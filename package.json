@@ -1,0 +1,24 @@
+{
+  "name": "ring3-workspace",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Workspace for the ring3 compatibility runtime library.",
+  "engines": {
+    "node": "22.16.0"
+  },
+  "packageManager": "pnpm@11.9.0",
+  "scripts": {
+    "build": "pnpm build:rust && pnpm build:wasm && pnpm build:typescript",
+    "build:rust": "cargo build --workspace --locked",
+    "build:typescript": "pnpm --filter @ring3/runtime build",
+    "build:wasm": "cargo build --workspace --locked --target wasm32-unknown-unknown",
+    "format:rust": "cargo fmt --all -- --check",
+    "lint:rust": "cargo clippy --workspace --all-targets -- -D warnings",
+    "preinstall": "node tools/verify-toolchain.mjs",
+    "toolchain:check": "node tools/verify-toolchain.mjs",
+    "typecheck": "pnpm --filter @ring3/runtime typecheck"
+  },
+  "devDependencies": {
+    "typescript": "5.9.3"
+  }
+}
