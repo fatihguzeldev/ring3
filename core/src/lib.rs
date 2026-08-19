@@ -1,1 +1,3 @@
-//! Rust and WebAssembly core for ring3.
+mod address;
+
+pub use address::{GuestAddress32, ProgramCounter32};
