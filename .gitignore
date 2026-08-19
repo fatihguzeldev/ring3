@@ -1,0 +1,23 @@
+# Rust
+/target/
+
+# Node and package output
+/node_modules/
+**/node_modules/
+**/dist/
+*.tsbuildinfo
+
+# Local environment and credentials
+.env
+.env.*
+!.env.example
+*.pem
+
+# macOS and editors
+.DS_Store
+.idea/
+.vscode/
+
+# Logs and temporary files
+*.log
+*.tmp
