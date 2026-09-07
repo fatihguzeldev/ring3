@@ -1,5 +1,11 @@
 use crate::FileOffset;
 
+mod optional;
+
+pub use optional::{
+    PeDataDirectory, PeDirectoryAddress, PeHeaders, PeOptionalHeader, parse_pe_headers,
+};
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum PeKind {
     Pe32,
@@ -42,6 +48,16 @@ pub enum PeHeaderError {
         offset: FileOffset,
         machine: u16,
         kind: PeKind,
+    },
+    OptionalHeaderExtentTooShort {
+        offset: FileOffset,
+        required: u64,
+        declared: u16,
+    },
+    DirectoryLimitExceeded {
+        offset: FileOffset,
+        count: u32,
+        limit: u32,
     },
 }
 
