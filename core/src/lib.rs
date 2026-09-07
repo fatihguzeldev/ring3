@@ -1,3 +1,3 @@
 mod address;
 
-pub use address::{GuestAddress32, ProgramCounter32};
+pub use address::{FileOffset, GuestAddress32, ProgramCounter32, RelativeVirtualAddress};
