@@ -1,0 +1,46 @@
+{
+  "schemaVersion": 1,
+  "fixture": "pe32-arithmetic",
+  "corpus": "CORPUS-0",
+  "provenance": "self-authored",
+  "licenseStatus": "pending",
+  "windowsOracle": "not-run",
+  "source": {
+    "path": "corpus/pe32-arithmetic.s",
+    "sha256": "28ca36d883b942ca3cd22a0ec9a22a4e6561687ba12e134f877d551ce5006781"
+  },
+  "tools": {
+    "clang": {
+      "version": "Apple clang version 21.0.0 (clang-2100.1.1.101)",
+      "sha256": "f30550eab15fdf5ab8c0dc54c52679711241e5d4b636b027e18c09fef531775d"
+    },
+    "lld": {
+      "version": "LLD 22.1.6 (https://github.com/rust-lang/llvm-project.git dcc3606807c989700e0ac1cac18c31741bcd40d9)",
+      "sha256": "8f5fe507df7232eac0a610c12a5d11f3202205235f710eb98c6c78df6d3f548d"
+    },
+    "objdump": {
+      "version": "Apple LLVM version 21.0.0",
+      "sha256": "1dcc1432db4d828cf8cd71a84cb8d9bf63a7ca80b5eeec711a9e5f13a3f5f98e"
+    },
+    "objcopy": {
+      "version": "LLVM version 22.1.6-rust-1.97.1-stable",
+      "sha256": "ccee726be447414072f925b06ef85dd36a3f693d48b03f6ed8cc94135751029b"
+    }
+  },
+  "expectation": {
+    "kind": "declared-not-executed",
+    "machine": "coff-i386",
+    "optionalHeader": "010b (PE32)",
+    "imageBase": "00400000",
+    "entryRva": "00001000",
+    "entryBytes": "b80700000083c023cc0f0b",
+    "int3Offset": 8,
+    "eaxBeforeInt3": 42,
+    "instructions": [
+      "movl $0x7, %eax",
+      "addl $0x23, %eax",
+      "int3",
+      "ud2"
+    ]
+  }
+}
