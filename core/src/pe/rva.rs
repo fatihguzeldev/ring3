@@ -1,4 +1,4 @@
-use super::{PeHeaderError, PeSectionTable, Reader, parse_pe_sections};
+use super::{PeHeaderError, PeHeaders, PeSectionTable, Reader, parse_pe_sections};
 use crate::{FileOffset, RelativeVirtualAddress};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -130,6 +130,103 @@ fn select_region(
     })
 }
 
+fn request_end(start: RelativeVirtualAddress, length: u32) -> Result<u64, PeRvaError> {
+    if length == 0 {
+        return Err(PeRvaError::EmptyRange { start });
+    }
+    let query_start = u64::from(start.get());
+    let query_end = query_start + u64::from(length);
+    if query_end > 1_u64 << 32 {
+        return Err(PeRvaError::RvaRangeOverflow { start, length });
+    }
+    Ok(query_end)
+}
+
+pub(super) struct PreparedPe<'a> {
+    bytes: &'a [u8],
+    table: PeSectionTable<'a>,
+}
+
+impl<'a> PreparedPe<'a> {
+    pub(super) fn new(bytes: &'a [u8]) -> Result<Self, PeRvaError> {
+        let table = parse_pe_sections(bytes).map_err(PeRvaError::Parse)?;
+        let prefix = table.headers.prefix;
+        let minimum = (prefix.pe_offset.get()
+            + 24
+            + u64::from(prefix.size_of_optional_header)
+            + u64::from(prefix.number_of_sections) * 40)
+            .max(64);
+        let size_of_headers = table.headers.optional.size_of_headers;
+        if u64::from(size_of_headers) < minimum || u64::from(size_of_headers) > bytes.len() as u64 {
+            return Err(PeRvaError::InvalidHeaderExtent {
+                size_of_headers,
+                minimum,
+                file_size: bytes.len() as u64,
+            });
+        }
+        Ok(Self { bytes, table })
+    }
+
+    pub(super) fn headers(&self) -> &PeHeaders {
+        &self.table.headers
+    }
+
+    pub(super) fn resolve(
+        &self,
+        start: RelativeVirtualAddress,
+        length: u32,
+    ) -> Result<PeFileRange<'a>, PeRvaError> {
+        let query_end = request_end(start, length)?;
+        let query_start = u64::from(start.get());
+        let region = select_region(&self.table, start, length)?;
+        let file_offset = match region.source {
+            PeFileRangeSource::Headers => FileOffset::new(query_start),
+            PeFileRangeSource::Section(section_index) => {
+                let section = &self.table.sections[usize::from(section_index)];
+                if section.virtual_size == 0 {
+                    return Err(PeRvaError::ZeroVirtualSizeUnsupported {
+                        start,
+                        length,
+                        section_index,
+                    });
+                }
+                let relative_end = query_end - region.start;
+                if relative_end > u64::from(section.virtual_size) {
+                    return Err(PeRvaError::RawPaddingUnsupported {
+                        start,
+                        length,
+                        section_index,
+                    });
+                }
+                if relative_end > u64::from(section.size_of_raw_data) {
+                    return Err(PeRvaError::NotFileBacked {
+                        start,
+                        length,
+                        section_index,
+                    });
+                }
+                FileOffset::new(section.pointer_to_raw_data.get() + query_start - region.start)
+            }
+        };
+        let (resolved, _) = Reader { bytes: self.bytes }
+            .read(file_offset, u64::from(length))
+            .map_err(|error| match error {
+                PeHeaderError::OutOfBounds { available, .. } => PeRvaError::FileRangeOutOfBounds {
+                    start,
+                    length,
+                    file_offset,
+                    available,
+                },
+                other => PeRvaError::Parse(other),
+            })?;
+        Ok(PeFileRange {
+            file_offset,
+            bytes: resolved,
+            source: region.source,
+        })
+    }
+}
+
 /// resolves one complete range under conservative header and section policies.
 /// headers must cover the declared section table and fit the input. sections
 /// expose only the smaller virtual/raw extent; the larger extent still guards
@@ -148,73 +245,6 @@ pub fn resolve_pe_file_range(
     start: RelativeVirtualAddress,
     length: u32,
 ) -> Result<PeFileRange<'_>, PeRvaError> {
-    if length == 0 {
-        return Err(PeRvaError::EmptyRange { start });
-    }
-    let query_start = u64::from(start.get());
-    let query_end = query_start + u64::from(length);
-    if query_end > 1_u64 << 32 {
-        return Err(PeRvaError::RvaRangeOverflow { start, length });
-    }
-    let table = parse_pe_sections(bytes).map_err(PeRvaError::Parse)?;
-    let prefix = table.headers.prefix;
-    let minimum = (prefix.pe_offset.get()
-        + 24
-        + u64::from(prefix.size_of_optional_header)
-        + u64::from(prefix.number_of_sections) * 40)
-        .max(64);
-    let size_of_headers = table.headers.optional.size_of_headers;
-    if u64::from(size_of_headers) < minimum || u64::from(size_of_headers) > bytes.len() as u64 {
-        return Err(PeRvaError::InvalidHeaderExtent {
-            size_of_headers,
-            minimum,
-            file_size: bytes.len() as u64,
-        });
-    }
-    let region = select_region(&table, start, length)?;
-    let file_offset = match region.source {
-        PeFileRangeSource::Headers => FileOffset::new(query_start),
-        PeFileRangeSource::Section(section_index) => {
-            let section = &table.sections[usize::from(section_index)];
-            if section.virtual_size == 0 {
-                return Err(PeRvaError::ZeroVirtualSizeUnsupported {
-                    start,
-                    length,
-                    section_index,
-                });
-            }
-            let relative_end = query_end - region.start;
-            if relative_end > u64::from(section.virtual_size) {
-                return Err(PeRvaError::RawPaddingUnsupported {
-                    start,
-                    length,
-                    section_index,
-                });
-            }
-            if relative_end > u64::from(section.size_of_raw_data) {
-                return Err(PeRvaError::NotFileBacked {
-                    start,
-                    length,
-                    section_index,
-                });
-            }
-            FileOffset::new(section.pointer_to_raw_data.get() + query_start - region.start)
-        }
-    };
-    let (resolved, _) = Reader { bytes }
-        .read(file_offset, u64::from(length))
-        .map_err(|error| match error {
-            PeHeaderError::OutOfBounds { available, .. } => PeRvaError::FileRangeOutOfBounds {
-                start,
-                length,
-                file_offset,
-                available,
-            },
-            other => PeRvaError::Parse(other),
-        })?;
-    Ok(PeFileRange {
-        file_offset,
-        bytes: resolved,
-        source: region.source,
-    })
+    request_end(start, length)?;
+    PreparedPe::new(bytes)?.resolve(start, length)
 }

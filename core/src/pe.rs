@@ -1,9 +1,11 @@
 use crate::{FileOffset, RelativeVirtualAddress};
 
+mod imports;
 mod optional;
 mod rva;
 mod sections;
 
+pub use imports::{PeImportDescriptor, PeImportError, parse_pe_import_descriptors};
 pub use optional::{
     PeDataDirectory, PeDirectoryAddress, PeHeaders, PeOptionalHeader, parse_pe_headers,
 };
