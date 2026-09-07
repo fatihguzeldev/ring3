@@ -12,6 +12,8 @@
     "build:rust": "cargo build --workspace --locked",
     "build:typescript": "pnpm --filter @ring3/runtime build",
     "build:wasm": "cargo build --workspace --locked --target wasm32-unknown-unknown",
+    "corpus:build": "node tools/build-corpus.mjs",
+    "corpus:test": "node --test tools/build-corpus.test.mjs",
     "format:rust": "cargo fmt --all -- --check",
     "lint:rust": "cargo clippy --workspace --all-targets -- -D warnings",
     "preinstall": "node tools/verify-toolchain.mjs",
