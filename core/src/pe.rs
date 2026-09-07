@@ -1,10 +1,12 @@
-use crate::FileOffset;
+use crate::{FileOffset, RelativeVirtualAddress};
 
 mod optional;
+mod sections;
 
 pub use optional::{
     PeDataDirectory, PeDirectoryAddress, PeHeaders, PeOptionalHeader, parse_pe_headers,
 };
+pub use sections::{PeSection, PeSectionTable, parse_pe_sections};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum PeKind {
@@ -58,6 +60,29 @@ pub enum PeHeaderError {
         offset: FileOffset,
         count: u32,
         limit: u32,
+    },
+    SectionLimitExceeded {
+        offset: FileOffset,
+        count: u16,
+        limit: u16,
+    },
+    SectionTableOutOfBounds {
+        offset: FileOffset,
+        needed: u64,
+        available: u64,
+    },
+    SectionRawDataOutOfBounds {
+        section_index: u16,
+        section_offset: FileOffset,
+        offset: FileOffset,
+        needed: u64,
+        available: u64,
+    },
+    VirtualRangeOverflow {
+        section_index: u16,
+        offset: FileOffset,
+        virtual_address: RelativeVirtualAddress,
+        virtual_size: u32,
     },
 }
 

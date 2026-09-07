@@ -53,11 +53,11 @@ pub struct PeHeaders {
     pub directories: [Option<PeDataDirectory>; 16],
 }
 
-fn read_u16(bytes: &[u8], index: usize) -> u16 {
+pub(super) fn read_u16(bytes: &[u8], index: usize) -> u16 {
     u16::from_le_bytes([bytes[index], bytes[index + 1]])
 }
 
-fn read_u32(bytes: &[u8], index: usize) -> u32 {
+pub(super) fn read_u32(bytes: &[u8], index: usize) -> u32 {
     u32::from_le_bytes([
         bytes[index],
         bytes[index + 1],
