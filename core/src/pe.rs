@@ -1,11 +1,13 @@
 use crate::{FileOffset, RelativeVirtualAddress};
 
 mod optional;
+mod rva;
 mod sections;
 
 pub use optional::{
     PeDataDirectory, PeDirectoryAddress, PeHeaders, PeOptionalHeader, parse_pe_headers,
 };
+pub use rva::{PeFileRange, PeFileRangeSource, PeRvaError, resolve_pe_file_range};
 pub use sections::{PeSection, PeSectionTable, parse_pe_sections};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
