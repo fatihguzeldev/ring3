@@ -17,7 +17,7 @@
     "corpus:build:ordinals": "node tools/build-import-corpus.mjs --ordinal",
     "corpus:build:forwarders": "node tools/build-forwarder-corpus.mjs",
     "corpus:build:pe32plus": "node tools/build-pe32plus-corpus.mjs",
-    "corpus:test": "node --test tools/build-corpus.test.mjs tools/build-import-corpus.test.mjs tools/build-ordinal-corpus.test.mjs tools/build-forwarder-corpus.test.mjs tools/build-pe32plus-corpus.test.mjs tools/verify-corpus.test.mjs tools/build-relocation-corpus.test.mjs tools/build-tls-corpus.test.mjs",
+    "corpus:test": "node --test tools/build-corpus.test.mjs tools/build-import-corpus.test.mjs tools/build-ordinal-corpus.test.mjs tools/build-forwarder-corpus.test.mjs tools/build-pe32plus-corpus.test.mjs tools/verify-corpus.test.mjs tools/build-relocation-corpus.test.mjs tools/build-tls-corpus.test.mjs tools/build-delay-corpus.test.mjs",
     "corpus:verify": "node tools/verify-corpus.mjs",
     "format:rust": "cargo fmt --all -- --check",
     "lint:rust": "cargo clippy --workspace --all-targets -- -D warnings",
@@ -25,7 +25,8 @@
     "toolchain:check": "node tools/verify-toolchain.mjs",
     "typecheck": "pnpm --filter @ring3/runtime typecheck",
     "corpus:build:relocations": "node tools/build-relocation-corpus.mjs",
-    "corpus:build:tls": "node tools/build-tls-corpus.mjs"
+    "corpus:build:tls": "node tools/build-tls-corpus.mjs",
+    "corpus:build:delay": "node tools/build-delay-corpus.mjs"
   },
   "devDependencies": {
     "typescript": "5.9.3"

@@ -1,0 +1,137 @@
+{
+  "schemaVersion": 1,
+  "provenance": "self-authored",
+  "licenseStatus": "pending",
+  "windowsOracle": "not-run",
+  "executed": false,
+  "fixture": "pe-delay-imports",
+  "sources": {
+    "probe.c": {
+      "path": "corpus/pe-delay-imports/probe.c",
+      "sha256": "da3820a9096a84ed4d37e87fb8b98c6658aca04c719212974305c6c433a2f400"
+    },
+    "delayed.c": {
+      "path": "corpus/pe-delay-imports/delayed.c",
+      "sha256": "d896cd1f4b933b7b74d206341c65000a1e0bb12311cc38871beb93c250e75f86"
+    }
+  },
+  "tools": {
+    "clang": {
+      "version": "Apple clang version 21.0.0 (clang-2100.1.1.101)",
+      "sha256": "f30550eab15fdf5ab8c0dc54c52679711241e5d4b636b027e18c09fef531775d"
+    },
+    "lld": {
+      "version": "LLD 22.1.6 (https://github.com/rust-lang/llvm-project.git dcc3606807c989700e0ac1cac18c31741bcd40d9)",
+      "sha256": "8f5fe507df7232eac0a610c12a5d11f3202205235f710eb98c6c78df6d3f548d"
+    },
+    "objdump": {
+      "version": "Apple LLVM version 21.0.0",
+      "sha256": "1dcc1432db4d828cf8cd71a84cb8d9bf63a7ca80b5eeec711a9e5f13a3f5f98e"
+    }
+  },
+  "architectures": {
+    "i386": {
+      "kind": "PE32",
+      "machine": 332,
+      "artifacts": {
+        "probe.obj": {
+          "bytes": 639,
+          "sha256": "3179529df76a9e97635dc9d2b87a201712ac3394657ce7b1995311787979442f"
+        },
+        "delayed.obj": {
+          "bytes": 645,
+          "sha256": "b117fc8144f7c822b860b643dba374c86d2fcacb4c94307638f3dfd05995df86"
+        },
+        "Ring3Delay.dll": {
+          "bytes": 2048,
+          "sha256": "7f2adbbe2b3c039122d85f603524530eaf2f8be4fc9308ebb4a4798a22bcadbe"
+        },
+        "Ring3Delay.lib": {
+          "bytes": 1342,
+          "sha256": "ada995247705dc71c469116e776831f34bf4c53d57f3017e39b07b51f4479171"
+        },
+        "delayed.exe": {
+          "bytes": 2560,
+          "sha256": "ab2c15214a85f8593608a30ca9a0b462ec61a04e10b4abd1e86e4869210640b8"
+        },
+        "Ring3Delay.dll.inspection.txt": {
+          "bytes": 2650,
+          "sha256": "d4415af05849ac5276f7fd004c0dfae5281422f90b4416b4581d01198f998d97"
+        },
+        "delayed.exe.inspection.txt": {
+          "bytes": 3031,
+          "sha256": "53196c9c1ae3b183c93d97ffc2ed885f770ba78221b5bc4c19066bbd670e6bdf"
+        }
+      },
+      "directory": {
+        "rva": 8192,
+        "fileOffset": 1536,
+        "size": 64,
+        "rawWords": [
+          1,
+          8276,
+          12288,
+          12296,
+          8256,
+          0,
+          0,
+          0
+        ],
+        "terminatorRva": 8224,
+        "terminatorFileOffset": 1568
+      }
+    },
+    "amd64": {
+      "kind": "PE32+",
+      "machine": 34404,
+      "artifacts": {
+        "probe.obj": {
+          "bytes": 638,
+          "sha256": "f2b21288e8b6569a19a92c20b602fa9f651abb02cdc0f01a68a4538bc1cde168"
+        },
+        "delayed.obj": {
+          "bytes": 642,
+          "sha256": "d04ce10aad21891ec5f8fdf5baf955df1c9b1fa5169c5c4a4d212dc88e8e90c5"
+        },
+        "Ring3Delay.dll": {
+          "bytes": 2048,
+          "sha256": "d0dc462168a525fe4592c7950ef194eca23afef0929a753c41f2a07017f3297d"
+        },
+        "Ring3Delay.lib": {
+          "bytes": 1346,
+          "sha256": "9c081dee2cccf2414a0a6430fcee4ee27491a4c52dc626d6355ee862d8bea93f"
+        },
+        "delayed.exe": {
+          "bytes": 3072,
+          "sha256": "5845501b0acf7d97c5470ce06bc738a2d2e3ce3aac64f69c164cbda8cb942e17"
+        },
+        "Ring3Delay.dll.inspection.txt": {
+          "bytes": 2886,
+          "sha256": "35e4353eb6a09ac6c20802da38a51413c8703a52fff9b4d4bf96a75ee2a8a19d"
+        },
+        "delayed.exe.inspection.txt": {
+          "bytes": 3860,
+          "sha256": "6e2c4d16bf7ed1989a77217076b347d129492eb371ef1680233803ed7f1e5f40"
+        }
+      },
+      "directory": {
+        "rva": 8200,
+        "fileOffset": 1544,
+        "size": 64,
+        "rawWords": [
+          1,
+          8288,
+          12288,
+          12296,
+          8264,
+          0,
+          0,
+          0
+        ],
+        "terminatorRva": 8232,
+        "terminatorFileOffset": 1576
+      }
+    }
+  },
+  "objectTimestamp": 0
+}
