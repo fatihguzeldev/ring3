@@ -9,6 +9,7 @@ mod lookups;
 mod optional;
 mod rva;
 mod sections;
+mod tls;
 
 pub use base_relocations::{
     PeBaseRelocationBlock, PeBaseRelocationError, parse_pe_base_relocation_blocks,
@@ -29,6 +30,7 @@ pub use optional::{
 };
 pub use rva::{PeFileRange, PeFileRangeSource, PeRvaError, resolve_pe_file_range};
 pub use sections::{PeSection, PeSectionTable, parse_pe_sections};
+pub use tls::{PeTlsDirectory, PeTlsDirectoryError, parse_pe_tls_directory};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum PeKind {
