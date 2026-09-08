@@ -58,6 +58,10 @@
     "pe_sections": [
       "generated_pe32_section_matches_recorded_bytes",
       "disposable_pe32_plus_section_matches_recorded_bytes"
+    ],
+    "pe_base_relocations": [
+      "generated_pe32_relocation_blocks_match_raw_metadata",
+      "generated_pe32plus_relocation_blocks_match_raw_metadata"
     ]
   }
 }

@@ -33,10 +33,11 @@ pnpm corpus:build:imports
 pnpm corpus:build:ordinals
 pnpm corpus:build:forwarders
 pnpm corpus:build:pe32plus
+pnpm corpus:build:relocations
 ```
 
-`corpus:verify` builds all five fixture families twice and runs the 29 real-file
-parser tests listed in `corpus/real-file-tests.json` against 12 fresh fixture paths.
+`corpus:verify` builds all six fixture families twice and runs the 31 real-file
+parser tests listed in `corpus/real-file-tests.json` against 14 fresh fixture paths.
 It requires the pinned native Rust tools on `aarch64-apple-darwin`, compiles tests
 offline into a fresh Cargo target, and refuses missing, extra or skipped cases.
 `target/corpus-verification/run-*/verification` retains tool/source hashes, child
@@ -56,3 +57,7 @@ with named and ordinal target strings. Its `fixtures.json` lists both DLL test p
 The PE32+ header builder uses `target/corpus-pe32plus/run-*` for the arithmetic
 fixture with stack/heap header values above 32 bits. Its `fixtures.json` provides
 `RING3_PE32PLUS_FIXTURE` for the header, section and RVA tests.
+
+The relocation builder uses `target/corpus-relocations/run-*` for PE32 and PE32+
+images with two base-relocation blocks. Its `fixtures.json` lists both paths for
+the raw block metadata tests; no relocations or guest code are executed.

@@ -1,6 +1,6 @@
 use ring3_core::{
-    FileOffset, PeBaseRelocationBlock, PeBaseRelocationError, PeHeaderError, PeRvaError,
-    RelativeVirtualAddress, parse_pe_base_relocation_blocks,
+    FileOffset, PeBaseRelocationBlock, PeBaseRelocationError, PeDirectoryAddress, PeHeaderError,
+    PeKind, PeRvaError, RelativeVirtualAddress, parse_pe_base_relocation_blocks, parse_pe_headers,
 };
 
 fn put32(bytes: &mut [u8], offset: usize, value: u32) {
@@ -443,4 +443,58 @@ fn exact_total_slot_budget_succeeds_and_excess_precedes_payload_resolution() {
             })
         );
     }
+}
+
+fn check_real_fixture(variable: &str, plus: bool) {
+    let path = std::env::var_os(variable)
+        .expect("an explicit generated base-relocation fixture path is required");
+    let bytes = std::fs::read(path).unwrap();
+    assert_eq!(bytes.len(), 6144);
+    let headers = parse_pe_headers(&bytes).unwrap();
+    assert_eq!(
+        headers.prefix.kind,
+        if plus { PeKind::Pe32Plus } else { PeKind::Pe32 }
+    );
+    let directory = headers.directories[5].unwrap();
+    assert_eq!(
+        directory.address,
+        PeDirectoryAddress::Rva(RelativeVirtualAddress::new(16384))
+    );
+    assert_eq!(directory.size, 24);
+    let raw = if plus {
+        [[0x08, 0xa0, 0x10, 0xa0], [0x18, 0xa0, 0, 0]]
+    } else {
+        [[0x08, 0x30, 0x0c, 0x30], [0x10, 0x30, 0, 0]]
+    };
+    let blocks = parse_pe_base_relocation_blocks(&bytes).unwrap();
+    assert_eq!(blocks.len(), 2);
+    for (index, (actual, expected_raw)) in blocks.iter().zip(&raw).enumerate() {
+        let index = u32::try_from(index).unwrap();
+        assert_eq!(
+            *actual,
+            PeBaseRelocationBlock {
+                block_rva: RelativeVirtualAddress::new(16384 + index * 12),
+                block_file_offset: FileOffset::new(5632 + u64::from(index) * 12),
+                page_rva: RelativeVirtualAddress::new(8192 + index * 4096),
+                block_size: 12,
+                raw_entries: expected_raw,
+            }
+        );
+        assert_eq!(
+            actual.raw_entries.as_ptr(),
+            bytes[5640 + index as usize * 12..].as_ptr()
+        );
+    }
+}
+
+#[test]
+#[ignore = "requires an explicit self-authored PE32 relocation fixture"]
+fn generated_pe32_relocation_blocks_match_raw_metadata() {
+    check_real_fixture("RING3_RELOCATION_PE32_FIXTURE", false);
+}
+
+#[test]
+#[ignore = "requires an explicit self-authored PE32+ relocation fixture"]
+fn generated_pe32plus_relocation_blocks_match_raw_metadata() {
+    check_real_fixture("RING3_RELOCATION_PE32PLUS_FIXTURE", true);
 }
