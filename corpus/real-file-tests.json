@@ -1,0 +1,63 @@
+{
+  "schemaVersion": 1,
+  "host": "aarch64-apple-darwin",
+  "tools": {
+    "cargo": {
+      "sha256": "7672ead309d505577c018fff2cafb3433601f073e38cbe87359ac1f7b944bbf5",
+      "version": "cargo 1.97.1 (c980f4866 2026-06-30)"
+    },
+    "rustc": {
+      "sha256": "210df6794001b73ec3d453878707fa1e0bdcb63c427024a6e6574bbe5615a4da",
+      "version": "rustc 1.97.1 (8bab26f4f 2026-07-14)"
+    }
+  },
+  "tests": {
+    "pe_export_addresses": [
+      "named_pe32_dll_matches_recorded_address_metadata",
+      "named_pe32plus_dll_matches_recorded_address_metadata",
+      "ordinal_pe32_dll_matches_recorded_address_metadata",
+      "ordinal_pe32plus_dll_matches_recorded_address_metadata",
+      "forwarder_pe32_dll_matches_recorded_sparse_address_metadata",
+      "forwarder_pe32plus_dll_matches_recorded_sparse_address_metadata"
+    ],
+    "pe_export_names": [
+      "named_pe32_dll_matches_recorded_name_metadata",
+      "named_pe32plus_dll_matches_recorded_name_metadata",
+      "ordinal_pe32_dll_matches_recorded_name_metadata",
+      "ordinal_pe32plus_dll_matches_recorded_name_metadata",
+      "forwarder_pe32_dll_matches_recorded_name_metadata",
+      "forwarder_pe32plus_dll_matches_recorded_name_metadata"
+    ],
+    "pe_exports": [
+      "named_pe32_dll_matches_recorded_export_metadata",
+      "named_pe32plus_dll_matches_recorded_export_metadata",
+      "ordinal_pe32_dll_matches_recorded_export_metadata",
+      "ordinal_pe32plus_dll_matches_recorded_export_metadata"
+    ],
+    "pe_header_prefix": [
+      "generated_corpus_matches_recorded_header_metadata"
+    ],
+    "pe_headers": [
+      "generated_pe32_matches_recorded_header_metadata",
+      "disposable_pe32_plus_matches_recorded_header_metadata"
+    ],
+    "pe_import_lookups": [
+      "generated_pe32_named_lookup_matches_llvm_and_raw_metadata",
+      "generated_pe32plus_named_lookup_matches_llvm_and_raw_metadata",
+      "generated_pe32_ordinal_lookup_preserves_bit15",
+      "generated_pe32plus_ordinal_lookup_preserves_bit15_and_raw_bit63"
+    ],
+    "pe_imports": [
+      "generated_pe32_imports_match_recorded_llvm_and_raw_metadata",
+      "generated_pe32plus_imports_match_recorded_llvm_and_raw_metadata"
+    ],
+    "pe_rva": [
+      "generated_pe32_entry_range_matches_recorded_file_bytes",
+      "generated_pe32plus_entry_range_matches_recorded_file_bytes"
+    ],
+    "pe_sections": [
+      "generated_pe32_section_matches_recorded_bytes",
+      "disposable_pe32_plus_section_matches_recorded_bytes"
+    ]
+  }
+}
