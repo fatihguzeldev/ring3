@@ -226,3 +226,259 @@ fn repeated_imports_retain_row_order_and_later_errors_have_original_indices() {
         assert_eq!(bytes, before);
     }
 }
+
+#[test]
+fn all_ordinal_bits_survive_and_reserved_encodings_refuse() {
+    for plus in [false, true] {
+        let mut bytes = fixture(plus);
+        for ordinal in [0, 32767, 32768, 65535] {
+            entry(&mut bytes, plus, 0, flag(plus) | u64::from(ordinal));
+            let table = parse_pe_delay_import_lookups(&bytes).unwrap().unwrap();
+            assert_eq!(
+                table.imports[0].entries[0].symbol,
+                PeImportSymbol::Ordinal(ordinal)
+            );
+        }
+        let raw_value = flag(plus) | 0x1_0000;
+        entry(&mut bytes, plus, 0, raw_value);
+        assert_eq!(
+            parse_pe_delay_import_lookups(&bytes),
+            Err(PeDelayImportLookupError::Lookup(
+                PeImportLookupError::InvalidOrdinalEncoding {
+                    descriptor_index: 0,
+                    entry_index: 0,
+                    raw_value,
+                    kind: if plus { PeKind::Pe32Plus } else { PeKind::Pe32 },
+                }
+            ))
+        );
+    }
+    for raw_value in [1_u64 << 31, 1 << 62] {
+        let mut bytes = fixture(true);
+        entry(&mut bytes, true, 0, raw_value);
+        assert_eq!(
+            parse_pe_delay_import_lookups(&bytes),
+            Err(PeDelayImportLookupError::Lookup(
+                PeImportLookupError::InvalidNameEncoding {
+                    descriptor_index: 0,
+                    entry_index: 0,
+                    raw_value,
+                    kind: PeKind::Pe32Plus,
+                }
+            ))
+        );
+    }
+}
+
+#[test]
+fn hint_names_preserve_ascii_controls_and_reject_empty_or_non_ascii() {
+    for plus in [false, true] {
+        let mut bytes = fixture(plus);
+        bytes[770..776].copy_from_slice(b"A\x01\x7fZ\0\0");
+        let table = parse_pe_delay_import_lookups(&bytes).unwrap().unwrap();
+        assert_eq!(
+            table.imports[0].entries[0].symbol,
+            PeImportSymbol::ByName {
+                hint_name_rva: RelativeVirtualAddress::new(0x1100),
+                hint: 0xbeef,
+                name: "A\x01\x7fZ",
+            }
+        );
+        bytes[771] = 0x80;
+        assert_eq!(
+            parse_pe_delay_import_lookups(&bytes),
+            Err(PeDelayImportLookupError::Lookup(
+                PeImportLookupError::NonAsciiSymbolName {
+                    descriptor_index: 0,
+                    entry_index: 0,
+                    hint_name_rva: RelativeVirtualAddress::new(0x1100),
+                    offset: 1,
+                    byte: 0x80,
+                }
+            ))
+        );
+        bytes[770] = 0;
+        assert_eq!(
+            parse_pe_delay_import_lookups(&bytes),
+            Err(PeDelayImportLookupError::Lookup(
+                PeImportLookupError::EmptySymbolName {
+                    descriptor_index: 0,
+                    entry_index: 0,
+                    hint_name_rva: RelativeVirtualAddress::new(0x1100),
+                }
+            ))
+        );
+    }
+}
+
+#[test]
+fn lookup_and_hint_prefixes_require_complete_file_backing() {
+    use ring3_core::PeRvaError;
+    for plus in [false, true] {
+        let mut bytes = fixture(plus);
+        let section = 152 + fixed(plus) + 112;
+        let width = if plus { 8 } else { 4 };
+        put32(&mut bytes, section + 16, 160);
+        assert_eq!(
+            parse_pe_delay_import_lookups(&bytes),
+            Err(PeDelayImportLookupError::Lookup(
+                PeImportLookupError::LookupRange {
+                    descriptor_index: 0,
+                    entry_index: 0,
+                    start: RelativeVirtualAddress::new(0x10a0),
+                    length: width,
+                    cause: PeRvaError::NotFileBacked {
+                        start: RelativeVirtualAddress::new(0x10a0),
+                        length: width,
+                        section_index: 0
+                    },
+                }
+            ))
+        );
+        put32(&mut bytes, section + 16, 256);
+        assert_eq!(
+            parse_pe_delay_import_lookups(&bytes),
+            Err(PeDelayImportLookupError::Lookup(
+                PeImportLookupError::HintNameRange {
+                    descriptor_index: 0,
+                    entry_index: 0,
+                    hint_name_rva: RelativeVirtualAddress::new(0x1100),
+                    offset: 0,
+                    cause: PeRvaError::NotFileBacked {
+                        start: RelativeVirtualAddress::new(0x1100),
+                        length: 3,
+                        section_index: 0
+                    },
+                }
+            ))
+        );
+        put32(&mut bytes, section + 16, 512);
+        bytes.truncate(771);
+        assert_eq!(
+            parse_pe_delay_import_lookups(&bytes),
+            Err(PeDelayImportLookupError::Names(
+                PeDelayImportNameError::Table(PeDelayImportError::Base(PeRvaError::Parse(
+                    ring3_core::PeHeaderError::SectionRawDataOutOfBounds {
+                        section_index: 0,
+                        section_offset: FileOffset::new(u64::try_from(section).unwrap()),
+                        offset: FileOffset::new(512),
+                        needed: 512,
+                        available: 259,
+                    }
+                )))
+            ))
+        );
+    }
+}
+
+fn large(plus: bool, rows: u32) -> Vec<u8> {
+    let mut bytes = fixture(plus);
+    bytes.resize(0x22200, 0);
+    bytes[512..1024].fill(0);
+    let section = 152 + fixed(plus) + 112;
+    put32(&mut bytes, section + 8, 0x22000);
+    put32(&mut bytes, section + 16, 0x22000);
+    directory(&mut bytes, plus, 0x1000, (rows + 1) * 32);
+    for index in 0..rows {
+        descriptor(&mut bytes, usize::try_from(index).unwrap(), 0x6000, 0x3000);
+    }
+    bytes[20992..21007].copy_from_slice(b"Ring3Delay.dll\0");
+    bytes
+}
+
+fn large_entry(bytes: &mut [u8], plus: bool, index: usize, value: u64) {
+    let width = if plus { 8 } else { 4 };
+    bytes[8704 + index * width..8704 + (index + 1) * width]
+        .copy_from_slice(&value.to_le_bytes()[..width]);
+}
+
+#[test]
+fn fetched_zero_and_local_entry_limit_precede_total_and_encoding() {
+    for plus in [false, true] {
+        let mut bytes = large(plus, 4);
+        for index in 0..1024 {
+            large_entry(&mut bytes, plus, index, flag(plus) | 7);
+        }
+        let table = parse_pe_delay_import_lookups(&bytes).unwrap().unwrap();
+        assert_eq!(table.imports.len(), 4);
+        assert!(table.imports.iter().all(|row| row.entries.len() == 1024));
+        large_entry(&mut bytes, plus, 1024, flag(plus) | 0x1_0000);
+        assert_eq!(
+            parse_pe_delay_import_lookups(&bytes),
+            Err(PeDelayImportLookupError::Lookup(
+                PeImportLookupError::EntryLimitExceeded {
+                    descriptor_index: 0,
+                    entry_index: 1024,
+                    limit: 1024
+                }
+            ))
+        );
+        large_entry(&mut bytes, plus, 1024, 0);
+        directory(&mut bytes, plus, 0x1000, 192);
+        descriptor(&mut bytes, 4, 0x6000, 0x3000);
+        assert_eq!(
+            parse_pe_delay_import_lookups(&bytes),
+            Err(PeDelayImportLookupError::Lookup(
+                PeImportLookupError::TotalEntryLimitExceeded {
+                    descriptor_index: 4,
+                    entry_index: 0,
+                    limit: 4096
+                }
+            ))
+        );
+        put32(&mut bytes, 512 + 4 * 32 + 16, 0x7000);
+        assert_eq!(
+            parse_pe_delay_import_lookups(&bytes)
+                .unwrap()
+                .unwrap()
+                .imports[4]
+                .entries
+                .len(),
+            0
+        );
+    }
+}
+
+#[test]
+fn symbol_name_limits_count_nul_repeated_scans_and_exclude_dll_names() {
+    for plus in [false, true] {
+        let mut bytes = large(plus, 1);
+        bytes[33280..33282].copy_from_slice(&u16::MAX.to_le_bytes());
+        bytes[33282..34305].fill(b'a');
+        for index in 0..64 {
+            large_entry(&mut bytes, plus, index, 0x9000);
+        }
+        let table = parse_pe_delay_import_lookups(&bytes).unwrap().unwrap();
+        assert_eq!(table.imports[0].entries.len(), 64);
+        let PeImportSymbol::ByName { hint, name, .. } = table.imports[0].entries[63].symbol else {
+            panic!("expected a name at the aggregate scan limit");
+        };
+        assert_eq!(hint, u16::MAX);
+        assert_eq!(name.len(), 1023);
+        large_entry(&mut bytes, plus, 64, 0x9000);
+        assert_eq!(
+            parse_pe_delay_import_lookups(&bytes),
+            Err(PeDelayImportLookupError::Lookup(
+                PeImportLookupError::NameScanBudgetExceeded {
+                    descriptor_index: 0,
+                    entry_index: 64,
+                    hint_name_rva: RelativeVirtualAddress::new(0x9000),
+                    offset: 0,
+                    limit: 65_536,
+                }
+            ))
+        );
+        bytes[34305] = b'a';
+        assert_eq!(
+            parse_pe_delay_import_lookups(&bytes),
+            Err(PeDelayImportLookupError::Lookup(
+                PeImportLookupError::NameLengthLimitExceeded {
+                    descriptor_index: 0,
+                    entry_index: 0,
+                    hint_name_rva: RelativeVirtualAddress::new(0x9000),
+                    limit: 1024,
+                }
+            ))
+        );
+    }
+}
