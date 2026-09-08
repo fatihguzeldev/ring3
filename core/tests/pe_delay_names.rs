@@ -193,3 +193,226 @@ fn the_complete_raw_table_is_validated_before_any_name_or_attribute() {
         );
     }
 }
+
+#[test]
+fn ascii_case_controls_header_and_zero_rva_are_preserved_without_normalization() {
+    for plus in [false, true] {
+        let mut bytes = fixture(plus);
+        let name = "MiXeD\u{1}\u{7f}\t.dll";
+        bytes[464..464 + name.len()].copy_from_slice(name.as_bytes());
+        put32(&mut bytes, 516, 464);
+        let table = parse_pe_delay_import_names(&bytes).unwrap().unwrap();
+        assert_eq!(table.imports[0].dll_name, name);
+        assert_eq!(table.imports[0].dll_name.as_ptr(), bytes[464..].as_ptr());
+        put32(&mut bytes, 516, 0);
+        let table = parse_pe_delay_import_names(&bytes).unwrap().unwrap();
+        assert_eq!(table.imports[0].dll_name, "MZ");
+        assert_eq!(table.imports[0].dll_name.as_ptr(), bytes.as_ptr());
+        section(&mut bytes, plus, 1, [128, 0x6001, 128, 640]);
+        put32(&mut bytes, 516, 0x6001);
+        assert_eq!(
+            parse_pe_delay_import_names(&bytes)
+                .unwrap()
+                .unwrap()
+                .imports[0]
+                .dll_name,
+            "Ring3Delay.dll"
+        );
+    }
+}
+
+#[test]
+fn empty_and_every_non_ascii_byte_refuse_with_exact_coordinates() {
+    for plus in [false, true] {
+        let mut bytes = fixture(plus);
+        bytes[640] = 0;
+        assert_eq!(
+            parse_pe_delay_import_names(&bytes),
+            Err(PeDelayImportNameError::EmptyDllName {
+                descriptor_index: 0,
+                name_rva: RelativeVirtualAddress::new(0x6000),
+            })
+        );
+        for byte in 128..=255 {
+            bytes[640] = byte;
+            assert_eq!(
+                parse_pe_delay_import_names(&bytes),
+                Err(PeDelayImportNameError::NonAsciiDllName {
+                    descriptor_index: 0,
+                    name_rva: RelativeVirtualAddress::new(0x6000),
+                    offset: 0,
+                    byte,
+                })
+            );
+        }
+        bytes[640] = b'R';
+        bytes[645] = 255;
+        assert_eq!(
+            parse_pe_delay_import_names(&bytes),
+            Err(PeDelayImportNameError::NonAsciiDllName {
+                descriptor_index: 0,
+                name_rva: RelativeVirtualAddress::new(0x6000),
+                offset: 5,
+                byte: 255,
+            })
+        );
+    }
+}
+
+#[test]
+fn every_consumed_name_prefix_preserves_its_conservative_backing_error() {
+    for plus in [false, true] {
+        let start = RelativeVirtualAddress::new(0x6000);
+        let length = 5;
+        for (first, second, cause) in [
+            (
+                [4, 0x6000, 4, 640],
+                [124, 0x6004, 124, 644],
+                PeRvaError::CrossesRegionBoundary { start, length },
+            ),
+            (
+                [128, 0x6000, 128, 640],
+                [124, 0x6004, 124, 644],
+                PeRvaError::AmbiguousRange { start, length },
+            ),
+            (
+                [128, 0x6000, 4, 640],
+                [0, 0x8000, 0, 0],
+                PeRvaError::NotFileBacked {
+                    start,
+                    length,
+                    section_index: 1,
+                },
+            ),
+            (
+                [4, 0x6000, 128, 640],
+                [0, 0x8000, 0, 0],
+                PeRvaError::RawPaddingUnsupported {
+                    start,
+                    length,
+                    section_index: 1,
+                },
+            ),
+        ] {
+            let mut bytes = fixture(plus);
+            bytes[134..136].copy_from_slice(&3_u16.to_le_bytes());
+            section(&mut bytes, plus, 1, first);
+            section(&mut bytes, plus, 2, second);
+            assert_eq!(
+                parse_pe_delay_import_names(&bytes),
+                Err(PeDelayImportNameError::NameRange {
+                    descriptor_index: 0,
+                    name_rva: start,
+                    offset: 4,
+                    cause,
+                })
+            );
+        }
+        let mut bytes = fixture(plus);
+        put32(&mut bytes, 516, u32::MAX);
+        assert_eq!(
+            parse_pe_delay_import_names(&bytes),
+            Err(PeDelayImportNameError::NameRange {
+                descriptor_index: 0,
+                name_rva: RelativeVirtualAddress::new(u32::MAX),
+                offset: 0,
+                cause: PeRvaError::UnmappedRva {
+                    start: RelativeVirtualAddress::new(u32::MAX),
+                    length: 1
+                },
+            })
+        );
+    }
+}
+
+fn long_names(plus: bool, count: u16, size: u32) -> Vec<u8> {
+    let mut bytes = fixture(plus);
+    bytes.resize(4640 + size as usize, 0);
+    bytes[512..].fill(0);
+    section(&mut bytes, plus, 0, [4128, 0x1000, 4128, 512]);
+    section(&mut bytes, plus, 1, [size, 0x6000, size, 4640]);
+    directory(&mut bytes, plus, 0x1000, (u32::from(count) + 1) * 32);
+    for index in 0..usize::from(count) {
+        descriptor(&mut bytes, index, 1, 0x6000);
+    }
+    bytes
+}
+
+#[test]
+fn per_name_budget_counts_nul_and_refuses_before_reading_the_next_byte() {
+    for plus in [false, true] {
+        let mut bytes = long_names(plus, 1, 1025);
+        bytes[4640..5663].fill(b'x');
+        assert_eq!(
+            parse_pe_delay_import_names(&bytes)
+                .unwrap()
+                .unwrap()
+                .imports[0]
+                .dll_name
+                .len(),
+            1023
+        );
+        bytes[5663] = b'x';
+        assert_eq!(
+            parse_pe_delay_import_names(&bytes),
+            Err(PeDelayImportNameError::NameLengthLimitExceeded {
+                descriptor_index: 0,
+                name_rva: RelativeVirtualAddress::new(0x6000),
+                limit: 1024,
+            })
+        );
+    }
+}
+
+#[test]
+fn total_budget_counts_duplicate_scans_and_attributes_still_precede_it() {
+    for plus in [false, true] {
+        let mut bytes = long_names(plus, 64, 1024);
+        bytes[4640..5663].fill(b'x');
+        let table = parse_pe_delay_import_names(&bytes).unwrap().unwrap();
+        assert_eq!(table.imports.len(), 64);
+        assert!(
+            table
+                .imports
+                .iter()
+                .all(|import| import.dll_name.len() == 1023)
+        );
+        directory(&mut bytes, plus, 0x1000, 66 * 32);
+        descriptor(&mut bytes, 64, 1, u32::MAX);
+        assert_eq!(
+            parse_pe_delay_import_names(&bytes),
+            Err(PeDelayImportNameError::NameScanBudgetExceeded {
+                descriptor_index: 64,
+                name_rva: RelativeVirtualAddress::new(u32::MAX),
+                offset: 0,
+                limit: 65_536,
+            })
+        );
+        descriptor(&mut bytes, 64, 3, u32::MAX);
+        assert_eq!(
+            parse_pe_delay_import_names(&bytes),
+            Err(PeDelayImportNameError::UnsupportedAttributes {
+                descriptor_index: 64,
+                attributes: 3,
+            })
+        );
+    }
+}
+
+#[test]
+fn per_name_limit_wins_when_both_budgets_expire() {
+    for plus in [false, true] {
+        let mut bytes = long_names(plus, 64, 2049);
+        bytes[4640..5663].fill(b'x');
+        bytes[5664..6688].fill(b'y');
+        descriptor(&mut bytes, 63, 1, 0x6400);
+        assert_eq!(
+            parse_pe_delay_import_names(&bytes),
+            Err(PeDelayImportNameError::NameLengthLimitExceeded {
+                descriptor_index: 63,
+                name_rva: RelativeVirtualAddress::new(0x6400),
+                limit: 1024,
+            })
+        );
+    }
+}
