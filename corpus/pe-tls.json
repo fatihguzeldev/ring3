@@ -1,0 +1,85 @@
+{
+  "schemaVersion": 1,
+  "provenance": "self-authored",
+  "licenseStatus": "pending",
+  "windowsOracle": "not-run",
+  "executed": false,
+  "fixture": "pe-tls",
+  "sources": {
+    "i386.s": {
+      "path": "corpus/pe-tls/i386.s",
+      "sha256": "54f661566b96842ff741ed499970cf01da39155f1dd9a14627ef0c3946d2e894"
+    },
+    "amd64.s": {
+      "path": "corpus/pe-tls/amd64.s",
+      "sha256": "57f288d3a386aef4031fe58a7154bd42fca5550ce8667f7ed86946f1396610ba"
+    }
+  },
+  "tools": {
+    "clang": {
+      "version": "Apple clang version 21.0.0 (clang-2100.1.1.101)",
+      "sha256": "f30550eab15fdf5ab8c0dc54c52679711241e5d4b636b027e18c09fef531775d"
+    },
+    "lld": {
+      "version": "LLD 22.1.6 (https://github.com/rust-lang/llvm-project.git dcc3606807c989700e0ac1cac18c31741bcd40d9)",
+      "sha256": "8f5fe507df7232eac0a610c12a5d11f3202205235f710eb98c6c78df6d3f548d"
+    },
+    "objdump": {
+      "version": "Apple LLVM version 21.0.0",
+      "sha256": "1dcc1432db4d828cf8cd71a84cb8d9bf63a7ca80b5eeec711a9e5f13a3f5f98e"
+    }
+  },
+  "architectures": {
+    "i386": {
+      "kind": "PE32",
+      "machine": 332,
+      "artifacts": {
+        "tls.obj": {
+          "bytes": 665,
+          "sha256": "e1b519db2ac13e8b5bcb9a164dccb7b562246eddf3ee152d8ae5eb234b1d54b3"
+        },
+        "tls.exe": {
+          "bytes": 3584,
+          "sha256": "2ab1f1b7c88eb460ab73ea6a26c983c4707ddc58c98b34563e1e94b7f335318f"
+        }
+      },
+      "directory": {
+        "rva": 8200,
+        "fileOffset": 1544,
+        "size": 24,
+        "startAddressOfRawData": "4210688",
+        "endAddressOfRawData": "4210693",
+        "addressOfIndex": "4206592",
+        "addressOfCallbacks": "4202496",
+        "sizeOfZeroFill": 7,
+        "characteristics": 5242880
+      }
+    },
+    "amd64": {
+      "kind": "PE32+",
+      "machine": 34404,
+      "artifacts": {
+        "tls.obj": {
+          "bytes": 688,
+          "sha256": "f7a26eea2b8944ef3391fb97a20513bdd9cc0eceb00701fa8b911ac41f066c6e"
+        },
+        "tls.exe": {
+          "bytes": 3584,
+          "sha256": "ccadbb829b3042d68cdb5484c2e9724578a8818661c8849b179ebe5acc101bdf"
+        }
+      },
+      "directory": {
+        "rva": 8208,
+        "fileOffset": 1552,
+        "size": 40,
+        "startAddressOfRawData": "5368725504",
+        "endAddressOfRawData": "5368725509",
+        "addressOfIndex": "5368721408",
+        "addressOfCallbacks": "5368717312",
+        "sizeOfZeroFill": 7,
+        "characteristics": 5242880
+      }
+    }
+  },
+  "objectTimestamp": 0
+}
