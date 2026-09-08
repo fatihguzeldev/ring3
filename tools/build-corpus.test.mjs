@@ -121,6 +121,7 @@ test("CLI rejects linked target roots and corpus prefixes before creating a run"
       mkdirSync(join(workspace, "tools"), { recursive: true });
       mkdirSync(join(workspace, "corpus"));
       writeFileSync(join(workspace, "tools/build-corpus.mjs"), readFileSync(new URL("./build-corpus.mjs", import.meta.url)));
+      writeFileSync(join(workspace, "tools/corpus-tools.mjs"), readFileSync(new URL("./corpus-tools.mjs", import.meta.url)));
       writeFileSync(join(workspace, "corpus/pe32-arithmetic.json"), JSON.stringify(contract));
       writeFileSync(join(workspace, ".node-version"), process.versions.node);
       if (linkedPath !== "target") mkdirSync(join(workspace, "target"));

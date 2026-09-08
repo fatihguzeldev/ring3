@@ -1,39 +1,10 @@
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
-import { createHash } from "node:crypto";
-import { lstatSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
-import { isAbsolute, join, relative, resolve, sep } from "node:path";
-import { fileURLToPath, pathToFileURL } from "node:url";
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { join, resolve } from "node:path";
+import { pathToFileURL } from "node:url";
+import { locateTools, prepareOutputParents, root, run, sha256, target } from "./corpus-tools.mjs";
 
-const root = fileURLToPath(new URL("../", import.meta.url));
-const target = join(root, "target");
 export const contract = JSON.parse(readFileSync(join(root, "corpus/pe32-arithmetic.json"), "utf8"));
-const sha256 = (bytes) => createHash("sha256").update(bytes).digest("hex");
-
-function run(command, args, cwd) {
-  const result = spawnSync(command, args, {
-    cwd,
-    env: { ...process.env, LC_ALL: "C", TZ: "UTC" },
-    encoding: "utf8",
-    timeout: 15_000,
-    maxBuffer: 1024 * 1024,
-  });
-  if (result.error || result.status !== 0) {
-    throw new Error(`${command} failed: ${result.error?.message ?? result.stderr}`);
-  }
-  return result.stdout;
-}
-
-function locateTools() {
-  const sysroot = run("rustc", ["+1.97.1", "--print", "sysroot"]).trim();
-  const rustBin = join(sysroot, "lib/rustlib/aarch64-apple-darwin/bin");
-  return {
-    clang: run("xcrun", ["--find", "clang"]).trim(),
-    lld: join(rustBin, "rust-lld"),
-    objdump: run("xcrun", ["--find", "llvm-objdump"]).trim(),
-    objcopy: join(rustBin, "rust-objcopy"),
-  };
-}
 
 export function verifyTextPermissions(output, objcopy) {
   const args = ["--set-section-flags", ".text=alloc,load,readonly,code", "pe32-arithmetic.exe", "rx-check.exe"];
@@ -41,30 +12,6 @@ export function verifyTextPermissions(output, objcopy) {
   // llvm must leave the original bytes unchanged when requesting rx section flags.
   assert.deepEqual(readFileSync(join(output, "rx-check.exe")), readFileSync(join(output, "pe32-arithmetic.exe")), ".text must already be read-only and executable");
   return args;
-}
-
-function ensureRealDirectory(directory) {
-  try {
-    mkdirSync(directory);
-  } catch (error) {
-    if (error.code !== "EEXIST") throw error;
-  }
-  assert.ok(lstatSync(directory).isDirectory(), "output path components must be real directories");
-}
-
-// this checks existing paths; it is not a concurrent filesystem sandbox.
-function prepareOutputParents(outputDirectory) {
-  const output = resolve(outputDirectory);
-  const child = relative(target, output);
-  assert.ok(child && child !== ".." && !child.startsWith(`..${sep}`) && !isAbsolute(child),
-    "output must be a fresh directory under target");
-  let parent = target;
-  ensureRealDirectory(parent);
-  for (const component of child.split(sep).slice(0, -1)) {
-    parent = join(parent, component);
-    ensureRealDirectory(parent);
-  }
-  return output;
 }
 
 export function buildFixture(outputDirectory, options = {}) {
