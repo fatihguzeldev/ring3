@@ -30,6 +30,7 @@ pnpm corpus:test
 pnpm corpus:build
 pnpm corpus:build:imports
 pnpm corpus:build:ordinals
+pnpm corpus:build:forwarders
 ```
 
 The named import builder produces self-authored PE32 and PE32+ EXE/DLL pairs under
@@ -39,3 +40,6 @@ environment variables used by the named import/export Rust integration tests;
 
 The ordinal builder uses `target/corpus-ordinals/run-*` for the corresponding
 ordinal-32768 EXE/DLL pairs. Its `fixtures.json` lists the four ordinal test paths.
+
+The forwarder builder uses `target/corpus-forwarders/run-*` for sparse export DLLs
+with named and ordinal target strings. Its `fixtures.json` lists both DLL test paths.
