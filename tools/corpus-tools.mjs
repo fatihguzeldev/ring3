@@ -57,4 +57,3 @@ export function prepareOutputParents(outputDirectory) {
   }
   return output;
 }
-
