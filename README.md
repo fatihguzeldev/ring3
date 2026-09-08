@@ -26,6 +26,11 @@ PE width and retains the all-zero terminator coordinates. Missing directories an
 present empty tables remain distinct. Attribute and address words stay unclassified;
 DLL names, lookup/IAT targets and delayed loading are outside this reader.
 
+`parse_pe_delay_import_names` pairs those descriptors with exact borrowed ASCII DLL
+names when attributes equal `1`. Other attribute values return an explicit error.
+Name scans include the NUL terminator in their 1024-byte per-name and 65,536-byte
+total limits; names are preserved without normalization or module resolution.
+
 ## Static PE fixtures
 
 The corpus builders require the pinned macOS Apple Clang/LLVM and Rust LLD binaries

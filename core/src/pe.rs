@@ -2,6 +2,7 @@ use crate::{FileOffset, RelativeVirtualAddress};
 
 mod base_relocations;
 mod delay_imports;
+mod delay_names;
 mod export_addresses;
 mod export_names;
 mod exports;
@@ -18,6 +19,9 @@ pub use base_relocations::{
 pub use delay_imports::{
     PeDelayImportDescriptor, PeDelayImportError, PeDelayImportTable,
     parse_pe_delay_import_descriptors,
+};
+pub use delay_names::{
+    PeDelayImportName, PeDelayImportNameError, PeDelayImportNameTable, parse_pe_delay_import_names,
 };
 pub use export_addresses::{
     PeExportAddressEntry, PeExportAddressError, PeExportAddressTable, PeExportTarget,
