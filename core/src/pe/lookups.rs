@@ -179,7 +179,7 @@ fn named_symbol<'a>(
     }
 }
 
-fn lookup_entries<'a>(
+pub(super) fn lookup_entries<'a>(
     prepared: &PreparedPe<'a>,
     descriptor_index: u16,
     start: RelativeVirtualAddress,
