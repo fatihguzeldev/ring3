@@ -31,6 +31,11 @@ names when attributes equal `1`. Other attribute values return an explicit error
 Name scans include the NUL terminator in their 1024-byte per-name and 65,536-byte
 total limits; names are preserved without normalization or module resolution.
 
+`parse_pe_delay_import_lookups` validates all supported DLL names before reading
+explicit INT entries. It returns borrowed symbol names with hints or 16-bit ordinals,
+using the static lookup reader's encoding, backing and scan limits. Missing INTs
+return an error; IAT fallback, module resolution and delayed execution are excluded.
+
 ## Static PE fixtures
 
 The corpus builders require the pinned macOS Apple Clang/LLVM and Rust LLD binaries
