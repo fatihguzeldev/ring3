@@ -61,6 +61,12 @@ pub fn parse_pe_export_directory(
     bytes: &[u8],
 ) -> Result<Option<PeExportDirectory>, PeExportDirectoryError> {
     let prepared = PreparedPe::new(bytes).map_err(PeExportDirectoryError::Base)?;
+    parse_prepared_export_directory(&prepared)
+}
+
+pub(super) fn parse_prepared_export_directory(
+    prepared: &PreparedPe<'_>,
+) -> Result<Option<PeExportDirectory>, PeExportDirectoryError> {
     let Some(directory) = prepared.headers().directories[0] else {
         return Ok(None);
     };
