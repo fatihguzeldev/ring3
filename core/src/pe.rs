@@ -1,5 +1,6 @@
 use crate::{FileOffset, RelativeVirtualAddress};
 
+mod base_relocations;
 mod export_addresses;
 mod export_names;
 mod exports;
@@ -9,6 +10,9 @@ mod optional;
 mod rva;
 mod sections;
 
+pub use base_relocations::{
+    PeBaseRelocationBlock, PeBaseRelocationError, parse_pe_base_relocation_blocks,
+};
 pub use export_addresses::{
     PeExportAddressEntry, PeExportAddressError, PeExportAddressTable, PeExportTarget,
     parse_pe_export_addresses,
