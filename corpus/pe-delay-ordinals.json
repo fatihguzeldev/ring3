@@ -1,0 +1,179 @@
+{
+  "schemaVersion": 1,
+  "provenance": "self-authored",
+  "licenseStatus": "pending",
+  "windowsOracle": "not-run",
+  "executed": false,
+  "fixture": "pe-delay-ordinals",
+  "sources": {
+    "probe.c": {
+      "path": "corpus/pe-delay-ordinals/probe.c",
+      "sha256": "3aa379f70a9a0bb5549c34f0153e6731dd76ffe0ac22f7a5acbf5ace208146ef"
+    },
+    "delayed.c": {
+      "path": "corpus/pe-delay-ordinals/delayed.c",
+      "sha256": "d896cd1f4b933b7b74d206341c65000a1e0bb12311cc38871beb93c250e75f86"
+    },
+    "probe.def": {
+      "path": "corpus/pe-delay-ordinals/probe.def",
+      "sha256": "0fe5832341e0d7d310cab9020f510e649e5d502a50594f4dd3d85879aa29fccc"
+    }
+  },
+  "tools": {
+    "clang": {
+      "version": "Apple clang version 21.0.0 (clang-2100.1.1.101)",
+      "sha256": "f30550eab15fdf5ab8c0dc54c52679711241e5d4b636b027e18c09fef531775d"
+    },
+    "lld": {
+      "version": "LLD 22.1.6 (https://github.com/rust-lang/llvm-project.git dcc3606807c989700e0ac1cac18c31741bcd40d9)",
+      "sha256": "8f5fe507df7232eac0a610c12a5d11f3202205235f710eb98c6c78df6d3f548d"
+    },
+    "objdump": {
+      "version": "Apple LLVM version 21.0.0",
+      "sha256": "1dcc1432db4d828cf8cd71a84cb8d9bf63a7ca80b5eeec711a9e5f13a3f5f98e"
+    }
+  },
+  "architectures": {
+    "i386": {
+      "kind": "PE32",
+      "machine": 332,
+      "artifacts": {
+        "probe.obj": {
+          "bytes": 548,
+          "sha256": "fad00390145743c3677ae9bea54c5dbe8d49a2884f90b025052b8e41093a6d6e"
+        },
+        "delayed.obj": {
+          "bytes": 645,
+          "sha256": "b117fc8144f7c822b860b643dba374c86d2fcacb4c94307638f3dfd05995df86"
+        },
+        "Ring3Delay.dll": {
+          "bytes": 2048,
+          "sha256": "32ddf1f8f1a28c96349ff07989438e84d1cf4f6d5860ecee4b4e7b1660381bf0"
+        },
+        "Ring3Delay.lib": {
+          "bytes": 1342,
+          "sha256": "34932edc2c55df7ebe14fa694bdfc9526f8929a42fc22706ba8a10c8138343fc"
+        },
+        "delayed.exe": {
+          "bytes": 2560,
+          "sha256": "180f9f4955c325e1f550dc3e2fe13192ccaf1abae81cc8cffb40cf8eabcea391"
+        },
+        "Ring3Delay.dll.inspection.txt": {
+          "bytes": 2569,
+          "sha256": "120f5c391e3880a50e0f2a7c3c98cf6ea6ad9574422103735455621d91924bf8"
+        },
+        "delayed.exe.inspection.txt": {
+          "bytes": 2977,
+          "sha256": "96c3be09186dd468fb5577a10b8ba611613a42696bd346a71c02eed5787689ad"
+        }
+      },
+      "directory": {
+        "rva": 8192,
+        "fileOffset": 1536,
+        "size": 64,
+        "terminatorRva": 8224,
+        "terminatorFileOffset": 1568,
+        "rawWords": [
+          1,
+          8268,
+          12288,
+          12296,
+          8256,
+          0,
+          0,
+          0
+        ]
+      },
+      "lookup": {
+        "rva": 8256,
+        "fileOffset": 1600,
+        "width": 4,
+        "rawValue": "2147516416",
+        "ordinal": 32768,
+        "terminatorRva": 8260,
+        "terminatorFileOffset": 1604
+      },
+      "exports": {
+        "directoryRva": 8192,
+        "directoryFileOffset": 1536,
+        "ordinalBase": 32768,
+        "functionCount": 1,
+        "nameCount": 0,
+        "firstAddressRva": 4096,
+        "addressTableRva": 8247,
+        "addressTableFileOffset": 1591
+      }
+    },
+    "amd64": {
+      "kind": "PE32+",
+      "machine": 34404,
+      "artifacts": {
+        "probe.obj": {
+          "bytes": 548,
+          "sha256": "58fd16c45fe4b7ab6c3887d2e2d793f05f451e31c738a3ba13708b6e3fa4fc23"
+        },
+        "delayed.obj": {
+          "bytes": 642,
+          "sha256": "d04ce10aad21891ec5f8fdf5baf955df1c9b1fa5169c5c4a4d212dc88e8e90c5"
+        },
+        "Ring3Delay.dll": {
+          "bytes": 2048,
+          "sha256": "f88802666da0a13e8a55d90f66812410b949c9196d65c3b92108405f58bd6894"
+        },
+        "Ring3Delay.lib": {
+          "bytes": 1346,
+          "sha256": "c97bf62ff64f5ea1f2c775a4243ee6796ac5f1df2068b45175e4366776021876"
+        },
+        "delayed.exe": {
+          "bytes": 3072,
+          "sha256": "de7fc1f3edcc74c3ae67be3b6ca2e97bc1ae5f4ef9d51267aae35899939b80c1"
+        },
+        "Ring3Delay.dll.inspection.txt": {
+          "bytes": 2804,
+          "sha256": "567e039ea9840bf21fa02786a7c0e50bde644b15c308f81aca28a77b29d91795"
+        },
+        "delayed.exe.inspection.txt": {
+          "bytes": 3852,
+          "sha256": "396e768aba10fdffac36a5b02ab095f5e30be493110494a84988add7dc8a2c00"
+        }
+      },
+      "directory": {
+        "rva": 8200,
+        "fileOffset": 1544,
+        "size": 64,
+        "terminatorRva": 8232,
+        "terminatorFileOffset": 1576,
+        "rawWords": [
+          1,
+          8280,
+          12288,
+          12296,
+          8264,
+          0,
+          0,
+          0
+        ]
+      },
+      "lookup": {
+        "rva": 8264,
+        "fileOffset": 1608,
+        "width": 8,
+        "rawValue": "9223372036854808576",
+        "ordinal": 32768,
+        "terminatorRva": 8272,
+        "terminatorFileOffset": 1616
+      },
+      "exports": {
+        "directoryRva": 8192,
+        "directoryFileOffset": 1536,
+        "ordinalBase": 32768,
+        "functionCount": 1,
+        "nameCount": 0,
+        "firstAddressRva": 4096,
+        "addressTableRva": 8247,
+        "addressTableFileOffset": 1591
+      }
+    }
+  },
+  "objectTimestamp": 0
+}
