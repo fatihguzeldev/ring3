@@ -27,12 +27,20 @@ twice, and compare the output bytes without executing the guest programs.
 
 ```bash
 pnpm corpus:test
+pnpm corpus:verify
 pnpm corpus:build
 pnpm corpus:build:imports
 pnpm corpus:build:ordinals
 pnpm corpus:build:forwarders
 pnpm corpus:build:pe32plus
 ```
+
+`corpus:verify` builds all five fixture families twice and runs the 29 real-file
+parser tests listed in `corpus/real-file-tests.json` against 12 fresh fixture paths.
+It requires the pinned native Rust tools on `aarch64-apple-darwin`, compiles tests
+offline into a fresh Cargo target, and refuses missing, extra or skipped cases.
+`target/corpus-verification/run-*/verification` retains tool/source hashes, child
+logs and fixture evidence; `verification.json` appears only after every case passes.
 
 The named import builder produces self-authored PE32 and PE32+ EXE/DLL pairs under
 a fresh `target/corpus-imports/run-*` directory. Its `fixtures.json` lists the four
