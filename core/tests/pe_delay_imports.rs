@@ -451,3 +451,42 @@ fn invalid_base_precedes_absence_and_directory_failures() {
         );
     }
 }
+
+fn generated_delay_fixture(variable: &str, plus: bool) {
+    let path = std::env::var_os(variable).expect("explicit generated delay fixture path");
+    let bytes = std::fs::read(path).unwrap();
+    assert_eq!(bytes.len(), if plus { 3072 } else { 2560 });
+    let (rva, offset, words) = if plus {
+        (8200, 1544, [1, 8288, 12288, 12296, 8264, 0, 0, 0])
+    } else {
+        (8192, 1536, [1, 8276, 12288, 12296, 8256, 0, 0, 0])
+    };
+    assert_eq!(
+        parse_pe_delay_import_descriptors(&bytes),
+        Ok(Some(PeDelayImportTable {
+            kind: if plus { PeKind::Pe32Plus } else { PeKind::Pe32 },
+            directory_rva: RelativeVirtualAddress::new(rva),
+            directory_file_offset: FileOffset::new(offset),
+            directory_size: 64,
+            descriptors: vec![PeDelayImportDescriptor {
+                descriptor_rva: RelativeVirtualAddress::new(rva),
+                descriptor_file_offset: FileOffset::new(offset),
+                ..raw(0, words)
+            }],
+            terminator_rva: RelativeVirtualAddress::new(rva + 32),
+            terminator_file_offset: FileOffset::new(offset + 32),
+        }))
+    );
+}
+
+#[test]
+#[ignore = "requires an explicit generated delay fixture path"]
+fn generated_pe32_delay_descriptors_match_raw_metadata() {
+    generated_delay_fixture("RING3_DELAY_PE32_FIXTURE", false);
+}
+
+#[test]
+#[ignore = "requires an explicit generated delay fixture path"]
+fn generated_pe32plus_delay_descriptors_match_raw_metadata() {
+    generated_delay_fixture("RING3_DELAY_PE32PLUS_FIXTURE", true);
+}
