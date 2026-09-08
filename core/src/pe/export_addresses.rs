@@ -176,8 +176,14 @@ pub fn parse_pe_export_addresses(
 ) -> Result<Option<PeExportAddressTable<'_>>, PeExportAddressError> {
     let prepared = PreparedPe::new(bytes)
         .map_err(|cause| PeExportAddressError::Directory(PeExportDirectoryError::Base(cause)))?;
+    parse_prepared_export_addresses(&prepared)
+}
+
+pub(super) fn parse_prepared_export_addresses<'a>(
+    prepared: &PreparedPe<'a>,
+) -> Result<Option<PeExportAddressTable<'a>>, PeExportAddressError> {
     let Some(directory) =
-        parse_prepared_export_directory(&prepared).map_err(PeExportAddressError::Directory)?
+        parse_prepared_export_directory(prepared).map_err(PeExportAddressError::Directory)?
     else {
         return Ok(None);
     };
@@ -222,7 +228,7 @@ pub fn parse_pe_export_addresses(
         } else if (directory_start..directory_end).contains(&u64::from(raw)) {
             PeExportTarget::Forwarder {
                 rva,
-                text: read_forwarder(&prepared, table_index, rva, directory_end, &mut total)?,
+                text: read_forwarder(prepared, table_index, rva, directory_end, &mut total)?,
             }
         } else {
             PeExportTarget::Rva(rva)
