@@ -1,0 +1,4 @@
+LIBRARY Ring3Forwarders.dll
+EXPORTS
+    by_name=OtherModule.ring3_target @7
+    by_ordinal=OtherModule.#32768 @9

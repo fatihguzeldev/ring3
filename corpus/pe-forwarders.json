@@ -1,0 +1,83 @@
+{
+  "schemaVersion": 1,
+  "fixture": "pe-forwarders",
+  "provenance": "self-authored",
+  "licenseStatus": "pending",
+  "windowsOracle": "not-run",
+  "executed": false,
+  "sources": {
+    "anchor.c": {
+      "path": "corpus/pe-forwarders/anchor.c",
+      "sha256": "7fde66349fdb567a99e64cff1487627b11f4dabf92acb99d243f2afcda494c34"
+    },
+    "forwarders.def": {
+      "path": "corpus/pe-forwarders/forwarders.def",
+      "sha256": "3d3b51a73916c73d69ced5ec812b1d4d06d57bfd010c2e06b91f5d1a38a169c9"
+    }
+  },
+  "tools": {
+    "clang": {
+      "version": "Apple clang version 21.0.0 (clang-2100.1.1.101)",
+      "sha256": "f30550eab15fdf5ab8c0dc54c52679711241e5d4b636b027e18c09fef531775d"
+    },
+    "lld": {
+      "version": "LLD 22.1.6 (https://github.com/rust-lang/llvm-project.git dcc3606807c989700e0ac1cac18c31741bcd40d9)",
+      "sha256": "8f5fe507df7232eac0a610c12a5d11f3202205235f710eb98c6c78df6d3f548d"
+    },
+    "objdump": {
+      "version": "Apple LLVM version 21.0.0",
+      "sha256": "1dcc1432db4d828cf8cd71a84cb8d9bf63a7ca80b5eeec711a9e5f13a3f5f98e"
+    }
+  },
+  "architectures": {
+    "i386": {
+      "kind": "PE32",
+      "machine": 332,
+      "artifacts": {
+        "Ring3Forwarders.dll": {
+          "sha256": "712d2aa28d94475c0008c21d31f1d38964b8531f427911da85df34957c13be8d",
+          "bytes": 2048
+        },
+        "Ring3Forwarders.lib": {
+          "sha256": "7dced6bc0e0cd4a6b5787c128bf9fdcef98c347f38c6b5f0a5af6ac68349f802",
+          "bytes": 1666
+        },
+        "anchor.obj": {
+          "sha256": "b1f0aeb85c226c95bfa357a3585f94d4e1f2bb5495ff7e56a469127bca811abc",
+          "bytes": 572
+        }
+      }
+    },
+    "amd64": {
+      "kind": "PE32+",
+      "machine": 34404,
+      "artifacts": {
+        "Ring3Forwarders.dll": {
+          "sha256": "029ebe773e592200afe56c40fca5fbe28a641e260348d8870b8f949f0e52420c",
+          "bytes": 2048
+        },
+        "Ring3Forwarders.lib": {
+          "sha256": "ab63880cf1efb7c52bddfb4cd777de5b67653df59de51f54588245b3564f1864",
+          "bytes": 1664
+        },
+        "anchor.obj": {
+          "sha256": "3560908c3e014c266b6e8f4e145b5278c67f0d655b2eb24c59de4e766e834afe",
+          "bytes": 573
+        }
+      }
+    }
+  },
+  "expectation": {
+    "dllName": "Ring3Forwarders.dll",
+    "ordinalBase": 7,
+    "addressCount": 3,
+    "nameCount": 2,
+    "directoryRva": 8192,
+    "directorySize": 147,
+    "forwarders": [
+      "OtherModule.ring3_target",
+      "OtherModule.#32768"
+    ]
+  },
+  "objectTimestamp": 0
+}
