@@ -6,7 +6,7 @@
   "licenseStatus": "pending",
   "windowsOracle": "not-run",
   "source": {
-    "path": "corpus/pe32-arithmetic.s",
+    "path": "corpus/pe32-arithmetic/pe32-arithmetic.s",
     "sha256": "28ca36d883b942ca3cd22a0ec9a22a4e6561687ba12e134f877d551ce5006781"
   },
   "tools": {

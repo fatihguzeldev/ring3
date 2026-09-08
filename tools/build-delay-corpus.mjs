@@ -4,8 +4,8 @@ import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { locateTools, prepareOutputParents, root, run, sha256, target } from "./corpus-tools.mjs";
 
-export const contract = JSON.parse(readFileSync(join(root, "corpus/pe-delay-imports.json"), "utf8"));
-export const ordinalContract = JSON.parse(readFileSync(join(root, "corpus/pe-delay-ordinals.json"), "utf8"));
+export const contract = JSON.parse(readFileSync(join(root, "corpus/pe-delay-imports/fixture.json"), "utf8"));
+export const ordinalContract = JSON.parse(readFileSync(join(root, "corpus/pe-delay-ordinals/fixture.json"), "utf8"));
 const sources = ["probe.c", "delayed.c"];
 const ordinalSources = [...sources, "probe.def"];
 const artifacts = ["probe.obj", "delayed.obj", "Ring3Delay.dll", "Ring3Delay.lib", "delayed.exe", "Ring3Delay.dll.inspection.txt", "delayed.exe.inspection.txt"];
