@@ -29,9 +29,13 @@ twice, and compare the output bytes without executing the guest programs.
 pnpm corpus:test
 pnpm corpus:build
 pnpm corpus:build:imports
+pnpm corpus:build:ordinals
 ```
 
 The named import builder produces self-authored PE32 and PE32+ EXE/DLL pairs under
 a fresh `target/corpus-imports/run-*` directory. Its `fixtures.json` lists the four
 environment variables used by the named import/export Rust integration tests;
 `repeatability.json` links both build records. Generated binaries remain untracked.
+
+The ordinal builder uses `target/corpus-ordinals/run-*` for the corresponding
+ordinal-32768 EXE/DLL pairs. Its `fixtures.json` lists the four ordinal test paths.
