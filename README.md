@@ -42,10 +42,11 @@ pnpm corpus:build:forwarders
 pnpm corpus:build:pe32plus
 pnpm corpus:build:relocations
 pnpm corpus:build:tls
+pnpm corpus:build:delay
 ```
 
-`corpus:verify` builds all seven fixture families twice and runs the 33 real-file
-parser tests listed in `corpus/real-file-tests.json` against 16 fresh fixture paths.
+`corpus:verify` builds all eight fixture families twice and runs the 35 real-file
+parser tests listed in `corpus/real-file-tests.json` against 18 fresh fixture paths.
 It requires the pinned native Rust tools on `aarch64-apple-darwin`, compiles tests
 offline into a fresh Cargo target, and refuses missing, extra or skipped cases.
 `target/corpus-verification/run-*/verification` retains tool/source hashes, child
@@ -73,3 +74,7 @@ the raw block metadata tests; no relocations or guest code are executed.
 The TLS builder uses `target/corpus-tls/run-*` for PE32 and PE32+ images with
 fixed TLS directories. Its `fixtures.json` lists both paths for the raw directory
 metadata tests; no TLS targets or callbacks are executed.
+
+The delay builder uses `target/corpus-delay/run-*` for self-authored DLL/import-library
+and delay-importing EXE pairs. Its `fixtures.json` supplies both EXE paths for raw
+descriptor tests. The link-only helper and generated PE programs are never executed.

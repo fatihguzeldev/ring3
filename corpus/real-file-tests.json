@@ -66,6 +66,10 @@
     "pe_tls": [
       "generated_pe32_tls_directory_matches_raw_metadata",
       "generated_pe32plus_tls_directory_matches_raw_metadata"
+    ],
+    "pe_delay_imports": [
+      "generated_pe32_delay_descriptors_match_raw_metadata",
+      "generated_pe32plus_delay_descriptors_match_raw_metadata"
     ]
   }
 }
