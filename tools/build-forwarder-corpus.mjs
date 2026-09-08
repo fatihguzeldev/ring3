@@ -4,7 +4,7 @@ import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { locateTools, prepareOutputParents, root, run, sha256, target } from "./corpus-tools.mjs";
 
-export const contract = JSON.parse(readFileSync(join(root, "corpus/pe-forwarders.json"), "utf8"));
+export const contract = JSON.parse(readFileSync(join(root, "corpus/pe-forwarders/fixture.json"), "utf8"));
 const sources = ["anchor.c", "forwarders.def"];
 const artifacts = ["Ring3Forwarders.dll", "Ring3Forwarders.lib", "anchor.obj"];
 const architectures = [

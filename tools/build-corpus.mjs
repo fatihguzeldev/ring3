@@ -4,7 +4,7 @@ import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { locateTools, prepareOutputParents, root, run, sha256, target } from "./corpus-tools.mjs";
 
-export const contract = JSON.parse(readFileSync(join(root, "corpus/pe32-arithmetic.json"), "utf8"));
+export const contract = JSON.parse(readFileSync(join(root, "corpus/pe32-arithmetic/fixture.json"), "utf8"));
 
 export function verifyTextPermissions(output, objcopy) {
   const args = ["--set-section-flags", ".text=alloc,load,readonly,code", "pe32-arithmetic.exe", "rx-check.exe"];

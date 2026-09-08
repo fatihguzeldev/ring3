@@ -48,7 +48,7 @@ test("missing and mismatched tools fail without success evidence", () => {
 test("changed source, invalid assembly and altered expectation fail closed", () => {
   const directory = mkdtempSync(new URL("source-controls-", outputRoot));
   const sourcePath = join(directory, "changed.s");
-  const source = readFileSync(new URL("../corpus/pe32-arithmetic.s", import.meta.url), "utf8");
+  const source = readFileSync(new URL("../corpus/pe32-arithmetic/pe32-arithmetic.s", import.meta.url), "utf8");
   try {
     writeFileSync(sourcePath, source.replace("$7", "$8"));
     assert.throws(() => buildFixture(join(directory, "identity"), { sourcePath }), /source SHA-256 mismatch/);
@@ -119,10 +119,10 @@ test("CLI rejects linked target roots and corpus prefixes before creating a run"
     for (const linkedPath of ["target", "target/corpus0"]) {
       const workspace = join(directory, linkedPath.replaceAll("/", "-"));
       mkdirSync(join(workspace, "tools"), { recursive: true });
-      mkdirSync(join(workspace, "corpus"));
+      mkdirSync(join(workspace, "corpus/pe32-arithmetic"), { recursive: true });
       writeFileSync(join(workspace, "tools/build-corpus.mjs"), readFileSync(new URL("./build-corpus.mjs", import.meta.url)));
       writeFileSync(join(workspace, "tools/corpus-tools.mjs"), readFileSync(new URL("./corpus-tools.mjs", import.meta.url)));
-      writeFileSync(join(workspace, "corpus/pe32-arithmetic.json"), JSON.stringify(contract));
+      writeFileSync(join(workspace, "corpus/pe32-arithmetic/fixture.json"), JSON.stringify(contract));
       writeFileSync(join(workspace, ".node-version"), process.versions.node);
       if (linkedPath !== "target") mkdirSync(join(workspace, "target"));
       symlinkSync(outside, join(workspace, linkedPath), "dir");

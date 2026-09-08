@@ -39,7 +39,7 @@ return an error; IAT fallback, module resolution and delayed execution are exclu
 ## Static PE fixtures
 
 The corpus builders require the pinned macOS Apple Clang/LLVM and Rust LLD binaries
-recorded in `corpus/*.json`. They verify source and tool hashes, build each fixture
+recorded in `corpus/*/fixture.json`. They verify source and tool hashes, build each fixture
 twice, and compare the output bytes without executing the guest programs.
 
 ```bash

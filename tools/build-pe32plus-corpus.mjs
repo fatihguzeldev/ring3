@@ -4,7 +4,7 @@ import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { locateTools, prepareOutputParents, root, run, sha256, target } from "./corpus-tools.mjs";
 
-export const contract = JSON.parse(readFileSync(join(root, "corpus/pe32plus-arithmetic.json"), "utf8"));
+export const contract = JSON.parse(readFileSync(join(root, "corpus/pe32plus-arithmetic/fixture.json"), "utf8"));
 const artifacts = ["arithmetic.exe", "arithmetic.obj"];
 
 export function buildPe32PlusFixture(outputDirectory, options = {}) {
@@ -13,7 +13,7 @@ export function buildPe32PlusFixture(outputDirectory, options = {}) {
   mkdirSync(output);
   const spec = options.contract ?? contract;
   assert.equal(spec.schemaVersion, 1);
-  const source = readFileSync(options.sourcePath ?? join(root, "corpus/pe32plus-arithmetic.s"));
+  const source = readFileSync(options.sourcePath ?? join(root, "corpus/pe32plus-arithmetic/pe32plus-arithmetic.s"));
   assert.equal(sha256(source), spec.source.sha256, "source SHA-256 mismatch");
   const tools = { ...locateTools(), ...options.tools };
   const versions = {};

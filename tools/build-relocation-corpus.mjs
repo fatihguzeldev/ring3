@@ -4,7 +4,7 @@ import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { locateTools, prepareOutputParents, root, run, sha256, target } from "./corpus-tools.mjs";
 
-export const contract = JSON.parse(readFileSync(join(root, "corpus/pe-base-relocations.json"), "utf8"));
+export const contract = JSON.parse(readFileSync(join(root, "corpus/pe-base-relocations/fixture.json"), "utf8"));
 const artifacts = ["relocations.obj", "relocations.exe"];
 const architectures = [
   ["i386", "i686-pc-windows-msvc", "x86", "0x400000", "coff-i386"],

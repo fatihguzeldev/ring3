@@ -6,7 +6,7 @@
   "windowsOracle": "not-run",
   "executed": false,
   "source": {
-    "path": "corpus/pe32plus-arithmetic.s",
+    "path": "corpus/pe32plus-arithmetic/pe32plus-arithmetic.s",
     "sha256": "49ad1ed37716a405197c594d39e55b871f2cc8790c08340a410b4e1a8d84d899"
   },
   "tools": {

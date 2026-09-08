@@ -4,8 +4,8 @@ import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { locateTools, prepareOutputParents, root, run, sha256, target } from "./corpus-tools.mjs";
 
-export const contract = JSON.parse(readFileSync(join(root, "corpus/pe-named-imports.json"), "utf8"));
-export const ordinalContract = JSON.parse(readFileSync(join(root, "corpus/pe-ordinal-imports.json"), "utf8"));
+export const contract = JSON.parse(readFileSync(join(root, "corpus/pe-named-imports/fixture.json"), "utf8"));
+export const ordinalContract = JSON.parse(readFileSync(join(root, "corpus/pe-ordinal-imports/fixture.json"), "utf8"));
 const artifactNames = (library) => ["imports.exe", `${library}.dll`, `${library}.lib`, "imports.obj", "probe.obj"];
 const architectures = [
   ["i386", "i686-pc-windows-msvc", "x86", "0x10000000", "0x400000", "coff-i386"],

@@ -4,7 +4,7 @@ import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { locateTools, prepareOutputParents, root, run, sha256, target } from "./corpus-tools.mjs";
 
-export const contract = JSON.parse(readFileSync(join(root, "corpus/pe-tls.json"), "utf8"));
+export const contract = JSON.parse(readFileSync(join(root, "corpus/pe-tls/fixture.json"), "utf8"));
 const artifacts = ["tls.obj", "tls.exe"];
 const architectures = [
   ["i386", "i686-pc-windows-msvc", "x86", "0x400000", "coff-i386"],
