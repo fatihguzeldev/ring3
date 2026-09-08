@@ -1,0 +1,49 @@
+{
+  "schemaVersion": 1,
+  "fixture": "pe32plus-arithmetic",
+  "provenance": "self-authored",
+  "licenseStatus": "pending",
+  "windowsOracle": "not-run",
+  "executed": false,
+  "source": {
+    "path": "corpus/pe32plus-arithmetic.s",
+    "sha256": "49ad1ed37716a405197c594d39e55b871f2cc8790c08340a410b4e1a8d84d899"
+  },
+  "tools": {
+    "clang": {
+      "version": "Apple clang version 21.0.0 (clang-2100.1.1.101)",
+      "sha256": "f30550eab15fdf5ab8c0dc54c52679711241e5d4b636b027e18c09fef531775d"
+    },
+    "lld": {
+      "version": "LLD 22.1.6 (https://github.com/rust-lang/llvm-project.git dcc3606807c989700e0ac1cac18c31741bcd40d9)",
+      "sha256": "8f5fe507df7232eac0a610c12a5d11f3202205235f710eb98c6c78df6d3f548d"
+    },
+    "objdump": {
+      "version": "Apple LLVM version 21.0.0",
+      "sha256": "1dcc1432db4d828cf8cd71a84cb8d9bf63a7ca80b5eeec711a9e5f13a3f5f98e"
+    }
+  },
+  "artifacts": {
+    "arithmetic.exe": {
+      "sha256": "a07d0c1a4064c9b1e09682277cc2b57310f41a279cf663a9b3fa6b8a888a8e2c",
+      "bytes": 1024
+    },
+    "arithmetic.obj": {
+      "sha256": "0df7188ad2ce0d7f63a22c507177a521fbf3d928ec93f7c639930decdea01fbe",
+      "bytes": 281
+    }
+  },
+  "expectation": {
+    "format": "coff-x86-64",
+    "headerFields": {
+      "Magic": "020b",
+      "AddressOfEntryPoint": "0000000000001000",
+      "ImageBase": "0000000140000000",
+      "SizeOfStackReserve": "0000000100002000",
+      "SizeOfStackCommit": "0000000100001000",
+      "SizeOfHeapReserve": "0000000200003000",
+      "SizeOfHeapCommit": "0000000200001000"
+    }
+  },
+  "objectTimestamp": 0
+}
