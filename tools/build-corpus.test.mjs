@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync, mkdtempSync, readFileSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, mkdirSync, readdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { buildFixture, contract, verifyTextPermissions } from "./build-corpus.mjs";
@@ -12,12 +13,12 @@ mkdirSync(outputRoot, { recursive: true });
 test("separate builds have identical PE bytes and evidence", () => {
   const directory = mkdtempSync(new URL("run-", outputRoot));
   try {
-    const first = buildFixture(join(directory, "first"));
-    const second = buildFixture(join(directory, "second"));
+    const first = buildFixture(join(directory, "nested", "first"));
+    const second = buildFixture(join(directory, "nested", "second"));
     assert.deepEqual(first, second);
     assert.deepEqual(
-      readFileSync(join(directory, "first/pe32-arithmetic.exe")),
-      readFileSync(join(directory, "second/pe32-arithmetic.exe")),
+      readFileSync(join(directory, "nested/first/pe32-arithmetic.exe")),
+      readFileSync(join(directory, "nested/second/pe32-arithmetic.exe")),
     );
     assert.equal(first.expectation.eaxBeforeInt3, 42);
     assert.equal(first.windowsOracle, "not-run");
@@ -85,6 +86,64 @@ test("LLVM permission check rejects writable text and restores the original byte
     assert.throws(() => verifyTextPermissions(writable, objcopy), /already be read-only and executable/);
     assert.deepEqual(readFileSync(join(writable, "rx-check.exe")), readFileSync(join(original, "pe32-arithmetic.exe")));
     assert.equal(existsSync(join(writable, "evidence.json")), false);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("output parents reject symbolic links before creating outside directories", () => {
+  const directory = mkdtempSync(new URL("path-control-", outputRoot));
+  const outside = mkdtempSync(join(tmpdir(), "ring3-corpus-outside-"));
+  try {
+    symlinkSync(outside, join(directory, "redirect"), "dir");
+    const invalidContract = structuredClone(contract);
+    invalidContract.source.sha256 = "0".repeat(64);
+    let failure;
+    try {
+      buildFixture(join(directory, "redirect", "nested", "fixture"), { contract: invalidContract });
+    } catch (error) {
+      failure = error;
+    }
+    assert.deepEqual(readdirSync(outside), []);
+    assert.match(failure?.message ?? "build did not refuse", /real directories/);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+    rmSync(outside, { recursive: true, force: true });
+  }
+});
+
+test("CLI rejects linked target roots and corpus prefixes before creating a run", () => {
+  const directory = mkdtempSync(new URL("cli-path-control-", outputRoot));
+  const outside = mkdtempSync(join(tmpdir(), "ring3-corpus-cli-outside-"));
+  try {
+    for (const linkedPath of ["target", "target/corpus0"]) {
+      const workspace = join(directory, linkedPath.replaceAll("/", "-"));
+      mkdirSync(join(workspace, "tools"), { recursive: true });
+      mkdirSync(join(workspace, "corpus"));
+      writeFileSync(join(workspace, "tools/build-corpus.mjs"), readFileSync(new URL("./build-corpus.mjs", import.meta.url)));
+      writeFileSync(join(workspace, "corpus/pe32-arithmetic.json"), JSON.stringify(contract));
+      writeFileSync(join(workspace, ".node-version"), process.versions.node);
+      if (linkedPath !== "target") mkdirSync(join(workspace, "target"));
+      symlinkSync(outside, join(workspace, linkedPath), "dir");
+      const result = spawnSync(process.execPath, [join(workspace, "tools/build-corpus.mjs")], { encoding: "utf8", timeout: 5_000 });
+      assert.deepEqual(readdirSync(outside), []);
+      assert.equal(result.status, 1);
+      assert.match(result.stderr, /real directories/);
+    }
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+    rmSync(outside, { recursive: true, force: true });
+  }
+});
+
+test("existing output directories are preserved when reuse is refused", () => {
+  const directory = mkdtempSync(new URL("reuse-control-", outputRoot));
+  try {
+    const sentinel = join(directory, "existing.txt");
+    writeFileSync(sentinel, "preserve this output\n");
+    assert.throws(() => buildFixture(directory), { code: "EEXIST" });
+    assert.equal(readFileSync(sentinel, "utf8"), "preserve this output\n");
+    assert.deepEqual(readdirSync(directory), ["existing.txt"]);
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }
