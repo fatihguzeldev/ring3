@@ -8,6 +8,7 @@ import { buildImportFixtures, buildOrdinalFixtures } from "./build-import-corpus
 import { buildForwarderFixtures } from "./build-forwarder-corpus.mjs";
 import { buildPe32PlusFixture } from "./build-pe32plus-corpus.mjs";
 import { buildRelocationFixtures } from "./build-relocation-corpus.mjs";
+import { buildTlsFixtures } from "./build-tls-corpus.mjs";
 import { prepareOutputParents, root, run, sha256, target } from "./corpus-tools.mjs";
 
 export const inventory = JSON.parse(readFileSync(join(root, "corpus/real-file-tests.json"), "utf8"));
@@ -92,6 +93,10 @@ const families = [
   { name: "relocations", build: buildRelocationFixtures, fixtures: {
     RING3_RELOCATION_PE32_FIXTURE: "i386/relocations.exe",
     RING3_RELOCATION_PE32PLUS_FIXTURE: "amd64/relocations.exe",
+  } },
+  { name: "tls", build: buildTlsFixtures, fixtures: {
+    RING3_TLS_PE32_FIXTURE: "i386/tls.exe",
+    RING3_TLS_PE32PLUS_FIXTURE: "amd64/tls.exe",
   } },
 ];
 
