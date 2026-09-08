@@ -482,3 +482,76 @@ fn symbol_name_limits_count_nul_repeated_scans_and_exclude_dll_names() {
         );
     }
 }
+
+fn generated_delay_lookup_fixture(variable: &str, plus: bool) {
+    let path = std::env::var_os(variable).expect("explicit generated delay fixture path");
+    let bytes = std::fs::read(path).unwrap();
+    assert_eq!(bytes.len(), if plus { 3072 } else { 2560 });
+    let (rva, offset, name_rva, name_offset, lookup_rva, lookup_offset, hint_rva, hint_offset) =
+        if plus {
+            (8200, 1544, 8288, 1632, 8264, 1608, 8280, 1624)
+        } else {
+            (8192, 1536, 8276, 1620, 8256, 1600, 8268, 1612)
+        };
+    let table = parse_pe_delay_import_lookups(&bytes).unwrap().unwrap();
+    assert_eq!(
+        table,
+        PeDelayImportLookupTable {
+            kind: if plus { PeKind::Pe32Plus } else { PeKind::Pe32 },
+            directory_rva: RelativeVirtualAddress::new(rva),
+            directory_file_offset: FileOffset::new(offset),
+            directory_size: 64,
+            imports: vec![PeDelayImportLookup {
+                import: PeDelayImportName {
+                    descriptor: PeDelayImportDescriptor {
+                        descriptor_rva: RelativeVirtualAddress::new(rva),
+                        descriptor_file_offset: FileOffset::new(offset),
+                        attributes: 1,
+                        dll_name_address: name_rva,
+                        module_handle_address: 12288,
+                        import_address_table_address: 12296,
+                        import_name_table_address: lookup_rva,
+                        bound_import_address_table_address: 0,
+                        unload_import_address_table_address: 0,
+                        time_date_stamp: 0,
+                    },
+                    dll_name: "Ring3Delay.dll",
+                },
+                entries: vec![PeImportLookupEntry {
+                    lookup_rva: RelativeVirtualAddress::new(lookup_rva),
+                    lookup_file_offset: FileOffset::new(lookup_offset),
+                    raw_value: u64::from(hint_rva),
+                    symbol: PeImportSymbol::ByName {
+                        hint_name_rva: RelativeVirtualAddress::new(hint_rva),
+                        hint: 0,
+                        name: "probe",
+                    },
+                }],
+            }],
+            terminator_rva: RelativeVirtualAddress::new(rva + 32),
+            terminator_file_offset: FileOffset::new(offset + 32),
+        }
+    );
+    assert_eq!(
+        table.imports[0].import.dll_name.as_ptr(),
+        bytes[name_offset..].as_ptr()
+    );
+    assert_eq!(&bytes[name_offset..name_offset + 15], b"Ring3Delay.dll\0");
+    let PeImportSymbol::ByName { name, .. } = table.imports[0].entries[0].symbol else {
+        panic!("expected the generated named lookup");
+    };
+    assert_eq!(name.as_ptr(), bytes[hint_offset + 2..].as_ptr());
+    assert_eq!(&bytes[hint_offset..hint_offset + 8], b"\0\0probe\0");
+}
+
+#[test]
+#[ignore = "requires an explicit generated delay fixture path"]
+fn generated_pe32_delay_lookups_match_raw_metadata() {
+    generated_delay_lookup_fixture("RING3_DELAY_PE32_FIXTURE", false);
+}
+
+#[test]
+#[ignore = "requires an explicit generated delay fixture path"]
+fn generated_pe32plus_delay_lookups_match_raw_metadata() {
+    generated_delay_lookup_fixture("RING3_DELAY_PE32PLUS_FIXTURE", true);
+}
