@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname, join, relative, resolve } from "node:path";
+import { lstatSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 const root = fileURLToPath(new URL("../", import.meta.url));
@@ -43,12 +43,33 @@ export function verifyTextPermissions(output, objcopy) {
   return args;
 }
 
+function ensureRealDirectory(directory) {
+  try {
+    mkdirSync(directory);
+  } catch (error) {
+    if (error.code !== "EEXIST") throw error;
+  }
+  assert.ok(lstatSync(directory).isDirectory(), "output path components must be real directories");
+}
+
+// this checks existing paths; it is not a concurrent filesystem sandbox.
+function prepareOutputParents(outputDirectory) {
+  const output = resolve(outputDirectory);
+  const child = relative(target, output);
+  assert.ok(child && child !== ".." && !child.startsWith(`..${sep}`) && !isAbsolute(child),
+    "output must be a fresh directory under target");
+  let parent = target;
+  ensureRealDirectory(parent);
+  for (const component of child.split(sep).slice(0, -1)) {
+    parent = join(parent, component);
+    ensureRealDirectory(parent);
+  }
+  return output;
+}
+
 export function buildFixture(outputDirectory, options = {}) {
   assert.equal(process.versions.node, readFileSync(join(root, ".node-version"), "utf8").trim());
-  const output = resolve(outputDirectory);
-  assert.ok(relative(target, output).startsWith("..") === false && output !== target,
-    "output must be a fresh directory under target");
-  mkdirSync(dirname(output), { recursive: true });
+  const output = prepareOutputParents(outputDirectory);
   mkdirSync(output);
 
   const spec = options.contract ?? contract;
@@ -110,7 +131,7 @@ export function buildFixture(outputDirectory, options = {}) {
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
   try {
     const outputRoot = join(target, "corpus0");
-    mkdirSync(outputRoot, { recursive: true });
+    prepareOutputParents(join(outputRoot, "run-"));
     const output = mkdtempSync(join(outputRoot, "run-"));
     const first = buildFixture(join(output, "first"));
     const second = buildFixture(join(output, "second"));
