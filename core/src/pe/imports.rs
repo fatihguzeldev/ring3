@@ -159,6 +159,12 @@ pub fn parse_pe_import_descriptors(
     bytes: &[u8],
 ) -> Result<Vec<PeImportDescriptor<'_>>, PeImportError> {
     let prepared = PreparedPe::new(bytes).map_err(PeImportError::Base)?;
+    parse_prepared_descriptors(&prepared)
+}
+
+pub(super) fn parse_prepared_descriptors<'a>(
+    prepared: &PreparedPe<'a>,
+) -> Result<Vec<PeImportDescriptor<'a>>, PeImportError> {
     let Some(directory) = prepared.headers().directories[1] else {
         return Ok(Vec::new());
     };
@@ -211,7 +217,7 @@ pub fn parse_pe_import_descriptors(
             });
         }
         let name_rva = RelativeVirtualAddress::new(fields[3]);
-        let dll_name = read_name(&prepared, descriptor_index, name_rva, &mut total_name_bytes)?;
+        let dll_name = read_name(prepared, descriptor_index, name_rva, &mut total_name_bytes)?;
         descriptors.push(PeImportDescriptor {
             descriptor_rva: RelativeVirtualAddress::new(rva.get() + offset),
             descriptor_file_offset: FileOffset::new(prefix.file_offset.get() + u64::from(offset)),
