@@ -1,0 +1,97 @@
+{
+  "schemaVersion": 1,
+  "fixture": "pe-ordinal-imports",
+  "provenance": "self-authored",
+  "licenseStatus": "pending",
+  "windowsOracle": "not-run",
+  "executed": false,
+  "sources": {
+    "probe.c": {
+      "path": "corpus/pe-ordinal-imports/probe.c",
+      "sha256": "b1e4059d27c405eedcf8928c94d89ee20a4bb633af14d270b70c8818dbc934cb"
+    },
+    "imports.c": {
+      "path": "corpus/pe-ordinal-imports/imports.c",
+      "sha256": "32d47e3d2591bd0a52937646d1065b450b1d4f4aaeabd68521149e3e74e284bd"
+    },
+    "exports.def": {
+      "path": "corpus/pe-ordinal-imports/exports.def",
+      "sha256": "a21c969b045d5fd3f14305425f8f05b11205c2d126c36e34a1915a4548a1ee04"
+    }
+  },
+  "tools": {
+    "clang": {
+      "version": "Apple clang version 21.0.0 (clang-2100.1.1.101)",
+      "sha256": "f30550eab15fdf5ab8c0dc54c52679711241e5d4b636b027e18c09fef531775d"
+    },
+    "lld": {
+      "version": "LLD 22.1.6 (https://github.com/rust-lang/llvm-project.git dcc3606807c989700e0ac1cac18c31741bcd40d9)",
+      "sha256": "8f5fe507df7232eac0a610c12a5d11f3202205235f710eb98c6c78df6d3f548d"
+    },
+    "objdump": {
+      "version": "Apple LLVM version 21.0.0",
+      "sha256": "1dcc1432db4d828cf8cd71a84cb8d9bf63a7ca80b5eeec711a9e5f13a3f5f98e"
+    }
+  },
+  "architectures": {
+    "i386": {
+      "kind": "PE32",
+      "machine": 332,
+      "artifacts": {
+        "imports.exe": {
+          "sha256": "d3895e2ad1ac163d2c7795ef8cb00fd2d4065c9d33f3d8c7582806be1bf061b8",
+          "bytes": 2048
+        },
+        "Ring3Ordinal.dll": {
+          "sha256": "8a5bb6cc509634b054e7a54d5c1b1218b50a733769644d935c839c0e31150f23",
+          "bytes": 2048
+        },
+        "Ring3Ordinal.lib": {
+          "sha256": "a4fdcc9cbfb56f77548314a8d75c19750b08c21da3fc3b91f22729490ecda9ef",
+          "bytes": 1468
+        },
+        "imports.obj": {
+          "sha256": "489f06d518f1ef85641c67e47f7b3e725838965f9d9872ac49f1d375a4bfb2ba",
+          "bytes": 607
+        },
+        "probe.obj": {
+          "sha256": "370ff4bb67e538c0a2a53782b403ce5fc15c7f0493f01dc9001db330bb5eca39",
+          "bytes": 571
+        }
+      }
+    },
+    "amd64": {
+      "kind": "PE32+",
+      "machine": 34404,
+      "artifacts": {
+        "imports.exe": {
+          "sha256": "d80edb1e921edd34d5025c2d2ed56ba4668d6e0a3896dca66741640ff258cfc1",
+          "bytes": 2048
+        },
+        "Ring3Ordinal.dll": {
+          "sha256": "e8300b6064877fec765007b7bd436dd4c0dea1e5c1d808a03c67e1ac67d3f46e",
+          "bytes": 2048
+        },
+        "Ring3Ordinal.lib": {
+          "sha256": "fca3cd01749544c8dd17f90d11644acc4d30cc39da9755e4b3e246f532661590",
+          "bytes": 1472
+        },
+        "imports.obj": {
+          "sha256": "93a2daaced00116cfc787d902733a3fcd14f233f650cdc669895c9aaca4e9dcb",
+          "bytes": 606
+        },
+        "probe.obj": {
+          "sha256": "c0317d780e019bd59373d6ee18d14739cc7fb87315fb14690fd0845f80c3a042",
+          "bytes": 572
+        }
+      }
+    }
+  },
+  "expectation": {
+    "dllName": "Ring3Ordinal.dll",
+    "ordinal": 32768,
+    "exportRva": 4096,
+    "exportNameCount": 0
+  },
+  "objectTimestamp": 0
+}
