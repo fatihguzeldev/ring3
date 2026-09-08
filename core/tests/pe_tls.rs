@@ -1,6 +1,6 @@
 use ring3_core::{
-    FileOffset, PeHeaderError, PeKind, PeRvaError, PeTlsDirectory, PeTlsDirectoryError,
-    RelativeVirtualAddress, parse_pe_tls_directory,
+    FileOffset, PeDirectoryAddress, PeHeaderError, PeKind, PeRvaError, PeTlsDirectory,
+    PeTlsDirectoryError, RelativeVirtualAddress, parse_pe_headers, parse_pe_tls_directory,
 };
 
 fn put32(bytes: &mut [u8], offset: usize, value: u32) {
@@ -345,4 +345,53 @@ fn base_failures_precede_absence_and_directory_errors() {
             )))
         );
     }
+}
+
+fn generated_tls_fixture(variable: &str, plus: bool) {
+    let path = std::env::var_os(variable).expect("explicit generated TLS fixture path");
+    let bytes = std::fs::read(path).unwrap();
+    assert_eq!(bytes.len(), 3584);
+    let headers = parse_pe_headers(&bytes).unwrap();
+    assert_eq!(headers.prefix.kind, kind(plus));
+    let (rva, offset, addresses) = if plus {
+        (
+            8208,
+            1552,
+            [5_368_725_504, 5_368_725_509, 5_368_721_408, 5_368_717_312],
+        )
+    } else {
+        (8200, 1544, [4_210_688, 4_210_693, 4_206_592, 4_202_496])
+    };
+    let directory = headers.directories[9].unwrap();
+    assert_eq!(
+        directory.address,
+        PeDirectoryAddress::Rva(RelativeVirtualAddress::new(rva))
+    );
+    assert_eq!(directory.size, length(plus));
+    assert_eq!(
+        parse_pe_tls_directory(&bytes),
+        Ok(Some(PeTlsDirectory {
+            directory_rva: RelativeVirtualAddress::new(rva),
+            directory_file_offset: FileOffset::new(offset),
+            start_address_of_raw_data: addresses[0],
+            end_address_of_raw_data: addresses[1],
+            address_of_index: addresses[2],
+            address_of_callbacks: addresses[3],
+            size_of_zero_fill: 7,
+            characteristics: 0x0050_0000,
+            ..zero(plus)
+        }))
+    );
+}
+
+#[test]
+#[ignore = "requires an explicit generated PE32 TLS fixture path"]
+fn generated_pe32_tls_directory_matches_raw_metadata() {
+    generated_tls_fixture("RING3_TLS_PE32_FIXTURE", false);
+}
+
+#[test]
+#[ignore = "requires an explicit generated PE32+ TLS fixture path"]
+fn generated_pe32plus_tls_directory_matches_raw_metadata() {
+    generated_tls_fixture("RING3_TLS_PE32PLUS_FIXTURE", true);
 }

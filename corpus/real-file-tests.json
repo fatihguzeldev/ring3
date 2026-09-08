@@ -62,6 +62,10 @@
     "pe_base_relocations": [
       "generated_pe32_relocation_blocks_match_raw_metadata",
       "generated_pe32plus_relocation_blocks_match_raw_metadata"
+    ],
+    "pe_tls": [
+      "generated_pe32_tls_directory_matches_raw_metadata",
+      "generated_pe32plus_tls_directory_matches_raw_metadata"
     ]
   }
 }
