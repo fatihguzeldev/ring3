@@ -142,8 +142,14 @@ pub fn parse_pe_delay_import_names(
 ) -> Result<Option<PeDelayImportNameTable<'_>>, PeDelayImportNameError> {
     let prepared = PreparedPe::new(bytes)
         .map_err(|cause| PeDelayImportNameError::Table(PeDelayImportError::Base(cause)))?;
+    parse_prepared_names(&prepared)
+}
+
+pub(super) fn parse_prepared_names<'a>(
+    prepared: &PreparedPe<'a>,
+) -> Result<Option<PeDelayImportNameTable<'a>>, PeDelayImportNameError> {
     let Some(table) =
-        parse_prepared_descriptors(&prepared).map_err(PeDelayImportNameError::Table)?
+        parse_prepared_descriptors(prepared).map_err(PeDelayImportNameError::Table)?
     else {
         return Ok(None);
     };
@@ -157,7 +163,7 @@ pub fn parse_pe_delay_import_names(
             });
         }
         let name_rva = RelativeVirtualAddress::new(descriptor.dll_name_address);
-        let dll_name = read_name(&prepared, descriptor_index, name_rva, &mut total)?;
+        let dll_name = read_name(prepared, descriptor_index, name_rva, &mut total)?;
         imports.push(PeDelayImportName {
             descriptor,
             dll_name,
