@@ -66,7 +66,7 @@ pub(super) fn read_u32(bytes: &[u8], index: usize) -> u32 {
     ])
 }
 
-fn read_u64(bytes: &[u8], index: usize) -> u64 {
+pub(super) fn read_u64(bytes: &[u8], index: usize) -> u64 {
     u64::from_le_bytes([
         bytes[index],
         bytes[index + 1],
