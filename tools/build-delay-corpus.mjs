@@ -5,7 +5,9 @@ import { pathToFileURL } from "node:url";
 import { locateTools, prepareOutputParents, root, run, sha256, target } from "./corpus-tools.mjs";
 
 export const contract = JSON.parse(readFileSync(join(root, "corpus/pe-delay-imports.json"), "utf8"));
+export const ordinalContract = JSON.parse(readFileSync(join(root, "corpus/pe-delay-ordinals.json"), "utf8"));
 const sources = ["probe.c", "delayed.c"];
+const ordinalSources = [...sources, "probe.def"];
 const artifacts = ["probe.obj", "delayed.obj", "Ring3Delay.dll", "Ring3Delay.lib", "delayed.exe", "Ring3Delay.dll.inspection.txt", "delayed.exe.inspection.txt"];
 const architectures = [
   ["i386", "i686-pc-windows-msvc", "x86", "0x10000000", "0x400000", "coff-i386"],
@@ -16,10 +18,13 @@ export function buildDelayImportFixtures(outputDirectory, options = {}) {
   assert.equal(process.versions.node, readFileSync(join(root, ".node-version"), "utf8").trim());
   const output = prepareOutputParents(outputDirectory);
   mkdirSync(output);
-  const spec = options.contract ?? contract;
+  const ordinal = options.ordinal === true;
+  const spec = options.contract ?? (ordinal ? ordinalContract : contract);
+  const sourceNames = ordinal ? ordinalSources : sources;
+  const sourceDirectory = options.sourceDirectory ?? join(root, ordinal ? "corpus/pe-delay-ordinals" : "corpus/pe-delay-imports");
   assert.equal(spec.schemaVersion, 1);
-  const snapshots = Object.fromEntries(sources.map(name => {
-    const bytes = readFileSync(join(options.sourceDirectory ?? join(root, "corpus/pe-delay-imports"), name));
+  const snapshots = Object.fromEntries(sourceNames.map(name => {
+    const bytes = readFileSync(join(sourceDirectory, name));
     assert.equal(sha256(bytes), spec.sources[name].sha256, `${name} source SHA-256 mismatch`);
     return [name, bytes];
   }));
@@ -35,14 +40,14 @@ export function buildDelayImportFixtures(outputDirectory, options = {}) {
   for (const [architecture, triple, machine, dllBase, exeBase, format] of architectures) {
     const directory = join(output, architecture);
     mkdirSync(directory);
-    for (const name of sources) writeFileSync(join(directory, name), snapshots[name]);
+    for (const name of sourceNames) writeFileSync(join(directory, name), snapshots[name]);
     const compile = ["--target=" + triple, "-c", "-O1", "-ffreestanding", "-fno-stack-protector", "-fno-ident", "-mno-incremental-linker-compatible"];
     const common = ["-flavor", "link", `/machine:${machine}`, "/nodefaultlib", "/timestamp:0", "/fixed", "/dynamicbase:no", "/nxcompat"];
     if (architecture === "i386") common.push("/safeseh:no");
     const commands = {
       compileProbe: [...compile, "probe.c", "-o", "probe.obj"],
       compileDelayed: [...compile, "delayed.c", "-o", "delayed.obj"],
-      linkDll: [...common, "/dll", "/noentry", `/base:${dllBase}`, "/out:Ring3Delay.dll", "/implib:Ring3Delay.lib", "probe.obj"],
+      linkDll: [...common, "/dll", "/noentry", `/base:${dllBase}`, ...(ordinal ? ["/def:probe.def"] : []), "/out:Ring3Delay.dll", "/implib:Ring3Delay.lib", "probe.obj"],
       linkExe: [...common, "/entry:entry", "/subsystem:console", `/base:${exeBase}`, "/delayload:Ring3Delay.dll", "/out:delayed.exe", "delayed.obj", "Ring3Delay.lib"],
       inspectDll: ["--private-headers", "--section-headers", "--full-contents", "Ring3Delay.dll"],
       inspectExe: ["--private-headers", "--section-headers", "--full-contents", "delayed.exe"],
@@ -66,6 +71,27 @@ export function buildDelayImportFixtures(outputDirectory, options = {}) {
     assert.equal(expectedDirectory.terminatorRva, expectedDirectory.rva + 32);
     assert.equal(expectedDirectory.terminatorFileOffset, expectedDirectory.fileOffset + 32);
     assert.deepEqual(exe.subarray(expectedDirectory.terminatorFileOffset, expectedDirectory.terminatorFileOffset + 32), Buffer.alloc(32), "delay terminator mismatch");
+    if (ordinal) {
+      const expected = spec.architectures[architecture];
+      const lookup = expected.lookup;
+      const width = architecture === "i386" ? 4 : 8;
+      assert.equal(lookup.width, width);
+      assert.equal(lookup.rva, expectedDirectory.rawWords[4]);
+      const raw = width === 4 ? BigInt(exe.readUInt32LE(lookup.fileOffset)) : exe.readBigUInt64LE(lookup.fileOffset);
+      assert.equal(raw, BigInt(lookup.rawValue), "ordinal lookup mismatch");
+      assert.equal(raw & 0xffffn, BigInt(lookup.ordinal), "ordinal value mismatch");
+      assert.equal(lookup.terminatorRva, lookup.rva + width);
+      assert.equal(lookup.terminatorFileOffset, lookup.fileOffset + width);
+      assert.deepEqual(exe.subarray(lookup.terminatorFileOffset, lookup.terminatorFileOffset + width), Buffer.alloc(width), "ordinal lookup terminator mismatch");
+      const dll = readFileSync(join(directory, "Ring3Delay.dll"));
+      const exports = expected.exports;
+      const optional = dll.readUInt32LE(60) + 24;
+      assert.equal(dll.readUInt32LE(optional + (architecture === "amd64" ? 112 : 96)), exports.directoryRva, "ordinal export directory mismatch");
+      assert.equal(dll.readUInt32LE(exports.directoryFileOffset + 28), exports.addressTableRva, "ordinal export table mismatch");
+      assert.equal(exports.addressTableFileOffset - exports.directoryFileOffset, exports.addressTableRva - exports.directoryRva, "ordinal export table offset mismatch");
+      assert.equal(dll.readUInt32LE(exports.addressTableFileOffset), exports.firstAddressRva, "ordinal export address mismatch");
+      assert.deepEqual([16, 20, 24].map(offset => dll.readUInt32LE(exports.directoryFileOffset + offset)), [exports.ordinalBase, exports.functionCount, exports.nameCount], "ordinal export mismatch");
+    }
     const identities = {};
     for (const name of artifacts) {
       const bytes = readFileSync(join(directory, name));
@@ -90,25 +116,27 @@ export function buildDelayImportFixtures(outputDirectory, options = {}) {
 
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
   try {
-    assert.equal(process.argv.length, 2, "unsupported corpus arguments");
-    const outputRoot = join(target, "corpus-delay");
+    assert.ok(process.argv.length === 2 || (process.argv.length === 3 && process.argv[2] === "--ordinal"), "unsupported corpus arguments");
+    const ordinal = process.argv[2] === "--ordinal";
+    const sourceNames = ordinal ? ordinalSources : sources;
+    const outputRoot = join(target, ordinal ? "corpus-delay-ordinals" : "corpus-delay");
     prepareOutputParents(join(outputRoot, "run-"));
     const output = mkdtempSync(join(outputRoot, "run-"));
-    const first = buildDelayImportFixtures(join(output, "first"));
-    const second = buildDelayImportFixtures(join(output, "second"));
+    const first = buildDelayImportFixtures(join(output, "first"), { ordinal });
+    const second = buildDelayImportFixtures(join(output, "second"), { ordinal });
     assert.deepEqual(first, second);
     for (const [architecture] of architectures) {
-      for (const name of [...sources, ...artifacts]) {
+      for (const name of [...sourceNames, ...artifacts]) {
         assert.deepEqual(readFileSync(join(output, "first", architecture, name)), readFileSync(join(output, "second", architecture, name)), `${architecture}/${name} repeatability mismatch`);
       }
     }
     const fixtures = {
-      RING3_DELAY_PE32_FIXTURE: join(output, "first/i386/delayed.exe"),
-      RING3_DELAY_PE32PLUS_FIXTURE: join(output, "first/amd64/delayed.exe"),
+      [ordinal ? "RING3_DELAY_ORDINAL_PE32_FIXTURE" : "RING3_DELAY_PE32_FIXTURE"]: join(output, "first/i386/delayed.exe"),
+      [ordinal ? "RING3_DELAY_ORDINAL_PE32PLUS_FIXTURE" : "RING3_DELAY_PE32PLUS_FIXTURE"]: join(output, "first/amd64/delayed.exe"),
     };
     writeFileSync(join(output, "fixtures.json"), `${JSON.stringify(fixtures, null, 2)}\n`);
     writeFileSync(join(output, "repeatability.json"), `${JSON.stringify({ verified: true, first: "first/evidence.json", second: "second/evidence.json" }, null, 2)}\n`);
-    console.log(`Delay PE32 and PE32+ fixtures verified.\nEvidence: ${output}\nFixture paths: ${join(output, "fixtures.json")}`);
+    console.log(`${ordinal ? "Ordinal delay" : "Delay"} PE32 and PE32+ fixtures verified.\nEvidence: ${output}\nFixture paths: ${join(output, "fixtures.json")}`);
   } catch (error) {
     console.error(`[ring3 delay corpus] ${error.message}`);
     process.exitCode = 1;

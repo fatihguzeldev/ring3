@@ -53,6 +53,7 @@ pnpm corpus:build:pe32plus
 pnpm corpus:build:relocations
 pnpm corpus:build:tls
 pnpm corpus:build:delay
+pnpm corpus:build:delay-ordinals
 ```
 
 `corpus:verify` builds all eight fixture families twice and runs the 39 real-file
@@ -89,3 +90,8 @@ The delay builder uses `target/corpus-delay/run-*` for self-authored DLL/import-
 and delay-importing EXE pairs. Its `fixtures.json` supplies both EXE paths for raw
 descriptor, supported DLL-name and named lookup tests. The link-only helper and generated PE
 programs are never executed.
+
+The ordinal delay command uses `target/corpus-delay-ordinals/run-*` for fixed
+ordinal `32768` imports and `NONAME` DLL exports. Its fixture manifest supplies
+`RING3_DELAY_ORDINAL_PE32_FIXTURE` and `RING3_DELAY_ORDINAL_PE32PLUS_FIXTURE`.
+These fixtures are built and checked twice; they are not yet part of `corpus:verify`.
