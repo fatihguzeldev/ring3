@@ -70,6 +70,10 @@
     "pe_delay_imports": [
       "generated_pe32_delay_descriptors_match_raw_metadata",
       "generated_pe32plus_delay_descriptors_match_raw_metadata"
+    ],
+    "pe_delay_names": [
+      "generated_pe32_delay_names_match_raw_metadata",
+      "generated_pe32plus_delay_names_match_raw_metadata"
     ]
   }
 }
