@@ -19,6 +19,13 @@ pnpm typecheck
 pnpm build
 ```
 
+## Raw delay-import metadata
+
+`parse_pe_delay_import_descriptors` reads at most 128 raw descriptors in either
+PE width and retains the all-zero terminator coordinates. Missing directories and
+present empty tables remain distinct. Attribute and address words stay unclassified;
+DLL names, lookup/IAT targets and delayed loading are outside this reader.
+
 ## Static PE fixtures
 
 The corpus builders require the pinned macOS Apple Clang/LLVM and Rust LLD binaries
