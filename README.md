@@ -31,6 +31,7 @@ pnpm corpus:build
 pnpm corpus:build:imports
 pnpm corpus:build:ordinals
 pnpm corpus:build:forwarders
+pnpm corpus:build:pe32plus
 ```
 
 The named import builder produces self-authored PE32 and PE32+ EXE/DLL pairs under
@@ -43,3 +44,7 @@ ordinal-32768 EXE/DLL pairs. Its `fixtures.json` lists the four ordinal test pat
 
 The forwarder builder uses `target/corpus-forwarders/run-*` for sparse export DLLs
 with named and ordinal target strings. Its `fixtures.json` lists both DLL test paths.
+
+The PE32+ header builder uses `target/corpus-pe32plus/run-*` for the arithmetic
+fixture with stack/heap header values above 32 bits. Its `fixtures.json` provides
+`RING3_PE32PLUS_FIXTURE` for the header, section and RVA tests.
