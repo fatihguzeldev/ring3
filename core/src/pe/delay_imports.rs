@@ -82,6 +82,12 @@ pub fn parse_pe_delay_import_descriptors(
     bytes: &[u8],
 ) -> Result<Option<PeDelayImportTable>, PeDelayImportError> {
     let prepared = PreparedPe::new(bytes).map_err(PeDelayImportError::Base)?;
+    parse_prepared_descriptors(&prepared)
+}
+
+pub(super) fn parse_prepared_descriptors(
+    prepared: &PreparedPe<'_>,
+) -> Result<Option<PeDelayImportTable>, PeDelayImportError> {
     let Some(directory) = prepared.headers().directories[13] else {
         return Ok(None);
     };
