@@ -305,3 +305,48 @@ fn graph_entry_budget_bounds_shared_and_distinct_record_sets() {
         }
     }
 }
+
+fn generated_resource_fixture_matches_data_records(variable: &str, plus: bool) {
+    use ring3_core::PeKind;
+
+    let path = std::env::var_os(variable).expect("explicit generated resource fixture path");
+    let bytes = std::fs::read(&path).unwrap();
+    let before = bytes.clone();
+    assert_eq!(bytes.len(), 2048);
+    let parsed = parse_pe_resource_data_entries(&bytes).unwrap().unwrap();
+    assert_eq!(
+        parsed.directory_graph.kind,
+        if plus { PeKind::Pe32Plus } else { PeKind::Pe32 }
+    );
+    assert_eq!(
+        Some(parsed.directory_graph),
+        parse_pe_resource_directories(&bytes).unwrap()
+    );
+    assert_eq!(
+        parsed.data_entries,
+        [PeResourceDataEntry {
+            data_entry_offset: 80,
+            data_entry_rva: RelativeVirtualAddress::new(8272),
+            data_entry_file_offset: FileOffset::new(1616),
+            payload_rva: RelativeVirtualAddress::new(8296),
+            payload_size: 4,
+            code_page: 0,
+            reserved: 0,
+        }]
+    );
+    assert_eq!(parsed.references, [reference(2, 0, 0)]);
+    assert_eq!(bytes, before);
+    assert_eq!(std::fs::read(path).unwrap(), before);
+}
+
+#[test]
+#[ignore = "requires an explicit generated resource fixture path"]
+fn generated_pe32_resource_data_entries_match_linked_records() {
+    generated_resource_fixture_matches_data_records("RING3_RESOURCE_PE32_FIXTURE", false);
+}
+
+#[test]
+#[ignore = "requires an explicit generated resource fixture path"]
+fn generated_pe32plus_resource_data_entries_match_linked_records() {
+    generated_resource_fixture_matches_data_records("RING3_RESOURCE_PE32PLUS_FIXTURE", true);
+}
