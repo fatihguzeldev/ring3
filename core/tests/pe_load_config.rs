@@ -272,3 +272,37 @@ fn prefix_ending_exactly_at_u32_boundary_does_not_wrap() {
         );
     }
 }
+
+fn generated_fixture_with_synthetic_load_config(variable: &str, plus: bool) {
+    let path = std::env::var_os(variable).expect("explicit generated fixture path");
+    let original = std::fs::read(&path).unwrap();
+    assert_eq!(original.len(), 1024);
+    assert_eq!(&original[60..64], &120_u32.to_le_bytes());
+    let slot = if plus { 336 } else { 320 };
+    assert_eq!(&original[slot..slot + 8], &[0; 8]);
+    assert_eq!(&original[448..472], &[0; 24]);
+    let structure_size = if plus { 112 } else { 64 };
+    let mut bytes = original.clone();
+    put32(&mut bytes, slot, 448);
+    put32(&mut bytes, slot + 4, 24);
+    record(&mut bytes, 448, structure_size);
+    let before = bytes.clone();
+    assert_eq!(
+        parse_pe_load_config_prefix(&bytes),
+        Ok(Some(expected(plus, 448, 448, 24, structure_size)))
+    );
+    assert_eq!(bytes, before);
+    assert_eq!(std::fs::read(path).unwrap(), original);
+}
+
+#[test]
+#[ignore = "requires an explicit generated fixture path"]
+fn generated_pe32_with_synthetic_load_config_matches_prefix_metadata() {
+    generated_fixture_with_synthetic_load_config("RING3_PE32_FIXTURE", false);
+}
+
+#[test]
+#[ignore = "requires an explicit generated fixture path"]
+fn generated_pe32plus_with_synthetic_load_config_matches_prefix_metadata() {
+    generated_fixture_with_synthetic_load_config("RING3_PE32PLUS_FIXTURE", true);
+}
