@@ -1,9 +1,10 @@
 use std::fmt::{self, Write as _};
 
 use ring3_core::{
-    PeResourceDataEntryError, PeResourceDirectoryError, PeResourceDirectoryNameError,
-    PeResourcePayloadError, RelativeVirtualAddress, parse_pe_base_relocation_blocks,
-    parse_pe_certificate_entries, parse_pe_certificate_table, parse_pe_debug_directory,
+    FileOffset, PeDebugPayloadError, PeHeaderError, PeResourceDataEntryError,
+    PeResourceDirectoryError, PeResourceDirectoryNameError, PeResourcePayloadError,
+    RelativeVirtualAddress, parse_pe_base_relocation_blocks, parse_pe_certificate_entries,
+    parse_pe_certificate_table, parse_pe_debug_directory, parse_pe_debug_payloads,
     parse_pe_delay_import_descriptors, parse_pe_delay_import_lookups, parse_pe_delay_import_names,
     parse_pe_export_addresses, parse_pe_export_directory, parse_pe_export_names,
     parse_pe_header_prefix, parse_pe_headers, parse_pe_import_descriptors, parse_pe_import_lookups,
@@ -12,7 +13,7 @@ use ring3_core::{
     parse_pe_resource_root_names, parse_pe_sections, parse_pe_tls_directory, resolve_pe_file_range,
 };
 
-const READER_COUNT: usize = 24;
+const READER_COUNT: usize = 25;
 const CASE_COUNT: u32 = 3074;
 
 fn put32(bytes: &mut [u8], offset: usize, value: u32) {
@@ -175,6 +176,7 @@ fn inspect(bytes: &[u8], baseline: bool, report: &mut Campaign) {
     observe!(18, parse_pe_resource_root);
     observe!(19, parse_pe_resource_root_names);
     inspect_resource_graphs(bytes, baseline, report);
+    inspect_debug_payloads(bytes, baseline, report);
     assert_eq!(bytes, before, "input changed at case {}", report.cases);
     report.cases += 1;
 }
@@ -260,6 +262,29 @@ fn inspect_resource_graphs(bytes: &[u8], baseline: bool, report: &mut Campaign) 
     }
     report.outcomes[23][usize::from(first.is_err())] += 1;
     write!(report.digest, "\0parse_pe_resource_payloads:{first:?}\0").unwrap();
+}
+
+fn inspect_debug_payloads(bytes: &[u8], baseline: bool, report: &mut Campaign) {
+    let first = parse_pe_debug_payloads(bytes);
+    let second = parse_pe_debug_payloads(bytes);
+    assert_eq!(first, second, "debug payloads at case {}", report.cases);
+    if baseline {
+        assert_eq!(
+            first,
+            Err(PeDebugPayloadError::PayloadRange {
+                entry_index: 0,
+                file_offset: FileOffset::new(0xffff_fffe),
+                size: u32::MAX,
+                cause: PeHeaderError::OutOfBounds {
+                    offset: FileOffset::new(0xffff_fffe),
+                    needed: u64::from(u32::MAX),
+                    available: 0
+                },
+            })
+        );
+    }
+    report.outcomes[24][usize::from(first.is_err())] += 1;
+    write!(report.digest, "\0parse_pe_debug_payloads:{first:?}\0").unwrap();
 }
 
 fn next(state: &mut u32) -> u32 {
