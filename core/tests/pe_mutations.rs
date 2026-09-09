@@ -2,17 +2,17 @@ use std::fmt::{self, Write as _};
 
 use ring3_core::{
     PeResourceDataEntryError, PeResourceDirectoryError, PeResourceDirectoryNameError,
-    RelativeVirtualAddress, parse_pe_base_relocation_blocks, parse_pe_certificate_entries,
-    parse_pe_certificate_table, parse_pe_debug_directory, parse_pe_delay_import_descriptors,
-    parse_pe_delay_import_lookups, parse_pe_delay_import_names, parse_pe_export_addresses,
-    parse_pe_export_directory, parse_pe_export_names, parse_pe_header_prefix, parse_pe_headers,
-    parse_pe_import_descriptors, parse_pe_import_lookups, parse_pe_load_config_prefix,
-    parse_pe_resource_data_entries, parse_pe_resource_directories,
-    parse_pe_resource_directory_names, parse_pe_resource_root, parse_pe_resource_root_names,
-    parse_pe_sections, parse_pe_tls_directory, resolve_pe_file_range,
+    PeResourcePayloadError, RelativeVirtualAddress, parse_pe_base_relocation_blocks,
+    parse_pe_certificate_entries, parse_pe_certificate_table, parse_pe_debug_directory,
+    parse_pe_delay_import_descriptors, parse_pe_delay_import_lookups, parse_pe_delay_import_names,
+    parse_pe_export_addresses, parse_pe_export_directory, parse_pe_export_names,
+    parse_pe_header_prefix, parse_pe_headers, parse_pe_import_descriptors, parse_pe_import_lookups,
+    parse_pe_load_config_prefix, parse_pe_resource_data_entries, parse_pe_resource_directories,
+    parse_pe_resource_directory_names, parse_pe_resource_payloads, parse_pe_resource_root,
+    parse_pe_resource_root_names, parse_pe_sections, parse_pe_tls_directory, resolve_pe_file_range,
 };
 
-const READER_COUNT: usize = 23;
+const READER_COUNT: usize = 24;
 const CASE_COUNT: u32 = 3074;
 
 fn put32(bytes: &mut [u8], offset: usize, value: u32) {
@@ -241,6 +241,25 @@ fn inspect_resource_graphs(bytes: &[u8], baseline: bool, report: &mut Campaign) 
         "\0parse_pe_resource_directory_names:{first:?}\0"
     )
     .unwrap();
+    let first = parse_pe_resource_payloads(bytes);
+    let second = parse_pe_resource_payloads(bytes);
+    assert_eq!(first, second, "resource payloads at case {}", report.cases);
+    if baseline {
+        assert_eq!(
+            first,
+            Err(PeResourcePayloadError::Data(
+                PeResourceDataEntryError::Graph(
+                    PeResourceDirectoryError::DirectoryOutsideResource {
+                        offset: 0x7fff_ffff,
+                        length: 16,
+                        directory_size: 48,
+                    }
+                )
+            ))
+        );
+    }
+    report.outcomes[23][usize::from(first.is_err())] += 1;
+    write!(report.digest, "\0parse_pe_resource_payloads:{first:?}\0").unwrap();
 }
 
 fn next(state: &mut u32) -> u32 {

@@ -18,6 +18,7 @@ mod resource_data;
 mod resource_directories;
 mod resource_directory_names;
 mod resource_names;
+mod resource_payloads;
 mod resources;
 mod rva;
 mod sections;
@@ -75,6 +76,9 @@ pub use resource_directory_names::{
 pub use resource_names::{
     PeResourceRootName, PeResourceRootNameError, PeResourceRootNameTable,
     parse_pe_resource_root_names,
+};
+pub use resource_payloads::{
+    PeResourcePayload, PeResourcePayloadError, PeResourcePayloadTable, parse_pe_resource_payloads,
 };
 pub use resources::{
     PeResourceRoot, PeResourceRootEntry, PeResourceRootError, parse_pe_resource_root,

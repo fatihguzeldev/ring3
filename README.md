@@ -25,6 +25,7 @@ load-config common prefix; resource root headers, raw entries and borrowed Unico
 name bytes; bounded acyclic resource directory graphs with shared table identities;
 fixed raw resource data-entry records and their leaf references;
 borrowed name bytes across each directory’s named-entry prefix;
+conservative borrowed resource payload ranges with explicit empty views;
 and delay-import descriptors, supported DLL names and lookup symbols. Certificate entries use file
 offsets and preserve opaque bodies and padding without validating signatures.
 These readers inspect bytes without loading modules, binding addresses or executing

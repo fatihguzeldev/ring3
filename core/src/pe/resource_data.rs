@@ -74,8 +74,14 @@ pub fn parse_pe_resource_data_entries(
             cause,
         )))
     })?;
+    parse_prepared_resource_data_entries(&prepared)
+}
+
+pub(super) fn parse_prepared_resource_data_entries(
+    prepared: &PreparedPe<'_>,
+) -> Result<Option<PeResourceDataEntryTable>, PeResourceDataEntryError> {
     let Some(directory_graph) =
-        parse_prepared_resource_directories(&prepared).map_err(PeResourceDataEntryError::Graph)?
+        parse_prepared_resource_directories(prepared).map_err(PeResourceDataEntryError::Graph)?
     else {
         return Ok(None);
     };
