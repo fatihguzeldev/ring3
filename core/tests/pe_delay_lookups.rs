@@ -555,3 +555,75 @@ fn generated_pe32_delay_lookups_match_raw_metadata() {
 fn generated_pe32plus_delay_lookups_match_raw_metadata() {
     generated_delay_lookup_fixture("RING3_DELAY_PE32PLUS_FIXTURE", true);
 }
+
+fn generated_ordinal_delay_fixture(variable: &str, plus: bool) {
+    let path = std::env::var_os(variable).expect("explicit generated ordinal delay fixture path");
+    let bytes = std::fs::read(path).unwrap();
+    let before = bytes.clone();
+    assert_eq!(bytes.len(), if plus { 3072 } else { 2560 });
+    let (rva, offset, name_rva, name_offset, lookup_rva, lookup_offset, raw_value, width) = if plus
+    {
+        (8200, 1544, 8280, 1624, 8264, 1608, 0x8000_0000_0000_8000, 8)
+    } else {
+        (8192, 1536, 8268, 1612, 8256, 1600, 0x8000_8000, 4)
+    };
+    let table = parse_pe_delay_import_lookups(&bytes).unwrap().unwrap();
+    assert_eq!(
+        table,
+        PeDelayImportLookupTable {
+            kind: if plus { PeKind::Pe32Plus } else { PeKind::Pe32 },
+            directory_rva: RelativeVirtualAddress::new(rva),
+            directory_file_offset: FileOffset::new(offset),
+            directory_size: 64,
+            imports: vec![PeDelayImportLookup {
+                import: PeDelayImportName {
+                    descriptor: PeDelayImportDescriptor {
+                        descriptor_rva: RelativeVirtualAddress::new(rva),
+                        descriptor_file_offset: FileOffset::new(offset),
+                        attributes: 1,
+                        dll_name_address: name_rva,
+                        module_handle_address: 12288,
+                        import_address_table_address: 12296,
+                        import_name_table_address: lookup_rva,
+                        bound_import_address_table_address: 0,
+                        unload_import_address_table_address: 0,
+                        time_date_stamp: 0,
+                    },
+                    dll_name: "Ring3Delay.dll",
+                },
+                entries: vec![PeImportLookupEntry {
+                    lookup_rva: RelativeVirtualAddress::new(lookup_rva),
+                    lookup_file_offset: FileOffset::new(lookup_offset),
+                    raw_value,
+                    symbol: PeImportSymbol::Ordinal(32768),
+                }],
+            }],
+            terminator_rva: RelativeVirtualAddress::new(rva + 32),
+            terminator_file_offset: FileOffset::new(offset + 32),
+        }
+    );
+    assert_eq!(
+        table.imports[0].import.dll_name.as_ptr(),
+        bytes[name_offset..].as_ptr()
+    );
+    assert_eq!(&bytes[name_offset..name_offset + 15], b"Ring3Delay.dll\0");
+    let start = usize::try_from(lookup_offset).unwrap();
+    assert_eq!(
+        &bytes[start..start + width],
+        &raw_value.to_le_bytes()[..width]
+    );
+    assert_eq!(&bytes[start + width..start + 2 * width], &[0; 8][..width]);
+    assert_eq!(bytes, before);
+}
+
+#[test]
+#[ignore = "requires an explicit generated ordinal delay fixture path"]
+fn generated_pe32_ordinal_delay_lookup_matches_raw_metadata() {
+    generated_ordinal_delay_fixture("RING3_DELAY_ORDINAL_PE32_FIXTURE", false);
+}
+
+#[test]
+#[ignore = "requires an explicit generated ordinal delay fixture path"]
+fn generated_pe32plus_ordinal_delay_lookup_matches_raw_metadata() {
+    generated_ordinal_delay_fixture("RING3_DELAY_ORDINAL_PE32PLUS_FIXTURE", true);
+}
