@@ -22,8 +22,8 @@ ranges; static import/export metadata; raw base-relocation blocks; fixed TLS
 directories; raw certificate tables and entry metadata; raw debug directory
 metadata without following payload coordinates; the supported size-bearing
 load-config common prefix; resource root headers, raw entries and borrowed Unicode
-name bytes; and delay-import
-descriptors, supported DLL names and lookup symbols. Certificate entries use file
+name bytes; bounded acyclic resource directory graphs with shared table identities;
+and delay-import descriptors, supported DLL names and lookup symbols. Certificate entries use file
 offsets and preserve opaque bodies and padding without validating signatures.
 These readers inspect bytes without loading modules, binding addresses or executing
 the generated programs. Reader types and limits live with their [implementation](core/src/pe/).
