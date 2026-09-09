@@ -74,6 +74,12 @@ pub enum PeResourceRootError {
 )]
 pub fn parse_pe_resource_root(bytes: &[u8]) -> Result<Option<PeResourceRoot>, PeResourceRootError> {
     let prepared = PreparedPe::new(bytes).map_err(PeResourceRootError::Base)?;
+    parse_prepared_resource_root(&prepared)
+}
+
+pub(super) fn parse_prepared_resource_root(
+    prepared: &PreparedPe<'_>,
+) -> Result<Option<PeResourceRoot>, PeResourceRootError> {
     let Some(directory) = prepared.headers().directories[2] else {
         return Ok(None);
     };
