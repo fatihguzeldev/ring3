@@ -367,3 +367,75 @@ fn final_name_record_can_end_at_the_u32_coordinate_boundary() {
         );
     }
 }
+
+fn generated_fixture_with_synthetic_resource_names(variable: &str, plus: bool) {
+    use ring3_core::{PeKind, PeResourceRoot, PeResourceRootEntry};
+
+    let path = std::env::var_os(variable).expect("explicit generated fixture path");
+    let original = std::fs::read(&path).unwrap();
+    assert_eq!(original.len(), 1024);
+    assert_eq!(&original[60..64], &120_u32.to_le_bytes());
+    let slot = if plus { 272 } else { 256 };
+    assert_eq!(&original[slot..slot + 8], &[0; 8]);
+    assert_eq!(&original[448..488], &[0; 40]);
+    let mut bytes = original.clone();
+    put32(&mut bytes, slot, 448);
+    put32(&mut bytes, slot + 4, 40);
+    put16(&mut bytes, 460, 1);
+    put16(&mut bytes, 462, 1);
+    put32(&mut bytes, 464, 0x8000_0020);
+    put32(&mut bytes, 468, 0x8000_0000);
+    put32(&mut bytes, 472, u32::MAX);
+    put32(&mut bytes, 476, u32::MAX);
+    bytes[480..488].copy_from_slice(&[3, 0, 65, 0, 0, 0, 0, 0xd8]);
+    let before = bytes.clone();
+    let table = parse_pe_resource_root_names(&bytes).unwrap().unwrap();
+    assert_eq!(
+        table.root,
+        PeResourceRoot {
+            kind: if plus { PeKind::Pe32Plus } else { PeKind::Pe32 },
+            directory_rva: RelativeVirtualAddress::new(448),
+            directory_file_offset: FileOffset::new(448),
+            directory_size: 40,
+            characteristics: 0,
+            time_date_stamp: 0,
+            major_version: 0,
+            minor_version: 0,
+            number_of_named_entries: 1,
+            number_of_id_entries: 1,
+            entries: vec![
+                PeResourceRootEntry {
+                    entry_rva: RelativeVirtualAddress::new(464),
+                    entry_file_offset: FileOffset::new(464),
+                    raw_name_or_id: 0x8000_0020,
+                    raw_data_or_subdirectory: 0x8000_0000
+                },
+                PeResourceRootEntry {
+                    entry_rva: RelativeVirtualAddress::new(472),
+                    entry_file_offset: FileOffset::new(472),
+                    raw_name_or_id: u32::MAX,
+                    raw_data_or_subdirectory: u32::MAX
+                },
+            ],
+        }
+    );
+    assert_eq!(
+        table.names,
+        [name(0, 32, 480, 480, 3, &[65, 0, 0, 0, 0, 0xd8])]
+    );
+    assert_eq!(table.names[0].utf16le.as_ptr(), bytes[482..].as_ptr());
+    assert_eq!(bytes, before);
+    assert_eq!(std::fs::read(path).unwrap(), original);
+}
+
+#[test]
+#[ignore = "requires an explicit generated fixture path"]
+fn generated_pe32_with_synthetic_resource_names_matches_raw_bytes() {
+    generated_fixture_with_synthetic_resource_names("RING3_PE32_FIXTURE", false);
+}
+
+#[test]
+#[ignore = "requires an explicit generated fixture path"]
+fn generated_pe32plus_with_synthetic_resource_names_matches_raw_bytes() {
+    generated_fixture_with_synthetic_resource_names("RING3_PE32PLUS_FIXTURE", true);
+}
