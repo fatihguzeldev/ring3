@@ -66,13 +66,14 @@ pub enum PeResourceRootNameError {
     },
 }
 
-fn read_name<'a>(
+pub(super) fn read_resource_name<'a>(
     prepared: &PreparedPe<'a>,
-    root: &PeResourceRoot,
+    directory_rva: RelativeVirtualAddress,
+    directory_size: u32,
     entry_index: u16,
+    raw_name_or_id: u32,
     used: u32,
 ) -> Result<PeResourceRootName<'a>, PeResourceRootNameError> {
-    let raw_name_or_id = root.entries[usize::from(entry_index)].raw_name_or_id;
     if raw_name_or_id & 0x8000_0000 == 0 {
         return Err(PeResourceRootNameError::UnsupportedNameEncoding {
             entry_index,
@@ -81,15 +82,15 @@ fn read_name<'a>(
     }
     let offset = raw_name_or_id & 0x7fff_ffff;
     let resolve = |length| {
-        if u64::from(offset) + u64::from(length) > u64::from(root.directory_size) {
+        if u64::from(offset) + u64::from(length) > u64::from(directory_size) {
             return Err(PeResourceRootNameError::NameOutsideDirectory {
                 entry_index,
                 offset,
                 length,
-                directory_size: root.directory_size,
+                directory_size,
             });
         }
-        let start = RelativeVirtualAddress::new(root.directory_rva.get() + offset);
+        let start = RelativeVirtualAddress::new(directory_rva.get() + offset);
         prepared
             .resolve(start, length)
             .map_err(|cause| PeResourceRootNameError::NameRange {
@@ -120,7 +121,7 @@ fn read_name<'a>(
     Ok(PeResourceRootName {
         entry_index,
         name_offset: offset,
-        name_rva: RelativeVirtualAddress::new(root.directory_rva.get() + offset),
+        name_rva: RelativeVirtualAddress::new(directory_rva.get() + offset),
         name_file_offset: record.file_offset,
         code_unit_count,
         utf16le: &record.bytes[2..],
@@ -151,7 +152,14 @@ pub fn parse_pe_resource_root_names(
     let mut names = Vec::with_capacity(usize::from(root.number_of_named_entries));
     let mut used = 0;
     for entry_index in 0..root.number_of_named_entries {
-        let name = read_name(&prepared, &root, entry_index, used)?;
+        let name = read_resource_name(
+            &prepared,
+            root.directory_rva,
+            root.directory_size,
+            entry_index,
+            root.entries[usize::from(entry_index)].raw_name_or_id,
+            used,
+        )?;
         used += u32::from(name.code_unit_count);
         names.push(name);
     }
