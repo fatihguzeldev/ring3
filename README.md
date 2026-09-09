@@ -99,7 +99,7 @@ pnpm corpus:verify
 `corpus:test` runs the producer and verification guard tests, including changed
 inputs, tool failures and output-directory ownership checks.
 
-`corpus:verify` builds all ten fixture families twice and runs all 61 tests listed
+`corpus:verify` builds all ten fixture families twice and runs all 63 tests listed
 in [real-file-tests.json](corpus/real-file-tests.json) against 22 fresh file paths,
 including named and ordinal delay-import lookups, linked resource directory graphs
 and fixed resource data-entry records.
