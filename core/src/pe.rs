@@ -11,6 +11,7 @@ mod export_addresses;
 mod export_names;
 mod exports;
 mod imports;
+mod load_config;
 mod lookups;
 mod optional;
 mod rva;
@@ -46,6 +47,7 @@ pub use export_addresses::{
 pub use export_names::{PeExportName, PeExportNameError, PeExportNameTable, parse_pe_export_names};
 pub use exports::{PeExportDirectory, PeExportDirectoryError, parse_pe_export_directory};
 pub use imports::{PeImportDescriptor, PeImportError, parse_pe_import_descriptors};
+pub use load_config::{PeLoadConfigError, PeLoadConfigPrefix, parse_pe_load_config_prefix};
 pub use lookups::{
     PeImportLookup, PeImportLookupEntry, PeImportLookupError, PeImportSymbol,
     parse_pe_import_lookups,

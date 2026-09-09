@@ -5,11 +5,11 @@ use ring3_core::{
     parse_pe_certificate_table, parse_pe_debug_directory, parse_pe_delay_import_descriptors,
     parse_pe_delay_import_lookups, parse_pe_delay_import_names, parse_pe_export_addresses,
     parse_pe_export_directory, parse_pe_export_names, parse_pe_header_prefix, parse_pe_headers,
-    parse_pe_import_descriptors, parse_pe_import_lookups, parse_pe_sections,
-    parse_pe_tls_directory, resolve_pe_file_range,
+    parse_pe_import_descriptors, parse_pe_import_lookups, parse_pe_load_config_prefix,
+    parse_pe_sections, parse_pe_tls_directory, resolve_pe_file_range,
 };
 
-const READER_COUNT: usize = 17;
+const READER_COUNT: usize = 18;
 const CASE_COUNT: u32 = 3074;
 
 fn put32(bytes: &mut [u8], offset: usize, value: u32) {
@@ -44,6 +44,7 @@ fn fixture(plus: bool) -> Vec<u8> {
         (5, 760, 12),
         (6, 896, 28),
         (9, 784, if plus { 40 } else { 24 }),
+        (10, 960, 24),
         (13, 832, 64),
     ] {
         put32(&mut bytes, directory + slot * 8, rva(offset));
@@ -75,6 +76,11 @@ fn fixture(plus: bool) -> Vec<u8> {
         (920, 0xffff_fffe),
         (936, 8),
         (944, 8),
+        (960, if plus { 112 } else { 64 }),
+        (964, 0xaabb_ccdd),
+        (972, 0x1122_3344),
+        (976, 0x5566_7788),
+        (980, u32::MAX),
     ] {
         put32(&mut bytes, offset, value);
     }
@@ -152,6 +158,7 @@ fn inspect(bytes: &[u8], baseline: bool, report: &mut Campaign) {
     observe!(14, parse_pe_certificate_table);
     observe!(15, parse_pe_certificate_entries);
     observe!(16, parse_pe_debug_directory);
+    observe!(17, parse_pe_load_config_prefix);
     assert_eq!(bytes, before, "input changed at case {}", report.cases);
     report.cases += 1;
 }
