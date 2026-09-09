@@ -103,8 +103,14 @@ pub fn parse_pe_resource_directories(
 ) -> Result<Option<PeResourceDirectoryGraph>, PeResourceDirectoryError> {
     let prepared = PreparedPe::new(bytes)
         .map_err(|cause| PeResourceDirectoryError::Root(PeResourceRootError::Base(cause)))?;
+    parse_prepared_resource_directories(&prepared)
+}
+
+pub(super) fn parse_prepared_resource_directories(
+    prepared: &PreparedPe<'_>,
+) -> Result<Option<PeResourceDirectoryGraph>, PeResourceDirectoryError> {
     let Some(root) =
-        parse_prepared_resource_root(&prepared).map_err(PeResourceDirectoryError::Root)?
+        parse_prepared_resource_root(prepared).map_err(PeResourceDirectoryError::Root)?
     else {
         return Ok(None);
     };
@@ -121,7 +127,7 @@ pub fn parse_pe_resource_directories(
     let mut index = 0;
     while index < offsets.len() {
         if index != 0 {
-            let directory = read_child(&prepared, &graph, offsets[index], total)?;
+            let directory = read_child(prepared, &graph, offsets[index], total)?;
             total += u32::from(directory.number_of_named_entries)
                 + u32::from(directory.number_of_id_entries);
             graph.directories.push(directory);
