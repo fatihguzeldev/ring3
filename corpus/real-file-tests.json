@@ -116,6 +116,10 @@
     "pe_resource_directory_names": [
       "generated_pe32_resource_directory_names_match_linked_bytes",
       "generated_pe32plus_resource_directory_names_match_linked_bytes"
+    ],
+    "pe_resource_payloads": [
+      "generated_pe32_resource_payloads_match_linked_bytes",
+      "generated_pe32plus_resource_payloads_match_linked_bytes"
     ]
   }
 }
