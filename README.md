@@ -79,6 +79,9 @@ pnpm build
 
 `test:rust` runs the regular Rust tests and documentation tests. Tests that require
 generated EXE/DLL files run through the corpus verifier below.
+The regular suite includes a fixed 3,074-input mutation campaign across the PE
+readers, checking repeated results and input preservation. This finite campaign
+does not replace semantic tests or coverage-guided fuzzing.
 
 ## Corpus verification
 
