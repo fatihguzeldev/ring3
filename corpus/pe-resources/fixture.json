@@ -1,0 +1,139 @@
+{
+  "schemaVersion": 1,
+  "provenance": "self-authored",
+  "licenseStatus": "pending",
+  "windowsOracle": "not-run",
+  "executed": false,
+  "fixture": "pe-resources",
+  "sources": {
+    "i386.s": {
+      "path": "corpus/pe-resources/i386.s",
+      "sha256": "387ce4df8a836a5726808aface46e56f7fa85fdbfe845e72fd0d87193236e7ec"
+    },
+    "amd64.s": {
+      "path": "corpus/pe-resources/amd64.s",
+      "sha256": "1ed718bc99c409aae2ef76872f46b51d227024c21001f9e985dd896da67cee85"
+    }
+  },
+  "tools": {
+    "clang": {
+      "version": "Apple clang version 21.0.0 (clang-2100.1.1.101)",
+      "sha256": "f30550eab15fdf5ab8c0dc54c52679711241e5d4b636b027e18c09fef531775d"
+    },
+    "lld": {
+      "version": "LLD 22.1.6 (https://github.com/rust-lang/llvm-project.git dcc3606807c989700e0ac1cac18c31741bcd40d9)",
+      "sha256": "8f5fe507df7232eac0a610c12a5d11f3202205235f710eb98c6c78df6d3f548d"
+    },
+    "objdump": {
+      "version": "Apple LLVM version 21.0.0",
+      "sha256": "1dcc1432db4d828cf8cd71a84cb8d9bf63a7ca80b5eeec711a9e5f13a3f5f98e"
+    }
+  },
+  "architectures": {
+    "i386": {
+      "kind": "PE32",
+      "machine": 332,
+      "directory": {
+        "rva": 8192,
+        "fileOffset": 1536,
+        "size": 108
+      },
+      "rootHeader": [
+        0,
+        0,
+        0,
+        0,
+        1,
+        1
+      ],
+      "entries": [
+        {
+          "rva": 8208,
+          "fileOffset": 1552,
+          "rawNameOrId": 2147483744,
+          "rawDataOrSubdirectory": 2147483680
+        },
+        {
+          "rva": 8216,
+          "fileOffset": 1560,
+          "rawNameOrId": 10,
+          "rawDataOrSubdirectory": 2147483680
+        }
+      ],
+      "name": {
+        "offset": 96,
+        "rva": 8288,
+        "fileOffset": 1632,
+        "codeUnits": 3,
+        "utf16le": "52003300a903"
+      },
+      "artifacts": {
+        "resources.obj": {
+          "bytes": 597,
+          "sha256": "a0887831f6d7cfc9aada2b1bbaad8d091a716a2464b4e79740b006c03aa0d389"
+        },
+        "resources.exe": {
+          "bytes": 2048,
+          "sha256": "4b74b393b9b9b75a9466304525b6ebac9af6a2ca1de35952a35cd26243a386b7"
+        }
+      },
+      "inspection": {
+        "bytes": 2677,
+        "sha256": "504f91b56996b328ebfe05143b6483905d225a19d1e78224edccd0cd520a3047"
+      }
+    },
+    "amd64": {
+      "kind": "PE32+",
+      "machine": 34404,
+      "directory": {
+        "rva": 8192,
+        "fileOffset": 1536,
+        "size": 108
+      },
+      "rootHeader": [
+        0,
+        0,
+        0,
+        0,
+        1,
+        1
+      ],
+      "entries": [
+        {
+          "rva": 8208,
+          "fileOffset": 1552,
+          "rawNameOrId": 2147483744,
+          "rawDataOrSubdirectory": 2147483680
+        },
+        {
+          "rva": 8216,
+          "fileOffset": 1560,
+          "rawNameOrId": 10,
+          "rawDataOrSubdirectory": 2147483680
+        }
+      ],
+      "name": {
+        "offset": 96,
+        "rva": 8288,
+        "fileOffset": 1632,
+        "codeUnits": 3,
+        "utf16le": "52003300a903"
+      },
+      "artifacts": {
+        "resources.obj": {
+          "bytes": 467,
+          "sha256": "31ec81e0764cafd0344b50b000f5285cf131f9cfa636c3ea55aa1aa81c92cc65"
+        },
+        "resources.exe": {
+          "bytes": 2048,
+          "sha256": "3f5ded12a0d06b1e8c1a36f2121663d0966cf1cc6c62faf6f916d7c228cfe5f1"
+        }
+      },
+      "inspection": {
+        "bytes": 2930,
+        "sha256": "1cc90452b6b10a710062c12b2201c865afb92129b09a0223659112f1a556ddc4"
+      }
+    }
+  },
+  "objectTimestamp": 0
+}
