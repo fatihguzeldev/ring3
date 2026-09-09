@@ -112,6 +112,10 @@
     "pe_resource_data": [
       "generated_pe32_resource_data_entries_match_linked_records",
       "generated_pe32plus_resource_data_entries_match_linked_records"
+    ],
+    "pe_resource_directory_names": [
+      "generated_pe32_resource_directory_names_match_linked_bytes",
+      "generated_pe32plus_resource_directory_names_match_linked_bytes"
     ]
   }
 }

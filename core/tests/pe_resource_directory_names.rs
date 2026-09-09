@@ -404,3 +404,48 @@ fn graph_entry_limit_bounds_zero_length_name_metadata() {
         );
     }
 }
+
+fn generated_resource_fixture_matches_directory_names(variable: &str, plus: bool) {
+    use ring3_core::{PeKind, PeResourceDirectoryName, parse_pe_resource_directories};
+
+    let path = std::env::var_os(variable).expect("explicit generated resource fixture path");
+    let bytes = std::fs::read(&path).unwrap();
+    let before = bytes.clone();
+    assert_eq!(bytes.len(), 2048);
+    let parsed = parse_pe_resource_directory_names(&bytes).unwrap().unwrap();
+    assert_eq!(
+        parsed.directory_graph.kind,
+        if plus { PeKind::Pe32Plus } else { PeKind::Pe32 }
+    );
+    assert_eq!(
+        Some(parsed.directory_graph),
+        parse_pe_resource_directories(&bytes).unwrap()
+    );
+    assert_eq!(
+        parsed.names,
+        [PeResourceDirectoryName {
+            directory_index: 0,
+            entry_index: 0,
+            name_offset: 96,
+            name_rva: RelativeVirtualAddress::new(8288),
+            name_file_offset: FileOffset::new(1632),
+            code_unit_count: 3,
+            utf16le: &[0x52, 0, 0x33, 0, 0xa9, 3],
+        }]
+    );
+    assert_eq!(parsed.names[0].utf16le.as_ptr(), bytes[1634..].as_ptr());
+    assert_eq!(bytes, before);
+    assert_eq!(std::fs::read(path).unwrap(), before);
+}
+
+#[test]
+#[ignore = "requires an explicit generated resource fixture path"]
+fn generated_pe32_resource_directory_names_match_linked_bytes() {
+    generated_resource_fixture_matches_directory_names("RING3_RESOURCE_PE32_FIXTURE", false);
+}
+
+#[test]
+#[ignore = "requires an explicit generated resource fixture path"]
+fn generated_pe32plus_resource_directory_names_match_linked_bytes() {
+    generated_resource_fixture_matches_directory_names("RING3_RESOURCE_PE32PLUS_FIXTURE", true);
+}
