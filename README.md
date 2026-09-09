@@ -23,6 +23,7 @@ directories; raw certificate tables and entry metadata; raw debug directory
 metadata without following payload coordinates; the supported size-bearing
 load-config common prefix; resource root headers, raw entries and borrowed Unicode
 name bytes; bounded acyclic resource directory graphs with shared table identities;
+fixed raw resource data-entry records and their leaf references;
 and delay-import descriptors, supported DLL names and lookup symbols. Certificate entries use file
 offsets and preserve opaque bodies and padding without validating signatures.
 These readers inspect bytes without loading modules, binding addresses or executing
