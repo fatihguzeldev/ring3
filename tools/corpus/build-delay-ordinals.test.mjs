@@ -5,10 +5,10 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
-import { buildDelayImportFixtures, ordinalContract } from "./build-delay-corpus.mjs";
-import { sha256 } from "./corpus-tools.mjs";
+import { buildDelayImportFixtures, ordinalContract } from "./build-delay-imports.mjs";
+import { sha256 } from "./shared.mjs";
 
-const outputRoot = new URL("../target/delay-ordinal-corpus-tests/", import.meta.url);
+const outputRoot = new URL("../../target/delay-ordinal-corpus-tests/", import.meta.url);
 mkdirSync(outputRoot, { recursive: true });
 
 test("ordinal delay fixtures reproduce the archived NONAME and full-width INT bytes", () => {
@@ -81,11 +81,11 @@ test("ordinal producer preserves existing output and refuses linked ancestors", 
 });
 
 test("ordinal CLI rejects extra arguments before writing either output family", () => {
-  const outputs = ["../target/corpus-delay/", "../target/corpus-delay-ordinals/"].map(path => new URL(path, import.meta.url));
+  const outputs = ["../../target/corpus-delay/", "../../target/corpus-delay-ordinals/"].map(path => new URL(path, import.meta.url));
   const list = path => existsSync(path) ? readdirSync(path).sort() : null;
   const before = outputs.map(list);
   for (const args of [["--ordinal", "extra"], ["--ordinals"], ["--ordinal", "--ordinal"]]) {
-    const result = spawnSync(process.execPath, [fileURLToPath(new URL("./build-delay-corpus.mjs", import.meta.url)), ...args], { encoding: "utf8", timeout: 5000, maxBuffer: 1024 * 1024 });
+    const result = spawnSync(process.execPath, [fileURLToPath(new URL("./build-delay-imports.mjs", import.meta.url)), ...args], { encoding: "utf8", timeout: 5000, maxBuffer: 1024 * 1024 });
     assert.equal(result.status, 1);
     assert.match(result.stderr, /unsupported corpus arguments/);
     assert.equal(result.stdout, "");

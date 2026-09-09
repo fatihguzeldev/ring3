@@ -5,10 +5,10 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
-import { buildForwarderFixtures, contract } from "./build-forwarder-corpus.mjs";
-import { sha256 } from "./corpus-tools.mjs";
+import { buildForwarderFixtures, contract } from "./build-forwarders.mjs";
+import { sha256 } from "./shared.mjs";
 
-const outputRoot = new URL("../target/forwarder-corpus-tests/", import.meta.url);
+const outputRoot = new URL("../../target/forwarder-corpus-tests/", import.meta.url);
 mkdirSync(outputRoot, { recursive: true });
 
 test("sparse forwarder DLL fixtures preserve pinned bytes across independent builds", () => {
@@ -43,8 +43,8 @@ test("forwarder source, tool, compiler, linker and expectation failures refuse s
     assert.throws(() => buildForwarderFixtures(join(directory, "tool"), { tools: { clang: process.execPath } }), /clang SHA-256 mismatch/);
     const sources = join(directory, "sources");
     mkdirSync(sources);
-    const originalAnchor = readFileSync(new URL("../corpus/pe-forwarders/anchor.c", import.meta.url));
-    writeFileSync(join(sources, "forwarders.def"), readFileSync(new URL("../corpus/pe-forwarders/forwarders.def", import.meta.url)));
+    const originalAnchor = readFileSync(new URL("../../corpus/pe-forwarders/anchor.c", import.meta.url));
+    writeFileSync(join(sources, "forwarders.def"), readFileSync(new URL("../../corpus/pe-forwarders/forwarders.def", import.meta.url)));
     const invalidAnchor = "invalid C source\n";
     writeFileSync(join(sources, "anchor.c"), invalidAnchor);
     const invalidCompiler = structuredClone(contract);
@@ -84,7 +84,7 @@ test("forwarder producer preserves existing outputs and refuses linked ancestors
 });
 
 test("forwarder CLI refuses extra arguments", () => {
-  const result = spawnSync(process.execPath, [fileURLToPath(new URL("./build-forwarder-corpus.mjs", import.meta.url)), "extra"], { encoding: "utf8" });
+  const result = spawnSync(process.execPath, [fileURLToPath(new URL("./build-forwarders.mjs", import.meta.url)), "extra"], { encoding: "utf8" });
   assert.equal(result.status, 1);
   assert.match(result.stderr, /unsupported corpus arguments/);
   assert.equal(result.stdout, "");

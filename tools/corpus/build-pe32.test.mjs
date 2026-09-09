@@ -5,9 +5,9 @@ import { existsSync, mkdtempSync, readFileSync, mkdirSync, readdirSync, rmSync, 
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { buildFixture, contract, verifyTextPermissions } from "./build-corpus.mjs";
+import { buildFixture, contract, verifyTextPermissions } from "./build-pe32.mjs";
 
-const outputRoot = new URL("../target/corpus-tests/", import.meta.url);
+const outputRoot = new URL("../../target/corpus-tests/", import.meta.url);
 mkdirSync(outputRoot, { recursive: true });
 
 test("separate builds have identical PE bytes and evidence", () => {
@@ -48,7 +48,7 @@ test("missing and mismatched tools fail without success evidence", () => {
 test("changed source, invalid assembly and altered expectation fail closed", () => {
   const directory = mkdtempSync(new URL("source-controls-", outputRoot));
   const sourcePath = join(directory, "changed.s");
-  const source = readFileSync(new URL("../corpus/pe32-arithmetic/pe32-arithmetic.s", import.meta.url), "utf8");
+  const source = readFileSync(new URL("../../corpus/pe32-arithmetic/pe32-arithmetic.s", import.meta.url), "utf8");
   try {
     writeFileSync(sourcePath, source.replace("$7", "$8"));
     assert.throws(() => buildFixture(join(directory, "identity"), { sourcePath }), /source SHA-256 mismatch/);
@@ -118,15 +118,15 @@ test("CLI rejects linked target roots and corpus prefixes before creating a run"
   try {
     for (const linkedPath of ["target", "target/corpus0"]) {
       const workspace = join(directory, linkedPath.replaceAll("/", "-"));
-      mkdirSync(join(workspace, "tools"), { recursive: true });
+      mkdirSync(join(workspace, "tools/corpus"), { recursive: true });
       mkdirSync(join(workspace, "corpus/pe32-arithmetic"), { recursive: true });
-      writeFileSync(join(workspace, "tools/build-corpus.mjs"), readFileSync(new URL("./build-corpus.mjs", import.meta.url)));
-      writeFileSync(join(workspace, "tools/corpus-tools.mjs"), readFileSync(new URL("./corpus-tools.mjs", import.meta.url)));
+      writeFileSync(join(workspace, "tools/corpus/build-pe32.mjs"), readFileSync(new URL("./build-pe32.mjs", import.meta.url)));
+      writeFileSync(join(workspace, "tools/corpus/shared.mjs"), readFileSync(new URL("./shared.mjs", import.meta.url)));
       writeFileSync(join(workspace, "corpus/pe32-arithmetic/fixture.json"), JSON.stringify(contract));
       writeFileSync(join(workspace, ".node-version"), process.versions.node);
       if (linkedPath !== "target") mkdirSync(join(workspace, "target"));
       symlinkSync(outside, join(workspace, linkedPath), "dir");
-      const result = spawnSync(process.execPath, [join(workspace, "tools/build-corpus.mjs")], { encoding: "utf8", timeout: 5_000 });
+      const result = spawnSync(process.execPath, [join(workspace, "tools/corpus/build-pe32.mjs")], { encoding: "utf8", timeout: 5_000 });
       assert.deepEqual(readdirSync(outside), []);
       assert.equal(result.status, 1);
       assert.match(result.stderr, /real directories/);

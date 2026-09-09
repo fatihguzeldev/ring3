@@ -5,7 +5,7 @@ import { lstatSync, mkdirSync } from "node:fs";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
-export const root = fileURLToPath(new URL("../", import.meta.url));
+export const root = fileURLToPath(new URL("../../", import.meta.url));
 export const target = join(root, "target");
 export const sha256 = (bytes) => createHash("sha256").update(bytes).digest("hex");
 

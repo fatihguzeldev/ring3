@@ -5,10 +5,10 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
-import { buildTlsFixtures, contract } from "./build-tls-corpus.mjs";
-import { sha256 } from "./corpus-tools.mjs";
+import { buildTlsFixtures, contract } from "./build-tls.mjs";
+import { sha256 } from "./shared.mjs";
 
-const outputRoot = new URL("../target/tls-corpus-tests/", import.meta.url);
+const outputRoot = new URL("../../target/tls-corpus-tests/", import.meta.url);
 mkdirSync(outputRoot, { recursive: true });
 
 test("tls fixtures preserve pinned object and executable bytes across builds", () => {
@@ -45,7 +45,7 @@ test("tls source, tool, assembler, linker and byte mismatches refuse success evi
     assert.throws(() => buildTlsFixtures(join(directory, "source"), { contract: wrongSource }), /source SHA-256 mismatch/);
     assert.throws(() => buildTlsFixtures(join(directory, "tool"), { tools: { clang: process.execPath } }), /clang SHA-256 mismatch/);
     const sources = join(directory, "sources"); mkdirSync(sources);
-    writeFileSync(join(sources, "amd64.s"), readFileSync(new URL("../corpus/pe-tls/amd64.s", import.meta.url)));
+    writeFileSync(join(sources, "amd64.s"), readFileSync(new URL("../../corpus/pe-tls/amd64.s", import.meta.url)));
     for (const [name, source] of [
       ["assembler", "invalid_assembly_instruction\n"],
       ["linker", ".data\n.long ring3_missing_symbol\n"],
@@ -86,9 +86,9 @@ test("tls producer preserves existing outputs and refuses linked ancestors", () 
 });
 
 test("tls CLI refuses extra arguments before creating a build directory", () => {
-  const root = new URL("../target/corpus-tls/", import.meta.url);
+  const root = new URL("../../target/corpus-tls/", import.meta.url);
   const before = existsSync(root) ? readdirSync(root).sort() : null;
-  const result = spawnSync(process.execPath, [fileURLToPath(new URL("./build-tls-corpus.mjs", import.meta.url)), "extra"], { encoding: "utf8", timeout: 5000, maxBuffer: 1024 * 1024 });
+  const result = spawnSync(process.execPath, [fileURLToPath(new URL("./build-tls.mjs", import.meta.url)), "extra"], { encoding: "utf8", timeout: 5000, maxBuffer: 1024 * 1024 });
   assert.equal(result.status, 1);
   assert.match(result.stderr, /unsupported corpus arguments/);
   assert.equal(result.stdout, "");

@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
-import { locateTools, prepareOutputParents, root, run, sha256, target } from "./corpus-tools.mjs";
+import { locateTools, prepareOutputParents, root, run, sha256, target } from "./shared.mjs";
 
 export const contract = JSON.parse(readFileSync(join(root, "corpus/pe32plus-arithmetic/fixture.json"), "utf8"));
 const artifacts = ["arithmetic.exe", "arithmetic.obj"];
