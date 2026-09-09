@@ -312,3 +312,43 @@ fn exact_u32_coordinate_end_is_supported_without_wrapping_entry_start() {
         );
     }
 }
+
+fn generated_fixture_with_synthetic_debug_directory(variable: &str, plus: bool) {
+    let path = std::env::var_os(variable).expect("explicit generated fixture path");
+    let original = std::fs::read(&path).unwrap();
+    assert_eq!(original.len(), 1024);
+    assert_eq!(&original[60..64], &120_u32.to_le_bytes());
+    let slot = if plus { 304 } else { 288 };
+    assert_eq!(&original[slot..slot + 8], &[0; 8]);
+    assert_eq!(&original[448..504], &[0; 56]);
+    let mut bytes = original.clone();
+    put32(&mut bytes, slot, 448);
+    put32(&mut bytes, slot + 4, 56);
+    record(&mut bytes, 448);
+    record(&mut bytes, 476);
+    let before = bytes.clone();
+    assert_eq!(
+        parse_pe_debug_directory(&bytes),
+        Ok(Some(PeDebugDirectoryTable {
+            kind: if plus { PeKind::Pe32Plus } else { PeKind::Pe32 },
+            directory_rva: RelativeVirtualAddress::new(448),
+            directory_file_offset: FileOffset::new(448),
+            directory_size: 56,
+            entries: vec![expected(448, 448), expected(476, 476)],
+        }))
+    );
+    assert_eq!(bytes, before);
+    assert_eq!(std::fs::read(path).unwrap(), original);
+}
+
+#[test]
+#[ignore = "requires an explicit generated fixture path"]
+fn generated_pe32_with_synthetic_debug_directory_matches_raw_metadata() {
+    generated_fixture_with_synthetic_debug_directory("RING3_PE32_FIXTURE", false);
+}
+
+#[test]
+#[ignore = "requires an explicit generated fixture path"]
+fn generated_pe32plus_with_synthetic_debug_directory_matches_raw_metadata() {
+    generated_fixture_with_synthetic_debug_directory("RING3_PE32PLUS_FIXTURE", true);
+}
