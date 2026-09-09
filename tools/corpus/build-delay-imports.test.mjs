@@ -5,10 +5,10 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
-import { buildDelayImportFixtures, contract } from "./build-delay-corpus.mjs";
-import { sha256 } from "./corpus-tools.mjs";
+import { buildDelayImportFixtures, contract } from "./build-delay-imports.mjs";
+import { sha256 } from "./shared.mjs";
 
-const outputRoot = new URL("../target/delay-corpus-tests/", import.meta.url);
+const outputRoot = new URL("../../target/delay-corpus-tests/", import.meta.url);
 mkdirSync(outputRoot, { recursive: true });
 
 test("delay fixtures preserve all archived bytes and zero timestamps across builds", () => {
@@ -48,7 +48,7 @@ test("delay source, tool, compiler, linker and artifact mismatches refuse succes
     assert.throws(() => buildDelayImportFixtures(join(directory, "source"), { contract: wrongSource }), /source SHA-256 mismatch/);
     assert.throws(() => buildDelayImportFixtures(join(directory, "tool"), { tools: { clang: process.execPath } }), /clang SHA-256 mismatch/);
     const sources = join(directory, "sources"); mkdirSync(sources);
-    writeFileSync(join(sources, "probe.c"), readFileSync(new URL("../corpus/pe-delay-imports/probe.c", import.meta.url)));
+    writeFileSync(join(sources, "probe.c"), readFileSync(new URL("../../corpus/pe-delay-imports/probe.c", import.meta.url)));
     for (const [name, source] of [
       ["compiler", "this is not valid C;\n"],
       ["linker", "extern int ring3_missing(void); int entry(void) { return ring3_missing(); }\n"],
@@ -92,9 +92,9 @@ test("delay producer preserves existing outputs and refuses linked ancestors", (
 });
 
 test("delay CLI refuses extra arguments before creating a build directory", () => {
-  const root = new URL("../target/corpus-delay/", import.meta.url);
+  const root = new URL("../../target/corpus-delay/", import.meta.url);
   const before = existsSync(root) ? readdirSync(root).sort() : null;
-  const result = spawnSync(process.execPath, [fileURLToPath(new URL("./build-delay-corpus.mjs", import.meta.url)), "extra"], { encoding: "utf8", timeout: 5000, maxBuffer: 1024 * 1024 });
+  const result = spawnSync(process.execPath, [fileURLToPath(new URL("./build-delay-imports.mjs", import.meta.url)), "extra"], { encoding: "utf8", timeout: 5000, maxBuffer: 1024 * 1024 });
   assert.equal(result.status, 1);
   assert.match(result.stderr, /unsupported corpus arguments/);
   assert.equal(result.stdout, "");

@@ -5,10 +5,10 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
-import { buildOrdinalFixtures, ordinalContract } from "./build-import-corpus.mjs";
-import { sha256 } from "./corpus-tools.mjs";
+import { buildOrdinalFixtures, ordinalContract } from "./build-imports.mjs";
+import { sha256 } from "./shared.mjs";
 
-const outputRoot = new URL("../target/ordinal-corpus-tests/", import.meta.url);
+const outputRoot = new URL("../../target/ordinal-corpus-tests/", import.meta.url);
 mkdirSync(outputRoot, { recursive: true });
 
 test("ordinal PE fixtures preserve pinned identities across independent builds", () => {
@@ -43,7 +43,7 @@ test("ordinal definition, linker and byte failures cannot produce success eviden
     const sources = join(directory, "sources");
     mkdirSync(sources);
     for (const name of ["probe.c", "imports.c"]) {
-      writeFileSync(join(sources, name), readFileSync(new URL(`../corpus/pe-ordinal-imports/${name}`, import.meta.url)));
+      writeFileSync(join(sources, name), readFileSync(new URL(`../../corpus/pe-ordinal-imports/${name}`, import.meta.url)));
     }
     const invalid = "EXPORTS\n ring3_probe @invalid NONAME\n";
     writeFileSync(join(sources, "exports.def"), invalid);
@@ -79,7 +79,7 @@ test("ordinal producer preserves existing outputs and refuses linked ancestors",
 
 test("import corpus CLI refuses unknown or extra family arguments", () => {
   for (const args of [["--unknown"], ["--ordinal", "extra"]]) {
-    const result = spawnSync(process.execPath, [fileURLToPath(new URL("./build-import-corpus.mjs", import.meta.url)), ...args], { encoding: "utf8" });
+    const result = spawnSync(process.execPath, [fileURLToPath(new URL("./build-imports.mjs", import.meta.url)), ...args], { encoding: "utf8" });
     assert.equal(result.status, 1);
     assert.match(result.stderr, /unsupported corpus arguments/);
     assert.equal(result.stdout, "");

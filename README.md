@@ -1,14 +1,68 @@
 # ring3
 
-## Toolchains
+Ring3 is a compatibility-runtime project. The current implementation is a Rust
+core that reads Windows executable (PE) metadata, with self-authored test files
+and tools that verify the results. Guest execution and TypeScript host integration
+remain future work.
 
-- Rust/Cargo: `1.97.1`
-- WebAssembly target: `wasm32-unknown-unknown`
-- Node.js: `22.16.0`
-- pnpm: `11.9.0`
-- TypeScript: `5.9.3`
+## Repository map
 
-## Verification
+| Location | Purpose |
+| --- | --- |
+| [core/src/](core/src/) | Rust readers, address types and PE metadata types. |
+| [core/tests/](core/tests/) | Rust tests for valid files, malformed input and reader limits. |
+| [runtime/](runtime/) | TypeScript host package; currently a package skeleton. |
+| [corpus/](corpus/) | Small test-program sources and their expected properties. |
+| [tools/corpus/](tools/corpus/) | Fixture builders, verification runner and their colocated tests. |
+| [tools/verify-toolchain.mjs](tools/verify-toolchain.mjs) | Node.js and package-manager version checks. |
+| `target/` | Generated Rust builds, EXE/DLL samples and test output; ignored by Git. |
+
+The [core exports](core/src/lib.rs) cover PE32/PE32+ headers, sections and file
+ranges; static import/export metadata; raw base-relocation blocks; fixed TLS
+directories; and delay-import descriptors, supported DLL names and lookup symbols.
+These readers inspect bytes without loading modules, binding addresses or executing
+the generated programs. Reader types and limits live with their [implementation](core/src/pe/).
+
+## Fixture corpus
+
+A fixture is a small input with known properties, used to test a reader. Each
+family keeps its source files and `fixture.json` together:
+
+```text
+corpus/
+  pe-named-imports/
+    fixture.json
+    imports.c
+    probe.c
+  ...
+  real-file-tests.json
+```
+
+`fixture.json` records source paths, expected metadata and pinned source/tool/output
+identities. It is maintained test input, not a run log. The builders read it,
+compile the source twice and verify the resulting bytes. Generated EXE/DLL files
+and per-run evidence go under `target/`; they are not committed.
+
+| Family | Input being checked | Build command |
+| --- | --- | --- |
+| [pe32-arithmetic](corpus/pe32-arithmetic/) | Minimal 32-bit EXE. | `pnpm corpus:build` |
+| [pe32plus-arithmetic](corpus/pe32plus-arithmetic/) | Minimal 64-bit EXE with wide header values. | `pnpm corpus:build:pe32plus` |
+| [pe-named-imports](corpus/pe-named-imports/) | EXE/DLL pairs with symbols imported by name. | `pnpm corpus:build:imports` |
+| [pe-ordinal-imports](corpus/pe-ordinal-imports/) | EXE/DLL pairs with symbols imported by number. | `pnpm corpus:build:ordinals` |
+| [pe-forwarders](corpus/pe-forwarders/) | DLL exports that refer to another module's symbols. | `pnpm corpus:build:forwarders` |
+| [pe-base-relocations](corpus/pe-base-relocations/) | Files containing relocation block metadata. | `pnpm corpus:build:relocations` |
+| [pe-tls](corpus/pe-tls/) | Files containing fixed thread-local storage directories. | `pnpm corpus:build:tls` |
+| [pe-delay-imports](corpus/pe-delay-imports/) | Delay-import metadata with named symbols. | `pnpm corpus:build:delay` |
+| [pe-delay-ordinals](corpus/pe-delay-ordinals/) | Delay-import metadata with ordinal `32768`. | `pnpm corpus:build:delay-ordinals` |
+
+Builders require the pinned macOS Apple Clang/LLVM and Rust LLD binaries recorded
+in each manifest. Tool identity checks intentionally fail when those binaries
+change; review and update the pins when changing the fixture toolchain.
+
+## Development
+
+Use Rust/Cargo `1.97.1`, the `wasm32-unknown-unknown` target, Node.js `22.16.0`,
+pnpm `11.9.0` and TypeScript `5.9.3`.
 
 ```bash
 pnpm install --frozen-lockfile
@@ -19,79 +73,26 @@ pnpm typecheck
 pnpm build
 ```
 
-## Raw delay-import metadata
-
-`parse_pe_delay_import_descriptors` reads at most 128 raw descriptors in either
-PE width and retains the all-zero terminator coordinates. Missing directories and
-present empty tables remain distinct. Attribute and address words stay unclassified;
-DLL names, lookup/IAT targets and delayed loading are outside this reader.
-
-`parse_pe_delay_import_names` pairs those descriptors with exact borrowed ASCII DLL
-names when attributes equal `1`. Other attribute values return an explicit error.
-Name scans include the NUL terminator in their 1024-byte per-name and 65,536-byte
-total limits; names are preserved without normalization or module resolution.
-
-`parse_pe_delay_import_lookups` validates all supported DLL names before reading
-explicit INT entries. It returns borrowed symbol names with hints or 16-bit ordinals,
-using the static lookup reader's encoding, backing and scan limits. Missing INTs
-return an error; IAT fallback, module resolution and delayed execution are excluded.
-
-## Static PE fixtures
-
-The corpus builders require the pinned macOS Apple Clang/LLVM and Rust LLD binaries
-recorded in `corpus/*/fixture.json`. They verify source and tool hashes, build each fixture
-twice, and compare the output bytes without executing the guest programs.
+## Corpus verification
 
 ```bash
 pnpm corpus:test
 pnpm corpus:verify
-pnpm corpus:build
-pnpm corpus:build:imports
-pnpm corpus:build:ordinals
-pnpm corpus:build:forwarders
-pnpm corpus:build:pe32plus
-pnpm corpus:build:relocations
-pnpm corpus:build:tls
-pnpm corpus:build:delay
-pnpm corpus:build:delay-ordinals
 ```
 
-`corpus:verify` builds all eight fixture families twice and runs the 39 real-file
-parser tests listed in `corpus/real-file-tests.json` against 18 fresh fixture paths.
-It requires the pinned native Rust tools on `aarch64-apple-darwin`, compiles tests
-offline into a fresh Cargo target, and refuses missing, extra or skipped cases.
-`target/corpus-verification/run-*/verification` retains tool/source hashes, child
-logs and fixture evidence; `verification.json` appears only after every case passes.
+`corpus:test` runs the producer and verification guard tests, including changed
+inputs, tool failures and output-directory ownership checks.
 
-The named import builder produces self-authored PE32 and PE32+ EXE/DLL pairs under
-a fresh `target/corpus-imports/run-*` directory. Its `fixtures.json` lists the four
-environment variables used by the named import/export Rust integration tests;
-`repeatability.json` links both build records. Generated binaries remain untracked.
+`corpus:verify` builds eight fixture families twice and runs all 39 tests listed in
+[real-file-tests.json](corpus/real-file-tests.json) against 18 fresh file paths.
+The ordinal delay family has its own build command and producer tests; it is not
+yet registered in this full parser run.
 
-The ordinal builder uses `target/corpus-ordinals/run-*` for the corresponding
-ordinal-32768 EXE/DLL pairs. Its `fixtures.json` lists the four ordinal test paths.
+The verifier requires pinned native Rust tools on `aarch64-apple-darwin`, compiles
+the Rust tests offline into a fresh Cargo target, and rejects missing, extra or
+skipped cases. Its `verification.json` is written only after every check passes.
+The command prints the evidence directory and fixture paths needed for inspection.
 
-The forwarder builder uses `target/corpus-forwarders/run-*` for sparse export DLLs
-with named and ordinal target strings. Its `fixtures.json` lists both DLL test paths.
-
-The PE32+ header builder uses `target/corpus-pe32plus/run-*` for the arithmetic
-fixture with stack/heap header values above 32 bits. Its `fixtures.json` provides
-`RING3_PE32PLUS_FIXTURE` for the header, section and RVA tests.
-
-The relocation builder uses `target/corpus-relocations/run-*` for PE32 and PE32+
-images with two base-relocation blocks. Its `fixtures.json` lists both paths for
-the raw block metadata tests; no relocations or guest code are executed.
-
-The TLS builder uses `target/corpus-tls/run-*` for PE32 and PE32+ images with
-fixed TLS directories. Its `fixtures.json` lists both paths for the raw directory
-metadata tests; no TLS targets or callbacks are executed.
-
-The delay builder uses `target/corpus-delay/run-*` for self-authored DLL/import-library
-and delay-importing EXE pairs. Its `fixtures.json` supplies both EXE paths for raw
-descriptor, supported DLL-name and named lookup tests. The link-only helper and generated PE
-programs are never executed.
-
-The ordinal delay command uses `target/corpus-delay-ordinals/run-*` for fixed
-ordinal `32768` imports and `NONAME` DLL exports. Its fixture manifest supplies
-`RING3_DELAY_ORDINAL_PE32_FIXTURE` and `RING3_DELAY_ORDINAL_PE32PLUS_FIXTURE`.
-These fixtures are built and checked twice; they are not yet part of `corpus:verify`.
+Generated output is temporary. Preserve required run evidence in the Ring3
+Obsidian bank before removing completed run directories and copied workspaces.
+Keep source files and manifests in Git; keep research and task history in the bank.

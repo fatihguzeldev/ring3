@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { flattenInventory, parseTestList, verifyTestResult } from "./verify-corpus.mjs";
+import { flattenInventory, parseTestList, verifyTestResult } from "./verify.mjs";
 
 const name = "generated_corpus_matches_recorded_header_metadata";
 const success = `\nrunning 1 test\ntest ${name} ... ok\n\ntest result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 9 filtered out; finished in 0.00s\n\n`;

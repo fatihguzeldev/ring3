@@ -3,10 +3,10 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, 
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import test from "node:test";
-import { buildImportFixtures, contract } from "./build-import-corpus.mjs";
-import { sha256 } from "./corpus-tools.mjs";
+import { buildImportFixtures, contract } from "./build-imports.mjs";
+import { sha256 } from "./shared.mjs";
 
-const outputRoot = new URL("../target/import-corpus-tests/", import.meta.url);
+const outputRoot = new URL("../../target/import-corpus-tests/", import.meta.url);
 mkdirSync(outputRoot, { recursive: true });
 
 test("named PE fixtures match pinned bytes across independent builds", () => {
@@ -43,7 +43,7 @@ test("source, tool, compiler and expected-byte failures never write success evid
     mkdirSync(sources);
     const invalid = "invalid C source\n";
     writeFileSync(join(sources, "probe.c"), invalid);
-    writeFileSync(join(sources, "imports.c"), readFileSync(new URL("../corpus/pe-named-imports/imports.c", import.meta.url)));
+    writeFileSync(join(sources, "imports.c"), readFileSync(new URL("../../corpus/pe-named-imports/imports.c", import.meta.url)));
     const invalidContract = structuredClone(contract);
     invalidContract.sources["probe.c"].sha256 = sha256(invalid);
     assert.throws(() => buildImportFixtures(join(directory, "compiler"), { sourceDirectory: sources, contract: invalidContract }), /failed:/);

@@ -5,10 +5,10 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
-import { buildPe32PlusFixture, contract } from "./build-pe32plus-corpus.mjs";
-import { sha256 } from "./corpus-tools.mjs";
+import { buildPe32PlusFixture, contract } from "./build-pe32plus.mjs";
+import { sha256 } from "./shared.mjs";
 
-const outputRoot = new URL("../target/pe32plus-corpus-tests/", import.meta.url);
+const outputRoot = new URL("../../target/pe32plus-corpus-tests/", import.meta.url);
 mkdirSync(outputRoot, { recursive: true });
 
 test("PE32+ header fixture preserves both pinned artifacts across independent builds", () => {
@@ -73,7 +73,7 @@ test("PE32+ producer preserves existing outputs and refuses linked ancestors", (
 });
 
 test("PE32+ CLI refuses extra arguments", () => {
-  const result = spawnSync(process.execPath, [fileURLToPath(new URL("./build-pe32plus-corpus.mjs", import.meta.url)), "extra"], { encoding: "utf8" });
+  const result = spawnSync(process.execPath, [fileURLToPath(new URL("./build-pe32plus.mjs", import.meta.url)), "extra"], { encoding: "utf8" });
   assert.equal(result.status, 1);
   assert.match(result.stderr, /unsupported corpus arguments/);
   assert.equal(result.stdout, "");
