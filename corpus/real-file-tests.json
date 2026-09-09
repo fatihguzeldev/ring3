@@ -79,6 +79,10 @@
       "generated_pe32_with_synthetic_certificate_entries_matches_file_metadata",
       "generated_pe32plus_with_synthetic_certificate_entries_matches_file_metadata"
     ],
+    "pe_debug": [
+      "generated_pe32_with_synthetic_debug_directory_matches_raw_metadata",
+      "generated_pe32plus_with_synthetic_debug_directory_matches_raw_metadata"
+    ],
     "pe_delay_lookups": [
       "generated_pe32_delay_lookups_match_raw_metadata",
       "generated_pe32plus_delay_lookups_match_raw_metadata",
