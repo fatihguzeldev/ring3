@@ -14,6 +14,7 @@ mod imports;
 mod load_config;
 mod lookups;
 mod optional;
+mod resource_directories;
 mod resource_names;
 mod resources;
 mod rva;
@@ -56,6 +57,10 @@ pub use lookups::{
 };
 pub use optional::{
     PeDataDirectory, PeDirectoryAddress, PeHeaders, PeOptionalHeader, parse_pe_headers,
+};
+pub use resource_directories::{
+    PeResourceDirectory, PeResourceDirectoryEntry, PeResourceDirectoryError,
+    PeResourceDirectoryGraph, parse_pe_resource_directories,
 };
 pub use resource_names::{
     PeResourceRootName, PeResourceRootNameError, PeResourceRootNameTable,
