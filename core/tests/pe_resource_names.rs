@@ -439,3 +439,39 @@ fn generated_pe32_with_synthetic_resource_names_matches_raw_bytes() {
 fn generated_pe32plus_with_synthetic_resource_names_matches_raw_bytes() {
     generated_fixture_with_synthetic_resource_names("RING3_PE32PLUS_FIXTURE", true);
 }
+
+fn generated_resource_fixture_matches_linked_names(variable: &str, plus: bool) {
+    let path = std::env::var_os(variable).expect("explicit generated resource fixture path");
+    let bytes = std::fs::read(&path).unwrap();
+    let before = bytes.clone();
+    assert_eq!(bytes.len(), 2048);
+    let table = parse_pe_resource_root_names(&bytes).unwrap().unwrap();
+    assert_eq!(table.root, parse_pe_resource_root(&bytes).unwrap().unwrap());
+    assert_eq!(
+        table.root.kind,
+        if plus {
+            ring3_core::PeKind::Pe32Plus
+        } else {
+            ring3_core::PeKind::Pe32
+        }
+    );
+    assert_eq!(
+        table.names,
+        [name(0, 96, 8288, 1632, 3, &[0x52, 0, 0x33, 0, 0xa9, 3])]
+    );
+    assert_eq!(table.names[0].utf16le.as_ptr(), bytes[1634..].as_ptr());
+    assert_eq!(bytes, before);
+    assert_eq!(std::fs::read(path).unwrap(), before);
+}
+
+#[test]
+#[ignore = "requires an explicit generated resource fixture path"]
+fn generated_pe32_resource_names_match_linked_bytes() {
+    generated_resource_fixture_matches_linked_names("RING3_RESOURCE_PE32_FIXTURE", false);
+}
+
+#[test]
+#[ignore = "requires an explicit generated resource fixture path"]
+fn generated_pe32plus_resource_names_match_linked_bytes() {
+    generated_resource_fixture_matches_linked_names("RING3_RESOURCE_PE32PLUS_FIXTURE", true);
+}

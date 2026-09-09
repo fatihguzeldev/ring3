@@ -85,7 +85,9 @@
     ],
     "pe_resources": [
       "generated_pe32_with_synthetic_resource_root_matches_raw_metadata",
-      "generated_pe32plus_with_synthetic_resource_root_matches_raw_metadata"
+      "generated_pe32plus_with_synthetic_resource_root_matches_raw_metadata",
+      "generated_pe32_resource_root_matches_linked_metadata",
+      "generated_pe32plus_resource_root_matches_linked_metadata"
     ],
     "pe_debug": [
       "generated_pe32_with_synthetic_debug_directory_matches_raw_metadata",
@@ -99,7 +101,9 @@
     ],
     "pe_resource_names": [
       "generated_pe32_with_synthetic_resource_names_matches_raw_bytes",
-      "generated_pe32plus_with_synthetic_resource_names_matches_raw_bytes"
+      "generated_pe32plus_with_synthetic_resource_names_matches_raw_bytes",
+      "generated_pe32_resource_names_match_linked_bytes",
+      "generated_pe32plus_resource_names_match_linked_bytes"
     ]
   }
 }

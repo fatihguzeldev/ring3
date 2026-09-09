@@ -379,3 +379,43 @@ fn generated_pe32_with_synthetic_resource_root_matches_raw_metadata() {
 fn generated_pe32plus_with_synthetic_resource_root_matches_raw_metadata() {
     generated_fixture_with_synthetic_resource_root("RING3_PE32PLUS_FIXTURE", true);
 }
+
+fn generated_resource_fixture_matches_linked_root(variable: &str, plus: bool) {
+    let path = std::env::var_os(variable).expect("explicit generated resource fixture path");
+    let bytes = std::fs::read(&path).unwrap();
+    let before = bytes.clone();
+    assert_eq!(bytes.len(), 2048);
+    assert_eq!(
+        parse_pe_resource_root(&bytes),
+        Ok(Some(PeResourceRoot {
+            kind: if plus { PeKind::Pe32Plus } else { PeKind::Pe32 },
+            directory_rva: RelativeVirtualAddress::new(8192),
+            directory_file_offset: FileOffset::new(1536),
+            directory_size: 108,
+            characteristics: 0,
+            time_date_stamp: 0,
+            major_version: 0,
+            minor_version: 0,
+            number_of_named_entries: 1,
+            number_of_id_entries: 1,
+            entries: vec![
+                entry(8208, 1552, 0x8000_0060, 0x8000_0020),
+                entry(8216, 1560, 10, 0x8000_0020)
+            ],
+        }))
+    );
+    assert_eq!(bytes, before);
+    assert_eq!(std::fs::read(path).unwrap(), before);
+}
+
+#[test]
+#[ignore = "requires an explicit generated resource fixture path"]
+fn generated_pe32_resource_root_matches_linked_metadata() {
+    generated_resource_fixture_matches_linked_root("RING3_RESOURCE_PE32_FIXTURE", false);
+}
+
+#[test]
+#[ignore = "requires an explicit generated resource fixture path"]
+fn generated_pe32plus_resource_root_matches_linked_metadata() {
+    generated_resource_fixture_matches_linked_root("RING3_RESOURCE_PE32PLUS_FIXTURE", true);
+}
