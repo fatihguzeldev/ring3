@@ -6,10 +6,11 @@ use ring3_core::{
     parse_pe_delay_import_lookups, parse_pe_delay_import_names, parse_pe_export_addresses,
     parse_pe_export_directory, parse_pe_export_names, parse_pe_header_prefix, parse_pe_headers,
     parse_pe_import_descriptors, parse_pe_import_lookups, parse_pe_load_config_prefix,
-    parse_pe_resource_root, parse_pe_sections, parse_pe_tls_directory, resolve_pe_file_range,
+    parse_pe_resource_root, parse_pe_resource_root_names, parse_pe_sections,
+    parse_pe_tls_directory, resolve_pe_file_range,
 };
 
-const READER_COUNT: usize = 19;
+const READER_COUNT: usize = 20;
 const CASE_COUNT: u32 = 3074;
 
 fn put32(bytes: &mut [u8], offset: usize, value: u32) {
@@ -41,7 +42,7 @@ fn fixture(plus: bool) -> Vec<u8> {
     for (slot, offset, size) in [
         (0, 672, 40),
         (1, 560, 40),
-        (2, 512, 32),
+        (2, 512, 48),
         (5, 760, 12),
         (6, 896, 28),
         (9, 784, if plus { 40 } else { 24 }),
@@ -58,7 +59,7 @@ fn fixture(plus: bool) -> Vec<u8> {
         (516, 0x90ab_cdef),
         (520, 0xabcd_1234),
         (524, 0x0001_0001),
-        (528, u32::MAX),
+        (528, 0x8000_0020),
         (532, 0x8000_0000),
         (536, 7),
         (540, u32::MAX),
@@ -94,6 +95,7 @@ fn fixture(plus: bool) -> Vec<u8> {
         put32(&mut bytes, offset, value);
     }
     bytes[600..606].copy_from_slice(b"x.dll\0");
+    bytes[544..552].copy_from_slice(&[3, 0, 65, 0, 0, 0xd8, 0, 0]);
     bytes[716..722].copy_from_slice(b"e.dll\0");
     bytes[744..746].copy_from_slice(b"e\0");
     if plus {
@@ -169,6 +171,7 @@ fn inspect(bytes: &[u8], baseline: bool, report: &mut Campaign) {
     observe!(16, parse_pe_debug_directory);
     observe!(17, parse_pe_load_config_prefix);
     observe!(18, parse_pe_resource_root);
+    observe!(19, parse_pe_resource_root_names);
     assert_eq!(bytes, before, "input changed at case {}", report.cases);
     report.cases += 1;
 }
