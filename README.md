@@ -87,10 +87,9 @@ pnpm corpus:verify
 `corpus:test` runs the producer and verification guard tests, including changed
 inputs, tool failures and output-directory ownership checks.
 
-`corpus:verify` builds eight fixture families twice and runs all 39 tests listed in
-[real-file-tests.json](corpus/real-file-tests.json) against 18 fresh file paths.
-The ordinal delay family has its own build command and producer tests; it is not
-yet registered in this full parser run.
+`corpus:verify` builds all nine fixture families twice and runs all 41 tests listed
+in [real-file-tests.json](corpus/real-file-tests.json) against 20 fresh file paths,
+including named and ordinal delay-import lookups.
 
 The verifier requires pinned native Rust tools on `aarch64-apple-darwin`, compiles
 the Rust tests offline into a fresh Cargo target, and rejects missing, extra or
