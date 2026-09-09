@@ -4,6 +4,7 @@ import { createHash } from "node:crypto";
 import { existsSync, mkdtempSync, readFileSync, mkdirSync, readdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import test from "node:test";
 import { buildFixture, contract, verifyTextPermissions } from "./build-pe32.mjs";
 
@@ -148,4 +149,27 @@ test("existing output directories are preserved when reuse is refused", () => {
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }
+});
+
+test("unsupported PE32 fixture schemas cannot produce success evidence", () => {
+  const directory = mkdtempSync(new URL("schema-control-", outputRoot));
+  const output = join(directory, "fixture");
+  try {
+    const spec = { ...contract, schemaVersion: 2 };
+    assert.throws(() => buildFixture(output, { contract: spec }), /unsupported fixture schema/);
+    assert.equal(existsSync(join(output, "evidence.json")), false);
+    assert.equal(existsSync(join(output, "pe32-arithmetic.exe")), false);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("PE32 CLI refuses extra arguments before creating a build directory", () => {
+  const root = new URL("../../target/corpus0/", import.meta.url);
+  const before = existsSync(root) ? readdirSync(root).sort() : null;
+  const result = spawnSync(process.execPath, [fileURLToPath(new URL("./build-pe32.mjs", import.meta.url)), "--ordinal"], { encoding: "utf8", timeout: 5000, maxBuffer: 1024 * 1024 });
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /unsupported corpus arguments/);
+  assert.equal(result.stdout, "");
+  assert.deepEqual(existsSync(root) ? readdirSync(root).sort() : null, before);
 });

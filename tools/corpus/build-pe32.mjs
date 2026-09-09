@@ -20,6 +20,7 @@ export function buildFixture(outputDirectory, options = {}) {
   mkdirSync(output);
 
   const spec = options.contract ?? contract;
+  assert.equal(spec.schemaVersion, 1, "unsupported fixture schema");
   const source = readFileSync(options.sourcePath ?? join(root, spec.source.path));
   assert.equal(sha256(source), spec.source.sha256, "source SHA-256 mismatch");
   const tools = { ...locateTools(), ...options.tools };
@@ -77,6 +78,7 @@ export function buildFixture(outputDirectory, options = {}) {
 
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
   try {
+    assert.equal(process.argv.length, 2, "unsupported corpus arguments");
     const outputRoot = join(target, "corpus0");
     prepareOutputParents(join(outputRoot, "run-"));
     const output = mkdtempSync(join(outputRoot, "run-"));
