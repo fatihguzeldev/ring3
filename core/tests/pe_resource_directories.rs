@@ -481,3 +481,69 @@ fn exact_rva_domain_end_is_supported_without_wrapping_coordinates() {
         );
     }
 }
+
+fn generated_resource_fixture_matches_directory_graph(variable: &str, plus: bool) {
+    use ring3_core::{PeResourceDirectory, PeResourceDirectoryEntry, PeResourceDirectoryGraph};
+
+    let path = std::env::var_os(variable).expect("explicit generated resource fixture path");
+    let bytes = std::fs::read(&path).unwrap();
+    let before = bytes.clone();
+    assert_eq!(bytes.len(), 2048);
+    let entry = |offset: u32, name, target, child| PeResourceDirectoryEntry {
+        entry_rva: RelativeVirtualAddress::new(8192 + offset),
+        entry_file_offset: FileOffset::new(1536 + u64::from(offset)),
+        raw_name_or_id: name,
+        raw_data_or_subdirectory: target,
+        child_directory_index: child,
+    };
+    let node = |offset, named, ids, depth, entries| PeResourceDirectory {
+        directory_offset: offset,
+        directory_rva: RelativeVirtualAddress::new(8192 + offset),
+        directory_file_offset: FileOffset::new(1536 + u64::from(offset)),
+        characteristics: 0,
+        time_date_stamp: 0,
+        major_version: 0,
+        minor_version: 0,
+        number_of_named_entries: named,
+        number_of_id_entries: ids,
+        longest_root_path: depth,
+        entries,
+    };
+    assert_eq!(
+        parse_pe_resource_directories(&bytes),
+        Ok(Some(PeResourceDirectoryGraph {
+            kind: if plus { PeKind::Pe32Plus } else { PeKind::Pe32 },
+            directory_rva: RelativeVirtualAddress::new(8192),
+            directory_file_offset: FileOffset::new(1536),
+            directory_size: 108,
+            directories: vec![
+                node(
+                    0,
+                    1,
+                    1,
+                    0,
+                    vec![
+                        entry(16, 0x8000_0060, 0x8000_0020, Some(1)),
+                        entry(24, 10, 0x8000_0020, Some(1)),
+                    ]
+                ),
+                node(32, 0, 1, 1, vec![entry(48, 7, 0x8000_0038, Some(2))]),
+                node(56, 0, 1, 2, vec![entry(72, 1033, 80, None)]),
+            ],
+        }))
+    );
+    assert_eq!(bytes, before);
+    assert_eq!(std::fs::read(path).unwrap(), before);
+}
+
+#[test]
+#[ignore = "requires an explicit generated resource fixture path"]
+fn generated_pe32_resource_directories_match_linked_graph() {
+    generated_resource_fixture_matches_directory_graph("RING3_RESOURCE_PE32_FIXTURE", false);
+}
+
+#[test]
+#[ignore = "requires an explicit generated resource fixture path"]
+fn generated_pe32plus_resource_directories_match_linked_graph() {
+    generated_resource_fixture_matches_directory_graph("RING3_RESOURCE_PE32PLUS_FIXTURE", true);
+}
