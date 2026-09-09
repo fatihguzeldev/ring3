@@ -104,6 +104,10 @@
       "generated_pe32plus_with_synthetic_resource_names_matches_raw_bytes",
       "generated_pe32_resource_names_match_linked_bytes",
       "generated_pe32plus_resource_names_match_linked_bytes"
+    ],
+    "pe_resource_directories": [
+      "generated_pe32_resource_directories_match_linked_graph",
+      "generated_pe32plus_resource_directories_match_linked_graph"
     ]
   }
 }
