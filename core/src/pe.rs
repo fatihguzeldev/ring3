@@ -14,6 +14,7 @@ mod imports;
 mod load_config;
 mod lookups;
 mod optional;
+mod resources;
 mod rva;
 mod sections;
 mod tls;
@@ -54,6 +55,9 @@ pub use lookups::{
 };
 pub use optional::{
     PeDataDirectory, PeDirectoryAddress, PeHeaders, PeOptionalHeader, parse_pe_headers,
+};
+pub use resources::{
+    PeResourceRoot, PeResourceRootEntry, PeResourceRootError, parse_pe_resource_root,
 };
 pub use rva::{PeFileRange, PeFileRangeSource, PeRvaError, resolve_pe_file_range};
 pub use sections::{PeSection, PeSectionTable, parse_pe_sections};
