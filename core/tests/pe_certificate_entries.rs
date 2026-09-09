@@ -250,3 +250,73 @@ fn rounded_steps_keep_following_headers_and_borrowed_slices_exact() {
         }
     }
 }
+
+fn generated_fixture_with_synthetic_entries(variable: &str, plus: bool) {
+    let path = std::env::var_os(variable).expect("explicit generated fixture path");
+    let original = std::fs::read(&path).unwrap();
+    assert_eq!(original.len(), 1024);
+    assert_eq!(&original[60..64], &120_u32.to_le_bytes());
+    let slot = if plus { 288 } else { 272 };
+    assert_eq!(&original[slot..slot + 8], &[0; 8]);
+    let raw = [
+        13, 0, 0, 0, 0, 2, 0xff, 0xff, b'r', b'i', b'n', b'g', b'3', 0, 0, 0, 8, 0, 0, 0, 0, 1, 2,
+        0,
+    ];
+    // synthetic record framing only; this does not create a signed image.
+    let mut bytes = original.clone();
+    bytes.extend_from_slice(&raw);
+    put32(&mut bytes, slot, 1024);
+    put32(&mut bytes, slot + 4, 24);
+    let before = bytes.clone();
+    let result = parse_pe_certificate_entries(&bytes).unwrap().unwrap();
+    assert_eq!(
+        result,
+        PeCertificateEntryTable {
+            table: PeCertificateTable {
+                kind: if plus { PeKind::Pe32Plus } else { PeKind::Pe32 },
+                file_offset: FileOffset::new(1024),
+                size: 24,
+                raw_bytes: &raw,
+            },
+            entries: vec![
+                PeCertificateEntry {
+                    file_offset: FileOffset::new(1024),
+                    length: 13,
+                    revision: 0x200,
+                    certificate_type: 0xffff,
+                    raw_body: b"ring3",
+                    alignment_padding: &[0; 3],
+                },
+                PeCertificateEntry {
+                    file_offset: FileOffset::new(1040),
+                    length: 8,
+                    revision: 0x100,
+                    certificate_type: 2,
+                    raw_body: &[],
+                    alignment_padding: &[],
+                },
+            ],
+        }
+    );
+    assert_eq!(result.table.raw_bytes.as_ptr(), bytes[1024..].as_ptr());
+    assert_eq!(result.entries[0].raw_body.as_ptr(), bytes[1032..].as_ptr());
+    assert_eq!(
+        result.entries[0].alignment_padding.as_ptr(),
+        bytes[1037..].as_ptr()
+    );
+    assert_eq!(result.entries[1].raw_body.as_ptr(), bytes[1048..].as_ptr());
+    assert_eq!(bytes, before);
+    assert_eq!(std::fs::read(path).unwrap(), original);
+}
+
+#[test]
+#[ignore = "requires an explicit generated fixture path"]
+fn generated_pe32_with_synthetic_certificate_entries_matches_file_metadata() {
+    generated_fixture_with_synthetic_entries("RING3_PE32_FIXTURE", false);
+}
+
+#[test]
+#[ignore = "requires an explicit generated fixture path"]
+fn generated_pe32plus_with_synthetic_certificate_entries_matches_file_metadata() {
+    generated_fixture_with_synthetic_entries("RING3_PE32PLUS_FIXTURE", true);
+}
