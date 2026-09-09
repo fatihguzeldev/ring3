@@ -69,9 +69,13 @@ pnpm install --frozen-lockfile
 pnpm toolchain:check
 pnpm format:rust
 pnpm lint:rust
+pnpm test:rust
 pnpm typecheck
 pnpm build
 ```
+
+`test:rust` runs the regular Rust tests and documentation tests. Tests that require
+generated EXE/DLL files run through the corpus verifier below.
 
 ## Corpus verification
 

@@ -21,6 +21,7 @@
     "corpus:verify": "node tools/corpus/verify.mjs",
     "format:rust": "cargo fmt --all -- --check",
     "lint:rust": "cargo clippy --workspace --all-targets -- -D warnings",
+    "test:rust": "cargo test --workspace --locked",
     "preinstall": "node tools/verify-toolchain.mjs",
     "toolchain:check": "node tools/verify-toolchain.mjs",
     "typecheck": "pnpm --filter @ring3/runtime typecheck",
