@@ -96,6 +96,10 @@
       "generated_pe32plus_delay_lookups_match_raw_metadata",
       "generated_pe32_ordinal_delay_lookup_matches_raw_metadata",
       "generated_pe32plus_ordinal_delay_lookup_matches_raw_metadata"
+    ],
+    "pe_resource_names": [
+      "generated_pe32_with_synthetic_resource_names_matches_raw_bytes",
+      "generated_pe32plus_with_synthetic_resource_names_matches_raw_bytes"
     ]
   }
 }
