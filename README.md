@@ -59,6 +59,7 @@ and per-run evidence go under `target/`; they are not committed.
 | [pe-tls](corpus/pe-tls/) | Files containing fixed thread-local storage directories. | `pnpm corpus:build:tls` |
 | [pe-delay-imports](corpus/pe-delay-imports/) | Delay-import metadata with named symbols. | `pnpm corpus:build:delay` |
 | [pe-delay-ordinals](corpus/pe-delay-ordinals/) | Delay-import metadata with ordinal `32768`. | `pnpm corpus:build:delay-ordinals` |
+| [pe-resources](corpus/pe-resources/) | Linked resource roots and raw Unicode name bytes. | `pnpm corpus:build:resources` |
 
 Builders require the pinned macOS Apple Clang/LLVM and Rust LLD binaries recorded
 in each manifest. Tool identity checks intentionally fail when those binaries
@@ -95,7 +96,7 @@ pnpm corpus:verify
 `corpus:test` runs the producer and verification guard tests, including changed
 inputs, tool failures and output-directory ownership checks.
 
-`corpus:verify` builds all nine fixture families twice and runs all 51 tests listed
+`corpus:verify` builds its nine integrated fixture families twice and runs all 51 tests listed
 in [real-file-tests.json](corpus/real-file-tests.json) against 20 fresh file paths,
 including named and ordinal delay-import lookups.
 Certificate-entry tests append synthetic records to generated PE files in memory;
