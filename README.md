@@ -19,7 +19,9 @@ remain future work.
 
 The [core exports](core/src/lib.rs) cover PE32/PE32+ headers, sections and file
 ranges; static import/export metadata; raw base-relocation blocks; fixed TLS
-directories; and delay-import descriptors, supported DLL names and lookup symbols.
+directories; raw certificate-table bytes; and delay-import descriptors, supported
+DLL names and lookup symbols. Certificate bytes use file offsets and are not
+validated signatures.
 These readers inspect bytes without loading modules, binding addresses or executing
 the generated programs. Reader types and limits live with their [implementation](core/src/pe/).
 

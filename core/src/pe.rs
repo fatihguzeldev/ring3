@@ -1,6 +1,7 @@
 use crate::{FileOffset, RelativeVirtualAddress};
 
 mod base_relocations;
+mod certificates;
 mod delay_imports;
 mod delay_lookups;
 mod delay_names;
@@ -17,6 +18,7 @@ mod tls;
 pub use base_relocations::{
     PeBaseRelocationBlock, PeBaseRelocationError, parse_pe_base_relocation_blocks,
 };
+pub use certificates::{PeCertificateError, PeCertificateTable, parse_pe_certificate_table};
 pub use delay_imports::{
     PeDelayImportDescriptor, PeDelayImportError, PeDelayImportTable,
     parse_pe_delay_import_descriptors,
