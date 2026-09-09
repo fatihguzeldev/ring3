@@ -4,6 +4,7 @@ mod base_relocations;
 mod certificate_entries;
 mod certificates;
 mod debug;
+mod debug_payloads;
 mod delay_imports;
 mod delay_lookups;
 mod delay_names;
@@ -34,6 +35,10 @@ pub use certificate_entries::{
 pub use certificates::{PeCertificateError, PeCertificateTable, parse_pe_certificate_table};
 pub use debug::{
     PeDebugDirectoryEntry, PeDebugDirectoryError, PeDebugDirectoryTable, parse_pe_debug_directory,
+};
+pub use debug_payloads::{
+    PeDebugPayload, PeDebugPayloadError, PeDebugPayloadRange, PeDebugPayloadTable,
+    parse_pe_debug_payloads,
 };
 pub use delay_imports::{
     PeDelayImportDescriptor, PeDelayImportError, PeDelayImportTable,

@@ -20,7 +20,7 @@ remain future work.
 The [core exports](core/src/lib.rs) cover PE32/PE32+ headers, sections and file
 ranges; static import/export metadata; raw base-relocation blocks; fixed TLS
 directories; raw certificate tables and entry metadata; raw debug directory
-metadata without following payload coordinates; the supported size-bearing
+metadata and borrowed payload file ranges independent of their RVA fields; the supported size-bearing
 load-config common prefix; resource root headers, raw entries and borrowed Unicode
 name bytes; bounded acyclic resource directory graphs with shared table identities;
 fixed raw resource data-entry records and their leaf references;
