@@ -83,6 +83,10 @@
       "generated_pe32_with_synthetic_load_config_matches_prefix_metadata",
       "generated_pe32plus_with_synthetic_load_config_matches_prefix_metadata"
     ],
+    "pe_resources": [
+      "generated_pe32_with_synthetic_resource_root_matches_raw_metadata",
+      "generated_pe32plus_with_synthetic_resource_root_matches_raw_metadata"
+    ],
     "pe_debug": [
       "generated_pe32_with_synthetic_debug_directory_matches_raw_metadata",
       "generated_pe32plus_with_synthetic_debug_directory_matches_raw_metadata"

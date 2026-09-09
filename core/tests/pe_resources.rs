@@ -323,3 +323,59 @@ fn final_entry_can_end_at_the_u32_coordinate_boundary() {
         );
     }
 }
+
+fn generated_fixture_with_synthetic_resource_root(variable: &str, plus: bool) {
+    let path = std::env::var_os(variable).expect("explicit generated fixture path");
+    let original = std::fs::read(&path).unwrap();
+    assert_eq!(original.len(), 1024);
+    assert_eq!(&original[60..64], &120_u32.to_le_bytes());
+    let slot = if plus { 272 } else { 256 };
+    assert_eq!(&original[slot..slot + 8], &[0; 8]);
+    assert_eq!(&original[448..480], &[0; 32]);
+    let mut bytes = original.clone();
+    put32(&mut bytes, slot, 448);
+    put32(&mut bytes, slot + 4, 32);
+    record(&mut bytes, 448, 1, 1);
+    for (offset, value) in [
+        (464, u32::MAX),
+        (468, 0x8000_0000),
+        (472, 7),
+        (476, u32::MAX),
+    ] {
+        put32(&mut bytes, offset, value);
+    }
+    let before = bytes.clone();
+    assert_eq!(
+        parse_pe_resource_root(&bytes),
+        Ok(Some(PeResourceRoot {
+            kind: if plus { PeKind::Pe32Plus } else { PeKind::Pe32 },
+            directory_rva: RelativeVirtualAddress::new(448),
+            directory_file_offset: FileOffset::new(448),
+            directory_size: 32,
+            characteristics: 0x1234_5678,
+            time_date_stamp: 0x90ab_cdef,
+            major_version: 0x1234,
+            minor_version: 0xabcd,
+            number_of_named_entries: 1,
+            number_of_id_entries: 1,
+            entries: vec![
+                entry(464, 464, u32::MAX, 0x8000_0000),
+                entry(472, 472, 7, u32::MAX)
+            ],
+        }))
+    );
+    assert_eq!(bytes, before);
+    assert_eq!(std::fs::read(path).unwrap(), original);
+}
+
+#[test]
+#[ignore = "requires an explicit generated fixture path"]
+fn generated_pe32_with_synthetic_resource_root_matches_raw_metadata() {
+    generated_fixture_with_synthetic_resource_root("RING3_PE32_FIXTURE", false);
+}
+
+#[test]
+#[ignore = "requires an explicit generated fixture path"]
+fn generated_pe32plus_with_synthetic_resource_root_matches_raw_metadata() {
+    generated_fixture_with_synthetic_resource_root("RING3_PE32PLUS_FIXTURE", true);
+}
