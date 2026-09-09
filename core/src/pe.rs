@@ -16,6 +16,7 @@ mod lookups;
 mod optional;
 mod resource_data;
 mod resource_directories;
+mod resource_directory_names;
 mod resource_names;
 mod resources;
 mod rva;
@@ -66,6 +67,10 @@ pub use resource_data::{
 pub use resource_directories::{
     PeResourceDirectory, PeResourceDirectoryEntry, PeResourceDirectoryError,
     PeResourceDirectoryGraph, parse_pe_resource_directories,
+};
+pub use resource_directory_names::{
+    PeResourceDirectoryName, PeResourceDirectoryNameError, PeResourceDirectoryNameTable,
+    parse_pe_resource_directory_names,
 };
 pub use resource_names::{
     PeResourceRootName, PeResourceRootNameError, PeResourceRootNameTable,
