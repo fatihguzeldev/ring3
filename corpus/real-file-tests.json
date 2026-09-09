@@ -108,6 +108,10 @@
     "pe_resource_directories": [
       "generated_pe32_resource_directories_match_linked_graph",
       "generated_pe32plus_resource_directories_match_linked_graph"
+    ],
+    "pe_resource_data": [
+      "generated_pe32_resource_data_entries_match_linked_records",
+      "generated_pe32plus_resource_data_entries_match_linked_records"
     ]
   }
 }
