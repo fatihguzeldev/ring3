@@ -4,16 +4,17 @@ use ring3_core::{
     FileOffset, PeDebugPayloadError, PeHeaderError, PeResourceDataEntryError,
     PeResourceDirectoryError, PeResourceDirectoryNameError, PeResourcePayloadError,
     RelativeVirtualAddress, parse_pe_base_relocation_blocks, parse_pe_certificate_entries,
-    parse_pe_certificate_table, parse_pe_debug_directory, parse_pe_debug_payloads,
-    parse_pe_delay_import_descriptors, parse_pe_delay_import_lookups, parse_pe_delay_import_names,
-    parse_pe_export_addresses, parse_pe_export_directory, parse_pe_export_names,
-    parse_pe_header_prefix, parse_pe_headers, parse_pe_import_descriptors, parse_pe_import_lookups,
-    parse_pe_load_config_prefix, parse_pe_resource_data_entries, parse_pe_resource_directories,
-    parse_pe_resource_directory_names, parse_pe_resource_payloads, parse_pe_resource_root,
-    parse_pe_resource_root_names, parse_pe_sections, parse_pe_tls_directory, resolve_pe_file_range,
+    parse_pe_certificate_table, parse_pe_clr_header, parse_pe_debug_directory,
+    parse_pe_debug_payloads, parse_pe_delay_import_descriptors, parse_pe_delay_import_lookups,
+    parse_pe_delay_import_names, parse_pe_export_addresses, parse_pe_export_directory,
+    parse_pe_export_names, parse_pe_header_prefix, parse_pe_headers, parse_pe_import_descriptors,
+    parse_pe_import_lookups, parse_pe_load_config_prefix, parse_pe_resource_data_entries,
+    parse_pe_resource_directories, parse_pe_resource_directory_names, parse_pe_resource_payloads,
+    parse_pe_resource_root, parse_pe_resource_root_names, parse_pe_sections,
+    parse_pe_tls_directory, resolve_pe_file_range,
 };
 
-const READER_COUNT: usize = 25;
+const READER_COUNT: usize = 26;
 const CASE_COUNT: u32 = 3074;
 
 fn put32(bytes: &mut [u8], offset: usize, value: u32) {
@@ -177,6 +178,7 @@ fn inspect(bytes: &[u8], baseline: bool, report: &mut Campaign) {
     observe!(19, parse_pe_resource_root_names);
     inspect_resource_graphs(bytes, baseline, report);
     inspect_debug_payloads(bytes, baseline, report);
+    observe!(25, parse_pe_clr_header);
     assert_eq!(bytes, before, "input changed at case {}", report.cases);
     report.cases += 1;
 }

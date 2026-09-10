@@ -3,6 +3,7 @@ use crate::{FileOffset, RelativeVirtualAddress};
 mod base_relocations;
 mod certificate_entries;
 mod certificates;
+mod clr;
 mod debug;
 mod debug_payloads;
 mod delay_imports;
@@ -33,6 +34,7 @@ pub use certificate_entries::{
     parse_pe_certificate_entries,
 };
 pub use certificates::{PeCertificateError, PeCertificateTable, parse_pe_certificate_table};
+pub use clr::{PeClrDataDirectory, PeClrError, PeClrHeader, parse_pe_clr_header};
 pub use debug::{
     PeDebugDirectoryEntry, PeDebugDirectoryError, PeDebugDirectoryTable, parse_pe_debug_directory,
 };

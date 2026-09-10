@@ -21,7 +21,8 @@ The [core exports](core/src/lib.rs) cover PE32/PE32+ headers, sections and file
 ranges; static import/export metadata; raw base-relocation blocks; fixed TLS
 directories; raw certificate tables and entry metadata; raw debug directory
 metadata and borrowed payload file ranges independent of their RVA fields; the supported size-bearing
-load-config common prefix; resource root headers, raw entries and borrowed Unicode
+load-config common prefix; the fixed raw CLR header with uninterpreted nested coordinates;
+resource root headers, raw entries and borrowed Unicode
 name bytes; bounded acyclic resource directory graphs with shared table identities;
 fixed raw resource data-entry records and their leaf references;
 borrowed name bytes across each directory’s named-entry prefix;
@@ -30,6 +31,8 @@ and delay-import descriptors, supported DLL names and lookup symbols. Certificat
 offsets and preserve opaque bodies and padding without validating signatures.
 These readers inspect bytes without loading modules, binding addresses or executing
 the generated programs. Reader types and limits live with their [implementation](core/src/pe/).
+The CLR reader preserves flags and the entry-point word without validating metadata,
+tokens or runtime compatibility; declared header tails are not read.
 
 ## Fixture corpus
 
