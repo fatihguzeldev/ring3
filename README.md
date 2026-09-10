@@ -49,7 +49,7 @@ and unresolved forwarders. `PeExportLookup::new(bytes)` keeps an owner for repea
 queries on the same immutable image. Its `lookup` method retains name and address
 reader results independently, including absence and errors; construction performs
 no parsing. Results can outlive the owner, while the image must remain alive.
-Mixed queries may retain two address tables. See the
+Mixed queries share one retained address table; name entries remain lazy. See the
 [selection API](core/src/pe/export_lookup.rs).
 
 `lookup_pe_export_batch` adds explicit query-count and total selection-row limits

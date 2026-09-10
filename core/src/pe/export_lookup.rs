@@ -1,6 +1,8 @@
+use super::export_names::parse_prepared_export_name_entries;
+use super::rva::PreparedPe;
 use super::{
-    PeExportAddressEntry, PeExportAddressError, PeExportAddressTable, PeExportName,
-    PeExportNameError, PeExportNameTable, parse_pe_export_addresses, parse_pe_export_names,
+    PeExportAddressEntry, PeExportAddressError, PeExportAddressTable, PeExportDirectoryError,
+    PeExportName, PeExportNameError, parse_pe_export_addresses,
 };
 
 /// exact name or full biased export ordinal; no module search or hint lookup.
@@ -72,8 +74,8 @@ pub fn lookup_pe_export<'a>(
 
 /// lazy export tables for one immutable image; no global cache or module search.
 ///
-/// each query kind retains its full reader result, including absence and errors.
-/// name and ordinal state are independent and may retain two address tables.
+/// query kinds share one retained address result, including absence and errors.
+/// name entries stay lazy; a name-entry error does not prevent ordinal selection.
 /// existing reader limits apply; retained tables are not a total memory cap.
 /// selections borrow image text and may outlive this owner and the query.
 ///
@@ -101,7 +103,7 @@ pub fn lookup_pe_export<'a>(
 /// ```
 pub struct PeExportLookup<'a> {
     bytes: &'a [u8],
-    names: Option<Result<Option<PeExportNameTable<'a>>, PeExportNameError>>,
+    names: Option<Result<Vec<PeExportName<'a>>, PeExportNameError>>,
     addresses: Option<Result<Option<PeExportAddressTable<'a>>, PeExportAddressError>>,
 }
 
@@ -132,18 +134,35 @@ impl<'a> PeExportLookup<'a> {
         &mut self,
         query: PeExportQuery<'_>,
     ) -> Result<PeExportSelection<'a>, PeExportLookupError> {
+        let addresses = match self
+            .addresses
+            .get_or_insert_with(|| parse_pe_export_addresses(self.bytes))
+        {
+            Err(error) => {
+                return Err(match query {
+                    PeExportQuery::Name(_) => {
+                        PeExportLookupError::Names(PeExportNameError::Addresses(*error))
+                    }
+                    PeExportQuery::Ordinal(_) => PeExportLookupError::Addresses(*error),
+                });
+            }
+            Ok(None) => return Ok(PeExportSelection::DirectoryAbsent),
+            Ok(Some(table)) => table,
+        };
         match query {
             PeExportQuery::Name(query) => {
-                let table = match self
-                    .names
-                    .get_or_insert_with(|| parse_pe_export_names(self.bytes))
-                {
+                let entries = match self.names.get_or_insert_with(|| {
+                    let prepared = PreparedPe::new(self.bytes).map_err(|cause| {
+                        PeExportNameError::Addresses(PeExportAddressError::Directory(
+                            PeExportDirectoryError::Base(cause),
+                        ))
+                    })?;
+                    parse_prepared_export_name_entries(&prepared, addresses)
+                }) {
                     Err(error) => return Err(PeExportLookupError::Names(*error)),
-                    Ok(None) => return Ok(PeExportSelection::DirectoryAbsent),
-                    Ok(Some(table)) => table,
+                    Ok(entries) => entries,
                 };
-                let matches: Vec<_> = table
-                    .entries
+                let matches: Vec<_> = entries
                     .iter()
                     .copied()
                     .filter(|entry| entry.name == query)
@@ -151,26 +170,18 @@ impl<'a> PeExportLookup<'a> {
                 Ok(match matches.as_slice() {
                     [] => PeExportSelection::NameNotFound,
                     [name] => PeExportSelection::Selected {
-                        address: table.addresses.entries[usize::from(name.address_index)],
+                        address: addresses.entries[usize::from(name.address_index)],
                         name: Some(*name),
                     },
                     _ => PeExportSelection::AmbiguousName { matches },
                 })
             }
             PeExportQuery::Ordinal(ordinal) => {
-                let table = match self
-                    .addresses
-                    .get_or_insert_with(|| parse_pe_export_addresses(self.bytes))
-                {
-                    Err(error) => return Err(PeExportLookupError::Addresses(*error)),
-                    Ok(None) => return Ok(PeExportSelection::DirectoryAbsent),
-                    Ok(Some(table)) => table,
-                };
-                let base = table.directory.ordinal_base;
+                let base = addresses.directory.ordinal_base;
                 let Some(index) = ordinal.checked_sub(base) else {
                     return Ok(PeExportSelection::OrdinalBeforeBase { ordinal, base });
                 };
-                let Some(address) = table
+                let Some(address) = addresses
                     .entries
                     .iter()
                     .find(|entry| entry.table_index == index)
@@ -178,7 +189,7 @@ impl<'a> PeExportLookup<'a> {
                     return Ok(PeExportSelection::OrdinalOutOfRange {
                         ordinal,
                         base,
-                        address_count: table.directory.address_table_entries,
+                        address_count: addresses.directory.address_table_entries,
                     });
                 };
                 Ok(PeExportSelection::Selected {
@@ -192,19 +203,33 @@ impl<'a> PeExportLookup<'a> {
 
 #[cfg(test)]
 mod tests {
-    use super::{PeExportLookup, PeExportQuery};
+    use super::{PeExportLookup, PeExportLookupError, PeExportNameError, PeExportQuery};
 
     #[test]
-    fn construction_and_query_kinds_keep_independent_lazy_states() {
-        let mut lookup = PeExportLookup::new(b"");
-        assert!(lookup.names.is_none() && lookup.addresses.is_none());
-        let first = lookup.lookup(PeExportQuery::Name("entry"));
-        assert!(matches!(lookup.names, Some(Err(_))));
-        assert!(lookup.addresses.is_none());
-        assert_eq!(lookup.lookup(PeExportQuery::Name("entry")), first);
-        let second = lookup.lookup(PeExportQuery::Ordinal(1));
-        assert!(matches!(lookup.addresses, Some(Err(_))));
-        assert_eq!(lookup.lookup(PeExportQuery::Ordinal(1)), second);
-        assert_eq!(lookup.lookup(PeExportQuery::Name("entry")), first);
+    fn construction_and_query_kinds_share_lazy_address_errors() {
+        for name_first in [false, true] {
+            let mut lookup = PeExportLookup::new(b"");
+            assert!(lookup.names.is_none() && lookup.addresses.is_none());
+            let queries = if name_first {
+                [PeExportQuery::Name("entry"), PeExportQuery::Ordinal(1)]
+            } else {
+                [PeExportQuery::Ordinal(1), PeExportQuery::Name("entry")]
+            };
+            for query in queries {
+                let result = lookup.lookup(query);
+                let Some(Err(cause)) = lookup.addresses else {
+                    panic!()
+                };
+                assert!(lookup.names.is_none());
+                let expected = match query {
+                    PeExportQuery::Name(_) => {
+                        PeExportLookupError::Names(PeExportNameError::Addresses(cause))
+                    }
+                    PeExportQuery::Ordinal(_) => PeExportLookupError::Addresses(cause),
+                };
+                assert_eq!(result, Err(expected));
+                assert_eq!(lookup.lookup(query), result);
+            }
+        }
     }
 }
