@@ -377,3 +377,51 @@ fn generated_pe32_with_synthetic_clr_matches_raw_header() {
 fn generated_pe32plus_with_synthetic_clr_matches_raw_header() {
     generated_fixture_with_synthetic_clr("RING3_PE32PLUS_FIXTURE", true);
 }
+
+fn generated_managed_header(variable: &str, plus: bool) {
+    let path = std::env::var(variable).expect("set the generated managed fixture path");
+    let bytes = std::fs::read(&path).unwrap();
+    assert_eq!(bytes.len(), if plus { 3072 } else { 3584 });
+    let before = bytes.clone();
+    let empty = PeClrDataDirectory {
+        rva: RelativeVirtualAddress::new(0),
+        size: 0,
+    };
+    let wanted = PeClrHeader {
+        kind: if plus { PeKind::Pe32Plus } else { PeKind::Pe32 },
+        directory_rva: RelativeVirtualAddress::new(if plus { 8192 } else { 8200 }),
+        directory_file_offset: FileOffset::new(if plus { 512 } else { 520 }),
+        directory_size: 72,
+        header_size: 72,
+        major_runtime_version: 2,
+        minor_runtime_version: 5,
+        flags: if plus { 1 } else { 3 },
+        raw_entry_point: 0x0600_0001,
+        metadata: PeClrDataDirectory {
+            rva: RelativeVirtualAddress::new(if plus { 8268 } else { 8276 }),
+            size: 692,
+        },
+        resources: empty,
+        strong_name_signature: empty,
+        code_manager_table: empty,
+        v_table_fixups: empty,
+        export_address_table_jumps: empty,
+        managed_native_header: empty,
+    };
+    assert_eq!(parse_pe_clr_header(&bytes), Ok(Some(wanted)));
+    assert_eq!(parse_pe_clr_header(&bytes), Ok(Some(wanted)));
+    assert_eq!(bytes, before);
+    assert_eq!(std::fs::read(path).unwrap(), before);
+}
+
+#[test]
+#[ignore = "requires a generated unpatched managed pe32 fixture"]
+fn generated_pe32_managed_clr_matches_compiler_header() {
+    generated_managed_header("RING3_CLR_PE32_FIXTURE", false);
+}
+
+#[test]
+#[ignore = "requires a generated unpatched managed pe32+ fixture"]
+fn generated_pe32plus_managed_clr_matches_compiler_header() {
+    generated_managed_header("RING3_CLR_PE32PLUS_FIXTURE", true);
+}

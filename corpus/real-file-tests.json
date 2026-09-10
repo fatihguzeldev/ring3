@@ -132,7 +132,9 @@
     ],
     "pe_clr": [
       "generated_pe32_with_synthetic_clr_matches_raw_header",
-      "generated_pe32plus_with_synthetic_clr_matches_raw_header"
+      "generated_pe32plus_with_synthetic_clr_matches_raw_header",
+      "generated_pe32_managed_clr_matches_compiler_header",
+      "generated_pe32plus_managed_clr_matches_compiler_header"
     ],
     "pe_certificates": [
       "generated_pe32_with_opaque_certificate_table_matches_file_bytes",

@@ -79,7 +79,8 @@ timestamps are stable content-derived values.
 
 Managed fixtures require the existing macOS arm64 .NET SDK `10.0.401` recorded in
 [their manifest](corpus/pe-managed/fixture.json). Set `RING3_DOTNET_ROOT` to its
-extracted root before running `corpus:build:managed` or `corpus:test`.
+extracted root before running `corpus:build:managed`, `corpus:test` or
+`corpus:verify`.
 The producer verifies pinned host, compiler, runtime and reference bytes, then
 invokes the compiler directly with scoped CLI/temp directories. It performs no
 SDK download, package restore or generated PE execution. Reproducibility is
@@ -120,7 +121,7 @@ inputs, tool failures and output-directory ownership checks.
 `corpus:verify` builds the registered fixture families twice and runs the tests listed
 in [real-file-tests.json](corpus/real-file-tests.json) against fresh file paths,
 including named and ordinal delay-import lookups, linked resource directory graphs
-and fixed resource data-entry records.
+fixed resource data-entry records and unpatched managed CLR headers.
 Certificate-entry tests append synthetic records to generated PE files in memory;
 the source fixtures remain unchanged and are not cryptographically signed.
 
