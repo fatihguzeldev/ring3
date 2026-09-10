@@ -18,11 +18,6 @@ mod imports;
 mod load_config;
 mod lookups;
 mod optional;
-mod resource_data;
-mod resource_directories;
-mod resource_directory_names;
-mod resource_names;
-mod resource_payloads;
 mod resources;
 mod rva;
 mod sections;
@@ -82,27 +77,16 @@ pub use lookups::{
 pub use optional::{
     PeDataDirectory, PeDirectoryAddress, PeHeaders, PeOptionalHeader, parse_pe_headers,
 };
-pub use resource_data::{
-    PeResourceDataEntry, PeResourceDataEntryError, PeResourceDataEntryTable,
-    PeResourceDataReference, parse_pe_resource_data_entries,
-};
-pub use resource_directories::{
-    PeResourceDirectory, PeResourceDirectoryEntry, PeResourceDirectoryError,
-    PeResourceDirectoryGraph, parse_pe_resource_directories,
-};
-pub use resource_directory_names::{
-    PeResourceDirectoryName, PeResourceDirectoryNameError, PeResourceDirectoryNameTable,
-    parse_pe_resource_directory_names,
-};
-pub use resource_names::{
-    PeResourceRootName, PeResourceRootNameError, PeResourceRootNameTable,
-    parse_pe_resource_root_names,
-};
-pub use resource_payloads::{
-    PeResourcePayload, PeResourcePayloadError, PeResourcePayloadTable, parse_pe_resource_payloads,
-};
 pub use resources::{
-    PeResourceRoot, PeResourceRootEntry, PeResourceRootError, parse_pe_resource_root,
+    PeResourceDataEntry, PeResourceDataEntryError, PeResourceDataEntryTable,
+    PeResourceDataReference, PeResourceDirectory, PeResourceDirectoryEntry,
+    PeResourceDirectoryError, PeResourceDirectoryGraph, PeResourceDirectoryName,
+    PeResourceDirectoryNameError, PeResourceDirectoryNameTable, PeResourcePayload,
+    PeResourcePayloadError, PeResourcePayloadTable, PeResourceRoot, PeResourceRootEntry,
+    PeResourceRootError, PeResourceRootName, PeResourceRootNameError, PeResourceRootNameTable,
+    parse_pe_resource_data_entries, parse_pe_resource_directories,
+    parse_pe_resource_directory_names, parse_pe_resource_payloads, parse_pe_resource_root,
+    parse_pe_resource_root_names,
 };
 pub use rva::{PeFileRange, PeFileRangeSource, PeRvaError, resolve_pe_file_range};
 pub use sections::{PeSection, PeSectionTable, parse_pe_sections};
