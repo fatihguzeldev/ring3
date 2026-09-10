@@ -50,14 +50,14 @@ queries on the same immutable image. Its `lookup` method retains name and addres
 reader results independently, including absence and errors; construction performs
 no parsing. Results can outlive the owner, while the image must remain alive.
 Mixed queries share one retained address table; name entries remain lazy. See the
-[selection API](core/src/pe/export_lookup.rs).
+[selection API](core/src/pe/exports/lookup.rs).
 
 `lookup_pe_export_batch` adds explicit query-count and total selection-row limits
 to an ordered query list. Each selected target costs one logical row; ambiguity
 costs every matching row. Other outcomes and per-query parse errors cost zero,
 while still counting as queries. Budget refusal returns no partial batch. Each
 query may allocate its own result before the row check, so this is not a byte or
-process-memory cap. See the [export batch API](core/src/pe/export_batch.rs).
+process-memory cap. See the [export batch API](core/src/pe/exports/batch.rs).
 
 `parse_pe_amd64_exception_functions` reads at most 4096 raw 12-byte records
 from exception directory slot 3 in AMD64 PE32+ files. It preserves record order,

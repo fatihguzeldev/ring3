@@ -11,10 +11,6 @@ mod delay_import_exports;
 mod delay_imports;
 mod delay_lookups;
 mod delay_names;
-mod export_addresses;
-mod export_batch;
-mod export_lookup;
-mod export_names;
 mod exports;
 mod header_batch;
 mod import_exports;
@@ -66,18 +62,13 @@ pub use delay_lookups::{
 pub use delay_names::{
     PeDelayImportName, PeDelayImportNameError, PeDelayImportNameTable, parse_pe_delay_import_names,
 };
-pub use export_addresses::{
-    PeExportAddressEntry, PeExportAddressError, PeExportAddressTable, PeExportTarget,
-    parse_pe_export_addresses,
+pub use exports::{
+    PeExportAddressEntry, PeExportAddressError, PeExportAddressTable, PeExportBatch,
+    PeExportBatchError, PeExportBatchLimits, PeExportDirectory, PeExportDirectoryError,
+    PeExportLookup, PeExportLookupError, PeExportName, PeExportNameError, PeExportNameTable,
+    PeExportQuery, PeExportSelection, PeExportTarget, lookup_pe_export, lookup_pe_export_batch,
+    parse_pe_export_addresses, parse_pe_export_directory, parse_pe_export_names,
 };
-pub use export_batch::{
-    PeExportBatch, PeExportBatchError, PeExportBatchLimits, lookup_pe_export_batch,
-};
-pub use export_lookup::{
-    PeExportLookup, PeExportLookupError, PeExportQuery, PeExportSelection, lookup_pe_export,
-};
-pub use export_names::{PeExportName, PeExportNameError, PeExportNameTable, parse_pe_export_names};
-pub use exports::{PeExportDirectory, PeExportDirectoryError, parse_pe_export_directory};
 pub use header_batch::{
     PeHeaderBatch, PeHeaderBatchError, PeHeaderBatchLimits, parse_pe_header_prefix_batch,
 };
