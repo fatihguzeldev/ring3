@@ -1,6 +1,6 @@
-use super::{
-    PeExportBatch, PeExportBatchError, PeExportBatchLimits, PeExportQuery, PeImportLookup,
-    PeImportLookupError, PeImportSymbol, lookup_pe_export_batch, parse_pe_import_lookups,
+use super::{PeImportLookup, PeImportLookupError, PeImportSymbol, parse_pe_import_lookups};
+use crate::pe::exports::{
+    PeExportBatch, PeExportBatchError, PeExportBatchLimits, PeExportQuery, lookup_pe_export_batch,
 };
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
