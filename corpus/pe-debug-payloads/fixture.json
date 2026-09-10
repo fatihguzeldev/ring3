@@ -1,0 +1,252 @@
+{
+  "schemaVersion": 1,
+  "executed": false,
+  "windowsOracle": "not-run",
+  "reproducibility": "Pinned local tool binaries and installation paths; independent output roots. PDB retains tool installation paths.",
+  "source": {
+    "path": "corpus/pe-debug-payloads/debug.c",
+    "sha256": "d309a13b411a41a5fa30a33d466673541c35469d45e64ad9b30b47904399c7e0"
+  },
+  "tools": {
+    "clang": {
+      "version": "Apple clang version 21.0.0 (clang-2100.1.1.101)",
+      "sha256": "f30550eab15fdf5ab8c0dc54c52679711241e5d4b636b027e18c09fef531775d"
+    },
+    "lld": {
+      "version": "LLD 22.1.6 (https://github.com/rust-lang/llvm-project.git dcc3606807c989700e0ac1cac18c31741bcd40d9)",
+      "sha256": "8f5fe507df7232eac0a610c12a5d11f3202205235f710eb98c6c78df6d3f548d"
+    },
+    "objdump": {
+      "version": "Apple LLVM version 21.0.0",
+      "sha256": "1dcc1432db4d828cf8cd71a84cb8d9bf63a7ca80b5eeec711a9e5f13a3f5f98e"
+    }
+  },
+  "architectures": {
+    "i386": {
+      "commands": {
+        "clang": [
+          "-fdebug-compilation-dir=.",
+          "-gno-codeview-command-line",
+          "-mno-incremental-linker-compatible",
+          "--target=i686-pc-windows-msvc",
+          "-g",
+          "-gcodeview",
+          "-O0",
+          "-fno-stack-protector",
+          "-c",
+          "debug.c",
+          "-o",
+          "debug.obj"
+        ],
+        "lld": [
+          "-flavor",
+          "link",
+          "/entry:entry",
+          "/subsystem:console",
+          "/machine:x86",
+          "/nodefaultlib",
+          "/fixed",
+          "/dynamicbase:no",
+          "/nxcompat",
+          "/safeseh:no",
+          "/debug:full",
+          "/Brepro",
+          "/pdb:debug.pdb",
+          "/out:debug.exe",
+          "/pdbaltpath:ring3-debug.pdb",
+          "/pdbsourcepath:C:/ring3",
+          "debug.obj"
+        ],
+        "objdump": [
+          "--private-headers",
+          "--section-headers",
+          "--full-contents",
+          "debug.exe"
+        ]
+      },
+      "artifacts": {
+        "debug.obj": {
+          "bytes": 1402,
+          "sha256": "6b2adaa7d88dac7f43658acb62de6ab9f91809f4ee682e8b4817c68403eaff8a"
+        },
+        "debug.exe": {
+          "bytes": 2048,
+          "sha256": "1e31a6bc1d4c5d3f2ea7dd2f9dc2fc8f9fb8e6f0fea15ee8d3ecc8908ffa1db2"
+        },
+        "debug.pdb": {
+          "bytes": 77824,
+          "sha256": "3eae3de051a0b9e9ebd09ce976405f2feb39bb08c4031a0359e2dfa229aef344"
+        }
+      },
+      "inspection": {
+        "bytes": 2681,
+        "sha256": "fbf18cb1c9c143d335d362e9cf367afa45664ff52c3996b077c525ca17922e9c"
+      },
+      "metadata": {
+        "kind": 32,
+        "machine": 332,
+        "coffTimestamp": 1862328645,
+        "directory": [
+          8192,
+          1536,
+          56
+        ],
+        "entries": [
+          [
+            8192,
+            1536,
+            0,
+            1862328645,
+            0,
+            0,
+            2,
+            40,
+            8248,
+            1592
+          ],
+          [
+            8220,
+            1564,
+            0,
+            1862328645,
+            0,
+            0,
+            16,
+            0,
+            0,
+            0
+          ]
+        ],
+        "payloads": [
+          [
+            0,
+            1592,
+            40,
+            "bf5def7d86b54f4d",
+            "525344530d1a99e914c98e584c4c44205044422e0100000072696e67332d64656275672e70646200"
+          ],
+          [
+            1,
+            null,
+            0,
+            "cbf29ce484222325",
+            ""
+          ]
+        ]
+      }
+    },
+    "amd64": {
+      "commands": {
+        "clang": [
+          "-fdebug-compilation-dir=.",
+          "-gno-codeview-command-line",
+          "-mno-incremental-linker-compatible",
+          "--target=x86_64-pc-windows-msvc",
+          "-g",
+          "-gcodeview",
+          "-O0",
+          "-fno-stack-protector",
+          "-c",
+          "debug.c",
+          "-o",
+          "debug.obj"
+        ],
+        "lld": [
+          "-flavor",
+          "link",
+          "/entry:entry",
+          "/subsystem:console",
+          "/machine:x64",
+          "/nodefaultlib",
+          "/fixed",
+          "/dynamicbase:no",
+          "/nxcompat",
+          "/safeseh:no",
+          "/debug:full",
+          "/Brepro",
+          "/pdb:debug.pdb",
+          "/out:debug.exe",
+          "/pdbaltpath:ring3-debug.pdb",
+          "/pdbsourcepath:C:/ring3",
+          "debug.obj"
+        ],
+        "objdump": [
+          "--private-headers",
+          "--section-headers",
+          "--full-contents",
+          "debug.exe"
+        ]
+      },
+      "artifacts": {
+        "debug.obj": {
+          "bytes": 1314,
+          "sha256": "ff3c3b197b476f362f597958459abf6880f5666abfe0bf2d4d5733698af99b94"
+        },
+        "debug.exe": {
+          "bytes": 2560,
+          "sha256": "2a64fb86ea2bc8ad5f0b702c6bb1e28bed483100d773897146ac6311072f8ac2"
+        },
+        "debug.pdb": {
+          "bytes": 73728,
+          "sha256": "c9ae739c1f7d173f30248a13a7240bf52120650cda0456881cc78845e062cb95"
+        }
+      },
+      "inspection": {
+        "bytes": 3125,
+        "sha256": "b4cb69555b65397b7b5ef8b149104aa19c38d863087a14bcde3f2c919d91e907"
+      },
+      "metadata": {
+        "kind": 64,
+        "machine": 34404,
+        "coffTimestamp": 4146262468,
+        "directory": [
+          8192,
+          1536,
+          56
+        ],
+        "entries": [
+          [
+            8192,
+            1536,
+            0,
+            4146262468,
+            0,
+            0,
+            2,
+            40,
+            8248,
+            1592
+          ],
+          [
+            8220,
+            1564,
+            0,
+            4146262468,
+            0,
+            0,
+            16,
+            0,
+            0,
+            0
+          ]
+        ],
+        "payloads": [
+          [
+            0,
+            1592,
+            40,
+            "ed8e4c76d4619182",
+            "52534453a24e620a25143ac44c4c44205044422e0100000072696e67332d64656275672e70646200"
+          ],
+          [
+            1,
+            null,
+            0,
+            "cbf29ce484222325",
+            ""
+          ]
+        ]
+      }
+    }
+  }
+}
