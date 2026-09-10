@@ -151,3 +151,75 @@ fn unclassified_machine_and_raw_prefix_fields_are_preserved() {
     assert_eq!(header.characteristics, 0x4321);
     assert_eq!(header.kind, PeKind::Pe32Plus);
 }
+
+#[test]
+#[ignore = "requires explicit RING3_PE32_FIXTURE and RING3_PE32PLUS_FIXTURE paths"]
+fn generated_mixed_header_batch_matches_owned_metadata_and_budgets() {
+    use ring3_core::{PeHeaderBatch, PeHeaderPrefix};
+
+    let first = PeHeaderPrefix {
+        pe_offset: FileOffset::new(120),
+        machine: 0x14c,
+        number_of_sections: 1,
+        characteristics: 0x103,
+        size_of_optional_header: 224,
+        kind: PeKind::Pe32,
+    };
+    let second = PeHeaderPrefix {
+        pe_offset: FileOffset::new(120),
+        machine: 0x8664,
+        number_of_sections: 1,
+        characteristics: 0x23,
+        size_of_optional_header: 240,
+        kind: PeKind::Pe32Plus,
+    };
+    let expected = PeHeaderBatch {
+        total_bytes: 3072,
+        headers: vec![Ok(first), Ok(second), Ok(first)],
+    };
+    let result = {
+        let paths = ["RING3_PE32_FIXTURE", "RING3_PE32PLUS_FIXTURE"].map(|variable| {
+            std::env::var_os(variable).expect("explicit generated arithmetic fixture path")
+        });
+        let owned = paths.each_ref().map(|path| std::fs::read(path).unwrap());
+        let before = owned.clone();
+        assert!(owned.iter().all(|bytes| bytes.len() == 1024));
+        let inputs = [
+            owned[0].as_slice(),
+            owned[1].as_slice(),
+            owned[0].as_slice(),
+        ];
+        let result = parse_pe_header_prefix_batch(&inputs, limits(3, 1024, 3072)).unwrap();
+        assert_eq!(result, expected);
+        assert_eq!(
+            parse_pe_header_prefix_batch(&inputs, limits(3, 1024, 3072)),
+            Ok(expected.clone())
+        );
+        assert_eq!(
+            parse_pe_header_prefix_batch(&inputs, limits(2, 1024, 3072)),
+            Err(PeHeaderBatchError::FileCountExceeded { count: 3, limit: 2 })
+        );
+        assert_eq!(
+            parse_pe_header_prefix_batch(&inputs, limits(3, 1023, 3072)),
+            Err(PeHeaderBatchError::FileSizeExceeded {
+                index: 0,
+                size: 1024,
+                limit: 1023
+            })
+        );
+        assert_eq!(
+            parse_pe_header_prefix_batch(&inputs, limits(3, 1024, 3071)),
+            Err(PeHeaderBatchError::TotalSizeExceeded {
+                index: 2,
+                total: 3072,
+                limit: 3071
+            })
+        );
+        assert_eq!(owned, before);
+        for (path, bytes) in paths.iter().zip(&owned) {
+            assert_eq!(std::fs::read(path).unwrap(), *bytes);
+        }
+        result
+    };
+    assert_eq!(result, expected);
+}

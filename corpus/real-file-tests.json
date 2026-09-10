@@ -139,6 +139,9 @@
     "pe_certificates": [
       "generated_pe32_with_opaque_certificate_table_matches_file_bytes",
       "generated_pe32plus_with_opaque_certificate_table_matches_file_bytes"
+    ],
+    "pe_header_batch": [
+      "generated_mixed_header_batch_matches_owned_metadata_and_budgets"
     ]
   }
 }
