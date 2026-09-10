@@ -15,6 +15,7 @@ mod export_lookup;
 mod export_names;
 mod exports;
 mod header_batch;
+mod import_exports;
 mod imports;
 mod load_config;
 mod lookups;
@@ -71,6 +72,7 @@ pub use exports::{PeExportDirectory, PeExportDirectoryError, parse_pe_export_dir
 pub use header_batch::{
     PeHeaderBatch, PeHeaderBatchError, PeHeaderBatchLimits, parse_pe_header_prefix_batch,
 };
+pub use import_exports::{PeImportExportBatch, PeImportExportError, lookup_pe_import_exports};
 pub use imports::{PeImportDescriptor, PeImportError, parse_pe_import_descriptors};
 pub use load_config::{PeLoadConfigError, PeLoadConfigPrefix, parse_pe_load_config_prefix};
 pub use lookups::{
