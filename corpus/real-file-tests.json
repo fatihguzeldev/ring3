@@ -120,6 +120,10 @@
     "pe_resource_payloads": [
       "generated_pe32_resource_payloads_match_linked_bytes",
       "generated_pe32plus_resource_payloads_match_linked_bytes"
+    ],
+    "pe_debug_payloads": [
+      "generated_pe32_with_synthetic_debug_payload_matches_overlay_bytes",
+      "generated_pe32plus_with_synthetic_debug_payload_matches_overlay_bytes"
     ]
   }
 }

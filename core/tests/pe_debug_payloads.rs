@@ -311,3 +311,82 @@ fn all_directory_validation_precedes_invalid_payloads() {
         );
     }
 }
+
+fn generated_fixture_with_synthetic_debug_payload(variable: &str, plus: bool) {
+    let path = std::env::var_os(variable).expect("explicit generated fixture path");
+    let original = std::fs::read(&path).unwrap();
+    assert_eq!(original.len(), 1024);
+    assert_eq!(&original[60..64], &120_u32.to_le_bytes());
+    let slot = if plus { 304 } else { 288 };
+    assert_eq!(&original[slot..slot + 8], &[0; 8]);
+    assert_eq!(&original[448..476], &[0; 28]);
+    let mut bytes = original.clone();
+    put32(&mut bytes, slot, 448);
+    put32(&mut bytes, slot + 4, 28);
+    put32(&mut bytes, 460, 0xfeed_beef);
+    put32(&mut bytes, 464, 4);
+    put32(&mut bytes, 468, 0);
+    put32(&mut bytes, 472, 1024);
+    bytes.extend_from_slice(&[0x12, 0x34, 0x56, 0x78]);
+    for (index, (before, after)) in original.iter().zip(&bytes).enumerate() {
+        if !(slot..slot + 8).contains(&index) && !(448..476).contains(&index) {
+            assert_eq!(before, after, "unexpected mutation at {index}");
+        }
+    }
+    let before = bytes.clone();
+    let result = parse_pe_debug_payloads(&bytes).unwrap().unwrap();
+    assert_eq!(
+        result.directory_table.kind,
+        if plus { PeKind::Pe32Plus } else { PeKind::Pe32 }
+    );
+    assert_eq!(
+        result.directory_table.directory_rva,
+        RelativeVirtualAddress::new(448)
+    );
+    assert_eq!(
+        result.directory_table.directory_file_offset,
+        FileOffset::new(448)
+    );
+    assert_eq!(result.directory_table.directory_size, 28);
+    assert_eq!(result.directory_table.entries.len(), 1);
+    let entry = result.directory_table.entries[0];
+    assert_eq!(entry.entry_rva, RelativeVirtualAddress::new(448));
+    assert_eq!(entry.entry_file_offset, FileOffset::new(448));
+    assert_eq!(entry.characteristics, 0);
+    assert_eq!(entry.time_date_stamp, 0);
+    assert_eq!(entry.major_version, 0);
+    assert_eq!(entry.minor_version, 0);
+    assert_eq!(entry.debug_type, 0xfeed_beef);
+    assert_eq!(entry.size_of_data, 4);
+    assert_eq!(entry.address_of_raw_data, RelativeVirtualAddress::new(0));
+    assert_eq!(entry.pointer_to_raw_data, FileOffset::new(1024));
+    assert_eq!(
+        result.payloads,
+        [PeDebugPayload {
+            entry_index: 0,
+            range: Some(PeDebugPayloadRange {
+                file_offset: FileOffset::new(1024),
+                raw_bytes: &[0x12, 0x34, 0x56, 0x78]
+            })
+        }]
+    );
+    assert_eq!(
+        result.payloads[0].range.unwrap().raw_bytes.as_ptr(),
+        bytes[1024..].as_ptr()
+    );
+    assert_eq!(parse_pe_debug_payloads(&bytes), Ok(Some(result)));
+    assert_eq!(bytes, before);
+    assert_eq!(std::fs::read(path).unwrap(), original);
+}
+
+#[test]
+#[ignore = "requires an explicit generated fixture path"]
+fn generated_pe32_with_synthetic_debug_payload_matches_overlay_bytes() {
+    generated_fixture_with_synthetic_debug_payload("RING3_PE32_FIXTURE", false);
+}
+
+#[test]
+#[ignore = "requires an explicit generated fixture path"]
+fn generated_pe32plus_with_synthetic_debug_payload_matches_overlay_bytes() {
+    generated_fixture_with_synthetic_debug_payload("RING3_PE32PLUS_FIXTURE", true);
+}
