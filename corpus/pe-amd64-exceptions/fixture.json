@@ -1,0 +1,121 @@
+{
+  "schemaVersion": 1,
+  "provenance": "self-authored",
+  "licenseStatus": "pending",
+  "windowsOracle": "not-run",
+  "executed": false,
+  "fixture": "pe-amd64-exceptions",
+  "sources": {
+    "two-functions.s": {
+      "path": "corpus/pe-amd64-exceptions/two-functions.s",
+      "sha256": "60e5ab0a8654ac216d31b9ce12503bad27ff4c28e66884b1665df01873e26ac8"
+    },
+    "leaf-only.s": {
+      "path": "corpus/pe-amd64-exceptions/leaf-only.s",
+      "sha256": "fbfb698d5f5624bf3bb1ec4cb68d32ab4836d4f831f3f643fc48dbaa556e0fa8"
+    }
+  },
+  "tools": {
+    "clang": {
+      "sha256": "f30550eab15fdf5ab8c0dc54c52679711241e5d4b636b027e18c09fef531775d",
+      "version": "Apple clang version 21.0.0 (clang-2100.1.1.101)"
+    },
+    "lld": {
+      "sha256": "8f5fe507df7232eac0a610c12a5d11f3202205235f710eb98c6c78df6d3f548d",
+      "version": "LLD 22.1.6 (https://github.com/rust-lang/llvm-project.git dcc3606807c989700e0ac1cac18c31741bcd40d9)"
+    },
+    "objdump": {
+      "sha256": "1dcc1432db4d828cf8cd71a84cb8d9bf63a7ca80b5eeec711a9e5f13a3f5f98e",
+      "version": "Apple LLVM version 21.0.0"
+    }
+  },
+  "configurations": {
+    "two-functions": {
+      "exports": [
+        "frame_small",
+        "frame_saved"
+      ],
+      "artifacts": {
+        "probe.obj": {
+          "bytes": 598,
+          "sha256": "298d55f90583823a7d7feda044c49ea67dd994ffcefe9c48c8bd4cfade2b89b2"
+        },
+        "Probe.dll": {
+          "bytes": 2560,
+          "sha256": "790445b2007976cbd9fb616784f24e53a9951f07b0418ae56ad4be8960ed2410"
+        },
+        "Probe.lib": {
+          "bytes": 1508,
+          "sha256": "2b1d07c0a45a1a55d93a5498afc571f92fa85c0f286c897bb89111d5136333f2"
+        }
+      },
+      "inspection": {
+        "bytes": 3902,
+        "sha256": "e2394b128492ac94df359209e8ae270b8d33298a08d7043e76b63883a6204f50"
+      },
+      "metadata": {
+        "kind": "PE32Plus",
+        "machine": 34404,
+        "timeDateStamp": 0,
+        "directory": {
+          "rva": 12288,
+          "size": 24,
+          "fileOffset": 2048
+        },
+        "entries": [
+          {
+            "tableIndex": 0,
+            "entryRva": 12288,
+            "entryFileOffset": 2048,
+            "beginRva": 4096,
+            "endRva": 4110,
+            "unwindInfoRva": 8288
+          },
+          {
+            "tableIndex": 1,
+            "entryRva": 12300,
+            "entryFileOffset": 2060,
+            "beginRva": 4112,
+            "endRva": 4130,
+            "unwindInfoRva": 8296
+          }
+        ]
+      }
+    },
+    "leaf-only": {
+      "exports": [
+        "leaf_probe"
+      ],
+      "artifacts": {
+        "probe.obj": {
+          "bytes": 287,
+          "sha256": "4f6f79b975f9567aa52cdddd3ed31c191deb77cc18e19cfa024c0f9a7867b972"
+        },
+        "Probe.dll": {
+          "bytes": 2048,
+          "sha256": "024054daa4f94c27cac3aba671196ae7079e22bb4852675130b19dba52ad09f5"
+        },
+        "Probe.lib": {
+          "bytes": 1326,
+          "sha256": "8a7e0c65ac444af3284895bb3ce52e7d8a2d05c3fb7670199f51adcc5033f1d7"
+        }
+      },
+      "inspection": {
+        "bytes": 2895,
+        "sha256": "97626c2df6de244238dff861a9a427eb04a9e28484755f6eca820729b9800ca7"
+      },
+      "metadata": {
+        "kind": "PE32Plus",
+        "machine": 34404,
+        "timeDateStamp": 0,
+        "directory": {
+          "rva": 0,
+          "size": 0,
+          "fileOffset": null
+        },
+        "entries": []
+      }
+    }
+  },
+  "objectTimestamp": 0
+}
