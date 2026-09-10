@@ -48,7 +48,8 @@ corpus/
 
 `fixture.json` records source paths, expected metadata and pinned source/tool/output
 identities. It is maintained test input, not a run log. The builders read it,
-compile the source twice and verify the resulting bytes. Generated EXE/DLL files
+compile the source twice and verify the resulting bytes. Debug fixture PDB sidecars
+are checked as whole files; their symbols are not decoded. Generated EXE/DLL files
 and per-run evidence go under `target/`; they are not committed.
 
 | Family | Input being checked | Build command |
@@ -63,10 +64,14 @@ and per-run evidence go under `target/`; they are not committed.
 | [pe-delay-imports](corpus/pe-delay-imports/) | Delay-import metadata with named symbols. | `pnpm corpus:build:delay` |
 | [pe-delay-ordinals](corpus/pe-delay-ordinals/) | Delay-import metadata with ordinal `32768`. | `pnpm corpus:build:delay-ordinals` |
 | [pe-resources](corpus/pe-resources/) | Linked resource roots and raw Unicode name bytes. | `pnpm corpus:build:resources` |
+| [pe-debug-payloads](corpus/pe-debug-payloads/) | Linked raw debug metadata, opaque CodeView bytes and empty REPRO records. | `pnpm corpus:build:debug` |
 
 Builders require the pinned macOS Apple Clang/LLVM and Rust LLD binaries recorded
 in each manifest. Tool identity checks intentionally fail when those binaries
 change; review and update the pins when changing the fixture toolchain.
+Debug fixture repeatability also depends on the pinned local tool installation
+paths retained inside PDB sidecars. Object timestamps are zero; the PE/debug
+timestamps are stable content-derived values.
 
 ## Development
 
@@ -99,8 +104,8 @@ pnpm corpus:verify
 `corpus:test` runs the producer and verification guard tests, including changed
 inputs, tool failures and output-directory ownership checks.
 
-`corpus:verify` builds all ten fixture families twice and runs all 63 tests listed
-in [real-file-tests.json](corpus/real-file-tests.json) against 22 fresh file paths,
+`corpus:verify` builds the registered fixture families twice and runs the tests listed
+in [real-file-tests.json](corpus/real-file-tests.json) against fresh file paths,
 including named and ordinal delay-import lookups, linked resource directory graphs
 and fixed resource data-entry records.
 Certificate-entry tests append synthetic records to generated PE files in memory;
