@@ -35,7 +35,8 @@
       "ordinal_pe32plus_dll_matches_recorded_export_metadata"
     ],
     "pe_header_prefix": [
-      "generated_corpus_matches_recorded_header_metadata"
+      "generated_corpus_matches_recorded_header_metadata",
+      "generated_pe32plus_corpus_matches_recorded_header_prefix"
     ],
     "pe_headers": [
       "generated_pe32_matches_recorded_header_metadata",
@@ -132,6 +133,10 @@
     "pe_clr": [
       "generated_pe32_with_synthetic_clr_matches_raw_header",
       "generated_pe32plus_with_synthetic_clr_matches_raw_header"
+    ],
+    "pe_certificates": [
+      "generated_pe32_with_opaque_certificate_table_matches_file_bytes",
+      "generated_pe32plus_with_opaque_certificate_table_matches_file_bytes"
     ]
   }
 }

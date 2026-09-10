@@ -200,3 +200,25 @@ fn generated_corpus_matches_recorded_header_metadata() {
         })
     );
 }
+
+#[test]
+#[ignore = "requires the generated arithmetic file in RING3_PE32PLUS_FIXTURE"]
+fn generated_pe32plus_corpus_matches_recorded_header_prefix() {
+    let path =
+        std::env::var_os("RING3_PE32PLUS_FIXTURE").expect("explicit generated pe32+ fixture path");
+    let bytes = std::fs::read(&path).unwrap();
+    let before = bytes.clone();
+    assert_eq!(bytes.len(), 1024);
+    let wanted = PeHeaderPrefix {
+        pe_offset: FileOffset::new(120),
+        machine: 0x8664,
+        number_of_sections: 1,
+        characteristics: 0x23,
+        size_of_optional_header: 240,
+        kind: PeKind::Pe32Plus,
+    };
+    assert_eq!(parse_pe_header_prefix(&bytes), Ok(wanted));
+    assert_eq!(parse_pe_header_prefix(&bytes), Ok(wanted));
+    assert_eq!(bytes, before);
+    assert_eq!(std::fs::read(path).unwrap(), bytes);
+}
