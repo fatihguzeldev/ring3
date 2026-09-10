@@ -11,6 +11,7 @@ import { buildRelocationFixtures } from "./build-relocations.mjs";
 import { buildTlsFixtures } from "./build-tls.mjs";
 import { buildDelayImportFixtures } from "./build-delay-imports.mjs";
 import { buildResourceFixtures } from "./build-resources.mjs";
+import { buildDebugFixtures } from "./build-debug-payloads.mjs";
 import { prepareOutputParents, root, run, sha256, target } from "./shared.mjs";
 
 export const inventory = JSON.parse(readFileSync(join(root, "corpus/real-file-tests.json"), "utf8"));
@@ -107,6 +108,10 @@ const families = [
   { name: "delay-ordinal", build: (directory) => buildDelayImportFixtures(directory, { ordinal: true }), fixtures: {
     RING3_DELAY_ORDINAL_PE32_FIXTURE: "i386/delayed.exe",
     RING3_DELAY_ORDINAL_PE32PLUS_FIXTURE: "amd64/delayed.exe",
+  } },
+  { name: "debug", build: buildDebugFixtures, fixtures: {
+    RING3_DEBUG_PE32_FIXTURE: "i386/debug.exe",
+    RING3_DEBUG_PE32PLUS_FIXTURE: "amd64/debug.exe",
   } },
   { name: "resources", build: buildResourceFixtures, fixtures: {
     RING3_RESOURCE_PE32_FIXTURE: "i386/resources.exe",
