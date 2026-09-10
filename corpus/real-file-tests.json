@@ -91,7 +91,9 @@
     ],
     "pe_debug": [
       "generated_pe32_with_synthetic_debug_directory_matches_raw_metadata",
-      "generated_pe32plus_with_synthetic_debug_directory_matches_raw_metadata"
+      "generated_pe32plus_with_synthetic_debug_directory_matches_raw_metadata",
+      "generated_pe32_debug_directory_matches_linked_metadata",
+      "generated_pe32plus_debug_directory_matches_linked_metadata"
     ],
     "pe_delay_lookups": [
       "generated_pe32_delay_lookups_match_raw_metadata",
@@ -123,7 +125,9 @@
     ],
     "pe_debug_payloads": [
       "generated_pe32_with_synthetic_debug_payload_matches_overlay_bytes",
-      "generated_pe32plus_with_synthetic_debug_payload_matches_overlay_bytes"
+      "generated_pe32plus_with_synthetic_debug_payload_matches_overlay_bytes",
+      "generated_pe32_debug_payloads_match_linked_bytes",
+      "generated_pe32plus_debug_payloads_match_linked_bytes"
     ]
   }
 }

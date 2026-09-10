@@ -390,3 +390,69 @@ fn generated_pe32_with_synthetic_debug_payload_matches_overlay_bytes() {
 fn generated_pe32plus_with_synthetic_debug_payload_matches_overlay_bytes() {
     generated_fixture_with_synthetic_debug_payload("RING3_PE32PLUS_FIXTURE", true);
 }
+
+fn generated_debug_fixture_matches_linked_payloads(variable: &str, plus: bool) {
+    let path = std::env::var_os(variable).expect("explicit generated debug fixture path");
+    let bytes = std::fs::read(&path).unwrap();
+    let before = bytes.clone();
+    let guid = if plus {
+        [
+            0xa2, 0x4e, 0x62, 0x0a, 0x25, 0x14, 0x3a, 0xc4, 0x4c, 0x4c, 0x44, 0x20, 0x50, 0x44,
+            0x42, 0x2e,
+        ]
+    } else {
+        [
+            0x0d, 0x1a, 0x99, 0xe9, 0x14, 0xc9, 0x8e, 0x58, 0x4c, 0x4c, 0x44, 0x20, 0x50, 0x44,
+            0x42, 0x2e,
+        ]
+    };
+    let mut payload = Vec::from(*b"RSDS");
+    payload.extend_from_slice(&guid);
+    payload.extend_from_slice(&1_u32.to_le_bytes());
+    payload.extend_from_slice(b"ring3-debug.pdb\0");
+    assert_eq!(payload.len(), 40);
+    let table = parse_pe_debug_payloads(&bytes).unwrap().unwrap();
+    assert_eq!(
+        table.directory_table.kind,
+        if plus { PeKind::Pe32Plus } else { PeKind::Pe32 }
+    );
+    assert_eq!(
+        table.directory_table,
+        parse_pe_debug_directory(&bytes).unwrap().unwrap()
+    );
+    assert_eq!(
+        table.payloads,
+        [
+            PeDebugPayload {
+                entry_index: 0,
+                range: Some(PeDebugPayloadRange {
+                    file_offset: FileOffset::new(1592),
+                    raw_bytes: &payload
+                })
+            },
+            PeDebugPayload {
+                entry_index: 1,
+                range: None
+            },
+        ]
+    );
+    assert_eq!(
+        table.payloads[0].range.unwrap().raw_bytes.as_ptr(),
+        bytes[1592..].as_ptr()
+    );
+    assert_eq!(parse_pe_debug_payloads(&bytes), Ok(Some(table)));
+    assert_eq!(bytes, before);
+    assert_eq!(std::fs::read(path).unwrap(), before);
+}
+
+#[test]
+#[ignore = "requires an explicit generated debug fixture path"]
+fn generated_pe32_debug_payloads_match_linked_bytes() {
+    generated_debug_fixture_matches_linked_payloads("RING3_DEBUG_PE32_FIXTURE", false);
+}
+
+#[test]
+#[ignore = "requires an explicit generated debug fixture path"]
+fn generated_pe32plus_debug_payloads_match_linked_bytes() {
+    generated_debug_fixture_matches_linked_payloads("RING3_DEBUG_PE32PLUS_FIXTURE", true);
+}

@@ -352,3 +352,45 @@ fn generated_pe32_with_synthetic_debug_directory_matches_raw_metadata() {
 fn generated_pe32plus_with_synthetic_debug_directory_matches_raw_metadata() {
     generated_fixture_with_synthetic_debug_directory("RING3_PE32PLUS_FIXTURE", true);
 }
+
+fn generated_debug_fixture_matches_linked_metadata(variable: &str, plus: bool) {
+    let path = std::env::var_os(variable).expect("explicit generated debug fixture path");
+    let bytes = std::fs::read(&path).unwrap();
+    let before = bytes.clone();
+    let stamp = if plus { 4_146_262_468 } else { 1_862_328_645 };
+    let entry = |index: u32, debug_type, size, rva, file| PeDebugDirectoryEntry {
+        entry_rva: RelativeVirtualAddress::new(8192 + index * 28),
+        entry_file_offset: FileOffset::new(1536 + u64::from(index) * 28),
+        characteristics: 0,
+        time_date_stamp: stamp,
+        major_version: 0,
+        minor_version: 0,
+        debug_type,
+        size_of_data: size,
+        address_of_raw_data: RelativeVirtualAddress::new(rva),
+        pointer_to_raw_data: FileOffset::new(file),
+    };
+    let expected = PeDebugDirectoryTable {
+        kind: if plus { PeKind::Pe32Plus } else { PeKind::Pe32 },
+        directory_rva: RelativeVirtualAddress::new(8192),
+        directory_file_offset: FileOffset::new(1536),
+        directory_size: 56,
+        entries: vec![entry(0, 2, 40, 8248, 1592), entry(1, 16, 0, 0, 0)],
+    };
+    assert_eq!(parse_pe_debug_directory(&bytes), Ok(Some(expected.clone())));
+    assert_eq!(parse_pe_debug_directory(&bytes), Ok(Some(expected)));
+    assert_eq!(bytes, before);
+    assert_eq!(std::fs::read(path).unwrap(), before);
+}
+
+#[test]
+#[ignore = "requires an explicit generated debug fixture path"]
+fn generated_pe32_debug_directory_matches_linked_metadata() {
+    generated_debug_fixture_matches_linked_metadata("RING3_DEBUG_PE32_FIXTURE", false);
+}
+
+#[test]
+#[ignore = "requires an explicit generated debug fixture path"]
+fn generated_pe32plus_debug_directory_matches_linked_metadata() {
+    generated_debug_fixture_matches_linked_metadata("RING3_DEBUG_PE32PLUS_FIXTURE", true);
+}
