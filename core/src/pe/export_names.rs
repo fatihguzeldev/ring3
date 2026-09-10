@@ -178,6 +178,14 @@ pub fn parse_pe_export_names(
     else {
         return Ok(None);
     };
+    let entries = parse_prepared_export_name_entries(&prepared, &addresses)?;
+    Ok(Some(PeExportNameTable { addresses, entries }))
+}
+
+pub(super) fn parse_prepared_export_name_entries<'a>(
+    prepared: &PreparedPe<'a>,
+    addresses: &PeExportAddressTable<'a>,
+) -> Result<Vec<PeExportName<'a>>, PeExportNameError> {
     let count = addresses.directory.number_of_name_pointers;
     if count > NAME_LIMIT {
         return Err(PeExportNameError::NameLimitExceeded {
@@ -187,7 +195,7 @@ pub fn parse_pe_export_names(
     }
     let mut entries = Vec::new();
     if count == 0 {
-        return Ok(Some(PeExportNameTable { addresses, entries }));
+        return Ok(entries);
     }
     let name_start = addresses.directory.name_pointer_rva;
     let ordinal_start = addresses.directory.ordinal_table_rva;
@@ -231,7 +239,7 @@ pub fn parse_pe_export_names(
                 entry_index: table_index,
             });
         }
-        let (name_file_offset, name) = read_name(&prepared, table_index, name_rva, &mut total)?;
+        let (name_file_offset, name) = read_name(prepared, table_index, name_rva, &mut total)?;
         entries.push(PeExportName {
             table_index,
             name_pointer_rva: RelativeVirtualAddress::new(name_start.get() + name_offset),
@@ -248,5 +256,5 @@ pub fn parse_pe_export_names(
             name,
         });
     }
-    Ok(Some(PeExportNameTable { addresses, entries }))
+    Ok(entries)
 }
