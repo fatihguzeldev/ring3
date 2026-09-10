@@ -128,6 +128,10 @@
       "generated_pe32plus_with_synthetic_debug_payload_matches_overlay_bytes",
       "generated_pe32_debug_payloads_match_linked_bytes",
       "generated_pe32plus_debug_payloads_match_linked_bytes"
+    ],
+    "pe_clr": [
+      "generated_pe32_with_synthetic_clr_matches_raw_header",
+      "generated_pe32plus_with_synthetic_clr_matches_raw_header"
     ]
   }
 }
