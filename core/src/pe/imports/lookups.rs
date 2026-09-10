@@ -1,7 +1,8 @@
-use super::imports::parse_prepared_descriptors;
-use super::optional::{read_u16, read_u32};
-use super::rva::PreparedPe;
-use super::{PeImportDescriptor, PeImportError, PeKind, PeRvaError};
+use super::descriptors::parse_prepared_descriptors;
+use super::{PeImportDescriptor, PeImportError};
+use crate::pe::optional::{read_u16, read_u32};
+use crate::pe::rva::PreparedPe;
+use crate::pe::{PeKind, PeRvaError};
 use crate::{FileOffset, RelativeVirtualAddress};
 
 const ENTRY_LIMIT: u16 = 1024;

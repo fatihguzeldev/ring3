@@ -41,6 +41,13 @@ order. A malformed prefix stays in its file's result. Repeated references count
 toward the logical byte total each time; these limits do not cap process memory.
 See the [batch API and example](core/src/pe/header_batch.rs).
 
+Related PE readers are grouped under [imports](core/src/pe/imports.rs),
+[exports](core/src/pe/exports.rs), and [resources](core/src/pe/resources.rs).
+Delay imports live inside the [imports family](core/src/pe/imports/delay.rs).
+Each family keeps its readers and selection operations together; the public
+`ring3_core` API remains available through the crate root.
+
+
 `lookup_pe_export` selects metadata by exact name or full biased export ordinal
 inside one supplied image. Name queries preserve every duplicate matching row;
 ordinal queries use the address table without reading export names. The result
@@ -77,7 +84,7 @@ Query and selection-row limits apply after import parsing; they do not bound
 input bytes or temporary allocations. Each image owns the lifetime of its own
 borrowed text. This is static metadata matching without module discovery,
 architecture compatibility checks or address binding. See the
-[import/export API](core/src/pe/import_exports.rs).
+[import/export API](core/src/pe/imports/export_batch.rs).
 
 `lookup_pe_delay_import_exports` applies the same explicit-provider matching to
 one delay-import descriptor. It validates the complete delay table, DLL names
@@ -85,7 +92,7 @@ and lookup entries before selection. Unsupported attributes and unavailable INTs
 retain the raw reader's errors; INTs never fall back to IAT bytes. Each result
 keeps the selected delay metadata and its ordered provider selections, with
 independent image lifetimes and the same query/row budget scope. See the
-[delay import/export API](core/src/pe/delay_import_exports.rs).
+[delay import/export API](core/src/pe/imports/delay/export_batch.rs).
 
 
 ## Fixture corpus

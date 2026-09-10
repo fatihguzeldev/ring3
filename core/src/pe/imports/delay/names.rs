@@ -1,6 +1,7 @@
-use super::delay_imports::parse_prepared_descriptors;
-use super::rva::PreparedPe;
-use super::{PeDelayImportDescriptor, PeDelayImportError, PeKind, PeRvaError};
+use super::descriptors::parse_prepared_descriptors;
+use super::{PeDelayImportDescriptor, PeDelayImportError};
+use crate::pe::rva::PreparedPe;
+use crate::pe::{PeKind, PeRvaError};
 use crate::{FileOffset, RelativeVirtualAddress};
 
 const NAME_LENGTH_LIMIT: u32 = 1024;

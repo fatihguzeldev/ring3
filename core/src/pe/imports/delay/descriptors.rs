@@ -1,6 +1,6 @@
-use super::optional::read_u32;
-use super::rva::PreparedPe;
-use super::{PeDirectoryAddress, PeKind, PeRvaError};
+use crate::pe::optional::read_u32;
+use crate::pe::rva::PreparedPe;
+use crate::pe::{PeDirectoryAddress, PeKind, PeRvaError};
 use crate::{FileOffset, RelativeVirtualAddress};
 
 const DESCRIPTOR_LIMIT: u16 = 128;

@@ -1,10 +1,9 @@
-use super::delay_names::parse_prepared_names;
-use super::lookups::lookup_entries;
-use super::rva::PreparedPe;
-use super::{
-    PeDelayImportError, PeDelayImportName, PeDelayImportNameError, PeImportLookupEntry,
-    PeImportLookupError, PeKind,
-};
+use super::super::lookups::lookup_entries;
+use super::super::{PeImportLookupEntry, PeImportLookupError};
+use super::names::parse_prepared_names;
+use super::{PeDelayImportError, PeDelayImportName, PeDelayImportNameError};
+use crate::pe::PeKind;
+use crate::pe::rva::PreparedPe;
 use crate::{FileOffset, RelativeVirtualAddress};
 
 /// raw delay metadata and same-input names, in descriptor and lookup order.

@@ -7,16 +7,10 @@ mod certificates;
 mod clr;
 mod debug;
 mod debug_payloads;
-mod delay_import_exports;
-mod delay_imports;
-mod delay_lookups;
-mod delay_names;
 mod exports;
 mod header_batch;
-mod import_exports;
 mod imports;
 mod load_config;
-mod lookups;
 mod optional;
 mod resources;
 mod rva;
@@ -43,20 +37,6 @@ pub use debug_payloads::{
     PeDebugPayload, PeDebugPayloadError, PeDebugPayloadRange, PeDebugPayloadTable,
     parse_pe_debug_payloads,
 };
-pub use delay_import_exports::{
-    PeDelayImportExportBatch, PeDelayImportExportError, lookup_pe_delay_import_exports,
-};
-pub use delay_imports::{
-    PeDelayImportDescriptor, PeDelayImportError, PeDelayImportTable,
-    parse_pe_delay_import_descriptors,
-};
-pub use delay_lookups::{
-    PeDelayImportLookup, PeDelayImportLookupError, PeDelayImportLookupTable,
-    parse_pe_delay_import_lookups,
-};
-pub use delay_names::{
-    PeDelayImportName, PeDelayImportNameError, PeDelayImportNameTable, parse_pe_delay_import_names,
-};
 pub use exports::{
     PeExportAddressEntry, PeExportAddressError, PeExportAddressTable, PeExportBatch,
     PeExportBatchError, PeExportBatchLimits, PeExportDirectory, PeExportDirectoryError,
@@ -67,13 +47,17 @@ pub use exports::{
 pub use header_batch::{
     PeHeaderBatch, PeHeaderBatchError, PeHeaderBatchLimits, parse_pe_header_prefix_batch,
 };
-pub use import_exports::{PeImportExportBatch, PeImportExportError, lookup_pe_import_exports};
-pub use imports::{PeImportDescriptor, PeImportError, parse_pe_import_descriptors};
-pub use load_config::{PeLoadConfigError, PeLoadConfigPrefix, parse_pe_load_config_prefix};
-pub use lookups::{
-    PeImportLookup, PeImportLookupEntry, PeImportLookupError, PeImportSymbol,
+pub use imports::{
+    PeDelayImportDescriptor, PeDelayImportError, PeDelayImportExportBatch,
+    PeDelayImportExportError, PeDelayImportLookup, PeDelayImportLookupError,
+    PeDelayImportLookupTable, PeDelayImportName, PeDelayImportNameError, PeDelayImportNameTable,
+    PeDelayImportTable, PeImportDescriptor, PeImportError, PeImportExportBatch,
+    PeImportExportError, PeImportLookup, PeImportLookupEntry, PeImportLookupError, PeImportSymbol,
+    lookup_pe_delay_import_exports, lookup_pe_import_exports, parse_pe_delay_import_descriptors,
+    parse_pe_delay_import_lookups, parse_pe_delay_import_names, parse_pe_import_descriptors,
     parse_pe_import_lookups,
 };
+pub use load_config::{PeLoadConfigError, PeLoadConfigPrefix, parse_pe_load_config_prefix};
 pub use optional::{
     PeDataDirectory, PeDirectoryAddress, PeHeaders, PeOptionalHeader, parse_pe_headers,
 };
