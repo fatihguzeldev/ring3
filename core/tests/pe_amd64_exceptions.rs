@@ -319,3 +319,40 @@ fn the_whole_table_must_have_one_conservative_backing_range() {
         })
     );
 }
+
+#[test]
+#[ignore = "requires the self-authored linked AMD64 exception fixture"]
+fn generated_amd64_exception_functions_preserve_raw_records() {
+    let path = std::env::var("RING3_EXCEPTION_AMD64_FIXTURE")
+        .expect("RING3_EXCEPTION_AMD64_FIXTURE is required");
+    let bytes = std::fs::read(path).expect("read the AMD64 exception fixture");
+    assert_eq!(bytes.len(), 2560);
+    let headers = ring3_core::parse_pe_headers(&bytes).unwrap();
+    assert_eq!(headers.prefix.kind, PeKind::Pe32Plus);
+    assert_eq!(headers.prefix.machine, 0x8664);
+    assert_eq!(
+        parse_pe_amd64_exception_functions(&bytes),
+        Ok(Some(PeAmd64ExceptionTable {
+            directory_rva: RelativeVirtualAddress::new(12288),
+            directory_file_offset: FileOffset::new(2048),
+            directory_size: 24,
+            entries: vec![
+                expected(0, 12288, 2048, [4096, 4110, 8288]),
+                expected(1, 12300, 2060, [4112, 4130, 8296]),
+            ],
+        }))
+    );
+}
+
+#[test]
+#[ignore = "requires the self-authored linked AMD64 leaf fixture"]
+fn generated_amd64_leaf_image_has_no_exception_functions() {
+    let path = std::env::var("RING3_EXCEPTION_AMD64_LEAF_FIXTURE")
+        .expect("RING3_EXCEPTION_AMD64_LEAF_FIXTURE is required");
+    let bytes = std::fs::read(path).expect("read the AMD64 leaf fixture");
+    assert_eq!(bytes.len(), 2048);
+    let headers = ring3_core::parse_pe_headers(&bytes).unwrap();
+    assert_eq!(headers.prefix.kind, PeKind::Pe32Plus);
+    assert_eq!(headers.prefix.machine, 0x8664);
+    assert_eq!(parse_pe_amd64_exception_functions(&bytes), Ok(None));
+}

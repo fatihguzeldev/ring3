@@ -112,6 +112,7 @@ and per-run evidence go under `target/`; they are not committed.
 | [pe-delay-imports](corpus/pe-delay-imports/) | Delay-import metadata with named symbols. | `pnpm corpus:build:delay` |
 | [pe-delay-ordinals](corpus/pe-delay-ordinals/) | Delay-import metadata with ordinal `32768`. | `pnpm corpus:build:delay-ordinals` |
 | [pe-resources](corpus/pe-resources/) | Linked resource roots and raw Unicode name bytes. | `pnpm corpus:build:resources` |
+| [pe-amd64-exceptions](corpus/pe-amd64-exceptions/) | AMD64 DLLs with two raw exception function records or an absent table. | `pnpm corpus:build:exceptions` |
 | [pe-debug-payloads](corpus/pe-debug-payloads/) | Linked raw debug metadata, opaque CodeView bytes and empty REPRO records. | `pnpm corpus:build:debug` |
 | [pe-managed](corpus/pe-managed/) | Unpatched self-authored managed PE32 and PE32+ files with raw CLR headers. | `pnpm corpus:build:managed` |
 
