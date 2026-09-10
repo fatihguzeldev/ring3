@@ -200,3 +200,61 @@ fn framing_does_not_validate_sections_record_content_or_placement() {
         assert_eq!(table.raw_bytes.as_ptr(), bytes[64..].as_ptr());
     }
 }
+
+fn generated_fixture_with_opaque_certificate_table(variable: &str, plus: bool) {
+    let path = std::env::var_os(variable).expect("explicit generated fixture path");
+    let original = std::fs::read(&path).unwrap();
+    let prefix = ring3_core::parse_pe_header_prefix(&original).unwrap();
+    let kind = if plus { PeKind::Pe32Plus } else { PeKind::Pe32 };
+    assert_eq!(prefix.kind, kind);
+    assert_eq!(original.len(), 1024);
+    assert_eq!(prefix.pe_offset, FileOffset::new(120));
+    let slot = 120 + 24 + fixed(plus) + 32;
+    assert_eq!(&original[slot..slot + 8], &[0; 8]);
+    assert_eq!(parse_pe_certificate_table(&original), Ok(None));
+    let raw = [
+        0, 0, 0, 0, 0xab, 0xcd, 0xef, 0x12, b'r', b'i', b'n', b'g', b'3', 0xff, 0, 0x80,
+    ];
+    let mut bytes = original.clone();
+    bytes.extend_from_slice(&raw);
+    put32(&mut bytes, slot, 1024);
+    put32(&mut bytes, slot + 4, 16);
+    let before = bytes.clone();
+    let wanted = PeCertificateTable {
+        kind,
+        file_offset: FileOffset::new(1024),
+        size: 16,
+        raw_bytes: &raw,
+    };
+    let table = parse_pe_certificate_table(&bytes).unwrap().unwrap();
+    assert_eq!(table, wanted);
+    assert_eq!(parse_pe_certificate_table(&bytes), Ok(Some(wanted)));
+    assert_eq!(table.raw_bytes.as_ptr(), bytes[1024..].as_ptr());
+    assert_eq!(
+        ring3_core::parse_pe_certificate_entries(&bytes),
+        Err(ring3_core::PeCertificateEntryError::InvalidEntryLength {
+            entry_index: 0,
+            length: 0,
+        })
+    );
+    assert_eq!(bytes, before);
+    assert_eq!(bytes.len(), original.len() + raw.len());
+    for (index, (old, new)) in original.iter().zip(&bytes).enumerate() {
+        if !(slot..slot + 8).contains(&index) {
+            assert_eq!(old, new, "unexpected mutation at file byte {index}");
+        }
+    }
+    assert_eq!(std::fs::read(path).unwrap(), original);
+}
+
+#[test]
+#[ignore = "requires a generated pe32 fixture; certificate bytes are an opaque memory variant"]
+fn generated_pe32_with_opaque_certificate_table_matches_file_bytes() {
+    generated_fixture_with_opaque_certificate_table("RING3_PE32_FIXTURE", false);
+}
+
+#[test]
+#[ignore = "requires a generated pe32+ fixture; certificate bytes are an opaque memory variant"]
+fn generated_pe32plus_with_opaque_certificate_table_matches_file_bytes() {
+    generated_fixture_with_opaque_certificate_table("RING3_PE32PLUS_FIXTURE", true);
+}
