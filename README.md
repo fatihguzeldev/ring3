@@ -21,7 +21,7 @@ The [core exports](core/src/lib.rs) cover PE32/PE32+ headers, sections and file
 ranges; static import/export metadata; raw base-relocation blocks; fixed TLS
 directories; raw certificate tables and entry metadata; raw debug directory
 metadata and borrowed payload file ranges independent of their RVA fields; the supported size-bearing
-load-config common prefix; the fixed raw CLR header with uninterpreted nested coordinates;
+load-config common prefix; raw AMD64 exception function records; the fixed raw CLR header with uninterpreted nested coordinates;
 resource root headers, raw entries and borrowed Unicode
 name bytes; bounded acyclic resource directory graphs with shared table identities;
 fixed raw resource data-entry records and their leaf references;
@@ -58,6 +58,15 @@ costs every matching row. Other outcomes and per-query parse errors cost zero,
 while still counting as queries. Budget refusal returns no partial batch. Each
 query may allocate its own result before the row check, so this is not a byte or
 process-memory cap. See the [export batch API](core/src/pe/export_batch.rs).
+
+`parse_pe_amd64_exception_functions` reads at most 4096 raw 12-byte records
+from exception directory slot 3 in AMD64 PE32+ files. It preserves record order,
+zero entries, duplicates and all three RVA fields without following function or
+unwind targets. The directory RVA must be four-byte aligned; its complete table
+must have one conservative file-backed range. An absent slot is accepted for any
+otherwise accepted image. The result owns scalar metadata. This is not unwind
+validation, exception execution, or an input or peak-memory budget; see the
+[exception reader API](core/src/pe/amd64_exceptions.rs) for error precedence.
 
 `lookup_pe_import_exports` matches one descriptor's ordered import symbols against
 an explicitly supplied provider image. It validates all importer lookups first,

@@ -1,5 +1,6 @@
 use crate::{FileOffset, RelativeVirtualAddress};
 
+mod amd64_exceptions;
 mod base_relocations;
 mod certificate_entries;
 mod certificates;
@@ -30,6 +31,10 @@ mod rva;
 mod sections;
 mod tls;
 
+pub use amd64_exceptions::{
+    PeAmd64ExceptionEntry, PeAmd64ExceptionError, PeAmd64ExceptionTable,
+    parse_pe_amd64_exception_functions,
+};
 pub use base_relocations::{
     PeBaseRelocationBlock, PeBaseRelocationError, parse_pe_base_relocation_blocks,
 };
