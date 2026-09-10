@@ -602,3 +602,130 @@ fn generated_pe32plus_forwarder_export_selection_matches_metadata() {
         ring3_core::PeKind::Pe32Plus,
     );
 }
+
+#[test]
+fn reusable_lookup_keeps_name_errors_independent_of_ordinal_order() {
+    for plus in [false, true] {
+        let mut bytes = fixture(plus, 2);
+        row(&mut bytes, 1, 0xc010, 3);
+        let expected = Err(PeExportLookupError::Names(
+            PeExportNameError::AddressIndexOutOfRange {
+                entry_index: 1,
+                address_index: 3,
+                address_count: 3,
+            },
+        ));
+        for name_first in [false, true] {
+            let mut lookup = ring3_core::PeExportLookup::new(&bytes);
+            let queries = if name_first {
+                [PeExportQuery::Name("zeta"), PeExportQuery::Ordinal(9)]
+            } else {
+                [PeExportQuery::Ordinal(9), PeExportQuery::Name("zeta")]
+            };
+            for _ in 0..16 {
+                for query in queries {
+                    let result = lookup.lookup(query);
+                    if matches!(query, PeExportQuery::Name(_)) {
+                        assert_eq!(result, expected);
+                    } else {
+                        assert_eq!(
+                            result,
+                            Ok(PeExportSelection::Selected {
+                                address: ring3_core::PeExportAddressEntry {
+                                    table_index: 2,
+                                    ordinal: 9,
+                                    entry_rva: RelativeVirtualAddress::new(0x3008),
+                                    entry_file_offset: FileOffset::new(8712),
+                                    target: PeExportTarget::Forwarder {
+                                        rva: RelativeVirtualAddress::new(0x1100),
+                                        text: "W.F",
+                                    },
+                                },
+                                name: None,
+                            })
+                        );
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn reusable_results_outlive_the_owner_and_query() {
+    let bytes = fixture(false, 2);
+    let before = bytes.clone();
+    let (names, address) = {
+        let mut lookup = ring3_core::PeExportLookup::new(&bytes);
+        let query = String::from("zeta");
+        (
+            lookup.lookup(PeExportQuery::Name(&query)).unwrap(),
+            lookup.lookup(PeExportQuery::Ordinal(9)).unwrap(),
+        )
+    };
+    let PeExportSelection::AmbiguousName { matches } = names else {
+        panic!()
+    };
+    assert_eq!(matches.len(), 2);
+    assert_eq!((matches[0].table_index, matches[1].table_index), (0, 1));
+    assert!(
+        matches
+            .iter()
+            .all(|name| std::ptr::eq(name.name.as_ptr(), bytes[file_offset(0xc000)..].as_ptr()))
+    );
+    let PeExportSelection::Selected {
+        address,
+        name: None,
+    } = address
+    else {
+        panic!()
+    };
+    let PeExportTarget::Forwarder { text, .. } = address.target else {
+        panic!()
+    };
+    assert!(std::ptr::eq(text.as_ptr(), bytes[768..].as_ptr()));
+    assert_eq!(bytes, before);
+}
+
+#[test]
+fn reusable_owners_keep_absence_and_distinct_images_separate() {
+    let first = fixture(false, 1);
+    let mut second = first.clone();
+    directory(&mut second, false, 0, 0);
+    let mut present = ring3_core::PeExportLookup::new(&first);
+    let mut absent = ring3_core::PeExportLookup::new(&second);
+    for _ in 0..16 {
+        for query in [PeExportQuery::Name("zeta"), PeExportQuery::Ordinal(9)] {
+            assert_eq!(absent.lookup(query), Ok(PeExportSelection::DirectoryAbsent));
+            assert!(matches!(
+                present.lookup(query),
+                Ok(PeExportSelection::Selected { .. })
+            ));
+        }
+    }
+    assert_eq!(first, fixture(false, 1));
+}
+
+#[test]
+fn reusable_malformed_input_retains_both_typed_error_paths() {
+    let mut lookup = ring3_core::PeExportLookup::new(b"");
+    let cause = PeExportAddressError::Directory(PeExportDirectoryError::Base(PeRvaError::Parse(
+        PeHeaderError::OutOfBounds {
+            offset: FileOffset::new(0),
+            needed: 2,
+            available: 0,
+        },
+    )));
+    for _ in 0..16 {
+        assert_eq!(
+            lookup.lookup(PeExportQuery::Ordinal(0)),
+            Err(PeExportLookupError::Addresses(cause))
+        );
+        assert_eq!(
+            lookup.lookup(PeExportQuery::Name("")),
+            Err(PeExportLookupError::Names(PeExportNameError::Addresses(
+                cause
+            )))
+        );
+    }
+}
