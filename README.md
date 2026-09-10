@@ -59,6 +59,17 @@ while still counting as queries. Budget refusal returns no partial batch. Each
 query may allocate its own result before the row check, so this is not a byte or
 process-memory cap. See the [export batch API](core/src/pe/export_batch.rs).
 
+`lookup_pe_import_exports` matches one descriptor's ordered import symbols against
+an explicitly supplied provider image. It validates all importer lookups first,
+then selects the descriptor by its zero-based index and runs one export batch.
+Import hints remain metadata; names use exact matching and ordinals keep all
+16 bits. Provider errors stay aligned with the corresponding import entries.
+Query and selection-row limits apply after import parsing; they do not bound
+input bytes or temporary allocations. Each image owns the lifetime of its own
+borrowed text. This is static metadata matching without module discovery,
+architecture compatibility checks or address binding. See the
+[import/export API](core/src/pe/import_exports.rs).
+
 ## Fixture corpus
 
 A fixture is a small input with known properties, used to test a reader. Each
