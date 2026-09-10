@@ -1,7 +1,8 @@
-use super::resource_directories::parse_prepared_resource_directories;
-use super::resource_names::{PeResourceRootNameError, read_resource_name};
-use super::rva::PreparedPe;
-use super::{PeResourceDirectoryError, PeResourceDirectoryGraph, PeResourceRootError, PeRvaError};
+use super::directories::parse_prepared_resource_directories;
+use super::names::{PeResourceRootNameError, read_resource_name};
+use super::{PeResourceDirectoryError, PeResourceDirectoryGraph, PeResourceRootError};
+use crate::pe::PeRvaError;
+use crate::pe::rva::PreparedPe;
 use crate::{FileOffset, RelativeVirtualAddress};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

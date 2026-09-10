@@ -1,9 +1,10 @@
 use std::collections::BTreeMap;
 
-use super::optional::read_u32;
-use super::resource_directories::parse_prepared_resource_directories;
-use super::rva::PreparedPe;
-use super::{PeResourceDirectoryError, PeResourceDirectoryGraph, PeResourceRootError, PeRvaError};
+use super::directories::parse_prepared_resource_directories;
+use super::{PeResourceDirectoryError, PeResourceDirectoryGraph, PeResourceRootError};
+use crate::pe::PeRvaError;
+use crate::pe::optional::read_u32;
+use crate::pe::rva::PreparedPe;
 use crate::{FileOffset, RelativeVirtualAddress};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

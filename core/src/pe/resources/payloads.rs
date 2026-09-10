@@ -1,10 +1,11 @@
-use super::resource_data::parse_prepared_resource_data_entries;
-use super::rva::PreparedPe;
+use super::data::parse_prepared_resource_data_entries;
 use super::{
-    PeFileRange, PeResourceDataEntryError, PeResourceDataEntryTable, PeResourceDirectoryError,
-    PeResourceRootError, PeRvaError,
+    PeResourceDataEntryError, PeResourceDataEntryTable, PeResourceDirectoryError,
+    PeResourceRootError,
 };
 use crate::RelativeVirtualAddress;
+use crate::pe::rva::PreparedPe;
+use crate::pe::{PeFileRange, PeRvaError};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct PeResourcePayload<'a> {

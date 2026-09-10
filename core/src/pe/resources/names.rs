@@ -1,7 +1,8 @@
-use super::optional::read_u16;
-use super::resources::parse_prepared_resource_root;
-use super::rva::PreparedPe;
-use super::{PeResourceRoot, PeResourceRootError, PeRvaError};
+use super::root::parse_prepared_resource_root;
+use super::{PeResourceRoot, PeResourceRootError};
+use crate::pe::PeRvaError;
+use crate::pe::optional::read_u16;
+use crate::pe::rva::PreparedPe;
 use crate::{FileOffset, RelativeVirtualAddress};
 
 const NAME_UNIT_LIMIT: u16 = 1024;
