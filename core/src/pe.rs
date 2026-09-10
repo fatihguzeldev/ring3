@@ -10,6 +10,7 @@ mod delay_imports;
 mod delay_lookups;
 mod delay_names;
 mod export_addresses;
+mod export_lookup;
 mod export_names;
 mod exports;
 mod header_batch;
@@ -58,6 +59,7 @@ pub use export_addresses::{
     PeExportAddressEntry, PeExportAddressError, PeExportAddressTable, PeExportTarget,
     parse_pe_export_addresses,
 };
+pub use export_lookup::{PeExportLookupError, PeExportQuery, PeExportSelection, lookup_pe_export};
 pub use export_names::{PeExportName, PeExportNameError, PeExportNameTable, parse_pe_export_names};
 pub use exports::{PeExportDirectory, PeExportDirectoryError, parse_pe_export_directory};
 pub use header_batch::{
