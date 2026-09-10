@@ -325,3 +325,55 @@ fn short_embedded_headers_are_rejected_after_physical_prefix() {
         }
     }
 }
+
+fn generated_fixture_with_synthetic_clr(variable: &str, plus: bool) {
+    let path = std::env::var(variable).expect("set the generated fixture path");
+    let original = std::fs::read(&path).unwrap();
+    let table = ring3_core::parse_pe_sections(&original).unwrap();
+    let header = table.headers.prefix;
+    assert_eq!(
+        header.kind,
+        if plus { PeKind::Pe32Plus } else { PeKind::Pe32 }
+    );
+    let pe = usize::try_from(header.pe_offset.get()).unwrap();
+    let metadata_end = pe
+        + 24
+        + usize::from(header.size_of_optional_header)
+        + usize::from(header.number_of_sections) * 40;
+    let file = 440;
+    assert!(metadata_end <= file);
+    assert!(table.headers.optional.size_of_headers >= 512);
+    assert!(original[file..512].iter().all(|byte| *byte == 0));
+    assert_eq!(table.headers.directories[14].unwrap().size, 0);
+    let slot = pe + 24 + fixed(plus) + 112;
+    assert_eq!(&original[slot..slot + 8], &[0; 8]);
+    let mut bytes = original.clone();
+    put32(&mut bytes, slot, 440);
+    put32(&mut bytes, slot + 4, 72);
+    let cb = if plus { 96 } else { 80 };
+    record(&mut bytes, file, cb);
+    let before = bytes.clone();
+    let wanted = expected(plus, 440, 440, 72, cb);
+    assert_eq!(parse_pe_clr_header(&bytes), Ok(Some(wanted)));
+    assert_eq!(parse_pe_clr_header(&bytes), Ok(Some(wanted)));
+    assert_eq!(bytes, before);
+    assert_eq!(bytes.len(), original.len());
+    for (index, (old, new)) in original.iter().zip(&bytes).enumerate() {
+        if !(slot..slot + 8).contains(&index) && !(file..file + 72).contains(&index) {
+            assert_eq!(old, new, "unexpected mutation at file byte {index}");
+        }
+    }
+    assert_eq!(std::fs::read(path).unwrap(), original);
+}
+
+#[test]
+#[ignore = "requires a generated pe32 fixture; only a memory variant contains a clr header"]
+fn generated_pe32_with_synthetic_clr_matches_raw_header() {
+    generated_fixture_with_synthetic_clr("RING3_PE32_FIXTURE", false);
+}
+
+#[test]
+#[ignore = "requires a generated pe32+ fixture; only a memory variant contains a clr header"]
+fn generated_pe32plus_with_synthetic_clr_matches_raw_header() {
+    generated_fixture_with_synthetic_clr("RING3_PE32PLUS_FIXTURE", true);
+}
