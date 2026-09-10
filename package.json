@@ -17,7 +17,7 @@
     "corpus:build:ordinals": "node tools/corpus/build-imports.mjs --ordinal",
     "corpus:build:forwarders": "node tools/corpus/build-forwarders.mjs",
     "corpus:build:pe32plus": "node tools/corpus/build-pe32plus.mjs",
-    "corpus:test": "node --test tools/corpus/build-pe32.test.mjs tools/corpus/build-imports.test.mjs tools/corpus/build-import-ordinals.test.mjs tools/corpus/build-forwarders.test.mjs tools/corpus/build-pe32plus.test.mjs tools/corpus/verify.test.mjs tools/corpus/build-relocations.test.mjs tools/corpus/build-tls.test.mjs tools/corpus/build-delay-imports.test.mjs tools/corpus/build-delay-ordinals.test.mjs tools/corpus/build-resources.test.mjs tools/corpus/build-debug-payloads.test.mjs",
+    "corpus:test": "node --test tools/corpus/build-pe32.test.mjs tools/corpus/build-imports.test.mjs tools/corpus/build-import-ordinals.test.mjs tools/corpus/build-forwarders.test.mjs tools/corpus/build-pe32plus.test.mjs tools/corpus/verify.test.mjs tools/corpus/build-relocations.test.mjs tools/corpus/build-tls.test.mjs tools/corpus/build-delay-imports.test.mjs tools/corpus/build-delay-ordinals.test.mjs tools/corpus/build-resources.test.mjs tools/corpus/build-debug-payloads.test.mjs tools/corpus/build-managed.test.mjs",
     "corpus:verify": "node tools/corpus/verify.mjs",
     "format:rust": "cargo fmt --all -- --check",
     "lint:rust": "cargo clippy --workspace --all-targets -- -D warnings",
@@ -30,7 +30,8 @@
     "corpus:build:delay": "node tools/corpus/build-delay-imports.mjs",
     "corpus:build:delay-ordinals": "node tools/corpus/build-delay-imports.mjs --ordinal",
     "corpus:build:resources": "node tools/corpus/build-resources.mjs",
-    "corpus:build:debug": "node tools/corpus/build-debug-payloads.mjs"
+    "corpus:build:debug": "node tools/corpus/build-debug-payloads.mjs",
+    "corpus:build:managed": "node tools/corpus/build-managed.mjs"
   },
   "devDependencies": {
     "typescript": "5.9.3"

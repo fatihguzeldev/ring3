@@ -1,0 +1,199 @@
+{
+  "schemaVersion": 1,
+  "executed": false,
+  "windowsOracle": "not-run",
+  "reproducibility": "Pinned local macOS arm64 SDK/compiler/runtime/reference bytes; independent output roots. No cross-machine claim.",
+  "source": {
+    "path": "corpus/pe-managed/Probe.cs",
+    "sha256": "325dbcbcc6253429615b2971d9d534ba6ec3e42c42e6044750ef5f31cd58bd48"
+  },
+  "sdk": {
+    "version": "10.0.401",
+    "runtimeVersion": "10.0.12",
+    "compilerVersion": "5.9.0-1.26423.113 (e34a38d2ae1fc26406a317517196e55c68ff83ab)",
+    "archive": {
+      "name": "dotnet-sdk-osx-arm64.tar.gz",
+      "rid": "osx-arm64",
+      "url": "https://builds.dotnet.microsoft.com/dotnet/Sdk/10.0.401/dotnet-sdk-10.0.401-osx-arm64.tar.gz",
+      "hash": "69f64eb00dc045398755c440b152225d544301a345a146a16e86a56a0c52b7c94b2c331520e976dbb821f18d31930aafbd25bb85961e3517e0665414ce0cbcff"
+    },
+    "compilerPath": "sdk/10.0.401/Roslyn/bincore/csc.dll",
+    "referencePath": "packs/Microsoft.NETCore.App.Ref/10.0.12/ref/net10.0/System.Runtime.dll",
+    "files": {
+      "dotnet": {
+        "bytes": 141392,
+        "sha256": "00c673767ee2538369f307d3c8a0ce06f16bc9e0ecf8ce767b64dd02b2230e98"
+      },
+      "packs/Microsoft.NETCore.App.Ref/10.0.12/ref/net10.0/System.Runtime.dll": {
+        "bytes": 862504,
+        "sha256": "10ceaa9b398f512b46def6fd16fb5374c82ac03a7495859adbaaa70868fe70aa"
+      }
+    },
+    "trees": {
+      "host/fxr/10.0.12": {
+        "files": 1,
+        "bytes": 425456,
+        "sha256": "064fbe5b95cf8191f2d30925b76c5f6d481f31714619b3060def7ea8b9ccf52f"
+      },
+      "sdk/10.0.401/Roslyn/bincore": {
+        "files": 54,
+        "bytes": 48460260,
+        "sha256": "49f719bc47ca77a979726a9de1d1d1cc07c84d505cf2c60c57bc9f004b70c3f8"
+      },
+      "shared/Microsoft.NETCore.App/10.0.12": {
+        "files": 188,
+        "bytes": 86185383,
+        "sha256": "4e274c56c45fb1d94c0aed6a6b7af290dfc20ca9a49f385736a53d0d66edfe71"
+      }
+    }
+  },
+  "compilerArguments": [
+    "-noconfig",
+    "-nostdlib+",
+    "-nologo",
+    "-target:exe",
+    "-deterministic+",
+    "-optimize+",
+    "-debug-",
+    "-langversion:14.0",
+    "-codepage:65001"
+  ],
+  "architectures": {
+    "x86": {
+      "artifact": {
+        "bytes": 3584,
+        "sha256": "4315faf842c9e8badf6a5872523472ca2a8df13e035a47e56a2ba5076912c92a"
+      },
+      "metadata": {
+        "kind": 32,
+        "directory": [
+          8200,
+          520,
+          72
+        ],
+        "cb": 72,
+        "version": [
+          2,
+          5
+        ],
+        "flags": 3,
+        "entry": [
+          100663297,
+          "token"
+        ],
+        "pairs": [
+          [
+            8276,
+            692
+          ],
+          [
+            0,
+            0
+          ],
+          [
+            0,
+            0
+          ],
+          [
+            0,
+            0
+          ],
+          [
+            0,
+            0
+          ],
+          [
+            0,
+            0
+          ],
+          [
+            0,
+            0
+          ]
+        ],
+        "prefixHex": "480000000200050054200000b40200000300000001000006000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+        "source": [
+          "section",
+          0
+        ],
+        "fullDirectoryQuery": [
+          "range",
+          520,
+          72,
+          [
+            "section",
+            0
+          ]
+        ]
+      }
+    },
+    "x64": {
+      "artifact": {
+        "bytes": 3072,
+        "sha256": "7d50f2f6db9b06867cd30e9426e96241a2e522f0704a26561cdd1525d60654a9"
+      },
+      "metadata": {
+        "kind": 64,
+        "directory": [
+          8192,
+          512,
+          72
+        ],
+        "cb": 72,
+        "version": [
+          2,
+          5
+        ],
+        "flags": 1,
+        "entry": [
+          100663297,
+          "token"
+        ],
+        "pairs": [
+          [
+            8268,
+            692
+          ],
+          [
+            0,
+            0
+          ],
+          [
+            0,
+            0
+          ],
+          [
+            0,
+            0
+          ],
+          [
+            0,
+            0
+          ],
+          [
+            0,
+            0
+          ],
+          [
+            0,
+            0
+          ]
+        ],
+        "prefixHex": "48000000020005004c200000b40200000100000001000006000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+        "source": [
+          "section",
+          0
+        ],
+        "fullDirectoryQuery": [
+          "range",
+          512,
+          72,
+          [
+            "section",
+            0
+          ]
+        ]
+      }
+    }
+  }
+}
