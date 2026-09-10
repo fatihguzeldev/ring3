@@ -12,6 +12,7 @@ import { buildTlsFixtures } from "./build-tls.mjs";
 import { buildDelayImportFixtures } from "./build-delay-imports.mjs";
 import { buildResourceFixtures } from "./build-resources.mjs";
 import { buildDebugFixtures } from "./build-debug-payloads.mjs";
+import { buildManagedFixtures } from "./build-managed.mjs";
 import { prepareOutputParents, root, run, sha256, target } from "./shared.mjs";
 
 export const inventory = JSON.parse(readFileSync(join(root, "corpus/real-file-tests.json"), "utf8"));
@@ -68,7 +69,7 @@ function sourceHashes() {
     for (const entry of readdirSync(join(root, directory), { withFileTypes: true })) {
       const path = join(directory, entry.name);
       if (entry.isDirectory()) walk(path);
-      else if (/\.(rs|mjs|json|s|c|def)$/.test(entry.name)) {
+      else if (/\.(rs|mjs|json|s|c|cs|def)$/.test(entry.name)) {
         assert.ok(entry.isFile(), "source inputs must be regular files");
         paths.push(path);
       }
@@ -112,6 +113,10 @@ const families = [
   { name: "debug", build: buildDebugFixtures, fixtures: {
     RING3_DEBUG_PE32_FIXTURE: "i386/debug.exe",
     RING3_DEBUG_PE32PLUS_FIXTURE: "amd64/debug.exe",
+  } },
+  { name: "managed", build: buildManagedFixtures, fixtures: {
+    RING3_CLR_PE32_FIXTURE: "x86/Probe.exe",
+    RING3_CLR_PE32PLUS_FIXTURE: "x64/Probe.exe",
   } },
   { name: "resources", build: buildResourceFixtures, fixtures: {
     RING3_RESOURCE_PE32_FIXTURE: "i386/resources.exe",
