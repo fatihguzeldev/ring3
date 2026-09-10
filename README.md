@@ -45,7 +45,12 @@ See the [batch API and example](core/src/pe/header_batch.rs).
 inside one supplied image. Name queries preserve every duplicate matching row;
 ordinal queries use the address table without reading export names. The result
 borrows name and forwarder text from the input and retains empty slots, raw RVAs
-and unresolved forwarders. See the [selection API](core/src/pe/export_lookup.rs).
+and unresolved forwarders. `PeExportLookup::new(bytes)` keeps an owner for repeated
+queries on the same immutable image. Its `lookup` method retains name and address
+reader results independently, including absence and errors; construction performs
+no parsing. Results can outlive the owner, while the image must remain alive.
+Mixed queries may retain two address tables. See the
+[selection API](core/src/pe/export_lookup.rs).
 
 ## Fixture corpus
 
