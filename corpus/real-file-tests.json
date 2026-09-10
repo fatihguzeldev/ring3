@@ -142,6 +142,14 @@
     ],
     "pe_header_batch": [
       "generated_mixed_header_batch_matches_owned_metadata_and_budgets"
+    ],
+    "pe_export_lookup": [
+      "generated_pe32_named_export_selection_matches_metadata",
+      "generated_pe32plus_named_export_selection_matches_metadata",
+      "generated_pe32_ordinal_export_selection_matches_metadata",
+      "generated_pe32plus_ordinal_export_selection_matches_metadata",
+      "generated_pe32_forwarder_export_selection_matches_metadata",
+      "generated_pe32plus_forwarder_export_selection_matches_metadata"
     ]
   }
 }

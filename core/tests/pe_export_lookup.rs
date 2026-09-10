@@ -352,3 +352,253 @@ fn borrowed_forwarder_and_full_ambiguity_limit_preserve_inputs_and_repeats() {
     assert!(std::ptr::eq(text.as_ptr(), bytes[768..].as_ptr()));
     assert_eq!(bytes, before);
 }
+
+fn read_corpus_provider(variable: &str, kind: ring3_core::PeKind) -> (std::path::PathBuf, Vec<u8>) {
+    let path = std::path::PathBuf::from(
+        std::env::var_os(variable).expect("explicit generated provider fixture path"),
+    );
+    let bytes = std::fs::read(&path).unwrap();
+    assert_eq!(bytes.len(), 2048);
+    assert_eq!(
+        ring3_core::parse_pe_header_prefix(&bytes).unwrap().kind,
+        kind
+    );
+    (path, bytes)
+}
+
+fn check_corpus_selection(
+    bytes: &[u8],
+    query: PeExportQuery<'_>,
+    expected: &PeExportSelection<'_>,
+) {
+    let before = bytes.to_vec();
+    let result = lookup_pe_export(bytes, query).unwrap();
+    assert_eq!(&result, expected);
+    assert_eq!(&lookup_pe_export(bytes, query).unwrap(), expected);
+    if let PeExportSelection::Selected { address, name } = result {
+        if let Some(name) = name {
+            let offset = usize::try_from(name.name_file_offset.get()).unwrap();
+            assert!(std::ptr::eq(name.name.as_ptr(), bytes[offset..].as_ptr()));
+        }
+        if let PeExportTarget::Forwarder { rva, text } = address.target {
+            let offset = match rva.get() {
+                8295 => 1639,
+                8320 => 1664,
+                _ => panic!("unexpected corpus forwarder"),
+            };
+            assert!(std::ptr::eq(text.as_ptr(), bytes[offset..].as_ptr()));
+        }
+    }
+    assert_eq!(bytes, before);
+}
+
+fn check_direct_corpus_selection(variable: &str, kind: ring3_core::PeKind, named: bool) {
+    use ring3_core::{PeExportAddressEntry, PeExportName};
+
+    let (path, bytes) = read_corpus_provider(variable, kind);
+    let ordinal = if named { 1 } else { 32768 };
+    let address = PeExportAddressEntry {
+        table_index: 0,
+        ordinal,
+        entry_rva: RelativeVirtualAddress::new(if named { 8247 } else { 8249 }),
+        entry_file_offset: FileOffset::new(if named { 1591 } else { 1593 }),
+        target: PeExportTarget::Rva(RelativeVirtualAddress::new(4096)),
+    };
+    check_corpus_selection(
+        &bytes,
+        PeExportQuery::Ordinal(ordinal),
+        &PeExportSelection::Selected {
+            address,
+            name: None,
+        },
+    );
+    let name = PeExportName {
+        table_index: 0,
+        name_pointer_rva: RelativeVirtualAddress::new(8251),
+        name_pointer_file_offset: FileOffset::new(1595),
+        ordinal_entry_rva: RelativeVirtualAddress::new(8255),
+        ordinal_entry_file_offset: FileOffset::new(1599),
+        address_index: 0,
+        name_rva: RelativeVirtualAddress::new(8257),
+        name_file_offset: FileOffset::new(1601),
+        name: "ring3_probe",
+    };
+    let expected = if named {
+        PeExportSelection::Selected {
+            address,
+            name: Some(name),
+        }
+    } else {
+        PeExportSelection::NameNotFound
+    };
+    check_corpus_selection(&bytes, PeExportQuery::Name("ring3_probe"), &expected);
+    check_corpus_selection(
+        &bytes,
+        PeExportQuery::Name("RING3_PROBE"),
+        &PeExportSelection::NameNotFound,
+    );
+    check_corpus_selection(
+        &bytes,
+        PeExportQuery::Ordinal(ordinal - 1),
+        &PeExportSelection::OrdinalBeforeBase {
+            ordinal: ordinal - 1,
+            base: ordinal,
+        },
+    );
+    check_corpus_selection(
+        &bytes,
+        PeExportQuery::Ordinal(ordinal + 1),
+        &PeExportSelection::OrdinalOutOfRange {
+            ordinal: ordinal + 1,
+            base: ordinal,
+            address_count: 1,
+        },
+    );
+    assert_eq!(std::fs::read(path).unwrap(), bytes);
+}
+
+fn check_forwarder_corpus_selection(variable: &str, kind: ring3_core::PeKind) {
+    use ring3_core::{PeExportAddressEntry, PeExportName};
+
+    let (path, bytes) = read_corpus_provider(variable, kind);
+    for (name_index, address_index, name_rva, name_offset, name, target_rva, text) in [
+        (
+            0,
+            0_u16,
+            8276,
+            1620,
+            "by_name",
+            8295,
+            "OtherModule.ring3_target",
+        ),
+        (1, 2, 8284, 1628, "by_ordinal", 8320, "OtherModule.#32768"),
+    ] {
+        let address = PeExportAddressEntry {
+            table_index: u32::from(address_index),
+            ordinal: 7 + u32::from(address_index),
+            entry_rva: RelativeVirtualAddress::new(8252 + 4 * u32::from(address_index)),
+            entry_file_offset: FileOffset::new(1596 + 4 * u64::from(address_index)),
+            target: PeExportTarget::Forwarder {
+                rva: RelativeVirtualAddress::new(target_rva),
+                text,
+            },
+        };
+        let row = PeExportName {
+            table_index: name_index,
+            name_pointer_rva: RelativeVirtualAddress::new(8264 + 4 * name_index),
+            name_pointer_file_offset: FileOffset::new(1608 + 4 * u64::from(name_index)),
+            ordinal_entry_rva: RelativeVirtualAddress::new(8272 + 2 * name_index),
+            ordinal_entry_file_offset: FileOffset::new(1616 + 2 * u64::from(name_index)),
+            address_index,
+            name_rva: RelativeVirtualAddress::new(name_rva),
+            name_file_offset: FileOffset::new(name_offset),
+            name,
+        };
+        check_corpus_selection(
+            &bytes,
+            PeExportQuery::Name(name),
+            &PeExportSelection::Selected {
+                address,
+                name: Some(row),
+            },
+        );
+        check_corpus_selection(
+            &bytes,
+            PeExportQuery::Ordinal(address.ordinal),
+            &PeExportSelection::Selected {
+                address,
+                name: None,
+            },
+        );
+    }
+    check_corpus_selection(
+        &bytes,
+        PeExportQuery::Ordinal(8),
+        &PeExportSelection::Selected {
+            address: PeExportAddressEntry {
+                table_index: 1,
+                ordinal: 8,
+                entry_rva: RelativeVirtualAddress::new(8256),
+                entry_file_offset: FileOffset::new(1600),
+                target: PeExportTarget::Empty,
+            },
+            name: None,
+        },
+    );
+    check_corpus_selection(
+        &bytes,
+        PeExportQuery::Ordinal(6),
+        &PeExportSelection::OrdinalBeforeBase {
+            ordinal: 6,
+            base: 7,
+        },
+    );
+    check_corpus_selection(
+        &bytes,
+        PeExportQuery::Ordinal(10),
+        &PeExportSelection::OrdinalOutOfRange {
+            ordinal: 10,
+            base: 7,
+            address_count: 3,
+        },
+    );
+    assert_eq!(std::fs::read(path).unwrap(), bytes);
+}
+
+#[test]
+#[ignore = "requires explicit RING3_EXPORT_PE32_NAMED_DLL"]
+fn generated_pe32_named_export_selection_matches_metadata() {
+    check_direct_corpus_selection(
+        "RING3_EXPORT_PE32_NAMED_DLL",
+        ring3_core::PeKind::Pe32,
+        true,
+    );
+}
+
+#[test]
+#[ignore = "requires explicit RING3_EXPORT_PE32PLUS_NAMED_DLL"]
+fn generated_pe32plus_named_export_selection_matches_metadata() {
+    check_direct_corpus_selection(
+        "RING3_EXPORT_PE32PLUS_NAMED_DLL",
+        ring3_core::PeKind::Pe32Plus,
+        true,
+    );
+}
+
+#[test]
+#[ignore = "requires explicit RING3_EXPORT_PE32_ORDINAL_DLL"]
+fn generated_pe32_ordinal_export_selection_matches_metadata() {
+    check_direct_corpus_selection(
+        "RING3_EXPORT_PE32_ORDINAL_DLL",
+        ring3_core::PeKind::Pe32,
+        false,
+    );
+}
+
+#[test]
+#[ignore = "requires explicit RING3_EXPORT_PE32PLUS_ORDINAL_DLL"]
+fn generated_pe32plus_ordinal_export_selection_matches_metadata() {
+    check_direct_corpus_selection(
+        "RING3_EXPORT_PE32PLUS_ORDINAL_DLL",
+        ring3_core::PeKind::Pe32Plus,
+        false,
+    );
+}
+
+#[test]
+#[ignore = "requires explicit RING3_EXPORT_FORWARD_PE32_FIXTURE"]
+fn generated_pe32_forwarder_export_selection_matches_metadata() {
+    check_forwarder_corpus_selection(
+        "RING3_EXPORT_FORWARD_PE32_FIXTURE",
+        ring3_core::PeKind::Pe32,
+    );
+}
+
+#[test]
+#[ignore = "requires explicit RING3_EXPORT_FORWARD_PE32PLUS_FIXTURE"]
+fn generated_pe32plus_forwarder_export_selection_matches_metadata() {
+    check_forwarder_corpus_selection(
+        "RING3_EXPORT_FORWARD_PE32PLUS_FIXTURE",
+        ring3_core::PeKind::Pe32Plus,
+    );
+}
