@@ -149,7 +149,9 @@
       "generated_pe32_ordinal_export_selection_matches_metadata",
       "generated_pe32plus_ordinal_export_selection_matches_metadata",
       "generated_pe32_forwarder_export_selection_matches_metadata",
-      "generated_pe32plus_forwarder_export_selection_matches_metadata"
+      "generated_pe32plus_forwarder_export_selection_matches_metadata",
+      "generated_pe32_reusable_export_lookup_matches_metadata",
+      "generated_pe32plus_reusable_export_lookup_matches_metadata"
     ]
   }
 }

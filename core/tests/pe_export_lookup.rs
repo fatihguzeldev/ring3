@@ -729,3 +729,98 @@ fn reusable_malformed_input_retains_both_typed_error_paths() {
         );
     }
 }
+
+fn check_reusable_corpus_provider(variable: &str, kind: ring3_core::PeKind) {
+    let (path, bytes) = read_corpus_provider(variable, kind);
+    let before = bytes.clone();
+    let address = ring3_core::PeExportAddressEntry {
+        table_index: 0,
+        ordinal: 1,
+        entry_rva: RelativeVirtualAddress::new(8247),
+        entry_file_offset: FileOffset::new(1591),
+        target: PeExportTarget::Rva(RelativeVirtualAddress::new(4096)),
+    };
+    let named = PeExportSelection::Selected {
+        address,
+        name: Some(ring3_core::PeExportName {
+            table_index: 0,
+            name_pointer_rva: RelativeVirtualAddress::new(8251),
+            name_pointer_file_offset: FileOffset::new(1595),
+            ordinal_entry_rva: RelativeVirtualAddress::new(8255),
+            ordinal_entry_file_offset: FileOffset::new(1599),
+            address_index: 0,
+            name_rva: RelativeVirtualAddress::new(8257),
+            name_file_offset: FileOffset::new(1601),
+            name: "ring3_probe",
+        }),
+    };
+    for name_first in [false, true] {
+        let result = {
+            let mut lookup = ring3_core::PeExportLookup::new(&bytes);
+            let query = String::from("ring3_probe");
+            let queries = if name_first {
+                [PeExportQuery::Name(&query), PeExportQuery::Ordinal(1)]
+            } else {
+                [PeExportQuery::Ordinal(1), PeExportQuery::Name(&query)]
+            };
+            for _ in 0..16 {
+                for query in queries {
+                    let expected = if matches!(query, PeExportQuery::Name(_)) {
+                        named.clone()
+                    } else {
+                        PeExportSelection::Selected {
+                            address,
+                            name: None,
+                        }
+                    };
+                    assert_eq!(lookup.lookup(query), Ok(expected));
+                }
+                assert_eq!(
+                    lookup.lookup(PeExportQuery::Name("RING3_PROBE")),
+                    Ok(PeExportSelection::NameNotFound)
+                );
+                assert_eq!(
+                    lookup.lookup(PeExportQuery::Ordinal(0)),
+                    Ok(PeExportSelection::OrdinalBeforeBase {
+                        ordinal: 0,
+                        base: 1
+                    })
+                );
+                assert_eq!(
+                    lookup.lookup(PeExportQuery::Ordinal(2)),
+                    Ok(PeExportSelection::OrdinalOutOfRange {
+                        ordinal: 2,
+                        base: 1,
+                        address_count: 1
+                    })
+                );
+            }
+            lookup.lookup(PeExportQuery::Name(&query)).unwrap()
+        };
+        assert_eq!(result, named);
+        let PeExportSelection::Selected {
+            name: Some(name), ..
+        } = result
+        else {
+            panic!()
+        };
+        assert!(std::ptr::eq(name.name.as_ptr(), bytes[1601..].as_ptr()));
+    }
+    assert_eq!(bytes, before);
+    assert_eq!(std::fs::read(path).unwrap(), before);
+}
+
+#[test]
+#[ignore = "requires explicit RING3_EXPORT_PE32_NAMED_DLL"]
+fn generated_pe32_reusable_export_lookup_matches_metadata() {
+    check_reusable_corpus_provider("RING3_EXPORT_PE32_NAMED_DLL", ring3_core::PeKind::Pe32);
+}
+
+#[test]
+#[ignore = "requires explicit RING3_EXPORT_PE32PLUS_NAMED_DLL"]
+fn generated_pe32plus_reusable_export_lookup_matches_metadata() {
+    check_reusable_corpus_provider(
+        "RING3_EXPORT_PE32PLUS_NAMED_DLL",
+        ring3_core::PeKind::Pe32Plus,
+    );
+}
