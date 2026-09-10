@@ -34,6 +34,13 @@ the generated programs. Reader types and limits live with their [implementation]
 The CLR reader preserves flags and the entry-point word without validating metadata,
 tokens or runtime compatibility; declared header tails are not read.
 
+`parse_pe_header_prefix_batch` accepts an immutable list of already materialized
+byte slices and explicit file-count, per-file byte and total-byte limits. It
+checks every budget before reading prefixes, then returns owned results in input
+order. A malformed prefix stays in its file's result. Repeated references count
+toward the logical byte total each time; these limits do not cap process memory.
+See the [batch API and example](core/src/pe/header_batch.rs).
+
 ## Fixture corpus
 
 A fixture is a small input with known properties, used to test a reader. Each
