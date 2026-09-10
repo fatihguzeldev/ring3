@@ -286,3 +286,112 @@ fn repeated_budget_refusals_and_successes_preserve_inputs() {
     }
     assert_eq!(bytes, before);
 }
+
+fn read_corpus_provider(variable: &str, kind: ring3_core::PeKind) -> (std::path::PathBuf, Vec<u8>) {
+    let path = std::path::PathBuf::from(
+        std::env::var_os(variable).expect("explicit generated provider fixture path"),
+    );
+    let bytes = std::fs::read(&path).unwrap();
+    assert_eq!(bytes.len(), 2048);
+    assert_eq!(
+        ring3_core::parse_pe_header_prefix(&bytes).unwrap().kind,
+        kind
+    );
+    (path, bytes)
+}
+
+fn check_corpus_batch(variable: &str, kind: ring3_core::PeKind) {
+    let (path, bytes) = read_corpus_provider(variable, kind);
+    let before = bytes.clone();
+    let address = ring3_core::PeExportAddressEntry {
+        table_index: 0,
+        ordinal: 1,
+        entry_rva: RelativeVirtualAddress::new(8247),
+        entry_file_offset: FileOffset::new(1591),
+        target: PeExportTarget::Rva(RelativeVirtualAddress::new(4096)),
+    };
+    let named = PeExportSelection::Selected {
+        address,
+        name: Some(ring3_core::PeExportName {
+            table_index: 0,
+            name_pointer_rva: RelativeVirtualAddress::new(8251),
+            name_pointer_file_offset: FileOffset::new(1595),
+            ordinal_entry_rva: RelativeVirtualAddress::new(8255),
+            ordinal_entry_file_offset: FileOffset::new(1599),
+            address_index: 0,
+            name_rva: RelativeVirtualAddress::new(8257),
+            name_file_offset: FileOffset::new(1601),
+            name: "ring3_probe",
+        }),
+    };
+    for _ in 0..16 {
+        let batch = {
+            let query = String::from("ring3_probe");
+            let queries = [
+                PeExportQuery::Name(&query),
+                PeExportQuery::Ordinal(1),
+                PeExportQuery::Name("RING3_PROBE"),
+                PeExportQuery::Ordinal(0),
+                PeExportQuery::Ordinal(2),
+            ];
+            assert_eq!(
+                lookup_pe_export_batch(&bytes, &queries, limits(4, 2)),
+                Err(PeExportBatchError::QueryCountExceeded { count: 5, limit: 4 })
+            );
+            assert_eq!(
+                lookup_pe_export_batch(&bytes, &queries, limits(5, 1)),
+                Err(PeExportBatchError::SelectionRowsExceeded {
+                    index: 1,
+                    total: 2,
+                    limit: 1
+                })
+            );
+            lookup_pe_export_batch(&bytes, &queries, limits(5, 2)).unwrap()
+        };
+        assert_eq!(batch.selection_rows, 2);
+        assert_eq!(
+            batch.selections,
+            vec![
+                Ok(named.clone()),
+                Ok(PeExportSelection::Selected {
+                    address,
+                    name: None
+                }),
+                Ok(PeExportSelection::NameNotFound),
+                Ok(PeExportSelection::OrdinalBeforeBase {
+                    ordinal: 0,
+                    base: 1
+                }),
+                Ok(PeExportSelection::OrdinalOutOfRange {
+                    ordinal: 2,
+                    base: 1,
+                    address_count: 1
+                })
+            ]
+        );
+        let PeExportSelection::Selected {
+            name: Some(name), ..
+        } = batch.selections[0].as_ref().unwrap()
+        else {
+            panic!()
+        };
+        assert!(std::ptr::eq(name.name.as_ptr(), bytes[1601..].as_ptr()));
+    }
+    assert_eq!(bytes, before);
+    assert_eq!(std::fs::read(path).unwrap(), before);
+}
+
+#[test]
+#[ignore = "requires explicit RING3_EXPORT_PE32_NAMED_DLL"]
+fn generated_pe32_export_batch_matches_metadata() {
+    check_corpus_batch("RING3_EXPORT_PE32_NAMED_DLL", ring3_core::PeKind::Pe32);
+}
+
+#[test]
+#[ignore = "requires explicit RING3_EXPORT_PE32PLUS_NAMED_DLL"]
+fn generated_pe32plus_export_batch_matches_metadata() {
+    check_corpus_batch(
+        "RING3_EXPORT_PE32PLUS_NAMED_DLL",
+        ring3_core::PeKind::Pe32Plus,
+    );
+}

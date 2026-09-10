@@ -152,6 +152,10 @@
       "generated_pe32plus_forwarder_export_selection_matches_metadata",
       "generated_pe32_reusable_export_lookup_matches_metadata",
       "generated_pe32plus_reusable_export_lookup_matches_metadata"
+    ],
+    "pe_export_batch": [
+      "generated_pe32_export_batch_matches_metadata",
+      "generated_pe32plus_export_batch_matches_metadata"
     ]
   }
 }
