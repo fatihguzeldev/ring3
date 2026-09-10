@@ -360,3 +360,186 @@ fn both_inputs_keep_their_own_borrowed_text_across_repeated_batches() {
     assert_eq!(importer, before_importer);
     assert_eq!(provider, before_provider);
 }
+
+fn read_corpus_image(variable: &str, kind: ring3_core::PeKind) -> (std::path::PathBuf, Vec<u8>) {
+    let path = std::path::PathBuf::from(
+        std::env::var_os(variable).expect("explicit generated image path"),
+    );
+    let bytes = std::fs::read(&path).unwrap();
+    assert_eq!(bytes.len(), 2048);
+    assert_eq!(
+        ring3_core::parse_pe_header_prefix(&bytes).unwrap().kind,
+        kind
+    );
+    (path, bytes)
+}
+
+fn corpus_selection(ordinal: bool) -> PeExportSelection<'static> {
+    use ring3_core::{PeExportAddressEntry, PeExportName};
+    PeExportSelection::Selected {
+        address: PeExportAddressEntry {
+            table_index: 0,
+            ordinal: if ordinal { 32768 } else { 1 },
+            entry_rva: RelativeVirtualAddress::new(if ordinal { 8249 } else { 8247 }),
+            entry_file_offset: FileOffset::new(if ordinal { 1593 } else { 1591 }),
+            target: PeExportTarget::Rva(RelativeVirtualAddress::new(4096)),
+        },
+        name: if ordinal {
+            None
+        } else {
+            Some(PeExportName {
+                table_index: 0,
+                name_pointer_rva: RelativeVirtualAddress::new(8251),
+                name_pointer_file_offset: FileOffset::new(1595),
+                ordinal_entry_rva: RelativeVirtualAddress::new(8255),
+                ordinal_entry_file_offset: FileOffset::new(1599),
+                address_index: 0,
+                name_rva: RelativeVirtualAddress::new(8257),
+                name_file_offset: FileOffset::new(1601),
+                name: "ring3_probe",
+            })
+        },
+    }
+}
+
+fn check_corpus_pair(
+    importer_variable: &str,
+    provider_variable: &str,
+    kind: ring3_core::PeKind,
+    ordinal: bool,
+) {
+    use ring3_core::{PeImportDescriptor, PeImportLookup, PeImportLookupEntry};
+    let (importer_path, importer) = read_corpus_image(importer_variable, kind);
+    let (provider_path, provider) = read_corpus_image(provider_variable, kind);
+    let importer_before = importer.clone();
+    let provider_before = provider.clone();
+    let plus = kind == ring3_core::PeKind::Pe32Plus;
+    let hint_rva = if plus { 8264 } else { 8248 };
+    let dll_rva = if ordinal { hint_rva } else { hint_rva + 14 };
+    let symbol = if ordinal {
+        PeImportSymbol::Ordinal(32768)
+    } else {
+        PeImportSymbol::ByName {
+            hint_name_rva: RelativeVirtualAddress::new(hint_rva),
+            hint: 0,
+            name: "ring3_probe",
+        }
+    };
+    let imports = PeImportLookup {
+        descriptor: PeImportDescriptor {
+            descriptor_rva: RelativeVirtualAddress::new(8192),
+            descriptor_file_offset: FileOffset::new(1536),
+            import_lookup_table_rva: RelativeVirtualAddress::new(8232),
+            time_date_stamp: 0,
+            forwarder_chain: 0,
+            name_rva: RelativeVirtualAddress::new(dll_rva),
+            import_address_table_rva: RelativeVirtualAddress::new(if plus { 8248 } else { 8240 }),
+            dll_name: if ordinal {
+                "Ring3Ordinal.dll"
+            } else {
+                "Ring3Probe.dll"
+            },
+        },
+        entries: vec![PeImportLookupEntry {
+            lookup_rva: RelativeVirtualAddress::new(8232),
+            lookup_file_offset: FileOffset::new(1576),
+            raw_value: if ordinal {
+                if plus {
+                    0x8000_0000_0000_8000
+                } else {
+                    0x8000_8000
+                }
+            } else {
+                u64::from(hint_rva)
+            },
+            symbol,
+        }],
+    };
+    let selection = corpus_selection(ordinal);
+    for _ in 0..8 {
+        assert_eq!(
+            lookup_pe_import_exports(&importer, 0, &provider, limits(0, 1)),
+            Err(PeImportExportError::ExportBatch(
+                PeExportBatchError::QueryCountExceeded { count: 1, limit: 0 }
+            ))
+        );
+        assert_eq!(
+            lookup_pe_import_exports(&importer, 0, &provider, limits(1, 0)),
+            Err(PeImportExportError::ExportBatch(
+                PeExportBatchError::SelectionRowsExceeded {
+                    index: 0,
+                    total: 1,
+                    limit: 0
+                }
+            ))
+        );
+        let batch = lookup_pe_import_exports(&importer, 0, &provider, limits(1, 1)).unwrap();
+        assert_eq!(batch.imports, imports);
+        assert_eq!(batch.exports.selection_rows, 1);
+        assert_eq!(batch.exports.selections, vec![Ok(selection.clone())]);
+        assert!(std::ptr::eq(
+            batch.imports.descriptor.dll_name.as_ptr(),
+            importer[(dll_rva - 6656) as usize..].as_ptr()
+        ));
+        if let PeImportSymbol::ByName { name, .. } = batch.imports.entries[0].symbol {
+            assert!(std::ptr::eq(
+                name.as_ptr(),
+                importer[(hint_rva - 6656 + 2) as usize..].as_ptr()
+            ));
+        }
+        if let PeExportSelection::Selected {
+            name: Some(name), ..
+        } = batch.exports.selections[0].as_ref().unwrap()
+        {
+            assert!(std::ptr::eq(name.name.as_ptr(), provider[1601..].as_ptr()));
+        }
+    }
+    assert_eq!(importer, importer_before);
+    assert_eq!(provider, provider_before);
+    assert_eq!(std::fs::read(importer_path).unwrap(), importer_before);
+    assert_eq!(std::fs::read(provider_path).unwrap(), provider_before);
+}
+
+#[test]
+#[ignore = "requires explicit RING3_IMPORT_PE32_FIXTURE and RING3_EXPORT_PE32_NAMED_DLL"]
+fn generated_pe32_named_imports_match_explicit_exports() {
+    check_corpus_pair(
+        "RING3_IMPORT_PE32_FIXTURE",
+        "RING3_EXPORT_PE32_NAMED_DLL",
+        ring3_core::PeKind::Pe32,
+        false,
+    );
+}
+
+#[test]
+#[ignore = "requires explicit RING3_ORDINAL_PE32_FIXTURE and RING3_EXPORT_PE32_ORDINAL_DLL"]
+fn generated_pe32_ordinal_imports_match_explicit_exports() {
+    check_corpus_pair(
+        "RING3_ORDINAL_PE32_FIXTURE",
+        "RING3_EXPORT_PE32_ORDINAL_DLL",
+        ring3_core::PeKind::Pe32,
+        true,
+    );
+}
+
+#[test]
+#[ignore = "requires explicit RING3_IMPORT_PE32PLUS_FIXTURE and RING3_EXPORT_PE32PLUS_NAMED_DLL"]
+fn generated_pe32plus_named_imports_match_explicit_exports() {
+    check_corpus_pair(
+        "RING3_IMPORT_PE32PLUS_FIXTURE",
+        "RING3_EXPORT_PE32PLUS_NAMED_DLL",
+        ring3_core::PeKind::Pe32Plus,
+        false,
+    );
+}
+
+#[test]
+#[ignore = "requires explicit RING3_ORDINAL_PE32PLUS_FIXTURE and RING3_EXPORT_PE32PLUS_ORDINAL_DLL"]
+fn generated_pe32plus_ordinal_imports_match_explicit_exports() {
+    check_corpus_pair(
+        "RING3_ORDINAL_PE32PLUS_FIXTURE",
+        "RING3_EXPORT_PE32PLUS_ORDINAL_DLL",
+        ring3_core::PeKind::Pe32Plus,
+        true,
+    );
+}

@@ -156,6 +156,12 @@
     "pe_export_batch": [
       "generated_pe32_export_batch_matches_metadata",
       "generated_pe32plus_export_batch_matches_metadata"
+    ],
+    "pe_import_exports": [
+      "generated_pe32_named_imports_match_explicit_exports",
+      "generated_pe32_ordinal_imports_match_explicit_exports",
+      "generated_pe32plus_named_imports_match_explicit_exports",
+      "generated_pe32plus_ordinal_imports_match_explicit_exports"
     ]
   }
 }
