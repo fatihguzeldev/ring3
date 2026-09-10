@@ -68,13 +68,23 @@ and per-run evidence go under `target/`; they are not committed.
 | [pe-delay-ordinals](corpus/pe-delay-ordinals/) | Delay-import metadata with ordinal `32768`. | `pnpm corpus:build:delay-ordinals` |
 | [pe-resources](corpus/pe-resources/) | Linked resource roots and raw Unicode name bytes. | `pnpm corpus:build:resources` |
 | [pe-debug-payloads](corpus/pe-debug-payloads/) | Linked raw debug metadata, opaque CodeView bytes and empty REPRO records. | `pnpm corpus:build:debug` |
+| [pe-managed](corpus/pe-managed/) | Unpatched self-authored managed PE32 and PE32+ files with raw CLR headers. | `pnpm corpus:build:managed` |
 
-Builders require the pinned macOS Apple Clang/LLVM and Rust LLD binaries recorded
+Native fixture builders require the pinned macOS Apple Clang/LLVM and Rust LLD binaries recorded
 in each manifest. Tool identity checks intentionally fail when those binaries
 change; review and update the pins when changing the fixture toolchain.
 Debug fixture repeatability also depends on the pinned local tool installation
 paths retained inside PDB sidecars. Object timestamps are zero; the PE/debug
 timestamps are stable content-derived values.
+
+Managed fixtures require the existing macOS arm64 .NET SDK `10.0.401` recorded in
+[their manifest](corpus/pe-managed/fixture.json). Set `RING3_DOTNET_ROOT` to its
+extracted root before running `corpus:build:managed` or `corpus:test`.
+The producer verifies pinned host, compiler, runtime and reference bytes, then
+invokes the compiler directly with scoped CLI/temp directories. It performs no
+SDK download, package restore or generated PE execution. Reproducibility is
+limited to the pinned local toolchain; the output PE timestamps are nonzero.
+
 
 ## Development
 
