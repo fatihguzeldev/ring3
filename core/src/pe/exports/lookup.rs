@@ -1,9 +1,9 @@
-use super::export_names::parse_prepared_export_name_entries;
-use super::rva::PreparedPe;
+use super::names::parse_prepared_export_name_entries;
 use super::{
     PeExportAddressEntry, PeExportAddressError, PeExportAddressTable, PeExportDirectoryError,
     PeExportName, PeExportNameError, parse_pe_export_addresses,
 };
+use crate::pe::rva::PreparedPe;
 
 /// exact name or full biased export ordinal; no module search or hint lookup.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

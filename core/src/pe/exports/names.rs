@@ -1,7 +1,8 @@
-use super::export_addresses::parse_prepared_export_addresses;
-use super::optional::{read_u16, read_u32};
-use super::rva::PreparedPe;
-use super::{PeExportAddressError, PeExportAddressTable, PeExportDirectoryError, PeRvaError};
+use super::addresses::parse_prepared_export_addresses;
+use super::{PeExportAddressError, PeExportAddressTable, PeExportDirectoryError};
+use crate::pe::PeRvaError;
+use crate::pe::optional::{read_u16, read_u32};
+use crate::pe::rva::PreparedPe;
 use crate::{FileOffset, RelativeVirtualAddress};
 
 const NAME_LIMIT: u32 = 4096;

@@ -1,7 +1,8 @@
-use super::exports::parse_prepared_export_directory;
-use super::optional::read_u32;
-use super::rva::PreparedPe;
-use super::{PeExportDirectory, PeExportDirectoryError, PeRvaError};
+use super::directory::parse_prepared_export_directory;
+use super::{PeExportDirectory, PeExportDirectoryError};
+use crate::pe::PeRvaError;
+use crate::pe::optional::read_u32;
+use crate::pe::rva::PreparedPe;
 use crate::{FileOffset, RelativeVirtualAddress};
 
 const ENTRY_LIMIT: u32 = 4096;
