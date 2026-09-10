@@ -41,6 +41,12 @@ order. A malformed prefix stays in its file's result. Repeated references count
 toward the logical byte total each time; these limits do not cap process memory.
 See the [batch API and example](core/src/pe/header_batch.rs).
 
+`lookup_pe_export` selects metadata by exact name or full biased export ordinal
+inside one supplied image. Name queries preserve every duplicate matching row;
+ordinal queries use the address table without reading export names. The result
+borrows name and forwarder text from the input and retains empty slots, raw RVAs
+and unresolved forwarders. See the [selection API](core/src/pe/export_lookup.rs).
+
 ## Fixture corpus
 
 A fixture is a small input with known properties, used to test a reader. Each
