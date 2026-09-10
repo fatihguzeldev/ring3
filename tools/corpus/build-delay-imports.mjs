@@ -133,6 +133,8 @@ if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1]
     const fixtures = {
       [ordinal ? "RING3_DELAY_ORDINAL_PE32_FIXTURE" : "RING3_DELAY_PE32_FIXTURE"]: join(output, "first/i386/delayed.exe"),
       [ordinal ? "RING3_DELAY_ORDINAL_PE32PLUS_FIXTURE" : "RING3_DELAY_PE32PLUS_FIXTURE"]: join(output, "first/amd64/delayed.exe"),
+      [ordinal ? "RING3_DELAY_ORDINAL_PE32_PROVIDER_DLL" : "RING3_DELAY_PE32_PROVIDER_DLL"]: join(output, "first/i386/Ring3Delay.dll"),
+      [ordinal ? "RING3_DELAY_ORDINAL_PE32PLUS_PROVIDER_DLL" : "RING3_DELAY_PE32PLUS_PROVIDER_DLL"]: join(output, "first/amd64/Ring3Delay.dll"),
     };
     writeFileSync(join(output, "fixtures.json"), `${JSON.stringify(fixtures, null, 2)}\n`);
     writeFileSync(join(output, "repeatability.json"), `${JSON.stringify({ verified: true, first: "first/evidence.json", second: "second/evidence.json" }, null, 2)}\n`);

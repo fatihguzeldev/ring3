@@ -166,6 +166,12 @@
     "pe_amd64_exceptions": [
       "generated_amd64_exception_functions_preserve_raw_records",
       "generated_amd64_leaf_image_has_no_exception_functions"
+    ],
+    "pe_delay_import_exports": [
+      "generated_pe32_named_delay_imports_match_explicit_exports",
+      "generated_pe32_ordinal_delay_imports_match_explicit_exports",
+      "generated_pe32plus_named_delay_imports_match_explicit_exports",
+      "generated_pe32plus_ordinal_delay_imports_match_explicit_exports"
     ]
   }
 }

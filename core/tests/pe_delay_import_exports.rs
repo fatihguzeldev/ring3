@@ -415,3 +415,209 @@ fn all_raw_records_and_names_precede_lookups_without_iat_fallback() {
         );
     }
 }
+
+fn read_corpus_image(
+    variable: &str,
+    kind: ring3_core::PeKind,
+    length: usize,
+) -> (std::path::PathBuf, Vec<u8>) {
+    let path = std::path::PathBuf::from(
+        std::env::var_os(variable).expect("explicit generated image path"),
+    );
+    let bytes = std::fs::read(&path).unwrap();
+    assert_eq!(bytes.len(), length);
+    assert_eq!(
+        ring3_core::parse_pe_header_prefix(&bytes).unwrap().kind,
+        kind
+    );
+    (path, bytes)
+}
+
+fn corpus_selection(ordinal: bool) -> PeExportSelection<'static> {
+    use ring3_core::{PeExportAddressEntry, PeExportName};
+    PeExportSelection::Selected {
+        address: PeExportAddressEntry {
+            table_index: 0,
+            ordinal: if ordinal { 32768 } else { 1 },
+            entry_rva: RelativeVirtualAddress::new(8247),
+            entry_file_offset: FileOffset::new(1591),
+            target: PeExportTarget::Rva(RelativeVirtualAddress::new(4096)),
+        },
+        name: if ordinal {
+            None
+        } else {
+            Some(PeExportName {
+                table_index: 0,
+                name_pointer_rva: RelativeVirtualAddress::new(8251),
+                name_pointer_file_offset: FileOffset::new(1595),
+                ordinal_entry_rva: RelativeVirtualAddress::new(8255),
+                ordinal_entry_file_offset: FileOffset::new(1599),
+                address_index: 0,
+                name_rva: RelativeVirtualAddress::new(8257),
+                name_file_offset: FileOffset::new(1601),
+                name: "probe",
+            })
+        },
+    }
+}
+
+fn corpus_imports(plus: bool, ordinal: bool) -> ring3_core::PeDelayImportLookup<'static> {
+    use ring3_core::{
+        PeDelayImportDescriptor, PeDelayImportLookup, PeDelayImportName, PeImportLookupEntry,
+    };
+    let hint_rva = if plus { 8280 } else { 8268 };
+    let dll_rva = if ordinal { hint_rva } else { hint_rva + 8 };
+    let lookup_rva = if plus { 8264 } else { 8256 };
+    let descriptor_rva = if plus { 8200 } else { 8192 };
+    let symbol = if ordinal {
+        PeImportSymbol::Ordinal(32768)
+    } else {
+        PeImportSymbol::ByName {
+            hint_name_rva: RelativeVirtualAddress::new(hint_rva),
+            hint: 0,
+            name: "probe",
+        }
+    };
+    PeDelayImportLookup {
+        import: PeDelayImportName {
+            descriptor: PeDelayImportDescriptor {
+                descriptor_rva: RelativeVirtualAddress::new(descriptor_rva),
+                descriptor_file_offset: FileOffset::new(u64::from(descriptor_rva - 6656)),
+                attributes: 1,
+                dll_name_address: dll_rva,
+                module_handle_address: 12288,
+                import_address_table_address: 12296,
+                import_name_table_address: lookup_rva,
+                bound_import_address_table_address: 0,
+                unload_import_address_table_address: 0,
+                time_date_stamp: 0,
+            },
+            dll_name: "Ring3Delay.dll",
+        },
+        entries: vec![PeImportLookupEntry {
+            lookup_rva: RelativeVirtualAddress::new(lookup_rva),
+            lookup_file_offset: FileOffset::new(u64::from(lookup_rva - 6656)),
+            raw_value: if ordinal {
+                if plus {
+                    0x8000_0000_0000_8000
+                } else {
+                    0x8000_8000
+                }
+            } else {
+                u64::from(hint_rva)
+            },
+            symbol,
+        }],
+    }
+}
+
+fn check_corpus_pair(
+    importer_variable: &str,
+    provider_variable: &str,
+    kind: ring3_core::PeKind,
+    ordinal: bool,
+) {
+    let (importer_path, importer) = read_corpus_image(
+        importer_variable,
+        kind,
+        if kind == ring3_core::PeKind::Pe32Plus {
+            3072
+        } else {
+            2560
+        },
+    );
+    let (provider_path, provider) = read_corpus_image(provider_variable, kind, 2048);
+    let importer_before = importer.clone();
+    let provider_before = provider.clone();
+    let plus = kind == ring3_core::PeKind::Pe32Plus;
+    let hint_rva: usize = if plus { 8280 } else { 8268 };
+    let dll_rva = if ordinal { hint_rva } else { hint_rva + 8 };
+    let imports = corpus_imports(plus, ordinal);
+    let selection = corpus_selection(ordinal);
+    for _ in 0..8 {
+        assert_eq!(
+            lookup_pe_delay_import_exports(&importer, 0, &provider, limits(0, 1)),
+            Err(PeDelayImportExportError::ExportBatch(
+                PeExportBatchError::QueryCountExceeded { count: 1, limit: 0 }
+            ))
+        );
+        assert_eq!(
+            lookup_pe_delay_import_exports(&importer, 0, &provider, limits(1, 0)),
+            Err(PeDelayImportExportError::ExportBatch(
+                PeExportBatchError::SelectionRowsExceeded {
+                    index: 0,
+                    total: 1,
+                    limit: 0
+                }
+            ))
+        );
+        let batch = lookup_pe_delay_import_exports(&importer, 0, &provider, limits(1, 1)).unwrap();
+        assert_eq!(batch.imports, imports);
+        assert_eq!(batch.exports.selection_rows, 1);
+        assert_eq!(batch.exports.selections, vec![Ok(selection.clone())]);
+        assert!(std::ptr::eq(
+            batch.imports.import.dll_name.as_ptr(),
+            importer[dll_rva - 6656..].as_ptr()
+        ));
+        if let PeImportSymbol::ByName { name, .. } = batch.imports.entries[0].symbol {
+            assert!(std::ptr::eq(
+                name.as_ptr(),
+                importer[hint_rva - 6656 + 2..].as_ptr()
+            ));
+        }
+        if let PeExportSelection::Selected {
+            name: Some(name), ..
+        } = batch.exports.selections[0].as_ref().unwrap()
+        {
+            assert!(std::ptr::eq(name.name.as_ptr(), provider[1601..].as_ptr()));
+        }
+    }
+    assert_eq!(importer, importer_before);
+    assert_eq!(provider, provider_before);
+    assert_eq!(std::fs::read(importer_path).unwrap(), importer_before);
+    assert_eq!(std::fs::read(provider_path).unwrap(), provider_before);
+}
+
+#[test]
+#[ignore = "requires explicit RING3_DELAY_PE32_FIXTURE and RING3_DELAY_PE32_PROVIDER_DLL"]
+fn generated_pe32_named_delay_imports_match_explicit_exports() {
+    check_corpus_pair(
+        "RING3_DELAY_PE32_FIXTURE",
+        "RING3_DELAY_PE32_PROVIDER_DLL",
+        ring3_core::PeKind::Pe32,
+        false,
+    );
+}
+
+#[test]
+#[ignore = "requires explicit RING3_DELAY_ORDINAL_PE32_FIXTURE and RING3_DELAY_ORDINAL_PE32_PROVIDER_DLL"]
+fn generated_pe32_ordinal_delay_imports_match_explicit_exports() {
+    check_corpus_pair(
+        "RING3_DELAY_ORDINAL_PE32_FIXTURE",
+        "RING3_DELAY_ORDINAL_PE32_PROVIDER_DLL",
+        ring3_core::PeKind::Pe32,
+        true,
+    );
+}
+
+#[test]
+#[ignore = "requires explicit RING3_DELAY_PE32PLUS_FIXTURE and RING3_DELAY_PE32PLUS_PROVIDER_DLL"]
+fn generated_pe32plus_named_delay_imports_match_explicit_exports() {
+    check_corpus_pair(
+        "RING3_DELAY_PE32PLUS_FIXTURE",
+        "RING3_DELAY_PE32PLUS_PROVIDER_DLL",
+        ring3_core::PeKind::Pe32Plus,
+        false,
+    );
+}
+
+#[test]
+#[ignore = "requires explicit RING3_DELAY_ORDINAL_PE32PLUS_FIXTURE and RING3_DELAY_ORDINAL_PE32PLUS_PROVIDER_DLL"]
+fn generated_pe32plus_ordinal_delay_imports_match_explicit_exports() {
+    check_corpus_pair(
+        "RING3_DELAY_ORDINAL_PE32PLUS_FIXTURE",
+        "RING3_DELAY_ORDINAL_PE32PLUS_PROVIDER_DLL",
+        ring3_core::PeKind::Pe32Plus,
+        true,
+    );
+}

@@ -110,10 +110,14 @@ const families = [
   { name: "delay", build: buildDelayImportFixtures, fixtures: {
     RING3_DELAY_PE32_FIXTURE: "i386/delayed.exe",
     RING3_DELAY_PE32PLUS_FIXTURE: "amd64/delayed.exe",
+    RING3_DELAY_PE32_PROVIDER_DLL: "i386/Ring3Delay.dll",
+    RING3_DELAY_PE32PLUS_PROVIDER_DLL: "amd64/Ring3Delay.dll",
   } },
   { name: "delay-ordinal", build: (directory) => buildDelayImportFixtures(directory, { ordinal: true }), fixtures: {
     RING3_DELAY_ORDINAL_PE32_FIXTURE: "i386/delayed.exe",
     RING3_DELAY_ORDINAL_PE32PLUS_FIXTURE: "amd64/delayed.exe",
+    RING3_DELAY_ORDINAL_PE32_PROVIDER_DLL: "i386/Ring3Delay.dll",
+    RING3_DELAY_ORDINAL_PE32PLUS_PROVIDER_DLL: "amd64/Ring3Delay.dll",
   } },
   { name: "debug", build: buildDebugFixtures, fixtures: {
     RING3_DEBUG_PE32_FIXTURE: "i386/debug.exe",
