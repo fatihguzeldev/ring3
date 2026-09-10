@@ -7,6 +7,7 @@ mod certificates;
 mod clr;
 mod debug;
 mod debug_payloads;
+mod delay_import_exports;
 mod delay_imports;
 mod delay_lookups;
 mod delay_names;
@@ -50,6 +51,9 @@ pub use debug::{
 pub use debug_payloads::{
     PeDebugPayload, PeDebugPayloadError, PeDebugPayloadRange, PeDebugPayloadTable,
     parse_pe_debug_payloads,
+};
+pub use delay_import_exports::{
+    PeDelayImportExportBatch, PeDelayImportExportError, lookup_pe_delay_import_exports,
 };
 pub use delay_imports::{
     PeDelayImportDescriptor, PeDelayImportError, PeDelayImportTable,

@@ -79,6 +79,15 @@ borrowed text. This is static metadata matching without module discovery,
 architecture compatibility checks or address binding. See the
 [import/export API](core/src/pe/import_exports.rs).
 
+`lookup_pe_delay_import_exports` applies the same explicit-provider matching to
+one delay-import descriptor. It validates the complete delay table, DLL names
+and lookup entries before selection. Unsupported attributes and unavailable INTs
+retain the raw reader's errors; INTs never fall back to IAT bytes. Each result
+keeps the selected delay metadata and its ordered provider selections, with
+independent image lifetimes and the same query/row budget scope. See the
+[delay import/export API](core/src/pe/delay_import_exports.rs).
+
+
 ## Fixture corpus
 
 A fixture is a small input with known properties, used to test a reader. Each
