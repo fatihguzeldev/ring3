@@ -13,6 +13,7 @@ import { buildDelayImportFixtures } from "./build-delay-imports.mjs";
 import { buildResourceFixtures } from "./build-resources.mjs";
 import { buildDebugFixtures } from "./build-debug-payloads.mjs";
 import { buildManagedFixtures } from "./build-managed.mjs";
+import { buildAmd64ExceptionFixtures } from "./build-amd64-exceptions.mjs";
 import { prepareOutputParents, root, run, sha256, target } from "./shared.mjs";
 
 export const inventory = JSON.parse(readFileSync(join(root, "corpus/real-file-tests.json"), "utf8"));
@@ -80,6 +81,10 @@ function sourceHashes() {
 }
 
 const families = [
+  { name: "amd64-exceptions", build: buildAmd64ExceptionFixtures, fixtures: {
+    RING3_EXCEPTION_AMD64_FIXTURE: "two-functions/Probe.dll",
+    RING3_EXCEPTION_AMD64_LEAF_FIXTURE: "leaf-only/Probe.dll",
+  } },
   { name: "pe32", build: buildFixture, fixtures: { RING3_PE32_FIXTURE: "pe32-arithmetic.exe" } },
   { name: "pe32plus", build: buildPe32PlusFixture, fixtures: { RING3_PE32PLUS_FIXTURE: "arithmetic.exe" } },
   { name: "named", build: buildImportFixtures, fixtures: {
