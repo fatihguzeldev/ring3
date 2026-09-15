@@ -205,6 +205,12 @@
       "generated_pe32plus_architecture_declarations_match_compiled_fields",
       "generated_managed_pe32_architecture_declarations_match_compiled_fields",
       "generated_managed_pe32plus_architecture_declarations_match_compiled_fields"
+    ],
+    "pe_fingerprints": [
+      "generated_pe32_fingerprints_match_compiled_bytes_and_fields",
+      "generated_pe32plus_fingerprints_match_compiled_bytes_and_fields",
+      "generated_managed_pe32_fingerprints_match_compiled_bytes_and_fields",
+      "generated_managed_pe32plus_fingerprints_match_compiled_bytes_and_fields"
     ]
   }
 }
