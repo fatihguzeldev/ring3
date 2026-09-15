@@ -268,7 +268,9 @@ declared-evidence cases retain complete owned fields and physical byte ranges
 from unpatched PE32/PE32+ and managed files, including declared zero CLR
 descriptors and present CLR headers. Two named-evidence groups retain mixed
 compiled pairings, aliases, reordered records, empty-content errors and exact
-path-before-content admission refusals.
+path-before-content admission refusals. Four direct architecture-declaration
+cases retain exact raw fields and named COFF/CLR bit observations from the same
+unpatched native and managed files.
 Certificate-entry tests append synthetic records to generated PE files in memory;
 the source fixtures remain unchanged and are not cryptographically signed.
 

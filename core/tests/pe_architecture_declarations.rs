@@ -214,3 +214,286 @@ fn describes_named_source_results_after_source_release() {
     assert!(result.optional.is_err());
     assert!(result.clr.is_err());
 }
+
+use ring3_core::{
+    PeClrArchitectureDeclarations, PeCoffArchitectureDeclarations, inspect_pe_declared_evidence,
+};
+
+fn compiled_expectation(
+    raw: PeDeclaredEvidence,
+    coff_bits: [bool; 2],
+    coff_unselected: u16,
+    clr_bits: Option<[bool; 4]>,
+) -> PeArchitectureDeclarations {
+    assert_eq!(raw.clr.unwrap().is_some(), clr_bits.is_some());
+    PeArchitectureDeclarations {
+        prefix: raw.prefix.map(|raw| PeCoffArchitectureDeclarations {
+            raw,
+            bits: [
+                PeFlagBit {
+                    name: "IMAGE_FILE_32BIT_MACHINE",
+                    mask: 0x0100,
+                    is_set: coff_bits[0],
+                },
+                PeFlagBit {
+                    name: "IMAGE_FILE_LARGE_ADDRESS_AWARE",
+                    mask: 0x0020,
+                    is_set: coff_bits[1],
+                },
+            ],
+            unselected_bits: coff_unselected,
+        }),
+        optional: raw.optional,
+        clr: raw.clr.map(|value| {
+            value.map(|raw| {
+                let states = clr_bits.unwrap();
+                PeClrArchitectureDeclarations {
+                    raw,
+                    bits: [
+                        PeFlagBit {
+                            name: "COMIMAGE_FLAGS_ILONLY",
+                            mask: 1,
+                            is_set: states[0],
+                        },
+                        PeFlagBit {
+                            name: "COMIMAGE_FLAGS_32BITREQUIRED",
+                            mask: 2,
+                            is_set: states[1],
+                        },
+                        PeFlagBit {
+                            name: "COMIMAGE_FLAGS_NATIVE_ENTRYPOINT",
+                            mask: 0x10,
+                            is_set: states[2],
+                        },
+                        PeFlagBit {
+                            name: "COMIMAGE_FLAGS_32BITPREFERRED",
+                            mask: 0x0002_0000,
+                            is_set: states[3],
+                        },
+                    ],
+                    unselected_bits: 0,
+                }
+            })
+        }),
+    }
+}
+
+fn check_raw_field<T>(bytes: &[u8], evidence: &PeFieldEvidence<T>, raw: &[u8]) {
+    assert_eq!(usize::from(evidence.byte_length), raw.len());
+    let start = usize::try_from(evidence.file_offset.get()).unwrap();
+    let end = start.checked_add(raw.len()).unwrap();
+    assert_eq!(bytes.get(start..end), Some(raw));
+}
+
+fn generated_architecture_declarations(
+    variable: &str,
+    size: usize,
+    wanted: &PeArchitectureDeclarations,
+) {
+    let path = std::env::var(variable).expect("set the generated fixture path");
+    let original = std::fs::read(&path).unwrap();
+    assert_eq!(original.len(), size);
+    let mut bytes = original.clone();
+    let actual = describe_pe_architecture_declarations(inspect_pe_declared_evidence(&bytes));
+    assert_eq!(&actual, wanted);
+    assert_eq!(
+        describe_pe_architecture_declarations(inspect_pe_declared_evidence(&bytes)),
+        actual
+    );
+    assert_eq!(bytes, original);
+    let prefix = actual.prefix.unwrap().raw;
+    let magic: u16 = match prefix.kind.value {
+        PeKind::Pe32 => 0x10b,
+        PeKind::Pe32Plus => 0x20b,
+    };
+    check_raw_field(&bytes, &prefix.kind, &magic.to_le_bytes());
+    check_raw_field(&bytes, &prefix.machine, &prefix.machine.value.to_le_bytes());
+    check_raw_field(
+        &bytes,
+        &prefix.characteristics,
+        &prefix.characteristics.value.to_le_bytes(),
+    );
+    let optional = actual.optional.unwrap();
+    check_raw_field(
+        &bytes,
+        &optional.entry_rva,
+        &optional.entry_rva.value.get().to_le_bytes(),
+    );
+    check_raw_field(
+        &bytes,
+        &optional.subsystem,
+        &optional.subsystem.value.to_le_bytes(),
+    );
+    check_raw_field(
+        &bytes,
+        &optional.dll_characteristics,
+        &optional.dll_characteristics.value.to_le_bytes(),
+    );
+    check_raw_field(
+        &bytes,
+        &optional.directory_count,
+        &optional.directory_count.value.to_le_bytes(),
+    );
+    let descriptor = optional.clr_descriptor.unwrap();
+    check_raw_field(
+        &bytes,
+        &descriptor.rva,
+        &descriptor.rva.value.get().to_le_bytes(),
+    );
+    check_raw_field(
+        &bytes,
+        &descriptor.size,
+        &descriptor.size.value.to_le_bytes(),
+    );
+    if let Some(clr) = actual.clr.unwrap() {
+        let clr = clr.raw;
+        check_raw_field(&bytes, &clr.flags, &clr.flags.value.to_le_bytes());
+        check_raw_field(
+            &bytes,
+            &clr.raw_entry_point,
+            &clr.raw_entry_point.value.to_le_bytes(),
+        );
+    }
+    bytes.fill(0);
+    drop(bytes);
+    assert_eq!(&actual, wanted);
+    assert_eq!(
+        describe_pe_architecture_declarations(inspect_pe_declared_evidence(&original)),
+        actual
+    );
+    assert_eq!(std::fs::read(path).unwrap(), original);
+}
+
+#[test]
+#[ignore = "requires a generated unpatched pe32 fixture"]
+fn generated_pe32_architecture_declarations_match_compiled_fields() {
+    generated_architecture_declarations(
+        "RING3_PE32_FIXTURE",
+        1024,
+        &compiled_expectation(
+            PeDeclaredEvidence {
+                prefix: Ok(PeHeaderPrefixEvidence {
+                    kind: field(PeKind::Pe32, 144, 2),
+                    machine: field(332, 124, 2),
+                    characteristics: field(259, 142, 2),
+                }),
+                optional: Ok(PeOptionalHeaderEvidence {
+                    entry_rva: field(RelativeVirtualAddress::new(4096), 160, 4),
+                    subsystem: field(3, 212, 2),
+                    dll_characteristics: field(33024, 214, 2),
+                    directory_count: field(16, 236, 4),
+                    clr_descriptor: Some(PeClrDescriptorEvidence {
+                        rva: field(RelativeVirtualAddress::new(0), 352, 4),
+                        size: field(0, 356, 4),
+                    }),
+                }),
+                clr: Ok(None),
+            },
+            [true, false],
+            3,
+            None,
+        ),
+    );
+}
+
+#[test]
+#[ignore = "requires a generated unpatched pe32+ fixture"]
+fn generated_pe32plus_architecture_declarations_match_compiled_fields() {
+    generated_architecture_declarations(
+        "RING3_PE32PLUS_FIXTURE",
+        1024,
+        &compiled_expectation(
+            PeDeclaredEvidence {
+                prefix: Ok(PeHeaderPrefixEvidence {
+                    kind: field(PeKind::Pe32Plus, 144, 2),
+                    machine: field(34404, 124, 2),
+                    characteristics: field(35, 142, 2),
+                }),
+                optional: Ok(PeOptionalHeaderEvidence {
+                    entry_rva: field(RelativeVirtualAddress::new(4096), 160, 4),
+                    subsystem: field(3, 212, 2),
+                    dll_characteristics: field(33056, 214, 2),
+                    directory_count: field(16, 252, 4),
+                    clr_descriptor: Some(PeClrDescriptorEvidence {
+                        rva: field(RelativeVirtualAddress::new(0), 368, 4),
+                        size: field(0, 372, 4),
+                    }),
+                }),
+                clr: Ok(None),
+            },
+            [false, true],
+            3,
+            None,
+        ),
+    );
+}
+
+#[test]
+#[ignore = "requires a generated unpatched managed pe32 fixture"]
+fn generated_managed_pe32_architecture_declarations_match_compiled_fields() {
+    generated_architecture_declarations(
+        "RING3_CLR_PE32_FIXTURE",
+        3584,
+        &compiled_expectation(
+            PeDeclaredEvidence {
+                prefix: Ok(PeHeaderPrefixEvidence {
+                    kind: field(PeKind::Pe32, 152, 2),
+                    machine: field(332, 132, 2),
+                    characteristics: field(258, 150, 2),
+                }),
+                optional: Ok(PeOptionalHeaderEvidence {
+                    entry_rva: field(RelativeVirtualAddress::new(9078), 168, 4),
+                    subsystem: field(3, 220, 2),
+                    dll_characteristics: field(34112, 222, 2),
+                    directory_count: field(16, 244, 4),
+                    clr_descriptor: Some(PeClrDescriptorEvidence {
+                        rva: field(RelativeVirtualAddress::new(8200), 360, 4),
+                        size: field(72, 364, 4),
+                    }),
+                }),
+                clr: Ok(Some(PeClrHeaderEvidence {
+                    flags: field(3, 536, 4),
+                    raw_entry_point: field(0x0600_0001, 540, 4),
+                })),
+            },
+            [true, false],
+            2,
+            Some([true, true, false, false]),
+        ),
+    );
+}
+
+#[test]
+#[ignore = "requires a generated unpatched managed pe32+ fixture"]
+fn generated_managed_pe32plus_architecture_declarations_match_compiled_fields() {
+    generated_architecture_declarations(
+        "RING3_CLR_PE32PLUS_FIXTURE",
+        3072,
+        &compiled_expectation(
+            PeDeclaredEvidence {
+                prefix: Ok(PeHeaderPrefixEvidence {
+                    kind: field(PeKind::Pe32Plus, 152, 2),
+                    machine: field(34404, 132, 2),
+                    characteristics: field(34, 150, 2),
+                }),
+                optional: Ok(PeOptionalHeaderEvidence {
+                    entry_rva: field(RelativeVirtualAddress::new(0), 168, 4),
+                    subsystem: field(3, 220, 2),
+                    dll_characteristics: field(34112, 222, 2),
+                    directory_count: field(16, 260, 4),
+                    clr_descriptor: Some(PeClrDescriptorEvidence {
+                        rva: field(RelativeVirtualAddress::new(8192), 376, 4),
+                        size: field(72, 380, 4),
+                    }),
+                }),
+                clr: Ok(Some(PeClrHeaderEvidence {
+                    flags: field(1, 528, 4),
+                    raw_entry_point: field(0x0600_0001, 532, 4),
+                })),
+            },
+            [false, true],
+            2,
+            Some([true, false, false, false]),
+        ),
+    );
+}

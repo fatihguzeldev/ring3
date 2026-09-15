@@ -199,6 +199,12 @@
     "source_pe_evidence": [
       "generated_named_evidence_preserves_mixed_pairings_and_aliases",
       "generated_named_evidence_refusals_preserve_priority_and_operands"
+    ],
+    "pe_architecture_declarations": [
+      "generated_pe32_architecture_declarations_match_compiled_fields",
+      "generated_pe32plus_architecture_declarations_match_compiled_fields",
+      "generated_managed_pe32_architecture_declarations_match_compiled_fields",
+      "generated_managed_pe32plus_architecture_declarations_match_compiled_fields"
     ]
   }
 }
