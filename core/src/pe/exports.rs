@@ -1,6 +1,7 @@
 mod addresses;
 mod batch;
 mod directory;
+mod forwarder;
 mod lookup;
 mod names;
 
@@ -14,3 +15,7 @@ pub use lookup::{
     PeExportLookup, PeExportLookupError, PeExportQuery, PeExportSelection, lookup_pe_export,
 };
 pub use names::{PeExportName, PeExportNameError, PeExportNameTable, parse_pe_export_names};
+
+pub use forwarder::{
+    PeForwarderRequest, PeForwarderRequestError, PeForwarderSymbol, decode_pe_forwarder_request,
+};

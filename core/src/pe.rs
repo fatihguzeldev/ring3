@@ -41,7 +41,8 @@ pub use exports::{
     PeExportAddressEntry, PeExportAddressError, PeExportAddressTable, PeExportBatch,
     PeExportBatchError, PeExportBatchLimits, PeExportDirectory, PeExportDirectoryError,
     PeExportLookup, PeExportLookupError, PeExportName, PeExportNameError, PeExportNameTable,
-    PeExportQuery, PeExportSelection, PeExportTarget, lookup_pe_export, lookup_pe_export_batch,
+    PeExportQuery, PeExportSelection, PeExportTarget, PeForwarderRequest, PeForwarderRequestError,
+    PeForwarderSymbol, decode_pe_forwarder_request, lookup_pe_export, lookup_pe_export_batch,
     parse_pe_export_addresses, parse_pe_export_directory, parse_pe_export_names,
 };
 pub use header_batch::{
