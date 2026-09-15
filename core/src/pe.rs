@@ -18,8 +18,9 @@ mod sections;
 mod tls;
 
 pub use amd64_exceptions::{
-    PeAmd64ExceptionEntry, PeAmd64ExceptionError, PeAmd64ExceptionTable,
-    parse_pe_amd64_exception_functions,
+    PeAmd64ExceptionEntry, PeAmd64ExceptionError, PeAmd64ExceptionTable, PeAmd64UnwindInfoV1,
+    PeAmd64UnwindInfoV1Error, PeAmd64UnwindTailV1, parse_pe_amd64_exception_functions,
+    parse_pe_amd64_unwind_info_v1,
 };
 pub use base_relocations::{
     PeBaseRelocationBlock, PeBaseRelocationError, parse_pe_base_relocation_blocks,
