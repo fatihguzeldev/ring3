@@ -49,6 +49,11 @@ pub use pe::{
     walk_pe_export_forwarders,
 };
 pub use pe::{PeFingerprintError, PeFingerprintedEvidence, fingerprint_pe_declared_evidence};
+pub use pe::{
+    PeOwnedImportDescriptor, PeOwnedImportLookup, PeOwnedImportLookupEntry, PeOwnedImportSymbol,
+    PeStaticImportEvidence, PeStaticImportEvidenceError, PeStaticImportEvidenceLimits,
+    inspect_pe_static_imports,
+};
 
 pub use source::{
     AsciiPeSource, AsciiPeSourceEvidence, AsciiPeSourceEvidenceBatch, AsciiPeSourceEvidenceError,

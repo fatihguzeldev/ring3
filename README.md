@@ -90,6 +90,13 @@ Algorithm-length refusals stay in their entries; aliases count and hash for ever
 occurrence. Paths are excluded from digests. See the
 [named fingerprint API](core/src/source/pe_fingerprints.rs).
 
+`inspect_pe_static_imports` retains owned static DLL and symbol metadata as two
+independent descriptor/lookup results. Input admission precedes reading; complete
+row and text admission precedes owned copying. Duplicate text counts for each
+copy, and a lookup error preserves readable DLL declarations. These observations
+outlive input bytes without selecting providers or inferring requirements. See
+the [owned import evidence API](core/src/pe/imports/evidence.rs).
+
 Related PE readers are grouped under [imports](core/src/pe/imports.rs),
 [exports](core/src/pe/exports.rs), and [resources](core/src/pe/resources.rs).
 Delay imports live inside the [imports family](core/src/pe/imports/delay.rs).
