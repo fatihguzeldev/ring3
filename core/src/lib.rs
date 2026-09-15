@@ -15,7 +15,9 @@ pub use pe::{
     PeExportAddressTable, PeExportBatch, PeExportBatchError, PeExportBatchLimits,
     PeExportDirectory, PeExportDirectoryError, PeExportLookup, PeExportLookupError, PeExportName,
     PeExportNameError, PeExportNameTable, PeExportQuery, PeExportSelection, PeExportTarget,
-    PeFileRange, PeFileRangeSource, PeForwarderRequest, PeForwarderRequestError, PeForwarderSymbol,
+    PeFileRange, PeFileRangeSource, PeForwarderHop, PeForwarderQuery, PeForwarderRequest,
+    PeForwarderRequestError, PeForwarderRoute, PeForwarderStep, PeForwarderSymbol,
+    PeForwarderTextContext, PeForwarderWalk, PeForwarderWalkError, PeForwarderWalkLimits,
     PeHeaderBatch, PeHeaderBatchError, PeHeaderBatchLimits, PeHeaderError, PeHeaderPrefix,
     PeHeaders, PeImportDescriptor, PeImportError, PeImportExportBatch, PeImportExportError,
     PeImportLookup, PeImportLookupEntry, PeImportLookupError, PeImportSymbol, PeKind,
@@ -38,5 +40,5 @@ pub use pe::{
     parse_pe_import_lookups, parse_pe_load_config_prefix, parse_pe_resource_data_entries,
     parse_pe_resource_directories, parse_pe_resource_directory_names, parse_pe_resource_payloads,
     parse_pe_resource_root, parse_pe_resource_root_names, parse_pe_sections,
-    parse_pe_tls_directory, resolve_pe_file_range,
+    parse_pe_tls_directory, resolve_pe_file_range, walk_pe_export_forwarders,
 };

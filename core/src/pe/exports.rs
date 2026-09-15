@@ -4,6 +4,7 @@ mod directory;
 mod forwarder;
 mod lookup;
 mod names;
+mod walk;
 
 pub use addresses::{
     PeExportAddressEntry, PeExportAddressError, PeExportAddressTable, PeExportTarget,
@@ -18,4 +19,9 @@ pub use names::{PeExportName, PeExportNameError, PeExportNameTable, parse_pe_exp
 
 pub use forwarder::{
     PeForwarderRequest, PeForwarderRequestError, PeForwarderSymbol, decode_pe_forwarder_request,
+};
+
+pub use walk::{
+    PeForwarderHop, PeForwarderQuery, PeForwarderRoute, PeForwarderStep, PeForwarderTextContext,
+    PeForwarderWalk, PeForwarderWalkError, PeForwarderWalkLimits, walk_pe_export_forwarders,
 };
