@@ -429,3 +429,191 @@ fn name_and_symbol_failures_discard_only_their_dependent_views() {
         );
     }
 }
+
+fn compiled_delay_expected(plus: bool, ordinal: bool) -> PeDelayImportEvidence {
+    let (rva, offset, lookup_rva, lookup_offset) = if plus {
+        (8200, 1544, 8264, 1608)
+    } else {
+        (8192, 1536, 8256, 1600)
+    };
+    let name_rva = match (plus, ordinal) {
+        (false, false) => 8276,
+        (true, false) => 8288,
+        (false, true) => 8268,
+        (true, true) => 8280,
+    };
+    let hint_rva = if plus { 8280 } else { 8268 };
+    let descriptor = PeDelayImportDescriptor {
+        descriptor_rva: RelativeVirtualAddress::new(rva),
+        descriptor_file_offset: FileOffset::new(offset),
+        attributes: 1,
+        dll_name_address: name_rva,
+        module_handle_address: 12288,
+        import_address_table_address: 12296,
+        import_name_table_address: lookup_rva,
+        bound_import_address_table_address: 0,
+        unload_import_address_table_address: 0,
+        time_date_stamp: 0,
+    };
+    let import = PeOwnedDelayImportName {
+        descriptor,
+        dll_name: "Ring3Delay.dll".to_owned(),
+    };
+    let entry = PeOwnedImportLookupEntry {
+        lookup_rva: RelativeVirtualAddress::new(lookup_rva),
+        lookup_file_offset: FileOffset::new(lookup_offset),
+        raw_value: if ordinal {
+            if plus {
+                0x8000_0000_0000_8000
+            } else {
+                0x8000_8000
+            }
+        } else {
+            u64::from(hint_rva)
+        },
+        symbol: if ordinal {
+            PeOwnedImportSymbol::Ordinal(32768)
+        } else {
+            PeOwnedImportSymbol::ByName {
+                hint_name_rva: RelativeVirtualAddress::new(hint_rva),
+                hint: 0,
+                name: "probe".to_owned(),
+            }
+        },
+    };
+    let kind = if plus { PeKind::Pe32Plus } else { PeKind::Pe32 };
+    let directory_rva = RelativeVirtualAddress::new(rva);
+    let directory_file_offset = FileOffset::new(offset);
+    let terminator_rva = RelativeVirtualAddress::new(rva + 32);
+    let terminator_file_offset = FileOffset::new(offset + 32);
+    PeDelayImportEvidence {
+        total_rows: 4,
+        total_text_bytes: if ordinal { 28 } else { 33 },
+        descriptors: Ok(Some(PeDelayImportTable {
+            kind,
+            directory_rva,
+            directory_file_offset,
+            directory_size: 64,
+            descriptors: vec![descriptor],
+            terminator_rva,
+            terminator_file_offset,
+        })),
+        names: Ok(Some(PeOwnedDelayImportNameTable {
+            kind,
+            directory_rva,
+            directory_file_offset,
+            directory_size: 64,
+            imports: vec![import.clone()],
+            terminator_rva,
+            terminator_file_offset,
+        })),
+        lookups: Ok(Some(PeOwnedDelayImportLookupTable {
+            kind,
+            directory_rva,
+            directory_file_offset,
+            directory_size: 64,
+            imports: vec![PeOwnedDelayImportLookup {
+                import,
+                entries: vec![entry],
+            }],
+            terminator_rva,
+            terminator_file_offset,
+        })),
+    }
+}
+
+fn compiled_owned_delay_fixtures() -> Vec<(std::path::PathBuf, Vec<u8>, PeDelayImportEvidence)> {
+    let inputs = [
+        ("RING3_DELAY_PE32_FIXTURE", false, false),
+        ("RING3_DELAY_PE32PLUS_FIXTURE", true, false),
+        ("RING3_DELAY_ORDINAL_PE32_FIXTURE", false, true),
+        ("RING3_DELAY_ORDINAL_PE32PLUS_FIXTURE", true, true),
+    ]
+    .map(|(variable, plus, ordinal)| {
+        let path = std::env::var_os(variable).unwrap_or_else(|| panic!("{variable}: NotPresent"));
+        (std::path::PathBuf::from(path), plus, ordinal)
+    });
+    inputs
+        .into_iter()
+        .map(|(path, plus, ordinal)| {
+            let bytes = std::fs::read(&path).unwrap();
+            assert_eq!(bytes.len(), if plus { 3072 } else { 2560 });
+            (path, bytes, compiled_delay_expected(plus, ordinal))
+        })
+        .collect()
+}
+
+#[test]
+#[ignore = "requires all four explicit named/ordinal delay fixture paths"]
+fn generated_owned_delay_imports_preserve_compiled_metadata() {
+    for (path, mut bytes, expected) in compiled_owned_delay_fixtures() {
+        let before = bytes.clone();
+        let caps = PeDelayImportEvidenceLimits {
+            max_input_bytes: u64::try_from(bytes.len()).unwrap(),
+            max_output_rows: expected.total_rows,
+            max_output_text_bytes: expected.total_text_bytes,
+        };
+        let actual = inspect_pe_delay_imports(&bytes, caps).unwrap();
+        assert_eq!(actual, inspect_pe_delay_imports(&bytes, caps).unwrap());
+        assert_eq!(bytes, before);
+        bytes.fill(0xee);
+        drop(bytes);
+        assert_eq!(actual, expected);
+        assert_eq!(std::fs::read(path).unwrap(), before);
+    }
+}
+
+#[test]
+#[ignore = "requires all four explicit named/ordinal delay fixture paths"]
+fn generated_owned_delay_import_refusals_preserve_compiled_budget_operands() {
+    for (path, bytes, expected) in compiled_owned_delay_fixtures() {
+        let before = bytes.clone();
+        let length = u64::try_from(bytes.len()).unwrap();
+        let rows = expected.total_rows;
+        let text = expected.total_text_bytes;
+        let caps = PeDelayImportEvidenceLimits {
+            max_input_bytes: length,
+            max_output_rows: rows,
+            max_output_text_bytes: text,
+        };
+        assert_eq!(inspect_pe_delay_imports(&bytes, caps), Ok(expected));
+        for (limits, error) in [
+            (
+                PeDelayImportEvidenceLimits {
+                    max_input_bytes: length - 1,
+                    max_output_rows: 0,
+                    max_output_text_bytes: 0,
+                },
+                PeDelayImportEvidenceError::InputTooLarge {
+                    length,
+                    limit: length - 1,
+                },
+            ),
+            (
+                PeDelayImportEvidenceLimits {
+                    max_output_rows: rows - 1,
+                    max_output_text_bytes: 0,
+                    ..caps
+                },
+                PeDelayImportEvidenceError::OutputRowsExceeded {
+                    rows,
+                    limit: rows - 1,
+                },
+            ),
+            (
+                PeDelayImportEvidenceLimits {
+                    max_output_text_bytes: text - 1,
+                    ..caps
+                },
+                PeDelayImportEvidenceError::OutputTextExceeded {
+                    bytes: text,
+                    limit: text - 1,
+                },
+            ),
+        ] {
+            assert_eq!(inspect_pe_delay_imports(&bytes, limits), Err(error));
+        }
+        assert_eq!(bytes, before);
+        assert_eq!(std::fs::read(path).unwrap(), before);
+    }
+}

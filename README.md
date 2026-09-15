@@ -306,7 +306,9 @@ and owned declared evidence from these same unpatched files.
 Two named-fingerprint groups retain owned mixed and aliased compiled results,
 reordered path associations and exact path-before-content admission refusals.
 Two owned static-import groups retain compiled named/ordinal metadata after input
-drop and exact input, row and text budget refusals across both PE widths.
+release and exact input, row and text budget refusals across both PE widths.
+Two owned delay-import groups retain all three metadata tables and named/ordinal
+entries after input release, with the same exact budget order and operands.
 Certificate-entry tests append synthetic records to generated PE files in memory;
 the source fixtures remain unchanged and are not cryptographically signed.
 
