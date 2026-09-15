@@ -90,6 +90,12 @@ Algorithm-length refusals stay in their entries; aliases count and hash for ever
 occurrence. Paths are excluded from digests. See the
 [named fingerprint API](core/src/source/pe_fingerprints.rs).
 
+`inspect_ascii_pe_source_module_evidence` admits the full path/content list, then
+keeps each owned path with its whole-input fingerprint and independent owned
+static-import, delay-import and export results. The same family output caps apply
+fresh to every occurrence; errors remain local to their entry or family. See the
+[named module evidence API](core/src/source/pe_modules.rs).
+
 `inspect_pe_static_imports` retains owned static DLL and symbol metadata as two
 independent descriptor/lookup results. Input admission precedes reading; complete
 row and text admission precedes owned copying. Duplicate text counts for each

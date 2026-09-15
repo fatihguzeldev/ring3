@@ -73,3 +73,8 @@ pub use source::{
 pub use source::{
     AsciiPeSourceFingerprint, AsciiPeSourceFingerprintBatch, fingerprint_ascii_pe_source_evidence,
 };
+
+pub use source::{
+    AsciiPeSourceModuleEvidence, AsciiPeSourceModuleEvidenceBatch,
+    AsciiPeSourceModuleEvidenceLimits, inspect_ascii_pe_source_module_evidence,
+};

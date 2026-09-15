@@ -2,6 +2,7 @@ mod paths;
 mod pe_evidence;
 mod pe_fingerprints;
 mod pe_headers;
+mod pe_modules;
 
 pub use paths::{
     AsciiSourcePathBatch, AsciiSourcePathCollision, AsciiSourcePathEntry, AsciiSourcePathError,
@@ -17,4 +18,8 @@ pub use pe_fingerprints::{
 pub use pe_headers::{
     AsciiPeSource, AsciiPeSourceHeader, AsciiPeSourceHeaderError, AsciiPeSourceHeaderLimits,
     AsciiPeSourceHeaders, parse_ascii_pe_source_headers,
+};
+pub use pe_modules::{
+    AsciiPeSourceModuleEvidence, AsciiPeSourceModuleEvidenceBatch,
+    AsciiPeSourceModuleEvidenceLimits, inspect_ascii_pe_source_module_evidence,
 };
