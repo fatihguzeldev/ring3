@@ -56,6 +56,13 @@ CLR-reader errors remain distinct. These declarations do not establish runtime
 requirements, support or loadability. See the
 [declared evidence API](core/src/pe/declared_evidence.rs).
 
+`describe_pe_architecture_declarations` accepts existing owned evidence and names
+two COFF and four CLR flag bits while retaining raw values, byte coordinates and
+independent outcomes. It reads no bytes and does not authenticate caller-supplied
+fields or coordinates. Absent or failed CLR evidence has no bit observations;
+required/preferred bits remain raw observations without a runtime verdict. See
+the [declaration projection](core/src/pe/architecture_declarations.rs).
+
 `parse_ascii_pe_source_headers` accepts paired path/content records, admits all
 paths first, then checks content budgets and reads each PE header prefix. Owned
 results keep each path with its original content result; malformed prefixes do
