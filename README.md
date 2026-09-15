@@ -72,7 +72,11 @@ to an ordered query list. Each selected target costs one logical row; ambiguity
 costs every matching row. Other outcomes and per-query parse errors cost zero,
 while still counting as queries. Budget refusal returns no partial batch. Each
 query may allocate its own result before the row check, so this is not a byte or
-process-memory cap. See the [export batch API](core/src/pe/exports/batch.rs).
+process-memory cap. `PeExportLookup::lookup_batch` applies the same rules across repeated batches on
+one image owner. Each batch starts fresh query/row limits and reuses retained
+address/name results. Count refusal and empty batches leave tables untouched;
+row refusal may retain tables for later calls. Results borrow the image and may
+outlive the owner. See the [export batch API](core/src/pe/exports/batch.rs).
 
 `parse_pe_amd64_exception_functions` reads at most 4096 raw 12-byte records
 from exception directory slot 3 in AMD64 PE32+ files. It preserves record order,
