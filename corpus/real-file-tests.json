@@ -215,6 +215,10 @@
     "source_pe_fingerprints": [
       "generated_named_fingerprints_preserve_mixed_pairings_and_aliases",
       "generated_named_fingerprint_refusals_preserve_priority_and_operands"
+    ],
+    "pe_static_import_evidence": [
+      "generated_owned_imports_preserve_compiled_named_and_ordinal_metadata",
+      "generated_owned_import_refusals_preserve_compiled_budget_operands"
     ]
   }
 }

@@ -316,3 +316,168 @@ fn lookup_name_errors_discard_lookup_prefix_without_losing_dll_observations() {
         })
     );
 }
+
+use ring3_core::{PeOwnedImportLookup, PeOwnedImportLookupEntry, PeStaticImportEvidence};
+
+struct CompiledOwnedImportFixture {
+    path: String,
+    bytes: Vec<u8>,
+    expected: PeStaticImportEvidence,
+}
+
+fn compiled_owned_import_fixtures() -> Vec<CompiledOwnedImportFixture> {
+    [
+        (
+            "RING3_IMPORT_PE32_FIXTURE",
+            (8262, 8240),
+            "Ring3Probe.dll",
+            0x2038_u64,
+            PeOwnedImportSymbol::ByName {
+                hint_name_rva: RelativeVirtualAddress::new(8248),
+                hint: 0,
+                name: "ring3_probe".to_owned(),
+            },
+            39_u64,
+        ),
+        (
+            "RING3_IMPORT_PE32PLUS_FIXTURE",
+            (8278, 8248),
+            "Ring3Probe.dll",
+            0x2048_u64,
+            PeOwnedImportSymbol::ByName {
+                hint_name_rva: RelativeVirtualAddress::new(8264),
+                hint: 0,
+                name: "ring3_probe".to_owned(),
+            },
+            39_u64,
+        ),
+        (
+            "RING3_ORDINAL_PE32_FIXTURE",
+            (8248, 8240),
+            "Ring3Ordinal.dll",
+            0x8000_8000_u64,
+            PeOwnedImportSymbol::Ordinal(32768),
+            32_u64,
+        ),
+        (
+            "RING3_ORDINAL_PE32PLUS_FIXTURE",
+            (8264, 8248),
+            "Ring3Ordinal.dll",
+            0x8000_0000_0000_8000_u64,
+            PeOwnedImportSymbol::Ordinal(32768),
+            32_u64,
+        ),
+    ]
+    .into_iter()
+    .map(
+        |(variable, (name_rva, iat_rva), dll_name, raw_value, symbol, total_text_bytes)| {
+            let path = std::env::var(variable).expect(variable);
+            let bytes = std::fs::read(&path).unwrap();
+            assert_eq!(bytes.len(), 2048);
+            let descriptor = PeOwnedImportDescriptor {
+                descriptor_rva: RelativeVirtualAddress::new(8192),
+                descriptor_file_offset: FileOffset::new(1536),
+                import_lookup_table_rva: RelativeVirtualAddress::new(8232),
+                time_date_stamp: 0,
+                forwarder_chain: 0,
+                name_rva: RelativeVirtualAddress::new(name_rva),
+                import_address_table_rva: RelativeVirtualAddress::new(iat_rva),
+                dll_name: dll_name.to_owned(),
+            };
+            let expected = PeStaticImportEvidence {
+                total_rows: 3,
+                total_text_bytes,
+                descriptors: Ok(vec![descriptor.clone()]),
+                lookups: Ok(vec![PeOwnedImportLookup {
+                    descriptor,
+                    entries: vec![PeOwnedImportLookupEntry {
+                        lookup_rva: RelativeVirtualAddress::new(8232),
+                        lookup_file_offset: FileOffset::new(1576),
+                        raw_value,
+                        symbol,
+                    }],
+                }]),
+            };
+            CompiledOwnedImportFixture {
+                path,
+                bytes,
+                expected,
+            }
+        },
+    )
+    .collect()
+}
+
+#[test]
+#[ignore = "requires all four explicit named/ordinal import fixture paths"]
+fn generated_owned_imports_preserve_compiled_named_and_ordinal_metadata() {
+    for mut fixture in compiled_owned_import_fixtures() {
+        let original = fixture.bytes.clone();
+        let caps = PeStaticImportEvidenceLimits {
+            max_input_bytes: 2048,
+            max_output_rows: 3,
+            max_output_text_bytes: fixture.expected.total_text_bytes,
+        };
+        let observed = inspect_pe_static_imports(&fixture.bytes, caps);
+        assert_eq!(observed, Ok(fixture.expected.clone()));
+        assert_eq!(observed, inspect_pe_static_imports(&fixture.bytes, caps));
+        assert_eq!(fixture.bytes, original);
+        fixture.bytes.fill(0xee);
+        drop(fixture.bytes);
+        assert_eq!(observed, Ok(fixture.expected));
+        assert_eq!(std::fs::read(fixture.path).unwrap(), original);
+    }
+}
+
+#[test]
+#[ignore = "requires all four explicit named/ordinal import fixture paths"]
+fn generated_owned_import_refusals_preserve_compiled_budget_operands() {
+    for fixture in compiled_owned_import_fixtures() {
+        let caps = PeStaticImportEvidenceLimits {
+            max_input_bytes: 2048,
+            max_output_rows: 3,
+            max_output_text_bytes: fixture.expected.total_text_bytes,
+        };
+        assert_eq!(
+            inspect_pe_static_imports(&fixture.bytes, caps),
+            Ok(fixture.expected.clone())
+        );
+        for (limits, error) in [
+            (
+                PeStaticImportEvidenceLimits {
+                    max_input_bytes: 2047,
+                    max_output_rows: 0,
+                    max_output_text_bytes: 0,
+                },
+                PeStaticImportEvidenceError::InputTooLarge {
+                    length: 2048,
+                    limit: 2047,
+                },
+            ),
+            (
+                PeStaticImportEvidenceLimits {
+                    max_output_rows: 2,
+                    max_output_text_bytes: 0,
+                    ..caps
+                },
+                PeStaticImportEvidenceError::OutputRowsExceeded { rows: 3, limit: 2 },
+            ),
+            (
+                PeStaticImportEvidenceLimits {
+                    max_output_text_bytes: caps.max_output_text_bytes - 1,
+                    ..caps
+                },
+                PeStaticImportEvidenceError::OutputTextExceeded {
+                    bytes: caps.max_output_text_bytes,
+                    limit: caps.max_output_text_bytes - 1,
+                },
+            ),
+        ] {
+            assert_eq!(
+                inspect_pe_static_imports(&fixture.bytes, limits),
+                Err(error)
+            );
+        }
+        assert_eq!(std::fs::read(fixture.path).unwrap(), fixture.bytes);
+    }
+}
