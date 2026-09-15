@@ -63,6 +63,13 @@ not stop later entries. Path and content byte totals remain separate. Pairings
 come from the caller and do not establish file provenance or image loadability.
 See the [source composition](core/src/source/pe_headers.rs).
 
+`inspect_ascii_pe_source_evidence` keeps the same path-first admission and logical
+content budgets, then associates every admitted path with all three declared PE
+evidence outcomes. Each field offset belongs to its paired content; errors in one
+file do not discard other admitted files. The existing header pass is retained,
+so collecting evidence repeats prefix work. See the
+[named evidence API](core/src/source/pe_evidence.rs).
+
 Related PE readers are grouped under [imports](core/src/pe/imports.rs),
 [exports](core/src/pe/exports.rs), and [resources](core/src/pe/resources.rs).
 Delay imports live inside the [imports family](core/src/pe/imports/delay.rs).
