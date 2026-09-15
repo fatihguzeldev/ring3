@@ -59,6 +59,14 @@ no parsing. Results can outlive the owner, while the image must remain alive.
 Mixed queries share one retained address table; name entries remain lazy. See the
 [selection API](core/src/pe/exports/lookup.rs).
 
+`decode_pe_forwarder_request` separates conventional `module.name` or
+`module.#ordinal` text into borrowed request metadata under a caller byte limit.
+It accepts visible ASCII with exactly one dot, preserves module/name spelling and
+leading ordinal zeroes, and reports typed refusals with byte offsets. Multiple dots
+and other unsupported syntax remain uninterpreted; refusal does not establish
+Windows validity. This helper performs no module lookup, path normalization or
+forwarder traversal. See the [request decoder](core/src/pe/exports/forwarder.rs).
+
 `lookup_pe_export_batch` adds explicit query-count and total selection-row limits
 to an ordered query list. Each selected target costs one logical row; ambiguity
 costs every matching row. Other outcomes and per-query parse errors cost zero,
