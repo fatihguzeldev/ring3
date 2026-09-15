@@ -242,3 +242,192 @@ fn results_are_owned_and_inspection_preserves_input() {
     assert_eq!(evidence, expected(PeKind::Pe32Plus, 128, 513));
     assert_eq!(inspect_pe_declared_evidence(&original), evidence);
 }
+
+fn check_raw_field<T>(bytes: &[u8], evidence: &PeFieldEvidence<T>, raw: &[u8]) {
+    assert_eq!(usize::from(evidence.byte_length), raw.len());
+    let start = usize::try_from(evidence.file_offset.get()).unwrap();
+    let end = start.checked_add(raw.len()).unwrap();
+    assert_eq!(bytes.get(start..end), Some(raw));
+}
+
+fn generated_declared_evidence(variable: &str, size: usize, wanted: PeDeclaredEvidence) {
+    let path = std::env::var(variable).expect("set the generated fixture path");
+    let original = std::fs::read(&path).unwrap();
+    assert_eq!(original.len(), size);
+    let mut bytes = original.clone();
+    let actual = inspect_pe_declared_evidence(&bytes);
+    assert_eq!(actual, wanted);
+    assert_eq!(inspect_pe_declared_evidence(&bytes), actual);
+    assert_eq!(bytes, original);
+    let prefix = actual.prefix.unwrap();
+    let magic: u16 = match prefix.kind.value {
+        PeKind::Pe32 => 0x10b,
+        PeKind::Pe32Plus => 0x20b,
+    };
+    check_raw_field(&bytes, &prefix.kind, &magic.to_le_bytes());
+    check_raw_field(&bytes, &prefix.machine, &prefix.machine.value.to_le_bytes());
+    check_raw_field(
+        &bytes,
+        &prefix.characteristics,
+        &prefix.characteristics.value.to_le_bytes(),
+    );
+    let optional = actual.optional.unwrap();
+    check_raw_field(
+        &bytes,
+        &optional.entry_rva,
+        &optional.entry_rva.value.get().to_le_bytes(),
+    );
+    check_raw_field(
+        &bytes,
+        &optional.subsystem,
+        &optional.subsystem.value.to_le_bytes(),
+    );
+    check_raw_field(
+        &bytes,
+        &optional.dll_characteristics,
+        &optional.dll_characteristics.value.to_le_bytes(),
+    );
+    check_raw_field(
+        &bytes,
+        &optional.directory_count,
+        &optional.directory_count.value.to_le_bytes(),
+    );
+    let descriptor = optional.clr_descriptor.unwrap();
+    check_raw_field(
+        &bytes,
+        &descriptor.rva,
+        &descriptor.rva.value.get().to_le_bytes(),
+    );
+    check_raw_field(
+        &bytes,
+        &descriptor.size,
+        &descriptor.size.value.to_le_bytes(),
+    );
+    if let Some(clr) = actual.clr.unwrap() {
+        check_raw_field(&bytes, &clr.flags, &clr.flags.value.to_le_bytes());
+        check_raw_field(
+            &bytes,
+            &clr.raw_entry_point,
+            &clr.raw_entry_point.value.to_le_bytes(),
+        );
+    }
+    bytes.fill(0);
+    drop(bytes);
+    assert_eq!(actual, wanted);
+    assert_eq!(inspect_pe_declared_evidence(&original), actual);
+    assert_eq!(std::fs::read(path).unwrap(), original);
+}
+
+#[test]
+#[ignore = "requires a generated unpatched pe32 fixture"]
+fn generated_pe32_declared_evidence_matches_compiled_fields() {
+    generated_declared_evidence(
+        "RING3_PE32_FIXTURE",
+        1024,
+        PeDeclaredEvidence {
+            prefix: Ok(PeHeaderPrefixEvidence {
+                kind: field(PeKind::Pe32, 144, 2),
+                machine: field(332, 124, 2),
+                characteristics: field(259, 142, 2),
+            }),
+            optional: Ok(PeOptionalHeaderEvidence {
+                entry_rva: field(RelativeVirtualAddress::new(4096), 160, 4),
+                subsystem: field(3, 212, 2),
+                dll_characteristics: field(33024, 214, 2),
+                directory_count: field(16, 236, 4),
+                clr_descriptor: Some(PeClrDescriptorEvidence {
+                    rva: field(RelativeVirtualAddress::new(0), 352, 4),
+                    size: field(0, 356, 4),
+                }),
+            }),
+            clr: Ok(None),
+        },
+    );
+}
+
+#[test]
+#[ignore = "requires a generated unpatched pe32+ fixture"]
+fn generated_pe32plus_declared_evidence_matches_compiled_fields() {
+    generated_declared_evidence(
+        "RING3_PE32PLUS_FIXTURE",
+        1024,
+        PeDeclaredEvidence {
+            prefix: Ok(PeHeaderPrefixEvidence {
+                kind: field(PeKind::Pe32Plus, 144, 2),
+                machine: field(34404, 124, 2),
+                characteristics: field(35, 142, 2),
+            }),
+            optional: Ok(PeOptionalHeaderEvidence {
+                entry_rva: field(RelativeVirtualAddress::new(4096), 160, 4),
+                subsystem: field(3, 212, 2),
+                dll_characteristics: field(33056, 214, 2),
+                directory_count: field(16, 252, 4),
+                clr_descriptor: Some(PeClrDescriptorEvidence {
+                    rva: field(RelativeVirtualAddress::new(0), 368, 4),
+                    size: field(0, 372, 4),
+                }),
+            }),
+            clr: Ok(None),
+        },
+    );
+}
+
+#[test]
+#[ignore = "requires a generated unpatched managed pe32 fixture"]
+fn generated_managed_pe32_declared_evidence_matches_compiled_fields() {
+    generated_declared_evidence(
+        "RING3_CLR_PE32_FIXTURE",
+        3584,
+        PeDeclaredEvidence {
+            prefix: Ok(PeHeaderPrefixEvidence {
+                kind: field(PeKind::Pe32, 152, 2),
+                machine: field(332, 132, 2),
+                characteristics: field(258, 150, 2),
+            }),
+            optional: Ok(PeOptionalHeaderEvidence {
+                entry_rva: field(RelativeVirtualAddress::new(9078), 168, 4),
+                subsystem: field(3, 220, 2),
+                dll_characteristics: field(34112, 222, 2),
+                directory_count: field(16, 244, 4),
+                clr_descriptor: Some(PeClrDescriptorEvidence {
+                    rva: field(RelativeVirtualAddress::new(8200), 360, 4),
+                    size: field(72, 364, 4),
+                }),
+            }),
+            clr: Ok(Some(PeClrHeaderEvidence {
+                flags: field(3, 536, 4),
+                raw_entry_point: field(0x0600_0001, 540, 4),
+            })),
+        },
+    );
+}
+
+#[test]
+#[ignore = "requires a generated unpatched managed pe32+ fixture"]
+fn generated_managed_pe32plus_declared_evidence_matches_compiled_fields() {
+    generated_declared_evidence(
+        "RING3_CLR_PE32PLUS_FIXTURE",
+        3072,
+        PeDeclaredEvidence {
+            prefix: Ok(PeHeaderPrefixEvidence {
+                kind: field(PeKind::Pe32Plus, 152, 2),
+                machine: field(34404, 132, 2),
+                characteristics: field(34, 150, 2),
+            }),
+            optional: Ok(PeOptionalHeaderEvidence {
+                entry_rva: field(RelativeVirtualAddress::new(0), 168, 4),
+                subsystem: field(3, 220, 2),
+                dll_characteristics: field(34112, 222, 2),
+                directory_count: field(16, 260, 4),
+                clr_descriptor: Some(PeClrDescriptorEvidence {
+                    rva: field(RelativeVirtualAddress::new(8192), 376, 4),
+                    size: field(72, 380, 4),
+                }),
+            }),
+            clr: Ok(Some(PeClrHeaderEvidence {
+                flags: field(1, 528, 4),
+                raw_entry_point: field(0x0600_0001, 532, 4),
+            })),
+        },
+    );
+}

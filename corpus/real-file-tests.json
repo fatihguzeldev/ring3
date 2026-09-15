@@ -189,6 +189,12 @@
     "source_pe_headers": [
       "generated_named_headers_preserve_both_widths_and_aliases",
       "generated_named_admission_refusals_preserve_priority_and_indices"
+    ],
+    "pe_declared_evidence": [
+      "generated_pe32_declared_evidence_matches_compiled_fields",
+      "generated_pe32plus_declared_evidence_matches_compiled_fields",
+      "generated_managed_pe32_declared_evidence_matches_compiled_fields",
+      "generated_managed_pe32plus_declared_evidence_matches_compiled_fields"
     ]
   }
 }
