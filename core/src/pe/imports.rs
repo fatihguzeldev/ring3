@@ -5,10 +5,12 @@ mod export_batch;
 mod lookups;
 
 pub use delay::{
-    PeDelayImportDescriptor, PeDelayImportError, PeDelayImportExportBatch,
-    PeDelayImportExportError, PeDelayImportLookup, PeDelayImportLookupError,
-    PeDelayImportLookupTable, PeDelayImportName, PeDelayImportNameError, PeDelayImportNameTable,
-    PeDelayImportTable, lookup_pe_delay_import_exports,
+    PeDelayImportDescriptor, PeDelayImportError, PeDelayImportEvidence, PeDelayImportEvidenceError,
+    PeDelayImportEvidenceLimits, PeDelayImportExportBatch, PeDelayImportExportError,
+    PeDelayImportLookup, PeDelayImportLookupError, PeDelayImportLookupTable, PeDelayImportName,
+    PeDelayImportNameError, PeDelayImportNameTable, PeDelayImportTable, PeOwnedDelayImportLookup,
+    PeOwnedDelayImportLookupTable, PeOwnedDelayImportName, PeOwnedDelayImportNameTable,
+    inspect_pe_delay_imports, lookup_pe_delay_import_exports,
     lookup_pe_delay_import_exports_with_provider, parse_pe_delay_import_descriptors,
     parse_pe_delay_import_lookups, parse_pe_delay_import_names,
 };
