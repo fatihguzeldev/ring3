@@ -206,6 +206,35 @@ mod tests {
     use super::{PeExportLookup, PeExportLookupError, PeExportNameError, PeExportQuery};
 
     #[test]
+    fn batch_gates_do_not_initialize_or_discard_retained_tables() {
+        use crate::{PeExportBatchError, PeExportBatchLimits};
+        let mut owner = PeExportLookup::new(b"");
+        let queries = [PeExportQuery::Ordinal(1)];
+        let zero = PeExportBatchLimits {
+            max_queries: 0,
+            max_selection_rows: 0,
+        };
+        let one = PeExportBatchLimits {
+            max_queries: 1,
+            max_selection_rows: 0,
+        };
+        assert_eq!(
+            owner.lookup_batch(&queries, zero),
+            Err(PeExportBatchError::QueryCountExceeded { count: 1, limit: 0 })
+        );
+        assert!(owner.lookup_batch(&[], zero).unwrap().selections.is_empty());
+        assert!(owner.addresses.is_none() && owner.names.is_none());
+        let result = owner.lookup_batch(&queries, one).unwrap();
+        assert!(result.selections[0].is_err());
+        assert!(matches!(owner.addresses, Some(Err(_))) && owner.names.is_none());
+        let retained = owner.addresses.clone();
+        assert!(owner.lookup_batch(&queries, zero).is_err());
+        assert!(owner.lookup_batch(&[], zero).unwrap().selections.is_empty());
+        assert_eq!(owner.addresses, retained);
+        assert_eq!(owner.lookup_batch(&queries, one).unwrap(), result);
+    }
+
+    #[test]
     fn construction_and_query_kinds_share_lazy_address_errors() {
         for name_first in [false, true] {
             let mut lookup = PeExportLookup::new(b"");

@@ -75,37 +75,81 @@ pub fn lookup_pe_export_batch<'a>(
     queries: &[PeExportQuery<'_>],
     limits: PeExportBatchLimits,
 ) -> Result<PeExportBatch<'a>, PeExportBatchError> {
-    let count = queries.len() as u64;
-    if count > limits.max_queries {
-        return Err(PeExportBatchError::QueryCountExceeded {
-            count,
-            limit: limits.max_queries,
-        });
+    check_query_count(queries.len(), limits.max_queries)?;
+    PeExportLookup::new(bytes).lookup_admitted_batch(queries, limits)
+}
+
+impl<'a> PeExportLookup<'a> {
+    /// bounds a query batch using this owner's retained export tables.
+    /// each call starts a fresh logical query/row budget. results borrow only the
+    /// image and can outlive both this owner and the query list.
+    ///
+    /// count refusal and empty batches do not read tables. row refusal may retain
+    /// tables already read; later batches can reuse them. limits and per-query
+    /// outcomes follow `lookup_pe_export_batch`, including its temporary allocation
+    /// limitation. a row refusal returns no partial batch.
+    ///
+    /// # errors
+    /// query count is checked before lookup; row overflow precedes row-limit refusal.
+    ///
+    /// ```compile_fail
+    /// use ring3_core::{PeExportBatch, PeExportBatchLimits, PeExportLookup, PeExportQuery};
+    /// fn escape() -> PeExportBatch<'static> {
+    ///     let bytes = vec![0; 64];
+    ///     PeExportLookup::new(&bytes).lookup_batch(&[PeExportQuery::Ordinal(1)],
+    ///         PeExportBatchLimits { max_queries: 1, max_selection_rows: 1 }).unwrap()
+    /// }
+    /// ```
+    #[expect(
+        clippy::missing_errors_doc,
+        reason = "project documentation headings are lower case"
+    )]
+    pub fn lookup_batch(
+        &mut self,
+        queries: &[PeExportQuery<'_>],
+        limits: PeExportBatchLimits,
+    ) -> Result<PeExportBatch<'a>, PeExportBatchError> {
+        check_query_count(queries.len(), limits.max_queries)?;
+        self.lookup_admitted_batch(queries, limits)
     }
-    let mut lookup = PeExportLookup::new(bytes);
-    let mut selection_rows = 0;
-    let mut selections = Vec::new();
-    for (index, &query) in queries.iter().enumerate() {
-        let result = lookup.lookup(query);
-        let rows = match &result {
-            Ok(PeExportSelection::Selected { .. }) => 1,
-            Ok(PeExportSelection::AmbiguousName { matches }) => matches.len() as u64,
-            Ok(
-                PeExportSelection::DirectoryAbsent
-                | PeExportSelection::NameNotFound
-                | PeExportSelection::OrdinalBeforeBase { .. }
-                | PeExportSelection::OrdinalOutOfRange { .. },
-            )
-            | Err(_) => 0,
-        };
-        selection_rows =
-            charge_selection_rows(index, selection_rows, rows, limits.max_selection_rows)?;
-        selections.push(result);
+
+    fn lookup_admitted_batch(
+        &mut self,
+        queries: &[PeExportQuery<'_>],
+        limits: PeExportBatchLimits,
+    ) -> Result<PeExportBatch<'a>, PeExportBatchError> {
+        let mut selection_rows = 0;
+        let mut selections = Vec::new();
+        for (index, &query) in queries.iter().enumerate() {
+            let result = self.lookup(query);
+            let rows = match &result {
+                Ok(PeExportSelection::Selected { .. }) => 1,
+                Ok(PeExportSelection::AmbiguousName { matches }) => matches.len() as u64,
+                Ok(
+                    PeExportSelection::DirectoryAbsent
+                    | PeExportSelection::NameNotFound
+                    | PeExportSelection::OrdinalBeforeBase { .. }
+                    | PeExportSelection::OrdinalOutOfRange { .. },
+                )
+                | Err(_) => 0,
+            };
+            selection_rows =
+                charge_selection_rows(index, selection_rows, rows, limits.max_selection_rows)?;
+            selections.push(result);
+        }
+        Ok(PeExportBatch {
+            selection_rows,
+            selections,
+        })
     }
-    Ok(PeExportBatch {
-        selection_rows,
-        selections,
-    })
+}
+
+fn check_query_count(count: usize, limit: u64) -> Result<(), PeExportBatchError> {
+    let count = count as u64;
+    if count > limit {
+        return Err(PeExportBatchError::QueryCountExceeded { count, limit });
+    }
+    Ok(())
 }
 
 fn charge_selection_rows(

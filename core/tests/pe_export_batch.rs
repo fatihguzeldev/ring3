@@ -1,7 +1,7 @@
 use ring3_core::{
-    FileOffset, PeExportAddressError, PeExportBatchError, PeExportBatchLimits, PeExportLookupError,
-    PeExportNameError, PeExportQuery, PeExportSelection, PeExportTarget, RelativeVirtualAddress,
-    lookup_pe_export_batch,
+    FileOffset, PeExportAddressError, PeExportBatchError, PeExportBatchLimits, PeExportLookup,
+    PeExportLookupError, PeExportNameError, PeExportQuery, PeExportSelection, PeExportTarget,
+    RelativeVirtualAddress, lookup_pe_export_batch,
 };
 
 fn put32(bytes: &mut [u8], offset: usize, value: u32) {
@@ -285,6 +285,110 @@ fn repeated_budget_refusals_and_successes_preserve_inputs() {
         );
     }
     assert_eq!(bytes, before);
+}
+
+#[test]
+fn one_owner_resets_batch_budgets_and_recovers_after_refusal() {
+    for plus in [false, true] {
+        let bytes = fixture(plus, 2);
+        let before = bytes.clone();
+        let mut owner = PeExportLookup::new(&bytes);
+        let queries = [PeExportQuery::Name("zeta"), PeExportQuery::Ordinal(8)];
+        let expected = lookup_pe_export_batch(&bytes, &queries, limits(2, 3)).unwrap();
+        assert_eq!(expected.selection_rows, 3);
+        assert_eq!(
+            owner.lookup(PeExportQuery::Ordinal(8)),
+            expected.selections[1]
+        );
+        for _ in 0..3 {
+            assert_eq!(
+                owner.lookup_batch(&queries, limits(1, 3)),
+                Err(PeExportBatchError::QueryCountExceeded { count: 2, limit: 1 })
+            );
+            assert_eq!(
+                owner.lookup_batch(&queries, limits(2, 2)),
+                Err(PeExportBatchError::SelectionRowsExceeded {
+                    index: 1,
+                    total: 3,
+                    limit: 2
+                })
+            );
+            assert_eq!(
+                owner.lookup_batch(&queries, limits(2, 3)).unwrap(),
+                expected
+            );
+            assert_eq!(
+                owner
+                    .lookup_batch(&[], limits(0, 0))
+                    .unwrap()
+                    .selection_rows,
+                0
+            );
+            assert_eq!(
+                owner.lookup(PeExportQuery::Name("absent")),
+                Ok(PeExportSelection::NameNotFound)
+            );
+        }
+        assert_eq!(bytes, before);
+    }
+}
+
+#[test]
+fn reusable_batches_preserve_name_error_and_ordinal_independence() {
+    for plus in [false, true] {
+        let mut bytes = fixture(plus, 2);
+        row(&mut bytes, 1, 0xc010, 3);
+        let queries = [PeExportQuery::Name("zeta"), PeExportQuery::Ordinal(8)];
+        let mut owner = PeExportLookup::new(&bytes);
+        let expected = lookup_pe_export_batch(&bytes, &queries, limits(2, 1)).unwrap();
+        assert!(expected.selections[0].is_err());
+        assert_eq!(expected.selection_rows, 1);
+        assert_eq!(
+            owner.lookup_batch(&queries, limits(2, 0)),
+            Err(PeExportBatchError::SelectionRowsExceeded {
+                index: 1,
+                total: 1,
+                limit: 0
+            })
+        );
+        assert_eq!(
+            owner.lookup_batch(&queries, limits(2, 1)).unwrap(),
+            expected
+        );
+        assert_eq!(owner.lookup(queries[1]), expected.selections[1]);
+        assert_eq!(
+            owner
+                .lookup_batch(&[queries[0]], limits(1, 0))
+                .unwrap()
+                .selections,
+            [expected.selections[0].clone()]
+        );
+    }
+}
+
+#[test]
+fn reusable_batch_results_outlive_owner_and_query_storage() {
+    let bytes = fixture(true, 1);
+    let batch = {
+        let name = String::from("zeta");
+        let mut owner = PeExportLookup::new(&bytes);
+        let batch = owner
+            .lookup_batch(&[PeExportQuery::Name(&name)], limits(1, 1))
+            .unwrap();
+        assert!(owner.lookup(PeExportQuery::Ordinal(8)).is_ok());
+        batch
+    };
+    let PeExportSelection::Selected {
+        name: Some(name), ..
+    } = batch.selections[0].as_ref().unwrap()
+    else {
+        panic!("expected named selection")
+    };
+    assert_eq!(name.name, "zeta");
+    assert!(std::ptr::eq(
+        name.name.as_ptr(),
+        bytes[file_offset(0xc000)..].as_ptr()
+    ));
 }
 
 fn read_corpus_provider(variable: &str, kind: ring3_core::PeKind) -> (std::path::PathBuf, Vec<u8>) {
