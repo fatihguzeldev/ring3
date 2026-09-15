@@ -249,7 +249,10 @@ including named and ordinal delay-import lookups and explicit EXE/provider pairs
 explicit forwarder/ordinal-provider walks with named-miss and ordinal-selected terminals,
 paired ASCII source/header results and admission refusals across both PE widths,
 linked resource directory graphs,
-fixed resource data-entry records and unpatched managed CLR headers.
+fixed resource data-entry records and unpatched managed CLR headers. Four direct
+declared-evidence cases retain complete owned fields and physical byte ranges
+from unpatched PE32/PE32+ and managed files, including declared zero CLR
+descriptors and present CLR headers.
 Certificate-entry tests append synthetic records to generated PE files in memory;
 the source fixtures remain unchanged and are not cryptographically signed.
 
