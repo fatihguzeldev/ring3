@@ -45,6 +45,8 @@ pub use pe::{
 };
 
 pub use source::{
-    AsciiSourcePathBatch, AsciiSourcePathCollision, AsciiSourcePathEntry, AsciiSourcePathError,
-    AsciiSourcePathLimits, AsciiSourcePathSegmentError, admit_ascii_source_paths,
+    AsciiPeSource, AsciiPeSourceHeader, AsciiPeSourceHeaderError, AsciiPeSourceHeaderLimits,
+    AsciiPeSourceHeaders, AsciiSourcePathBatch, AsciiSourcePathCollision, AsciiSourcePathEntry,
+    AsciiSourcePathError, AsciiSourcePathLimits, AsciiSourcePathSegmentError,
+    admit_ascii_source_paths, parse_ascii_pe_source_headers,
 };
