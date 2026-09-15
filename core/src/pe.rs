@@ -63,6 +63,7 @@ pub use exports::{
 pub use fingerprints::{
     PeFingerprintError, PeFingerprintedEvidence, fingerprint_pe_declared_evidence,
 };
+pub(crate) use header_batch::preflight as admit_pe_input_lengths;
 pub use header_batch::{
     PeHeaderBatch, PeHeaderBatchError, PeHeaderBatchLimits, parse_pe_header_prefix_batch,
 };

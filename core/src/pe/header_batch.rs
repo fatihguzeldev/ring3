@@ -73,7 +73,7 @@ pub fn parse_pe_header_prefix_batch(
     parse_with(inputs, limits, parse_pe_header_prefix)
 }
 
-fn preflight(
+pub(crate) fn preflight(
     sizes: impl ExactSizeIterator<Item = u64>,
     limits: PeHeaderBatchLimits,
 ) -> Result<u64, PeHeaderBatchError> {

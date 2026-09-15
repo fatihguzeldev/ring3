@@ -1,6 +1,7 @@
+use super::pe_headers::admit_sources;
 use super::{
     AsciiPeSource, AsciiPeSourceHeaderError, AsciiPeSourceHeaderLimits, AsciiSourcePathEntry,
-    AsciiSourcePathError, AsciiSourcePathLimits, parse_ascii_pe_source_headers,
+    AsciiSourcePathError, AsciiSourcePathLimits,
 };
 use crate::{
     PeDeclaredEvidence, PeHeaderBatchError, PeHeaderBatchLimits, inspect_pe_declared_evidence,
@@ -38,15 +39,14 @@ pub struct AsciiPeSourceEvidenceBatch {
 
 /// admits paired sources and retains all three reader outcomes for every entry.
 ///
-/// delegates path and content admission to `parse_ascii_pe_source_headers`:
+/// shares path and content admission with the header collector:
 /// path count precedes projections, complete path admission precedes content
 /// count/size/total checks, and no pe bytes are read before admission completes.
 /// zero limits are valid. outer refusals contain no partial result.
 ///
-/// the admitted header pass reads each prefix; its temporary results are discarded
-/// during evidence collection. each source then uses `inspect_pe_declared_evidence`
-/// with its independent reader work. paths and temporary vectors may be allocated
-/// before a content refusal. logical budgets do not cap acquisition or process memory.
+/// each admitted source uses `inspect_pe_declared_evidence` directly, with its
+/// independent reader work. paths and temporary vectors may be allocated before
+/// a content refusal. logical budgets do not cap acquisition or process memory.
 ///
 /// malformed sections remain entry-local outcomes and do not stop later sources.
 /// filenames do not select formats. caller pairing, lexical keys and input indices
@@ -89,7 +89,7 @@ pub fn inspect_ascii_pe_source_evidence(
     sources: &[AsciiPeSource<'_>],
     limits: AsciiPeSourceEvidenceLimits,
 ) -> Result<AsciiPeSourceEvidenceBatch, AsciiPeSourceEvidenceError> {
-    let admitted = parse_ascii_pe_source_headers(
+    let (admitted, total_content_bytes) = admit_sources(
         sources,
         AsciiPeSourceHeaderLimits {
             paths: limits.paths,
@@ -107,13 +107,13 @@ pub fn inspect_ascii_pe_source_evidence(
     );
     Ok(AsciiPeSourceEvidenceBatch {
         total_path_bytes: admitted.total_path_bytes,
-        total_content_bytes: admitted.total_content_bytes,
+        total_content_bytes,
         entries: admitted
             .entries
             .into_iter()
             .zip(sources)
-            .map(|(entry, source)| AsciiPeSourceEvidence {
-                path: entry.path,
+            .map(|(path, source)| AsciiPeSourceEvidence {
+                path,
                 evidence: inspect_pe_declared_evidence(source.bytes),
             })
             .collect(),

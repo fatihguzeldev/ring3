@@ -1,9 +1,10 @@
 use super::{
-    AsciiSourcePathEntry, AsciiSourcePathError, AsciiSourcePathLimits, admit_ascii_source_paths,
+    AsciiSourcePathBatch, AsciiSourcePathEntry, AsciiSourcePathError, AsciiSourcePathLimits,
+    admit_ascii_source_paths,
 };
+use crate::pe::admit_pe_input_lengths;
 use crate::{
-    PeHeaderBatchError, PeHeaderBatchLimits, PeHeaderError, PeHeaderPrefix,
-    parse_pe_header_prefix_batch,
+    PeHeaderBatchError, PeHeaderBatchLimits, PeHeaderError, PeHeaderPrefix, parse_pe_header_prefix,
 };
 
 /// a caller-supplied path/content pairing; no external provenance is verified.
@@ -81,6 +82,26 @@ pub fn parse_ascii_pe_source_headers(
     sources: &[AsciiPeSource<'_>],
     limits: AsciiPeSourceHeaderLimits,
 ) -> Result<AsciiPeSourceHeaders, AsciiPeSourceHeaderError> {
+    let (admitted, total_content_bytes) = admit_sources(sources, limits)?;
+    Ok(AsciiPeSourceHeaders {
+        total_path_bytes: admitted.total_path_bytes,
+        total_content_bytes,
+        entries: admitted
+            .entries
+            .into_iter()
+            .zip(sources)
+            .map(|(path, source)| AsciiPeSourceHeader {
+                path,
+                header: parse_pe_header_prefix(source.bytes),
+            })
+            .collect(),
+    })
+}
+
+pub(super) fn admit_sources(
+    sources: &[AsciiPeSource<'_>],
+    limits: AsciiPeSourceHeaderLimits,
+) -> Result<(AsciiSourcePathBatch, u64), AsciiPeSourceHeaderError> {
     let count = sources.len() as u64;
     if count > limits.paths.max_paths {
         return Err(AsciiPeSourceHeaderError::Paths(
@@ -93,17 +114,10 @@ pub fn parse_ascii_pe_source_headers(
     let paths: Vec<_> = sources.iter().map(|source| source.path).collect();
     let admitted =
         admit_ascii_source_paths(&paths, limits.paths).map_err(AsciiPeSourceHeaderError::Paths)?;
-    let bytes: Vec<_> = sources.iter().map(|source| source.bytes).collect();
-    let headers = parse_pe_header_prefix_batch(&bytes, limits.headers)
-        .map_err(AsciiPeSourceHeaderError::Headers)?;
-    Ok(AsciiPeSourceHeaders {
-        total_path_bytes: admitted.total_path_bytes,
-        total_content_bytes: headers.total_bytes,
-        entries: admitted
-            .entries
-            .into_iter()
-            .zip(headers.headers)
-            .map(|(path, header)| AsciiPeSourceHeader { path, header })
-            .collect(),
-    })
+    let total_content_bytes = admit_pe_input_lengths(
+        sources.iter().map(|source| source.bytes.len() as u64),
+        limits.headers,
+    )
+    .map_err(AsciiPeSourceHeaderError::Headers)?;
+    Ok((admitted, total_content_bytes))
 }
