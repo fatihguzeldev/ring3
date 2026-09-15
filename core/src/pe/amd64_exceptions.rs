@@ -1,7 +1,14 @@
+mod unwind;
+
 use super::optional::read_u32;
 use super::rva::PreparedPe;
 use super::{PeDirectoryAddress, PeKind, PeRvaError};
 use crate::{FileOffset, RelativeVirtualAddress};
+
+pub use unwind::{
+    PeAmd64UnwindInfoV1, PeAmd64UnwindInfoV1Error, PeAmd64UnwindTailV1,
+    parse_pe_amd64_unwind_info_v1,
+};
 
 const ENTRY_SIZE: u32 = 12;
 const MAX_ENTRIES: u16 = 4096;

@@ -111,6 +111,16 @@ otherwise accepted image. The result owns scalar metadata. This is not unwind
 validation, exception execution, or an input or peak-memory budget; see the
 [exception reader API](core/src/pe/amd64_exceptions.rs) for error precedence.
 
+`parse_pe_amd64_unwind_info_v1` reads one explicit, four-byte aligned RVA in an
+AMD64 PE32+ file, independently of exception-directory membership. The owned
+result separates raw code slots from odd-count padding and preserves frame,
+prolog and fixed handler/chain coordinates. The entire envelope must occupy one
+conservative file-backed range; its declared slot count bounds it to 528 bytes.
+Only version 1 and structural flag values 0–4 are admitted. Opcode meaning,
+frame validity, handler data and target contents remain unchecked. No target
+is followed and no unwinding is performed. See the
+[v1 unwind API](core/src/pe/amd64_exceptions/unwind.rs) for fields and error order.
+
 `lookup_pe_import_exports` matches one descriptor's ordered import symbols against
 an explicitly supplied provider image. It validates all importer lookups first,
 then selects the descriptor by its zero-based index and runs one export batch.
