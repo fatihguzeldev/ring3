@@ -3,19 +3,19 @@ use std::fmt::{self, Write as _};
 use ring3_core::{
     FileOffset, PeDebugPayloadError, PeHeaderError, PeResourceDataEntryError,
     PeResourceDirectoryError, PeResourceDirectoryNameError, PeResourcePayloadError,
-    RelativeVirtualAddress, parse_pe_base_relocation_blocks, parse_pe_certificate_entries,
-    parse_pe_certificate_table, parse_pe_clr_header, parse_pe_debug_directory,
-    parse_pe_debug_payloads, parse_pe_delay_import_descriptors, parse_pe_delay_import_lookups,
-    parse_pe_delay_import_names, parse_pe_export_addresses, parse_pe_export_directory,
-    parse_pe_export_names, parse_pe_header_prefix, parse_pe_headers, parse_pe_import_descriptors,
-    parse_pe_import_lookups, parse_pe_load_config_prefix, parse_pe_resource_data_entries,
-    parse_pe_resource_directories, parse_pe_resource_directory_names, parse_pe_resource_payloads,
-    parse_pe_resource_root, parse_pe_resource_root_names, parse_pe_sections,
-    parse_pe_tls_directory, resolve_pe_file_range,
+    RelativeVirtualAddress, parse_pe_amd64_exception_functions, parse_pe_base_relocation_blocks,
+    parse_pe_certificate_entries, parse_pe_certificate_table, parse_pe_clr_header,
+    parse_pe_debug_directory, parse_pe_debug_payloads, parse_pe_delay_import_descriptors,
+    parse_pe_delay_import_lookups, parse_pe_delay_import_names, parse_pe_export_addresses,
+    parse_pe_export_directory, parse_pe_export_names, parse_pe_header_prefix, parse_pe_headers,
+    parse_pe_import_descriptors, parse_pe_import_lookups, parse_pe_load_config_prefix,
+    parse_pe_resource_data_entries, parse_pe_resource_directories,
+    parse_pe_resource_directory_names, parse_pe_resource_payloads, parse_pe_resource_root,
+    parse_pe_resource_root_names, parse_pe_sections, parse_pe_tls_directory, resolve_pe_file_range,
 };
 
-const READER_COUNT: usize = 26;
-const CASE_COUNT: u32 = 3074;
+const READER_COUNT: usize = 27;
+const CASE_COUNT: u32 = 4611;
 
 fn put32(bytes: &mut [u8], offset: usize, value: u32) {
     bytes[offset..offset + 4].copy_from_slice(&value.to_le_bytes());
@@ -110,6 +110,21 @@ fn fixture(plus: bool) -> Vec<u8> {
     bytes
 }
 
+fn exception_fixture() -> Vec<u8> {
+    let mut bytes = fixture(true);
+    bytes[132..134].copy_from_slice(&0x8664_u16.to_le_bytes());
+    let directory = directory_base(true);
+    put32(&mut bytes, directory + 24, rva(984));
+    put32(&mut bytes, directory + 28, 24);
+    for (index, value) in [0x1500, 0x1510, 0x1600, u32::MAX, 0, 1]
+        .into_iter()
+        .enumerate()
+    {
+        put32(&mut bytes, 984 + index * 4, value);
+    }
+    bytes
+}
+
 #[derive(Debug)]
 struct Digest(u64);
 
@@ -132,6 +147,7 @@ impl fmt::Write for Digest {
 struct Campaign {
     cases: u32,
     outcomes: [[u32; 2]; READER_COUNT],
+    exception_presence: [u32; 2],
     digest: Digest,
 }
 
@@ -179,8 +195,53 @@ fn inspect(bytes: &[u8], baseline: bool, report: &mut Campaign) {
     inspect_resource_graphs(bytes, baseline, report);
     inspect_debug_payloads(bytes, baseline, report);
     observe!(25, parse_pe_clr_header);
+    inspect_amd64_exceptions(bytes, baseline, report);
     assert_eq!(bytes, before, "input changed at case {}", report.cases);
     report.cases += 1;
+}
+
+fn inspect_amd64_exceptions(bytes: &[u8], baseline: bool, report: &mut Campaign) {
+    let first = parse_pe_amd64_exception_functions(bytes);
+    let second = parse_pe_amd64_exception_functions(bytes);
+    assert_eq!(first, second, "amd64 exceptions at case {}", report.cases);
+    if baseline {
+        assert!(first.is_ok(), "amd64 exception baseline: {first:?}");
+    }
+    report.outcomes[26][usize::from(first.is_err())] += 1;
+    write!(
+        report.digest,
+        "\0parse_pe_amd64_exception_functions:{first:?}\0"
+    )
+    .unwrap();
+    if let Ok(table) = first {
+        report.exception_presence[usize::from(table.is_some())] += 1;
+        if baseline && let Some(table) = table {
+            assert_eq!(table.directory_rva.get(), rva(984));
+            assert_eq!(table.directory_file_offset.get(), 984);
+            assert_eq!(table.directory_size, 24);
+            let records: Vec<_> = table
+                .entries
+                .iter()
+                .map(|entry| {
+                    (
+                        entry.table_index,
+                        entry.entry_rva.get(),
+                        entry.entry_file_offset.get(),
+                        entry.begin_rva.get(),
+                        entry.end_rva.get(),
+                        entry.unwind_info_rva.get(),
+                    )
+                })
+                .collect();
+            assert_eq!(
+                records,
+                [
+                    (0, rva(984), 984, 0x1500, 0x1510, 0x1600),
+                    (1, rva(996), 996, u32::MAX, 0, 1),
+                ]
+            );
+        }
+    }
 }
 
 fn inspect_resource_graphs(bytes: &[u8], baseline: bool, report: &mut Campaign) {
@@ -304,11 +365,15 @@ fn campaign() -> Campaign {
     let mut report = Campaign {
         cases: 0,
         outcomes: [[0; 2]; READER_COUNT],
+        exception_presence: [0; 2],
         digest: Digest(0xcbf2_9ce4_8422_2325),
     };
     let mut state = 0x7233_4636;
-    for plus in [false, true] {
-        let original = fixture(plus);
+    for (plus, original) in [
+        (false, fixture(false)),
+        (true, fixture(true)),
+        (true, exception_fixture()),
+    ] {
         inspect(&original, true, &mut report);
         for end in 0..original.len() {
             inspect(&original[..end], false, &mut report);
@@ -359,6 +424,11 @@ fn campaign() -> Campaign {
         }
     }
     assert_eq!(report.cases, CASE_COUNT);
+    assert!(report.exception_presence.iter().all(|&count| count > 0));
+    assert_eq!(
+        report.exception_presence.iter().sum::<u32>(),
+        report.outcomes[26][0]
+    );
     for [successes, failures] in report.outcomes {
         assert!(successes > 0 && failures > 0);
         assert_eq!(successes + failures, CASE_COUNT);
