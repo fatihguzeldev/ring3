@@ -54,10 +54,10 @@ pub use imports::{
     PeDelayImportLookupTable, PeDelayImportName, PeDelayImportNameError, PeDelayImportNameTable,
     PeDelayImportTable, PeImportDescriptor, PeImportError, PeImportExportBatch,
     PeImportExportError, PeImportLookup, PeImportLookupEntry, PeImportLookupError, PeImportSymbol,
-    lookup_pe_delay_import_exports, lookup_pe_import_exports,
-    lookup_pe_import_exports_with_provider, parse_pe_delay_import_descriptors,
-    parse_pe_delay_import_lookups, parse_pe_delay_import_names, parse_pe_import_descriptors,
-    parse_pe_import_lookups,
+    lookup_pe_delay_import_exports, lookup_pe_delay_import_exports_with_provider,
+    lookup_pe_import_exports, lookup_pe_import_exports_with_provider,
+    parse_pe_delay_import_descriptors, parse_pe_delay_import_lookups, parse_pe_delay_import_names,
+    parse_pe_import_descriptors, parse_pe_import_lookups,
 };
 pub use load_config::{PeLoadConfigError, PeLoadConfigPrefix, parse_pe_load_config_prefix};
 pub use optional::{

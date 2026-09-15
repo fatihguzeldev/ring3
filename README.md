@@ -109,6 +109,9 @@ retain the raw reader's errors; INTs never fall back to IAT bytes. Each result
 keeps the selected delay metadata and its ordered provider selections, with
 independent image lifetimes and the same query/row budget scope. See the
 [delay import/export API](core/src/pe/imports/delay/export_batch.rs).
+`lookup_pe_delay_import_exports_with_provider` accepts a retained `PeExportLookup`
+with the same independent image lifetimes and per-call budgets as the static
+counterpart. Complete delay validation still precedes provider matching.
 
 
 ## Fixture corpus
