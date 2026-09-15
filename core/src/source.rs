@@ -1,5 +1,6 @@
 mod paths;
 mod pe_evidence;
+mod pe_fingerprints;
 mod pe_headers;
 
 pub use paths::{
@@ -9,6 +10,9 @@ pub use paths::{
 pub use pe_evidence::{
     AsciiPeSourceEvidence, AsciiPeSourceEvidenceBatch, AsciiPeSourceEvidenceError,
     AsciiPeSourceEvidenceLimits, inspect_ascii_pe_source_evidence,
+};
+pub use pe_fingerprints::{
+    AsciiPeSourceFingerprint, AsciiPeSourceFingerprintBatch, fingerprint_ascii_pe_source_evidence,
 };
 pub use pe_headers::{
     AsciiPeSource, AsciiPeSourceHeader, AsciiPeSourceHeaderError, AsciiPeSourceHeaderLimits,

@@ -84,6 +84,12 @@ file do not discard other admitted files. Shared admission completes before each
 source goes directly to the independent evidence inspector. See the
 [named evidence API](core/src/source/pe_evidence.rs).
 
+`fingerprint_ascii_pe_source_evidence` applies the same complete path/content
+admission, then binds each admitted path to its whole-input fingerprint result.
+Algorithm-length refusals stay in their entries; aliases count and hash for every
+occurrence. Paths are excluded from digests. See the
+[named fingerprint API](core/src/source/pe_fingerprints.rs).
+
 Related PE readers are grouped under [imports](core/src/pe/imports.rs),
 [exports](core/src/pe/exports.rs), and [resources](core/src/pe/resources.rs).
 Delay imports live inside the [imports family](core/src/pe/imports/delay.rs).

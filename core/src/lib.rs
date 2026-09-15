@@ -58,3 +58,6 @@ pub use source::{
     AsciiSourcePathSegmentError, admit_ascii_source_paths, inspect_ascii_pe_source_evidence,
     parse_ascii_pe_source_headers,
 };
+pub use source::{
+    AsciiPeSourceFingerprint, AsciiPeSourceFingerprintBatch, fingerprint_ascii_pe_source_evidence,
+};
