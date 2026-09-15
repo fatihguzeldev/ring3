@@ -181,7 +181,7 @@ and per-run evidence go under `target/`; they are not committed.
 | [pe-delay-imports](corpus/pe-delay-imports/) | Delay-import metadata with named symbols. | `pnpm corpus:build:delay` |
 | [pe-delay-ordinals](corpus/pe-delay-ordinals/) | Delay-import metadata with ordinal `32768`. | `pnpm corpus:build:delay-ordinals` |
 | [pe-resources](corpus/pe-resources/) | Linked resource roots and raw Unicode name bytes. | `pnpm corpus:build:resources` |
-| [pe-amd64-exceptions](corpus/pe-amd64-exceptions/) | AMD64 DLLs with two raw exception function records or an absent table. | `pnpm corpus:build:exceptions` |
+| [pe-amd64-exceptions](corpus/pe-amd64-exceptions/) | AMD64 DLLs with two raw exception function records and their v1 unwind metadata, or an absent table. | `pnpm corpus:build:exceptions` |
 | [pe-debug-payloads](corpus/pe-debug-payloads/) | Linked raw debug metadata, opaque CodeView bytes and empty REPRO records. | `pnpm corpus:build:debug` |
 | [pe-managed](corpus/pe-managed/) | Unpatched self-authored managed PE32 and PE32+ files with raw CLR headers. | `pnpm corpus:build:managed` |
 
@@ -219,9 +219,10 @@ pnpm build
 
 `test:rust` runs the regular Rust tests and documentation tests. Tests that require
 generated EXE/DLL files run through the corpus verifier below.
-The regular suite includes a fixed 4,611-input mutation campaign across all 27 raw PE
+The regular suite includes a fixed 4,611-input mutation campaign across 27 raw PE
 readers, including present and absent AMD64 exception tables, checking repeated
-results and input preservation. This finite campaign
+results and input preservation. The separate v1 unwind metadata reader has
+focused and direct corpus tests and is not yet part of that campaign. This finite campaign
 does not replace semantic tests or coverage-guided fuzzing.
 
 ## Corpus verification

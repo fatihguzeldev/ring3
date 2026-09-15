@@ -346,3 +346,66 @@ fn explicit_rva_does_not_require_exception_directory_membership() {
         })
     );
 }
+
+#[test]
+#[ignore = "requires the self-authored linked AMD64 exception fixture"]
+fn generated_amd64_unwind_records_preserve_slots_and_padding() {
+    let path = std::env::var("RING3_EXCEPTION_AMD64_FIXTURE")
+        .expect("RING3_EXCEPTION_AMD64_FIXTURE is required");
+    let mut bytes = std::fs::read(&path).expect("read the AMD64 exception fixture");
+    let before = bytes.clone();
+    assert_eq!(bytes.len(), 2560);
+    assert_eq!(&bytes[1632..1640], &[1, 4, 1, 0, 4, 0x42, 0, 0]);
+    assert_eq!(&bytes[1640..1648], &[1, 5, 2, 0, 5, 0x32, 1, 0x30]);
+    let table = ring3_core::parse_pe_amd64_exception_functions(&bytes)
+        .unwrap()
+        .unwrap();
+    let addresses: Vec<_> = table.entries.iter().map(|x| x.unwind_info_rva).collect();
+    assert_eq!(addresses, [rva(8288), rva(8296)]);
+    let expected = [
+        PeAmd64UnwindInfoV1 {
+            rva: rva(8288),
+            file_offset: FileOffset::new(1632),
+            byte_length: 8,
+            version: 1,
+            flags: 0,
+            prolog_size: 4,
+            code_count: 1,
+            frame_register: 0,
+            frame_offset_scaled: 0,
+            code_words: vec![0x4204],
+            padding_word: Some(0),
+            tail: PeAmd64UnwindTailV1::None,
+        },
+        PeAmd64UnwindInfoV1 {
+            rva: rva(8296),
+            file_offset: FileOffset::new(1640),
+            byte_length: 8,
+            version: 1,
+            flags: 0,
+            prolog_size: 5,
+            code_count: 2,
+            frame_register: 0,
+            frame_offset_scaled: 0,
+            code_words: vec![0x3205, 0x3001],
+            padding_word: None,
+            tail: PeAmd64UnwindTailV1::None,
+        },
+    ];
+    let results: Vec<_> = addresses
+        .iter()
+        .map(|&address| parse_pe_amd64_unwind_info_v1(&bytes, address).unwrap())
+        .collect();
+    assert_eq!(results, expected);
+    for (&address, result) in addresses.iter().zip(&results) {
+        assert_eq!(
+            parse_pe_amd64_unwind_info_v1(&bytes, address).as_ref(),
+            Ok(result)
+        );
+    }
+    assert_eq!(bytes, before);
+    assert_eq!(std::fs::read(path).unwrap(), before);
+    bytes.fill(0);
+    drop(bytes);
+    assert_eq!(results, expected);
+}
