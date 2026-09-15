@@ -68,11 +68,13 @@ pub use header_batch::{
     PeHeaderBatch, PeHeaderBatchError, PeHeaderBatchLimits, parse_pe_header_prefix_batch,
 };
 pub use imports::{
-    PeDelayImportDescriptor, PeDelayImportError, PeDelayImportExportBatch,
-    PeDelayImportExportError, PeDelayImportLookup, PeDelayImportLookupError,
-    PeDelayImportLookupTable, PeDelayImportName, PeDelayImportNameError, PeDelayImportNameTable,
-    PeDelayImportTable, PeImportDescriptor, PeImportError, PeImportExportBatch,
-    PeImportExportError, PeImportLookup, PeImportLookupEntry, PeImportLookupError, PeImportSymbol,
+    PeDelayImportDescriptor, PeDelayImportError, PeDelayImportEvidence, PeDelayImportEvidenceError,
+    PeDelayImportEvidenceLimits, PeDelayImportExportBatch, PeDelayImportExportError,
+    PeDelayImportLookup, PeDelayImportLookupError, PeDelayImportLookupTable, PeDelayImportName,
+    PeDelayImportNameError, PeDelayImportNameTable, PeDelayImportTable, PeImportDescriptor,
+    PeImportError, PeImportExportBatch, PeImportExportError, PeImportLookup, PeImportLookupEntry,
+    PeImportLookupError, PeImportSymbol, PeOwnedDelayImportLookup, PeOwnedDelayImportLookupTable,
+    PeOwnedDelayImportName, PeOwnedDelayImportNameTable, inspect_pe_delay_imports,
     lookup_pe_delay_import_exports, lookup_pe_delay_import_exports_with_provider,
     lookup_pe_import_exports, lookup_pe_import_exports_with_provider,
     parse_pe_delay_import_descriptors, parse_pe_delay_import_lookups, parse_pe_delay_import_names,

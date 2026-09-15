@@ -178,6 +178,16 @@ so calls for multiple importers or descriptors can reuse one caller-selected
 provider's tables. Each call has fresh query/row limits, and returned metadata
 can outlive the owner while retaining each input image's independent lifetime.
 
+`inspect_pe_delay_imports` retains three independent owned results for the raw
+delay table, DLL names and lookup symbols. Each keeps absence, present-empty
+table metadata and typed errors distinct. Input admission precedes the readers;
+complete row and text admission precedes new text/conversion copies. Existing
+reader allocations occur earlier, and the already-owned raw table moves into
+the result. Repeated text counts per occurrence; these limits do not cap process
+memory. Exact metadata survives input release, including readable raw/name
+results when later stages fail. See the
+[owned delay evidence API](core/src/pe/imports/delay/evidence.rs).
+
 `lookup_pe_delay_import_exports` applies the same explicit-provider matching to
 one delay-import descriptor. It validates the complete delay table, DLL names
 and lookup entries before selection. Unsupported attributes and unavailable INTs

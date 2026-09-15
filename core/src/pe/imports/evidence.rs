@@ -1,6 +1,6 @@
 use super::{
-    PeImportDescriptor, PeImportError, PeImportLookup, PeImportLookupError, PeImportSymbol,
-    parse_pe_import_descriptors, parse_pe_import_lookups,
+    PeImportDescriptor, PeImportError, PeImportLookup, PeImportLookupEntry, PeImportLookupError,
+    PeImportSymbol, parse_pe_import_descriptors, parse_pe_import_lookups,
 };
 use crate::{FileOffset, RelativeVirtualAddress};
 
@@ -78,30 +78,30 @@ fn own_descriptor(d: PeImportDescriptor<'_>) -> PeOwnedImportDescriptor {
     }
 }
 
+pub(super) fn own_entry(e: PeImportLookupEntry<'_>) -> PeOwnedImportLookupEntry {
+    PeOwnedImportLookupEntry {
+        lookup_rva: e.lookup_rva,
+        lookup_file_offset: e.lookup_file_offset,
+        raw_value: e.raw_value,
+        symbol: match e.symbol {
+            PeImportSymbol::Ordinal(v) => PeOwnedImportSymbol::Ordinal(v),
+            PeImportSymbol::ByName {
+                hint_name_rva,
+                hint,
+                name,
+            } => PeOwnedImportSymbol::ByName {
+                hint_name_rva,
+                hint,
+                name: name.to_owned(),
+            },
+        },
+    }
+}
+
 fn own_lookup(l: PeImportLookup<'_>) -> PeOwnedImportLookup {
     PeOwnedImportLookup {
         descriptor: own_descriptor(l.descriptor),
-        entries: l
-            .entries
-            .into_iter()
-            .map(|e| PeOwnedImportLookupEntry {
-                lookup_rva: e.lookup_rva,
-                lookup_file_offset: e.lookup_file_offset,
-                raw_value: e.raw_value,
-                symbol: match e.symbol {
-                    PeImportSymbol::Ordinal(v) => PeOwnedImportSymbol::Ordinal(v),
-                    PeImportSymbol::ByName {
-                        hint_name_rva,
-                        hint,
-                        name,
-                    } => PeOwnedImportSymbol::ByName {
-                        hint_name_rva,
-                        hint,
-                        name: name.to_owned(),
-                    },
-                },
-            })
-            .collect(),
+        entries: l.entries.into_iter().map(own_entry).collect(),
     }
 }
 
