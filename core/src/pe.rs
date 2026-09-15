@@ -52,13 +52,15 @@ pub use declared_evidence::{
 pub use exports::{
     PeExportAddressEntry, PeExportAddressError, PeExportAddressTable, PeExportBatch,
     PeExportBatchError, PeExportBatchLimits, PeExportDirectory, PeExportDirectoryError,
-    PeExportLookup, PeExportLookupError, PeExportName, PeExportNameError, PeExportNameTable,
-    PeExportQuery, PeExportSelection, PeExportTarget, PeForwarderHop, PeForwarderQuery,
-    PeForwarderRequest, PeForwarderRequestError, PeForwarderRoute, PeForwarderStep,
-    PeForwarderSymbol, PeForwarderTextContext, PeForwarderWalk, PeForwarderWalkError,
-    PeForwarderWalkLimits, decode_pe_forwarder_request, lookup_pe_export, lookup_pe_export_batch,
-    parse_pe_export_addresses, parse_pe_export_directory, parse_pe_export_names,
-    walk_pe_export_forwarders,
+    PeExportEvidence, PeExportEvidenceError, PeExportEvidenceLimits, PeExportLookup,
+    PeExportLookupError, PeExportName, PeExportNameError, PeExportNameTable, PeExportQuery,
+    PeExportSelection, PeExportTarget, PeForwarderHop, PeForwarderQuery, PeForwarderRequest,
+    PeForwarderRequestError, PeForwarderRoute, PeForwarderStep, PeForwarderSymbol,
+    PeForwarderTextContext, PeForwarderWalk, PeForwarderWalkError, PeForwarderWalkLimits,
+    PeOwnedExportAddressEntry, PeOwnedExportAddressTable, PeOwnedExportName,
+    PeOwnedExportNameTable, PeOwnedExportTarget, decode_pe_forwarder_request, inspect_pe_exports,
+    lookup_pe_export, lookup_pe_export_batch, parse_pe_export_addresses, parse_pe_export_directory,
+    parse_pe_export_names, walk_pe_export_forwarders,
 };
 pub use fingerprints::{
     PeFingerprintError, PeFingerprintedEvidence, fingerprint_pe_declared_evidence,

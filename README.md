@@ -104,6 +104,15 @@ Each family keeps its readers and selection operations together; the public
 `ring3_core` API remains available through the crate root.
 
 
+`inspect_pe_exports` retains three independent owned directory, address and name
+results after input release. Names keep their complete nested address table;
+standalone and nested entries and text copies each count toward output limits.
+Input admission precedes all readers; complete row and text admission precedes
+new owned copies, while existing reader allocations occur earlier. All metadata,
+target variants, raw forwarder spelling, absence and typed errors stay distinct.
+Directory DLL-name pointers remain metadata; direct target content is not read.
+See the [owned export evidence API](core/src/pe/exports/evidence.rs).
+
 `lookup_pe_export` selects metadata by exact name or full biased export ordinal
 inside one supplied image. Name queries preserve every duplicate matching row;
 ordinal queries use the address table without reading export names. The result
