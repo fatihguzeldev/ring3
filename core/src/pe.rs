@@ -7,6 +7,7 @@ mod certificates;
 mod clr;
 mod debug;
 mod debug_payloads;
+mod declared_evidence;
 mod exports;
 mod header_batch;
 mod imports;
@@ -37,6 +38,10 @@ pub use debug::{
 pub use debug_payloads::{
     PeDebugPayload, PeDebugPayloadError, PeDebugPayloadRange, PeDebugPayloadTable,
     parse_pe_debug_payloads,
+};
+pub use declared_evidence::{
+    PeClrDescriptorEvidence, PeClrHeaderEvidence, PeDeclaredEvidence, PeFieldEvidence,
+    PeHeaderPrefixEvidence, PeOptionalHeaderEvidence, inspect_pe_declared_evidence,
 };
 pub use exports::{
     PeExportAddressEntry, PeExportAddressError, PeExportAddressTable, PeExportBatch,
