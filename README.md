@@ -80,8 +80,8 @@ See the [source composition](core/src/source/pe_headers.rs).
 `inspect_ascii_pe_source_evidence` keeps the same path-first admission and logical
 content budgets, then associates every admitted path with all three declared PE
 evidence outcomes. Each field offset belongs to its paired content; errors in one
-file do not discard other admitted files. The existing header pass is retained,
-so collecting evidence repeats prefix work. See the
+file do not discard other admitted files. Shared admission completes before each
+source goes directly to the independent evidence inspector. See the
 [named evidence API](core/src/source/pe_evidence.rs).
 
 Related PE readers are grouped under [imports](core/src/pe/imports.rs),
