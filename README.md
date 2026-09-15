@@ -48,6 +48,13 @@ order. A malformed prefix stays in its file's result. Repeated references count
 toward the logical byte total each time; these limits do not cap process memory.
 See the [batch API and example](core/src/pe/header_batch.rs).
 
+`parse_ascii_pe_source_headers` accepts paired path/content records, admits all
+paths first, then checks content budgets and reads each PE header prefix. Owned
+results keep each path with its original content result; malformed prefixes do
+not stop later entries. Path and content byte totals remain separate. Pairings
+come from the caller and do not establish file provenance or image loadability.
+See the [source composition](core/src/source/pe_headers.rs).
+
 Related PE readers are grouped under [imports](core/src/pe/imports.rs),
 [exports](core/src/pe/exports.rs), and [resources](core/src/pe/resources.rs).
 Delay imports live inside the [imports family](core/src/pe/imports/delay.rs).
