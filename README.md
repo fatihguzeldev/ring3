@@ -332,6 +332,9 @@ metadata after input release, including nested address tables and exact budget
 refusal operands.
 Certificate-entry tests append synthetic records to generated PE files in memory;
 the source fixtures remain unchanged and are not cryptographically signed.
+Two module-evidence groups retain whole-file fingerprints and complete owned
+static/delay/export observations across six compiled inputs, including input
+release and independent family output-refusal operands.
 
 The verifier requires pinned native Rust tools on `aarch64-apple-darwin`, compiles
 the Rust tests offline into a fresh Cargo target, and rejects missing, extra or

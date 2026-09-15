@@ -227,6 +227,10 @@
     "pe_static_import_evidence": [
       "generated_owned_imports_preserve_compiled_named_and_ordinal_metadata",
       "generated_owned_import_refusals_preserve_compiled_budget_operands"
+    ],
+    "pe_module_evidence": [
+      "generated_owned_module_evidence_preserves_compiled_observations",
+      "generated_owned_module_refusals_preserve_family_isolation"
     ]
   }
 }
