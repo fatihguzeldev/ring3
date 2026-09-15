@@ -48,6 +48,14 @@ order. A malformed prefix stays in its file's result. Repeated references count
 toward the logical byte total each time; these limits do not cap process memory.
 See the [batch API and example](core/src/pe/header_batch.rs).
 
+`inspect_pe_declared_evidence` collects owned header-prefix, optional-header and
+CLR-header evidence as three independent reader outcomes. Each selected field
+retains its physical file offset and byte width; a later reader error preserves
+earlier successful fields. Undeclared CLR slots, declared zero descriptors and
+CLR-reader errors remain distinct. These declarations do not establish runtime
+requirements, support or loadability. See the
+[declared evidence API](core/src/pe/declared_evidence.rs).
+
 `parse_ascii_pe_source_headers` accepts paired path/content records, admits all
 paths first, then checks content budgets and reads each PE header prefix. Owned
 results keep each path with its original content result; malformed prefixes do
