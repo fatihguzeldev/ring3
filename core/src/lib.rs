@@ -48,6 +48,7 @@ pub use pe::{
     parse_pe_resource_root_names, parse_pe_sections, parse_pe_tls_directory, resolve_pe_file_range,
     walk_pe_export_forwarders,
 };
+pub use pe::{PeFingerprintError, PeFingerprintedEvidence, fingerprint_pe_declared_evidence};
 
 pub use source::{
     AsciiPeSource, AsciiPeSourceEvidence, AsciiPeSourceEvidenceBatch, AsciiPeSourceEvidenceError,

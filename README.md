@@ -56,6 +56,13 @@ CLR-reader errors remain distinct. These declarations do not establish runtime
 requirements, support or loadability. See the
 [declared evidence API](core/src/pe/declared_evidence.rs).
 
+`fingerprint_pe_declared_evidence` checks a caller byte limit, hashes every input
+byte with SHA-256, and collects owned declared evidence from that same slice.
+Admitted empty or malformed images retain their reader errors alongside the hash.
+The digest includes uninspected and trailing bytes; it does not authenticate a
+source or implement the PE Authenticode hash. See the
+[content fingerprint API](core/src/pe/fingerprints.rs).
+
 `describe_pe_architecture_declarations` accepts existing owned evidence and names
 two COFF and four CLR flag bits while retaining raw values, byte coordinates and
 independent outcomes. It reads no bytes and does not authenticate caller-supplied
