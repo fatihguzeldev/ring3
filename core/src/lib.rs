@@ -49,8 +49,10 @@ pub use pe::{
 };
 
 pub use source::{
-    AsciiPeSource, AsciiPeSourceHeader, AsciiPeSourceHeaderError, AsciiPeSourceHeaderLimits,
-    AsciiPeSourceHeaders, AsciiSourcePathBatch, AsciiSourcePathCollision, AsciiSourcePathEntry,
-    AsciiSourcePathError, AsciiSourcePathLimits, AsciiSourcePathSegmentError,
-    admit_ascii_source_paths, parse_ascii_pe_source_headers,
+    AsciiPeSource, AsciiPeSourceEvidence, AsciiPeSourceEvidenceBatch, AsciiPeSourceEvidenceError,
+    AsciiPeSourceEvidenceLimits, AsciiPeSourceHeader, AsciiPeSourceHeaderError,
+    AsciiPeSourceHeaderLimits, AsciiPeSourceHeaders, AsciiSourcePathBatch,
+    AsciiSourcePathCollision, AsciiSourcePathEntry, AsciiSourcePathError, AsciiSourcePathLimits,
+    AsciiSourcePathSegmentError, admit_ascii_source_paths, inspect_ascii_pe_source_evidence,
+    parse_ascii_pe_source_headers,
 };
