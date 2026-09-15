@@ -1,6 +1,7 @@
 use crate::{FileOffset, RelativeVirtualAddress};
 
 mod amd64_exceptions;
+mod architecture_declarations;
 mod base_relocations;
 mod certificate_entries;
 mod certificates;
@@ -22,6 +23,10 @@ pub use amd64_exceptions::{
     PeAmd64ExceptionEntry, PeAmd64ExceptionError, PeAmd64ExceptionTable, PeAmd64UnwindInfoV1,
     PeAmd64UnwindInfoV1Error, PeAmd64UnwindTailV1, parse_pe_amd64_exception_functions,
     parse_pe_amd64_unwind_info_v1,
+};
+pub use architecture_declarations::{
+    PeArchitectureDeclarations, PeClrArchitectureDeclarations, PeCoffArchitectureDeclarations,
+    PeFlagBit, describe_pe_architecture_declarations,
 };
 pub use base_relocations::{
     PeBaseRelocationBlock, PeBaseRelocationError, parse_pe_base_relocation_blocks,
