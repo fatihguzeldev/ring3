@@ -7,7 +7,8 @@ pub use delay::{
     PeDelayImportDescriptor, PeDelayImportError, PeDelayImportExportBatch,
     PeDelayImportExportError, PeDelayImportLookup, PeDelayImportLookupError,
     PeDelayImportLookupTable, PeDelayImportName, PeDelayImportNameError, PeDelayImportNameTable,
-    PeDelayImportTable, lookup_pe_delay_import_exports, parse_pe_delay_import_descriptors,
+    PeDelayImportTable, lookup_pe_delay_import_exports,
+    lookup_pe_delay_import_exports_with_provider, parse_pe_delay_import_descriptors,
     parse_pe_delay_import_lookups, parse_pe_delay_import_names,
 };
 pub use descriptors::{PeImportDescriptor, PeImportError, parse_pe_import_descriptors};

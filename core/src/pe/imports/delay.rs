@@ -9,6 +9,7 @@ pub use descriptors::{
 };
 pub use export_batch::{
     PeDelayImportExportBatch, PeDelayImportExportError, lookup_pe_delay_import_exports,
+    lookup_pe_delay_import_exports_with_provider,
 };
 pub use lookups::{
     PeDelayImportLookup, PeDelayImportLookupError, PeDelayImportLookupTable,
