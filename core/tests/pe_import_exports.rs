@@ -1,7 +1,8 @@
 use ring3_core::{
-    FileOffset, PeExportBatchError, PeExportBatchLimits, PeExportLookupError, PeExportNameError,
-    PeExportSelection, PeExportTarget, PeImportExportError, PeImportLookupError, PeImportSymbol,
-    RelativeVirtualAddress, lookup_pe_import_exports,
+    FileOffset, PeExportBatchError, PeExportBatchLimits, PeExportLookup, PeExportLookupError,
+    PeExportNameError, PeExportSelection, PeExportTarget, PeImportExportError, PeImportLookupError,
+    PeImportSymbol, RelativeVirtualAddress, lookup_pe_import_exports,
+    lookup_pe_import_exports_with_provider,
 };
 mod importing {
     pub(super) fn put32(bytes: &mut [u8], offset: usize, value: u32) {
@@ -359,6 +360,89 @@ fn both_inputs_keep_their_own_borrowed_text_across_repeated_batches() {
     }
     assert_eq!(importer, before_importer);
     assert_eq!(provider, before_provider);
+}
+
+#[test]
+fn retained_provider_matches_multiple_importers_with_fresh_limits() {
+    for provider_plus in [false, true] {
+        let provider_bytes = providing::fixture(provider_plus, 2);
+        let before = provider_bytes.clone();
+        let mut provider = PeExportLookup::new(&provider_bytes);
+        for import_plus in [false, true, false] {
+            let importer = mixed_importer(import_plus);
+            let expected =
+                lookup_pe_import_exports(&importer, 0, &provider_bytes, limits(5, 5)).unwrap();
+            assert_eq!(expected.exports.selection_rows, 5);
+            assert_eq!(
+                lookup_pe_import_exports_with_provider(&importer, 0, &mut provider, limits(4, 5)),
+                Err(PeImportExportError::ExportBatch(
+                    PeExportBatchError::QueryCountExceeded { count: 5, limit: 4 }
+                ))
+            );
+            assert_eq!(
+                lookup_pe_import_exports_with_provider(&importer, 0, &mut provider, limits(5, 4)),
+                lookup_pe_import_exports(&importer, 0, &provider_bytes, limits(5, 4))
+            );
+            assert_eq!(
+                lookup_pe_import_exports_with_provider(&importer, 0, &mut provider, limits(5, 5))
+                    .unwrap(),
+                expected
+            );
+            assert!(matches!(
+                lookup_pe_import_exports_with_provider(b"", 0, &mut provider, limits(0, 0)),
+                Err(PeImportExportError::Imports(_))
+            ));
+            assert_eq!(
+                lookup_pe_import_exports_with_provider(&importer, 1, &mut provider, limits(0, 0)),
+                Err(PeImportExportError::DescriptorNotFound {
+                    descriptor_index: 1,
+                    descriptor_count: 1
+                })
+            );
+            assert_eq!(
+                lookup_pe_import_exports_with_provider(&importer, 0, &mut provider, limits(5, 5))
+                    .unwrap(),
+                expected
+            );
+        }
+        assert_eq!(provider_bytes, before);
+    }
+}
+
+#[test]
+fn retained_provider_results_outlive_owner_with_independent_image_borrows() {
+    let importer = mixed_importer(true);
+    let provider_bytes = providing::fixture(false, 2);
+    let batch = {
+        let mut provider = PeExportLookup::new(&provider_bytes);
+        let batch =
+            lookup_pe_import_exports_with_provider(&importer, 0, &mut provider, limits(5, 5))
+                .unwrap();
+        assert!(
+            provider
+                .lookup_batch(&[], limits(0, 0))
+                .unwrap()
+                .selections
+                .is_empty()
+        );
+        batch
+    };
+    let PeImportSymbol::ByName { name, .. } = batch.imports.entries[0].symbol else {
+        panic!("expected import name")
+    };
+    assert!(std::ptr::eq(
+        name.as_ptr(),
+        importer[importing::file_offset(0xe000) + 2..].as_ptr()
+    ));
+    let PeExportSelection::AmbiguousName { matches } =
+        batch.exports.selections[0].as_ref().unwrap()
+    else {
+        panic!("expected duplicate exports")
+    };
+    assert!(matches.iter().all(|entry| std::ptr::eq(
+        entry.name.as_ptr(),
+        provider_bytes[providing::file_offset(0xc000)..].as_ptr()
+    )));
 }
 
 fn read_corpus_image(variable: &str, kind: ring3_core::PeKind) -> (std::path::PathBuf, Vec<u8>) {
