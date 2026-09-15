@@ -1,6 +1,6 @@
 use super::{PeImportLookup, PeImportLookupError, PeImportSymbol, parse_pe_import_lookups};
 use crate::pe::exports::{
-    PeExportBatch, PeExportBatchError, PeExportBatchLimits, PeExportQuery, lookup_pe_export_batch,
+    PeExportBatch, PeExportBatchError, PeExportBatchLimits, PeExportLookup, PeExportQuery,
 };
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -73,6 +73,44 @@ pub fn lookup_pe_import_exports<'importer, 'provider>(
     provider_bytes: &'provider [u8],
     limits: PeExportBatchLimits,
 ) -> Result<PeImportExportBatch<'importer, 'provider>, PeImportExportError> {
+    let mut provider = PeExportLookup::new(provider_bytes);
+    lookup_pe_import_exports_with_provider(importer_bytes, descriptor_index, &mut provider, limits)
+}
+
+/// matches one descriptor against a caller-owned, explicitly selected provider.
+/// complete importer validation, descriptor selection and ordered query semantics
+/// follow `lookup_pe_import_exports`. the provider retains tables across calls;
+/// each call starts fresh query/row limits through `PeExportLookup::lookup_batch`.
+///
+/// no provider table is read for importer/descriptor errors, count refusal or an
+/// empty selected descriptor. row refusal may retain tables for later calls.
+/// results borrow the two input images independently and may outlive the owner.
+/// provider identity is caller-selected; no dll-name matching or discovery occurs.
+///
+/// # errors
+/// importer errors precede descriptor selection and export batch limits. provider
+/// parsing errors remain ordered per-query results, with no partial outer result.
+///
+/// ```compile_fail
+/// use ring3_core::{PeExportLookup, PeImportExportBatch, PeExportBatchLimits,
+///     lookup_pe_import_exports_with_provider};
+/// fn escape(importer: &[u8]) -> PeImportExportBatch<'_, 'static> {
+///     let bytes = vec![0; 64];
+///     let mut provider = PeExportLookup::new(&bytes);
+///     lookup_pe_import_exports_with_provider(importer, 0, &mut provider,
+///         PeExportBatchLimits { max_queries: 1, max_selection_rows: 1 }).unwrap()
+/// }
+/// ```
+#[expect(
+    clippy::missing_errors_doc,
+    reason = "project documentation headings are lower case"
+)]
+pub fn lookup_pe_import_exports_with_provider<'importer, 'provider>(
+    importer_bytes: &'importer [u8],
+    descriptor_index: u16,
+    provider: &mut PeExportLookup<'provider>,
+    limits: PeExportBatchLimits,
+) -> Result<PeImportExportBatch<'importer, 'provider>, PeImportExportError> {
     let descriptors =
         parse_pe_import_lookups(importer_bytes).map_err(PeImportExportError::Imports)?;
     let descriptor_count = descriptors.len();
@@ -91,7 +129,8 @@ pub fn lookup_pe_import_exports<'importer, 'provider>(
             PeImportSymbol::Ordinal(ordinal) => PeExportQuery::Ordinal(u32::from(ordinal)),
         })
         .collect();
-    let exports = lookup_pe_export_batch(provider_bytes, &queries, limits)
+    let exports = provider
+        .lookup_batch(&queries, limits)
         .map_err(PeImportExportError::ExportBatch)?;
     Ok(PeImportExportBatch { imports, exports })
 }

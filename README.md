@@ -97,6 +97,10 @@ input bytes or temporary allocations. Each image owns the lifetime of its own
 borrowed text. This is static metadata matching without module discovery,
 architecture compatibility checks or address binding. See the
 [import/export API](core/src/pe/imports/export_batch.rs).
+`lookup_pe_import_exports_with_provider` accepts an existing `PeExportLookup`
+so calls for multiple importers or descriptors can reuse one caller-selected
+provider's tables. Each call has fresh query/row limits, and returned metadata
+can outlive the owner while retaining each input image's independent lifetime.
 
 `lookup_pe_delay_import_exports` applies the same explicit-provider matching to
 one delay-import descriptor. It validates the complete delay table, DLL names
