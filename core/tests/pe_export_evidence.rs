@@ -465,3 +465,206 @@ fn retains_all_typed_directory_failures_with_zero_output_budget() {
         );
     }
 }
+
+#[derive(Clone, Copy)]
+enum CompiledExport {
+    Named,
+    Ordinal,
+    Forwarders,
+}
+
+fn compiled_expected(kind: CompiledExport) -> PeExportEvidence {
+    let (
+        size,
+        ordinal,
+        address_count,
+        name_count,
+        addresses_rva,
+        names_rva,
+        ordinals_rva,
+        rows,
+        text,
+    ) = match kind {
+        CompiledExport::Named => (77, 1, 1, 1, 8247, 8251, 8255, 3, 11),
+        CompiledExport::Ordinal => (61, 32768, 1, 0, 8249, 8253, 8253, 2, 0),
+        CompiledExport::Forwarders => (147, 7, 3, 2, 8252, 8264, 8272, 8, 101),
+    };
+    let directory = PeExportDirectory {
+        directory_rva: RelativeVirtualAddress::new(8192),
+        directory_file_offset: FileOffset::new(1536),
+        directory_size: size,
+        flags: 0,
+        time_date_stamp: 0,
+        major_version: 0,
+        minor_version: 0,
+        name_rva: RelativeVirtualAddress::new(8232),
+        ordinal_base: ordinal,
+        address_table_entries: address_count,
+        number_of_name_pointers: name_count,
+        export_address_table_rva: RelativeVirtualAddress::new(addresses_rva),
+        name_pointer_rva: RelativeVirtualAddress::new(names_rva),
+        ordinal_table_rva: RelativeVirtualAddress::new(ordinals_rva),
+    };
+    let targets = match kind {
+        CompiledExport::Named | CompiledExport::Ordinal => {
+            vec![PeOwnedExportTarget::Rva(RelativeVirtualAddress::new(4096))]
+        }
+        CompiledExport::Forwarders => vec![
+            PeOwnedExportTarget::Forwarder {
+                rva: RelativeVirtualAddress::new(8295),
+                text: "OtherModule.ring3_target".to_owned(),
+            },
+            PeOwnedExportTarget::Empty,
+            PeOwnedExportTarget::Forwarder {
+                rva: RelativeVirtualAddress::new(8320),
+                text: "OtherModule.#32768".to_owned(),
+            },
+        ],
+    };
+    let addresses = PeOwnedExportAddressTable {
+        directory,
+        entries: targets
+            .into_iter()
+            .zip(0_u32..)
+            .map(|(target, i)| PeOwnedExportAddressEntry {
+                table_index: i,
+                ordinal: ordinal + i,
+                entry_rva: RelativeVirtualAddress::new(addresses_rva + i * 4),
+                entry_file_offset: FileOffset::new(u64::from(addresses_rva - 6656 + i * 4)),
+                target,
+            })
+            .collect(),
+    };
+    let names = match kind {
+        CompiledExport::Named => vec![(0, 8257, "ring3_probe")],
+        CompiledExport::Ordinal => vec![],
+        CompiledExport::Forwarders => vec![(0, 8276, "by_name"), (2, 8284, "by_ordinal")],
+    };
+    let names = PeOwnedExportNameTable {
+        addresses: addresses.clone(),
+        entries: names
+            .into_iter()
+            .zip(0_u32..)
+            .map(|((address_index, rva, name), i)| PeOwnedExportName {
+                table_index: i,
+                name_pointer_rva: RelativeVirtualAddress::new(names_rva + i * 4),
+                name_pointer_file_offset: FileOffset::new(u64::from(names_rva - 6656 + i * 4)),
+                ordinal_entry_rva: RelativeVirtualAddress::new(ordinals_rva + i * 2),
+                ordinal_entry_file_offset: FileOffset::new(u64::from(ordinals_rva - 6656 + i * 2)),
+                address_index,
+                name_rva: RelativeVirtualAddress::new(rva),
+                name_file_offset: FileOffset::new(u64::from(rva - 6656)),
+                name: name.to_owned(),
+            })
+            .collect(),
+    };
+    PeExportEvidence {
+        total_rows: rows,
+        total_text_bytes: text,
+        directory: Ok(Some(directory)),
+        addresses: Ok(Some(addresses)),
+        names: Ok(Some(names)),
+    }
+}
+
+fn compiled_exports() -> Vec<(Vec<u8>, PeExportEvidence)> {
+    [
+        ("RING3_EXPORT_PE32_NAMED_DLL", CompiledExport::Named),
+        ("RING3_EXPORT_PE32PLUS_NAMED_DLL", CompiledExport::Named),
+        ("RING3_EXPORT_PE32_ORDINAL_DLL", CompiledExport::Ordinal),
+        ("RING3_EXPORT_PE32PLUS_ORDINAL_DLL", CompiledExport::Ordinal),
+        (
+            "RING3_EXPORT_FORWARD_PE32_FIXTURE",
+            CompiledExport::Forwarders,
+        ),
+        (
+            "RING3_EXPORT_FORWARD_PE32PLUS_FIXTURE",
+            CompiledExport::Forwarders,
+        ),
+    ]
+    .into_iter()
+    .map(|(variable, kind)| {
+        let path = std::env::var_os(variable)
+            .expect("all six explicit compiled export paths are required");
+        let bytes = std::fs::read(path).unwrap();
+        assert_eq!(bytes.len(), 2048);
+        (bytes, compiled_expected(kind))
+    })
+    .collect()
+}
+
+#[test]
+#[ignore = "requires all six explicit compiled export fixture paths"]
+fn generated_owned_exports_preserve_compiled_metadata() {
+    for (mut bytes, expected) in compiled_exports() {
+        let before = bytes.clone();
+        let caps = PeExportEvidenceLimits {
+            max_input_bytes: 2048,
+            max_output_rows: expected.total_rows,
+            max_output_text_bytes: expected.total_text_bytes,
+        };
+        let evidence = inspect_pe_exports(&bytes, caps).unwrap();
+        assert_eq!(evidence, expected);
+        assert_eq!(inspect_pe_exports(&bytes, caps), Ok(evidence.clone()));
+        assert_eq!(bytes, before);
+        bytes.fill(0xee);
+        drop(bytes);
+        assert_eq!(evidence, expected);
+    }
+}
+
+#[test]
+#[ignore = "requires all six explicit compiled export fixture paths"]
+fn generated_owned_export_refusals_preserve_compiled_budget_operands() {
+    for (bytes, expected) in compiled_exports() {
+        let caps = PeExportEvidenceLimits {
+            max_input_bytes: 2048,
+            max_output_rows: expected.total_rows,
+            max_output_text_bytes: expected.total_text_bytes,
+        };
+        assert_eq!(inspect_pe_exports(&bytes, caps), Ok(expected.clone()));
+        assert_eq!(
+            inspect_pe_exports(
+                &bytes,
+                PeExportEvidenceLimits {
+                    max_input_bytes: 2047,
+                    max_output_rows: 0,
+                    max_output_text_bytes: 0,
+                }
+            ),
+            Err(PeExportEvidenceError::InputTooLarge {
+                length: 2048,
+                limit: 2047
+            })
+        );
+        assert_eq!(
+            inspect_pe_exports(
+                &bytes,
+                PeExportEvidenceLimits {
+                    max_output_rows: expected.total_rows - 1,
+                    max_output_text_bytes: 0,
+                    ..caps
+                }
+            ),
+            Err(PeExportEvidenceError::OutputRowsExceeded {
+                rows: expected.total_rows,
+                limit: expected.total_rows - 1,
+            })
+        );
+        if expected.total_text_bytes > 0 {
+            assert_eq!(
+                inspect_pe_exports(
+                    &bytes,
+                    PeExportEvidenceLimits {
+                        max_output_text_bytes: expected.total_text_bytes - 1,
+                        ..caps
+                    }
+                ),
+                Err(PeExportEvidenceError::OutputTextExceeded {
+                    bytes: expected.total_text_bytes,
+                    limit: expected.total_text_bytes - 1,
+                })
+            );
+        }
+    }
+}
