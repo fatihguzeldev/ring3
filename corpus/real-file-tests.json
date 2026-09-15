@@ -231,6 +231,10 @@
     "pe_module_evidence": [
       "generated_owned_module_evidence_preserves_compiled_observations",
       "generated_owned_module_refusals_preserve_family_isolation"
+    ],
+    "source_pe_modules": [
+      "generated_named_modules_preserve_compiled_source_pairings",
+      "generated_named_module_refusals_preserve_admission_and_family_limits"
     ]
   }
 }

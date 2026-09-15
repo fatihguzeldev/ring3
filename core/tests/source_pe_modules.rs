@@ -602,3 +602,310 @@ fn exact_and_zero_admission_limits_are_valid() {
         assert!(inspect_ascii_pe_source_module_evidence(&sources, below).is_err());
     }
 }
+
+const COMPILED_SOURCE_FIXTURES: [(&str, &str, u64); 6] = [
+    (
+        "RING3_IMPORT_PE32_FIXTURE",
+        "38fc89db15266cf8361f7c0096fd3ecaee142ef28645f6c8540156bc8515a69e",
+        2048,
+    ),
+    (
+        "RING3_IMPORT_PE32PLUS_FIXTURE",
+        "a8214ec448366c86c1dc289f624316409a6ca34f695639365e796025187db8a1",
+        2048,
+    ),
+    (
+        "RING3_DELAY_PE32_FIXTURE",
+        "ab2c15214a85f8593608a30ca9a0b462ec61a04e10b4abd1e86e4869210640b8",
+        2560,
+    ),
+    (
+        "RING3_DELAY_PE32PLUS_FIXTURE",
+        "5845501b0acf7d97c5470ce06bc738a2d2e3ce3aac64f69c164cbda8cb942e17",
+        3072,
+    ),
+    (
+        "RING3_EXPORT_FORWARD_PE32_FIXTURE",
+        "712d2aa28d94475c0008c21d31f1d38964b8531f427911da85df34957c13be8d",
+        2048,
+    ),
+    (
+        "RING3_EXPORT_FORWARD_PE32PLUS_FIXTURE",
+        "029ebe773e592200afe56c40fca5fbe28a641e260348d8870b8f949f0e52420c",
+        2048,
+    ),
+];
+const COMPILED_SOURCE_ORDER: [usize; 7] = [0, 1, 2, 3, 4, 5, 0];
+fn compiled_source_paths() -> [String; 7] {
+    [
+        "Input\\Static32.bin",
+        "Input/Static64.bin",
+        "Delay\\First.data",
+        "Delay/Second.data",
+        "Exports\\First.dat",
+        "Exports/Second.dat",
+        "Aliases\\Again.data",
+    ]
+    .map(str::to_owned)
+}
+fn compiled_source_bytes() -> Vec<Vec<u8>> {
+    let paths: Vec<_> = COMPILED_SOURCE_FIXTURES
+        .iter()
+        .map(|(variable, _, _)| {
+            std::env::var_os(variable)
+                .expect("all six explicit compiled named-module paths are required")
+        })
+        .collect();
+    paths
+        .into_iter()
+        .map(|path| std::fs::read(path).expect("compiled named-module fixture must be readable"))
+        .collect()
+}
+fn compiled_source_limits() -> AsciiPeSourceModuleEvidenceLimits {
+    AsciiPeSourceModuleEvidenceLimits {
+        paths: AsciiSourcePathLimits {
+            max_paths: 7,
+            max_path_bytes: 18,
+            max_total_path_bytes: 122,
+            max_depth: 2,
+        },
+        content: PeHeaderBatchLimits {
+            max_files: 7,
+            max_file_bytes: 3072,
+            max_total_bytes: 15872,
+        },
+        static_imports: output(3, 39),
+        delay_imports: output(4, 33),
+        exports: output(8, 101),
+    }
+}
+fn compiled_source_views<'a>(
+    paths: &'a [String; 7],
+    bytes: &'a [Vec<u8>],
+) -> [AsciiPeSource<'a>; 7] {
+    std::array::from_fn(|index| AsciiPeSource {
+        path: &paths[index],
+        bytes: &bytes[COMPILED_SOURCE_ORDER[index]],
+    })
+}
+fn compiled_module_results(bytes: &[Vec<u8>]) -> Vec<ring3_core::PeModuleEvidence> {
+    bytes
+        .iter()
+        .map(|bytes| {
+            inspect_pe_module_evidence(bytes, module_limits(compiled_source_limits())).unwrap()
+        })
+        .collect()
+}
+fn assert_compiled_source_pairings(
+    batch: &AsciiPeSourceModuleEvidenceBatch,
+    expected: &[ring3_core::PeModuleEvidence],
+    paths: &[String; 7],
+) {
+    use std::fmt::Write as _;
+    assert_eq!(batch.total_path_bytes, 122);
+    assert_eq!(batch.total_content_bytes, 15872);
+    assert_eq!(batch.entries.len(), 7);
+    for (index, entry) in batch.entries.iter().enumerate() {
+        let fixture = COMPILED_SOURCE_ORDER[index];
+        let normalized = paths[index].replace('\\', "/");
+        assert_eq!(
+            entry.path,
+            AsciiSourcePathEntry {
+                index,
+                key: normalized.to_ascii_lowercase(),
+                normalized,
+                depth: 2
+            }
+        );
+        assert_eq!(entry.module, Ok(expected[fixture].clone()));
+        let fingerprint = &entry.module.as_ref().unwrap().fingerprinted;
+        assert_eq!(fingerprint.byte_length, COMPILED_SOURCE_FIXTURES[fixture].2);
+        let mut digest = String::with_capacity(64);
+        for byte in fingerprint.digest {
+            write!(digest, "{byte:02x}").unwrap();
+        }
+        assert_eq!(digest, COMPILED_SOURCE_FIXTURES[fixture].1);
+    }
+    assert_eq!(batch.entries[0].module, batch.entries[6].module);
+    assert_ne!(batch.entries[0].path, batch.entries[6].path);
+}
+
+#[test]
+#[ignore = "requires explicit self-authored compiled fixtures"]
+fn generated_named_modules_preserve_compiled_source_pairings() {
+    let mut bytes = compiled_source_bytes();
+    let mut paths = compiled_source_paths();
+    let original_bytes = bytes.clone();
+    let original_paths = paths.clone();
+    let expected = compiled_module_results(&bytes);
+    let limits = compiled_source_limits();
+    let owned = {
+        let sources = compiled_source_views(&paths, &bytes);
+        let batch = inspect_ascii_pe_source_module_evidence(&sources, limits).unwrap();
+        assert_eq!(
+            batch,
+            inspect_ascii_pe_source_module_evidence(&sources, limits).unwrap()
+        );
+        assert_compiled_source_pairings(&batch, &expected, &paths);
+        let mut reverse = sources;
+        reverse.reverse();
+        let reordered = inspect_ascii_pe_source_module_evidence(&reverse, limits).unwrap();
+        assert_eq!(reordered.total_path_bytes, batch.total_path_bytes);
+        assert_eq!(reordered.total_content_bytes, batch.total_content_bytes);
+        for (index, (entry, prior)) in reordered
+            .entries
+            .iter()
+            .zip(batch.entries.iter().rev())
+            .enumerate()
+        {
+            let mut expected_entry = prior.clone();
+            expected_entry.path.index = index;
+            assert_eq!(entry, &expected_entry);
+        }
+        let mut rebound = sources;
+        rebound[0].bytes = &bytes[1];
+        let actual = inspect_ascii_pe_source_module_evidence(&rebound, limits).unwrap();
+        let mut expected_rebound = batch.clone();
+        expected_rebound.entries[0].module = Ok(expected[1].clone());
+        assert_eq!(actual, expected_rebound);
+        batch
+    };
+    assert_eq!(bytes, original_bytes);
+    assert_eq!(paths, original_paths);
+    for bytes in &mut bytes {
+        bytes.fill(0xee);
+    }
+    for path in &mut paths {
+        path.clear();
+        path.push_str("replaced");
+    }
+    drop(bytes);
+    drop(paths);
+    assert_compiled_source_pairings(&owned, &expected, &original_paths);
+}
+
+fn assert_compiled_outer_refusals(
+    sources: [AsciiPeSource<'_>; 7],
+    limits: AsciiPeSourceModuleEvidenceLimits,
+) {
+    let mut collision = sources;
+    collision[6].path = "input/static32.bin";
+    let mut no_content = limits;
+    no_content.content.max_files = 0;
+    assert_eq!(
+        inspect_ascii_pe_source_module_evidence(&collision, no_content),
+        Err(Paths(AsciiSourcePathError::Collision {
+            index: 6,
+            prior: 0,
+            kind: AsciiSourcePathCollision::Duplicate
+        }))
+    );
+    let mut size = limits;
+    size.content.max_file_bytes = 3071;
+    assert_eq!(
+        inspect_ascii_pe_source_module_evidence(&sources, size),
+        Err(Content(PeHeaderBatchError::FileSizeExceeded {
+            index: 3,
+            size: 3072,
+            limit: 3071
+        }))
+    );
+    let mut total = limits;
+    total.content.max_total_bytes = 15871;
+    assert_eq!(
+        inspect_ascii_pe_source_module_evidence(&sources, total),
+        Err(Content(PeHeaderBatchError::TotalSizeExceeded {
+            index: 6,
+            total: 15872,
+            limit: 15871
+        }))
+    );
+}
+fn assert_compiled_family_refusal(
+    original: &AsciiPeSourceModuleEvidenceBatch,
+    actual: &AsciiPeSourceModuleEvidenceBatch,
+    family: usize,
+    rows_first: bool,
+) {
+    let (rows, text) = [(3, 39), (4, 33), (8, 101)][family];
+    let mut expected = original.clone();
+    for (index, entry) in expected.entries.iter_mut().enumerate() {
+        if COMPILED_SOURCE_ORDER[index] / 2 != family {
+            continue;
+        }
+        let module = entry.module.as_mut().unwrap();
+        match family {
+            0 => {
+                module.static_imports = Err(if rows_first {
+                    PeStaticImportEvidenceError::OutputRowsExceeded {
+                        rows,
+                        limit: rows - 1,
+                    }
+                } else {
+                    PeStaticImportEvidenceError::OutputTextExceeded {
+                        bytes: text,
+                        limit: text - 1,
+                    }
+                });
+            }
+            1 => {
+                module.delay_imports = Err(if rows_first {
+                    PeDelayImportEvidenceError::OutputRowsExceeded {
+                        rows,
+                        limit: rows - 1,
+                    }
+                } else {
+                    PeDelayImportEvidenceError::OutputTextExceeded {
+                        bytes: text,
+                        limit: text - 1,
+                    }
+                });
+            }
+            _ => {
+                module.exports = Err(if rows_first {
+                    PeExportEvidenceError::OutputRowsExceeded {
+                        rows,
+                        limit: rows - 1,
+                    }
+                } else {
+                    PeExportEvidenceError::OutputTextExceeded {
+                        bytes: text,
+                        limit: text - 1,
+                    }
+                });
+            }
+        }
+    }
+    assert_eq!(actual, &expected);
+}
+
+#[test]
+#[ignore = "requires explicit self-authored compiled fixtures"]
+fn generated_named_module_refusals_preserve_admission_and_family_limits() {
+    let bytes = compiled_source_bytes();
+    let paths = compiled_source_paths();
+    let sources = compiled_source_views(&paths, &bytes);
+    let exact = compiled_source_limits();
+    let expected = compiled_module_results(&bytes);
+    let original = inspect_ascii_pe_source_module_evidence(&sources, exact).unwrap();
+    assert_compiled_source_pairings(&original, &expected, &paths);
+    assert_compiled_outer_refusals(sources, exact);
+    for family in 0..3 {
+        for rows_first in [true, false] {
+            let mut limits = exact;
+            let cap = match family {
+                0 => &mut limits.static_imports,
+                1 => &mut limits.delay_imports,
+                _ => &mut limits.exports,
+            };
+            if rows_first {
+                cap.max_rows -= 1;
+                cap.max_text_bytes = 0;
+            } else {
+                cap.max_text_bytes -= 1;
+            }
+            let batch = inspect_ascii_pe_source_module_evidence(&sources, limits).unwrap();
+            assert_compiled_family_refusal(&original, &batch, family, rows_first);
+        }
+    }
+}

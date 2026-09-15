@@ -341,6 +341,9 @@ the source fixtures remain unchanged and are not cryptographically signed.
 Two module-evidence groups retain whole-file fingerprints and complete owned
 static/delay/export observations across six compiled inputs, including input
 release and independent family output-refusal operands.
+Two named-module groups retain mixed path/content pairings, aliases and owned
+results across the same six inputs, with exact whole-list admission and shared
+per-family output-refusal operands.
 
 The verifier requires pinned native Rust tools on `aarch64-apple-darwin`, compiles
 the Rust tests offline into a fresh Cargo target, and rejects missing, extra or
