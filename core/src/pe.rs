@@ -10,6 +10,7 @@ mod debug;
 mod debug_payloads;
 mod declared_evidence;
 mod exports;
+mod fingerprints;
 mod header_batch;
 mod imports;
 mod load_config;
@@ -58,6 +59,9 @@ pub use exports::{
     PeForwarderWalkLimits, decode_pe_forwarder_request, lookup_pe_export, lookup_pe_export_batch,
     parse_pe_export_addresses, parse_pe_export_directory, parse_pe_export_names,
     walk_pe_export_forwarders,
+};
+pub use fingerprints::{
+    PeFingerprintError, PeFingerprintedEvidence, fingerprint_pe_declared_evidence,
 };
 pub use header_batch::{
     PeHeaderBatch, PeHeaderBatchError, PeHeaderBatchLimits, parse_pe_header_prefix_batch,
