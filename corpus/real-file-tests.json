@@ -211,6 +211,10 @@
       "generated_pe32plus_fingerprints_match_compiled_bytes_and_fields",
       "generated_managed_pe32_fingerprints_match_compiled_bytes_and_fields",
       "generated_managed_pe32plus_fingerprints_match_compiled_bytes_and_fields"
+    ],
+    "source_pe_fingerprints": [
+      "generated_named_fingerprints_preserve_mixed_pairings_and_aliases",
+      "generated_named_fingerprint_refusals_preserve_priority_and_operands"
     ]
   }
 }
