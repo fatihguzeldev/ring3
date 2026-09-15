@@ -405,3 +405,261 @@ fn admitted_malformed_and_empty_inputs_keep_digest_and_all_reader_errors() {
         assert!(e.exports.unwrap().names.is_err());
     }
 }
+
+struct CompiledModule {
+    variable: &'static str,
+    length: u64,
+    digest: &'static str,
+    kind: ring3_core::PeKind,
+    declarations: (u16, u16, u32, u16, u16),
+    caps: [u64; 6],
+}
+
+fn compiled_modules() -> Vec<(CompiledModule, Vec<u8>)> {
+    let fixtures = [
+        CompiledModule {
+            variable: "RING3_IMPORT_PE32_FIXTURE",
+            length: 2048,
+            digest: "38fc89db15266cf8361f7c0096fd3ecaee142ef28645f6c8540156bc8515a69e",
+            kind: ring3_core::PeKind::Pe32,
+            declarations: (332, 259, 4096, 3, 33024),
+            caps: [3, 39, 0, 0, 0, 0],
+        },
+        CompiledModule {
+            variable: "RING3_IMPORT_PE32PLUS_FIXTURE",
+            length: 2048,
+            digest: "a8214ec448366c86c1dc289f624316409a6ca34f695639365e796025187db8a1",
+            kind: ring3_core::PeKind::Pe32Plus,
+            declarations: (34404, 35, 4096, 3, 33056),
+            caps: [3, 39, 0, 0, 0, 0],
+        },
+        CompiledModule {
+            variable: "RING3_DELAY_PE32_FIXTURE",
+            length: 2560,
+            digest: "ab2c15214a85f8593608a30ca9a0b462ec61a04e10b4abd1e86e4869210640b8",
+            kind: ring3_core::PeKind::Pe32,
+            declarations: (332, 259, 4112, 3, 33024),
+            caps: [0, 0, 4, 33, 0, 0],
+        },
+        CompiledModule {
+            variable: "RING3_DELAY_PE32PLUS_FIXTURE",
+            length: 3072,
+            digest: "5845501b0acf7d97c5470ce06bc738a2d2e3ce3aac64f69c164cbda8cb942e17",
+            kind: ring3_core::PeKind::Pe32Plus,
+            declarations: (34404, 35, 4112, 3, 33056),
+            caps: [0, 0, 4, 33, 0, 0],
+        },
+        CompiledModule {
+            variable: "RING3_EXPORT_FORWARD_PE32_FIXTURE",
+            length: 2048,
+            digest: "712d2aa28d94475c0008c21d31f1d38964b8531f427911da85df34957c13be8d",
+            kind: ring3_core::PeKind::Pe32,
+            declarations: (332, 8451, 0, 2, 256),
+            caps: [0, 0, 0, 0, 8, 101],
+        },
+        CompiledModule {
+            variable: "RING3_EXPORT_FORWARD_PE32PLUS_FIXTURE",
+            length: 2048,
+            digest: "029ebe773e592200afe56c40fca5fbe28a641e260348d8870b8f949f0e52420c",
+            kind: ring3_core::PeKind::Pe32Plus,
+            declarations: (34404, 8227, 0, 2, 288),
+            caps: [0, 0, 0, 0, 8, 101],
+        },
+    ];
+    let paths: Vec<_> = fixtures
+        .iter()
+        .map(|f| {
+            std::env::var_os(f.variable)
+                .expect("all six explicit compiled module paths are required")
+        })
+        .collect();
+    fixtures
+        .into_iter()
+        .zip(paths)
+        .map(|(f, path)| {
+            let bytes = std::fs::read(path).expect("compiled module fixture must be readable");
+            (f, bytes)
+        })
+        .collect()
+}
+
+fn compiled_limits(f: &CompiledModule) -> PeModuleEvidenceLimits {
+    PeModuleEvidenceLimits {
+        max_input_bytes: f.length,
+        static_imports: output(f.caps[0], f.caps[1]),
+        delay_imports: output(f.caps[2], f.caps[3]),
+        exports: output(f.caps[4], f.caps[5]),
+    }
+}
+
+#[test]
+#[ignore = "requires explicit self-authored compiled fixtures"]
+fn generated_owned_module_evidence_preserves_compiled_observations() {
+    use std::fmt::Write as _;
+    for (fixture, mut bytes) in compiled_modules() {
+        assert_eq!(
+            u64::try_from(bytes.len()).unwrap(),
+            fixture.length,
+            "{}",
+            fixture.variable
+        );
+        let limits = compiled_limits(&fixture);
+        let expected = individual(&bytes, limits);
+        let original = bytes.clone();
+        let evidence = inspect_pe_module_evidence(&bytes, limits).unwrap();
+        assert_eq!(evidence, expected, "{}", fixture.variable);
+        assert_eq!(
+            evidence,
+            inspect_pe_module_evidence(&bytes, limits).unwrap()
+        );
+        assert_eq!(bytes, original);
+        bytes.fill(0xee);
+        drop(bytes);
+        assert_eq!(evidence.clone(), expected);
+        assert_eq!(evidence.fingerprinted.byte_length, fixture.length);
+        let mut digest = String::with_capacity(64);
+        for byte in evidence.fingerprinted.digest {
+            write!(digest, "{byte:02x}").unwrap();
+        }
+        assert_eq!(digest, fixture.digest);
+        let prefix = evidence.fingerprinted.evidence.prefix.unwrap();
+        let optional = evidence.fingerprinted.evidence.optional.unwrap();
+        assert_eq!(prefix.kind.value, fixture.kind);
+        assert_eq!(
+            (
+                prefix.machine.value,
+                prefix.characteristics.value,
+                optional.entry_rva.value.get(),
+                optional.subsystem.value,
+                optional.dll_characteristics.value
+            ),
+            fixture.declarations
+        );
+        assert_eq!(optional.directory_count.value, 16);
+        assert_eq!(evidence.fingerprinted.evidence.clr, Ok(None));
+        let static_imports = evidence.static_imports.unwrap();
+        let delay_imports = evidence.delay_imports.unwrap();
+        let exports = evidence.exports.unwrap();
+        assert_eq!(
+            [
+                static_imports.total_rows,
+                static_imports.total_text_bytes,
+                delay_imports.total_rows,
+                delay_imports.total_text_bytes,
+                exports.total_rows,
+                exports.total_text_bytes
+            ],
+            fixture.caps
+        );
+        assert!(static_imports.descriptors.is_ok() && static_imports.lookups.is_ok());
+        assert!(
+            delay_imports.descriptors.is_ok()
+                && delay_imports.names.is_ok()
+                && delay_imports.lookups.is_ok()
+        );
+        assert!(exports.directory.is_ok() && exports.addresses.is_ok() && exports.names.is_ok());
+    }
+}
+
+#[test]
+#[ignore = "requires explicit self-authored compiled fixtures"]
+fn generated_owned_module_refusals_preserve_family_isolation() {
+    for (f, bytes) in compiled_modules() {
+        let exact = compiled_limits(&f);
+        let expected = individual(&bytes, exact);
+        assert_eq!(inspect_pe_module_evidence(&bytes, exact).unwrap(), expected);
+        let too_small = PeModuleEvidenceLimits {
+            max_input_bytes: f.length - 1,
+            static_imports: output(0, 0),
+            delay_imports: output(0, 0),
+            exports: output(0, 0),
+        };
+        assert_eq!(
+            inspect_pe_module_evidence(&bytes, too_small),
+            Err(PeFingerprintError::InputTooLarge {
+                length: f.length,
+                limit: f.length - 1
+            })
+        );
+        for family in 0..3 {
+            let (rows, text_bytes) = (f.caps[family * 2], f.caps[family * 2 + 1]);
+            if rows == 0 {
+                assert_eq!(text_bytes, 0);
+                continue;
+            }
+            assert!(text_bytes > 0);
+            for row_refusal in [true, false] {
+                let mut l = exact;
+                let cap = match family {
+                    0 => &mut l.static_imports,
+                    1 => &mut l.delay_imports,
+                    _ => &mut l.exports,
+                };
+                *cap = if row_refusal {
+                    output(rows - 1, 0)
+                } else {
+                    output(rows, text_bytes - 1)
+                };
+                let e = inspect_pe_module_evidence(&bytes, l).unwrap();
+                assert_eq!(e, individual(&bytes, l));
+                assert_eq!(e.fingerprinted, expected.fingerprinted);
+                match family {
+                    0 => {
+                        assert_eq!(
+                            e.static_imports,
+                            Err(if row_refusal {
+                                PeStaticImportEvidenceError::OutputRowsExceeded {
+                                    rows,
+                                    limit: rows - 1,
+                                }
+                            } else {
+                                PeStaticImportEvidenceError::OutputTextExceeded {
+                                    bytes: text_bytes,
+                                    limit: text_bytes - 1,
+                                }
+                            })
+                        );
+                        assert_eq!(e.delay_imports, expected.delay_imports);
+                        assert_eq!(e.exports, expected.exports);
+                    }
+                    1 => {
+                        assert_eq!(
+                            e.delay_imports,
+                            Err(if row_refusal {
+                                PeDelayImportEvidenceError::OutputRowsExceeded {
+                                    rows,
+                                    limit: rows - 1,
+                                }
+                            } else {
+                                PeDelayImportEvidenceError::OutputTextExceeded {
+                                    bytes: text_bytes,
+                                    limit: text_bytes - 1,
+                                }
+                            })
+                        );
+                        assert_eq!(e.static_imports, expected.static_imports);
+                        assert_eq!(e.exports, expected.exports);
+                    }
+                    _ => {
+                        assert_eq!(
+                            e.exports,
+                            Err(if row_refusal {
+                                PeExportEvidenceError::OutputRowsExceeded {
+                                    rows,
+                                    limit: rows - 1,
+                                }
+                            } else {
+                                PeExportEvidenceError::OutputTextExceeded {
+                                    bytes: text_bytes,
+                                    limit: text_bytes - 1,
+                                }
+                            })
+                        );
+                        assert_eq!(e.static_imports, expected.static_imports);
+                        assert_eq!(e.delay_imports, expected.delay_imports);
+                    }
+                }
+            }
+        }
+    }
+}
