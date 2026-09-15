@@ -203,3 +203,75 @@ fn every_ascii_byte_is_checked_in_module_and_name_positions() {
         }
     }
 }
+
+fn check_linked_forwarders(variable: &str, kind: ring3_core::PeKind) {
+    use ring3_core::{PeExportTarget, parse_pe_export_addresses, parse_pe_header_prefix};
+
+    let path = std::env::var_os(variable).expect("explicit generated forwarder fixture path");
+    let bytes = std::fs::read(&path).unwrap();
+    let before = bytes.clone();
+    assert_eq!(bytes.len(), 2048);
+    assert_eq!(parse_pe_header_prefix(&bytes).unwrap().kind, kind);
+    let table = parse_pe_export_addresses(&bytes).unwrap().unwrap();
+    assert_eq!(table.entries.len(), 3);
+    assert_eq!(table.entries[1].target, PeExportTarget::Empty);
+    for (index, spelling, symbol) in [
+        (0, "OtherModule.ring3_target", Symbol::Name("ring3_target")),
+        (
+            2,
+            "OtherModule.#32768",
+            Symbol::Ordinal {
+                digits: "32768",
+                value: 32768,
+            },
+        ),
+    ] {
+        let PeExportTarget::Forwarder { text, .. } = table.entries[index].target else {
+            panic!("expected raw forwarder text");
+        };
+        assert_eq!(text, spelling);
+        let request = decode(text, text.len() as u64).unwrap();
+        assert_eq!(
+            request,
+            PeForwarderRequest {
+                module: "OtherModule",
+                separator_offset: 11,
+                symbol,
+            }
+        );
+        assert!(std::ptr::eq(request.module.as_ptr(), text.as_ptr()));
+        match request.symbol {
+            Symbol::Name(name) => assert!(std::ptr::eq(name.as_ptr(), text[12..].as_ptr())),
+            Symbol::Ordinal { digits, .. } => {
+                assert!(std::ptr::eq(digits.as_ptr(), text[13..].as_ptr()));
+            }
+        }
+        assert_eq!(
+            decode(text, text.len() as u64 - 1),
+            Err(Error::LengthLimitExceeded {
+                length: text.len() as u64,
+                limit: text.len() as u64 - 1,
+            })
+        );
+    }
+    assert_eq!(bytes, before);
+    assert_eq!(std::fs::read(path).unwrap(), before);
+}
+
+#[test]
+#[ignore = "requires the self-authored linked PE32 forwarder fixture"]
+fn generated_pe32_forwarder_requests_preserve_borrowed_metadata() {
+    check_linked_forwarders(
+        "RING3_EXPORT_FORWARD_PE32_FIXTURE",
+        ring3_core::PeKind::Pe32,
+    );
+}
+
+#[test]
+#[ignore = "requires the self-authored linked PE32+ forwarder fixture"]
+fn generated_pe32plus_forwarder_requests_preserve_borrowed_metadata() {
+    check_linked_forwarders(
+        "RING3_EXPORT_FORWARD_PE32PLUS_FIXTURE",
+        ring3_core::PeKind::Pe32Plus,
+    );
+}
