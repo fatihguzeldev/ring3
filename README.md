@@ -286,6 +286,8 @@ cases retain exact raw fields and named COFF/CLR bit observations from the same
 unpatched native and managed files.
 Four direct content-fingerprint cases retain exact whole-file SHA-256 digests
 and owned declared evidence from these same unpatched files.
+Two named-fingerprint groups retain owned mixed and aliased compiled results,
+reordered path associations and exact path-before-content admission refusals.
 Certificate-entry tests append synthetic records to generated PE files in memory;
 the source fixtures remain unchanged and are not cryptographically signed.
 
