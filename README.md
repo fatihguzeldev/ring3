@@ -67,6 +67,16 @@ and other unsupported syntax remain uninterpreted; refusal does not establish
 Windows validity. This helper performs no module lookup, path normalization or
 forwarder traversal. See the [request decoder](core/src/pe/exports/forwarder.rs).
 
+`walk_pe_export_forwarders` follows one export query across an immutable image
+list using caller-provided, source-specific routes. Source indices identify list
+positions for that call; routes match exact module text. The caller supplies source,
+route, hop, selection-row and aggregate text limits. The walk retains raw metadata
+and ordered steps, stops at terminal selections, and rejects repeated source/EAT
+entries even when query spelling changes. Errors return no partial walk. Results
+own name queries and borrow raw text from images; fresh calls create fresh owners.
+This does not discover DLLs, normalize names, bind targets or execute code. See the
+[bounded walk contract](core/src/pe/exports/walk.rs).
+
 `lookup_pe_export_batch` adds explicit query-count and total selection-row limits
 to an ordered query list. Each selected target costs one logical row; ambiguity
 costs every matching row. Other outcomes and per-query parse errors cost zero,
