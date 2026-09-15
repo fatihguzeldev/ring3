@@ -113,6 +113,15 @@ target variants, raw forwarder spelling, absence and typed errors stay distinct.
 Directory DLL-name pointers remain metadata; direct target content is not read.
 See the [owned export evidence API](core/src/pe/exports/evidence.rs).
 
+`inspect_pe_module_evidence` binds the whole-input fingerprint and declared,
+static import, delay import and export evidence to one input slice. It retains
+owned, independent family results even when another family exceeds its row/text
+limits. Shared fingerprint input admission runs first; family output limits are
+separate and do not cap total allocations. This is metadata evidence, not a
+complete module report, provider resolution or authentication guarantee.
+See the [same-input module evidence API](core/src/pe/module_evidence.rs).
+
+
 `lookup_pe_export` selects metadata by exact name or full biased export ordinal
 inside one supplied image. Name queries preserve every duplicate matching row;
 ordinal queries use the address table without reading export names. The result
