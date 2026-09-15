@@ -14,6 +14,7 @@ mod fingerprints;
 mod header_batch;
 mod imports;
 mod load_config;
+mod module_evidence;
 mod optional;
 mod resources;
 mod rva;
@@ -88,6 +89,9 @@ pub use imports::{
     inspect_pe_static_imports,
 };
 pub use load_config::{PeLoadConfigError, PeLoadConfigPrefix, parse_pe_load_config_prefix};
+pub use module_evidence::{
+    PeModuleEvidence, PeModuleEvidenceLimits, PeModuleOutputLimits, inspect_pe_module_evidence,
+};
 pub use optional::{
     PeDataDirectory, PeDirectoryAddress, PeHeaders, PeOptionalHeader, parse_pe_headers,
 };
