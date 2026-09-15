@@ -1,21 +1,22 @@
 use std::fmt::{self, Write as _};
 
 use ring3_core::{
-    FileOffset, PeDebugPayloadError, PeHeaderError, PeResourceDataEntryError,
-    PeResourceDirectoryError, PeResourceDirectoryNameError, PeResourcePayloadError,
-    RelativeVirtualAddress, parse_pe_amd64_exception_functions, parse_pe_base_relocation_blocks,
-    parse_pe_certificate_entries, parse_pe_certificate_table, parse_pe_clr_header,
-    parse_pe_debug_directory, parse_pe_debug_payloads, parse_pe_delay_import_descriptors,
-    parse_pe_delay_import_lookups, parse_pe_delay_import_names, parse_pe_export_addresses,
-    parse_pe_export_directory, parse_pe_export_names, parse_pe_header_prefix, parse_pe_headers,
-    parse_pe_import_descriptors, parse_pe_import_lookups, parse_pe_load_config_prefix,
-    parse_pe_resource_data_entries, parse_pe_resource_directories,
-    parse_pe_resource_directory_names, parse_pe_resource_payloads, parse_pe_resource_root,
-    parse_pe_resource_root_names, parse_pe_sections, parse_pe_tls_directory, resolve_pe_file_range,
+    FileOffset, PeAmd64UnwindInfoV1, PeAmd64UnwindTailV1, PeDebugPayloadError, PeHeaderError,
+    PeResourceDataEntryError, PeResourceDirectoryError, PeResourceDirectoryNameError,
+    PeResourcePayloadError, RelativeVirtualAddress, parse_pe_amd64_exception_functions,
+    parse_pe_amd64_unwind_info_v1, parse_pe_base_relocation_blocks, parse_pe_certificate_entries,
+    parse_pe_certificate_table, parse_pe_clr_header, parse_pe_debug_directory,
+    parse_pe_debug_payloads, parse_pe_delay_import_descriptors, parse_pe_delay_import_lookups,
+    parse_pe_delay_import_names, parse_pe_export_addresses, parse_pe_export_directory,
+    parse_pe_export_names, parse_pe_header_prefix, parse_pe_headers, parse_pe_import_descriptors,
+    parse_pe_import_lookups, parse_pe_load_config_prefix, parse_pe_resource_data_entries,
+    parse_pe_resource_directories, parse_pe_resource_directory_names, parse_pe_resource_payloads,
+    parse_pe_resource_root, parse_pe_resource_root_names, parse_pe_sections,
+    parse_pe_tls_directory, resolve_pe_file_range,
 };
 
-const READER_COUNT: usize = 27;
-const CASE_COUNT: u32 = 4611;
+const READER_COUNT: usize = 28;
+const CASE_COUNT: u32 = 6148;
 
 fn put32(bytes: &mut [u8], offset: usize, value: u32) {
     bytes[offset..offset + 4].copy_from_slice(&value.to_le_bytes());
@@ -125,6 +126,33 @@ fn exception_fixture() -> Vec<u8> {
     bytes
 }
 
+fn unwind_fixture() -> Vec<u8> {
+    let mut bytes = exception_fixture();
+    bytes[1008..1020].copy_from_slice(&[
+        9, 7, 1, 0xf3, 0x12, 0x7b, 0x5a, 0xa5, 0x78, 0x56, 0x34, 0x12,
+    ]);
+    bytes
+}
+
+fn unwind_expected() -> PeAmd64UnwindInfoV1 {
+    PeAmd64UnwindInfoV1 {
+        rva: RelativeVirtualAddress::new(4592),
+        file_offset: FileOffset::new(1008),
+        byte_length: 12,
+        version: 1,
+        flags: 1,
+        prolog_size: 7,
+        code_count: 1,
+        frame_register: 3,
+        frame_offset_scaled: 15,
+        code_words: vec![0x7b12],
+        padding_word: Some(0xa55a),
+        tail: PeAmd64UnwindTailV1::Handler {
+            handler_rva: RelativeVirtualAddress::new(0x1234_5678),
+        },
+    }
+}
+
 #[derive(Debug)]
 struct Digest(u64);
 
@@ -151,7 +179,12 @@ struct Campaign {
     digest: Digest,
 }
 
-fn inspect(bytes: &[u8], baseline: bool, report: &mut Campaign) {
+fn inspect(
+    bytes: &[u8],
+    baseline: bool,
+    unwind_expected: Option<&PeAmd64UnwindInfoV1>,
+    report: &mut Campaign,
+) {
     let before = bytes.to_vec();
     write!(report.digest, "input:{}:{}\0", report.cases, bytes.len()).unwrap();
     report.digest.bytes(bytes);
@@ -196,6 +229,7 @@ fn inspect(bytes: &[u8], baseline: bool, report: &mut Campaign) {
     inspect_debug_payloads(bytes, baseline, report);
     observe!(25, parse_pe_clr_header);
     inspect_amd64_exceptions(bytes, baseline, report);
+    inspect_amd64_unwind(bytes, unwind_expected, report);
     assert_eq!(bytes, before, "input changed at case {}", report.cases);
     report.cases += 1;
 }
@@ -240,6 +274,96 @@ fn inspect_amd64_exceptions(bytes: &[u8], baseline: bool, report: &mut Campaign)
                     (1, rva(996), 996, u32::MAX, 0, 1),
                 ]
             );
+        }
+    }
+}
+
+fn inspect_amd64_unwind(
+    bytes: &[u8],
+    expected: Option<&PeAmd64UnwindInfoV1>,
+    report: &mut Campaign,
+) {
+    let address = RelativeVirtualAddress::new(4592);
+    let mut owned = bytes.to_vec();
+    let first = parse_pe_amd64_unwind_info_v1(&owned, address);
+    let second = parse_pe_amd64_unwind_info_v1(bytes, address);
+    assert_eq!(owned, bytes);
+    owned.fill(0);
+    drop(owned);
+    assert_eq!(first, second, "amd64 unwind at case {}", report.cases);
+    if let Some(expected) = expected {
+        assert_eq!(first.as_ref(), Ok(expected));
+    }
+    report.outcomes[27][usize::from(first.is_err())] += 1;
+    write!(
+        report.digest,
+        "\0parse_pe_amd64_unwind_info_v1:4592:{first:?}\0"
+    )
+    .unwrap();
+    if let Ok(record) = first {
+        check_unwind_record(bytes, &record);
+    }
+}
+
+fn check_unwind_record(bytes: &[u8], record: &PeAmd64UnwindInfoV1) {
+    assert_eq!(record.rva.get(), 4592);
+    assert_eq!(record.version, 1);
+    assert!(record.flags <= 4);
+    assert!(record.frame_register <= 15 && record.frame_offset_scaled <= 15);
+    assert_eq!(record.code_words.len(), usize::from(record.code_count));
+    assert_eq!(record.padding_word.is_some(), record.code_count % 2 == 1);
+    let tail_size = match record.tail {
+        PeAmd64UnwindTailV1::None => 0,
+        PeAmd64UnwindTailV1::Handler { .. } => 4,
+        PeAmd64UnwindTailV1::Chain { .. } => 12,
+    };
+    let tail_offset = 4 + ((u32::from(record.code_count) + 1) & !1) * 2;
+    assert_eq!(record.byte_length, tail_offset + tail_size);
+    assert!(record.byte_length <= 528);
+    let offset = usize::try_from(record.file_offset.get()).unwrap();
+    let length = usize::try_from(record.byte_length).unwrap();
+    let end = offset.checked_add(length).unwrap();
+    let raw = bytes.get(offset..end).unwrap();
+    assert_eq!(
+        &raw[..4],
+        &[
+            record.version | (record.flags << 3),
+            record.prolog_size,
+            record.code_count,
+            record.frame_register | (record.frame_offset_scaled << 4)
+        ]
+    );
+    for (index, word) in record
+        .code_words
+        .iter()
+        .copied()
+        .chain(record.padding_word)
+        .enumerate()
+    {
+        assert_eq!(&raw[4 + index * 2..6 + index * 2], &word.to_le_bytes());
+    }
+    let tail = &raw[usize::try_from(tail_offset).unwrap()..];
+    match record.tail {
+        PeAmd64UnwindTailV1::None => {
+            assert_eq!(record.flags, 0);
+            assert!(tail.is_empty());
+        }
+        PeAmd64UnwindTailV1::Handler { handler_rva } => {
+            assert!((1..=3).contains(&record.flags));
+            assert_eq!(tail, &handler_rva.get().to_le_bytes());
+        }
+        PeAmd64UnwindTailV1::Chain {
+            begin_rva,
+            end_rva,
+            unwind_info_rva,
+        } => {
+            assert_eq!(record.flags, 4);
+            for (index, value) in [begin_rva, end_rva, unwind_info_rva]
+                .into_iter()
+                .enumerate()
+            {
+                assert_eq!(&tail[index * 4..index * 4 + 4], &value.get().to_le_bytes());
+            }
         }
     }
 }
@@ -369,20 +493,21 @@ fn campaign() -> Campaign {
         digest: Digest(0xcbf2_9ce4_8422_2325),
     };
     let mut state = 0x7233_4636;
-    for (plus, original) in [
-        (false, fixture(false)),
-        (true, fixture(true)),
-        (true, exception_fixture()),
+    for (plus, original, expected_unwind) in [
+        (false, fixture(false), None),
+        (true, fixture(true), None),
+        (true, exception_fixture(), None),
+        (true, unwind_fixture(), Some(unwind_expected())),
     ] {
-        inspect(&original, true, &mut report);
+        inspect(&original, true, expected_unwind.as_ref(), &mut report);
         for end in 0..original.len() {
-            inspect(&original[..end], false, &mut report);
+            inspect(&original[..end], false, None, &mut report);
         }
         for _ in 0..128 {
             let mut bytes = original.clone();
             let position = index(&mut state, bytes.len());
             bytes[position] ^= 1 << (next(&mut state) % 8);
-            inspect(&bytes, false, &mut report);
+            inspect(&bytes, false, None, &mut report);
         }
         let directory = directory_base(plus);
         let mut words = vec![60, 148, 212, directory - 4];
@@ -408,7 +533,7 @@ fn campaign() -> Campaign {
             let mut bytes = original.clone();
             let position = words[index(&mut state, words.len())];
             put32(&mut bytes, position, boundaries[round % boundaries.len()]);
-            inspect(&bytes, false, &mut report);
+            inspect(&bytes, false, None, &mut report);
         }
         for round in 0..256 {
             let mut bytes = original.clone();
@@ -420,7 +545,7 @@ fn campaign() -> Campaign {
             if round % 4 == 0 {
                 bytes.truncate(index(&mut state, original.len()));
             }
-            inspect(&bytes, false, &mut report);
+            inspect(&bytes, false, None, &mut report);
         }
     }
     assert_eq!(report.cases, CASE_COUNT);

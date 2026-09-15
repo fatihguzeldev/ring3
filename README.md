@@ -219,10 +219,10 @@ pnpm build
 
 `test:rust` runs the regular Rust tests and documentation tests. Tests that require
 generated EXE/DLL files run through the corpus verifier below.
-The regular suite includes a fixed 4,611-input mutation campaign across 27 raw PE
-readers, including present and absent AMD64 exception tables, checking repeated
-results and input preservation. The separate v1 unwind metadata reader has
-focused and direct corpus tests and is not yet part of that campaign. This finite campaign
+The regular suite includes a fixed 6,148-input mutation campaign across 28 raw PE
+readers, including present and absent AMD64 exception tables and v1 unwind metadata
+at one explicit RVA. It checks repeated results, input preservation and owned
+unwind record fields, with one synthetic handler seed. This finite campaign
 does not replace semantic tests or coverage-guided fuzzing.
 
 ## Corpus verification
