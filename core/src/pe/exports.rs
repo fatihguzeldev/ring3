@@ -1,6 +1,7 @@
 mod addresses;
 mod batch;
 mod directory;
+mod evidence;
 mod forwarder;
 mod lookup;
 mod names;
@@ -24,4 +25,10 @@ pub use forwarder::{
 pub use walk::{
     PeForwarderHop, PeForwarderQuery, PeForwarderRoute, PeForwarderStep, PeForwarderTextContext,
     PeForwarderWalk, PeForwarderWalkError, PeForwarderWalkLimits, walk_pe_export_forwarders,
+};
+
+pub use evidence::{
+    PeExportEvidence, PeExportEvidenceError, PeExportEvidenceLimits, PeOwnedExportAddressEntry,
+    PeOwnedExportAddressTable, PeOwnedExportName, PeOwnedExportNameTable, PeOwnedExportTarget,
+    inspect_pe_exports,
 };
