@@ -182,6 +182,10 @@
       "generated_pe32plus_named_forwarder_walk_preserves_missing_target",
       "generated_pe32_ordinal_forwarder_walk_selects_explicit_provider",
       "generated_pe32plus_ordinal_forwarder_walk_selects_explicit_provider"
+    ],
+    "source_pe_headers": [
+      "generated_named_headers_preserve_both_widths_and_aliases",
+      "generated_named_admission_refusals_preserve_priority_and_indices"
     ]
   }
 }

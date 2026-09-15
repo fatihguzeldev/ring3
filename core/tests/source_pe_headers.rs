@@ -427,3 +427,170 @@ fn a_later_header_keeps_its_source_after_multiple_prefix_failures() {
         Ok(expected_prefix(0x7777, PeKind::Pe32Plus, 3))
     );
 }
+
+fn generated_arithmetic_sources() -> ([std::ffi::OsString; 2], [Vec<u8>; 2]) {
+    let paths = ["RING3_PE32_FIXTURE", "RING3_PE32PLUS_FIXTURE"].map(|variable| {
+        std::env::var_os(variable).expect("explicit generated arithmetic fixture path")
+    });
+    let bytes = paths.each_ref().map(|path| std::fs::read(path).unwrap());
+    assert!(bytes.iter().all(|bytes| bytes.len() == 1024));
+    (paths, bytes)
+}
+
+fn generated_prefix(kind: PeKind) -> PeHeaderPrefix {
+    let (machine, characteristics, size_of_optional_header) = match kind {
+        PeKind::Pe32 => (0x14c, 0x103, 224),
+        PeKind::Pe32Plus => (0x8664, 0x23, 240),
+    };
+    PeHeaderPrefix {
+        pe_offset: FileOffset::new(120),
+        machine,
+        number_of_sections: 1,
+        characteristics,
+        size_of_optional_header,
+        kind,
+    }
+}
+
+fn generated_source_limits() -> AsciiPeSourceHeaderLimits {
+    AsciiPeSourceHeaderLimits {
+        paths: AsciiSourcePathLimits {
+            max_paths: 3,
+            max_path_bytes: 10,
+            max_total_path_bytes: 25,
+            max_depth: 2,
+        },
+        headers: PeHeaderBatchLimits {
+            max_files: 3,
+            max_file_bytes: 1024,
+            max_total_bytes: 3072,
+        },
+    }
+}
+
+#[test]
+#[ignore = "requires explicit RING3_PE32_FIXTURE and RING3_PE32PLUS_FIXTURE paths"]
+fn generated_named_headers_preserve_both_widths_and_aliases() {
+    let expected = AsciiPeSourceHeaders {
+        total_path_bytes: 25,
+        total_content_bytes: 3072,
+        entries: vec![
+            AsciiPeSourceHeader {
+                path: expected_path(0, "Bin/A.data", "bin/a.data", 2),
+                header: Ok(generated_prefix(PeKind::Pe32)),
+            },
+            AsciiPeSourceHeader {
+                path: expected_path(1, "lib/B.bin", "lib/b.bin", 2),
+                header: Ok(generated_prefix(PeKind::Pe32Plus)),
+            },
+            AsciiPeSourceHeader {
+                path: expected_path(2, "copy/A", "copy/a", 2),
+                header: Ok(generated_prefix(PeKind::Pe32)),
+            },
+        ],
+    };
+    let result = {
+        let (paths, bytes) = generated_arithmetic_sources();
+        let before = bytes.clone();
+        let names = ["Bin\\A.data", "lib/B.bin", "copy/A"].map(str::to_owned);
+        let original_names = names.clone();
+        let sources = [
+            AsciiPeSource {
+                path: &names[0],
+                bytes: &bytes[0],
+            },
+            AsciiPeSource {
+                path: &names[1],
+                bytes: &bytes[1],
+            },
+            AsciiPeSource {
+                path: &names[2],
+                bytes: &bytes[0],
+            },
+        ];
+        let result = parse_ascii_pe_source_headers(&sources, generated_source_limits()).unwrap();
+        assert_eq!(result, expected);
+        assert_eq!(
+            parse_ascii_pe_source_headers(&sources, generated_source_limits()),
+            Ok(expected.clone())
+        );
+        assert_eq!(names, original_names);
+        assert_eq!(bytes, before);
+        for (path, original) in paths.iter().zip(&before) {
+            assert_eq!(std::fs::read(path).unwrap(), *original);
+        }
+        result
+    };
+    assert_eq!(result, expected);
+}
+
+#[test]
+#[ignore = "requires explicit RING3_PE32_FIXTURE and RING3_PE32PLUS_FIXTURE paths"]
+fn generated_named_admission_refusals_preserve_priority_and_indices() {
+    let (paths, bytes) = generated_arithmetic_sources();
+    let before = bytes.clone();
+    let mut sources = [
+        AsciiPeSource {
+            path: "A",
+            bytes: &bytes[0],
+        },
+        AsciiPeSource {
+            path: "a",
+            bytes: &bytes[1],
+        },
+    ];
+    let mut cap = generated_source_limits();
+    cap.headers = PeHeaderBatchLimits {
+        max_files: 0,
+        max_file_bytes: 0,
+        max_total_bytes: 0,
+    };
+    assert_eq!(
+        parse_ascii_pe_source_headers(&sources, cap),
+        Err(AsciiPeSourceHeaderError::Paths(
+            AsciiSourcePathError::Collision {
+                index: 1,
+                prior: 0,
+                kind: AsciiSourcePathCollision::Duplicate
+            }
+        ))
+    );
+    sources[1].path = "B";
+    cap.headers = PeHeaderBatchLimits {
+        max_files: 1,
+        max_file_bytes: 1023,
+        max_total_bytes: 2047,
+    };
+    assert_eq!(
+        parse_ascii_pe_source_headers(&sources, cap),
+        Err(AsciiPeSourceHeaderError::Headers(
+            PeHeaderBatchError::FileCountExceeded { count: 2, limit: 1 }
+        ))
+    );
+    cap.headers.max_files = 2;
+    assert_eq!(
+        parse_ascii_pe_source_headers(&sources, cap),
+        Err(AsciiPeSourceHeaderError::Headers(
+            PeHeaderBatchError::FileSizeExceeded {
+                index: 0,
+                size: 1024,
+                limit: 1023
+            }
+        ))
+    );
+    cap.headers.max_file_bytes = 1024;
+    assert_eq!(
+        parse_ascii_pe_source_headers(&sources, cap),
+        Err(AsciiPeSourceHeaderError::Headers(
+            PeHeaderBatchError::TotalSizeExceeded {
+                index: 1,
+                total: 2048,
+                limit: 2047
+            }
+        ))
+    );
+    assert_eq!(bytes, before);
+    for (path, original) in paths.iter().zip(&before) {
+        assert_eq!(std::fs::read(path).unwrap(), *original);
+    }
+}
