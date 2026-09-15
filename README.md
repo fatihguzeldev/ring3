@@ -318,6 +318,9 @@ Two owned static-import groups retain compiled named/ordinal metadata after inpu
 release and exact input, row and text budget refusals across both PE widths.
 Two owned delay-import groups retain all three metadata tables and named/ordinal
 entries after input release, with the same exact budget order and operands.
+Two owned export groups retain complete named, ordinal-only and sparse-forwarder
+metadata after input release, including nested address tables and exact budget
+refusal operands.
 Certificate-entry tests append synthetic records to generated PE files in memory;
 the source fixtures remain unchanged and are not cryptographically signed.
 
