@@ -591,3 +591,233 @@ fn long_chains_are_iterative_and_charge_exact_aggregate_limits() {
         })
     );
 }
+
+fn linked_forwarder_step(ordinal: bool) -> ring3_core::PeForwarderStep<'static> {
+    use ring3_core::{
+        PeExportAddressEntry, PeExportName, PeForwarderHop, PeForwarderRequest, PeForwarderSymbol,
+    };
+    let (name_index, table_index, name_rva, name_offset, name, target_rva, text, symbol) =
+        if ordinal {
+            (
+                1,
+                2_u16,
+                8284,
+                1628,
+                "by_ordinal",
+                8320,
+                "OtherModule.#32768",
+                PeForwarderSymbol::Ordinal {
+                    digits: "32768",
+                    value: 32768,
+                },
+            )
+        } else {
+            (
+                0,
+                0_u16,
+                8276,
+                1620,
+                "by_name",
+                8295,
+                "OtherModule.ring3_target",
+                PeForwarderSymbol::Name("ring3_target"),
+            )
+        };
+    ring3_core::PeForwarderStep {
+        source_index: 0,
+        query: PeForwarderQuery::Name(name.into()),
+        selection: PeExportSelection::Selected {
+            address: PeExportAddressEntry {
+                table_index: u32::from(table_index),
+                ordinal: 7 + u32::from(table_index),
+                entry_rva: RelativeVirtualAddress::new(8252 + 4 * u32::from(table_index)),
+                entry_file_offset: FileOffset::new(1596 + 4 * u64::from(table_index)),
+                target: PeExportTarget::Forwarder {
+                    rva: RelativeVirtualAddress::new(target_rva),
+                    text,
+                },
+            },
+            name: Some(PeExportName {
+                table_index: name_index,
+                name_pointer_rva: RelativeVirtualAddress::new(8264 + 4 * name_index),
+                name_pointer_file_offset: FileOffset::new(1608 + 4 * u64::from(name_index)),
+                ordinal_entry_rva: RelativeVirtualAddress::new(8272 + 2 * name_index),
+                ordinal_entry_file_offset: FileOffset::new(1616 + 2 * u64::from(name_index)),
+                address_index: table_index,
+                name_rva: RelativeVirtualAddress::new(name_rva),
+                name_file_offset: FileOffset::new(name_offset),
+                name,
+            }),
+        },
+        forwarder: Some(PeForwarderHop {
+            request: PeForwarderRequest {
+                module: "OtherModule",
+                separator_offset: 11,
+                symbol,
+            },
+            destination_index: 1,
+        }),
+    }
+}
+
+fn linked_terminal_step(ordinal: bool) -> ring3_core::PeForwarderStep<'static> {
+    ring3_core::PeForwarderStep {
+        source_index: 1,
+        query: if ordinal {
+            PeForwarderQuery::Ordinal(32768)
+        } else {
+            PeForwarderQuery::Name("ring3_target".into())
+        },
+        selection: if ordinal {
+            PeExportSelection::Selected {
+                address: ring3_core::PeExportAddressEntry {
+                    table_index: 0,
+                    ordinal: 32768,
+                    entry_rva: RelativeVirtualAddress::new(8249),
+                    entry_file_offset: FileOffset::new(1593),
+                    target: PeExportTarget::Rva(RelativeVirtualAddress::new(4096)),
+                },
+                name: None,
+            }
+        } else {
+            PeExportSelection::NameNotFound
+        },
+        forwarder: None,
+    }
+}
+
+fn read_walk_fixture(variable: &str, kind: ring3_core::PeKind) -> (std::path::PathBuf, Vec<u8>) {
+    let path = std::path::PathBuf::from(
+        std::env::var_os(variable).expect("explicit generated walk fixture path"),
+    );
+    let bytes = std::fs::read(&path).unwrap();
+    assert_eq!(bytes.len(), 2048);
+    assert_eq!(
+        ring3_core::parse_pe_header_prefix(&bytes).unwrap().kind,
+        kind
+    );
+    (path, bytes)
+}
+
+fn check_linked_walk(
+    forwarder_variable: &str,
+    provider_variable: &str,
+    kind: ring3_core::PeKind,
+    ordinal: bool,
+) {
+    let (forwarder_path, forwarder) = read_walk_fixture(forwarder_variable, kind);
+    let (provider_path, provider) = read_walk_fixture(provider_variable, kind);
+    let before = (forwarder.clone(), provider.clone());
+    let root = if ordinal { "by_ordinal" } else { "by_name" };
+    let (rows, text_bytes) = if ordinal { (2, 39) } else { (1, 42) };
+    let cap = PeForwarderWalkLimits {
+        max_sources: 2,
+        max_routes: 1,
+        max_hops: 2,
+        max_selection_rows: rows,
+        max_text_bytes: text_bytes,
+    };
+    let expected = ring3_core::PeForwarderWalk {
+        selection_rows: rows,
+        text_bytes,
+        steps: vec![
+            linked_forwarder_step(ordinal),
+            linked_terminal_step(ordinal),
+        ],
+    };
+    let sources = [forwarder.as_slice(), provider.as_slice()];
+    let routes = [route(0, "OtherModule", 1)];
+    let result =
+        walk_pe_export_forwarders(&sources, &routes, 0, PeExportQuery::Name(root), cap).unwrap();
+    assert_eq!(result, expected);
+    assert_eq!(
+        walk_pe_export_forwarders(&sources, &routes, 0, PeExportQuery::Name(root), cap).unwrap(),
+        expected
+    );
+    let request = result.steps[0].forwarder.unwrap().request;
+    let offset = if ordinal { 1664 } else { 1639 };
+    assert!(std::ptr::eq(
+        request.module.as_ptr(),
+        forwarder[offset..].as_ptr()
+    ));
+    match request.symbol {
+        ring3_core::PeForwarderSymbol::Name(name) => assert!(std::ptr::eq(
+            name.as_ptr(),
+            forwarder[offset + 12..].as_ptr()
+        )),
+        ring3_core::PeForwarderSymbol::Ordinal { digits, .. } => assert!(std::ptr::eq(
+            digits.as_ptr(),
+            forwarder[offset + 13..].as_ptr()
+        )),
+    }
+    let PeExportSelection::Selected {
+        address,
+        name: Some(name),
+    } = result.steps[0].selection
+    else {
+        panic!()
+    };
+    assert!(std::ptr::eq(
+        name.name.as_ptr(),
+        forwarder[usize::try_from(name.name_file_offset.get()).unwrap()..].as_ptr()
+    ));
+    let PeExportTarget::Forwarder { text, .. } = address.target else {
+        panic!()
+    };
+    assert!(std::ptr::eq(text.as_ptr(), forwarder[offset..].as_ptr()));
+    assert_eq!(
+        walk_pe_export_forwarders(&sources, &[], 0, PeExportQuery::Name(root), cap),
+        Err(PeForwarderWalkError::MissingRoute {
+            hop: 0,
+            source_index: 0,
+            request
+        })
+    );
+    assert_eq!((&forwarder, &provider), (&before.0, &before.1));
+    assert_eq!(std::fs::read(forwarder_path).unwrap(), before.0);
+    assert_eq!(std::fs::read(provider_path).unwrap(), before.1);
+}
+
+#[test]
+#[ignore = "requires explicit linked PE32 forwarder and ordinal provider fixtures"]
+fn generated_pe32_named_forwarder_walk_preserves_missing_target() {
+    check_linked_walk(
+        "RING3_EXPORT_FORWARD_PE32_FIXTURE",
+        "RING3_EXPORT_PE32_ORDINAL_DLL",
+        ring3_core::PeKind::Pe32,
+        false,
+    );
+}
+
+#[test]
+#[ignore = "requires explicit linked PE32+ forwarder and ordinal provider fixtures"]
+fn generated_pe32plus_named_forwarder_walk_preserves_missing_target() {
+    check_linked_walk(
+        "RING3_EXPORT_FORWARD_PE32PLUS_FIXTURE",
+        "RING3_EXPORT_PE32PLUS_ORDINAL_DLL",
+        ring3_core::PeKind::Pe32Plus,
+        false,
+    );
+}
+
+#[test]
+#[ignore = "requires explicit linked PE32 forwarder and ordinal provider fixtures"]
+fn generated_pe32_ordinal_forwarder_walk_selects_explicit_provider() {
+    check_linked_walk(
+        "RING3_EXPORT_FORWARD_PE32_FIXTURE",
+        "RING3_EXPORT_PE32_ORDINAL_DLL",
+        ring3_core::PeKind::Pe32,
+        true,
+    );
+}
+
+#[test]
+#[ignore = "requires explicit linked PE32+ forwarder and ordinal provider fixtures"]
+fn generated_pe32plus_ordinal_forwarder_walk_selects_explicit_provider() {
+    check_linked_walk(
+        "RING3_EXPORT_FORWARD_PE32PLUS_FIXTURE",
+        "RING3_EXPORT_PE32PLUS_ORDINAL_DLL",
+        ring3_core::PeKind::Pe32Plus,
+        true,
+    );
+}

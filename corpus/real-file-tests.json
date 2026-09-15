@@ -176,6 +176,12 @@
     "pe_forwarder_requests": [
       "generated_pe32_forwarder_requests_preserve_borrowed_metadata",
       "generated_pe32plus_forwarder_requests_preserve_borrowed_metadata"
+    ],
+    "pe_forwarder_walk": [
+      "generated_pe32_named_forwarder_walk_preserves_missing_target",
+      "generated_pe32plus_named_forwarder_walk_preserves_missing_target",
+      "generated_pe32_ordinal_forwarder_walk_selects_explicit_provider",
+      "generated_pe32plus_ordinal_forwarder_walk_selects_explicit_provider"
     ]
   }
 }
