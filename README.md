@@ -259,7 +259,9 @@ linked resource directory graphs,
 fixed resource data-entry records and unpatched managed CLR headers. Four direct
 declared-evidence cases retain complete owned fields and physical byte ranges
 from unpatched PE32/PE32+ and managed files, including declared zero CLR
-descriptors and present CLR headers.
+descriptors and present CLR headers. Two named-evidence groups retain mixed
+compiled pairings, aliases, reordered records, empty-content errors and exact
+path-before-content admission refusals.
 Certificate-entry tests append synthetic records to generated PE files in memory;
 the source fixtures remain unchanged and are not cryptographically signed.
 
