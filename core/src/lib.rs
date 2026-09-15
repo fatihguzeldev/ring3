@@ -78,3 +78,7 @@ pub use source::{
     AsciiPeSourceModuleEvidence, AsciiPeSourceModuleEvidenceBatch,
     AsciiPeSourceModuleEvidenceLimits, inspect_ascii_pe_source_module_evidence,
 };
+
+pub use pe::{
+    PeExportEvidenceLookupError, PeExportEvidenceLookupLimits, lookup_pe_export_evidence,
+};

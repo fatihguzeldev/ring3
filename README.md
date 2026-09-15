@@ -119,6 +119,16 @@ target variants, raw forwarder spelling, absence and typed errors stay distinct.
 Directory DLL-name pointers remain metadata; direct target content is not read.
 See the [owned export evidence API](core/src/pe/exports/evidence.rs).
 
+`lookup_pe_export_evidence` queries retained export metadata after image release.
+It admits actual rows and text bytes in the required view, then validates every
+count, positional index, ordinal and name-to-address reference before selection.
+Name queries use nested addresses; ordinal queries use standalone addresses.
+Unrelated views and reported totals are ignored. Results borrow evidence and
+preserve opaque metadata; these checks do not establish PE validity, provenance,
+cross-view coherence or allocation/time bounds. See the
+[owned export query API](core/src/pe/exports/evidence_lookup.rs).
+
+
 `inspect_pe_module_evidence` binds the whole-input fingerprint and declared,
 static import, delay import and export evidence to one input slice. It retains
 owned, independent family results even when another family exceeds its row/text

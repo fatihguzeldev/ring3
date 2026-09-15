@@ -2,6 +2,7 @@ mod addresses;
 mod batch;
 mod directory;
 mod evidence;
+mod evidence_lookup;
 mod forwarder;
 mod lookup;
 mod names;
@@ -31,4 +32,8 @@ pub use evidence::{
     PeExportEvidence, PeExportEvidenceError, PeExportEvidenceLimits, PeOwnedExportAddressEntry,
     PeOwnedExportAddressTable, PeOwnedExportName, PeOwnedExportNameTable, PeOwnedExportTarget,
     inspect_pe_exports,
+};
+
+pub use evidence_lookup::{
+    PeExportEvidenceLookupError, PeExportEvidenceLookupLimits, lookup_pe_export_evidence,
 };
