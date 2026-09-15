@@ -14,7 +14,9 @@
   "tests": {
     "pe_export_evidence": [
       "generated_owned_exports_preserve_compiled_metadata",
-      "generated_owned_export_refusals_preserve_compiled_budget_operands"
+      "generated_owned_export_refusals_preserve_compiled_budget_operands",
+      "generated_owned_export_queries_preserve_compiled_selections_after_release",
+      "generated_owned_export_query_refusals_preserve_compiled_view_limits"
     ],
     "pe_export_addresses": [
       "named_pe32_dll_matches_recorded_address_metadata",

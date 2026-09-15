@@ -668,3 +668,250 @@ fn generated_owned_export_refusals_preserve_compiled_budget_operands() {
         }
     }
 }
+
+use ring3_core::{
+    PeExportEvidenceLookupError, PeExportEvidenceLookupLimits, PeExportLookupError, PeExportQuery,
+    PeExportSelection, lookup_pe_export, lookup_pe_export_evidence,
+};
+
+struct CompiledQueryInput {
+    bytes: Vec<u8>,
+    expected: PeExportEvidence,
+    queries: Vec<PeExportQuery<'static>>,
+    ordinal_limits: PeExportEvidenceLookupLimits,
+    name_limits: PeExportEvidenceLookupLimits,
+}
+
+fn compiled_query_inputs() -> Vec<CompiledQueryInput> {
+    let paths: Vec<_> = [
+        ("RING3_EXPORT_PE32_NAMED_DLL", CompiledExport::Named),
+        ("RING3_EXPORT_PE32PLUS_NAMED_DLL", CompiledExport::Named),
+        ("RING3_EXPORT_PE32_ORDINAL_DLL", CompiledExport::Ordinal),
+        ("RING3_EXPORT_PE32PLUS_ORDINAL_DLL", CompiledExport::Ordinal),
+        (
+            "RING3_EXPORT_FORWARD_PE32_FIXTURE",
+            CompiledExport::Forwarders,
+        ),
+        (
+            "RING3_EXPORT_FORWARD_PE32PLUS_FIXTURE",
+            CompiledExport::Forwarders,
+        ),
+    ]
+    .into_iter()
+    .map(|(variable, kind)| {
+        let path = std::env::var_os(variable)
+            .expect("all six explicit compiled owned export query paths are required");
+        (path, kind)
+    })
+    .collect();
+    paths
+        .into_iter()
+        .map(|(path, kind)| {
+            let bytes = std::fs::read(path).unwrap();
+            assert_eq!(bytes.len(), 2048);
+            let (spelling, ordinals, ordinal_caps, name_caps): (&[&str], &[u32], _, _) = match kind
+            {
+                CompiledExport::Named => (
+                    &["ring3_probe", "RING3_PROBE", "Missing"],
+                    &[0, 1, 2],
+                    (1, 0),
+                    (2, 11),
+                ),
+                CompiledExport::Ordinal => (
+                    &["Missing"],
+                    &[0, 32767, 32768, 32769, u32::MAX],
+                    (1, 0),
+                    (1, 0),
+                ),
+                CompiledExport::Forwarders => (
+                    &["by_name", "by_ordinal", "BY_NAME", "Missing"],
+                    &[6, 7, 8, 9, 10, u32::MAX],
+                    (3, 42),
+                    (5, 59),
+                ),
+            };
+            let queries = spelling
+                .iter()
+                .map(|name| PeExportQuery::Name(name))
+                .chain(ordinals.iter().copied().map(PeExportQuery::Ordinal))
+                .collect();
+            let caps = |(rows, text)| PeExportEvidenceLookupLimits {
+                max_table_rows: rows,
+                max_table_text_bytes: text,
+            };
+            CompiledQueryInput {
+                bytes,
+                expected: compiled_expected(kind),
+                queries,
+                ordinal_limits: caps(ordinal_caps),
+                name_limits: caps(name_caps),
+            }
+        })
+        .collect()
+}
+
+fn compiled_query_limits(
+    input: &CompiledQueryInput,
+    query: PeExportQuery<'_>,
+) -> PeExportEvidenceLookupLimits {
+    match query {
+        PeExportQuery::Name(_) => input.name_limits,
+        PeExportQuery::Ordinal(_) => input.ordinal_limits,
+    }
+}
+
+#[test]
+#[ignore = "requires all six explicit compiled owned export query paths"]
+fn generated_owned_export_queries_preserve_compiled_selections_after_release() {
+    let mut outcomes = 0;
+    for mut input in compiled_query_inputs() {
+        let before = input.bytes.clone();
+        let expected: Vec<_> = input
+            .queries
+            .iter()
+            .map(|query| {
+                format!(
+                    "{:?}",
+                    lookup_pe_export(&input.bytes, *query)
+                        .map_err(PeExportEvidenceLookupError::Reader)
+                )
+            })
+            .collect();
+        let evidence = inspect_pe_exports(
+            &input.bytes,
+            PeExportEvidenceLimits {
+                max_input_bytes: 2048,
+                max_output_rows: input.expected.total_rows,
+                max_output_text_bytes: input.expected.total_text_bytes,
+            },
+        )
+        .unwrap();
+        assert_eq!(evidence, input.expected);
+        assert_eq!(input.bytes, before);
+        drop(before);
+        input.bytes.fill(0xee);
+        drop(std::mem::take(&mut input.bytes));
+        let mut previous = Vec::new();
+        for (query, expected) in input.queries.iter().copied().zip(&expected) {
+            let caps = compiled_query_limits(&input, query);
+            let selection = {
+                let spelling = match query {
+                    PeExportQuery::Name(s) => Some(s.to_owned()),
+                    PeExportQuery::Ordinal(_) => None,
+                };
+                let temporary = spelling.as_deref().map_or(query, PeExportQuery::Name);
+                lookup_pe_export_evidence(&evidence, temporary, caps)
+            };
+            assert_eq!(format!("{selection:?}"), *expected);
+            assert_eq!(lookup_pe_export_evidence(&evidence, query, caps), selection);
+            previous.push(selection);
+            outcomes += 1;
+        }
+        for (query, selection) in input.queries.iter().copied().zip(previous).rev() {
+            assert_eq!(
+                lookup_pe_export_evidence(&evidence, query, compiled_query_limits(&input, query)),
+                selection
+            );
+        }
+    }
+    assert_eq!(outcomes, 44);
+}
+
+#[test]
+#[ignore = "requires all six explicit compiled owned export query paths"]
+fn generated_owned_export_query_refusals_preserve_compiled_view_limits() {
+    let zero = PeExportEvidenceLookupLimits {
+        max_table_rows: 0,
+        max_table_text_bytes: 0,
+    };
+    let mut outcomes = 0;
+    for mut input in compiled_query_inputs() {
+        let mut evidence = inspect_pe_exports(
+            &input.bytes,
+            PeExportEvidenceLimits {
+                max_input_bytes: 2048,
+                max_output_rows: input.expected.total_rows,
+                max_output_text_bytes: input.expected.total_text_bytes,
+            },
+        )
+        .unwrap();
+        assert_eq!(evidence, input.expected);
+        input.bytes.fill(0xee);
+        drop(std::mem::take(&mut input.bytes));
+        evidence.total_rows = 0;
+        evidence.total_text_bytes = 0;
+        for query in input.queries.iter().copied() {
+            let caps = compiled_query_limits(&input, query);
+            let selected = lookup_pe_export_evidence(&evidence, query, caps);
+            assert!(selected.is_ok());
+            assert_eq!(
+                lookup_pe_export_evidence(
+                    &evidence,
+                    query,
+                    PeExportEvidenceLookupLimits {
+                        max_table_rows: caps.max_table_rows - 1,
+                        max_table_text_bytes: 0
+                    }
+                ),
+                Err(PeExportEvidenceLookupError::RowsExceeded {
+                    rows: caps.max_table_rows,
+                    limit: caps.max_table_rows - 1
+                })
+            );
+            if caps.max_table_text_bytes > 0 {
+                assert_eq!(
+                    lookup_pe_export_evidence(
+                        &evidence,
+                        query,
+                        PeExportEvidenceLookupLimits {
+                            max_table_text_bytes: caps.max_table_text_bytes - 1,
+                            ..caps
+                        }
+                    ),
+                    Err(PeExportEvidenceLookupError::TextExceeded {
+                        bytes: caps.max_table_text_bytes,
+                        limit: caps.max_table_text_bytes - 1
+                    })
+                );
+            }
+            let mut independent = evidence.clone();
+            independent.directory = Ok(None);
+            independent.total_rows = u64::MAX;
+            independent.total_text_bytes = u64::MAX;
+            let name_error = PeExportNameError::NameUnavailable { entry_index: 77 };
+            let address_error = PeExportAddressError::AddressTableUnavailable { count: 99 };
+            match query {
+                PeExportQuery::Name(_) => independent.addresses = Err(address_error),
+                PeExportQuery::Ordinal(_) => independent.names = Err(name_error),
+            }
+            assert_eq!(
+                lookup_pe_export_evidence(&independent, query, caps),
+                selected
+            );
+            let reader_error = match query {
+                PeExportQuery::Name(_) => {
+                    independent.names = Err(name_error);
+                    PeExportLookupError::Names(name_error)
+                }
+                PeExportQuery::Ordinal(_) => {
+                    independent.addresses = Err(address_error);
+                    PeExportLookupError::Addresses(address_error)
+                }
+            };
+            assert_eq!(
+                lookup_pe_export_evidence(&independent, query, zero),
+                Err(PeExportEvidenceLookupError::Reader(reader_error))
+            );
+            match query {
+                PeExportQuery::Name(_) => independent.names = Ok(None),
+                PeExportQuery::Ordinal(_) => independent.addresses = Ok(None),
+            }
+            assert_eq!(
+                lookup_pe_export_evidence(&independent, query, zero),
+                Ok(PeExportSelection::DirectoryAbsent)
+            );
+            outcomes += 1;
+        }
+    }
+    assert_eq!(outcomes, 44);
+}
