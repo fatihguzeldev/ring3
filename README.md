@@ -34,6 +34,13 @@ the generated programs. Reader types and limits live with their [implementation]
 The CLR reader preserves flags and the entry-point word without validating metadata,
 tokens or runtime compatibility; declared header tails are not read.
 
+`admit_ascii_source_paths` checks a materialized list of relative ASCII file-path
+strings with explicit count, per-path byte, total byte and depth limits. It changes
+backslash separators to slash, retains original case and supplies an ASCII-lowercase
+comparison key. Duplicate and file/ancestor collisions are rejected; output strings
+are owned. Keys and indices describe this lexical list, not filesystem containment,
+content identity or Windows names. See the [ASCII path contract](core/src/source/paths.rs).
+
 `parse_pe_header_prefix_batch` accepts an immutable list of already materialized
 byte slices and explicit file-count, per-file byte and total-byte limits. It
 checks every budget before reading prefixes, then returns owned results in input

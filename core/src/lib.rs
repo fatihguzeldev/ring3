@@ -1,5 +1,6 @@
 mod address;
 mod pe;
+mod source;
 
 pub use address::{FileOffset, GuestAddress32, ProgramCounter32, RelativeVirtualAddress};
 pub use pe::{
@@ -41,4 +42,9 @@ pub use pe::{
     parse_pe_resource_directories, parse_pe_resource_directory_names, parse_pe_resource_payloads,
     parse_pe_resource_root, parse_pe_resource_root_names, parse_pe_sections,
     parse_pe_tls_directory, resolve_pe_file_range, walk_pe_export_forwarders,
+};
+
+pub use source::{
+    AsciiSourcePathBatch, AsciiSourcePathCollision, AsciiSourcePathEntry, AsciiSourcePathError,
+    AsciiSourcePathLimits, AsciiSourcePathSegmentError, admit_ascii_source_paths,
 };
