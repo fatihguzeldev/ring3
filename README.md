@@ -354,6 +354,9 @@ release and independent family output-refusal operands.
 Two named-module groups retain mixed path/content pairings, aliases and owned
 results across the same six inputs, with exact whole-list admission and shared
 per-family output-refusal operands.
+Two owned-query groups use the existing named, ordinal-only and sparse-forwarder
+DLLs to retain complete selections after image release, exact query-view row/text
+caps and independent reader refusals, separately from collection output totals.
 
 The verifier requires pinned native Rust tools on `aarch64-apple-darwin`, compiles
 the Rust tests offline into a fresh Cargo target, and rejects missing, extra or
