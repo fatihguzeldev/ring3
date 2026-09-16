@@ -1,3 +1,10 @@
+mod evidence;
+
+pub use evidence::{
+    PeBoundImportEvidence, PeBoundImportEvidenceError, PeBoundImportEvidenceLimits,
+    PeOwnedBoundImportName, PeOwnedBoundImportNameTable, inspect_pe_bound_imports,
+};
+
 mod names;
 
 pub use names::{

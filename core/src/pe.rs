@@ -297,8 +297,10 @@ pub use exports::{
 pub use exports::{PeForwarderEvidenceWalkError, walk_pe_export_evidence_forwarders};
 
 pub use imports::{
-    PeBoundForwarderRef, PeBoundImportDescriptor, PeBoundImportError, PeBoundImportName,
+    PeBoundForwarderRef, PeBoundImportDescriptor, PeBoundImportError, PeBoundImportEvidence,
+    PeBoundImportEvidenceError, PeBoundImportEvidenceLimits, PeBoundImportName,
     PeBoundImportNameError, PeBoundImportNameLocation, PeBoundImportNameTable, PeBoundImportTable,
+    PeOwnedBoundImportName, PeOwnedBoundImportNameTable, inspect_pe_bound_imports,
     parse_pe_bound_import_descriptors, parse_pe_bound_import_names,
 };
 
