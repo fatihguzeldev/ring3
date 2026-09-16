@@ -3,6 +3,9 @@ use ring3_core::{
     RelativeVirtualAddress, parse_pe_import_lookups,
 };
 
+#[path = "pe_import_lookups/observed.rs"]
+mod observed;
+
 fn put32(bytes: &mut [u8], offset: usize, value: u32) {
     bytes[offset..offset + 4].copy_from_slice(&value.to_le_bytes());
 }
