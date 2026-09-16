@@ -1,5 +1,6 @@
 mod descriptors;
 mod evidence;
+mod evidence_exports;
 mod export_batch;
 mod lookups;
 mod names;
@@ -23,4 +24,8 @@ pub use lookups::{
 };
 pub use names::{
     PeDelayImportName, PeDelayImportNameError, PeDelayImportNameTable, parse_pe_delay_import_names,
+};
+
+pub use evidence_exports::{
+    PeDelayImportEvidenceExportBatch, lookup_pe_delay_import_evidence_exports,
 };

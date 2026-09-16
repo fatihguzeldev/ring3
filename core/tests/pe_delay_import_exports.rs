@@ -5,6 +5,266 @@ use ring3_core::{
     PeImportSymbol, RelativeVirtualAddress, lookup_pe_delay_import_exports,
     lookup_pe_delay_import_exports_with_provider,
 };
+use ring3_core::{
+    PeDelayImportEvidence, PeDelayImportEvidenceLimits, PeExportEvidence, PeExportEvidenceLimits,
+    PeExportEvidenceLookupError, PeExportEvidenceLookupLimits, PeOwnedImportSymbol,
+    inspect_pe_delay_imports, inspect_pe_exports, lookup_pe_delay_import_evidence_exports,
+};
+
+fn owned_inputs(importer: &[u8], provider: &[u8]) -> (PeDelayImportEvidence, PeExportEvidence) {
+    (
+        inspect_pe_delay_imports(
+            importer,
+            PeDelayImportEvidenceLimits {
+                max_input_bytes: 65_536,
+                max_output_rows: 8,
+                max_output_text_bytes: 18,
+            },
+        )
+        .unwrap(),
+        inspect_pe_exports(
+            provider,
+            PeExportEvidenceLimits {
+                max_input_bytes: 65_536,
+                max_output_rows: 8,
+                max_output_text_bytes: 14,
+            },
+        )
+        .unwrap(),
+    )
+}
+
+fn owned_query_limits() -> PeExportEvidenceLookupLimits {
+    PeExportEvidenceLookupLimits {
+        max_table_rows: 5,
+        max_table_text_bytes: 11,
+    }
+}
+
+#[test]
+fn owned_delay_matches_preserve_both_image_widths_after_release() {
+    for (import_plus, export_plus) in [(false, false), (true, true), (false, true), (true, false)] {
+        let mut importer = mixed_importer(import_plus);
+        let mut provider = providing::fixture(export_plus, 2);
+        let raw = lookup_pe_delay_import_exports(&importer, 0, &provider, limits(5, 5)).unwrap();
+        let expected: Vec<_> = raw
+            .exports
+            .selections
+            .into_iter()
+            .map(|s| format!("{:?}", s.map_err(PeExportEvidenceLookupError::Reader)))
+            .collect();
+        let (imports, exports) = owned_inputs(&importer, &provider);
+        importer.fill(0xee);
+        provider.fill(0xee);
+        drop(importer);
+        drop(provider);
+        let before = (imports.clone(), exports.clone());
+        let result = lookup_pe_delay_import_evidence_exports(
+            &imports,
+            0,
+            &exports,
+            owned_query_limits(),
+            limits(5, 5),
+        )
+        .unwrap();
+        assert!(std::ptr::eq(
+            result.imports,
+            imports
+                .lookups
+                .as_ref()
+                .unwrap()
+                .as_ref()
+                .unwrap()
+                .imports
+                .as_ptr()
+        ));
+        assert_eq!(result.exports.selection_rows, 5);
+        assert_eq!(result.imports.import.dll_name, "Own.DLL");
+        assert_eq!(
+            result.imports.entries[4].symbol,
+            PeOwnedImportSymbol::Ordinal(65535)
+        );
+        assert_eq!(
+            result
+                .exports
+                .selections
+                .iter()
+                .map(|s| format!("{s:?}"))
+                .collect::<Vec<_>>(),
+            expected
+        );
+        assert_eq!(
+            lookup_pe_delay_import_evidence_exports(
+                &imports,
+                0,
+                &exports,
+                owned_query_limits(),
+                limits(5, 5)
+            ),
+            Ok(result)
+        );
+        assert_eq!((imports, exports), before);
+    }
+}
+
+#[test]
+fn owned_delay_errors_absence_and_descriptor_count_precede_provider() {
+    let (mut imports, exports) =
+        owned_inputs(&mixed_importer(false), &providing::fixture(false, 2));
+    let zero = PeExportEvidenceLookupLimits {
+        max_table_rows: 0,
+        max_table_text_bytes: 0,
+    };
+    assert_eq!(
+        lookup_pe_delay_import_evidence_exports(&imports, 1, &exports, zero, limits(0, 0)),
+        Err(PeDelayImportExportError::DescriptorNotFound {
+            descriptor_index: 1,
+            descriptor_count: 1
+        })
+    );
+    assert_eq!(
+        lookup_pe_delay_import_evidence_exports(&imports, 0, &exports, zero, limits(4, 0)),
+        Err(PeDelayImportExportError::ExportBatch(
+            PeExportBatchError::QueryCountExceeded { count: 5, limit: 4 }
+        ))
+    );
+    imports
+        .lookups
+        .as_mut()
+        .unwrap()
+        .as_mut()
+        .unwrap()
+        .imports
+        .clear();
+    assert_eq!(
+        lookup_pe_delay_import_evidence_exports(&imports, 0, &exports, zero, limits(0, 0)),
+        Err(PeDelayImportExportError::DescriptorNotFound {
+            descriptor_index: 0,
+            descriptor_count: 0
+        })
+    );
+    imports.lookups = Ok(None);
+    assert_eq!(
+        lookup_pe_delay_import_evidence_exports(&imports, 0, &exports, zero, limits(0, 0)),
+        Err(PeDelayImportExportError::DescriptorNotFound {
+            descriptor_index: 0,
+            descriptor_count: 0
+        })
+    );
+    let error = PeDelayImportLookupError::Lookup(PeImportLookupError::LookupTableUnavailable {
+        descriptor_index: 19,
+    });
+    imports.lookups = Err(error);
+    assert_eq!(
+        lookup_pe_delay_import_evidence_exports(&imports, u16::MAX, &exports, zero, limits(0, 0)),
+        Err(PeDelayImportExportError::Imports(error))
+    );
+}
+
+#[test]
+fn owned_delay_empty_entries_and_opaque_metadata_keep_provider_errors_aligned() {
+    let (mut imports, mut exports) =
+        owned_inputs(&mixed_importer(false), &providing::fixture(false, 2));
+    imports.descriptors = Ok(None);
+    imports.names = Ok(None);
+    imports.total_rows = 0;
+    imports.total_text_bytes = 0;
+    imports.lookups.as_mut().unwrap().as_mut().unwrap().imports[0]
+        .import
+        .descriptor
+        .attributes = u32::MAX;
+    let error = PeExportNameError::NameUnavailable { entry_index: 77 };
+    exports.names = Err(error);
+    let result = lookup_pe_delay_import_evidence_exports(
+        &imports,
+        0,
+        &exports,
+        owned_query_limits(),
+        limits(5, 3),
+    )
+    .unwrap();
+    assert_eq!(result.imports.import.descriptor.attributes, u32::MAX);
+    assert_eq!(result.exports.selection_rows, 3);
+    assert_eq!(
+        result.exports.selections[0],
+        Err(PeExportEvidenceLookupError::Reader(
+            PeExportLookupError::Names(error)
+        ))
+    );
+    assert_eq!(
+        lookup_pe_delay_import_evidence_exports(
+            &imports,
+            0,
+            &exports,
+            owned_query_limits(),
+            limits(5, 2)
+        ),
+        Err(PeDelayImportExportError::ExportBatch(
+            PeExportBatchError::SelectionRowsExceeded {
+                index: 3,
+                total: 3,
+                limit: 2
+            }
+        ))
+    );
+    imports.lookups.as_mut().unwrap().as_mut().unwrap().imports[0]
+        .entries
+        .clear();
+    let empty = lookup_pe_delay_import_evidence_exports(
+        &imports,
+        0,
+        &exports,
+        PeExportEvidenceLookupLimits {
+            max_table_rows: 0,
+            max_table_text_bytes: 0,
+        },
+        limits(0, 0),
+    )
+    .unwrap();
+    assert_eq!(empty.exports.selection_rows, 0);
+    assert!(empty.exports.selections.is_empty());
+}
+
+#[test]
+fn owned_delay_result_halves_keep_independent_evidence_lifetimes() {
+    let (imports, exports) = owned_inputs(&mixed_importer(false), &providing::fixture(false, 2));
+    let retained_imports = {
+        let temporary_provider = exports.clone();
+        lookup_pe_delay_import_evidence_exports(
+            &imports,
+            0,
+            &temporary_provider,
+            owned_query_limits(),
+            limits(5, 5),
+        )
+        .unwrap()
+        .imports
+    };
+    assert!(std::ptr::eq(
+        retained_imports,
+        imports
+            .lookups
+            .as_ref()
+            .unwrap()
+            .as_ref()
+            .unwrap()
+            .imports
+            .as_ptr()
+    ));
+    let retained_exports = {
+        let temporary_importer = imports.clone();
+        lookup_pe_delay_import_evidence_exports(
+            &temporary_importer,
+            0,
+            &exports,
+            owned_query_limits(),
+            limits(5, 5),
+        )
+        .unwrap()
+        .exports
+    };
+    assert_eq!(retained_exports.selection_rows, 5);
+}
 mod importing {
     pub(super) fn put32(bytes: &mut [u8], offset: usize, value: u32) {
         bytes[offset..offset + 4].copy_from_slice(&value.to_le_bytes());

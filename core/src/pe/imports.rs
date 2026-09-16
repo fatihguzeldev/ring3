@@ -30,3 +30,5 @@ pub use lookups::{
     PeImportLookup, PeImportLookupEntry, PeImportLookupError, PeImportSymbol,
     parse_pe_import_lookups,
 };
+
+pub use delay::{PeDelayImportEvidenceExportBatch, lookup_pe_delay_import_evidence_exports};

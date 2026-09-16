@@ -1,5 +1,6 @@
 use super::{
-    PeImportExportError, PeOwnedImportLookup, PeOwnedImportSymbol, PeStaticImportEvidence,
+    PeImportExportError, PeOwnedImportLookup, PeOwnedImportLookupEntry, PeOwnedImportSymbol,
+    PeStaticImportEvidence,
 };
 use crate::pe::exports::{
     PeExportBatchError, PeExportBatchLimits, PeExportEvidence, PeExportEvidenceBatch,
@@ -100,24 +101,30 @@ pub fn lookup_pe_import_evidence_exports<'importer, 'provider>(
             descriptor_count: descriptors.len(),
         },
     )?;
-    let count = imports.entries.len() as u64;
+    let exports = lookup_entry_exports(&imports.entries, provider, query_limits, batch_limits)
+        .map_err(PeImportExportError::ExportBatch)?;
+    Ok(PeImportEvidenceExportBatch { imports, exports })
+}
+
+pub(super) fn lookup_entry_exports<'provider>(
+    entries: &[PeOwnedImportLookupEntry],
+    provider: &'provider PeExportEvidence,
+    query_limits: PeExportEvidenceLookupLimits,
+    batch_limits: PeExportBatchLimits,
+) -> Result<PeExportEvidenceBatch<'provider>, PeExportBatchError> {
+    let count = entries.len() as u64;
     if count > batch_limits.max_queries {
-        return Err(PeImportExportError::ExportBatch(
-            PeExportBatchError::QueryCountExceeded {
-                count,
-                limit: batch_limits.max_queries,
-            },
-        ));
+        return Err(PeExportBatchError::QueryCountExceeded {
+            count,
+            limit: batch_limits.max_queries,
+        });
     }
-    let queries: Vec<_> = imports
-        .entries
+    let queries: Vec<_> = entries
         .iter()
         .map(|entry| match &entry.symbol {
             PeOwnedImportSymbol::ByName { name, .. } => PeExportQuery::Name(name),
             PeOwnedImportSymbol::Ordinal(ordinal) => PeExportQuery::Ordinal(u32::from(*ordinal)),
         })
         .collect();
-    let exports = lookup_pe_export_evidence_batch(provider, &queries, query_limits, batch_limits)
-        .map_err(PeImportExportError::ExportBatch)?;
-    Ok(PeImportEvidenceExportBatch { imports, exports })
+    lookup_pe_export_evidence_batch(provider, &queries, query_limits, batch_limits)
 }

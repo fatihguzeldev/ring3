@@ -143,6 +143,14 @@ and widened ordinals drive queries; DLL text, hints and raw fields remain metada
 The two evidence lifetimes are independent. See the
 [owned import matching API](core/src/pe/imports/evidence_exports.rs).
 
+`lookup_pe_delay_import_evidence_exports` provides the same explicit-provider
+association for retained delay-import records. Stored lookup errors precede
+descriptor selection; absent and present-empty tables have no descriptors.
+Both import consumers share count admission and borrowed symbol-query mapping.
+Delay attributes and other raw metadata remain uninterpreted; this adds no delay
+loading or IAT fallback. See the
+[owned delay matching API](core/src/pe/imports/delay/evidence_exports.rs).
+
 
 `inspect_pe_module_evidence` binds the whole-input fingerprint and declared,
 static import, delay import and export evidence to one input slice. It retains
