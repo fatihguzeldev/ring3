@@ -1,8 +1,8 @@
 use super::{entry, file_offset, fixture, put32, section, source};
 use ring3_core::{
     FileOffset, PeImportError, PeImportLookupError, PeImportLookupObservationError,
-    PeImportLookupSource, PeImportSymbol, PeKind, PeRvaError, RelativeVirtualAddress,
-    parse_pe_import_lookups, parse_pe_import_lookups_with_iat_fallback,
+    PeImportLookupSource, PeImportSymbol, PeKind, PeObservedImportLookup, PeRvaError,
+    RelativeVirtualAddress, parse_pe_import_lookups, parse_pe_import_lookups_with_iat_fallback,
 };
 
 fn fallback(bytes: &mut [u8], index: u16) {
@@ -319,4 +319,64 @@ fn lookup_shaped_addresses_decode_as_facts_and_reserved_bits_refuse() {
             })
         );
     }
+}
+
+fn check_compiled_borrows(bytes: &[u8], table: &PeObservedImportLookup<'_>) {
+    let offset = |rva: u32| usize::try_from(rva - 8192 + 1536).unwrap();
+    assert!(std::ptr::eq(
+        table.descriptor.dll_name.as_ptr(),
+        bytes[offset(table.descriptor.name_rva.get())..].as_ptr()
+    ));
+    if let PeImportSymbol::ByName {
+        hint_name_rva,
+        name,
+        ..
+    } = table.entries[0].symbol
+    {
+        assert!(std::ptr::eq(
+            name.as_ptr(),
+            bytes[offset(hint_name_rva.get()) + 2..].as_ptr()
+        ));
+    }
+}
+
+pub(super) fn check_compiled_fixture(bytes: &[u8], mut expected: PeObservedImportLookup<'_>) {
+    let original = bytes.to_vec();
+    let observed = parse_pe_import_lookups_with_iat_fallback(bytes).unwrap();
+    assert_eq!(observed, [expected.clone()]);
+    assert_eq!(
+        parse_pe_import_lookups_with_iat_fallback(bytes).unwrap(),
+        observed
+    );
+    check_compiled_borrows(bytes, &observed[0]);
+    assert_eq!(bytes, original);
+
+    // this copy is a four-byte descriptor mutation, not a linker mode.
+    let mut zero_oft_copy = bytes.to_vec();
+    zero_oft_copy[1536..1540].fill(0);
+    assert_eq!(zero_oft_copy[..1536], bytes[..1536]);
+    assert_eq!(zero_oft_copy[1536..1540], [0; 4]);
+    assert_eq!(zero_oft_copy[1540..], bytes[1540..]);
+    let before = zero_oft_copy.clone();
+    expected.descriptor.import_lookup_table_rva = RelativeVirtualAddress::new(0);
+    expected.source = PeImportLookupSource::FirstThunkFallback;
+    expected.entries[0].lookup_rva = expected.descriptor.import_address_table_rva;
+    expected.entries[0].lookup_file_offset = FileOffset::new(
+        1536 + u64::from(expected.descriptor.import_address_table_rva.get() - 8192),
+    );
+    let observed = parse_pe_import_lookups_with_iat_fallback(&zero_oft_copy).unwrap();
+    assert_eq!(observed, [expected]);
+    assert_eq!(
+        parse_pe_import_lookups_with_iat_fallback(&zero_oft_copy).unwrap(),
+        observed
+    );
+    check_compiled_borrows(&zero_oft_copy, &observed[0]);
+    assert_eq!(zero_oft_copy, before);
+    assert_eq!(bytes, original);
+    assert_eq!(
+        parse_pe_import_lookups(&zero_oft_copy),
+        Err(PeImportLookupError::LookupTableUnavailable {
+            descriptor_index: 0
+        })
+    );
 }
