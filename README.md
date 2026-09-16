@@ -135,6 +135,13 @@ Results borrow retained evidence and can outlive the query list. Admission repea
 for each query; these logical limits do not cap allocations or elapsed time.
 See the [owned export batch API](core/src/pe/exports/evidence_batch.rs).
 
+`parse_pe_bound_import_descriptors` retains raw bound-import records and their
+nested forwarder references, including original coordinates and opaque name
+offsets, timestamps and reserved words. It admits at most 128 descriptors and
+1024 references; each consumed prefix must be one conservative file-backed range.
+Its required zero descriptor is an explicit acceptance policy; zero references remain data.
+It does not resolve names or establish current binding validity.
+
 `lookup_pe_import_evidence_exports` matches one retained static-import descriptor
 against an explicitly supplied export observation after both images are released.
 It borrows the import record, admits its entry count before allocating queries,

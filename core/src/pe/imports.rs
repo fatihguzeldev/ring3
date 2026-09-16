@@ -1,3 +1,4 @@
+mod bound;
 mod delay;
 mod descriptors;
 mod evidence;
@@ -32,3 +33,8 @@ pub use lookups::{
 };
 
 pub use delay::{PeDelayImportEvidenceExportBatch, lookup_pe_delay_import_evidence_exports};
+
+pub use bound::{
+    PeBoundForwarderRef, PeBoundImportDescriptor, PeBoundImportError, PeBoundImportTable,
+    parse_pe_bound_import_descriptors,
+};

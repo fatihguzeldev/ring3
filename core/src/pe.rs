@@ -296,6 +296,11 @@ pub use exports::{
 };
 pub use exports::{PeForwarderEvidenceWalkError, walk_pe_export_evidence_forwarders};
 
+pub use imports::{
+    PeBoundForwarderRef, PeBoundImportDescriptor, PeBoundImportError, PeBoundImportTable,
+    parse_pe_bound_import_descriptors,
+};
+
 #[cfg(test)]
 mod tests {
     use super::{FileOffset, PeHeaderError, Reader};
