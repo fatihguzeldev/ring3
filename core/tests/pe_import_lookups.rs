@@ -1,5 +1,6 @@
 use ring3_core::{
-    FileOffset, PeImportError, PeImportLookupError, PeImportSymbol, PeKind, PeRvaError,
+    FileOffset, PeImportDescriptor, PeImportError, PeImportLookupEntry, PeImportLookupError,
+    PeImportLookupSource, PeImportSymbol, PeKind, PeObservedImportLookup, PeRvaError,
     RelativeVirtualAddress, parse_pe_import_lookups,
 };
 
@@ -554,6 +555,7 @@ fn check_real_fixture(
     symbol: PeImportSymbol<'static>,
     dll_name: &str,
     name_offset: Option<usize>,
+    iat_and_dll_rva: (u32, u32),
 ) {
     let path =
         std::env::var(variable).expect("an explicit generated lookup fixture path is required");
@@ -581,6 +583,28 @@ fn check_real_fixture(
         };
         assert!(std::ptr::eq(name.as_ptr(), bytes[offset..].as_ptr()));
     }
+    observed::check_compiled_fixture(
+        &bytes,
+        PeObservedImportLookup {
+            descriptor: PeImportDescriptor {
+                descriptor_rva: RelativeVirtualAddress::new(8192),
+                descriptor_file_offset: FileOffset::new(1536),
+                import_lookup_table_rva: RelativeVirtualAddress::new(8232),
+                time_date_stamp: 0,
+                forwarder_chain: 0,
+                name_rva: RelativeVirtualAddress::new(iat_and_dll_rva.1),
+                import_address_table_rva: RelativeVirtualAddress::new(iat_and_dll_rva.0),
+                dll_name,
+            },
+            source: PeImportLookupSource::OriginalFirstThunk,
+            entries: vec![PeImportLookupEntry {
+                lookup_rva: RelativeVirtualAddress::new(8232),
+                lookup_file_offset: FileOffset::new(1576),
+                raw_value: raw,
+                symbol,
+            }],
+        },
+    );
 }
 
 #[test]
@@ -596,6 +620,7 @@ fn generated_pe32_named_lookup_matches_llvm_and_raw_metadata() {
         },
         "Ring3Probe.dll",
         Some(1594),
+        (8240, 8262),
     );
 }
 
@@ -612,6 +637,7 @@ fn generated_pe32plus_named_lookup_matches_llvm_and_raw_metadata() {
         },
         "Ring3Probe.dll",
         Some(1610),
+        (8248, 8278),
     );
 }
 
@@ -624,6 +650,7 @@ fn generated_pe32_ordinal_lookup_preserves_bit15() {
         PeImportSymbol::Ordinal(32768),
         "Ring3Ordinal.dll",
         None,
+        (8240, 8248),
     );
 }
 
@@ -636,5 +663,6 @@ fn generated_pe32plus_ordinal_lookup_preserves_bit15_and_raw_bit63() {
         PeImportSymbol::Ordinal(32768),
         "Ring3Ordinal.dll",
         None,
+        (8248, 8264),
     );
 }

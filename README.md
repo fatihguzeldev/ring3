@@ -161,6 +161,11 @@ Decodable address-origin bytes can resemble names or ordinals, so success gives
 no binding-state, Windows-acceptance or loadability verdict. The strict lookup
 reader and its existing consumers keep their behavior. See the
 [source-explicit reader](core/src/pe/imports/observed.rs).
+The compiled named/ordinal PE32/PE32+ lookup checks also compare full observations
+for the original files and copies with only the OFT descriptor field zeroed.
+The copies retain IAT coordinates and borrowed names while the strict reader
+still refuses them. These are labeled byte mutations, not linker modes or
+evidence of Windows binding behavior.
 
 Related PE readers are grouped under [imports](core/src/pe/imports.rs),
 [exports](core/src/pe/exports.rs), and [resources](core/src/pe/resources.rs).
