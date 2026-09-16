@@ -1,3 +1,10 @@
+mod names;
+
+pub use names::{
+    PeBoundImportName, PeBoundImportNameError, PeBoundImportNameLocation, PeBoundImportNameTable,
+    parse_pe_bound_import_names,
+};
+
 use crate::pe::optional::{read_u16, read_u32};
 use crate::pe::rva::PreparedPe;
 use crate::pe::{PeDirectoryAddress, PeKind, PeRvaError};
@@ -119,6 +126,12 @@ pub fn parse_pe_bound_import_descriptors(
     bytes: &[u8],
 ) -> Result<Option<PeBoundImportTable>, PeBoundImportError> {
     let prepared = PreparedPe::new(bytes).map_err(PeBoundImportError::Base)?;
+    parse_prepared_table(&prepared)
+}
+
+fn parse_prepared_table(
+    prepared: &PreparedPe<'_>,
+) -> Result<Option<PeBoundImportTable>, PeBoundImportError> {
     let Some(directory) = prepared.headers().directories[11] else {
         return Ok(None);
     };
@@ -135,7 +148,7 @@ pub fn parse_pe_bound_import_descriptors(
     if u64::from(rva.get()) + u64::from(size) > 1_u64 << 32 {
         return Err(PeBoundImportError::DirectoryRangeOverflow { rva, size });
     }
-    parse_table(&prepared, rva, size)
+    parse_table(prepared, rva, size)
 }
 
 fn parse_table(
