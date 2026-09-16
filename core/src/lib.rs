@@ -92,3 +92,8 @@ pub use pe::{
     PeForwarderWalkBatchMetric, walk_pe_export_evidence_forwarders_batch,
 };
 pub use pe::{PeForwarderEvidenceWalkError, walk_pe_export_evidence_forwarders};
+
+pub use pe::{
+    PeBoundForwarderRef, PeBoundImportDescriptor, PeBoundImportError, PeBoundImportTable,
+    parse_pe_bound_import_descriptors,
+};
