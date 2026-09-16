@@ -100,3 +100,8 @@ pub use pe::{
     PeOwnedBoundImportName, PeOwnedBoundImportNameTable, inspect_pe_bound_imports,
     parse_pe_bound_import_descriptors, parse_pe_bound_import_names,
 };
+
+pub use source::{
+    AsciiApplicationSourceCandidateError, AsciiApplicationSourceCandidateLimits,
+    find_ascii_application_source_candidate,
+};

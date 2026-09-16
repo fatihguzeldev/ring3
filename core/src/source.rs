@@ -1,9 +1,14 @@
+mod application_candidates;
 mod paths;
 mod pe_evidence;
 mod pe_fingerprints;
 mod pe_headers;
 mod pe_modules;
 
+pub use application_candidates::{
+    AsciiApplicationSourceCandidateError, AsciiApplicationSourceCandidateLimits,
+    find_ascii_application_source_candidate,
+};
 pub use paths::{
     AsciiSourcePathBatch, AsciiSourcePathCollision, AsciiSourcePathEntry, AsciiSourcePathError,
     AsciiSourcePathLimits, AsciiSourcePathSegmentError, admit_ascii_source_paths,
