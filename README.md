@@ -109,6 +109,13 @@ fields or coordinates. Absent or failed CLR evidence has no bit observations;
 required/preferred bits remain raw observations without a runtime verdict. See
 the [declaration projection](core/src/pe/architecture_declarations.rs).
 
+`describe_pe_coff_image_role_declarations` names the executable-image, system and
+DLL bits in one supplied successful prefix. It preserves all raw fields and all
+unselected bits, including recognized architecture flags. Each bit is independent;
+the result makes no executable-candidate, driver, service or loadability decision.
+Caller-side `Result::map` preserves a failed prefix without producing declarations.
+See the [image-role projection](core/src/pe/coff_image_role_declarations.rs).
+
 `parse_ascii_pe_source_headers` accepts paired path/content records, admits all
 paths first, then checks content budgets and reads each PE header prefix. Owned
 results keep each path with its original content result; malformed prefixes do
