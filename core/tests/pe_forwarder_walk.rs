@@ -821,3 +821,279 @@ fn generated_pe32plus_ordinal_forwarder_walk_selects_explicit_provider() {
         true,
     );
 }
+use ring3_core::{
+    PeExportEvidence, PeExportEvidenceLimits, PeExportEvidenceLookupError,
+    PeExportEvidenceLookupLimits, PeExportLookupError, PeExportNameError,
+    PeForwarderEvidenceWalkError, inspect_pe_exports, walk_pe_export_evidence_forwarders,
+};
+
+fn owned_evidence(bytes: &[u8]) -> PeExportEvidence {
+    inspect_pe_exports(
+        bytes,
+        PeExportEvidenceLimits {
+            max_input_bytes: 65536,
+            max_output_rows: 16,
+            max_output_text_bytes: 128,
+        },
+    )
+    .unwrap()
+}
+fn view_limits() -> PeExportEvidenceLookupLimits {
+    PeExportEvidenceLookupLimits {
+        max_table_rows: 3,
+        max_table_text_bytes: 32,
+    }
+}
+
+#[test]
+fn owned_walks_preserve_full_results_after_images_and_query_storage_drop() {
+    for plus in [false, true] {
+        let mut first = fixture(plus, Some("Next.entry"));
+        let mut second = fixture(!plus, None);
+        let expected = format!(
+            "{:?}",
+            walk_pe_export_forwarders(
+                &[&first, &second],
+                &[route(0, "Next", 1)],
+                0,
+                PeExportQuery::Name("entry"),
+                limits()
+            )
+            .unwrap()
+        );
+        let evidence = [owned_evidence(&first), owned_evidence(&second)];
+        first.fill(0xee);
+        second.fill(0xee);
+        drop(first);
+        drop(second);
+        let before = evidence.clone();
+        for _ in 0..2 {
+            let result = {
+                let module = String::from("Next");
+                let name = String::from("entry");
+                let sources: Vec<_> = evidence.iter().collect();
+                walk_pe_export_evidence_forwarders(
+                    &sources,
+                    &[route(0, &module, 1)],
+                    0,
+                    PeExportQuery::Name(&name),
+                    view_limits(),
+                    limits(),
+                )
+                .unwrap()
+            };
+            assert_eq!(format!("{result:?}"), expected);
+            let PeExportSelection::Selected {
+                name: Some(name), ..
+            } = &result.steps[1].selection
+            else {
+                panic!()
+            };
+            assert_eq!(
+                name.name.as_ptr(),
+                evidence[1]
+                    .names
+                    .as_ref()
+                    .unwrap()
+                    .as_ref()
+                    .unwrap()
+                    .entries[0]
+                    .name
+                    .as_ptr()
+            );
+            assert_eq!(evidence, before);
+        }
+    }
+}
+
+#[test]
+fn owned_walk_provider_errors_preserve_reader_view_and_structure_causes() {
+    fn call(
+        source: &PeExportEvidence,
+        caps: PeExportEvidenceLookupLimits,
+    ) -> Result<ring3_core::PeForwarderWalk<'_>, PeForwarderEvidenceWalkError<'_>> {
+        walk_pe_export_evidence_forwarders(
+            &[source],
+            &[],
+            0,
+            PeExportQuery::Name("entry"),
+            caps,
+            limits(),
+        )
+    }
+    let mut evidence = owned_evidence(&fixture(false, None));
+    let provider = |cause| PeForwarderEvidenceWalkError::Provider {
+        hop: 0,
+        source_index: 0,
+        cause,
+    };
+    assert_eq!(
+        call(
+            &evidence,
+            PeExportEvidenceLookupLimits {
+                max_table_rows: 2,
+                ..view_limits()
+            }
+        )
+        .unwrap_err(),
+        provider(PeExportEvidenceLookupError::RowsExceeded { rows: 3, limit: 2 })
+    );
+    assert_eq!(
+        call(
+            &evidence,
+            PeExportEvidenceLookupLimits {
+                max_table_text_bytes: 4,
+                ..view_limits()
+            }
+        )
+        .unwrap_err(),
+        provider(PeExportEvidenceLookupError::TextExceeded { bytes: 5, limit: 4 })
+    );
+    evidence.names.as_mut().unwrap().as_mut().unwrap().entries[0].table_index = 99;
+    assert_eq!(
+        call(&evidence, view_limits()).unwrap_err(),
+        provider(PeExportEvidenceLookupError::NameIndexMismatch {
+            entry_index: 0,
+            table_index: 99
+        })
+    );
+    let error = PeExportNameError::NameLimitExceeded {
+        count: 17,
+        limit: 16,
+    };
+    evidence.names = Err(error);
+    assert_eq!(
+        call(
+            &evidence,
+            PeExportEvidenceLookupLimits {
+                max_table_rows: 0,
+                max_table_text_bytes: 0
+            }
+        )
+        .unwrap_err(),
+        provider(PeExportEvidenceLookupError::Reader(
+            PeExportLookupError::Names(error)
+        ))
+    );
+}
+
+#[test]
+fn owned_walk_admission_hop_and_aggregate_errors_keep_the_common_boundary() {
+    let evidence = owned_evidence(&fixture(false, Some("Self.#7")));
+    let sources = [&evidence];
+    let routes = [route(0, "Self", 0)];
+    let call = |query_caps, caps| {
+        walk_pe_export_evidence_forwarders(
+            &sources,
+            &routes,
+            0,
+            PeExportQuery::Ordinal(7),
+            query_caps,
+            caps,
+        )
+    };
+    let zero = PeExportEvidenceLookupLimits {
+        max_table_rows: 0,
+        max_table_text_bytes: 0,
+    };
+    assert_eq!(
+        call(
+            zero,
+            PeForwarderWalkLimits {
+                max_sources: 0,
+                ..limits()
+            }
+        ),
+        Err(PeForwarderEvidenceWalkError::Walk(
+            PeForwarderWalkError::SourceCountExceeded { count: 1, limit: 0 }
+        ))
+    );
+    assert_eq!(
+        call(
+            zero,
+            PeForwarderWalkLimits {
+                max_hops: 0,
+                ..limits()
+            }
+        ),
+        Err(PeForwarderEvidenceWalkError::Walk(
+            PeForwarderWalkError::HopLimitExceeded { hop: 0, limit: 0 }
+        ))
+    );
+    assert_eq!(
+        call(
+            view_limits(),
+            PeForwarderWalkLimits {
+                max_selection_rows: 1,
+                ..limits()
+            }
+        ),
+        Err(PeForwarderEvidenceWalkError::Walk(
+            PeForwarderWalkError::SelectionRows {
+                hop: 1,
+                source_index: 0,
+                used: 1,
+                cause: PeExportBatchError::SelectionRowsExceeded {
+                    index: 0,
+                    total: 1,
+                    limit: 0
+                }
+            }
+        ))
+    );
+    assert_eq!(
+        call(view_limits(), limits()),
+        Err(PeForwarderEvidenceWalkError::Walk(
+            PeForwarderWalkError::Cycle {
+                first_hop: 0,
+                hop: 1,
+                source_index: 0,
+                table_index: 0
+            }
+        ))
+    );
+}
+
+#[test]
+fn owned_missing_route_error_outlives_route_query_and_source_list_storage() {
+    let mut bytes = fixture(false, Some("Next.entry"));
+    let evidence = owned_evidence(&bytes);
+    bytes.fill(0xee);
+    drop(bytes);
+    let error = {
+        let sources = vec![&evidence];
+        let name = String::from("entry");
+        let wrong = String::from("next");
+        walk_pe_export_evidence_forwarders(
+            &sources,
+            &[route(0, &wrong, 0)],
+            0,
+            PeExportQuery::Name(&name),
+            view_limits(),
+            limits(),
+        )
+        .unwrap_err()
+    };
+    let PeForwarderEvidenceWalkError::Walk(PeForwarderWalkError::MissingRoute {
+        hop,
+        source_index,
+        request,
+    }) = error
+    else {
+        panic!()
+    };
+    assert_eq!((hop, source_index, request.module), (0, 0, "Next"));
+    let ring3_core::PeOwnedExportTarget::Forwarder { text, .. } = &evidence
+        .names
+        .as_ref()
+        .unwrap()
+        .as_ref()
+        .unwrap()
+        .addresses
+        .entries[0]
+        .target
+    else {
+        panic!()
+    };
+    assert_eq!(request.module.as_ptr(), text.as_ptr());
+}

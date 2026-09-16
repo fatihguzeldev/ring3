@@ -151,6 +151,13 @@ Delay attributes and other raw metadata remain uninterpreted; this adds no delay
 loading or IAT fallback. See the
 [owned delay matching API](core/src/pe/imports/delay/evidence_exports.rs).
 
+`walk_pe_export_evidence_forwarders` follows explicit source-context routes using
+retained export observations after image release. It shares traversal semantics
+with the byte-backed walker and repeats required-view admission at every hop.
+Owned provider errors remain distinct from route, aggregate-budget and traversal
+refusals. Results and missing-route errors borrow evidence, independently of
+route and query storage. This adds no module discovery or provider identity.
+See the [owned forwarder API](core/src/pe/exports/evidence_walk.rs).
 
 `inspect_pe_module_evidence` binds the whole-input fingerprint and declared,
 static import, delay import and export evidence to one input slice. It retains
