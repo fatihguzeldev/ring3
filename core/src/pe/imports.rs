@@ -5,6 +5,7 @@ mod evidence;
 mod evidence_exports;
 mod export_batch;
 mod lookups;
+mod observed;
 
 pub use delay::{
     PeDelayImportDescriptor, PeDelayImportError, PeDelayImportEvidence, PeDelayImportEvidenceError,
@@ -30,6 +31,10 @@ pub use export_batch::{
 pub use lookups::{
     PeImportLookup, PeImportLookupEntry, PeImportLookupError, PeImportSymbol,
     parse_pe_import_lookups,
+};
+pub use observed::{
+    PeImportLookupObservationError, PeImportLookupSource, PeObservedImportLookup,
+    parse_pe_import_lookups_with_iat_fallback,
 };
 
 pub use delay::{PeDelayImportEvidenceExportBatch, lookup_pe_delay_import_evidence_exports};

@@ -152,6 +152,16 @@ copy, and a lookup error preserves readable DLL declarations. These observations
 outlive input bytes without selecting providers or inferring requirements. See
 the [owned import evidence API](core/src/pe/imports/evidence.rs).
 
+`parse_pe_import_lookups_with_iat_fallback` separately observes lookup-shaped IAT
+bytes when a descriptor's original-first-thunk is zero. It preserves the original
+descriptor, borrowed names and an explicit source on both tables and decoder
+errors. Nonzero original-first-thunk always wins, even when malformed; all
+descriptors validate first and the existing lookup budgets remain shared.
+Decodable address-origin bytes can resemble names or ordinals, so success gives
+no binding-state, Windows-acceptance or loadability verdict. The strict lookup
+reader and its existing consumers keep their behavior. See the
+[source-explicit reader](core/src/pe/imports/observed.rs).
+
 Related PE readers are grouped under [imports](core/src/pe/imports.rs),
 [exports](core/src/pe/exports.rs), and [resources](core/src/pe/resources.rs).
 Delay imports live inside the [imports family](core/src/pe/imports/delay.rs).

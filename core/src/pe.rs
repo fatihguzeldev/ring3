@@ -84,12 +84,14 @@ pub use imports::{
     PeDelayImportLookup, PeDelayImportLookupError, PeDelayImportLookupTable, PeDelayImportName,
     PeDelayImportNameError, PeDelayImportNameTable, PeDelayImportTable, PeImportDescriptor,
     PeImportError, PeImportExportBatch, PeImportExportError, PeImportLookup, PeImportLookupEntry,
-    PeImportLookupError, PeImportSymbol, PeOwnedDelayImportLookup, PeOwnedDelayImportLookupTable,
+    PeImportLookupError, PeImportLookupObservationError, PeImportLookupSource, PeImportSymbol,
+    PeObservedImportLookup, PeOwnedDelayImportLookup, PeOwnedDelayImportLookupTable,
     PeOwnedDelayImportName, PeOwnedDelayImportNameTable, inspect_pe_delay_imports,
     lookup_pe_delay_import_exports, lookup_pe_delay_import_exports_with_provider,
     lookup_pe_import_exports, lookup_pe_import_exports_with_provider,
     parse_pe_delay_import_descriptors, parse_pe_delay_import_lookups, parse_pe_delay_import_names,
     parse_pe_import_descriptors, parse_pe_import_lookups,
+    parse_pe_import_lookups_with_iat_fallback,
 };
 pub use imports::{PeImportEvidenceExportBatch, lookup_pe_import_evidence_exports};
 pub use imports::{
