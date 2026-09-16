@@ -128,6 +128,13 @@ preserve opaque metadata; these checks do not establish PE validity, provenance,
 cross-view coherence or allocation/time bounds. See the
 [owned export query API](core/src/pe/exports/evidence_lookup.rs).
 
+`lookup_pe_export_evidence_batch` applies that same required-view validation to
+an ordered query list with explicit query-count and total selection-row limits.
+Per-query errors remain in place; aggregate refusal returns no partial batch.
+Results borrow retained evidence and can outlive the query list. Admission repeats
+for each query; these logical limits do not cap allocations or elapsed time.
+See the [owned export batch API](core/src/pe/exports/evidence_batch.rs).
+
 
 `inspect_pe_module_evidence` binds the whole-input fingerprint and declared,
 static import, delay import and export evidence to one input slice. It retains

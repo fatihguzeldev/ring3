@@ -144,7 +144,7 @@ impl<'a> PeExportLookup<'a> {
     }
 }
 
-fn check_query_count(count: usize, limit: u64) -> Result<(), PeExportBatchError> {
+pub(super) fn check_query_count(count: usize, limit: u64) -> Result<(), PeExportBatchError> {
     let count = count as u64;
     if count > limit {
         return Err(PeExportBatchError::QueryCountExceeded { count, limit });
@@ -152,7 +152,7 @@ fn check_query_count(count: usize, limit: u64) -> Result<(), PeExportBatchError>
     Ok(())
 }
 
-fn charge_selection_rows(
+pub(super) fn charge_selection_rows(
     index: usize,
     total: u64,
     rows: u64,
