@@ -393,6 +393,8 @@ One owned import/export group retains four compiled named/ordinal EXE–DLL pair
 after both images are released, with exact provider selections and limit errors.
 One owned delay import/export group retains the four compiled delay pairs with
 complete import records, provider selections and limit errors after image release.
+One owned forwarder group retains the four compiled named/ordinal walks after
+image release, with complete steps, exact budgets and distinct provider refusals.
 
 The verifier requires pinned native Rust tools on `aarch64-apple-darwin`, compiles
 the Rust tests offline into a fresh Cargo target, and rejects missing, extra or
