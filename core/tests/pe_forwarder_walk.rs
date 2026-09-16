@@ -1504,3 +1504,183 @@ fn owned_walk_batch_errors_keep_payloads_without_successful_charges() {
         );
     }
 }
+
+#[expect(
+    clippy::too_many_lines,
+    reason = "complete compiled batch outcomes and refusals share one fixture context"
+)]
+fn check_linked_owned_walk_batch(evidence: &[PeExportEvidence; 2]) {
+    let sources = [&evidence[0], &evidence[1]];
+    let routes = [route(0, "OtherModule", 1)];
+    let long_name = "x".repeat(43);
+    let queries = [
+        PeExportQuery::Name("by_name"),
+        PeExportQuery::Name(&long_name),
+        PeExportQuery::Name("by_ordinal"),
+        PeExportQuery::Name("by_name"),
+    ];
+    let caps = PeForwarderWalkBatchLimits {
+        max_queries: 4,
+        max_successful_steps: 6,
+        max_successful_selection_rows: 4,
+        max_successful_text_bytes: 123,
+    };
+    let query_caps = PeExportEvidenceLookupLimits {
+        max_table_rows: 5,
+        max_table_text_bytes: 59,
+    };
+    let run = |queries: &[PeExportQuery<'_>], caps, query_caps| {
+        walk_pe_export_evidence_forwarders_batch(
+            &sources,
+            &routes,
+            0,
+            queries,
+            query_caps,
+            PeForwarderWalkLimits {
+                max_sources: 2,
+                max_routes: 1,
+                max_hops: 2,
+                max_selection_rows: 2,
+                max_text_bytes: 42,
+            },
+            caps,
+        )
+    };
+    let walk = |ordinal| {
+        Ok(ring3_core::PeForwarderWalk {
+            selection_rows: if ordinal { 2 } else { 1 },
+            text_bytes: if ordinal { 39 } else { 42 },
+            steps: vec![
+                linked_forwarder_step(ordinal),
+                linked_terminal_step(ordinal),
+            ],
+        })
+    };
+    let error = Err(PeForwarderEvidenceWalkError::Walk(
+        PeForwarderWalkError::TextBytesExceeded {
+            context: PeForwarderTextContext::RootName,
+            total: 54,
+            limit: 42,
+        },
+    ));
+    let expected = PeForwarderEvidenceWalkBatch {
+        successful_steps: 6,
+        successful_selection_rows: 4,
+        successful_text_bytes: 123,
+        walks: vec![walk(false), error.clone(), walk(true), walk(false)],
+    };
+    assert_eq!(run(&queries, caps, query_caps), Ok(expected.clone()));
+    assert_eq!(run(&queries, caps, query_caps), Ok(expected.clone()));
+    let reversed: Vec<_> = queries.iter().rev().copied().collect();
+    let mut reverse_expected = expected;
+    reverse_expected.walks.reverse();
+    assert_eq!(run(&reversed, caps, query_caps), Ok(reverse_expected));
+    for (metric, short, used, amount, limit) in [
+        (
+            PeForwarderWalkBatchMetric::SuccessfulSteps,
+            PeForwarderWalkBatchLimits {
+                max_successful_steps: 5,
+                ..caps
+            },
+            4,
+            2,
+            5,
+        ),
+        (
+            PeForwarderWalkBatchMetric::SuccessfulSelectionRows,
+            PeForwarderWalkBatchLimits {
+                max_successful_selection_rows: 3,
+                ..caps
+            },
+            3,
+            1,
+            3,
+        ),
+        (
+            PeForwarderWalkBatchMetric::SuccessfulTextBytes,
+            PeForwarderWalkBatchLimits {
+                max_successful_text_bytes: 122,
+                ..caps
+            },
+            81,
+            42,
+            122,
+        ),
+    ] {
+        assert_eq!(
+            run(&queries, short, query_caps),
+            Err(PeForwarderWalkBatchError::OutputLimitExceeded {
+                metric,
+                index: 3,
+                used,
+                amount,
+                limit,
+            })
+        );
+    }
+    assert_eq!(
+        run(
+            &queries,
+            PeForwarderWalkBatchLimits {
+                max_queries: 3,
+                ..caps
+            },
+            query_caps
+        ),
+        Err(PeForwarderWalkBatchError::QueryCountExceeded { count: 4, limit: 3 })
+    );
+    let provider_error = Err(PeForwarderEvidenceWalkError::Provider {
+        hop: 0,
+        source_index: 0,
+        cause: PeExportEvidenceLookupError::RowsExceeded { rows: 5, limit: 4 },
+    });
+    assert_eq!(
+        run(
+            &queries,
+            caps,
+            PeExportEvidenceLookupLimits {
+                max_table_rows: 4,
+                ..query_caps
+            }
+        ),
+        Ok(PeForwarderEvidenceWalkBatch {
+            successful_steps: 0,
+            successful_selection_rows: 0,
+            successful_text_bytes: 0,
+            walks: vec![
+                provider_error.clone(),
+                error,
+                provider_error.clone(),
+                provider_error
+            ]
+        })
+    );
+}
+
+#[test]
+#[ignore = "requires all four explicit compiled owned forwarder batch paths"]
+fn generated_owned_forwarder_batches_preserve_compiled_order_and_limits() {
+    let paths = [
+        (
+            "RING3_EXPORT_FORWARD_PE32_FIXTURE",
+            "RING3_EXPORT_PE32_ORDINAL_DLL",
+        ),
+        (
+            "RING3_EXPORT_FORWARD_PE32PLUS_FIXTURE",
+            "RING3_EXPORT_PE32PLUS_ORDINAL_DLL",
+        ),
+    ]
+    .map(|(forwarder, provider)| {
+        let path = |key| {
+            std::path::PathBuf::from(
+                std::env::var_os(key)
+                    .expect("all four explicit compiled owned forwarder batch paths are required"),
+            )
+        };
+        (path(forwarder), path(provider))
+    });
+    for (forwarder, provider) in paths {
+        let evidence = compiled_owned_walk_evidence(&forwarder, &provider);
+        check_linked_owned_walk_batch(&evidence);
+    }
+}
