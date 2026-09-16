@@ -1,14 +1,16 @@
 use ring3_core::{
-    AsciiApplicationSourceCandidateLimits, AsciiPeModuleDependencyError,
-    AsciiPeModuleDependencyEvidence, AsciiPeModuleDependencyLimits, AsciiPeModuleDependencyRequest,
-    AsciiPeSource, AsciiPeSourceModuleEvidenceBatch, AsciiPeSourceModuleEvidenceLimits,
-    AsciiSourcePathBatch, AsciiSourcePathEntry, AsciiSourcePathLimits, FileOffset,
-    PeExportAddressEntry, PeExportBatchLimits, PeExportEvidenceLookupLimits, PeExportName,
-    PeExportSelection, PeExportTarget, PeHeaderBatchLimits, PeModuleDependencyKind,
-    PeModuleDependencyViews, PeModuleOutputLimits, RelativeVirtualAddress as Rva,
-    find_ascii_application_source_candidate, inspect_ascii_pe_source_module_evidence,
-    lookup_pe_delay_import_evidence_exports, lookup_pe_import_evidence_exports,
-    observe_ascii_pe_module_dependencies,
+    AsciiApplicationSourceCandidateLimits, AsciiPeDependencyClosure, AsciiPeDependencyClosureError,
+    AsciiPeDependencyClosureLimits, AsciiPeModuleDependencyError, AsciiPeModuleDependencyEvidence,
+    AsciiPeModuleDependencyLimits, AsciiPeModuleDependencyRequest, AsciiPeSource,
+    AsciiPeSourceModuleEvidenceBatch, AsciiPeSourceModuleEvidenceLimits, AsciiSourcePathBatch,
+    AsciiSourcePathEntry, AsciiSourcePathLimits, FileOffset, PeDependencyClosureMode,
+    PeDependencyRequestStep, PeDependencyRequestVisit, PeDependencyVisit, PeExportAddressEntry,
+    PeExportBatchLimits, PeExportEvidenceLookupLimits, PeExportName, PeExportSelection,
+    PeExportTarget, PeHeaderBatchLimits, PeModuleDependencyKind, PeModuleDependencyViews,
+    PeModuleOutputLimits, RelativeVirtualAddress as Rva, find_ascii_application_source_candidate,
+    inspect_ascii_pe_source_module_evidence, lookup_pe_delay_import_evidence_exports,
+    lookup_pe_import_evidence_exports, observe_ascii_pe_module_dependencies,
+    walk_ascii_pe_dependency_closure,
 };
 
 struct RetainedScenario {
@@ -240,6 +242,100 @@ fn check_dependency_observations(scenario: &RetainedScenario) -> AsciiPeModuleDe
     report
 }
 
+fn check_selected_closure(
+    scenario: &RetainedScenario,
+    observations: &AsciiPeModuleDependencyEvidence,
+) {
+    let application = scenario.application_index;
+    let provider = scenario.candidate.index;
+    let request_index = usize::from(application > scenario.importer_index);
+    for mode in [
+        PeDependencyClosureMode::StaticOnly,
+        PeDependencyClosureMode::StaticAndDelay,
+    ] {
+        let follows = !scenario.delay || mode == PeDependencyClosureMode::StaticAndDelay;
+        let caps = AsciiPeDependencyClosureLimits {
+            observation: AsciiPeModuleDependencyLimits {
+                paths: limits(scenario.delay).paths,
+                max_requests: 2,
+                max_request_text_bytes: 28,
+                max_basename_bytes: 14,
+            },
+            max_reached_sources: if follows { 2 } else { 1 },
+            max_examined_requests: 1,
+        };
+        let mut input = scenario.batch.clone();
+        assert_eq!(
+            walk_ascii_pe_dependency_closure(
+                &input,
+                application,
+                mode,
+                AsciiPeDependencyClosureLimits {
+                    max_examined_requests: 0,
+                    ..caps
+                }
+            ),
+            Err(AsciiPeDependencyClosureError::ExaminedRequestsExceeded {
+                source_index: application,
+                request_index,
+                count: 1,
+                limit: 0
+            })
+        );
+        if follows {
+            assert_eq!(
+                walk_ascii_pe_dependency_closure(
+                    &input,
+                    application,
+                    mode,
+                    AsciiPeDependencyClosureLimits {
+                        max_reached_sources: 1,
+                        ..caps
+                    }
+                ),
+                Err(AsciiPeDependencyClosureError::ReachedSourcesExceeded {
+                    source_index: provider,
+                    via_request_index: Some(request_index),
+                    count: 2,
+                    limit: 1
+                })
+            );
+        }
+        let closure = walk_ascii_pe_dependency_closure(&input, application, mode, caps).unwrap();
+        assert_eq!(
+            walk_ascii_pe_dependency_closure(&input, application, mode, caps),
+            Ok(closure.clone())
+        );
+        assert_eq!(input, scenario.batch);
+        input.entries.clear();
+        drop(input);
+        let mut visits = vec![PeDependencyVisit {
+            source_index: application,
+            via_request_index: None,
+        }];
+        if follows {
+            visits.push(PeDependencyVisit {
+                source_index: provider,
+                via_request_index: Some(request_index),
+            });
+        }
+        let expected = AsciiPeDependencyClosure {
+            observations: observations.clone(),
+            mode,
+            visits,
+            examined_requests: vec![PeDependencyRequestVisit {
+                request_index,
+                step: if follows {
+                    PeDependencyRequestStep::Discovered { visit_index: 1 }
+                } else {
+                    PeDependencyRequestStep::ExcludedDelay
+                },
+            }],
+        };
+        assert_eq!(closure, expected);
+    }
+}
+
 fn expected_selection(symbol: &str) -> PeExportSelection<'_> {
     PeExportSelection::Selected {
         address: PeExportAddressEntry {
@@ -265,6 +361,7 @@ fn expected_selection(symbol: &str) -> PeExportSelection<'_> {
 
 fn check_retained_association(scenario: &RetainedScenario) {
     let report = check_dependency_observations(scenario);
+    check_selected_closure(scenario, &report);
     let candidate_index = report
         .requests
         .iter()
@@ -347,7 +444,7 @@ fn generated_application_candidates_select_retained_static_and_delay_providers()
     let mut scenarios = Vec::new();
     for (delay, importer, provider) in [(false, &bytes[0], &bytes[1]), (true, &bytes[2], &bytes[3])]
     {
-        for order in [[0, 1, 2, 3], [2, 0, 3, 1]] {
+        for order in [[0, 1, 2, 3], [2, 0, 3, 1], [1, 2, 3, 0]] {
             scenarios.push(collect_scenario(importer, provider, delay, order));
         }
     }
