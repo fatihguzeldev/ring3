@@ -915,3 +915,121 @@ fn generated_owned_export_query_refusals_preserve_compiled_view_limits() {
     }
     assert_eq!(outcomes, 44);
 }
+
+#[test]
+#[ignore = "requires all six explicit compiled owned export query paths"]
+#[expect(
+    clippy::too_many_lines,
+    reason = "one complete compiled batch contract"
+)]
+fn generated_owned_export_batches_preserve_compiled_results_and_budgets() {
+    use ring3_core::{
+        PeExportBatchError, PeExportBatchLimits, lookup_pe_export_batch,
+        lookup_pe_export_evidence_batch,
+    };
+
+    let mut outcomes = 0;
+    for (mut input, (rows, last_selected)) in
+        compiled_query_inputs()
+            .into_iter()
+            .zip([(2, 4), (2, 4), (1, 3), (1, 3), (5, 7), (5, 7)])
+    {
+        let count = input.queries.len() as u64;
+        let caps = PeExportBatchLimits {
+            max_queries: count,
+            max_selection_rows: rows,
+        };
+        let raw = lookup_pe_export_batch(&input.bytes, &input.queries, caps).unwrap();
+        assert_eq!(raw.selection_rows, rows);
+        let expected: Vec<_> = raw
+            .selections
+            .into_iter()
+            .map(|s| format!("{:?}", s.map_err(PeExportEvidenceLookupError::Reader)))
+            .collect();
+        let evidence = inspect_pe_exports(
+            &input.bytes,
+            PeExportEvidenceLimits {
+                max_input_bytes: 2048,
+                max_output_rows: input.expected.total_rows,
+                max_output_text_bytes: input.expected.total_text_bytes,
+            },
+        )
+        .unwrap();
+        assert_eq!(evidence, input.expected);
+        input.bytes.fill(0xee);
+        drop(std::mem::take(&mut input.bytes));
+        let batch =
+            lookup_pe_export_evidence_batch(&evidence, &input.queries, input.name_limits, caps)
+                .unwrap();
+        assert_eq!(batch.selection_rows, rows);
+        assert_eq!(
+            batch
+                .selections
+                .iter()
+                .map(|s| format!("{s:?}"))
+                .collect::<Vec<_>>(),
+            expected
+        );
+        assert_eq!(
+            lookup_pe_export_evidence_batch(&evidence, &input.queries, input.name_limits, caps),
+            Ok(batch.clone())
+        );
+        assert_eq!(
+            lookup_pe_export_evidence_batch(
+                &evidence,
+                &input.queries,
+                input.name_limits,
+                PeExportBatchLimits {
+                    max_selection_rows: rows - 1,
+                    ..caps
+                }
+            ),
+            Err(PeExportBatchError::SelectionRowsExceeded {
+                index: last_selected,
+                total: rows,
+                limit: rows - 1
+            })
+        );
+        assert_eq!(
+            lookup_pe_export_evidence_batch(
+                &evidence,
+                &input.queries,
+                PeExportEvidenceLookupLimits {
+                    max_table_rows: 0,
+                    max_table_text_bytes: 0
+                },
+                PeExportBatchLimits {
+                    max_queries: count - 1,
+                    ..caps
+                }
+            ),
+            Err(PeExportBatchError::QueryCountExceeded {
+                count,
+                limit: count - 1
+            })
+        );
+        let empty = lookup_pe_export_evidence_batch(
+            &evidence,
+            &[],
+            input.name_limits,
+            PeExportBatchLimits {
+                max_queries: 0,
+                max_selection_rows: 0,
+            },
+        )
+        .unwrap();
+        assert_eq!(empty.selection_rows, 0);
+        assert!(empty.selections.is_empty());
+        input.queries.reverse();
+        let reversed =
+            lookup_pe_export_evidence_batch(&evidence, &input.queries, input.name_limits, caps)
+                .unwrap();
+        assert_eq!(reversed.selection_rows, rows);
+        assert_eq!(
+            reversed.selections,
+            batch.selections.into_iter().rev().collect::<Vec<_>>()
+        );
+        outcomes += count;
+    }
+    assert_eq!(outcomes, 44);
+}

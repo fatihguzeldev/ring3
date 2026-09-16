@@ -364,6 +364,8 @@ per-family output-refusal operands.
 Two owned-query groups use the existing named, ordinal-only and sparse-forwarder
 DLLs to retain complete selections after image release, exact query-view row/text
 caps and independent reader refusals, separately from collection output totals.
+One owned-batch group retains all 44 compiled queries in ordered and reversed
+batches after image release, with exact aggregate row totals and refusal indices.
 
 The verifier requires pinned native Rust tools on `aarch64-apple-darwin`, compiles
 the Rust tests offline into a fresh Cargo target, and rejects missing, extra or
