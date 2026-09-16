@@ -6,6 +6,93 @@ use ring3_core::{
     describe_pe_architecture_declarations, inspect_ascii_pe_source_evidence,
 };
 
+mod image_role {
+    use super::{PeFlagBit, PeHeaderError, PeHeaderPrefixEvidence, PeKind, field, supplied};
+    use ring3_core::{PeCoffImageRoleDeclarations, describe_pe_coff_image_role_declarations};
+
+    #[test]
+    fn keeps_every_role_combination_with_clear_or_full_unselected_background() {
+        for (selected, states) in [
+            (0x0000, [false, false, false]),
+            (0x0002, [true, false, false]),
+            (0x1000, [false, true, false]),
+            (0x1002, [true, true, false]),
+            (0x2000, [false, false, true]),
+            (0x2002, [true, false, true]),
+            (0x3000, [false, true, true]),
+            (0x3002, [true, true, true]),
+        ] {
+            for background in [0, 0xcffd] {
+                let raw = supplied(selected + background, 0).prefix.unwrap();
+                let result = describe_pe_coff_image_role_declarations(raw);
+                assert_eq!(result.raw, raw);
+                assert_eq!(result.unselected_bits, background);
+                assert_eq!(
+                    result.bits,
+                    [
+                        PeFlagBit {
+                            name: "IMAGE_FILE_EXECUTABLE_IMAGE",
+                            mask: 0x0002,
+                            is_set: states[0],
+                        },
+                        PeFlagBit {
+                            name: "IMAGE_FILE_SYSTEM",
+                            mask: 0x1000,
+                            is_set: states[1],
+                        },
+                        PeFlagBit {
+                            name: "IMAGE_FILE_DLL",
+                            mask: 0x2000,
+                            is_set: states[2],
+                        },
+                    ]
+                );
+                assert_eq!(describe_pe_coff_image_role_declarations(raw), result);
+            }
+        }
+    }
+
+    #[test]
+    fn preserves_unvalidated_raw_fields_and_recognized_unselected_bits_in_a_copy() {
+        fn assert_copy<T: Copy>(_: T) {}
+
+        let mut raw = supplied(0x0120, 0).prefix.unwrap();
+        raw.machine = field(u16::MAX, 0, 255);
+        raw.kind = field(PeKind::Pe32, u64::MAX, 0);
+        raw.characteristics = field(0x0120, 7, 1);
+        let original = raw;
+        let result = describe_pe_coff_image_role_declarations(raw);
+        assert_copy(result);
+        raw.characteristics.value = 0;
+        assert_ne!(raw, result.raw);
+        assert_eq!(result.raw, original);
+        assert_eq!(result.unselected_bits, 0x0120);
+        assert!(result.bits.iter().all(|bit| !bit.is_set));
+    }
+
+    #[test]
+    fn caller_mapping_preserves_errors_without_producing_declarations() {
+        for error in [
+            PeHeaderError::InvalidDosSignature {
+                offset: ring3_core::FileOffset::new(0),
+            },
+            PeHeaderError::UnsupportedOptionalMagic {
+                offset: ring3_core::FileOffset::new(u64::MAX),
+                magic: u16::MAX,
+            },
+        ] {
+            let mut calls = 0;
+            let result: Result<PeCoffImageRoleDeclarations, _> =
+                Result::<PeHeaderPrefixEvidence, _>::Err(error).map(|raw| {
+                    calls += 1;
+                    describe_pe_coff_image_role_declarations(raw)
+                });
+            assert_eq!(calls, 0);
+            assert_eq!(result, Err(error));
+        }
+    }
+}
+
 fn field<T>(value: T, offset: u64, byte_length: u8) -> PeFieldEvidence<T> {
     PeFieldEvidence {
         value,

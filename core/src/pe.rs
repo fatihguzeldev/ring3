@@ -6,6 +6,7 @@ mod base_relocations;
 mod certificate_entries;
 mod certificates;
 mod clr;
+mod coff_image_role_declarations;
 mod debug;
 mod debug_payloads;
 mod declared_evidence;
@@ -39,6 +40,9 @@ pub use certificate_entries::{
 };
 pub use certificates::{PeCertificateError, PeCertificateTable, parse_pe_certificate_table};
 pub use clr::{PeClrDataDirectory, PeClrError, PeClrHeader, parse_pe_clr_header};
+pub use coff_image_role_declarations::{
+    PeCoffImageRoleDeclarations, describe_pe_coff_image_role_declarations,
+};
 pub use debug::{
     PeDebugDirectoryEntry, PeDebugDirectoryError, PeDebugDirectoryTable, parse_pe_debug_directory,
 };
