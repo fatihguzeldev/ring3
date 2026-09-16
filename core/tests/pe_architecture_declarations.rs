@@ -303,7 +303,8 @@ fn describes_named_source_results_after_source_release() {
 }
 
 use ring3_core::{
-    PeClrArchitectureDeclarations, PeCoffArchitectureDeclarations, inspect_pe_declared_evidence,
+    PeClrArchitectureDeclarations, PeCoffArchitectureDeclarations, PeCoffImageRoleDeclarations,
+    describe_pe_coff_image_role_declarations, inspect_pe_declared_evidence,
 };
 
 fn compiled_expectation(
@@ -372,16 +373,58 @@ fn check_raw_field<T>(bytes: &[u8], evidence: &PeFieldEvidence<T>, raw: &[u8]) {
     assert_eq!(bytes.get(start..end), Some(raw));
 }
 
+fn compiled_role_expectation(
+    raw: PeHeaderPrefixEvidence,
+    unselected_bits: u16,
+) -> PeCoffImageRoleDeclarations {
+    PeCoffImageRoleDeclarations {
+        raw,
+        bits: [
+            PeFlagBit {
+                name: "IMAGE_FILE_EXECUTABLE_IMAGE",
+                mask: 0x0002,
+                is_set: true,
+            },
+            PeFlagBit {
+                name: "IMAGE_FILE_SYSTEM",
+                mask: 0x1000,
+                is_set: false,
+            },
+            PeFlagBit {
+                name: "IMAGE_FILE_DLL",
+                mask: 0x2000,
+                is_set: false,
+            },
+        ],
+        unselected_bits,
+    }
+}
+
 fn generated_architecture_declarations(
     variable: &str,
     size: usize,
     wanted: &PeArchitectureDeclarations,
+    role_unselected: u16,
 ) {
     let path = std::env::var(variable).expect("set the generated fixture path");
     let original = std::fs::read(&path).unwrap();
     assert_eq!(original.len(), size);
     let mut bytes = original.clone();
-    let actual = describe_pe_architecture_declarations(inspect_pe_declared_evidence(&bytes));
+    let declared = inspect_pe_declared_evidence(&bytes);
+    let actual = describe_pe_architecture_declarations(declared);
+    let role = declared
+        .prefix
+        .map(describe_pe_coff_image_role_declarations);
+    let wanted_role = wanted
+        .prefix
+        .map(|prefix| compiled_role_expectation(prefix.raw, role_unselected));
+    assert_eq!(role, wanted_role);
+    assert_eq!(
+        declared
+            .prefix
+            .map(describe_pe_coff_image_role_declarations),
+        role
+    );
     assert_eq!(&actual, wanted);
     assert_eq!(
         describe_pe_architecture_declarations(inspect_pe_declared_evidence(&bytes)),
@@ -443,6 +486,7 @@ fn generated_architecture_declarations(
     }
     bytes.fill(0);
     drop(bytes);
+    assert_eq!(role, wanted_role);
     assert_eq!(&actual, wanted);
     assert_eq!(
         describe_pe_architecture_declarations(inspect_pe_declared_evidence(&original)),
@@ -480,6 +524,7 @@ fn generated_pe32_architecture_declarations_match_compiled_fields() {
             3,
             None,
         ),
+        0x0101,
     );
 }
 
@@ -512,6 +557,7 @@ fn generated_pe32plus_architecture_declarations_match_compiled_fields() {
             3,
             None,
         ),
+        0x0021,
     );
 }
 
@@ -547,6 +593,7 @@ fn generated_managed_pe32_architecture_declarations_match_compiled_fields() {
             2,
             Some([true, true, false, false]),
         ),
+        0x0100,
     );
 }
 
@@ -582,5 +629,6 @@ fn generated_managed_pe32plus_architecture_declarations_match_compiled_fields() 
             2,
             Some([true, false, false, false]),
         ),
+        0x0020,
     );
 }
