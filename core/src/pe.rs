@@ -288,6 +288,8 @@ pub fn parse_pe_header_prefix(bytes: &[u8]) -> Result<PeHeaderPrefix, PeHeaderEr
     })
 }
 
+pub use imports::{PeDelayImportEvidenceExportBatch, lookup_pe_delay_import_evidence_exports};
+
 #[cfg(test)]
 mod tests {
     use super::{FileOffset, PeHeaderError, Reader};
