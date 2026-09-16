@@ -409,6 +409,8 @@ One owned delay import/export group retains the four compiled delay pairs with
 complete import records, provider selections and limit errors after image release.
 One owned forwarder group retains the four compiled named/ordinal walks after
 image release, with complete steps, exact budgets and distinct provider refusals.
+One bound-import group verifies absence on four unmodified named importer/provider
+files across both PE widths; positive bound records use self-authored fixtures.
 One owned forwarder batch group retains ordered complete walks and real per-query
 errors, with exact aggregate successful totals and one-less limit refusals.
 

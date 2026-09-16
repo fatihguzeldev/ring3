@@ -439,3 +439,30 @@ fn maximum_combined_prefix_and_unrelated_directory_targets_are_supported() {
         assert_eq!(table.terminator_file_offset, FileOffset::new(9728));
     }
 }
+
+#[test]
+#[ignore = "requires four explicit generated importer/provider fixture paths"]
+fn generated_named_importers_and_providers_have_no_bound_import_table() {
+    let inputs = [
+        ("RING3_IMPORT_PE32_FIXTURE", PeKind::Pe32),
+        ("RING3_IMPORT_PE32PLUS_FIXTURE", PeKind::Pe32Plus),
+        ("RING3_EXPORT_PE32_NAMED_DLL", PeKind::Pe32),
+        ("RING3_EXPORT_PE32PLUS_NAMED_DLL", PeKind::Pe32Plus),
+    ]
+    .map(|(variable, kind)| {
+        let path = std::env::var_os(variable)
+            .expect("all four explicit generated bound-import absence fixture paths are required");
+        (path, kind)
+    });
+    for (path, kind) in inputs {
+        let bytes = std::fs::read(path).unwrap();
+        assert_eq!(
+            ring3_core::parse_pe_header_prefix(&bytes).unwrap().kind,
+            kind
+        );
+        let before = bytes.clone();
+        assert_eq!(parse_pe_bound_import_descriptors(&bytes), Ok(None));
+        assert_eq!(parse_pe_bound_import_descriptors(&bytes), Ok(None));
+        assert_eq!(bytes, before);
+    }
+}
