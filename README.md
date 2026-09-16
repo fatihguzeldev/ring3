@@ -41,6 +41,16 @@ comparison key. Duplicate and file/ancestor collisions are rejected; output stri
 are owned. Keys and indices describe this lexical list, not filesystem containment,
 content identity or Windows names. See the [ASCII path contract](core/src/source/paths.rs).
 
+`find_ascii_application_source_candidate` admits a full raw path list, checks an
+explicit application-file index, then validates one literal basename. It returns
+an owned optional entry from that file's exact parent directory, preserving the
+original index and spelling. Matching uses the existing ASCII keys; it does not
+search subdirectories or append extensions. The context file need not be an
+executable and may match itself. Path errors precede index errors, which precede
+basename errors. A match is lexical evidence, not filesystem identity, provider
+loadability or Windows search order. See the
+[application source candidate API](core/src/source/application_candidates.rs).
+
 `parse_pe_header_prefix_batch` accepts an immutable list of already materialized
 byte slices and explicit file-count, per-file byte and total-byte limits. It
 checks every budget before reading prefixes, then returns owned results in input
