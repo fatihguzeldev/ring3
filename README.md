@@ -374,6 +374,8 @@ DLLs to retain complete selections after image release, exact query-view row/tex
 caps and independent reader refusals, separately from collection output totals.
 One owned-batch group retains all 44 compiled queries in ordered and reversed
 batches after image release, with exact aggregate row totals and refusal indices.
+One owned import/export group retains four compiled named/ordinal EXE–DLL pairs
+after both images are released, with exact provider selections and limit errors.
 
 The verifier requires pinned native Rust tools on `aarch64-apple-darwin`, compiles
 the Rust tests offline into a fresh Cargo target, and rejects missing, extra or
