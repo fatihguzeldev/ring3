@@ -402,6 +402,8 @@ One owned delay import/export group retains the four compiled delay pairs with
 complete import records, provider selections and limit errors after image release.
 One owned forwarder group retains the four compiled named/ordinal walks after
 image release, with complete steps, exact budgets and distinct provider refusals.
+One owned forwarder batch group retains ordered complete walks and real per-query
+errors, with exact aggregate successful totals and one-less limit refusals.
 
 The verifier requires pinned native Rust tools on `aarch64-apple-darwin`, compiles
 the Rust tests offline into a fresh Cargo target, and rejects missing, extra or
