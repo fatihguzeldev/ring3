@@ -51,6 +51,12 @@ basename errors. A match is lexical evidence, not filesystem identity, provider
 loadability or Windows search order. See the
 [application source candidate API](core/src/source/application_candidates.rs).
 
+A compiled PE32 integration case composes named module evidence, that lexical
+candidate index and explicit static/delay export queries after releasing the
+original path and byte buffers. It distinguishes the caller's application directory
+from the importer's directory using the same provider content under both labels.
+These remain caller-paired paths and bytes, not authenticated provider identities.
+
 `parse_pe_header_prefix_batch` accepts an immutable list of already materialized
 byte slices and explicit file-count, per-file byte and total-byte limits. It
 checks every budget before reading prefixes, then returns owned results in input
