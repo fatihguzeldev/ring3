@@ -115,6 +115,9 @@ unselected bits, including recognized architecture flags. Each bit is independen
 the result makes no executable-candidate, driver, service or loadability decision.
 Caller-side `Result::map` preserves a failed prefix without producing declarations.
 See the [image-role projection](core/src/pe/coff_image_role_declarations.rs).
+The existing compiled native and managed PE32/PE32+ declaration checks also retain
+the full role projection after releasing the inspected byte buffer. Those fixtures
+declare executable-image with system and DLL clear.
 
 `parse_ascii_pe_source_headers` accepts paired path/content records, admits all
 paths first, then checks content budgets and reads each PE header prefix. Owned
