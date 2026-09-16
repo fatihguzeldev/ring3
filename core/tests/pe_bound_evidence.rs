@@ -416,3 +416,51 @@ fn copied_text_excludes_nuls_and_reader_scan_refusal_keeps_raw_rows_only() {
         );
     }
 }
+
+#[test]
+#[ignore = "requires four explicit generated importer/provider fixture paths"]
+fn generated_owned_bound_imports_preserve_compiled_absence() {
+    let inputs = [
+        ("RING3_IMPORT_PE32_FIXTURE", ring3_core::PeKind::Pe32),
+        (
+            "RING3_IMPORT_PE32PLUS_FIXTURE",
+            ring3_core::PeKind::Pe32Plus,
+        ),
+        ("RING3_EXPORT_PE32_NAMED_DLL", ring3_core::PeKind::Pe32),
+        (
+            "RING3_EXPORT_PE32PLUS_NAMED_DLL",
+            ring3_core::PeKind::Pe32Plus,
+        ),
+    ]
+    .map(|(variable, kind)| {
+        let path = std::env::var_os(variable).expect(
+            "all four explicit generated owned bound-import absence fixture paths are required",
+        );
+        (path, kind)
+    });
+    for (path, kind) in inputs {
+        let outputs = {
+            let mut bytes = std::fs::read(path).unwrap();
+            assert_eq!(
+                ring3_core::parse_pe_header_prefix(&bytes).unwrap().kind,
+                kind
+            );
+            let before = bytes.clone();
+            let caps = limits(bytes.len(), 0, 0);
+            let first = inspect_pe_bound_imports(&bytes, caps).unwrap();
+            let second = inspect_pe_bound_imports(&bytes, caps).unwrap();
+            assert_eq!(bytes, before);
+            bytes.fill(0);
+            drop(bytes);
+            (first, second)
+        };
+        let expected = PeBoundImportEvidence {
+            total_rows: 0,
+            total_text_bytes: 0,
+            descriptors: Ok(None),
+            names: Ok(None),
+        };
+        assert_eq!(outputs.0, expected);
+        assert_eq!(outputs.1, expected);
+    }
+}
