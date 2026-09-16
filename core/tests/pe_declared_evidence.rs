@@ -1,7 +1,8 @@
 use ring3_core::{
     FileOffset, PeClrDescriptorEvidence, PeClrError, PeClrHeaderEvidence, PeDeclaredEvidence,
-    PeFieldEvidence, PeHeaderError, PeHeaderPrefixEvidence, PeKind, PeOptionalHeaderEvidence,
-    PeRvaError, RelativeVirtualAddress, inspect_pe_declared_evidence,
+    PeDesktopExecutableCandidateAssessment, PeDesktopExecutableCandidateDecision, PeFieldEvidence,
+    PeHeaderError, PeHeaderPrefixEvidence, PeKind, PeOptionalHeaderEvidence, PeRvaError,
+    RelativeVirtualAddress, assess_pe_desktop_executable_candidate, inspect_pe_declared_evidence,
 };
 
 fn put16(bytes: &mut [u8], offset: usize, value: u16) {
@@ -257,6 +258,14 @@ fn generated_declared_evidence(variable: &str, size: usize, wanted: PeDeclaredEv
     let mut bytes = original.clone();
     let actual = inspect_pe_declared_evidence(&bytes);
     assert_eq!(actual, wanted);
+    let wanted_candidate = PeDesktopExecutableCandidateAssessment {
+        raw: wanted,
+        decision: PeDesktopExecutableCandidateDecision::Candidate,
+        reasons: [None; 4],
+    };
+    let candidate = assess_pe_desktop_executable_candidate(actual);
+    assert_eq!(candidate, wanted_candidate);
+    assert_eq!(assess_pe_desktop_executable_candidate(actual), candidate);
     assert_eq!(inspect_pe_declared_evidence(&bytes), actual);
     assert_eq!(bytes, original);
     let prefix = actual.prefix.unwrap();
@@ -314,6 +323,8 @@ fn generated_declared_evidence(variable: &str, size: usize, wanted: PeDeclaredEv
     bytes.fill(0);
     drop(bytes);
     assert_eq!(actual, wanted);
+    assert_eq!(candidate, wanted_candidate);
+    assert_eq!(assess_pe_desktop_executable_candidate(actual), candidate);
     assert_eq!(inspect_pe_declared_evidence(&original), actual);
     assert_eq!(std::fs::read(path).unwrap(), original);
 }

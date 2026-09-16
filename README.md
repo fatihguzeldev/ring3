@@ -128,6 +128,9 @@ and CLR outcomes remain observations; they do not rank or reject a candidate.
 This allocation-free assessment does not select a main EXE, assign confidence,
 authenticate fields or establish support or loadability. See the
 [desktop candidate policy](core/src/pe/desktop_executable_candidates.rs).
+The compiled native and managed PE32/PE32+ evidence checks retain the complete
+candidate assessment after releasing the inspected bytes. All four declare
+console candidates, including the managed PE32+ image with zero native entry RVA.
 
 `parse_ascii_pe_source_headers` accepts paired path/content records, admits all
 paths first, then checks content budgets and reads each PE header prefix. Owned
