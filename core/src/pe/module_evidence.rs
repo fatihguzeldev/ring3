@@ -1,9 +1,10 @@
 use crate::{
+    PeBoundImportEvidence, PeBoundImportEvidenceError, PeBoundImportEvidenceLimits,
     PeDelayImportEvidence, PeDelayImportEvidenceError, PeDelayImportEvidenceLimits,
     PeExportEvidence, PeExportEvidenceError, PeExportEvidenceLimits, PeFingerprintError,
     PeFingerprintedEvidence, PeStaticImportEvidence, PeStaticImportEvidenceError,
-    PeStaticImportEvidenceLimits, fingerprint_pe_declared_evidence, inspect_pe_delay_imports,
-    inspect_pe_exports, inspect_pe_static_imports,
+    PeStaticImportEvidenceLimits, fingerprint_pe_declared_evidence, inspect_pe_bound_imports,
+    inspect_pe_delay_imports, inspect_pe_exports, inspect_pe_static_imports,
 };
 
 /// one family's logical output limits; not allocation or memory limits.
@@ -13,13 +14,14 @@ pub struct PeModuleOutputLimits {
     pub max_text_bytes: u64,
 }
 
-/// common input admission and separate static, delay and export output limits.
+/// common input admission and separate static, delay, export and bound output limits.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct PeModuleEvidenceLimits {
     pub max_input_bytes: u64,
     pub static_imports: PeModuleOutputLimits,
     pub delay_imports: PeModuleOutputLimits,
     pub exports: PeModuleOutputLimits,
+    pub bound_imports: PeModuleOutputLimits,
 }
 
 /// owned fingerprinted declarations and import/export observations, not a complete module report.
@@ -29,21 +31,25 @@ pub struct PeModuleEvidence {
     pub static_imports: Result<PeStaticImportEvidence, PeStaticImportEvidenceError>,
     pub delay_imports: Result<PeDelayImportEvidence, PeDelayImportEvidenceError>,
     pub exports: Result<PeExportEvidence, PeExportEvidenceError>,
+    pub bound_imports: Result<PeBoundImportEvidence, PeBoundImportEvidenceError>,
 }
 
-/// collects fingerprinted declarations and three metadata families from the same bytes.
+/// collects fingerprinted declarations and four metadata families from the same bytes.
 /// whole-input fingerprint admission runs first: caller byte limit, then sha-256
 /// message-length limit. admitted malformed inputs still retain their digest and
-/// independent reader errors. all three family results survive independently;
+/// independent reader errors. all four family results survive independently;
 /// a family's output refusal does not discard the fingerprint or other results.
 /// each family's existing input-error variant remains in its result type but
 /// cannot arise here after common input admission succeeds.
+/// bound-import results preserve independent raw/name outcomes and count their
+/// standalone records, nested records and names under their own family caps.
 ///
 /// each family applies its existing row-before-text limits; there is no combined
 /// output limit or all-or-nothing output admission. prior owned families can exist
 /// before a later refusal. fingerprint/declaration work and existing reader
 /// allocations occur earlier; readers may parse the same bytes again. these
-/// logical output limits do not cap process memory or recover allocation failure.
+/// logical output limits do not cap process memory or time, recover allocation
+/// failure, or provide cancellation.
 ///
 /// all results outlive input. coordinates, raw text, errors and absence/empty
 /// distinctions are preserved without normalization or inference. this does not
@@ -59,11 +65,13 @@ pub struct PeModuleEvidence {
 ///     let bytes = Vec::new();
 ///     inspect_pe_module_evidence(&bytes, PeModuleEvidenceLimits {
 ///         max_input_bytes: 0, static_imports: zero, delay_imports: zero, exports: zero,
+///         bound_imports: zero,
 ///     }).unwrap()
 /// };
 /// assert_eq!(evidence.fingerprinted.byte_length, 0);
 /// assert!(evidence.static_imports.unwrap().descriptors.is_err());
 /// assert!(evidence.exports.unwrap().directory.is_err());
+/// assert!(evidence.bound_imports.unwrap().descriptors.is_err());
 /// ```
 ///
 /// # errors
@@ -102,10 +110,19 @@ pub fn inspect_pe_module_evidence(
             max_output_text_bytes: limits.exports.max_text_bytes,
         },
     );
+    let bound_imports = inspect_pe_bound_imports(
+        bytes,
+        PeBoundImportEvidenceLimits {
+            max_input_bytes: limits.max_input_bytes,
+            max_output_rows: limits.bound_imports.max_rows,
+            max_output_text_bytes: limits.bound_imports.max_text_bytes,
+        },
+    );
     Ok(PeModuleEvidence {
         fingerprinted,
         static_imports,
         delay_imports,
         exports,
+        bound_imports,
     })
 }

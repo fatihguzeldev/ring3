@@ -92,7 +92,7 @@ occurrence. Paths are excluded from digests. See the
 
 `inspect_ascii_pe_source_module_evidence` admits the full path/content list, then
 keeps each owned path with its whole-input fingerprint and independent owned
-static-import, delay-import and export results. The same family output caps apply
+static-import, delay-import, export and bound-import results. The same family output caps apply
 fresh to every occurrence; errors remain local to their entry or family. See the
 [named module evidence API](core/src/source/pe_modules.rs).
 
@@ -190,12 +190,20 @@ contribute to those successful-result totals. Aggregate refusal returns no parti
 batch. See the [batch contract](core/src/pe/exports/evidence_walk_batch.rs).
 
 `inspect_pe_module_evidence` binds the whole-input fingerprint and declared,
-static import, delay import and export evidence to one input slice. It retains
+static import, delay import, export and bound-import evidence to one input slice. It retains
 owned, independent family results even when another family exceeds its row/text
 limits. Shared fingerprint input admission runs first; family output limits are
 separate and do not cap total allocations. This is metadata evidence, not a
 complete module report, provider resolution or authentication guarantee.
 See the [same-input module evidence API](core/src/pe/module_evidence.rs).
+
+The unpublished `0.0.0` Rust module structs now require an explicit
+`bound_imports: PeModuleOutputLimits` field in both module and named-source limits.
+`PeModuleEvidence` also gains its independent `bound_imports` result. This changes
+struct-literal source compatibility: callers constructing these values must add
+the field. Zero output caps retain absence and empty tables; nonempty observations
+can instead retain a bound-family output refusal. Existing direct Git consumers
+must make the same migration.
 
 
 `lookup_pe_export` selects metadata by exact name or full biased export ordinal
@@ -414,11 +422,11 @@ refusal operands.
 Certificate-entry tests append synthetic records to generated PE files in memory;
 the source fixtures remain unchanged and are not cryptographically signed.
 Two module-evidence groups retain whole-file fingerprints and complete owned
-static/delay/export observations across six compiled inputs, including input
-release and independent family output-refusal operands.
+static/delay/export observations and explicit bound-import absence across six
+compiled inputs, including input release and independent family output-refusal operands.
 Two named-module groups retain mixed path/content pairings, aliases and owned
 results across the same six inputs, with exact whole-list admission and shared
-per-family output-refusal operands.
+per-family output-refusal operands and explicit bound-import absence.
 Two owned-query groups use the existing named, ordinal-only and sparse-forwarder
 DLLs to retain complete selections after image release, exact query-view row/text
 caps and independent reader refusals, separately from collection output totals.

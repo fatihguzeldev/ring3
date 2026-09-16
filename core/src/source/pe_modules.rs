@@ -16,6 +16,7 @@ pub struct AsciiPeSourceModuleEvidenceLimits {
     pub static_imports: PeModuleOutputLimits,
     pub delay_imports: PeModuleOutputLimits,
     pub exports: PeModuleOutputLimits,
+    pub bound_imports: PeModuleOutputLimits,
 }
 
 /// owned observations for one caller-paired path and its content.
@@ -42,7 +43,7 @@ pub struct AsciiPeSourceModuleEvidenceBatch {
 /// the whole list passes. zero limits are valid; outer refusals contain no batch.
 ///
 /// the sole per-entry input cap comes from `content.max_file_bytes`. each source
-/// starts fresh static/delay/export output accounting under the same family caps.
+/// starts fresh static/delay/export/bound output accounting under the same family caps.
 /// complete independent reader results and family refusals stay with that source;
 /// neither a family refusal nor an entry fingerprint error stops later entries.
 /// admitted empty or malformed bytes retain their digest and typed reader errors.
@@ -73,6 +74,7 @@ pub struct AsciiPeSourceModuleEvidenceBatch {
 ///         },
 ///         content: PeHeaderBatchLimits { max_files: 1, max_file_bytes: 3, max_total_bytes: 3 },
 ///         static_imports: output, delay_imports: output, exports: output,
+///         bound_imports: output,
 ///     },
 /// )?;
 /// assert_eq!(batch.entries[0].path.key, "data");
@@ -122,6 +124,7 @@ fn inspect_with(
         static_imports: limits.static_imports,
         delay_imports: limits.delay_imports,
         exports: limits.exports,
+        bound_imports: limits.bound_imports,
     };
     Ok(AsciiPeSourceModuleEvidenceBatch {
         total_path_bytes: admitted.total_path_bytes,
@@ -163,6 +166,7 @@ mod tests {
             static_imports: output,
             delay_imports: output,
             exports: output,
+            bound_imports: output,
         }
     }
 
@@ -222,6 +226,7 @@ mod tests {
             static_imports: caps.static_imports,
             delay_imports: caps.delay_imports,
             exports: caps.exports,
+            bound_imports: caps.bound_imports,
         };
         // synthetic refusal tests only collector continuation, not an actual huge sha input.
         let injected = PeFingerprintError::Sha256LengthExceeded {
