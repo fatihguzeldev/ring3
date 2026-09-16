@@ -73,7 +73,10 @@ A compiled PE32 integration case composes named module evidence, that lexical
 candidate index and explicit static/delay export queries after releasing the
 original path and byte buffers. It distinguishes the caller's application directory
 from the importer's directory using the same provider content under both labels.
-The same case checks complete aggregate dependency reports and exact count/text
+The same case checks one-hop selected closures in both delay modes across three source
+orders, including a selected root whose original request index is nonzero. Exact
+traversal caps and owned full observations are compared after input release.
+It also checks complete aggregate dependency reports and exact count/text
 refusals, then selects the export provider through the report's candidate index.
 These remain caller-paired paths and bytes, not authenticated provider identities.
 
