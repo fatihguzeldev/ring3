@@ -179,7 +179,8 @@
       "generated_pe32_named_delay_imports_match_explicit_exports",
       "generated_pe32_ordinal_delay_imports_match_explicit_exports",
       "generated_pe32plus_named_delay_imports_match_explicit_exports",
-      "generated_pe32plus_ordinal_delay_imports_match_explicit_exports"
+      "generated_pe32plus_ordinal_delay_imports_match_explicit_exports",
+      "generated_owned_delay_imports_match_compiled_explicit_providers"
     ],
     "pe_forwarder_requests": [
       "generated_pe32_forwarder_requests_preserve_borrowed_metadata",

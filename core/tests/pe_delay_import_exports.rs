@@ -1010,3 +1010,175 @@ fn generated_pe32plus_ordinal_delay_imports_match_explicit_exports() {
         true,
     );
 }
+
+fn check_owned_corpus_record(
+    actual: &ring3_core::PeOwnedDelayImportLookup,
+    plus: bool,
+    ordinal: bool,
+) {
+    let expected = corpus_imports(plus, ordinal);
+    assert_eq!(actual.import.descriptor, expected.import.descriptor);
+    assert_eq!(actual.import.dll_name, expected.import.dll_name);
+    assert_eq!(actual.entries.len(), expected.entries.len());
+    for (actual, expected) in actual.entries.iter().zip(expected.entries) {
+        let symbol = match &actual.symbol {
+            PeOwnedImportSymbol::Ordinal(value) => PeImportSymbol::Ordinal(*value),
+            PeOwnedImportSymbol::ByName {
+                hint_name_rva,
+                hint,
+                name,
+            } => PeImportSymbol::ByName {
+                hint_name_rva: *hint_name_rva,
+                hint: *hint,
+                name,
+            },
+        };
+        assert_eq!(
+            (
+                actual.lookup_rva,
+                actual.lookup_file_offset,
+                actual.raw_value,
+                symbol
+            ),
+            (
+                expected.lookup_rva,
+                expected.lookup_file_offset,
+                expected.raw_value,
+                expected.symbol
+            )
+        );
+    }
+}
+
+fn check_owned_corpus_pair(
+    importer_path: &std::path::Path,
+    provider_path: &std::path::Path,
+    plus: bool,
+    ordinal: bool,
+) {
+    let mut importer = std::fs::read(importer_path).unwrap();
+    let mut provider = std::fs::read(provider_path).unwrap();
+    let importer_length = if plus { 3072 } else { 2560 };
+    assert_eq!((importer.len(), provider.len()), (importer_length, 2048));
+    let imports = inspect_pe_delay_imports(
+        &importer,
+        PeDelayImportEvidenceLimits {
+            max_input_bytes: u64::try_from(importer_length).unwrap(),
+            max_output_rows: 4,
+            max_output_text_bytes: if ordinal { 28 } else { 33 },
+        },
+    )
+    .unwrap();
+    let exports = inspect_pe_exports(
+        &provider,
+        PeExportEvidenceLimits {
+            max_input_bytes: 2048,
+            max_output_rows: if ordinal { 2 } else { 3 },
+            max_output_text_bytes: if ordinal { 0 } else { 5 },
+        },
+    )
+    .unwrap();
+    importer.fill(0xee);
+    provider.fill(0xee);
+    drop(importer);
+    drop(provider);
+    let query_limits = PeExportEvidenceLookupLimits {
+        max_table_rows: if ordinal { 1 } else { 2 },
+        max_table_text_bytes: if ordinal { 0 } else { 5 },
+    };
+    let run = |query_caps, batch_caps| {
+        lookup_pe_delay_import_evidence_exports(&imports, 0, &exports, query_caps, batch_caps)
+    };
+    let result = run(query_limits, limits(1, 1)).unwrap();
+    assert!(std::ptr::eq(
+        result.imports,
+        imports
+            .lookups
+            .as_ref()
+            .unwrap()
+            .as_ref()
+            .unwrap()
+            .imports
+            .as_ptr()
+    ));
+    check_owned_corpus_record(result.imports, plus, ordinal);
+    assert_eq!(result.exports.selection_rows, 1);
+    assert_eq!(
+        result.exports.selections,
+        vec![Ok(corpus_selection(ordinal))]
+    );
+    assert_eq!(run(query_limits, limits(1, 1)), Ok(result));
+    assert_eq!(
+        run(query_limits, limits(1, 0)),
+        Err(PeDelayImportExportError::ExportBatch(
+            PeExportBatchError::SelectionRowsExceeded {
+                index: 0,
+                total: 1,
+                limit: 0
+            }
+        ))
+    );
+    let zero = PeExportEvidenceLookupLimits {
+        max_table_rows: 0,
+        max_table_text_bytes: 0,
+    };
+    assert_eq!(
+        run(zero, limits(0, 0)),
+        Err(PeDelayImportExportError::ExportBatch(
+            PeExportBatchError::QueryCountExceeded { count: 1, limit: 0 }
+        ))
+    );
+    let refused = run(zero, limits(1, 0)).unwrap();
+    assert_eq!(refused.exports.selection_rows, 0);
+    assert_eq!(
+        refused.exports.selections,
+        vec![Err(PeExportEvidenceLookupError::RowsExceeded {
+            rows: if ordinal { 1 } else { 2 },
+            limit: 0,
+        })]
+    );
+}
+
+#[test]
+#[ignore = "requires all eight explicit compiled owned delay import/provider paths"]
+fn generated_owned_delay_imports_match_compiled_explicit_providers() {
+    let paths: Vec<_> = [
+        (
+            "RING3_DELAY_PE32_FIXTURE",
+            "RING3_DELAY_PE32_PROVIDER_DLL",
+            false,
+            false,
+        ),
+        (
+            "RING3_DELAY_ORDINAL_PE32_FIXTURE",
+            "RING3_DELAY_ORDINAL_PE32_PROVIDER_DLL",
+            false,
+            true,
+        ),
+        (
+            "RING3_DELAY_PE32PLUS_FIXTURE",
+            "RING3_DELAY_PE32PLUS_PROVIDER_DLL",
+            true,
+            false,
+        ),
+        (
+            "RING3_DELAY_ORDINAL_PE32PLUS_FIXTURE",
+            "RING3_DELAY_ORDINAL_PE32PLUS_PROVIDER_DLL",
+            true,
+            true,
+        ),
+    ]
+    .into_iter()
+    .map(|(importer, provider, plus, ordinal)| {
+        let path = |key| {
+            std::path::PathBuf::from(std::env::var_os(key).expect(
+                "all eight explicit compiled owned delay import/provider paths are required",
+            ))
+        };
+        (path(importer), path(provider), plus, ordinal)
+    })
+    .collect();
+    for (importer, provider, plus, ordinal) in paths {
+        check_owned_corpus_pair(&importer, &provider, plus, ordinal);
+    }
+}
