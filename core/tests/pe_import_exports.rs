@@ -906,3 +906,149 @@ fn generated_pe32plus_ordinal_imports_match_explicit_exports() {
         true,
     );
 }
+
+fn check_owned_corpus_pair(
+    importer_path: &std::path::Path,
+    provider_path: &std::path::Path,
+    plus: bool,
+    ordinal: bool,
+) {
+    let mut importer = std::fs::read(importer_path).unwrap();
+    let mut provider = std::fs::read(provider_path).unwrap();
+    assert_eq!((importer.len(), provider.len()), (2048, 2048));
+    let imports = inspect_pe_static_imports(
+        &importer,
+        PeStaticImportEvidenceLimits {
+            max_input_bytes: 2048,
+            max_output_rows: 3,
+            max_output_text_bytes: if ordinal { 32 } else { 39 },
+        },
+    )
+    .unwrap();
+    let exports = inspect_pe_exports(
+        &provider,
+        PeExportEvidenceLimits {
+            max_input_bytes: 2048,
+            max_output_rows: if ordinal { 2 } else { 3 },
+            max_output_text_bytes: if ordinal { 0 } else { 11 },
+        },
+    )
+    .unwrap();
+    importer.fill(0xee);
+    provider.fill(0xee);
+    drop(importer);
+    drop(provider);
+    let query_limits = PeExportEvidenceLookupLimits {
+        max_table_rows: if ordinal { 1 } else { 2 },
+        max_table_text_bytes: if ordinal { 0 } else { 11 },
+    };
+    let run = |query_caps, batch_caps| {
+        lookup_pe_import_evidence_exports(&imports, 0, &exports, query_caps, batch_caps)
+    };
+    let result = run(query_limits, limits(1, 1)).unwrap();
+    assert!(std::ptr::eq(
+        result.imports,
+        imports.lookups.as_ref().unwrap().as_ptr()
+    ));
+    assert_eq!(result.imports.entries.len(), 1);
+    assert_eq!(
+        result.imports.entries[0].symbol,
+        if ordinal {
+            PeOwnedImportSymbol::Ordinal(32768)
+        } else {
+            PeOwnedImportSymbol::ByName {
+                hint_name_rva: RelativeVirtualAddress::new(if plus { 8264 } else { 8248 }),
+                hint: 0,
+                name: "ring3_probe".to_owned(),
+            }
+        }
+    );
+    assert_eq!(
+        result.imports.descriptor.dll_name,
+        if ordinal {
+            "Ring3Ordinal.dll"
+        } else {
+            "Ring3Probe.dll"
+        }
+    );
+    assert_eq!(result.exports.selection_rows, 1);
+    assert_eq!(
+        result.exports.selections,
+        vec![Ok(corpus_selection(ordinal))]
+    );
+    assert_eq!(run(query_limits, limits(1, 1)), Ok(result));
+    assert_eq!(
+        run(query_limits, limits(1, 0)),
+        Err(PeImportExportError::ExportBatch(
+            PeExportBatchError::SelectionRowsExceeded {
+                index: 0,
+                total: 1,
+                limit: 0
+            }
+        ))
+    );
+    let zero = PeExportEvidenceLookupLimits {
+        max_table_rows: 0,
+        max_table_text_bytes: 0,
+    };
+    assert_eq!(
+        run(zero, limits(0, 0)),
+        Err(PeImportExportError::ExportBatch(
+            PeExportBatchError::QueryCountExceeded { count: 1, limit: 0 }
+        ))
+    );
+    let refused = run(zero, limits(1, 0)).unwrap();
+    assert_eq!(refused.exports.selection_rows, 0);
+    assert_eq!(
+        refused.exports.selections,
+        vec![Err(PeExportEvidenceLookupError::RowsExceeded {
+            rows: if ordinal { 1 } else { 2 },
+            limit: 0,
+        })]
+    );
+}
+
+#[test]
+#[ignore = "requires all eight explicit compiled owned import/provider paths"]
+fn generated_owned_imports_match_compiled_explicit_providers() {
+    let paths: Vec<_> = [
+        (
+            "RING3_IMPORT_PE32_FIXTURE",
+            "RING3_EXPORT_PE32_NAMED_DLL",
+            false,
+            false,
+        ),
+        (
+            "RING3_ORDINAL_PE32_FIXTURE",
+            "RING3_EXPORT_PE32_ORDINAL_DLL",
+            false,
+            true,
+        ),
+        (
+            "RING3_IMPORT_PE32PLUS_FIXTURE",
+            "RING3_EXPORT_PE32PLUS_NAMED_DLL",
+            true,
+            false,
+        ),
+        (
+            "RING3_ORDINAL_PE32PLUS_FIXTURE",
+            "RING3_EXPORT_PE32PLUS_ORDINAL_DLL",
+            true,
+            true,
+        ),
+    ]
+    .into_iter()
+    .map(|(importer, provider, plus, ordinal)| {
+        let path = |key| {
+            std::path::PathBuf::from(
+                std::env::var_os(key)
+                    .expect("all eight explicit compiled owned import/provider paths are required"),
+            )
+        };
+        (path(importer), path(provider), plus, ordinal)
+    })
+    .collect();
+    for (importer, provider, plus, ordinal) in paths {
+        check_owned_corpus_pair(&importer, &provider, plus, ordinal);
+    }
+}

@@ -168,7 +168,8 @@
       "generated_pe32_named_imports_match_explicit_exports",
       "generated_pe32_ordinal_imports_match_explicit_exports",
       "generated_pe32plus_named_imports_match_explicit_exports",
-      "generated_pe32plus_ordinal_imports_match_explicit_exports"
+      "generated_pe32plus_ordinal_imports_match_explicit_exports",
+      "generated_owned_imports_match_compiled_explicit_providers"
     ],
     "pe_amd64_exceptions": [
       "generated_amd64_exception_functions_preserve_raw_records",
