@@ -448,3 +448,37 @@ fn maximum_raw_graph_keeps_all_1152_name_occurrences() {
         );
     }
 }
+
+#[test]
+#[ignore = "requires four explicit generated importer/provider fixture paths"]
+fn generated_named_importers_and_providers_have_no_bound_import_names() {
+    let inputs = [
+        ("RING3_IMPORT_PE32_FIXTURE", ring3_core::PeKind::Pe32),
+        (
+            "RING3_IMPORT_PE32PLUS_FIXTURE",
+            ring3_core::PeKind::Pe32Plus,
+        ),
+        ("RING3_EXPORT_PE32_NAMED_DLL", ring3_core::PeKind::Pe32),
+        (
+            "RING3_EXPORT_PE32PLUS_NAMED_DLL",
+            ring3_core::PeKind::Pe32Plus,
+        ),
+    ]
+    .map(|(variable, kind)| {
+        let path = std::env::var_os(variable).expect(
+            "all four explicit generated bound-import name absence fixture paths are required",
+        );
+        (path, kind)
+    });
+    for (path, kind) in inputs {
+        let bytes = std::fs::read(path).unwrap();
+        assert_eq!(
+            ring3_core::parse_pe_header_prefix(&bytes).unwrap().kind,
+            kind
+        );
+        let before = bytes.clone();
+        assert_eq!(parse_pe_bound_import_names(&bytes), Ok(None));
+        assert_eq!(parse_pe_bound_import_names(&bytes), Ok(None));
+        assert_eq!(bytes, before);
+    }
+}
