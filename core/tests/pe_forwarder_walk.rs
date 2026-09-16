@@ -1235,3 +1235,272 @@ fn generated_owned_forwarder_walks_preserve_compiled_routes() {
         }
     }
 }
+
+use ring3_core::{
+    PeForwarderEvidenceWalkBatch, PeForwarderWalkBatchError, PeForwarderWalkBatchLimits,
+    PeForwarderWalkBatchMetric, walk_pe_export_evidence_forwarders_batch,
+};
+
+fn walk_batch_limits() -> PeForwarderWalkBatchLimits {
+    PeForwarderWalkBatchLimits {
+        max_queries: 8,
+        max_successful_steps: 16,
+        max_successful_selection_rows: 16,
+        max_successful_text_bytes: 512,
+    }
+}
+
+#[test]
+fn owned_walk_batch_admits_count_before_invalid_common_inputs() {
+    let call = |queries: &[PeExportQuery<'_>]| {
+        walk_pe_export_evidence_forwarders_batch(
+            &[],
+            &[route(u32::MAX, "", u32::MAX)],
+            u32::MAX,
+            queries,
+            view_limits(),
+            limits(),
+            PeForwarderWalkBatchLimits {
+                max_queries: 0,
+                max_successful_steps: 0,
+                max_successful_selection_rows: 0,
+                max_successful_text_bytes: 0,
+            },
+        )
+    };
+    assert_eq!(
+        call(&[]),
+        Ok(PeForwarderEvidenceWalkBatch {
+            successful_steps: 0,
+            successful_selection_rows: 0,
+            successful_text_bytes: 0,
+            walks: vec![],
+        })
+    );
+    assert_eq!(
+        call(&[PeExportQuery::Name("é")]),
+        Err(PeForwarderWalkBatchError::QueryCountExceeded { count: 1, limit: 0 })
+    );
+}
+
+#[test]
+fn owned_walk_batch_keeps_order_and_only_borrows_evidence() {
+    let evidence = [
+        owned_evidence(&fixture(false, Some("Next.entry"))),
+        owned_evidence(&fixture(true, None)),
+    ];
+    let before = evidence.clone();
+    let result = {
+        let query = String::from("entry");
+        let token = String::from("Next");
+        let sources = vec![&evidence[0], &evidence[1]];
+        walk_pe_export_evidence_forwarders_batch(
+            &sources,
+            &[route(0, &token, 1)],
+            0,
+            &[
+                PeExportQuery::Name(&query),
+                PeExportQuery::Name(&"x".repeat(257)),
+                PeExportQuery::Ordinal(7),
+            ],
+            view_limits(),
+            limits(),
+            PeForwarderWalkBatchLimits {
+                max_queries: 3,
+                max_successful_steps: 4,
+                max_successful_selection_rows: 4,
+                max_successful_text_bytes: 33,
+            },
+        )
+        .unwrap()
+    };
+    assert_eq!(
+        (
+            result.successful_steps,
+            result.successful_selection_rows,
+            result.successful_text_bytes
+        ),
+        (4, 4, 33)
+    );
+    assert_eq!(result.walks.len(), 3);
+    for (index, query) in [
+        (0, PeExportQuery::Name("entry")),
+        (1, PeExportQuery::Name(&"x".repeat(257))),
+        (2, PeExportQuery::Ordinal(7)),
+    ] {
+        assert_eq!(
+            result.walks[index],
+            walk_pe_export_evidence_forwarders(
+                &[&evidence[0], &evidence[1]],
+                &[route(0, "Next", 1)],
+                0,
+                query,
+                view_limits(),
+                limits()
+            )
+        );
+    }
+    let PeExportSelection::Selected {
+        name: Some(name), ..
+    } = &result.walks[0].as_ref().unwrap().steps[1].selection
+    else {
+        panic!()
+    };
+    assert_eq!(
+        name.name.as_ptr(),
+        evidence[1]
+            .names
+            .as_ref()
+            .unwrap()
+            .as_ref()
+            .unwrap()
+            .entries[0]
+            .name
+            .as_ptr()
+    );
+    assert_eq!(evidence, before);
+}
+
+#[test]
+fn owned_walk_batch_refuses_successful_totals_in_steps_rows_text_order() {
+    let evidence = owned_evidence(&fixture(false, None));
+    for (metric, caps, used, amount) in [
+        (
+            PeForwarderWalkBatchMetric::SuccessfulSteps,
+            PeForwarderWalkBatchLimits {
+                max_successful_steps: 1,
+                max_successful_selection_rows: 1,
+                max_successful_text_bytes: 5,
+                ..walk_batch_limits()
+            },
+            1,
+            1,
+        ),
+        (
+            PeForwarderWalkBatchMetric::SuccessfulSelectionRows,
+            PeForwarderWalkBatchLimits {
+                max_successful_selection_rows: 1,
+                max_successful_text_bytes: 5,
+                ..walk_batch_limits()
+            },
+            1,
+            1,
+        ),
+        (
+            PeForwarderWalkBatchMetric::SuccessfulTextBytes,
+            PeForwarderWalkBatchLimits {
+                max_successful_text_bytes: 5,
+                ..walk_batch_limits()
+            },
+            5,
+            5,
+        ),
+    ] {
+        assert_eq!(
+            walk_pe_export_evidence_forwarders_batch(
+                &[&evidence],
+                &[],
+                0,
+                &[
+                    PeExportQuery::Name("entry"),
+                    PeExportQuery::Name(&"x".repeat(257)),
+                    PeExportQuery::Name("entry")
+                ],
+                view_limits(),
+                limits(),
+                caps
+            ),
+            Err(PeForwarderWalkBatchError::OutputLimitExceeded {
+                metric,
+                index: 2,
+                used,
+                amount,
+                limit: used,
+            })
+        );
+    }
+}
+
+#[test]
+fn owned_walk_batch_retains_structural_provider_errors_at_zero_successful_cost() {
+    let mut evidence = owned_evidence(&fixture(false, None));
+    evidence.names.as_mut().unwrap().as_mut().unwrap().entries[0].table_index = 99;
+    let result = walk_pe_export_evidence_forwarders_batch(
+        &[&evidence],
+        &[],
+        0,
+        &[
+            PeExportQuery::Name("entry"),
+            PeExportQuery::Ordinal(7),
+            PeExportQuery::Name("entry"),
+        ],
+        view_limits(),
+        limits(),
+        PeForwarderWalkBatchLimits {
+            max_queries: 3,
+            max_successful_steps: 1,
+            max_successful_selection_rows: 1,
+            max_successful_text_bytes: 0,
+        },
+    )
+    .unwrap();
+    let error = Err(PeForwarderEvidenceWalkError::Provider {
+        hop: 0,
+        source_index: 0,
+        cause: PeExportEvidenceLookupError::NameIndexMismatch {
+            entry_index: 0,
+            table_index: 99,
+        },
+    });
+    assert_eq!(result.walks[0], error);
+    assert_eq!(result.walks[2], error);
+    assert!(result.walks[1].is_ok());
+    assert_eq!(
+        (
+            result.successful_steps,
+            result.successful_selection_rows,
+            result.successful_text_bytes
+        ),
+        (1, 1, 0)
+    );
+}
+
+#[test]
+fn owned_walk_batch_errors_keep_payloads_without_successful_charges() {
+    let evidence = owned_evidence(&fixture(false, Some("Next.entry")));
+    for routes in [vec![], vec![route(0, "Next", 0), route(0, "Next", 0)]] {
+        let result = walk_pe_export_evidence_forwarders_batch(
+            &[&evidence],
+            &routes,
+            0,
+            &[PeExportQuery::Name("entry"), PeExportQuery::Name("entry")],
+            view_limits(),
+            limits(),
+            PeForwarderWalkBatchLimits {
+                max_queries: 2,
+                max_successful_steps: 0,
+                max_successful_selection_rows: 0,
+                max_successful_text_bytes: 0,
+            },
+        )
+        .unwrap();
+        let expected = walk_pe_export_evidence_forwarders(
+            &[&evidence],
+            &routes,
+            0,
+            PeExportQuery::Name("entry"),
+            view_limits(),
+            limits(),
+        );
+        assert!(expected.is_err());
+        assert_eq!(result.walks, vec![expected.clone(), expected]);
+        assert_eq!(
+            (
+                result.successful_steps,
+                result.successful_selection_rows,
+                result.successful_text_bytes
+            ),
+            (0, 0, 0)
+        );
+    }
+}

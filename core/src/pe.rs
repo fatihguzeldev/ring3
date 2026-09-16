@@ -290,6 +290,10 @@ pub fn parse_pe_header_prefix(bytes: &[u8]) -> Result<PeHeaderPrefix, PeHeaderEr
 
 pub use imports::{PeDelayImportEvidenceExportBatch, lookup_pe_delay_import_evidence_exports};
 
+pub use exports::{
+    PeForwarderEvidenceWalkBatch, PeForwarderWalkBatchError, PeForwarderWalkBatchLimits,
+    PeForwarderWalkBatchMetric, walk_pe_export_evidence_forwarders_batch,
+};
 pub use exports::{PeForwarderEvidenceWalkError, walk_pe_export_evidence_forwarders};
 
 #[cfg(test)]

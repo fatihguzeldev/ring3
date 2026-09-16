@@ -159,6 +159,13 @@ refusals. Results and missing-route errors borrow evidence, independently of
 route and query storage. This adds no module discovery or provider identity.
 See the [owned forwarder API](core/src/pe/exports/evidence_walk.rs).
 
+`walk_pe_export_evidence_forwarders_batch` retains ordered walks over the same
+explicit source and route context. It admits query count before traversal and
+caps aggregate steps, selection rows and text from complete successful walks.
+Per-query errors stay in order; their payloads and failed traversal work do not
+contribute to those successful-result totals. Aggregate refusal returns no partial
+batch. See the [batch contract](core/src/pe/exports/evidence_walk_batch.rs).
+
 `inspect_pe_module_evidence` binds the whole-input fingerprint and declared,
 static import, delay import and export evidence to one input slice. It retains
 owned, independent family results even when another family exceeds its row/text

@@ -5,6 +5,7 @@ mod evidence;
 mod evidence_batch;
 mod evidence_lookup;
 mod evidence_walk;
+mod evidence_walk_batch;
 mod forwarder;
 mod lookup;
 mod names;
@@ -42,3 +43,7 @@ pub use evidence_lookup::{
 };
 
 pub use evidence_walk::{PeForwarderEvidenceWalkError, walk_pe_export_evidence_forwarders};
+pub use evidence_walk_batch::{
+    PeForwarderEvidenceWalkBatch, PeForwarderWalkBatchError, PeForwarderWalkBatchLimits,
+    PeForwarderWalkBatchMetric, walk_pe_export_evidence_forwarders_batch,
+};
