@@ -119,6 +119,16 @@ The existing compiled native and managed PE32/PE32+ declaration checks also reta
 the full role projection after releasing the inspected byte buffer. Those fixtures
 declare executable-image with system and DLL clear.
 
+`assess_pe_desktop_executable_candidate` applies an explicit Ring3 desktop policy
+to existing declared evidence: executable-image set, DLL and system clear, and
+GUI or console subsystem. It returns candidate, excluded or indeterminate with
+all independent reasons in fixed order and the complete original evidence.
+Available exclusions take precedence over unavailable fields. Machine, entry RVA
+and CLR outcomes remain observations; they do not rank or reject a candidate.
+This allocation-free assessment does not select a main EXE, assign confidence,
+authenticate fields or establish support or loadability. See the
+[desktop candidate policy](core/src/pe/desktop_executable_candidates.rs).
+
 `parse_ascii_pe_source_headers` accepts paired path/content records, admits all
 paths first, then checks content budgets and reads each PE header prefix. Owned
 results keep each path with its original content result; malformed prefixes do

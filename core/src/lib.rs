@@ -64,6 +64,10 @@ pub use pe::{
     walk_pe_export_forwarders,
 };
 pub use pe::{PeCoffImageRoleDeclarations, describe_pe_coff_image_role_declarations};
+pub use pe::{
+    PeDesktopExecutableCandidateAssessment, PeDesktopExecutableCandidateDecision,
+    PeDesktopExecutableCandidateReason, assess_pe_desktop_executable_candidate,
+};
 pub use pe::{PeFingerprintError, PeFingerprintedEvidence, fingerprint_pe_declared_evidence};
 pub use pe::{
     PeOwnedImportDescriptor, PeOwnedImportLookup, PeOwnedImportLookupEntry, PeOwnedImportSymbol,
