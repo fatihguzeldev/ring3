@@ -2,6 +2,12 @@ mod address;
 mod pe;
 mod source;
 
+pub use source::{
+    AsciiPeModuleDependencyError, AsciiPeModuleDependencyEvidence, AsciiPeModuleDependencyLimits,
+    AsciiPeModuleDependencyRequest, PeDelayDependencyError, PeModuleDependencyKind,
+    PeModuleDependencyViews, PeStaticDependencyError, observe_ascii_pe_module_dependencies,
+};
+
 pub use address::{FileOffset, GuestAddress32, ProgramCounter32, RelativeVirtualAddress};
 pub use pe::{
     PeAmd64ExceptionEntry, PeAmd64ExceptionError, PeAmd64ExceptionTable, PeAmd64UnwindInfoV1,
