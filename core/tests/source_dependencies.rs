@@ -413,3 +413,306 @@ fn empty_success_and_reordered_source_positions_are_explicit() {
     assert_eq!(output.requests[0].source_index, 1);
     assert_eq!(output.requests[0].candidate, Ok(Some(0)));
 }
+
+mod closure {
+    use super::{batch, limits, source};
+    use ring3_core::{
+        AsciiPeDependencyClosure, AsciiPeDependencyClosureError as Error,
+        AsciiPeDependencyClosureLimits as Limits, AsciiPeModuleDependencyError,
+        PeDependencyClosureMode::{StaticAndDelay, StaticOnly},
+        PeDependencyRequestStep::{
+            self, AlreadyReached, CandidateError, Discovered, ExcludedDelay, NoCandidate,
+        },
+        PeFingerprintError, observe_ascii_pe_module_dependencies as observe,
+        walk_ascii_pe_dependency_closure as walk,
+    };
+
+    fn caps(reached: u64, examined: u64) -> Limits {
+        Limits {
+            observation: limits(),
+            max_reached_sources: reached,
+            max_examined_requests: examined,
+        }
+    }
+    fn visits(value: &AsciiPeDependencyClosure) -> Vec<(usize, Option<usize>)> {
+        value
+            .visits
+            .iter()
+            .map(|v| (v.source_index, v.via_request_index))
+            .collect()
+    }
+    fn steps(value: &AsciiPeDependencyClosure) -> Vec<(usize, PeDependencyRequestStep)> {
+        value
+            .examined_requests
+            .iter()
+            .map(|v| (v.request_index, v.step))
+            .collect()
+    }
+
+    #[test]
+    fn breadth_first_provenance_uses_original_request_indices_and_owns_the_report() {
+        let mut input = batch(vec![
+            source("c.dll", &[], None),
+            source("b.dll", &["c.dll"], None),
+            source("app.exe", &["a.dll"], Some(&["b.dll"])),
+            source("a.dll", &["c.dll"], None),
+        ]);
+        let before = input.clone();
+        let observations = observe(&input, 2, limits()).unwrap();
+        let output = walk(&input, 2, StaticAndDelay, caps(4, 4)).unwrap();
+        assert_eq!(input, before);
+        assert_eq!(
+            walk(&input, 2, StaticAndDelay, caps(4, 4)),
+            Ok(output.clone())
+        );
+        for entry in &mut input.entries {
+            entry.path.normalized.replace_range(.., "overwritten");
+            if let Ok(module) = &mut entry.module {
+                for row in module
+                    .static_imports
+                    .as_mut()
+                    .unwrap()
+                    .descriptors
+                    .as_mut()
+                    .unwrap()
+                {
+                    row.dll_name.replace_range(.., "overwritten");
+                }
+                if let Some(table) = module
+                    .delay_imports
+                    .as_mut()
+                    .unwrap()
+                    .names
+                    .as_mut()
+                    .unwrap()
+                {
+                    for row in &mut table.imports {
+                        row.dll_name.replace_range(.., "overwritten");
+                    }
+                }
+            }
+        }
+        drop(input);
+        assert_eq!(output.observations, observations);
+        assert_eq!(output.mode, StaticAndDelay);
+        assert_eq!(
+            visits(&output),
+            [(2, None), (3, Some(1)), (1, Some(2)), (0, Some(3))]
+        );
+        assert_eq!(
+            steps(&output),
+            [
+                (1, Discovered { visit_index: 1 }),
+                (2, Discovered { visit_index: 2 }),
+                (3, Discovered { visit_index: 3 }),
+                (0, AlreadyReached { visit_index: 3 })
+            ]
+        );
+    }
+
+    #[test]
+    fn delay_modes_keep_excluded_occurrences_and_later_static_reachability() {
+        let input = batch(vec![
+            source("app.exe", &["a.dll"], Some(&["b.dll"])),
+            source("a.dll", &["b.dll"], None),
+            source("b.dll", &[], None),
+        ]);
+        let static_only = walk(&input, 0, StaticOnly, caps(3, 3)).unwrap();
+        let potential = walk(&input, 0, StaticAndDelay, caps(3, 3)).unwrap();
+        assert_eq!(static_only.mode, StaticOnly);
+        assert_eq!(static_only.observations, potential.observations);
+        assert_eq!(
+            visits(&static_only),
+            [(0, None), (1, Some(0)), (2, Some(2))]
+        );
+        assert_eq!(visits(&potential), [(0, None), (1, Some(0)), (2, Some(1))]);
+        assert_eq!(
+            steps(&static_only),
+            [
+                (0, Discovered { visit_index: 1 }),
+                (1, ExcludedDelay),
+                (2, Discovered { visit_index: 2 })
+            ]
+        );
+        assert_eq!(
+            steps(&potential),
+            [
+                (0, Discovered { visit_index: 1 }),
+                (1, Discovered { visit_index: 2 }),
+                (2, AlreadyReached { visit_index: 2 })
+            ]
+        );
+        let only_delay = batch(vec![source("app.exe", &[], Some(&["missing.dll"]))]);
+        assert_eq!(
+            walk(&only_delay, 0, StaticOnly, caps(1, 0)),
+            Err(Error::ExaminedRequestsExceeded {
+                source_index: 0,
+                request_index: 0,
+                count: 1,
+                limit: 0
+            })
+        );
+    }
+
+    #[test]
+    fn cycles_duplicates_and_equal_module_aliases_preserve_each_occurrence() {
+        let a = source("a.dll", &["app.exe", "shared.dll"], None);
+        let mut alias = a.clone();
+        alias.path.normalized = "alias.dll".into();
+        let input = batch(vec![
+            source("app.exe", &["app.exe", "a.dll", "A.DLL", "alias.dll"], None),
+            a,
+            alias,
+            source("shared.dll", &[], None),
+        ]);
+        assert_eq!(input.entries[1].module, input.entries[2].module);
+        let output = walk(&input, 0, StaticOnly, caps(4, 8)).unwrap();
+        assert_eq!(
+            visits(&output),
+            [(0, None), (1, Some(1)), (2, Some(3)), (3, Some(5))]
+        );
+        assert_eq!(
+            steps(&output),
+            [
+                (0, AlreadyReached { visit_index: 0 }),
+                (1, Discovered { visit_index: 1 }),
+                (2, AlreadyReached { visit_index: 1 }),
+                (3, Discovered { visit_index: 2 }),
+                (4, AlreadyReached { visit_index: 0 }),
+                (5, Discovered { visit_index: 3 }),
+                (6, AlreadyReached { visit_index: 0 }),
+                (7, AlreadyReached { visit_index: 3 })
+            ]
+        );
+        assert_eq!(
+            walk(&input, 0, StaticOnly, caps(4, 7)),
+            Err(Error::ExaminedRequestsExceeded {
+                source_index: 2,
+                request_index: 7,
+                count: 8,
+                limit: 7
+            })
+        );
+    }
+
+    #[test]
+    fn inventory_preflight_root_and_edge_admission_have_explicit_precedence() {
+        let input = batch(vec![
+            source("app.exe", &["a.dll"], None),
+            source("a.dll", &["b.dll"], None),
+            source("b.dll", &[], None),
+        ]);
+        let mut limited = caps(0, 0);
+        limited.observation.max_requests = 1;
+        assert_eq!(
+            walk(&input, 0, StaticOnly, limited),
+            Err(Error::Observation(
+                AsciiPeModuleDependencyError::RequestCountExceeded { count: 2, limit: 1 }
+            ))
+        );
+        assert_eq!(
+            walk(&input, 0, StaticOnly, caps(0, 0)),
+            Err(Error::ReachedSourcesExceeded {
+                source_index: 0,
+                via_request_index: None,
+                count: 1,
+                limit: 0
+            })
+        );
+        assert_eq!(
+            walk(&input, 0, StaticOnly, caps(1, 0)),
+            Err(Error::ExaminedRequestsExceeded {
+                source_index: 0,
+                request_index: 0,
+                count: 1,
+                limit: 0
+            })
+        );
+        assert_eq!(
+            walk(&input, 0, StaticOnly, caps(1, 1)),
+            Err(Error::ReachedSourcesExceeded {
+                source_index: 1,
+                via_request_index: Some(0),
+                count: 2,
+                limit: 1
+            })
+        );
+        assert_eq!(
+            walk(&input, 0, StaticOnly, caps(2, 1)),
+            Err(Error::ExaminedRequestsExceeded {
+                source_index: 1,
+                request_index: 1,
+                count: 2,
+                limit: 1
+            })
+        );
+        assert_eq!(
+            walk(&input, 0, StaticOnly, caps(2, 2)),
+            Err(Error::ReachedSourcesExceeded {
+                source_index: 2,
+                via_request_index: Some(1),
+                count: 3,
+                limit: 2
+            })
+        );
+        assert_eq!(
+            visits(&walk(&input, 0, StaticOnly, caps(3, 2)).unwrap()),
+            [(0, None), (1, Some(0)), (2, Some(1))]
+        );
+        let unrelated = batch(vec![
+            source("app.exe", &[], None),
+            source("unused.dll", &["missing.dll"], None),
+        ]);
+        let mut limited = caps(0, 0);
+        limited.observation.max_request_text_bytes = 0;
+        assert_eq!(
+            walk(&unrelated, 0, StaticOnly, limited),
+            Err(Error::Observation(
+                AsciiPeModuleDependencyError::RequestTextExceeded {
+                    bytes: 11,
+                    limit: 0
+                }
+            ))
+        );
+        let output = walk(&unrelated, 0, StaticOnly, caps(1, 0)).unwrap();
+        assert_eq!(visits(&output), [(0, None)]);
+        assert!(output.examined_requests.is_empty());
+        assert_eq!(output.observations.requests.len(), 1);
+    }
+
+    #[test]
+    fn terminal_frontiers_retain_errors_and_exclusion_precedes_candidate_classification() {
+        let error = PeFingerprintError::InputTooLarge {
+            length: 2,
+            limit: 1,
+        };
+        let mut failed = source("broken.dll", &[], None);
+        failed.module = Err(error);
+        let input = batch(vec![
+            source(
+                "app.exe",
+                &["missing.dll", "é.dll", "broken.dll"],
+                Some(&["é.dll"]),
+            ),
+            failed,
+        ]);
+        let output = walk(&input, 0, StaticOnly, caps(2, 4)).unwrap();
+        assert_eq!(visits(&output), [(0, None), (1, Some(2))]);
+        assert_eq!(
+            steps(&output),
+            [
+                (0, NoCandidate),
+                (1, CandidateError),
+                (2, Discovered { visit_index: 1 }),
+                (3, ExcludedDelay)
+            ]
+        );
+        assert_eq!(output.observations.sources[1], Err(error));
+        assert!(output.observations.requests[1].candidate.is_err());
+        assert!(output.observations.requests[3].candidate.is_err());
+        assert_eq!(
+            steps(&walk(&input, 0, StaticAndDelay, caps(2, 4)).unwrap())[3],
+            (3, CandidateError)
+        );
+    }
+}

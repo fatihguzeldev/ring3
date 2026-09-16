@@ -60,6 +60,15 @@ retain source and request order, including duplicates. Each request repeats the
 existing finder admission; this is not Windows resolution or a recursive loader.
 See the [retained dependency API](core/src/source/module_dependencies.rs).
 
+`walk_ascii_pe_dependency_closure` selects the observed component of one application
+from the retained batch, with explicit static-only or static-and-delay modes. It keeps
+complete observations, breadth-first source visits, original request indices and
+first-discovery provenance. Repeated targets terminate without merging equal-byte
+source occurrences; every examined request counts, including excluded and failed
+candidates. Whole-inventory admission precedes the two traversal caps. This reports
+potential lexical reachability, not launch requirements or loader behavior.
+See the [selected closure API](core/src/source/dependency_closure.rs).
+
 A compiled PE32 integration case composes named module evidence, that lexical
 candidate index and explicit static/delay export queries after releasing the
 original path and byte buffers. It distinguishes the caller's application directory
