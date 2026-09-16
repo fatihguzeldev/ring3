@@ -1,4 +1,5 @@
 mod application_candidates;
+mod dependency_closure;
 mod module_dependencies;
 mod paths;
 mod pe_evidence;
@@ -9,6 +10,11 @@ mod pe_modules;
 pub use application_candidates::{
     AsciiApplicationSourceCandidateError, AsciiApplicationSourceCandidateLimits,
     find_ascii_application_source_candidate,
+};
+pub use dependency_closure::{
+    AsciiPeDependencyClosure, AsciiPeDependencyClosureError, AsciiPeDependencyClosureLimits,
+    PeDependencyClosureMode, PeDependencyRequestStep, PeDependencyRequestVisit, PeDependencyVisit,
+    walk_ascii_pe_dependency_closure,
 };
 pub use module_dependencies::{
     AsciiPeModuleDependencyError, AsciiPeModuleDependencyEvidence, AsciiPeModuleDependencyLimits,

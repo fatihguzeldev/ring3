@@ -111,3 +111,9 @@ pub use source::{
     AsciiApplicationSourceCandidateError, AsciiApplicationSourceCandidateLimits,
     find_ascii_application_source_candidate,
 };
+
+pub use source::{
+    AsciiPeDependencyClosure, AsciiPeDependencyClosureError, AsciiPeDependencyClosureLimits,
+    PeDependencyClosureMode, PeDependencyRequestStep, PeDependencyRequestVisit, PeDependencyVisit,
+    walk_ascii_pe_dependency_closure,
+};
