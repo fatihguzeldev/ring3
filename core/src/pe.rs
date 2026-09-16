@@ -10,6 +10,7 @@ mod coff_image_role_declarations;
 mod debug;
 mod debug_payloads;
 mod declared_evidence;
+mod desktop_executable_candidates;
 mod exports;
 mod fingerprints;
 mod header_batch;
@@ -53,6 +54,10 @@ pub use debug_payloads::{
 pub use declared_evidence::{
     PeClrDescriptorEvidence, PeClrHeaderEvidence, PeDeclaredEvidence, PeFieldEvidence,
     PeHeaderPrefixEvidence, PeOptionalHeaderEvidence, inspect_pe_declared_evidence,
+};
+pub use desktop_executable_candidates::{
+    PeDesktopExecutableCandidateAssessment, PeDesktopExecutableCandidateDecision,
+    PeDesktopExecutableCandidateReason, assess_pe_desktop_executable_candidate,
 };
 pub use exports::{
     PeExportAddressEntry, PeExportAddressError, PeExportAddressTable, PeExportBatch,
