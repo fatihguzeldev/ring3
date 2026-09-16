@@ -94,6 +94,7 @@ pub use pe::{
 pub use pe::{PeForwarderEvidenceWalkError, walk_pe_export_evidence_forwarders};
 
 pub use pe::{
-    PeBoundForwarderRef, PeBoundImportDescriptor, PeBoundImportError, PeBoundImportTable,
-    parse_pe_bound_import_descriptors,
+    PeBoundForwarderRef, PeBoundImportDescriptor, PeBoundImportError, PeBoundImportName,
+    PeBoundImportNameError, PeBoundImportNameLocation, PeBoundImportNameTable, PeBoundImportTable,
+    parse_pe_bound_import_descriptors, parse_pe_bound_import_names,
 };

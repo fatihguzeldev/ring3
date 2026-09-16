@@ -142,6 +142,14 @@ offsets, timestamps and reserved words. It admits at most 128 descriptors and
 Its required zero descriptor is an explicit acceptance policy; zero references remain data.
 It does not resolve names or establish current binding validity.
 
+`parse_pe_bound_import_names` validates that entire raw table before reading names.
+It retains the owned table with ordered, explicitly located names borrowed from
+its input, preserving spelling and duplicate offsets. Each name has a 1024-byte
+scan limit; all occurrences together have a 65536-byte limit, including NUL bytes.
+Names can lie outside the declared directory when their prefixes are uniquely
+file-backed. ASCII acceptance does not validate paths, providers or binding.
+See the [borrowed name contract](core/src/pe/imports/bound/names.rs).
+
 `lookup_pe_import_evidence_exports` matches one retained static-import descriptor
 against an explicitly supplied export observation after both images are released.
 It borrows the import record, admits its entry count before allocating queries,

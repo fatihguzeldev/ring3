@@ -35,6 +35,7 @@ pub use lookups::{
 pub use delay::{PeDelayImportEvidenceExportBatch, lookup_pe_delay_import_evidence_exports};
 
 pub use bound::{
-    PeBoundForwarderRef, PeBoundImportDescriptor, PeBoundImportError, PeBoundImportTable,
-    parse_pe_bound_import_descriptors,
+    PeBoundForwarderRef, PeBoundImportDescriptor, PeBoundImportError, PeBoundImportName,
+    PeBoundImportNameError, PeBoundImportNameLocation, PeBoundImportNameTable, PeBoundImportTable,
+    parse_pe_bound_import_descriptors, parse_pe_bound_import_names,
 };
