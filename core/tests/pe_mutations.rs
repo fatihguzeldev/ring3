@@ -1,3 +1,6 @@
+#[path = "pe_mutations/import_observations.rs"]
+mod import_observations;
+
 use std::fmt::{self, Write as _};
 
 use ring3_core::{
@@ -184,6 +187,7 @@ fn inspect(
     baseline: bool,
     unwind_expected: Option<&PeAmd64UnwindInfoV1>,
     report: &mut Campaign,
+    observations: &mut import_observations::Report,
 ) {
     let before = bytes.to_vec();
     write!(report.digest, "input:{}:{}\0", report.cases, bytes.len()).unwrap();
@@ -230,6 +234,7 @@ fn inspect(
     observe!(25, parse_pe_clr_header);
     inspect_amd64_exceptions(bytes, baseline, report);
     inspect_amd64_unwind(bytes, unwind_expected, report);
+    let _ = import_observations::inspect(bytes, observations);
     assert_eq!(bytes, before, "input changed at case {}", report.cases);
     report.cases += 1;
 }
@@ -485,7 +490,8 @@ fn index(state: &mut u32, length: usize) -> usize {
     usize::try_from(next(state)).unwrap() % length
 }
 
-fn campaign() -> Campaign {
+fn campaign() -> (Campaign, import_observations::Report) {
+    let mut observations = import_observations::Report::new();
     let mut report = Campaign {
         cases: 0,
         outcomes: [[0; 2]; READER_COUNT],
@@ -499,15 +505,27 @@ fn campaign() -> Campaign {
         (true, exception_fixture(), None),
         (true, unwind_fixture(), Some(unwind_expected())),
     ] {
-        inspect(&original, true, expected_unwind.as_ref(), &mut report);
+        inspect(
+            &original,
+            true,
+            expected_unwind.as_ref(),
+            &mut report,
+            &mut observations,
+        );
         for end in 0..original.len() {
-            inspect(&original[..end], false, None, &mut report);
+            inspect(
+                &original[..end],
+                false,
+                None,
+                &mut report,
+                &mut observations,
+            );
         }
         for _ in 0..128 {
             let mut bytes = original.clone();
             let position = index(&mut state, bytes.len());
             bytes[position] ^= 1 << (next(&mut state) % 8);
-            inspect(&bytes, false, None, &mut report);
+            inspect(&bytes, false, None, &mut report, &mut observations);
         }
         let directory = directory_base(plus);
         let mut words = vec![60, 148, 212, directory - 4];
@@ -533,7 +551,7 @@ fn campaign() -> Campaign {
             let mut bytes = original.clone();
             let position = words[index(&mut state, words.len())];
             put32(&mut bytes, position, boundaries[round % boundaries.len()]);
-            inspect(&bytes, false, None, &mut report);
+            inspect(&bytes, false, None, &mut report, &mut observations);
         }
         for round in 0..256 {
             let mut bytes = original.clone();
@@ -545,7 +563,7 @@ fn campaign() -> Campaign {
             if round % 4 == 0 {
                 bytes.truncate(index(&mut state, original.len()));
             }
-            inspect(&bytes, false, None, &mut report);
+            inspect(&bytes, false, None, &mut report, &mut observations);
         }
     }
     assert_eq!(report.cases, CASE_COUNT);
@@ -558,7 +576,8 @@ fn campaign() -> Campaign {
         assert!(successes > 0 && failures > 0);
         assert_eq!(successes + failures, CASE_COUNT);
     }
-    report
+    import_observations::positive_tail(&mut observations);
+    (report, observations)
 }
 
 #[test]
