@@ -251,6 +251,9 @@
     ],
     "pe_bound_evidence": [
       "generated_owned_bound_imports_preserve_compiled_absence"
+    ],
+    "source_provider_composition": [
+      "generated_application_candidates_select_retained_static_and_delay_providers"
     ]
   }
 }
