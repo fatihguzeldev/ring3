@@ -1,16 +1,20 @@
 use ring3_core::{
-    AsciiApplicationSourceCandidateLimits, AsciiPeSource, AsciiPeSourceModuleEvidenceBatch,
-    AsciiPeSourceModuleEvidenceLimits, AsciiSourcePathEntry, AsciiSourcePathLimits, FileOffset,
+    AsciiApplicationSourceCandidateLimits, AsciiPeModuleDependencyError,
+    AsciiPeModuleDependencyEvidence, AsciiPeModuleDependencyLimits, AsciiPeModuleDependencyRequest,
+    AsciiPeSource, AsciiPeSourceModuleEvidenceBatch, AsciiPeSourceModuleEvidenceLimits,
+    AsciiSourcePathBatch, AsciiSourcePathEntry, AsciiSourcePathLimits, FileOffset,
     PeExportAddressEntry, PeExportBatchLimits, PeExportEvidenceLookupLimits, PeExportName,
-    PeExportSelection, PeExportTarget, PeHeaderBatchLimits, PeModuleOutputLimits,
-    RelativeVirtualAddress as Rva, find_ascii_application_source_candidate,
-    inspect_ascii_pe_source_module_evidence, lookup_pe_delay_import_evidence_exports,
-    lookup_pe_import_evidence_exports,
+    PeExportSelection, PeExportTarget, PeHeaderBatchLimits, PeModuleDependencyKind,
+    PeModuleDependencyViews, PeModuleOutputLimits, RelativeVirtualAddress as Rva,
+    find_ascii_application_source_candidate, inspect_ascii_pe_source_module_evidence,
+    lookup_pe_delay_import_evidence_exports, lookup_pe_import_evidence_exports,
+    observe_ascii_pe_module_dependencies,
 };
 
 struct RetainedScenario {
     batch: AsciiPeSourceModuleEvidenceBatch,
     candidate: AsciiSourcePathEntry,
+    application_index: usize,
     importer_index: usize,
     delay: bool,
 }
@@ -130,9 +134,7 @@ fn collect_scenario(
         path.clear();
         path.extend(std::iter::repeat_n('x', len));
     }
-    drop(paths);
-    drop(before);
-    drop(labels);
+    drop((paths, before, labels));
     assert_eq!(
         candidate,
         AsciiSourcePathEntry {
@@ -146,9 +148,96 @@ fn collect_scenario(
     RetainedScenario {
         batch,
         candidate,
+        application_index,
         importer_index,
         delay,
     }
+}
+
+fn check_dependency_observations(scenario: &RetainedScenario) -> AsciiPeModuleDependencyEvidence {
+    let mut input = scenario.batch.clone();
+    let caps = AsciiPeModuleDependencyLimits {
+        paths: limits(scenario.delay).paths,
+        max_requests: 2,
+        max_request_text_bytes: 28,
+        max_basename_bytes: 14,
+    };
+    let application = scenario.application_index;
+    assert_eq!(
+        observe_ascii_pe_module_dependencies(
+            &input,
+            application,
+            AsciiPeModuleDependencyLimits {
+                max_requests: 1,
+                ..caps
+            }
+        ),
+        Err(AsciiPeModuleDependencyError::RequestCountExceeded { count: 2, limit: 1 })
+    );
+    assert_eq!(
+        observe_ascii_pe_module_dependencies(
+            &input,
+            application,
+            AsciiPeModuleDependencyLimits {
+                max_request_text_bytes: 27,
+                ..caps
+            }
+        ),
+        Err(AsciiPeModuleDependencyError::RequestTextExceeded {
+            bytes: 28,
+            limit: 27
+        })
+    );
+    let report = observe_ascii_pe_module_dependencies(&input, application, caps).unwrap();
+    assert_eq!(
+        observe_ascii_pe_module_dependencies(&input, application, caps),
+        Ok(report.clone())
+    );
+    assert_eq!(input, scenario.batch);
+    input.entries.clear();
+    drop(input);
+    let (dll, kind) = if scenario.delay {
+        ("Ring3Delay.dll", PeModuleDependencyKind::Delay)
+    } else {
+        ("Ring3Probe.dll", PeModuleDependencyKind::Static)
+    };
+    let mut request_sources = [application, scenario.importer_index];
+    request_sources.sort_unstable();
+    let expected = AsciiPeModuleDependencyEvidence {
+        paths: AsciiSourcePathBatch {
+            total_path_bytes: 72,
+            entries: scenario
+                .batch
+                .entries
+                .iter()
+                .map(|entry| entry.path.clone())
+                .collect(),
+        },
+        application_source_index: application,
+        total_requests: 2,
+        total_request_text_bytes: 28,
+        sources: (0..4)
+            .map(|index| {
+                let importer = request_sources.contains(&index);
+                Ok(PeModuleDependencyViews {
+                    static_imports: Ok(u64::from(importer && !scenario.delay)),
+                    delay_imports: Ok((importer && scenario.delay).then_some(1)),
+                })
+            })
+            .collect(),
+        requests: request_sources
+            .into_iter()
+            .map(|source_index| AsciiPeModuleDependencyRequest {
+                source_index,
+                kind,
+                descriptor_index: 0,
+                dll_name: dll.into(),
+                candidate: Ok(Some(scenario.candidate.index)),
+            })
+            .collect(),
+    };
+    assert_eq!(report, expected);
+    report
 }
 
 fn expected_selection(symbol: &str) -> PeExportSelection<'_> {
@@ -175,11 +264,20 @@ fn expected_selection(symbol: &str) -> PeExportSelection<'_> {
 }
 
 fn check_retained_association(scenario: &RetainedScenario) {
+    let report = check_dependency_observations(scenario);
+    let candidate_index = report
+        .requests
+        .iter()
+        .find(|request| request.source_index == scenario.importer_index)
+        .unwrap()
+        .candidate
+        .unwrap()
+        .unwrap();
     let importer = scenario.batch.entries[scenario.importer_index]
         .module
         .as_ref()
         .unwrap();
-    let provider = scenario.batch.entries[scenario.candidate.index]
+    let provider = scenario.batch.entries[candidate_index]
         .module
         .as_ref()
         .unwrap()
