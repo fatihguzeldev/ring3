@@ -4,6 +4,7 @@ mod directory;
 mod evidence;
 mod evidence_batch;
 mod evidence_lookup;
+mod evidence_walk;
 mod forwarder;
 mod lookup;
 mod names;
@@ -39,3 +40,5 @@ pub use evidence_batch::{PeExportEvidenceBatch, lookup_pe_export_evidence_batch}
 pub use evidence_lookup::{
     PeExportEvidenceLookupError, PeExportEvidenceLookupLimits, lookup_pe_export_evidence,
 };
+
+pub use evidence_walk::{PeForwarderEvidenceWalkError, walk_pe_export_evidence_forwarders};

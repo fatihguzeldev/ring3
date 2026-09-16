@@ -60,7 +60,7 @@ pub struct PeForwarderStep<'a> {
     pub forwarder: Option<PeForwarderHop<'a>>,
 }
 
-/// complete ordered metadata, borrowing only source images; errors contain no partial walk.
+/// complete ordered metadata, borrowing only source storage; errors contain no partial walk.
 ///
 /// ```compile_fail
 /// use ring3_core::{PeExportQuery, PeForwarderWalk, PeForwarderWalkLimits, walk_pe_export_forwarders};
@@ -353,7 +353,6 @@ fn lookup_step<'image>(
 /// ```
 #[expect(
     clippy::missing_errors_doc,
-    clippy::missing_panics_doc,
     reason = "project documentation headings are lower case"
 )]
 pub fn walk_pe_export_forwarders<'image>(
@@ -363,20 +362,59 @@ pub fn walk_pe_export_forwarders<'image>(
     root_query: PeExportQuery<'_>,
     limits: PeForwarderWalkLimits,
 ) -> Result<PeForwarderWalk<'image>, PeForwarderWalkError<'image>> {
+    walk_with(
+        sources.len(),
+        routes,
+        root_source_index,
+        root_query,
+        limits,
+        || {
+            let mut owners: Vec<_> = sources
+                .iter()
+                .map(|&bytes| PeExportLookup::new(bytes))
+                .collect();
+            move |source_index, query, hop, selection_rows| {
+                lookup_step(
+                    &mut owners[source_index as usize],
+                    query,
+                    hop,
+                    source_index,
+                    selection_rows,
+                    limits.max_selection_rows,
+                )
+            }
+        },
+    )
+}
+
+pub(super) fn walk_with<'image, E, F>(
+    source_count: usize,
+    routes: &[PeForwarderRoute<'_>],
+    root_source_index: u32,
+    root_query: PeExportQuery<'_>,
+    limits: PeForwarderWalkLimits,
+    initialize: impl FnOnce() -> F,
+) -> Result<PeForwarderWalk<'image>, E>
+where
+    E: From<PeForwarderWalkError<'image>>,
+    F: for<'query> FnMut(
+        u32,
+        PeExportQuery<'query>,
+        u64,
+        u64,
+    ) -> Result<(PeExportSelection<'image>, u64), E>,
+{
     let AdmittedRoutes {
         bindings,
         mut text_bytes,
     } = admit_inputs(
-        sources.len() as u64,
+        source_count as u64,
         routes,
         root_source_index,
         root_query,
         limits,
     )?;
-    let mut owners: Vec<_> = sources
-        .iter()
-        .map(|&bytes| PeExportLookup::new(bytes))
-        .collect();
+    let mut lookup = initialize();
     let mut visited = BTreeMap::new();
     let mut steps = Vec::new();
     let mut selection_rows = 0_u64;
@@ -388,16 +426,10 @@ pub fn walk_pe_export_forwarders<'image>(
             return Err(PeForwarderWalkError::HopLimitExceeded {
                 hop,
                 limit: limits.max_hops,
-            });
+            }
+            .into());
         }
-        let (selection, total) = lookup_step(
-            &mut owners[source_index as usize],
-            query.borrowed(),
-            hop,
-            source_index,
-            selection_rows,
-            limits.max_selection_rows,
-        )?;
+        let (selection, total) = lookup(source_index, query.borrowed(), hop, selection_rows)?;
         selection_rows = total;
         let address = match &selection {
             PeExportSelection::Selected { address, .. } => Some(*address),
@@ -423,7 +455,8 @@ pub fn walk_pe_export_forwarders<'image>(
                 hop,
                 source_index,
                 table_index: address.table_index,
-            });
+            }
+            .into());
         }
         visited.insert((source_index, address.table_index), hop);
         let PeExportTarget::Forwarder { text: raw, .. } = address.target else {
@@ -449,7 +482,8 @@ pub fn walk_pe_export_forwarders<'image>(
                 hop,
                 source_index,
                 request,
-            });
+            }
+            .into());
         };
         step.forwarder = Some(PeForwarderHop {
             request,
@@ -467,6 +501,47 @@ pub fn walk_pe_export_forwarders<'image>(
 #[cfg(test)]
 mod tests {
     use super::{PeForwarderTextContext, PeForwarderWalkError, charge_text, check_source_count};
+
+    #[test]
+    fn lookup_initialization_follows_admission_and_precedes_hop_checks() {
+        use super::{PeExportQuery, PeForwarderWalk, PeForwarderWalkLimits, walk_with};
+        for (root, initialized, error) in [
+            (
+                1,
+                false,
+                PeForwarderWalkError::RootSourceOutOfRange {
+                    source_index: 1,
+                    source_count: 1,
+                },
+            ),
+            (
+                0,
+                true,
+                PeForwarderWalkError::HopLimitExceeded { hop: 0, limit: 0 },
+            ),
+        ] {
+            let called = std::cell::Cell::new(false);
+            let result: Result<PeForwarderWalk<'_>, PeForwarderWalkError<'_>> = walk_with(
+                1,
+                &[],
+                root,
+                PeExportQuery::Ordinal(1),
+                PeForwarderWalkLimits {
+                    max_sources: 1,
+                    max_routes: 0,
+                    max_hops: 0,
+                    max_selection_rows: 0,
+                    max_text_bytes: 0,
+                },
+                || {
+                    called.set(true);
+                    |_, _, _, _| unreachable!("zero hop budget prevents lookup")
+                },
+            );
+            assert_eq!(result, Err(error));
+            assert_eq!(called.get(), initialized);
+        }
+    }
 
     #[test]
     fn synthetic_text_boundaries_preserve_admission_order() {
