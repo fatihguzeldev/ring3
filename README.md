@@ -362,6 +362,11 @@ readers, including present and absent AMD64 exception tables and v1 unwind metad
 at one explicit RVA. It checks repeated results, input preservation and owned
 unwind record fields, with one synthetic handler seed. This finite campaign
 does not replace semantic tests or coverage-guided fuzzing.
+A separate 20,218-input campaign exercises raw bound-import records and borrowed
+names with positive seeds in both PE widths, truncations, bit flips, field edges
+and fixed-seed mutations. It checks raw/name consistency, record bytes and
+coordinates, name pairing and borrowing, repeated results and input preservation.
+Its outcome signatures are observed regression evidence, not a semantic oracle.
 
 ## Corpus verification
 
