@@ -1,6 +1,7 @@
 mod delay;
 mod descriptors;
 mod evidence;
+mod evidence_exports;
 mod export_batch;
 mod lookups;
 
@@ -20,6 +21,7 @@ pub use evidence::{
     PeStaticImportEvidence, PeStaticImportEvidenceError, PeStaticImportEvidenceLimits,
     inspect_pe_static_imports,
 };
+pub use evidence_exports::{PeImportEvidenceExportBatch, lookup_pe_import_evidence_exports};
 pub use export_batch::{
     PeImportExportBatch, PeImportExportError, lookup_pe_import_exports,
     lookup_pe_import_exports_with_provider,

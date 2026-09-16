@@ -135,6 +135,14 @@ Results borrow retained evidence and can outlive the query list. Admission repea
 for each query; these logical limits do not cap allocations or elapsed time.
 See the [owned export batch API](core/src/pe/exports/evidence_batch.rs).
 
+`lookup_pe_import_evidence_exports` matches one retained static-import descriptor
+against an explicitly supplied export observation after both images are released.
+It borrows the import record, admits its entry count before allocating queries,
+and preserves aligned provider results under the owned-batch limits. Exact names
+and widened ordinals drive queries; DLL text, hints and raw fields remain metadata.
+The two evidence lifetimes are independent. See the
+[owned import matching API](core/src/pe/imports/evidence_exports.rs).
+
 
 `inspect_pe_module_evidence` binds the whole-input fingerprint and declared,
 static import, delay import and export evidence to one input slice. It retains

@@ -83,3 +83,4 @@ pub use pe::{PeExportEvidenceBatch, lookup_pe_export_evidence_batch};
 pub use pe::{
     PeExportEvidenceLookupError, PeExportEvidenceLookupLimits, lookup_pe_export_evidence,
 };
+pub use pe::{PeImportEvidenceExportBatch, lookup_pe_import_evidence_exports};

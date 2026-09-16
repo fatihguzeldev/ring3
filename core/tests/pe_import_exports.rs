@@ -4,6 +4,285 @@ use ring3_core::{
     PeImportSymbol, RelativeVirtualAddress, lookup_pe_import_exports,
     lookup_pe_import_exports_with_provider,
 };
+use ring3_core::{
+    PeExportEvidence, PeExportEvidenceLimits, PeExportEvidenceLookupError,
+    PeExportEvidenceLookupLimits, PeOwnedImportSymbol, PeStaticImportEvidence,
+    PeStaticImportEvidenceLimits, inspect_pe_exports, inspect_pe_static_imports,
+    lookup_pe_import_evidence_exports,
+};
+
+fn owned_inputs(importer: &[u8], provider: &[u8]) -> (PeStaticImportEvidence, PeExportEvidence) {
+    (
+        inspect_pe_static_imports(
+            importer,
+            PeStaticImportEvidenceLimits {
+                max_input_bytes: 65_536,
+                max_output_rows: 7,
+                max_output_text_bytes: 18,
+            },
+        )
+        .unwrap(),
+        inspect_pe_exports(
+            provider,
+            PeExportEvidenceLimits {
+                max_input_bytes: 65_536,
+                max_output_rows: 8,
+                max_output_text_bytes: 14,
+            },
+        )
+        .unwrap(),
+    )
+}
+
+fn owned_query_limits() -> PeExportEvidenceLookupLimits {
+    PeExportEvidenceLookupLimits {
+        max_table_rows: 5,
+        max_table_text_bytes: 11,
+    }
+}
+
+#[test]
+fn owned_import_matches_preserve_both_image_widths_after_release() {
+    for (import_plus, export_plus) in [(false, false), (true, true), (false, true), (true, false)] {
+        let mut importer = mixed_importer(import_plus);
+        let mut provider = providing::fixture(export_plus, 2);
+        let raw = lookup_pe_import_exports(&importer, 0, &provider, limits(5, 5)).unwrap();
+        let expected: Vec<_> = raw
+            .exports
+            .selections
+            .into_iter()
+            .map(|s| format!("{:?}", s.map_err(PeExportEvidenceLookupError::Reader)))
+            .collect();
+        let (imports, exports) = owned_inputs(&importer, &provider);
+        importer.fill(0xee);
+        provider.fill(0xee);
+        drop(importer);
+        drop(provider);
+        let before = (imports.clone(), exports.clone());
+        let result = lookup_pe_import_evidence_exports(
+            &imports,
+            0,
+            &exports,
+            owned_query_limits(),
+            limits(5, 5),
+        )
+        .unwrap();
+        assert!(std::ptr::eq(
+            result.imports,
+            imports.lookups.as_ref().unwrap().as_ptr()
+        ));
+        assert_eq!(result.exports.selection_rows, 5);
+        assert_eq!(result.imports.descriptor.dll_name, "Own.DLL");
+        assert_eq!(
+            result.imports.entries[4].symbol,
+            PeOwnedImportSymbol::Ordinal(65535)
+        );
+        assert_eq!(
+            result
+                .exports
+                .selections
+                .iter()
+                .map(|s| format!("{s:?}"))
+                .collect::<Vec<_>>(),
+            expected
+        );
+        assert_eq!(
+            lookup_pe_import_evidence_exports(
+                &imports,
+                0,
+                &exports,
+                owned_query_limits(),
+                limits(5, 5)
+            ),
+            Ok(result)
+        );
+        assert_eq!((imports, exports), before);
+    }
+}
+
+#[test]
+fn owned_import_error_descriptor_and_count_precedence_is_explicit() {
+    let (mut imports, exports) =
+        owned_inputs(&mixed_importer(false), &providing::fixture(false, 2));
+    let zero = PeExportEvidenceLookupLimits {
+        max_table_rows: 0,
+        max_table_text_bytes: 0,
+    };
+    assert_eq!(
+        lookup_pe_import_evidence_exports(&imports, 1, &exports, zero, limits(0, 0)),
+        Err(PeImportExportError::DescriptorNotFound {
+            descriptor_index: 1,
+            descriptor_count: 1
+        })
+    );
+    assert_eq!(
+        lookup_pe_import_evidence_exports(&imports, 0, &exports, zero, limits(4, 0)),
+        Err(PeImportExportError::ExportBatch(
+            PeExportBatchError::QueryCountExceeded { count: 5, limit: 4 }
+        ))
+    );
+    let error = PeImportLookupError::LookupTableUnavailable {
+        descriptor_index: 19,
+    };
+    imports.lookups = Err(error);
+    assert_eq!(
+        lookup_pe_import_evidence_exports(&imports, u16::MAX, &exports, zero, limits(0, 0)),
+        Err(PeImportExportError::Imports(error))
+    );
+}
+
+#[test]
+fn owned_import_result_halves_keep_independent_evidence_lifetimes() {
+    let (imports, exports) = owned_inputs(&mixed_importer(false), &providing::fixture(false, 2));
+    let retained_imports = {
+        let temporary_provider = exports.clone();
+        lookup_pe_import_evidence_exports(
+            &imports,
+            0,
+            &temporary_provider,
+            owned_query_limits(),
+            limits(5, 5),
+        )
+        .unwrap()
+        .imports
+    };
+    assert!(std::ptr::eq(
+        retained_imports,
+        imports.lookups.as_ref().unwrap().as_ptr()
+    ));
+    let retained_exports = {
+        let temporary_importer = imports.clone();
+        lookup_pe_import_evidence_exports(
+            &temporary_importer,
+            0,
+            &exports,
+            owned_query_limits(),
+            limits(5, 5),
+        )
+        .unwrap()
+        .exports
+    };
+    assert_eq!(retained_exports.selection_rows, 5);
+    assert!(matches!(
+        retained_exports.selections[0],
+        Ok(PeExportSelection::AmbiguousName { .. })
+    ));
+}
+
+#[test]
+fn owned_import_provider_failures_remain_aligned_and_empty_entries_skip_provider() {
+    let (mut imports, mut exports) =
+        owned_inputs(&mixed_importer(false), &providing::fixture(false, 2));
+    let reader_error = PeExportNameError::NameUnavailable { entry_index: 77 };
+    exports.names = Err(reader_error);
+    let result = lookup_pe_import_evidence_exports(
+        &imports,
+        0,
+        &exports,
+        owned_query_limits(),
+        limits(5, 3),
+    )
+    .unwrap();
+    assert_eq!(result.exports.selection_rows, 3);
+    assert_eq!(
+        result.exports.selections[0],
+        Err(PeExportEvidenceLookupError::Reader(
+            PeExportLookupError::Names(reader_error)
+        ))
+    );
+    assert!(matches!(
+        result.exports.selections[1],
+        Ok(PeExportSelection::Selected { name: None, .. })
+    ));
+    assert_eq!(
+        lookup_pe_import_evidence_exports(
+            &imports,
+            0,
+            &exports,
+            owned_query_limits(),
+            limits(5, 2)
+        ),
+        Err(PeImportExportError::ExportBatch(
+            PeExportBatchError::SelectionRowsExceeded {
+                index: 3,
+                total: 3,
+                limit: 2
+            }
+        ))
+    );
+    let zero = PeExportEvidenceLookupLimits {
+        max_table_rows: 0,
+        max_table_text_bytes: 0,
+    };
+    let refused =
+        lookup_pe_import_evidence_exports(&imports, 0, &exports, zero, limits(5, 0)).unwrap();
+    assert_eq!(refused.exports.selection_rows, 0);
+    assert_eq!(refused.exports.selections.len(), 5);
+    assert_eq!(
+        refused.exports.selections[1],
+        Err(PeExportEvidenceLookupError::RowsExceeded { rows: 3, limit: 0 })
+    );
+    imports.lookups.as_mut().unwrap()[0].entries.clear();
+    let empty =
+        lookup_pe_import_evidence_exports(&imports, 0, &exports, zero, limits(0, 0)).unwrap();
+    assert_eq!(empty.exports.selection_rows, 0);
+    assert!(empty.exports.selections.is_empty());
+    assert!(std::ptr::eq(
+        empty.imports,
+        imports.lookups.as_ref().unwrap().as_ptr()
+    ));
+}
+
+#[test]
+fn owned_import_symbols_are_opaque_queries_and_unrelated_views_are_ignored() {
+    let (mut imports, mut exports) =
+        owned_inputs(&mixed_importer(false), &providing::fixture(false, 2));
+    imports.descriptors = Ok(Vec::new());
+    imports.total_rows = u64::MAX;
+    imports.total_text_bytes = u64::MAX;
+    let record = &mut imports.lookups.as_mut().unwrap()[0];
+    record.descriptor.dll_name = "unrelated provider\0é".to_owned();
+    let mut entry = record.entries[0].clone();
+    entry.raw_value = 0;
+    entry.symbol = PeOwnedImportSymbol::ByName {
+        hint_name_rva: RelativeVirtualAddress::new(u32::MAX),
+        hint: u16::MAX,
+        name: "é".to_owned(),
+    };
+    record.entries = vec![entry.clone(), entry.clone()];
+    entry.symbol = PeOwnedImportSymbol::Ordinal(32768);
+    record.entries.push(entry.clone());
+    entry.symbol = PeOwnedImportSymbol::Ordinal(65535);
+    record.entries.push(entry);
+    let names = exports.names.as_mut().unwrap().as_mut().unwrap();
+    names.entries[0].name = "é".to_owned();
+    names.entries[1].name = "É".to_owned();
+    let result = lookup_pe_import_evidence_exports(
+        &imports,
+        0,
+        &exports,
+        owned_query_limits(),
+        limits(4, 2),
+    )
+    .unwrap();
+    assert_eq!(result.exports.selection_rows, 2);
+    assert_eq!(result.exports.selections[0], result.exports.selections[1]);
+    assert!(matches!(
+        result.exports.selections[0],
+        Ok(PeExportSelection::Selected { name: Some(_), .. })
+    ));
+    for (index, ordinal) in [(2, 32768), (3, 65535)] {
+        assert_eq!(
+            result.exports.selections[index],
+            Ok(PeExportSelection::OrdinalOutOfRange {
+                ordinal,
+                base: 7,
+                address_count: 3
+            })
+        );
+    }
+    assert_eq!(result.imports.entries[0].raw_value, 0);
+}
 mod importing {
     pub(super) fn put32(bytes: &mut [u8], offset: usize, value: u32) {
         bytes[offset..offset + 4].copy_from_slice(&value.to_le_bytes());

@@ -87,6 +87,7 @@ pub use imports::{
     parse_pe_delay_import_descriptors, parse_pe_delay_import_lookups, parse_pe_delay_import_names,
     parse_pe_import_descriptors, parse_pe_import_lookups,
 };
+pub use imports::{PeImportEvidenceExportBatch, lookup_pe_import_evidence_exports};
 pub use imports::{
     PeOwnedImportDescriptor, PeOwnedImportLookup, PeOwnedImportLookupEntry, PeOwnedImportSymbol,
     PeStaticImportEvidence, PeStaticImportEvidenceError, PeStaticImportEvidenceLimits,
