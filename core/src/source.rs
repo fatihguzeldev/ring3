@@ -1,4 +1,5 @@
 mod application_candidates;
+mod module_dependencies;
 mod paths;
 mod pe_evidence;
 mod pe_fingerprints;
@@ -8,6 +9,11 @@ mod pe_modules;
 pub use application_candidates::{
     AsciiApplicationSourceCandidateError, AsciiApplicationSourceCandidateLimits,
     find_ascii_application_source_candidate,
+};
+pub use module_dependencies::{
+    AsciiPeModuleDependencyError, AsciiPeModuleDependencyEvidence, AsciiPeModuleDependencyLimits,
+    AsciiPeModuleDependencyRequest, PeDelayDependencyError, PeModuleDependencyKind,
+    PeModuleDependencyViews, PeStaticDependencyError, observe_ascii_pe_module_dependencies,
 };
 pub use paths::{
     AsciiSourcePathBatch, AsciiSourcePathCollision, AsciiSourcePathEntry, AsciiSourcePathError,
