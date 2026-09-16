@@ -87,4 +87,8 @@ pub use pe::{PeImportEvidenceExportBatch, lookup_pe_import_evidence_exports};
 
 pub use pe::{PeDelayImportEvidenceExportBatch, lookup_pe_delay_import_evidence_exports};
 
+pub use pe::{
+    PeForwarderEvidenceWalkBatch, PeForwarderWalkBatchError, PeForwarderWalkBatchLimits,
+    PeForwarderWalkBatchMetric, walk_pe_export_evidence_forwarders_batch,
+};
 pub use pe::{PeForwarderEvidenceWalkError, walk_pe_export_evidence_forwarders};
