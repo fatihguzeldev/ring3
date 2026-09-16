@@ -248,6 +248,9 @@
     ],
     "pe_bound_names": [
       "generated_named_importers_and_providers_have_no_bound_import_names"
+    ],
+    "pe_bound_evidence": [
+      "generated_owned_bound_imports_preserve_compiled_absence"
     ]
   }
 }
