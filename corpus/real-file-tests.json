@@ -245,6 +245,9 @@
     ],
     "pe_bound_imports": [
       "generated_named_importers_and_providers_have_no_bound_import_table"
+    ],
+    "pe_bound_names": [
+      "generated_named_importers_and_providers_have_no_bound_import_names"
     ]
   }
 }
