@@ -1097,3 +1097,141 @@ fn owned_missing_route_error_outlives_route_query_and_source_list_storage() {
     };
     assert_eq!(request.module.as_ptr(), text.as_ptr());
 }
+
+fn compiled_owned_walk_evidence(
+    forwarder: &std::path::Path,
+    provider: &std::path::Path,
+) -> [PeExportEvidence; 2] {
+    [(forwarder, 8, 101), (provider, 2, 0)].map(|(path, rows, text)| {
+        let mut bytes = std::fs::read(path).unwrap();
+        assert_eq!(bytes.len(), 2048);
+        let evidence = inspect_pe_exports(
+            &bytes,
+            PeExportEvidenceLimits {
+                max_input_bytes: 2048,
+                max_output_rows: rows,
+                max_output_text_bytes: text,
+            },
+        )
+        .unwrap();
+        bytes.fill(0xee);
+        drop(bytes);
+        evidence
+    })
+}
+
+fn check_linked_owned_walk(evidence: &[PeExportEvidence; 2], ordinal: bool) {
+    let root = if ordinal { "by_ordinal" } else { "by_name" };
+    let (rows, text_bytes) = if ordinal { (2, 39) } else { (1, 42) };
+    let sources = [&evidence[0], &evidence[1]];
+    let routes = [route(0, "OtherModule", 1)];
+    let cap = PeForwarderWalkLimits {
+        max_sources: 2,
+        max_routes: 1,
+        max_hops: 2,
+        max_selection_rows: rows,
+        max_text_bytes: text_bytes,
+    };
+    let query_cap = PeExportEvidenceLookupLimits {
+        max_table_rows: 5,
+        max_table_text_bytes: 59,
+    };
+    let run = |routes: &[PeForwarderRoute<'_>], query_cap, cap| {
+        walk_pe_export_evidence_forwarders(
+            &sources,
+            routes,
+            0,
+            PeExportQuery::Name(root),
+            query_cap,
+            cap,
+        )
+    };
+    let expected = ring3_core::PeForwarderWalk {
+        selection_rows: rows,
+        text_bytes,
+        steps: vec![
+            linked_forwarder_step(ordinal),
+            linked_terminal_step(ordinal),
+        ],
+    };
+    let request = expected.steps[0].forwarder.unwrap().request;
+    assert_eq!(run(&routes, query_cap, cap), Ok(expected.clone()));
+    assert_eq!(run(&routes, query_cap, cap), Ok(expected));
+    assert_eq!(
+        run(&[], query_cap, cap),
+        Err(PeForwarderEvidenceWalkError::Walk(
+            PeForwarderWalkError::MissingRoute {
+                hop: 0,
+                source_index: 0,
+                request
+            },
+        ))
+    );
+    assert_eq!(
+        run(
+            &routes,
+            query_cap,
+            PeForwarderWalkLimits {
+                max_selection_rows: rows - 1,
+                ..cap
+            }
+        ),
+        Err(PeForwarderEvidenceWalkError::Walk(
+            PeForwarderWalkError::SelectionRows {
+                hop: u64::from(ordinal),
+                source_index: u32::from(ordinal),
+                used: u64::from(ordinal),
+                cause: PeExportBatchError::SelectionRowsExceeded {
+                    index: 0,
+                    total: 1,
+                    limit: 0
+                },
+            }
+        ))
+    );
+    assert_eq!(
+        run(
+            &routes,
+            PeExportEvidenceLookupLimits {
+                max_table_rows: 4,
+                ..query_cap
+            },
+            cap
+        ),
+        Err(PeForwarderEvidenceWalkError::Provider {
+            hop: 0,
+            source_index: 0,
+            cause: PeExportEvidenceLookupError::RowsExceeded { rows: 5, limit: 4 },
+        })
+    );
+}
+
+#[test]
+#[ignore = "requires all four explicit compiled owned forwarder/provider paths"]
+fn generated_owned_forwarder_walks_preserve_compiled_routes() {
+    let paths = [
+        (
+            "RING3_EXPORT_FORWARD_PE32_FIXTURE",
+            "RING3_EXPORT_PE32_ORDINAL_DLL",
+        ),
+        (
+            "RING3_EXPORT_FORWARD_PE32PLUS_FIXTURE",
+            "RING3_EXPORT_PE32PLUS_ORDINAL_DLL",
+        ),
+    ]
+    .map(|(forwarder, provider)| {
+        let path =
+            |key| {
+                std::path::PathBuf::from(std::env::var_os(key).expect(
+                    "all four explicit compiled owned forwarder/provider paths are required",
+                ))
+            };
+        (path(forwarder), path(provider))
+    });
+    for (forwarder, provider) in paths {
+        let evidence = compiled_owned_walk_evidence(&forwarder, &provider);
+        for ordinal in [false, true] {
+            check_linked_owned_walk(&evidence, ordinal);
+        }
+    }
+}

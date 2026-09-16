@@ -190,7 +190,8 @@
       "generated_pe32_named_forwarder_walk_preserves_missing_target",
       "generated_pe32plus_named_forwarder_walk_preserves_missing_target",
       "generated_pe32_ordinal_forwarder_walk_selects_explicit_provider",
-      "generated_pe32plus_ordinal_forwarder_walk_selects_explicit_provider"
+      "generated_pe32plus_ordinal_forwarder_walk_selects_explicit_provider",
+      "generated_owned_forwarder_walks_preserve_compiled_routes"
     ],
     "pe_amd64_unwind": [
       "generated_amd64_unwind_records_preserve_slots_and_padding"
