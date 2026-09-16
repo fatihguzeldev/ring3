@@ -63,6 +63,7 @@ pub use exports::{
     lookup_pe_export, lookup_pe_export_batch, parse_pe_export_addresses, parse_pe_export_directory,
     parse_pe_export_names, walk_pe_export_forwarders,
 };
+pub use exports::{PeExportEvidenceBatch, lookup_pe_export_evidence_batch};
 pub use exports::{
     PeExportEvidenceLookupError, PeExportEvidenceLookupLimits, lookup_pe_export_evidence,
 };

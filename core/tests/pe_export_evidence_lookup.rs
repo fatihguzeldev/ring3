@@ -5,6 +5,192 @@ use ring3_core::{
     PeOwnedExportNameTable, PeOwnedExportTarget, RelativeVirtualAddress, inspect_pe_exports,
     lookup_pe_export, lookup_pe_export_evidence,
 };
+use ring3_core::{PeExportBatchError, PeExportBatchLimits, lookup_pe_export_evidence_batch};
+
+fn batch_limits(queries: u64, rows: u64) -> PeExportBatchLimits {
+    PeExportBatchLimits {
+        max_queries: queries,
+        max_selection_rows: rows,
+    }
+}
+
+#[test]
+fn evidence_batch_preserves_order_and_metadata_after_image_and_queries_drop() {
+    for plus in [false, true] {
+        let bytes = fixture(plus);
+        let queries = [
+            PeExportQuery::Name("Alpha"),
+            PeExportQuery::Name("zeta\t\x01\"\\\x7f"),
+            PeExportQuery::Name("Alias"),
+            PeExportQuery::Name("alpha"),
+            PeExportQuery::Ordinal(0xffff_fff9),
+            PeExportQuery::Ordinal(0xffff_fffb),
+            PeExportQuery::Ordinal(0xffff_fff8),
+            PeExportQuery::Ordinal(u32::MAX),
+        ];
+        let expected: Vec<_> = queries
+            .iter()
+            .map(|&q| format!("{:?}", lookup_pe_export(&bytes, q).map_err(Error::Reader)))
+            .collect();
+        let evidence = inspect_pe_exports(&bytes, collection_limits()).unwrap();
+        drop(bytes);
+        let before = evidence.clone();
+        let batch = lookup_pe_export_evidence_batch(
+            &evidence,
+            &queries,
+            limits(10, 60),
+            batch_limits(8, 6),
+        )
+        .unwrap();
+        assert_eq!(batch.selection_rows, 6);
+        assert_eq!(
+            batch
+                .selections
+                .iter()
+                .map(|s| format!("{s:?}"))
+                .collect::<Vec<_>>(),
+            expected
+        );
+        assert_eq!(
+            lookup_pe_export_evidence_batch(
+                &evidence,
+                &queries,
+                limits(10, 60),
+                batch_limits(8, 5)
+            ),
+            Err(PeExportBatchError::SelectionRowsExceeded {
+                index: 5,
+                total: 6,
+                limit: 5
+            })
+        );
+        assert_eq!(
+            lookup_pe_export_evidence_batch(
+                &evidence,
+                &queries,
+                limits(10, 60),
+                batch_limits(8, 6)
+            ),
+            Ok(batch)
+        );
+        let independent = {
+            let query = String::from("Alias");
+            lookup_pe_export_evidence_batch(
+                &evidence,
+                &[PeExportQuery::Name(&query)],
+                limits(10, 60),
+                batch_limits(1, 1),
+            )
+            .unwrap()
+        };
+        assert_eq!(independent.selection_rows, 1);
+        assert!(matches!(
+            independent.selections[0],
+            Ok(PeExportSelection::Selected {
+                address: ring3_core::PeExportAddressEntry {
+                    target: PeExportTarget::Forwarder {
+                        text: "M.#00032768",
+                        ..
+                    },
+                    ..
+                },
+                ..
+            })
+        ));
+        assert_eq!(evidence, before);
+    }
+}
+
+#[test]
+fn evidence_batch_count_and_empty_admission_precede_invalid_evidence() {
+    let mut evidence = observed();
+    names(&mut evidence).entries[3].address_index = u16::MAX;
+    let queries = [
+        PeExportQuery::Name("Alpha"),
+        PeExportQuery::Ordinal(0xffff_fff9),
+    ];
+    assert_eq!(
+        lookup_pe_export_evidence_batch(&evidence, &queries, limits(0, 0), batch_limits(1, 0)),
+        Err(PeExportBatchError::QueryCountExceeded { count: 2, limit: 1 })
+    );
+    let empty =
+        lookup_pe_export_evidence_batch(&evidence, &[], limits(0, 0), batch_limits(0, 0)).unwrap();
+    assert_eq!(empty.selection_rows, 0);
+    assert!(empty.selections.is_empty());
+}
+
+#[test]
+fn evidence_batch_retains_per_query_limits_and_late_structure_errors() {
+    let mut evidence = observed();
+    evidence.total_rows = 0;
+    evidence.total_text_bytes = 0;
+    let queries = [
+        PeExportQuery::Name("Alpha"),
+        PeExportQuery::Ordinal(0xffff_fff9),
+    ];
+    for (query_limits, error) in [
+        (limits(6, 32), Error::RowsExceeded { rows: 10, limit: 6 }),
+        (
+            limits(10, 32),
+            Error::TextExceeded {
+                bytes: 60,
+                limit: 32,
+            },
+        ),
+    ] {
+        let batch =
+            lookup_pe_export_evidence_batch(&evidence, &queries, query_limits, batch_limits(2, 1))
+                .unwrap();
+        assert_eq!(batch.selection_rows, 1);
+        assert_eq!(batch.selections[0], Err(error));
+        assert!(matches!(
+            batch.selections[1],
+            Ok(PeExportSelection::Selected { name: None, .. })
+        ));
+    }
+    names(&mut evidence).entries[3].address_index = 6;
+    let batch =
+        lookup_pe_export_evidence_batch(&evidence, &queries, limits(10, 60), batch_limits(2, 1))
+            .unwrap();
+    assert_eq!(
+        batch.selections[0],
+        Err(Error::NameAddressIndexOutOfRange {
+            entry_index: 3,
+            address_index: 6,
+            address_count: 6
+        })
+    );
+    assert_eq!(batch.selection_rows, 1);
+    assert!(matches!(
+        batch.selections[1],
+        Ok(PeExportSelection::Selected { name: None, .. })
+    ));
+}
+
+#[test]
+fn evidence_batch_absence_and_reader_errors_cost_no_selection_rows() {
+    let mut evidence = observed();
+    let error = PeExportNameError::NameUnavailable { entry_index: 3 };
+    evidence.names = Err(error);
+    evidence.addresses = Ok(None);
+    let queries = [
+        PeExportQuery::Name("Alpha"),
+        PeExportQuery::Ordinal(1),
+        PeExportQuery::Name("Alpha"),
+    ];
+    let batch =
+        lookup_pe_export_evidence_batch(&evidence, &queries, limits(0, 0), batch_limits(3, 0))
+            .unwrap();
+    assert_eq!(batch.selection_rows, 0);
+    assert_eq!(
+        batch.selections,
+        vec![
+            Err(Error::Reader(PeExportLookupError::Names(error))),
+            Ok(PeExportSelection::DirectoryAbsent),
+            Err(Error::Reader(PeExportLookupError::Names(error))),
+        ]
+    );
+}
 
 fn put32(bytes: &mut [u8], offset: usize, value: u32) {
     bytes[offset..offset + 4].copy_from_slice(&value.to_le_bytes());
