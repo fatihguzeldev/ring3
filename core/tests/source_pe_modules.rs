@@ -134,6 +134,7 @@ fn limits() -> AsciiPeSourceModuleEvidenceLimits {
         static_imports: output(5, 32),
         delay_imports: output(5, 23),
         exports: output(8, 35),
+        bound_imports: output(0, 0),
     }
 }
 fn module_limits(limits: AsciiPeSourceModuleEvidenceLimits) -> PeModuleEvidenceLimits {
@@ -142,6 +143,7 @@ fn module_limits(limits: AsciiPeSourceModuleEvidenceLimits) -> PeModuleEvidenceL
         static_imports: limits.static_imports,
         delay_imports: limits.delay_imports,
         exports: limits.exports,
+        bound_imports: limits.bound_imports,
     }
 }
 
@@ -677,6 +679,7 @@ fn compiled_source_limits() -> AsciiPeSourceModuleEvidenceLimits {
         static_imports: output(3, 39),
         delay_imports: output(4, 33),
         exports: output(8, 101),
+        bound_imports: output(0, 0),
     }
 }
 fn compiled_source_views<'a>(
@@ -718,6 +721,15 @@ fn assert_compiled_source_pairings(
             }
         );
         assert_eq!(entry.module, Ok(expected[fixture].clone()));
+        assert_eq!(
+            entry.module.as_ref().unwrap().bound_imports,
+            Ok(ring3_core::PeBoundImportEvidence {
+                total_rows: 0,
+                total_text_bytes: 0,
+                descriptors: Ok(None),
+                names: Ok(None),
+            })
+        );
         let fingerprint = &entry.module.as_ref().unwrap().fingerprinted;
         assert_eq!(fingerprint.byte_length, COMPILED_SOURCE_FIXTURES[fixture].2);
         let mut digest = String::with_capacity(64);
@@ -906,6 +918,175 @@ fn generated_named_module_refusals_preserve_admission_and_family_limits() {
             }
             let batch = inspect_ascii_pe_source_module_evidence(&sources, limits).unwrap();
             assert_compiled_family_refusal(&original, &batch, family, rows_first);
+        }
+    }
+}
+
+fn with_bound(plus: bool) -> Vec<u8> {
+    let mut b = fixture(plus);
+    put(&mut b, slot(plus) + 88, 0x2c00);
+    put(&mut b, slot(plus) + 92, 32);
+    for (index, timestamp, name, count) in
+        [(0, 123, 128, 1), (1, 456, 144, 0xbeef), (2, 789, 160, 0)]
+    {
+        let o = offset(0x2c00) + index * 8;
+        put(&mut b, o, timestamp);
+        word(&mut b, o + 4, name);
+        word(&mut b, o + 6, count);
+    }
+    text(&mut b, 0x2c80, b"Bound.DLL\0");
+    text(&mut b, 0x2c90, b"Other.DLL\0");
+    text(&mut b, 0x2ca0, b"Tail.DLL\0");
+    b
+}
+
+#[test]
+fn named_bound_results_keep_aliases_order_and_ownership() {
+    for plus in [false, true] {
+        let mut good = with_bound(plus);
+        let mut bad = good.clone();
+        bad[offset(0x2ca0)] = 0xff;
+        let mut paths = ["Bin/A".to_owned(), "Bin/B".to_owned(), "Alias".to_owned()];
+        let mut caps = limits();
+        caps.bound_imports = output(9, 26);
+        let expected = [good.as_slice(), bad.as_slice(), good.as_slice()]
+            .map(|bytes| inspect_pe_module_evidence(bytes, module_limits(caps)).unwrap());
+        let owned = {
+            let sources = [
+                AsciiPeSource {
+                    path: &paths[0],
+                    bytes: &good,
+                },
+                AsciiPeSource {
+                    path: &paths[1],
+                    bytes: &bad,
+                },
+                AsciiPeSource {
+                    path: &paths[2],
+                    bytes: &good,
+                },
+            ];
+            let batch = inspect_ascii_pe_source_module_evidence(&sources, caps).unwrap();
+            assert_eq!(
+                batch,
+                inspect_ascii_pe_source_module_evidence(&sources, caps).unwrap()
+            );
+            let reverse = inspect_ascii_pe_source_module_evidence(
+                &[sources[2], sources[1], sources[0]],
+                caps,
+            )
+            .unwrap();
+            for (index, entry) in reverse.entries.iter().enumerate() {
+                assert_eq!(entry.path.index, index);
+                assert_eq!(entry.module, batch.entries[2 - index].module);
+                assert_eq!(entry.path.key, batch.entries[2 - index].path.key);
+            }
+            batch
+        };
+        good.fill(0);
+        bad.fill(0);
+        for path in &mut paths {
+            path.clear();
+        }
+        drop(good);
+        drop(bad);
+        drop(paths);
+        assert_eq!(
+            (owned.total_path_bytes, owned.total_content_bytes),
+            (15, 24576)
+        );
+        for (index, entry) in owned.entries.iter().enumerate() {
+            assert_eq!(entry.path.index, index);
+            assert_eq!(entry.module, Ok(expected[index].clone()));
+        }
+        assert_eq!(owned.entries[0].module, owned.entries[2].module);
+        assert_ne!(owned.entries[0].path, owned.entries[2].path);
+        let partial = owned.entries[1]
+            .module
+            .as_ref()
+            .unwrap()
+            .bound_imports
+            .as_ref()
+            .unwrap();
+        assert_eq!((partial.total_rows, partial.total_text_bytes), (3, 0));
+        assert!(partial.descriptors.is_ok() && partial.names.is_err());
+    }
+}
+
+#[test]
+fn named_bound_caps_are_per_occurrence_and_outer_admission_stays_first() {
+    use ring3_core::PeBoundImportEvidenceError as BoundError;
+    for plus in [false, true] {
+        let good = with_bound(plus);
+        let mut partial = good.clone();
+        partial[offset(0x2ca0)] = 0xff;
+        let absent = fixture(plus);
+        let mut caps = limits();
+        caps.bound_imports = output(8, 0);
+        let sources = [
+            AsciiPeSource {
+                path: "first",
+                bytes: &good,
+            },
+            AsciiPeSource {
+                path: "second",
+                bytes: &partial,
+            },
+            AsciiPeSource {
+                path: "third",
+                bytes: &absent,
+            },
+        ];
+        let batch = inspect_ascii_pe_source_module_evidence(&sources, caps).unwrap();
+        let modules: Vec<_> = batch
+            .entries
+            .iter()
+            .map(|e| e.module.as_ref().unwrap())
+            .collect();
+        assert_eq!(
+            modules[0].bound_imports,
+            Err(BoundError::OutputRowsExceeded { rows: 9, limit: 8 })
+        );
+        assert_eq!(modules[1].bound_imports.as_ref().unwrap().total_rows, 3);
+        assert_eq!(
+            modules[2].bound_imports.as_ref().unwrap().descriptors,
+            Ok(None)
+        );
+        for (source, module) in sources.iter().zip(modules) {
+            assert_eq!(
+                module,
+                &inspect_pe_module_evidence(source.bytes, module_limits(caps)).unwrap()
+            );
+            assert!(
+                module.static_imports.is_ok()
+                    && module.delay_imports.is_ok()
+                    && module.exports.is_ok()
+            );
+        }
+        let late = vec![0; 8193];
+        for invalid_path in [false, true] {
+            let result = inspect_ascii_pe_source_module_evidence(
+                &[
+                    sources[0],
+                    AsciiPeSource {
+                        path: if invalid_path { "" } else { "late" },
+                        bytes: &late,
+                    },
+                ],
+                caps,
+            );
+            assert_eq!(
+                result,
+                Err(if invalid_path {
+                    Paths(AsciiSourcePathError::EmptyPath { index: 1 })
+                } else {
+                    Content(PeHeaderBatchError::FileSizeExceeded {
+                        index: 1,
+                        size: 8193,
+                        limit: 8192,
+                    })
+                })
+            );
         }
     }
 }

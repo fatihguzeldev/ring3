@@ -122,10 +122,19 @@ fn limits() -> PeModuleEvidenceLimits {
         static_imports: output(5, 32),
         delay_imports: output(5, 23),
         exports: output(8, 35),
+        bound_imports: output(0, 0),
     }
 }
 fn individual(bytes: &[u8], l: PeModuleEvidenceLimits) -> PeModuleEvidence {
     PeModuleEvidence {
+        bound_imports: ring3_core::inspect_pe_bound_imports(
+            bytes,
+            ring3_core::PeBoundImportEvidenceLimits {
+                max_input_bytes: l.max_input_bytes,
+                max_output_rows: l.bound_imports.max_rows,
+                max_output_text_bytes: l.bound_imports.max_text_bytes,
+            },
+        ),
         fingerprinted: fingerprint_pe_declared_evidence(bytes, l.max_input_bytes).unwrap(),
         static_imports: inspect_pe_static_imports(
             bytes,
@@ -198,6 +207,7 @@ fn uninspected_tail_changes_digest_while_all_metadata_stays_equal() {
         assert_eq!(before.static_imports, after.static_imports);
         assert_eq!(before.delay_imports, after.delay_imports);
         assert_eq!(before.exports, after.exports);
+        assert_eq!(before.bound_imports, after.bound_imports);
     }
 }
 
@@ -210,6 +220,7 @@ fn shared_input_refusal_precedes_malformed_metadata_and_family_caps() {
             static_imports: output(0, 0),
             delay_imports: output(0, 0),
             exports: output(0, 0),
+            bound_imports: output(0, 0),
         };
         assert_eq!(
             inspect_pe_module_evidence(&bytes, l),
@@ -362,6 +373,7 @@ fn zero_output_limits_keep_absence_and_present_empty_distinct() {
             static_imports: output(0, 0),
             delay_imports: output(0, 0),
             exports: output(0, 0),
+            bound_imports: output(0, 0),
         };
         let mut absent = fixture(plus);
         for i in [0, 1, 13] {
@@ -396,6 +408,7 @@ fn admitted_malformed_and_empty_inputs_keep_digest_and_all_reader_errors() {
             static_imports: output(0, 0),
             delay_imports: output(0, 0),
             exports: output(0, 0),
+            bound_imports: output(0, 0),
         };
         let e = inspect_pe_module_evidence(&bytes, l).unwrap();
         assert_eq!(e, individual(&bytes, l));
@@ -489,6 +502,7 @@ fn compiled_limits(f: &CompiledModule) -> PeModuleEvidenceLimits {
         static_imports: output(f.caps[0], f.caps[1]),
         delay_imports: output(f.caps[2], f.caps[3]),
         exports: output(f.caps[4], f.caps[5]),
+        bound_imports: output(0, 0),
     }
 }
 
@@ -537,6 +551,15 @@ fn generated_owned_module_evidence_preserves_compiled_observations() {
         );
         assert_eq!(optional.directory_count.value, 16);
         assert_eq!(evidence.fingerprinted.evidence.clr, Ok(None));
+        assert_eq!(
+            evidence.bound_imports,
+            Ok(ring3_core::PeBoundImportEvidence {
+                total_rows: 0,
+                total_text_bytes: 0,
+                descriptors: Ok(None),
+                names: Ok(None),
+            })
+        );
         let static_imports = evidence.static_imports.unwrap();
         let delay_imports = evidence.delay_imports.unwrap();
         let exports = evidence.exports.unwrap();
@@ -573,6 +596,7 @@ fn generated_owned_module_refusals_preserve_family_isolation() {
             static_imports: output(0, 0),
             delay_imports: output(0, 0),
             exports: output(0, 0),
+            bound_imports: output(0, 0),
         };
         assert_eq!(
             inspect_pe_module_evidence(&bytes, too_small),
@@ -658,6 +682,170 @@ fn generated_owned_module_refusals_preserve_family_isolation() {
                         assert_eq!(e.static_imports, expected.static_imports);
                         assert_eq!(e.delay_imports, expected.delay_imports);
                     }
+                }
+            }
+        }
+    }
+}
+
+fn with_bound(plus: bool) -> Vec<u8> {
+    let mut b = fixture(plus);
+    put(&mut b, slot(plus) + 88, 0x2c00);
+    put(&mut b, slot(plus) + 92, 32);
+    for (index, timestamp, name, count) in
+        [(0, 123, 128, 1), (1, 456, 144, 0xbeef), (2, 789, 160, 0)]
+    {
+        let o = offset(0x2c00) + index * 8;
+        put(&mut b, o, timestamp);
+        word(&mut b, o + 4, name);
+        word(&mut b, o + 6, count);
+    }
+    text(&mut b, 0x2c80, b"Bound.DLL\0");
+    text(&mut b, 0x2c90, b"Other.DLL\0");
+    text(&mut b, 0x2ca0, b"Tail.DLL\0");
+    b
+}
+
+#[test]
+fn bound_family_owns_same_input_metadata_after_release() {
+    for plus in [false, true] {
+        let mut bytes = with_bound(plus);
+        let before = bytes.clone();
+        let mut caps = limits();
+        caps.bound_imports = output(9, 26);
+        let expected = individual(&bytes, caps);
+        let actual = inspect_pe_module_evidence(&bytes, caps).unwrap();
+        assert_eq!(actual, inspect_pe_module_evidence(&bytes, caps).unwrap());
+        assert_eq!(bytes, before);
+        bytes.fill(0);
+        drop(bytes);
+        assert_eq!(actual, expected);
+        let bound = actual.bound_imports.unwrap();
+        assert_eq!((bound.total_rows, bound.total_text_bytes), (9, 26));
+        let raw = bound.descriptors.unwrap().unwrap();
+        assert_eq!(raw.descriptors.len(), 2);
+        assert_eq!(raw.descriptors[0].forwarder_refs[0].reserved, 0xbeef);
+        let names = bound.names.unwrap().unwrap();
+        assert_eq!(names.table, raw);
+        assert_eq!(
+            names
+                .names
+                .iter()
+                .map(|n| n.dll_name.as_str())
+                .collect::<Vec<_>>(),
+            ["Bound.DLL", "Other.DLL", "Tail.DLL"]
+        );
+        assert_eq!(names.names[2].name_rva.get(), 0x2ca0);
+        assert_eq!(names.names[2].name_file_offset.get(), 7840);
+    }
+}
+
+#[test]
+fn all_four_family_refusal_subsets_keep_other_complete_results() {
+    use ring3_core::PeBoundImportEvidenceError as BoundError;
+    for plus in [false, true] {
+        let bytes = with_bound(plus);
+        for text_refusal in [false, true] {
+            for mask in 0..16 {
+                let mut caps = limits();
+                caps.bound_imports = output(9, 26);
+                for (bit, cap, rows, text) in [
+                    (1, &mut caps.static_imports, 5, 32),
+                    (2, &mut caps.delay_imports, 5, 23),
+                    (4, &mut caps.exports, 8, 35),
+                    (8, &mut caps.bound_imports, 9, 26),
+                ] {
+                    if mask & bit != 0 {
+                        *cap = if text_refusal {
+                            output(rows, text - 1)
+                        } else {
+                            output(rows - 1, 0)
+                        };
+                    }
+                }
+                let actual = inspect_pe_module_evidence(&bytes, caps).unwrap();
+                assert_eq!(actual, individual(&bytes, caps));
+                assert_eq!(actual.static_imports.is_err(), mask & 1 != 0);
+                assert_eq!(actual.delay_imports.is_err(), mask & 2 != 0);
+                assert_eq!(actual.exports.is_err(), mask & 4 != 0);
+                assert_eq!(actual.bound_imports.is_err(), mask & 8 != 0);
+                if mask & 8 != 0 {
+                    assert_eq!(
+                        actual.bound_imports,
+                        Err(if text_refusal {
+                            BoundError::OutputTextExceeded {
+                                bytes: 26,
+                                limit: 25,
+                            }
+                        } else {
+                            BoundError::OutputRowsExceeded { rows: 9, limit: 8 }
+                        })
+                    );
+                }
+            }
+        }
+        let mut caps = limits();
+        caps.max_input_bytes = 8191;
+        assert_eq!(
+            inspect_pe_module_evidence(&bytes, caps),
+            Err(PeFingerprintError::InputTooLarge {
+                length: 8192,
+                limit: 8191
+            })
+        );
+    }
+}
+
+#[test]
+fn bound_inner_errors_and_empty_tables_remain_independent() {
+    for plus in [false, true] {
+        let mut caps = limits();
+        caps.bound_imports = output(9, 26);
+        for mode in 0..4 {
+            let mut bytes = with_bound(plus);
+            match mode {
+                0 => bytes[offset(0x2ca0)] = 0xff,
+                1 => put(&mut bytes, slot(plus) + 92, 24),
+                2 => bytes[slot(plus) + 88..slot(plus) + 96].fill(0),
+                _ => bytes[offset(0x2c00)..offset(0x2c00) + 32].fill(0),
+            }
+            let actual = inspect_pe_module_evidence(&bytes, caps).unwrap();
+            assert_eq!(actual, individual(&bytes, caps));
+            assert!(
+                actual.static_imports.is_ok()
+                    && actual.delay_imports.is_ok()
+                    && actual.exports.is_ok()
+            );
+            let bound = actual.bound_imports.unwrap();
+            assert_eq!(
+                (bound.total_rows, bound.total_text_bytes),
+                (if mode == 0 { 3 } else { 0 }, 0)
+            );
+            match mode {
+                0 => {
+                    assert_eq!(bound.descriptors.unwrap().unwrap().descriptors.len(), 2);
+                    assert_eq!(
+                        bound.names,
+                        Err(ring3_core::PeBoundImportNameError::NonAsciiDllName {
+                            location: ring3_core::PeBoundImportNameLocation::Descriptor {
+                                descriptor_index: 1
+                            },
+                            name_rva: ring3_core::RelativeVirtualAddress::new(0x2ca0),
+                            offset: 0,
+                            byte: 0xff,
+                        })
+                    );
+                }
+                1 => {
+                    assert!(bound.descriptors.is_err() && bound.names.is_err());
+                }
+                2 => {
+                    assert_eq!(bound.descriptors, Ok(None));
+                    assert_eq!(bound.names, Ok(None));
+                }
+                _ => {
+                    assert!(bound.descriptors.unwrap().unwrap().descriptors.is_empty());
+                    assert!(bound.names.unwrap().unwrap().names.is_empty());
                 }
             }
         }
