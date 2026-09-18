@@ -19,6 +19,17 @@ test("sparse forwarder DLL fixtures preserve pinned bytes across independent bui
     assert.deepEqual(first, second);
     assert.equal(first.executed, false);
     assert.equal(first.windowsOracle, "not-run");
+    assert.ok(contract.sources["provider.c"]);
+    assert.ok(contract.sources["provider.def"]);
+    for (const architecture of ["i386", "amd64"]) {
+      for (const name of ["OtherModule.dll", "OtherModule.lib", "provider.obj"]) {
+        assert.ok(contract.architectures[architecture].artifacts[name]);
+      }
+      const inspection = readFileSync(join(directory, "first", architecture, "provider-inspection.txt"), "utf8");
+      assert.match(inspection, /OtherModule\.dll/);
+      assert.match(inspection, /Ordinal base: 32768/);
+      assert.match(inspection, /ring3_target/);
+    }
     for (const architecture of ["i386", "amd64"]) {
       for (const [name, expected] of Object.entries(contract.architectures[architecture].artifacts)) {
         const a = readFileSync(join(directory, "first", architecture, name));
@@ -43,8 +54,10 @@ test("forwarder source, tool, compiler, linker and expectation failures refuse s
     assert.throws(() => buildForwarderFixtures(join(directory, "tool"), { tools: { clang: process.execPath } }), /clang SHA-256 mismatch/);
     const sources = join(directory, "sources");
     mkdirSync(sources);
+    for (const name of Object.keys(contract.sources)) {
+      writeFileSync(join(sources, name), readFileSync(new URL(`../../corpus/pe-forwarders/${name}`, import.meta.url)));
+    }
     const originalAnchor = readFileSync(new URL("../../corpus/pe-forwarders/anchor.c", import.meta.url));
-    writeFileSync(join(sources, "forwarders.def"), readFileSync(new URL("../../corpus/pe-forwarders/forwarders.def", import.meta.url)));
     const invalidAnchor = "invalid C source\n";
     writeFileSync(join(sources, "anchor.c"), invalidAnchor);
     const invalidCompiler = structuredClone(contract);
@@ -62,6 +75,49 @@ test("forwarder source, tool, compiler, linker and expectation failures refuse s
     for (const name of ["source", "tool", "compiler", "linker", "expectation"]) {
       assert.equal(existsSync(join(directory, name, "evidence.json")), false);
     }
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("named provider source, compile, link, artifacts and inspection failures refuse success evidence", () => {
+  const directory = mkdtempSync(new URL("provider-negative-", outputRoot));
+  const attempted = [];
+  const reject = (name, options, pattern) => {
+    attempted.push(name);
+    assert.throws(() => buildForwarderFixtures(join(directory, name), options), pattern);
+  };
+  try {
+    for (const name of ["provider.c", "provider.def"]) {
+      const spec = structuredClone(contract);
+      spec.sources[name].sha256 = "0".repeat(64);
+      reject(`source-${name}`, { contract: spec }, /source SHA-256 mismatch/);
+    }
+    const sources = join(directory, "sources");
+    mkdirSync(sources);
+    for (const name of Object.keys(contract.sources)) {
+      writeFileSync(join(sources, name), readFileSync(new URL(`../../corpus/pe-forwarders/${name}`, import.meta.url)));
+    }
+    const invalidSource = "invalid provider C source\n";
+    writeFileSync(join(sources, "provider.c"), invalidSource);
+    const compiler = structuredClone(contract);
+    compiler.sources["provider.c"].sha256 = sha256(invalidSource);
+    reject("compile", { sourceDirectory: sources, contract: compiler }, /failed:/);
+    writeFileSync(join(sources, "provider.c"), readFileSync(new URL("../../corpus/pe-forwarders/provider.c", import.meta.url)));
+    const invalidDefinition = "EXPORTS\n missing_provider_symbol @32768\n";
+    writeFileSync(join(sources, "provider.def"), invalidDefinition);
+    const linker = structuredClone(contract);
+    linker.sources["provider.def"].sha256 = sha256(invalidDefinition);
+    reject("link", { sourceDirectory: sources, contract: linker }, /failed:/);
+    for (const name of ["OtherModule.dll", "OtherModule.lib", "provider.obj"]) {
+      const spec = structuredClone(contract);
+      spec.architectures.amd64.artifacts[name].sha256 = "0".repeat(64);
+      reject(`artifact-${name}`, { contract: spec }, /artifact SHA-256 mismatch/);
+    }
+    const inspection = structuredClone(contract);
+    inspection.expectation.provider.symbol = "not_the_provider_export";
+    reject("inspection", { contract: inspection }, /LLVM provider mismatch/);
+    for (const name of attempted) assert.equal(existsSync(join(directory, name, "evidence.json")), false);
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }

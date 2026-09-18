@@ -13,6 +13,14 @@
     "forwarders.def": {
       "path": "corpus/pe-forwarders/forwarders.def",
       "sha256": "3d3b51a73916c73d69ced5ec812b1d4d06d57bfd010c2e06b91f5d1a38a169c9"
+    },
+    "provider.c": {
+      "path": "corpus/pe-forwarders/provider.c",
+      "sha256": "1ad879d7866cb097d4bfb47b6ae4adb238d7318bdba03eca0e1acae8b90c4b15"
+    },
+    "provider.def": {
+      "path": "corpus/pe-forwarders/provider.def",
+      "sha256": "bedc0afdc36fe5368276225e89b26a997d43ce74e7ab848fd14445ae55bb89e4"
     }
   },
   "tools": {
@@ -45,6 +53,18 @@
         "anchor.obj": {
           "sha256": "b1f0aeb85c226c95bfa357a3585f94d4e1f2bb5495ff7e56a469127bca811abc",
           "bytes": 572
+        },
+        "OtherModule.dll": {
+          "bytes": 2048,
+          "sha256": "aa31c9dd54d773cc246753e9ebc174d9ceed7fb62f5a6cbceb34e88781c6e91c"
+        },
+        "OtherModule.lib": {
+          "bytes": 1386,
+          "sha256": "9f7fd9a48d765604524e050699da8eca50f08f16b056a18079bbc7661751c87b"
+        },
+        "provider.obj": {
+          "bytes": 562,
+          "sha256": "0d6c37c4df3ec1edfa5fe214b9babf705f1adfae8d6f57a463cc9cae02254322"
         }
       }
     },
@@ -63,6 +83,18 @@
         "anchor.obj": {
           "sha256": "3560908c3e014c266b6e8f4e145b5278c67f0d655b2eb24c59de4e766e834afe",
           "bytes": 573
+        },
+        "OtherModule.dll": {
+          "bytes": 2048,
+          "sha256": "83aad28f5c82a6f5cfdac44154d0d34efe0f909ff8c690bc24f1e6e11af59f2c"
+        },
+        "OtherModule.lib": {
+          "bytes": 1390,
+          "sha256": "7fa7ed726d87d9138d4bdf87ef7e3ae042c24de3099836fef44d1595dee56f53"
+        },
+        "provider.obj": {
+          "bytes": 561,
+          "sha256": "b41e7603a78870d45bb7679cba392f52be9182d610fbcf6163f938747e6c2a43"
         }
       }
     }
@@ -77,7 +109,17 @@
     "forwarders": [
       "OtherModule.ring3_target",
       "OtherModule.#32768"
-    ]
+    ],
+    "provider": {
+      "dllName": "OtherModule.dll",
+      "ordinalBase": 32768,
+      "addressCount": 1,
+      "nameCount": 1,
+      "directoryRva": 8192,
+      "directorySize": 79,
+      "symbol": "ring3_target",
+      "targetRva": 4096
+    }
   },
   "objectTimestamp": 0
 }
