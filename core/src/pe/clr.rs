@@ -81,6 +81,10 @@ fn read_directory(bytes: &[u8], offset: usize) -> PeClrDataDirectory {
 )]
 pub fn parse_pe_clr_header(bytes: &[u8]) -> Result<Option<PeClrHeader>, PeClrError> {
     let prepared = PreparedPe::new(bytes).map_err(PeClrError::Base)?;
+    parse_prepared(&prepared)
+}
+
+pub(super) fn parse_prepared(prepared: &PreparedPe<'_>) -> Result<Option<PeClrHeader>, PeClrError> {
     let Some(directory) = prepared.headers().directories[14] else {
         return Ok(None);
     };

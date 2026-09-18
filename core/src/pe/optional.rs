@@ -135,6 +135,13 @@ fn decode_fixed(bytes: &[u8], kind: PeKind) -> PeOptionalHeader {
 )]
 pub fn parse_pe_headers(bytes: &[u8]) -> Result<PeHeaders, PeHeaderError> {
     let prefix = parse_pe_header_prefix(bytes)?;
+    parse_after_prefix(bytes, prefix)
+}
+
+pub(super) fn parse_after_prefix(
+    bytes: &[u8],
+    prefix: PeHeaderPrefix,
+) -> Result<PeHeaders, PeHeaderError> {
     let reader = Reader { bytes };
     let (_, coff_offset) = reader.read(prefix.pe_offset, 4)?;
     let (_, optional_offset) = reader.read(coff_offset, 20)?;

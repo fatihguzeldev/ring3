@@ -1,4 +1,4 @@
-use super::{PeHeaderError, PeHeaders, PeSectionTable, Reader, parse_pe_sections};
+use super::{PeHeaderError, PeHeaders, PeSectionTable, Reader, parse_pe_headers};
 use crate::{FileOffset, RelativeVirtualAddress};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -149,7 +149,13 @@ pub(super) struct PreparedPe<'a> {
 
 impl<'a> PreparedPe<'a> {
     pub(super) fn new(bytes: &'a [u8]) -> Result<Self, PeRvaError> {
-        let table = parse_pe_sections(bytes).map_err(PeRvaError::Parse)?;
+        let headers = parse_pe_headers(bytes).map_err(PeRvaError::Parse)?;
+        Self::from_headers(bytes, &headers)
+    }
+
+    pub(super) fn from_headers(bytes: &'a [u8], headers: &PeHeaders) -> Result<Self, PeRvaError> {
+        let table =
+            super::sections::parse_with_headers(bytes, headers).map_err(PeRvaError::Parse)?;
         let prefix = table.headers.prefix;
         let minimum = (prefix.pe_offset.get()
             + 24

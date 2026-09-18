@@ -195,6 +195,35 @@ fn absent_clr_requires_valid_sections_without_erasing_valid_headers() {
 }
 
 #[test]
+fn section_raw_failure_precedes_header_extent_and_clr_absence() {
+    for kind in [PeKind::Pe32, PeKind::Pe32Plus] {
+        for count in [14, 16] {
+            let mut bytes = fixture(kind, 128, 512);
+            let section = 152 + fixed(kind) + 128;
+            put32(&mut bytes, 212, 0);
+            put32(&mut bytes, 152 + fixed(kind) - 4, count);
+            put32(&mut bytes, section + 20, 768);
+            let mut want = expected(kind, 128, 512);
+            let optional = want.optional.as_mut().unwrap();
+            optional.directory_count.value = count;
+            if count == 14 {
+                optional.clr_descriptor = None;
+            }
+            want.clr = Err(PeClrError::Base(PeRvaError::Parse(
+                PeHeaderError::SectionRawDataOutOfBounds {
+                    section_index: 0,
+                    section_offset: FileOffset::new(section as u64),
+                    offset: FileOffset::new(768),
+                    needed: 1024,
+                    available: 768,
+                },
+            )));
+            assert_eq!(inspect_pe_declared_evidence(&bytes), want);
+        }
+    }
+}
+
+#[test]
 fn preserves_prefix_and_exact_directory_limit_error_operands() {
     for kind in [PeKind::Pe32, PeKind::Pe32Plus] {
         let mut bytes = fixture(kind, 128, 512);

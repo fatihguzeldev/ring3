@@ -100,7 +100,10 @@ See the [batch API and example](core/src/pe/header_batch.rs).
 `inspect_pe_declared_evidence` collects owned header-prefix, optional-header and
 CLR-header evidence as three independent reader outcomes. Each selected field
 retains its physical file offset and byte width; a later reader error preserves
-earlier successful fields. Undeclared CLR slots, declared zero descriptors and
+earlier successful fields. The collector reuses prefix and header data admitted
+from the same input within that call. Section and CLR validation still run before
+their results, including for absent CLR metadata; standalone readers perform their
+own admission. Undeclared CLR slots, declared zero descriptors and
 CLR-reader errors remain distinct. These declarations do not establish runtime
 requirements, support or loadability. See the
 [declared evidence API](core/src/pe/declared_evidence.rs).
