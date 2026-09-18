@@ -484,6 +484,11 @@ IAT fallback cases (named and ordinal, in both PE widths). It checks source and
 error provenance, raw values, coordinates, borrowed names, repeated outcomes and
 input preservation without changing the original 28-reader campaign. Its
 6,152-input signature is regression evidence, not a semantic oracle.
+A separate TLS callback reader processes the original 6,148 inputs at a four-entry
+cap plus ten explicit absence, null-pointer, empty-table, raw-pointer and count-limit
+cases across both PE widths. It checks raw slot bytes, coordinates, zero termination,
+error provenance, explicit limits, repeated outcomes and ownership after releasing
+the input copy. Its 6,158-input signature is finite regression evidence.
 A separate 20,218-input campaign exercises raw bound-import records and borrowed
 names with positive seeds in both PE widths, truncations, bit flips, field edges
 and fixed-seed mutations. It checks raw/name consistency, record bytes and
