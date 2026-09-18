@@ -288,69 +288,118 @@ pub fn lookup_pe_export_evidence<'e>(
     query: PeExportQuery<'_>,
     limits: PeExportEvidenceLookupLimits,
 ) -> Result<PeExportSelection<'e>, PeExportEvidenceLookupError> {
-    match query {
-        PeExportQuery::Name(query) => {
-            let Some(table) = evidence
-                .names
-                .as_ref()
-                .map_err(|e| PeExportEvidenceLookupError::Reader(PeExportLookupError::Names(*e)))?
-            else {
-                return Ok(PeExportSelection::DirectoryAbsent);
-            };
-            admit(&table.addresses, &table.entries, limits)?;
-            admit_names(table)?;
-            let matches: Vec<_> = table
-                .entries
-                .iter()
-                .filter(|e| e.name == query)
-                .map(name)
-                .collect();
-            Ok(match matches.as_slice() {
-                [] => PeExportSelection::NameNotFound,
-                [name] => {
-                    let entry = table
-                        .addresses
-                        .entries
-                        .get(usize::from(name.address_index))
-                        .ok_or(PeExportEvidenceLookupError::NameAddressIndexOutOfRange {
-                            entry_index: name.table_index,
-                            address_index: name.address_index,
-                            address_count: table.addresses.directory.address_table_entries,
-                        })?;
-                    PeExportSelection::Selected {
-                        address: address(entry),
-                        name: Some(*name),
-                    }
-                }
-                _ => PeExportSelection::AmbiguousName { matches },
-            })
+    EvidenceLookup::new(evidence, limits).lookup(query)
+}
+
+// caller-built name and ordinal views are independent; admission cannot be shared.
+pub(super) struct EvidenceLookup<'e> {
+    evidence: &'e PeExportEvidence,
+    limits: PeExportEvidenceLookupLimits,
+    names: Option<Result<Option<&'e PeOwnedExportNameTable>, PeExportEvidenceLookupError>>,
+    addresses: Option<Result<Option<&'e PeOwnedExportAddressTable>, PeExportEvidenceLookupError>>,
+}
+
+impl<'e> EvidenceLookup<'e> {
+    pub(super) fn new(
+        evidence: &'e PeExportEvidence,
+        limits: PeExportEvidenceLookupLimits,
+    ) -> Self {
+        Self {
+            evidence,
+            limits,
+            names: None,
+            addresses: None,
         }
-        PeExportQuery::Ordinal(ordinal) => {
-            let Some(table) = evidence.addresses.as_ref().map_err(|e| {
+    }
+
+    fn names(&mut self) -> Result<Option<&'e PeOwnedExportNameTable>, PeExportEvidenceLookupError> {
+        *self.names.get_or_insert_with(|| {
+            let Some(table) =
+                self.evidence.names.as_ref().map_err(|e| {
+                    PeExportEvidenceLookupError::Reader(PeExportLookupError::Names(*e))
+                })?
+            else {
+                return Ok(None);
+            };
+            admit(&table.addresses, &table.entries, self.limits)?;
+            admit_names(table)?;
+            Ok(Some(table))
+        })
+    }
+
+    fn addresses(
+        &mut self,
+    ) -> Result<Option<&'e PeOwnedExportAddressTable>, PeExportEvidenceLookupError> {
+        *self.addresses.get_or_insert_with(|| {
+            let Some(table) = self.evidence.addresses.as_ref().map_err(|e| {
                 PeExportEvidenceLookupError::Reader(PeExportLookupError::Addresses(*e))
             })?
             else {
-                return Ok(PeExportSelection::DirectoryAbsent);
+                return Ok(None);
             };
-            admit(table, &[], limits)?;
-            let base = table.directory.ordinal_base;
-            let Some(index) = ordinal.checked_sub(base) else {
-                return Ok(PeExportSelection::OrdinalBeforeBase { ordinal, base });
-            };
-            let Some(entry) = usize::try_from(index)
-                .ok()
-                .and_then(|i| table.entries.get(i))
-            else {
-                return Ok(PeExportSelection::OrdinalOutOfRange {
-                    ordinal,
-                    base,
-                    address_count: table.directory.address_table_entries,
-                });
-            };
-            Ok(PeExportSelection::Selected {
-                address: address(entry),
-                name: None,
-            })
+            admit(table, &[], self.limits)?;
+            Ok(Some(table))
+        })
+    }
+
+    pub(super) fn lookup(
+        &mut self,
+        query: PeExportQuery<'_>,
+    ) -> Result<PeExportSelection<'e>, PeExportEvidenceLookupError> {
+        match query {
+            PeExportQuery::Name(query) => {
+                let Some(table) = self.names()? else {
+                    return Ok(PeExportSelection::DirectoryAbsent);
+                };
+                let matches: Vec<_> = table
+                    .entries
+                    .iter()
+                    .filter(|e| e.name == query)
+                    .map(name)
+                    .collect();
+                Ok(match matches.as_slice() {
+                    [] => PeExportSelection::NameNotFound,
+                    [name] => {
+                        let entry = table
+                            .addresses
+                            .entries
+                            .get(usize::from(name.address_index))
+                            .ok_or(PeExportEvidenceLookupError::NameAddressIndexOutOfRange {
+                                entry_index: name.table_index,
+                                address_index: name.address_index,
+                                address_count: table.addresses.directory.address_table_entries,
+                            })?;
+                        PeExportSelection::Selected {
+                            address: address(entry),
+                            name: Some(*name),
+                        }
+                    }
+                    _ => PeExportSelection::AmbiguousName { matches },
+                })
+            }
+            PeExportQuery::Ordinal(ordinal) => {
+                let Some(table) = self.addresses()? else {
+                    return Ok(PeExportSelection::DirectoryAbsent);
+                };
+                let base = table.directory.ordinal_base;
+                let Some(index) = ordinal.checked_sub(base) else {
+                    return Ok(PeExportSelection::OrdinalBeforeBase { ordinal, base });
+                };
+                let Some(entry) = usize::try_from(index)
+                    .ok()
+                    .and_then(|i| table.entries.get(i))
+                else {
+                    return Ok(PeExportSelection::OrdinalOutOfRange {
+                        ordinal,
+                        base,
+                        address_count: table.directory.address_table_entries,
+                    });
+                };
+                Ok(PeExportSelection::Selected {
+                    address: address(entry),
+                    name: None,
+                })
+            }
         }
     }
 }

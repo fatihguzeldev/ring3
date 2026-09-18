@@ -613,3 +613,77 @@ fn opaque_unicode_empty_text_and_coordinates_are_preserved() {
         }
     );
 }
+
+#[test]
+fn repeated_batch_queries_keep_independent_views_and_fresh_admission() {
+    let mut evidence = observed();
+    names(&mut evidence).addresses.entries[1].target =
+        PeOwnedExportTarget::Rva(RelativeVirtualAddress::new(77));
+    let queries = [
+        PeExportQuery::Name("Alpha"),
+        PeExportQuery::Ordinal(0xffff_fffa),
+        PeExportQuery::Name("Alpha"),
+        PeExportQuery::Ordinal(0xffff_fffa),
+    ];
+    for reversed in [false, true] {
+        let mut ordered = queries;
+        if reversed {
+            ordered.reverse();
+        }
+        for query_limits in [limits(10, 60), limits(6, 32), limits(0, 0)] {
+            let expected: Vec<_> = ordered
+                .iter()
+                .map(|&q| lookup_pe_export_evidence(&evidence, q, query_limits))
+                .collect();
+            let batch = lookup_pe_export_evidence_batch(
+                &evidence,
+                &ordered,
+                query_limits,
+                batch_limits(4, 4),
+            )
+            .unwrap();
+            assert_eq!(batch.selections, expected);
+            if query_limits == limits(10, 60) {
+                assert_eq!(batch.selection_rows, 4);
+                for (&q, selection) in ordered.iter().zip(&batch.selections) {
+                    let expected = match q {
+                        PeExportQuery::Name(_) => 77,
+                        PeExportQuery::Ordinal(_) => 1,
+                    };
+                    assert!(
+                        matches!(selection, Ok(PeExportSelection::Selected { address, .. })
+                        if address.target == PeExportTarget::Rva(RelativeVirtualAddress::new(expected)))
+                    );
+                }
+            }
+        }
+    }
+    names(&mut evidence).entries[3].address_index = 6;
+    let malformed =
+        lookup_pe_export_evidence_batch(&evidence, &queries, limits(10, 60), batch_limits(4, 2))
+            .unwrap();
+    let error = Err(Error::NameAddressIndexOutOfRange {
+        entry_index: 3,
+        address_index: 6,
+        address_count: 6,
+    });
+    assert_eq!(malformed.selections[0], error);
+    assert_eq!(malformed.selections[2], error);
+    assert_eq!(malformed.selection_rows, 2);
+    drop(malformed);
+    evidence.names = Ok(None);
+    evidence.addresses = Err(PeExportAddressError::AddressTableUnavailable { count: 6 });
+    let absent =
+        lookup_pe_export_evidence_batch(&evidence, &queries, limits(0, 0), batch_limits(4, 0))
+            .unwrap();
+    assert_eq!(absent.selection_rows, 0);
+    assert_eq!(absent.selections[0], Ok(PeExportSelection::DirectoryAbsent));
+    assert_eq!(absent.selections[2], absent.selections[0]);
+    assert_eq!(
+        absent.selections[1],
+        Err(Error::Reader(PeExportLookupError::Addresses(
+            PeExportAddressError::AddressTableUnavailable { count: 6 }
+        )))
+    );
+    assert_eq!(absent.selections[3], absent.selections[1]);
+}
