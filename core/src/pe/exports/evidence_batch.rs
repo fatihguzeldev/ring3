@@ -1,7 +1,8 @@
 use super::batch::{charge_selection_rows, check_query_count};
+use super::evidence_lookup::EvidenceLookup;
 use super::{
     PeExportBatchError, PeExportBatchLimits, PeExportEvidence, PeExportEvidenceLookupError,
-    PeExportEvidenceLookupLimits, PeExportQuery, PeExportSelection, lookup_pe_export_evidence,
+    PeExportEvidenceLookupLimits, PeExportQuery, PeExportSelection,
 };
 
 /// ordered query results borrowing only the retained evidence.
@@ -13,8 +14,8 @@ pub struct PeExportEvidenceBatch<'e> {
 
 /// bounds an ordered batch over retained export evidence after image release.
 /// query count is checked before lookup or allocation; empty batches do not
-/// inspect evidence. every query repeats `lookup_pe_export_evidence` admission
-/// using the same per-query limits. errors remain ordered results and cost zero
+/// inspect evidence. each required view is admitted lazily once per batch under
+/// fixed per-query limits. errors remain ordered results and cost zero
 /// selection rows, as do absent, missing and out-of-range outcomes. selected
 /// targets cost one row, including empty slots; ambiguity costs every match.
 /// cumulative rows are checked before append. each call starts fresh budgets.
@@ -22,8 +23,10 @@ pub struct PeExportEvidenceBatch<'e> {
 /// results may outlive query strings and the list, but not evidence. limits bound
 /// logical rows, queries and per-query table text, not allocator capacity, process
 /// memory, elapsed time or cancellation. a refused query may already have
-/// allocated its result. no view cache, provider selection or provenance check
-/// is added; required-view errors and structural checks retain their precedence.
+/// allocated its result. name and ordinal views retain independent admission
+/// results, including errors and absence, only for this call. required-view
+/// errors and structural checks retain their precedence; no provider selection
+/// or provenance check is added.
 ///
 /// # errors
 /// query-count refusal precedes all lookup. cumulative selection-row overflow
@@ -71,10 +74,11 @@ pub fn lookup_pe_export_evidence_batch<'e>(
     batch_limits: PeExportBatchLimits,
 ) -> Result<PeExportEvidenceBatch<'e>, PeExportBatchError> {
     check_query_count(queries.len(), batch_limits.max_queries)?;
+    let mut lookup = EvidenceLookup::new(evidence, query_limits);
     let mut selection_rows = 0;
     let mut selections = Vec::new();
     for (index, &query) in queries.iter().enumerate() {
-        let result = lookup_pe_export_evidence(evidence, query, query_limits);
+        let result = lookup.lookup(query);
         let rows = match &result {
             Ok(PeExportSelection::Selected { .. }) => 1,
             Ok(PeExportSelection::AmbiguousName { matches }) => matches.len() as u64,

@@ -208,8 +208,10 @@ cross-view coherence or allocation/time bounds. See the
 `lookup_pe_export_evidence_batch` applies that same required-view validation to
 an ordered query list with explicit query-count and total selection-row limits.
 Per-query errors remain in place; aggregate refusal returns no partial batch.
-Results borrow retained evidence and can outlive the query list. Admission repeats
-for each query; these logical limits do not cap allocations or elapsed time.
+Results borrow retained evidence and can outlive the query list. Each required
+view is admitted once, lazily, within the batch under fixed limits. Name and
+ordinal views stay independent, including errors and absence; selection rows are
+still charged per query. These logical limits do not cap allocations or elapsed time.
 See the [owned export batch API](core/src/pe/exports/evidence_batch.rs).
 
 `parse_pe_bound_import_descriptors` retains raw bound-import records and their
