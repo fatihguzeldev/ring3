@@ -1,3 +1,10 @@
+mod callbacks;
+
+pub use callbacks::{
+    PeTlsCallbackEntry, PeTlsCallbackError, PeTlsCallbackLimits, PeTlsCallbackTable,
+    PeTlsCallbacks, parse_pe_tls_callbacks,
+};
+
 use super::optional::{read_u32, read_u64};
 use super::rva::PreparedPe;
 use super::{PeDirectoryAddress, PeKind, PeRvaError};
@@ -56,6 +63,12 @@ pub enum PeTlsDirectoryError {
 )]
 pub fn parse_pe_tls_directory(bytes: &[u8]) -> Result<Option<PeTlsDirectory>, PeTlsDirectoryError> {
     let prepared = PreparedPe::new(bytes).map_err(PeTlsDirectoryError::Base)?;
+    parse_prepared_directory(&prepared)
+}
+
+fn parse_prepared_directory(
+    prepared: &PreparedPe<'_>,
+) -> Result<Option<PeTlsDirectory>, PeTlsDirectoryError> {
     let Some(directory) = prepared.headers().directories[9] else {
         return Ok(None);
     };

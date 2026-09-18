@@ -19,7 +19,7 @@ remain future work.
 
 The [core exports](core/src/lib.rs) cover PE32/PE32+ headers, sections and file
 ranges; static import/export metadata; raw base-relocation blocks; fixed TLS
-directories; raw certificate tables and entry metadata; raw debug directory
+directories and bounded callback pointer lists; raw certificate tables and entry metadata; raw debug directory
 metadata and borrowed payload file ranges independent of their RVA fields; the supported size-bearing
 load-config common prefix; raw AMD64 exception function records; the fixed raw CLR header with uninterpreted nested coordinates;
 resource root headers, raw entries and borrowed Unicode
@@ -33,6 +33,15 @@ These readers inspect bytes without loading modules, binding addresses or execut
 the generated programs. Reader types and limits live with their [implementation](core/src/pe/).
 The CLR reader preserves flags and the entry-point word without validating metadata,
 tokens or runtime compatibility; declared header tails are not read.
+
+`parse_pe_tls_callbacks` reads the callback pointer list using the same image’s
+preferred base. It returns owned directory, table, ordered raw addresses and
+terminator coordinates, distinguishing an absent directory, null table pointer
+and present empty table. An explicit `u16` limit caps nonzero entries; one extra
+slot must prove the zero terminator. Every consumed prefix must belong to one
+unambiguous file-backed region. Callback targets remain uninterpreted; no TLS
+initialization or callback invocation occurs. See the
+[TLS callback reader](core/src/pe/tls/callbacks.rs).
 
 `admit_ascii_source_paths` checks a materialized list of relative ASCII file-path
 strings with explicit count, per-path byte, total byte and depth limits. It changes
