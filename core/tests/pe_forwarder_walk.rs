@@ -1769,3 +1769,6 @@ fn owned_walk_batches_keep_view_errors_and_limits_local_to_each_call() {
         assert_eq!([first.clone(), second], before);
     }
 }
+
+#[path = "pe_forwarder_walk/named_target.rs"]
+mod named_target;
