@@ -88,6 +88,8 @@
       "generated_pe32plus_with_synthetic_certificate_entries_matches_file_metadata"
     ],
     "pe_load_config": [
+      "generated_pe32_load_config_matches_prefix_metadata",
+      "generated_pe32plus_load_config_matches_prefix_metadata",
       "generated_pe32_with_synthetic_load_config_matches_prefix_metadata",
       "generated_pe32plus_with_synthetic_load_config_matches_prefix_metadata"
     ],

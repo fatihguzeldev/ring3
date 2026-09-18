@@ -10,6 +10,7 @@ import { buildForwarderFixtures } from "./build-forwarders.mjs";
 import { buildPe32PlusFixture } from "./build-pe32plus.mjs";
 import { buildRelocationFixtures } from "./build-relocations.mjs";
 import { buildTlsFixtures } from "./build-tls.mjs";
+import { buildLoadConfigFixtures } from "./build-load-config.mjs";
 import { buildDelayImportFixtures } from "./build-delay-imports.mjs";
 import { buildResourceFixtures } from "./build-resources.mjs";
 import { buildDebugFixtures } from "./build-debug-payloads.mjs";
@@ -117,6 +118,10 @@ const families = [
   { name: "tls", build: buildTlsFixtures, fixtures: {
     RING3_TLS_PE32_FIXTURE: "i386/tls.exe",
     RING3_TLS_PE32PLUS_FIXTURE: "amd64/tls.exe",
+  } },
+  { name: "load-config", build: buildLoadConfigFixtures, fixtures: {
+    RING3_LOAD_CONFIG_PE32_FIXTURE: "i386/load-config.exe",
+    RING3_LOAD_CONFIG_PE32PLUS_FIXTURE: "amd64/load-config.exe",
   } },
   { name: "delay", build: buildDelayImportFixtures, fixtures: {
     RING3_DELAY_PE32_FIXTURE: "i386/delayed.exe",
