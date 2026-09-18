@@ -405,6 +405,7 @@ and per-run evidence go under `target/`; they are not committed.
 | [pe32-arithmetic](corpus/pe32-arithmetic/) | Minimal 32-bit EXE. | `pnpm corpus:build` |
 | [pe32plus-arithmetic](corpus/pe32plus-arithmetic/) | Minimal 64-bit EXE with wide header values. | `pnpm corpus:build:pe32plus` |
 | [pe-named-imports](corpus/pe-named-imports/) | EXE/DLL pairs with symbols imported by name. | `pnpm corpus:build:imports` |
+| [pe-dependency-chain](corpus/pe-dependency-chain/) | EXE → DLL → DLL import chains in both PE widths. | `pnpm corpus:build:chain` |
 | [pe-ordinal-imports](corpus/pe-ordinal-imports/) | EXE/DLL pairs with symbols imported by number. | `pnpm corpus:build:ordinals` |
 | [pe-forwarders](corpus/pe-forwarders/) | DLL exports that refer to another module's symbols. | `pnpm corpus:build:forwarders` |
 | [pe-base-relocations](corpus/pe-base-relocations/) | Files containing relocation block metadata. | `pnpm corpus:build:relocations` |
