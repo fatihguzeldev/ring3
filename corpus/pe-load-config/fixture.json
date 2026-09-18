@@ -1,0 +1,87 @@
+{
+  "schemaVersion": 1,
+  "provenance": "self-authored",
+  "licenseStatus": "pending",
+  "windowsOracle": "not-run",
+  "executed": false,
+  "fixture": "pe-load-config",
+  "sources": {
+    "i386.s": {
+      "path": "corpus/pe-load-config/i386.s",
+      "sha256": "3e97f4c8f72e920882ebdd0b33da2ed46ce8d1ef31df5242ffd3ba77d1238de4"
+    },
+    "amd64.s": {
+      "path": "corpus/pe-load-config/amd64.s",
+      "sha256": "a613037c2fb643ba9c1c1a9b5f00557cfdee7a6ba8bbbb8fb9846de7607aedb4"
+    }
+  },
+  "tools": {
+    "clang": {
+      "version": "Apple clang version 21.0.0 (clang-2100.1.1.101)",
+      "sha256": "f30550eab15fdf5ab8c0dc54c52679711241e5d4b636b027e18c09fef531775d"
+    },
+    "lld": {
+      "version": "LLD 22.1.6 (https://github.com/rust-lang/llvm-project.git dcc3606807c989700e0ac1cac18c31741bcd40d9)",
+      "sha256": "8f5fe507df7232eac0a610c12a5d11f3202205235f710eb98c6c78df6d3f548d"
+    },
+    "objdump": {
+      "version": "Apple LLVM version 21.0.0",
+      "sha256": "1dcc1432db4d828cf8cd71a84cb8d9bf63a7ca80b5eeec711a9e5f13a3f5f98e"
+    }
+  },
+  "architectures": {
+    "i386": {
+      "kind": "PE32",
+      "machine": 332,
+      "artifacts": {
+        "load-config.obj": {
+          "bytes": 474,
+          "sha256": "403c7f675f95602c15c42f34ff35f01b5346377a7cc70cdd62c58fdea9a4b5d4"
+        },
+        "load-config.exe": {
+          "bytes": 2048,
+          "sha256": "1929f1482533a87c6524cad1f2328588e3dda05e9e48a6f4f73a64888c632aa3"
+        }
+      },
+      "directory": {
+        "rva": 8208,
+        "fileOffset": 1552,
+        "size": 72,
+        "structureSize": 72,
+        "timeDateStamp": 305419896,
+        "majorVersion": 3,
+        "minorVersion": 7,
+        "globalFlagsClear": 4096,
+        "globalFlagsSet": 8192,
+        "criticalSectionDefaultTimeout": 11259375
+      }
+    },
+    "amd64": {
+      "kind": "PE32+",
+      "machine": 34404,
+      "artifacts": {
+        "load-config.obj": {
+          "bytes": 513,
+          "sha256": "4e4251d0d3dda813d1633555e4aacf8697b65d4a45bd2b969682b72ddc5bf1f5"
+        },
+        "load-config.exe": {
+          "bytes": 2048,
+          "sha256": "2c60b61275deedbf9980eef1cde74be68cda70241531e385000d789b9eba6d16"
+        }
+      },
+      "directory": {
+        "rva": 8208,
+        "fileOffset": 1552,
+        "size": 112,
+        "structureSize": 112,
+        "timeDateStamp": 2271560481,
+        "majorVersion": 9,
+        "minorVersion": 11,
+        "globalFlagsClear": 2147483649,
+        "globalFlagsSet": 1073741826,
+        "criticalSectionDefaultTimeout": 270544960
+      }
+    }
+  },
+  "objectTimestamp": 0
+}
