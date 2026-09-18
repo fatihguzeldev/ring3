@@ -257,7 +257,9 @@
     ],
     "source_compiled_chain": [
       "generated_pe32_chain_preserves_multihop_closure",
-      "generated_pe32plus_chain_preserves_multihop_closure"
+      "generated_pe32plus_chain_preserves_multihop_closure",
+      "generated_pe32_chain_candidates_select_retained_symbols",
+      "generated_pe32plus_chain_candidates_select_retained_symbols"
     ]
   }
 }
