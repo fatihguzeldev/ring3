@@ -1,6 +1,8 @@
 use ring3_core::{
-    FileOffset, PeDirectoryAddress, PeHeaderError, PeKind, PeRvaError, PeTlsDirectory,
-    PeTlsDirectoryError, RelativeVirtualAddress, parse_pe_headers, parse_pe_tls_directory,
+    FileOffset, PeDirectoryAddress, PeHeaderError, PeKind, PeRvaError, PeTlsCallbackEntry,
+    PeTlsCallbackError, PeTlsCallbackLimits, PeTlsCallbackTable, PeTlsCallbacks, PeTlsDirectory,
+    PeTlsDirectoryError, RelativeVirtualAddress, parse_pe_headers, parse_pe_tls_callbacks,
+    parse_pe_tls_directory,
 };
 
 fn put32(bytes: &mut [u8], offset: usize, value: u32) {
@@ -347,9 +349,28 @@ fn base_failures_precede_absence_and_directory_errors() {
     }
 }
 
+fn compiled_callbacks(plus: bool, directory: PeTlsDirectory) -> PeTlsCallbacks {
+    PeTlsCallbacks {
+        directory,
+        image_base: if plus { 5_368_709_120 } else { 4_194_304 },
+        table: Some(PeTlsCallbackTable {
+            table_rva: RelativeVirtualAddress::new(8192),
+            table_file_offset: FileOffset::new(1536),
+            entries: vec![PeTlsCallbackEntry {
+                table_index: 0,
+                slot_rva: RelativeVirtualAddress::new(8192),
+                slot_file_offset: FileOffset::new(1536),
+                raw_va: if plus { 5_368_713_216 } else { 4_198_400 },
+            }],
+            terminator_rva: RelativeVirtualAddress::new(if plus { 8200 } else { 8196 }),
+            terminator_file_offset: FileOffset::new(if plus { 1544 } else { 1540 }),
+        }),
+    }
+}
+
 fn generated_tls_fixture(variable: &str, plus: bool) {
     let path = std::env::var_os(variable).expect("explicit generated TLS fixture path");
-    let bytes = std::fs::read(path).unwrap();
+    let mut bytes = std::fs::read(path).unwrap();
     assert_eq!(bytes.len(), 3584);
     let headers = parse_pe_headers(&bytes).unwrap();
     assert_eq!(headers.prefix.kind, kind(plus));
@@ -368,20 +389,31 @@ fn generated_tls_fixture(variable: &str, plus: bool) {
         PeDirectoryAddress::Rva(RelativeVirtualAddress::new(rva))
     );
     assert_eq!(directory.size, length(plus));
+    let expected = PeTlsDirectory {
+        directory_rva: RelativeVirtualAddress::new(rva),
+        directory_file_offset: FileOffset::new(offset),
+        start_address_of_raw_data: addresses[0],
+        end_address_of_raw_data: addresses[1],
+        address_of_index: addresses[2],
+        address_of_callbacks: addresses[3],
+        size_of_zero_fill: 7,
+        characteristics: 0x0050_0000,
+        ..zero(plus)
+    };
+    assert_eq!(parse_pe_tls_directory(&bytes), Ok(Some(expected)));
+    let before = bytes.clone();
+    let limits = PeTlsCallbackLimits { max_callbacks: 1 };
+    let callbacks = parse_pe_tls_callbacks(&bytes, limits);
+    assert_eq!(callbacks, Ok(Some(compiled_callbacks(plus, expected))));
+    assert_eq!(parse_pe_tls_callbacks(&bytes, limits), callbacks);
     assert_eq!(
-        parse_pe_tls_directory(&bytes),
-        Ok(Some(PeTlsDirectory {
-            directory_rva: RelativeVirtualAddress::new(rva),
-            directory_file_offset: FileOffset::new(offset),
-            start_address_of_raw_data: addresses[0],
-            end_address_of_raw_data: addresses[1],
-            address_of_index: addresses[2],
-            address_of_callbacks: addresses[3],
-            size_of_zero_fill: 7,
-            characteristics: 0x0050_0000,
-            ..zero(plus)
-        }))
+        parse_pe_tls_callbacks(&bytes, PeTlsCallbackLimits { max_callbacks: 0 }),
+        Err(PeTlsCallbackError::CallbackLimitExceeded { index: 0, limit: 0 })
     );
+    assert_eq!(bytes, before);
+    bytes.fill(0);
+    drop(bytes);
+    assert_eq!(callbacks, Ok(Some(compiled_callbacks(plus, expected))));
 }
 
 #[test]
