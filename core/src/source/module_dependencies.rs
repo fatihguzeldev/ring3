@@ -1,4 +1,6 @@
-use super::application_candidates::find_admitted_application_source_position;
+use std::collections::BTreeMap;
+
+use super::application_candidates::admit_application_basename;
 use crate::{
     AsciiApplicationSourceCandidateError, AsciiPeSourceModuleEvidenceBatch, AsciiSourcePathBatch,
     AsciiSourcePathError, AsciiSourcePathLimits, PeDelayImportEvidenceError,
@@ -198,6 +200,27 @@ fn text_add(
         })
 }
 
+// paths and the application index have already passed same-call admission.
+fn application_candidate_index(
+    paths: &AsciiSourcePathBatch,
+    application_source_index: usize,
+) -> BTreeMap<&str, usize> {
+    let application = &paths.entries[application_source_index];
+    let parent = application
+        .key
+        .rsplit_once('/')
+        .map_or("", |(parent, _)| parent);
+    paths
+        .entries
+        .iter()
+        .enumerate()
+        .filter_map(|(index, entry)| {
+            let (entry_parent, name) = entry.key.rsplit_once('/').unwrap_or(("", &entry.key));
+            (entry_parent == parent).then_some((name, index))
+        })
+        .collect()
+}
+
 /// observes every retained static descriptor and delay name in one application context.
 /// source and candidate indices are positions in the input entries vector; request
 /// descriptor indices are occurrences within the successful static or delay view.
@@ -213,7 +236,8 @@ fn text_add(
 ///
 /// module/family/view errors remain independent. static empty, delay absent and
 /// delay present-empty remain distinct. requests retain source, static-before-delay
-/// and view order, including duplicates. requests reuse this call's admitted paths;
+/// and view order, including duplicates. requests share a same-call index of freshly
+/// admitted application-parent basenames; zero requests do not build the index.
 /// each basename is still admitted independently under the lexical finder's rules,
 /// preserving its full error or optional candidate index. none does not mean a
 /// missing windows dll. self/cyclic candidates
@@ -315,6 +339,11 @@ pub fn observe_ascii_pe_module_dependencies(
             limit: limits.max_request_text_bytes,
         });
     }
+    let candidates: BTreeMap<&str, usize> = if total_requests == 0 {
+        BTreeMap::new()
+    } else {
+        application_candidate_index(&paths, application_source_index)
+    };
     let mut sources = Vec::new();
     let mut requests = Vec::new();
     for (source_index, entry) in batch.entries.iter().enumerate() {
@@ -324,12 +353,8 @@ pub fn observe_ascii_pe_module_dependencies(
                 for descriptor_index in 0..rows.len() {
                     let token = rows.name(descriptor_index);
                     let dll_name = token.to_owned();
-                    let candidate = find_admitted_application_source_position(
-                        &paths,
-                        application_source_index,
-                        token,
-                        limits.max_basename_bytes,
-                    );
+                    let candidate = admit_application_basename(token, limits.max_basename_bytes)
+                        .map(|token| candidates.get(token.entries[0].key.as_str()).copied());
                     requests.push(AsciiPeModuleDependencyRequest {
                         source_index,
                         kind,
@@ -341,6 +366,7 @@ pub fn observe_ascii_pe_module_dependencies(
             }
         }
     }
+    drop(candidates);
     Ok(AsciiPeModuleDependencyEvidence {
         paths,
         application_source_index,
