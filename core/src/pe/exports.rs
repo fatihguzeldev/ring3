@@ -1,3 +1,5 @@
+pub(super) use evidence::inspect_prepared_exports;
+
 mod addresses;
 mod batch;
 mod directory;

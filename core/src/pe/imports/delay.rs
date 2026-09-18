@@ -1,3 +1,5 @@
+pub(in crate::pe) use evidence::inspect_prepared_delay_imports;
+
 mod descriptors;
 mod evidence;
 mod evidence_exports;

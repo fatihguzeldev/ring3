@@ -1,10 +1,14 @@
+use super::exports::inspect_prepared_exports;
+use super::imports::{
+    inspect_prepared_bound_imports, inspect_prepared_delay_imports, inspect_prepared_static_imports,
+};
+use super::rva::PreparedPe;
 use crate::{
     PeBoundImportEvidence, PeBoundImportEvidenceError, PeBoundImportEvidenceLimits,
     PeDelayImportEvidence, PeDelayImportEvidenceError, PeDelayImportEvidenceLimits,
     PeExportEvidence, PeExportEvidenceError, PeExportEvidenceLimits, PeFingerprintError,
     PeFingerprintedEvidence, PeStaticImportEvidence, PeStaticImportEvidenceError,
-    PeStaticImportEvidenceLimits, fingerprint_pe_declared_evidence, inspect_pe_bound_imports,
-    inspect_pe_delay_imports, inspect_pe_exports, inspect_pe_static_imports,
+    PeStaticImportEvidenceLimits, fingerprint_pe_declared_evidence,
 };
 
 /// one family's logical output limits; not allocation or memory limits.
@@ -45,7 +49,9 @@ pub struct PeModuleEvidence {
 /// standalone records, nested records and names under their own family caps.
 ///
 /// each family applies its existing row-before-text limits; there is no combined
-/// output limit or all-or-nothing output admission. prior owned families can exist
+/// output limit or all-or-nothing output admission. the four family readers share
+/// same-call prepared input or its base error after fingerprinting; declared
+/// evidence retains its separate validation depths. prior owned families can exist
 /// before a later refusal. fingerprint/declaration work and existing reader
 /// allocations occur earlier; readers may parse the same bytes again. these
 /// logical output limits do not cap process memory or time, recover allocation
@@ -86,32 +92,34 @@ pub fn inspect_pe_module_evidence(
     limits: PeModuleEvidenceLimits,
 ) -> Result<PeModuleEvidence, PeFingerprintError> {
     let fingerprinted = fingerprint_pe_declared_evidence(bytes, limits.max_input_bytes)?;
-    let static_imports = inspect_pe_static_imports(
-        bytes,
+    let prepared = PreparedPe::new(bytes);
+    let shared = prepared.as_ref().map_err(|cause| *cause);
+    let static_imports = inspect_prepared_static_imports(
+        shared,
         PeStaticImportEvidenceLimits {
             max_input_bytes: limits.max_input_bytes,
             max_output_rows: limits.static_imports.max_rows,
             max_output_text_bytes: limits.static_imports.max_text_bytes,
         },
     );
-    let delay_imports = inspect_pe_delay_imports(
-        bytes,
+    let delay_imports = inspect_prepared_delay_imports(
+        shared,
         PeDelayImportEvidenceLimits {
             max_input_bytes: limits.max_input_bytes,
             max_output_rows: limits.delay_imports.max_rows,
             max_output_text_bytes: limits.delay_imports.max_text_bytes,
         },
     );
-    let exports = inspect_pe_exports(
-        bytes,
+    let exports = inspect_prepared_exports(
+        shared,
         PeExportEvidenceLimits {
             max_input_bytes: limits.max_input_bytes,
             max_output_rows: limits.exports.max_rows,
             max_output_text_bytes: limits.exports.max_text_bytes,
         },
     );
-    let bound_imports = inspect_pe_bound_imports(
-        bytes,
+    let bound_imports = inspect_prepared_bound_imports(
+        shared,
         PeBoundImportEvidenceLimits {
             max_input_bytes: limits.max_input_bytes,
             max_output_rows: limits.bound_imports.max_rows,
