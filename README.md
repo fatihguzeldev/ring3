@@ -249,7 +249,10 @@ It retains the owned table with ordered, explicitly located names borrowed from
 its input, preserving spelling and duplicate offsets. Each name has a 1024-byte
 scan limit; all occurrences together have a 65536-byte limit, including NUL bytes.
 Names can lie outside the declared directory when their prefixes are uniquely
-file-backed. ASCII acceptance does not validate paths, providers or binding.
+file-backed. Same-name range checks can reuse a successfully admitted larger
+prefix; a failed probe falls back to the original shorter-prefix checks. An
+unreadable or ambiguous tail after NUL does not invalidate a readable name.
+ASCII acceptance does not validate paths, providers or binding.
 See the [borrowed name contract](core/src/pe/imports/bound/names.rs).
 
 `inspect_pe_bound_imports` retains independent owned raw and name results after

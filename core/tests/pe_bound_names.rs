@@ -1,7 +1,7 @@
 use ring3_core::{
     FileOffset, PeBoundImportError, PeBoundImportName, PeBoundImportNameError as Error,
     PeBoundImportNameLocation as Location, PeRvaError, RelativeVirtualAddress as Rva,
-    parse_pe_bound_import_descriptors, parse_pe_bound_import_names,
+    parse_pe_bound_import_descriptors, parse_pe_bound_import_names, resolve_pe_file_range,
 };
 
 fn put32(bytes: &mut [u8], offset: usize, value: u32) {
@@ -165,6 +165,32 @@ fn name_starts_may_be_raw_records_headers_or_a_separate_backed_region() {
         let output = parse_pe_bound_import_names(&bytes).unwrap().unwrap();
         assert_eq!(output.names[0].dll_name, "H");
         assert_eq!(output.names[0].name_file_offset, FileOffset::new(504));
+        assert_eq!(
+            resolve_pe_file_range(&bytes, Rva::new(504), 1024),
+            Err(PeRvaError::CrossesRegionBoundary {
+                start: Rva::new(504),
+                length: 1024,
+            })
+        );
+        section(&mut bytes, plus, 1, [4, 508, 4, 1024]);
+        assert_eq!(
+            resolve_pe_file_range(&bytes, Rva::new(504), 1024),
+            Err(PeRvaError::AmbiguousRange {
+                start: Rva::new(504),
+                length: 1024,
+            })
+        );
+        let output = parse_pe_bound_import_names(&bytes).unwrap().unwrap();
+        assert_eq!(
+            output.names,
+            vec![PeBoundImportName {
+                location: descriptor(0),
+                name_rva: Rva::new(504),
+                name_file_offset: FileOffset::new(504),
+                dll_name: "H",
+            }]
+        );
+        assert_eq!(output.names[0].dll_name.as_ptr(), bytes[504..].as_ptr());
         let mut bytes = fixture(plus, 16);
         section(&mut bytes, plus, 0, [16, 4096, 16, 512]);
         section(&mut bytes, plus, 1, [16, 8192, 16, 1024]);
