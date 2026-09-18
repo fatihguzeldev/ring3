@@ -110,6 +110,42 @@ fn expected(plus: bool) -> PeDelayImportLookupTable<'static> {
 }
 
 #[test]
+fn early_symbol_nul_does_not_admit_the_unread_tail() {
+    let hint_name_rva = RelativeVirtualAddress::new(0x1100);
+    for plus in [false, true] {
+        for ambiguous in [false, true] {
+            let mut bytes = fixture(plus);
+            let cause = if ambiguous {
+                bytes[134..136].copy_from_slice(&2_u16.to_le_bytes());
+                let section = 152 + fixed(plus) + 112 + 40;
+                for (offset, value) in [(8, 8), (12, 0x1108), (16, 8), (20, 776)] {
+                    put32(&mut bytes, section + offset, value);
+                }
+                ring3_core::PeRvaError::AmbiguousRange {
+                    start: hint_name_rva,
+                    length: 1026,
+                }
+            } else {
+                ring3_core::PeRvaError::CrossesRegionBoundary {
+                    start: hint_name_rva,
+                    length: 1026,
+                }
+            };
+            assert_eq!(
+                ring3_core::resolve_pe_file_range(&bytes, hint_name_rva, 1026),
+                Err(cause)
+            );
+            let actual = parse_pe_delay_import_lookups(&bytes).unwrap().unwrap();
+            assert_eq!(actual, expected(plus));
+            let PeImportSymbol::ByName { name, .. } = actual.imports[0].entries[0].symbol else {
+                panic!("expected a borrowed symbol");
+            };
+            assert_eq!(name.as_ptr(), bytes[770..].as_ptr());
+        }
+    }
+}
+
+#[test]
 fn both_widths_preserve_full_metadata_borrows_order_and_input() {
     for plus in [false, true] {
         let bytes = fixture(plus);

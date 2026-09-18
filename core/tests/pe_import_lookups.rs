@@ -74,6 +74,53 @@ fn section(bytes: &mut [u8], plus: bool, index: usize, va: u32, virtual_size: u3
 }
 
 #[test]
+fn early_symbol_nul_does_not_admit_the_unread_tail() {
+    let hint_name_rva = RelativeVirtualAddress::new(0xe000);
+    for plus in [false, true] {
+        let mut original = fixture(plus, 1);
+        entry(&mut original, plus, 0, 0, hint_name_rva.get().into());
+        let expected = parse_pe_import_lookups(&original).unwrap();
+        assert_eq!(expected.len(), 1);
+        assert_eq!(expected[0].entries.len(), 1);
+        assert_eq!(
+            expected[0].entries[0].symbol,
+            PeImportSymbol::ByName {
+                hint_name_rva,
+                hint: 0xabcd,
+                name: "Symbol\tA"
+            }
+        );
+        for ambiguous in [false, true] {
+            let mut bytes = original.clone();
+            let cause = if ambiguous {
+                bytes[134..136].copy_from_slice(&2_u16.to_le_bytes());
+                section(&mut bytes, plus, 1, 0xe00b, 32, 32);
+                PeRvaError::AmbiguousRange {
+                    start: hint_name_rva,
+                    length: 1026,
+                }
+            } else {
+                section(&mut bytes, plus, 0, 0x1000, 0xd00b, 0xd00b);
+                PeRvaError::CrossesRegionBoundary {
+                    start: hint_name_rva,
+                    length: 1026,
+                }
+            };
+            assert_eq!(
+                ring3_core::resolve_pe_file_range(&bytes, hint_name_rva, 1026),
+                Err(cause)
+            );
+            let actual = parse_pe_import_lookups(&bytes).unwrap();
+            assert_eq!(actual, expected);
+            let PeImportSymbol::ByName { name, .. } = actual[0].entries[0].symbol else {
+                panic!("expected a borrowed symbol");
+            };
+            assert_eq!(name.as_ptr(), bytes[file_offset(0xe000) + 2..].as_ptr());
+        }
+    }
+}
+
+#[test]
 fn both_widths_preserve_mixed_symbols_raw_values_and_borrowed_names() {
     for plus in [false, true] {
         let mut bytes = fixture(plus, 1);
