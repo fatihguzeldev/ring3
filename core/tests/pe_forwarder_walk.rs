@@ -1684,3 +1684,88 @@ fn generated_owned_forwarder_batches_preserve_compiled_order_and_limits() {
         check_linked_owned_walk_batch(&evidence);
     }
 }
+
+#[test]
+fn owned_walk_batches_keep_view_errors_and_limits_local_to_each_call() {
+    let mut first = owned_evidence(&fixture(false, Some("Next.entry")));
+    first.addresses.as_mut().unwrap().as_mut().unwrap().entries[0].target =
+        ring3_core::PeOwnedExportTarget::Forwarder {
+            rva: RelativeVirtualAddress::new(4200),
+            text: "Next.#7".to_owned(),
+        };
+    let queries = [
+        PeExportQuery::Name("entry"),
+        PeExportQuery::Ordinal(7),
+        PeExportQuery::Name("missing"),
+        PeExportQuery::Ordinal(8),
+        PeExportQuery::Name("entry"),
+        PeExportQuery::Ordinal(7),
+    ];
+    for variant in 0..7 {
+        let mut second = owned_evidence(&fixture(true, None));
+        match variant {
+            1 => second.names = Ok(None),
+            2 => second.addresses = Ok(None),
+            3 => second.names.as_mut().unwrap().as_mut().unwrap().entries[0].table_index = 99,
+            4 => second.addresses.as_mut().unwrap().as_mut().unwrap().entries[0].ordinal = 99,
+            5 => {
+                second.names =
+                    Err(ring3_core::PeExportNameError::NameUnavailable { entry_index: 4 });
+            }
+            6 => {
+                second.addresses =
+                    Err(ring3_core::PeExportAddressError::AddressTableUnavailable { count: 4 });
+            }
+            _ => {}
+        }
+        let before = [first.clone(), second.clone()];
+        for rows in [0, 1, 2, 16] {
+            for hops in [0, 1, 2] {
+                let view = PeExportEvidenceLookupLimits {
+                    max_table_rows: rows,
+                    ..view_limits()
+                };
+                let walk = PeForwarderWalkLimits {
+                    max_hops: hops,
+                    ..limits()
+                };
+                let sources = [&first, &second];
+                let routes = [route(0, "Next", 1)];
+                let walks: Vec<_> = queries
+                    .iter()
+                    .map(|&query| {
+                        walk_pe_export_evidence_forwarders(&sources, &routes, 0, query, view, walk)
+                    })
+                    .collect();
+                let successful: Vec<_> = walks
+                    .iter()
+                    .filter_map(|result| result.as_ref().ok())
+                    .collect();
+                let expected = PeForwarderEvidenceWalkBatch {
+                    successful_steps: successful.iter().map(|walk| walk.steps.len() as u64).sum(),
+                    successful_selection_rows: successful
+                        .iter()
+                        .map(|walk| walk.selection_rows)
+                        .sum(),
+                    successful_text_bytes: successful.iter().map(|walk| walk.text_bytes).sum(),
+                    walks,
+                };
+                let actual = walk_pe_export_evidence_forwarders_batch(
+                    &sources,
+                    &routes,
+                    0,
+                    &queries,
+                    view,
+                    walk,
+                    walk_batch_limits(),
+                )
+                .unwrap();
+                assert_eq!(
+                    actual, expected,
+                    "variant {variant}, rows {rows}, hops {hops}"
+                );
+            }
+        }
+        assert_eq!([first.clone(), second], before);
+    }
+}
