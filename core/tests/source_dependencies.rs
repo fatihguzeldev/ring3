@@ -527,6 +527,176 @@ mod closure {
             .collect()
     }
 
+    fn replace_ignored_metadata(input: &mut ring3_core::AsciiPeSourceModuleEvidenceBatch) {
+        input.total_path_bytes = 0;
+        input.total_content_bytes = 0;
+        for entry in &mut input.entries {
+            entry.path.index = usize::MAX;
+            entry.path.key = "app/b.dll".into();
+            entry.path.depth = 0;
+            let module = entry.module.as_mut().unwrap();
+            module.fingerprinted.byte_length = u64::MAX;
+            module.fingerprinted.digest.fill(165);
+            let header_error = ring3_core::PeHeaderError::InvalidDosSignature {
+                offset: ring3_core::FileOffset::new(u64::MAX),
+            };
+            module.fingerprinted.evidence.prefix = Err(header_error);
+            module.fingerprinted.evidence.optional = Err(header_error);
+            module.fingerprinted.evidence.clr =
+                Err(ring3_core::PeClrError::UnsupportedHeaderSize {
+                    header_size: 0,
+                    required: 72,
+                });
+            let imports = module.static_imports.as_mut().unwrap();
+            imports.total_rows = 0;
+            imports.total_text_bytes = 0;
+            imports.lookups = Ok(vec![]);
+            let delay = module.delay_imports.as_mut().unwrap();
+            delay.total_rows = 0;
+            delay.total_text_bytes = 0;
+            delay.descriptors = Err(ring3_core::PeDelayImportError::MissingTerminator {
+                descriptor_index: 73,
+            });
+            delay.lookups = Err(ring3_core::PeDelayImportLookupError::Lookup(
+                ring3_core::PeImportLookupError::LookupTableUnavailable {
+                    descriptor_index: 71,
+                },
+            ));
+            module.exports = Err(ring3_core::PeExportEvidenceError::OutputRowsExceeded {
+                rows: u64::MAX,
+                limit: 0,
+            });
+            module.bound_imports =
+                Err(ring3_core::PeBoundImportEvidenceError::OutputTextExceeded {
+                    bytes: u64::MAX,
+                    limit: 0,
+                });
+        }
+    }
+
+    #[test]
+    fn ignored_metadata_preserves_observations_and_both_closure_modes() {
+        use super::Kind::{Delay, Static};
+        let input = batch(vec![
+            source("other/a.dll", &["ignored.dll"], None),
+            source("app/a.dll", &["main.exe"], None),
+            source("app/main.exe", &["a.dll"], Some(&["b.dll"])),
+            source("app/b.dll", &[], None),
+        ]);
+        let original = input.clone();
+        let observations = observe(&input, 2, limits()).unwrap();
+        assert_eq!(observations.total_requests, 4);
+        assert_eq!(observations.total_request_text_bytes, 29);
+        assert_eq!(observations.paths.total_path_bytes, 41);
+        assert_eq!(
+            observations
+                .requests
+                .iter()
+                .map(|r| (
+                    r.source_index,
+                    r.kind,
+                    r.descriptor_index,
+                    r.dll_name.as_str(),
+                    r.candidate,
+                ))
+                .collect::<Vec<_>>(),
+            [
+                (0, Static, 0, "ignored.dll", Ok(None)),
+                (1, Static, 0, "main.exe", Ok(Some(2))),
+                (2, Static, 0, "a.dll", Ok(Some(1))),
+                (2, Delay, 0, "b.dll", Ok(Some(3))),
+            ]
+        );
+        let mut changed = input.clone();
+        replace_ignored_metadata(&mut changed);
+        let before = changed.clone();
+        let observed = observe(&changed, 2, limits()).unwrap();
+        assert_eq!(observed, observations);
+        assert_eq!(observe(&changed, 2, limits()), Ok(observed.clone()));
+        let mut retained = Vec::new();
+        for (mode, expected_visits, expected_steps) in [
+            (
+                StaticOnly,
+                vec![(2, None), (1, Some(2))],
+                vec![
+                    (2, Discovered { visit_index: 1 }),
+                    (3, ExcludedDelay),
+                    (1, AlreadyReached { visit_index: 0 }),
+                ],
+            ),
+            (
+                StaticAndDelay,
+                vec![(2, None), (1, Some(2)), (3, Some(3))],
+                vec![
+                    (2, Discovered { visit_index: 1 }),
+                    (3, Discovered { visit_index: 2 }),
+                    (1, AlreadyReached { visit_index: 0 }),
+                ],
+            ),
+        ] {
+            let expected = walk(&input, 2, mode, caps(3, 3)).unwrap();
+            assert_eq!(expected.observations, observations);
+            assert_eq!(visits(&expected), expected_visits);
+            assert_eq!(steps(&expected), expected_steps);
+            let actual = walk(&changed, 2, mode, caps(3, 3)).unwrap();
+            assert_eq!(actual, expected);
+            assert_eq!(walk(&changed, 2, mode, caps(3, 3)), Ok(actual.clone()));
+            retained.push((actual, expected));
+        }
+        assert_eq!(input, original);
+        assert_eq!(changed, before);
+        changed.entries.clear();
+        drop(changed);
+        assert_eq!(observed, observations);
+        for (actual, expected) in retained {
+            assert_eq!(actual, expected);
+        }
+
+        assert_authoritative_fields_change_results(input);
+    }
+
+    fn assert_authoritative_fields_change_results(
+        mut authoritative: ring3_core::AsciiPeSourceModuleEvidenceBatch,
+    ) {
+        authoritative.entries[2].path.normalized.clear();
+        let path_error =
+            AsciiPeModuleDependencyError::Paths(ring3_core::AsciiSourcePathError::EmptyPath {
+                index: 2,
+            });
+        assert_eq!(observe(&authoritative, 2, limits()), Err(path_error));
+        for mode in [StaticOnly, StaticAndDelay] {
+            assert_eq!(
+                walk(&authoritative, 2, mode, caps(3, 3)),
+                Err(Error::Observation(path_error))
+            );
+        }
+        authoritative.entries[2].path.normalized = "app/main.exe".into();
+        authoritative.entries[2]
+            .module
+            .as_mut()
+            .unwrap()
+            .static_imports
+            .as_mut()
+            .unwrap()
+            .descriptors
+            .as_mut()
+            .unwrap()[0]
+            .dll_name = "missing.dll".into();
+        assert_eq!(
+            observe(&authoritative, 2, limits()).unwrap().requests[2].candidate,
+            Ok(None)
+        );
+        for mode in [StaticOnly, StaticAndDelay] {
+            assert_eq!(
+                walk(&authoritative, 2, mode, caps(3, 3))
+                    .unwrap()
+                    .examined_requests[0]
+                    .step,
+                NoCandidate
+            );
+        }
+    }
+
     #[test]
     fn breadth_first_provenance_uses_original_request_indices_and_owns_the_report() {
         let mut input = batch(vec![
