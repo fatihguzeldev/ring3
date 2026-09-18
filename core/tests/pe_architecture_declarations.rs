@@ -93,6 +93,124 @@ mod image_role {
     }
 }
 
+mod entry_point {
+    use super::{PeClrError, PeClrHeaderEvidence, RelativeVirtualAddress, field};
+    use ring3_core::{
+        PeClrEntryPointDeclaration, PeClrEntryPointTarget as Target, describe_pe_clr_entry_point,
+    };
+
+    #[test]
+    fn declares_the_full_word_using_only_the_native_entrypoint_bit() {
+        for (flags, native) in [
+            (0, false),
+            (1, false),
+            (0x10, true),
+            (0x11, true),
+            (0x20000, false),
+            (0x20010, true),
+            (0xffff_ffef, false),
+            (u32::MAX, true),
+        ] {
+            for word in [
+                0,
+                1,
+                0x0600_0001,
+                0x2600_0001,
+                0x7fff_ffff,
+                0x8000_0000,
+                u32::MAX,
+            ] {
+                for (flags_offset, flags_width, word_offset, word_width) in
+                    [(528, 4, 532, 4), (u64::MAX, 0, 0, u8::MAX)]
+                {
+                    let raw = PeClrHeaderEvidence {
+                        flags: field(flags, flags_offset, flags_width),
+                        raw_entry_point: field(word, word_offset, word_width),
+                    };
+                    let target = if native {
+                        Target::NativeRva(RelativeVirtualAddress::new(word))
+                    } else {
+                        Target::ManagedToken(word)
+                    };
+                    assert_eq!(
+                        describe_pe_clr_entry_point(raw),
+                        PeClrEntryPointDeclaration { raw, target }
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn declaration_is_an_independent_copy_of_supplied_evidence() {
+        fn assert_copy<T: Copy>(_: T) {}
+        let mut raw = PeClrHeaderEvidence {
+            flags: field(0x10, u64::MAX, 0),
+            raw_entry_point: field(u32::MAX, 0, u8::MAX),
+        };
+        let before = raw;
+        let declaration = describe_pe_clr_entry_point(raw);
+        assert_copy(declaration);
+        raw.flags.value = 0;
+        raw.raw_entry_point.value = 0;
+        assert_ne!(raw, declaration.raw);
+        assert_eq!(declaration.raw, before);
+        assert_eq!(describe_pe_clr_entry_point(before), declaration);
+    }
+
+    #[test]
+    fn caller_mapping_keeps_absence_errors_and_present_zero_distinct() {
+        let managed = PeClrHeaderEvidence {
+            flags: field(0, 528, 4),
+            raw_entry_point: field(0, 532, 4),
+        };
+        let native = PeClrHeaderEvidence {
+            flags: field(0x10, 528, 4),
+            ..managed
+        };
+        let directory = PeClrError::InconsistentDirectory {
+            rva: RelativeVirtualAddress::new(1),
+            size: 0,
+        };
+        let header = PeClrError::UnsupportedHeaderSize {
+            header_size: 1,
+            required: 72,
+        };
+        for (input, expected, expected_calls) in [
+            (Ok(None), Ok(None), 0),
+            (Err(directory), Err(directory), 0),
+            (Err(header), Err(header), 0),
+            (
+                Ok(Some(managed)),
+                Ok(Some(PeClrEntryPointDeclaration {
+                    raw: managed,
+                    target: Target::ManagedToken(0),
+                })),
+                1,
+            ),
+            (
+                Ok(Some(native)),
+                Ok(Some(PeClrEntryPointDeclaration {
+                    raw: native,
+                    target: Target::NativeRva(RelativeVirtualAddress::new(0)),
+                })),
+                1,
+            ),
+        ] {
+            let mut calls = 0;
+            let actual = input.map(|value| {
+                value.map(|raw| {
+                    calls += 1;
+                    describe_pe_clr_entry_point(raw)
+                })
+            });
+            assert_eq!(actual, expected);
+            assert_eq!(calls, expected_calls);
+            assert_eq!(actual.map(|value| value.map(|entry| entry.raw)), input);
+        }
+    }
+}
+
 fn field<T>(value: T, offset: u64, byte_length: u8) -> PeFieldEvidence<T> {
     PeFieldEvidence {
         value,
