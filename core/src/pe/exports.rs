@@ -37,6 +37,7 @@ pub use evidence::{
     inspect_pe_exports,
 };
 
+pub(super) use evidence_batch::lookup_iter;
 pub use evidence_batch::{PeExportEvidenceBatch, lookup_pe_export_evidence_batch};
 pub use evidence_lookup::{
     PeExportEvidenceLookupError, PeExportEvidenceLookupLimits, lookup_pe_export_evidence,

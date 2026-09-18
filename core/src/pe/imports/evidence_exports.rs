@@ -4,7 +4,7 @@ use super::{
 };
 use crate::pe::exports::{
     PeExportBatchError, PeExportBatchLimits, PeExportEvidence, PeExportEvidenceBatch,
-    PeExportEvidenceLookupLimits, PeExportQuery, lookup_pe_export_evidence_batch,
+    PeExportEvidenceLookupLimits, PeExportQuery, lookup_iter,
 };
 
 /// a retained import record and aligned selections borrowing their own evidence.
@@ -17,7 +17,8 @@ pub struct PeImportEvidenceExportBatch<'importer, 'provider> {
 /// matches one retained static-import descriptor against an explicit provider.
 /// only `importer.lookups` is read; unrelated descriptor views and reported totals
 /// are ignored. the selected record is borrowed without cloning. its actual entry
-/// count is admitted before query allocation or traversal of any symbol.
+/// count is admitted before traversal of any symbol. queries borrow the entries
+/// directly through an iterator; no intermediate query list is allocated.
 ///
 /// each entry supplies one exact name or losslessly widened ordinal in order.
 /// hints, raw values, coordinates and dll names remain opaque metadata; they do
@@ -119,12 +120,9 @@ pub(super) fn lookup_entry_exports<'provider>(
             limit: batch_limits.max_queries,
         });
     }
-    let queries: Vec<_> = entries
-        .iter()
-        .map(|entry| match &entry.symbol {
-            PeOwnedImportSymbol::ByName { name, .. } => PeExportQuery::Name(name),
-            PeOwnedImportSymbol::Ordinal(ordinal) => PeExportQuery::Ordinal(u32::from(*ordinal)),
-        })
-        .collect();
-    lookup_pe_export_evidence_batch(provider, &queries, query_limits, batch_limits)
+    let queries = entries.iter().map(|entry| match &entry.symbol {
+        PeOwnedImportSymbol::ByName { name, .. } => PeExportQuery::Name(name),
+        PeOwnedImportSymbol::Ordinal(ordinal) => PeExportQuery::Ordinal(u32::from(*ordinal)),
+    });
+    lookup_iter(provider, queries, query_limits, batch_limits)
 }

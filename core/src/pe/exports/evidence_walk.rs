@@ -124,7 +124,7 @@ impl<'sources, 'e> EvidenceWalk<'sources, 'e> {
                     });
                     let mut batch = lookup_with(
                         lookup,
-                        &[query],
+                        std::iter::once(query),
                         PeExportBatchLimits {
                             max_queries: 1,
                             max_selection_rows: limits.max_selection_rows - used,
