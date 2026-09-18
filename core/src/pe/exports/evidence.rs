@@ -1,8 +1,8 @@
 use super::{
     PeExportAddressError, PeExportAddressTable, PeExportDirectory, PeExportDirectoryError,
-    PeExportNameError, PeExportNameTable, PeExportTarget, parse_pe_export_addresses,
-    parse_pe_export_directory, parse_pe_export_names,
+    PeExportNameError, PeExportNameTable, PeExportTarget,
 };
+use crate::pe::rva::PreparedPe;
 use crate::{FileOffset, RelativeVirtualAddress};
 
 /// per-call input and logical output caps; not allocation or memory limits.
@@ -121,7 +121,8 @@ fn own_names(table: PeExportNameTable<'_>) -> PeOwnedExportNameTable {
     }
 }
 /// collects independent owned export directory, address and name results.
-/// input admission precedes all three readers. each standalone address entry,
+/// input admission precedes parsing. same-call prepared input, directory and
+/// addresses are reused for dependent views. each standalone address entry,
 /// nested address entry within names, and name entry costs one output row.
 /// fixed directory/table wrappers cost no rows. each forwarder/name text copy
 /// costs its byte length, excluding nul; duplicates and nested copies count
@@ -178,9 +179,43 @@ pub fn inspect_pe_exports(
             limit: limits.max_input_bytes,
         });
     }
-    let directory = parse_pe_export_directory(bytes);
-    let addresses = parse_pe_export_addresses(bytes);
-    let names = parse_pe_export_names(bytes);
+    let admitted = PreparedPe::new(bytes)
+        .map_err(PeExportDirectoryError::Base)
+        .and_then(|prepared| {
+            super::directory::parse_prepared_export_directory(&prepared)
+                .map(|directory| (prepared, directory))
+        });
+    let (directory, addresses, names) = match admitted {
+        Ok((prepared, directory)) => {
+            let addresses = directory
+                .map(|directory| {
+                    super::addresses::parse_admitted_export_addresses(&prepared, directory)
+                })
+                .transpose();
+            let names = match &addresses {
+                Ok(table) => table
+                    .as_ref()
+                    .map(|addresses| {
+                        super::names::parse_prepared_export_name_entries(&prepared, addresses).map(
+                            |entries| PeExportNameTable {
+                                addresses: addresses.clone(),
+                                entries,
+                            },
+                        )
+                    })
+                    .transpose(),
+                Err(cause) => Err(PeExportNameError::Addresses(*cause)),
+            };
+            (Ok(directory), addresses, names)
+        }
+        Err(cause) => (
+            Err(cause),
+            Err(PeExportAddressError::Directory(cause)),
+            Err(PeExportNameError::Addresses(
+                PeExportAddressError::Directory(cause),
+            )),
+        ),
+    };
     let mut rows = 0_u64;
     let mut text_bytes = 0_u64;
     // reader caps bound standalone/nested address and name views to 12288 rows and less than 196608 text bytes.
