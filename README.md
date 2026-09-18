@@ -453,6 +453,7 @@ and per-run evidence go under `target/`; they are not committed.
 | [pe-forwarders](corpus/pe-forwarders/) | Forwarder DLLs and named terminal providers in both PE widths. | `pnpm corpus:build:forwarders` |
 | [pe-base-relocations](corpus/pe-base-relocations/) | Files containing relocation block metadata. | `pnpm corpus:build:relocations` |
 | [pe-tls](corpus/pe-tls/) | Files containing fixed thread-local storage directories. | `pnpm corpus:build:tls` |
+| [pe-load-config](corpus/pe-load-config/) | Linked load-config records with distinct common prefixes in both PE widths. | `pnpm corpus:build:load-config` |
 | [pe-delay-imports](corpus/pe-delay-imports/) | Delay-import metadata with named symbols. | `pnpm corpus:build:delay` |
 | [pe-delay-ordinals](corpus/pe-delay-ordinals/) | Delay-import metadata with ordinal `32768`. | `pnpm corpus:build:delay-ordinals` |
 | [pe-resources](corpus/pe-resources/) | Linked resource roots and raw Unicode name bytes. | `pnpm corpus:build:resources` |
