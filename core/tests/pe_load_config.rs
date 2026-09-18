@@ -306,3 +306,44 @@ fn generated_pe32_with_synthetic_load_config_matches_prefix_metadata() {
 fn generated_pe32plus_with_synthetic_load_config_matches_prefix_metadata() {
     generated_fixture_with_synthetic_load_config("RING3_PE32PLUS_FIXTURE", true);
 }
+
+fn generated_linked_load_config(variable: &str, plus: bool) {
+    let path = std::env::var_os(variable).expect("explicit generated fixture path");
+    let bytes = std::fs::read(&path).unwrap();
+    assert_eq!(bytes.len(), 2048);
+    let before = bytes.clone();
+    let prefix = parse_pe_load_config_prefix(&bytes).unwrap().unwrap();
+    assert_eq!(parse_pe_load_config_prefix(&bytes), Ok(Some(prefix)));
+    assert_eq!(bytes, before);
+    assert_eq!(std::fs::read(path).unwrap(), before);
+    drop(bytes);
+    drop(before);
+    assert_eq!(
+        prefix,
+        PeLoadConfigPrefix {
+            kind: if plus { PeKind::Pe32Plus } else { PeKind::Pe32 },
+            directory_rva: RelativeVirtualAddress::new(0x2010),
+            directory_file_offset: FileOffset::new(1552),
+            directory_size: if plus { 112 } else { 72 },
+            structure_size: if plus { 112 } else { 72 },
+            time_date_stamp: if plus { 0x8765_4321 } else { 0x1234_5678 },
+            major_version: if plus { 9 } else { 3 },
+            minor_version: if plus { 11 } else { 7 },
+            global_flags_clear: if plus { 0x8000_0001 } else { 0x1000 },
+            global_flags_set: if plus { 0x4000_0002 } else { 0x2000 },
+            critical_section_default_timeout: if plus { 0x1020_3040 } else { 0x00ab_cdef },
+        }
+    );
+}
+
+#[test]
+#[ignore = "requires an explicit generated fixture path"]
+fn generated_pe32_load_config_matches_prefix_metadata() {
+    generated_linked_load_config("RING3_LOAD_CONFIG_PE32_FIXTURE", false);
+}
+
+#[test]
+#[ignore = "requires an explicit generated fixture path"]
+fn generated_pe32plus_load_config_matches_prefix_metadata() {
+    generated_linked_load_config("RING3_LOAD_CONFIG_PE32PLUS_FIXTURE", true);
+}
