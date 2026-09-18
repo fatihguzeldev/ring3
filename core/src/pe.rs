@@ -6,6 +6,7 @@ mod base_relocations;
 mod certificate_entries;
 mod certificates;
 mod clr;
+mod clr_entry_point_declarations;
 mod coff_image_role_declarations;
 mod debug;
 mod debug_payloads;
@@ -41,6 +42,9 @@ pub use certificate_entries::{
 };
 pub use certificates::{PeCertificateError, PeCertificateTable, parse_pe_certificate_table};
 pub use clr::{PeClrDataDirectory, PeClrError, PeClrHeader, parse_pe_clr_header};
+pub use clr_entry_point_declarations::{
+    PeClrEntryPointDeclaration, PeClrEntryPointTarget, describe_pe_clr_entry_point,
+};
 pub use coff_image_role_declarations::{
     PeCoffImageRoleDeclarations, describe_pe_coff_image_role_declarations,
 };

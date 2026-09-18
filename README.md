@@ -109,6 +109,13 @@ fields or coordinates. Absent or failed CLR evidence has no bit observations;
 required/preferred bits remain raw observations without a runtime verdict. See
 the [declaration projection](core/src/pe/architecture_declarations.rs).
 
+`describe_pe_clr_entry_point` pairs available owned CLR evidence with a typed
+managed-token or native-RVA declaration, selected only by flag `0x10`. It retains
+the complete raw word and coordinates, including zero and caller-created fields.
+Caller-side `Result`/`Option` mapping preserves errors and absence. The declaration
+does not validate a token or target, select an entry point, or imply runtime support.
+See the [CLR entry-point declaration API](core/src/pe/clr_entry_point_declarations.rs).
+
 `describe_pe_coff_image_role_declarations` names the executable-image, system and
 DLL bits in one supplied successful prefix. It preserves all raw fields and all
 unselected bits, including recognized architecture flags. Each bit is independent;
