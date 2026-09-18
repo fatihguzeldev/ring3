@@ -386,7 +386,9 @@ can outlive the owner while retaining each input image's independent lifetime.
 
 `inspect_pe_delay_imports` retains three independent owned results for the raw
 delay table, DLL names and lookup symbols. Each keeps absence, present-empty
-table metadata and typed errors distinct. Input admission precedes the readers;
+table metadata and typed errors distinct. The collector reuses the same call’s
+prepared input, raw descriptors and admitted DLL names for dependent views;
+standalone readers still admit their own input. Input admission precedes parsing;
 complete row and text admission precedes new text/conversion copies. Existing
 reader allocations occur earlier, and the already-owned raw table moves into
 the result. Repeated text counts per occurrence; these limits do not cap process

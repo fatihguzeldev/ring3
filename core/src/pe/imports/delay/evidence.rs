@@ -2,9 +2,9 @@ use super::super::evidence::own_entry;
 use super::{
     PeDelayImportDescriptor, PeDelayImportError, PeDelayImportLookupError,
     PeDelayImportLookupTable, PeDelayImportName, PeDelayImportNameError, PeDelayImportNameTable,
-    PeDelayImportTable, parse_pe_delay_import_descriptors, parse_pe_delay_import_lookups,
-    parse_pe_delay_import_names,
+    PeDelayImportTable,
 };
+use crate::pe::rva::PreparedPe;
 use crate::{FileOffset, PeImportSymbol, PeKind, PeOwnedImportLookupEntry, RelativeVirtualAddress};
 
 /// per-call input and logical output caps; not allocation or memory limits.
@@ -106,7 +106,8 @@ fn own_lookups(t: PeDelayImportLookupTable<'_>) -> PeOwnedDelayImportLookupTable
 }
 
 /// collects independent owned delay descriptor, name and lookup results.
-/// input admission precedes all three readers. each successful raw descriptor,
+/// input admission precedes parsing. same-call prepared input, raw descriptors and
+/// names are reused by their dependent views. each successful raw descriptor,
 /// named descriptor, lookup descriptor and lookup entry costs one output row.
 /// table wrappers and directory/terminator metadata cost no rows. each copied
 /// dll/symbol text occurrence costs its byte length, excluding nul; duplicates
@@ -163,9 +164,34 @@ pub fn inspect_pe_delay_imports(
             limit: limits.max_input_bytes,
         });
     }
-    let raw = parse_pe_delay_import_descriptors(bytes);
-    let names = parse_pe_delay_import_names(bytes);
-    let lookups = parse_pe_delay_import_lookups(bytes);
+    let admitted = PreparedPe::new(bytes)
+        .map_err(PeDelayImportError::Base)
+        .and_then(|prepared| {
+            super::descriptors::parse_prepared_descriptors(&prepared).map(|raw| (prepared, raw))
+        });
+    let (raw, names, lookups) = match admitted {
+        Ok((prepared, raw)) => {
+            let names = raw
+                .as_ref()
+                .map(|table| super::names::parse_admitted_names(&prepared, table))
+                .transpose();
+            let lookups = match &names {
+                Ok(table) => table
+                    .as_ref()
+                    .map(|table| super::lookups::parse_admitted_lookups(&prepared, table))
+                    .transpose(),
+                Err(cause) => Err(PeDelayImportLookupError::Names(*cause)),
+            };
+            (Ok(raw), names, lookups)
+        }
+        Err(cause) => (
+            Err(cause),
+            Err(PeDelayImportNameError::Table(cause)),
+            Err(PeDelayImportLookupError::Names(
+                PeDelayImportNameError::Table(cause),
+            )),
+        ),
+    };
     let mut rows = 0_u64;
     let mut text_bytes = 0_u64;
     // reader bounds limit the combined views to 4480 rows and less than 196608 text bytes.

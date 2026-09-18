@@ -1,5 +1,5 @@
 use super::descriptors::parse_prepared_descriptors;
-use super::{PeDelayImportDescriptor, PeDelayImportError};
+use super::{PeDelayImportDescriptor, PeDelayImportError, PeDelayImportTable};
 use crate::pe::rva::PreparedPe;
 use crate::pe::{PeKind, PeRvaError};
 use crate::{FileOffset, RelativeVirtualAddress};
@@ -154,9 +154,16 @@ pub(super) fn parse_prepared_names<'a>(
     else {
         return Ok(None);
     };
+    parse_admitted_names(prepared, &table).map(Some)
+}
+
+pub(super) fn parse_admitted_names<'a>(
+    prepared: &PreparedPe<'a>,
+    table: &PeDelayImportTable,
+) -> Result<PeDelayImportNameTable<'a>, PeDelayImportNameError> {
     let mut imports = Vec::new();
     let mut total = 0;
-    for (descriptor_index, descriptor) in (0_u16..).zip(table.descriptors) {
+    for (descriptor_index, descriptor) in (0_u16..).zip(table.descriptors.iter().copied()) {
         if descriptor.attributes != 1 {
             return Err(PeDelayImportNameError::UnsupportedAttributes {
                 descriptor_index,
@@ -170,7 +177,7 @@ pub(super) fn parse_prepared_names<'a>(
             dll_name,
         });
     }
-    Ok(Some(PeDelayImportNameTable {
+    Ok(PeDelayImportNameTable {
         kind: table.kind,
         directory_rva: table.directory_rva,
         directory_file_offset: table.directory_file_offset,
@@ -178,5 +185,5 @@ pub(super) fn parse_prepared_names<'a>(
         imports,
         terminator_rva: table.terminator_rva,
         terminator_file_offset: table.terminator_file_offset,
-    }))
+    })
 }
