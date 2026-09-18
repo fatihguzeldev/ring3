@@ -116,6 +116,84 @@ fn batch(entries: Vec<AsciiPeSourceModuleEvidence>) -> AsciiPeSourceModuleEviden
 }
 
 #[test]
+fn request_candidates_match_standalone_admission_across_tokens_and_limits() {
+    use ring3_core::{
+        AsciiApplicationSourceCandidateLimits, find_ascii_application_source_candidate,
+    };
+    let tokens = [
+        "lib.dll",
+        "LIB.DLL",
+        "main.exe",
+        "missing",
+        "",
+        ".",
+        "..",
+        "CON.dll",
+        "a.",
+        "a ",
+        "/lib.dll",
+        "C:lib.dll",
+        "é",
+        "dir/lib.dll",
+        r"dir\lib.dll",
+        "%2f.dll",
+    ];
+    let input = batch(vec![
+        source(r"App\main.exe", &tokens, Some(&tokens)),
+        source("plugins/lib.dll", &[], None),
+        source("APP/LIB.DLL", &[], None),
+        source("App/%2f.dll", &[], None),
+    ]);
+    let before = input.clone();
+    let labels: Vec<_> = input
+        .entries
+        .iter()
+        .map(|e| e.path.normalized.as_str())
+        .collect();
+    for application in 0..input.entries.len() {
+        for basename_limit in [0, 1, 7, 8, 64] {
+            let caps = Limits {
+                max_requests: 32,
+                max_request_text_bytes: 1024,
+                max_basename_bytes: basename_limit,
+                ..limits()
+            };
+            let result = observe(&input, application, caps).unwrap();
+            assert_eq!(result.requests.len(), 32);
+            for (index, request) in result.requests.iter().enumerate() {
+                let token = tokens[index % tokens.len()];
+                let expected = find_ascii_application_source_candidate(
+                    &labels,
+                    application,
+                    token,
+                    AsciiApplicationSourceCandidateLimits {
+                        paths: caps.paths,
+                        max_basename_bytes: basename_limit,
+                    },
+                )
+                .map(|entry| entry.map(|entry| entry.index));
+                assert_eq!(request.source_index, 0);
+                assert_eq!(request.descriptor_index, index % tokens.len());
+                assert_eq!(
+                    request.kind,
+                    if index < tokens.len() {
+                        Kind::Static
+                    } else {
+                        Kind::Delay
+                    }
+                );
+                assert_eq!(request.dll_name, token);
+                assert_eq!(
+                    request.candidate, expected,
+                    "application={application} token={token:?} cap={basename_limit}"
+                );
+            }
+        }
+    }
+    assert_eq!(input, before);
+}
+
+#[test]
 fn ordered_requests_own_text_and_use_the_application_context() {
     let output = {
         let mut input = batch(vec![

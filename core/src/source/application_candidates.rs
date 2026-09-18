@@ -1,5 +1,6 @@
 use super::{
-    AsciiSourcePathEntry, AsciiSourcePathError, AsciiSourcePathLimits, admit_ascii_source_paths,
+    AsciiSourcePathBatch, AsciiSourcePathEntry, AsciiSourcePathError, AsciiSourcePathLimits,
+    admit_ascii_source_paths,
 };
 
 /// explicit limits on already materialized paths and one literal basename.
@@ -75,6 +76,22 @@ pub fn find_ascii_application_source_candidate(
 ) -> Result<Option<AsciiSourcePathEntry>, AsciiApplicationSourceCandidateError> {
     let mut admitted = admit_ascii_source_paths(paths, limits.paths)
         .map_err(AsciiApplicationSourceCandidateError::Paths)?;
+    let position = find_admitted_application_source_position(
+        &admitted,
+        application_source_index,
+        basename,
+        limits.max_basename_bytes,
+    )?;
+    Ok(position.map(|index| admitted.entries.swap_remove(index)))
+}
+
+// paths must be fresh admission output, not caller-constructed metadata.
+pub(super) fn find_admitted_application_source_position(
+    admitted: &AsciiSourcePathBatch,
+    application_source_index: usize,
+    basename: &str,
+    max_basename_bytes: u64,
+) -> Result<Option<usize>, AsciiApplicationSourceCandidateError> {
     let application = admitted.entries.get(application_source_index).ok_or(
         AsciiApplicationSourceCandidateError::ApplicationSourceIndexOutOfRange {
             index: application_source_index,
@@ -85,8 +102,8 @@ pub fn find_ascii_application_source_candidate(
         &[basename],
         AsciiSourcePathLimits {
             max_paths: 1,
-            max_path_bytes: limits.max_basename_bytes,
-            max_total_path_bytes: limits.max_basename_bytes,
+            max_path_bytes: max_basename_bytes,
+            max_total_path_bytes: max_basename_bytes,
             max_depth: 1,
         },
     )
@@ -95,9 +112,8 @@ pub fn find_ascii_application_source_candidate(
         .key
         .rsplit_once('/')
         .map_or("", |(parent, _)| parent);
-    let position = admitted.entries.iter().position(|entry| {
+    Ok(admitted.entries.iter().position(|entry| {
         let (entry_parent, entry_name) = entry.key.rsplit_once('/').unwrap_or(("", &entry.key));
         entry_parent == parent && entry_name == token.entries[0].key
-    });
-    Ok(position.map(|index| admitted.entries.swap_remove(index)))
+    }))
 }
