@@ -105,6 +105,13 @@ fn read_name<'a>(
             directory_rva,
             module_name_offset,
         })?;
+    let usable = NAME_SCAN_LIMIT.min(TOTAL_SCAN_LIMIT - *total);
+    // a backed full prefix also backs every shorter prefix; failed probes stay invisible.
+    let admitted = if usable == 0 {
+        None
+    } else {
+        prepared.resolve(name_rva, usable).ok()
+    };
     for offset in 0..=NAME_SCAN_LIMIT {
         if offset == NAME_SCAN_LIMIT {
             return Err(PeBoundImportNameError::NameLengthLimitExceeded {
@@ -121,14 +128,17 @@ fn read_name<'a>(
                 limit: TOTAL_SCAN_LIMIT,
             });
         }
-        let prefix = prepared.resolve(name_rva, offset + 1).map_err(|cause| {
-            PeBoundImportNameError::NameRange {
-                location,
-                name_rva,
-                offset,
-                cause,
-            }
-        })?;
+        let prefix = match admitted {
+            Some(prefix) => prefix,
+            None => prepared.resolve(name_rva, offset + 1).map_err(|cause| {
+                PeBoundImportNameError::NameRange {
+                    location,
+                    name_rva,
+                    offset,
+                    cause,
+                }
+            })?,
+        };
         let byte = prefix.bytes[offset as usize];
         *total += 1;
         if byte == 0 {
