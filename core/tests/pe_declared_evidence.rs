@@ -1,8 +1,10 @@
 use ring3_core::{
-    FileOffset, PeClrDescriptorEvidence, PeClrError, PeClrHeaderEvidence, PeDeclaredEvidence,
-    PeDesktopExecutableCandidateAssessment, PeDesktopExecutableCandidateDecision, PeFieldEvidence,
-    PeHeaderError, PeHeaderPrefixEvidence, PeKind, PeOptionalHeaderEvidence, PeRvaError,
-    RelativeVirtualAddress, assess_pe_desktop_executable_candidate, inspect_pe_declared_evidence,
+    FileOffset, PeClrDescriptorEvidence, PeClrEntryPointDeclaration, PeClrEntryPointTarget,
+    PeClrError, PeClrHeaderEvidence, PeDeclaredEvidence, PeDesktopExecutableCandidateAssessment,
+    PeDesktopExecutableCandidateDecision, PeFieldEvidence, PeHeaderError, PeHeaderPrefixEvidence,
+    PeKind, PeOptionalHeaderEvidence, PeRvaError, RelativeVirtualAddress,
+    assess_pe_desktop_executable_candidate, describe_pe_clr_entry_point,
+    inspect_pe_declared_evidence,
 };
 
 fn put16(bytes: &mut [u8], offset: usize, value: u16) {
@@ -251,7 +253,12 @@ fn check_raw_field<T>(bytes: &[u8], evidence: &PeFieldEvidence<T>, raw: &[u8]) {
     assert_eq!(bytes.get(start..end), Some(raw));
 }
 
-fn generated_declared_evidence(variable: &str, size: usize, wanted: PeDeclaredEvidence) {
+fn generated_declared_evidence(
+    variable: &str,
+    size: usize,
+    wanted: PeDeclaredEvidence,
+    wanted_entry: Option<PeClrEntryPointDeclaration>,
+) {
     let path = std::env::var(variable).expect("set the generated fixture path");
     let original = std::fs::read(&path).unwrap();
     assert_eq!(original.len(), size);
@@ -264,6 +271,8 @@ fn generated_declared_evidence(variable: &str, size: usize, wanted: PeDeclaredEv
         reasons: [None; 4],
     };
     let candidate = assess_pe_desktop_executable_candidate(actual);
+    let entry = actual.clr.unwrap().map(describe_pe_clr_entry_point);
+    assert_eq!(entry, wanted_entry);
     assert_eq!(candidate, wanted_candidate);
     assert_eq!(assess_pe_desktop_executable_candidate(actual), candidate);
     assert_eq!(inspect_pe_declared_evidence(&bytes), actual);
@@ -325,6 +334,8 @@ fn generated_declared_evidence(variable: &str, size: usize, wanted: PeDeclaredEv
     assert_eq!(actual, wanted);
     assert_eq!(candidate, wanted_candidate);
     assert_eq!(assess_pe_desktop_executable_candidate(actual), candidate);
+    assert_eq!(entry, wanted_entry);
+    assert_eq!(actual.clr.unwrap().map(describe_pe_clr_entry_point), entry);
     assert_eq!(inspect_pe_declared_evidence(&original), actual);
     assert_eq!(std::fs::read(path).unwrap(), original);
 }
@@ -353,6 +364,7 @@ fn generated_pe32_declared_evidence_matches_compiled_fields() {
             }),
             clr: Ok(None),
         },
+        None,
     );
 }
 
@@ -380,6 +392,7 @@ fn generated_pe32plus_declared_evidence_matches_compiled_fields() {
             }),
             clr: Ok(None),
         },
+        None,
     );
 }
 
@@ -410,6 +423,13 @@ fn generated_managed_pe32_declared_evidence_matches_compiled_fields() {
                 raw_entry_point: field(0x0600_0001, 540, 4),
             })),
         },
+        Some(PeClrEntryPointDeclaration {
+            raw: PeClrHeaderEvidence {
+                flags: field(3, 536, 4),
+                raw_entry_point: field(0x0600_0001, 540, 4),
+            },
+            target: PeClrEntryPointTarget::ManagedToken(0x0600_0001),
+        }),
     );
 }
 
@@ -440,5 +460,12 @@ fn generated_managed_pe32plus_declared_evidence_matches_compiled_fields() {
                 raw_entry_point: field(0x0600_0001, 532, 4),
             })),
         },
+        Some(PeClrEntryPointDeclaration {
+            raw: PeClrHeaderEvidence {
+                flags: field(1, 528, 4),
+                raw_entry_point: field(0x0600_0001, 532, 4),
+            },
+            target: PeClrEntryPointTarget::ManagedToken(0x0600_0001),
+        }),
     );
 }
