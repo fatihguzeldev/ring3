@@ -293,16 +293,23 @@ pub fn parse_pe_import_lookups(
         .map_err(|error| PeImportLookupError::Descriptors(PeImportError::Base(error)))?;
     let descriptors =
         parse_prepared_descriptors(&prepared).map_err(PeImportLookupError::Descriptors)?;
+    parse_admitted_lookups(&prepared, &descriptors)
+}
+
+pub(super) fn parse_admitted_lookups<'a>(
+    prepared: &PreparedPe<'a>,
+    descriptors: &[PeImportDescriptor<'a>],
+) -> Result<Vec<PeImportLookup<'a>>, PeImportLookupError> {
     let mut lookups = Vec::new();
     let mut total_entries = 0;
     let mut total_name_bytes = 0;
-    for (descriptor_index, descriptor) in (0_u16..).zip(descriptors) {
+    for (descriptor_index, descriptor) in (0_u16..).zip(descriptors.iter().copied()) {
         let start = descriptor.import_lookup_table_rva;
         if start.get() == 0 {
             return Err(PeImportLookupError::LookupTableUnavailable { descriptor_index });
         }
         let entries = lookup_entries(
-            &prepared,
+            prepared,
             descriptor_index,
             start,
             &mut total_entries,

@@ -179,8 +179,9 @@ fresh to every occurrence; errors remain local to their entry or family. See the
 [named module evidence API](core/src/source/pe_modules.rs).
 
 `inspect_pe_static_imports` retains owned static DLL and symbol metadata as two
-independent descriptor/lookup results. Input admission precedes reading; complete
-row and text admission precedes owned copying. Duplicate text counts for each
+independent descriptor/lookup results. The collector reuses same-call base and
+descriptor admission for lookup traversal; standalone readers admit their own input.
+Input admission precedes reading; complete row and text admission precedes owned copying. Duplicate text counts for each
 copy, and a lookup error preserves readable DLL declarations. These observations
 outlive input bytes without selecting providers or inferring requirements. See
 the [owned import evidence API](core/src/pe/imports/evidence.rs).

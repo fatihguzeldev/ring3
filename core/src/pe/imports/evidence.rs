@@ -1,7 +1,8 @@
 use super::{
     PeImportDescriptor, PeImportError, PeImportLookup, PeImportLookupEntry, PeImportLookupError,
-    PeImportSymbol, parse_pe_import_descriptors, parse_pe_import_lookups,
+    PeImportSymbol,
 };
+use crate::pe::rva::PreparedPe;
 use crate::{FileOffset, RelativeVirtualAddress};
 
 /// per-call input and logical owned-output caps; not allocation or memory limits.
@@ -106,7 +107,8 @@ fn own_lookup(l: PeImportLookup<'_>) -> PeOwnedImportLookup {
 }
 
 /// collects independent owned static descriptor and lookup results from one input.
-/// input admission precedes both readers. only successful results contribute to
+/// input admission precedes parsing. same-call prepared input and descriptors are
+/// reused for lookup traversal. only successful results contribute to
 /// output budgets: each standalone descriptor, lookup descriptor and lookup entry
 /// costs one row. every copied dll/symbol text occurrence costs its byte length,
 /// excluding nul; duplicates count each time. complete row admission precedes
@@ -157,8 +159,19 @@ pub fn inspect_pe_static_imports(
             limit: limits.max_input_bytes,
         });
     }
-    let descriptors = parse_pe_import_descriptors(bytes);
-    let lookups = parse_pe_import_lookups(bytes);
+    let admitted = PreparedPe::new(bytes)
+        .map_err(PeImportError::Base)
+        .and_then(|prepared| {
+            super::descriptors::parse_prepared_descriptors(&prepared)
+                .map(|descriptors| (prepared, descriptors))
+        });
+    let (descriptors, lookups) = match admitted {
+        Ok((prepared, descriptors)) => {
+            let lookups = super::lookups::parse_admitted_lookups(&prepared, &descriptors);
+            (Ok(descriptors), lookups)
+        }
+        Err(cause) => (Err(cause), Err(PeImportLookupError::Descriptors(cause))),
+    };
     let mut rows = 0_u64;
     let mut text_bytes = 0_u64;
     // reader limits bound totals to 4352 rows and fewer than 196608 text bytes.
