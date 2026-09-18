@@ -194,11 +194,19 @@ pub fn parse_pe_bound_import_names(
     else {
         return Ok(None);
     };
+    let names = parse_admitted_names(&prepared, &table)?;
+    Ok(Some(PeBoundImportNameTable { table, names }))
+}
+
+pub(super) fn parse_admitted_names<'a>(
+    prepared: &PreparedPe<'a>,
+    table: &PeBoundImportTable,
+) -> Result<Vec<PeBoundImportName<'a>>, PeBoundImportNameError> {
     let mut names = Vec::new();
     let mut total = 0;
     for (descriptor_index, descriptor) in (0_u16..).zip(&table.descriptors) {
         names.push(read_name(
-            &prepared,
+            prepared,
             PeBoundImportNameLocation::Descriptor { descriptor_index },
             table.directory_rva,
             descriptor.module_name_offset,
@@ -206,7 +214,7 @@ pub fn parse_pe_bound_import_names(
         )?);
         for (forwarder_index, reference) in (0_u16..).zip(&descriptor.forwarder_refs) {
             names.push(read_name(
-                &prepared,
+                prepared,
                 PeBoundImportNameLocation::Forwarder {
                     descriptor_index,
                     forwarder_index,
@@ -217,5 +225,5 @@ pub fn parse_pe_bound_import_names(
             )?);
         }
     }
-    Ok(Some(PeBoundImportNameTable { table, names }))
+    Ok(names)
 }

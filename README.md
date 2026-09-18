@@ -253,11 +253,14 @@ file-backed. ASCII acceptance does not validate paths, providers or binding.
 See the [borrowed name contract](core/src/pe/imports/bound/names.rs).
 
 `inspect_pe_bound_imports` retains independent owned raw and name results after
-input release. Input admission precedes both readers; complete row and text
-admission precedes new name copies. Standalone records, nested records and name
+input release. Input admission precedes parsing; the collector reuses the same
+call’s prepared input and complete raw table for name scanning. A successful name
+view retains a separate raw-table clone. Complete row and text admission precedes
+new name copies. Standalone records, nested records and name
 entries each count as rows; copied text excludes NUL and counts every occurrence.
 A name failure preserves readable raw metadata. These logical output caps do not
-bound earlier reader allocations or establish provider/binding validity. See the
+bound earlier reader allocations or the nested raw-table clone, or establish
+provider/binding validity. See the
 [owned bound-import contract](core/src/pe/imports/bound/evidence.rs).
 
 `lookup_pe_import_evidence_exports` matches one retained static-import descriptor

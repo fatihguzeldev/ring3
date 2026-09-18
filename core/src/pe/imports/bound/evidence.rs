@@ -1,7 +1,8 @@
 use super::{
     PeBoundImportError, PeBoundImportNameError, PeBoundImportNameLocation, PeBoundImportNameTable,
-    PeBoundImportTable, parse_pe_bound_import_descriptors, parse_pe_bound_import_names,
+    PeBoundImportTable, parse_prepared_table,
 };
+use crate::pe::rva::PreparedPe;
 use crate::{FileOffset, RelativeVirtualAddress};
 
 /// per-call input and logical output caps; not allocation or memory limits.
@@ -77,8 +78,9 @@ fn own_names(table: PeBoundImportNameTable<'_>) -> PeOwnedBoundImportNameTable {
 /// present-empty tables retain metadata with zero output caps.
 ///
 /// complete row admission precedes text admission and new owned name conversion
-/// copies. existing reader allocations, including both already-owned raw tables,
-/// occur earlier; those tables move into the evidence. reader caps bound output
+/// copies. raw-table and borrowed-name allocations, and the successful nested
+/// raw-table clone, occur earlier; both tables move into the evidence.
+/// reader caps bound output
 /// to 3456 rows and fewer than 65536 text bytes. these logical limits do not cap
 /// process memory, resolver work or execution time, do not recover allocation
 /// failure, and offer no cancellation.
@@ -123,8 +125,26 @@ pub fn inspect_pe_bound_imports(
             limit: limits.max_input_bytes,
         });
     }
-    let descriptors = parse_pe_bound_import_descriptors(bytes);
-    let names = parse_pe_bound_import_names(bytes);
+    let admitted = PreparedPe::new(bytes)
+        .map_err(PeBoundImportError::Base)
+        .and_then(|prepared| parse_prepared_table(&prepared).map(|table| (prepared, table)));
+    let (descriptors, names) = match admitted {
+        Ok((prepared, table)) => {
+            let names = table
+                .as_ref()
+                .map(|table| {
+                    super::names::parse_admitted_names(&prepared, table).map(|names| {
+                        PeBoundImportNameTable {
+                            table: table.clone(),
+                            names,
+                        }
+                    })
+                })
+                .transpose();
+            (Ok(table), names)
+        }
+        Err(cause) => (Err(cause), Err(PeBoundImportNameError::Table(cause))),
+    };
     let mut rows = 0;
     let mut text_bytes = 0;
     if let Ok(Some(table)) = &descriptors {
