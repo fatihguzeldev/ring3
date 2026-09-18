@@ -434,7 +434,7 @@ and per-run evidence go under `target/`; they are not committed.
 | [pe-named-imports](corpus/pe-named-imports/) | EXE/DLL pairs with symbols imported by name. | `pnpm corpus:build:imports` |
 | [pe-dependency-chain](corpus/pe-dependency-chain/) | EXE → DLL → DLL import chains in both PE widths. | `pnpm corpus:build:chain` |
 | [pe-ordinal-imports](corpus/pe-ordinal-imports/) | EXE/DLL pairs with symbols imported by number. | `pnpm corpus:build:ordinals` |
-| [pe-forwarders](corpus/pe-forwarders/) | DLL exports that refer to another module's symbols. | `pnpm corpus:build:forwarders` |
+| [pe-forwarders](corpus/pe-forwarders/) | Forwarder DLLs and named terminal providers in both PE widths. | `pnpm corpus:build:forwarders` |
 | [pe-base-relocations](corpus/pe-base-relocations/) | Files containing relocation block metadata. | `pnpm corpus:build:relocations` |
 | [pe-tls](corpus/pe-tls/) | Files containing fixed thread-local storage directories. | `pnpm corpus:build:tls` |
 | [pe-delay-imports](corpus/pe-delay-imports/) | Delay-import metadata with named symbols. | `pnpm corpus:build:delay` |
@@ -559,6 +559,11 @@ result is retained after input release under zero output caps; positive bound
 records and names use self-authored fixtures.
 One owned forwarder batch group retains ordered complete walks and real per-query
 errors, with exact aggregate successful totals and one-less limit refusals.
+Two named-forwarder groups reach a compiled named terminal in PE32 and PE32+
+through borrowed walks, owned walks and owned batches. Complete selected metadata,
+source/evidence text ownership, exact budgets and missing-route refusals are checked;
+substituting the ordinal-only provider preserves the earlier name-not-found result.
+Routes remain explicit caller input, with no module discovery or code execution.
 
 The verifier requires pinned native Rust tools on `aarch64-apple-darwin`, compiles
 the Rust tests offline into a fresh Cargo target, and rejects missing, extra or

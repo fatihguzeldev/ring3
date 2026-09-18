@@ -192,7 +192,9 @@
       "generated_pe32_ordinal_forwarder_walk_selects_explicit_provider",
       "generated_pe32plus_ordinal_forwarder_walk_selects_explicit_provider",
       "generated_owned_forwarder_walks_preserve_compiled_routes",
-      "generated_owned_forwarder_batches_preserve_compiled_order_and_limits"
+      "generated_owned_forwarder_batches_preserve_compiled_order_and_limits",
+      "named_target::generated_pe32_named_forwarder_selects_terminal",
+      "named_target::generated_pe32plus_named_forwarder_selects_terminal"
     ],
     "pe_amd64_unwind": [
       "generated_amd64_unwind_records_preserve_slots_and_padding"
