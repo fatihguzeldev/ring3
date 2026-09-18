@@ -1,9 +1,10 @@
+use super::application_candidates::find_admitted_application_source_position;
 use crate::{
-    AsciiApplicationSourceCandidateError, AsciiApplicationSourceCandidateLimits,
-    AsciiPeSourceModuleEvidenceBatch, AsciiSourcePathBatch, AsciiSourcePathError,
-    AsciiSourcePathLimits, PeDelayImportEvidenceError, PeDelayImportNameError, PeFingerprintError,
-    PeImportError, PeModuleEvidence, PeOwnedDelayImportName, PeOwnedImportDescriptor,
-    PeStaticImportEvidenceError, admit_ascii_source_paths, find_ascii_application_source_candidate,
+    AsciiApplicationSourceCandidateError, AsciiPeSourceModuleEvidenceBatch, AsciiSourcePathBatch,
+    AsciiSourcePathError, AsciiSourcePathLimits, PeDelayImportEvidenceError,
+    PeDelayImportNameError, PeFingerprintError, PeImportError, PeModuleEvidence,
+    PeOwnedDelayImportName, PeOwnedImportDescriptor, PeStaticImportEvidenceError,
+    admit_ascii_source_paths,
 };
 
 /// the retained view that supplied a request.
@@ -212,9 +213,10 @@ fn text_add(
 ///
 /// module/family/view errors remain independent. static empty, delay absent and
 /// delay present-empty remain distinct. requests retain source, static-before-delay
-/// and view order, including duplicates. each request calls the existing lexical
-/// finder, repeating source admission, and preserves its full error or optional
-/// candidate index. none does not mean a missing windows dll. self/cyclic candidates
+/// and view order, including duplicates. requests reuse this call's admitted paths;
+/// each basename is still admitted independently under the lexical finder's rules,
+/// preserving its full error or optional candidate index. none does not mean a
+/// missing windows dll. self/cyclic candidates
 /// are observations; no recursive traversal, provider resolution or loading occurs.
 ///
 /// output outlives input. no filesystem i/o, global memory/time bound, allocation
@@ -322,16 +324,12 @@ pub fn observe_ascii_pe_module_dependencies(
                 for descriptor_index in 0..rows.len() {
                     let token = rows.name(descriptor_index);
                     let dll_name = token.to_owned();
-                    let candidate = find_ascii_application_source_candidate(
-                        &labels,
+                    let candidate = find_admitted_application_source_position(
+                        &paths,
                         application_source_index,
                         token,
-                        AsciiApplicationSourceCandidateLimits {
-                            paths: limits.paths,
-                            max_basename_bytes: limits.max_basename_bytes,
-                        },
-                    )
-                    .map(|entry| entry.map(|entry| entry.index));
+                        limits.max_basename_bytes,
+                    );
                     requests.push(AsciiPeModuleDependencyRequest {
                         source_index,
                         kind,
