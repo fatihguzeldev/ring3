@@ -2,7 +2,7 @@ use super::{
     PeExportAddressError, PeExportAddressTable, PeExportDirectory, PeExportDirectoryError,
     PeExportNameError, PeExportNameTable, PeExportTarget,
 };
-use crate::pe::rva::PreparedPe;
+use crate::pe::{PeRvaError, rva::PreparedPe};
 use crate::{FileOffset, RelativeVirtualAddress};
 
 /// per-call input and logical output caps; not allocation or memory limits.
@@ -179,24 +179,33 @@ pub fn inspect_pe_exports(
             limit: limits.max_input_bytes,
         });
     }
-    let admitted = PreparedPe::new(bytes)
+    let prepared = PreparedPe::new(bytes);
+    inspect_prepared_exports(prepared.as_ref().map_err(|cause| *cause), limits)
+}
+
+// the caller has admitted this same input before preparing it.
+pub(in crate::pe) fn inspect_prepared_exports(
+    prepared: Result<&PreparedPe<'_>, PeRvaError>,
+    limits: PeExportEvidenceLimits,
+) -> Result<PeExportEvidence, PeExportEvidenceError> {
+    let admitted = prepared
         .map_err(PeExportDirectoryError::Base)
         .and_then(|prepared| {
-            super::directory::parse_prepared_export_directory(&prepared)
+            super::directory::parse_prepared_export_directory(prepared)
                 .map(|directory| (prepared, directory))
         });
     let (directory, addresses, names) = match admitted {
         Ok((prepared, directory)) => {
             let addresses = directory
                 .map(|directory| {
-                    super::addresses::parse_admitted_export_addresses(&prepared, directory)
+                    super::addresses::parse_admitted_export_addresses(prepared, directory)
                 })
                 .transpose();
             let names = match &addresses {
                 Ok(table) => table
                     .as_ref()
                     .map(|addresses| {
-                        super::names::parse_prepared_export_name_entries(&prepared, addresses).map(
+                        super::names::parse_prepared_export_name_entries(prepared, addresses).map(
                             |entries| PeExportNameTable {
                                 addresses: addresses.clone(),
                                 entries,

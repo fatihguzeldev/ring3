@@ -1,3 +1,7 @@
+pub(super) use bound::inspect_prepared_bound_imports;
+pub(super) use delay::inspect_prepared_delay_imports;
+pub(super) use evidence::inspect_prepared_static_imports;
+
 mod bound;
 mod delay;
 mod descriptors;

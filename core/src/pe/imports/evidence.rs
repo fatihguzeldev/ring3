@@ -2,7 +2,7 @@ use super::{
     PeImportDescriptor, PeImportError, PeImportLookup, PeImportLookupEntry, PeImportLookupError,
     PeImportSymbol,
 };
-use crate::pe::rva::PreparedPe;
+use crate::pe::{PeRvaError, rva::PreparedPe};
 use crate::{FileOffset, RelativeVirtualAddress};
 
 /// per-call input and logical owned-output caps; not allocation or memory limits.
@@ -159,15 +159,22 @@ pub fn inspect_pe_static_imports(
             limit: limits.max_input_bytes,
         });
     }
-    let admitted = PreparedPe::new(bytes)
-        .map_err(PeImportError::Base)
-        .and_then(|prepared| {
-            super::descriptors::parse_prepared_descriptors(&prepared)
-                .map(|descriptors| (prepared, descriptors))
-        });
+    let prepared = PreparedPe::new(bytes);
+    inspect_prepared_static_imports(prepared.as_ref().map_err(|cause| *cause), limits)
+}
+
+// the caller has admitted this same input before preparing it.
+pub(in crate::pe) fn inspect_prepared_static_imports(
+    prepared: Result<&PreparedPe<'_>, PeRvaError>,
+    limits: PeStaticImportEvidenceLimits,
+) -> Result<PeStaticImportEvidence, PeStaticImportEvidenceError> {
+    let admitted = prepared.map_err(PeImportError::Base).and_then(|prepared| {
+        super::descriptors::parse_prepared_descriptors(prepared)
+            .map(|descriptors| (prepared, descriptors))
+    });
     let (descriptors, lookups) = match admitted {
         Ok((prepared, descriptors)) => {
-            let lookups = super::lookups::parse_admitted_lookups(&prepared, &descriptors);
+            let lookups = super::lookups::parse_admitted_lookups(prepared, &descriptors);
             (Ok(descriptors), lookups)
         }
         Err(cause) => (Err(cause), Err(PeImportLookupError::Descriptors(cause))),

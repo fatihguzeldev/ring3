@@ -1,3 +1,5 @@
+pub(in crate::pe) use evidence::inspect_prepared_bound_imports;
+
 mod evidence;
 
 pub use evidence::{

@@ -4,7 +4,7 @@ use super::{
     PeDelayImportLookupTable, PeDelayImportName, PeDelayImportNameError, PeDelayImportNameTable,
     PeDelayImportTable,
 };
-use crate::pe::rva::PreparedPe;
+use crate::pe::{PeRvaError, rva::PreparedPe};
 use crate::{FileOffset, PeImportSymbol, PeKind, PeOwnedImportLookupEntry, RelativeVirtualAddress};
 
 /// per-call input and logical output caps; not allocation or memory limits.
@@ -164,21 +164,30 @@ pub fn inspect_pe_delay_imports(
             limit: limits.max_input_bytes,
         });
     }
-    let admitted = PreparedPe::new(bytes)
+    let prepared = PreparedPe::new(bytes);
+    inspect_prepared_delay_imports(prepared.as_ref().map_err(|cause| *cause), limits)
+}
+
+// the caller has admitted this same input before preparing it.
+pub(in crate::pe) fn inspect_prepared_delay_imports(
+    prepared: Result<&PreparedPe<'_>, PeRvaError>,
+    limits: PeDelayImportEvidenceLimits,
+) -> Result<PeDelayImportEvidence, PeDelayImportEvidenceError> {
+    let admitted = prepared
         .map_err(PeDelayImportError::Base)
         .and_then(|prepared| {
-            super::descriptors::parse_prepared_descriptors(&prepared).map(|raw| (prepared, raw))
+            super::descriptors::parse_prepared_descriptors(prepared).map(|raw| (prepared, raw))
         });
     let (raw, names, lookups) = match admitted {
         Ok((prepared, raw)) => {
             let names = raw
                 .as_ref()
-                .map(|table| super::names::parse_admitted_names(&prepared, table))
+                .map(|table| super::names::parse_admitted_names(prepared, table))
                 .transpose();
             let lookups = match &names {
                 Ok(table) => table
                     .as_ref()
-                    .map(|table| super::lookups::parse_admitted_lookups(&prepared, table))
+                    .map(|table| super::lookups::parse_admitted_lookups(prepared, table))
                     .transpose(),
                 Err(cause) => Err(PeDelayImportLookupError::Names(*cause)),
             };

@@ -311,8 +311,10 @@ batch. See the [batch contract](core/src/pe/exports/evidence_walk_batch.rs).
 `inspect_pe_module_evidence` binds the whole-input fingerprint and declared,
 static import, delay import, export and bound-import evidence to one input slice. It retains
 owned, independent family results even when another family exceeds its row/text
-limits. Shared fingerprint input admission runs first; family output limits are
-separate and do not cap total allocations. This is metadata evidence, not a
+limits. Shared fingerprint input admission runs first. After fingerprint and
+declaration collection, the four families share one same-call prepared PE header
+and section result; declaration validation remains separate. Family output limits
+are separate and do not cap total allocations. This is metadata evidence, not a
 complete module report, provider resolution or authentication guarantee.
 See the [same-input module evidence API](core/src/pe/module_evidence.rs).
 

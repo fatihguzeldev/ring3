@@ -2,7 +2,7 @@ use super::{
     PeBoundImportError, PeBoundImportNameError, PeBoundImportNameLocation, PeBoundImportNameTable,
     PeBoundImportTable, parse_prepared_table,
 };
-use crate::pe::rva::PreparedPe;
+use crate::pe::{PeRvaError, rva::PreparedPe};
 use crate::{FileOffset, RelativeVirtualAddress};
 
 /// per-call input and logical output caps; not allocation or memory limits.
@@ -125,15 +125,24 @@ pub fn inspect_pe_bound_imports(
             limit: limits.max_input_bytes,
         });
     }
-    let admitted = PreparedPe::new(bytes)
+    let prepared = PreparedPe::new(bytes);
+    inspect_prepared_bound_imports(prepared.as_ref().map_err(|cause| *cause), limits)
+}
+
+// the caller has admitted this same input before preparing it.
+pub(in crate::pe) fn inspect_prepared_bound_imports(
+    prepared: Result<&PreparedPe<'_>, PeRvaError>,
+    limits: PeBoundImportEvidenceLimits,
+) -> Result<PeBoundImportEvidence, PeBoundImportEvidenceError> {
+    let admitted = prepared
         .map_err(PeBoundImportError::Base)
-        .and_then(|prepared| parse_prepared_table(&prepared).map(|table| (prepared, table)));
+        .and_then(|prepared| parse_prepared_table(prepared).map(|table| (prepared, table)));
     let (descriptors, names) = match admitted {
         Ok((prepared, table)) => {
             let names = table
                 .as_ref()
                 .map(|table| {
-                    super::names::parse_admitted_names(&prepared, table).map(|names| {
+                    super::names::parse_admitted_names(prepared, table).map(|names| {
                         PeBoundImportNameTable {
                             table: table.clone(),
                             names,
