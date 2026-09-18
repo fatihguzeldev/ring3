@@ -1,3 +1,6 @@
+#[path = "pe_mutations/tls_callbacks.rs"]
+mod tls_callbacks;
+
 #[path = "pe_mutations/import_observations.rs"]
 mod import_observations;
 
@@ -188,6 +191,7 @@ fn inspect(
     unwind_expected: Option<&PeAmd64UnwindInfoV1>,
     report: &mut Campaign,
     observations: &mut import_observations::Report,
+    callbacks: &mut tls_callbacks::Report,
 ) {
     let before = bytes.to_vec();
     write!(report.digest, "input:{}:{}\0", report.cases, bytes.len()).unwrap();
@@ -235,6 +239,7 @@ fn inspect(
     inspect_amd64_exceptions(bytes, baseline, report);
     inspect_amd64_unwind(bytes, unwind_expected, report);
     let _ = import_observations::inspect(bytes, observations);
+    let _ = tls_callbacks::inspect(bytes, 4, callbacks);
     assert_eq!(bytes, before, "input changed at case {}", report.cases);
     report.cases += 1;
 }
@@ -490,8 +495,9 @@ fn index(state: &mut u32, length: usize) -> usize {
     usize::try_from(next(state)).unwrap() % length
 }
 
-fn campaign() -> (Campaign, import_observations::Report) {
-    let mut observations = import_observations::Report::new();
+fn campaign() -> (Campaign, import_observations::Report, tls_callbacks::Report) {
+    let mut tls = tls_callbacks::Report::new();
+    let mut imports = import_observations::Report::new();
     let mut report = Campaign {
         cases: 0,
         outcomes: [[0; 2]; READER_COUNT],
@@ -510,7 +516,8 @@ fn campaign() -> (Campaign, import_observations::Report) {
             true,
             expected_unwind.as_ref(),
             &mut report,
-            &mut observations,
+            &mut imports,
+            &mut tls,
         );
         for end in 0..original.len() {
             inspect(
@@ -518,14 +525,15 @@ fn campaign() -> (Campaign, import_observations::Report) {
                 false,
                 None,
                 &mut report,
-                &mut observations,
+                &mut imports,
+                &mut tls,
             );
         }
         for _ in 0..128 {
             let mut bytes = original.clone();
             let position = index(&mut state, bytes.len());
             bytes[position] ^= 1 << (next(&mut state) % 8);
-            inspect(&bytes, false, None, &mut report, &mut observations);
+            inspect(&bytes, false, None, &mut report, &mut imports, &mut tls);
         }
         let directory = directory_base(plus);
         let mut words = vec![60, 148, 212, directory - 4];
@@ -551,7 +559,7 @@ fn campaign() -> (Campaign, import_observations::Report) {
             let mut bytes = original.clone();
             let position = words[index(&mut state, words.len())];
             put32(&mut bytes, position, boundaries[round % boundaries.len()]);
-            inspect(&bytes, false, None, &mut report, &mut observations);
+            inspect(&bytes, false, None, &mut report, &mut imports, &mut tls);
         }
         for round in 0..256 {
             let mut bytes = original.clone();
@@ -563,7 +571,7 @@ fn campaign() -> (Campaign, import_observations::Report) {
             if round % 4 == 0 {
                 bytes.truncate(index(&mut state, original.len()));
             }
-            inspect(&bytes, false, None, &mut report, &mut observations);
+            inspect(&bytes, false, None, &mut report, &mut imports, &mut tls);
         }
     }
     assert_eq!(report.cases, CASE_COUNT);
@@ -576,8 +584,9 @@ fn campaign() -> (Campaign, import_observations::Report) {
         assert!(successes > 0 && failures > 0);
         assert_eq!(successes + failures, CASE_COUNT);
     }
-    import_observations::positive_tail(&mut observations);
-    (report, observations)
+    import_observations::positive_tail(&mut imports);
+    tls_callbacks::positive_tail(&mut tls);
+    (report, imports, tls)
 }
 
 #[test]
