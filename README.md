@@ -186,6 +186,12 @@ copy, and a lookup error preserves readable DLL declarations. These observations
 outlive input bytes without selecting providers or inferring requirements. See
 the [owned import evidence API](core/src/pe/imports/evidence.rs).
 
+Static and delay lookup readers reuse one successfully backed hint/name prefix
+within each symbol's remaining name budget. A failed larger-prefix probe falls
+back to the original growing ranges, so an early NUL can still end a valid name
+before an unreadable or ambiguous tail. Hint bytes do not consume the name budget;
+local and aggregate name limits retain their existing order.
+
 `parse_pe_import_lookups_with_iat_fallback` separately observes lookup-shaped IAT
 bytes when a descriptor's original-first-thunk is zero. It preserves the original
 descriptor, borrowed names and an explicit source on both tables and decoder

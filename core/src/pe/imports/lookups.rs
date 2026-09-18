@@ -121,6 +121,13 @@ fn named_symbol<'a>(
     hint_name_rva: RelativeVirtualAddress,
     total: &mut u32,
 ) -> Result<PeImportSymbol<'a>, PeImportLookupError> {
+    let usable = NAME_LENGTH_LIMIT.min(NAME_SCAN_BUDGET - *total);
+    // a backed full prefix also backs every shorter prefix; failed probes stay invisible.
+    let admitted = if usable == 0 {
+        None
+    } else {
+        prepared.resolve(hint_name_rva, 2 + usable).ok()
+    };
     let mut offset = 0;
     loop {
         if offset == NAME_LENGTH_LIMIT {
@@ -140,15 +147,18 @@ fn named_symbol<'a>(
                 limit: NAME_SCAN_BUDGET,
             });
         }
-        let prefix = prepared
-            .resolve(hint_name_rva, 2 + offset + 1)
-            .map_err(|cause| PeImportLookupError::HintNameRange {
-                descriptor_index,
-                entry_index,
-                hint_name_rva,
-                offset,
-                cause,
-            })?;
+        let prefix = match admitted {
+            Some(prefix) => prefix,
+            None => prepared
+                .resolve(hint_name_rva, 2 + offset + 1)
+                .map_err(|cause| PeImportLookupError::HintNameRange {
+                    descriptor_index,
+                    entry_index,
+                    hint_name_rva,
+                    offset,
+                    cause,
+                })?,
+        };
         let byte = prefix.bytes[2 + offset as usize];
         *total += 1;
         if byte == 0 {
