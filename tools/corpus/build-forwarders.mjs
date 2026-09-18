@@ -5,8 +5,8 @@ import { pathToFileURL } from "node:url";
 import { locateTools, prepareOutputParents, root, run, sha256, target } from "./shared.mjs";
 
 export const contract = JSON.parse(readFileSync(join(root, "corpus/pe-forwarders/fixture.json"), "utf8"));
-const sources = ["anchor.c", "forwarders.def"];
-const artifacts = ["Ring3Forwarders.dll", "Ring3Forwarders.lib", "anchor.obj"];
+const sources = ["anchor.c", "forwarders.def", "provider.c", "provider.def"];
+const artifacts = ["Ring3Forwarders.dll", "Ring3Forwarders.lib", "anchor.obj", "OtherModule.dll", "OtherModule.lib", "provider.obj"];
 const architectures = [
   ["i386", "i686-pc-windows-msvc", "x86", "0x10000000", "coff-i386"],
   ["amd64", "x86_64-pc-windows-msvc", "x64", "0x180000000", "coff-x86-64"],
@@ -41,6 +41,11 @@ export function buildForwarderFixtures(outputDirectory, options = {}) {
     const link = ["-flavor", "link", `/machine:${machine}`, "/nodefaultlib", "/timestamp:0", "/fixed", "/dynamicbase:no", "/nxcompat", "/dll", "/noentry", `/base:${base}`, "/out:Ring3Forwarders.dll", "/implib:Ring3Forwarders.lib", "/def:forwarders.def", "anchor.obj"];
     if (architecture === "i386") link.push("/safeseh:no");
     run(tools.lld, link, directory);
+    const compileProvider = [`--target=${triple}`, "-c", "-O1", "-ffreestanding", "-fno-stack-protector", "-fno-ident", "-mno-incremental-linker-compatible", "provider.c", "-o", "provider.obj"];
+    run(tools.clang, compileProvider, directory);
+    const linkProvider = ["-flavor", "link", `/machine:${machine}`, "/nodefaultlib", "/timestamp:0", "/fixed", "/dynamicbase:no", "/nxcompat", "/dll", "/noentry", `/base:${base}`, "/out:OtherModule.dll", "/implib:OtherModule.lib", "/def:provider.def", "provider.obj"];
+    if (architecture === "i386") linkProvider.push("/safeseh:no");
+    run(tools.lld, linkProvider, directory);
     const identities = {};
     for (const name of artifacts) {
       const bytes = readFileSync(join(directory, name));
@@ -54,11 +59,19 @@ export function buildForwarderFixtures(outputDirectory, options = {}) {
     assert.ok(inspection.includes(`file format ${format}`), "LLVM format mismatch");
     for (const text of spec.expectation.forwarders) assert.ok(inspection.includes(text), "LLVM forwarder mismatch");
     writeFileSync(join(directory, "inspection.txt"), inspection);
+    const inspectProvider = ["--private-headers", "--section-headers", "--full-contents", "OtherModule.dll"];
+    const providerInspection = run(tools.objdump, inspectProvider, directory);
+    assert.ok(providerInspection.includes(`file format ${format}`), "LLVM provider format mismatch");
+    for (const text of [spec.expectation.provider.dllName, spec.expectation.provider.symbol, `Ordinal base: ${spec.expectation.provider.ordinalBase}`]) {
+      assert.ok(providerInspection.includes(text), "LLVM provider mismatch");
+    }
+    writeFileSync(join(directory, "provider-inspection.txt"), providerInspection);
     builds[architecture] = {
       target: triple,
-      commands: [{ tool: "clang", args: compile }, { tool: "lld", args: link }, { tool: "objdump", args: inspect }],
+      commands: [{ tool: "clang", args: compile }, { tool: "lld", args: link }, { tool: "clang", args: compileProvider }, { tool: "lld", args: linkProvider }, { tool: "objdump", args: inspect }, { tool: "objdump", args: inspectProvider }],
       artifacts: identities,
       inspection: { path: `${architecture}/inspection.txt`, sha256: sha256(inspection) },
+      providerInspection: { path: `${architecture}/provider-inspection.txt`, sha256: sha256(providerInspection) },
     };
   }
   const evidence = {
@@ -88,6 +101,8 @@ if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1]
     const fixtures = {
       RING3_EXPORT_FORWARD_PE32_FIXTURE: join(output, "first/i386/Ring3Forwarders.dll"),
       RING3_EXPORT_FORWARD_PE32PLUS_FIXTURE: join(output, "first/amd64/Ring3Forwarders.dll"),
+      RING3_EXPORT_FORWARD_PE32_NAMED_PROVIDER: join(output, "first/i386/OtherModule.dll"),
+      RING3_EXPORT_FORWARD_PE32PLUS_NAMED_PROVIDER: join(output, "first/amd64/OtherModule.dll"),
     };
     writeFileSync(join(output, "fixtures.json"), `${JSON.stringify(fixtures, null, 2)}\n`);
     writeFileSync(join(output, "repeatability.json"), `${JSON.stringify({ verified: true, first: "first/evidence.json", second: "second/evidence.json" }, null, 2)}\n`);

@@ -107,6 +107,8 @@ const families = [
   { name: "forwarder", build: buildForwarderFixtures, fixtures: {
     RING3_EXPORT_FORWARD_PE32_FIXTURE: "i386/Ring3Forwarders.dll",
     RING3_EXPORT_FORWARD_PE32PLUS_FIXTURE: "amd64/Ring3Forwarders.dll",
+    RING3_EXPORT_FORWARD_PE32_NAMED_PROVIDER: "i386/OtherModule.dll",
+    RING3_EXPORT_FORWARD_PE32PLUS_NAMED_PROVIDER: "amd64/OtherModule.dll",
   } },
   { name: "relocations", build: buildRelocationFixtures, fixtures: {
     RING3_RELOCATION_PE32_FIXTURE: "i386/relocations.exe",
