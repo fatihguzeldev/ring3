@@ -73,6 +73,20 @@ pub fn lookup_pe_export_evidence_batch<'e>(
     query_limits: PeExportEvidenceLookupLimits,
     batch_limits: PeExportBatchLimits,
 ) -> Result<PeExportEvidenceBatch<'e>, PeExportBatchError> {
+    lookup_iter(
+        evidence,
+        queries.iter().copied(),
+        query_limits,
+        batch_limits,
+    )
+}
+
+pub(in crate::pe) fn lookup_iter<'e, 'query>(
+    evidence: &'e PeExportEvidence,
+    queries: impl ExactSizeIterator<Item = PeExportQuery<'query>>,
+    query_limits: PeExportEvidenceLookupLimits,
+    batch_limits: PeExportBatchLimits,
+) -> Result<PeExportEvidenceBatch<'e>, PeExportBatchError> {
     lookup_with(
         &mut EvidenceLookup::new(evidence, query_limits),
         queries,
@@ -80,15 +94,15 @@ pub fn lookup_pe_export_evidence_batch<'e>(
     )
 }
 
-pub(super) fn lookup_with<'e>(
+pub(super) fn lookup_with<'e, 'query>(
     lookup: &mut EvidenceLookup<'e>,
-    queries: &[PeExportQuery<'_>],
+    queries: impl ExactSizeIterator<Item = PeExportQuery<'query>>,
     batch_limits: PeExportBatchLimits,
 ) -> Result<PeExportEvidenceBatch<'e>, PeExportBatchError> {
     check_query_count(queries.len(), batch_limits.max_queries)?;
     let mut selection_rows = 0;
     let mut selections = Vec::new();
-    for (index, &query) in queries.iter().enumerate() {
+    for (index, query) in queries.enumerate() {
         let result = lookup.lookup(query);
         let rows = match &result {
             Ok(PeExportSelection::Selected { .. }) => 1,
@@ -109,4 +123,88 @@ pub(super) fn lookup_with<'e>(
         selection_rows,
         selections,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{PeExportLookupError, PeExportNameError};
+    use std::cell::Cell;
+
+    #[test]
+    fn iterator_count_admission_precedes_mapping_and_preserves_order() {
+        let error = PeExportNameError::NameUnavailable { entry_index: 3 };
+        let evidence = PeExportEvidence {
+            total_rows: 0,
+            total_text_bytes: 0,
+            directory: Ok(None),
+            addresses: Ok(None),
+            names: Err(error),
+        };
+        let queries = [PeExportQuery::Name("entry"), PeExportQuery::Ordinal(7)];
+        let mapped = Cell::new(0);
+        let limits = PeExportEvidenceLookupLimits {
+            max_table_rows: 0,
+            max_table_text_bytes: 0,
+        };
+        let input = || {
+            queries
+                .iter()
+                .copied()
+                .inspect(|_| mapped.set(mapped.get() + 1))
+        };
+        assert_eq!(
+            lookup_iter(
+                &evidence,
+                input(),
+                limits,
+                PeExportBatchLimits {
+                    max_queries: 1,
+                    max_selection_rows: 0
+                },
+            ),
+            Err(PeExportBatchError::QueryCountExceeded { count: 2, limit: 1 }),
+        );
+        assert_eq!(mapped.get(), 0);
+        let result = lookup_iter(
+            &evidence,
+            input(),
+            limits,
+            PeExportBatchLimits {
+                max_queries: 2,
+                max_selection_rows: 0,
+            },
+        )
+        .unwrap();
+        assert_eq!(mapped.get(), 2);
+        assert_eq!(
+            result,
+            PeExportEvidenceBatch {
+                selection_rows: 0,
+                selections: vec![
+                    Err(PeExportEvidenceLookupError::Reader(
+                        PeExportLookupError::Names(error)
+                    )),
+                    Ok(PeExportSelection::DirectoryAbsent),
+                ],
+            }
+        );
+        let empty = lookup_iter(
+            &evidence,
+            std::iter::empty(),
+            limits,
+            PeExportBatchLimits {
+                max_queries: 0,
+                max_selection_rows: 0,
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            empty,
+            PeExportEvidenceBatch {
+                selection_rows: 0,
+                selections: vec![]
+            }
+        );
+    }
 }

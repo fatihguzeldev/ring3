@@ -246,8 +246,9 @@ bound earlier reader allocations or establish provider/binding validity. See the
 
 `lookup_pe_import_evidence_exports` matches one retained static-import descriptor
 against an explicitly supplied export observation after both images are released.
-It borrows the import record, admits its entry count before allocating queries,
-and preserves aligned provider results under the owned-batch limits. Exact names
+It borrows the import record, admits its entry count before visiting symbols,
+and passes borrowed queries directly to the owned-batch engine without an
+intermediate list. Aligned provider results retain the same limits. Exact names
 and widened ordinals drive queries; DLL text, hints and raw fields remain metadata.
 The two evidence lifetimes are independent. See the
 [owned import matching API](core/src/pe/imports/evidence_exports.rs).

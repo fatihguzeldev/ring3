@@ -16,9 +16,10 @@ pub struct PeDelayImportEvidenceExportBatch<'importer, 'provider> {
 /// selectable descriptors. unrelated raw/name views and reported totals are
 /// ignored; no unselected record is inspected. the selected record is borrowed.
 ///
-/// actual selected entry count is admitted before query allocation or symbol
-/// traversal. exact borrowed names and widened u16 ordinals use the same private
-/// mapping as static imports and the existing bounded owned export batch.
+/// actual selected entry count is admitted before symbol traversal. queries are
+/// borrowed lazily without an intermediate list. exact names and widened u16
+/// ordinals use the same private mapping as static imports and the bounded
+/// owned export batch.
 /// provider errors remain aligned with entries; empty entries skip provider
 /// inspection. results retain two independent evidence lifetimes without image
 /// bytes, import-record clones or text copies.
