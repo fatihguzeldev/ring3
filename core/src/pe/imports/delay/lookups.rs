@@ -1,7 +1,9 @@
 use super::super::lookups::lookup_entries;
 use super::super::{PeImportLookupEntry, PeImportLookupError};
 use super::names::parse_prepared_names;
-use super::{PeDelayImportError, PeDelayImportName, PeDelayImportNameError};
+use super::{
+    PeDelayImportError, PeDelayImportName, PeDelayImportNameError, PeDelayImportNameTable,
+};
 use crate::pe::PeKind;
 use crate::pe::rva::PreparedPe;
 use crate::{FileOffset, RelativeVirtualAddress};
@@ -67,10 +69,17 @@ pub fn parse_pe_delay_import_lookups(
     else {
         return Ok(None);
     };
+    parse_admitted_lookups(&prepared, &table).map(Some)
+}
+
+pub(super) fn parse_admitted_lookups<'a>(
+    prepared: &PreparedPe<'a>,
+    table: &PeDelayImportNameTable<'a>,
+) -> Result<PeDelayImportLookupTable<'a>, PeDelayImportLookupError> {
     let mut imports = Vec::new();
     let mut total_entries = 0;
     let mut total_name_bytes = 0;
-    for (descriptor_index, import) in (0_u16..).zip(table.imports) {
+    for (descriptor_index, import) in (0_u16..).zip(table.imports.iter().copied()) {
         let start = RelativeVirtualAddress::new(import.descriptor.import_name_table_address);
         if start.get() == 0 {
             return Err(PeDelayImportLookupError::Lookup(
@@ -78,7 +87,7 @@ pub fn parse_pe_delay_import_lookups(
             ));
         }
         let entries = lookup_entries(
-            &prepared,
+            prepared,
             descriptor_index,
             start,
             &mut total_entries,
@@ -87,7 +96,7 @@ pub fn parse_pe_delay_import_lookups(
         .map_err(PeDelayImportLookupError::Lookup)?;
         imports.push(PeDelayImportLookup { import, entries });
     }
-    Ok(Some(PeDelayImportLookupTable {
+    Ok(PeDelayImportLookupTable {
         kind: table.kind,
         directory_rva: table.directory_rva,
         directory_file_offset: table.directory_file_offset,
@@ -95,5 +104,5 @@ pub fn parse_pe_delay_import_lookups(
         imports,
         terminator_rva: table.terminator_rva,
         terminator_file_offset: table.terminator_file_offset,
-    }))
+    })
 }
