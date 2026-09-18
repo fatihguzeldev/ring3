@@ -8,6 +8,11 @@ use ring3_core::{
     PeModuleDependencyKind, PeModuleDependencyViews, PeModuleOutputLimits, PeOwnedImportSymbol,
     inspect_ascii_pe_source_module_evidence, walk_ascii_pe_dependency_closure,
 };
+use ring3_core::{
+    FileOffset, PeExportAddressEntry, PeExportBatchError, PeExportBatchLimits,
+    PeExportEvidenceLookupLimits, PeExportName, PeExportSelection, PeExportTarget,
+    PeImportExportError, RelativeVirtualAddress as Rva, lookup_pe_import_evidence_exports,
+};
 
 const PATHS: [&str; 3] = [
     "game/Chain.exe",
@@ -311,4 +316,179 @@ fn generated_pe32_chain_preserves_multihop_closure() {
 #[ignore = "requires explicit generated dependency-chain fixture paths"]
 fn generated_pe32plus_chain_preserves_multihop_closure() {
     run_chain("RING3_CHAIN_PE32PLUS", PeKind::Pe32Plus);
+}
+
+fn expected_export(provider: usize) -> PeExportSelection<'static> {
+    let (eat, symbol) = match provider {
+        1 => (8248, "ring3_middle"),
+        2 => (8246, "ring3_leaf"),
+        _ => panic!("only chain DLLs export a symbol"),
+    };
+    PeExportSelection::Selected {
+        address: PeExportAddressEntry {
+            table_index: 0,
+            ordinal: 1,
+            entry_rva: Rva::new(eat),
+            entry_file_offset: FileOffset::new(u64::from(eat - 6656)),
+            target: PeExportTarget::Rva(Rva::new(4096)),
+        },
+        name: Some(PeExportName {
+            table_index: 0,
+            name_pointer_rva: Rva::new(eat + 4),
+            name_pointer_file_offset: FileOffset::new(u64::from(eat - 6652)),
+            ordinal_entry_rva: Rva::new(eat + 8),
+            ordinal_entry_file_offset: FileOffset::new(u64::from(eat - 6648)),
+            address_index: 0,
+            name_rva: Rva::new(eat + 10),
+            name_file_offset: FileOffset::new(u64::from(eat - 6646)),
+            name: symbol,
+        }),
+    }
+}
+
+fn check_symbol_request(
+    batch: &AsciiPeSourceModuleEvidenceBatch,
+    request: &AsciiPeModuleDependencyRequest,
+    order: &[usize],
+) {
+    let provider_index = request.candidate.unwrap().unwrap();
+    let provider = order[provider_index];
+    assert_eq!(provider, order[request.source_index] + 1);
+    assert_eq!(request.descriptor_index, 0);
+    let imports = batch.entries[request.source_index]
+        .module
+        .as_ref()
+        .unwrap()
+        .static_imports
+        .as_ref()
+        .unwrap();
+    let expected = expected_export(provider);
+    let symbol_bytes = if provider == 1 { 12 } else { 10 };
+    let query_limits = PeExportEvidenceLookupLimits {
+        max_table_rows: 2,
+        max_table_text_bytes: symbol_bytes,
+    };
+    let caps = PeExportBatchLimits {
+        max_queries: 1,
+        max_selection_rows: 1,
+    };
+    let exports = batch.entries[provider_index]
+        .module
+        .as_ref()
+        .unwrap()
+        .exports
+        .as_ref()
+        .unwrap();
+    let result = lookup_pe_import_evidence_exports(
+        imports,
+        u16::try_from(request.descriptor_index).unwrap(),
+        exports,
+        query_limits,
+        caps,
+    )
+    .unwrap();
+    let original = &imports.lookups.as_ref().unwrap()[0];
+    assert!(std::ptr::eq(result.imports, original));
+    assert_eq!(result.imports.descriptor.dll_name, request.dll_name);
+    assert_eq!(result.exports.selection_rows, 1);
+    assert_eq!(result.exports.selections, vec![Ok(expected)]);
+    for (caps, expected) in [
+        (
+            PeExportBatchLimits {
+                max_queries: 0,
+                ..caps
+            },
+            PeExportBatchError::QueryCountExceeded { count: 1, limit: 0 },
+        ),
+        (
+            PeExportBatchLimits {
+                max_selection_rows: 0,
+                ..caps
+            },
+            PeExportBatchError::SelectionRowsExceeded {
+                index: 0,
+                total: 1,
+                limit: 0,
+            },
+        ),
+    ] {
+        assert_eq!(
+            lookup_pe_import_evidence_exports(imports, 0, exports, query_limits, caps),
+            Err(PeImportExportError::ExportBatch(expected)),
+        );
+    }
+    for (index, &original) in order.iter().enumerate().filter(|(_, n)| **n != provider) {
+        let wrong = batch.entries[index]
+            .module
+            .as_ref()
+            .unwrap()
+            .exports
+            .as_ref()
+            .unwrap();
+        let result = lookup_pe_import_evidence_exports(
+            imports,
+            0,
+            wrong,
+            PeExportEvidenceLookupLimits {
+                max_table_text_bytes: 12,
+                ..query_limits
+            },
+            PeExportBatchLimits {
+                max_selection_rows: 0,
+                ..caps
+            },
+        )
+        .unwrap();
+        assert_eq!(result.exports.selection_rows, 0);
+        assert_eq!(
+            result.exports.selections,
+            vec![Ok(if original == 0 {
+                PeExportSelection::DirectoryAbsent
+            } else {
+                PeExportSelection::NameNotFound
+            })]
+        );
+    }
+}
+
+fn run_chain_symbols(prefix: &str, kind: PeKind) {
+    for order in [
+        [0, 1, 2],
+        [0, 2, 1],
+        [1, 0, 2],
+        [1, 2, 0],
+        [2, 0, 1],
+        [2, 1, 0],
+    ] {
+        let batch = collect(prefix, kind, &order);
+        let before = batch.clone();
+        let root = order.iter().position(|&n| n == 0).unwrap();
+        let closure = walk_ascii_pe_dependency_closure(
+            &batch,
+            root,
+            PeDependencyClosureMode::StaticOnly,
+            closure_limits(true),
+        )
+        .unwrap();
+        assert_eq!(closure.observations, expected_observations(&order));
+        assert_eq!(closure.examined_requests.len(), 2);
+        for (edge, visit) in closure.examined_requests.iter().enumerate() {
+            let request = &closure.observations.requests[visit.request_index];
+            assert_eq!(order[request.source_index], edge);
+            check_symbol_request(&batch, request, &order);
+        }
+        assert_eq!(batch, before);
+    }
+}
+
+#[test]
+#[ignore = "requires explicit generated dependency-chain fixture paths"]
+fn generated_pe32_chain_candidates_select_retained_symbols() {
+    run_chain_symbols("RING3_CHAIN_PE32", PeKind::Pe32);
+}
+
+#[test]
+#[ignore = "requires explicit generated dependency-chain fixture paths"]
+fn generated_pe32plus_chain_candidates_select_retained_symbols() {
+    run_chain_symbols("RING3_CHAIN_PE32PLUS", PeKind::Pe32Plus);
 }
