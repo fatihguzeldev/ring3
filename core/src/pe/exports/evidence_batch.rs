@@ -73,8 +73,19 @@ pub fn lookup_pe_export_evidence_batch<'e>(
     query_limits: PeExportEvidenceLookupLimits,
     batch_limits: PeExportBatchLimits,
 ) -> Result<PeExportEvidenceBatch<'e>, PeExportBatchError> {
+    lookup_with(
+        &mut EvidenceLookup::new(evidence, query_limits),
+        queries,
+        batch_limits,
+    )
+}
+
+pub(super) fn lookup_with<'e>(
+    lookup: &mut EvidenceLookup<'e>,
+    queries: &[PeExportQuery<'_>],
+    batch_limits: PeExportBatchLimits,
+) -> Result<PeExportEvidenceBatch<'e>, PeExportBatchError> {
     check_query_count(queries.len(), batch_limits.max_queries)?;
-    let mut lookup = EvidenceLookup::new(evidence, query_limits);
     let mut selection_rows = 0;
     let mut selections = Vec::new();
     for (index, &query) in queries.iter().enumerate() {

@@ -1,6 +1,7 @@
+use super::evidence_walk::EvidenceWalk;
 use super::{
     PeExportEvidence, PeExportEvidenceLookupLimits, PeExportQuery, PeForwarderEvidenceWalkError,
-    PeForwarderRoute, PeForwarderWalk, PeForwarderWalkLimits, walk_pe_export_evidence_forwarders,
+    PeForwarderRoute, PeForwarderWalk, PeForwarderWalkLimits,
 };
 
 /// query count and aggregate metrics of complete successful walks only.
@@ -79,9 +80,11 @@ fn charge(
 
 /// admits aggregate successful results over ordered owned-evidence walks.
 /// query count precedes result allocation and all single-walk calls. empty
-/// queries do not inspect sources, routes or root indices. each query calls
-/// `walk_pe_export_evidence_forwarders` with fresh, uniform view/walk limits;
-/// common admission repeats, and every provider or walk error stays in order.
+/// queries do not inspect sources, routes or root indices. each query starts
+/// fresh walk budgets under uniform view/walk limits. required export views are
+/// admitted lazily once per source position for this batch; name and ordinal
+/// views remain independent. common source/route/root admission still repeats,
+/// and every provider or walk error stays in order.
 ///
 /// only complete successes charge steps, selection rows, then walk text bytes,
 /// before append. text includes repeated route/root admission for each successful
@@ -90,7 +93,9 @@ fn charge(
 /// time and cancellation are not bounded by these aggregate totals.
 ///
 /// results borrow only export evidence; source lists, routes and query text may
-/// be dropped. no caching, provider discovery, identity checks or binding occur.
+/// be dropped. view admission results are retained only within this call;
+/// selections and walks are not cached. no provider discovery, identity checks
+/// or binding occur.
 ///
 /// # errors
 /// count refusal precedes traversal. each aggregate addition checks overflow
@@ -154,15 +159,9 @@ pub fn walk_pe_export_evidence_forwarders_batch<'e>(
         successful_text_bytes: 0,
         walks: Vec::new(),
     };
+    let mut owner = EvidenceWalk::new(sources, query_limits);
     for (index, &query) in queries.iter().enumerate() {
-        let result = walk_pe_export_evidence_forwarders(
-            sources,
-            routes,
-            root_source_index,
-            query,
-            query_limits,
-            walk_limits,
-        );
+        let result = owner.walk(routes, root_source_index, query, walk_limits);
         if let Ok(walk) = &result {
             batch.successful_steps = charge(
                 PeForwarderWalkBatchMetric::SuccessfulSteps,

@@ -1,9 +1,12 @@
+use super::evidence_batch::lookup_with;
+use super::evidence_lookup::EvidenceLookup;
 use super::walk::walk_with;
 use super::{
     PeExportBatchLimits, PeExportEvidence, PeExportEvidenceLookupError,
     PeExportEvidenceLookupLimits, PeExportQuery, PeForwarderRoute, PeForwarderWalk,
-    PeForwarderWalkError, PeForwarderWalkLimits, lookup_pe_export_evidence_batch,
+    PeForwarderWalkError, PeForwarderWalkLimits,
 };
+use std::collections::BTreeMap;
 
 /// traversal refusals retain their existing operands; provider errors use the owned view contract.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -24,8 +27,9 @@ impl<'e> From<PeForwarderWalkError<'e>> for PeForwarderEvidenceWalkError<'e> {
 
 /// walks retained export evidence using caller-supplied source-context routes.
 /// source positions, exact route tokens, cycle identity and aggregate walk limits
-/// follow `walk_pe_export_forwarders`. each hop repeats required-view admission
-/// with the same query limits; evidence is neither cached nor authenticated.
+/// follow `walk_pe_export_forwarders`. required views are admitted lazily once
+/// per source position under fixed query limits within this call. name and
+/// ordinal views remain independent; this does not authenticate evidence.
 /// query limits count complete required table rows/text, independently of the
 /// walk's cumulative selection rows and route/root/forwarder text. unused evidence
 /// views and sources are not inspected. results and missing-route errors borrow
@@ -69,7 +73,6 @@ impl<'e> From<PeForwarderWalkError<'e>> for PeForwarderEvidenceWalkError<'e> {
 /// ```
 #[expect(
     clippy::missing_errors_doc,
-    clippy::missing_panics_doc,
     reason = "project documentation headings are lower case"
 )]
 pub fn walk_pe_export_evidence_forwarders<'e>(
@@ -80,48 +83,79 @@ pub fn walk_pe_export_evidence_forwarders<'e>(
     query_limits: PeExportEvidenceLookupLimits,
     limits: PeForwarderWalkLimits,
 ) -> Result<PeForwarderWalk<'e>, PeForwarderEvidenceWalkError<'e>> {
-    walk_with(
-        sources.len(),
-        routes,
-        root_source_index,
-        root_query,
-        limits,
-        || {
-            move |source_index, query, hop, used| {
-                let mut batch = lookup_pe_export_evidence_batch(
-                    sources[source_index as usize],
-                    &[query],
-                    query_limits,
-                    PeExportBatchLimits {
-                        max_queries: 1,
-                        max_selection_rows: limits.max_selection_rows - used,
-                    },
-                )
-                .map_err(|cause| PeForwarderWalkError::SelectionRows {
-                    hop,
-                    source_index,
-                    used,
-                    cause,
-                })?;
-                let total = used.checked_add(batch.selection_rows).ok_or(
-                    PeForwarderWalkError::SelectionRowsOverflow {
+    EvidenceWalk::new(sources, query_limits).walk(routes, root_source_index, root_query, limits)
+}
+
+pub(super) struct EvidenceWalk<'sources, 'e> {
+    sources: &'sources [&'e PeExportEvidence],
+    query_limits: PeExportEvidenceLookupLimits,
+    lookups: BTreeMap<u32, EvidenceLookup<'e>>,
+}
+
+impl<'sources, 'e> EvidenceWalk<'sources, 'e> {
+    pub(super) fn new(
+        sources: &'sources [&'e PeExportEvidence],
+        query_limits: PeExportEvidenceLookupLimits,
+    ) -> Self {
+        Self {
+            sources,
+            query_limits,
+            lookups: BTreeMap::new(),
+        }
+    }
+
+    pub(super) fn walk(
+        &mut self,
+        routes: &[PeForwarderRoute<'_>],
+        root_source_index: u32,
+        root_query: PeExportQuery<'_>,
+        limits: PeForwarderWalkLimits,
+    ) -> Result<PeForwarderWalk<'e>, PeForwarderEvidenceWalkError<'e>> {
+        walk_with(
+            self.sources.len(),
+            routes,
+            root_source_index,
+            root_query,
+            limits,
+            || {
+                move |source_index, query, hop, used| {
+                    let lookup = self.lookups.entry(source_index).or_insert_with(|| {
+                        EvidenceLookup::new(self.sources[source_index as usize], self.query_limits)
+                    });
+                    let mut batch = lookup_with(
+                        lookup,
+                        &[query],
+                        PeExportBatchLimits {
+                            max_queries: 1,
+                            max_selection_rows: limits.max_selection_rows - used,
+                        },
+                    )
+                    .map_err(|cause| PeForwarderWalkError::SelectionRows {
                         hop,
                         source_index,
-                        total: used,
-                        rows: batch.selection_rows,
-                    },
-                )?;
-                let selection = batch
-                    .selections
-                    .pop()
-                    .expect("one admitted query has one result")
-                    .map_err(|cause| PeForwarderEvidenceWalkError::Provider {
-                        hop,
-                        source_index,
+                        used,
                         cause,
                     })?;
-                Ok((selection, total))
-            }
-        },
-    )
+                    let total = used.checked_add(batch.selection_rows).ok_or(
+                        PeForwarderWalkError::SelectionRowsOverflow {
+                            hop,
+                            source_index,
+                            total: used,
+                            rows: batch.selection_rows,
+                        },
+                    )?;
+                    let selection = batch
+                        .selections
+                        .pop()
+                        .expect("one admitted query has one result")
+                        .map_err(|cause| PeForwarderEvidenceWalkError::Provider {
+                            hop,
+                            source_index,
+                            cause,
+                        })?;
+                    Ok((selection, total))
+                }
+            },
+        )
+    }
 }

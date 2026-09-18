@@ -262,7 +262,8 @@ loading or IAT fallback. See the
 
 `walk_pe_export_evidence_forwarders` follows explicit source-context routes using
 retained export observations after image release. It shares traversal semantics
-with the byte-backed walker and repeats required-view admission at every hop.
+with the byte-backed walker. Required export views are admitted lazily once per
+source position within a call; name and ordinal views remain independent.
 Owned provider errors remain distinct from route, aggregate-budget and traversal
 refusals. Results and missing-route errors borrow evidence, independently of
 route and query storage. This adds no module discovery or provider identity.
@@ -271,6 +272,8 @@ See the [owned forwarder API](core/src/pe/exports/evidence_walk.rs).
 `walk_pe_export_evidence_forwarders_batch` retains ordered walks over the same
 explicit source and route context. It admits query count before traversal and
 caps aggregate steps, selection rows and text from complete successful walks.
+It reuses required export-view admission across queries with the same evidence
+and limits, while source/route/root admission and walk budgets start fresh.
 Per-query errors stay in order; their payloads and failed traversal work do not
 contribute to those successful-result totals. Aggregate refusal returns no partial
 batch. See the [batch contract](core/src/pe/exports/evidence_walk_batch.rs).
