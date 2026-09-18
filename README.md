@@ -65,9 +65,10 @@ and delay-name request with its lexical candidate in one explicit application
 context. It re-admits actual path labels, preserves independent module/family/view
 errors and absent/empty distinctions, and applies complete request-count and token
 byte limits before copying requests or matching candidates. Owned results retain
-source and request order, including duplicates. The observer reuses its freshly
-admitted path list; each request still validates its literal basename under the
-same candidate policy. This is not Windows resolution or a recursive loader.
+source and request order, including duplicates. Requests share a same-call index
+of freshly admitted basenames in the application's exact parent directory; zero
+requests do not build the index. Each request still validates its literal basename
+under the same candidate policy. This is not Windows resolution or a recursive loader.
 See the [retained dependency API](core/src/source/module_dependencies.rs).
 
 `walk_ascii_pe_dependency_closure` selects the observed component of one application
