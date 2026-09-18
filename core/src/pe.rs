@@ -128,7 +128,11 @@ pub use resources::{
 };
 pub use rva::{PeFileRange, PeFileRangeSource, PeRvaError, resolve_pe_file_range};
 pub use sections::{PeSection, PeSectionTable, parse_pe_sections};
-pub use tls::{PeTlsDirectory, PeTlsDirectoryError, parse_pe_tls_directory};
+pub use tls::{
+    PeTlsCallbackEntry, PeTlsCallbackError, PeTlsCallbackLimits, PeTlsCallbackTable,
+    PeTlsCallbacks, PeTlsDirectory, PeTlsDirectoryError, parse_pe_tls_callbacks,
+    parse_pe_tls_directory,
+};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum PeKind {

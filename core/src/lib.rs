@@ -125,3 +125,8 @@ pub use source::{
     PeDependencyClosureMode, PeDependencyRequestStep, PeDependencyRequestVisit, PeDependencyVisit,
     walk_ascii_pe_dependency_closure,
 };
+
+pub use pe::{
+    PeTlsCallbackEntry, PeTlsCallbackError, PeTlsCallbackLimits, PeTlsCallbackTable,
+    PeTlsCallbacks, parse_pe_tls_callbacks,
+};
