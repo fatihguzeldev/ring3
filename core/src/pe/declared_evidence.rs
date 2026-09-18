@@ -1,6 +1,6 @@
 use super::{
     PeClrError, PeClrHeader, PeDirectoryAddress, PeHeaderError, PeHeaderPrefix, PeHeaders, PeKind,
-    parse_pe_clr_header, parse_pe_header_prefix, parse_pe_headers,
+    PeRvaError, parse_pe_header_prefix,
 };
 use crate::{FileOffset, RelativeVirtualAddress};
 
@@ -120,9 +120,9 @@ fn clr_evidence(header: PeClrHeader) -> PeClrHeaderEvidence {
 
 /// collects declared fields without a whole-image success or eligibility verdict.
 ///
-/// calls the prefix, full-header and clr readers independently on the same input,
-/// preserving their exact errors and validation depths. earlier reads are repeated
-/// by later readers. a valid prefix can coexist with an optional-header error;
+/// preserves independent prefix, full-header and clr outcomes and validation depths.
+/// same-call successful prefix and headers are reused; section and clr admission
+/// still run before their results. a valid prefix can coexist with an optional-header error;
 /// valid headers can coexist with a clr or section error. no recovery parsing occurs.
 ///
 /// successful fields own raw values and physical input coordinates. machine,
@@ -142,9 +142,24 @@ fn clr_evidence(header: PeClrHeader) -> PeClrHeaderEvidence {
 /// assert!(evidence.clr.is_err());
 /// ```
 pub fn inspect_pe_declared_evidence(bytes: &[u8]) -> PeDeclaredEvidence {
+    let parsed_prefix = parse_pe_header_prefix(bytes);
+    let headers =
+        parsed_prefix.and_then(|prefix| super::optional::parse_after_prefix(bytes, prefix));
+    let prefix = parsed_prefix.map(prefix_evidence);
+    let optional = headers
+        .as_ref()
+        .map(optional_evidence)
+        .map_err(|&cause| cause);
+    let clr = headers
+        .map_err(|cause| PeClrError::Base(PeRvaError::Parse(cause)))
+        .and_then(|headers| {
+            super::rva::PreparedPe::from_headers(bytes, &headers).map_err(PeClrError::Base)
+        })
+        .and_then(|prepared| super::clr::parse_prepared(&prepared))
+        .map(|value| value.map(clr_evidence));
     PeDeclaredEvidence {
-        prefix: parse_pe_header_prefix(bytes).map(prefix_evidence),
-        optional: parse_pe_headers(bytes).map(|headers| optional_evidence(&headers)),
-        clr: parse_pe_clr_header(bytes).map(|value| value.map(clr_evidence)),
+        prefix,
+        optional,
+        clr,
     }
 }

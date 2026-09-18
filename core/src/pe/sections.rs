@@ -45,6 +45,13 @@ pub struct PeSectionTable<'a> {
 )]
 pub fn parse_pe_sections(bytes: &[u8]) -> Result<PeSectionTable<'_>, PeHeaderError> {
     let headers = parse_pe_headers(bytes)?;
+    parse_with_headers(bytes, &headers)
+}
+
+pub(super) fn parse_with_headers<'a>(
+    bytes: &'a [u8],
+    headers: &PeHeaders,
+) -> Result<PeSectionTable<'a>, PeHeaderError> {
     let reader = Reader { bytes };
     let (_, coff_offset) = reader.read(headers.prefix.pe_offset, 4)?;
     let (_, optional_offset) = reader.read(coff_offset, 20)?;
@@ -130,5 +137,8 @@ pub fn parse_pe_sections(bytes: &[u8]) -> Result<PeSectionTable<'_>, PeHeaderErr
         });
         section_offset = next_offset;
     }
-    Ok(PeSectionTable { headers, sections })
+    Ok(PeSectionTable {
+        headers: *headers,
+        sections,
+    })
 }
