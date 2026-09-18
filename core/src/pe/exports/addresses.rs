@@ -188,6 +188,13 @@ pub(super) fn parse_prepared_export_addresses<'a>(
     else {
         return Ok(None);
     };
+    parse_admitted_export_addresses(prepared, directory).map(Some)
+}
+
+pub(super) fn parse_admitted_export_addresses<'a>(
+    prepared: &PreparedPe<'a>,
+    directory: PeExportDirectory,
+) -> Result<PeExportAddressTable<'a>, PeExportAddressError> {
     let count = directory.address_table_entries;
     if count > ENTRY_LIMIT {
         return Err(PeExportAddressError::EntryLimitExceeded {
@@ -197,7 +204,7 @@ pub(super) fn parse_prepared_export_addresses<'a>(
     }
     let mut entries = Vec::new();
     if count == 0 {
-        return Ok(Some(PeExportAddressTable { directory, entries }));
+        return Ok(PeExportAddressTable { directory, entries });
     }
     let start = directory.export_address_table_rva;
     if start.get() == 0 {
@@ -242,5 +249,5 @@ pub(super) fn parse_prepared_export_addresses<'a>(
             target,
         });
     }
-    Ok(Some(PeExportAddressTable { directory, entries }))
+    Ok(PeExportAddressTable { directory, entries })
 }
