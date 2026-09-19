@@ -516,6 +516,8 @@ discovery and corpus verifier contract tests also run in CI, checking exact test
 results and inventory validation.
 Generated-file corpus tests remain a separate local verification
 with the pinned macOS tools.
+The corpus verifier disables Cargo compiler wrappers so its verified `rustc`
+runs directly; other inherited Cargo flags and settings are not isolated.
 The regular suite includes a fixed 6,148-input mutation campaign across 28 raw PE
 readers, including present and absent AMD64 exception tables and v1 unwind metadata
 at one explicit RVA. It checks repeated results, input preservation and owned

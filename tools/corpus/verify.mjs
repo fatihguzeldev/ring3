@@ -157,6 +157,15 @@ const families = [
   } },
 ];
 
+export function corpusEnvironment(parent, targetDirectory, rustcPath) {
+  const env = Object.fromEntries(Object.entries(parent).filter(([name]) => !name.startsWith("RING3_")));
+  // empty values also override cargo's configured wrappers.
+  return Object.assign(env, {
+    LC_ALL: "C", TZ: "UTC", CARGO_TARGET_DIR: targetDirectory, RUSTC: rustcPath,
+    RUSTC_WRAPPER: "", RUSTC_WORKSPACE_WRAPPER: "",
+  });
+}
+
 export function verifyCorpus(outputDirectory, options = {}) {
   assert.equal(process.versions.node, readFileSync(join(root, ".node-version"), "utf8").trim());
   const spec = options.inventory ?? inventory;
@@ -198,8 +207,7 @@ export function verifyCorpus(outputDirectory, options = {}) {
   }
   assert.ok(run(rustTools.rustc.path, ["-vV"]).split("\n").includes(`host: ${spec.host}`), "rustc host mismatch");
   const cargoDirectory = join(output, "cargo");
-  const env = Object.fromEntries(Object.entries(process.env).filter(([name]) => !name.startsWith("RING3_")));
-  Object.assign(env, { LC_ALL: "C", TZ: "UTC", CARGO_TARGET_DIR: cargoDirectory, RUSTC: rustTools.rustc.path });
+  const env = corpusEnvironment(process.env, cargoDirectory, rustTools.rustc.path);
   const compile = capture(rustTools.cargo.path, ["test", "-p", "ring3-core", "--locked", "--offline", "--tests", "--no-run", "--target", spec.host, "--message-format=json"], env, "compile", 60_000);
   requireSuccess(compile, "native test compilation");
   const messages = lines(compile.stdout).map((line) => JSON.parse(line));
