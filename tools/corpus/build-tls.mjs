@@ -23,7 +23,7 @@ export function buildTlsFixtures(outputDirectory, options = {}) {
     assert.equal(sha256(bytes), spec.sources[name].sha256, `${name} source SHA-256 mismatch`);
     return [architecture, bytes];
   }));
-  const tools = { ...locateTools(), ...options.tools };
+  const tools = locateTools(options.tools);
   const versions = {};
   for (const name of ["clang", "lld", "objdump"]) {
     assert.equal(sha256(readFileSync(tools[name])), spec.tools[name].sha256, `${name} SHA-256 mismatch`);

@@ -445,6 +445,9 @@ identities. It is maintained test input, not a run log. The builders read it,
 compile the source twice and verify the resulting bytes. Debug fixture PDB sidecars
 are checked as whole files; their symbols are not decoded. Generated EXE/DLL files
 and per-run evidence go under `target/`; they are not committed.
+Builder `options.tools` paths replace discovery for those tools; only missing paths
+use the default host toolchain. Explicit paths still undergo the manifest's hash
+and version checks, and do not enable a new platform profile.
 
 | Family | Input being checked | Build command |
 | --- | --- | --- |
@@ -505,7 +508,8 @@ runner for main pushes and pull requests. It uses the repository's pinned Rust
 toolchain and Cargo lockfile. The Wasm step also runs a small import-free assertion
 harness in the pinned Node version, checking PE32+ metadata, file-backed ranges,
 path admission and a whole-input fingerprint. This is a smoke test, separate from
-the native suite. Generated-file corpus tests remain a separate local verification
+the native suite. Host-independent fixture tool discovery tests also run in CI.
+Generated-file corpus tests remain a separate local verification
 with the pinned macOS tools.
 The regular suite includes a fixed 6,148-input mutation campaign across 28 raw PE
 readers, including present and absent AMD64 exception tables and v1 unwind metadata

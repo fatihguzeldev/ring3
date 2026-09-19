@@ -58,7 +58,7 @@ export function buildAmd64ExceptionFixtures(outputDirectory, options = {}) {
     assert.equal(sha256(bytes), spec.sources[source].sha256, `${source} source SHA-256 mismatch`);
     return [name, bytes];
   }));
-  const tools = { ...locateTools(), ...options.tools };
+  const tools = locateTools(options.tools);
   const commands = [];
   function invoke(tool, args, directory, label) {
     assert.equal(sha256(readFileSync(tools[tool])), spec.tools[tool].sha256, `${tool} SHA-256 mismatch`);

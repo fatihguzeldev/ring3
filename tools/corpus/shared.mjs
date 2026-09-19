@@ -23,15 +23,18 @@ export function run(command, args, cwd) {
   return result.stdout;
 }
 
-export function locateTools() {
-  const sysroot = run("rustc", ["+1.97.1", "--print", "sysroot"]).trim();
-  const rustBin = join(sysroot, "lib/rustlib/aarch64-apple-darwin/bin");
-  return {
-    clang: run("xcrun", ["--find", "clang"]).trim(),
-    lld: join(rustBin, "rust-lld"),
-    objdump: run("xcrun", ["--find", "llvm-objdump"]).trim(),
-    objcopy: join(rustBin, "rust-objcopy"),
-  };
+export function locateTools(overrides = {}) {
+  const tools = { ...overrides };
+  const missing = (name) => !Object.hasOwn(tools, name);
+  if (missing("lld") || missing("objcopy")) {
+    const sysroot = run("rustc", ["+1.97.1", "--print", "sysroot"]).trim();
+    const rustBin = join(sysroot, "lib/rustlib/aarch64-apple-darwin/bin");
+    if (missing("lld")) tools.lld = join(rustBin, "rust-lld");
+    if (missing("objcopy")) tools.objcopy = join(rustBin, "rust-objcopy");
+  }
+  if (missing("clang")) tools.clang = run("xcrun", ["--find", "clang"]).trim();
+  if (missing("objdump")) tools.objdump = run("xcrun", ["--find", "llvm-objdump"]).trim();
+  return tools;
 }
 
 function ensureRealDirectory(directory) {

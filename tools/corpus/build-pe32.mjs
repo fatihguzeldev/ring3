@@ -23,7 +23,7 @@ export function buildFixture(outputDirectory, options = {}) {
   assert.equal(spec.schemaVersion, 1, "unsupported fixture schema");
   const source = readFileSync(options.sourcePath ?? join(root, spec.source.path));
   assert.equal(sha256(source), spec.source.sha256, "source SHA-256 mismatch");
-  const tools = { ...locateTools(), ...options.tools };
+  const tools = locateTools(options.tools);
   for (const name of ["clang", "lld", "objdump", "objcopy"]) {
     const expected = spec.tools[name];
     assert.equal(sha256(readFileSync(tools[name])), expected.sha256, `${name} SHA-256 mismatch`);
