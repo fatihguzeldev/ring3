@@ -105,22 +105,14 @@ pub(super) fn find_admitted_application_source_position(
         .map_or("", |(parent, _)| parent);
     Ok(admitted.entries.iter().position(|entry| {
         let (entry_parent, entry_name) = entry.key.rsplit_once('/').unwrap_or(("", &entry.key));
-        entry_parent == parent && entry_name == token.entries[0].key
+        entry_parent == parent && entry_name == token.key
     }))
 }
 
 pub(super) fn admit_application_basename(
     basename: &str,
     max_basename_bytes: u64,
-) -> Result<AsciiSourcePathBatch, AsciiApplicationSourceCandidateError> {
-    admit_ascii_source_paths(
-        &[basename],
-        AsciiSourcePathLimits {
-            max_paths: 1,
-            max_path_bytes: max_basename_bytes,
-            max_total_path_bytes: max_basename_bytes,
-            max_depth: 1,
-        },
-    )
-    .map_err(AsciiApplicationSourceCandidateError::Basename)
+) -> Result<AsciiSourcePathEntry, AsciiApplicationSourceCandidateError> {
+    super::paths::admit_ascii_source_basename(basename, max_basename_bytes)
+        .map_err(AsciiApplicationSourceCandidateError::Basename)
 }

@@ -204,6 +204,22 @@ fn normalize(
         depth,
     })
 }
+pub(super) fn admit_ascii_source_basename(
+    basename: &str,
+    max_basename_bytes: u64,
+) -> Result<AsciiSourcePathEntry, AsciiSourcePathError> {
+    preflight(
+        &[basename],
+        AsciiSourcePathLimits {
+            max_paths: 1,
+            max_path_bytes: max_basename_bytes,
+            max_total_path_bytes: max_basename_bytes,
+            max_depth: 1,
+        },
+    )?;
+    normalize(0, basename, 1)
+}
+
 /// admits a conservative ascii-only list of relative file paths with implicit directories.
 /// changes only backslash separators to slash; comparison keys fold ascii case.
 /// percent text stays literal. keys and indices are local lexical results, not

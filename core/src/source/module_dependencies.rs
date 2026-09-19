@@ -354,7 +354,7 @@ pub fn observe_ascii_pe_module_dependencies(
                     let token = rows.name(descriptor_index);
                     let dll_name = token.to_owned();
                     let candidate = admit_application_basename(token, limits.max_basename_bytes)
-                        .map(|token| candidates.get(token.entries[0].key.as_str()).copied());
+                        .map(|token| candidates.get(token.key.as_str()).copied());
                     requests.push(AsciiPeModuleDependencyRequest {
                         source_index,
                         kind,

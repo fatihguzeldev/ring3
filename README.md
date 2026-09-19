@@ -68,7 +68,9 @@ byte limits before copying requests or matching candidates. Owned results retain
 source and request order, including duplicates. Requests share a same-call index
 of freshly admitted basenames in the application's exact parent directory; zero
 requests do not build the index. Each request still validates its literal basename
-under the same candidate policy. This is not Windows resolution or a recursive loader.
+under the same candidate policy. Singleton basename admission reuses the path byte
+and lexical checks without constructing a source list or collision index.
+This is not Windows resolution or a recursive loader.
 See the [retained dependency API](core/src/source/module_dependencies.rs).
 
 `walk_ascii_pe_dependency_closure` selects the observed component of one application
