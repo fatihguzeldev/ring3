@@ -175,11 +175,234 @@ fn inspect_path_collisions() {
     );
 }
 
+fn import_fixture(name: &[u8; 6]) -> [u8; 528] {
+    let mut bytes = fixture();
+    for (offset, value) in [(0x110, 0x40_u32), (0x114, 40), (0x4c, 0x70)] {
+        bytes[offset..offset + 4].copy_from_slice(&value.to_le_bytes());
+    }
+    bytes[0x70..0x76].copy_from_slice(name);
+    bytes
+}
+
+fn inspect_dependency_cycle() {
+    use ring3_core::{
+        AsciiPeDependencyClosure, AsciiPeDependencyClosureError, AsciiPeDependencyClosureLimits,
+        AsciiPeModuleDependencyEvidence, AsciiPeModuleDependencyLimits,
+        AsciiPeModuleDependencyRequest, AsciiPeSource, AsciiPeSourceModuleEvidenceLimits,
+        PeDependencyClosureMode, PeDependencyRequestStep, PeDependencyRequestVisit,
+        PeDependencyVisit, PeHeaderBatchLimits, PeImportLookupError, PeModuleDependencyKind,
+        PeModuleDependencyViews, PeModuleOutputLimits, PeOwnedImportDescriptor,
+        PeStaticImportEvidence, inspect_ascii_pe_source_module_evidence,
+        walk_ascii_pe_dependency_closure,
+    };
+    let paths = ["game/main.exe", "GAME/A.dll", "game/B.dll"];
+    let names = ["A.dll", "B.dll", "A.dll"];
+    let path_limits = AsciiSourcePathLimits {
+        max_paths: 3,
+        max_path_bytes: 13,
+        max_total_path_bytes: 33,
+        max_depth: 2,
+    };
+    let batch = {
+        let mut bytes = [
+            import_fixture(b"A.dll\0"),
+            import_fixture(b"B.dll\0"),
+            import_fixture(b"A.dll\0"),
+        ];
+        let sources = std::array::from_fn::<_, 3, _>(|i| AsciiPeSource {
+            path: paths[i],
+            bytes: &bytes[i],
+        });
+        let family = PeModuleOutputLimits {
+            max_rows: 1,
+            max_text_bytes: 5,
+        };
+        let batch = inspect_ascii_pe_source_module_evidence(
+            &sources,
+            AsciiPeSourceModuleEvidenceLimits {
+                paths: path_limits,
+                content: PeHeaderBatchLimits {
+                    max_files: 3,
+                    max_file_bytes: 528,
+                    max_total_bytes: 1584,
+                },
+                static_imports: family,
+                delay_imports: family,
+                exports: family,
+                bound_imports: family,
+            },
+        )
+        .unwrap();
+        for input in &mut bytes {
+            input.fill(0);
+        }
+        batch
+    };
+    let digests = [
+        [
+            0xfc, 0x6a, 0x18, 0xb5, 0x92, 0xf4, 0x5a, 0xda, 0xe4, 0xfe, 0x55, 0x8e, 0xc9, 0x8c,
+            0x8a, 0x0f, 0x90, 0x50, 0x56, 0x43, 0x87, 0xaa, 0xa9, 0xbd, 0xb2, 0xab, 0xfd, 0x5a,
+            0x4b, 0x39, 0x4c, 0x5d,
+        ],
+        [
+            0x4b, 0x4c, 0x4e, 0x22, 0x72, 0x49, 0x88, 0x51, 0xad, 0x6e, 0x31, 0xc4, 0xd3, 0x63,
+            0xc4, 0x3f, 0x35, 0x5b, 0xd1, 0xf7, 0x75, 0x94, 0x76, 0xd4, 0x20, 0x31, 0x4e, 0xe8,
+            0xaf, 0x2e, 0x5c, 0x8f,
+        ],
+    ];
+    assert_eq!(batch.total_path_bytes, 33);
+    assert_eq!(batch.total_content_bytes, 1584);
+    assert_eq!(batch.entries.len(), 3);
+    for (index, entry) in batch.entries.iter().enumerate() {
+        let module = entry.module.as_ref().unwrap();
+        assert_eq!(module.fingerprinted.byte_length, 528);
+        assert_eq!(
+            module.fingerprinted.digest,
+            digests[usize::from(index == 1)]
+        );
+        assert_eq!(
+            module.static_imports,
+            Ok(PeStaticImportEvidence {
+                total_rows: 1,
+                total_text_bytes: 5,
+                descriptors: Ok(vec![PeOwnedImportDescriptor {
+                    descriptor_rva: RelativeVirtualAddress::new(64),
+                    descriptor_file_offset: FileOffset::new(64),
+                    import_lookup_table_rva: RelativeVirtualAddress::new(0),
+                    time_date_stamp: 0,
+                    forwarder_chain: 0,
+                    name_rva: RelativeVirtualAddress::new(112),
+                    import_address_table_rva: RelativeVirtualAddress::new(0),
+                    dll_name: names[index].into(),
+                }]),
+                lookups: Err(PeImportLookupError::LookupTableUnavailable {
+                    descriptor_index: 0
+                }),
+            })
+        );
+    }
+    let limits = AsciiPeDependencyClosureLimits {
+        observation: AsciiPeModuleDependencyLimits {
+            paths: path_limits,
+            max_requests: 3,
+            max_request_text_bytes: 15,
+            max_basename_bytes: 5,
+        },
+        max_reached_sources: 3,
+        max_examined_requests: 3,
+    };
+    let before = batch.clone();
+    let mut retained = Vec::new();
+    for mode in [
+        PeDependencyClosureMode::StaticOnly,
+        PeDependencyClosureMode::StaticAndDelay,
+    ] {
+        let expected = AsciiPeDependencyClosure {
+            observations: AsciiPeModuleDependencyEvidence {
+                paths: AsciiSourcePathBatch {
+                    total_path_bytes: 33,
+                    entries: paths
+                        .iter()
+                        .enumerate()
+                        .map(|(index, path)| AsciiSourcePathEntry {
+                            index,
+                            normalized: (*path).into(),
+                            key: path.to_ascii_lowercase(),
+                            depth: 2,
+                        })
+                        .collect(),
+                },
+                application_source_index: 0,
+                total_requests: 3,
+                total_request_text_bytes: 15,
+                sources: vec![
+                    Ok(PeModuleDependencyViews {
+                        static_imports: Ok(1),
+                        delay_imports: Ok(None),
+                    });
+                    3
+                ],
+                requests: [1, 2, 1]
+                    .into_iter()
+                    .enumerate()
+                    .map(|(source_index, target)| AsciiPeModuleDependencyRequest {
+                        source_index,
+                        kind: PeModuleDependencyKind::Static,
+                        descriptor_index: 0,
+                        dll_name: names[source_index].into(),
+                        candidate: Ok(Some(target)),
+                    })
+                    .collect(),
+            },
+            mode,
+            visits: vec![
+                PeDependencyVisit {
+                    source_index: 0,
+                    via_request_index: None,
+                },
+                PeDependencyVisit {
+                    source_index: 1,
+                    via_request_index: Some(0),
+                },
+                PeDependencyVisit {
+                    source_index: 2,
+                    via_request_index: Some(1),
+                },
+            ],
+            examined_requests: vec![
+                PeDependencyRequestVisit {
+                    request_index: 0,
+                    step: PeDependencyRequestStep::Discovered { visit_index: 1 },
+                },
+                PeDependencyRequestVisit {
+                    request_index: 1,
+                    step: PeDependencyRequestStep::Discovered { visit_index: 2 },
+                },
+                PeDependencyRequestVisit {
+                    request_index: 2,
+                    step: PeDependencyRequestStep::AlreadyReached { visit_index: 1 },
+                },
+            ],
+        };
+        assert_eq!(
+            walk_ascii_pe_dependency_closure(
+                &batch,
+                0,
+                mode,
+                AsciiPeDependencyClosureLimits {
+                    max_examined_requests: 2,
+                    ..limits
+                }
+            ),
+            Err(AsciiPeDependencyClosureError::ExaminedRequestsExceeded {
+                source_index: 2,
+                request_index: 2,
+                count: 3,
+                limit: 2,
+            })
+        );
+        let actual = walk_ascii_pe_dependency_closure(&batch, 0, mode, limits).unwrap();
+        assert_eq!(actual, expected);
+        assert_eq!(
+            walk_ascii_pe_dependency_closure(&batch, 0, mode, limits),
+            Ok(expected.clone())
+        );
+        retained.push((actual, expected));
+    }
+    assert_eq!(batch, before);
+    drop(batch);
+    drop(before);
+    for (actual, expected) in retained {
+        assert_eq!(actual, expected);
+    }
+}
+
 // this isolated test cdylib owns its unique zero-argument export.
 #[unsafe(no_mangle)]
 pub extern "C" fn run() -> u32 {
     inspect_image();
     inspect_paths();
     inspect_path_collisions();
+    inspect_dependency_cycle();
     0x5233_0001
 }
