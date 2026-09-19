@@ -4,6 +4,7 @@ import { mkdtempSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
+import { runWasmSmoke } from "./run-wasm.mjs";
 
 const root = fileURLToPath(new URL("../../", import.meta.url));
 const expectedNode = readFileSync(join(root, ".node-version"), "utf8").trim();
@@ -32,22 +33,11 @@ command("rustc", [
   harness, "-o", output,
 ]);
 
-const bytes = readFileSync(output);
-const module = await WebAssembly.compile(bytes);
-assert.deepEqual(WebAssembly.Module.imports(module), [], "smoke must have no host imports");
-const instance = await WebAssembly.instantiate(module);
-assert.equal(typeof instance.exports.run, "function");
-for (let call = 0; call < 2; call += 1) {
-  assert.equal(instance.exports.run(), 0x52330001, "all core smoke assertions must finish");
-}
+const smoke = runWasmSmoke(output);
 const sha256 = (value) => createHash("sha256").update(value).digest("hex");
 console.log(JSON.stringify({
-  node: process.versions.node,
-  imports: 0,
-  calls: 2,
-  sentinel: "0x52330001",
+  ...smoke,
   output,
-  wasmSha256: sha256(bytes),
   harnessSha256: sha256(readFileSync(harness)),
   librarySha256: sha256(readFileSync(library)),
 }));
