@@ -508,7 +508,8 @@ runner for main pushes and pull requests. It uses the repository's pinned Rust
 toolchain and Cargo lockfile. The Wasm step also runs a small import-free assertion
 harness in the pinned Node version, checking PE32+ metadata, file-backed ranges,
 path admission and a whole-input fingerprint. This is a smoke test, separate from
-the native suite. Host-independent fixture tool discovery tests also run in CI.
+the native suite. Host-independent fixture tool discovery and corpus verifier
+contract tests also run in CI, checking exact test results and inventory validation.
 Generated-file corpus tests remain a separate local verification
 with the pinned macOS tools.
 The regular suite includes a fixed 6,148-input mutation campaign across 28 raw PE

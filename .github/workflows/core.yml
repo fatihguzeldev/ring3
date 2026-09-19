@@ -39,7 +39,7 @@ jobs:
         with:
           node-version-file: .node-version
           package-manager-cache: false
-      - name: Fixture tool discovery tests
-        run: node --test tools/corpus/shared.test.mjs
+      - name: Portable corpus tooling tests
+        run: node --test tools/corpus/shared.test.mjs tools/corpus/verify.test.mjs
       - name: Wasm release build and smoke
         run: node tools/core/verify-wasm.mjs
