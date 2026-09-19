@@ -5,7 +5,7 @@ import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import { pathToFileURL } from "node:url";
 import { buildFixture } from "./build-pe32.mjs";
 import { buildImportFixtures, buildOrdinalFixtures } from "./build-imports.mjs";
-import { buildDependencyChainFixtures } from "./build-dependency-chain.mjs";
+import { buildDependencyChainFixtures, buildDependencyCycleFixtures } from "./build-dependency-chain.mjs";
 import { buildForwarderFixtures } from "./build-forwarders.mjs";
 import { buildPe32PlusFixture } from "./build-pe32plus.mjs";
 import { buildRelocationFixtures } from "./build-relocations.mjs";
@@ -83,6 +83,14 @@ function sourceHashes() {
 }
 
 const families = [
+  { name: "dependency-cycle", build: buildDependencyCycleFixtures, fixtures: {
+    RING3_CYCLE_PE32_EXE: "i386/Chain.exe",
+    RING3_CYCLE_PE32_MIDDLE: "i386/Ring3Middle.dll",
+    RING3_CYCLE_PE32_LEAF: "i386/Ring3Leaf.dll",
+    RING3_CYCLE_PE32PLUS_EXE: "amd64/Chain.exe",
+    RING3_CYCLE_PE32PLUS_MIDDLE: "amd64/Ring3Middle.dll",
+    RING3_CYCLE_PE32PLUS_LEAF: "amd64/Ring3Leaf.dll",
+  } },
   { name: "dependency-chain", build: buildDependencyChainFixtures, fixtures: {
     RING3_CHAIN_PE32_EXE: "i386/Chain.exe",
     RING3_CHAIN_PE32_MIDDLE: "i386/Ring3Middle.dll",
