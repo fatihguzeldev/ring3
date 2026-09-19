@@ -457,6 +457,7 @@ and version checks, and do not enable a new platform profile.
 | [pe32plus-arithmetic](corpus/pe32plus-arithmetic/) | Minimal 64-bit EXE with wide header values. | `pnpm corpus:build:pe32plus` |
 | [pe-named-imports](corpus/pe-named-imports/) | EXE/DLL pairs with symbols imported by name. | `pnpm corpus:build:imports` |
 | [pe-dependency-chain](corpus/pe-dependency-chain/) | EXE → DLL → DLL import chains in both PE widths. | `pnpm corpus:build:chain` |
+| [pe-dependency-cycle](corpus/pe-dependency-cycle/) | Linked EXE → middle → leaf → middle metadata, with a separate bootstrap leaf. | `pnpm corpus:build:cycle` |
 | [pe-ordinal-imports](corpus/pe-ordinal-imports/) | EXE/DLL pairs with symbols imported by number. | `pnpm corpus:build:ordinals` |
 | [pe-forwarders](corpus/pe-forwarders/) | Forwarder DLLs and named terminal providers in both PE widths. | `pnpm corpus:build:forwarders` |
 | [pe-base-relocations](corpus/pe-base-relocations/) | Files containing relocation block metadata. | `pnpm corpus:build:relocations` |

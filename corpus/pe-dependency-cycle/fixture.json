@@ -1,0 +1,183 @@
+{
+  "schemaVersion": 1,
+  "fixture": "pe-dependency-cycle",
+  "provenance": "self-authored",
+  "licenseStatus": "pending",
+  "windowsOracle": "not-run",
+  "executed": false,
+  "sources": {
+    "leaf.c": {
+      "path": "corpus/pe-dependency-chain/leaf.c",
+      "sha256": "e449c05db657b8d2d9250ef9c5194be9324affa20ee54d6f219ecea273347c00"
+    },
+    "middle.c": {
+      "path": "corpus/pe-dependency-chain/middle.c",
+      "sha256": "3f3df79133f094d9231d8451e4414bdb3a66fca2621e39cc29b077f7bc145c1e"
+    },
+    "chain.c": {
+      "path": "corpus/pe-dependency-chain/chain.c",
+      "sha256": "528010fa63e46d243cd287b094bd9e230c7e024cc0594d8d88a497ee159ed25e"
+    },
+    "cycle_leaf.c": {
+      "path": "corpus/pe-dependency-cycle/cycle_leaf.c",
+      "sha256": "c0f6ce644364815066d391f926beaee00fe1e4be7e020f8584b0ed37975ac42d"
+    }
+  },
+  "tools": {
+    "clang": {
+      "version": "Apple clang version 21.0.0 (clang-2100.1.1.101)",
+      "sha256": "f30550eab15fdf5ab8c0dc54c52679711241e5d4b636b027e18c09fef531775d"
+    },
+    "lld": {
+      "version": "LLD 22.1.6 (https://github.com/rust-lang/llvm-project.git dcc3606807c989700e0ac1cac18c31741bcd40d9)",
+      "sha256": "8f5fe507df7232eac0a610c12a5d11f3202205235f710eb98c6c78df6d3f548d"
+    },
+    "objdump": {
+      "version": "Apple LLVM version 21.0.0",
+      "sha256": "1dcc1432db4d828cf8cd71a84cb8d9bf63a7ca80b5eeec711a9e5f13a3f5f98e"
+    }
+  },
+  "objectTimestamp": 0,
+  "architectures": {
+    "i386": {
+      "kind": "PE32",
+      "machine": 332,
+      "artifacts": {
+        "chain.obj": {
+          "bytes": 608,
+          "sha256": "56d7cccbc51a0bda6292826732c83ac7ef97ca202845d83641f52dd42dc1f583"
+        },
+        "Ring3Leaf.dll": {
+          "bytes": 2048,
+          "sha256": "24067a34d6ea92472f6c2d039434ebbae822f845646643cf5b6ea341171f32eb"
+        },
+        "Ring3Leaf.lib": {
+          "bytes": 1358,
+          "sha256": "2f3ce904af67ddc8bc322e15577c707ac651a8f42a891240416728f200927ba0"
+        },
+        "Ring3Middle.dll": {
+          "bytes": 2048,
+          "sha256": "06124727f3ce4f78d903754d36742dbebebf7ccce80c2e5e8e912b6e666c66d4"
+        },
+        "Ring3Middle.lib": {
+          "bytes": 1386,
+          "sha256": "dc14f35b6d625d9eb23e301a9ee6564669432a270893ae51b3212646e3085f71"
+        },
+        "middle.obj": {
+          "bytes": 708,
+          "sha256": "85975ece7297dd76b479e877cd69fee7bb44af95eb70507e347f83bf52b77497"
+        },
+        "leaf.obj": {
+          "bytes": 664,
+          "sha256": "37f54c9573ef2d6ca365c23995084c5f5fa37c2c05c0f49a8de7622a2f490880"
+        },
+        "cycle_leaf.obj": {
+          "bytes": 706,
+          "sha256": "2912849dbd3bc3d08108d147b62ca56dbb7c9dd077ee1a2f8a306b6918f41d75"
+        },
+        "Chain.exe": {
+          "bytes": 2048,
+          "sha256": "8e0af322919d921344bf4787c50d20434bacf93ecc14ff6a5c79f5422828a08c"
+        },
+        "bootstrap/Ring3Leaf.dll": {
+          "bytes": 2048,
+          "sha256": "3cab3defe7790a3106c416f3c6447b43b17dd494e9e54d17ad051728f8756311"
+        },
+        "bootstrap/Ring3Leaf.lib": {
+          "bytes": 1358,
+          "sha256": "2f3ce904af67ddc8bc322e15577c707ac651a8f42a891240416728f200927ba0"
+        }
+      }
+    },
+    "amd64": {
+      "kind": "PE32+",
+      "machine": 34404,
+      "artifacts": {
+        "chain.obj": {
+          "bytes": 607,
+          "sha256": "190b5f4222137534ed007b04cd5c142284fcaf711e84199e51fdbb7ff6541965"
+        },
+        "Ring3Leaf.dll": {
+          "bytes": 2048,
+          "sha256": "b53682ee6b06060ba316eeab92626967becb00dbd6650e3165ab13064d793ef9"
+        },
+        "Ring3Leaf.lib": {
+          "bytes": 1362,
+          "sha256": "aa09dcec2188e3af1bde82b589092c6466add0a6b73122aa088630079d6dae86"
+        },
+        "Ring3Middle.dll": {
+          "bytes": 2048,
+          "sha256": "ca825ad8fb5a93184bb6779ac3a0afbc2b9875524079c40ea3c41986f715d32d"
+        },
+        "Ring3Middle.lib": {
+          "bytes": 1390,
+          "sha256": "8baf2faa24afadb4733193e72311c2bc2aa5d61ea807a07a20450afa872d1083"
+        },
+        "middle.obj": {
+          "bytes": 714,
+          "sha256": "81fcd92a474facad232b254878983c40ce96c3281c12c28dea380226fd88f6ab"
+        },
+        "leaf.obj": {
+          "bytes": 665,
+          "sha256": "42d83ddee06fbbb2e3b0fe3395c2241cf500b68d3c43dedf3de48b9c3cd51bd3"
+        },
+        "cycle_leaf.obj": {
+          "bytes": 712,
+          "sha256": "62a15d99e5d388bc655c400a75a9b2c64b17d31ade86fe8e46729fd566404658"
+        },
+        "Chain.exe": {
+          "bytes": 2048,
+          "sha256": "ab444f90e87f64eb90fe1b09a4008619d2c740a9e9cd8ba6e1fd2f1c76612e4d"
+        },
+        "bootstrap/Ring3Leaf.dll": {
+          "bytes": 2048,
+          "sha256": "ef0f6a07f4c43a987eece9b062fa93e95d92320c05e31a60c97730449c76c936"
+        },
+        "bootstrap/Ring3Leaf.lib": {
+          "bytes": 1362,
+          "sha256": "aa09dcec2188e3af1bde82b589092c6466add0a6b73122aa088630079d6dae86"
+        }
+      }
+    }
+  },
+  "expectation": {
+    "Chain.exe": {
+      "importedDlls": [
+        "Ring3Middle.dll"
+      ],
+      "symbols": [
+        "ring3_middle"
+      ]
+    },
+    "Ring3Middle.dll": {
+      "importedDlls": [
+        "Ring3Leaf.dll"
+      ],
+      "symbols": [
+        "ring3_middle",
+        "ring3_leaf"
+      ]
+    },
+    "Ring3Leaf.dll": {
+      "importedDlls": [
+        "Ring3Middle.dll"
+      ],
+      "symbols": [
+        "ring3_leaf",
+        "ring3_middle"
+      ]
+    },
+    "bootstrap/Ring3Leaf.dll": {
+      "importedDlls": [],
+      "symbols": [
+        "ring3_leaf"
+      ]
+    }
+  },
+  "bootstrap": {
+    "source": "leaf.c",
+    "image": "bootstrap/Ring3Leaf.dll",
+    "importLibrary": "bootstrap/Ring3Leaf.lib",
+    "includedInFinalGraph": false
+  }
+}
