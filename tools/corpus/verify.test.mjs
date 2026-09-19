@@ -1,10 +1,36 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { flattenInventory, parseTestList, verifyTestResult } from "./verify.mjs";
+import { corpusEnvironment, flattenInventory, parseTestList, verifyTestResult } from "./verify.mjs";
 
 const name = "generated_corpus_matches_recorded_header_metadata";
 const success = `\nrunning 1 test\ntest ${name} ... ok\n\ntest result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 9 filtered out; finished in 0.00s\n\n`;
 const result = (stdout) => ({ status: 0, signal: null, stdout });
+
+test("corpus compilation disables inherited wrappers while preserving isolated child settings", () => {
+  const parent = Object.freeze({
+    PATH: "/tools", CARGO_HOME: "/cache", LC_ALL: "other", TZ: "other",
+    CARGO_TARGET_DIR: "/old-target", RUSTC: "/other-rustc",
+    RUSTC_WRAPPER: "/wrapper", RUSTC_WORKSPACE_WRAPPER: "/workspace-wrapper",
+    CARGO_BUILD_RUSTC_WRAPPER: "/configured-wrapper",
+    CARGO_BUILD_RUSTC_WORKSPACE_WRAPPER: "/configured-workspace-wrapper",
+    RING3_STALE_FIXTURE: "/stale", RING3_DOTNET_ROOT: "/sdk",
+  });
+  const before = { ...parent };
+  const env = corpusEnvironment(parent, "/fresh-target", "/pinned-rustc");
+  assert.deepEqual(env, {
+    PATH: "/tools", CARGO_HOME: "/cache", LC_ALL: "C", TZ: "UTC",
+    CARGO_TARGET_DIR: "/fresh-target", RUSTC: "/pinned-rustc",
+    RUSTC_WRAPPER: "", RUSTC_WORKSPACE_WRAPPER: "",
+    CARGO_BUILD_RUSTC_WRAPPER: "/configured-wrapper",
+    CARGO_BUILD_RUSTC_WORKSPACE_WRAPPER: "/configured-workspace-wrapper",
+  });
+  assert.deepEqual(parent, before);
+  env.RING3_NEW_FIXTURE = "/fresh-fixture";
+  assert.equal(parent.RING3_NEW_FIXTURE, undefined);
+  const unset = corpusEnvironment({}, "/fresh-target", "/pinned-rustc");
+  assert.equal(unset.RUSTC_WRAPPER, "");
+  assert.equal(unset.RUSTC_WORKSPACE_WRAPPER, "");
+});
 
 test("exact test success refuses zero, skipped, wrong, duplicate and partial reports", () => {
   verifyTestResult(result(success), name);
