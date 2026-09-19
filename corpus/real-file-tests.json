@@ -268,6 +268,10 @@
       "generated_pe32plus_chain_preserves_multihop_closure",
       "generated_pe32_chain_candidates_select_retained_symbols",
       "generated_pe32plus_chain_candidates_select_retained_symbols"
+    ],
+    "source_compiled_delay": [
+      "compiled_pe32_delay_modes_preserve_owned_closure",
+      "compiled_pe32plus_delay_modes_preserve_owned_closure"
     ]
   }
 }
