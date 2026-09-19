@@ -35,5 +35,9 @@ jobs:
         run: cargo test --workspace --locked
       - name: Native release build
         run: cargo build --workspace --locked --release
-      - name: Wasm release build
-        run: cargo build --workspace --locked --release --target wasm32-unknown-unknown
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38
+        with:
+          node-version-file: .node-version
+          package-manager-cache: false
+      - name: Wasm release build and smoke
+        run: node tools/core/verify-wasm.mjs

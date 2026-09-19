@@ -494,6 +494,7 @@ pnpm lint:rust
 pnpm test:rust
 pnpm typecheck
 pnpm build
+node tools/core/verify-wasm.mjs
 ```
 
 `test:rust` runs the regular Rust tests and documentation tests. Tests that require
@@ -501,8 +502,11 @@ generated EXE/DLL files run through the corpus verifier below.
 The [core workflow](.github/workflows/core.yml) runs formatting, strict Clippy,
 regular tests and doctests, and native/Wasm release builds on GitHub's Ubuntu
 runner for main pushes and pull requests. It uses the repository's pinned Rust
-toolchain and Cargo lockfile. The Wasm step checks compilation; generated-file
-corpus tests remain a separate local verification with the pinned macOS tools.
+toolchain and Cargo lockfile. The Wasm step also runs a small import-free assertion
+harness in the pinned Node version, checking PE32+ metadata, file-backed ranges,
+path admission and a whole-input fingerprint. This is a smoke test, separate from
+the native suite. Generated-file corpus tests remain a separate local verification
+with the pinned macOS tools.
 The regular suite includes a fixed 6,148-input mutation campaign across 28 raw PE
 readers, including present and absent AMD64 exception tables and v1 unwind metadata
 at one explicit RVA. It checks repeated results, input preservation and owned
