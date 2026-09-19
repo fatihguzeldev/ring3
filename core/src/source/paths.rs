@@ -1,4 +1,5 @@
 use std::collections::BTreeMap;
+use std::ops::Bound::{Included, Unbounded};
 
 /// explicit limits on already materialized raw path text; no default namespace policy.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -284,7 +285,9 @@ pub fn admit_ascii_source_paths(
             }
         }
         let prefix = format!("{key}/");
-        if let Some((previous, &prior)) = seen.range(prefix.clone()..).next()
+        if let Some((previous, &prior)) = seen
+            .range::<str, _>((Included(prefix.as_str()), Unbounded))
+            .next()
             && previous.starts_with(&prefix)
         {
             return Err(AsciiSourcePathError::Collision {
