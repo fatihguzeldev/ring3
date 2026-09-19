@@ -511,9 +511,13 @@ runner for main pushes and pull requests. It uses the repository's pinned Rust
 toolchain and Cargo lockfile. The Wasm step also runs a small import-free assertion
 harness in the pinned Node version, checking PE32+ metadata, file-backed ranges,
 path admission with selected collision diagnostics, and a whole-input fingerprint.
+The harness executes twice in a child Node process with a 15-second timeout,
+including module loading, compilation and instantiation. A timeout terminates the
+child and fails verification; Rust compilation is outside this timeout.
 This is a smoke test, separate from the native suite. Host-independent fixture tool
 discovery and corpus verifier contract tests also run in CI, checking exact test
-results and inventory validation.
+results and inventory validation. Portable Wasm runner tests also check refusal
+and termination paths using small self-authored modules.
 Generated-file corpus tests remain a separate local verification
 with the pinned macOS tools.
 The corpus verifier disables Cargo compiler wrappers so its verified `rustc`
