@@ -1,8 +1,9 @@
 use ring3_core::{
-    AsciiSourcePathBatch, AsciiSourcePathEntry, AsciiSourcePathError, AsciiSourcePathLimits,
-    AsciiSourcePathSegmentError, FileOffset, PeFileRange, PeFileRangeSource, PeFingerprintError,
-    PeHeaderPrefix, PeKind, PeRvaError, RelativeVirtualAddress, admit_ascii_source_paths,
-    fingerprint_pe_declared_evidence, parse_pe_headers, resolve_pe_file_range,
+    AsciiSourcePathBatch, AsciiSourcePathCollision as Collision, AsciiSourcePathEntry,
+    AsciiSourcePathError, AsciiSourcePathLimits, AsciiSourcePathSegmentError, FileOffset,
+    PeFileRange, PeFileRangeSource, PeFingerprintError, PeHeaderPrefix, PeKind, PeRvaError,
+    RelativeVirtualAddress, admit_ascii_source_paths, fingerprint_pe_declared_evidence,
+    parse_pe_headers, resolve_pe_file_range,
 };
 
 fn fixture() -> [u8; 528] {
@@ -133,10 +134,52 @@ fn inspect_paths() {
     );
 }
 
+fn inspect_path_collisions() {
+    let limits = AsciiSourcePathLimits {
+        max_paths: 3,
+        max_path_bytes: 12,
+        max_total_path_bytes: 36,
+        max_depth: 2,
+    };
+    for (paths, index, prior, kind) in [
+        (vec!["Data/A", r"data\a"], 1, 0, Collision::Duplicate),
+        (vec!["a", "a/b"], 1, 0, Collision::AncestorFile),
+        (vec!["a/b", "a"], 1, 0, Collision::DescendantFile),
+        (vec!["a!", "a/b", "a"], 2, 1, Collision::DescendantFile),
+        (vec!["a/z", "a/b", "a"], 2, 1, Collision::DescendantFile),
+    ] {
+        assert_eq!(
+            admit_ascii_source_paths(&paths, limits),
+            Err(AsciiSourcePathError::Collision { index, prior, kind })
+        );
+    }
+    assert_eq!(
+        admit_ascii_source_paths(&["ab/file", "a"], limits),
+        Ok(AsciiSourcePathBatch {
+            total_path_bytes: 8,
+            entries: vec![
+                AsciiSourcePathEntry {
+                    index: 0,
+                    normalized: "ab/file".into(),
+                    key: "ab/file".into(),
+                    depth: 2,
+                },
+                AsciiSourcePathEntry {
+                    index: 1,
+                    normalized: "a".into(),
+                    key: "a".into(),
+                    depth: 1,
+                },
+            ],
+        })
+    );
+}
+
 // this isolated test cdylib owns its unique zero-argument export.
 #[unsafe(no_mangle)]
 pub extern "C" fn run() -> u32 {
     inspect_image();
     inspect_paths();
+    inspect_path_collisions();
     0x5233_0001
 }
