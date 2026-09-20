@@ -42,6 +42,34 @@ mod modules_executable;
 #[path = "../../core/tests/support/error_mode_executable.rs"]
 mod error_mode_executable;
 
+#[path = "../../core/tests/support/heap_executable.rs"]
+mod heap_executable;
+
+fn execute_heap() {
+    use ring3_core::execution::{MemoryError, Process32, ProcessStop, Register32, StopReason};
+    let mut process = Process32::load(&heap_executable::pe32(), 27).unwrap();
+    let result = process.run(100);
+    assert_eq!(result.reason, ProcessStop::Stopped(StopReason::Breakpoint));
+    assert_eq!(result.api_calls, 2);
+    assert_eq!(process.cpu.register(Register32::Eax), 0);
+    assert_eq!(process.cpu.register(Register32::Esi), 0x2000_0000);
+    assert_eq!(process.memory.mapped_pages(), 25);
+    assert_eq!(
+        process.memory.read(0x2000_0000, &mut [0]),
+        Err(MemoryError::Unmapped {
+            address: 0x2000_0000
+        })
+    );
+    #[cfg(windows_demo)]
+    {
+        let mut process =
+            Process32::load(include_bytes!("../../target/windows-api/heap.exe"), 64).unwrap();
+        let result = process.run(1000);
+        assert_eq!(result.reason, ProcessStop::Exited(42));
+        assert_eq!(result.api_calls, 8);
+    }
+}
+
 fn execute_error_mode() {
     use ring3_core::execution::{Process32, ProcessStop, Register32, StopReason};
     for mode in [0, 1, 2, 4, 0x8000, 0x8007] {
@@ -934,6 +962,7 @@ pub extern "C" fn run() -> u32 {
     execute_windows_api();
     execute_resident_modules();
     execute_error_mode();
+    execute_heap();
     execute_image();
     execute_function();
     inspect_image();

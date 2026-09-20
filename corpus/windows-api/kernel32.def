@@ -6,3 +6,5 @@ EXPORTS
     _LoadLibraryA@4==LoadLibraryA
     _GetModuleHandleA@4==GetModuleHandleA
     _FreeLibrary@4==FreeLibrary
+    _LocalAlloc@8==LocalAlloc
+    _LocalFree@4==LocalFree

@@ -7,7 +7,7 @@ mkdirSync(output, { recursive: true });
 const tools = locateTools();
 run(tools.lld, ["-flavor", "link", "/lib", "/machine:x86",
   `/def:${join(root, "corpus/windows-api/kernel32.def")}`, "/out:kernel32.lib"], output);
-for (const name of ["calls", "modules"]) {
+for (const name of ["calls", "modules", "heap"]) {
   run(tools.clang, ["--target=i686-pc-windows-msvc", "-O0", "-ffreestanding",
     "-fno-stack-protector", "-c", join(root, `corpus/windows-api/${name}.c`),
     "-o", `${name}.obj`], output);
