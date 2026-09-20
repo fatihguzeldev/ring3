@@ -36,6 +36,43 @@ mod dll_executable;
 #[path = "../../core/tests/support/delay_executable.rs"]
 mod delay_executable;
 
+#[path = "../../core/tests/support/modules_executable.rs"]
+mod modules_executable;
+
+fn execute_resident_modules() {
+    use ring3_core::execution::{Process32, ProcessStop, Register32, StopReason};
+    let mut process = Process32::load(&modules_executable::pe32(), 32).unwrap();
+    let mut calls = 0;
+    for _ in 0..100 {
+        let result = process.run(1);
+        calls += result.api_calls;
+        if result.reason == ProcessStop::Stopped(StopReason::Breakpoint) {
+            break;
+        }
+        assert_eq!(
+            result.reason,
+            ProcessStop::Stopped(StopReason::InstructionLimit)
+        );
+    }
+    assert_eq!(calls, 4);
+    assert_eq!(
+        process.cpu.register(Register32::Ebx),
+        process.cpu.register(Register32::Esi)
+    );
+    assert_ne!(process.cpu.register(Register32::Ebx), 0);
+    assert_eq!(process.cpu.register(Register32::Edi), 1);
+    assert_eq!(process.cpu.register(Register32::Eax), 0);
+    assert_eq!(process.last_error().unwrap(), 126);
+    #[cfg(windows_demo)]
+    {
+        let mut process =
+            Process32::load(include_bytes!("../../target/windows-api/modules.exe"), 64).unwrap();
+        let result = process.run(1000);
+        assert_eq!(result.reason, ProcessStop::Exited(42));
+        assert_eq!(result.api_calls, 12);
+    }
+}
+
 fn execute_dword_test() {
     use ring3_core::execution::{Cpu32, Permissions, Register32, StopReason, load_pe32};
     for (value, flags) in [(0_u32, 0x44), (1, 0), (3, 4), (0x8000_0000, 0x84)] {
@@ -827,6 +864,7 @@ pub extern "C" fn run() -> u32 {
     execute_dword_test();
     execute_diagnostic();
     execute_windows_api();
+    execute_resident_modules();
     execute_image();
     execute_function();
     inspect_image();

@@ -9,9 +9,10 @@ import { runWasmSmoke } from "./run-wasm.mjs";
 const root = fileURLToPath(new URL("../../", import.meta.url));
 const expectedNode = readFileSync(join(root, ".node-version"), "utf8").trim();
 assert.equal(process.versions.node, expectedNode, "repository Node version is required");
-assert.ok(process.argv.length === 2 || (process.argv.length === 3 && process.argv[2] === "--dll-demo"),
-  "usage: verify-wasm.mjs [--dll-demo]");
+assert.ok(process.argv.length === 2 || (process.argv.length === 3 && ["--dll-demo", "--windows-demo"].includes(process.argv[2])),
+  "usage: verify-wasm.mjs [--dll-demo|--windows-demo]");
 const compiledDll = process.argv[2] === "--dll-demo";
+const compiledWindows = process.argv[2] === "--windows-demo";
 
 function command(program, args) {
   const result = spawnSync(program, args, { cwd: root, stdio: "inherit" });
@@ -21,6 +22,7 @@ function command(program, args) {
 
 const harness = join(root, "tools/core/wasm-smoke.rs");
 if (compiledDll) command(process.execPath, ["tools/corpus/build-guest-dll.mjs"]);
+if (compiledWindows) command(process.execPath, ["tools/corpus/build-windows-api.mjs"]);
 const target = join(root, "target");
 command("rustfmt", ["--edition", "2024", "--check", harness]);
 command("cargo", [
@@ -35,6 +37,7 @@ command("rustc", [
   "-C", "opt-level=3", "-C", "panic=abort", "-D", "warnings",
   "--extern", `ring3_core=${library}`, "-L", `dependency=${join(release, "deps")}`,
   ...(compiledDll ? ["--cfg", "guest_dll_demo"] : []),
+  ...(compiledWindows ? ["--cfg", "windows_demo"] : []),
   harness, "-o", output,
 ]);
 
@@ -43,6 +46,7 @@ const sha256 = (value) => createHash("sha256").update(value).digest("hex");
 console.log(JSON.stringify({
   ...smoke,
   compiledDll,
+  compiledWindows,
   output,
   harnessSha256: sha256(readFileSync(harness)),
   librarySha256: sha256(readFileSync(library)),

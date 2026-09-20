@@ -3,3 +3,6 @@ EXPORTS
     _SetLastError@4==SetLastError
     _GetLastError@0==GetLastError
     _ExitProcess@4==ExitProcess
+    _LoadLibraryA@4==LoadLibraryA
+    _GetModuleHandleA@4==GetModuleHandleA
+    _FreeLibrary@4==FreeLibrary
