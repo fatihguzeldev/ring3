@@ -87,6 +87,30 @@ mod process_version_executable;
 #[path = "../../core/tests/support/metrics_executable.rs"]
 mod metrics_executable;
 
+#[path = "../../core/tests/support/gdi_executable.rs"]
+mod gdi_executable;
+
+fn execute_gdi() {
+    use ring3_core::execution::{Process32, ProcessStop, Register32, StopReason};
+    let mut process = Process32::load(&gdi_executable::lifecycle(), 32).unwrap();
+    let result = process.run(50);
+    assert_eq!(result.reason, ProcessStop::Stopped(StopReason::Breakpoint));
+    assert_eq!((result.instructions, result.api_calls), (19, 5));
+    assert_eq!(process.cpu.register(Register32::Eax), 0);
+    assert_eq!(process.cpu.register(Register32::Edx), 1);
+    assert_eq!(process.cpu.register(Register32::Esi), 640);
+    assert_eq!(process.cpu.register(Register32::Edi), 480);
+    assert_eq!(process.cpu.register(Register32::Esp), 0x1001_0000);
+    #[cfg(windows_demo)]
+    {
+        let mut process =
+            Process32::load(include_bytes!("../../target/windows-api/gdi.exe"), 64).unwrap();
+        let result = process.run(1000);
+        assert_eq!(result.reason, ProcessStop::Exited(42));
+        assert_eq!(result.api_calls, 24);
+    }
+}
+
 fn execute_metrics() {
     use ring3_core::execution::{Process32, ProcessStop, Register32, StopReason};
     let mut process = Process32::load(&metrics_executable::pe32(), 32).unwrap();
@@ -1487,6 +1511,7 @@ pub extern "C" fn run() -> u32 {
     execute_zero_extend();
     execute_process_version();
     execute_metrics();
+    execute_gdi();
     execute_image();
     execute_function();
     inspect_image();
