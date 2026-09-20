@@ -24,6 +24,41 @@ mod crt_executable;
 #[path = "../../core/tests/support/fp_control_executable.rs"]
 mod fp_control_executable;
 
+#[path = "../../core/tests/support/initializer_executable.rs"]
+mod initializer_executable;
+
+fn execute_initializers() {
+    use ring3_core::execution::{Process32, ProcessStop, Register32, StopReason};
+
+    for seed in [0_u32, 13, u32::MAX] {
+        let mut process = Process32::load(&initializer_executable::pe32(seed), 32).unwrap();
+        let mut api_calls = 0;
+        let mut finished = false;
+        for _ in 0..500 {
+            let step = process.run(1);
+            assert_eq!(step.instructions + step.api_calls, 1);
+            api_calls += step.api_calls;
+            if step.reason == ProcessStop::Stopped(StopReason::Breakpoint) {
+                finished = true;
+                break;
+            }
+            assert_eq!(
+                step.reason,
+                ProcessStop::Stopped(StopReason::InstructionLimit)
+            );
+        }
+        assert!(finished);
+        assert_eq!(api_calls, 1);
+        assert_eq!(process.cpu.register(Register32::Esp), 0x1001_0000);
+        let mut value = [0; 4];
+        process.memory.read(0x0040_21c0, &mut value).unwrap();
+        assert_eq!(
+            u32::from_le_bytes(value),
+            seed.wrapping_add(8).wrapping_mul(2)
+        );
+    }
+}
+
 fn execute_fp_control() {
     use ring3_core::execution::{Process32, ProcessStop, Register32, StopReason};
 
@@ -633,6 +668,7 @@ pub extern "C" fn run() -> u32 {
     execute_thread();
     execute_crt();
     execute_fp_control();
+    execute_initializers();
     execute_diagnostic();
     execute_windows_api();
     execute_image();

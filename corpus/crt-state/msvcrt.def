@@ -5,3 +5,4 @@ EXPORTS
     __p__commode
     _adjust_fdiv DATA
     _controlfp
+    _initterm
