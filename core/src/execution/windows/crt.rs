@@ -7,6 +7,11 @@ const DATA: u32 = 0x7000_2000;
 const FMODE: u32 = DATA;
 const COMMODE: u32 = DATA + 4;
 const ADJUST_FDIV: u32 = DATA + 8;
+const ACMDLN: u32 = DATA + 12;
+const ARGC: u32 = DATA + 16;
+const ARGV: u32 = DATA + 20;
+const ENVIRON: u32 = DATA + 24;
+const INITENV: u32 = DATA + 28;
 
 #[derive(Clone, Copy)]
 pub(super) enum Call {
@@ -70,12 +75,28 @@ pub(super) fn resolve(name: &str) -> Option<u32> {
         "_fmode" => Some(FMODE),
         "_commode" => Some(COMMODE),
         "_adjust_fdiv" => Some(ADJUST_FDIV),
+        "_acmdln" => Some(ACMDLN),
+        "__argc" => Some(ARGC),
+        "__argv" => Some(ARGV),
+        "_environ" => Some(ENVIRON),
+        "__initenv" => Some(INITENV),
         _ => None,
     }
 }
 
-pub(super) fn initialize(memory: &mut GuestMemory) -> Result<(), MemoryError> {
+pub(super) fn initialize(
+    memory: &mut GuestMemory,
+    parameters: &super::parameters::Parameters,
+) -> Result<(), MemoryError> {
     memory.map_zeroed(u64::from(DATA), PAGE_SIZE, Permissions::READ_WRITE)?;
     guest::write_word(memory, FMODE, 0x4000)?;
+    for (address, value) in [
+        (ACMDLN, parameters.command_line),
+        (ARGC, parameters.argc),
+        (ARGV, parameters.argv),
+        (ENVIRON, parameters.environment),
+    ] {
+        guest::write_word(memory, address, value)?;
+    }
     initializers::initialize(memory)
 }

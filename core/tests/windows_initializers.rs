@@ -122,10 +122,10 @@ fn invalid_tables_targets_and_stack_permissions_stop_explicitly() {
 fn guest_routine_is_read_only_and_counts_against_page_cap() {
     let bytes = initializer_executable::pe32(13);
     assert!(matches!(
-        Process32::load(&bytes, 23),
+        Process32::load(&bytes, 24),
         Err(LoadError::Memory(MemoryError::PageLimitExceeded))
     ));
-    let mut process = Process32::load(&bytes, 24).unwrap();
+    let mut process = Process32::load(&bytes, 25).unwrap();
     assert!(process.memory.fetch(0x7000_3000, &mut [0]).is_ok());
     assert!(process.memory.write(0x7000_3000, &[0xcc]).is_err());
 }

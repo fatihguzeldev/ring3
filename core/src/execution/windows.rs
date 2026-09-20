@@ -8,9 +8,11 @@ mod crt;
 mod d3d8;
 mod diagnostics;
 mod guest;
+mod parameters;
 mod thread;
 
 pub use d3d8::Frame;
+pub use parameters::ProcessOptions;
 
 const API_BASE: u32 = 0x7000_0000;
 const STACK_BASE: u32 = 0x1000_0000;
@@ -123,7 +125,7 @@ impl Process32 {
     /// peb initialization or full crt startup is performed.
     #[expect(clippy::missing_errors_doc, reason = "project headings are lower case")]
     pub fn load(bytes: &[u8], page_limit: u32) -> Result<Self, LoadError> {
-        Self::load_with_diagnostics(bytes, page_limit, false)
+        Self::load_with_options(bytes, page_limit, ProcessOptions::default())
     }
 
     /// traces entry without resolving every import or initializing missing dlls.
@@ -134,18 +136,31 @@ impl Process32 {
     /// returns the image, memory and reserved-range errors of [`Self::load`].
     #[expect(clippy::missing_errors_doc, reason = "project headings are lower case")]
     pub fn load_diagnostic(bytes: &[u8], page_limit: u32) -> Result<Self, LoadError> {
-        Self::load_with_diagnostics(bytes, page_limit, true)
+        Self::load_with_options(
+            bytes,
+            page_limit,
+            ProcessOptions {
+                diagnostic_imports: true,
+                ..ProcessOptions::default()
+            },
+        )
     }
 
-    fn load_with_diagnostics(
+    /// loads explicit narrow-byte startup parameters into bounded guest memory.
+    ///
+    /// # errors
+    /// rejects invalid/oversized parameters and the basic loader's image/memory errors.
+    #[expect(clippy::missing_errors_doc, reason = "project headings are lower case")]
+    pub fn load_with_options(
         bytes: &[u8],
         page_limit: u32,
-        diagnostic: bool,
+        options: ProcessOptions<'_>,
     ) -> Result<Self, LoadError> {
+        let parameters = parameters::Parameters::prepare(options)?;
         let mut diagnostic_imports = diagnostics::Imports::default();
         let mut image = load_pe32_with_imports(bytes, page_limit, |module, symbol| {
             Api::resolve(module, symbol).or_else(|| {
-                if diagnostic {
+                if options.diagnostic_imports {
                     diagnostic_imports.insert(module, symbol)
                 } else {
                     None
@@ -163,7 +178,8 @@ impl Process32 {
         d3d8::Graphics::initialize(&mut image.memory)?;
         diagnostic_imports.map(&mut image.memory)?;
         thread::initialize(&mut image.memory, STACK_BASE, STACK_BASE + STACK_SIZE)?;
-        crt::initialize(&mut image.memory)?;
+        parameters.map(&mut image.memory)?;
+        crt::initialize(&mut image.memory, &parameters)?;
         let mut cpu = Cpu32::new(image.entry_point);
         cpu.set_register(Register32::Esp, STACK_BASE + STACK_SIZE);
         cpu.set_fs_base(thread::BASE);

@@ -102,10 +102,10 @@ fn trap_addresses_keep_distinct_identities_and_padding_is_not_callable() {
 fn diagnostics_respect_page_caps_collisions_and_known_apis() {
     let bytes = imported_executable::pe32(&[0xcc], "Missing.dll", &["Absent"]);
     assert!(matches!(
-        Process32::load_diagnostic(&bytes, 24),
+        Process32::load_diagnostic(&bytes, 25),
         Err(LoadError::Memory(MemoryError::PageLimitExceeded))
     ));
-    assert!(Process32::load_diagnostic(&bytes, 25).is_ok());
+    assert!(Process32::load_diagnostic(&bytes, 26).is_ok());
     let mut collision = bytes.clone();
     collision[0xb4..0xb8].copy_from_slice(&0x7100_0000_u32.to_le_bytes());
     assert!(matches!(

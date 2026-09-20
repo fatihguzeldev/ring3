@@ -18,6 +18,7 @@ pub enum LoadError {
     UnsupportedImage,
     UnsupportedDirectory { index: u8 },
     InvalidLayout,
+    InvalidProcessParameters,
     Imports(PeImportLookupError),
     InvalidImportAddressTable,
     UnresolvedImport { module: String, symbol: String },
