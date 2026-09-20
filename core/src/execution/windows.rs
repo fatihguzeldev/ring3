@@ -4,6 +4,7 @@ use super::{
 };
 use crate::PeImportSymbol;
 
+mod code_pages;
 mod critical_sections;
 mod crt;
 mod d3d8;
@@ -78,6 +79,7 @@ enum Api {
     ExceptionProlog,
     Graphics(d3d8::Call),
     Crt(crt::Call),
+    CodePage(code_pages::Call),
     Module(modules::Call),
     Heap(heap::Call),
     CriticalSection(critical_sections::Call),
@@ -114,7 +116,8 @@ impl Api {
                 .or_else(|| modules::Call::at(offset).map(Self::Module))
                 .or_else(|| heap::Call::at(offset).map(Self::Heap))
                 .or_else(|| critical_sections::Call::at(offset).map(Self::CriticalSection))
-                .or_else(|| tls::Call::at(offset).map(Self::Tls)),
+                .or_else(|| tls::Call::at(offset).map(Self::Tls))
+                .or_else(|| code_pages::Call::at(offset).map(Self::CodePage)),
         }
     }
 
@@ -151,6 +154,8 @@ impl Api {
                 "GlobalLock" => 0x7c,
                 "GlobalUnlock" => 0x80,
                 "GlobalFree" => 0x84,
+                "GetACP" => 0x88,
+                "GetOEMCP" => 0x8c,
                 _ => return None,
             }
         } else if module.eq_ignore_ascii_case("d3d8.dll") && name == "Direct3DCreate8" {
@@ -169,6 +174,7 @@ impl Api {
             | Self::GetDesktopWindow
             | Self::GetErrorMode
             | Self::GetVersion
+            | Self::CodePage(_)
             | Self::ExceptionProlog
             | Self::Unsupported => 0,
             Self::Graphics(call) => call.arguments(),
@@ -404,6 +410,7 @@ impl Process32 {
             }
             Api::GetErrorMode => self.cpu.set_register(Register32::Eax, self.error_mode),
             Api::GetVersion => self.cpu.set_register(Register32::Eax, GUEST_VERSION),
+            Api::CodePage(call) => self.cpu.set_register(Register32::Eax, call.identifier()),
             Api::Tls(call) => {
                 let value = self
                     .tls
