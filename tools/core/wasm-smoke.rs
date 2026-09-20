@@ -36,6 +36,31 @@ mod dll_executable;
 #[path = "../../core/tests/support/delay_executable.rs"]
 mod delay_executable;
 
+fn execute_dword_test() {
+    use ring3_core::execution::{Cpu32, Permissions, Register32, StopReason, load_pe32};
+    for (value, flags) in [(0_u32, 0x44), (1, 0), (3, 4), (0x8000_0000, 0x84)] {
+        let code = [0x85, 0x1d, 0, 0x20, 0x40, 0, 0xcc];
+        let mut image = load_pe32(&executable::pe32(&code), 3).unwrap();
+        image
+            .memory
+            .write(0x0040_2000, &value.to_le_bytes())
+            .unwrap();
+        image
+            .memory
+            .protect(0x0040_2000, 4096, Permissions::READ)
+            .unwrap();
+        let mut cpu = Cpu32::new(image.entry_point);
+        cpu.set_register(Register32::Ebx, u32::MAX);
+        cpu.eflags = 0x8d7;
+        assert_eq!(cpu.run(&mut image.memory, 2).reason, StopReason::Breakpoint);
+        assert_eq!(cpu.register(Register32::Ebx), u32::MAX);
+        assert_eq!(cpu.eflags & 0x8c5, flags);
+        let mut unchanged = [0; 4];
+        image.memory.read(0x0040_2000, &mut unchanged).unwrap();
+        assert_eq!(unchanged, value.to_le_bytes());
+    }
+}
+
 fn execute_delay_thunks() {
     use ring3_core::execution::{Process32, ProcessStop, Register32, StopReason};
     for legacy in [false, true] {
@@ -799,6 +824,7 @@ pub extern "C" fn run() -> u32 {
     execute_arguments();
     execute_dlls();
     execute_delay_thunks();
+    execute_dword_test();
     execute_diagnostic();
     execute_windows_api();
     execute_image();
