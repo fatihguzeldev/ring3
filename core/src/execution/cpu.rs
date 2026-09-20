@@ -160,6 +160,16 @@ impl Cpu32 {
                 self.set_register(destination, self.effective_address(instruction)?);
             }
             code if is_binary(code) => self.binary(instruction, memory)?,
+            Code::Inc_rm8
+            | Code::Inc_rm16
+            | Code::Inc_rm32
+            | Code::Inc_r16
+            | Code::Inc_r32
+            | Code::Dec_rm8
+            | Code::Dec_rm16
+            | Code::Dec_rm32
+            | Code::Dec_r16
+            | Code::Dec_r32 => self.increment(instruction, memory)?,
             Code::Push_r32
             | Code::Pushd_imm32
             | Code::Pushd_imm8
@@ -233,6 +243,31 @@ impl Cpu32 {
         } else {
             self.arithmetic_flags(left, right, result, carry, subtract, width);
         }
+        Ok(())
+    }
+
+    fn increment(
+        &mut self,
+        instruction: &Instruction,
+        memory: &mut GuestMemory,
+    ) -> Result<(), StopReason> {
+        let destination = self.operand(instruction, 0)?;
+        let left = self.read_operand(destination, memory)?;
+        let subtract = instruction.mnemonic() == Mnemonic::Dec;
+        let result = if subtract {
+            left.wrapping_sub(1)
+        } else {
+            left.wrapping_add(1)
+        } & destination.width.mask();
+        self.write_operand(destination, result, memory)?;
+        self.arithmetic_flags(
+            left,
+            1,
+            result,
+            self.eflags & 1 != 0,
+            subtract,
+            destination.width,
+        );
         Ok(())
     }
 
