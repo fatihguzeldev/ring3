@@ -63,6 +63,26 @@ mod exception_frame_executable;
 #[path = "../../core/tests/support/crt_heap_executable.rs"]
 mod crt_heap_executable;
 
+#[path = "../../core/tests/support/dllonexit_executable.rs"]
+mod dllonexit_executable;
+
+fn execute_dllonexit() {
+    use ring3_core::execution::{Process32, ProcessStop, Register32, StopReason};
+    let mut process = Process32::load(&dllonexit_executable::pe32(), 26).unwrap();
+    let stack = process.cpu.register(Register32::Esp);
+    let pages = process.memory.mapped_pages();
+    let result = process.run(100);
+    assert_eq!(result.reason, ProcessStop::Stopped(StopReason::Breakpoint));
+    assert_eq!(result.api_calls, 4);
+    assert_eq!(process.cpu.register(Register32::Esp), stack);
+    assert_eq!(process.cpu.register(Register32::Edx), 0);
+    assert_eq!(process.cpu.register(Register32::Ebx), 21);
+    assert_eq!(process.memory.mapped_pages(), pages);
+    let mut bytes = [0; 4];
+    process.memory.read(0x0040_2190, &mut bytes).unwrap();
+    assert_eq!(u32::from_le_bytes(bytes), 21);
+}
+
 fn execute_crt_heap() {
     use ring3_core::execution::{Process32, ProcessStop, Register32, StopReason};
     let mut process = Process32::load(&crt_heap_executable::pe32(), 27).unwrap();
@@ -1294,6 +1314,7 @@ pub extern "C" fn run() -> u32 {
     execute_memset();
     execute_exception_frame();
     execute_crt_heap();
+    execute_dllonexit();
     execute_image();
     execute_function();
     inspect_image();

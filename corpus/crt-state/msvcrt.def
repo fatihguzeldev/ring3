@@ -16,3 +16,4 @@ EXPORTS
     malloc
     free
     _errno
+    __dllonexit
