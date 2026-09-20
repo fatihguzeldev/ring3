@@ -161,7 +161,14 @@ impl Cpu32 {
                 let destination = register32(instruction.op0_register())?;
                 self.set_register(destination, self.effective_address(instruction)?);
             }
-            code if is_binary(code) => self.binary(instruction, memory)?,
+            code if is_binary(code) || is_sbb(code) => self.binary(instruction, memory)?,
+            Code::Neg_rm8 | Code::Neg_rm16 | Code::Neg_rm32 => {
+                let destination = self.operand(instruction, 0)?;
+                let input = self.read_operand(destination, memory)?;
+                let result = 0_u32.wrapping_sub(input) & destination.width.mask();
+                self.write_operand(destination, result, memory)?;
+                self.arithmetic_flags(0, input, result, input != 0, true, destination.width);
+            }
             code if shifts::is_shift(code) => self.shift(instruction, memory)?,
             Code::Imul_r16_rm16
             | Code::Imul_r32_rm32
@@ -212,12 +219,19 @@ impl Cpu32 {
         let width = destination.width;
         let right = self.read_operand(self.operand(instruction, 1)?, memory)? & width.mask();
         let operation = instruction.mnemonic();
-        let subtract = matches!(operation, Mnemonic::Sub | Mnemonic::Cmp);
+        let subtract = matches!(operation, Mnemonic::Sub | Mnemonic::Cmp | Mnemonic::Sbb);
         let (result, carry) = match operation {
             Mnemonic::Xor => (left ^ right, false),
             Mnemonic::Or => (left | right, false),
             Mnemonic::And | Mnemonic::Test => (left & right, false),
             Mnemonic::Sub | Mnemonic::Cmp => left.overflowing_sub(right),
+            Mnemonic::Sbb => {
+                let borrow = self.eflags & 1;
+                (
+                    left.wrapping_sub(right).wrapping_sub(borrow),
+                    u64::from(left) < u64::from(right) + u64::from(borrow),
+                )
+            }
             _ => (
                 left.wrapping_add(right),
                 u64::from(left) + u64::from(right) > u64::from(width.mask()),
@@ -473,5 +487,25 @@ fn is_binary(code: Code) -> bool {
             | Code::Test_EAX_imm32
             | Code::Test_rm32_imm32
             | Code::Test_rm32_r32
+    )
+}
+
+fn is_sbb(code: Code) -> bool {
+    matches!(
+        code,
+        Code::Sbb_AL_imm8
+            | Code::Sbb_rm8_imm8
+            | Code::Sbb_rm8_r8
+            | Code::Sbb_r8_rm8
+            | Code::Sbb_AX_imm16
+            | Code::Sbb_rm16_imm16
+            | Code::Sbb_rm16_r16
+            | Code::Sbb_r16_rm16
+            | Code::Sbb_rm16_imm8
+            | Code::Sbb_EAX_imm32
+            | Code::Sbb_rm32_imm32
+            | Code::Sbb_rm32_r32
+            | Code::Sbb_r32_rm32
+            | Code::Sbb_rm32_imm8
     )
 }

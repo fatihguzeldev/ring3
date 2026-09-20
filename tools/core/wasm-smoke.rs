@@ -66,6 +66,27 @@ mod crt_heap_executable;
 #[path = "../../core/tests/support/dllonexit_executable.rs"]
 mod dllonexit_executable;
 
+#[path = "../../core/tests/support/borrow_executable.rs"]
+mod borrow_executable;
+
+fn execute_borrow() {
+    use ring3_core::execution::{Cpu32, Register32, StopReason, load_pe32};
+    let mut image = load_pe32(&borrow_executable::pe32(), 3).unwrap();
+    let mut cpu = Cpu32::new(image.entry_point);
+    cpu.set_fs_base(0x0040_2000);
+    cpu.eflags = 0xced7;
+    let result = cpu.run(&mut image.memory, 100);
+    assert_eq!(result.reason, StopReason::Breakpoint);
+    assert_eq!(result.instructions, 12);
+    assert_eq!(cpu.register(Register32::Eax), 1);
+    assert_eq!(cpu.register(Register32::Edx), 0);
+    assert_eq!(cpu.register(Register32::Ebx), 0xffff_fdff);
+    assert_eq!(cpu.eflags, (0xced7 & !0x8d5) | 0x44);
+    let mut bytes = [0; 4];
+    image.memory.read(0x0040_2000, &mut bytes).unwrap();
+    assert_eq!(u32::from_le_bytes(bytes), 16);
+}
+
 fn execute_dllonexit() {
     use ring3_core::execution::{Process32, ProcessStop, Register32, StopReason};
     let mut process = Process32::load(&dllonexit_executable::pe32(), 26).unwrap();
@@ -1315,6 +1336,7 @@ pub extern "C" fn run() -> u32 {
     execute_exception_frame();
     execute_crt_heap();
     execute_dllonexit();
+    execute_borrow();
     execute_image();
     execute_function();
     inspect_image();
