@@ -21,6 +21,40 @@ mod thread_executable;
 #[path = "../../core/tests/support/crt_executable.rs"]
 mod crt_executable;
 
+#[path = "../../core/tests/support/fp_control_executable.rs"]
+mod fp_control_executable;
+
+fn execute_fp_control() {
+    use ring3_core::execution::{Process32, ProcessStop, Register32, StopReason};
+
+    for (initial, value, mask, word, flags) in [
+        (
+            0x027f_u16,
+            0x0002_0300,
+            0x0003_0300,
+            0x0c7f_u16,
+            0x000a_031f,
+        ),
+        (0x027f, 0, 0x0008_001f, 0x0242, 0x0009_0000),
+        (0x027d, 0x0008_001f, 0x0008_001f, 0x027d, 0x0001_001f),
+    ] {
+        let bytes = fp_control_executable::pe32(initial, value, mask);
+        let mut process = Process32::load(&bytes, 32).unwrap();
+        let result = process.run(100);
+        assert_eq!(result.reason, ProcessStop::Stopped(StopReason::Breakpoint));
+        assert_eq!(result.api_calls, 2);
+        assert_eq!(process.cpu.x87_control_word(), word);
+        assert_eq!(process.cpu.register(Register32::Eax), flags);
+        assert_eq!(process.cpu.register(Register32::Ebx), 0x0009_001f);
+        assert_eq!(process.cpu.register(Register32::Esp), 0x1001_0000);
+        let mut saved = [0; 2];
+        process.memory.read(0x0040_2300, &mut saved).unwrap();
+        assert_eq!(saved, 0x027f_u16.to_le_bytes());
+        process.memory.read(0x0040_2308, &mut saved).unwrap();
+        assert_eq!(saved, word.to_le_bytes());
+    }
+}
+
 fn execute_crt() {
     use ring3_core::execution::{Process32, ProcessStop, Register32, StopReason};
 
@@ -598,6 +632,7 @@ pub extern "C" fn run() -> u32 {
     execute_graphics();
     execute_thread();
     execute_crt();
+    execute_fp_control();
     execute_diagnostic();
     execute_windows_api();
     execute_image();

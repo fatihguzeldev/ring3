@@ -4,3 +4,4 @@ EXPORTS
     __p__fmode
     __p__commode
     _adjust_fdiv DATA
+    _controlfp
