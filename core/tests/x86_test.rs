@@ -98,10 +98,10 @@ fn fs_test_and_conditional_branch_resume_without_changing_operands() {
 }
 
 #[test]
-fn unsupported_widths_prefixes_and_undocumented_alias_do_not_execute() {
+fn unsupported_prefixes_and_undocumented_aliases_do_not_execute() {
     for code in [
-        &[0x84, 0xc0][..],
-        &[0x66, 0x85, 0xc0][..],
+        &[0xf6, 0xc8, 1][..],
+        &[0x66, 0xf7, 0xc8, 1, 0][..],
         &[0xf7, 0xc8, 1, 0, 0, 0][..],
         &[0xf3, 0x85, 0xc0][..],
         &[0xf0, 0x85, 0xc0][..],

@@ -13,6 +13,10 @@ impl Width {
     pub(super) fn mask(self) -> u32 {
         u32::MAX >> (32 - self as u32 * 8)
     }
+
+    pub(super) fn sign_bit(self) -> u32 {
+        1 << (self as u32 * 8 - 1)
+    }
 }
 
 #[derive(Clone, Copy)]

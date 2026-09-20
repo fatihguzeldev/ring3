@@ -159,34 +159,7 @@ impl Cpu32 {
                 let destination = register32(instruction.op0_register())?;
                 self.set_register(destination, self.effective_address(instruction)?);
             }
-            Code::Add_EAX_imm32
-            | Code::Add_rm32_imm32
-            | Code::Add_rm32_imm8
-            | Code::Add_rm32_r32
-            | Code::Add_r32_rm32
-            | Code::Sub_EAX_imm32
-            | Code::Sub_rm32_imm32
-            | Code::Sub_rm32_imm8
-            | Code::Sub_rm32_r32
-            | Code::Sub_r32_rm32
-            | Code::Cmp_EAX_imm32
-            | Code::Cmp_rm32_imm32
-            | Code::Cmp_rm32_imm8
-            | Code::Cmp_rm32_r32
-            | Code::Cmp_r32_rm32
-            | Code::Xor_EAX_imm32
-            | Code::Xor_rm32_imm32
-            | Code::Xor_rm32_imm8
-            | Code::Xor_rm32_r32
-            | Code::Xor_r32_rm32
-            | Code::Or_EAX_imm32
-            | Code::Or_rm32_imm32
-            | Code::Or_rm32_imm8
-            | Code::Or_rm32_r32
-            | Code::Or_r32_rm32
-            | Code::Test_EAX_imm32
-            | Code::Test_rm32_imm32
-            | Code::Test_rm32_r32 => self.binary(instruction, memory)?,
+            code if is_binary(code) => self.binary(instruction, memory)?,
             Code::Push_r32
             | Code::Pushd_imm32
             | Code::Pushd_imm8
@@ -237,7 +210,8 @@ impl Cpu32 {
     ) -> Result<(), StopReason> {
         let destination = self.operand(instruction, 0)?;
         let left = self.read_operand(destination, memory)?;
-        let right = self.read_operand(self.operand(instruction, 1)?, memory)?;
+        let width = destination.width;
+        let right = self.read_operand(self.operand(instruction, 1)?, memory)? & width.mask();
         let operation = instruction.mnemonic();
         let subtract = matches!(operation, Mnemonic::Sub | Mnemonic::Cmp);
         let (result, carry) = match operation {
@@ -245,15 +219,19 @@ impl Cpu32 {
             Mnemonic::Or => (left | right, false),
             Mnemonic::Test => (left & right, false),
             Mnemonic::Sub | Mnemonic::Cmp => left.overflowing_sub(right),
-            _ => left.overflowing_add(right),
+            _ => (
+                left.wrapping_add(right),
+                u64::from(left) + u64::from(right) > u64::from(width.mask()),
+            ),
         };
+        let result = result & width.mask();
         if !matches!(operation, Mnemonic::Cmp | Mnemonic::Test) {
             self.write_operand(destination, result, memory)?;
         }
         if matches!(operation, Mnemonic::Xor | Mnemonic::Or | Mnemonic::Test) {
-            self.eflags = (self.eflags & !0x8d5) | result_flags(result);
+            self.eflags = (self.eflags & !0x8d5) | result_flags(result, width);
         } else {
-            self.arithmetic_flags(left, right, result, carry, subtract);
+            self.arithmetic_flags(left, right, result, carry, subtract, width);
         }
         Ok(())
     }
@@ -265,25 +243,26 @@ impl Cpu32 {
         result: u32,
         carry: bool,
         subtract: bool,
+        width: operands::Width,
     ) {
         let overflow = if subtract {
             (left ^ right) & (left ^ result)
         } else {
             !(left ^ right) & (left ^ result)
-        } & 0x8000_0000
+        } & width.sign_bit()
             != 0;
         self.eflags = (self.eflags & !0x8d5)
             | u32::from(carry)
-            | result_flags(result)
+            | result_flags(result, width)
             | ((left ^ right ^ result) & 0x10)
             | (u32::from(overflow) << 11);
     }
 }
 
-fn result_flags(result: u32) -> u32 {
+fn result_flags(result: u32, width: operands::Width) -> u32 {
     (u32::from((result & 0xff).count_ones().is_multiple_of(2)) << 2)
         | (u32::from(result == 0) << 6)
-        | ((result >> 24) & 0x80)
+        | (u32::from(result & width.sign_bit() != 0) << 7)
 }
 
 fn register32(register: Register) -> Result<Register32, StopReason> {
@@ -347,5 +326,90 @@ fn is_move(code: Code) -> bool {
             | Code::Mov_rm32_imm32
             | Code::Mov_EAX_moffs32
             | Code::Mov_moffs32_EAX
+    )
+}
+
+fn is_binary(code: Code) -> bool {
+    matches!(
+        code,
+        Code::Add_AL_imm8
+            | Code::Add_rm8_imm8
+            | Code::Add_rm8_r8
+            | Code::Add_r8_rm8
+            | Code::Add_AX_imm16
+            | Code::Add_rm16_imm16
+            | Code::Add_rm16_r16
+            | Code::Add_r16_rm16
+            | Code::Add_rm16_imm8
+            | Code::Add_EAX_imm32
+            | Code::Add_rm32_imm32
+            | Code::Add_rm32_r32
+            | Code::Add_r32_rm32
+            | Code::Add_rm32_imm8
+            | Code::Sub_AL_imm8
+            | Code::Sub_rm8_imm8
+            | Code::Sub_rm8_r8
+            | Code::Sub_r8_rm8
+            | Code::Sub_AX_imm16
+            | Code::Sub_rm16_imm16
+            | Code::Sub_rm16_r16
+            | Code::Sub_r16_rm16
+            | Code::Sub_rm16_imm8
+            | Code::Sub_EAX_imm32
+            | Code::Sub_rm32_imm32
+            | Code::Sub_rm32_r32
+            | Code::Sub_r32_rm32
+            | Code::Sub_rm32_imm8
+            | Code::Cmp_AL_imm8
+            | Code::Cmp_rm8_imm8
+            | Code::Cmp_rm8_r8
+            | Code::Cmp_r8_rm8
+            | Code::Cmp_AX_imm16
+            | Code::Cmp_rm16_imm16
+            | Code::Cmp_rm16_r16
+            | Code::Cmp_r16_rm16
+            | Code::Cmp_rm16_imm8
+            | Code::Cmp_EAX_imm32
+            | Code::Cmp_rm32_imm32
+            | Code::Cmp_rm32_r32
+            | Code::Cmp_r32_rm32
+            | Code::Cmp_rm32_imm8
+            | Code::Xor_AL_imm8
+            | Code::Xor_rm8_imm8
+            | Code::Xor_rm8_r8
+            | Code::Xor_r8_rm8
+            | Code::Xor_AX_imm16
+            | Code::Xor_rm16_imm16
+            | Code::Xor_rm16_r16
+            | Code::Xor_r16_rm16
+            | Code::Xor_rm16_imm8
+            | Code::Xor_EAX_imm32
+            | Code::Xor_rm32_imm32
+            | Code::Xor_rm32_r32
+            | Code::Xor_r32_rm32
+            | Code::Xor_rm32_imm8
+            | Code::Or_AL_imm8
+            | Code::Or_rm8_imm8
+            | Code::Or_rm8_r8
+            | Code::Or_r8_rm8
+            | Code::Or_AX_imm16
+            | Code::Or_rm16_imm16
+            | Code::Or_rm16_r16
+            | Code::Or_r16_rm16
+            | Code::Or_rm16_imm8
+            | Code::Or_EAX_imm32
+            | Code::Or_rm32_imm32
+            | Code::Or_rm32_r32
+            | Code::Or_r32_rm32
+            | Code::Or_rm32_imm8
+            | Code::Test_AL_imm8
+            | Code::Test_rm8_imm8
+            | Code::Test_rm8_r8
+            | Code::Test_AX_imm16
+            | Code::Test_rm16_imm16
+            | Code::Test_rm16_r16
+            | Code::Test_EAX_imm32
+            | Code::Test_rm32_imm32
+            | Code::Test_rm32_r32
     )
 }
