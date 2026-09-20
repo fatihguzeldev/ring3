@@ -188,7 +188,10 @@ impl Cpu32 {
             | Code::Or_rm32_imm32
             | Code::Or_rm32_imm8
             | Code::Or_rm32_r32
-            | Code::Or_r32_rm32 => self.binary(instruction, memory)?,
+            | Code::Or_r32_rm32
+            | Code::Test_EAX_imm32
+            | Code::Test_rm32_imm32
+            | Code::Test_rm32_r32 => self.binary(instruction, memory)?,
             Code::Push_r32
             | Code::Pushd_imm32
             | Code::Pushd_imm8
@@ -245,13 +248,14 @@ impl Cpu32 {
         let (result, carry) = match operation {
             Mnemonic::Xor => (left ^ right, false),
             Mnemonic::Or => (left | right, false),
+            Mnemonic::Test => (left & right, false),
             Mnemonic::Sub | Mnemonic::Cmp => left.overflowing_sub(right),
             _ => left.overflowing_add(right),
         };
-        if operation != Mnemonic::Cmp {
+        if !matches!(operation, Mnemonic::Cmp | Mnemonic::Test) {
             self.write_operand(destination, result, memory)?;
         }
-        if matches!(operation, Mnemonic::Xor | Mnemonic::Or) {
+        if matches!(operation, Mnemonic::Xor | Mnemonic::Or | Mnemonic::Test) {
             self.eflags = (self.eflags & !0x8d5) | result_flags(result);
         } else {
             self.arithmetic_flags(left, right, result, carry, subtract);
