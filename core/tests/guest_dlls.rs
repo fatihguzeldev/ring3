@@ -330,7 +330,7 @@ fn module_mapping_limits_protections_and_unsupported_directories_are_enforced() 
         ),
         Err(LoadError::Memory(MemoryError::PageLimitExceeded))
     ));
-    for index in [9, 10, 13] {
+    for index in [9, 10] {
         let mut unsupported = library.clone();
         put(&mut unsupported, 0xf8 + index * 8, 0x2200);
         put(&mut unsupported, 0xfc + index * 8, 32);

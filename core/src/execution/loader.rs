@@ -42,6 +42,7 @@ pub enum LoadError {
         symbol: String,
     },
     Imports(PeImportLookupError),
+    DelayImports(crate::PeDelayImportError),
     InvalidImportAddressTable,
     UnresolvedImport {
         module: String,
@@ -93,7 +94,12 @@ fn load_image(
     allow_imports: bool,
     resolver: impl FnMut(&str, PeImportSymbol<'_>) -> Option<u32>,
 ) -> Result<LoadedPe32, LoadError> {
-    let image = Image::parse(bytes, allow_imports, false)?;
+    let policy = if allow_imports {
+        ImportPolicy::Static
+    } else {
+        ImportPolicy::Reject
+    };
+    let image = Image::parse(bytes, policy, false)?;
     let mut memory = GuestMemory::new(page_limit);
     image.map(&mut memory)?;
     if allow_imports {
@@ -110,15 +116,26 @@ fn load_image(
     })
 }
 
+#[derive(Clone, Copy, Eq, PartialEq)]
+enum ImportPolicy {
+    Reject,
+    Static,
+    GuestManagedDelay,
+}
+
 struct Image<'a> {
     bytes: &'a [u8],
     table: PeSectionTable<'a>,
 }
 
 impl<'a> Image<'a> {
-    fn parse(bytes: &'a [u8], allow_imports: bool, dll: bool) -> Result<Self, LoadError> {
+    fn parse(bytes: &'a [u8], policy: ImportPolicy, dll: bool) -> Result<Self, LoadError> {
         let table = parse_pe_sections(bytes).map_err(LoadError::Header)?;
-        validate_image(&table, bytes.len(), allow_imports, dll)?;
+        validate_image(&table, bytes.len(), policy, dll)?;
+        // delay helpers own target addresses and iat writes inside guest execution.
+        if policy == ImportPolicy::GuestManagedDelay {
+            crate::parse_pe_delay_import_descriptors(bytes).map_err(LoadError::DelayImports)?;
+        }
         Ok(Self { bytes, table })
     }
 
@@ -197,7 +214,7 @@ impl<'a> Image<'a> {
 fn validate_image(
     table: &PeSectionTable<'_>,
     file_size: usize,
-    allow_imports: bool,
+    policy: ImportPolicy,
     dll: bool,
 ) -> Result<(), LoadError> {
     let header = &table.headers;
@@ -209,8 +226,12 @@ fn validate_image(
     {
         return Err(LoadError::UnsupportedImage);
     }
+    let allow_imports = policy != ImportPolicy::Reject;
     for index in [1_u8, 9, 10, 11, 12, 13, 14] {
-        if (allow_imports && matches!(index, 1 | 12)) || (!allow_imports && index == 11) {
+        if (allow_imports && matches!(index, 1 | 12))
+            || (!allow_imports && index == 11)
+            || (policy == ImportPolicy::GuestManagedDelay && index == 13)
+        {
             continue;
         }
         if let Some(directory) = header.directories[usize::from(index)] {

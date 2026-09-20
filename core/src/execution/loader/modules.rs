@@ -1,4 +1,4 @@
-use super::{GuestMemory, Image, LoadError, LoadedPe32, imports};
+use super::{GuestMemory, Image, ImportPolicy, LoadError, LoadedPe32, imports};
 use crate::{
     PeExportLookup, PeExportQuery, PeExportSelection, PeExportTarget, PeImportSymbol,
     parse_pe_import_lookups,
@@ -26,10 +26,10 @@ pub(in crate::execution) fn load_modules(
     mut fallback: impl FnMut(&str, PeImportSymbol<'_>) -> Option<u32>,
 ) -> Result<(LoadedPe32, Vec<Initializer>), LoadError> {
     validate_modules(modules)?;
-    let program = Image::parse(bytes, true, false)?;
+    let program = Image::parse(bytes, ImportPolicy::GuestManagedDelay, false)?;
     let images = modules
         .iter()
-        .map(|module| Image::parse(module.bytes, true, true))
+        .map(|module| Image::parse(module.bytes, ImportPolicy::GuestManagedDelay, true))
         .collect::<Result<Vec<_>, _>>()?;
     let order = initialization_order(modules)?;
     let mut exports: Vec<_> = modules
