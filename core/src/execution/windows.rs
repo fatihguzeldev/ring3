@@ -7,6 +7,7 @@ use crate::PeImportSymbol;
 mod code_pages;
 mod critical_sections;
 mod crt;
+mod cursors;
 mod d3d8;
 mod diagnostics;
 mod gdi;
@@ -39,6 +40,7 @@ pub struct Process32 {
     startup: startup::Startup,
     modules: modules::Modules,
     messages: messages::Messages,
+    cursors: cursors::Cursors,
     heap: heap::Heap,
     critical_sections: critical_sections::CriticalSections,
     tls: tls::Tls,
@@ -88,6 +90,7 @@ enum Api {
     ExceptionProlog,
     Graphics(d3d8::Call),
     Gdi(gdi::Call),
+    Cursor(cursors::Call),
     Crt(crt::Call),
     CodePage(code_pages::Call),
     Module(modules::Call),
@@ -126,6 +129,7 @@ impl Api {
                 .map(Self::Graphics)
                 .or_else(|| system::Call::at(offset).map(Self::System))
                 .or_else(|| gdi::Call::at(offset).map(Self::Gdi))
+                .or_else(|| cursors::Call::at(offset).map(Self::Cursor))
                 .or_else(|| crt::Call::at(offset).map(Self::Crt))
                 .or_else(|| modules::Call::at(offset).map(Self::Module))
                 .or_else(|| heap::Call::at(offset).map(Self::Heap))
@@ -183,6 +187,9 @@ impl Api {
                 "GetSystemMetrics" => 0x9c,
                 "GetSysColor" => 0xac,
                 "GetSysColorBrush" => 0xb0,
+                "LoadCursorA" => 0xbc,
+                "SetCursor" => 0xc0,
+                "GetCursor" => 0xc4,
                 "GetDC" => 0xa0,
                 "ReleaseDC" => 0xa4,
                 _ => return None,
@@ -210,6 +217,7 @@ impl Api {
             | Self::Unsupported => 0,
             Self::Graphics(call) => call.arguments(),
             Self::Gdi(call) => call.arguments(),
+            Self::Cursor(call) => call.arguments(),
             Self::Crt(call) => call.arguments(),
             Self::CodePage(call) => call.arguments(),
             Self::Heap(call) => call.arguments(),
@@ -311,6 +319,7 @@ impl Process32 {
             modules,
             messages: messages::Messages::default(),
             gdi: gdi::Gdi::default(),
+            cursors: cursors::Cursors::default(),
             heap: heap::Heap::default(),
             critical_sections: critical_sections::CriticalSections::default(),
             tls: tls::Tls::default(),
@@ -509,6 +518,10 @@ impl Process32 {
             Api::Gdi(call) => self.cpu.set_register(
                 Register32::Eax,
                 self.gdi.dispatch(call, arguments, &mut self.memory)?,
+            ),
+            Api::Cursor(call) => self.cpu.set_register(
+                Register32::Eax,
+                self.cursors.dispatch(call, arguments, &mut self.memory)?,
             ),
             Api::Crt(call) => {
                 if let Some(value) = self.crt.dispatch(
