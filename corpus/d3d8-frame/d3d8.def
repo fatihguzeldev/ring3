@@ -1,0 +1,3 @@
+LIBRARY d3d8.dll
+EXPORTS
+    _Direct3DCreate8@4==Direct3DCreate8

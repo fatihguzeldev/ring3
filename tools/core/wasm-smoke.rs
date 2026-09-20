@@ -12,6 +12,30 @@ mod executable;
 #[path = "../../core/tests/support/imported_executable.rs"]
 mod imported_executable;
 
+#[path = "../../core/tests/support/d3d8_executable.rs"]
+mod d3d8_executable;
+
+fn execute_graphics() {
+    use ring3_core::execution::{Process32, ProcessStop, StopReason};
+
+    for (width, height, color) in [(4, 3, 0xff12_3456_u32), (9, 7, 0xffed_cba9)] {
+        let mut process =
+            Process32::load(&d3d8_executable::pe32(width, height, color), 32).unwrap();
+        let result = process.run(100);
+        assert_eq!(result.reason, ProcessStop::Stopped(StopReason::Breakpoint));
+        assert_eq!(result.api_calls, 4);
+        let frame = process.take_frame().unwrap();
+        assert_eq!((frame.width, frame.height), (width, height));
+        let [_, r, g, b] = color.to_be_bytes();
+        assert!(
+            frame
+                .rgba
+                .chunks_exact(4)
+                .all(|pixel| pixel == [r, g, b, 255])
+        );
+    }
+}
+
 fn execute_windows_api() {
     use ring3_core::execution::{Process32, ProcessStop};
 
@@ -480,6 +504,7 @@ fn inspect_dependency_cycle() {
 // this isolated test cdylib owns its unique zero-argument export.
 #[unsafe(no_mangle)]
 pub extern "C" fn run() -> u32 {
+    execute_graphics();
     execute_windows_api();
     execute_image();
     execute_function();

@@ -1,4 +1,4 @@
-use std::io::Read;
+use std::io::{Read, Write};
 
 use ring3_core::execution::{Process32, ProcessStop, Register32, StopReason};
 
@@ -6,10 +6,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut args = std::env::args().skip(1);
     let path = args
         .next()
-        .ok_or("usage: run_pe32 <file.exe> [work-limit]")?;
+        .ok_or("usage: run_pe32 <file.exe> [work-limit] [frame.ppm]")?;
     let limit = args
         .next()
         .map_or(Ok(1_000_000), |value| value.parse::<u64>())?;
+    let frame_path = args.next();
     if args.next().is_some() {
         return Err("too many arguments".into());
     }
@@ -32,6 +33,22 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         process.cpu.register(Register32::Eax),
         process.cpu.eflags
     );
+    if let Some(path) = frame_path {
+        let frame = process
+            .take_frame()
+            .ok_or("guest has not presented a frame")?;
+        let file = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(path)?;
+        let mut output = std::io::BufWriter::new(file);
+        writeln!(output, "P6\n{} {}\n255", frame.width, frame.height)?;
+        for pixel in frame.rgba.chunks_exact(4) {
+            output.write_all(&pixel[..3])?;
+        }
+        output.flush()?;
+        println!("exported {}x{} guest frame", frame.width, frame.height);
+    }
     if !matches!(
         result.reason,
         ProcessStop::Exited(_) | ProcessStop::Stopped(StopReason::Breakpoint)
