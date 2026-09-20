@@ -8,6 +8,7 @@ mod crt;
 mod d3d8;
 mod diagnostics;
 mod guest;
+mod heap;
 mod modules;
 mod parameters;
 mod startup;
@@ -28,6 +29,7 @@ pub struct Process32 {
     error_mode: u32,
     startup: startup::Startup,
     modules: modules::Modules,
+    heap: heap::Heap,
     graphics: d3d8::Graphics,
     crt: crt::Crt,
     diagnostic_imports: diagnostics::Imports,
@@ -69,6 +71,7 @@ enum Api {
     Graphics(d3d8::Call),
     Crt(crt::Call),
     Module(modules::Call),
+    Heap(heap::Call),
     Unsupported,
 }
 
@@ -96,7 +99,8 @@ impl Api {
             offset => d3d8::Call::at(offset)
                 .map(Self::Graphics)
                 .or_else(|| crt::Call::at(offset).map(Self::Crt))
-                .or_else(|| modules::Call::at(offset).map(Self::Module)),
+                .or_else(|| modules::Call::at(offset).map(Self::Module))
+                .or_else(|| heap::Call::at(offset).map(Self::Heap)),
         }
     }
 
@@ -117,6 +121,8 @@ impl Api {
                 "FreeLibrary" => 0x1c,
                 "SetErrorMode" => 0x20,
                 "GetErrorMode" => 0x24,
+                "LocalAlloc" => 0x28,
+                "LocalFree" => 0x2c,
                 _ => return None,
             }
         } else if module.eq_ignore_ascii_case("d3d8.dll") && name == "Direct3DCreate8" {
@@ -137,6 +143,7 @@ impl Api {
             | Self::Unsupported => 0,
             Self::Graphics(call) => call.arguments(),
             Self::Crt(call) => call.arguments(),
+            Self::Heap(call) => call.arguments(),
             _ => 1,
         }
     }
@@ -230,6 +237,7 @@ impl Process32 {
             error_mode: 0,
             startup,
             modules,
+            heap: heap::Heap::default(),
             graphics: d3d8::Graphics::default(),
             crt: crt::Crt::default(),
             diagnostic_imports,
@@ -359,6 +367,12 @@ impl Process32 {
                 self.error_mode = argument & 0x8003;
             }
             Api::GetErrorMode => self.cpu.set_register(Register32::Eax, self.error_mode),
+            Api::Heap(call) => {
+                let value = self
+                    .heap
+                    .dispatch(call, &frame[1..words], stack, &mut self.memory)?;
+                self.cpu.set_register(Register32::Eax, value);
+            }
             Api::Module(call) => {
                 let value = self.modules.dispatch(
                     call,
@@ -384,7 +398,7 @@ impl Process32 {
             }
             Api::Unsupported => unreachable!(),
         }
-        // an api output may alias the saved return address; permissions are unchanged.
+        // an api output may alias the saved return address; heap free protects this frame.
         guest::read_words(&self.memory, stack, &mut frame[..1])?;
         self.cpu
             .set_register(Register32::Esp, stack.wrapping_add(api.stack_cleanup()));
