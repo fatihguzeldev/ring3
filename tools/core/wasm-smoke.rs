@@ -111,6 +111,30 @@ fn execute_gdi() {
     }
 }
 
+#[path = "../../core/tests/support/colors_executable.rs"]
+mod colors_executable;
+
+fn execute_colors() {
+    use ring3_core::execution::{Process32, ProcessStop, Register32, StopReason};
+    let mut process = Process32::load(&colors_executable::pe32(), 32).unwrap();
+    let result = process.run(30);
+    assert_eq!(result.reason, ProcessStop::Stopped(StopReason::Breakpoint));
+    assert_eq!((result.instructions, result.api_calls), (12, 4));
+    assert_eq!(process.cpu.register(Register32::Eax), 0);
+    assert_eq!(process.cpu.register(Register32::Ebx), 0x00c8_d0d4);
+    assert_eq!(process.cpu.register(Register32::Ecx), 0x00a5_6e3a);
+    assert_eq!(process.cpu.register(Register32::Edx), 0x00ff_ffff);
+    assert_eq!(process.cpu.register(Register32::Esp), 0x1001_0000);
+    #[cfg(windows_demo)]
+    {
+        let mut process =
+            Process32::load(include_bytes!("../../target/windows-api/colors.exe"), 64).unwrap();
+        let result = process.run(1000);
+        assert_eq!(result.reason, ProcessStop::Exited(42));
+        assert_eq!(result.api_calls, 35);
+    }
+}
+
 fn execute_metrics() {
     use ring3_core::execution::{Process32, ProcessStop, Register32, StopReason};
     let mut process = Process32::load(&metrics_executable::pe32(), 32).unwrap();
@@ -1511,6 +1535,7 @@ pub extern "C" fn run() -> u32 {
     execute_zero_extend();
     execute_process_version();
     execute_metrics();
+    execute_colors();
     execute_gdi();
     execute_image();
     execute_function();

@@ -4,3 +4,4 @@ EXPORTS
     _GetSystemMetrics@4==GetSystemMetrics
     _GetDC@4==GetDC
     _ReleaseDC@8==ReleaseDC
+    _GetSysColor@4==GetSysColor
