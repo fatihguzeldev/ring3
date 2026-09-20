@@ -3,6 +3,7 @@ use iced_x86::{Code, Decoder, DecoderError, DecoderOptions, Instruction, Mnemoni
 use super::{GuestMemory, MemoryError};
 
 mod operands;
+mod stack;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Register32 {
@@ -138,6 +139,20 @@ impl Cpu32 {
             | Code::Xor_rm32_imm8
             | Code::Xor_rm32_r32
             | Code::Xor_r32_rm32 => self.binary(instruction, memory)?,
+            Code::Push_r32
+            | Code::Pushd_imm32
+            | Code::Pushd_imm8
+            | Code::Push_rm32
+            | Code::Pop_r32
+            | Code::Pop_rm32
+            | Code::Call_rel32_32
+            | Code::Call_rm32
+            | Code::Jmp_rm32
+            | Code::Retnd
+            | Code::Retnd_imm16
+            | Code::Leaved => {
+                next = self.stack_instruction(instruction, memory)?;
+            }
             Code::Jmp_rel8_32 | Code::Jmp_rel32_32 => next = instruction.near_branch32(),
             Code::Je_rel8_32 | Code::Je_rel32_32 => {
                 if self.eflags & 0x40 != 0 {
