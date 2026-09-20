@@ -1,6 +1,6 @@
+use super::loader::load_modules;
 use super::{
     Cpu32, GuestMemory, LoadError, MemoryError, PAGE_SIZE, Permissions, Register32, StopReason,
-    load_pe32_with_imports,
 };
 use crate::PeImportSymbol;
 
@@ -9,6 +9,7 @@ mod d3d8;
 mod diagnostics;
 mod guest;
 mod parameters;
+mod startup;
 mod thread;
 
 pub use d3d8::Frame;
@@ -23,6 +24,7 @@ pub struct Process32 {
     pub memory: GuestMemory,
     pub cpu: Cpu32,
     exit_code: Option<u32>,
+    startup: startup::Startup,
     graphics: d3d8::Graphics,
     crt: crt::Crt,
     diagnostic_imports: diagnostics::Imports,
@@ -31,6 +33,9 @@ pub struct Process32 {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ProcessStop {
     Exited(u32),
+    DllInitializationFailed {
+        module: String,
+    },
     Stopped(StopReason),
     UnsupportedApi {
         address: u32,
@@ -132,7 +137,7 @@ impl Process32 {
     ///
     /// # errors
     /// rejects unsupported images/imports, allocation limits and reserved-range
-    /// collisions. only initial thread fields are supplied; no windows dll, tls,
+    /// collisions. only initial thread fields are supplied; no tls allocation,
     /// peb initialization or full crt startup is performed.
     #[expect(clippy::missing_errors_doc, reason = "project headings are lower case")]
     pub fn load(bytes: &[u8], page_limit: u32) -> Result<Self, LoadError> {
@@ -157,10 +162,12 @@ impl Process32 {
         )
     }
 
-    /// loads explicit narrow-byte startup parameters into bounded guest memory.
+    /// loads startup parameters and explicit preferred-base dll providers.
+    /// dependency-ordered process attach executes on the first run before the exe.
     ///
     /// # errors
-    /// rejects invalid/oversized parameters and the basic loader's image/memory errors.
+    /// rejects invalid/oversized inputs, cycles, unsupported exports/directories,
+    /// and the basic loader's image/memory errors.
     #[expect(clippy::missing_errors_doc, reason = "project headings are lower case")]
     pub fn load_with_options(
         bytes: &[u8],
@@ -169,15 +176,16 @@ impl Process32 {
     ) -> Result<Self, LoadError> {
         let parameters = parameters::Parameters::prepare(options)?;
         let mut diagnostic_imports = diagnostics::Imports::default();
-        let mut image = load_pe32_with_imports(bytes, page_limit, |module, symbol| {
-            Api::resolve(module, symbol).or_else(|| {
-                if options.diagnostic_imports {
-                    diagnostic_imports.insert(module, symbol)
-                } else {
-                    None
-                }
-            })
-        })?;
+        let (mut image, initializers) =
+            load_modules(bytes, page_limit, options.modules, |module, symbol| {
+                Api::resolve(module, symbol).or_else(|| {
+                    if options.diagnostic_imports {
+                        diagnostic_imports.insert(module, symbol)
+                    } else {
+                        None
+                    }
+                })
+            })?;
         image.memory.map_zeroed(
             u64::from(STACK_BASE),
             u64::from(STACK_SIZE),
@@ -191,7 +199,9 @@ impl Process32 {
         thread::initialize(&mut image.memory, STACK_BASE, STACK_BASE + STACK_SIZE)?;
         parameters.map(&mut image.memory)?;
         crt::initialize(&mut image.memory, &parameters)?;
-        let mut cpu = Cpu32::new(image.entry_point);
+        let (startup, entry) =
+            startup::Startup::map(&mut image.memory, initializers, image.entry_point)?;
+        let mut cpu = Cpu32::new(entry);
         cpu.set_register(Register32::Esp, STACK_BASE + STACK_SIZE);
         cpu.set_fs_base(thread::BASE);
         cpu.set_x87_control_word(0x027f);
@@ -199,6 +209,7 @@ impl Process32 {
             memory: image.memory,
             cpu,
             exit_code: None,
+            startup,
             graphics: d3d8::Graphics::default(),
             crt: crt::Crt::default(),
             diagnostic_imports,
@@ -247,10 +258,16 @@ impl Process32 {
             result.reason = ProcessStop::Exited(code);
             return result;
         }
+        if let Some(stop) = self.startup.failed() {
+            result.reason = stop;
+            return result;
+        }
         let mut remaining = budget;
         while remaining != 0 {
             let step = self.cpu.run_until(&mut self.memory, remaining, |address| {
-                Api::at(address).is_some() || self.diagnostic_imports.contains(address)
+                Api::at(address).is_some()
+                    || self.diagnostic_imports.contains(address)
+                    || self.startup.contains(address)
             });
             result.instructions += step.instructions;
             remaining -= step.instructions;
@@ -258,7 +275,11 @@ impl Process32 {
                 result.reason = ProcessStop::Stopped(step.reason);
                 return result;
             }
-            if let Some(stop) = self.diagnostic_imports.stop(self.cpu.eip) {
+            if let Some(stop) = self
+                .startup
+                .stop(self.cpu.eip)
+                .or_else(|| self.diagnostic_imports.stop(self.cpu.eip))
+            {
                 result.reason = stop;
                 return result;
             }

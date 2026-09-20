@@ -1,3 +1,4 @@
+use super::super::GuestModule;
 use super::{GuestMemory, LoadError, MemoryError, PAGE_SIZE, Permissions};
 
 const BASE: u32 = 0x7000_4000;
@@ -9,6 +10,7 @@ pub struct ProcessOptions<'a> {
     pub command_line: &'a [u8],
     pub environment: &'a [&'a [u8]],
     pub diagnostic_imports: bool,
+    pub modules: &'a [GuestModule<'a>],
 }
 
 impl Default for ProcessOptions<'_> {
@@ -17,6 +19,7 @@ impl Default for ProcessOptions<'_> {
             command_line: b"program.exe",
             environment: &[],
             diagnostic_imports: false,
+            modules: &[],
         }
     }
 }
@@ -161,6 +164,7 @@ mod tests {
             command_line: b"",
             environment: &environment,
             diagnostic_imports: false,
+            modules: &[],
         })
         .unwrap();
         assert_eq!(parameters.bytes.len(), MAX_BYTES);
@@ -189,7 +193,8 @@ mod tests {
             Parameters::prepare(ProcessOptions {
                 command_line: b"",
                 environment: &[&too_long],
-                diagnostic_imports: false
+                diagnostic_imports: false,
+                modules: &[]
             }),
             Err(LoadError::InvalidProcessParameters)
         ));

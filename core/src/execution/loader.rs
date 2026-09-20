@@ -5,6 +5,10 @@ use crate::{
 };
 
 mod imports;
+pub(super) mod modules;
+
+pub use modules::GuestModule;
+pub(super) use modules::load_modules;
 
 pub struct LoadedPe32 {
     pub memory: GuestMemory,
@@ -16,12 +20,33 @@ pub struct LoadedPe32 {
 pub enum LoadError {
     Header(PeHeaderError),
     UnsupportedImage,
-    UnsupportedDirectory { index: u8 },
+    UnsupportedDirectory {
+        index: u8,
+    },
     InvalidLayout,
     InvalidProcessParameters,
+    InvalidModuleName,
+    ModuleLimitExceeded,
+    DuplicateModule {
+        name: String,
+    },
+    CyclicModules {
+        module: String,
+    },
+    Exports {
+        module: String,
+        cause: crate::PeExportLookupError,
+    },
+    InvalidExport {
+        module: String,
+        symbol: String,
+    },
     Imports(PeImportLookupError),
     InvalidImportAddressTable,
-    UnresolvedImport { module: String, symbol: String },
+    UnresolvedImport {
+        module: String,
+        symbol: String,
+    },
     Memory(MemoryError),
 }
 
@@ -68,11 +93,14 @@ fn load_image(
     allow_imports: bool,
     resolver: impl FnMut(&str, PeImportSymbol<'_>) -> Option<u32>,
 ) -> Result<LoadedPe32, LoadError> {
-    let image = Image::parse(bytes, allow_imports)?;
+    let image = Image::parse(bytes, allow_imports, false)?;
     let mut memory = GuestMemory::new(page_limit);
     image.map(&mut memory)?;
     if allow_imports {
-        imports::bind(bytes, image.base(), &mut memory, resolver)?;
+        let mut resolver = resolver;
+        imports::bind(bytes, image.base(), &mut memory, |module, symbol| {
+            Ok(resolver(module, symbol))
+        })?;
     }
     image.protect(&mut memory)?;
     Ok(LoadedPe32 {
@@ -88,9 +116,9 @@ struct Image<'a> {
 }
 
 impl<'a> Image<'a> {
-    fn parse(bytes: &'a [u8], allow_imports: bool) -> Result<Self, LoadError> {
+    fn parse(bytes: &'a [u8], allow_imports: bool, dll: bool) -> Result<Self, LoadError> {
         let table = parse_pe_sections(bytes).map_err(LoadError::Header)?;
-        validate_image(&table, bytes.len(), allow_imports)?;
+        validate_image(&table, bytes.len(), allow_imports, dll)?;
         Ok(Self { bytes, table })
     }
 
@@ -103,6 +131,11 @@ impl<'a> Image<'a> {
             self.base() + u64::from(self.table.headers.optional.address_of_entry_point.get()),
         )
         .expect("validated pe32 entry point")
+    }
+
+    fn has_entry(&self) -> bool {
+        self.table.headers.prefix.characteristics & 0x2000 == 0
+            || self.table.headers.optional.address_of_entry_point.get() != 0
     }
 
     fn map(&self, memory: &mut GuestMemory) -> Result<(), LoadError> {
@@ -154,7 +187,9 @@ impl<'a> Image<'a> {
                 },
             )?;
         }
-        memory.fetch(u64::from(self.entry_point()), &mut [0])?;
+        if self.has_entry() {
+            memory.fetch(u64::from(self.entry_point()), &mut [0])?;
+        }
         Ok(())
     }
 }
@@ -163,12 +198,13 @@ fn validate_image(
     table: &PeSectionTable<'_>,
     file_size: usize,
     allow_imports: bool,
+    dll: bool,
 ) -> Result<(), LoadError> {
     let header = &table.headers;
     let optional = &header.optional;
     if header.prefix.kind != PeKind::Pe32
         || header.prefix.machine != 0x14c
-        || header.prefix.characteristics & 0x2002 != 2
+        || header.prefix.characteristics & 0x2002 != if dll { 0x2002 } else { 2 }
         || !matches!(optional.subsystem, 2 | 3)
     {
         return Err(LoadError::UnsupportedImage);

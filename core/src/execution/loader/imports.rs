@@ -5,7 +5,7 @@ pub(super) fn bind(
     bytes: &[u8],
     base: u64,
     memory: &mut GuestMemory,
-    mut resolver: impl FnMut(&str, PeImportSymbol<'_>) -> Option<u32>,
+    mut resolver: impl FnMut(&str, PeImportSymbol<'_>) -> Result<Option<u32>, LoadError>,
 ) -> Result<(), LoadError> {
     let imports = parse_pe_import_lookups(bytes).map_err(LoadError::Imports)?;
     let mut ranges = Vec::new();
@@ -29,7 +29,7 @@ pub(super) fn bind(
         }
         ranges.push((u64::from(rva.get()), end));
         for (index, entry) in (0_u64..).zip(import.entries) {
-            let address = resolver(descriptor.dll_name, entry.symbol).ok_or_else(|| {
+            let address = resolver(descriptor.dll_name, entry.symbol)?.ok_or_else(|| {
                 LoadError::UnresolvedImport {
                     module: descriptor.dll_name.to_owned(),
                     symbol: match entry.symbol {
