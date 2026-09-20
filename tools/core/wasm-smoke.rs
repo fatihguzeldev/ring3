@@ -60,6 +60,29 @@ mod memset_executable;
 #[path = "../../core/tests/support/exception_frame_executable.rs"]
 mod exception_frame_executable;
 
+#[path = "../../core/tests/support/crt_heap_executable.rs"]
+mod crt_heap_executable;
+
+fn execute_crt_heap() {
+    use ring3_core::execution::{Process32, ProcessStop, Register32, StopReason};
+    let mut process = Process32::load(&crt_heap_executable::pe32(), 27).unwrap();
+    let stack = process.cpu.register(Register32::Esp);
+    let pages = process.memory.mapped_pages();
+    let result = process.run(100);
+    assert_eq!(result.reason, ProcessStop::Stopped(StopReason::Breakpoint));
+    assert_eq!(result.api_calls, 3);
+    assert_eq!(process.cpu.register(Register32::Esp), stack);
+    assert_eq!(process.cpu.register(Register32::Eax), 123);
+    assert_eq!(process.cpu.register(Register32::Ebx), 42);
+    assert_eq!(process.memory.mapped_pages(), pages);
+    assert!(
+        process
+            .memory
+            .read(u64::from(process.cpu.register(Register32::Esi)), &mut [0])
+            .is_err()
+    );
+}
+
 fn execute_exception_frame() {
     use ring3_core::execution::{Process32, ProcessStop, Register32, StopReason};
     let mut process = Process32::load(&exception_frame_executable::pe32(), 32).unwrap();
@@ -1270,6 +1293,7 @@ pub extern "C" fn run() -> u32 {
     execute_global_memory();
     execute_memset();
     execute_exception_frame();
+    execute_crt_heap();
     execute_image();
     execute_function();
     inspect_image();
