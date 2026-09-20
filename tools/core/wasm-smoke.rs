@@ -48,6 +48,28 @@ mod heap_executable;
 #[path = "../../core/tests/support/critical_section_executable.rs"]
 mod critical_section_executable;
 
+#[path = "../../core/tests/support/tls_executable.rs"]
+mod tls_executable;
+
+fn execute_tls() {
+    use ring3_core::execution::{Process32, ProcessStop, Register32, StopReason};
+    let mut process = Process32::load(&tls_executable::pe32(), 32).unwrap();
+    let result = process.run(100);
+    assert_eq!(result.reason, ProcessStop::Stopped(StopReason::Breakpoint));
+    assert_eq!(result.api_calls, 6);
+    assert_eq!(process.cpu.register(Register32::Esi), 0x1234_5678);
+    assert_eq!(process.cpu.register(Register32::Eax), 0);
+    assert_eq!(process.last_error().unwrap(), 0);
+    #[cfg(windows_demo)]
+    {
+        let mut process =
+            Process32::load(include_bytes!("../../target/windows-api/tls.exe"), 64).unwrap();
+        let result = process.run(1000);
+        assert_eq!(result.reason, ProcessStop::Exited(42));
+        assert_eq!(result.api_calls, 14);
+    }
+}
+
 fn execute_critical_sections() {
     use ring3_core::execution::{Process32, ProcessStop, Register32, StopReason};
     let mut process = Process32::load(&critical_section_executable::pe32(), 32).unwrap();
@@ -1041,6 +1063,7 @@ pub extern "C" fn run() -> u32 {
     execute_heap();
     execute_version();
     execute_critical_sections();
+    execute_tls();
     execute_image();
     execute_function();
     inspect_image();

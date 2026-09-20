@@ -14,3 +14,7 @@ EXPORTS
     _TryEnterCriticalSection@4==TryEnterCriticalSection
     _LeaveCriticalSection@4==LeaveCriticalSection
     _DeleteCriticalSection@4==DeleteCriticalSection
+    _TlsAlloc@0==TlsAlloc
+    _TlsFree@4==TlsFree
+    _TlsGetValue@4==TlsGetValue
+    _TlsSetValue@8==TlsSetValue
