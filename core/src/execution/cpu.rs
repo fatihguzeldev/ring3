@@ -227,7 +227,7 @@ impl Cpu32 {
         let (result, carry) = match operation {
             Mnemonic::Xor => (left ^ right, false),
             Mnemonic::Or => (left | right, false),
-            Mnemonic::Test => (left & right, false),
+            Mnemonic::And | Mnemonic::Test => (left & right, false),
             Mnemonic::Sub | Mnemonic::Cmp => left.overflowing_sub(right),
             _ => (
                 left.wrapping_add(right),
@@ -238,7 +238,10 @@ impl Cpu32 {
         if !matches!(operation, Mnemonic::Cmp | Mnemonic::Test) {
             self.write_operand(destination, result, memory)?;
         }
-        if matches!(operation, Mnemonic::Xor | Mnemonic::Or | Mnemonic::Test) {
+        if matches!(
+            operation,
+            Mnemonic::Xor | Mnemonic::Or | Mnemonic::And | Mnemonic::Test
+        ) {
             self.eflags = (self.eflags & !0x8d5) | result_flags(result, width);
         } else {
             self.arithmetic_flags(left, right, result, carry, subtract, width);
@@ -437,6 +440,20 @@ fn is_binary(code: Code) -> bool {
             | Code::Or_rm32_r32
             | Code::Or_r32_rm32
             | Code::Or_rm32_imm8
+            | Code::And_AL_imm8
+            | Code::And_rm8_imm8
+            | Code::And_rm8_r8
+            | Code::And_r8_rm8
+            | Code::And_AX_imm16
+            | Code::And_rm16_imm16
+            | Code::And_rm16_r16
+            | Code::And_r16_rm16
+            | Code::And_rm16_imm8
+            | Code::And_EAX_imm32
+            | Code::And_rm32_imm32
+            | Code::And_rm32_r32
+            | Code::And_r32_rm32
+            | Code::And_rm32_imm8
             | Code::Test_AL_imm8
             | Code::Test_rm8_imm8
             | Code::Test_rm8_r8

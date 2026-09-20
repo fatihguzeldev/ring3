@@ -10,14 +10,16 @@ enum Operation {
     Cmp,
     Xor,
     Or,
+    And,
     Test,
 }
-const OPERATIONS: [Operation; 6] = [
+const OPERATIONS: [Operation; 7] = [
     Operation::Add,
     Operation::Sub,
     Operation::Cmp,
     Operation::Xor,
     Operation::Or,
+    Operation::And,
     Operation::Test,
 ];
 
@@ -29,6 +31,7 @@ impl Operation {
             Self::Cmp => (0x3c, 0x38, 7),
             Self::Xor => (0x34, 0x30, 6),
             Self::Or => (0x0c, 0x08, 1),
+            Self::And => (0x24, 0x20, 4),
             Self::Test => (0xa8, 0x84, 0),
         }
     }
@@ -62,7 +65,7 @@ fn oracle(operation: Operation, bits: u32, left: u32, right: u32) -> (u32, u32) 
         ),
         Operation::Xor => (i64::from(left ^ right), 0, false, false),
         Operation::Or => (i64::from(left | right), 0, false, false),
-        Operation::Test => (i64::from(left & right), 0, false, false),
+        Operation::And | Operation::Test => (i64::from(left & right), 0, false, false),
     };
     let result = u32::try_from(wide.rem_euclid(modulus)).unwrap();
     let flags = u32::from(carry)
@@ -206,7 +209,7 @@ fn register_memory_and_immediate_forms_share_width_and_sign_extension() {
 
 #[test]
 fn readonly_comparisons_and_faulting_writes_preserve_operands() {
-    for opcode in [0x38, 0x84, 0x08] {
+    for opcode in [0x38, 0x84, 0x08, 0x20] {
         for word in [false, true] {
             let mut code = if word { vec![0x66] } else { vec![] };
             code.extend_from_slice(&[opcode + u8::from(word), 0x1d, 0xff, 0x2f, 0x40, 0]);
@@ -219,7 +222,7 @@ fn readonly_comparisons_and_faulting_writes_preserve_operands() {
             cpu.eflags = 0xced7;
             let before = cpu;
             let result = cpu.run(&mut image.memory, 1);
-            if word || opcode == 0x08 {
+            if word || matches!(opcode, 0x08 | 0x20) {
                 assert!(matches!(result.reason, StopReason::MemoryFault(_)));
                 assert_eq!(cpu, before);
             } else {
