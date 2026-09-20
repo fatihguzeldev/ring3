@@ -18,6 +18,38 @@ mod d3d8_executable;
 #[path = "../../core/tests/support/thread_executable.rs"]
 mod thread_executable;
 
+#[path = "../../core/tests/support/crt_executable.rs"]
+mod crt_executable;
+
+fn execute_crt() {
+    use ring3_core::execution::{Process32, ProcessStop, Register32, StopReason};
+
+    for application_type in [1_u32, 2, u32::MAX] {
+        let mut process = Process32::load(&crt_executable::pe32(application_type), 32).unwrap();
+        let mut initial_fmode = [0; 4];
+        process
+            .memory
+            .read(0x7000_2000, &mut initial_fmode)
+            .unwrap();
+        assert_eq!(u32::from_le_bytes(initial_fmode), 0x4000);
+        let result = process.run(100);
+        assert_eq!(result.reason, ProcessStop::Stopped(StopReason::Breakpoint));
+        assert_eq!(result.api_calls, 3);
+        assert_eq!(
+            process.crt_application_type(),
+            application_type.cast_signed()
+        );
+        assert_eq!(process.cpu.register(Register32::Ecx), application_type);
+        assert_eq!(process.cpu.register(Register32::Esp), 0x1001_0000);
+        assert_eq!(process.cpu.register(Register32::Edx), 7);
+        assert_eq!(process.cpu.register(Register32::Ebx), 0);
+        let mut globals = [0; 8];
+        process.memory.read(0x7000_2000, &mut globals).unwrap();
+        assert_eq!(&globals[..4], &35_u32.to_le_bytes());
+        assert_eq!(&globals[4..], &7_u32.to_le_bytes());
+    }
+}
+
 fn execute_thread() {
     use ring3_core::execution::{Process32, ProcessStop, Register32, StopReason};
 
@@ -565,6 +597,7 @@ fn inspect_dependency_cycle() {
 pub extern "C" fn run() -> u32 {
     execute_graphics();
     execute_thread();
+    execute_crt();
     execute_diagnostic();
     execute_windows_api();
     execute_image();

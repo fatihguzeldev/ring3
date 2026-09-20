@@ -1,0 +1,6 @@
+LIBRARY MSVCRT.dll
+EXPORTS
+    __set_app_type
+    __p__fmode
+    __p__commode
+    _adjust_fdiv DATA
