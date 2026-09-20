@@ -1,3 +1,5 @@
 LIBRARY GDI32.dll
 EXPORTS
     _GetDeviceCaps@8==GetDeviceCaps
+    _GetObjectA@12==GetObjectA
+    _DeleteObject@4==DeleteObject

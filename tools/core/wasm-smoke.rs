@@ -90,6 +90,34 @@ mod metrics_executable;
 #[path = "../../core/tests/support/gdi_executable.rs"]
 mod gdi_executable;
 
+#[path = "../../core/tests/support/brushes_executable.rs"]
+mod brushes_executable;
+
+fn execute_brushes() {
+    use ring3_core::execution::{Process32, ProcessStop, Register32, StopReason};
+    let mut process = Process32::load(&brushes_executable::lifecycle(), 32).unwrap();
+    let result = process.run(50);
+    assert_eq!(result.reason, ProcessStop::Stopped(StopReason::Breakpoint));
+    assert_eq!((result.instructions, result.api_calls), (15, 4));
+    assert_eq!(
+        process.cpu.register(Register32::Eax),
+        process.cpu.register(Register32::Ebx)
+    );
+    assert_ne!(process.cpu.register(Register32::Eax), 0);
+    assert_eq!(process.cpu.register(Register32::Edx), 0x00c8_d0d4);
+    assert_eq!(process.cpu.register(Register32::Esi), 12);
+    assert_eq!(process.cpu.register(Register32::Edi), 1);
+    assert_eq!(process.cpu.register(Register32::Esp), 0x1001_0000);
+    #[cfg(windows_demo)]
+    {
+        let mut process =
+            Process32::load(include_bytes!("../../target/windows-api/brushes.exe"), 64).unwrap();
+        let result = process.run(1000);
+        assert_eq!(result.reason, ProcessStop::Exited(42));
+        assert_eq!(result.api_calls, 17);
+    }
+}
+
 fn execute_gdi() {
     use ring3_core::execution::{Process32, ProcessStop, Register32, StopReason};
     let mut process = Process32::load(&gdi_executable::lifecycle(), 32).unwrap();
@@ -1537,6 +1565,7 @@ pub extern "C" fn run() -> u32 {
     execute_metrics();
     execute_colors();
     execute_gdi();
+    execute_brushes();
     execute_image();
     execute_function();
     inspect_image();
