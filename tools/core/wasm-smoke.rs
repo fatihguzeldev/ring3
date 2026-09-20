@@ -69,6 +69,31 @@ mod dllonexit_executable;
 #[path = "../../core/tests/support/borrow_executable.rs"]
 mod borrow_executable;
 
+#[path = "../../core/tests/support/code_pages_executable.rs"]
+mod code_pages_executable;
+
+fn execute_code_pages() {
+    use ring3_core::execution::{Process32, ProcessStop, Register32, StopReason};
+    let mut process = Process32::load(&code_pages_executable::pe32(), 32).unwrap();
+    let result = process.run(20);
+    assert_eq!(result.reason, ProcessStop::Stopped(StopReason::Breakpoint));
+    assert_eq!((result.instructions, result.api_calls), (4, 2));
+    assert_eq!(process.cpu.register(Register32::Eax), 437);
+    assert_eq!(process.cpu.register(Register32::Ebx), 1252);
+    assert_eq!(process.cpu.register(Register32::Esp), 0x1001_0000);
+    #[cfg(windows_demo)]
+    {
+        let mut process = Process32::load(
+            include_bytes!("../../target/windows-api/code-pages.exe"),
+            64,
+        )
+        .unwrap();
+        let result = process.run(1000);
+        assert_eq!(result.reason, ProcessStop::Exited(42));
+        assert_eq!(result.api_calls, 5);
+    }
+}
+
 fn execute_borrow() {
     use ring3_core::execution::{Cpu32, Register32, StopReason, load_pe32};
     let mut image = load_pe32(&borrow_executable::pe32(), 3).unwrap();
@@ -1337,6 +1362,7 @@ pub extern "C" fn run() -> u32 {
     execute_crt_heap();
     execute_dllonexit();
     execute_borrow();
+    execute_code_pages();
     execute_image();
     execute_function();
     inspect_image();
