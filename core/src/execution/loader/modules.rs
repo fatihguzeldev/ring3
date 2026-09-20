@@ -28,6 +28,7 @@ pub(in crate::execution) struct LoadedModules {
     pub image: LoadedPe32,
     pub initializers: Vec<Initializer>,
     pub providers: Vec<MappedModule>,
+    pub subsystem_version: (u16, u16),
 }
 
 pub(in crate::execution) fn load_modules(
@@ -119,6 +120,7 @@ pub(in crate::execution) fn load_modules(
         },
         initializers,
         providers,
+        subsystem_version: program.table.headers.optional.subsystem_version,
     })
 }
 

@@ -33,6 +33,7 @@ pub struct Process32 {
     pub cpu: Cpu32,
     exit_code: Option<u32>,
     error_mode: u32,
+    subsystem_version: u32,
     startup: startup::Startup,
     modules: modules::Modules,
     messages: messages::Messages,
@@ -79,6 +80,7 @@ enum Api {
     SetErrorMode,
     GetErrorMode,
     GetVersion,
+    GetProcessVersion,
     ExceptionProlog,
     Graphics(d3d8::Call),
     Crt(crt::Call),
@@ -112,6 +114,7 @@ impl Api {
             0x24 => Some(Self::GetErrorMode),
             0x30 => Some(Self::GetVersion),
             0x94 => Some(Self::RegisterWindowMessage),
+            0x98 => Some(Self::GetProcessVersion),
             0x118 => Some(Self::ExceptionProlog),
             0xffc => Some(Self::Unsupported),
             offset => d3d8::Call::at(offset)
@@ -161,6 +164,7 @@ impl Api {
                 "GetACP" => 0x88,
                 "GetOEMCP" => 0x8c,
                 "GetCPInfo" => 0x90,
+                "GetProcessVersion" => 0x98,
                 _ => return None,
             }
         } else if module.eq_ignore_ascii_case("d3d8.dll") && name == "Direct3DCreate8" {
@@ -255,6 +259,7 @@ impl Process32 {
                 }
             })
         })?;
+        let (major, minor) = loaded.subsystem_version;
         let mut image = loaded.image;
         let modules = modules::Modules::new(image.image_base, loaded.providers);
         image.memory.map_zeroed(
@@ -281,6 +286,7 @@ impl Process32 {
             cpu,
             exit_code: None,
             error_mode: 0,
+            subsystem_version: (u32::from(major) << 16) | u32::from(minor),
             startup,
             modules,
             messages: messages::Messages::default(),
@@ -424,6 +430,13 @@ impl Process32 {
             }
             Api::GetErrorMode => self.cpu.set_register(Register32::Eax, self.error_mode),
             Api::GetVersion => self.cpu.set_register(Register32::Eax, GUEST_VERSION),
+            Api::GetProcessVersion => {
+                if argument != 0 {
+                    return Err(DispatchError::Unsupported);
+                }
+                self.cpu
+                    .set_register(Register32::Eax, self.subsystem_version);
+            }
             Api::CodePage(call) => {
                 let value = call.dispatch(&frame[1..words], &mut self.memory)?;
                 self.cpu.set_register(Register32::Eax, value);
