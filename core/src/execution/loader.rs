@@ -32,6 +32,7 @@ impl From<MemoryError> for LoadError {
 }
 
 /// loads an import-free i386 executable at its preferred base into fresh memory.
+/// allocation rounds the declared image size to pages without changing headers.
 ///
 /// # errors
 /// rejects unsupported initialization requirements, ambiguous section pages,
@@ -70,7 +71,7 @@ fn load_image(
     validate_image(&table, bytes.len(), allow_imports)?;
     let optional = &table.headers.optional;
     let base = optional.image_base;
-    let length = u64::from(optional.size_of_image);
+    let length = round_pages(u64::from(optional.size_of_image));
     let mut memory = GuestMemory::new(page_limit);
     memory.map_zeroed(base, length, Permissions::READ_WRITE)?;
     let headers_size =
@@ -149,6 +150,7 @@ fn validate_image(
         + u64::from(header.prefix.size_of_optional_header)
         + u64::from(header.prefix.number_of_sections) * 40;
     let image_size = u64::from(optional.size_of_image);
+    let mapped_size = round_pages(image_size);
     if !optional.section_alignment.is_power_of_two()
         || optional.section_alignment < 4096
         || !optional.file_alignment.is_power_of_two()
@@ -156,12 +158,9 @@ fn validate_image(
         || optional.file_alignment > optional.section_alignment
         || !optional.image_base.is_multiple_of(65536)
         || image_size == 0
-        || !optional
-            .size_of_image
-            .is_multiple_of(optional.section_alignment)
         || optional
             .image_base
-            .checked_add(image_size)
+            .checked_add(mapped_size)
             .is_none_or(|end| end > 1_u64 << 32)
         || u64::from(optional.size_of_headers) < header_end
         || u64::from(optional.size_of_headers) > file_size as u64
@@ -182,7 +181,7 @@ fn validate_image(
             .virtual_address
             .get()
             .is_multiple_of(optional.section_alignment)
-            || end > image_size
+            || end > mapped_size
             || (section.size_of_raw_data != 0
                 && (!section
                     .pointer_to_raw_data
