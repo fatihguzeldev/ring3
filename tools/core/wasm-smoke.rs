@@ -27,6 +27,52 @@ mod fp_control_executable;
 #[path = "../../core/tests/support/initializer_executable.rs"]
 mod initializer_executable;
 
+#[path = "../../core/tests/support/arguments_executable.rs"]
+mod arguments_executable;
+
+fn execute_arguments() {
+    use ring3_core::execution::{Process32, ProcessOptions, ProcessStop, Register32, StopReason};
+
+    let mut process = Process32::load_with_options(
+        &arguments_executable::pe32(0, 1),
+        32,
+        ProcessOptions {
+            command_line: b"demo one \"two words\"",
+            environment: &[b"A=B"],
+            ..ProcessOptions::default()
+        },
+    )
+    .unwrap();
+    let result = process.run(100);
+    assert_eq!(result.reason, ProcessStop::Stopped(StopReason::Breakpoint));
+    assert_eq!(result.api_calls, 1);
+    assert_eq!(process.crt_new_mode(), 1);
+    assert_eq!(process.cpu.register(Register32::Eax), 0);
+    assert_eq!(process.cpu.register(Register32::Esp), 0x1001_0000);
+    let word = |address: u32| {
+        let mut bytes = [0; 4];
+        process.memory.read(u64::from(address), &mut bytes).unwrap();
+        u32::from_le_bytes(bytes)
+    };
+    assert_eq!(word(0x0040_2304), 3);
+    let argv = word(0x0040_2308);
+    assert_eq!(word(argv + 12), 0);
+    let mut last_argument = [0; 10];
+    process
+        .memory
+        .read(u64::from(word(argv + 8)), &mut last_argument)
+        .unwrap();
+    assert_eq!(&last_argument, b"two words\0");
+    let env = word(0x0040_230c);
+    assert_eq!(word(env + 4), 0);
+    let mut environment = [0; 4];
+    process
+        .memory
+        .read(u64::from(word(env)), &mut environment)
+        .unwrap();
+    assert_eq!(&environment, b"A=B\0");
+}
+
 fn execute_initializers() {
     use ring3_core::execution::{Process32, ProcessStop, Register32, StopReason};
 
@@ -669,6 +715,7 @@ pub extern "C" fn run() -> u32 {
     execute_crt();
     execute_fp_control();
     execute_initializers();
+    execute_arguments();
     execute_diagnostic();
     execute_windows_api();
     execute_image();

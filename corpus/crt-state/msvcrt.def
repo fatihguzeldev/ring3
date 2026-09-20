@@ -6,3 +6,8 @@ EXPORTS
     _adjust_fdiv DATA
     _controlfp
     _initterm
+    __getmainargs
+    _acmdln DATA
+    __argc DATA
+    __argv DATA
+    _environ DATA

@@ -1,6 +1,6 @@
 use std::io::{Read, Write};
 
-use ring3_core::execution::{Process32, ProcessStop, Register32, StopReason};
+use ring3_core::execution::{Process32, ProcessOptions, ProcessStop, Register32, StopReason};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut args = std::env::args().skip(1).peekable();
@@ -19,20 +19,34 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         return Err("too many arguments".into());
     }
     let mut bytes = Vec::new();
-    std::fs::File::open(path)?
+    std::fs::File::open(&path)?
         .take(64 * 1024 * 1024 + 1)
         .read_to_end(&mut bytes)?;
     if bytes.len() > 64 * 1024 * 1024 {
         return Err("input exceeds 64 MiB".into());
     }
-    let mut process = if diagnostic {
+    let name = std::path::Path::new(&path)
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or("input has no usable basename")?;
+    if name.contains('"') {
+        return Err("input basename cannot contain a Windows command-line quote".into());
+    }
+    let command_line = format!("\"{name}\"");
+    if diagnostic {
         eprintln!(
             "diagnostic mode: unknown imports are stop addresses; missing dlls are not initialized"
         );
-        Process32::load_diagnostic(&bytes, 16_384)
-    } else {
-        Process32::load(&bytes, 16_384)
     }
+    let mut process = Process32::load_with_options(
+        &bytes,
+        16_384,
+        ProcessOptions {
+            command_line: command_line.as_bytes(),
+            diagnostic_imports: diagnostic,
+            ..ProcessOptions::default()
+        },
+    )
     .map_err(|error| format!("load failed: {error:?}"))?;
     let result = process.run(limit);
     println!(
