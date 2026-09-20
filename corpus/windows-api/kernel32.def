@@ -9,6 +9,7 @@ EXPORTS
     _LocalAlloc@8==LocalAlloc
     _LocalFree@4==LocalFree
     _GetVersion@0==GetVersion
+    _GetProcessVersion@4==GetProcessVersion
     _GetACP@0==GetACP
     _GetOEMCP@0==GetOEMCP
     _GetCPInfo@8==GetCPInfo

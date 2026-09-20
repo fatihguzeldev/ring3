@@ -9,11 +9,12 @@ for (const library of ["kernel32", "user32"]) {
   run(tools.lld, ["-flavor", "link", "/lib", "/machine:x86",
     `/def:${join(root, `corpus/windows-api/${library}.def`)}`, `/out:${library}.lib`], output);
 }
-for (const name of ["calls", "modules", "heap", "version", "critical-sections", "tls", "global-memory", "code-pages", "cpinfo", "messages"]) {
+for (const name of ["calls", "modules", "heap", "version", "critical-sections", "tls", "global-memory", "code-pages", "cpinfo", "messages", "process-version"]) {
   run(tools.clang, ["--target=i686-pc-windows-msvc", "-O0", "-ffreestanding",
     "-fno-stack-protector", "-c", join(root, `corpus/windows-api/${name}.c`),
     "-o", `${name}.obj`], output);
-  run(tools.lld, ["-flavor", "link", "/entry:entry", "/subsystem:console",
+  run(tools.lld, ["-flavor", "link", "/entry:entry",
+    name === "process-version" ? "/subsystem:console,5.01" : "/subsystem:console",
     "/machine:x86", "/nodefaultlib", "/base:0x400000", "/fixed",
     "/dynamicbase:no", "/nxcompat", "/safeseh:no", "/timestamp:0",
     `/out:${name}.exe`, `${name}.obj`, "kernel32.lib", "user32.lib"], output);
