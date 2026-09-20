@@ -44,7 +44,7 @@ fn diagnostic_calls_stop_with_identity_without_guessing_the_abi() {
             process.cpu.register(Register32::Esp),
             initial.register(Register32::Esp) - 8
         );
-        assert_eq!(process.last_error(), 0);
+        assert_eq!(process.last_error().unwrap(), 0);
         assert_eq!(process.exit_code(), None);
         process.cpu.set_register(Register32::Esp, 0xffff_ffff);
         assert_eq!(process.run(1).reason, expected);
@@ -102,10 +102,10 @@ fn trap_addresses_keep_distinct_identities_and_padding_is_not_callable() {
 fn diagnostics_respect_page_caps_collisions_and_known_apis() {
     let bytes = imported_executable::pe32(&[0xcc], "Missing.dll", &["Absent"]);
     assert!(matches!(
-        Process32::load_diagnostic(&bytes, 21),
+        Process32::load_diagnostic(&bytes, 22),
         Err(LoadError::Memory(MemoryError::PageLimitExceeded))
     ));
-    assert!(Process32::load_diagnostic(&bytes, 22).is_ok());
+    assert!(Process32::load_diagnostic(&bytes, 23).is_ok());
     let mut collision = bytes.clone();
     collision[0xb4..0xb8].copy_from_slice(&0x7100_0000_u32.to_le_bytes());
     assert!(matches!(

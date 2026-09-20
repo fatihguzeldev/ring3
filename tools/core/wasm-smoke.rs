@@ -15,6 +15,30 @@ mod imported_executable;
 #[path = "../../core/tests/support/d3d8_executable.rs"]
 mod d3d8_executable;
 
+#[path = "../../core/tests/support/thread_executable.rs"]
+mod thread_executable;
+
+fn execute_thread() {
+    use ring3_core::execution::{Process32, ProcessStop, Register32, StopReason};
+
+    for value in [42_u32, u32::MAX] {
+        let mut process = Process32::load(&thread_executable::pe32(value), 32).unwrap();
+        let result = process.run(100);
+        assert_eq!(result.reason, ProcessStop::Stopped(StopReason::Breakpoint));
+        assert_eq!(result.api_calls, 2);
+        assert_eq!(process.cpu.register(Register32::Eax), value.wrapping_add(7));
+        assert_eq!(process.cpu.register(Register32::Ebx), value);
+        assert_eq!(process.cpu.register(Register32::Esi), 0x7ffd_e000);
+        assert_eq!(process.cpu.register(Register32::Ecx), 0x1001_0000);
+        assert_eq!(process.cpu.register(Register32::Edx), 0x1000_0000);
+        assert_eq!(process.cpu.register(Register32::Esp), 0x1001_0000);
+        assert_eq!(process.last_error().unwrap(), value.wrapping_add(7));
+        let mut head = [0; 4];
+        process.memory.read(0x7ffd_e000, &mut head).unwrap();
+        assert_eq!(u32::from_le_bytes(head), u32::MAX);
+    }
+}
+
 fn execute_diagnostic() {
     use ring3_core::execution::{LoadError, Process32, ProcessStop};
 
@@ -90,7 +114,7 @@ fn execute_windows_api() {
         let result = process.run(100);
         assert_eq!(result.reason, ProcessStop::Exited(value));
         assert_eq!(result.api_calls, 3);
-        assert_eq!(process.last_error(), value);
+        assert_eq!(process.last_error().unwrap(), value);
         assert_eq!(process.run(100).instructions, 0);
     }
 }
@@ -540,6 +564,7 @@ fn inspect_dependency_cycle() {
 #[unsafe(no_mangle)]
 pub extern "C" fn run() -> u32 {
     execute_graphics();
+    execute_thread();
     execute_diagnostic();
     execute_windows_api();
     execute_image();

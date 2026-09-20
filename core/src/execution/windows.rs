@@ -7,6 +7,7 @@ use crate::PeImportSymbol;
 mod d3d8;
 mod diagnostics;
 mod guest;
+mod thread;
 
 pub use d3d8::Frame;
 
@@ -18,7 +19,6 @@ const STACK_SIZE: u32 = 64 * 1024;
 pub struct Process32 {
     pub memory: GuestMemory,
     pub cpu: Cpu32,
-    last_error: u32,
     exit_code: Option<u32>,
     graphics: d3d8::Graphics,
     diagnostic_imports: diagnostics::Imports,
@@ -103,7 +103,8 @@ impl Process32 {
     ///
     /// # errors
     /// rejects unsupported images/imports, allocation limits and reserved-range
-    /// collisions. no windows dll, tls, peb/teb or crt initialization is performed.
+    /// collisions. only initial thread fields are supplied; no windows dll, tls,
+    /// peb or crt initialization is performed.
     #[expect(clippy::missing_errors_doc, reason = "project headings are lower case")]
     pub fn load(bytes: &[u8], page_limit: u32) -> Result<Self, LoadError> {
         Self::load_with_diagnostics(bytes, page_limit, false)
@@ -145,21 +146,26 @@ impl Process32 {
             .map_zeroed(u64::from(API_BASE), PAGE_SIZE, Permissions::NONE)?;
         d3d8::Graphics::initialize(&mut image.memory)?;
         diagnostic_imports.map(&mut image.memory)?;
+        thread::initialize(&mut image.memory, STACK_BASE, STACK_BASE + STACK_SIZE)?;
         let mut cpu = Cpu32::new(image.entry_point);
         cpu.set_register(Register32::Esp, STACK_BASE + STACK_SIZE);
+        cpu.set_fs_base(thread::BASE);
         Ok(Self {
             memory: image.memory,
             cpu,
-            last_error: 0,
             exit_code: None,
             graphics: d3d8::Graphics::default(),
             diagnostic_imports,
         })
     }
 
-    #[must_use]
-    pub fn last_error(&self) -> u32 {
-        self.last_error
+    /// reads the same guest thread field used by win32 and fs-relative accesses.
+    ///
+    /// # errors
+    /// returns a guest memory fault if the thread field is no longer readable.
+    #[expect(clippy::missing_errors_doc, reason = "project headings are lower case")]
+    pub fn last_error(&self) -> Result<u32, MemoryError> {
+        thread::last_error(&self.memory)
     }
 
     #[must_use]
@@ -231,8 +237,8 @@ impl Process32 {
         guest::read_words(&self.memory, stack, &mut frame[..words])?;
         let argument = frame[1];
         match api {
-            Api::SetLastError => self.last_error = argument,
-            Api::GetLastError => self.cpu.set_register(Register32::Eax, self.last_error),
+            Api::SetLastError => thread::set_last_error(&mut self.memory, argument)?,
+            Api::GetLastError => self.cpu.set_register(Register32::Eax, self.last_error()?),
             Api::ExitProcess => {
                 self.exit_code = Some(argument);
                 return Ok(());

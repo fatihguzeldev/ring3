@@ -26,7 +26,7 @@ fn api_roundtrip_preserves_guest_values_and_exits_without_running_following_code
         assert_eq!(result.reason, ProcessStop::Exited(input.wrapping_add(42)));
         assert_eq!(result.instructions, 8);
         assert_eq!(result.api_calls, 3);
-        assert_eq!(process.last_error(), input.wrapping_add(35));
+        assert_eq!(process.last_error().unwrap(), input.wrapping_add(35));
         assert_eq!(process.cpu.register(Register32::Esp), initial_stack - 8);
         let before = process.cpu;
         let again = process.run(100);
@@ -68,7 +68,7 @@ fn api_stack_fault_preserves_cpu_and_last_error_state() {
     ));
     assert_eq!((result.instructions, result.api_calls), (0, 0));
     assert_eq!(process.cpu, before);
-    assert_eq!(process.last_error(), 0);
+    assert_eq!(process.last_error().unwrap(), 0);
     assert_eq!(process.exit_code(), None);
 }
 
