@@ -163,6 +163,12 @@ impl Cpu32 {
             }
             code if is_binary(code) => self.binary(instruction, memory)?,
             code if shifts::is_shift(code) => self.shift(instruction, memory)?,
+            Code::Imul_r16_rm16
+            | Code::Imul_r32_rm32
+            | Code::Imul_r16_rm16_imm16
+            | Code::Imul_r32_rm32_imm32
+            | Code::Imul_r16_rm16_imm8
+            | Code::Imul_r32_rm32_imm8 => self.multiply(instruction, memory)?,
             Code::Inc_rm8
             | Code::Inc_rm16
             | Code::Inc_rm32
@@ -254,6 +260,27 @@ impl Cpu32 {
             subtract,
             destination.width,
         );
+        Ok(())
+    }
+
+    fn multiply(
+        &mut self,
+        instruction: &Instruction,
+        memory: &mut GuestMemory,
+    ) -> Result<(), StopReason> {
+        let destination = self.operand(instruction, 0)?;
+        let mask = destination.width.mask();
+        let shift = 32 - destination.width as u32 * 8;
+        let signed = |value: u32| i64::from(((value & mask) << shift).cast_signed() >> shift);
+        let first = u32::from(instruction.op_count() == 3);
+        let left = signed(self.read_operand(self.operand(instruction, first)?, memory)?);
+        let right = signed(self.read_operand(self.operand(instruction, first + 1)?, memory)?);
+        let product = left * right;
+        let result = u32::try_from(product.cast_unsigned() & u64::from(mask))
+            .expect("masked product fits u32");
+        self.write_operand(destination, result, memory)?;
+        // sf/zf/af/pf are undefined and deterministically preserved.
+        self.eflags = (self.eflags & !0x801) | if product == signed(result) { 0 } else { 0x801 };
         Ok(())
     }
 

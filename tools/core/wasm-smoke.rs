@@ -316,6 +316,53 @@ fn execute_and() {
     assert_eq!(bytes, 0xffff_ff80_u32.to_le_bytes());
 }
 
+fn execute_imul() {
+    use ring3_core::execution::{Cpu32, PAGE_SIZE, Permissions, Register32, StopReason, load_pe32};
+    for (left, right, expected, overflow) in [
+        (0x8000_0000, u32::MAX, 0x8000_0000, true),
+        (u32::MAX, 7, 0xffff_fff9, false),
+        (0x7fff_ffff, 2, 0xffff_fffe, true),
+    ] {
+        let mut image = load_pe32(&executable::pe32(&[0x0f, 0xaf, 0xc3]), 3).unwrap();
+        let mut cpu = Cpu32::new(image.entry_point);
+        cpu.set_register(Register32::Eax, left);
+        cpu.set_register(Register32::Ebx, right);
+        cpu.eflags = 0xced7;
+        assert_eq!(
+            cpu.run(&mut image.memory, 1).reason,
+            StopReason::InstructionLimit
+        );
+        assert_eq!(cpu.register(Register32::Eax), expected);
+        assert_eq!(
+            cpu.eflags,
+            (0xced7 & !0x801) | if overflow { 0x801 } else { 0 }
+        );
+    }
+    let code = [
+        0x69, 0xc9, 0xff, 0xff, 0xff, 0x1f, 0x64, 0x66, 0x6b, 0x05, 0, 0, 0, 0, 0xfd, 0xcc,
+    ];
+    let mut image = load_pe32(&executable::pe32(&code), 3).unwrap();
+    image
+        .memory
+        .write(0x0040_2ffe, &0xfffe_u16.to_le_bytes())
+        .unwrap();
+    image
+        .memory
+        .protect(0x0040_2000, PAGE_SIZE, Permissions::READ)
+        .unwrap();
+    let mut cpu = Cpu32::new(image.entry_point);
+    cpu.set_register(Register32::Ecx, 8);
+    cpu.set_register(Register32::Eax, 0xabcd_0000);
+    cpu.set_fs_base(0x0040_2ffe);
+    assert_eq!(
+        cpu.run(&mut image.memory, 10).reason,
+        StopReason::Breakpoint
+    );
+    assert_eq!(cpu.register(Register32::Ecx), 0xffff_fff8);
+    assert_eq!(cpu.register(Register32::Eax), 0xabcd_0006);
+    assert_eq!(cpu.eflags & 0x801, 0);
+}
+
 fn execute_shifts() {
     use ring3_core::execution::{Cpu32, Register32, StopReason, load_pe32};
     for (count, result, flags) in [
@@ -1160,6 +1207,7 @@ pub extern "C" fn run() -> u32 {
     execute_and();
     execute_conditional_branches();
     execute_shifts();
+    execute_imul();
     execute_diagnostic();
     execute_windows_api();
     execute_resident_modules();
