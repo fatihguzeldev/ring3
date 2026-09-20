@@ -42,10 +42,10 @@ fn guest_links_and_restores_its_exception_chain_and_shares_last_error() {
 fn thread_mapping_counts_toward_budget_and_refuses_collisions_and_execution() {
     let bytes = thread_executable::pe32(42);
     assert!(matches!(
-        Process32::load(&bytes, 21),
+        Process32::load(&bytes, 22),
         Err(LoadError::Memory(MemoryError::PageLimitExceeded))
     ));
-    let mut process = Process32::load(&bytes, 22).unwrap();
+    let mut process = Process32::load(&bytes, 23).unwrap();
     assert!(process.memory.fetch(0x7ffd_e000, &mut [0]).is_err());
     let mut collision = bytes;
     collision[0xb4..0xb8].copy_from_slice(&0x7ffd_0000_u32.to_le_bytes());

@@ -4,6 +4,7 @@ use super::{
 };
 use crate::PeImportSymbol;
 
+mod crt;
 mod d3d8;
 mod diagnostics;
 mod guest;
@@ -21,6 +22,7 @@ pub struct Process32 {
     pub cpu: Cpu32,
     exit_code: Option<u32>,
     graphics: d3d8::Graphics,
+    crt: crt::Crt,
     diagnostic_imports: diagnostics::Imports,
 }
 
@@ -53,6 +55,7 @@ enum Api {
     ExitProcess,
     GetDesktopWindow,
     Graphics(d3d8::Call),
+    Crt(crt::Call),
     Unsupported,
 }
 
@@ -64,7 +67,9 @@ impl Api {
             8 => Some(Self::ExitProcess),
             16 => Some(Self::GetDesktopWindow),
             0xffc => Some(Self::Unsupported),
-            offset => d3d8::Call::at(offset).map(Self::Graphics),
+            offset => d3d8::Call::at(offset)
+                .map(Self::Graphics)
+                .or_else(|| crt::Call::at(offset).map(Self::Crt)),
         }
     }
 
@@ -72,6 +77,9 @@ impl Api {
         let PeImportSymbol::ByName { name, .. } = symbol else {
             return None;
         };
+        if module.eq_ignore_ascii_case("msvcrt.dll") {
+            return crt::resolve(name);
+        }
         let offset = if module.eq_ignore_ascii_case("kernel32.dll") {
             match name {
                 "SetLastError" => 0,
@@ -93,7 +101,15 @@ impl Api {
         match self {
             Self::GetLastError | Self::GetDesktopWindow | Self::Unsupported => 0,
             Self::Graphics(call) => call.arguments(),
+            Self::Crt(call) => call.arguments(),
             _ => 1,
+        }
+    }
+
+    fn stack_cleanup(self) -> u32 {
+        match self {
+            Self::Crt(_) => 4,
+            _ => u32::try_from((self.arguments() + 1) * 4).expect("api frame fits u32"),
         }
     }
 }
@@ -104,7 +120,7 @@ impl Process32 {
     /// # errors
     /// rejects unsupported images/imports, allocation limits and reserved-range
     /// collisions. only initial thread fields are supplied; no windows dll, tls,
-    /// peb or crt initialization is performed.
+    /// peb initialization or full crt startup is performed.
     #[expect(clippy::missing_errors_doc, reason = "project headings are lower case")]
     pub fn load(bytes: &[u8], page_limit: u32) -> Result<Self, LoadError> {
         Self::load_with_diagnostics(bytes, page_limit, false)
@@ -147,6 +163,7 @@ impl Process32 {
         d3d8::Graphics::initialize(&mut image.memory)?;
         diagnostic_imports.map(&mut image.memory)?;
         thread::initialize(&mut image.memory, STACK_BASE, STACK_BASE + STACK_SIZE)?;
+        crt::initialize(&mut image.memory)?;
         let mut cpu = Cpu32::new(image.entry_point);
         cpu.set_register(Register32::Esp, STACK_BASE + STACK_SIZE);
         cpu.set_fs_base(thread::BASE);
@@ -155,6 +172,7 @@ impl Process32 {
             cpu,
             exit_code: None,
             graphics: d3d8::Graphics::default(),
+            crt: crt::Crt::default(),
             diagnostic_imports,
         })
     }
@@ -171,6 +189,11 @@ impl Process32 {
     #[must_use]
     pub fn exit_code(&self) -> Option<u32> {
         self.exit_code
+    }
+
+    #[must_use]
+    pub fn crt_application_type(&self) -> i32 {
+        self.crt.application_type
     }
 
     /// takes the latest presented frame; presentation does not accumulate a queue.
@@ -232,7 +255,6 @@ impl Process32 {
     fn dispatch(&mut self, api: Api) -> Result<(), MemoryError> {
         let stack = self.cpu.register(Register32::Esp);
         let words = api.arguments() + 1;
-        let length = u32::try_from(words * 4).expect("api frame fits u32");
         let mut frame = [0; 8];
         guest::read_words(&self.memory, stack, &mut frame[..words])?;
         let argument = frame[1];
@@ -250,12 +272,17 @@ impl Process32 {
                     .dispatch(call, &frame[1..words], &mut self.memory)?;
                 self.cpu.set_register(Register32::Eax, result);
             }
+            Api::Crt(call) => {
+                if let Some(value) = self.crt.dispatch(call, argument) {
+                    self.cpu.set_register(Register32::Eax, value);
+                }
+            }
             Api::Unsupported => unreachable!(),
         }
         // an api output may alias the saved return address; permissions are unchanged.
         guest::read_words(&self.memory, stack, &mut frame[..1])?;
         self.cpu
-            .set_register(Register32::Esp, stack.wrapping_add(length));
+            .set_register(Register32::Esp, stack.wrapping_add(api.stack_cleanup()));
         self.cpu.eip = frame[0];
         Ok(())
     }
