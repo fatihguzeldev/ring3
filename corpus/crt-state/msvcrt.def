@@ -11,3 +11,4 @@ EXPORTS
     __argc DATA
     __argv DATA
     _environ DATA
+    memset

@@ -54,6 +54,24 @@ mod tls_executable;
 #[path = "../../core/tests/support/global_memory_executable.rs"]
 mod global_memory_executable;
 
+#[path = "../../core/tests/support/memset_executable.rs"]
+mod memset_executable;
+
+fn execute_memset() {
+    use ring3_core::execution::{Process32, ProcessStop, Register32, StopReason};
+    let mut process = Process32::load(&memset_executable::pe32(), 32).unwrap();
+    let stack = process.cpu.register(Register32::Esp);
+    let result = process.run(100);
+    assert_eq!(result.reason, ProcessStop::Stopped(StopReason::Breakpoint));
+    assert_eq!(result.api_calls, 1);
+    assert_eq!(process.cpu.register(Register32::Esp), stack);
+    assert_eq!(process.cpu.register(Register32::Eax), 0x0040_2180);
+    assert_eq!(process.cpu.register(Register32::Ebx), 0xa5a5_a5a5);
+    let mut bytes = [0; 8];
+    process.memory.read(0x0040_2180, &mut bytes).unwrap();
+    assert_eq!(bytes, [0xa5; 8]);
+}
+
 fn execute_global_memory() {
     use ring3_core::execution::{Process32, ProcessStop, Register32, StopReason};
     let mut process = Process32::load(&global_memory_executable::pe32(), 27).unwrap();
@@ -1217,6 +1235,7 @@ pub extern "C" fn run() -> u32 {
     execute_critical_sections();
     execute_tls();
     execute_global_memory();
+    execute_memset();
     execute_image();
     execute_function();
     inspect_image();
