@@ -145,6 +145,10 @@ impl Api {
                 "TlsFree" => 0x6c,
                 "TlsGetValue" => 0x70,
                 "TlsSetValue" => 0x74,
+                "GlobalAlloc" => 0x78,
+                "GlobalLock" => 0x7c,
+                "GlobalUnlock" => 0x80,
+                "GlobalFree" => 0x84,
                 _ => return None,
             }
         } else if module.eq_ignore_ascii_case("d3d8.dll") && name == "Direct3DCreate8" {

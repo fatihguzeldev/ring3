@@ -9,6 +9,10 @@ const END: u64 = 0x3000_0000;
 pub(super) enum Call {
     Alloc,
     Free,
+    GlobalAlloc,
+    GlobalLock,
+    GlobalUnlock,
+    GlobalFree,
 }
 
 impl Call {
@@ -16,21 +20,43 @@ impl Call {
         match offset {
             0x28 => Some(Self::Alloc),
             0x2c => Some(Self::Free),
+            0x78 => Some(Self::GlobalAlloc),
+            0x7c => Some(Self::GlobalLock),
+            0x80 => Some(Self::GlobalUnlock),
+            0x84 => Some(Self::GlobalFree),
             _ => None,
         }
     }
 
     pub(super) fn arguments(self) -> usize {
         match self {
-            Self::Alloc => 2,
-            Self::Free => 1,
+            Self::Alloc | Self::GlobalAlloc => 2,
+            _ => 1,
         }
+    }
+}
+
+enum Kind {
+    Local,
+    GlobalFixed,
+    GlobalMovable { discarded: bool, locks: u32 },
+}
+
+struct Allocation {
+    base: u32,
+    length: u64,
+    kind: Kind,
+}
+
+impl Allocation {
+    fn global(&self) -> bool {
+        !matches!(self.kind, Kind::Local)
     }
 }
 
 #[derive(Default)]
 pub(super) struct Heap {
-    allocations: BTreeMap<u32, u64>,
+    allocations: BTreeMap<u32, Allocation>,
 }
 
 impl Heap {
@@ -42,27 +68,61 @@ impl Heap {
         memory: &mut GuestMemory,
     ) -> Result<u32, DispatchError> {
         match call {
-            Call::Alloc => self.allocate(arguments[0], arguments[1], memory),
-            Call::Free => self.free(arguments[0], stack, memory),
+            Call::Alloc | Call::GlobalAlloc => self.allocate(
+                matches!(call, Call::GlobalAlloc),
+                arguments[0],
+                arguments[1],
+                memory,
+            ),
+            Call::Free | Call::GlobalFree => self.free(
+                matches!(call, Call::GlobalFree),
+                arguments[0],
+                stack,
+                memory,
+            ),
+            Call::GlobalLock => self.lock(arguments[0], memory),
+            Call::GlobalUnlock => self.unlock(arguments[0], memory),
         }
     }
 
     fn allocate(
         &mut self,
+        global: bool,
         flags: u32,
         size: u32,
         memory: &mut GuestMemory,
     ) -> Result<u32, DispatchError> {
-        if flags & !0x40 != 0 {
+        let allowed = if global { 0x7172 } else { 0x40 };
+        if flags & !allowed != 0 {
             return Err(DispatchError::Unsupported);
         }
+        let movable = global && flags & 2 != 0;
+        let discarded = movable && size == 0;
+        let permissions = if discarded {
+            Permissions::NONE
+        } else {
+            Permissions::READ_WRITE
+        };
         let length = u64::from(size).max(1).div_ceil(PAGE_SIZE) * PAGE_SIZE;
         if let Some(address) = memory.first_free_span(START, END, length)? {
-            match memory.map_zeroed(address, length, Permissions::READ_WRITE) {
+            match memory.map_zeroed(address, length, permissions) {
                 Ok(()) => {
-                    let pointer = u32::try_from(address).expect("heap window fits u32");
-                    self.allocations.insert(pointer, length);
-                    return Ok(pointer);
+                    let base = u32::try_from(address).expect("heap window fits u32");
+                    // the tag distinguishes opaque movable handles from fixed pointers.
+                    let handle = base | if movable { 2 } else { 0 };
+                    let kind = if movable {
+                        Kind::GlobalMovable {
+                            discarded,
+                            locks: 0,
+                        }
+                    } else if global {
+                        Kind::GlobalFixed
+                    } else {
+                        Kind::Local
+                    };
+                    self.allocations
+                        .insert(handle, Allocation { base, length, kind });
+                    return Ok(handle);
                 }
                 Err(MemoryError::PageLimitExceeded) => {}
                 Err(error) => return Err(error.into()),
@@ -74,24 +134,105 @@ impl Heap {
 
     fn free(
         &mut self,
-        pointer: u32,
+        global: bool,
+        handle: u32,
         stack: u32,
         memory: &mut GuestMemory,
     ) -> Result<u32, DispatchError> {
-        if pointer == 0 {
+        if handle == 0 {
             return Ok(0);
         }
-        let Some(&length) = self.allocations.get(&pointer) else {
+        let Some(allocation) = self
+            .allocations
+            .get(&handle)
+            .filter(|allocation| allocation.global() == global)
+        else {
             thread::set_last_error(memory, 6)?;
-            return Ok(pointer);
+            return Ok(handle);
         };
-        let address = u64::from(pointer);
+        let address = u64::from(allocation.base);
         // dispatch must still read the return slot after the call completes.
-        if address < u64::from(stack) + 8 && u64::from(stack) < address + length {
+        if address < u64::from(stack) + 8 && u64::from(stack) < address + allocation.length {
             return Err(DispatchError::Unsupported);
         }
-        memory.unmap(address, length)?;
-        self.allocations.remove(&pointer);
+        memory.unmap(address, allocation.length)?;
+        self.allocations.remove(&handle);
         Ok(0)
+    }
+
+    fn lock(&mut self, handle: u32, memory: &mut GuestMemory) -> Result<u32, DispatchError> {
+        let Some(allocation) = self
+            .allocations
+            .get_mut(&handle)
+            .filter(|allocation| allocation.global())
+        else {
+            thread::set_last_error(memory, 6)?;
+            return Ok(0);
+        };
+        if let Kind::GlobalMovable { discarded, locks } = &mut allocation.kind {
+            if *discarded {
+                thread::set_last_error(memory, 157)?;
+                return Ok(0);
+            }
+            *locks = locks.checked_add(1).ok_or(DispatchError::Unsupported)?;
+        }
+        Ok(allocation.base)
+    }
+
+    fn unlock(&mut self, handle: u32, memory: &mut GuestMemory) -> Result<u32, DispatchError> {
+        let Some(allocation) = self
+            .allocations
+            .get_mut(&handle)
+            .filter(|allocation| allocation.global())
+        else {
+            thread::set_last_error(memory, 6)?;
+            return Ok(0);
+        };
+        let Kind::GlobalMovable { locks, .. } = &mut allocation.kind else {
+            return Ok(1);
+        };
+        match *locks {
+            0 => {
+                thread::set_last_error(memory, 158)?;
+                Ok(0)
+            }
+            1 => {
+                thread::set_last_error(memory, 0)?;
+                *locks = 0;
+                Ok(0)
+            }
+            _ => {
+                *locks -= 1;
+                Ok(1)
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn global_lock_overflow_preserves_count() {
+        let mut heap = Heap::default();
+        let mut memory = GuestMemory::new(1);
+        let Ok(handle) = heap.allocate(true, 2, 1, &mut memory) else {
+            panic!()
+        };
+        let Kind::GlobalMovable { locks, .. } =
+            &mut heap.allocations.get_mut(&handle).unwrap().kind
+        else {
+            panic!()
+        };
+        *locks = u32::MAX;
+        assert!(matches!(
+            heap.lock(handle, &mut memory),
+            Err(DispatchError::Unsupported)
+        ));
+        let Kind::GlobalMovable { locks, .. } = heap.allocations[&handle].kind else {
+            panic!()
+        };
+        assert_eq!(locks, u32::MAX);
     }
 }
