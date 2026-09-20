@@ -289,6 +289,34 @@ fn execute_and() {
     assert_eq!(bytes, 0xffff_ff80_u32.to_le_bytes());
 }
 
+fn execute_conditional_branches() {
+    use ring3_core::execution::{Cpu32, Register32, StopReason, load_pe32};
+    for (left, right, less) in [
+        (0x8000_0000_u32, 1_u32, true),
+        (0x7fff_ffff, u32::MAX, false),
+        (0, 0, false),
+    ] {
+        let code = [0x39, 0xd8, 0x0f, 0x8d, 5, 0, 0, 0, 0xb9, 42, 0, 0, 0, 0xcc];
+        let mut image = load_pe32(&executable::pe32(&code), 3).unwrap();
+        let mut cpu = Cpu32::new(image.entry_point);
+        cpu.set_register(Register32::Eax, left);
+        cpu.set_register(Register32::Ebx, right);
+        assert_eq!(
+            cpu.run(&mut image.memory, 10).reason,
+            StopReason::Breakpoint
+        );
+        assert_eq!(cpu.register(Register32::Ecx), if less { 42 } else { 0 });
+    }
+    let code = [0xb9, 0xfd, 0xff, 0xff, 0xff, 0x41, 0x7c, 0xfd, 0xcc];
+    let mut image = load_pe32(&executable::pe32(&code), 3).unwrap();
+    let mut cpu = Cpu32::new(image.entry_point);
+    assert_eq!(
+        cpu.run(&mut image.memory, 20).reason,
+        StopReason::Breakpoint
+    );
+    assert_eq!(cpu.register(Register32::Ecx), 0);
+}
+
 fn execute_delay_thunks() {
     use ring3_core::execution::{Process32, ProcessStop, Register32, StopReason};
     for legacy in [false, true] {
@@ -1056,6 +1084,7 @@ pub extern "C" fn run() -> u32 {
     execute_narrow_operands();
     execute_increment();
     execute_and();
+    execute_conditional_branches();
     execute_diagnostic();
     execute_windows_api();
     execute_resident_modules();

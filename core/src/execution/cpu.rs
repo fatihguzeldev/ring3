@@ -2,6 +2,7 @@ use iced_x86::{Code, Decoder, DecoderError, DecoderOptions, Instruction, Mnemoni
 
 use super::{GuestMemory, MemoryError};
 
+mod branches;
 mod operands;
 mod stack;
 mod x87;
@@ -185,29 +186,9 @@ impl Cpu32 {
                 next = self.stack_instruction(instruction, memory)?;
             }
             Code::Jmp_rel8_32 | Code::Jmp_rel32_32 => next = instruction.near_branch32(),
-            Code::Je_rel8_32 | Code::Je_rel32_32 => {
-                if self.eflags & 0x40 != 0 {
-                    next = instruction.near_branch32();
-                }
-            }
-            Code::Jne_rel8_32 | Code::Jne_rel32_32 => {
-                if self.eflags & 0x40 == 0 {
-                    next = instruction.near_branch32();
-                }
-            }
-            Code::Jb_rel8_32 | Code::Jb_rel32_32 => {
-                if self.eflags & 1 != 0 {
-                    next = instruction.near_branch32();
-                }
-            }
-            Code::Jae_rel8_32 | Code::Jae_rel32_32 => {
-                if self.eflags & 1 == 0 {
-                    next = instruction.near_branch32();
-                }
-            }
             Code::Fldcw_m2byte | Code::Fnstcw_m2byte => self.x87_control(instruction, memory)?,
             Code::Nopd | Code::Int3 => {}
-            _ => return Err(StopReason::UnsupportedInstruction),
+            _ => next = self.conditional_branch(instruction)?,
         }
         self.eip = next;
         Ok(instruction.code() == Code::Int3)
