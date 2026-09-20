@@ -388,6 +388,9 @@ fn is_move(code: Code) -> bool {
             | Code::Mov_rm32_imm32
             | Code::Mov_EAX_moffs32
             | Code::Mov_moffs32_EAX
+            | Code::Movzx_r16_rm8
+            | Code::Movzx_r32_rm8
+            | Code::Movzx_r32_rm16
     )
 }
 

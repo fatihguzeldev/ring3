@@ -78,6 +78,25 @@ mod cpinfo_executable;
 #[path = "../../core/tests/support/messages_executable.rs"]
 mod messages_executable;
 
+#[path = "../../core/tests/support/zero_extend_executable.rs"]
+mod zero_extend_executable;
+
+fn execute_zero_extend() {
+    use ring3_core::execution::{Cpu32, Register32, StopReason, load_pe32};
+    let mut image = load_pe32(&zero_extend_executable::pe32(), 3).unwrap();
+    let mut cpu = Cpu32::new(image.entry_point);
+    cpu.eflags = 0xced7;
+    cpu.set_fs_base(0x0040_2000);
+    let result = cpu.run(&mut image.memory, 20);
+    assert_eq!(result.reason, StopReason::Breakpoint);
+    assert_eq!(result.instructions, 7);
+    assert_eq!(cpu.register(Register32::Eax), 0xff);
+    assert_eq!(cpu.register(Register32::Ebx), 0x1234_00ff);
+    assert_eq!(cpu.register(Register32::Ecx), 0xff);
+    assert_eq!(cpu.register(Register32::Edx), 0xff80);
+    assert_eq!(cpu.eflags, 0xced7);
+}
+
 fn execute_messages() {
     use ring3_core::execution::{Process32, ProcessStop, Register32, StopReason};
     let mut process = Process32::load(&messages_executable::pe32(), 32).unwrap();
@@ -1417,6 +1436,7 @@ pub extern "C" fn run() -> u32 {
     execute_code_pages();
     execute_cpinfo();
     execute_messages();
+    execute_zero_extend();
     execute_image();
     execute_function();
     inspect_image();
