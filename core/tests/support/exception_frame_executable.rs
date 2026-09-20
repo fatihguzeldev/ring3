@@ -1,0 +1,33 @@
+use super::imported_executable;
+
+pub fn pe32() -> Vec<u8> {
+    let mut code = vec![0xcc; 256];
+    code[..11].copy_from_slice(&[0xe8, 0x3b, 0, 0, 0, 0xb8, 42, 0, 0, 0, 0xcc]);
+    let epilog = [
+        0x8b, 0x4d, 0xf4, 0x64, 0x89, 0x0d, 0, 0, 0, 0, 0x89, 0xec, 0x5d, 0xc3,
+    ];
+    let chain = [0x64, 0x8b, 0x0d, 0, 0, 0, 0];
+    let mut outer = vec![
+        0xb8, 0x11, 0x11, 0x11, 0x11, 0xff, 0x15, 0x60, 0x20, 0x40, 0,
+    ];
+    outer.extend_from_slice(&chain);
+    outer.extend_from_slice(&[0x89, 0x0d, 0x80, 0x21, 0x40, 0]);
+    let next = 0x40 + outer.len() + 5;
+    outer.push(0xe8);
+    outer.extend_from_slice(&u32::try_from(0xc0 - next).unwrap().to_le_bytes());
+    outer.extend_from_slice(&chain);
+    outer.extend_from_slice(&[0x89, 0x0d, 0x84, 0x21, 0x40, 0]);
+    outer.extend_from_slice(&epilog);
+    code[0x40..0x40 + outer.len()].copy_from_slice(&outer);
+    let mut inner = vec![
+        0xb8, 0x22, 0x22, 0x22, 0x22, 0xff, 0x15, 0x60, 0x20, 0x40, 0,
+    ];
+    inner.extend_from_slice(&chain);
+    inner.extend_from_slice(&[0x89, 0x0d, 0x88, 0x21, 0x40, 0]);
+    for (offset, output) in [(0xf4, 0x8c), (0xf8, 0x90), (0xfc, 0x94)] {
+        inner.extend_from_slice(&[0x8b, 0x45, offset, 0xa3, output, 0x21, 0x40, 0]);
+    }
+    inner.extend_from_slice(&epilog);
+    code[0xc0..0xc0 + inner.len()].copy_from_slice(&inner);
+    imported_executable::pe32(&code, "MSVCRT.dll", &["_EH_prolog"])
+}

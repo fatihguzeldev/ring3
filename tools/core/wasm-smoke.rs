@@ -57,6 +57,39 @@ mod global_memory_executable;
 #[path = "../../core/tests/support/memset_executable.rs"]
 mod memset_executable;
 
+#[path = "../../core/tests/support/exception_frame_executable.rs"]
+mod exception_frame_executable;
+
+fn execute_exception_frame() {
+    use ring3_core::execution::{Process32, ProcessStop, Register32, StopReason};
+    let mut process = Process32::load(&exception_frame_executable::pe32(), 32).unwrap();
+    let stack = process.cpu.register(Register32::Esp);
+    process.cpu.set_register(Register32::Ebp, 0x8765_4321);
+    process.cpu.eflags = 0xced7;
+    let result = process.run(100);
+    assert_eq!(result.reason, ProcessStop::Stopped(StopReason::Breakpoint));
+    assert_eq!(result.api_calls, 2);
+    assert_eq!(process.cpu.register(Register32::Esp), stack);
+    assert_eq!(process.cpu.register(Register32::Ebp), 0x8765_4321);
+    assert_eq!(process.cpu.register(Register32::Eax), 42);
+    assert_eq!(process.cpu.eflags, 0xced7);
+    let mut chain = [0; 4];
+    process.memory.read(0x7ffd_e000, &mut chain).unwrap();
+    assert_eq!(chain, [0xff; 4]);
+    let mut data = [0; 24];
+    process.memory.read(0x0040_2180, &mut data).unwrap();
+    for (word, value) in data.chunks_exact(4).zip([
+        stack - 20,
+        stack - 20,
+        stack - 40,
+        stack - 20,
+        0x2222_2222,
+        u32::MAX,
+    ]) {
+        assert_eq!(word, value.to_le_bytes());
+    }
+}
+
 fn execute_memset() {
     use ring3_core::execution::{Process32, ProcessStop, Register32, StopReason};
     let mut process = Process32::load(&memset_executable::pe32(), 32).unwrap();
@@ -1236,6 +1269,7 @@ pub extern "C" fn run() -> u32 {
     execute_tls();
     execute_global_memory();
     execute_memset();
+    execute_exception_frame();
     execute_image();
     execute_function();
     inspect_image();

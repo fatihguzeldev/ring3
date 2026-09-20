@@ -12,3 +12,4 @@ EXPORTS
     __argv DATA
     _environ DATA
     memset
+    _EH_prolog
