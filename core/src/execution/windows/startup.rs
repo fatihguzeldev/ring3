@@ -7,6 +7,7 @@ const BASE: u32 = 0x7001_4000;
 pub(super) struct Startup {
     failures: Vec<(u32, String)>,
     failed: Option<String>,
+    completion: Option<u32>,
 }
 
 impl Startup {
@@ -33,6 +34,7 @@ impl Startup {
             ));
             code.push(0xcc);
         }
+        startup.completion = Some(BASE + u32::try_from(code.len()).expect("bounded module count"));
         code.push(0xe9);
         let next = BASE + u32::try_from(code.len()).expect("bounded module count") + 4;
         code.extend_from_slice(&entry.wrapping_sub(next).to_le_bytes());
@@ -43,7 +45,19 @@ impl Startup {
     }
 
     pub(super) fn contains(&self, address: u32) -> bool {
-        self.failures.iter().any(|(trap, _)| *trap == address)
+        self.completion == Some(address) || self.failures.iter().any(|(trap, _)| *trap == address)
+    }
+
+    pub(super) fn complete_at(&mut self, address: u32) -> bool {
+        if self.completion != Some(address) {
+            return false;
+        }
+        self.completion = None;
+        true
+    }
+
+    pub(super) fn is_complete(&self) -> bool {
+        self.completion.is_none()
     }
 
     pub(super) fn stop(&mut self, address: u32) -> Option<ProcessStop> {

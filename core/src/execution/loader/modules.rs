@@ -19,18 +19,36 @@ pub(in crate::execution) struct Initializer {
     pub entry: u32,
 }
 
+pub(in crate::execution) struct MappedModule {
+    pub name: String,
+    pub base: u32,
+}
+
+pub(in crate::execution) struct LoadedModules {
+    pub image: LoadedPe32,
+    pub initializers: Vec<Initializer>,
+    pub providers: Vec<MappedModule>,
+}
+
 pub(in crate::execution) fn load_modules(
     bytes: &[u8],
     page_limit: u32,
     modules: &[GuestModule<'_>],
     mut fallback: impl FnMut(&str, PeImportSymbol<'_>) -> Option<u32>,
-) -> Result<(LoadedPe32, Vec<Initializer>), LoadError> {
+) -> Result<LoadedModules, LoadError> {
     validate_modules(modules)?;
     let program = Image::parse(bytes, ImportPolicy::GuestManagedDelay, false)?;
     let images = modules
         .iter()
         .map(|module| Image::parse(module.bytes, ImportPolicy::GuestManagedDelay, true))
         .collect::<Result<Vec<_>, _>>()?;
+    // null cannot identify a resident module or the main executable.
+    if std::iter::once(&program)
+        .chain(&images)
+        .any(|image| image.base() == 0)
+    {
+        return Err(LoadError::InvalidLayout);
+    }
     let order = initialization_order(modules)?;
     let mut exports: Vec<_> = modules
         .iter()
@@ -85,14 +103,23 @@ pub(in crate::execution) fn load_modules(
             entry: images[index].entry_point(),
         })
         .collect();
-    Ok((
-        LoadedPe32 {
+    let providers = modules
+        .iter()
+        .zip(&images)
+        .map(|(module, image)| MappedModule {
+            name: module.name.to_owned(),
+            base: u32::try_from(image.base()).expect("validated pe32 base"),
+        })
+        .collect();
+    Ok(LoadedModules {
+        image: LoadedPe32 {
             memory,
             image_base: u32::try_from(program.base()).expect("validated pe32 base"),
             entry_point: program.entry_point(),
         },
         initializers,
-    ))
+        providers,
+    })
 }
 
 fn validate_modules(modules: &[GuestModule<'_>]) -> Result<(), LoadError> {

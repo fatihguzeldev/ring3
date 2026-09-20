@@ -8,6 +8,7 @@ mod crt;
 mod d3d8;
 mod diagnostics;
 mod guest;
+mod modules;
 mod parameters;
 mod startup;
 mod thread;
@@ -25,6 +26,7 @@ pub struct Process32 {
     pub cpu: Cpu32,
     exit_code: Option<u32>,
     startup: startup::Startup,
+    modules: modules::Modules,
     graphics: d3d8::Graphics,
     crt: crt::Crt,
     diagnostic_imports: diagnostics::Imports,
@@ -63,6 +65,7 @@ enum Api {
     GetDesktopWindow,
     Graphics(d3d8::Call),
     Crt(crt::Call),
+    Module(modules::Call),
     Unsupported,
 }
 
@@ -87,7 +90,8 @@ impl Api {
             0xffc => Some(Self::Unsupported),
             offset => d3d8::Call::at(offset)
                 .map(Self::Graphics)
-                .or_else(|| crt::Call::at(offset).map(Self::Crt)),
+                .or_else(|| crt::Call::at(offset).map(Self::Crt))
+                .or_else(|| modules::Call::at(offset).map(Self::Module)),
         }
     }
 
@@ -103,6 +107,9 @@ impl Api {
                 "SetLastError" => 0,
                 "GetLastError" => 4,
                 "ExitProcess" => 8,
+                "LoadLibraryA" => 0x14,
+                "GetModuleHandleA" => 0x18,
+                "FreeLibrary" => 0x1c,
                 _ => return None,
             }
         } else if module.eq_ignore_ascii_case("d3d8.dll") && name == "Direct3DCreate8" {
@@ -176,16 +183,17 @@ impl Process32 {
     ) -> Result<Self, LoadError> {
         let parameters = parameters::Parameters::prepare(options)?;
         let mut diagnostic_imports = diagnostics::Imports::default();
-        let (mut image, initializers) =
-            load_modules(bytes, page_limit, options.modules, |module, symbol| {
-                Api::resolve(module, symbol).or_else(|| {
-                    if options.diagnostic_imports {
-                        diagnostic_imports.insert(module, symbol)
-                    } else {
-                        None
-                    }
-                })
-            })?;
+        let loaded = load_modules(bytes, page_limit, options.modules, |module, symbol| {
+            Api::resolve(module, symbol).or_else(|| {
+                if options.diagnostic_imports {
+                    diagnostic_imports.insert(module, symbol)
+                } else {
+                    None
+                }
+            })
+        })?;
+        let mut image = loaded.image;
+        let modules = modules::Modules::new(image.image_base, loaded.providers);
         image.memory.map_zeroed(
             u64::from(STACK_BASE),
             u64::from(STACK_SIZE),
@@ -200,7 +208,7 @@ impl Process32 {
         parameters.map(&mut image.memory)?;
         crt::initialize(&mut image.memory, &parameters)?;
         let (startup, entry) =
-            startup::Startup::map(&mut image.memory, initializers, image.entry_point)?;
+            startup::Startup::map(&mut image.memory, loaded.initializers, image.entry_point)?;
         let mut cpu = Cpu32::new(entry);
         cpu.set_register(Register32::Esp, STACK_BASE + STACK_SIZE);
         cpu.set_fs_base(thread::BASE);
@@ -210,6 +218,7 @@ impl Process32 {
             cpu,
             exit_code: None,
             startup,
+            modules,
             graphics: d3d8::Graphics::default(),
             crt: crt::Crt::default(),
             diagnostic_imports,
@@ -275,6 +284,9 @@ impl Process32 {
                 result.reason = ProcessStop::Stopped(step.reason);
                 return result;
             }
+            if self.startup.complete_at(self.cpu.eip) {
+                continue;
+            }
             if let Some(stop) = self
                 .startup
                 .stop(self.cpu.eip)
@@ -327,6 +339,15 @@ impl Process32 {
                 return Ok(());
             }
             Api::GetDesktopWindow => self.cpu.set_register(Register32::Eax, d3d8::DESKTOP),
+            Api::Module(call) => {
+                let value = self.modules.dispatch(
+                    call,
+                    argument,
+                    self.startup.is_complete(),
+                    &mut self.memory,
+                )?;
+                self.cpu.set_register(Register32::Eax, value);
+            }
             Api::Graphics(call) => {
                 let result = self
                     .graphics
