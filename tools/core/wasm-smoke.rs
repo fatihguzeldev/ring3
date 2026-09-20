@@ -30,6 +30,64 @@ mod initializer_executable;
 #[path = "../../core/tests/support/arguments_executable.rs"]
 mod arguments_executable;
 
+#[path = "../../core/tests/support/dll_executable.rs"]
+mod dll_executable;
+
+fn execute_dlls() {
+    use ring3_core::execution::{
+        GuestModule, Process32, ProcessOptions, ProcessStop, Register32, StopReason,
+    };
+    let base = 0x5000_0000;
+    for success in [true, false] {
+        let library = dll_executable::dll(base, &dll_executable::attach(base, 41, success), None);
+        let mut process = Process32::load_with_options(
+            &dll_executable::exe("demo.dll"),
+            32,
+            ProcessOptions {
+                modules: &[GuestModule {
+                    name: "demo.dll",
+                    bytes: &library,
+                }],
+                ..ProcessOptions::default()
+            },
+        )
+        .unwrap();
+        let result = process.run(100);
+        let reason = if success {
+            ProcessStop::Stopped(StopReason::Breakpoint)
+        } else {
+            ProcessStop::DllInitializationFailed {
+                module: "demo.dll".to_owned(),
+            }
+        };
+        assert_eq!(result.reason, reason);
+        if success {
+            assert_eq!(process.cpu.register(Register32::Eax), 42);
+        } else {
+            assert_eq!(process.run(100).reason, reason);
+            assert_eq!(process.run(100).instructions, 0);
+        }
+    }
+    #[cfg(guest_dll_demo)]
+    {
+        let mut process = Process32::load_with_options(
+            include_bytes!("../../target/guest-dll/caller.exe"),
+            64,
+            ProcessOptions {
+                modules: &[GuestModule {
+                    name: "demo.dll",
+                    bytes: include_bytes!("../../target/guest-dll/demo.dll"),
+                }],
+                ..ProcessOptions::default()
+            },
+        )
+        .unwrap();
+        let result = process.run(1000);
+        assert_eq!(result.reason, ProcessStop::Exited(42));
+        assert_eq!(result.api_calls, 1);
+    }
+}
+
 fn execute_arguments() {
     use ring3_core::execution::{Process32, ProcessOptions, ProcessStop, Register32, StopReason};
 
@@ -716,6 +774,7 @@ pub extern "C" fn run() -> u32 {
     execute_fp_control();
     execute_initializers();
     execute_arguments();
+    execute_dlls();
     execute_diagnostic();
     execute_windows_api();
     execute_image();

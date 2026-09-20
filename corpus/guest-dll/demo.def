@@ -1,0 +1,5 @@
+LIBRARY demo.dll
+EXPORTS
+    value @7
+    state @8 DATA
+    ordinal_value @9 NONAME
