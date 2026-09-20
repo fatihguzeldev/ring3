@@ -4,6 +4,7 @@ use super::{GuestMemory, MemoryError};
 
 mod operands;
 mod stack;
+mod x87;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Register32 {
@@ -21,6 +22,7 @@ pub enum Register32 {
 pub struct Cpu32 {
     registers: [u32; 8],
     fs_base: u32,
+    x87_control_word: u16,
     pub eip: u32,
     pub eflags: u32,
 }
@@ -48,6 +50,7 @@ impl Cpu32 {
         Self {
             registers: [0; 8],
             fs_base: 0,
+            x87_control_word: 0x037f,
             eip: entry_point,
             eflags: 2,
         }
@@ -70,6 +73,16 @@ impl Cpu32 {
     /// configures the flat 32-bit fs base; selector loading is not emulated.
     pub fn set_fs_base(&mut self, base: u32) {
         self.fs_base = base;
+    }
+
+    #[must_use]
+    pub fn x87_control_word(&self) -> u16 {
+        self.x87_control_word
+    }
+
+    /// sets raw control state; floating-point arithmetic is not yet implemented.
+    pub fn set_x87_control_word(&mut self, value: u16) {
+        self.x87_control_word = value;
     }
 
     pub fn run(&mut self, memory: &mut GuestMemory, instruction_limit: u64) -> RunResult {
@@ -201,6 +214,7 @@ impl Cpu32 {
                     next = instruction.near_branch32();
                 }
             }
+            Code::Fldcw_m2byte | Code::Fnstcw_m2byte => self.x87_control(instruction, memory)?,
             Code::Nopd | Code::Int3 => {}
             _ => return Err(StopReason::UnsupportedInstruction),
         }
