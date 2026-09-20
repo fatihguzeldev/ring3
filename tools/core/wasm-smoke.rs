@@ -45,6 +45,29 @@ mod error_mode_executable;
 #[path = "../../core/tests/support/heap_executable.rs"]
 mod heap_executable;
 
+fn execute_version() {
+    use ring3_core::execution::{Process32, ProcessStop, Register32, StopReason};
+    let bytes = imported_executable::pe32(
+        &[0xff, 0x15, 0x60, 0x20, 0x40, 0, 0xcc],
+        "kernel32.dll",
+        &["GetVersion"],
+    );
+    let mut process = Process32::load(&bytes, 32).unwrap();
+    let result = process.run(10);
+    assert_eq!(result.reason, ProcessStop::Stopped(StopReason::Breakpoint));
+    assert_eq!(result.api_calls, 1);
+    assert_eq!(process.cpu.register(Register32::Eax), 0x0a28_0105);
+    assert_eq!(process.cpu.register(Register32::Esp), 0x1001_0000);
+    #[cfg(windows_demo)]
+    {
+        let mut process =
+            Process32::load(include_bytes!("../../target/windows-api/version.exe"), 64).unwrap();
+        let result = process.run(1000);
+        assert_eq!(result.reason, ProcessStop::Exited(42));
+        assert_eq!(result.api_calls, 5);
+    }
+}
+
 fn execute_heap() {
     use ring3_core::execution::{MemoryError, Process32, ProcessStop, Register32, StopReason};
     let mut process = Process32::load(&heap_executable::pe32(), 27).unwrap();
@@ -963,6 +986,7 @@ pub extern "C" fn run() -> u32 {
     execute_resident_modules();
     execute_error_mode();
     execute_heap();
+    execute_version();
     execute_image();
     execute_function();
     inspect_image();

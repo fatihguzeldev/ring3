@@ -20,6 +20,8 @@ pub use parameters::ProcessOptions;
 const API_BASE: u32 = 0x7000_0000;
 const STACK_BASE: u32 = 0x1000_0000;
 const STACK_SIZE: u32 = 64 * 1024;
+// immutable nt 5.1/build 2600 guest identity, independent of the host and executable.
+const GUEST_VERSION: u32 = (2600 << 16) | (1 << 8) | 5;
 
 /// a single guest thread with a minimal win32 import boundary, not a full process.
 pub struct Process32 {
@@ -68,6 +70,7 @@ enum Api {
     GetDesktopWindow,
     SetErrorMode,
     GetErrorMode,
+    GetVersion,
     Graphics(d3d8::Call),
     Crt(crt::Call),
     Module(modules::Call),
@@ -95,6 +98,7 @@ impl Api {
             16 => Some(Self::GetDesktopWindow),
             0x20 => Some(Self::SetErrorMode),
             0x24 => Some(Self::GetErrorMode),
+            0x30 => Some(Self::GetVersion),
             0xffc => Some(Self::Unsupported),
             offset => d3d8::Call::at(offset)
                 .map(Self::Graphics)
@@ -123,6 +127,7 @@ impl Api {
                 "GetErrorMode" => 0x24,
                 "LocalAlloc" => 0x28,
                 "LocalFree" => 0x2c,
+                "GetVersion" => 0x30,
                 _ => return None,
             }
         } else if module.eq_ignore_ascii_case("d3d8.dll") && name == "Direct3DCreate8" {
@@ -140,6 +145,7 @@ impl Api {
             Self::GetLastError
             | Self::GetDesktopWindow
             | Self::GetErrorMode
+            | Self::GetVersion
             | Self::Unsupported => 0,
             Self::Graphics(call) => call.arguments(),
             Self::Crt(call) => call.arguments(),
@@ -367,6 +373,7 @@ impl Process32 {
                 self.error_mode = argument & 0x8003;
             }
             Api::GetErrorMode => self.cpu.set_register(Register32::Eax, self.error_mode),
+            Api::GetVersion => self.cpu.set_register(Register32::Eax, GUEST_VERSION),
             Api::Heap(call) => {
                 let value = self
                     .heap
