@@ -1,3 +1,4 @@
+use super::super::Access;
 use super::{
     API_BASE, Cpu32, DispatchError, GuestMemory, MemoryError, PAGE_SIZE, Permissions, guest,
 };
@@ -23,6 +24,7 @@ pub(super) enum Call {
     CommodePointer,
     ControlFp,
     GetMainArgs,
+    Memset,
 }
 
 impl Call {
@@ -33,6 +35,7 @@ impl Call {
             0x108 => Some(Self::CommodePointer),
             0x10c => Some(Self::ControlFp),
             0x110 => Some(Self::GetMainArgs),
+            0x114 => Some(Self::Memset),
             _ => None,
         }
     }
@@ -42,6 +45,7 @@ impl Call {
             Self::SetAppType => 1,
             Self::ControlFp => 2,
             Self::GetMainArgs => 5,
+            Self::Memset => 3,
             Self::FmodePointer | Self::CommodePointer => 0,
         }
     }
@@ -73,6 +77,16 @@ impl Crt {
                 arguments::get_main(self, arguments, memory)?;
                 Some(0)
             }
+            Call::Memset => {
+                let length = usize::try_from(arguments[2]).expect("u32 count fits target usize");
+                guest::check(memory, arguments[0], length, Access::Write)?;
+                memory.fill(
+                    u64::from(arguments[0]),
+                    length,
+                    arguments[1].to_le_bytes()[0],
+                )?;
+                Some(arguments[0])
+            }
         })
     }
 }
@@ -85,6 +99,7 @@ pub(super) fn resolve(name: &str) -> Option<u32> {
         "_controlfp" => Some(API_BASE + 0x10c),
         "_initterm" => Some(initializers::BASE),
         "__getmainargs" => Some(API_BASE + 0x110),
+        "memset" => Some(API_BASE + 0x114),
         "_fmode" => Some(FMODE),
         "_commode" => Some(COMMODE),
         "_adjust_fdiv" => Some(ADJUST_FDIV),

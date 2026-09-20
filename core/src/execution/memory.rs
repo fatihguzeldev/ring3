@@ -191,6 +191,23 @@ impl GuestMemory {
         Ok(())
     }
 
+    pub(super) fn fill(
+        &mut self,
+        mut address: u64,
+        mut length: usize,
+        value: u8,
+    ) -> Result<(), MemoryError> {
+        self.check_access(address, length, Access::Write)?;
+        while length != 0 {
+            let (index, offset, count) = chunk(address, length);
+            let page = self.pages.get_mut(&index).expect("fill range was checked");
+            page.bytes[offset..offset + count].fill(value);
+            address += count as u64;
+            length -= count;
+        }
+        Ok(())
+    }
+
     fn copy_out(
         &self,
         mut address: u64,
