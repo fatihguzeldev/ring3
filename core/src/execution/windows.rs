@@ -15,6 +15,7 @@ mod messages;
 mod modules;
 mod parameters;
 mod startup;
+mod system_metrics;
 mod thread;
 mod tls;
 
@@ -77,6 +78,7 @@ enum Api {
     ExitProcess,
     GetDesktopWindow,
     RegisterWindowMessage,
+    GetSystemMetrics,
     SetErrorMode,
     GetErrorMode,
     GetVersion,
@@ -115,6 +117,7 @@ impl Api {
             0x30 => Some(Self::GetVersion),
             0x94 => Some(Self::RegisterWindowMessage),
             0x98 => Some(Self::GetProcessVersion),
+            0x9c => Some(Self::GetSystemMetrics),
             0x118 => Some(Self::ExceptionProlog),
             0xffc => Some(Self::Unsupported),
             offset => d3d8::Call::at(offset)
@@ -173,6 +176,7 @@ impl Api {
             match name {
                 "GetDesktopWindow" => 16,
                 "RegisterWindowMessageA" => 0x94,
+                "GetSystemMetrics" => 0x9c,
                 _ => return None,
             }
         } else {
@@ -419,6 +423,10 @@ impl Process32 {
             Api::RegisterWindowMessage => {
                 let value = self.messages.register(argument, &mut self.memory)?;
                 self.cpu.set_register(Register32::Eax, value);
+            }
+            Api::GetSystemMetrics => {
+                self.cpu
+                    .set_register(Register32::Eax, system_metrics::get(argument)?);
             }
             Api::SetErrorMode => {
                 if argument & !0x8007 != 0 {
