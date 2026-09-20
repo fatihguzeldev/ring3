@@ -33,6 +33,24 @@ mod arguments_executable;
 #[path = "../../core/tests/support/dll_executable.rs"]
 mod dll_executable;
 
+#[path = "../../core/tests/support/delay_executable.rs"]
+mod delay_executable;
+
+fn execute_delay_thunks() {
+    use ring3_core::execution::{Process32, ProcessStop, Register32, StopReason};
+    for legacy in [false, true] {
+        let mut process = Process32::load(&delay_executable::pe32(legacy, false), 32).unwrap();
+        let result = process.run(50);
+        assert_eq!(result.reason, ProcessStop::Stopped(StopReason::Breakpoint));
+        assert_eq!(process.cpu.register(Register32::Eax), 42);
+        let mut word = [0; 4];
+        process.memory.read(0x0040_2190, &mut word).unwrap();
+        assert_eq!(u32::from_le_bytes(word), 1);
+        process.memory.read(0x0040_2180, &mut word).unwrap();
+        assert_eq!(u32::from_le_bytes(word), 0x0040_1080);
+    }
+}
+
 fn execute_dlls() {
     use ring3_core::execution::{
         GuestModule, Process32, ProcessOptions, ProcessStop, Register32, StopReason,
@@ -83,6 +101,11 @@ fn execute_dlls() {
         )
         .unwrap();
         let result = process.run(1000);
+        assert_eq!(result.reason, ProcessStop::Exited(42));
+        assert_eq!(result.api_calls, 1);
+        let mut delayed =
+            Process32::load(include_bytes!("../../target/guest-dll/delayed.exe"), 64).unwrap();
+        let result = delayed.run(1000);
         assert_eq!(result.reason, ProcessStop::Exited(42));
         assert_eq!(result.api_calls, 1);
     }
@@ -775,6 +798,7 @@ pub extern "C" fn run() -> u32 {
     execute_initializers();
     execute_arguments();
     execute_dlls();
+    execute_delay_thunks();
     execute_diagnostic();
     execute_windows_api();
     execute_image();
