@@ -1,5 +1,10 @@
 use super::{GuestMemory, MemoryError, PAGE_SIZE, Permissions};
-use crate::{PeDirectoryAddress, PeHeaderError, PeKind, PeSectionTable, parse_pe_sections};
+use crate::{
+    PeDirectoryAddress, PeHeaderError, PeImportLookupError, PeImportSymbol, PeKind, PeSectionTable,
+    parse_pe_sections,
+};
+
+mod imports;
 
 pub struct LoadedPe32 {
     pub memory: GuestMemory,
@@ -13,6 +18,10 @@ pub enum LoadError {
     UnsupportedImage,
     UnsupportedDirectory { index: u8 },
     InvalidLayout,
+    Imports(PeImportLookupError),
+    InvalidImportAddressTable,
+    BoundImportsUnsupported,
+    UnresolvedImport { module: String, symbol: String },
     Memory(MemoryError),
 }
 
@@ -32,8 +41,33 @@ impl From<MemoryError> for LoadError {
     reason = "project documentation headings are lower case"
 )]
 pub fn load_pe32(bytes: &[u8], page_limit: u32) -> Result<LoadedPe32, LoadError> {
+    load_image(bytes, page_limit, false, |_, _| None)
+}
+
+/// loads a pe32 image and resolves static imports before final section protection.
+/// the resolver returns guest addresses, never host pointers. callbacks may have
+/// occurred before a later load failure; partially loaded memory never escapes.
+///
+/// # errors
+/// rejects unresolved, malformed, bound or zero-oft imports and invalid iat ranges,
+/// along with the image and memory errors of [`load_pe32`].
+#[expect(clippy::missing_errors_doc, reason = "project headings are lower case")]
+pub fn load_pe32_with_imports(
+    bytes: &[u8],
+    page_limit: u32,
+    resolver: impl FnMut(&str, PeImportSymbol<'_>) -> Option<u32>,
+) -> Result<LoadedPe32, LoadError> {
+    load_image(bytes, page_limit, true, resolver)
+}
+
+fn load_image(
+    bytes: &[u8],
+    page_limit: u32,
+    allow_imports: bool,
+    resolver: impl FnMut(&str, PeImportSymbol<'_>) -> Option<u32>,
+) -> Result<LoadedPe32, LoadError> {
     let table = parse_pe_sections(bytes).map_err(LoadError::Header)?;
-    validate_image(&table, bytes.len())?;
+    validate_image(&table, bytes.len(), allow_imports)?;
     let optional = &table.headers.optional;
     let base = optional.image_base;
     let length = u64::from(optional.size_of_image);
@@ -47,6 +81,9 @@ pub fn load_pe32(bytes: &[u8], page_limit: u32) -> Result<LoadedPe32, LoadError>
             base + u64::from(section.virtual_address.get()),
             section.raw_data,
         )?;
+    }
+    if allow_imports {
+        imports::bind(bytes, base, &mut memory, resolver)?;
     }
     memory.protect(base, length, Permissions::NONE)?;
     memory.protect(
@@ -79,7 +116,11 @@ pub fn load_pe32(bytes: &[u8], page_limit: u32) -> Result<LoadedPe32, LoadError>
     })
 }
 
-fn validate_image(table: &PeSectionTable<'_>, file_size: usize) -> Result<(), LoadError> {
+fn validate_image(
+    table: &PeSectionTable<'_>,
+    file_size: usize,
+    allow_imports: bool,
+) -> Result<(), LoadError> {
     let header = &table.headers;
     let optional = &header.optional;
     if header.prefix.kind != PeKind::Pe32
@@ -89,7 +130,10 @@ fn validate_image(table: &PeSectionTable<'_>, file_size: usize) -> Result<(), Lo
     {
         return Err(LoadError::UnsupportedImage);
     }
-    for index in [1_u8, 9, 10, 12, 13, 14] {
+    for index in [1_u8, 9, 10, 11, 12, 13, 14] {
+        if (allow_imports && matches!(index, 1 | 12)) || (!allow_imports && index == 11) {
+            continue;
+        }
         if let Some(directory) = header.directories[usize::from(index)] {
             let address = match directory.address {
                 PeDirectoryAddress::Rva(rva) => u64::from(rva.get()),
