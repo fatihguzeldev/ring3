@@ -68,54 +68,95 @@ fn load_image(
     allow_imports: bool,
     resolver: impl FnMut(&str, PeImportSymbol<'_>) -> Option<u32>,
 ) -> Result<LoadedPe32, LoadError> {
-    let table = parse_pe_sections(bytes).map_err(LoadError::Header)?;
-    validate_image(&table, bytes.len(), allow_imports)?;
-    let optional = &table.headers.optional;
-    let base = optional.image_base;
-    let length = round_pages(u64::from(optional.size_of_image));
+    let image = Image::parse(bytes, allow_imports)?;
     let mut memory = GuestMemory::new(page_limit);
-    memory.map_zeroed(base, length, Permissions::READ_WRITE)?;
-    let headers_size =
-        usize::try_from(optional.size_of_headers).map_err(|_| LoadError::InvalidLayout)?;
-    memory.write(base, &bytes[..headers_size])?;
-    for section in &table.sections {
-        memory.write(
-            base + u64::from(section.virtual_address.get()),
-            section.raw_data,
-        )?;
-    }
+    image.map(&mut memory)?;
     if allow_imports {
-        imports::bind(bytes, base, &mut memory, resolver)?;
+        imports::bind(bytes, image.base(), &mut memory, resolver)?;
     }
-    memory.protect(base, length, Permissions::NONE)?;
-    memory.protect(
-        base,
-        round_pages(u64::from(optional.size_of_headers)),
-        Permissions::READ,
-    )?;
-    for section in &table.sections {
-        let size = section.virtual_size.max(section.size_of_raw_data);
-        if size == 0 {
-            continue;
-        }
-        let flags = section.characteristics;
-        memory.protect(
-            base + u64::from(section.virtual_address.get()),
-            round_pages(u64::from(size)),
-            Permissions {
-                read: flags & 0x4000_0000 != 0,
-                write: flags & 0x8000_0000 != 0,
-                execute: flags & 0x2000_0000 != 0,
-            },
-        )?;
-    }
-    let entry = base + u64::from(optional.address_of_entry_point.get());
-    memory.fetch(entry, &mut [0])?;
+    image.protect(&mut memory)?;
     Ok(LoadedPe32 {
         memory,
-        image_base: u32::try_from(base).map_err(|_| LoadError::InvalidLayout)?,
-        entry_point: u32::try_from(entry).map_err(|_| LoadError::InvalidLayout)?,
+        image_base: u32::try_from(image.base()).expect("validated pe32 base"),
+        entry_point: image.entry_point(),
     })
+}
+
+struct Image<'a> {
+    bytes: &'a [u8],
+    table: PeSectionTable<'a>,
+}
+
+impl<'a> Image<'a> {
+    fn parse(bytes: &'a [u8], allow_imports: bool) -> Result<Self, LoadError> {
+        let table = parse_pe_sections(bytes).map_err(LoadError::Header)?;
+        validate_image(&table, bytes.len(), allow_imports)?;
+        Ok(Self { bytes, table })
+    }
+
+    fn base(&self) -> u64 {
+        self.table.headers.optional.image_base
+    }
+
+    fn entry_point(&self) -> u32 {
+        u32::try_from(
+            self.base() + u64::from(self.table.headers.optional.address_of_entry_point.get()),
+        )
+        .expect("validated pe32 entry point")
+    }
+
+    fn map(&self, memory: &mut GuestMemory) -> Result<(), LoadError> {
+        let optional = &self.table.headers.optional;
+        let base = self.base();
+        memory.map_zeroed(
+            base,
+            round_pages(u64::from(optional.size_of_image)),
+            Permissions::READ_WRITE,
+        )?;
+        let headers_size =
+            usize::try_from(optional.size_of_headers).map_err(|_| LoadError::InvalidLayout)?;
+        memory.write(base, &self.bytes[..headers_size])?;
+        for section in &self.table.sections {
+            memory.write(
+                base + u64::from(section.virtual_address.get()),
+                section.raw_data,
+            )?;
+        }
+        Ok(())
+    }
+
+    fn protect(&self, memory: &mut GuestMemory) -> Result<(), LoadError> {
+        let optional = &self.table.headers.optional;
+        let base = self.base();
+        memory.protect(
+            base,
+            round_pages(u64::from(optional.size_of_image)),
+            Permissions::NONE,
+        )?;
+        memory.protect(
+            base,
+            round_pages(u64::from(optional.size_of_headers)),
+            Permissions::READ,
+        )?;
+        for section in &self.table.sections {
+            let size = section.virtual_size.max(section.size_of_raw_data);
+            if size == 0 {
+                continue;
+            }
+            let flags = section.characteristics;
+            memory.protect(
+                base + u64::from(section.virtual_address.get()),
+                round_pages(u64::from(size)),
+                Permissions {
+                    read: flags & 0x4000_0000 != 0,
+                    write: flags & 0x8000_0000 != 0,
+                    execute: flags & 0x2000_0000 != 0,
+                },
+            )?;
+        }
+        memory.fetch(u64::from(self.entry_point()), &mut [0])?;
+        Ok(())
+    }
 }
 
 fn validate_image(
