@@ -61,6 +61,17 @@ enum Api {
     Unsupported,
 }
 
+enum DispatchError {
+    Memory(MemoryError),
+    Unsupported,
+}
+
+impl From<MemoryError> for DispatchError {
+    fn from(error: MemoryError) -> Self {
+        Self::Memory(error)
+    }
+}
+
 impl Api {
     fn at(address: u32) -> Option<Self> {
         match address.checked_sub(API_BASE)? {
@@ -213,6 +224,11 @@ impl Process32 {
         self.crt.application_type
     }
 
+    #[must_use]
+    pub fn crt_new_mode(&self) -> u32 {
+        self.crt.new_mode
+    }
+
     /// takes the latest presented frame; presentation does not accumulate a queue.
     pub fn take_frame(&mut self) -> Option<Frame> {
         self.graphics.take_frame()
@@ -256,7 +272,14 @@ impl Process32 {
                 return result;
             }
             if let Err(error) = self.dispatch(api) {
-                result.reason = ProcessStop::Stopped(StopReason::MemoryFault(error));
+                result.reason = match error {
+                    DispatchError::Memory(error) => {
+                        ProcessStop::Stopped(StopReason::MemoryFault(error))
+                    }
+                    DispatchError::Unsupported => ProcessStop::UnsupportedApi {
+                        address: self.cpu.eip,
+                    },
+                };
                 return result;
             }
             result.api_calls += 1;
@@ -269,7 +292,7 @@ impl Process32 {
         result
     }
 
-    fn dispatch(&mut self, api: Api) -> Result<(), MemoryError> {
+    fn dispatch(&mut self, api: Api) -> Result<(), DispatchError> {
         let stack = self.cpu.register(Register32::Esp);
         let words = api.arguments() + 1;
         let mut frame = [0; 8];
@@ -290,7 +313,10 @@ impl Process32 {
                 self.cpu.set_register(Register32::Eax, result);
             }
             Api::Crt(call) => {
-                if let Some(value) = self.crt.dispatch(call, &frame[1..words], &mut self.cpu) {
+                if let Some(value) =
+                    self.crt
+                        .dispatch(call, &frame[1..words], &mut self.cpu, &mut self.memory)?
+                {
                     self.cpu.set_register(Register32::Eax, value);
                 }
             }

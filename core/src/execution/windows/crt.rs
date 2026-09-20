@@ -1,5 +1,8 @@
-use super::{API_BASE, Cpu32, GuestMemory, MemoryError, PAGE_SIZE, Permissions, guest};
+use super::{
+    API_BASE, Cpu32, DispatchError, GuestMemory, MemoryError, PAGE_SIZE, Permissions, guest,
+};
 
+mod arguments;
 mod floating;
 mod initializers;
 
@@ -19,6 +22,7 @@ pub(super) enum Call {
     FmodePointer,
     CommodePointer,
     ControlFp,
+    GetMainArgs,
 }
 
 impl Call {
@@ -28,6 +32,7 @@ impl Call {
             0x104 => Some(Self::FmodePointer),
             0x108 => Some(Self::CommodePointer),
             0x10c => Some(Self::ControlFp),
+            0x110 => Some(Self::GetMainArgs),
             _ => None,
         }
     }
@@ -36,6 +41,7 @@ impl Call {
         match self {
             Self::SetAppType => 1,
             Self::ControlFp => 2,
+            Self::GetMainArgs => 5,
             Self::FmodePointer | Self::CommodePointer => 0,
         }
     }
@@ -44,6 +50,7 @@ impl Call {
 #[derive(Default)]
 pub(super) struct Crt {
     pub(super) application_type: i32,
+    pub(super) new_mode: u32,
 }
 
 impl Crt {
@@ -52,8 +59,9 @@ impl Crt {
         call: Call,
         arguments: &[u32],
         cpu: &mut Cpu32,
-    ) -> Option<u32> {
-        match call {
+        memory: &mut GuestMemory,
+    ) -> Result<Option<u32>, DispatchError> {
+        Ok(match call {
             Call::SetAppType => {
                 self.application_type = arguments[0].cast_signed();
                 None
@@ -61,7 +69,11 @@ impl Crt {
             Call::FmodePointer => Some(FMODE),
             Call::CommodePointer => Some(COMMODE),
             Call::ControlFp => Some(floating::control(cpu, arguments[0], arguments[1])),
-        }
+            Call::GetMainArgs => {
+                arguments::get_main(self, arguments, memory)?;
+                Some(0)
+            }
+        })
     }
 }
 
@@ -72,6 +84,7 @@ pub(super) fn resolve(name: &str) -> Option<u32> {
         "__p__commode" => Some(API_BASE + 0x108),
         "_controlfp" => Some(API_BASE + 0x10c),
         "_initterm" => Some(initializers::BASE),
+        "__getmainargs" => Some(API_BASE + 0x110),
         "_fmode" => Some(FMODE),
         "_commode" => Some(COMMODE),
         "_adjust_fdiv" => Some(ADJUST_FDIV),
