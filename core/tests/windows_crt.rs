@@ -98,10 +98,10 @@ fn crt_frame_faults_and_mapping_failures_are_explicit() {
     assert_eq!(process.cpu, before);
     assert!(process.memory.fetch(0x7000_2000, &mut [0]).is_err());
     assert!(matches!(
-        Process32::load(&bytes, 22),
+        Process32::load(&bytes, 23),
         Err(LoadError::Memory(MemoryError::PageLimitExceeded))
     ));
-    assert!(Process32::load(&bytes, 23).is_ok());
+    assert!(Process32::load(&bytes, 24).is_ok());
     let mut collision = bytes;
     collision[0xb4..0xb8].copy_from_slice(&0x7000_0000_u32.to_le_bytes());
     assert!(Process32::load(&collision, 32).is_err());

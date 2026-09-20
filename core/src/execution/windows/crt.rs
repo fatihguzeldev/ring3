@@ -1,6 +1,7 @@
 use super::{API_BASE, Cpu32, GuestMemory, MemoryError, PAGE_SIZE, Permissions, guest};
 
 mod floating;
+mod initializers;
 
 const DATA: u32 = 0x7000_2000;
 const FMODE: u32 = DATA;
@@ -65,6 +66,7 @@ pub(super) fn resolve(name: &str) -> Option<u32> {
         "__p__fmode" => Some(API_BASE + 0x104),
         "__p__commode" => Some(API_BASE + 0x108),
         "_controlfp" => Some(API_BASE + 0x10c),
+        "_initterm" => Some(initializers::BASE),
         "_fmode" => Some(FMODE),
         "_commode" => Some(COMMODE),
         "_adjust_fdiv" => Some(ADJUST_FDIV),
@@ -74,5 +76,6 @@ pub(super) fn resolve(name: &str) -> Option<u32> {
 
 pub(super) fn initialize(memory: &mut GuestMemory) -> Result<(), MemoryError> {
     memory.map_zeroed(u64::from(DATA), PAGE_SIZE, Permissions::READ_WRITE)?;
-    guest::write_word(memory, FMODE, 0x4000)
+    guest::write_word(memory, FMODE, 0x4000)?;
+    initializers::initialize(memory)
 }
