@@ -1,4 +1,6 @@
-use super::{API_BASE, GuestMemory, MemoryError, PAGE_SIZE, Permissions, guest};
+use super::{API_BASE, Cpu32, GuestMemory, MemoryError, PAGE_SIZE, Permissions, guest};
+
+mod floating;
 
 const DATA: u32 = 0x7000_2000;
 const FMODE: u32 = DATA;
@@ -10,6 +12,7 @@ pub(super) enum Call {
     SetAppType,
     FmodePointer,
     CommodePointer,
+    ControlFp,
 }
 
 impl Call {
@@ -18,12 +21,17 @@ impl Call {
             0x100 => Some(Self::SetAppType),
             0x104 => Some(Self::FmodePointer),
             0x108 => Some(Self::CommodePointer),
+            0x10c => Some(Self::ControlFp),
             _ => None,
         }
     }
 
     pub(super) fn arguments(self) -> usize {
-        usize::from(matches!(self, Self::SetAppType))
+        match self {
+            Self::SetAppType => 1,
+            Self::ControlFp => 2,
+            Self::FmodePointer | Self::CommodePointer => 0,
+        }
     }
 }
 
@@ -33,14 +41,20 @@ pub(super) struct Crt {
 }
 
 impl Crt {
-    pub(super) fn dispatch(&mut self, call: Call, argument: u32) -> Option<u32> {
+    pub(super) fn dispatch(
+        &mut self,
+        call: Call,
+        arguments: &[u32],
+        cpu: &mut Cpu32,
+    ) -> Option<u32> {
         match call {
             Call::SetAppType => {
-                self.application_type = argument.cast_signed();
+                self.application_type = arguments[0].cast_signed();
                 None
             }
             Call::FmodePointer => Some(FMODE),
             Call::CommodePointer => Some(COMMODE),
+            Call::ControlFp => Some(floating::control(cpu, arguments[0], arguments[1])),
         }
     }
 }
@@ -50,6 +64,7 @@ pub(super) fn resolve(name: &str) -> Option<u32> {
         "__set_app_type" => Some(API_BASE + 0x100),
         "__p__fmode" => Some(API_BASE + 0x104),
         "__p__commode" => Some(API_BASE + 0x108),
+        "_controlfp" => Some(API_BASE + 0x10c),
         "_fmode" => Some(FMODE),
         "_commode" => Some(COMMODE),
         "_adjust_fdiv" => Some(ADJUST_FDIV),

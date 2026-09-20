@@ -167,6 +167,7 @@ impl Process32 {
         let mut cpu = Cpu32::new(image.entry_point);
         cpu.set_register(Register32::Esp, STACK_BASE + STACK_SIZE);
         cpu.set_fs_base(thread::BASE);
+        cpu.set_x87_control_word(0x027f);
         Ok(Self {
             memory: image.memory,
             cpu,
@@ -273,7 +274,7 @@ impl Process32 {
                 self.cpu.set_register(Register32::Eax, result);
             }
             Api::Crt(call) => {
-                if let Some(value) = self.crt.dispatch(call, argument) {
+                if let Some(value) = self.crt.dispatch(call, &frame[1..words], &mut self.cpu) {
                     self.cpu.set_register(Register32::Eax, value);
                 }
             }
