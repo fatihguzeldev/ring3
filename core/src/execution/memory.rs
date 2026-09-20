@@ -171,7 +171,12 @@ impl GuestMemory {
         Ok(())
     }
 
-    fn check_access(&self, address: u64, length: usize, access: Access) -> Result<(), MemoryError> {
+    pub(super) fn check_access(
+        &self,
+        address: u64,
+        length: usize,
+        access: Access,
+    ) -> Result<(), MemoryError> {
         let end = address
             .checked_add(length as u64)
             .ok_or(MemoryError::AddressOverflow)?;

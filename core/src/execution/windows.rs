@@ -4,6 +4,11 @@ use super::{
 };
 use crate::PeImportSymbol;
 
+mod d3d8;
+mod guest;
+
+pub use d3d8::Frame;
+
 const API_BASE: u32 = 0x7000_0000;
 const STACK_BASE: u32 = 0x1000_0000;
 const STACK_SIZE: u32 = 64 * 1024;
@@ -14,12 +19,14 @@ pub struct Process32 {
     pub cpu: Cpu32,
     last_error: u32,
     exit_code: Option<u32>,
+    graphics: d3d8::Graphics,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ProcessStop {
     Exited(u32),
     Stopped(StopReason),
+    UnsupportedApi { address: u32 },
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -34,6 +41,9 @@ enum Api {
     SetLastError,
     GetLastError,
     ExitProcess,
+    GetDesktopWindow,
+    Graphics(d3d8::Call),
+    Unsupported,
 }
 
 impl Api {
@@ -42,24 +52,39 @@ impl Api {
             0 => Some(Self::SetLastError),
             4 => Some(Self::GetLastError),
             8 => Some(Self::ExitProcess),
-            _ => None,
+            16 => Some(Self::GetDesktopWindow),
+            0xffc => Some(Self::Unsupported),
+            offset => d3d8::Call::at(offset).map(Self::Graphics),
         }
     }
 
     fn resolve(module: &str, symbol: PeImportSymbol<'_>) -> Option<u32> {
-        if !module.eq_ignore_ascii_case("kernel32.dll") {
-            return None;
-        }
         let PeImportSymbol::ByName { name, .. } = symbol else {
             return None;
         };
-        let offset = match name {
-            "SetLastError" => 0,
-            "GetLastError" => 4,
-            "ExitProcess" => 8,
-            _ => return None,
+        let offset = if module.eq_ignore_ascii_case("kernel32.dll") {
+            match name {
+                "SetLastError" => 0,
+                "GetLastError" => 4,
+                "ExitProcess" => 8,
+                _ => return None,
+            }
+        } else if module.eq_ignore_ascii_case("d3d8.dll") && name == "Direct3DCreate8" {
+            12
+        } else if module.eq_ignore_ascii_case("user32.dll") && name == "GetDesktopWindow" {
+            16
+        } else {
+            return None;
         };
         Some(API_BASE + offset)
+    }
+
+    fn arguments(self) -> usize {
+        match self {
+            Self::GetLastError | Self::GetDesktopWindow | Self::Unsupported => 0,
+            Self::Graphics(call) => call.arguments(),
+            _ => 1,
+        }
     }
 }
 
@@ -80,6 +105,7 @@ impl Process32 {
         image
             .memory
             .map_zeroed(u64::from(API_BASE), PAGE_SIZE, Permissions::NONE)?;
+        d3d8::Graphics::initialize(&mut image.memory)?;
         let mut cpu = Cpu32::new(image.entry_point);
         cpu.set_register(Register32::Esp, STACK_BASE + STACK_SIZE);
         Ok(Self {
@@ -87,6 +113,7 @@ impl Process32 {
             cpu,
             last_error: 0,
             exit_code: None,
+            graphics: d3d8::Graphics::default(),
         })
     }
 
@@ -98,6 +125,11 @@ impl Process32 {
     #[must_use]
     pub fn exit_code(&self) -> Option<u32> {
         self.exit_code
+    }
+
+    /// takes the latest presented frame; presentation does not accumulate a queue.
+    pub fn take_frame(&mut self) -> Option<Frame> {
+        self.graphics.take_frame()
     }
 
     /// each guest instruction and each completed api call costs one budget unit.
@@ -127,6 +159,12 @@ impl Process32 {
             let Some(api) = Api::at(self.cpu.eip) else {
                 unreachable!()
             };
+            if matches!(api, Api::Unsupported) {
+                result.reason = ProcessStop::UnsupportedApi {
+                    address: self.cpu.eip,
+                };
+                return result;
+            }
             if let Err(error) = self.dispatch(api) {
                 result.reason = ProcessStop::Stopped(StopReason::MemoryFault(error));
                 return result;
@@ -143,19 +181,11 @@ impl Process32 {
 
     fn dispatch(&mut self, api: Api) -> Result<(), MemoryError> {
         let stack = self.cpu.register(Register32::Esp);
-        let length = if matches!(api, Api::GetLastError) {
-            4
-        } else {
-            8
-        };
-        stack
-            .checked_add(length - 1)
-            .ok_or(MemoryError::AddressOverflow)?;
+        let words = api.arguments() + 1;
+        let length = u32::try_from(words * 4).expect("api frame fits u32");
         let mut frame = [0; 8];
-        self.memory
-            .read(u64::from(stack), &mut frame[..length as usize])?;
-        let return_address = u32::from_le_bytes(frame[..4].try_into().unwrap());
-        let argument = u32::from_le_bytes(frame[4..].try_into().unwrap());
+        guest::read_words(&self.memory, stack, &mut frame[..words])?;
+        let argument = frame[1];
         match api {
             Api::SetLastError => self.last_error = argument,
             Api::GetLastError => self.cpu.set_register(Register32::Eax, self.last_error),
@@ -163,10 +193,20 @@ impl Process32 {
                 self.exit_code = Some(argument);
                 return Ok(());
             }
+            Api::GetDesktopWindow => self.cpu.set_register(Register32::Eax, d3d8::DESKTOP),
+            Api::Graphics(call) => {
+                let result = self
+                    .graphics
+                    .dispatch(call, &frame[1..words], &mut self.memory)?;
+                self.cpu.set_register(Register32::Eax, result);
+            }
+            Api::Unsupported => unreachable!(),
         }
+        // an api output may alias the saved return address; permissions are unchanged.
+        guest::read_words(&self.memory, stack, &mut frame[..1])?;
         self.cpu
             .set_register(Register32::Esp, stack.wrapping_add(length));
-        self.cpu.eip = return_address;
+        self.cpu.eip = frame[0];
         Ok(())
     }
 }
