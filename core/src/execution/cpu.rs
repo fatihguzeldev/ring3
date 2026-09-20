@@ -1,6 +1,8 @@
-use iced_x86::{Code, Decoder, DecoderError, DecoderOptions, Instruction, OpKind, Register};
+use iced_x86::{Code, Decoder, DecoderError, DecoderOptions, Instruction, Mnemonic, Register};
 
 use super::{GuestMemory, MemoryError};
+
+mod operands;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Register32 {
@@ -59,7 +61,9 @@ impl Cpu32 {
     pub fn run(&mut self, memory: &mut GuestMemory, instruction_limit: u64) -> RunResult {
         for executed in 0..instruction_limit {
             let start = self.eip;
-            let result = decode(memory, start).and_then(|instruction| self.execute(&instruction));
+            let before = *self;
+            let result =
+                decode(memory, start).and_then(|instruction| self.execute(&instruction, memory));
             match result {
                 Ok(false) => {}
                 Ok(true) => {
@@ -70,6 +74,7 @@ impl Cpu32 {
                     };
                 }
                 Err(reason) => {
+                    *self = before;
                     return RunResult {
                         reason,
                         instructions: executed,
@@ -85,7 +90,11 @@ impl Cpu32 {
         }
     }
 
-    fn execute(&mut self, instruction: &Instruction) -> Result<bool, StopReason> {
+    fn execute(
+        &mut self,
+        instruction: &Instruction,
+        memory: &mut GuestMemory,
+    ) -> Result<bool, StopReason> {
         if instruction.has_lock_prefix()
             || instruction.has_rep_prefix()
             || instruction.has_repne_prefix()
@@ -95,58 +104,40 @@ impl Cpu32 {
         }
         let mut next = instruction.next_ip32();
         match instruction.code() {
-            Code::Mov_r32_imm32 => {
-                let destination = register32(instruction.op0_register())?;
-                self.set_register(destination, instruction.immediate32());
+            Code::Mov_r32_imm32
+            | Code::Mov_r32_rm32
+            | Code::Mov_rm32_r32
+            | Code::Mov_rm32_imm32
+            | Code::Mov_EAX_moffs32
+            | Code::Mov_moffs32_EAX => {
+                let destination = self.operand(instruction, 0)?;
+                let value = self.read_operand(self.operand(instruction, 1)?, memory)?;
+                self.write_operand(destination, value, memory)?;
             }
-            Code::Mov_r32_rm32 | Code::Mov_rm32_r32
-                if instruction.op0_kind() == OpKind::Register
-                    && instruction.op1_kind() == OpKind::Register =>
-            {
+            Code::Lea_r32_m => {
                 let destination = register32(instruction.op0_register())?;
-                let source = register32(instruction.op1_register())?;
-                self.set_register(destination, self.register(source));
+                self.set_register(destination, self.effective_address(instruction)?);
             }
             Code::Add_EAX_imm32
             | Code::Add_rm32_imm32
             | Code::Add_rm32_imm8
+            | Code::Add_rm32_r32
+            | Code::Add_r32_rm32
             | Code::Sub_EAX_imm32
             | Code::Sub_rm32_imm32
             | Code::Sub_rm32_imm8
+            | Code::Sub_rm32_r32
+            | Code::Sub_r32_rm32
             | Code::Cmp_EAX_imm32
             | Code::Cmp_rm32_imm32
             | Code::Cmp_rm32_imm8
-                if instruction.op0_kind() == OpKind::Register =>
-            {
-                let destination = register32(instruction.op0_register())?;
-                let left = self.register(destination);
-                let right = if instruction.op1_kind() == OpKind::Immediate8to32 {
-                    instruction.immediate8to32().cast_unsigned()
-                } else {
-                    instruction.immediate32()
-                };
-                let subtract = matches!(
-                    instruction.code(),
-                    Code::Sub_EAX_imm32
-                        | Code::Sub_rm32_imm32
-                        | Code::Sub_rm32_imm8
-                        | Code::Cmp_EAX_imm32
-                        | Code::Cmp_rm32_imm32
-                        | Code::Cmp_rm32_imm8
-                );
-                let (result, carry) = if subtract {
-                    left.overflowing_sub(right)
-                } else {
-                    left.overflowing_add(right)
-                };
-                self.arithmetic_flags(left, right, result, carry, subtract);
-                if !matches!(
-                    instruction.code(),
-                    Code::Cmp_EAX_imm32 | Code::Cmp_rm32_imm32 | Code::Cmp_rm32_imm8
-                ) {
-                    self.set_register(destination, result);
-                }
-            }
+            | Code::Cmp_rm32_r32
+            | Code::Cmp_r32_rm32
+            | Code::Xor_EAX_imm32
+            | Code::Xor_rm32_imm32
+            | Code::Xor_rm32_imm8
+            | Code::Xor_rm32_r32
+            | Code::Xor_r32_rm32 => self.binary(instruction, memory)?,
             Code::Jmp_rel8_32 | Code::Jmp_rel32_32 => next = instruction.near_branch32(),
             Code::Je_rel8_32 | Code::Je_rel32_32 => {
                 if self.eflags & 0x40 != 0 {
@@ -165,6 +156,32 @@ impl Cpu32 {
         Ok(instruction.code() == Code::Int3)
     }
 
+    fn binary(
+        &mut self,
+        instruction: &Instruction,
+        memory: &mut GuestMemory,
+    ) -> Result<(), StopReason> {
+        let destination = self.operand(instruction, 0)?;
+        let left = self.read_operand(destination, memory)?;
+        let right = self.read_operand(self.operand(instruction, 1)?, memory)?;
+        let operation = instruction.mnemonic();
+        let subtract = matches!(operation, Mnemonic::Sub | Mnemonic::Cmp);
+        let (result, carry) = match operation {
+            Mnemonic::Xor => (left ^ right, false),
+            Mnemonic::Sub | Mnemonic::Cmp => left.overflowing_sub(right),
+            _ => left.overflowing_add(right),
+        };
+        if operation != Mnemonic::Cmp {
+            self.write_operand(destination, result, memory)?;
+        }
+        if operation == Mnemonic::Xor {
+            self.eflags = (self.eflags & !0x8d5) | result_flags(result);
+        } else {
+            self.arithmetic_flags(left, right, result, carry, subtract);
+        }
+        Ok(())
+    }
+
     fn arithmetic_flags(
         &mut self,
         left: u32,
@@ -181,12 +198,16 @@ impl Cpu32 {
             != 0;
         self.eflags = (self.eflags & !0x8d5)
             | u32::from(carry)
-            | (u32::from((result & 0xff).count_ones().is_multiple_of(2)) << 2)
+            | result_flags(result)
             | ((left ^ right ^ result) & 0x10)
-            | (u32::from(result == 0) << 6)
-            | ((result >> 24) & 0x80)
             | (u32::from(overflow) << 11);
     }
+}
+
+fn result_flags(result: u32) -> u32 {
+    (u32::from((result & 0xff).count_ones().is_multiple_of(2)) << 2)
+        | (u32::from(result == 0) << 6)
+        | ((result >> 24) & 0x80)
 }
 
 fn register32(register: Register) -> Result<Register32, StopReason> {
