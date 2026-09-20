@@ -15,6 +15,41 @@ mod imported_executable;
 #[path = "../../core/tests/support/d3d8_executable.rs"]
 mod d3d8_executable;
 
+fn execute_diagnostic() {
+    use ring3_core::execution::{LoadError, Process32, ProcessStop};
+
+    for ordinal in [false, true] {
+        let mut bytes = imported_executable::pe32(
+            &[0xff, 0x15, 0x60, 0x20, 0x40, 0],
+            "Missing.dll",
+            &["Absent"],
+        );
+        bytes[0xd0..0xd4].copy_from_slice(&0x2180_u32.to_le_bytes());
+        bytes[0x1a8..0x1ac].copy_from_slice(&0x180_u32.to_le_bytes());
+        bytes[1028..1032].fill(0xff);
+        bytes[1120..1124].fill(0xfe);
+        if ordinal {
+            bytes[1088..1092].copy_from_slice(&0x8000_0017_u32.to_le_bytes());
+        }
+        assert!(matches!(
+            Process32::load(&bytes, 32),
+            Err(LoadError::UnresolvedImport { .. })
+        ));
+        let mut process = Process32::load_diagnostic(&bytes, 32).unwrap();
+        let result = process.run(100);
+        assert_eq!(
+            result.reason,
+            ProcessStop::UnresolvedImport {
+                address: 0x7100_0000,
+                module: "Missing.dll".into(),
+                symbol: if ordinal { "#23" } else { "Absent" }.into(),
+            }
+        );
+        assert_eq!((result.instructions, result.api_calls), (1, 0));
+        assert_eq!(process.run(100).instructions, 0);
+    }
+}
+
 fn execute_graphics() {
     use ring3_core::execution::{Process32, ProcessStop, StopReason};
 
@@ -505,6 +540,7 @@ fn inspect_dependency_cycle() {
 #[unsafe(no_mangle)]
 pub extern "C" fn run() -> u32 {
     execute_graphics();
+    execute_diagnostic();
     execute_windows_api();
     execute_image();
     execute_function();
