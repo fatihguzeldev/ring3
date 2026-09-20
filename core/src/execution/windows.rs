@@ -156,6 +156,7 @@ impl Api {
                 "GlobalFree" => 0x84,
                 "GetACP" => 0x88,
                 "GetOEMCP" => 0x8c,
+                "GetCPInfo" => 0x90,
                 _ => return None,
             }
         } else if module.eq_ignore_ascii_case("d3d8.dll") && name == "Direct3DCreate8" {
@@ -174,11 +175,11 @@ impl Api {
             | Self::GetDesktopWindow
             | Self::GetErrorMode
             | Self::GetVersion
-            | Self::CodePage(_)
             | Self::ExceptionProlog
             | Self::Unsupported => 0,
             Self::Graphics(call) => call.arguments(),
             Self::Crt(call) => call.arguments(),
+            Self::CodePage(call) => call.arguments(),
             Self::Heap(call) => call.arguments(),
             Self::Tls(call) => call.arguments(),
             _ => 1,
@@ -410,7 +411,10 @@ impl Process32 {
             }
             Api::GetErrorMode => self.cpu.set_register(Register32::Eax, self.error_mode),
             Api::GetVersion => self.cpu.set_register(Register32::Eax, GUEST_VERSION),
-            Api::CodePage(call) => self.cpu.set_register(Register32::Eax, call.identifier()),
+            Api::CodePage(call) => {
+                let value = call.dispatch(&frame[1..words], &mut self.memory)?;
+                self.cpu.set_register(Register32::Eax, value);
+            }
             Api::Tls(call) => {
                 let value = self
                     .tls

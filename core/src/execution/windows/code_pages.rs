@@ -5,6 +5,7 @@ const OEM: u32 = 437;
 pub(super) enum Call {
     Ansi,
     Oem,
+    Info,
 }
 
 impl Call {
@@ -12,14 +13,43 @@ impl Call {
         match offset {
             0x88 => Some(Self::Ansi),
             0x8c => Some(Self::Oem),
+            0x90 => Some(Self::Info),
             _ => None,
         }
     }
 
-    pub(super) fn identifier(self) -> u32 {
+    pub(super) fn arguments(self) -> usize {
+        if matches!(self, Self::Info) { 2 } else { 0 }
+    }
+
+    pub(super) fn dispatch(
+        self,
+        arguments: &[u32],
+        memory: &mut GuestMemory,
+    ) -> Result<u32, DispatchError> {
         match self {
-            Self::Ansi => ANSI,
-            Self::Oem => OEM,
+            Self::Ansi => Ok(ANSI),
+            Self::Oem => Ok(OEM),
+            Self::Info => info(arguments[0], arguments[1], memory),
         }
     }
 }
+
+fn info(code_page: u32, output: u32, memory: &mut GuestMemory) -> Result<u32, DispatchError> {
+    if output == 0 {
+        thread::set_last_error(memory, 87)?;
+        return Ok(0);
+    }
+    if !matches!(code_page, 0 | 1 | 3 | ANSI | OEM) {
+        return Err(DispatchError::Unsupported);
+    }
+    // the two trailing structure padding bytes are not output fields.
+    let mut fields = [0; 18];
+    fields[0] = 1;
+    fields[4] = b'?';
+    guest::check(memory, output, fields.len(), Access::Write)?;
+    memory.write(u64::from(output), &fields)?;
+    Ok(1)
+}
+use super::super::Access;
+use super::{DispatchError, GuestMemory, guest, thread};
