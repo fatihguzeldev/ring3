@@ -425,17 +425,27 @@ impl Process32 {
         let words = api.arguments() + 1;
         let mut frame = [0; 8];
         guest::read_words(&self.memory, stack, &mut frame[..words])?;
-        let argument = frame[1];
+        if matches!(api, Api::ExceptionProlog) {
+            return crt::enter_exception_frame(&mut self.cpu, &mut self.memory, frame[0]);
+        }
+        if matches!(api, Api::ExitProcess) {
+            self.exit_code = Some(frame[1]);
+            return Ok(());
+        }
+        self.invoke(api, &frame[1..words], stack)?;
+        // an api output may alias the saved return address; heap free protects this frame.
+        guest::read_words(&self.memory, stack, &mut frame[..1])?;
+        self.cpu
+            .set_register(Register32::Esp, stack.wrapping_add(api.stack_cleanup()));
+        self.cpu.eip = frame[0];
+        Ok(())
+    }
+
+    fn invoke(&mut self, api: Api, arguments: &[u32], stack: u32) -> Result<(), DispatchError> {
+        let argument = arguments.first().copied().unwrap_or(0);
         match api {
-            Api::ExceptionProlog => {
-                return crt::enter_exception_frame(&mut self.cpu, &mut self.memory, frame[0]);
-            }
             Api::SetLastError => thread::set_last_error(&mut self.memory, argument)?,
             Api::GetLastError => self.cpu.set_register(Register32::Eax, self.last_error()?),
-            Api::ExitProcess => {
-                self.exit_code = Some(argument);
-                return Ok(());
-            }
             Api::GetDesktopWindow => self.cpu.set_register(Register32::Eax, d3d8::DESKTOP),
             Api::RegisterWindowMessage => {
                 let value = self.messages.register(argument, &mut self.memory)?;
@@ -462,13 +472,11 @@ impl Process32 {
                     .set_register(Register32::Eax, self.subsystem_version);
             }
             Api::CodePage(call) => {
-                let value = call.dispatch(&frame[1..words], &mut self.memory)?;
+                let value = call.dispatch(arguments, &mut self.memory)?;
                 self.cpu.set_register(Register32::Eax, value);
             }
             Api::Tls(call) => {
-                let value = self
-                    .tls
-                    .dispatch(call, &frame[1..words], &mut self.memory)?;
+                let value = self.tls.dispatch(call, arguments, &mut self.memory)?;
                 self.cpu.set_register(Register32::Eax, value);
             }
             Api::CriticalSection(call) => {
@@ -482,7 +490,7 @@ impl Process32 {
             Api::Heap(call) => {
                 let value = self
                     .heap
-                    .dispatch(call, &frame[1..words], stack, &mut self.memory)?;
+                    .dispatch(call, arguments, stack, &mut self.memory)?;
                 self.cpu.set_register(Register32::Eax, value);
             }
             Api::Module(call) => {
@@ -496,18 +504,16 @@ impl Process32 {
             }
             Api::Graphics(call) => self.cpu.set_register(
                 Register32::Eax,
-                self.graphics
-                    .dispatch(call, &frame[1..words], &mut self.memory)?,
+                self.graphics.dispatch(call, arguments, &mut self.memory)?,
             ),
             Api::Gdi(call) => self.cpu.set_register(
                 Register32::Eax,
-                self.gdi
-                    .dispatch(call, &frame[1..words], &mut self.memory)?,
+                self.gdi.dispatch(call, arguments, &mut self.memory)?,
             ),
             Api::Crt(call) => {
                 if let Some(value) = self.crt.dispatch(
                     call,
-                    &frame[1..words],
+                    arguments,
                     &mut self.cpu,
                     &mut self.memory,
                     &mut self.heap,
@@ -515,13 +521,8 @@ impl Process32 {
                     self.cpu.set_register(Register32::Eax, value);
                 }
             }
-            Api::Unsupported => unreachable!(),
+            Api::ExceptionProlog | Api::ExitProcess | Api::Unsupported => unreachable!(),
         }
-        // an api output may alias the saved return address; heap free protects this frame.
-        guest::read_words(&self.memory, stack, &mut frame[..1])?;
-        self.cpu
-            .set_register(Register32::Esp, stack.wrapping_add(api.stack_cleanup()));
-        self.cpu.eip = frame[0];
         Ok(())
     }
 }
