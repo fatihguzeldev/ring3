@@ -4,6 +4,7 @@ use super::{
 };
 use crate::PeImportSymbol;
 
+mod critical_sections;
 mod crt;
 mod d3d8;
 mod diagnostics;
@@ -32,6 +33,7 @@ pub struct Process32 {
     startup: startup::Startup,
     modules: modules::Modules,
     heap: heap::Heap,
+    critical_sections: critical_sections::CriticalSections,
     graphics: d3d8::Graphics,
     crt: crt::Crt,
     diagnostic_imports: diagnostics::Imports,
@@ -75,6 +77,7 @@ enum Api {
     Crt(crt::Call),
     Module(modules::Call),
     Heap(heap::Call),
+    CriticalSection(critical_sections::Call),
     Unsupported,
 }
 
@@ -104,7 +107,8 @@ impl Api {
                 .map(Self::Graphics)
                 .or_else(|| crt::Call::at(offset).map(Self::Crt))
                 .or_else(|| modules::Call::at(offset).map(Self::Module))
-                .or_else(|| heap::Call::at(offset).map(Self::Heap)),
+                .or_else(|| heap::Call::at(offset).map(Self::Heap))
+                .or_else(|| critical_sections::Call::at(offset).map(Self::CriticalSection)),
         }
     }
 
@@ -128,6 +132,11 @@ impl Api {
                 "LocalAlloc" => 0x28,
                 "LocalFree" => 0x2c,
                 "GetVersion" => 0x30,
+                "InitializeCriticalSection" => 0x34,
+                "EnterCriticalSection" => 0x38,
+                "TryEnterCriticalSection" => 0x3c,
+                "LeaveCriticalSection" => 0x60,
+                "DeleteCriticalSection" => 0x64,
                 _ => return None,
             }
         } else if module.eq_ignore_ascii_case("d3d8.dll") && name == "Direct3DCreate8" {
@@ -244,6 +253,7 @@ impl Process32 {
             startup,
             modules,
             heap: heap::Heap::default(),
+            critical_sections: critical_sections::CriticalSections::default(),
             graphics: d3d8::Graphics::default(),
             crt: crt::Crt::default(),
             diagnostic_imports,
@@ -374,6 +384,14 @@ impl Process32 {
             }
             Api::GetErrorMode => self.cpu.set_register(Register32::Eax, self.error_mode),
             Api::GetVersion => self.cpu.set_register(Register32::Eax, GUEST_VERSION),
+            Api::CriticalSection(call) => {
+                if let Some(value) =
+                    self.critical_sections
+                        .dispatch(call, argument, &mut self.memory)?
+                {
+                    self.cpu.set_register(Register32::Eax, value);
+                }
+            }
             Api::Heap(call) => {
                 let value = self
                     .heap
