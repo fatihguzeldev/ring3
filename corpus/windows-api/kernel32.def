@@ -9,3 +9,8 @@ EXPORTS
     _LocalAlloc@8==LocalAlloc
     _LocalFree@4==LocalFree
     _GetVersion@0==GetVersion
+    _InitializeCriticalSection@4==InitializeCriticalSection
+    _EnterCriticalSection@4==EnterCriticalSection
+    _TryEnterCriticalSection@4==TryEnterCriticalSection
+    _LeaveCriticalSection@4==LeaveCriticalSection
+    _DeleteCriticalSection@4==DeleteCriticalSection
