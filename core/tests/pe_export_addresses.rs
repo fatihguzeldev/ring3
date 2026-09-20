@@ -152,23 +152,28 @@ fn directory_and_base_failures_precede_entry_policies() {
 #[test]
 fn entry_limit_includes_holes_and_precedes_source_or_ordinal_checks() {
     for plus in [false, true] {
-        let mut bytes = fixture(plus, 4096);
+        let mut bytes = fixture(plus, 16_384);
+        bytes.resize(131_072, 0);
+        section(&mut bytes, plus, 0, [0x1_e000, 0x1000, 0x1_e000, 512]);
         let result = parse_pe_export_addresses(&bytes).unwrap().unwrap();
-        assert_eq!(result.entries.len(), 4096);
+        assert_eq!(result.entries.len(), 16_384);
         assert!(
             result
                 .entries
                 .iter()
                 .all(|entry| entry.target == PeExportTarget::Empty)
         );
-        assert_eq!(result.entries[4095].ordinal, 4102);
-        for count in [4097, u32::MAX] {
+        assert_eq!(result.entries[16_383].ordinal, 16_390);
+        for count in [16_385, u32::MAX] {
             put32(&mut bytes, 532, count);
             put32(&mut bytes, 540, 0);
             put32(&mut bytes, 528, u32::MAX);
             assert_eq!(
                 parse_pe_export_addresses(&bytes),
-                Err(PeExportAddressError::EntryLimitExceeded { count, limit: 4096 })
+                Err(PeExportAddressError::EntryLimitExceeded {
+                    count,
+                    limit: 16_384
+                })
             );
         }
         put32(&mut bytes, 532, 1);

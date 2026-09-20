@@ -376,3 +376,45 @@ fn unresolved_imports_during_attach_stop_before_exe_without_skipping_dll_work() 
     );
     assert_eq!(word(&process, BASE + 0x2180), 0);
 }
+
+#[test]
+fn ordinal_beyond_the_old_table_cap_resolves_and_executes() {
+    let base = 0x5000_0000;
+    let mut library = dll(base, &attach(base, 41, true), None);
+    library.resize(0x6400, 0);
+    for (offset, value) in [
+        (0x1a8, 0x6000),
+        (0x1b0, 0x6000),
+        (0xd0, 0x8000),
+        (1556, 5000),
+        (1564, 0x2300),
+        (0x700, 0x1080),
+        (0x704, 0x2180),
+        (0x700 + 4999 * 4, 0x1080),
+    ] {
+        put(&mut library, offset, value);
+    }
+    let mut program = imported_executable::pe32(
+        &[0xff, 0x15, 0x60, 0x20, 0x40, 0, 0xcc],
+        "demo.dll",
+        &["ordinal"],
+    );
+    put(&mut program, 1088, 0x8000_138e);
+    let mut process = Process32::load_with_options(
+        &program,
+        64,
+        ProcessOptions {
+            modules: &[GuestModule {
+                name: "demo.dll",
+                bytes: &library,
+            }],
+            ..ProcessOptions::default()
+        },
+    )
+    .unwrap();
+    assert_eq!(
+        process.run(100).reason,
+        ProcessStop::Stopped(StopReason::Breakpoint)
+    );
+    assert_eq!(process.cpu.register(Register32::Eax), 42);
+}

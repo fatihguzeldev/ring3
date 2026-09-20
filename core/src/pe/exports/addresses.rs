@@ -5,7 +5,7 @@ use crate::pe::optional::read_u32;
 use crate::pe::rva::PreparedPe;
 use crate::{FileOffset, RelativeVirtualAddress};
 
-const ENTRY_LIMIT: u32 = 4096;
+const ENTRY_LIMIT: u32 = 16_384;
 const FORWARDER_LENGTH_LIMIT: u32 = 1024;
 const FORWARDER_SCAN_BUDGET: u32 = 65_536;
 
@@ -159,7 +159,7 @@ fn read_forwarder<'a>(
     }
 }
 
-/// reads at most 4096 entries, retaining holes and unresolved direct rvas.
+/// reads at most 16,384 entries, retaining holes and unresolved direct rvas.
 /// forwarders are classified by the directory range, without grammar checks.
 /// string budgets include nul: 1024 bytes each and 65,536 across repeated scans.
 ///
