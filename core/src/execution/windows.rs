@@ -14,6 +14,7 @@ mod modules;
 mod parameters;
 mod startup;
 mod thread;
+mod tls;
 
 pub use d3d8::Frame;
 pub use parameters::ProcessOptions;
@@ -34,6 +35,7 @@ pub struct Process32 {
     modules: modules::Modules,
     heap: heap::Heap,
     critical_sections: critical_sections::CriticalSections,
+    tls: tls::Tls,
     graphics: d3d8::Graphics,
     crt: crt::Crt,
     diagnostic_imports: diagnostics::Imports,
@@ -78,6 +80,7 @@ enum Api {
     Module(modules::Call),
     Heap(heap::Call),
     CriticalSection(critical_sections::Call),
+    Tls(tls::Call),
     Unsupported,
 }
 
@@ -108,7 +111,8 @@ impl Api {
                 .or_else(|| crt::Call::at(offset).map(Self::Crt))
                 .or_else(|| modules::Call::at(offset).map(Self::Module))
                 .or_else(|| heap::Call::at(offset).map(Self::Heap))
-                .or_else(|| critical_sections::Call::at(offset).map(Self::CriticalSection)),
+                .or_else(|| critical_sections::Call::at(offset).map(Self::CriticalSection))
+                .or_else(|| tls::Call::at(offset).map(Self::Tls)),
         }
     }
 
@@ -137,6 +141,10 @@ impl Api {
                 "TryEnterCriticalSection" => 0x3c,
                 "LeaveCriticalSection" => 0x60,
                 "DeleteCriticalSection" => 0x64,
+                "TlsAlloc" => 0x68,
+                "TlsFree" => 0x6c,
+                "TlsGetValue" => 0x70,
+                "TlsSetValue" => 0x74,
                 _ => return None,
             }
         } else if module.eq_ignore_ascii_case("d3d8.dll") && name == "Direct3DCreate8" {
@@ -159,6 +167,7 @@ impl Api {
             Self::Graphics(call) => call.arguments(),
             Self::Crt(call) => call.arguments(),
             Self::Heap(call) => call.arguments(),
+            Self::Tls(call) => call.arguments(),
             _ => 1,
         }
     }
@@ -176,7 +185,7 @@ impl Process32 {
     ///
     /// # errors
     /// rejects unsupported images/imports, allocation limits and reserved-range
-    /// collisions. only initial thread fields are supplied; no tls allocation,
+    /// collisions. only initial thread fields are supplied; no static tls initialization,
     /// peb initialization or full crt startup is performed.
     #[expect(clippy::missing_errors_doc, reason = "project headings are lower case")]
     pub fn load(bytes: &[u8], page_limit: u32) -> Result<Self, LoadError> {
@@ -254,6 +263,7 @@ impl Process32 {
             modules,
             heap: heap::Heap::default(),
             critical_sections: critical_sections::CriticalSections::default(),
+            tls: tls::Tls::default(),
             graphics: d3d8::Graphics::default(),
             crt: crt::Crt::default(),
             diagnostic_imports,
@@ -384,6 +394,12 @@ impl Process32 {
             }
             Api::GetErrorMode => self.cpu.set_register(Register32::Eax, self.error_mode),
             Api::GetVersion => self.cpu.set_register(Register32::Eax, GUEST_VERSION),
+            Api::Tls(call) => {
+                let value = self
+                    .tls
+                    .dispatch(call, &frame[1..words], &mut self.memory)?;
+                self.cpu.set_register(Register32::Eax, value);
+            }
             Api::CriticalSection(call) => {
                 if let Some(value) =
                     self.critical_sections
