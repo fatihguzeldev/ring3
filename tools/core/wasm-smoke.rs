@@ -139,6 +139,31 @@ fn execute_narrow_operands() {
     }
 }
 
+fn execute_increment() {
+    use ring3_core::execution::{Cpu32, Register32, StopReason, load_pe32};
+    for carry in [0, 1] {
+        let code = [
+            0x64, 0xfe, 0x00, 0x66, 0xb9, 3, 0, 0x66, 0x49, 0x75, 0xfc, 0xcc,
+        ];
+        let mut image = load_pe32(&executable::pe32(&code), 3).unwrap();
+        let mut cpu = Cpu32::new(image.entry_point);
+        cpu.set_fs_base(0x0040_2000);
+        cpu.eflags = 2 | carry;
+        for _ in 0..8 {
+            assert_eq!(
+                cpu.run(&mut image.memory, 1).reason,
+                StopReason::InstructionLimit
+            );
+        }
+        assert_eq!(cpu.run(&mut image.memory, 1).reason, StopReason::Breakpoint);
+        assert_eq!(cpu.register(Register32::Ecx), 0);
+        assert_eq!(cpu.eflags & 0x8d5, 0x44 | carry);
+        let mut value = [0; 4];
+        image.memory.read(0x0040_2000, &mut value).unwrap();
+        assert_eq!(value, [18, 0, 0, 0]);
+    }
+}
+
 fn execute_delay_thunks() {
     use ring3_core::execution::{Process32, ProcessStop, Register32, StopReason};
     for legacy in [false, true] {
@@ -904,6 +929,7 @@ pub extern "C" fn run() -> u32 {
     execute_delay_thunks();
     execute_dword_test();
     execute_narrow_operands();
+    execute_increment();
     execute_diagnostic();
     execute_windows_api();
     execute_resident_modules();
