@@ -18,7 +18,11 @@ pub fn pe32(legacy: bool, unknown_api: bool) -> Vec<u8> {
         0x83, 0x05, 0x90, 0x21, 0x40, 0, 1, 0xc7, 0x05, 0x80, 0x21, 0x40, 0, 0x80, 0x10, 0x40, 0,
         0xb8, 0x80, 0x10, 0x40, 0, 0xff, 0xe0,
     ]);
-    let names: &[&str] = if unknown_api { &["LoadLibraryA"] } else { &[] };
+    let names: &[&str] = if unknown_api {
+        &["MissingDelayApi"]
+    } else {
+        &[]
+    };
     let mut bytes = imported_executable::pe32(&code, "KERNEL32.dll", names);
     bytes.resize(2048, 0);
     if !unknown_api {

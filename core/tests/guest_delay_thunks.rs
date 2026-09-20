@@ -67,7 +67,7 @@ fn unknown_helper_api_is_a_real_stop_and_no_resolution_is_faked() {
     let mut process = Process32::load_diagnostic(&delay_executable::pe32(true, true), 32).unwrap();
     assert!(
         matches!(process.run(100).reason, ProcessStop::UnresolvedImport { module, symbol, .. }
-        if module == "KERNEL32.dll" && symbol == "LoadLibraryA")
+        if module == "KERNEL32.dll" && symbol == "MissingDelayApi")
     );
     assert_eq!(word(&process, 0x0040_2180), 0x0040_10c0);
     assert_eq!(word(&process, 0x0040_2190), 0);
