@@ -18,3 +18,7 @@ EXPORTS
     _TlsFree@4==TlsFree
     _TlsGetValue@4==TlsGetValue
     _TlsSetValue@8==TlsSetValue
+    _GlobalAlloc@8==GlobalAlloc
+    _GlobalLock@4==GlobalLock
+    _GlobalUnlock@4==GlobalUnlock
+    _GlobalFree@4==GlobalFree
