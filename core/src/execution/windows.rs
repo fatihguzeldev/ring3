@@ -11,6 +11,7 @@ mod d3d8;
 mod diagnostics;
 mod guest;
 mod heap;
+mod messages;
 mod modules;
 mod parameters;
 mod startup;
@@ -34,6 +35,7 @@ pub struct Process32 {
     error_mode: u32,
     startup: startup::Startup,
     modules: modules::Modules,
+    messages: messages::Messages,
     heap: heap::Heap,
     critical_sections: critical_sections::CriticalSections,
     tls: tls::Tls,
@@ -73,6 +75,7 @@ enum Api {
     GetLastError,
     ExitProcess,
     GetDesktopWindow,
+    RegisterWindowMessage,
     SetErrorMode,
     GetErrorMode,
     GetVersion,
@@ -108,6 +111,7 @@ impl Api {
             0x20 => Some(Self::SetErrorMode),
             0x24 => Some(Self::GetErrorMode),
             0x30 => Some(Self::GetVersion),
+            0x94 => Some(Self::RegisterWindowMessage),
             0x118 => Some(Self::ExceptionProlog),
             0xffc => Some(Self::Unsupported),
             offset => d3d8::Call::at(offset)
@@ -161,8 +165,12 @@ impl Api {
             }
         } else if module.eq_ignore_ascii_case("d3d8.dll") && name == "Direct3DCreate8" {
             12
-        } else if module.eq_ignore_ascii_case("user32.dll") && name == "GetDesktopWindow" {
-            16
+        } else if module.eq_ignore_ascii_case("user32.dll") {
+            match name {
+                "GetDesktopWindow" => 16,
+                "RegisterWindowMessageA" => 0x94,
+                _ => return None,
+            }
         } else {
             return None;
         };
@@ -275,6 +283,7 @@ impl Process32 {
             error_mode: 0,
             startup,
             modules,
+            messages: messages::Messages::default(),
             heap: heap::Heap::default(),
             critical_sections: critical_sections::CriticalSections::default(),
             tls: tls::Tls::default(),
@@ -401,6 +410,10 @@ impl Process32 {
                 return Ok(());
             }
             Api::GetDesktopWindow => self.cpu.set_register(Register32::Eax, d3d8::DESKTOP),
+            Api::RegisterWindowMessage => {
+                let value = self.messages.register(argument, &mut self.memory)?;
+                self.cpu.set_register(Register32::Eax, value);
+            }
             Api::SetErrorMode => {
                 if argument & !0x8007 != 0 {
                     return Err(DispatchError::Unsupported);
