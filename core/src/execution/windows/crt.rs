@@ -7,6 +7,7 @@ use super::{
 mod arguments;
 mod floating;
 mod initializers;
+mod onexit;
 
 const DATA: u32 = 0x7000_2000;
 const FMODE: u32 = DATA;
@@ -30,6 +31,7 @@ pub(super) enum Call {
     Malloc,
     Free,
     ErrnoPointer,
+    DllOnExit,
 }
 
 impl Call {
@@ -44,6 +46,7 @@ impl Call {
             0x11c => Some(Self::Malloc),
             0x120 => Some(Self::Free),
             0x124 => Some(Self::ErrnoPointer),
+            0x128 => Some(Self::DllOnExit),
             _ => None,
         }
     }
@@ -53,7 +56,7 @@ impl Call {
             Self::SetAppType | Self::Malloc | Self::Free => 1,
             Self::ControlFp => 2,
             Self::GetMainArgs => 5,
-            Self::Memset => 3,
+            Self::Memset | Self::DllOnExit => 3,
             Self::FmodePointer | Self::CommodePointer | Self::ErrnoPointer => 0,
         }
     }
@@ -92,6 +95,12 @@ impl Crt {
                 None
             }
             Call::ErrnoPointer => Some(ERRNO),
+            Call::DllOnExit => Some(onexit::register(
+                heap,
+                memory,
+                cpu.register(Register32::Esp),
+                arguments,
+            )?),
             Call::FmodePointer => Some(FMODE),
             Call::CommodePointer => Some(COMMODE),
             Call::ControlFp => Some(floating::control(cpu, arguments[0], arguments[1])),
@@ -126,6 +135,7 @@ pub(super) fn resolve(name: &str) -> Option<u32> {
         "malloc" => Some(API_BASE + 0x11c),
         "free" => Some(API_BASE + 0x120),
         "_errno" => Some(API_BASE + 0x124),
+        "__dllonexit" => Some(API_BASE + 0x128),
         "_fmode" => Some(FMODE),
         "_commode" => Some(COMMODE),
         "_adjust_fdiv" => Some(ADJUST_FDIV),

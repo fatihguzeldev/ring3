@@ -163,6 +163,13 @@ impl Heap {
         self.reserve(size, Kind::Crt, memory)
     }
 
+    pub(super) fn crt_length(&self, pointer: u32) -> Option<u64> {
+        self.allocations
+            .get(&pointer)
+            .filter(|allocation| matches!(allocation.kind, Kind::Crt))
+            .map(|allocation| allocation.length)
+    }
+
     pub(super) fn free_crt(
         &mut self,
         pointer: u32,
