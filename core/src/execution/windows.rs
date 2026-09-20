@@ -9,6 +9,7 @@ mod critical_sections;
 mod crt;
 mod d3d8;
 mod diagnostics;
+mod gdi;
 mod guest;
 mod heap;
 mod messages;
@@ -42,6 +43,7 @@ pub struct Process32 {
     critical_sections: critical_sections::CriticalSections,
     tls: tls::Tls,
     graphics: d3d8::Graphics,
+    gdi: gdi::Gdi,
     crt: crt::Crt,
     diagnostic_imports: diagnostics::Imports,
 }
@@ -85,6 +87,7 @@ enum Api {
     GetProcessVersion,
     ExceptionProlog,
     Graphics(d3d8::Call),
+    Gdi(gdi::Call),
     Crt(crt::Call),
     CodePage(code_pages::Call),
     Module(modules::Call),
@@ -122,6 +125,7 @@ impl Api {
             0xffc => Some(Self::Unsupported),
             offset => d3d8::Call::at(offset)
                 .map(Self::Graphics)
+                .or_else(|| gdi::Call::at(offset).map(Self::Gdi))
                 .or_else(|| crt::Call::at(offset).map(Self::Crt))
                 .or_else(|| modules::Call::at(offset).map(Self::Module))
                 .or_else(|| heap::Call::at(offset).map(Self::Heap))
@@ -177,8 +181,12 @@ impl Api {
                 "GetDesktopWindow" => 16,
                 "RegisterWindowMessageA" => 0x94,
                 "GetSystemMetrics" => 0x9c,
+                "GetDC" => 0xa0,
+                "ReleaseDC" => 0xa4,
                 _ => return None,
             }
+        } else if module.eq_ignore_ascii_case("gdi32.dll") && name == "GetDeviceCaps" {
+            0xa8
         } else {
             return None;
         };
@@ -194,6 +202,7 @@ impl Api {
             | Self::ExceptionProlog
             | Self::Unsupported => 0,
             Self::Graphics(call) => call.arguments(),
+            Self::Gdi(call) => call.arguments(),
             Self::Crt(call) => call.arguments(),
             Self::CodePage(call) => call.arguments(),
             Self::Heap(call) => call.arguments(),
@@ -294,6 +303,7 @@ impl Process32 {
             startup,
             modules,
             messages: messages::Messages::default(),
+            gdi: gdi::Gdi::default(),
             heap: heap::Heap::default(),
             critical_sections: critical_sections::CriticalSections::default(),
             tls: tls::Tls::default(),
@@ -484,6 +494,9 @@ impl Process32 {
                     .dispatch(call, &frame[1..words], &mut self.memory)?;
                 self.cpu.set_register(Register32::Eax, result);
             }
+            Api::Gdi(call) => self
+                .cpu
+                .set_register(Register32::Eax, self.gdi.dispatch(call, &frame[1..words])?),
             Api::Crt(call) => {
                 if let Some(value) = self.crt.dispatch(
                     call,

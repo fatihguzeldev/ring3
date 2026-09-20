@@ -118,7 +118,13 @@ fn builtin_identity_name_rules_and_balanced_references() {
         .write(0x7ffd_e034, &99_u32.to_le_bytes())
         .unwrap();
     assert_eq!(call(&mut process, 1, 0), 0x0040_0000);
-    for module in ["kernel32.dll", "msvcrt.dll", "d3d8.dll", "user32.dll"] {
+    for module in [
+        "kernel32.dll",
+        "msvcrt.dll",
+        "d3d8.dll",
+        "user32.dll",
+        "gdi32.dll",
+    ] {
         name(&mut process, module);
         let handle = call(&mut process, 1, NAME);
         assert_ne!(handle, 0);

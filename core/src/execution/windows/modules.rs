@@ -48,6 +48,7 @@ impl Modules {
             ("msvcrt.dll", 0x804),
             ("d3d8.dll", 0x808),
             ("user32.dll", 0x80c),
+            ("gdi32.dll", 0x810),
         ] {
             if !resident
                 .iter()

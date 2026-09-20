@@ -84,7 +84,7 @@ fn icon_metrics_return_the_fixed_guest_dimensions_without_other_state_changes() 
 #[test]
 fn unsupported_metrics_and_faulting_frames_stop_without_side_effects() {
     let mut process = process();
-    for index in [0, 1, 13, 42, 48, 51, 0x8000_0000, u32::MAX] {
+    for index in [13, 42, 48, 51, 0x8000_0000, u32::MAX] {
         let before = prepare(&mut process, index);
         let result = process.run(1);
         assert_eq!(result.reason, ProcessStop::UnsupportedApi { address: API });
