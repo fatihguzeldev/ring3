@@ -75,6 +75,7 @@ enum Api {
     SetErrorMode,
     GetErrorMode,
     GetVersion,
+    ExceptionProlog,
     Graphics(d3d8::Call),
     Crt(crt::Call),
     Module(modules::Call),
@@ -105,6 +106,7 @@ impl Api {
             0x20 => Some(Self::SetErrorMode),
             0x24 => Some(Self::GetErrorMode),
             0x30 => Some(Self::GetVersion),
+            0x118 => Some(Self::ExceptionProlog),
             0xffc => Some(Self::Unsupported),
             offset => d3d8::Call::at(offset)
                 .map(Self::Graphics)
@@ -167,6 +169,7 @@ impl Api {
             | Self::GetDesktopWindow
             | Self::GetErrorMode
             | Self::GetVersion
+            | Self::ExceptionProlog
             | Self::Unsupported => 0,
             Self::Graphics(call) => call.arguments(),
             Self::Crt(call) => call.arguments(),
@@ -381,6 +384,9 @@ impl Process32 {
         guest::read_words(&self.memory, stack, &mut frame[..words])?;
         let argument = frame[1];
         match api {
+            Api::ExceptionProlog => {
+                return crt::enter_exception_frame(&mut self.cpu, &mut self.memory, frame[0]);
+            }
             Api::SetLastError => thread::set_last_error(&mut self.memory, argument)?,
             Api::GetLastError => self.cpu.set_register(Register32::Eax, self.last_error()?),
             Api::ExitProcess => {

@@ -1,6 +1,7 @@
 use super::super::Access;
 use super::{
-    API_BASE, Cpu32, DispatchError, GuestMemory, MemoryError, PAGE_SIZE, Permissions, guest,
+    API_BASE, Cpu32, DispatchError, GuestMemory, MemoryError, PAGE_SIZE, Permissions, Register32,
+    guest,
 };
 
 mod arguments;
@@ -100,6 +101,7 @@ pub(super) fn resolve(name: &str) -> Option<u32> {
         "_initterm" => Some(initializers::BASE),
         "__getmainargs" => Some(API_BASE + 0x110),
         "memset" => Some(API_BASE + 0x114),
+        "_EH_prolog" => Some(API_BASE + 0x118),
         "_fmode" => Some(FMODE),
         "_commode" => Some(COMMODE),
         "_adjust_fdiv" => Some(ADJUST_FDIV),
@@ -110,6 +112,42 @@ pub(super) fn resolve(name: &str) -> Option<u32> {
         "__initenv" => Some(INITENV),
         _ => None,
     }
+}
+
+pub(super) fn enter_exception_frame(
+    cpu: &mut Cpu32,
+    memory: &mut GuestMemory,
+    target: u32,
+) -> Result<(), DispatchError> {
+    let stack = cpu.register(Register32::Esp);
+    let start = stack.checked_sub(16).ok_or(MemoryError::AddressOverflow)?;
+    let chain = cpu.fs_base();
+    if u64::from(start) < u64::from(chain) + 4 && u64::from(chain) < u64::from(start) + 20 {
+        return Err(DispatchError::Unsupported);
+    }
+    let mut previous = [0];
+    guest::read_words(memory, chain, &mut previous)?;
+    guest::check(memory, start, 20, Access::Write)?;
+    guest::check(memory, chain, 4, Access::Write)?;
+    // include the temporary return push below the surviving exception record.
+    let values = [
+        target,
+        previous[0],
+        cpu.register(Register32::Eax),
+        u32::MAX,
+        cpu.register(Register32::Ebp),
+    ];
+    let mut bytes = [0; 20];
+    for (slot, value) in bytes.chunks_exact_mut(4).zip(values) {
+        slot.copy_from_slice(&value.to_le_bytes());
+    }
+    memory.write(u64::from(start), &bytes)?;
+    guest::write_word(memory, chain, stack - 12)?;
+    cpu.set_register(Register32::Eax, target);
+    cpu.set_register(Register32::Ebp, stack);
+    cpu.set_register(Register32::Esp, stack - 12);
+    cpu.eip = target;
+    Ok(())
 }
 
 pub(super) fn initialize(
