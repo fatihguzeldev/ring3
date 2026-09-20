@@ -289,6 +289,53 @@ fn execute_and() {
     assert_eq!(bytes, 0xffff_ff80_u32.to_le_bytes());
 }
 
+fn execute_shifts() {
+    use ring3_core::execution::{Cpu32, Register32, StopReason, load_pe32};
+    for (count, result, flags) in [
+        (0, 0x8000_0001, 0x8d5),
+        (32, 0x8000_0001, 0x8d5),
+        (33, 2, 0x801),
+        (255, 0x8000_0000, 0x84),
+    ] {
+        let mut image = load_pe32(&executable::pe32(&[0xd3, 0xe0]), 3).unwrap();
+        let mut cpu = Cpu32::new(image.entry_point);
+        cpu.set_register(Register32::Eax, 0x8000_0001);
+        cpu.set_register(Register32::Ecx, count);
+        cpu.eflags = 0x8d7;
+        assert_eq!(
+            cpu.run(&mut image.memory, 1).reason,
+            StopReason::InstructionLimit
+        );
+        assert_eq!(cpu.register(Register32::Eax), result);
+        assert_eq!(cpu.eflags, flags | 2);
+    }
+    let code = [
+        0xd0, 0xec, 0xd3, 0xe1, 0x64, 0x66, 0xc1, 0x3d, 0, 0, 0, 0, 3, 0xcc,
+    ];
+    let mut image = load_pe32(&executable::pe32(&code), 3).unwrap();
+    image
+        .memory
+        .write(0x0040_2ffe, &0x8001_u16.to_le_bytes())
+        .unwrap();
+    let mut cpu = Cpu32::new(image.entry_point);
+    cpu.set_register(Register32::Eax, 0x1234_817f);
+    cpu.set_register(Register32::Ecx, 0x1000_0003);
+    cpu.set_fs_base(0x0040_2ffe);
+    for _ in 0..3 {
+        assert_eq!(
+            cpu.run(&mut image.memory, 1).reason,
+            StopReason::InstructionLimit
+        );
+    }
+    assert_eq!(cpu.run(&mut image.memory, 1).reason, StopReason::Breakpoint);
+    assert_eq!(cpu.register(Register32::Eax), 0x1234_407f);
+    assert_eq!(cpu.register(Register32::Ecx), 0x8000_0018);
+    assert_eq!(cpu.eflags & 0x8d5, 0x84);
+    let mut word = [0; 2];
+    image.memory.read(0x0040_2ffe, &mut word).unwrap();
+    assert_eq!(word, 0xf000_u16.to_le_bytes());
+}
+
 fn execute_conditional_branches() {
     use ring3_core::execution::{Cpu32, Register32, StopReason, load_pe32};
     for (left, right, less) in [
@@ -1085,6 +1132,7 @@ pub extern "C" fn run() -> u32 {
     execute_increment();
     execute_and();
     execute_conditional_branches();
+    execute_shifts();
     execute_diagnostic();
     execute_windows_api();
     execute_resident_modules();

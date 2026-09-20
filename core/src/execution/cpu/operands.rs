@@ -52,9 +52,11 @@ impl Cpu32 {
                     0
                 };
                 let width = match instruction.memory_size() {
-                    MemorySize::UInt8 => Width::Byte,
-                    MemorySize::UInt16 => Width::Word,
-                    MemorySize::UInt32 | MemorySize::DwordOffset => Width::Dword,
+                    MemorySize::UInt8 | MemorySize::Int8 => Width::Byte,
+                    MemorySize::UInt16 | MemorySize::Int16 => Width::Word,
+                    MemorySize::UInt32 | MemorySize::Int32 | MemorySize::DwordOffset => {
+                        Width::Dword
+                    }
                     _ => return Err(StopReason::UnsupportedInstruction),
                 };
                 Ok(Operand {

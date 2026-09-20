@@ -4,6 +4,7 @@ use super::{GuestMemory, MemoryError};
 
 mod branches;
 mod operands;
+mod shifts;
 mod stack;
 mod x87;
 
@@ -161,6 +162,7 @@ impl Cpu32 {
                 self.set_register(destination, self.effective_address(instruction)?);
             }
             code if is_binary(code) => self.binary(instruction, memory)?,
+            code if shifts::is_shift(code) => self.shift(instruction, memory)?,
             Code::Inc_rm8
             | Code::Inc_rm16
             | Code::Inc_rm32
