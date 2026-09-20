@@ -9,6 +9,33 @@ use ring3_core::{
 #[path = "../../core/tests/support/executable.rs"]
 mod executable;
 
+#[path = "../../core/tests/support/imported_executable.rs"]
+mod imported_executable;
+
+fn execute_windows_api() {
+    use ring3_core::execution::{Process32, ProcessStop};
+
+    for value in [42_u32, 123, u32::MAX] {
+        let mut code = vec![0x68];
+        code.extend_from_slice(&value.to_le_bytes());
+        code.extend_from_slice(&[
+            0xff, 0x15, 0x60, 0x20, 0x40, 0, 0xff, 0x15, 0x64, 0x20, 0x40, 0, 0x50, 0xff, 0x15,
+            0x68, 0x20, 0x40, 0, 0x0f, 0x0b,
+        ]);
+        let bytes = imported_executable::pe32(
+            &code,
+            "KERNEL32.dll",
+            &["SetLastError", "GetLastError", "ExitProcess"],
+        );
+        let mut process = Process32::load(&bytes, 32).unwrap();
+        let result = process.run(100);
+        assert_eq!(result.reason, ProcessStop::Exited(value));
+        assert_eq!(result.api_calls, 3);
+        assert_eq!(process.last_error(), value);
+        assert_eq!(process.run(100).instructions, 0);
+    }
+}
+
 fn execute_image() {
     use ring3_core::execution::{Cpu32, Register32, StopReason, load_pe32};
 
@@ -453,6 +480,7 @@ fn inspect_dependency_cycle() {
 // this isolated test cdylib owns its unique zero-argument export.
 #[unsafe(no_mangle)]
 pub extern "C" fn run() -> u32 {
+    execute_windows_api();
     execute_image();
     execute_function();
     inspect_image();

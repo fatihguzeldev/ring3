@@ -1,0 +1,5 @@
+LIBRARY KERNEL32.dll
+EXPORTS
+    _SetLastError@4==SetLastError
+    _GetLastError@0==GetLastError
+    _ExitProcess@4==ExitProcess
