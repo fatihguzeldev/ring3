@@ -6,6 +6,34 @@ use ring3_core::{
     parse_pe_headers, resolve_pe_file_range,
 };
 
+#[path = "../../core/tests/support/executable.rs"]
+mod executable;
+
+fn execute_image() {
+    use ring3_core::execution::{Cpu32, Register32, StopReason, load_pe32};
+
+    for (left, right) in [(7_u32, 35_u32), (100, 23), (u32::MAX, 1)] {
+        let mut code = vec![0xb8];
+        code.extend_from_slice(&left.to_le_bytes());
+        code.push(0x05);
+        code.extend_from_slice(&right.to_le_bytes());
+        code.push(0xcc);
+        let mut image = load_pe32(&executable::pe32(&code), 3).unwrap();
+        let mut cpu = Cpu32::new(image.entry_point);
+        let result = cpu.run(&mut image.memory, 3);
+        assert_eq!(result.reason, StopReason::Breakpoint);
+        assert_eq!(result.instructions, 3);
+        assert_eq!(cpu.register(Register32::Eax), left.wrapping_add(right));
+    }
+    let mut image = load_pe32(&executable::pe32(&[0xeb, 0xfe]), 3).unwrap();
+    let mut cpu = Cpu32::new(image.entry_point);
+    assert_eq!(
+        cpu.run(&mut image.memory, 20).reason,
+        StopReason::InstructionLimit
+    );
+    assert_eq!(cpu.eip, image.entry_point);
+}
+
 fn fixture() -> [u8; 528] {
     let mut bytes = [0; 528];
     bytes[..2].copy_from_slice(b"MZ");
@@ -400,6 +428,7 @@ fn inspect_dependency_cycle() {
 // this isolated test cdylib owns its unique zero-argument export.
 #[unsafe(no_mangle)]
 pub extern "C" fn run() -> u32 {
+    execute_image();
     inspect_image();
     inspect_paths();
     inspect_path_collisions();
