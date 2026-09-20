@@ -39,6 +39,23 @@ mod delay_executable;
 #[path = "../../core/tests/support/modules_executable.rs"]
 mod modules_executable;
 
+#[path = "../../core/tests/support/error_mode_executable.rs"]
+mod error_mode_executable;
+
+fn execute_error_mode() {
+    use ring3_core::execution::{Process32, ProcessStop, Register32, StopReason};
+    for mode in [0, 1, 2, 4, 0x8000, 0x8007] {
+        let mut process = Process32::load(&error_mode_executable::pe32(mode), 32).unwrap();
+        let result = process.run(100);
+        assert_eq!(result.reason, ProcessStop::Stopped(StopReason::Breakpoint));
+        assert_eq!(result.api_calls, 4);
+        assert_eq!(process.cpu.register(Register32::Ebx), 0);
+        assert_eq!(process.cpu.register(Register32::Esi), mode & 0x8003);
+        assert_eq!(process.cpu.register(Register32::Edi), mode & 0x8003);
+        assert_eq!(process.cpu.register(Register32::Eax), 0);
+    }
+}
+
 fn execute_resident_modules() {
     use ring3_core::execution::{Process32, ProcessStop, Register32, StopReason};
     let mut process = Process32::load(&modules_executable::pe32(), 32).unwrap();
@@ -865,6 +882,7 @@ pub extern "C" fn run() -> u32 {
     execute_diagnostic();
     execute_windows_api();
     execute_resident_modules();
+    execute_error_mode();
     execute_image();
     execute_function();
     inspect_image();
