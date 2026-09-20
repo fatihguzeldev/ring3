@@ -214,6 +214,16 @@ impl Cpu32 {
                     next = instruction.near_branch32();
                 }
             }
+            Code::Jb_rel8_32 | Code::Jb_rel32_32 => {
+                if self.eflags & 1 != 0 {
+                    next = instruction.near_branch32();
+                }
+            }
+            Code::Jae_rel8_32 | Code::Jae_rel32_32 => {
+                if self.eflags & 1 == 0 {
+                    next = instruction.near_branch32();
+                }
+            }
             Code::Fldcw_m2byte | Code::Fnstcw_m2byte => self.x87_control(instruction, memory)?,
             Code::Nopd | Code::Int3 => {}
             _ => return Err(StopReason::UnsupportedInstruction),
