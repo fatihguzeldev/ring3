@@ -1,6 +1,8 @@
 use std::collections::BTreeSet;
 
-use super::DispatchError;
+use super::{DispatchError, GuestMemory};
+
+mod brushes;
 
 pub(super) const SCREEN_WIDTH: u32 = 640;
 pub(super) const SCREEN_HEIGHT: u32 = 480;
@@ -13,6 +15,9 @@ pub(super) enum Call {
     Get,
     Release,
     Caps,
+    SystemBrush,
+    Object,
+    Delete,
 }
 
 impl Call {
@@ -21,14 +26,18 @@ impl Call {
             0xa0 => Some(Self::Get),
             0xa4 => Some(Self::Release),
             0xa8 => Some(Self::Caps),
+            0xb0 => Some(Self::SystemBrush),
+            0xb4 => Some(Self::Object),
+            0xb8 => Some(Self::Delete),
             _ => None,
         }
     }
 
     pub(super) fn arguments(self) -> usize {
         match self {
-            Self::Get => 1,
+            Self::Get | Self::SystemBrush | Self::Delete => 1,
             Self::Release | Self::Caps => 2,
+            Self::Object => 3,
         }
     }
 }
@@ -36,6 +45,7 @@ impl Call {
 pub(super) struct Gdi {
     live: BTreeSet<u32>,
     next: u32,
+    brushes: brushes::Brushes,
 }
 
 impl Default for Gdi {
@@ -43,13 +53,28 @@ impl Default for Gdi {
         Self {
             live: BTreeSet::new(),
             next: FIRST_HANDLE,
+            brushes: brushes::Brushes::default(),
         }
     }
 }
 
 impl Gdi {
-    pub(super) fn dispatch(&mut self, call: Call, arguments: &[u32]) -> Result<u32, DispatchError> {
+    pub(super) fn dispatch(
+        &mut self,
+        call: Call,
+        arguments: &[u32],
+        memory: &mut GuestMemory,
+    ) -> Result<u32, DispatchError> {
+        if matches!(call, Call::Object | Call::Delete) && self.live.contains(&arguments[0]) {
+            return Err(DispatchError::Unsupported);
+        }
         match call {
+            Call::SystemBrush => self.brushes.system(arguments[0]),
+            Call::Object => self
+                .brushes
+                .get(arguments[0], arguments[1], arguments[2], memory),
+            // system-owned brushes survive deletion for the process lifetime.
+            Call::Delete => Ok(u32::from(self.brushes.color(arguments[0]).is_some())),
             Call::Get => {
                 if arguments[0] != 0 {
                     return Err(DispatchError::Unsupported);
@@ -87,17 +112,24 @@ mod tests {
 
     #[test]
     fn exhausted_handle_namespace_never_wraps_or_revives_released_contexts() {
+        let mut memory = GuestMemory::new(0);
         let mut gdi = Gdi {
             next: LAST_HANDLE,
             ..Gdi::default()
         };
-        assert!(matches!(gdi.dispatch(Call::Get, &[0]), Ok(LAST_HANDLE)));
-        assert!(matches!(gdi.dispatch(Call::Get, &[0]), Ok(0)));
         assert!(matches!(
-            gdi.dispatch(Call::Release, &[0, LAST_HANDLE]),
+            gdi.dispatch(Call::Get, &[0], &mut memory),
+            Ok(LAST_HANDLE)
+        ));
+        assert!(matches!(gdi.dispatch(Call::Get, &[0], &mut memory), Ok(0)));
+        assert!(matches!(
+            gdi.dispatch(Call::Release, &[0, LAST_HANDLE], &mut memory),
             Ok(1)
         ));
-        assert!(matches!(gdi.dispatch(Call::Get, &[0]), Ok(0)));
-        assert!(matches!(gdi.dispatch(Call::Caps, &[LAST_HANDLE, 8]), Ok(0)));
+        assert!(matches!(gdi.dispatch(Call::Get, &[0], &mut memory), Ok(0)));
+        assert!(matches!(
+            gdi.dispatch(Call::Caps, &[LAST_HANDLE, 8], &mut memory),
+            Ok(0)
+        ));
     }
 }

@@ -40,7 +40,7 @@ impl Call {
     }
 }
 
-fn color(index: u32) -> Result<u32, DispatchError> {
+pub(super) fn color(index: u32) -> Result<u32, DispatchError> {
     match index {
         0 | 4 | 10 | 11 | 15 | 19 | 22 | 30 => Ok(0x00c8_d0d4),
         1 => Ok(0x00a5_6e3a),

@@ -182,12 +182,18 @@ impl Api {
                 "RegisterWindowMessageA" => 0x94,
                 "GetSystemMetrics" => 0x9c,
                 "GetSysColor" => 0xac,
+                "GetSysColorBrush" => 0xb0,
                 "GetDC" => 0xa0,
                 "ReleaseDC" => 0xa4,
                 _ => return None,
             }
-        } else if module.eq_ignore_ascii_case("gdi32.dll") && name == "GetDeviceCaps" {
-            0xa8
+        } else if module.eq_ignore_ascii_case("gdi32.dll") {
+            match name {
+                "GetDeviceCaps" => 0xa8,
+                "GetObjectA" => 0xb4,
+                "DeleteObject" => 0xb8,
+                _ => return None,
+            }
         } else {
             return None;
         };
@@ -435,10 +441,9 @@ impl Process32 {
                 let value = self.messages.register(argument, &mut self.memory)?;
                 self.cpu.set_register(Register32::Eax, value);
             }
-            Api::System(call) => {
-                self.cpu
-                    .set_register(Register32::Eax, call.dispatch(argument)?);
-            }
+            Api::System(call) => self
+                .cpu
+                .set_register(Register32::Eax, call.dispatch(argument)?),
             Api::SetErrorMode => {
                 if argument & !0x8007 != 0 {
                     return Err(DispatchError::Unsupported);
@@ -489,15 +494,16 @@ impl Process32 {
                 )?;
                 self.cpu.set_register(Register32::Eax, value);
             }
-            Api::Graphics(call) => {
-                let result = self
-                    .graphics
-                    .dispatch(call, &frame[1..words], &mut self.memory)?;
-                self.cpu.set_register(Register32::Eax, result);
-            }
-            Api::Gdi(call) => self
-                .cpu
-                .set_register(Register32::Eax, self.gdi.dispatch(call, &frame[1..words])?),
+            Api::Graphics(call) => self.cpu.set_register(
+                Register32::Eax,
+                self.graphics
+                    .dispatch(call, &frame[1..words], &mut self.memory)?,
+            ),
+            Api::Gdi(call) => self.cpu.set_register(
+                Register32::Eax,
+                self.gdi
+                    .dispatch(call, &frame[1..words], &mut self.memory)?,
+            ),
             Api::Crt(call) => {
                 if let Some(value) = self.crt.dispatch(
                     call,
