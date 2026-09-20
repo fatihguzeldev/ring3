@@ -9,7 +9,7 @@ for (const library of ["kernel32", "user32"]) {
   run(tools.lld, ["-flavor", "link", "/lib", "/machine:x86",
     `/def:${join(root, `corpus/windows-api/${library}.def`)}`, `/out:${library}.lib`], output);
 }
-for (const name of ["calls", "modules", "heap", "version", "critical-sections", "tls", "global-memory", "code-pages", "cpinfo", "messages", "process-version"]) {
+for (const name of ["calls", "modules", "heap", "version", "critical-sections", "tls", "global-memory", "code-pages", "cpinfo", "messages", "process-version", "metrics"]) {
   run(tools.clang, ["--target=i686-pc-windows-msvc", "-O0", "-ffreestanding",
     "-fno-stack-protector", "-c", join(root, `corpus/windows-api/${name}.c`),
     "-o", `${name}.obj`], output);

@@ -84,6 +84,30 @@ mod zero_extend_executable;
 #[path = "../../core/tests/support/process_version_executable.rs"]
 mod process_version_executable;
 
+#[path = "../../core/tests/support/metrics_executable.rs"]
+mod metrics_executable;
+
+fn execute_metrics() {
+    use ring3_core::execution::{Process32, ProcessStop, Register32, StopReason};
+    let mut process = Process32::load(&metrics_executable::pe32(), 32).unwrap();
+    let result = process.run(30);
+    assert_eq!(result.reason, ProcessStop::Stopped(StopReason::Breakpoint));
+    assert_eq!((result.instructions, result.api_calls), (12, 4));
+    assert_eq!(process.cpu.register(Register32::Eax), 16);
+    assert_eq!(process.cpu.register(Register32::Ebx), 32);
+    assert_eq!(process.cpu.register(Register32::Ecx), 32);
+    assert_eq!(process.cpu.register(Register32::Edx), 16);
+    assert_eq!(process.cpu.register(Register32::Esp), 0x1001_0000);
+    #[cfg(windows_demo)]
+    {
+        let mut process =
+            Process32::load(include_bytes!("../../target/windows-api/metrics.exe"), 64).unwrap();
+        let result = process.run(1000);
+        assert_eq!(result.reason, ProcessStop::Exited(42));
+        assert_eq!(result.api_calls, 13);
+    }
+}
+
 fn execute_process_version() {
     use ring3_core::execution::{Process32, ProcessStop, Register32, StopReason};
     let mut process = Process32::load(&process_version_executable::pe32(9, 2), 32).unwrap();
@@ -1462,6 +1486,7 @@ pub extern "C" fn run() -> u32 {
     execute_messages();
     execute_zero_extend();
     execute_process_version();
+    execute_metrics();
     execute_image();
     execute_function();
     inspect_image();
