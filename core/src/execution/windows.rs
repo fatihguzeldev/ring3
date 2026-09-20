@@ -5,6 +5,7 @@ use super::{
 use crate::PeImportSymbol;
 
 mod d3d8;
+mod diagnostics;
 mod guest;
 
 pub use d3d8::Frame;
@@ -20,13 +21,22 @@ pub struct Process32 {
     last_error: u32,
     exit_code: Option<u32>,
     graphics: d3d8::Graphics,
+    diagnostic_imports: diagnostics::Imports,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ProcessStop {
     Exited(u32),
     Stopped(StopReason),
-    UnsupportedApi { address: u32 },
+    UnsupportedApi {
+        address: u32,
+    },
+    /// an unresolved diagnostic import; ordinal symbols use the `#number` form.
+    UnresolvedImport {
+        address: u32,
+        module: String,
+        symbol: String,
+    },
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -96,7 +106,35 @@ impl Process32 {
     /// collisions. no windows dll, tls, peb/teb or crt initialization is performed.
     #[expect(clippy::missing_errors_doc, reason = "project headings are lower case")]
     pub fn load(bytes: &[u8], page_limit: u32) -> Result<Self, LoadError> {
-        let mut image = load_pe32_with_imports(bytes, page_limit, Api::resolve)?;
+        Self::load_with_diagnostics(bytes, page_limit, false)
+    }
+
+    /// traces entry without resolving every import or initializing missing dlls.
+    /// unknown calls stop with their identity before any api work; imported data
+    /// accesses fault. this mode does not establish successful process startup.
+    ///
+    /// # errors
+    /// returns the image, memory and reserved-range errors of [`Self::load`].
+    #[expect(clippy::missing_errors_doc, reason = "project headings are lower case")]
+    pub fn load_diagnostic(bytes: &[u8], page_limit: u32) -> Result<Self, LoadError> {
+        Self::load_with_diagnostics(bytes, page_limit, true)
+    }
+
+    fn load_with_diagnostics(
+        bytes: &[u8],
+        page_limit: u32,
+        diagnostic: bool,
+    ) -> Result<Self, LoadError> {
+        let mut diagnostic_imports = diagnostics::Imports::default();
+        let mut image = load_pe32_with_imports(bytes, page_limit, |module, symbol| {
+            Api::resolve(module, symbol).or_else(|| {
+                if diagnostic {
+                    diagnostic_imports.insert(module, symbol)
+                } else {
+                    None
+                }
+            })
+        })?;
         image.memory.map_zeroed(
             u64::from(STACK_BASE),
             u64::from(STACK_SIZE),
@@ -106,6 +144,7 @@ impl Process32 {
             .memory
             .map_zeroed(u64::from(API_BASE), PAGE_SIZE, Permissions::NONE)?;
         d3d8::Graphics::initialize(&mut image.memory)?;
+        diagnostic_imports.map(&mut image.memory)?;
         let mut cpu = Cpu32::new(image.entry_point);
         cpu.set_register(Register32::Esp, STACK_BASE + STACK_SIZE);
         Ok(Self {
@@ -114,6 +153,7 @@ impl Process32 {
             last_error: 0,
             exit_code: None,
             graphics: d3d8::Graphics::default(),
+            diagnostic_imports,
         })
     }
 
@@ -148,12 +188,16 @@ impl Process32 {
         let mut remaining = budget;
         while remaining != 0 {
             let step = self.cpu.run_until(&mut self.memory, remaining, |address| {
-                Api::at(address).is_some()
+                Api::at(address).is_some() || self.diagnostic_imports.contains(address)
             });
             result.instructions += step.instructions;
             remaining -= step.instructions;
             if step.reason != StopReason::Intercepted {
                 result.reason = ProcessStop::Stopped(step.reason);
+                return result;
+            }
+            if let Some(stop) = self.diagnostic_imports.stop(self.cpu.eip) {
+                result.reason = stop;
                 return result;
             }
             let Some(api) = Api::at(self.cpu.eip) else {

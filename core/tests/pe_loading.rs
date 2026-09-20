@@ -16,7 +16,9 @@ fn rounds_partial_image_pages_without_changing_headers_or_bounds() {
     image.memory.read(0x40_2fff, &mut [0]).unwrap();
     assert!(image.memory.read(0x40_3000, &mut [0]).is_err());
     assert_eq!(
-        Cpu32::new(image.entry_point).run(&mut image.memory, 1).reason,
+        Cpu32::new(image.entry_point)
+            .run(&mut image.memory, 1)
+            .reason,
         StopReason::Breakpoint
     );
     assert!(matches!(
@@ -30,7 +32,10 @@ fn rounds_partial_image_pages_without_changing_headers_or_bounds() {
     }
     bytes[0xb4..0xb8].copy_from_slice(&0xffff_0000_u32.to_le_bytes());
     bytes[0xd0..0xd4].copy_from_slice(&0x1_0001_u32.to_le_bytes());
-    assert!(matches!(load_pe32(&bytes, 32), Err(LoadError::InvalidLayout)));
+    assert!(matches!(
+        load_pe32(&bytes, 32),
+        Err(LoadError::InvalidLayout)
+    ));
 }
 
 #[test]
