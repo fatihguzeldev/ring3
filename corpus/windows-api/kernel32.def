@@ -11,6 +11,7 @@ EXPORTS
     _GetVersion@0==GetVersion
     _GetACP@0==GetACP
     _GetOEMCP@0==GetOEMCP
+    _GetCPInfo@8==GetCPInfo
     _InitializeCriticalSection@4==InitializeCriticalSection
     _EnterCriticalSection@4==EnterCriticalSection
     _TryEnterCriticalSection@4==TryEnterCriticalSection

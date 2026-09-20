@@ -72,6 +72,35 @@ mod borrow_executable;
 #[path = "../../core/tests/support/code_pages_executable.rs"]
 mod code_pages_executable;
 
+#[path = "../../core/tests/support/cpinfo_executable.rs"]
+mod cpinfo_executable;
+
+fn execute_cpinfo() {
+    use ring3_core::execution::{Process32, ProcessStop, Register32, StopReason};
+    let mut process = Process32::load(&cpinfo_executable::pe32(), 32).unwrap();
+    let result = process.run(30);
+    assert_eq!(result.reason, ProcessStop::Stopped(StopReason::Breakpoint));
+    assert_eq!((result.instructions, result.api_calls), (7, 2));
+    assert_eq!(process.cpu.register(Register32::Eax), 1);
+    assert_eq!(process.cpu.register(Register32::Ebx), 1);
+    assert_eq!(process.cpu.register(Register32::Edx), 63);
+    assert_eq!(process.cpu.register(Register32::Esp), 0x1001_0000);
+    let mut bytes = [0; 18];
+    process.memory.read(0x0040_2180, &mut bytes).unwrap();
+    let mut expected = [0; 18];
+    expected[0] = 1;
+    expected[4] = b'?';
+    assert_eq!(bytes, expected);
+    #[cfg(windows_demo)]
+    {
+        let mut process =
+            Process32::load(include_bytes!("../../target/windows-api/cpinfo.exe"), 64).unwrap();
+        let result = process.run(1000);
+        assert_eq!(result.reason, ProcessStop::Exited(42));
+        assert_eq!(result.api_calls, 12);
+    }
+}
+
 fn execute_code_pages() {
     use ring3_core::execution::{Process32, ProcessStop, Register32, StopReason};
     let mut process = Process32::load(&code_pages_executable::pe32(), 32).unwrap();
@@ -1363,6 +1392,7 @@ pub extern "C" fn run() -> u32 {
     execute_dllonexit();
     execute_borrow();
     execute_code_pages();
+    execute_cpinfo();
     execute_image();
     execute_function();
     inspect_image();
