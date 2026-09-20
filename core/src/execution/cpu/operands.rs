@@ -19,7 +19,15 @@ impl Cpu32 {
             OpKind::Register => Ok(Operand32::Register(register32(
                 instruction.op_register(index),
             )?)),
-            OpKind::Memory => Ok(Operand32::Memory(self.effective_address(instruction)?)),
+            OpKind::Memory => {
+                let offset = self.effective_address(instruction)?;
+                let base = if instruction.memory_segment() == Register::FS {
+                    self.fs_base
+                } else {
+                    0
+                };
+                Ok(Operand32::Memory(base.wrapping_add(offset)))
+            }
             OpKind::Immediate32 => Ok(Operand32::Immediate(instruction.immediate32())),
             OpKind::Immediate8to32 => Ok(Operand32::Immediate(
                 instruction.immediate8to32().cast_unsigned(),

@@ -20,6 +20,7 @@ pub enum Register32 {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct Cpu32 {
     registers: [u32; 8],
+    fs_base: u32,
     pub eip: u32,
     pub eflags: u32,
 }
@@ -46,6 +47,7 @@ impl Cpu32 {
     pub fn new(entry_point: u32) -> Self {
         Self {
             registers: [0; 8],
+            fs_base: 0,
             eip: entry_point,
             eflags: 2,
         }
@@ -58,6 +60,16 @@ impl Cpu32 {
 
     pub fn set_register(&mut self, register: Register32, value: u32) {
         self.registers[register as usize] = value;
+    }
+
+    #[must_use]
+    pub fn fs_base(&self) -> u32 {
+        self.fs_base
+    }
+
+    /// configures the flat 32-bit fs base; selector loading is not emulated.
+    pub fn set_fs_base(&mut self, base: u32) {
+        self.fs_base = base;
     }
 
     pub fn run(&mut self, memory: &mut GuestMemory, instruction_limit: u64) -> RunResult {
@@ -119,7 +131,7 @@ impl Cpu32 {
         if instruction.has_lock_prefix()
             || instruction.has_rep_prefix()
             || instruction.has_repne_prefix()
-            || instruction.has_segment_prefix()
+            || (instruction.has_segment_prefix() && instruction.segment_prefix() != Register::FS)
         {
             return Err(StopReason::UnsupportedInstruction);
         }
