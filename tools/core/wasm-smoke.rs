@@ -34,6 +34,31 @@ fn execute_image() {
     assert_eq!(cpu.eip, image.entry_point);
 }
 
+fn execute_function() {
+    use ring3_core::execution::{Cpu32, Permissions, Register32, StopReason, load_pe32};
+
+    let code = [
+        0x6a, 35, 0x6a, 7, 0xe8, 9, 0, 0, 0, 0x83, 0xc4, 8, 0xa3, 0, 0x20, 0x40, 0, 0xcc, 0x55,
+        0x89, 0xe5, 0x8b, 0x45, 8, 0x03, 0x45, 12, 0xc9, 0xc3,
+    ];
+    let mut image = load_pe32(&executable::pe32(&code), 4).unwrap();
+    image
+        .memory
+        .map_zeroed(0x1000_0000, 4096, Permissions::READ_WRITE)
+        .unwrap();
+    let mut cpu = Cpu32::new(image.entry_point);
+    cpu.set_register(Register32::Esp, 0x1000_1000);
+    assert_eq!(
+        cpu.run(&mut image.memory, 100).reason,
+        StopReason::Breakpoint
+    );
+    assert_eq!(cpu.register(Register32::Eax), 42);
+    assert_eq!(cpu.register(Register32::Esp), 0x1000_1000);
+    let mut result = [0; 4];
+    image.memory.read(0x0040_2000, &mut result).unwrap();
+    assert_eq!(u32::from_le_bytes(result), 42);
+}
+
 fn fixture() -> [u8; 528] {
     let mut bytes = [0; 528];
     bytes[..2].copy_from_slice(b"MZ");
@@ -429,6 +454,7 @@ fn inspect_dependency_cycle() {
 #[unsafe(no_mangle)]
 pub extern "C" fn run() -> u32 {
     execute_image();
+    execute_function();
     inspect_image();
     inspect_paths();
     inspect_path_collisions();

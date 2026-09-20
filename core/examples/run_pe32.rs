@@ -1,6 +1,6 @@
 use std::io::Read;
 
-use ring3_core::execution::{Cpu32, Register32, StopReason, load_pe32};
+use ring3_core::execution::{Cpu32, Permissions, Register32, StopReason, load_pe32};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut args = std::env::args().skip(1);
@@ -21,7 +21,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         return Err("input exceeds 64 MiB".into());
     }
     let mut image = load_pe32(&bytes, 16_384).map_err(|error| format!("load failed: {error:?}"))?;
+    image
+        .memory
+        .map_zeroed(0x1000_0000, 64 * 1024, Permissions::READ_WRITE)
+        .map_err(|error| format!("stack mapping failed: {error:?}"))?;
     let mut cpu = Cpu32::new(image.entry_point);
+    cpu.set_register(Register32::Esp, 0x1001_0000);
     let result = cpu.run(&mut image.memory, limit);
     println!(
         "{:?} at {:#010x}; instructions={}; eax={:#010x}; eflags={:#010x}",
