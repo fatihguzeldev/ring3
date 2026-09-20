@@ -47,7 +47,7 @@ fn fs_faults_and_unsupported_segments_leave_faulting_state_unchanged() {
         (&[0x64, 0xa3, 0, 0, 0, 0][..], 0x0040_1000),
         (&[0x64, 0xa1, 0, 0, 0, 0][..], 0x8000_0000),
         (&[0x65, 0xa1, 0, 0, 0, 0][..], 0x0040_2000),
-        (&[0x64, 0x66, 0xa1, 0, 0, 0, 0][..], 0x0040_2000),
+        (&[0x64, 0x67, 0xa1, 0, 0][..], 0x0040_2000),
     ] {
         let mut image = load_pe32(&executable::pe32(code), 3).unwrap();
         let mut cpu = Cpu32::new(image.entry_point);

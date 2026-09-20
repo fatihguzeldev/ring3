@@ -1,6 +1,6 @@
 use iced_x86::{Code, Instruction};
 
-use super::operands::Operand32;
+use super::operands::Location;
 use super::{Cpu32, GuestMemory, MemoryError, StopReason};
 
 impl Cpu32 {
@@ -9,7 +9,7 @@ impl Cpu32 {
         instruction: &Instruction,
         memory: &mut GuestMemory,
     ) -> Result<(), StopReason> {
-        let Operand32::Memory(address) = self.operand(instruction, 0)? else {
+        let Location::Memory(address) = self.operand(instruction, 0)?.location else {
             return Err(StopReason::UnsupportedInstruction);
         };
         address

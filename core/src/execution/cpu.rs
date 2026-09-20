@@ -150,12 +150,7 @@ impl Cpu32 {
         }
         let mut next = instruction.next_ip32();
         match instruction.code() {
-            Code::Mov_r32_imm32
-            | Code::Mov_r32_rm32
-            | Code::Mov_rm32_r32
-            | Code::Mov_rm32_imm32
-            | Code::Mov_EAX_moffs32
-            | Code::Mov_moffs32_EAX => {
+            code if is_move(code) => {
                 let destination = self.operand(instruction, 0)?;
                 let value = self.read_operand(self.operand(instruction, 1)?, memory)?;
                 self.write_operand(destination, value, memory)?;
@@ -329,4 +324,28 @@ fn decode(memory: &GuestMemory, ip: u32) -> Result<Instruction, StopReason> {
         }
     }
     Err(StopReason::InvalidInstruction)
+}
+
+fn is_move(code: Code) -> bool {
+    matches!(
+        code,
+        Code::Mov_r8_imm8
+            | Code::Mov_r8_rm8
+            | Code::Mov_rm8_r8
+            | Code::Mov_rm8_imm8
+            | Code::Mov_AL_moffs8
+            | Code::Mov_moffs8_AL
+            | Code::Mov_r16_imm16
+            | Code::Mov_r16_rm16
+            | Code::Mov_rm16_r16
+            | Code::Mov_rm16_imm16
+            | Code::Mov_AX_moffs16
+            | Code::Mov_moffs16_AX
+            | Code::Mov_r32_imm32
+            | Code::Mov_r32_rm32
+            | Code::Mov_rm32_r32
+            | Code::Mov_rm32_imm32
+            | Code::Mov_EAX_moffs32
+            | Code::Mov_moffs32_EAX
+    )
 }

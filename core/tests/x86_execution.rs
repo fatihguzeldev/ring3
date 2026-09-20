@@ -53,7 +53,7 @@ fn branch_loop_consumes_budget_and_can_resume() {
 
 #[test]
 fn unsupported_and_invalid_instructions_preserve_faulting_state() {
-    for code in [&[0x0f, 0xa2][..], &[0x66, 0xb8, 1, 0], &[0xf0, 0x90]] {
+    for code in [&[0x0f, 0xa2][..], &[0x66, 0x50], &[0xf0, 0x90]] {
         let mut image = load_pe32(&executable::pe32(code), 3).unwrap();
         let mut cpu = Cpu32::new(image.entry_point);
         cpu.set_register(Register32::Eax, 55);
