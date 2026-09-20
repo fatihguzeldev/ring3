@@ -115,6 +115,30 @@ fn execute_dword_test() {
     }
 }
 
+fn execute_narrow_operands() {
+    use ring3_core::execution::{Cpu32, Register32, StopReason, load_pe32};
+    for (input, output, add_flags, test_flags) in [
+        (0x7fff_u32, 0x8000, 0x894, 0x80),
+        (0xffff, 0, 0x55, 0x44),
+        (0x02ff, 0x0300, 0x14, 4),
+    ] {
+        let code = [
+            0x66, 0x05, 1, 0, 0x88, 0x25, 0xff, 0x2f, 0x40, 0, 0x84, 0xe4, 0xcc,
+        ];
+        let mut image = load_pe32(&executable::pe32(&code), 3).unwrap();
+        let mut cpu = Cpu32::new(image.entry_point);
+        cpu.set_register(Register32::Eax, 0xa5a5_0000 | input);
+        assert_eq!(cpu.run(&mut image.memory, 1).instructions, 1);
+        assert_eq!(cpu.eflags & 0x8d5, add_flags);
+        assert_eq!(cpu.run(&mut image.memory, 3).reason, StopReason::Breakpoint);
+        assert_eq!(cpu.register(Register32::Eax), 0xa5a5_0000 | output);
+        assert_eq!(cpu.eflags & 0x8d5, test_flags);
+        let mut byte = [0];
+        image.memory.read(0x0040_2fff, &mut byte).unwrap();
+        assert_eq!(u32::from(byte[0]), output >> 8);
+    }
+}
+
 fn execute_delay_thunks() {
     use ring3_core::execution::{Process32, ProcessStop, Register32, StopReason};
     for legacy in [false, true] {
@@ -879,6 +903,7 @@ pub extern "C" fn run() -> u32 {
     execute_dlls();
     execute_delay_thunks();
     execute_dword_test();
+    execute_narrow_operands();
     execute_diagnostic();
     execute_windows_api();
     execute_resident_modules();
