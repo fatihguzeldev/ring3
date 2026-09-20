@@ -6,3 +6,6 @@ EXPORTS
     _ReleaseDC@8==ReleaseDC
     _GetSysColor@4==GetSysColor
     _GetSysColorBrush@4==GetSysColorBrush
+    _LoadCursorA@8==LoadCursorA
+    _SetCursor@4==SetCursor
+    _GetCursor@0==GetCursor
