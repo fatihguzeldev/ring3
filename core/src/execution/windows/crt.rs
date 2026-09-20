@@ -1,7 +1,7 @@
 use super::super::Access;
 use super::{
     API_BASE, Cpu32, DispatchError, GuestMemory, MemoryError, PAGE_SIZE, Permissions, Register32,
-    guest,
+    guest, heap,
 };
 
 mod arguments;
@@ -17,6 +17,7 @@ const ARGC: u32 = DATA + 16;
 const ARGV: u32 = DATA + 20;
 const ENVIRON: u32 = DATA + 24;
 const INITENV: u32 = DATA + 28;
+const ERRNO: u32 = DATA + 32;
 
 #[derive(Clone, Copy)]
 pub(super) enum Call {
@@ -26,6 +27,9 @@ pub(super) enum Call {
     ControlFp,
     GetMainArgs,
     Memset,
+    Malloc,
+    Free,
+    ErrnoPointer,
 }
 
 impl Call {
@@ -37,17 +41,20 @@ impl Call {
             0x10c => Some(Self::ControlFp),
             0x110 => Some(Self::GetMainArgs),
             0x114 => Some(Self::Memset),
+            0x11c => Some(Self::Malloc),
+            0x120 => Some(Self::Free),
+            0x124 => Some(Self::ErrnoPointer),
             _ => None,
         }
     }
 
     pub(super) fn arguments(self) -> usize {
         match self {
-            Self::SetAppType => 1,
+            Self::SetAppType | Self::Malloc | Self::Free => 1,
             Self::ControlFp => 2,
             Self::GetMainArgs => 5,
             Self::Memset => 3,
-            Self::FmodePointer | Self::CommodePointer => 0,
+            Self::FmodePointer | Self::CommodePointer | Self::ErrnoPointer => 0,
         }
     }
 }
@@ -65,12 +72,26 @@ impl Crt {
         arguments: &[u32],
         cpu: &mut Cpu32,
         memory: &mut GuestMemory,
+        heap: &mut heap::Heap,
     ) -> Result<Option<u32>, DispatchError> {
         Ok(match call {
             Call::SetAppType => {
                 self.application_type = arguments[0].cast_signed();
                 None
             }
+            Call::Malloc => Some(
+                if let Some(pointer) = heap.allocate_crt(arguments[0], memory)? {
+                    pointer
+                } else {
+                    guest::write_word(memory, ERRNO, 12)?;
+                    0
+                },
+            ),
+            Call::Free => {
+                heap.free_crt(arguments[0], cpu.register(Register32::Esp), memory)?;
+                None
+            }
+            Call::ErrnoPointer => Some(ERRNO),
             Call::FmodePointer => Some(FMODE),
             Call::CommodePointer => Some(COMMODE),
             Call::ControlFp => Some(floating::control(cpu, arguments[0], arguments[1])),
@@ -102,6 +123,9 @@ pub(super) fn resolve(name: &str) -> Option<u32> {
         "__getmainargs" => Some(API_BASE + 0x110),
         "memset" => Some(API_BASE + 0x114),
         "_EH_prolog" => Some(API_BASE + 0x118),
+        "malloc" => Some(API_BASE + 0x11c),
+        "free" => Some(API_BASE + 0x120),
+        "_errno" => Some(API_BASE + 0x124),
         "_fmode" => Some(FMODE),
         "_commode" => Some(COMMODE),
         "_adjust_fdiv" => Some(ADJUST_FDIV),

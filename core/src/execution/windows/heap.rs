@@ -38,6 +38,7 @@ impl Call {
 
 enum Kind {
     Local,
+    Crt,
     GlobalFixed,
     GlobalMovable { discarded: bool, locks: u32 },
 }
@@ -50,7 +51,7 @@ struct Allocation {
 
 impl Allocation {
     fn global(&self) -> bool {
-        !matches!(self.kind, Kind::Local)
+        matches!(self.kind, Kind::GlobalFixed | Kind::GlobalMovable { .. })
     }
 }
 
@@ -97,8 +98,36 @@ impl Heap {
             return Err(DispatchError::Unsupported);
         }
         let movable = global && flags & 2 != 0;
-        let discarded = movable && size == 0;
-        let permissions = if discarded {
+        let kind = if movable {
+            Kind::GlobalMovable {
+                discarded: size == 0,
+                locks: 0,
+            }
+        } else if global {
+            Kind::GlobalFixed
+        } else {
+            Kind::Local
+        };
+        if let Some(handle) = self.reserve(size, kind, memory)? {
+            return Ok(handle);
+        }
+        thread::set_last_error(memory, 8)?;
+        Ok(0)
+    }
+
+    fn reserve(
+        &mut self,
+        size: u32,
+        kind: Kind,
+        memory: &mut GuestMemory,
+    ) -> Result<Option<u32>, MemoryError> {
+        let permissions = if matches!(
+            kind,
+            Kind::GlobalMovable {
+                discarded: true,
+                ..
+            }
+        ) {
             Permissions::NONE
         } else {
             Permissions::READ_WRITE
@@ -109,27 +138,48 @@ impl Heap {
                 Ok(()) => {
                     let base = u32::try_from(address).expect("heap window fits u32");
                     // the tag distinguishes opaque movable handles from fixed pointers.
-                    let handle = base | if movable { 2 } else { 0 };
-                    let kind = if movable {
-                        Kind::GlobalMovable {
-                            discarded,
-                            locks: 0,
-                        }
-                    } else if global {
-                        Kind::GlobalFixed
-                    } else {
-                        Kind::Local
-                    };
+                    let handle = base
+                        | if matches!(kind, Kind::GlobalMovable { .. }) {
+                            2
+                        } else {
+                            0
+                        };
                     self.allocations
                         .insert(handle, Allocation { base, length, kind });
-                    return Ok(handle);
+                    return Ok(Some(handle));
                 }
                 Err(MemoryError::PageLimitExceeded) => {}
-                Err(error) => return Err(error.into()),
+                Err(error) => return Err(error),
             }
         }
-        thread::set_last_error(memory, 8)?;
-        Ok(0)
+        Ok(None)
+    }
+
+    pub(super) fn allocate_crt(
+        &mut self,
+        size: u32,
+        memory: &mut GuestMemory,
+    ) -> Result<Option<u32>, MemoryError> {
+        self.reserve(size, Kind::Crt, memory)
+    }
+
+    pub(super) fn free_crt(
+        &mut self,
+        pointer: u32,
+        stack: u32,
+        memory: &mut GuestMemory,
+    ) -> Result<(), DispatchError> {
+        if pointer == 0 {
+            return Ok(());
+        }
+        if !self
+            .allocations
+            .get(&pointer)
+            .is_some_and(|allocation| matches!(allocation.kind, Kind::Crt))
+        {
+            return Err(DispatchError::Unsupported);
+        }
+        self.release(pointer, stack, memory)
     }
 
     fn free(
@@ -142,14 +192,28 @@ impl Heap {
         if handle == 0 {
             return Ok(0);
         }
-        let Some(allocation) = self
-            .allocations
-            .get(&handle)
-            .filter(|allocation| allocation.global() == global)
-        else {
+        let valid = self.allocations.get(&handle).is_some_and(|allocation| {
+            if global {
+                allocation.global()
+            } else {
+                matches!(allocation.kind, Kind::Local)
+            }
+        });
+        if !valid {
             thread::set_last_error(memory, 6)?;
             return Ok(handle);
-        };
+        }
+        self.release(handle, stack, memory)?;
+        Ok(0)
+    }
+
+    fn release(
+        &mut self,
+        handle: u32,
+        stack: u32,
+        memory: &mut GuestMemory,
+    ) -> Result<(), DispatchError> {
+        let allocation = &self.allocations[&handle];
         let address = u64::from(allocation.base);
         // dispatch must still read the return slot after the call completes.
         if address < u64::from(stack) + 8 && u64::from(stack) < address + allocation.length {
@@ -157,7 +221,7 @@ impl Heap {
         }
         memory.unmap(address, allocation.length)?;
         self.allocations.remove(&handle);
-        Ok(0)
+        Ok(())
     }
 
     fn lock(&mut self, handle: u32, memory: &mut GuestMemory) -> Result<u32, DispatchError> {

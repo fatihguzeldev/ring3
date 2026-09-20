@@ -440,10 +440,13 @@ impl Process32 {
                 self.cpu.set_register(Register32::Eax, result);
             }
             Api::Crt(call) => {
-                if let Some(value) =
-                    self.crt
-                        .dispatch(call, &frame[1..words], &mut self.cpu, &mut self.memory)?
-                {
+                if let Some(value) = self.crt.dispatch(
+                    call,
+                    &frame[1..words],
+                    &mut self.cpu,
+                    &mut self.memory,
+                    &mut self.heap,
+                )? {
                     self.cpu.set_register(Register32::Eax, value);
                 }
             }
