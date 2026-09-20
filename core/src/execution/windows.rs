@@ -16,7 +16,7 @@ mod messages;
 mod modules;
 mod parameters;
 mod startup;
-mod system_metrics;
+mod system;
 mod thread;
 mod tls;
 
@@ -80,7 +80,7 @@ enum Api {
     ExitProcess,
     GetDesktopWindow,
     RegisterWindowMessage,
-    GetSystemMetrics,
+    System(system::Call),
     SetErrorMode,
     GetErrorMode,
     GetVersion,
@@ -120,11 +120,11 @@ impl Api {
             0x30 => Some(Self::GetVersion),
             0x94 => Some(Self::RegisterWindowMessage),
             0x98 => Some(Self::GetProcessVersion),
-            0x9c => Some(Self::GetSystemMetrics),
             0x118 => Some(Self::ExceptionProlog),
             0xffc => Some(Self::Unsupported),
             offset => d3d8::Call::at(offset)
                 .map(Self::Graphics)
+                .or_else(|| system::Call::at(offset).map(Self::System))
                 .or_else(|| gdi::Call::at(offset).map(Self::Gdi))
                 .or_else(|| crt::Call::at(offset).map(Self::Crt))
                 .or_else(|| modules::Call::at(offset).map(Self::Module))
@@ -181,6 +181,7 @@ impl Api {
                 "GetDesktopWindow" => 16,
                 "RegisterWindowMessageA" => 0x94,
                 "GetSystemMetrics" => 0x9c,
+                "GetSysColor" => 0xac,
                 "GetDC" => 0xa0,
                 "ReleaseDC" => 0xa4,
                 _ => return None,
@@ -434,9 +435,9 @@ impl Process32 {
                 let value = self.messages.register(argument, &mut self.memory)?;
                 self.cpu.set_register(Register32::Eax, value);
             }
-            Api::GetSystemMetrics => {
+            Api::System(call) => {
                 self.cpu
-                    .set_register(Register32::Eax, system_metrics::get(argument)?);
+                    .set_register(Register32::Eax, call.dispatch(argument)?);
             }
             Api::SetErrorMode => {
                 if argument & !0x8007 != 0 {
