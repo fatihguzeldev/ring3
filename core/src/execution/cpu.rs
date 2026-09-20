@@ -28,6 +28,7 @@ pub struct Cpu32 {
 pub enum StopReason {
     InstructionLimit,
     Breakpoint,
+    Intercepted,
     UnsupportedInstruction,
     InvalidInstruction,
     MemoryFault(MemoryError),
@@ -60,8 +61,27 @@ impl Cpu32 {
     }
 
     pub fn run(&mut self, memory: &mut GuestMemory, instruction_limit: u64) -> RunResult {
+        self.run_until(memory, instruction_limit, |_| false)
+    }
+
+    /// suspends before fetching an address selected by the caller. interception
+    /// leaves cpu state unchanged and consumes no instruction. a zero budget
+    /// returns the instruction limit without consulting the predicate.
+    pub fn run_until(
+        &mut self,
+        memory: &mut GuestMemory,
+        instruction_limit: u64,
+        mut intercept: impl FnMut(u32) -> bool,
+    ) -> RunResult {
         for executed in 0..instruction_limit {
             let start = self.eip;
+            if intercept(start) {
+                return RunResult {
+                    reason: StopReason::Intercepted,
+                    instructions: executed,
+                    instruction_pointer: start,
+                };
+            }
             let before = *self;
             let result =
                 decode(memory, start).and_then(|instruction| self.execute(&instruction, memory));
