@@ -25,6 +25,7 @@ pub struct Process32 {
     pub memory: GuestMemory,
     pub cpu: Cpu32,
     exit_code: Option<u32>,
+    error_mode: u32,
     startup: startup::Startup,
     modules: modules::Modules,
     graphics: d3d8::Graphics,
@@ -63,6 +64,8 @@ enum Api {
     GetLastError,
     ExitProcess,
     GetDesktopWindow,
+    SetErrorMode,
+    GetErrorMode,
     Graphics(d3d8::Call),
     Crt(crt::Call),
     Module(modules::Call),
@@ -87,6 +90,8 @@ impl Api {
             4 => Some(Self::GetLastError),
             8 => Some(Self::ExitProcess),
             16 => Some(Self::GetDesktopWindow),
+            0x20 => Some(Self::SetErrorMode),
+            0x24 => Some(Self::GetErrorMode),
             0xffc => Some(Self::Unsupported),
             offset => d3d8::Call::at(offset)
                 .map(Self::Graphics)
@@ -110,6 +115,8 @@ impl Api {
                 "LoadLibraryA" => 0x14,
                 "GetModuleHandleA" => 0x18,
                 "FreeLibrary" => 0x1c,
+                "SetErrorMode" => 0x20,
+                "GetErrorMode" => 0x24,
                 _ => return None,
             }
         } else if module.eq_ignore_ascii_case("d3d8.dll") && name == "Direct3DCreate8" {
@@ -124,7 +131,10 @@ impl Api {
 
     fn arguments(self) -> usize {
         match self {
-            Self::GetLastError | Self::GetDesktopWindow | Self::Unsupported => 0,
+            Self::GetLastError
+            | Self::GetDesktopWindow
+            | Self::GetErrorMode
+            | Self::Unsupported => 0,
             Self::Graphics(call) => call.arguments(),
             Self::Crt(call) => call.arguments(),
             _ => 1,
@@ -217,6 +227,7 @@ impl Process32 {
             memory: image.memory,
             cpu,
             exit_code: None,
+            error_mode: 0,
             startup,
             modules,
             graphics: d3d8::Graphics::default(),
@@ -339,6 +350,15 @@ impl Process32 {
                 return Ok(());
             }
             Api::GetDesktopWindow => self.cpu.set_register(Register32::Eax, d3d8::DESKTOP),
+            Api::SetErrorMode => {
+                if argument & !0x8007 != 0 {
+                    return Err(DispatchError::Unsupported);
+                }
+                self.cpu.set_register(Register32::Eax, self.error_mode);
+                // x86 permits ignoring sem_noalignmentfaultexcept.
+                self.error_mode = argument & 0x8003;
+            }
+            Api::GetErrorMode => self.cpu.set_register(Register32::Eax, self.error_mode),
             Api::Module(call) => {
                 let value = self.modules.dispatch(
                     call,
