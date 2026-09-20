@@ -20,7 +20,6 @@ pub enum LoadError {
     InvalidLayout,
     Imports(PeImportLookupError),
     InvalidImportAddressTable,
-    BoundImportsUnsupported,
     UnresolvedImport { module: String, symbol: String },
     Memory(MemoryError),
 }
@@ -48,9 +47,10 @@ pub fn load_pe32(bytes: &[u8], page_limit: u32) -> Result<LoadedPe32, LoadError>
 /// loads a pe32 image and resolves static imports before final section protection.
 /// the resolver returns guest addresses, never host pointers. callbacks may have
 /// occurred before a later load failure; partially loaded memory never escapes.
+/// explicit lookup tables replace cached iat addresses regardless of timestamps.
 ///
 /// # errors
-/// rejects unresolved, malformed, bound or zero-oft imports and invalid iat ranges,
+/// rejects unresolved, malformed or zero-oft imports and invalid iat ranges,
 /// along with the image and memory errors of [`load_pe32`].
 #[expect(clippy::missing_errors_doc, reason = "project headings are lower case")]
 pub fn load_pe32_with_imports(

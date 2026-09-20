@@ -11,9 +11,6 @@ pub(super) fn bind(
     let mut ranges = Vec::new();
     for import in imports {
         let descriptor = import.descriptor;
-        if descriptor.time_date_stamp != 0 {
-            return Err(LoadError::BoundImportsUnsupported);
-        }
         let rva = descriptor.import_address_table_rva;
         let count = u32::try_from(import.entries.len())
             .map_err(|_| LoadError::InvalidImportAddressTable)?;
