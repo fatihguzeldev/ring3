@@ -39,3 +39,4 @@ EXPORTS
     _InterlockedExchange@8==InterlockedExchange
     _InterlockedIncrement@4==InterlockedIncrement
     _InterlockedDecrement@4==InterlockedDecrement
+    _GetComputerNameA@8==GetComputerNameA

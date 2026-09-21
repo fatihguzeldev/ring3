@@ -347,6 +347,37 @@ fn execute_resources() {
 #[path = "../../core/tests/support/system_directory_executable.rs"]
 mod system_directory_executable;
 
+#[path = "../../core/tests/support/computer_name_executable.rs"]
+mod computer_name_executable;
+
+fn execute_computer_name() {
+    use ring3_core::execution::{Process32, ProcessStop, Register32, StopReason};
+    let mut process = Process32::load(&computer_name_executable::pe32(), 32).unwrap();
+    let result = process.run(50);
+    assert_eq!(result.reason, ProcessStop::Stopped(StopReason::Breakpoint));
+    assert_eq!((result.instructions, result.api_calls), (12, 2));
+    for (register, expected) in [
+        (Register32::Eax, 1),
+        (Register32::Ebx, 0),
+        (Register32::Ecx, 6),
+        (Register32::Edx, 5),
+        (Register32::Esi, 0x474e_4952),
+        (Register32::Esp, 0x1001_0000),
+    ] {
+        assert_eq!(process.cpu.register(register), expected);
+    }
+    #[cfg(windows_demo)]
+    {
+        let mut process = Process32::load(
+            include_bytes!("../../target/windows-api/computer-name.exe"),
+            64,
+        )
+        .unwrap();
+        let result = process.run(1000);
+        assert_eq!(result.reason, ProcessStop::Exited(42));
+    }
+}
+
 fn execute_system_directory() {
     use ring3_core::execution::{Process32, ProcessStop, Register32, StopReason};
     let mut process = Process32::load(&system_directory_executable::pe32(), 25).unwrap();
@@ -2190,6 +2221,7 @@ pub extern "C" fn run() -> u32 {
     execute_module_file_name();
     execute_resources();
     execute_system_directory();
+    execute_computer_name();
     execute_image();
     execute_function();
     inspect_image();
