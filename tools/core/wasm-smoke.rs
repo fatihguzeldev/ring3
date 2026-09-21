@@ -122,6 +122,21 @@ mod interlocked_executable;
 #[path = "../../core/tests/support/string_length_executable.rs"]
 mod string_length_executable;
 
+#[path = "../../core/tests/support/buffer_copy_executable.rs"]
+mod buffer_copy_executable;
+
+fn execute_buffer_copy() {
+    use ring3_core::execution::{Process32, ProcessStop, Register32, StopReason};
+    let mut process = Process32::load(&buffer_copy_executable::pe32(), 32).unwrap();
+    let result = process.run(50);
+    assert_eq!(result.reason, ProcessStop::Stopped(StopReason::Breakpoint));
+    assert_eq!((result.instructions, result.api_calls), (13, 2));
+    assert_eq!(process.cpu.register(Register32::Eax), 0);
+    assert_eq!(process.cpu.register(Register32::Ebx), 0x0040_2190);
+    assert_eq!(process.cpu.register(Register32::Ecx), 0xff80_0061);
+    assert_eq!(process.cpu.register(Register32::Esp), 0x1001_0000);
+}
+
 fn execute_string_length() {
     use ring3_core::execution::{Process32, ProcessStop, Register32, StopReason};
     let mut process = Process32::load(&string_length_executable::pe32(), 32).unwrap();
@@ -2102,6 +2117,7 @@ pub extern "C" fn run() -> u32 {
     execute_local_realloc();
     execute_interlocked();
     execute_string_length();
+    execute_buffer_copy();
     execute_thread_identity();
     execute_module_file_name();
     execute_resources();
