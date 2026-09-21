@@ -219,6 +219,9 @@ impl Cpu32 {
             | Code::Fst_m64fp
             | Code::Fstp_m32fp
             | Code::Fstp_m64fp => self.x87_transfer(instruction, memory)?,
+            Code::Fsqrt | Code::Fdivr_m32fp | Code::Fdivr_m64fp => {
+                self.x87_arithmetic(instruction, memory)?;
+            }
             Code::Nopd | Code::Int3 => {}
             _ => next = self.conditional_instruction(instruction, memory)?,
         }

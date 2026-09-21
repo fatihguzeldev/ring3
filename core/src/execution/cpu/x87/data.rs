@@ -35,6 +35,34 @@ impl Stack {
 }
 
 impl Cpu32 {
+    pub(in super::super) fn x87_arithmetic(
+        &mut self,
+        instruction: &Instruction,
+        memory: &GuestMemory,
+    ) -> Result<(), StopReason> {
+        self.x87_profile()?;
+        let top = self.x87_stack.value()?;
+        let result = if instruction.code() == Code::Fsqrt {
+            if top < 0.0 {
+                return Err(StopReason::UnsupportedInstruction);
+            }
+            top.sqrt()
+        } else {
+            let source = self.read_float(instruction, memory)?;
+            if top == 0.0 {
+                return Err(StopReason::UnsupportedInstruction);
+            }
+            let result = source / top;
+            // binary64's bottom binade cannot stand in for x87's extended exponent range.
+            if !result.is_finite() || (source != 0.0 && result.abs() < 2.0 * f64::MIN_POSITIVE) {
+                return Err(StopReason::UnsupportedInstruction);
+            }
+            result
+        };
+        self.x87_stack.values[usize::from(self.x87_stack.top)] = result.to_bits();
+        Ok(())
+    }
+
     pub(in super::super) fn x87_transfer(
         &mut self,
         instruction: &Instruction,
