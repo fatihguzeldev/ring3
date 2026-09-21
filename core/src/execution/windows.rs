@@ -12,6 +12,7 @@ mod crt;
 mod cursors;
 mod d3d8;
 mod diagnostics;
+mod directory;
 mod gdi;
 mod guest;
 mod heap;
@@ -47,6 +48,7 @@ pub struct Process32 {
     startup: startup::Startup,
     modules: modules::Modules,
     resources: resources::Resources,
+    current_directory: directory::Directory,
     user_atoms: user_atoms::UserAtoms,
     cursors: cursors::Cursors,
     heap: heap::Heap,
@@ -94,6 +96,7 @@ enum Api {
     ExitProcess,
     Interlocked(atomics::Call),
     Clock(clock::Call),
+    GetCurrentDirectory,
     GetDesktopWindow,
     RegisterUserAtom,
     System(system::Call),
@@ -139,6 +142,7 @@ impl Api {
             0x200 => Some(Self::Interlocked(atomics::Call::Exchange)),
             0x204 => Some(Self::Interlocked(atomics::Call::Increment)),
             0x208 => Some(Self::Interlocked(atomics::Call::Decrement)),
+            0x228 => Some(Self::GetCurrentDirectory),
             16 => Some(Self::GetDesktopWindow),
             0x20 => Some(Self::SetErrorMode),
             0x24 => Some(Self::GetErrorMode),
@@ -194,6 +198,7 @@ impl Api {
                 "CloseHandle" => 0x21c,
                 "QueryPerformanceFrequency" => 0x220,
                 "QueryPerformanceCounter" => 0x224,
+                "GetCurrentDirectoryA" => 0x228,
                 "lstrcpynA" => 0xe4,
                 "lstrcpyA" => 0xf0,
                 "lstrcatA" => 0xf4,
@@ -261,6 +266,7 @@ impl Api {
         match self {
             Self::Interlocked(call) => call.arguments(),
             Self::Synchronization(call) => call.arguments(),
+            Self::GetCurrentDirectory => 2,
             Self::GetLastError
             | Self::GetCurrentThread
             | Self::GetCurrentThreadId
@@ -335,6 +341,7 @@ impl Process32 {
         options: ProcessOptions<'_>,
     ) -> Result<Self, LoadError> {
         let parameters = parameters::Parameters::prepare(options)?;
+        let current_directory = directory::Directory::new(options.current_directory)?;
         let mut diagnostic_imports = diagnostics::Imports::default();
         let reserved = [
             u64::from(STACK_BASE)..u64::from(STACK_BASE + STACK_SIZE),
@@ -393,6 +400,7 @@ impl Process32 {
             startup,
             modules,
             resources,
+            current_directory,
             user_atoms: user_atoms::UserAtoms::default(),
             gdi: gdi::Gdi::default(),
             cursors: cursors::Cursors::default(),
@@ -533,6 +541,7 @@ impl Process32 {
         match api {
             Api::Interlocked(call) => self.interlocked(call, arguments)?,
             Api::Clock(call) => self.query_clock(call, argument)?,
+            Api::GetCurrentDirectory => self.query_directory(arguments)?,
             Api::Synchronization(call) => self.cpu.set_register(
                 Register32::Eax,
                 self.mutexes.dispatch(call, arguments, &mut self.memory)?,

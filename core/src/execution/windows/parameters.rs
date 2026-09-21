@@ -8,6 +8,7 @@ const MAX_BYTES: usize = 64 * 1024;
 #[derive(Clone, Copy, Debug)]
 pub struct ProcessOptions<'a> {
     pub image_path: &'a [u8],
+    pub current_directory: &'a [u8],
     pub command_line: &'a [u8],
     pub environment: &'a [&'a [u8]],
     pub diagnostic_imports: bool,
@@ -18,6 +19,7 @@ impl Default for ProcessOptions<'_> {
     fn default() -> Self {
         Self {
             image_path: b"C:\\program.exe",
+            current_directory: b"C:\\",
             command_line: b"program.exe",
             environment: &[],
             diagnostic_imports: false,
