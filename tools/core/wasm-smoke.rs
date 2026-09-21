@@ -608,6 +608,7 @@ fn execute_find_files() {
     };
     let mut process =
         Process32::load_with_options(&find_files_executable::pe32(), 64, options).unwrap();
+    process.memory.write(0x0040_2180, b"*TA.bin\0").unwrap();
     let result = process.run(50);
     assert_eq!(result.reason, ProcessStop::Stopped(StopReason::Breakpoint));
     assert_eq!((result.instructions, result.api_calls), (10, 3));
@@ -620,7 +621,7 @@ fn execute_find_files() {
     assert_eq!(&record[32..36], &5_u32.to_le_bytes());
     assert_eq!(&record[44..53], b"beta.bin\0");
     #[cfg(windows_demo)]
-    for (options, steps, calls) in [(ProcessOptions::default(), 57, 10), (options, 119, 17)] {
+    for (options, steps, calls) in [(ProcessOptions::default(), 57, 10), (options, 151, 21)] {
         let mut process = Process32::load_with_options(
             include_bytes!("../../target/windows-api/find-files.exe"),
             64,

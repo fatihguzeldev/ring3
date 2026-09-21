@@ -31,6 +31,10 @@ void entry(void) {
         if (FindNextFileA(handle, &data) || GetLastError() != 18) ExitProcess(5);
         if (!FindClose(handle)) ExitProcess(6);
         if (FindClose(handle) || GetLastError() != 6) ExitProcess(7);
+        handle = FindFirstFileA("*PHA.dat", &data);
+        if (handle == (void *)-1 || data.name[0] != 'a' || data.size_low != 7) ExitProcess(11);
+        if (FindNextFileA(handle, &data) || GetLastError() != 18) ExitProcess(12);
+        if (!FindClose(handle)) ExitProcess(13);
     }
     if (FindFirstFileA("missing\\*", &data) != (void *)-1 || GetLastError() != 3) ExitProcess(8);
     if (FindNextFileA((void *)0, &data) || GetLastError() != 6) ExitProcess(9);
