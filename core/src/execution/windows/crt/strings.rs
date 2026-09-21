@@ -1,5 +1,19 @@
 use super::{DispatchError, ERRNO, GuestMemory, MemoryError, guest, heap};
 
+pub(super) fn length(memory: &GuestMemory, source: u32) -> Result<u32, DispatchError> {
+    for offset in 0..65536 {
+        let address = source
+            .checked_add(offset)
+            .ok_or(MemoryError::AddressOverflow)?;
+        let mut byte = [0];
+        memory.read(u64::from(address), &mut byte)?;
+        if byte[0] == 0 {
+            return Ok(offset);
+        }
+    }
+    Err(DispatchError::Unsupported)
+}
+
 pub(super) fn duplicate(
     memory: &mut GuestMemory,
     heap: &mut heap::Heap,

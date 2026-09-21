@@ -40,6 +40,7 @@ pub(super) enum Call {
     MbSearchReverse,
     MbIncrement,
     Duplicate,
+    Length,
     Compare,
     SetMbCodePage,
     OnExit,
@@ -63,6 +64,7 @@ impl Call {
             0x12c => Some(Self::MbSearchReverse),
             0x130 => Some(Self::MbIncrement),
             0x134 => Some(Self::Duplicate),
+            0x14c => Some(Self::Length),
             0x138 => Some(Self::Compare),
             0x13c => Some(Self::SetMbCodePage),
             0x140 => Some(Self::OnExit),
@@ -79,6 +81,7 @@ impl Call {
             | Self::OperatorDelete
             | Self::MbIncrement
             | Self::Duplicate
+            | Self::Length
             | Self::SetMbCodePage
             | Self::OnExit => 1,
             Self::ControlFp | Self::MbSearchReverse => 2,
@@ -137,6 +140,7 @@ impl Crt {
             }
             Call::OnExit => Some(self.exit_callbacks.register(arguments[0])),
             Call::Duplicate => Some(strings::duplicate(memory, heap, arguments[0])?),
+            Call::Length => Some(strings::length(memory, arguments[0])?),
             Call::Compare => Some(buffers::compare(
                 memory,
                 arguments[0],
@@ -192,6 +196,7 @@ pub(super) fn resolve(name: &str) -> Option<u32> {
         "_mbsrchr" => Some(API_BASE + 0x12c),
         "_mbsinc" => Some(API_BASE + 0x130),
         "_strdup" => Some(API_BASE + 0x134),
+        "strlen" => Some(API_BASE + 0x14c),
         "_fmode" => Some(FMODE),
         "_commode" => Some(COMMODE),
         "_adjust_fdiv" => Some(ADJUST_FDIV),
