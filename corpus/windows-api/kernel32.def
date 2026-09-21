@@ -2,6 +2,8 @@ LIBRARY KERNEL32.dll
 EXPORTS
     _SetLastError@4==SetLastError
     _GetLastError@0==GetLastError
+    _GetCurrentThread@0==GetCurrentThread
+    _GetCurrentThreadId@0==GetCurrentThreadId
     _ExitProcess@4==ExitProcess
     _LoadLibraryA@4==LoadLibraryA
     _GetModuleHandleA@4==GetModuleHandleA
