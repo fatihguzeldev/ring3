@@ -188,6 +188,70 @@ fn files_are_owned_and_enumerated_with_directories_sizes_and_stable_snapshots() 
 }
 
 #[test]
+fn leading_star_matches_literal_suffixes_in_files_and_immediate_directories() {
+    let mut p = load(
+        &[
+            FileMetadata {
+                path: b"C:\\alpha_plugin.DLL",
+                size: 7,
+            },
+            FileMetadata {
+                path: b"C:\\prefix.a.b",
+                size: 8,
+            },
+            FileMetadata {
+                path: b"C:\\annul",
+                size: 9,
+            },
+            FileMetadata {
+                path: b"C:\\Nested\\hidden_plugin.dll",
+                size: 10,
+            },
+        ],
+        &[b"C:\\_plugin.dll", b"C:\\folder_plugin.dll"],
+    );
+    let handle = first(&mut p, b"*_PLugin.dll", OUTPUT);
+    for (index, (name, size, directory)) in [
+        (b"_plugin.dll".as_slice(), 0, true),
+        (b"alpha_plugin.DLL", 7, false),
+        (b"folder_plugin.dll", 0, true),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        if index > 0 {
+            assert_eq!(call(&mut p, NEXT, &[handle, OUTPUT]), 1);
+        }
+        record(&p, OUTPUT, name, size, directory);
+    }
+    assert_eq!(call(&mut p, NEXT, &[handle, OUTPUT]), 0);
+    assert_eq!(call(&mut p, CLOSE, &[handle]), 1);
+    for (pattern, name, size) in [
+        (
+            b"*ALPHA_PLUGIN.dll".as_slice(),
+            b"alpha_plugin.DLL".as_slice(),
+            7,
+        ),
+        (b"*x.a.B", b"prefix.a.b", 8),
+        (b"*NuL", b"annul", 9),
+        (b"Nested\\*plugin.dll", b"hidden_plugin.dll", 10),
+    ] {
+        let handle = first(&mut p, pattern, OUTPUT);
+        record(&p, OUTPUT, name, size, false);
+        assert_eq!(call(&mut p, NEXT, &[handle, OUTPUT]), 0);
+        assert_eq!(call(&mut p, CLOSE, &[handle]), 1);
+    }
+    for pattern in [
+        b"*plugin.dll.extra".as_slice(),
+        b"*longer_than_alpha_plugin.dll",
+        b"*fix.a",
+    ] {
+        assert_eq!(first(&mut p, pattern, 0), u32::MAX);
+        assert_eq!(p.last_error().unwrap(), 2);
+    }
+}
+
+#[test]
 fn failed_writes_preserve_handle_ids_and_cursors_and_aliases_capture_inputs() {
     let mut p = load(&[], &[b"C:\\A", b"C:\\B"]);
     p.memory.write(u64::from(SOURCE), b"*\0").unwrap();
@@ -270,6 +334,10 @@ fn unsupported_filters_and_guest_input_faults_do_not_open_searches() {
     let mut p = load(&[], &[b"C:\\Data"]);
     for pattern in [
         &b"*.*"[..],
+        b"**tail",
+        b"*a?",
+        b"*trail.",
+        b"*trail ",
         b"a?",
         b"a*",
         b"C:Data",

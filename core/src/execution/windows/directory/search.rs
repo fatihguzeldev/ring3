@@ -184,11 +184,8 @@ fn filter<'a>(current: &[u8], input: &'a [u8]) -> Result<(Vec<u8>, &'a [u8]), pa
         return Err(paths::PathError::Unsupported);
     }
     if pattern != b"*" {
-        let literal = if pattern.starts_with(b"*.") {
-            &pattern[1..]
-        } else {
-            pattern
-        };
+        let suffix = pattern.strip_prefix(b"*");
+        let literal = suffix.unwrap_or(pattern);
         if literal.is_empty()
             || literal.contains(&b'*')
             || literal.contains(&b'?')
@@ -196,7 +193,11 @@ fn filter<'a>(current: &[u8], input: &'a [u8]) -> Result<(Vec<u8>, &'a [u8]), pa
         {
             return Err(paths::PathError::Unsupported);
         }
-        paths::validate_component(literal)?;
+        if suffix.is_some() {
+            paths::validate_suffix(literal)?;
+        } else {
+            paths::validate_component(literal)?;
+        }
     }
     Ok((paths::resolve(current, parent)?, pattern))
 }
@@ -204,7 +205,7 @@ fn filter<'a>(current: &[u8], input: &'a [u8]) -> Result<(Vec<u8>, &'a [u8]), pa
 fn matches_name(pattern: &[u8], name: &[u8]) -> bool {
     pattern == b"*"
         || pattern.eq_ignore_ascii_case(name)
-        || (pattern.starts_with(b"*.")
+        || (pattern.starts_with(b"*")
             && name.len() >= pattern.len() - 1
             && name[name.len() - (pattern.len() - 1)..].eq_ignore_ascii_case(&pattern[1..]))
 }

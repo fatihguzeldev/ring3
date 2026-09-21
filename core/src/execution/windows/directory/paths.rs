@@ -76,9 +76,15 @@ pub(super) fn resolve(current: &[u8], input: &[u8]) -> Result<Vec<u8>, PathError
 }
 
 pub(super) fn validate_component(component: &[u8]) -> Result<(), PathError> {
+    if reserved_device(component) {
+        return Err(PathError::Unsupported);
+    }
+    validate_suffix(component)
+}
+
+pub(super) fn validate_suffix(component: &[u8]) -> Result<(), PathError> {
     if component.iter().any(|&b| b >= 0x7f || b == b'/')
         || matches!(component.last(), Some(b'.' | b' '))
-        || reserved_device(component)
     {
         return Err(PathError::Unsupported);
     }
