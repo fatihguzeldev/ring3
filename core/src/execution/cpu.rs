@@ -229,6 +229,7 @@ impl Cpu32 {
             | Code::Fmul_m64fp => {
                 self.x87_arithmetic(instruction, memory)?;
             }
+            Code::Wait if self.x87_control_word & 0x3f == 0x3f => {}
             Code::Nopd | Code::Int3 => {}
             _ => next = self.conditional_instruction(instruction, memory)?,
         }
