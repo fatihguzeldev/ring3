@@ -1,5 +1,13 @@
 use super::{DispatchError, GuestMemory, MemoryError};
 
+pub(super) fn increment(memory: &GuestMemory, pointer: u32) -> Result<u32, DispatchError> {
+    if pointer == 0 {
+        return Err(DispatchError::Unsupported);
+    }
+    memory.read(u64::from(pointer), &mut [0])?;
+    Ok(pointer.checked_add(1).ok_or(MemoryError::AddressOverflow)?)
+}
+
 pub(super) fn reverse_search(
     memory: &GuestMemory,
     pointer: u32,

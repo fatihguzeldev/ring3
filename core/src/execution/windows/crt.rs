@@ -34,6 +34,7 @@ pub(super) enum Call {
     ErrnoPointer,
     DllOnExit,
     MbSearchReverse,
+    MbIncrement,
 }
 
 impl Call {
@@ -50,13 +51,14 @@ impl Call {
             0x124 => Some(Self::ErrnoPointer),
             0x128 => Some(Self::DllOnExit),
             0x12c => Some(Self::MbSearchReverse),
+            0x130 => Some(Self::MbIncrement),
             _ => None,
         }
     }
 
     pub(super) fn arguments(self) -> usize {
         match self {
-            Self::SetAppType | Self::Malloc | Self::Free => 1,
+            Self::SetAppType | Self::Malloc | Self::Free | Self::MbIncrement => 1,
             Self::ControlFp | Self::MbSearchReverse => 2,
             Self::GetMainArgs => 5,
             Self::Memset | Self::DllOnExit => 3,
@@ -101,6 +103,7 @@ impl Crt {
             Call::MbSearchReverse => {
                 Some(strings::reverse_search(memory, arguments[0], arguments[1])?)
             }
+            Call::MbIncrement => Some(strings::increment(memory, arguments[0])?),
             Call::DllOnExit => Some(onexit::register(
                 heap,
                 memory,
@@ -143,6 +146,7 @@ pub(super) fn resolve(name: &str) -> Option<u32> {
         "_errno" => Some(API_BASE + 0x124),
         "__dllonexit" => Some(API_BASE + 0x128),
         "_mbsrchr" => Some(API_BASE + 0x12c),
+        "_mbsinc" => Some(API_BASE + 0x130),
         "_fmode" => Some(FMODE),
         "_commode" => Some(COMMODE),
         "_adjust_fdiv" => Some(ADJUST_FDIV),
