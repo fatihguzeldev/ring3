@@ -37,3 +37,5 @@ EXPORTS
     _GetSystemDirectoryA@8==GetSystemDirectoryA
     _DisableThreadLibraryCalls@4==DisableThreadLibraryCalls
     _InterlockedExchange@8==InterlockedExchange
+    _InterlockedIncrement@4==InterlockedIncrement
+    _InterlockedDecrement@4==InterlockedDecrement

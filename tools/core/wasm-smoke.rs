@@ -139,6 +139,31 @@ mod local_realloc_executable;
 #[path = "../../core/tests/support/interlocked_executable.rs"]
 mod interlocked_executable;
 
+#[path = "../../core/tests/support/counter_executable.rs"]
+mod counter_executable;
+
+#[path = "../../core/tests/support/locale_activity_executable.rs"]
+mod locale_activity_executable;
+
+fn execute_locale_activity() {
+    use ring3_core::execution::{Process32, ProcessStop, Register32, StopReason};
+    let mut process = Process32::load(&counter_executable::pe32(), 32).unwrap();
+    let result = process.run(50);
+    assert_eq!(result.reason, ProcessStop::Stopped(StopReason::Breakpoint));
+    assert_eq!((result.instructions, result.api_calls), (7, 2));
+    assert_eq!(process.cpu.register(Register32::Eax), u32::MAX);
+    assert_eq!(process.cpu.register(Register32::Ebx), 0);
+    assert_eq!(process.cpu.register(Register32::Esp), 0x1001_0000);
+    let mut process = Process32::load(&locale_activity_executable::pe32(), 32).unwrap();
+    let result = process.run(50);
+    assert_eq!(result.reason, ProcessStop::Stopped(StopReason::Breakpoint));
+    assert_eq!((result.instructions, result.api_calls), (9, 0));
+    assert_eq!(process.cpu.register(Register32::Eax), 0);
+    assert_eq!(process.cpu.register(Register32::Edx), 0);
+    assert_eq!(process.cpu.register(Register32::Esi), 42);
+    assert_eq!(process.cpu.register(Register32::Edi), 7);
+}
+
 #[path = "../../core/tests/support/string_length_executable.rs"]
 mod string_length_executable;
 
@@ -2136,6 +2161,7 @@ pub extern "C" fn run() -> u32 {
     execute_cursor_position();
     execute_local_realloc();
     execute_interlocked();
+    execute_locale_activity();
     execute_string_length();
     execute_buffer_copy();
     execute_complement();

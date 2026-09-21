@@ -20,6 +20,8 @@ EXPORTS
     _mbsrchr
     _mbsinc
     _strdup
+    __unguarded_readlc_active DATA
+    __setlc_active DATA
     strlen
     memcmp
     memcpy
