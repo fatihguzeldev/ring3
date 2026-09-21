@@ -177,6 +177,7 @@ impl Api {
                 "GetModuleFileNameA" => 0xe0,
                 "DisableThreadLibraryCalls" => 0xfc,
                 "GetSystemDirectoryA" => 0xf8,
+                "GetComputerNameA" => 0x20c,
                 "lstrcpynA" => 0xe4,
                 "lstrcpyA" => 0xf0,
                 "lstrcatA" => 0xf4,
