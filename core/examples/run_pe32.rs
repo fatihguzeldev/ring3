@@ -1,4 +1,8 @@
 use std::io::{Read, Write};
+use std::time::Instant;
+
+#[path = "support/timed.rs"]
+mod timed;
 
 use ring3_core::execution::{
     GuestModule, Process32, ProcessOptions, ProcessStop, Register32, StopReason,
@@ -84,7 +88,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         },
     )
     .map_err(|error| format!("load failed: {error:?}"))?;
-    let result = process.run(limit);
+    let origin = Instant::now();
+    let result = timed::run(&mut process, limit, || origin.elapsed()).map_err(|failure| {
+        format!(
+            "host clock failed: {:?}; completed={:?}",
+            failure.error, failure.completed
+        )
+    })?;
     println!(
         "{:?}; eip={:#010x}; execution_steps={}; api_calls={}; eax={:#010x}; eflags={:#010x}",
         result.reason,
