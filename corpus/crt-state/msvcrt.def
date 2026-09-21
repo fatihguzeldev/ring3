@@ -18,3 +18,4 @@ EXPORTS
     _errno
     __dllonexit
     _mbsrchr
+    _mbsinc
