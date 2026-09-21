@@ -1,4 +1,16 @@
-use super::Cpu32;
+use super::{Cpu32, DispatchError, Register32};
+
+pub(super) fn to_integer(cpu: &mut Cpu32) -> Result<u32, DispatchError> {
+    let bytes = cpu
+        .pop_x87_truncated_integer()
+        .ok_or(DispatchError::Unsupported)?
+        .to_le_bytes();
+    cpu.set_register(
+        Register32::Edx,
+        u32::from_le_bytes(bytes[4..].try_into().expect("high word")),
+    );
+    Ok(u32::from_le_bytes(bytes[..4].try_into().expect("low word")))
+}
 
 const EXCEPTIONS: [(u16, u32); 6] = [
     (0x01, 0x10),

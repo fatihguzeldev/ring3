@@ -35,6 +35,24 @@ impl Stack {
 }
 
 impl Cpu32 {
+    pub(crate) fn pop_x87_truncated_integer(&mut self) -> Option<i64> {
+        if self.x87_control_word & 0x3f != 0x3f {
+            return None;
+        }
+        let value = self.x87_stack.value().ok()?;
+        // the positive i64 limit rounds to 2^63 in binary64 and must stay exclusive.
+        if !(-9_223_372_036_854_775_808.0..9_223_372_036_854_775_808.0).contains(&value) {
+            return None;
+        }
+        #[expect(
+            clippy::cast_possible_truncation,
+            reason = "checked truncation toward zero"
+        )]
+        let integer = value as i64;
+        self.x87_stack.pop();
+        Some(integer)
+    }
+
     pub(in super::super) fn x87_arithmetic(
         &mut self,
         instruction: &Instruction,
