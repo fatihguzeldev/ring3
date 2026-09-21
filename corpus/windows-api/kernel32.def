@@ -40,3 +40,7 @@ EXPORTS
     _InterlockedIncrement@4==InterlockedIncrement
     _InterlockedDecrement@4==InterlockedDecrement
     _GetComputerNameA@8==GetComputerNameA
+    _CreateMutexA@12==CreateMutexA
+    _WaitForSingleObject@8==WaitForSingleObject
+    _ReleaseMutex@4==ReleaseMutex
+    _CloseHandle@4==CloseHandle

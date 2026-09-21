@@ -385,6 +385,26 @@ mod system_directory_executable;
 #[path = "../../core/tests/support/computer_name_executable.rs"]
 mod computer_name_executable;
 
+#[path = "../../core/tests/support/mutex_executable.rs"]
+mod mutex_executable;
+
+fn execute_mutex_lifecycle() {
+    use ring3_core::execution::{Process32, ProcessStop, Register32, StopReason};
+    let mut process = Process32::load(&mutex_executable::pe32(), 32).unwrap();
+    let result = process.run(50);
+    assert_eq!(result.reason, ProcessStop::Stopped(StopReason::Breakpoint));
+    assert_eq!((result.instructions, result.api_calls), (15, 5));
+    assert_eq!(process.cpu.register(Register32::Eax), 1);
+    assert_eq!(process.cpu.register(Register32::Ebx), 0x7200_0004);
+    assert_eq!(process.cpu.register(Register32::Esp), 0x1001_0000);
+    #[cfg(windows_demo)]
+    {
+        let mut process =
+            Process32::load(include_bytes!("../../target/windows-api/mutex.exe"), 64).unwrap();
+        assert_eq!(process.run(1000).reason, ProcessStop::Exited(42));
+    }
+}
+
 fn execute_computer_name() {
     use ring3_core::execution::{Process32, ProcessStop, Register32, StopReason};
     let mut process = Process32::load(&computer_name_executable::pe32(), 32).unwrap();
@@ -2259,6 +2279,7 @@ pub extern "C" fn run() -> u32 {
     execute_resources();
     execute_system_directory();
     execute_computer_name();
+    execute_mutex_lifecycle();
     execute_image();
     execute_function();
     inspect_image();
