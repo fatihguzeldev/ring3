@@ -13,6 +13,7 @@ mod onexit;
 mod random;
 mod status;
 mod strings;
+mod type_names;
 
 const DATA: u32 = 0x7000_2000;
 const FMODE: u32 = DATA;
@@ -57,6 +58,7 @@ pub(super) enum Call {
     SeedRandom,
     Random,
     FloatToInteger,
+    TypeName,
     SetMbCodePage,
     OnExit,
 }
@@ -88,6 +90,7 @@ impl Call {
             0x160 => Some(Self::SeedRandom),
             0x164 => Some(Self::Random),
             0x168 => Some(Self::FloatToInteger),
+            0x16c => Some(Self::TypeName),
             0x13c => Some(Self::SetMbCodePage),
             0x140 => Some(Self::OnExit),
             _ => None,
@@ -114,7 +117,8 @@ impl Call {
             | Self::CommodePointer
             | Self::ErrnoPointer
             | Self::Random
-            | Self::FloatToInteger => 0,
+            | Self::FloatToInteger
+            | Self::TypeName => 0,
         }
     }
 }
@@ -179,6 +183,11 @@ impl Crt {
             }
             Call::Random => Some(self.random.next()),
             Call::FloatToInteger => Some(floating::to_integer(cpu)?),
+            Call::TypeName => Some(type_names::name(
+                memory,
+                heap,
+                cpu.register(Register32::Ecx),
+            )?),
             Call::MbSearchReverse => Some(self.multibyte.reverse_search(
                 memory,
                 arguments[0],
@@ -269,6 +278,7 @@ pub(super) fn resolve(name: &str) -> Option<u32> {
         "srand" => Some(API_BASE + 0x160),
         "rand" => Some(API_BASE + 0x164),
         "_ftol" => Some(API_BASE + 0x168),
+        "?name@type_info@@QBEPBDXZ" => Some(API_BASE + 0x16c),
         "__dllonexit" => Some(API_BASE + 0x128),
         "_mbsrchr" => Some(API_BASE + 0x12c),
         "_mbsinc" => Some(API_BASE + 0x130),
