@@ -33,6 +33,9 @@ mod arguments_executable;
 #[path = "../../core/tests/support/dll_executable.rs"]
 mod dll_executable;
 
+#[path = "../../core/tests/support/relocated_executable.rs"]
+mod relocated_executable;
+
 #[path = "../../core/tests/support/delay_executable.rs"]
 mod delay_executable;
 
@@ -1084,27 +1087,52 @@ fn execute_dlls() {
     }
     #[cfg(guest_dll_demo)]
     {
-        let mut process = Process32::load_with_options(
-            include_bytes!("../../target/guest-dll/caller.exe"),
-            64,
-            ProcessOptions {
-                modules: &[GuestModule {
-                    name: "demo.dll",
-                    bytes: include_bytes!("../../target/guest-dll/demo.dll"),
-                }],
-                ..ProcessOptions::default()
-            },
-        )
-        .unwrap();
-        let result = process.run(1000);
-        assert_eq!(result.reason, ProcessStop::Exited(42));
-        assert_eq!(result.api_calls, 1);
+        for library in [
+            include_bytes!("../../target/guest-dll/demo.dll").as_slice(),
+            include_bytes!("../../target/guest-dll/relocated/demo.dll").as_slice(),
+        ] {
+            let mut process = Process32::load_with_options(
+                include_bytes!("../../target/guest-dll/caller.exe"),
+                64,
+                ProcessOptions {
+                    modules: &[GuestModule {
+                        name: "demo.dll",
+                        bytes: library,
+                    }],
+                    ..ProcessOptions::default()
+                },
+            )
+            .unwrap();
+            let result = process.run(1000);
+            assert_eq!(result.reason, ProcessStop::Exited(42));
+            assert_eq!(result.api_calls, 1);
+        }
         let mut delayed =
             Process32::load(include_bytes!("../../target/guest-dll/delayed.exe"), 64).unwrap();
         let result = delayed.run(1000);
         assert_eq!(result.reason, ProcessStop::Exited(42));
         assert_eq!(result.api_calls, 1);
     }
+    let library = relocated_executable::dll(0x1000_0000);
+    let mut process = Process32::load_with_options(
+        &dll_executable::exe("demo.dll"),
+        32,
+        ProcessOptions {
+            modules: &[GuestModule {
+                name: "demo.dll",
+                bytes: &library,
+            }],
+            ..ProcessOptions::default()
+        },
+    )
+    .unwrap();
+    let result = process.run(100);
+    assert_eq!(result.reason, ProcessStop::Stopped(StopReason::Breakpoint));
+    assert_eq!(process.cpu.register(Register32::Eax), 42);
+    assert_eq!(process.cpu.register(Register32::Esp), 0x1001_0000);
+    let mut word = [0; 4];
+    process.memory.read(0x3000_2190, &mut word).unwrap();
+    assert_eq!(u32::from_le_bytes(word), 0x3000_0000);
 }
 
 fn execute_arguments() {
