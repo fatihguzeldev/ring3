@@ -248,6 +248,7 @@ fn builtin_identity_name_rules_and_balanced_references() {
         "d3d8.dll",
         "user32.dll",
         "gdi32.dll",
+        "winmm.dll",
     ] {
         name(&mut process, module);
         let handle = call(&mut process, 1, NAME);
@@ -351,44 +352,46 @@ fn faults_do_not_acquire_references_or_change_cpu() {
 
 #[test]
 fn explicit_provider_precedence_and_bootstrap_readiness_are_preserved() {
-    let library = dll_executable::dll(DLL, &dll_executable::attach(DLL, 42, true), None);
-    let modules = [GuestModule {
-        name: "msvcrt.dll",
-        bytes: &library,
-    }];
-    let mut process = load(&modules);
-    let bootstrap = process.cpu;
-    name(&mut process, "MSVCRT.DLL");
-    assert_eq!(call(&mut process, 1, NAME), DLL);
-    prepare(&mut process, 0, NAME);
-    assert!(matches!(
-        process.run(1).reason,
-        ProcessStop::UnsupportedApi { .. }
-    ));
-    // changing eip to the exe must not invent completed initialization.
-    process.cpu.eip = 0x0040_1000;
-    assert_eq!(
-        process.run(1).reason,
-        ProcessStop::Stopped(StopReason::Breakpoint)
-    );
-    prepare(&mut process, 0, NAME);
-    assert!(matches!(
-        process.run(1).reason,
-        ProcessStop::UnsupportedApi { .. }
-    ));
-    process.cpu = bootstrap;
-    for _ in 0..100 {
-        if process.run(1).reason == ProcessStop::Stopped(StopReason::Breakpoint) {
-            break;
+    for module_name in ["msvcrt.dll", "winmm.dll"] {
+        let library = dll_executable::dll(DLL, &dll_executable::attach(DLL, 42, true), None);
+        let modules = [GuestModule {
+            name: module_name,
+            bytes: &library,
+        }];
+        let mut process = load(&modules);
+        let bootstrap = process.cpu;
+        name(&mut process, &module_name.to_uppercase());
+        assert_eq!(call(&mut process, 1, NAME), DLL);
+        prepare(&mut process, 0, NAME);
+        assert!(matches!(
+            process.run(1).reason,
+            ProcessStop::UnsupportedApi { .. }
+        ));
+        // changing eip to the exe must not invent completed initialization.
+        process.cpu.eip = 0x0040_1000;
+        assert_eq!(
+            process.run(1).reason,
+            ProcessStop::Stopped(StopReason::Breakpoint)
+        );
+        prepare(&mut process, 0, NAME);
+        assert!(matches!(
+            process.run(1).reason,
+            ProcessStop::UnsupportedApi { .. }
+        ));
+        process.cpu = bootstrap;
+        for _ in 0..100 {
+            if process.run(1).reason == ProcessStop::Stopped(StopReason::Breakpoint) {
+                break;
+            }
         }
+        assert_eq!(call(&mut process, 0, NAME), DLL);
+        assert_eq!(call(&mut process, 2, DLL), 1);
+        prepare(&mut process, 2, DLL);
+        assert!(matches!(
+            process.run(1).reason,
+            ProcessStop::UnsupportedApi { .. }
+        ));
     }
-    assert_eq!(call(&mut process, 0, NAME), DLL);
-    assert_eq!(call(&mut process, 2, DLL), 1);
-    prepare(&mut process, 2, DLL);
-    assert!(matches!(
-        process.run(1).reason,
-        ProcessStop::UnsupportedApi { .. }
-    ));
 }
 
 #[test]

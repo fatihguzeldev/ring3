@@ -73,6 +73,7 @@ impl Modules {
             ("d3d8.dll", 0x808),
             ("user32.dll", 0x80c),
             ("gdi32.dll", 0x810),
+            ("winmm.dll", 0x814),
         ] {
             if !resident
                 .iter()

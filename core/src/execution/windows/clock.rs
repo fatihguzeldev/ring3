@@ -13,13 +13,19 @@ pub enum ClockError {
 pub(super) enum Call {
     Frequency,
     Counter,
+    Milliseconds,
 }
 
 impl Call {
+    pub(super) fn arguments(self) -> usize {
+        usize::from(!matches!(self, Self::Milliseconds))
+    }
+
     pub(super) fn at(offset: u32) -> Option<Self> {
         match offset {
             0x220 => Some(Self::Frequency),
             0x224 => Some(Self::Counter),
+            0x244 => Some(Self::Milliseconds),
             _ => None,
         }
     }
@@ -47,6 +53,14 @@ impl Process32 {
         let value = match call {
             Call::Frequency => 1_000_000_000,
             Call::Counter => self.elapsed_nanoseconds,
+            Call::Milliseconds => {
+                let millis = (self.elapsed_nanoseconds / 1_000_000) & i64::from(u32::MAX);
+                self.cpu.set_register(
+                    Register32::Eax,
+                    u32::try_from(millis).expect("masked millisecond counter"),
+                );
+                return Ok(());
+            }
         };
         guest::check(&self.memory, output, 8, Access::Write)?;
         self.memory.write(u64::from(output), &value.to_le_bytes())?;

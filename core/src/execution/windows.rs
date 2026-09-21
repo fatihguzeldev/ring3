@@ -247,6 +247,8 @@ impl Api {
                 "GetProcessVersion" => 0x98,
                 _ => return None,
             }
+        } else if module.eq_ignore_ascii_case("winmm.dll") && name == "timeGetTime" {
+            0x244
         } else if module.eq_ignore_ascii_case("d3d8.dll") && name == "Direct3DCreate8" {
             12
         } else if module.eq_ignore_ascii_case("user32.dll") {
@@ -285,6 +287,7 @@ impl Api {
             Self::Interlocked(call) => call.arguments(),
             Self::Synchronization(call) => call.arguments(),
             Self::Directory(call) => call.arguments(),
+            Self::Clock(call) => call.arguments(),
             Self::GetEnvironmentVariable => 3,
             Self::GetLastError
             | Self::GetCommandLine
