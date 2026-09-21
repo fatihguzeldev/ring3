@@ -21,3 +21,4 @@ EXPORTS
     _mbsinc
     _strdup
     memcmp
+    _setmbcp

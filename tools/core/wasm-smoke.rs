@@ -1784,6 +1784,21 @@ fn inspect_dependency_cycle() {
     }
 }
 
+#[path = "../../core/tests/support/crt_code_page_executable.rs"]
+mod crt_code_page_executable;
+
+fn execute_crt_code_page() {
+    use ring3_core::execution::{Process32, ProcessStop, Register32, StopReason};
+    let mut process = Process32::load(&crt_code_page_executable::pe32(), 25).unwrap();
+    let result = process.run(100);
+    assert_eq!(result.reason, ProcessStop::Stopped(StopReason::Breakpoint));
+    assert_eq!((result.instructions, result.api_calls), (13, 3));
+    assert_eq!(process.cpu.register(Register32::Eax), 0x0040_2182);
+    assert_eq!(process.cpu.register(Register32::Ebx), 0);
+    assert_eq!(process.cpu.register(Register32::Esi), 0x0040_2181);
+    assert_eq!(process.cpu.register(Register32::Esp), 0x1001_0000);
+}
+
 #[path = "../../core/tests/support/reverse_search_executable.rs"]
 mod reverse_search_executable;
 
@@ -1935,6 +1950,7 @@ pub extern "C" fn run() -> u32 {
     execute_global_memory();
     execute_memset();
     execute_reverse_search();
+    execute_crt_code_page();
     execute_string_traversal();
     execute_strdup();
     execute_buffer_compare();
