@@ -776,35 +776,38 @@ fn execute_error_mode() {
 
 fn execute_resident_modules() {
     use ring3_core::execution::{Process32, ProcessStop, Register32, StopReason};
-    let mut process = Process32::load(&modules_executable::pe32(), 32).unwrap();
-    let mut calls = 0;
-    for _ in 0..100 {
-        let result = process.run(1);
-        calls += result.api_calls;
-        if result.reason == ProcessStop::Stopped(StopReason::Breakpoint) {
-            break;
+    for bytes in [modules_executable::pe32(), modules_executable::absolute()] {
+        let mut process = Process32::load(&bytes, 32).unwrap();
+        let mut calls = 0;
+        for _ in 0..100 {
+            let result = process.run(1);
+            calls += result.api_calls;
+            if result.reason == ProcessStop::Stopped(StopReason::Breakpoint) {
+                break;
+            }
+            assert_eq!(
+                result.reason,
+                ProcessStop::Stopped(StopReason::InstructionLimit)
+            );
         }
+        assert_eq!(calls, 4);
         assert_eq!(
-            result.reason,
-            ProcessStop::Stopped(StopReason::InstructionLimit)
+            process.cpu.register(Register32::Ebx),
+            process.cpu.register(Register32::Esi)
         );
+        assert_ne!(process.cpu.register(Register32::Ebx), 0);
+        assert_eq!(process.cpu.register(Register32::Edi), 1);
+        assert_eq!(process.cpu.register(Register32::Eax), 0);
+        assert_eq!(process.last_error().unwrap(), 126);
+        assert_eq!(process.cpu.register(Register32::Esp), 0x1001_0000);
     }
-    assert_eq!(calls, 4);
-    assert_eq!(
-        process.cpu.register(Register32::Ebx),
-        process.cpu.register(Register32::Esi)
-    );
-    assert_ne!(process.cpu.register(Register32::Ebx), 0);
-    assert_eq!(process.cpu.register(Register32::Edi), 1);
-    assert_eq!(process.cpu.register(Register32::Eax), 0);
-    assert_eq!(process.last_error().unwrap(), 126);
     #[cfg(windows_demo)]
     {
         let mut process =
             Process32::load(include_bytes!("../../target/windows-api/modules.exe"), 64).unwrap();
         let result = process.run(1000);
         assert_eq!(result.reason, ProcessStop::Exited(42));
-        assert_eq!(result.api_calls, 12);
+        assert_eq!(result.api_calls, 20);
     }
 }
 
