@@ -92,8 +92,7 @@ enum Api {
     GetErrorMode,
     GetVersion,
     GetProcessVersion,
-    CopyString,
-    CopyTerminatedString,
+    String(strings::Call),
     ExceptionProlog,
     Graphics(d3d8::Call),
     Gdi(gdi::Call),
@@ -133,8 +132,6 @@ impl Api {
             0x30 => Some(Self::GetVersion),
             0x94 | 0xc8 => Some(Self::RegisterUserAtom),
             0x98 => Some(Self::GetProcessVersion),
-            0xe4 => Some(Self::CopyString),
-            0xf0 => Some(Self::CopyTerminatedString),
             0x118 => Some(Self::ExceptionProlog),
             0xffc => Some(Self::Unsupported),
             offset => d3d8::Call::at(offset)
@@ -145,6 +142,7 @@ impl Api {
                 .or_else(|| crt::Call::at(offset).map(Self::Crt))
                 .or_else(|| modules::Call::at(offset).map(Self::Module))
                 .or_else(|| resources::Call::at(offset).map(Self::Resource))
+                .or_else(|| strings::Call::at(offset).map(Self::String))
                 .or_else(|| heap::Call::at(offset).map(Self::Heap))
                 .or_else(|| critical_sections::Call::at(offset).map(Self::CriticalSection))
                 .or_else(|| tls::Call::at(offset).map(Self::Tls))
@@ -171,6 +169,7 @@ impl Api {
                 "GetModuleFileNameA" => 0xe0,
                 "lstrcpynA" => 0xe4,
                 "lstrcpyA" => 0xf0,
+                "lstrcatA" => 0xf4,
                 "FindResourceA" => 0xe8,
                 "FreeLibrary" => 0x1c,
                 "SetErrorMode" => 0x20,
@@ -250,8 +249,7 @@ impl Api {
             Self::Tls(call) => call.arguments(),
             Self::Module(call) => call.arguments(),
             Self::Resource(call) => call.arguments(),
-            Self::CopyString => 3,
-            Self::CopyTerminatedString => 2,
+            Self::String(call) => call.arguments(),
             _ => 1,
         }
     }
@@ -521,9 +519,8 @@ impl Process32 {
                 let value = call.dispatch(arguments, &mut self.memory)?;
                 self.cpu.set_register(Register32::Eax, value);
             }
-            Api::CopyString | Api::CopyTerminatedString => {
-                let count = arguments.get(2).copied().unwrap_or(u32::MAX);
-                let value = strings::copy(&mut self.memory, arguments[0], arguments[1], count)?;
+            Api::String(call) => {
+                let value = call.dispatch(&mut self.memory, arguments)?;
                 self.cpu.set_register(Register32::Eax, value);
             }
             Api::Tls(call) => {

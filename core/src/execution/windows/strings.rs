@@ -1,15 +1,85 @@
 use super::super::Access;
 use super::{DispatchError, GuestMemory, MemoryError, guest, thread};
 
-pub(super) fn copy(
+#[derive(Clone, Copy)]
+pub(super) enum Call {
+    Copy,
+    CopyTerminated,
+    Append,
+}
+
+impl Call {
+    pub(super) fn at(offset: u32) -> Option<Self> {
+        match offset {
+            0xe4 => Some(Self::Copy),
+            0xf0 => Some(Self::CopyTerminated),
+            0xf4 => Some(Self::Append),
+            _ => None,
+        }
+    }
+
+    pub(super) fn arguments(self) -> usize {
+        match self {
+            Self::Copy => 3,
+            Self::CopyTerminated | Self::Append => 2,
+        }
+    }
+
+    pub(super) fn dispatch(
+        self,
+        memory: &mut GuestMemory,
+        arguments: &[u32],
+    ) -> Result<u32, DispatchError> {
+        match self {
+            Self::Copy | Self::CopyTerminated => copy(
+                memory,
+                arguments[0],
+                arguments[1],
+                arguments.get(2).copied().unwrap_or(u32::MAX),
+            ),
+            Self::Append => append(memory, arguments[0], arguments[1]),
+        }
+    }
+}
+
+fn copy(
     memory: &mut GuestMemory,
     destination: u32,
     source: u32,
     count: u32,
 ) -> Result<u32, DispatchError> {
-    match prepare(memory, destination, source, count) {
-        Ok(bytes) => {
-            memory.write(u64::from(destination), &bytes)?;
+    let prepared = prepare(memory, destination, source, count).map(|bytes| (destination, bytes));
+    complete(memory, destination, prepared)
+}
+
+fn append(memory: &mut GuestMemory, destination: u32, source: u32) -> Result<u32, DispatchError> {
+    let prepared = append_address(memory, destination)
+        .and_then(|output| prepare(memory, output, source, u32::MAX).map(|bytes| (output, bytes)));
+    complete(memory, destination, prepared)
+}
+
+fn append_address(memory: &GuestMemory, destination: u32) -> Result<u32, DispatchError> {
+    for offset in 0..65536 {
+        let address = destination
+            .checked_add(offset)
+            .ok_or(MemoryError::AddressOverflow)?;
+        let mut byte = [0];
+        memory.read(u64::from(address), &mut byte)?;
+        if byte[0] == 0 {
+            return Ok(address);
+        }
+    }
+    Err(DispatchError::Unsupported)
+}
+
+fn complete(
+    memory: &mut GuestMemory,
+    destination: u32,
+    prepared: Result<(u32, Vec<u8>), DispatchError>,
+) -> Result<u32, DispatchError> {
+    match prepared {
+        Ok((output, bytes)) => {
+            memory.write(u64::from(output), &bytes)?;
             Ok(destination)
         }
         Err(DispatchError::Memory(_)) => {
