@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 
 use super::super::Access;
-use super::{DispatchError, GuestMemory, guest, thread};
+use super::{DispatchError, GuestMemory, Process32, Register32, guest, thread};
 
 const MAX_OBJECTS: usize = 4096;
 const SIZE: usize = 24;
@@ -25,6 +25,22 @@ impl Call {
             0x64 => Some(Self::Delete),
             _ => None,
         }
+    }
+}
+
+impl Process32 {
+    pub(super) fn critical_section(
+        &mut self,
+        call: Call,
+        pointer: u32,
+    ) -> Result<(), DispatchError> {
+        if let Some(value) = self
+            .critical_sections
+            .dispatch(call, pointer, &mut self.memory)?
+        {
+            self.cpu.set_register(Register32::Eax, value);
+        }
+        Ok(())
     }
 }
 

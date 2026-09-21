@@ -557,14 +557,7 @@ impl Process32 {
                 let value = self.tls.dispatch(call, arguments, &mut self.memory)?;
                 self.cpu.set_register(Register32::Eax, value);
             }
-            Api::CriticalSection(call) => {
-                if let Some(value) =
-                    self.critical_sections
-                        .dispatch(call, argument, &mut self.memory)?
-                {
-                    self.cpu.set_register(Register32::Eax, value);
-                }
-            }
+            Api::CriticalSection(call) => self.critical_section(call, argument)?,
             Api::Heap(call) => {
                 let value = self
                     .heap
