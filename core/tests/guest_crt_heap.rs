@@ -7,9 +7,13 @@ use ring3_core::execution::{Process32, ProcessStop, Register32, StopReason};
 
 #[test]
 fn crt_heap_guest_caller_cleanup_and_single_step_execution_match() {
-    let bytes = crt_heap_executable::pe32();
-    let mut whole = Process32::load(&bytes, 27).unwrap();
-    let mut stepped = Process32::load(&bytes, 27).unwrap();
+    check_guest(&crt_heap_executable::pe32(false));
+    check_guest(&crt_heap_executable::pe32(true));
+}
+
+fn check_guest(bytes: &[u8]) {
+    let mut whole = Process32::load(bytes, 27).unwrap();
+    let mut stepped = Process32::load(bytes, 27).unwrap();
     let stack = whole.cpu.register(Register32::Esp);
     let pages = whole.memory.mapped_pages();
     let result = whole.run(100);

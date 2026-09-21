@@ -33,6 +33,8 @@ pub(super) enum Call {
     Memset,
     Malloc,
     Free,
+    OperatorNew,
+    OperatorDelete,
     ErrnoPointer,
     DllOnExit,
     MbSearchReverse,
@@ -54,6 +56,8 @@ impl Call {
             0x114 => Some(Self::Memset),
             0x11c => Some(Self::Malloc),
             0x120 => Some(Self::Free),
+            0x144 => Some(Self::OperatorNew),
+            0x148 => Some(Self::OperatorDelete),
             0x124 => Some(Self::ErrnoPointer),
             0x128 => Some(Self::DllOnExit),
             0x12c => Some(Self::MbSearchReverse),
@@ -71,6 +75,8 @@ impl Call {
             Self::SetAppType
             | Self::Malloc
             | Self::Free
+            | Self::OperatorNew
+            | Self::OperatorDelete
             | Self::MbIncrement
             | Self::Duplicate
             | Self::SetMbCodePage
@@ -113,7 +119,8 @@ impl Crt {
                     0
                 },
             ),
-            Call::Free => {
+            Call::OperatorNew => Some(heap.allocate_crt(arguments[0], memory)?.unwrap_or(0)),
+            Call::Free | Call::OperatorDelete => {
                 heap.free_crt(arguments[0], cpu.register(Register32::Esp), memory)?;
                 None
             }
@@ -178,6 +185,8 @@ pub(super) fn resolve(name: &str) -> Option<u32> {
         "_EH_prolog" => Some(API_BASE + 0x118),
         "malloc" => Some(API_BASE + 0x11c),
         "free" => Some(API_BASE + 0x120),
+        "??2@YAPAXI@Z" => Some(API_BASE + 0x144),
+        "??3@YAXPAX@Z" => Some(API_BASE + 0x148),
         "_errno" => Some(API_BASE + 0x124),
         "__dllonexit" => Some(API_BASE + 0x128),
         "_mbsrchr" => Some(API_BASE + 0x12c),

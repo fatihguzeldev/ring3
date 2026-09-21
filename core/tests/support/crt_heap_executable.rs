@@ -1,6 +1,6 @@
 use super::imported_executable;
 
-pub fn pe32() -> Vec<u8> {
+pub fn pe32(cpp: bool) -> Vec<u8> {
     imported_executable::pe32(
         &[
             0xff, 0x15, 0x68, 0x20, 0x40, 0, 0x89, 0xc7, 0xc7, 0, 123, 0, 0, 0, 0x68, 1, 0x10, 0,
@@ -9,6 +9,10 @@ pub fn pe32() -> Vec<u8> {
             0xc4, 4, 0x8b, 7, 0xcc,
         ],
         "MSVCRT.dll",
-        &["malloc", "free", "_errno"],
+        if cpp {
+            &["??2@YAPAXI@Z", "??3@YAXPAX@Z", "_errno"]
+        } else {
+            &["malloc", "free", "_errno"]
+        },
     )
 }

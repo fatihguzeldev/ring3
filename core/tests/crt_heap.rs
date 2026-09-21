@@ -8,6 +8,8 @@ use ring3_core::execution::{
 const MALLOC: u32 = 0x7000_011c;
 const FREE: u32 = 0x7000_0120;
 const ERRNO: u32 = 0x7000_0124;
+const NEW: u32 = 0x7000_0144;
+const DELETE: u32 = 0x7000_0148;
 const ERROR: u64 = 0x7000_2020;
 const STACK: u32 = 0x1000_ff00;
 
@@ -41,7 +43,7 @@ fn call(process: &mut Process32, api: u32, args: &[u32]) -> u32 {
     );
     assert_eq!((result.instructions, result.api_calls), (0, 1));
     assert_eq!(process.cpu.eip, 0x0040_1000);
-    let cleanup = if [MALLOC, FREE, ERRNO].contains(&api) {
+    let cleanup = if [MALLOC, FREE, ERRNO, NEW, DELETE].contains(&api) {
         4
     } else {
         u32::try_from((args.len() + 1) * 4).unwrap()
@@ -49,6 +51,49 @@ fn call(process: &mut Process32, api: u32, args: &[u32]) -> u32 {
     assert_eq!(process.cpu.register(Register32::Esp), STACK + cleanup);
     assert_eq!(process.cpu.eflags, 0xced7);
     process.cpu.register(Register32::Eax)
+}
+
+#[test]
+fn legacy_new_and_delete_own_guest_memory_and_preserve_errors_even_on_exhaustion() {
+    let mut process = process(28);
+    let initial = process.memory.mapped_pages();
+    process.memory.write(ERROR, &123_u32.to_le_bytes()).unwrap();
+    process
+        .memory
+        .write(0x7ffd_e034, &77_u32.to_le_bytes())
+        .unwrap();
+    let pointer = call(&mut process, NEW, &[4097]);
+    assert_ne!(pointer, 0);
+    assert_eq!(pointer % 8, 0);
+    process
+        .memory
+        .write(u64::from(pointer) + 4096, &[42])
+        .unwrap();
+    assert!(process.memory.fetch(u64::from(pointer), &mut [0]).is_err());
+    let zero = call(&mut process, NEW, &[0]);
+    assert_ne!(zero, 0);
+    assert_ne!(zero, pointer);
+    for size in [0, 1, u32::MAX] {
+        assert_eq!(call(&mut process, NEW, &[size]), 0);
+        assert_eq!(process.memory.mapped_pages(), initial + 3);
+        assert_eq!(read(&process, ERROR), 123);
+        assert_eq!(process.last_error().unwrap(), 77);
+    }
+    process
+        .memory
+        .protect(0x7000_2000, PAGE_SIZE, Permissions::NONE)
+        .unwrap();
+    process
+        .memory
+        .protect(0x7ffd_e000, PAGE_SIZE, Permissions::NONE)
+        .unwrap();
+    assert_eq!(call(&mut process, NEW, &[1]), 0);
+    assert_eq!(call(&mut process, DELETE, &[pointer]), 99);
+    assert_eq!(call(&mut process, NEW, &[4097]), pointer);
+    assert_eq!(call(&mut process, DELETE, &[pointer]), 99);
+    assert_eq!(call(&mut process, DELETE, &[zero]), 99);
+    assert_eq!(call(&mut process, DELETE, &[0]), 99);
+    assert_eq!(process.memory.mapped_pages(), initial);
 }
 
 fn read(process: &Process32, address: u64) -> u32 {
@@ -98,15 +143,17 @@ fn all_cross_family_operations_refuse_crt_and_windows_ownership_mismatches() {
     let fixed = call(&mut process, 0x7000_0078, &[0, 1]);
     let movable = call(&mut process, 0x7000_0078, &[2, 1]);
     let pages = process.memory.mapped_pages();
-    for invalid in [local, fixed, movable, pointer + 1, u32::MAX] {
-        prepare(&mut process, FREE, &[invalid]);
-        let before = process.cpu;
-        assert_eq!(
-            process.run(1).reason,
-            ProcessStop::UnsupportedApi { address: FREE }
-        );
-        assert_eq!(process.cpu, before);
-        assert_eq!(process.memory.mapped_pages(), pages);
+    for api in [FREE, DELETE] {
+        for invalid in [local, fixed, movable, pointer + 1, u32::MAX] {
+            prepare(&mut process, api, &[invalid]);
+            let before = process.cpu;
+            assert_eq!(
+                process.run(1).reason,
+                ProcessStop::UnsupportedApi { address: api }
+            );
+            assert_eq!(process.cpu, before);
+            assert_eq!(process.memory.mapped_pages(), pages);
+        }
     }
     for api in [0x7000_002c, 0x7000_0084, 0x7000_007c, 0x7000_0080] {
         assert_eq!(
@@ -171,31 +218,35 @@ fn invalid_cdecl_frame_and_freeing_its_backing_preserve_heap_state() {
     let mut process = process(27);
     let pointer = call(&mut process, MALLOC, &[4097]);
     let pages = process.memory.mapped_pages();
-    prepare(&mut process, MALLOC, &[1]);
-    process.cpu.set_register(Register32::Esp, 0x1000_fffc);
-    let before = process.cpu;
-    assert!(matches!(
-        process.run(1).reason,
-        ProcessStop::Stopped(StopReason::MemoryFault(_))
-    ));
-    assert_eq!(process.cpu, before);
-    assert_eq!(process.memory.mapped_pages(), pages);
-    process.cpu.eip = FREE;
-    process.cpu.set_register(Register32::Esp, pointer);
-    process
-        .memory
-        .write(u64::from(pointer), &0x0040_1000_u32.to_le_bytes())
-        .unwrap();
-    process
-        .memory
-        .write(u64::from(pointer) + 4, &pointer.to_le_bytes())
-        .unwrap();
-    let before = process.cpu;
-    assert_eq!(
-        process.run(1).reason,
-        ProcessStop::UnsupportedApi { address: FREE }
-    );
-    assert_eq!(process.cpu, before);
-    assert_eq!(process.memory.mapped_pages(), pages);
+    for api in [MALLOC, NEW] {
+        prepare(&mut process, api, &[1]);
+        process.cpu.set_register(Register32::Esp, 0x1000_fffc);
+        let before = process.cpu;
+        assert!(matches!(
+            process.run(1).reason,
+            ProcessStop::Stopped(StopReason::MemoryFault(_))
+        ));
+        assert_eq!(process.cpu, before);
+        assert_eq!(process.memory.mapped_pages(), pages);
+    }
+    for api in [FREE, DELETE] {
+        process.cpu.eip = api;
+        process.cpu.set_register(Register32::Esp, pointer);
+        process
+            .memory
+            .write(u64::from(pointer), &0x0040_1000_u32.to_le_bytes())
+            .unwrap();
+        process
+            .memory
+            .write(u64::from(pointer) + 4, &pointer.to_le_bytes())
+            .unwrap();
+        let before = process.cpu;
+        assert_eq!(
+            process.run(1).reason,
+            ProcessStop::UnsupportedApi { address: api }
+        );
+        assert_eq!(process.cpu, before);
+        assert_eq!(process.memory.mapped_pages(), pages);
+    }
     assert_eq!(call(&mut process, FREE, &[pointer]), 99);
 }
