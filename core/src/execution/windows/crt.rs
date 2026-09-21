@@ -170,14 +170,7 @@ impl Crt {
                 self.application_type = arguments[0].cast_signed();
                 None
             }
-            Call::Malloc => Some(
-                if let Some(pointer) = heap.allocate_crt(arguments[0], memory)? {
-                    pointer
-                } else {
-                    guest::write_word(memory, ERRNO, 12)?;
-                    0
-                },
-            ),
+            Call::Malloc => Some(malloc(memory, heap, arguments[0])?),
             Call::OperatorNew => Some(heap.allocate_crt(arguments[0], memory)?.unwrap_or(0)),
             Call::Free | Call::OperatorDelete => {
                 heap.free_crt(arguments[0], cpu.register(Register32::Esp), memory)?;
@@ -263,6 +256,19 @@ impl Crt {
                 Some(arguments[0])
             }
         })
+    }
+}
+
+fn malloc(
+    memory: &mut GuestMemory,
+    heap: &mut heap::Heap,
+    size: u32,
+) -> Result<u32, DispatchError> {
+    if let Some(pointer) = heap.allocate_crt(size, memory)? {
+        Ok(pointer)
+    } else {
+        guest::write_word(memory, ERRNO, 12)?;
+        Ok(0)
     }
 }
 
