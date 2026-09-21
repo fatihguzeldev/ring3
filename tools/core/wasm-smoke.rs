@@ -634,6 +634,38 @@ fn execute_find_files() {
     }
 }
 
+#[path = "../../core/tests/support/millisecond_clock_executable.rs"]
+mod millisecond_clock_executable;
+
+fn execute_millisecond_clock() {
+    use ring3_core::execution::{Process32, ProcessStop, Register32, StopReason};
+    use std::time::Duration;
+    let mut process = Process32::load(&millisecond_clock_executable::pe32(), 32).unwrap();
+    process
+        .set_elapsed_time(Duration::from_nanos(4_294_968_530_999_999))
+        .unwrap();
+    let result = process.run(20);
+    assert_eq!(result.reason, ProcessStop::Stopped(StopReason::Breakpoint));
+    assert_eq!((result.instructions, result.api_calls), (4, 2));
+    assert_eq!(process.cpu.register(Register32::Eax), 1234);
+    assert_eq!(process.cpu.register(Register32::Ebx), 1234);
+    assert_eq!(process.cpu.register(Register32::Esp), 0x1001_0000);
+    #[cfg(windows_demo)]
+    {
+        let mut process = Process32::load(
+            include_bytes!("../../target/windows-api/millisecond-clock.exe"),
+            64,
+        )
+        .unwrap();
+        process
+            .set_elapsed_time(Duration::from_millis(5_250))
+            .unwrap();
+        let result = process.run(1000);
+        assert_eq!(result.reason, ProcessStop::Exited(42));
+        assert_eq!((result.instructions, result.api_calls), (19, 5));
+    }
+}
+
 #[path = "../../core/tests/support/x87_executable.rs"]
 mod x87_executable;
 
@@ -2715,6 +2747,7 @@ pub extern "C" fn run() -> u32 {
     execute_file_status();
     execute_environment_query();
     execute_x87_data();
+    execute_millisecond_clock();
     execute_command_line();
     execute_image();
     execute_function();
