@@ -21,6 +21,27 @@ mod repeated_moves_executable;
 #[path = "../../core/tests/support/register_stack_executable.rs"]
 mod register_stack_executable;
 
+#[path = "../../core/tests/support/flag_stack_executable.rs"]
+mod flag_stack_executable;
+
+fn execute_flag_stack() {
+    use ring3_core::execution::{Process32, ProcessStop, Register32, StopReason};
+    let mut process = Process32::load(&flag_stack_executable::pe32(), 32).unwrap();
+    let result = process.run(100);
+    assert_eq!(result.reason, ProcessStop::Stopped(StopReason::Breakpoint));
+    assert_eq!((result.instructions, result.api_calls), (16, 0));
+    for (register, expected) in [
+        (Register32::Eax, 0),
+        (Register32::Ebx, 0x0020_0002),
+        (Register32::Ecx, 2),
+        (Register32::Edx, 2),
+        (Register32::Esp, 0x1001_0000),
+    ] {
+        assert_eq!(process.cpu.register(register), expected);
+    }
+    assert_eq!(process.cpu.eflags, 2);
+}
+
 fn execute_register_stack() {
     use ring3_core::execution::{Process32, ProcessStop, Register32, StopReason};
     let mut process = Process32::load(&register_stack_executable::pe32(), 32).unwrap();
@@ -2300,6 +2321,7 @@ pub extern "C" fn run() -> u32 {
     execute_string_scan();
     execute_repeated_moves();
     execute_register_stack();
+    execute_flag_stack();
     execute_thread_identity();
     execute_module_file_name();
     execute_resources();
