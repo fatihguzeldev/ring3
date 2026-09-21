@@ -1,5 +1,5 @@
 use super::super::Access;
-use super::{API_BASE, DispatchError, GuestMemory, MemoryError, guest, thread};
+use super::{API_BASE, DispatchError, GuestMemory, MemoryError, guest, system, thread};
 use crate::execution::loader::modules::MappedModule;
 
 #[derive(Clone, Copy)]
@@ -76,7 +76,7 @@ impl Modules {
             {
                 resident.push(Module {
                     name: name.to_owned(),
-                    path: [b"C:\\Windows\\System32\\".as_slice(), name.as_bytes(), &[0]].concat(),
+                    path: [system::SYSTEM_DIRECTORY, b"\\", name.as_bytes(), &[0]].concat(),
                     handle: API_BASE + offset,
                     references: 1,
                     builtin: true,

@@ -167,6 +167,7 @@ impl Api {
                 "LoadLibraryA" => 0x14,
                 "GetModuleHandleA" => 0x18,
                 "GetModuleFileNameA" => 0xe0,
+                "GetSystemDirectoryA" => 0xf8,
                 "lstrcpynA" => 0xe4,
                 "lstrcpyA" => 0xf0,
                 "lstrcatA" => 0xf4,
@@ -250,6 +251,7 @@ impl Api {
             Self::Module(call) => call.arguments(),
             Self::Resource(call) => call.arguments(),
             Self::String(call) => call.arguments(),
+            Self::System(call) => call.arguments(),
             _ => 1,
         }
     }
@@ -497,7 +499,7 @@ impl Process32 {
             }
             Api::System(call) => self
                 .cpu
-                .set_register(Register32::Eax, call.dispatch(argument)?),
+                .set_register(Register32::Eax, call.dispatch(arguments, &mut self.memory)?),
             Api::SetErrorMode => {
                 if argument & !0x8007 != 0 {
                     return Err(DispatchError::Unsupported);

@@ -1,4 +1,7 @@
-use super::{DispatchError, gdi};
+use super::super::Access;
+use super::{DispatchError, GuestMemory, gdi, guest};
+
+pub(super) const SYSTEM_DIRECTORY: &[u8] = b"C:\\Windows\\System32";
 
 const LARGE_ICON: u32 = 32;
 const SMALL_ICON: u32 = 16;
@@ -21,6 +24,7 @@ fn metrics(index: u32) -> Result<u32, DispatchError> {
 pub(super) enum Call {
     Metrics,
     Color,
+    Directory,
 }
 
 impl Call {
@@ -28,16 +32,42 @@ impl Call {
         match offset {
             0x9c => Some(Self::Metrics),
             0xac => Some(Self::Color),
+            0xf8 => Some(Self::Directory),
             _ => None,
         }
     }
 
-    pub(super) fn dispatch(self, index: u32) -> Result<u32, DispatchError> {
-        match self {
-            Self::Metrics => metrics(index),
-            Self::Color => color(index),
+    pub(super) fn arguments(self) -> usize {
+        if matches!(self, Self::Directory) {
+            2
+        } else {
+            1
         }
     }
+
+    pub(super) fn dispatch(
+        self,
+        arguments: &[u32],
+        memory: &mut GuestMemory,
+    ) -> Result<u32, DispatchError> {
+        match self {
+            Self::Metrics => metrics(arguments[0]),
+            Self::Color => color(arguments[0]),
+            Self::Directory => directory(memory, arguments[0], arguments[1]),
+        }
+    }
+}
+
+fn directory(memory: &mut GuestMemory, output: u32, capacity: u32) -> Result<u32, DispatchError> {
+    let mut bytes = [0; SYSTEM_DIRECTORY.len() + 1];
+    let required = u32::try_from(bytes.len()).expect("fixed directory length fits u32");
+    if capacity < required {
+        return Ok(required);
+    }
+    guest::check(memory, output, bytes.len(), Access::Write)?;
+    bytes[..SYSTEM_DIRECTORY.len()].copy_from_slice(SYSTEM_DIRECTORY);
+    memory.write(u64::from(output), &bytes)?;
+    Ok(required - 1)
 }
 
 pub(super) fn color(index: u32) -> Result<u32, DispatchError> {
