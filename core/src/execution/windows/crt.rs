@@ -24,6 +24,10 @@ const INITENV: u32 = DATA + 28;
 const ERRNO: u32 = DATA + 32;
 const UNGUARDED_READLC_ACTIVE: u32 = DATA + 36;
 const SETLC_ACTIVE: u32 = DATA + 40;
+const LC_HANDLE: u32 = DATA + 44;
+const LC_CODEPAGE: u32 = DATA + 68;
+const LC_COLLATE_CP: u32 = DATA + 72;
+const MB_CUR_MAX: u32 = DATA + 76;
 
 #[derive(Clone, Copy)]
 pub(super) enum Call {
@@ -218,6 +222,10 @@ pub(super) fn resolve(name: &str) -> Option<u32> {
         "__initenv" => Some(INITENV),
         "__unguarded_readlc_active" => Some(UNGUARDED_READLC_ACTIVE),
         "__setlc_active" => Some(SETLC_ACTIVE),
+        "__lc_handle" => Some(LC_HANDLE),
+        "__lc_codepage" => Some(LC_CODEPAGE),
+        "__lc_collate_cp" => Some(LC_COLLATE_CP),
+        "__mb_cur_max" => Some(MB_CUR_MAX),
         _ => None,
     }
 }
@@ -265,6 +273,7 @@ pub(super) fn initialize(
     memory.map_zeroed(u64::from(DATA), PAGE_SIZE, Permissions::READ_WRITE)?;
     guest::write_word(memory, FMODE, 0x4000)?;
     for (address, value) in [
+        (MB_CUR_MAX, 1),
         (ACMDLN, parameters.command_line),
         (ARGC, parameters.argc),
         (ARGV, parameters.argv),
