@@ -222,6 +222,13 @@ impl Cpu32 {
             Code::Fild_m16int | Code::Fild_m32int | Code::Fild_m64int => {
                 self.x87_integer_load(instruction, memory)?;
             }
+            Code::Fist_m16int
+            | Code::Fist_m32int
+            | Code::Fistp_m16int
+            | Code::Fistp_m32int
+            | Code::Fistp_m64int => {
+                self.x87_integer_store(instruction, memory)?;
+            }
             Code::Fsqrt
             | Code::Fdivr_m32fp
             | Code::Fdivr_m64fp

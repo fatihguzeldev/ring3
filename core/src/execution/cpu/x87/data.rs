@@ -91,7 +91,7 @@ impl Cpu32 {
         instruction: &Instruction,
         memory: &GuestMemory,
     ) -> Result<(), StopReason> {
-        self.x87_profile()?;
+        self.x87_masked()?;
         let (address, size) = self.data_address(instruction)?;
         let mut bytes = [0; 8];
         memory
@@ -118,16 +118,56 @@ impl Cpu32 {
         self.x87_stack.push(value)
     }
 
+    pub(in super::super) fn x87_integer_store(
+        &mut self,
+        instruction: &Instruction,
+        memory: &mut GuestMemory,
+    ) -> Result<(), StopReason> {
+        self.x87_masked()?;
+        let value = self.x87_stack.value()?;
+        let rounded = match (self.x87_control_word >> 10) & 3 {
+            0 => value.round_ties_even(),
+            1 => value.floor(),
+            2 => value.ceil(),
+            _ => value.trunc(),
+        };
+        let (address, size) = self.data_address(instruction)?;
+        let limit = match size {
+            2 => 32_768.0,
+            4 => 2_147_483_648.0,
+            _ => 9_223_372_036_854_775_808.0,
+        };
+        if !(-limit..limit).contains(&rounded) {
+            return Err(StopReason::UnsupportedInstruction);
+        }
+        #[expect(
+            clippy::cast_possible_truncation,
+            reason = "rounded and range-checked integer"
+        )]
+        let integer = rounded as i64;
+        memory
+            .write(u64::from(address), &integer.to_le_bytes()[..size])
+            .map_err(StopReason::MemoryFault)?;
+        if matches!(
+            instruction.code(),
+            Code::Fistp_m16int | Code::Fistp_m32int | Code::Fistp_m64int
+        ) {
+            self.x87_stack.pop();
+        }
+        Ok(())
+    }
+
     pub(in super::super) fn x87_transfer(
         &mut self,
         instruction: &Instruction,
         memory: &mut GuestMemory,
     ) -> Result<(), StopReason> {
-        self.x87_profile()?;
         if matches!(instruction.code(), Code::Fld_m32fp | Code::Fld_m64fp) {
+            self.x87_masked()?;
             let value = self.read_float(instruction, memory)?;
             return self.x87_stack.push(value);
         }
+        self.x87_profile()?;
         let value = self.x87_stack.value()?;
         let (address, size) = self.data_address(instruction)?;
         let mut bytes = value.to_le_bytes();
@@ -156,6 +196,13 @@ impl Cpu32 {
     fn x87_profile(&self) -> Result<(), StopReason> {
         // status and exception delivery remain unsupported; never expose a fabricated status word.
         if self.x87_control_word & 0x0f3f != 0x023f {
+            return Err(StopReason::UnsupportedInstruction);
+        }
+        Ok(())
+    }
+
+    fn x87_masked(&self) -> Result<(), StopReason> {
+        if self.x87_control_word & 0x3f != 0x3f {
             return Err(StopReason::UnsupportedInstruction);
         }
         Ok(())

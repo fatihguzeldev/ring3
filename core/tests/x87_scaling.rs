@@ -112,7 +112,7 @@ fn integer_ranges_profiles_and_stack_capacity_fail_without_mutation() {
         assert_eq!(cpu, before);
     }
     let (mut cpu, mut memory) = load(&code);
-    cpu.set_x87_control_word(0x037f);
+    cpu.set_x87_control_word(0x027e);
     let before = cpu;
     assert_eq!(
         cpu.run(&mut memory, 1).reason,

@@ -194,10 +194,7 @@ fn loads_reject_special_values_and_excluded_control_modes() {
             assert_eq!(cpu, before);
         }
     }
-    for control in [
-        0x037f, 0x007f, 0x017f, 0x067f, 0x0a7f, 0x0e7f, 0x027e, 0x027d, 0x027b, 0x0277, 0x026f,
-        0x025f,
-    ] {
+    for control in [0x027e, 0x027d, 0x027b, 0x0277, 0x026f, 0x025f] {
         let (mut cpu, mut memory) = load(&instruction(0xd9, 0x05, INPUT));
         cpu.set_x87_control_word(control);
         let before = cpu;
