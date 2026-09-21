@@ -19,3 +19,4 @@ EXPORTS
     __dllonexit
     _mbsrchr
     _mbsinc
+    _strdup

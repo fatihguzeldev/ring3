@@ -1789,6 +1789,28 @@ fn execute_string_traversal() {
     }
 }
 
+#[path = "../../core/tests/support/strdup_executable.rs"]
+mod strdup_executable;
+
+fn execute_strdup() {
+    use ring3_core::execution::{Process32, ProcessStop, Register32, StopReason};
+    let mut process = Process32::load(&strdup_executable::pe32(), 26).unwrap();
+    let pages = process.memory.mapped_pages();
+    let result = process.run(50);
+    assert_eq!(result.reason, ProcessStop::Stopped(StopReason::Breakpoint));
+    assert_eq!((result.instructions, result.api_calls), (11, 2));
+    assert_eq!(process.cpu.register(Register32::Eax), 0x2000_0000);
+    assert_eq!(process.cpu.register(Register32::Ecx), 0x2000_0000);
+    assert_eq!(process.cpu.register(Register32::Ebx), 0x0063_6261);
+    assert_eq!(process.cpu.register(Register32::Edx), 0x0063_622a);
+    assert_eq!(process.cpu.register(Register32::Esp), 0x1001_0000);
+    assert_eq!(process.memory.mapped_pages(), pages);
+    assert!(process.memory.read(0x2000_0000, &mut [0]).is_err());
+    let mut source = [0; 4];
+    process.memory.read(0x0040_2180, &mut source).unwrap();
+    assert_eq!(&source, b"abc\0");
+}
+
 // this isolated test cdylib owns its unique zero-argument export.
 #[unsafe(no_mangle)]
 pub extern "C" fn run() -> u32 {
@@ -1819,6 +1841,7 @@ pub extern "C" fn run() -> u32 {
     execute_memset();
     execute_reverse_search();
     execute_string_traversal();
+    execute_strdup();
     execute_exception_frame();
     execute_crt_heap();
     execute_dllonexit();
