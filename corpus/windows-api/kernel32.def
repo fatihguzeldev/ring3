@@ -36,3 +36,4 @@ EXPORTS
     _lstrcatA@8==lstrcatA
     _GetSystemDirectoryA@8==GetSystemDirectoryA
     _DisableThreadLibraryCalls@4==DisableThreadLibraryCalls
+    _InterlockedExchange@8==InterlockedExchange
