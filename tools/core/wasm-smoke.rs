@@ -1799,6 +1799,14 @@ fn execute_string_traversal() {
             0x6463_6261,
             [b'a', b'b', b'c', b'd', b'e', b'f', 0, 0x55],
         ),
+        (
+            string_traversal_executable::append(),
+            5,
+            1,
+            0x0040_2190,
+            0x6463_6261,
+            [b'a', b'b', b'c', b'd', 0, 0x55, 0x55, 0x55],
+        ),
     ] {
         let mut process = Process32::load(&bytes, 25).unwrap();
         let result = process.run(50);
@@ -1823,7 +1831,7 @@ fn execute_string_traversal() {
         .unwrap();
         let result = process.run(1000);
         assert_eq!(result.reason, ProcessStop::Exited(42));
-        assert_eq!((result.instructions, result.api_calls), (74, 9));
+        assert_eq!((result.instructions, result.api_calls), (141, 16));
     }
 }
 

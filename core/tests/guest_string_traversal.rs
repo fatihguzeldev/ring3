@@ -32,6 +32,14 @@ fn string_traversal_and_copy_match_native_whole_and_single_step_execution() {
             0x6463_6261,
             [b'a', b'b', b'c', b'd', b'e', b'f', 0, 0x55],
         ),
+        (
+            string_traversal_executable::append(),
+            5,
+            1,
+            0x0040_2190,
+            0x6463_6261,
+            [b'a', b'b', b'c', b'd', 0, 0x55, 0x55, 0x55],
+        ),
     ] {
         let mut whole = Process32::load(&bytes, 25).unwrap();
         let mut stepped = Process32::load(&bytes, 25).unwrap();
