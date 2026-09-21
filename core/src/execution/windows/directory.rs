@@ -4,24 +4,32 @@ use super::{
     thread,
 };
 
+mod catalog;
 mod paths;
+mod search;
+pub use catalog::FileMetadata;
 
 pub(super) struct Directory {
     terminated: Vec<u8>,
     declarations: Vec<Box<[u8]>>,
+    files: Vec<catalog::File>,
+    searches: search::Searches,
 }
 
 #[derive(Clone, Copy)]
 pub(super) enum Call {
     Query,
     Change,
+    FindFirst,
+    FindNext,
+    FindClose,
 }
 
 impl Call {
     pub(super) fn arguments(self) -> usize {
         match self {
-            Self::Query => 2,
-            Self::Change => 1,
+            Self::Query | Self::FindFirst | Self::FindNext => 2,
+            Self::Change | Self::FindClose => 1,
         }
     }
 }
@@ -36,6 +44,17 @@ impl Process32 {
             Call::Change => self
                 .current_directory
                 .change(arguments[0], &mut self.memory)?,
+            Call::FindFirst => {
+                self.current_directory
+                    .find_first(arguments[0], arguments[1], &mut self.memory)?
+            }
+            Call::FindNext => {
+                self.current_directory
+                    .find_next(arguments[0], arguments[1], &mut self.memory)?
+            }
+            Call::FindClose => self
+                .current_directory
+                .find_close(arguments[0], &mut self.memory)?,
         };
         self.cpu.set_register(Register32::Eax, result);
         Ok(())
@@ -43,7 +62,11 @@ impl Process32 {
 }
 
 impl Directory {
-    pub(super) fn new(path: &[u8], directories: &[&[u8]]) -> Result<Self, LoadError> {
+    pub(super) fn new(
+        path: &[u8],
+        directories: &[&[u8]],
+        files: &[FileMetadata<'_>],
+    ) -> Result<Self, LoadError> {
         if directories.len() >= 256 {
             return Err(LoadError::InvalidProcessParameters);
         }
@@ -59,13 +82,16 @@ impl Directory {
                 return Err(LoadError::InvalidProcessParameters);
             }
         }
-        let declarations = entries().map(Box::from).collect();
+        let declarations: Vec<Box<[u8]>> = entries().map(Box::from).collect();
+        let files = catalog::prepare(files, &declarations)?;
         let mut terminated = Vec::with_capacity(path.len() + 1);
         terminated.extend_from_slice(path);
         terminated.push(0);
         Ok(Self {
             terminated,
             declarations,
+            files,
+            searches: search::Searches::default(),
         })
     }
 
@@ -77,20 +103,31 @@ impl Directory {
                 Err(paths::PathError::Unsupported) => return Err(DispatchError::Unsupported),
                 Err(paths::PathError::Windows(error)) => return failed(memory, error),
             };
-        let exists = self.declarations.iter().any(|declared| {
-            declared
-                .get(..candidate.len())
-                .is_some_and(|prefix| prefix.eq_ignore_ascii_case(&candidate))
-                && (candidate.len() == declared.len()
-                    || candidate.len() == 3
-                    || declared.get(candidate.len()) == Some(&b'\\'))
-        });
+        let exists = self.exists(&candidate);
         if !exists {
             return failed(memory, 3);
         }
         candidate.push(0);
         self.terminated = candidate;
         Ok(1)
+    }
+
+    fn all_paths(&self) -> impl Iterator<Item = &[u8]> {
+        self.declarations
+            .iter()
+            .map(AsRef::as_ref)
+            .chain(self.files.iter().map(|file| file.path.as_ref()))
+    }
+
+    fn exists(&self, candidate: &[u8]) -> bool {
+        self.all_paths().enumerate().any(|(index, declared)| {
+            declared
+                .get(..candidate.len())
+                .is_some_and(|prefix| prefix.eq_ignore_ascii_case(candidate))
+                && ((candidate.len() == declared.len() && index < self.declarations.len())
+                    || candidate.len() == 3
+                    || declared.get(candidate.len()) == Some(&b'\\'))
+        })
     }
 
     pub(super) fn query(

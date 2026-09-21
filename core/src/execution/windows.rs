@@ -29,6 +29,7 @@ mod user_atoms;
 
 pub use clock::ClockError;
 pub use d3d8::Frame;
+pub use directory::FileMetadata;
 pub use parameters::ProcessOptions;
 
 const API_BASE: u32 = 0x7000_0000;
@@ -146,6 +147,9 @@ impl Api {
             0x208 => Some(Self::Interlocked(atomics::Call::Decrement)),
             0x228 => Some(Self::Directory(directory::Call::Query)),
             0x230 => Some(Self::Directory(directory::Call::Change)),
+            0x234 => Some(Self::Directory(directory::Call::FindFirst)),
+            0x238 => Some(Self::Directory(directory::Call::FindNext)),
+            0x23c => Some(Self::Directory(directory::Call::FindClose)),
             0x22c => Some(Self::GetCommandLine),
             16 => Some(Self::GetDesktopWindow),
             0x20 => Some(Self::SetErrorMode),
@@ -204,6 +208,9 @@ impl Api {
                 "QueryPerformanceCounter" => 0x224,
                 "GetCurrentDirectoryA" => 0x228,
                 "SetCurrentDirectoryA" => 0x230,
+                "FindFirstFileA" => 0x234,
+                "FindNextFileA" => 0x238,
+                "FindClose" => 0x23c,
                 "GetCommandLineA" => 0x22c,
                 "lstrcpynA" => 0xe4,
                 "lstrcpyA" => 0xf0,
@@ -348,8 +355,11 @@ impl Process32 {
         options: ProcessOptions<'_>,
     ) -> Result<Self, LoadError> {
         let parameters = parameters::Parameters::prepare(options)?;
-        let current_directory =
-            directory::Directory::new(options.current_directory, options.directories)?;
+        let current_directory = directory::Directory::new(
+            options.current_directory,
+            options.directories,
+            options.files,
+        )?;
         let mut diagnostic_imports = diagnostics::Imports::default();
         let reserved = [
             u64::from(STACK_BASE)..u64::from(STACK_BASE + STACK_SIZE),

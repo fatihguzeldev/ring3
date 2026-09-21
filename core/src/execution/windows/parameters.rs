@@ -11,6 +11,8 @@ pub struct ProcessOptions<'a> {
     pub current_directory: &'a [u8],
     /// existing virtual directories; declarations also make their ancestors available.
     pub directories: &'a [&'a [u8]],
+    /// declared metadata only; file contents are not mounted.
+    pub files: &'a [super::directory::FileMetadata<'a>],
     pub command_line: &'a [u8],
     pub environment: &'a [&'a [u8]],
     pub diagnostic_imports: bool,
@@ -23,6 +25,7 @@ impl Default for ProcessOptions<'_> {
             image_path: b"C:\\program.exe",
             current_directory: b"C:\\",
             directories: &[],
+            files: &[],
             command_line: b"program.exe",
             environment: &[],
             diagnostic_imports: false,
