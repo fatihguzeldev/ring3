@@ -1,4 +1,5 @@
-use super::{API_BASE, DispatchError, GuestMemory, MemoryError, thread};
+use super::super::Access;
+use super::{API_BASE, DispatchError, GuestMemory, MemoryError, guest, thread};
 use crate::execution::loader::modules::MappedModule;
 
 #[derive(Clone, Copy)]
@@ -6,14 +7,20 @@ pub(super) enum Call {
     Load,
     Handle,
     Free,
+    FileName,
 }
 
 impl Call {
+    pub(super) fn arguments(self) -> usize {
+        if matches!(self, Self::FileName) { 3 } else { 1 }
+    }
+
     pub(super) fn at(offset: u32) -> Option<Self> {
         match offset {
             0x14 => Some(Self::Load),
             0x18 => Some(Self::Handle),
             0x1c => Some(Self::Free),
+            0xe0 => Some(Self::FileName),
             _ => None,
         }
     }
@@ -21,6 +28,7 @@ impl Call {
 
 struct Module {
     name: String,
+    path: Vec<u8>,
     handle: u32,
     references: u32,
     builtin: bool,
@@ -28,14 +36,22 @@ struct Module {
 
 pub(super) struct Modules {
     program: u32,
+    program_path: Vec<u8>,
     resident: Vec<Module>,
 }
 
 impl Modules {
-    pub(super) fn new(program: u32, providers: Vec<MappedModule>) -> Self {
+    pub(super) fn new(program: u32, program_path: &[u8], providers: Vec<MappedModule>) -> Self {
+        let parent_end = program_path
+            .iter()
+            .rposition(|&byte| byte == b'\\')
+            .expect("validated absolute path")
+            + 1;
+        let parent = &program_path[..parent_end];
         let mut resident: Vec<_> = providers
             .into_iter()
             .map(|provider| Module {
+                path: [parent, provider.name.as_bytes(), &[0]].concat(),
                 name: provider.name,
                 handle: provider.base,
                 references: 1,
@@ -56,22 +72,31 @@ impl Modules {
             {
                 resident.push(Module {
                     name: name.to_owned(),
+                    path: [b"C:\\Windows\\System32\\".as_slice(), name.as_bytes(), &[0]].concat(),
                     handle: API_BASE + offset,
                     references: 1,
                     builtin: true,
                 });
             }
         }
-        Self { program, resident }
+        Self {
+            program,
+            program_path: [program_path, &[0]].concat(),
+            resident,
+        }
     }
 
     pub(super) fn dispatch(
         &mut self,
         call: Call,
-        argument: u32,
+        arguments: &[u32],
         initialized: bool,
         memory: &mut GuestMemory,
     ) -> Result<u32, DispatchError> {
+        let argument = arguments[0];
+        if matches!(call, Call::FileName) {
+            return self.file_name(argument, arguments[1], arguments[2], memory);
+        }
         if matches!(call, Call::Free) {
             let Some(module) = self
                 .resident
@@ -110,6 +135,36 @@ impl Modules {
                 .ok_or(DispatchError::Unsupported)?;
         }
         Ok(module.handle)
+    }
+
+    fn file_name(
+        &self,
+        handle: u32,
+        output: u32,
+        size: u32,
+        memory: &mut GuestMemory,
+    ) -> Result<u32, DispatchError> {
+        let path = if handle == 0 || handle == self.program {
+            &self.program_path
+        } else if let Some(module) = self.resident.iter().find(|module| module.handle == handle) {
+            &module.path
+        } else {
+            thread::set_last_error(memory, 126)?;
+            return Ok(0);
+        };
+        let count = (size as usize).min(path.len());
+        let truncated = (size as usize) < path.len();
+        guest::check(memory, output, count, Access::Write)?;
+        if truncated {
+            thread::check_last_error_write(memory)?;
+        }
+        memory.write(u64::from(output), &path[..count])?;
+        if truncated {
+            thread::set_last_error(memory, 0).expect("last-error output was checked");
+            Ok(size)
+        } else {
+            Ok(u32::try_from(path.len() - 1).expect("bounded image path"))
+        }
     }
 }
 
@@ -154,10 +209,10 @@ mod tests {
             .map_zeroed(0x1000, PAGE_SIZE, Permissions::READ_WRITE)
             .unwrap();
         memory.write(0x1000, b"kernel32\0").unwrap();
-        let mut modules = Modules::new(0x0040_0000, Vec::new());
+        let mut modules = Modules::new(0x0040_0000, b"C:\\program.exe", Vec::new());
         modules.resident[0].references = u32::MAX;
         assert!(matches!(
-            modules.dispatch(Call::Load, 0x1000, true, &mut memory),
+            modules.dispatch(Call::Load, &[0x1000], true, &mut memory),
             Err(DispatchError::Unsupported)
         ));
         assert_eq!(modules.resident[0].references, u32::MAX);

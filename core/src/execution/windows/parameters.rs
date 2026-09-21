@@ -7,6 +7,7 @@ const MAX_BYTES: usize = 64 * 1024;
 /// explicit narrow-byte inputs; the host environment is never inherited.
 #[derive(Clone, Copy, Debug)]
 pub struct ProcessOptions<'a> {
+    pub image_path: &'a [u8],
     pub command_line: &'a [u8],
     pub environment: &'a [&'a [u8]],
     pub diagnostic_imports: bool,
@@ -16,6 +17,7 @@ pub struct ProcessOptions<'a> {
 impl Default for ProcessOptions<'_> {
     fn default() -> Self {
         Self {
+            image_path: b"C:\\program.exe",
             command_line: b"program.exe",
             environment: &[],
             diagnostic_imports: false,
@@ -34,6 +36,7 @@ pub(super) struct Parameters {
 
 impl Parameters {
     pub(super) fn prepare(options: ProcessOptions<'_>) -> Result<Self, LoadError> {
+        validate_image_path(options)?;
         if options.command_line.len() > 32767
             || options.command_line.contains(&0)
             || options.environment.len() > 256
@@ -84,6 +87,36 @@ impl Parameters {
         memory.map_zeroed(u64::from(BASE), length, Permissions::READ_WRITE)?;
         memory.write(u64::from(BASE), &self.bytes)
     }
+}
+
+fn validate_image_path(options: ProcessOptions<'_>) -> Result<(), LoadError> {
+    let path = options.image_path;
+    if !(4..=32767).contains(&path.len())
+        || !path[0].is_ascii_alphabetic()
+        || &path[1..3] != b":\\"
+        || path[3..].split(|&byte| byte == b'\\').any(|component| {
+            component.is_empty()
+                || matches!(component, b"." | b"..")
+                || component
+                    .iter()
+                    .any(|&byte| !(0x20..=0x7e).contains(&byte) || b"<>:\"|?*/".contains(&byte))
+        })
+    {
+        return Err(LoadError::InvalidProcessParameters);
+    }
+    let parent = path
+        .iter()
+        .rposition(|&byte| byte == b'\\')
+        .expect("absolute path")
+        + 1;
+    if options
+        .modules
+        .iter()
+        .any(|module| parent + module.name.len() > 32767)
+    {
+        return Err(LoadError::InvalidProcessParameters);
+    }
+    Ok(())
 }
 
 fn whitespace(byte: u8) -> bool {
@@ -165,6 +198,7 @@ mod tests {
             environment: &environment,
             diagnostic_imports: false,
             modules: &[],
+            ..ProcessOptions::default()
         })
         .unwrap();
         assert_eq!(parameters.bytes.len(), MAX_BYTES);
@@ -194,7 +228,8 @@ mod tests {
                 command_line: b"",
                 environment: &[&too_long],
                 diagnostic_imports: false,
-                modules: &[]
+                modules: &[],
+                ..ProcessOptions::default()
             }),
             Err(LoadError::InvalidProcessParameters)
         ));

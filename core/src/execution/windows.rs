@@ -159,6 +159,7 @@ impl Api {
                 "ExitProcess" => 8,
                 "LoadLibraryA" => 0x14,
                 "GetModuleHandleA" => 0x18,
+                "GetModuleFileNameA" => 0xe0,
                 "FreeLibrary" => 0x1c,
                 "SetErrorMode" => 0x20,
                 "GetErrorMode" => 0x24,
@@ -234,6 +235,7 @@ impl Api {
             Self::CodePage(call) => call.arguments(),
             Self::Heap(call) => call.arguments(),
             Self::Tls(call) => call.arguments(),
+            Self::Module(call) => call.arguments(),
             _ => 1,
         }
     }
@@ -301,7 +303,7 @@ impl Process32 {
         })?;
         let (major, minor) = loaded.subsystem_version;
         let mut image = loaded.image;
-        let modules = modules::Modules::new(image.image_base, loaded.providers);
+        let modules = modules::Modules::new(image.image_base, options.image_path, loaded.providers);
         image.memory.map_zeroed(
             u64::from(STACK_BASE),
             u64::from(STACK_SIZE),
@@ -521,7 +523,7 @@ impl Process32 {
             Api::Module(call) => {
                 let value = self.modules.dispatch(
                     call,
-                    argument,
+                    arguments,
                     self.startup.is_complete(),
                     &mut self.memory,
                 )?;

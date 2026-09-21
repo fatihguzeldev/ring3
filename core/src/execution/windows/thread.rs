@@ -37,3 +37,7 @@ pub(super) fn current_id(memory: &GuestMemory) -> Result<u32, MemoryError> {
     guest::read_words(memory, BASE + 0x24, &mut value)?;
     Ok(value[0])
 }
+
+pub(super) fn check_last_error_write(memory: &GuestMemory) -> Result<(), MemoryError> {
+    guest::check(memory, LAST_ERROR, 4, super::super::Access::Write)
+}
