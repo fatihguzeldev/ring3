@@ -16,11 +16,59 @@ pub(super) fn supports_repeat(instruction: &Instruction) -> bool {
             && !instruction.has_repne_prefix()
             && matches!(
                 instruction.code(),
-                Code::Movsb_m8_m8 | Code::Movsw_m16_m16 | Code::Movsd_m32_m32
+                Code::Movsb_m8_m8
+                    | Code::Movsw_m16_m16
+                    | Code::Movsd_m32_m32
+                    | Code::Stosb_m8_AL
+                    | Code::Stosw_m16_AX
+                    | Code::Stosd_m32_EAX
             ))
 }
 
 impl Cpu32 {
+    pub(super) fn store_string(
+        &mut self,
+        instruction: &Instruction,
+        memory: &mut GuestMemory,
+    ) -> Result<u32, StopReason> {
+        if instruction.op0_kind() != OpKind::MemoryESEDI {
+            return Err(StopReason::UnsupportedInstruction);
+        }
+        let repeat = instruction.has_rep_prefix();
+        let count = self.register(Register32::Ecx);
+        if repeat && count == 0 {
+            return Ok(instruction.next_ip32());
+        }
+        let width = match instruction.code() {
+            Code::Stosb_m8_AL => Width::Byte,
+            Code::Stosw_m16_AX => Width::Word,
+            Code::Stosd_m32_EAX => Width::Dword,
+            _ => return Err(StopReason::UnsupportedInstruction),
+        };
+        let destination = self.register(Register32::Edi);
+        self.write_operand(
+            Operand {
+                location: Location::Memory(destination),
+                width,
+            },
+            self.register(Register32::Eax),
+            memory,
+        )?;
+        let step = if self.eflags & 0x400 == 0 {
+            width as u32
+        } else {
+            (width as u32).wrapping_neg()
+        };
+        self.set_register(Register32::Edi, destination.wrapping_add(step));
+        if repeat {
+            self.set_register(Register32::Ecx, count - 1);
+            if count > 1 {
+                return Ok(self.eip);
+            }
+        }
+        Ok(instruction.next_ip32())
+    }
+
     pub(super) fn scan_string(
         &mut self,
         instruction: &Instruction,

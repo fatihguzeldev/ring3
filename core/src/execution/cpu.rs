@@ -212,6 +212,9 @@ impl Cpu32 {
                 next = self.move_string(instruction, memory)?;
             }
             code if strings::is_scan(code) => next = self.scan_string(instruction, memory)?,
+            Code::Stosb_m8_AL | Code::Stosw_m16_AX | Code::Stosd_m32_EAX => {
+                next = self.store_string(instruction, memory)?;
+            }
             Code::Fldcw_m2byte | Code::Fnstcw_m2byte => self.x87_control(instruction, memory)?,
             Code::Fld_m32fp
             | Code::Fld_m64fp
