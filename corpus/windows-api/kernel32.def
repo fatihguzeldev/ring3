@@ -34,3 +34,4 @@ EXPORTS
     _GlobalFree@4==GlobalFree
     _lstrcpyA@8==lstrcpyA
     _lstrcatA@8==lstrcatA
+    _GetSystemDirectoryA@8==GetSystemDirectoryA
