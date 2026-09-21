@@ -3,6 +3,7 @@ use iced_x86::{Code, Decoder, DecoderError, DecoderOptions, Instruction, Mnemoni
 use super::{GuestMemory, MemoryError};
 
 mod branches;
+mod flag_stack;
 mod operands;
 mod register_stack;
 mod shifts;

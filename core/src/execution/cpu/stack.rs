@@ -22,6 +22,10 @@ pub(super) fn is_stack(code: Code) -> bool {
             | Code::Pushad
             | Code::Popaw
             | Code::Popad
+            | Code::Pushfw
+            | Code::Pushfd
+            | Code::Popfw
+            | Code::Popfd
     )
 }
 
@@ -35,6 +39,9 @@ impl Cpu32 {
         match instruction.code() {
             Code::Pushaw | Code::Pushad | Code::Popaw | Code::Popad => {
                 self.register_stack(instruction.code(), memory)?;
+            }
+            Code::Pushfw | Code::Pushfd | Code::Popfw | Code::Popfd => {
+                self.flag_stack(instruction.code(), memory)?;
             }
             Code::Push_r32 | Code::Pushd_imm32 | Code::Pushd_imm8 | Code::Push_rm32 => {
                 let value = self.read_operand(self.operand(instruction, 0)?, memory)?;
