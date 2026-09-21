@@ -25,5 +25,8 @@ void entry(void) {
     __asm__ volatile("fildll %1; fmuls %2; fstpl %0"
         : "=m"(output64) : "m"(integer64), "m"(factor32) : "st");
     if (output64 != 0x4348000000000000ULL) ExitProcess(5);
+    unsigned short saved;
+    __asm__ volatile("fwait; fnstcw %0; fwait" : "=m"(saved));
+    if (saved != control) ExitProcess(6);
     ExitProcess(42);
 }

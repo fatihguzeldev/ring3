@@ -710,6 +710,22 @@ mod x87_executable;
 #[path = "../../core/tests/support/x87_scaling_executable.rs"]
 mod x87_scaling_executable;
 
+#[path = "../../core/tests/support/fpu_wait_executable.rs"]
+mod fpu_wait_executable;
+
+fn execute_fpu_wait() {
+    use ring3_core::execution::{Cpu32, StopReason, load_pe32};
+    let mut image = load_pe32(&fpu_wait_executable::pe32(), 4).unwrap();
+    let mut cpu = Cpu32::new(image.entry_point);
+    let result = cpu.run(&mut image.memory, 20);
+    assert_eq!(result.reason, StopReason::Breakpoint);
+    assert_eq!(result.instructions, 6);
+    assert_eq!(cpu.x87_control_word(), 0x0f7f);
+    let mut bytes = [0; 4];
+    image.memory.read(0x0040_2180, &mut bytes).unwrap();
+    assert_eq!(bytes, [0x7f, 3, 0xaa, 0xaa]);
+}
+
 fn execute_x87_scaling() {
     use ring3_core::execution::{Cpu32, StopReason, load_pe32};
     for (input, factor, expected) in [
@@ -773,7 +789,7 @@ fn execute_x87_data() {
         .unwrap();
         let result = process.run(1000);
         assert_eq!(result.reason, ProcessStop::Exited(42));
-        assert_eq!((result.instructions, result.api_calls), (60, 1));
+        assert_eq!((result.instructions, result.api_calls), (67, 1));
     }
 }
 
@@ -2820,6 +2836,7 @@ pub extern "C" fn run() -> u32 {
     execute_environment_query();
     execute_x87_data();
     execute_x87_scaling();
+    execute_fpu_wait();
     execute_millisecond_clock();
     execute_crt_random();
     execute_crt_float_to_integer();
