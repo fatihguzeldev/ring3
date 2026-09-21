@@ -41,3 +41,4 @@ EXPORTS
     _ftol
     ?name@type_info@@QBEPBDXZ
     strncmp
+    _stricmp

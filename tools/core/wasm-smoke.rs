@@ -687,6 +687,28 @@ mod type_name_executable;
 #[path = "../../core/tests/support/string_prefix_executable.rs"]
 mod string_prefix_executable;
 
+#[path = "../../core/tests/support/case_compare_executable.rs"]
+mod case_compare_executable;
+
+fn execute_crt_case_comparison() {
+    use ring3_core::execution::{Process32, ProcessStop, Register32, StopReason};
+    for (left, right, expected) in [
+        (b"MiXeD\0".as_slice(), b"mixed\0".as_slice(), 0_i32),
+        (b"Z\0", b"[\0", 31),
+        (b"\xc4\0", b"\xe4\0", -32),
+    ] {
+        let mut p = Process32::load(&case_compare_executable::pe32(), 32).unwrap();
+        p.memory.write(0x0040_2180, left).unwrap();
+        p.memory.write(0x0040_2190, right).unwrap();
+        let run = p.run(40);
+        assert_eq!(run.reason, ProcessStop::Stopped(StopReason::Breakpoint));
+        assert_eq!((run.instructions, run.api_calls), (10, 2));
+        assert_eq!(p.cpu.register(Register32::Esi), expected.cast_unsigned());
+        assert_eq!(p.cpu.register(Register32::Eax), 2);
+        assert_eq!(p.cpu.register(Register32::Esp), 0x1001_0000);
+    }
+}
+
 fn execute_crt_string_prefix() {
     use ring3_core::execution::{Process32, ProcessStop, Register32, StopReason};
     for (left, right, expected) in [
@@ -2972,6 +2994,7 @@ pub extern "C" fn run() -> u32 {
     execute_crt_float_to_integer();
     execute_crt_type_names();
     execute_crt_string_prefix();
+    execute_crt_case_comparison();
     execute_command_line();
     execute_image();
     execute_function();
