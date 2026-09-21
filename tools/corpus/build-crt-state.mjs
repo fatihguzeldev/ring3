@@ -12,9 +12,11 @@ for (const [module, definition] of [
   run(tools.lld, ["-flavor", "link", "/lib", "/machine:x86",
     `/def:${join(root, definition)}`, `/out:${module}.lib`], output);
 }
-for (const name of ["state", "fp-control", "initializers", "arguments", "memory", "exception-frame", "heap", "dllonexit", "reverse-search", "string-traversal", "string-duplicate", "buffer-compare", "code-page", "onexit"]) {
+for (const name of ["state", "fp-control", "initializers", "arguments", "memory", "exception-frame", "heap", "dllonexit", "reverse-search", "string-traversal", "string-duplicate", "buffer-compare", "code-page", "onexit", "cpp-allocation"]) {
+  const cpp = name === "cpp-allocation";
   run(tools.clang, ["--target=i686-pc-windows-msvc", "-O0", "-ffreestanding",
-    "-fno-stack-protector", "-c", join(root, `corpus/crt-state/${name}.c`),
+    "-fno-stack-protector", ...(cpp ? ["-fno-exceptions", "-fno-rtti", "-fcheck-new", "-fno-sized-deallocation"] : []),
+    "-c", join(root, `corpus/crt-state/${name}.${cpp ? "cpp" : "c"}`),
     "-o", `${name}.obj`], output);
   run(tools.lld, ["-flavor", "link", "/entry:entry", "/subsystem:console",
     "/machine:x86", "/nodefaultlib", "/base:0x400000", "/fixed",
