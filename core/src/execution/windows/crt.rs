@@ -8,6 +8,7 @@ mod arguments;
 mod floating;
 mod initializers;
 mod onexit;
+mod strings;
 
 const DATA: u32 = 0x7000_2000;
 const FMODE: u32 = DATA;
@@ -32,6 +33,7 @@ pub(super) enum Call {
     Free,
     ErrnoPointer,
     DllOnExit,
+    MbSearchReverse,
 }
 
 impl Call {
@@ -47,6 +49,7 @@ impl Call {
             0x120 => Some(Self::Free),
             0x124 => Some(Self::ErrnoPointer),
             0x128 => Some(Self::DllOnExit),
+            0x12c => Some(Self::MbSearchReverse),
             _ => None,
         }
     }
@@ -54,7 +57,7 @@ impl Call {
     pub(super) fn arguments(self) -> usize {
         match self {
             Self::SetAppType | Self::Malloc | Self::Free => 1,
-            Self::ControlFp => 2,
+            Self::ControlFp | Self::MbSearchReverse => 2,
             Self::GetMainArgs => 5,
             Self::Memset | Self::DllOnExit => 3,
             Self::FmodePointer | Self::CommodePointer | Self::ErrnoPointer => 0,
@@ -95,6 +98,9 @@ impl Crt {
                 None
             }
             Call::ErrnoPointer => Some(ERRNO),
+            Call::MbSearchReverse => {
+                Some(strings::reverse_search(memory, arguments[0], arguments[1])?)
+            }
             Call::DllOnExit => Some(onexit::register(
                 heap,
                 memory,
@@ -136,6 +142,7 @@ pub(super) fn resolve(name: &str) -> Option<u32> {
         "free" => Some(API_BASE + 0x120),
         "_errno" => Some(API_BASE + 0x124),
         "__dllonexit" => Some(API_BASE + 0x128),
+        "_mbsrchr" => Some(API_BASE + 0x12c),
         "_fmode" => Some(FMODE),
         "_commode" => Some(COMMODE),
         "_adjust_fdiv" => Some(ADJUST_FDIV),
