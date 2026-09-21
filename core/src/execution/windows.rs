@@ -13,13 +13,13 @@ mod diagnostics;
 mod gdi;
 mod guest;
 mod heap;
-mod messages;
 mod modules;
 mod parameters;
 mod startup;
 mod system;
 mod thread;
 mod tls;
+mod user_atoms;
 
 pub use d3d8::Frame;
 pub use parameters::ProcessOptions;
@@ -39,7 +39,7 @@ pub struct Process32 {
     subsystem_version: u32,
     startup: startup::Startup,
     modules: modules::Modules,
-    messages: messages::Messages,
+    user_atoms: user_atoms::UserAtoms,
     cursors: cursors::Cursors,
     heap: heap::Heap,
     critical_sections: critical_sections::CriticalSections,
@@ -81,7 +81,7 @@ enum Api {
     GetLastError,
     ExitProcess,
     GetDesktopWindow,
-    RegisterWindowMessage,
+    RegisterUserAtom,
     System(system::Call),
     SetErrorMode,
     GetErrorMode,
@@ -121,7 +121,7 @@ impl Api {
             0x20 => Some(Self::SetErrorMode),
             0x24 => Some(Self::GetErrorMode),
             0x30 => Some(Self::GetVersion),
-            0x94 => Some(Self::RegisterWindowMessage),
+            0x94 => Some(Self::RegisterUserAtom),
             0x98 => Some(Self::GetProcessVersion),
             0x118 => Some(Self::ExceptionProlog),
             0xffc => Some(Self::Unsupported),
@@ -317,7 +317,7 @@ impl Process32 {
             subsystem_version: (u32::from(major) << 16) | u32::from(minor),
             startup,
             modules,
-            messages: messages::Messages::default(),
+            user_atoms: user_atoms::UserAtoms::default(),
             gdi: gdi::Gdi::default(),
             cursors: cursors::Cursors::default(),
             heap: heap::Heap::default(),
@@ -456,8 +456,8 @@ impl Process32 {
             Api::SetLastError => thread::set_last_error(&mut self.memory, argument)?,
             Api::GetLastError => self.cpu.set_register(Register32::Eax, self.last_error()?),
             Api::GetDesktopWindow => self.cpu.set_register(Register32::Eax, d3d8::DESKTOP),
-            Api::RegisterWindowMessage => {
-                let value = self.messages.register(argument, &mut self.memory)?;
+            Api::RegisterUserAtom => {
+                let value = self.user_atoms.register(argument, &mut self.memory)?;
                 self.cpu.set_register(Register32::Eax, value);
             }
             Api::System(call) => self

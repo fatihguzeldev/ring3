@@ -3,11 +3,11 @@ use std::collections::BTreeMap;
 use super::{DispatchError, GuestMemory, MemoryError, thread};
 
 #[derive(Default)]
-pub(super) struct Messages {
+pub(super) struct UserAtoms {
     names: BTreeMap<String, u32>,
 }
 
-impl Messages {
+impl UserAtoms {
     pub(super) fn register(
         &mut self,
         pointer: u32,
@@ -21,7 +21,7 @@ impl Messages {
             thread::set_last_error(memory, 8)?;
             return Ok(0);
         }
-        let identifier = 0xc000 + u32::try_from(self.names.len()).expect("bounded message table");
+        let identifier = 0xc000 + u32::try_from(self.names.len()).expect("bounded user atom table");
         self.names.insert(name, identifier);
         Ok(identifier)
     }
