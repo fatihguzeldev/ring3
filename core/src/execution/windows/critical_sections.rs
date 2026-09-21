@@ -1,11 +1,10 @@
 use std::collections::BTreeMap;
 
 use super::super::Access;
-use super::{DispatchError, GuestMemory, guest};
+use super::{DispatchError, GuestMemory, guest, thread};
 
 const MAX_OBJECTS: usize = 4096;
 const SIZE: usize = 24;
-const THREAD_ID: u32 = 1;
 
 #[derive(Clone, Copy)]
 pub(super) enum Call {
@@ -98,7 +97,7 @@ fn representation(depth: u32) -> [u32; 6] {
         0,
         depth.wrapping_sub(1),
         depth,
-        if depth == 0 { 0 } else { THREAD_ID },
+        if depth == 0 { 0 } else { thread::CURRENT_ID },
         0,
         0,
     ]

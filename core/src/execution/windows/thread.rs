@@ -1,5 +1,6 @@
 use super::{GuestMemory, MemoryError, PAGE_SIZE, Permissions, guest};
 
+pub(super) const CURRENT_ID: u32 = 1;
 pub(super) const BASE: u32 = 0x7ffd_e000;
 const LAST_ERROR: u32 = BASE + 0x34;
 
@@ -14,6 +15,7 @@ pub(super) fn initialize(
         (4, stack_base),
         (8, stack_limit),
         (0x18, BASE),
+        (0x24, CURRENT_ID),
     ] {
         guest::write_word(memory, BASE + offset, value)?;
     }
@@ -28,4 +30,10 @@ pub(super) fn last_error(memory: &GuestMemory) -> Result<u32, MemoryError> {
 
 pub(super) fn set_last_error(memory: &mut GuestMemory, value: u32) -> Result<(), MemoryError> {
     guest::write_word(memory, LAST_ERROR, value)
+}
+
+pub(super) fn current_id(memory: &GuestMemory) -> Result<u32, MemoryError> {
+    let mut value = [0];
+    guest::read_words(memory, BASE + 0x24, &mut value)?;
+    Ok(value[0])
 }

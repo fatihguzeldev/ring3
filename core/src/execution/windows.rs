@@ -79,6 +79,8 @@ pub struct ProcessResult {
 enum Api {
     SetLastError,
     GetLastError,
+    GetCurrentThread,
+    GetCurrentThreadId,
     ExitProcess,
     GetDesktopWindow,
     RegisterUserAtom,
@@ -116,6 +118,8 @@ impl Api {
         match address.checked_sub(API_BASE)? {
             0 => Some(Self::SetLastError),
             4 => Some(Self::GetLastError),
+            0xd8 => Some(Self::GetCurrentThread),
+            0xdc => Some(Self::GetCurrentThreadId),
             8 => Some(Self::ExitProcess),
             16 => Some(Self::GetDesktopWindow),
             0x20 => Some(Self::SetErrorMode),
@@ -150,6 +154,8 @@ impl Api {
             match name {
                 "SetLastError" => 0,
                 "GetLastError" => 4,
+                "GetCurrentThread" => 0xd8,
+                "GetCurrentThreadId" => 0xdc,
                 "ExitProcess" => 8,
                 "LoadLibraryA" => 0x14,
                 "GetModuleHandleA" => 0x18,
@@ -214,6 +220,8 @@ impl Api {
     fn arguments(self) -> usize {
         match self {
             Self::GetLastError
+            | Self::GetCurrentThread
+            | Self::GetCurrentThreadId
             | Self::GetDesktopWindow
             | Self::GetErrorMode
             | Self::GetVersion
@@ -459,6 +467,10 @@ impl Process32 {
         match api {
             Api::SetLastError => thread::set_last_error(&mut self.memory, argument)?,
             Api::GetLastError => self.cpu.set_register(Register32::Eax, self.last_error()?),
+            Api::GetCurrentThread => self.cpu.set_register(Register32::Eax, u32::MAX - 1),
+            Api::GetCurrentThreadId => self
+                .cpu
+                .set_register(Register32::Eax, thread::current_id(&self.memory)?),
             Api::GetDesktopWindow => self.cpu.set_register(Register32::Eax, d3d8::DESKTOP),
             Api::RegisterUserAtom => {
                 let value = self.user_atoms.register(argument, &mut self.memory)?;
