@@ -36,3 +36,5 @@ EXPORTS
     ??2@YAPAXI@Z
     ??3@YAXPAX@Z
     _stat
+    srand
+    rand

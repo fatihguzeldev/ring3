@@ -637,6 +637,21 @@ fn execute_find_files() {
 #[path = "../../core/tests/support/millisecond_clock_executable.rs"]
 mod millisecond_clock_executable;
 
+#[path = "../../core/tests/support/random_executable.rs"]
+mod random_executable;
+
+fn execute_crt_random() {
+    use ring3_core::execution::{Process32, ProcessStop, Register32, StopReason};
+    let mut process = Process32::load(&random_executable::pe32(), 32).unwrap();
+    let result = process.run(40);
+    assert_eq!(result.reason, ProcessStop::Stopped(StopReason::Breakpoint));
+    assert_eq!((result.instructions, result.api_calls), (9, 4));
+    assert_eq!(process.cpu.register(Register32::Ebx), 41);
+    assert_eq!(process.cpu.register(Register32::Esi), 5890);
+    assert_eq!(process.cpu.register(Register32::Eax), 1279);
+    assert_eq!(process.cpu.register(Register32::Esp), 0x1001_0000);
+}
+
 fn execute_millisecond_clock() {
     use ring3_core::execution::{Process32, ProcessStop, Register32, StopReason};
     use std::time::Duration;
@@ -2748,6 +2763,7 @@ pub extern "C" fn run() -> u32 {
     execute_environment_query();
     execute_x87_data();
     execute_millisecond_clock();
+    execute_crt_random();
     execute_command_line();
     execute_image();
     execute_function();
