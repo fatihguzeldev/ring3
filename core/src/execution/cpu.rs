@@ -4,6 +4,7 @@ use super::{GuestMemory, MemoryError};
 
 mod branches;
 mod flag_stack;
+mod identification;
 mod operands;
 mod register_stack;
 mod shifts;
@@ -156,6 +157,7 @@ impl Cpu32 {
         }
         let mut next = instruction.next_ip32();
         match instruction.code() {
+            Code::Cpuid => self.identify(),
             code if is_move(code) => {
                 let destination = self.operand(instruction, 0)?;
                 let value = self.read_operand(self.operand(instruction, 1)?, memory)?;
