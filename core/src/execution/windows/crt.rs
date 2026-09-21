@@ -5,6 +5,7 @@ use super::{
 };
 
 mod arguments;
+mod buffers;
 mod floating;
 mod initializers;
 mod onexit;
@@ -36,6 +37,7 @@ pub(super) enum Call {
     MbSearchReverse,
     MbIncrement,
     Duplicate,
+    Compare,
 }
 
 impl Call {
@@ -54,6 +56,7 @@ impl Call {
             0x12c => Some(Self::MbSearchReverse),
             0x130 => Some(Self::MbIncrement),
             0x134 => Some(Self::Duplicate),
+            0x138 => Some(Self::Compare),
             _ => None,
         }
     }
@@ -63,7 +66,7 @@ impl Call {
             Self::SetAppType | Self::Malloc | Self::Free | Self::MbIncrement | Self::Duplicate => 1,
             Self::ControlFp | Self::MbSearchReverse => 2,
             Self::GetMainArgs => 5,
-            Self::Memset | Self::DllOnExit => 3,
+            Self::Memset | Self::DllOnExit | Self::Compare => 3,
             Self::FmodePointer | Self::CommodePointer | Self::ErrnoPointer => 0,
         }
     }
@@ -107,6 +110,12 @@ impl Crt {
             }
             Call::MbIncrement => Some(strings::increment(memory, arguments[0])?),
             Call::Duplicate => Some(strings::duplicate(memory, heap, arguments[0])?),
+            Call::Compare => Some(buffers::compare(
+                memory,
+                arguments[0],
+                arguments[1],
+                arguments[2],
+            )?),
             Call::DllOnExit => Some(onexit::register(
                 heap,
                 memory,
@@ -143,6 +152,7 @@ pub(super) fn resolve(name: &str) -> Option<u32> {
         "_initterm" => Some(initializers::BASE),
         "__getmainargs" => Some(API_BASE + 0x110),
         "memset" => Some(API_BASE + 0x114),
+        "memcmp" => Some(API_BASE + 0x138),
         "_EH_prolog" => Some(API_BASE + 0x118),
         "malloc" => Some(API_BASE + 0x11c),
         "free" => Some(API_BASE + 0x120),
