@@ -1838,6 +1838,23 @@ fn execute_string_traversal() {
 #[path = "../../core/tests/support/strdup_executable.rs"]
 mod strdup_executable;
 
+#[path = "../../core/tests/support/buffer_compare_executable.rs"]
+mod buffer_compare_executable;
+
+fn execute_buffer_compare() {
+    use ring3_core::execution::{Process32, ProcessStop, Register32, StopReason};
+    let mut process = Process32::load(&buffer_compare_executable::pe32(), 25).unwrap();
+    let result = process.run(50);
+    assert_eq!(result.reason, ProcessStop::Stopped(StopReason::Breakpoint));
+    assert_eq!((result.instructions, result.api_calls), (12, 2));
+    assert_eq!(process.cpu.register(Register32::Eax), u32::MAX);
+    assert_eq!(process.cpu.register(Register32::Ebx), 1);
+    assert_eq!(process.cpu.register(Register32::Esp), 0x1001_0000);
+    let mut bytes = [0; 3];
+    process.memory.read(0x0040_2180, &mut bytes).unwrap();
+    assert_eq!(&bytes, b"a\0\x80");
+}
+
 fn execute_strdup() {
     use ring3_core::execution::{Process32, ProcessStop, Register32, StopReason};
     let mut process = Process32::load(&strdup_executable::pe32(), 26).unwrap();
@@ -1888,6 +1905,7 @@ pub extern "C" fn run() -> u32 {
     execute_reverse_search();
     execute_string_traversal();
     execute_strdup();
+    execute_buffer_compare();
     execute_exception_frame();
     execute_crt_heap();
     execute_dllonexit();

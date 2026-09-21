@@ -20,3 +20,4 @@ EXPORTS
     _mbsrchr
     _mbsinc
     _strdup
+    memcmp

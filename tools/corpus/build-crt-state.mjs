@@ -12,7 +12,7 @@ for (const [module, definition] of [
   run(tools.lld, ["-flavor", "link", "/lib", "/machine:x86",
     `/def:${join(root, definition)}`, `/out:${module}.lib`], output);
 }
-for (const name of ["state", "fp-control", "initializers", "arguments", "memory", "exception-frame", "heap", "dllonexit", "reverse-search", "string-traversal", "string-duplicate"]) {
+for (const name of ["state", "fp-control", "initializers", "arguments", "memory", "exception-frame", "heap", "dllonexit", "reverse-search", "string-traversal", "string-duplicate", "buffer-compare"]) {
   run(tools.clang, ["--target=i686-pc-windows-msvc", "-O0", "-ffreestanding",
     "-fno-stack-protector", "-c", join(root, `corpus/crt-state/${name}.c`),
     "-o", `${name}.obj`], output);
