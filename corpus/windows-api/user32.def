@@ -10,3 +10,5 @@ EXPORTS
     _LoadCursorA@8==LoadCursorA
     _SetCursor@4==SetCursor
     _GetCursor@0==GetCursor
+    _GetCursorPos@4==GetCursorPos
+    _SetCursorPos@8==SetCursorPos
