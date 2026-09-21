@@ -1,5 +1,7 @@
 #[path = "support/dll_executable.rs"]
 mod dll_executable;
+#[path = "support/export_names_executable.rs"]
+mod export_names_executable;
 #[path = "support/imported_executable.rs"]
 mod imported_executable;
 
@@ -9,6 +11,37 @@ use ring3_core::execution::{
 };
 
 const BASE: u32 = 0x5000_0000;
+
+#[test]
+fn large_unique_export_name_tables_bind_and_execute() {
+    let library = export_names_executable::dll();
+    let names = ring3_core::parse_pe_export_names(&library)
+        .unwrap()
+        .unwrap();
+    assert_eq!(names.entries.len(), 2050);
+    assert_eq!(
+        names
+            .entries
+            .iter()
+            .map(|entry| entry.name.len() + 1)
+            .sum::<usize>(),
+        131_084
+    );
+    let mut process = load(
+        &exe("demo.dll"),
+        &[GuestModule {
+            name: "demo.dll",
+            bytes: &library,
+        }],
+    )
+    .unwrap();
+    assert_eq!(
+        process.run(100).reason,
+        ProcessStop::Stopped(StopReason::Breakpoint)
+    );
+    assert_eq!(process.cpu.register(Register32::Eax), 42);
+    assert_eq!(word(&process, 0x0040_2064), BASE + 0x2180);
+}
 
 fn load(bytes: &[u8], modules: &[GuestModule<'_>]) -> Result<Process32, LoadError> {
     Process32::load_with_options(

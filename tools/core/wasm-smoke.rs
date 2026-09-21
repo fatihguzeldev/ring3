@@ -36,6 +36,9 @@ mod dll_executable;
 #[path = "../../core/tests/support/relocated_executable.rs"]
 mod relocated_executable;
 
+#[path = "../../core/tests/support/export_names_executable.rs"]
+mod export_names_executable;
+
 #[path = "../../core/tests/support/delay_executable.rs"]
 mod delay_executable;
 
@@ -1113,26 +1116,33 @@ fn execute_dlls() {
         assert_eq!(result.reason, ProcessStop::Exited(42));
         assert_eq!(result.api_calls, 1);
     }
-    let library = relocated_executable::dll(0x1000_0000);
-    let mut process = Process32::load_with_options(
-        &dll_executable::exe("demo.dll"),
-        32,
-        ProcessOptions {
-            modules: &[GuestModule {
-                name: "demo.dll",
-                bytes: &library,
-            }],
-            ..ProcessOptions::default()
-        },
-    )
-    .unwrap();
-    let result = process.run(100);
-    assert_eq!(result.reason, ProcessStop::Stopped(StopReason::Breakpoint));
-    assert_eq!(process.cpu.register(Register32::Eax), 42);
-    assert_eq!(process.cpu.register(Register32::Esp), 0x1001_0000);
-    let mut word = [0; 4];
-    process.memory.read(0x3000_2190, &mut word).unwrap();
-    assert_eq!(u32::from_le_bytes(word), 0x3000_0000);
+    for (library, base) in [
+        (relocated_executable::dll(0x1000_0000), 0x3000_0000),
+        (export_names_executable::dll(), 0x5000_0000),
+    ] {
+        let mut process = Process32::load_with_options(
+            &dll_executable::exe("demo.dll"),
+            128,
+            ProcessOptions {
+                modules: &[GuestModule {
+                    name: "demo.dll",
+                    bytes: &library,
+                }],
+                ..ProcessOptions::default()
+            },
+        )
+        .unwrap();
+        let result = process.run(100);
+        assert_eq!(result.reason, ProcessStop::Stopped(StopReason::Breakpoint));
+        assert_eq!(process.cpu.register(Register32::Eax), 42);
+        assert_eq!(process.cpu.register(Register32::Esp), 0x1001_0000);
+        let mut word = [0; 4];
+        process
+            .memory
+            .read(u64::from(base + 0x2190), &mut word)
+            .unwrap();
+        assert_eq!(u32::from_le_bytes(word), base);
+    }
 }
 
 fn execute_arguments() {
