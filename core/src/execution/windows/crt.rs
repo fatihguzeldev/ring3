@@ -35,6 +35,7 @@ pub(super) enum Call {
     DllOnExit,
     MbSearchReverse,
     MbIncrement,
+    Duplicate,
 }
 
 impl Call {
@@ -52,13 +53,14 @@ impl Call {
             0x128 => Some(Self::DllOnExit),
             0x12c => Some(Self::MbSearchReverse),
             0x130 => Some(Self::MbIncrement),
+            0x134 => Some(Self::Duplicate),
             _ => None,
         }
     }
 
     pub(super) fn arguments(self) -> usize {
         match self {
-            Self::SetAppType | Self::Malloc | Self::Free | Self::MbIncrement => 1,
+            Self::SetAppType | Self::Malloc | Self::Free | Self::MbIncrement | Self::Duplicate => 1,
             Self::ControlFp | Self::MbSearchReverse => 2,
             Self::GetMainArgs => 5,
             Self::Memset | Self::DllOnExit => 3,
@@ -104,6 +106,7 @@ impl Crt {
                 Some(strings::reverse_search(memory, arguments[0], arguments[1])?)
             }
             Call::MbIncrement => Some(strings::increment(memory, arguments[0])?),
+            Call::Duplicate => Some(strings::duplicate(memory, heap, arguments[0])?),
             Call::DllOnExit => Some(onexit::register(
                 heap,
                 memory,
@@ -147,6 +150,7 @@ pub(super) fn resolve(name: &str) -> Option<u32> {
         "__dllonexit" => Some(API_BASE + 0x128),
         "_mbsrchr" => Some(API_BASE + 0x12c),
         "_mbsinc" => Some(API_BASE + 0x130),
+        "_strdup" => Some(API_BASE + 0x134),
         "_fmode" => Some(FMODE),
         "_commode" => Some(COMMODE),
         "_adjust_fdiv" => Some(ADJUST_FDIV),
