@@ -17,8 +17,14 @@ const DLL: u32 = 0x5000_0000;
 
 #[test]
 fn guest_calls_resume_with_the_same_module_state_and_budget() {
-    let mut whole = Process32::load(&modules_executable::pe32(), 32).unwrap();
-    let mut stepped = Process32::load(&modules_executable::pe32(), 32).unwrap();
+    for bytes in [modules_executable::pe32(), modules_executable::absolute()] {
+        check_guest(&bytes);
+    }
+}
+
+fn check_guest(bytes: &[u8]) {
+    let mut whole = Process32::load(bytes, 32).unwrap();
+    let mut stepped = Process32::load(bytes, 32).unwrap();
     let result = whole.run(100);
     assert_eq!(result.reason, ProcessStop::Stopped(StopReason::Breakpoint));
     assert_eq!(result.api_calls, 4);
@@ -46,6 +52,7 @@ fn guest_calls_resume_with_the_same_module_state_and_budget() {
         (result.instructions, result.api_calls)
     );
     assert_eq!(stepped.cpu, whole.cpu);
+    assert_eq!(whole.cpu.register(Register32::Esp), 0x1001_0000);
 }
 
 fn program() -> Vec<u8> {
@@ -57,11 +64,16 @@ fn program() -> Vec<u8> {
 }
 
 fn load(modules: &[GuestModule<'_>]) -> Process32 {
+    load_path(modules, b"C:\\program.exe")
+}
+
+fn load_path(modules: &[GuestModule<'_>], image_path: &[u8]) -> Process32 {
     Process32::load_with_options(
         &program(),
         64,
         ProcessOptions {
             modules,
+            image_path,
             ..ProcessOptions::default()
         },
     )
@@ -151,7 +163,7 @@ fn builtin_identity_name_rules_and_balanced_references() {
 #[test]
 fn missing_modules_invalid_handles_and_unsupported_names_are_distinct() {
     let mut process = load(&[]);
-    for value in ["unknown", "kernel32.", &"a".repeat(255)] {
+    for value in ["unknown", "kernel32.", "c:\\msvcrt.dll", &"a".repeat(255)] {
         name(&mut process, value);
         for slot in [0, 1] {
             assert_eq!(call(&mut process, slot, NAME), 0);
@@ -166,7 +178,7 @@ fn missing_modules_invalid_handles_and_unsupported_names_are_distinct() {
         "",
         ".",
         "..",
-        "c:\\msvcrt.dll",
+        "c:msvcrt.dll",
         "./msvcrt.dll",
         "é.dll",
         &"a".repeat(256),
@@ -302,5 +314,196 @@ fn null_image_bases_cannot_be_used_as_successful_module_handles() {
             }
         ),
         Err(LoadError::InvalidLayout)
+    ));
+}
+
+#[test]
+fn absolute_paths_match_only_the_owned_identity_and_balance_references() {
+    let mut p = load(&[]);
+    p.memory.write(0x7ffd_e034, &77_u32.to_le_bytes()).unwrap();
+    for path in [
+        r"C:\Windows\System32\kernel32.dll",
+        r"c:\WINDOWS\system32\KERNEL32",
+        r"C:\Windows\System32\kernel32.dll.",
+    ] {
+        name(&mut p, path);
+        assert_eq!(call(&mut p, 1, NAME), 0x7000_0800);
+        assert_eq!(call(&mut p, 0, NAME), 0x7000_0800);
+        assert_eq!(call(&mut p, 2, 0x7000_0800), 1);
+    }
+    assert_eq!(p.last_error().unwrap(), 77);
+    prepare(&mut p, 2, 0x7000_0800);
+    assert!(matches!(
+        p.run(1).reason,
+        ProcessStop::UnsupportedApi { .. }
+    ));
+    for path in [
+        r"D:\Windows\System32\kernel32.dll",
+        r"C:\Elsewhere\kernel32.dll",
+        r"C:\Windows\System32\absent.dll",
+    ] {
+        name(&mut p, path);
+        for api in [0, 1] {
+            assert_eq!(call(&mut p, api, NAME), 0);
+            assert_eq!(p.last_error().unwrap(), 126);
+        }
+    }
+    name(&mut p, r"c:\PROGRAM.exe");
+    assert_eq!(call(&mut p, 1, NAME), 0x0040_0000);
+    prepare(&mut p, 0, NAME);
+    let before = p.cpu;
+    assert!(matches!(
+        p.run(1).reason,
+        ProcessStop::UnsupportedApi { .. }
+    ));
+    assert_eq!(p.cpu, before);
+}
+
+#[test]
+fn provided_paths_keep_precedence_and_initialization_rules() {
+    let library = dll_executable::dll(DLL, &dll_executable::attach(DLL, 42, true), None);
+    let modules = [GuestModule {
+        name: "gdi32.dll",
+        bytes: &library,
+    }];
+    let mut p = load_path(&modules, br"D:\Build.v1\Game Files\demo.exe");
+    let bootstrap = p.cpu;
+    name(&mut p, r"d:\build.v1\GAME Files\GDI32");
+    assert_eq!(call(&mut p, 1, NAME), DLL);
+    prepare(&mut p, 0, NAME);
+    let before = p.cpu;
+    assert!(matches!(
+        p.run(1).reason,
+        ProcessStop::UnsupportedApi { .. }
+    ));
+    assert_eq!(p.cpu, before);
+    name(&mut p, r"C:\Windows\System32\gdi32.dll");
+    assert_eq!(call(&mut p, 1, NAME), 0);
+    assert_eq!(p.last_error().unwrap(), 126);
+    p.cpu = bootstrap;
+    assert_eq!(
+        p.run(100).reason,
+        ProcessStop::Stopped(StopReason::Breakpoint)
+    );
+    name(&mut p, r"D:\Build.v1\Game Files\gdi32.dll.");
+    assert_eq!(call(&mut p, 0, NAME), DLL);
+    assert_eq!(call(&mut p, 2, DLL), 1);
+    name(&mut p, "gdi32.dll");
+    assert_eq!(call(&mut p, 1, NAME), DLL);
+    prepare(&mut p, 2, DLL);
+    assert!(matches!(
+        p.run(1).reason,
+        ProcessStop::UnsupportedApi { .. }
+    ));
+}
+
+#[test]
+fn conflicting_main_and_dll_paths_stop_before_reference_changes() {
+    let mut library = dll_executable::dll(DLL, &[], None);
+    dll_executable::put(&mut library, 0xa8, 0);
+    let mut p = load(&[GuestModule {
+        name: "program.exe",
+        bytes: &library,
+    }]);
+    name(&mut p, r"C:\program.exe");
+    for api in [0, 1] {
+        prepare(&mut p, api, NAME);
+        let before = p.cpu;
+        let result = p.run(1);
+        assert!(matches!(result.reason, ProcessStop::UnsupportedApi { .. }));
+        assert_eq!((result.instructions, result.api_calls), (0, 0));
+        assert_eq!(p.cpu, before);
+    }
+    assert_eq!(call(&mut p, 1, 0), 0x0040_0000);
+    prepare(&mut p, 2, DLL);
+    assert!(matches!(
+        p.run(1).reason,
+        ProcessStop::UnsupportedApi { .. }
+    ));
+}
+
+#[test]
+fn absolute_path_grammar_scan_and_normalized_length_are_bounded() {
+    let mut p = load(&[]);
+    for path in [
+        r"C:relative.dll",
+        r"C:/demo.dll",
+        r"\server\demo.dll",
+        r"C:\dir\\demo.dll",
+        r"C:\.\demo.dll",
+        r"C:\..\demo.dll",
+        r"C:\dir\",
+        r"C:\dir\.",
+        r"C:\dir\..",
+        r"C:\dir\bad?.dll",
+        "C:\\é\\demo.dll",
+    ] {
+        name(&mut p, path);
+        prepare(&mut p, 0, NAME);
+        let before = p.cpu;
+        let result = p.run(1);
+        assert!(
+            matches!(result.reason, ProcessStop::UnsupportedApi { .. }),
+            "{path}: {result:?}"
+        );
+        assert_eq!((result.instructions, result.api_calls), (0, 0));
+        assert_eq!(p.cpu, before);
+    }
+    p.memory
+        .map_zeroed(0x2000_0000, 32768, Permissions::READ_WRITE)
+        .unwrap();
+    let path = format!("C:\\{}.dll\0", "a".repeat(32760));
+    assert_eq!(path.len(), 32768);
+    p.memory.write(0x2000_0000, path.as_bytes()).unwrap();
+    assert_eq!(call(&mut p, 1, 0x2000_0000), 0);
+    assert_eq!(p.last_error().unwrap(), 126);
+    for length in [32767, 32768] {
+        let mut path = format!("C:\\{}", "a".repeat(length - 3)).into_bytes();
+        if length == 32767 {
+            path.push(0);
+        }
+        p.memory.write(0x2000_0000, &path).unwrap();
+        prepare(&mut p, 0, 0x2000_0000);
+        let before = p.cpu;
+        assert!(matches!(
+            p.run(1).reason,
+            ProcessStop::UnsupportedApi { .. }
+        ));
+        assert_eq!(p.cpu, before);
+    }
+}
+
+#[test]
+fn absolute_path_reads_and_missing_error_writes_are_atomic() {
+    let mut p = load(&[]);
+    p.memory.write(0x0040_2ffc, br"C:\a").unwrap();
+    prepare(&mut p, 0, 0x0040_2ffc);
+    let before = p.cpu;
+    let result = p.run(1);
+    assert!(matches!(
+        result.reason,
+        ProcessStop::Stopped(StopReason::MemoryFault(_))
+    ));
+    assert_eq!((result.instructions, result.api_calls), (0, 0));
+    assert_eq!(p.cpu, before);
+    name(&mut p, r"C:\Windows\System32\unknown.dll");
+    p.memory
+        .protect(0x7ffd_e000, 4096, Permissions::READ)
+        .unwrap();
+    prepare(&mut p, 0, NAME);
+    let before = p.cpu;
+    let result = p.run(1);
+    assert!(matches!(
+        result.reason,
+        ProcessStop::Stopped(StopReason::MemoryFault(_))
+    ));
+    assert_eq!(p.cpu, before);
+    name(&mut p, r"C:\Windows\System32\kernel32.dll");
+    assert_eq!(call(&mut p, 0, NAME), 0x7000_0800);
+    assert_eq!(call(&mut p, 2, 0x7000_0800), 1);
+    prepare(&mut p, 2, 0x7000_0800);
+    assert!(matches!(
+        p.run(1).reason,
+        ProcessStop::UnsupportedApi { .. }
     ));
 }

@@ -91,17 +91,7 @@ impl Parameters {
 
 fn validate_image_path(options: ProcessOptions<'_>) -> Result<(), LoadError> {
     let path = options.image_path;
-    if !(4..=32767).contains(&path.len())
-        || !path[0].is_ascii_alphabetic()
-        || &path[1..3] != b":\\"
-        || path[3..].split(|&byte| byte == b'\\').any(|component| {
-            component.is_empty()
-                || matches!(component, b"." | b"..")
-                || component
-                    .iter()
-                    .any(|&byte| !(0x20..=0x7e).contains(&byte) || b"<>:\"|?*/".contains(&byte))
-        })
-    {
+    if !valid_absolute_path(path) {
         return Err(LoadError::InvalidProcessParameters);
     }
     let parent = path
@@ -117,6 +107,19 @@ fn validate_image_path(options: ProcessOptions<'_>) -> Result<(), LoadError> {
         return Err(LoadError::InvalidProcessParameters);
     }
     Ok(())
+}
+
+pub(super) fn valid_absolute_path(path: &[u8]) -> bool {
+    (4..=32767).contains(&path.len())
+        && path[0].is_ascii_alphabetic()
+        && &path[1..3] == b":\\"
+        && !path[3..].split(|&byte| byte == b'\\').any(|component| {
+            component.is_empty()
+                || matches!(component, b"." | b"..")
+                || component
+                    .iter()
+                    .any(|&byte| !(0x20..=0x7e).contains(&byte) || b"<>:\"|?*/".contains(&byte))
+        })
 }
 
 fn whitespace(byte: u8) -> bool {

@@ -1,5 +1,5 @@
 use super::super::Access;
-use super::{API_BASE, DispatchError, GuestMemory, MemoryError, guest, system, thread};
+use super::{API_BASE, DispatchError, GuestMemory, MemoryError, guest, parameters, system, thread};
 use crate::execution::loader::modules::MappedModule;
 
 #[derive(Clone, Copy)]
@@ -121,11 +121,25 @@ impl Modules {
             return Ok(self.program);
         }
         let name = read_name(memory, argument)?;
-        let Some(module) = self
-            .resident
-            .iter_mut()
-            .find(|module| module.name.eq_ignore_ascii_case(&name))
-        else {
+        let absolute = name.as_bytes().get(1) == Some(&b':');
+        if absolute && matches_path(&self.program_path, &name) {
+            if matches!(call, Call::Load)
+                || self
+                    .resident
+                    .iter()
+                    .any(|module| matches_path(&module.path, &name))
+            {
+                return Err(DispatchError::Unsupported);
+            }
+            return Ok(self.program);
+        }
+        let Some(module) = self.resident.iter_mut().find(|module| {
+            if absolute {
+                matches_path(&module.path, &name)
+            } else {
+                module.name.eq_ignore_ascii_case(&name)
+            }
+        }) else {
             thread::set_last_error(memory, 126)?;
             return Ok(0);
         };
@@ -172,28 +186,51 @@ impl Modules {
     }
 }
 
+fn matches_path(path: &[u8], name: &str) -> bool {
+    path[..path.len() - 1].eq_ignore_ascii_case(name.as_bytes())
+}
+
 fn read_name(memory: &GuestMemory, pointer: u32) -> Result<String, DispatchError> {
     let mut name = String::new();
-    for offset in 0..=255 {
+    for offset in 0..=32767 {
         let address = pointer
             .checked_add(offset)
             .ok_or(MemoryError::AddressOverflow)?;
         let mut byte = [0];
         memory.read(u64::from(address), &mut byte)?;
+        let absolute = name.as_bytes().get(1) == Some(&b':');
         if byte[0] == 0 {
-            if name.is_empty() || matches!(name.as_str(), "." | "..") {
+            if name.is_empty()
+                || matches!(name.as_str(), "." | "..")
+                || (absolute && !parameters::valid_absolute_path(name.as_bytes()))
+            {
                 return Err(DispatchError::Unsupported);
             }
             if name.ends_with('.') {
                 name.pop();
-            } else if !name.contains('.') {
+            } else if !name
+                .rsplit('\\')
+                .next()
+                .expect("nonempty name")
+                .contains('.')
+            {
                 name.push_str(".dll");
+            }
+            if absolute && !parameters::valid_absolute_path(name.as_bytes()) {
+                return Err(DispatchError::Unsupported);
             }
             return Ok(name);
         }
-        if offset == 255
-            || !(byte[0].is_ascii_alphanumeric() || matches!(byte[0], b'.' | b'_' | b'-'))
-        {
+        let drive_colon =
+            offset == 1 && name.as_bytes()[0].is_ascii_alphabetic() && byte[0] == b':';
+        let valid = if absolute {
+            (offset != 2 || byte[0] == b'\\')
+                && (0x20..=0x7e).contains(&byte[0])
+                && !b"<>:\"|?*/".contains(&byte[0])
+        } else {
+            drive_colon || byte[0].is_ascii_alphanumeric() || matches!(byte[0], b'.' | b'_' | b'-')
+        };
+        if offset == if absolute { 32767 } else { 255 } || !valid {
             return Err(DispatchError::Unsupported);
         }
         name.push(char::from(byte[0]));
