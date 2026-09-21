@@ -121,7 +121,7 @@ impl Api {
             0x20 => Some(Self::SetErrorMode),
             0x24 => Some(Self::GetErrorMode),
             0x30 => Some(Self::GetVersion),
-            0x94 => Some(Self::RegisterUserAtom),
+            0x94 | 0xc8 => Some(Self::RegisterUserAtom),
             0x98 => Some(Self::GetProcessVersion),
             0x118 => Some(Self::ExceptionProlog),
             0xffc => Some(Self::Unsupported),
@@ -184,6 +184,7 @@ impl Api {
             match name {
                 "GetDesktopWindow" => 16,
                 "RegisterWindowMessageA" => 0x94,
+                "RegisterClipboardFormatA" => 0xc8,
                 "GetSystemMetrics" => 0x9c,
                 "GetSysColor" => 0xac,
                 "GetSysColorBrush" => 0xb0,
