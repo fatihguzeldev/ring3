@@ -584,6 +584,55 @@ fn execute_change_directory() {
     }
 }
 
+#[path = "../../core/tests/support/find_files_executable.rs"]
+mod find_files_executable;
+
+fn execute_find_files() {
+    use ring3_core::execution::{
+        FileMetadata, Process32, ProcessOptions, ProcessStop, Register32, StopReason,
+    };
+    let files = [
+        FileMetadata {
+            path: b"C:\\alpha.dat",
+            size: 0x1_0000_0007,
+        },
+        FileMetadata {
+            path: b"C:\\beta.bin",
+            size: 5,
+        },
+    ];
+    let options = ProcessOptions {
+        files: &files,
+        directories: &[b"C:\\Data"],
+        ..ProcessOptions::default()
+    };
+    let mut process =
+        Process32::load_with_options(&find_files_executable::pe32(), 64, options).unwrap();
+    let result = process.run(50);
+    assert_eq!(result.reason, ProcessStop::Stopped(StopReason::Breakpoint));
+    assert_eq!((result.instructions, result.api_calls), (10, 3));
+    assert_eq!(process.cpu.register(Register32::Eax), 1);
+    assert_eq!(process.cpu.register(Register32::Ebx), 0x7300_0004);
+    assert_eq!(process.cpu.register(Register32::Esp), 0x1001_0000);
+    let mut record = [0; 320];
+    process.memory.read(0x0040_2280, &mut record).unwrap();
+    assert_eq!(record[0], 0x80);
+    assert_eq!(&record[32..36], &5_u32.to_le_bytes());
+    assert_eq!(&record[44..53], b"beta.bin\0");
+    #[cfg(windows_demo)]
+    for (options, steps, calls) in [(ProcessOptions::default(), 57, 10), (options, 119, 17)] {
+        let mut process = Process32::load_with_options(
+            include_bytes!("../../target/windows-api/find-files.exe"),
+            64,
+            options,
+        )
+        .unwrap();
+        let result = process.run(1000);
+        assert_eq!(result.reason, ProcessStop::Exited(42));
+        assert_eq!((result.instructions, result.api_calls), (steps, calls));
+    }
+}
+
 fn execute_current_directory() {
     use ring3_core::execution::{Process32, ProcessOptions, ProcessStop, Register32, StopReason};
     let mut process = Process32::load_with_options(
@@ -2552,6 +2601,7 @@ pub extern "C" fn run() -> u32 {
     execute_performance_clock();
     execute_current_directory();
     execute_change_directory();
+    execute_find_files();
     execute_command_line();
     execute_image();
     execute_function();

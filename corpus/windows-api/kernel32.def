@@ -49,3 +49,6 @@ EXPORTS
     _GetCurrentDirectoryA@8==GetCurrentDirectoryA
     _SetCurrentDirectoryA@4==SetCurrentDirectoryA
     _GetCommandLineA@0==GetCommandLineA
+    _FindFirstFileA@8==FindFirstFileA
+    _FindNextFileA@8==FindNextFileA
+    _FindClose@4==FindClose
