@@ -16,6 +16,7 @@ mod heap;
 mod modules;
 mod parameters;
 mod startup;
+mod strings;
 mod system;
 mod thread;
 mod tls;
@@ -89,6 +90,7 @@ enum Api {
     GetErrorMode,
     GetVersion,
     GetProcessVersion,
+    CopyString,
     ExceptionProlog,
     Graphics(d3d8::Call),
     Gdi(gdi::Call),
@@ -127,6 +129,7 @@ impl Api {
             0x30 => Some(Self::GetVersion),
             0x94 | 0xc8 => Some(Self::RegisterUserAtom),
             0x98 => Some(Self::GetProcessVersion),
+            0xe4 => Some(Self::CopyString),
             0x118 => Some(Self::ExceptionProlog),
             0xffc => Some(Self::Unsupported),
             offset => d3d8::Call::at(offset)
@@ -160,6 +163,7 @@ impl Api {
                 "LoadLibraryA" => 0x14,
                 "GetModuleHandleA" => 0x18,
                 "GetModuleFileNameA" => 0xe0,
+                "lstrcpynA" => 0xe4,
                 "FreeLibrary" => 0x1c,
                 "SetErrorMode" => 0x20,
                 "GetErrorMode" => 0x24,
@@ -236,6 +240,7 @@ impl Api {
             Self::Heap(call) => call.arguments(),
             Self::Tls(call) => call.arguments(),
             Self::Module(call) => call.arguments(),
+            Self::CopyString => 3,
             _ => 1,
         }
     }
@@ -500,6 +505,11 @@ impl Process32 {
             }
             Api::CodePage(call) => {
                 let value = call.dispatch(arguments, &mut self.memory)?;
+                self.cpu.set_register(Register32::Eax, value);
+            }
+            Api::CopyString => {
+                let value =
+                    strings::copy(&mut self.memory, arguments[0], arguments[1], arguments[2])?;
                 self.cpu.set_register(Register32::Eax, value);
             }
             Api::Tls(call) => {
