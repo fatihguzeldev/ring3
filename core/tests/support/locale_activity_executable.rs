@@ -1,0 +1,12 @@
+use super::imported_executable;
+
+pub fn pe32() -> Vec<u8> {
+    imported_executable::pe32(
+        &[
+            0x8b, 0x0d, 0x60, 0x20, 0x40, 0, 0x8b, 1, 0x8b, 0x1d, 0x64, 0x20, 0x40, 0, 0x8b, 0x13,
+            0xc7, 1, 42, 0, 0, 0, 0xc7, 3, 7, 0, 0, 0, 0x8b, 0x31, 0x8b, 0x3b, 0xcc,
+        ],
+        "MSVCRT.dll",
+        &["__unguarded_readlc_active", "__setlc_active"],
+    )
+}

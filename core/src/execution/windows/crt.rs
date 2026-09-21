@@ -22,6 +22,8 @@ const ARGV: u32 = DATA + 20;
 const ENVIRON: u32 = DATA + 24;
 const INITENV: u32 = DATA + 28;
 const ERRNO: u32 = DATA + 32;
+const UNGUARDED_READLC_ACTIVE: u32 = DATA + 36;
+const SETLC_ACTIVE: u32 = DATA + 40;
 
 #[derive(Clone, Copy)]
 pub(super) enum Call {
@@ -214,6 +216,8 @@ pub(super) fn resolve(name: &str) -> Option<u32> {
         "__argv" => Some(ARGV),
         "_environ" => Some(ENVIRON),
         "__initenv" => Some(INITENV),
+        "__unguarded_readlc_active" => Some(UNGUARDED_READLC_ACTIVE),
+        "__setlc_active" => Some(SETLC_ACTIVE),
         _ => None,
     }
 }
