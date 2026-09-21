@@ -14,6 +14,8 @@ pub struct ProcessOptions<'a> {
     /// declared metadata only; file contents are not mounted.
     pub files: &'a [super::directory::FileMetadata<'a>],
     pub command_line: &'a [u8],
+    /// explicit name=value entries; win32 queries own a snapshot separate from `_environ`.
+    /// ordinary ascii names match case-insensitively; the first duplicate wins.
     pub environment: &'a [&'a [u8]],
     pub diagnostic_imports: bool,
     pub modules: &'a [GuestModule<'a>],

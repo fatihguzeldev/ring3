@@ -13,6 +13,7 @@ mod cursors;
 mod d3d8;
 mod diagnostics;
 mod directory;
+mod environment;
 mod gdi;
 mod guest;
 mod heap;
@@ -51,6 +52,7 @@ pub struct Process32 {
     modules: modules::Modules,
     resources: resources::Resources,
     current_directory: directory::Directory,
+    environment: environment::Environment,
     user_atoms: user_atoms::UserAtoms,
     cursors: cursors::Cursors,
     heap: heap::Heap,
@@ -100,6 +102,7 @@ enum Api {
     Clock(clock::Call),
     Directory(directory::Call),
     GetCommandLine,
+    GetEnvironmentVariable,
     GetDesktopWindow,
     RegisterUserAtom,
     System(system::Call),
@@ -150,6 +153,7 @@ impl Api {
             0x234 => Some(Self::Directory(directory::Call::FindFirst)),
             0x238 => Some(Self::Directory(directory::Call::FindNext)),
             0x23c => Some(Self::Directory(directory::Call::FindClose)),
+            0x240 => Some(Self::GetEnvironmentVariable),
             0x22c => Some(Self::GetCommandLine),
             16 => Some(Self::GetDesktopWindow),
             0x20 => Some(Self::SetErrorMode),
@@ -211,6 +215,7 @@ impl Api {
                 "FindFirstFileA" => 0x234,
                 "FindNextFileA" => 0x238,
                 "FindClose" => 0x23c,
+                "GetEnvironmentVariableA" => 0x240,
                 "GetCommandLineA" => 0x22c,
                 "lstrcpynA" => 0xe4,
                 "lstrcpyA" => 0xf0,
@@ -280,6 +285,7 @@ impl Api {
             Self::Interlocked(call) => call.arguments(),
             Self::Synchronization(call) => call.arguments(),
             Self::Directory(call) => call.arguments(),
+            Self::GetEnvironmentVariable => 3,
             Self::GetLastError
             | Self::GetCommandLine
             | Self::GetCurrentThread
@@ -420,6 +426,7 @@ impl Process32 {
             modules,
             resources,
             current_directory,
+            environment: environment::Environment::new(options.environment),
             user_atoms: user_atoms::UserAtoms::default(),
             gdi: gdi::Gdi::default(),
             cursors: cursors::Cursors::default(),
@@ -562,6 +569,7 @@ impl Process32 {
             Api::Clock(call) => self.query_clock(call, argument)?,
             Api::Directory(call) => self.directory(call, arguments)?,
             Api::GetCommandLine => self.cpu.set_register(Register32::Eax, self.command_line),
+            Api::GetEnvironmentVariable => self.environment_query(arguments)?,
             Api::Synchronization(call) => self.cpu.set_register(
                 Register32::Eax,
                 self.mutexes.dispatch(call, arguments, &mut self.memory)?,
