@@ -19,6 +19,7 @@ mod parameters;
 mod resources;
 mod startup;
 mod strings;
+mod synchronization;
 mod system;
 mod thread;
 mod tls;
@@ -47,6 +48,7 @@ pub struct Process32 {
     cursors: cursors::Cursors,
     heap: heap::Heap,
     critical_sections: critical_sections::CriticalSections,
+    mutexes: synchronization::Mutexes,
     tls: tls::Tls,
     graphics: d3d8::Graphics,
     gdi: gdi::Gdi,
@@ -106,6 +108,7 @@ enum Api {
     Resource(resources::Call),
     Heap(heap::Call),
     CriticalSection(critical_sections::Call),
+    Synchronization(synchronization::Call),
     Tls(tls::Call),
     Unsupported,
 }
@@ -151,6 +154,7 @@ impl Api {
                 .or_else(|| strings::Call::at(offset).map(Self::String))
                 .or_else(|| heap::Call::at(offset).map(Self::Heap))
                 .or_else(|| critical_sections::Call::at(offset).map(Self::CriticalSection))
+                .or_else(|| synchronization::Call::at(offset).map(Self::Synchronization))
                 .or_else(|| tls::Call::at(offset).map(Self::Tls))
                 .or_else(|| code_pages::Call::at(offset).map(Self::CodePage)),
         }
@@ -179,6 +183,10 @@ impl Api {
                 "DisableThreadLibraryCalls" => 0xfc,
                 "GetSystemDirectoryA" => 0xf8,
                 "GetComputerNameA" => 0x20c,
+                "CreateMutexA" => 0x210,
+                "WaitForSingleObject" => 0x214,
+                "ReleaseMutex" => 0x218,
+                "CloseHandle" => 0x21c,
                 "lstrcpynA" => 0xe4,
                 "lstrcpyA" => 0xf0,
                 "lstrcatA" => 0xf4,
@@ -245,6 +253,7 @@ impl Api {
     fn arguments(self) -> usize {
         match self {
             Self::Interlocked(call) => call.arguments(),
+            Self::Synchronization(call) => call.arguments(),
             Self::GetLastError
             | Self::GetCurrentThread
             | Self::GetCurrentThreadId
@@ -381,6 +390,7 @@ impl Process32 {
             cursors: cursors::Cursors::default(),
             heap: heap::Heap::default(),
             critical_sections: critical_sections::CriticalSections::default(),
+            mutexes: synchronization::Mutexes::default(),
             tls: tls::Tls::default(),
             graphics: d3d8::Graphics::default(),
             crt: crt::Crt::default(),
@@ -514,6 +524,10 @@ impl Process32 {
         let argument = arguments.first().copied().unwrap_or(0);
         match api {
             Api::Interlocked(call) => self.interlocked(call, arguments)?,
+            Api::Synchronization(call) => self.cpu.set_register(
+                Register32::Eax,
+                self.mutexes.dispatch(call, arguments, &mut self.memory)?,
+            ),
             Api::SetLastError => thread::set_last_error(&mut self.memory, argument)?,
             Api::GetLastError => self.cpu.set_register(Register32::Eax, self.last_error()?),
             Api::GetCurrentThread => self.cpu.set_register(Register32::Eax, u32::MAX - 1),
