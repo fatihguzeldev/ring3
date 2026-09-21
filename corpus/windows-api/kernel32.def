@@ -32,3 +32,4 @@ EXPORTS
     _GlobalLock@4==GlobalLock
     _GlobalUnlock@4==GlobalUnlock
     _GlobalFree@4==GlobalFree
+  _lstrcpyA@8==lstrcpyA

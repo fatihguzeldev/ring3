@@ -1774,13 +1774,14 @@ mod string_traversal_executable;
 
 fn execute_string_traversal() {
     use ring3_core::execution::{Process32, ProcessStop, Register32, StopReason};
-    for (bytes, instructions, calls, eax, ebx) in [
+    for (bytes, instructions, calls, eax, ebx, expected_output) in [
         (
             string_traversal_executable::increment(),
             8,
             2,
             0x0040_2182,
             0x0040_2181,
+            [0; 8],
         ),
         (
             string_traversal_executable::copy(),
@@ -1788,6 +1789,15 @@ fn execute_string_traversal() {
             1,
             0x0040_2190,
             0x0063_6261,
+            [b'a', b'b', b'c', 0, 0x55, 0x55, 0x55, 0x55],
+        ),
+        (
+            string_traversal_executable::terminated_copy(),
+            5,
+            1,
+            0x0040_2190,
+            0x6463_6261,
+            [b'a', b'b', b'c', b'd', b'e', b'f', 0, 0x55],
         ),
     ] {
         let mut process = Process32::load(&bytes, 25).unwrap();
@@ -1802,14 +1812,18 @@ fn execute_string_traversal() {
         assert_eq!(process.cpu.register(Register32::Esp), 0x1001_0000);
         let mut output = [0; 8];
         process.memory.read(0x0040_2190, &mut output).unwrap();
-        assert_eq!(
-            output,
-            if calls == 1 {
-                [b'a', b'b', b'c', 0, 0x55, 0x55, 0x55, 0x55]
-            } else {
-                [0; 8]
-            }
-        );
+        assert_eq!(output, expected_output);
+    }
+    #[cfg(windows_demo)]
+    {
+        let mut process = Process32::load(
+            include_bytes!("../../target/windows-api/string-copy.exe"),
+            64,
+        )
+        .unwrap();
+        let result = process.run(1000);
+        assert_eq!(result.reason, ProcessStop::Exited(42));
+        assert_eq!((result.instructions, result.api_calls), (74, 9));
     }
 }
 

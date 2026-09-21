@@ -7,13 +7,14 @@ use ring3_core::execution::{Process32, ProcessStop, Register32, StopReason};
 
 #[test]
 fn string_traversal_and_copy_match_native_whole_and_single_step_execution() {
-    for (bytes, instructions, calls, eax, ebx) in [
+    for (bytes, instructions, calls, eax, ebx, expected_output) in [
         (
             string_traversal_executable::increment(),
             8,
             2,
             0x0040_2182,
             0x0040_2181,
+            [0; 8],
         ),
         (
             string_traversal_executable::copy(),
@@ -21,6 +22,15 @@ fn string_traversal_and_copy_match_native_whole_and_single_step_execution() {
             1,
             0x0040_2190,
             0x0063_6261,
+            [b'a', b'b', b'c', 0, 0x55, 0x55, 0x55, 0x55],
+        ),
+        (
+            string_traversal_executable::terminated_copy(),
+            5,
+            1,
+            0x0040_2190,
+            0x6463_6261,
+            [b'a', b'b', b'c', b'd', b'e', b'f', 0, 0x55],
         ),
     ] {
         let mut whole = Process32::load(&bytes, 25).unwrap();
@@ -49,14 +59,7 @@ fn string_traversal_and_copy_match_native_whole_and_single_step_execution() {
             assert_eq!(process.cpu.register(Register32::Esp), 0x1001_0000);
             let mut output = [0; 8];
             process.memory.read(0x0040_2190, &mut output).unwrap();
-            assert_eq!(
-                output,
-                if calls == 1 {
-                    [b'a', b'b', b'c', 0, 0x55, 0x55, 0x55, 0x55]
-                } else {
-                    [0; 8]
-                }
-            );
+            assert_eq!(output, expected_output);
         }
     }
 }

@@ -26,3 +26,17 @@ pub fn copy() -> Vec<u8> {
     bytes[0x590..0x598].fill(0x55);
     bytes
 }
+
+pub fn terminated_copy() -> Vec<u8> {
+    let mut bytes = imported_executable::pe32(
+        &[
+            0x68, 0x80, 0x21, 0x40, 0, 0x68, 0x90, 0x21, 0x40, 0, 0xff, 0x15, 0x60, 0x20, 0x40, 0,
+            0x8b, 0x18, 0xcc,
+        ],
+        "KERNEL32.dll",
+        &["lstrcpyA"],
+    );
+    bytes[0x580..0x587].copy_from_slice(b"abcdef\0");
+    bytes[0x590..0x598].fill(0x55);
+    bytes
+}
