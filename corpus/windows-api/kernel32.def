@@ -47,4 +47,5 @@ EXPORTS
     _QueryPerformanceFrequency@4==QueryPerformanceFrequency
     _QueryPerformanceCounter@4==QueryPerformanceCounter
     _GetCurrentDirectoryA@8==GetCurrentDirectoryA
+    _SetCurrentDirectoryA@4==SetCurrentDirectoryA
     _GetCommandLineA@0==GetCommandLineA
