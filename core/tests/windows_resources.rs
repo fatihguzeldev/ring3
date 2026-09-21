@@ -112,13 +112,21 @@ fn missing_resources_report_the_lookup_stage_and_clear_string_output() {
 
 #[test]
 fn provided_images_override_builtin_identity_and_own_their_metadata() {
+    check_provider_resources(0x5000_0000, 0x5000_0000);
+    check_provider_resources(0x1000_0000, 0x3000_0000);
+}
+
+fn check_provider_resources(preferred: u32, actual: u32) {
     let exe = resource_executable::guest();
     let text = resource_executable::block(&[&[68, 76, 76]]);
     let mut dll = resource_executable::pe32(&[0xcc], &[(1033, &text)]);
-    resource_executable::put(&mut dll, 0xb4, 0x5000_0000);
+    resource_executable::put(&mut dll, 0xb4, preferred);
     resource_executable::put(&mut dll, 0xa8, 0);
     resource_executable::put(&mut dll, 0x100, 0);
     resource_executable::put(&mut dll, 0x104, 0);
+    for (at, value) in [(0x120, 0x2f00), (0x124, 12), (0x1300, 0), (0x1304, 12)] {
+        resource_executable::put(&mut dll, at, value);
+    }
     dll[0x96..0x98].copy_from_slice(&0x2102_u16.to_le_bytes());
     let mut process = Process32::load_with_options(
         &exe,
@@ -133,21 +141,26 @@ fn provided_images_override_builtin_identity_and_own_their_metadata() {
     )
     .unwrap();
     dll.fill(0);
-    assert_eq!(call(&mut process, FIND, &[0x5000_0000, 1, 6]), 0x5000_2348);
-    assert_eq!(call(&mut process, STRING, &[0x5000_0000, 0, OUTPUT, 10]), 3);
+    process
+        .memory
+        .write(u64::from(OUTPUT), b"gdi32.dll\0")
+        .unwrap();
+    assert_eq!(call(&mut process, 0x7000_0018, &[OUTPUT]), actual);
+    assert_eq!(call(&mut process, FIND, &[actual, 1, 6]), actual + 0x2348);
+    assert_eq!(call(&mut process, STRING, &[actual, 0, OUTPUT, 10]), 3);
     assert_eq!(output(&process, 4), b"DLL\0");
     assert_eq!(call(&mut process, FIND, &[0x7000_0810, 1, 6]), 0);
     assert_eq!(process.last_error().unwrap(), 87);
     process
         .memory
-        .write(0x5000_2310, &10_u32.to_le_bytes())
+        .write(u64::from(actual + 0x2310), &10_u32.to_le_bytes())
         .unwrap();
-    assert_eq!(call(&mut process, FIND, &[0x5000_0000, 1, 6]), 0x5000_2348);
+    assert_eq!(call(&mut process, FIND, &[actual, 1, 6]), actual + 0x2348);
     process
         .memory
-        .write(0x5000_235a, &88_u16.to_le_bytes())
+        .write(u64::from(actual + 0x235a), &88_u16.to_le_bytes())
         .unwrap();
-    assert_eq!(call(&mut process, STRING, &[0x5000_0000, 0, OUTPUT, 10]), 3);
+    assert_eq!(call(&mut process, STRING, &[actual, 0, OUTPUT, 10]), 3);
     assert_eq!(output(&process, 4), b"XLL\0");
 }
 

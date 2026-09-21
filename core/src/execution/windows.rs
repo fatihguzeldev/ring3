@@ -294,7 +294,7 @@ impl Process32 {
         )
     }
 
-    /// loads startup parameters and explicit preferred-base dll providers.
+    /// loads startup parameters and explicit dll providers, rebasing collisions.
     /// dependency-ordered process attach executes on the first run before the exe.
     ///
     /// # errors
@@ -308,15 +308,29 @@ impl Process32 {
     ) -> Result<Self, LoadError> {
         let parameters = parameters::Parameters::prepare(options)?;
         let mut diagnostic_imports = diagnostics::Imports::default();
-        let loaded = load_modules(bytes, page_limit, options.modules, |module, symbol| {
-            Api::resolve(module, symbol).or_else(|| {
-                if options.diagnostic_imports {
-                    diagnostic_imports.insert(module, symbol)
-                } else {
-                    None
-                }
-            })
-        })?;
+        let reserved = [
+            u64::from(STACK_BASE)..u64::from(STACK_BASE + STACK_SIZE),
+            heap::START..heap::END,
+            u64::from(API_BASE)..u64::from(startup::BASE) + PAGE_SIZE,
+            u64::from(diagnostics::BASE)
+                ..u64::from(diagnostics::BASE) + u64::from(diagnostics::MAX_IMPORTS) * 4,
+            u64::from(thread::BASE)..u64::from(thread::BASE) + PAGE_SIZE,
+        ];
+        let loaded = load_modules(
+            bytes,
+            page_limit,
+            options.modules,
+            &reserved,
+            |module, symbol| {
+                Api::resolve(module, symbol).or_else(|| {
+                    if options.diagnostic_imports {
+                        diagnostic_imports.insert(module, symbol)
+                    } else {
+                        None
+                    }
+                })
+            },
+        )?;
         let (major, minor) = loaded.subsystem_version;
         let mut image = loaded.image;
         let resources =

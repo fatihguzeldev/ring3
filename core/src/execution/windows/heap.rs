@@ -3,8 +3,8 @@ use std::collections::BTreeMap;
 use super::super::Access;
 use super::{DispatchError, GuestMemory, MemoryError, PAGE_SIZE, Permissions, thread};
 
-const START: u64 = 0x2000_0000;
-const END: u64 = 0x3000_0000;
+pub(super) const START: u64 = 0x2000_0000;
+pub(super) const END: u64 = 0x3000_0000;
 
 #[derive(Clone, Copy)]
 pub(super) enum Call {

@@ -1,7 +1,7 @@
 use super::{GuestMemory, MemoryError, PAGE_SIZE, Permissions, ProcessStop};
 use crate::execution::loader::modules::Initializer;
 
-const BASE: u32 = 0x7001_4000;
+pub(super) const BASE: u32 = 0x7001_4000;
 
 #[derive(Default)]
 pub(super) struct Startup {

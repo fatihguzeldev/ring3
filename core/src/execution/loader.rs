@@ -6,6 +6,8 @@ use crate::{
 
 mod imports;
 pub(super) mod modules;
+mod placement;
+mod relocations;
 
 pub use modules::GuestModule;
 pub(super) use modules::load_modules;
@@ -32,6 +34,18 @@ pub enum LoadError {
     },
     CyclicModules {
         module: String,
+    },
+    NoModuleAddress,
+    RelocationRequired,
+    Relocations(crate::PeBaseRelocationError),
+    UnalignedRelocationPage {
+        rva: u32,
+    },
+    UnsupportedRelocation {
+        kind: u16,
+    },
+    RelocationTarget {
+        rva: u64,
     },
     Exports {
         module: String,
@@ -126,6 +140,7 @@ enum ImportPolicy {
 struct Image<'a> {
     bytes: &'a [u8],
     table: PeSectionTable<'a>,
+    base: u64,
 }
 
 impl<'a> Image<'a> {
@@ -136,11 +151,12 @@ impl<'a> Image<'a> {
         if policy == ImportPolicy::GuestManagedDelay {
             crate::parse_pe_delay_import_descriptors(bytes).map_err(LoadError::DelayImports)?;
         }
-        Ok(Self { bytes, table })
+        let base = table.headers.optional.image_base;
+        Ok(Self { bytes, table, base })
     }
 
     fn base(&self) -> u64 {
-        self.table.headers.optional.image_base
+        self.base
     }
 
     fn entry_point(&self) -> u32 {

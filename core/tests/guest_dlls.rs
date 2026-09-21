@@ -312,7 +312,7 @@ fn module_mapping_limits_protections_and_unsupported_directories_are_enforced() 
                     bytes: &library
                 }]
             ),
-            Err(LoadError::Memory(MemoryError::AlreadyMapped { .. }))
+            Err(LoadError::RelocationRequired)
         ));
     }
     let library = dll(BASE, &attach(BASE, 1, true), None);

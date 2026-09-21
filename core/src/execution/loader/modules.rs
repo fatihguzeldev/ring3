@@ -1,4 +1,8 @@
-use super::{GuestMemory, Image, ImportPolicy, LoadError, LoadedPe32, imports};
+use std::ops::Range;
+
+use super::{
+    GuestMemory, Image, ImportPolicy, LoadError, LoadedPe32, imports, placement, relocations,
+};
 use crate::{
     PeExportLookup, PeExportQuery, PeExportSelection, PeExportTarget, PeImportSymbol,
     parse_pe_import_lookups,
@@ -35,11 +39,12 @@ pub(in crate::execution) fn load_modules(
     bytes: &[u8],
     page_limit: u32,
     modules: &[GuestModule<'_>],
+    reserved: &[Range<u64>],
     mut fallback: impl FnMut(&str, PeImportSymbol<'_>) -> Option<u32>,
 ) -> Result<LoadedModules, LoadError> {
     validate_modules(modules)?;
     let program = Image::parse(bytes, ImportPolicy::GuestManagedDelay, false)?;
-    let images = modules
+    let mut images = modules
         .iter()
         .map(|module| Image::parse(module.bytes, ImportPolicy::GuestManagedDelay, true))
         .collect::<Result<Vec<_>, _>>()?;
@@ -50,6 +55,7 @@ pub(in crate::execution) fn load_modules(
     {
         return Err(LoadError::InvalidLayout);
     }
+    placement::assign(&program, &mut images, reserved)?;
     let order = initialization_order(modules)?;
     let mut exports: Vec<_> = modules
         .iter()
@@ -58,6 +64,9 @@ pub(in crate::execution) fn load_modules(
     let mut memory = GuestMemory::new(page_limit);
     for image in std::iter::once(&program).chain(&images) {
         image.map(&mut memory)?;
+    }
+    for image in &images {
+        relocations::apply(image, &mut memory)?;
     }
     for image in std::iter::once(&program).chain(&images) {
         imports::bind(image.bytes, image.base(), &mut memory, |name, symbol| {

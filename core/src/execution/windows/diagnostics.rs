@@ -1,7 +1,7 @@
 use super::{GuestMemory, MemoryError, PAGE_SIZE, PeImportSymbol, Permissions, ProcessStop};
 
-const BASE: u32 = 0x7100_0000;
-const MAX_IMPORTS: u32 = 4096;
+pub(super) const BASE: u32 = 0x7100_0000;
+pub(super) const MAX_IMPORTS: u32 = 4096;
 
 #[derive(Default)]
 pub(super) struct Imports {
