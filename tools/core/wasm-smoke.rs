@@ -18,6 +18,9 @@ mod string_scan_executable;
 #[path = "../../core/tests/support/repeated_moves_executable.rs"]
 mod repeated_moves_executable;
 
+#[path = "../../core/tests/support/string_stores_executable.rs"]
+mod string_stores_executable;
+
 #[path = "../../core/tests/support/register_stack_executable.rs"]
 mod register_stack_executable;
 
@@ -98,6 +101,41 @@ fn execute_repeated_moves() {
     let mut copied = [0; 11];
     process.memory.read(0x0040_20c0, &mut copied).unwrap();
     assert_eq!(copied, [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]);
+}
+
+fn execute_string_stores() {
+    use ring3_core::execution::{Process32, ProcessStop, Register32, StopReason};
+    let mut p = Process32::load(&string_stores_executable::pe32(), 32).unwrap();
+    p.cpu.set_fs_base(0x5000_0000);
+    p.cpu.set_register(Register32::Esi, 0xdead_beef);
+    p.cpu.eflags = 0xcad7;
+    let run = p.run(40);
+    assert_eq!(run.reason, ProcessStop::Stopped(StopReason::Breakpoint));
+    assert_eq!((run.instructions, run.api_calls), (10, 0));
+    assert_eq!(p.cpu.register(Register32::Eax), 0x1234_5678);
+    assert_eq!(p.cpu.register(Register32::Esi), 0xdead_beef);
+    assert_eq!(p.cpu.register(Register32::Edi), 0x0040_208b);
+    assert_eq!(p.cpu.register(Register32::Ecx), 0);
+    assert_eq!(p.cpu.eflags, 0xcad7);
+    let mut bytes = [0; 13];
+    p.memory.read(0x0040_2080, &mut bytes).unwrap();
+    assert_eq!(
+        bytes,
+        [
+            0x78, 0x56, 0x34, 0x12, 0x78, 0x56, 0x34, 0x12, 0x78, 0x56, 0x78, 0xaa, 0xaa
+        ]
+    );
+    #[cfg(windows_demo)]
+    {
+        let mut p = Process32::load(
+            include_bytes!("../../target/windows-api/string-stores.exe"),
+            64,
+        )
+        .unwrap();
+        let run = p.run(10000);
+        assert_eq!(run.reason, ProcessStop::Exited(42));
+        assert_eq!((run.instructions, run.api_calls), (731, 1));
+    }
 }
 
 fn execute_string_scan() {
@@ -2909,6 +2947,7 @@ pub extern "C" fn run() -> u32 {
     execute_signed_extension();
     execute_string_scan();
     execute_repeated_moves();
+    execute_string_stores();
     execute_register_stack();
     execute_flag_stack();
     execute_cpuid();
