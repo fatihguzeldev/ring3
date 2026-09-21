@@ -172,6 +172,8 @@ fn math_checks_empty_stack_modes_and_memory_before_publishing_results() {
         &[0xd9, 0xfa][..],
         &[0xd8, 0x3d, 0x10, 0x22, 0x40, 0],
         &[0xdc, 0x3d, 0x10, 0x22, 0x40, 0],
+        &[0xd8, 0x0d, 0x10, 0x22, 0x40, 0],
+        &[0xdc, 0x0d, 0x10, 0x22, 0x40, 0],
     ] {
         let (mut cpu, mut memory) = load(operation, 4.0_f64.to_bits(), 0);
         cpu.eip += 6;
@@ -191,8 +193,13 @@ fn math_checks_empty_stack_modes_and_memory_before_publishing_results() {
         );
         assert_eq!(cpu, before);
     }
-    for address in [0x0040_2ffc_u32, 0xffff_fffc] {
-        let mut operation = vec![0xdc, 0x3d];
+    for (mode, address) in [
+        (0x3d, 0x0040_2ffc_u32),
+        (0x3d, 0xffff_fffc),
+        (0x0d, 0x0040_2ffc),
+        (0x0d, 0xffff_fffc),
+    ] {
+        let mut operation = vec![0xdc, mode];
         operation.extend_from_slice(&address.to_le_bytes());
         let (mut cpu, mut memory) = load(&operation, 4.0_f64.to_bits(), 0);
         assert_eq!(cpu.run(&mut memory, 1).instructions, 1);

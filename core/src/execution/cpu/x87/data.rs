@@ -49,18 +49,55 @@ impl Cpu32 {
             top.sqrt()
         } else {
             let source = self.read_float(instruction, memory)?;
-            if top == 0.0 {
-                return Err(StopReason::UnsupportedInstruction);
-            }
-            let result = source / top;
+            let multiply = matches!(instruction.code(), Code::Fmul_m32fp | Code::Fmul_m64fp);
+            let (result, exact_zero) = if multiply {
+                (top * source, top == 0.0 || source == 0.0)
+            } else {
+                if top == 0.0 {
+                    return Err(StopReason::UnsupportedInstruction);
+                }
+                (source / top, source == 0.0)
+            };
             // binary64's bottom binade cannot stand in for x87's extended exponent range.
-            if !result.is_finite() || (source != 0.0 && result.abs() < 2.0 * f64::MIN_POSITIVE) {
+            if !result.is_finite() || (!exact_zero && result.abs() < 2.0 * f64::MIN_POSITIVE) {
                 return Err(StopReason::UnsupportedInstruction);
             }
             result
         };
         self.x87_stack.values[usize::from(self.x87_stack.top)] = result.to_bits();
         Ok(())
+    }
+
+    pub(in super::super) fn x87_integer_load(
+        &mut self,
+        instruction: &Instruction,
+        memory: &GuestMemory,
+    ) -> Result<(), StopReason> {
+        self.x87_profile()?;
+        let (address, size) = self.data_address(instruction)?;
+        let mut bytes = [0; 8];
+        memory
+            .read(u64::from(address), &mut bytes[..size])
+            .map_err(StopReason::MemoryFault)?;
+        let integer = match size {
+            2 => i64::from(i16::from_le_bytes(
+                bytes[..2].try_into().expect("integer width"),
+            )),
+            4 => i64::from(i32::from_le_bytes(
+                bytes[..4].try_into().expect("integer width"),
+            )),
+            _ => i64::from_le_bytes(bytes),
+        };
+        // fild is exact even when the arithmetic precision control requests fewer bits.
+        if !(-(1_i64 << 53)..=(1_i64 << 53)).contains(&integer) {
+            return Err(StopReason::UnsupportedInstruction);
+        }
+        #[expect(
+            clippy::cast_precision_loss,
+            reason = "bounded exact integer conversion"
+        )]
+        let value = integer as f64;
+        self.x87_stack.push(value)
     }
 
     pub(in super::super) fn x87_transfer(
@@ -74,7 +111,7 @@ impl Cpu32 {
             return self.x87_stack.push(value);
         }
         let value = self.x87_stack.value()?;
-        let (address, size) = self.float_address(instruction)?;
+        let (address, size) = self.data_address(instruction)?;
         let mut bytes = value.to_le_bytes();
         if size == 4 {
             if value != 0.0
@@ -106,10 +143,11 @@ impl Cpu32 {
         Ok(())
     }
 
-    fn float_address(&self, instruction: &Instruction) -> Result<(u32, usize), StopReason> {
+    fn data_address(&self, instruction: &Instruction) -> Result<(u32, usize), StopReason> {
         let size = match instruction.memory_size() {
-            MemorySize::Float32 => 4,
-            MemorySize::Float64 => 8,
+            MemorySize::Int16 => 2,
+            MemorySize::Float32 | MemorySize::Int32 => 4,
+            MemorySize::Float64 | MemorySize::Int64 => 8,
             _ => return Err(StopReason::UnsupportedInstruction),
         };
         let offset = self.effective_address(instruction)?;
@@ -120,7 +158,7 @@ impl Cpu32 {
         };
         let address = base.wrapping_add(offset);
         address
-            .checked_add(u32::try_from(size - 1).expect("float width"))
+            .checked_add(u32::try_from(size - 1).expect("x87 operand width"))
             .ok_or(StopReason::MemoryFault(MemoryError::AddressOverflow))?;
         Ok((address, size))
     }
@@ -130,7 +168,7 @@ impl Cpu32 {
         instruction: &Instruction,
         memory: &GuestMemory,
     ) -> Result<f64, StopReason> {
-        let (address, size) = self.float_address(instruction)?;
+        let (address, size) = self.data_address(instruction)?;
         let mut bytes = [0; 8];
         memory
             .read(u64::from(address), &mut bytes[..size])
