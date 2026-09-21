@@ -633,6 +633,43 @@ fn execute_find_files() {
     }
 }
 
+#[path = "../../core/tests/support/file_status_executable.rs"]
+mod file_status_executable;
+
+fn execute_file_status() {
+    use ring3_core::execution::{
+        FileMetadata, Process32, ProcessOptions, ProcessStop, Register32, StopReason,
+    };
+    let mut process = Process32::load_with_options(
+        &file_status_executable::pe32(),
+        64,
+        ProcessOptions {
+            current_directory: b"D:\\Apps",
+            files: &[FileMetadata {
+                path: b"D:\\Apps\\RUN.ExE",
+                size: 123,
+            }],
+            ..ProcessOptions::default()
+        },
+    )
+    .unwrap();
+    process.memory.write(0x0040_2180, b"run.exe\0").unwrap();
+    let result = process.run(50);
+    assert_eq!(result.reason, ProcessStop::Stopped(StopReason::Breakpoint));
+    assert_eq!((result.instructions, result.api_calls), (5, 1));
+    assert_eq!(process.cpu.register(Register32::Eax), 0);
+    assert_eq!(process.cpu.register(Register32::Esp), 0x1001_0000);
+    let mut record = [0; 36];
+    process.memory.read(0x0040_2280, &mut record).unwrap();
+    let mut expected = [0; 36];
+    expected[0] = 3;
+    expected[16] = 3;
+    expected[8] = 1;
+    expected[6..8].copy_from_slice(&0x81ff_u16.to_le_bytes());
+    expected[20] = 123;
+    assert_eq!(record, expected);
+}
+
 fn execute_current_directory() {
     use ring3_core::execution::{Process32, ProcessOptions, ProcessStop, Register32, StopReason};
     let mut process = Process32::load_with_options(
@@ -2602,6 +2639,7 @@ pub extern "C" fn run() -> u32 {
     execute_current_directory();
     execute_change_directory();
     execute_find_files();
+    execute_file_status();
     execute_command_line();
     execute_image();
     execute_function();

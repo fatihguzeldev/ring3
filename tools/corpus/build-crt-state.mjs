@@ -12,7 +12,7 @@ for (const [module, definition] of [
   run(tools.lld, ["-flavor", "link", "/lib", "/machine:x86",
     `/def:${join(root, definition)}`, `/out:${module}.lib`], output);
 }
-for (const name of ["state", "fp-control", "initializers", "arguments", "memory", "exception-frame", "heap", "dllonexit", "reverse-search", "string-traversal", "string-duplicate", "buffer-compare", "code-page", "onexit", "cpp-allocation", "string-length", "string-copy", "character-search", "buffer-copy", "locale-activity", "locale-metadata"]) {
+for (const name of ["state", "fp-control", "initializers", "arguments", "memory", "exception-frame", "heap", "dllonexit", "reverse-search", "string-traversal", "string-duplicate", "buffer-compare", "code-page", "onexit", "cpp-allocation", "string-length", "string-copy", "character-search", "file-status", "buffer-copy", "locale-activity", "locale-metadata"]) {
   const cpp = name === "cpp-allocation";
   run(tools.clang, ["--target=i686-pc-windows-msvc", "-O0", "-ffreestanding",
     "-fno-stack-protector", ...(cpp ? ["-fno-exceptions", "-fno-rtti", "-fcheck-new", "-fno-sized-deallocation"] : []),
