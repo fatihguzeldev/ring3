@@ -119,6 +119,21 @@ mod local_realloc_executable;
 #[path = "../../core/tests/support/interlocked_executable.rs"]
 mod interlocked_executable;
 
+#[path = "../../core/tests/support/string_length_executable.rs"]
+mod string_length_executable;
+
+fn execute_string_length() {
+    use ring3_core::execution::{Process32, ProcessStop, Register32, StopReason};
+    let mut process = Process32::load(&string_length_executable::pe32(), 32).unwrap();
+    let result = process.run(50);
+    assert_eq!(result.reason, ProcessStop::Stopped(StopReason::Breakpoint));
+    assert_eq!((result.instructions, result.api_calls), (12, 3));
+    assert_eq!(process.cpu.register(Register32::Eax), 0);
+    assert_eq!(process.cpu.register(Register32::Ebx), 3);
+    assert_eq!(process.cpu.register(Register32::Ecx), 2);
+    assert_eq!(process.cpu.register(Register32::Esp), 0x1001_0000);
+}
+
 fn execute_interlocked() {
     use ring3_core::execution::{Process32, ProcessStop, Register32, StopReason};
     let mut process = Process32::load(&interlocked_executable::pe32(), 32).unwrap();
@@ -2086,6 +2101,7 @@ pub extern "C" fn run() -> u32 {
     execute_cursor_position();
     execute_local_realloc();
     execute_interlocked();
+    execute_string_length();
     execute_thread_identity();
     execute_module_file_name();
     execute_resources();

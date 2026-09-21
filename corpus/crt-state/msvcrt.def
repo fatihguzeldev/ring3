@@ -20,6 +20,7 @@ EXPORTS
     _mbsrchr
     _mbsinc
     _strdup
+    strlen
     memcmp
     _setmbcp
     _onexit
