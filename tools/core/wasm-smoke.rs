@@ -454,6 +454,45 @@ mod computer_name_executable;
 #[path = "../../core/tests/support/mutex_executable.rs"]
 mod mutex_executable;
 
+#[path = "../../core/tests/support/performance_clock_executable.rs"]
+mod performance_clock_executable;
+
+fn execute_performance_clock() {
+    use ring3_core::execution::{Process32, ProcessStop, Register32, StopReason};
+    use std::time::Duration;
+    let mut process = Process32::load(&performance_clock_executable::pe32(), 32).unwrap();
+    process
+        .set_elapsed_time(Duration::from_nanos(5_000_000_123))
+        .unwrap();
+    let result = process.run(50);
+    assert_eq!(result.reason, ProcessStop::Stopped(StopReason::Breakpoint));
+    assert_eq!((result.instructions, result.api_calls), (8, 3));
+    assert_eq!(process.cpu.register(Register32::Eax), 1);
+    assert_eq!(process.cpu.register(Register32::Ebx), 1);
+    assert_eq!(process.cpu.register(Register32::Esp), 0x1001_0000);
+    let mut output = [0; 24];
+    process.memory.read(0x0040_2280, &mut output).unwrap();
+    for (bytes, value) in
+        output
+            .chunks_exact(8)
+            .zip([1_000_000_000_u64, 5_000_000_123, 5_000_000_123])
+    {
+        assert_eq!(bytes, value.to_le_bytes());
+    }
+    #[cfg(windows_demo)]
+    {
+        let mut process = Process32::load(
+            include_bytes!("../../target/windows-api/performance-clock.exe"),
+            64,
+        )
+        .unwrap();
+        process
+            .set_elapsed_time(Duration::from_nanos(5_000_000_123))
+            .unwrap();
+        assert_eq!(process.run(1000).reason, ProcessStop::Exited(42));
+    }
+}
+
 fn execute_mutex_lifecycle() {
     use ring3_core::execution::{Process32, ProcessStop, Register32, StopReason};
     let mut process = Process32::load(&mutex_executable::pe32(), 32).unwrap();
@@ -2349,6 +2388,7 @@ pub extern "C" fn run() -> u32 {
     execute_system_directory();
     execute_computer_name();
     execute_mutex_lifecycle();
+    execute_performance_clock();
     execute_image();
     execute_function();
     inspect_image();

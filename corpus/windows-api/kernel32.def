@@ -44,3 +44,5 @@ EXPORTS
     _WaitForSingleObject@8==WaitForSingleObject
     _ReleaseMutex@4==ReleaseMutex
     _CloseHandle@4==CloseHandle
+    _QueryPerformanceFrequency@4==QueryPerformanceFrequency
+    _QueryPerformanceCounter@4==QueryPerformanceCounter
