@@ -75,6 +75,8 @@ mod code_pages_executable;
 #[path = "../../core/tests/support/cpinfo_executable.rs"]
 mod cpinfo_executable;
 
+#[path = "../../core/tests/support/clipboard_formats_executable.rs"]
+mod clipboard_formats_executable;
 #[path = "../../core/tests/support/messages_executable.rs"]
 mod messages_executable;
 
@@ -268,6 +270,29 @@ fn execute_zero_extend() {
     assert_eq!(cpu.register(Register32::Ecx), 0xff);
     assert_eq!(cpu.register(Register32::Edx), 0xff80);
     assert_eq!(cpu.eflags, 0xced7);
+}
+
+fn execute_clipboard_formats() {
+    use ring3_core::execution::{Process32, ProcessStop, Register32, StopReason};
+    let mut process = Process32::load(&clipboard_formats_executable::pe32(), 32).unwrap();
+    let result = process.run(30);
+    assert_eq!(result.reason, ProcessStop::Stopped(StopReason::Breakpoint));
+    assert_eq!((result.instructions, result.api_calls), (9, 3));
+    assert_eq!(process.cpu.register(Register32::Eax), 0xc001);
+    assert_eq!(process.cpu.register(Register32::Ebx), 0xc000);
+    assert_eq!(process.cpu.register(Register32::Ecx), 0xc000);
+    assert_eq!(process.cpu.register(Register32::Esp), 0x1001_0000);
+    #[cfg(windows_demo)]
+    {
+        let mut process = Process32::load(
+            include_bytes!("../../target/windows-api/clipboard-formats.exe"),
+            64,
+        )
+        .unwrap();
+        let result = process.run(1000);
+        assert_eq!(result.reason, ProcessStop::Exited(42));
+        assert_eq!(result.api_calls, 8);
+    }
 }
 
 fn execute_messages() {
@@ -1609,6 +1634,7 @@ pub extern "C" fn run() -> u32 {
     execute_code_pages();
     execute_cpinfo();
     execute_messages();
+    execute_clipboard_formats();
     execute_zero_extend();
     execute_condition_bytes();
     execute_process_version();

@@ -1,6 +1,7 @@
 LIBRARY USER32.dll
 EXPORTS
     _RegisterWindowMessageA@4==RegisterWindowMessageA
+    _RegisterClipboardFormatA@4==RegisterClipboardFormatA
     _GetSystemMetrics@4==GetSystemMetrics
     _GetDC@4==GetDC
     _ReleaseDC@8==ReleaseDC
