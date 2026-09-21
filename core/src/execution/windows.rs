@@ -97,7 +97,7 @@ enum Api {
     ExitProcess,
     Interlocked(atomics::Call),
     Clock(clock::Call),
-    GetCurrentDirectory,
+    Directory(directory::Call),
     GetCommandLine,
     GetDesktopWindow,
     RegisterUserAtom,
@@ -144,7 +144,8 @@ impl Api {
             0x200 => Some(Self::Interlocked(atomics::Call::Exchange)),
             0x204 => Some(Self::Interlocked(atomics::Call::Increment)),
             0x208 => Some(Self::Interlocked(atomics::Call::Decrement)),
-            0x228 => Some(Self::GetCurrentDirectory),
+            0x228 => Some(Self::Directory(directory::Call::Query)),
+            0x230 => Some(Self::Directory(directory::Call::Change)),
             0x22c => Some(Self::GetCommandLine),
             16 => Some(Self::GetDesktopWindow),
             0x20 => Some(Self::SetErrorMode),
@@ -202,6 +203,7 @@ impl Api {
                 "QueryPerformanceFrequency" => 0x220,
                 "QueryPerformanceCounter" => 0x224,
                 "GetCurrentDirectoryA" => 0x228,
+                "SetCurrentDirectoryA" => 0x230,
                 "GetCommandLineA" => 0x22c,
                 "lstrcpynA" => 0xe4,
                 "lstrcpyA" => 0xf0,
@@ -270,7 +272,7 @@ impl Api {
         match self {
             Self::Interlocked(call) => call.arguments(),
             Self::Synchronization(call) => call.arguments(),
-            Self::GetCurrentDirectory => 2,
+            Self::Directory(call) => call.arguments(),
             Self::GetLastError
             | Self::GetCommandLine
             | Self::GetCurrentThread
@@ -346,7 +348,8 @@ impl Process32 {
         options: ProcessOptions<'_>,
     ) -> Result<Self, LoadError> {
         let parameters = parameters::Parameters::prepare(options)?;
-        let current_directory = directory::Directory::new(options.current_directory)?;
+        let current_directory =
+            directory::Directory::new(options.current_directory, options.directories)?;
         let mut diagnostic_imports = diagnostics::Imports::default();
         let reserved = [
             u64::from(STACK_BASE)..u64::from(STACK_BASE + STACK_SIZE),
@@ -547,7 +550,7 @@ impl Process32 {
         match api {
             Api::Interlocked(call) => self.interlocked(call, arguments)?,
             Api::Clock(call) => self.query_clock(call, argument)?,
-            Api::GetCurrentDirectory => self.query_directory(arguments)?,
+            Api::Directory(call) => self.directory(call, arguments)?,
             Api::GetCommandLine => self.cpu.set_register(Register32::Eax, self.command_line),
             Api::Synchronization(call) => self.cpu.set_register(
                 Register32::Eax,
