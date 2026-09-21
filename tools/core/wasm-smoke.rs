@@ -291,6 +291,22 @@ mod string_length_executable;
 #[path = "../../core/tests/support/buffer_copy_executable.rs"]
 mod buffer_copy_executable;
 
+#[path = "../../core/tests/support/string_copy_executable.rs"]
+mod string_copy_executable;
+
+fn execute_string_copy() {
+    use ring3_core::execution::{Process32, ProcessStop, Register32, StopReason};
+    let mut process = Process32::load(&string_copy_executable::pe32(), 32).unwrap();
+    let result = process.run(50);
+    assert_eq!(result.reason, ProcessStop::Stopped(StopReason::Breakpoint));
+    assert_eq!((result.instructions, result.api_calls), (6, 1));
+    assert_eq!(process.cpu.register(Register32::Eax), 0x0040_2190);
+    assert_eq!(process.cpu.register(Register32::Esp), 0x1001_0000);
+    let mut bytes = [0; 10];
+    process.memory.read(0x0040_2190, &mut bytes).unwrap();
+    assert_eq!(bytes, [b'a', 0x80, b'b', 0, 0, 0, 0, 0, 0x55, 0x55]);
+}
+
 fn execute_buffer_copy() {
     use ring3_core::execution::{Process32, ProcessStop, Register32, StopReason};
     let mut process = Process32::load(&buffer_copy_executable::pe32(), 32).unwrap();
@@ -2447,6 +2463,7 @@ pub extern "C" fn run() -> u32 {
     execute_locale_metadata();
     execute_string_length();
     execute_buffer_copy();
+    execute_string_copy();
     execute_complement();
     execute_string_scan();
     execute_repeated_moves();

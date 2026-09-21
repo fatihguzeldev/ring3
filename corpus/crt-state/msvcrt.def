@@ -27,6 +27,7 @@ EXPORTS
     __lc_collate_cp DATA
     __mb_cur_max DATA
     strlen
+    strncpy
     memcmp
     memcpy
     _setmbcp
