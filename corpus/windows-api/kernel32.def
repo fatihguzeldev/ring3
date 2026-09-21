@@ -1,5 +1,6 @@
 LIBRARY KERNEL32.dll
 EXPORTS
+    _FindResourceA@12==FindResourceA
     _lstrcpynA@12==lstrcpynA
     _SetLastError@4==SetLastError
     _GetLastError@0==GetLastError
