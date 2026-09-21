@@ -236,13 +236,7 @@ impl Cpu32 {
             | Code::Fistp_m64int => {
                 self.x87_integer_store(instruction, memory)?;
             }
-            Code::Fsqrt
-            | Code::Fdivr_m32fp
-            | Code::Fdivr_m64fp
-            | Code::Fmul_m32fp
-            | Code::Fmul_m64fp => {
-                self.x87_arithmetic(instruction, memory)?;
-            }
+            code if x87::is_arithmetic(code) => self.x87_arithmetic(instruction, memory)?,
             Code::Wait if self.x87_control_word & 0x3f == 0x3f => {}
             Code::Nopd | Code::Int3 => {}
             _ => next = self.conditional_instruction(instruction, memory)?,
