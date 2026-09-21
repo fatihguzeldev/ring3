@@ -29,6 +29,7 @@ pub struct Cpu32 {
     registers: [u32; 8],
     fs_base: u32,
     x87_control_word: u16,
+    x87_stack: x87::Stack,
     pub eip: u32,
     pub eflags: u32,
 }
@@ -58,6 +59,7 @@ impl Cpu32 {
             registers: [0; 8],
             fs_base: 0,
             x87_control_word: 0x037f,
+            x87_stack: x87::Stack::default(),
             eip: entry_point,
             eflags: 2,
         }
@@ -87,7 +89,7 @@ impl Cpu32 {
         self.x87_control_word
     }
 
-    /// sets raw control state; floating-point arithmetic is not yet implemented.
+    /// sets raw control state; x87 data operations admit only their documented profile.
     pub fn set_x87_control_word(&mut self, value: u16) {
         self.x87_control_word = value;
     }
@@ -211,6 +213,12 @@ impl Cpu32 {
             }
             code if strings::is_scan(code) => next = self.scan_string(instruction, memory)?,
             Code::Fldcw_m2byte | Code::Fnstcw_m2byte => self.x87_control(instruction, memory)?,
+            Code::Fld_m32fp
+            | Code::Fld_m64fp
+            | Code::Fst_m32fp
+            | Code::Fst_m64fp
+            | Code::Fstp_m32fp
+            | Code::Fstp_m64fp => self.x87_transfer(instruction, memory)?,
             Code::Nopd | Code::Int3 => {}
             _ => next = self.conditional_instruction(instruction, memory)?,
         }

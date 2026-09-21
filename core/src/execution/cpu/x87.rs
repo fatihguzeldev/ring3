@@ -3,6 +3,9 @@ use iced_x86::{Code, Instruction};
 use super::operands::Location;
 use super::{Cpu32, GuestMemory, MemoryError, StopReason};
 
+mod data;
+pub(super) use data::Stack;
+
 impl Cpu32 {
     pub(super) fn x87_control(
         &mut self,
