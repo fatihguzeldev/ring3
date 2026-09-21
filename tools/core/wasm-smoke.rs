@@ -24,6 +24,26 @@ mod register_stack_executable;
 #[path = "../../core/tests/support/flag_stack_executable.rs"]
 mod flag_stack_executable;
 
+#[path = "../../core/tests/support/cpuid_executable.rs"]
+mod cpuid_executable;
+
+fn execute_cpuid() {
+    use ring3_core::execution::{Process32, ProcessStop, Register32, StopReason};
+    let mut process = Process32::load(&cpuid_executable::pe32(), 32).unwrap();
+    let result = process.run(100);
+    assert_eq!(result.reason, ProcessStop::Stopped(StopReason::Breakpoint));
+    assert_eq!((result.instructions, result.api_calls), (15, 0));
+    let mut actual = [0xff; 32];
+    process.memory.read(0x0040_2080, &mut actual).unwrap();
+    let mut expected = [0; 32];
+    expected[0] = 1;
+    expected[4..16].copy_from_slice(b"Ring3CPUCore");
+    assert_eq!(actual, expected);
+    assert_eq!(process.cpu.register(Register32::Eax), 0x8000_0000);
+    assert_eq!(process.cpu.register(Register32::Esp), 0x1001_0000);
+    assert_eq!(process.cpu.eflags, 0x46);
+}
+
 fn execute_flag_stack() {
     use ring3_core::execution::{Process32, ProcessStop, Register32, StopReason};
     let mut process = Process32::load(&flag_stack_executable::pe32(), 32).unwrap();
@@ -2322,6 +2342,7 @@ pub extern "C" fn run() -> u32 {
     execute_repeated_moves();
     execute_register_stack();
     execute_flag_stack();
+    execute_cpuid();
     execute_thread_identity();
     execute_module_file_name();
     execute_resources();
