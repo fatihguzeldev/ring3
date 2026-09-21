@@ -118,13 +118,19 @@ impl Cpu32 {
         } else {
             let source = self.read_float(instruction, memory)?;
             let multiply = matches!(instruction.code(), Code::Fmul_m32fp | Code::Fmul_m64fp);
+            let (left, right) =
+                if matches!(instruction.code(), Code::Fdivr_m32fp | Code::Fdivr_m64fp) {
+                    (source, top)
+                } else {
+                    (top, source)
+                };
             let (result, exact_zero) = if multiply {
-                (top * source, top == 0.0 || source == 0.0)
+                (left * right, left == 0.0 || right == 0.0)
             } else {
-                if top == 0.0 {
+                if right == 0.0 {
                     return Err(StopReason::UnsupportedInstruction);
                 }
-                (source / top, source == 0.0)
+                (left / right, left == 0.0)
             };
             // binary64's bottom binade cannot stand in for x87's extended exponent range.
             if !result.is_finite() || (!exact_zero && result.abs() < 2.0 * f64::MIN_POSITIVE) {
@@ -133,7 +139,7 @@ impl Cpu32 {
             let rounding = if multiply {
                 rounding::product_result(result, top, source)
             } else {
-                rounding::quotient_result(result, source, top)
+                rounding::quotient_result(result, left, right)
             };
             (result, rounding)
         };
