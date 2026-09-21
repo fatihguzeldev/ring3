@@ -4,6 +4,7 @@ use super::{
 };
 use crate::PeImportSymbol;
 
+mod atomics;
 mod code_pages;
 mod critical_sections;
 mod crt;
@@ -85,6 +86,7 @@ enum Api {
     GetCurrentThread,
     GetCurrentThreadId,
     ExitProcess,
+    InterlockedExchange,
     GetDesktopWindow,
     RegisterUserAtom,
     System(system::Call),
@@ -126,6 +128,7 @@ impl Api {
             0xd8 => Some(Self::GetCurrentThread),
             0xdc => Some(Self::GetCurrentThreadId),
             8 => Some(Self::ExitProcess),
+            0x200 => Some(Self::InterlockedExchange),
             16 => Some(Self::GetDesktopWindow),
             0x20 => Some(Self::SetErrorMode),
             0x24 => Some(Self::GetErrorMode),
@@ -164,6 +167,7 @@ impl Api {
                 "GetCurrentThread" => 0xd8,
                 "GetCurrentThreadId" => 0xdc,
                 "ExitProcess" => 8,
+                "InterlockedExchange" => 0x200,
                 "LoadLibraryA" => 0x14,
                 "GetModuleHandleA" => 0x18,
                 "GetModuleFileNameA" => 0xe0,
@@ -234,6 +238,7 @@ impl Api {
 
     fn arguments(self) -> usize {
         match self {
+            Self::InterlockedExchange => 2,
             Self::GetLastError
             | Self::GetCurrentThread
             | Self::GetCurrentThreadId
@@ -501,6 +506,7 @@ impl Process32 {
     fn invoke(&mut self, api: Api, arguments: &[u32], stack: u32) -> Result<(), DispatchError> {
         let argument = arguments.first().copied().unwrap_or(0);
         match api {
+            Api::InterlockedExchange => self.interlocked_exchange(arguments)?,
             Api::SetLastError => thread::set_last_error(&mut self.memory, argument)?,
             Api::GetLastError => self.cpu.set_register(Register32::Eax, self.last_error()?),
             Api::GetCurrentThread => self.cpu.set_register(Register32::Eax, u32::MAX - 1),
