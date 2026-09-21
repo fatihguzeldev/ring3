@@ -170,9 +170,6 @@ impl Cpu32 {
                 let input = self.read_operand(destination, memory)?;
                 self.write_operand(destination, !input & destination.width.mask(), memory)?;
             }
-            Code::Pushaw | Code::Pushad | Code::Popaw | Code::Popad => {
-                self.register_stack(instruction.code(), memory)?;
-            }
             Code::Neg_rm8 | Code::Neg_rm16 | Code::Neg_rm32 => {
                 let destination = self.operand(instruction, 0)?;
                 let input = self.read_operand(destination, memory)?;
@@ -197,18 +194,7 @@ impl Cpu32 {
             | Code::Dec_rm32
             | Code::Dec_r16
             | Code::Dec_r32 => self.increment(instruction, memory)?,
-            Code::Push_r32
-            | Code::Pushd_imm32
-            | Code::Pushd_imm8
-            | Code::Push_rm32
-            | Code::Pop_r32
-            | Code::Pop_rm32
-            | Code::Call_rel32_32
-            | Code::Call_rm32
-            | Code::Jmp_rm32
-            | Code::Retnd
-            | Code::Retnd_imm16
-            | Code::Leaved => {
+            code if stack::is_stack(code) => {
                 next = self.stack_instruction(instruction, memory)?;
             }
             Code::Jmp_rel8_32 | Code::Jmp_rel32_32 => next = instruction.near_branch32(),

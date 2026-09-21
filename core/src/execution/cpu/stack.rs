@@ -3,6 +3,28 @@ use iced_x86::{Code, Instruction, OpKind};
 use super::operands::{read_dword, write_dword};
 use super::{Cpu32, GuestMemory, Register32, StopReason, register32};
 
+pub(super) fn is_stack(code: Code) -> bool {
+    matches!(
+        code,
+        Code::Push_r32
+            | Code::Pushd_imm32
+            | Code::Pushd_imm8
+            | Code::Push_rm32
+            | Code::Pop_r32
+            | Code::Pop_rm32
+            | Code::Call_rel32_32
+            | Code::Call_rm32
+            | Code::Jmp_rm32
+            | Code::Retnd
+            | Code::Retnd_imm16
+            | Code::Leaved
+            | Code::Pushaw
+            | Code::Pushad
+            | Code::Popaw
+            | Code::Popad
+    )
+}
+
 impl Cpu32 {
     pub(super) fn stack_instruction(
         &mut self,
@@ -11,6 +33,9 @@ impl Cpu32 {
     ) -> Result<u32, StopReason> {
         let next = instruction.next_ip32();
         match instruction.code() {
+            Code::Pushaw | Code::Pushad | Code::Popaw | Code::Popad => {
+                self.register_stack(instruction.code(), memory)?;
+            }
             Code::Push_r32 | Code::Pushd_imm32 | Code::Pushd_imm8 | Code::Push_rm32 => {
                 let value = self.read_operand(self.operand(instruction, 0)?, memory)?;
                 self.push(memory, value)?;
