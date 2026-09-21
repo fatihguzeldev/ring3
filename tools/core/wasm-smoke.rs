@@ -18,6 +18,31 @@ mod string_scan_executable;
 #[path = "../../core/tests/support/repeated_moves_executable.rs"]
 mod repeated_moves_executable;
 
+#[path = "../../core/tests/support/register_stack_executable.rs"]
+mod register_stack_executable;
+
+fn execute_register_stack() {
+    use ring3_core::execution::{Process32, ProcessStop, Register32, StopReason};
+    let mut process = Process32::load(&register_stack_executable::pe32(), 32).unwrap();
+    process.cpu.eflags = 0xced7;
+    let result = process.run(100);
+    assert_eq!(result.reason, ProcessStop::Stopped(StopReason::Breakpoint));
+    assert_eq!((result.instructions, result.api_calls), (26, 0));
+    for (register, expected) in [
+        (Register32::Eax, 0xa1a1_3344),
+        (Register32::Ecx, 0xa2a2_7788),
+        (Register32::Edx, 0xa3a3_bbcc),
+        (Register32::Ebx, 0xa4a4_ff00),
+        (Register32::Esp, 0x1001_0000),
+        (Register32::Ebp, 0xa5a5_3040),
+        (Register32::Esi, 0xa6a6_7080),
+        (Register32::Edi, 0xa7a7_b0c0),
+    ] {
+        assert_eq!(process.cpu.register(register), expected);
+    }
+    assert_eq!(process.cpu.eflags, 0xced7);
+}
+
 fn execute_repeated_moves() {
     use ring3_core::execution::{Process32, ProcessStop, Register32, StopReason};
     let mut process = Process32::load(&repeated_moves_executable::pe32(), 32).unwrap();
@@ -2274,6 +2299,7 @@ pub extern "C" fn run() -> u32 {
     execute_complement();
     execute_string_scan();
     execute_repeated_moves();
+    execute_register_stack();
     execute_thread_identity();
     execute_module_file_name();
     execute_resources();
