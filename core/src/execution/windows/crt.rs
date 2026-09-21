@@ -60,6 +60,7 @@ pub(super) enum Call {
     FloatToInteger,
     TypeName,
     CompareStringPrefix,
+    CompareIgnoringCase,
     SetMbCodePage,
     OnExit,
 }
@@ -93,6 +94,7 @@ impl Call {
             0x168 => Some(Self::FloatToInteger),
             0x16c => Some(Self::TypeName),
             0x170 => Some(Self::CompareStringPrefix),
+            0x174 => Some(Self::CompareIgnoringCase),
             0x13c => Some(Self::SetMbCodePage),
             0x140 => Some(Self::OnExit),
             _ => None,
@@ -112,7 +114,11 @@ impl Call {
             | Self::SeedRandom
             | Self::SetMbCodePage
             | Self::OnExit => 1,
-            Self::ControlFp | Self::MbSearchReverse | Self::FindCharacter | Self::Stat => 2,
+            Self::ControlFp
+            | Self::MbSearchReverse
+            | Self::FindCharacter
+            | Self::Stat
+            | Self::CompareIgnoringCase => 2,
             Self::GetMainArgs => 5,
             Self::Memset
             | Self::DllOnExit
@@ -201,6 +207,11 @@ impl Crt {
             Call::OnExit => Some(self.exit_callbacks.register(arguments[0])),
             Call::Duplicate => Some(strings::duplicate(memory, heap, arguments[0])?),
             Call::Length => Some(strings::length(memory, arguments[0])?),
+            Call::CompareIgnoringCase => Some(strings::compare_ignoring_case(
+                memory,
+                arguments[0],
+                arguments[1],
+            )?),
             Call::CompareStringPrefix => Some(strings::compare_prefix(
                 memory,
                 arguments[0],
@@ -299,6 +310,7 @@ pub(super) fn resolve(name: &str) -> Option<u32> {
         "_ftol" => Some(API_BASE + 0x168),
         "?name@type_info@@QBEPBDXZ" => Some(API_BASE + 0x16c),
         "strncmp" => Some(API_BASE + 0x170),
+        "_stricmp" => Some(API_BASE + 0x174),
         "__dllonexit" => Some(API_BASE + 0x128),
         "_mbsrchr" => Some(API_BASE + 0x12c),
         "_mbsinc" => Some(API_BASE + 0x130),

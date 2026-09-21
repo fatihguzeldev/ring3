@@ -1,5 +1,34 @@
 use super::{Access, DispatchError, ERRNO, GuestMemory, MemoryError, buffers, guest, heap};
 
+pub(super) fn compare_ignoring_case(
+    memory: &GuestMemory,
+    left: u32,
+    right: u32,
+) -> Result<u32, DispatchError> {
+    if left == 0 || right == 0 {
+        return Err(DispatchError::Unsupported);
+    }
+    for offset in 0..65536 {
+        let left = left
+            .checked_add(offset)
+            .ok_or(MemoryError::AddressOverflow)?;
+        let right = right
+            .checked_add(offset)
+            .ok_or(MemoryError::AddressOverflow)?;
+        let (mut a, mut b) = ([0], [0]);
+        memory.read(u64::from(left), &mut a)?;
+        memory.read(u64::from(right), &mut b)?;
+        let (a, b) = (a[0].to_ascii_lowercase(), b[0].to_ascii_lowercase());
+        if a != b {
+            return Ok((i32::from(a) - i32::from(b)).cast_unsigned());
+        }
+        if a == 0 {
+            return Ok(0);
+        }
+    }
+    Err(DispatchError::Unsupported)
+}
+
 pub(super) fn compare_prefix(
     memory: &GuestMemory,
     left: u32,
