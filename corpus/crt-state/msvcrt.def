@@ -17,3 +17,4 @@ EXPORTS
     free
     _errno
     __dllonexit
+    _mbsrchr
