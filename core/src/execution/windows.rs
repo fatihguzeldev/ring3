@@ -44,6 +44,7 @@ pub struct Process32 {
     exit_code: Option<u32>,
     error_mode: u32,
     elapsed_nanoseconds: i64,
+    command_line: u32,
     subsystem_version: u32,
     startup: startup::Startup,
     modules: modules::Modules,
@@ -97,6 +98,7 @@ enum Api {
     Interlocked(atomics::Call),
     Clock(clock::Call),
     GetCurrentDirectory,
+    GetCommandLine,
     GetDesktopWindow,
     RegisterUserAtom,
     System(system::Call),
@@ -143,6 +145,7 @@ impl Api {
             0x204 => Some(Self::Interlocked(atomics::Call::Increment)),
             0x208 => Some(Self::Interlocked(atomics::Call::Decrement)),
             0x228 => Some(Self::GetCurrentDirectory),
+            0x22c => Some(Self::GetCommandLine),
             16 => Some(Self::GetDesktopWindow),
             0x20 => Some(Self::SetErrorMode),
             0x24 => Some(Self::GetErrorMode),
@@ -199,6 +202,7 @@ impl Api {
                 "QueryPerformanceFrequency" => 0x220,
                 "QueryPerformanceCounter" => 0x224,
                 "GetCurrentDirectoryA" => 0x228,
+                "GetCommandLineA" => 0x22c,
                 "lstrcpynA" => 0xe4,
                 "lstrcpyA" => 0xf0,
                 "lstrcatA" => 0xf4,
@@ -268,6 +272,7 @@ impl Api {
             Self::Synchronization(call) => call.arguments(),
             Self::GetCurrentDirectory => 2,
             Self::GetLastError
+            | Self::GetCommandLine
             | Self::GetCurrentThread
             | Self::GetCurrentThreadId
             | Self::GetDesktopWindow
@@ -396,6 +401,7 @@ impl Process32 {
             exit_code: None,
             error_mode: 0,
             elapsed_nanoseconds: 0,
+            command_line: parameters.command_line,
             subsystem_version: (u32::from(major) << 16) | u32::from(minor),
             startup,
             modules,
@@ -542,6 +548,7 @@ impl Process32 {
             Api::Interlocked(call) => self.interlocked(call, arguments)?,
             Api::Clock(call) => self.query_clock(call, argument)?,
             Api::GetCurrentDirectory => self.query_directory(arguments)?,
+            Api::GetCommandLine => self.cpu.set_register(Register32::Eax, self.command_line),
             Api::Synchronization(call) => self.cpu.set_register(
                 Register32::Eax,
                 self.mutexes.dispatch(call, arguments, &mut self.memory)?,
