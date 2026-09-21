@@ -158,6 +158,7 @@ impl Api {
                 "GetErrorMode" => 0x24,
                 "LocalAlloc" => 0x28,
                 "LocalFree" => 0x2c,
+                "LocalReAlloc" => 0xd4,
                 "GetVersion" => 0x30,
                 "InitializeCriticalSection" => 0x34,
                 "EnterCriticalSection" => 0x38,

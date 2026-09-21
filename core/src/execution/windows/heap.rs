@@ -1,5 +1,6 @@
 use std::collections::BTreeMap;
 
+use super::super::Access;
 use super::{DispatchError, GuestMemory, MemoryError, PAGE_SIZE, Permissions, thread};
 
 const START: u64 = 0x2000_0000;
@@ -9,6 +10,7 @@ const END: u64 = 0x3000_0000;
 pub(super) enum Call {
     Alloc,
     Free,
+    Realloc,
     GlobalAlloc,
     GlobalLock,
     GlobalUnlock,
@@ -20,6 +22,7 @@ impl Call {
         match offset {
             0x28 => Some(Self::Alloc),
             0x2c => Some(Self::Free),
+            0xd4 => Some(Self::Realloc),
             0x78 => Some(Self::GlobalAlloc),
             0x7c => Some(Self::GlobalLock),
             0x80 => Some(Self::GlobalUnlock),
@@ -31,6 +34,7 @@ impl Call {
     pub(super) fn arguments(self) -> usize {
         match self {
             Self::Alloc | Self::GlobalAlloc => 2,
+            Self::Realloc => 3,
             _ => 1,
         }
     }
@@ -46,6 +50,7 @@ enum Kind {
 struct Allocation {
     base: u32,
     length: u64,
+    size: u32,
     kind: Kind,
 }
 
@@ -81,6 +86,9 @@ impl Heap {
                 stack,
                 memory,
             ),
+            Call::Realloc => {
+                self.reallocate(arguments[0], arguments[1], arguments[2], stack, memory)
+            }
             Call::GlobalLock => self.lock(arguments[0], memory),
             Call::GlobalUnlock => self.unlock(arguments[0], memory),
         }
@@ -144,8 +152,15 @@ impl Heap {
                         } else {
                             0
                         };
-                    self.allocations
-                        .insert(handle, Allocation { base, length, kind });
+                    self.allocations.insert(
+                        handle,
+                        Allocation {
+                            base,
+                            length,
+                            size,
+                            kind,
+                        },
+                    );
                     return Ok(Some(handle));
                 }
                 Err(MemoryError::PageLimitExceeded) => {}
@@ -153,6 +168,121 @@ impl Heap {
             }
         }
         Ok(None)
+    }
+
+    fn reallocate(
+        &mut self,
+        handle: u32,
+        size: u32,
+        flags: u32,
+        stack: u32,
+        memory: &mut GuestMemory,
+    ) -> Result<u32, DispatchError> {
+        if flags & !0x42 != 0 {
+            return Err(DispatchError::Unsupported);
+        }
+        let Some(allocation) = self
+            .allocations
+            .get(&handle)
+            .filter(|allocation| matches!(allocation.kind, Kind::Local))
+        else {
+            thread::set_last_error(memory, 6)?;
+            return Ok(0);
+        };
+        let (base, old_length, old_size) = (
+            u64::from(allocation.base),
+            allocation.length,
+            allocation.size,
+        );
+        if base < u64::from(stack) + 16 && u64::from(stack) < base + old_length {
+            return Err(DispatchError::Unsupported);
+        }
+        let length = u64::from(size).max(1).div_ceil(PAGE_SIZE) * PAGE_SIZE;
+        let grows = length > old_length;
+        let in_place = !grows
+            || (base + length <= END
+                && memory.first_free_span(
+                    base + old_length,
+                    base + length,
+                    length - old_length,
+                )? == Some(base + old_length));
+        if !in_place {
+            return self.relocate(handle, size, flags, memory);
+        }
+        let zero = flags & 0x40 != 0 && size > old_size;
+        if zero {
+            let existing = u64::from(size).min(old_length) - u64::from(old_size);
+            memory.check_access(
+                base + u64::from(old_size),
+                usize::try_from(existing).expect("heap range fits wasm32"),
+                Access::Write,
+            )?;
+        }
+        if grows {
+            match memory.map_zeroed(
+                base + old_length,
+                length - old_length,
+                Permissions::READ_WRITE,
+            ) {
+                Ok(()) => {}
+                Err(MemoryError::PageLimitExceeded) => {
+                    thread::set_last_error(memory, 8)?;
+                    return Ok(0);
+                }
+                Err(error) => return Err(error.into()),
+            }
+        } else if length < old_length {
+            memory.unmap(base + length, old_length - length)?;
+        }
+        if zero {
+            memory
+                .fill(base + u64::from(old_size), (size - old_size) as usize, 0)
+                .expect("existing zero range was checked and new pages are writable");
+        }
+        let allocation = self
+            .allocations
+            .get_mut(&handle)
+            .expect("allocation was checked");
+        allocation.size = size;
+        allocation.length = length;
+        Ok(handle)
+    }
+
+    fn relocate(
+        &mut self,
+        handle: u32,
+        size: u32,
+        flags: u32,
+        memory: &mut GuestMemory,
+    ) -> Result<u32, DispatchError> {
+        if flags & 2 == 0 {
+            thread::set_last_error(memory, 8)?;
+            return Ok(0);
+        }
+        let old = &self.allocations[&handle];
+        let base = u64::from(old.base);
+        let old_length = old.length;
+        let count = old.size.min(size) as usize;
+        memory.check_access(base, count, Access::Read)?;
+        let Some(new) = self.reserve(size, Kind::Local, memory)? else {
+            thread::set_last_error(memory, 8)?;
+            return Ok(0);
+        };
+        let mut buffer = [0; 4096];
+        for offset in (0..count).step_by(buffer.len()) {
+            let chunk = &mut buffer[..(count - offset).min(4096)];
+            memory
+                .read(base + offset as u64, chunk)
+                .expect("copy source was checked");
+            memory
+                .write(u64::from(new) + offset as u64, chunk)
+                .expect("new pages are writable");
+        }
+        memory
+            .unmap(base, old_length)
+            .expect("old pages are owned by this allocation");
+        self.allocations.remove(&handle);
+        Ok(new)
     }
 
     pub(super) fn allocate_crt(
