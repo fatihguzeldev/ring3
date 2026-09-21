@@ -39,3 +39,4 @@ EXPORTS
     srand
     rand
     _ftol
+    ?name@type_info@@QBEPBDXZ

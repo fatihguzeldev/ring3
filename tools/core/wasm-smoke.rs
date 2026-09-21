@@ -643,6 +643,36 @@ mod random_executable;
 #[path = "../../core/tests/support/float_to_integer_executable.rs"]
 mod float_to_integer_executable;
 
+#[path = "../../core/tests/support/type_name_executable.rs"]
+mod type_name_executable;
+
+fn execute_crt_type_names() {
+    use ring3_core::execution::{Process32, ProcessStop, Register32, StopReason};
+    for (raw, expected) in [
+        (".?AVWidget@engine@@", "class engine::Widget"),
+        (".?AUNode@inner@outer@@", "struct outer::inner::Node"),
+        (".?AT_Value2@@", "union _Value2"),
+        (".?AW4Mode@engine@@", "enum engine::Mode"),
+    ] {
+        let mut p = Process32::load(&type_name_executable::pe32(), 32).unwrap();
+        p.memory
+            .write(0x0040_2188, format!("{raw}\0").as_bytes())
+            .unwrap();
+        let result = p.run(40);
+        assert_eq!(result.reason, ProcessStop::Stopped(StopReason::Breakpoint));
+        assert_eq!((result.instructions, result.api_calls), (5, 2));
+        let pointer = p.cpu.register(Register32::Eax);
+        assert_eq!(pointer, p.cpu.register(Register32::Esi));
+        let mut cache = [0; 4];
+        p.memory.read(0x0040_2184, &mut cache).unwrap();
+        assert_eq!(cache, pointer.to_le_bytes());
+        let mut name = vec![0; expected.len() + 1];
+        p.memory.read(u64::from(pointer), &mut name).unwrap();
+        assert_eq!(name, format!("{expected}\0").as_bytes());
+        assert_eq!(p.cpu.register(Register32::Esp), 0x1001_0000);
+    }
+}
+
 fn execute_crt_float_to_integer() {
     use ring3_core::execution::{Process32, ProcessStop, Register32, StopReason};
     for (first, low, high) in [
@@ -2879,6 +2909,7 @@ pub extern "C" fn run() -> u32 {
     execute_millisecond_clock();
     execute_crt_random();
     execute_crt_float_to_integer();
+    execute_crt_type_names();
     execute_command_line();
     execute_image();
     execute_function();
