@@ -82,6 +82,8 @@ mod messages_executable;
 
 #[path = "../../core/tests/support/condition_bytes_executable.rs"]
 mod condition_bytes_executable;
+#[path = "../../core/tests/support/string_moves_executable.rs"]
+mod string_moves_executable;
 #[path = "../../core/tests/support/zero_extend_executable.rs"]
 mod zero_extend_executable;
 
@@ -237,6 +239,22 @@ fn execute_process_version() {
         assert_eq!(result.reason, ProcessStop::Exited(42));
         assert_eq!(result.api_calls, 6);
     }
+}
+
+fn execute_string_moves() {
+    use ring3_core::execution::{Cpu32, Register32, StopReason, load_pe32};
+    let mut image = load_pe32(&string_moves_executable::pe32(), 3).unwrap();
+    let mut cpu = Cpu32::new(image.entry_point);
+    cpu.eflags = 0xcad7;
+    let result = cpu.run(&mut image.memory, 20);
+    assert_eq!(result.reason, StopReason::Breakpoint);
+    assert_eq!(result.instructions, 6);
+    assert_eq!(cpu.register(Register32::Esi), 0x0040_2187);
+    assert_eq!(cpu.register(Register32::Edi), 0x0040_21c7);
+    assert_eq!(cpu.eflags, 0xcad7);
+    let mut bytes = [0; 7];
+    image.memory.read(0x0040_21c0, &mut bytes).unwrap();
+    assert_eq!(bytes, [1, 2, 3, 4, 5, 6, 7]);
 }
 
 fn execute_condition_bytes() {
@@ -1637,6 +1655,7 @@ pub extern "C" fn run() -> u32 {
     execute_clipboard_formats();
     execute_zero_extend();
     execute_condition_bytes();
+    execute_string_moves();
     execute_process_version();
     execute_metrics();
     execute_colors();

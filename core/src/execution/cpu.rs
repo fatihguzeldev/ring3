@@ -6,6 +6,7 @@ mod branches;
 mod operands;
 mod shifts;
 mod stack;
+mod strings;
 mod x87;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -201,6 +202,9 @@ impl Cpu32 {
                 next = self.stack_instruction(instruction, memory)?;
             }
             Code::Jmp_rel8_32 | Code::Jmp_rel32_32 => next = instruction.near_branch32(),
+            Code::Movsb_m8_m8 | Code::Movsw_m16_m16 | Code::Movsd_m32_m32 => {
+                self.move_string(instruction, memory)?;
+            }
             Code::Fldcw_m2byte | Code::Fnstcw_m2byte => self.x87_control(instruction, memory)?,
             Code::Nopd | Code::Int3 => {}
             _ => next = self.conditional_instruction(instruction, memory)?,
