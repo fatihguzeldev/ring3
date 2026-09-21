@@ -52,3 +52,4 @@ EXPORTS
     _FindFirstFileA@8==FindFirstFileA
     _FindNextFileA@8==FindNextFileA
     _FindClose@4==FindClose
+    _GetEnvironmentVariableA@12==GetEnvironmentVariableA

@@ -633,6 +633,39 @@ fn execute_find_files() {
     }
 }
 
+#[path = "../../core/tests/support/environment_executable.rs"]
+mod environment_executable;
+
+fn execute_environment_query() {
+    use ring3_core::execution::{Process32, ProcessOptions, ProcessStop, Register32, StopReason};
+    let options = ProcessOptions {
+        environment: &[b"demo=hello", b"empty="],
+        ..ProcessOptions::default()
+    };
+    let mut process =
+        Process32::load_with_options(&environment_executable::pe32(), 64, options).unwrap();
+    let result = process.run(50);
+    assert_eq!(result.reason, ProcessStop::Stopped(StopReason::Breakpoint));
+    assert_eq!((result.instructions, result.api_calls), (5, 1));
+    assert_eq!(process.cpu.register(Register32::Eax), 5);
+    assert_eq!(process.cpu.register(Register32::Esp), 0x1001_0000);
+    let mut bytes = [0; 6];
+    process.memory.read(0x0040_2280, &mut bytes).unwrap();
+    assert_eq!(&bytes, b"hello\0");
+    #[cfg(windows_demo)]
+    for (options, steps, calls) in [(ProcessOptions::default(), 36, 6), (options, 115, 13)] {
+        let mut process = Process32::load_with_options(
+            include_bytes!("../../target/windows-api/environment.exe"),
+            64,
+            options,
+        )
+        .unwrap();
+        let result = process.run(1000);
+        assert_eq!(result.reason, ProcessStop::Exited(42));
+        assert_eq!((result.instructions, result.api_calls), (steps, calls));
+    }
+}
+
 #[path = "../../core/tests/support/file_status_executable.rs"]
 mod file_status_executable;
 
@@ -2640,6 +2673,7 @@ pub extern "C" fn run() -> u32 {
     execute_change_directory();
     execute_find_files();
     execute_file_status();
+    execute_environment_query();
     execute_command_line();
     execute_image();
     execute_function();
