@@ -684,6 +684,38 @@ fn execute_millisecond_clock() {
 #[path = "../../core/tests/support/x87_executable.rs"]
 mod x87_executable;
 
+#[path = "../../core/tests/support/x87_scaling_executable.rs"]
+mod x87_scaling_executable;
+
+fn execute_x87_scaling() {
+    use ring3_core::execution::{Cpu32, StopReason, load_pe32};
+    for (input, factor, expected) in [
+        (-7_i64, 0x3fc0_0000_u32, 0xc025_0000_0000_0000_u64),
+        (3, 0x3eaa_aaab, 0x3ff0_0000_0800_0000),
+        (0, 0xbf80_0000, 0x8000_0000_0000_0000),
+        (1_i64 << 53, 0x3fc0_0000, 0x4348_0000_0000_0000),
+        ((1_i64 << 52) + 1, 0x3fc0_0000, 0x4338_0000_0000_0002),
+        ((1_i64 << 52) + 3, 0x3fc0_0000, 0x4338_0000_0000_0004),
+    ] {
+        let mut image = load_pe32(&x87_scaling_executable::pe32(), 16).unwrap();
+        image
+            .memory
+            .write(0x0040_2180, &input.to_le_bytes())
+            .unwrap();
+        image
+            .memory
+            .write(0x0040_2188, &factor.to_le_bytes())
+            .unwrap();
+        let mut cpu = Cpu32::new(image.entry_point);
+        let run = cpu.run(&mut image.memory, 20);
+        assert_eq!(run.reason, StopReason::Breakpoint);
+        assert_eq!(run.instructions, 5);
+        let mut bytes = [0; 8];
+        image.memory.read(0x0040_21a0, &mut bytes).unwrap();
+        assert_eq!(u64::from_le_bytes(bytes), expected);
+    }
+}
+
 fn execute_x87_data() {
     use ring3_core::execution::{Cpu32, StopReason, load_pe32};
     for (input, dividend, expected) in [
@@ -716,7 +748,9 @@ fn execute_x87_data() {
             64,
         )
         .unwrap();
-        assert_eq!(process.run(1000).reason, ProcessStop::Exited(42));
+        let result = process.run(1000);
+        assert_eq!(result.reason, ProcessStop::Exited(42));
+        assert_eq!((result.instructions, result.api_calls), (60, 1));
     }
 }
 
@@ -2762,6 +2796,7 @@ pub extern "C" fn run() -> u32 {
     execute_file_status();
     execute_environment_query();
     execute_x87_data();
+    execute_x87_scaling();
     execute_millisecond_clock();
     execute_crt_random();
     execute_command_line();
