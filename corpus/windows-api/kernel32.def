@@ -46,3 +46,4 @@ EXPORTS
     _CloseHandle@4==CloseHandle
     _QueryPerformanceFrequency@4==QueryPerformanceFrequency
     _QueryPerformanceCounter@4==QueryPerformanceCounter
+    _GetCurrentDirectoryA@8==GetCurrentDirectoryA

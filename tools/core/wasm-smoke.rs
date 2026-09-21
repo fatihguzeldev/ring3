@@ -457,6 +457,40 @@ mod mutex_executable;
 #[path = "../../core/tests/support/performance_clock_executable.rs"]
 mod performance_clock_executable;
 
+#[path = "../../core/tests/support/current_directory_executable.rs"]
+mod current_directory_executable;
+
+fn execute_current_directory() {
+    use ring3_core::execution::{Process32, ProcessOptions, ProcessStop, Register32, StopReason};
+    let mut process = Process32::load_with_options(
+        &current_directory_executable::pe32(),
+        32,
+        ProcessOptions {
+            current_directory: b"Q:\\Data",
+            ..ProcessOptions::default()
+        },
+    )
+    .unwrap();
+    let result = process.run(50);
+    assert_eq!(result.reason, ProcessStop::Stopped(StopReason::Breakpoint));
+    assert_eq!((result.instructions, result.api_calls), (8, 2));
+    assert_eq!(process.cpu.register(Register32::Eax), 7);
+    assert_eq!(process.cpu.register(Register32::Ebx), 8);
+    assert_eq!(process.cpu.register(Register32::Esp), 0x1001_0000);
+    let mut output = [0; 8];
+    process.memory.read(0x0040_2280, &mut output).unwrap();
+    assert_eq!(&output, b"Q:\\Data\0");
+    #[cfg(windows_demo)]
+    {
+        let mut process = Process32::load(
+            include_bytes!("../../target/windows-api/current-directory.exe"),
+            64,
+        )
+        .unwrap();
+        assert_eq!(process.run(1000).reason, ProcessStop::Exited(42));
+    }
+}
+
 fn execute_performance_clock() {
     use ring3_core::execution::{Process32, ProcessStop, Register32, StopReason};
     use std::time::Duration;
@@ -2389,6 +2423,7 @@ pub extern "C" fn run() -> u32 {
     execute_computer_name();
     execute_mutex_lifecycle();
     execute_performance_clock();
+    execute_current_directory();
     execute_image();
     execute_function();
     inspect_image();
