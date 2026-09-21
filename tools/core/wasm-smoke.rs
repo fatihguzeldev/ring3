@@ -15,6 +15,25 @@ mod complement_executable;
 #[path = "../../core/tests/support/string_scan_executable.rs"]
 mod string_scan_executable;
 
+#[path = "../../core/tests/support/repeated_moves_executable.rs"]
+mod repeated_moves_executable;
+
+fn execute_repeated_moves() {
+    use ring3_core::execution::{Process32, ProcessStop, Register32, StopReason};
+    let mut process = Process32::load(&repeated_moves_executable::pe32(), 32).unwrap();
+    process.cpu.eflags = 0xcad7;
+    let result = process.run(50);
+    assert_eq!(result.reason, ProcessStop::Stopped(StopReason::Breakpoint));
+    assert_eq!((result.instructions, result.api_calls), (10, 0));
+    assert_eq!(process.cpu.register(Register32::Ecx), 0);
+    assert_eq!(process.cpu.register(Register32::Esi), 0x0040_208b);
+    assert_eq!(process.cpu.register(Register32::Edi), 0x0040_20cb);
+    assert_eq!(process.cpu.eflags, 0xcad7);
+    let mut copied = [0; 11];
+    process.memory.read(0x0040_20c0, &mut copied).unwrap();
+    assert_eq!(copied, [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]);
+}
+
 fn execute_string_scan() {
     use ring3_core::execution::{Process32, ProcessStop, Register32, StopReason};
     let mut process = Process32::load(&string_scan_executable::pe32(), 32).unwrap();
@@ -2234,6 +2253,7 @@ pub extern "C" fn run() -> u32 {
     execute_buffer_copy();
     execute_complement();
     execute_string_scan();
+    execute_repeated_moves();
     execute_thread_identity();
     execute_module_file_name();
     execute_resources();
