@@ -7,6 +7,7 @@ use super::{
 mod arguments;
 mod buffers;
 mod floating;
+mod formatting;
 mod initializers;
 mod multibyte;
 mod onexit;
@@ -61,6 +62,7 @@ pub(super) enum Call {
     TypeName,
     CompareStringPrefix,
     CompareIgnoringCase,
+    Format,
     SetMbCodePage,
     OnExit,
 }
@@ -95,6 +97,7 @@ impl Call {
             0x16c => Some(Self::TypeName),
             0x170 => Some(Self::CompareStringPrefix),
             0x174 => Some(Self::CompareIgnoringCase),
+            0x178 => Some(Self::Format),
             0x13c => Some(Self::SetMbCodePage),
             0x140 => Some(Self::OnExit),
             _ => None,
@@ -120,6 +123,7 @@ impl Call {
             | Self::Stat
             | Self::CompareIgnoringCase => 2,
             Self::GetMainArgs => 5,
+            Self::Format => 4,
             Self::Memset
             | Self::DllOnExit
             | Self::Compare
@@ -207,6 +211,7 @@ impl Crt {
             Call::OnExit => Some(self.exit_callbacks.register(arguments[0])),
             Call::Duplicate => Some(strings::duplicate(memory, heap, arguments[0])?),
             Call::Length => Some(strings::length(memory, arguments[0])?),
+            Call::Format => Some(formatting::write(memory, arguments)?),
             Call::CompareIgnoringCase => Some(strings::compare_ignoring_case(
                 memory,
                 arguments[0],
@@ -311,6 +316,7 @@ pub(super) fn resolve(name: &str) -> Option<u32> {
         "?name@type_info@@QBEPBDXZ" => Some(API_BASE + 0x16c),
         "strncmp" => Some(API_BASE + 0x170),
         "_stricmp" => Some(API_BASE + 0x174),
+        "_vsnprintf" => Some(API_BASE + 0x178),
         "__dllonexit" => Some(API_BASE + 0x128),
         "_mbsrchr" => Some(API_BASE + 0x12c),
         "_mbsinc" => Some(API_BASE + 0x130),
