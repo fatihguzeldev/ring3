@@ -38,3 +38,4 @@ EXPORTS
     _stat
     srand
     rand
+    _ftol

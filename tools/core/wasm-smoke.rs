@@ -640,6 +640,29 @@ mod millisecond_clock_executable;
 #[path = "../../core/tests/support/random_executable.rs"]
 mod random_executable;
 
+#[path = "../../core/tests/support/float_to_integer_executable.rs"]
+mod float_to_integer_executable;
+
+fn execute_crt_float_to_integer() {
+    use ring3_core::execution::{Process32, ProcessStop, Register32, StopReason};
+    for (first, low, high) in [
+        (0x41f0_0000_001c_0000_u64, 1_u32, 1_u32),
+        (0x43df_ffff_ffff_ffff, 0xffff_fc00, 0x7fff_ffff),
+        (0xc3e0_0000_0000_0000, 0, 0x8000_0000),
+    ] {
+        let mut p = Process32::load(&float_to_integer_executable::pe32(), 32).unwrap();
+        p.memory.write(0x0040_2180, &first.to_le_bytes()).unwrap();
+        let result = p.run(40);
+        assert_eq!(result.reason, ProcessStop::Stopped(StopReason::Breakpoint));
+        assert_eq!((result.instructions, result.api_calls), (7, 2));
+        assert_eq!(p.cpu.register(Register32::Esi), low);
+        assert_eq!(p.cpu.register(Register32::Edi), high);
+        assert_eq!(p.cpu.register(Register32::Eax), u32::MAX);
+        assert_eq!(p.cpu.register(Register32::Edx), u32::MAX);
+        assert_eq!(p.cpu.register(Register32::Esp), 0x1001_0000);
+    }
+}
+
 fn execute_crt_random() {
     use ring3_core::execution::{Process32, ProcessStop, Register32, StopReason};
     let mut process = Process32::load(&random_executable::pe32(), 32).unwrap();
@@ -2799,6 +2822,7 @@ pub extern "C" fn run() -> u32 {
     execute_x87_scaling();
     execute_millisecond_clock();
     execute_crt_random();
+    execute_crt_float_to_integer();
     execute_command_line();
     execute_image();
     execute_function();
