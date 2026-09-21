@@ -22,6 +22,10 @@ EXPORTS
     _strdup
     __unguarded_readlc_active DATA
     __setlc_active DATA
+    __lc_handle DATA
+    __lc_codepage DATA
+    __lc_collate_cp DATA
+    __mb_cur_max DATA
     strlen
     memcmp
     memcpy

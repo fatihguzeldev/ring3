@@ -145,6 +145,26 @@ mod counter_executable;
 #[path = "../../core/tests/support/locale_activity_executable.rs"]
 mod locale_activity_executable;
 
+#[path = "../../core/tests/support/locale_metadata_executable.rs"]
+mod locale_metadata_executable;
+
+fn execute_locale_metadata() {
+    use ring3_core::execution::{Process32, ProcessStop, Register32, StopReason};
+    let mut process = Process32::load(&locale_metadata_executable::pe32(), 32).unwrap();
+    let result = process.run(50);
+    assert_eq!(result.reason, ProcessStop::Stopped(StopReason::Breakpoint));
+    assert_eq!((result.instructions, result.api_calls), (12, 0));
+    for (register, expected) in [
+        (Register32::Eax, 0),
+        (Register32::Ebx, 42),
+        (Register32::Ecx, 0),
+        (Register32::Edx, 0),
+        (Register32::Ebp, 1),
+    ] {
+        assert_eq!(process.cpu.register(register), expected);
+    }
+}
+
 fn execute_locale_activity() {
     use ring3_core::execution::{Process32, ProcessStop, Register32, StopReason};
     let mut process = Process32::load(&counter_executable::pe32(), 32).unwrap();
@@ -2162,6 +2182,7 @@ pub extern "C" fn run() -> u32 {
     execute_local_realloc();
     execute_interlocked();
     execute_locale_activity();
+    execute_locale_metadata();
     execute_string_length();
     execute_buffer_copy();
     execute_complement();
