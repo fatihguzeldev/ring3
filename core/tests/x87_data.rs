@@ -296,10 +296,10 @@ fn fs_addressing_aliases_and_last_address_span_work() {
 }
 
 #[test]
-fn status_and_unimplemented_stack_forms_remain_explicit_stops() {
+fn examination_and_unimplemented_stack_forms_remain_explicit_stops() {
     for code in [
-        vec![0xdf, 0xe0],
-        vec![0xdd, 0x3d, 0, 0x23, 0x40, 0],
+        vec![0xd9, 0xe5],
+        vec![0xd9, 0xe4],
         vec![0xd9, 0xc0],
         vec![0xd9, 0xe8],
         vec![0xdb, 0xe2],

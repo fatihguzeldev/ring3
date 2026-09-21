@@ -1,12 +1,15 @@
 use iced_x86::{Code, Instruction, MemorySize, Register};
+use std::cmp::Ordering;
 
-use super::{Cpu32, GuestMemory, MemoryError, StopReason};
+use super::super::operands::Location;
+use super::{Cpu32, GuestMemory, MemoryError, StopReason, rounding};
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub(crate) struct Stack {
     values: [u64; 8],
     top: u8,
     occupied: u8,
+    status: u16,
 }
 
 impl Stack {
@@ -24,6 +27,7 @@ impl Stack {
         self.top = self.top.wrapping_sub(1) & 7;
         self.values[usize::from(self.top)] = value.to_bits();
         self.occupied += 1;
+        self.status &= !0x0200;
         Ok(())
     }
 
@@ -32,9 +36,52 @@ impl Stack {
         self.top = (self.top + 1) & 7;
         self.occupied -= 1;
     }
+
+    fn rounded(&mut self, inexact: bool, up: bool) {
+        self.status = (self.status & !0x0200) | (u16::from(up) << 9);
+        if inexact {
+            self.status |= 0x20;
+        }
+    }
 }
 
 impl Cpu32 {
+    pub(in super::super) fn x87_compare(
+        &mut self,
+        instruction: &Instruction,
+        memory: &GuestMemory,
+    ) -> Result<(), StopReason> {
+        self.x87_masked()?;
+        let left = self.x87_stack.value()?;
+        let right = self.read_float(instruction, memory)?;
+        let condition = match left.partial_cmp(&right).expect("admitted finite operands") {
+            Ordering::Less => 0x0100,
+            Ordering::Equal => 0x4000,
+            Ordering::Greater => 0,
+        };
+        self.x87_stack.status = (self.x87_stack.status & !0x4700) | condition;
+        if matches!(instruction.code(), Code::Fcomp_m32fp | Code::Fcomp_m64fp) {
+            self.x87_stack.pop();
+        }
+        Ok(())
+    }
+
+    pub(in super::super) fn x87_store_status(
+        &mut self,
+        instruction: &Instruction,
+        memory: &mut GuestMemory,
+    ) -> Result<(), StopReason> {
+        self.x87_masked()?;
+        let destination = self.operand(instruction, 0)?;
+        if let Location::Memory(address) = destination.location {
+            address
+                .checked_add(1)
+                .ok_or(StopReason::MemoryFault(MemoryError::AddressOverflow))?;
+        }
+        let status = self.x87_stack.status | (u16::from(self.x87_stack.top) << 11);
+        self.write_operand(destination, u32::from(status), memory)
+    }
+
     pub(crate) fn pop_x87_truncated_integer(&mut self) -> Option<i64> {
         if self.x87_control_word & 0x3f != 0x3f {
             return None;
@@ -49,6 +96,8 @@ impl Cpu32 {
             reason = "checked truncation toward zero"
         )]
         let integer = value as i64;
+        self.x87_stack
+            .rounded(value.to_bits() != value.trunc().to_bits(), false);
         self.x87_stack.pop();
         Some(integer)
     }
@@ -60,11 +109,12 @@ impl Cpu32 {
     ) -> Result<(), StopReason> {
         self.x87_profile()?;
         let top = self.x87_stack.value()?;
-        let result = if instruction.code() == Code::Fsqrt {
+        let (result, rounding) = if instruction.code() == Code::Fsqrt {
             if top < 0.0 {
                 return Err(StopReason::UnsupportedInstruction);
             }
-            top.sqrt()
+            let result = top.sqrt();
+            (result, rounding::square_root_result(result, top))
         } else {
             let source = self.read_float(instruction, memory)?;
             let multiply = matches!(instruction.code(), Code::Fmul_m32fp | Code::Fmul_m64fp);
@@ -80,8 +130,15 @@ impl Cpu32 {
             if !result.is_finite() || (!exact_zero && result.abs() < 2.0 * f64::MIN_POSITIVE) {
                 return Err(StopReason::UnsupportedInstruction);
             }
-            result
+            let rounding = if multiply {
+                rounding::product_result(result, top, source)
+            } else {
+                rounding::quotient_result(result, source, top)
+            };
+            (result, rounding)
         };
+        self.x87_stack
+            .rounded(rounding != Ordering::Equal, rounding == Ordering::Greater);
         self.x87_stack.values[usize::from(self.x87_stack.top)] = result.to_bits();
         Ok(())
     }
@@ -148,6 +205,10 @@ impl Cpu32 {
         memory
             .write(u64::from(address), &integer.to_le_bytes()[..size])
             .map_err(StopReason::MemoryFault)?;
+        self.x87_stack.rounded(
+            rounded.to_bits() != value.to_bits(),
+            rounded.abs() > value.abs(),
+        );
         if matches!(
             instruction.code(),
             Code::Fistp_m16int | Code::Fistp_m32int | Code::Fistp_m64int
@@ -171,6 +232,7 @@ impl Cpu32 {
         let value = self.x87_stack.value()?;
         let (address, size) = self.data_address(instruction)?;
         let mut bytes = value.to_le_bytes();
+        let mut rounded = value;
         if size == 4 {
             if value != 0.0
                 && !(f64::from(f32::MIN_POSITIVE)..=f64::from(f32::MAX)).contains(&value.abs())
@@ -182,11 +244,16 @@ impl Cpu32 {
                 reason = "checked nearest-even narrowing"
             )]
             let narrowed = value as f32;
+            rounded = f64::from(narrowed);
             bytes[..4].copy_from_slice(&narrowed.to_le_bytes());
         }
         memory
             .write(u64::from(address), &bytes[..size])
             .map_err(StopReason::MemoryFault)?;
+        self.x87_stack.rounded(
+            rounded.to_bits() != value.to_bits(),
+            rounded.abs() > value.abs(),
+        );
         if matches!(instruction.code(), Code::Fstp_m32fp | Code::Fstp_m64fp) {
             self.x87_stack.pop();
         }
@@ -194,7 +261,6 @@ impl Cpu32 {
     }
 
     fn x87_profile(&self) -> Result<(), StopReason> {
-        // status and exception delivery remain unsupported; never expose a fabricated status word.
         if self.x87_control_word & 0x0f3f != 0x023f {
             return Err(StopReason::UnsupportedInstruction);
         }

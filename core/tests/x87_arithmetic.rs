@@ -1,8 +1,10 @@
 #[path = "support/executable.rs"]
 mod executable;
+#[path = "support/integer_cpu_state.rs"]
+mod integer_cpu_state;
 #[path = "support/x87_executable.rs"]
 mod x87_executable;
-use ring3_core::execution::{Cpu32, GuestMemory, StopReason, load_pe32};
+use ring3_core::execution::{Cpu32, GuestMemory, Register32, StopReason, load_pe32};
 
 #[test]
 fn authored_load_compute_store_sequence_runs_whole_or_stepwise() {
@@ -43,7 +45,7 @@ fn authored_load_compute_store_sequence_runs_whole_or_stepwise() {
 fn load(operation: &[u8], top: u64, source: u64) -> (Cpu32, GuestMemory) {
     let mut code = vec![0xdd, 0x05, 0, 0x22, 0x40, 0];
     code.extend_from_slice(operation);
-    code.extend_from_slice(&[0xdd, 0x1d, 0x20, 0x22, 0x40, 0]);
+    code.extend_from_slice(&[0xdd, 0x1d, 0x20, 0x22, 0x40, 0, 0xdf, 0xe0]);
     let mut image = load_pe32(&executable::pe32(&code), 16).unwrap();
     image.memory.write(0x0040_2200, &top.to_le_bytes()).unwrap();
     image
@@ -81,7 +83,16 @@ fn square_root_matches_known_bits_and_preserves_signed_zero() {
                 assert_eq!(cpu.run(&mut memory, budget).instructions, budget);
             }
             assert_eq!(result(&memory), expected);
-            assert_eq!(cpu, expected_cpu);
+            integer_cpu_state::assert_unchanged(&cpu, &expected_cpu);
+            assert_eq!(cpu.run(&mut memory, 1).instructions, 1);
+            assert_eq!(
+                cpu.register(Register32::Eax),
+                if input == 0x4000_0000_0000_0000 {
+                    0x20
+                } else {
+                    0
+                }
+            );
         }
     }
 }
@@ -127,7 +138,12 @@ fn reverse_division_orders_memory_before_top_and_rounds_to_binary64() {
             expected_cpu.eip += 18;
             assert_eq!(cpu.run(&mut memory, 3).instructions, 3);
             assert_eq!(result(&memory), expected);
-            assert_eq!(cpu, expected_cpu);
+            integer_cpu_state::assert_unchanged(&cpu, &expected_cpu);
+            assert_eq!(cpu.run(&mut memory, 1).instructions, 1);
+            assert_eq!(
+                cpu.register(Register32::Eax),
+                if top == 3_f64.to_bits() { 0x20 } else { 0 }
+            );
         }
     }
 }

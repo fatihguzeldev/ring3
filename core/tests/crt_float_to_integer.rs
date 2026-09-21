@@ -2,6 +2,8 @@
 mod float_to_integer_executable;
 #[path = "support/imported_executable.rs"]
 mod imported_executable;
+#[path = "support/integer_cpu_state.rs"]
+mod integer_cpu_state;
 
 use ring3_core::execution::{
     LoadError, Permissions, Process32, ProcessStop, Register32, StopReason,
@@ -13,7 +15,7 @@ const STACK: u32 = 0x1000_ff00;
 fn process() -> Process32 {
     Process32::load(
         &imported_executable::pe32(
-            &[0xdd, 0x05, 0x80, 0x21, 0x40, 0, 0xcc],
+            &[0xdd, 0x05, 0x80, 0x21, 0x40, 0, 0xdf, 0xe0, 0xcc],
             "MSVCRT.dll",
             &["_ftol"],
         ),
@@ -110,7 +112,25 @@ fn signed_fractions_and_integer_boundaries_truncate_and_pop_without_memory_write
         empty.set_register(Register32::Esp, STACK + 4);
         empty.set_register(Register32::Eax, p.cpu.register(Register32::Eax));
         empty.set_register(Register32::Edx, p.cpu.register(Register32::Edx));
-        assert_eq!(p.cpu, empty);
+        integer_cpu_state::assert_unchanged(&p.cpu, &empty);
+        p.cpu.eip = 0x0040_1006;
+        assert_eq!(p.run(1).instructions, 1);
+        let precision = if matches!(
+            input,
+            0x3ffc_0000_0000_0000
+                | 0xbffc_0000_0000_0000
+                | 0x3fe8_0000_0000_0000
+                | 0xbfe8_0000_0000_0000
+                | 0x0010_0000_0000_0000
+                | 0x8010_0000_0000_0000
+                | 0x41f0_0000_001c_0000
+                | 0xc1f0_0000_001c_0000
+        ) {
+            0x20
+        } else {
+            0
+        };
+        assert_eq!(p.cpu.register(Register32::Eax) & 0xffff, precision);
         assert_eq!(p.last_error().unwrap(), 77);
         let mut error = [0; 4];
         p.memory.read(0x7000_2020, &mut error).unwrap();

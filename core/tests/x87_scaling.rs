@@ -1,9 +1,11 @@
 #[path = "support/executable.rs"]
 mod executable;
+#[path = "support/integer_cpu_state.rs"]
+mod integer_cpu_state;
 #[path = "support/x87_scaling_executable.rs"]
 mod x87_scaling_executable;
 
-use ring3_core::execution::{Cpu32, GuestMemory, Permissions, StopReason, load_pe32};
+use ring3_core::execution::{Cpu32, GuestMemory, Permissions, Register32, StopReason, load_pe32};
 
 #[test]
 fn authored_integer_scaling_agrees_whole_stepwise_and_with_known_bits() {
@@ -186,6 +188,7 @@ fn multiplication(opcode: u8, top: u64, source: u64) -> (Cpu32, GuestMemory) {
     let mut code = operand(0xdd, 0x05, 0x0040_2200);
     code.extend(operand(opcode, 0x0d, 0x0040_2210));
     code.extend(operand(0xdd, 0x1d, 0x0040_2300));
+    code.extend([0xdf, 0xe0]);
     let (cpu, mut memory) = load(&code);
     memory.write(0x0040_2200, &top.to_le_bytes()).unwrap();
     memory.write(0x0040_2210, &source.to_le_bytes()).unwrap();
@@ -229,7 +232,16 @@ fn multiplication_rounds_known_ties_and_preserves_zero_sign() {
             expected_cpu.eip += 18;
             assert_eq!(cpu.run(&mut memory, 3).instructions, 3);
             assert_eq!(result(&memory), expected);
-            assert_eq!(cpu, expected_cpu);
+            integer_cpu_state::assert_unchanged(&cpu, &expected_cpu);
+            assert_eq!(cpu.run(&mut memory, 1).instructions, 1);
+            assert_eq!(
+                cpu.register(Register32::Eax),
+                if matches!(top, 0x3ff0_0000_0000_0001 | 0x3ff0_0000_0000_0003) {
+                    0x20
+                } else {
+                    0
+                }
+            );
         }
     }
 }

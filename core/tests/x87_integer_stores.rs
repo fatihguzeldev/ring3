@@ -1,9 +1,11 @@
 #[path = "support/executable.rs"]
 mod executable;
+#[path = "support/integer_cpu_state.rs"]
+mod integer_cpu_state;
 #[path = "support/integer_store_executable.rs"]
 mod integer_store_executable;
 
-use ring3_core::execution::{Cpu32, GuestMemory, Permissions, StopReason, load_pe32};
+use ring3_core::execution::{Cpu32, GuestMemory, Permissions, Register32, StopReason, load_pe32};
 
 const INPUT: u32 = 0x0040_2200;
 const OUTPUT: u32 = 0x0040_2300;
@@ -24,6 +26,7 @@ fn operand(opcode: u8, mode: u8, address: u32) -> Vec<u8> {
 fn load(opcode: u8, mode: u8, address: u32, input: f64, control: u16) -> (Cpu32, GuestMemory) {
     let mut code = operand(0xdd, 0x05, INPUT);
     code.extend(operand(opcode, mode, address));
+    code.extend([0xdf, 0xe0]);
     let mut image = load_pe32(&executable::pe32(&code), 32).unwrap();
     image
         .memory
@@ -93,7 +96,17 @@ fn every_store_form_uses_guest_rounding_and_changes_only_its_output_and_optional
                 assert_eq!(cpu.run(&mut memory, 0).instructions, 0);
                 assert_eq!(cpu, before);
                 assert_eq!(cpu.run(&mut memory, 1).instructions, 1);
-                assert_eq!(cpu, expected_cpu);
+                integer_cpu_state::assert_unchanged(&cpu, &expected_cpu);
+                assert_eq!(cpu.run(&mut memory, 1).instructions, 1);
+                let rounded = f64::from(i32::try_from(expected).unwrap());
+                let status = if pop { 0 } else { 0x3800 }
+                    | if input == 0.0 { 0 } else { 0x20 }
+                    | if rounded.abs() > input.abs() {
+                        0x200
+                    } else {
+                        0
+                    };
+                assert_eq!(cpu.register(Register32::Eax), status);
                 assert_eq!(read(&memory, OUTPUT, size), expected.to_le_bytes()[..size]);
                 assert_eq!(
                     read(&memory, OUTPUT + u32::try_from(size).unwrap(), 16 - size),

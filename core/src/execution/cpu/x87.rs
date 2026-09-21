@@ -4,6 +4,7 @@ use super::operands::Location;
 use super::{Cpu32, GuestMemory, MemoryError, StopReason};
 
 mod data;
+mod rounding;
 pub(super) use data::Stack;
 
 impl Cpu32 {
