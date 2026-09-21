@@ -5,6 +5,7 @@ use super::{
 use crate::PeImportSymbol;
 
 mod atomics;
+mod clock;
 mod code_pages;
 mod critical_sections;
 mod crt;
@@ -25,6 +26,7 @@ mod thread;
 mod tls;
 mod user_atoms;
 
+pub use clock::ClockError;
 pub use d3d8::Frame;
 pub use parameters::ProcessOptions;
 
@@ -40,6 +42,7 @@ pub struct Process32 {
     pub cpu: Cpu32,
     exit_code: Option<u32>,
     error_mode: u32,
+    elapsed_nanoseconds: i64,
     subsystem_version: u32,
     startup: startup::Startup,
     modules: modules::Modules,
@@ -90,6 +93,7 @@ enum Api {
     GetCurrentThreadId,
     ExitProcess,
     Interlocked(atomics::Call),
+    Clock(clock::Call),
     GetDesktopWindow,
     RegisterUserAtom,
     System(system::Call),
@@ -155,6 +159,7 @@ impl Api {
                 .or_else(|| heap::Call::at(offset).map(Self::Heap))
                 .or_else(|| critical_sections::Call::at(offset).map(Self::CriticalSection))
                 .or_else(|| synchronization::Call::at(offset).map(Self::Synchronization))
+                .or_else(|| clock::Call::at(offset).map(Self::Clock))
                 .or_else(|| tls::Call::at(offset).map(Self::Tls))
                 .or_else(|| code_pages::Call::at(offset).map(Self::CodePage)),
         }
@@ -187,6 +192,8 @@ impl Api {
                 "WaitForSingleObject" => 0x214,
                 "ReleaseMutex" => 0x218,
                 "CloseHandle" => 0x21c,
+                "QueryPerformanceFrequency" => 0x220,
+                "QueryPerformanceCounter" => 0x224,
                 "lstrcpynA" => 0xe4,
                 "lstrcpyA" => 0xf0,
                 "lstrcatA" => 0xf4,
@@ -381,6 +388,7 @@ impl Process32 {
             cpu,
             exit_code: None,
             error_mode: 0,
+            elapsed_nanoseconds: 0,
             subsystem_version: (u32::from(major) << 16) | u32::from(minor),
             startup,
             modules,
@@ -524,6 +532,7 @@ impl Process32 {
         let argument = arguments.first().copied().unwrap_or(0);
         match api {
             Api::Interlocked(call) => self.interlocked(call, arguments)?,
+            Api::Clock(call) => self.query_clock(call, argument)?,
             Api::Synchronization(call) => self.cpu.set_register(
                 Register32::Eax,
                 self.mutexes.dispatch(call, arguments, &mut self.memory)?,
