@@ -167,6 +167,7 @@ impl Api {
                 "LoadLibraryA" => 0x14,
                 "GetModuleHandleA" => 0x18,
                 "GetModuleFileNameA" => 0xe0,
+                "DisableThreadLibraryCalls" => 0xfc,
                 "GetSystemDirectoryA" => 0xf8,
                 "lstrcpynA" => 0xe4,
                 "lstrcpyA" => 0xf0,

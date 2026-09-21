@@ -8,6 +8,7 @@ pub(super) enum Call {
     Handle,
     Free,
     FileName,
+    DisableThreadCalls,
 }
 
 impl Call {
@@ -21,6 +22,7 @@ impl Call {
             0x18 => Some(Self::Handle),
             0x1c => Some(Self::Free),
             0xe0 => Some(Self::FileName),
+            0xfc => Some(Self::DisableThreadCalls),
             _ => None,
         }
     }
@@ -32,6 +34,7 @@ struct Module {
     handle: u32,
     references: u32,
     builtin: bool,
+    thread_notifications: bool,
 }
 
 pub(super) struct Modules {
@@ -60,6 +63,7 @@ impl Modules {
                 handle: provider.base,
                 references: 1,
                 builtin: false,
+                thread_notifications: true,
             })
             .collect();
         // builtin handles are opaque identities in the reserved api page, not images.
@@ -80,6 +84,7 @@ impl Modules {
                     handle: API_BASE + offset,
                     references: 1,
                     builtin: true,
+                    thread_notifications: true,
                 });
             }
         }
@@ -98,6 +103,21 @@ impl Modules {
         memory: &mut GuestMemory,
     ) -> Result<u32, DispatchError> {
         let argument = arguments[0];
+        if matches!(call, Call::DisableThreadCalls) {
+            if argument == self.program {
+                return Err(DispatchError::Unsupported);
+            }
+            let Some(module) = self
+                .resident
+                .iter_mut()
+                .find(|module| module.handle == argument)
+            else {
+                thread::set_last_error(memory, 126)?;
+                return Ok(0);
+            };
+            module.thread_notifications = false;
+            return Ok(1);
+        }
         if matches!(call, Call::FileName) {
             return self.file_name(argument, arguments[1], arguments[2], memory);
         }
@@ -242,6 +262,56 @@ fn read_name(memory: &GuestMemory, pointer: u32) -> Result<String, DispatchError
 mod tests {
     use super::*;
     use crate::execution::{PAGE_SIZE, Permissions};
+
+    #[test]
+    fn notification_policy_is_per_module_and_per_process_without_reference_changes() {
+        let create = || {
+            Modules::new(
+                0x0040_0000,
+                b"C:\\program.exe",
+                vec![
+                    MappedModule {
+                        name: "first.dll".into(),
+                        base: 0x5000_0000,
+                    },
+                    MappedModule {
+                        name: "second.dll".into(),
+                        base: 0x5001_0000,
+                    },
+                ],
+            )
+        };
+        let mut modules = create();
+        let other = create();
+        let mut memory = GuestMemory::new(0);
+        for _ in 0..2 {
+            assert_eq!(
+                modules
+                    .dispatch(Call::DisableThreadCalls, &[0x5000_0000], false, &mut memory)
+                    .ok(),
+                Some(1)
+            );
+            assert!(!modules.resident[0].thread_notifications);
+            assert!(
+                modules.resident[1..]
+                    .iter()
+                    .all(|module| module.thread_notifications)
+            );
+            assert!(modules.resident.iter().all(|module| module.references == 1));
+            assert!(
+                other
+                    .resident
+                    .iter()
+                    .all(|module| module.thread_notifications)
+            );
+        }
+        assert!(matches!(
+            modules.dispatch(Call::DisableThreadCalls, &[0], true, &mut memory),
+            Err(DispatchError::Memory(_))
+        ));
+        assert!(!modules.resident[0].thread_notifications);
+        assert!(modules.resident[1].thread_notifications);
+    }
 
     #[test]
     fn reference_overflow_does_not_mutate_state() {

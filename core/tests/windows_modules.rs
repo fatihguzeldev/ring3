@@ -5,6 +5,8 @@ mod dll_executable;
 mod imported_executable;
 #[path = "support/modules_executable.rs"]
 mod modules_executable;
+#[path = "support/thread_notifications_executable.rs"]
+mod thread_notifications_executable;
 
 use ring3_core::execution::{
     GuestModule, LoadError, Permissions, Process32, ProcessOptions, ProcessStop, Register32,
@@ -59,7 +61,12 @@ fn program() -> Vec<u8> {
     imported_executable::pe32(
         &[0xcc],
         "kernel32.dll",
-        &["LoadLibraryA", "GetModuleHandleA", "FreeLibrary"],
+        &[
+            "LoadLibraryA",
+            "GetModuleHandleA",
+            "FreeLibrary",
+            "DisableThreadLibraryCalls",
+        ],
     )
 }
 
@@ -120,6 +127,111 @@ fn call(process: &mut Process32, slot: u32, argument: u32) -> u32 {
     assert_eq!(process.cpu.eip, 0x0040_1000);
     assert_eq!(process.cpu.register(Register32::Esp), STACK + 8);
     process.cpu.register(Register32::Eax)
+}
+
+#[test]
+fn dll_process_attach_can_disable_thread_notifications_and_still_finish() {
+    let library = thread_notifications_executable::dll();
+    let bytes = dll_executable::exe("demo.dll");
+    let modules = [GuestModule {
+        name: "demo.dll",
+        bytes: &library,
+    }];
+    let options = ProcessOptions {
+        modules: &modules,
+        ..ProcessOptions::default()
+    };
+    let mut whole = Process32::load_with_options(&bytes, 32, options).unwrap();
+    let mut stepped = Process32::load_with_options(&bytes, 32, options).unwrap();
+    let result = whole.run(100);
+    assert_eq!(result.reason, ProcessStop::Stopped(StopReason::Breakpoint));
+    assert_eq!(result.api_calls, 1);
+    assert_eq!(whole.cpu.register(Register32::Eax), 1);
+    assert_eq!(whole.cpu.register(Register32::Esp), 0x1001_0000);
+    let (mut instructions, mut calls) = (0, 0);
+    for _ in 0..100 {
+        let step = stepped.run(1);
+        instructions += step.instructions;
+        calls += step.api_calls;
+        if step.reason != ProcessStop::Stopped(StopReason::InstructionLimit) {
+            assert_eq!(step.reason, result.reason);
+            break;
+        }
+    }
+    assert_eq!(
+        (instructions, calls),
+        (result.instructions, result.api_calls)
+    );
+    assert_eq!(stepped.cpu, whole.cpu);
+}
+
+#[test]
+fn notification_disable_checks_module_identity_and_preserves_error_state_on_success() {
+    let library = dll_executable::dll(DLL, &dll_executable::attach(DLL, 42, true), None);
+    let mut process = load(&[GuestModule {
+        name: "demo.dll",
+        bytes: &library,
+    }]);
+    let bootstrap = process.cpu;
+    process
+        .memory
+        .write(0x7ffd_e034, &77_u32.to_le_bytes())
+        .unwrap();
+    for handle in [DLL, DLL, 0x7000_0800] {
+        assert_eq!(call(&mut process, 3, handle), 1);
+        assert_eq!(process.last_error().unwrap(), 77);
+    }
+    name(&mut process, "demo.dll");
+    prepare(&mut process, 0, NAME);
+    assert!(matches!(
+        process.run(1).reason,
+        ProcessStop::UnsupportedApi { .. }
+    ));
+    process.cpu = bootstrap;
+    assert_eq!(
+        process.run(100).reason,
+        ProcessStop::Stopped(StopReason::Breakpoint)
+    );
+    assert_eq!(call(&mut process, 0, NAME), DLL);
+    assert_eq!(call(&mut process, 2, DLL), 1);
+    prepare(&mut process, 2, DLL);
+    assert!(matches!(
+        process.run(1).reason,
+        ProcessStop::UnsupportedApi { .. }
+    ));
+    for invalid in [0, DLL + 1, 0x6000_0000, u32::MAX] {
+        assert_eq!(call(&mut process, 3, invalid), 0);
+        assert_eq!(process.last_error().unwrap(), 126);
+    }
+    prepare(&mut process, 3, 0x0040_0000);
+    let before = process.cpu;
+    assert_eq!(
+        process.run(1).reason,
+        ProcessStop::UnsupportedApi {
+            address: 0x7000_00fc
+        }
+    );
+    assert_eq!(process.cpu, before);
+    process
+        .memory
+        .protect(0x7ffd_e000, 4096, Permissions::NONE)
+        .unwrap();
+    assert_eq!(call(&mut process, 3, DLL), 1);
+    prepare(&mut process, 3, 0);
+    let before = process.cpu;
+    assert!(matches!(
+        process.run(1).reason,
+        ProcessStop::Stopped(StopReason::MemoryFault(_))
+    ));
+    assert_eq!(process.cpu, before);
+    prepare(&mut process, 3, DLL);
+    process.cpu.set_register(Register32::Esp, 0x1000_fffc);
+    let before = process.cpu;
+    assert!(matches!(
+        process.run(1).reason,
+        ProcessStop::Stopped(StopReason::MemoryFault(_))
+    ));
+    assert_eq!(process.cpu, before);
 }
 
 #[test]
