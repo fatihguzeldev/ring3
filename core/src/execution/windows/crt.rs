@@ -1,7 +1,7 @@
 use super::super::Access;
 use super::{
     API_BASE, Cpu32, DispatchError, GuestMemory, MemoryError, PAGE_SIZE, Permissions, Register32,
-    guest, heap,
+    directory, guest, heap,
 };
 
 mod arguments;
@@ -10,6 +10,7 @@ mod floating;
 mod initializers;
 mod multibyte;
 mod onexit;
+mod status;
 mod strings;
 
 const DATA: u32 = 0x7000_2000;
@@ -51,6 +52,7 @@ pub(super) enum Call {
     Copy,
     CopyString,
     FindCharacter,
+    Stat,
     SetMbCodePage,
     OnExit,
 }
@@ -78,6 +80,7 @@ impl Call {
             0x150 => Some(Self::Copy),
             0x154 => Some(Self::CopyString),
             0x158 => Some(Self::FindCharacter),
+            0x15c => Some(Self::Stat),
             0x13c => Some(Self::SetMbCodePage),
             0x140 => Some(Self::OnExit),
             _ => None,
@@ -96,7 +99,7 @@ impl Call {
             | Self::Length
             | Self::SetMbCodePage
             | Self::OnExit => 1,
-            Self::ControlFp | Self::MbSearchReverse | Self::FindCharacter => 2,
+            Self::ControlFp | Self::MbSearchReverse | Self::FindCharacter | Self::Stat => 2,
             Self::GetMainArgs => 5,
             Self::Memset | Self::DllOnExit | Self::Compare | Self::Copy | Self::CopyString => 3,
             Self::FmodePointer | Self::CommodePointer | Self::ErrnoPointer => 0,
@@ -112,6 +115,22 @@ pub(super) struct Crt {
     exit_callbacks: onexit::Registry,
 }
 
+impl super::Process32 {
+    pub(super) fn crt_call(&mut self, call: Call, arguments: &[u32]) -> Result<(), DispatchError> {
+        if let Some(value) = self.crt.dispatch(
+            call,
+            arguments,
+            &mut self.cpu,
+            &mut self.memory,
+            &mut self.heap,
+            &self.current_directory,
+        )? {
+            self.cpu.set_register(Register32::Eax, value);
+        }
+        Ok(())
+    }
+}
+
 impl Crt {
     pub(super) fn dispatch(
         &mut self,
@@ -120,6 +139,7 @@ impl Crt {
         cpu: &mut Cpu32,
         memory: &mut GuestMemory,
         heap: &mut heap::Heap,
+        directory: &directory::Directory,
     ) -> Result<Option<u32>, DispatchError> {
         Ok(match call {
             Call::SetAppType => {
@@ -154,6 +174,12 @@ impl Crt {
             Call::Duplicate => Some(strings::duplicate(memory, heap, arguments[0])?),
             Call::Length => Some(strings::length(memory, arguments[0])?),
             Call::FindCharacter => Some(strings::find(memory, arguments[0], arguments[1])?),
+            Call::Stat => Some(status::query(
+                directory,
+                memory,
+                arguments[0],
+                arguments[1],
+            )?),
             Call::CopyString => Some(strings::copy(
                 memory,
                 arguments[0],
@@ -220,6 +246,7 @@ pub(super) fn resolve(name: &str) -> Option<u32> {
         "??2@YAPAXI@Z" => Some(API_BASE + 0x144),
         "??3@YAXPAX@Z" => Some(API_BASE + 0x148),
         "_errno" => Some(API_BASE + 0x124),
+        "_stat" => Some(API_BASE + 0x15c),
         "__dllonexit" => Some(API_BASE + 0x128),
         "_mbsrchr" => Some(API_BASE + 0x12c),
         "_mbsinc" => Some(API_BASE + 0x130),

@@ -643,17 +643,7 @@ impl Process32 {
                 Register32::Eax,
                 self.cursors.dispatch(call, arguments, &mut self.memory)?,
             ),
-            Api::Crt(call) => {
-                if let Some(value) = self.crt.dispatch(
-                    call,
-                    arguments,
-                    &mut self.cpu,
-                    &mut self.memory,
-                    &mut self.heap,
-                )? {
-                    self.cpu.set_register(Register32::Eax, value);
-                }
-            }
+            Api::Crt(call) => self.crt_call(call, arguments)?,
             Api::ExceptionProlog | Api::ExitProcess | Api::Unsupported => unreachable!(),
         }
         Ok(())

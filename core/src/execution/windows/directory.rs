@@ -16,6 +16,13 @@ pub(super) struct Directory {
     searches: search::Searches,
 }
 
+pub(super) struct Status {
+    pub(super) drive: u8,
+    pub(super) size: u64,
+    pub(super) directory: bool,
+    pub(super) executable: bool,
+}
+
 #[derive(Clone, Copy)]
 pub(super) enum Call {
     Query,
@@ -128,6 +135,44 @@ impl Directory {
                     || candidate.len() == 3
                     || declared.get(candidate.len()) == Some(&b'\\'))
         })
+    }
+
+    pub(super) fn legacy_status(
+        &self,
+        memory: &GuestMemory,
+        source: u32,
+    ) -> Result<Option<Status>, DispatchError> {
+        let input = paths::read(memory, source)?;
+        let path = match paths::resolve(&self.terminated[..self.terminated.len() - 1], &input) {
+            Ok(path) => path,
+            Err(paths::PathError::Windows(_)) => return Ok(None),
+            Err(paths::PathError::Unsupported) => return Err(DispatchError::Unsupported),
+        };
+        if input.last() == Some(&b'\\')
+            && input.len() != 1
+            && !(input.len() == 3 && input[1] == b':')
+        {
+            return Ok(None);
+        }
+        let file = self
+            .files
+            .iter()
+            .find(|file| file.path.eq_ignore_ascii_case(&path));
+        if file.is_none() && !self.exists(&path) {
+            return Ok(None);
+        }
+        let executable = [b".exe", b".com", b".bat", b".cmd"]
+            .iter()
+            .any(|extension| {
+                path.get(path.len().saturating_sub(4)..)
+                    .is_some_and(|end| end.eq_ignore_ascii_case(*extension))
+            });
+        Ok(Some(Status {
+            drive: path[0].to_ascii_uppercase() - b'A',
+            size: file.map_or(0, |file| file.size),
+            directory: file.is_none(),
+            executable,
+        }))
     }
 
     pub(super) fn query(
