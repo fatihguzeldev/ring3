@@ -42,3 +42,4 @@ EXPORTS
     ?name@type_info@@QBEPBDXZ
     strncmp
     _stricmp
+    _vsnprintf

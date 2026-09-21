@@ -690,6 +690,31 @@ mod string_prefix_executable;
 #[path = "../../core/tests/support/case_compare_executable.rs"]
 mod case_compare_executable;
 
+#[path = "../../core/tests/support/formatting_executable.rs"]
+mod formatting_executable;
+
+fn execute_crt_formatting() {
+    use ring3_core::execution::{Process32, ProcessStop, Register32, StopReason};
+    for (capacity, result, expected) in [
+        (32_u8, 13_i32, b"ok:-42:ABCD:%\0!".as_slice()),
+        (13, 13, b"ok:-42:ABCD:%!"),
+        (5, -1, b"ok:-4!"),
+    ] {
+        let mut executable = formatting_executable::pe32();
+        executable[0x20b] = capacity;
+        let mut p = Process32::load(&executable, 32).unwrap();
+        p.memory.write(0x0040_2200, &[b'!'; 32]).unwrap();
+        let run = p.run(40);
+        assert_eq!(run.reason, ProcessStop::Stopped(StopReason::Breakpoint));
+        assert_eq!((run.instructions, run.api_calls), (7, 1));
+        assert_eq!(p.cpu.register(Register32::Eax), result.cast_unsigned());
+        assert_eq!(p.cpu.register(Register32::Esp), 0x1001_0000);
+        let mut bytes = vec![0; expected.len()];
+        p.memory.read(0x0040_2200, &mut bytes).unwrap();
+        assert_eq!(bytes, expected);
+    }
+}
+
 fn execute_crt_case_comparison() {
     use ring3_core::execution::{Process32, ProcessStop, Register32, StopReason};
     for (left, right, expected) in [
@@ -2995,6 +3020,7 @@ pub extern "C" fn run() -> u32 {
     execute_crt_type_names();
     execute_crt_string_prefix();
     execute_crt_case_comparison();
+    execute_crt_formatting();
     execute_command_line();
     execute_image();
     execute_function();
