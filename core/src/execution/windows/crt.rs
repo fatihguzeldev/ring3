@@ -8,6 +8,7 @@ mod arguments;
 mod buffers;
 mod floating;
 mod initializers;
+mod multibyte;
 mod onexit;
 mod strings;
 
@@ -38,6 +39,7 @@ pub(super) enum Call {
     MbIncrement,
     Duplicate,
     Compare,
+    SetMbCodePage,
 }
 
 impl Call {
@@ -57,13 +59,19 @@ impl Call {
             0x130 => Some(Self::MbIncrement),
             0x134 => Some(Self::Duplicate),
             0x138 => Some(Self::Compare),
+            0x13c => Some(Self::SetMbCodePage),
             _ => None,
         }
     }
 
     pub(super) fn arguments(self) -> usize {
         match self {
-            Self::SetAppType | Self::Malloc | Self::Free | Self::MbIncrement | Self::Duplicate => 1,
+            Self::SetAppType
+            | Self::Malloc
+            | Self::Free
+            | Self::MbIncrement
+            | Self::Duplicate
+            | Self::SetMbCodePage => 1,
             Self::ControlFp | Self::MbSearchReverse => 2,
             Self::GetMainArgs => 5,
             Self::Memset | Self::DllOnExit | Self::Compare => 3,
@@ -76,6 +84,7 @@ impl Call {
 pub(super) struct Crt {
     pub(super) application_type: i32,
     pub(super) new_mode: u32,
+    multibyte: multibyte::CodePage,
 }
 
 impl Crt {
@@ -105,10 +114,16 @@ impl Crt {
                 None
             }
             Call::ErrnoPointer => Some(ERRNO),
-            Call::MbSearchReverse => {
-                Some(strings::reverse_search(memory, arguments[0], arguments[1])?)
+            Call::MbSearchReverse => Some(self.multibyte.reverse_search(
+                memory,
+                arguments[0],
+                arguments[1],
+            )?),
+            Call::MbIncrement => Some(self.multibyte.increment(memory, arguments[0])?),
+            Call::SetMbCodePage => {
+                self.multibyte.set(arguments[0].cast_signed())?;
+                Some(0)
             }
-            Call::MbIncrement => Some(strings::increment(memory, arguments[0])?),
             Call::Duplicate => Some(strings::duplicate(memory, heap, arguments[0])?),
             Call::Compare => Some(buffers::compare(
                 memory,
@@ -153,6 +168,7 @@ pub(super) fn resolve(name: &str) -> Option<u32> {
         "__getmainargs" => Some(API_BASE + 0x110),
         "memset" => Some(API_BASE + 0x114),
         "memcmp" => Some(API_BASE + 0x138),
+        "_setmbcp" => Some(API_BASE + 0x13c),
         "_EH_prolog" => Some(API_BASE + 0x118),
         "malloc" => Some(API_BASE + 0x11c),
         "free" => Some(API_BASE + 0x120),

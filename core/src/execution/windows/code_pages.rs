@@ -1,5 +1,5 @@
-const ANSI: u32 = 1252;
-const OEM: u32 = 437;
+pub(super) const ANSI: u32 = 1252;
+pub(super) const OEM: u32 = 437;
 
 #[derive(Clone, Copy)]
 pub(super) enum Call {
