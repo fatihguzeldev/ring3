@@ -1,5 +1,27 @@
 use super::{Access, DispatchError, ERRNO, GuestMemory, MemoryError, buffers, guest, heap};
 
+pub(super) fn find(
+    memory: &GuestMemory,
+    source: u32,
+    character: u32,
+) -> Result<u32, DispatchError> {
+    let character = character.to_le_bytes()[0];
+    for offset in 0..65536 {
+        let address = source
+            .checked_add(offset)
+            .ok_or(MemoryError::AddressOverflow)?;
+        let mut byte = [0];
+        memory.read(u64::from(address), &mut byte)?;
+        if byte[0] == character {
+            return Ok(address);
+        }
+        if byte[0] == 0 {
+            return Ok(0);
+        }
+    }
+    Err(DispatchError::Unsupported)
+}
+
 pub(super) fn copy(
     memory: &mut GuestMemory,
     destination: u32,

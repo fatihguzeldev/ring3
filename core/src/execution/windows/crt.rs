@@ -50,6 +50,7 @@ pub(super) enum Call {
     Compare,
     Copy,
     CopyString,
+    FindCharacter,
     SetMbCodePage,
     OnExit,
 }
@@ -76,6 +77,7 @@ impl Call {
             0x138 => Some(Self::Compare),
             0x150 => Some(Self::Copy),
             0x154 => Some(Self::CopyString),
+            0x158 => Some(Self::FindCharacter),
             0x13c => Some(Self::SetMbCodePage),
             0x140 => Some(Self::OnExit),
             _ => None,
@@ -94,7 +96,7 @@ impl Call {
             | Self::Length
             | Self::SetMbCodePage
             | Self::OnExit => 1,
-            Self::ControlFp | Self::MbSearchReverse => 2,
+            Self::ControlFp | Self::MbSearchReverse | Self::FindCharacter => 2,
             Self::GetMainArgs => 5,
             Self::Memset | Self::DllOnExit | Self::Compare | Self::Copy | Self::CopyString => 3,
             Self::FmodePointer | Self::CommodePointer | Self::ErrnoPointer => 0,
@@ -151,6 +153,7 @@ impl Crt {
             Call::OnExit => Some(self.exit_callbacks.register(arguments[0])),
             Call::Duplicate => Some(strings::duplicate(memory, heap, arguments[0])?),
             Call::Length => Some(strings::length(memory, arguments[0])?),
+            Call::FindCharacter => Some(strings::find(memory, arguments[0], arguments[1])?),
             Call::CopyString => Some(strings::copy(
                 memory,
                 arguments[0],
@@ -208,6 +211,7 @@ pub(super) fn resolve(name: &str) -> Option<u32> {
         "memcmp" => Some(API_BASE + 0x138),
         "memcpy" => Some(API_BASE + 0x150),
         "strncpy" => Some(API_BASE + 0x154),
+        "strchr" => Some(API_BASE + 0x158),
         "_setmbcp" => Some(API_BASE + 0x13c),
         "_onexit" => Some(API_BASE + 0x140),
         "_EH_prolog" => Some(API_BASE + 0x118),
