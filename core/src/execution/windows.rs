@@ -75,6 +75,7 @@ pub enum ProcessStop {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ProcessResult {
     pub reason: ProcessStop,
+    /// execution steps; each repeated scan element counts as one step.
     pub instructions: u64,
     pub api_calls: u64,
 }
@@ -416,7 +417,8 @@ impl Process32 {
         self.graphics.take_frame()
     }
 
-    /// each guest instruction and each completed api call costs one budget unit.
+    /// each guest execution step and completed api call costs one budget unit.
+    /// repeated scans use one step per element, or one for a zero-count scan.
     /// faults consume no unit for the faulting operation. exit is terminal and
     /// later calls return the same code without executing more guest work.
     pub fn run(&mut self, budget: u64) -> ProcessResult {

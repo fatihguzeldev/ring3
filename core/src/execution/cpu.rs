@@ -43,6 +43,7 @@ pub enum StopReason {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct RunResult {
     pub reason: StopReason,
+    /// execution steps; each repeated scan element counts as one step.
     pub instructions: u64,
     pub instruction_pointer: u32,
 }
@@ -93,7 +94,7 @@ impl Cpu32 {
     }
 
     /// suspends before fetching an address selected by the caller. interception
-    /// leaves cpu state unchanged and consumes no instruction. a zero budget
+    /// leaves cpu state unchanged and consumes no step. a zero budget
     /// returns the instruction limit without consulting the predicate.
     pub fn run_until(
         &mut self,
@@ -145,8 +146,8 @@ impl Cpu32 {
         memory: &mut GuestMemory,
     ) -> Result<bool, StopReason> {
         if instruction.has_lock_prefix()
-            || instruction.has_rep_prefix()
-            || instruction.has_repne_prefix()
+            || ((instruction.has_rep_prefix() || instruction.has_repne_prefix())
+                && !strings::is_scan(instruction.code()))
             || (instruction.has_segment_prefix() && instruction.segment_prefix() != Register::FS)
         {
             return Err(StopReason::UnsupportedInstruction);
@@ -210,6 +211,7 @@ impl Cpu32 {
             Code::Movsb_m8_m8 | Code::Movsw_m16_m16 | Code::Movsd_m32_m32 => {
                 self.move_string(instruction, memory)?;
             }
+            code if strings::is_scan(code) => next = self.scan_string(instruction, memory)?,
             Code::Fldcw_m2byte | Code::Fnstcw_m2byte => self.x87_control(instruction, memory)?,
             Code::Nopd | Code::Int3 => {}
             _ => next = self.conditional_instruction(instruction, memory)?,
