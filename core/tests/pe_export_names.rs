@@ -575,7 +575,7 @@ fn local_name_limit_includes_nul_and_precedes_the_next_range() {
 #[test]
 fn forwarder_and_name_budgets_are_separate_and_duplicates_count_toward_each() {
     for plus in [false, true] {
-        let mut bytes = fixture(plus, 64);
+        let mut bytes = fixture(plus, 1024);
         put32(&mut bytes, 532, 64);
         bytes[768..1791].fill(b'F');
         bytes[1791] = 0;
@@ -586,52 +586,66 @@ fn forwarder_and_name_budgets_are_separate_and_duplicates_count_toward_each() {
             put32(&mut bytes, file_offset(0x3000 + index * 4), 0x1100);
         }
         let result = parse_pe_export_names(&bytes).unwrap().unwrap();
-        assert_eq!(result.entries.len(), 64);
+        assert_eq!(result.entries.len(), 1024);
         assert_eq!(result.addresses.entries.len(), 64);
-        put32(&mut bytes, 536, 65);
-        row(&mut bytes, 64, u32::MAX, 0);
+        put32(&mut bytes, 536, 1025);
+        row(&mut bytes, 1024, u32::MAX, 0);
         assert_eq!(
             parse_pe_export_names(&bytes),
             Err(PeExportNameError::NameScanBudgetExceeded {
-                entry_index: 64,
+                entry_index: 1024,
                 start: RelativeVirtualAddress::new(u32::MAX),
                 offset: 0,
-                limit: 65_536,
+                limit: 1_048_576,
             })
         );
-        row(&mut bytes, 64, 0, 0);
+        row(&mut bytes, 1024, 0, 0);
         assert_eq!(
             parse_pe_export_names(&bytes),
-            Err(PeExportNameError::NameUnavailable { entry_index: 64 })
+            Err(PeExportNameError::NameUnavailable { entry_index: 1024 })
         );
-        row(&mut bytes, 64, 0, u16::MAX);
+        row(&mut bytes, 1024, 0, u16::MAX);
         assert_eq!(
             parse_pe_export_names(&bytes),
             Err(PeExportNameError::AddressIndexOutOfRange {
-                entry_index: 64,
+                entry_index: 1024,
                 address_index: u16::MAX,
                 address_count: 64,
             })
         );
-        row(&mut bytes, 63, 0xc800, 0);
-        row(&mut bytes, 64, 0xc000, 0);
+        row(&mut bytes, 1023, 0xc800, 0);
+        row(&mut bytes, 1024, 0xc000, 0);
         let second = file_offset(0xc800);
         bytes[second..second + 511].fill(b'B');
         bytes[second + 511] = 0;
         assert_eq!(
             parse_pe_export_names(&bytes),
             Err(PeExportNameError::NameScanBudgetExceeded {
-                entry_index: 64,
+                entry_index: 1024,
                 start: RelativeVirtualAddress::new(0xc000),
                 offset: 512,
-                limit: 65_536,
+                limit: 1_048_576,
+            })
+        );
+        bytes[second..second + 1022].fill(b'B');
+        bytes[second + 1022] = 0;
+        let single = file_offset(0xd000);
+        bytes[single..single + 2].copy_from_slice(b"Z\0");
+        row(&mut bytes, 1024, 0xd000, 0);
+        assert_eq!(
+            parse_pe_export_names(&bytes),
+            Err(PeExportNameError::NameScanBudgetExceeded {
+                entry_index: 1024,
+                start: RelativeVirtualAddress::new(0xd000),
+                offset: 1,
+                limit: 1_048_576,
             })
         );
         bytes[second..second + 1024].fill(b'B');
         assert_eq!(
             parse_pe_export_names(&bytes),
             Err(PeExportNameError::NameLengthLimitExceeded {
-                entry_index: 63,
+                entry_index: 1023,
                 start: RelativeVirtualAddress::new(0xc800),
                 limit: 1024,
             })

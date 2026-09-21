@@ -7,7 +7,7 @@ use crate::{FileOffset, RelativeVirtualAddress};
 
 const NAME_LIMIT: u32 = 4096;
 const NAME_LENGTH_LIMIT: u32 = 1024;
-const NAME_SCAN_BUDGET: u32 = 65_536;
+const NAME_SCAN_BUDGET: u32 = 1_048_576;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct PeExportName<'a> {
@@ -154,7 +154,7 @@ fn read_name<'a>(
 
 /// reads at most 4096 ordered names without sorting, deduplication or lookup.
 /// names may be outside the directory and may refer to empty address entries.
-/// name budgets include nul and duplicate scans: 1024 bytes each and 65,536
+/// name budgets include nul and duplicate scans: 1024 bytes each and 1,048,576
 /// total, separate from the inherited forwarder budget.
 ///
 /// # errors
