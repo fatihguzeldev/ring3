@@ -86,7 +86,7 @@ enum Api {
     GetCurrentThread,
     GetCurrentThreadId,
     ExitProcess,
-    InterlockedExchange,
+    Interlocked(atomics::Call),
     GetDesktopWindow,
     RegisterUserAtom,
     System(system::Call),
@@ -128,7 +128,9 @@ impl Api {
             0xd8 => Some(Self::GetCurrentThread),
             0xdc => Some(Self::GetCurrentThreadId),
             8 => Some(Self::ExitProcess),
-            0x200 => Some(Self::InterlockedExchange),
+            0x200 => Some(Self::Interlocked(atomics::Call::Exchange)),
+            0x204 => Some(Self::Interlocked(atomics::Call::Increment)),
+            0x208 => Some(Self::Interlocked(atomics::Call::Decrement)),
             16 => Some(Self::GetDesktopWindow),
             0x20 => Some(Self::SetErrorMode),
             0x24 => Some(Self::GetErrorMode),
@@ -168,6 +170,8 @@ impl Api {
                 "GetCurrentThreadId" => 0xdc,
                 "ExitProcess" => 8,
                 "InterlockedExchange" => 0x200,
+                "InterlockedIncrement" => 0x204,
+                "InterlockedDecrement" => 0x208,
                 "LoadLibraryA" => 0x14,
                 "GetModuleHandleA" => 0x18,
                 "GetModuleFileNameA" => 0xe0,
@@ -238,7 +242,7 @@ impl Api {
 
     fn arguments(self) -> usize {
         match self {
-            Self::InterlockedExchange => 2,
+            Self::Interlocked(call) => call.arguments(),
             Self::GetLastError
             | Self::GetCurrentThread
             | Self::GetCurrentThreadId
@@ -506,7 +510,7 @@ impl Process32 {
     fn invoke(&mut self, api: Api, arguments: &[u32], stack: u32) -> Result<(), DispatchError> {
         let argument = arguments.first().copied().unwrap_or(0);
         match api {
-            Api::InterlockedExchange => self.interlocked_exchange(arguments)?,
+            Api::Interlocked(call) => self.interlocked(call, arguments)?,
             Api::SetLastError => thread::set_last_error(&mut self.memory, argument)?,
             Api::GetLastError => self.cpu.set_register(Register32::Eax, self.last_error()?),
             Api::GetCurrentThread => self.cpu.set_register(Register32::Eax, u32::MAX - 1),
