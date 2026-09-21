@@ -61,6 +61,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     if name.contains('"') {
         return Err("input basename cannot contain a Windows command-line quote".into());
     }
+    let image_path = format!("C:\\{name}");
     let command_line = format!("\"{name}\"");
     let modules: Vec<_> = libraries
         .iter()
@@ -75,6 +76,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         &bytes,
         16_384,
         ProcessOptions {
+            image_path: image_path.as_bytes(),
             command_line: command_line.as_bytes(),
             diagnostic_imports: diagnostic,
             modules: &modules,
