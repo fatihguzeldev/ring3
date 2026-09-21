@@ -16,18 +16,20 @@ const REGISTERS: [Register32; 8] = [
 
 fn encoding(form: u8, modrm: u8) -> Vec<u8> {
     let mut code = if form == 0 { vec![0x66] } else { vec![] };
-    code.extend_from_slice(&[0x0f, if form == 2 { 0xb7 } else { 0xb6 }, modrm]);
+    code.extend_from_slice(&[0x0f, if form == 2 { 0xbf } else { 0xbe }, modrm]);
     code
 }
 
 #[test]
-fn all_register_forms_zero_extend_without_changing_flags_or_unrelated_bits() {
+fn all_register_forms_sign_extend_without_changing_flags_or_unrelated_bits() {
     for form in 0..3 {
         for source in 0..8_u8 {
             for destination in 0..8_u8 {
                 let code = encoding(form, 0xc0 | destination << 3 | source);
                 let mut image = load_pe32(&executable::pe32(&code), 3).unwrap();
-                let values: Vec<u32> = if form == 2 {
+                let values: Vec<u32> = if form == 2 && source == 0 && destination == 1 {
+                    (0..65536).collect()
+                } else if form == 2 {
                     vec![0, 1, 0x7f, 0x80, 0xff, 0x100, 0x7fff, 0x8000, 0xffff]
                 } else {
                     (0..256).collect()
@@ -43,12 +45,19 @@ fn all_register_forms_zero_extend_without_changing_flags_or_unrelated_bits() {
                     cpu.eflags = 0xced7;
                     let mut expected = cpu;
                     let dest = REGISTERS[usize::from(destination)];
+                    let bytes = value.to_le_bytes();
+                    let signed = if form == 2 {
+                        i32::from(i16::from_le_bytes([bytes[0], bytes[1]]))
+                    } else {
+                        i32::from(i8::from_le_bytes([bytes[0]]))
+                    }
+                    .cast_unsigned();
                     expected.set_register(
                         dest,
                         if form == 0 {
-                            (cpu.register(dest) & 0xffff_0000) | value
+                            (cpu.register(dest) & 0xffff_0000) | (signed & 0xffff)
                         } else {
-                            value
+                            signed
                         },
                     );
                     expected.eip += u32::try_from(code.len()).unwrap();
@@ -69,13 +78,17 @@ fn all_register_forms_zero_extend_without_changing_flags_or_unrelated_bits() {
 fn memory_reads_use_source_width_including_fs_sib_and_top_address() {
     for form in 0..3 {
         let width = if form == 2 { 2 } else { 1 };
-        for address in [0x0040_3000_u32 - width, u32::MAX - width + 1] {
+        for address in [0x0040_3000_u32 - width, 0x0040_2fff, u32::MAX - width + 1] {
             let mut code = encoding(form, 0x05);
             code.extend_from_slice(&address.to_le_bytes());
-            let mut image = load_pe32(&executable::pe32(&code), 4).unwrap();
+            let mut image = load_pe32(&executable::pe32(&code), 5).unwrap();
             image
                 .memory
                 .map_zeroed(0xffff_f000, PAGE_SIZE, Permissions::READ_WRITE)
+                .unwrap();
+            image
+                .memory
+                .map_zeroed(0x0040_3000, PAGE_SIZE, Permissions::READ_WRITE)
                 .unwrap();
             image
                 .memory
@@ -95,14 +108,19 @@ fn memory_reads_use_source_width_including_fs_sib_and_top_address() {
             expected.set_register(
                 Register32::Eax,
                 match form {
-                    0 => 0xa5b6_0080,
-                    1 => 0x80,
-                    _ => 0xff80,
+                    0 => 0xa5b6_ff80,
+                    _ => 0xffff_ff80,
                 },
             );
             expected.eip += u32::try_from(code.len()).unwrap();
+            let before = cpu;
+            assert_eq!(cpu.run(&mut image.memory, 0).instructions, 0);
+            assert_eq!(cpu, before);
             assert_eq!(cpu.run(&mut image.memory, 1).instructions, 1);
             assert_eq!(cpu, expected);
+            let mut after = vec![0; width as usize];
+            image.memory.read(u64::from(address), &mut after).unwrap();
+            assert_eq!(after, 0xff80_u16.to_le_bytes()[..width as usize]);
         }
         let mut code = encoding(form, 0x54);
         code.insert(0, 0x64);
@@ -115,7 +133,10 @@ fn memory_reads_use_source_width_including_fs_sib_and_top_address() {
         cpu.set_register(Register32::Edx, 3);
         cpu.eflags = 0xced7;
         let mut expected = cpu;
-        expected.set_register(Register32::Edx, if form == 2 { 0xff80 } else { 0x80 });
+        expected.set_register(
+            Register32::Edx,
+            if form == 0 { 0xff80 } else { 0xffff_ff80 },
+        );
         expected.eip += u32::try_from(code.len()).unwrap();
         assert_eq!(cpu.run(&mut image.memory, 1).instructions, 1);
         assert_eq!(cpu, expected);
@@ -127,7 +148,7 @@ fn failed_extension_reads_and_excluded_encodings_preserve_the_entire_cpu() {
     for address in [0x0040_2000_u32, 0x0040_2fff, u32::MAX] {
         let mut code = encoding(2, 0x05);
         code.extend_from_slice(&address.to_le_bytes());
-        let mut image = load_pe32(&executable::pe32(&code), 4).unwrap();
+        let mut image = load_pe32(&executable::pe32(&code), 5).unwrap();
         image
             .memory
             .map_zeroed(0xffff_f000, PAGE_SIZE, Permissions::READ_WRITE)
@@ -158,12 +179,12 @@ fn failed_extension_reads_and_excluded_encodings_preserve_the_entire_cpu() {
         assert_eq!(cpu, before);
     }
     for code in [
-        &[0x66, 0x0f, 0xb7, 0xc0][..],
+        &[0x66, 0x0f, 0xbf, 0xc0][..],
         &[0x0f, 0x31],
-        &[0x67, 0x0f, 0xb6, 0],
-        &[0xf3, 0x0f, 0xb6, 0xc0],
-        &[0xf2, 0x0f, 0xb6, 0xc0],
-        &[0x65, 0x0f, 0xb6, 0],
+        &[0x67, 0x0f, 0xbe, 0],
+        &[0xf3, 0x0f, 0xbe, 0xc0],
+        &[0xf2, 0x0f, 0xbe, 0xc0],
+        &[0x65, 0x0f, 0xbe, 0],
     ] {
         let mut image = load_pe32(&executable::pe32(code), 3).unwrap();
         let mut cpu = Cpu32::new(image.entry_point);
@@ -174,7 +195,7 @@ fn failed_extension_reads_and_excluded_encodings_preserve_the_entire_cpu() {
         );
         assert_eq!(cpu, before);
     }
-    let mut image = load_pe32(&executable::pe32(&[0xf0, 0x0f, 0xb6, 0]), 3).unwrap();
+    let mut image = load_pe32(&executable::pe32(&[0xf0, 0x0f, 0xbe, 0]), 3).unwrap();
     let mut cpu = Cpu32::new(image.entry_point);
     let before = cpu;
     assert_eq!(
@@ -184,12 +205,12 @@ fn failed_extension_reads_and_excluded_encodings_preserve_the_entire_cpu() {
     assert_eq!(cpu, before);
 }
 
-#[path = "support/zero_extend_executable.rs"]
-mod zero_extend_executable;
+#[path = "support/signed_extend_executable.rs"]
+mod signed_extend_executable;
 
 #[test]
-fn zero_extension_guest_matches_whole_and_single_instruction_execution() {
-    let bytes = zero_extend_executable::pe32();
+fn signed_extension_guest_matches_whole_and_single_instruction_execution() {
+    let bytes = signed_extend_executable::pe32();
     let mut whole = load_pe32(&bytes, 3).unwrap();
     let mut stepped = load_pe32(&bytes, 3).unwrap();
     let mut cpu = Cpu32::new(whole.entry_point);
@@ -210,9 +231,9 @@ fn zero_extension_guest_matches_whole_and_single_instruction_execution() {
     }
     assert_eq!(count, result.instructions);
     assert_eq!(other, cpu);
-    assert_eq!(cpu.register(Register32::Eax), 0xff);
-    assert_eq!(cpu.register(Register32::Ebx), 0x1234_00ff);
-    assert_eq!(cpu.register(Register32::Ecx), 0xff);
-    assert_eq!(cpu.register(Register32::Edx), 0xff80);
+    assert_eq!(cpu.register(Register32::Eax), u32::MAX);
+    assert_eq!(cpu.register(Register32::Ebx), 0x1234_ffff);
+    assert_eq!(cpu.register(Register32::Ecx), u32::MAX);
+    assert_eq!(cpu.register(Register32::Edx), 0xffff_ff80);
     assert_eq!(cpu.eflags, 0xced7);
 }

@@ -160,7 +160,12 @@ impl Cpu32 {
             Code::Cpuid => self.identify(),
             code if is_move(code) => {
                 let destination = self.operand(instruction, 0)?;
-                let value = self.read_operand(self.operand(instruction, 1)?, memory)?;
+                let source = self.operand(instruction, 1)?;
+                let mut value = self.read_operand(source, memory)?;
+                if instruction.mnemonic() == Mnemonic::Movsx {
+                    let shift = 32 - source.width as u32 * 8;
+                    value = ((value << shift).cast_signed() >> shift).cast_unsigned();
+                }
                 self.write_operand(destination, value, memory)?;
             }
             Code::Lea_r32_m => {
@@ -395,6 +400,9 @@ fn is_move(code: Code) -> bool {
             | Code::Movzx_r16_rm8
             | Code::Movzx_r32_rm8
             | Code::Movzx_r32_rm16
+            | Code::Movsx_r16_rm8
+            | Code::Movsx_r32_rm8
+            | Code::Movsx_r32_rm16
     )
 }
 
