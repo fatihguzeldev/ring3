@@ -10,6 +10,7 @@ mod floating;
 mod initializers;
 mod multibyte;
 mod onexit;
+mod random;
 mod status;
 mod strings;
 
@@ -53,6 +54,8 @@ pub(super) enum Call {
     CopyString,
     FindCharacter,
     Stat,
+    SeedRandom,
+    Random,
     SetMbCodePage,
     OnExit,
 }
@@ -81,6 +84,8 @@ impl Call {
             0x154 => Some(Self::CopyString),
             0x158 => Some(Self::FindCharacter),
             0x15c => Some(Self::Stat),
+            0x160 => Some(Self::SeedRandom),
+            0x164 => Some(Self::Random),
             0x13c => Some(Self::SetMbCodePage),
             0x140 => Some(Self::OnExit),
             _ => None,
@@ -97,12 +102,13 @@ impl Call {
             | Self::MbIncrement
             | Self::Duplicate
             | Self::Length
+            | Self::SeedRandom
             | Self::SetMbCodePage
             | Self::OnExit => 1,
             Self::ControlFp | Self::MbSearchReverse | Self::FindCharacter | Self::Stat => 2,
             Self::GetMainArgs => 5,
             Self::Memset | Self::DllOnExit | Self::Compare | Self::Copy | Self::CopyString => 3,
-            Self::FmodePointer | Self::CommodePointer | Self::ErrnoPointer => 0,
+            Self::FmodePointer | Self::CommodePointer | Self::ErrnoPointer | Self::Random => 0,
         }
     }
 }
@@ -113,6 +119,7 @@ pub(super) struct Crt {
     pub(super) new_mode: u32,
     multibyte: multibyte::CodePage,
     exit_callbacks: onexit::Registry,
+    random: random::Sequence,
 }
 
 impl super::Process32 {
@@ -160,6 +167,11 @@ impl Crt {
                 None
             }
             Call::ErrnoPointer => Some(ERRNO),
+            Call::SeedRandom => {
+                self.random.seed(arguments[0]);
+                None
+            }
+            Call::Random => Some(self.random.next()),
             Call::MbSearchReverse => Some(self.multibyte.reverse_search(
                 memory,
                 arguments[0],
@@ -247,6 +259,8 @@ pub(super) fn resolve(name: &str) -> Option<u32> {
         "??3@YAXPAX@Z" => Some(API_BASE + 0x148),
         "_errno" => Some(API_BASE + 0x124),
         "_stat" => Some(API_BASE + 0x15c),
+        "srand" => Some(API_BASE + 0x160),
+        "rand" => Some(API_BASE + 0x164),
         "__dllonexit" => Some(API_BASE + 0x128),
         "_mbsrchr" => Some(API_BASE + 0x12c),
         "_mbsinc" => Some(API_BASE + 0x130),
