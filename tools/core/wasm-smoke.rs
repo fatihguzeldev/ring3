@@ -113,6 +113,27 @@ fn execute_string_scan() {
     assert_eq!(process.cpu.eflags, 2);
 }
 
+#[path = "../../core/tests/support/signed_extend_executable.rs"]
+mod signed_extend_executable;
+
+fn execute_signed_extension() {
+    use ring3_core::execution::{Cpu32, Register32, StopReason, load_pe32};
+    let mut image = load_pe32(&signed_extend_executable::pe32(), 3).unwrap();
+    let mut cpu = Cpu32::new(image.entry_point);
+    cpu.set_fs_base(0x0040_2000);
+    cpu.eflags = 0xced7;
+    let result = cpu.run(&mut image.memory, 20);
+    assert_eq!(
+        (result.reason, result.instructions),
+        (StopReason::Breakpoint, 7)
+    );
+    assert_eq!(cpu.register(Register32::Eax), u32::MAX);
+    assert_eq!(cpu.register(Register32::Ebx), 0x1234_ffff);
+    assert_eq!(cpu.register(Register32::Ecx), u32::MAX);
+    assert_eq!(cpu.register(Register32::Edx), 0xffff_ff80);
+    assert_eq!(cpu.eflags, 0xced7);
+}
+
 fn execute_complement() {
     use ring3_core::execution::{Cpu32, Register32, StopReason, load_pe32};
     let mut image = load_pe32(&complement_executable::pe32(), 3).unwrap();
@@ -2465,6 +2486,7 @@ pub extern "C" fn run() -> u32 {
     execute_buffer_copy();
     execute_string_copy();
     execute_complement();
+    execute_signed_extension();
     execute_string_scan();
     execute_repeated_moves();
     execute_register_stack();
