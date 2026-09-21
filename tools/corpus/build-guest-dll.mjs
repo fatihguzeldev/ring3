@@ -12,13 +12,13 @@ for (const name of ["demo", "caller", "delayed"]) {
 }
 const flags = ["-flavor", "link", "/subsystem:console", "/machine:x86",
   "/nodefaultlib", "/fixed", "/dynamicbase:no", "/nxcompat", "/safeseh:no", "/timestamp:0"];
-run(tools.lld, [...flags, "/dll", "/entry:attach@12", "/base:0x50000000",
-  `/def:${join(root, "corpus/guest-dll/demo.def")}`, "/out:demo.dll", "/implib:demo.lib", "demo.obj"], output);
-run(tools.lld, [...flags.filter((flag) => flag !== "/fixed"), "/fixed:no",
-  "/dll", "/entry:attach@12", "/base:0x10000000",
-  `/def:${join(root, "corpus/guest-dll/demo.def")}`, "/out:relocated/demo.dll", "/implib:relocated/demo.lib", "demo.obj"], output);
 run(tools.lld, ["-flavor", "link", "/lib", "/machine:x86",
   `/def:${join(root, "corpus/windows-api/kernel32.def")}`, "/out:kernel32.lib"], output);
+run(tools.lld, [...flags, "/dll", "/entry:attach@12", "/base:0x50000000",
+  `/def:${join(root, "corpus/guest-dll/demo.def")}`, "/out:demo.dll", "/implib:demo.lib", "demo.obj", "kernel32.lib"], output);
+run(tools.lld, [...flags.filter((flag) => flag !== "/fixed"), "/fixed:no",
+  "/dll", "/entry:attach@12", "/base:0x10000000",
+  `/def:${join(root, "corpus/guest-dll/demo.def")}`, "/out:relocated/demo.dll", "/implib:relocated/demo.lib", "demo.obj", "kernel32.lib"], output);
 run(tools.lld, [...flags, "/entry:entry", "/base:0x400000", "/out:caller.exe",
   "caller.obj", "demo.lib", "kernel32.lib"], output);
 run(tools.lld, [...flags, "/entry:entry", "/base:0x400000", "/out:delayed.exe",

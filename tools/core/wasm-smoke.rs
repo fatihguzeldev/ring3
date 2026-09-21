@@ -39,6 +39,9 @@ mod relocated_executable;
 #[path = "../../core/tests/support/export_names_executable.rs"]
 mod export_names_executable;
 
+#[path = "../../core/tests/support/thread_notifications_executable.rs"]
+mod thread_notifications_executable;
+
 #[path = "../../core/tests/support/delay_executable.rs"]
 mod delay_executable;
 
@@ -1110,7 +1113,7 @@ fn execute_dlls() {
             .unwrap();
             let result = process.run(1000);
             assert_eq!(result.reason, ProcessStop::Exited(42));
-            assert_eq!(result.api_calls, 1);
+            assert_eq!(result.api_calls, 2);
         }
         let mut delayed =
             Process32::load(include_bytes!("../../target/guest-dll/delayed.exe"), 64).unwrap();
@@ -1145,6 +1148,30 @@ fn execute_dlls() {
             .unwrap();
         assert_eq!(u32::from_le_bytes(word), base);
     }
+}
+
+fn execute_thread_notifications() {
+    use ring3_core::execution::{
+        GuestModule, Process32, ProcessOptions, ProcessStop, Register32, StopReason,
+    };
+    let library = thread_notifications_executable::dll();
+    let mut process = Process32::load_with_options(
+        &dll_executable::exe("demo.dll"),
+        32,
+        ProcessOptions {
+            modules: &[GuestModule {
+                name: "demo.dll",
+                bytes: &library,
+            }],
+            ..ProcessOptions::default()
+        },
+    )
+    .unwrap();
+    let result = process.run(100);
+    assert_eq!(result.reason, ProcessStop::Stopped(StopReason::Breakpoint));
+    assert_eq!(result.api_calls, 1);
+    assert_eq!(process.cpu.register(Register32::Eax), 1);
+    assert_eq!(process.cpu.register(Register32::Esp), 0x1001_0000);
 }
 
 fn execute_arguments() {
@@ -1988,6 +2015,7 @@ pub extern "C" fn run() -> u32 {
     execute_initializers();
     execute_arguments();
     execute_dlls();
+    execute_thread_notifications();
     execute_delay_thunks();
     execute_dword_test();
     execute_narrow_operands();

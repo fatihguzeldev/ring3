@@ -35,3 +35,4 @@ EXPORTS
     _lstrcpyA@8==lstrcpyA
     _lstrcatA@8==lstrcatA
     _GetSystemDirectoryA@8==GetSystemDirectoryA
+    _DisableThreadLibraryCalls@4==DisableThreadLibraryCalls
