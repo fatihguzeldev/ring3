@@ -634,6 +634,45 @@ fn execute_find_files() {
     }
 }
 
+#[path = "../../core/tests/support/x87_executable.rs"]
+mod x87_executable;
+
+fn execute_x87_data() {
+    use ring3_core::execution::{Cpu32, StopReason, load_pe32};
+    for (input, dividend, expected) in [
+        (0x4080_0000_u32, 0x4100_0000_u32, 0x4080_0000_u32),
+        (0x4110_0000, 0x3f80_0000, 0x3eaa_aaab),
+        (0x4000_0000, 0x3f80_0000, 0x3f35_04f3),
+    ] {
+        let mut image = load_pe32(&x87_executable::pe32(), 16).unwrap();
+        image
+            .memory
+            .write(0x0040_2180, &input.to_le_bytes())
+            .unwrap();
+        image
+            .memory
+            .write(0x0040_2184, &dividend.to_le_bytes())
+            .unwrap();
+        let mut cpu = Cpu32::new(image.entry_point);
+        let result = cpu.run(&mut image.memory, 20);
+        assert_eq!(result.reason, StopReason::Breakpoint);
+        assert_eq!(result.instructions, 6);
+        let mut bytes = [0; 4];
+        image.memory.read(0x0040_2188, &mut bytes).unwrap();
+        assert_eq!(u32::from_le_bytes(bytes), expected);
+    }
+    #[cfg(windows_demo)]
+    {
+        use ring3_core::execution::{Process32, ProcessStop};
+        let mut process = Process32::load(
+            include_bytes!("../../target/windows-api/floating-point.exe"),
+            64,
+        )
+        .unwrap();
+        assert_eq!(process.run(1000).reason, ProcessStop::Exited(42));
+    }
+}
+
 #[path = "../../core/tests/support/environment_executable.rs"]
 mod environment_executable;
 
@@ -2675,6 +2714,7 @@ pub extern "C" fn run() -> u32 {
     execute_find_files();
     execute_file_status();
     execute_environment_query();
+    execute_x87_data();
     execute_command_line();
     execute_image();
     execute_function();
