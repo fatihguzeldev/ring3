@@ -104,6 +104,33 @@ mod cursor_position_executable;
 #[path = "../../core/tests/support/cursors_executable.rs"]
 mod cursors_executable;
 
+#[path = "../../core/tests/support/local_realloc_executable.rs"]
+mod local_realloc_executable;
+
+fn execute_local_realloc() {
+    use ring3_core::execution::{Process32, ProcessStop, Register32, StopReason};
+    let mut process = Process32::load(&local_realloc_executable::pe32(), 40).unwrap();
+    let result = process.run(100);
+    assert_eq!(result.reason, ProcessStop::Stopped(StopReason::Breakpoint));
+    assert_eq!((result.instructions, result.api_calls), (15, 3));
+    assert_eq!(process.cpu.register(Register32::Eax), 0);
+    assert_eq!(process.cpu.register(Register32::Ecx), 42);
+    assert_eq!(process.cpu.register(Register32::Edx), 0);
+    assert_eq!(process.cpu.register(Register32::Esp), 0x1001_0000);
+    assert!(process.memory.read(0x2000_0000, &mut [0]).is_err());
+    #[cfg(windows_demo)]
+    {
+        let mut process = Process32::load(
+            include_bytes!("../../target/windows-api/local-realloc.exe"),
+            64,
+        )
+        .unwrap();
+        let result = process.run(1000);
+        assert_eq!(result.reason, ProcessStop::Exited(42));
+        assert_eq!(result.api_calls, 11);
+    }
+}
+
 fn execute_cursor_position() {
     use ring3_core::execution::{Process32, ProcessStop, Register32, StopReason};
     let mut process = Process32::load(&cursor_position_executable::pe32(), 32).unwrap();
@@ -1688,6 +1715,7 @@ pub extern "C" fn run() -> u32 {
     execute_brushes();
     execute_cursors();
     execute_cursor_position();
+    execute_local_realloc();
     execute_image();
     execute_function();
     inspect_image();

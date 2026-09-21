@@ -8,6 +8,7 @@ EXPORTS
     _FreeLibrary@4==FreeLibrary
     _LocalAlloc@8==LocalAlloc
     _LocalFree@4==LocalFree
+    _LocalReAlloc@12==LocalReAlloc
     _GetVersion@0==GetVersion
     _GetProcessVersion@4==GetProcessVersion
     _GetACP@0==GetACP
