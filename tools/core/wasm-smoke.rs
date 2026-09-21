@@ -696,6 +696,32 @@ mod formatting_executable;
 #[path = "../../core/tests/support/x87_status_executable.rs"]
 mod x87_status_executable;
 
+#[path = "../../core/tests/support/division_executable.rs"]
+mod division_executable;
+
+fn execute_x87_division() {
+    use ring3_core::execution::{Cpu32, Register32, StopReason, load_pe32};
+    for (numerator, divisor, expected, status) in [
+        (8_f64, 2_f32, 0x3ff5_5555_5555_5555_u64, 0x20),
+        (-8., 2., 0xbff5_5555_5555_5555, 0x20),
+        (0., -2., 0x8000_0000_0000_0000, 0),
+    ] {
+        let image = load_pe32(&division_executable::pe32(), 32).unwrap();
+        let mut cpu = Cpu32::new(image.entry_point);
+        let mut memory = image.memory;
+        memory.write(0x0040_2188, &numerator.to_le_bytes()).unwrap();
+        memory.write(0x0040_2190, &divisor.to_le_bytes()).unwrap();
+        let run = cpu.run(&mut memory, 40);
+        assert_eq!(run.reason, StopReason::Breakpoint);
+        assert_eq!(run.instructions, 9);
+        assert_eq!(cpu.register(Register32::Esi), 0x3800);
+        assert_eq!(cpu.register(Register32::Eax), status);
+        let mut bytes = [0; 8];
+        memory.read(0x0040_21a0, &mut bytes).unwrap();
+        assert_eq!(u64::from_le_bytes(bytes), expected);
+    }
+}
+
 fn execute_x87_status() {
     use ring3_core::execution::{Cpu32, Register32, StopReason, load_pe32};
     for (denominator, numerator, first, last) in [
@@ -1001,7 +1027,7 @@ fn execute_x87_data() {
         .unwrap();
         let result = process.run(1000);
         assert_eq!(result.reason, ProcessStop::Exited(42));
-        assert_eq!((result.instructions, result.api_calls), (259, 1));
+        assert_eq!((result.instructions, result.api_calls), (273, 1));
     }
 }
 
@@ -3059,6 +3085,7 @@ pub extern "C" fn run() -> u32 {
     execute_crt_case_comparison();
     execute_crt_formatting();
     execute_x87_status();
+    execute_x87_division();
     execute_command_line();
     execute_image();
     execute_function();

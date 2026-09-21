@@ -48,5 +48,10 @@ void entry(void) {
         if (small != 7 || medium != positive[rc]) ExitProcess(8);
     }
     __asm__ volatile("fldcw %0" : : "m"(control));
+    unsigned int eight = 0x41000000, two = 0x40000000;
+    unsigned long long three = 0x4008000000000000ULL;
+    __asm__ volatile("flds %1; fdivs %2; fdivl %3; fstpl %0"
+        : "=m"(output64) : "m"(eight), "m"(two), "m"(three) : "st");
+    if (output64 != 0x3ff5555555555555ULL) ExitProcess(9);
     ExitProcess(42);
 }
