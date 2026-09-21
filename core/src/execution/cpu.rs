@@ -4,6 +4,7 @@ use super::{GuestMemory, MemoryError};
 
 mod branches;
 mod operands;
+mod register_stack;
 mod shifts;
 mod stack;
 mod strings;
@@ -168,6 +169,9 @@ impl Cpu32 {
                 let destination = self.operand(instruction, 0)?;
                 let input = self.read_operand(destination, memory)?;
                 self.write_operand(destination, !input & destination.width.mask(), memory)?;
+            }
+            Code::Pushaw | Code::Pushad | Code::Popaw | Code::Popad => {
+                self.register_stack(instruction.code(), memory)?;
             }
             Code::Neg_rm8 | Code::Neg_rm16 | Code::Neg_rm32 => {
                 let destination = self.operand(instruction, 0)?;

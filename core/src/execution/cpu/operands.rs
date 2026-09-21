@@ -158,7 +158,11 @@ fn register_view(register: Register) -> Result<Operand, StopReason> {
     })
 }
 
-fn read_value(memory: &GuestMemory, address: u32, width: Width) -> Result<u32, StopReason> {
+pub(super) fn read_value(
+    memory: &GuestMemory,
+    address: u32,
+    width: Width,
+) -> Result<u32, StopReason> {
     check_span(address, width)?;
     let mut bytes = [0; 4];
     memory
@@ -167,7 +171,7 @@ fn read_value(memory: &GuestMemory, address: u32, width: Width) -> Result<u32, S
     Ok(u32::from_le_bytes(bytes))
 }
 
-fn write_value(
+pub(super) fn write_value(
     memory: &mut GuestMemory,
     address: u32,
     width: Width,
@@ -179,7 +183,7 @@ fn write_value(
         .map_err(StopReason::MemoryFault)
 }
 
-fn check_span(address: u32, width: Width) -> Result<(), StopReason> {
+pub(super) fn check_span(address: u32, width: Width) -> Result<(), StopReason> {
     address
         .checked_add(width as u32 - 1)
         .ok_or(StopReason::MemoryFault(MemoryError::AddressOverflow))?;
