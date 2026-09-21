@@ -1,5 +1,20 @@
 use super::{Access, DispatchError, ERRNO, GuestMemory, guest, heap};
 
+#[derive(Default)]
+pub(super) struct Registry {
+    functions: Vec<u32>,
+}
+
+impl Registry {
+    pub(super) fn register(&mut self, function: u32) -> u32 {
+        if function == 0 || self.functions.len() == 4096 || self.functions.try_reserve(1).is_err() {
+            return 0;
+        }
+        self.functions.push(function);
+        function
+    }
+}
+
 pub(super) fn register(
     heap: &mut heap::Heap,
     memory: &mut GuestMemory,
@@ -68,4 +83,27 @@ pub(super) fn register(
 fn overlaps(left: u32, left_length: u64, right: u32, right_length: u64) -> bool {
     u64::from(left) < u64::from(right) + right_length
         && u64::from(right) < u64::from(left) + left_length
+}
+
+#[cfg(test)]
+mod tests {
+    use super::super::Crt;
+
+    #[test]
+    fn crt_registry_retains_order_duplicates_and_independent_ownership() {
+        let mut first = Crt::default();
+        let second = Crt::default();
+        for function in [42, 17, 42] {
+            assert_eq!(first.exit_callbacks.register(function), function);
+        }
+        assert_eq!(first.exit_callbacks.register(0), 0);
+        assert_eq!(first.exit_callbacks.functions, [42, 17, 42]);
+        assert!(second.exit_callbacks.functions.is_empty());
+        for function in 1..=4093 {
+            assert_eq!(first.exit_callbacks.register(function), function);
+        }
+        let before = first.exit_callbacks.functions.clone();
+        assert_eq!(first.exit_callbacks.register(99), 0);
+        assert_eq!(first.exit_callbacks.functions, before);
+    }
 }

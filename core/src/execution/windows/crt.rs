@@ -40,6 +40,7 @@ pub(super) enum Call {
     Duplicate,
     Compare,
     SetMbCodePage,
+    OnExit,
 }
 
 impl Call {
@@ -60,6 +61,7 @@ impl Call {
             0x134 => Some(Self::Duplicate),
             0x138 => Some(Self::Compare),
             0x13c => Some(Self::SetMbCodePage),
+            0x140 => Some(Self::OnExit),
             _ => None,
         }
     }
@@ -71,7 +73,8 @@ impl Call {
             | Self::Free
             | Self::MbIncrement
             | Self::Duplicate
-            | Self::SetMbCodePage => 1,
+            | Self::SetMbCodePage
+            | Self::OnExit => 1,
             Self::ControlFp | Self::MbSearchReverse => 2,
             Self::GetMainArgs => 5,
             Self::Memset | Self::DllOnExit | Self::Compare => 3,
@@ -85,6 +88,7 @@ pub(super) struct Crt {
     pub(super) application_type: i32,
     pub(super) new_mode: u32,
     multibyte: multibyte::CodePage,
+    exit_callbacks: onexit::Registry,
 }
 
 impl Crt {
@@ -124,6 +128,7 @@ impl Crt {
                 self.multibyte.set(arguments[0].cast_signed())?;
                 Some(0)
             }
+            Call::OnExit => Some(self.exit_callbacks.register(arguments[0])),
             Call::Duplicate => Some(strings::duplicate(memory, heap, arguments[0])?),
             Call::Compare => Some(buffers::compare(
                 memory,
@@ -169,6 +174,7 @@ pub(super) fn resolve(name: &str) -> Option<u32> {
         "memset" => Some(API_BASE + 0x114),
         "memcmp" => Some(API_BASE + 0x138),
         "_setmbcp" => Some(API_BASE + 0x13c),
+        "_onexit" => Some(API_BASE + 0x140),
         "_EH_prolog" => Some(API_BASE + 0x118),
         "malloc" => Some(API_BASE + 0x11c),
         "free" => Some(API_BASE + 0x120),
