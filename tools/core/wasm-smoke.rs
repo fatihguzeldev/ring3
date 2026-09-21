@@ -12,6 +12,22 @@ mod executable;
 #[path = "../../core/tests/support/complement_executable.rs"]
 mod complement_executable;
 
+#[path = "../../core/tests/support/string_scan_executable.rs"]
+mod string_scan_executable;
+
+fn execute_string_scan() {
+    use ring3_core::execution::{Process32, ProcessStop, Register32, StopReason};
+    let mut process = Process32::load(&string_scan_executable::pe32(), 32).unwrap();
+    let result = process.run(100);
+    assert_eq!(result.reason, ProcessStop::Stopped(StopReason::Breakpoint));
+    assert_eq!((result.instructions, result.api_calls), (17, 0));
+    assert_eq!(process.cpu.register(Register32::Eax), 0x4242);
+    assert_eq!(process.cpu.register(Register32::Ebx), 3);
+    assert_eq!(process.cpu.register(Register32::Ecx), 0);
+    assert_eq!(process.cpu.register(Register32::Edi), 0x0040_2096);
+    assert_eq!(process.cpu.eflags, 2);
+}
+
 fn execute_complement() {
     use ring3_core::execution::{Cpu32, Register32, StopReason, load_pe32};
     let mut image = load_pe32(&complement_executable::pe32(), 3).unwrap();
@@ -2217,6 +2233,7 @@ pub extern "C" fn run() -> u32 {
     execute_string_length();
     execute_buffer_copy();
     execute_complement();
+    execute_string_scan();
     execute_thread_identity();
     execute_module_file_name();
     execute_resources();

@@ -86,7 +86,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     .map_err(|error| format!("load failed: {error:?}"))?;
     let result = process.run(limit);
     println!(
-        "{:?}; eip={:#010x}; instructions={}; api_calls={}; eax={:#010x}; eflags={:#010x}",
+        "{:?}; eip={:#010x}; execution_steps={}; api_calls={}; eax={:#010x}; eflags={:#010x}",
         result.reason,
         process.cpu.eip,
         result.instructions,
