@@ -43,7 +43,7 @@ pub enum StopReason {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct RunResult {
     pub reason: StopReason,
-    /// execution steps; each repeated scan element counts as one step.
+    /// execution steps; each repeated string element counts as one step.
     pub instructions: u64,
     pub instruction_pointer: u32,
 }
@@ -147,7 +147,7 @@ impl Cpu32 {
     ) -> Result<bool, StopReason> {
         if instruction.has_lock_prefix()
             || ((instruction.has_rep_prefix() || instruction.has_repne_prefix())
-                && !strings::is_scan(instruction.code()))
+                && !strings::supports_repeat(instruction))
             || (instruction.has_segment_prefix() && instruction.segment_prefix() != Register::FS)
         {
             return Err(StopReason::UnsupportedInstruction);
@@ -209,7 +209,7 @@ impl Cpu32 {
             }
             Code::Jmp_rel8_32 | Code::Jmp_rel32_32 => next = instruction.near_branch32(),
             Code::Movsb_m8_m8 | Code::Movsw_m16_m16 | Code::Movsd_m32_m32 => {
-                self.move_string(instruction, memory)?;
+                next = self.move_string(instruction, memory)?;
             }
             code if strings::is_scan(code) => next = self.scan_string(instruction, memory)?,
             Code::Fldcw_m2byte | Code::Fnstcw_m2byte => self.x87_control(instruction, memory)?,

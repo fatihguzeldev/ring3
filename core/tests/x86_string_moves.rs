@@ -176,7 +176,7 @@ fn source_and_destination_faults_do_not_copy_partial_elements_or_update_cpu() {
     }
     for code in [
         &[0x67, 0xa5][..],
-        &[0xf3, 0xa5],
+        &[0xf3, 0x67, 0xa5],
         &[0xf2, 0xa4],
         &[0x65, 0xa5],
         &[0xf0, 0xa5],

@@ -10,6 +10,16 @@ pub(super) fn is_scan(code: Code) -> bool {
     )
 }
 
+pub(super) fn supports_repeat(instruction: &Instruction) -> bool {
+    is_scan(instruction.code())
+        || (instruction.has_rep_prefix()
+            && !instruction.has_repne_prefix()
+            && matches!(
+                instruction.code(),
+                Code::Movsb_m8_m8 | Code::Movsw_m16_m16 | Code::Movsd_m32_m32
+            ))
+}
+
 impl Cpu32 {
     pub(super) fn scan_string(
         &mut self,
@@ -72,11 +82,16 @@ impl Cpu32 {
         &mut self,
         instruction: &Instruction,
         memory: &mut GuestMemory,
-    ) -> Result<(), StopReason> {
+    ) -> Result<u32, StopReason> {
         if instruction.op0_kind() != OpKind::MemoryESEDI
             || instruction.op1_kind() != OpKind::MemorySegESI
         {
             return Err(StopReason::UnsupportedInstruction);
+        }
+        let repeat = instruction.has_rep_prefix();
+        let count = self.register(Register32::Ecx);
+        if repeat && count == 0 {
+            return Ok(instruction.next_ip32());
         }
         let width = match instruction.code() {
             Code::Movsb_m8_m8 => Width::Byte,
@@ -104,6 +119,12 @@ impl Cpu32 {
         };
         self.set_register(Register32::Esi, source.wrapping_add(step));
         self.set_register(Register32::Edi, destination.wrapping_add(step));
-        Ok(())
+        if repeat {
+            self.set_register(Register32::Ecx, count - 1);
+            if count > 1 {
+                return Ok(self.eip);
+            }
+        }
+        Ok(instruction.next_ip32())
     }
 }
