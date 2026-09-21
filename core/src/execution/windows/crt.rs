@@ -59,6 +59,7 @@ pub(super) enum Call {
     Random,
     FloatToInteger,
     TypeName,
+    CompareStringPrefix,
     SetMbCodePage,
     OnExit,
 }
@@ -91,6 +92,7 @@ impl Call {
             0x164 => Some(Self::Random),
             0x168 => Some(Self::FloatToInteger),
             0x16c => Some(Self::TypeName),
+            0x170 => Some(Self::CompareStringPrefix),
             0x13c => Some(Self::SetMbCodePage),
             0x140 => Some(Self::OnExit),
             _ => None,
@@ -112,7 +114,12 @@ impl Call {
             | Self::OnExit => 1,
             Self::ControlFp | Self::MbSearchReverse | Self::FindCharacter | Self::Stat => 2,
             Self::GetMainArgs => 5,
-            Self::Memset | Self::DllOnExit | Self::Compare | Self::Copy | Self::CopyString => 3,
+            Self::Memset
+            | Self::DllOnExit
+            | Self::Compare
+            | Self::Copy
+            | Self::CopyString
+            | Self::CompareStringPrefix => 3,
             Self::FmodePointer
             | Self::CommodePointer
             | Self::ErrnoPointer
@@ -201,6 +208,12 @@ impl Crt {
             Call::OnExit => Some(self.exit_callbacks.register(arguments[0])),
             Call::Duplicate => Some(strings::duplicate(memory, heap, arguments[0])?),
             Call::Length => Some(strings::length(memory, arguments[0])?),
+            Call::CompareStringPrefix => Some(strings::compare_prefix(
+                memory,
+                arguments[0],
+                arguments[1],
+                arguments[2],
+            )?),
             Call::FindCharacter => Some(strings::find(memory, arguments[0], arguments[1])?),
             Call::Stat => Some(status::query(
                 directory,
@@ -279,6 +292,7 @@ pub(super) fn resolve(name: &str) -> Option<u32> {
         "rand" => Some(API_BASE + 0x164),
         "_ftol" => Some(API_BASE + 0x168),
         "?name@type_info@@QBEPBDXZ" => Some(API_BASE + 0x16c),
+        "strncmp" => Some(API_BASE + 0x170),
         "__dllonexit" => Some(API_BASE + 0x128),
         "_mbsrchr" => Some(API_BASE + 0x12c),
         "_mbsinc" => Some(API_BASE + 0x130),
