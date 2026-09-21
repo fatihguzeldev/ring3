@@ -15,6 +15,7 @@ mod guest;
 mod heap;
 mod modules;
 mod parameters;
+mod resources;
 mod startup;
 mod strings;
 mod system;
@@ -40,6 +41,7 @@ pub struct Process32 {
     subsystem_version: u32,
     startup: startup::Startup,
     modules: modules::Modules,
+    resources: resources::Resources,
     user_atoms: user_atoms::UserAtoms,
     cursors: cursors::Cursors,
     heap: heap::Heap,
@@ -98,6 +100,7 @@ enum Api {
     Crt(crt::Call),
     CodePage(code_pages::Call),
     Module(modules::Call),
+    Resource(resources::Call),
     Heap(heap::Call),
     CriticalSection(critical_sections::Call),
     Tls(tls::Call),
@@ -139,6 +142,7 @@ impl Api {
                 .or_else(|| cursors::Call::at(offset).map(Self::Cursor))
                 .or_else(|| crt::Call::at(offset).map(Self::Crt))
                 .or_else(|| modules::Call::at(offset).map(Self::Module))
+                .or_else(|| resources::Call::at(offset).map(Self::Resource))
                 .or_else(|| heap::Call::at(offset).map(Self::Heap))
                 .or_else(|| critical_sections::Call::at(offset).map(Self::CriticalSection))
                 .or_else(|| tls::Call::at(offset).map(Self::Tls))
@@ -164,6 +168,7 @@ impl Api {
                 "GetModuleHandleA" => 0x18,
                 "GetModuleFileNameA" => 0xe0,
                 "lstrcpynA" => 0xe4,
+                "FindResourceA" => 0xe8,
                 "FreeLibrary" => 0x1c,
                 "SetErrorMode" => 0x20,
                 "GetErrorMode" => 0x24,
@@ -195,6 +200,7 @@ impl Api {
         } else if module.eq_ignore_ascii_case("user32.dll") {
             match name {
                 "GetDesktopWindow" => 16,
+                "LoadStringA" => 0xec,
                 "RegisterWindowMessageA" => 0x94,
                 "RegisterClipboardFormatA" => 0xc8,
                 "GetSystemMetrics" => 0x9c,
@@ -240,6 +246,7 @@ impl Api {
             Self::Heap(call) => call.arguments(),
             Self::Tls(call) => call.arguments(),
             Self::Module(call) => call.arguments(),
+            Self::Resource(call) => call.arguments(),
             Self::CopyString => 3,
             _ => 1,
         }
@@ -308,6 +315,8 @@ impl Process32 {
         })?;
         let (major, minor) = loaded.subsystem_version;
         let mut image = loaded.image;
+        let resources =
+            resources::Resources::new(image.image_base, bytes, &loaded.providers, options.modules);
         let modules = modules::Modules::new(image.image_base, options.image_path, loaded.providers);
         image.memory.map_zeroed(
             u64::from(STACK_BASE),
@@ -336,6 +345,7 @@ impl Process32 {
             subsystem_version: (u32::from(major) << 16) | u32::from(minor),
             startup,
             modules,
+            resources,
             user_atoms: user_atoms::UserAtoms::default(),
             gdi: gdi::Gdi::default(),
             cursors: cursors::Cursors::default(),
@@ -537,6 +547,12 @@ impl Process32 {
                     self.startup.is_complete(),
                     &mut self.memory,
                 )?;
+                self.cpu.set_register(Register32::Eax, value);
+            }
+            Api::Resource(call) => {
+                let value =
+                    self.resources
+                        .dispatch(call, arguments, &self.modules, &mut self.memory)?;
                 self.cpu.set_register(Register32::Eax, value);
             }
             Api::Graphics(call) => self.cpu.set_register(

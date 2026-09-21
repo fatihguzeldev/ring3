@@ -41,6 +41,10 @@ pub(super) struct Modules {
 }
 
 impl Modules {
+    pub(super) fn contains(&self, handle: u32) -> bool {
+        handle == self.program || self.resident.iter().any(|module| module.handle == handle)
+    }
+
     pub(super) fn new(program: u32, program_path: &[u8], providers: Vec<MappedModule>) -> Self {
         let parent_end = program_path
             .iter()
