@@ -1,4 +1,5 @@
-use super::{DispatchError, GuestMemory, thread};
+use super::super::Access;
+use super::{DispatchError, GuestMemory, gdi, guest, thread};
 
 const SYSTEM_IDS: [u32; 14] = [
     32512, 32513, 32514, 32515, 32516, 32642, 32643, 32644, 32645, 32646, 32648, 32649, 32650,
@@ -11,6 +12,8 @@ pub(super) enum Call {
     Load,
     Set,
     Get,
+    GetPosition,
+    SetPosition,
 }
 
 impl Call {
@@ -19,14 +22,16 @@ impl Call {
             0xbc => Some(Self::Load),
             0xc0 => Some(Self::Set),
             0xc4 => Some(Self::Get),
+            0xcc => Some(Self::GetPosition),
+            0xd0 => Some(Self::SetPosition),
             _ => None,
         }
     }
 
     pub(super) fn arguments(self) -> usize {
         match self {
-            Self::Load => 2,
-            Self::Set => 1,
+            Self::Load | Self::SetPosition => 2,
+            Self::Set | Self::GetPosition => 1,
             Self::Get => 0,
         }
     }
@@ -36,6 +41,7 @@ impl Call {
 pub(super) struct Cursors {
     loaded: [bool; 14],
     current: u32,
+    position: [u32; 2],
 }
 
 impl Cursors {
@@ -66,6 +72,32 @@ impl Cursors {
                 Ok(std::mem::replace(&mut self.current, handle))
             }
             Call::Get => Ok(self.current),
+            Call::GetPosition => {
+                let output = arguments[0];
+                if output == 0 {
+                    thread::set_last_error(memory, 998)?;
+                    return Ok(0);
+                }
+                guest::check(memory, output, 8, Access::Write)?;
+                let mut bytes = [0; 8];
+                bytes[..4].copy_from_slice(&self.position[0].to_le_bytes());
+                bytes[4..].copy_from_slice(&self.position[1].to_le_bytes());
+                memory.write(u64::from(output), &bytes)?;
+                Ok(1)
+            }
+            Call::SetPosition => {
+                let clamp = |value: u32, extent: u32| {
+                    value
+                        .cast_signed()
+                        .clamp(0, i32::try_from(extent - 1).expect("screen bound fits i32"))
+                        .cast_unsigned()
+                };
+                self.position = [
+                    clamp(arguments[0], gdi::SCREEN_WIDTH),
+                    clamp(arguments[1], gdi::SCREEN_HEIGHT),
+                ];
+                Ok(1)
+            }
         }
     }
 

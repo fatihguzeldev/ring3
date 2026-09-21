@@ -191,6 +191,8 @@ impl Api {
                 "LoadCursorA" => 0xbc,
                 "SetCursor" => 0xc0,
                 "GetCursor" => 0xc4,
+                "GetCursorPos" => 0xcc,
+                "SetCursorPos" => 0xd0,
                 "GetDC" => 0xa0,
                 "ReleaseDC" => 0xa4,
                 _ => return None,
