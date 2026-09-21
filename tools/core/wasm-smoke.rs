@@ -693,6 +693,43 @@ mod case_compare_executable;
 #[path = "../../core/tests/support/formatting_executable.rs"]
 mod formatting_executable;
 
+#[path = "../../core/tests/support/x87_status_executable.rs"]
+mod x87_status_executable;
+
+fn execute_x87_status() {
+    use ring3_core::execution::{Cpu32, Register32, StopReason, load_pe32};
+    for (denominator, numerator, first, last) in [
+        (10_f64, 1_f64, 0x3a20, 0x20),
+        (3., -1., 0x3820, 0x120),
+        (1., 0., 0x3800, 0x4000),
+    ] {
+        let image = load_pe32(&x87_status_executable::pe32(), 32).unwrap();
+        let mut cpu = Cpu32::new(image.entry_point);
+        let mut memory = image.memory;
+        memory
+            .write(0x0040_2188, &denominator.to_le_bytes())
+            .unwrap();
+        memory.write(0x0040_2190, &numerator.to_le_bytes()).unwrap();
+        let run = cpu.run(&mut memory, 40);
+        assert_eq!(run.reason, StopReason::Breakpoint);
+        assert_eq!(run.instructions, 8);
+        assert_eq!(cpu.register(Register32::Esi), first);
+        assert_eq!(cpu.register(Register32::Eax), last);
+    }
+    #[cfg(windows_demo)]
+    {
+        use ring3_core::execution::{Process32, ProcessStop};
+        let mut process = Process32::load(
+            include_bytes!("../../target/windows-api/floating-status.exe"),
+            64,
+        )
+        .unwrap();
+        let run = process.run(1000);
+        assert_eq!(run.reason, ProcessStop::Exited(42));
+        assert_eq!((run.instructions, run.api_calls), (70, 1));
+    }
+}
+
 fn execute_crt_formatting() {
     use ring3_core::execution::{Process32, ProcessStop, Register32, StopReason};
     for (capacity, result, expected) in [
@@ -3021,6 +3058,7 @@ pub extern "C" fn run() -> u32 {
     execute_crt_string_prefix();
     execute_crt_case_comparison();
     execute_crt_formatting();
+    execute_x87_status();
     execute_command_line();
     execute_image();
     execute_function();
