@@ -163,6 +163,11 @@ impl Cpu32 {
                 self.set_register(destination, self.effective_address(instruction)?);
             }
             code if is_binary(code) || is_sbb(code) => self.binary(instruction, memory)?,
+            Code::Not_rm8 | Code::Not_rm16 | Code::Not_rm32 => {
+                let destination = self.operand(instruction, 0)?;
+                let input = self.read_operand(destination, memory)?;
+                self.write_operand(destination, !input & destination.width.mask(), memory)?;
+            }
             Code::Neg_rm8 | Code::Neg_rm16 | Code::Neg_rm32 => {
                 let destination = self.operand(instruction, 0)?;
                 let input = self.read_operand(destination, memory)?;

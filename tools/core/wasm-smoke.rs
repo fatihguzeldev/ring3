@@ -9,6 +9,26 @@ use ring3_core::{
 #[path = "../../core/tests/support/executable.rs"]
 mod executable;
 
+#[path = "../../core/tests/support/complement_executable.rs"]
+mod complement_executable;
+
+fn execute_complement() {
+    use ring3_core::execution::{Cpu32, Register32, StopReason, load_pe32};
+    let mut image = load_pe32(&complement_executable::pe32(), 3).unwrap();
+    let mut cpu = Cpu32::new(image.entry_point);
+    cpu.set_fs_base(0x0040_2000);
+    cpu.eflags = 0xced7;
+    let result = cpu.run(&mut image.memory, 50);
+    assert_eq!(
+        (result.reason, result.instructions),
+        (StopReason::Breakpoint, 8)
+    );
+    assert_eq!(cpu.register(Register32::Eax), 0x1234_5687);
+    assert_eq!(cpu.register(Register32::Ebx), 0xffff_ffee);
+    assert_eq!(cpu.register(Register32::Esi), 0x7fff_ffff);
+    assert_eq!(cpu.eflags, 0xced7);
+}
+
 #[path = "../../core/tests/support/imported_executable.rs"]
 mod imported_executable;
 
@@ -2118,6 +2138,7 @@ pub extern "C" fn run() -> u32 {
     execute_interlocked();
     execute_string_length();
     execute_buffer_copy();
+    execute_complement();
     execute_thread_identity();
     execute_module_file_name();
     execute_resources();
