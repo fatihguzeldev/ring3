@@ -713,6 +713,44 @@ mod x87_scaling_executable;
 #[path = "../../core/tests/support/fpu_wait_executable.rs"]
 mod fpu_wait_executable;
 
+#[path = "../../core/tests/support/integer_store_executable.rs"]
+mod integer_store_executable;
+
+fn execute_integer_stores() {
+    use ring3_core::execution::{Cpu32, StopReason, load_pe32};
+    for (input, expected) in [
+        (1.5_f64, [2_i64, 1, 2, 1]),
+        (2.5, [2, 2, 3, 2]),
+        (-1.5, [-2, -2, -1, -1]),
+        (-2.5, [-2, -3, -2, -2]),
+    ] {
+        for (rc, integer) in expected.into_iter().enumerate() {
+            let mut image = load_pe32(&integer_store_executable::pe32(), 4).unwrap();
+            image
+                .memory
+                .write(0x0040_2180, &input.to_le_bytes())
+                .unwrap();
+            let control = 0x027f | (u16::try_from(rc).unwrap() << 10);
+            image
+                .memory
+                .write(0x0040_2190, &control.to_le_bytes())
+                .unwrap();
+            let mut cpu = Cpu32::new(image.entry_point);
+            let result = cpu.run(&mut image.memory, 20);
+            assert_eq!(result.reason, StopReason::Breakpoint);
+            assert_eq!(result.instructions, 6);
+            assert_eq!(cpu.x87_control_word(), control);
+            let mut bytes = [0; 16];
+            image.memory.read(0x0040_21a0, &mut bytes).unwrap();
+            let expected = integer.to_le_bytes();
+            assert_eq!(&bytes[..2], &expected[..2]);
+            assert_eq!(&bytes[2..4], &[0xaa, 0xaa]);
+            assert_eq!(&bytes[4..8], &expected[..4]);
+            assert_eq!(&bytes[8..], &expected);
+        }
+    }
+}
+
 fn execute_fpu_wait() {
     use ring3_core::execution::{Cpu32, StopReason, load_pe32};
     let mut image = load_pe32(&fpu_wait_executable::pe32(), 4).unwrap();
@@ -789,7 +827,7 @@ fn execute_x87_data() {
         .unwrap();
         let result = process.run(1000);
         assert_eq!(result.reason, ProcessStop::Exited(42));
-        assert_eq!((result.instructions, result.api_calls), (67, 1));
+        assert_eq!((result.instructions, result.api_calls), (259, 1));
     }
 }
 
@@ -2837,6 +2875,7 @@ pub extern "C" fn run() -> u32 {
     execute_x87_data();
     execute_x87_scaling();
     execute_fpu_wait();
+    execute_integer_stores();
     execute_millisecond_clock();
     execute_crt_random();
     execute_crt_float_to_integer();

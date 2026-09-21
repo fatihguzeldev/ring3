@@ -1,5 +1,8 @@
 __declspec(dllimport) __declspec(noreturn) void __stdcall ExitProcess(unsigned int);
 
+static const int negative[] = {-2, -3, -2, -2};
+static const int positive[] = {2, 1, 2, 1};
+
 void entry(void) {
     unsigned short control = 0x027f;
     unsigned int input = 0x40800000, dividend = 0x41000000, output;
@@ -28,5 +31,22 @@ void entry(void) {
     unsigned short saved;
     __asm__ volatile("fwait; fnstcw %0; fwait" : "=m"(saved));
     if (saved != control) ExitProcess(6);
+    unsigned long long fraction = 0xc004000000000000ULL;
+    unsigned int positive_fraction = 0x3fe00000;
+    for (unsigned int rc = 0; rc < 4; rc++) {
+        unsigned short rounding = 0x027f | (rc << 10);
+        short small;
+        int medium;
+        long long large;
+        __asm__ volatile("fldcw %3; fldl %4; fists %0; fistl %1; fistpll %2"
+            : "=m"(small), "=m"(medium), "=m"(large)
+            : "m"(rounding), "m"(fraction) : "st");
+        if (small != negative[rc] || medium != negative[rc] || large != negative[rc]) ExitProcess(7);
+        int seven = 7;
+        __asm__ volatile("fildl %2; fistps %0; flds %3; fistpl %1"
+            : "=m"(small), "=m"(medium) : "m"(seven), "m"(positive_fraction) : "st");
+        if (small != 7 || medium != positive[rc]) ExitProcess(8);
+    }
+    __asm__ volatile("fldcw %0" : : "m"(control));
     ExitProcess(42);
 }
