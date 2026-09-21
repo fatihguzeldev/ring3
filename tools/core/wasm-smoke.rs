@@ -78,6 +78,8 @@ mod cpinfo_executable;
 #[path = "../../core/tests/support/messages_executable.rs"]
 mod messages_executable;
 
+#[path = "../../core/tests/support/condition_bytes_executable.rs"]
+mod condition_bytes_executable;
 #[path = "../../core/tests/support/zero_extend_executable.rs"]
 mod zero_extend_executable;
 
@@ -233,6 +235,23 @@ fn execute_process_version() {
         assert_eq!(result.reason, ProcessStop::Exited(42));
         assert_eq!(result.api_calls, 6);
     }
+}
+
+fn execute_condition_bytes() {
+    use ring3_core::execution::{Cpu32, Register32, StopReason, load_pe32};
+    let mut image = load_pe32(&condition_bytes_executable::pe32(), 3).unwrap();
+    let mut cpu = Cpu32::new(image.entry_point);
+    cpu.set_fs_base(0x0040_2000);
+    let result = cpu.run(&mut image.memory, 20);
+    assert_eq!(result.reason, StopReason::Breakpoint);
+    assert_eq!(result.instructions, 10);
+    assert_eq!(cpu.register(Register32::Eax), 0xaabb_0100);
+    assert_eq!(cpu.register(Register32::Ebx), 0x100);
+    assert_eq!(cpu.register(Register32::Ecx), 0x100);
+    assert_eq!(cpu.eflags, 0x46);
+    let mut bytes = [0; 2];
+    image.memory.read(0x0040_2180, &mut bytes).unwrap();
+    assert_eq!(bytes, [0, 1]);
 }
 
 fn execute_zero_extend() {
@@ -1591,6 +1610,7 @@ pub extern "C" fn run() -> u32 {
     execute_cpinfo();
     execute_messages();
     execute_zero_extend();
+    execute_condition_bytes();
     execute_process_version();
     execute_metrics();
     execute_colors();

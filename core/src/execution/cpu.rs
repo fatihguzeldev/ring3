@@ -203,7 +203,7 @@ impl Cpu32 {
             Code::Jmp_rel8_32 | Code::Jmp_rel32_32 => next = instruction.near_branch32(),
             Code::Fldcw_m2byte | Code::Fnstcw_m2byte => self.x87_control(instruction, memory)?,
             Code::Nopd | Code::Int3 => {}
-            _ => next = self.conditional_branch(instruction)?,
+            _ => next = self.conditional_instruction(instruction, memory)?,
         }
         self.eip = next;
         Ok(instruction.code() == Code::Int3)
