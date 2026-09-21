@@ -1,5 +1,34 @@
 use super::{Access, DispatchError, GuestMemory, guest};
 
+pub(super) fn copy(
+    memory: &mut GuestMemory,
+    destination: u32,
+    source: u32,
+    count: u32,
+) -> Result<u32, DispatchError> {
+    if count == 0 {
+        return Ok(destination);
+    }
+    let length = usize::try_from(count).expect("guest32 count fits usize");
+    guest::check(memory, source, length, Access::Read)?;
+    guest::check(memory, destination, length, Access::Write)?;
+    let (src, dst, size) = (u64::from(source), u64::from(destination), u64::from(count));
+    if src < dst + size && dst < src + size {
+        return Err(DispatchError::Unsupported);
+    }
+    let mut bytes = [0; 4096];
+    for offset in (0..length).step_by(bytes.len()) {
+        let size = (length - offset).min(bytes.len());
+        memory
+            .read(src + offset as u64, &mut bytes[..size])
+            .expect("nonoverlapping source range was checked");
+        memory
+            .write(dst + offset as u64, &bytes[..size])
+            .expect("destination range was checked");
+    }
+    Ok(destination)
+}
+
 pub(super) fn compare(
     memory: &GuestMemory,
     left: u32,
