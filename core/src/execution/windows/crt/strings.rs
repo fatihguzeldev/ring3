@@ -1,5 +1,13 @@
 use super::{Access, DispatchError, ERRNO, GuestMemory, MemoryError, buffers, guest, heap};
 
+pub(super) fn lowercase(character: u32) -> Result<u32, DispatchError> {
+    if character == u32::MAX {
+        return Ok(character);
+    }
+    let byte = u8::try_from(character).map_err(|_| DispatchError::Unsupported)?;
+    Ok(u32::from(byte.to_ascii_lowercase()))
+}
+
 pub(super) fn compare_ignoring_case(
     memory: &GuestMemory,
     left: u32,

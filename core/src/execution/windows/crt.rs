@@ -63,6 +63,7 @@ pub(super) enum Call {
     CompareStringPrefix,
     CompareIgnoringCase,
     Format,
+    Lowercase,
     SetMbCodePage,
     OnExit,
 }
@@ -98,6 +99,7 @@ impl Call {
             0x170 => Some(Self::CompareStringPrefix),
             0x174 => Some(Self::CompareIgnoringCase),
             0x178 => Some(Self::Format),
+            0x17c => Some(Self::Lowercase),
             0x13c => Some(Self::SetMbCodePage),
             0x140 => Some(Self::OnExit),
             _ => None,
@@ -115,6 +117,7 @@ impl Call {
             | Self::Duplicate
             | Self::Length
             | Self::SeedRandom
+            | Self::Lowercase
             | Self::SetMbCodePage
             | Self::OnExit => 1,
             Self::ControlFp
@@ -212,6 +215,7 @@ impl Crt {
             Call::Duplicate => Some(strings::duplicate(memory, heap, arguments[0])?),
             Call::Length => Some(strings::length(memory, arguments[0])?),
             Call::Format => Some(formatting::write(memory, arguments)?),
+            Call::Lowercase => Some(strings::lowercase(arguments[0])?),
             Call::CompareIgnoringCase => Some(strings::compare_ignoring_case(
                 memory,
                 arguments[0],
@@ -317,6 +321,7 @@ pub(super) fn resolve(name: &str) -> Option<u32> {
         "strncmp" => Some(API_BASE + 0x170),
         "_stricmp" => Some(API_BASE + 0x174),
         "_vsnprintf" => Some(API_BASE + 0x178),
+        "tolower" => Some(API_BASE + 0x17c),
         "__dllonexit" => Some(API_BASE + 0x128),
         "_mbsrchr" => Some(API_BASE + 0x12c),
         "_mbsinc" => Some(API_BASE + 0x130),
