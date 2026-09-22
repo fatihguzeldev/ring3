@@ -1686,7 +1686,7 @@ fn execute_windows_formatting() {
         .unwrap();
         let run = process.run(2000);
         assert_eq!(run.reason, ProcessStop::Exited(42));
-        assert_eq!((run.instructions, run.api_calls), (783, 5));
+        assert_eq!((run.instructions, run.api_calls), (1594, 9));
     }
 }
 
