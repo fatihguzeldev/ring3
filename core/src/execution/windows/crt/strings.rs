@@ -202,7 +202,10 @@ pub(super) fn duplicate(
     Ok(pointer)
 }
 
-fn terminated_bytes(memory: &GuestMemory, source: u32) -> Result<Vec<u8>, DispatchError> {
+pub(super) fn terminated_bytes(
+    memory: &GuestMemory,
+    source: u32,
+) -> Result<Vec<u8>, DispatchError> {
     let mut bytes = Vec::new();
     for offset in 0..65536 {
         let address = source

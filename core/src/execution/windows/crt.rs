@@ -10,6 +10,7 @@ mod floating;
 mod initializers;
 mod multibyte;
 mod onexit;
+mod paths;
 mod random;
 mod status;
 mod strings;
@@ -56,6 +57,7 @@ pub(super) enum Call {
     Copy,
     CopyString,
     AppendString,
+    SplitPath,
     FindCharacter,
     Stat,
     Remove,
@@ -107,6 +109,7 @@ impl Call {
             0x184 => Some(Self::ArgvPointer),
             0x188 => Some(Self::Remove),
             0x18c => Some(Self::AppendString),
+            0x190 => Some(Self::SplitPath),
             0x13c => Some(Self::SetMbCodePage),
             0x140 => Some(Self::OnExit),
             _ => None,
@@ -133,7 +136,7 @@ impl Call {
             | Self::FindCharacter
             | Self::Stat
             | Self::CompareIgnoringCase => 2,
-            Self::GetMainArgs => 5,
+            Self::GetMainArgs | Self::SplitPath => 5,
             Self::Format => 4,
             Self::Memset
             | Self::DllOnExit
@@ -239,6 +242,10 @@ impl Crt {
                 arguments[2],
             )?),
             Call::FindCharacter => Some(strings::find(memory, arguments[0], arguments[1])?),
+            Call::SplitPath => {
+                self.multibyte.split_path(memory, arguments)?;
+                None
+            }
             Call::Remove => Some(status::remove(directory, memory, arguments[0])?),
             Call::Stat => Some(status::query(
                 directory,
@@ -313,6 +320,7 @@ pub(super) fn resolve(name: &str) -> Option<u32> {
         "memcpy" => Some(API_BASE + 0x150),
         "strncpy" => Some(API_BASE + 0x154),
         "strncat" => Some(API_BASE + 0x18c),
+        "_splitpath" => Some(API_BASE + 0x190),
         "strchr" => Some(API_BASE + 0x158),
         "_setmbcp" => Some(API_BASE + 0x13c),
         "_onexit" => Some(API_BASE + 0x140),
