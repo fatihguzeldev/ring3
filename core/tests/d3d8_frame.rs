@@ -269,12 +269,13 @@ fn device_format_compatibility_matches_the_owned_render_target_surface() {
 }
 
 #[test]
-fn device_format_reports_only_the_owned_normal_x8_texture() {
+fn device_format_reports_only_the_owned_normal_32_bit_textures() {
     let (mut process, root) = root();
     let check = method(&process, root, 10);
     assert_eq!(invoke(&mut process, check, &[root, 0, 1, 22, 0, 3, 22]), 0);
+    assert_eq!(invoke(&mut process, check, &[root, 0, 1, 22, 0, 3, 21]), 0);
     for args in [
-        [root, 0, 1, 22, 0, 3, 21],
+        [root, 0, 1, 22, 0, 3, 20],
         [root, 0, 1, 22, 1, 3, 22],
         [root, 0, 1, 22, 0, 2, 22],
         [root, 0, 2, 22, 0, 3, 22],
@@ -611,13 +612,57 @@ fn texture_owns_mip_pixels_and_releases_its_guest_memory() {
 }
 
 #[test]
+fn alpha_texture_preserves_32_bit_bgra_pixels_and_reports_its_format() {
+    let (mut process, _, device) = create();
+    let create_texture = method(&process, device, 20);
+    assert_eq!(
+        invoke(
+            &mut process,
+            create_texture,
+            &[device, 2, 1, 1, 0, 21, 1, TEXTURE_OUTPUT]
+        ),
+        0
+    );
+    let texture = read(&process, TEXTURE_OUTPUT);
+    let level_desc = method(&process, texture, 14);
+    assert_eq!(
+        invoke(&mut process, level_desc, &[texture, 0, LEVEL_DESC]),
+        0
+    );
+    assert_eq!(read(&process, LEVEL_DESC), 21);
+    assert_eq!(read(&process, LEVEL_DESC + 16), 8);
+
+    let lock = method(&process, texture, 16);
+    let unlock = method(&process, texture, 17);
+    assert_eq!(
+        invoke(&mut process, lock, &[texture, 0, LOCKED_RECT, 0, 0]),
+        0
+    );
+    let pixels = read(&process, LOCKED_RECT + 4);
+    assert_eq!(read(&process, LOCKED_RECT), 8);
+    process
+        .memory
+        .write(u64::from(pixels), &[0x33, 0x22, 0x11, 0x7f])
+        .unwrap();
+    assert_eq!(invoke(&mut process, unlock, &[texture, 0]), 0);
+    assert_eq!(
+        invoke(&mut process, lock, &[texture, 0, LOCKED_RECT, 0, 0]),
+        0
+    );
+    assert_eq!(read_bytes(&process, pixels, 4), [0x33, 0x22, 0x11, 0x7f]);
+    assert_eq!(invoke(&mut process, unlock, &[texture, 0]), 0);
+    let release = method(&process, texture, 2);
+    assert_eq!(invoke(&mut process, release, &[texture]), 0);
+}
+
+#[test]
 fn unsupported_texture_requests_preserve_output_and_device_lifetime() {
     let (mut process, _, device) = create();
     let create_texture = method(&process, device, 20);
     for args in [
         [0, 2, 1, 0, 22, 1],
         [4, 2, 1, 1, 22, 1],
-        [4, 2, 1, 0, 21, 1],
+        [4, 2, 1, 0, 20, 1],
         [4, 2, 1, 0, 22, 3],
         [u32::MAX, u32::MAX, 1, 0, 22, 1],
     ] {

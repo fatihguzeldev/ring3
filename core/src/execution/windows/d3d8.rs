@@ -113,6 +113,7 @@ pub(super) struct Graphics {
 struct Texture {
     refs: u32,
     length: u64,
+    format: u32,
     pool: u32,
     levels: Vec<TextureLevel>,
 }
@@ -308,7 +309,7 @@ impl Graphics {
         if args[0] != ROOT || self.root_refs == 0 || args[1] != 0 || !matches!(args[2], 1..=3) {
             return INVALID_CALL;
         }
-        if matches!(args[2..], [1, 22, 1, 1, 22] | [1, 22, 0, 3, 22]) {
+        if matches!(args[2..], [1, 22, 1, 1, 22] | [1, 22, 0, 3, 21 | 22]) {
             0
         } else {
             NOT_AVAILABLE
@@ -430,7 +431,7 @@ impl Graphics {
             || height == 0
             || u64::from(width) * u64::from(height) > MAX_PIXELS
             || usage != 0
-            || format != 22
+            || !matches!(format, 21 | 22)
             || !matches!(pool, 0..=2)
         {
             return Ok(INVALID_CALL);
@@ -479,6 +480,7 @@ impl Graphics {
             Texture {
                 refs: 1,
                 length,
+                format,
                 pool,
                 levels,
             },
@@ -521,7 +523,7 @@ impl Graphics {
         };
         guest::check(memory, args[2], 32, Access::Write)?;
         let values = [
-            22,
+            texture.format,
             3,
             0,
             texture.pool,
