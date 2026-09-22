@@ -16,7 +16,7 @@ fn executes_an_uninterrupted_guest_graphics_program() {
             Process32::load(&d3d8_executable::pe32(width, height, color), 32).unwrap();
         let result = process.run(100);
         assert_eq!(result.reason, ProcessStop::Stopped(StopReason::Breakpoint));
-        assert_eq!(result.api_calls, 4);
+        assert_eq!(result.api_calls, 5);
         assert_eq!(read(&process, PARAMETERS + 12), 1);
         let frame = process.take_frame().unwrap();
         assert_eq!((frame.width, frame.height), (width, height));
@@ -89,6 +89,18 @@ fn create_accepts_only_direct3d_8_0_and_8_1_sdk_identities() {
         let factory = read(&process, 0x0040_2060);
         assert_eq!(invoke(&mut process, factory, &[version]), 0);
     }
+}
+
+#[test]
+fn adapter_count_reports_only_the_live_owned_root() {
+    let (mut process, root) = root();
+    let count = method(&process, root, 4);
+    assert_eq!(invoke(&mut process, count, &[root]), 1);
+    assert_eq!(invoke(&mut process, count, &[root]), 1);
+    assert_eq!(invoke(&mut process, count, &[root + 4]), 0);
+    let release = method(&process, root, 2);
+    assert_eq!(invoke(&mut process, release, &[root]), 0);
+    assert_eq!(invoke(&mut process, count, &[root]), 0);
 }
 
 fn create() -> (Process32, u32, u32) {

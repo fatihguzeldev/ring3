@@ -22,6 +22,7 @@ pub struct Frame {
 #[derive(Clone, Copy)]
 pub(super) enum Call {
     Create,
+    AdapterCount,
     CreateDevice,
     Clear,
     Present,
@@ -42,6 +43,7 @@ impl Call {
             0x54 => Self::RootRelease,
             0x58 => Self::DeviceAddRef,
             0x5c => Self::DeviceRelease,
+            0x2d0 => Self::AdapterCount,
             _ => return None,
         })
     }
@@ -76,6 +78,7 @@ impl Graphics {
         for (table, index, offset) in [
             (ROOT_TABLE, 1, 0x50),
             (ROOT_TABLE, 2, 0x54),
+            (ROOT_TABLE, 4, 0x2d0),
             (ROOT_TABLE, 15, 0x40),
             (DEVICE_TABLE, 1, 0x58),
             (DEVICE_TABLE, 2, 0x5c),
@@ -106,6 +109,7 @@ impl Graphics {
                     ROOT
                 }
             }
+            Call::AdapterCount => u32::from(args[0] == ROOT && self.root_refs != 0),
             Call::CreateDevice => return self.create_device(args, memory),
             Call::Clear => return self.clear(args, memory),
             Call::Present => {
