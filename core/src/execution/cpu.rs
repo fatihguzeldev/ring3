@@ -3,6 +3,7 @@ use iced_x86::{Code, Decoder, DecoderError, DecoderOptions, Instruction, Mnemoni
 use super::{GuestMemory, MemoryError};
 
 mod branches;
+mod division;
 mod flag_stack;
 mod identification;
 mod operands;
@@ -41,6 +42,8 @@ pub enum StopReason {
     Intercepted,
     UnsupportedInstruction,
     InvalidInstruction,
+    /// zero divisor or an unsigned quotient too large for its destination.
+    DivideError,
     MemoryFault(MemoryError),
 }
 
@@ -197,6 +200,7 @@ impl Cpu32 {
             Code::Imul_rm8 | Code::Imul_rm16 | Code::Imul_rm32 => {
                 self.multiply_wide(instruction, memory)?;
             }
+            Code::Div_rm8 | Code::Div_rm16 | Code::Div_rm32 => self.divide(instruction, memory)?,
             Code::Inc_rm8
             | Code::Inc_rm16
             | Code::Inc_rm32
