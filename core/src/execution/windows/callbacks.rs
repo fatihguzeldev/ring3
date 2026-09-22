@@ -5,7 +5,14 @@ const MAX_DEPTH: usize = 64;
 
 #[derive(Default)]
 pub(super) struct Callbacks {
-    stacks: Vec<u32>,
+    frames: Vec<Frame>,
+}
+
+#[derive(Clone, Copy)]
+pub(super) struct Frame {
+    pub(super) stack: u32,
+    pub(super) caller: u32,
+    pub(super) cleanup: u32,
 }
 
 impl Callbacks {
@@ -15,22 +22,47 @@ impl Callbacks {
         memory: &mut GuestMemory,
         arguments: &[u32],
     ) -> Result<(), DispatchError> {
-        if self.stacks.len() == MAX_DEPTH || arguments[0] == RETURN {
+        let stack = cpu.register(Register32::Esp);
+        self.enter(
+            cpu,
+            memory,
+            Frame {
+                stack,
+                caller: stack,
+                cleanup: 24,
+            },
+            arguments[0],
+            &arguments[1..],
+        )
+    }
+
+    pub(super) fn enter(
+        &mut self,
+        cpu: &mut Cpu32,
+        memory: &mut GuestMemory,
+        frame: Frame,
+        procedure: u32,
+        arguments: &[u32],
+    ) -> Result<(), DispatchError> {
+        if self.frames.len() == MAX_DEPTH || procedure == RETURN || arguments.len() > 4 {
             return Err(DispatchError::Unsupported);
         }
-        let stack = cpu.register(Register32::Esp);
-        let callback_stack = stack.checked_sub(20).ok_or(MemoryError::AddressOverflow)?;
-        let mut frame = [0; 20];
-        for (bytes, value) in frame
+        let length = (arguments.len() + 1) * 4;
+        let callback_stack = frame
+            .stack
+            .checked_sub(u32::try_from(length).expect("small callback frame"))
+            .ok_or(MemoryError::AddressOverflow)?;
+        let mut data = [0; 20];
+        for (bytes, value) in data[..length]
             .chunks_exact_mut(4)
-            .zip(std::iter::once(&RETURN).chain(&arguments[1..]))
+            .zip(std::iter::once(&RETURN).chain(arguments))
         {
             bytes.copy_from_slice(&value.to_le_bytes());
         }
-        memory.write(u64::from(callback_stack), &frame)?;
-        self.stacks.push(stack);
+        memory.write(u64::from(callback_stack), &data[..length])?;
+        self.frames.push(frame);
         cpu.set_register(Register32::Esp, callback_stack);
-        cpu.eip = arguments[0];
+        cpu.eip = procedure;
         Ok(())
     }
 
@@ -39,14 +71,14 @@ impl Callbacks {
         cpu: &mut Cpu32,
         memory: &GuestMemory,
     ) -> Result<(), DispatchError> {
-        let stack = *self.stacks.last().ok_or(DispatchError::Unsupported)?;
-        if cpu.register(Register32::Esp) != stack {
+        let frame = *self.frames.last().ok_or(DispatchError::Unsupported)?;
+        if cpu.register(Register32::Esp) != frame.stack {
             return Err(DispatchError::Unsupported);
         }
         let mut saved_return = [0];
-        guest::read_words(memory, stack, &mut saved_return)?;
-        self.stacks.pop();
-        cpu.set_register(Register32::Esp, stack.wrapping_add(24));
+        guest::read_words(memory, frame.caller, &mut saved_return)?;
+        self.frames.pop();
+        cpu.set_register(Register32::Esp, frame.caller.wrapping_add(frame.cleanup));
         cpu.eip = saved_return[0];
         Ok(())
     }
