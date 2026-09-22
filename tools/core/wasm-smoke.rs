@@ -1604,6 +1604,14 @@ fn execute_window_creation() {
             final_state = Some((process.cpu, counts));
         }
     }
+    #[cfg(windows_demo)]
+    {
+        let mut process =
+            Process32::load(include_bytes!("../../target/windows-api/dialog.exe"), 64).unwrap();
+        let result = process.run(1000);
+        assert_eq!(result.reason, ProcessStop::Exited(42));
+        assert_eq!((result.instructions, result.api_calls), (85, 10));
+    }
 }
 
 fn execute_window_procedures() {
