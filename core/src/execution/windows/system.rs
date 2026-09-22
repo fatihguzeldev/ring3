@@ -27,6 +27,7 @@ fn metrics(index: u32) -> Result<u32, DispatchError> {
         32 | 33 => Ok(RESIZE_FRAME.cast_unsigned()),
         34 => Ok(MIN_TRACK[0].cast_unsigned()),
         35 => Ok(MIN_TRACK[1].cast_unsigned()),
+        42 => Ok(0),
         59 => Ok(MAX_TRACK[0].cast_unsigned()),
         60 => Ok(MAX_TRACK[1].cast_unsigned()),
         17 => Ok(gdi::SCREEN_HEIGHT - CAPTION_HEIGHT),
