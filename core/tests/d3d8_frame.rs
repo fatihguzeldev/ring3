@@ -198,6 +198,50 @@ fn adapter_mode_faults_before_writing_any_prefix() {
 }
 
 #[test]
+fn device_type_compatibility_matches_the_owned_formats() {
+    let (mut process, root) = root();
+    assert_eq!(method(&process, root, 8), 0x7000_0ffc);
+    assert_eq!(method(&process, root, 10), 0x7000_0ffc);
+    let check = method(&process, root, 9);
+    assert_ne!(check, 0x7000_0ffc);
+    for windowed in [0, 1] {
+        assert_eq!(
+            invoke(&mut process, check, &[root, 0, 1, 22, 22, windowed]),
+            0
+        );
+    }
+    for args in [
+        [root, 0, 2, 22, 22, 0],
+        [root, 0, 3, 22, 22, 0],
+        [root, 0, 1, 21, 22, 0],
+        [root, 0, 1, 22, 21, 0],
+    ] {
+        assert_eq!(invoke(&mut process, check, &args), 0x8876_086a);
+    }
+}
+
+#[test]
+fn invalid_or_released_roots_cannot_report_device_type_compatibility() {
+    let (mut process, root) = root();
+    let check = method(&process, root, 9);
+    for args in [
+        [root + 4, 0, 1, 22, 22, 0],
+        [root, 1, 1, 22, 22, 0],
+        [root, 0, 0, 22, 22, 0],
+        [root, 0, 4, 22, 22, 0],
+    ] {
+        assert_eq!(invoke(&mut process, check, &args), 0x8876_086c);
+    }
+
+    let release = method(&process, root, 2);
+    assert_eq!(invoke(&mut process, release, &[root]), 0);
+    assert_eq!(
+        invoke(&mut process, check, &[root, 0, 1, 22, 22, 0]),
+        0x8876_086c
+    );
+}
+
+#[test]
 fn adapter_identifier_reports_the_owned_virtual_adapter() {
     let (mut process, root) = root();
     let identifier = method(&process, root, 5);
