@@ -1,4 +1,5 @@
-use super::{Access, DispatchError, GuestMemory, MemoryError, guest};
+use super::super::Access;
+use super::{DispatchError, GuestMemory, MemoryError, guest};
 
 const OUTPUT_LIMIT: usize = 65536;
 

@@ -1,13 +1,12 @@
 use super::super::Access;
 use super::{
     API_BASE, Cpu32, DispatchError, GuestMemory, MemoryError, PAGE_SIZE, Permissions, Register32,
-    directory, guest, heap,
+    directory, formatting, guest, heap,
 };
 
 mod arguments;
 mod buffers;
 mod floating;
-mod formatting;
 mod initializers;
 mod multibyte;
 mod onexit;

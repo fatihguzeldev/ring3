@@ -14,6 +14,7 @@ mod d3d8;
 mod diagnostics;
 mod directory;
 mod environment;
+mod formatting;
 mod gdi;
 mod guest;
 mod heap;
