@@ -9,6 +9,7 @@ use crate::{
 
 mod accelerators;
 mod icons;
+mod loaded;
 
 #[derive(Clone, Copy)]
 pub(super) enum Call {
@@ -17,6 +18,9 @@ pub(super) enum Call {
     LoadAccelerators,
     CopyAccelerators,
     LoadIcon,
+    LoadResource,
+    LockResource,
+    SizeofResource,
 }
 
 impl Call {
@@ -24,7 +28,10 @@ impl Call {
         match self {
             Self::Find | Self::CopyAccelerators => 3,
             Self::String => 4,
-            Self::LoadAccelerators | Self::LoadIcon => 2,
+            Self::LoadAccelerators | Self::LoadIcon | Self::LoadResource | Self::SizeofResource => {
+                2
+            }
+            Self::LockResource => 1,
         }
     }
 
@@ -35,6 +42,9 @@ impl Call {
             0x29c => Some(Self::LoadAccelerators),
             0x2a0 => Some(Self::CopyAccelerators),
             0x2c8 => Some(Self::LoadIcon),
+            0x424 => Some(Self::LoadResource),
+            0x428 => Some(Self::LockResource),
+            0x42c => Some(Self::SizeofResource),
             _ => None,
         }
     }
@@ -50,8 +60,10 @@ pub(super) struct Resources {
     images: Vec<Image>,
     accelerators: accelerators::Tables,
     icons: icons::Icons,
+    loaded: loaded::Loaded,
 }
 
+#[derive(Clone, Copy)]
 struct Resource {
     info: u32,
     base: u32,
@@ -89,6 +101,7 @@ impl Resources {
             images,
             accelerators: accelerators::Tables::default(),
             icons: icons::Icons::default(),
+            loaded: loaded::Loaded::default(),
         }
     }
 
@@ -100,6 +113,9 @@ impl Resources {
         memory: &mut GuestMemory,
     ) -> Result<u32, DispatchError> {
         match call {
+            Call::LoadResource => self.load_resource(arguments, modules, memory),
+            Call::LockResource => self.lock_resource(arguments[0], modules, memory),
+            Call::SizeofResource => self.sizeof_resource(arguments, modules, memory),
             Call::LoadIcon => self.load_icon(arguments, modules, memory),
             Call::LoadAccelerators => {
                 if arguments[1] > 0xffff {
@@ -219,6 +235,41 @@ impl Resources {
             base,
             data: data.payload_rva.get(),
             size: data.payload_size,
+        }))
+    }
+
+    fn find_info(
+        &self,
+        module: u32,
+        info: u32,
+        modules: &Modules,
+    ) -> Result<Selection, DispatchError> {
+        let base = if module == 0 { self.program } else { module };
+        if !modules.contains(base) {
+            return Ok(Selection::Missing(87));
+        }
+        let Some(image) = self.images.iter().find(|image| image.base == base) else {
+            return Ok(Selection::Missing(1812));
+        };
+        let Some(table) = image
+            .table
+            .as_ref()
+            .map_err(|_| DispatchError::Unsupported)?
+        else {
+            return Ok(Selection::Missing(1812));
+        };
+        let Some(entry) = table
+            .data_entries
+            .iter()
+            .find(|entry| base.checked_add(entry.data_entry_rva.get()) == Some(info))
+        else {
+            return Ok(Selection::Missing(87));
+        };
+        Ok(Selection::Found(Resource {
+            info,
+            base,
+            data: entry.payload_rva.get(),
+            size: entry.payload_size,
         }))
     }
 }

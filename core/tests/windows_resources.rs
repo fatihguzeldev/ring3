@@ -10,6 +10,9 @@ use ring3_core::execution::{
 
 const FIND: u32 = 0x7000_00e8;
 const STRING: u32 = 0x7000_00ec;
+const LOAD: u32 = 0x7000_0424;
+const LOCK: u32 = 0x7000_0428;
+const SIZE: u32 = 0x7000_042c;
 const STACK: u32 = 0x1000_ff00;
 const OUTPUT: u32 = 0x0040_2180;
 
@@ -86,6 +89,56 @@ fn numeric_resource_identity_and_counted_string_slots_come_from_the_image() {
         assert_eq!(process.last_error().unwrap(), 77);
     }
     assert_eq!(process.memory.mapped_pages(), pages);
+}
+
+#[test]
+fn loaded_resource_handle_locks_to_the_mapped_payload_and_reports_its_size() {
+    let mut process = load();
+    let info = call(&mut process, FIND, &[0, 1, 6]);
+    assert_eq!(info, 0x0040_2348);
+    assert_eq!(call(&mut process, SIZE, &[0, info]), 50);
+    assert_eq!(call(&mut process, LOCK, &[info]), 0);
+    let handle = call(&mut process, LOAD, &[0, info]);
+    assert_eq!(handle, 0x7900_0004);
+    assert_eq!(call(&mut process, LOAD, &[0x0040_0000, info]), handle);
+    let pointer = call(&mut process, LOCK, &[handle]);
+    assert_eq!(pointer, 0x0040_2358);
+    assert_eq!(output_at(&process, pointer, 4), [5, 0, b'A', 0]);
+}
+
+#[test]
+fn invalid_resource_ownership_and_unreadable_payload_do_not_publish_handles() {
+    let mut process = load();
+    let info = call(&mut process, FIND, &[0, 1, 6]);
+    assert_eq!(call(&mut process, LOAD, &[0x7000_0800, info]), 0);
+    assert_eq!(process.last_error().unwrap(), 1812);
+    assert_eq!(call(&mut process, LOAD, &[0, info + 4]), 0);
+    assert_eq!(process.last_error().unwrap(), 87);
+    assert_eq!(call(&mut process, LOCK, &[0x7900_0004]), 0);
+    process
+        .memory
+        .protect(0x0040_2000, PAGE_SIZE, Permissions::NONE)
+        .unwrap();
+    prepare(&mut process, LOAD, &[0, info]);
+    let before = process.cpu;
+    let result = process.run(1);
+    assert!(matches!(
+        result.reason,
+        ProcessStop::Stopped(StopReason::MemoryFault(_))
+    ));
+    assert_eq!(result.api_calls, 0);
+    assert_eq!(process.cpu, before);
+    process
+        .memory
+        .protect(0x0040_2000, PAGE_SIZE, Permissions::READ_WRITE)
+        .unwrap();
+    assert_eq!(call(&mut process, LOAD, &[0, info]), 0x7900_0004);
+}
+
+fn output_at(process: &Process32, address: u32, length: usize) -> Vec<u8> {
+    let mut bytes = vec![0; length];
+    process.memory.read(u64::from(address), &mut bytes).unwrap();
+    bytes
 }
 
 #[test]
