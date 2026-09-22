@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use super::{Access, Call, DispatchError, GuestMemory, Key, guest, read_name};
+use super::{Access, Call, DispatchError, GuestMemory, Key, MemoryError, guest, read_name};
 
 const MAX_VALUE_BYTES: usize = 64 * 1024;
 const MAX_VALUES: usize = 4096;
@@ -18,6 +18,29 @@ pub(super) struct Values {
 }
 
 impl Values {
+    pub(super) fn set_default(
+        &mut self,
+        key: Key,
+        source: u32,
+        memory: &GuestMemory,
+    ) -> Result<u32, DispatchError> {
+        for offset in 0..u32::try_from(MAX_VALUE_BYTES).expect("bounded value length") {
+            let address = source
+                .checked_add(offset)
+                .ok_or(MemoryError::AddressOverflow)?;
+            let mut byte = [0];
+            memory.read(u64::from(address), &mut byte)?;
+            if byte[0] == 0 {
+                return self.set(
+                    (key, String::new()),
+                    &[0, 0, 0, 1, source, offset + 1],
+                    memory,
+                );
+            }
+        }
+        Err(DispatchError::Unsupported)
+    }
+
     pub(super) fn dispatch(
         &mut self,
         call: Call,

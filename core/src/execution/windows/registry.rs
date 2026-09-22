@@ -6,6 +6,7 @@ use super::{DispatchError, GuestMemory, MemoryError, Process32, Register32, gues
 mod values;
 
 const CURRENT_USER: u32 = 0x8000_0001;
+const CLASSES_ROOT: u32 = 0x8000_0000;
 const LOCAL_MACHINE: u32 = 0x8000_0002;
 const MAX_KEYS: usize = 4096;
 const MAX_HANDLES: usize = 4096;
@@ -18,6 +19,7 @@ pub(super) enum Call {
     Close,
     Query,
     Set,
+    SetDefault,
 }
 
 impl Call {
@@ -28,13 +30,14 @@ impl Call {
             0x280 => Some(Self::Close),
             0x284 => Some(Self::Query),
             0x288 => Some(Self::Set),
+            0x298 => Some(Self::SetDefault),
             _ => None,
         }
     }
 
     pub(super) fn arguments(self) -> usize {
         match self {
-            Self::Open => 5,
+            Self::Open | Self::SetDefault => 5,
             Self::Create => 9,
             Self::Close => 1,
             Self::Query | Self::Set => 6,
@@ -96,6 +99,9 @@ impl Registry {
         args: &[u32],
         memory: &mut GuestMemory,
     ) -> Result<u32, DispatchError> {
+        if matches!(call, Call::SetDefault) {
+            return self.set_default(args, memory);
+        }
         let Some(parent) = self.parent(args[0])? else {
             return Ok(6);
         };
@@ -130,9 +136,6 @@ impl Registry {
             return Err(DispatchError::Unsupported);
         }
         let path = read_name(memory, args[1])?;
-        if !path.is_empty() && path.split('\\').any(str::is_empty) {
-            return Err(DispatchError::Unsupported);
-        }
         if !create && path.is_empty() && matches!(args[0], CURRENT_USER | LOCAL_MACHINE) {
             guest::write_word(memory, output, args[0])?;
             return Ok(0);
@@ -167,6 +170,53 @@ impl Registry {
         self.handles.insert(self.next, (target, access));
         self.next += 4;
         Ok(0)
+    }
+
+    fn set_default(&mut self, args: &[u32], memory: &GuestMemory) -> Result<u32, DispatchError> {
+        let parent = if args[0] == CLASSES_ROOT {
+            Key {
+                root: LOCAL_MACHINE,
+                path: "software\\classes".to_owned(),
+            }
+        } else {
+            let Some(parent) = self.parent(args[0])? else {
+                return Ok(6);
+            };
+            parent
+        };
+        if self
+            .handles
+            .get(&args[0])
+            .is_some_and(|(_, access)| access & 2 == 0)
+        {
+            return Ok(5);
+        }
+        if args[2] != 1 || args[3] == 0 {
+            return Err(DispatchError::Unsupported);
+        }
+        let path = read_name(memory, args[1])?;
+        let mut target = join(parent, &path)?;
+        if args[0] == CLASSES_ROOT {
+            let user = Key {
+                root: CURRENT_USER,
+                path: target.path.clone(),
+            };
+            if self.keys.contains(&user) {
+                target = user;
+            }
+        }
+        let missing = self.missing(&target);
+        if target.root == LOCAL_MACHINE && missing.iter().any(|key| !key.path.contains('\\')) {
+            return Ok(5);
+        }
+        if self.keys.len() + missing.len() > MAX_KEYS {
+            return Ok(8);
+        }
+        let result = self.values.set_default(target, args[3], memory)?;
+        if result == 0 {
+            self.keys.extend(missing);
+        }
+        Ok(result)
     }
 
     fn missing(&self, target: &Key) -> Vec<Key> {
@@ -212,6 +262,9 @@ fn read_name(memory: &GuestMemory, pointer: u32) -> Result<String, DispatchError
 }
 
 fn join(mut parent: Key, path: &str) -> Result<Key, DispatchError> {
+    if !path.is_empty() && path.split('\\').any(str::is_empty) {
+        return Err(DispatchError::Unsupported);
+    }
     if !parent.path.is_empty() && !path.is_empty() {
         parent.path.push('\\');
     }
@@ -280,6 +333,54 @@ mod tests {
                 Ok(8)
             ));
             assert_eq!(registry.keys.len(), key_count);
+            assert_eq!(registry.next, 0x7600_0004);
+        }
+    }
+
+    #[test]
+    fn default_value_quota_failures_do_not_create_keys_or_consume_handles() {
+        for full_keys in [false, true] {
+            let mut registry = Registry::default();
+            let mut memory = memory();
+            let root = Key {
+                root: CURRENT_USER,
+                path: String::new(),
+            };
+            for index in 0..4096 {
+                if full_keys {
+                    if index >= 4 {
+                        registry.keys.insert(Key {
+                            root: CURRENT_USER,
+                            path: format!("key{index}"),
+                        });
+                    }
+                } else {
+                    let name = format!("value{index}\0");
+                    memory.write(0x1000, name.as_bytes()).unwrap();
+                    assert!(matches!(
+                        registry.values.dispatch(
+                            Call::Set,
+                            root.clone(),
+                            &[CURRENT_USER, 0x1000, 0, 3, 0, 0],
+                            &mut memory,
+                        ),
+                        Ok(0)
+                    ));
+                }
+            }
+            memory.write(0x1000, b"software\\missing\\child\0").unwrap();
+            memory.write(0x1100, b"data\0").unwrap();
+            let before = registry.keys.clone();
+            assert!(matches!(
+                registry.dispatch(
+                    Call::SetDefault,
+                    &[CURRENT_USER, 0x1000, 1, 0x1100, 0],
+                    &mut memory
+                ),
+                Ok(8)
+            ));
+            assert!(registry.keys == before);
+            assert!(registry.handles.is_empty());
             assert_eq!(registry.next, 0x7600_0004);
         }
     }

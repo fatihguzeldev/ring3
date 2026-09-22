@@ -222,6 +222,7 @@ impl Api {
                         "RegCloseKey" => 0x280,
                         "RegQueryValueExA" => 0x284,
                         "RegSetValueExA" => 0x288,
+                        "RegSetValueA" => 0x298,
                         _ => return None,
                     },
             );
