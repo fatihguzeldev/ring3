@@ -53,3 +53,4 @@ EXPORTS
     _FindNextFileA@8==FindNextFileA
     _FindClose@4==FindClose
     _GetEnvironmentVariableA@12==GetEnvironmentVariableA
+    _GetStartupInfoA@4==GetStartupInfoA
