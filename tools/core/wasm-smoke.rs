@@ -375,6 +375,8 @@ fn execute_locale_activity() {
 
 #[path = "../../core/tests/support/string_length_executable.rs"]
 mod string_length_executable;
+#[path = "../../core/tests/support/windows_string_length_executable.rs"]
+mod windows_string_length_executable;
 
 #[path = "../../core/tests/support/buffer_copy_executable.rs"]
 mod buffer_copy_executable;
@@ -1354,6 +1356,29 @@ fn execute_registry_values() {
         let run = process.run(1000);
         assert_eq!(run.reason, ProcessStop::Exited(42));
         assert_eq!((run.instructions, run.api_calls), (202, 15));
+    }
+}
+
+fn execute_windows_string_length() {
+    use ring3_core::execution::{Process32, ProcessStop, Register32, StopReason};
+    let mut process = Process32::load(&windows_string_length_executable::pe32(), 32).unwrap();
+    let run = process.run(100);
+    assert_eq!(run.reason, ProcessStop::Stopped(StopReason::Breakpoint));
+    assert_eq!((run.instructions, run.api_calls), (9, 3));
+    assert_eq!(process.cpu.register(Register32::Eax), 0);
+    assert_eq!(process.cpu.register(Register32::Ebx), 3);
+    assert_eq!(process.cpu.register(Register32::Ecx), 2);
+    assert_eq!(process.cpu.register(Register32::Esp), 0x1001_0000);
+    #[cfg(windows_demo)]
+    {
+        let mut process = Process32::load(
+            include_bytes!("../../target/windows-api/string-length.exe"),
+            64,
+        )
+        .unwrap();
+        let run = process.run(1000);
+        assert_eq!(run.reason, ProcessStop::Exited(42));
+        assert_eq!((run.instructions, run.api_calls), (44, 8));
     }
 }
 
@@ -3450,6 +3475,7 @@ pub extern "C" fn run() -> u32 {
     execute_procedure_lookup();
     execute_registry_keys();
     execute_registry_values();
+    execute_windows_string_length();
     execute_x87_register_stores();
     execute_thread_priority();
     execute_windows_formatting();

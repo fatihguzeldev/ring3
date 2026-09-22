@@ -57,3 +57,4 @@ EXPORTS
     _GetStartupInfoA@4==GetStartupInfoA
     _SetThreadPriority@8==SetThreadPriority
     _GetThreadPriority@4==GetThreadPriority
+    _lstrlenA@4==lstrlenA
