@@ -99,7 +99,7 @@ impl Graphics {
     ) -> Result<u32, MemoryError> {
         Ok(match call {
             Call::Create => {
-                if args[0] != 220 || self.root_refs != 0 {
+                if !matches!(args[0], 120 | 220) || self.root_refs != 0 {
                     0
                 } else {
                     self.root_refs = 1;

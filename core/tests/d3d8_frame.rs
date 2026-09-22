@@ -75,6 +75,22 @@ fn root() -> (Process32, u32) {
     (process, root)
 }
 
+#[test]
+fn create_accepts_only_direct3d_8_0_and_8_1_sdk_identities() {
+    let bytes = imported_executable::pe32(&[0xff, 0xd0, 0xcc], "d3d8.dll", &["Direct3DCreate8"]);
+    for version in [120, 220] {
+        let mut process = Process32::load(&bytes, 32).unwrap();
+        let factory = read(&process, 0x0040_2060);
+        assert_ne!(invoke(&mut process, factory, &[version]), 0);
+        assert_eq!(invoke(&mut process, factory, &[version]), 0);
+    }
+    for version in [0, 119, 121, 219, 221, u32::MAX] {
+        let mut process = Process32::load(&bytes, 32).unwrap();
+        let factory = read(&process, 0x0040_2060);
+        assert_eq!(invoke(&mut process, factory, &[version]), 0);
+    }
+}
+
 fn create() -> (Process32, u32, u32) {
     let (mut process, root) = root();
     let create_device = method(&process, root, 15);
