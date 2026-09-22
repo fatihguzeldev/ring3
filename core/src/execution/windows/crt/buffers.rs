@@ -41,6 +41,51 @@ pub(super) fn copy(
     Ok(destination)
 }
 
+pub(super) fn move_bytes(
+    memory: &mut GuestMemory,
+    destination: u32,
+    source: u32,
+    count: u32,
+) -> Result<u32, DispatchError> {
+    if count == 0 {
+        return Ok(destination);
+    }
+    let length = usize::try_from(count).expect("guest32 count fits usize");
+    guest::check(memory, source, length, Access::Read)?;
+    guest::check(memory, destination, length, Access::Write)?;
+    if source == destination {
+        return Ok(destination);
+    }
+
+    let (src, dst) = (u64::from(source), u64::from(destination));
+    let mut bytes = [0; 4096];
+    if src < dst && dst < src + u64::from(count) {
+        let mut end = length;
+        while end != 0 {
+            let size = end.min(bytes.len());
+            let offset = end - size;
+            memory
+                .read(src + offset as u64, &mut bytes[..size])
+                .expect("source range was checked");
+            memory
+                .write(dst + offset as u64, &bytes[..size])
+                .expect("destination range was checked");
+            end = offset;
+        }
+    } else {
+        for offset in (0..length).step_by(bytes.len()) {
+            let size = (length - offset).min(bytes.len());
+            memory
+                .read(src + offset as u64, &mut bytes[..size])
+                .expect("source range was checked");
+            memory
+                .write(dst + offset as u64, &bytes[..size])
+                .expect("destination range was checked");
+        }
+    }
+    Ok(destination)
+}
+
 pub(super) fn compare(
     memory: &GuestMemory,
     left: u32,

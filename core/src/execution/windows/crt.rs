@@ -56,6 +56,7 @@ pub(super) enum Call {
     Length,
     Compare,
     Copy,
+    Move,
     CopyString,
     AppendString,
     SplitPath,
@@ -121,6 +122,7 @@ impl Call {
             0x1a4 => Some(Self::Stream(streams::Call::Tell)),
             0x1a8 => Some(Self::UppercaseString),
             0x1ac => Some(Self::Sprintf),
+            0x1b0 => Some(Self::Move),
             0x13c => Some(Self::SetMbCodePage),
             0x140 => Some(Self::OnExit),
             _ => None,
@@ -156,6 +158,7 @@ impl Call {
             | Self::DllOnExit
             | Self::Compare
             | Self::Copy
+            | Self::Move
             | Self::CopyString
             | Self::AppendString
             | Self::CompareStringPrefix => 3,
@@ -279,6 +282,7 @@ impl Crt {
                 };
                 Some(copy(memory, args[0], args[1], args[2])?)
             }
+            Call::Move => Some(buffers::move_bytes(memory, args[0], args[1], args[2])?),
             Call::Compare => Some(buffers::compare(memory, args[0], args[1], args[2])?),
             Call::DllOnExit => Some(onexit::register(
                 heap,
@@ -336,6 +340,7 @@ pub(super) fn resolve(name: &str) -> Option<u32> {
         "ftell" => Some(API_BASE + 0x1a4),
         "_strupr" => Some(API_BASE + 0x1a8),
         "sprintf" => Some(API_BASE + 0x1ac),
+        "memmove" => Some(API_BASE + 0x1b0),
         "strchr" => Some(API_BASE + 0x158),
         "_setmbcp" => Some(API_BASE + 0x13c),
         "_onexit" => Some(API_BASE + 0x140),
