@@ -14,6 +14,7 @@ pub(in super::super) enum Call {
     Read,
     Close,
     Seek,
+    Tell,
 }
 
 impl Call {
@@ -21,7 +22,7 @@ impl Call {
         match self {
             Self::Open => 2,
             Self::Read => 4,
-            Self::Close => 1,
+            Self::Close | Self::Tell => 1,
             Self::Seek => 3,
         }
     }
@@ -70,6 +71,7 @@ impl Streams {
                 Ok(0)
             }
             Call::Seek => self.seek(args, memory, directory),
+            Call::Tell => self.tell(args[0], memory),
         }
     }
 
@@ -190,14 +192,14 @@ impl Streams {
             1 => i64::try_from(stream.position).expect("stream position fits u32"),
             2 => i64::try_from(directory.contents(stream.file).len())
                 .expect("file contents are bounded below i64"),
-            _ => return invalid_seek(memory),
+            _ => return invalid_position(memory),
         };
         let offset = i64::from(args[1].cast_signed());
         let Some(target) = base
             .checked_add(offset)
             .and_then(|value| u32::try_from(value).ok())
         else {
-            return invalid_seek(memory);
+            return invalid_position(memory);
         };
         let clear_eof = stream.eof;
         if clear_eof {
@@ -209,6 +211,16 @@ impl Streams {
         stream.eof = false;
         Ok(0)
     }
+
+    fn tell(&self, pointer: u32, memory: &mut GuestMemory) -> Result<u32, DispatchError> {
+        let position = u32::try_from(self.validated(pointer, memory)?.position)
+            .expect("stream position fits u32");
+        if position <= i32::MAX.cast_unsigned() {
+            Ok(position)
+        } else {
+            invalid_position(memory)
+        }
+    }
 }
 
 fn failed(memory: &mut GuestMemory, error: u32) -> Result<u32, DispatchError> {
@@ -216,7 +228,7 @@ fn failed(memory: &mut GuestMemory, error: u32) -> Result<u32, DispatchError> {
     Ok(0)
 }
 
-fn invalid_seek(memory: &mut GuestMemory) -> Result<u32, DispatchError> {
+fn invalid_position(memory: &mut GuestMemory) -> Result<u32, DispatchError> {
     guest::write_word(memory, ERRNO, 22)?;
     Ok(u32::MAX)
 }
