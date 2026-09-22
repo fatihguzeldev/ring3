@@ -1516,6 +1516,29 @@ fn execute_translate_message() {
     assert_eq!(process.last_error().unwrap(), 77);
 }
 
+#[cfg(windows_demo)]
+fn execute_dispatch_message() {
+    use ring3_core::execution::{PostedMessage, Process32, ProcessStop};
+    let mut process = Process32::load(
+        include_bytes!("../../target/windows-api/dispatch-message.exe"),
+        64,
+    )
+    .unwrap();
+    assert_eq!(process.run(10000).reason, ProcessStop::WaitingForMessage);
+    process
+        .post_message(PostedMessage {
+            hwnd: 0x7500_0004,
+            message: 0x401,
+            wparam: 10,
+            lparam: 32,
+            time: 1234,
+            point: [12, -5],
+        })
+        .unwrap();
+    assert_eq!(process.run(1000).reason, ProcessStop::Exited(42));
+    assert_eq!(process.last_error().unwrap(), 77);
+}
+
 fn execute_icons() {
     use ring3_core::execution::{Process32, ProcessStop, Register32, StopReason};
     let bytes = icon_executable::guest();
@@ -4255,6 +4278,8 @@ pub extern "C" fn run() -> u32 {
     execute_get_message_wait();
     #[cfg(windows_demo)]
     execute_translate_message();
+    #[cfg(windows_demo)]
+    execute_dispatch_message();
     execute_path_components();
     execute_file_streams();
     execute_desktop_queries();
