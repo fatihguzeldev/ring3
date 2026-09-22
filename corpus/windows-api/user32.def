@@ -24,3 +24,4 @@ EXPORTS
     _GetClassInfoA@12==GetClassInfoA
     _RegisterClassA@4==RegisterClassA
     _UnregisterClassA@8==UnregisterClassA
+    _CallWindowProcA@20==CallWindowProcA
