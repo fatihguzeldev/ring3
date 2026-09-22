@@ -7,6 +7,7 @@ use ring3_core::execution::{Permissions, Process32, ProcessStop, Register32, Sto
 
 const STACK: u32 = 0x1000_ef00;
 const CREATE: u32 = 0x7000_02a8;
+const ACTIVE: u32 = 0x7000_0430;
 const HANDLE: u32 = 0x7500_0004;
 const RETURN: u32 = 0x7000_0ff8;
 const ARGS: [u32; 12] = [
@@ -87,6 +88,25 @@ fn logged(reject: Option<(u32, u32)>) -> Vec<u8> {
     }
     procedure.extend_from_slice(&[0xff, 0x15, 0x68, 0x20, 0x40, 0, 0xc2, 16, 0]);
     window_creation_executable::pe32(&procedure)
+}
+
+#[test]
+fn active_window_tracks_only_successful_visible_creation() {
+    let mut hidden = ready(&logged(None));
+    assert_eq!(query(&mut hidden, ACTIVE, &[]), 0);
+    assert_eq!(finish(&mut hidden), HANDLE);
+    assert_eq!(query(&mut hidden, ACTIVE, &[]), 0);
+
+    let mut visible = ready(&logged(None));
+    put(&mut visible, STACK + 16, &[ARGS[3] | 0x1000_0000]);
+    assert_eq!(query(&mut visible, ACTIVE, &[]), 0);
+    assert_eq!(finish(&mut visible), HANDLE);
+    assert_eq!(query(&mut visible, ACTIVE, &[]), HANDLE);
+
+    let mut rejected = ready(&logged(Some((0x81, 0))));
+    put(&mut rejected, STACK + 16, &[ARGS[3] | 0x1000_0000]);
+    assert_eq!(finish(&mut rejected), 0);
+    assert_eq!(query(&mut rejected, ACTIVE, &[]), 0);
 }
 
 fn with_hook(code: &[u8]) -> Process32 {
@@ -263,7 +283,7 @@ fn newest_cbt_can_change_geometry_without_automatic_hook_chaining() {
 #[test]
 fn unsupported_cbt_mutation_stops_before_next_phase_and_can_be_repaired() {
     let hook = [
-        0x8b, 0x44, 0x24, 12, 0x8b, 0, 0xc7, 0x40, 32, 0, 0, 0xca, 0x10, 0x31, 0xc0, 0xc2, 12, 0,
+        0x8b, 0x44, 0x24, 12, 0x8b, 0, 0xc7, 0x40, 32, 0, 0, 0xca, 0x20, 0x31, 0xc0, 0xc2, 12, 0,
     ];
     let mut p = with_hook(&hook);
     assert_eq!(
@@ -370,7 +390,7 @@ fn saved_return_fault_retains_completed_callbacks_and_window_until_repaired() {
 fn unsupported_profiles_stop_without_publishing_a_window() {
     for (index, value) in [
         (0, 1),
-        (3, 0x10ca_0000),
+        (3, 0x20ca_0000),
         (4, 0x8000_0000),
         (6, u32::MAX),
         (8, 1),

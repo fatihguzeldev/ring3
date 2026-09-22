@@ -88,7 +88,7 @@ pub(super) struct Pending {
 impl Process32 {
     pub(super) fn create_window(&mut self, args: &[u32]) -> Result<bool, DispatchError> {
         if args[0] != 0
-            || args[3] & !0x00cf_0000 != 0
+            || args[3] & !0x10cf_0000 != 0
             || args[8] != 0
             || args[9] != 0
             || args[4..6].contains(&0x8000_0000)
@@ -216,7 +216,9 @@ impl Process32 {
 
     fn finish_creation(&mut self, pending: Pending, success: bool) -> Result<(), DispatchError> {
         self.callbacks.finish(&mut self.cpu, &self.memory)?;
-        if !success {
+        if success {
+            self.desktop.activate_created(pending.window);
+        } else {
             self.desktop.remove(pending.window);
         }
         self.cpu

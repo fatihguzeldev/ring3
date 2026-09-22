@@ -282,6 +282,7 @@ impl Api {
                 "GetDesktopWindow" => 16,
                 "FindWindowA" => 0x26c,
                 "IsWindow" => 0x270,
+                "GetActiveWindow" => 0x430,
                 "wsprintfA" => 0x25c,
                 "GetClassInfoA" => 0x260,
                 "RegisterClassA" => 0x264,

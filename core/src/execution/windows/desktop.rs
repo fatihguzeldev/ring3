@@ -12,6 +12,7 @@ pub(super) enum Call {
     Desktop,
     Find,
     IsWindow,
+    Active,
 }
 
 impl Call {
@@ -20,12 +21,13 @@ impl Call {
             0x10 => Some(Self::Desktop),
             0x26c => Some(Self::Find),
             0x270 => Some(Self::IsWindow),
+            0x430 => Some(Self::Active),
             _ => None,
         }
     }
     pub(super) fn arguments(self) -> usize {
         match self {
-            Self::Desktop => 0,
+            Self::Desktop | Self::Active => 0,
             Self::IsWindow => 1,
             Self::Find => 2,
         }
@@ -47,6 +49,7 @@ pub(super) struct Window {
 
 pub(super) struct Desktop {
     top_levels: BTreeMap<u32, Window>,
+    active: u32,
     next: u32,
 }
 
@@ -54,6 +57,7 @@ impl Default for Desktop {
     fn default() -> Self {
         Self {
             top_levels: BTreeMap::new(),
+            active: 0,
             next: 0x7500_0004,
         }
     }
@@ -75,6 +79,18 @@ impl Desktop {
     }
     pub(super) fn remove(&mut self, handle: u32) {
         self.top_levels.remove(&handle);
+        if self.active == handle {
+            self.active = 0;
+        }
+    }
+    pub(super) fn activate_created(&mut self, handle: u32) {
+        if self
+            .top_levels
+            .get(&handle)
+            .is_some_and(|window| window.style & 0x1000_0000 != 0)
+        {
+            self.active = handle;
+        }
     }
     pub(super) fn has_class(&self, instance: u32, atom: u32) -> bool {
         self.top_levels
@@ -90,6 +106,7 @@ impl Desktop {
     ) -> Result<u32, DispatchError> {
         match call {
             Call::Desktop => Ok(DESKTOP),
+            Call::Active => Ok(self.active),
             Call::IsWindow => Ok(u32::from(
                 args[0] == DESKTOP || self.top_levels.contains_key(&args[0]),
             )),
