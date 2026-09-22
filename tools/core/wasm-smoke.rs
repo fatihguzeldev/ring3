@@ -1537,7 +1537,11 @@ fn execute_registry_defaults() {
 
 fn execute_hook_registration() {
     use ring3_core::execution::{Process32, ProcessStop, Register32, StopReason};
-    for bytes in [hook_executable::pe32(), hook_executable::keyboard()] {
+    for bytes in [
+        hook_executable::pe32(),
+        hook_executable::keyboard(),
+        hook_executable::cbt(),
+    ] {
         let mut process = Process32::load(&bytes, 32).unwrap();
         let run = process.run(100);
         assert_eq!(run.reason, ProcessStop::Stopped(StopReason::Breakpoint));
@@ -1553,7 +1557,7 @@ fn execute_hook_registration() {
             Process32::load(include_bytes!("../../target/windows-api/hooks.exe"), 64).unwrap();
         let run = process.run(1000);
         assert_eq!(run.reason, ProcessStop::Exited(42));
-        assert_eq!((run.instructions, run.api_calls), (201, 30));
+        assert_eq!((run.instructions, run.api_calls), (277, 40));
     }
 }
 

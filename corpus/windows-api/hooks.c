@@ -35,5 +35,12 @@ void entry(void) {
     if (SetWindowsHookExA(13, filter, module, thread) || GetLastError() != 1429) ExitProcess(8);
     if (SetWindowsHookExA(13, 0, module, 0) || GetLastError() != 1427) ExitProcess(9);
     if (UnhookWindowsHookEx(keyboard) || GetLastError() != 1404 || delivered) ExitProcess(10);
+    SetLastError(77);
+    void *cbt = SetWindowsHookExA(5, filter, 0, thread);
+    void *other = SetWindowsHookExA(5, filter, 0, thread);
+    if (!cbt || !other || cbt == other || delivered || GetLastError() != 77) ExitProcess(11);
+    if (!UnhookWindowsHookEx(cbt) || !UnhookWindowsHookEx(other) || delivered) ExitProcess(12);
+    if (UnhookWindowsHookEx(cbt) || GetLastError() != 1404) ExitProcess(13);
+    if (SetWindowsHookExA(5, 0, 0, thread) || GetLastError() != 1427 || delivered) ExitProcess(14);
     ExitProcess(42);
 }
