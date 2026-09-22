@@ -375,6 +375,8 @@ fn execute_locale_activity() {
 
 #[path = "../../core/tests/support/file_attributes_executable.rs"]
 mod file_attributes_executable;
+#[path = "../../core/tests/support/short_path_executable.rs"]
+mod short_path_executable;
 #[path = "../../core/tests/support/string_append_executable.rs"]
 mod string_append_executable;
 #[path = "../../core/tests/support/string_length_executable.rs"]
@@ -1438,6 +1440,43 @@ fn execute_file_attributes() {
             assert_eq!(run.reason, ProcessStop::Exited(42));
             let counts = if files.is_empty() { (36, 8) } else { (78, 16) };
             assert_eq!((run.instructions, run.api_calls), counts);
+        }
+    }
+}
+
+fn execute_short_path() {
+    use ring3_core::execution::{Process32, ProcessStop, Register32, StopReason};
+    let mut process = Process32::load(&short_path_executable::pe32(), 32).unwrap();
+    let run = process.run(50);
+    assert_eq!(run.reason, ProcessStop::Stopped(StopReason::Breakpoint));
+    assert_eq!((run.instructions, run.api_calls), (10, 2));
+    assert_eq!(process.cpu.register(Register32::Eax), 4);
+    assert_eq!(process.cpu.register(Register32::Ebx), 3);
+    assert_eq!(process.cpu.register(Register32::Esp), 0x1001_0000);
+    let mut bytes = [0; 4];
+    process.memory.read(0x0040_21a0, &mut bytes).unwrap();
+    assert_eq!(&bytes, b"c:\\\0");
+    #[cfg(windows_demo)]
+    {
+        use ring3_core::execution::{FileMetadata, ProcessOptions};
+        let files = [FileMetadata {
+            path: b"C:\\Long Folder\\Long File.bin",
+            size: 42,
+        }];
+        for files in [&[][..], &files[..]] {
+            let mut process = Process32::load_with_options(
+                include_bytes!("../../target/windows-api/short-path.exe"),
+                64,
+                ProcessOptions {
+                    files,
+                    ..ProcessOptions::default()
+                },
+            )
+            .unwrap();
+            let run = process.run(5000);
+            assert_eq!(run.reason, ProcessStop::Exited(42));
+            assert_eq!(run.api_calls, 8);
+            assert_eq!(run.instructions, if files.is_empty() { 67 } else { 834 });
         }
     }
 }
@@ -3538,6 +3577,7 @@ pub extern "C" fn run() -> u32 {
     execute_registry_values();
     execute_windows_string_length();
     execute_file_attributes();
+    execute_short_path();
     execute_x87_register_stores();
     execute_thread_priority();
     execute_windows_formatting();

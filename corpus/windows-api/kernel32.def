@@ -59,3 +59,4 @@ EXPORTS
     _GetThreadPriority@4==GetThreadPriority
     _lstrlenA@4==lstrlenA
     _GetFileAttributesA@4==GetFileAttributesA
+    _GetShortPathNameA@12==GetShortPathNameA
