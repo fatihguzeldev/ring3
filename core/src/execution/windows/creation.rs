@@ -15,6 +15,9 @@ pub(super) enum Call {
     Default,
     Rectangle,
     ClientRectangle,
+    Parent,
+    GetLong,
+    SetLong,
 }
 
 impl Call {
@@ -24,6 +27,9 @@ impl Call {
             0x2ac => Some(Self::Default),
             0x2b0 => Some(Self::Rectangle),
             0x2b4 => Some(Self::ClientRectangle),
+            0x2b8 => Some(Self::Parent),
+            0x2bc => Some(Self::GetLong),
+            0x2c0 => Some(Self::SetLong),
             _ => None,
         }
     }
@@ -31,6 +37,8 @@ impl Call {
         match self {
             Self::Create => 12,
             Self::Default => 4,
+            Self::Parent => 1,
+            Self::SetLong => 3,
             _ => 2,
         }
     }
@@ -340,10 +348,35 @@ impl Process32 {
             Call::Default => self.default_window_proc(args)?,
             Call::Rectangle => self.window_rectangle(args, false)?,
             Call::ClientRectangle => self.window_rectangle(args, true)?,
+            Call::Parent | Call::GetLong | Call::SetLong => self.window_property(call, args)?,
             Call::Create => unreachable!(),
         };
         self.cpu.set_register(Register32::Eax, result);
         Ok(())
+    }
+
+    fn window_property(&mut self, call: Call, args: &[u32]) -> Result<u32, DispatchError> {
+        if matches!(call, Call::Parent) {
+            if args[0] == desktop::DESKTOP {
+                return Ok(0);
+            }
+        } else if args[1] != (-4_i32).cast_unsigned() || args[0] == desktop::DESKTOP {
+            return Err(DispatchError::Unsupported);
+        }
+        if matches!(call, Call::SetLong) && matches!(args[2], 0 | callbacks::RETURN) {
+            return Err(DispatchError::Unsupported);
+        }
+        let Some(window) = self.desktop.window_mut(args[0]) else {
+            thread::set_last_error(&mut self.memory, 1400)?;
+            return Ok(0);
+        };
+        match call {
+            // creation currently admits only unowned, non-popup top-level windows.
+            Call::Parent => Ok(0),
+            Call::GetLong => Ok(window.procedure),
+            Call::SetLong => Ok(std::mem::replace(&mut window.procedure, args[2])),
+            _ => unreachable!(),
+        }
     }
 
     fn default_window_proc(&mut self, args: &[u32]) -> Result<u32, DispatchError> {
