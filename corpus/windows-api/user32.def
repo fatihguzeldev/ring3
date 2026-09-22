@@ -13,3 +13,5 @@ EXPORTS
     _GetCursor@0==GetCursor
     _GetCursorPos@4==GetCursorPos
     _SetCursorPos@8==SetCursorPos
+    _SetWindowsHookExA@16==SetWindowsHookExA
+    _UnhookWindowsHookEx@4==UnhookWindowsHookEx

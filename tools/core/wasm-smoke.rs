@@ -1111,6 +1111,29 @@ mod environment_executable;
 #[path = "../../core/tests/support/startup_info_executable.rs"]
 mod startup_info_executable;
 
+#[path = "../../core/tests/support/hook_executable.rs"]
+mod hook_executable;
+
+fn execute_hook_registration() {
+    use ring3_core::execution::{Process32, ProcessStop, Register32, StopReason};
+    let mut process = Process32::load(&hook_executable::pe32(), 32).unwrap();
+    let run = process.run(100);
+    assert_eq!(run.reason, ProcessStop::Stopped(StopReason::Breakpoint));
+    assert_eq!((run.instructions, run.api_calls), (11, 3));
+    assert_eq!(process.cpu.register(Register32::Eax), 0);
+    assert_eq!(process.cpu.register(Register32::Ebx), 0x7400_0004);
+    assert_eq!(process.cpu.register(Register32::Esp), 0x1001_0000);
+    assert_eq!(process.last_error().unwrap(), 1404);
+    #[cfg(windows_demo)]
+    {
+        let mut process =
+            Process32::load(include_bytes!("../../target/windows-api/hooks.exe"), 64).unwrap();
+        let run = process.run(1000);
+        assert_eq!(run.reason, ProcessStop::Exited(42));
+        assert_eq!((run.instructions, run.api_calls), (83, 14));
+    }
+}
+
 fn execute_startup_information() {
     use ring3_core::execution::{Process32, ProcessStop, Register32, StopReason};
     let mut process = Process32::load(&startup_info_executable::pe32(), 32).unwrap();
@@ -3178,6 +3201,7 @@ pub extern "C" fn run() -> u32 {
     execute_file_status();
     execute_environment_query();
     execute_startup_information();
+    execute_hook_registration();
     execute_x87_data();
     execute_x87_scaling();
     execute_fpu_wait();
