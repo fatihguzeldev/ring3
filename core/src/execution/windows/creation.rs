@@ -383,7 +383,13 @@ impl Process32 {
             if args[0] == desktop::DESKTOP {
                 return Ok(0);
             }
-        } else if args[1] != (-4_i32).cast_unsigned() || args[0] == desktop::DESKTOP {
+        } else if args[0] == desktop::DESKTOP
+            || !match call {
+                Call::GetLong => matches!(args[1].cast_signed(), -4 | -16 | -20),
+                Call::SetLong => args[1] == (-4_i32).cast_unsigned(),
+                _ => unreachable!(),
+            }
+        {
             return Err(DispatchError::Unsupported);
         }
         if matches!(call, Call::SetLong) && matches!(args[2], 0 | callbacks::RETURN) {
@@ -395,7 +401,12 @@ impl Process32 {
         };
         match call {
             Call::Parent => Ok(window.parent),
-            Call::GetLong => Ok(window.procedure),
+            Call::GetLong => match args[1].cast_signed() {
+                -4 => Ok(window.procedure),
+                -16 => Ok(window.style),
+                -20 => Ok(window.exstyle),
+                _ => unreachable!(),
+            },
             Call::SetLong => Ok(std::mem::replace(&mut window.procedure, args[2])),
             _ => unreachable!(),
         }

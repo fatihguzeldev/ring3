@@ -48,6 +48,26 @@ fn new_windows_of_the_same_class_keep_the_class_default() {
 }
 
 #[test]
+fn window_styles_are_read_from_owned_windows_and_invalid_handles_report_error() {
+    let mut p = created();
+    call(&mut p, 0x7000_0000, &[77]);
+    assert_eq!(
+        call(&mut p, GET, &[WINDOW, (-16_i32).cast_unsigned()]),
+        0x04ca_0000
+    );
+    assert_eq!(
+        call(&mut p, GET, &[WINDOW, (-20_i32).cast_unsigned()]),
+        0x100
+    );
+    assert_eq!(p.last_error().unwrap(), 77);
+    for index in [(-16_i32).cast_unsigned(), (-20_i32).cast_unsigned()] {
+        assert_eq!(call(&mut p, GET, &[0, index]), 0);
+        assert_eq!(p.last_error().unwrap(), 1400);
+    }
+    assert_eq!(call(&mut p, GET, &[WINDOW, INDEX]), 0x0040_1100);
+}
+
+#[test]
 fn unknown_and_rejected_window_handles_report_invalid_window() {
     let mut p = created();
     for window in [0, 2, 0xc000, 0x0040_0000, WINDOW + 4, u32::MAX] {
@@ -101,6 +121,7 @@ fn error_write_faults_and_unsupported_profiles_leave_the_procedure_unchanged() {
     for (api, args) in [
         (PARENT, vec![0]),
         (GET, vec![0, INDEX]),
+        (GET, vec![0, (-16_i32).cast_unsigned()]),
         (SET, vec![0, INDEX, REPLACEMENT]),
     ] {
         let before = prepare(&mut p, api, &args);
