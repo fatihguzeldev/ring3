@@ -784,6 +784,46 @@ mod division_executable;
 #[path = "../../core/tests/support/wide_product_executable.rs"]
 mod wide_product_executable;
 
+#[path = "../../core/tests/support/division_cases.rs"]
+mod division_cases;
+#[path = "../../core/tests/support/unsigned_division_executable.rs"]
+mod unsigned_division_executable;
+
+fn execute_unsigned_division() {
+    use ring3_core::execution::{Process32, ProcessStop, Register32, StopReason};
+    division_cases::arithmetic();
+    division_cases::errors();
+    for budget in [1, 100] {
+        let mut process = Process32::load(&unsigned_division_executable::pe32(), 32).unwrap();
+        let mut steps = 0;
+        loop {
+            let run = process.run(budget);
+            steps += run.instructions;
+            if run.reason != ProcessStop::Stopped(StopReason::InstructionLimit) {
+                assert_eq!(run.reason, ProcessStop::Stopped(StopReason::Breakpoint));
+                break;
+            }
+            assert!(steps < 100);
+        }
+        assert_eq!(steps, 14);
+        assert_eq!(process.cpu.register(Register32::Esi), 252_648_990);
+        assert_eq!(process.cpu.register(Register32::Edi), 5);
+        assert_eq!(process.cpu.register(Register32::Eax), 0xabcd_00ff);
+        assert_eq!(process.cpu.register(Register32::Edx), 4);
+    }
+    #[cfg(windows_demo)]
+    {
+        let mut process = Process32::load(
+            include_bytes!("../../target/windows-api/unsigned-division.exe"),
+            64,
+        )
+        .unwrap();
+        let run = process.run(1000);
+        assert_eq!(run.reason, ProcessStop::Exited(42));
+        assert_eq!(run.api_calls, 1);
+    }
+}
+
 fn execute_wide_product() {
     use ring3_core::execution::{Process32, ProcessStop, Register32, StopReason};
     let mut process = Process32::load(&wide_product_executable::pe32(), 32).unwrap();
@@ -3778,6 +3818,7 @@ pub extern "C" fn run() -> u32 {
     execute_x87_status();
     execute_x87_division();
     execute_wide_product();
+    execute_unsigned_division();
     execute_command_line();
     execute_image();
     execute_function();
