@@ -20,6 +20,7 @@ EXPORTS
     _SetCursorPos@8==SetCursorPos
     _SetWindowsHookExA@16==SetWindowsHookExA
     _UnhookWindowsHookEx@4==UnhookWindowsHookEx
+    _CallNextHookEx@16==CallNextHookEx
     wsprintfA
     _GetClassInfoA@12==GetClassInfoA
     _RegisterClassA@4==RegisterClassA

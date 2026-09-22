@@ -1274,6 +1274,41 @@ mod window_creation_executable;
 #[path = "../../core/tests/support/window_property_cases.rs"]
 mod window_property_cases;
 
+#[path = "../../core/tests/support/hook_chain_cases.rs"]
+mod hook_chain_cases;
+
+fn execute_hook_chain() {
+    hook_chain_cases::verify();
+    #[cfg(windows_demo)]
+    {
+        use ring3_core::execution::{Process32, ProcessStop, StopReason};
+        let mut final_state = None;
+        for budget in [1, 10000] {
+            let mut process = Process32::load(
+                include_bytes!("../../target/windows-api/hook-chain.exe"),
+                64,
+            )
+            .unwrap();
+            let mut counts = (0, 0);
+            loop {
+                let run = process.run(budget);
+                counts.0 += run.instructions;
+                counts.1 += run.api_calls;
+                if run.reason != ProcessStop::Stopped(StopReason::InstructionLimit) {
+                    assert_eq!(run.reason, ProcessStop::Exited(42));
+                    break;
+                }
+                assert!(counts.0 + counts.1 < 10000);
+            }
+            assert_eq!(process.last_error().unwrap(), 77);
+            if let Some(expected) = final_state {
+                assert_eq!((process.cpu, counts), expected);
+            }
+            final_state = Some((process.cpu, counts));
+        }
+    }
+}
+
 fn execute_window_properties() {
     window_property_cases::ownership();
     #[cfg(windows_demo)]
@@ -3836,6 +3871,7 @@ pub extern "C" fn run() -> u32 {
     execute_window_procedures();
     execute_window_creation();
     execute_window_properties();
+    execute_hook_chain();
     execute_desktop_queries();
     execute_x87_data();
     execute_x87_scaling();
