@@ -1,5 +1,7 @@
 use super::super::Access;
-use super::{API_BASE, DispatchError, GuestMemory, MemoryError, guest, parameters, system, thread};
+use super::{
+    API_BASE, Api, DispatchError, GuestMemory, MemoryError, guest, parameters, system, thread,
+};
 use crate::execution::loader::modules::MappedModule;
 
 #[derive(Clone, Copy)]
@@ -9,11 +11,16 @@ pub(super) enum Call {
     Free,
     FileName,
     DisableThreadCalls,
+    Procedure,
 }
 
 impl Call {
     pub(super) fn arguments(self) -> usize {
-        if matches!(self, Self::FileName) { 3 } else { 1 }
+        match self {
+            Self::FileName => 3,
+            Self::Procedure => 2,
+            _ => 1,
+        }
     }
 
     pub(super) fn at(offset: u32) -> Option<Self> {
@@ -23,6 +30,7 @@ impl Call {
             0x1c => Some(Self::Free),
             0xe0 => Some(Self::FileName),
             0xfc => Some(Self::DisableThreadCalls),
+            0x274 => Some(Self::Procedure),
             _ => None,
         }
     }
@@ -103,6 +111,9 @@ impl Modules {
         initialized: bool,
         memory: &mut GuestMemory,
     ) -> Result<u32, DispatchError> {
+        if matches!(call, Call::Procedure) {
+            return self.procedure(arguments[0], arguments[1], memory);
+        }
         let argument = arguments[0];
         if matches!(call, Call::DisableThreadCalls) {
             if argument == self.program {
@@ -174,6 +185,26 @@ impl Modules {
                 .ok_or(DispatchError::Unsupported)?;
         }
         Ok(module.handle)
+    }
+
+    fn procedure(
+        &self,
+        handle: u32,
+        pointer: u32,
+        memory: &mut GuestMemory,
+    ) -> Result<u32, DispatchError> {
+        if handle == 0 || handle == self.program {
+            return Err(DispatchError::Unsupported);
+        }
+        let Some(module) = self.resident.iter().find(|module| module.handle == handle) else {
+            thread::set_last_error(memory, 126)?;
+            return Ok(0);
+        };
+        if !module.builtin || pointer <= 0xffff {
+            return Err(DispatchError::Unsupported);
+        }
+        let name = procedure_name(memory, pointer)?;
+        Api::resolve_name(&module.name, &name).ok_or(DispatchError::Unsupported)
     }
 
     fn file_name(
@@ -257,6 +288,25 @@ fn read_name(memory: &GuestMemory, pointer: u32) -> Result<String, DispatchError
         name.push(char::from(byte[0]));
     }
     unreachable!()
+}
+
+fn procedure_name(memory: &GuestMemory, pointer: u32) -> Result<String, DispatchError> {
+    let mut name = Vec::new();
+    for offset in 0..4096_u32 {
+        let address = pointer
+            .checked_add(offset)
+            .ok_or(MemoryError::AddressOverflow)?;
+        let mut byte = [0];
+        memory.read(u64::from(address), &mut byte)?;
+        if byte[0] == 0 && !name.is_empty() {
+            return Ok(String::from_utf8(name).expect("validated ascii export name"));
+        }
+        if !(0x20..=0x7e).contains(&byte[0]) {
+            return Err(DispatchError::Unsupported);
+        }
+        name.push(byte[0]);
+    }
+    Err(DispatchError::Unsupported)
 }
 
 #[cfg(test)]

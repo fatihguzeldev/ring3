@@ -203,6 +203,10 @@ impl Api {
         let PeImportSymbol::ByName { name, .. } = symbol else {
             return None;
         };
+        Self::resolve_name(module, name)
+    }
+
+    fn resolve_name(module: &str, name: &str) -> Option<u32> {
         if module.eq_ignore_ascii_case("msvcrt.dll") {
             return crt::resolve(name);
         }
@@ -265,6 +269,7 @@ impl Api {
             "InterlockedDecrement" => 0x208,
             "LoadLibraryA" => 0x14,
             "GetModuleHandleA" => 0x18,
+            "GetProcAddress" => 0x274,
             "GetModuleFileNameA" => 0xe0,
             "DisableThreadLibraryCalls" => 0xfc,
             "GetSystemDirectoryA" => 0xf8,
