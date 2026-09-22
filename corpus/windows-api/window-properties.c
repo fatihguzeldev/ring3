@@ -56,6 +56,11 @@ void entry(void) {
     if (!UnhookWindowsHookEx(hookHandle)) ExitProcess(4);
     second = CreateWindowExA(0, className, "second", 0x00ca0000, 0, 0, 200, 100, 0, 0, (Handle)0x400000, 0);
     if (!second || first == second || GetWindowLongA(second, -4) != (long)original) ExitProcess(5);
+    if (GetWindowLongA(first, -16) != 0x04ca0000 || GetWindowLongA(first, -20) != 0x100 ||
+        GetWindowLongA(second, -16) != 0x04ca0000 || GetWindowLongA(second, -20) != 0x100 ||
+        GetLastError() != 77) ExitProcess(15);
+    if (GetWindowLongA(0, -16) != 0 || GetLastError() != 1400) ExitProcess(16);
+    SetLastError(77);
     if (GetParent(first) || GetParent(second) || count != 8 || GetLastError() != 77) ExitProcess(6);
     for (unsigned int i = 0; i < 8; i += 4) {
         if (messages[i] != 0x24 || messages[i+1] != 0x81 || messages[i+2] != 0x83 || messages[i+3] != 1) ExitProcess(7);
