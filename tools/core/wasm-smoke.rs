@@ -1286,6 +1286,61 @@ mod window_message_cases;
 #[path = "../../core/tests/support/path_component_cases.rs"]
 mod path_component_cases;
 
+#[path = "../../core/tests/support/file_stream_cases.rs"]
+mod file_stream_cases;
+
+#[cfg(windows_demo)]
+fn verify_compiled_file_streams() -> (u64, u64) {
+    use file_stream_cases::PAYLOAD;
+    use ring3_core::execution::{
+        FileContents, FileMetadata, Process32, ProcessOptions, ProcessStop, StopReason,
+    };
+    let mut prior = None;
+    for budget in [1, 10000] {
+        let mut p = Process32::load_with_options(
+            include_bytes!("../../target/windows-api/file-streams.exe"),
+            128,
+            ProcessOptions {
+                files: &[FileMetadata {
+                    path: b"C:\\sample.bin",
+                    size: PAYLOAD.len() as u64,
+                }],
+                file_contents: &[FileContents {
+                    path: b"C:\\sample.bin",
+                    bytes: PAYLOAD,
+                }],
+                ..ProcessOptions::default()
+            },
+        )
+        .unwrap();
+        let pages = p.memory.mapped_pages();
+        let mut counts = (0, 0);
+        loop {
+            let result = p.run(budget);
+            counts.0 += result.instructions;
+            counts.1 += result.api_calls;
+            if result.reason != ProcessStop::Stopped(StopReason::InstructionLimit) {
+                assert_eq!(result.reason, ProcessStop::Exited(42));
+                break;
+            }
+            assert!(counts.0 + counts.1 < 10000);
+        }
+        assert_eq!(p.memory.mapped_pages(), pages);
+        assert_eq!(p.last_error().unwrap(), 77);
+        if let Some(previous) = prior {
+            assert_eq!((p.cpu, counts), previous);
+        }
+        prior = Some((p.cpu, counts));
+    }
+    prior.unwrap().1
+}
+
+fn execute_file_streams() {
+    file_stream_cases::verify();
+    #[cfg(windows_demo)]
+    verify_compiled_file_streams();
+}
+
 fn execute_path_components() {
     path_component_cases::verify();
     #[cfg(windows_demo)]
@@ -3989,6 +4044,7 @@ pub extern "C" fn run() -> u32 {
     execute_icons();
     execute_window_messages();
     execute_path_components();
+    execute_file_streams();
     execute_desktop_queries();
     execute_x87_data();
     execute_x87_scaling();
