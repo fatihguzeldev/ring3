@@ -1120,6 +1120,35 @@ mod thread_priority_executable;
 #[path = "../../core/tests/support/windows_format_executable.rs"]
 mod windows_format_executable;
 
+#[path = "../../core/tests/support/window_class_executable.rs"]
+mod window_class_executable;
+
+fn execute_window_classes() {
+    use ring3_core::execution::{Process32, ProcessStop, Register32, StopReason};
+    let mut process = Process32::load(&window_class_executable::pe32(), 32).unwrap();
+    let run = process.run(100);
+    assert_eq!(run.reason, ProcessStop::Stopped(StopReason::Breakpoint));
+    assert_eq!((run.instructions, run.api_calls), (11, 3));
+    assert_eq!(process.cpu.register(Register32::Eax), 1);
+    assert_eq!(process.cpu.register(Register32::Ebx), 0xc000);
+    assert_eq!(process.cpu.register(Register32::Esp), 0x1001_0000);
+    let mut record = [0; 40];
+    process.memory.read(0x0040_2280, &mut record).unwrap();
+    assert_eq!(record[..4], 3_u32.to_le_bytes());
+    assert_eq!(record[36..], 0x0040_2180_u32.to_le_bytes());
+    #[cfg(windows_demo)]
+    {
+        let mut process = Process32::load(
+            include_bytes!("../../target/windows-api/window-classes.exe"),
+            64,
+        )
+        .unwrap();
+        let run = process.run(1000);
+        assert_eq!(run.reason, ProcessStop::Exited(42));
+        assert_eq!((run.instructions, run.api_calls), (132, 18));
+    }
+}
+
 fn execute_windows_formatting() {
     use ring3_core::execution::{Process32, ProcessStop, Register32, StopReason};
     let mut process = Process32::load(&windows_format_executable::pe32(), 32).unwrap();
@@ -3255,6 +3284,7 @@ pub extern "C" fn run() -> u32 {
     execute_hook_registration();
     execute_thread_priority();
     execute_windows_formatting();
+    execute_window_classes();
     execute_x87_data();
     execute_x87_scaling();
     execute_fpu_wait();

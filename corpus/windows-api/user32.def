@@ -16,3 +16,6 @@ EXPORTS
     _SetWindowsHookExA@16==SetWindowsHookExA
     _UnhookWindowsHookEx@4==UnhookWindowsHookEx
     wsprintfA
+    _GetClassInfoA@12==GetClassInfoA
+    _RegisterClassA@4==RegisterClassA
+    _UnregisterClassA@8==UnregisterClassA
