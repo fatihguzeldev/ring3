@@ -31,6 +31,7 @@ pub(super) enum Call {
     AdapterIdentifier,
     AdapterModeCount,
     AdapterMode,
+    CheckDeviceType,
     DeviceCaps,
     CreateDevice,
     Clear,
@@ -57,6 +58,7 @@ impl Call {
             0x2d8 => Self::DeviceCaps,
             0x2dc => Self::AdapterModeCount,
             0x2e0 => Self::AdapterMode,
+            0x2e4 => Self::CheckDeviceType,
             _ => return None,
         })
     }
@@ -67,6 +69,7 @@ impl Call {
             Self::Present => 5,
             Self::AdapterIdentifier | Self::AdapterMode | Self::DeviceCaps => 4,
             Self::AdapterModeCount => 2,
+            Self::CheckDeviceType => 6,
             _ => 1,
         }
     }
@@ -97,6 +100,7 @@ impl Graphics {
             (ROOT_TABLE, 5, 0x2d4),
             (ROOT_TABLE, 6, 0x2dc),
             (ROOT_TABLE, 7, 0x2e0),
+            (ROOT_TABLE, 9, 0x2e4),
             (ROOT_TABLE, 13, 0x2d8),
             (ROOT_TABLE, 15, 0x40),
             (DEVICE_TABLE, 1, 0x58),
@@ -134,6 +138,7 @@ impl Graphics {
                 u32::from(args[0] == ROOT && self.root_refs != 0 && args[1] == 0)
             }
             Call::AdapterMode => return self.adapter_mode(args, memory),
+            Call::CheckDeviceType => self.check_device_type(args),
             Call::DeviceCaps => return self.device_caps(args, memory),
             Call::CreateDevice => return self.create_device(args, memory),
             Call::Clear => return self.clear(args, memory),
@@ -214,6 +219,17 @@ impl Graphics {
         }
         memory.write(u64::from(args[3]), &mode)?;
         Ok(0)
+    }
+
+    fn check_device_type(&self, args: &[u32]) -> u32 {
+        if args[0] != ROOT || self.root_refs == 0 || args[1] != 0 || !matches!(args[2], 1..=3) {
+            return INVALID_CALL;
+        }
+        if args[2] == 1 && args[3] == 22 && args[4] == 22 {
+            0
+        } else {
+            NOT_AVAILABLE
+        }
     }
 
     fn create_device(
