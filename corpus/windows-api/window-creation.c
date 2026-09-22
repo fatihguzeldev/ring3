@@ -10,6 +10,7 @@ __declspec(dllimport) Handle __stdcall CreateWindowExA(unsigned long, const char
 __declspec(dllimport) long __stdcall DefWindowProcA(Handle, unsigned int, unsigned int, long);
 __declspec(dllimport) int __stdcall IsWindow(Handle);
 __declspec(dllimport) Handle __stdcall FindWindowA(const char *, const char *);
+__declspec(dllimport) Handle __stdcall GetActiveWindow(void);
 __declspec(dllimport) int __stdcall GetWindowRect(Handle, Rect *);
 __declspec(dllimport) int __stdcall GetClientRect(Handle, Rect *);
 __declspec(dllimport) Handle __stdcall SetWindowsHookExA(int, long (__stdcall *)(int, unsigned int, long), Handle, unsigned long);
@@ -69,6 +70,7 @@ void entry(void) {
     if (!hookHandle) ExitProcess(2);
     window = create("outer");
     if (!window || !nested || count != 8 || hooks != 2) ExitProcess(3);
+    if (GetActiveWindow()) ExitProcess(16);
     for (unsigned int i = 0; i < 8; i += 4) {
         if (messages[i] != 0x24 || messages[i+1] != 0x81 || messages[i+2] != 0x83 || messages[i+3] != 1) ExitProcess(4);
     }
@@ -77,10 +79,13 @@ void entry(void) {
     for (mode = 1; mode <= 3; mode++) {
         count = 0;
         if (create("rejected") || GetLastError() != 77 || FindWindowA(className, "rejected")) ExitProcess(7);
+        if (GetActiveWindow()) ExitProcess(17);
         if (mode == 1 && (count != 3 || messages[2] != 0x82)) ExitProcess(8);
         if (mode == 2 && (count != 6 || messages[4] != 2 || messages[5] != 0x82)) ExitProcess(9);
         if (mode == 3 && count) ExitProcess(14);
     }
+    Handle visible = CreateWindowExA(0, className, "visible", 0x10ca0000, 10, 20, 130, 90, 0, 0, (Handle)0x400000, (void *)1234);
+    if (!visible || GetActiveWindow() != visible || FindWindowA(className, "visible") != visible) ExitProcess(18);
     if (!IsWindow(window) || !IsWindow(nested) || !UnhookWindowsHookEx(hookHandle)) ExitProcess(15);
     ExitProcess(42);
 }

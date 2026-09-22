@@ -1,6 +1,7 @@
 LIBRARY USER32.dll
 EXPORTS
     _GetDesktopWindow@0==GetDesktopWindow
+    _GetActiveWindow@0==GetActiveWindow
     _FindWindowA@8==FindWindowA
     _IsWindow@4==IsWindow
     _LoadStringA@16==LoadStringA
