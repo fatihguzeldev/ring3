@@ -286,6 +286,52 @@ fn invalid_or_released_roots_cannot_report_device_format_compatibility() {
 }
 
 #[test]
+fn multisample_compatibility_matches_the_owned_surface() {
+    let (mut process, root) = root();
+    assert_eq!(method(&process, root, 12), 0x7000_0ffc);
+    let check = method(&process, root, 11);
+    assert_ne!(check, 0x7000_0ffc);
+    for windowed in [0, 1] {
+        assert_eq!(
+            invoke(&mut process, check, &[root, 0, 1, 22, windowed, 0]),
+            0
+        );
+    }
+    for args in [
+        [root, 0, 1, 22, 0, 1],
+        [root, 0, 1, 22, 0, 2],
+        [root, 0, 1, 22, 0, 16],
+        [root, 0, 2, 22, 0, 0],
+        [root, 0, 3, 22, 0, 0],
+        [root, 0, 1, 21, 0, 0],
+    ] {
+        assert_eq!(invoke(&mut process, check, &args), 0x8876_086a);
+    }
+}
+
+#[test]
+fn invalid_or_released_roots_cannot_report_multisample_compatibility() {
+    let (mut process, root) = root();
+    let check = method(&process, root, 11);
+    for args in [
+        [root + 4, 0, 1, 22, 0, 0],
+        [root, 1, 1, 22, 0, 0],
+        [root, 0, 0, 22, 0, 0],
+        [root, 0, 4, 22, 0, 0],
+        [root, 0, 1, 22, 0, 17],
+    ] {
+        assert_eq!(invoke(&mut process, check, &args), 0x8876_086c);
+    }
+
+    let release = method(&process, root, 2);
+    assert_eq!(invoke(&mut process, release, &[root]), 0);
+    assert_eq!(
+        invoke(&mut process, check, &[root, 0, 1, 22, 0, 0]),
+        0x8876_086c
+    );
+}
+
+#[test]
 fn adapter_identifier_reports_the_owned_virtual_adapter() {
     let (mut process, root) = root();
     let identifier = method(&process, root, 5);
