@@ -12,6 +12,7 @@ __declspec(dllimport) int __stdcall IsWindow(Handle);
 __declspec(dllimport) Handle __stdcall FindWindowA(const char *, const char *);
 __declspec(dllimport) Handle __stdcall GetActiveWindow(void);
 __declspec(dllimport) int __stdcall ShowWindow(Handle, int);
+__declspec(dllimport) int __stdcall UpdateWindow(Handle);
 __declspec(dllimport) long __stdcall GetWindowLongA(Handle, int);
 __declspec(dllimport) int __stdcall GetWindowRect(Handle, Rect *);
 __declspec(dllimport) int __stdcall GetClientRect(Handle, Rect *);
@@ -89,6 +90,7 @@ void entry(void) {
     if (ShowWindow(window, 1) || GetActiveWindow() != window ||
         !(GetWindowLongA(window, -16) & 0x10000000) || !ShowWindow(window, 1)) ExitProcess(24);
     if (ShowWindow(0, 1) || GetLastError() != 1400) ExitProcess(25);
+    if (UpdateWindow(0) || GetLastError() != 1400) ExitProcess(26);
     SetLastError(77);
     Handle visible = CreateWindowExA(0, className, "visible", 0x10ca0000, 10, 20, 130, 90, 0, 0, (Handle)0x400000, (void *)1234);
     if (!visible || GetActiveWindow() != visible || FindWindowA(className, "visible") != visible) ExitProcess(18);
