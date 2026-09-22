@@ -140,6 +140,7 @@ impl Process32 {
             caller,
             cleanup: 52,
             creation: Some(pending),
+            cbt_hook: hook.map(|(handle, _)| handle),
         };
         let style = if hook.is_some() {
             args[3]
@@ -236,6 +237,7 @@ impl Process32 {
         let procedure = self.delivery_target(frame, pending)?;
         pending.phase = phase;
         frame.creation = Some(pending);
+        frame.cbt_hook = None;
         self.callbacks.replace(
             &mut self.cpu,
             &mut self.memory,

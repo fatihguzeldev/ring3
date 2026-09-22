@@ -1,6 +1,8 @@
 use std::collections::BTreeMap;
 
-use super::{DispatchError, GuestMemory, modules::Modules, thread};
+use super::{
+    DispatchError, GuestMemory, Process32, Register32, callbacks, modules::Modules, thread,
+};
 
 const MAX_HOOKS: usize = 4096;
 const FIRST_HANDLE: u32 = 0x7400_0004;
@@ -53,8 +55,12 @@ impl Default for Hooks {
 
 impl Hooks {
     pub(super) fn newest_cbt(&self) -> Option<(u32, u32)> {
+        self.next_cbt(self.next)
+    }
+
+    fn next_cbt(&self, current: u32) -> Option<(u32, u32)> {
         self.callbacks
-            .iter()
+            .range(..current)
             .rev()
             .find_map(|(&handle, &(kind, procedure))| {
                 (kind == Kind::Cbt).then_some((handle, procedure))
@@ -95,6 +101,34 @@ impl Hooks {
         self.callbacks.insert(handle, (kind, arguments[1]));
         self.next += 4;
         Ok(handle)
+    }
+}
+
+impl Process32 {
+    pub(super) fn call_next_hook(&mut self, args: &[u32]) -> Result<bool, DispatchError> {
+        let current = self
+            .callbacks
+            .active_cbt()
+            .ok_or(DispatchError::Unsupported)?;
+        let Some((handle, procedure)) = self.hooks.next_cbt(current) else {
+            self.cpu.set_register(Register32::Eax, 0);
+            return Ok(false);
+        };
+        let stack = self.cpu.register(Register32::Esp);
+        self.callbacks.enter(
+            &mut self.cpu,
+            &mut self.memory,
+            callbacks::Frame {
+                stack,
+                caller: stack,
+                cleanup: 20,
+                creation: None,
+                cbt_hook: Some(handle),
+            },
+            procedure,
+            &args[1..],
+        )?;
+        Ok(true)
     }
 }
 

@@ -14,6 +14,7 @@ pub(super) struct Frame {
     pub(super) caller: u32,
     pub(super) cleanup: u32,
     pub(super) creation: Option<creation::Pending>,
+    pub(super) cbt_hook: Option<u32>,
 }
 
 impl Callbacks {
@@ -32,10 +33,15 @@ impl Callbacks {
                 caller: stack,
                 cleanup: 24,
                 creation: None,
+                cbt_hook: None,
             },
             arguments[0],
             &arguments[1..],
         )
+    }
+
+    pub(super) fn active_cbt(&self) -> Option<u32> {
+        self.frames.iter().rev().find_map(|frame| frame.cbt_hook)
     }
 
     pub(super) fn enter(

@@ -119,6 +119,7 @@ enum Api {
     GetStartupInfo,
     WindowsFormat,
     CallWindowProc,
+    CallNextHook,
     Window(creation::Call),
     RegisterUserAtom,
     System(system::Call),
@@ -189,6 +190,7 @@ impl Api {
             0x248 => Some(Self::GetStartupInfo),
             0x25c => Some(Self::WindowsFormat),
             0x2a4 => Some(Self::CallWindowProc),
+            0x2c4 => Some(Self::CallNextHook),
             0x22c => Some(Self::GetCommandLine),
             0x20 => Some(Self::SetErrorMode),
             0x24 => Some(Self::GetErrorMode),
@@ -267,6 +269,7 @@ impl Api {
                 "LoadAcceleratorsA" => 0x29c,
                 "CopyAcceleratorTableA" => 0x2a0,
                 "CallWindowProcA" => 0x2a4,
+                "CallNextHookEx" => 0x2c4,
                 "CreateWindowExA" => 0x2a8,
                 "DefWindowProcA" => 0x2ac,
                 "GetWindowRect" => 0x2b0,
@@ -381,6 +384,7 @@ impl Api {
             Self::GetEnvironmentVariable => 3,
             Self::WindowsFormat => 2,
             Self::CallWindowProc => 5,
+            Self::CallNextHook => 4,
             Self::Window(call) => call.arguments(),
             Self::GetLastError
             | Self::GetCommandLine
@@ -664,12 +668,16 @@ impl Process32 {
             self.exit_code = Some(frame[1]);
             return Ok(());
         }
-        if matches!(api, Api::Window(creation::Call::Create)) {
-            if self.create_window(&frame[1..words])? {
-                return Ok(());
+        let suspended = match api {
+            Api::CallNextHook => self.call_next_hook(&frame[1..words])?,
+            Api::Window(creation::Call::Create) => self.create_window(&frame[1..words])?,
+            _ => {
+                self.invoke(api, &frame[1..words], stack)?;
+                false
             }
-        } else {
-            self.invoke(api, &frame[1..words], stack)?;
+        };
+        if suspended {
+            return Ok(());
         }
         // an api output may alias the saved return address; heap free protects this frame.
         guest::read_words(&self.memory, stack, &mut frame[..1])?;
@@ -748,12 +756,10 @@ impl Process32 {
                 self.cpu.set_register(Register32::Eax, value);
             }
             Api::Module(call) => {
-                let value = self.modules.dispatch(
-                    call,
-                    args,
-                    self.startup.is_complete(),
-                    &mut self.memory,
-                )?;
+                let attached = self.startup.is_complete();
+                let value = self
+                    .modules
+                    .dispatch(call, args, attached, &mut self.memory)?;
                 self.cpu.set_register(Register32::Eax, value);
             }
             Api::Resource(call) => {
@@ -784,9 +790,11 @@ impl Process32 {
                 self.cursors.dispatch(call, args, &mut self.memory)?,
             ),
             Api::Crt(call) => self.crt_call(call, args)?,
-            Api::CallWindowProc | Api::ExceptionProlog | Api::ExitProcess | Api::Unsupported => {
-                unreachable!()
-            }
+            Api::CallWindowProc
+            | Api::CallNextHook
+            | Api::ExceptionProlog
+            | Api::ExitProcess
+            | Api::Unsupported => unreachable!(),
         }
         Ok(())
     }
