@@ -43,8 +43,9 @@ pub fn verify() {
             }
             assert!(counts.0 + counts.1 < 100);
         }
-        assert_eq!(counts, (16, 3));
+        assert_eq!(counts, (28, 5));
         assert_eq!(p.cpu.register(Register32::Esi), 5);
+        assert_eq!(p.cpu.register(Register32::Edi), 3);
         assert_eq!(p.cpu.register(Register32::Eax), 0);
         assert_eq!(p.cpu.register(Register32::Esp), 0x1001_0000);
         assert_eq!(p.memory.mapped_pages(), pages);
@@ -55,7 +56,8 @@ pub fn verify() {
         let mut output = [0; 16];
         p.memory.read(0x0040_2400, &mut output).unwrap();
         assert_eq!(&output[..PAYLOAD.len()], PAYLOAD);
-        assert_eq!(&output[PAYLOAD.len()..], &[0x55; 5]);
+        assert_eq!(&output[PAYLOAD.len()..14], b"END");
+        assert_eq!(&output[14..], &[0x55; 2]);
         assert!(
             p.memory
                 .read(u64::from(p.cpu.register(Register32::Ebx)), &mut [0])
@@ -76,10 +78,13 @@ pub fn executable() -> Vec<u8> {
     }
     code.extend_from_slice(&[
         0xff, 0x15, 0x60, 0x20, 0x40, 0, 0x83, 0xc4, 8, 0x89, 0xc3, 0x50, 0x6a, 6, 0x6a, 2, 0x68,
-        0, 0x24, 0x40, 0, 0xff, 0x15, 0x64, 0x20, 0x40, 0, 0x83, 0xc4, 16, 0x89, 0xc6, 0x53, 0xff,
-        0x15, 0x68, 0x20, 0x40, 0, 0x83, 0xc4, 4, 0xcc,
+        0, 0x24, 0x40, 0, 0xff, 0x15, 0x64, 0x20, 0x40, 0, 0x83, 0xc4, 16, 0x89, 0xc6, 0x6a, 2,
+        0x6a, 0xfd, 0x53, 0xff, 0x15, 0x6c, 0x20, 0x40, 0, 0x83, 0xc4, 12, 0x53, 0x6a, 3, 0x6a, 1,
+        0x68, 0x0b, 0x24, 0x40, 0, 0xff, 0x15, 0x64, 0x20, 0x40, 0, 0x83, 0xc4, 16, 0x89, 0xc7,
+        0x53, 0xff, 0x15, 0x68, 0x20, 0x40, 0, 0x83, 0xc4, 4, 0xcc,
     ]);
-    let mut bytes = imported_executable::pe32(&code, "MSVCRT.dll", &["fopen", "fread", "fclose"]);
+    let mut bytes =
+        imported_executable::pe32(&code, "MSVCRT.dll", &["fopen", "fread", "fclose", "fseek"]);
     bytes[0x580..0x58b].copy_from_slice(b"sample.bin\0");
     bytes[0x590..0x593].copy_from_slice(b"rb\0");
     bytes
