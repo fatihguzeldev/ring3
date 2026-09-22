@@ -201,6 +201,10 @@ impl Cpu32 {
                 self.multiply_wide(instruction, memory)?;
             }
             Code::Div_rm8 | Code::Div_rm16 | Code::Div_rm32 => self.divide(instruction, memory)?,
+            Code::Cdq => self.set_register(
+                Register32::Edx,
+                (self.register(Register32::Eax).cast_signed() >> 31).cast_unsigned(),
+            ),
             Code::Inc_rm8
             | Code::Inc_rm16
             | Code::Inc_rm32
