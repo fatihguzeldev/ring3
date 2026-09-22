@@ -124,6 +124,7 @@ enum Api {
     SendMessage,
     PeekMessage,
     ShowWindow,
+    UpdateWindow,
     CreateDialog,
     CallNextHook,
     Window(creation::Call),
@@ -220,6 +221,7 @@ impl Api {
             0x2cc => Some(Self::SendMessage),
             0x43c => Some(Self::PeekMessage),
             0x440 => Some(Self::ShowWindow),
+            0x444 => Some(Self::UpdateWindow),
             0x2c4 => Some(Self::CallNextHook),
             0x22c => Some(Self::GetCommandLine),
             0x434 => Some(Self::CreateDialog),
@@ -307,6 +309,7 @@ impl Api {
                 "SendMessageA" => 0x2cc,
                 "PeekMessageA" => 0x43c,
                 "ShowWindow" => 0x440,
+                "UpdateWindow" => 0x444,
                 "CallNextHookEx" => 0x2c4,
                 "CreateWindowExA" => 0x2a8,
                 "DefWindowProcA" => 0x2ac,
@@ -811,6 +814,15 @@ impl Process32 {
         Ok(())
     }
 
+    fn update_window(&mut self, handle: u32) -> Result<(), DispatchError> {
+        if handle == desktop::DESKTOP || self.desktop.window(handle).is_some() {
+            return Err(DispatchError::Unsupported);
+        }
+        thread::set_last_error(&mut self.memory, 1400)?;
+        self.cpu.set_register(Register32::Eax, 0);
+        Ok(())
+    }
+
     fn invoke(&mut self, api: Api, args: &[u32], stack: u32) -> Result<(), DispatchError> {
         let argument = args.first().copied().unwrap_or(0);
         match api {
@@ -824,6 +836,7 @@ impl Process32 {
             Api::WindowsFormat => self.windows_format(args, stack)?,
             Api::PeekMessage => self.peek_empty_message(args)?,
             Api::ShowWindow => self.show_window_normal(args)?,
+            Api::UpdateWindow => self.update_window(argument)?,
             Api::Class(call) => self.window_class(call, args)?,
             Api::Window(call) => self.window_api(call, args)?,
             Api::Synchronization(call) => self.cpu.set_register(

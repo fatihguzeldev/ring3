@@ -11,6 +11,7 @@ const STACK: u32 = 0x1000_ef00;
 const CREATE: u32 = 0x7000_02a8;
 const ACTIVE: u32 = 0x7000_0430;
 const SHOW: u32 = 0x7000_0440;
+const UPDATE: u32 = 0x7000_0444;
 const HANDLE: u32 = 0x7500_0004;
 const RETURN: u32 = 0x7000_0ff8;
 const ARGS: [u32; 12] = [
@@ -160,6 +161,36 @@ fn show_normal_error_write_fault_does_not_advance_api_state() {
     assert_eq!((run.instructions, run.api_calls), (0, 0));
     assert_eq!(p.cpu, before);
     assert_eq!(query(&mut p, ACTIVE, &[]), 0);
+}
+
+#[test]
+fn update_window_rejects_invalid_handle_without_claiming_a_paint_region() {
+    let mut p = ready(&logged(None));
+    assert_eq!(finish(&mut p), HANDLE);
+    assert_eq!(query(&mut p, UPDATE, &[0]), 0);
+    assert_eq!(p.last_error().unwrap(), 1400);
+    prepare(&mut p, UPDATE, STACK, &[HANDLE]);
+    let before = p.cpu;
+    let run = p.run(1);
+    assert_eq!(run.reason, ProcessStop::UnsupportedApi { address: UPDATE });
+    assert_eq!((run.instructions, run.api_calls), (0, 0));
+    assert_eq!(p.cpu, before);
+
+    prepare(&mut p, UPDATE, STACK, &[0]);
+    p.memory
+        .protect(0x7ffd_e000, 4096, Permissions::READ)
+        .unwrap();
+    let before = p.cpu;
+    let run = p.run(1);
+    assert_eq!(
+        run.reason,
+        ProcessStop::Stopped(StopReason::MemoryFault(MemoryError::PermissionDenied {
+            address: 0x7ffd_e034,
+            access: Access::Write,
+        }))
+    );
+    assert_eq!((run.instructions, run.api_calls), (0, 0));
+    assert_eq!(p.cpu, before);
 }
 
 fn with_hook(code: &[u8]) -> Process32 {
