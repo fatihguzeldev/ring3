@@ -589,6 +589,16 @@ impl Process32 {
         Ok(())
     }
 
+    fn set_error_mode(&mut self, argument: u32) -> Result<(), DispatchError> {
+        if argument & !0x8007 != 0 {
+            return Err(DispatchError::Unsupported);
+        }
+        self.cpu.set_register(Register32::Eax, self.error_mode);
+        // x86 permits ignoring sem_noalignmentfaultexcept.
+        self.error_mode = argument & 0x8003;
+        Ok(())
+    }
+
     fn invoke(&mut self, api: Api, arguments: &[u32], stack: u32) -> Result<(), DispatchError> {
         let argument = arguments.first().copied().unwrap_or(0);
         match api {
@@ -616,14 +626,7 @@ impl Process32 {
             Api::System(call) => self
                 .cpu
                 .set_register(Register32::Eax, call.dispatch(arguments, &mut self.memory)?),
-            Api::SetErrorMode => {
-                if argument & !0x8007 != 0 {
-                    return Err(DispatchError::Unsupported);
-                }
-                self.cpu.set_register(Register32::Eax, self.error_mode);
-                // x86 permits ignoring sem_noalignmentfaultexcept.
-                self.error_mode = argument & 0x8003;
-            }
+            Api::SetErrorMode => self.set_error_mode(argument)?,
             Api::GetErrorMode => self.cpu.set_register(Register32::Eax, self.error_mode),
             Api::GetVersion => self.cpu.set_register(Register32::Eax, GUEST_VERSION),
             Api::GetProcessVersion => {
