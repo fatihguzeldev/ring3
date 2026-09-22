@@ -142,6 +142,7 @@ impl Process32 {
             creation: Some(pending),
             cbt_hook: hook.map(|(handle, _)| handle),
             module: None,
+            dialog: None,
         };
         let style = if hook.is_some() {
             args[3]
@@ -185,6 +186,12 @@ impl Process32 {
 
     pub(super) fn finish_callback(&mut self) -> Result<(), DispatchError> {
         let frame = self.callbacks.current(&self.cpu)?;
+        if let Some(dialog) = frame.dialog {
+            self.callbacks.finish(&mut self.cpu, &self.memory)?;
+            self.desktop.activate_created(dialog);
+            self.cpu.set_register(Register32::Eax, dialog);
+            return Ok(());
+        }
         if let Some(pending) = frame.module {
             let success = self.cpu.register(Register32::Eax) != 0;
             if !success {
@@ -387,8 +394,7 @@ impl Process32 {
             return Ok(0);
         };
         match call {
-            // creation currently admits only unowned, non-popup top-level windows.
-            Call::Parent => Ok(0),
+            Call::Parent => Ok(window.parent),
             Call::GetLong => Ok(window.procedure),
             Call::SetLong => Ok(std::mem::replace(&mut window.procedure, args[2])),
             _ => unreachable!(),
@@ -465,6 +471,9 @@ impl Process32 {
                 thread::set_last_error(&mut self.memory, 1400)?;
                 return Ok(0);
             };
+            if window.dialog_units.is_some() {
+                return Err(DispatchError::Unsupported);
+            }
             if client {
                 [
                     0,

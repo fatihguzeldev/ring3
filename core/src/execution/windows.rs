@@ -16,6 +16,7 @@ mod cursors;
 mod d3d8;
 mod desktop;
 mod diagnostics;
+mod dialogs;
 mod directory;
 mod environment;
 mod formatting;
@@ -120,6 +121,7 @@ enum Api {
     WindowsFormat,
     CallWindowProc,
     SendMessage,
+    CreateDialog,
     CallNextHook,
     Window(creation::Call),
     RegisterUserAtom,
@@ -215,6 +217,7 @@ impl Api {
             0x2cc => Some(Self::SendMessage),
             0x2c4 => Some(Self::CallNextHook),
             0x22c => Some(Self::GetCommandLine),
+            0x434 => Some(Self::CreateDialog),
             0x20 => Some(Self::SetErrorMode),
             0x24 => Some(Self::GetErrorMode),
             0x30 => Some(Self::GetVersion),
@@ -283,6 +286,8 @@ impl Api {
                 "FindWindowA" => 0x26c,
                 "IsWindow" => 0x270,
                 "GetActiveWindow" => 0x430,
+                "GetDlgItem" => 0x438,
+                "CreateDialogIndirectParamA" => 0x434,
                 "wsprintfA" => 0x25c,
                 "GetClassInfoA" => 0x260,
                 "RegisterClassA" => 0x264,
@@ -413,7 +418,7 @@ impl Api {
             Self::Clock(call) => call.arguments(),
             Self::GetEnvironmentVariable => 3,
             Self::WindowsFormat => 2,
-            Self::CallWindowProc => 5,
+            Self::CallWindowProc | Self::CreateDialog => 5,
             Self::CallNextHook | Self::SendMessage => 4,
             Self::Window(call) => call.arguments(),
             Self::GetLastError
@@ -713,6 +718,7 @@ impl Process32 {
         }
         let suspended = match api {
             Api::SendMessage => self.send_message(&frame[1..words])?,
+            Api::CreateDialog => self.create_dialog(&frame[1..words])?,
             Api::CallNextHook => self.call_next_hook(&frame[1..words])?,
             Api::Window(creation::Call::Create) => self.create_window(&frame[1..words])?,
             Api::Module(modules::Call::Load) => self.load_module(&frame[1..words])?,
@@ -751,6 +757,7 @@ impl Process32 {
                         creation: None,
                         cbt_hook: None,
                         module: Some(pending),
+                        dialog: None,
                     },
                     pending.entry,
                     &[pending.handle, 1, 0],
@@ -836,12 +843,7 @@ impl Process32 {
                     .dispatch(call, args, attached, &mut self.memory)?;
                 self.cpu.set_register(Register32::Eax, value);
             }
-            Api::Resource(call) => {
-                let value = self
-                    .resources
-                    .dispatch(call, args, &self.modules, &mut self.memory)?;
-                self.cpu.set_register(Register32::Eax, value);
-            }
+            Api::Resource(call) => self.resource_api(call, args)?,
             Api::Graphics(call) => self.cpu.set_register(
                 Register32::Eax,
                 self.graphics.dispatch(call, args, &mut self.memory)?,
@@ -864,7 +866,8 @@ impl Process32 {
                 self.cursors.dispatch(call, args, &mut self.memory)?,
             ),
             Api::Crt(call) => self.crt_call(call, args)?,
-            Api::CallWindowProc
+            Api::CreateDialog
+            | Api::CallWindowProc
             | Api::SendMessage
             | Api::CallNextHook
             | Api::ExceptionProlog

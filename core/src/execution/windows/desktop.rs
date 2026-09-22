@@ -13,6 +13,7 @@ pub(super) enum Call {
     Find,
     IsWindow,
     Active,
+    DlgItem,
 }
 
 impl Call {
@@ -22,6 +23,7 @@ impl Call {
             0x26c => Some(Self::Find),
             0x270 => Some(Self::IsWindow),
             0x430 => Some(Self::Active),
+            0x438 => Some(Self::DlgItem),
             _ => None,
         }
     }
@@ -29,7 +31,7 @@ impl Call {
         match self {
             Self::Desktop | Self::Active => 0,
             Self::IsWindow => 1,
-            Self::Find => 2,
+            Self::Find | Self::DlgItem => 2,
         }
     }
 }
@@ -45,10 +47,14 @@ pub(super) struct Window {
     pub(super) rectangle: [i32; 4],
     pub(super) client: [i32; 4],
     pub(super) icons: [u32; 2],
+    pub(super) parent: u32,
+    pub(super) id: u32,
+    pub(super) dialog_units: Option<[i16; 4]>,
 }
 
 pub(super) struct Desktop {
     top_levels: BTreeMap<u32, Window>,
+    children: BTreeMap<u32, Window>,
     active: u32,
     next: u32,
 }
@@ -57,6 +63,7 @@ impl Default for Desktop {
     fn default() -> Self {
         Self {
             top_levels: BTreeMap::new(),
+            children: BTreeMap::new(),
             active: 0,
             next: 0x7500_0004,
         }
@@ -65,20 +72,43 @@ impl Default for Desktop {
 
 impl Desktop {
     pub(super) fn available(&self) -> Option<u32> {
-        (self.top_levels.len() < 4096 && self.next <= 0x75ff_fffc).then_some(self.next)
+        self.available_many(1)
+    }
+    pub(super) fn available_many(&self, count: usize) -> Option<u32> {
+        let remaining = 4096_usize.checked_sub(self.top_levels.len() + self.children.len())?;
+        let last = self
+            .next
+            .checked_add(u32::try_from(count.checked_sub(1)?).ok()?.checked_mul(4)?)?;
+        (count <= remaining && last <= 0x75ff_fffc).then_some(self.next)
     }
     pub(super) fn insert(&mut self, handle: u32, window: Window) {
         self.top_levels.insert(handle, window);
         self.next += 4;
     }
+    pub(super) fn insert_child(&mut self, handle: u32, window: Window) {
+        self.children.insert(handle, window);
+        self.next += 4;
+    }
     pub(super) fn window(&self, handle: u32) -> Option<&Window> {
-        self.top_levels.get(&handle)
+        self.top_levels
+            .get(&handle)
+            .or_else(|| self.children.get(&handle))
     }
     pub(super) fn window_mut(&mut self, handle: u32) -> Option<&mut Window> {
-        self.top_levels.get_mut(&handle)
+        if let Some(window) = self.top_levels.get_mut(&handle) {
+            Some(window)
+        } else {
+            self.children.get_mut(&handle)
+        }
+    }
+    pub(super) fn child(&self, parent: u32, id: u32) -> Option<u32> {
+        self.children.iter().find_map(|(&handle, window)| {
+            (window.parent == parent && window.id == id).then_some(handle)
+        })
     }
     pub(super) fn remove(&mut self, handle: u32) {
         self.top_levels.remove(&handle);
+        self.children.retain(|_, window| window.parent != handle);
         if self.active == handle {
             self.active = 0;
         }
@@ -108,8 +138,11 @@ impl Desktop {
             Call::Desktop => Ok(DESKTOP),
             Call::Active => Ok(self.active),
             Call::IsWindow => Ok(u32::from(
-                args[0] == DESKTOP || self.top_levels.contains_key(&args[0]),
+                args[0] == DESKTOP
+                    || self.top_levels.contains_key(&args[0])
+                    || self.children.contains_key(&args[0]),
             )),
+            Call::DlgItem => Ok(self.child(args[0], args[1]).unwrap_or(0)),
             Call::Find => {
                 let class = match args[0] {
                     0 => None,

@@ -1,5 +1,7 @@
 use super::super::Access;
-use super::{DispatchError, GuestMemory, MemoryError, guest, modules::Modules, thread};
+use super::{
+    DispatchError, GuestMemory, MemoryError, Process32, Register32, guest, modules::Modules, thread,
+};
 use crate::execution::GuestModule;
 use crate::execution::loader::modules::MappedModule;
 use crate::{
@@ -271,6 +273,16 @@ impl Resources {
             data: entry.payload_rva.get(),
             size: entry.payload_size,
         }))
+    }
+}
+
+impl Process32 {
+    pub(super) fn resource_api(&mut self, call: Call, args: &[u32]) -> Result<(), DispatchError> {
+        let value = self
+            .resources
+            .dispatch(call, args, &self.modules, &mut self.memory)?;
+        self.cpu.set_register(Register32::Eax, value);
+        Ok(())
     }
 }
 

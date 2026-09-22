@@ -25,6 +25,17 @@ impl Default for Loaded {
 }
 
 impl Resources {
+    pub(in crate::execution::windows) fn loaded_payload_size(
+        &self,
+        module: u32,
+        pointer: u32,
+    ) -> Option<u32> {
+        self.loaded.entries.values().find_map(|resource| {
+            (resource.base == module && payload_address(*resource).ok() == Some(pointer))
+                .then_some(resource.size)
+        })
+    }
+
     pub(super) fn load_resource(
         &mut self,
         args: &[u32],

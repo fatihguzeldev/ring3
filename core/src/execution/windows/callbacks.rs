@@ -27,6 +27,7 @@ impl Process32 {
                 creation: None,
                 cbt_hook: None,
                 module: None,
+                dialog: None,
             },
             window.procedure,
             args,
@@ -48,6 +49,7 @@ pub(super) struct Frame {
     pub(super) creation: Option<creation::Pending>,
     pub(super) cbt_hook: Option<u32>,
     pub(super) module: Option<modules::Pending>,
+    pub(super) dialog: Option<u32>,
 }
 
 impl Callbacks {
@@ -68,6 +70,7 @@ impl Callbacks {
                 creation: None,
                 cbt_hook: None,
                 module: None,
+                dialog: None,
             },
             arguments[0],
             &arguments[1..],
