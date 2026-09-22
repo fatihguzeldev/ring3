@@ -6,6 +6,12 @@ typedef result (__stdcall *clear_target)(object *, u32, const int *, u32, u32, f
 typedef result (__stdcall *present_frame)(object *, void *, void *, u32, void *);
 typedef u32 (__stdcall *release_object)(object *);
 typedef u32 (__stdcall *adapter_count)(object *);
+typedef result (__stdcall *check_format)(object *, u32, u32, u32, u32, u32, u32);
+typedef result (__stdcall *create_texture)(object *, u32, u32, u32, u32, u32, u32, object **);
+typedef u32 (__stdcall *get_level_count)(object *);
+typedef result (__stdcall *get_level_desc)(object *, u32, u32 *);
+typedef result (__stdcall *lock_rect)(object *, u32, u32 *, const int *, u32);
+typedef result (__stdcall *unlock_rect)(object *, u32);
 #pragma pack(push, 4)
 typedef struct {
     u32 data1;
@@ -37,8 +43,11 @@ int left[4] = {24, 24, 152, 176};
 int right[4] = {168, 24, 296, 176};
 int stripe[4] = {0, 88, 320, 112};
 object *device;
+object *texture;
 adapter_identifier identifier;
 u32 caps[53];
+u32 texture_desc[8];
+u32 locked_rect_data[2];
 int _fltused = 0;
 
 void entry(void) {
@@ -66,6 +75,21 @@ void entry(void) {
     result status = ((create_device)root->methods[15])(
         root, 0, 1, desktop, 0x20, presentation, &device);
     if (status != 0) ExitProcess(2);
+    if (((check_format)root->methods[10])(root, 0, 1, 22, 0, 3, 22) != 0) ExitProcess(16);
+    if (((create_texture)device->methods[20])(
+        device, 4, 2, 0, 0, 22, 1, &texture) != 0) ExitProcess(17);
+    if (((get_level_count)texture->methods[13])(texture) != 3) ExitProcess(18);
+    if (((get_level_desc)texture->methods[14])(texture, 1, texture_desc) != 0 ||
+        texture_desc[0] != 22 || texture_desc[1] != 3 || texture_desc[3] != 1 ||
+        texture_desc[4] != 8 || texture_desc[6] != 2 || texture_desc[7] != 1) ExitProcess(19);
+    if (((lock_rect)texture->methods[16])(texture, 0, locked_rect_data, 0, 0) != 0 ||
+        locked_rect_data[0] != 16 || locked_rect_data[1] == 0) ExitProcess(20);
+    ((u32 *)locked_rect_data[1])[0] = 0x00112233;
+    if (((unlock_rect)texture->methods[17])(texture, 0) != 0) ExitProcess(21);
+    if (((lock_rect)texture->methods[16])(texture, 0, locked_rect_data, 0, 0) != 0 ||
+        ((u32 *)locked_rect_data[1])[0] != 0x00112233) ExitProcess(22);
+    if (((unlock_rect)texture->methods[17])(texture, 0) != 0) ExitProcess(23);
+    if (((release_object)texture->methods[2])(texture) != 0) ExitProcess(24);
     clear_target clear = (clear_target)device->methods[36];
     if (clear(device, 0, 0, 1, 0xff102030, 0.0f, 0) != 0) ExitProcess(3);
     if (clear(device, 1, left, 1, 0xffe86c42, 0.0f, 0) != 0) ExitProcess(4);
