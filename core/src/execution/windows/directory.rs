@@ -36,13 +36,14 @@ pub(super) enum Call {
     FindFirst,
     FindNext,
     FindClose,
+    Attributes,
 }
 
 impl Call {
     pub(super) fn arguments(self) -> usize {
         match self {
             Self::Query | Self::FindFirst | Self::FindNext => 2,
-            Self::Change | Self::FindClose => 1,
+            Self::Change | Self::FindClose | Self::Attributes => 1,
         }
     }
 }
@@ -68,6 +69,9 @@ impl Process32 {
             Call::FindClose => self
                 .current_directory
                 .find_close(arguments[0], &mut self.memory)?,
+            Call::Attributes => self
+                .current_directory
+                .attributes(arguments[0], &mut self.memory)?,
         };
         self.cpu.set_register(Register32::Eax, result);
         Ok(())
@@ -141,6 +145,46 @@ impl Directory {
                     || candidate.len() == 3
                     || declared.get(candidate.len()) == Some(&b'\\'))
         })
+    }
+
+    fn attributes(&self, source: u32, memory: &mut GuestMemory) -> Result<u32, DispatchError> {
+        let input = paths::read(memory, source)?;
+        if input.len() >= 260 {
+            return Err(DispatchError::Unsupported);
+        }
+        let path = match paths::resolve(&self.terminated[..self.terminated.len() - 1], &input) {
+            Ok(path) => path,
+            Err(paths::PathError::Unsupported) => return Err(DispatchError::Unsupported),
+            Err(paths::PathError::Windows(error)) => {
+                return failed(memory, error).map(|_| u32::MAX);
+            }
+        };
+        if path.len() >= 260 {
+            return Err(DispatchError::Unsupported);
+        }
+        if self
+            .files
+            .iter()
+            .any(|file| !file.removed && file.path.eq_ignore_ascii_case(&path))
+        {
+            if input.last() == Some(&b'\\') {
+                return Err(DispatchError::Unsupported);
+            }
+            return Ok(128);
+        }
+        if self.exists(&path) {
+            return Ok(16);
+        }
+        let parent_end = path
+            .iter()
+            .rposition(|&b| b == b'\\')
+            .expect("absolute path");
+        let error = if self.exists(&path[..parent_end.max(3)]) {
+            2
+        } else {
+            3
+        };
+        failed(memory, error).map(|_| u32::MAX)
     }
 
     pub(super) fn legacy_status(
