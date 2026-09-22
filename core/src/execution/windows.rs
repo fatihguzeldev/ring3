@@ -23,6 +23,7 @@ mod heap;
 mod hooks;
 mod modules;
 mod parameters;
+mod registry;
 mod resources;
 mod startup;
 mod strings;
@@ -54,6 +55,7 @@ pub struct Process32 {
     subsystem_version: u32,
     startup: startup::Startup,
     modules: modules::Modules,
+    registry: registry::Registry,
     resources: resources::Resources,
     current_directory: directory::Directory,
     environment: environment::Environment,
@@ -130,6 +132,7 @@ enum Api {
     CodePage(code_pages::Call),
     Module(modules::Call),
     Resource(resources::Call),
+    Registry(registry::Call),
     Heap(heap::Call),
     CriticalSection(critical_sections::Call),
     Synchronization(synchronization::Call),
@@ -187,6 +190,7 @@ impl Api {
                 .or_else(|| crt::Call::at(offset).map(Self::Crt))
                 .or_else(|| modules::Call::at(offset).map(Self::Module))
                 .or_else(|| resources::Call::at(offset).map(Self::Resource))
+                .or_else(|| registry::Call::at(offset).map(Self::Registry))
                 .or_else(|| strings::Call::at(offset).map(Self::String))
                 .or_else(|| heap::Call::at(offset).map(Self::Heap))
                 .or_else(|| critical_sections::Call::at(offset).map(Self::CriticalSection))
@@ -207,6 +211,17 @@ impl Api {
     }
 
     fn resolve_name(module: &str, name: &str) -> Option<u32> {
+        if module.eq_ignore_ascii_case("advapi32.dll") {
+            return Some(
+                API_BASE
+                    + match name {
+                        "RegOpenKeyExA" => 0x278,
+                        "RegCreateKeyExA" => 0x27c,
+                        "RegCloseKey" => 0x280,
+                        _ => return None,
+                    },
+            );
+        }
         if module.eq_ignore_ascii_case("msvcrt.dll") {
             return crt::resolve(name);
         }
@@ -350,6 +365,7 @@ impl Api {
             Self::Tls(call) => call.arguments(),
             Self::Module(call) => call.arguments(),
             Self::Resource(call) => call.arguments(),
+            Self::Registry(call) => call.arguments(),
             Self::String(call) => call.arguments(),
             Self::System(call) => call.arguments(),
             _ => 1,
@@ -476,6 +492,7 @@ impl Process32 {
             user_atoms: user_atoms::UserAtoms::default(),
             classes: classes::Classes::default(),
             desktop: desktop::Desktop::default(),
+            registry: registry::Registry::default(),
             gdi: gdi::Gdi::default(),
             cursors: cursors::Cursors::default(),
             heap: heap::Heap::default(),
@@ -594,7 +611,7 @@ impl Process32 {
     fn dispatch(&mut self, api: Api) -> Result<(), DispatchError> {
         let stack = self.cpu.register(Register32::Esp);
         let words = api.arguments() + 1;
-        let mut frame = [0; 8];
+        let mut frame = [0; 10];
         guest::read_words(&self.memory, stack, &mut frame[..words])?;
         if matches!(api, Api::ExceptionProlog) {
             return crt::enter_exception_frame(&mut self.cpu, &mut self.memory, frame[0]);
@@ -628,6 +645,7 @@ impl Process32 {
             Api::Interlocked(call) => self.interlocked(call, arguments)?,
             Api::Clock(call) => self.query_clock(call, argument)?,
             Api::Directory(call) => self.directory(call, arguments)?,
+            Api::Registry(call) => self.registry(call, arguments)?,
             Api::GetCommandLine => self.cpu.set_register(Register32::Eax, self.command_line),
             Api::GetEnvironmentVariable => self.environment_query(arguments)?,
             Api::GetStartupInfo => parameters::startup_info(&mut self.memory, argument)?,
