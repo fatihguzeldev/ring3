@@ -29,6 +29,7 @@ pub(super) enum Call {
     Create,
     AdapterCount,
     AdapterIdentifier,
+    AdapterModeCount,
     DeviceCaps,
     CreateDevice,
     Clear,
@@ -53,6 +54,7 @@ impl Call {
             0x2d0 => Self::AdapterCount,
             0x2d4 => Self::AdapterIdentifier,
             0x2d8 => Self::DeviceCaps,
+            0x2dc => Self::AdapterModeCount,
             _ => return None,
         })
     }
@@ -62,6 +64,7 @@ impl Call {
             Self::CreateDevice | Self::Clear => 7,
             Self::Present => 5,
             Self::AdapterIdentifier | Self::DeviceCaps => 4,
+            Self::AdapterModeCount => 2,
             _ => 1,
         }
     }
@@ -90,6 +93,7 @@ impl Graphics {
             (ROOT_TABLE, 2, 0x54),
             (ROOT_TABLE, 4, 0x2d0),
             (ROOT_TABLE, 5, 0x2d4),
+            (ROOT_TABLE, 6, 0x2dc),
             (ROOT_TABLE, 13, 0x2d8),
             (ROOT_TABLE, 15, 0x40),
             (DEVICE_TABLE, 1, 0x58),
@@ -123,6 +127,9 @@ impl Graphics {
             }
             Call::AdapterCount => u32::from(args[0] == ROOT && self.root_refs != 0),
             Call::AdapterIdentifier => return self.adapter_identifier(args, memory),
+            Call::AdapterModeCount => {
+                u32::from(args[0] == ROOT && self.root_refs != 0 && args[1] == 0)
+            }
             Call::DeviceCaps => return self.device_caps(args, memory),
             Call::CreateDevice => return self.create_device(args, memory),
             Call::Clear => return self.clear(args, memory),
