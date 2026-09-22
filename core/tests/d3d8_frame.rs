@@ -15,6 +15,9 @@ const MODE: u32 = 0x0040_28e0;
 const DEVICE_TYPE_STATUS: u32 = 0x0040_28f0;
 const DEVICE_FORMAT_STATUS: u32 = 0x0040_28f4;
 const MULTISAMPLE_STATUS: u32 = 0x0040_28f8;
+const TEXTURE_OUTPUT: u32 = 0x0040_2a00;
+const LOCKED_RECT: u32 = 0x0040_2a10;
+const LEVEL_DESC: u32 = 0x0040_2a20;
 
 #[test]
 fn executes_an_uninterrupted_guest_graphics_program() {
@@ -260,6 +263,21 @@ fn device_format_compatibility_matches_the_owned_render_target_surface() {
         [root, 0, 1, 22, 0, 1, 22],
         [root, 0, 1, 22, 1, 2, 22],
         [root, 0, 1, 22, 1, 1, 21],
+    ] {
+        assert_eq!(invoke(&mut process, check, &args), 0x8876_086a);
+    }
+}
+
+#[test]
+fn device_format_reports_only_the_owned_normal_x8_texture() {
+    let (mut process, root) = root();
+    let check = method(&process, root, 10);
+    assert_eq!(invoke(&mut process, check, &[root, 0, 1, 22, 0, 3, 22]), 0);
+    for args in [
+        [root, 0, 1, 22, 0, 3, 21],
+        [root, 0, 1, 22, 1, 3, 22],
+        [root, 0, 1, 22, 0, 2, 22],
+        [root, 0, 2, 22, 0, 3, 22],
     ] {
         assert_eq!(invoke(&mut process, check, &args), 0x8876_086a);
     }
@@ -515,6 +533,182 @@ fn create() -> (Process32, u32, u32) {
     );
     let device = read(&process, OUTPUT);
     (process, root, device)
+}
+
+#[test]
+fn texture_owns_mip_pixels_and_releases_its_guest_memory() {
+    let (mut process, root, device) = create();
+    let create_texture = method(&process, device, 20);
+    assert_ne!(create_texture, 0x7000_0ffc);
+    assert_eq!(
+        invoke(
+            &mut process,
+            create_texture,
+            &[device, 4, 2, 0, 0, 22, 1, TEXTURE_OUTPUT]
+        ),
+        0
+    );
+    let texture = read(&process, TEXTURE_OUTPUT);
+    assert_ne!(texture, 0);
+    let level_count = method(&process, texture, 13);
+    assert_eq!(invoke(&mut process, level_count, &[texture]), 3);
+
+    let description = method(&process, texture, 14);
+    for (level, width, height) in [(0, 4, 2), (1, 2, 1), (2, 1, 1)] {
+        assert_eq!(
+            invoke(&mut process, description, &[texture, level, LEVEL_DESC]),
+            0
+        );
+        assert_eq!(
+            read_bytes(&process, LEVEL_DESC, 32),
+            [22, 3, 0, 1, width * height * 4, 0, width, height]
+                .into_iter()
+                .flat_map(u32::to_le_bytes)
+                .collect::<Vec<_>>()
+        );
+    }
+
+    let lock = method(&process, texture, 16);
+    let unlock = method(&process, texture, 17);
+    assert_eq!(
+        invoke(&mut process, lock, &[texture, 0, LOCKED_RECT, 0, 0]),
+        0
+    );
+    let pitch = read(&process, LOCKED_RECT);
+    let pixels = read(&process, LOCKED_RECT + 4);
+    assert_eq!(pitch, 16);
+    process
+        .memory
+        .write(u64::from(pixels), &[1, 2, 3, 4])
+        .unwrap();
+    assert_eq!(
+        invoke(&mut process, lock, &[texture, 0, LOCKED_RECT, 0, 0]),
+        0x8876_086c
+    );
+    assert_eq!(invoke(&mut process, unlock, &[texture, 0]), 0);
+    assert_eq!(invoke(&mut process, unlock, &[texture, 0]), 0x8876_086c);
+    assert_eq!(
+        invoke(&mut process, lock, &[texture, 0, LOCKED_RECT, 0, 0]),
+        0
+    );
+    assert_eq!(
+        read_bytes(&process, read(&process, LOCKED_RECT + 4), 4),
+        [1, 2, 3, 4]
+    );
+    assert_eq!(invoke(&mut process, unlock, &[texture, 0]), 0);
+
+    let release = method(&process, texture, 2);
+    let add_ref = method(&process, texture, 1);
+    assert_eq!(invoke(&mut process, add_ref, &[texture]), 2);
+    assert_eq!(invoke(&mut process, release, &[texture]), 1);
+    assert_eq!(invoke(&mut process, release, &[texture]), 0);
+    assert!(process.memory.read(u64::from(pixels), &mut [0]).is_err());
+    assert_eq!(invoke(&mut process, level_count, &[texture]), 0x8876_086c);
+    let device_release = method(&process, device, 2);
+    let root_release = method(&process, root, 2);
+    assert_eq!(invoke(&mut process, device_release, &[device]), 0);
+    assert_eq!(invoke(&mut process, root_release, &[root]), 0);
+}
+
+#[test]
+fn unsupported_texture_requests_preserve_output_and_device_lifetime() {
+    let (mut process, _, device) = create();
+    let create_texture = method(&process, device, 20);
+    for args in [
+        [0, 2, 1, 0, 22, 1],
+        [4, 2, 1, 1, 22, 1],
+        [4, 2, 1, 0, 21, 1],
+        [4, 2, 1, 0, 22, 3],
+        [u32::MAX, u32::MAX, 1, 0, 22, 1],
+    ] {
+        write(&mut process, TEXTURE_OUTPUT, &[0x1234_5678]);
+        assert_eq!(
+            invoke(
+                &mut process,
+                create_texture,
+                &[
+                    device,
+                    args[0],
+                    args[1],
+                    args[2],
+                    args[3],
+                    args[4],
+                    args[5],
+                    TEXTURE_OUTPUT
+                ]
+            ),
+            0x8876_086c
+        );
+        assert_eq!(read(&process, TEXTURE_OUTPUT), 0x1234_5678);
+    }
+    let release = method(&process, device, 2);
+    assert_eq!(invoke(&mut process, release, &[device]), 0);
+}
+
+#[test]
+fn texture_failures_preserve_output_lock_state_and_page_capacity() {
+    let (mut process, _, device) = create();
+    let create_texture = method(&process, device, 20);
+    let pages = process.memory.mapped_pages();
+    write(&mut process, TEXTURE_OUTPUT, &[0x1234_5678]);
+    assert_eq!(
+        invoke(
+            &mut process,
+            create_texture,
+            &[device, 512, 512, 1, 0, 22, 1, TEXTURE_OUTPUT]
+        ),
+        0x8876_017c
+    );
+    assert_eq!(read(&process, TEXTURE_OUTPUT), 0x1234_5678);
+    assert_eq!(process.memory.mapped_pages(), pages);
+
+    let bad_output = call(
+        &mut process,
+        create_texture,
+        &[device, 4, 2, 1, 0, 22, 1, 0x0040_1000],
+    );
+    assert!(matches!(
+        bad_output.reason,
+        ProcessStop::Stopped(StopReason::MemoryFault(_))
+    ));
+    assert_eq!(process.memory.mapped_pages(), pages);
+    assert_eq!(
+        invoke(
+            &mut process,
+            create_texture,
+            &[device, 4, 2, 1, 0, 22, 1, TEXTURE_OUTPUT]
+        ),
+        0
+    );
+    let texture = read(&process, TEXTURE_OUTPUT);
+    let lock = method(&process, texture, 16);
+    let unlock = method(&process, texture, 17);
+    write(&mut process, PARAMETERS, &[1, 0, 3, 2]);
+    assert_eq!(
+        invoke(
+            &mut process,
+            lock,
+            &[texture, 0, LOCKED_RECT, PARAMETERS, 0]
+        ),
+        0
+    );
+    assert_eq!(read(&process, LOCKED_RECT), 16);
+    assert_eq!(read(&process, LOCKED_RECT + 4), texture + 4096 + 4);
+    assert_eq!(invoke(&mut process, unlock, &[texture, 0]), 0);
+
+    write(&mut process, PARAMETERS, &[1, 0, 5, 2]);
+    write(&mut process, LOCKED_RECT, &[0x1234_5678, 0x8765_4321]);
+    assert_eq!(
+        invoke(
+            &mut process,
+            lock,
+            &[texture, 0, LOCKED_RECT, PARAMETERS, 0]
+        ),
+        0x8876_086c
+    );
+    assert_eq!(read(&process, LOCKED_RECT), 0x1234_5678);
+    assert_eq!(read(&process, LOCKED_RECT + 4), 0x8765_4321);
+    assert_eq!(invoke(&mut process, unlock, &[texture, 0]), 0x8876_086c);
 }
 
 #[test]

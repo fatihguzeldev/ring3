@@ -1,3 +1,5 @@
+use std::collections::BTreeMap;
+
 use super::super::Access;
 use super::{API_BASE, GuestMemory, MemoryError, PAGE_SIZE, Permissions, desktop::DESKTOP, guest};
 
@@ -15,6 +17,10 @@ const DEVICE_CAPS_SIZE: usize = 212;
 const CAPS2_CAN_RENDER_WINDOWED: u32 = 0x0008_0000;
 const MAX_PIXELS: u64 = 1_048_576;
 const MAX_RECTS: u32 = 64;
+const TEXTURE_TABLE: u32 = OBJECT_BASE + 0x400;
+const TEXTURE_START: u64 = 0x7200_0000;
+const TEXTURE_END: u64 = 0x7f00_0000;
+const OUT_OF_VIDEO_MEMORY: u32 = 0x8876_017c;
 
 /// an owned top-to-bottom rgba8 snapshot of the most recent presentation.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -36,12 +42,19 @@ pub(super) enum Call {
     CheckMultiSampleType,
     DeviceCaps,
     CreateDevice,
+    CreateTexture,
     Clear,
     Present,
     RootAddRef,
     RootRelease,
     DeviceAddRef,
     DeviceRelease,
+    TextureAddRef,
+    TextureRelease,
+    TextureLevelCount,
+    TextureLevelDesc,
+    TextureLockRect,
+    TextureUnlockRect,
 }
 
 impl Call {
@@ -55,6 +68,13 @@ impl Call {
             0x54 => Self::RootRelease,
             0x58 => Self::DeviceAddRef,
             0x5c => Self::DeviceRelease,
+            0x400 => Self::CreateTexture,
+            0x404 => Self::TextureAddRef,
+            0x408 => Self::TextureRelease,
+            0x40c => Self::TextureLevelCount,
+            0x410 => Self::TextureLevelDesc,
+            0x414 => Self::TextureLockRect,
+            0x418 => Self::TextureUnlockRect,
             0x2d0 => Self::AdapterCount,
             0x2d4 => Self::AdapterIdentifier,
             0x2d8 => Self::DeviceCaps,
@@ -70,9 +90,11 @@ impl Call {
     pub(super) fn arguments(self) -> usize {
         match self {
             Self::CreateDevice | Self::Clear | Self::CheckDeviceFormat => 7,
-            Self::Present => 5,
+            Self::CreateTexture => 8,
+            Self::Present | Self::TextureLockRect => 5,
+            Self::TextureLevelDesc => 3,
             Self::AdapterIdentifier | Self::AdapterMode | Self::DeviceCaps => 4,
-            Self::AdapterModeCount => 2,
+            Self::AdapterModeCount | Self::TextureUnlockRect => 2,
             Self::CheckDeviceType | Self::CheckMultiSampleType => 6,
             _ => 1,
         }
@@ -85,6 +107,21 @@ pub(super) struct Graphics {
     device_refs: u32,
     back: Option<Frame>,
     front: Option<Frame>,
+    textures: BTreeMap<u32, Texture>,
+}
+
+struct Texture {
+    refs: u32,
+    length: u64,
+    pool: u32,
+    levels: Vec<TextureLevel>,
+}
+
+struct TextureLevel {
+    width: u32,
+    height: u32,
+    offset: u32,
+    locked: bool,
 }
 
 impl Graphics {
@@ -96,6 +133,9 @@ impl Graphics {
             for index in 0..count {
                 guest::write_word(memory, table + index * 4, API_BASE + 0xffc)?;
             }
+        }
+        for index in 0..19 {
+            guest::write_word(memory, TEXTURE_TABLE + index * 4, API_BASE + 0xffc)?;
         }
         for (table, index, offset) in [
             (ROOT_TABLE, 1, 0x50),
@@ -113,6 +153,13 @@ impl Graphics {
             (DEVICE_TABLE, 2, 0x5c),
             (DEVICE_TABLE, 15, 0x48),
             (DEVICE_TABLE, 36, 0x44),
+            (DEVICE_TABLE, 20, 0x400),
+            (TEXTURE_TABLE, 1, 0x404),
+            (TEXTURE_TABLE, 2, 0x408),
+            (TEXTURE_TABLE, 13, 0x40c),
+            (TEXTURE_TABLE, 14, 0x410),
+            (TEXTURE_TABLE, 16, 0x414),
+            (TEXTURE_TABLE, 17, 0x418),
         ] {
             guest::write_word(memory, table + index * 4, API_BASE + offset)?;
         }
@@ -149,6 +196,24 @@ impl Graphics {
             Call::CheckMultiSampleType => self.check_multisample_type(args),
             Call::DeviceCaps => return self.device_caps(args, memory),
             Call::CreateDevice => return self.create_device(args, memory),
+            Call::CreateTexture => return self.create_texture(args, memory),
+            Call::TextureLevelDesc => return self.texture_level_desc(args, memory),
+            Call::TextureLockRect => return self.texture_lock_rect(args, memory),
+            Call::TextureUnlockRect => self.texture_unlock_rect(args),
+            Call::TextureLevelCount => {
+                self.textures.get(&args[0]).map_or(INVALID_CALL, |texture| {
+                    u32::try_from(texture.levels.len()).expect("bounded mip count")
+                })
+            }
+            Call::TextureAddRef => {
+                if let Some(texture) = self.textures.get_mut(&args[0]) {
+                    texture.refs = texture.refs.saturating_add(1);
+                    texture.refs
+                } else {
+                    INVALID_CALL
+                }
+            }
+            Call::TextureRelease => return self.texture_release(args[0], memory),
             Call::Clear => return self.clear(args, memory),
             Call::Present => {
                 if args[0] != DEVICE || self.device_refs == 0 || args[1..5] != [0; 4] {
@@ -174,8 +239,7 @@ impl Graphics {
                 } else {
                     self.device_refs -= 1;
                     if self.device_refs == 0 {
-                        self.back = None;
-                        self.root_refs = self.root_refs.saturating_sub(1);
+                        self.finish_device();
                     }
                 }
                 self.device_refs
@@ -244,7 +308,7 @@ impl Graphics {
         if args[0] != ROOT || self.root_refs == 0 || args[1] != 0 || !matches!(args[2], 1..=3) {
             return INVALID_CALL;
         }
-        if args[2..] == [1, 22, 1, 1, 22] {
+        if matches!(args[2..], [1, 22, 1, 1, 22] | [1, 22, 0, 3, 22]) {
             0
         } else {
             NOT_AVAILABLE
@@ -338,6 +402,192 @@ impl Graphics {
         self.device_refs = 1;
         self.back = Some(frame);
         Ok(0)
+    }
+
+    fn finish_device(&mut self) {
+        self.back = None;
+        self.root_refs = self.root_refs.saturating_sub(1);
+    }
+
+    fn create_texture(
+        &mut self,
+        args: &[u32],
+        memory: &mut GuestMemory,
+    ) -> Result<u32, MemoryError> {
+        let [
+            device,
+            width,
+            height,
+            requested_levels,
+            usage,
+            format,
+            pool,
+            output,
+        ] = <[u32; 8]>::try_from(args).expect("d3d8 call arity");
+        if device != DEVICE
+            || self.device_refs == 0
+            || width == 0
+            || height == 0
+            || u64::from(width) * u64::from(height) > MAX_PIXELS
+            || usage != 0
+            || format != 22
+            || !matches!(pool, 0..=2)
+        {
+            return Ok(INVALID_CALL);
+        }
+
+        let mut levels = Vec::new();
+        let (mut level_width, mut level_height) = (width, height);
+        let mut pixel_bytes = 0_u64;
+        loop {
+            levels.push(TextureLevel {
+                width: level_width,
+                height: level_height,
+                offset: u32::try_from(PAGE_SIZE + pixel_bytes)
+                    .expect("bounded texture address offset"),
+                locked: false,
+            });
+            pixel_bytes += u64::from(level_width) * u64::from(level_height) * 4;
+            if (requested_levels != 0 && levels.len() == requested_levels as usize)
+                || (level_width == 1 && level_height == 1)
+            {
+                break;
+            }
+            level_width = (level_width / 2).max(1);
+            level_height = (level_height / 2).max(1);
+        }
+        if requested_levels != 0 && levels.len() != requested_levels as usize {
+            return Ok(INVALID_CALL);
+        }
+        guest::check(memory, output, 4, Access::Write)?;
+        let length = PAGE_SIZE + pixel_bytes.div_ceil(PAGE_SIZE) * PAGE_SIZE;
+        let Some(address) = memory.first_free_span(TEXTURE_START, TEXTURE_END, length)? else {
+            return Ok(OUT_OF_VIDEO_MEMORY);
+        };
+        if memory
+            .map_zeroed(address, length, Permissions::READ_WRITE)
+            .is_err()
+        {
+            return Ok(OUT_OF_VIDEO_MEMORY);
+        }
+        let address = u32::try_from(address).expect("texture guest range is 32-bit");
+        guest::write_word(memory, address, TEXTURE_TABLE)?;
+        memory.protect(u64::from(address), PAGE_SIZE, Permissions::READ)?;
+        guest::write_word(memory, output, address)?;
+        self.textures.insert(
+            address,
+            Texture {
+                refs: 1,
+                length,
+                pool,
+                levels,
+            },
+        );
+        self.device_refs = self.device_refs.saturating_add(1);
+        Ok(0)
+    }
+
+    fn texture_release(
+        &mut self,
+        address: u32,
+        memory: &mut GuestMemory,
+    ) -> Result<u32, MemoryError> {
+        let Some(texture) = self.textures.get_mut(&address) else {
+            return Ok(INVALID_CALL);
+        };
+        if texture.refs > 1 {
+            texture.refs -= 1;
+            return Ok(texture.refs);
+        }
+        memory.unmap(u64::from(address), texture.length)?;
+        self.textures.remove(&address);
+        self.device_refs -= 1;
+        if self.device_refs == 0 {
+            self.finish_device();
+        }
+        Ok(0)
+    }
+
+    fn texture_level_desc(
+        &self,
+        args: &[u32],
+        memory: &mut GuestMemory,
+    ) -> Result<u32, MemoryError> {
+        let Some(texture) = self.textures.get(&args[0]) else {
+            return Ok(INVALID_CALL);
+        };
+        let Some(level) = texture.levels.get(args[1] as usize) else {
+            return Ok(INVALID_CALL);
+        };
+        guest::check(memory, args[2], 32, Access::Write)?;
+        let values = [
+            22,
+            3,
+            0,
+            texture.pool,
+            level.width * level.height * 4,
+            0,
+            level.width,
+            level.height,
+        ];
+        let bytes: Vec<_> = values.into_iter().flat_map(u32::to_le_bytes).collect();
+        memory.write(u64::from(args[2]), &bytes)?;
+        Ok(0)
+    }
+
+    fn texture_lock_rect(
+        &mut self,
+        args: &[u32],
+        memory: &mut GuestMemory,
+    ) -> Result<u32, MemoryError> {
+        let Some(texture) = self.textures.get(&args[0]) else {
+            return Ok(INVALID_CALL);
+        };
+        let Some(level) = texture.levels.get(args[1] as usize) else {
+            return Ok(INVALID_CALL);
+        };
+        if level.locked || args[4] != 0 {
+            return Ok(INVALID_CALL);
+        }
+        let (left, top) = if args[3] == 0 {
+            (0, 0)
+        } else {
+            let mut rect = [0; 4];
+            guest::read_words(memory, args[3], &mut rect)?;
+            if rect[0] >= rect[2]
+                || rect[1] >= rect[3]
+                || rect[2] > level.width
+                || rect[3] > level.height
+            {
+                return Ok(INVALID_CALL);
+            }
+            (rect[0], rect[1])
+        };
+        guest::check(memory, args[2], 8, Access::Write)?;
+        let pitch = level.width * 4;
+        let pixels = args[0] + level.offset + top * pitch + left * 4;
+        let bytes: Vec<_> = [pitch, pixels]
+            .into_iter()
+            .flat_map(u32::to_le_bytes)
+            .collect();
+        memory.write(u64::from(args[2]), &bytes)?;
+        self.textures.get_mut(&args[0]).unwrap().levels[args[1] as usize].locked = true;
+        Ok(0)
+    }
+
+    fn texture_unlock_rect(&mut self, args: &[u32]) -> u32 {
+        let Some(level) = self
+            .textures
+            .get_mut(&args[0])
+            .and_then(|texture| texture.levels.get_mut(args[1] as usize))
+        else {
+            return INVALID_CALL;
+        };
+        if !level.locked {
+            return INVALID_CALL;
+        }
+        level.locked = false;
+        0
     }
 
     fn clear(&mut self, args: &[u32], memory: &GuestMemory) -> Result<u32, MemoryError> {
