@@ -122,6 +122,13 @@ impl Desktop {
             self.active = handle;
         }
     }
+    pub(super) fn show_normal(&mut self, handle: u32) -> Option<u32> {
+        let window = self.top_levels.get_mut(&handle)?;
+        let was_visible = u32::from(window.style & 0x1000_0000 != 0);
+        window.style |= 0x1000_0000;
+        self.active = handle;
+        Some(was_visible)
+    }
     pub(super) fn has_class(&self, instance: u32, atom: u32) -> bool {
         self.top_levels
             .values()

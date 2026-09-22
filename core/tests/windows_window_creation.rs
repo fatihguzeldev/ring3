@@ -3,11 +3,14 @@ mod imported_executable;
 #[path = "support/window_creation_executable.rs"]
 mod window_creation_executable;
 
-use ring3_core::execution::{Permissions, Process32, ProcessStop, Register32, StopReason};
+use ring3_core::execution::{
+    Access, MemoryError, Permissions, Process32, ProcessStop, Register32, StopReason,
+};
 
 const STACK: u32 = 0x1000_ef00;
 const CREATE: u32 = 0x7000_02a8;
 const ACTIVE: u32 = 0x7000_0430;
+const SHOW: u32 = 0x7000_0440;
 const HANDLE: u32 = 0x7500_0004;
 const RETURN: u32 = 0x7000_0ff8;
 const ARGS: [u32; 12] = [
@@ -107,6 +110,56 @@ fn active_window_tracks_only_successful_visible_creation() {
     put(&mut rejected, STACK + 16, &[ARGS[3] | 0x1000_0000]);
     assert_eq!(finish(&mut rejected), 0);
     assert_eq!(query(&mut rejected, ACTIVE, &[]), 0);
+}
+
+#[test]
+fn show_normal_returns_previous_visibility_and_activates_owned_window() {
+    let mut p = ready(&logged(None));
+    assert_eq!(finish(&mut p), HANDLE);
+    assert_eq!(query(&mut p, ACTIVE, &[]), 0);
+    assert_eq!(
+        query(&mut p, 0x7000_02bc, &[HANDLE, (-16_i32).cast_unsigned()]),
+        0x04ca_0000
+    );
+    assert_eq!(query(&mut p, SHOW, &[HANDLE, 1]), 0);
+    assert_eq!(
+        query(&mut p, 0x7000_02bc, &[HANDLE, (-16_i32).cast_unsigned()]),
+        0x14ca_0000
+    );
+    assert_eq!(query(&mut p, ACTIVE, &[]), HANDLE);
+    assert_eq!(query(&mut p, SHOW, &[HANDLE, 1]), 1);
+    let before = {
+        prepare(&mut p, SHOW, STACK, &[HANDLE, 5]);
+        p.cpu
+    };
+    let run = p.run(1);
+    assert_eq!(run.reason, ProcessStop::UnsupportedApi { address: SHOW });
+    assert_eq!((run.instructions, run.api_calls), (0, 0));
+    assert_eq!(p.cpu, before);
+    assert_eq!(query(&mut p, SHOW, &[0, 1]), 0);
+    assert_eq!(p.last_error().unwrap(), 1400);
+}
+
+#[test]
+fn show_normal_error_write_fault_does_not_advance_api_state() {
+    let mut p = ready(&logged(None));
+    assert_eq!(finish(&mut p), HANDLE);
+    prepare(&mut p, SHOW, STACK, &[0, 1]);
+    p.memory
+        .protect(0x7ffd_e000, 4096, Permissions::READ)
+        .unwrap();
+    let before = p.cpu;
+    let run = p.run(1);
+    assert_eq!(
+        run.reason,
+        ProcessStop::Stopped(StopReason::MemoryFault(MemoryError::PermissionDenied {
+            address: 0x7ffd_e034,
+            access: Access::Write,
+        }))
+    );
+    assert_eq!((run.instructions, run.api_calls), (0, 0));
+    assert_eq!(p.cpu, before);
+    assert_eq!(query(&mut p, ACTIVE, &[]), 0);
 }
 
 fn with_hook(code: &[u8]) -> Process32 {

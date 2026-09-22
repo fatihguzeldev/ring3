@@ -123,6 +123,7 @@ enum Api {
     CallWindowProc,
     SendMessage,
     PeekMessage,
+    ShowWindow,
     CreateDialog,
     CallNextHook,
     Window(creation::Call),
@@ -218,6 +219,7 @@ impl Api {
             0x2a4 => Some(Self::CallWindowProc),
             0x2cc => Some(Self::SendMessage),
             0x43c => Some(Self::PeekMessage),
+            0x440 => Some(Self::ShowWindow),
             0x2c4 => Some(Self::CallNextHook),
             0x22c => Some(Self::GetCommandLine),
             0x434 => Some(Self::CreateDialog),
@@ -304,6 +306,7 @@ impl Api {
                 "CallWindowProcA" => 0x2a4,
                 "SendMessageA" => 0x2cc,
                 "PeekMessageA" => 0x43c,
+                "ShowWindow" => 0x440,
                 "CallNextHookEx" => 0x2c4,
                 "CreateWindowExA" => 0x2a8,
                 "DefWindowProcA" => 0x2ac,
@@ -421,7 +424,7 @@ impl Api {
             Self::Directory(call) => call.arguments(),
             Self::Clock(call) => call.arguments(),
             Self::GetEnvironmentVariable => 3,
-            Self::WindowsFormat => 2,
+            Self::WindowsFormat | Self::ShowWindow => 2,
             Self::CallWindowProc | Self::CreateDialog | Self::PeekMessage => 5,
             Self::CallNextHook | Self::SendMessage => 4,
             Self::Window(call) => call.arguments(),
@@ -795,6 +798,19 @@ impl Process32 {
         Ok(())
     }
 
+    fn show_window_normal(&mut self, args: &[u32]) -> Result<(), DispatchError> {
+        if args[1] != 1 {
+            return Err(DispatchError::Unsupported);
+        }
+        let Some(was_visible) = self.desktop.show_normal(args[0]) else {
+            thread::set_last_error(&mut self.memory, 1400)?;
+            self.cpu.set_register(Register32::Eax, 0);
+            return Ok(());
+        };
+        self.cpu.set_register(Register32::Eax, was_visible);
+        Ok(())
+    }
+
     fn invoke(&mut self, api: Api, args: &[u32], stack: u32) -> Result<(), DispatchError> {
         let argument = args.first().copied().unwrap_or(0);
         match api {
@@ -807,6 +823,7 @@ impl Process32 {
             Api::GetStartupInfo => parameters::startup_info(&mut self.memory, argument)?,
             Api::WindowsFormat => self.windows_format(args, stack)?,
             Api::PeekMessage => self.peek_empty_message(args)?,
+            Api::ShowWindow => self.show_window_normal(args)?,
             Api::Class(call) => self.window_class(call, args)?,
             Api::Window(call) => self.window_api(call, args)?,
             Api::Synchronization(call) => self.cpu.set_register(
