@@ -94,6 +94,8 @@ fn create_accepts_only_direct3d_8_0_and_8_1_sdk_identities() {
 #[test]
 fn adapter_count_reports_only_the_live_owned_root() {
     let (mut process, root) = root();
+    assert_eq!(method(&process, root, 3), 0x7000_0ffc);
+    assert_eq!(method(&process, root, 5), 0x7000_0ffc);
     let count = method(&process, root, 4);
     assert_eq!(invoke(&mut process, count, &[root]), 1);
     assert_eq!(invoke(&mut process, count, &[root]), 1);
