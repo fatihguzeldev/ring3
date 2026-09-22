@@ -8,6 +8,9 @@ const ROOT_TABLE: u32 = OBJECT_BASE + 0x100;
 const DEVICE_TABLE: u32 = OBJECT_BASE + 0x200;
 const INVALID_CALL: u32 = 0x8876_086c;
 const NOT_AVAILABLE: u32 = 0x8876_086a;
+const ADAPTER_IDENTIFIER_SIZE: usize = 1068;
+const ADAPTER_DRIVER: &[u8] = b"ring3\0";
+const ADAPTER_DESCRIPTION: &[u8] = b"Ring3 Virtual Display Adapter\0";
 const MAX_PIXELS: u64 = 1_048_576;
 const MAX_RECTS: u32 = 64;
 
@@ -23,6 +26,7 @@ pub struct Frame {
 pub(super) enum Call {
     Create,
     AdapterCount,
+    AdapterIdentifier,
     CreateDevice,
     Clear,
     Present,
@@ -44,6 +48,7 @@ impl Call {
             0x58 => Self::DeviceAddRef,
             0x5c => Self::DeviceRelease,
             0x2d0 => Self::AdapterCount,
+            0x2d4 => Self::AdapterIdentifier,
             _ => return None,
         })
     }
@@ -52,6 +57,7 @@ impl Call {
         match self {
             Self::CreateDevice | Self::Clear => 7,
             Self::Present => 5,
+            Self::AdapterIdentifier => 4,
             _ => 1,
         }
     }
@@ -79,6 +85,7 @@ impl Graphics {
             (ROOT_TABLE, 1, 0x50),
             (ROOT_TABLE, 2, 0x54),
             (ROOT_TABLE, 4, 0x2d0),
+            (ROOT_TABLE, 5, 0x2d4),
             (ROOT_TABLE, 15, 0x40),
             (DEVICE_TABLE, 1, 0x58),
             (DEVICE_TABLE, 2, 0x5c),
@@ -110,6 +117,7 @@ impl Graphics {
                 }
             }
             Call::AdapterCount => u32::from(args[0] == ROOT && self.root_refs != 0),
+            Call::AdapterIdentifier => return self.adapter_identifier(args, memory),
             Call::CreateDevice => return self.create_device(args, memory),
             Call::Clear => return self.clear(args, memory),
             Call::Present => {
@@ -144,6 +152,23 @@ impl Graphics {
             }
             _ => INVALID_CALL,
         })
+    }
+
+    fn adapter_identifier(
+        &self,
+        args: &[u32],
+        memory: &mut GuestMemory,
+    ) -> Result<u32, MemoryError> {
+        if args[0] != ROOT || self.root_refs == 0 || args[1] != 0 || !matches!(args[2], 0 | 2) {
+            return Ok(INVALID_CALL);
+        }
+        guest::check(memory, args[3], ADAPTER_IDENTIFIER_SIZE, Access::Write)?;
+        let mut identifier = [0; ADAPTER_IDENTIFIER_SIZE];
+        identifier[..ADAPTER_DRIVER.len()].copy_from_slice(ADAPTER_DRIVER);
+        let description = &mut identifier[512..];
+        description[..ADAPTER_DESCRIPTION.len()].copy_from_slice(ADAPTER_DESCRIPTION);
+        memory.write(u64::from(args[3]), &identifier)?;
+        Ok(0)
     }
 
     fn create_device(
