@@ -1283,6 +1283,41 @@ mod icon_executable;
 #[path = "../../core/tests/support/window_message_cases.rs"]
 mod window_message_cases;
 
+#[path = "../../core/tests/support/path_component_cases.rs"]
+mod path_component_cases;
+
+fn execute_path_components() {
+    path_component_cases::verify();
+    #[cfg(windows_demo)]
+    {
+        use ring3_core::execution::{Process32, ProcessStop, StopReason};
+        let mut final_state = None;
+        for budget in [1, 100000] {
+            let mut process = Process32::load(
+                include_bytes!("../../target/windows-api/path-components.exe"),
+                64,
+            )
+            .unwrap();
+            let mut counts = (0, 0);
+            loop {
+                let result = process.run(budget);
+                counts.0 += result.instructions;
+                counts.1 += result.api_calls;
+                if result.reason != ProcessStop::Stopped(StopReason::InstructionLimit) {
+                    assert_eq!(result.reason, ProcessStop::Exited(42));
+                    break;
+                }
+                assert!(counts.0 + counts.1 < 100000);
+            }
+            assert_eq!(process.last_error().unwrap(), 77);
+            if let Some(prior) = final_state {
+                assert_eq!((process.cpu, counts), prior);
+            }
+            final_state = Some((process.cpu, counts));
+        }
+    }
+}
+
 fn execute_window_messages() {
     window_message_cases::verify();
     #[cfg(windows_demo)]
@@ -3953,6 +3988,7 @@ pub extern "C" fn run() -> u32 {
     execute_hook_chain();
     execute_icons();
     execute_window_messages();
+    execute_path_components();
     execute_desktop_queries();
     execute_x87_data();
     execute_x87_scaling();
