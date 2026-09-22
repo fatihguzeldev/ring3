@@ -1,6 +1,9 @@
 LIBRARY KERNEL32.dll
 EXPORTS
     _FindResourceA@12==FindResourceA
+    _LoadResource@8==LoadResource
+    _LockResource@4==LockResource
+    _SizeofResource@8==SizeofResource
     _lstrcpynA@12==lstrcpynA
     _SetLastError@4==SetLastError
     _GetLastError@0==GetLastError

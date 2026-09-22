@@ -628,7 +628,7 @@ fn execute_resources() {
             Process32::load(include_bytes!("../../target/windows-api/resources.exe"), 64).unwrap();
         let result = process.run(1000);
         assert_eq!(result.reason, ProcessStop::Exited(42));
-        assert_eq!((result.instructions, result.api_calls), (138, 14));
+        assert_eq!((result.instructions, result.api_calls), (189, 18));
     }
 }
 
