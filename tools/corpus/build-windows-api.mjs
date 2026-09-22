@@ -9,14 +9,15 @@ for (const library of ["kernel32", "user32", "gdi32", "winmm", "advapi32"]) {
   run(tools.lld, ["-flavor", "link", "/lib", "/machine:x86",
     `/def:${join(root, `corpus/windows-api/${library}.def`)}`, `/out:${library}.lib`], output);
 }
-for (const name of ["calls", "modules", "heap", "version", "critical-sections", "tls", "global-memory", "code-pages", "cpinfo", "messages", "clipboard-formats", "process-version", "metrics", "gdi", "colors", "brushes", "cursors", "cursor-position", "local-realloc", "thread-identity", "module-file-name", "resources", "string-copy", "system-directory", "interlocked", "computer-name", "mutex", "performance-clock", "current-directory", "change-directory", "find-files", "command-line", "environment", "floating-point", "millisecond-clock", "string-stores", "floating-status", "signed-products", "string-comparisons", "startup-info", "hooks", "thread-priority", "formatting", "window-classes", "desktop-queries", "floating-registers", "procedures", "registry", "registry-values", "string-length", "file-attributes", "short-path", "registry-defaults", "accelerators", "window-procedures", "window-creation", "unsigned-division", "window-properties", "hook-chain", "icons"]) {
+for (const name of ["calls", "modules", "heap", "version", "critical-sections", "tls", "global-memory", "code-pages", "cpinfo", "messages", "clipboard-formats", "process-version", "metrics", "gdi", "colors", "brushes", "cursors", "cursor-position", "local-realloc", "thread-identity", "module-file-name", "resources", "string-copy", "system-directory", "interlocked", "computer-name", "mutex", "performance-clock", "current-directory", "change-directory", "find-files", "command-line", "environment", "floating-point", "millisecond-clock", "string-stores", "floating-status", "signed-products", "string-comparisons", "startup-info", "hooks", "thread-priority", "formatting", "window-classes", "desktop-queries", "floating-registers", "procedures", "registry", "registry-values", "string-length", "file-attributes", "short-path", "registry-defaults", "accelerators", "window-procedures", "window-creation", "unsigned-division", "window-properties", "hook-chain", "icons", "window-messages"]) {
   run(tools.clang, ["--target=i686-pc-windows-msvc", "-O0", "-ffreestanding",
     "-fno-stack-protector", "-c", join(root, `corpus/windows-api/${name}.c`),
     "-o", `${name}.obj`], output);
   const extra = [];
-  if (name === "resources" || name === "accelerators" || name === "icons") {
+  const resource = name === "window-messages" ? "icons" : name;
+  if (resource === "resources" || resource === "accelerators" || resource === "icons") {
     run(tools.clang, ["--target=i686-pc-windows-msvc", "-c",
-      join(root, `corpus/windows-api/${name}.s`), "-o", "resource-data.obj"], output);
+      join(root, `corpus/windows-api/${resource}.s`), "-o", "resource-data.obj"], output);
     extra.push("resource-data.obj");
   }
   run(tools.lld, ["-flavor", "link", "/entry:entry",
