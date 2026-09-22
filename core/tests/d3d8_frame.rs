@@ -8,6 +8,7 @@ use ring3_core::execution::{Process32, ProcessResult, ProcessStop, Register32, S
 
 const PARAMETERS: u32 = 0x0040_2100;
 const OUTPUT: u32 = 0x0040_2180;
+const IDENTIFIER: u32 = 0x0040_2200;
 
 #[test]
 fn executes_an_uninterrupted_guest_graphics_program() {
@@ -34,6 +35,12 @@ fn read(process: &Process32, address: u32) -> u32 {
     let mut bytes = [0; 4];
     process.memory.read(u64::from(address), &mut bytes).unwrap();
     u32::from_le_bytes(bytes)
+}
+
+fn read_bytes(process: &Process32, address: u32, length: usize) -> Vec<u8> {
+    let mut bytes = vec![0; length];
+    process.memory.read(u64::from(address), &mut bytes).unwrap();
+    bytes
 }
 
 fn write(process: &mut Process32, address: u32, values: &[u32]) {
@@ -95,7 +102,7 @@ fn create_accepts_only_direct3d_8_0_and_8_1_sdk_identities() {
 fn adapter_count_reports_only_the_live_owned_root() {
     let (mut process, root) = root();
     assert_eq!(method(&process, root, 3), 0x7000_0ffc);
-    assert_eq!(method(&process, root, 5), 0x7000_0ffc);
+    assert_eq!(method(&process, root, 6), 0x7000_0ffc);
     let count = method(&process, root, 4);
     assert_eq!(invoke(&mut process, count, &[root]), 1);
     assert_eq!(invoke(&mut process, count, &[root]), 1);
@@ -103,6 +110,88 @@ fn adapter_count_reports_only_the_live_owned_root() {
     let release = method(&process, root, 2);
     assert_eq!(invoke(&mut process, release, &[root]), 0);
     assert_eq!(invoke(&mut process, count, &[root]), 0);
+}
+
+#[test]
+fn adapter_identifier_reports_the_owned_virtual_adapter() {
+    let (mut process, root) = root();
+    let identifier = method(&process, root, 5);
+    assert_ne!(identifier, 0x7000_0ffc);
+    for flags in [0, 2] {
+        process
+            .memory
+            .write(u64::from(IDENTIFIER), &[0xa5; 1068])
+            .unwrap();
+        assert_eq!(
+            invoke(&mut process, identifier, &[root, 0, flags, IDENTIFIER]),
+            0
+        );
+
+        let bytes = read_bytes(&process, IDENTIFIER, 1068);
+        assert_eq!(&bytes[..6], b"ring3\0");
+        assert!(bytes[6..512].iter().all(|byte| *byte == 0));
+        assert_eq!(&bytes[512..542], b"Ring3 Virtual Display Adapter\0");
+        assert!(bytes[542..].iter().all(|byte| *byte == 0));
+    }
+}
+
+#[test]
+fn invalid_or_released_roots_do_not_write_adapter_identifiers() {
+    let (mut process, root) = root();
+    let identifier = method(&process, root, 5);
+    for args in [[root + 4, 0, 0], [root, 1, 0], [root, 0, 1]] {
+        process
+            .memory
+            .write(u64::from(IDENTIFIER), &[0xa5; 1068])
+            .unwrap();
+        assert_eq!(
+            invoke(
+                &mut process,
+                identifier,
+                &[args[0], args[1], args[2], IDENTIFIER]
+            ),
+            0x8876_086c
+        );
+        assert!(
+            read_bytes(&process, IDENTIFIER, 1068)
+                .iter()
+                .all(|byte| *byte == 0xa5)
+        );
+    }
+
+    let release = method(&process, root, 2);
+    assert_eq!(invoke(&mut process, release, &[root]), 0);
+    assert_eq!(
+        invoke(&mut process, identifier, &[root, 0, 0, IDENTIFIER]),
+        0x8876_086c
+    );
+    assert!(
+        read_bytes(&process, IDENTIFIER, 1068)
+            .iter()
+            .all(|byte| *byte == 0xa5)
+    );
+}
+
+#[test]
+fn adapter_identifier_faults_before_writing_any_prefix() {
+    let (mut process, root) = root();
+    let identifier = method(&process, root, 5);
+    let partial = 0x0040_2e00;
+    process
+        .memory
+        .write(u64::from(partial), &[0xa5; 512])
+        .unwrap();
+    let result = call(&mut process, identifier, &[root, 0, 0, partial]);
+    assert!(matches!(
+        result.reason,
+        ProcessStop::Stopped(StopReason::MemoryFault(_))
+    ));
+    assert_eq!(result.api_calls, 0);
+    assert!(
+        read_bytes(&process, partial, 512)
+            .iter()
+            .all(|byte| *byte == 0xa5)
+    );
 }
 
 fn create() -> (Process32, u32, u32) {
