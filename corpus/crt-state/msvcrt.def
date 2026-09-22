@@ -30,6 +30,7 @@ EXPORTS
     __mb_cur_max DATA
     strlen
     strncpy
+    strncat
     strchr
     memcmp
     memcpy

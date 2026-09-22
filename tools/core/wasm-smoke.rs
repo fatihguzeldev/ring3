@@ -375,6 +375,8 @@ fn execute_locale_activity() {
 
 #[path = "../../core/tests/support/file_attributes_executable.rs"]
 mod file_attributes_executable;
+#[path = "../../core/tests/support/string_append_executable.rs"]
+mod string_append_executable;
 #[path = "../../core/tests/support/string_length_executable.rs"]
 mod string_length_executable;
 #[path = "../../core/tests/support/windows_string_length_executable.rs"]
@@ -423,6 +425,19 @@ fn execute_buffer_copy() {
     assert_eq!(process.cpu.register(Register32::Ebx), 0x0040_2190);
     assert_eq!(process.cpu.register(Register32::Ecx), 0xff80_0061);
     assert_eq!(process.cpu.register(Register32::Esp), 0x1001_0000);
+}
+
+fn execute_string_append() {
+    use ring3_core::execution::{Process32, ProcessStop, Register32, StopReason};
+    let mut process = Process32::load(&string_append_executable::pe32(), 32).unwrap();
+    let run = process.run(50);
+    assert_eq!(run.reason, ProcessStop::Stopped(StopReason::Breakpoint));
+    assert_eq!((run.instructions, run.api_calls), (6, 1));
+    assert_eq!(process.cpu.register(Register32::Eax), 0x0040_2190);
+    assert_eq!(process.cpu.register(Register32::Esp), 0x1001_0000);
+    let mut bytes = [0; 8];
+    process.memory.read(0x0040_2190, &mut bytes).unwrap();
+    assert_eq!(bytes, [b'Q', b'a', 0x80, 0, 0x55, 0x55, 0x55, 0x55]);
 }
 
 fn execute_string_length() {
@@ -3491,6 +3506,7 @@ pub extern "C" fn run() -> u32 {
     execute_locale_activity();
     execute_locale_metadata();
     execute_string_length();
+    execute_string_append();
     execute_buffer_copy();
     execute_string_copy();
     execute_character_search();
