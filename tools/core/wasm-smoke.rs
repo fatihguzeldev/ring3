@@ -1201,6 +1201,31 @@ fn execute_x87_scaling() {
         image.memory.read(0x0040_21a0, &mut bytes).unwrap();
         assert_eq!(u64::from_le_bytes(bytes), expected);
     }
+    let mut image = load_pe32(&x87_scaling_executable::pe32(), 16).unwrap();
+    image
+        .memory
+        .write(0x0040_2180, &1_000_000_000_i64.to_le_bytes())
+        .unwrap();
+    image
+        .memory
+        .write(0x0040_2188, &1_000_000_000.0_f32.to_le_bytes())
+        .unwrap();
+    image
+        .memory
+        .write(0x0040_2190, &0x007f_u16.to_le_bytes())
+        .unwrap();
+    let mut cpu = Cpu32::new(image.entry_point);
+    let run = cpu.run(&mut image.memory, 3);
+    assert_eq!(run.reason, StopReason::InstructionLimit);
+    assert_eq!(run.instructions, 3);
+    assert_eq!(cpu.x87_control_word(), 0x007f);
+    cpu.set_x87_control_word(0x027f);
+    let run = cpu.run(&mut image.memory, 2);
+    assert_eq!(run.reason, StopReason::Breakpoint);
+    assert_eq!(run.instructions, 2);
+    let mut bytes = [0; 8];
+    image.memory.read(0x0040_21a0, &mut bytes).unwrap();
+    assert_eq!(u64::from_le_bytes(bytes), 0x43ab_c16d_6000_0000);
 }
 
 fn execute_x87_data() {
@@ -1237,7 +1262,7 @@ fn execute_x87_data() {
         .unwrap();
         let result = process.run(1000);
         assert_eq!(result.reason, ProcessStop::Exited(42));
-        assert_eq!((result.instructions, result.api_calls), (273, 1));
+        assert_eq!((result.instructions, result.api_calls), (288, 1));
     }
 }
 

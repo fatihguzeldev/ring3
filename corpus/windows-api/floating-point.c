@@ -28,6 +28,13 @@ void entry(void) {
     __asm__ volatile("fildll %1; fmuls %2; fstpl %0"
         : "=m"(output64) : "m"(integer64), "m"(factor32) : "st");
     if (output64 != 0x4348000000000000ULL) ExitProcess(5);
+    unsigned short single = 0x007f;
+    long long billion = 1000000000LL;
+    unsigned int billion_float = 0x4e6e6b28;
+    __asm__ volatile("fldcw %1; fildll %2; fmuls %3; fldcw %4; fstpl %0"
+        : "=m"(output64)
+        : "m"(single), "m"(billion), "m"(billion_float), "m"(control) : "st");
+    if (output64 != 0x43abc16d60000000ULL) ExitProcess(10);
     unsigned short saved;
     __asm__ volatile("fwait; fnstcw %0; fwait" : "=m"(saved));
     if (saved != control) ExitProcess(6);
