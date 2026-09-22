@@ -1448,6 +1448,38 @@ fn execute_window_messages() {
     }
 }
 
+#[cfg(windows_demo)]
+fn execute_get_message_wait() {
+    use ring3_core::execution::{Process32, ProcessStop, Register32};
+    let mut process = Process32::load(
+        include_bytes!("../../target/windows-api/get-message-wait.exe"),
+        64,
+    )
+    .unwrap();
+    let first = process.run(1000);
+    assert_eq!(first.reason, ProcessStop::WaitingForMessage);
+    assert_eq!(first.api_calls, 1);
+    assert_eq!(process.cpu.eip, 0x7000_0448);
+    let cpu = process.cpu;
+    let stack = process.cpu.register(Register32::Esp);
+    let mut pointer = [0; 4];
+    process
+        .memory
+        .read(u64::from(stack + 4), &mut pointer)
+        .unwrap();
+    let mut message = [0; 32];
+    process
+        .memory
+        .read(u64::from(u32::from_le_bytes(pointer)), &mut message)
+        .unwrap();
+    assert_eq!(message, [0x5a; 32]);
+    assert_eq!(process.last_error().unwrap(), 77);
+    let repeated = process.run(1);
+    assert_eq!(repeated.reason, ProcessStop::WaitingForMessage);
+    assert_eq!((repeated.instructions, repeated.api_calls), (0, 0));
+    assert_eq!(process.cpu, cpu);
+}
+
 fn execute_icons() {
     use ring3_core::execution::{Process32, ProcessStop, Register32, StopReason};
     let bytes = icon_executable::guest();
@@ -4183,6 +4215,8 @@ pub extern "C" fn run() -> u32 {
     execute_hook_chain();
     execute_icons();
     execute_window_messages();
+    #[cfg(windows_demo)]
+    execute_get_message_wait();
     execute_path_components();
     execute_file_streams();
     execute_desktop_queries();
