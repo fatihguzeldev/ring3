@@ -722,6 +722,8 @@ mod case_compare_executable;
 #[path = "../../core/tests/support/formatting_executable.rs"]
 mod formatting_executable;
 
+#[path = "../../core/tests/support/x87_register_executable.rs"]
+mod x87_register_executable;
 #[path = "../../core/tests/support/x87_status_executable.rs"]
 mod x87_status_executable;
 
@@ -1259,6 +1261,32 @@ fn execute_thread_priority() {
         let run = process.run(1000);
         assert_eq!(run.reason, ProcessStop::Exited(42));
         assert_eq!((run.instructions, run.api_calls), (208, 24));
+    }
+}
+
+fn execute_x87_register_stores() {
+    use ring3_core::execution::{Cpu32, Register32, StopReason, load_pe32};
+    let image = load_pe32(&x87_register_executable::pe32(), 32).unwrap();
+    let mut cpu = Cpu32::new(image.entry_point);
+    let mut memory = image.memory;
+    let run = cpu.run(&mut memory, 40);
+    assert_eq!(run.reason, StopReason::Breakpoint);
+    assert_eq!(run.instructions, 10);
+    assert_eq!(cpu.register(Register32::Eax), 0);
+    let mut output = [0; 8];
+    memory.read(0x0040_21a0, &mut output).unwrap();
+    assert_eq!(output, (-0_f64).to_le_bytes());
+    #[cfg(windows_demo)]
+    {
+        use ring3_core::execution::{Process32, ProcessStop};
+        let mut process = Process32::load(
+            include_bytes!("../../target/windows-api/floating-registers.exe"),
+            64,
+        )
+        .unwrap();
+        let run = process.run(1000);
+        assert_eq!(run.reason, ProcessStop::Exited(42));
+        assert_eq!((run.instructions, run.api_calls), (44, 1));
     }
 }
 
@@ -3352,6 +3380,7 @@ pub extern "C" fn run() -> u32 {
     execute_environment_query();
     execute_startup_information();
     execute_hook_registration();
+    execute_x87_register_stores();
     execute_thread_priority();
     execute_windows_formatting();
     execute_window_classes();
