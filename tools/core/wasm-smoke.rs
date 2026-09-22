@@ -3427,6 +3427,17 @@ fn execute_compiled_graphics() {
     assert_eq!(pixel(0, 0), &[0x10, 0x20, 0x30, 255]);
 }
 
+#[cfg(windows_demo)]
+fn execute_compiled_rtti() {
+    use ring3_core::execution::{Process32, ProcessStop};
+
+    let mut process =
+        Process32::load(include_bytes!("../../target/crt-rtti/casts.exe"), 64).unwrap();
+    let result = process.run(1_000);
+    assert_eq!(result.reason, ProcessStop::Exited(0));
+    assert_eq!(result.api_calls, 4);
+}
+
 fn execute_windows_api() {
     use ring3_core::execution::{Process32, ProcessStop};
 
@@ -4051,6 +4062,8 @@ fn execute_strdup() {
 pub extern "C" fn run() -> u32 {
     execute_accumulator_sign_extension();
     execute_graphics();
+    #[cfg(windows_demo)]
+    execute_compiled_rtti();
     execute_thread();
     execute_crt();
     execute_fp_control();
