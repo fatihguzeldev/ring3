@@ -308,6 +308,7 @@ impl Api {
             "lstrcpynA" => 0xe4,
             "lstrcpyA" => 0xf0,
             "lstrcatA" => 0xf4,
+            "lstrlenA" => 0x28c,
             "FindResourceA" => 0xe8,
             "FreeLibrary" => 0x1c,
             "SetErrorMode" => 0x20,

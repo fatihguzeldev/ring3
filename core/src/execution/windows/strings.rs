@@ -6,6 +6,7 @@ pub(super) enum Call {
     Copy,
     CopyTerminated,
     Append,
+    Length,
 }
 
 impl Call {
@@ -14,6 +15,7 @@ impl Call {
             0xe4 => Some(Self::Copy),
             0xf0 => Some(Self::CopyTerminated),
             0xf4 => Some(Self::Append),
+            0x28c => Some(Self::Length),
             _ => None,
         }
     }
@@ -21,6 +23,7 @@ impl Call {
     pub(super) fn arguments(self) -> usize {
         match self {
             Self::Copy => 3,
+            Self::Length => 1,
             Self::CopyTerminated | Self::Append => 2,
         }
     }
@@ -38,6 +41,8 @@ impl Call {
                 arguments.get(2).copied().unwrap_or(u32::MAX),
             ),
             Self::Append => append(memory, arguments[0], arguments[1]),
+            Self::Length if arguments[0] == 0 => Ok(0),
+            Self::Length => append_address(memory, arguments[0]).map(|end| end - arguments[0]),
         }
     }
 }
