@@ -8,5 +8,5 @@ pub use loader::{GuestModule, LoadError, LoadedPe32, load_pe32, load_pe32_with_i
 pub use memory::{Access, GuestMemory, MemoryError, PAGE_SIZE, Permissions};
 pub use windows::{
     ClockError, FileContents, FileMetadata, Frame, PostMessageError, PostedMessage, Process32,
-    ProcessOptions, ProcessResult, ProcessStop,
+    ProcessOptions, ProcessResult, ProcessStop, WindowSnapshot,
 };

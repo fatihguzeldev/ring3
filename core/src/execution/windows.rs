@@ -40,6 +40,7 @@ mod user_atoms;
 
 pub use clock::ClockError;
 pub use d3d8::Frame;
+pub use desktop::WindowSnapshot;
 pub use directory::{FileContents, FileMetadata};
 pub use messages::{PostMessageError, PostedMessage};
 pub use parameters::ProcessOptions;
@@ -650,6 +651,12 @@ impl Process32 {
     /// takes the latest presented frame; presentation does not accumulate a queue.
     pub fn take_frame(&mut self) -> Option<Frame> {
         self.graphics.take_frame()
+    }
+
+    /// returns detached snapshots of owned windows in ascending handle order.
+    #[must_use]
+    pub fn window_snapshots(&self) -> Vec<WindowSnapshot> {
+        self.desktop.snapshots()
     }
 
     /// adds one host-provided message to this process's bounded thread queue.

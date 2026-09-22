@@ -52,6 +52,21 @@ pub(super) struct Window {
     pub(super) dialog_units: Option<[i16; 4]>,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct WindowSnapshot {
+    pub hwnd: u32,
+    pub parent: u32,
+    pub id: u32,
+    pub class: u32,
+    pub style: u32,
+    pub exstyle: u32,
+    pub title: String,
+    pub rectangle: [i32; 4],
+    pub client: [i32; 4],
+    pub dialog_units: Option<[i16; 4]>,
+    pub active: bool,
+}
+
 pub(super) struct Desktop {
     top_levels: BTreeMap<u32, Window>,
     children: BTreeMap<u32, Window>,
@@ -71,6 +86,29 @@ impl Default for Desktop {
 }
 
 impl Desktop {
+    pub(super) fn snapshots(&self) -> Vec<WindowSnapshot> {
+        let mut snapshots: Vec<_> = self
+            .top_levels
+            .iter()
+            .chain(&self.children)
+            .map(|(&hwnd, window)| WindowSnapshot {
+                hwnd,
+                parent: window.parent,
+                id: window.id,
+                class: window.class,
+                style: window.style,
+                exstyle: window.exstyle,
+                title: window.title.clone(),
+                rectangle: window.rectangle,
+                client: window.client,
+                dialog_units: window.dialog_units,
+                active: hwnd == self.active,
+            })
+            .collect();
+        snapshots.sort_unstable_by_key(|window| window.hwnd);
+        snapshots
+    }
+
     pub(super) fn available(&self) -> Option<u32> {
         self.available_many(1)
     }
@@ -219,6 +257,38 @@ impl super::Process32 {
 mod tests {
     use super::*;
     use crate::execution::Permissions;
+
+    #[test]
+    fn snapshots_include_children_in_handle_order_without_desktop_sentinel() {
+        let mut desktop = Desktop::default();
+        desktop.top_levels.insert(
+            0x7500_0008,
+            Window {
+                title: "dialog".into(),
+                ..Window::default()
+            },
+        );
+        desktop.children.insert(
+            0x7500_0004,
+            Window {
+                parent: 0x7500_0008,
+                id: 42,
+                class: 0x80,
+                dialog_units: Some([1, 2, 3, 4]),
+                ..Window::default()
+            },
+        );
+        let snapshots = desktop.snapshots();
+        assert_eq!(snapshots.len(), 2);
+        assert_eq!(snapshots[0].hwnd, 0x7500_0004);
+        assert_eq!(snapshots[0].parent, 0x7500_0008);
+        assert_eq!(snapshots[0].id, 42);
+        assert_eq!(snapshots[0].dialog_units, Some([1, 2, 3, 4]));
+        assert_eq!(snapshots[1].hwnd, 0x7500_0008);
+        desktop.children.clear();
+        assert_eq!(snapshots[0].class, 0x80);
+        assert_eq!(snapshots[1].title, "dialog");
+    }
 
     #[test]
     fn populated_registry_filters_owned_class_and_title_and_excludes_desktop() {
