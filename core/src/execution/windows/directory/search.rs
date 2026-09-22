@@ -126,6 +126,12 @@ impl Directory {
                 continue;
             };
             let name = tail.split(|&b| b == b'\\').next().expect("nonempty tail");
+            if source >= self.declarations.len()
+                && start + name.len() == path.len()
+                && self.files[source - self.declarations.len()].removed
+            {
+                continue;
+            }
             if !matches_name(pattern, name) {
                 continue;
             }

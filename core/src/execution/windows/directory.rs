@@ -23,6 +23,12 @@ pub(super) struct Status {
     pub(super) executable: bool,
 }
 
+pub(super) enum Removal {
+    Removed,
+    Missing,
+    Directory,
+}
+
 #[derive(Clone, Copy)]
 pub(super) enum Call {
     Query,
@@ -157,7 +163,7 @@ impl Directory {
         let file = self
             .files
             .iter()
-            .find(|file| file.path.eq_ignore_ascii_case(&path));
+            .find(|file| !file.removed && file.path.eq_ignore_ascii_case(&path));
         if file.is_none() && !self.exists(&path) {
             return Ok(None);
         }
@@ -173,6 +179,36 @@ impl Directory {
             directory: file.is_none(),
             executable,
         }))
+    }
+
+    pub(super) fn remove_file(
+        &mut self,
+        memory: &GuestMemory,
+        source: u32,
+    ) -> Result<Removal, DispatchError> {
+        let input = paths::read(memory, source)?;
+        let path = match paths::resolve(&self.terminated[..self.terminated.len() - 1], &input) {
+            Ok(path) => path,
+            Err(paths::PathError::Windows(_)) => return Ok(Removal::Missing),
+            Err(paths::PathError::Unsupported) => return Err(DispatchError::Unsupported),
+        };
+        if let Some(file) = self
+            .files
+            .iter_mut()
+            .find(|file| file.path.eq_ignore_ascii_case(&path))
+        {
+            if file.removed || input.last() == Some(&b'\\') {
+                return Ok(Removal::Missing);
+            }
+            // retain path scaffolding and stable indices for directory and search snapshots.
+            file.removed = true;
+            return Ok(Removal::Removed);
+        }
+        Ok(if self.exists(&path) {
+            Removal::Directory
+        } else {
+            Removal::Missing
+        })
     }
 
     pub(super) fn query(

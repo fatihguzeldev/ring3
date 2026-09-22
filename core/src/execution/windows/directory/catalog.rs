@@ -2,7 +2,7 @@ use std::collections::BTreeSet;
 
 use super::{LoadError, parameters, paths};
 
-/// immutable file metadata; no file contents or host filesystem access are implied.
+/// initial file metadata; no file contents or host filesystem access are implied.
 #[derive(Clone, Copy, Debug)]
 pub struct FileMetadata<'a> {
     pub path: &'a [u8],
@@ -12,6 +12,7 @@ pub struct FileMetadata<'a> {
 pub(super) struct File {
     pub(super) path: Box<[u8]>,
     pub(super) size: u64,
+    pub(super) removed: bool,
 }
 
 pub(super) fn prepare(
@@ -62,6 +63,7 @@ pub(super) fn prepare(
         .map(|file| File {
             path: file.path.into(),
             size: file.size,
+            removed: false,
         })
         .collect())
 }

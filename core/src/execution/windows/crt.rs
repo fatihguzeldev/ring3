@@ -57,6 +57,7 @@ pub(super) enum Call {
     CopyString,
     FindCharacter,
     Stat,
+    Remove,
     SeedRandom,
     Random,
     FloatToInteger,
@@ -103,6 +104,7 @@ impl Call {
             0x17c => Some(Self::Lowercase),
             0x180 => Some(Self::ArgcPointer),
             0x184 => Some(Self::ArgvPointer),
+            0x188 => Some(Self::Remove),
             0x13c => Some(Self::SetMbCodePage),
             0x140 => Some(Self::OnExit),
             _ => None,
@@ -122,7 +124,8 @@ impl Call {
             | Self::SeedRandom
             | Self::Lowercase
             | Self::SetMbCodePage
-            | Self::OnExit => 1,
+            | Self::OnExit
+            | Self::Remove => 1,
             Self::ControlFp
             | Self::MbSearchReverse
             | Self::FindCharacter
@@ -165,7 +168,7 @@ impl super::Process32 {
             &mut self.cpu,
             &mut self.memory,
             &mut self.heap,
-            &self.current_directory,
+            &mut self.current_directory,
         )? {
             self.cpu.set_register(Register32::Eax, value);
         }
@@ -181,7 +184,7 @@ impl Crt {
         cpu: &mut Cpu32,
         memory: &mut GuestMemory,
         heap: &mut heap::Heap,
-        directory: &directory::Directory,
+        directory: &mut directory::Directory,
     ) -> Result<Option<u32>, DispatchError> {
         Ok(match call {
             Call::SetAppType => {
@@ -233,6 +236,7 @@ impl Crt {
                 arguments[2],
             )?),
             Call::FindCharacter => Some(strings::find(memory, arguments[0], arguments[1])?),
+            Call::Remove => Some(status::remove(directory, memory, arguments[0])?),
             Call::Stat => Some(status::query(
                 directory,
                 memory,
@@ -319,6 +323,7 @@ pub(super) fn resolve(name: &str) -> Option<u32> {
         "??3@YAXPAX@Z" => Some(API_BASE + 0x148),
         "_errno" => Some(API_BASE + 0x124),
         "_stat" => Some(API_BASE + 0x15c),
+        "remove" => Some(API_BASE + 0x188),
         "srand" => Some(API_BASE + 0x160),
         "rand" => Some(API_BASE + 0x164),
         "_ftol" => Some(API_BASE + 0x168),

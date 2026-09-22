@@ -1,5 +1,19 @@
 use super::{Access, DispatchError, ERRNO, GuestMemory, directory, guest};
 
+pub(super) fn remove(
+    directory: &mut directory::Directory,
+    memory: &mut GuestMemory,
+    source: u32,
+) -> Result<u32, DispatchError> {
+    let error = match directory.remove_file(memory, source)? {
+        directory::Removal::Removed => return Ok(0),
+        directory::Removal::Missing => 2,
+        directory::Removal::Directory => 13,
+    };
+    guest::write_word(memory, ERRNO, error)?;
+    Ok(u32::MAX)
+}
+
 pub(super) fn query(
     directory: &directory::Directory,
     memory: &mut GuestMemory,
