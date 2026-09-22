@@ -1264,21 +1264,23 @@ fn execute_thread_priority() {
 
 fn execute_hook_registration() {
     use ring3_core::execution::{Process32, ProcessStop, Register32, StopReason};
-    let mut process = Process32::load(&hook_executable::pe32(), 32).unwrap();
-    let run = process.run(100);
-    assert_eq!(run.reason, ProcessStop::Stopped(StopReason::Breakpoint));
-    assert_eq!((run.instructions, run.api_calls), (11, 3));
-    assert_eq!(process.cpu.register(Register32::Eax), 0);
-    assert_eq!(process.cpu.register(Register32::Ebx), 0x7400_0004);
-    assert_eq!(process.cpu.register(Register32::Esp), 0x1001_0000);
-    assert_eq!(process.last_error().unwrap(), 1404);
+    for bytes in [hook_executable::pe32(), hook_executable::keyboard()] {
+        let mut process = Process32::load(&bytes, 32).unwrap();
+        let run = process.run(100);
+        assert_eq!(run.reason, ProcessStop::Stopped(StopReason::Breakpoint));
+        assert_eq!((run.instructions, run.api_calls), (11, 3));
+        assert_eq!(process.cpu.register(Register32::Eax), 0);
+        assert_eq!(process.cpu.register(Register32::Ebx), 0x7400_0004);
+        assert_eq!(process.cpu.register(Register32::Esp), 0x1001_0000);
+        assert_eq!(process.last_error().unwrap(), 1404);
+    }
     #[cfg(windows_demo)]
     {
         let mut process =
             Process32::load(include_bytes!("../../target/windows-api/hooks.exe"), 64).unwrap();
         let run = process.run(1000);
         assert_eq!(run.reason, ProcessStop::Exited(42));
-        assert_eq!((run.instructions, run.api_calls), (83, 14));
+        assert_eq!((run.instructions, run.api_calls), (201, 30));
     }
 }
 

@@ -1,6 +1,7 @@
 typedef long (__stdcall *HookProc)(int, unsigned long, long);
 __declspec(dllimport) void *__stdcall SetWindowsHookExA(int, HookProc, void *, unsigned long);
 __declspec(dllimport) int __stdcall UnhookWindowsHookEx(void *);
+__declspec(dllimport) void *__stdcall GetModuleHandleA(const char *);
 __declspec(dllimport) unsigned long __stdcall GetCurrentThreadId(void);
 __declspec(dllimport) void __stdcall SetLastError(unsigned long);
 __declspec(dllimport) unsigned long __stdcall GetLastError(void);
@@ -22,5 +23,17 @@ void entry(void) {
     if (UnhookWindowsHookEx(first) || GetLastError() != 1404) ExitProcess(3);
     if (!UnhookWindowsHookEx(second) || GetLastError() != 1404) ExitProcess(4);
     if (SetWindowsHookExA(-1, 0, 0, thread) || GetLastError() != 1427) ExitProcess(5);
+    void *module = GetModuleHandleA(0);
+    SetLastError(77);
+    void *keyboard = SetWindowsHookExA(13, filter, module, 0);
+    void *another = SetWindowsHookExA(13, filter, 0, 0);
+    void *message = SetWindowsHookExA(-1, filter, 0, thread);
+    if (!keyboard || !another || !message || keyboard == another || keyboard == message ||
+        another == message || delivered || GetLastError() != 77) ExitProcess(6);
+    if (!UnhookWindowsHookEx(another) || !UnhookWindowsHookEx(message) ||
+        !UnhookWindowsHookEx(keyboard) || GetLastError() != 77) ExitProcess(7);
+    if (SetWindowsHookExA(13, filter, module, thread) || GetLastError() != 1429) ExitProcess(8);
+    if (SetWindowsHookExA(13, 0, module, 0) || GetLastError() != 1427) ExitProcess(9);
+    if (UnhookWindowsHookEx(keyboard) || GetLastError() != 1404 || delivered) ExitProcess(10);
     ExitProcess(42);
 }
