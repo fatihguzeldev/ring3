@@ -25,3 +25,7 @@ EXPORTS
     _RegisterClassA@4==RegisterClassA
     _UnregisterClassA@8==UnregisterClassA
     _CallWindowProcA@20==CallWindowProcA
+    _CreateWindowExA@48==CreateWindowExA
+    _DefWindowProcA@16==DefWindowProcA
+    _GetWindowRect@8==GetWindowRect
+    _GetClientRect@8==GetClientRect

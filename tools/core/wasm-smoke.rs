@@ -1228,6 +1228,62 @@ mod window_class_executable;
 #[path = "../../core/tests/support/window_proc_executable.rs"]
 mod window_proc_executable;
 
+#[path = "../../core/tests/support/window_creation_executable.rs"]
+mod window_creation_executable;
+
+fn execute_window_creation() {
+    use ring3_core::execution::{Process32, ProcessStop, Register32, StopReason};
+    let mut final_state = None;
+    for budget in [1, 1000] {
+        let mut process = Process32::load(&window_creation_executable::guest(), 32).unwrap();
+        let mut counts = (0, 0);
+        loop {
+            let run = process.run(budget);
+            counts.0 += run.instructions;
+            counts.1 += run.api_calls;
+            if run.reason != ProcessStop::Stopped(StopReason::InstructionLimit) {
+                assert_eq!(run.reason, ProcessStop::Stopped(StopReason::Breakpoint));
+                break;
+            }
+            assert!(counts.0 + counts.1 < 1000);
+        }
+        assert_eq!(process.cpu.register(Register32::Eax), 1);
+        assert_eq!(process.cpu.register(Register32::Ebx), 0x7500_0004);
+        assert_eq!(process.cpu.register(Register32::Esp), 0x1001_0000);
+        if let Some(expected) = final_state {
+            assert_eq!((process.cpu, counts), expected);
+        }
+        final_state = Some((process.cpu, counts));
+    }
+    #[cfg(windows_demo)]
+    {
+        let mut final_state = None;
+        for budget in [1, 10000] {
+            let mut process = Process32::load(
+                include_bytes!("../../target/windows-api/window-creation.exe"),
+                64,
+            )
+            .unwrap();
+            let mut counts = (0, 0);
+            loop {
+                let run = process.run(budget);
+                counts.0 += run.instructions;
+                counts.1 += run.api_calls;
+                if run.reason != ProcessStop::Stopped(StopReason::InstructionLimit) {
+                    assert_eq!(run.reason, ProcessStop::Exited(42));
+                    break;
+                }
+                assert!(counts.0 + counts.1 < 10000);
+            }
+            assert_eq!(process.last_error().unwrap(), 77);
+            if let Some(expected) = final_state {
+                assert_eq!((process.cpu, counts), expected);
+            }
+            final_state = Some((process.cpu, counts));
+        }
+    }
+}
+
 fn execute_window_procedures() {
     use ring3_core::execution::{Process32, ProcessStop, Register32, StopReason};
     for (bytes, expected, value) in [
@@ -3703,6 +3759,7 @@ pub extern "C" fn run() -> u32 {
     execute_windows_formatting();
     execute_window_classes();
     execute_window_procedures();
+    execute_window_creation();
     execute_desktop_queries();
     execute_x87_data();
     execute_x87_scaling();
