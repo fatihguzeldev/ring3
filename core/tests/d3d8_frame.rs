@@ -106,7 +106,7 @@ fn create_accepts_only_direct3d_8_0_and_8_1_sdk_identities() {
 fn adapter_count_reports_only_the_live_owned_root() {
     let (mut process, root) = root();
     assert_eq!(method(&process, root, 3), 0x7000_0ffc);
-    assert_eq!(method(&process, root, 6), 0x7000_0ffc);
+    assert_eq!(method(&process, root, 7), 0x7000_0ffc);
     let count = method(&process, root, 4);
     assert_eq!(invoke(&mut process, count, &[root]), 1);
     assert_eq!(invoke(&mut process, count, &[root]), 1);
@@ -114,6 +114,20 @@ fn adapter_count_reports_only_the_live_owned_root() {
     let release = method(&process, root, 2);
     assert_eq!(invoke(&mut process, release, &[root]), 0);
     assert_eq!(invoke(&mut process, count, &[root]), 0);
+}
+
+#[test]
+fn adapter_mode_count_reports_only_the_owned_display() {
+    let (mut process, root) = root();
+    let count = method(&process, root, 6);
+    assert_ne!(count, 0x7000_0ffc);
+    assert_eq!(invoke(&mut process, count, &[root, 0]), 1);
+    assert_eq!(invoke(&mut process, count, &[root, 0]), 1);
+    assert_eq!(invoke(&mut process, count, &[root, 1]), 0);
+    assert_eq!(invoke(&mut process, count, &[root + 4, 0]), 0);
+    let release = method(&process, root, 2);
+    assert_eq!(invoke(&mut process, release, &[root]), 0);
+    assert_eq!(invoke(&mut process, count, &[root, 0]), 0);
 }
 
 #[test]
