@@ -231,6 +231,7 @@ impl Cpu32 {
             | Code::Fst_m64fp
             | Code::Fstp_m32fp
             | Code::Fstp_m64fp => self.x87_transfer(instruction, memory)?,
+            Code::Fst_sti | Code::Fstp_sti => self.x87_register_store(instruction)?,
             Code::Fild_m16int | Code::Fild_m32int | Code::Fild_m64int => {
                 self.x87_integer_load(instruction, memory)?;
             }

@@ -46,6 +46,26 @@ impl Stack {
 }
 
 impl Cpu32 {
+    pub(in super::super) fn x87_register_store(
+        &mut self,
+        instruction: &Instruction,
+    ) -> Result<(), StopReason> {
+        self.x87_masked()?;
+        let index = (instruction.op0_register() as usize)
+            .checked_sub(Register::ST0 as usize)
+            .ok_or(StopReason::UnsupportedInstruction)?;
+        if index >= usize::from(self.x87_stack.occupied) {
+            return Err(StopReason::UnsupportedInstruction);
+        }
+        let top = usize::from(self.x87_stack.top);
+        self.x87_stack.values[(top + index) & 7] = self.x87_stack.values[top];
+        self.x87_stack.rounded(false, false);
+        if instruction.code() == Code::Fstp_sti {
+            self.x87_stack.pop();
+        }
+        Ok(())
+    }
+
     pub(in super::super) fn x87_compare(
         &mut self,
         instruction: &Instruction,
