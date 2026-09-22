@@ -33,6 +33,7 @@ pub(super) enum Call {
     AdapterMode,
     CheckDeviceType,
     CheckDeviceFormat,
+    CheckMultiSampleType,
     DeviceCaps,
     CreateDevice,
     Clear,
@@ -61,6 +62,7 @@ impl Call {
             0x2e0 => Self::AdapterMode,
             0x2e4 => Self::CheckDeviceType,
             0x2e8 => Self::CheckDeviceFormat,
+            0x2ec => Self::CheckMultiSampleType,
             _ => return None,
         })
     }
@@ -71,7 +73,7 @@ impl Call {
             Self::Present => 5,
             Self::AdapterIdentifier | Self::AdapterMode | Self::DeviceCaps => 4,
             Self::AdapterModeCount => 2,
-            Self::CheckDeviceType => 6,
+            Self::CheckDeviceType | Self::CheckMultiSampleType => 6,
             _ => 1,
         }
     }
@@ -104,6 +106,7 @@ impl Graphics {
             (ROOT_TABLE, 7, 0x2e0),
             (ROOT_TABLE, 9, 0x2e4),
             (ROOT_TABLE, 10, 0x2e8),
+            (ROOT_TABLE, 11, 0x2ec),
             (ROOT_TABLE, 13, 0x2d8),
             (ROOT_TABLE, 15, 0x40),
             (DEVICE_TABLE, 1, 0x58),
@@ -143,6 +146,7 @@ impl Graphics {
             Call::AdapterMode => return self.adapter_mode(args, memory),
             Call::CheckDeviceType => self.check_device_type(args),
             Call::CheckDeviceFormat => self.check_device_format(args),
+            Call::CheckMultiSampleType => self.check_multisample_type(args),
             Call::DeviceCaps => return self.device_caps(args, memory),
             Call::CreateDevice => return self.create_device(args, memory),
             Call::Clear => return self.clear(args, memory),
@@ -241,6 +245,22 @@ impl Graphics {
             return INVALID_CALL;
         }
         if args[2..] == [1, 22, 1, 1, 22] {
+            0
+        } else {
+            NOT_AVAILABLE
+        }
+    }
+
+    fn check_multisample_type(&self, args: &[u32]) -> u32 {
+        if args[0] != ROOT
+            || self.root_refs == 0
+            || args[1] != 0
+            || !matches!(args[2], 1..=3)
+            || args[5] > 16
+        {
+            return INVALID_CALL;
+        }
+        if args[2] == 1 && args[3] == 22 && args[5] == 0 {
             0
         } else {
             NOT_AVAILABLE
