@@ -108,6 +108,7 @@ enum Api {
     GetCommandLine,
     GetEnvironmentVariable,
     GetStartupInfo,
+    WindowsFormat,
     GetDesktopWindow,
     RegisterUserAtom,
     System(system::Call),
@@ -162,6 +163,7 @@ impl Api {
             0x23c => Some(Self::Directory(directory::Call::FindClose)),
             0x240 => Some(Self::GetEnvironmentVariable),
             0x248 => Some(Self::GetStartupInfo),
+            0x25c => Some(Self::WindowsFormat),
             0x22c => Some(Self::GetCommandLine),
             16 => Some(Self::GetDesktopWindow),
             0x20 => Some(Self::SetErrorMode),
@@ -207,6 +209,7 @@ impl Api {
         } else if module.eq_ignore_ascii_case("user32.dll") {
             match name {
                 "GetDesktopWindow" => 16,
+                "wsprintfA" => 0x25c,
                 "SetWindowsHookExA" => 0x24c,
                 "UnhookWindowsHookEx" => 0x250,
                 "LoadStringA" => 0xec,
@@ -311,6 +314,7 @@ impl Api {
             Self::Directory(call) => call.arguments(),
             Self::Clock(call) => call.arguments(),
             Self::GetEnvironmentVariable => 3,
+            Self::WindowsFormat => 2,
             Self::GetLastError
             | Self::GetCommandLine
             | Self::GetCurrentThread
@@ -337,7 +341,7 @@ impl Api {
 
     fn stack_cleanup(self) -> u32 {
         match self {
-            Self::Crt(_) => 4,
+            Self::Crt(_) | Self::WindowsFormat => 4,
             _ => u32::try_from((self.arguments() + 1) * 4).expect("api frame fits u32"),
         }
     }
@@ -608,6 +612,7 @@ impl Process32 {
             Api::GetCommandLine => self.cpu.set_register(Register32::Eax, self.command_line),
             Api::GetEnvironmentVariable => self.environment_query(arguments)?,
             Api::GetStartupInfo => parameters::startup_info(&mut self.memory, argument)?,
+            Api::WindowsFormat => self.windows_format(arguments, stack)?,
             Api::Synchronization(call) => self.cpu.set_register(
                 Register32::Eax,
                 self.mutexes.dispatch(call, arguments, &mut self.memory)?,

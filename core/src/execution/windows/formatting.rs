@@ -1,7 +1,23 @@
 use super::super::Access;
 use super::{DispatchError, GuestMemory, MemoryError, guest};
 
-const OUTPUT_LIMIT: usize = 65536;
+#[derive(Clone, Copy)]
+struct Limits {
+    output: usize,
+    string: usize,
+    character: bool,
+}
+
+const CRT: Limits = Limits {
+    output: 65536,
+    string: 65536,
+    character: true,
+};
+const WINDOWS: Limits = Limits {
+    output: 1023,
+    string: 1024,
+    character: false,
+};
 
 pub(super) fn write(memory: &mut GuestMemory, arguments: &[u32]) -> Result<u32, DispatchError> {
     let (destination, capacity, format, values) =
@@ -10,7 +26,7 @@ pub(super) fn write(memory: &mut GuestMemory, arguments: &[u32]) -> Result<u32, 
         return Err(DispatchError::Unsupported);
     }
     let format = read_string(memory, format, 4096)?;
-    let mut output = render(memory, &format, values)?;
+    let mut output = render(memory, &format, u64::from(values), CRT)?;
     let length = u32::try_from(output.len()).expect("bounded output fits u32");
     if destination == 0 {
         return Ok(length);
@@ -25,21 +41,48 @@ pub(super) fn write(memory: &mut GuestMemory, arguments: &[u32]) -> Result<u32, 
     Ok(if length > capacity { u32::MAX } else { length })
 }
 
-fn render(memory: &GuestMemory, format: &[u8], values: u32) -> Result<Vec<u8>, DispatchError> {
-    let mut cursor = u64::from(values);
+impl super::Process32 {
+    pub(super) fn windows_format(
+        &mut self,
+        arguments: &[u32],
+        stack: u32,
+    ) -> Result<(), DispatchError> {
+        let destination = arguments[0];
+        if destination == 0 {
+            return Err(DispatchError::Unsupported);
+        }
+        let format = read_string(&self.memory, arguments[1], 4096)?;
+        let mut output = render(&self.memory, &format, u64::from(stack) + 12, WINDOWS)?;
+        let length = u32::try_from(output.len()).expect("bounded output fits u32");
+        output.push(0);
+        guest::check(&self.memory, destination, output.len(), Access::Write)?;
+        self.memory.write(u64::from(destination), &output)?;
+        self.cpu.set_register(super::Register32::Eax, length);
+        Ok(())
+    }
+}
+
+fn render(
+    memory: &GuestMemory,
+    format: &[u8],
+    mut cursor: u64,
+    limits: Limits,
+) -> Result<Vec<u8>, DispatchError> {
     let mut output = Vec::new();
     let mut bytes = format.iter().copied();
     while let Some(byte) = bytes.next() {
         if byte != b'%' {
-            append(&mut output, &[byte])?;
+            append(&mut output, &[byte], limits.output)?;
             continue;
         }
         let conversion = bytes.next().ok_or(DispatchError::Unsupported)?;
         if conversion == b'%' {
-            append(&mut output, b"%")?;
+            append(&mut output, b"%", limits.output)?;
             continue;
         }
-        if !matches!(conversion, b's' | b'c' | b'd' | b'i' | b'u' | b'x' | b'X') {
+        if !matches!(conversion, b's' | b'c' | b'd' | b'i' | b'u' | b'x' | b'X')
+            || (conversion == b'c' && !limits.character)
+        {
             return Err(DispatchError::Unsupported);
         }
         let address = u32::try_from(cursor).map_err(|_| MemoryError::AddressOverflow)?;
@@ -48,7 +91,7 @@ fn render(memory: &GuestMemory, format: &[u8], values: u32) -> Result<Vec<u8>, D
         cursor += 4;
         let value = value[0];
         let text = match conversion {
-            b's' => read_string(memory, value, OUTPUT_LIMIT)?,
+            b's' => read_string(memory, value, limits.string)?,
             b'c' => vec![value.to_le_bytes()[0]],
             b'd' | b'i' => value.cast_signed().to_string().into_bytes(),
             b'u' => value.to_string().into_bytes(),
@@ -56,13 +99,13 @@ fn render(memory: &GuestMemory, format: &[u8], values: u32) -> Result<Vec<u8>, D
             b'X' => format!("{value:X}").into_bytes(),
             _ => unreachable!("conversion was validated"),
         };
-        append(&mut output, &text)?;
+        append(&mut output, &text, limits.output)?;
     }
     Ok(output)
 }
 
-fn append(output: &mut Vec<u8>, bytes: &[u8]) -> Result<(), DispatchError> {
-    if bytes.len() > OUTPUT_LIMIT - output.len() {
+fn append(output: &mut Vec<u8>, bytes: &[u8], limit: usize) -> Result<(), DispatchError> {
+    if bytes.len() > limit - output.len() {
         return Err(DispatchError::Unsupported);
     }
     output.extend_from_slice(bytes);
