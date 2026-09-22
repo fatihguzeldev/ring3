@@ -25,6 +25,7 @@ mod gdi;
 mod guest;
 mod heap;
 mod hooks;
+mod messages;
 mod modules;
 mod parameters;
 mod registry;
@@ -40,6 +41,7 @@ mod user_atoms;
 pub use clock::ClockError;
 pub use d3d8::Frame;
 pub use directory::{FileContents, FileMetadata};
+pub use messages::{PostMessageError, PostedMessage};
 pub use parameters::ProcessOptions;
 
 const API_BASE: u32 = 0x7000_0000;
@@ -67,6 +69,7 @@ pub struct Process32 {
     user_atoms: user_atoms::UserAtoms,
     classes: classes::Classes,
     desktop: desktop::Desktop,
+    messages: messages::Queue,
     cursors: cursors::Cursors,
     heap: heap::Heap,
     critical_sections: critical_sections::CriticalSections,
@@ -598,6 +601,7 @@ impl Process32 {
             user_atoms: user_atoms::UserAtoms::default(),
             classes: classes::Classes::default(),
             desktop: desktop::Desktop::default(),
+            messages: messages::Queue::default(),
             registry: registry::Registry::default(),
             gdi: gdi::Gdi::default(),
             cursors: cursors::Cursors::default(),
@@ -640,6 +644,24 @@ impl Process32 {
     /// takes the latest presented frame; presentation does not accumulate a queue.
     pub fn take_frame(&mut self) -> Option<Frame> {
         self.graphics.take_frame()
+    }
+
+    /// adds one host-provided message to this process's bounded thread queue.
+    ///
+    /// # errors
+    /// rejects an exited process, invalid window or message id, or full queue.
+    #[expect(clippy::missing_errors_doc, reason = "project headings are lower case")]
+    pub fn post_message(&mut self, message: PostedMessage) -> Result<(), PostMessageError> {
+        if self.exit_code.is_some() {
+            return Err(PostMessageError::Exited);
+        }
+        if message.message > u16::MAX.into() || (message.message == 0x12 && message.hwnd != 0) {
+            return Err(PostMessageError::InvalidMessage);
+        }
+        if message.hwnd != 0 && self.desktop.window(message.hwnd).is_none() {
+            return Err(PostMessageError::InvalidWindow);
+        }
+        self.messages.post(message)
     }
 
     /// each guest execution step and dispatched api call costs one budget unit.
@@ -795,7 +817,7 @@ impl Process32 {
         Ok(())
     }
 
-    fn peek_empty_message(&mut self, args: &[u32]) -> Result<(), DispatchError> {
+    fn peek_message(&mut self, args: &[u32]) -> Result<(), DispatchError> {
         if (!matches!(args[1], 0 | u32::MAX) && self.desktop.window(args[1]).is_none())
             || args[2] > u16::MAX.into()
             || args[3] > u16::MAX.into()
@@ -803,20 +825,41 @@ impl Process32 {
         {
             return Err(DispatchError::Unsupported);
         }
-        guest::check(&self.memory, args[0], 32, Access::Write)?;
-        self.cpu.set_register(Register32::Eax, 0);
-        Ok(())
+        self.receive_message(&args[..4], args[4] & 1 != 0, false)
     }
 
-    fn wait_for_message(&self, args: &[u32]) -> Result<(), DispatchError> {
+    fn get_message(&mut self, args: &[u32]) -> Result<(), DispatchError> {
         if (!matches!(args[1], 0 | u32::MAX) && self.desktop.window(args[1]).is_none())
             || args[2] > u16::MAX.into()
             || args[3] > u16::MAX.into()
         {
             return Err(DispatchError::Unsupported);
         }
+        self.receive_message(args, true, true)
+    }
+
+    fn receive_message(
+        &mut self,
+        args: &[u32],
+        remove: bool,
+        wait: bool,
+    ) -> Result<(), DispatchError> {
         guest::check(&self.memory, args[0], 32, Access::Write)?;
-        Err(DispatchError::WaitingForMessage)
+        let Some((index, message)) = self.messages.find(args[1], args[2], args[3], &self.desktop)
+        else {
+            if wait {
+                return Err(DispatchError::WaitingForMessage);
+            }
+            self.cpu.set_register(Register32::Eax, 0);
+            return Ok(());
+        };
+        self.memory.write(u64::from(args[0]), &message.bytes())?;
+        if remove {
+            self.messages.remove(index);
+        }
+        self.cpu
+            .set_register(Register32::Eax, u32::from(!wait || message.message != 0x12));
+        Ok(())
     }
 
     fn show_window_normal(&mut self, args: &[u32]) -> Result<(), DispatchError> {
@@ -852,8 +895,8 @@ impl Process32 {
             Api::GetEnvironmentVariable => self.environment_query(args)?,
             Api::GetStartupInfo => parameters::startup_info(&mut self.memory, argument)?,
             Api::WindowsFormat => self.windows_format(args, stack)?,
-            Api::PeekMessage => self.peek_empty_message(args)?,
-            Api::GetMessage => self.wait_for_message(args)?,
+            Api::PeekMessage => self.peek_message(args)?,
+            Api::GetMessage => self.get_message(args)?,
             Api::ShowWindow => self.show_window_normal(args)?,
             Api::UpdateWindow => self.update_window(argument)?,
             Api::Class(call) => self.window_class(call, args)?,
