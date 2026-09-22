@@ -153,11 +153,7 @@ impl Cpu32 {
         instruction: &Instruction,
         memory: &mut GuestMemory,
     ) -> Result<bool, StopReason> {
-        if instruction.has_lock_prefix()
-            || ((instruction.has_rep_prefix() || instruction.has_repne_prefix())
-                && !strings::supports_repeat(instruction))
-            || (instruction.has_segment_prefix() && instruction.segment_prefix() != Register::FS)
-        {
+        if has_unsupported_prefix(instruction) {
             return Err(StopReason::UnsupportedInstruction);
         }
         let mut next = instruction.next_ip32();
@@ -201,10 +197,7 @@ impl Cpu32 {
                 self.multiply_wide(instruction, memory)?;
             }
             Code::Div_rm8 | Code::Div_rm16 | Code::Div_rm32 => self.divide(instruction, memory)?,
-            Code::Cdq => self.set_register(
-                Register32::Edx,
-                (self.register(Register32::Eax).cast_signed() >> 31).cast_unsigned(),
-            ),
+            Code::Cdq => self.sign_extend_accumulator(),
             Code::Inc_rm8
             | Code::Inc_rm16
             | Code::Inc_rm32
@@ -257,6 +250,11 @@ impl Cpu32 {
         }
         self.eip = next;
         Ok(instruction.code() == Code::Int3)
+    }
+
+    fn sign_extend_accumulator(&mut self) {
+        let high = (self.register(Register32::Eax).cast_signed() >> 31).cast_unsigned();
+        self.set_register(Register32::Edx, high);
     }
 
     fn binary(
@@ -403,6 +401,13 @@ fn result_flags(result: u32, width: operands::Width) -> u32 {
     (u32::from((result & 0xff).count_ones().is_multiple_of(2)) << 2)
         | (u32::from(result == 0) << 6)
         | (u32::from(result & width.sign_bit() != 0) << 7)
+}
+
+fn has_unsupported_prefix(instruction: &Instruction) -> bool {
+    instruction.has_lock_prefix()
+        || ((instruction.has_rep_prefix() || instruction.has_repne_prefix())
+            && !strings::supports_repeat(instruction))
+        || (instruction.has_segment_prefix() && instruction.segment_prefix() != Register::FS)
 }
 
 fn register32(register: Register) -> Result<Register32, StopReason> {
