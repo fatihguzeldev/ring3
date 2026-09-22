@@ -202,3 +202,198 @@ fn failure(memory: &mut GuestMemory, error: u32) -> Result<u32, DispatchError> {
     thread::set_last_error(memory, error)?;
     Ok(0)
 }
+
+#[cfg(test)]
+#[path = "../../../../tests/support/icon_executable.rs"]
+mod icon_executable;
+#[cfg(test)]
+#[path = "../../../../tests/support/imported_executable.rs"]
+mod imported_executable;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::execution::{Permissions, Process32};
+
+    #[test]
+    fn selected_palette_and_both_masks_are_owned_after_guest_bytes_change() {
+        let bytes = icon_executable::guest();
+        let mut p = Process32::load(&bytes, 32).unwrap();
+        assert!(matches!(
+            p.resources
+                .load_icon(&[0x0040_0000, 7], &p.modules, &mut p.memory),
+            Ok(FIRST_HANDLE)
+        ));
+        let selected = &bytes[0xab8..0x1360];
+        assert_eq!(p.resources.icons.loaded[&FIRST_HANDLE].1, selected);
+        p.memory
+            .write(icon_executable::SECOND_IMAGE, &vec![0xff; selected.len()])
+            .unwrap();
+        assert!(matches!(
+            p.resources
+                .load_icon(&[0x0040_0000, 7], &p.modules, &mut p.memory),
+            Ok(FIRST_HANDLE)
+        ));
+        assert_eq!(p.resources.icons.loaded[&FIRST_HANDLE].1, selected);
+        assert_eq!(p.resources.icons.loaded.len(), 1);
+    }
+
+    #[test]
+    fn group_selection_keeps_first_tie_and_does_not_hide_unsupported_best_depth() {
+        let mut bytes = icon_executable::guest()[0x1360..0x1382].to_vec();
+        assert!(matches!(select(&bytes), Ok(Entry { bits: 8, id: 2, .. })));
+        bytes[26..28].copy_from_slice(&16_u16.to_le_bytes());
+        assert!(matches!(
+            select(&bytes),
+            Ok(Entry {
+                bits: 16,
+                id: 2,
+                ..
+            })
+        ));
+        bytes[26..28].copy_from_slice(&4_u16.to_le_bytes());
+        assert!(matches!(select(&bytes), Ok(Entry { bits: 4, id: 1, .. })));
+        bytes[6..8].copy_from_slice(&[16, 16]);
+        assert!(matches!(select(&bytes), Ok(Entry { id: 2, .. })));
+        bytes[20..22].copy_from_slice(&[48, 48]);
+        assert!(matches!(select(&bytes), Err(DispatchError::Unsupported)));
+        for size in [0, 5, 6, 19, 33] {
+            assert!(matches!(
+                select(&bytes[..size]),
+                Err(DispatchError::Unsupported)
+            ));
+        }
+    }
+
+    fn dib(bits: u16, colors: u32) -> Vec<u8> {
+        let mut bytes = vec![0; 40 + colors as usize * 4 + 128 * usize::from(bits) + 128];
+        for (offset, value) in [(0, 40), (4, 32), (8, 64), (32, colors)] {
+            icon_executable::put(&mut bytes, offset, value);
+        }
+        bytes[12..14].copy_from_slice(&1_u16.to_le_bytes());
+        bytes[14..16].copy_from_slice(&bits.to_le_bytes());
+        bytes
+    }
+
+    #[test]
+    fn dib_extent_and_palette_indices_are_validated_independently_of_declared_size() {
+        for (bits, colors) in [(1, 2), (4, 16), (8, 256), (24, 0), (32, 0)] {
+            let mut bytes = dib(bits, colors);
+            for declared in [0, 128 * u32::from(bits), 128 * u32::from(bits) + 128] {
+                icon_executable::put(&mut bytes, 20, declared);
+                assert!(validate(&bytes, bits).is_ok());
+            }
+            bytes.pop();
+            assert!(matches!(
+                validate(&bytes, bits),
+                Err(DispatchError::Unsupported)
+            ));
+        }
+        for bits in [1, 4, 8] {
+            let mut bytes = dib(bits, 1);
+            assert!(validate(&bytes, bits).is_ok());
+            bytes[44] = 1 << (8 - bits);
+            assert!(matches!(
+                validate(&bytes, bits),
+                Err(DispatchError::Unsupported)
+            ));
+        }
+        let good = dib(8, 256);
+        for (offset, value) in [
+            (0, 108),
+            (4, 0xffff_ffff),
+            (8, 32),
+            (12, 0x80002),
+            (16, 3),
+            (20, 1),
+            (32, 257),
+        ] {
+            let mut bytes = good.clone();
+            icon_executable::put(&mut bytes, offset, value);
+            assert!(matches!(
+                validate(&bytes, 8),
+                Err(DispatchError::Unsupported)
+            ));
+        }
+    }
+
+    #[test]
+    fn quota_and_handle_exhaustion_do_not_mutate_state_and_allow_cached_loads() {
+        for quota in [false, true] {
+            let mut p = Process32::load(&icon_executable::guest(), 32).unwrap();
+            assert!(matches!(
+                p.resources
+                    .load_icon(&[0x0040_0000, 7], &p.modules, &mut p.memory),
+                Ok(FIRST_HANDLE)
+            ));
+            let cached = p.resources.icons.loaded.remove(&FIRST_HANDLE).unwrap();
+            if quota {
+                for n in 0..MAX_ICONS {
+                    p.resources
+                        .icons
+                        .loaded
+                        .insert(u32::try_from(n).unwrap(), (0, vec![]));
+                }
+            } else {
+                p.resources.icons.next = LAST_HANDLE + 4;
+            }
+            let next = p.resources.icons.next;
+            let len = p.resources.icons.loaded.len();
+            p.memory
+                .protect(0x7ffd_e000, 4096, Permissions::NONE)
+                .unwrap();
+            assert!(matches!(
+                p.resources
+                    .load_icon(&[0x0040_0000, 7], &p.modules, &mut p.memory),
+                Err(DispatchError::Memory(_))
+            ));
+            assert_eq!(
+                (p.resources.icons.next, p.resources.icons.loaded.len()),
+                (next, len)
+            );
+            p.memory
+                .protect(0x7ffd_e000, 4096, Permissions::READ_WRITE)
+                .unwrap();
+            assert!(matches!(
+                p.resources
+                    .load_icon(&[0x0040_0000, 7], &p.modules, &mut p.memory),
+                Ok(0)
+            ));
+            assert_eq!(p.last_error().unwrap(), 8);
+            p.resources.icons.loaded.insert(FIRST_HANDLE, cached);
+            assert!(matches!(
+                p.resources
+                    .load_icon(&[0x0040_0000, 7], &p.modules, &mut p.memory),
+                Ok(FIRST_HANDLE)
+            ));
+        }
+    }
+
+    #[test]
+    fn resource_copy_checks_size_address_and_full_span_before_allocating() {
+        let mut memory = GuestMemory::new(1);
+        memory.map_zeroed(0x1000, 4096, Permissions::READ).unwrap();
+        let mut resource = Resource {
+            info: 1,
+            base: 0x1000,
+            data: 4092,
+            size: 8,
+        };
+        assert!(matches!(
+            resource.bytes(&memory, MAX_IMAGE),
+            Err(DispatchError::Memory(_))
+        ));
+        resource.base = u32::MAX;
+        assert!(matches!(
+            resource.bytes(&memory, MAX_IMAGE),
+            Err(DispatchError::Memory(MemoryError::AddressOverflow))
+        ));
+        for size in [0, 4265, u32::MAX] {
+            resource.size = size;
+            assert!(matches!(
+                resource.bytes(&memory, MAX_IMAGE),
+                Err(DispatchError::Unsupported)
+            ));
+        }
+    }
+}
