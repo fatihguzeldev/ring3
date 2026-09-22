@@ -37,11 +37,13 @@ pub(super) enum Call {
     FindNext,
     FindClose,
     Attributes,
+    ShortPath,
 }
 
 impl Call {
     pub(super) fn arguments(self) -> usize {
         match self {
+            Self::ShortPath => 3,
             Self::Query | Self::FindFirst | Self::FindNext => 2,
             Self::Change | Self::FindClose | Self::Attributes => 1,
         }
@@ -72,6 +74,12 @@ impl Process32 {
             Call::Attributes => self
                 .current_directory
                 .attributes(arguments[0], &mut self.memory)?,
+            Call::ShortPath => self.current_directory.short_path(
+                arguments[0],
+                arguments[1],
+                arguments[2],
+                &mut self.memory,
+            )?,
         };
         self.cpu.set_register(Register32::Eax, result);
         Ok(())
@@ -149,10 +157,18 @@ impl Directory {
 
     fn attributes(&self, source: u32, memory: &mut GuestMemory) -> Result<u32, DispatchError> {
         let input = paths::read(memory, source)?;
+        self.path_attributes(&input, memory)
+    }
+
+    fn path_attributes(
+        &self,
+        input: &[u8],
+        memory: &mut GuestMemory,
+    ) -> Result<u32, DispatchError> {
         if input.len() >= 260 {
             return Err(DispatchError::Unsupported);
         }
-        let path = match paths::resolve(&self.terminated[..self.terminated.len() - 1], &input) {
+        let path = match paths::resolve(&self.terminated[..self.terminated.len() - 1], input) {
             Ok(path) => path,
             Err(paths::PathError::Unsupported) => return Err(DispatchError::Unsupported),
             Err(paths::PathError::Windows(error)) => {
@@ -185,6 +201,30 @@ impl Directory {
             3
         };
         failed(memory, error).map(|_| u32::MAX)
+    }
+
+    fn short_path(
+        &self,
+        source: u32,
+        output: u32,
+        capacity: u32,
+        memory: &mut GuestMemory,
+    ) -> Result<u32, DispatchError> {
+        let mut input = paths::read(memory, source)?;
+        if input.is_empty() {
+            return failed(memory, 161);
+        }
+        if self.path_attributes(&input, memory)? == u32::MAX {
+            return Ok(0);
+        }
+        let required = u32::try_from(input.len() + 1).expect("bounded path");
+        if capacity < required {
+            return Ok(required);
+        }
+        input.push(0);
+        guest::check(memory, output, input.len(), Access::Write)?;
+        memory.write(u64::from(output), &input)?;
+        Ok(required - 1)
     }
 
     pub(super) fn legacy_status(
