@@ -1,6 +1,6 @@
 use super::{
     Cpu32, DispatchError, GuestMemory, MemoryError, Process32, Register32, creation, desktop,
-    guest, thread,
+    guest, modules, thread,
 };
 
 pub(super) const RETURN: u32 = 0x7000_0ff8;
@@ -26,6 +26,7 @@ impl Process32 {
                 cleanup: 20,
                 creation: None,
                 cbt_hook: None,
+                module: None,
             },
             window.procedure,
             args,
@@ -46,6 +47,7 @@ pub(super) struct Frame {
     pub(super) cleanup: u32,
     pub(super) creation: Option<creation::Pending>,
     pub(super) cbt_hook: Option<u32>,
+    pub(super) module: Option<modules::Pending>,
 }
 
 impl Callbacks {
@@ -65,6 +67,7 @@ impl Callbacks {
                 cleanup: 24,
                 creation: None,
                 cbt_hook: None,
+                module: None,
             },
             arguments[0],
             &arguments[1..],

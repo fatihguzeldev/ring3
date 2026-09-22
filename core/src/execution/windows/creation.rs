@@ -141,6 +141,7 @@ impl Process32 {
             cleanup: 52,
             creation: Some(pending),
             cbt_hook: hook.map(|(handle, _)| handle),
+            module: None,
         };
         let style = if hook.is_some() {
             args[3]
@@ -184,6 +185,17 @@ impl Process32 {
 
     pub(super) fn finish_callback(&mut self) -> Result<(), DispatchError> {
         let frame = self.callbacks.current(&self.cpu)?;
+        if let Some(pending) = frame.module {
+            let success = self.cpu.register(Register32::Eax) != 0;
+            if !success {
+                thread::set_last_error(&mut self.memory, 1114)?;
+            }
+            self.callbacks.finish(&mut self.cpu, &self.memory)?;
+            self.modules.finish(pending, success);
+            self.cpu
+                .set_register(Register32::Eax, if success { pending.handle } else { 0 });
+            return Ok(());
+        }
         let Some(pending) = frame.creation else {
             return self.callbacks.finish(&mut self.cpu, &self.memory);
         };

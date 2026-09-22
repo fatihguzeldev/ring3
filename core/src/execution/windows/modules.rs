@@ -48,16 +48,25 @@ struct Module {
 
 enum State {
     Ready,
-    Deferred {
-        #[expect(dead_code, reason = "activation follows the input contract")]
-        entry: Option<u32>,
-    },
+    Deferred { entry: Option<u32> },
+    Initializing { entry: u32 },
 }
 
 impl Module {
     fn visible(&self) -> bool {
-        matches!(self.state, State::Ready)
+        matches!(self.state, State::Ready | State::Initializing { .. })
     }
+}
+
+#[derive(Clone, Copy)]
+pub(super) struct Pending {
+    pub(super) handle: u32,
+    pub(super) entry: u32,
+}
+
+pub(super) enum Load {
+    Complete(u32),
+    Initialize(Pending),
 }
 
 pub(super) struct Modules {
@@ -67,6 +76,90 @@ pub(super) struct Modules {
 }
 
 impl Modules {
+    pub(super) fn load(
+        &mut self,
+        argument: u32,
+        initialized: bool,
+        memory: &mut GuestMemory,
+    ) -> Result<Load, DispatchError> {
+        let name = read_name(memory, argument)?;
+        let absolute = name.as_bytes().get(1) == Some(&b':');
+        if absolute && matches_path(&self.program_path, &name) {
+            return Err(DispatchError::Unsupported);
+        }
+        let Some(module) = self.resident.iter_mut().find(|module| {
+            if absolute {
+                matches_path(&module.path, &name)
+            } else {
+                module.name.eq_ignore_ascii_case(&name)
+            }
+        }) else {
+            thread::set_last_error(memory, 126)?;
+            return Ok(Load::Complete(0));
+        };
+        match module.state {
+            State::Ready => {
+                if !module.builtin && !initialized {
+                    return Err(DispatchError::Unsupported);
+                }
+                module.references = module
+                    .references
+                    .checked_add(1)
+                    .ok_or(DispatchError::Unsupported)?;
+                Ok(Load::Complete(module.handle))
+            }
+            State::Deferred { entry: None } if initialized => {
+                module.state = State::Ready;
+                module.references = 1;
+                Ok(Load::Complete(module.handle))
+            }
+            State::Deferred { entry: Some(entry) } if initialized => {
+                Ok(Load::Initialize(Pending {
+                    handle: module.handle,
+                    entry,
+                }))
+            }
+            State::Deferred { .. } | State::Initializing { .. } => Err(DispatchError::Unsupported),
+        }
+    }
+
+    pub(super) fn start(&mut self, pending: Pending) {
+        let module = self
+            .resident
+            .iter_mut()
+            .find(|module| module.handle == pending.handle)
+            .expect("prepared deferred module is retained");
+        debug_assert!(matches!(
+            module.state,
+            State::Deferred {
+                entry: Some(entry)
+            } if entry == pending.entry
+        ));
+        module.state = State::Initializing {
+            entry: pending.entry,
+        };
+    }
+
+    pub(super) fn finish(&mut self, pending: Pending, success: bool) {
+        let module = self
+            .resident
+            .iter_mut()
+            .find(|module| module.handle == pending.handle)
+            .expect("initializing module is retained");
+        debug_assert!(matches!(
+            module.state,
+            State::Initializing { entry } if entry == pending.entry
+        ));
+        if success {
+            module.state = State::Ready;
+            module.references = 1;
+        } else {
+            module.state = State::Deferred {
+                entry: Some(pending.entry),
+            };
+        }
+    }
+
     pub(super) fn contains(&self, handle: u32) -> bool {
         handle == self.program
             || self
@@ -149,6 +242,12 @@ impl Modules {
         initialized: bool,
         memory: &mut GuestMemory,
     ) -> Result<u32, DispatchError> {
+        if matches!(call, Call::Load) {
+            return match self.load(arguments[0], initialized, memory)? {
+                Load::Complete(value) => Ok(value),
+                Load::Initialize(_) => Err(DispatchError::Unsupported),
+            };
+        }
         if matches!(call, Call::Procedure) {
             return self.procedure(arguments[0], arguments[1], memory);
         }
@@ -180,6 +279,9 @@ impl Modules {
                 thread::set_last_error(memory, 6)?;
                 return Ok(0);
             };
+            if matches!(module.state, State::Initializing { .. }) {
+                return Err(DispatchError::Unsupported);
+            }
             if module.references == 1 {
                 // the final release requires detach/unload, which is not implemented.
                 return Err(DispatchError::Unsupported);
@@ -193,11 +295,10 @@ impl Modules {
         let name = read_name(memory, argument)?;
         let absolute = name.as_bytes().get(1) == Some(&b':');
         if absolute && matches_path(&self.program_path, &name) {
-            if matches!(call, Call::Load)
-                || self
-                    .resident
-                    .iter()
-                    .any(|module| matches_path(&module.path, &name))
+            if self
+                .resident
+                .iter()
+                .any(|module| matches_path(&module.path, &name))
             {
                 return Err(DispatchError::Unsupported);
             }
@@ -216,15 +317,6 @@ impl Modules {
             thread::set_last_error(memory, 126)?;
             return Ok(0);
         };
-        if matches!(call, Call::Load) {
-            if !module.builtin && !initialized {
-                return Err(DispatchError::Unsupported);
-            }
-            module.references = module
-                .references
-                .checked_add(1)
-                .ok_or(DispatchError::Unsupported)?;
-        }
         Ok(module.handle)
     }
 
@@ -379,6 +471,8 @@ mod tests {
                         base: 0x5001_0000,
                     },
                 ],
+                2,
+                &[],
             )
         };
         let mut modules = create();
@@ -420,12 +514,26 @@ mod tests {
             .map_zeroed(0x1000, PAGE_SIZE, Permissions::READ_WRITE)
             .unwrap();
         memory.write(0x1000, b"kernel32\0").unwrap();
-        let mut modules = Modules::new(0x0040_0000, b"C:\\program.exe", Vec::new());
+        let mut modules = Modules::new(0x0040_0000, b"C:\\program.exe", Vec::new(), 0, &[]);
         modules.resident[0].references = u32::MAX;
         assert!(matches!(
             modules.dispatch(Call::Load, &[0x1000], true, &mut memory),
             Err(DispatchError::Unsupported)
         ));
         assert_eq!(modules.resident[0].references, u32::MAX);
+    }
+
+    #[test]
+    fn initializing_module_cannot_release_its_unpublished_reference() {
+        let mut memory = GuestMemory::new(1);
+        let mut modules = Modules::new(0x0040_0000, b"C:\\program.exe", Vec::new(), 0, &[]);
+        modules.resident[0].state = State::Initializing { entry: 1 };
+        modules.resident[0].references = 0;
+        let handle = modules.resident[0].handle;
+        assert!(matches!(
+            modules.dispatch(Call::Free, &[handle], true, &mut memory),
+            Err(DispatchError::Unsupported)
+        ));
+        assert_eq!(modules.resident[0].references, 0);
     }
 }

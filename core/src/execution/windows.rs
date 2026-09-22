@@ -710,6 +710,7 @@ impl Process32 {
             Api::SendMessage => self.send_message(&frame[1..words])?,
             Api::CallNextHook => self.call_next_hook(&frame[1..words])?,
             Api::Window(creation::Call::Create) => self.create_window(&frame[1..words])?,
+            Api::Module(modules::Call::Load) => self.load_module(&frame[1..words])?,
             _ => {
                 self.invoke(api, &frame[1..words], stack)?;
                 false
@@ -724,6 +725,35 @@ impl Process32 {
             .set_register(Register32::Esp, stack.wrapping_add(api.stack_cleanup()));
         self.cpu.eip = frame[0];
         Ok(())
+    }
+
+    fn load_module(&mut self, args: &[u32]) -> Result<bool, DispatchError> {
+        let initialized = self.startup.is_complete();
+        match self.modules.load(args[0], initialized, &mut self.memory)? {
+            modules::Load::Complete(value) => {
+                self.cpu.set_register(Register32::Eax, value);
+                Ok(false)
+            }
+            modules::Load::Initialize(pending) => {
+                let stack = self.cpu.register(Register32::Esp);
+                self.callbacks.enter(
+                    &mut self.cpu,
+                    &mut self.memory,
+                    callbacks::Frame {
+                        stack,
+                        caller: stack,
+                        cleanup: 8,
+                        creation: None,
+                        cbt_hook: None,
+                        module: Some(pending),
+                    },
+                    pending.entry,
+                    &[pending.handle, 1, 0],
+                )?;
+                self.modules.start(pending);
+                Ok(true)
+            }
+        }
     }
 
     fn set_error_mode(&mut self, argument: u32) -> Result<(), DispatchError> {

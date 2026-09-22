@@ -124,6 +124,7 @@ impl Process32 {
                 cleanup: 20,
                 creation: None,
                 cbt_hook: Some(handle),
+                module: None,
             },
             procedure,
             &args[1..],
@@ -143,7 +144,7 @@ mod tests {
 
     #[test]
     fn callbacks_retain_reverse_registration_order_and_handles_never_wrap() {
-        let modules = Modules::new(0x0040_0000, b"C:\\program.exe", Vec::new());
+        let modules = Modules::new(0x0040_0000, b"C:\\program.exe", Vec::new(), 0, &[]);
         let mut memory = GuestMemory::new(1);
         thread::initialize(&mut memory, 0, 0).unwrap();
         let mut hooks = Hooks {
@@ -186,7 +187,7 @@ mod tests {
 
     #[test]
     fn hook_kinds_keep_separate_reverse_ordered_callbacks() {
-        let modules = Modules::new(0x0040_0000, b"C:\\program.exe", Vec::new());
+        let modules = Modules::new(0x0040_0000, b"C:\\program.exe", Vec::new(), 0, &[]);
         let mut memory = GuestMemory::new(1);
         thread::initialize(&mut memory, 0, 0).unwrap();
         let mut hooks = Hooks::default();
