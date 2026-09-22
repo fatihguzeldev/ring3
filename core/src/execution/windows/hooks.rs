@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use super::{DispatchError, GuestMemory, thread};
+use super::{DispatchError, GuestMemory, modules::Modules, thread};
 
 const MAX_HOOKS: usize = 4096;
 const FIRST_HANDLE: u32 = 0x7400_0004;
@@ -29,9 +29,15 @@ impl Call {
     }
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum Kind {
+    MessageFilter,
+    LowLevelKeyboard,
+}
+
 pub(super) struct Hooks {
     // monotonic handles retain registration order; callbacks run only on delivery.
-    callbacks: BTreeMap<u32, u32>,
+    callbacks: BTreeMap<u32, (Kind, u32)>,
     next: u32,
 }
 
@@ -49,6 +55,7 @@ impl Hooks {
         &mut self,
         call: Call,
         arguments: &[u32],
+        modules: &Modules,
         memory: &mut GuestMemory,
     ) -> Result<u32, DispatchError> {
         if matches!(call, Call::Remove) {
@@ -58,17 +65,24 @@ impl Hooks {
                 failure(memory, 1404)
             };
         }
-        if arguments[0] != u32::MAX || arguments[2] != 0 || arguments[3] != thread::CURRENT_ID {
-            return Err(DispatchError::Unsupported);
-        }
+        let kind = match arguments[0] {
+            u32::MAX if arguments[2] == 0 && arguments[3] == thread::CURRENT_ID => {
+                Kind::MessageFilter
+            }
+            13 if arguments[2] == 0 || modules.contains(arguments[2]) => Kind::LowLevelKeyboard,
+            _ => return Err(DispatchError::Unsupported),
+        };
         if arguments[1] == 0 {
             return failure(memory, 1427);
+        }
+        if kind == Kind::LowLevelKeyboard && arguments[3] != 0 {
+            return failure(memory, 1429);
         }
         if self.callbacks.len() == MAX_HOOKS || self.next > LAST_HANDLE {
             return failure(memory, 8);
         }
         let handle = self.next;
-        self.callbacks.insert(handle, arguments[1]);
+        self.callbacks.insert(handle, (kind, arguments[1]));
         self.next += 4;
         Ok(handle)
     }
@@ -85,6 +99,7 @@ mod tests {
 
     #[test]
     fn callbacks_retain_reverse_registration_order_and_handles_never_wrap() {
+        let modules = Modules::new(0x0040_0000, b"C:\\program.exe", Vec::new());
         let mut memory = GuestMemory::new(1);
         thread::initialize(&mut memory, 0, 0).unwrap();
         let mut hooks = Hooks {
@@ -94,7 +109,12 @@ mod tests {
         for callback in [0x0040_1234, 0x3000_5678] {
             assert!(
                 hooks
-                    .dispatch(Call::Install, &[u32::MAX, callback, 0, 1], &mut memory)
+                    .dispatch(
+                        Call::Install,
+                        &[u32::MAX, callback, 0, 1],
+                        &modules,
+                        &mut memory
+                    )
                     .is_ok()
             );
         }
@@ -103,20 +123,61 @@ mod tests {
                 .callbacks
                 .iter()
                 .rev()
-                .map(|(&h, &p)| (h, p))
+                .map(|(&h, &(_, p))| (h, p))
                 .collect::<Vec<_>>(),
             [(LAST_HANDLE, 0x3000_5678), (LAST_HANDLE - 4, 0x0040_1234)]
         );
         assert!(matches!(
-            hooks.dispatch(Call::Remove, &[LAST_HANDLE], &mut memory),
+            hooks.dispatch(Call::Remove, &[LAST_HANDLE], &modules, &mut memory),
             Ok(1)
         ));
         assert!(matches!(
-            hooks.dispatch(Call::Install, &[u32::MAX, 1, 0, 1], &mut memory),
+            hooks.dispatch(Call::Install, &[u32::MAX, 1, 0, 1], &modules, &mut memory),
             Ok(0)
         ));
         assert_eq!(thread::last_error(&memory).unwrap(), 8);
         assert_eq!(hooks.next, LAST_HANDLE + 4);
         assert_eq!(hooks.callbacks.len(), 1);
+    }
+
+    #[test]
+    fn hook_kinds_keep_separate_reverse_ordered_callbacks() {
+        let modules = Modules::new(0x0040_0000, b"C:\\program.exe", Vec::new());
+        let mut memory = GuestMemory::new(1);
+        thread::initialize(&mut memory, 0, 0).unwrap();
+        let mut hooks = Hooks::default();
+        for args in [
+            [u32::MAX, 10, 0, 1],
+            [13, 20, 0, 0],
+            [u32::MAX, 30, 0, 1],
+            [13, 40, 0x0040_0000, 0],
+        ] {
+            assert!(
+                hooks
+                    .dispatch(Call::Install, &args, &modules, &mut memory)
+                    .is_ok()
+            );
+        }
+        for (kind, expected) in [
+            (Kind::MessageFilter, [30, 10]),
+            (Kind::LowLevelKeyboard, [40, 20]),
+        ] {
+            let callbacks: Vec<_> = hooks
+                .callbacks
+                .values()
+                .rev()
+                .filter_map(|&(stored, callback)| (stored == kind).then_some(callback))
+                .collect();
+            assert_eq!(callbacks, expected);
+        }
+        assert!(matches!(
+            hooks.dispatch(Call::Remove, &[FIRST_HANDLE + 4], &modules, &mut memory),
+            Ok(1)
+        ));
+        assert_eq!(
+            hooks.callbacks[&(FIRST_HANDLE + 12)],
+            (Kind::LowLevelKeyboard, 40)
+        );
+        assert_eq!(hooks.callbacks[&FIRST_HANDLE], (Kind::MessageFilter, 10));
     }
 }

@@ -704,7 +704,8 @@ impl Process32 {
             ),
             Api::Hook(call) => self.cpu.set_register(
                 Register32::Eax,
-                self.hooks.dispatch(call, arguments, &mut self.memory)?,
+                self.hooks
+                    .dispatch(call, arguments, &self.modules, &mut self.memory)?,
             ),
             Api::Cursor(call) => self.cpu.set_register(
                 Register32::Eax,
