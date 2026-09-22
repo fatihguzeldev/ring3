@@ -18,7 +18,7 @@ object *device;
 int _fltused = 0;
 
 void entry(void) {
-    object *root = Direct3DCreate8(220);
+    object *root = Direct3DCreate8(120);
     if (root == 0) ExitProcess(1);
     u32 desktop = GetDesktopWindow();
     presentation[6] = desktop;
