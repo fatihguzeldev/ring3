@@ -26,6 +26,7 @@ typedef struct {
 } adapter_identifier;
 #pragma pack(pop)
 typedef result (__stdcall *get_adapter_identifier)(object *, u32, u32, adapter_identifier *);
+typedef result (__stdcall *get_device_caps)(object *, u32, u32, u32 *);
 
 __declspec(dllimport) object *__stdcall Direct3DCreate8(u32);
 __declspec(dllimport) u32 __stdcall GetDesktopWindow(void);
@@ -37,6 +38,7 @@ int right[4] = {168, 24, 296, 176};
 int stripe[4] = {0, 88, 320, 112};
 object *device;
 adapter_identifier identifier;
+u32 caps[53];
 int _fltused = 0;
 
 void entry(void) {
@@ -51,6 +53,14 @@ void entry(void) {
         identifier.vendor_id != 0 || identifier.device_id != 0 || identifier.subsystem_id != 0 ||
         identifier.revision != 0 || identifier.device_identifier.data1 != 0 ||
         identifier.device_identifier.data4[7] != 0 || identifier.whql_level != 0) ExitProcess(11);
+    caps[0] = 0x12345678;
+    if ((u32)((get_device_caps)root->methods[13])(root, 0, 2, caps) != 0x8876086a ||
+        caps[0] != 0x12345678) ExitProcess(12);
+    if ((u32)((get_device_caps)root->methods[13])(root, 0, 3, caps) != 0x8876086a ||
+        caps[0] != 0x12345678) ExitProcess(13);
+    if (((get_device_caps)root->methods[13])(root, 0, 1, caps) != 0) ExitProcess(14);
+    if (caps[0] != 1 || caps[1] != 0 || caps[2] != 0 || caps[3] != 0x00080000 ||
+        caps[4] != 0 || caps[52] != 0) ExitProcess(15);
     u32 desktop = GetDesktopWindow();
     presentation[6] = desktop;
     result status = ((create_device)root->methods[15])(
