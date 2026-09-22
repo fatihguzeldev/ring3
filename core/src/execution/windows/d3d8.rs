@@ -30,6 +30,7 @@ pub(super) enum Call {
     AdapterCount,
     AdapterIdentifier,
     AdapterModeCount,
+    AdapterMode,
     DeviceCaps,
     CreateDevice,
     Clear,
@@ -55,6 +56,7 @@ impl Call {
             0x2d4 => Self::AdapterIdentifier,
             0x2d8 => Self::DeviceCaps,
             0x2dc => Self::AdapterModeCount,
+            0x2e0 => Self::AdapterMode,
             _ => return None,
         })
     }
@@ -63,7 +65,7 @@ impl Call {
         match self {
             Self::CreateDevice | Self::Clear => 7,
             Self::Present => 5,
-            Self::AdapterIdentifier | Self::DeviceCaps => 4,
+            Self::AdapterIdentifier | Self::AdapterMode | Self::DeviceCaps => 4,
             Self::AdapterModeCount => 2,
             _ => 1,
         }
@@ -94,6 +96,7 @@ impl Graphics {
             (ROOT_TABLE, 4, 0x2d0),
             (ROOT_TABLE, 5, 0x2d4),
             (ROOT_TABLE, 6, 0x2dc),
+            (ROOT_TABLE, 7, 0x2e0),
             (ROOT_TABLE, 13, 0x2d8),
             (ROOT_TABLE, 15, 0x40),
             (DEVICE_TABLE, 1, 0x58),
@@ -130,6 +133,7 @@ impl Graphics {
             Call::AdapterModeCount => {
                 u32::from(args[0] == ROOT && self.root_refs != 0 && args[1] == 0)
             }
+            Call::AdapterMode => return self.adapter_mode(args, memory),
             Call::DeviceCaps => return self.device_caps(args, memory),
             Call::CreateDevice => return self.create_device(args, memory),
             Call::Clear => return self.clear(args, memory),
@@ -196,6 +200,19 @@ impl Graphics {
         caps[..4].copy_from_slice(&1_u32.to_le_bytes());
         caps[12..16].copy_from_slice(&CAPS2_CAN_RENDER_WINDOWED.to_le_bytes());
         memory.write(u64::from(args[3]), &caps)?;
+        Ok(0)
+    }
+
+    fn adapter_mode(&self, args: &[u32], memory: &mut GuestMemory) -> Result<u32, MemoryError> {
+        if args[0] != ROOT || self.root_refs == 0 || args[1] != 0 || args[2] != 0 {
+            return Ok(INVALID_CALL);
+        }
+        guest::check(memory, args[3], 16, Access::Write)?;
+        let mut mode = [0; 16];
+        for (field, value) in mode.chunks_exact_mut(4).zip([640_u32, 480, 0, 22]) {
+            field.copy_from_slice(&value.to_le_bytes());
+        }
+        memory.write(u64::from(args[3]), &mode)?;
         Ok(0)
     }
 
