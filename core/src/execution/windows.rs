@@ -396,6 +396,7 @@ impl Api {
             "GetACP" => 0x88,
             "GetOEMCP" => 0x8c,
             "GetCPInfo" => 0x90,
+            "WideCharToMultiByte" => 0x338,
             "GetProcessVersion" => 0x98,
             _ => return None,
         };

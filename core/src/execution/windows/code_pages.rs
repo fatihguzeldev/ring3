@@ -6,6 +6,7 @@ pub(super) enum Call {
     Ansi,
     Oem,
     Info,
+    WideToAnsi,
 }
 
 impl Call {
@@ -14,12 +15,17 @@ impl Call {
             0x88 => Some(Self::Ansi),
             0x8c => Some(Self::Oem),
             0x90 => Some(Self::Info),
+            0x338 => Some(Self::WideToAnsi),
             _ => None,
         }
     }
 
     pub(super) fn arguments(self) -> usize {
-        if matches!(self, Self::Info) { 2 } else { 0 }
+        match self {
+            Self::Info => 2,
+            Self::WideToAnsi => 8,
+            Self::Ansi | Self::Oem => 0,
+        }
     }
 
     pub(super) fn dispatch(
@@ -31,7 +37,118 @@ impl Call {
             Self::Ansi => Ok(ANSI),
             Self::Oem => Ok(OEM),
             Self::Info => info(arguments[0], arguments[1], memory),
+            Self::WideToAnsi => wide_to_ansi(arguments, memory),
         }
+    }
+}
+
+fn wide_to_ansi(args: &[u32], memory: &mut GuestMemory) -> Result<u32, DispatchError> {
+    if !matches!(args[0], 0 | 3 | ANSI) || args[1] != 0 {
+        return Err(DispatchError::Unsupported);
+    }
+    let [_, _, source, count, output, capacity, default, used] = args.try_into().unwrap();
+    if source == 0
+        || count == 0
+        || count.cast_signed() < -1
+        || capacity.cast_signed() < 0
+        || (capacity != 0 && (output == 0 || output == source))
+    {
+        thread::set_last_error(memory, 87)?;
+        return Ok(0);
+    }
+    let limit = if count == u32::MAX {
+        65536
+    } else {
+        count as usize
+    };
+    if limit > 65536 {
+        return Err(DispatchError::Unsupported);
+    }
+    let replacement = if default == 0 {
+        b'?'
+    } else {
+        guest::check(memory, default, 1, Access::Read)?;
+        let mut byte = [0];
+        memory.read(u64::from(default), &mut byte)?;
+        byte[0]
+    };
+    let mut units = Vec::with_capacity(limit.min(256));
+    for index in 0..limit {
+        let address = source
+            .checked_add(u32::try_from(index).map_err(|_| DispatchError::Unsupported)? * 2)
+            .ok_or(DispatchError::Unsupported)?;
+        guest::check(memory, address, 2, Access::Read)?;
+        let mut bytes = [0; 2];
+        memory.read(u64::from(address), &mut bytes)?;
+        let unit = u16::from_le_bytes(bytes);
+        units.push(unit);
+        if count == u32::MAX && unit == 0 {
+            break;
+        }
+    }
+    if count == u32::MAX && units.last().copied() != Some(0) {
+        return Err(DispatchError::Unsupported);
+    }
+    let mut converted = Vec::with_capacity(units.len());
+    let mut substituted = false;
+    for character in char::decode_utf16(units) {
+        let byte = character.ok().and_then(cp1252);
+        converted.push(byte.unwrap_or_else(|| {
+            substituted = true;
+            replacement
+        }));
+    }
+    if capacity != 0 {
+        if converted.len() > capacity as usize {
+            thread::set_last_error(memory, 122)?;
+            return Ok(0);
+        }
+        guest::check(memory, output, converted.len(), Access::Write)?;
+    }
+    if used != 0 {
+        guest::check(memory, used, 4, Access::Write)?;
+    }
+    if capacity != 0 {
+        memory.write(u64::from(output), &converted)?;
+    }
+    if used != 0 {
+        memory.write(u64::from(used), &u32::from(substituted).to_le_bytes())?;
+    }
+    u32::try_from(converted.len()).map_err(|_| DispatchError::Unsupported)
+}
+
+fn cp1252(character: char) -> Option<u8> {
+    let value = u32::from(character);
+    match value {
+        0..=0x7f | 0xa0..=0xff => u8::try_from(value).ok(),
+        0x20ac => Some(0x80),
+        0x201a => Some(0x82),
+        0x0192 => Some(0x83),
+        0x201e => Some(0x84),
+        0x2026 => Some(0x85),
+        0x2020 => Some(0x86),
+        0x2021 => Some(0x87),
+        0x02c6 => Some(0x88),
+        0x2030 => Some(0x89),
+        0x0160 => Some(0x8a),
+        0x2039 => Some(0x8b),
+        0x0152 => Some(0x8c),
+        0x017d => Some(0x8e),
+        0x2018 => Some(0x91),
+        0x2019 => Some(0x92),
+        0x201c => Some(0x93),
+        0x201d => Some(0x94),
+        0x2022 => Some(0x95),
+        0x2013 => Some(0x96),
+        0x2014 => Some(0x97),
+        0x02dc => Some(0x98),
+        0x2122 => Some(0x99),
+        0x0161 => Some(0x9a),
+        0x203a => Some(0x9b),
+        0x0153 => Some(0x9c),
+        0x017e => Some(0x9e),
+        0x0178 => Some(0x9f),
+        _ => None,
     }
 }
 
