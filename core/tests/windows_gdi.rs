@@ -77,7 +77,9 @@ fn screen_contexts_have_independent_lifetimes_and_consistent_device_properties()
     }
     assert_eq!(call(&mut process, 0x7000_009c, &[0]), 640);
     assert_eq!(call(&mut process, 0x7000_009c, &[1]), 480);
-    assert_eq!(call(&mut process, RELEASE, &[0xdead_beef, first]), 1);
+    assert_eq!(call(&mut process, RELEASE, &[0xdead_beef, first]), 0);
+    assert_eq!(call(&mut process, CAPS, &[first, 8]), 640);
+    assert_eq!(call(&mut process, RELEASE, &[0, first]), 1);
     assert_eq!(call(&mut process, RELEASE, &[0, first]), 0);
     assert_eq!(call(&mut process, CAPS, &[first, 8]), 0);
     assert_eq!(call(&mut process, CAPS, &[second, 8]), 640);
@@ -91,6 +93,22 @@ fn screen_contexts_have_independent_lifetimes_and_consistent_device_properties()
         .unwrap();
     assert_eq!(process.last_error().unwrap(), 77);
     assert_eq!(process.memory.mapped_pages(), pages);
+}
+
+#[test]
+fn desktop_context_requires_its_own_window_on_release() {
+    let mut process = process();
+    let desktop = call(&mut process, GET, &[1]);
+    let screen = call(&mut process, GET, &[0]);
+    assert_ne!(desktop, 0);
+    assert_ne!(desktop, screen);
+    assert_eq!(call(&mut process, CAPS, &[desktop, 8]), 640);
+    assert_eq!(call(&mut process, RELEASE, &[0, desktop]), 0);
+    assert_eq!(call(&mut process, CAPS, &[desktop, 10]), 480);
+    assert_eq!(call(&mut process, RELEASE, &[1, desktop]), 1);
+    assert_eq!(call(&mut process, CAPS, &[desktop, 8]), 0);
+    assert_eq!(call(&mut process, RELEASE, &[1, screen]), 0);
+    assert_eq!(call(&mut process, RELEASE, &[0, screen]), 1);
 }
 
 #[test]
@@ -132,7 +150,7 @@ fn unsupported_inputs_and_bad_frames_do_not_allocate_or_release_contexts() {
     let mut process = process();
     let live = call(&mut process, GET, &[0]);
     for (api, arguments) in [
-        (GET, vec![1]),
+        (GET, vec![2]),
         (GET, vec![u32::MAX]),
         (CAPS, vec![live, 38]),
         (CAPS, vec![live, u32::MAX]),

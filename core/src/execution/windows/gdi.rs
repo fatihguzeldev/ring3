@@ -1,6 +1,6 @@
-use std::collections::BTreeSet;
+use std::collections::BTreeMap;
 
-use super::{DispatchError, GuestMemory};
+use super::{DispatchError, GuestMemory, desktop::DESKTOP};
 
 mod brushes;
 
@@ -44,7 +44,7 @@ impl Call {
 }
 
 pub(super) struct Gdi {
-    live: BTreeSet<u32>,
+    live: BTreeMap<u32, u32>,
     next: u32,
     brushes: brushes::Brushes,
 }
@@ -52,7 +52,7 @@ pub(super) struct Gdi {
 impl Default for Gdi {
     fn default() -> Self {
         Self {
-            live: BTreeSet::new(),
+            live: BTreeMap::new(),
             next: FIRST_HANDLE,
             brushes: brushes::Brushes::default(),
         }
@@ -66,7 +66,7 @@ impl Gdi {
         arguments: &[u32],
         memory: &mut GuestMemory,
     ) -> Result<u32, DispatchError> {
-        if matches!(call, Call::Object | Call::Delete) && self.live.contains(&arguments[0]) {
+        if matches!(call, Call::Object | Call::Delete) && self.live.contains_key(&arguments[0]) {
             return Err(DispatchError::Unsupported);
         }
         match call {
@@ -77,20 +77,27 @@ impl Gdi {
             // system-owned brushes survive deletion for the process lifetime.
             Call::Delete => Ok(u32::from(self.brushes.color(arguments[0]).is_some())),
             Call::Get => {
-                if arguments[0] != 0 {
+                if !matches!(arguments[0], 0 | DESKTOP) {
                     return Err(DispatchError::Unsupported);
                 }
                 if self.live.len() == MAX_LIVE || self.next > LAST_HANDLE {
                     return Ok(0);
                 }
                 let handle = self.next;
-                self.live.insert(handle);
+                self.live.insert(handle, arguments[0]);
                 self.next += 4;
                 Ok(handle)
             }
-            Call::Release => Ok(u32::from(self.live.remove(&arguments[1]))),
+            Call::Release => {
+                if self.live.get(&arguments[1]) == Some(&arguments[0]) {
+                    self.live.remove(&arguments[1]);
+                    Ok(1)
+                } else {
+                    Ok(0)
+                }
+            }
             Call::Caps => {
-                if !self.live.contains(&arguments[0]) {
+                if !self.live.contains_key(&arguments[0]) {
                     return Ok(0);
                 }
                 match arguments[1] {
