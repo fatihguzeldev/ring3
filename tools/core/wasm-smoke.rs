@@ -9,6 +9,24 @@ use ring3_core::{
 #[path = "../../core/tests/support/executable.rs"]
 mod executable;
 
+fn execute_accumulator_sign_extension() {
+    use ring3_core::execution::{Cpu32, Register32, StopReason, load_pe32};
+
+    for (eax, edx) in [(39, 0), (0x8000_0000, u32::MAX)] {
+        let mut image = load_pe32(&executable::pe32(&[0x99]), 3).unwrap();
+        let mut cpu = Cpu32::new(image.entry_point);
+        cpu.set_register(Register32::Eax, eax);
+        cpu.set_register(Register32::Edx, 0xa5a5_a5a5);
+        cpu.eflags = 0xced7;
+        let result = cpu.run(&mut image.memory, 1);
+        assert_eq!(result.reason, StopReason::InstructionLimit);
+        assert_eq!(result.instructions, 1);
+        assert_eq!(cpu.register(Register32::Eax), eax);
+        assert_eq!(cpu.register(Register32::Edx), edx);
+        assert_eq!(cpu.eflags, 0xced7);
+    }
+}
+
 #[path = "../../core/tests/support/complement_executable.rs"]
 mod complement_executable;
 
@@ -4007,6 +4025,7 @@ fn execute_strdup() {
 // this isolated test cdylib owns its unique zero-argument export.
 #[unsafe(no_mangle)]
 pub extern "C" fn run() -> u32 {
+    execute_accumulator_sign_extension();
     execute_graphics();
     execute_thread();
     execute_crt();
