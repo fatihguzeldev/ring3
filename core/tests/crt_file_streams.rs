@@ -11,6 +11,7 @@ use ring3_core::execution::{
 const OPEN: u32 = 0x7000_0194;
 const READ: u32 = 0x7000_0198;
 const CLOSE: u32 = 0x7000_019c;
+const SEEK: u32 = 0x7000_01a0;
 const STACK: u32 = 0x1000_ff00;
 const PATH: u32 = 0x0040_2180;
 const MODE: u32 = 0x0040_2190;
@@ -127,6 +128,115 @@ fn independent_cursors_partial_items_and_eof_have_real_stream_lifetimes() {
 }
 
 #[test]
+fn seek_from_end_moves_the_cursor_and_clears_eof() {
+    let mut p = file_stream_cases::process(128);
+    let pointer = open(&mut p);
+    assert_eq!(call(&mut p, READ, &[OUTPUT, 1, 12, pointer]), 11);
+    assert_eq!(word(&p, pointer + 12), 0x15);
+    p.memory
+        .write(u64::from(ERRNO), &123_u32.to_le_bytes())
+        .unwrap();
+    p.memory.write(0x7ffd_e034, &77_u32.to_le_bytes()).unwrap();
+    assert_eq!(
+        call(&mut p, SEEK, &[pointer, (-3_i32).cast_unsigned(), 2]),
+        0
+    );
+    assert_eq!(word(&p, pointer + 12), 5);
+    assert_eq!(word(&p, ERRNO), 123);
+    assert_eq!(p.last_error().unwrap(), 77);
+    assert_eq!(call(&mut p, READ, &[OUTPUT, 1, 3, pointer]), 3);
+    assert_eq!(bytes(&p, OUTPUT, 3), b"END");
+}
+
+#[test]
+fn seek_supports_all_origins_and_positions_beyond_eof() {
+    let mut p = file_stream_cases::process(128);
+    let a = open(&mut p);
+    let b = open(&mut p);
+    assert_eq!(call(&mut p, SEEK, &[a, 5, 0]), 0);
+    assert_eq!(call(&mut p, READ, &[OUTPUT, 1, 2, a]), 2);
+    assert_eq!(bytes(&p, OUTPUT, 2), b"\x1az");
+    assert_eq!(call(&mut p, SEEK, &[a, (-1_i32).cast_unsigned(), 1]), 0);
+    assert_eq!(call(&mut p, READ, &[OUTPUT, 1, 1, a]), 1);
+    assert_eq!(bytes(&p, OUTPUT, 1), b"z");
+    assert_eq!(call(&mut p, SEEK, &[b, (-1_i32).cast_unsigned(), 2]), 0);
+    assert_eq!(call(&mut p, READ, &[OUTPUT, 1, 1, b]), 1);
+    assert_eq!(bytes(&p, OUTPUT, 1), b"D");
+
+    assert_eq!(call(&mut p, SEEK, &[a, 4, 2]), 0);
+    assert_eq!(call(&mut p, READ, &[OUTPUT, 1, 1, a]), 0);
+    assert_eq!(word(&p, a + 12), 0x15);
+    assert_eq!(call(&mut p, SEEK, &[a, 0, 2]), 0);
+    assert_eq!(word(&p, a + 12), 5);
+    assert_eq!(call(&mut p, READ, &[OUTPUT, 1, 1, a]), 0);
+    assert_eq!(word(&p, a + 12), 0x15);
+
+    for args in [
+        [a, 0, 3],
+        [a, (-12_i32).cast_unsigned(), 2],
+        [a, i32::MIN.cast_unsigned(), 1],
+    ] {
+        assert_eq!(call(&mut p, SEEK, &args), u32::MAX);
+        assert_eq!(word(&p, ERRNO), 22);
+        assert_eq!(word(&p, a + 12), 0x15);
+    }
+    assert_eq!(call(&mut p, SEEK, &[a, i32::MAX.cast_unsigned(), 0]), 0);
+    assert_eq!(call(&mut p, SEEK, &[a, i32::MAX.cast_unsigned(), 1]), 0);
+    assert_eq!(call(&mut p, SEEK, &[a, 2, 1]), u32::MAX);
+    assert_eq!(word(&p, ERRNO), 22);
+    assert_eq!(call(&mut p, SEEK, &[a, 0, 0]), 0);
+    assert_eq!(call(&mut p, READ, &[OUTPUT, 1, 1, a]), 1);
+    assert_eq!(bytes(&p, OUTPUT, 1), b"a");
+}
+
+#[test]
+fn seek_budget_and_guest_write_faults_preserve_cursor_and_eof() {
+    let mut p = file_stream_cases::process(128);
+    let pointer = open(&mut p);
+    prepare(&mut p, SEEK, &[pointer, 5, 0]);
+    let cpu = p.cpu;
+    assert_eq!(p.run(0).api_calls, 0);
+    assert_eq!(p.cpu, cpu);
+    assert_eq!(success(&mut p), 0);
+    assert_eq!(call(&mut p, READ, &[OUTPUT, 1, 1, pointer]), 1);
+    assert_eq!(bytes(&p, OUTPUT, 1), b"\x1a");
+    assert_eq!(call(&mut p, READ, &[OUTPUT, 1, 16, pointer]), 5);
+    assert_eq!(word(&p, pointer + 12), 0x15);
+
+    p.memory
+        .protect(u64::from(pointer), 4096, Permissions::READ)
+        .unwrap();
+    prepare(&mut p, SEEK, &[pointer, 0, 0]);
+    failure(&mut p, false);
+    p.memory
+        .protect(u64::from(pointer), 4096, Permissions::READ_WRITE)
+        .unwrap();
+    assert_eq!(word(&p, pointer + 12), 0x15);
+    assert_eq!(call(&mut p, READ, &[OUTPUT, 1, 1, pointer]), 0);
+
+    p.memory
+        .protect(0x7000_2000, 4096, Permissions::READ)
+        .unwrap();
+    prepare(&mut p, SEEK, &[pointer, 0, 3]);
+    failure(&mut p, false);
+    p.memory
+        .protect(0x7000_2000, 4096, Permissions::READ_WRITE)
+        .unwrap();
+    assert_eq!(word(&p, pointer + 12), 0x15);
+    assert_eq!(call(&mut p, SEEK, &[pointer, 0, 0]), 0);
+
+    p.memory
+        .protect(u64::from(pointer), 4096, Permissions::READ)
+        .unwrap();
+    assert_eq!(call(&mut p, SEEK, &[pointer, 1, 0]), 0);
+    p.memory
+        .protect(u64::from(pointer), 4096, Permissions::READ_WRITE)
+        .unwrap();
+    assert_eq!(call(&mut p, READ, &[OUTPUT, 1, 1, pointer]), 1);
+    assert_eq!(bytes(&p, OUTPUT, 1), b"b");
+}
+
+#[test]
 fn snapshots_outlive_inputs_and_paths_follow_cwd_case_and_slashes() {
     let mut source = file_stream_cases::PAYLOAD.to_vec();
     let mut p = Process32::load_with_options(
@@ -235,6 +345,10 @@ fn read_faults_and_zero_budget_preserve_bytes_cursor_and_eof_for_retry() {
 fn unsupported_requests_corrupt_records_and_wrong_heap_owner_do_not_consume_data() {
     let mut p = file_stream_cases::process(128);
     let pointer = open(&mut p);
+    for args in [[0, 0, 0], [pointer + 4, 0, 0]] {
+        prepare(&mut p, SEEK, &args);
+        failure(&mut p, true);
+    }
     for args in [
         [OUTPUT, u32::MAX, 2, pointer],
         [OUTPUT, 1, 64 * 1024 * 1024 + 1, pointer],
@@ -247,6 +361,8 @@ fn unsupported_requests_corrupt_records_and_wrong_heap_owner_do_not_consume_data
     }
     p.memory.write(u64::from(pointer), &[1]).unwrap();
     prepare(&mut p, READ, &[OUTPUT, 1, 1, pointer]);
+    failure(&mut p, true);
+    prepare(&mut p, SEEK, &[pointer, 0, 0]);
     failure(&mut p, true);
     prepare(&mut p, CLOSE, &[pointer]);
     failure(&mut p, true);
@@ -265,6 +381,8 @@ fn unsupported_requests_corrupt_records_and_wrong_heap_owner_do_not_consume_data
     assert_eq!(call(&mut p, READ, &[OUTPUT, 1, 1, pointer]), 1);
     assert_eq!(bytes(&p, OUTPUT, 1), b"a");
     assert_eq!(call(&mut p, CLOSE, &[pointer]), 0);
+    prepare(&mut p, SEEK, &[pointer, 0, 0]);
+    failure(&mut p, true);
 }
 
 #[test]

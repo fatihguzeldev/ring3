@@ -13,6 +13,7 @@ pub(in super::super) enum Call {
     Open,
     Read,
     Close,
+    Seek,
 }
 
 impl Call {
@@ -21,6 +22,7 @@ impl Call {
             Self::Open => 2,
             Self::Read => 4,
             Self::Close => 1,
+            Self::Seek => 3,
         }
     }
 }
@@ -67,6 +69,7 @@ impl Streams {
                 directory.release_reader(file);
                 Ok(0)
             }
+            Call::Seek => self.seek(args, memory, directory),
         }
     }
 
@@ -151,7 +154,8 @@ impl Streams {
             return Err(DispatchError::Unsupported);
         }
         let stream = self.validated(args[3], memory)?;
-        let source = &directory.contents(stream.file)[stream.position..];
+        let contents = directory.contents(stream.file);
+        let source = contents.get(stream.position..).unwrap_or_default();
         let copied = requested.min(source.len());
         let pointer = u64::from(args[3]);
         let output = u64::from(args[0]);
@@ -173,9 +177,46 @@ impl Streams {
         stream.eof = eof;
         Ok(u32::try_from(copied).expect("bounded read fits u32") / args[1])
     }
+
+    fn seek(
+        &mut self,
+        args: &[u32],
+        memory: &mut GuestMemory,
+        directory: &Directory,
+    ) -> Result<u32, DispatchError> {
+        let stream = self.validated(args[0], memory)?;
+        let base = match args[2] {
+            0 => 0,
+            1 => i64::try_from(stream.position).expect("stream position fits u32"),
+            2 => i64::try_from(directory.contents(stream.file).len())
+                .expect("file contents are bounded below i64"),
+            _ => return invalid_seek(memory),
+        };
+        let offset = i64::from(args[1].cast_signed());
+        let Some(target) = base
+            .checked_add(offset)
+            .and_then(|value| u32::try_from(value).ok())
+        else {
+            return invalid_seek(memory);
+        };
+        let clear_eof = stream.eof;
+        if clear_eof {
+            guest::check(memory, args[0] + 12, 4, Access::Write)?;
+            guest::write_word(memory, args[0] + 12, 5)?;
+        }
+        let stream = self.live.get_mut(&args[0]).expect("validated stream");
+        stream.position = target as usize;
+        stream.eof = false;
+        Ok(0)
+    }
 }
 
 fn failed(memory: &mut GuestMemory, error: u32) -> Result<u32, DispatchError> {
     guest::write_word(memory, ERRNO, error)?;
     Ok(0)
+}
+
+fn invalid_seek(memory: &mut GuestMemory) -> Result<u32, DispatchError> {
+    guest::write_word(memory, ERRNO, 22)?;
+    Ok(u32::MAX)
 }
