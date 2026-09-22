@@ -1,6 +1,7 @@
 use super::loader::{GuestModule, load_modules};
 use super::{
-    Cpu32, GuestMemory, LoadError, MemoryError, PAGE_SIZE, Permissions, Register32, StopReason,
+    Access, Cpu32, GuestMemory, LoadError, MemoryError, PAGE_SIZE, Permissions, Register32,
+    StopReason,
 };
 use crate::PeImportSymbol;
 
@@ -121,6 +122,7 @@ enum Api {
     WindowsFormat,
     CallWindowProc,
     SendMessage,
+    PeekMessage,
     CreateDialog,
     CallNextHook,
     Window(creation::Call),
@@ -215,6 +217,7 @@ impl Api {
             0x25c => Some(Self::WindowsFormat),
             0x2a4 => Some(Self::CallWindowProc),
             0x2cc => Some(Self::SendMessage),
+            0x43c => Some(Self::PeekMessage),
             0x2c4 => Some(Self::CallNextHook),
             0x22c => Some(Self::GetCommandLine),
             0x434 => Some(Self::CreateDialog),
@@ -300,6 +303,7 @@ impl Api {
                 "CopyAcceleratorTableA" => 0x2a0,
                 "CallWindowProcA" => 0x2a4,
                 "SendMessageA" => 0x2cc,
+                "PeekMessageA" => 0x43c,
                 "CallNextHookEx" => 0x2c4,
                 "CreateWindowExA" => 0x2a8,
                 "DefWindowProcA" => 0x2ac,
@@ -418,7 +422,7 @@ impl Api {
             Self::Clock(call) => call.arguments(),
             Self::GetEnvironmentVariable => 3,
             Self::WindowsFormat => 2,
-            Self::CallWindowProc | Self::CreateDialog => 5,
+            Self::CallWindowProc | Self::CreateDialog | Self::PeekMessage => 5,
             Self::CallNextHook | Self::SendMessage => 4,
             Self::Window(call) => call.arguments(),
             Self::GetLastError
@@ -778,6 +782,19 @@ impl Process32 {
         Ok(())
     }
 
+    fn peek_empty_message(&mut self, args: &[u32]) -> Result<(), DispatchError> {
+        if (!matches!(args[1], 0 | u32::MAX) && self.desktop.window(args[1]).is_none())
+            || args[2] > u16::MAX.into()
+            || args[3] > u16::MAX.into()
+            || args[4] & !3 != 0
+        {
+            return Err(DispatchError::Unsupported);
+        }
+        guest::check(&self.memory, args[0], 32, Access::Write)?;
+        self.cpu.set_register(Register32::Eax, 0);
+        Ok(())
+    }
+
     fn invoke(&mut self, api: Api, args: &[u32], stack: u32) -> Result<(), DispatchError> {
         let argument = args.first().copied().unwrap_or(0);
         match api {
@@ -789,6 +806,7 @@ impl Process32 {
             Api::GetEnvironmentVariable => self.environment_query(args)?,
             Api::GetStartupInfo => parameters::startup_info(&mut self.memory, argument)?,
             Api::WindowsFormat => self.windows_format(args, stack)?,
+            Api::PeekMessage => self.peek_empty_message(args)?,
             Api::Class(call) => self.window_class(call, args)?,
             Api::Window(call) => self.window_api(call, args)?,
             Api::Synchronization(call) => self.cpu.set_register(
