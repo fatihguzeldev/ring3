@@ -37,6 +37,8 @@ pub(super) enum Call {
     SetAppType,
     FmodePointer,
     CommodePointer,
+    ArgcPointer,
+    ArgvPointer,
     ControlFp,
     GetMainArgs,
     Memset,
@@ -99,6 +101,8 @@ impl Call {
             0x174 => Some(Self::CompareIgnoringCase),
             0x178 => Some(Self::Format),
             0x17c => Some(Self::Lowercase),
+            0x180 => Some(Self::ArgcPointer),
+            0x184 => Some(Self::ArgvPointer),
             0x13c => Some(Self::SetMbCodePage),
             0x140 => Some(Self::OnExit),
             _ => None,
@@ -134,6 +138,8 @@ impl Call {
             | Self::CompareStringPrefix => 3,
             Self::FmodePointer
             | Self::CommodePointer
+            | Self::ArgcPointer
+            | Self::ArgvPointer
             | Self::ErrnoPointer
             | Self::Random
             | Self::FloatToInteger
@@ -259,6 +265,8 @@ impl Crt {
             )?),
             Call::FmodePointer => Some(FMODE),
             Call::CommodePointer => Some(COMMODE),
+            Call::ArgcPointer => Some(ARGC),
+            Call::ArgvPointer => Some(ARGV),
             Call::ControlFp => Some(floating::control(cpu, arguments[0], arguments[1])),
             Call::GetMainArgs => {
                 arguments::get_main(self, arguments, memory)?;
@@ -296,6 +304,8 @@ pub(super) fn resolve(name: &str) -> Option<u32> {
         "__set_app_type" => Some(API_BASE + 0x100),
         "__p__fmode" => Some(API_BASE + 0x104),
         "__p__commode" => Some(API_BASE + 0x108),
+        "__p___argc" => Some(API_BASE + 0x180),
+        "__p___argv" => Some(API_BASE + 0x184),
         "_controlfp" => Some(API_BASE + 0x10c),
         "_initterm" => Some(initializers::BASE),
         "__getmainargs" => Some(API_BASE + 0x110),
