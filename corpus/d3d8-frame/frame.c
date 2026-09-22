@@ -90,6 +90,19 @@ void entry(void) {
         ((u32 *)locked_rect_data[1])[0] != 0x00112233) ExitProcess(22);
     if (((unlock_rect)texture->methods[17])(texture, 0) != 0) ExitProcess(23);
     if (((release_object)texture->methods[2])(texture) != 0) ExitProcess(24);
+    if (((check_format)root->methods[10])(root, 0, 1, 22, 0, 3, 21) != 0) ExitProcess(25);
+    if (((create_texture)device->methods[20])(
+        device, 2, 1, 1, 0, 21, 1, &texture) != 0) ExitProcess(26);
+    if (((get_level_desc)texture->methods[14])(texture, 0, texture_desc) != 0 ||
+        texture_desc[0] != 21 || texture_desc[4] != 8) ExitProcess(27);
+    if (((lock_rect)texture->methods[16])(texture, 0, locked_rect_data, 0, 0) != 0 ||
+        locked_rect_data[0] != 8) ExitProcess(28);
+    ((u32 *)locked_rect_data[1])[0] = 0x7f112233;
+    if (((unlock_rect)texture->methods[17])(texture, 0) != 0) ExitProcess(29);
+    if (((lock_rect)texture->methods[16])(texture, 0, locked_rect_data, 0, 0) != 0 ||
+        ((u32 *)locked_rect_data[1])[0] != 0x7f112233) ExitProcess(30);
+    if (((unlock_rect)texture->methods[17])(texture, 0) != 0) ExitProcess(31);
+    if (((release_object)texture->methods[2])(texture) != 0) ExitProcess(32);
     clear_target clear = (clear_target)device->methods[36];
     if (clear(device, 0, 0, 1, 0xff102030, 0.0f, 0) != 0) ExitProcess(3);
     if (clear(device, 1, left, 1, 0xffe86c42, 0.0f, 0) != 0) ExitProcess(4);
