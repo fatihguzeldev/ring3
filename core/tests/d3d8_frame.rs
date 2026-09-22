@@ -9,6 +9,7 @@ use ring3_core::execution::{Process32, ProcessResult, ProcessStop, Register32, S
 const PARAMETERS: u32 = 0x0040_2100;
 const OUTPUT: u32 = 0x0040_2180;
 const IDENTIFIER: u32 = 0x0040_2200;
+const CAPS: u32 = 0x0040_2800;
 
 #[test]
 fn executes_an_uninterrupted_guest_graphics_program() {
@@ -190,6 +191,94 @@ fn adapter_identifier_faults_before_writing_any_prefix() {
     assert_eq!(result.api_calls, 0);
     assert!(
         read_bytes(&process, partial, 512)
+            .iter()
+            .all(|byte| *byte == 0xa5)
+    );
+}
+
+#[test]
+fn device_caps_report_only_the_owned_windowed_device() {
+    let (mut process, root) = root();
+    assert_eq!(method(&process, root, 12), 0x7000_0ffc);
+    assert_eq!(method(&process, root, 14), 0x7000_0ffc);
+    let get_caps = method(&process, root, 13);
+    assert_ne!(get_caps, 0x7000_0ffc);
+    for device_type in [2, 3] {
+        process.memory.write(u64::from(CAPS), &[0xa5; 212]).unwrap();
+        assert_eq!(
+            invoke(&mut process, get_caps, &[root, 0, device_type, CAPS]),
+            0x8876_086a
+        );
+        assert!(
+            read_bytes(&process, CAPS, 212)
+                .iter()
+                .all(|byte| *byte == 0xa5)
+        );
+        assert_eq!(
+            invoke(&mut process, get_caps, &[root, 0, device_type, u32::MAX]),
+            0x8876_086a
+        );
+    }
+
+    assert_eq!(invoke(&mut process, get_caps, &[root, 0, 1, CAPS]), 0);
+    let caps = read_bytes(&process, CAPS, 212);
+    assert_eq!(u32::from_le_bytes(caps[0..4].try_into().unwrap()), 1);
+    assert_eq!(u32::from_le_bytes(caps[4..8].try_into().unwrap()), 0);
+    assert_eq!(
+        u32::from_le_bytes(caps[12..16].try_into().unwrap()),
+        0x0008_0000
+    );
+    assert!(caps[8..12].iter().all(|byte| *byte == 0));
+    assert!(caps[16..].iter().all(|byte| *byte == 0));
+}
+
+#[test]
+fn invalid_or_released_roots_do_not_write_device_caps() {
+    let (mut process, root) = root();
+    let get_caps = method(&process, root, 13);
+    for args in [[root + 4, 0, 1], [root, 1, 1], [root, 0, 0], [root, 0, 4]] {
+        process.memory.write(u64::from(CAPS), &[0xa5; 212]).unwrap();
+        assert_eq!(
+            invoke(&mut process, get_caps, &[args[0], args[1], args[2], CAPS]),
+            0x8876_086c
+        );
+        assert!(
+            read_bytes(&process, CAPS, 212)
+                .iter()
+                .all(|byte| *byte == 0xa5)
+        );
+    }
+
+    let release = method(&process, root, 2);
+    assert_eq!(invoke(&mut process, release, &[root]), 0);
+    assert_eq!(
+        invoke(&mut process, get_caps, &[root, 0, 1, CAPS]),
+        0x8876_086c
+    );
+    assert!(
+        read_bytes(&process, CAPS, 212)
+            .iter()
+            .all(|byte| *byte == 0xa5)
+    );
+}
+
+#[test]
+fn device_caps_fault_before_writing_any_prefix() {
+    let (mut process, root) = root();
+    let get_caps = method(&process, root, 13);
+    let partial = 0x0040_2f80;
+    process
+        .memory
+        .write(u64::from(partial), &[0xa5; 128])
+        .unwrap();
+    let result = call(&mut process, get_caps, &[root, 0, 1, partial]);
+    assert!(matches!(
+        result.reason,
+        ProcessStop::Stopped(StopReason::MemoryFault(_))
+    ));
+    assert_eq!(result.api_calls, 0);
+    assert!(
+        read_bytes(&process, partial, 128)
             .iter()
             .all(|byte| *byte == 0xa5)
     );
