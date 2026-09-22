@@ -308,6 +308,8 @@ mod zero_extend_executable;
 #[path = "../../core/tests/support/process_version_executable.rs"]
 mod process_version_executable;
 
+#[path = "../../core/tests/support/accelerator_executable.rs"]
+mod accelerator_executable;
 #[path = "../../core/tests/support/metrics_executable.rs"]
 mod metrics_executable;
 
@@ -564,6 +566,32 @@ fn execute_module_file_name() {
 
 #[path = "../../core/tests/support/resource_executable.rs"]
 mod resource_executable;
+
+fn execute_accelerators() {
+    use ring3_core::execution::{Process32, ProcessStop, Register32, StopReason};
+    let mut process = Process32::load(&accelerator_executable::guest(), 32).unwrap();
+    let run = process.run(100);
+    assert_eq!(run.reason, ProcessStop::Stopped(StopReason::Breakpoint));
+    assert_eq!((run.instructions, run.api_calls), (14, 3));
+    assert_eq!(process.cpu.register(Register32::Eax), 2);
+    assert_eq!(process.cpu.register(Register32::Ebx), 0x7700_0004);
+    assert_eq!(process.cpu.register(Register32::Ecx), 2);
+    assert_eq!(process.cpu.register(Register32::Esp), 0x1001_0000);
+    let mut bytes = [0; 12];
+    process.memory.read(0x0040_2180, &mut bytes).unwrap();
+    assert_eq!(bytes, [9, 0, 65, 0, 100, 0, 0, 0, 120, 0, 200, 0]);
+    #[cfg(windows_demo)]
+    {
+        let mut process = Process32::load(
+            include_bytes!("../../target/windows-api/accelerators.exe"),
+            64,
+        )
+        .unwrap();
+        let run = process.run(1000);
+        assert_eq!(run.reason, ProcessStop::Exited(42));
+        assert_eq!((run.instructions, run.api_calls), (118, 12));
+    }
+}
 
 fn execute_resources() {
     use ring3_core::execution::{Process32, ProcessStop, Register32, StopReason};
@@ -3592,6 +3620,7 @@ pub extern "C" fn run() -> u32 {
     execute_thread_identity();
     execute_module_file_name();
     execute_resources();
+    execute_accelerators();
     execute_system_directory();
     execute_computer_name();
     execute_mutex_lifecycle();
