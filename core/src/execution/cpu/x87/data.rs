@@ -127,7 +127,7 @@ impl Cpu32 {
         instruction: &Instruction,
         memory: &GuestMemory,
     ) -> Result<(), StopReason> {
-        self.x87_profile()?;
+        let single_precision = self.x87_arithmetic_precision(instruction.code())?;
         let top = self.x87_stack.value()?;
         let (result, rounding) = if instruction.code() == Code::Fsqrt {
             if top < 0.0 {
@@ -144,7 +144,7 @@ impl Cpu32 {
                 } else {
                     (top, source)
                 };
-            let (result, exact_zero) = if multiply {
+            let (mut result, exact_zero) = if multiply {
                 (left * right, left == 0.0 || right == 0.0)
             } else {
                 if right == 0.0 {
@@ -155,6 +155,10 @@ impl Cpu32 {
             // binary64's bottom binade cannot stand in for x87's extended exponent range.
             if !result.is_finite() || (!exact_zero && result.abs() < 2.0 * f64::MIN_POSITIVE) {
                 return Err(StopReason::UnsupportedInstruction);
+            }
+            if single_precision {
+                result = rounding::single_product(result, left, right)
+                    .ok_or(StopReason::UnsupportedInstruction)?;
             }
             let rounding = if multiply {
                 rounding::product_result(result, top, source)
@@ -291,6 +295,14 @@ impl Cpu32 {
             return Err(StopReason::UnsupportedInstruction);
         }
         Ok(())
+    }
+
+    fn x87_arithmetic_precision(&self, code: Code) -> Result<bool, StopReason> {
+        match self.x87_control_word & 0x0f3f {
+            0x023f => Ok(false),
+            0x003f if matches!(code, Code::Fmul_m32fp | Code::Fmul_m64fp) => Ok(true),
+            _ => Err(StopReason::UnsupportedInstruction),
+        }
     }
 
     fn x87_masked(&self) -> Result<(), StopReason> {

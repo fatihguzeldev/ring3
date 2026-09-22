@@ -149,6 +149,119 @@ fn reverse_division_orders_memory_before_top_and_rounds_to_binary64() {
 }
 
 #[test]
+fn single_precision_multiply_rounds_the_exact_product_to_24_bits() {
+    let operation = &[0xd8, 0x0d, 0x10, 0x22, 0x40, 0];
+    for (top, source, expected, status) in [
+        (1.5_f64.to_bits(), 2.0_f32.to_bits(), 3.0_f64.to_bits(), 0),
+        (
+            1_000_000_000.0_f64.to_bits(),
+            1_000_000_000.0_f32.to_bits(),
+            0x43ab_c16d_6000_0000,
+            0x20,
+        ),
+        (
+            (-1_000_000_000.0_f64).to_bits(),
+            1_000_000_000.0_f32.to_bits(),
+            0xc3ab_c16d_6000_0000,
+            0x20,
+        ),
+        (
+            (-0.0_f64).to_bits(),
+            2.0_f32.to_bits(),
+            (-0.0_f64).to_bits(),
+            0,
+        ),
+        (
+            2.0_f64.to_bits(),
+            (-0.0_f32).to_bits(),
+            (-0.0_f64).to_bits(),
+            0,
+        ),
+        (0x3ff0_0000_1000_0000, 0x3f80_0000, 1.0_f64.to_bits(), 0x20),
+        (
+            0x3ff0_0000_3000_0000,
+            0x3f80_0000,
+            0x3ff0_0000_4000_0000,
+            0x220,
+        ),
+        (
+            0x3fef_ffff_e000_0040,
+            0x3f80_0001,
+            0x3ff0_0000_2000_0000,
+            0x220,
+        ),
+    ] {
+        let (mut cpu, mut memory) = load(operation, top, u64::from(source));
+        cpu.set_x87_control_word(0x007f);
+        assert_eq!(cpu.run(&mut memory, 2).instructions, 2);
+        assert_eq!(cpu.x87_control_word(), 0x007f);
+        let store = cpu.eip;
+        cpu.eip += 6;
+        assert_eq!(cpu.run(&mut memory, 1).instructions, 1);
+        assert_eq!(
+            cpu.register(Register32::Eax) & 0x220,
+            status,
+            "top={top:#x} source={source:#x}"
+        );
+        cpu.eip = store;
+        cpu.set_x87_control_word(0x027f);
+        assert_eq!(cpu.run(&mut memory, 1).instructions, 1);
+        assert_eq!(result(&memory), expected);
+        assert_eq!(cpu.x87_control_word(), 0x027f);
+    }
+}
+
+#[test]
+fn single_precision_multiply_accepts_the_64_bit_memory_form() {
+    let operation = &[0xdc, 0x0d, 0x10, 0x22, 0x40, 0];
+    let (mut cpu, mut memory) = load(
+        operation,
+        1_000_000_000.0_f64.to_bits(),
+        1_000_000_000.0_f64.to_bits(),
+    );
+    cpu.set_x87_control_word(0x007f);
+    assert_eq!(cpu.run(&mut memory, 2).instructions, 2);
+    cpu.set_x87_control_word(0x027f);
+    assert_eq!(cpu.run(&mut memory, 1).instructions, 1);
+    assert_eq!(result(&memory), 0x43ab_c16d_6000_0000);
+}
+
+#[test]
+fn single_precision_profile_rejects_other_math_and_excluded_ranges_atomically() {
+    for operation in [
+        &[0xd9, 0xfa][..],
+        &[0xd8, 0x3d, 0x10, 0x22, 0x40, 0],
+        &[0xdc, 0x3d, 0x10, 0x22, 0x40, 0],
+        &[0xd8, 0x35, 0x10, 0x22, 0x40, 0],
+    ] {
+        let (mut cpu, mut memory) = load(operation, 4.0_f64.to_bits(), 2.0_f64.to_bits());
+        assert_eq!(cpu.run(&mut memory, 1).instructions, 1);
+        cpu.set_x87_control_word(0x007f);
+        let before = cpu;
+        assert_eq!(
+            cpu.run(&mut memory, 1).reason,
+            StopReason::UnsupportedInstruction
+        );
+        assert_eq!(cpu, before);
+    }
+    let multiply = &[0xd8, 0x0d, 0x10, 0x22, 0x40, 0];
+    for (top, source) in [
+        (f64::from(f32::MAX), 2.0_f32),
+        (f64::from(f32::MIN_POSITIVE), 0.5_f32),
+    ] {
+        let (mut cpu, mut memory) = load(multiply, top.to_bits(), u64::from(source.to_bits()));
+        assert_eq!(cpu.run(&mut memory, 1).instructions, 1);
+        cpu.set_x87_control_word(0x007f);
+        let before = cpu;
+        assert_eq!(
+            cpu.run(&mut memory, 1).reason,
+            StopReason::UnsupportedInstruction
+        );
+        assert_eq!(cpu, before);
+    }
+}
+
+#[test]
 fn excluded_math_and_range_boundaries_preserve_the_full_cpu() {
     let divide = &[0xdc, 0x3d, 0x10, 0x22, 0x40, 0][..];
     for (operation, top, source) in [

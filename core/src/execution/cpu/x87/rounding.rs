@@ -6,6 +6,41 @@ pub(super) fn product_result(result: f64, left: f64, right: f64) -> Ordering {
     compare(parts(result), (left * right, le + re))
 }
 
+pub(super) fn single_product(result: f64, left: f64, right: f64) -> Option<f64> {
+    let magnitude = result.abs();
+    if magnitude != 0.0
+        && !(f64::from(f32::MIN_POSITIVE)..=f64::from(f32::MAX)).contains(&magnitude)
+    {
+        return None;
+    }
+    #[expect(
+        clippy::cast_possible_truncation,
+        reason = "bounded nearest-even narrowing"
+    )]
+    let narrowed = magnitude as f32;
+    let candidate = f64::from(narrowed);
+    let rounded = if candidate.to_bits() == magnitude.to_bits() {
+        candidate
+    } else {
+        let (lower, upper) = if candidate < magnitude {
+            (candidate, f64::from(narrowed.next_up()))
+        } else {
+            (f64::from(narrowed.next_down()), candidate)
+        };
+        let midpoint = lower + (upper - lower) * 0.5;
+        if magnitude.to_bits() == midpoint.to_bits() {
+            match product_result(midpoint, left, right) {
+                Ordering::Less => upper,
+                Ordering::Greater => lower,
+                Ordering::Equal => candidate,
+            }
+        } else {
+            candidate
+        }
+    };
+    Some(rounded.copysign(result))
+}
+
 pub(super) fn quotient_result(result: f64, numerator: f64, denominator: f64) -> Ordering {
     product_result(numerator, result, denominator).reverse()
 }
