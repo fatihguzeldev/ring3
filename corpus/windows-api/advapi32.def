@@ -3,3 +3,5 @@ EXPORTS
     _RegOpenKeyExA@20==RegOpenKeyExA
     _RegCreateKeyExA@36==RegCreateKeyExA
     _RegCloseKey@4==RegCloseKey
+    _RegQueryValueExA@24==RegQueryValueExA
+    _RegSetValueExA@24==RegSetValueExA
