@@ -214,7 +214,9 @@ impl Cpu32 {
             Code::Movsb_m8_m8 | Code::Movsw_m16_m16 | Code::Movsd_m32_m32 => {
                 next = self.move_string(instruction, memory)?;
             }
-            code if strings::is_scan(code) => next = self.scan_string(instruction, memory)?,
+            code if strings::is_comparison(code) => {
+                next = self.compare_string(instruction, memory)?;
+            }
             Code::Stosb_m8_AL | Code::Stosw_m16_AX | Code::Stosd_m32_EAX => {
                 next = self.store_string(instruction, memory)?;
             }
