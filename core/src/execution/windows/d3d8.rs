@@ -15,12 +15,15 @@ const ADAPTER_DRIVER: &[u8] = b"ring3\0";
 const ADAPTER_DESCRIPTION: &[u8] = b"Ring3 Virtual Display Adapter\0";
 const DEVICE_CAPS_SIZE: usize = 212;
 const CAPS2_CAN_RENDER_WINDOWED: u32 = 0x0008_0000;
+const DEVCAPS_DRAWPRIM_TLVERTEX: u32 = 0x0000_0400;
 const MAX_PIXELS: u64 = 1_048_576;
 const MAX_RECTS: u32 = 64;
 const TEXTURE_TABLE: u32 = OBJECT_BASE + 0x400;
 const TEXTURE_START: u64 = 0x7200_0000;
 const TEXTURE_END: u64 = 0x7f00_0000;
 const OUT_OF_VIDEO_MEMORY: u32 = 0x8876_017c;
+
+mod primitives;
 
 /// an owned top-to-bottom rgba8 snapshot of the most recent presentation.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -56,6 +59,8 @@ pub(super) enum Call {
     TextureLevelDesc,
     TextureLockRect,
     TextureUnlockRect,
+    SetVertexShader,
+    DrawPrimitiveUp,
 }
 
 impl Call {
@@ -76,6 +81,8 @@ impl Call {
             0x410 => Self::TextureLevelDesc,
             0x414 => Self::TextureLockRect,
             0x418 => Self::TextureUnlockRect,
+            0x41c => Self::SetVertexShader,
+            0x420 => Self::DrawPrimitiveUp,
             0x2d0 => Self::AdapterCount,
             0x2d4 => Self::AdapterIdentifier,
             0x2d8 => Self::DeviceCaps,
@@ -93,10 +100,10 @@ impl Call {
         match self {
             Self::CreateDevice | Self::Clear | Self::CheckDeviceFormat => 7,
             Self::CreateTexture => 8,
-            Self::Present | Self::TextureLockRect => 5,
+            Self::Present | Self::TextureLockRect | Self::DrawPrimitiveUp => 5,
             Self::TextureLevelDesc | Self::CurrentDisplayMode => 3,
             Self::AdapterIdentifier | Self::AdapterMode | Self::DeviceCaps => 4,
-            Self::AdapterModeCount | Self::TextureUnlockRect => 2,
+            Self::AdapterModeCount | Self::TextureUnlockRect | Self::SetVertexShader => 2,
             Self::CheckDeviceType | Self::CheckMultiSampleType => 6,
             _ => 1,
         }
@@ -110,6 +117,7 @@ pub(super) struct Graphics {
     back: Option<Frame>,
     front: Option<Frame>,
     textures: BTreeMap<u32, Texture>,
+    vertex_fvf: u32,
 }
 
 struct Texture {
@@ -158,6 +166,8 @@ impl Graphics {
             (DEVICE_TABLE, 15, 0x48),
             (DEVICE_TABLE, 36, 0x44),
             (DEVICE_TABLE, 20, 0x400),
+            (DEVICE_TABLE, 72, 0x420),
+            (DEVICE_TABLE, 76, 0x41c),
             (TEXTURE_TABLE, 1, 0x404),
             (TEXTURE_TABLE, 2, 0x408),
             (TEXTURE_TABLE, 13, 0x40c),
@@ -207,6 +217,21 @@ impl Graphics {
             Call::TextureLevelDesc => return self.texture_level_desc(args, memory),
             Call::TextureLockRect => return self.texture_lock_rect(args, memory),
             Call::TextureUnlockRect => self.texture_unlock_rect(args),
+            Call::SetVertexShader => {
+                if args[0] != DEVICE || self.device_refs == 0 || args[1] != 0x44 {
+                    INVALID_CALL
+                } else {
+                    self.vertex_fvf = args[1];
+                    0
+                }
+            }
+            Call::DrawPrimitiveUp => {
+                if args[0] != DEVICE || self.device_refs == 0 {
+                    INVALID_CALL
+                } else {
+                    return primitives::draw_up(self.back.as_mut(), self.vertex_fvf, args, memory);
+                }
+            }
             Call::TextureLevelCount => {
                 self.textures.get(&args[0]).map_or(INVALID_CALL, |texture| {
                     u32::try_from(texture.levels.len()).expect("bounded mip count")
@@ -283,6 +308,10 @@ impl Graphics {
         let mut caps = [0; DEVICE_CAPS_SIZE];
         caps[..4].copy_from_slice(&1_u32.to_le_bytes());
         caps[12..16].copy_from_slice(&CAPS2_CAN_RENDER_WINDOWED.to_le_bytes());
+        caps[28..32].copy_from_slice(&DEVCAPS_DRAWPRIM_TLVERTEX.to_le_bytes());
+        caps[180..184].copy_from_slice(&primitives::MAX_PRIMITIVES.to_le_bytes());
+        caps[188..192].copy_from_slice(&1_u32.to_le_bytes());
+        caps[192..196].copy_from_slice(&primitives::MAX_STRIDE.to_le_bytes());
         memory.write(u64::from(args[3]), &caps)?;
         Ok(0)
     }
@@ -413,6 +442,7 @@ impl Graphics {
 
     fn finish_device(&mut self) {
         self.back = None;
+        self.vertex_fvf = 0;
         self.root_refs = self.root_refs.saturating_sub(1);
     }
 

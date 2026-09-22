@@ -515,7 +515,14 @@ fn device_caps_report_only_the_owned_windowed_device() {
         0x0008_0000
     );
     assert!(caps[8..12].iter().all(|byte| *byte == 0));
-    assert!(caps[16..].iter().all(|byte| *byte == 0));
+    assert!(caps[16..28].iter().all(|byte| *byte == 0));
+    assert_eq!(u32::from_le_bytes(caps[28..32].try_into().unwrap()), 0x400);
+    assert!(caps[32..180].iter().all(|byte| *byte == 0));
+    assert_eq!(u32::from_le_bytes(caps[180..184].try_into().unwrap()), 4096);
+    assert!(caps[184..188].iter().all(|byte| *byte == 0));
+    assert_eq!(u32::from_le_bytes(caps[188..192].try_into().unwrap()), 1);
+    assert_eq!(u32::from_le_bytes(caps[192..196].try_into().unwrap()), 256);
+    assert!(caps[196..].iter().all(|byte| *byte == 0));
 }
 
 #[test]
@@ -583,6 +590,204 @@ fn create() -> (Process32, u32, u32) {
     );
     let device = read(&process, OUTPUT);
     (process, root, device)
+}
+
+#[test]
+fn transformed_triangle_up_changes_the_presented_back_buffer() {
+    let (mut process, root, device) = create();
+    let get_caps = method(&process, root, 13);
+    assert_eq!(invoke(&mut process, get_caps, &[root, 0, 1, CAPS]), 0);
+    assert_eq!(read(&process, CAPS + 28) & 0x400, 0x400);
+    let set_shader = method(&process, device, 76);
+    let draw = method(&process, device, 72);
+    assert_ne!(set_shader, 0x7000_0ffc);
+    assert_ne!(draw, 0x7000_0ffc);
+    assert_eq!(invoke(&mut process, set_shader, &[device, 0x44]), 0);
+
+    let vertices = 0x0040_2b00;
+    write(
+        &mut process,
+        vertices,
+        &[
+            0_f32.to_bits(),
+            0_f32.to_bits(),
+            0,
+            1_f32.to_bits(),
+            0xffff_0000,
+            4_f32.to_bits(),
+            0_f32.to_bits(),
+            0,
+            1_f32.to_bits(),
+            0xffff_0000,
+            0_f32.to_bits(),
+            3_f32.to_bits(),
+            0,
+            1_f32.to_bits(),
+            0xffff_0000,
+        ],
+    );
+    let clear = method(&process, device, 36);
+    let present = method(&process, device, 15);
+    assert_eq!(
+        invoke(&mut process, clear, &[device, 0, 0, 1, 0xff00_0000, 0, 0]),
+        0
+    );
+    assert_eq!(invoke(&mut process, draw, &[device, 4, 1, vertices, 20]), 0);
+    assert_eq!(invoke(&mut process, present, &[device, 0, 0, 0, 0]), 0);
+    let frame = process.take_frame().unwrap();
+    assert_eq!(&frame.rgba[0..4], &[255, 0, 0, 255]);
+    assert_eq!(
+        &frame.rgba[(2 * 4 + 3) * 4..(2 * 4 + 4) * 4],
+        &[0, 0, 0, 255]
+    );
+}
+
+#[test]
+fn transformed_triangle_up_culls_counterclockwise_winding() {
+    let (mut process, _, device) = create();
+    let vertices = 0x0040_2b00;
+    write(
+        &mut process,
+        vertices,
+        &[
+            0_f32.to_bits(),
+            0_f32.to_bits(),
+            0,
+            1_f32.to_bits(),
+            0xffff_0000,
+            0_f32.to_bits(),
+            3_f32.to_bits(),
+            0,
+            1_f32.to_bits(),
+            0xffff_0000,
+            4_f32.to_bits(),
+            0_f32.to_bits(),
+            0,
+            1_f32.to_bits(),
+            0xffff_0000,
+        ],
+    );
+    let set_shader = method(&process, device, 76);
+    let draw = method(&process, device, 72);
+    let present = method(&process, device, 15);
+    assert_eq!(invoke(&mut process, set_shader, &[device, 0x44]), 0);
+    assert_eq!(invoke(&mut process, draw, &[device, 4, 1, vertices, 20]), 0);
+    assert_eq!(invoke(&mut process, present, &[device, 0, 0, 0, 0]), 0);
+    assert!(
+        process
+            .take_frame()
+            .unwrap()
+            .rgba
+            .chunks_exact(4)
+            .all(|pixel| pixel == [0, 0, 0, 255])
+    );
+}
+
+#[test]
+fn transformed_draw_rejects_bad_inputs_without_touching_the_back_buffer() {
+    let (mut process, _, device) = create();
+    let set_shader = method(&process, device, 76);
+    let draw = method(&process, device, 72);
+    assert_eq!(
+        invoke(&mut process, set_shader, &[device, 0x04]),
+        0x8876_086c
+    );
+    assert_eq!(invoke(&mut process, set_shader, &[device, 0x44]), 0);
+    assert_eq!(
+        invoke(&mut process, draw, &[device, 1, 1, 0x0040_2b00, 20]),
+        0x8876_086c
+    );
+    assert_eq!(
+        invoke(&mut process, draw, &[device, 4, 4097, 0x0040_2b00, 20]),
+        0x8876_086c
+    );
+    assert_eq!(
+        invoke(&mut process, draw, &[device, 4, 1, 0x0040_2b00, 19]),
+        0x8876_086c
+    );
+    assert_eq!(invoke(&mut process, draw, &[device, 4, 0, 0, 20]), 0);
+    let partial = 0x0040_2fd0;
+    write(
+        &mut process,
+        partial,
+        &[
+            0_f32.to_bits(),
+            0_f32.to_bits(),
+            0,
+            1_f32.to_bits(),
+            0xffff_0000,
+            4_f32.to_bits(),
+            0_f32.to_bits(),
+            0,
+            1_f32.to_bits(),
+            0xffff_0000,
+        ],
+    );
+    let result = call(&mut process, draw, &[device, 4, 1, partial, 20]);
+    assert!(matches!(
+        result.reason,
+        ProcessStop::Stopped(StopReason::MemoryFault(_))
+    ));
+    assert_eq!(result.api_calls, 0);
+    let present = method(&process, device, 15);
+    assert_eq!(invoke(&mut process, present, &[device, 0, 0, 0, 0]), 0);
+    assert!(
+        process
+            .take_frame()
+            .unwrap()
+            .rgba
+            .chunks_exact(4)
+            .all(|p| p == [0, 0, 0, 255])
+    );
+}
+
+#[test]
+fn transformed_strip_interpolates_colors_and_draws_the_second_triangle() {
+    let (mut process, _, device) = create();
+    let vertices = 0x0040_2b00;
+    write(
+        &mut process,
+        vertices,
+        &[
+            0_f32.to_bits(),
+            0_f32.to_bits(),
+            0,
+            1_f32.to_bits(),
+            0xffff_0000,
+            4_f32.to_bits(),
+            0_f32.to_bits(),
+            0,
+            1_f32.to_bits(),
+            0xff00_ff00,
+            0_f32.to_bits(),
+            3_f32.to_bits(),
+            0,
+            1_f32.to_bits(),
+            0xff00_00ff,
+            4_f32.to_bits(),
+            3_f32.to_bits(),
+            0,
+            1_f32.to_bits(),
+            0xffff_ffff,
+        ],
+    );
+    let set_shader = method(&process, device, 76);
+    let draw = method(&process, device, 72);
+    let present = method(&process, device, 15);
+    assert_eq!(invoke(&mut process, set_shader, &[device, 0x44]), 0);
+    assert_eq!(invoke(&mut process, draw, &[device, 5, 2, vertices, 20]), 0);
+    assert_eq!(invoke(&mut process, present, &[device, 0, 0, 0, 0]), 0);
+    let frame = process.take_frame().unwrap();
+    let inside = &frame.rgba[20..24];
+    assert!(
+        inside[..3]
+            .iter()
+            .all(|channel| (1..=254).contains(channel))
+    );
+    assert_ne!(
+        &frame.rgba[(2 * 4 + 3) * 4..(2 * 4 + 4) * 4],
+        &[0, 0, 0, 255]
+    );
 }
 
 #[test]
