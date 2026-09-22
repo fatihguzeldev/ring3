@@ -1,5 +1,17 @@
 use super::{Access, DispatchError, GuestMemory, guest};
 
+pub(super) fn fill(
+    memory: &mut GuestMemory,
+    destination: u32,
+    value: u32,
+    count: u32,
+) -> Result<u32, DispatchError> {
+    let length = usize::try_from(count).expect("u32 count fits target usize");
+    guest::check(memory, destination, length, Access::Write)?;
+    memory.fill(u64::from(destination), length, value.to_le_bytes()[0])?;
+    Ok(destination)
+}
+
 pub(super) fn copy(
     memory: &mut GuestMemory,
     destination: u32,

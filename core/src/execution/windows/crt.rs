@@ -272,16 +272,12 @@ impl Crt {
                 arguments::get_main(self, arguments, memory)?;
                 Some(0)
             }
-            Call::Memset => {
-                let length = usize::try_from(arguments[2]).expect("u32 count fits target usize");
-                guest::check(memory, arguments[0], length, Access::Write)?;
-                memory.fill(
-                    u64::from(arguments[0]),
-                    length,
-                    arguments[1].to_le_bytes()[0],
-                )?;
-                Some(arguments[0])
-            }
+            Call::Memset => Some(buffers::fill(
+                memory,
+                arguments[0],
+                arguments[1],
+                arguments[2],
+            )?),
         })
     }
 }
