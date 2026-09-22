@@ -129,6 +129,7 @@ enum Api {
     SendMessage,
     PeekMessage,
     GetMessage,
+    TranslateMessage,
     ShowWindow,
     UpdateWindow,
     CreateDialog,
@@ -229,6 +230,7 @@ impl Api {
             0x2cc => Some(Self::SendMessage),
             0x43c => Some(Self::PeekMessage),
             0x448 => Some(Self::GetMessage),
+            0x44c => Some(Self::TranslateMessage),
             0x440 => Some(Self::ShowWindow),
             0x444 => Some(Self::UpdateWindow),
             0x2c4 => Some(Self::CallNextHook),
@@ -318,6 +320,7 @@ impl Api {
                 "SendMessageA" => 0x2cc,
                 "PeekMessageA" => 0x43c,
                 "GetMessageA" => 0x448,
+                "TranslateMessage" => 0x44c,
                 "ShowWindow" => 0x440,
                 "UpdateWindow" => 0x444,
                 "CallNextHookEx" => 0x2c4,
@@ -817,6 +820,15 @@ impl Process32 {
         Ok(())
     }
 
+    fn process_version(&mut self, module: u32) -> Result<(), DispatchError> {
+        if module != 0 {
+            return Err(DispatchError::Unsupported);
+        }
+        self.cpu
+            .set_register(Register32::Eax, self.subsystem_version);
+        Ok(())
+    }
+
     fn peek_message(&mut self, args: &[u32]) -> Result<(), DispatchError> {
         if (!matches!(args[1], 0 | u32::MAX) && self.desktop.window(args[1]).is_none())
             || args[2] > u16::MAX.into()
@@ -836,6 +848,35 @@ impl Process32 {
             return Err(DispatchError::Unsupported);
         }
         self.receive_message(args, true, true)
+    }
+
+    fn translate_message(&mut self, address: u32) -> Result<(), DispatchError> {
+        let mut words = [0; 8];
+        guest::read_words(&self.memory, address, &mut words)?;
+        let translated = matches!(words[1], 0x100 | 0x101 | 0x104 | 0x105);
+        if matches!(words[1], 0x100 | 0x104) && words[2] == 13 {
+            self.post_message(PostedMessage {
+                hwnd: words[0],
+                message: if words[1] == 0x100 { 0x102 } else { 0x106 },
+                wparam: 13,
+                lparam: words[3],
+                time: words[4],
+                point: [words[5].cast_signed(), words[6].cast_signed()],
+            })
+            .map_err(|_| DispatchError::Unsupported)?;
+        }
+        self.cpu
+            .set_register(Register32::Eax, u32::from(translated));
+        Ok(())
+    }
+
+    fn message_api(&mut self, api: Api, args: &[u32]) -> Result<(), DispatchError> {
+        match api {
+            Api::PeekMessage => self.peek_message(args),
+            Api::GetMessage => self.get_message(args),
+            Api::TranslateMessage => self.translate_message(args[0]),
+            _ => unreachable!(),
+        }
     }
 
     fn receive_message(
@@ -895,8 +936,9 @@ impl Process32 {
             Api::GetEnvironmentVariable => self.environment_query(args)?,
             Api::GetStartupInfo => parameters::startup_info(&mut self.memory, argument)?,
             Api::WindowsFormat => self.windows_format(args, stack)?,
-            Api::PeekMessage => self.peek_message(args)?,
-            Api::GetMessage => self.get_message(args)?,
+            Api::PeekMessage | Api::GetMessage | Api::TranslateMessage => {
+                self.message_api(api, args)?;
+            }
             Api::ShowWindow => self.show_window_normal(args)?,
             Api::UpdateWindow => self.update_window(argument)?,
             Api::Class(call) => self.window_class(call, args)?,
@@ -922,13 +964,7 @@ impl Process32 {
             Api::SetErrorMode => self.set_error_mode(argument)?,
             Api::GetErrorMode => self.cpu.set_register(Register32::Eax, self.error_mode),
             Api::GetVersion => self.cpu.set_register(Register32::Eax, GUEST_VERSION),
-            Api::GetProcessVersion => {
-                if argument != 0 {
-                    return Err(DispatchError::Unsupported);
-                }
-                self.cpu
-                    .set_register(Register32::Eax, self.subsystem_version);
-            }
+            Api::GetProcessVersion => self.process_version(argument)?,
             Api::CodePage(call) => {
                 let value = call.dispatch(args, &mut self.memory)?;
                 self.cpu.set_register(Register32::Eax, value);
