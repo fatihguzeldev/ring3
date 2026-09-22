@@ -1690,6 +1690,21 @@ fn execute_windows_formatting() {
     }
 }
 
+fn execute_buffer_move() {
+    #[cfg(windows_demo)]
+    {
+        use ring3_core::execution::{Process32, ProcessStop};
+        let mut process = Process32::load(
+            include_bytes!("../../target/windows-api/buffer-move.exe"),
+            64,
+        )
+        .unwrap();
+        let run = process.run(2000);
+        assert_eq!(run.reason, ProcessStop::Exited(42));
+        assert_eq!((run.instructions, run.api_calls), (572, 9));
+    }
+}
+
 fn execute_thread_priority() {
     use ring3_core::execution::{Process32, ProcessStop, Register32, StopReason};
     let mut process = Process32::load(&thread_priority_executable::pe32(), 32).unwrap();
@@ -4036,6 +4051,7 @@ pub extern "C" fn run() -> u32 {
     execute_x87_register_stores();
     execute_thread_priority();
     execute_windows_formatting();
+    execute_buffer_move();
     execute_window_classes();
     execute_window_procedures();
     execute_window_creation();
