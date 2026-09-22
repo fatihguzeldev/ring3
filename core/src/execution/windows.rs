@@ -1,4 +1,4 @@
-use super::loader::load_modules;
+use super::loader::{GuestModule, load_modules};
 use super::{
     Cpu32, GuestMemory, LoadError, MemoryError, PAGE_SIZE, Permissions, Register32, StopReason,
 };
@@ -152,6 +152,27 @@ enum Api {
 enum DispatchError {
     Memory(MemoryError),
     Unsupported,
+}
+
+fn collect_modules<'a>(
+    startup: &[GuestModule<'a>],
+    deferred: &[GuestModule<'a>],
+) -> Vec<GuestModule<'a>> {
+    startup.iter().chain(deferred).copied().collect()
+}
+
+fn partition_initializers(
+    initializers: Vec<super::loader::modules::Initializer>,
+    deferred: &[GuestModule<'_>],
+) -> (
+    Vec<super::loader::modules::Initializer>,
+    Vec<super::loader::modules::Initializer>,
+) {
+    initializers.into_iter().partition(|initializer| {
+        deferred
+            .iter()
+            .any(|module| initializer.name.eq_ignore_ascii_case(module.name))
+    })
 }
 
 impl DispatchError {
@@ -482,10 +503,12 @@ impl Process32 {
                 ..u64::from(diagnostics::BASE) + u64::from(diagnostics::MAX_IMPORTS) * 4,
             u64::from(thread::BASE)..u64::from(thread::BASE) + PAGE_SIZE,
         ];
-        let loaded = load_modules(
+        let all_modules = collect_modules(options.modules, options.deferred_modules);
+        let mut loaded = load_modules(
             bytes,
             page_limit,
-            options.modules,
+            &all_modules,
+            options.modules.len(),
             &reserved,
             |module, symbol| {
                 Api::resolve(module, symbol).or_else(|| {
@@ -497,11 +520,21 @@ impl Process32 {
                 })
             },
         )?;
+        let (deferred_initializers, startup_initializers) = partition_initializers(
+            std::mem::take(&mut loaded.initializers),
+            options.deferred_modules,
+        );
         let (major, minor) = loaded.subsystem_version;
         let mut image = loaded.image;
         let resources =
-            resources::Resources::new(image.image_base, bytes, &loaded.providers, options.modules);
-        let modules = modules::Modules::new(image.image_base, options.image_path, loaded.providers);
+            resources::Resources::new(image.image_base, bytes, &loaded.providers, &all_modules);
+        let modules = modules::Modules::new(
+            image.image_base,
+            options.image_path,
+            loaded.providers,
+            options.modules.len(),
+            &deferred_initializers,
+        );
         image.memory.map_zeroed(
             u64::from(STACK_BASE),
             u64::from(STACK_SIZE),
@@ -516,7 +549,7 @@ impl Process32 {
         parameters.map(&mut image.memory)?;
         crt::initialize(&mut image.memory, &parameters)?;
         let (startup, entry) =
-            startup::Startup::map(&mut image.memory, loaded.initializers, image.entry_point)?;
+            startup::Startup::map(&mut image.memory, startup_initializers, image.entry_point)?;
         let mut cpu = Cpu32::new(entry);
         cpu.set_register(Register32::Esp, STACK_BASE + STACK_SIZE);
         cpu.set_fs_base(thread::BASE);

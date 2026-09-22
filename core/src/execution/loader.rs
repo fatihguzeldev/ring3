@@ -37,6 +37,10 @@ pub enum LoadError {
     CyclicModules {
         module: String,
     },
+    DeferredModuleDependency {
+        module: String,
+        dependency: String,
+    },
     NoModuleAddress,
     RelocationRequired,
     Relocations(crate::PeBaseRelocationError),

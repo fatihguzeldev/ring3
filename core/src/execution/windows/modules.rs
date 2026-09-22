@@ -43,6 +43,21 @@ struct Module {
     references: u32,
     builtin: bool,
     thread_notifications: bool,
+    state: State,
+}
+
+enum State {
+    Ready,
+    Deferred {
+        #[expect(dead_code, reason = "activation follows the input contract")]
+        entry: Option<u32>,
+    },
+}
+
+impl Module {
+    fn visible(&self) -> bool {
+        matches!(self.state, State::Ready)
+    }
 }
 
 pub(super) struct Modules {
@@ -53,10 +68,20 @@ pub(super) struct Modules {
 
 impl Modules {
     pub(super) fn contains(&self, handle: u32) -> bool {
-        handle == self.program || self.resident.iter().any(|module| module.handle == handle)
+        handle == self.program
+            || self
+                .resident
+                .iter()
+                .any(|module| module.handle == handle && module.visible())
     }
 
-    pub(super) fn new(program: u32, program_path: &[u8], providers: Vec<MappedModule>) -> Self {
+    pub(super) fn new(
+        program: u32,
+        program_path: &[u8],
+        providers: Vec<MappedModule>,
+        startup_count: usize,
+        deferred_initializers: &[crate::execution::loader::modules::Initializer],
+    ) -> Self {
         let parent_end = program_path
             .iter()
             .rposition(|&byte| byte == b'\\')
@@ -65,11 +90,22 @@ impl Modules {
         let parent = &program_path[..parent_end];
         let mut resident: Vec<_> = providers
             .into_iter()
-            .map(|provider| Module {
+            .enumerate()
+            .map(|(index, provider)| Module {
+                state: if index < startup_count {
+                    State::Ready
+                } else {
+                    State::Deferred {
+                        entry: deferred_initializers
+                            .iter()
+                            .find(|initializer| initializer.name == provider.name)
+                            .map(|initializer| initializer.entry),
+                    }
+                },
                 path: [parent, provider.name.as_bytes(), &[0]].concat(),
                 name: provider.name,
                 handle: provider.base,
-                references: 1,
+                references: u32::from(index < startup_count),
                 builtin: false,
                 thread_notifications: true,
             })
@@ -95,6 +131,7 @@ impl Modules {
                     references: 1,
                     builtin: true,
                     thread_notifications: true,
+                    state: State::Ready,
                 });
             }
         }
@@ -123,7 +160,7 @@ impl Modules {
             let Some(module) = self
                 .resident
                 .iter_mut()
-                .find(|module| module.handle == argument)
+                .find(|module| module.handle == argument && module.visible())
             else {
                 thread::set_last_error(memory, 126)?;
                 return Ok(0);
@@ -138,7 +175,7 @@ impl Modules {
             let Some(module) = self
                 .resident
                 .iter_mut()
-                .find(|module| module.handle == argument)
+                .find(|module| module.handle == argument && module.visible())
             else {
                 thread::set_last_error(memory, 6)?;
                 return Ok(0);
@@ -167,6 +204,9 @@ impl Modules {
             return Ok(self.program);
         }
         let Some(module) = self.resident.iter_mut().find(|module| {
+            if !module.visible() {
+                return false;
+            }
             if absolute {
                 matches_path(&module.path, &name)
             } else {
@@ -197,7 +237,11 @@ impl Modules {
         if handle == 0 || handle == self.program {
             return Err(DispatchError::Unsupported);
         }
-        let Some(module) = self.resident.iter().find(|module| module.handle == handle) else {
+        let Some(module) = self
+            .resident
+            .iter()
+            .find(|module| module.handle == handle && module.visible())
+        else {
             thread::set_last_error(memory, 126)?;
             return Ok(0);
         };
@@ -217,7 +261,11 @@ impl Modules {
     ) -> Result<u32, DispatchError> {
         let path = if handle == 0 || handle == self.program {
             &self.program_path
-        } else if let Some(module) = self.resident.iter().find(|module| module.handle == handle) {
+        } else if let Some(module) = self
+            .resident
+            .iter()
+            .find(|module| module.handle == handle && module.visible())
+        {
             &module.path
         } else {
             thread::set_last_error(memory, 126)?;

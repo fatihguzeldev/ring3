@@ -28,6 +28,8 @@ pub struct ProcessOptions<'a> {
     /// ordinary ascii names match case-insensitively; the first duplicate wins.
     pub environment: &'a [&'a [u8]],
     pub diagnostic_imports: bool,
+    /// validated providers that stay hidden and skip process attach until `LoadLibraryA`.
+    pub deferred_modules: &'a [GuestModule<'a>],
     pub modules: &'a [GuestModule<'a>],
 }
 
@@ -42,6 +44,7 @@ impl Default for ProcessOptions<'_> {
             command_line: b"program.exe",
             environment: &[],
             diagnostic_imports: false,
+            deferred_modules: &[],
             modules: &[],
         }
     }

@@ -39,10 +39,12 @@ pub(in crate::execution) fn load_modules(
     bytes: &[u8],
     page_limit: u32,
     modules: &[GuestModule<'_>],
+    startup_count: usize,
     reserved: &[Range<u64>],
     mut fallback: impl FnMut(&str, PeImportSymbol<'_>) -> Option<u32>,
 ) -> Result<LoadedModules, LoadError> {
     validate_modules(modules)?;
+    validate_deferred_dependencies(bytes, modules, startup_count)?;
     let program = Image::parse(bytes, ImportPolicy::GuestManagedDelay, false)?;
     let mut images = modules
         .iter()
@@ -131,6 +133,30 @@ pub(in crate::execution) fn load_modules(
         providers,
         subsystem_version: program.table.headers.optional.subsystem_version,
     })
+}
+
+fn validate_deferred_dependencies(
+    program: &[u8],
+    modules: &[GuestModule<'_>],
+    startup_count: usize,
+) -> Result<(), LoadError> {
+    let deferred = &modules[startup_count..];
+    if deferred.is_empty() {
+        return Ok(());
+    }
+    for (name, bytes) in std::iter::once(("<program>", program))
+        .chain(modules.iter().map(|module| (module.name, module.bytes)))
+    {
+        for import in parse_pe_import_lookups(bytes).map_err(LoadError::Imports)? {
+            if let Some(index) = find(deferred, import.descriptor.dll_name) {
+                return Err(LoadError::DeferredModuleDependency {
+                    module: name.to_owned(),
+                    dependency: deferred[index].name.to_owned(),
+                });
+            }
+        }
+    }
+    Ok(())
 }
 
 fn validate_modules(modules: &[GuestModule<'_>]) -> Result<(), LoadError> {
