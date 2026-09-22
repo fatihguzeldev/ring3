@@ -12,6 +12,7 @@ mod critical_sections;
 mod crt;
 mod cursors;
 mod d3d8;
+mod desktop;
 mod diagnostics;
 mod directory;
 mod environment;
@@ -58,6 +59,7 @@ pub struct Process32 {
     environment: environment::Environment,
     user_atoms: user_atoms::UserAtoms,
     classes: classes::Classes,
+    desktop: desktop::Desktop,
     cursors: cursors::Cursors,
     heap: heap::Heap,
     critical_sections: critical_sections::CriticalSections,
@@ -111,7 +113,6 @@ enum Api {
     GetEnvironmentVariable,
     GetStartupInfo,
     WindowsFormat,
-    GetDesktopWindow,
     RegisterUserAtom,
     System(system::Call),
     SetErrorMode,
@@ -124,6 +125,7 @@ enum Api {
     Gdi(gdi::Call),
     Cursor(cursors::Call),
     Class(classes::Call),
+    Desktop(desktop::Call),
     Crt(crt::Call),
     CodePage(code_pages::Call),
     Module(modules::Call),
@@ -168,7 +170,6 @@ impl Api {
             0x248 => Some(Self::GetStartupInfo),
             0x25c => Some(Self::WindowsFormat),
             0x22c => Some(Self::GetCommandLine),
-            16 => Some(Self::GetDesktopWindow),
             0x20 => Some(Self::SetErrorMode),
             0x24 => Some(Self::GetErrorMode),
             0x30 => Some(Self::GetVersion),
@@ -182,6 +183,7 @@ impl Api {
                 .or_else(|| gdi::Call::at(offset).map(Self::Gdi))
                 .or_else(|| cursors::Call::at(offset).map(Self::Cursor))
                 .or_else(|| classes::Call::at(offset).map(Self::Class))
+                .or_else(|| desktop::Call::at(offset).map(Self::Desktop))
                 .or_else(|| crt::Call::at(offset).map(Self::Crt))
                 .or_else(|| modules::Call::at(offset).map(Self::Module))
                 .or_else(|| resources::Call::at(offset).map(Self::Resource))
@@ -213,6 +215,8 @@ impl Api {
         } else if module.eq_ignore_ascii_case("user32.dll") {
             match name {
                 "GetDesktopWindow" => 16,
+                "FindWindowA" => 0x26c,
+                "IsWindow" => 0x270,
                 "wsprintfA" => 0x25c,
                 "GetClassInfoA" => 0x260,
                 "RegisterClassA" => 0x264,
@@ -326,7 +330,6 @@ impl Api {
             | Self::GetCommandLine
             | Self::GetCurrentThread
             | Self::GetCurrentThreadId
-            | Self::GetDesktopWindow
             | Self::GetErrorMode
             | Self::GetVersion
             | Self::ExceptionProlog
@@ -335,6 +338,7 @@ impl Api {
             Self::Gdi(call) => call.arguments(),
             Self::Cursor(call) => call.arguments(),
             Self::Class(call) => call.arguments(),
+            Self::Desktop(call) => call.arguments(),
             Self::Crt(call) => call.arguments(),
             Self::CodePage(call) => call.arguments(),
             Self::Heap(call) => call.arguments(),
@@ -466,6 +470,7 @@ impl Process32 {
             environment: environment::Environment::new(options.environment),
             user_atoms: user_atoms::UserAtoms::default(),
             classes: classes::Classes::default(),
+            desktop: desktop::Desktop::default(),
             gdi: gdi::Gdi::default(),
             cursors: cursors::Cursors::default(),
             heap: heap::Heap::default(),
@@ -633,7 +638,7 @@ impl Process32 {
             Api::GetCurrentThreadId => self
                 .cpu
                 .set_register(Register32::Eax, thread::current_id(&self.memory)?),
-            Api::GetDesktopWindow => self.cpu.set_register(Register32::Eax, d3d8::DESKTOP),
+            Api::Desktop(call) => self.window_query(call, arguments)?,
             Api::RegisterUserAtom => {
                 let value = self.user_atoms.register(argument, &mut self.memory)?;
                 self.cpu.set_register(Register32::Eax, value);

@@ -1,7 +1,6 @@
 use super::super::Access;
-use super::{API_BASE, GuestMemory, MemoryError, PAGE_SIZE, Permissions, guest};
+use super::{API_BASE, GuestMemory, MemoryError, PAGE_SIZE, Permissions, desktop::DESKTOP, guest};
 
-pub(super) const DESKTOP: u32 = 1;
 const OBJECT_BASE: u32 = API_BASE + 4096;
 const ROOT: u32 = OBJECT_BASE;
 const DEVICE: u32 = OBJECT_BASE + 4;
