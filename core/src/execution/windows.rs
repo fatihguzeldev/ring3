@@ -130,6 +130,7 @@ enum Api {
     PeekMessage,
     GetMessage,
     TranslateMessage,
+    DispatchMessage,
     ShowWindow,
     UpdateWindow,
     CreateDialog,
@@ -231,6 +232,7 @@ impl Api {
             0x43c => Some(Self::PeekMessage),
             0x448 => Some(Self::GetMessage),
             0x44c => Some(Self::TranslateMessage),
+            0x450 => Some(Self::DispatchMessage),
             0x440 => Some(Self::ShowWindow),
             0x444 => Some(Self::UpdateWindow),
             0x2c4 => Some(Self::CallNextHook),
@@ -321,6 +323,7 @@ impl Api {
                 "PeekMessageA" => 0x43c,
                 "GetMessageA" => 0x448,
                 "TranslateMessage" => 0x44c,
+                "DispatchMessageA" => 0x450,
                 "ShowWindow" => 0x440,
                 "UpdateWindow" => 0x444,
                 "CallNextHookEx" => 0x2c4,
@@ -760,6 +763,7 @@ impl Process32 {
         }
         let suspended = match api {
             Api::SendMessage => self.send_message(&frame[1..words])?,
+            Api::DispatchMessage => self.dispatch_message(frame[1])?,
             Api::CreateDialog => self.create_dialog(&frame[1..words])?,
             Api::CallNextHook => self.call_next_hook(&frame[1..words])?,
             Api::Window(creation::Call::Create) => self.create_window(&frame[1..words])?,
@@ -1015,6 +1019,7 @@ impl Process32 {
             Api::CreateDialog
             | Api::CallWindowProc
             | Api::SendMessage
+            | Api::DispatchMessage
             | Api::CallNextHook
             | Api::ExceptionProlog
             | Api::ExitProcess

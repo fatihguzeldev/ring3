@@ -7,6 +7,41 @@ pub(super) const RETURN: u32 = 0x7000_0ff8;
 const MAX_DEPTH: usize = 64;
 
 impl Process32 {
+    pub(super) fn dispatch_message(&mut self, address: u32) -> Result<bool, DispatchError> {
+        let mut message = [0; 8];
+        guest::read_words(&self.memory, address, &mut message)?;
+        if message[1] > u16::MAX.into() || (message[1] == 0x113 && message[3] != 0) {
+            return Err(DispatchError::Unsupported);
+        }
+        if message[0] == 0 {
+            self.cpu.set_register(Register32::Eax, 0);
+            return Ok(false);
+        }
+        let Some(window) = self.desktop.window(message[0]) else {
+            return Err(DispatchError::Unsupported);
+        };
+        if window.procedure == 0 {
+            return Err(DispatchError::Unsupported);
+        }
+        let stack = self.cpu.register(Register32::Esp);
+        self.callbacks.enter(
+            &mut self.cpu,
+            &mut self.memory,
+            Frame {
+                stack,
+                caller: stack,
+                cleanup: 8,
+                creation: None,
+                cbt_hook: None,
+                module: None,
+                dialog: None,
+            },
+            window.procedure,
+            &message[..4],
+        )?;
+        Ok(true)
+    }
+
     pub(super) fn send_message(&mut self, args: &[u32]) -> Result<bool, DispatchError> {
         if matches!(args[0], desktop::DESKTOP | 0xffff | u32::MAX) {
             return Err(DispatchError::Unsupported);
