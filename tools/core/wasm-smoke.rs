@@ -1450,7 +1450,7 @@ fn execute_window_messages() {
 
 #[cfg(windows_demo)]
 fn execute_get_message_wait() {
-    use ring3_core::execution::{Process32, ProcessStop, Register32};
+    use ring3_core::execution::{PostedMessage, Process32, ProcessStop, Register32};
     let mut process = Process32::load(
         include_bytes!("../../target/windows-api/get-message-wait.exe"),
         64,
@@ -1478,6 +1478,19 @@ fn execute_get_message_wait() {
     assert_eq!(repeated.reason, ProcessStop::WaitingForMessage);
     assert_eq!((repeated.instructions, repeated.api_calls), (0, 0));
     assert_eq!(process.cpu, cpu);
+    process
+        .post_message(PostedMessage {
+            hwnd: 0,
+            message: 0x401,
+            wparam: 42,
+            lparam: 0x1020_3040,
+            time: 1234,
+            point: [12, -5],
+        })
+        .unwrap();
+    let resumed = process.run(1000);
+    assert_eq!(resumed.reason, ProcessStop::Exited(42));
+    assert_eq!(process.last_error().unwrap(), 77);
 }
 
 fn execute_icons() {
