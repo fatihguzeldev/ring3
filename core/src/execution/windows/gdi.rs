@@ -6,6 +6,7 @@ mod brushes;
 
 pub(super) const SCREEN_WIDTH: u32 = 640;
 pub(super) const SCREEN_HEIGHT: u32 = 480;
+pub(super) const COLOR_BITS: u16 = 32;
 const FIRST_HANDLE: u32 = 0x6000_0000;
 const LAST_HANDLE: u32 = 0x6fff_fffc;
 const MAX_LIVE: usize = 1024;
@@ -96,7 +97,7 @@ impl Gdi {
                     2 | 14 => Ok(1),
                     8 => Ok(SCREEN_WIDTH),
                     10 => Ok(SCREEN_HEIGHT),
-                    12 => Ok(32),
+                    12 => Ok(u32::from(COLOR_BITS)),
                     24 => Ok(u32::MAX),
                     88 | 90 => Ok(96),
                     _ => Err(DispatchError::Unsupported),

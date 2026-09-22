@@ -266,6 +266,7 @@ impl Api {
                 "SetWindowsHookExA" => 0x24c,
                 "UnhookWindowsHookEx" => 0x250,
                 "LoadStringA" => 0xec,
+                "LoadIconA" => 0x2c8,
                 "LoadAcceleratorsA" => 0x29c,
                 "CopyAcceleratorTableA" => 0x2a0,
                 "CallWindowProcA" => 0x2a4,

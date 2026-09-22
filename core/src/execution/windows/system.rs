@@ -4,7 +4,7 @@ use super::{DispatchError, GuestMemory, gdi, guest, thread};
 pub(super) const SYSTEM_DIRECTORY: &[u8] = b"C:\\Windows\\System32";
 const COMPUTER_NAME: &[u8; 6] = b"RING3\0";
 
-const LARGE_ICON: u32 = 32;
+pub(super) const LARGE_ICON: u32 = 32;
 const SMALL_ICON: u32 = 16;
 const SCROLL_WIDTH: u32 = 16;
 const SCROLL_HEIGHT: u32 = 16;

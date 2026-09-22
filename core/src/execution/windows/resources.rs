@@ -8,6 +8,7 @@ use crate::{
 };
 
 mod accelerators;
+mod icons;
 
 #[derive(Clone, Copy)]
 pub(super) enum Call {
@@ -15,6 +16,7 @@ pub(super) enum Call {
     String,
     LoadAccelerators,
     CopyAccelerators,
+    LoadIcon,
 }
 
 impl Call {
@@ -22,7 +24,7 @@ impl Call {
         match self {
             Self::Find | Self::CopyAccelerators => 3,
             Self::String => 4,
-            Self::LoadAccelerators => 2,
+            Self::LoadAccelerators | Self::LoadIcon => 2,
         }
     }
 
@@ -32,6 +34,7 @@ impl Call {
             0xec => Some(Self::String),
             0x29c => Some(Self::LoadAccelerators),
             0x2a0 => Some(Self::CopyAccelerators),
+            0x2c8 => Some(Self::LoadIcon),
             _ => None,
         }
     }
@@ -46,6 +49,7 @@ pub(super) struct Resources {
     program: u32,
     images: Vec<Image>,
     accelerators: accelerators::Tables,
+    icons: icons::Icons,
 }
 
 struct Resource {
@@ -84,6 +88,7 @@ impl Resources {
             program,
             images,
             accelerators: accelerators::Tables::default(),
+            icons: icons::Icons::default(),
         }
     }
 
@@ -95,6 +100,7 @@ impl Resources {
         memory: &mut GuestMemory,
     ) -> Result<u32, DispatchError> {
         match call {
+            Call::LoadIcon => self.load_icon(arguments, modules, memory),
             Call::LoadAccelerators => {
                 if arguments[1] > 0xffff {
                     return Err(DispatchError::Unsupported);
