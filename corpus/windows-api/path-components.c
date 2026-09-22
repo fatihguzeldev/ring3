@@ -1,4 +1,5 @@
 typedef void (__cdecl *Split)(const char *, char *, char *, char *, char *);
+typedef char *(__cdecl *Uppercase)(char *);
 typedef int *(__cdecl *Errno)(void);
 __declspec(dllimport) void *__stdcall GetModuleHandleA(const char *);
 __declspec(dllimport) void *__stdcall GetProcAddress(void *, const char *);
@@ -7,6 +8,8 @@ __declspec(dllimport) unsigned long __stdcall GetLastError(void);
 __declspec(dllimport) __declspec(noreturn) void __stdcall ExitProcess(unsigned int);
 
 static char drive[3], directory[256], filename[256], extension[256], long_name[256];
+static unsigned char mixed_case[] = {'a', 'Z', '0', '-', '_', 0xc4, 0xe4, 0xff, 0, 'x'};
+static const unsigned char upper_case[] = {'A', 'Z', '0', '-', '_', 0xc4, 0xe4, 0xff, 0, 'x'};
 static const struct {
     const char *path, *drive, *directory, *filename, *extension;
 } cases[] = {
@@ -26,8 +29,9 @@ static int equal(const char *a, const char *b) {
 void entry(void) {
     void *crt = GetModuleHandleA("MSVCRT.dll");
     Split split = (Split)GetProcAddress(crt, "_splitpath");
+    Uppercase uppercase = (Uppercase)GetProcAddress(crt, "_strupr");
     Errno error = (Errno)GetProcAddress(crt, "_errno");
-    if (!split || !error) ExitProcess(1);
+    if (!split || !uppercase || !error) ExitProcess(1);
     int *errno_cell = error();
     *errno_cell = 123;
     SetLastError(77);
@@ -57,5 +61,10 @@ void entry(void) {
     split(long_name, drive, directory, filename, extension);
     if (!equal(filename, long_name) || *drive || *directory || *extension) ExitProcess(7);
     if (*errno_cell != 123 || GetLastError() != 77) ExitProcess(8);
+    if (uppercase((char *)mixed_case) != (char *)mixed_case) ExitProcess(9);
+    for (unsigned i = 0; i < sizeof(mixed_case); i++) {
+        if (mixed_case[i] != upper_case[i]) ExitProcess(10);
+    }
+    if (*errno_cell != 123 || GetLastError() != 77) ExitProcess(11);
     ExitProcess(42);
 }
