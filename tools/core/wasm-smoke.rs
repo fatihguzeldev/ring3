@@ -1663,6 +1663,11 @@ fn execute_window_creation() {
         assert_eq!(process.cpu.register(Register32::Eax), 1);
         assert_eq!(process.cpu.register(Register32::Ebx), 0x7500_0004);
         assert_eq!(process.cpu.register(Register32::Esp), 0x1001_0000);
+        let windows = process.window_snapshots();
+        assert_eq!(windows.len(), 1);
+        assert_eq!(windows[0].hwnd, 0x7500_0004);
+        assert_eq!(windows[0].title, "title");
+        assert_eq!(windows[0].parent, 0);
         if let Some(expected) = final_state {
             assert_eq!((process.cpu, counts), expected);
         }
