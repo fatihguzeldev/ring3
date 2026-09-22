@@ -1,7 +1,38 @@
-use super::{Cpu32, DispatchError, GuestMemory, MemoryError, Register32, creation, guest};
+use super::{
+    Cpu32, DispatchError, GuestMemory, MemoryError, Process32, Register32, creation, desktop,
+    guest, thread,
+};
 
 pub(super) const RETURN: u32 = 0x7000_0ff8;
 const MAX_DEPTH: usize = 64;
+
+impl Process32 {
+    pub(super) fn send_message(&mut self, args: &[u32]) -> Result<bool, DispatchError> {
+        if matches!(args[0], desktop::DESKTOP | 0xffff | u32::MAX) {
+            return Err(DispatchError::Unsupported);
+        }
+        let Some(window) = self.desktop.window(args[0]) else {
+            thread::set_last_error(&mut self.memory, 1400)?;
+            self.cpu.set_register(Register32::Eax, 0);
+            return Ok(false);
+        };
+        let stack = self.cpu.register(Register32::Esp);
+        self.callbacks.enter(
+            &mut self.cpu,
+            &mut self.memory,
+            Frame {
+                stack,
+                caller: stack,
+                cleanup: 20,
+                creation: None,
+                cbt_hook: None,
+            },
+            window.procedure,
+            args,
+        )?;
+        Ok(true)
+    }
+}
 
 #[derive(Default)]
 pub(super) struct Callbacks {

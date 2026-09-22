@@ -42,6 +42,7 @@ pub(super) struct Window {
     pub(super) title: String,
     pub(super) rectangle: [i32; 4],
     pub(super) client: [i32; 4],
+    pub(super) icons: [u32; 2],
 }
 
 pub(super) struct Desktop {

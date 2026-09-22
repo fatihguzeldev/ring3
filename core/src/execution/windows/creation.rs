@@ -387,6 +387,17 @@ impl Process32 {
             return Ok(0);
         };
         match args[1] {
+            0x7f if args[2] <= 1 && args[3] == 0 => Ok(window.icons[args[2] as usize]),
+            0x80 if args[2] <= 1 => {
+                if args[3] != 0 && !self.resources.contains_icon(args[3]) {
+                    return Err(DispatchError::Unsupported);
+                }
+                let window = self.desktop.window_mut(args[0]).expect("validated window");
+                Ok(std::mem::replace(
+                    &mut window.icons[args[2] as usize],
+                    args[3],
+                ))
+            }
             0x81 => {
                 let mut creation = [0; 12];
                 guest::read_words(&self.memory, args[3], &mut creation)?;

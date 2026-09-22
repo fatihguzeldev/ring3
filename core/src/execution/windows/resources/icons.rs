@@ -28,6 +28,10 @@ impl Default for Icons {
 }
 
 impl Resources {
+    pub(in super::super) fn contains_icon(&self, handle: u32) -> bool {
+        self.icons.loaded.contains_key(&handle)
+    }
+
     pub(super) fn load_icon(
         &mut self,
         args: &[u32],

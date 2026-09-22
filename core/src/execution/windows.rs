@@ -119,6 +119,7 @@ enum Api {
     GetStartupInfo,
     WindowsFormat,
     CallWindowProc,
+    SendMessage,
     CallNextHook,
     Window(creation::Call),
     RegisterUserAtom,
@@ -190,6 +191,7 @@ impl Api {
             0x248 => Some(Self::GetStartupInfo),
             0x25c => Some(Self::WindowsFormat),
             0x2a4 => Some(Self::CallWindowProc),
+            0x2cc => Some(Self::SendMessage),
             0x2c4 => Some(Self::CallNextHook),
             0x22c => Some(Self::GetCommandLine),
             0x20 => Some(Self::SetErrorMode),
@@ -270,6 +272,7 @@ impl Api {
                 "LoadAcceleratorsA" => 0x29c,
                 "CopyAcceleratorTableA" => 0x2a0,
                 "CallWindowProcA" => 0x2a4,
+                "SendMessageA" => 0x2cc,
                 "CallNextHookEx" => 0x2c4,
                 "CreateWindowExA" => 0x2a8,
                 "DefWindowProcA" => 0x2ac,
@@ -385,7 +388,7 @@ impl Api {
             Self::GetEnvironmentVariable => 3,
             Self::WindowsFormat => 2,
             Self::CallWindowProc => 5,
-            Self::CallNextHook => 4,
+            Self::CallNextHook | Self::SendMessage => 4,
             Self::Window(call) => call.arguments(),
             Self::GetLastError
             | Self::GetCommandLine
@@ -670,6 +673,7 @@ impl Process32 {
             return Ok(());
         }
         let suspended = match api {
+            Api::SendMessage => self.send_message(&frame[1..words])?,
             Api::CallNextHook => self.call_next_hook(&frame[1..words])?,
             Api::Window(creation::Call::Create) => self.create_window(&frame[1..words])?,
             _ => {
@@ -792,6 +796,7 @@ impl Process32 {
             ),
             Api::Crt(call) => self.crt_call(call, args)?,
             Api::CallWindowProc
+            | Api::SendMessage
             | Api::CallNextHook
             | Api::ExceptionProlog
             | Api::ExitProcess
