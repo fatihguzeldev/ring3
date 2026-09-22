@@ -17,6 +17,7 @@ mod environment;
 mod gdi;
 mod guest;
 mod heap;
+mod hooks;
 mod modules;
 mod parameters;
 mod resources;
@@ -58,6 +59,7 @@ pub struct Process32 {
     heap: heap::Heap,
     critical_sections: critical_sections::CriticalSections,
     mutexes: synchronization::Mutexes,
+    hooks: hooks::Hooks,
     tls: tls::Tls,
     graphics: d3d8::Graphics,
     gdi: gdi::Gdi,
@@ -123,6 +125,7 @@ enum Api {
     Heap(heap::Call),
     CriticalSection(critical_sections::Call),
     Synchronization(synchronization::Call),
+    Hook(hooks::Call),
     Tls(tls::Call),
     Unsupported,
 }
@@ -177,6 +180,7 @@ impl Api {
                 .or_else(|| heap::Call::at(offset).map(Self::Heap))
                 .or_else(|| critical_sections::Call::at(offset).map(Self::CriticalSection))
                 .or_else(|| synchronization::Call::at(offset).map(Self::Synchronization))
+                .or_else(|| hooks::Call::at(offset).map(Self::Hook))
                 .or_else(|| clock::Call::at(offset).map(Self::Clock))
                 .or_else(|| tls::Call::at(offset).map(Self::Tls))
                 .or_else(|| code_pages::Call::at(offset).map(Self::CodePage)),
@@ -199,6 +203,8 @@ impl Api {
         } else if module.eq_ignore_ascii_case("user32.dll") {
             match name {
                 "GetDesktopWindow" => 16,
+                "SetWindowsHookExA" => 0x24c,
+                "UnhookWindowsHookEx" => 0x250,
                 "LoadStringA" => 0xec,
                 "RegisterWindowMessageA" => 0x94,
                 "RegisterClipboardFormatA" => 0xc8,
@@ -294,6 +300,7 @@ impl Api {
         match self {
             Self::Interlocked(call) => call.arguments(),
             Self::Synchronization(call) => call.arguments(),
+            Self::Hook(call) => call.arguments(),
             Self::Directory(call) => call.arguments(),
             Self::Clock(call) => call.arguments(),
             Self::GetEnvironmentVariable => 3,
@@ -444,6 +451,7 @@ impl Process32 {
             heap: heap::Heap::default(),
             critical_sections: critical_sections::CriticalSections::default(),
             mutexes: synchronization::Mutexes::default(),
+            hooks: hooks::Hooks::default(),
             tls: tls::Tls::default(),
             graphics: d3d8::Graphics::default(),
             crt: crt::Crt::default(),
@@ -658,6 +666,10 @@ impl Process32 {
             Api::Gdi(call) => self.cpu.set_register(
                 Register32::Eax,
                 self.gdi.dispatch(call, arguments, &mut self.memory)?,
+            ),
+            Api::Hook(call) => self.cpu.set_register(
+                Register32::Eax,
+                self.hooks.dispatch(call, arguments, &mut self.memory)?,
             ),
             Api::Cursor(call) => self.cpu.set_register(
                 Register32::Eax,
