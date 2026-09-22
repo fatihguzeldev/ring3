@@ -3,6 +3,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use super::super::Access;
 use super::{DispatchError, GuestMemory, MemoryError, Process32, Register32, guest};
 
+mod values;
+
 const CURRENT_USER: u32 = 0x8000_0001;
 const LOCAL_MACHINE: u32 = 0x8000_0002;
 const MAX_KEYS: usize = 4096;
@@ -14,6 +16,8 @@ pub(super) enum Call {
     Open,
     Create,
     Close,
+    Query,
+    Set,
 }
 
 impl Call {
@@ -22,6 +26,8 @@ impl Call {
             0x278 => Some(Self::Open),
             0x27c => Some(Self::Create),
             0x280 => Some(Self::Close),
+            0x284 => Some(Self::Query),
+            0x288 => Some(Self::Set),
             _ => None,
         }
     }
@@ -31,6 +37,7 @@ impl Call {
             Self::Open => 5,
             Self::Create => 9,
             Self::Close => 1,
+            Self::Query | Self::Set => 6,
         }
     }
 }
@@ -46,6 +53,7 @@ pub(super) struct Registry {
     // the second word retains the granted access mask for value operations.
     handles: BTreeMap<u32, (Key, u32)>,
     next: u32,
+    values: values::Values,
 }
 
 impl Default for Registry {
@@ -63,6 +71,7 @@ impl Default for Registry {
             keys,
             handles: BTreeMap::new(),
             next: 0x7600_0004,
+            values: values::Values::default(),
         }
     }
 }
@@ -90,6 +99,17 @@ impl Registry {
         let Some(parent) = self.parent(args[0])? else {
             return Ok(6);
         };
+        if matches!(call, Call::Query | Call::Set) {
+            let access = self
+                .handles
+                .get(&args[0])
+                .map_or(0xf003f, |(_, access)| *access);
+            let required = if matches!(call, Call::Query) { 1 } else { 2 };
+            if access & required == 0 {
+                return Ok(5);
+            }
+            return self.values.dispatch(call, parent, args, memory);
+        }
         if matches!(call, Call::Close) {
             self.handles.remove(&args[0]);
             return Ok(0);
@@ -109,7 +129,10 @@ impl Registry {
         if access & !0x000f_003f != 0 {
             return Err(DispatchError::Unsupported);
         }
-        let path = subkey(memory, args[1])?;
+        let path = read_name(memory, args[1])?;
+        if !path.is_empty() && path.split('\\').any(str::is_empty) {
+            return Err(DispatchError::Unsupported);
+        }
         if !create && path.is_empty() && matches!(args[0], CURRENT_USER | LOCAL_MACHINE) {
             guest::write_word(memory, output, args[0])?;
             return Ok(0);
@@ -166,7 +189,7 @@ impl Registry {
     }
 }
 
-fn subkey(memory: &GuestMemory, pointer: u32) -> Result<String, DispatchError> {
+fn read_name(memory: &GuestMemory, pointer: u32) -> Result<String, DispatchError> {
     let mut name = String::new();
     if pointer == 0 {
         return Ok(name);
@@ -178,9 +201,6 @@ fn subkey(memory: &GuestMemory, pointer: u32) -> Result<String, DispatchError> {
         let mut byte = [0];
         memory.read(u64::from(address), &mut byte)?;
         if byte[0] == 0 {
-            if !name.is_empty() && name.split('\\').any(str::is_empty) {
-                return Err(DispatchError::Unsupported);
-            }
             return Ok(name);
         }
         if !(0x20..=0x7e).contains(&byte[0]) {
