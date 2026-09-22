@@ -26,6 +26,7 @@ EXPORTS
     _UnhookWindowsHookEx@4==UnhookWindowsHookEx
     _CallNextHookEx@16==CallNextHookEx
     _SendMessageA@16==SendMessageA
+    _PeekMessageA@20==PeekMessageA
     wsprintfA
     _GetClassInfoA@12==GetClassInfoA
     _RegisterClassA@4==RegisterClassA

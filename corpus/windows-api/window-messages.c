@@ -7,6 +7,7 @@ __declspec(dllimport) long __stdcall DefWindowProcA(Handle, unsigned int, unsign
 __declspec(dllimport) long __stdcall CallWindowProcA(WindowProc, Handle, unsigned int, unsigned int, long);
 __declspec(dllimport) long __stdcall SetWindowLongA(Handle, int, long);
 __declspec(dllimport) long __stdcall SendMessageA(Handle, unsigned int, unsigned int, long);
+__declspec(dllimport) int __stdcall PeekMessageA(void *, Handle, unsigned int, unsigned int, unsigned int);
 __declspec(dllimport) Handle __stdcall LoadIconA(Handle, const char *);
 __declspec(dllimport) void __stdcall SetLastError(unsigned long);
 __declspec(dllimport) unsigned long __stdcall GetLastError(void);
@@ -43,6 +44,7 @@ static Handle create(void) {
 void entry(void) {
     static const WindowClass wc = {3, procedure, 0, 0, (Handle)0x400000, 0, 0, 0, 0, className};
     Handle first, second, icon;
+    unsigned int message[8];
     SetLastError(77);
     if (!RegisterClassA(&wc)) ExitProcess(1);
     first = create(); second = create();
@@ -62,5 +64,9 @@ void entry(void) {
     if (SendMessageA(second, 0x400, 10, 32) != 42) ExitProcess(12);
     if (SetWindowLongA(first, -4, (long)previous) != (long)replacement) ExitProcess(13);
     if (SendMessageA(first, 0x400, 10, 32) != 42 || GetLastError() != 77) ExitProcess(14);
+    for (unsigned int i = 0; i < 8; i++) message[i] = 0x5a5a5a5a;
+    if (PeekMessageA(message, 0, 0, 0, 0) || PeekMessageA(message, first, 0x100, 0x1ff, 1) ||
+        PeekMessageA(message, (Handle)-1, 0, 0, 0) || GetLastError() != 77) ExitProcess(22);
+    for (unsigned int i = 0; i < 8; i++) if (message[i] != 0x5a5a5a5a) ExitProcess(23);
     ExitProcess(42);
 }
