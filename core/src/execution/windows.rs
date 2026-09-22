@@ -83,6 +83,8 @@ pub struct Process32 {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ProcessStop {
     Exited(u32),
+    /// the current thread has no queued message and can resume after one arrives.
+    WaitingForMessage,
     DllInitializationFailed {
         module: String,
     },
@@ -123,6 +125,7 @@ enum Api {
     CallWindowProc,
     SendMessage,
     PeekMessage,
+    GetMessage,
     ShowWindow,
     UpdateWindow,
     CreateDialog,
@@ -158,6 +161,7 @@ enum Api {
 enum DispatchError {
     Memory(MemoryError),
     Unsupported,
+    WaitingForMessage,
 }
 
 fn collect_modules<'a>(
@@ -186,6 +190,7 @@ impl DispatchError {
         match self {
             Self::Memory(error) => ProcessStop::Stopped(StopReason::MemoryFault(error)),
             Self::Unsupported => ProcessStop::UnsupportedApi { address },
+            Self::WaitingForMessage => ProcessStop::WaitingForMessage,
         }
     }
 }
@@ -220,6 +225,7 @@ impl Api {
             0x2a4 => Some(Self::CallWindowProc),
             0x2cc => Some(Self::SendMessage),
             0x43c => Some(Self::PeekMessage),
+            0x448 => Some(Self::GetMessage),
             0x440 => Some(Self::ShowWindow),
             0x444 => Some(Self::UpdateWindow),
             0x2c4 => Some(Self::CallNextHook),
@@ -308,6 +314,7 @@ impl Api {
                 "CallWindowProcA" => 0x2a4,
                 "SendMessageA" => 0x2cc,
                 "PeekMessageA" => 0x43c,
+                "GetMessageA" => 0x448,
                 "ShowWindow" => 0x440,
                 "UpdateWindow" => 0x444,
                 "CallNextHookEx" => 0x2c4,
@@ -429,7 +436,7 @@ impl Api {
             Self::GetEnvironmentVariable => 3,
             Self::WindowsFormat | Self::ShowWindow => 2,
             Self::CallWindowProc | Self::CreateDialog | Self::PeekMessage => 5,
-            Self::CallNextHook | Self::SendMessage => 4,
+            Self::CallNextHook | Self::SendMessage | Self::GetMessage => 4,
             Self::Window(call) => call.arguments(),
             Self::GetLastError
             | Self::GetCommandLine
@@ -801,6 +808,17 @@ impl Process32 {
         Ok(())
     }
 
+    fn wait_for_message(&self, args: &[u32]) -> Result<(), DispatchError> {
+        if (!matches!(args[1], 0 | u32::MAX) && self.desktop.window(args[1]).is_none())
+            || args[2] > u16::MAX.into()
+            || args[3] > u16::MAX.into()
+        {
+            return Err(DispatchError::Unsupported);
+        }
+        guest::check(&self.memory, args[0], 32, Access::Write)?;
+        Err(DispatchError::WaitingForMessage)
+    }
+
     fn show_window_normal(&mut self, args: &[u32]) -> Result<(), DispatchError> {
         if args[1] != 1 {
             return Err(DispatchError::Unsupported);
@@ -835,6 +853,7 @@ impl Process32 {
             Api::GetStartupInfo => parameters::startup_info(&mut self.memory, argument)?,
             Api::WindowsFormat => self.windows_format(args, stack)?,
             Api::PeekMessage => self.peek_empty_message(args)?,
+            Api::GetMessage => self.wait_for_message(args)?,
             Api::ShowWindow => self.show_window_normal(args)?,
             Api::UpdateWindow => self.update_window(argument)?,
             Api::Class(call) => self.window_class(call, args)?,
