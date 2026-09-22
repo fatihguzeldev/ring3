@@ -17,8 +17,9 @@ fn executes_an_uninterrupted_guest_graphics_program() {
             Process32::load(&d3d8_executable::pe32(width, height, color), 32).unwrap();
         let result = process.run(100);
         assert_eq!(result.reason, ProcessStop::Stopped(StopReason::Breakpoint));
-        assert_eq!(result.api_calls, 5);
+        assert_eq!(result.api_calls, 6);
         assert_eq!(read(&process, PARAMETERS + 12), 1);
+        assert_eq!(read(&process, IDENTIFIER), 0x676e_6972);
         let frame = process.take_frame().unwrap();
         assert_eq!((frame.width, frame.height), (width, height));
         let [_, r, g, b] = color.to_be_bytes();
