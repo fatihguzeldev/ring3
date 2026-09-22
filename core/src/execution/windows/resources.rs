@@ -7,17 +7,22 @@ use crate::{
     PeResourcePayloadError, parse_pe_resource_payloads,
 };
 
+mod accelerators;
+
 #[derive(Clone, Copy)]
 pub(super) enum Call {
     Find,
     String,
+    LoadAccelerators,
+    CopyAccelerators,
 }
 
 impl Call {
     pub(super) fn arguments(self) -> usize {
         match self {
-            Self::Find => 3,
+            Self::Find | Self::CopyAccelerators => 3,
             Self::String => 4,
+            Self::LoadAccelerators => 2,
         }
     }
 
@@ -25,6 +30,8 @@ impl Call {
         match offset {
             0xe8 => Some(Self::Find),
             0xec => Some(Self::String),
+            0x29c => Some(Self::LoadAccelerators),
+            0x2a0 => Some(Self::CopyAccelerators),
             _ => None,
         }
     }
@@ -38,6 +45,7 @@ struct Image {
 pub(super) struct Resources {
     program: u32,
     images: Vec<Image>,
+    accelerators: accelerators::Tables,
 }
 
 struct Resource {
@@ -72,17 +80,38 @@ impl Resources {
                     .map(|table| table.map(|table| table.data_entry_table)),
             })
             .collect();
-        Self { program, images }
+        Self {
+            program,
+            images,
+            accelerators: accelerators::Tables::default(),
+        }
     }
 
     pub(super) fn dispatch(
-        &self,
+        &mut self,
         call: Call,
         arguments: &[u32],
         modules: &Modules,
         memory: &mut GuestMemory,
     ) -> Result<u32, DispatchError> {
         match call {
+            Call::LoadAccelerators => {
+                if arguments[1] > 0xffff {
+                    return Err(DispatchError::Unsupported);
+                }
+                let error = match self.find(arguments[0], 9, arguments[1], modules)? {
+                    Selection::Found(resource) => {
+                        if let Some(handle) = self.accelerators.load(&resource, memory)? {
+                            return Ok(handle);
+                        }
+                        8
+                    }
+                    Selection::Missing(error) => error,
+                };
+                thread::set_last_error(memory, error)?;
+                Ok(0)
+            }
+            Call::CopyAccelerators => self.accelerators.copy(arguments, memory),
             Call::Find => {
                 let (name, kind) = (arguments[1], arguments[2]);
                 if name > 0xffff || kind > 0xffff {

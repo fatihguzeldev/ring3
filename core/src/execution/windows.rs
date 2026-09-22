@@ -248,6 +248,8 @@ impl Api {
                 "SetWindowsHookExA" => 0x24c,
                 "UnhookWindowsHookEx" => 0x250,
                 "LoadStringA" => 0xec,
+                "LoadAcceleratorsA" => 0x29c,
+                "CopyAcceleratorTableA" => 0x2a0,
                 "RegisterWindowMessageA" => 0x94,
                 "RegisterClipboardFormatA" => 0xc8,
                 "GetSystemMetrics" => 0x9c,
