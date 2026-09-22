@@ -58,3 +58,4 @@ EXPORTS
     _SetThreadPriority@8==SetThreadPriority
     _GetThreadPriority@4==GetThreadPriority
     _lstrlenA@4==lstrlenA
+    _GetFileAttributesA@4==GetFileAttributesA

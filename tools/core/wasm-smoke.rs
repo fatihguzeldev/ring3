@@ -373,6 +373,8 @@ fn execute_locale_activity() {
     assert_eq!(process.cpu.register(Register32::Edi), 7);
 }
 
+#[path = "../../core/tests/support/file_attributes_executable.rs"]
+mod file_attributes_executable;
 #[path = "../../core/tests/support/string_length_executable.rs"]
 mod string_length_executable;
 #[path = "../../core/tests/support/windows_string_length_executable.rs"]
@@ -1379,6 +1381,49 @@ fn execute_windows_string_length() {
         let run = process.run(1000);
         assert_eq!(run.reason, ProcessStop::Exited(42));
         assert_eq!((run.instructions, run.api_calls), (44, 8));
+    }
+}
+
+fn execute_file_attributes() {
+    use ring3_core::execution::{
+        FileMetadata, Process32, ProcessOptions, ProcessStop, Register32, StopReason,
+    };
+    let files = [
+        FileMetadata {
+            path: b"C:\\sample.bin",
+            size: 42,
+        },
+        FileMetadata {
+            path: b"C:\\Folder\\leaf.bin",
+            size: 7,
+        },
+    ];
+    for (files, value) in [(&[][..], u32::MAX), (&files[..], 128)] {
+        let options = ProcessOptions {
+            files,
+            ..ProcessOptions::default()
+        };
+        let mut process =
+            Process32::load_with_options(&file_attributes_executable::pe32(), 64, options).unwrap();
+        let run = process.run(100);
+        assert_eq!(run.reason, ProcessStop::Stopped(StopReason::Breakpoint));
+        assert_eq!((run.instructions, run.api_calls), (6, 2));
+        assert_eq!(process.cpu.register(Register32::Eax), value);
+        assert_eq!(process.cpu.register(Register32::Ebx), 16);
+        assert_eq!(process.cpu.register(Register32::Esp), 0x1001_0000);
+        #[cfg(windows_demo)]
+        {
+            let mut process = Process32::load_with_options(
+                include_bytes!("../../target/windows-api/file-attributes.exe"),
+                64,
+                options,
+            )
+            .unwrap();
+            let run = process.run(1000);
+            assert_eq!(run.reason, ProcessStop::Exited(42));
+            let counts = if files.is_empty() { (36, 8) } else { (78, 16) };
+            assert_eq!((run.instructions, run.api_calls), counts);
+        }
     }
 }
 
@@ -3476,6 +3521,7 @@ pub extern "C" fn run() -> u32 {
     execute_registry_keys();
     execute_registry_values();
     execute_windows_string_length();
+    execute_file_attributes();
     execute_x87_register_stores();
     execute_thread_priority();
     execute_windows_formatting();
