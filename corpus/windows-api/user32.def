@@ -28,6 +28,7 @@ EXPORTS
     _SendMessageA@16==SendMessageA
     _PeekMessageA@20==PeekMessageA
     _GetMessageA@16==GetMessageA
+    _TranslateMessage@4==TranslateMessage
     _ShowWindow@8==ShowWindow
     _UpdateWindow@4==UpdateWindow
     wsprintfA
