@@ -22,7 +22,10 @@ function command(program, args) {
 
 const harness = join(root, "tools/core/wasm-smoke.rs");
 if (compiledDll) command(process.execPath, ["tools/corpus/build-guest-dll.mjs"]);
-if (compiledWindows) command(process.execPath, ["tools/corpus/build-windows-api.mjs"]);
+if (compiledWindows) {
+  command(process.execPath, ["tools/corpus/build-windows-api.mjs"]);
+  command(process.execPath, ["tools/corpus/build-d3d8-frame.mjs"]);
+}
 const target = join(root, "target");
 command("rustfmt", ["--edition", "2024", "--check", harness]);
 command("cargo", [

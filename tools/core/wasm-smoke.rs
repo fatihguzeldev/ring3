@@ -3403,6 +3403,28 @@ fn execute_graphics() {
                 .all(|pixel| pixel == [r, g, b, 255])
         );
     }
+    #[cfg(windows_demo)]
+    execute_compiled_graphics();
+}
+
+#[cfg(windows_demo)]
+fn execute_compiled_graphics() {
+    use ring3_core::execution::{Process32, ProcessStop};
+
+    let mut process =
+        Process32::load(include_bytes!("../../target/d3d8-frame/frame.exe"), 64).unwrap();
+    let result = process.run(100_000);
+    assert_eq!(result.reason, ProcessStop::Exited(0));
+    assert_eq!(result.api_calls, 36);
+    let frame = process.take_frame().unwrap();
+    assert_eq!((frame.width, frame.height), (320, 200));
+    let pixel = |x: usize, y: usize| {
+        let offset = (y * frame.width as usize + x) * 4;
+        &frame.rgba[offset..offset + 4]
+    };
+    assert_eq!(pixel(45, 45), &[0, 255, 0, 255]);
+    assert_eq!(pixel(100, 50), &[0xe8, 0x6c, 0x42, 255]);
+    assert_eq!(pixel(0, 0), &[0x10, 0x20, 0x30, 255]);
 }
 
 fn execute_windows_api() {

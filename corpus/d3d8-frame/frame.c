@@ -13,6 +13,9 @@ typedef u32 (__stdcall *get_level_count)(object *);
 typedef result (__stdcall *get_level_desc)(object *, u32, u32 *);
 typedef result (__stdcall *lock_rect)(object *, u32, u32 *, const int *, u32);
 typedef result (__stdcall *unlock_rect)(object *, u32);
+typedef result (__stdcall *set_vertex_shader)(object *, u32);
+typedef result (__stdcall *draw_primitive_up)(object *, u32, u32, const void *, u32);
+typedef struct { float x, y, z, rhw; u32 diffuse; } color_vertex;
 #pragma pack(push, 4)
 typedef struct {
     u32 data1;
@@ -43,6 +46,11 @@ u32 presentation[13] = {320, 200, 22, 1, 0, 1, 0, 1, 0, 0, 0, 0, 0};
 int left[4] = {24, 24, 152, 176};
 int right[4] = {168, 24, 296, 176};
 int stripe[4] = {0, 88, 320, 112};
+color_vertex triangle[3] = {
+    {40.0f, 40.0f, 0.0f, 1.0f, 0xff00ff00},
+    {80.0f, 40.0f, 0.0f, 1.0f, 0xff00ff00},
+    {40.0f, 80.0f, 0.0f, 1.0f, 0xff00ff00},
+};
 object *device;
 object *texture;
 adapter_identifier identifier;
@@ -71,7 +79,8 @@ void entry(void) {
         caps[0] != 0x12345678) ExitProcess(13);
     if (((get_device_caps)root->methods[13])(root, 0, 1, caps) != 0) ExitProcess(14);
     if (caps[0] != 1 || caps[1] != 0 || caps[2] != 0 || caps[3] != 0x00080000 ||
-        caps[4] != 0 || caps[52] != 0) ExitProcess(15);
+        caps[4] != 0 || caps[7] != 0x400 || caps[45] != 4096 ||
+        caps[47] != 1 || caps[48] != 256 || caps[52] != 0) ExitProcess(15);
     if (((get_display_mode)root->methods[8])(root, 0, current_mode) != 0 ||
         current_mode[0] != 640 || current_mode[1] != 480 ||
         current_mode[2] != 0 || current_mode[3] != 22) ExitProcess(33);
@@ -113,6 +122,9 @@ void entry(void) {
     if (clear(device, 1, left, 1, 0xffe86c42, 0.0f, 0) != 0) ExitProcess(4);
     if (clear(device, 1, right, 1, 0xff42bad1, 0.0f, 0) != 0) ExitProcess(5);
     if (clear(device, 1, stripe, 1, 0xfff4d35e, 0.0f, 0) != 0) ExitProcess(6);
+    if (((set_vertex_shader)device->methods[76])(device, 0x44) != 0) ExitProcess(34);
+    if (((draw_primitive_up)device->methods[72])(
+        device, 4, 1, triangle, sizeof(triangle[0])) != 0) ExitProcess(35);
     if (((present_frame)device->methods[15])(device, 0, 0, 0, 0) != 0) ExitProcess(7);
     ((release_object)device->methods[2])(device);
     ((release_object)root->methods[2])(root);
