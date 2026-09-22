@@ -43,3 +43,4 @@ EXPORTS
     strncmp
     _stricmp
     _vsnprintf
+    tolower

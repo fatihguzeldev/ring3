@@ -783,6 +783,24 @@ fn execute_x87_status() {
     }
 }
 
+#[path = "../../core/tests/support/lowercase_executable.rs"]
+mod lowercase_executable;
+
+fn execute_crt_lowercase() {
+    use ring3_core::execution::{Process32, ProcessStop, Register32, StopReason};
+    for (character, expected) in [(0x54_u32, 0x74), (0xff, 0xff), (0, 0)] {
+        let mut bytes = lowercase_executable::pe32();
+        bytes[0x201..0x205].copy_from_slice(&character.to_le_bytes());
+        let mut process = Process32::load(&bytes, 32).unwrap();
+        let run = process.run(40);
+        assert_eq!(run.reason, ProcessStop::Stopped(StopReason::Breakpoint));
+        assert_eq!((run.instructions, run.api_calls), (8, 2));
+        assert_eq!(process.cpu.register(Register32::Esi), expected);
+        assert_eq!(process.cpu.register(Register32::Eax), u32::MAX);
+        assert_eq!(process.cpu.register(Register32::Esp), 0x1001_0000);
+    }
+}
+
 fn execute_crt_formatting() {
     use ring3_core::execution::{Process32, ProcessStop, Register32, StopReason};
     for (capacity, result, expected) in [
@@ -3111,6 +3129,7 @@ pub extern "C" fn run() -> u32 {
     execute_crt_string_prefix();
     execute_crt_case_comparison();
     execute_crt_formatting();
+    execute_crt_lowercase();
     execute_x87_status();
     execute_x87_division();
     execute_wide_product();
