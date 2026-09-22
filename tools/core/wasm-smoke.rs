@@ -1160,6 +1160,8 @@ mod startup_info_executable;
 mod hook_executable;
 #[path = "../../core/tests/support/procedure_executable.rs"]
 mod procedure_executable;
+#[path = "../../core/tests/support/registry_executable.rs"]
+mod registry_executable;
 
 #[path = "../../core/tests/support/thread_priority_executable.rs"]
 mod thread_priority_executable;
@@ -1311,6 +1313,24 @@ fn execute_procedure_lookup() {
         let run = process.run(1000);
         assert_eq!(run.reason, ProcessStop::Exited(42));
         assert_eq!((run.instructions, run.api_calls), (78, 14));
+    }
+}
+
+fn execute_registry_keys() {
+    use ring3_core::execution::{Process32, ProcessStop, Register32, StopReason};
+    let mut process = Process32::load(&registry_executable::pe32(), 32).unwrap();
+    let run = process.run(100);
+    assert_eq!(run.reason, ProcessStop::Stopped(StopReason::Breakpoint));
+    assert_eq!((run.instructions, run.api_calls), (22, 3));
+    assert_eq!(process.cpu.register(Register32::Eax), 1);
+    assert_eq!(process.cpu.register(Register32::Esp), 0x1001_0000);
+    #[cfg(windows_demo)]
+    {
+        let mut process =
+            Process32::load(include_bytes!("../../target/windows-api/registry.exe"), 64).unwrap();
+        let run = process.run(1000);
+        assert_eq!(run.reason, ProcessStop::Exited(42));
+        assert_eq!((run.instructions, run.api_calls), (152, 16));
     }
 }
 
@@ -3405,6 +3425,7 @@ pub extern "C" fn run() -> u32 {
     execute_startup_information();
     execute_hook_registration();
     execute_procedure_lookup();
+    execute_registry_keys();
     execute_x87_register_stores();
     execute_thread_priority();
     execute_windows_formatting();
