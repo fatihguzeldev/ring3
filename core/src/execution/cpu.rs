@@ -194,6 +194,9 @@ impl Cpu32 {
             | Code::Imul_r32_rm32_imm32
             | Code::Imul_r16_rm16_imm8
             | Code::Imul_r32_rm32_imm8 => self.multiply(instruction, memory)?,
+            Code::Imul_rm8 | Code::Imul_rm16 | Code::Imul_rm32 => {
+                self.multiply_wide(instruction, memory)?;
+            }
             Code::Inc_rm8
             | Code::Inc_rm16
             | Code::Inc_rm32
@@ -331,6 +334,34 @@ impl Cpu32 {
         self.write_operand(destination, result, memory)?;
         // sf/zf/af/pf are undefined and deterministically preserved.
         self.eflags = (self.eflags & !0x801) | if product == signed(result) { 0 } else { 0x801 };
+        Ok(())
+    }
+
+    fn multiply_wide(
+        &mut self,
+        instruction: &Instruction,
+        memory: &GuestMemory,
+    ) -> Result<(), StopReason> {
+        let source = self.operand(instruction, 0)?;
+        let bits = source.width as u32 * 8;
+        let mask = source.width.mask();
+        let signed =
+            |value: u32| i64::from(((value & mask) << (32 - bits)).cast_signed() >> (32 - bits));
+        let accumulator = self.register(Register32::Eax);
+        let product = signed(accumulator) * signed(self.read_operand(source, memory)?);
+        let destination_mask = if bits == 8 { 0xffff } else { mask };
+        let low = u32::try_from(product.cast_unsigned() & u64::from(destination_mask))
+            .expect("masked product fits u32");
+        self.set_register(Register32::Eax, (accumulator & !destination_mask) | low);
+        if bits != 8 {
+            let high = u32::try_from((product.cast_unsigned() >> bits) & u64::from(mask))
+                .expect("masked product fits u32");
+            self.set_register(
+                Register32::Edx,
+                (self.register(Register32::Edx) & !mask) | high,
+            );
+        }
+        self.eflags = (self.eflags & !0x801) | if product == signed(low) { 0 } else { 0x801 };
         Ok(())
     }
 
