@@ -5,6 +5,7 @@ typedef result (__stdcall *create_device)(object *, u32, u32, u32, u32, u32 *, o
 typedef result (__stdcall *clear_target)(object *, u32, const int *, u32, u32, float, u32);
 typedef result (__stdcall *present_frame)(object *, void *, void *, u32, void *);
 typedef u32 (__stdcall *release_object)(object *);
+typedef u32 (__stdcall *adapter_count)(object *);
 
 __declspec(dllimport) object *__stdcall Direct3DCreate8(u32);
 __declspec(dllimport) u32 __stdcall GetDesktopWindow(void);
@@ -20,6 +21,7 @@ int _fltused = 0;
 void entry(void) {
     object *root = Direct3DCreate8(120);
     if (root == 0) ExitProcess(1);
+    if (((adapter_count)root->methods[4])(root) != 1) ExitProcess(8);
     u32 desktop = GetDesktopWindow();
     presentation[6] = desktop;
     result status = ((create_device)root->methods[15])(
