@@ -33,7 +33,7 @@ fn prepare(process: &mut Process32, index: u32) -> Cpu32 {
 }
 
 #[test]
-fn icon_metrics_return_the_fixed_guest_dimensions_without_other_state_changes() {
+fn metrics_return_the_fixed_guest_dimensions_without_other_state_changes() {
     let mut process = process();
     let pages = process.memory.mapped_pages();
     process
@@ -49,6 +49,11 @@ fn icon_metrics_return_the_fixed_guest_dimensions_without_other_state_changes() 
         .protect(0x0040_0000, PAGE_SIZE, Permissions::NONE)
         .unwrap();
     for (index, value) in [
+        (0, 640),
+        (1, 480),
+        (4, 19),
+        (16, 640),
+        (17, 461),
         (2, 16),
         (3, 16),
         (9, 16),
@@ -111,9 +116,17 @@ mod metrics_executable;
 
 #[test]
 fn icon_metrics_guest_matches_whole_and_single_step_execution() {
-    let bytes = metrics_executable::pe32();
-    let mut whole = Process32::load(&bytes, 32).unwrap();
-    let mut stepped = Process32::load(&bytes, 32).unwrap();
+    check_guest(&metrics_executable::pe32(), [16, 32, 32, 16]);
+}
+
+#[test]
+fn fullscreen_client_metrics_reserve_the_caption_from_the_guest_screen() {
+    check_guest(&metrics_executable::fullscreen(), [461, 640, 480, 19]);
+}
+
+fn check_guest(bytes: &[u8], values: [u32; 4]) {
+    let mut whole = Process32::load(bytes, 32).unwrap();
+    let mut stepped = Process32::load(bytes, 32).unwrap();
     let result = whole.run(30);
     assert_eq!(result.reason, ProcessStop::Stopped(StopReason::Breakpoint));
     assert_eq!((result.instructions, result.api_calls), (12, 4));
@@ -129,9 +142,9 @@ fn icon_metrics_guest_matches_whole_and_single_step_execution() {
     }
     assert_eq!((instructions, calls), (12, 4));
     assert_eq!(whole.cpu, stepped.cpu);
-    assert_eq!(whole.cpu.register(Register32::Eax), 16);
-    assert_eq!(whole.cpu.register(Register32::Ebx), 32);
-    assert_eq!(whole.cpu.register(Register32::Ecx), 32);
-    assert_eq!(whole.cpu.register(Register32::Edx), 16);
+    assert_eq!(whole.cpu.register(Register32::Eax), values[0]);
+    assert_eq!(whole.cpu.register(Register32::Ebx), values[1]);
+    assert_eq!(whole.cpu.register(Register32::Ecx), values[2]);
+    assert_eq!(whole.cpu.register(Register32::Edx), values[3]);
     assert_eq!(whole.cpu.register(Register32::Esp), 0x1001_0000);
 }
