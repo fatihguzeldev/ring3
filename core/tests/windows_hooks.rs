@@ -15,6 +15,7 @@ const ERROR: u32 = 0x7ffd_e034;
 const FIRST: u32 = 0x7400_0004;
 const KEYBOARD: [u32; 4] = [13, 0xdead_beef, 0x0040_0000, 0];
 const ARGS: [u32; 4] = [u32::MAX, 0xdead_beef, 0, 1];
+const CBT: [u32; 4] = [5, 0xdead_beef, 0, 1];
 
 fn load() -> Process32 {
     Process32::load(&hook_executable::pe32(), 32).unwrap()
@@ -58,7 +59,11 @@ fn call(p: &mut Process32, api: u32, args: &[u32]) -> u32 {
 
 #[test]
 fn imported_hook_lifetime_runs_whole_or_stepwise() {
-    for bytes in [hook_executable::pe32(), hook_executable::keyboard()] {
+    for bytes in [
+        hook_executable::pe32(),
+        hook_executable::keyboard(),
+        hook_executable::cbt(),
+    ] {
         for budget in [1, 100] {
             let mut p = Process32::load(&bytes, 32).unwrap();
             let mut counts = (0, 0);
@@ -114,7 +119,11 @@ fn capacity_recovery_does_not_recycle_stale_handles() {
     let mut p = load();
     let pages = p.memory.mapped_pages();
     for index in 0..4096 {
-        let args = if index % 2 == 0 { ARGS } else { KEYBOARD };
+        let args = match index % 3 {
+            0 => ARGS,
+            1 => KEYBOARD,
+            _ => CBT,
+        };
         assert_eq!(call(&mut p, SET, &args), FIRST + index * 4);
     }
     p.memory
@@ -135,7 +144,11 @@ fn capacity_recovery_does_not_recycle_stale_handles() {
         assert_eq!(call(&mut p, REMOVE, &[FIRST + index * 4]), 1);
     }
     for index in 4096..8192 {
-        let args = if index % 2 == 0 { ARGS } else { KEYBOARD };
+        let args = match index % 3 {
+            0 => ARGS,
+            1 => KEYBOARD,
+            _ => CBT,
+        };
         assert_eq!(call(&mut p, SET, &args), FIRST + index * 4);
     }
     assert_eq!(call(&mut p, REMOVE, &[FIRST]), 0);
@@ -151,6 +164,9 @@ fn unsupported_forms_and_error_faults_preserve_registration_identity() {
         [u32::MAX, 1, 1, 1],
         [u32::MAX, 1, 0, 0],
         [u32::MAX, 1, 0, 2],
+        [5, 1, 1, 1],
+        [5, 1, 0, 0],
+        [5, 1, 0, 2],
     ] {
         let before = prepare(&mut p, SET, &args);
         assert_eq!(
@@ -168,7 +184,11 @@ fn unsupported_forms_and_error_faults_preserve_registration_identity() {
     let before = prepare(&mut p, SET, &ARGS);
     assert_eq!(p.run(0).api_calls, 0);
     assert_eq!(p.cpu, before);
-    for (api, args) in [(SET, vec![u32::MAX, 0, 0, 1]), (REMOVE, vec![FIRST])] {
+    for (api, args) in [
+        (SET, vec![u32::MAX, 0, 0, 1]),
+        (SET, vec![5, 0, 0, 1]),
+        (REMOVE, vec![FIRST]),
+    ] {
         let before = prepare(&mut p, api, &args);
         let result = p.run(1);
         assert!(matches!(
@@ -339,4 +359,39 @@ fn keyboard_zero_budget_and_incomplete_frame_leave_registration_unchanged() {
     ));
     assert_eq!(p.cpu, before);
     assert_eq!(call(&mut p, REMOVE, &[FIRST]), 1);
+}
+
+#[test]
+fn cbt_lifetimes_do_not_read_callbacks_and_preserve_other_hook_kinds() {
+    let mut p = load();
+    assert_eq!(call(&mut p, SET, &[5, 0, 0, 1]), 0);
+    assert_eq!(p.last_error().unwrap(), 1427);
+    p.memory
+        .protect(0x7ffd_e000, 4096, Permissions::NONE)
+        .unwrap();
+    p.memory
+        .protect(0x7000_2000, 4096, Permissions::NONE)
+        .unwrap();
+    let before = prepare(&mut p, SET, &CBT);
+    assert_eq!(p.run(0).api_calls, 0);
+    assert_eq!(p.cpu, before);
+    p.cpu.set_register(Register32::Esp, 0x1000_fff0);
+    let before = p.cpu;
+    assert!(matches!(
+        p.run(1).reason,
+        ProcessStop::Stopped(StopReason::MemoryFault(_))
+    ));
+    assert_eq!(p.cpu, before);
+    for (index, callback) in [1, 0x0040_1000, u32::MAX].into_iter().enumerate() {
+        assert_eq!(
+            call(&mut p, SET, &[5, callback, 0, 1]),
+            FIRST + u32::try_from(index).unwrap() * 4
+        );
+    }
+    assert_eq!(call(&mut p, SET, &ARGS), FIRST + 12);
+    assert_eq!(call(&mut p, SET, &KEYBOARD), FIRST + 16);
+    for index in [1, 3, 0, 4, 2] {
+        assert_eq!(call(&mut p, REMOVE, &[FIRST + index * 4]), 1);
+    }
+    assert_eq!(call(&mut p, SET, &CBT), FIRST + 20);
 }

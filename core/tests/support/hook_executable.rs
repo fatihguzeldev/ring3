@@ -8,6 +8,10 @@ pub fn keyboard() -> Vec<u8> {
     registration(13, 0x0040_0000, 0)
 }
 
+pub fn cbt() -> Vec<u8> {
+    registration(5, 0, 1)
+}
+
 fn registration(kind: u32, module: u32, thread: u32) -> Vec<u8> {
     let mut code = Vec::new();
     for argument in [thread, module, 0x0040_1040, kind] {

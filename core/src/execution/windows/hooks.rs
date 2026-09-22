@@ -33,6 +33,7 @@ impl Call {
 enum Kind {
     MessageFilter,
     LowLevelKeyboard,
+    Cbt,
 }
 
 pub(super) struct Hooks {
@@ -69,6 +70,7 @@ impl Hooks {
             u32::MAX if arguments[2] == 0 && arguments[3] == thread::CURRENT_ID => {
                 Kind::MessageFilter
             }
+            5 if arguments[2] == 0 && arguments[3] == thread::CURRENT_ID => Kind::Cbt,
             13 if arguments[2] == 0 || modules.contains(arguments[2]) => Kind::LowLevelKeyboard,
             _ => return Err(DispatchError::Unsupported),
         };
@@ -151,6 +153,8 @@ mod tests {
             [13, 20, 0, 0],
             [u32::MAX, 30, 0, 1],
             [13, 40, 0x0040_0000, 0],
+            [5, 50, 0, 1],
+            [5, 60, 0, 1],
         ] {
             assert!(
                 hooks
@@ -161,6 +165,7 @@ mod tests {
         for (kind, expected) in [
             (Kind::MessageFilter, [30, 10]),
             (Kind::LowLevelKeyboard, [40, 20]),
+            (Kind::Cbt, [60, 50]),
         ] {
             let callbacks: Vec<_> = hooks
                 .callbacks
