@@ -60,6 +60,7 @@ pub struct Process32 {
     critical_sections: critical_sections::CriticalSections,
     mutexes: synchronization::Mutexes,
     hooks: hooks::Hooks,
+    priority: thread::Priority,
     tls: tls::Tls,
     graphics: d3d8::Graphics,
     gdi: gdi::Gdi,
@@ -126,6 +127,7 @@ enum Api {
     CriticalSection(critical_sections::Call),
     Synchronization(synchronization::Call),
     Hook(hooks::Call),
+    ThreadPriority(thread::PriorityCall),
     Tls(tls::Call),
     Unsupported,
 }
@@ -181,6 +183,7 @@ impl Api {
                 .or_else(|| critical_sections::Call::at(offset).map(Self::CriticalSection))
                 .or_else(|| synchronization::Call::at(offset).map(Self::Synchronization))
                 .or_else(|| hooks::Call::at(offset).map(Self::Hook))
+                .or_else(|| thread::PriorityCall::at(offset).map(Self::ThreadPriority))
                 .or_else(|| clock::Call::at(offset).map(Self::Clock))
                 .or_else(|| tls::Call::at(offset).map(Self::Tls))
                 .or_else(|| code_pages::Call::at(offset).map(Self::CodePage)),
@@ -239,6 +242,8 @@ impl Api {
             "GetLastError" => 4,
             "GetCurrentThread" => 0xd8,
             "GetCurrentThreadId" => 0xdc,
+            "SetThreadPriority" => 0x254,
+            "GetThreadPriority" => 0x258,
             "ExitProcess" => 8,
             "InterlockedExchange" => 0x200,
             "InterlockedIncrement" => 0x204,
@@ -301,6 +306,7 @@ impl Api {
             Self::Interlocked(call) => call.arguments(),
             Self::Synchronization(call) => call.arguments(),
             Self::Hook(call) => call.arguments(),
+            Self::ThreadPriority(call) => call.arguments(),
             Self::Directory(call) => call.arguments(),
             Self::Clock(call) => call.arguments(),
             Self::GetEnvironmentVariable => 3,
@@ -452,6 +458,7 @@ impl Process32 {
             critical_sections: critical_sections::CriticalSections::default(),
             mutexes: synchronization::Mutexes::default(),
             hooks: hooks::Hooks::default(),
+            priority: thread::Priority::default(),
             tls: tls::Tls::default(),
             graphics: d3d8::Graphics::default(),
             crt: crt::Crt::default(),
@@ -666,6 +673,10 @@ impl Process32 {
             Api::Gdi(call) => self.cpu.set_register(
                 Register32::Eax,
                 self.gdi.dispatch(call, arguments, &mut self.memory)?,
+            ),
+            Api::ThreadPriority(call) => self.cpu.set_register(
+                Register32::Eax,
+                self.priority.dispatch(call, arguments, &mut self.memory)?,
             ),
             Api::Hook(call) => self.cpu.set_register(
                 Register32::Eax,
