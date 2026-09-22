@@ -23,6 +23,7 @@ EXPORTS
     _GetACP@0==GetACP
     _GetOEMCP@0==GetOEMCP
     _GetCPInfo@8==GetCPInfo
+    _WideCharToMultiByte@32==WideCharToMultiByte
     _InitializeCriticalSection@4==InitializeCriticalSection
     _EnterCriticalSection@4==EnterCriticalSection
     _TryEnterCriticalSection@4==TryEnterCriticalSection
