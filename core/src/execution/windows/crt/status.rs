@@ -8,7 +8,7 @@ pub(super) fn remove(
     let error = match directory.remove_file(memory, source)? {
         directory::Removal::Removed => return Ok(0),
         directory::Removal::Missing => 2,
-        directory::Removal::Directory => 13,
+        directory::Removal::Directory | directory::Removal::Open => 13,
     };
     guest::write_word(memory, ERRNO, error)?;
     Ok(u32::MAX)

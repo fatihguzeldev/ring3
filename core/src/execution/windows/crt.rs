@@ -13,6 +13,7 @@ mod onexit;
 mod paths;
 mod random;
 mod status;
+mod streams;
 mod strings;
 mod type_names;
 
@@ -58,6 +59,7 @@ pub(super) enum Call {
     CopyString,
     AppendString,
     SplitPath,
+    Stream(streams::Call),
     FindCharacter,
     Stat,
     Remove,
@@ -110,6 +112,9 @@ impl Call {
             0x188 => Some(Self::Remove),
             0x18c => Some(Self::AppendString),
             0x190 => Some(Self::SplitPath),
+            0x194 => Some(Self::Stream(streams::Call::Open)),
+            0x198 => Some(Self::Stream(streams::Call::Read)),
+            0x19c => Some(Self::Stream(streams::Call::Close)),
             0x13c => Some(Self::SetMbCodePage),
             0x140 => Some(Self::OnExit),
             _ => None,
@@ -118,6 +123,7 @@ impl Call {
 
     pub(super) fn arguments(self) -> usize {
         match self {
+            Self::Stream(call) => call.arguments(),
             Self::SetAppType
             | Self::Malloc
             | Self::Free
@@ -164,6 +170,7 @@ pub(super) struct Crt {
     multibyte: multibyte::CodePage,
     exit_callbacks: onexit::Registry,
     random: random::Sequence,
+    streams: streams::Streams,
 }
 
 impl super::Process32 {
@@ -186,26 +193,30 @@ impl Crt {
     pub(super) fn dispatch(
         &mut self,
         call: Call,
-        arguments: &[u32],
+        args: &[u32],
         cpu: &mut Cpu32,
         memory: &mut GuestMemory,
         heap: &mut heap::Heap,
         directory: &mut directory::Directory,
     ) -> Result<Option<u32>, DispatchError> {
         Ok(match call {
+            Call::Stream(call) => self
+                .streams
+                .dispatch(call, args, cpu, memory, heap, directory)
+                .map(Some)?,
             Call::SetAppType => {
-                self.application_type = arguments[0].cast_signed();
+                self.application_type = args[0].cast_signed();
                 None
             }
-            Call::Malloc => Some(malloc(memory, heap, arguments[0])?),
-            Call::OperatorNew => Some(heap.allocate_crt(arguments[0], memory)?.unwrap_or(0)),
+            Call::Malloc => Some(malloc(memory, heap, args[0])?),
+            Call::OperatorNew => Some(heap.allocate_crt(args[0], memory)?.unwrap_or(0)),
             Call::Free | Call::OperatorDelete => {
-                heap.free_crt(arguments[0], cpu.register(Register32::Esp), memory)?;
+                heap.free_crt(args[0], cpu.register(Register32::Esp), memory)?;
                 None
             }
             Call::ErrnoPointer => Some(ERRNO),
             Call::SeedRandom => {
-                self.random.seed(arguments[0]);
+                self.random.seed(args[0]);
                 None
             }
             Call::Random => Some(self.random.next()),
@@ -215,79 +226,55 @@ impl Crt {
                 heap,
                 cpu.register(Register32::Ecx),
             )?),
-            Call::MbSearchReverse => Some(self.multibyte.reverse_search(
-                memory,
-                arguments[0],
-                arguments[1],
-            )?),
-            Call::MbIncrement => Some(self.multibyte.increment(memory, arguments[0])?),
+            Call::MbSearchReverse => Some(self.multibyte.reverse_search(memory, args[0], args[1])?),
+            Call::MbIncrement => Some(self.multibyte.increment(memory, args[0])?),
             Call::SetMbCodePage => {
-                self.multibyte.set(arguments[0].cast_signed())?;
+                self.multibyte.set(args[0].cast_signed())?;
                 Some(0)
             }
-            Call::OnExit => Some(self.exit_callbacks.register(arguments[0])),
-            Call::Duplicate => Some(strings::duplicate(memory, heap, arguments[0])?),
-            Call::Length => Some(strings::length(memory, arguments[0])?),
-            Call::Format => Some(formatting::write(memory, arguments)?),
-            Call::Lowercase => Some(strings::lowercase(arguments[0])?),
-            Call::CompareIgnoringCase => Some(strings::compare_ignoring_case(
-                memory,
-                arguments[0],
-                arguments[1],
-            )?),
-            Call::CompareStringPrefix => Some(strings::compare_prefix(
-                memory,
-                arguments[0],
-                arguments[1],
-                arguments[2],
-            )?),
-            Call::FindCharacter => Some(strings::find(memory, arguments[0], arguments[1])?),
+            Call::OnExit => Some(self.exit_callbacks.register(args[0])),
+            Call::Duplicate => Some(strings::duplicate(memory, heap, args[0])?),
+            Call::Length => Some(strings::length(memory, args[0])?),
+            Call::Format => Some(formatting::write(memory, args)?),
+            Call::Lowercase => Some(strings::lowercase(args[0])?),
+            Call::CompareIgnoringCase => {
+                Some(strings::compare_ignoring_case(memory, args[0], args[1])?)
+            }
+            Call::CompareStringPrefix => {
+                Some(strings::compare_prefix(memory, args[0], args[1], args[2])?)
+            }
+            Call::FindCharacter => Some(strings::find(memory, args[0], args[1])?),
             Call::SplitPath => {
-                self.multibyte.split_path(memory, arguments)?;
+                self.multibyte.split_path(memory, args)?;
                 None
             }
-            Call::Remove => Some(status::remove(directory, memory, arguments[0])?),
-            Call::Stat => Some(status::query(
-                directory,
-                memory,
-                arguments[0],
-                arguments[1],
-            )?),
+            Call::Remove => Some(status::remove(directory, memory, args[0])?),
+            Call::Stat => Some(status::query(directory, memory, args[0], args[1])?),
             Call::Copy | Call::CopyString | Call::AppendString => {
                 let copy = match call {
                     Call::CopyString => strings::copy,
                     Call::AppendString => strings::append,
                     _ => buffers::copy,
                 };
-                Some(copy(memory, arguments[0], arguments[1], arguments[2])?)
+                Some(copy(memory, args[0], args[1], args[2])?)
             }
-            Call::Compare => Some(buffers::compare(
-                memory,
-                arguments[0],
-                arguments[1],
-                arguments[2],
-            )?),
+            Call::Compare => Some(buffers::compare(memory, args[0], args[1], args[2])?),
             Call::DllOnExit => Some(onexit::register(
                 heap,
                 memory,
                 cpu.register(Register32::Esp),
-                arguments,
+                args,
             )?),
             Call::FmodePointer => Some(FMODE),
             Call::CommodePointer => Some(COMMODE),
             Call::ArgcPointer => Some(ARGC),
             Call::ArgvPointer => Some(ARGV),
-            Call::ControlFp => Some(floating::control(cpu, arguments[0], arguments[1])),
+            Call::ControlFp => Some(floating::control(cpu, args[0], args[1])),
             Call::GetMainArgs => {
-                arguments::get_main(self, arguments, memory)?;
+                arguments::get_main(self, args, memory)?;
                 Some(0)
             }
-            Call::Memset => Some(buffers::fill(
-                memory,
-                arguments[0],
-                arguments[1],
-                arguments[2],
-            )?),
+            Call::Memset => Some(buffers::fill(memory, args[0], args[1], args[2])?),
         })
     }
 }
@@ -321,6 +308,9 @@ pub(super) fn resolve(name: &str) -> Option<u32> {
         "strncpy" => Some(API_BASE + 0x154),
         "strncat" => Some(API_BASE + 0x18c),
         "_splitpath" => Some(API_BASE + 0x190),
+        "fopen" => Some(API_BASE + 0x194),
+        "fread" => Some(API_BASE + 0x198),
+        "fclose" => Some(API_BASE + 0x19c),
         "strchr" => Some(API_BASE + 0x158),
         "_setmbcp" => Some(API_BASE + 0x13c),
         "_onexit" => Some(API_BASE + 0x140),

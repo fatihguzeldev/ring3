@@ -19,8 +19,10 @@ pub struct ProcessOptions<'a> {
     pub current_directory: &'a [u8],
     /// existing virtual directories; declarations also make their ancestors available.
     pub directories: &'a [&'a [u8]],
-    /// declared metadata only; file contents are not mounted.
+    /// declared metadata; supplied contents must match these paths and sizes.
     pub files: &'a [super::directory::FileMetadata<'a>],
+    /// immutable snapshots for declared files, limited to one gib in total.
+    pub file_contents: &'a [super::directory::FileContents<'a>],
     pub command_line: &'a [u8],
     /// explicit name=value entries; win32 queries own a snapshot separate from `_environ`.
     /// ordinary ascii names match case-insensitively; the first duplicate wins.
@@ -36,6 +38,7 @@ impl Default for ProcessOptions<'_> {
             current_directory: b"C:\\",
             directories: &[],
             files: &[],
+            file_contents: &[],
             command_line: b"program.exe",
             environment: &[],
             diagnostic_imports: false,

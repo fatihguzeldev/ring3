@@ -5,9 +5,12 @@ use super::{
 };
 
 mod catalog;
+mod contents;
 mod paths;
 mod search;
 pub use catalog::FileMetadata;
+pub use contents::FileContents;
+pub(super) use contents::ReadFile;
 
 pub(super) struct Directory {
     terminated: Vec<u8>,
@@ -27,6 +30,7 @@ pub(super) enum Removal {
     Removed,
     Missing,
     Directory,
+    Open,
 }
 
 #[derive(Clone, Copy)]
@@ -283,6 +287,9 @@ impl Directory {
         {
             if file.removed || input.last() == Some(&b'\\') {
                 return Ok(Removal::Missing);
+            }
+            if file.readers != 0 {
+                return Ok(Removal::Open);
             }
             // retain path scaffolding and stable indices for directory and search snapshots.
             file.removed = true;

@@ -37,7 +37,7 @@ mod user_atoms;
 
 pub use clock::ClockError;
 pub use d3d8::Frame;
-pub use directory::FileMetadata;
+pub use directory::{FileContents, FileMetadata};
 pub use parameters::ProcessOptions;
 
 const API_BASE: u32 = 0x7000_0000;
@@ -467,11 +467,12 @@ impl Process32 {
         options: ProcessOptions<'_>,
     ) -> Result<Self, LoadError> {
         let parameters = parameters::Parameters::prepare(options)?;
-        let current_directory = directory::Directory::new(
+        let mut current_directory = directory::Directory::new(
             options.current_directory,
             options.directories,
             options.files,
         )?;
+        current_directory.attach_contents(options.file_contents)?;
         let mut diagnostic_imports = diagnostics::Imports::default();
         let reserved = [
             u64::from(STACK_BASE)..u64::from(STACK_BASE + STACK_SIZE),

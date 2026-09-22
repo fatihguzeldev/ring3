@@ -27,6 +27,8 @@ pub enum LoadError {
     },
     InvalidLayout,
     InvalidProcessParameters,
+    FileContentsLimitExceeded,
+    FileContentsAllocationFailed,
     InvalidModuleName,
     ModuleLimitExceeded,
     DuplicateModule {

@@ -13,6 +13,8 @@ pub(super) struct File {
     pub(super) path: Box<[u8]>,
     pub(super) size: u64,
     pub(super) removed: bool,
+    pub(super) contents: Option<Vec<u8>>,
+    pub(super) readers: u16,
 }
 
 pub(super) fn prepare(
@@ -64,6 +66,8 @@ pub(super) fn prepare(
             path: file.path.into(),
             size: file.size,
             removed: false,
+            contents: None,
+            readers: 0,
         })
         .collect())
 }

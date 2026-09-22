@@ -43,6 +43,7 @@ impl Call {
 enum Kind {
     Local,
     Crt,
+    Stream,
     GlobalFixed,
     GlobalMovable { discarded: bool, locks: u32 },
 }
@@ -298,6 +299,29 @@ impl Heap {
             .get(&pointer)
             .filter(|allocation| matches!(allocation.kind, Kind::Crt))
             .map(|allocation| allocation.length)
+    }
+
+    pub(super) fn allocate_stream(
+        &mut self,
+        memory: &mut GuestMemory,
+    ) -> Result<Option<u32>, MemoryError> {
+        self.reserve(32, Kind::Stream, memory)
+    }
+
+    pub(super) fn free_stream(
+        &mut self,
+        pointer: u32,
+        stack: u32,
+        memory: &mut GuestMemory,
+    ) -> Result<(), DispatchError> {
+        if !self
+            .allocations
+            .get(&pointer)
+            .is_some_and(|allocation| matches!(allocation.kind, Kind::Stream))
+        {
+            return Err(DispatchError::Unsupported);
+        }
+        self.release(pointer, stack, memory)
     }
 
     pub(super) fn free_crt(
