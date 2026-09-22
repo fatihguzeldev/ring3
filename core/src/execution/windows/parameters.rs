@@ -1,6 +1,14 @@
 use super::super::GuestModule;
 use super::{GuestMemory, LoadError, MemoryError, PAGE_SIZE, Permissions};
 
+pub(super) fn startup_info(memory: &mut GuestMemory, output: u32) -> Result<(), MemoryError> {
+    // this creation profile has no window overrides or inherited handles.
+    let mut bytes = [0; 68];
+    bytes[..4].copy_from_slice(&68_u32.to_le_bytes());
+    super::guest::check(memory, output, bytes.len(), super::super::Access::Write)?;
+    memory.write(u64::from(output), &bytes)
+}
+
 const BASE: u32 = 0x7000_4000;
 const MAX_BYTES: usize = 64 * 1024;
 

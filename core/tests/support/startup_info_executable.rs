@@ -1,0 +1,12 @@
+use super::imported_executable;
+
+pub fn pe32() -> Vec<u8> {
+    imported_executable::pe32(
+        &[
+            0xb8, 0x78, 0x56, 0x34, 0x12, 0x68, 0x80, 0x21, 0x40, 0, 0xff, 0x15, 0x60, 0x20, 0x40,
+            0, 0xcc,
+        ],
+        "KeRnEl32.dll",
+        &["GetStartupInfoA"],
+    )
+}
