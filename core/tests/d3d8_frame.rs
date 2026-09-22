@@ -125,7 +125,7 @@ fn create_accepts_only_direct3d_8_0_and_8_1_sdk_identities() {
 fn adapter_count_reports_only_the_live_owned_root() {
     let (mut process, root) = root();
     assert_eq!(method(&process, root, 3), 0x7000_0ffc);
-    assert_eq!(method(&process, root, 8), 0x7000_0ffc);
+    assert_eq!(method(&process, root, 12), 0x7000_0ffc);
     let count = method(&process, root, 4);
     assert_eq!(invoke(&mut process, count, &[root]), 1);
     assert_eq!(invoke(&mut process, count, &[root]), 1);
@@ -154,7 +154,7 @@ fn adapter_mode_reports_the_owned_display_profile() {
     let (mut process, root) = root();
     let enumerate = method(&process, root, 7);
     assert_ne!(enumerate, 0x7000_0ffc);
-    assert_eq!(method(&process, root, 8), 0x7000_0ffc);
+    assert_eq!(method(&process, root, 12), 0x7000_0ffc);
     process.memory.write(u64::from(MODE), &[0xa5; 16]).unwrap();
     assert_eq!(invoke(&mut process, enumerate, &[root, 0, 0, MODE]), 0);
     assert_eq!(
@@ -164,6 +164,55 @@ fn adapter_mode_reports_the_owned_display_profile() {
             .flat_map(u32::to_le_bytes)
             .collect::<Vec<_>>()
     );
+}
+
+#[test]
+fn current_display_mode_matches_the_only_enumerated_mode() {
+    let (mut process, root) = root();
+    let current = method(&process, root, 8);
+    assert_ne!(current, 0x7000_0ffc);
+    let enumerate = method(&process, root, 7);
+    assert_eq!(invoke(&mut process, enumerate, &[root, 0, 0, MODE]), 0);
+    let expected = read_bytes(&process, MODE, 16);
+    process.memory.write(u64::from(MODE), &[0xa5; 16]).unwrap();
+    assert_eq!(invoke(&mut process, current, &[root, 0, MODE]), 0);
+    assert_eq!(read_bytes(&process, MODE, 16), expected);
+}
+
+#[test]
+fn current_display_mode_rejects_invalid_identity_without_writing() {
+    let (mut process, root) = root();
+    let current = method(&process, root, 8);
+    for args in [[root + 4, 0], [root, 1]] {
+        process.memory.write(u64::from(MODE), &[0xa5; 16]).unwrap();
+        assert_eq!(
+            invoke(&mut process, current, &[args[0], args[1], MODE]),
+            0x8876_086c
+        );
+        assert_eq!(read_bytes(&process, MODE, 16), [0xa5; 16]);
+    }
+    let release = method(&process, root, 2);
+    assert_eq!(invoke(&mut process, release, &[root]), 0);
+    assert_eq!(invoke(&mut process, current, &[root, 0, MODE]), 0x8876_086c);
+    assert_eq!(read_bytes(&process, MODE, 16), [0xa5; 16]);
+}
+
+#[test]
+fn current_display_mode_faults_before_any_prefix_write() {
+    let (mut process, root) = root();
+    let current = method(&process, root, 8);
+    let partial = 0x0040_2ff8;
+    process
+        .memory
+        .write(u64::from(partial), &[0xa5; 8])
+        .unwrap();
+    let result = call(&mut process, current, &[root, 0, partial]);
+    assert!(matches!(
+        result.reason,
+        ProcessStop::Stopped(StopReason::MemoryFault(_))
+    ));
+    assert_eq!(result.api_calls, 0);
+    assert_eq!(read_bytes(&process, partial, 8), [0xa5; 8]);
 }
 
 #[test]
@@ -209,7 +258,7 @@ fn adapter_mode_faults_before_writing_any_prefix() {
 #[test]
 fn device_type_compatibility_matches_the_owned_formats() {
     let (mut process, root) = root();
-    assert_eq!(method(&process, root, 8), 0x7000_0ffc);
+    assert_eq!(method(&process, root, 12), 0x7000_0ffc);
     let check = method(&process, root, 9);
     assert_ne!(check, 0x7000_0ffc);
     for windowed in [0, 1] {
@@ -252,7 +301,7 @@ fn invalid_or_released_roots_cannot_report_device_type_compatibility() {
 #[test]
 fn device_format_compatibility_matches_the_owned_render_target_surface() {
     let (mut process, root) = root();
-    assert_eq!(method(&process, root, 8), 0x7000_0ffc);
+    assert_eq!(method(&process, root, 12), 0x7000_0ffc);
     let check = method(&process, root, 10);
     assert_ne!(check, 0x7000_0ffc);
     assert_eq!(invoke(&mut process, check, &[root, 0, 1, 22, 1, 1, 22]), 0);

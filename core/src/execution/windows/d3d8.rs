@@ -37,6 +37,7 @@ pub(super) enum Call {
     AdapterIdentifier,
     AdapterModeCount,
     AdapterMode,
+    CurrentDisplayMode,
     CheckDeviceType,
     CheckDeviceFormat,
     CheckMultiSampleType,
@@ -80,6 +81,7 @@ impl Call {
             0x2d8 => Self::DeviceCaps,
             0x2dc => Self::AdapterModeCount,
             0x2e0 => Self::AdapterMode,
+            0x2f0 => Self::CurrentDisplayMode,
             0x2e4 => Self::CheckDeviceType,
             0x2e8 => Self::CheckDeviceFormat,
             0x2ec => Self::CheckMultiSampleType,
@@ -92,7 +94,7 @@ impl Call {
             Self::CreateDevice | Self::Clear | Self::CheckDeviceFormat => 7,
             Self::CreateTexture => 8,
             Self::Present | Self::TextureLockRect => 5,
-            Self::TextureLevelDesc => 3,
+            Self::TextureLevelDesc | Self::CurrentDisplayMode => 3,
             Self::AdapterIdentifier | Self::AdapterMode | Self::DeviceCaps => 4,
             Self::AdapterModeCount | Self::TextureUnlockRect => 2,
             Self::CheckDeviceType | Self::CheckMultiSampleType => 6,
@@ -145,6 +147,7 @@ impl Graphics {
             (ROOT_TABLE, 5, 0x2d4),
             (ROOT_TABLE, 6, 0x2dc),
             (ROOT_TABLE, 7, 0x2e0),
+            (ROOT_TABLE, 8, 0x2f0),
             (ROOT_TABLE, 9, 0x2e4),
             (ROOT_TABLE, 10, 0x2e8),
             (ROOT_TABLE, 11, 0x2ec),
@@ -192,6 +195,9 @@ impl Graphics {
                 u32::from(args[0] == ROOT && self.root_refs != 0 && args[1] == 0)
             }
             Call::AdapterMode => return self.adapter_mode(args, memory),
+            Call::CurrentDisplayMode => {
+                return self.adapter_mode(&[args[0], args[1], 0, args[2]], memory);
+            }
             Call::CheckDeviceType => self.check_device_type(args),
             Call::CheckDeviceFormat => self.check_device_format(args),
             Call::CheckMultiSampleType => self.check_multisample_type(args),
