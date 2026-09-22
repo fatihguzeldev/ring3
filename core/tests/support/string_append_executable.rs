@@ -1,0 +1,16 @@
+use super::imported_executable;
+
+pub fn pe32() -> Vec<u8> {
+    let mut bytes = imported_executable::pe32(
+        &[
+            0x6a, 2, 0x68, 0x80, 0x21, 0x40, 0, 0x68, 0x90, 0x21, 0x40, 0, 0xff, 0x15, 0x60, 0x20,
+            0x40, 0, 0x83, 0xc4, 12, 0xcc,
+        ],
+        "MSVCRT.dll",
+        &["strncat"],
+    );
+    bytes[0x580..0x584].copy_from_slice(b"a\x80b\0");
+    bytes[0x590..0x598].fill(0x55);
+    bytes[0x590..0x592].copy_from_slice(b"Q\0");
+    bytes
+}

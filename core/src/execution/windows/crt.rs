@@ -55,6 +55,7 @@ pub(super) enum Call {
     Compare,
     Copy,
     CopyString,
+    AppendString,
     FindCharacter,
     Stat,
     Remove,
@@ -105,6 +106,7 @@ impl Call {
             0x180 => Some(Self::ArgcPointer),
             0x184 => Some(Self::ArgvPointer),
             0x188 => Some(Self::Remove),
+            0x18c => Some(Self::AppendString),
             0x13c => Some(Self::SetMbCodePage),
             0x140 => Some(Self::OnExit),
             _ => None,
@@ -138,6 +140,7 @@ impl Call {
             | Self::Compare
             | Self::Copy
             | Self::CopyString
+            | Self::AppendString
             | Self::CompareStringPrefix => 3,
             Self::FmodePointer
             | Self::CommodePointer
@@ -243,18 +246,14 @@ impl Crt {
                 arguments[0],
                 arguments[1],
             )?),
-            Call::CopyString => Some(strings::copy(
-                memory,
-                arguments[0],
-                arguments[1],
-                arguments[2],
-            )?),
-            Call::Copy => Some(buffers::copy(
-                memory,
-                arguments[0],
-                arguments[1],
-                arguments[2],
-            )?),
+            Call::Copy | Call::CopyString | Call::AppendString => {
+                let copy = match call {
+                    Call::CopyString => strings::copy,
+                    Call::AppendString => strings::append,
+                    _ => buffers::copy,
+                };
+                Some(copy(memory, arguments[0], arguments[1], arguments[2])?)
+            }
             Call::Compare => Some(buffers::compare(
                 memory,
                 arguments[0],
@@ -313,6 +312,7 @@ pub(super) fn resolve(name: &str) -> Option<u32> {
         "memcmp" => Some(API_BASE + 0x138),
         "memcpy" => Some(API_BASE + 0x150),
         "strncpy" => Some(API_BASE + 0x154),
+        "strncat" => Some(API_BASE + 0x18c),
         "strchr" => Some(API_BASE + 0x158),
         "_setmbcp" => Some(API_BASE + 0x13c),
         "_onexit" => Some(API_BASE + 0x140),

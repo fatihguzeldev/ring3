@@ -121,6 +121,39 @@ pub(super) fn copy(
     Ok(destination)
 }
 
+pub(super) fn append(
+    memory: &mut GuestMemory,
+    destination: u32,
+    source: u32,
+    count: u32,
+) -> Result<u32, DispatchError> {
+    if count == 0 {
+        return Ok(destination);
+    }
+    if count > 65536 {
+        return Err(DispatchError::Unsupported);
+    }
+    let output = destination
+        .checked_add(length(memory, destination)?)
+        .ok_or(MemoryError::AddressOverflow)?;
+    let copied = prefix_length(memory, source, count)?;
+    let read_length = copied + u32::from(copied < count);
+    guest::check(
+        memory,
+        output,
+        usize::try_from(copied + 1).expect("bounded append fits usize"),
+        Access::Write,
+    )?;
+    if u64::from(source) < u64::from(output) + u64::from(copied) + 1
+        && u64::from(destination) < u64::from(source) + u64::from(read_length)
+    {
+        return Err(DispatchError::Unsupported);
+    }
+    buffers::copy(memory, output, source, copied)?;
+    memory.write(u64::from(output) + u64::from(copied), &[0])?;
+    Ok(destination)
+}
+
 fn prefix_length(memory: &GuestMemory, source: u32, count: u32) -> Result<u32, DispatchError> {
     for offset in 0..count {
         let address = source
