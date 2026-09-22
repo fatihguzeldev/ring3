@@ -12,6 +12,7 @@ mod multibyte;
 mod onexit;
 mod paths;
 mod random;
+mod rtti;
 mod status;
 mod streams;
 mod strings;
@@ -76,6 +77,7 @@ pub(super) enum Call {
     UppercaseString,
     SetMbCodePage,
     OnExit,
+    DynamicCast,
 }
 
 impl Call {
@@ -123,6 +125,7 @@ impl Call {
             0x1a8 => Some(Self::UppercaseString),
             0x1ac => Some(Self::Sprintf),
             0x1b0 => Some(Self::Move),
+            0x1b4 => Some(Self::DynamicCast),
             0x13c => Some(Self::SetMbCodePage),
             0x140 => Some(Self::OnExit),
             _ => None,
@@ -152,7 +155,7 @@ impl Call {
             | Self::Stat
             | Self::CompareIgnoringCase
             | Self::Sprintf => 2,
-            Self::GetMainArgs | Self::SplitPath => 5,
+            Self::GetMainArgs | Self::SplitPath | Self::DynamicCast => 5,
             Self::Format => 4,
             Self::Memset
             | Self::DllOnExit
@@ -237,6 +240,7 @@ impl Crt {
                 heap,
                 cpu.register(Register32::Ecx),
             )?),
+            Call::DynamicCast => Some(rtti::dynamic_cast(memory, args)?),
             Call::MbSearchReverse => Some(self.multibyte.reverse_search(memory, args[0], args[1])?),
             Call::MbIncrement => Some(self.multibyte.increment(memory, args[0])?),
             Call::SetMbCodePage => {
@@ -356,6 +360,7 @@ pub(super) fn resolve(name: &str) -> Option<u32> {
         "rand" => Some(API_BASE + 0x164),
         "_ftol" => Some(API_BASE + 0x168),
         "?name@type_info@@QBEPBDXZ" => Some(API_BASE + 0x16c),
+        "__RTDynamicCast" => Some(API_BASE + 0x1b4),
         "strncmp" => Some(API_BASE + 0x170),
         "_stricmp" => Some(API_BASE + 0x174),
         "_vsnprintf" => Some(API_BASE + 0x178),
