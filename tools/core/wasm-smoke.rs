@@ -1882,22 +1882,27 @@ fn execute_colors() {
 
 fn execute_metrics() {
     use ring3_core::execution::{Process32, ProcessStop, Register32, StopReason};
-    let mut process = Process32::load(&metrics_executable::pe32(), 32).unwrap();
-    let result = process.run(30);
-    assert_eq!(result.reason, ProcessStop::Stopped(StopReason::Breakpoint));
-    assert_eq!((result.instructions, result.api_calls), (12, 4));
-    assert_eq!(process.cpu.register(Register32::Eax), 16);
-    assert_eq!(process.cpu.register(Register32::Ebx), 32);
-    assert_eq!(process.cpu.register(Register32::Ecx), 32);
-    assert_eq!(process.cpu.register(Register32::Edx), 16);
-    assert_eq!(process.cpu.register(Register32::Esp), 0x1001_0000);
+    for (bytes, values) in [
+        (metrics_executable::pe32(), [16, 32, 32, 16]),
+        (metrics_executable::fullscreen(), [461, 640, 480, 19]),
+    ] {
+        let mut process = Process32::load(&bytes, 32).unwrap();
+        let result = process.run(30);
+        assert_eq!(result.reason, ProcessStop::Stopped(StopReason::Breakpoint));
+        assert_eq!((result.instructions, result.api_calls), (12, 4));
+        assert_eq!(process.cpu.register(Register32::Eax), values[0]);
+        assert_eq!(process.cpu.register(Register32::Ebx), values[1]);
+        assert_eq!(process.cpu.register(Register32::Ecx), values[2]);
+        assert_eq!(process.cpu.register(Register32::Edx), values[3]);
+        assert_eq!(process.cpu.register(Register32::Esp), 0x1001_0000);
+    }
     #[cfg(windows_demo)]
     {
         let mut process =
             Process32::load(include_bytes!("../../target/windows-api/metrics.exe"), 64).unwrap();
         let result = process.run(1000);
         assert_eq!(result.reason, ProcessStop::Exited(42));
-        assert_eq!(result.api_calls, 13);
+        assert_eq!(result.api_calls, 18);
     }
 }
 
