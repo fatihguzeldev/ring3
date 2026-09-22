@@ -14,6 +14,7 @@ const MODE_COUNT: u32 = 0x0040_28d4;
 const MODE: u32 = 0x0040_28e0;
 const DEVICE_TYPE_STATUS: u32 = 0x0040_28f0;
 const DEVICE_FORMAT_STATUS: u32 = 0x0040_28f4;
+const MULTISAMPLE_STATUS: u32 = 0x0040_28f8;
 
 #[test]
 fn executes_an_uninterrupted_guest_graphics_program() {
@@ -22,7 +23,7 @@ fn executes_an_uninterrupted_guest_graphics_program() {
             Process32::load(&d3d8_executable::pe32(width, height, color), 32).unwrap();
         let result = process.run(100);
         assert_eq!(result.reason, ProcessStop::Stopped(StopReason::Breakpoint));
-        assert_eq!(result.api_calls, 11);
+        assert_eq!(result.api_calls, 12);
         assert_eq!(read(&process, PARAMETERS + 12), 1);
         assert_eq!(read(&process, IDENTIFIER), 0x676e_6972);
         assert_eq!(read(&process, CAPS), 1);
@@ -37,6 +38,7 @@ fn executes_an_uninterrupted_guest_graphics_program() {
         );
         assert_eq!(read(&process, DEVICE_TYPE_STATUS), 0);
         assert_eq!(read(&process, DEVICE_FORMAT_STATUS), 0);
+        assert_eq!(read(&process, MULTISAMPLE_STATUS), 0);
         let frame = process.take_frame().unwrap();
         assert_eq!((frame.width, frame.height), (width, height));
         let [_, r, g, b] = color.to_be_bytes();
@@ -248,7 +250,6 @@ fn invalid_or_released_roots_cannot_report_device_type_compatibility() {
 fn device_format_compatibility_matches_the_owned_render_target_surface() {
     let (mut process, root) = root();
     assert_eq!(method(&process, root, 8), 0x7000_0ffc);
-    assert_eq!(method(&process, root, 11), 0x7000_0ffc);
     let check = method(&process, root, 10);
     assert_ne!(check, 0x7000_0ffc);
     assert_eq!(invoke(&mut process, check, &[root, 0, 1, 22, 1, 1, 22]), 0);

@@ -36,6 +36,12 @@ pub fn pe32(width: u32, height: u32, color: u32) -> Vec<u8> {
     code.extend_from_slice(&[
         0x56, 0xff, 0x50, 0x28, 0xa3, 0xf4, 0x28, 0x40, 0, 0x8b, 0x06,
     ]);
+    for value in [0, 0, 22, 1, 0] {
+        push(&mut code, value);
+    }
+    code.extend_from_slice(&[
+        0x56, 0xff, 0x50, 0x2c, 0xa3, 0xf8, 0x28, 0x40, 0, 0x8b, 0x06,
+    ]);
     for value in [0x0040_2180, 0x0040_2100, 0x20, 1, 1, 0] {
         push(&mut code, value);
     }
