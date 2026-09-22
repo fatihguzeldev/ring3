@@ -1114,6 +1114,30 @@ mod startup_info_executable;
 #[path = "../../core/tests/support/hook_executable.rs"]
 mod hook_executable;
 
+#[path = "../../core/tests/support/thread_priority_executable.rs"]
+mod thread_priority_executable;
+
+fn execute_thread_priority() {
+    use ring3_core::execution::{Process32, ProcessStop, Register32, StopReason};
+    let mut process = Process32::load(&thread_priority_executable::pe32(), 32).unwrap();
+    let run = process.run(100);
+    assert_eq!(run.reason, ProcessStop::Stopped(StopReason::Breakpoint));
+    assert_eq!((run.instructions, run.api_calls), (8, 4));
+    assert_eq!(process.cpu.register(Register32::Eax), 1);
+    assert_eq!(process.cpu.register(Register32::Esp), 0x1001_0000);
+    #[cfg(windows_demo)]
+    {
+        let mut process = Process32::load(
+            include_bytes!("../../target/windows-api/thread-priority.exe"),
+            64,
+        )
+        .unwrap();
+        let run = process.run(1000);
+        assert_eq!(run.reason, ProcessStop::Exited(42));
+        assert_eq!((run.instructions, run.api_calls), (208, 24));
+    }
+}
+
 fn execute_hook_registration() {
     use ring3_core::execution::{Process32, ProcessStop, Register32, StopReason};
     let mut process = Process32::load(&hook_executable::pe32(), 32).unwrap();
@@ -3202,6 +3226,7 @@ pub extern "C" fn run() -> u32 {
     execute_environment_query();
     execute_startup_information();
     execute_hook_registration();
+    execute_thread_priority();
     execute_x87_data();
     execute_x87_scaling();
     execute_fpu_wait();

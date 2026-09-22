@@ -54,3 +54,5 @@ EXPORTS
     _FindClose@4==FindClose
     _GetEnvironmentVariableA@12==GetEnvironmentVariableA
     _GetStartupInfoA@4==GetStartupInfoA
+    _SetThreadPriority@8==SetThreadPriority
+    _GetThreadPriority@4==GetThreadPriority
