@@ -5,3 +5,4 @@ EXPORTS
     _RegCloseKey@4==RegCloseKey
     _RegQueryValueExA@24==RegQueryValueExA
     _RegSetValueExA@24==RegSetValueExA
+    _RegSetValueA@20==RegSetValueA
