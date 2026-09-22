@@ -138,6 +138,35 @@ fn execute_string_stores() {
     }
 }
 
+#[path = "../../core/tests/support/string_compare_executable.rs"]
+mod string_compare_executable;
+
+fn execute_string_comparisons() {
+    use ring3_core::execution::{Process32, ProcessStop, Register32, StopReason};
+    let mut process = Process32::load(&string_compare_executable::pe32(), 32).unwrap();
+    let run = process.run(100);
+    assert_eq!(run.reason, ProcessStop::Stopped(StopReason::Breakpoint));
+    assert_eq!((run.instructions, run.api_calls), (17, 0));
+    for register in [Register32::Ebx, Register32::Ebp, Register32::Ecx] {
+        assert_eq!(process.cpu.register(register), 1);
+    }
+    for register in [Register32::Esi, Register32::Edi] {
+        assert_eq!(process.cpu.register(register), 0x0040_20c4);
+    }
+    assert_eq!(process.cpu.eflags, 0x46);
+    #[cfg(windows_demo)]
+    {
+        let mut process = Process32::load(
+            include_bytes!("../../target/windows-api/string-comparisons.exe"),
+            64,
+        )
+        .unwrap();
+        let run = process.run(1000);
+        assert_eq!(run.reason, ProcessStop::Exited(42));
+        assert_eq!((run.instructions, run.api_calls), (86, 1));
+    }
+}
+
 fn execute_string_scan() {
     use ring3_core::execution::{Process32, ProcessStop, Register32, StopReason};
     let mut process = Process32::load(&string_scan_executable::pe32(), 32).unwrap();
@@ -3101,6 +3130,7 @@ pub extern "C" fn run() -> u32 {
     execute_complement();
     execute_signed_extension();
     execute_string_scan();
+    execute_string_comparisons();
     execute_repeated_moves();
     execute_string_stores();
     execute_register_stack();
