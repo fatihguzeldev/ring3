@@ -3348,7 +3348,7 @@ fn execute_graphics() {
             Process32::load(&d3d8_executable::pe32(width, height, color), 32).unwrap();
         let result = process.run(100);
         assert_eq!(result.reason, ProcessStop::Stopped(StopReason::Breakpoint));
-        assert_eq!(result.api_calls, 7);
+        assert_eq!(result.api_calls, 8);
         let mut driver = [0; 6];
         process.memory.read(0x0040_2200, &mut driver).unwrap();
         assert_eq!(&driver, b"ring3\0");
@@ -3359,6 +3359,9 @@ fn execute_graphics() {
             u32::from_le_bytes(caps[12..].try_into().unwrap()),
             0x0008_0000
         );
+        let mut count = [0; 4];
+        process.memory.read(0x0040_28d4, &mut count).unwrap();
+        assert_eq!(u32::from_le_bytes(count), 1);
         let frame = process.take_frame().unwrap();
         assert_eq!((frame.width, frame.height), (width, height));
         let [_, r, g, b] = color.to_be_bytes();

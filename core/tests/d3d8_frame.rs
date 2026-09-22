@@ -10,6 +10,7 @@ const PARAMETERS: u32 = 0x0040_2100;
 const OUTPUT: u32 = 0x0040_2180;
 const IDENTIFIER: u32 = 0x0040_2200;
 const CAPS: u32 = 0x0040_2800;
+const MODE_COUNT: u32 = 0x0040_28d4;
 
 #[test]
 fn executes_an_uninterrupted_guest_graphics_program() {
@@ -18,11 +19,12 @@ fn executes_an_uninterrupted_guest_graphics_program() {
             Process32::load(&d3d8_executable::pe32(width, height, color), 32).unwrap();
         let result = process.run(100);
         assert_eq!(result.reason, ProcessStop::Stopped(StopReason::Breakpoint));
-        assert_eq!(result.api_calls, 7);
+        assert_eq!(result.api_calls, 8);
         assert_eq!(read(&process, PARAMETERS + 12), 1);
         assert_eq!(read(&process, IDENTIFIER), 0x676e_6972);
         assert_eq!(read(&process, CAPS), 1);
         assert_eq!(read(&process, CAPS + 12), 0x0008_0000);
+        assert_eq!(read(&process, MODE_COUNT), 1);
         let frame = process.take_frame().unwrap();
         assert_eq!((frame.width, frame.height), (width, height));
         let [_, r, g, b] = color.to_be_bytes();
