@@ -2382,7 +2382,7 @@ fn execute_metrics() {
             Process32::load(include_bytes!("../../target/windows-api/metrics.exe"), 64).unwrap();
         let result = process.run(1000);
         assert_eq!(result.reason, ProcessStop::Exited(42));
-        assert_eq!(result.api_calls, 18);
+        assert_eq!(result.api_calls, 19);
     }
 }
 

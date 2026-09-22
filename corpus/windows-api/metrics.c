@@ -11,6 +11,7 @@ void entry(void) {
     if (width != 640 || height != 480 || caption != 19) ExitProcess(5);
     if (GetSystemMetrics(16) != width) ExitProcess(6);
     if (GetSystemMetrics(17) != height - caption) ExitProcess(7);
+    if (GetSystemMetrics(42) != 0) ExitProcess(8);
     if (GetSystemMetrics(11) != 32 || GetSystemMetrics(12) != 32) ExitProcess(1);
     if (GetSystemMetrics(49) != 16 || GetSystemMetrics(50) != 16) ExitProcess(2);
     static const int scroll[6] = {2, 3, 9, 10, 20, 21};
