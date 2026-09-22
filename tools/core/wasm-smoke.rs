@@ -1277,6 +1277,50 @@ mod window_property_cases;
 #[path = "../../core/tests/support/hook_chain_cases.rs"]
 mod hook_chain_cases;
 
+#[path = "../../core/tests/support/icon_executable.rs"]
+mod icon_executable;
+
+fn execute_icons() {
+    use ring3_core::execution::{Process32, ProcessStop, Register32, StopReason};
+    let bytes = icon_executable::guest();
+    let fixtures = std::iter::once((
+        bytes.as_slice(),
+        ProcessStop::Stopped(StopReason::Breakpoint),
+    ));
+    #[cfg(windows_demo)]
+    let fixtures = fixtures.chain(std::iter::once((
+        include_bytes!("../../target/windows-api/icons.exe").as_slice(),
+        ProcessStop::Exited(42),
+    )));
+    for (bytes, stop) in fixtures {
+        let mut final_state = None;
+        for budget in [1, 10000] {
+            let mut process = Process32::load(bytes, 64).unwrap();
+            let mut counts = (0, 0);
+            loop {
+                let run = process.run(budget);
+                counts.0 += run.instructions;
+                counts.1 += run.api_calls;
+                if run.reason != ProcessStop::Stopped(StopReason::InstructionLimit) {
+                    assert_eq!(run.reason, stop);
+                    break;
+                }
+                assert!(counts.0 + counts.1 < 10000);
+            }
+            if matches!(stop, ProcessStop::Stopped(_)) {
+                assert_eq!(process.cpu.register(Register32::Eax), 0x7800_0004);
+                assert_eq!(process.cpu.register(Register32::Ebx), 0x7800_0004);
+            } else {
+                assert_eq!(process.last_error().unwrap(), 1814);
+            }
+            if let Some(expected) = final_state {
+                assert_eq!((process.cpu, counts), expected);
+            }
+            final_state = Some((process.cpu, counts));
+        }
+    }
+}
+
 fn execute_hook_chain() {
     hook_chain_cases::verify();
     #[cfg(windows_demo)]
@@ -3872,6 +3916,7 @@ pub extern "C" fn run() -> u32 {
     execute_window_creation();
     execute_window_properties();
     execute_hook_chain();
+    execute_icons();
     execute_desktop_queries();
     execute_x87_data();
     execute_x87_scaling();

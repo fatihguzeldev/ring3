@@ -4,6 +4,7 @@ EXPORTS
     _FindWindowA@8==FindWindowA
     _IsWindow@4==IsWindow
     _LoadStringA@16==LoadStringA
+    _LoadIconA@8==LoadIconA
     _LoadAcceleratorsA@8==LoadAcceleratorsA
     _CopyAcceleratorTableA@12==CopyAcceleratorTableA
     _RegisterWindowMessageA@4==RegisterWindowMessageA
