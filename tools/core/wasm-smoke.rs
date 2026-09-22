@@ -1117,6 +1117,33 @@ mod hook_executable;
 #[path = "../../core/tests/support/thread_priority_executable.rs"]
 mod thread_priority_executable;
 
+#[path = "../../core/tests/support/windows_format_executable.rs"]
+mod windows_format_executable;
+
+fn execute_windows_formatting() {
+    use ring3_core::execution::{Process32, ProcessStop, Register32, StopReason};
+    let mut process = Process32::load(&windows_format_executable::pe32(), 32).unwrap();
+    let run = process.run(100);
+    assert_eq!(run.reason, ProcessStop::Stopped(StopReason::Breakpoint));
+    assert_eq!((run.instructions, run.api_calls), (7, 1));
+    assert_eq!(process.cpu.register(Register32::Eax), 10);
+    assert_eq!(process.cpu.register(Register32::Esp), 0x1001_0000);
+    let mut text = [0xff; 11];
+    process.memory.read(0x0040_2400, &mut text).unwrap();
+    assert_eq!(&text, b"-42:ABCD:%\0");
+    #[cfg(windows_demo)]
+    {
+        let mut process = Process32::load(
+            include_bytes!("../../target/windows-api/formatting.exe"),
+            64,
+        )
+        .unwrap();
+        let run = process.run(2000);
+        assert_eq!(run.reason, ProcessStop::Exited(42));
+        assert_eq!((run.instructions, run.api_calls), (783, 5));
+    }
+}
+
 fn execute_thread_priority() {
     use ring3_core::execution::{Process32, ProcessStop, Register32, StopReason};
     let mut process = Process32::load(&thread_priority_executable::pe32(), 32).unwrap();
@@ -3227,6 +3254,7 @@ pub extern "C" fn run() -> u32 {
     execute_startup_information();
     execute_hook_registration();
     execute_thread_priority();
+    execute_windows_formatting();
     execute_x87_data();
     execute_x87_scaling();
     execute_fpu_wait();

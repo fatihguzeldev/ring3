@@ -15,3 +15,4 @@ EXPORTS
     _SetCursorPos@8==SetCursorPos
     _SetWindowsHookExA@16==SetWindowsHookExA
     _UnhookWindowsHookEx@4==UnhookWindowsHookEx
+    wsprintfA
