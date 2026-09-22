@@ -71,6 +71,7 @@ pub(super) enum Call {
     CompareIgnoringCase,
     Format,
     Lowercase,
+    UppercaseString,
     SetMbCodePage,
     OnExit,
 }
@@ -117,6 +118,7 @@ impl Call {
             0x19c => Some(Self::Stream(streams::Call::Close)),
             0x1a0 => Some(Self::Stream(streams::Call::Seek)),
             0x1a4 => Some(Self::Stream(streams::Call::Tell)),
+            0x1a8 => Some(Self::UppercaseString),
             0x13c => Some(Self::SetMbCodePage),
             0x140 => Some(Self::OnExit),
             _ => None,
@@ -136,6 +138,7 @@ impl Call {
             | Self::Length
             | Self::SeedRandom
             | Self::Lowercase
+            | Self::UppercaseString
             | Self::SetMbCodePage
             | Self::OnExit
             | Self::Remove => 1,
@@ -239,6 +242,7 @@ impl Crt {
             Call::Length => Some(strings::length(memory, args[0])?),
             Call::Format => Some(formatting::write(memory, args)?),
             Call::Lowercase => Some(strings::lowercase(args[0])?),
+            Call::UppercaseString => Some(strings::uppercase(memory, args[0])?),
             Call::CompareIgnoringCase => {
                 Some(strings::compare_ignoring_case(memory, args[0], args[1])?)
             }
@@ -315,6 +319,7 @@ pub(super) fn resolve(name: &str) -> Option<u32> {
         "fclose" => Some(API_BASE + 0x19c),
         "fseek" => Some(API_BASE + 0x1a0),
         "ftell" => Some(API_BASE + 0x1a4),
+        "_strupr" => Some(API_BASE + 0x1a8),
         "strchr" => Some(API_BASE + 0x158),
         "_setmbcp" => Some(API_BASE + 0x13c),
         "_onexit" => Some(API_BASE + 0x140),

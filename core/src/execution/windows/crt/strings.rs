@@ -8,6 +8,26 @@ pub(super) fn lowercase(character: u32) -> Result<u32, DispatchError> {
     Ok(u32::from(byte.to_ascii_lowercase()))
 }
 
+pub(super) fn uppercase(memory: &mut GuestMemory, source: u32) -> Result<u32, DispatchError> {
+    if source == 0 {
+        guest::write_word(memory, ERRNO, 22)?;
+        return Ok(0);
+    }
+    let mut bytes = terminated_bytes(memory, source)?;
+    let length = bytes.len() - 1;
+    let mut changed = false;
+    for byte in &mut bytes[..length] {
+        let uppercase = byte.to_ascii_uppercase();
+        changed |= uppercase != *byte;
+        *byte = uppercase;
+    }
+    if changed {
+        guest::check(memory, source, length, Access::Write)?;
+        memory.write(u64::from(source), &bytes[..length])?;
+    }
+    Ok(source)
+}
+
 pub(super) fn compare_ignoring_case(
     memory: &GuestMemory,
     left: u32,
