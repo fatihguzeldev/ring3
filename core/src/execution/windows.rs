@@ -5,6 +5,7 @@ use super::{
 use crate::PeImportSymbol;
 
 mod atomics;
+mod callbacks;
 mod classes;
 mod clock;
 mod code_pages;
@@ -54,6 +55,7 @@ pub struct Process32 {
     command_line: u32,
     subsystem_version: u32,
     startup: startup::Startup,
+    callbacks: callbacks::Callbacks,
     modules: modules::Modules,
     registry: registry::Registry,
     resources: resources::Resources,
@@ -115,6 +117,7 @@ enum Api {
     GetEnvironmentVariable,
     GetStartupInfo,
     WindowsFormat,
+    CallWindowProc,
     RegisterUserAtom,
     System(system::Call),
     SetErrorMode,
@@ -147,6 +150,15 @@ enum DispatchError {
     Unsupported,
 }
 
+impl DispatchError {
+    fn stop(self, address: u32) -> ProcessStop {
+        match self {
+            Self::Memory(error) => ProcessStop::Stopped(StopReason::MemoryFault(error)),
+            Self::Unsupported => ProcessStop::UnsupportedApi { address },
+        }
+    }
+}
+
 impl From<MemoryError> for DispatchError {
     fn from(error: MemoryError) -> Self {
         Self::Memory(error)
@@ -174,6 +186,7 @@ impl Api {
             0x240 => Some(Self::GetEnvironmentVariable),
             0x248 => Some(Self::GetStartupInfo),
             0x25c => Some(Self::WindowsFormat),
+            0x2a4 => Some(Self::CallWindowProc),
             0x22c => Some(Self::GetCommandLine),
             0x20 => Some(Self::SetErrorMode),
             0x24 => Some(Self::GetErrorMode),
@@ -250,6 +263,7 @@ impl Api {
                 "LoadStringA" => 0xec,
                 "LoadAcceleratorsA" => 0x29c,
                 "CopyAcceleratorTableA" => 0x2a0,
+                "CallWindowProcA" => 0x2a4,
                 "RegisterWindowMessageA" => 0x94,
                 "RegisterClipboardFormatA" => 0xc8,
                 "GetSystemMetrics" => 0x9c,
@@ -356,6 +370,7 @@ impl Api {
             Self::Clock(call) => call.arguments(),
             Self::GetEnvironmentVariable => 3,
             Self::WindowsFormat => 2,
+            Self::CallWindowProc => 5,
             Self::GetLastError
             | Self::GetCommandLine
             | Self::GetCurrentThread
@@ -495,6 +510,7 @@ impl Process32 {
             command_line: parameters.command_line,
             subsystem_version: (u32::from(major) << 16) | u32::from(minor),
             startup,
+            callbacks: callbacks::Callbacks::default(),
             modules,
             resources,
             current_directory,
@@ -546,7 +562,8 @@ impl Process32 {
         self.graphics.take_frame()
     }
 
-    /// each guest execution step and completed api call costs one budget unit.
+    /// each guest execution step and dispatched api call costs one budget unit.
+    /// a dispatched callback may still be in progress when the budget ends.
     /// repeated strings use one step per element, or one for a zero-count operation.
     /// faults consume no unit for the faulting operation. exit is terminal and
     /// later calls return the same code without executing more guest work.
@@ -570,6 +587,7 @@ impl Process32 {
                 Api::at(address).is_some()
                     || self.diagnostic_imports.contains(address)
                     || self.startup.contains(address)
+                    || address == callbacks::RETURN
             });
             result.instructions += step.instructions;
             remaining -= step.instructions;
@@ -578,6 +596,13 @@ impl Process32 {
                 return result;
             }
             if self.startup.complete_at(self.cpu.eip) {
+                continue;
+            }
+            if self.cpu.eip == callbacks::RETURN {
+                if let Err(error) = self.callbacks.finish(&mut self.cpu, &self.memory) {
+                    result.reason = error.stop(self.cpu.eip);
+                    return result;
+                }
                 continue;
             }
             if let Some(stop) = self
@@ -598,14 +623,7 @@ impl Process32 {
                 return result;
             }
             if let Err(error) = self.dispatch(api) {
-                result.reason = match error {
-                    DispatchError::Memory(error) => {
-                        ProcessStop::Stopped(StopReason::MemoryFault(error))
-                    }
-                    DispatchError::Unsupported => ProcessStop::UnsupportedApi {
-                        address: self.cpu.eip,
-                    },
-                };
+                result.reason = error.stop(self.cpu.eip);
                 return result;
             }
             result.api_calls += 1;
@@ -623,6 +641,11 @@ impl Process32 {
         let words = api.arguments() + 1;
         let mut frame = [0; 10];
         guest::read_words(&self.memory, stack, &mut frame[..words])?;
+        if matches!(api, Api::CallWindowProc) {
+            return self
+                .callbacks
+                .start(&mut self.cpu, &mut self.memory, &frame[1..words]);
+        }
         if matches!(api, Api::ExceptionProlog) {
             return crt::enter_exception_frame(&mut self.cpu, &mut self.memory, frame[0]);
         }
@@ -745,7 +768,9 @@ impl Process32 {
                 self.cursors.dispatch(call, arguments, &mut self.memory)?,
             ),
             Api::Crt(call) => self.crt_call(call, arguments)?,
-            Api::ExceptionProlog | Api::ExitProcess | Api::Unsupported => unreachable!(),
+            Api::CallWindowProc | Api::ExceptionProlog | Api::ExitProcess | Api::Unsupported => {
+                unreachable!()
+            }
         }
         Ok(())
     }
