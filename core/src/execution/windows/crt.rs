@@ -70,6 +70,7 @@ pub(super) enum Call {
     CompareStringPrefix,
     CompareIgnoringCase,
     Format,
+    Sprintf,
     Lowercase,
     UppercaseString,
     SetMbCodePage,
@@ -119,6 +120,7 @@ impl Call {
             0x1a0 => Some(Self::Stream(streams::Call::Seek)),
             0x1a4 => Some(Self::Stream(streams::Call::Tell)),
             0x1a8 => Some(Self::UppercaseString),
+            0x1ac => Some(Self::Sprintf),
             0x13c => Some(Self::SetMbCodePage),
             0x140 => Some(Self::OnExit),
             _ => None,
@@ -146,7 +148,8 @@ impl Call {
             | Self::MbSearchReverse
             | Self::FindCharacter
             | Self::Stat
-            | Self::CompareIgnoringCase => 2,
+            | Self::CompareIgnoringCase
+            | Self::Sprintf => 2,
             Self::GetMainArgs | Self::SplitPath => 5,
             Self::Format => 4,
             Self::Memset
@@ -241,6 +244,18 @@ impl Crt {
             Call::Duplicate => Some(strings::duplicate(memory, heap, args[0])?),
             Call::Length => Some(strings::length(memory, args[0])?),
             Call::Format => Some(formatting::write(memory, args)?),
+            Call::Sprintf => {
+                if args[0] == 0 || args[1] == 0 {
+                    guest::write_word(memory, ERRNO, 22)?;
+                    Some(u32::MAX)
+                } else {
+                    Some(formatting::write_variadic(
+                        memory,
+                        args,
+                        cpu.register(Register32::Esp),
+                    )?)
+                }
+            }
             Call::Lowercase => Some(strings::lowercase(args[0])?),
             Call::UppercaseString => Some(strings::uppercase(memory, args[0])?),
             Call::CompareIgnoringCase => {
@@ -320,6 +335,7 @@ pub(super) fn resolve(name: &str) -> Option<u32> {
         "fseek" => Some(API_BASE + 0x1a0),
         "ftell" => Some(API_BASE + 0x1a4),
         "_strupr" => Some(API_BASE + 0x1a8),
+        "sprintf" => Some(API_BASE + 0x1ac),
         "strchr" => Some(API_BASE + 0x158),
         "_setmbcp" => Some(API_BASE + 0x13c),
         "_onexit" => Some(API_BASE + 0x140),
