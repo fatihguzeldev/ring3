@@ -32,17 +32,54 @@ impl Call {
     }
 }
 
-struct Window {
-    class: u32,
-    title: String,
+#[derive(Default)]
+pub(super) struct Window {
+    pub(super) class: u32,
+    pub(super) instance: u32,
+    pub(super) procedure: u32,
+    pub(super) style: u32,
+    pub(super) exstyle: u32,
+    pub(super) title: String,
+    pub(super) rectangle: [i32; 4],
+    pub(super) client: [i32; 4],
 }
 
-#[derive(Default)]
 pub(super) struct Desktop {
     top_levels: BTreeMap<u32, Window>,
+    next: u32,
+}
+
+impl Default for Desktop {
+    fn default() -> Self {
+        Self {
+            top_levels: BTreeMap::new(),
+            next: 0x7500_0004,
+        }
+    }
 }
 
 impl Desktop {
+    pub(super) fn available(&self) -> Option<u32> {
+        (self.top_levels.len() < 4096 && self.next <= 0x75ff_fffc).then_some(self.next)
+    }
+    pub(super) fn insert(&mut self, handle: u32, window: Window) {
+        self.top_levels.insert(handle, window);
+        self.next += 4;
+    }
+    pub(super) fn window(&self, handle: u32) -> Option<&Window> {
+        self.top_levels.get(&handle)
+    }
+    pub(super) fn window_mut(&mut self, handle: u32) -> Option<&mut Window> {
+        self.top_levels.get_mut(&handle)
+    }
+    pub(super) fn remove(&mut self, handle: u32) {
+        self.top_levels.remove(&handle);
+    }
+    pub(super) fn has_class(&self, instance: u32, atom: u32) -> bool {
+        self.top_levels
+            .values()
+            .any(|window| window.instance == instance && window.class == atom)
+    }
     pub(super) fn dispatch(
         &self,
         call: Call,
@@ -74,6 +111,7 @@ impl Desktop {
                 Ok(self
                     .top_levels
                     .iter()
+                    .rev()
                     .find_map(|(&handle, window)| {
                         (class.is_none_or(|atom| atom == window.class)
                             && title
@@ -87,7 +125,10 @@ impl Desktop {
     }
 }
 
-fn read_title(memory: &GuestMemory, pointer: u32) -> Result<String, DispatchError> {
+pub(super) fn read_title(memory: &GuestMemory, pointer: u32) -> Result<String, DispatchError> {
+    if pointer == 0 {
+        return Ok(String::new());
+    }
     let mut title = String::new();
     for offset in 0..4096 {
         let address = pointer
@@ -140,6 +181,7 @@ mod tests {
             Window {
                 class: atom,
                 title: "title".into(),
+                ..Window::default()
             },
         );
         desktop.top_levels.insert(
@@ -147,10 +189,11 @@ mod tests {
             Window {
                 class: atom + 1,
                 title: String::new(),
+                ..Window::default()
             },
         );
         for (args, expected) in [
-            ([0, 0], 0x7500_0004),
+            ([0, 0], 0x7500_0008),
             ([0x10000, 0x10020], 0x7500_0004),
             ([atom, 0], 0x7500_0004),
             ([0, 0x10025], 0x7500_0008),

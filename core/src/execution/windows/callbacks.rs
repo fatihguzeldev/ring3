@@ -1,4 +1,4 @@
-use super::{Cpu32, DispatchError, GuestMemory, MemoryError, Register32, guest};
+use super::{Cpu32, DispatchError, GuestMemory, MemoryError, Register32, creation, guest};
 
 pub(super) const RETURN: u32 = 0x7000_0ff8;
 const MAX_DEPTH: usize = 64;
@@ -13,6 +13,7 @@ pub(super) struct Frame {
     pub(super) stack: u32,
     pub(super) caller: u32,
     pub(super) cleanup: u32,
+    pub(super) creation: Option<creation::Pending>,
 }
 
 impl Callbacks {
@@ -30,6 +31,7 @@ impl Callbacks {
                 stack,
                 caller: stack,
                 cleanup: 24,
+                creation: None,
             },
             arguments[0],
             &arguments[1..],
@@ -44,26 +46,46 @@ impl Callbacks {
         procedure: u32,
         arguments: &[u32],
     ) -> Result<(), DispatchError> {
-        if self.frames.len() == MAX_DEPTH || procedure == RETURN || arguments.len() > 4 {
-            return Err(DispatchError::Unsupported);
-        }
-        let length = (arguments.len() + 1) * 4;
-        let callback_stack = frame
-            .stack
-            .checked_sub(u32::try_from(length).expect("small callback frame"))
-            .ok_or(MemoryError::AddressOverflow)?;
-        let mut data = [0; 20];
-        for (bytes, value) in data[..length]
-            .chunks_exact_mut(4)
-            .zip(std::iter::once(&RETURN).chain(arguments))
-        {
-            bytes.copy_from_slice(&value.to_le_bytes());
-        }
-        memory.write(u64::from(callback_stack), &data[..length])?;
+        self.check_entry(procedure)?;
+        let callback_stack = write_frame(memory, frame.stack, arguments)?;
         self.frames.push(frame);
         cpu.set_register(Register32::Esp, callback_stack);
         cpu.eip = procedure;
         Ok(())
+    }
+
+    pub(super) fn check_entry(&self, procedure: u32) -> Result<(), DispatchError> {
+        if self.frames.len() == MAX_DEPTH || procedure == RETURN {
+            return Err(DispatchError::Unsupported);
+        }
+        Ok(())
+    }
+
+    pub(super) fn replace(
+        &mut self,
+        cpu: &mut Cpu32,
+        memory: &mut GuestMemory,
+        frame: Frame,
+        procedure: u32,
+        arguments: &[u32],
+    ) -> Result<(), DispatchError> {
+        self.current(cpu)?;
+        if procedure == RETURN {
+            return Err(DispatchError::Unsupported);
+        }
+        let callback_stack = write_frame(memory, frame.stack, arguments)?;
+        *self.frames.last_mut().expect("validated current frame") = frame;
+        cpu.set_register(Register32::Esp, callback_stack);
+        cpu.eip = procedure;
+        Ok(())
+    }
+
+    pub(super) fn current(&self, cpu: &Cpu32) -> Result<Frame, DispatchError> {
+        let frame = *self.frames.last().ok_or(DispatchError::Unsupported)?;
+        if cpu.register(Register32::Esp) != frame.stack {
+            return Err(DispatchError::Unsupported);
+        }
+        Ok(frame)
     }
 
     pub(super) fn finish(
@@ -71,10 +93,7 @@ impl Callbacks {
         cpu: &mut Cpu32,
         memory: &GuestMemory,
     ) -> Result<(), DispatchError> {
-        let frame = *self.frames.last().ok_or(DispatchError::Unsupported)?;
-        if cpu.register(Register32::Esp) != frame.stack {
-            return Err(DispatchError::Unsupported);
-        }
+        let frame = self.current(cpu)?;
         let mut saved_return = [0];
         guest::read_words(memory, frame.caller, &mut saved_return)?;
         self.frames.pop();
@@ -82,4 +101,27 @@ impl Callbacks {
         cpu.eip = saved_return[0];
         Ok(())
     }
+}
+
+fn write_frame(
+    memory: &mut GuestMemory,
+    stack: u32,
+    arguments: &[u32],
+) -> Result<u32, DispatchError> {
+    if arguments.len() > 4 {
+        return Err(DispatchError::Unsupported);
+    }
+    let length = (arguments.len() + 1) * 4;
+    let callback_stack = stack
+        .checked_sub(u32::try_from(length).expect("small callback frame"))
+        .ok_or(MemoryError::AddressOverflow)?;
+    let mut data = [0; 20];
+    for (bytes, value) in data[..length]
+        .chunks_exact_mut(4)
+        .zip(std::iter::once(&RETURN).chain(arguments))
+    {
+        bytes.copy_from_slice(&value.to_le_bytes());
+    }
+    memory.write(u64::from(callback_stack), &data[..length])?;
+    Ok(callback_stack)
 }

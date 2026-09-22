@@ -9,6 +9,7 @@ mod callbacks;
 mod classes;
 mod clock;
 mod code_pages;
+mod creation;
 mod critical_sections;
 mod crt;
 mod cursors;
@@ -118,6 +119,7 @@ enum Api {
     GetStartupInfo,
     WindowsFormat,
     CallWindowProc,
+    Window(creation::Call),
     RegisterUserAtom,
     System(system::Call),
     SetErrorMode,
@@ -198,6 +200,7 @@ impl Api {
             offset => d3d8::Call::at(offset)
                 .map(Self::Graphics)
                 .or_else(|| system::Call::at(offset).map(Self::System))
+                .or_else(|| creation::Call::at(offset).map(Self::Window))
                 .or_else(|| gdi::Call::at(offset).map(Self::Gdi))
                 .or_else(|| cursors::Call::at(offset).map(Self::Cursor))
                 .or_else(|| classes::Call::at(offset).map(Self::Class))
@@ -264,6 +267,10 @@ impl Api {
                 "LoadAcceleratorsA" => 0x29c,
                 "CopyAcceleratorTableA" => 0x2a0,
                 "CallWindowProcA" => 0x2a4,
+                "CreateWindowExA" => 0x2a8,
+                "DefWindowProcA" => 0x2ac,
+                "GetWindowRect" => 0x2b0,
+                "GetClientRect" => 0x2b4,
                 "RegisterWindowMessageA" => 0x94,
                 "RegisterClipboardFormatA" => 0xc8,
                 "GetSystemMetrics" => 0x9c,
@@ -371,6 +378,7 @@ impl Api {
             Self::GetEnvironmentVariable => 3,
             Self::WindowsFormat => 2,
             Self::CallWindowProc => 5,
+            Self::Window(call) => call.arguments(),
             Self::GetLastError
             | Self::GetCommandLine
             | Self::GetCurrentThread
@@ -599,7 +607,7 @@ impl Process32 {
                 continue;
             }
             if self.cpu.eip == callbacks::RETURN {
-                if let Err(error) = self.callbacks.finish(&mut self.cpu, &self.memory) {
+                if let Err(error) = self.finish_callback() {
                     result.reason = error.stop(self.cpu.eip);
                     return result;
                 }
@@ -639,7 +647,7 @@ impl Process32 {
     fn dispatch(&mut self, api: Api) -> Result<(), DispatchError> {
         let stack = self.cpu.register(Register32::Esp);
         let words = api.arguments() + 1;
-        let mut frame = [0; 10];
+        let mut frame = [0; 13];
         guest::read_words(&self.memory, stack, &mut frame[..words])?;
         if matches!(api, Api::CallWindowProc) {
             return self
@@ -653,7 +661,13 @@ impl Process32 {
             self.exit_code = Some(frame[1]);
             return Ok(());
         }
-        self.invoke(api, &frame[1..words], stack)?;
+        if matches!(api, Api::Window(creation::Call::Create)) {
+            if self.create_window(&frame[1..words])? {
+                return Ok(());
+            }
+        } else {
+            self.invoke(api, &frame[1..words], stack)?;
+        }
         // an api output may alias the saved return address; heap free protects this frame.
         guest::read_words(&self.memory, stack, &mut frame[..1])?;
         self.cpu
@@ -672,21 +686,22 @@ impl Process32 {
         Ok(())
     }
 
-    fn invoke(&mut self, api: Api, arguments: &[u32], stack: u32) -> Result<(), DispatchError> {
-        let argument = arguments.first().copied().unwrap_or(0);
+    fn invoke(&mut self, api: Api, args: &[u32], stack: u32) -> Result<(), DispatchError> {
+        let argument = args.first().copied().unwrap_or(0);
         match api {
-            Api::Interlocked(call) => self.interlocked(call, arguments)?,
+            Api::Interlocked(call) => self.interlocked(call, args)?,
             Api::Clock(call) => self.query_clock(call, argument)?,
-            Api::Directory(call) => self.directory(call, arguments)?,
-            Api::Registry(call) => self.registry(call, arguments)?,
+            Api::Directory(call) => self.directory(call, args)?,
+            Api::Registry(call) => self.registry(call, args)?,
             Api::GetCommandLine => self.cpu.set_register(Register32::Eax, self.command_line),
-            Api::GetEnvironmentVariable => self.environment_query(arguments)?,
+            Api::GetEnvironmentVariable => self.environment_query(args)?,
             Api::GetStartupInfo => parameters::startup_info(&mut self.memory, argument)?,
-            Api::WindowsFormat => self.windows_format(arguments, stack)?,
-            Api::Class(call) => self.window_class(call, arguments)?,
+            Api::WindowsFormat => self.windows_format(args, stack)?,
+            Api::Class(call) => self.window_class(call, args)?,
+            Api::Window(call) => self.window_api(call, args)?,
             Api::Synchronization(call) => self.cpu.set_register(
                 Register32::Eax,
-                self.mutexes.dispatch(call, arguments, &mut self.memory)?,
+                self.mutexes.dispatch(call, args, &mut self.memory)?,
             ),
             Api::SetLastError => thread::set_last_error(&mut self.memory, argument)?,
             Api::GetLastError => self.cpu.set_register(Register32::Eax, self.last_error()?),
@@ -694,14 +709,14 @@ impl Process32 {
             Api::GetCurrentThreadId => self
                 .cpu
                 .set_register(Register32::Eax, thread::current_id(&self.memory)?),
-            Api::Desktop(call) => self.window_query(call, arguments)?,
+            Api::Desktop(call) => self.window_query(call, args)?,
             Api::RegisterUserAtom => {
                 let value = self.user_atoms.register(argument, &mut self.memory)?;
                 self.cpu.set_register(Register32::Eax, value);
             }
             Api::System(call) => self
                 .cpu
-                .set_register(Register32::Eax, call.dispatch(arguments, &mut self.memory)?),
+                .set_register(Register32::Eax, call.dispatch(args, &mut self.memory)?),
             Api::SetErrorMode => self.set_error_mode(argument)?,
             Api::GetErrorMode => self.cpu.set_register(Register32::Eax, self.error_mode),
             Api::GetVersion => self.cpu.set_register(Register32::Eax, GUEST_VERSION),
@@ -713,61 +728,59 @@ impl Process32 {
                     .set_register(Register32::Eax, self.subsystem_version);
             }
             Api::CodePage(call) => {
-                let value = call.dispatch(arguments, &mut self.memory)?;
+                let value = call.dispatch(args, &mut self.memory)?;
                 self.cpu.set_register(Register32::Eax, value);
             }
             Api::String(call) => {
-                let value = call.dispatch(&mut self.memory, arguments)?;
+                let value = call.dispatch(&mut self.memory, args)?;
                 self.cpu.set_register(Register32::Eax, value);
             }
             Api::Tls(call) => {
-                let value = self.tls.dispatch(call, arguments, &mut self.memory)?;
+                let value = self.tls.dispatch(call, args, &mut self.memory)?;
                 self.cpu.set_register(Register32::Eax, value);
             }
             Api::CriticalSection(call) => self.critical_section(call, argument)?,
             Api::Heap(call) => {
-                let value = self
-                    .heap
-                    .dispatch(call, arguments, stack, &mut self.memory)?;
+                let value = self.heap.dispatch(call, args, stack, &mut self.memory)?;
                 self.cpu.set_register(Register32::Eax, value);
             }
             Api::Module(call) => {
                 let value = self.modules.dispatch(
                     call,
-                    arguments,
+                    args,
                     self.startup.is_complete(),
                     &mut self.memory,
                 )?;
                 self.cpu.set_register(Register32::Eax, value);
             }
             Api::Resource(call) => {
-                let value =
-                    self.resources
-                        .dispatch(call, arguments, &self.modules, &mut self.memory)?;
+                let value = self
+                    .resources
+                    .dispatch(call, args, &self.modules, &mut self.memory)?;
                 self.cpu.set_register(Register32::Eax, value);
             }
             Api::Graphics(call) => self.cpu.set_register(
                 Register32::Eax,
-                self.graphics.dispatch(call, arguments, &mut self.memory)?,
+                self.graphics.dispatch(call, args, &mut self.memory)?,
             ),
             Api::Gdi(call) => self.cpu.set_register(
                 Register32::Eax,
-                self.gdi.dispatch(call, arguments, &mut self.memory)?,
+                self.gdi.dispatch(call, args, &mut self.memory)?,
             ),
             Api::ThreadPriority(call) => self.cpu.set_register(
                 Register32::Eax,
-                self.priority.dispatch(call, arguments, &mut self.memory)?,
+                self.priority.dispatch(call, args, &mut self.memory)?,
             ),
             Api::Hook(call) => self.cpu.set_register(
                 Register32::Eax,
                 self.hooks
-                    .dispatch(call, arguments, &self.modules, &mut self.memory)?,
+                    .dispatch(call, args, &self.modules, &mut self.memory)?,
             ),
             Api::Cursor(call) => self.cpu.set_register(
                 Register32::Eax,
-                self.cursors.dispatch(call, arguments, &mut self.memory)?,
+                self.cursors.dispatch(call, args, &mut self.memory)?,
             ),
-            Api::Crt(call) => self.crt_call(call, arguments)?,
+            Api::Crt(call) => self.crt_call(call, args)?,
             Api::CallWindowProc | Api::ExceptionProlog | Api::ExitProcess | Api::Unsupported => {
                 unreachable!()
             }

@@ -52,6 +52,14 @@ impl Default for Hooks {
 }
 
 impl Hooks {
+    pub(super) fn newest_cbt(&self) -> Option<(u32, u32)> {
+        self.callbacks
+            .iter()
+            .rev()
+            .find_map(|(&handle, &(kind, procedure))| {
+                (kind == Kind::Cbt).then_some((handle, procedure))
+            })
+    }
     pub(super) fn dispatch(
         &mut self,
         call: Call,

@@ -42,6 +42,7 @@ impl Classes {
         args: &[u32],
         modules: &Modules,
         atoms: &mut UserAtoms,
+        desktop: &super::desktop::Desktop,
         memory: &mut GuestMemory,
     ) -> Result<u32, DispatchError> {
         if matches!(call, Call::Register) {
@@ -52,23 +53,7 @@ impl Classes {
         } else {
             (args[1], args[0])
         };
-        if instance == 0 || !modules.contains(instance) {
-            return Err(DispatchError::Unsupported);
-        }
-        let atom = if name <= 0xffff {
-            if name < 0xc000 {
-                return Err(DispatchError::Unsupported);
-            }
-            name
-        } else {
-            let name = read_name(memory, name)?;
-            let Some(atom) = atoms.lookup(&name) else {
-                return failure(memory, 1411);
-            };
-            atom
-        };
-        let key = (instance, atom);
-        let Some(&record) = self.definitions.get(&key) else {
+        let Some((atom, record)) = self.find(instance, name, modules, atoms, memory)? else {
             return failure(memory, 1411);
         };
         if matches!(call, Call::Query) {
@@ -80,9 +65,40 @@ impl Classes {
             memory.write(u64::from(args[2]), &bytes)?;
             return Ok(atom);
         }
-        self.definitions.remove(&key);
+        if desktop.has_class(instance, atom) {
+            return failure(memory, 1412);
+        }
+        self.definitions.remove(&(instance, atom));
         atoms.release_class(atom);
         Ok(1)
+    }
+
+    pub(super) fn find(
+        &self,
+        instance: u32,
+        name: u32,
+        modules: &Modules,
+        atoms: &UserAtoms,
+        memory: &GuestMemory,
+    ) -> Result<Option<(u32, [u32; 9])>, DispatchError> {
+        if instance == 0 || !modules.contains(instance) {
+            return Err(DispatchError::Unsupported);
+        }
+        let atom = if name <= 0xffff {
+            if name < 0xc000 {
+                return Err(DispatchError::Unsupported);
+            }
+            name
+        } else {
+            let Some(atom) = atoms.lookup(&read_name(memory, name)?) else {
+                return Ok(None);
+            };
+            atom
+        };
+        Ok(self
+            .definitions
+            .get(&(instance, atom))
+            .map(|record| (atom, *record)))
     }
 
     fn register(
@@ -164,6 +180,7 @@ impl super::Process32 {
             arguments,
             &self.modules,
             &mut self.user_atoms,
+            &self.desktop,
             &mut self.memory,
         )?;
         self.cpu.set_register(super::Register32::Eax, value);

@@ -8,13 +8,27 @@ const LARGE_ICON: u32 = 32;
 const SMALL_ICON: u32 = 16;
 const SCROLL_WIDTH: u32 = 16;
 const SCROLL_HEIGHT: u32 = 16;
-const CAPTION_HEIGHT: u32 = 19;
+pub(super) const CAPTION_HEIGHT: u32 = 19;
+pub(super) const DIALOG_FRAME: i32 = 3;
+pub(super) const RESIZE_FRAME: i32 = 4;
+pub(super) const MIN_TRACK: [i32; 2] = [112, 27];
+pub(super) const MAX_TRACK: [i32; 2] = [
+    gdi::SCREEN_WIDTH.cast_signed() + 12,
+    gdi::SCREEN_HEIGHT.cast_signed() + 12,
+];
 
 fn metrics(index: u32) -> Result<u32, DispatchError> {
     match index {
         0 | 16 => Ok(gdi::SCREEN_WIDTH),
         1 => Ok(gdi::SCREEN_HEIGHT),
         4 => Ok(CAPTION_HEIGHT),
+        5 | 6 => Ok(1),
+        7 | 8 => Ok(DIALOG_FRAME.cast_unsigned()),
+        32 | 33 => Ok(RESIZE_FRAME.cast_unsigned()),
+        34 => Ok(MIN_TRACK[0].cast_unsigned()),
+        35 => Ok(MIN_TRACK[1].cast_unsigned()),
+        59 => Ok(MAX_TRACK[0].cast_unsigned()),
+        60 => Ok(MAX_TRACK[1].cast_unsigned()),
         17 => Ok(gdi::SCREEN_HEIGHT - CAPTION_HEIGHT),
         2 | 3 => Ok(SCROLL_WIDTH),
         9 | 10 | 20 | 21 => Ok(SCROLL_HEIGHT),
