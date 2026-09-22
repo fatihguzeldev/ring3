@@ -5,6 +5,7 @@ use super::{
 use crate::PeImportSymbol;
 
 mod atomics;
+mod classes;
 mod clock;
 mod code_pages;
 mod critical_sections;
@@ -56,6 +57,7 @@ pub struct Process32 {
     current_directory: directory::Directory,
     environment: environment::Environment,
     user_atoms: user_atoms::UserAtoms,
+    classes: classes::Classes,
     cursors: cursors::Cursors,
     heap: heap::Heap,
     critical_sections: critical_sections::CriticalSections,
@@ -121,6 +123,7 @@ enum Api {
     Graphics(d3d8::Call),
     Gdi(gdi::Call),
     Cursor(cursors::Call),
+    Class(classes::Call),
     Crt(crt::Call),
     CodePage(code_pages::Call),
     Module(modules::Call),
@@ -178,6 +181,7 @@ impl Api {
                 .or_else(|| system::Call::at(offset).map(Self::System))
                 .or_else(|| gdi::Call::at(offset).map(Self::Gdi))
                 .or_else(|| cursors::Call::at(offset).map(Self::Cursor))
+                .or_else(|| classes::Call::at(offset).map(Self::Class))
                 .or_else(|| crt::Call::at(offset).map(Self::Crt))
                 .or_else(|| modules::Call::at(offset).map(Self::Module))
                 .or_else(|| resources::Call::at(offset).map(Self::Resource))
@@ -210,6 +214,9 @@ impl Api {
             match name {
                 "GetDesktopWindow" => 16,
                 "wsprintfA" => 0x25c,
+                "GetClassInfoA" => 0x260,
+                "RegisterClassA" => 0x264,
+                "UnregisterClassA" => 0x268,
                 "SetWindowsHookExA" => 0x24c,
                 "UnhookWindowsHookEx" => 0x250,
                 "LoadStringA" => 0xec,
@@ -327,6 +334,7 @@ impl Api {
             Self::Graphics(call) => call.arguments(),
             Self::Gdi(call) => call.arguments(),
             Self::Cursor(call) => call.arguments(),
+            Self::Class(call) => call.arguments(),
             Self::Crt(call) => call.arguments(),
             Self::CodePage(call) => call.arguments(),
             Self::Heap(call) => call.arguments(),
@@ -457,6 +465,7 @@ impl Process32 {
             current_directory,
             environment: environment::Environment::new(options.environment),
             user_atoms: user_atoms::UserAtoms::default(),
+            classes: classes::Classes::default(),
             gdi: gdi::Gdi::default(),
             cursors: cursors::Cursors::default(),
             heap: heap::Heap::default(),
@@ -613,6 +622,7 @@ impl Process32 {
             Api::GetEnvironmentVariable => self.environment_query(arguments)?,
             Api::GetStartupInfo => parameters::startup_info(&mut self.memory, argument)?,
             Api::WindowsFormat => self.windows_format(arguments, stack)?,
+            Api::Class(call) => self.window_class(call, arguments)?,
             Api::Synchronization(call) => self.cpu.set_register(
                 Register32::Eax,
                 self.mutexes.dispatch(call, arguments, &mut self.memory)?,
