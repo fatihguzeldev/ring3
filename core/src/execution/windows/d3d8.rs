@@ -11,6 +11,8 @@ const NOT_AVAILABLE: u32 = 0x8876_086a;
 const ADAPTER_IDENTIFIER_SIZE: usize = 1068;
 const ADAPTER_DRIVER: &[u8] = b"ring3\0";
 const ADAPTER_DESCRIPTION: &[u8] = b"Ring3 Virtual Display Adapter\0";
+const DEVICE_CAPS_SIZE: usize = 212;
+const CAPS2_CAN_RENDER_WINDOWED: u32 = 0x0008_0000;
 const MAX_PIXELS: u64 = 1_048_576;
 const MAX_RECTS: u32 = 64;
 
@@ -27,6 +29,7 @@ pub(super) enum Call {
     Create,
     AdapterCount,
     AdapterIdentifier,
+    DeviceCaps,
     CreateDevice,
     Clear,
     Present,
@@ -49,6 +52,7 @@ impl Call {
             0x5c => Self::DeviceRelease,
             0x2d0 => Self::AdapterCount,
             0x2d4 => Self::AdapterIdentifier,
+            0x2d8 => Self::DeviceCaps,
             _ => return None,
         })
     }
@@ -57,7 +61,7 @@ impl Call {
         match self {
             Self::CreateDevice | Self::Clear => 7,
             Self::Present => 5,
-            Self::AdapterIdentifier => 4,
+            Self::AdapterIdentifier | Self::DeviceCaps => 4,
             _ => 1,
         }
     }
@@ -86,6 +90,7 @@ impl Graphics {
             (ROOT_TABLE, 2, 0x54),
             (ROOT_TABLE, 4, 0x2d0),
             (ROOT_TABLE, 5, 0x2d4),
+            (ROOT_TABLE, 13, 0x2d8),
             (ROOT_TABLE, 15, 0x40),
             (DEVICE_TABLE, 1, 0x58),
             (DEVICE_TABLE, 2, 0x5c),
@@ -118,6 +123,7 @@ impl Graphics {
             }
             Call::AdapterCount => u32::from(args[0] == ROOT && self.root_refs != 0),
             Call::AdapterIdentifier => return self.adapter_identifier(args, memory),
+            Call::DeviceCaps => return self.device_caps(args, memory),
             Call::CreateDevice => return self.create_device(args, memory),
             Call::Clear => return self.clear(args, memory),
             Call::Present => {
@@ -168,6 +174,21 @@ impl Graphics {
         let description = &mut identifier[512..];
         description[..ADAPTER_DESCRIPTION.len()].copy_from_slice(ADAPTER_DESCRIPTION);
         memory.write(u64::from(args[3]), &identifier)?;
+        Ok(0)
+    }
+
+    fn device_caps(&self, args: &[u32], memory: &mut GuestMemory) -> Result<u32, MemoryError> {
+        if args[0] != ROOT || self.root_refs == 0 || args[1] != 0 || !matches!(args[2], 1..=3) {
+            return Ok(INVALID_CALL);
+        }
+        if args[2] != 1 {
+            return Ok(NOT_AVAILABLE);
+        }
+        guest::check(memory, args[3], DEVICE_CAPS_SIZE, Access::Write)?;
+        let mut caps = [0; DEVICE_CAPS_SIZE];
+        caps[..4].copy_from_slice(&1_u32.to_le_bytes());
+        caps[12..16].copy_from_slice(&CAPS2_CAN_RENDER_WINDOWED.to_le_bytes());
+        memory.write(u64::from(args[3]), &caps)?;
         Ok(0)
     }
 
