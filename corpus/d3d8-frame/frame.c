@@ -6,6 +6,7 @@ typedef result (__stdcall *clear_target)(object *, u32, const int *, u32, u32, f
 typedef result (__stdcall *present_frame)(object *, void *, void *, u32, void *);
 typedef u32 (__stdcall *release_object)(object *);
 typedef u32 (__stdcall *adapter_count)(object *);
+typedef result (__stdcall *get_display_mode)(object *, u32, u32 *);
 typedef result (__stdcall *check_format)(object *, u32, u32, u32, u32, u32, u32);
 typedef result (__stdcall *create_texture)(object *, u32, u32, u32, u32, u32, u32, object **);
 typedef u32 (__stdcall *get_level_count)(object *);
@@ -46,6 +47,7 @@ object *device;
 object *texture;
 adapter_identifier identifier;
 u32 caps[53];
+u32 current_mode[4];
 u32 texture_desc[8];
 u32 locked_rect_data[2];
 int _fltused = 0;
@@ -70,6 +72,9 @@ void entry(void) {
     if (((get_device_caps)root->methods[13])(root, 0, 1, caps) != 0) ExitProcess(14);
     if (caps[0] != 1 || caps[1] != 0 || caps[2] != 0 || caps[3] != 0x00080000 ||
         caps[4] != 0 || caps[52] != 0) ExitProcess(15);
+    if (((get_display_mode)root->methods[8])(root, 0, current_mode) != 0 ||
+        current_mode[0] != 640 || current_mode[1] != 480 ||
+        current_mode[2] != 0 || current_mode[3] != 22) ExitProcess(33);
     u32 desktop = GetDesktopWindow();
     presentation[6] = desktop;
     result status = ((create_device)root->methods[15])(
