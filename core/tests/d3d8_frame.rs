@@ -11,6 +11,7 @@ const OUTPUT: u32 = 0x0040_2180;
 const IDENTIFIER: u32 = 0x0040_2200;
 const CAPS: u32 = 0x0040_2800;
 const MODE_COUNT: u32 = 0x0040_28d4;
+const MODE: u32 = 0x0040_28e0;
 
 #[test]
 fn executes_an_uninterrupted_guest_graphics_program() {
@@ -108,7 +109,7 @@ fn create_accepts_only_direct3d_8_0_and_8_1_sdk_identities() {
 fn adapter_count_reports_only_the_live_owned_root() {
     let (mut process, root) = root();
     assert_eq!(method(&process, root, 3), 0x7000_0ffc);
-    assert_eq!(method(&process, root, 7), 0x7000_0ffc);
+    assert_eq!(method(&process, root, 8), 0x7000_0ffc);
     let count = method(&process, root, 4);
     assert_eq!(invoke(&mut process, count, &[root]), 1);
     assert_eq!(invoke(&mut process, count, &[root]), 1);
@@ -130,6 +131,63 @@ fn adapter_mode_count_reports_only_the_owned_display() {
     let release = method(&process, root, 2);
     assert_eq!(invoke(&mut process, release, &[root]), 0);
     assert_eq!(invoke(&mut process, count, &[root, 0]), 0);
+}
+
+#[test]
+fn adapter_mode_reports_the_owned_display_profile() {
+    let (mut process, root) = root();
+    let enumerate = method(&process, root, 7);
+    assert_ne!(enumerate, 0x7000_0ffc);
+    assert_eq!(method(&process, root, 8), 0x7000_0ffc);
+    process.memory.write(u64::from(MODE), &[0xa5; 16]).unwrap();
+    assert_eq!(invoke(&mut process, enumerate, &[root, 0, 0, MODE]), 0);
+    assert_eq!(
+        read_bytes(&process, MODE, 16),
+        [640_u32, 480, 0, 22]
+            .into_iter()
+            .flat_map(u32::to_le_bytes)
+            .collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn invalid_or_released_roots_do_not_write_adapter_modes() {
+    let (mut process, root) = root();
+    let enumerate = method(&process, root, 7);
+    for args in [[root + 4, 0, 0], [root, 1, 0], [root, 0, 1]] {
+        process.memory.write(u64::from(MODE), &[0xa5; 16]).unwrap();
+        assert_eq!(
+            invoke(&mut process, enumerate, &[args[0], args[1], args[2], MODE]),
+            0x8876_086c
+        );
+        assert_eq!(read_bytes(&process, MODE, 16), [0xa5; 16]);
+    }
+
+    let release = method(&process, root, 2);
+    assert_eq!(invoke(&mut process, release, &[root]), 0);
+    assert_eq!(
+        invoke(&mut process, enumerate, &[root, 0, 0, MODE]),
+        0x8876_086c
+    );
+    assert_eq!(read_bytes(&process, MODE, 16), [0xa5; 16]);
+}
+
+#[test]
+fn adapter_mode_faults_before_writing_any_prefix() {
+    let (mut process, root) = root();
+    let enumerate = method(&process, root, 7);
+    let partial = 0x0040_2ff8;
+    process
+        .memory
+        .write(u64::from(partial), &[0xa5; 8])
+        .unwrap();
+    let result = call(&mut process, enumerate, &[root, 0, 0, partial]);
+    assert!(matches!(
+        result.reason,
+        ProcessStop::Stopped(StopReason::MemoryFault(_))
+    ));
+    assert_eq!(result.api_calls, 0);
+    assert_eq!(read_bytes(&process, partial, 8), [0xa5; 8]);
 }
 
 #[test]
