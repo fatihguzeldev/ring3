@@ -2833,6 +2833,38 @@ fn execute_multibyte_to_wide() {
     assert_eq!(output, [b'A', 0, 0xac, 0x20, 0, 0]);
 }
 
+fn execute_com_apartment() {
+    use ring3_core::execution::{Process32, ProcessStop, Register32, StopReason};
+    let bytes =
+        imported_executable::pe32(&[0xcc], "ole32.dll", &["CoInitialize", "CoUninitialize"]);
+    let mut process = Process32::load(&bytes, 32).unwrap();
+    let mut call = |api: u32, argument: Option<u32>| {
+        let mut frame = 0x0040_1000_u32.to_le_bytes().to_vec();
+        if let Some(argument) = argument {
+            frame.extend_from_slice(&argument.to_le_bytes());
+        }
+        process.memory.write(0x1000_ef00, &frame).unwrap();
+        process.cpu.eip = api;
+        process.cpu.set_register(Register32::Esp, 0x1000_ef00);
+        let result = process.run(1);
+        assert_eq!(
+            result.reason,
+            ProcessStop::Stopped(StopReason::InstructionLimit)
+        );
+        assert_eq!((result.instructions, result.api_calls), (0, 1));
+        assert_eq!(
+            process.cpu.register(Register32::Esp),
+            0x1000_ef04 + u32::from(argument.is_some()) * 4
+        );
+        process.cpu.register(Register32::Eax)
+    };
+    assert_eq!(call(0x7000_0474, Some(0)), 0);
+    assert_eq!(call(0x7000_0474, Some(0)), 1);
+    assert_eq!(call(0x7000_0478, None), 1);
+    assert_eq!(call(0x7000_0478, None), 1);
+    assert_eq!(call(0x7000_0474, Some(0)), 0);
+}
+
 fn execute_borrow() {
     use ring3_core::execution::{Cpu32, Register32, StopReason, load_pe32};
     let mut image = load_pe32(&borrow_executable::pe32(), 3).unwrap();
@@ -4387,6 +4419,7 @@ pub extern "C" fn run() -> u32 {
     execute_borrow();
     execute_code_pages();
     execute_multibyte_to_wide();
+    execute_com_apartment();
     execute_cpinfo();
     execute_messages();
     execute_clipboard_formats();
