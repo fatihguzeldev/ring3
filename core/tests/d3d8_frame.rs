@@ -606,6 +606,61 @@ fn d16_depth_clear_and_occlusion_keep_color_and_depth_independent() {
 }
 
 #[test]
+fn z_enable_render_state_controls_depth_tests_and_writes() {
+    let (mut process, device) = depth_device();
+    let set_state = method(&process, device, 50);
+    let clear = method(&process, device, 36);
+    let present = method(&process, device, 15);
+    assert_eq!(invoke(&mut process, set_state, &[device, 7, 1]), 0);
+    assert_eq!(
+        invoke(
+            &mut process,
+            clear,
+            &[device, 0, 0, 3, 0, 1_f32.to_bits(), 0]
+        ),
+        0
+    );
+    draw_depth_triangle(&mut process, device, 0.25, 0xffff_0000);
+    assert_eq!(invoke(&mut process, set_state, &[device, 7, 0]), 0);
+    draw_depth_triangle(&mut process, device, 0.75, 0xff00_00ff);
+    assert_eq!(invoke(&mut process, set_state, &[device, 7, 1]), 0);
+    draw_depth_triangle(&mut process, device, 0.5, 0xff00_ff00);
+    assert_eq!(invoke(&mut process, present, &[device, 0, 0, 0, 0]), 0);
+    assert_eq!(&process.take_frame().unwrap().rgba[..4], &[0, 0, 255, 255]);
+}
+
+#[test]
+fn invalid_z_enable_requests_preserve_the_owned_device_state() {
+    let (mut process, device) = depth_device();
+    let set_state = method(&process, device, 50);
+    let clear = method(&process, device, 36);
+    let present = method(&process, device, 15);
+    assert_eq!(invoke(&mut process, set_state, &[device, 7, 0]), 0);
+    for args in [[device, 7, 2], [device, 14, 1], [device + 4, 7, 1]] {
+        assert_eq!(invoke(&mut process, set_state, &args), 0x8876_086c);
+    }
+    assert_eq!(
+        invoke(
+            &mut process,
+            clear,
+            &[device, 0, 0, 3, 0, 1_f32.to_bits(), 0]
+        ),
+        0
+    );
+    draw_depth_triangle(&mut process, device, 0.25, 0xffff_0000);
+    draw_depth_triangle(&mut process, device, 0.75, 0xff00_00ff);
+    assert_eq!(invoke(&mut process, present, &[device, 0, 0, 0, 0]), 0);
+    assert_eq!(&process.take_frame().unwrap().rgba[..4], &[0, 0, 255, 255]);
+
+    let release = method(&process, device, 2);
+    assert_eq!(invoke(&mut process, release, &[device]), 0);
+    assert_eq!(
+        invoke(&mut process, set_state, &[device, 7, 1]),
+        0x8876_086c
+    );
+}
+
+#[test]
 fn invalid_depth_clear_does_not_change_the_owned_surfaces() {
     let (mut process, device) = depth_device();
     let clear = method(&process, device, 36);

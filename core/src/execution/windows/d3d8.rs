@@ -66,6 +66,7 @@ pub(super) enum Call {
     TextureUnlockRect,
     SetVertexShader,
     SetViewport,
+    SetRenderState,
     DrawPrimitiveUp,
 }
 
@@ -90,6 +91,7 @@ impl Call {
             0x41c => Self::SetVertexShader,
             0x420 => Self::DrawPrimitiveUp,
             0x498 => Self::SetViewport,
+            0x49c => Self::SetRenderState,
             0x2d0 => Self::AdapterCount,
             0x2d4 => Self::AdapterIdentifier,
             0x2d8 => Self::DeviceCaps,
@@ -109,7 +111,7 @@ impl Call {
             Self::CreateDevice | Self::Clear | Self::CheckDeviceFormat => 7,
             Self::CreateTexture => 8,
             Self::Present | Self::TextureLockRect | Self::DrawPrimitiveUp => 5,
-            Self::TextureLevelDesc | Self::CurrentDisplayMode => 3,
+            Self::TextureLevelDesc | Self::CurrentDisplayMode | Self::SetRenderState => 3,
             Self::AdapterIdentifier | Self::AdapterMode | Self::DeviceCaps => 4,
             Self::AdapterModeCount
             | Self::TextureUnlockRect
@@ -128,6 +130,7 @@ pub(super) struct Graphics {
     back: Option<Frame>,
     spare: Option<Frame>,
     depth: Option<Vec<u16>>,
+    z_enabled: bool,
     viewport: Option<Viewport>,
     front: Option<Frame>,
     textures: BTreeMap<u32, Texture>,
@@ -189,6 +192,7 @@ impl Graphics {
             (DEVICE_TABLE, 15, 0x48),
             (DEVICE_TABLE, 36, 0x44),
             (DEVICE_TABLE, 40, 0x498),
+            (DEVICE_TABLE, 50, 0x49c),
             (DEVICE_TABLE, 20, 0x400),
             (DEVICE_TABLE, 72, 0x420),
             (DEVICE_TABLE, 76, 0x41c),
@@ -252,20 +256,8 @@ impl Graphics {
                 }
             }
             Call::SetViewport => return self.set_viewport(args, memory),
-            Call::DrawPrimitiveUp => {
-                if args[0] != DEVICE || self.device_refs == 0 {
-                    INVALID_CALL
-                } else {
-                    return primitives::draw_up(
-                        self.back.as_mut(),
-                        self.depth.as_deref_mut(),
-                        self.viewport,
-                        self.vertex_fvf,
-                        args,
-                        memory,
-                    );
-                }
-            }
+            Call::SetRenderState => self.set_render_state(args),
+            Call::DrawPrimitiveUp => return self.draw_primitive_up(args, memory),
             Call::TextureLevelCount => {
                 self.textures.get(&args[0]).map_or(INVALID_CALL, |texture| {
                     u32::try_from(texture.levels.len()).expect("bounded mip count")
@@ -498,6 +490,7 @@ impl Graphics {
         self.root_refs = self.root_refs.saturating_add(1);
         self.device_refs = 1;
         self.depth = (enable_depth == 1).then(|| vec![u16::MAX; (width * height) as usize]);
+        self.z_enabled = enable_depth == 1;
         self.spare = (count == 2).then(|| frame.clone());
         self.viewport = Some(Viewport {
             left: 0,
@@ -513,6 +506,7 @@ impl Graphics {
         self.back = None;
         self.spare = None;
         self.depth = None;
+        self.z_enabled = false;
         self.viewport = None;
         self.vertex_fvf = 0;
         self.root_refs = self.root_refs.saturating_sub(1);
@@ -545,6 +539,32 @@ impl Graphics {
             bottom: (y + height) as usize,
         });
         Ok(0)
+    }
+
+    fn set_render_state(&mut self, args: &[u32]) -> u32 {
+        if args[0] != DEVICE || self.device_refs == 0 || args[1] != 7 || args[2] > 1 {
+            return INVALID_CALL;
+        }
+        self.z_enabled = args[2] == 1;
+        0
+    }
+
+    fn draw_primitive_up(
+        &mut self,
+        args: &[u32],
+        memory: &GuestMemory,
+    ) -> Result<u32, MemoryError> {
+        if args[0] != DEVICE || self.device_refs == 0 {
+            return Ok(INVALID_CALL);
+        }
+        primitives::draw_up(
+            self.back.as_mut(),
+            self.depth.as_deref_mut().filter(|_| self.z_enabled),
+            self.viewport,
+            self.vertex_fvf,
+            args,
+            memory,
+        )
     }
 
     fn create_texture(
