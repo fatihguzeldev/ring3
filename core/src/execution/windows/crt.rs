@@ -13,6 +13,7 @@ mod onexit;
 mod paths;
 mod random;
 mod rtti;
+mod scanning;
 mod status;
 mod streams;
 mod strings;
@@ -73,6 +74,7 @@ pub(super) enum Call {
     CompareIgnoringCase,
     Format,
     Sprintf,
+    Sscanf,
     Lowercase,
     UppercaseString,
     SetMbCodePage,
@@ -126,6 +128,7 @@ impl Call {
             0x1ac => Some(Self::Sprintf),
             0x1b0 => Some(Self::Move),
             0x1b4 => Some(Self::DynamicCast),
+            0x1b8 => Some(Self::Sscanf),
             0x13c => Some(Self::SetMbCodePage),
             0x140 => Some(Self::OnExit),
             _ => None,
@@ -154,7 +157,8 @@ impl Call {
             | Self::FindCharacter
             | Self::Stat
             | Self::CompareIgnoringCase
-            | Self::Sprintf => 2,
+            | Self::Sprintf
+            | Self::Sscanf => 2,
             Self::GetMainArgs | Self::SplitPath | Self::DynamicCast => 5,
             Self::Format => 4,
             Self::Memset
@@ -263,6 +267,11 @@ impl Crt {
                     )?)
                 }
             }
+            Call::Sscanf => Some(scanning::sscanf_decimal(
+                memory,
+                args,
+                cpu.register(Register32::Esp),
+            )?),
             Call::Lowercase => Some(strings::lowercase(args[0])?),
             Call::UppercaseString => Some(strings::uppercase(memory, args[0])?),
             Call::CompareIgnoringCase => {
@@ -344,6 +353,7 @@ pub(super) fn resolve(name: &str) -> Option<u32> {
         "ftell" => Some(API_BASE + 0x1a4),
         "_strupr" => Some(API_BASE + 0x1a8),
         "sprintf" => Some(API_BASE + 0x1ac),
+        "sscanf" => Some(API_BASE + 0x1b8),
         "memmove" => Some(API_BASE + 0x1b0),
         "strchr" => Some(API_BASE + 0x158),
         "_setmbcp" => Some(API_BASE + 0x13c),
