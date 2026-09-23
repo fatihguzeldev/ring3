@@ -232,7 +232,7 @@ impl Cpu32 {
             | Code::Fst_m64fp
             | Code::Fstp_m32fp
             | Code::Fstp_m64fp => self.x87_transfer(instruction, memory)?,
-            Code::Fst_sti | Code::Fstp_sti => self.x87_register_store(instruction)?,
+            code if x87::is_register_transfer(code) => self.x87_register_transfer(instruction)?,
             Code::Fabs => self.x87_absolute()?,
             Code::Fadd_st0_sti | Code::Fadd_sti_st0 => self.x87_register_add(instruction)?,
             Code::Fdivrp_sti_st0 | Code::Fdivp_sti_st0 => self.x87_divide_pop(instruction)?,

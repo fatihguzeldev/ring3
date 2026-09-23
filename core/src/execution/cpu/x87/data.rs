@@ -130,19 +130,29 @@ impl Cpu32 {
         Ok(())
     }
 
-    pub(in super::super) fn x87_register_store(
+    pub(in super::super) fn x87_register_transfer(
         &mut self,
         instruction: &Instruction,
     ) -> Result<(), StopReason> {
         self.x87_masked()?;
-        let index = (instruction.op0_register() as usize)
+        let register = if instruction.code() == Code::Fxch_st0_sti {
+            instruction.op1_register()
+        } else {
+            instruction.op0_register()
+        };
+        let index = (register as usize)
             .checked_sub(Register::ST0 as usize)
             .ok_or(StopReason::UnsupportedInstruction)?;
         if index >= usize::from(self.x87_stack.occupied) {
             return Err(StopReason::UnsupportedInstruction);
         }
         let top = usize::from(self.x87_stack.top);
-        self.x87_stack.values[(top + index) & 7] = self.x87_stack.values[top];
+        let target = (top + index) & 7;
+        if instruction.code() == Code::Fxch_st0_sti {
+            self.x87_stack.values.swap(top, target);
+        } else {
+            self.x87_stack.values[target] = self.x87_stack.values[top];
+        }
         self.x87_stack.rounded(false, false);
         if instruction.code() == Code::Fstp_sti {
             self.x87_stack.pop();

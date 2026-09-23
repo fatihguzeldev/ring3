@@ -53,3 +53,7 @@ pub(super) fn is_arithmetic(code: Code) -> bool {
             | Code::Fsubr_m64fp
     )
 }
+
+pub(super) fn is_register_transfer(code: Code) -> bool {
+    matches!(code, Code::Fst_sti | Code::Fstp_sti | Code::Fxch_st0_sti)
+}
