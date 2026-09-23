@@ -72,6 +72,8 @@ pub(super) enum Call {
     TextureSurfaceAddRef,
     TextureSurfaceRelease,
     TextureSurfaceDesc,
+    TextureSurfaceLockRect,
+    TextureSurfaceUnlockRect,
     SetVertexShader,
     SetViewport,
     SetRenderState,
@@ -104,6 +106,8 @@ impl Call {
             0x4bc => Self::TextureSurfaceAddRef,
             0x4c0 => Self::TextureSurfaceRelease,
             0x4c4 => Self::TextureSurfaceDesc,
+            0x4c8 => Self::TextureSurfaceLockRect,
+            0x4cc => Self::TextureSurfaceUnlockRect,
             0x41c => Self::SetVertexShader,
             0x420 => Self::DrawPrimitiveUp,
             0x498 => Self::SetViewport,
@@ -135,7 +139,10 @@ impl Call {
             | Self::TextureGetSurface
             | Self::CurrentDisplayMode
             | Self::SetRenderState => 3,
-            Self::AdapterIdentifier | Self::AdapterMode | Self::DeviceCaps => 4,
+            Self::AdapterIdentifier
+            | Self::AdapterMode
+            | Self::DeviceCaps
+            | Self::TextureSurfaceLockRect => 4,
             Self::AdapterModeCount
             | Self::TextureUnlockRect
             | Self::SetVertexShader
@@ -253,6 +260,8 @@ impl Graphics {
             (TEXTURE_SURFACE_TABLE, 1, 0x4bc),
             (TEXTURE_SURFACE_TABLE, 2, 0x4c0),
             (TEXTURE_SURFACE_TABLE, 8, 0x4c4),
+            (TEXTURE_SURFACE_TABLE, 9, 0x4c8),
+            (TEXTURE_SURFACE_TABLE, 10, 0x4cc),
         ] {
             guest::write_word(memory, table + index * 4, API_BASE + offset)?;
         }
@@ -303,6 +312,8 @@ impl Graphics {
                 return self.texture_surface_ref(call, args[0], memory);
             }
             Call::TextureSurfaceDesc => return self.texture_surface_desc(args, memory),
+            Call::TextureSurfaceLockRect => return self.texture_surface_lock_rect(args, memory),
+            Call::TextureSurfaceUnlockRect => self.texture_surface_unlock_rect(args[0]),
             Call::SetVertexShader => {
                 if args[0] != DEVICE || self.device_refs == 0 || args[1] != 0x44 {
                     INVALID_CALL
@@ -320,17 +331,7 @@ impl Graphics {
             Call::AvailableTextureMemory => self.available_texture_memory(args[0]),
             Call::DrawPrimitiveUp => return self.draw_primitive_up(args, memory),
             Call::TextureLevelCount => self.texture_level_count(args[0]),
-            Call::TextureAddRef => {
-                if let Some(texture) = self.textures.get_mut(&args[0]) {
-                    if texture.refs == 0 {
-                        return Ok(INVALID_CALL);
-                    }
-                    texture.refs = texture.refs.saturating_add(1);
-                    texture.total_refs()
-                } else {
-                    INVALID_CALL
-                }
-            }
+            Call::TextureAddRef => self.texture_add_ref(args[0]),
             Call::TextureRelease => return self.texture_release(args[0], memory),
             Call::Clear => return self.clear(args, memory),
             Call::Present => {
@@ -804,6 +805,17 @@ impl Graphics {
         })
     }
 
+    fn texture_add_ref(&mut self, address: u32) -> u32 {
+        let Some(texture) = self.textures.get_mut(&address) else {
+            return INVALID_CALL;
+        };
+        if texture.refs == 0 {
+            return INVALID_CALL;
+        }
+        texture.refs = texture.refs.saturating_add(1);
+        texture.total_refs()
+    }
+
     fn texture_get_surface(
         &mut self,
         args: &[u32],
@@ -891,6 +903,33 @@ impl Graphics {
             ],
             memory,
         )
+    }
+
+    fn texture_surface_lock_rect(
+        &mut self,
+        args: &[u32],
+        memory: &mut GuestMemory,
+    ) -> Result<u32, MemoryError> {
+        let Some((texture, level)) = self.texture_surface_identity(args[0]) else {
+            return Ok(INVALID_CALL);
+        };
+        self.texture_lock_rect(
+            &[
+                texture,
+                u32::try_from(level).expect("bounded mip count"),
+                args[1],
+                args[2],
+                args[3],
+            ],
+            memory,
+        )
+    }
+
+    fn texture_surface_unlock_rect(&mut self, surface: u32) -> u32 {
+        let Some((texture, level)) = self.texture_surface_identity(surface) else {
+            return INVALID_CALL;
+        };
+        self.texture_unlock_rect(&[texture, u32::try_from(level).expect("bounded mip count")])
     }
 
     fn texture_level_desc(

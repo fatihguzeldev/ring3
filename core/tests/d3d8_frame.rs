@@ -25,6 +25,7 @@ const FULLSCREEN_PARAMS: u32 = 0x0040_2a60;
 const VIEWPORT: u32 = 0x0040_2bc0;
 const DEPTH_OUTPUT: u32 = 0x0040_2be0;
 const SURFACE_OUTPUT: u32 = 0x0040_2c00;
+const SURFACE_RECT: u32 = 0x0040_2c20;
 
 #[test]
 fn executes_an_uninterrupted_guest_graphics_program() {
@@ -1529,6 +1530,103 @@ fn texture_surface_desc_rejects_stale_handles_and_output_faults() {
         0x8876_086c
     );
     assert_eq!(read(&process, LEVEL_DESC), 0xa5a5_a5a5);
+}
+
+#[test]
+fn surface_and_texture_lock_rect_share_mip_pixels_and_lock_state() {
+    let (mut process, _, device) = create();
+    let create_texture = method(&process, device, 20);
+    assert_eq!(
+        invoke(
+            &mut process,
+            create_texture,
+            &[device, 4, 2, 1, 0, 22, 1, TEXTURE_OUTPUT]
+        ),
+        0
+    );
+    let texture = read(&process, TEXTURE_OUTPUT);
+    let get_surface = method(&process, texture, 15);
+    assert_eq!(
+        invoke(&mut process, get_surface, &[texture, 0, SURFACE_OUTPUT]),
+        0
+    );
+    let surface = read(&process, SURFACE_OUTPUT);
+    let surface_lock = method(&process, surface, 9);
+    let surface_unlock = method(&process, surface, 10);
+    let texture_lock = method(&process, texture, 16);
+    let texture_unlock = method(&process, texture, 17);
+    write(&mut process, SURFACE_RECT, &[1, 0, 3, 2]);
+    assert_eq!(
+        invoke(
+            &mut process,
+            surface_lock,
+            &[surface, LOCKED_RECT, SURFACE_RECT, 0]
+        ),
+        0
+    );
+    assert_eq!(read(&process, LOCKED_RECT), 16);
+    let pixel = read(&process, LOCKED_RECT + 4);
+    assert_eq!(
+        invoke(&mut process, texture_lock, &[texture, 0, LOCKED_RECT, 0, 0]),
+        0x8876_086c
+    );
+    process
+        .memory
+        .write(u64::from(pixel), &[0x11, 0x22, 0x33, 0x44])
+        .unwrap();
+    assert_eq!(invoke(&mut process, surface_unlock, &[surface]), 0);
+    assert_eq!(
+        invoke(&mut process, texture_lock, &[texture, 0, LOCKED_RECT, 0, 0]),
+        0
+    );
+    assert_eq!(pixel, read(&process, LOCKED_RECT + 4) + 4);
+    assert_eq!(read_bytes(&process, pixel, 4), [0x11, 0x22, 0x33, 0x44]);
+    assert_eq!(invoke(&mut process, texture_unlock, &[texture, 0]), 0);
+    assert_eq!(
+        invoke(&mut process, surface_unlock, &[surface]),
+        0x8876_086c
+    );
+}
+
+#[test]
+fn surface_lock_rect_rejects_stale_handles_and_bad_output_atomically() {
+    let (mut process, _, device) = create();
+    let create_texture = method(&process, device, 20);
+    assert_eq!(
+        invoke(
+            &mut process,
+            create_texture,
+            &[device, 4, 2, 1, 0, 22, 1, TEXTURE_OUTPUT]
+        ),
+        0
+    );
+    let texture = read(&process, TEXTURE_OUTPUT);
+    let get_surface = method(&process, texture, 15);
+    assert_eq!(
+        invoke(&mut process, get_surface, &[texture, 0, SURFACE_OUTPUT]),
+        0
+    );
+    let surface = read(&process, SURFACE_OUTPUT);
+    let lock = method(&process, surface, 9);
+    write(&mut process, LOCKED_RECT, &[0xa5a5_a5a5, 0xa5a5_a5a5]);
+    assert_eq!(
+        invoke(&mut process, lock, &[surface + 2, LOCKED_RECT, 0, 0]),
+        0x8876_086c
+    );
+    let fault = call(&mut process, lock, &[surface, 0x6000_0000, 0, 0]);
+    assert!(matches!(
+        fault.reason,
+        ProcessStop::Stopped(StopReason::MemoryFault(_))
+    ));
+    assert_eq!(fault.api_calls, 0);
+    assert_eq!(read(&process, LOCKED_RECT), 0xa5a5_a5a5);
+    let release = method(&process, surface, 2);
+    assert_eq!(invoke(&mut process, release, &[surface]), 0);
+    assert_eq!(
+        invoke(&mut process, lock, &[surface, LOCKED_RECT, 0, 0]),
+        0x8876_086c
+    );
+    assert_eq!(read(&process, LOCKED_RECT), 0xa5a5_a5a5);
 }
 
 #[test]
