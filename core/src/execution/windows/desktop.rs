@@ -371,6 +371,30 @@ pub(super) fn read_title(memory: &GuestMemory, pointer: u32) -> Result<String, D
 }
 
 impl super::Process32 {
+    pub(super) fn enable_dialog_control(&mut self, args: &[u32]) -> Result<(), DispatchError> {
+        let Some(window) = self.desktop.window(args[0]) else {
+            thread::set_last_error(&mut self.memory, 1400)?;
+            self.cpu.set_register(Register32::Eax, 0);
+            return Ok(());
+        };
+        if window.parent == 0
+            || window.dialog_units.is_none()
+            || !(0x80..=0x85).contains(&window.class)
+            || window.procedure != 0
+        {
+            return Err(DispatchError::Unsupported);
+        }
+        let was_disabled = u32::from(window.style & 0x0800_0000 != 0);
+        let window = self.desktop.window_mut(args[0]).expect("validated window");
+        if args[1] == 0 {
+            window.style |= 0x0800_0000;
+        } else {
+            window.style &= !0x0800_0000;
+        }
+        self.cpu.set_register(Register32::Eax, was_disabled);
+        Ok(())
+    }
+
     pub(super) fn combo_message(&mut self, args: &[u32]) -> Result<Option<u32>, DispatchError> {
         let window = self.desktop.window(args[0]).expect("validated window");
         if window.parent == 0
