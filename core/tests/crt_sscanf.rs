@@ -97,7 +97,7 @@ fn no_conversion_and_null_arguments_leave_destination_unchanged() {
 #[test]
 fn unsupported_format_overflow_and_invalid_output_stop_without_write() {
     for (input, format, output, unsupported) in [
-        (&b"123\0"[..], &b"%x\0"[..], OUTPUT, true),
+        (&b"123\0"[..], &b"%o\0"[..], OUTPUT, true),
         (&b"2147483648\0"[..], &b"%d\0"[..], OUTPUT, true),
         (&b"123\0"[..], &b"%d\0"[..], 0, false),
     ] {
@@ -214,6 +214,63 @@ fn unsigned_nonmatch_overflow_and_fault_preserve_destination() {
         (&b"12\0"[..], 0, false),
     ] {
         let mut process = process(input, b"%u\0");
+        prepare(&mut process, INPUT, FORMAT, output);
+        let before = process.cpu;
+        let reason = process.run(1).reason;
+        if unsupported {
+            assert_eq!(reason, ProcessStop::UnsupportedApi { address: API });
+        } else {
+            assert!(matches!(
+                reason,
+                ProcessStop::Stopped(StopReason::MemoryFault(_))
+            ));
+        }
+        assert_eq!(process.cpu, before);
+        assert_eq!(word(&process, OUTPUT), 0x1234_5678);
+    }
+}
+
+#[test]
+fn hex_format_assigns_32_bit_pattern_and_keeps_cdecl_arguments() {
+    for (input, expected) in [
+        (&b"ABCDEF12tail\0"[..], 0xabcd_ef12_u32),
+        (&b" \t0x7f!\0"[..], 0x7f),
+        (&b"0Xffffffff\0"[..], u32::MAX),
+        (&b"-a\0"[..], u32::MAX - 9),
+        (&b"+00aBc\0"[..], 0xabc),
+    ] {
+        let mut process = process(input, b"%x\0");
+        prepare(&mut process, INPUT, FORMAT, OUTPUT);
+        let result = process.run(1);
+        assert_eq!(
+            result.reason,
+            ProcessStop::Stopped(StopReason::InstructionLimit)
+        );
+        assert_eq!((result.instructions, result.api_calls), (0, 1));
+        assert_eq!(process.cpu.register(Register32::Eax), 1);
+        assert_eq!(process.cpu.register(Register32::Esp), STACK + 4);
+        assert_eq!(word(&process, OUTPUT), expected);
+    }
+}
+
+#[test]
+fn hex_nonmatch_overflow_and_fault_preserve_destination() {
+    for (input, expected) in [(&b"xyz\0"[..], 0), (&b" \t\0"[..], u32::MAX)] {
+        let mut process = process(input, b"%x\0");
+        prepare(&mut process, INPUT, FORMAT, OUTPUT);
+        assert_eq!(
+            process.run(1).reason,
+            ProcessStop::Stopped(StopReason::InstructionLimit)
+        );
+        assert_eq!(process.cpu.register(Register32::Eax), expected);
+        assert_eq!(word(&process, OUTPUT), 0x1234_5678);
+    }
+    for (input, output, unsupported) in [
+        (&b"100000000\0"[..], OUTPUT, true),
+        (&b"0x\0"[..], OUTPUT, true),
+        (&b"ab\0"[..], 0, false),
+    ] {
+        let mut process = process(input, b"%x\0");
         prepare(&mut process, INPUT, FORMAT, output);
         let before = process.cpu;
         let reason = process.run(1).reason;

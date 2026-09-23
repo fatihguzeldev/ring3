@@ -10,7 +10,7 @@ pub(super) fn sscanf(
         return Ok(u32::MAX);
     }
     let format = read_string(memory, args[1])?;
-    if format != b"%d" && format != b"%f" && format != b"%u" {
+    if format != b"%d" && format != b"%f" && format != b"%u" && format != b"%x" {
         return Err(DispatchError::Unsupported);
     }
     let input = read_string(memory, args[0])?;
@@ -25,6 +25,7 @@ pub(super) fn sscanf(
         b"%d" => parse_decimal(&input, offset)?,
         b"%f" => parse_float(&input, offset)?,
         b"%u" => parse_unsigned(&input, offset)?,
+        b"%x" => parse_hex(&input, offset)?,
         _ => unreachable!("validated format"),
     };
     let Some(value) = value else {
@@ -140,6 +141,50 @@ fn parse_unsigned(input: &[u8], mut offset: usize) -> Result<Option<[u8; 4]>, Di
         return Ok(None);
     }
     let value = u32::try_from(magnitude).expect("bounded unsigned magnitude");
+    let value = if negative {
+        value.wrapping_neg()
+    } else {
+        value
+    };
+    Ok(Some(value.to_le_bytes()))
+}
+
+fn parse_hex(input: &[u8], mut offset: usize) -> Result<Option<[u8; 4]>, DispatchError> {
+    let negative = match input[offset] {
+        b'-' => {
+            offset += 1;
+            true
+        }
+        b'+' => {
+            offset += 1;
+            false
+        }
+        _ => false,
+    };
+    let prefixed =
+        input.get(offset) == Some(&b'0') && matches!(input.get(offset + 1), Some(b'x' | b'X'));
+    if prefixed {
+        offset += 2;
+    }
+    let start = offset;
+    let mut magnitude = 0_u64;
+    while let Some(digit) = input
+        .get(offset)
+        .and_then(|byte| (*byte as char).to_digit(16))
+    {
+        magnitude = magnitude * 16 + u64::from(digit);
+        if magnitude > u64::from(u32::MAX) {
+            return Err(DispatchError::Unsupported);
+        }
+        offset += 1;
+    }
+    if offset == start {
+        if prefixed {
+            return Err(DispatchError::Unsupported);
+        }
+        return Ok(None);
+    }
+    let value = u32::try_from(magnitude).expect("bounded hex magnitude");
     let value = if negative {
         value.wrapping_neg()
     } else {
