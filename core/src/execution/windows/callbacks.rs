@@ -1,6 +1,6 @@
 use super::{
     Cpu32, DispatchError, GuestMemory, MemoryError, Process32, Register32, creation, desktop,
-    guest, modules, thread,
+    dialogs, guest, modules, thread,
 };
 
 pub(super) const RETURN: u32 = 0x7000_0ff8;
@@ -84,7 +84,7 @@ pub(super) struct Frame {
     pub(super) creation: Option<creation::Pending>,
     pub(super) cbt_hook: Option<u32>,
     pub(super) module: Option<modules::Pending>,
-    pub(super) dialog: Option<u32>,
+    pub(super) dialog: Option<dialogs::Pending>,
 }
 
 impl Callbacks {

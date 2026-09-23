@@ -187,10 +187,7 @@ impl Process32 {
     pub(super) fn finish_callback(&mut self) -> Result<(), DispatchError> {
         let frame = self.callbacks.current(&self.cpu)?;
         if let Some(dialog) = frame.dialog {
-            self.callbacks.finish(&mut self.cpu, &self.memory)?;
-            self.desktop.activate_created(dialog);
-            self.cpu.set_register(Register32::Eax, dialog);
-            return Ok(());
+            return self.finish_dialog_callback(frame, dialog);
         }
         if let Some(pending) = frame.module {
             let success = self.cpu.register(Register32::Eax) != 0;

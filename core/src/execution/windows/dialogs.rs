@@ -1,9 +1,27 @@
 use super::super::Access;
-use super::{DispatchError, GuestMemory, Process32, Register32, callbacks, desktop, guest};
+use super::{
+    DispatchError, GuestMemory, MemoryError, Process32, Register32, callbacks, desktop, guest,
+};
 
 const MAX_TEMPLATE: usize = 65536;
 const MAX_ITEMS: usize = 256;
 const MAX_TEXT: usize = 1024;
+const HOOK_SCRATCH: u32 = 64;
+
+#[derive(Clone, Copy)]
+enum Phase {
+    Cbt,
+    Init,
+}
+
+#[derive(Clone, Copy)]
+pub(super) struct Pending {
+    window: u32,
+    procedure: u32,
+    focus: u32,
+    init: u32,
+    phase: Phase,
+}
 
 pub(super) struct Template {
     pub(super) style: u32,
@@ -121,7 +139,7 @@ pub(super) fn parse(
 
 impl Process32 {
     pub(super) fn create_dialog(&mut self, args: &[u32]) -> Result<bool, DispatchError> {
-        let [instance, pointer, parent, procedure, init] = args.try_into().unwrap();
+        let [instance, pointer, parent, procedure, _init] = args.try_into().unwrap();
         if instance == 0 || !self.modules.contains(instance) || parent != 0 || procedure == 0 {
             return Err(DispatchError::Unsupported);
         }
@@ -143,22 +161,7 @@ impl Process32 {
             .and_then(|index| u32::try_from(index + 1).ok())
             .and_then(|index| handle.checked_add(index * 4))
             .unwrap_or(0);
-        let stack = self.cpu.register(Register32::Esp);
-        self.callbacks.enter(
-            &mut self.cpu,
-            &mut self.memory,
-            callbacks::Frame {
-                stack,
-                caller: stack,
-                cleanup: 24,
-                creation: None,
-                cbt_hook: None,
-                module: None,
-                dialog: Some(handle),
-            },
-            procedure,
-            &[handle, 0x110, focus, init],
-        )?;
+        self.start_dialog_callback(args, handle, focus, &template)?;
         self.desktop.insert(
             handle,
             desktop::Window {
@@ -197,6 +200,123 @@ impl Process32 {
             );
         }
         Ok(true)
+    }
+
+    fn start_dialog_callback(
+        &mut self,
+        args: &[u32],
+        handle: u32,
+        focus: u32,
+        template: &Template,
+    ) -> Result<(), DispatchError> {
+        let [instance, _, parent, procedure, init] = args.try_into().unwrap();
+        let caller = self.cpu.register(Register32::Esp);
+        let hook = self.hooks.newest_cbt();
+        self.callbacks
+            .check_entry(hook.map_or(procedure, |(_, callback)| callback))?;
+        let stack = if hook.is_some() {
+            let base = caller
+                .checked_sub(HOOK_SCRATCH)
+                .ok_or(MemoryError::AddressOverflow)?;
+            let lowest = base.checked_sub(20).ok_or(MemoryError::AddressOverflow)?;
+            guest::check(
+                &self.memory,
+                lowest,
+                (HOOK_SCRATCH + 20) as usize,
+                Access::Write,
+            )?;
+            base
+        } else {
+            caller
+        };
+        let pending = Pending {
+            window: handle,
+            procedure,
+            focus,
+            init,
+            phase: if hook.is_some() {
+                Phase::Cbt
+            } else {
+                Phase::Init
+            },
+        };
+        if hook.is_some() {
+            let [x, y, width, height] =
+                template.units.map(|value| i32::from(value).cast_unsigned());
+            let creation = [
+                init,
+                instance,
+                0,
+                parent,
+                height,
+                width,
+                y,
+                x,
+                template.style,
+                0,
+                0x8002,
+                template.exstyle,
+                stack,
+                0,
+            ];
+            let bytes: Vec<_> = creation
+                .iter()
+                .flat_map(|word| word.to_le_bytes())
+                .collect();
+            self.memory.write(u64::from(stack), &bytes)?;
+        }
+        let hook_arguments = [3, handle, stack + 48];
+        let init_arguments = [handle, 0x110, focus, init];
+        let arguments: &[u32] = if hook.is_some() {
+            &hook_arguments
+        } else {
+            &init_arguments
+        };
+        self.callbacks.enter(
+            &mut self.cpu,
+            &mut self.memory,
+            callbacks::Frame {
+                stack,
+                caller,
+                cleanup: 24,
+                creation: None,
+                cbt_hook: hook.map(|(handle, _)| handle),
+                module: None,
+                dialog: Some(pending),
+            },
+            hook.map_or(procedure, |(_, procedure)| procedure),
+            arguments,
+        )?;
+        Ok(())
+    }
+
+    pub(super) fn finish_dialog_callback(
+        &mut self,
+        mut frame: callbacks::Frame,
+        mut pending: Pending,
+    ) -> Result<(), DispatchError> {
+        if matches!(pending.phase, Phase::Cbt) {
+            if self.cpu.register(Register32::Eax) != 0 {
+                self.callbacks.finish(&mut self.cpu, &self.memory)?;
+                self.desktop.remove(pending.window);
+                self.cpu.set_register(Register32::Eax, 0);
+                return Ok(());
+            }
+            pending.phase = Phase::Init;
+            frame.dialog = Some(pending);
+            frame.cbt_hook = None;
+            return self.callbacks.replace(
+                &mut self.cpu,
+                &mut self.memory,
+                frame,
+                pending.procedure,
+                &[pending.window, 0x110, pending.focus, pending.init],
+            );
+        }
+        self.callbacks.finish(&mut self.cpu, &self.memory)?;
+        self.desktop.activate_created(pending.window);
+        self.cpu.set_register(Register32::Eax, pending.window);
+        Ok(())
     }
 }
 
