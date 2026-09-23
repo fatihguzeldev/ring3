@@ -46,6 +46,42 @@ impl Stack {
 }
 
 impl Cpu32 {
+    pub(in super::super) fn x87_register_add(
+        &mut self,
+        instruction: &Instruction,
+    ) -> Result<(), StopReason> {
+        self.x87_arithmetic_precision(instruction.code())?;
+        let destination_is_top = instruction.code() == Code::Fadd_st0_sti;
+        let indexed_register = if destination_is_top {
+            instruction.op1_register()
+        } else {
+            instruction.op0_register()
+        };
+        let index = (indexed_register as usize)
+            .checked_sub(Register::ST0 as usize)
+            .ok_or(StopReason::UnsupportedInstruction)?;
+        if index >= usize::from(self.x87_stack.occupied) {
+            return Err(StopReason::UnsupportedInstruction);
+        }
+        let top = self.x87_stack.value()?;
+        let slot = (usize::from(self.x87_stack.top) + index) & 7;
+        let indexed = f64::from_bits(self.x87_stack.values[slot]);
+        let result = top + indexed;
+        if !result.is_finite() || (result != 0.0 && !result.is_normal()) {
+            return Err(StopReason::UnsupportedInstruction);
+        }
+        let rounding = rounding::sum_result(result, top, indexed);
+        self.x87_stack
+            .rounded(rounding != Ordering::Equal, rounding == Ordering::Greater);
+        let destination = if destination_is_top {
+            usize::from(self.x87_stack.top)
+        } else {
+            slot
+        };
+        self.x87_stack.values[destination] = result.to_bits();
+        Ok(())
+    }
+
     pub(in super::super) fn x87_register_store(
         &mut self,
         instruction: &Instruction,
