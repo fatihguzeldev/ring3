@@ -358,7 +358,9 @@ impl Cpu32 {
             let value = self.read_float(instruction, memory)?;
             return self.x87_stack.push(value);
         }
-        self.x87_profile()?;
+        if instruction.code() != Code::Fstp_m32fp || self.x87_control_word & 0x0f3f != 0x003f {
+            self.x87_profile()?;
+        }
         let value = self.x87_stack.value()?;
         let (address, size) = self.data_address(instruction)?;
         let mut bytes = value.to_le_bytes();
