@@ -65,9 +65,16 @@ void entry(void) {
     Handle combo = GetDlgItem(window, 43);
     if (SendMessageA(combo, 0x146, 0, 0) != 0 ||
         SendMessageA(combo, 0x143, 0, (long)"pear") != 0 ||
+        SendMessageA(combo, 0x151, 0, 0x1234) != 0 ||
         SendMessageA(combo, 0x143, 0, (long)"apple") != 0 ||
         SendMessageA(combo, 0x143, 0, (long)"orange") != 1 ||
-        SendMessageA(combo, 0x146, 0, 0) != 3) ExitProcess(6);
+        SendMessageA(combo, 0x146, 0, 0) != 3 ||
+        SendMessageA(combo, 0x150, 2, 0) != 0x1234 ||
+        SendMessageA(combo, 0x151, 1, 0x5678) != 0 ||
+        SendMessageA(combo, 0x150, 1, 0) != 0x5678 ||
+        SendMessageA(combo, 0x150, 0, 0) != 0 ||
+        SendMessageA(combo, 0x151, 4, 99) != -1 ||
+        SendMessageA(combo, 0x150, 4, 0) != -1) ExitProcess(6);
     SetLastError(77);
     if (SendMessageA(GetDlgItem(window, 42), 0x364, 0, 0) ||
         SendMessageA(GetDlgItem(window, 43), 0x364, 0, 0) || GetLastError() != 77)
