@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 
 use super::{
-    DispatchError, GuestMemory, MemoryError,
+    DispatchError, GuestMemory, MemoryError, Register32, thread,
     user_atoms::{self, UserAtoms},
 };
 
@@ -14,6 +14,7 @@ pub(super) enum Call {
     IsWindow,
     Active,
     DlgItem,
+    Top,
 }
 
 impl Call {
@@ -24,13 +25,14 @@ impl Call {
             0x270 => Some(Self::IsWindow),
             0x430 => Some(Self::Active),
             0x438 => Some(Self::DlgItem),
+            0x454 => Some(Self::Top),
             _ => None,
         }
     }
     pub(super) fn arguments(self) -> usize {
         match self {
             Self::Desktop | Self::Active => 0,
-            Self::IsWindow => 1,
+            Self::IsWindow | Self::Top => 1,
             Self::Find | Self::DlgItem => 2,
         }
     }
@@ -86,6 +88,17 @@ impl Default for Desktop {
 }
 
 impl Desktop {
+    pub(super) fn top_window(&self, parent: u32) -> u32 {
+        if matches!(parent, 0 | DESKTOP) {
+            return self.top_levels.keys().next_back().copied().unwrap_or(0);
+        }
+        self.children
+            .iter()
+            .rev()
+            .find_map(|(&handle, window)| (window.parent == parent).then_some(handle))
+            .unwrap_or(0)
+    }
+
     pub(super) fn snapshots(&self) -> Vec<WindowSnapshot> {
         let mut snapshots: Vec<_> = self
             .top_levels
@@ -187,6 +200,7 @@ impl Desktop {
                     || self.top_levels.contains_key(&args[0])
                     || self.children.contains_key(&args[0]),
             )),
+            Call::Top => Ok(self.top_window(args[0])),
             Call::DlgItem => Ok(self.child(args[0], args[1]).unwrap_or(0)),
             Call::Find => {
                 let class = match args[0] {
@@ -245,6 +259,14 @@ pub(super) fn read_title(memory: &GuestMemory, pointer: u32) -> Result<String, D
 
 impl super::Process32 {
     pub(super) fn window_query(&mut self, call: Call, args: &[u32]) -> Result<(), DispatchError> {
+        if matches!(call, Call::Top)
+            && !matches!(args[0], 0 | DESKTOP)
+            && self.desktop.window(args[0]).is_none()
+        {
+            thread::set_last_error(&mut self.memory, 1400)?;
+            self.cpu.set_register(Register32::Eax, 0);
+            return Ok(());
+        }
         let value = self
             .desktop
             .dispatch(call, args, &self.user_atoms, &self.memory)?;
@@ -279,6 +301,9 @@ mod tests {
             },
         );
         let snapshots = desktop.snapshots();
+        assert_eq!(desktop.top_window(0x7500_0008), 0x7500_0004);
+        assert_eq!(desktop.top_window(0), 0x7500_0008);
+        assert_eq!(desktop.top_window(0x7500_0004), 0);
         assert_eq!(snapshots.len(), 2);
         assert_eq!(snapshots[0].hwnd, 0x7500_0004);
         assert_eq!(snapshots[0].parent, 0x7500_0008);
