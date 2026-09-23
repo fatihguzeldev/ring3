@@ -4,6 +4,7 @@ EXPORTS
     _GetActiveWindow@0==GetActiveWindow
     _CreateDialogIndirectParamA@20==CreateDialogIndirectParamA
     _GetDlgItem@8==GetDlgItem
+    _GetTopWindow@4==GetTopWindow
     _FindWindowA@8==FindWindowA
     _IsWindow@4==IsWindow
     _LoadStringA@16==LoadStringA
