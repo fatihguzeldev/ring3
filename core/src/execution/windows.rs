@@ -10,6 +10,7 @@ mod callbacks;
 mod classes;
 mod clock;
 mod code_pages;
+mod com;
 mod creation;
 mod critical_sections;
 mod crt;
@@ -81,6 +82,7 @@ pub struct Process32 {
     graphics: d3d8::Graphics,
     gdi: gdi::Gdi,
     crt: crt::Crt,
+    com: com::Com,
     diagnostic_imports: diagnostics::Imports,
 }
 
@@ -157,6 +159,7 @@ enum Api {
     Class(classes::Call),
     Desktop(desktop::Call),
     Crt(crt::Call),
+    Com(com::Call),
     CodePage(code_pages::Call),
     Module(modules::Call),
     Resource(resources::Call),
@@ -278,7 +281,8 @@ impl Api {
                 .or_else(|| thread::PriorityCall::at(offset).map(Self::ThreadPriority))
                 .or_else(|| clock::Call::at(offset).map(Self::Clock))
                 .or_else(|| tls::Call::at(offset).map(Self::Tls))
-                .or_else(|| code_pages::Call::at(offset).map(Self::CodePage)),
+                .or_else(|| code_pages::Call::at(offset).map(Self::CodePage))
+                .or_else(|| com::Call::at(offset).map(Self::Com)),
         }
     }
 
@@ -306,6 +310,9 @@ impl Api {
         }
         if module.eq_ignore_ascii_case("msvcrt.dll") {
             return crt::resolve(name);
+        }
+        if module.eq_ignore_ascii_case("ole32.dll") {
+            return com::Call::resolve(name).map(|offset| API_BASE + offset);
         }
         let offset = if module.eq_ignore_ascii_case("kernel32.dll") {
             Self::kernel32(name)?
@@ -489,6 +496,7 @@ impl Api {
             Self::Desktop(call) => call.arguments(),
             Self::Crt(call) => call.arguments(),
             Self::CodePage(call) => call.arguments(),
+            Self::Com(call) => call.arguments(),
             Self::Heap(call) => call.arguments(),
             Self::Tls(call) => call.arguments(),
             Self::Module(call) => call.arguments(),
@@ -646,6 +654,7 @@ impl Process32 {
             tls: tls::Tls::default(),
             graphics: d3d8::Graphics::default(),
             crt: crt::Crt::default(),
+            com: com::Com::default(),
             diagnostic_imports,
         })
     }
@@ -1029,6 +1038,13 @@ impl Process32 {
         Ok(true)
     }
 
+    fn com_api(&mut self, call: com::Call, args: &[u32]) -> Result<(), DispatchError> {
+        if let Some(value) = self.com.dispatch(call, args)? {
+            self.cpu.set_register(Register32::Eax, value);
+        }
+        Ok(())
+    }
+
     fn invoke(&mut self, api: Api, args: &[u32], stack: u32) -> Result<(), DispatchError> {
         let argument = args.first().copied().unwrap_or(0);
         match api {
@@ -1074,6 +1090,7 @@ impl Process32 {
                 let value = call.dispatch(args, &mut self.memory)?;
                 self.cpu.set_register(Register32::Eax, value);
             }
+            Api::Com(call) => self.com_api(call, args)?,
             Api::String(call) => {
                 let value = call.dispatch(&mut self.memory, args)?;
                 self.cpu.set_register(Register32::Eax, value);
