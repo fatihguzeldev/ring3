@@ -70,6 +70,7 @@ pub(super) enum Call {
     GetTextureStageState,
     SetTextureStageState,
     ValidateDevice,
+    TestCooperativeLevel,
     TextureLevelCount,
     TextureLevelDesc,
     TextureLockRect,
@@ -109,6 +110,7 @@ impl Call {
             0x4d8 => Self::GetTextureStageState,
             0x4dc => Self::SetTextureStageState,
             0x4e0 => Self::ValidateDevice,
+            0x4e4 => Self::TestCooperativeLevel,
             0x40c => Self::TextureLevelCount,
             0x410 => Self::TextureLevelDesc,
             0x414 => Self::TextureLockRect,
@@ -266,6 +268,7 @@ impl Graphics {
             (DEVICE_TABLE, 62, 0x4d8),
             (DEVICE_TABLE, 63, 0x4dc),
             (DEVICE_TABLE, 64, 0x4e0),
+            (DEVICE_TABLE, 3, 0x4e4),
             (DEPTH_SURFACE_TABLE, 1, 0x4a4),
             (DEPTH_SURFACE_TABLE, 2, 0x4a8),
             (DEVICE_TABLE, 20, 0x400),
@@ -350,6 +353,7 @@ impl Graphics {
             Call::GetTextureStageState => return self.get_texture_stage_state(args, memory),
             Call::SetTextureStageState => self.set_texture_stage_state(args),
             Call::ValidateDevice => return self.validate_device(args, memory),
+            Call::TestCooperativeLevel => self.test_cooperative_level(args[0]),
             Call::GetDepthStencilSurface => return self.get_depth_surface(args, memory),
             Call::DepthSurfaceAddRef | Call::DepthSurfaceRelease => {
                 self.depth_surface_ref(call, args)
@@ -721,6 +725,14 @@ impl Graphics {
         guest::check(memory, output, 4, Access::Write)?;
         guest::write_word(memory, output, 1)?;
         Ok(0)
+    }
+
+    fn test_cooperative_level(&self, device: u32) -> u32 {
+        if device == DEVICE && self.device_refs != 0 {
+            0
+        } else {
+            INVALID_CALL
+        }
     }
 
     fn get_depth_surface(

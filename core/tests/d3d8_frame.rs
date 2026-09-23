@@ -1600,6 +1600,20 @@ fn validate_device_reports_one_untextured_pass_and_preserves_failed_outputs() {
 }
 
 #[test]
+fn cooperative_level_reports_only_a_live_owned_device_without_presenting() {
+    let (mut process, _, device) = create();
+    let test = method(&process, device, 3);
+    assert_ne!(test, 0x7000_0ffc);
+    assert_eq!(invoke(&mut process, test, &[device]), 0);
+    assert!(process.take_frame().is_none());
+    assert_eq!(invoke(&mut process, test, &[device + 4]), 0x8876_086c);
+    let release = method(&process, device, 2);
+    assert_eq!(invoke(&mut process, release, &[device]), 0);
+    assert_eq!(invoke(&mut process, test, &[device]), 0x8876_086c);
+    assert!(process.take_frame().is_none());
+}
+
+#[test]
 fn texture_surface_levels_have_stable_distinct_owned_identities() {
     let (mut process, _, device) = create();
     let create_texture = method(&process, device, 20);
