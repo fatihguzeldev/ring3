@@ -23,6 +23,7 @@ const LEVEL_DESC: u32 = 0x0040_2a20;
 const FULLSCREEN_OUTPUT: u32 = 0x0040_2a40;
 const FULLSCREEN_PARAMS: u32 = 0x0040_2a60;
 const VIEWPORT: u32 = 0x0040_2bc0;
+const DEPTH_OUTPUT: u32 = 0x0040_2be0;
 
 #[test]
 fn executes_an_uninterrupted_guest_graphics_program() {
@@ -518,6 +519,67 @@ fn d16_depth_capability_matches_only_the_owned_color_target() {
         invoke(&mut process, match_depth, &[root, 1, 1, 22, 22, 80]),
         0x8876_086c
     );
+}
+
+#[test]
+fn depth_surface_get_returns_a_stable_owned_com_identity() {
+    let (mut process, device) = depth_device();
+    let get_surface = method(&process, device, 33);
+    let release_device = method(&process, device, 2);
+    assert_eq!(
+        invoke(&mut process, get_surface, &[device, DEPTH_OUTPUT]),
+        0
+    );
+    let surface = read(&process, DEPTH_OUTPUT);
+    assert_ne!(surface, 0);
+    assert_eq!(
+        invoke(&mut process, get_surface, &[device, DEPTH_OUTPUT]),
+        0
+    );
+    assert_eq!(read(&process, DEPTH_OUTPUT), surface);
+    let add_ref = method(&process, surface, 1);
+    let release_surface = method(&process, surface, 2);
+    assert_eq!(invoke(&mut process, add_ref, &[surface]), 4);
+    assert_eq!(invoke(&mut process, release_surface, &[surface]), 3);
+    assert_eq!(invoke(&mut process, release_surface, &[surface]), 2);
+    assert_eq!(invoke(&mut process, release_device, &[device]), 1);
+    assert_eq!(invoke(&mut process, release_surface, &[surface]), 0);
+    assert_eq!(invoke(&mut process, add_ref, &[surface]), 0x8876_086c);
+}
+
+#[test]
+fn depth_surface_get_rejects_absent_or_invalid_outputs_atomically() {
+    let (mut process, device) = depth_device();
+    let get_surface = method(&process, device, 33);
+    write(&mut process, DEPTH_OUTPUT, &[0xa5a5_a5a5]);
+    let result = call(&mut process, get_surface, &[device, 0x6000_0000]);
+    assert!(matches!(
+        result.reason,
+        ProcessStop::Stopped(StopReason::MemoryFault(_))
+    ));
+    assert_eq!(result.api_calls, 0);
+    assert_eq!(read(&process, DEPTH_OUTPUT), 0xa5a5_a5a5);
+    assert_eq!(
+        invoke(&mut process, get_surface, &[device + 4, DEPTH_OUTPUT]),
+        0x8876_086c
+    );
+    assert_eq!(read(&process, DEPTH_OUTPUT), 0xa5a5_a5a5);
+    let release = method(&process, device, 2);
+    assert_eq!(invoke(&mut process, release, &[device]), 0);
+    assert_eq!(
+        invoke(&mut process, get_surface, &[device, DEPTH_OUTPUT]),
+        0x8876_086c
+    );
+    assert_eq!(read(&process, DEPTH_OUTPUT), 0xa5a5_a5a5);
+
+    let (mut process, _, device) = create();
+    let get_surface = method(&process, device, 33);
+    write(&mut process, DEPTH_OUTPUT, &[0xa5a5_a5a5]);
+    assert_eq!(
+        invoke(&mut process, get_surface, &[device, DEPTH_OUTPUT]),
+        0x8876_086c
+    );
+    assert_eq!(read(&process, DEPTH_OUTPUT), 0xa5a5_a5a5);
 }
 
 fn depth_device() -> (Process32, u32) {

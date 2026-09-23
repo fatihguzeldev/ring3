@@ -10,8 +10,10 @@ use super::{
 const OBJECT_BASE: u32 = API_BASE + 4096;
 const ROOT: u32 = OBJECT_BASE;
 const DEVICE: u32 = OBJECT_BASE + 4;
+const DEPTH_SURFACE: u32 = OBJECT_BASE + 8;
 const ROOT_TABLE: u32 = OBJECT_BASE + 0x100;
 const DEVICE_TABLE: u32 = OBJECT_BASE + 0x200;
+const DEPTH_SURFACE_TABLE: u32 = OBJECT_BASE + 0x500;
 const INVALID_CALL: u32 = 0x8876_086c;
 const NOT_AVAILABLE: u32 = 0x8876_086a;
 const ADAPTER_IDENTIFIER_SIZE: usize = 1068;
@@ -67,6 +69,9 @@ pub(super) enum Call {
     SetVertexShader,
     SetViewport,
     SetRenderState,
+    GetDepthStencilSurface,
+    DepthSurfaceAddRef,
+    DepthSurfaceRelease,
     DrawPrimitiveUp,
 }
 
@@ -92,6 +97,9 @@ impl Call {
             0x420 => Self::DrawPrimitiveUp,
             0x498 => Self::SetViewport,
             0x49c => Self::SetRenderState,
+            0x4a0 => Self::GetDepthStencilSurface,
+            0x4a4 => Self::DepthSurfaceAddRef,
+            0x4a8 => Self::DepthSurfaceRelease,
             0x2d0 => Self::AdapterCount,
             0x2d4 => Self::AdapterIdentifier,
             0x2d8 => Self::DeviceCaps,
@@ -116,7 +124,8 @@ impl Call {
             Self::AdapterModeCount
             | Self::TextureUnlockRect
             | Self::SetVertexShader
-            | Self::SetViewport => 2,
+            | Self::SetViewport
+            | Self::GetDepthStencilSurface => 2,
             Self::CheckDeviceType | Self::CheckMultiSampleType | Self::CheckDepthStencilMatch => 6,
             _ => 1,
         }
@@ -130,6 +139,7 @@ pub(super) struct Graphics {
     back: Option<Frame>,
     spare: Option<Frame>,
     depth: Option<Vec<u16>>,
+    depth_surface_refs: u32,
     z_enabled: bool,
     viewport: Option<Viewport>,
     front: Option<Frame>,
@@ -165,7 +175,12 @@ impl Graphics {
         memory.map_zeroed(u64::from(OBJECT_BASE), PAGE_SIZE, Permissions::READ_WRITE)?;
         guest::write_word(memory, ROOT, ROOT_TABLE)?;
         guest::write_word(memory, DEVICE, DEVICE_TABLE)?;
-        for (table, count) in [(ROOT_TABLE, 16), (DEVICE_TABLE, 97)] {
+        guest::write_word(memory, DEPTH_SURFACE, DEPTH_SURFACE_TABLE)?;
+        for (table, count) in [
+            (ROOT_TABLE, 16),
+            (DEVICE_TABLE, 97),
+            (DEPTH_SURFACE_TABLE, 13),
+        ] {
             for index in 0..count {
                 guest::write_word(memory, table + index * 4, API_BASE + 0xffc)?;
             }
@@ -193,6 +208,9 @@ impl Graphics {
             (DEVICE_TABLE, 36, 0x44),
             (DEVICE_TABLE, 40, 0x498),
             (DEVICE_TABLE, 50, 0x49c),
+            (DEVICE_TABLE, 33, 0x4a0),
+            (DEPTH_SURFACE_TABLE, 1, 0x4a4),
+            (DEPTH_SURFACE_TABLE, 2, 0x4a8),
             (DEVICE_TABLE, 20, 0x400),
             (DEVICE_TABLE, 72, 0x420),
             (DEVICE_TABLE, 76, 0x41c),
@@ -257,6 +275,10 @@ impl Graphics {
             }
             Call::SetViewport => return self.set_viewport(args, memory),
             Call::SetRenderState => self.set_render_state(args),
+            Call::GetDepthStencilSurface => return self.get_depth_surface(args, memory),
+            Call::DepthSurfaceAddRef | Call::DepthSurfaceRelease => {
+                self.depth_surface_ref(call, args)
+            }
             Call::DrawPrimitiveUp => return self.draw_primitive_up(args, memory),
             Call::TextureLevelCount => {
                 self.textures.get(&args[0]).map_or(INVALID_CALL, |texture| {
@@ -490,6 +512,7 @@ impl Graphics {
         self.root_refs = self.root_refs.saturating_add(1);
         self.device_refs = 1;
         self.depth = (enable_depth == 1).then(|| vec![u16::MAX; (width * height) as usize]);
+        self.depth_surface_refs = 0;
         self.z_enabled = enable_depth == 1;
         self.spare = (count == 2).then(|| frame.clone());
         self.viewport = Some(Viewport {
@@ -506,6 +529,7 @@ impl Graphics {
         self.back = None;
         self.spare = None;
         self.depth = None;
+        self.depth_surface_refs = 0;
         self.z_enabled = false;
         self.viewport = None;
         self.vertex_fvf = 0;
@@ -547,6 +571,58 @@ impl Graphics {
         }
         self.z_enabled = args[2] == 1;
         0
+    }
+
+    fn get_depth_surface(
+        &mut self,
+        args: &[u32],
+        memory: &mut GuestMemory,
+    ) -> Result<u32, MemoryError> {
+        if args[0] != DEVICE || self.device_refs == 0 || self.depth.is_none() {
+            return Ok(INVALID_CALL);
+        }
+        if self.depth_surface_refs >= u32::MAX - 1 {
+            return Ok(INVALID_CALL);
+        }
+        let refs = self.depth_surface_refs + 1;
+        let retained_device = if self.depth_surface_refs == 0 {
+            let Some(device_refs) = self.device_refs.checked_add(1) else {
+                return Ok(INVALID_CALL);
+            };
+            device_refs
+        } else {
+            self.device_refs
+        };
+        guest::check(memory, args[1], 4, Access::Write)?;
+        guest::write_word(memory, args[1], DEPTH_SURFACE)?;
+        self.depth_surface_refs = refs;
+        self.device_refs = retained_device;
+        Ok(0)
+    }
+
+    fn depth_surface_ref(&mut self, call: Call, args: &[u32]) -> u32 {
+        if args[0] != DEPTH_SURFACE || self.depth_surface_refs == 0 {
+            return INVALID_CALL;
+        }
+        if matches!(call, Call::DepthSurfaceAddRef) {
+            if self.depth_surface_refs >= u32::MAX - 1 {
+                return INVALID_CALL;
+            }
+            let refs = self.depth_surface_refs + 1;
+            self.depth_surface_refs = refs;
+            return refs + 1;
+        }
+        self.depth_surface_refs -= 1;
+        if self.depth_surface_refs != 0 {
+            return self.depth_surface_refs + 1;
+        }
+        self.device_refs -= 1;
+        if self.device_refs == 0 {
+            self.finish_device();
+            0
+        } else {
+            1
+        }
     }
 
     fn draw_primitive_up(
