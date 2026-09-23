@@ -54,6 +54,7 @@ pub(super) struct Window {
     pub(super) parent: u32,
     pub(super) id: u32,
     pub(super) dialog_units: Option<[i16; 4]>,
+    pub(super) dialog_result: Option<u32>,
     pub(super) needs_paint: bool,
     pub(super) combo: ComboBox,
 }
@@ -296,6 +297,15 @@ impl Desktop {
         self.active = handle;
         Some(was_visible)
     }
+    pub(super) fn end_dialog(&mut self, handle: u32, result: u32) {
+        let window = self.top_levels.get_mut(&handle).expect("validated dialog");
+        window.dialog_result = Some(result);
+        window.style &= !0x1000_0000;
+        window.needs_paint = false;
+        if self.active == handle {
+            self.active = 0;
+        }
+    }
     pub(super) fn has_class(&self, instance: u32, atom: u32) -> bool {
         self.top_levels
             .values()
@@ -375,6 +385,20 @@ pub(super) fn read_title(memory: &GuestMemory, pointer: u32) -> Result<String, D
 }
 
 impl super::Process32 {
+    pub(super) fn end_dialog(&mut self, args: &[u32]) -> Result<(), DispatchError> {
+        let Some(window) = self.desktop.window(args[0]) else {
+            thread::set_last_error(&mut self.memory, 1400)?;
+            self.cpu.set_register(Register32::Eax, 0);
+            return Ok(());
+        };
+        if window.parent != 0 || window.class != 0x8002 || window.dialog_units.is_none() {
+            return Err(DispatchError::Unsupported);
+        }
+        self.desktop.end_dialog(args[0], args[1]);
+        self.cpu.set_register(Register32::Eax, 1);
+        Ok(())
+    }
+
     pub(super) fn enable_dialog_control(&mut self, args: &[u32]) -> Result<(), DispatchError> {
         let Some(window) = self.desktop.window(args[0]) else {
             thread::set_last_error(&mut self.memory, 1400)?;
@@ -563,6 +587,36 @@ mod tests {
         desktop.children.clear();
         assert_eq!(snapshots[0].class, 0x80);
         assert_eq!(snapshots[1].title, "dialog");
+    }
+
+    #[test]
+    fn end_dialog_records_result_hides_and_keeps_owned_handles() {
+        let mut desktop = Desktop::default();
+        desktop.insert(
+            0x7500_0004,
+            Window {
+                class: 0x8002,
+                style: 0x1000_0000,
+                dialog_units: Some([0; 4]),
+                needs_paint: true,
+                ..Window::default()
+            },
+        );
+        desktop.insert_child(
+            0x7500_0008,
+            Window {
+                parent: 0x7500_0004,
+                ..Window::default()
+            },
+        );
+        desktop.activate_created(0x7500_0004);
+        desktop.end_dialog(0x7500_0004, 123);
+        let dialog = desktop.window(0x7500_0004).unwrap();
+        assert_eq!(dialog.dialog_result, Some(123));
+        assert_eq!(dialog.style & 0x1000_0000, 0);
+        assert!(!dialog.needs_paint);
+        assert_eq!(desktop.active, 0);
+        assert!(desktop.window(0x7500_0008).is_some());
     }
 
     #[test]
