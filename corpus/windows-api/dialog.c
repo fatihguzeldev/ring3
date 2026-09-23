@@ -24,6 +24,8 @@ __declspec(dllimport) Handle __stdcall GetTopWindow(Handle);
 __declspec(dllimport) Handle __stdcall GetWindow(Handle, unsigned int);
 __declspec(dllimport) int __stdcall SetWindowTextA(Handle, const char *);
 __declspec(dllimport) Handle __stdcall FindWindowA(const char *, const char *);
+__declspec(dllimport) int __stdcall EnableWindow(Handle, int);
+__declspec(dllimport) long __stdcall GetWindowLongA(Handle, int);
 __declspec(dllimport) long __stdcall SendMessageA(Handle, unsigned int, unsigned int, long);
 __declspec(dllimport) void __stdcall SetLastError(unsigned long);
 __declspec(dllimport) unsigned long __stdcall GetLastError(void);
@@ -89,6 +91,14 @@ void entry(void) {
         SendMessageA(combo, 0x150, 0, 0) != -1 ||
         SendMessageA(combo, 0x143, 0, (long)"new") != 0 ||
         SendMessageA(combo, 0x146, 0, 0) != 1) ExitProcess(8);
+    Handle button = GetDlgItem(window, 42);
+    if (GetWindowLongA(button, -16) & 0x08000000 ||
+        EnableWindow(button, 0) != 0 ||
+        !(GetWindowLongA(button, -16) & 0x08000000) ||
+        EnableWindow(button, 0) != 1 ||
+        EnableWindow(button, 1) != 1 ||
+        GetWindowLongA(button, -16) & 0x08000000 ||
+        EnableWindow(button, 1) != 0) ExitProcess(9);
     SetLastError(77);
     if (SendMessageA(GetDlgItem(window, 42), 0x364, 0, 0) ||
         SendMessageA(GetDlgItem(window, 43), 0x364, 0, 0) || GetLastError() != 77)
