@@ -21,6 +21,9 @@ typedef struct {
 __declspec(dllimport) Handle __stdcall CreateDialogIndirectParamA(Handle, const void *, Handle, DialogProc, long);
 __declspec(dllimport) Handle __stdcall GetDlgItem(Handle, int);
 __declspec(dllimport) Handle __stdcall GetTopWindow(Handle);
+__declspec(dllimport) long __stdcall SendMessageA(Handle, unsigned int, unsigned int, long);
+__declspec(dllimport) void __stdcall SetLastError(unsigned long);
+__declspec(dllimport) unsigned long __stdcall GetLastError(void);
 __declspec(dllimport) Handle __stdcall GetParent(Handle);
 __declspec(dllimport) Handle __stdcall GetActiveWindow(void);
 __declspec(dllimport) int __stdcall IsWindow(Handle);
@@ -48,5 +51,9 @@ void entry(void) {
     if (GetTopWindow(window) != GetDlgItem(window, 43) ||
         GetTopWindow(GetDlgItem(window, 42)) || GetTopWindow(0) != window)
         ExitProcess(2);
+    SetLastError(77);
+    if (SendMessageA(GetDlgItem(window, 42), 0x364, 0, 0) ||
+        SendMessageA(GetDlgItem(window, 43), 0x364, 0, 0) || GetLastError() != 77)
+        ExitProcess(3);
     ExitProcess(42);
 }
