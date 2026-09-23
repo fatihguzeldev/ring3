@@ -28,6 +28,7 @@ __declspec(dllimport) int __stdcall EnableWindow(Handle, int);
 __declspec(dllimport) long __stdcall GetWindowLongA(Handle, int);
 __declspec(dllimport) int __stdcall ShowWindow(Handle, int);
 __declspec(dllimport) int __stdcall UpdateWindow(Handle);
+__declspec(dllimport) int __stdcall EndDialog(Handle, int);
 __declspec(dllimport) long __stdcall SendMessageA(Handle, unsigned int, unsigned int, long);
 __declspec(dllimport) void __stdcall SetLastError(unsigned long);
 __declspec(dllimport) unsigned long __stdcall GetLastError(void);
@@ -109,5 +110,8 @@ void entry(void) {
         ExitProcess(3);
     if (ShowWindow(window, 1) || !UpdateWindow(window) || paints != 1 ||
         !UpdateWindow(window) || paints != 1) ExitProcess(14);
+    if (!EndDialog(window, 123) ||
+        GetWindowLongA(window, -16) & 0x10000000 ||
+        GetActiveWindow() || !IsWindow(window) || !IsWindow(button)) ExitProcess(15);
     ExitProcess(42);
 }

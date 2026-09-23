@@ -37,6 +37,7 @@ EXPORTS
     _DispatchMessageA@4==DispatchMessageA
     _ShowWindow@8==ShowWindow
     _UpdateWindow@4==UpdateWindow
+    _EndDialog@8==EndDialog
     wsprintfA
     _GetClassInfoA@12==GetClassInfoA
     _RegisterClassA@4==RegisterClassA
