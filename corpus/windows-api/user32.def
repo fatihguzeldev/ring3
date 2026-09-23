@@ -6,6 +6,7 @@ EXPORTS
     _GetDlgItem@8==GetDlgItem
     _GetTopWindow@4==GetTopWindow
     _GetWindow@8==GetWindow
+    _SetWindowTextA@8==SetWindowTextA
     _FindWindowA@8==FindWindowA
     _IsWindow@4==IsWindow
     _LoadStringA@16==LoadStringA

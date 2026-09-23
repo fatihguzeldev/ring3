@@ -22,6 +22,8 @@ __declspec(dllimport) Handle __stdcall CreateDialogIndirectParamA(Handle, const 
 __declspec(dllimport) Handle __stdcall GetDlgItem(Handle, int);
 __declspec(dllimport) Handle __stdcall GetTopWindow(Handle);
 __declspec(dllimport) Handle __stdcall GetWindow(Handle, unsigned int);
+__declspec(dllimport) int __stdcall SetWindowTextA(Handle, const char *);
+__declspec(dllimport) Handle __stdcall FindWindowA(const char *, const char *);
 __declspec(dllimport) long __stdcall SendMessageA(Handle, unsigned int, unsigned int, long);
 __declspec(dllimport) void __stdcall SetLastError(unsigned long);
 __declspec(dllimport) unsigned long __stdcall GetLastError(void);
@@ -58,6 +60,8 @@ void entry(void) {
         GetWindow(GetDlgItem(window, 42), 1) != GetDlgItem(window, 42) ||
         GetWindow(window, 5) != GetDlgItem(window, 43) ||
         GetWindow(GetDlgItem(window, 42), 2)) ExitProcess(4);
+    if (!SetWindowTextA(window, "renamed") || FindWindowA(0, "renamed") != window)
+        ExitProcess(5);
     SetLastError(77);
     if (SendMessageA(GetDlgItem(window, 42), 0x364, 0, 0) ||
         SendMessageA(GetDlgItem(window, 43), 0x364, 0, 0) || GetLastError() != 77)
