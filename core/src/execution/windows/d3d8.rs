@@ -17,6 +17,7 @@ const DEPTH_SURFACE_TABLE: u32 = OBJECT_BASE + 0x500;
 const TEXTURE_SURFACE_TABLE: u32 = OBJECT_BASE + 0x600;
 const INVALID_CALL: u32 = 0x8876_086c;
 const NOT_AVAILABLE: u32 = 0x8876_086a;
+const UNSUPPORTED_COLOR_OPERATION: u32 = 0x8876_0819;
 const ADAPTER_IDENTIFIER_SIZE: usize = 1068;
 const ADAPTER_DRIVER: &[u8] = b"ring3\0";
 const ADAPTER_DESCRIPTION: &[u8] = b"Ring3 Virtual Display Adapter\0";
@@ -68,6 +69,7 @@ pub(super) enum Call {
     SetTexture,
     GetTextureStageState,
     SetTextureStageState,
+    ValidateDevice,
     TextureLevelCount,
     TextureLevelDesc,
     TextureLockRect,
@@ -106,6 +108,7 @@ impl Call {
             0x4d4 => Self::SetTexture,
             0x4d8 => Self::GetTextureStageState,
             0x4dc => Self::SetTextureStageState,
+            0x4e0 => Self::ValidateDevice,
             0x40c => Self::TextureLevelCount,
             0x410 => Self::TextureLevelDesc,
             0x414 => Self::TextureLockRect,
@@ -159,7 +162,8 @@ impl Call {
             | Self::SetVertexShader
             | Self::SetViewport
             | Self::GetDepthStencilSurface
-            | Self::TextureSurfaceDesc => 2,
+            | Self::TextureSurfaceDesc
+            | Self::ValidateDevice => 2,
             Self::CheckDeviceType | Self::CheckMultiSampleType | Self::CheckDepthStencilMatch => 6,
             _ => 1,
         }
@@ -261,6 +265,7 @@ impl Graphics {
             (DEVICE_TABLE, 61, 0x4d4),
             (DEVICE_TABLE, 62, 0x4d8),
             (DEVICE_TABLE, 63, 0x4dc),
+            (DEVICE_TABLE, 64, 0x4e0),
             (DEPTH_SURFACE_TABLE, 1, 0x4a4),
             (DEPTH_SURFACE_TABLE, 2, 0x4a8),
             (DEVICE_TABLE, 20, 0x400),
@@ -344,6 +349,7 @@ impl Graphics {
             Call::SetTexture => return self.set_texture(args, memory),
             Call::GetTextureStageState => return self.get_texture_stage_state(args, memory),
             Call::SetTextureStageState => self.set_texture_stage_state(args),
+            Call::ValidateDevice => return self.validate_device(args, memory),
             Call::GetDepthStencilSurface => return self.get_depth_surface(args, memory),
             Call::DepthSurfaceAddRef | Call::DepthSurfaceRelease => {
                 self.depth_surface_ref(call, args)
@@ -701,6 +707,19 @@ impl Graphics {
         }
         guest::check(memory, output, 4, Access::Write)?;
         guest::write_word(memory, output, self.color_arg0[index])?;
+        Ok(0)
+    }
+
+    fn validate_device(&self, args: &[u32], memory: &mut GuestMemory) -> Result<u32, MemoryError> {
+        let [device, output] = <[u32; 2]>::try_from(args).expect("d3d8 call arity");
+        if device != DEVICE || self.device_refs == 0 {
+            return Ok(INVALID_CALL);
+        }
+        if self.texture_stages.iter().any(|texture| *texture != 0) {
+            return Ok(UNSUPPORTED_COLOR_OPERATION);
+        }
+        guest::check(memory, output, 4, Access::Write)?;
+        guest::write_word(memory, output, 1)?;
         Ok(0)
     }
 

@@ -1555,6 +1555,51 @@ fn colorarg0_texture_stage_state_round_trips_and_rejects_bad_requests() {
 }
 
 #[test]
+fn validate_device_reports_one_untextured_pass_and_preserves_failed_outputs() {
+    let (mut process, _, device) = create();
+    let validate = method(&process, device, 64);
+    assert_ne!(validate, 0x7000_0ffc);
+    write(&mut process, LEVEL_DESC, &[0x5555_5555]);
+    assert_eq!(invoke(&mut process, validate, &[device, LEVEL_DESC]), 0);
+    assert_eq!(read(&process, LEVEL_DESC), 1);
+
+    write(&mut process, LEVEL_DESC, &[0x5555_5555]);
+    assert_eq!(
+        invoke(&mut process, validate, &[device + 4, LEVEL_DESC]),
+        0x8876_086c
+    );
+    assert_eq!(read(&process, LEVEL_DESC), 0x5555_5555);
+    let fault = call(&mut process, validate, &[device, 0x5000_0000]);
+    assert!(matches!(
+        fault.reason,
+        ProcessStop::Stopped(StopReason::MemoryFault(_))
+    ));
+    assert_eq!(fault.api_calls, 0);
+    assert_eq!(read(&process, LEVEL_DESC), 0x5555_5555);
+
+    let create_texture = method(&process, device, 20);
+    assert_eq!(
+        invoke(
+            &mut process,
+            create_texture,
+            &[device, 2, 2, 1, 0, 22, 1, TEXTURE_OUTPUT]
+        ),
+        0
+    );
+    let texture = read(&process, TEXTURE_OUTPUT);
+    let set_texture = method(&process, device, 61);
+    assert_eq!(invoke(&mut process, set_texture, &[device, 7, texture]), 0);
+    assert_eq!(
+        invoke(&mut process, validate, &[device, LEVEL_DESC]),
+        0x8876_0819
+    );
+    assert_eq!(read(&process, LEVEL_DESC), 0x5555_5555);
+    assert_eq!(invoke(&mut process, set_texture, &[device, 7, 0]), 0);
+    assert_eq!(invoke(&mut process, validate, &[device, LEVEL_DESC]), 0);
+    assert_eq!(read(&process, LEVEL_DESC), 1);
+}
+
+#[test]
 fn texture_surface_levels_have_stable_distinct_owned_identities() {
     let (mut process, _, device) = create();
     let create_texture = method(&process, device, 20);
