@@ -59,8 +59,13 @@ pub(super) struct Window {
 
 #[derive(Default)]
 pub(super) struct ComboBox {
-    items: Vec<String>,
+    items: Vec<ComboItem>,
     bytes: usize,
+}
+
+struct ComboItem {
+    title: String,
+    data: u32,
 }
 
 impl ComboBox {
@@ -75,19 +80,34 @@ impl ComboBox {
             self.items.len()
         } else {
             self.items.partition_point(|item| {
-                item.bytes()
+                item.title
+                    .bytes()
                     .map(|byte| byte.to_ascii_lowercase())
                     .cmp(title.bytes().map(|byte| byte.to_ascii_lowercase()))
                     != std::cmp::Ordering::Greater
             })
         };
-        self.items.insert(index, title);
+        self.items.insert(index, ComboItem { title, data: 0 });
         self.bytes = bytes;
         u32::try_from(index).expect("bounded combo count")
     }
 
     fn count(&self) -> u32 {
         u32::try_from(self.items.len()).expect("bounded combo count")
+    }
+
+    fn item_data(&self, index: u32) -> u32 {
+        self.items
+            .get(index as usize)
+            .map_or(u32::MAX, |item| item.data)
+    }
+
+    fn set_item_data(&mut self, index: u32, data: u32) -> u32 {
+        let Some(item) = self.items.get_mut(index as usize) else {
+            return u32::MAX;
+        };
+        item.data = data;
+        0
     }
 }
 
@@ -342,6 +362,11 @@ impl super::Process32 {
                 Ok(Some(window.combo.add(window.style, title)))
             }
             0x146 if args[2..] == [0, 0] => Ok(Some(window.combo.count())),
+            0x150 => Ok(Some(window.combo.item_data(args[2]))),
+            0x151 => {
+                let window = self.desktop.window_mut(args[0]).expect("validated window");
+                Ok(Some(window.combo.set_item_data(args[2], args[3])))
+            }
             _ => Ok(None),
         }
     }
@@ -397,15 +422,27 @@ mod tests {
     fn combo_items_keep_sorted_or_insertion_order_with_a_byte_limit() {
         let mut sorted = ComboBox::default();
         assert_eq!(sorted.add(0x100, "pear".into()), 0);
+        assert_eq!(sorted.set_item_data(0, 0x1234), 0);
         assert_eq!(sorted.add(0x100, "Apple".into()), 0);
         assert_eq!(sorted.add(0x100, "orange".into()), 1);
         assert_eq!(sorted.add(0x100, "apple".into()), 1);
-        assert_eq!(sorted.items, ["Apple", "apple", "orange", "pear"]);
+        assert_eq!(
+            sorted
+                .items
+                .iter()
+                .map(|item| item.title.as_str())
+                .collect::<Vec<_>>(),
+            ["Apple", "apple", "orange", "pear"]
+        );
+        assert_eq!(sorted.item_data(3), 0x1234);
+        assert_eq!(sorted.set_item_data(4, 99), u32::MAX);
+        assert_eq!(sorted.item_data(4), u32::MAX);
 
         let mut unsorted = ComboBox::default();
         assert_eq!(unsorted.add(0, "pear".into()), 0);
         assert_eq!(unsorted.add(0, "apple".into()), 1);
-        assert_eq!(unsorted.items, ["pear", "apple"]);
+        assert_eq!(unsorted.items[0].title, "pear");
+        assert_eq!(unsorted.items[1].title, "apple");
 
         let mut full = ComboBox::default();
         for index in 0..16 {
