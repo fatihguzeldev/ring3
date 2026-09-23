@@ -46,6 +46,35 @@ impl Stack {
 }
 
 impl Cpu32 {
+    pub(in super::super) fn x87_unary(&mut self, code: Code) -> Result<(), StopReason> {
+        match code {
+            Code::Fabs => self.x87_absolute(),
+            Code::Fptan => self.x87_tangent(),
+            _ => Err(StopReason::UnsupportedInstruction),
+        }
+    }
+
+    fn x87_tangent(&mut self) -> Result<(), StopReason> {
+        self.x87_masked()?;
+        if self.x87_control_word & 0x0c00 != 0 || self.x87_stack.occupied == 8 {
+            return Err(StopReason::UnsupportedInstruction);
+        }
+        let angle = self.x87_stack.value()?;
+        if !(angle == 0.0 || angle.is_normal()) || angle.abs() >= 3.0 * std::f64::consts::PI / 8.0 {
+            return Err(StopReason::UnsupportedInstruction);
+        }
+        let tangent = angle.tan();
+        if !tangent.is_finite() {
+            return Err(StopReason::UnsupportedInstruction);
+        }
+        let slot = usize::from(self.x87_stack.top);
+        self.x87_stack.values[slot] = tangent.to_bits();
+        self.x87_stack.push(1.0)?;
+        self.x87_stack.status &= !0x0400;
+        self.x87_stack.rounded(angle != 0.0, false);
+        Ok(())
+    }
+
     pub(in super::super) fn x87_absolute(&mut self) -> Result<(), StopReason> {
         if !matches!(self.x87_control_word & 0x0f3f, 0x003f | 0x023f) {
             return Err(StopReason::UnsupportedInstruction);
