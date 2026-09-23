@@ -317,6 +317,13 @@ impl Desktop {
         }
         Some(was_visible)
     }
+    pub(super) fn invalidate_full(&mut self, handle: u32) -> bool {
+        let Some(window) = self.top_levels.get_mut(&handle) else {
+            return false;
+        };
+        window.needs_paint = true;
+        true
+    }
     pub(super) fn end_dialog(&mut self, handle: u32, result: u32) {
         let window = self.top_levels.get_mut(&handle).expect("validated dialog");
         window.dialog_result = Some(result);
@@ -746,6 +753,27 @@ mod tests {
             assert!(!window.needs_paint);
             assert_eq!(desktop.active, 0);
         }
+    }
+
+    #[test]
+    fn full_client_invalidation_is_owned_and_idempotent() {
+        let mut desktop = Desktop::default();
+        desktop.insert(
+            0x7500_0004,
+            Window {
+                rectangle: [10, 20, 130, 90],
+                client: [0, 0, 120, 70],
+                ..Window::default()
+            },
+        );
+        assert!(!desktop.window(0x7500_0004).unwrap().needs_paint);
+        assert!(!desktop.invalidate_full(0));
+        assert!(desktop.invalidate_full(0x7500_0004));
+        assert!(desktop.invalidate_full(0x7500_0004));
+        let window = desktop.window(0x7500_0004).unwrap();
+        assert!(window.needs_paint);
+        assert_eq!(window.rectangle, [10, 20, 130, 90]);
+        assert_eq!(window.client, [0, 0, 120, 70]);
     }
 
     #[test]

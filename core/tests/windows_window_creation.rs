@@ -12,6 +12,7 @@ const CREATE: u32 = 0x7000_02a8;
 const ACTIVE: u32 = 0x7000_0430;
 const SHOW: u32 = 0x7000_0440;
 const UPDATE: u32 = 0x7000_0444;
+const INVALIDATE: u32 = 0x7000_04b0;
 const HANDLE: u32 = 0x7500_0004;
 const RETURN: u32 = 0x7000_0ff8;
 const ARGS: [u32; 12] = [
@@ -203,6 +204,55 @@ fn show_normal_error_write_fault_does_not_advance_api_state() {
     assert_eq!((run.instructions, run.api_calls), (0, 0));
     assert_eq!(p.cpu, before);
     assert_eq!(query(&mut p, ACTIVE, &[]), 0);
+}
+
+#[test]
+fn invalidate_rect_import_marks_an_owned_full_client_for_paint() {
+    let bytes = imported_executable::pe32(&[0xff, 0xd0, 0xcc], "USER32.dll", &["InvalidateRect"]);
+    let mut imported = Process32::load(&bytes, 32).unwrap();
+    let mut pointer = [0; 4];
+    imported.memory.read(0x0040_2060, &mut pointer).unwrap();
+    assert_eq!(u32::from_le_bytes(pointer), INVALIDATE);
+    assert_eq!(query(&mut imported, INVALIDATE, &[0, 0, 0]), 0);
+    assert_eq!(imported.last_error().unwrap(), 1400);
+
+    let mut p = ready(&logged(None));
+    assert_eq!(finish(&mut p), HANDLE);
+    let before = p.window_snapshots();
+    assert_eq!(query(&mut p, INVALIDATE, &[HANDLE, 0, 0]), 1);
+    assert_eq!(query(&mut p, INVALIDATE, &[HANDLE, 0, 0]), 1);
+    assert_eq!(p.window_snapshots()[0].rectangle, before[0].rectangle);
+    assert_eq!(p.window_snapshots()[0].client, before[0].client);
+
+    for args in [[HANDLE, 0x0040_2180, 0], [HANDLE, 0, 1]] {
+        prepare(&mut p, INVALIDATE, STACK, &args);
+        let before = p.cpu;
+        let run = p.run(1);
+        assert_eq!(
+            run.reason,
+            ProcessStop::UnsupportedApi {
+                address: INVALIDATE
+            }
+        );
+        assert_eq!((run.instructions, run.api_calls), (0, 0));
+        assert_eq!(p.cpu, before);
+    }
+
+    prepare(&mut p, INVALIDATE, STACK, &[0, 0, 0]);
+    p.memory
+        .protect(0x7ffd_e000, 4096, Permissions::READ)
+        .unwrap();
+    let before = p.cpu;
+    let run = p.run(1);
+    assert_eq!(
+        run.reason,
+        ProcessStop::Stopped(StopReason::MemoryFault(MemoryError::PermissionDenied {
+            address: 0x7ffd_e034,
+            access: Access::Write,
+        }))
+    );
+    assert_eq!((run.instructions, run.api_calls), (0, 0));
+    assert_eq!(p.cpu, before);
 }
 
 #[test]

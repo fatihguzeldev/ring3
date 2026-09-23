@@ -144,6 +144,7 @@ enum Api {
     DestroyWindow,
     ShowWindow,
     UpdateWindow,
+    InvalidateRect,
     CreateDialog,
     CallNextHook,
     Window(creation::Call),
@@ -266,6 +267,7 @@ impl Api {
             0x470 => Some(Self::DestroyWindow),
             0x440 => Some(Self::ShowWindow),
             0x444 => Some(Self::UpdateWindow),
+            0x4b0 => Some(Self::InvalidateRect),
             0x2c4 => Some(Self::CallNextHook),
             0x22c => Some(Self::GetCommandLine),
             0x434 => Some(Self::CreateDialog),
@@ -370,6 +372,7 @@ impl Api {
                 "DestroyWindow" => 0x470,
                 "ShowWindow" => 0x440,
                 "UpdateWindow" => 0x444,
+                "InvalidateRect" => 0x4b0,
                 "CallNextHookEx" => 0x2c4,
                 "CreateWindowExA" => 0x2a8,
                 "DefWindowProcA" => 0x2ac,
@@ -487,7 +490,7 @@ impl Api {
             Self::ThreadPriority(call) => call.arguments(),
             Self::Directory(call) => call.arguments(),
             Self::Clock(call) => call.arguments(),
-            Self::GetEnvironmentVariable => 3,
+            Self::GetEnvironmentVariable | Self::InvalidateRect => 3,
             Self::WindowsFormat
             | Self::ShowWindow
             | Self::SetWindowText
@@ -1062,6 +1065,19 @@ impl Process32 {
         Ok(true)
     }
 
+    fn invalidate_rect(&mut self, args: &[u32]) -> Result<(), DispatchError> {
+        if args[1] != 0 || args[2] != 0 {
+            return Err(DispatchError::Unsupported);
+        }
+        if self.desktop.invalidate_full(args[0]) {
+            self.cpu.set_register(Register32::Eax, 1);
+        } else {
+            thread::set_last_error(&mut self.memory, 1400)?;
+            self.cpu.set_register(Register32::Eax, 0);
+        }
+        Ok(())
+    }
+
     fn com_api(&mut self, call: com::Call, args: &[u32]) -> Result<(), DispatchError> {
         if let Some(value) =
             self.com
@@ -1089,6 +1105,7 @@ impl Process32 {
             }
             Api::PostMessage => self.post_guest_message(args)?,
             Api::ShowWindow => self.show_window(args)?,
+            Api::InvalidateRect => self.invalidate_rect(args)?,
             Api::SetWindowText => self.set_window_text(args)?,
             Api::EnableWindow => self.enable_dialog_control(args)?,
             Api::EndDialog => self.end_dialog(args)?,
