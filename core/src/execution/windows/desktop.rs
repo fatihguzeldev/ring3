@@ -61,6 +61,7 @@ pub(super) struct Window {
 pub(super) struct ComboBox {
     items: Vec<ComboItem>,
     bytes: usize,
+    selected: Option<usize>,
 }
 
 struct ComboItem {
@@ -87,6 +88,11 @@ impl ComboBox {
                     != std::cmp::Ordering::Greater
             })
         };
+        if let Some(selected) = &mut self.selected
+            && index <= *selected
+        {
+            *selected += 1;
+        }
         self.items.insert(index, ComboItem { title, data: 0 });
         self.bytes = bytes;
         u32::try_from(index).expect("bounded combo count")
@@ -108,6 +114,21 @@ impl ComboBox {
         };
         item.data = data;
         0
+    }
+
+    fn select(&mut self, index: u32) -> u32 {
+        self.selected = ((index as usize) < self.items.len()).then_some(index as usize);
+        self.selection()
+    }
+
+    fn selection(&self) -> u32 {
+        self.selected.map_or(u32::MAX, |index| {
+            u32::try_from(index).expect("bounded combo count")
+        })
+    }
+
+    fn selected_title(&self) -> Option<&str> {
+        self.selected.map(|index| self.items[index].title.as_str())
     }
 }
 
@@ -362,10 +383,17 @@ impl super::Process32 {
                 Ok(Some(window.combo.add(window.style, title)))
             }
             0x146 if args[2..] == [0, 0] => Ok(Some(window.combo.count())),
+            0x147 => Ok(Some(window.combo.selection())),
             0x150 => Ok(Some(window.combo.item_data(args[2]))),
             0x151 => {
                 let window = self.desktop.window_mut(args[0]).expect("validated window");
                 Ok(Some(window.combo.set_item_data(args[2], args[3])))
+            }
+            0x14e => {
+                let window = self.desktop.window_mut(args[0]).expect("validated window");
+                let result = window.combo.select(args[2]);
+                window.title = window.combo.selected_title().unwrap_or_default().to_owned();
+                Ok(Some(result))
             }
             _ => Ok(None),
         }
@@ -423,6 +451,7 @@ mod tests {
         let mut sorted = ComboBox::default();
         assert_eq!(sorted.add(0x100, "pear".into()), 0);
         assert_eq!(sorted.set_item_data(0, 0x1234), 0);
+        assert_eq!(sorted.select(0), 0);
         assert_eq!(sorted.add(0x100, "Apple".into()), 0);
         assert_eq!(sorted.add(0x100, "orange".into()), 1);
         assert_eq!(sorted.add(0x100, "apple".into()), 1);
@@ -435,6 +464,11 @@ mod tests {
             ["Apple", "apple", "orange", "pear"]
         );
         assert_eq!(sorted.item_data(3), 0x1234);
+        assert_eq!(sorted.selection(), 3);
+        assert_eq!(sorted.selected_title(), Some("pear"));
+        assert_eq!(sorted.select(u32::MAX), u32::MAX);
+        assert_eq!(sorted.selection(), u32::MAX);
+        assert_eq!(sorted.selected_title(), None);
         assert_eq!(sorted.set_item_data(4, 99), u32::MAX);
         assert_eq!(sorted.item_data(4), u32::MAX);
 
