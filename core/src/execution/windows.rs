@@ -1061,7 +1061,10 @@ impl Process32 {
     }
 
     fn com_api(&mut self, call: com::Call, args: &[u32]) -> Result<(), DispatchError> {
-        if let Some(value) = self.com.dispatch(call, args, &mut self.memory)? {
+        if let Some(value) =
+            self.com
+                .dispatch(call, args, &mut self.memory, &self.current_directory)?
+        {
             self.cpu.set_register(Register32::Eax, value);
         }
         Ok(())

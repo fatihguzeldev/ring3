@@ -91,6 +91,19 @@ impl Process32 {
 }
 
 impl Directory {
+    pub(super) fn has_file(&self, input: &[u8]) -> Result<bool, DispatchError> {
+        let path = match paths::resolve(&self.terminated[..self.terminated.len() - 1], input) {
+            Ok(path) => path,
+            Err(paths::PathError::Windows(_) | paths::PathError::Unsupported) => {
+                return Err(DispatchError::Unsupported);
+            }
+        };
+        Ok(self
+            .files
+            .iter()
+            .any(|file| !file.removed && file.path.eq_ignore_ascii_case(&path)))
+    }
+
     pub(super) fn new(
         path: &[u8],
         directories: &[&[u8]],

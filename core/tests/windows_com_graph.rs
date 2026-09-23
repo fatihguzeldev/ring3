@@ -1,7 +1,9 @@
 #[path = "support/imported_executable.rs"]
 mod imported_executable;
 
-use ring3_core::execution::{Process32, ProcessStop, Register32, StopReason};
+use ring3_core::execution::{
+    FileMetadata, Process32, ProcessOptions, ProcessStop, Register32, StopReason,
+};
 
 const INITIALIZE: u32 = 0x7000_0474;
 const CREATE: u32 = 0x7000_047c;
@@ -93,6 +95,53 @@ fn ok(process: &mut Process32, api: u32, args: &[u32]) -> u32 {
     let (stop, eax) = call(process, api, args);
     assert_eq!(stop, ProcessStop::Stopped(StopReason::InstructionLimit));
     eax
+}
+
+#[test]
+fn render_file_reports_missing_media_and_refuses_an_existing_unrendered_file() {
+    let media = FileMetadata {
+        path: b"C:\\present.mpg",
+        size: 4,
+    };
+    let mut process = Process32::load_with_options(
+        &imported_executable::pe32(&[0xcc], "ole32.dll", &["CoInitialize", "CoCreateInstance"]),
+        64,
+        ProcessOptions {
+            files: &[media],
+            ..ProcessOptions::default()
+        },
+    )
+    .unwrap();
+    write_guid(&mut process, CLSID, &FILTER_GRAPH);
+    write_guid(&mut process, IID, &GRAPH_BUILDER);
+    assert_eq!(ok(&mut process, INITIALIZE, &[0]), 0);
+    assert_eq!(ok(&mut process, CREATE, &[CLSID, 0, 1, IID, OUTPUT]), 0);
+    let graph = word(&process, OUTPUT);
+    let address = STACK + 0x100;
+    for (path, expected) in [
+        (r"C:\missing.mpg", Some(0x8004_0216)),
+        (r"C:\present.mpg", None),
+        (r"C:\bad?.mpg", None),
+    ] {
+        let bytes: Vec<_> = path
+            .encode_utf16()
+            .chain(std::iter::once(0))
+            .flat_map(u16::to_le_bytes)
+            .collect();
+        process.memory.write(u64::from(address), &bytes).unwrap();
+        let (stop, value) = call(&mut process, RENDER_FILE, &[graph, address, 0]);
+        if let Some(expected) = expected {
+            assert_eq!(stop, ProcessStop::Stopped(StopReason::InstructionLimit));
+            assert_eq!(value, expected);
+        } else {
+            assert_eq!(
+                stop,
+                ProcessStop::UnsupportedApi {
+                    address: RENDER_FILE
+                }
+            );
+        }
+    }
 }
 
 #[test]

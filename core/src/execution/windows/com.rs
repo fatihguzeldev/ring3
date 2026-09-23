@@ -1,5 +1,7 @@
 use super::super::Access;
-use super::{API_BASE, DispatchError, GuestMemory, MemoryError, PAGE_SIZE, Permissions, guest};
+use super::{
+    API_BASE, DispatchError, GuestMemory, MemoryError, PAGE_SIZE, Permissions, directory, guest,
+};
 
 pub(super) const BASE: u32 = 0x7001_5000;
 const TABLE_BASE: u32 = BASE + 0x100;
@@ -14,6 +16,7 @@ const NOT_INITIALIZED: u32 = 0x8004_01f0;
 const NO_INTERFACE: u32 = 0x8000_4002;
 const NULL_POINTER: u32 = 0x8000_4003;
 const OUT_OF_MEMORY: u32 = 0x8007_000e;
+const FILE_NOT_FOUND: u32 = 0x8004_0216;
 
 const fn guid(data1: u32, data2: u16, data3: u16, data4: [u8; 8]) -> [u8; 16] {
     let a = data1.to_le_bytes();
@@ -124,6 +127,40 @@ pub(super) struct Com {
 }
 
 impl Com {
+    fn render_file(
+        &self,
+        args: &[u32],
+        memory: &GuestMemory,
+        directory: &directory::Directory,
+    ) -> Result<u32, DispatchError> {
+        self.object(args[0])?;
+        if !(args[0] - OBJECT_BASE).is_multiple_of(OBJECT_STRIDE) || args[2] != 0 {
+            return Err(DispatchError::Unsupported);
+        }
+        if args[1] == 0 {
+            return Ok(NULL_POINTER);
+        }
+        let mut path = Vec::new();
+        for index in 0..32768_u32 {
+            let address = args[1]
+                .checked_add(index * 2)
+                .ok_or(DispatchError::Unsupported)?;
+            let mut unit = [0; 2];
+            memory.read(u64::from(address), &mut unit)?;
+            match u16::from_le_bytes(unit) {
+                0 => {
+                    if directory.has_file(&path)? {
+                        return Err(DispatchError::Unsupported);
+                    }
+                    return Ok(FILE_NOT_FOUND);
+                }
+                1..=0x7e => path.push(unit[0]),
+                _ => return Err(DispatchError::Unsupported),
+            }
+        }
+        Err(DispatchError::Unsupported)
+    }
+
     fn initialize(memory: &mut GuestMemory) -> Result<(), MemoryError> {
         memory.map_zeroed(u64::from(BASE), PAGE_SIZE, Permissions::READ_WRITE)?;
         for id in 0..INTERFACES {
@@ -238,6 +275,7 @@ impl Com {
         call: Call,
         args: &[u32],
         memory: &mut GuestMemory,
+        directory: &directory::Directory,
     ) -> Result<Option<u32>, DispatchError> {
         match call {
             Call::Initialize => {
@@ -257,7 +295,7 @@ impl Com {
             }
             Call::CreateInstance => self.create_instance(args, memory).map(Some),
             Call::QueryInterface => self.query_interface(args, memory).map(Some),
-            Call::RenderFile => Err(DispatchError::Unsupported),
+            Call::RenderFile => self.render_file(args, memory, directory).map(Some),
             Call::AddRef => {
                 let graph = self.object(args[0])?;
                 let next = self.graphs[graph]
