@@ -8,6 +8,7 @@ EXPORTS
     _GetWindow@8==GetWindow
     _SetWindowTextA@8==SetWindowTextA
     _EnableWindow@8==EnableWindow
+    _PostMessageA@16==PostMessageA
     _FindWindowA@8==FindWindowA
     _IsWindow@4==IsWindow
     _LoadStringA@16==LoadStringA

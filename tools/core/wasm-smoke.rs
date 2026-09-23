@@ -1524,7 +1524,9 @@ fn execute_dispatch_message() {
         64,
     )
     .unwrap();
-    assert_eq!(process.run(10000).reason, ProcessStop::WaitingForMessage);
+    let first = process.run(10000);
+    assert_eq!(first.reason, ProcessStop::WaitingForMessage);
+    assert_eq!((first.instructions, first.api_calls), (144, 7));
     process
         .post_message(PostedMessage {
             hwnd: 0x7500_0004,
@@ -1535,7 +1537,9 @@ fn execute_dispatch_message() {
             point: [12, -5],
         })
         .unwrap();
-    assert_eq!(process.run(1000).reason, ProcessStop::Exited(42));
+    let resumed = process.run(1000);
+    assert_eq!(resumed.reason, ProcessStop::Exited(42));
+    assert_eq!((resumed.instructions, resumed.api_calls), (77, 7));
     assert_eq!(process.last_error().unwrap(), 77);
 }
 
