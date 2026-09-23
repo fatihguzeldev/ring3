@@ -56,6 +56,27 @@ pub(super) fn write_variadic(
     Ok(length)
 }
 
+pub(super) fn write_snprintf_variadic(
+    memory: &mut GuestMemory,
+    arguments: &[u32],
+    stack: u32,
+) -> Result<u32, DispatchError> {
+    let (destination, capacity, format) = (arguments[0], arguments[1], arguments[2]);
+    let format = read_string(memory, format, 4096)?;
+    let mut output = render(memory, &format, u64::from(stack) + 16, CRT)?;
+    let length = u32::try_from(output.len()).expect("bounded output fits u32");
+    if length < capacity {
+        output.push(0);
+    } else {
+        output.truncate(usize::try_from(capacity).expect("u32 capacity fits usize"));
+    }
+    if !output.is_empty() {
+        guest::check(memory, destination, output.len(), Access::Write)?;
+        memory.write(u64::from(destination), &output)?;
+    }
+    Ok(if length >= capacity { u32::MAX } else { length })
+}
+
 impl super::Process32 {
     pub(super) fn windows_format(
         &mut self,

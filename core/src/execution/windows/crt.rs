@@ -74,6 +74,7 @@ pub(super) enum Call {
     CompareIgnoringCase,
     Format,
     Sprintf,
+    Snprintf,
     Sscanf,
     Lowercase,
     UppercaseString,
@@ -126,6 +127,7 @@ impl Call {
             0x1a4 => Some(Self::Stream(streams::Call::Tell)),
             0x1a8 => Some(Self::UppercaseString),
             0x1ac => Some(Self::Sprintf),
+            0x1bc => Some(Self::Snprintf),
             0x1b0 => Some(Self::Move),
             0x1b4 => Some(Self::DynamicCast),
             0x1b8 => Some(Self::Sscanf),
@@ -161,7 +163,8 @@ impl Call {
             | Self::Sscanf => 2,
             Self::GetMainArgs | Self::SplitPath | Self::DynamicCast => 5,
             Self::Format => 4,
-            Self::Memset
+            Self::Snprintf
+            | Self::Memset
             | Self::DllOnExit
             | Self::Compare
             | Self::Copy
@@ -267,6 +270,7 @@ impl Crt {
                     )?)
                 }
             }
+            Call::Snprintf => Some(snprintf(memory, args, cpu.register(Register32::Esp))?),
             Call::Sscanf => Some(scanning::sscanf(
                 memory,
                 args,
@@ -317,6 +321,15 @@ impl Crt {
     }
 }
 
+fn snprintf(memory: &mut GuestMemory, args: &[u32], stack: u32) -> Result<u32, DispatchError> {
+    if args[0] == 0 || args[2] == 0 {
+        guest::write_word(memory, ERRNO, 22)?;
+        Ok(u32::MAX)
+    } else {
+        formatting::write_snprintf_variadic(memory, args, stack)
+    }
+}
+
 fn malloc(
     memory: &mut GuestMemory,
     heap: &mut heap::Heap,
@@ -353,6 +366,7 @@ pub(super) fn resolve(name: &str) -> Option<u32> {
         "ftell" => Some(API_BASE + 0x1a4),
         "_strupr" => Some(API_BASE + 0x1a8),
         "sprintf" => Some(API_BASE + 0x1ac),
+        "_snprintf" => Some(API_BASE + 0x1bc),
         "sscanf" => Some(API_BASE + 0x1b8),
         "memmove" => Some(API_BASE + 0x1b0),
         "strchr" => Some(API_BASE + 0x158),
