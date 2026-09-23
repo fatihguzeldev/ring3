@@ -125,7 +125,7 @@ fn create_accepts_only_direct3d_8_0_and_8_1_sdk_identities() {
 fn adapter_count_reports_only_the_live_owned_root() {
     let (mut process, root) = root();
     assert_eq!(method(&process, root, 3), 0x7000_0ffc);
-    assert_eq!(method(&process, root, 12), 0x7000_0ffc);
+    assert_ne!(method(&process, root, 12), 0x7000_0ffc);
     let count = method(&process, root, 4);
     assert_eq!(invoke(&mut process, count, &[root]), 1);
     assert_eq!(invoke(&mut process, count, &[root]), 1);
@@ -154,7 +154,7 @@ fn adapter_mode_reports_the_owned_display_profile() {
     let (mut process, root) = root();
     let enumerate = method(&process, root, 7);
     assert_ne!(enumerate, 0x7000_0ffc);
-    assert_eq!(method(&process, root, 12), 0x7000_0ffc);
+    assert_ne!(method(&process, root, 12), 0x7000_0ffc);
     process.memory.write(u64::from(MODE), &[0xa5; 16]).unwrap();
     assert_eq!(invoke(&mut process, enumerate, &[root, 0, 0, MODE]), 0);
     assert_eq!(
@@ -258,7 +258,7 @@ fn adapter_mode_faults_before_writing_any_prefix() {
 #[test]
 fn device_type_compatibility_matches_the_owned_formats() {
     let (mut process, root) = root();
-    assert_eq!(method(&process, root, 12), 0x7000_0ffc);
+    assert_ne!(method(&process, root, 12), 0x7000_0ffc);
     let check = method(&process, root, 9);
     assert_ne!(check, 0x7000_0ffc);
     for windowed in [0, 1] {
@@ -301,7 +301,7 @@ fn invalid_or_released_roots_cannot_report_device_type_compatibility() {
 #[test]
 fn device_format_compatibility_matches_the_owned_render_target_surface() {
     let (mut process, root) = root();
-    assert_eq!(method(&process, root, 12), 0x7000_0ffc);
+    assert_ne!(method(&process, root, 12), 0x7000_0ffc);
     let check = method(&process, root, 10);
     assert_ne!(check, 0x7000_0ffc);
     assert_eq!(invoke(&mut process, check, &[root, 0, 1, 22, 1, 1, 22]), 0);
@@ -355,9 +355,161 @@ fn invalid_or_released_roots_cannot_report_device_format_compatibility() {
 }
 
 #[test]
+fn d16_depth_capability_matches_only_the_owned_color_target() {
+    let (mut process, root) = root();
+    let format = method(&process, root, 10);
+    let match_depth = method(&process, root, 12);
+    assert_eq!(invoke(&mut process, format, &[root, 0, 1, 22, 2, 1, 80]), 0);
+    assert_eq!(
+        invoke(&mut process, match_depth, &[root, 0, 1, 22, 22, 80]),
+        0
+    );
+    for args in [
+        [root, 0, 1, 22, 2, 1, 75],
+        [root, 0, 1, 22, 2, 3, 80],
+        [root, 0, 1, 21, 2, 1, 80],
+    ] {
+        assert_eq!(invoke(&mut process, format, &args), 0x8876_086a);
+    }
+    for args in [
+        [root, 0, 1, 22, 22, 75],
+        [root, 0, 1, 22, 21, 80],
+        [root, 0, 2, 22, 22, 80],
+    ] {
+        assert_eq!(invoke(&mut process, match_depth, &args), 0x8876_086a);
+    }
+    assert_eq!(
+        invoke(&mut process, match_depth, &[root, 1, 1, 22, 22, 80]),
+        0x8876_086c
+    );
+}
+
+fn depth_device() -> (Process32, u32) {
+    let (mut process, root) = root();
+    write(
+        &mut process,
+        PARAMETERS,
+        &[4, 3, 22, 1, 0, 1, 1, 1, 1, 80, 0, 0, 0],
+    );
+    let create = method(&process, root, 15);
+    assert_eq!(
+        invoke(
+            &mut process,
+            create,
+            &[root, 0, 1, 1, 0x20, PARAMETERS, OUTPUT]
+        ),
+        0
+    );
+    let device = read(&process, OUTPUT);
+    (process, device)
+}
+
+fn draw_depth_triangle(process: &mut Process32, device: u32, z: f32, color: u32) {
+    let vertices = 0x0040_2b00;
+    write(
+        process,
+        vertices,
+        &[
+            0_f32.to_bits(),
+            0_f32.to_bits(),
+            z.to_bits(),
+            1_f32.to_bits(),
+            color,
+            4_f32.to_bits(),
+            0_f32.to_bits(),
+            z.to_bits(),
+            1_f32.to_bits(),
+            color,
+            0_f32.to_bits(),
+            3_f32.to_bits(),
+            z.to_bits(),
+            1_f32.to_bits(),
+            color,
+        ],
+    );
+    let shader = method(process, device, 76);
+    let draw = method(process, device, 72);
+    assert_eq!(invoke(process, shader, &[device, 0x44]), 0);
+    assert_eq!(invoke(process, draw, &[device, 4, 1, vertices, 20]), 0);
+}
+
+#[test]
+fn d16_depth_clear_and_occlusion_keep_color_and_depth_independent() {
+    let (mut process, device) = depth_device();
+    let clear = method(&process, device, 36);
+    let present = method(&process, device, 15);
+    assert_eq!(
+        invoke(
+            &mut process,
+            clear,
+            &[device, 0, 0, 3, 0, 1_f32.to_bits(), 0]
+        ),
+        0
+    );
+    draw_depth_triangle(&mut process, device, 0.25, 0xffff_0000);
+    draw_depth_triangle(&mut process, device, 0.75, 0xff00_00ff);
+    assert_eq!(invoke(&mut process, present, &[device, 0, 0, 0, 0]), 0);
+    assert_eq!(&process.take_frame().unwrap().rgba[..4], &[255, 0, 0, 255]);
+
+    assert_eq!(invoke(&mut process, clear, &[device, 0, 0, 1, 0, 0, 0]), 0);
+    draw_depth_triangle(&mut process, device, 0.75, 0xff00_00ff);
+    assert_eq!(invoke(&mut process, present, &[device, 0, 0, 0, 0]), 0);
+    assert_eq!(&process.take_frame().unwrap().rgba[..4], &[0, 0, 0, 255]);
+
+    assert_eq!(
+        invoke(
+            &mut process,
+            clear,
+            &[device, 0, 0, 2, 0, 1_f32.to_bits(), 0]
+        ),
+        0
+    );
+    draw_depth_triangle(&mut process, device, 0.75, 0xff00_00ff);
+    assert_eq!(invoke(&mut process, present, &[device, 0, 0, 0, 0]), 0);
+    assert_eq!(&process.take_frame().unwrap().rgba[..4], &[0, 0, 255, 255]);
+}
+
+#[test]
+fn invalid_depth_clear_does_not_change_the_owned_surfaces() {
+    let (mut process, device) = depth_device();
+    let clear = method(&process, device, 36);
+    let present = method(&process, device, 15);
+    assert_eq!(
+        invoke(
+            &mut process,
+            clear,
+            &[device, 0, 0, 3, 0, 1_f32.to_bits(), 0]
+        ),
+        0
+    );
+    draw_depth_triangle(&mut process, device, 0.25, 0xffff_0000);
+    for flags in [2, 3] {
+        assert_eq!(
+            invoke(
+                &mut process,
+                clear,
+                &[device, 0, 0, flags, 0, f32::NAN.to_bits(), 0]
+            ),
+            0x8876_086c
+        );
+    }
+    assert_eq!(
+        invoke(
+            &mut process,
+            clear,
+            &[device, 0, 0, 4, 0, 1_f32.to_bits(), 0]
+        ),
+        0x8876_086c
+    );
+    draw_depth_triangle(&mut process, device, 0.75, 0xff00_00ff);
+    assert_eq!(invoke(&mut process, present, &[device, 0, 0, 0, 0]), 0);
+    assert_eq!(&process.take_frame().unwrap().rgba[..4], &[255, 0, 0, 255]);
+}
+
+#[test]
 fn multisample_compatibility_matches_the_owned_surface() {
     let (mut process, root) = root();
-    assert_eq!(method(&process, root, 12), 0x7000_0ffc);
+    assert_ne!(method(&process, root, 12), 0x7000_0ffc);
     let check = method(&process, root, 11);
     assert_ne!(check, 0x7000_0ffc);
     for windowed in [0, 1] {
@@ -485,7 +637,7 @@ fn adapter_identifier_faults_before_writing_any_prefix() {
 #[test]
 fn device_caps_report_only_the_owned_windowed_device() {
     let (mut process, root) = root();
-    assert_eq!(method(&process, root, 12), 0x7000_0ffc);
+    assert_ne!(method(&process, root, 12), 0x7000_0ffc);
     assert_eq!(method(&process, root, 14), 0x7000_0ffc);
     let get_caps = method(&process, root, 13);
     assert_ne!(get_caps, 0x7000_0ffc);

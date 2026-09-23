@@ -1,4 +1,4 @@
-use super::{Frame, INVALID_CALL};
+use super::{Frame, INVALID_CALL, quantize_d16};
 use crate::execution::{GuestMemory, MemoryError};
 
 pub(super) const MAX_PRIMITIVES: u32 = 4096;
@@ -12,6 +12,7 @@ const MAX_RASTER_SAMPLES: u64 = 4_194_304;
 struct Vertex {
     x: f64,
     y: f64,
+    z: f64,
     color: [u8; 3],
 }
 
@@ -26,6 +27,7 @@ struct Bounds {
 
 pub(super) fn draw_up(
     frame: Option<&mut Frame>,
+    mut depth: Option<&mut [u16]>,
     fvf: u32,
     args: &[u32],
     memory: &GuestMemory,
@@ -68,12 +70,19 @@ pub(super) fn draw_up(
         let y = f32::from_le_bytes(bytes[4..8].try_into().expect("position word"));
         let z = f32::from_le_bytes(bytes[8..12].try_into().expect("position word"));
         let rhw = f32::from_le_bytes(bytes[12..16].try_into().expect("position word"));
-        if !x.is_finite() || !y.is_finite() || !z.is_finite() || !rhw.is_finite() || rhw <= 0.0 {
+        if !x.is_finite()
+            || !y.is_finite()
+            || !z.is_finite()
+            || !(0.0..=1.0).contains(&z)
+            || !rhw.is_finite()
+            || rhw <= 0.0
+        {
             return Ok(INVALID_CALL);
         }
         vertices.push(Vertex {
             x: f64::from(x),
             y: f64::from(y),
+            z: f64::from(z),
             color: [bytes[18], bytes[17], bytes[16]],
         });
     }
@@ -100,6 +109,7 @@ pub(super) fn draw_up(
         if let Some(bounds) = bounds {
             raster_triangle(
                 frame,
+                depth.as_deref_mut(),
                 vertices[indices[0]],
                 vertices[indices[1]],
                 vertices[indices[2]],
@@ -150,7 +160,14 @@ fn triangle_bounds(frame: &Frame, a: Vertex, b: Vertex, c: Vertex) -> Option<Bou
     clippy::cast_sign_loss,
     clippy::cast_precision_loss
 )]
-fn raster_triangle(frame: &mut Frame, a: Vertex, b: Vertex, c: Vertex, bounds: Bounds) {
+fn raster_triangle(
+    frame: &mut Frame,
+    mut depth: Option<&mut [u16]>,
+    a: Vertex,
+    b: Vertex,
+    c: Vertex,
+    bounds: Bounds,
+) {
     for y in bounds.top..bounds.bottom {
         for x in bounds.left..bounds.right {
             let px = x as f64 + 0.5;
@@ -161,7 +178,15 @@ fn raster_triangle(frame: &mut Frame, a: Vertex, b: Vertex, c: Vertex, bounds: B
             if wa < 0.0 || wb < 0.0 || wc < 0.0 {
                 continue;
             }
-            let offset = (y * frame.width as usize + x) * 4;
+            let pixel_index = y * frame.width as usize + x;
+            if let Some(depth) = depth.as_deref_mut() {
+                let z = quantize_d16((wa * a.z + wb * b.z + wc * c.z).clamp(0.0, 1.0));
+                if z > depth[pixel_index] {
+                    continue;
+                }
+                depth[pixel_index] = z;
+            }
+            let offset = pixel_index * 4;
             for channel in 0..3 {
                 let value = wa * f64::from(a.color[channel])
                     + wb * f64::from(b.color[channel])

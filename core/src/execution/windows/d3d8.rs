@@ -43,6 +43,7 @@ pub(super) enum Call {
     CurrentDisplayMode,
     CheckDeviceType,
     CheckDeviceFormat,
+    CheckDepthStencilMatch,
     CheckMultiSampleType,
     DeviceCaps,
     CreateDevice,
@@ -91,6 +92,7 @@ impl Call {
             0x2f0 => Self::CurrentDisplayMode,
             0x2e4 => Self::CheckDeviceType,
             0x2e8 => Self::CheckDeviceFormat,
+            0x2f4 => Self::CheckDepthStencilMatch,
             0x2ec => Self::CheckMultiSampleType,
             _ => return None,
         })
@@ -104,7 +106,7 @@ impl Call {
             Self::TextureLevelDesc | Self::CurrentDisplayMode => 3,
             Self::AdapterIdentifier | Self::AdapterMode | Self::DeviceCaps => 4,
             Self::AdapterModeCount | Self::TextureUnlockRect | Self::SetVertexShader => 2,
-            Self::CheckDeviceType | Self::CheckMultiSampleType => 6,
+            Self::CheckDeviceType | Self::CheckMultiSampleType | Self::CheckDepthStencilMatch => 6,
             _ => 1,
         }
     }
@@ -115,6 +117,7 @@ pub(super) struct Graphics {
     root_refs: u32,
     device_refs: u32,
     back: Option<Frame>,
+    depth: Option<Vec<u16>>,
     front: Option<Frame>,
     textures: BTreeMap<u32, Texture>,
     vertex_fvf: u32,
@@ -159,6 +162,7 @@ impl Graphics {
             (ROOT_TABLE, 9, 0x2e4),
             (ROOT_TABLE, 10, 0x2e8),
             (ROOT_TABLE, 11, 0x2ec),
+            (ROOT_TABLE, 12, 0x2f4),
             (ROOT_TABLE, 13, 0x2d8),
             (ROOT_TABLE, 15, 0x40),
             (DEVICE_TABLE, 1, 0x58),
@@ -210,6 +214,7 @@ impl Graphics {
             }
             Call::CheckDeviceType => self.check_device_type(args),
             Call::CheckDeviceFormat => self.check_device_format(args),
+            Call::CheckDepthStencilMatch => self.check_depth_stencil_match(args),
             Call::CheckMultiSampleType => self.check_multisample_type(args),
             Call::DeviceCaps => return self.device_caps(args, memory),
             Call::CreateDevice => return self.create_device(args, memory),
@@ -229,7 +234,13 @@ impl Graphics {
                 if args[0] != DEVICE || self.device_refs == 0 {
                     INVALID_CALL
                 } else {
-                    return primitives::draw_up(self.back.as_mut(), self.vertex_fvf, args, memory);
+                    return primitives::draw_up(
+                        self.back.as_mut(),
+                        self.depth.as_deref_mut(),
+                        self.vertex_fvf,
+                        args,
+                        memory,
+                    );
                 }
             }
             Call::TextureLevelCount => {
@@ -344,7 +355,21 @@ impl Graphics {
         if args[0] != ROOT || self.root_refs == 0 || args[1] != 0 || !matches!(args[2], 1..=3) {
             return INVALID_CALL;
         }
-        if matches!(args[2..], [1, 22, 1, 1, 22] | [1, 22, 0, 3, 21 | 22]) {
+        if matches!(
+            args[2..],
+            [1, 22, 1, 1, 22] | [1, 22, 0, 3, 21 | 22] | [1, 22, 2, 1, 80]
+        ) {
+            0
+        } else {
+            NOT_AVAILABLE
+        }
+    }
+
+    fn check_depth_stencil_match(&self, args: &[u32]) -> u32 {
+        if args[0] != ROOT || self.root_refs == 0 || args[1] != 0 || !matches!(args[2], 1..=3) {
+            return INVALID_CALL;
+        }
+        if args[2..] == [1, 22, 22, 80] {
             0
         } else {
             NOT_AVAILABLE
@@ -395,8 +420,8 @@ impl Graphics {
             swap,
             window,
             windowed,
-            depth,
-            _,
+            enable_depth,
+            depth_format,
             flags,
             refresh,
             interval,
@@ -411,7 +436,7 @@ impl Graphics {
             || !matches!(window, 0 | DESKTOP)
             || (window == 0 && args[3] == 0)
             || windowed == 0
-            || depth != 0
+            || !matches!((enable_depth, depth_format), (0, 0) | (1, 80))
             || flags != 0
             || refresh != 0
             || interval != 0
@@ -436,12 +461,14 @@ impl Graphics {
         guest::write_word(memory, args[6], DEVICE)?;
         self.root_refs = self.root_refs.saturating_add(1);
         self.device_refs = 1;
+        self.depth = (enable_depth == 1).then(|| vec![u16::MAX; (width * height) as usize]);
         self.back = Some(frame);
         Ok(0)
     }
 
     fn finish_device(&mut self) {
         self.back = None;
+        self.depth = None;
         self.vertex_fvf = 0;
         self.root_refs = self.root_refs.saturating_sub(1);
     }
@@ -631,7 +658,7 @@ impl Graphics {
     fn clear(&mut self, args: &[u32], memory: &GuestMemory) -> Result<u32, MemoryError> {
         if args[0] != DEVICE
             || self.device_refs == 0
-            || args[3] != 1
+            || !matches!(args[3], 1..=3)
             || args[1] > MAX_RECTS
             || (args[1] == 0) != (args[2] == 0)
         {
@@ -640,6 +667,15 @@ impl Graphics {
         let Some(back) = self.back.as_mut() else {
             return Ok(INVALID_CALL);
         };
+        let clear_color = args[3] & 1 != 0;
+        let clear_depth = args[3] & 2 != 0;
+        if clear_depth && self.depth.is_none() {
+            return Ok(INVALID_CALL);
+        }
+        let depth_value = f32::from_bits(args[5]);
+        if clear_depth && (!depth_value.is_finite() || !(0.0..=1.0).contains(&depth_value)) {
+            return Ok(INVALID_CALL);
+        }
         let mut rects = vec![[0; 4]; args[1] as usize];
         guest::check(memory, args[2], rects.len() * 16, Access::Read)?;
         for (index, rect) in (0_u32..).zip(&mut rects) {
@@ -670,11 +706,24 @@ impl Graphics {
             for y in y1..y2 {
                 let start = ((y * back.width + x1) * 4) as usize;
                 let end = ((y * back.width + x2) * 4) as usize;
-                for pixel in back.rgba[start..end].chunks_exact_mut(4) {
-                    pixel.copy_from_slice(&[red, green, blue, 255]);
+                if clear_color {
+                    for pixel in back.rgba[start..end].chunks_exact_mut(4) {
+                        pixel.copy_from_slice(&[red, green, blue, 255]);
+                    }
+                }
+                if clear_depth {
+                    let start = (y * back.width + x1) as usize;
+                    let end = (y * back.width + x2) as usize;
+                    self.depth.as_mut().expect("validated depth surface")[start..end]
+                        .fill(quantize_d16(f64::from(depth_value)));
                 }
             }
         }
         Ok(0)
     }
+}
+
+#[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+fn quantize_d16(value: f64) -> u16 {
+    (value * f64::from(u16::MAX)).round() as u16
 }
