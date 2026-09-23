@@ -98,8 +98,12 @@ fn method(process: &Process32, object: u32, index: u32) -> u32 {
 }
 
 fn root() -> (Process32, u32) {
+    root_with_page_limit(32)
+}
+
+fn root_with_page_limit(page_limit: u32) -> (Process32, u32) {
     let bytes = imported_executable::pe32(&[0xff, 0xd0, 0xcc], "d3d8.dll", &["Direct3DCreate8"]);
-    let mut process = Process32::load(&bytes, 32).unwrap();
+    let mut process = Process32::load(&bytes, page_limit).unwrap();
     let factory = read(&process, 0x0040_2060);
     let root = invoke(&mut process, factory, &[220]);
     assert_ne!(root, 0);
@@ -582,6 +586,40 @@ fn depth_surface_get_rejects_absent_or_invalid_outputs_atomically() {
     assert_eq!(read(&process, DEPTH_OUTPUT), 0xa5a5_a5a5);
 }
 
+#[test]
+fn available_texture_memory_tracks_the_owned_guest_aperture() {
+    let (mut process, _, device) = create_with_page_limit(512);
+    let available = method(&process, device, 4);
+    let create_texture = method(&process, device, 20);
+    assert_eq!(
+        invoke(&mut process, available, &[device]),
+        208 * 1024 * 1024
+    );
+    assert_eq!(invoke(&mut process, available, &[device + 4]), 0);
+    assert_eq!(
+        invoke(
+            &mut process,
+            create_texture,
+            &[device, 512, 512, 1, 0, 22, 1, TEXTURE_OUTPUT]
+        ),
+        0
+    );
+    assert_eq!(
+        invoke(&mut process, available, &[device]),
+        207 * 1024 * 1024
+    );
+    let texture = read(&process, TEXTURE_OUTPUT);
+    let release = method(&process, texture, 2);
+    assert_eq!(invoke(&mut process, release, &[texture]), 0);
+    assert_eq!(
+        invoke(&mut process, available, &[device]),
+        208 * 1024 * 1024
+    );
+    let release_device = method(&process, device, 2);
+    assert_eq!(invoke(&mut process, release_device, &[device]), 0);
+    assert_eq!(invoke(&mut process, available, &[device]), 0);
+}
+
 fn depth_device() -> (Process32, u32) {
     let (mut process, root) = root();
     write(
@@ -1045,7 +1083,11 @@ fn device_caps_fault_before_writing_any_prefix() {
 }
 
 fn create() -> (Process32, u32, u32) {
-    let (mut process, root) = root();
+    create_with_page_limit(32)
+}
+
+fn create_with_page_limit(page_limit: u32) -> (Process32, u32, u32) {
+    let (mut process, root) = root_with_page_limit(page_limit);
     let create_device = method(&process, root, 15);
     assert_eq!(
         invoke(

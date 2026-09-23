@@ -27,6 +27,7 @@ const MAX_RECTS: u32 = 64;
 const TEXTURE_TABLE: u32 = OBJECT_BASE + 0x400;
 const TEXTURE_START: u64 = 0x7200_0000;
 const TEXTURE_END: u64 = 0x7f00_0000;
+const MIB: u64 = 1024 * 1024;
 const OUT_OF_VIDEO_MEMORY: u32 = 0x8876_017c;
 
 mod primitives;
@@ -72,6 +73,7 @@ pub(super) enum Call {
     GetDepthStencilSurface,
     DepthSurfaceAddRef,
     DepthSurfaceRelease,
+    AvailableTextureMemory,
     DrawPrimitiveUp,
 }
 
@@ -100,6 +102,7 @@ impl Call {
             0x4a0 => Self::GetDepthStencilSurface,
             0x4a4 => Self::DepthSurfaceAddRef,
             0x4a8 => Self::DepthSurfaceRelease,
+            0x4ac => Self::AvailableTextureMemory,
             0x2d0 => Self::AdapterCount,
             0x2d4 => Self::AdapterIdentifier,
             0x2d8 => Self::DeviceCaps,
@@ -209,6 +212,7 @@ impl Graphics {
             (DEVICE_TABLE, 40, 0x498),
             (DEVICE_TABLE, 50, 0x49c),
             (DEVICE_TABLE, 33, 0x4a0),
+            (DEVICE_TABLE, 4, 0x4ac),
             (DEPTH_SURFACE_TABLE, 1, 0x4a4),
             (DEPTH_SURFACE_TABLE, 2, 0x4a8),
             (DEVICE_TABLE, 20, 0x400),
@@ -279,6 +283,7 @@ impl Graphics {
             Call::DepthSurfaceAddRef | Call::DepthSurfaceRelease => {
                 self.depth_surface_ref(call, args)
             }
+            Call::AvailableTextureMemory => self.available_texture_memory(args[0]),
             Call::DrawPrimitiveUp => return self.draw_primitive_up(args, memory),
             Call::TextureLevelCount => {
                 self.textures.get(&args[0]).map_or(INVALID_CALL, |texture| {
@@ -623,6 +628,15 @@ impl Graphics {
         } else {
             1
         }
+    }
+
+    fn available_texture_memory(&self, device: u32) -> u32 {
+        if device != DEVICE || self.device_refs == 0 {
+            return 0;
+        }
+        let used: u64 = self.textures.values().map(|texture| texture.length).sum();
+        let free = (TEXTURE_END - TEXTURE_START).saturating_sub(used);
+        u32::try_from(((free + MIB / 2) / MIB) * MIB).expect("bounded texture aperture")
     }
 
     fn draw_primitive_up(
