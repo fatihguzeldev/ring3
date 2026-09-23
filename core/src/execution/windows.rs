@@ -20,6 +20,7 @@ mod desktop;
 mod diagnostics;
 mod dialogs;
 mod directory;
+mod eh;
 mod environment;
 mod formatting;
 mod gdi;
@@ -63,6 +64,7 @@ pub struct Process32 {
     subsystem_version: u32,
     startup: startup::Startup,
     callbacks: callbacks::Callbacks,
+    exception: Option<eh::Pending>,
     modules: modules::Modules,
     registry: registry::Registry,
     resources: resources::Resources,
@@ -153,6 +155,7 @@ enum Api {
     GetProcessVersion,
     String(strings::Call),
     ExceptionProlog,
+    CxxThrow,
     Graphics(d3d8::Call),
     Gdi(gdi::Call),
     Cursor(cursors::Call),
@@ -272,7 +275,8 @@ impl Api {
             0x94 | 0xc8 => Some(Self::RegisterUserAtom),
             0x98 => Some(Self::GetProcessVersion),
             0x118 => Some(Self::ExceptionProlog),
-            0xffc => Some(Self::Unsupported),
+            0x490 => Some(Self::CxxThrow),
+            0x494 | 0xffc => Some(Self::Unsupported),
             offset => d3d8::Call::at(offset)
                 .map(Self::Graphics)
                 .or_else(|| system::Call::at(offset).map(Self::System))
@@ -488,7 +492,8 @@ impl Api {
             | Self::ShowWindow
             | Self::SetWindowText
             | Self::EnableWindow
-            | Self::EndDialog => 2,
+            | Self::EndDialog
+            | Self::CxxThrow => 2,
             Self::CallWindowProc | Self::CreateDialog | Self::PeekMessage => 5,
             Self::SetWindowPos => 7,
             Self::CallNextHook | Self::SendMessage | Self::PostMessage | Self::GetMessage => 4,
@@ -640,6 +645,7 @@ impl Process32 {
             subsystem_version: (u32::from(major) << 16) | u32::from(minor),
             startup,
             callbacks: callbacks::Callbacks::default(),
+            exception: None,
             modules,
             resources,
             current_directory,
@@ -743,6 +749,7 @@ impl Process32 {
                     || self.diagnostic_imports.contains(address)
                     || self.startup.contains(address)
                     || address == callbacks::RETURN
+                    || address == eh::RETURN
             });
             result.instructions += step.instructions;
             remaining -= step.instructions;
@@ -755,6 +762,13 @@ impl Process32 {
             }
             if self.cpu.eip == callbacks::RETURN {
                 if let Err(error) = self.finish_callback() {
+                    result.reason = error.stop(self.cpu.eip);
+                    return result;
+                }
+                continue;
+            }
+            if self.cpu.eip == eh::RETURN {
+                if let Err(error) = self.finish_exception_call() {
                     result.reason = error.stop(self.cpu.eip);
                     return result;
                 }
@@ -803,6 +817,9 @@ impl Process32 {
         }
         if matches!(api, Api::ExceptionProlog) {
             return crt::enter_exception_frame(&mut self.cpu, &mut self.memory, frame[0]);
+        }
+        if matches!(api, Api::CxxThrow) {
+            return self.throw_exception(&frame[1..3]);
         }
         if matches!(api, Api::ExitProcess) {
             self.exit_code = Some(frame[1]);
@@ -1050,6 +1067,7 @@ impl Process32 {
         Ok(())
     }
 
+    #[expect(clippy::too_many_lines, reason = "flat api routing table")]
     fn invoke(&mut self, api: Api, args: &[u32], stack: u32) -> Result<(), DispatchError> {
         let argument = args.first().copied().unwrap_or(0);
         match api {
@@ -1147,6 +1165,7 @@ impl Process32 {
             | Api::DispatchMessage
             | Api::CallNextHook
             | Api::ExceptionProlog
+            | Api::CxxThrow
             | Api::ExitProcess
             | Api::Unsupported => unreachable!(),
         }

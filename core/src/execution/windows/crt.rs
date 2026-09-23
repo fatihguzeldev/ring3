@@ -359,6 +359,8 @@ pub(super) fn resolve(name: &str) -> Option<u32> {
         "_setmbcp" => Some(API_BASE + 0x13c),
         "_onexit" => Some(API_BASE + 0x140),
         "_EH_prolog" => Some(API_BASE + 0x118),
+        "_CxxThrowException" => Some(API_BASE + 0x490),
+        "__CxxFrameHandler" => Some(API_BASE + 0x494),
         "malloc" => Some(API_BASE + 0x11c),
         "free" => Some(API_BASE + 0x120),
         "??2@YAPAXI@Z" => Some(API_BASE + 0x144),
