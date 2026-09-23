@@ -1505,6 +1505,56 @@ fn device_texture_stage_rejects_bad_targets_without_changing_old_binding() {
 }
 
 #[test]
+fn colorarg0_texture_stage_state_round_trips_and_rejects_bad_requests() {
+    let (mut process, _, device) = create();
+    let set = method(&process, device, 63);
+    let get = method(&process, device, 62);
+    assert_ne!(set, 0x7000_0ffc);
+    assert_ne!(get, 0x7000_0ffc);
+    for stage in [0, 3, 7] {
+        assert_eq!(
+            invoke(&mut process, get, &[device, stage, 26, LEVEL_DESC]),
+            0
+        );
+        assert_eq!(read(&process, LEVEL_DESC), 1);
+    }
+    assert_eq!(invoke(&mut process, set, &[device, 0, 26, 0]), 0);
+    assert_eq!(invoke(&mut process, set, &[device, 7, 26, 2]), 0);
+    for (stage, expected) in [(0, 0), (3, 1), (7, 2)] {
+        assert_eq!(
+            invoke(&mut process, get, &[device, stage, 26, LEVEL_DESC]),
+            0
+        );
+        assert_eq!(read(&process, LEVEL_DESC), expected);
+    }
+    for args in [
+        [device, 8, 26, 0],
+        [device + 4, 0, 26, 0],
+        [device, 0, 1, 0],
+        [device, 0, 26, 3],
+    ] {
+        assert_eq!(invoke(&mut process, set, &args), 0x8876_086c);
+    }
+    write(&mut process, LEVEL_DESC, &[0x5555_5555]);
+    for args in [
+        [device, 8, 26, LEVEL_DESC],
+        [device + 4, 0, 26, LEVEL_DESC],
+        [device, 0, 1, LEVEL_DESC],
+    ] {
+        assert_eq!(invoke(&mut process, get, &args), 0x8876_086c);
+        assert_eq!(read(&process, LEVEL_DESC), 0x5555_5555);
+    }
+    let fault = call(&mut process, get, &[device, 0, 26, 0x5000_0000]);
+    assert!(matches!(
+        fault.reason,
+        ProcessStop::Stopped(StopReason::MemoryFault(_))
+    ));
+    assert_eq!(fault.api_calls, 0);
+    assert_eq!(invoke(&mut process, get, &[device, 0, 26, LEVEL_DESC]), 0);
+    assert_eq!(read(&process, LEVEL_DESC), 0);
+}
+
+#[test]
 fn texture_surface_levels_have_stable_distinct_owned_identities() {
     let (mut process, _, device) = create();
     let create_texture = method(&process, device, 20);

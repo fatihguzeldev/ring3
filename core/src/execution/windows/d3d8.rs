@@ -66,6 +66,8 @@ pub(super) enum Call {
     TextureRelease,
     TexturePreLoad,
     SetTexture,
+    GetTextureStageState,
+    SetTextureStageState,
     TextureLevelCount,
     TextureLevelDesc,
     TextureLockRect,
@@ -102,6 +104,8 @@ impl Call {
             0x408 => Self::TextureRelease,
             0x4d0 => Self::TexturePreLoad,
             0x4d4 => Self::SetTexture,
+            0x4d8 => Self::GetTextureStageState,
+            0x4dc => Self::SetTextureStageState,
             0x40c => Self::TextureLevelCount,
             0x410 => Self::TextureLevelDesc,
             0x414 => Self::TextureLockRect,
@@ -147,7 +151,9 @@ impl Call {
             Self::AdapterIdentifier
             | Self::AdapterMode
             | Self::DeviceCaps
-            | Self::TextureSurfaceLockRect => 4,
+            | Self::TextureSurfaceLockRect
+            | Self::GetTextureStageState
+            | Self::SetTextureStageState => 4,
             Self::AdapterModeCount
             | Self::TextureUnlockRect
             | Self::SetVertexShader
@@ -173,6 +179,7 @@ pub(super) struct Graphics {
     front: Option<Frame>,
     textures: BTreeMap<u32, Texture>,
     texture_stages: [u32; 8],
+    color_arg0: [u32; 8],
     vertex_fvf: u32,
 }
 
@@ -252,6 +259,8 @@ impl Graphics {
             (DEVICE_TABLE, 33, 0x4a0),
             (DEVICE_TABLE, 4, 0x4ac),
             (DEVICE_TABLE, 61, 0x4d4),
+            (DEVICE_TABLE, 62, 0x4d8),
+            (DEVICE_TABLE, 63, 0x4dc),
             (DEPTH_SURFACE_TABLE, 1, 0x4a4),
             (DEPTH_SURFACE_TABLE, 2, 0x4a8),
             (DEVICE_TABLE, 20, 0x400),
@@ -333,6 +342,8 @@ impl Graphics {
             Call::SetViewport => return self.set_viewport(args, memory),
             Call::SetRenderState => self.set_render_state(args),
             Call::SetTexture => return self.set_texture(args, memory),
+            Call::GetTextureStageState => return self.get_texture_stage_state(args, memory),
+            Call::SetTextureStageState => self.set_texture_stage_state(args),
             Call::GetDepthStencilSurface => return self.get_depth_surface(args, memory),
             Call::DepthSurfaceAddRef | Call::DepthSurfaceRelease => {
                 self.depth_surface_ref(call, args)
@@ -563,6 +574,7 @@ impl Graphics {
         self.root_refs = self.root_refs.saturating_add(1);
         self.device_refs = 1;
         self.texture_stages = [0; 8];
+        self.color_arg0 = [1; 8];
         self.depth = (enable_depth == 1).then(|| vec![u16::MAX; (width * height) as usize]);
         self.depth_surface_refs = 0;
         self.z_enabled = enable_depth == 1;
@@ -586,6 +598,7 @@ impl Graphics {
         self.viewport = None;
         self.vertex_fvf = 0;
         self.texture_stages = [0; 8];
+        self.color_arg0 = [1; 8];
         self.root_refs = self.root_refs.saturating_sub(1);
     }
 
@@ -653,6 +666,41 @@ impl Graphics {
             self.texture_add_ref(next);
         }
         self.texture_stages[index] = next;
+        Ok(0)
+    }
+
+    fn set_texture_stage_state(&mut self, args: &[u32]) -> u32 {
+        let [device, stage, kind, value] = <[u32; 4]>::try_from(args).expect("d3d8 call arity");
+        let Ok(index) = usize::try_from(stage) else {
+            return INVALID_CALL;
+        };
+        if device != DEVICE
+            || self.device_refs == 0
+            || index >= self.color_arg0.len()
+            || kind != 26
+            || value > 2
+        {
+            return INVALID_CALL;
+        }
+        self.color_arg0[index] = value;
+        0
+    }
+
+    fn get_texture_stage_state(
+        &self,
+        args: &[u32],
+        memory: &mut GuestMemory,
+    ) -> Result<u32, MemoryError> {
+        let [device, stage, kind, output] = <[u32; 4]>::try_from(args).expect("d3d8 call arity");
+        let Ok(index) = usize::try_from(stage) else {
+            return Ok(INVALID_CALL);
+        };
+        if device != DEVICE || self.device_refs == 0 || index >= self.color_arg0.len() || kind != 26
+        {
+            return Ok(INVALID_CALL);
+        }
+        guest::check(memory, output, 4, Access::Write)?;
+        guest::write_word(memory, output, self.color_arg0[index])?;
         Ok(0)
     }
 
