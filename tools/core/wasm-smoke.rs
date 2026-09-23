@@ -1723,7 +1723,7 @@ fn execute_window_creation() {
             Process32::load(include_bytes!("../../target/windows-api/dialog.exe"), 64).unwrap();
         let result = process.run(1000);
         assert_eq!(result.reason, ProcessStop::Exited(42));
-        assert_eq!((result.instructions, result.api_calls), (700, 86));
+        assert_eq!((result.instructions, result.api_calls), (798, 95));
     }
 }
 

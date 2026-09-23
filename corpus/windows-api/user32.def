@@ -39,6 +39,7 @@ EXPORTS
     _UpdateWindow@4==UpdateWindow
     _EndDialog@8==EndDialog
     _SetWindowPos@28==SetWindowPos
+    _DestroyWindow@4==DestroyWindow
     wsprintfA
     _GetClassInfoA@12==GetClassInfoA
     _RegisterClassA@4==RegisterClassA
