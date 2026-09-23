@@ -263,8 +263,12 @@ impl Cpu32 {
             }
             let signed_right = if add { right } else { -right };
             if single_precision {
-                result = rounding::single_sum(result, left, signed_right)
-                    .ok_or(StopReason::UnsupportedInstruction)?;
+                result = if self.x87_control_word & 0x0f3f == 0x0c3f {
+                    rounding::single_sum_toward_zero(result, left, signed_right)
+                } else {
+                    rounding::single_sum(result, left, signed_right)
+                }
+                .ok_or(StopReason::UnsupportedInstruction)?;
             }
             (result, rounding::sum_result(result, left, signed_right))
         } else {
@@ -318,8 +322,10 @@ impl Cpu32 {
             };
             (result, rounding)
         };
-        self.x87_stack
-            .rounded(rounding != Ordering::Equal, rounding == Ordering::Greater);
+        self.x87_stack.rounded(
+            rounding != Ordering::Equal,
+            self.x87_control_word & 0x0f3f != 0x0c3f && rounding == Ordering::Greater,
+        );
         self.x87_stack.values[usize::from(self.x87_stack.top)] = result.to_bits();
         Ok(())
     }
@@ -475,7 +481,14 @@ impl Cpu32 {
             {
                 Ok(true)
             }
-            0x0c3f if matches!(code, Code::Fmul_m32fp | Code::Fadd_st0_sti) => Ok(true),
+            0x0c3f
+                if matches!(
+                    code,
+                    Code::Fmul_m32fp | Code::Fadd_st0_sti | Code::Fadd_m32fp
+                ) =>
+            {
+                Ok(true)
+            }
             _ => Err(StopReason::UnsupportedInstruction),
         }
     }
