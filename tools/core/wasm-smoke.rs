@@ -1791,6 +1791,25 @@ fn execute_window_creation() {
             assert_eq!((process.cpu, counts), expected);
         }
         final_state = Some((process.cpu, counts));
+        let rectangle = windows[0].rectangle;
+        let frame: Vec<_> = [0x0040_1000_u32, 0x7500_0004, 5]
+            .into_iter()
+            .flat_map(u32::to_le_bytes)
+            .collect();
+        process.memory.write(0x1000_ef00, &frame).unwrap();
+        process.cpu.eip = 0x7000_0440;
+        process.cpu.set_register(Register32::Esp, 0x1000_ef00);
+        let run = process.run(1);
+        assert_eq!(
+            run.reason,
+            ProcessStop::Stopped(StopReason::InstructionLimit)
+        );
+        assert_eq!((run.instructions, run.api_calls), (0, 1));
+        assert_eq!(process.cpu.register(Register32::Eax), 0);
+        let shown = process.window_snapshots();
+        assert_eq!(shown[0].rectangle, rectangle);
+        assert_ne!(shown[0].style & 0x1000_0000, 0);
+        assert!(shown[0].active);
     }
     #[cfg(windows_demo)]
     {
