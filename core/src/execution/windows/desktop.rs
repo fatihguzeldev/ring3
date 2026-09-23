@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 
 use super::{
-    DispatchError, GuestMemory, MemoryError, Register32, callbacks, thread,
+    DispatchError, GuestMemory, MemoryError, Register32, callbacks, gdi, thread,
     user_atoms::{self, UserAtoms},
 };
 
@@ -63,6 +63,7 @@ pub(super) struct Window {
     pub(super) dialog_units: Option<[i16; 4]>,
     pub(super) dialog_result: Option<u32>,
     pub(super) needs_paint: bool,
+    pub(super) topmost: bool,
     pub(super) combo: ComboBox,
 }
 
@@ -324,6 +325,59 @@ impl Desktop {
         window.needs_paint = true;
         true
     }
+    pub(super) fn position_topmost_no_redraw(&mut self, args: &[u32]) -> bool {
+        let [handle, insert_after, x, y, width, height, flags] =
+            <[u32; 7]>::try_from(args).expect("SetWindowPos arity");
+        if insert_after != u32::MAX
+            || flags != 8
+            || self.active != handle
+            || self.top_levels.len() != 1
+            || width == 0
+            || height == 0
+            || x.checked_add(width)
+                .is_none_or(|right| right > gdi::SCREEN_WIDTH)
+            || y.checked_add(height)
+                .is_none_or(|bottom| bottom > gdi::SCREEN_HEIGHT)
+        {
+            return false;
+        }
+        let Some(window) = self.top_levels.get_mut(&handle) else {
+            return false;
+        };
+        if window.dialog_units.is_some() {
+            return false;
+        }
+        let old = window.rectangle;
+        let client = window.client;
+        let insets = [
+            client[0] - old[0],
+            client[1] - old[1],
+            old[2] - client[2],
+            old[3] - client[3],
+        ];
+        let (x, y, right, bottom) = (
+            x.cast_signed(),
+            y.cast_signed(),
+            (x + width).cast_signed(),
+            (y + height).cast_signed(),
+        );
+        let new_client = [
+            x + insets[0],
+            y + insets[1],
+            right - insets[2],
+            bottom - insets[3],
+        ];
+        if insets.iter().any(|inset| *inset < 0)
+            || new_client[0] >= new_client[2]
+            || new_client[1] >= new_client[3]
+        {
+            return false;
+        }
+        window.rectangle = [x, y, right, bottom];
+        window.client = new_client;
+        window.topmost = true;
+        true
+    }
     pub(super) fn end_dialog(&mut self, handle: u32, result: u32) {
         let window = self.top_levels.get_mut(&handle).expect("validated dialog");
         window.dialog_result = Some(result);
@@ -485,11 +539,13 @@ impl super::Process32 {
             self.cpu.set_register(Register32::Eax, 0);
             return Ok(());
         };
-        if window.parent != 0
-            || window.class != 0x8002
-            || window.dialog_units.is_none()
-            || args[1..] != [0, 0, 0, 0, 0, 0x97]
-        {
+        let (parent, class, is_dialog) =
+            (window.parent, window.class, window.dialog_units.is_some());
+        if !is_dialog && self.desktop.position_topmost_no_redraw(args) {
+            self.cpu.set_register(Register32::Eax, 1);
+            return Ok(());
+        }
+        if parent != 0 || class != 0x8002 || !is_dialog || args[1..] != [0, 0, 0, 0, 0, 0x97] {
             return Err(DispatchError::Unsupported);
         }
         self.desktop.hide_dialog(args[0]);
@@ -774,6 +830,29 @@ mod tests {
         assert!(window.needs_paint);
         assert_eq!(window.rectangle, [10, 20, 130, 90]);
         assert_eq!(window.client, [0, 0, 120, 70]);
+    }
+
+    #[test]
+    fn topmost_no_redraw_keeps_existing_paint_without_scheduling_another() {
+        let mut desktop = Desktop::default();
+        desktop.insert(
+            0x7500_0004,
+            Window {
+                style: 0x1000_0000,
+                rectangle: [0, 0, 640, 480],
+                client: [3, 22, 637, 477],
+                needs_paint: true,
+                ..Window::default()
+            },
+        );
+        desktop.activate_created(0x7500_0004);
+        assert!(desktop.position_topmost_no_redraw(&[0x7500_0004, u32::MAX, 0, 0, 640, 461, 8]));
+        let window = desktop.window(0x7500_0004).unwrap();
+        assert_eq!(window.rectangle, [0, 0, 640, 461]);
+        assert_eq!(window.client, [3, 22, 637, 458]);
+        assert!(window.topmost);
+        assert!(window.needs_paint);
+        assert_eq!(desktop.active, 0x7500_0004);
     }
 
     #[test]

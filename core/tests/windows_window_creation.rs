@@ -13,6 +13,7 @@ const ACTIVE: u32 = 0x7000_0430;
 const SHOW: u32 = 0x7000_0440;
 const UPDATE: u32 = 0x7000_0444;
 const INVALIDATE: u32 = 0x7000_04b0;
+const SET_POS: u32 = 0x7000_046c;
 const HANDLE: u32 = 0x7500_0004;
 const RETURN: u32 = 0x7000_0ff8;
 const ARGS: [u32; 12] = [
@@ -253,6 +254,44 @@ fn invalidate_rect_import_marks_an_owned_full_client_for_paint() {
     );
     assert_eq!((run.instructions, run.api_calls), (0, 0));
     assert_eq!(p.cpu, before);
+}
+
+#[test]
+fn topmost_no_redraw_resizes_the_active_owned_main_window() {
+    let mut p = ready(&logged(None));
+    assert_eq!(finish(&mut p), HANDLE);
+    assert_eq!(query(&mut p, SHOW, &[HANDLE, 5]), 0);
+    let before = p.window_snapshots();
+    let old = &before[0];
+    assert!(old.active);
+    assert_eq!(
+        query(&mut p, SET_POS, &[HANDLE, u32::MAX, 0, 0, 640, 461, 8]),
+        1
+    );
+    let after = p.window_snapshots();
+    let new = &after[0];
+    assert_eq!(new.rectangle, [0, 0, 640, 461]);
+    assert_eq!(new.client[0], old.client[0] - old.rectangle[0]);
+    assert_eq!(new.client[1], old.client[1] - old.rectangle[1]);
+    assert_eq!(new.client[2], 640 - (old.rectangle[2] - old.client[2]));
+    assert_eq!(new.client[3], 461 - (old.rectangle[3] - old.client[3]));
+    assert_eq!(new.style, old.style);
+    assert!(new.active);
+
+    for args in [
+        [HANDLE, 0, 0, 0, 640, 461, 8],
+        [HANDLE, u32::MAX, 0, 0, 641, 461, 8],
+        [HANDLE, u32::MAX, 0, 0, 640, 461, 0x10],
+    ] {
+        prepare(&mut p, SET_POS, STACK, &args);
+        let cpu = p.cpu;
+        let run = p.run(1);
+        assert_eq!(run.reason, ProcessStop::UnsupportedApi { address: SET_POS });
+        assert_eq!(p.cpu, cpu);
+        assert_eq!(p.window_snapshots()[0].rectangle, new.rectangle);
+    }
+    assert_eq!(query(&mut p, SET_POS, &[0, u32::MAX, 0, 0, 640, 461, 8]), 0);
+    assert_eq!(p.last_error().unwrap(), 1400);
 }
 
 #[test]
