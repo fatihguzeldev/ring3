@@ -293,8 +293,12 @@ impl Cpu32 {
                 return Err(StopReason::UnsupportedInstruction);
             }
             if single_precision {
-                result = rounding::single_product(result, left, right)
-                    .ok_or(StopReason::UnsupportedInstruction)?;
+                result = if self.x87_control_word & 0x0f3f == 0x0c3f {
+                    rounding::single_product_toward_zero(result, left, right)
+                } else {
+                    rounding::single_product(result, left, right)
+                }
+                .ok_or(StopReason::UnsupportedInstruction)?;
             }
             let rounding = if multiply {
                 rounding::product_result(result, top, source)
@@ -459,6 +463,7 @@ impl Cpu32 {
             {
                 Ok(true)
             }
+            0x0c3f if code == Code::Fmul_m32fp => Ok(true),
             _ => Err(StopReason::UnsupportedInstruction),
         }
     }

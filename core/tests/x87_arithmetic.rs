@@ -227,6 +227,70 @@ fn single_precision_multiply_accepts_the_64_bit_memory_form() {
 }
 
 #[test]
+fn truncating_single_precision_memory_multiply_preserves_status_and_sign() {
+    let operation = &[0xd8, 0x0d, 0x10, 0x22, 0x40, 0];
+    for (top, source, expected, status) in [
+        (0.5_f64, 2.0_f32, 1.0_f64, 0),
+        (
+            1.0 + 3.0 * 2.0_f64.powi(-24),
+            1.0_f32 + 2.0_f32.powi(-23),
+            1.0 + 2.0_f64.powi(-22),
+            0x20,
+        ),
+        (
+            -1.0 - 3.0 * 2.0_f64.powi(-24),
+            1.0_f32 + 2.0_f32.powi(-23),
+            -1.0 - 2.0_f64.powi(-22),
+            0x20,
+        ),
+        (-0.0, 2.0, -0.0, 0),
+    ] {
+        let (mut cpu, mut memory) = load(operation, top.to_bits(), u64::from(source.to_bits()));
+        cpu.set_x87_control_word(0x0c7f);
+        assert_eq!(cpu.run(&mut memory, 2).instructions, 2);
+        let store = cpu.eip;
+        cpu.eip += 6;
+        assert_eq!(cpu.run(&mut memory, 1).instructions, 1);
+        assert_eq!(cpu.register(Register32::Eax) & 0x220, status);
+        cpu.eip = store;
+        cpu.set_x87_control_word(0x027f);
+        assert_eq!(cpu.run(&mut memory, 1).instructions, 1);
+        assert_eq!(result(&memory), expected.to_bits());
+    }
+}
+
+#[test]
+fn truncating_single_precision_memory_multiply_rejects_faults_atomically() {
+    for (operation, top, source, expected) in [
+        (
+            &[0xd8, 0x0d, 0, 0, 0, 0x50][..],
+            2.0_f64,
+            2.0_f32,
+            Some(StopReason::MemoryFault(
+                ring3_core::execution::MemoryError::Unmapped {
+                    address: 0x5000_0000,
+                },
+            )),
+        ),
+        (&[0xd8, 0x0d, 0x10, 0x22, 0x40, 0], f64::MAX, 2.0, None),
+        (&[0xdc, 0x0d, 0x10, 0x22, 0x40, 0], 2.0, 2.0, None),
+    ] {
+        let (mut cpu, mut memory) = load(operation, top.to_bits(), u64::from(source.to_bits()));
+        cpu.set_x87_control_word(0x0c7f);
+        assert_eq!(cpu.run(&mut memory, 1).instructions, 1);
+        let before = cpu;
+        let stop = cpu.run(&mut memory, 1).reason;
+        if let Some(expected) = expected {
+            assert_eq!(stop, expected);
+        } else {
+            assert_eq!(stop, StopReason::UnsupportedInstruction);
+        }
+        assert_eq!(cpu, before);
+        assert_eq!(result(&memory), 0);
+    }
+}
+
+#[test]
 fn single_precision_profile_rejects_other_math_and_excluded_ranges_atomically() {
     for operation in [
         &[0xd9, 0xfa][..],

@@ -10,6 +10,23 @@ pub(super) fn single_product(result: f64, left: f64, right: f64) -> Option<f64> 
     single_rounded(result, |midpoint| product_result(midpoint, left, right))
 }
 
+pub(super) fn single_product_toward_zero(result: f64, left: f64, right: f64) -> Option<f64> {
+    let nearest = single_product(result, left, right)?;
+    if product_result(nearest, left, right) != Ordering::Greater {
+        return Some(nearest);
+    }
+    #[expect(
+        clippy::cast_possible_truncation,
+        reason = "nearest result already has f32 precision"
+    )]
+    let narrowed = nearest as f32;
+    Some(f64::from(if nearest.is_sign_negative() {
+        narrowed.next_up()
+    } else {
+        narrowed.next_down()
+    }))
+}
+
 pub(super) fn single_sum(result: f64, left: f64, right: f64) -> Option<f64> {
     single_rounded(result, |midpoint| {
         let compared = sum_result(midpoint.copysign(result), left, right);
