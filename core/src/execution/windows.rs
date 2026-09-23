@@ -128,6 +128,7 @@ enum Api {
     WindowsFormat,
     CallWindowProc,
     SendMessage,
+    PostMessage,
     PeekMessage,
     GetMessage,
     TranslateMessage,
@@ -232,6 +233,7 @@ impl Api {
             0x25c => Some(Self::WindowsFormat),
             0x2a4 => Some(Self::CallWindowProc),
             0x2cc => Some(Self::SendMessage),
+            0x464 => Some(Self::PostMessage),
             0x43c => Some(Self::PeekMessage),
             0x448 => Some(Self::GetMessage),
             0x44c => Some(Self::TranslateMessage),
@@ -329,6 +331,7 @@ impl Api {
                 "GetMessageA" => 0x448,
                 "TranslateMessage" => 0x44c,
                 "DispatchMessageA" => 0x450,
+                "PostMessageA" => 0x464,
                 "GetTopWindow" => 0x454,
                 "GetWindow" => 0x458,
                 "SetWindowTextA" => 0x45c,
@@ -454,7 +457,7 @@ impl Api {
             Self::GetEnvironmentVariable => 3,
             Self::WindowsFormat | Self::ShowWindow | Self::SetWindowText | Self::EnableWindow => 2,
             Self::CallWindowProc | Self::CreateDialog | Self::PeekMessage => 5,
-            Self::CallNextHook | Self::SendMessage | Self::GetMessage => 4,
+            Self::CallNextHook | Self::SendMessage | Self::PostMessage | Self::GetMessage => 4,
             Self::Window(call) => call.arguments(),
             Self::GetLastError
             | Self::GetCommandLine
@@ -891,6 +894,36 @@ impl Process32 {
         Ok(())
     }
 
+    fn post_guest_message(&mut self, args: &[u32]) -> Result<(), DispatchError> {
+        if matches!(args[0], 0xffff | u32::MAX) || args[1] > u16::MAX.into() {
+            return Err(DispatchError::Unsupported);
+        }
+        let millis = (self.elapsed_nanoseconds / 1_000_000) & i64::from(u32::MAX);
+        let posted = PostedMessage {
+            hwnd: args[0],
+            message: args[1],
+            wparam: args[2],
+            lparam: args[3],
+            time: u32::try_from(millis).expect("masked millisecond counter"),
+            point: self.cursors.position(),
+        };
+        match self.post_message(posted) {
+            Ok(()) => self.cpu.set_register(Register32::Eax, 1),
+            Err(PostMessageError::InvalidWindow) => {
+                thread::set_last_error(&mut self.memory, 1400)?;
+                self.cpu.set_register(Register32::Eax, 0);
+            }
+            Err(PostMessageError::Full) => {
+                thread::set_last_error(&mut self.memory, 1816)?;
+                self.cpu.set_register(Register32::Eax, 0);
+            }
+            Err(PostMessageError::InvalidMessage | PostMessageError::Exited) => {
+                return Err(DispatchError::Unsupported);
+            }
+        }
+        Ok(())
+    }
+
     fn message_api(&mut self, api: Api, args: &[u32]) -> Result<(), DispatchError> {
         match api {
             Api::PeekMessage => self.peek_message(args),
@@ -992,6 +1025,7 @@ impl Process32 {
             Api::PeekMessage | Api::GetMessage | Api::TranslateMessage => {
                 self.message_api(api, args)?;
             }
+            Api::PostMessage => self.post_guest_message(args)?,
             Api::ShowWindow => self.show_window_normal(args)?,
             Api::SetWindowText => self.set_window_text(args)?,
             Api::EnableWindow => self.enable_dialog_control(args)?,

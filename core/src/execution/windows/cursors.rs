@@ -45,6 +45,10 @@ pub(super) struct Cursors {
 }
 
 impl Cursors {
+    pub(super) fn position(&self) -> [i32; 2] {
+        self.position.map(u32::cast_signed)
+    }
+
     pub(super) fn dispatch(
         &mut self,
         call: Call,
