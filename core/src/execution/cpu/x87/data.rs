@@ -46,6 +46,20 @@ impl Stack {
 }
 
 impl Cpu32 {
+    pub(in super::super) fn x87_absolute(&mut self) -> Result<(), StopReason> {
+        if !matches!(self.x87_control_word & 0x0f3f, 0x003f | 0x023f) {
+            return Err(StopReason::UnsupportedInstruction);
+        }
+        let value = self.x87_stack.value()?;
+        if !value.is_finite() {
+            return Err(StopReason::UnsupportedInstruction);
+        }
+        let slot = usize::from(self.x87_stack.top);
+        self.x87_stack.values[slot] = value.to_bits() & !(1_u64 << 63);
+        self.x87_stack.rounded(false, false);
+        Ok(())
+    }
+
     pub(in super::super) fn x87_divide_pop(
         &mut self,
         instruction: &Instruction,
