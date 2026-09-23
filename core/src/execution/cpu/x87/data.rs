@@ -173,7 +173,12 @@ impl Cpu32 {
             (result, rounding::square_root_result(result, top))
         } else if matches!(
             instruction.code(),
-            Code::Fsub_m32fp | Code::Fsub_m64fp | Code::Fsubr_m32fp | Code::Fsubr_m64fp
+            Code::Fadd_m32fp
+                | Code::Fadd_m64fp
+                | Code::Fsub_m32fp
+                | Code::Fsub_m64fp
+                | Code::Fsubr_m32fp
+                | Code::Fsubr_m64fp
         ) {
             let source = self.read_float(instruction, memory)?;
             let (left, right) =
@@ -182,11 +187,13 @@ impl Cpu32 {
                 } else {
                     (top, source)
                 };
-            let result = left - right;
+            let add = matches!(instruction.code(), Code::Fadd_m32fp | Code::Fadd_m64fp);
+            let result = if add { left + right } else { left - right };
             if !result.is_finite() || (result != 0.0 && !result.is_normal()) {
                 return Err(StopReason::UnsupportedInstruction);
             }
-            (result, rounding::sum_result(result, left, -right))
+            let signed_right = if add { right } else { -right };
+            (result, rounding::sum_result(result, left, signed_right))
         } else {
             let source = self.read_float(instruction, memory)?;
             let multiply = matches!(instruction.code(), Code::Fmul_m32fp | Code::Fmul_m64fp);
