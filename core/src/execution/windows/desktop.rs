@@ -307,18 +307,23 @@ impl Desktop {
         self.active = handle;
         Some(was_visible)
     }
+    pub(super) fn hide_window(&mut self, handle: u32) -> Option<u32> {
+        let window = self.top_levels.get_mut(&handle)?;
+        let was_visible = u32::from(window.style & 0x1000_0000 != 0);
+        window.style &= !0x1000_0000;
+        window.needs_paint = false;
+        if self.active == handle {
+            self.active = 0;
+        }
+        Some(was_visible)
+    }
     pub(super) fn end_dialog(&mut self, handle: u32, result: u32) {
         let window = self.top_levels.get_mut(&handle).expect("validated dialog");
         window.dialog_result = Some(result);
         self.hide_dialog(handle);
     }
     pub(super) fn hide_dialog(&mut self, handle: u32) {
-        let window = self.top_levels.get_mut(&handle).expect("validated dialog");
-        window.style &= !0x1000_0000;
-        window.needs_paint = false;
-        if self.active == handle {
-            self.active = 0;
-        }
+        self.hide_window(handle).expect("validated dialog");
     }
     pub(super) fn has_class(&self, instance: u32, atom: u32) -> bool {
         self.top_levels

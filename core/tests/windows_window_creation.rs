@@ -162,6 +162,28 @@ fn show_existing_size_activates_without_changing_geometry() {
 }
 
 #[test]
+fn hide_owned_window_returns_previous_visibility_and_clears_activation() {
+    let mut p = ready(&logged(None));
+    assert_eq!(finish(&mut p), HANDLE);
+    let initial = p.window_snapshots();
+    assert_eq!(query(&mut p, SHOW, &[HANDLE, 0]), 0);
+    assert_eq!(query(&mut p, SHOW, &[HANDLE, 5]), 0);
+    assert_eq!(query(&mut p, ACTIVE, &[]), HANDLE);
+
+    assert_eq!(query(&mut p, SHOW, &[HANDLE, 0]), 1);
+    assert_eq!(query(&mut p, SHOW, &[HANDLE, 0]), 0);
+    assert_eq!(query(&mut p, ACTIVE, &[]), 0);
+    let hidden = p.window_snapshots();
+    assert_eq!(hidden[0].style & 0x1000_0000, 0);
+    assert!(!hidden[0].active);
+    assert_eq!(hidden[0].rectangle, initial[0].rectangle);
+    assert_eq!(hidden[0].client, initial[0].client);
+
+    assert_eq!(query(&mut p, SHOW, &[0, 0]), 0);
+    assert_eq!(p.last_error().unwrap(), 1400);
+}
+
+#[test]
 fn show_normal_error_write_fault_does_not_advance_api_state() {
     let mut p = ready(&logged(None));
     assert_eq!(finish(&mut p), HANDLE);
