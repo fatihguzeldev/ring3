@@ -130,6 +130,10 @@ impl ComboBox {
     fn selected_title(&self) -> Option<&str> {
         self.selected.map(|index| self.items[index].title.as_str())
     }
+
+    fn reset(&mut self) {
+        *self = Self::default();
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -382,6 +386,12 @@ impl super::Process32 {
                 let window = self.desktop.window_mut(args[0]).expect("validated window");
                 Ok(Some(window.combo.add(window.style, title)))
             }
+            0x14b if args[2..] == [0, 0] => {
+                let window = self.desktop.window_mut(args[0]).expect("validated window");
+                window.combo.reset();
+                window.title.clear();
+                Ok(Some(0))
+            }
             0x146 if args[2..] == [0, 0] => Ok(Some(window.combo.count())),
             0x147 => Ok(Some(window.combo.selection())),
             0x150 => Ok(Some(window.combo.item_data(args[2]))),
@@ -484,6 +494,12 @@ mod tests {
         }
         assert_eq!(full.add(0, "x".into()), u32::MAX - 1);
         assert_eq!(full.count(), 16);
+        assert_eq!(full.select(0), 0);
+        full.reset();
+        assert_eq!(full.count(), 0);
+        assert_eq!(full.selection(), u32::MAX);
+        assert_eq!(full.item_data(0), u32::MAX);
+        assert_eq!(full.add(0, "new".into()), 0);
     }
 
     #[test]
