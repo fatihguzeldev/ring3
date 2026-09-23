@@ -51,6 +51,18 @@ impl Process32 {
             self.cpu.set_register(Register32::Eax, 0);
             return Ok(false);
         };
+        if window.procedure == 0 {
+            if window.parent != 0
+                && window.dialog_units.is_some()
+                && (0x80..=0x85).contains(&window.class)
+                && args[1] == 0x364
+                && args[2..] == [0, 0]
+            {
+                self.cpu.set_register(Register32::Eax, 0);
+                return Ok(false);
+            }
+            return Err(DispatchError::Unsupported);
+        }
         let stack = self.cpu.register(Register32::Esp);
         self.callbacks.enter(
             &mut self.cpu,
