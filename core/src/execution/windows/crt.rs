@@ -267,7 +267,7 @@ impl Crt {
                     )?)
                 }
             }
-            Call::Sscanf => Some(scanning::sscanf_decimal(
+            Call::Sscanf => Some(scanning::sscanf(
                 memory,
                 args,
                 cpu.register(Register32::Esp),

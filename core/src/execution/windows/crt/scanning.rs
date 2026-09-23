@@ -1,6 +1,6 @@
 use super::{Access, DispatchError, ERRNO, GuestMemory, MemoryError, guest};
 
-pub(super) fn sscanf_decimal(
+pub(super) fn sscanf(
     memory: &mut GuestMemory,
     args: &[u32],
     stack: u32,
@@ -9,7 +9,8 @@ pub(super) fn sscanf_decimal(
         guest::write_word(memory, ERRNO, 22)?;
         return Ok(u32::MAX);
     }
-    if read_string(memory, args[1])? != b"%d" {
+    let format = read_string(memory, args[1])?;
+    if format != b"%d" && format != b"%f" {
         return Err(DispatchError::Unsupported);
     }
     let input = read_string(memory, args[0])?;
@@ -20,6 +21,23 @@ pub(super) fn sscanf_decimal(
     if offset == input.len() {
         return Ok(u32::MAX);
     }
+    let value = if format == b"%d" {
+        parse_decimal(&input, offset)?
+    } else {
+        parse_float(&input, offset)?
+    };
+    let Some(value) = value else {
+        return Ok(0);
+    };
+    let address = stack.checked_add(12).ok_or(MemoryError::AddressOverflow)?;
+    let mut destination = [0];
+    guest::read_words(memory, address, &mut destination)?;
+    guest::check(memory, destination[0], 4, Access::Write)?;
+    memory.write(u64::from(destination[0]), &value)?;
+    Ok(1)
+}
+
+fn parse_decimal(input: &[u8], mut offset: usize) -> Result<Option<[u8; 4]>, DispatchError> {
     let negative = match input[offset] {
         b'-' => {
             offset += 1;
@@ -47,17 +65,53 @@ pub(super) fn sscanf_decimal(
         offset += 1;
     }
     if offset == start {
-        return Ok(0);
+        return Ok(None);
     }
     let signed = i64::try_from(magnitude).expect("bounded decimal magnitude");
     let value = i32::try_from(if negative { -signed } else { signed })
         .expect("bounded signed decimal value");
-    let address = stack.checked_add(12).ok_or(MemoryError::AddressOverflow)?;
-    let mut destination = [0];
-    guest::read_words(memory, address, &mut destination)?;
-    guest::check(memory, destination[0], 4, Access::Write)?;
-    memory.write(u64::from(destination[0]), &value.to_le_bytes())?;
-    Ok(1)
+    Ok(Some(value.to_le_bytes()))
+}
+
+fn parse_float(input: &[u8], mut offset: usize) -> Result<Option<[u8; 4]>, DispatchError> {
+    let start = offset;
+    if matches!(input[offset], b'+' | b'-') {
+        offset += 1;
+    }
+    let mut digits = 0;
+    while matches!(input.get(offset), Some(b'0'..=b'9')) {
+        offset += 1;
+        digits += 1;
+    }
+    if input.get(offset) == Some(&b'.') {
+        offset += 1;
+        while matches!(input.get(offset), Some(b'0'..=b'9')) {
+            offset += 1;
+            digits += 1;
+        }
+    }
+    if digits == 0 {
+        return Ok(None);
+    }
+    if matches!(input.get(offset), Some(b'e' | b'E')) {
+        offset += 1;
+        if matches!(input.get(offset), Some(b'+' | b'-')) {
+            offset += 1;
+        }
+        let exponent = offset;
+        while matches!(input.get(offset), Some(b'0'..=b'9')) {
+            offset += 1;
+        }
+        if exponent == offset {
+            return Err(DispatchError::Unsupported);
+        }
+    }
+    let token = std::str::from_utf8(&input[start..offset]).expect("ascii numeric token");
+    let value: f32 = token.parse().map_err(|_| DispatchError::Unsupported)?;
+    if !value.is_finite() {
+        return Err(DispatchError::Unsupported);
+    }
+    Ok(Some(value.to_le_bytes()))
 }
 
 fn read_string(memory: &GuestMemory, pointer: u32) -> Result<Vec<u8>, DispatchError> {
