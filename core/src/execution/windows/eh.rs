@@ -6,6 +6,7 @@ const MAX_STATES: u32 = 64;
 const MAX_TRY_BLOCKS: u32 = 32;
 
 pub(super) struct Pending {
+    inner: Option<Inner>,
     record: u32,
     frame: u32,
     call_stack: u32,
@@ -15,6 +16,13 @@ pub(super) struct Pending {
     actions: Vec<(u32, u32)>,
     next_action: usize,
     catch_started: bool,
+}
+
+#[derive(Clone, Copy)]
+struct Inner {
+    record: u32,
+    frame: u32,
+    action: u32,
 }
 
 fn words<const N: usize>(memory: &GuestMemory, address: u32) -> Result<[u32; N], DispatchError> {
@@ -62,6 +70,8 @@ fn catch_for_state(
     memory: &GuestMemory,
     info: [u32; 7],
     state: u32,
+    throw_info: [u32; 4],
+    allow_typed: bool,
 ) -> Result<(u32, u32), DispatchError> {
     let mut selected = None;
     for index in 0..info[3] {
@@ -86,11 +96,88 @@ fn catch_for_state(
     }
     let (try_low, handlers) = selected.ok_or(DispatchError::Unsupported)?;
     let catch = words::<4>(memory, handlers)?;
-    if catch[0] != 0 || catch[1] != 0 || catch[2] != 0 || catch[3] == 0 {
+    if catch[0] != 0 || catch[2] != 0 || catch[3] == 0 {
         return Err(DispatchError::Unsupported);
+    }
+    if catch[1] != 0 {
+        if !allow_typed || throw_info[0] != 0 || throw_info[2] != 0 || throw_info[3] == 0 {
+            return Err(DispatchError::Unsupported);
+        }
+        guest::check(memory, catch[1], 8, Access::Read)?;
+        let type_count = words::<1>(memory, throw_info[3])?[0];
+        if type_count == 0 || type_count > 32 {
+            return Err(DispatchError::Unsupported);
+        }
+        let type_entries = throw_info[3]
+            .checked_add(4)
+            .ok_or(DispatchError::Unsupported)?;
+        let mut matched = false;
+        for index in 0..type_count {
+            let candidate_address = words::<1>(memory, entry(type_entries, index, 4)?)?[0];
+            let candidate = words::<7>(memory, candidate_address)?;
+            if candidate[1] == catch[1]
+                && candidate[0] == 1
+                && candidate[2..5] == [0, u32::MAX, 0]
+                && candidate[5] == 4
+                && candidate[6] == 0
+            {
+                matched = true;
+                break;
+            }
+        }
+        if !matched {
+            return Err(DispatchError::Unsupported);
+        }
     }
     guest::check(memory, catch[3], 1, Access::Execute)?;
     Ok((try_low, catch[3]))
+}
+
+fn inspect_inner(
+    cpu: &Cpu32,
+    memory: &GuestMemory,
+    record: u32,
+) -> Result<(u32, Inner), DispatchError> {
+    let registration = words::<3>(memory, record)?;
+    if registration[0] == u32::MAX || registration[0] <= record {
+        return Err(DispatchError::Unsupported);
+    }
+    let frame = record.checked_add(12).ok_or(DispatchError::Unsupported)?;
+    let outer_frame = registration[0]
+        .checked_add(12)
+        .ok_or(DispatchError::Unsupported)?;
+    if cpu.register(Register32::Ebp) != outer_frame
+        || cpu.register(Register32::Esp) >= record
+        || frame >= registration[0]
+    {
+        return Err(DispatchError::Unsupported);
+    }
+    let info_address = func_info_address(memory, registration[1])?;
+    let info = words::<7>(memory, info_address)?;
+    if !matches!(info[0], 0x1993_0520 | 0x1993_0522)
+        || info[1] == 0
+        || info[1] > MAX_STATES
+        || info[3] != 0
+        || info[4] != 0
+        || registration[2] >= info[1]
+    {
+        return Err(DispatchError::Unsupported);
+    }
+    let unwind = words::<2>(memory, entry(info[2], registration[2], 8)?)?;
+    if unwind[0] != u32::MAX || unwind[1] == 0 {
+        return Err(DispatchError::Unsupported);
+    }
+    guest::check(memory, unwind[1], 1, Access::Execute)?;
+    guest::check(memory, record + 8, 4, Access::Write)?;
+    guest::check(memory, cpu.fs_base(), 4, Access::Write)?;
+    Ok((
+        registration[0],
+        Inner {
+            record,
+            frame,
+            action: unwind[1],
+        },
+    ))
 }
 
 impl Pending {
@@ -104,11 +191,20 @@ impl Pending {
             return Err(DispatchError::Unsupported);
         }
 
-        let record = words::<1>(memory, cpu.fs_base())?[0];
-        let frame = record.checked_add(12).ok_or(DispatchError::Unsupported)?;
-        if record == u32::MAX || cpu.register(Register32::Ebp) != frame {
+        let mut record = words::<1>(memory, cpu.fs_base())?[0];
+        if record == u32::MAX {
             return Err(DispatchError::Unsupported);
         }
+        let inner = if cpu.register(Register32::Ebp)
+            == record.checked_add(12).ok_or(DispatchError::Unsupported)?
+        {
+            None
+        } else {
+            let (outer, inner) = inspect_inner(cpu, memory, record)?;
+            record = outer;
+            Some(inner)
+        };
+        let frame = record.checked_add(12).ok_or(DispatchError::Unsupported)?;
         let registration = words::<3>(memory, record)?;
         if registration[0] != u32::MAX && registration[0] <= record {
             return Err(DispatchError::Unsupported);
@@ -126,7 +222,7 @@ impl Pending {
         }
 
         let state = registration[2];
-        let (try_low, catch) = catch_for_state(memory, info, state)?;
+        let (try_low, catch) = catch_for_state(memory, info, state, throw_info, inner.is_some())?;
 
         let mut actions = Vec::new();
         let mut cursor = state;
@@ -161,6 +257,7 @@ impl Pending {
         )?;
         guest::check(memory, saved_stack, 4, Access::Read)?;
         Ok(Self {
+            inner,
             record,
             frame,
             call_stack,
@@ -174,6 +271,13 @@ impl Pending {
     }
 
     fn advance(&mut self, cpu: &mut Cpu32, memory: &mut GuestMemory) -> Result<(), DispatchError> {
+        if let Some(inner) = self.inner {
+            guest::write_word(memory, self.call_stack - 4, RETURN)?;
+            cpu.set_register(Register32::Ebp, inner.frame);
+            cpu.set_register(Register32::Esp, self.call_stack - 4);
+            cpu.eip = inner.action;
+            return Ok(());
+        }
         let (state, target) = if let Some(&(state, target)) = self.actions.get(self.next_action) {
             self.next_action += 1;
             (state, target)
@@ -205,11 +309,26 @@ impl Process32 {
         let Some(mut pending) = self.exception.take() else {
             return Err(DispatchError::Unsupported);
         };
+        let expected_frame = pending.inner.map_or(pending.frame, |inner| inner.frame);
         if self.cpu.register(Register32::Esp) != pending.call_stack
-            || self.cpu.register(Register32::Ebp) != pending.frame
+            || self.cpu.register(Register32::Ebp) != expected_frame
         {
             self.exception = Some(pending);
             return Err(DispatchError::Unsupported);
+        }
+        if let Some(inner) = pending.inner {
+            let result = (|| {
+                if words::<1>(&self.memory, self.cpu.fs_base())?[0] != inner.record {
+                    return Err(DispatchError::Unsupported);
+                }
+                guest::write_word(&mut self.memory, inner.record + 8, u32::MAX)?;
+                guest::write_word(&mut self.memory, self.cpu.fs_base(), pending.record)?;
+                pending.inner = None;
+                pending.advance(&mut self.cpu, &mut self.memory)
+            })();
+            self.exception = Some(pending);
+            result?;
+            return Ok(());
         }
         if pending.catch_started {
             let continuation = self.cpu.register(Register32::Eax);
