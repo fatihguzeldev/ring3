@@ -1082,6 +1082,7 @@ fn execute_crt_scanning() {
         ),
         (b" 1.25tail\0", b"%f\0".as_slice(), 1.25_f32.to_bits()),
         (b" 4294967295tail\0", b"%u\0".as_slice(), u32::MAX),
+        (b" 0xabcdef12tail\0", b"%x\0".as_slice(), 0xabcd_ef12),
     ] {
         let mut process = Process32::load(&bytes, 32).unwrap();
         process.memory.write(0x0040_2300, input).unwrap();
