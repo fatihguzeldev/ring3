@@ -26,6 +26,8 @@ __declspec(dllimport) int __stdcall SetWindowTextA(Handle, const char *);
 __declspec(dllimport) Handle __stdcall FindWindowA(const char *, const char *);
 __declspec(dllimport) int __stdcall EnableWindow(Handle, int);
 __declspec(dllimport) long __stdcall GetWindowLongA(Handle, int);
+__declspec(dllimport) int __stdcall ShowWindow(Handle, int);
+__declspec(dllimport) int __stdcall UpdateWindow(Handle);
 __declspec(dllimport) long __stdcall SendMessageA(Handle, unsigned int, unsigned int, long);
 __declspec(dllimport) void __stdcall SetLastError(unsigned long);
 __declspec(dllimport) unsigned long __stdcall GetLastError(void);
@@ -40,8 +42,10 @@ static const Template dialog = {
     {0, 0, 0x50000103, 40, 5, 30, 12, 43, 0xffff, 0x85, {'H', 'i', 0}, 0}
 };
 static int callbacks;
+static int paints;
 
 static int __stdcall procedure(Handle window, unsigned int message, unsigned int focus, long init) {
+    if (message == 0x0f) { paints++; return 0; }
     if (message != 0x110) ExitProcess(10);
     if (init != 123 || !IsWindow(window) || !IsWindow((Handle)focus)) ExitProcess(11);
     if (GetDlgItem(window, 42) != (Handle)focus || GetParent((Handle)focus) != window) ExitProcess(12);
@@ -103,5 +107,7 @@ void entry(void) {
     if (SendMessageA(GetDlgItem(window, 42), 0x364, 0, 0) ||
         SendMessageA(GetDlgItem(window, 43), 0x364, 0, 0) || GetLastError() != 77)
         ExitProcess(3);
+    if (ShowWindow(window, 1) || !UpdateWindow(window) || paints != 1 ||
+        !UpdateWindow(window) || paints != 1) ExitProcess(14);
     ExitProcess(42);
 }
