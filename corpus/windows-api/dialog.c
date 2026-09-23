@@ -21,6 +21,7 @@ typedef struct {
 __declspec(dllimport) Handle __stdcall CreateDialogIndirectParamA(Handle, const void *, Handle, DialogProc, long);
 __declspec(dllimport) Handle __stdcall GetDlgItem(Handle, int);
 __declspec(dllimport) Handle __stdcall GetTopWindow(Handle);
+__declspec(dllimport) Handle __stdcall GetWindow(Handle, unsigned int);
 __declspec(dllimport) long __stdcall SendMessageA(Handle, unsigned int, unsigned int, long);
 __declspec(dllimport) void __stdcall SetLastError(unsigned long);
 __declspec(dllimport) unsigned long __stdcall GetLastError(void);
@@ -51,6 +52,12 @@ void entry(void) {
     if (GetTopWindow(window) != GetDlgItem(window, 43) ||
         GetTopWindow(GetDlgItem(window, 42)) || GetTopWindow(0) != window)
         ExitProcess(2);
+    if (GetWindow(GetDlgItem(window, 43), 2) != GetDlgItem(window, 42) ||
+        GetWindow(GetDlgItem(window, 42), 3) != GetDlgItem(window, 43) ||
+        GetWindow(GetDlgItem(window, 43), 0) != GetDlgItem(window, 43) ||
+        GetWindow(GetDlgItem(window, 42), 1) != GetDlgItem(window, 42) ||
+        GetWindow(window, 5) != GetDlgItem(window, 43) ||
+        GetWindow(GetDlgItem(window, 42), 2)) ExitProcess(4);
     SetLastError(77);
     if (SendMessageA(GetDlgItem(window, 42), 0x364, 0, 0) ||
         SendMessageA(GetDlgItem(window, 43), 0x364, 0, 0) || GetLastError() != 77)
