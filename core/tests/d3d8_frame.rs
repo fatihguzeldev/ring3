@@ -22,6 +22,7 @@ const LOCKED_RECT: u32 = 0x0040_2a10;
 const LEVEL_DESC: u32 = 0x0040_2a20;
 const FULLSCREEN_OUTPUT: u32 = 0x0040_2a40;
 const FULLSCREEN_PARAMS: u32 = 0x0040_2a60;
+const VIEWPORT: u32 = 0x0040_2bc0;
 
 #[test]
 fn executes_an_uninterrupted_guest_graphics_program() {
@@ -639,6 +640,68 @@ fn invalid_depth_clear_does_not_change_the_owned_surfaces() {
     draw_depth_triangle(&mut process, device, 0.75, 0xff00_00ff);
     assert_eq!(invoke(&mut process, present, &[device, 0, 0, 0, 0]), 0);
     assert_eq!(&process.take_frame().unwrap().rgba[..4], &[255, 0, 0, 255]);
+}
+
+#[test]
+fn set_viewport_clips_transformed_triangles_to_the_owned_subrect() {
+    let (mut process, _, device) = create();
+    let set_viewport = method(&process, device, 40);
+    let clear = method(&process, device, 36);
+    let present = method(&process, device, 15);
+    write(
+        &mut process,
+        VIEWPORT,
+        &[0, 0, 4, 3, 0_f32.to_bits(), 1_f32.to_bits()],
+    );
+    assert_eq!(invoke(&mut process, set_viewport, &[device, VIEWPORT]), 0);
+    write(
+        &mut process,
+        VIEWPORT,
+        &[1, 1, 2, 2, 0_f32.to_bits(), 1_f32.to_bits()],
+    );
+    assert_eq!(invoke(&mut process, set_viewport, &[device, VIEWPORT]), 0);
+    assert_eq!(invoke(&mut process, clear, &[device, 0, 0, 1, 0, 0, 0]), 0);
+    draw_depth_triangle(&mut process, device, 0.25, 0xffff_0000);
+    assert_eq!(invoke(&mut process, present, &[device, 0, 0, 0, 0]), 0);
+    let frame = process.take_frame().unwrap();
+    assert_eq!(&frame.rgba[0..4], &[0, 0, 0, 255]);
+    assert_eq!(&frame.rgba[(4 + 1) * 4..(4 + 2) * 4], &[255, 0, 0, 255]);
+}
+
+#[test]
+fn invalid_viewport_or_guest_fault_preserves_the_previous_clip() {
+    let (mut process, _, device) = create();
+    let set_viewport = method(&process, device, 40);
+    let present = method(&process, device, 15);
+    write(
+        &mut process,
+        VIEWPORT,
+        &[1, 1, 2, 2, 0_f32.to_bits(), 1_f32.to_bits()],
+    );
+    assert_eq!(invoke(&mut process, set_viewport, &[device, VIEWPORT]), 0);
+    for fields in [
+        [3, 1, 2, 2, 0_f32.to_bits(), 1_f32.to_bits()],
+        [0, 0, 0, 3, 0_f32.to_bits(), 1_f32.to_bits()],
+        [u32::MAX, 0, 2, 3, 0_f32.to_bits(), 1_f32.to_bits()],
+        [0, 0, 4, 3, 0.5_f32.to_bits(), 1_f32.to_bits()],
+    ] {
+        write(&mut process, VIEWPORT, &fields);
+        assert_eq!(
+            invoke(&mut process, set_viewport, &[device, VIEWPORT]),
+            0x8876_086c
+        );
+    }
+    let result = call(&mut process, set_viewport, &[device, 0x6000_0000]);
+    assert!(matches!(
+        result.reason,
+        ProcessStop::Stopped(StopReason::MemoryFault(_))
+    ));
+    assert_eq!(result.api_calls, 0);
+    draw_depth_triangle(&mut process, device, 0.25, 0xffff_0000);
+    assert_eq!(invoke(&mut process, present, &[device, 0, 0, 0, 0]), 0);
+    let frame = process.take_frame().unwrap();
+    assert_eq!(&frame.rgba[0..4], &[0, 0, 0, 255]);
+    assert_eq!(&frame.rgba[(4 + 1) * 4..(4 + 2) * 4], &[255, 0, 0, 255]);
 }
 
 #[test]

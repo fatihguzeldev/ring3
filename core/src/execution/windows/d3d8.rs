@@ -65,6 +65,7 @@ pub(super) enum Call {
     TextureLockRect,
     TextureUnlockRect,
     SetVertexShader,
+    SetViewport,
     DrawPrimitiveUp,
 }
 
@@ -88,6 +89,7 @@ impl Call {
             0x418 => Self::TextureUnlockRect,
             0x41c => Self::SetVertexShader,
             0x420 => Self::DrawPrimitiveUp,
+            0x424 => Self::SetViewport,
             0x2d0 => Self::AdapterCount,
             0x2d4 => Self::AdapterIdentifier,
             0x2d8 => Self::DeviceCaps,
@@ -109,7 +111,10 @@ impl Call {
             Self::Present | Self::TextureLockRect | Self::DrawPrimitiveUp => 5,
             Self::TextureLevelDesc | Self::CurrentDisplayMode => 3,
             Self::AdapterIdentifier | Self::AdapterMode | Self::DeviceCaps => 4,
-            Self::AdapterModeCount | Self::TextureUnlockRect | Self::SetVertexShader => 2,
+            Self::AdapterModeCount
+            | Self::TextureUnlockRect
+            | Self::SetVertexShader
+            | Self::SetViewport => 2,
             Self::CheckDeviceType | Self::CheckMultiSampleType | Self::CheckDepthStencilMatch => 6,
             _ => 1,
         }
@@ -123,6 +128,7 @@ pub(super) struct Graphics {
     back: Option<Frame>,
     spare: Option<Frame>,
     depth: Option<Vec<u16>>,
+    viewport: Option<Viewport>,
     front: Option<Frame>,
     textures: BTreeMap<u32, Texture>,
     vertex_fvf: u32,
@@ -141,6 +147,14 @@ struct TextureLevel {
     height: u32,
     offset: u32,
     locked: bool,
+}
+
+#[derive(Clone, Copy)]
+pub(super) struct Viewport {
+    left: usize,
+    top: usize,
+    right: usize,
+    bottom: usize,
 }
 
 impl Graphics {
@@ -174,6 +188,7 @@ impl Graphics {
             (DEVICE_TABLE, 2, 0x5c),
             (DEVICE_TABLE, 15, 0x48),
             (DEVICE_TABLE, 36, 0x44),
+            (DEVICE_TABLE, 40, 0x424),
             (DEVICE_TABLE, 20, 0x400),
             (DEVICE_TABLE, 72, 0x420),
             (DEVICE_TABLE, 76, 0x41c),
@@ -236,6 +251,7 @@ impl Graphics {
                     0
                 }
             }
+            Call::SetViewport => return self.set_viewport(args, memory),
             Call::DrawPrimitiveUp => {
                 if args[0] != DEVICE || self.device_refs == 0 {
                     INVALID_CALL
@@ -243,6 +259,7 @@ impl Graphics {
                     return primitives::draw_up(
                         self.back.as_mut(),
                         self.depth.as_deref_mut(),
+                        self.viewport,
                         self.vertex_fvf,
                         args,
                         memory,
@@ -482,6 +499,12 @@ impl Graphics {
         self.device_refs = 1;
         self.depth = (enable_depth == 1).then(|| vec![u16::MAX; (width * height) as usize]);
         self.spare = (count == 2).then(|| frame.clone());
+        self.viewport = Some(Viewport {
+            left: 0,
+            top: 0,
+            right: width as usize,
+            bottom: height as usize,
+        });
         self.back = Some(frame);
         Ok(0)
     }
@@ -490,8 +513,38 @@ impl Graphics {
         self.back = None;
         self.spare = None;
         self.depth = None;
+        self.viewport = None;
         self.vertex_fvf = 0;
         self.root_refs = self.root_refs.saturating_sub(1);
+    }
+
+    fn set_viewport(&mut self, args: &[u32], memory: &GuestMemory) -> Result<u32, MemoryError> {
+        if args[0] != DEVICE || self.device_refs == 0 || args[1] == 0 {
+            return Ok(INVALID_CALL);
+        }
+        let Some(frame) = self.back.as_ref() else {
+            return Ok(INVALID_CALL);
+        };
+        let mut fields = [0; 6];
+        guest::read_words(memory, args[1], &mut fields)?;
+        let [x, y, width, height, min_z, max_z] = fields;
+        if width == 0
+            || height == 0
+            || x.checked_add(width).is_none_or(|right| right > frame.width)
+            || y.checked_add(height)
+                .is_none_or(|bottom| bottom > frame.height)
+            || min_z != 0_f32.to_bits()
+            || max_z != 1_f32.to_bits()
+        {
+            return Ok(INVALID_CALL);
+        }
+        self.viewport = Some(Viewport {
+            left: x as usize,
+            top: y as usize,
+            right: (x + width) as usize,
+            bottom: (y + height) as usize,
+        });
+        Ok(0)
     }
 
     fn create_texture(

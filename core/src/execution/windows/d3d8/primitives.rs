@@ -1,4 +1,4 @@
-use super::{Frame, INVALID_CALL, quantize_d16};
+use super::{Frame, INVALID_CALL, Viewport, quantize_d16};
 use crate::execution::{GuestMemory, MemoryError};
 
 pub(super) const MAX_PRIMITIVES: u32 = 4096;
@@ -28,11 +28,15 @@ struct Bounds {
 pub(super) fn draw_up(
     frame: Option<&mut Frame>,
     mut depth: Option<&mut [u16]>,
+    viewport: Option<Viewport>,
     fvf: u32,
     args: &[u32],
     memory: &GuestMemory,
 ) -> Result<u32, MemoryError> {
     let Some(frame) = frame else {
+        return Ok(INVALID_CALL);
+    };
+    let Some(viewport) = viewport else {
         return Ok(INVALID_CALL);
     };
     let [_, topology, count, pointer, stride] =
@@ -92,7 +96,7 @@ pub(super) fn draw_up(
     for primitive in 0..count as usize {
         let indices = primitive_indices(topology, primitive);
         let bounds = triangle_bounds(
-            frame,
+            viewport,
             vertices[indices[0]],
             vertices[indices[1]],
             vertices[indices[2]],
@@ -130,18 +134,18 @@ fn primitive_indices(topology: u32, primitive: usize) -> [usize; 3] {
     }
 }
 
-// finite coordinates are clipped to the bounded frame before integer conversion.
+// Finite coordinates saturate on integer conversion, then clip to the owned viewport.
 #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
-fn triangle_bounds(frame: &Frame, a: Vertex, b: Vertex, c: Vertex) -> Option<Bounds> {
+fn triangle_bounds(viewport: Viewport, a: Vertex, b: Vertex, c: Vertex) -> Option<Bounds> {
     let area = edge(a, b, c.x, c.y);
     // the default D3D cull mode rejects counterclockwise screen-space triangles.
     if area <= 0.0 || !area.is_finite() {
         return None;
     }
-    let left = a.x.min(b.x).min(c.x).floor().max(0.0) as usize;
-    let top = a.y.min(b.y).min(c.y).floor().max(0.0) as usize;
-    let right = a.x.max(b.x).max(c.x).ceil().min(f64::from(frame.width)) as usize;
-    let bottom = a.y.max(b.y).max(c.y).ceil().min(f64::from(frame.height)) as usize;
+    let left = (a.x.min(b.x).min(c.x).floor() as usize).max(viewport.left);
+    let top = (a.y.min(b.y).min(c.y).floor() as usize).max(viewport.top);
+    let right = (a.x.max(b.x).max(c.x).ceil() as usize).min(viewport.right);
+    let bottom = (a.y.max(b.y).max(c.y).ceil() as usize).min(viewport.bottom);
     if left >= right || top >= bottom {
         return None;
     }
