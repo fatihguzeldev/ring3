@@ -1539,6 +1539,19 @@ fn execute_dispatch_message() {
     assert_eq!(process.last_error().unwrap(), 77);
 }
 
+#[cfg(windows_demo)]
+fn execute_dialog_cbt() {
+    use ring3_core::execution::{Process32, ProcessStop};
+    let mut process = Process32::load(
+        include_bytes!("../../target/windows-api/dialog-cbt.exe"),
+        64,
+    )
+    .unwrap();
+    let run = process.run(1000);
+    assert_eq!(run.reason, ProcessStop::Exited(42));
+    assert_eq!((run.instructions, run.api_calls), (201, 11));
+}
+
 fn execute_icons() {
     use ring3_core::execution::{Process32, ProcessStop, Register32, StopReason};
     let bytes = icon_executable::guest();
@@ -4285,6 +4298,8 @@ pub extern "C" fn run() -> u32 {
     execute_translate_message();
     #[cfg(windows_demo)]
     execute_dispatch_message();
+    #[cfg(windows_demo)]
+    execute_dialog_cbt();
     execute_path_components();
     execute_file_streams();
     execute_desktop_queries();
