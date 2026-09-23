@@ -430,6 +430,11 @@ impl Cpu32 {
                     return Ok(());
                 }
                 let value = f64::from_bits(bits);
+                if value.is_subnormal() {
+                    self.x87_stack.push(value)?;
+                    self.x87_stack.status |= 2;
+                    return Ok(());
+                }
                 if !value.is_normal() && value != 0.0 {
                     return Err(StopReason::UnsupportedInstruction);
                 }

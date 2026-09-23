@@ -119,6 +119,28 @@ fn masked_double_nan_load_quiets_signaling_input_and_sets_invalid_status() {
 }
 
 #[test]
+fn masked_double_denormal_load_keeps_bits_and_sets_denormal_status() {
+    let mut code = instruction(0xdd, 0x05, INPUT);
+    code.extend([0xdf, 0xe0]);
+    code.extend(instruction(0xdd, 0x1d, OUTPUT));
+    for source in [1_u64, 0x000f_ffff_ffff_ffff, 0x8000_0000_0000_0001] {
+        let (mut cpu, mut memory) = load(&code);
+        memory
+            .write(u64::from(INPUT), &source.to_le_bytes())
+            .unwrap();
+        assert_eq!(cpu.run(&mut memory, 3).instructions, 3);
+        assert_eq!(cpu.register(Register32::Eax) & 2, 2);
+        assert_eq!(read(&memory, OUTPUT, 8), source.to_le_bytes());
+    }
+    let (mut cpu, mut memory) = load(&code);
+    memory
+        .write(u64::from(INPUT), &1_f64.to_le_bytes())
+        .unwrap();
+    assert_eq!(cpu.run(&mut memory, 3).instructions, 3);
+    assert_eq!(cpu.register(Register32::Eax) & 2, 0);
+}
+
+#[test]
 fn narrowing_uses_nearest_even_and_rejects_unsupported_ranges() {
     let mut code = instruction(0xdd, 0x05, INPUT);
     code.extend(instruction(0xd9, 0x1d, OUTPUT));
@@ -211,15 +233,7 @@ fn loads_reject_special_values_and_excluded_control_modes() {
                 0x7f80_0001,
             ],
         ),
-        (
-            0xdd,
-            vec![
-                1,
-                0x000f_ffff_ffff_ffff,
-                0x7ff0_0000_0000_0000,
-                0xfff0_0000_0000_0000,
-            ],
-        ),
+        (0xdd, vec![0x7ff0_0000_0000_0000, 0xfff0_0000_0000_0000]),
     ] {
         for value in values {
             let (mut cpu, mut memory) = load(&instruction(opcode, 0x05, INPUT));
