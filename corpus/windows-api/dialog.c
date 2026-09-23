@@ -35,7 +35,7 @@ __declspec(dllimport) __declspec(noreturn) void __stdcall ExitProcess(unsigned i
 static const Template dialog = {
     1, 0xffff, 0, 0, 0x80c00000, 2, 0, 0, 100, 50, 0, 0, {'T', 0}, 0,
     {0, 0, 0x50010000, 4, 5, 30, 12, 42, 0xffff, 0x80, {'O', 'K', 0}, 0},
-    {0, 0, 0x50000000, 40, 5, 30, 12, 43, 0xffff, 0x82, {'H', 'i', 0}, 0}
+    {0, 0, 0x50000103, 40, 5, 30, 12, 43, 0xffff, 0x85, {'H', 'i', 0}, 0}
 };
 static int callbacks;
 
@@ -62,6 +62,12 @@ void entry(void) {
         GetWindow(GetDlgItem(window, 42), 2)) ExitProcess(4);
     if (!SetWindowTextA(window, "renamed") || FindWindowA(0, "renamed") != window)
         ExitProcess(5);
+    Handle combo = GetDlgItem(window, 43);
+    if (SendMessageA(combo, 0x146, 0, 0) != 0 ||
+        SendMessageA(combo, 0x143, 0, (long)"pear") != 0 ||
+        SendMessageA(combo, 0x143, 0, (long)"apple") != 0 ||
+        SendMessageA(combo, 0x143, 0, (long)"orange") != 1 ||
+        SendMessageA(combo, 0x146, 0, 0) != 3) ExitProcess(6);
     SetLastError(77);
     if (SendMessageA(GetDlgItem(window, 42), 0x364, 0, 0) ||
         SendMessageA(GetDlgItem(window, 43), 0x364, 0, 0) || GetLastError() != 77)
