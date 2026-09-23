@@ -136,6 +136,7 @@ enum Api {
     SetWindowText,
     EnableWindow,
     EndDialog,
+    SetWindowPos,
     ShowWindow,
     UpdateWindow,
     CreateDialog,
@@ -242,6 +243,7 @@ impl Api {
             0x45c => Some(Self::SetWindowText),
             0x460 => Some(Self::EnableWindow),
             0x468 => Some(Self::EndDialog),
+            0x46c => Some(Self::SetWindowPos),
             0x440 => Some(Self::ShowWindow),
             0x444 => Some(Self::UpdateWindow),
             0x2c4 => Some(Self::CallNextHook),
@@ -339,6 +341,7 @@ impl Api {
                 "SetWindowTextA" => 0x45c,
                 "EnableWindow" => 0x460,
                 "EndDialog" => 0x468,
+                "SetWindowPos" => 0x46c,
                 "ShowWindow" => 0x440,
                 "UpdateWindow" => 0x444,
                 "CallNextHookEx" => 0x2c4,
@@ -464,6 +467,7 @@ impl Api {
             | Self::EnableWindow
             | Self::EndDialog => 2,
             Self::CallWindowProc | Self::CreateDialog | Self::PeekMessage => 5,
+            Self::SetWindowPos => 7,
             Self::CallNextHook | Self::SendMessage | Self::PostMessage | Self::GetMessage => 4,
             Self::Window(call) => call.arguments(),
             Self::GetLastError
@@ -1037,6 +1041,7 @@ impl Process32 {
             Api::SetWindowText => self.set_window_text(args)?,
             Api::EnableWindow => self.enable_dialog_control(args)?,
             Api::EndDialog => self.end_dialog(args)?,
+            Api::SetWindowPos => self.set_dialog_window_pos(args)?,
             Api::Class(call) => self.window_class(call, args)?,
             Api::Window(call) => self.window_api(call, args)?,
             Api::Synchronization(call) => self.cpu.set_register(
@@ -1050,10 +1055,7 @@ impl Process32 {
                 .cpu
                 .set_register(Register32::Eax, thread::current_id(&self.memory)?),
             Api::Desktop(call) => self.window_query(call, args)?,
-            Api::RegisterUserAtom => {
-                let value = self.user_atoms.register(argument, &mut self.memory)?;
-                self.cpu.set_register(Register32::Eax, value);
-            }
+            Api::RegisterUserAtom => self.register_user_atom(argument)?,
             Api::System(call) => self
                 .cpu
                 .set_register(Register32::Eax, call.dispatch(args, &mut self.memory)?),

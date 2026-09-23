@@ -300,6 +300,10 @@ impl Desktop {
     pub(super) fn end_dialog(&mut self, handle: u32, result: u32) {
         let window = self.top_levels.get_mut(&handle).expect("validated dialog");
         window.dialog_result = Some(result);
+        self.hide_dialog(handle);
+    }
+    pub(super) fn hide_dialog(&mut self, handle: u32) {
+        let window = self.top_levels.get_mut(&handle).expect("validated dialog");
         window.style &= !0x1000_0000;
         window.needs_paint = false;
         if self.active == handle {
@@ -385,6 +389,24 @@ pub(super) fn read_title(memory: &GuestMemory, pointer: u32) -> Result<String, D
 }
 
 impl super::Process32 {
+    pub(super) fn set_dialog_window_pos(&mut self, args: &[u32]) -> Result<(), DispatchError> {
+        let Some(window) = self.desktop.window(args[0]) else {
+            thread::set_last_error(&mut self.memory, 1400)?;
+            self.cpu.set_register(Register32::Eax, 0);
+            return Ok(());
+        };
+        if window.parent != 0
+            || window.class != 0x8002
+            || window.dialog_units.is_none()
+            || args[1..] != [0, 0, 0, 0, 0, 0x97]
+        {
+            return Err(DispatchError::Unsupported);
+        }
+        self.desktop.hide_dialog(args[0]);
+        self.cpu.set_register(Register32::Eax, 1);
+        Ok(())
+    }
+
     pub(super) fn end_dialog(&mut self, args: &[u32]) -> Result<(), DispatchError> {
         let Some(window) = self.desktop.window(args[0]) else {
             thread::set_last_error(&mut self.memory, 1400)?;
@@ -617,6 +639,30 @@ mod tests {
         assert!(!dialog.needs_paint);
         assert_eq!(desktop.active, 0);
         assert!(desktop.window(0x7500_0008).is_some());
+    }
+
+    #[test]
+    fn hiding_visible_dialog_twice_keeps_result_unset() {
+        let mut desktop = Desktop::default();
+        desktop.insert(
+            0x7500_0004,
+            Window {
+                class: 0x8002,
+                style: 0x1000_0000,
+                dialog_units: Some([0; 4]),
+                needs_paint: true,
+                ..Window::default()
+            },
+        );
+        desktop.activate_created(0x7500_0004);
+        for _ in 0..2 {
+            desktop.hide_dialog(0x7500_0004);
+            let window = desktop.window(0x7500_0004).unwrap();
+            assert_eq!(window.style & 0x1000_0000, 0);
+            assert_eq!(window.dialog_result, None);
+            assert!(!window.needs_paint);
+            assert_eq!(desktop.active, 0);
+        }
     }
 
     #[test]

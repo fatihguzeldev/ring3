@@ -1,6 +1,14 @@
 use std::collections::BTreeMap;
 
-use super::{DispatchError, GuestMemory, MemoryError, thread};
+use super::{DispatchError, GuestMemory, MemoryError, Register32, thread};
+
+impl super::Process32 {
+    pub(super) fn register_user_atom(&mut self, pointer: u32) -> Result<(), DispatchError> {
+        let value = self.user_atoms.register(pointer, &mut self.memory)?;
+        self.cpu.set_register(Register32::Eax, value);
+        Ok(())
+    }
+}
 
 pub(super) struct UserAtoms {
     names: BTreeMap<String, Atom>,
