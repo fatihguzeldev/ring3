@@ -143,6 +143,7 @@ impl Process32 {
             cbt_hook: hook.map(|(handle, _)| handle),
             module: None,
             dialog: None,
+            paint: false,
         };
         let style = if hook.is_some() {
             args[3]
@@ -186,6 +187,11 @@ impl Process32 {
 
     pub(super) fn finish_callback(&mut self) -> Result<(), DispatchError> {
         let frame = self.callbacks.current(&self.cpu)?;
+        if frame.paint {
+            self.callbacks.finish(&mut self.cpu, &self.memory)?;
+            self.cpu.set_register(Register32::Eax, 1);
+            return Ok(());
+        }
         if let Some(dialog) = frame.dialog {
             return self.finish_dialog_callback(frame, dialog);
         }

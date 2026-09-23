@@ -54,6 +54,7 @@ pub(super) struct Window {
     pub(super) parent: u32,
     pub(super) id: u32,
     pub(super) dialog_units: Option<[i16; 4]>,
+    pub(super) needs_paint: bool,
     pub(super) combo: ComboBox,
 }
 
@@ -288,6 +289,9 @@ impl Desktop {
     pub(super) fn show_normal(&mut self, handle: u32) -> Option<u32> {
         let window = self.top_levels.get_mut(&handle)?;
         let was_visible = u32::from(window.style & 0x1000_0000 != 0);
+        if was_visible == 0 && window.class == 0x8002 && window.dialog_units.is_some() {
+            window.needs_paint = true;
+        }
         window.style |= 0x1000_0000;
         self.active = handle;
         Some(was_visible)

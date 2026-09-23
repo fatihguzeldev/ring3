@@ -35,6 +35,7 @@ impl Process32 {
                 cbt_hook: None,
                 module: None,
                 dialog: None,
+                paint: false,
             },
             window.procedure,
             &message[..4],
@@ -80,6 +81,7 @@ impl Process32 {
                 cbt_hook: None,
                 module: None,
                 dialog: None,
+                paint: false,
             },
             procedure,
             args,
@@ -102,6 +104,7 @@ pub(super) struct Frame {
     pub(super) cbt_hook: Option<u32>,
     pub(super) module: Option<modules::Pending>,
     pub(super) dialog: Option<dialogs::Pending>,
+    pub(super) paint: bool,
 }
 
 impl Callbacks {
@@ -123,6 +126,7 @@ impl Callbacks {
                 cbt_hook: None,
                 module: None,
                 dialog: None,
+                paint: false,
             },
             arguments[0],
             &arguments[1..],

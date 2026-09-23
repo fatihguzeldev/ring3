@@ -126,6 +126,7 @@ impl Process32 {
                 cbt_hook: Some(handle),
                 module: None,
                 dialog: None,
+                paint: false,
             },
             procedure,
             &args[1..],

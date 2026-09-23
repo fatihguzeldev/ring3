@@ -778,6 +778,7 @@ impl Process32 {
         }
         let suspended = match api {
             Api::SendMessage => self.send_message(&frame[1..words])?,
+            Api::UpdateWindow => self.update_window(frame[1])?,
             Api::DispatchMessage => self.dispatch_message(frame[1])?,
             Api::CreateDialog => self.create_dialog(&frame[1..words])?,
             Api::CallNextHook => self.call_next_hook(&frame[1..words])?,
@@ -819,6 +820,7 @@ impl Process32 {
                         cbt_hook: None,
                         module: Some(pending),
                         dialog: None,
+                        paint: false,
                     },
                     pending.entry,
                     &[pending.handle, 1, 0],
@@ -935,13 +937,45 @@ impl Process32 {
         Ok(())
     }
 
-    fn update_window(&mut self, handle: u32) -> Result<(), DispatchError> {
-        if handle == desktop::DESKTOP || self.desktop.window(handle).is_some() {
+    fn update_window(&mut self, handle: u32) -> Result<bool, DispatchError> {
+        if handle == desktop::DESKTOP {
             return Err(DispatchError::Unsupported);
         }
-        thread::set_last_error(&mut self.memory, 1400)?;
-        self.cpu.set_register(Register32::Eax, 0);
-        Ok(())
+        let Some(window) = self.desktop.window(handle) else {
+            thread::set_last_error(&mut self.memory, 1400)?;
+            self.cpu.set_register(Register32::Eax, 0);
+            return Ok(false);
+        };
+        if window.class != 0x8002 || window.dialog_units.is_none() || window.procedure == 0 {
+            return Err(DispatchError::Unsupported);
+        }
+        if !window.needs_paint {
+            self.cpu.set_register(Register32::Eax, 1);
+            return Ok(false);
+        }
+        let procedure = window.procedure;
+        let stack = self.cpu.register(Register32::Esp);
+        self.callbacks.enter(
+            &mut self.cpu,
+            &mut self.memory,
+            callbacks::Frame {
+                stack,
+                caller: stack,
+                cleanup: 8,
+                creation: None,
+                cbt_hook: None,
+                module: None,
+                dialog: None,
+                paint: true,
+            },
+            procedure,
+            &[handle, 0x0f, 0, 0],
+        )?;
+        self.desktop
+            .window_mut(handle)
+            .expect("validated window")
+            .needs_paint = false;
+        Ok(true)
     }
 
     fn invoke(&mut self, api: Api, args: &[u32], stack: u32) -> Result<(), DispatchError> {
@@ -961,7 +995,6 @@ impl Process32 {
             Api::ShowWindow => self.show_window_normal(args)?,
             Api::SetWindowText => self.set_window_text(args)?,
             Api::EnableWindow => self.enable_dialog_control(args)?,
-            Api::UpdateWindow => self.update_window(argument)?,
             Api::Class(call) => self.window_class(call, args)?,
             Api::Window(call) => self.window_api(call, args)?,
             Api::Synchronization(call) => self.cpu.set_register(
@@ -1034,6 +1067,7 @@ impl Process32 {
             ),
             Api::Crt(call) => self.crt_call(call, args)?,
             Api::CreateDialog
+            | Api::UpdateWindow
             | Api::CallWindowProc
             | Api::SendMessage
             | Api::DispatchMessage
