@@ -200,6 +200,18 @@ fn partition_initializers(
     })
 }
 
+fn reserved_ranges() -> [std::ops::Range<u64>; 6] {
+    [
+        u64::from(STACK_BASE)..u64::from(STACK_BASE + STACK_SIZE),
+        heap::START..heap::END,
+        u64::from(API_BASE)..u64::from(startup::BASE) + PAGE_SIZE,
+        u64::from(com::BASE)..u64::from(com::BASE) + PAGE_SIZE,
+        u64::from(diagnostics::BASE)
+            ..u64::from(diagnostics::BASE) + u64::from(diagnostics::MAX_IMPORTS) * 4,
+        u64::from(thread::BASE)..u64::from(thread::BASE) + PAGE_SIZE,
+    ]
+}
+
 impl DispatchError {
     fn stop(self, address: u32) -> ProcessStop {
         match self {
@@ -566,14 +578,7 @@ impl Process32 {
         )?;
         current_directory.attach_contents(options.file_contents)?;
         let mut diagnostic_imports = diagnostics::Imports::default();
-        let reserved = [
-            u64::from(STACK_BASE)..u64::from(STACK_BASE + STACK_SIZE),
-            heap::START..heap::END,
-            u64::from(API_BASE)..u64::from(startup::BASE) + PAGE_SIZE,
-            u64::from(diagnostics::BASE)
-                ..u64::from(diagnostics::BASE) + u64::from(diagnostics::MAX_IMPORTS) * 4,
-            u64::from(thread::BASE)..u64::from(thread::BASE) + PAGE_SIZE,
-        ];
+        let reserved = reserved_ranges();
         let all_modules = collect_modules(options.modules, options.deferred_modules);
         let mut loaded = load_modules(
             bytes,
@@ -1039,7 +1044,7 @@ impl Process32 {
     }
 
     fn com_api(&mut self, call: com::Call, args: &[u32]) -> Result<(), DispatchError> {
-        if let Some(value) = self.com.dispatch(call, args)? {
+        if let Some(value) = self.com.dispatch(call, args, &mut self.memory)? {
             self.cpu.set_register(Register32::Eax, value);
         }
         Ok(())
