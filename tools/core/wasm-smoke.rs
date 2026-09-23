@@ -932,6 +932,28 @@ fn execute_x87_register_add() {
     assert_eq!(u64::from_le_bytes(bytes), 3.0_f64.to_bits());
 }
 
+fn execute_x87_divide_pop() {
+    use ring3_core::execution::{Cpu32, Register32, StopReason, load_pe32};
+    for (mode, indexed, top) in [(0xf1, 2.0_f64, 8.0_f64), (0xf9, 8.0, 2.0)] {
+        let code = [
+            0xdd, 0x05, 0x00, 0x22, 0x40, 0x00, 0xdd, 0x05, 0x08, 0x22, 0x40, 0x00, 0xde, mode,
+            0xdf, 0xe0, 0xdd, 0x1d, 0x20, 0x22, 0x40, 0x00,
+        ];
+        let image = load_pe32(&executable::pe32(&code), 16).unwrap();
+        let mut memory = image.memory;
+        memory.write(0x0040_2200, &indexed.to_le_bytes()).unwrap();
+        memory.write(0x0040_2208, &top.to_le_bytes()).unwrap();
+        let mut cpu = Cpu32::new(image.entry_point);
+        cpu.set_x87_control_word(0x027f);
+        assert_eq!(cpu.run(&mut memory, 4).reason, StopReason::InstructionLimit);
+        assert_eq!(cpu.register(Register32::Eax) & 0x3a20, 0x3800);
+        assert_eq!(cpu.run(&mut memory, 1).reason, StopReason::InstructionLimit);
+        let mut bytes = [0; 8];
+        memory.read(0x0040_2220, &mut bytes).unwrap();
+        assert_eq!(u64::from_le_bytes(bytes), 4.0_f64.to_bits());
+    }
+}
+
 fn execute_x87_status() {
     use ring3_core::execution::{Cpu32, Register32, StopReason, load_pe32};
     for (denominator, numerator, first, last) in [
@@ -4368,6 +4390,7 @@ pub extern "C" fn run() -> u32 {
     execute_x87_division();
     execute_x87_memory_sum();
     execute_x87_register_add();
+    execute_x87_divide_pop();
     execute_wide_product();
     execute_unsigned_division();
     execute_command_line();
