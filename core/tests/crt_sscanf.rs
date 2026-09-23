@@ -173,3 +173,59 @@ fn float_nonmatch_and_fault_preserve_destination() {
         assert_eq!(word(&process, OUTPUT), 0x1234_5678);
     }
 }
+
+#[test]
+fn unsigned_format_assigns_u32_and_keeps_cdecl_arguments() {
+    for (input, expected) in [
+        (&b"7tail\0"[..], 7_u32),
+        (&b" \t+12x\0"[..], 12),
+        (&b"-1\0"[..], u32::MAX),
+        (&b"4294967295\0"[..], u32::MAX),
+        (&b"0123\0"[..], 123),
+    ] {
+        let mut process = process(input, b"%u\0");
+        prepare(&mut process, INPUT, FORMAT, OUTPUT);
+        let result = process.run(1);
+        assert_eq!(
+            result.reason,
+            ProcessStop::Stopped(StopReason::InstructionLimit)
+        );
+        assert_eq!((result.instructions, result.api_calls), (0, 1));
+        assert_eq!(process.cpu.register(Register32::Eax), 1);
+        assert_eq!(process.cpu.register(Register32::Esp), STACK + 4);
+        assert_eq!(word(&process, OUTPUT), expected);
+    }
+}
+
+#[test]
+fn unsigned_nonmatch_overflow_and_fault_preserve_destination() {
+    for (input, expected) in [(&b"text\0"[..], 0), (&b" \t\0"[..], u32::MAX)] {
+        let mut process = process(input, b"%u\0");
+        prepare(&mut process, INPUT, FORMAT, OUTPUT);
+        assert_eq!(
+            process.run(1).reason,
+            ProcessStop::Stopped(StopReason::InstructionLimit)
+        );
+        assert_eq!(process.cpu.register(Register32::Eax), expected);
+        assert_eq!(word(&process, OUTPUT), 0x1234_5678);
+    }
+    for (input, output, unsupported) in [
+        (&b"4294967296\0"[..], OUTPUT, true),
+        (&b"12\0"[..], 0, false),
+    ] {
+        let mut process = process(input, b"%u\0");
+        prepare(&mut process, INPUT, FORMAT, output);
+        let before = process.cpu;
+        let reason = process.run(1).reason;
+        if unsupported {
+            assert_eq!(reason, ProcessStop::UnsupportedApi { address: API });
+        } else {
+            assert!(matches!(
+                reason,
+                ProcessStop::Stopped(StopReason::MemoryFault(_))
+            ));
+        }
+        assert_eq!(process.cpu, before);
+        assert_eq!(word(&process, OUTPUT), 0x1234_5678);
+    }
+}

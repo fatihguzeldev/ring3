@@ -10,7 +10,7 @@ pub(super) fn sscanf(
         return Ok(u32::MAX);
     }
     let format = read_string(memory, args[1])?;
-    if format != b"%d" && format != b"%f" {
+    if format != b"%d" && format != b"%f" && format != b"%u" {
         return Err(DispatchError::Unsupported);
     }
     let input = read_string(memory, args[0])?;
@@ -21,10 +21,11 @@ pub(super) fn sscanf(
     if offset == input.len() {
         return Ok(u32::MAX);
     }
-    let value = if format == b"%d" {
-        parse_decimal(&input, offset)?
-    } else {
-        parse_float(&input, offset)?
+    let value = match format.as_slice() {
+        b"%d" => parse_decimal(&input, offset)?,
+        b"%f" => parse_float(&input, offset)?,
+        b"%u" => parse_unsigned(&input, offset)?,
+        _ => unreachable!("validated format"),
     };
     let Some(value) = value else {
         return Ok(0);
@@ -111,6 +112,39 @@ fn parse_float(input: &[u8], mut offset: usize) -> Result<Option<[u8; 4]>, Dispa
     if !value.is_finite() {
         return Err(DispatchError::Unsupported);
     }
+    Ok(Some(value.to_le_bytes()))
+}
+
+fn parse_unsigned(input: &[u8], mut offset: usize) -> Result<Option<[u8; 4]>, DispatchError> {
+    let negative = match input[offset] {
+        b'-' => {
+            offset += 1;
+            true
+        }
+        b'+' => {
+            offset += 1;
+            false
+        }
+        _ => false,
+    };
+    let start = offset;
+    let mut magnitude = 0_u64;
+    while matches!(input.get(offset), Some(b'0'..=b'9')) {
+        magnitude = magnitude * 10 + u64::from(input[offset] - b'0');
+        if magnitude > u64::from(u32::MAX) {
+            return Err(DispatchError::Unsupported);
+        }
+        offset += 1;
+    }
+    if offset == start {
+        return Ok(None);
+    }
+    let value = u32::try_from(magnitude).expect("bounded unsigned magnitude");
+    let value = if negative {
+        value.wrapping_neg()
+    } else {
+        value
+    };
     Ok(Some(value.to_le_bytes()))
 }
 
