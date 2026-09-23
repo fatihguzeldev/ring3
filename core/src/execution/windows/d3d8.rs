@@ -14,6 +14,7 @@ const DEPTH_SURFACE: u32 = OBJECT_BASE + 8;
 const ROOT_TABLE: u32 = OBJECT_BASE + 0x100;
 const DEVICE_TABLE: u32 = OBJECT_BASE + 0x200;
 const DEPTH_SURFACE_TABLE: u32 = OBJECT_BASE + 0x500;
+const TEXTURE_SURFACE_TABLE: u32 = OBJECT_BASE + 0x600;
 const INVALID_CALL: u32 = 0x8876_086c;
 const NOT_AVAILABLE: u32 = 0x8876_086a;
 const ADAPTER_IDENTIFIER_SIZE: usize = 1068;
@@ -67,6 +68,9 @@ pub(super) enum Call {
     TextureLevelDesc,
     TextureLockRect,
     TextureUnlockRect,
+    TextureGetSurface,
+    TextureSurfaceAddRef,
+    TextureSurfaceRelease,
     SetVertexShader,
     SetViewport,
     SetRenderState,
@@ -95,6 +99,9 @@ impl Call {
             0x410 => Self::TextureLevelDesc,
             0x414 => Self::TextureLockRect,
             0x418 => Self::TextureUnlockRect,
+            0x4b8 => Self::TextureGetSurface,
+            0x4bc => Self::TextureSurfaceAddRef,
+            0x4c0 => Self::TextureSurfaceRelease,
             0x41c => Self::SetVertexShader,
             0x420 => Self::DrawPrimitiveUp,
             0x498 => Self::SetViewport,
@@ -122,7 +129,10 @@ impl Call {
             Self::CreateDevice | Self::Clear | Self::CheckDeviceFormat => 7,
             Self::CreateTexture => 8,
             Self::Present | Self::TextureLockRect | Self::DrawPrimitiveUp => 5,
-            Self::TextureLevelDesc | Self::CurrentDisplayMode | Self::SetRenderState => 3,
+            Self::TextureLevelDesc
+            | Self::TextureGetSurface
+            | Self::CurrentDisplayMode
+            | Self::SetRenderState => 3,
             Self::AdapterIdentifier | Self::AdapterMode | Self::DeviceCaps => 4,
             Self::AdapterModeCount
             | Self::TextureUnlockRect
@@ -163,6 +173,15 @@ struct TextureLevel {
     height: u32,
     offset: u32,
     locked: bool,
+    surface_refs: u32,
+}
+
+impl Texture {
+    fn total_refs(&self) -> u32 {
+        self.levels.iter().fold(self.refs, |refs, level| {
+            refs.saturating_add(level.surface_refs)
+        })
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -190,6 +209,9 @@ impl Graphics {
         }
         for index in 0..19 {
             guest::write_word(memory, TEXTURE_TABLE + index * 4, API_BASE + 0xffc)?;
+        }
+        for index in 0..13 {
+            guest::write_word(memory, TEXTURE_SURFACE_TABLE + index * 4, API_BASE + 0xffc)?;
         }
         for (table, index, offset) in [
             (ROOT_TABLE, 1, 0x50),
@@ -224,6 +246,9 @@ impl Graphics {
             (TEXTURE_TABLE, 14, 0x410),
             (TEXTURE_TABLE, 16, 0x414),
             (TEXTURE_TABLE, 17, 0x418),
+            (TEXTURE_TABLE, 15, 0x4b8),
+            (TEXTURE_SURFACE_TABLE, 1, 0x4bc),
+            (TEXTURE_SURFACE_TABLE, 2, 0x4c0),
         ] {
             guest::write_word(memory, table + index * 4, API_BASE + offset)?;
         }
@@ -269,6 +294,10 @@ impl Graphics {
             Call::TextureLevelDesc => return self.texture_level_desc(args, memory),
             Call::TextureLockRect => return self.texture_lock_rect(args, memory),
             Call::TextureUnlockRect => self.texture_unlock_rect(args),
+            Call::TextureGetSurface => return self.texture_get_surface(args, memory),
+            Call::TextureSurfaceAddRef | Call::TextureSurfaceRelease => {
+                return self.texture_surface_ref(call, args[0], memory);
+            }
             Call::SetVertexShader => {
                 if args[0] != DEVICE || self.device_refs == 0 || args[1] != 0x44 {
                     INVALID_CALL
@@ -292,8 +321,11 @@ impl Graphics {
             }
             Call::TextureAddRef => {
                 if let Some(texture) = self.textures.get_mut(&args[0]) {
+                    if texture.refs == 0 {
+                        return Ok(INVALID_CALL);
+                    }
                     texture.refs = texture.refs.saturating_add(1);
-                    texture.refs
+                    texture.total_refs()
                 } else {
                     INVALID_CALL
                 }
@@ -694,6 +726,7 @@ impl Graphics {
                 offset: u32::try_from(PAGE_SIZE + pixel_bytes)
                     .expect("bounded texture address offset"),
                 locked: false,
+                surface_refs: 0,
             });
             pixel_bytes += u64::from(level_width) * u64::from(level_height) * 4;
             if (requested_levels != 0 && levels.len() == requested_levels as usize)
@@ -720,6 +753,10 @@ impl Graphics {
         }
         let address = u32::try_from(address).expect("texture guest range is 32-bit");
         guest::write_word(memory, address, TEXTURE_TABLE)?;
+        for index in 0..levels.len() {
+            let offset = u32::try_from(index).expect("bounded mip count") * 4;
+            guest::write_word(memory, address + 4 + offset, TEXTURE_SURFACE_TABLE)?;
+        }
         memory.protect(u64::from(address), PAGE_SIZE, Permissions::READ)?;
         guest::write_word(memory, output, address)?;
         self.textures.insert(
@@ -744,9 +781,12 @@ impl Graphics {
         let Some(texture) = self.textures.get_mut(&address) else {
             return Ok(INVALID_CALL);
         };
-        if texture.refs > 1 {
+        if texture.refs == 0 {
+            return Ok(INVALID_CALL);
+        }
+        if texture.total_refs() > 1 {
             texture.refs -= 1;
-            return Ok(texture.refs);
+            return Ok(texture.total_refs());
         }
         memory.unmap(u64::from(address), texture.length)?;
         self.textures.remove(&address);
@@ -755,6 +795,74 @@ impl Graphics {
             self.finish_device();
         }
         Ok(0)
+    }
+
+    fn texture_get_surface(
+        &mut self,
+        args: &[u32],
+        memory: &mut GuestMemory,
+    ) -> Result<u32, MemoryError> {
+        let Some(texture) = self.textures.get_mut(&args[0]) else {
+            return Ok(INVALID_CALL);
+        };
+        if texture.refs == 0 || texture.total_refs() == u32::MAX {
+            return Ok(INVALID_CALL);
+        }
+        let Some(level) = texture.levels.get_mut(args[1] as usize) else {
+            return Ok(INVALID_CALL);
+        };
+        if level.surface_refs == u32::MAX {
+            return Ok(INVALID_CALL);
+        }
+        guest::check(memory, args[2], 4, Access::Write)?;
+        let surface = args[0] + 4 + args[1] * 4;
+        guest::write_word(memory, args[2], surface)?;
+        level.surface_refs += 1;
+        Ok(0)
+    }
+
+    fn texture_surface_ref(
+        &mut self,
+        call: Call,
+        surface: u32,
+        memory: &mut GuestMemory,
+    ) -> Result<u32, MemoryError> {
+        let page_size = u32::try_from(PAGE_SIZE).expect("guest page fits u32");
+        let texture_address = surface & !(page_size - 1);
+        let Some(offset) = surface.checked_sub(texture_address + 4) else {
+            return Ok(INVALID_CALL);
+        };
+        if offset % 4 != 0 {
+            return Ok(INVALID_CALL);
+        }
+        let Some(texture) = self.textures.get_mut(&texture_address) else {
+            return Ok(INVALID_CALL);
+        };
+        let total_refs = texture.total_refs();
+        let Some(level) = texture.levels.get_mut((offset / 4) as usize) else {
+            return Ok(INVALID_CALL);
+        };
+        if level.surface_refs == 0 {
+            return Ok(INVALID_CALL);
+        }
+        if matches!(call, Call::TextureSurfaceAddRef) {
+            if total_refs == u32::MAX {
+                return Ok(INVALID_CALL);
+            }
+            level.surface_refs += 1;
+            return Ok(level.surface_refs);
+        }
+        if total_refs == 1 {
+            memory.unmap(u64::from(texture_address), texture.length)?;
+            self.textures.remove(&texture_address);
+            self.device_refs -= 1;
+            if self.device_refs == 0 {
+                self.finish_device();
+            }
+            return Ok(0);
+        }
+        level.surface_refs -= 1;
+        Ok(level.surface_refs)
     }
 
     fn texture_level_desc(

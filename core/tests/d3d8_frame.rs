@@ -24,6 +24,7 @@ const FULLSCREEN_OUTPUT: u32 = 0x0040_2a40;
 const FULLSCREEN_PARAMS: u32 = 0x0040_2a60;
 const VIEWPORT: u32 = 0x0040_2bc0;
 const DEPTH_OUTPUT: u32 = 0x0040_2be0;
+const SURFACE_OUTPUT: u32 = 0x0040_2c00;
 
 #[test]
 fn executes_an_uninterrupted_guest_graphics_program() {
@@ -1372,6 +1373,86 @@ fn texture_owns_mip_pixels_and_releases_its_guest_memory() {
     let root_release = method(&process, root, 2);
     assert_eq!(invoke(&mut process, device_release, &[device]), 0);
     assert_eq!(invoke(&mut process, root_release, &[root]), 0);
+}
+
+#[test]
+fn texture_surface_levels_have_stable_distinct_owned_identities() {
+    let (mut process, _, device) = create();
+    let create_texture = method(&process, device, 20);
+    assert_eq!(
+        invoke(
+            &mut process,
+            create_texture,
+            &[device, 4, 2, 0, 0, 22, 1, TEXTURE_OUTPUT]
+        ),
+        0
+    );
+    let texture = read(&process, TEXTURE_OUTPUT);
+    let get_surface = method(&process, texture, 15);
+    assert_eq!(
+        invoke(&mut process, get_surface, &[texture, 0, SURFACE_OUTPUT]),
+        0
+    );
+    let level0 = read(&process, SURFACE_OUTPUT);
+    assert_ne!(level0, 0);
+    assert_eq!(
+        invoke(&mut process, get_surface, &[texture, 0, SURFACE_OUTPUT]),
+        0
+    );
+    assert_eq!(read(&process, SURFACE_OUTPUT), level0);
+    assert_eq!(
+        invoke(&mut process, get_surface, &[texture, 1, SURFACE_OUTPUT]),
+        0
+    );
+    let level1 = read(&process, SURFACE_OUTPUT);
+    assert_ne!(level1, level0);
+    assert_eq!(method(&process, level0, 1), method(&process, level1, 1));
+    let add_ref = method(&process, level0, 1);
+    let release = method(&process, level0, 2);
+    assert_eq!(invoke(&mut process, add_ref, &[level0]), 3);
+    let texture_release = method(&process, texture, 2);
+    assert_eq!(invoke(&mut process, texture_release, &[texture]), 4);
+    assert_eq!(invoke(&mut process, release, &[level0]), 2);
+    assert_eq!(invoke(&mut process, release, &[level1]), 0);
+    assert_eq!(invoke(&mut process, release, &[level0]), 1);
+    assert_eq!(invoke(&mut process, release, &[level0]), 0);
+    assert!(process.memory.read(u64::from(texture), &mut [0]).is_err());
+    assert_eq!(invoke(&mut process, release, &[level0]), 0x8876_086c);
+}
+
+#[test]
+fn texture_surface_get_rejects_invalid_levels_and_outputs_atomically() {
+    let (mut process, _, device) = create();
+    let create_texture = method(&process, device, 20);
+    assert_eq!(
+        invoke(
+            &mut process,
+            create_texture,
+            &[device, 4, 2, 1, 0, 22, 1, TEXTURE_OUTPUT]
+        ),
+        0
+    );
+    let texture = read(&process, TEXTURE_OUTPUT);
+    let get_surface = method(&process, texture, 15);
+    write(&mut process, SURFACE_OUTPUT, &[0xa5a5_a5a5]);
+    assert_eq!(
+        invoke(&mut process, get_surface, &[texture, 1, SURFACE_OUTPUT]),
+        0x8876_086c
+    );
+    assert_eq!(
+        invoke(&mut process, get_surface, &[0, 0, SURFACE_OUTPUT]),
+        0x8876_086c
+    );
+    assert_eq!(read(&process, SURFACE_OUTPUT), 0xa5a5_a5a5);
+    let result = call(&mut process, get_surface, &[texture, 0, 0x6000_0000]);
+    assert!(matches!(
+        result.reason,
+        ProcessStop::Stopped(StopReason::MemoryFault(_))
+    ));
+    assert_eq!(result.api_calls, 0);
+    assert_eq!(read(&process, SURFACE_OUTPUT), 0xa5a5_a5a5);
+    let release = method(&process, texture, 2);
+    assert_eq!(invoke(&mut process, release, &[texture]), 0);
 }
 
 #[test]
