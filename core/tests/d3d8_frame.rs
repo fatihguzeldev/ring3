@@ -1456,6 +1456,82 @@ fn texture_surface_get_rejects_invalid_levels_and_outputs_atomically() {
 }
 
 #[test]
+fn texture_surface_desc_matches_the_owned_mip_level() {
+    let (mut process, _, device) = create();
+    let create_texture = method(&process, device, 20);
+    assert_eq!(
+        invoke(
+            &mut process,
+            create_texture,
+            &[device, 4, 2, 0, 0, 22, 1, TEXTURE_OUTPUT]
+        ),
+        0
+    );
+    let texture = read(&process, TEXTURE_OUTPUT);
+    let get_surface = method(&process, texture, 15);
+    let level_desc = method(&process, texture, 14);
+    for level in 0..3 {
+        assert_eq!(
+            invoke(&mut process, get_surface, &[texture, level, SURFACE_OUTPUT]),
+            0
+        );
+        let surface = read(&process, SURFACE_OUTPUT);
+        let get_desc = method(&process, surface, 8);
+        assert_eq!(invoke(&mut process, get_desc, &[surface, LEVEL_DESC]), 0);
+        let from_surface = read_bytes(&process, LEVEL_DESC, 32);
+        write(&mut process, LEVEL_DESC, &[0; 8]);
+        assert_eq!(
+            invoke(&mut process, level_desc, &[texture, level, LEVEL_DESC]),
+            0
+        );
+        assert_eq!(read_bytes(&process, LEVEL_DESC, 32), from_surface);
+        let release = method(&process, surface, 2);
+        assert_eq!(invoke(&mut process, release, &[surface]), 0);
+    }
+}
+
+#[test]
+fn texture_surface_desc_rejects_stale_handles_and_output_faults() {
+    let (mut process, _, device) = create();
+    let create_texture = method(&process, device, 20);
+    assert_eq!(
+        invoke(
+            &mut process,
+            create_texture,
+            &[device, 4, 2, 1, 0, 22, 1, TEXTURE_OUTPUT]
+        ),
+        0
+    );
+    let texture = read(&process, TEXTURE_OUTPUT);
+    let get_surface = method(&process, texture, 15);
+    assert_eq!(
+        invoke(&mut process, get_surface, &[texture, 0, SURFACE_OUTPUT]),
+        0
+    );
+    let surface = read(&process, SURFACE_OUTPUT);
+    let get_desc = method(&process, surface, 8);
+    write(&mut process, LEVEL_DESC, &[0xa5a5_a5a5; 8]);
+    assert_eq!(
+        invoke(&mut process, get_desc, &[surface + 2, LEVEL_DESC]),
+        0x8876_086c
+    );
+    let fault = call(&mut process, get_desc, &[surface, 0x6000_0000]);
+    assert!(matches!(
+        fault.reason,
+        ProcessStop::Stopped(StopReason::MemoryFault(_))
+    ));
+    assert_eq!(fault.api_calls, 0);
+    assert_eq!(read(&process, LEVEL_DESC), 0xa5a5_a5a5);
+    let release = method(&process, surface, 2);
+    assert_eq!(invoke(&mut process, release, &[surface]), 0);
+    assert_eq!(
+        invoke(&mut process, get_desc, &[surface, LEVEL_DESC]),
+        0x8876_086c
+    );
+    assert_eq!(read(&process, LEVEL_DESC), 0xa5a5_a5a5);
+}
+
+#[test]
 fn alpha_texture_preserves_32_bit_bgra_pixels_and_reports_its_format() {
     let (mut process, _, device) = create();
     let create_texture = method(&process, device, 20);

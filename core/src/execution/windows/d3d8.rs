@@ -71,6 +71,7 @@ pub(super) enum Call {
     TextureGetSurface,
     TextureSurfaceAddRef,
     TextureSurfaceRelease,
+    TextureSurfaceDesc,
     SetVertexShader,
     SetViewport,
     SetRenderState,
@@ -102,6 +103,7 @@ impl Call {
             0x4b8 => Self::TextureGetSurface,
             0x4bc => Self::TextureSurfaceAddRef,
             0x4c0 => Self::TextureSurfaceRelease,
+            0x4c4 => Self::TextureSurfaceDesc,
             0x41c => Self::SetVertexShader,
             0x420 => Self::DrawPrimitiveUp,
             0x498 => Self::SetViewport,
@@ -138,7 +140,8 @@ impl Call {
             | Self::TextureUnlockRect
             | Self::SetVertexShader
             | Self::SetViewport
-            | Self::GetDepthStencilSurface => 2,
+            | Self::GetDepthStencilSurface
+            | Self::TextureSurfaceDesc => 2,
             Self::CheckDeviceType | Self::CheckMultiSampleType | Self::CheckDepthStencilMatch => 6,
             _ => 1,
         }
@@ -249,6 +252,7 @@ impl Graphics {
             (TEXTURE_TABLE, 15, 0x4b8),
             (TEXTURE_SURFACE_TABLE, 1, 0x4bc),
             (TEXTURE_SURFACE_TABLE, 2, 0x4c0),
+            (TEXTURE_SURFACE_TABLE, 8, 0x4c4),
         ] {
             guest::write_word(memory, table + index * 4, API_BASE + offset)?;
         }
@@ -298,6 +302,7 @@ impl Graphics {
             Call::TextureSurfaceAddRef | Call::TextureSurfaceRelease => {
                 return self.texture_surface_ref(call, args[0], memory);
             }
+            Call::TextureSurfaceDesc => return self.texture_surface_desc(args, memory),
             Call::SetVertexShader => {
                 if args[0] != DEVICE || self.device_refs == 0 || args[1] != 0x44 {
                     INVALID_CALL
@@ -314,11 +319,7 @@ impl Graphics {
             }
             Call::AvailableTextureMemory => self.available_texture_memory(args[0]),
             Call::DrawPrimitiveUp => return self.draw_primitive_up(args, memory),
-            Call::TextureLevelCount => {
-                self.textures.get(&args[0]).map_or(INVALID_CALL, |texture| {
-                    u32::try_from(texture.levels.len()).expect("bounded mip count")
-                })
-            }
+            Call::TextureLevelCount => self.texture_level_count(args[0]),
             Call::TextureAddRef => {
                 if let Some(texture) = self.textures.get_mut(&args[0]) {
                     if texture.refs == 0 {
@@ -797,6 +798,12 @@ impl Graphics {
         Ok(0)
     }
 
+    fn texture_level_count(&self, address: u32) -> u32 {
+        self.textures.get(&address).map_or(INVALID_CALL, |texture| {
+            u32::try_from(texture.levels.len()).expect("bounded mip count")
+        })
+    }
+
     fn texture_get_surface(
         &mut self,
         args: &[u32],
@@ -827,24 +834,15 @@ impl Graphics {
         surface: u32,
         memory: &mut GuestMemory,
     ) -> Result<u32, MemoryError> {
-        let page_size = u32::try_from(PAGE_SIZE).expect("guest page fits u32");
-        let texture_address = surface & !(page_size - 1);
-        let Some(offset) = surface.checked_sub(texture_address + 4) else {
+        let Some((texture_address, index)) = self.texture_surface_identity(surface) else {
             return Ok(INVALID_CALL);
         };
-        if offset % 4 != 0 {
-            return Ok(INVALID_CALL);
-        }
-        let Some(texture) = self.textures.get_mut(&texture_address) else {
-            return Ok(INVALID_CALL);
-        };
+        let texture = self
+            .textures
+            .get_mut(&texture_address)
+            .expect("validated surface");
         let total_refs = texture.total_refs();
-        let Some(level) = texture.levels.get_mut((offset / 4) as usize) else {
-            return Ok(INVALID_CALL);
-        };
-        if level.surface_refs == 0 {
-            return Ok(INVALID_CALL);
-        }
+        let level = &mut texture.levels[index];
         if matches!(call, Call::TextureSurfaceAddRef) {
             if total_refs == u32::MAX {
                 return Ok(INVALID_CALL);
@@ -863,6 +861,36 @@ impl Graphics {
         }
         level.surface_refs -= 1;
         Ok(level.surface_refs)
+    }
+
+    fn texture_surface_identity(&self, surface: u32) -> Option<(u32, usize)> {
+        let page_size = u32::try_from(PAGE_SIZE).expect("guest page fits u32");
+        let texture_address = surface & !(page_size - 1);
+        let offset = surface.checked_sub(texture_address + 4)?;
+        if offset % 4 != 0 {
+            return None;
+        }
+        let index = (offset / 4) as usize;
+        let texture = self.textures.get(&texture_address)?;
+        (texture.levels.get(index)?.surface_refs != 0).then_some((texture_address, index))
+    }
+
+    fn texture_surface_desc(
+        &self,
+        args: &[u32],
+        memory: &mut GuestMemory,
+    ) -> Result<u32, MemoryError> {
+        let Some((texture, level)) = self.texture_surface_identity(args[0]) else {
+            return Ok(INVALID_CALL);
+        };
+        self.texture_level_desc(
+            &[
+                texture,
+                u32::try_from(level).expect("bounded mip count"),
+                args[1],
+            ],
+            memory,
+        )
     }
 
     fn texture_level_desc(
