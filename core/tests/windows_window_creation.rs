@@ -14,6 +14,7 @@ const SHOW: u32 = 0x7000_0440;
 const UPDATE: u32 = 0x7000_0444;
 const INVALIDATE: u32 = 0x7000_04b0;
 const SET_POS: u32 = 0x7000_046c;
+const FOREGROUND: u32 = 0x7000_04b4;
 const HANDLE: u32 = 0x7500_0004;
 const RETURN: u32 = 0x7000_0ff8;
 const ARGS: [u32; 12] = [
@@ -292,6 +293,30 @@ fn topmost_no_redraw_resizes_the_active_owned_main_window() {
     }
     assert_eq!(query(&mut p, SET_POS, &[0, u32::MAX, 0, 0, 640, 461, 8]), 0);
     assert_eq!(p.last_error().unwrap(), 1400);
+}
+
+#[test]
+fn foreground_import_activates_only_visible_owned_top_level() {
+    let bytes =
+        imported_executable::pe32(&[0xff, 0xd0, 0xcc], "USER32.dll", &["SetForegroundWindow"]);
+    let mut imported = Process32::load(&bytes, 32).unwrap();
+    let mut pointer = [0; 4];
+    imported.memory.read(0x0040_2060, &mut pointer).unwrap();
+    assert_eq!(u32::from_le_bytes(pointer), FOREGROUND);
+    assert_eq!(query(&mut imported, FOREGROUND, &[0]), 0);
+
+    let mut p = ready(&logged(None));
+    assert_eq!(finish(&mut p), HANDLE);
+    assert_eq!(query(&mut p, FOREGROUND, &[HANDLE]), 0);
+    assert_eq!(query(&mut p, ACTIVE, &[]), 0);
+    assert_eq!(query(&mut p, SHOW, &[HANDLE, 5]), 0);
+    let before = p.window_snapshots();
+    assert_eq!(query(&mut p, FOREGROUND, &[HANDLE]), 1);
+    assert_eq!(query(&mut p, FOREGROUND, &[HANDLE]), 1);
+    assert_eq!(query(&mut p, ACTIVE, &[]), HANDLE);
+    assert_eq!(p.window_snapshots(), before);
+    assert_eq!(query(&mut p, FOREGROUND, &[0]), 0);
+    assert_eq!(query(&mut p, ACTIVE, &[]), HANDLE);
 }
 
 #[test]

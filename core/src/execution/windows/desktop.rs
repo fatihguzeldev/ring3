@@ -298,6 +298,17 @@ impl Desktop {
             self.active = handle;
         }
     }
+    pub(super) fn activate_foreground(&mut self, handle: u32) -> bool {
+        if self
+            .top_levels
+            .get(&handle)
+            .is_none_or(|window| window.style & 0x1000_0000 == 0)
+        {
+            return false;
+        }
+        self.active = handle;
+        true
+    }
     pub(super) fn show_activated(&mut self, handle: u32) -> Option<u32> {
         let window = self.top_levels.get_mut(&handle)?;
         let was_visible = u32::from(window.style & 0x1000_0000 != 0);
@@ -853,6 +864,33 @@ mod tests {
         assert!(window.topmost);
         assert!(window.needs_paint);
         assert_eq!(desktop.active, 0x7500_0004);
+    }
+
+    #[test]
+    fn foreground_activation_rejects_children_and_hidden_windows() {
+        let mut desktop = Desktop::default();
+        desktop.insert(
+            0x7500_0004,
+            Window {
+                style: 0x1000_0000,
+                ..Window::default()
+            },
+        );
+        desktop.insert_child(
+            0x7500_0008,
+            Window {
+                parent: 0x7500_0004,
+                style: 0x1000_0000,
+                ..Window::default()
+            },
+        );
+        assert!(!desktop.activate_foreground(0x7500_0008));
+        assert_eq!(desktop.active, 0);
+        assert!(desktop.activate_foreground(0x7500_0004));
+        assert_eq!(desktop.active, 0x7500_0004);
+        desktop.hide_window(0x7500_0004);
+        assert!(!desktop.activate_foreground(0x7500_0004));
+        assert_eq!(desktop.active, 0);
     }
 
     #[test]
