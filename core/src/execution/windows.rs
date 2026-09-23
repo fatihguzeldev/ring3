@@ -1164,11 +1164,14 @@ impl Process32 {
                 self.cpu.set_register(Register32::Eax, value);
             }
             Api::Resource(call) => self.resource_api(call, args)?,
-            Api::Graphics(call) => self.cpu.set_register(
-                Register32::Eax,
-                self.graphics
-                    .dispatch(call, args, &mut self.memory, &self.desktop)?,
-            ),
+            Api::Graphics(call) => {
+                let value = self
+                    .graphics
+                    .dispatch(call, args, &mut self.memory, &self.desktop)?;
+                if !matches!(call, d3d8::Call::TexturePreLoad) || value != 0 {
+                    self.cpu.set_register(Register32::Eax, value);
+                }
+            }
             Api::Gdi(call) => self.cpu.set_register(
                 Register32::Eax,
                 self.gdi.dispatch(call, args, &mut self.memory)?,

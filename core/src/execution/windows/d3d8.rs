@@ -64,6 +64,7 @@ pub(super) enum Call {
     DeviceRelease,
     TextureAddRef,
     TextureRelease,
+    TexturePreLoad,
     TextureLevelCount,
     TextureLevelDesc,
     TextureLockRect,
@@ -98,6 +99,7 @@ impl Call {
             0x400 => Self::CreateTexture,
             0x404 => Self::TextureAddRef,
             0x408 => Self::TextureRelease,
+            0x4d0 => Self::TexturePreLoad,
             0x40c => Self::TextureLevelCount,
             0x410 => Self::TextureLevelDesc,
             0x414 => Self::TextureLockRect,
@@ -252,6 +254,7 @@ impl Graphics {
             (DEVICE_TABLE, 76, 0x41c),
             (TEXTURE_TABLE, 1, 0x404),
             (TEXTURE_TABLE, 2, 0x408),
+            (TEXTURE_TABLE, 9, 0x4d0),
             (TEXTURE_TABLE, 13, 0x40c),
             (TEXTURE_TABLE, 14, 0x410),
             (TEXTURE_TABLE, 16, 0x414),
@@ -333,6 +336,9 @@ impl Graphics {
             Call::TextureLevelCount => self.texture_level_count(args[0]),
             Call::TextureAddRef => self.texture_add_ref(args[0]),
             Call::TextureRelease => return self.texture_release(args[0], memory),
+            Call::TexturePreLoad => self.textures.get(&args[0]).map_or(INVALID_CALL, |texture| {
+                if texture.refs == 0 { INVALID_CALL } else { 0 }
+            }),
             Call::Clear => return self.clear(args, memory),
             Call::Present => {
                 if args[0] != DEVICE || self.device_refs == 0 || args[1..5] != [0; 4] {

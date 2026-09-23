@@ -1377,6 +1377,58 @@ fn texture_owns_mip_pixels_and_releases_its_guest_memory() {
 }
 
 #[test]
+fn texture_preload_is_void_and_preserves_owned_pixels_and_lifetime() {
+    for pool in [0, 1, 2] {
+        let (mut process, _, device) = create();
+        let create_texture = method(&process, device, 20);
+        assert_eq!(
+            invoke(
+                &mut process,
+                create_texture,
+                &[device, 4, 2, 1, 0, 22, pool, TEXTURE_OUTPUT]
+            ),
+            0
+        );
+        let texture = read(&process, TEXTURE_OUTPUT);
+        let preload = method(&process, texture, 9);
+        assert_ne!(preload, 0x7000_0ffc);
+        let lock = method(&process, texture, 16);
+        let unlock = method(&process, texture, 17);
+        assert_eq!(
+            invoke(&mut process, lock, &[texture, 0, LOCKED_RECT, 0, 0]),
+            0
+        );
+        let pixels = read(&process, LOCKED_RECT + 4);
+        process
+            .memory
+            .write(u64::from(pixels), &[1, 2, 3, 4])
+            .unwrap();
+        assert_eq!(invoke(&mut process, unlock, &[texture, 0]), 0);
+
+        let result = call(&mut process, preload, &[texture]);
+        assert_eq!(result.reason, ProcessStop::Stopped(StopReason::Breakpoint));
+        assert_eq!(result.api_calls, 1);
+        assert_eq!(process.cpu.register(Register32::Esp), 0x1001_0000);
+        assert_eq!(process.cpu.register(Register32::Eax), preload);
+        assert!(process.take_frame().is_none());
+        assert_eq!(
+            invoke(&mut process, lock, &[texture, 0, LOCKED_RECT, 0, 0]),
+            0
+        );
+        let mut bytes = [0; 4];
+        process.memory.read(u64::from(pixels), &mut bytes).unwrap();
+        assert_eq!(bytes, [1, 2, 3, 4]);
+        assert_eq!(invoke(&mut process, unlock, &[texture, 0]), 0);
+
+        let release = method(&process, texture, 2);
+        assert_eq!(invoke(&mut process, release, &[texture]), 0);
+        let stale = call(&mut process, preload, &[texture]);
+        assert_eq!(stale.reason, ProcessStop::Stopped(StopReason::Breakpoint));
+        assert_eq!(process.cpu.register(Register32::Eax), 0x8876_086c);
+    }
+}
+
+#[test]
 fn texture_surface_levels_have_stable_distinct_owned_identities() {
     let (mut process, _, device) = create();
     let create_texture = method(&process, device, 20);
