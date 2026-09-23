@@ -7,6 +7,21 @@ pub(super) fn product_result(result: f64, left: f64, right: f64) -> Ordering {
 }
 
 pub(super) fn single_product(result: f64, left: f64, right: f64) -> Option<f64> {
+    single_rounded(result, |midpoint| product_result(midpoint, left, right))
+}
+
+pub(super) fn single_sum(result: f64, left: f64, right: f64) -> Option<f64> {
+    single_rounded(result, |midpoint| {
+        let compared = sum_result(midpoint.copysign(result), left, right);
+        if result.is_sign_negative() {
+            compared.reverse()
+        } else {
+            compared
+        }
+    })
+}
+
+fn single_rounded(result: f64, compare_exact: impl Fn(f64) -> Ordering) -> Option<f64> {
     let magnitude = result.abs();
     if magnitude != 0.0
         && !(f64::from(f32::MIN_POSITIVE)..=f64::from(f32::MAX)).contains(&magnitude)
@@ -29,7 +44,7 @@ pub(super) fn single_product(result: f64, left: f64, right: f64) -> Option<f64> 
         };
         let midpoint = lower + (upper - lower) * 0.5;
         if magnitude.to_bits() == midpoint.to_bits() {
-            match product_result(midpoint, left, right) {
+            match compare_exact(midpoint) {
                 Ordering::Less => upper,
                 Ordering::Greater => lower,
                 Ordering::Equal => candidate,

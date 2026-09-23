@@ -222,11 +222,15 @@ impl Cpu32 {
                     (top, source)
                 };
             let add = matches!(instruction.code(), Code::Fadd_m32fp | Code::Fadd_m64fp);
-            let result = if add { left + right } else { left - right };
+            let mut result = if add { left + right } else { left - right };
             if !result.is_finite() || (result != 0.0 && !result.is_normal()) {
                 return Err(StopReason::UnsupportedInstruction);
             }
             let signed_right = if add { right } else { -right };
+            if single_precision {
+                result = rounding::single_sum(result, left, signed_right)
+                    .ok_or(StopReason::UnsupportedInstruction)?;
+            }
             (result, rounding::sum_result(result, left, signed_right))
         } else {
             let source = if instruction.code() == Code::Fimul_m32int {
@@ -405,7 +409,12 @@ impl Cpu32 {
             0x003f
                 if matches!(
                     code,
-                    Code::Fmul_m32fp | Code::Fmul_m64fp | Code::Fimul_m32int
+                    Code::Fmul_m32fp
+                        | Code::Fmul_m64fp
+                        | Code::Fimul_m32int
+                        | Code::Fadd_m32fp
+                        | Code::Fsub_m32fp
+                        | Code::Fsubr_m32fp
                 ) =>
             {
                 Ok(true)
