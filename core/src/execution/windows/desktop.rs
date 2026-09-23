@@ -291,6 +291,21 @@ pub(super) fn read_title(memory: &GuestMemory, pointer: u32) -> Result<String, D
 }
 
 impl super::Process32 {
+    pub(super) fn set_window_text(&mut self, args: &[u32]) -> Result<(), DispatchError> {
+        if self.desktop.window(args[0]).is_none() {
+            thread::set_last_error(&mut self.memory, 1400)?;
+            self.cpu.set_register(Register32::Eax, 0);
+            return Ok(());
+        }
+        let title = read_title(&self.memory, args[1])?;
+        self.desktop
+            .window_mut(args[0])
+            .expect("validated window")
+            .title = title;
+        self.cpu.set_register(Register32::Eax, 1);
+        Ok(())
+    }
+
     pub(super) fn window_query(&mut self, call: Call, args: &[u32]) -> Result<(), DispatchError> {
         if matches!(call, Call::Top)
             && !matches!(args[0], 0 | DESKTOP)
