@@ -1071,6 +1071,32 @@ fn execute_crt_formatting() {
     }
 }
 
+fn execute_crt_scanning() {
+    use ring3_core::execution::{Process32, ProcessStop, Register32, StopReason};
+    let bytes = imported_executable::pe32(&[0xcc], "MSVCRT.dll", &["sscanf"]);
+    let mut process = Process32::load(&bytes, 32).unwrap();
+    process.memory.write(0x0040_2300, b" -42tail\0").unwrap();
+    process.memory.write(0x0040_2180, b"%d\0").unwrap();
+    let frame: Vec<_> = [0x0040_1000_u32, 0x0040_2300, 0x0040_2180, 0x0040_2400]
+        .into_iter()
+        .flat_map(u32::to_le_bytes)
+        .collect();
+    process.memory.write(0x1000_ef00, &frame).unwrap();
+    process.cpu.eip = 0x7000_01b8;
+    process.cpu.set_register(Register32::Esp, 0x1000_ef00);
+    let result = process.run(1);
+    assert_eq!(
+        result.reason,
+        ProcessStop::Stopped(StopReason::InstructionLimit)
+    );
+    assert_eq!((result.instructions, result.api_calls), (0, 1));
+    assert_eq!(process.cpu.register(Register32::Eax), 1);
+    assert_eq!(process.cpu.register(Register32::Esp), 0x1000_ef04);
+    let mut output = [0; 4];
+    process.memory.read(0x0040_2400, &mut output).unwrap();
+    assert_eq!(i32::from_le_bytes(output), -42);
+}
+
 fn execute_crt_case_comparison() {
     use ring3_core::execution::{Process32, ProcessStop, Register32, StopReason};
     for (left, right, expected) in [
@@ -4383,6 +4409,7 @@ pub extern "C" fn run() -> u32 {
     execute_crt_string_prefix();
     execute_crt_case_comparison();
     execute_crt_formatting();
+    execute_crt_scanning();
     execute_crt_lowercase();
     execute_argument_pointers();
     execute_file_removal();
