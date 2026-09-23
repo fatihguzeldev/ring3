@@ -257,14 +257,22 @@ impl Cpu32 {
             }
             (result, rounding::sum_result(result, left, signed_right))
         } else {
-            let source = if instruction.code() == Code::Fimul_m32int {
+            let source = if instruction.code() == Code::Fmul_st0_sti {
+                let index = (instruction.op1_register() as usize)
+                    .checked_sub(Register::ST0 as usize)
+                    .ok_or(StopReason::UnsupportedInstruction)?;
+                if index >= usize::from(self.x87_stack.occupied) {
+                    return Err(StopReason::UnsupportedInstruction);
+                }
+                f64::from_bits(self.x87_stack.values[(usize::from(self.x87_stack.top) + index) & 7])
+            } else if instruction.code() == Code::Fimul_m32int {
                 self.read_integer_m32(instruction, memory)?
             } else {
                 self.read_float(instruction, memory)?
             };
             let multiply = matches!(
                 instruction.code(),
-                Code::Fmul_m32fp | Code::Fmul_m64fp | Code::Fimul_m32int
+                Code::Fmul_st0_sti | Code::Fmul_m32fp | Code::Fmul_m64fp | Code::Fimul_m32int
             );
             let (left, right) =
                 if matches!(instruction.code(), Code::Fdivr_m32fp | Code::Fdivr_m64fp) {
@@ -433,7 +441,8 @@ impl Cpu32 {
             0x003f
                 if matches!(
                     code,
-                    Code::Fmul_m32fp
+                    Code::Fmul_st0_sti
+                        | Code::Fmul_m32fp
                         | Code::Fmul_m64fp
                         | Code::Fimul_m32int
                         | Code::Fadd_m32fp
