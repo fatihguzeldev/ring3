@@ -46,6 +46,40 @@ impl Stack {
 }
 
 impl Cpu32 {
+    pub(in super::super) fn x87_divide_pop(
+        &mut self,
+        instruction: &Instruction,
+    ) -> Result<(), StopReason> {
+        self.x87_arithmetic_precision(instruction.code())?;
+        let index = (instruction.op0_register() as usize)
+            .checked_sub(Register::ST0 as usize)
+            .ok_or(StopReason::UnsupportedInstruction)?;
+        if index == 0 || index >= usize::from(self.x87_stack.occupied) {
+            return Err(StopReason::UnsupportedInstruction);
+        }
+        let top = self.x87_stack.value()?;
+        let slot = (usize::from(self.x87_stack.top) + index) & 7;
+        let indexed = f64::from_bits(self.x87_stack.values[slot]);
+        let (numerator, denominator) = if instruction.code() == Code::Fdivrp_sti_st0 {
+            (top, indexed)
+        } else {
+            (indexed, top)
+        };
+        if denominator == 0.0 {
+            return Err(StopReason::UnsupportedInstruction);
+        }
+        let result = numerator / denominator;
+        if !result.is_finite() || (numerator != 0.0 && result.abs() < 2.0 * f64::MIN_POSITIVE) {
+            return Err(StopReason::UnsupportedInstruction);
+        }
+        let rounding = rounding::quotient_result(result, numerator, denominator);
+        self.x87_stack
+            .rounded(rounding != Ordering::Equal, rounding == Ordering::Greater);
+        self.x87_stack.values[slot] = result.to_bits();
+        self.x87_stack.pop();
+        Ok(())
+    }
+
     pub(in super::super) fn x87_register_add(
         &mut self,
         instruction: &Instruction,
