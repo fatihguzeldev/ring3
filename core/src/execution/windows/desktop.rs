@@ -297,7 +297,7 @@ impl Desktop {
             self.active = handle;
         }
     }
-    pub(super) fn show_normal(&mut self, handle: u32) -> Option<u32> {
+    pub(super) fn show_activated(&mut self, handle: u32) -> Option<u32> {
         let window = self.top_levels.get_mut(&handle)?;
         let was_visible = u32::from(window.style & 0x1000_0000 != 0);
         if was_visible == 0 && window.class == 0x8002 && window.dialog_units.is_some() {

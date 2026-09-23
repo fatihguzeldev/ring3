@@ -130,7 +130,7 @@ fn show_normal_returns_previous_visibility_and_activates_owned_window() {
     assert_eq!(query(&mut p, ACTIVE, &[]), HANDLE);
     assert_eq!(query(&mut p, SHOW, &[HANDLE, 1]), 1);
     let before = {
-        prepare(&mut p, SHOW, STACK, &[HANDLE, 5]);
+        prepare(&mut p, SHOW, STACK, &[HANDLE, 6]);
         p.cpu
     };
     let run = p.run(1);
@@ -138,6 +138,26 @@ fn show_normal_returns_previous_visibility_and_activates_owned_window() {
     assert_eq!((run.instructions, run.api_calls), (0, 0));
     assert_eq!(p.cpu, before);
     assert_eq!(query(&mut p, SHOW, &[0, 1]), 0);
+    assert_eq!(p.last_error().unwrap(), 1400);
+}
+
+#[test]
+fn show_existing_size_activates_without_changing_geometry() {
+    let mut p = ready(&logged(None));
+    assert_eq!(finish(&mut p), HANDLE);
+    let before = p.window_snapshots();
+    assert_eq!(before.len(), 1);
+    assert_eq!(before[0].style & 0x1000_0000, 0);
+    assert!(!before[0].active);
+    assert_eq!(query(&mut p, SHOW, &[HANDLE, 5]), 0);
+    let after = p.window_snapshots();
+    assert_eq!(after.len(), 1);
+    assert_eq!(after[0].rectangle, before[0].rectangle);
+    assert_eq!(after[0].client, before[0].client);
+    assert_ne!(after[0].style & 0x1000_0000, 0);
+    assert!(after[0].active);
+    assert_eq!(query(&mut p, SHOW, &[HANDLE, 5]), 1);
+    assert_eq!(query(&mut p, SHOW, &[0, 5]), 0);
     assert_eq!(p.last_error().unwrap(), 1400);
 }
 

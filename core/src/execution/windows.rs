@@ -973,11 +973,11 @@ impl Process32 {
         Ok(())
     }
 
-    fn show_window_normal(&mut self, args: &[u32]) -> Result<(), DispatchError> {
-        if args[1] != 1 {
+    fn show_window_activated(&mut self, args: &[u32]) -> Result<(), DispatchError> {
+        if !matches!(args[1], 1 | 5) {
             return Err(DispatchError::Unsupported);
         }
-        let Some(was_visible) = self.desktop.show_normal(args[0]) else {
+        let Some(was_visible) = self.desktop.show_activated(args[0]) else {
             thread::set_last_error(&mut self.memory, 1400)?;
             self.cpu.set_register(Register32::Eax, 0);
             return Ok(());
@@ -1043,7 +1043,7 @@ impl Process32 {
                 self.message_api(api, args)?;
             }
             Api::PostMessage => self.post_guest_message(args)?,
-            Api::ShowWindow => self.show_window_normal(args)?,
+            Api::ShowWindow => self.show_window_activated(args)?,
             Api::SetWindowText => self.set_window_text(args)?,
             Api::EnableWindow => self.enable_dialog_control(args)?,
             Api::EndDialog => self.end_dialog(args)?,
