@@ -83,6 +83,12 @@ void entry(void) {
         SendMessageA(combo, 0x14e, 5, 0) != -1 ||
         SendMessageA(combo, 0x14e, 0, 0) != 0 ||
         SendMessageA(combo, 0x147, 0, 0) != 0) ExitProcess(7);
+    if (SendMessageA(combo, 0x14b, 0, 0) != 0 ||
+        SendMessageA(combo, 0x146, 0, 0) != 0 ||
+        SendMessageA(combo, 0x147, 0, 0) != -1 ||
+        SendMessageA(combo, 0x150, 0, 0) != -1 ||
+        SendMessageA(combo, 0x143, 0, (long)"new") != 0 ||
+        SendMessageA(combo, 0x146, 0, 0) != 1) ExitProcess(8);
     SetLastError(77);
     if (SendMessageA(GetDlgItem(window, 42), 0x364, 0, 0) ||
         SendMessageA(GetDlgItem(window, 43), 0x364, 0, 0) || GetLastError() != 77)
