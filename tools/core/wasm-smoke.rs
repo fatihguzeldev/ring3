@@ -2800,6 +2800,39 @@ fn execute_code_pages() {
     }
 }
 
+fn execute_multibyte_to_wide() {
+    use ring3_core::execution::{Process32, ProcessStop, Register32, StopReason};
+    let bytes = imported_executable::pe32(&[0xcc], "KERNEL32.dll", &["MultiByteToWideChar"]);
+    let mut process = Process32::load(&bytes, 32).unwrap();
+    process.memory.write(0x0040_2300, b"A\x80\0").unwrap();
+    let frame: Vec<_> = [
+        0x0040_1000_u32,
+        0,
+        0,
+        0x0040_2300,
+        u32::MAX,
+        0x0040_2400,
+        260,
+    ]
+    .into_iter()
+    .flat_map(u32::to_le_bytes)
+    .collect();
+    process.memory.write(0x1000_ef00, &frame).unwrap();
+    process.cpu.eip = 0x7000_033c;
+    process.cpu.set_register(Register32::Esp, 0x1000_ef00);
+    let result = process.run(1);
+    assert_eq!(
+        result.reason,
+        ProcessStop::Stopped(StopReason::InstructionLimit)
+    );
+    assert_eq!((result.instructions, result.api_calls), (0, 1));
+    assert_eq!(process.cpu.register(Register32::Eax), 3);
+    assert_eq!(process.cpu.register(Register32::Esp), 0x1000_ef1c);
+    let mut output = [0; 6];
+    process.memory.read(0x0040_2400, &mut output).unwrap();
+    assert_eq!(output, [b'A', 0, 0xac, 0x20, 0, 0]);
+}
+
 fn execute_borrow() {
     use ring3_core::execution::{Cpu32, Register32, StopReason, load_pe32};
     let mut image = load_pe32(&borrow_executable::pe32(), 3).unwrap();
@@ -4353,6 +4386,7 @@ pub extern "C" fn run() -> u32 {
     execute_dllonexit();
     execute_borrow();
     execute_code_pages();
+    execute_multibyte_to_wide();
     execute_cpinfo();
     execute_messages();
     execute_clipboard_formats();
