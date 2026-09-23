@@ -7,6 +7,7 @@ pub(super) enum Call {
     Oem,
     Info,
     WideToAnsi,
+    AnsiToWide,
 }
 
 impl Call {
@@ -16,6 +17,7 @@ impl Call {
             0x8c => Some(Self::Oem),
             0x90 => Some(Self::Info),
             0x338 => Some(Self::WideToAnsi),
+            0x33c => Some(Self::AnsiToWide),
             _ => None,
         }
     }
@@ -24,6 +26,7 @@ impl Call {
         match self {
             Self::Info => 2,
             Self::WideToAnsi => 8,
+            Self::AnsiToWide => 6,
             Self::Ansi | Self::Oem => 0,
         }
     }
@@ -38,7 +41,97 @@ impl Call {
             Self::Oem => Ok(OEM),
             Self::Info => info(arguments[0], arguments[1], memory),
             Self::WideToAnsi => wide_to_ansi(arguments, memory),
+            Self::AnsiToWide => ansi_to_wide(arguments, memory),
         }
+    }
+}
+
+fn ansi_to_wide(args: &[u32], memory: &mut GuestMemory) -> Result<u32, DispatchError> {
+    if !matches!(args[0], 0 | 3 | ANSI) || args[1] != 0 {
+        return Err(DispatchError::Unsupported);
+    }
+    let [_, _, source, count, output, capacity] = args.try_into().unwrap();
+    if source == 0
+        || count == 0
+        || count.cast_signed() < -1
+        || capacity.cast_signed() < 0
+        || (capacity != 0 && (output == 0 || output == source))
+    {
+        thread::set_last_error(memory, 87)?;
+        return Ok(0);
+    }
+    let limit = if count == u32::MAX {
+        65536
+    } else {
+        count as usize
+    };
+    if limit > 65536 {
+        return Err(DispatchError::Unsupported);
+    }
+    let mut bytes = Vec::with_capacity(limit.min(256));
+    for index in 0..limit {
+        let address = source
+            .checked_add(u32::try_from(index).map_err(|_| DispatchError::Unsupported)?)
+            .ok_or(DispatchError::Unsupported)?;
+        guest::check(memory, address, 1, Access::Read)?;
+        let mut byte = [0];
+        memory.read(u64::from(address), &mut byte)?;
+        bytes.push(byte[0]);
+        if count == u32::MAX && byte[0] == 0 {
+            break;
+        }
+    }
+    if count == u32::MAX && bytes.last().copied() != Some(0) {
+        return Err(DispatchError::Unsupported);
+    }
+    let mut converted = Vec::with_capacity(bytes.len() * 2);
+    for byte in bytes {
+        let unit = cp1252_unit(byte).ok_or(DispatchError::Unsupported)?;
+        converted.extend_from_slice(&unit.to_le_bytes());
+    }
+    let units = u32::try_from(converted.len() / 2).map_err(|_| DispatchError::Unsupported)?;
+    if capacity != 0 {
+        if units > capacity {
+            thread::set_last_error(memory, 122)?;
+            return Ok(0);
+        }
+        guest::check(memory, output, converted.len(), Access::Write)?;
+        memory.write(u64::from(output), &converted)?;
+    }
+    Ok(units)
+}
+
+fn cp1252_unit(byte: u8) -> Option<u16> {
+    match byte {
+        0x80 => Some(0x20ac),
+        0x81 | 0x8d | 0x8f | 0x90 | 0x9d => None,
+        0x82 => Some(0x201a),
+        0x83 => Some(0x0192),
+        0x84 => Some(0x201e),
+        0x85 => Some(0x2026),
+        0x86 => Some(0x2020),
+        0x87 => Some(0x2021),
+        0x88 => Some(0x02c6),
+        0x89 => Some(0x2030),
+        0x8a => Some(0x0160),
+        0x8b => Some(0x2039),
+        0x8c => Some(0x0152),
+        0x8e => Some(0x017d),
+        0x91 => Some(0x2018),
+        0x92 => Some(0x2019),
+        0x93 => Some(0x201c),
+        0x94 => Some(0x201d),
+        0x95 => Some(0x2022),
+        0x96 => Some(0x2013),
+        0x97 => Some(0x2014),
+        0x98 => Some(0x02dc),
+        0x99 => Some(0x2122),
+        0x9a => Some(0x0161),
+        0x9b => Some(0x203a),
+        0x9c => Some(0x0153),
+        0x9e => Some(0x017e),
+        0x9f => Some(0x0178),
+        _ => Some(u16::from(byte)),
     }
 }
 
