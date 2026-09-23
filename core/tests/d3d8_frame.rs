@@ -1429,6 +1429,82 @@ fn texture_preload_is_void_and_preserves_owned_pixels_and_lifetime() {
 }
 
 #[test]
+fn device_texture_stages_retain_bindings_until_unbound() {
+    let (mut process, _, device) = create();
+    let set_texture = method(&process, device, 61);
+    assert_ne!(set_texture, 0x7000_0ffc);
+    assert_eq!(invoke(&mut process, set_texture, &[device, 0, 0]), 0);
+    let create_texture = method(&process, device, 20);
+    assert_eq!(
+        invoke(
+            &mut process,
+            create_texture,
+            &[device, 2, 2, 1, 0, 22, 1, TEXTURE_OUTPUT]
+        ),
+        0
+    );
+    let texture = read(&process, TEXTURE_OUTPUT);
+    process
+        .memory
+        .write(u64::from(texture + 4096), &[1, 2, 3, 4])
+        .unwrap();
+    assert_eq!(invoke(&mut process, set_texture, &[device, 0, texture]), 0);
+    assert_eq!(invoke(&mut process, set_texture, &[device, 0, texture]), 0);
+    assert_eq!(invoke(&mut process, set_texture, &[device, 7, texture]), 0);
+    let release = method(&process, texture, 2);
+    assert_eq!(invoke(&mut process, release, &[texture]), 2);
+    let mut pixels = [0; 4];
+    process
+        .memory
+        .read(u64::from(texture + 4096), &mut pixels)
+        .unwrap();
+    assert_eq!(pixels, [1, 2, 3, 4]);
+    assert_eq!(invoke(&mut process, set_texture, &[device, 0, 0]), 0);
+    assert_eq!(invoke(&mut process, set_texture, &[device, 7, 0]), 0);
+    assert!(process.memory.read(u64::from(texture), &mut [0]).is_err());
+    assert_eq!(
+        invoke(&mut process, set_texture, &[device, 0, texture]),
+        0x8876_086c
+    );
+}
+
+#[test]
+fn device_texture_stage_rejects_bad_targets_without_changing_old_binding() {
+    let (mut process, _, device) = create();
+    let set_texture = method(&process, device, 61);
+    let create_texture = method(&process, device, 20);
+    assert_eq!(
+        invoke(
+            &mut process,
+            create_texture,
+            &[device, 2, 2, 1, 0, 22, 1, TEXTURE_OUTPUT]
+        ),
+        0
+    );
+    let first = read(&process, TEXTURE_OUTPUT);
+    assert_eq!(invoke(&mut process, set_texture, &[device, 0, first]), 0);
+    for args in [[device, 8, 0], [device, 0, 0x5500_0000], [device + 4, 0, 0]] {
+        assert_eq!(invoke(&mut process, set_texture, &args), 0x8876_086c);
+    }
+    let first_release = method(&process, first, 2);
+    assert_eq!(invoke(&mut process, first_release, &[first]), 1);
+    assert_eq!(
+        invoke(
+            &mut process,
+            create_texture,
+            &[device, 2, 2, 1, 0, 22, 1, TEXTURE_OUTPUT]
+        ),
+        0
+    );
+    let second = read(&process, TEXTURE_OUTPUT);
+    assert_eq!(invoke(&mut process, set_texture, &[device, 0, second]), 0);
+    assert!(process.memory.read(u64::from(first), &mut [0]).is_err());
+    assert_eq!(invoke(&mut process, set_texture, &[device, 0, 0]), 0);
+    let second_release = method(&process, second, 2);
+    assert_eq!(invoke(&mut process, second_release, &[second]), 0);
+}
+
+#[test]
 fn texture_surface_levels_have_stable_distinct_owned_identities() {
     let (mut process, _, device) = create();
     let create_texture = method(&process, device, 20);

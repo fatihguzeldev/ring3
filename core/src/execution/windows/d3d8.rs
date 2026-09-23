@@ -65,6 +65,7 @@ pub(super) enum Call {
     TextureAddRef,
     TextureRelease,
     TexturePreLoad,
+    SetTexture,
     TextureLevelCount,
     TextureLevelDesc,
     TextureLockRect,
@@ -100,6 +101,7 @@ impl Call {
             0x404 => Self::TextureAddRef,
             0x408 => Self::TextureRelease,
             0x4d0 => Self::TexturePreLoad,
+            0x4d4 => Self::SetTexture,
             0x40c => Self::TextureLevelCount,
             0x410 => Self::TextureLevelDesc,
             0x414 => Self::TextureLockRect,
@@ -140,7 +142,8 @@ impl Call {
             Self::TextureLevelDesc
             | Self::TextureGetSurface
             | Self::CurrentDisplayMode
-            | Self::SetRenderState => 3,
+            | Self::SetRenderState
+            | Self::SetTexture => 3,
             Self::AdapterIdentifier
             | Self::AdapterMode
             | Self::DeviceCaps
@@ -169,6 +172,7 @@ pub(super) struct Graphics {
     viewport: Option<Viewport>,
     front: Option<Frame>,
     textures: BTreeMap<u32, Texture>,
+    texture_stages: [u32; 8],
     vertex_fvf: u32,
 }
 
@@ -247,6 +251,7 @@ impl Graphics {
             (DEVICE_TABLE, 50, 0x49c),
             (DEVICE_TABLE, 33, 0x4a0),
             (DEVICE_TABLE, 4, 0x4ac),
+            (DEVICE_TABLE, 61, 0x4d4),
             (DEPTH_SURFACE_TABLE, 1, 0x4a4),
             (DEPTH_SURFACE_TABLE, 2, 0x4a8),
             (DEVICE_TABLE, 20, 0x400),
@@ -327,6 +332,7 @@ impl Graphics {
             }
             Call::SetViewport => return self.set_viewport(args, memory),
             Call::SetRenderState => self.set_render_state(args),
+            Call::SetTexture => return self.set_texture(args, memory),
             Call::GetDepthStencilSurface => return self.get_depth_surface(args, memory),
             Call::DepthSurfaceAddRef | Call::DepthSurfaceRelease => {
                 self.depth_surface_ref(call, args)
@@ -556,6 +562,7 @@ impl Graphics {
         guest::write_word(memory, args[6], DEVICE)?;
         self.root_refs = self.root_refs.saturating_add(1);
         self.device_refs = 1;
+        self.texture_stages = [0; 8];
         self.depth = (enable_depth == 1).then(|| vec![u16::MAX; (width * height) as usize]);
         self.depth_surface_refs = 0;
         self.z_enabled = enable_depth == 1;
@@ -578,6 +585,7 @@ impl Graphics {
         self.z_enabled = false;
         self.viewport = None;
         self.vertex_fvf = 0;
+        self.texture_stages = [0; 8];
         self.root_refs = self.root_refs.saturating_sub(1);
     }
 
@@ -616,6 +624,36 @@ impl Graphics {
         }
         self.z_enabled = args[2] == 1;
         0
+    }
+
+    fn set_texture(&mut self, args: &[u32], memory: &mut GuestMemory) -> Result<u32, MemoryError> {
+        let [device, stage, next] = <[u32; 3]>::try_from(args).expect("d3d8 call arity");
+        let Ok(index) = usize::try_from(stage) else {
+            return Ok(INVALID_CALL);
+        };
+        if device != DEVICE || self.device_refs == 0 || index >= self.texture_stages.len() {
+            return Ok(INVALID_CALL);
+        }
+        let previous = self.texture_stages[index];
+        if previous == next {
+            return Ok(0);
+        }
+        if next != 0 {
+            let Some(texture) = self.textures.get(&next) else {
+                return Ok(INVALID_CALL);
+            };
+            if texture.refs == 0 || texture.total_refs() == u32::MAX {
+                return Ok(INVALID_CALL);
+            }
+        }
+        if previous != 0 {
+            self.texture_release(previous, memory)?;
+        }
+        if next != 0 {
+            self.texture_add_ref(next);
+        }
+        self.texture_stages[index] = next;
+        Ok(0)
     }
 
     fn get_depth_surface(
