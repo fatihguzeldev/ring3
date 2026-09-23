@@ -1,7 +1,7 @@
 #[path = "support/executable.rs"]
 mod executable;
 
-use ring3_core::execution::{Cpu32, GuestMemory, Permissions, StopReason, load_pe32};
+use ring3_core::execution::{Cpu32, GuestMemory, Permissions, Register32, StopReason, load_pe32};
 
 const INPUT: u32 = 0x0040_2200;
 const OUTPUT: u32 = 0x0040_2300;
@@ -74,6 +74,48 @@ fn memory_transfers_preserve_finite_bits_and_signed_zero() {
             assert_eq!(cpu.x87_control_word(), 0x027f);
         }
     }
+}
+
+#[test]
+fn masked_double_nan_load_quiets_signaling_input_and_sets_invalid_status() {
+    let mut code = instruction(0xdd, 0x05, INPUT);
+    code.extend([0xdf, 0xe0]);
+    code.extend(instruction(0xdd, 0x1d, OUTPUT));
+    for (source, expected, invalid_status) in [
+        (0xfff0_0000_0000_0001_u64, 0xfff8_0000_0000_0001_u64, 1),
+        (0x7ff8_0000_0000_0011, 0x7ff8_0000_0000_0011, 0),
+    ] {
+        let (mut cpu, mut memory) = load(&code);
+        memory
+            .write(u64::from(INPUT), &source.to_le_bytes())
+            .unwrap();
+        memory.write(u64::from(OUTPUT), &[0x55; 8]).unwrap();
+        assert_eq!(cpu.run(&mut memory, 3).instructions, 3);
+        assert_eq!(cpu.register(Register32::Eax) & 1, invalid_status);
+        assert_eq!(read(&memory, OUTPUT, 8), expected.to_le_bytes());
+        assert_eq!(read(&memory, INPUT, 8), source.to_le_bytes());
+        assert_eq!(cpu.eflags, 0xced7);
+    }
+
+    let (mut cpu, mut memory) = load(&instruction(0xdd, 0x05, INPUT));
+    let entry = cpu.eip;
+    memory
+        .write(u64::from(INPUT), &1_f64.to_le_bytes())
+        .unwrap();
+    for _ in 0..8 {
+        cpu.eip = entry;
+        assert_eq!(cpu.run(&mut memory, 1).instructions, 1);
+    }
+    memory
+        .write(u64::from(INPUT), &0xfff0_0000_0000_0001_u64.to_le_bytes())
+        .unwrap();
+    cpu.eip = entry;
+    let full = cpu;
+    assert_eq!(
+        cpu.run(&mut memory, 1).reason,
+        StopReason::UnsupportedInstruction
+    );
+    assert_eq!(cpu, full);
 }
 
 #[test]
@@ -176,8 +218,6 @@ fn loads_reject_special_values_and_excluded_control_modes() {
                 0x000f_ffff_ffff_ffff,
                 0x7ff0_0000_0000_0000,
                 0xfff0_0000_0000_0000,
-                0x7ff8_0000_0000_0000,
-                0x7ff0_0000_0000_0001,
             ],
         ),
     ] {

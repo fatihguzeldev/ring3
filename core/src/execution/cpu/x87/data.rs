@@ -412,6 +412,29 @@ impl Cpu32 {
     ) -> Result<(), StopReason> {
         if matches!(instruction.code(), Code::Fld_m32fp | Code::Fld_m64fp) {
             self.x87_masked()?;
+            if instruction.code() == Code::Fld_m64fp {
+                let (address, _) = self.data_address(instruction)?;
+                let mut bytes = [0; 8];
+                memory
+                    .read(u64::from(address), &mut bytes)
+                    .map_err(StopReason::MemoryFault)?;
+                let bits = u64::from_le_bytes(bytes);
+                if bits & 0x7ff0_0000_0000_0000 == 0x7ff0_0000_0000_0000
+                    && bits & 0x000f_ffff_ffff_ffff != 0
+                {
+                    let signaling = bits & (1 << 51) == 0;
+                    self.x87_stack.push(f64::from_bits(bits | (1 << 51)))?;
+                    if signaling {
+                        self.x87_stack.status |= 1;
+                    }
+                    return Ok(());
+                }
+                let value = f64::from_bits(bits);
+                if !value.is_normal() && value != 0.0 {
+                    return Err(StopReason::UnsupportedInstruction);
+                }
+                return self.x87_stack.push(value);
+            }
             let value = self.read_float(instruction, memory)?;
             return self.x87_stack.push(value);
         }
