@@ -54,6 +54,41 @@ pub(super) struct Window {
     pub(super) parent: u32,
     pub(super) id: u32,
     pub(super) dialog_units: Option<[i16; 4]>,
+    pub(super) combo: ComboBox,
+}
+
+#[derive(Default)]
+pub(super) struct ComboBox {
+    items: Vec<String>,
+    bytes: usize,
+}
+
+impl ComboBox {
+    fn add(&mut self, style: u32, title: String) -> u32 {
+        let Some(bytes) = self.bytes.checked_add(title.len() + 1) else {
+            return u32::MAX - 1;
+        };
+        if self.items.len() == 1024 || bytes > 64 * 1024 {
+            return u32::MAX - 1;
+        }
+        let index = if style & 0x100 == 0 {
+            self.items.len()
+        } else {
+            self.items.partition_point(|item| {
+                item.bytes()
+                    .map(|byte| byte.to_ascii_lowercase())
+                    .cmp(title.bytes().map(|byte| byte.to_ascii_lowercase()))
+                    != std::cmp::Ordering::Greater
+            })
+        };
+        self.items.insert(index, title);
+        self.bytes = bytes;
+        u32::try_from(index).expect("bounded combo count")
+    }
+
+    fn count(&self) -> u32 {
+        u32::try_from(self.items.len()).expect("bounded combo count")
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -291,6 +326,26 @@ pub(super) fn read_title(memory: &GuestMemory, pointer: u32) -> Result<String, D
 }
 
 impl super::Process32 {
+    pub(super) fn combo_message(&mut self, args: &[u32]) -> Result<Option<u32>, DispatchError> {
+        let window = self.desktop.window(args[0]).expect("validated window");
+        if window.parent == 0
+            || window.dialog_units.is_none()
+            || window.class != 0x85
+            || (window.style & 0x30 != 0 && window.style & 0x200 == 0)
+        {
+            return Ok(None);
+        }
+        match args[1] {
+            0x143 if args[3] != 0 => {
+                let title = read_title(&self.memory, args[3])?;
+                let window = self.desktop.window_mut(args[0]).expect("validated window");
+                Ok(Some(window.combo.add(window.style, title)))
+            }
+            0x146 if args[2..] == [0, 0] => Ok(Some(window.combo.count())),
+            _ => Ok(None),
+        }
+    }
+
     pub(super) fn set_window_text(&mut self, args: &[u32]) -> Result<(), DispatchError> {
         if self.desktop.window(args[0]).is_none() {
             thread::set_last_error(&mut self.memory, 1400)?;
@@ -337,6 +392,28 @@ impl super::Process32 {
 mod tests {
     use super::*;
     use crate::execution::Permissions;
+
+    #[test]
+    fn combo_items_keep_sorted_or_insertion_order_with_a_byte_limit() {
+        let mut sorted = ComboBox::default();
+        assert_eq!(sorted.add(0x100, "pear".into()), 0);
+        assert_eq!(sorted.add(0x100, "Apple".into()), 0);
+        assert_eq!(sorted.add(0x100, "orange".into()), 1);
+        assert_eq!(sorted.add(0x100, "apple".into()), 1);
+        assert_eq!(sorted.items, ["Apple", "apple", "orange", "pear"]);
+
+        let mut unsorted = ComboBox::default();
+        assert_eq!(unsorted.add(0, "pear".into()), 0);
+        assert_eq!(unsorted.add(0, "apple".into()), 1);
+        assert_eq!(unsorted.items, ["pear", "apple"]);
+
+        let mut full = ComboBox::default();
+        for index in 0..16 {
+            assert_eq!(full.add(0, "x".repeat(4095)), index);
+        }
+        assert_eq!(full.add(0, "x".into()), u32::MAX - 1);
+        assert_eq!(full.count(), 16);
+    }
 
     #[test]
     fn snapshots_include_children_in_handle_order_without_desktop_sentinel() {

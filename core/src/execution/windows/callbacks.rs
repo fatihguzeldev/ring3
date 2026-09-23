@@ -51,13 +51,18 @@ impl Process32 {
             self.cpu.set_register(Register32::Eax, 0);
             return Ok(false);
         };
-        if window.procedure == 0 {
-            if window.parent != 0
-                && window.dialog_units.is_some()
-                && (0x80..=0x85).contains(&window.class)
-                && args[1] == 0x364
-                && args[2..] == [0, 0]
-            {
+        let procedure = window.procedure;
+        let builtin_initial_update = window.parent != 0
+            && window.dialog_units.is_some()
+            && (0x80..=0x85).contains(&window.class)
+            && args[1] == 0x364
+            && args[2..] == [0, 0];
+        if procedure == 0 {
+            if let Some(result) = self.combo_message(args)? {
+                self.cpu.set_register(Register32::Eax, result);
+                return Ok(false);
+            }
+            if builtin_initial_update {
                 self.cpu.set_register(Register32::Eax, 0);
                 return Ok(false);
             }
@@ -76,7 +81,7 @@ impl Process32 {
                 module: None,
                 dialog: None,
             },
-            window.procedure,
+            procedure,
             args,
         )?;
         Ok(true)
