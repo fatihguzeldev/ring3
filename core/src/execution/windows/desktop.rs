@@ -15,6 +15,7 @@ pub(super) enum Call {
     Active,
     DlgItem,
     Top,
+    Window,
 }
 
 impl Call {
@@ -26,6 +27,7 @@ impl Call {
             0x430 => Some(Self::Active),
             0x438 => Some(Self::DlgItem),
             0x454 => Some(Self::Top),
+            0x458 => Some(Self::Window),
             _ => None,
         }
     }
@@ -33,7 +35,7 @@ impl Call {
         match self {
             Self::Desktop | Self::Active => 0,
             Self::IsWindow | Self::Top => 1,
-            Self::Find | Self::DlgItem => 2,
+            Self::Find | Self::DlgItem | Self::Window => 2,
         }
     }
 }
@@ -97,6 +99,36 @@ impl Desktop {
             .rev()
             .find_map(|(&handle, window)| (window.parent == parent).then_some(handle))
             .unwrap_or(0)
+    }
+
+    pub(super) fn relative_window(&self, handle: u32, relation: u32) -> Option<u32> {
+        let parent = self.window(handle)?.parent;
+        if relation == 5 {
+            return Some(self.top_window(handle));
+        }
+        if relation == 4 {
+            return Some(0);
+        }
+        let siblings: Vec<u32> = if parent == 0 {
+            self.top_levels.keys().copied().collect()
+        } else {
+            self.children
+                .iter()
+                .filter_map(|(&handle, window)| (window.parent == parent).then_some(handle))
+                .collect()
+        };
+        let index = siblings.binary_search(&handle).ok()?;
+        Some(match relation {
+            0 => *siblings.last().expect("selected window exists"),
+            1 => siblings[0],
+            2 => index
+                .checked_sub(1)
+                .and_then(|index| siblings.get(index))
+                .copied()
+                .unwrap_or(0),
+            3 => siblings.get(index + 1).copied().unwrap_or(0),
+            _ => return None,
+        })
     }
 
     pub(super) fn snapshots(&self) -> Vec<WindowSnapshot> {
@@ -201,6 +233,7 @@ impl Desktop {
                     || self.children.contains_key(&args[0]),
             )),
             Call::Top => Ok(self.top_window(args[0])),
+            Call::Window => Ok(self.relative_window(args[0], args[1]).unwrap_or(0)),
             Call::DlgItem => Ok(self.child(args[0], args[1]).unwrap_or(0)),
             Call::Find => {
                 let class = match args[0] {
@@ -266,6 +299,16 @@ impl super::Process32 {
             thread::set_last_error(&mut self.memory, 1400)?;
             self.cpu.set_register(Register32::Eax, 0);
             return Ok(());
+        }
+        if matches!(call, Call::Window) {
+            if args[1] > 5 {
+                return Err(DispatchError::Unsupported);
+            }
+            if self.desktop.window(args[0]).is_none() {
+                thread::set_last_error(&mut self.memory, 1400)?;
+                self.cpu.set_register(Register32::Eax, 0);
+                return Ok(());
+            }
         }
         let value = self
             .desktop

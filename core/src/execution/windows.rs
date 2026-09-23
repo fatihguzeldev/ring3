@@ -326,6 +326,7 @@ impl Api {
                 "TranslateMessage" => 0x44c,
                 "DispatchMessageA" => 0x450,
                 "GetTopWindow" => 0x454,
+                "GetWindow" => 0x458,
                 "ShowWindow" => 0x440,
                 "UpdateWindow" => 0x444,
                 "CallNextHookEx" => 0x2c4,
