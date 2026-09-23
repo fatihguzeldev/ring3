@@ -98,7 +98,7 @@ impl Cpu32 {
         &mut self,
         instruction: &Instruction,
     ) -> Result<(), StopReason> {
-        self.x87_arithmetic_precision(instruction.code())?;
+        let single_precision = self.x87_arithmetic_precision(instruction.code())?;
         let destination_is_top = instruction.code() == Code::Fadd_st0_sti;
         let indexed_register = if destination_is_top {
             instruction.op1_register()
@@ -114,13 +114,24 @@ impl Cpu32 {
         let top = self.x87_stack.value()?;
         let slot = (usize::from(self.x87_stack.top) + index) & 7;
         let indexed = f64::from_bits(self.x87_stack.values[slot]);
-        let result = top + indexed;
+        let mut result = top + indexed;
         if !result.is_finite() || (result != 0.0 && !result.is_normal()) {
             return Err(StopReason::UnsupportedInstruction);
         }
+        let truncating = self.x87_control_word & 0x0f3f == 0x0c3f;
+        if single_precision {
+            result = if truncating {
+                rounding::single_sum_toward_zero(result, top, indexed)
+            } else {
+                rounding::single_sum(result, top, indexed)
+            }
+            .ok_or(StopReason::UnsupportedInstruction)?;
+        }
         let rounding = rounding::sum_result(result, top, indexed);
-        self.x87_stack
-            .rounded(rounding != Ordering::Equal, rounding == Ordering::Greater);
+        self.x87_stack.rounded(
+            rounding != Ordering::Equal,
+            !truncating && rounding == Ordering::Greater,
+        );
         let destination = if destination_is_top {
             usize::from(self.x87_stack.top)
         } else {
@@ -452,7 +463,8 @@ impl Cpu32 {
             0x003f
                 if matches!(
                     code,
-                    Code::Fmul_st0_sti
+                    Code::Fadd_st0_sti
+                        | Code::Fmul_st0_sti
                         | Code::Fmul_m32fp
                         | Code::Fmul_m64fp
                         | Code::Fimul_m32int
@@ -463,7 +475,7 @@ impl Cpu32 {
             {
                 Ok(true)
             }
-            0x0c3f if code == Code::Fmul_m32fp => Ok(true),
+            0x0c3f if matches!(code, Code::Fmul_m32fp | Code::Fadd_st0_sti) => Ok(true),
             _ => Err(StopReason::UnsupportedInstruction),
         }
     }

@@ -92,3 +92,78 @@ fn overflow_and_empty_register_do_not_publish_partial_result() {
     );
     assert_eq!(cpu, before);
 }
+
+#[test]
+fn single_precision_register_add_rounds_nearest_or_toward_zero() {
+    for (top, source, control, expected, status) in [
+        (0.5_f64, 0.5_f64, 0x0c7f_u16, 1.0_f64, 0),
+        (
+            1.0 + 3.0 * 2.0_f64.powi(-24),
+            2.0_f64.powi(-25),
+            0x0c7f,
+            1.0 + 2.0_f64.powi(-23),
+            0x20,
+        ),
+        (
+            -1.0 - 3.0 * 2.0_f64.powi(-24),
+            -2.0_f64.powi(-25),
+            0x0c7f,
+            -1.0 - 2.0_f64.powi(-23),
+            0x20,
+        ),
+        (
+            1.0 + 3.0 * 2.0_f64.powi(-24),
+            2.0_f64.powi(-25),
+            0x007f,
+            1.0 + 2.0_f64.powi(-22),
+            0x220,
+        ),
+        (-0.0, -0.0, 0x0c7f, -0.0, 0),
+    ] {
+        let (mut cpu, mut memory) = load(top, Some(source), 0xd8);
+        cpu.set_x87_control_word(control);
+        assert_eq!(cpu.run(&mut memory, 4).instructions, 4);
+        assert_eq!(cpu.register(Register32::Eax) & 0x220, status);
+        cpu.set_x87_control_word(0x027f);
+        assert_eq!(cpu.run(&mut memory, 1).instructions, 1);
+        assert_eq!(result(&memory), expected.to_bits());
+    }
+}
+
+#[test]
+fn single_precision_register_add_rejects_bad_operands_atomically() {
+    for (top, source, opcode, control) in [
+        (f64::MAX, f64::MAX, 0xd8, 0x0c7f),
+        (1.0, 2.0, 0xdc, 0x0c7f),
+        (1.0, 2.0, 0xd8, 0x087f),
+    ] {
+        let (mut cpu, mut memory) = load(top, Some(source), opcode);
+        cpu.set_x87_control_word(control);
+        assert_eq!(cpu.run(&mut memory, 2).instructions, 2);
+        let before = cpu;
+        assert_eq!(
+            cpu.run(&mut memory, 1).reason,
+            StopReason::UnsupportedInstruction
+        );
+        assert_eq!(cpu, before);
+        assert_eq!(result(&memory), 0);
+    }
+
+    let mut code = vec![0xdd, 0x05];
+    code.extend(TOP.to_le_bytes());
+    code.extend([0xd8, 0xc1]);
+    let mut image = load_pe32(&executable::pe32(&code), 16).unwrap();
+    image
+        .memory
+        .write(u64::from(TOP), &1.0_f64.to_le_bytes())
+        .unwrap();
+    let mut cpu = Cpu32::new(image.entry_point);
+    cpu.set_x87_control_word(0x0c7f);
+    assert_eq!(cpu.run(&mut image.memory, 1).instructions, 1);
+    let before = cpu;
+    assert_eq!(
+        cpu.run(&mut image.memory, 1).reason,
+        StopReason::UnsupportedInstruction
+    );
+    assert_eq!(cpu, before);
+}

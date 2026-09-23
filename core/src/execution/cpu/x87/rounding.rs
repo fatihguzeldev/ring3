@@ -38,6 +38,26 @@ pub(super) fn single_sum(result: f64, left: f64, right: f64) -> Option<f64> {
     })
 }
 
+pub(super) fn single_sum_toward_zero(result: f64, left: f64, right: f64) -> Option<f64> {
+    let nearest = single_sum(result, left, right)?;
+    let compared = sum_result(nearest, left, right);
+    let away = (nearest.is_sign_positive() && compared == Ordering::Greater)
+        || (nearest.is_sign_negative() && compared == Ordering::Less);
+    if !away {
+        return Some(nearest);
+    }
+    #[expect(
+        clippy::cast_possible_truncation,
+        reason = "nearest result already has f32 precision"
+    )]
+    let narrowed = nearest as f32;
+    Some(f64::from(if nearest.is_sign_negative() {
+        narrowed.next_up()
+    } else {
+        narrowed.next_down()
+    }))
+}
+
 fn single_rounded(result: f64, compare_exact: impl Fn(f64) -> Ordering) -> Option<f64> {
     let magnitude = result.abs();
     if magnitude != 0.0
