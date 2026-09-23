@@ -137,6 +137,7 @@ enum Api {
     EnableWindow,
     EndDialog,
     SetWindowPos,
+    DestroyWindow,
     ShowWindow,
     UpdateWindow,
     CreateDialog,
@@ -244,6 +245,7 @@ impl Api {
             0x460 => Some(Self::EnableWindow),
             0x468 => Some(Self::EndDialog),
             0x46c => Some(Self::SetWindowPos),
+            0x470 => Some(Self::DestroyWindow),
             0x440 => Some(Self::ShowWindow),
             0x444 => Some(Self::UpdateWindow),
             0x2c4 => Some(Self::CallNextHook),
@@ -342,6 +344,7 @@ impl Api {
                 "EnableWindow" => 0x460,
                 "EndDialog" => 0x468,
                 "SetWindowPos" => 0x46c,
+                "DestroyWindow" => 0x470,
                 "ShowWindow" => 0x440,
                 "UpdateWindow" => 0x444,
                 "CallNextHookEx" => 0x2c4,
@@ -793,6 +796,7 @@ impl Process32 {
         let suspended = match api {
             Api::SendMessage => self.send_message(&frame[1..words])?,
             Api::UpdateWindow => self.update_window(frame[1])?,
+            Api::DestroyWindow => self.destroy_dialog(frame[1])?,
             Api::DispatchMessage => self.dispatch_message(frame[1])?,
             Api::CreateDialog => self.create_dialog(&frame[1..words])?,
             Api::CallNextHook => self.call_next_hook(&frame[1..words])?,
@@ -834,6 +838,7 @@ impl Process32 {
                         cbt_hook: None,
                         module: Some(pending),
                         dialog: None,
+                        destroy: None,
                         paint: false,
                     },
                     pending.entry,
@@ -1010,6 +1015,7 @@ impl Process32 {
                 cbt_hook: None,
                 module: None,
                 dialog: None,
+                destroy: None,
                 paint: true,
             },
             procedure,
@@ -1111,6 +1117,7 @@ impl Process32 {
             ),
             Api::Crt(call) => self.crt_call(call, args)?,
             Api::CreateDialog
+            | Api::DestroyWindow
             | Api::UpdateWindow
             | Api::CallWindowProc
             | Api::SendMessage

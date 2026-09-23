@@ -1,11 +1,18 @@
 use std::collections::BTreeMap;
 
 use super::{
-    DispatchError, GuestMemory, MemoryError, Register32, thread,
+    DispatchError, GuestMemory, MemoryError, Register32, callbacks, thread,
     user_atoms::{self, UserAtoms},
 };
 
 pub(super) const DESKTOP: u32 = 1;
+
+#[derive(Clone, Copy)]
+pub(super) struct DestroyPending {
+    handle: u32,
+    procedure: u32,
+    nc_destroy: bool,
+}
 
 #[derive(Clone, Copy)]
 pub(super) enum Call {
@@ -273,10 +280,13 @@ impl Desktop {
     }
     pub(super) fn remove(&mut self, handle: u32) {
         self.top_levels.remove(&handle);
-        self.children.retain(|_, window| window.parent != handle);
+        self.remove_children(handle);
         if self.active == handle {
             self.active = 0;
         }
+    }
+    pub(super) fn remove_children(&mut self, handle: u32) {
+        self.children.retain(|_, window| window.parent != handle);
     }
     pub(super) fn activate_created(&mut self, handle: u32) {
         if self
@@ -389,6 +399,74 @@ pub(super) fn read_title(memory: &GuestMemory, pointer: u32) -> Result<String, D
 }
 
 impl super::Process32 {
+    pub(super) fn destroy_dialog(&mut self, handle: u32) -> Result<bool, DispatchError> {
+        let Some(window) = self.desktop.window(handle) else {
+            thread::set_last_error(&mut self.memory, 1400)?;
+            self.cpu.set_register(Register32::Eax, 0);
+            return Ok(false);
+        };
+        if window.parent != 0
+            || window.class != 0x8002
+            || window.dialog_units.is_none()
+            || window.procedure == 0
+        {
+            return Err(DispatchError::Unsupported);
+        }
+        let pending = DestroyPending {
+            handle,
+            procedure: window.procedure,
+            nc_destroy: false,
+        };
+        let stack = self.cpu.register(Register32::Esp);
+        self.callbacks.enter(
+            &mut self.cpu,
+            &mut self.memory,
+            callbacks::Frame {
+                stack,
+                caller: stack,
+                cleanup: 8,
+                creation: None,
+                cbt_hook: None,
+                module: None,
+                dialog: None,
+                destroy: Some(pending),
+                paint: false,
+            },
+            pending.procedure,
+            &[handle, 2, 0, 0],
+        )?;
+        self.desktop.hide_dialog(handle);
+        Ok(true)
+    }
+
+    pub(super) fn finish_destroy_callback(
+        &mut self,
+        frame: callbacks::Frame,
+        pending: DestroyPending,
+    ) -> Result<(), DispatchError> {
+        if !pending.nc_destroy {
+            self.desktop.remove_children(pending.handle);
+            let next = DestroyPending {
+                nc_destroy: true,
+                ..pending
+            };
+            return self.callbacks.replace(
+                &mut self.cpu,
+                &mut self.memory,
+                callbacks::Frame {
+                    destroy: Some(next),
+                    ..frame
+                },
+                pending.procedure,
+                &[pending.handle, 0x82, 0, 0],
+            );
+        }
+        self.callbacks.finish(&mut self.cpu, &self.memory)?;
+        self.desktop.remove(pending.handle);
+        self.cpu.set_register(Register32::Eax, 1);
+        Ok(())
+    }
+
     pub(super) fn set_dialog_window_pos(&mut self, args: &[u32]) -> Result<(), DispatchError> {
         let Some(window) = self.desktop.window(args[0]) else {
             thread::set_last_error(&mut self.memory, 1400)?;

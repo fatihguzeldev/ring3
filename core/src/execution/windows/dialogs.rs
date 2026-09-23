@@ -283,6 +283,7 @@ impl Process32 {
                 cbt_hook: hook.map(|(handle, _)| handle),
                 module: None,
                 dialog: Some(pending),
+                destroy: None,
                 paint: false,
             },
             hook.map_or(procedure, |(_, procedure)| procedure),
