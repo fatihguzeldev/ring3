@@ -71,6 +71,66 @@ fn self_and_second_register_add_set_result_and_rounding() {
 }
 
 #[test]
+fn add_pop_stores_the_rounded_second_register_and_pops_top() {
+    for (top, source, control, expected, status) in [
+        (0.0_f64, 0.0_f64, 0x007f_u16, 0.0_f64, 0),
+        (2.5, 1.25, 0x027f, 3.75, 0),
+        (
+            1.0 + 3.0 * 2.0_f64.powi(-24),
+            2.0_f64.powi(-25),
+            0x007f,
+            1.0 + 2.0_f64.powi(-22),
+            0x220,
+        ),
+        (
+            1.0 + 3.0 * 2.0_f64.powi(-24),
+            2.0_f64.powi(-25),
+            0x0c7f,
+            1.0 + 2.0_f64.powi(-23),
+            0x20,
+        ),
+    ] {
+        let (mut cpu, mut memory) = load(top, Some(source), 0xde);
+        cpu.set_x87_control_word(control);
+        assert_eq!(cpu.run(&mut memory, 4).instructions, 4);
+        assert_eq!(cpu.register(Register32::Eax) & 0x3a20, 0x3800 | status);
+        cpu.set_x87_control_word(0x027f);
+        assert_eq!(cpu.run(&mut memory, 1).instructions, 1);
+        assert_eq!(result(&memory), expected.to_bits());
+    }
+}
+
+#[test]
+fn add_pop_rejects_missing_target_and_overflow_atomically() {
+    let mut code = vec![0xdd, 0x05];
+    code.extend(TOP.to_le_bytes());
+    code.extend([0xde, 0xc1]);
+    let mut image = load_pe32(&executable::pe32(&code), 16).unwrap();
+    image
+        .memory
+        .write(u64::from(TOP), &1_f64.to_le_bytes())
+        .unwrap();
+    let mut cpu = Cpu32::new(image.entry_point);
+    cpu.set_x87_control_word(0x027f);
+    assert_eq!(cpu.run(&mut image.memory, 1).instructions, 1);
+    let before = cpu;
+    assert_eq!(
+        cpu.run(&mut image.memory, 1).reason,
+        StopReason::UnsupportedInstruction
+    );
+    assert_eq!(cpu, before);
+
+    let (mut cpu, mut memory) = load(f64::MAX, Some(f64::MAX), 0xde);
+    assert_eq!(cpu.run(&mut memory, 2).instructions, 2);
+    let before = cpu;
+    assert_eq!(
+        cpu.run(&mut memory, 1).reason,
+        StopReason::UnsupportedInstruction
+    );
+    assert_eq!(cpu, before);
+}
+
+#[test]
 fn overflow_and_empty_register_do_not_publish_partial_result() {
     let (mut cpu, mut memory) = load(f64::MAX, None, 0xdc);
     assert_eq!(cpu.run(&mut memory, 1).instructions, 1);

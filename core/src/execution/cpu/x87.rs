@@ -58,3 +58,10 @@ pub(super) fn is_arithmetic(code: Code) -> bool {
 pub(super) fn is_register_transfer(code: Code) -> bool {
     matches!(code, Code::Fst_sti | Code::Fstp_sti | Code::Fxch_st0_sti)
 }
+
+pub(super) fn is_register_add(code: Code) -> bool {
+    matches!(
+        code,
+        Code::Fadd_st0_sti | Code::Fadd_sti_st0 | Code::Faddp_sti_st0
+    )
+}

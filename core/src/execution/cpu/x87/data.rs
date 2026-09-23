@@ -100,6 +100,7 @@ impl Cpu32 {
     ) -> Result<(), StopReason> {
         let single_precision = self.x87_arithmetic_precision(instruction.code())?;
         let destination_is_top = instruction.code() == Code::Fadd_st0_sti;
+        let pop = instruction.code() == Code::Faddp_sti_st0;
         let indexed_register = if destination_is_top {
             instruction.op1_register()
         } else {
@@ -108,7 +109,7 @@ impl Cpu32 {
         let index = (indexed_register as usize)
             .checked_sub(Register::ST0 as usize)
             .ok_or(StopReason::UnsupportedInstruction)?;
-        if index >= usize::from(self.x87_stack.occupied) {
+        if index >= usize::from(self.x87_stack.occupied) || (pop && index == 0) {
             return Err(StopReason::UnsupportedInstruction);
         }
         let top = self.x87_stack.value()?;
@@ -138,6 +139,9 @@ impl Cpu32 {
             slot
         };
         self.x87_stack.values[destination] = result.to_bits();
+        if pop {
+            self.x87_stack.pop();
+        }
         Ok(())
     }
 
@@ -498,6 +502,7 @@ impl Cpu32 {
                 if matches!(
                     code,
                     Code::Fadd_st0_sti
+                        | Code::Faddp_sti_st0
                         | Code::Fmul_st0_sti
                         | Code::Fmul_m32fp
                         | Code::Fmul_m64fp
@@ -512,7 +517,7 @@ impl Cpu32 {
             0x0c3f
                 if matches!(
                     code,
-                    Code::Fmul_m32fp | Code::Fadd_st0_sti | Code::Fadd_m32fp
+                    Code::Fmul_m32fp | Code::Fadd_st0_sti | Code::Faddp_sti_st0 | Code::Fadd_m32fp
                 ) =>
             {
                 Ok(true)

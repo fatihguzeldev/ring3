@@ -234,7 +234,7 @@ impl Cpu32 {
             | Code::Fstp_m64fp => self.x87_transfer(instruction, memory)?,
             code if x87::is_register_transfer(code) => self.x87_register_transfer(instruction)?,
             Code::Fabs => self.x87_absolute()?,
-            Code::Fadd_st0_sti | Code::Fadd_sti_st0 => self.x87_register_add(instruction)?,
+            code if x87::is_register_add(code) => self.x87_register_add(instruction)?,
             Code::Fdivrp_sti_st0 | Code::Fdivp_sti_st0 => self.x87_divide_pop(instruction)?,
             Code::Fild_m16int | Code::Fild_m32int | Code::Fild_m64int => {
                 self.x87_integer_load(instruction, memory)?;
