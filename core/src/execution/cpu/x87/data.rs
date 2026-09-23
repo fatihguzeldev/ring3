@@ -229,8 +229,15 @@ impl Cpu32 {
             let signed_right = if add { right } else { -right };
             (result, rounding::sum_result(result, left, signed_right))
         } else {
-            let source = self.read_float(instruction, memory)?;
-            let multiply = matches!(instruction.code(), Code::Fmul_m32fp | Code::Fmul_m64fp);
+            let source = if instruction.code() == Code::Fimul_m32int {
+                self.read_integer_m32(instruction, memory)?
+            } else {
+                self.read_float(instruction, memory)?
+            };
+            let multiply = matches!(
+                instruction.code(),
+                Code::Fmul_m32fp | Code::Fmul_m64fp | Code::Fimul_m32int
+            );
             let (left, right) =
                 if matches!(instruction.code(), Code::Fdivr_m32fp | Code::Fdivr_m64fp) {
                     (source, top)
@@ -393,7 +400,14 @@ impl Cpu32 {
     fn x87_arithmetic_precision(&self, code: Code) -> Result<bool, StopReason> {
         match self.x87_control_word & 0x0f3f {
             0x023f => Ok(false),
-            0x003f if matches!(code, Code::Fmul_m32fp | Code::Fmul_m64fp) => Ok(true),
+            0x003f
+                if matches!(
+                    code,
+                    Code::Fmul_m32fp | Code::Fmul_m64fp | Code::Fimul_m32int
+                ) =>
+            {
+                Ok(true)
+            }
             _ => Err(StopReason::UnsupportedInstruction),
         }
     }
@@ -448,5 +462,21 @@ impl Cpu32 {
             return Err(StopReason::UnsupportedInstruction);
         }
         Ok(value)
+    }
+
+    fn read_integer_m32(
+        &self,
+        instruction: &Instruction,
+        memory: &GuestMemory,
+    ) -> Result<f64, StopReason> {
+        let (address, size) = self.data_address(instruction)?;
+        if size != 4 {
+            return Err(StopReason::UnsupportedInstruction);
+        }
+        let mut bytes = [0; 4];
+        memory
+            .read(u64::from(address), &mut bytes)
+            .map_err(StopReason::MemoryFault)?;
+        Ok(f64::from(i32::from_le_bytes(bytes)))
     }
 }
