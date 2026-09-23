@@ -50,6 +50,7 @@ pub(super) fn is_arithmetic(code: Code) -> bool {
             | Code::Fadd_m64fp
             | Code::Fsub_m32fp
             | Code::Fsub_m64fp
+            | Code::Fsub_st0_sti
             | Code::Fsubr_m32fp
             | Code::Fsubr_m64fp
     )

@@ -250,10 +250,15 @@ impl Cpu32 {
                 | Code::Fadd_m64fp
                 | Code::Fsub_m32fp
                 | Code::Fsub_m64fp
+                | Code::Fsub_st0_sti
                 | Code::Fsubr_m32fp
                 | Code::Fsubr_m64fp
         ) {
-            let source = self.read_float(instruction, memory)?;
+            let source = if instruction.code() == Code::Fsub_st0_sti {
+                self.x87_register_value(instruction.op1_register())?
+            } else {
+                self.read_float(instruction, memory)?
+            };
             let (left, right) =
                 if matches!(instruction.code(), Code::Fsubr_m32fp | Code::Fsubr_m64fp) {
                     (source, top)
@@ -277,13 +282,7 @@ impl Cpu32 {
             (result, rounding::sum_result(result, left, signed_right))
         } else {
             let source = if instruction.code() == Code::Fmul_st0_sti {
-                let index = (instruction.op1_register() as usize)
-                    .checked_sub(Register::ST0 as usize)
-                    .ok_or(StopReason::UnsupportedInstruction)?;
-                if index >= usize::from(self.x87_stack.occupied) {
-                    return Err(StopReason::UnsupportedInstruction);
-                }
-                f64::from_bits(self.x87_stack.values[(usize::from(self.x87_stack.top) + index) & 7])
+                self.x87_register_value(instruction.op1_register())?
             } else if instruction.code() == Code::Fimul_m32int {
                 self.read_integer_m32(instruction, memory)?
             } else {
@@ -576,6 +575,17 @@ impl Cpu32 {
             return Err(StopReason::UnsupportedInstruction);
         }
         Ok(value)
+    }
+
+    fn x87_register_value(&self, register: Register) -> Result<f64, StopReason> {
+        let index = (register as usize)
+            .checked_sub(Register::ST0 as usize)
+            .ok_or(StopReason::UnsupportedInstruction)?;
+        if index >= usize::from(self.x87_stack.occupied) {
+            return Err(StopReason::UnsupportedInstruction);
+        }
+        let slot = (usize::from(self.x87_stack.top) + index) & 7;
+        Ok(f64::from_bits(self.x87_stack.values[slot]))
     }
 
     fn read_integer_m32(
