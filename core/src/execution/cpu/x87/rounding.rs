@@ -49,6 +49,18 @@ pub(super) fn square_root_result(result: f64, input: f64) -> Ordering {
     product_result(input, result, result).reverse()
 }
 
+pub(super) fn sum_result(result: f64, left: f64, right: f64) -> Ordering {
+    let approximated_right = result - left;
+    let error = (left - (result - approximated_right)) + (right - approximated_right);
+    if error > 0.0 {
+        Ordering::Less
+    } else if error < 0.0 {
+        Ordering::Greater
+    } else {
+        Ordering::Equal
+    }
+}
+
 fn parts(value: f64) -> (u128, i32) {
     if value == 0.0 {
         return (0, 0);

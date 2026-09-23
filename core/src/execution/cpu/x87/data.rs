@@ -135,6 +135,22 @@ impl Cpu32 {
             }
             let result = top.sqrt();
             (result, rounding::square_root_result(result, top))
+        } else if matches!(
+            instruction.code(),
+            Code::Fsub_m32fp | Code::Fsub_m64fp | Code::Fsubr_m32fp | Code::Fsubr_m64fp
+        ) {
+            let source = self.read_float(instruction, memory)?;
+            let (left, right) =
+                if matches!(instruction.code(), Code::Fsubr_m32fp | Code::Fsubr_m64fp) {
+                    (source, top)
+                } else {
+                    (top, source)
+                };
+            let result = left - right;
+            if !result.is_finite() || (result != 0.0 && !result.is_normal()) {
+                return Err(StopReason::UnsupportedInstruction);
+            }
+            (result, rounding::sum_result(result, left, -right))
         } else {
             let source = self.read_float(instruction, memory)?;
             let multiply = matches!(instruction.code(), Code::Fmul_m32fp | Code::Fmul_m64fp);
