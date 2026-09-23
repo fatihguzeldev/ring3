@@ -1,7 +1,11 @@
 use std::collections::BTreeMap;
 
 use super::super::Access;
-use super::{API_BASE, GuestMemory, MemoryError, PAGE_SIZE, Permissions, desktop::DESKTOP, guest};
+use super::{
+    API_BASE, GuestMemory, MemoryError, PAGE_SIZE, Permissions,
+    desktop::{DESKTOP, Desktop},
+    guest,
+};
 
 const OBJECT_BASE: u32 = API_BASE + 4096;
 const ROOT: u32 = OBJECT_BASE;
@@ -117,6 +121,7 @@ pub(super) struct Graphics {
     root_refs: u32,
     device_refs: u32,
     back: Option<Frame>,
+    spare: Option<Frame>,
     depth: Option<Vec<u16>>,
     front: Option<Frame>,
     textures: BTreeMap<u32, Texture>,
@@ -193,6 +198,7 @@ impl Graphics {
         call: Call,
         args: &[u32],
         memory: &mut GuestMemory,
+        desktop: &Desktop,
     ) -> Result<u32, MemoryError> {
         Ok(match call {
             Call::Create => {
@@ -217,7 +223,7 @@ impl Graphics {
             Call::CheckDepthStencilMatch => self.check_depth_stencil_match(args),
             Call::CheckMultiSampleType => self.check_multisample_type(args),
             Call::DeviceCaps => return self.device_caps(args, memory),
-            Call::CreateDevice => return self.create_device(args, memory),
+            Call::CreateDevice => return self.create_device(args, memory, desktop),
             Call::CreateTexture => return self.create_texture(args, memory),
             Call::TextureLevelDesc => return self.texture_level_desc(args, memory),
             Call::TextureLockRect => return self.texture_lock_rect(args, memory),
@@ -263,6 +269,9 @@ impl Graphics {
                     INVALID_CALL
                 } else {
                     self.front.clone_from(&self.back);
+                    if let (Some(back), Some(spare)) = (&mut self.back, &mut self.spare) {
+                        std::mem::swap(back, spare);
+                    }
                     0
                 }
             }
@@ -396,12 +405,17 @@ impl Graphics {
         &mut self,
         args: &[u32],
         memory: &mut GuestMemory,
+        desktop: &Desktop,
     ) -> Result<u32, MemoryError> {
+        let valid_focus = matches!(args[3], 0 | DESKTOP)
+            || desktop
+                .window(args[3])
+                .is_some_and(|window| window.parent == 0);
         if args[0] != ROOT
             || self.root_refs == 0
             || args[1] != 0
             || args[2] != 1
-            || !matches!(args[3], 0 | DESKTOP)
+            || !valid_focus
             || args[4] != 0x20
         {
             return Ok(INVALID_CALL);
@@ -430,12 +444,17 @@ impl Graphics {
             || height == 0
             || u64::from(width) * u64::from(height) > MAX_PIXELS
             || format != 22
-            || count > 1
+            || count > 2
             || samples != 0
             || swap != 1
-            || !matches!(window, 0 | DESKTOP)
+            || !(matches!(window, 0 | DESKTOP)
+                || desktop
+                    .window(window)
+                    .is_some_and(|owned| owned.parent == 0))
             || (window == 0 && args[3] == 0)
-            || windowed == 0
+            || !matches!(windowed, 0 | 1)
+            || (windowed == 0 && (width != 640 || height != 480))
+            || (windowed == 0 && (matches!(args[3], 0 | DESKTOP) || matches!(window, 0 | DESKTOP)))
             || !matches!((enable_depth, depth_format), (0, 0) | (1, 80))
             || flags != 0
             || refresh != 0
@@ -457,17 +476,19 @@ impl Graphics {
         for pixel in frame.rgba.chunks_exact_mut(4) {
             pixel[3] = 255;
         }
-        guest::write_word(memory, args[5] + 12, 1)?;
+        guest::write_word(memory, args[5] + 12, count.max(1))?;
         guest::write_word(memory, args[6], DEVICE)?;
         self.root_refs = self.root_refs.saturating_add(1);
         self.device_refs = 1;
         self.depth = (enable_depth == 1).then(|| vec![u16::MAX; (width * height) as usize]);
+        self.spare = (count == 2).then(|| frame.clone());
         self.back = Some(frame);
         Ok(0)
     }
 
     fn finish_device(&mut self) {
         self.back = None;
+        self.spare = None;
         self.depth = None;
         self.vertex_fvf = 0;
         self.root_refs = self.root_refs.saturating_sub(1);

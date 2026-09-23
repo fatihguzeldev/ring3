@@ -3,6 +3,8 @@ mod imported_executable;
 
 #[path = "support/d3d8_executable.rs"]
 mod d3d8_executable;
+#[path = "support/window_creation_executable.rs"]
+mod window_creation_executable;
 
 use ring3_core::execution::{Process32, ProcessResult, ProcessStop, Register32, StopReason};
 
@@ -18,6 +20,8 @@ const MULTISAMPLE_STATUS: u32 = 0x0040_28f8;
 const TEXTURE_OUTPUT: u32 = 0x0040_2a00;
 const LOCKED_RECT: u32 = 0x0040_2a10;
 const LEVEL_DESC: u32 = 0x0040_2a20;
+const FULLSCREEN_OUTPUT: u32 = 0x0040_2a40;
+const FULLSCREEN_PARAMS: u32 = 0x0040_2a60;
 
 #[test]
 fn executes_an_uninterrupted_guest_graphics_program() {
@@ -103,6 +107,137 @@ fn root() -> (Process32, u32) {
         &[4, 3, 22, 1, 0, 1, 1, 1, 0, 0, 0, 0, 0],
     );
     (process, root)
+}
+
+fn direct_call(process: &mut Process32, target: u32, args: &[u32]) -> u32 {
+    let stack = 0x1000_ef00;
+    let mut frame = vec![0x0040_10f0];
+    frame.extend_from_slice(args);
+    write(process, stack, &frame);
+    process.cpu.eip = target;
+    process.cpu.set_register(Register32::Esp, stack);
+    let result = process.run(1);
+    assert_eq!(
+        result.reason,
+        ProcessStop::Stopped(StopReason::InstructionLimit)
+    );
+    assert_eq!(result.api_calls, 1);
+    process.cpu.register(Register32::Eax)
+}
+
+fn root_with_owned_window() -> (Process32, u32, u32) {
+    let mut process = Process32::load(&window_creation_executable::guest(), 32).unwrap();
+    assert_eq!(
+        process.run(1000).reason,
+        ProcessStop::Stopped(StopReason::Breakpoint)
+    );
+    let hwnd = process.cpu.register(Register32::Ebx);
+    assert_eq!(process.window_snapshots()[0].hwnd, hwnd);
+    assert_eq!(process.window_snapshots()[0].parent, 0);
+    let root = direct_call(&mut process, 0x7000_000c, &[220]);
+    assert_ne!(root, 0);
+    (process, root, hwnd)
+}
+
+#[test]
+fn owned_window_can_create_fullscreen_d16_device_with_two_back_buffers() {
+    let (mut process, root, hwnd) = root_with_owned_window();
+    write(
+        &mut process,
+        FULLSCREEN_PARAMS,
+        &[640, 480, 22, 2, 0, 1, hwnd, 0, 1, 80, 0, 0, 0],
+    );
+    let create = method(&process, root, 15);
+    assert_eq!(
+        direct_call(
+            &mut process,
+            create,
+            &[root, 0, 1, hwnd, 0x20, FULLSCREEN_PARAMS, FULLSCREEN_OUTPUT]
+        ),
+        0
+    );
+    assert_eq!(read(&process, FULLSCREEN_PARAMS + 12), 2);
+    let device = read(&process, FULLSCREEN_OUTPUT);
+    let clear = method(&process, device, 36);
+    let present = method(&process, device, 15);
+    assert_eq!(
+        direct_call(
+            &mut process,
+            clear,
+            &[device, 0, 0, 3, 0xff12_3456, 1_f32.to_bits(), 0]
+        ),
+        0
+    );
+    assert_eq!(direct_call(&mut process, present, &[device, 0, 0, 0, 0]), 0);
+    let first = process.take_frame().unwrap();
+    assert!(
+        first
+            .rgba
+            .chunks_exact(4)
+            .all(|pixel| pixel == [0x12, 0x34, 0x56, 255])
+    );
+    assert_eq!(direct_call(&mut process, present, &[device, 0, 0, 0, 0]), 0);
+    let second = process.take_frame().unwrap();
+    assert!(
+        second
+            .rgba
+            .chunks_exact(4)
+            .all(|pixel| pixel == [0, 0, 0, 255])
+    );
+    for (color, expected) in [
+        (0xff12_3456, [0x12, 0x34, 0x56, 255]),
+        (0xffab_cdef, [0xab, 0xcd, 0xef, 255]),
+    ] {
+        assert_eq!(
+            direct_call(
+                &mut process,
+                clear,
+                &[device, 0, 0, 3, color, 1_f32.to_bits(), 0]
+            ),
+            0
+        );
+        assert_eq!(direct_call(&mut process, present, &[device, 0, 0, 0, 0]), 0);
+        let frame = process.take_frame().unwrap();
+        assert_eq!((frame.width, frame.height), (640, 480));
+        assert!(frame.rgba.chunks_exact(4).all(|pixel| pixel == expected));
+    }
+}
+
+#[test]
+fn fullscreen_creation_rejects_foreign_windows_modes_and_excess_buffers() {
+    let (mut process, root, hwnd) = root_with_owned_window();
+    let create = method(&process, root, 15);
+    let base = [640, 480, 22, 2, 0, 1, hwnd, 0, 1, 80, 0, 0, 0];
+    for (focus, slot, value) in [
+        (hwnd + 4, 0, 640),
+        (hwnd, 6, hwnd + 4),
+        (0, 6, hwnd),
+        (hwnd, 6, 1),
+        (hwnd, 0, 800),
+        (hwnd, 3, 3),
+    ] {
+        let mut params = base;
+        params[slot] = value;
+        write(&mut process, FULLSCREEN_PARAMS, &params);
+        write(&mut process, FULLSCREEN_OUTPUT, &[0x1234_5678]);
+        assert_eq!(
+            direct_call(
+                &mut process,
+                create,
+                &[
+                    root,
+                    0,
+                    1,
+                    focus,
+                    0x20,
+                    FULLSCREEN_PARAMS,
+                    FULLSCREEN_OUTPUT
+                ]
+            ),
+            0x8876_086c
+        );
+        assert_eq!(read(&process, FULLSCREEN_OUTPUT), 0x1234_5678);
+    }
 }
 
 #[test]

@@ -1140,7 +1140,8 @@ impl Process32 {
             Api::Resource(call) => self.resource_api(call, args)?,
             Api::Graphics(call) => self.cpu.set_register(
                 Register32::Eax,
-                self.graphics.dispatch(call, args, &mut self.memory)?,
+                self.graphics
+                    .dispatch(call, args, &mut self.memory, &self.desktop)?,
             ),
             Api::Gdi(call) => self.cpu.set_register(
                 Register32::Eax,
