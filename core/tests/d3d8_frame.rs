@@ -1614,6 +1614,42 @@ fn cooperative_level_reports_only_a_live_owned_device_without_presenting() {
 }
 
 #[test]
+fn scene_calls_pair_on_the_live_device_and_reset_after_recreation() {
+    let (mut process, root, device) = create();
+    let begin = method(&process, device, 34);
+    let end = method(&process, device, 35);
+    assert_ne!(begin, 0x7000_0ffc);
+    assert_ne!(end, 0x7000_0ffc);
+    assert_eq!(invoke(&mut process, end, &[device]), 0x8876_086c);
+    assert_eq!(invoke(&mut process, begin, &[device + 4]), 0x8876_086c);
+    assert_eq!(invoke(&mut process, begin, &[device]), 0);
+    assert_eq!(invoke(&mut process, begin, &[device]), 0x8876_086c);
+    assert_eq!(invoke(&mut process, end, &[device + 4]), 0x8876_086c);
+    assert_eq!(invoke(&mut process, end, &[device]), 0);
+    assert_eq!(invoke(&mut process, end, &[device]), 0x8876_086c);
+    assert_eq!(invoke(&mut process, begin, &[device]), 0);
+    assert!(process.take_frame().is_none());
+
+    let release = method(&process, device, 2);
+    assert_eq!(invoke(&mut process, release, &[device]), 0);
+    assert_eq!(invoke(&mut process, end, &[device]), 0x8876_086c);
+    let create_device = method(&process, root, 15);
+    assert_eq!(
+        invoke(
+            &mut process,
+            create_device,
+            &[root, 0, 1, 1, 0x20, PARAMETERS, OUTPUT]
+        ),
+        0
+    );
+    let recreated = read(&process, OUTPUT);
+    assert_eq!(invoke(&mut process, end, &[recreated]), 0x8876_086c);
+    assert_eq!(invoke(&mut process, begin, &[recreated]), 0);
+    assert_eq!(invoke(&mut process, end, &[recreated]), 0);
+    assert!(process.take_frame().is_none());
+}
+
+#[test]
 fn texture_surface_levels_have_stable_distinct_owned_identities() {
     let (mut process, _, device) = create();
     let create_texture = method(&process, device, 20);

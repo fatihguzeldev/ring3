@@ -71,6 +71,8 @@ pub(super) enum Call {
     SetTextureStageState,
     ValidateDevice,
     TestCooperativeLevel,
+    BeginScene,
+    EndScene,
     TextureLevelCount,
     TextureLevelDesc,
     TextureLockRect,
@@ -111,6 +113,8 @@ impl Call {
             0x4dc => Self::SetTextureStageState,
             0x4e0 => Self::ValidateDevice,
             0x4e4 => Self::TestCooperativeLevel,
+            0x4e8 => Self::BeginScene,
+            0x4ec => Self::EndScene,
             0x40c => Self::TextureLevelCount,
             0x410 => Self::TextureLevelDesc,
             0x414 => Self::TextureLockRect,
@@ -181,6 +185,7 @@ pub(super) struct Graphics {
     depth: Option<Vec<u16>>,
     depth_surface_refs: u32,
     z_enabled: bool,
+    scene_open: bool,
     viewport: Option<Viewport>,
     front: Option<Frame>,
     textures: BTreeMap<u32, Texture>,
@@ -269,6 +274,8 @@ impl Graphics {
             (DEVICE_TABLE, 63, 0x4dc),
             (DEVICE_TABLE, 64, 0x4e0),
             (DEVICE_TABLE, 3, 0x4e4),
+            (DEVICE_TABLE, 34, 0x4e8),
+            (DEVICE_TABLE, 35, 0x4ec),
             (DEPTH_SURFACE_TABLE, 1, 0x4a4),
             (DEPTH_SURFACE_TABLE, 2, 0x4a8),
             (DEVICE_TABLE, 20, 0x400),
@@ -354,6 +361,7 @@ impl Graphics {
             Call::SetTextureStageState => self.set_texture_stage_state(args),
             Call::ValidateDevice => return self.validate_device(args, memory),
             Call::TestCooperativeLevel => self.test_cooperative_level(args[0]),
+            Call::BeginScene | Call::EndScene => self.scene(call, args[0]),
             Call::GetDepthStencilSurface => return self.get_depth_surface(args, memory),
             Call::DepthSurfaceAddRef | Call::DepthSurfaceRelease => {
                 self.depth_surface_ref(call, args)
@@ -583,6 +591,7 @@ impl Graphics {
         guest::write_word(memory, args[6], DEVICE)?;
         self.root_refs = self.root_refs.saturating_add(1);
         self.device_refs = 1;
+        self.scene_open = false;
         self.texture_stages = [0; 8];
         self.color_arg0 = [1; 8];
         self.depth = (enable_depth == 1).then(|| vec![u16::MAX; (width * height) as usize]);
@@ -605,6 +614,7 @@ impl Graphics {
         self.depth = None;
         self.depth_surface_refs = 0;
         self.z_enabled = false;
+        self.scene_open = false;
         self.viewport = None;
         self.vertex_fvf = 0;
         self.texture_stages = [0; 8];
@@ -733,6 +743,15 @@ impl Graphics {
         } else {
             INVALID_CALL
         }
+    }
+
+    fn scene(&mut self, call: Call, device: u32) -> u32 {
+        let opening = matches!(call, Call::BeginScene);
+        if device != DEVICE || self.device_refs == 0 || self.scene_open == opening {
+            return INVALID_CALL;
+        }
+        self.scene_open = opening;
+        0
     }
 
     fn get_depth_surface(
