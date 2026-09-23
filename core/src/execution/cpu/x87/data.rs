@@ -394,7 +394,10 @@ impl Cpu32 {
             let value = self.read_float(instruction, memory)?;
             return self.x87_stack.push(value);
         }
-        if instruction.code() != Code::Fstp_m32fp || self.x87_control_word & 0x0f3f != 0x003f {
+        let profile = self.x87_control_word & 0x0f3f;
+        if !matches!(instruction.code(), Code::Fst_m32fp | Code::Fstp_m32fp)
+            || !matches!(profile, 0x003f | 0x0c3f)
+        {
             self.x87_profile()?;
         }
         let value = self.x87_stack.value()?;
@@ -407,11 +410,15 @@ impl Cpu32 {
             {
                 return Err(StopReason::UnsupportedInstruction);
             }
-            #[expect(
-                clippy::cast_possible_truncation,
-                reason = "checked nearest-even narrowing"
-            )]
-            let narrowed = value as f32;
+            #[expect(clippy::cast_possible_truncation, reason = "checked f32 range")]
+            let mut narrowed = value as f32;
+            if profile == 0x0c3f && f64::from(narrowed).abs() > value.abs() {
+                narrowed = if value.is_sign_negative() {
+                    narrowed.next_up()
+                } else {
+                    narrowed.next_down()
+                };
+            }
             rounded = f64::from(narrowed);
             bytes[..4].copy_from_slice(&narrowed.to_le_bytes());
         }
