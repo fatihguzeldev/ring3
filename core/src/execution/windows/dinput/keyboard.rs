@@ -3,6 +3,7 @@ use super::{Access, Desktop, DispatchError, GuestMemory, INVALID_ARGUMENT, NULL_
 const KEY: [u8; 16] = [
     0x20, 0x82, 0x72, 0x55, 0x3c, 0xd3, 0xcf, 0x11, 0xbf, 0xc7, 0x44, 0x45, 0x53, 0x54, 0, 0,
 ];
+const ACQUIRED: u32 = 0x8007_00aa;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Format {
@@ -26,6 +27,7 @@ pub(super) struct Device {
     format: Option<Format>,
     cooperative_level: Option<CooperativeLevel>,
     buffer_size: BufferSize,
+    acquired_epoch: Option<u64>,
 }
 
 impl Device {
@@ -35,7 +37,47 @@ impl Device {
             format: None,
             cooperative_level: None,
             buffer_size: BufferSize::default(),
+            acquired_epoch: None,
         }
+    }
+
+    fn is_acquired(&self, desktop: &Desktop) -> bool {
+        let (Some(epoch), Some(level)) = (self.acquired_epoch, self.cooperative_level) else {
+            return false;
+        };
+        self.references != 0
+            && desktop.activation() == (level.window, Some(epoch))
+            && desktop
+                .window(level.window)
+                .is_some_and(|window| window.style & 0x4000_0000 == 0)
+    }
+
+    pub(super) fn acquire(&mut self, desktop: &Desktop) -> Result<u32, DispatchError> {
+        if self.is_acquired(desktop) {
+            return Ok(1);
+        }
+        if self.format.is_none() {
+            return Ok(INVALID_ARGUMENT);
+        }
+        let level = self.cooperative_level.ok_or(DispatchError::Unsupported)?;
+        if desktop
+            .window(level.window)
+            .is_none_or(|window| window.style & 0x4000_0000 != 0)
+        {
+            return Ok(INVALID_ARGUMENT);
+        }
+        let (active, epoch) = desktop.activation();
+        if active != level.window {
+            return Ok(0x8007_0005);
+        }
+        self.acquired_epoch = Some(epoch.ok_or(DispatchError::Unsupported)?);
+        Ok(0)
+    }
+
+    pub(super) fn unacquire(&mut self, desktop: &Desktop) -> u32 {
+        let previous = self.is_acquired(desktop);
+        self.acquired_epoch = None;
+        u32::from(!previous)
     }
 
     pub(super) fn set_property(
@@ -43,6 +85,7 @@ impl Device {
         property: u32,
         address: u32,
         memory: &GuestMemory,
+        desktop: &Desktop,
     ) -> Result<u32, DispatchError> {
         if property != 1 {
             return Err(DispatchError::Unsupported);
@@ -61,6 +104,9 @@ impl Device {
         }
         if header[2] != 0 {
             return Ok(INVALID_ARGUMENT);
+        }
+        if self.is_acquired(desktop) {
+            return Ok(ACQUIRED);
         }
         self.buffer_size = BufferSize {
             requested: header[4],
@@ -87,6 +133,9 @@ impl Device {
         {
             return Ok(0x8007_0006);
         }
+        if self.is_acquired(desktop) {
+            return Ok(ACQUIRED);
+        }
         self.cooperative_level = Some(CooperativeLevel {
             window,
             suppress_windows_key: flags & 0x10 != 0,
@@ -98,6 +147,7 @@ impl Device {
         &mut self,
         address: u32,
         memory: &GuestMemory,
+        desktop: &Desktop,
     ) -> Result<u32, DispatchError> {
         if address == 0 {
             return Ok(NULL_POINTER);
@@ -110,6 +160,9 @@ impl Device {
         guest::read_words(memory, address, &mut header[..2])?;
         if header[1] != 16 {
             return Ok(INVALID_ARGUMENT);
+        }
+        if self.is_acquired(desktop) {
+            return Ok(ACQUIRED);
         }
         guest::read_words(memory, address, &mut header)?;
         if header[2..5] != [2, 256, 256] {
@@ -411,6 +464,179 @@ mod tests {
         args: [u32; 3],
     ) -> Result<u32, DispatchError> {
         input.dispatch(Call::SetProperty, &args, memory, &Desktop::default())
+    }
+
+    fn foreground() -> Desktop {
+        let mut desktop = Desktop::default();
+        for handle in [4, 8] {
+            desktop.insert(
+                handle,
+                Window {
+                    style: 0x1000_0000,
+                    ..Window::default()
+                },
+            );
+        }
+        desktop.activate_created(4);
+        desktop
+    }
+
+    #[test]
+    fn nonexclusive_acquisition_and_alias_lifetimes_are_independent() {
+        let (mut input, mut memory) = configured_first();
+        let desktop = foreground();
+        assert!(
+            input
+                .devices
+                .iter()
+                .all(|device| !device.is_acquired(&desktop))
+        );
+        assert_eq!(
+            input.devices[1].set_format(0x2000, &memory, &desktop).ok(),
+            Some(0)
+        );
+        for device in &mut input.devices {
+            assert_eq!(device.set_cooperative_level(4, 6, &desktop).ok(), Some(0));
+            assert_eq!(device.acquire(&desktop).ok(), Some(0));
+        }
+        memory.write(0x1020, &super::super::INTERFACES[0]).unwrap();
+        assert_eq!(
+            input
+                .dispatch(
+                    Call::QueryInterface(Class::Keyboard),
+                    &[DEVICES, 0x1020, 0x1000],
+                    &mut memory,
+                    &desktop
+                )
+                .ok(),
+            Some(0)
+        );
+        assert_eq!(input.devices[0].references, 2);
+        assert!(
+            input
+                .devices
+                .iter()
+                .all(|device| device.is_acquired(&desktop))
+        );
+        assert_eq!(input.devices[0].unacquire(&desktop), 0);
+        assert!(!input.devices[0].is_acquired(&desktop));
+        assert!(input.devices[1].is_acquired(&desktop));
+        assert_eq!(input.devices[0].acquire(&desktop).ok(), Some(0));
+        for (receiver, expected) in [(DEVICES, 1), (DEVICES, 0), (DEVICES + 4, 0)] {
+            assert_eq!(
+                input
+                    .dispatch(
+                        Call::Release(Class::Keyboard),
+                        &[receiver],
+                        &mut memory,
+                        &desktop
+                    )
+                    .ok(),
+                Some(expected)
+            );
+        }
+        assert!(
+            input
+                .devices
+                .iter()
+                .all(|device| !device.is_acquired(&desktop))
+        );
+        assert_eq!(input.roots, [0]);
+    }
+
+    #[test]
+    fn acquired_settings_remain_owned_until_explicit_release_or_focus_loss() {
+        let (mut input, mut memory) = configured_first();
+        let mut desktop = foreground();
+        let device = &mut input.devices[0];
+        assert_eq!(device.set_cooperative_level(4, 6, &desktop).ok(), Some(0));
+        words(&mut memory, 0x1101, &[20, 16, 0, 0, 16]);
+        assert_eq!(
+            device.set_property(1, 0x1101, &memory, &desktop).ok(),
+            Some(0)
+        );
+        assert_eq!(device.acquire(&desktop).ok(), Some(0));
+        let before = (
+            device.format,
+            device.cooperative_level,
+            device.buffer_size,
+            device.acquired_epoch,
+        );
+        assert_eq!(
+            device.set_format(0x2000, &memory, &desktop).ok(),
+            Some(ACQUIRED)
+        );
+        assert_eq!(
+            device.set_cooperative_level(8, 0x16, &desktop).ok(),
+            Some(ACQUIRED)
+        );
+        words(&mut memory, 0x1101, &[20, 16, 0, 0, u32::MAX]);
+        assert_eq!(
+            device.set_property(1, 0x1101, &memory, &desktop).ok(),
+            Some(ACQUIRED)
+        );
+        assert!(matches!(
+            device.set_property(1, 0x5000, &memory, &desktop),
+            Err(DispatchError::Memory(_))
+        ));
+        assert_eq!(
+            (
+                device.format,
+                device.cooperative_level,
+                device.buffer_size,
+                device.acquired_epoch
+            ),
+            before
+        );
+        assert!(desktop.activate_foreground(8));
+        assert!(desktop.activate_foreground(4));
+        assert!(!device.is_acquired(&desktop));
+        assert_eq!(device.set_format(0x2000, &memory, &desktop).ok(), Some(0));
+        assert_eq!(
+            device.set_property(1, 0x1101, &memory, &desktop).ok(),
+            Some(0)
+        );
+        assert_eq!(
+            device.set_cooperative_level(4, 0x16, &desktop).ok(),
+            Some(0)
+        );
+        assert_eq!(device.acquire(&desktop).ok(), Some(0));
+        assert!(device.is_acquired(&desktop));
+        assert_ne!(device.acquired_epoch, before.3);
+        assert_eq!(
+            device.buffer_size,
+            BufferSize {
+                requested: u32::MAX,
+                capacity: 1024
+            }
+        );
+        assert_eq!(device.unacquire(&desktop), 0);
+        assert_eq!(device.unacquire(&desktop), 1);
+        assert_eq!(device.acquired_epoch, None);
+        assert_eq!(input.devices[0].references, 1);
+        assert_eq!(input.devices[1].buffer_size, BufferSize::default());
+        assert!(!input.devices[1].is_acquired(&desktop));
+        assert_eq!(input.roots, [0]);
+    }
+
+    #[test]
+    fn acquisition_revalidates_child_and_removed_windows_without_losing_configuration() {
+        let (mut input, _) = configured_first();
+        let mut desktop = foreground();
+        let device = &mut input.devices[0];
+        assert_eq!(device.set_cooperative_level(4, 6, &desktop).ok(), Some(0));
+        let configured = device.cooperative_level;
+        desktop.window_mut(4).unwrap().style |= 0x4000_0000;
+        assert_eq!(device.acquire(&desktop).ok(), Some(INVALID_ARGUMENT));
+        assert_eq!(device.acquired_epoch, None);
+        desktop.window_mut(4).unwrap().style &= !0x4000_0000;
+        assert_eq!(device.acquire(&desktop).ok(), Some(0));
+        desktop.remove(4);
+        assert!(!device.is_acquired(&desktop));
+        assert_eq!(device.acquire(&desktop).ok(), Some(INVALID_ARGUMENT));
+        assert_eq!(device.unacquire(&desktop), 1);
+        assert_eq!(device.cooperative_level, configured);
+        assert_eq!(device.format, Some(Format::StandardKeyboard));
     }
 
     #[test]

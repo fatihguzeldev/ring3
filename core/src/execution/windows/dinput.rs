@@ -71,6 +71,8 @@ pub(super) enum Call {
     SetDataFormat,
     SetCooperativeLevel,
     SetProperty,
+    Acquire,
+    Unacquire,
     QueryInterface(Class),
     AddRef(Class),
     Release(Class),
@@ -90,6 +92,8 @@ impl Call {
             0x578 => Some(Self::SetDataFormat),
             0x57c => Some(Self::SetCooperativeLevel),
             0x580 => Some(Self::SetProperty),
+            0x584 => Some(Self::Acquire),
+            0x588 => Some(Self::Unacquire),
             _ => None,
         }
     }
@@ -103,7 +107,7 @@ impl Call {
             Self::Create | Self::CreateDevice => 4,
             Self::QueryInterface(_) | Self::SetCooperativeLevel | Self::SetProperty => 3,
             Self::SetDataFormat => 2,
-            Self::AddRef(_) | Self::Release(_) => 1,
+            Self::AddRef(_) | Self::Release(_) | Self::Acquire | Self::Unacquire => 1,
         }
     }
 }
@@ -160,6 +164,8 @@ impl Input {
                     1 => 0x570,
                     2 => 0x574,
                     6 => 0x580,
+                    7 => 0x584,
+                    8 => 0x588,
                     11 => 0x578,
                     13 => 0x57c,
                     _ => 0xffc,
@@ -278,7 +284,7 @@ impl Input {
             Call::CreateDevice => self.create_device(args, memory),
             Call::SetDataFormat => {
                 let index = self.object(Class::Keyboard, args[0])?;
-                self.devices[index].set_format(args[1], memory)
+                self.devices[index].set_format(args[1], memory, desktop)
             }
             Call::SetCooperativeLevel => {
                 let index = self.object(Class::Keyboard, args[0])?;
@@ -286,7 +292,15 @@ impl Input {
             }
             Call::SetProperty => {
                 let index = self.object(Class::Keyboard, args[0])?;
-                self.devices[index].set_property(args[1], args[2], memory)
+                self.devices[index].set_property(args[1], args[2], memory, desktop)
+            }
+            Call::Acquire => {
+                let index = self.object(Class::Keyboard, args[0])?;
+                self.devices[index].acquire(desktop)
+            }
+            Call::Unacquire => {
+                let index = self.object(Class::Keyboard, args[0])?;
+                Ok(self.devices[index].unacquire(desktop))
             }
             Call::QueryInterface(class) => self.query(class, args, memory),
             Call::AddRef(class) | Call::Release(class) => {

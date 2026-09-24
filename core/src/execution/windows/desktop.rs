@@ -165,6 +165,7 @@ pub(super) struct Desktop {
     top_levels: BTreeMap<u32, Window>,
     children: BTreeMap<u32, Window>,
     active: u32,
+    activation_epoch: Option<u64>,
     next: u32,
 }
 
@@ -174,12 +175,24 @@ impl Default for Desktop {
             top_levels: BTreeMap::new(),
             children: BTreeMap::new(),
             active: 0,
+            activation_epoch: Some(0),
             next: 0x7500_0004,
         }
     }
 }
 
 impl Desktop {
+    pub(super) fn activation(&self) -> (u32, Option<u64>) {
+        (self.active, self.activation_epoch)
+    }
+
+    fn set_active(&mut self, handle: u32) {
+        if self.active != handle {
+            self.activation_epoch = self.activation_epoch.and_then(|epoch| epoch.checked_add(1));
+            self.active = handle;
+        }
+    }
+
     pub(super) fn top_window(&self, parent: u32) -> u32 {
         if matches!(parent, 0 | DESKTOP) {
             return self.top_levels.keys().next_back().copied().unwrap_or(0);
@@ -283,7 +296,7 @@ impl Desktop {
         self.top_levels.remove(&handle);
         self.remove_children(handle);
         if self.active == handle {
-            self.active = 0;
+            self.set_active(0);
         }
     }
     pub(super) fn remove_children(&mut self, handle: u32) {
@@ -295,7 +308,7 @@ impl Desktop {
             .get(&handle)
             .is_some_and(|window| window.style & 0x1000_0000 != 0)
         {
-            self.active = handle;
+            self.set_active(handle);
         }
     }
     pub(super) fn activate_foreground(&mut self, handle: u32) -> bool {
@@ -306,7 +319,7 @@ impl Desktop {
         {
             return false;
         }
-        self.active = handle;
+        self.set_active(handle);
         true
     }
     pub(super) fn show_activated(&mut self, handle: u32) -> Option<u32> {
@@ -316,7 +329,7 @@ impl Desktop {
             window.needs_paint = true;
         }
         window.style |= 0x1000_0000;
-        self.active = handle;
+        self.set_active(handle);
         Some(was_visible)
     }
     pub(super) fn hide_window(&mut self, handle: u32) -> Option<u32> {
@@ -325,7 +338,7 @@ impl Desktop {
         window.style &= !0x1000_0000;
         window.needs_paint = false;
         if self.active == handle {
-            self.active = 0;
+            self.set_active(0);
         }
         Some(was_visible)
     }
@@ -697,6 +710,80 @@ impl super::Process32 {
 mod tests {
     use super::*;
     use crate::execution::Permissions;
+
+    #[test]
+    fn activation_epochs_change_only_with_the_active_window() {
+        let mut desktop = Desktop::default();
+        assert_eq!(desktop.activation(), (0, Some(0)));
+        for handle in [4, 8] {
+            desktop.insert(
+                handle,
+                Window {
+                    style: 0x1000_0000,
+                    ..Window::default()
+                },
+            );
+        }
+        desktop.insert(12, Window::default());
+        desktop.activate_created(4);
+        assert_eq!(desktop.activation(), (4, Some(1)));
+        desktop.activate_created(4);
+        assert!(desktop.activate_foreground(4));
+        assert_eq!(desktop.show_activated(4), Some(1));
+        assert_eq!(desktop.hide_window(8), Some(1));
+        assert!(!desktop.activate_foreground(8));
+        desktop.activate_created(12);
+        desktop.remove(12);
+        desktop.insert_child(
+            16,
+            Window {
+                parent: 4,
+                style: 0x5000_0000,
+                ..Window::default()
+            },
+        );
+        desktop.activate_created(16);
+        assert!(!desktop.activate_foreground(16));
+        desktop.remove_children(4);
+        assert_eq!(desktop.activation(), (4, Some(1)));
+        assert_eq!(desktop.show_activated(8), Some(0));
+        assert_eq!(desktop.activation(), (8, Some(2)));
+        assert!(desktop.activate_foreground(4));
+        assert_eq!(desktop.activation(), (4, Some(3)));
+        assert_eq!(desktop.hide_window(4), Some(1));
+        assert_eq!(desktop.activation(), (0, Some(4)));
+        assert_eq!(desktop.show_activated(4), Some(0));
+        assert_eq!(desktop.activation(), (4, Some(5)));
+        desktop.remove(8);
+        assert_eq!(desktop.activation(), (4, Some(5)));
+        desktop.remove(4);
+        assert_eq!(desktop.activation(), (0, Some(6)));
+    }
+
+    #[test]
+    fn activation_epoch_exhaustion_keeps_window_behavior_without_reusing_identity() {
+        let mut desktop = Desktop {
+            activation_epoch: Some(u64::MAX - 1),
+            ..Desktop::default()
+        };
+        desktop.insert(
+            4,
+            Window {
+                style: 0x1000_0000,
+                ..Window::default()
+            },
+        );
+        desktop.activate_created(4);
+        assert_eq!(desktop.activation(), (4, Some(u64::MAX)));
+        assert!(desktop.activate_foreground(4));
+        assert_eq!(desktop.activation(), (4, Some(u64::MAX)));
+        assert_eq!(desktop.hide_window(4), Some(1));
+        assert_eq!(desktop.activation(), (0, None));
+        assert_eq!(desktop.show_activated(4), Some(0));
+        assert_eq!(desktop.activation(), (4, None));
+        desktop.remove(4);
+        assert_eq!(desktop.activation(), (0, None));
+    }
 
     #[test]
     fn combo_items_keep_sorted_or_insertion_order_with_a_byte_limit() {
