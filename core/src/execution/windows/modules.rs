@@ -559,6 +559,64 @@ mod tests {
     use crate::execution::{PAGE_SIZE, Permissions};
 
     #[test]
+    fn deferred_initializer_ownership_excludes_foreign_starts_and_completions() {
+        let entries: Vec<_> = [("first.dll", 0x5000_0000), ("second.dll", 0x5001_0000)]
+            .into_iter()
+            .map(|(name, base)| Initializer {
+                name: name.to_owned(),
+                base,
+                entry: base + 0x1000,
+            })
+            .collect();
+        let providers = entries
+            .iter()
+            .map(|entry| MappedModule {
+                name: entry.name.clone(),
+                base: entry.base,
+            })
+            .collect();
+        let mut modules = Modules::new(0x0040_0000, b"C:\\program.exe", providers, 0, &entries);
+        let mut memory = GuestMemory::new(1);
+        memory
+            .map_zeroed(0x1000, PAGE_SIZE, Permissions::READ_WRITE)
+            .unwrap();
+        memory.write(0x1000, b"first.dll\0").unwrap();
+        let Load::Initialize(first) = modules
+            .load(0x1000, true, thread::Teb(thread::BASE), &mut memory)
+            .ok()
+            .unwrap()
+        else {
+            panic!()
+        };
+        modules.start(first, thread::BASE);
+        assert_eq!(modules.loader_owner(), Some(thread::BASE));
+        assert!(modules.check_initializer_owner(first, thread::BASE).is_ok());
+        assert!(matches!(
+            modules.check_initializer_owner(first, 0x1101_0000),
+            Err(DispatchError::Unsupported)
+        ));
+        memory.write(0x1000, b"second.dll\0").unwrap();
+        assert!(matches!(
+            modules.load(0x1000, true, thread::Teb(0x1101_0000), &mut memory),
+            Err(DispatchError::Unsupported)
+        ));
+        assert!(matches!(
+            modules.load(0x1000, true, thread::Teb(thread::BASE), &mut memory),
+            Ok(Load::Initialize(_))
+        ));
+        modules.finish(first, false);
+        assert_eq!(modules.loader_owner(), None);
+        assert!(matches!(
+            modules.check_initializer_owner(first, thread::BASE),
+            Err(DispatchError::Unsupported)
+        ));
+        assert!(matches!(
+            modules.load(0x1000, true, thread::Teb(0x1101_0000), &mut memory),
+            Ok(Load::Initialize(_))
+        ));
+    }
+
+    #[test]
     fn initializer_order_survives_failed_and_successful_deferred_loads() {
         let names = [
             "first.dll",
@@ -632,32 +690,8 @@ mod tests {
             (handles[3], handles[3] + 0x1000)
         );
         modules.start(fourth, thread::BASE);
-        assert_eq!(modules.loader_owner(), Some(thread::BASE));
-        assert!(
-            modules
-                .check_initializer_owner(fourth, thread::BASE)
-                .is_ok()
-        );
-        assert!(matches!(
-            modules.check_initializer_owner(fourth, 0x1101_0000),
-            Err(DispatchError::Unsupported)
-        ));
-        memory.write(0x1000, b"third.dll\0").unwrap();
-        assert!(matches!(
-            modules.load(0x1000, true, thread::Teb(0x1101_0000), &mut memory),
-            Err(DispatchError::Unsupported)
-        ));
-        assert!(matches!(
-            load(&mut modules, &mut memory, 2),
-            Load::Initialize(_)
-        ));
         assert_eq!(order(&modules), expected(&[1, 0]));
         modules.finish(fourth, false);
-        assert_eq!(modules.loader_owner(), None);
-        assert!(matches!(
-            modules.check_initializer_owner(fourth, thread::BASE),
-            Err(DispatchError::Unsupported)
-        ));
         assert_eq!(order(&modules), expected(&[1, 0]));
         let Load::Initialize(third) = load(&mut modules, &mut memory, 2) else {
             panic!()
