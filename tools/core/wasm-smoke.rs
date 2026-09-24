@@ -22,6 +22,8 @@ mod resumed_thread_cases;
 mod suspended_event_cases;
 #[path = "../../core/tests/support/suspended_thread_cases.rs"]
 mod suspended_thread_cases;
+#[path = "../../core/tests/support/timed_event_cases.rs"]
+mod timed_event_cases;
 
 #[path = "../../core/tests/support/thread_start_cases.rs"]
 mod thread_start_cases;
@@ -4703,6 +4705,7 @@ pub extern "C" fn run() -> u32 {
     resumed_thread_cases::resumed_guest_preserves_context_across_host_budgets();
     suspended_thread_cases::suspended_guest_preserves_counts_across_host_budgets();
     suspended_event_cases::suspended_event_waits_preserve_signal_and_handle_ownership();
+    timed_event_cases::finite_wait_uses_exact_host_time_across_budgets();
     thread_start_cases::ordered_notifications_precede_each_child_entry();
     thread_start_cases::retryable_notification_frames();
     cxx_exception_cases::outer_transition_faults_preserve_cleanup_and_catch_progress();

@@ -6,12 +6,32 @@ pub(super) struct Wait {
     handle: u32,
     event: u32,
     stack: u32,
-    released: bool,
+    deadline: Option<u64>,
+    completion: Option<Completion>,
+}
+
+#[derive(Clone, Copy)]
+pub(in super::super) enum Completion {
+    Signaled,
+    TimedOut,
+}
+
+impl Completion {
+    fn value(self) -> u32 {
+        match self {
+            Self::Signaled => 0,
+            Self::TimedOut => 258,
+        }
+    }
 }
 
 impl Wait {
     pub(super) fn pending(self) -> bool {
-        !self.released
+        self.completion.is_none()
+    }
+
+    fn expired(self, now: u64) -> bool {
+        self.pending() && self.deadline.is_some_and(|deadline| now >= deadline)
     }
 
     pub(super) fn check(self, cpu: &Cpu32) -> Result<(), DispatchError> {
@@ -31,6 +51,7 @@ impl Threads {
         cpu: &Cpu32,
         handle: u32,
         event: u32,
+        deadline: Option<u64>,
     ) -> Result<(), DispatchError> {
         if !self.scheduling_enabled() || cpu.fs_base() != self.active_teb() {
             return Err(DispatchError::Unsupported);
@@ -39,7 +60,8 @@ impl Threads {
             handle,
             event,
             stack: cpu.register(Register32::Esp),
-            released: false,
+            deadline,
+            completion: None,
         };
         wait.check(cpu)?;
         let state = self.state_mut(cpu.fs_base())?;
@@ -69,17 +91,42 @@ impl Threads {
         (context.suspend_count == 1 && wait.pending()).then_some(wait.handle)
     }
 
+    pub(in super::super) fn expired_on_resume(&self, handle: u32, now: u64) -> bool {
+        self.children.get(&handle).is_some_and(|context| {
+            context.suspend_count == 1 && context.state.wait.is_some_and(|wait| wait.expired(now))
+        })
+    }
+
+    pub(super) fn expire_waits(&mut self, now: u64) {
+        for state in std::iter::once(&mut self.primary).chain(
+            self.children
+                .values_mut()
+                .filter(|context| context.ever_resumed && context.suspend_count == 0)
+                .map(|context| &mut context.state),
+        ) {
+            if let Some(wait) = &mut state.wait
+                && wait.expired(now)
+            {
+                wait.completion = Some(Completion::TimedOut);
+            }
+        }
+    }
+
     pub(in super::super) fn release_waiters(&mut self, waiters: &[u32]) {
         for &handle in waiters {
-            let state = if handle == 0 {
-                &mut self.primary
-            } else {
-                &mut self.children.get_mut(&handle).unwrap().state
-            };
-            let wait = state.wait.as_mut().expect("prepared waiter is retained");
-            debug_assert!(wait.pending());
-            wait.released = true;
+            self.complete_wait(handle, Completion::Signaled);
         }
+    }
+
+    pub(in super::super) fn complete_wait(&mut self, handle: u32, completion: Completion) {
+        let state = if handle == 0 {
+            &mut self.primary
+        } else {
+            &mut self.children.get_mut(&handle).unwrap().state
+        };
+        let wait = state.wait.as_mut().expect("prepared waiter is retained");
+        debug_assert!(wait.pending());
+        wait.completion = Some(completion);
     }
 
     pub(in super::super) fn uses_wait_handle(&self, handle: u32) -> bool {
@@ -100,12 +147,10 @@ impl Threads {
             return Ok(false);
         };
         wait.check(cpu)?;
-        if wait.pending() {
-            return Err(DispatchError::Unsupported);
-        }
+        let completion = wait.completion.ok_or(DispatchError::Unsupported)?;
         let mut saved_return = [0];
         guest::read_words(memory, wait.stack, &mut saved_return)?;
-        cpu.set_register(Register32::Eax, 0);
+        cpu.set_register(Register32::Eax, completion.value());
         cpu.set_register(Register32::Esp, wait.stack + 12);
         cpu.eip = saved_return[0];
         state.wait = None;

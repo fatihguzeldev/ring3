@@ -739,7 +739,9 @@ impl Process32 {
     /// the public cpu is the selected thread; scheduling validates its fs identity.
     /// a dispatched callback may still be in progress when the budget ends.
     /// an event wait is charged when parked; its released continuation costs no unit.
+    /// finite event waits expire at a positive run boundary using the supplied elapsed time.
     /// when no thread is ready, returns the synchronization wait without more work.
+    /// the host may advance elapsed time and run again; execution never advances the clock.
     /// repeated strings use one step per element, or one for a zero-count operation.
     /// faults consume no unit for the faulting operation. exit is terminal and
     /// later calls return the same code without executing more guest work.
@@ -759,12 +761,7 @@ impl Process32 {
         }
         let mut remaining = budget;
         while remaining != 0 {
-            let pinned = if self.startup.is_complete() {
-                self.modules.loader_owner()
-            } else {
-                Some(thread::BASE)
-            };
-            let slice = match self.threads.slice(&mut self.cpu, remaining, pinned) {
+            let slice = match self.schedule_slice(remaining) {
                 Ok(Some(slice)) => slice,
                 Ok(None) => {
                     result.reason = ProcessStop::WaitingForSynchronization;

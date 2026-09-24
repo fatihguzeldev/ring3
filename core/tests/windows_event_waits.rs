@@ -137,7 +137,7 @@ fn all_blocked_threads_return_idle_without_reexecuting_the_wait() {
     let mut p = process();
     let event = call(&mut p, 0x53c, &[0, 1, 0, 0]);
     denied(&mut p, 0x214, &[event, u32::MAX]);
-    park_child(&mut p, event);
+    let child = park_child(&mut p, event);
     let valid = prepare(&mut p, 0x214, &[event, u32::MAX]);
     put(&mut p, 0x1000_fffc, CODE);
     p.cpu.set_register(Register32::Esp, 0x1000_fffc);
@@ -150,7 +150,7 @@ fn all_blocked_threads_return_idle_without_reexecuting_the_wait() {
     assert_eq!((fault.instructions, fault.api_calls), (0, 0));
     assert_eq!(p.cpu, invalid);
     p.cpu = valid;
-    denied(&mut p, 0x214, &[event, 1]);
+    denied(&mut p, 0x214, &[child, 1]);
     let before = prepare(&mut p, 0x214, &[event, u32::MAX]);
     let run = p.run(1);
     assert_eq!(

@@ -1,4 +1,6 @@
-use super::super::{Cpu32, DispatchError, GuestMemory, synchronization::SyncObjects, thread};
+use super::super::{
+    Cpu32, DispatchError, GuestMemory, Process32, synchronization::SyncObjects, thread,
+};
 use super::{State, Threads};
 
 const QUANTUM: u64 = 4096;
@@ -88,6 +90,7 @@ impl Threads {
         cpu: &mut Cpu32,
         budget: u64,
         pinned: Option<u32>,
+        now: u64,
     ) -> Result<Option<u64>, DispatchError> {
         if self.schedule.resumed == 0 {
             return Ok(Some(budget));
@@ -100,6 +103,7 @@ impl Threads {
         if let Some(wait) = wait {
             wait.check(cpu)?;
         }
+        self.expire_waits(now);
         if pinned.is_some() {
             if self.schedule.remaining == 0 {
                 self.schedule.remaining = QUANTUM;
@@ -167,5 +171,24 @@ impl Threads {
         if self.schedule.resumed != 0 {
             self.schedule.remaining -= count;
         }
+    }
+}
+
+impl Process32 {
+    pub(in super::super) fn schedule_slice(
+        &mut self,
+        budget: u64,
+    ) -> Result<Option<u64>, DispatchError> {
+        let pinned = if self.startup.is_complete() {
+            self.modules.loader_owner()
+        } else {
+            Some(thread::BASE)
+        };
+        self.threads.slice(
+            &mut self.cpu,
+            budget,
+            pinned,
+            self.elapsed_nanoseconds.cast_unsigned(),
+        )
     }
 }

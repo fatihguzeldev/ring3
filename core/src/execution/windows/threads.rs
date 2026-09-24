@@ -5,6 +5,7 @@ mod scheduling;
 mod suspension;
 mod waiting;
 pub(super) use entry::{ENTER, RETURN};
+pub(super) use waiting::Completion;
 
 use super::{
     API_BASE, Access, Cpu32, DispatchError, GuestMemory, Permissions, Register32, STACK_SIZE,
