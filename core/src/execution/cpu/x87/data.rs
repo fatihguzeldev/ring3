@@ -48,7 +48,7 @@ impl Stack {
 impl Cpu32 {
     pub(in super::super) fn x87_unary(&mut self, code: Code) -> Result<(), StopReason> {
         match code {
-            Code::Fabs => self.x87_absolute(),
+            Code::Fabs | Code::Fchs => self.x87_sign(code),
             Code::Fptan => self.x87_tangent(),
             _ => Err(StopReason::UnsupportedInstruction),
         }
@@ -75,7 +75,7 @@ impl Cpu32 {
         Ok(())
     }
 
-    pub(in super::super) fn x87_absolute(&mut self) -> Result<(), StopReason> {
+    fn x87_sign(&mut self, code: Code) -> Result<(), StopReason> {
         if !matches!(self.x87_control_word & 0x0f3f, 0x003f | 0x023f) {
             return Err(StopReason::UnsupportedInstruction);
         }
@@ -84,7 +84,11 @@ impl Cpu32 {
             return Err(StopReason::UnsupportedInstruction);
         }
         let slot = usize::from(self.x87_stack.top);
-        self.x87_stack.values[slot] = value.to_bits() & !(1_u64 << 63);
+        self.x87_stack.values[slot] = if code == Code::Fchs {
+            value.to_bits() ^ (1_u64 << 63)
+        } else {
+            value.to_bits() & !(1_u64 << 63)
+        };
         self.x87_stack.rounded(false, false);
         Ok(())
     }

@@ -49,6 +49,49 @@ fn absolute_value_clears_only_the_sign_for_both_supported_precisions() {
 }
 
 #[test]
+fn change_sign_flips_only_sign_bit_for_both_supported_precisions() {
+    let mut code = vec![0xdd, 0x05];
+    code.extend(TOP.to_le_bytes());
+    code.extend([0xd9, 0xe0, 0xdf, 0xe0, 0xdd, 0x1d]);
+    code.extend(OUTPUT.to_le_bytes());
+    for control in [0x007f, 0x027f] {
+        for input in [-1.0 - 2.0_f64.powi(-30), -0.0, 0.0, 5.0] {
+            let (mut cpu, mut memory) = load(&code, input, 0.0, control);
+            assert_eq!(cpu.run(&mut memory, 3).instructions, 3);
+            assert_eq!(cpu.register(Register32::Eax) & 0x3a20, 0x3800);
+            cpu.set_x87_control_word(0x027f);
+            assert_eq!(cpu.run(&mut memory, 1).instructions, 1);
+            assert_eq!(output(&memory), input.to_bits() ^ (1_u64 << 63));
+            assert_eq!(cpu.eflags, 0xced7);
+        }
+    }
+}
+
+#[test]
+fn change_sign_rejects_empty_stack_and_unmasked_control_atomically() {
+    let (mut cpu, mut memory) = load(&[0xd9, 0xe0], 2.0, 0.0, 0x007f);
+    let before = cpu;
+    assert_eq!(
+        cpu.run(&mut memory, 1).reason,
+        StopReason::UnsupportedInstruction
+    );
+    assert_eq!(cpu, before);
+
+    let mut code = vec![0xdd, 0x05];
+    code.extend(TOP.to_le_bytes());
+    code.extend([0xd9, 0xe0]);
+    let (mut cpu, mut memory) = load(&code, 2.0, 0.0, 0x007f);
+    assert_eq!(cpu.run(&mut memory, 1).instructions, 1);
+    cpu.set_x87_control_word(0x007e);
+    let before = cpu;
+    assert_eq!(
+        cpu.run(&mut memory, 1).reason,
+        StopReason::UnsupportedInstruction
+    );
+    assert_eq!(cpu, before);
+}
+
+#[test]
 fn absolute_value_clears_c1_and_keeps_sticky_precision() {
     let mut code = vec![0xdd, 0x05];
     code.extend(TOP.to_le_bytes());
