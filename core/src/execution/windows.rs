@@ -1171,7 +1171,12 @@ impl Process32 {
                 self.cpu.set_register(Register32::Eax, value);
             }
             Api::Tls(call) => {
-                let value = self.tls.dispatch(call, args, &mut self.memory)?;
+                let value = self.tls.dispatch(
+                    call,
+                    args,
+                    thread::Teb(self.cpu.fs_base()),
+                    &mut self.memory,
+                )?;
                 self.cpu.set_register(Register32::Eax, value);
             }
             Api::CriticalSection(call) => self.critical_section(call, argument)?,

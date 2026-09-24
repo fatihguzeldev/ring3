@@ -21,7 +21,7 @@ impl Threads {
         args: &[u32],
         memory: &mut GuestMemory,
         handles: &mut SyncObjects,
-    ) -> Result<u32, DispatchError> {
+    ) -> Result<(u32, thread::Teb), DispatchError> {
         if args[0] != 0 || args[1] != 0 || args[4] != 4 {
             return Err(DispatchError::Unsupported);
         }
@@ -60,7 +60,7 @@ impl Threads {
         cpu.set_x87_control_word(0x027f);
         let handle = handles.insert_thread();
         self.suspended.insert(handle, cpu);
-        Ok(handle)
+        Ok((handle, thread::Teb(high)))
     }
 }
 
@@ -78,10 +78,11 @@ mod tests {
         let mut threads = Threads::default();
         let mut handles = SyncObjects::default();
         for slot in 0..2 {
-            let handle = threads
+            let (handle, teb) = threads
                 .create_suspended(&[0, 0, 0x4000, slot, 4, 0], &mut memory, &mut handles)
                 .unwrap_or_else(|_| panic!("suspended creation failed"));
             let high = START + slot * SLOT_SIZE + STACK_SIZE;
+            assert_eq!(teb.0, high);
             let mut expected = Cpu32::new(0x4000);
             expected.set_register(Register32::Esp, high - 8);
             expected.set_fs_base(high);

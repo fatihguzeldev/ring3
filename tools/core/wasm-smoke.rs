@@ -3076,6 +3076,45 @@ fn execute_global_memory() {
     }
 }
 
+fn execute_tls_threads() {
+    use ring3_core::execution::{Process32, ProcessStop, Register32, StopReason};
+    fn call(process: &mut Process32, api: u32, args: &[u32]) -> u32 {
+        let stack = 0x1000_ff00;
+        process.cpu.eip = api;
+        process.cpu.set_register(Register32::Esp, stack);
+        for (index, value) in std::iter::once(&0x0040_1000_u32).chain(args).enumerate() {
+            process
+                .memory
+                .write(u64::from(stack) + index as u64 * 4, &value.to_le_bytes())
+                .unwrap();
+        }
+        assert_eq!(
+            process.run(1).reason,
+            ProcessStop::Stopped(StopReason::InstructionLimit)
+        );
+        process.cpu.register(Register32::Eax)
+    }
+    let mut process = Process32::load(&suspended_thread_executable::pe32(), 64).unwrap();
+    assert_eq!(
+        process.run(100).reason,
+        ProcessStop::Stopped(StopReason::Breakpoint)
+    );
+    let handle = process.cpu.register(Register32::Eax);
+    assert_eq!(call(&mut process, 0x7000_0068, &[]), 0);
+    assert_eq!(call(&mut process, 0x7000_0074, &[0, 111]), 1);
+    process.cpu.set_fs_base(0x1101_0000);
+    assert_eq!(call(&mut process, 0x7000_0070, &[0]), 0);
+    assert_eq!(call(&mut process, 0x7000_0074, &[0, 222]), 1);
+    assert_eq!(call(&mut process, 0x7000_021c, &[handle]), 1);
+    assert_eq!(call(&mut process, 0x7000_0070, &[0]), 222);
+    process.cpu.set_fs_base(0x7ffd_e000);
+    assert_eq!(call(&mut process, 0x7000_0070, &[0]), 111);
+    assert_eq!(call(&mut process, 0x7000_006c, &[0]), 1);
+    assert_eq!(call(&mut process, 0x7000_0068, &[]), 0);
+    process.cpu.set_fs_base(0x1101_0000);
+    assert_eq!(call(&mut process, 0x7000_0070, &[0]), 0);
+}
+
 fn execute_tls() {
     use ring3_core::execution::{Process32, ProcessStop, Register32, StopReason};
     let mut process = Process32::load(&tls_executable::pe32(), 32).unwrap();
@@ -4490,6 +4529,7 @@ pub extern "C" fn run() -> u32 {
     execute_version();
     execute_critical_sections();
     execute_tls();
+    execute_tls_threads();
     execute_global_memory();
     execute_memset();
     execute_reverse_search();

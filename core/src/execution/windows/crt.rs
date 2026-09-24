@@ -209,11 +209,12 @@ pub(super) struct Crt {
 impl super::Process32 {
     pub(super) fn crt_call(&mut self, call: Call, arguments: &[u32]) -> Result<(), DispatchError> {
         if matches!(call, Call::BeginThreadEx) {
-            let value = self.threads.create_suspended(
+            let (value, teb) = self.threads.create_suspended(
                 arguments,
                 &mut self.memory,
                 &mut self.sync_objects,
             )?;
+            self.tls.register(teb);
             self.cpu.set_register(Register32::Eax, value);
             return Ok(());
         }
