@@ -14,6 +14,8 @@ mod thread_hook_cases;
 #[allow(dead_code)]
 mod thread_window_query_cases;
 
+#[path = "../../core/tests/support/dinput_device_cases.rs"]
+mod dinput_device_cases;
 #[path = "../../core/tests/support/dinput_root_cases.rs"]
 mod dinput_root_cases;
 #[path = "../../core/tests/support/event_wait_control.rs"]
@@ -4711,6 +4713,7 @@ pub extern "C" fn run() -> u32 {
     suspended_event_cases::suspended_event_waits_preserve_signal_and_handle_ownership();
     timed_event_cases::finite_wait_uses_exact_host_time_across_budgets();
     dinput_root_cases::imported_root_lifetime_across_budgets();
+    dinput_device_cases::imported_keyboard_lifetime_across_budgets();
     thread_start_cases::ordered_notifications_precede_each_child_entry();
     thread_start_cases::retryable_notification_frames();
     cxx_exception_cases::outer_transition_faults_preserve_cleanup_and_catch_progress();

@@ -148,11 +148,12 @@ fn ansi_aliases_share_identity_and_roots_have_independent_retired_lifetimes() {
                 0 => QUERY,
                 1 => ADD,
                 2 => RELEASE,
+                3 => 0x7000_0568,
                 _ => 0x7000_0ffc,
             }
         );
     }
-    let unsupported = word(&p, table + 12);
+    let unsupported = word(&p, table + 16);
     denied(&mut p, unsupported, &[]);
 }
 

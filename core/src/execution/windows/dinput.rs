@@ -4,6 +4,12 @@ pub(super) const BASE: u32 = 0x7001_7000;
 const TABLE: u32 = BASE + 0x100;
 const OBJECTS: u32 = BASE + 0x800;
 const MAX_ROOTS: usize = 64;
+const DEVICE_TABLE: u32 = BASE + 0x200;
+const DEVICES: u32 = BASE + 0x900;
+const MAX_DEVICES: usize = 64;
+const KEYBOARD: [u8; 16] = [
+    0x61, 0x2b, 0x1d, 0x6f, 0xa0, 0xd5, 0xcf, 0x11, 0xbf, 0xc7, 0x44, 0x45, 0x53, 0x54, 0, 0,
+];
 const NO_INTERFACE: u32 = 0x8000_4002;
 const NULL_POINTER: u32 = 0x8000_4003;
 const INVALID_ARGUMENT: u32 = 0x8007_0057;
@@ -20,22 +26,61 @@ const INTERFACES: [[u8; 16]; 4] = [
         0x84, 0xb6, 0x4c, 0x9a, 0x6d, 0x23, 0xd3, 0x11, 0x8e, 0x9d, 0, 0xc0, 0x4f, 0x68, 0x44, 0xae,
     ],
 ];
+const DEVICE_INTERFACES: [[u8; 16]; 4] = [
+    INTERFACES[0],
+    [
+        0x80, 0xe6, 0x44, 0x59, 0x2e, 0xc9, 0xcf, 0x11, 0xbf, 0xc7, 0x44, 0x45, 0x53, 0x54, 0, 0,
+    ],
+    [
+        0x82, 0xe6, 0x44, 0x59, 0x2e, 0xc9, 0xcf, 0x11, 0xbf, 0xc7, 0x44, 0x45, 0x53, 0x54, 0, 0,
+    ],
+    [
+        0xbc, 0xc6, 0xd7, 0x57, 0x56, 0x23, 0xd3, 0x11, 0x8e, 0x9d, 0, 0xc0, 0x4f, 0x68, 0x44, 0xae,
+    ],
+];
+
+#[derive(Clone, Copy)]
+pub(super) enum Class {
+    Root,
+    Keyboard,
+}
+
+impl Class {
+    fn objects(self) -> u32 {
+        match self {
+            Self::Root => OBJECTS,
+            Self::Keyboard => DEVICES,
+        }
+    }
+
+    fn interfaces(self) -> &'static [[u8; 16]; 4] {
+        match self {
+            Self::Root => &INTERFACES,
+            Self::Keyboard => &DEVICE_INTERFACES,
+        }
+    }
+}
 
 #[derive(Clone, Copy)]
 pub(super) enum Call {
     Create,
-    QueryInterface,
-    AddRef,
-    Release,
+    CreateDevice,
+    QueryInterface(Class),
+    AddRef(Class),
+    Release(Class),
 }
 
 impl Call {
     pub(super) fn at(offset: u32) -> Option<Self> {
         match offset {
             0x558 => Some(Self::Create),
-            0x55c => Some(Self::QueryInterface),
-            0x560 => Some(Self::AddRef),
-            0x564 => Some(Self::Release),
+            0x55c => Some(Self::QueryInterface(Class::Root)),
+            0x560 => Some(Self::AddRef(Class::Root)),
+            0x564 => Some(Self::Release(Class::Root)),
+            0x568 => Some(Self::CreateDevice),
+            0x56c => Some(Self::QueryInterface(Class::Keyboard)),
+            0x570 => Some(Self::AddRef(Class::Keyboard)),
+            0x574 => Some(Self::Release(Class::Keyboard)),
             _ => None,
         }
     }
@@ -46,9 +91,9 @@ impl Call {
 
     pub(super) fn arguments(self) -> usize {
         match self {
-            Self::Create => 4,
-            Self::QueryInterface => 3,
-            Self::AddRef | Self::Release => 1,
+            Self::Create | Self::CreateDevice => 4,
+            Self::QueryInterface(_) => 3,
+            Self::AddRef(_) | Self::Release(_) => 1,
         }
     }
 }
@@ -56,15 +101,28 @@ impl Call {
 #[derive(Default)]
 pub(super) struct Input {
     roots: Vec<u32>,
+    devices: Vec<u32>,
 }
 
 impl Input {
-    fn object(&self, pointer: u32) -> Result<usize, DispatchError> {
+    fn counts(&mut self, class: Class) -> &mut Vec<u32> {
+        match class {
+            Class::Root => &mut self.roots,
+            Class::Keyboard => &mut self.devices,
+        }
+    }
+
+    fn object(&mut self, class: Class, pointer: u32) -> Result<usize, DispatchError> {
         let offset = pointer
-            .checked_sub(OBJECTS)
+            .checked_sub(class.objects())
             .ok_or(DispatchError::Unsupported)?;
         let index = usize::try_from(offset / 4).expect("32-bit object index");
-        if !offset.is_multiple_of(4) || self.roots.get(index).is_none_or(|count| *count == 0) {
+        if !offset.is_multiple_of(4)
+            || self
+                .counts(class)
+                .get(index)
+                .is_none_or(|count| *count == 0)
+        {
             return Err(DispatchError::Unsupported);
         }
         Ok(index)
@@ -78,12 +136,27 @@ impl Input {
                     0 => 0x55c_u32,
                     1 => 0x560,
                     2 => 0x564,
+                    3 => 0x568,
                     _ => 0xffc,
                 };
             bytes[0x100 + slot * 4..0x104 + slot * 4].copy_from_slice(&address.to_le_bytes());
         }
         for index in 0..MAX_ROOTS {
             bytes[0x800 + index * 4..0x804 + index * 4].copy_from_slice(&TABLE.to_le_bytes());
+        }
+        for slot in 0..29 {
+            let address = API_BASE
+                + match slot {
+                    0 => 0x56c_u32,
+                    1 => 0x570,
+                    2 => 0x574,
+                    _ => 0xffc,
+                };
+            bytes[0x200 + slot * 4..0x204 + slot * 4].copy_from_slice(&address.to_le_bytes());
+        }
+        for index in 0..MAX_DEVICES {
+            bytes[0x900 + index * 4..0x904 + index * 4]
+                .copy_from_slice(&DEVICE_TABLE.to_le_bytes());
         }
         memory.map_zeroed(u64::from(BASE), PAGE_SIZE, Permissions::READ_WRITE)?;
         memory.write(u64::from(BASE), &bytes)?;
@@ -120,8 +193,47 @@ impl Input {
         Ok(0)
     }
 
-    fn query(&mut self, args: &[u32], memory: &mut GuestMemory) -> Result<u32, DispatchError> {
-        let index = self.object(args[0])?;
+    fn create_device(
+        &mut self,
+        args: &[u32],
+        memory: &mut GuestMemory,
+    ) -> Result<u32, DispatchError> {
+        self.object(Class::Root, args[0])?;
+        if args[2] == 0 {
+            return Ok(NULL_POINTER);
+        }
+        guest::check(memory, args[2], 4, Access::Write)?;
+        if args[3] != 0 {
+            return Err(DispatchError::Unsupported);
+        }
+        if args[1] == 0 {
+            guest::write_word(memory, args[2], 0)?;
+            return Ok(NULL_POINTER);
+        }
+        guest::check(memory, args[1], 16, Access::Read)?;
+        let mut guid = [0; 16];
+        memory.read(u64::from(args[1]), &mut guid)?;
+        if guid != KEYBOARD {
+            return Err(DispatchError::Unsupported);
+        }
+        if self.devices.len() == MAX_DEVICES {
+            guest::write_word(memory, args[2], 0)?;
+            return Ok(OUT_OF_MEMORY);
+        }
+        let pointer =
+            DEVICES + u32::try_from(self.devices.len()).expect("bounded device count") * 4;
+        guest::write_word(memory, args[2], pointer)?;
+        self.devices.push(1);
+        Ok(0)
+    }
+
+    fn query(
+        &mut self,
+        class: Class,
+        args: &[u32],
+        memory: &mut GuestMemory,
+    ) -> Result<u32, DispatchError> {
+        let index = self.object(class, args[0])?;
         if args[1] == 0 || args[2] == 0 {
             return Ok(NULL_POINTER);
         }
@@ -129,15 +241,15 @@ impl Input {
         guest::check(memory, args[1], 16, Access::Read)?;
         let mut iid = [0; 16];
         memory.read(u64::from(args[1]), &mut iid)?;
-        if !INTERFACES.contains(&iid) {
+        if !class.interfaces().contains(&iid) {
             guest::write_word(memory, args[2], 0)?;
             return Ok(NO_INTERFACE);
         }
-        let count = self.roots[index]
+        let count = self.counts(class)[index]
             .checked_add(1)
             .ok_or(DispatchError::Unsupported)?;
         guest::write_word(memory, args[2], args[0])?;
-        self.roots[index] = count;
+        self.counts(class)[index] = count;
         Ok(0)
     }
 
@@ -149,17 +261,19 @@ impl Input {
     ) -> Result<u32, DispatchError> {
         match call {
             Call::Create => self.create(args, memory),
-            Call::QueryInterface => self.query(args, memory),
-            Call::AddRef | Call::Release => {
-                let index = self.object(args[0])?;
-                let count = if matches!(call, Call::AddRef) {
-                    self.roots[index]
+            Call::CreateDevice => self.create_device(args, memory),
+            Call::QueryInterface(class) => self.query(class, args, memory),
+            Call::AddRef(class) | Call::Release(class) => {
+                let index = self.object(class, args[0])?;
+                let counts = self.counts(class);
+                let count = if matches!(call, Call::AddRef(_)) {
+                    counts[index]
                         .checked_add(1)
                         .ok_or(DispatchError::Unsupported)?
                 } else {
-                    self.roots[index] - 1
+                    counts[index] - 1
                 };
-                self.roots[index] = count;
+                counts[index] = count;
                 Ok(count)
             }
         }
@@ -177,33 +291,35 @@ mod tests {
             .map_zeroed(0x1000, PAGE_SIZE, Permissions::READ_WRITE)
             .unwrap();
         memory.write(0x1000, &INTERFACES[0]).unwrap();
-        guest::write_word(&mut memory, 0x1020, 77).unwrap();
-        let mut input = Input {
-            roots: vec![u32::MAX],
-        };
-        assert!(matches!(
-            input.dispatch(Call::AddRef, &[OBJECTS], &mut memory),
-            Err(DispatchError::Unsupported)
-        ));
-        assert!(matches!(
-            input.dispatch(
-                Call::QueryInterface,
-                &[OBJECTS, 0x1000, 0x1020],
-                &mut memory
-            ),
-            Err(DispatchError::Unsupported)
-        ));
-        let mut output = [0];
-        guest::read_words(&memory, 0x1020, &mut output).unwrap();
-        assert_eq!(output, [77]);
-        assert_eq!(input.roots, [u32::MAX]);
-        assert_eq!(
-            input
-                .dispatch(Call::Release, &[OBJECTS], &mut memory)
-                .ok()
-                .unwrap(),
-            u32::MAX - 1
-        );
+        for class in [Class::Root, Class::Keyboard] {
+            guest::write_word(&mut memory, 0x1020, 77).unwrap();
+            let mut input = Input::default();
+            input.counts(class).push(u32::MAX);
+            let pointer = class.objects();
+            assert!(matches!(
+                input.dispatch(Call::AddRef(class), &[pointer], &mut memory),
+                Err(DispatchError::Unsupported)
+            ));
+            assert!(matches!(
+                input.dispatch(
+                    Call::QueryInterface(class),
+                    &[pointer, 0x1000, 0x1020],
+                    &mut memory
+                ),
+                Err(DispatchError::Unsupported)
+            ));
+            let mut output = [0];
+            guest::read_words(&memory, 0x1020, &mut output).unwrap();
+            assert_eq!(output, [77]);
+            assert_eq!(input.counts(class), &[u32::MAX]);
+            assert_eq!(
+                input
+                    .dispatch(Call::Release(class), &[pointer], &mut memory)
+                    .ok()
+                    .unwrap(),
+                u32::MAX - 1
+            );
+        }
     }
 
     #[test]
