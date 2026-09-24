@@ -45,6 +45,86 @@ fn result(memory: &GuestMemory) -> u64 {
     u64::from_le_bytes(bytes)
 }
 
+fn load_subtract_pop(indexed: f64, top: f64, control: u16) -> (Cpu32, GuestMemory) {
+    let mut code = Vec::new();
+    for address in [SOURCE, TOP] {
+        code.extend([0xdd, 0x05]);
+        code.extend(address.to_le_bytes());
+    }
+    code.extend([0xde, 0xe9, 0xdf, 0xe0, 0xd9, 0x1d]);
+    code.extend(RESULT.to_le_bytes());
+    let mut image = load_pe32(&executable::pe32(&code), 16).unwrap();
+    for (address, value) in [(SOURCE, indexed), (TOP, top)] {
+        image
+            .memory
+            .write(u64::from(address), &value.to_le_bytes())
+            .unwrap();
+    }
+    let mut cpu = Cpu32::new(image.entry_point);
+    cpu.set_x87_control_word(control);
+    (cpu, image.memory)
+}
+
+#[test]
+fn subtract_pop_stores_indexed_minus_top_with_single_precision() {
+    let quarter_ulp = f64::from(f32::EPSILON) * 0.25;
+    for (indexed, top, expected, status) in [
+        (2.0, 0.0, 2.0_f32, 0),
+        (3.0, 1.0, 2.0_f32, 0),
+        (1.0, 3.0, -2.0_f32, 0),
+        (1.0, quarter_ulp, 1.0_f32, 0x220),
+        (1.0, -quarter_ulp, 1.0_f32, 0x20),
+    ] {
+        let (mut cpu, mut memory) = load_subtract_pop(indexed, top, 0x007f);
+        assert_eq!(cpu.run(&mut memory, 4).instructions, 4);
+        assert_eq!(cpu.register(Register32::Eax) & 0x3a20, 0x3800 | status);
+        assert_eq!(cpu.run(&mut memory, 1).instructions, 1);
+        let mut bytes = [0; 4];
+        memory.read(u64::from(RESULT), &mut bytes).unwrap();
+        assert_eq!(u32::from_le_bytes(bytes), expected.to_bits());
+    }
+}
+
+#[test]
+fn subtract_pop_rejects_missing_target_range_and_control_atomically() {
+    for (indexed, top, control) in [
+        (f64::MAX, -f64::MAX, 0x007f),
+        (
+            f64::from(f32::MIN_POSITIVE),
+            f64::from(f32::MIN_POSITIVE) / 2.0,
+            0x007f,
+        ),
+        (3.0, 1.0, 0x0c7f),
+    ] {
+        let (mut cpu, mut memory) = load_subtract_pop(indexed, top, control);
+        assert_eq!(cpu.run(&mut memory, 2).instructions, 2);
+        let before = cpu;
+        assert_eq!(
+            cpu.run(&mut memory, 1).reason,
+            StopReason::UnsupportedInstruction
+        );
+        assert_eq!(cpu, before);
+    }
+
+    let mut code = vec![0xdd, 0x05];
+    code.extend(TOP.to_le_bytes());
+    code.extend([0xde, 0xe9]);
+    let mut image = load_pe32(&executable::pe32(&code), 16).unwrap();
+    image
+        .memory
+        .write(u64::from(TOP), &1.0_f64.to_le_bytes())
+        .unwrap();
+    let mut cpu = Cpu32::new(image.entry_point);
+    cpu.set_x87_control_word(0x007f);
+    assert_eq!(cpu.run(&mut image.memory, 1).instructions, 1);
+    let before = cpu;
+    assert_eq!(
+        cpu.run(&mut image.memory, 1).reason,
+        StopReason::UnsupportedInstruction
+    );
+    assert_eq!(cpu, before);
+}
+
 #[test]
 fn self_and_second_register_add_set_result_and_rounding() {
     for (top, source, opcode, expected, status) in [

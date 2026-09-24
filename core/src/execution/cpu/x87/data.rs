@@ -146,13 +146,17 @@ impl Cpu32 {
         Ok(())
     }
 
-    pub(in super::super) fn x87_register_add(
+    pub(in super::super) fn x87_register_add_sub(
         &mut self,
         instruction: &Instruction,
     ) -> Result<(), StopReason> {
         let single_precision = self.x87_arithmetic_precision(instruction.code())?;
         let destination_is_top = instruction.code() == Code::Fadd_st0_sti;
-        let pop = instruction.code() == Code::Faddp_sti_st0;
+        let subtract = instruction.code() == Code::Fsubp_sti_st0;
+        let pop = matches!(
+            instruction.code(),
+            Code::Faddp_sti_st0 | Code::Fsubp_sti_st0
+        );
         let indexed_register = if destination_is_top {
             instruction.op1_register()
         } else {
@@ -167,20 +171,29 @@ impl Cpu32 {
         let top = self.x87_stack.value()?;
         let slot = (usize::from(self.x87_stack.top) + index) & 7;
         let indexed = f64::from_bits(self.x87_stack.values[slot]);
-        let mut result = top + indexed;
+        let (left, right) = if subtract {
+            (indexed, -top)
+        } else {
+            (top, indexed)
+        };
+        let mut result = if subtract {
+            indexed - top
+        } else {
+            top + indexed
+        };
         if !result.is_finite() || (result != 0.0 && !result.is_normal()) {
             return Err(StopReason::UnsupportedInstruction);
         }
         let truncating = self.x87_control_word & 0x0f3f == 0x0c3f;
         if single_precision {
             result = if truncating {
-                rounding::single_sum_toward_zero(result, top, indexed)
+                rounding::single_sum_toward_zero(result, left, right)
             } else {
-                rounding::single_sum(result, top, indexed)
+                rounding::single_sum(result, left, right)
             }
             .ok_or(StopReason::UnsupportedInstruction)?;
         }
-        let rounding = rounding::sum_result(result, top, indexed);
+        let rounding = rounding::sum_result(result, left, right);
         self.x87_stack.rounded(
             rounding != Ordering::Equal,
             !truncating && rounding == Ordering::Greater,
@@ -578,6 +591,7 @@ impl Cpu32 {
                     code,
                     Code::Fdivp_sti_st0
                         | Code::Fmulp_sti_st0
+                        | Code::Fsubp_sti_st0
                         | Code::Fdiv_m32fp
                         | Code::Fsubr_st0_sti
                         | Code::Fadd_st0_sti
