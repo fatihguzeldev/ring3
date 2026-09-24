@@ -31,6 +31,7 @@ const MATRIX_OUTPUT: u32 = 0x0040_2d80;
 const VERTEX_BUFFER_OUTPUT: u32 = 0x0040_2e00;
 const VERTEX_DATA_OUTPUT: u32 = 0x0040_2e04;
 const INDEX_BUFFER_OUTPUT: u32 = 0x0040_2e08;
+const INDEX_DATA_OUTPUT: u32 = 0x0040_2e0c;
 
 #[test]
 fn executes_an_uninterrupted_guest_graphics_program() {
@@ -2616,4 +2617,95 @@ fn index_buffer_creation_rejects_invalid_requests_and_faults_atomically() {
         ),
         0
     );
+}
+
+#[test]
+fn index_buffer_lock_exposes_data_and_balances_nested_locks() {
+    let (mut process, _, device) = create();
+    let create_index = method(&process, device, 24);
+    assert_eq!(
+        direct_call(
+            &mut process,
+            create_index,
+            &[device, 12, 0x218, 101, 0, INDEX_BUFFER_OUTPUT]
+        ),
+        0
+    );
+    let buffer = read(&process, INDEX_BUFFER_OUTPUT);
+    let lock = method(&process, buffer, 11);
+    let unlock = method(&process, buffer, 12);
+    assert_ne!(lock, 0x7000_0ffc);
+    assert_ne!(unlock, 0x7000_0ffc);
+    assert_eq!(
+        direct_call(&mut process, lock, &[buffer, 0, 12, INDEX_DATA_OUTPUT, 0]),
+        0
+    );
+    let data = read(&process, INDEX_DATA_OUTPUT);
+    assert_eq!(data, buffer + 4096);
+    process
+        .memory
+        .write(u64::from(data), &[0, 0, 1, 0, 2, 0])
+        .unwrap();
+    assert_eq!(
+        direct_call(
+            &mut process,
+            lock,
+            &[buffer, 6, 6, INDEX_DATA_OUTPUT, 0x1000]
+        ),
+        0
+    );
+    assert_eq!(read(&process, INDEX_DATA_OUTPUT), data + 6);
+    assert_eq!(direct_call(&mut process, unlock, &[buffer]), 0);
+    assert_eq!(direct_call(&mut process, unlock, &[buffer]), 0);
+    assert_eq!(direct_call(&mut process, unlock, &[buffer]), 0x8876_086c);
+    assert_eq!(read_bytes(&process, data, 6), [0, 0, 1, 0, 2, 0]);
+}
+
+#[test]
+fn index_buffer_lock_rejects_invalid_ranges_flags_and_faults_atomically() {
+    let (mut process, _, device) = create();
+    let create_index = method(&process, device, 24);
+    assert_eq!(
+        direct_call(
+            &mut process,
+            create_index,
+            &[device, 12, 0x218, 101, 0, INDEX_BUFFER_OUTPUT]
+        ),
+        0
+    );
+    let buffer = read(&process, INDEX_BUFFER_OUTPUT);
+    let lock = method(&process, buffer, 11);
+    let unlock = method(&process, buffer, 12);
+    for (offset, size, flags) in [
+        (11, 2, 0),
+        (12, 0, 0),
+        (u32::MAX, 1, 0),
+        (0, 12, 0x10),
+        (0, 12, 0x2000 | 0x1000),
+        (0, 12, 0x4000),
+    ] {
+        write(&mut process, INDEX_DATA_OUTPUT, &[0x1234_5678]);
+        assert_eq!(
+            direct_call(
+                &mut process,
+                lock,
+                &[buffer, offset, size, INDEX_DATA_OUTPUT, flags]
+            ),
+            0x8876_086c
+        );
+        assert_eq!(read(&process, INDEX_DATA_OUTPUT), 0x1234_5678);
+        assert_eq!(direct_call(&mut process, unlock, &[buffer]), 0x8876_086c);
+    }
+    let fault = call(&mut process, lock, &[buffer, 0, 12, 0x0040_1000, 0]);
+    assert!(matches!(
+        fault.reason,
+        ProcessStop::Stopped(StopReason::MemoryFault(_))
+    ));
+    assert_eq!(direct_call(&mut process, unlock, &[buffer]), 0x8876_086c);
+    assert_eq!(
+        direct_call(&mut process, lock, &[buffer, 0, 0, INDEX_DATA_OUTPUT, 0]),
+        0
+    );
+    assert_eq!(read(&process, INDEX_DATA_OUTPUT), buffer + 4096);
+    assert_eq!(direct_call(&mut process, unlock, &[buffer]), 0);
 }
