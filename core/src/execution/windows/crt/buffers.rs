@@ -111,3 +111,29 @@ pub(super) fn compare(
     }
     Ok(0)
 }
+
+pub(super) fn find(
+    memory: &GuestMemory,
+    source: u32,
+    value: u32,
+    count: u32,
+) -> Result<u32, DispatchError> {
+    if count > 65536 {
+        return Err(DispatchError::Unsupported);
+    }
+    if count == 0 {
+        return Ok(0);
+    }
+    let length = usize::try_from(count).expect("bounded count fits usize");
+    guest::check(memory, source, length, Access::Read)?;
+    let target = value.to_le_bytes()[0];
+    let mut bytes = [0; 256];
+    for offset in (0..length).step_by(bytes.len()) {
+        let size = (length - offset).min(bytes.len());
+        memory.read(u64::from(source) + offset as u64, &mut bytes[..size])?;
+        if let Some(index) = bytes[..size].iter().position(|&byte| byte == target) {
+            return Ok(source + u32::try_from(offset + index).expect("bounded offset fits u32"));
+        }
+    }
+    Ok(0)
+}

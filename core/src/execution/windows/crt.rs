@@ -57,6 +57,7 @@ pub(super) enum Call {
     Duplicate,
     Length,
     Compare,
+    FindByte,
     Copy,
     Move,
     CopyString,
@@ -130,6 +131,7 @@ impl Call {
             0x1a8 => Some(Self::UppercaseString),
             0x1c0 => Some(Self::LowercaseString),
             0x1c4 => Some(Self::UppercaseCharacter),
+            0x1c8 => Some(Self::FindByte),
             0x1ac => Some(Self::Sprintf),
             0x1bc => Some(Self::Snprintf),
             0x1b0 => Some(Self::Move),
@@ -173,6 +175,7 @@ impl Call {
             | Self::Memset
             | Self::DllOnExit
             | Self::Compare
+            | Self::FindByte
             | Self::Copy
             | Self::Move
             | Self::CopyString
@@ -264,18 +267,7 @@ impl Crt {
             Call::Duplicate => Some(strings::duplicate(memory, heap, args[0])?),
             Call::Length => Some(strings::length(memory, args[0])?),
             Call::Format => Some(formatting::write(memory, args)?),
-            Call::Sprintf => {
-                if args[0] == 0 || args[1] == 0 {
-                    guest::write_word(memory, ERRNO, 22)?;
-                    Some(u32::MAX)
-                } else {
-                    Some(formatting::write_variadic(
-                        memory,
-                        args,
-                        cpu.register(Register32::Esp),
-                    )?)
-                }
-            }
+            Call::Sprintf => Some(sprintf(memory, args, cpu.register(Register32::Esp))?),
             Call::Snprintf => Some(snprintf(memory, args, cpu.register(Register32::Esp))?),
             Call::Sscanf => Some(scanning::sscanf(
                 memory,
@@ -309,6 +301,7 @@ impl Crt {
             }
             Call::Move => Some(buffers::move_bytes(memory, args[0], args[1], args[2])?),
             Call::Compare => Some(buffers::compare(memory, args[0], args[1], args[2])?),
+            Call::FindByte => Some(buffers::find(memory, args[0], args[1], args[2])?),
             Call::DllOnExit => Some(onexit::register(
                 heap,
                 memory,
@@ -326,6 +319,15 @@ impl Crt {
             }
             Call::Memset => Some(buffers::fill(memory, args[0], args[1], args[2])?),
         })
+    }
+}
+
+fn sprintf(memory: &mut GuestMemory, args: &[u32], stack: u32) -> Result<u32, DispatchError> {
+    if args[0] == 0 || args[1] == 0 {
+        guest::write_word(memory, ERRNO, 22)?;
+        Ok(u32::MAX)
+    } else {
+        formatting::write_variadic(memory, args, stack)
     }
 }
 
@@ -363,6 +365,7 @@ pub(super) fn resolve(name: &str) -> Option<u32> {
         "__getmainargs" => Some(API_BASE + 0x110),
         "memset" => Some(API_BASE + 0x114),
         "memcmp" => Some(API_BASE + 0x138),
+        "memchr" => Some(API_BASE + 0x1c8),
         "memcpy" => Some(API_BASE + 0x150),
         "strncpy" => Some(API_BASE + 0x154),
         "strncat" => Some(API_BASE + 0x18c),
