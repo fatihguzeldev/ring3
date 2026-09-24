@@ -75,6 +75,7 @@ pub(super) struct Modules {
     program_path: Vec<u8>,
     resident: Vec<Module>,
     initializer_order: Vec<u32>,
+    notification_owner: Option<u32>,
 }
 
 impl Modules {
@@ -112,6 +113,9 @@ impl Modules {
                 Ok(Load::Complete(module.handle))
             }
             State::Deferred if initialized => {
+                if self.notification_owner.is_some() {
+                    return Err(DispatchError::Unsupported);
+                }
                 if let Some(entry) = module.entry {
                     return Ok(Load::Initialize(Pending {
                         handle: module.handle,
@@ -170,6 +174,48 @@ impl Modules {
                 }
             })
             .collect()
+    }
+
+    pub(super) fn thread_initializers(&self) -> Result<Vec<Pending>, DispatchError> {
+        if self.notification_owner.is_some()
+            || self
+                .resident
+                .iter()
+                .any(|module| matches!(module.state, State::Initializing))
+        {
+            return Err(DispatchError::Unsupported);
+        }
+        Ok(self
+            .initializers()
+            .into_iter()
+            .filter(|initializer| self.thread_calls_enabled(initializer.base))
+            .map(|initializer| Pending {
+                handle: initializer.base,
+                entry: initializer.entry,
+            })
+            .collect())
+    }
+
+    pub(super) fn thread_calls_enabled(&self, handle: u32) -> bool {
+        self.resident.iter().any(|module| {
+            module.handle == handle
+                && module.thread_notifications
+                && matches!(module.state, State::Ready)
+        })
+    }
+
+    pub(super) fn notification_owner(&self) -> Option<u32> {
+        self.notification_owner
+    }
+
+    pub(super) fn start_notifications(&mut self, teb: u32) {
+        debug_assert!(self.notification_owner.is_none());
+        self.notification_owner = Some(teb);
+    }
+
+    pub(super) fn finish_notifications(&mut self, teb: u32) {
+        debug_assert_eq!(self.notification_owner, Some(teb));
+        self.notification_owner = None;
     }
 
     pub(super) fn contains(&self, handle: u32) -> bool {
@@ -254,6 +300,7 @@ impl Modules {
             program_path: [program_path, &[0]].concat(),
             resident,
             initializer_order,
+            notification_owner: None,
         }
     }
 
@@ -276,6 +323,9 @@ impl Modules {
         }
         let argument = arguments[0];
         if matches!(call, Call::DisableThreadCalls) {
+            if self.notification_owner.is_some_and(|owner| owner != teb.0) {
+                return Err(DispatchError::Unsupported);
+            }
             if argument == self.program {
                 return Err(DispatchError::Unsupported);
             }

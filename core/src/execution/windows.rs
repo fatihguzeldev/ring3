@@ -749,6 +749,8 @@ impl Process32 {
                     || self.startup.contains(address)
                     || address == callbacks::RETURN
                     || address == eh::RETURN
+                    || address == threads::ENTER
+                    || address == threads::RETURN
             });
             result.instructions += step.instructions;
             remaining -= step.instructions;
@@ -757,6 +759,13 @@ impl Process32 {
                 return result;
             }
             if self.startup.complete_at(self.cpu.eip) {
+                continue;
+            }
+            if matches!(self.cpu.eip, threads::ENTER | threads::RETURN) {
+                if let Err(error) = self.advance_thread_entry() {
+                    result.reason = error.stop(self.cpu.eip);
+                    return result;
+                }
                 continue;
             }
             if self.cpu.eip == callbacks::RETURN {

@@ -1,5 +1,8 @@
 use std::collections::BTreeMap;
 
+mod entry;
+pub(super) use entry::{ENTER, RETURN};
+
 use super::{
     API_BASE, Access, Cpu32, DispatchError, GuestMemory, Permissions, Register32, STACK_SIZE,
     callbacks, eh, guest, synchronization::SyncObjects, thread,
@@ -25,8 +28,14 @@ pub(super) struct State {
 
 struct Suspended {
     id: u32,
+    teb: u32,
+    #[cfg_attr(
+        not(test),
+        expect(dead_code, reason = "retained cpu is not scheduled yet")
+    )]
     cpu: Cpu32,
     state: State,
+    entry: entry::Entry,
 }
 
 impl Threads {
@@ -36,7 +45,7 @@ impl Threads {
         }
         self.suspended
             .values_mut()
-            .find(|context| context.cpu.fs_base() == teb)
+            .find(|context| context.teb == teb)
             .map(|context| &mut context.state)
             .ok_or(DispatchError::Unsupported)
     }
@@ -74,7 +83,7 @@ impl Threads {
         }
         self.suspended
             .values()
-            .find(|context| context.cpu.fs_base() == teb.0)
+            .find(|context| context.teb == teb.0)
             .map(|context| context.id)
     }
 
@@ -116,7 +125,7 @@ impl Threads {
             memory.unmap(u64::from(low), u64::from(SLOT_SIZE))?;
             return Err(error.into());
         }
-        let mut cpu = Cpu32::new(args[2]);
+        let mut cpu = Cpu32::new(ENTER);
         cpu.set_register(Register32::Esp, high - 8);
         cpu.set_fs_base(high);
         cpu.set_x87_control_word(0x027f);
@@ -125,8 +134,10 @@ impl Threads {
             handle,
             Suspended {
                 id,
+                teb: high,
                 cpu,
                 state: State::default(),
+                entry: entry::Entry::new(args[2], high - 8),
             },
         );
         Ok((handle, thread::Teb(high)))
@@ -152,7 +163,7 @@ mod tests {
                 .unwrap_or_else(|_| panic!("suspended creation failed"));
             let high = START + slot * SLOT_SIZE + STACK_SIZE;
             assert_eq!(teb.0, high);
-            let mut expected = Cpu32::new(0x4000);
+            let mut expected = Cpu32::new(ENTER);
             expected.set_register(Register32::Esp, high - 8);
             expected.set_fs_base(high);
             expected.set_x87_control_word(0x027f);
@@ -169,6 +180,16 @@ mod tests {
             ));
             assert_eq!(threads.suspended[&handle].cpu, expected);
             assert_eq!(threads.id(teb), Some(slot + 2));
+            threads
+                .suspended
+                .get_mut(&handle)
+                .unwrap()
+                .cpu
+                .set_fs_base(0x5000_0000);
+            assert_eq!(threads.id(teb), Some(slot + 2));
+            assert_eq!(threads.id(thread::Teb(0x5000_0000)), None);
+            assert!(threads.state_mut(teb.0).is_ok());
+            assert!(threads.state_mut(0x5000_0000).is_err());
             assert!(memory.fetch(u64::from(high - 8), &mut [0]).is_err());
             assert!(memory.fetch(u64::from(high), &mut [0]).is_err());
         }
