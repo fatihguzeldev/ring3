@@ -317,7 +317,11 @@ impl Cpu32 {
             if top < 0.0 {
                 return Err(StopReason::UnsupportedInstruction);
             }
-            let result = top.sqrt();
+            let mut result = top.sqrt();
+            if single_precision {
+                result = rounding::single_square_root(result, top)
+                    .ok_or(StopReason::UnsupportedInstruction)?;
+            }
             (result, rounding::square_root_result(result, top))
         } else if matches!(
             instruction.code(),
@@ -594,7 +598,8 @@ impl Cpu32 {
             0x003f
                 if matches!(
                     code,
-                    Code::Fdivp_sti_st0
+                    Code::Fsqrt
+                        | Code::Fdivp_sti_st0
                         | Code::Fmulp_sti_st0
                         | Code::Fsubp_sti_st0
                         | Code::Fsubrp_sti_st0

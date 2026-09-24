@@ -64,6 +64,59 @@ fn result(memory: &GuestMemory) -> u64 {
     u64::from_le_bytes(bytes)
 }
 
+fn load_single_sqrt(input: f64, control: u16) -> (Cpu32, GuestMemory) {
+    let code = [
+        0xdd, 0x05, 0x00, 0x22, 0x40, 0x00, 0xd9, 0xfa, 0xdf, 0xe0, 0xd9, 0x1d, 0x20, 0x22, 0x40,
+        0x00,
+    ];
+    let mut image = load_pe32(&executable::pe32(&code), 16).unwrap();
+    image
+        .memory
+        .write(0x0040_2200, &input.to_le_bytes())
+        .unwrap();
+    let mut cpu = Cpu32::new(image.entry_point);
+    cpu.set_x87_control_word(control);
+    (cpu, image.memory)
+}
+
+#[test]
+fn single_precision_square_root_rounds_and_preserves_signed_zero() {
+    for (input, expected, status) in [
+        (0.0, 0.0_f32, 0),
+        (-0.0, -0.0_f32, 0),
+        (4.0, 2.0_f32, 0),
+        (2.0, 2.0_f32.sqrt(), 0x20),
+        (5.0, 5.0_f32.sqrt(), 0x220),
+    ] {
+        let (mut cpu, mut memory) = load_single_sqrt(input, 0x007f);
+        assert_eq!(cpu.run(&mut memory, 3).instructions, 3);
+        assert_eq!(cpu.register(Register32::Eax) & 0x3a20, 0x3800 | status);
+        assert_eq!(cpu.run(&mut memory, 1).instructions, 1);
+        let mut bytes = [0; 4];
+        memory.read(0x0040_2220, &mut bytes).unwrap();
+        assert_eq!(u32::from_le_bytes(bytes), expected.to_bits());
+    }
+}
+
+#[test]
+fn single_precision_square_root_rejects_invalid_inputs_and_controls_atomically() {
+    for (input, control) in [
+        (-1.0, 0x007f),
+        (f64::MAX, 0x007f),
+        (f64::MIN_POSITIVE, 0x007f),
+        (4.0, 0x0c7f),
+    ] {
+        let (mut cpu, mut memory) = load_single_sqrt(input, control);
+        assert_eq!(cpu.run(&mut memory, 1).instructions, 1);
+        let before = cpu;
+        assert_eq!(
+            cpu.run(&mut memory, 1).reason,
+            StopReason::UnsupportedInstruction
+        );
+        assert_eq!(cpu, before);
+    }
+}
+
 #[test]
 fn square_root_matches_known_bits_and_preserves_signed_zero() {
     for (input, expected) in [
@@ -291,18 +344,17 @@ fn truncating_single_precision_memory_multiply_rejects_faults_atomically() {
 }
 
 #[test]
-fn single_precision_profile_rejects_remaining_math_and_excluded_ranges_atomically() {
-    for operation in [&[0xd9, 0xfa][..], &[0xdc, 0x3d, 0x10, 0x22, 0x40, 0]] {
-        let (mut cpu, mut memory) = load(operation, 4.0_f64.to_bits(), 2.0_f64.to_bits());
-        assert_eq!(cpu.run(&mut memory, 1).instructions, 1);
-        cpu.set_x87_control_word(0x007f);
-        let before = cpu;
-        assert_eq!(
-            cpu.run(&mut memory, 1).reason,
-            StopReason::UnsupportedInstruction
-        );
-        assert_eq!(cpu, before);
-    }
+fn single_precision_profile_rejects_remaining_excluded_ranges_atomically() {
+    let operation = &[0xdc, 0x3d, 0x10, 0x22, 0x40, 0];
+    let (mut cpu, mut memory) = load(operation, 4.0_f64.to_bits(), 2.0_f64.to_bits());
+    assert_eq!(cpu.run(&mut memory, 1).instructions, 1);
+    cpu.set_x87_control_word(0x007f);
+    let before = cpu;
+    assert_eq!(
+        cpu.run(&mut memory, 1).reason,
+        StopReason::UnsupportedInstruction
+    );
+    assert_eq!(cpu, before);
     let multiply = &[0xd8, 0x0d, 0x10, 0x22, 0x40, 0];
     for (top, source) in [
         (f64::from(f32::MAX), 2.0_f32),
