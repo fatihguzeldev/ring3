@@ -2715,6 +2715,25 @@ fn index_buffer_lock_rejects_invalid_ranges_flags_and_faults_atomically() {
 }
 
 #[test]
+fn xyz_diffuse_tex1_fvf_selects_a_distinct_fixed_function_vertex_layout() {
+    let (mut process, _, device) = create();
+    let set = method(&process, device, 76);
+    let draw_up = method(&process, device, 72);
+    assert_eq!(invoke(&mut process, set, &[device, 0x142]), 0);
+    assert_eq!(
+        invoke(&mut process, draw_up, &[device, 4, 0, 0, 20]),
+        0x8876_086c
+    );
+    assert_eq!(invoke(&mut process, set, &[device, 0x42]), 0x8876_086c);
+    assert_eq!(
+        invoke(&mut process, draw_up, &[device, 4, 0, 0, 20]),
+        0x8876_086c
+    );
+    assert_eq!(invoke(&mut process, set, &[device, 0x44]), 0);
+    assert_eq!(invoke(&mut process, draw_up, &[device, 4, 0, 0, 20]), 0);
+}
+
+#[test]
 fn fixed_function_pixel_shader_accepts_only_zero_on_a_live_device() {
     let (mut process, _, device) = create();
     let set = method(&process, device, 88);
