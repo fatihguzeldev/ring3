@@ -24,6 +24,7 @@ mod directory;
 mod dsound;
 mod eh;
 mod environment;
+mod event_waits;
 mod formatting;
 mod gdi;
 mod guest;
@@ -95,6 +96,8 @@ pub enum ProcessStop {
     Exited(u32),
     /// the current thread has no queued message and can resume after one arrives.
     WaitingForMessage,
+    /// every activated thread is waiting for an event; no guest work is ready.
+    WaitingForSynchronization,
     DllInitializationFailed {
         module: String,
     },
@@ -732,6 +735,8 @@ impl Process32 {
     /// dll initialization pins its owning thread until the notification finishes.
     /// the public cpu is the selected thread; scheduling validates its fs identity.
     /// a dispatched callback may still be in progress when the budget ends.
+    /// an event wait is charged when parked; its released continuation costs no unit.
+    /// when no thread is ready, returns the synchronization wait without more work.
     /// repeated strings use one step per element, or one for a zero-count operation.
     /// faults consume no unit for the faulting operation. exit is terminal and
     /// later calls return the same code without executing more guest work.
@@ -757,12 +762,24 @@ impl Process32 {
                 Some(thread::BASE)
             };
             let slice = match self.threads.slice(&mut self.cpu, remaining, pinned) {
-                Ok(slice) => slice,
+                Ok(Some(slice)) => slice,
+                Ok(None) => {
+                    result.reason = ProcessStop::WaitingForSynchronization;
+                    return result;
+                }
                 Err(error) => {
                     result.reason = error.stop(self.cpu.eip);
                     return result;
                 }
             };
+            match self.threads.finish_wait(&mut self.cpu, &self.memory) {
+                Ok(true) => continue,
+                Ok(false) => {}
+                Err(error) => {
+                    result.reason = error.stop(self.cpu.eip);
+                    return result;
+                }
+            }
             let step = self.cpu.run_until(&mut self.memory, slice, |address| {
                 Api::at(address).is_some()
                     || self.diagnostic_imports.contains(address)
@@ -861,6 +878,9 @@ impl Process32 {
             return Ok(());
         }
         let suspended = match api {
+            Api::Synchronization(synchronization::Call::Wait) => {
+                self.wait_event(&frame[1..words])?
+            }
             Api::SendMessage => self.send_message(&frame[1..words])?,
             Api::UpdateWindow => self.update_window(frame[1])?,
             Api::DestroyWindow => self.destroy_dialog(frame[1])?,
@@ -1163,12 +1183,7 @@ impl Process32 {
             Api::Class(call) => self.window_class(call, args)?,
             Api::Window(call) => self.window_api(call, args)?,
             Api::Synchronization(call) => {
-                let teb = thread::Teb(self.cpu.fs_base());
-                let actor = self.threads.id(teb).ok_or(DispatchError::Unsupported)?;
-                let value = self
-                    .sync_objects
-                    .dispatch(call, args, actor, teb, &mut self.memory)?;
-                self.cpu.set_register(Register32::Eax, value);
+                self.synchronization(call, args)?;
             }
             Api::SetLastError => {
                 thread::Teb(self.cpu.fs_base()).set_last_error(&mut self.memory, argument)?;

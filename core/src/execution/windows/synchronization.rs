@@ -47,6 +47,13 @@ pub(super) struct SyncObjects {
     next: u32,
 }
 
+#[derive(Clone, Copy)]
+pub(super) struct Event {
+    pub(super) id: u32,
+    pub(super) manual_reset: bool,
+    pub(super) signaled: bool,
+}
+
 struct Object {
     state: State,
     handles: usize,
@@ -70,6 +77,29 @@ impl Default for SyncObjects {
 }
 
 impl SyncObjects {
+    pub(super) fn event(&self, handle: u32) -> Option<Event> {
+        let &id = self.handles.get(&handle)?;
+        let State::Event {
+            manual_reset,
+            signaled,
+        } = self.objects[&id].state
+        else {
+            return None;
+        };
+        Some(Event {
+            id,
+            manual_reset,
+            signaled,
+        })
+    }
+
+    pub(super) fn consume_event(&mut self, id: u32) {
+        let State::Event { signaled, .. } = &mut self.objects.get_mut(&id).unwrap().state else {
+            unreachable!("prepared event retains its type")
+        };
+        *signaled = false;
+    }
+
     pub(super) fn is_thread(&self, handle: u32) -> bool {
         self.handles
             .get(&handle)

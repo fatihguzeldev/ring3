@@ -7,18 +7,22 @@ const QUANTUM: u64 = 4096;
 pub(super) struct Schedule {
     active: u32,
     primary: Option<Cpu32>,
-    runnable: u32,
+    resumed: u32,
     remaining: u64,
     requested: bool,
 }
 
 impl Threads {
-    fn active_teb(&self) -> u32 {
+    pub(super) fn active_teb(&self) -> u32 {
         if self.schedule.active == 0 {
             thread::BASE
         } else {
             self.children[&self.schedule.active].teb
         }
+    }
+
+    pub(super) fn scheduling_enabled(&self) -> bool {
+        self.schedule.resumed != 0
     }
 
     pub(in super::super) fn scheduled_child(&self) -> bool {
@@ -46,25 +50,30 @@ impl Threads {
             teb.set_last_error(memory, 6)?;
             return Ok(u32::MAX);
         };
-        if context.runnable {
+        if context.resumed {
             return Ok(0);
         }
-        context.runnable = true;
-        if self.schedule.runnable == 0 {
+        context.resumed = true;
+        if self.schedule.resumed == 0 {
             self.schedule.remaining = QUANTUM;
         }
-        self.schedule.runnable += 1;
+        self.schedule.resumed += 1;
         self.schedule.requested = true;
         Ok(1)
     }
 
-    fn ready(&self) -> impl Iterator<Item = (u32, &State)> + Clone {
+    pub(super) fn contexts(&self) -> impl Iterator<Item = (u32, &State)> + Clone {
         std::iter::once((0, &self.primary)).chain(
             self.children
                 .iter()
-                .filter(|(_, context)| context.runnable)
+                .filter(|(_, context)| context.resumed)
                 .map(|(&handle, context)| (handle, &context.state)),
         )
+    }
+
+    fn ready(&self) -> impl Iterator<Item = (u32, &State)> + Clone {
+        self.contexts()
+            .filter(|(_, state)| !state.wait.is_some_and(super::waiting::Wait::pending))
     }
 
     pub(in super::super) fn slice(
@@ -72,25 +81,31 @@ impl Threads {
         cpu: &mut Cpu32,
         budget: u64,
         pinned: Option<u32>,
-    ) -> Result<u64, DispatchError> {
-        if self.schedule.runnable == 0 {
-            return Ok(budget);
+    ) -> Result<Option<u64>, DispatchError> {
+        if self.schedule.resumed == 0 {
+            return Ok(Some(budget));
         }
         let teb = self.active_teb();
         if cpu.fs_base() != teb || pinned.is_some_and(|owner| owner != teb) {
             return Err(DispatchError::Unsupported);
         }
+        let wait = self.state_mut(teb)?.wait;
+        if let Some(wait) = wait {
+            wait.check(cpu)?;
+        }
         if pinned.is_some() {
             if self.schedule.remaining == 0 {
                 self.schedule.remaining = QUANTUM;
             }
-            return Ok(budget.min(self.schedule.remaining));
+            return Ok(Some(budget.min(self.schedule.remaining)));
         }
-        let highest = self
+        let Some(highest) = self
             .ready()
             .map(|(_, state)| state.priority.relative())
             .max()
-            .unwrap();
+        else {
+            return Ok(None);
+        };
         let current = if self.schedule.active == 0 {
             self.primary.priority.relative()
         } else {
@@ -99,7 +114,11 @@ impl Threads {
                 .priority
                 .relative()
         };
-        if self.schedule.remaining == 0 || self.schedule.requested || current < highest {
+        if self.schedule.remaining == 0
+            || self.schedule.requested
+            || current < highest
+            || wait.is_some_and(super::waiting::Wait::pending)
+        {
             let next = {
                 let mut candidates = self
                     .ready()
@@ -115,7 +134,7 @@ impl Threads {
             self.schedule.remaining = QUANTUM;
             self.schedule.requested = false;
         }
-        Ok(budget.min(self.schedule.remaining))
+        Ok(Some(budget.min(self.schedule.remaining)))
     }
 
     fn switch(&mut self, cpu: &mut Cpu32, next: u32) {
@@ -138,7 +157,7 @@ impl Threads {
     }
 
     pub(in super::super) fn account(&mut self, count: u64) {
-        if self.schedule.runnable != 0 {
+        if self.schedule.resumed != 0 {
             self.schedule.remaining -= count;
         }
     }

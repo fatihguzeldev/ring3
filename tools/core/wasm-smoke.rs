@@ -6,6 +6,9 @@ use ring3_core::{
     parse_pe_headers, resolve_pe_file_range,
 };
 
+#[path = "../../core/tests/support/event_wait_cases.rs"]
+mod event_wait_cases;
+
 #[path = "../../core/tests/support/resumed_thread_cases.rs"]
 mod resumed_thread_cases;
 
@@ -4683,6 +4686,7 @@ pub extern "C" fn run() -> u32 {
     execute_tls();
     execute_thread_state();
     execute_thread_callbacks();
+    event_wait_cases::event_handshake_runs_across_host_budgets();
     resumed_thread_cases::resumed_guest_preserves_context_across_host_budgets();
     thread_start_cases::ordered_notifications_precede_each_child_entry();
     thread_start_cases::retryable_notification_frames();

@@ -2,6 +2,7 @@ use std::collections::BTreeMap;
 
 mod entry;
 mod scheduling;
+mod waiting;
 pub(super) use entry::{ENTER, RETURN};
 
 use super::{
@@ -26,10 +27,11 @@ pub(super) struct State {
     priority: thread::Priority,
     pub(super) callbacks: callbacks::Callbacks,
     pub(super) exception: Option<eh::Pending>,
+    wait: Option<waiting::Wait>,
 }
 
 struct Context {
-    runnable: bool,
+    resumed: bool,
     id: u32,
     teb: u32,
     cpu: Cpu32,
@@ -132,7 +134,7 @@ impl Threads {
         self.children.insert(
             handle,
             Context {
-                runnable: false,
+                resumed: false,
                 id,
                 teb: high,
                 cpu,
