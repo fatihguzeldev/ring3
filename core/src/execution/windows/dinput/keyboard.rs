@@ -544,8 +544,34 @@ mod tests {
         assert_eq!(input.roots, [0]);
     }
 
+    fn standard_mouse(memory: &mut GuestMemory) {
+        words(memory, 0x2100, &[24, 16, 2, 20, 11, 0x2200]);
+        for index in 0..11 {
+            let (guid, offset, kind) = if index < 3 {
+                let mut guid = [
+                    0xe0, 0x02, 0x6d, 0xa3, 0xf3, 0xc9, 0xcf, 0x11, 0xbf, 0xc7, 0x44, 0x45, 0x53,
+                    0x54, 0, 0,
+                ];
+                guid[0] += u8::try_from(index).unwrap();
+                memory.write(u64::from(0x2300 + index * 16), &guid).unwrap();
+                (
+                    0x2300 + index * 16,
+                    index * 4,
+                    if index == 2 { 0x80ff_ff03 } else { 0x00ff_ff03 },
+                )
+            } else {
+                (
+                    0,
+                    index + 9,
+                    if index >= 5 { 0x80ff_ff0c } else { 0x00ff_ff0c },
+                )
+            };
+            words(memory, 0x2200 + index * 16, &[guid, offset, kind, 0]);
+        }
+    }
+
     #[test]
-    fn mouse_lifetime_does_not_change_acquired_keyboard_configuration() {
+    fn mouse_configuration_and_lifetime_do_not_change_acquired_keyboard() {
         let (mut input, mut memory) = setup();
         let desktop = foreground();
         let device = &mut input.devices[0];
@@ -575,6 +601,18 @@ mod tests {
                 .dispatch(
                     Call::CreateDevice,
                     &[OBJECTS, 0x1020, 0x1000, 0],
+                    &mut memory,
+                    &desktop
+                )
+                .ok(),
+            Some(0)
+        );
+        standard_mouse(&mut memory);
+        assert_eq!(
+            input
+                .dispatch(
+                    Call::SetMouseDataFormat,
+                    &[super::super::MICE, 0x2100],
                     &mut memory,
                     &desktop
                 )
@@ -619,7 +657,7 @@ mod tests {
         assert_eq!(memory.mapped_pages(), pages);
         assert_eq!(input.devices[1].references, 1);
         assert!(!input.devices[1].is_acquired(&desktop));
-        assert_eq!(input.mice, [0]);
+        assert_eq!(input.mice[0].references, 0);
     }
 
     #[test]

@@ -2,6 +2,7 @@ use super::desktop::Desktop;
 use super::{API_BASE, Access, DispatchError, GuestMemory, PAGE_SIZE, Permissions, guest};
 
 mod keyboard;
+mod mouse;
 
 pub(super) const BASE: u32 = 0x7001_7000;
 const TABLE: u32 = BASE + 0x100;
@@ -77,6 +78,7 @@ pub(super) enum Call {
     Create,
     CreateDevice,
     SetDataFormat,
+    SetMouseDataFormat,
     SetCooperativeLevel,
     SetProperty,
     Acquire,
@@ -105,6 +107,7 @@ impl Call {
             0x58c => Some(Self::QueryInterface(Class::Mouse)),
             0x590 => Some(Self::AddRef(Class::Mouse)),
             0x594 => Some(Self::Release(Class::Mouse)),
+            0x598 => Some(Self::SetMouseDataFormat),
             _ => None,
         }
     }
@@ -117,7 +120,7 @@ impl Call {
         match self {
             Self::Create | Self::CreateDevice => 4,
             Self::QueryInterface(_) | Self::SetCooperativeLevel | Self::SetProperty => 3,
-            Self::SetDataFormat => 2,
+            Self::SetDataFormat | Self::SetMouseDataFormat => 2,
             Self::AddRef(_) | Self::Release(_) | Self::Acquire | Self::Unacquire => 1,
         }
     }
@@ -127,7 +130,7 @@ impl Call {
 pub(super) struct Input {
     roots: Vec<u32>,
     devices: Vec<keyboard::Device>,
-    mice: Vec<u32>,
+    mice: Vec<mouse::Device>,
 }
 
 impl Input {
@@ -135,7 +138,7 @@ impl Input {
         match class {
             Class::Root => &mut self.roots[index],
             Class::Keyboard => &mut self.devices[index].references,
-            Class::Mouse => &mut self.mice[index],
+            Class::Mouse => &mut self.mice[index].references,
         }
     }
 
@@ -147,7 +150,7 @@ impl Input {
         let count = match class {
             Class::Root => self.roots.get(index),
             Class::Keyboard => self.devices.get(index).map(|device| &device.references),
-            Class::Mouse => self.mice.get(index),
+            Class::Mouse => self.mice.get(index).map(|device| &device.references),
         };
         if !offset.is_multiple_of(4) || count.is_none_or(|count| *count == 0) {
             return Err(DispatchError::Unsupported);
@@ -190,6 +193,7 @@ impl Input {
                     0 => 0x58c_u32,
                     1 => 0x590,
                     2 => 0x594,
+                    11 => 0x598,
                     _ => 0xffc,
                 };
             bytes[0x300 + slot * 4..0x304 + slot * 4].copy_from_slice(&address.to_le_bytes());
@@ -270,7 +274,7 @@ impl Input {
         if guid == KEYBOARD {
             self.devices.push(keyboard::Device::new());
         } else {
-            self.mice.push(1);
+            self.mice.push(mouse::Device::new());
         }
         Ok(0)
     }
@@ -315,6 +319,10 @@ impl Input {
             Call::SetDataFormat => {
                 let index = self.object(Class::Keyboard, args[0])?;
                 self.devices[index].set_format(args[1], memory, desktop)
+            }
+            Call::SetMouseDataFormat => {
+                let index = self.object(Class::Mouse, args[0])?;
+                self.mice[index].set_format(args[1], memory)
             }
             Call::SetCooperativeLevel => {
                 let index = self.object(Class::Keyboard, args[0])?;
@@ -366,7 +374,7 @@ mod tests {
             let mut input = Input::default();
             input.roots.push(u32::MAX);
             input.devices.push(keyboard::Device::new());
-            input.mice.push(u32::MAX);
+            input.mice.push(mouse::Device::new());
             *input.references(class, 0) = u32::MAX;
             let pointer = class.objects();
             assert!(matches!(

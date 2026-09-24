@@ -10,7 +10,9 @@ mod dinput_mouse_cases;
 mod imported_executable;
 
 use dinput_device_calls::*;
+use dinput_device_cases::DEVICE;
 use dinput_mouse_cases::MOUSE;
+use ring3_core::execution::Access;
 
 const MOUSE_QUERY: u32 = 0x7000_058c;
 const MOUSE_ADD: u32 = 0x7000_0590;
@@ -206,10 +208,11 @@ fn mouse_uses_read_only_nonexecutable_table_at_full_page_budget() {
                 0 => MOUSE_QUERY,
                 1 => MOUSE_ADD,
                 2 => MOUSE_RELEASE,
+                11 => 0x7000_0598,
                 _ => 0x7000_0ffc,
             }
         );
-        if slot >= 3 {
+        if slot >= 3 && slot != 11 {
             denied(&mut p, method, &[]);
         }
     }

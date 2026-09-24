@@ -42,6 +42,16 @@ fn store(code: &mut Vec<u8>, address: u32) {
 }
 
 pub fn imported_standard_keyboard_format_across_budgets() {
+    imported_format_across_budgets(
+        [
+            0x61, 0x2b, 0x1d, 0x6f, 0xa0, 0xd5, 0xcf, 0x11, 0xbf, 0xc7, 0x44, 0x45, 0x53, 0x54, 0,
+            0,
+        ],
+        standard,
+    );
+}
+
+pub fn imported_format_across_budgets(guid: [u8; 16], setup: fn(&mut GuestMemory, bool)) {
     let mut code = Vec::new();
     for value in [0, DATA, 0x700, 0x0040_0000] {
         push(&mut code, value);
@@ -72,25 +82,17 @@ pub fn imported_standard_keyboard_format_across_budgets() {
     code.push(0xcc);
     let bytes = imported_executable::pe32(&code, "dinput.dll", &["DirectInputCreateA"]);
     let mut results = Vec::new();
-    for reverse in [false, true] {
+    for variant in [false, true] {
         for budget in [1, 7, 4096, 20000] {
             let mut p = Process32::load(&bytes, 64).unwrap();
             p.memory
                 .map_zeroed(0x3000_0000, 12288, Permissions::READ_WRITE)
                 .unwrap();
-            standard(&mut p.memory, reverse);
+            setup(&mut p.memory, variant);
             p.memory
                 .protect(0x3000_0000, 12288, Permissions::READ)
                 .unwrap();
-            p.memory
-                .write(
-                    u64::from(DATA + 64),
-                    &[
-                        0x61, 0x2b, 0x1d, 0x6f, 0xa0, 0xd5, 0xcf, 0x11, 0xbf, 0xc7, 0x44, 0x45,
-                        0x53, 0x54, 0, 0,
-                    ],
-                )
-                .unwrap();
+            p.memory.write(u64::from(DATA + 64), &guid).unwrap();
             let stack = p.cpu.register(Register32::Esp);
             let mut counts = (0, 0);
             loop {

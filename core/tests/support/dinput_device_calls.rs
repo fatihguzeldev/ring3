@@ -1,7 +1,7 @@
-pub use super::dinput_device_cases::{DATA, DEVICE, KEYBOARD};
+pub use super::dinput_device_cases::{DATA, KEYBOARD};
 use super::imported_executable;
 pub use ring3_core::execution::{
-    Access, Cpu32, MemoryError, Permissions, Process32, ProcessStop, Register32, StopReason,
+    Cpu32, MemoryError, Permissions, Process32, ProcessStop, Register32, StopReason,
 };
 
 pub const ROOT_CREATE: u32 = 0x7000_0558;

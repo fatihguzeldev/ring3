@@ -11,6 +11,8 @@ fn imported_keyboard_vtable_lifetime_survives_root_across_budgets() {
 #[path = "support/dinput_device_calls.rs"]
 mod dinput_device_calls;
 use dinput_device_calls::*;
+use dinput_device_cases::DEVICE;
+use ring3_core::execution::Access;
 
 #[test]
 fn device_aliases_and_lifetimes_are_independent_of_roots_and_other_devices() {
