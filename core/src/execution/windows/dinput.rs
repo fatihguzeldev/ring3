@@ -70,6 +70,7 @@ pub(super) enum Call {
     CreateDevice,
     SetDataFormat,
     SetCooperativeLevel,
+    SetProperty,
     QueryInterface(Class),
     AddRef(Class),
     Release(Class),
@@ -88,6 +89,7 @@ impl Call {
             0x574 => Some(Self::Release(Class::Keyboard)),
             0x578 => Some(Self::SetDataFormat),
             0x57c => Some(Self::SetCooperativeLevel),
+            0x580 => Some(Self::SetProperty),
             _ => None,
         }
     }
@@ -99,7 +101,7 @@ impl Call {
     pub(super) fn arguments(self) -> usize {
         match self {
             Self::Create | Self::CreateDevice => 4,
-            Self::QueryInterface(_) | Self::SetCooperativeLevel => 3,
+            Self::QueryInterface(_) | Self::SetCooperativeLevel | Self::SetProperty => 3,
             Self::SetDataFormat => 2,
             Self::AddRef(_) | Self::Release(_) => 1,
         }
@@ -157,6 +159,7 @@ impl Input {
                     0 => 0x56c_u32,
                     1 => 0x570,
                     2 => 0x574,
+                    6 => 0x580,
                     11 => 0x578,
                     13 => 0x57c,
                     _ => 0xffc,
@@ -280,6 +283,10 @@ impl Input {
             Call::SetCooperativeLevel => {
                 let index = self.object(Class::Keyboard, args[0])?;
                 self.devices[index].set_cooperative_level(args[1], args[2], desktop)
+            }
+            Call::SetProperty => {
+                let index = self.object(Class::Keyboard, args[0])?;
+                self.devices[index].set_property(args[1], args[2], memory)
             }
             Call::QueryInterface(class) => self.query(class, args, memory),
             Call::AddRef(class) | Call::Release(class) => {

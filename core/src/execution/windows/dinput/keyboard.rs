@@ -15,10 +15,17 @@ struct CooperativeLevel {
     suppress_windows_key: bool,
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+struct BufferSize {
+    requested: u32,
+    capacity: u32,
+}
+
 pub(super) struct Device {
     pub(super) references: u32,
     format: Option<Format>,
     cooperative_level: Option<CooperativeLevel>,
+    buffer_size: BufferSize,
 }
 
 impl Device {
@@ -27,7 +34,39 @@ impl Device {
             references: 1,
             format: None,
             cooperative_level: None,
+            buffer_size: BufferSize::default(),
         }
+    }
+
+    pub(super) fn set_property(
+        &mut self,
+        property: u32,
+        address: u32,
+        memory: &GuestMemory,
+    ) -> Result<u32, DispatchError> {
+        if property != 1 {
+            return Err(DispatchError::Unsupported);
+        }
+        if address == 0 {
+            return Ok(INVALID_ARGUMENT);
+        }
+        let mut header = [0; 5];
+        guest::read_words(memory, address, &mut header[..2])?;
+        if header[1] != 16 || header[0] != 20 {
+            return Ok(INVALID_ARGUMENT);
+        }
+        guest::read_words(memory, address, &mut header)?;
+        if header[3] != 0 {
+            return Err(DispatchError::Unsupported);
+        }
+        if header[2] != 0 {
+            return Ok(INVALID_ARGUMENT);
+        }
+        self.buffer_size = BufferSize {
+            requested: header[4],
+            capacity: header[4].min(1024),
+        };
+        Ok(0)
     }
 
     pub(super) fn set_cooperative_level(
@@ -364,6 +403,134 @@ mod tests {
             Some(0)
         );
         (input, memory)
+    }
+
+    fn property(
+        input: &mut Input,
+        memory: &mut GuestMemory,
+        args: [u32; 3],
+    ) -> Result<u32, DispatchError> {
+        input.dispatch(Call::SetProperty, &args, memory, &Desktop::default())
+    }
+
+    #[test]
+    fn buffer_capacity_preserves_requested_values_and_other_device_state() {
+        let (mut input, mut memory) = configured_first();
+        assert!(
+            input
+                .devices
+                .iter()
+                .all(|device| device.buffer_size == BufferSize::default())
+        );
+        let mut desktop = Desktop::default();
+        desktop.insert(0x7500_0004, Window::default());
+        assert_eq!(
+            cooperate(&mut input, &mut memory, &desktop, [DEVICES, 0x7500_0004, 6]).ok(),
+            Some(0)
+        );
+        let cooperative = input.devices[0].cooperative_level;
+        memory.write(0x1020, &super::super::INTERFACES[0]).unwrap();
+        assert_eq!(
+            input
+                .dispatch(
+                    Call::QueryInterface(Class::Keyboard),
+                    &[DEVICES, 0x1020, 0x1000],
+                    &mut memory,
+                    &desktop
+                )
+                .ok(),
+            Some(0)
+        );
+        for (requested, capacity) in [
+            (0, 0),
+            (1, 1),
+            (16, 16),
+            (1024, 1024),
+            (1025, 1024),
+            (u32::MAX, 1024),
+            (0, 0),
+        ] {
+            words(&mut memory, 0x1101, &[20, 16, 0, 0, requested]);
+            assert_eq!(
+                property(&mut input, &mut memory, [DEVICES, 1, 0x1101]).ok(),
+                Some(0)
+            );
+            assert_eq!(
+                input.devices[0].buffer_size,
+                BufferSize {
+                    requested,
+                    capacity
+                }
+            );
+            assert_eq!(input.devices[1].buffer_size, BufferSize::default());
+        }
+        assert_eq!(input.devices[0].format, Some(Format::StandardKeyboard));
+        assert_eq!(input.devices[1].format, None);
+        assert_eq!(input.devices[0].cooperative_level, cooperative);
+        assert_eq!(input.devices[1].cooperative_level, None);
+        assert_eq!(input.devices[0].references, 2);
+        assert_eq!(input.devices[1].references, 1);
+        assert_eq!(input.roots, [0]);
+    }
+
+    #[test]
+    fn failed_buffer_replacement_preserves_values_and_recovers_without_borrowing() {
+        let (mut input, mut memory) = configured_first();
+        words(&mut memory, 0x1101, &[20, 16, 0, 0, 16]);
+        assert_eq!(
+            property(&mut input, &mut memory, [DEVICES, 1, 0x1101]).ok(),
+            Some(0)
+        );
+        let first = input.devices[0].buffer_size;
+        let pages = memory.mapped_pages();
+        for receiver in [DEVICES, DEVICES + 4] {
+            assert!(matches!(
+                property(&mut input, &mut memory, [receiver, 2, 0x5000]),
+                Err(DispatchError::Unsupported)
+            ));
+            assert_eq!(
+                property(&mut input, &mut memory, [receiver, 1, 0]).ok(),
+                Some(INVALID_ARGUMENT)
+            );
+            for header in [[19, 16, 0, 0, 99], [20, 15, 0, 0, 99], [20, 16, 1, 0, 99]] {
+                words(&mut memory, 0x1101, &header);
+                assert_eq!(
+                    property(&mut input, &mut memory, [receiver, 1, 0x1101]).ok(),
+                    Some(INVALID_ARGUMENT)
+                );
+            }
+            words(&mut memory, 0x1101, &[20, 16, 0, 1, 99]);
+            assert!(matches!(
+                property(&mut input, &mut memory, [receiver, 1, 0x1101]),
+                Err(DispatchError::Unsupported)
+            ));
+            words(&mut memory, 0x4ff8, &[20, 16]);
+            assert!(matches!(
+                property(&mut input, &mut memory, [receiver, 1, 0x4ff8]),
+                Err(DispatchError::Memory(_))
+            ));
+            assert_eq!(input.devices[0].buffer_size, first);
+            assert_eq!(input.devices[1].buffer_size, BufferSize::default());
+        }
+        words(&mut memory, 0x1101, &[20, 16, 0, 0, u32::MAX]);
+        assert_eq!(
+            property(&mut input, &mut memory, [DEVICES + 4, 1, 0x1101]).ok(),
+            Some(0)
+        );
+        words(&mut memory, 0x1101, &[0; 5]);
+        memory.unmap(0x1000, 4096).unwrap();
+        assert_eq!(input.devices[0].buffer_size, first);
+        assert_eq!(
+            input.devices[1].buffer_size,
+            BufferSize {
+                requested: u32::MAX,
+                capacity: 1024
+            }
+        );
+        assert_eq!(memory.mapped_pages(), pages - 1);
+        assert_eq!(input.devices[0].references, 1);
+        assert_eq!(input.devices[1].references, 1);
+        assert_eq!(input.roots, [0]);
     }
 
     #[test]

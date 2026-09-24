@@ -20,6 +20,8 @@ mod dinput_cooperative_cases;
 mod dinput_device_cases;
 #[path = "../../core/tests/support/dinput_format_cases.rs"]
 mod dinput_format_cases;
+#[path = "../../core/tests/support/dinput_property_cases.rs"]
+mod dinput_property_cases;
 #[path = "../../core/tests/support/dinput_root_cases.rs"]
 mod dinput_root_cases;
 #[path = "../../core/tests/support/event_wait_control.rs"]
@@ -4719,6 +4721,7 @@ pub extern "C" fn run() -> u32 {
     dinput_root_cases::imported_root_lifetime_across_budgets();
     dinput_device_cases::imported_keyboard_lifetime_across_budgets();
     dinput_format_cases::imported_standard_keyboard_format_across_budgets();
+    dinput_property_cases::imported_keyboard_buffer_setting_across_budgets();
     dinput_cooperative_cases::imported_foreground_keyboard_setting_across_budgets();
     thread_start_cases::ordered_notifications_precede_each_child_entry();
     thread_start_cases::retryable_notification_frames();
