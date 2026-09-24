@@ -1243,7 +1243,9 @@ impl Process32 {
             }
             Api::Com(call) => self.com_api(call, args)?,
             Api::Input(call) => {
-                let value = self.input.dispatch(call, args, &mut self.memory)?;
+                let value = self
+                    .input
+                    .dispatch(call, args, &mut self.memory, &self.desktop)?;
                 self.cpu.set_register(Register32::Eax, value);
             }
             Api::String(call) => {

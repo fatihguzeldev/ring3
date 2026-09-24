@@ -1,3 +1,4 @@
+use super::desktop::Desktop;
 use super::{API_BASE, Access, DispatchError, GuestMemory, PAGE_SIZE, Permissions, guest};
 
 mod keyboard;
@@ -68,6 +69,7 @@ pub(super) enum Call {
     Create,
     CreateDevice,
     SetDataFormat,
+    SetCooperativeLevel,
     QueryInterface(Class),
     AddRef(Class),
     Release(Class),
@@ -85,6 +87,7 @@ impl Call {
             0x570 => Some(Self::AddRef(Class::Keyboard)),
             0x574 => Some(Self::Release(Class::Keyboard)),
             0x578 => Some(Self::SetDataFormat),
+            0x57c => Some(Self::SetCooperativeLevel),
             _ => None,
         }
     }
@@ -96,7 +99,7 @@ impl Call {
     pub(super) fn arguments(self) -> usize {
         match self {
             Self::Create | Self::CreateDevice => 4,
-            Self::QueryInterface(_) => 3,
+            Self::QueryInterface(_) | Self::SetCooperativeLevel => 3,
             Self::SetDataFormat => 2,
             Self::AddRef(_) | Self::Release(_) => 1,
         }
@@ -155,6 +158,7 @@ impl Input {
                     1 => 0x570,
                     2 => 0x574,
                     11 => 0x578,
+                    13 => 0x57c,
                     _ => 0xffc,
                 };
             bytes[0x200 + slot * 4..0x204 + slot * 4].copy_from_slice(&address.to_le_bytes());
@@ -264,6 +268,7 @@ impl Input {
         call: Call,
         args: &[u32],
         memory: &mut GuestMemory,
+        desktop: &Desktop,
     ) -> Result<u32, DispatchError> {
         match call {
             Call::Create => self.create(args, memory),
@@ -271,6 +276,10 @@ impl Input {
             Call::SetDataFormat => {
                 let index = self.object(Class::Keyboard, args[0])?;
                 self.devices[index].set_format(args[1], memory)
+            }
+            Call::SetCooperativeLevel => {
+                let index = self.object(Class::Keyboard, args[0])?;
+                self.devices[index].set_cooperative_level(args[1], args[2], desktop)
             }
             Call::QueryInterface(class) => self.query(class, args, memory),
             Call::AddRef(class) | Call::Release(class) => {
@@ -309,14 +318,20 @@ mod tests {
             *input.references(class, 0) = u32::MAX;
             let pointer = class.objects();
             assert!(matches!(
-                input.dispatch(Call::AddRef(class), &[pointer], &mut memory),
+                input.dispatch(
+                    Call::AddRef(class),
+                    &[pointer],
+                    &mut memory,
+                    &Desktop::default()
+                ),
                 Err(DispatchError::Unsupported)
             ));
             assert!(matches!(
                 input.dispatch(
                     Call::QueryInterface(class),
                     &[pointer, 0x1000, 0x1020],
-                    &mut memory
+                    &mut memory,
+                    &Desktop::default()
                 ),
                 Err(DispatchError::Unsupported)
             ));
@@ -326,7 +341,12 @@ mod tests {
             assert_eq!(*input.references(class, 0), u32::MAX);
             assert_eq!(
                 input
-                    .dispatch(Call::Release(class), &[pointer], &mut memory)
+                    .dispatch(
+                        Call::Release(class),
+                        &[pointer],
+                        &mut memory,
+                        &Desktop::default()
+                    )
                     .ok()
                     .unwrap(),
                 u32::MAX - 1
@@ -348,7 +368,11 @@ mod tests {
             guest::write_word(&mut memory, 0x1000, 77).unwrap();
             let mut input = Input::default();
             let args = [1, 0x700, 0x1000, 0];
-            assert!(input.dispatch(Call::Create, &args, &mut memory).is_err());
+            assert!(
+                input
+                    .dispatch(Call::Create, &args, &mut memory, &Desktop::default())
+                    .is_err()
+            );
             assert!(input.roots.is_empty());
             let mut output = [0];
             guest::read_words(&memory, 0x1000, &mut output).unwrap();
@@ -356,7 +380,7 @@ mod tests {
             memory.unmap(extra, PAGE_SIZE).unwrap();
             assert_eq!(
                 input
-                    .dispatch(Call::Create, &args, &mut memory)
+                    .dispatch(Call::Create, &args, &mut memory, &Desktop::default())
                     .ok()
                     .unwrap(),
                 0

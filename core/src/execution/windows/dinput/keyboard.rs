@@ -1,4 +1,4 @@
-use super::{Access, DispatchError, GuestMemory, INVALID_ARGUMENT, NULL_POINTER, guest};
+use super::{Access, Desktop, DispatchError, GuestMemory, INVALID_ARGUMENT, NULL_POINTER, guest};
 
 const KEY: [u8; 16] = [
     0x20, 0x82, 0x72, 0x55, 0x3c, 0xd3, 0xcf, 0x11, 0xbf, 0xc7, 0x44, 0x45, 0x53, 0x54, 0, 0,
@@ -9,9 +9,16 @@ enum Format {
     StandardKeyboard,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct CooperativeLevel {
+    window: u32,
+    suppress_windows_key: bool,
+}
+
 pub(super) struct Device {
     pub(super) references: u32,
     format: Option<Format>,
+    cooperative_level: Option<CooperativeLevel>,
 }
 
 impl Device {
@@ -19,7 +26,33 @@ impl Device {
         Self {
             references: 1,
             format: None,
+            cooperative_level: None,
         }
+    }
+
+    pub(super) fn set_cooperative_level(
+        &mut self,
+        window: u32,
+        flags: u32,
+        desktop: &Desktop,
+    ) -> Result<u32, DispatchError> {
+        if matches!(flags & 0x3, 0 | 0x3) || matches!(flags & 0xc, 0 | 0xc) {
+            return Ok(INVALID_ARGUMENT);
+        }
+        if !matches!(flags, 6 | 0x16) {
+            return Err(DispatchError::Unsupported);
+        }
+        if desktop
+            .window(window)
+            .is_none_or(|window| window.style & 0x4000_0000 != 0)
+        {
+            return Ok(0x8007_0006);
+        }
+        self.cooperative_level = Some(CooperativeLevel {
+            window,
+            suppress_windows_key: flags & 0x10 != 0,
+        });
+        Ok(0)
     }
 
     pub(super) fn set_format(
@@ -73,6 +106,7 @@ impl Device {
 
 #[cfg(test)]
 mod tests {
+    use super::super::super::desktop::Window;
     use super::super::{Call, Class, DEVICES, Input, KEYBOARD, OBJECTS};
     use super::*;
     use crate::execution::Permissions;
@@ -106,7 +140,12 @@ mod tests {
         let mut input = Input::default();
         assert_eq!(
             input
-                .dispatch(Call::Create, &[1, 0x700, 0x1000, 0], &mut memory)
+                .dispatch(
+                    Call::Create,
+                    &[1, 0x700, 0x1000, 0],
+                    &mut memory,
+                    &Desktop::default()
+                )
                 .ok(),
             Some(0)
         );
@@ -116,7 +155,8 @@ mod tests {
                     .dispatch(
                         Call::CreateDevice,
                         &[OBJECTS, 0x1020, 0x1000, 0],
-                        &mut memory
+                        &mut memory,
+                        &Desktop::default()
                     )
                     .ok(),
                 Some(0)
@@ -126,56 +166,45 @@ mod tests {
         (input, memory)
     }
 
+    fn cooperate(
+        input: &mut Input,
+        memory: &mut GuestMemory,
+        desktop: &Desktop,
+        args: [u32; 3],
+    ) -> Result<u32, DispatchError> {
+        input.dispatch(Call::SetCooperativeLevel, &args, memory, desktop)
+    }
+
     #[test]
-    fn configuration_is_owned_per_device_and_failed_replacement_is_atomic() {
+    fn cooperative_settings_are_per_device_and_independent_of_format_and_root_refs() {
         let (mut input, mut memory) = setup();
-        assert!(input.devices.iter().all(|device| device.format.is_none()));
-        assert_eq!(
+        let mut desktop = Desktop::default();
+        desktop.insert(0x7500_0004, Window::default());
+        desktop.insert(
+            0x7500_0008,
+            Window {
+                parent: 0x7500_0004,
+                ..Window::default()
+            },
+        );
+        assert!(
             input
-                .dispatch(Call::Release(Class::Root), &[OBJECTS], &mut memory)
-                .ok(),
+                .devices
+                .iter()
+                .all(|device| device.cooperative_level.is_none())
+        );
+        assert_eq!(
+            cooperate(&mut input, &mut memory, &desktop, [DEVICES, 0x7500_0004, 6]).ok(),
             Some(0)
         );
         assert_eq!(
             input
-                .dispatch(Call::SetDataFormat, &[DEVICES, 0x2000], &mut memory)
-                .ok(),
-            Some(0)
-        );
-        let configured = Some(Format::StandardKeyboard);
-        for receiver in [DEVICES, DEVICES + 4] {
-            assert_eq!(
-                input
-                    .dispatch(Call::SetDataFormat, &[receiver, 0], &mut memory)
-                    .ok(),
-                Some(NULL_POINTER)
-            );
-            words(&mut memory, 0x2000, &[23]);
-            assert_eq!(
-                input
-                    .dispatch(Call::SetDataFormat, &[receiver, 0x2000], &mut memory)
-                    .ok(),
-                Some(INVALID_ARGUMENT)
-            );
-            standard(&mut memory);
-            words(&mut memory, 0x3ffc, &[1]);
-            assert!(matches!(
-                input.dispatch(Call::SetDataFormat, &[receiver, 0x2000], &mut memory),
-                Err(DispatchError::Unsupported)
-            ));
-            standard(&mut memory);
-            words(&mut memory, 0x3ff0, &[0x5000]);
-            assert!(matches!(
-                input.dispatch(Call::SetDataFormat, &[receiver, 0x2000], &mut memory),
-                Err(DispatchError::Memory(_))
-            ));
-            standard(&mut memory);
-            assert_eq!(input.devices[0].format, configured);
-            assert_eq!(input.devices[1].format, None);
-        }
-        assert_eq!(
-            input
-                .dispatch(Call::SetDataFormat, &[DEVICES + 4, 0x2000], &mut memory)
+                .dispatch(
+                    Call::Release(Class::Root),
+                    &[OBJECTS],
+                    &mut memory,
+                    &desktop
+                )
                 .ok(),
             Some(0)
         );
@@ -185,7 +214,252 @@ mod tests {
                 .dispatch(
                     Call::QueryInterface(Class::Keyboard),
                     &[DEVICES, 0x1020, 0x1000],
-                    &mut memory
+                    &mut memory,
+                    &desktop
+                )
+                .ok(),
+            Some(0)
+        );
+        assert_eq!(
+            input
+                .dispatch(
+                    Call::SetDataFormat,
+                    &[DEVICES, 0x2000],
+                    &mut memory,
+                    &desktop
+                )
+                .ok(),
+            Some(0)
+        );
+        assert_eq!(
+            cooperate(
+                &mut input,
+                &mut memory,
+                &desktop,
+                [DEVICES, 0x7500_0008, 0x16]
+            )
+            .ok(),
+            Some(0)
+        );
+        assert_eq!(
+            cooperate(
+                &mut input,
+                &mut memory,
+                &desktop,
+                [DEVICES + 4, 0x7500_0004, 6]
+            )
+            .ok(),
+            Some(0)
+        );
+        assert_eq!(
+            input.devices[0].cooperative_level,
+            Some(CooperativeLevel {
+                window: 0x7500_0008,
+                suppress_windows_key: true
+            })
+        );
+        assert_eq!(
+            input.devices[1].cooperative_level,
+            Some(CooperativeLevel {
+                window: 0x7500_0004,
+                suppress_windows_key: false
+            })
+        );
+        assert_eq!(input.devices[0].format, Some(Format::StandardKeyboard));
+        assert_eq!(input.devices[1].format, None);
+        assert_eq!(input.devices[0].references, 2);
+        assert_eq!(input.devices[1].references, 1);
+        assert_eq!(input.roots, [0]);
+    }
+
+    #[test]
+    fn cooperative_failures_preserve_settings_and_do_not_keep_windows_alive() {
+        let (mut input, mut memory) = setup();
+        let mut desktop = Desktop::default();
+        desktop.insert(0x7500_0004, Window::default());
+        desktop.insert_child(
+            0x7500_0008,
+            Window {
+                parent: 0x7500_0004,
+                style: 0x4000_0000,
+                ..Window::default()
+            },
+        );
+        assert_eq!(
+            cooperate(
+                &mut input,
+                &mut memory,
+                &desktop,
+                [DEVICES, 0x7500_0004, 0x16]
+            )
+            .ok(),
+            Some(0)
+        );
+        let initial = input.devices[0].cooperative_level;
+        for receiver in [DEVICES, DEVICES + 4] {
+            assert_eq!(
+                cooperate(
+                    &mut input,
+                    &mut memory,
+                    &desktop,
+                    [receiver, 0x7500_0008, 0]
+                )
+                .ok(),
+                Some(INVALID_ARGUMENT)
+            );
+            for flags in [5, 9, 10, 0x26] {
+                assert!(matches!(
+                    cooperate(
+                        &mut input,
+                        &mut memory,
+                        &desktop,
+                        [receiver, 0x7500_0008, flags]
+                    ),
+                    Err(DispatchError::Unsupported)
+                ));
+            }
+            for window in [0, 1, 0x7500_0008, 0xdead_beef] {
+                assert_eq!(
+                    cooperate(&mut input, &mut memory, &desktop, [receiver, window, 6]).ok(),
+                    Some(0x8007_0006)
+                );
+            }
+            assert_eq!(input.devices[0].cooperative_level, initial);
+            assert_eq!(input.devices[1].cooperative_level, None);
+        }
+        desktop.remove(0x7500_0004);
+        assert_eq!(
+            cooperate(&mut input, &mut memory, &desktop, [DEVICES, 0x7500_0004, 6]).ok(),
+            Some(0x8007_0006)
+        );
+        assert_eq!(input.devices[0].cooperative_level, initial);
+        assert!(desktop.window(0x7500_0004).is_none());
+        assert_eq!(input.devices[0].references, 1);
+        assert_eq!(input.devices[1].references, 1);
+    }
+
+    fn configured_first() -> (Input, GuestMemory) {
+        let (mut input, mut memory) = setup();
+        assert!(input.devices.iter().all(|device| device.format.is_none()));
+        assert_eq!(
+            input
+                .dispatch(
+                    Call::Release(Class::Root),
+                    &[OBJECTS],
+                    &mut memory,
+                    &Desktop::default()
+                )
+                .ok(),
+            Some(0)
+        );
+        assert_eq!(
+            input
+                .dispatch(
+                    Call::SetDataFormat,
+                    &[DEVICES, 0x2000],
+                    &mut memory,
+                    &Desktop::default()
+                )
+                .ok(),
+            Some(0)
+        );
+        (input, memory)
+    }
+
+    #[test]
+    fn failed_format_replacement_preserves_configured_and_unconfigured_devices() {
+        let (mut input, mut memory) = configured_first();
+        let configured = Some(Format::StandardKeyboard);
+        for receiver in [DEVICES, DEVICES + 4] {
+            assert_eq!(
+                input
+                    .dispatch(
+                        Call::SetDataFormat,
+                        &[receiver, 0],
+                        &mut memory,
+                        &Desktop::default()
+                    )
+                    .ok(),
+                Some(NULL_POINTER)
+            );
+            words(&mut memory, 0x2000, &[23]);
+            assert_eq!(
+                input
+                    .dispatch(
+                        Call::SetDataFormat,
+                        &[receiver, 0x2000],
+                        &mut memory,
+                        &Desktop::default()
+                    )
+                    .ok(),
+                Some(INVALID_ARGUMENT)
+            );
+            standard(&mut memory);
+            words(&mut memory, 0x3ffc, &[1]);
+            assert!(matches!(
+                input.dispatch(
+                    Call::SetDataFormat,
+                    &[receiver, 0x2000],
+                    &mut memory,
+                    &Desktop::default()
+                ),
+                Err(DispatchError::Unsupported)
+            ));
+            standard(&mut memory);
+            words(&mut memory, 0x3ff0, &[0x5000]);
+            assert!(matches!(
+                input.dispatch(
+                    Call::SetDataFormat,
+                    &[receiver, 0x2000],
+                    &mut memory,
+                    &Desktop::default()
+                ),
+                Err(DispatchError::Memory(_))
+            ));
+            standard(&mut memory);
+            assert_eq!(input.devices[0].format, configured);
+            assert_eq!(input.devices[1].format, None);
+        }
+        assert_eq!(
+            input
+                .dispatch(
+                    Call::SetDataFormat,
+                    &[DEVICES + 4, 0x2000],
+                    &mut memory,
+                    &Desktop::default()
+                )
+                .ok(),
+            Some(0)
+        );
+        assert_eq!(input.devices[1].format, configured);
+        assert_eq!(input.devices[0].references, 1);
+        assert_eq!(input.devices[1].references, 1);
+        assert_eq!(input.roots, [0]);
+    }
+
+    #[test]
+    fn format_configuration_outlives_guest_storage_and_creator() {
+        let (mut input, mut memory) = configured_first();
+        let configured = Some(Format::StandardKeyboard);
+        assert_eq!(
+            input
+                .dispatch(
+                    Call::SetDataFormat,
+                    &[DEVICES + 4, 0x2000],
+                    &mut memory,
+                    &Desktop::default()
+                )
+                .ok(),
+            Some(0)
+        );
+        memory.write(0x1020, &super::super::INTERFACES[0]).unwrap();
+        assert_eq!(
+            input
+                .dispatch(
+                    Call::QueryInterface(Class::Keyboard),
+                    &[DEVICES, 0x1020, 0x1000],
+                    &mut memory,
+                    &Desktop::default()
                 )
                 .ok(),
             Some(0)
@@ -200,7 +474,12 @@ mod tests {
         memory.unmap(0x2000, 0x3000).unwrap();
         assert!(
             input
-                .dispatch(Call::SetDataFormat, &[DEVICES, 0x2000], &mut memory)
+                .dispatch(
+                    Call::SetDataFormat,
+                    &[DEVICES, 0x2000],
+                    &mut memory,
+                    &Desktop::default()
+                )
                 .is_err()
         );
         assert!(
