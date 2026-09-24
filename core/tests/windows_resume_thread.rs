@@ -213,7 +213,7 @@ fn scheduled_boundaries_reject_foreign_fs_and_child_gui_before_reading_arguments
     }
     p.cpu.set_fs_base(CHILD);
     let pages = p.memory.mapped_pages();
-    for offset in [0x464, 0x2a8, 0x474, 12, 0xa0, 0xcc, 16] {
+    for offset in [0x464, 0x2a8, 0x474, 12, 0xa0, 0xcc, 0x430] {
         p.cpu.eip = 0x7000_0000 + offset;
         p.cpu.set_register(Register32::Esp, 0);
         let before = p.cpu;

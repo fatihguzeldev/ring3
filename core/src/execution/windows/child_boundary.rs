@@ -1,7 +1,27 @@
-use super::Api;
+use super::{Api, creation, desktop};
 
 impl Api {
     pub(super) fn requires_primary(self) -> bool {
+        if let Self::Window(call) = self {
+            return !matches!(
+                call,
+                creation::Call::Rectangle
+                    | creation::Call::ClientRectangle
+                    | creation::Call::Parent
+                    | creation::Call::GetLong
+            );
+        }
+        if let Self::Desktop(call) = self {
+            return !matches!(
+                call,
+                desktop::Call::Desktop
+                    | desktop::Call::Find
+                    | desktop::Call::IsWindow
+                    | desktop::Call::DlgItem
+                    | desktop::Call::Top
+                    | desktop::Call::Window
+            );
+        }
         matches!(
             self,
             Self::SendMessage
@@ -21,8 +41,6 @@ impl Api {
                 | Self::SetForegroundWindow
                 | Self::CreateDialog
                 | Self::CallNextHook
-                | Self::Window(_)
-                | Self::Desktop(_)
                 | Self::Cursor(_)
                 | Self::Gdi(_)
                 | Self::Graphics(_)
