@@ -638,6 +638,8 @@ mod system_directory_executable;
 #[path = "../../core/tests/support/computer_name_executable.rs"]
 mod computer_name_executable;
 
+#[path = "../../core/tests/support/event_executable.rs"]
+mod event_executable;
 #[path = "../../core/tests/support/mutex_executable.rs"]
 mod mutex_executable;
 
@@ -2436,6 +2438,27 @@ fn execute_mutex_lifecycle() {
         let mut process =
             Process32::load(include_bytes!("../../target/windows-api/mutex.exe"), 64).unwrap();
         assert_eq!(process.run(1000).reason, ProcessStop::Exited(42));
+    }
+}
+
+fn execute_event_lifecycle() {
+    use ring3_core::execution::{Process32, ProcessStop, Register32, StopReason};
+    for manual in [false, true] {
+        let mut process = Process32::load(&event_executable::pe32(manual), 32).unwrap();
+        let result = process.run(100);
+        assert_eq!(result.reason, ProcessStop::Stopped(StopReason::Breakpoint));
+        assert_eq!((result.instructions, result.api_calls), (28, 8));
+        for (register, expected) in [
+            (Register32::Eax, 258),
+            (Register32::Ebx, 0x7200_0004),
+            (Register32::Esi, 258),
+            (Register32::Edi, 0),
+            (Register32::Ebp, if manual { 0 } else { 258 }),
+            (Register32::Esp, 0x1001_0000),
+        ] {
+            assert_eq!(process.cpu.register(register), expected);
+        }
+        assert_eq!(process.last_error().unwrap(), 0);
     }
 }
 
@@ -4469,6 +4492,7 @@ pub extern "C" fn run() -> u32 {
     execute_system_directory();
     execute_computer_name();
     execute_mutex_lifecycle();
+    execute_event_lifecycle();
     execute_performance_clock();
     execute_current_directory();
     execute_change_directory();
