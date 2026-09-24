@@ -93,7 +93,7 @@ impl Cpu32 {
         &mut self,
         instruction: &Instruction,
     ) -> Result<(), StopReason> {
-        self.x87_arithmetic_precision(instruction.code())?;
+        let single_precision = self.x87_arithmetic_precision(instruction.code())?;
         let index = (instruction.op0_register() as usize)
             .checked_sub(Register::ST0 as usize)
             .ok_or(StopReason::UnsupportedInstruction)?;
@@ -111,13 +111,22 @@ impl Cpu32 {
         if denominator == 0.0 {
             return Err(StopReason::UnsupportedInstruction);
         }
-        let result = numerator / denominator;
+        let mut result = numerator / denominator;
         if !result.is_finite() || (numerator != 0.0 && result.abs() < 2.0 * f64::MIN_POSITIVE) {
             return Err(StopReason::UnsupportedInstruction);
         }
+        if single_precision {
+            result = rounding::single_quotient(result, numerator, denominator)
+                .ok_or(StopReason::UnsupportedInstruction)?;
+        }
         let rounding = rounding::quotient_result(result, numerator, denominator);
+        let rounded_up = if single_precision && result.is_sign_negative() {
+            rounding == Ordering::Less
+        } else {
+            rounding == Ordering::Greater
+        };
         self.x87_stack
-            .rounded(rounding != Ordering::Equal, rounding == Ordering::Greater);
+            .rounded(rounding != Ordering::Equal, rounded_up);
         self.x87_stack.values[slot] = result.to_bits();
         self.x87_stack.pop();
         Ok(())
@@ -529,7 +538,8 @@ impl Cpu32 {
             0x003f
                 if matches!(
                     code,
-                    Code::Fadd_st0_sti
+                    Code::Fdivp_sti_st0
+                        | Code::Fadd_st0_sti
                         | Code::Faddp_sti_st0
                         | Code::Fmul_st0_sti
                         | Code::Fmul_m32fp

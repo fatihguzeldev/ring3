@@ -38,6 +38,12 @@ pub(super) fn single_sum(result: f64, left: f64, right: f64) -> Option<f64> {
     })
 }
 
+pub(super) fn single_quotient(result: f64, numerator: f64, denominator: f64) -> Option<f64> {
+    single_rounded(result, |midpoint| {
+        quotient_result(midpoint, numerator, denominator)
+    })
+}
+
 pub(super) fn single_sum_toward_zero(result: f64, left: f64, right: f64) -> Option<f64> {
     let nearest = single_sum(result, left, right)?;
     let compared = sum_result(nearest, left, right);
