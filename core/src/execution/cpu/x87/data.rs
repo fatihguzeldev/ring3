@@ -569,8 +569,10 @@ impl Cpu32 {
             return self.x87_stack.push(value);
         }
         let profile = self.x87_control_word & 0x0f3f;
-        if !matches!(instruction.code(), Code::Fst_m32fp | Code::Fstp_m32fp)
-            || !matches!(profile, 0x003f | 0x0c3f)
+        if !matches!(
+            instruction.code(),
+            Code::Fst_m32fp | Code::Fstp_m32fp | Code::Fst_m64fp | Code::Fstp_m64fp
+        ) || !matches!(profile, 0x003f | 0x0c3f)
         {
             self.x87_profile()?;
         }
