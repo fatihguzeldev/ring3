@@ -270,6 +270,12 @@ impl Pending {
         })
     }
 
+    fn check_outer_writes(&self, memory: &GuestMemory) -> Result<(), DispatchError> {
+        guest::check(memory, self.record + 8, 4, Access::Write)?;
+        guest::check(memory, self.call_stack - 4, 4, Access::Write)?;
+        Ok(())
+    }
+
     fn advance(&mut self, cpu: &mut Cpu32, memory: &mut GuestMemory) -> Result<(), DispatchError> {
         if let Some(inner) = self.inner {
             guest::write_word(memory, self.call_stack - 4, RETURN)?;
@@ -278,15 +284,16 @@ impl Pending {
             cpu.eip = inner.action;
             return Ok(());
         }
-        let (state, target) = if let Some(&(state, target)) = self.actions.get(self.next_action) {
-            self.next_action += 1;
-            (state, target)
-        } else {
-            self.catch_started = true;
-            (self.try_low, self.catch)
-        };
+        let action = self.actions.get(self.next_action).copied();
+        let (state, target) = action.unwrap_or((self.try_low, self.catch));
+        self.check_outer_writes(memory)?;
         guest::write_word(memory, self.record + 8, state)?;
         guest::write_word(memory, self.call_stack - 4, RETURN)?;
+        if action.is_some() {
+            self.next_action += 1;
+        } else {
+            self.catch_started = true;
+        }
         cpu.set_register(Register32::Ebp, self.frame);
         cpu.set_register(Register32::Esp, self.call_stack - 4);
         cpu.eip = target;
@@ -323,6 +330,9 @@ impl Process32 {
                 if words::<1>(&self.memory, self.cpu.fs_base())?[0] != inner.record {
                     return Err(DispatchError::Unsupported);
                 }
+                guest::check(&self.memory, inner.record + 8, 4, Access::Write)?;
+                guest::check(&self.memory, self.cpu.fs_base(), 4, Access::Write)?;
+                pending.check_outer_writes(&self.memory)?;
                 guest::write_word(&mut self.memory, inner.record + 8, u32::MAX)?;
                 guest::write_word(&mut self.memory, self.cpu.fs_base(), pending.record)?;
                 pending.inner = None;

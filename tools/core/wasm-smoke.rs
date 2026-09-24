@@ -6,6 +6,9 @@ use ring3_core::{
     parse_pe_headers, resolve_pe_file_range,
 };
 
+#[path = "../../core/tests/support/cxx_exception_cases.rs"]
+mod cxx_exception_cases;
+
 #[path = "../../core/tests/support/executable.rs"]
 mod executable;
 
@@ -4674,6 +4677,8 @@ pub extern "C" fn run() -> u32 {
     execute_tls();
     execute_thread_state();
     execute_thread_callbacks();
+    cxx_exception_cases::outer_transition_faults_preserve_cleanup_and_catch_progress();
+    cxx_exception_cases::inner_completion_faults_leave_every_transition_destination_unchanged();
     execute_global_memory();
     execute_memset();
     execute_reverse_search();
