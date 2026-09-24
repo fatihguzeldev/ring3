@@ -876,7 +876,12 @@ impl Process32 {
 
     fn load_module(&mut self, args: &[u32]) -> Result<bool, DispatchError> {
         let initialized = self.startup.is_complete();
-        match self.modules.load(args[0], initialized, &mut self.memory)? {
+        match self.modules.load(
+            args[0],
+            initialized,
+            thread::Teb(self.cpu.fs_base()),
+            &mut self.memory,
+        )? {
             modules::Load::Complete(value) => {
                 self.cpu.set_register(Register32::Eax, value);
                 Ok(false)
@@ -1200,9 +1205,13 @@ impl Process32 {
             }
             Api::Module(call) => {
                 let attached = self.startup.is_complete();
-                let value = self
-                    .modules
-                    .dispatch(call, args, attached, &mut self.memory)?;
+                let value = self.modules.dispatch(
+                    call,
+                    args,
+                    attached,
+                    thread::Teb(self.cpu.fs_base()),
+                    &mut self.memory,
+                )?;
                 self.cpu.set_register(Register32::Eax, value);
             }
             Api::Resource(call) => self.resource_api(call, args)?,

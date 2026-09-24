@@ -80,6 +80,7 @@ impl Modules {
         &mut self,
         argument: u32,
         initialized: bool,
+        teb: thread::Teb,
         memory: &mut GuestMemory,
     ) -> Result<Load, DispatchError> {
         let name = read_name(memory, argument)?;
@@ -94,7 +95,7 @@ impl Modules {
                 module.name.eq_ignore_ascii_case(&name)
             }
         }) else {
-            thread::set_last_error(memory, 126)?;
+            teb.set_last_error(memory, 126)?;
             return Ok(Load::Complete(0));
         };
         match module.state {
@@ -240,16 +241,17 @@ impl Modules {
         call: Call,
         arguments: &[u32],
         initialized: bool,
+        teb: thread::Teb,
         memory: &mut GuestMemory,
     ) -> Result<u32, DispatchError> {
         if matches!(call, Call::Load) {
-            return match self.load(arguments[0], initialized, memory)? {
+            return match self.load(arguments[0], initialized, teb, memory)? {
                 Load::Complete(value) => Ok(value),
                 Load::Initialize(_) => Err(DispatchError::Unsupported),
             };
         }
         if matches!(call, Call::Procedure) {
-            return self.procedure(arguments[0], arguments[1], memory);
+            return self.procedure(arguments[0], arguments[1], teb, memory);
         }
         let argument = arguments[0];
         if matches!(call, Call::DisableThreadCalls) {
@@ -261,14 +263,14 @@ impl Modules {
                 .iter_mut()
                 .find(|module| module.handle == argument && module.visible())
             else {
-                thread::set_last_error(memory, 126)?;
+                teb.set_last_error(memory, 126)?;
                 return Ok(0);
             };
             module.thread_notifications = false;
             return Ok(1);
         }
         if matches!(call, Call::FileName) {
-            return self.file_name(argument, arguments[1], arguments[2], memory);
+            return self.file_name(argument, arguments[1], arguments[2], teb, memory);
         }
         if matches!(call, Call::Free) {
             let Some(module) = self
@@ -276,7 +278,7 @@ impl Modules {
                 .iter_mut()
                 .find(|module| module.handle == argument && module.visible())
             else {
-                thread::set_last_error(memory, 6)?;
+                teb.set_last_error(memory, 6)?;
                 return Ok(0);
             };
             if matches!(module.state, State::Initializing { .. }) {
@@ -314,7 +316,7 @@ impl Modules {
                 module.name.eq_ignore_ascii_case(&name)
             }
         }) else {
-            thread::set_last_error(memory, 126)?;
+            teb.set_last_error(memory, 126)?;
             return Ok(0);
         };
         Ok(module.handle)
@@ -324,6 +326,7 @@ impl Modules {
         &self,
         handle: u32,
         pointer: u32,
+        teb: thread::Teb,
         memory: &mut GuestMemory,
     ) -> Result<u32, DispatchError> {
         if handle == 0 || handle == self.program {
@@ -334,7 +337,7 @@ impl Modules {
             .iter()
             .find(|module| module.handle == handle && module.visible())
         else {
-            thread::set_last_error(memory, 126)?;
+            teb.set_last_error(memory, 126)?;
             return Ok(0);
         };
         if !module.builtin || pointer <= 0xffff {
@@ -349,6 +352,7 @@ impl Modules {
         handle: u32,
         output: u32,
         size: u32,
+        teb: thread::Teb,
         memory: &mut GuestMemory,
     ) -> Result<u32, DispatchError> {
         let path = if handle == 0 || handle == self.program {
@@ -360,18 +364,19 @@ impl Modules {
         {
             &module.path
         } else {
-            thread::set_last_error(memory, 126)?;
+            teb.set_last_error(memory, 126)?;
             return Ok(0);
         };
         let count = (size as usize).min(path.len());
         let truncated = (size as usize) < path.len();
         guest::check(memory, output, count, Access::Write)?;
         if truncated {
-            thread::check_last_error_write(memory)?;
+            teb.check_last_error_write(memory)?;
         }
         memory.write(u64::from(output), &path[..count])?;
         if truncated {
-            thread::set_last_error(memory, 0).expect("last-error output was checked");
+            teb.set_last_error(memory, 0)
+                .expect("last-error output was checked");
             Ok(size)
         } else {
             Ok(u32::try_from(path.len() - 1).expect("bounded image path"))
@@ -481,7 +486,13 @@ mod tests {
         for _ in 0..2 {
             assert_eq!(
                 modules
-                    .dispatch(Call::DisableThreadCalls, &[0x5000_0000], false, &mut memory)
+                    .dispatch(
+                        Call::DisableThreadCalls,
+                        &[0x5000_0000],
+                        false,
+                        thread::Teb(thread::BASE),
+                        &mut memory
+                    )
                     .ok(),
                 Some(1)
             );
@@ -500,7 +511,13 @@ mod tests {
             );
         }
         assert!(matches!(
-            modules.dispatch(Call::DisableThreadCalls, &[0], true, &mut memory),
+            modules.dispatch(
+                Call::DisableThreadCalls,
+                &[0],
+                true,
+                thread::Teb(thread::BASE),
+                &mut memory
+            ),
             Err(DispatchError::Memory(_))
         ));
         assert!(!modules.resident[0].thread_notifications);
@@ -517,7 +534,13 @@ mod tests {
         let mut modules = Modules::new(0x0040_0000, b"C:\\program.exe", Vec::new(), 0, &[]);
         modules.resident[0].references = u32::MAX;
         assert!(matches!(
-            modules.dispatch(Call::Load, &[0x1000], true, &mut memory),
+            modules.dispatch(
+                Call::Load,
+                &[0x1000],
+                true,
+                thread::Teb(thread::BASE),
+                &mut memory
+            ),
             Err(DispatchError::Unsupported)
         ));
         assert_eq!(modules.resident[0].references, u32::MAX);
@@ -531,7 +554,13 @@ mod tests {
         modules.resident[0].references = 0;
         let handle = modules.resident[0].handle;
         assert!(matches!(
-            modules.dispatch(Call::Free, &[handle], true, &mut memory),
+            modules.dispatch(
+                Call::Free,
+                &[handle],
+                true,
+                thread::Teb(thread::BASE),
+                &mut memory
+            ),
             Err(DispatchError::Unsupported)
         ));
         assert_eq!(modules.resident[0].references, 0);

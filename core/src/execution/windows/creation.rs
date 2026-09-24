@@ -208,7 +208,7 @@ impl Process32 {
         if let Some(pending) = frame.module {
             let success = self.cpu.register(Register32::Eax) != 0;
             if !success {
-                thread::set_last_error(&mut self.memory, 1114)?;
+                thread::Teb(self.cpu.fs_base()).set_last_error(&mut self.memory, 1114)?;
             }
             self.callbacks.finish(&mut self.cpu, &self.memory)?;
             self.modules.finish(pending, success);

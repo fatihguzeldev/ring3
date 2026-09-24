@@ -112,13 +112,14 @@ impl Resources {
         call: Call,
         arguments: &[u32],
         modules: &Modules,
+        teb: thread::Teb,
         memory: &mut GuestMemory,
     ) -> Result<u32, DispatchError> {
         match call {
-            Call::LoadResource => self.load_resource(arguments, modules, memory),
-            Call::LockResource => self.lock_resource(arguments[0], modules, memory),
-            Call::SizeofResource => self.sizeof_resource(arguments, modules, memory),
-            Call::LoadIcon => self.load_icon(arguments, modules, memory),
+            Call::LoadResource => self.load_resource(arguments, modules, teb, memory),
+            Call::LockResource => self.lock_resource(arguments[0], modules, teb, memory),
+            Call::SizeofResource => self.sizeof_resource(arguments, modules, teb, memory),
+            Call::LoadIcon => self.load_icon(arguments, modules, teb, memory),
             Call::LoadAccelerators => {
                 if arguments[1] > 0xffff {
                     return Err(DispatchError::Unsupported);
@@ -132,7 +133,7 @@ impl Resources {
                     }
                     Selection::Missing(error) => error,
                 };
-                thread::set_last_error(memory, error)?;
+                teb.set_last_error(memory, error)?;
                 Ok(0)
             }
             Call::CopyAccelerators => self.accelerators.copy(arguments, memory),
@@ -144,7 +145,7 @@ impl Resources {
                 match self.find(arguments[0], kind, name, modules)? {
                     Selection::Found(resource) => Ok(resource.info),
                     Selection::Missing(error) => {
-                        thread::set_last_error(memory, error)?;
+                        teb.set_last_error(memory, error)?;
                         Ok(0)
                     }
                 }
@@ -159,9 +160,9 @@ impl Resources {
                     Selection::Found(resource) => resource,
                     Selection::Missing(error) => {
                         guest::check(memory, output, 1, Access::Write)?;
-                        thread::check_last_error_write(memory)?;
+                        teb.check_last_error_write(memory)?;
                         memory.write(u64::from(output), &[0])?;
-                        thread::set_last_error(memory, error)?;
+                        teb.set_last_error(memory, error)?;
                         return Ok(0);
                     }
                 };
@@ -278,9 +279,13 @@ impl Resources {
 
 impl Process32 {
     pub(super) fn resource_api(&mut self, call: Call, args: &[u32]) -> Result<(), DispatchError> {
-        let value = self
-            .resources
-            .dispatch(call, args, &self.modules, &mut self.memory)?;
+        let value = self.resources.dispatch(
+            call,
+            args,
+            &self.modules,
+            thread::Teb(self.cpu.fs_base()),
+            &mut self.memory,
+        )?;
         self.cpu.set_register(Register32::Eax, value);
         Ok(())
     }

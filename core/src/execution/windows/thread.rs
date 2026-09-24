@@ -75,10 +75,6 @@ pub(super) fn set_last_error(memory: &mut GuestMemory, value: u32) -> Result<(),
     Teb(BASE).set_last_error(memory, value)
 }
 
-pub(super) fn check_last_error_write(memory: &GuestMemory) -> Result<(), MemoryError> {
-    Teb(BASE).check_last_error_write(memory)
-}
-
 #[cfg(test)]
 pub(super) fn last_error(memory: &GuestMemory) -> Result<u32, MemoryError> {
     Teb(BASE).last_error(memory)

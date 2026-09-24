@@ -333,3 +333,71 @@ fn searches_remain_shared_and_error_faults_do_not_consume_capacity_or_identity()
     assert_eq!(bytes(&p, OUTPUT, 8), b"C:\\demo\0");
     assert_eq!(p.last_error().unwrap(), 77);
 }
+
+#[test]
+fn module_and_resource_errors_use_caller_preflight_and_preserve_output_order() {
+    let bad = 0x5000_0000;
+    let cases = [
+        (0x14, vec![SOURCE], 0, 126),
+        (0x18, vec![SOURCE], 0, 126),
+        (0x1c, vec![bad], 0, 6),
+        (0xe0, vec![bad, OUTPUT, 16], 0, 126),
+        (0xfc, vec![bad], 0, 126),
+        (0x274, vec![bad, SOURCE], 0, 126),
+        (0xe0, vec![0, OUTPUT, 3], 3, 0),
+        (0xe8, vec![0, 1, 1], 0, 1812),
+        (0xec, vec![0, 1, OUTPUT, 16], 0, 1812),
+        (0x29c, vec![0, 1], 0, 1812),
+        (0x2c8, vec![0x0040_0000, 1], 0, 1812),
+        (0x424, vec![bad, 0], 0, 87),
+        (0x428, vec![bad], 0, 87),
+        (0x42c, vec![bad, 0], 0, 87),
+    ];
+    for (offset, args, result, error) in cases {
+        let mut p = load();
+        p.cpu.set_fs_base(CHILD);
+        p.memory.write(u64::from(OUTPUT), &[0x55; 16]).unwrap();
+        p.memory
+            .protect(u64::from(CHILD), PAGE_SIZE, Permissions::READ)
+            .unwrap();
+        let before = prepare(&mut p, offset, &args);
+        let run = p.run(1);
+        assert!(
+            matches!(run.reason, ProcessStop::Stopped(StopReason::MemoryFault(_))),
+            "api {offset:x}"
+        );
+        assert_eq!((run.instructions, run.api_calls), (0, 0));
+        assert_eq!(p.cpu, before);
+        assert_eq!(bytes(&p, OUTPUT, 16), [0x55; 16]);
+        p.memory
+            .protect(u64::from(CHILD), PAGE_SIZE, Permissions::READ_WRITE)
+            .unwrap();
+        call(&mut p, offset, &args, result);
+        assert_eq!(p.last_error().unwrap(), error, "api {offset:x}");
+        assert_eq!(bytes(&p, PRIMARY + 0x34, 4), 77_u32.to_le_bytes());
+        let mut expected = [0x55; 16];
+        if offset == 0xec {
+            expected[0] = 0;
+        } else if offset == 0xe0 && result == 3 {
+            expected[..3].copy_from_slice(b"C:\\");
+        }
+        assert_eq!(bytes(&p, OUTPUT, 16), expected);
+    }
+}
+
+#[test]
+fn module_and_string_resource_outputs_can_alias_the_caller_error() {
+    let mut p = load();
+    p.cpu.set_fs_base(CHILD);
+    call(&mut p, 0xe0, &[0, CHILD + 0x34, 3], 3);
+    assert_eq!(p.last_error().unwrap(), 0);
+    call(&mut p, 0xec, &[0, 1, CHILD + 0x34, 16], 0);
+    assert_eq!(p.last_error().unwrap(), 1812);
+    p.memory
+        .protect(u64::from(CHILD), PAGE_SIZE, Permissions::NONE)
+        .unwrap();
+    call(&mut p, 0x18, &[0], 0x0040_0000);
+    call(&mut p, 0xe0, &[0, OUTPUT, 32], 14);
+    assert_eq!(bytes(&p, OUTPUT, 15), b"C:\\program.exe\0");
+    assert_eq!(bytes(&p, PRIMARY + 0x34, 4), 77_u32.to_le_bytes());
+}

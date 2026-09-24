@@ -36,6 +36,7 @@ impl Resources {
         &mut self,
         args: &[u32],
         modules: &Modules,
+        teb: thread::Teb,
         memory: &mut GuestMemory,
     ) -> Result<u32, DispatchError> {
         if args[0] == 0 || args[1] > 0xffff {
@@ -43,7 +44,7 @@ impl Resources {
         }
         let group = match self.find(args[0], 14, args[1], modules)? {
             Selection::Found(resource) => resource,
-            Selection::Missing(error) => return failure(memory, error),
+            Selection::Missing(error) => return failure(teb, memory, error),
         };
         if let Some((&handle, _)) = self
             .icons
@@ -54,12 +55,12 @@ impl Resources {
             return Ok(handle);
         }
         if self.icons.loaded.len() == MAX_ICONS || self.icons.next > LAST_HANDLE {
-            return failure(memory, 8);
+            return failure(teb, memory, 8);
         }
         let entry = select(&group.bytes(memory, MAX_GROUP)?)?;
         let image = match self.find(args[0], 3, u32::from(entry.id), modules)? {
             Selection::Found(resource) => resource,
-            Selection::Missing(error) => return failure(memory, error),
+            Selection::Missing(error) => return failure(teb, memory, error),
         };
         if image.size != entry.size {
             return Err(DispatchError::Unsupported);
@@ -202,8 +203,8 @@ fn dword(bytes: &[u8], offset: usize) -> u32 {
     )
 }
 
-fn failure(memory: &mut GuestMemory, error: u32) -> Result<u32, DispatchError> {
-    thread::set_last_error(memory, error)?;
+fn failure(teb: thread::Teb, memory: &mut GuestMemory, error: u32) -> Result<u32, DispatchError> {
+    teb.set_last_error(memory, error)?;
     Ok(0)
 }
 
@@ -224,8 +225,12 @@ mod tests {
         let bytes = icon_executable::guest();
         let mut p = Process32::load(&bytes, 32).unwrap();
         assert!(matches!(
-            p.resources
-                .load_icon(&[0x0040_0000, 7], &p.modules, &mut p.memory),
+            p.resources.load_icon(
+                &[0x0040_0000, 7],
+                &p.modules,
+                thread::Teb(p.cpu.fs_base()),
+                &mut p.memory
+            ),
             Ok(FIRST_HANDLE)
         ));
         let selected = &bytes[0xab8..0x1360];
@@ -234,8 +239,12 @@ mod tests {
             .write(icon_executable::SECOND_IMAGE, &vec![0xff; selected.len()])
             .unwrap();
         assert!(matches!(
-            p.resources
-                .load_icon(&[0x0040_0000, 7], &p.modules, &mut p.memory),
+            p.resources.load_icon(
+                &[0x0040_0000, 7],
+                &p.modules,
+                thread::Teb(p.cpu.fs_base()),
+                &mut p.memory
+            ),
             Ok(FIRST_HANDLE)
         ));
         assert_eq!(p.resources.icons.loaded[&FIRST_HANDLE].1, selected);
@@ -326,8 +335,12 @@ mod tests {
         for quota in [false, true] {
             let mut p = Process32::load(&icon_executable::guest(), 32).unwrap();
             assert!(matches!(
-                p.resources
-                    .load_icon(&[0x0040_0000, 7], &p.modules, &mut p.memory),
+                p.resources.load_icon(
+                    &[0x0040_0000, 7],
+                    &p.modules,
+                    thread::Teb(p.cpu.fs_base()),
+                    &mut p.memory
+                ),
                 Ok(FIRST_HANDLE)
             ));
             let cached = p.resources.icons.loaded.remove(&FIRST_HANDLE).unwrap();
@@ -347,8 +360,12 @@ mod tests {
                 .protect(0x7ffd_e000, 4096, Permissions::NONE)
                 .unwrap();
             assert!(matches!(
-                p.resources
-                    .load_icon(&[0x0040_0000, 7], &p.modules, &mut p.memory),
+                p.resources.load_icon(
+                    &[0x0040_0000, 7],
+                    &p.modules,
+                    thread::Teb(p.cpu.fs_base()),
+                    &mut p.memory
+                ),
                 Err(DispatchError::Memory(_))
             ));
             assert_eq!(
@@ -359,15 +376,23 @@ mod tests {
                 .protect(0x7ffd_e000, 4096, Permissions::READ_WRITE)
                 .unwrap();
             assert!(matches!(
-                p.resources
-                    .load_icon(&[0x0040_0000, 7], &p.modules, &mut p.memory),
+                p.resources.load_icon(
+                    &[0x0040_0000, 7],
+                    &p.modules,
+                    thread::Teb(p.cpu.fs_base()),
+                    &mut p.memory
+                ),
                 Ok(0)
             ));
             assert_eq!(p.last_error().unwrap(), 8);
             p.resources.icons.loaded.insert(FIRST_HANDLE, cached);
             assert!(matches!(
-                p.resources
-                    .load_icon(&[0x0040_0000, 7], &p.modules, &mut p.memory),
+                p.resources.load_icon(
+                    &[0x0040_0000, 7],
+                    &p.modules,
+                    thread::Teb(p.cpu.fs_base()),
+                    &mut p.memory
+                ),
                 Ok(FIRST_HANDLE)
             ));
         }

@@ -3146,6 +3146,8 @@ fn execute_thread_state() {
         (0x7000_00e4, vec![0x0040_2340, 0x5000_0000, 4], 87),
         (0x7000_0230, vec![0x0040_2300], 3),
         (0x7000_023c, vec![0], 6),
+        (0x7000_0014, vec![0x0040_2300], 126),
+        (0x7000_00ec, vec![0, 1, 0x0040_2340, 16], 1812),
     ] {
         assert_eq!(call(&mut process, api, &args), 0);
         assert_eq!(process.last_error().unwrap(), error);

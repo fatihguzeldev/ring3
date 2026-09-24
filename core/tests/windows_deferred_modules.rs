@@ -293,3 +293,64 @@ fn failed_attach_error_write_fault_retains_callback_for_retry() {
     assert_eq!(call(&mut process, 0), 0);
     assert_eq!(process.last_error().unwrap(), 1114);
 }
+
+#[test]
+fn failed_attach_uses_child_error_and_retries_without_finishing_the_callback() {
+    let library = dll_executable::dll(DLL, &dll_executable::attach(DLL, 99, false), None);
+    let mut process = load(&library);
+    process.cpu.eip = 0x7000_0548;
+    process.cpu.set_register(Register32::Esp, STACK);
+    for (index, value) in [0x0040_1000_u32, 0, 0, 0x0040_1000, 0, 4, 0]
+        .into_iter()
+        .enumerate()
+    {
+        process
+            .memory
+            .write(u64::from(STACK) + index as u64 * 4, &value.to_le_bytes())
+            .unwrap();
+    }
+    assert_eq!(process.run(1).api_calls, 1);
+    assert_ne!(process.cpu.register(Register32::Eax), 0);
+    process
+        .memory
+        .write(0x7ffd_e034, &77_u32.to_le_bytes())
+        .unwrap();
+    process.cpu.set_fs_base(0x1101_0000);
+    name(&mut process, "demo.dll");
+    prepare(&mut process, 0);
+    process
+        .memory
+        .protect(0x1101_0000, PAGE_SIZE, Permissions::READ)
+        .unwrap();
+    assert!(matches!(
+        process.run(100).reason,
+        ProcessStop::Stopped(StopReason::MemoryFault(_))
+    ));
+    assert_eq!(process.cpu.eip, 0x7000_0ff8);
+    let before = process.cpu;
+    let run = process.run(1);
+    assert!(matches!(
+        run.reason,
+        ProcessStop::Stopped(StopReason::MemoryFault(_))
+    ));
+    assert_eq!((run.instructions, run.api_calls), (0, 0));
+    assert_eq!(process.cpu, before);
+    assert_eq!(word(&process, 0x7ffd_e034), 77);
+    assert_eq!(process.last_error().unwrap(), 0);
+    process
+        .memory
+        .protect(0x1101_0000, PAGE_SIZE, Permissions::READ_WRITE)
+        .unwrap();
+    assert_eq!(
+        process.run(1).reason,
+        ProcessStop::Stopped(StopReason::Breakpoint)
+    );
+    assert_eq!(process.cpu.register(Register32::Eax), 0);
+    assert_eq!(process.last_error().unwrap(), 1114);
+    assert_eq!(word(&process, 0x7ffd_e034), 77);
+    assert_eq!(call(&mut process, 1), 0);
+    assert_eq!(process.last_error().unwrap(), 126);
+    assert_eq!(call(&mut process, 0), 0);
+    assert_eq!(process.last_error().unwrap(), 1114);
+    assert_eq!(word(&process, 0x7ffd_e034), 77);
+}
