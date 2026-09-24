@@ -35,15 +35,22 @@ impl Call {
 }
 
 pub(super) struct Mutexes {
-    // a positive depth belongs to the sole guest thread.
-    objects: BTreeMap<u32, u32>,
+    objects: BTreeMap<u32, Mutex>,
+    handles: BTreeMap<u32, u32>,
     next: u32,
+}
+
+struct Mutex {
+    // a positive depth belongs to the sole guest thread.
+    depth: u32,
+    handles: usize,
 }
 
 impl Default for Mutexes {
     fn default() -> Self {
         Self {
             objects: BTreeMap::new(),
+            handles: BTreeMap::new(),
             next: FIRST_HANDLE,
         }
     }
@@ -63,7 +70,7 @@ impl Mutexes {
         if matches!(call, Call::Wait | Call::Close) && handle >= u32::MAX - 1 {
             return Err(DispatchError::Unsupported);
         }
-        let Some(&depth) = self.objects.get(&handle) else {
+        let Some(&object_id) = self.handles.get(&handle) else {
             return failure(
                 memory,
                 6,
@@ -74,19 +81,27 @@ impl Mutexes {
                 },
             );
         };
+        let object = self.objects.get_mut(&object_id).unwrap();
         match call {
             Call::Wait => {
-                let next = depth.checked_add(1).ok_or(DispatchError::Unsupported)?;
-                self.objects.insert(handle, next);
+                let next = object
+                    .depth
+                    .checked_add(1)
+                    .ok_or(DispatchError::Unsupported)?;
+                object.depth = next;
                 Ok(0)
             }
-            Call::ReleaseMutex if depth == 0 => failure(memory, 288, 0),
+            Call::ReleaseMutex if object.depth == 0 => failure(memory, 288, 0),
             Call::ReleaseMutex => {
-                self.objects.insert(handle, depth - 1);
+                object.depth -= 1;
                 Ok(1)
             }
             Call::Close => {
-                self.objects.remove(&handle);
+                self.handles.remove(&handle);
+                object.handles -= 1;
+                if object.handles == 0 {
+                    self.objects.remove(&object_id);
+                }
                 Ok(1)
             }
             Call::CreateMutex => unreachable!(),
@@ -101,12 +116,19 @@ impl Mutexes {
         if arguments[0] != 0 || arguments[2] != 0 {
             return Err(DispatchError::Unsupported);
         }
-        if self.objects.len() == MAX_OBJECTS || self.next > LAST_HANDLE {
+        if self.handles.len() == MAX_OBJECTS || self.next > LAST_HANDLE {
             return failure(memory, 8, 0);
         }
         thread::set_last_error(memory, 0)?;
         let handle = self.next;
-        self.objects.insert(handle, u32::from(arguments[1] != 0));
+        self.objects.insert(
+            handle,
+            Mutex {
+                depth: u32::from(arguments[1] != 0),
+                handles: 1,
+            },
+        );
+        self.handles.insert(handle, handle);
         self.next += 4;
         Ok(handle)
     }
@@ -152,12 +174,19 @@ mod tests {
         thread::initialize(&mut memory, 0, 0).unwrap();
         thread::set_last_error(&mut memory, 77).unwrap();
         let mut mutexes = Mutexes::default();
-        mutexes.objects.insert(FIRST_HANDLE, u32::MAX);
+        mutexes.objects.insert(
+            FIRST_HANDLE,
+            Mutex {
+                depth: u32::MAX,
+                handles: 1,
+            },
+        );
+        mutexes.handles.insert(FIRST_HANDLE, FIRST_HANDLE);
         assert!(matches!(
             mutexes.dispatch(Call::Wait, &[FIRST_HANDLE, 0], &mut memory),
             Err(DispatchError::Unsupported)
         ));
-        assert_eq!(mutexes.objects.get(&FIRST_HANDLE), Some(&u32::MAX));
+        assert_eq!(mutexes.objects.get(&FIRST_HANDLE).unwrap().depth, u32::MAX);
         assert_eq!(thread::last_error(&memory).unwrap(), 77);
         assert!(matches!(
             mutexes.dispatch(Call::ReleaseMutex, &[FIRST_HANDLE], &mut memory),
