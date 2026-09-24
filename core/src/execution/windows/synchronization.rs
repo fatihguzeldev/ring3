@@ -57,6 +57,7 @@ enum State {
     // a positive depth belongs to the sole guest thread.
     Mutex { depth: u32 },
     Event { manual_reset: bool, signaled: bool },
+    Thread,
 }
 
 impl Default for SyncObjects {
@@ -70,6 +71,33 @@ impl Default for SyncObjects {
 }
 
 impl SyncObjects {
+    pub(super) fn is_thread(&self, handle: u32) -> bool {
+        self.handles
+            .get(&handle)
+            .is_some_and(|id| matches!(self.objects[id].state, State::Thread))
+    }
+
+    pub(super) fn next_handle(&self) -> Option<u32> {
+        (self.handles.len() < MAX_HANDLES && self.next <= LAST_HANDLE).then_some(self.next)
+    }
+
+    pub(super) fn insert_thread(&mut self) -> u32 {
+        let handle = self
+            .next_handle()
+            .expect("thread creation preflights its handle");
+        self.objects.insert(
+            handle,
+            Object {
+                state: State::Thread,
+                handles: 1,
+                name: None,
+            },
+        );
+        self.handles.insert(handle, handle);
+        self.next += 4;
+        handle
+    }
+
     pub(super) fn dispatch(
         &mut self,
         call: Call,
@@ -96,6 +124,13 @@ impl SyncObjects {
         };
         let object = self.objects.get_mut(&object_id).unwrap();
         match (call, &mut object.state) {
+            (Call::Wait, State::Thread) => {
+                if arguments[1] == 0 {
+                    Ok(258)
+                } else {
+                    Err(DispatchError::Unsupported)
+                }
+            }
             (Call::Wait, State::Mutex { depth }) => {
                 let next = depth.checked_add(1).ok_or(DispatchError::Unsupported)?;
                 *depth = next;
@@ -177,7 +212,7 @@ impl SyncObjects {
         {
             return failure(memory, 6, 0);
         }
-        if self.handles.len() == MAX_HANDLES || self.next > LAST_HANDLE {
+        if self.next_handle().is_none() {
             return failure(memory, 8, 0);
         }
         thread::set_last_error(memory, if existing.is_some() { 183 } else { 0 })?;

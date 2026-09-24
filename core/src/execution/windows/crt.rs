@@ -38,6 +38,7 @@ const MB_CUR_MAX: u32 = DATA + 76;
 
 #[derive(Clone, Copy)]
 pub(super) enum Call {
+    BeginThreadEx,
     SetAppType,
     FmodePointer,
     CommodePointer,
@@ -89,6 +90,7 @@ pub(super) enum Call {
 impl Call {
     pub(super) fn at(offset: u32) -> Option<Self> {
         match offset {
+            0x548 => Some(Self::BeginThreadEx),
             0x100 => Some(Self::SetAppType),
             0x104 => Some(Self::FmodePointer),
             0x108 => Some(Self::CommodePointer),
@@ -145,6 +147,7 @@ impl Call {
 
     pub(super) fn arguments(self) -> usize {
         match self {
+            Self::BeginThreadEx => 6,
             Self::Stream(call) => call.arguments(),
             Self::SetAppType
             | Self::Malloc
@@ -205,6 +208,15 @@ pub(super) struct Crt {
 
 impl super::Process32 {
     pub(super) fn crt_call(&mut self, call: Call, arguments: &[u32]) -> Result<(), DispatchError> {
+        if matches!(call, Call::BeginThreadEx) {
+            let value = self.threads.create_suspended(
+                arguments,
+                &mut self.memory,
+                &mut self.sync_objects,
+            )?;
+            self.cpu.set_register(Register32::Eax, value);
+            return Ok(());
+        }
         if let Some(value) = self.crt.dispatch(
             call,
             arguments,
@@ -230,6 +242,7 @@ impl Crt {
         directory: &mut directory::Directory,
     ) -> Result<Option<u32>, DispatchError> {
         Ok(match call {
+            Call::BeginThreadEx => unreachable!("thread creation is owned by the process"),
             Call::Stream(call) => self
                 .streams
                 .dispatch(call, args, cpu, memory, heap, directory)
@@ -392,6 +405,7 @@ pub(super) fn resolve(name: &str) -> Option<u32> {
         "??2@YAPAXI@Z" => Some(API_BASE + 0x144),
         "??3@YAXPAX@Z" => Some(API_BASE + 0x148),
         "_errno" => Some(API_BASE + 0x124),
+        "_beginthreadex" => Some(API_BASE + 0x548),
         "_stat" => Some(API_BASE + 0x15c),
         "remove" => Some(API_BASE + 0x188),
         "srand" => Some(API_BASE + 0x160),

@@ -642,6 +642,8 @@ mod computer_name_executable;
 mod event_executable;
 #[path = "../../core/tests/support/mutex_executable.rs"]
 mod mutex_executable;
+#[path = "../../core/tests/support/suspended_thread_executable.rs"]
+mod suspended_thread_executable;
 
 #[path = "../../core/tests/support/performance_clock_executable.rs"]
 mod performance_clock_executable;
@@ -2438,6 +2440,27 @@ fn execute_mutex_lifecycle() {
         let mut process =
             Process32::load(include_bytes!("../../target/windows-api/mutex.exe"), 64).unwrap();
         assert_eq!(process.run(1000).reason, ProcessStop::Exited(42));
+    }
+}
+
+fn execute_suspended_thread() {
+    use ring3_core::execution::{Process32, ProcessStop, Register32, StopReason};
+    let mut p = Process32::load(&suspended_thread_executable::pe32(), 64).unwrap();
+    let pages = p.memory.mapped_pages();
+    let result = p.run(100);
+    assert_eq!(result.reason, ProcessStop::Stopped(StopReason::Breakpoint));
+    assert_eq!((result.instructions, result.api_calls), (9, 1));
+    assert_eq!(p.cpu.register(Register32::Eax), 0x7200_0004);
+    assert_eq!(p.cpu.register(Register32::Esp), 0x1001_0000);
+    assert_eq!(p.memory.mapped_pages(), pages + 17);
+    for (address, expected) in [
+        (0x0040_2200, 2_u32),
+        (0x1101_0024, 2),
+        (0x1100_fffc, 0x1234_5678),
+    ] {
+        let mut bytes = [0; 4];
+        p.memory.read(address, &mut bytes).unwrap();
+        assert_eq!(u32::from_le_bytes(bytes), expected);
     }
 }
 
@@ -4493,6 +4516,7 @@ pub extern "C" fn run() -> u32 {
     execute_computer_name();
     execute_mutex_lifecycle();
     execute_event_lifecycle();
+    execute_suspended_thread();
     execute_performance_clock();
     execute_current_directory();
     execute_change_directory();

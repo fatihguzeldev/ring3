@@ -38,6 +38,7 @@ mod strings;
 mod synchronization;
 mod system;
 mod thread;
+mod threads;
 mod tls;
 mod user_atoms;
 
@@ -54,7 +55,7 @@ const STACK_SIZE: u32 = 64 * 1024;
 // immutable nt 5.1/build 2600 guest identity, independent of the host and executable.
 const GUEST_VERSION: u32 = (2600 << 16) | (1 << 8) | 5;
 
-/// a single guest thread with a minimal win32 import boundary, not a full process.
+/// a guest process with one executing thread and a bounded win32 import boundary.
 pub struct Process32 {
     pub memory: GuestMemory,
     pub cpu: Cpu32,
@@ -79,6 +80,7 @@ pub struct Process32 {
     heap: heap::Heap,
     critical_sections: critical_sections::CriticalSections,
     sync_objects: synchronization::SyncObjects,
+    threads: threads::Threads,
     hooks: hooks::Hooks,
     priority: thread::Priority,
     tls: tls::Tls,
@@ -208,7 +210,7 @@ fn partition_initializers(
     })
 }
 
-fn reserved_ranges() -> [std::ops::Range<u64>; 7] {
+fn reserved_ranges() -> [std::ops::Range<u64>; 8] {
     [
         u64::from(STACK_BASE)..u64::from(STACK_BASE + STACK_SIZE),
         heap::START..heap::END,
@@ -218,6 +220,7 @@ fn reserved_ranges() -> [std::ops::Range<u64>; 7] {
         u64::from(diagnostics::BASE)
             ..u64::from(diagnostics::BASE) + u64::from(diagnostics::MAX_IMPORTS) * 4,
         u64::from(thread::BASE)..u64::from(thread::BASE) + PAGE_SIZE,
+        u64::from(threads::START)..u64::from(threads::END),
     ]
 }
 
@@ -284,7 +287,7 @@ impl Api {
             0x98 => Some(Self::GetProcessVersion),
             0x118 => Some(Self::ExceptionProlog),
             0x490 => Some(Self::CxxThrow),
-            0x494 | 0xffc => Some(Self::Unsupported),
+            0x494 | 0x54c | 0xffc => Some(Self::Unsupported),
             offset => d3d8::Call::at(offset)
                 .map(Self::Graphics)
                 .or_else(|| dsound::Call::at(offset).map(Self::Sound))
@@ -678,6 +681,7 @@ impl Process32 {
             heap: heap::Heap::default(),
             critical_sections: critical_sections::CriticalSections::default(),
             sync_objects: synchronization::SyncObjects::default(),
+            threads: threads::Threads::default(),
             hooks: hooks::Hooks::default(),
             priority: thread::Priority::default(),
             tls: tls::Tls::default(),
@@ -1192,10 +1196,15 @@ impl Process32 {
                 Register32::Eax,
                 self.gdi.dispatch(call, args, &mut self.memory)?,
             ),
-            Api::ThreadPriority(call) => self.cpu.set_register(
-                Register32::Eax,
-                self.priority.dispatch(call, args, &mut self.memory)?,
-            ),
+            Api::ThreadPriority(call) => {
+                if self.sync_objects.is_thread(args[0]) {
+                    return Err(DispatchError::Unsupported);
+                }
+                self.cpu.set_register(
+                    Register32::Eax,
+                    self.priority.dispatch(call, args, &mut self.memory)?,
+                );
+            }
             Api::Hook(call) => self.cpu.set_register(
                 Register32::Eax,
                 self.hooks

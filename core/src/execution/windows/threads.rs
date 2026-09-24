@@ -1,0 +1,104 @@
+use std::collections::BTreeMap;
+
+use super::{
+    API_BASE, Access, Cpu32, DispatchError, GuestMemory, Permissions, Register32, STACK_SIZE,
+    guest, synchronization::SyncObjects, thread,
+};
+
+const MAX_THREADS: u32 = 32;
+const SLOT_SIZE: u32 = STACK_SIZE + 4096;
+pub(super) const START: u32 = 0x1100_0000;
+pub(super) const END: u32 = START + MAX_THREADS * SLOT_SIZE;
+
+#[derive(Default)]
+pub(super) struct Threads {
+    suspended: BTreeMap<u32, Cpu32>,
+}
+
+impl Threads {
+    pub(super) fn create_suspended(
+        &mut self,
+        args: &[u32],
+        memory: &mut GuestMemory,
+        handles: &mut SyncObjects,
+    ) -> Result<u32, DispatchError> {
+        if args[0] != 0 || args[1] != 0 || args[4] != 4 {
+            return Err(DispatchError::Unsupported);
+        }
+        let slot = u32::try_from(self.suspended.len()).unwrap();
+        if slot == MAX_THREADS || handles.next_handle().is_none() {
+            return Err(DispatchError::Unsupported);
+        }
+        guest::check(memory, args[2], 1, Access::Execute)?;
+        if args[5] != 0 {
+            guest::check(memory, args[5], 4, Access::Write)?;
+        }
+        let id = slot + 2;
+        let low = START + slot * SLOT_SIZE;
+        let high = low + STACK_SIZE;
+        memory.map_zeroed(
+            u64::from(low),
+            u64::from(SLOT_SIZE),
+            Permissions::READ_WRITE,
+        )?;
+        let initialized = (|| {
+            thread::initialize_contents(memory, high, id, low, high)?;
+            guest::write_word(memory, high - 8, API_BASE + 0x54c)?;
+            guest::write_word(memory, high - 4, args[3])?;
+            if args[5] != 0 {
+                guest::write_word(memory, args[5], id)?;
+            }
+            Ok::<(), super::MemoryError>(())
+        })();
+        if let Err(error) = initialized {
+            memory.unmap(u64::from(low), u64::from(SLOT_SIZE))?;
+            return Err(error.into());
+        }
+        let mut cpu = Cpu32::new(args[2]);
+        cpu.set_register(Register32::Esp, high - 8);
+        cpu.set_fs_base(high);
+        cpu.set_x87_control_word(0x027f);
+        let handle = handles.insert_thread();
+        self.suspended.insert(handle, cpu);
+        Ok(handle)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::super::PAGE_SIZE;
+    use super::*;
+
+    #[test]
+    fn closed_child_retains_its_unexecuted_cpu_and_independent_stack() {
+        let mut memory = GuestMemory::new(40);
+        memory
+            .map_zeroed(0x4000, PAGE_SIZE, Permissions::READ_EXECUTE)
+            .unwrap();
+        let mut threads = Threads::default();
+        let mut handles = SyncObjects::default();
+        for slot in 0..2 {
+            let handle = threads
+                .create_suspended(&[0, 0, 0x4000, slot, 4, 0], &mut memory, &mut handles)
+                .unwrap_or_else(|_| panic!("suspended creation failed"));
+            let high = START + slot * SLOT_SIZE + STACK_SIZE;
+            let mut expected = Cpu32::new(0x4000);
+            expected.set_register(Register32::Esp, high - 8);
+            expected.set_fs_base(high);
+            expected.set_x87_control_word(0x027f);
+            assert_eq!(threads.suspended[&handle], expected);
+            assert!(matches!(
+                handles.dispatch(
+                    super::super::synchronization::Call::Close,
+                    &[handle],
+                    &mut memory
+                ),
+                Ok(1)
+            ));
+            assert_eq!(threads.suspended[&handle], expected);
+            assert!(memory.fetch(u64::from(high - 8), &mut [0]).is_err());
+            assert!(memory.fetch(u64::from(high), &mut [0]).is_err());
+        }
+        assert_eq!(threads.suspended.len(), 2);
+    }
+}
