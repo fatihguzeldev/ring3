@@ -83,8 +83,10 @@ fn duplicates_are_independent_writable_crt_allocations_with_exact_nul_content() 
     let second = call(&mut process, DUPLICATE, first);
     let empty = call(&mut process, DUPLICATE, SOURCE + 3);
     assert_eq!(first, 0x2000_0000);
-    assert_eq!(second, first + 4096);
-    assert_ne!(empty, 0);
+    assert_ne!(second, first);
+    assert_ne!(empty, first);
+    assert_ne!(empty, second);
+    assert_eq!(process.memory.mapped_pages(), pages + 1);
     assert_eq!(read(&process, first, 5), b"a\x80\xff\0\0");
     assert_eq!(read(&process, second, 4), b"a\x80\xff\0");
     assert_eq!(read(&process, empty, 1), [0]);
@@ -98,9 +100,11 @@ fn duplicates_are_independent_writable_crt_allocations_with_exact_nul_content() 
     assert_eq!(process.last_error().unwrap(), 6);
     for pointer in [first, second, empty] {
         assert_eq!(call(&mut process, FREE, pointer), 99);
-        assert!(process.memory.read(u64::from(pointer), &mut [0]).is_err());
     }
     assert_eq!(process.memory.mapped_pages(), pages);
+    for pointer in [first, second, empty] {
+        assert!(process.memory.read(u64::from(pointer), &mut [0]).is_err());
+    }
     assert_eq!(call(&mut process, DUPLICATE, SOURCE), first);
 }
 
@@ -114,6 +118,10 @@ fn exhaustion_sets_errno_and_error_write_faults_do_not_leak_heap_pages() {
     let first = call(&mut process, DUPLICATE, SOURCE);
     assert_ne!(first, 0);
     let pages = process.memory.mapped_pages();
+    for _ in 0..255 {
+        assert_ne!(call(&mut process, DUPLICATE, SOURCE), 0);
+    }
+    assert_eq!(process.memory.mapped_pages(), pages);
     assert_eq!(call(&mut process, DUPLICATE, SOURCE), 0);
     assert_eq!(read(&process, 0x7000_2020, 4), 12_u32.to_le_bytes());
     assert_eq!(process.last_error().unwrap(), 77);
