@@ -201,6 +201,11 @@ impl Cpu32 {
         }
         let top = usize::from(self.x87_stack.top);
         let target = (top + index) & 7;
+        if instruction.code() == Code::Fld_sti {
+            return self
+                .x87_stack
+                .push(f64::from_bits(self.x87_stack.values[target]));
+        }
         if instruction.code() == Code::Fxch_st0_sti {
             self.x87_stack.values.swap(top, target);
         } else {

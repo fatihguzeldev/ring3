@@ -22,6 +22,95 @@ fn load(code: &[u8]) -> (Cpu32, GuestMemory) {
 }
 
 #[test]
+fn register_load_copies_occupied_source_above_existing_stack() {
+    let mut code = Vec::new();
+    transfer(&mut code, 0x05, INPUT);
+    transfer(&mut code, 0x05, INPUT + 8);
+    code.extend([0xd9, 0xc1, 0xdf, 0xe0]);
+    for index in 0..3 {
+        code.extend([0xd9, 0x1d]);
+        code.extend((OUTPUT + index * 8).to_le_bytes());
+    }
+    for (source, expected_source) in [(2.5_f64, 2.5_f32.to_bits()), (-0.0, (-0.0_f32).to_bits())] {
+        let (mut cpu, mut memory) = load(&code);
+        cpu.set_x87_control_word(0x007f);
+        memory
+            .write(u64::from(INPUT), &source.to_le_bytes())
+            .unwrap();
+        memory
+            .write(u64::from(INPUT + 8), &3.0_f64.to_le_bytes())
+            .unwrap();
+        assert_eq!(cpu.run(&mut memory, 4).instructions, 4);
+        assert_eq!(cpu.register(Register32::Eax) & 0x3a20, 0x2800);
+        assert_eq!(cpu.run(&mut memory, 3).instructions, 3);
+        for (index, expected) in [expected_source, 3.0_f32.to_bits(), expected_source]
+            .into_iter()
+            .enumerate()
+        {
+            let mut bytes = [0; 4];
+            memory
+                .read(
+                    u64::from(OUTPUT) + u64::try_from(index).unwrap() * 8,
+                    &mut bytes,
+                )
+                .unwrap();
+            assert_eq!(u32::from_le_bytes(bytes), expected);
+        }
+    }
+}
+
+#[test]
+fn register_load_rejects_missing_source_full_stack_and_unmasked_control_atomically() {
+    let mut code = Vec::new();
+    transfer(&mut code, 0x05, INPUT);
+    code.extend([0xd9, 0xc1]);
+    let (mut cpu, mut memory) = load(&code);
+    memory
+        .write(u64::from(INPUT), &2.5_f64.to_le_bytes())
+        .unwrap();
+    assert_eq!(cpu.run(&mut memory, 1).instructions, 1);
+    let before = cpu;
+    assert_eq!(
+        cpu.run(&mut memory, 1).reason,
+        StopReason::UnsupportedInstruction
+    );
+    assert_eq!(cpu, before);
+
+    let mut code = Vec::new();
+    for _ in 0..8 {
+        transfer(&mut code, 0x05, INPUT);
+    }
+    code.extend([0xd9, 0xc1]);
+    let (mut cpu, mut memory) = load(&code);
+    memory
+        .write(u64::from(INPUT), &2.5_f64.to_le_bytes())
+        .unwrap();
+    assert_eq!(cpu.run(&mut memory, 8).instructions, 8);
+    let before = cpu;
+    assert_eq!(
+        cpu.run(&mut memory, 1).reason,
+        StopReason::UnsupportedInstruction
+    );
+    assert_eq!(cpu, before);
+
+    let mut code = Vec::new();
+    transfer(&mut code, 0x05, INPUT);
+    code.extend([0xd9, 0xc0]);
+    let (mut cpu, mut memory) = load(&code);
+    memory
+        .write(u64::from(INPUT), &2.5_f64.to_le_bytes())
+        .unwrap();
+    assert_eq!(cpu.run(&mut memory, 1).instructions, 1);
+    cpu.set_x87_control_word(0x027e);
+    let before = cpu;
+    assert_eq!(
+        cpu.run(&mut memory, 1).reason,
+        StopReason::UnsupportedInstruction
+    );
+    assert_eq!(cpu, before);
+}
+
+#[test]
 fn register_copy_and_pop_run_whole_or_stepwise() {
     for budget in [1, 100] {
         let image = load_pe32(&x87_register_executable::pe32(), 32).unwrap();
