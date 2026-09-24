@@ -261,6 +261,11 @@ fn exhaustion_sets_errno_and_faulting_error_write_never_leaks_or_caches() {
     p.memory.write(u64::from(THIS + 4), &[0; 4]).unwrap();
     p.memory.write(0x7ffd_e034, &77_u32.to_le_bytes()).unwrap();
     let pages = p.memory.mapped_pages();
+    for _ in 0..127 {
+        assert_ne!(call(&mut p, THIS), 0);
+        p.memory.write(u64::from(THIS + 4), &[0; 4]).unwrap();
+    }
+    assert_eq!(p.memory.mapped_pages(), pages);
     assert_eq!(call(&mut p, THIS), 0);
     assert_eq!(read(&p, 0x7000_2020, 4), 12_u32.to_le_bytes());
     assert_eq!(read(&p, THIS + 4, 4), [0; 4]);
