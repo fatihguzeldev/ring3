@@ -545,6 +545,84 @@ mod tests {
     }
 
     #[test]
+    fn mouse_lifetime_does_not_change_acquired_keyboard_configuration() {
+        let (mut input, mut memory) = setup();
+        let desktop = foreground();
+        let device = &mut input.devices[0];
+        assert_eq!(device.set_format(0x2000, &memory, &desktop).ok(), Some(0));
+        assert_eq!(
+            device.set_cooperative_level(4, 0x16, &desktop).ok(),
+            Some(0)
+        );
+        words(&mut memory, 0x2100, &[20, 16, 0, 0, 16]);
+        assert_eq!(
+            device.set_property(1, 0x2100, &memory, &desktop).ok(),
+            Some(0)
+        );
+        assert_eq!(device.acquire(&desktop).ok(), Some(0));
+        let before = (
+            device.references,
+            device.format,
+            device.cooperative_level,
+            device.buffer_size,
+            device.acquired_epoch,
+        );
+        let activation = desktop.activation();
+        let pages = memory.mapped_pages();
+        memory.write(0x1020, &super::super::MOUSE).unwrap();
+        assert_eq!(
+            input
+                .dispatch(
+                    Call::CreateDevice,
+                    &[OBJECTS, 0x1020, 0x1000, 0],
+                    &mut memory,
+                    &desktop
+                )
+                .ok(),
+            Some(0)
+        );
+        memory
+            .write(0x1020, &super::super::DEVICE_INTERFACES[0])
+            .unwrap();
+        let mouse = super::super::MICE;
+        for (call, args, expected) in [
+            (
+                Call::QueryInterface(Class::Mouse),
+                vec![mouse, 0x1020, 0x1000],
+                0,
+            ),
+            (Call::AddRef(Class::Mouse), vec![mouse], 3),
+            (Call::Release(Class::Root), vec![OBJECTS], 0),
+            (Call::Release(Class::Mouse), vec![mouse], 2),
+            (Call::Release(Class::Mouse), vec![mouse], 1),
+            (Call::Release(Class::Mouse), vec![mouse], 0),
+        ] {
+            assert_eq!(
+                input.dispatch(call, &args, &mut memory, &desktop).ok(),
+                Some(expected)
+            );
+        }
+        let device = &mut input.devices[0];
+        assert_eq!(
+            before,
+            (
+                device.references,
+                device.format,
+                device.cooperative_level,
+                device.buffer_size,
+                device.acquired_epoch
+            )
+        );
+        assert!(device.is_acquired(&desktop));
+        assert_eq!(device.acquire(&desktop).ok(), Some(1));
+        assert_eq!(desktop.activation(), activation);
+        assert_eq!(memory.mapped_pages(), pages);
+        assert_eq!(input.devices[1].references, 1);
+        assert!(!input.devices[1].is_acquired(&desktop));
+        assert_eq!(input.mice, [0]);
+    }
+
+    #[test]
     fn acquired_settings_remain_owned_until_explicit_release_or_focus_loss() {
         let (mut input, mut memory) = configured_first();
         let mut desktop = foreground();

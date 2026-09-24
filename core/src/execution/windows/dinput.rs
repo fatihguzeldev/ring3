@@ -10,6 +10,12 @@ const MAX_ROOTS: usize = 64;
 const DEVICE_TABLE: u32 = BASE + 0x200;
 const DEVICES: u32 = BASE + 0x900;
 const MAX_DEVICES: usize = 64;
+const MOUSE_TABLE: u32 = BASE + 0x300;
+const MICE: u32 = BASE + 0xa00;
+const MAX_MICE: usize = 64;
+const MOUSE: [u8; 16] = [
+    0x60, 0x2b, 0x1d, 0x6f, 0xa0, 0xd5, 0xcf, 0x11, 0xbf, 0xc7, 0x44, 0x45, 0x53, 0x54, 0, 0,
+];
 const KEYBOARD: [u8; 16] = [
     0x61, 0x2b, 0x1d, 0x6f, 0xa0, 0xd5, 0xcf, 0x11, 0xbf, 0xc7, 0x44, 0x45, 0x53, 0x54, 0, 0,
 ];
@@ -46,6 +52,7 @@ const DEVICE_INTERFACES: [[u8; 16]; 4] = [
 pub(super) enum Class {
     Root,
     Keyboard,
+    Mouse,
 }
 
 impl Class {
@@ -53,13 +60,14 @@ impl Class {
         match self {
             Self::Root => OBJECTS,
             Self::Keyboard => DEVICES,
+            Self::Mouse => MICE,
         }
     }
 
     fn interfaces(self) -> &'static [[u8; 16]; 4] {
         match self {
             Self::Root => &INTERFACES,
-            Self::Keyboard => &DEVICE_INTERFACES,
+            Self::Keyboard | Self::Mouse => &DEVICE_INTERFACES,
         }
     }
 }
@@ -94,6 +102,9 @@ impl Call {
             0x580 => Some(Self::SetProperty),
             0x584 => Some(Self::Acquire),
             0x588 => Some(Self::Unacquire),
+            0x58c => Some(Self::QueryInterface(Class::Mouse)),
+            0x590 => Some(Self::AddRef(Class::Mouse)),
+            0x594 => Some(Self::Release(Class::Mouse)),
             _ => None,
         }
     }
@@ -116,6 +127,7 @@ impl Call {
 pub(super) struct Input {
     roots: Vec<u32>,
     devices: Vec<keyboard::Device>,
+    mice: Vec<u32>,
 }
 
 impl Input {
@@ -123,6 +135,7 @@ impl Input {
         match class {
             Class::Root => &mut self.roots[index],
             Class::Keyboard => &mut self.devices[index].references,
+            Class::Mouse => &mut self.mice[index],
         }
     }
 
@@ -134,6 +147,7 @@ impl Input {
         let count = match class {
             Class::Root => self.roots.get(index),
             Class::Keyboard => self.devices.get(index).map(|device| &device.references),
+            Class::Mouse => self.mice.get(index),
         };
         if !offset.is_multiple_of(4) || count.is_none_or(|count| *count == 0) {
             return Err(DispatchError::Unsupported);
@@ -171,10 +185,21 @@ impl Input {
                     _ => 0xffc,
                 };
             bytes[0x200 + slot * 4..0x204 + slot * 4].copy_from_slice(&address.to_le_bytes());
+            let address = API_BASE
+                + match slot {
+                    0 => 0x58c_u32,
+                    1 => 0x590,
+                    2 => 0x594,
+                    _ => 0xffc,
+                };
+            bytes[0x300 + slot * 4..0x304 + slot * 4].copy_from_slice(&address.to_le_bytes());
         }
         for index in 0..MAX_DEVICES {
             bytes[0x900 + index * 4..0x904 + index * 4]
                 .copy_from_slice(&DEVICE_TABLE.to_le_bytes());
+        }
+        for index in 0..MAX_MICE {
+            bytes[0xa00 + index * 4..0xa04 + index * 4].copy_from_slice(&MOUSE_TABLE.to_le_bytes());
         }
         memory.map_zeroed(u64::from(BASE), PAGE_SIZE, Permissions::READ_WRITE)?;
         memory.write(u64::from(BASE), &bytes)?;
@@ -231,17 +256,22 @@ impl Input {
         guest::check(memory, args[1], 16, Access::Read)?;
         let mut guid = [0; 16];
         memory.read(u64::from(args[1]), &mut guid)?;
-        if guid != KEYBOARD {
-            return Err(DispatchError::Unsupported);
-        }
-        if self.devices.len() == MAX_DEVICES {
+        let (base, count, limit) = match guid {
+            KEYBOARD => (DEVICES, self.devices.len(), MAX_DEVICES),
+            MOUSE => (MICE, self.mice.len(), MAX_MICE),
+            _ => return Err(DispatchError::Unsupported),
+        };
+        if count == limit {
             guest::write_word(memory, args[2], 0)?;
             return Ok(OUT_OF_MEMORY);
         }
-        let pointer =
-            DEVICES + u32::try_from(self.devices.len()).expect("bounded device count") * 4;
+        let pointer = base + u32::try_from(count).expect("bounded device count") * 4;
         guest::write_word(memory, args[2], pointer)?;
-        self.devices.push(keyboard::Device::new());
+        if guid == KEYBOARD {
+            self.devices.push(keyboard::Device::new());
+        } else {
+            self.mice.push(1);
+        }
         Ok(0)
     }
 
@@ -331,11 +361,12 @@ mod tests {
             .map_zeroed(0x1000, PAGE_SIZE, Permissions::READ_WRITE)
             .unwrap();
         memory.write(0x1000, &INTERFACES[0]).unwrap();
-        for class in [Class::Root, Class::Keyboard] {
+        for class in [Class::Root, Class::Keyboard, Class::Mouse] {
             guest::write_word(&mut memory, 0x1020, 77).unwrap();
             let mut input = Input::default();
             input.roots.push(u32::MAX);
             input.devices.push(keyboard::Device::new());
+            input.mice.push(u32::MAX);
             *input.references(class, 0) = u32::MAX;
             let pointer = class.objects();
             assert!(matches!(

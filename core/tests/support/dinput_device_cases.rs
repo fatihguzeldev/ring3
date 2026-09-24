@@ -21,6 +21,10 @@ fn store(code: &mut Vec<u8>, address: u32) {
 }
 
 pub fn imported_keyboard_lifetime_across_budgets() {
+    imported_device_lifetime_across_budgets(KEYBOARD, 0x7001_7900);
+}
+
+pub fn imported_device_lifetime_across_budgets(guid: [u8; 16], device: u32) {
     let mut code = Vec::new();
     for value in [0, DATA, 0x700, 0x0040_0000] {
         push(&mut code, value);
@@ -55,7 +59,7 @@ pub fn imported_keyboard_lifetime_across_budgets() {
     let mut results = Vec::new();
     for budget in [1, 7, 4096, 20000] {
         let mut p = Process32::load(&bytes, 64).unwrap();
-        p.memory.write(u64::from(DATA + 64), &KEYBOARD).unwrap();
+        p.memory.write(u64::from(DATA + 64), &guid).unwrap();
         p.memory.write(u64::from(DATA + 80), &DEVICE).unwrap();
         let stack = p.cpu.register(Register32::Esp);
         let mut counts = (0, 0);
@@ -78,7 +82,7 @@ pub fn imported_keyboard_lifetime_across_budgets() {
             p.memory.read(u64::from(DATA + offset), &mut bytes).unwrap();
             outputs.push(u32::from_le_bytes(bytes));
         }
-        assert_eq!(&outputs[..3], &[0x7001_7800, 0x7001_7900, 0x7001_7900]);
+        assert_eq!(&outputs[..3], &[0x7001_7800, device, device]);
         assert_eq!(&outputs[3..], &[0, 0, 0, 2, 0, 2, 1, 0]);
         assert_eq!(p.cpu.register(Register32::Esp), stack);
         assert_eq!(counts.1, 8);
