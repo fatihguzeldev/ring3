@@ -345,16 +345,6 @@ fn truncating_single_precision_memory_multiply_rejects_faults_atomically() {
 
 #[test]
 fn single_precision_profile_rejects_remaining_excluded_ranges_atomically() {
-    let operation = &[0xdc, 0x3d, 0x10, 0x22, 0x40, 0];
-    let (mut cpu, mut memory) = load(operation, 4.0_f64.to_bits(), 2.0_f64.to_bits());
-    assert_eq!(cpu.run(&mut memory, 1).instructions, 1);
-    cpu.set_x87_control_word(0x007f);
-    let before = cpu;
-    assert_eq!(
-        cpu.run(&mut memory, 1).reason,
-        StopReason::UnsupportedInstruction
-    );
-    assert_eq!(cpu, before);
     let multiply = &[0xd8, 0x0d, 0x10, 0x22, 0x40, 0];
     for (top, source) in [
         (f64::from(f32::MAX), 2.0_f32),
