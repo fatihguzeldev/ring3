@@ -50,6 +50,70 @@ fn load_single(numerator: f64, divisor: f32) -> (Cpu32, GuestMemory) {
     load_single_code(numerator, divisor, 0x35)
 }
 
+fn load_single_reverse_m64(
+    top: f64,
+    numerator: f64,
+    control: u16,
+    address: u32,
+) -> (Cpu32, GuestMemory) {
+    let mut code = memory_instruction(0xdd, 0x05, 0x0040_2200);
+    code.extend(memory_instruction(0xdc, 0x3d, address));
+    code.extend([0xdf, 0xe0]);
+    code.extend(memory_instruction(0xd9, 0x1d, 0x0040_2300));
+    let mut image = load_pe32(&executable::pe32(&code), 32).unwrap();
+    image.memory.write(0x0040_2200, &top.to_le_bytes()).unwrap();
+    image
+        .memory
+        .write(0x0040_2210, &numerator.to_le_bytes())
+        .unwrap();
+    let mut cpu = Cpu32::new(image.entry_point);
+    cpu.set_x87_control_word(control);
+    (cpu, image.memory)
+}
+
+#[test]
+fn single_precision_reverse_m64_division_rounds_and_keeps_its_source() {
+    for (top, numerator, expected, status) in [
+        (3.0, 6.0, 2.0_f32, 0),
+        (3.0, 1.0, 1.0_f32 / 3.0, 0x220),
+        (31.0, 1.0, 1.0_f32 / 31.0, 0x20),
+        (3.0, -1.0, -1.0_f32 / 3.0, 0x20),
+    ] {
+        let (mut cpu, mut memory) = load_single_reverse_m64(top, numerator, 0x007f, 0x0040_2210);
+        assert_eq!(cpu.run(&mut memory, 3).instructions, 3);
+        assert_eq!(cpu.register(Register32::Eax) & 0x3a20, 0x3800 | status);
+        assert_eq!(cpu.run(&mut memory, 1).instructions, 1);
+        let mut output = [0; 4];
+        memory.read(0x0040_2300, &mut output).unwrap();
+        assert_eq!(u32::from_le_bytes(output), expected.to_bits());
+        let mut source = [0; 8];
+        memory.read(0x0040_2210, &mut source).unwrap();
+        assert_eq!(u64::from_le_bytes(source), numerator.to_bits());
+    }
+}
+
+#[test]
+fn single_precision_reverse_m64_division_rejects_invalid_and_faults_atomically() {
+    for (top, numerator, control, address) in [
+        (0.0, 1.0, 0x007f, 0x0040_2210),
+        (0.5, f64::from(f32::MAX) * 2.0, 0x007f, 0x0040_2210),
+        (2.0, f64::from(f32::MIN_POSITIVE), 0x007f, 0x0040_2210),
+        (2.0, 1.0, 0x0c7f, 0x0040_2210),
+        (2.0, 1.0, 0x007f, 0x6000_0000),
+    ] {
+        let (mut cpu, mut memory) = load_single_reverse_m64(top, numerator, control, address);
+        assert_eq!(cpu.run(&mut memory, 1).instructions, 1);
+        let before = cpu;
+        let reason = cpu.run(&mut memory, 1).reason;
+        if address == 0x6000_0000 {
+            assert!(matches!(reason, StopReason::MemoryFault(_)));
+        } else {
+            assert_eq!(reason, StopReason::UnsupportedInstruction);
+        }
+        assert_eq!(cpu, before);
+    }
+}
+
 #[test]
 fn single_precision_reverse_memory_division_uses_source_over_top() {
     for (top, source, expected, status) in [
