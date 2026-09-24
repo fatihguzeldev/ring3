@@ -93,7 +93,7 @@ impl Cpu32 {
         Ok(())
     }
 
-    pub(in super::super) fn x87_divide_pop(
+    pub(in super::super) fn x87_binary_pop(
         &mut self,
         instruction: &Instruction,
     ) -> Result<(), StopReason> {
@@ -107,23 +107,33 @@ impl Cpu32 {
         let top = self.x87_stack.value()?;
         let slot = (usize::from(self.x87_stack.top) + index) & 7;
         let indexed = f64::from_bits(self.x87_stack.values[slot]);
-        let (numerator, denominator) = if instruction.code() == Code::Fdivrp_sti_st0 {
+        let multiply = instruction.code() == Code::Fmulp_sti_st0;
+        let (left, right) = if instruction.code() == Code::Fdivrp_sti_st0 {
             (top, indexed)
         } else {
             (indexed, top)
         };
-        if denominator == 0.0 {
+        if !multiply && right == 0.0 {
             return Err(StopReason::UnsupportedInstruction);
         }
-        let mut result = numerator / denominator;
-        if !result.is_finite() || (numerator != 0.0 && result.abs() < 2.0 * f64::MIN_POSITIVE) {
+        let mut result = if multiply { left * right } else { left / right };
+        let exact_zero = left == 0.0 || (multiply && right == 0.0);
+        if !result.is_finite() || (!exact_zero && result.abs() < 2.0 * f64::MIN_POSITIVE) {
             return Err(StopReason::UnsupportedInstruction);
         }
         if single_precision {
-            result = rounding::single_quotient(result, numerator, denominator)
-                .ok_or(StopReason::UnsupportedInstruction)?;
+            result = if multiply {
+                rounding::single_product(result, left, right)
+            } else {
+                rounding::single_quotient(result, left, right)
+            }
+            .ok_or(StopReason::UnsupportedInstruction)?;
         }
-        let rounding = rounding::quotient_result(result, numerator, denominator);
+        let rounding = if multiply {
+            rounding::product_result(result, left, right)
+        } else {
+            rounding::quotient_result(result, left, right)
+        };
         let rounded_up = if single_precision && result.is_sign_negative() {
             rounding == Ordering::Less
         } else {
@@ -567,6 +577,7 @@ impl Cpu32 {
                 if matches!(
                     code,
                     Code::Fdivp_sti_st0
+                        | Code::Fmulp_sti_st0
                         | Code::Fdiv_m32fp
                         | Code::Fsubr_st0_sti
                         | Code::Fadd_st0_sti

@@ -70,3 +70,10 @@ pub(super) fn is_register_add(code: Code) -> bool {
         Code::Fadd_st0_sti | Code::Fadd_sti_st0 | Code::Faddp_sti_st0
     )
 }
+
+pub(super) fn is_binary_pop(code: Code) -> bool {
+    matches!(
+        code,
+        Code::Fdivrp_sti_st0 | Code::Fdivp_sti_st0 | Code::Fmulp_sti_st0
+    )
+}

@@ -24,6 +24,64 @@ fn fstp(code: &mut Vec<u8>, address: u32) {
     code.extend(address.to_le_bytes());
 }
 
+fn multiply_pop_fixture(
+    indexed: f64,
+    top: f64,
+    control: u16,
+) -> (Cpu32, ring3_core::execution::GuestMemory) {
+    let mut code = Vec::new();
+    fld(&mut code, INPUT);
+    fld(&mut code, INPUT + 8);
+    code.extend([0xde, 0xc9, 0xdf, 0xe0, 0xd9, 0x1d]);
+    code.extend(OUTPUT.to_le_bytes());
+    let (mut cpu, mut memory) = load(&code);
+    cpu.set_x87_control_word(control);
+    memory
+        .write(u64::from(INPUT), &indexed.to_le_bytes())
+        .unwrap();
+    memory
+        .write(u64::from(INPUT + 8), &top.to_le_bytes())
+        .unwrap();
+    (cpu, memory)
+}
+
+#[test]
+fn register_multiply_pop_rounds_and_removes_top() {
+    let quarter_ulp = f64::from(f32::EPSILON) * 0.25;
+    for (indexed, top, expected, status) in [
+        (2.0, 3.0, 6.0_f32, 0),
+        (1.0 + quarter_ulp, 1.0, 1.0_f32, 0x20),
+        (-1.0 - quarter_ulp, 1.0, -1.0_f32, 0x220),
+        (-0.0, 2.0, -0.0_f32, 0),
+    ] {
+        let (mut cpu, mut memory) = multiply_pop_fixture(indexed, top, 0x007f);
+        assert_eq!(cpu.run(&mut memory, 4).instructions, 4);
+        assert_eq!(cpu.register(Register32::Eax) & 0x3a20, 0x3800 | status);
+        assert_eq!(cpu.run(&mut memory, 1).instructions, 1);
+        let mut bytes = [0; 4];
+        memory.read(u64::from(OUTPUT), &mut bytes).unwrap();
+        assert_eq!(u32::from_le_bytes(bytes), expected.to_bits());
+    }
+}
+
+#[test]
+fn register_multiply_pop_rejects_range_and_control_atomically() {
+    for (indexed, top, control) in [
+        (f64::from(f32::MAX) * 2.0, 1.0, 0x007f),
+        (f64::from(f32::MIN_POSITIVE), 0.5, 0x007f),
+        (2.0, 3.0, 0x0c7f),
+    ] {
+        let (mut cpu, mut memory) = multiply_pop_fixture(indexed, top, control);
+        assert_eq!(cpu.run(&mut memory, 2).instructions, 2);
+        let before = cpu;
+        assert_eq!(
+            cpu.run(&mut memory, 1).reason,
+            StopReason::UnsupportedInstruction
+        );
+        assert_eq!(cpu, before);
+    }
+}
+
 #[test]
 fn register_multiply_uses_each_occupied_source_without_popping() {
     for index in 0_u8..8 {
