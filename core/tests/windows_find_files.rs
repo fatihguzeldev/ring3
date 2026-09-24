@@ -330,11 +330,37 @@ fn error_paths_preserve_outputs_except_last_error_alias_and_success_ignores_teb(
 }
 
 #[test]
+fn dos_star_dot_star_enumerates_names_with_and_without_extensions() {
+    let mut process = load(
+        &[
+            FileMetadata {
+                path: b"C:\\Data\\readme",
+                size: 3,
+            },
+            FileMetadata {
+                path: b"C:\\Data\\sound.wav",
+                size: 7,
+            },
+        ],
+        &[b"C:\\Data", b"C:\\Data\\Extras"],
+    );
+    let handle = first(&mut process, b"C:\\Data\\*.*", OUTPUT);
+    assert_eq!(handle, 0x7300_0004);
+    record(&process, OUTPUT, b"Extras", 0, true);
+    assert_eq!(call(&mut process, NEXT, &[handle, OUTPUT]), 1);
+    record(&process, OUTPUT, b"readme", 3, false);
+    assert_eq!(call(&mut process, NEXT, &[handle, OUTPUT]), 1);
+    record(&process, OUTPUT, b"sound.wav", 7, false);
+    assert_eq!(call(&mut process, NEXT, &[handle, OUTPUT]), 0);
+    assert_eq!(process.last_error().unwrap(), 18);
+    assert_eq!(call(&mut process, CLOSE, &[handle]), 1);
+}
+
+#[test]
 fn unsupported_filters_and_guest_input_faults_do_not_open_searches() {
     let mut p = load(&[], &[b"C:\\Data"]);
     for pattern in [
-        &b"*.*"[..],
-        b"**tail",
+        &b"**tail"[..],
         b"*a?",
         b"*trail.",
         b"*trail ",

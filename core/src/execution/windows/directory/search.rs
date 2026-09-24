@@ -186,6 +186,12 @@ fn filter<'a>(current: &[u8], input: &'a [u8]) -> Result<(Vec<u8>, &'a [u8]), pa
         .map_or((&b"."[..], input), |separator| {
             (&input[..=separator], &input[separator + 1..])
         });
+    // DOS *.* matches every directory entry, including names without a period.
+    let pattern = if pattern == b"*.*" {
+        &b"*"[..]
+    } else {
+        pattern
+    };
     if parent.contains(&b'*') || parent.contains(&b'?') {
         return Err(paths::PathError::Unsupported);
     }
