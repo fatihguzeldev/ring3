@@ -81,6 +81,7 @@ impl Heap {
         call: Call,
         arguments: &[u32],
         stack: u32,
+        teb: thread::Teb,
         memory: &mut GuestMemory,
     ) -> Result<u32, DispatchError> {
         match call {
@@ -88,19 +89,21 @@ impl Heap {
                 matches!(call, Call::GlobalAlloc),
                 arguments[0],
                 arguments[1],
+                teb,
                 memory,
             ),
             Call::Free | Call::GlobalFree => self.free(
                 matches!(call, Call::GlobalFree),
                 arguments[0],
                 stack,
+                teb,
                 memory,
             ),
             Call::Realloc => {
-                self.reallocate(arguments[0], arguments[1], arguments[2], stack, memory)
+                self.reallocate(arguments[0], arguments[1], arguments[2], stack, teb, memory)
             }
-            Call::GlobalLock => self.lock(arguments[0], memory),
-            Call::GlobalUnlock => self.unlock(arguments[0], memory),
+            Call::GlobalLock => self.lock(arguments[0], teb, memory),
+            Call::GlobalUnlock => self.unlock(arguments[0], teb, memory),
         }
     }
 
@@ -109,6 +112,7 @@ impl Heap {
         global: bool,
         flags: u32,
         size: u32,
+        teb: thread::Teb,
         memory: &mut GuestMemory,
     ) -> Result<u32, DispatchError> {
         let allowed = if global { 0x7172 } else { 0x40 };
@@ -129,7 +133,7 @@ impl Heap {
         if let Some(handle) = self.reserve(size, kind, memory)? {
             return Ok(handle);
         }
-        thread::set_last_error(memory, 8)?;
+        teb.set_last_error(memory, 8)?;
         Ok(0)
     }
 
@@ -262,6 +266,7 @@ impl Heap {
         size: u32,
         flags: u32,
         stack: u32,
+        teb: thread::Teb,
         memory: &mut GuestMemory,
     ) -> Result<u32, DispatchError> {
         if flags & !0x42 != 0 {
@@ -272,7 +277,7 @@ impl Heap {
             .get(&handle)
             .filter(|allocation| matches!(allocation.kind, Kind::Local))
         else {
-            thread::set_last_error(memory, 6)?;
+            teb.set_last_error(memory, 6)?;
             return Ok(0);
         };
         let (base, old_length, old_size) = (
@@ -293,7 +298,7 @@ impl Heap {
                     length - old_length,
                 )? == Some(base + old_length));
         if !in_place {
-            return self.relocate(handle, size, flags, memory);
+            return self.relocate(handle, size, flags, teb, memory);
         }
         let zero = flags & 0x40 != 0 && size > old_size;
         if zero {
@@ -312,7 +317,7 @@ impl Heap {
             ) {
                 Ok(()) => {}
                 Err(MemoryError::PageLimitExceeded) => {
-                    thread::set_last_error(memory, 8)?;
+                    teb.set_last_error(memory, 8)?;
                     return Ok(0);
                 }
                 Err(error) => return Err(error.into()),
@@ -339,10 +344,11 @@ impl Heap {
         handle: u32,
         size: u32,
         flags: u32,
+        teb: thread::Teb,
         memory: &mut GuestMemory,
     ) -> Result<u32, DispatchError> {
         if flags & 2 == 0 {
-            thread::set_last_error(memory, 8)?;
+            teb.set_last_error(memory, 8)?;
             return Ok(0);
         }
         let old = &self.allocations[&handle];
@@ -351,7 +357,7 @@ impl Heap {
         let count = old.size.min(size) as usize;
         memory.check_access(base, count, Access::Read)?;
         let Some(new) = self.reserve(size, Kind::Local, memory)? else {
-            thread::set_last_error(memory, 8)?;
+            teb.set_last_error(memory, 8)?;
             return Ok(0);
         };
         let mut buffer = [0; 4096];
@@ -433,6 +439,7 @@ impl Heap {
         global: bool,
         handle: u32,
         stack: u32,
+        teb: thread::Teb,
         memory: &mut GuestMemory,
     ) -> Result<u32, DispatchError> {
         if handle == 0 {
@@ -446,7 +453,7 @@ impl Heap {
             }
         });
         if !valid {
-            thread::set_last_error(memory, 6)?;
+            teb.set_last_error(memory, 6)?;
             return Ok(handle);
         }
         self.release(handle, stack, memory)?;
@@ -483,18 +490,23 @@ impl Heap {
         Ok(())
     }
 
-    fn lock(&mut self, handle: u32, memory: &mut GuestMemory) -> Result<u32, DispatchError> {
+    fn lock(
+        &mut self,
+        handle: u32,
+        teb: thread::Teb,
+        memory: &mut GuestMemory,
+    ) -> Result<u32, DispatchError> {
         let Some(allocation) = self
             .allocations
             .get_mut(&handle)
             .filter(|allocation| allocation.global())
         else {
-            thread::set_last_error(memory, 6)?;
+            teb.set_last_error(memory, 6)?;
             return Ok(0);
         };
         if let Kind::GlobalMovable { discarded, locks } = &mut allocation.kind {
             if *discarded {
-                thread::set_last_error(memory, 157)?;
+                teb.set_last_error(memory, 157)?;
                 return Ok(0);
             }
             *locks = locks.checked_add(1).ok_or(DispatchError::Unsupported)?;
@@ -502,13 +514,18 @@ impl Heap {
         Ok(allocation.base)
     }
 
-    fn unlock(&mut self, handle: u32, memory: &mut GuestMemory) -> Result<u32, DispatchError> {
+    fn unlock(
+        &mut self,
+        handle: u32,
+        teb: thread::Teb,
+        memory: &mut GuestMemory,
+    ) -> Result<u32, DispatchError> {
         let Some(allocation) = self
             .allocations
             .get_mut(&handle)
             .filter(|allocation| allocation.global())
         else {
-            thread::set_last_error(memory, 6)?;
+            teb.set_last_error(memory, 6)?;
             return Ok(0);
         };
         let Kind::GlobalMovable { locks, .. } = &mut allocation.kind else {
@@ -516,11 +533,11 @@ impl Heap {
         };
         match *locks {
             0 => {
-                thread::set_last_error(memory, 158)?;
+                teb.set_last_error(memory, 158)?;
                 Ok(0)
             }
             1 => {
-                thread::set_last_error(memory, 0)?;
+                teb.set_last_error(memory, 0)?;
                 *locks = 0;
                 Ok(0)
             }
@@ -540,7 +557,7 @@ mod tests {
     fn global_lock_overflow_preserves_count() {
         let mut heap = Heap::default();
         let mut memory = GuestMemory::new(1);
-        let Ok(handle) = heap.allocate(true, 2, 1, &mut memory) else {
+        let Ok(handle) = heap.allocate(true, 2, 1, thread::Teb(thread::BASE), &mut memory) else {
             panic!()
         };
         let Kind::GlobalMovable { locks, .. } =
@@ -550,7 +567,7 @@ mod tests {
         };
         *locks = u32::MAX;
         assert!(matches!(
-            heap.lock(handle, &mut memory),
+            heap.lock(handle, thread::Teb(thread::BASE), &mut memory),
             Err(DispatchError::Unsupported)
         ));
         let Kind::GlobalMovable { locks, .. } = heap.allocations[&handle].kind else {

@@ -22,6 +22,7 @@ fn load() -> Process32 {
         64,
         ProcessOptions {
             environment: &[b"demo=value"],
+            directories: &[b"C:\\demo"],
             ..ProcessOptions::default()
         },
     )
@@ -204,4 +205,131 @@ fn computer_name_size_aliases_keep_caller_error_preflight_and_write_order() {
     assert_eq!(p.cpu, before);
     assert_eq!(bytes(&p, PRIMARY + 0x34, 4), [0; 4]);
     assert_eq!(p.last_error().unwrap(), 111);
+}
+
+#[test]
+fn heap_and_directory_failures_target_caller_error_without_partial_state() {
+    let bad = 0x5000_0000;
+    let cases = [
+        (0x28, vec![0, u32::MAX], 0, 8),
+        (0x78, vec![0, u32::MAX], 0, 8),
+        (0x2c, vec![bad], bad, 6),
+        (0x84, vec![bad], bad, 6),
+        (0xd4, vec![bad, 8, 2], 0, 6),
+        (0x7c, vec![bad], 0, 6),
+        (0x80, vec![bad], 0, 6),
+        (0x230, vec![SOURCE], 0, 3),
+        (0x290, vec![SOURCE], u32::MAX, 2),
+        (0x294, vec![SOURCE, OUTPUT, 16], 0, 2),
+        (0x234, vec![SOURCE, OUTPUT], u32::MAX, 2),
+        (0x238, vec![bad, OUTPUT], 0, 6),
+        (0x23c, vec![bad], 0, 6),
+    ];
+    for readonly in [false, true] {
+        for (offset, args, result, error) in &cases {
+            let mut p = load();
+            p.cpu.set_fs_base(CHILD);
+            let pages = p.memory.mapped_pages();
+            let output = bytes(&p, OUTPUT, 320);
+            if readonly {
+                p.memory
+                    .protect(u64::from(CHILD), PAGE_SIZE, Permissions::READ)
+                    .unwrap();
+                let cpu = prepare(&mut p, *offset, args);
+                let run = p.run(1);
+                assert!(
+                    matches!(run.reason, ProcessStop::Stopped(StopReason::MemoryFault(_))),
+                    "api {offset:x}"
+                );
+                assert_eq!((run.instructions, run.api_calls), (0, 0));
+                assert_eq!(p.cpu, cpu);
+                assert_eq!(p.last_error().unwrap(), 88);
+                p.memory
+                    .protect(u64::from(CHILD), PAGE_SIZE, Permissions::READ_WRITE)
+                    .unwrap();
+            }
+            assert_eq!(p.memory.mapped_pages(), pages);
+            assert_eq!(bytes(&p, OUTPUT, 320), output);
+            call(&mut p, *offset, args, *result);
+            assert_eq!(p.last_error().unwrap(), *error, "api {offset:x}");
+            assert_eq!(p.memory.mapped_pages(), pages);
+            assert_eq!(bytes(&p, OUTPUT, 320), output);
+            assert_eq!(bytes(&p, PRIMARY + 0x34, 4), 77_u32.to_le_bytes());
+            call(&mut p, 0x228, &[16, OUTPUT], 3);
+            assert_eq!(bytes(&p, OUTPUT, 4), b"C:\\\0");
+        }
+    }
+}
+
+#[test]
+fn final_global_unlock_fault_preserves_lock_count_for_retry() {
+    let mut p = load();
+    call(&mut p, 0x78, &[2, 16], 0x2000_0002);
+    call(&mut p, 0x7c, &[0x2000_0002], 0x2000_0000);
+    p.cpu.set_fs_base(CHILD);
+    p.memory
+        .protect(u64::from(CHILD), PAGE_SIZE, Permissions::READ)
+        .unwrap();
+    let cpu = prepare(&mut p, 0x80, &[0x2000_0002]);
+    assert!(matches!(
+        p.run(1).reason,
+        ProcessStop::Stopped(StopReason::MemoryFault(_))
+    ));
+    assert_eq!(p.cpu, cpu);
+    assert_eq!(p.last_error().unwrap(), 88);
+    p.memory
+        .protect(u64::from(CHILD), PAGE_SIZE, Permissions::READ_WRITE)
+        .unwrap();
+    call(&mut p, 0x80, &[0x2000_0002], 0);
+    assert_eq!(p.last_error().unwrap(), 0);
+    call(&mut p, 0x80, &[0x2000_0002], 0);
+    assert_eq!(p.last_error().unwrap(), 158);
+    p.memory
+        .protect(u64::from(CHILD), PAGE_SIZE, Permissions::NONE)
+        .unwrap();
+    call(&mut p, 0x84, &[0x2000_0002], 0);
+    assert_eq!(bytes(&p, PRIMARY + 0x34, 4), 77_u32.to_le_bytes());
+}
+
+#[test]
+fn searches_remain_shared_and_error_faults_do_not_consume_capacity_or_identity() {
+    let mut p = load();
+    p.memory.write(u64::from(SOURCE), b"*\0").unwrap();
+    for index in 0..64 {
+        call(&mut p, 0x234, &[SOURCE, OUTPUT], 0x7300_0004 + index * 4);
+    }
+    let output = bytes(&p, OUTPUT, 320);
+    p.cpu.set_fs_base(CHILD);
+    p.memory
+        .protect(u64::from(CHILD), PAGE_SIZE, Permissions::READ)
+        .unwrap();
+    for (offset, args) in [(0x234, [SOURCE, OUTPUT]), (0x238, [0x7300_0004, OUTPUT])] {
+        let cpu = prepare(&mut p, offset, &args);
+        let run = p.run(1);
+        assert!(matches!(
+            run.reason,
+            ProcessStop::Stopped(StopReason::MemoryFault(_))
+        ));
+        assert_eq!((run.instructions, run.api_calls), (0, 0));
+        assert_eq!(p.cpu, cpu);
+        assert_eq!(bytes(&p, OUTPUT, 320), output);
+    }
+    call(&mut p, 0x23c, &[0x7300_0004], 1);
+    call(&mut p, 0x234, &[SOURCE, OUTPUT], 0x7300_0104);
+    p.memory
+        .protect(u64::from(CHILD), PAGE_SIZE, Permissions::READ_WRITE)
+        .unwrap();
+    call(&mut p, 0x234, &[SOURCE, OUTPUT], u32::MAX);
+    assert_eq!(p.last_error().unwrap(), 8);
+    call(&mut p, 0x238, &[0x7300_0104, OUTPUT], 0);
+    assert_eq!(p.last_error().unwrap(), 18);
+    p.memory.write(u64::from(SOURCE), b"demo\0").unwrap();
+    p.memory
+        .protect(u64::from(CHILD), PAGE_SIZE, Permissions::NONE)
+        .unwrap();
+    call(&mut p, 0x230, &[SOURCE], 1);
+    p.cpu.set_fs_base(PRIMARY);
+    call(&mut p, 0x228, &[16, OUTPUT], 7);
+    assert_eq!(bytes(&p, OUTPUT, 8), b"C:\\demo\0");
+    assert_eq!(p.last_error().unwrap(), 77);
 }

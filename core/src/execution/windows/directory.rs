@@ -56,6 +56,7 @@ impl Call {
 
 impl Process32 {
     pub(super) fn directory(&mut self, call: Call, arguments: &[u32]) -> Result<(), DispatchError> {
+        let teb = thread::Teb(self.cpu.fs_base());
         let result = match call {
             Call::Query => {
                 self.current_directory
@@ -63,25 +64,32 @@ impl Process32 {
             }
             Call::Change => self
                 .current_directory
-                .change(arguments[0], &mut self.memory)?,
-            Call::FindFirst => {
+                .change(arguments[0], teb, &mut self.memory)?,
+            Call::FindFirst => self.current_directory.find_first(
+                arguments[0],
+                arguments[1],
+                teb,
+                &mut self.memory,
+            )?,
+            Call::FindNext => self.current_directory.find_next(
+                arguments[0],
+                arguments[1],
+                teb,
+                &mut self.memory,
+            )?,
+            Call::FindClose => {
                 self.current_directory
-                    .find_first(arguments[0], arguments[1], &mut self.memory)?
+                    .find_close(arguments[0], teb, &mut self.memory)?
             }
-            Call::FindNext => {
+            Call::Attributes => {
                 self.current_directory
-                    .find_next(arguments[0], arguments[1], &mut self.memory)?
+                    .attributes(arguments[0], teb, &mut self.memory)?
             }
-            Call::FindClose => self
-                .current_directory
-                .find_close(arguments[0], &mut self.memory)?,
-            Call::Attributes => self
-                .current_directory
-                .attributes(arguments[0], &mut self.memory)?,
             Call::ShortPath => self.current_directory.short_path(
                 arguments[0],
                 arguments[1],
                 arguments[2],
+                teb,
                 &mut self.memory,
             )?,
         };
@@ -137,17 +145,22 @@ impl Directory {
         })
     }
 
-    fn change(&mut self, source: u32, memory: &mut GuestMemory) -> Result<u32, DispatchError> {
+    fn change(
+        &mut self,
+        source: u32,
+        teb: thread::Teb,
+        memory: &mut GuestMemory,
+    ) -> Result<u32, DispatchError> {
         let input = paths::read(memory, source)?;
         let mut candidate =
             match paths::resolve(&self.terminated[..self.terminated.len() - 1], &input) {
                 Ok(candidate) => candidate,
                 Err(paths::PathError::Unsupported) => return Err(DispatchError::Unsupported),
-                Err(paths::PathError::Windows(error)) => return failed(memory, error),
+                Err(paths::PathError::Windows(error)) => return failed(teb, memory, error),
             };
         let exists = self.exists(&candidate);
         if !exists {
-            return failed(memory, 3);
+            return failed(teb, memory, 3);
         }
         candidate.push(0);
         self.terminated = candidate;
@@ -172,14 +185,20 @@ impl Directory {
         })
     }
 
-    fn attributes(&self, source: u32, memory: &mut GuestMemory) -> Result<u32, DispatchError> {
+    fn attributes(
+        &self,
+        source: u32,
+        teb: thread::Teb,
+        memory: &mut GuestMemory,
+    ) -> Result<u32, DispatchError> {
         let input = paths::read(memory, source)?;
-        self.path_attributes(&input, memory)
+        self.path_attributes(&input, teb, memory)
     }
 
     fn path_attributes(
         &self,
         input: &[u8],
+        teb: thread::Teb,
         memory: &mut GuestMemory,
     ) -> Result<u32, DispatchError> {
         if input.len() >= 260 {
@@ -189,7 +208,7 @@ impl Directory {
             Ok(path) => path,
             Err(paths::PathError::Unsupported) => return Err(DispatchError::Unsupported),
             Err(paths::PathError::Windows(error)) => {
-                return failed(memory, error).map(|_| u32::MAX);
+                return failed(teb, memory, error).map(|_| u32::MAX);
             }
         };
         if path.len() >= 260 {
@@ -217,7 +236,7 @@ impl Directory {
         } else {
             3
         };
-        failed(memory, error).map(|_| u32::MAX)
+        failed(teb, memory, error).map(|_| u32::MAX)
     }
 
     fn short_path(
@@ -225,13 +244,14 @@ impl Directory {
         source: u32,
         output: u32,
         capacity: u32,
+        teb: thread::Teb,
         memory: &mut GuestMemory,
     ) -> Result<u32, DispatchError> {
         let mut input = paths::read(memory, source)?;
         if input.is_empty() {
-            return failed(memory, 161);
+            return failed(teb, memory, 161);
         }
-        if self.path_attributes(&input, memory)? == u32::MAX {
+        if self.path_attributes(&input, teb, memory)? == u32::MAX {
             return Ok(0);
         }
         let required = u32::try_from(input.len() + 1).expect("bounded path");
@@ -331,7 +351,7 @@ impl Directory {
     }
 }
 
-fn failed(memory: &mut GuestMemory, error: u32) -> Result<u32, DispatchError> {
-    thread::set_last_error(memory, error)?;
+fn failed(teb: thread::Teb, memory: &mut GuestMemory, error: u32) -> Result<u32, DispatchError> {
+    teb.set_last_error(memory, error)?;
     Ok(0)
 }

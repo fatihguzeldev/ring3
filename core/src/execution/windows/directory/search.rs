@@ -34,6 +34,7 @@ impl Directory {
         &mut self,
         source: u32,
         output: u32,
+        teb: thread::Teb,
         memory: &mut GuestMemory,
     ) -> Result<u32, DispatchError> {
         let input = paths::read(memory, source)?;
@@ -41,17 +42,17 @@ impl Directory {
         {
             Ok(filter) => filter,
             Err(paths::PathError::Unsupported) => return Err(DispatchError::Unsupported),
-            Err(paths::PathError::Windows(error)) => return failure(memory, error, u32::MAX),
+            Err(paths::PathError::Windows(error)) => return failure(teb, memory, error, u32::MAX),
         };
         if !self.exists(&parent) {
-            return failure(memory, 3, u32::MAX);
+            return failure(teb, memory, 3, u32::MAX);
         }
         let entries = self.matches(&parent, pattern)?;
         let Some(&first) = entries.first() else {
-            return failure(memory, 2, u32::MAX);
+            return failure(teb, memory, 2, u32::MAX);
         };
         if self.searches.active.len() == 64 || self.searches.next > 0x73ff_fffc {
-            return failure(memory, 8, u32::MAX);
+            return failure(teb, memory, 8, u32::MAX);
         }
         write(memory, output, &self.record(first))?;
         let handle = self.searches.next;
@@ -70,13 +71,14 @@ impl Directory {
         &mut self,
         handle: u32,
         output: u32,
+        teb: thread::Teb,
         memory: &mut GuestMemory,
     ) -> Result<u32, DispatchError> {
         let Some(search) = self.searches.active.get(&handle) else {
-            return failure(memory, 6, 0);
+            return failure(teb, memory, 6, 0);
         };
         let Some(&entry) = search.entries.get(search.position) else {
-            return failure(memory, 18, 0);
+            return failure(teb, memory, 18, 0);
         };
         write(memory, output, &self.record(entry))?;
         self.searches
@@ -90,12 +92,13 @@ impl Directory {
     pub(super) fn find_close(
         &mut self,
         handle: u32,
+        teb: thread::Teb,
         memory: &mut GuestMemory,
     ) -> Result<u32, DispatchError> {
         if self.searches.active.remove(&handle).is_some() {
             Ok(1)
         } else {
-            failure(memory, 6, 0)
+            failure(teb, memory, 6, 0)
         }
     }
 
@@ -228,7 +231,12 @@ fn write(memory: &mut GuestMemory, output: u32, record: &[u8; 320]) -> Result<()
     Ok(())
 }
 
-fn failure(memory: &mut GuestMemory, error: u32, value: u32) -> Result<u32, DispatchError> {
-    thread::set_last_error(memory, error)?;
+fn failure(
+    teb: thread::Teb,
+    memory: &mut GuestMemory,
+    error: u32,
+    value: u32,
+) -> Result<u32, DispatchError> {
+    teb.set_last_error(memory, error)?;
     Ok(value)
 }

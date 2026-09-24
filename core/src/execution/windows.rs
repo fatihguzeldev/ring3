@@ -1189,7 +1189,13 @@ impl Process32 {
             }
             Api::CriticalSection(call) => self.critical_section(call, argument)?,
             Api::Heap(call) => {
-                let value = self.heap.dispatch(call, args, stack, &mut self.memory)?;
+                let value = self.heap.dispatch(
+                    call,
+                    args,
+                    stack,
+                    thread::Teb(self.cpu.fs_base()),
+                    &mut self.memory,
+                )?;
                 self.cpu.set_register(Register32::Eax, value);
             }
             Api::Module(call) => {

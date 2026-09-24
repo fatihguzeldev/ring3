@@ -3144,10 +3144,20 @@ fn execute_thread_state() {
         (0x7000_020c, vec![0, 0x0040_2320], 111),
         (0x7000_0090, vec![1252, 0], 87),
         (0x7000_00e4, vec![0x0040_2340, 0x5000_0000, 4], 87),
+        (0x7000_0230, vec![0x0040_2300], 3),
+        (0x7000_023c, vec![0], 6),
     ] {
         assert_eq!(call(&mut process, api, &args), 0);
         assert_eq!(process.last_error().unwrap(), error);
     }
+    process.cpu.set_fs_base(0x7ffd_e000);
+    assert_eq!(process.last_error().unwrap(), 77);
+    let global = call(&mut process, 0x7000_0078, &[2, 16]);
+    assert_ne!(global, 0);
+    assert_ne!(call(&mut process, 0x7000_007c, &[global]), 0);
+    process.cpu.set_fs_base(0x1101_0000);
+    assert_eq!(call(&mut process, 0x7000_0080, &[global]), 0);
+    assert_eq!(process.last_error().unwrap(), 0);
     process.cpu.set_fs_base(0x7ffd_e000);
     assert_eq!(process.last_error().unwrap(), 77);
 }
