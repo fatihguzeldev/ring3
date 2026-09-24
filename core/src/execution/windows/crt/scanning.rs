@@ -1,12 +1,13 @@
-use super::{Access, DispatchError, ERRNO, GuestMemory, MemoryError, guest};
+use super::{Access, DispatchError, GuestMemory, MemoryError, guest};
 
 pub(super) fn sscanf(
     memory: &mut GuestMemory,
     args: &[u32],
     stack: u32,
+    errno: u32,
 ) -> Result<u32, DispatchError> {
     if args[0] == 0 || args[1] == 0 {
-        guest::write_word(memory, ERRNO, 22)?;
+        guest::write_word(memory, errno, 22)?;
         return Ok(u32::MAX);
     }
     let format = read_string(memory, args[1])?;

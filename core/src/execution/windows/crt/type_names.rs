@@ -1,9 +1,10 @@
-use super::{Access, DispatchError, ERRNO, GuestMemory, MemoryError, guest, heap};
+use super::{Access, DispatchError, GuestMemory, MemoryError, guest, heap};
 
 pub(super) fn name(
     memory: &mut GuestMemory,
     heap: &mut heap::Heap,
     this: u32,
+    errno: u32,
 ) -> Result<u32, DispatchError> {
     let cache = this.checked_add(4).ok_or(MemoryError::AddressOverflow)?;
     let mut pointer = [0];
@@ -17,7 +18,7 @@ pub(super) fn name(
     guest::check(memory, cache, 4, Access::Write)?;
     let length = u32::try_from(output.len()).expect("bounded type name fits u32");
     let Some(pointer) = heap.allocate_crt(length, memory)? else {
-        guest::write_word(memory, ERRNO, 12)?;
+        guest::write_word(memory, errno, 12)?;
         return Ok(0);
     };
     memory

@@ -3171,6 +3171,34 @@ fn execute_thread_state() {
     assert_eq!(process.last_error().unwrap(), 0);
     process.cpu.set_fs_base(0x7ffd_e000);
     assert_eq!(process.last_error().unwrap(), 77);
+    let primary_errno = call(&mut process, 0x7000_0124, &[]);
+    assert_eq!(primary_errno, 0x7000_2020);
+    process
+        .memory
+        .write(u64::from(primary_errno), &123_u32.to_le_bytes())
+        .unwrap();
+    assert_eq!(call(&mut process, 0x7000_0164, &[]), 41);
+    process.cpu.set_fs_base(0x1101_0000);
+    let child_errno = call(&mut process, 0x7000_0124, &[]);
+    assert_eq!(child_errno, 0x1101_0040);
+    assert_eq!(call(&mut process, 0x7000_0164, &[]), 41);
+    call(&mut process, 0x7000_0160, &[1792]);
+    assert_eq!(call(&mut process, 0x7000_0164, &[]), 5890);
+    assert_eq!(call(&mut process, 0x7000_01c0, &[0]), 0);
+    let mut errno = [0; 4];
+    process
+        .memory
+        .read(u64::from(child_errno), &mut errno)
+        .unwrap();
+    assert_eq!(u32::from_le_bytes(errno), 22);
+    process.cpu.set_fs_base(0x7ffd_e000);
+    assert_eq!(call(&mut process, 0x7000_0164, &[]), 18467);
+    process
+        .memory
+        .read(u64::from(primary_errno), &mut errno)
+        .unwrap();
+    assert_eq!(u32::from_le_bytes(errno), 123);
+    assert_eq!(process.last_error().unwrap(), 77);
 }
 
 fn execute_tls() {

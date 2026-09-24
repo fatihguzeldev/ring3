@@ -1,4 +1,4 @@
-use super::{Access, DispatchError, ERRNO, GuestMemory, guest, heap};
+use super::{Access, DispatchError, GuestMemory, guest, heap};
 
 #[derive(Default)]
 pub(super) struct Registry {
@@ -20,6 +20,7 @@ pub(super) fn register(
     memory: &mut GuestMemory,
     stack: u32,
     arguments: &[u32],
+    errno: u32,
 ) -> Result<u32, DispatchError> {
     let (function, begin_cell, end_cell) = (arguments[0], arguments[1], arguments[2]);
     if begin_cell == 0 || end_cell == 0 {
@@ -58,7 +59,7 @@ pub(super) fn register(
             Access::Read,
         )?;
         let Some(new) = heap.allocate_crt(needed, memory)? else {
-            guest::write_word(memory, ERRNO, 12)?;
+            guest::write_word(memory, errno, 12)?;
             return Ok(0);
         };
         // all remaining ranges are checked or belong to the fresh allocation.

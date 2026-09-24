@@ -8,6 +8,7 @@ mod arguments;
 mod buffers;
 mod floating;
 mod initializers;
+mod locals;
 mod multibyte;
 mod onexit;
 mod paths;
@@ -202,7 +203,7 @@ pub(super) struct Crt {
     pub(super) new_mode: u32,
     multibyte: multibyte::CodePage,
     exit_callbacks: onexit::Registry,
-    random: random::Sequence,
+    locals: locals::Locals,
     streams: streams::Streams,
 }
 
@@ -215,6 +216,7 @@ impl super::Process32 {
                 &mut self.sync_objects,
             )?;
             self.tls.register(teb);
+            self.crt.locals.register(teb);
             self.cpu.set_register(Register32::Eax, value);
             return Ok(());
         }
@@ -242,33 +244,37 @@ impl Crt {
         heap: &mut heap::Heap,
         directory: &mut directory::Directory,
     ) -> Result<Option<u32>, DispatchError> {
+        let teb = cpu.fs_base();
+        let stack = cpu.register(Register32::Esp);
+        let errno = || self.locals.errno(teb);
         Ok(match call {
             Call::BeginThreadEx => unreachable!("thread creation is owned by the process"),
             Call::Stream(call) => self
                 .streams
-                .dispatch(call, args, cpu, memory, heap, directory)
+                .dispatch(call, args, cpu, memory, heap, directory, errno()?)
                 .map(Some)?,
             Call::SetAppType => {
                 self.application_type = args[0].cast_signed();
                 None
             }
-            Call::Malloc => Some(malloc(memory, heap, args[0])?),
+            Call::Malloc => Some(malloc(memory, heap, args[0], errno()?)?),
             Call::OperatorNew => Some(heap.allocate_crt(args[0], memory)?.unwrap_or(0)),
             Call::Free | Call::OperatorDelete => {
-                heap.free_crt(args[0], cpu.register(Register32::Esp), memory)?;
+                heap.free_crt(args[0], stack, memory)?;
                 None
             }
-            Call::ErrnoPointer => Some(ERRNO),
+            Call::ErrnoPointer => Some(errno()?),
             Call::SeedRandom => {
-                self.random.seed(args[0]);
+                self.locals.random(cpu.fs_base())?.seed(args[0]);
                 None
             }
-            Call::Random => Some(self.random.next()),
+            Call::Random => Some(self.locals.random(cpu.fs_base())?.next()),
             Call::FloatToInteger => Some(floating::to_integer(cpu)?),
             Call::TypeName => Some(type_names::name(
                 memory,
                 heap,
                 cpu.register(Register32::Ecx),
+                errno()?,
             )?),
             Call::DynamicCast => Some(rtti::dynamic_cast(memory, args)?),
             Call::MbSearchReverse => Some(self.multibyte.reverse_search(memory, args[0], args[1])?),
@@ -278,20 +284,16 @@ impl Crt {
                 Some(0)
             }
             Call::OnExit => Some(self.exit_callbacks.register(args[0])),
-            Call::Duplicate => Some(strings::duplicate(memory, heap, args[0])?),
+            Call::Duplicate => Some(strings::duplicate(memory, heap, args[0], errno()?)?),
             Call::Length => Some(strings::length(memory, args[0])?),
             Call::Format => Some(formatting::write(memory, args)?),
-            Call::Sprintf => Some(sprintf(memory, args, cpu.register(Register32::Esp))?),
-            Call::Snprintf => Some(snprintf(memory, args, cpu.register(Register32::Esp))?),
-            Call::Sscanf => Some(scanning::sscanf(
-                memory,
-                args,
-                cpu.register(Register32::Esp),
-            )?),
+            Call::Sprintf => Some(sprintf(memory, args, stack, errno()?)?),
+            Call::Snprintf => Some(snprintf(memory, args, stack, errno()?)?),
+            Call::Sscanf => Some(scanning::sscanf(memory, args, stack, errno()?)?),
             Call::Lowercase => Some(strings::lowercase(args[0])?),
             Call::UppercaseCharacter => Some(strings::uppercase_character(args[0])?),
-            Call::LowercaseString => Some(strings::lowercase_string(memory, args[0])?),
-            Call::UppercaseString => Some(strings::uppercase(memory, args[0])?),
+            Call::LowercaseString => Some(strings::lowercase_string(memory, args[0], errno()?)?),
+            Call::UppercaseString => Some(strings::uppercase(memory, args[0], errno()?)?),
             Call::CompareIgnoringCase => {
                 Some(strings::compare_ignoring_case(memory, args[0], args[1])?)
             }
@@ -303,8 +305,14 @@ impl Crt {
                 self.multibyte.split_path(memory, args)?;
                 None
             }
-            Call::Remove => Some(status::remove(directory, memory, args[0])?),
-            Call::Stat => Some(status::query(directory, memory, args[0], args[1])?),
+            Call::Remove => Some(status::remove(directory, memory, args[0], errno()?)?),
+            Call::Stat => Some(status::query(
+                directory,
+                memory,
+                args[0],
+                args[1],
+                errno()?,
+            )?),
             Call::Copy | Call::CopyString | Call::AppendString => {
                 let copy = match call {
                     Call::CopyString => strings::copy,
@@ -316,12 +324,7 @@ impl Crt {
             Call::Move => Some(buffers::move_bytes(memory, args[0], args[1], args[2])?),
             Call::Compare => Some(buffers::compare(memory, args[0], args[1], args[2])?),
             Call::FindByte => Some(buffers::find(memory, args[0], args[1], args[2])?),
-            Call::DllOnExit => Some(onexit::register(
-                heap,
-                memory,
-                cpu.register(Register32::Esp),
-                args,
-            )?),
+            Call::DllOnExit => Some(onexit::register(heap, memory, stack, args, errno()?)?),
             Call::FmodePointer => Some(FMODE),
             Call::CommodePointer => Some(COMMODE),
             Call::ArgcPointer => Some(ARGC),
@@ -336,18 +339,28 @@ impl Crt {
     }
 }
 
-fn sprintf(memory: &mut GuestMemory, args: &[u32], stack: u32) -> Result<u32, DispatchError> {
+fn sprintf(
+    memory: &mut GuestMemory,
+    args: &[u32],
+    stack: u32,
+    errno: u32,
+) -> Result<u32, DispatchError> {
     if args[0] == 0 || args[1] == 0 {
-        guest::write_word(memory, ERRNO, 22)?;
+        guest::write_word(memory, errno, 22)?;
         Ok(u32::MAX)
     } else {
         formatting::write_variadic(memory, args, stack)
     }
 }
 
-fn snprintf(memory: &mut GuestMemory, args: &[u32], stack: u32) -> Result<u32, DispatchError> {
+fn snprintf(
+    memory: &mut GuestMemory,
+    args: &[u32],
+    stack: u32,
+    errno: u32,
+) -> Result<u32, DispatchError> {
     if args[0] == 0 || args[2] == 0 {
-        guest::write_word(memory, ERRNO, 22)?;
+        guest::write_word(memory, errno, 22)?;
         Ok(u32::MAX)
     } else {
         formatting::write_snprintf_variadic(memory, args, stack)
@@ -358,11 +371,12 @@ fn malloc(
     memory: &mut GuestMemory,
     heap: &mut heap::Heap,
     size: u32,
+    errno: u32,
 ) -> Result<u32, DispatchError> {
     if let Some(pointer) = heap.allocate_crt(size, memory)? {
         Ok(pointer)
     } else {
-        guest::write_word(memory, ERRNO, 12)?;
+        guest::write_word(memory, errno, 12)?;
         Ok(0)
     }
 }

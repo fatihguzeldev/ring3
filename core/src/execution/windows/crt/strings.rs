@@ -1,4 +1,4 @@
-use super::{Access, DispatchError, ERRNO, GuestMemory, MemoryError, buffers, guest, heap};
+use super::{Access, DispatchError, GuestMemory, MemoryError, buffers, guest, heap};
 
 pub(super) fn lowercase(character: u32) -> Result<u32, DispatchError> {
     character_case(character, false)
@@ -20,24 +20,30 @@ fn character_case(character: u32, make_uppercase: bool) -> Result<u32, DispatchE
     }))
 }
 
-pub(super) fn uppercase(memory: &mut GuestMemory, source: u32) -> Result<u32, DispatchError> {
-    change_case(memory, source, true)
+pub(super) fn uppercase(
+    memory: &mut GuestMemory,
+    source: u32,
+    errno: u32,
+) -> Result<u32, DispatchError> {
+    change_case(memory, source, true, errno)
 }
 
 pub(super) fn lowercase_string(
     memory: &mut GuestMemory,
     source: u32,
+    errno: u32,
 ) -> Result<u32, DispatchError> {
-    change_case(memory, source, false)
+    change_case(memory, source, false, errno)
 }
 
 fn change_case(
     memory: &mut GuestMemory,
     source: u32,
     make_uppercase: bool,
+    errno: u32,
 ) -> Result<u32, DispatchError> {
     if source == 0 {
-        guest::write_word(memory, ERRNO, 22)?;
+        guest::write_word(memory, errno, 22)?;
         return Ok(0);
     }
     let mut bytes = terminated_bytes(memory, source)?;
@@ -237,6 +243,7 @@ pub(super) fn duplicate(
     memory: &mut GuestMemory,
     heap: &mut heap::Heap,
     source: u32,
+    errno: u32,
 ) -> Result<u32, DispatchError> {
     if source == 0 {
         return Ok(0);
@@ -244,7 +251,7 @@ pub(super) fn duplicate(
     let bytes = terminated_bytes(memory, source)?;
     let length = u32::try_from(bytes.len()).expect("bounded string length fits u32");
     let Some(pointer) = heap.allocate_crt(length, memory)? else {
-        guest::write_word(memory, ERRNO, 12)?;
+        guest::write_word(memory, errno, 12)?;
         return Ok(0);
     };
     memory

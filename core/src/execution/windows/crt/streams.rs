@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 
 use super::{
-    Access, Cpu32, DispatchError, ERRNO, FMODE, GuestMemory, Register32,
+    Access, Cpu32, DispatchError, FMODE, GuestMemory, Register32,
     directory::{Directory, ReadFile},
     guest,
     heap::Heap,
@@ -51,6 +51,10 @@ pub(super) struct Streams {
 }
 
 impl Streams {
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "stream dispatch needs shared file state and caller errno"
+    )]
     pub(super) fn dispatch(
         &mut self,
         call: Call,
@@ -59,9 +63,10 @@ impl Streams {
         memory: &mut GuestMemory,
         heap: &mut Heap,
         directory: &mut Directory,
+        errno: u32,
     ) -> Result<u32, DispatchError> {
         match call {
-            Call::Open => self.open(args, memory, heap, directory),
+            Call::Open => self.open(args, memory, heap, directory, errno),
             Call::Read => self.read(args, memory, directory),
             Call::Close => {
                 let file = self.validated(args[0], memory)?.file;
@@ -70,8 +75,8 @@ impl Streams {
                 directory.release_reader(file);
                 Ok(0)
             }
-            Call::Seek => self.seek(args, memory, directory),
-            Call::Tell => self.tell(args[0], memory),
+            Call::Seek => self.seek(args, memory, directory, errno),
+            Call::Tell => self.tell(args[0], memory, errno),
         }
     }
 
@@ -81,6 +86,7 @@ impl Streams {
         memory: &mut GuestMemory,
         heap: &mut Heap,
         directory: &mut Directory,
+        errno: u32,
     ) -> Result<u32, DispatchError> {
         if args[0] == 0 || args[1] == 0 {
             return Err(DispatchError::Unsupported);
@@ -104,16 +110,16 @@ impl Streams {
         }
         let file = match directory.read_file(&mut path)? {
             ReadFile::Ready(index) => index,
-            ReadFile::Missing => return failed(memory, 2),
-            ReadFile::Directory => return failed(memory, 13),
+            ReadFile::Missing => return failed(memory, errno, 2),
+            ReadFile::Directory => return failed(memory, errno, 13),
         };
         let Some(descriptor) =
             (3..515).find(|id| self.live.values().all(|stream| stream.descriptor != *id))
         else {
-            return failed(memory, 24);
+            return failed(memory, errno, 24);
         };
         let Some(pointer) = heap.allocate_stream(memory)? else {
-            return failed(memory, 12);
+            return failed(memory, errno, 12);
         };
         let stream = Stream {
             file,
@@ -185,6 +191,7 @@ impl Streams {
         args: &[u32],
         memory: &mut GuestMemory,
         directory: &Directory,
+        errno: u32,
     ) -> Result<u32, DispatchError> {
         let stream = self.validated(args[0], memory)?;
         let base = match args[2] {
@@ -192,14 +199,14 @@ impl Streams {
             1 => i64::try_from(stream.position).expect("stream position fits u32"),
             2 => i64::try_from(directory.contents(stream.file).len())
                 .expect("file contents are bounded below i64"),
-            _ => return invalid_position(memory),
+            _ => return invalid_position(memory, errno),
         };
         let offset = i64::from(args[1].cast_signed());
         let Some(target) = base
             .checked_add(offset)
             .and_then(|value| u32::try_from(value).ok())
         else {
-            return invalid_position(memory);
+            return invalid_position(memory, errno);
         };
         let clear_eof = stream.eof;
         if clear_eof {
@@ -212,23 +219,28 @@ impl Streams {
         Ok(0)
     }
 
-    fn tell(&self, pointer: u32, memory: &mut GuestMemory) -> Result<u32, DispatchError> {
+    fn tell(
+        &self,
+        pointer: u32,
+        memory: &mut GuestMemory,
+        errno: u32,
+    ) -> Result<u32, DispatchError> {
         let position = u32::try_from(self.validated(pointer, memory)?.position)
             .expect("stream position fits u32");
         if position <= i32::MAX.cast_unsigned() {
             Ok(position)
         } else {
-            invalid_position(memory)
+            invalid_position(memory, errno)
         }
     }
 }
 
-fn failed(memory: &mut GuestMemory, error: u32) -> Result<u32, DispatchError> {
-    guest::write_word(memory, ERRNO, error)?;
+fn failed(memory: &mut GuestMemory, errno: u32, error: u32) -> Result<u32, DispatchError> {
+    guest::write_word(memory, errno, error)?;
     Ok(0)
 }
 
-fn invalid_position(memory: &mut GuestMemory) -> Result<u32, DispatchError> {
-    guest::write_word(memory, ERRNO, 22)?;
+fn invalid_position(memory: &mut GuestMemory, errno: u32) -> Result<u32, DispatchError> {
+    guest::write_word(memory, errno, 22)?;
     Ok(u32::MAX)
 }

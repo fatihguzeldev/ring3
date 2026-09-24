@@ -1,16 +1,17 @@
-use super::{Access, DispatchError, ERRNO, GuestMemory, directory, guest};
+use super::{Access, DispatchError, GuestMemory, directory, guest};
 
 pub(super) fn remove(
     directory: &mut directory::Directory,
     memory: &mut GuestMemory,
     source: u32,
+    errno: u32,
 ) -> Result<u32, DispatchError> {
     let error = match directory.remove_file(memory, source)? {
         directory::Removal::Removed => return Ok(0),
         directory::Removal::Missing => 2,
         directory::Removal::Directory | directory::Removal::Open => 13,
     };
-    guest::write_word(memory, ERRNO, error)?;
+    guest::write_word(memory, errno, error)?;
     Ok(u32::MAX)
 }
 
@@ -19,9 +20,10 @@ pub(super) fn query(
     memory: &mut GuestMemory,
     source: u32,
     output: u32,
+    errno: u32,
 ) -> Result<u32, DispatchError> {
     let Some(status) = directory.legacy_status(memory, source)? else {
-        guest::write_word(memory, ERRNO, 2)?;
+        guest::write_word(memory, errno, 2)?;
         return Ok(u32::MAX);
     };
     let size = i32::try_from(status.size).map_err(|_| DispatchError::Unsupported)?;
