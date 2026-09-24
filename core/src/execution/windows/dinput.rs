@@ -79,6 +79,7 @@ pub(super) enum Call {
     CreateDevice,
     SetDataFormat,
     SetMouseDataFormat,
+    SetMouseCooperativeLevel,
     SetCooperativeLevel,
     SetProperty,
     Acquire,
@@ -108,6 +109,7 @@ impl Call {
             0x590 => Some(Self::AddRef(Class::Mouse)),
             0x594 => Some(Self::Release(Class::Mouse)),
             0x598 => Some(Self::SetMouseDataFormat),
+            0x59c => Some(Self::SetMouseCooperativeLevel),
             _ => None,
         }
     }
@@ -119,7 +121,10 @@ impl Call {
     pub(super) fn arguments(self) -> usize {
         match self {
             Self::Create | Self::CreateDevice => 4,
-            Self::QueryInterface(_) | Self::SetCooperativeLevel | Self::SetProperty => 3,
+            Self::QueryInterface(_)
+            | Self::SetCooperativeLevel
+            | Self::SetMouseCooperativeLevel
+            | Self::SetProperty => 3,
             Self::SetDataFormat | Self::SetMouseDataFormat => 2,
             Self::AddRef(_) | Self::Release(_) | Self::Acquire | Self::Unacquire => 1,
         }
@@ -194,6 +199,7 @@ impl Input {
                     1 => 0x590,
                     2 => 0x594,
                     11 => 0x598,
+                    13 => 0x59c,
                     _ => 0xffc,
                 };
             bytes[0x300 + slot * 4..0x304 + slot * 4].copy_from_slice(&address.to_le_bytes());
@@ -323,6 +329,10 @@ impl Input {
             Call::SetMouseDataFormat => {
                 let index = self.object(Class::Mouse, args[0])?;
                 self.mice[index].set_format(args[1], memory)
+            }
+            Call::SetMouseCooperativeLevel => {
+                let index = self.object(Class::Mouse, args[0])?;
+                self.mice[index].set_cooperative_level(args[1], args[2], desktop)
             }
             Call::SetCooperativeLevel => {
                 let index = self.object(Class::Keyboard, args[0])?;

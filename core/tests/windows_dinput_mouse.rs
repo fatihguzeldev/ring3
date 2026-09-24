@@ -209,10 +209,11 @@ fn mouse_uses_read_only_nonexecutable_table_at_full_page_budget() {
                 1 => MOUSE_ADD,
                 2 => MOUSE_RELEASE,
                 11 => 0x7000_0598,
+                13 => 0x7000_059c,
                 _ => 0x7000_0ffc,
             }
         );
-        if slot >= 3 && slot != 11 {
+        if slot >= 3 && !matches!(slot, 11 | 13) {
             denied(&mut p, method, &[]);
         }
     }

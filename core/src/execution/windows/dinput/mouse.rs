@@ -1,4 +1,4 @@
-use super::{Access, DispatchError, GuestMemory, INVALID_ARGUMENT, NULL_POINTER, guest};
+use super::{Access, Desktop, DispatchError, GuestMemory, INVALID_ARGUMENT, NULL_POINTER, guest};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Format {
@@ -8,6 +8,7 @@ enum Format {
 pub(super) struct Device {
     pub(super) references: u32,
     format: Option<Format>,
+    cooperative_window: Option<u32>,
 }
 
 impl Device {
@@ -15,7 +16,30 @@ impl Device {
         Self {
             references: 1,
             format: None,
+            cooperative_window: None,
         }
+    }
+
+    pub(super) fn set_cooperative_level(
+        &mut self,
+        window: u32,
+        flags: u32,
+        desktop: &Desktop,
+    ) -> Result<u32, DispatchError> {
+        if matches!(flags & 0x3, 0 | 0x3) || matches!(flags & 0xc, 0 | 0xc) {
+            return Ok(INVALID_ARGUMENT);
+        }
+        if flags != 5 {
+            return Err(DispatchError::Unsupported);
+        }
+        if desktop
+            .window(window)
+            .is_none_or(|window| window.style & 0x4000_0000 != 0)
+        {
+            return Ok(0x8007_0006);
+        }
+        self.cooperative_window = Some(window);
+        Ok(0)
     }
 
     pub(super) fn set_format(
@@ -85,6 +109,7 @@ impl Device {
 
 #[cfg(test)]
 mod tests {
+    use super::super::super::desktop::Window;
     use super::*;
     use crate::execution::Permissions;
 
@@ -116,6 +141,97 @@ mod tests {
             };
             words(memory, 0x1101 + i * 16, &[pointer, offset, kind, 0]);
         }
+    }
+
+    fn desktop() -> Desktop {
+        let mut desktop = Desktop::default();
+        desktop.insert(4, Window::default());
+        desktop.insert(
+            8,
+            Window {
+                parent: 4,
+                ..Window::default()
+            },
+        );
+        desktop.insert(
+            12,
+            Window {
+                parent: 4,
+                style: 0x4000_0000,
+                ..Window::default()
+            },
+        );
+        desktop.activate_created(4);
+        desktop
+    }
+
+    #[test]
+    fn cooperative_window_is_independent_of_format_refs_and_other_mice() {
+        let desktop = desktop();
+        let activation = desktop.activation();
+        let mut first = Device::new();
+        let mut second = Device::new();
+        assert_eq!(first.cooperative_window, None);
+        assert_eq!(second.cooperative_window, None);
+        assert_eq!(first.set_cooperative_level(4, 5, &desktop).ok(), Some(0));
+        assert_eq!(second.set_cooperative_level(8, 5, &desktop).ok(), Some(0));
+        assert_eq!(first.format, None);
+        let mut memory = GuestMemory::new(1);
+        memory
+            .map_zeroed(0x1000, 4096, Permissions::READ_WRITE)
+            .unwrap();
+        standard(&mut memory);
+        assert_eq!(first.set_format(0x1001, &memory).ok(), Some(0));
+        assert_eq!(first.cooperative_window, Some(4));
+        assert_eq!(first.set_cooperative_level(8, 5, &desktop).ok(), Some(0));
+        assert_eq!(first.cooperative_window, Some(8));
+        assert_eq!(first.format, Some(Format::StandardMouse2));
+        assert_eq!(second.cooperative_window, Some(8));
+        assert_eq!(second.format, None);
+        assert_eq!((first.references, second.references), (1, 1));
+        assert_eq!(desktop.activation(), activation);
+        assert_eq!(memory.mapped_pages(), 1);
+    }
+
+    #[test]
+    fn bad_replacement_keeps_policy_and_removed_windows_are_not_pinned() {
+        let mut desktop = desktop();
+        let mut device = Device::new();
+        assert_eq!(device.set_cooperative_level(4, 5, &desktop).ok(), Some(0));
+        for flags in [0, 3, 12, u32::MAX] {
+            assert_eq!(
+                device.set_cooperative_level(0, flags, &desktop).ok(),
+                Some(INVALID_ARGUMENT)
+            );
+            assert_eq!(device.cooperative_window, Some(4));
+        }
+        for flags in [6, 9, 10, 0x15, 0x8000_0005] {
+            assert!(matches!(
+                device.set_cooperative_level(0, flags, &desktop),
+                Err(DispatchError::Unsupported)
+            ));
+            assert_eq!(device.cooperative_window, Some(4));
+        }
+        for window in [0, 1, 12, 16, u32::MAX] {
+            assert_eq!(
+                device.set_cooperative_level(window, 5, &desktop).ok(),
+                Some(0x8007_0006)
+            );
+            assert_eq!(device.cooperative_window, Some(4));
+        }
+        desktop.remove(4);
+        assert!(desktop.window(4).is_none());
+        assert_eq!(
+            device.set_cooperative_level(4, 5, &desktop).ok(),
+            Some(0x8007_0006)
+        );
+        assert_eq!(device.cooperative_window, Some(4));
+        let activation = desktop.activation();
+        assert_eq!(device.set_cooperative_level(8, 5, &desktop).ok(), Some(0));
+        assert_eq!(device.cooperative_window, Some(8));
+        assert_eq!(desktop.activation(), activation);
+        assert!(desktop.window(4).is_none());
+        assert_eq!(device.references, 1);
     }
 
     #[test]

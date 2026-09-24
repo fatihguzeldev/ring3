@@ -16,7 +16,7 @@ fn store(code: &mut Vec<u8>, address: u32) {
     code.extend_from_slice(&address.to_le_bytes());
 }
 
-fn code() -> Vec<u8> {
+fn code(flags: [u32; 2]) -> Vec<u8> {
     let mut code = Vec::new();
     for value in [0, DATA, 0x700, 0x0040_0000] {
         push(&mut code, value);
@@ -37,7 +37,7 @@ fn code() -> Vec<u8> {
     code.extend_from_slice(&[0x8b, 0x1d]);
     code.extend_from_slice(&(DATA + 4).to_le_bytes());
     code.extend_from_slice(&[0x8b, 0x2b]);
-    for (flags, offset) in [(6, 28), (0x16, 32)] {
+    for (flags, offset) in flags.into_iter().zip([28, 32]) {
         push(&mut code, flags);
         push(&mut code, WINDOW);
         code.extend_from_slice(&[0x53, 0xff, 0x55, 52]);
@@ -50,6 +50,10 @@ fn code() -> Vec<u8> {
 }
 
 pub fn process() -> Process32 {
+    process_with_cooperation([6, 0x16])
+}
+
+pub fn process_with_cooperation(flags: [u32; 2]) -> Process32 {
     let mut bytes = window_creation_executable::guest();
     bytes.resize(2048, 0);
     for (offset, value) in [
@@ -65,7 +69,7 @@ pub fn process() -> Process32 {
     }
     bytes[0x6c0..0x6cb].copy_from_slice(b"dinput.dll\0");
     bytes[0x6e2..0x6f5].copy_from_slice(b"DirectInputCreateA\0");
-    let code = code();
+    let code = code(flags);
     assert!(code.len() <= 0xc0);
     bytes[0x340..0x340 + code.len()].copy_from_slice(&code);
     let mut p = Process32::load(&bytes, 64).unwrap();
@@ -88,9 +92,13 @@ pub fn process() -> Process32 {
 }
 
 pub fn imported_foreground_keyboard_setting_across_budgets() {
+    imported_setting_across_budgets(process);
+}
+
+pub fn imported_setting_across_budgets(setup: fn() -> Process32) {
     let mut results = Vec::new();
     for budget in [1, 7, 4096, 20000] {
-        let mut p = process();
+        let mut p = setup();
         let windows = p.window_snapshots();
         let stack = p.cpu.register(Register32::Esp);
         let mut counts = (0, 0);

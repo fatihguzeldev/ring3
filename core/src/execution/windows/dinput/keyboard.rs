@@ -624,6 +624,7 @@ mod tests {
             .unwrap();
         let mouse = super::super::MICE;
         for (call, args, expected) in [
+            (Call::SetMouseCooperativeLevel, vec![mouse, 4, 5], 0),
             (
                 Call::QueryInterface(Class::Mouse),
                 vec![mouse, 0x1020, 0x1000],
