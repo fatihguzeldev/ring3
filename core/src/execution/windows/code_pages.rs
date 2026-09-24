@@ -34,19 +34,24 @@ impl Call {
     pub(super) fn dispatch(
         self,
         arguments: &[u32],
+        teb: thread::Teb,
         memory: &mut GuestMemory,
     ) -> Result<u32, DispatchError> {
         match self {
             Self::Ansi => Ok(ANSI),
             Self::Oem => Ok(OEM),
-            Self::Info => info(arguments[0], arguments[1], memory),
-            Self::WideToAnsi => wide_to_ansi(arguments, memory),
-            Self::AnsiToWide => ansi_to_wide(arguments, memory),
+            Self::Info => info(arguments[0], arguments[1], teb, memory),
+            Self::WideToAnsi => wide_to_ansi(arguments, teb, memory),
+            Self::AnsiToWide => ansi_to_wide(arguments, teb, memory),
         }
     }
 }
 
-fn ansi_to_wide(args: &[u32], memory: &mut GuestMemory) -> Result<u32, DispatchError> {
+fn ansi_to_wide(
+    args: &[u32],
+    teb: thread::Teb,
+    memory: &mut GuestMemory,
+) -> Result<u32, DispatchError> {
     if !matches!(args[0], 0 | 3 | ANSI) || args[1] != 0 {
         return Err(DispatchError::Unsupported);
     }
@@ -57,7 +62,7 @@ fn ansi_to_wide(args: &[u32], memory: &mut GuestMemory) -> Result<u32, DispatchE
         || capacity.cast_signed() < 0
         || (capacity != 0 && (output == 0 || output == source))
     {
-        thread::set_last_error(memory, 87)?;
+        teb.set_last_error(memory, 87)?;
         return Ok(0);
     }
     let limit = if count == u32::MAX {
@@ -92,7 +97,7 @@ fn ansi_to_wide(args: &[u32], memory: &mut GuestMemory) -> Result<u32, DispatchE
     let units = u32::try_from(converted.len() / 2).map_err(|_| DispatchError::Unsupported)?;
     if capacity != 0 {
         if units > capacity {
-            thread::set_last_error(memory, 122)?;
+            teb.set_last_error(memory, 122)?;
             return Ok(0);
         }
         guest::check(memory, output, converted.len(), Access::Write)?;
@@ -135,7 +140,11 @@ fn cp1252_unit(byte: u8) -> Option<u16> {
     }
 }
 
-fn wide_to_ansi(args: &[u32], memory: &mut GuestMemory) -> Result<u32, DispatchError> {
+fn wide_to_ansi(
+    args: &[u32],
+    teb: thread::Teb,
+    memory: &mut GuestMemory,
+) -> Result<u32, DispatchError> {
     if !matches!(args[0], 0 | 3 | ANSI) || args[1] != 0 {
         return Err(DispatchError::Unsupported);
     }
@@ -146,7 +155,7 @@ fn wide_to_ansi(args: &[u32], memory: &mut GuestMemory) -> Result<u32, DispatchE
         || capacity.cast_signed() < 0
         || (capacity != 0 && (output == 0 || output == source))
     {
-        thread::set_last_error(memory, 87)?;
+        teb.set_last_error(memory, 87)?;
         return Ok(0);
     }
     let limit = if count == u32::MAX {
@@ -193,7 +202,7 @@ fn wide_to_ansi(args: &[u32], memory: &mut GuestMemory) -> Result<u32, DispatchE
     }
     if capacity != 0 {
         if converted.len() > capacity as usize {
-            thread::set_last_error(memory, 122)?;
+            teb.set_last_error(memory, 122)?;
             return Ok(0);
         }
         guest::check(memory, output, converted.len(), Access::Write)?;
@@ -245,9 +254,14 @@ fn cp1252(character: char) -> Option<u8> {
     }
 }
 
-fn info(code_page: u32, output: u32, memory: &mut GuestMemory) -> Result<u32, DispatchError> {
+fn info(
+    code_page: u32,
+    output: u32,
+    teb: thread::Teb,
+    memory: &mut GuestMemory,
+) -> Result<u32, DispatchError> {
     if output == 0 {
-        thread::set_last_error(memory, 87)?;
+        teb.set_last_error(memory, 87)?;
         return Ok(0);
     }
     if !matches!(code_page, 0 | 1 | 3 | ANSI | OEM) {

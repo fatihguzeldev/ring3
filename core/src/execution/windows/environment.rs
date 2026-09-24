@@ -23,6 +23,7 @@ impl Environment {
     fn query(
         &self,
         memory: &mut GuestMemory,
+        teb: thread::Teb,
         source: u32,
         output: u32,
         capacity: u32,
@@ -34,7 +35,7 @@ impl Environment {
                 .then_some(&entry[separator + 1..])
         });
         let Some(value) = value else {
-            thread::set_last_error(memory, 203)?;
+            teb.set_last_error(memory, 203)?;
             return Ok(0);
         };
         if value.len() > 32767 {
@@ -52,9 +53,13 @@ impl Environment {
 
 impl Process32 {
     pub(super) fn environment_query(&mut self, arguments: &[u32]) -> Result<(), DispatchError> {
-        let result =
-            self.environment
-                .query(&mut self.memory, arguments[0], arguments[1], arguments[2])?;
+        let result = self.environment.query(
+            &mut self.memory,
+            thread::Teb(self.cpu.fs_base()),
+            arguments[0],
+            arguments[1],
+            arguments[2],
+        )?;
         self.cpu.set_register(Register32::Eax, result);
         Ok(())
     }

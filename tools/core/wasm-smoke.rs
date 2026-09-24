@@ -3135,6 +3135,21 @@ fn execute_thread_state() {
     assert_eq!(call(&mut process, 0x7000_0068, &[]), 0);
     process.cpu.set_fs_base(0x1101_0000);
     assert_eq!(call(&mut process, 0x7000_0070, &[0]), 0);
+    process.cpu.set_fs_base(0x7ffd_e000);
+    call(&mut process, 0x7000_0000, &[77]);
+    process.cpu.set_fs_base(0x1101_0000);
+    process.memory.write(0x0040_2300, b"absent\0").unwrap();
+    for (api, args, error) in [
+        (0x7000_0240, vec![0x0040_2300, 0, 0], 203),
+        (0x7000_020c, vec![0, 0x0040_2320], 111),
+        (0x7000_0090, vec![1252, 0], 87),
+        (0x7000_00e4, vec![0x0040_2340, 0x5000_0000, 4], 87),
+    ] {
+        assert_eq!(call(&mut process, api, &args), 0);
+        assert_eq!(process.last_error().unwrap(), error);
+    }
+    process.cpu.set_fs_base(0x7ffd_e000);
+    assert_eq!(process.last_error().unwrap(), 77);
 }
 
 fn execute_tls() {

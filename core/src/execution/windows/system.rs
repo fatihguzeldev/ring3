@@ -69,26 +69,32 @@ impl Call {
     pub(super) fn dispatch(
         self,
         arguments: &[u32],
+        teb: thread::Teb,
         memory: &mut GuestMemory,
     ) -> Result<u32, DispatchError> {
         match self {
             Self::Metrics => metrics(arguments[0]),
             Self::Color => color(arguments[0]),
             Self::Directory => directory(memory, arguments[0], arguments[1]),
-            Self::ComputerName => computer_name(memory, arguments[0], arguments[1]),
+            Self::ComputerName => computer_name(memory, teb, arguments[0], arguments[1]),
         }
     }
 }
 
-fn computer_name(memory: &mut GuestMemory, output: u32, size: u32) -> Result<u32, DispatchError> {
+fn computer_name(
+    memory: &mut GuestMemory,
+    teb: thread::Teb,
+    output: u32,
+    size: u32,
+) -> Result<u32, DispatchError> {
     let mut capacity = [0];
     guest::read_words(memory, size, &mut capacity)?;
     guest::check(memory, size, 4, Access::Write)?;
     let required = u32::try_from(COMPUTER_NAME.len()).expect("fixed name length fits u32");
     if capacity[0] < required {
-        thread::check_last_error_write(memory)?;
+        teb.check_last_error_write(memory)?;
         guest::write_word(memory, size, required)?;
-        thread::set_last_error(memory, 111)?;
+        teb.set_last_error(memory, 111)?;
         return Ok(0);
     }
     guest::check(memory, output, COMPUTER_NAME.len(), Access::Write)?;

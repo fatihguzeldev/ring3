@@ -31,16 +31,18 @@ impl Call {
     pub(super) fn dispatch(
         self,
         memory: &mut GuestMemory,
+        teb: thread::Teb,
         arguments: &[u32],
     ) -> Result<u32, DispatchError> {
         match self {
             Self::Copy | Self::CopyTerminated => copy(
                 memory,
+                teb,
                 arguments[0],
                 arguments[1],
                 arguments.get(2).copied().unwrap_or(u32::MAX),
             ),
-            Self::Append => append(memory, arguments[0], arguments[1]),
+            Self::Append => append(memory, teb, arguments[0], arguments[1]),
             Self::Length if arguments[0] == 0 => Ok(0),
             Self::Length => append_address(memory, arguments[0]).map(|end| end - arguments[0]),
         }
@@ -49,18 +51,24 @@ impl Call {
 
 fn copy(
     memory: &mut GuestMemory,
+    teb: thread::Teb,
     destination: u32,
     source: u32,
     count: u32,
 ) -> Result<u32, DispatchError> {
     let prepared = prepare(memory, destination, source, count).map(|bytes| (destination, bytes));
-    complete(memory, destination, prepared)
+    complete(memory, teb, destination, prepared)
 }
 
-fn append(memory: &mut GuestMemory, destination: u32, source: u32) -> Result<u32, DispatchError> {
+fn append(
+    memory: &mut GuestMemory,
+    teb: thread::Teb,
+    destination: u32,
+    source: u32,
+) -> Result<u32, DispatchError> {
     let prepared = append_address(memory, destination)
         .and_then(|output| prepare(memory, output, source, u32::MAX).map(|bytes| (output, bytes)));
-    complete(memory, destination, prepared)
+    complete(memory, teb, destination, prepared)
 }
 
 fn append_address(memory: &GuestMemory, destination: u32) -> Result<u32, DispatchError> {
@@ -79,6 +87,7 @@ fn append_address(memory: &GuestMemory, destination: u32) -> Result<u32, Dispatc
 
 fn complete(
     memory: &mut GuestMemory,
+    teb: thread::Teb,
     destination: u32,
     prepared: Result<(u32, Vec<u8>), DispatchError>,
 ) -> Result<u32, DispatchError> {
@@ -88,7 +97,7 @@ fn complete(
             Ok(destination)
         }
         Err(DispatchError::Memory(_)) => {
-            thread::set_last_error(memory, 87)?;
+            teb.set_last_error(memory, 87)?;
             Ok(0)
         }
         Err(error) => Err(error),

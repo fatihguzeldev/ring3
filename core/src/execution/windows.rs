@@ -1158,20 +1158,24 @@ impl Process32 {
             ),
             Api::Desktop(call) => self.window_query(call, args)?,
             Api::RegisterUserAtom => self.register_user_atom(argument)?,
-            Api::System(call) => self
-                .cpu
-                .set_register(Register32::Eax, call.dispatch(args, &mut self.memory)?),
+            Api::System(call) => {
+                let value =
+                    call.dispatch(args, thread::Teb(self.cpu.fs_base()), &mut self.memory)?;
+                self.cpu.set_register(Register32::Eax, value);
+            }
             Api::SetErrorMode => self.set_error_mode(argument)?,
             Api::GetErrorMode => self.cpu.set_register(Register32::Eax, self.error_mode),
             Api::GetVersion => self.cpu.set_register(Register32::Eax, GUEST_VERSION),
             Api::GetProcessVersion => self.process_version(argument)?,
             Api::CodePage(call) => {
-                let value = call.dispatch(args, &mut self.memory)?;
+                let value =
+                    call.dispatch(args, thread::Teb(self.cpu.fs_base()), &mut self.memory)?;
                 self.cpu.set_register(Register32::Eax, value);
             }
             Api::Com(call) => self.com_api(call, args)?,
             Api::String(call) => {
-                let value = call.dispatch(&mut self.memory, args)?;
+                let value =
+                    call.dispatch(&mut self.memory, thread::Teb(self.cpu.fs_base()), args)?;
                 self.cpu.set_register(Register32::Eax, value);
             }
             Api::Tls(call) => {
