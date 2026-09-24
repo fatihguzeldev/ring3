@@ -2881,6 +2881,51 @@ fn indexed_xyz_triangle_rasterizes_bound_guest_buffers() {
             .chunks_exact(4)
             .all(|pixel| pixel == [0, 0, 0, 255])
     );
+
+    process
+        .memory
+        .write(u64::from(index + 4096 + 4), &[2, 0])
+        .unwrap();
+    for offset in [12, 36, 60] {
+        write(&mut process, vertex + 4096 + offset, &[0xffff_ffff]);
+    }
+    for (offset, value) in [
+        (16, 0.1_f32),
+        (20, 0.1),
+        (40, 0.9),
+        (44, 0.1),
+        (64, 0.1),
+        (68, 0.9),
+    ] {
+        write(&mut process, vertex + 4096 + offset, &[value.to_bits()]);
+    }
+    let create_texture = method(&process, device, 20);
+    assert_eq!(
+        direct_call(
+            &mut process,
+            create_texture,
+            &[device, 2, 2, 1, 0, 21, 1, TEXTURE_OUTPUT],
+        ),
+        0
+    );
+    let texture = read(&process, TEXTURE_OUTPUT);
+    process
+        .memory
+        .write(
+            u64::from(texture + 4096),
+            &[
+                0, 0, 255, 255, 0, 255, 0, 255, 255, 0, 0, 255, 255, 255, 255, 255,
+            ],
+        )
+        .unwrap();
+    let set_texture = method(&process, device, 61);
+    assert_eq!(invoke(&mut process, set_texture, &[device, 0, texture]), 0);
+    assert_eq!(direct_call(&mut process, draw, &[device, 4, 0, 3, 0, 1]), 0);
+    assert_eq!(invoke(&mut process, present, &[device, 0, 0, 0, 0]), 0);
+    let frame = process.take_frame().unwrap();
+    assert_eq!(&frame.rgba[0..4], &[255, 0, 0, 255]);
+    assert_eq!(&frame.rgba[2 * 4..3 * 4], &[0, 255, 0, 255]);
+    assert_eq!(&frame.rgba[2 * 4 * 4..(2 * 4 + 1) * 4], &[0, 0, 255, 255]);
 }
 
 #[test]

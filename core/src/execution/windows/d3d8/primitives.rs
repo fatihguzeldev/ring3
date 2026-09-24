@@ -15,6 +15,8 @@ struct Vertex {
     y: f64,
     z: f64,
     color: [u8; 3],
+    inv_w: f64,
+    uv_over_w: [f64; 2],
 }
 
 #[derive(Clone, Copy)]
@@ -30,6 +32,7 @@ struct Bounds {
 struct ClipVertex {
     position: [f64; 4],
     color: [f64; 3],
+    uv: [f64; 2],
 }
 
 impl ClipVertex {
@@ -39,7 +42,30 @@ impl ClipVertex {
                 self.position[i] + (other.position[i] - self.position[i]) * t
             }),
             color: std::array::from_fn(|i| self.color[i] + (other.color[i] - self.color[i]) * t),
+            uv: std::array::from_fn(|i| self.uv[i] + (other.uv[i] - self.uv[i]) * t),
         }
+    }
+}
+
+struct SampledTexture {
+    width: u32,
+    height: u32,
+    bgra: Vec<u8>,
+}
+
+impl SampledTexture {
+    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+    fn sample(&self, uv: [f64; 2]) -> [u8; 3] {
+        let x = ((uv[0].rem_euclid(1.0) * f64::from(self.width)).floor() as usize)
+            .min(self.width as usize - 1);
+        let y = ((uv[1].rem_euclid(1.0) * f64::from(self.height)).floor() as usize)
+            .min(self.height as usize - 1);
+        let offset = (y * self.width as usize + x) * 4;
+        [
+            self.bgra[offset + 2],
+            self.bgra[offset + 1],
+            self.bgra[offset],
+        ]
     }
 }
 
@@ -73,7 +99,9 @@ pub(super) fn draw_indexed(
         || topology != 4
         || primitive_count > MAX_PRIMITIVES
         || stride < 24
-        || graphics.texture_stages.iter().any(|texture| *texture != 0)
+        || graphics.texture_stages[1..]
+            .iter()
+            .any(|texture| *texture != 0)
     {
         return Ok(INVALID_CALL);
     }
@@ -106,6 +134,26 @@ pub(super) fn draw_indexed(
     if primitive_count == 0 {
         return Ok(0);
     }
+
+    // Snapshot texture pixels before changing the back buffer.
+    let texture = if graphics.texture_stages[0] == 0 {
+        None
+    } else {
+        let Some(texture) = graphics.textures.get(&graphics.texture_stages[0]) else {
+            return Ok(INVALID_CALL);
+        };
+        let level = &texture.levels[0];
+        let mut bgra = vec![0; level.width as usize * level.height as usize * 4];
+        memory.read(
+            u64::from(graphics.texture_stages[0]) + u64::from(level.offset),
+            &mut bgra,
+        )?;
+        Some(SampledTexture {
+            width: level.width,
+            height: level.height,
+            bgra,
+        })
+    };
 
     let index_start = u64::from(index_address)
         + super::PAGE_SIZE
@@ -180,6 +228,7 @@ pub(super) fn draw_indexed(
                     f64::from(bytes[13]),
                     f64::from(bytes[12]),
                 ],
+                uv: uv.map(f64::from),
             },
         );
     }
@@ -215,7 +264,15 @@ pub(super) fn draw_indexed(
     let frame = graphics.back.as_mut().expect("validated back buffer");
     let mut depth = graphics.depth.as_deref_mut().filter(|_| graphics.z_enabled);
     for ([a, b, c], bounds) in prepared {
-        raster_triangle(frame, depth.as_deref_mut(), a, b, c, bounds);
+        raster_triangle(
+            frame,
+            depth.as_deref_mut(),
+            a,
+            b,
+            c,
+            bounds,
+            texture.as_ref(),
+        );
     }
     Ok(0)
 }
@@ -290,6 +347,8 @@ fn screen_vertex(clip: ClipVertex, viewport: Viewport) -> Option<Vertex> {
         color: clip
             .color
             .map(|channel| channel.round().clamp(0.0, 255.0) as u8),
+        inv_w: 1.0 / w,
+        uv_over_w: clip.uv.map(|coord| coord / w),
     })
 }
 
@@ -356,6 +415,8 @@ pub(super) fn draw_up(
             y: f64::from(y),
             z: f64::from(z),
             color: [bytes[18], bytes[17], bytes[16]],
+            inv_w: 1.0,
+            uv_over_w: [0.0, 0.0],
         });
     }
 
@@ -386,6 +447,7 @@ pub(super) fn draw_up(
                 vertices[indices[1]],
                 vertices[indices[2]],
                 bounds,
+                None,
             );
         }
     }
@@ -439,6 +501,7 @@ fn raster_triangle(
     b: Vertex,
     c: Vertex,
     bounds: Bounds,
+    texture: Option<&SampledTexture>,
 ) {
     for y in bounds.top..bounds.bottom {
         for x in bounds.left..bounds.right {
@@ -459,10 +522,24 @@ fn raster_triangle(
                 depth[pixel_index] = z;
             }
             let offset = pixel_index * 4;
+            let sampled = texture.and_then(|texture| {
+                let inv_w = wa * a.inv_w + wb * b.inv_w + wc * c.inv_w;
+                if inv_w <= 0.0 || !inv_w.is_finite() {
+                    return None;
+                }
+                let uv = std::array::from_fn(|i| {
+                    (wa * a.uv_over_w[i] + wb * b.uv_over_w[i] + wc * c.uv_over_w[i]) / inv_w
+                });
+                uv.iter()
+                    .all(|value| value.is_finite())
+                    .then(|| texture.sample(uv))
+            });
             for channel in 0..3 {
                 let value = wa * f64::from(a.color[channel])
                     + wb * f64::from(b.color[channel])
                     + wc * f64::from(c.color[channel]);
+                let value =
+                    sampled.map_or(value, |pixel| value * f64::from(pixel[channel]) / 255.0);
                 frame.rgba[offset + channel] = value.round().clamp(0.0, 255.0) as u8;
             }
             frame.rgba[offset + 3] = 255;
