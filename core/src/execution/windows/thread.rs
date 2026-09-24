@@ -111,17 +111,7 @@ impl Priority {
         &mut self,
         call: PriorityCall,
         arguments: &[u32],
-        teb: Teb,
-        memory: &mut GuestMemory,
     ) -> Result<u32, super::DispatchError> {
-        if arguments[0] != u32::MAX - 1 {
-            teb.set_last_error(memory, 6)?;
-            return Ok(if matches!(call, PriorityCall::Get) {
-                0x7fff_ffff
-            } else {
-                0
-            });
-        }
         if matches!(call, PriorityCall::Get) {
             return Ok(self.0);
         }

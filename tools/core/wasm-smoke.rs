@@ -3100,9 +3100,14 @@ fn execute_thread_state() {
         ProcessStop::Stopped(StopReason::Breakpoint)
     );
     let handle = process.cpu.register(Register32::Eax);
+    assert_eq!(call(&mut process, 0x7000_0254, &[u32::MAX - 1, 2]), 1);
+    assert_eq!(call(&mut process, 0x7000_0258, &[handle]), 0);
+    assert_eq!(call(&mut process, 0x7000_0254, &[handle, u32::MAX]), 1);
+    assert_eq!(call(&mut process, 0x7000_0258, &[u32::MAX - 1]), 2);
     assert_eq!(call(&mut process, 0x7000_0068, &[]), 0);
     assert_eq!(call(&mut process, 0x7000_0074, &[0, 111]), 1);
     process.cpu.set_fs_base(0x1101_0000);
+    assert_eq!(call(&mut process, 0x7000_0258, &[u32::MAX - 1]), u32::MAX);
     assert_eq!(call(&mut process, 0x7000_0070, &[0]), 0);
     process.cpu.set_fs_base(0x7ffd_e000);
     let mutex = call(&mut process, 0x7000_0210, &[0, 1, 0]);
@@ -3128,6 +3133,8 @@ fn execute_thread_state() {
     assert_eq!(u32::from_le_bytes(owner), 2);
     assert_eq!(call(&mut process, 0x7000_0074, &[0, 222]), 1);
     assert_eq!(call(&mut process, 0x7000_021c, &[handle]), 1);
+    assert_eq!(call(&mut process, 0x7000_0258, &[handle]), 0x7fff_ffff);
+    assert_eq!(call(&mut process, 0x7000_0258, &[u32::MAX - 1]), u32::MAX);
     assert_eq!(call(&mut process, 0x7000_0070, &[0]), 222);
     process.cpu.set_fs_base(0x7ffd_e000);
     assert_eq!(call(&mut process, 0x7000_0070, &[0]), 111);

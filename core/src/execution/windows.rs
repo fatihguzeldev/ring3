@@ -82,7 +82,6 @@ pub struct Process32 {
     sync_objects: synchronization::SyncObjects,
     threads: threads::Threads,
     hooks: hooks::Hooks,
-    priority: thread::Priority,
     tls: tls::Tls,
     graphics: d3d8::Graphics,
     sound_data_mapped: bool,
@@ -683,7 +682,6 @@ impl Process32 {
             sync_objects: synchronization::SyncObjects::default(),
             threads: threads::Threads::default(),
             hooks: hooks::Hooks::default(),
-            priority: thread::Priority::default(),
             tls: tls::Tls::default(),
             graphics: d3d8::Graphics::default(),
             sound_data_mapped: false,
@@ -1228,15 +1226,13 @@ impl Process32 {
                 self.gdi.dispatch(call, args, &mut self.memory)?,
             ),
             Api::ThreadPriority(call) => {
-                if self.sync_objects.is_thread(args[0]) {
-                    return Err(DispatchError::Unsupported);
-                }
                 self.cpu.set_register(
                     Register32::Eax,
-                    self.priority.dispatch(
+                    self.threads.priority(
                         call,
                         args,
                         thread::Teb(self.cpu.fs_base()),
+                        &self.sync_objects,
                         &mut self.memory,
                     )?,
                 );

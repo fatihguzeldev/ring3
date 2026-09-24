@@ -68,15 +68,10 @@ fn thread_handles_are_nonsignaled_and_closing_preserves_live_storage() {
     let mut p = load(80);
     let first = call(&mut p, CREATE, &args());
     assert_eq!(read(&p, OUTPUT), 2);
-    for api in [0x7000_0254, 0x7000_0258] {
-        let before = prepare(&mut p, api, &[first, 0]);
-        assert_eq!(
-            p.run(1).reason,
-            ProcessStop::UnsupportedApi { address: api }
-        );
-        assert_eq!(p.cpu, before);
-        assert_eq!(p.last_error().unwrap(), 0);
-    }
+    assert_eq!(call(&mut p, 0x7000_0258, &[first]), 0);
+    assert_eq!(call(&mut p, 0x7000_0254, &[first, 1]), 1);
+    assert_eq!(call(&mut p, 0x7000_0258, &[first]), 1);
+    assert_eq!(p.last_error().unwrap(), 0);
     assert_eq!(call(&mut p, 0x7000_0214, &[first, 0]), 258);
     for api in [0x7000_0218, 0x7000_0540, 0x7000_0544] {
         assert_eq!(call(&mut p, api, &[first]), 0);
