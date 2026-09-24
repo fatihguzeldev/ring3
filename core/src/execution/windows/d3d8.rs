@@ -128,6 +128,7 @@ pub(super) enum Call {
     DepthSurfaceRelease,
     AvailableTextureMemory,
     DrawPrimitiveUp,
+    DrawIndexedPrimitive,
 }
 
 impl Call {
@@ -179,6 +180,7 @@ impl Call {
             0x52c => Self::SetStreamSource,
             0x530 => Self::GetStreamSource,
             0x420 => Self::DrawPrimitiveUp,
+            0x534 => Self::DrawIndexedPrimitive,
             0x498 => Self::SetViewport,
             0x4f0 => Self::SetTransform,
             0x4f4 => Self::GetTransform,
@@ -237,6 +239,7 @@ impl Call {
             | Self::ValidateDevice => 2,
             Self::CreateVertexBuffer
             | Self::CreateIndexBuffer
+            | Self::DrawIndexedPrimitive
             | Self::CheckDeviceType
             | Self::CheckMultiSampleType
             | Self::CheckDepthStencilMatch => 6,
@@ -285,6 +288,7 @@ struct VertexBuffer {
 struct IndexBuffer {
     refs: u32,
     length: u64,
+    format: u32,
     lock: BufferLock,
 }
 
@@ -429,6 +433,7 @@ impl Graphics {
             (DEVICE_TABLE, 23, 0x4f8),
             (DEVICE_TABLE, 24, 0x50c),
             (DEVICE_TABLE, 72, 0x420),
+            (DEVICE_TABLE, 71, 0x534),
             (DEVICE_TABLE, 76, 0x41c),
             (DEVICE_TABLE, 88, 0x520),
             (DEVICE_TABLE, 85, 0x524),
@@ -531,6 +536,7 @@ impl Graphics {
             }
             Call::AvailableTextureMemory => self.available_texture_memory(args[0]),
             Call::DrawPrimitiveUp => return self.draw_primitive_up(args, memory),
+            Call::DrawIndexedPrimitive => return primitives::draw_indexed(self, args, memory),
             Call::TextureLevelCount => self.texture_level_count(args[0]),
             Call::TextureAddRef => self.texture_add_ref(args[0]),
             Call::TextureRelease => return self.texture_release(args[0], memory),
@@ -1357,6 +1363,7 @@ impl Graphics {
             IndexBuffer {
                 refs: 1,
                 length,
+                format,
                 lock: BufferLock {
                     byte_length,
                     usage,

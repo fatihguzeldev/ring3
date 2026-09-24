@@ -1,5 +1,6 @@
-use super::{Frame, INVALID_CALL, Viewport, quantize_d16};
+use super::{Frame, Graphics, IDENTITY_MATRIX, INVALID_CALL, Viewport, quantize_d16};
 use crate::execution::{GuestMemory, MemoryError};
+use std::collections::BTreeMap;
 
 pub(super) const MAX_PRIMITIVES: u32 = 4096;
 pub(super) const MAX_STRIDE: u32 = 256;
@@ -23,6 +24,273 @@ struct Bounds {
     right: usize,
     bottom: usize,
     area: f64,
+}
+
+#[derive(Clone, Copy)]
+struct ClipVertex {
+    position: [f64; 4],
+    color: [f64; 3],
+}
+
+impl ClipVertex {
+    fn lerp(self, other: Self, t: f64) -> Self {
+        Self {
+            position: std::array::from_fn(|i| {
+                self.position[i] + (other.position[i] - self.position[i]) * t
+            }),
+            color: std::array::from_fn(|i| self.color[i] + (other.color[i] - self.color[i]) * t),
+        }
+    }
+}
+
+#[allow(clippy::too_many_lines)]
+pub(super) fn draw_indexed(
+    graphics: &mut Graphics,
+    args: &[u32],
+    memory: &GuestMemory,
+) -> Result<u32, MemoryError> {
+    let [
+        device,
+        topology,
+        min_index,
+        num_vertices,
+        start_index,
+        primitive_count,
+    ] = <[u32; 6]>::try_from(args).expect("d3d8 call arity");
+    let Some(viewport) = graphics.viewport else {
+        return Ok(INVALID_CALL);
+    };
+    let Some((index_address, base_vertex)) = graphics.indices else {
+        return Ok(INVALID_CALL);
+    };
+    let Some((vertex_address, stride)) = graphics.stream else {
+        return Ok(INVALID_CALL);
+    };
+    if device != super::DEVICE
+        || graphics.device_refs == 0
+        || graphics.back.is_none()
+        || graphics.vertex_fvf != 0x142
+        || topology != 4
+        || primitive_count > MAX_PRIMITIVES
+        || stride < 24
+        || graphics.texture_stages.iter().any(|texture| *texture != 0)
+    {
+        return Ok(INVALID_CALL);
+    }
+    let Some(index_buffer) = graphics.index_buffers.get(&index_address) else {
+        return Ok(INVALID_CALL);
+    };
+    let Some(vertex_buffer) = graphics.vertex_buffers.get(&vertex_address) else {
+        return Ok(INVALID_CALL);
+    };
+    let index_size = if index_buffer.format == 101 {
+        2_u32
+    } else {
+        4_u32
+    };
+    let Some(index_count) = primitive_count.checked_mul(3) else {
+        return Ok(INVALID_CALL);
+    };
+    let Some(index_end) = start_index
+        .checked_add(index_count)
+        .and_then(|end| end.checked_mul(index_size))
+    else {
+        return Ok(INVALID_CALL);
+    };
+    let Some(vertex_range_end) = min_index.checked_add(num_vertices) else {
+        return Ok(INVALID_CALL);
+    };
+    if index_end > index_buffer.lock.byte_length || (primitive_count != 0 && num_vertices == 0) {
+        return Ok(INVALID_CALL);
+    }
+    if primitive_count == 0 {
+        return Ok(0);
+    }
+
+    let index_start = u64::from(index_address)
+        + super::PAGE_SIZE
+        + u64::from(start_index) * u64::from(index_size);
+    let mut index_bytes = vec![0; index_count as usize * index_size as usize];
+    memory.read(index_start, &mut index_bytes)?;
+    let mut triangles = Vec::with_capacity(primitive_count as usize);
+    let mut unique = BTreeMap::new();
+    for triangle in index_bytes.chunks_exact(index_size as usize * 3) {
+        let mut keys = [0_u32; 3];
+        for (slot, bytes) in triangle.chunks_exact(index_size as usize).enumerate() {
+            let index = if index_size == 2 {
+                u32::from(u16::from_le_bytes(bytes.try_into().expect("index16")))
+            } else {
+                u32::from_le_bytes(bytes.try_into().expect("index32"))
+            };
+            if !(min_index..vertex_range_end).contains(&index) {
+                return Ok(INVALID_CALL);
+            }
+            let Some(vertex) = base_vertex.checked_add(index) else {
+                return Ok(INVALID_CALL);
+            };
+            let Some(end) = vertex
+                .checked_mul(stride)
+                .and_then(|start| start.checked_add(24))
+            else {
+                return Ok(INVALID_CALL);
+            };
+            if end > vertex_buffer.lock.byte_length {
+                return Ok(INVALID_CALL);
+            }
+            keys[slot] = vertex;
+        }
+        triangles.push(keys);
+    }
+
+    let world = graphics.transforms.get(&16).unwrap_or(&IDENTITY_MATRIX);
+    let view = graphics.transforms.get(&2).unwrap_or(&IDENTITY_MATRIX);
+    let projection = graphics.transforms.get(&3).unwrap_or(&IDENTITY_MATRIX);
+    let vertex_base = u64::from(vertex_address) + super::PAGE_SIZE;
+    for key in triangles.iter().flat_map(|triangle| triangle.iter()) {
+        if unique.contains_key(key) {
+            continue;
+        }
+        let mut bytes = [0; 24];
+        memory.read(
+            vertex_base + u64::from(*key) * u64::from(stride),
+            &mut bytes,
+        )?;
+        let xyz = std::array::from_fn::<_, 3, _>(|i| {
+            f32::from_le_bytes(bytes[i * 4..i * 4 + 4].try_into().expect("position"))
+        });
+        let uv = std::array::from_fn::<_, 2, _>(|i| {
+            f32::from_le_bytes(bytes[16 + i * 4..20 + i * 4].try_into().expect("texcoord"))
+        });
+        if xyz.iter().chain(uv.iter()).any(|value| !value.is_finite()) {
+            return Ok(INVALID_CALL);
+        }
+        let mut position = [f64::from(xyz[0]), f64::from(xyz[1]), f64::from(xyz[2]), 1.0];
+        for matrix in [world, view, projection] {
+            position = transform(position, matrix);
+        }
+        if position.iter().any(|value| !value.is_finite()) {
+            return Ok(INVALID_CALL);
+        }
+        unique.insert(
+            *key,
+            ClipVertex {
+                position,
+                color: [
+                    f64::from(bytes[14]),
+                    f64::from(bytes[13]),
+                    f64::from(bytes[12]),
+                ],
+            },
+        );
+    }
+
+    let mut prepared = Vec::new();
+    let mut samples = 0_u64;
+    for triangle in triangles {
+        let polygon = clip_triangle([
+            unique[&triangle[0]],
+            unique[&triangle[1]],
+            unique[&triangle[2]],
+        ]);
+        for slot in 1..polygon.len().saturating_sub(1) {
+            let Some(a) = screen_vertex(polygon[0], viewport) else {
+                continue;
+            };
+            let Some(b) = screen_vertex(polygon[slot], viewport) else {
+                continue;
+            };
+            let Some(c) = screen_vertex(polygon[slot + 1], viewport) else {
+                continue;
+            };
+            if let Some(bounds) = triangle_bounds(viewport, a, b, c) {
+                samples += ((bounds.right - bounds.left) * (bounds.bottom - bounds.top)) as u64;
+                if samples > MAX_RASTER_SAMPLES {
+                    return Ok(INVALID_CALL);
+                }
+                prepared.push(([a, b, c], bounds));
+            }
+        }
+    }
+
+    let frame = graphics.back.as_mut().expect("validated back buffer");
+    let mut depth = graphics.depth.as_deref_mut().filter(|_| graphics.z_enabled);
+    for ([a, b, c], bounds) in prepared {
+        raster_triangle(frame, depth.as_deref_mut(), a, b, c, bounds);
+    }
+    Ok(0)
+}
+
+fn transform(position: [f64; 4], matrix: &[u32; 16]) -> [f64; 4] {
+    std::array::from_fn(|column| {
+        (0..4)
+            .map(|row| position[row] * f64::from(f32::from_bits(matrix[row * 4 + column])))
+            .sum()
+    })
+}
+
+fn clip_triangle(vertices: [ClipVertex; 3]) -> Vec<ClipVertex> {
+    let mut polygon = vertices.to_vec();
+    for plane in [
+        [1.0, 0.0, 0.0, 1.0],
+        [-1.0, 0.0, 0.0, 1.0],
+        [0.0, 1.0, 0.0, 1.0],
+        [0.0, -1.0, 0.0, 1.0],
+        [0.0, 0.0, 1.0, 0.0],
+        [0.0, 0.0, -1.0, 1.0],
+    ] {
+        if polygon.is_empty() {
+            break;
+        }
+        let mut clipped = Vec::with_capacity(polygon.len() + 1);
+        let mut previous = *polygon.last().expect("nonempty polygon");
+        let mut old_distance = plane_distance(previous, plane);
+        for current in polygon {
+            let distance = plane_distance(current, plane);
+            if (old_distance >= 0.0) != (distance >= 0.0) {
+                let t = old_distance / (old_distance - distance);
+                clipped.push(previous.lerp(current, t));
+            }
+            if distance >= 0.0 {
+                clipped.push(current);
+            }
+            previous = current;
+            old_distance = distance;
+        }
+        polygon = clipped;
+    }
+    polygon
+}
+
+fn plane_distance(vertex: ClipVertex, plane: [f64; 4]) -> f64 {
+    (0..4)
+        .map(|index| vertex.position[index] * plane[index])
+        .sum()
+}
+
+// Viewport coordinates are bounded by the admitted one-megapixel render target.
+#[allow(
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss,
+    clippy::cast_precision_loss
+)]
+fn screen_vertex(clip: ClipVertex, viewport: Viewport) -> Option<Vertex> {
+    let w = clip.position[3];
+    if w <= 0.0 {
+        return None;
+    }
+    let width = (viewport.right - viewport.left) as f64;
+    let height = (viewport.bottom - viewport.top) as f64;
+    let x = viewport.left as f64 + (clip.position[0] / w + 1.0) * width * 0.5;
+    let y = viewport.top as f64 + (1.0 - clip.position[1] / w) * height * 0.5;
+    let z = clip.position[2] / w;
+    (x.is_finite() && y.is_finite() && z.is_finite()).then_some(Vertex {
+        x,
+        y,
+        z,
+        color: clip
+            .color
+            .map(|channel| channel.round().clamp(0.0, 255.0) as u8),
+    })
 }
 
 pub(super) fn draw_up(

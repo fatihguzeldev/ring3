@@ -2734,6 +2734,156 @@ fn xyz_diffuse_tex1_fvf_selects_a_distinct_fixed_function_vertex_layout() {
 }
 
 #[test]
+#[allow(clippy::too_many_lines)]
+fn indexed_xyz_triangle_rasterizes_bound_guest_buffers() {
+    let (mut process, _, device) = create();
+    let create_vertex = method(&process, device, 23);
+    let create_index = method(&process, device, 24);
+    assert_eq!(
+        direct_call(
+            &mut process,
+            create_vertex,
+            &[device, 72, 0, 0x142, 0, VERTEX_BUFFER_OUTPUT]
+        ),
+        0
+    );
+    assert_eq!(
+        direct_call(
+            &mut process,
+            create_index,
+            &[device, 6, 0, 101, 0, INDEX_BUFFER_OUTPUT]
+        ),
+        0
+    );
+    let vertex = read(&process, VERTEX_BUFFER_OUTPUT);
+    let index = read(&process, INDEX_BUFFER_OUTPUT);
+    write(
+        &mut process,
+        vertex + 4096,
+        &[
+            (-1_f32).to_bits(),
+            1_f32.to_bits(),
+            0.5_f32.to_bits(),
+            0xffff_0000,
+            0,
+            0,
+            1_f32.to_bits(),
+            1_f32.to_bits(),
+            0.5_f32.to_bits(),
+            0xffff_0000,
+            0,
+            0,
+            (-1_f32).to_bits(),
+            (-1_f32).to_bits(),
+            0.5_f32.to_bits(),
+            0xffff_0000,
+            0,
+            0,
+        ],
+    );
+    process
+        .memory
+        .write(u64::from(index + 4096), &[0, 0, 1, 0, 2, 0])
+        .unwrap();
+    let set_shader = method(&process, device, 76);
+    let set_stream = method(&process, device, 83);
+    let set_indices = method(&process, device, 85);
+    let draw = method(&process, device, 71);
+    let present = method(&process, device, 15);
+    assert_ne!(draw, 0x7000_0ffc);
+    assert_eq!(invoke(&mut process, set_shader, &[device, 0x142]), 0);
+    assert_eq!(
+        invoke(&mut process, set_stream, &[device, 0, vertex, 24]),
+        0
+    );
+    assert_eq!(invoke(&mut process, set_indices, &[device, index, 0]), 0);
+    assert_eq!(direct_call(&mut process, draw, &[device, 4, 0, 3, 0, 1]), 0);
+    assert_eq!(invoke(&mut process, present, &[device, 0, 0, 0, 0]), 0);
+    let frame = process.take_frame().unwrap();
+    assert_eq!(&frame.rgba[0..4], &[255, 0, 0, 255]);
+    assert_eq!(
+        &frame.rgba[(2 * 4 + 3) * 4..(2 * 4 + 4) * 4],
+        &[0, 0, 0, 255]
+    );
+
+    let clear = method(&process, device, 36);
+    let set_transform = method(&process, device, 37);
+    for offset in [8, 32, 56] {
+        write(
+            &mut process,
+            vertex + 4096 + offset,
+            &[(-0.5_f32).to_bits()],
+        );
+    }
+    assert_eq!(
+        direct_call(&mut process, clear, &[device, 0, 0, 1, 0xff00_0000, 0, 0]),
+        0
+    );
+    assert_eq!(direct_call(&mut process, draw, &[device, 4, 0, 3, 0, 1]), 0);
+    assert_eq!(invoke(&mut process, present, &[device, 0, 0, 0, 0]), 0);
+    assert!(
+        process
+            .take_frame()
+            .unwrap()
+            .rgba
+            .chunks_exact(4)
+            .all(|pixel| pixel == [0, 0, 0, 255])
+    );
+
+    write(
+        &mut process,
+        MATRIX,
+        &[
+            1_f32.to_bits(),
+            0,
+            0,
+            0,
+            0,
+            1_f32.to_bits(),
+            0,
+            0,
+            0,
+            0,
+            1_f32.to_bits(),
+            0,
+            0,
+            0,
+            1_f32.to_bits(),
+            1_f32.to_bits(),
+        ],
+    );
+    assert_eq!(
+        invoke(&mut process, set_transform, &[device, 16, MATRIX]),
+        0
+    );
+    assert_eq!(direct_call(&mut process, draw, &[device, 4, 0, 3, 0, 1]), 0);
+    assert_eq!(invoke(&mut process, present, &[device, 0, 0, 0, 0]), 0);
+    assert_eq!(&process.take_frame().unwrap().rgba[0..4], &[255, 0, 0, 255]);
+
+    process
+        .memory
+        .write(u64::from(index + 4096 + 4), &[9, 0])
+        .unwrap();
+    assert_eq!(
+        direct_call(&mut process, clear, &[device, 0, 0, 1, 0xff00_0000, 0, 0]),
+        0
+    );
+    assert_eq!(
+        direct_call(&mut process, draw, &[device, 4, 0, 3, 0, 1]),
+        0x8876_086c
+    );
+    assert_eq!(invoke(&mut process, present, &[device, 0, 0, 0, 0]), 0);
+    assert!(
+        process
+            .take_frame()
+            .unwrap()
+            .rgba
+            .chunks_exact(4)
+            .all(|pixel| pixel == [0, 0, 0, 255])
+    );
+}
+
+#[test]
 fn fixed_function_pixel_shader_accepts_only_zero_on_a_live_device() {
     let (mut process, _, device) = create();
     let set = method(&process, device, 88);
