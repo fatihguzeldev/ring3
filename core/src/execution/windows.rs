@@ -65,8 +65,6 @@ pub struct Process32 {
     command_line: u32,
     subsystem_version: u32,
     startup: startup::Startup,
-    callbacks: callbacks::Callbacks,
-    exception: Option<eh::Pending>,
     modules: modules::Modules,
     registry: registry::Registry,
     resources: resources::Resources,
@@ -664,8 +662,6 @@ impl Process32 {
             command_line: parameters.command_line,
             subsystem_version: (u32::from(major) << 16) | u32::from(minor),
             startup,
-            callbacks: callbacks::Callbacks::default(),
-            exception: None,
             modules,
             resources,
             current_directory,
@@ -832,9 +828,11 @@ impl Process32 {
         let mut frame = [0; 13];
         guest::read_words(&self.memory, stack, &mut frame[..words])?;
         if matches!(api, Api::CallWindowProc) {
-            return self
-                .callbacks
-                .start(&mut self.cpu, &mut self.memory, &frame[1..words]);
+            return self.threads.state_mut(self.cpu.fs_base())?.callbacks.start(
+                &mut self.cpu,
+                &mut self.memory,
+                &frame[1..words],
+            );
         }
         if matches!(api, Api::ExceptionProlog) {
             return crt::enter_exception_frame(&mut self.cpu, &mut self.memory, frame[0]);
@@ -886,24 +884,27 @@ impl Process32 {
             }
             modules::Load::Initialize(pending) => {
                 let stack = self.cpu.register(Register32::Esp);
-                self.callbacks.enter(
-                    &mut self.cpu,
-                    &mut self.memory,
-                    callbacks::Frame {
-                        stack,
-                        caller: stack,
-                        cleanup: 8,
-                        creation: None,
-                        cbt_hook: None,
-                        module: Some(pending),
-                        dialog: None,
-                        destroy: None,
-                        paint: false,
-                        sound_enumeration: false,
-                    },
-                    pending.entry,
-                    &[pending.handle, 1, 0],
-                )?;
+                self.threads
+                    .state_mut(self.cpu.fs_base())?
+                    .callbacks
+                    .enter(
+                        &mut self.cpu,
+                        &mut self.memory,
+                        callbacks::Frame {
+                            stack,
+                            caller: stack,
+                            cleanup: 8,
+                            creation: None,
+                            cbt_hook: None,
+                            module: Some(pending),
+                            dialog: None,
+                            destroy: None,
+                            paint: false,
+                            sound_enumeration: false,
+                        },
+                        pending.entry,
+                        &[pending.handle, 1, 0],
+                    )?;
                 self.modules.start(pending);
                 Ok(true)
             }
@@ -1066,24 +1067,27 @@ impl Process32 {
         }
         let procedure = window.procedure;
         let stack = self.cpu.register(Register32::Esp);
-        self.callbacks.enter(
-            &mut self.cpu,
-            &mut self.memory,
-            callbacks::Frame {
-                stack,
-                caller: stack,
-                cleanup: 8,
-                creation: None,
-                cbt_hook: None,
-                module: None,
-                dialog: None,
-                destroy: None,
-                paint: true,
-                sound_enumeration: false,
-            },
-            procedure,
-            &[handle, 0x0f, 0, 0],
-        )?;
+        self.threads
+            .state_mut(self.cpu.fs_base())?
+            .callbacks
+            .enter(
+                &mut self.cpu,
+                &mut self.memory,
+                callbacks::Frame {
+                    stack,
+                    caller: stack,
+                    cleanup: 8,
+                    creation: None,
+                    cbt_hook: None,
+                    module: None,
+                    dialog: None,
+                    destroy: None,
+                    paint: true,
+                    sound_enumeration: false,
+                },
+                procedure,
+                &[handle, 0x0f, 0, 0],
+            )?;
         self.desktop
             .window_mut(handle)
             .expect("validated window")

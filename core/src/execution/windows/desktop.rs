@@ -495,24 +495,27 @@ impl super::Process32 {
             nc_destroy: false,
         };
         let stack = self.cpu.register(Register32::Esp);
-        self.callbacks.enter(
-            &mut self.cpu,
-            &mut self.memory,
-            callbacks::Frame {
-                stack,
-                caller: stack,
-                cleanup: 8,
-                creation: None,
-                cbt_hook: None,
-                module: None,
-                dialog: None,
-                destroy: Some(pending),
-                paint: false,
-                sound_enumeration: false,
-            },
-            pending.procedure,
-            &[handle, 2, 0, 0],
-        )?;
+        self.threads
+            .state_mut(self.cpu.fs_base())?
+            .callbacks
+            .enter(
+                &mut self.cpu,
+                &mut self.memory,
+                callbacks::Frame {
+                    stack,
+                    caller: stack,
+                    cleanup: 8,
+                    creation: None,
+                    cbt_hook: None,
+                    module: None,
+                    dialog: None,
+                    destroy: Some(pending),
+                    paint: false,
+                    sound_enumeration: false,
+                },
+                pending.procedure,
+                &[handle, 2, 0, 0],
+            )?;
         self.desktop.hide_dialog(handle);
         Ok(true)
     }
@@ -528,18 +531,25 @@ impl super::Process32 {
                 nc_destroy: true,
                 ..pending
             };
-            return self.callbacks.replace(
-                &mut self.cpu,
-                &mut self.memory,
-                callbacks::Frame {
-                    destroy: Some(next),
-                    ..frame
-                },
-                pending.procedure,
-                &[pending.handle, 0x82, 0, 0],
-            );
+            return self
+                .threads
+                .state_mut(self.cpu.fs_base())?
+                .callbacks
+                .replace(
+                    &mut self.cpu,
+                    &mut self.memory,
+                    callbacks::Frame {
+                        destroy: Some(next),
+                        ..frame
+                    },
+                    pending.procedure,
+                    &[pending.handle, 0x82, 0, 0],
+                );
         }
-        self.callbacks.finish(&mut self.cpu, &self.memory)?;
+        self.threads
+            .state_mut(self.cpu.fs_base())?
+            .callbacks
+            .finish(&mut self.cpu, &self.memory)?;
         self.desktop.remove(pending.handle);
         self.cpu.set_register(Register32::Eax, 1);
         Ok(())

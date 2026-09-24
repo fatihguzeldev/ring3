@@ -108,6 +108,8 @@ impl Hooks {
 impl Process32 {
     pub(super) fn call_next_hook(&mut self, args: &[u32]) -> Result<bool, DispatchError> {
         let current = self
+            .threads
+            .state_mut(self.cpu.fs_base())?
             .callbacks
             .active_cbt()
             .ok_or(DispatchError::Unsupported)?;
@@ -116,24 +118,27 @@ impl Process32 {
             return Ok(false);
         };
         let stack = self.cpu.register(Register32::Esp);
-        self.callbacks.enter(
-            &mut self.cpu,
-            &mut self.memory,
-            callbacks::Frame {
-                stack,
-                caller: stack,
-                cleanup: 20,
-                creation: None,
-                cbt_hook: Some(handle),
-                module: None,
-                dialog: None,
-                destroy: None,
-                paint: false,
-                sound_enumeration: false,
-            },
-            procedure,
-            &args[1..],
-        )?;
+        self.threads
+            .state_mut(self.cpu.fs_base())?
+            .callbacks
+            .enter(
+                &mut self.cpu,
+                &mut self.memory,
+                callbacks::Frame {
+                    stack,
+                    caller: stack,
+                    cleanup: 20,
+                    creation: None,
+                    cbt_hook: Some(handle),
+                    module: None,
+                    dialog: None,
+                    destroy: None,
+                    paint: false,
+                    sound_enumeration: false,
+                },
+                procedure,
+                &args[1..],
+            )?;
         Ok(true)
     }
 }

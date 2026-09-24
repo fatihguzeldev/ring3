@@ -212,7 +212,9 @@ impl Process32 {
         let [instance, _, parent, procedure, init] = args.try_into().unwrap();
         let caller = self.cpu.register(Register32::Esp);
         let hook = self.hooks.newest_cbt();
-        self.callbacks
+        self.threads
+            .state_mut(self.cpu.fs_base())?
+            .callbacks
             .check_entry(hook.map_or(procedure, |(_, callback)| callback))?;
         let stack = if hook.is_some() {
             let base = caller
@@ -272,24 +274,27 @@ impl Process32 {
         } else {
             &init_arguments
         };
-        self.callbacks.enter(
-            &mut self.cpu,
-            &mut self.memory,
-            callbacks::Frame {
-                stack,
-                caller,
-                cleanup: 24,
-                creation: None,
-                cbt_hook: hook.map(|(handle, _)| handle),
-                module: None,
-                dialog: Some(pending),
-                destroy: None,
-                paint: false,
-                sound_enumeration: false,
-            },
-            hook.map_or(procedure, |(_, procedure)| procedure),
-            arguments,
-        )?;
+        self.threads
+            .state_mut(self.cpu.fs_base())?
+            .callbacks
+            .enter(
+                &mut self.cpu,
+                &mut self.memory,
+                callbacks::Frame {
+                    stack,
+                    caller,
+                    cleanup: 24,
+                    creation: None,
+                    cbt_hook: hook.map(|(handle, _)| handle),
+                    module: None,
+                    dialog: Some(pending),
+                    destroy: None,
+                    paint: false,
+                    sound_enumeration: false,
+                },
+                hook.map_or(procedure, |(_, procedure)| procedure),
+                arguments,
+            )?;
         Ok(())
     }
 
@@ -300,7 +305,10 @@ impl Process32 {
     ) -> Result<(), DispatchError> {
         if matches!(pending.phase, Phase::Cbt) {
             if self.cpu.register(Register32::Eax) != 0 {
-                self.callbacks.finish(&mut self.cpu, &self.memory)?;
+                self.threads
+                    .state_mut(self.cpu.fs_base())?
+                    .callbacks
+                    .finish(&mut self.cpu, &self.memory)?;
                 self.desktop.remove(pending.window);
                 self.cpu.set_register(Register32::Eax, 0);
                 return Ok(());
@@ -308,15 +316,22 @@ impl Process32 {
             pending.phase = Phase::Init;
             frame.dialog = Some(pending);
             frame.cbt_hook = None;
-            return self.callbacks.replace(
-                &mut self.cpu,
-                &mut self.memory,
-                frame,
-                pending.procedure,
-                &[pending.window, 0x110, pending.focus, pending.init],
-            );
+            return self
+                .threads
+                .state_mut(self.cpu.fs_base())?
+                .callbacks
+                .replace(
+                    &mut self.cpu,
+                    &mut self.memory,
+                    frame,
+                    pending.procedure,
+                    &[pending.window, 0x110, pending.focus, pending.init],
+                );
         }
-        self.callbacks.finish(&mut self.cpu, &self.memory)?;
+        self.threads
+            .state_mut(self.cpu.fs_base())?
+            .callbacks
+            .finish(&mut self.cpu, &self.memory)?;
         self.desktop.activate_created(pending.window);
         self.cpu.set_register(Register32::Eax, pending.window);
         Ok(())

@@ -42,35 +42,41 @@ pub(super) fn initialize(memory: &mut super::GuestMemory) -> Result<(), super::M
 
 impl Process32 {
     pub(super) fn enumerate_sound(&mut self, args: &[u32]) -> Result<bool, DispatchError> {
-        self.callbacks.check_entry(args[0])?;
+        self.threads
+            .state_mut(self.cpu.fs_base())?
+            .callbacks
+            .check_entry(args[0])?;
         if !self.sound_data_mapped {
             initialize(&mut self.memory)?;
             self.sound_data_mapped = true;
         }
         let stack = self.cpu.register(Register32::Esp);
-        self.callbacks.enter(
-            &mut self.cpu,
-            &mut self.memory,
-            callbacks::Frame {
-                stack,
-                caller: stack,
-                cleanup: 12,
-                creation: None,
-                cbt_hook: None,
-                module: None,
-                dialog: None,
-                destroy: None,
-                paint: false,
-                sound_enumeration: true,
-            },
-            args[0],
-            &[
-                0,
-                BASE,
-                BASE + u32::try_from(DESCRIPTION.len()).expect("fixed description") - 1,
-                args[1],
-            ],
-        )?;
+        self.threads
+            .state_mut(self.cpu.fs_base())?
+            .callbacks
+            .enter(
+                &mut self.cpu,
+                &mut self.memory,
+                callbacks::Frame {
+                    stack,
+                    caller: stack,
+                    cleanup: 12,
+                    creation: None,
+                    cbt_hook: None,
+                    module: None,
+                    dialog: None,
+                    destroy: None,
+                    paint: false,
+                    sound_enumeration: true,
+                },
+                args[0],
+                &[
+                    0,
+                    BASE,
+                    BASE + u32::try_from(DESCRIPTION.len()).expect("fixed description") - 1,
+                    args[1],
+                ],
+            )?;
         Ok(true)
     }
 }

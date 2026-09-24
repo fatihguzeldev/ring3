@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 
 use super::{
     API_BASE, Access, Cpu32, DispatchError, GuestMemory, Permissions, Register32, STACK_SIZE,
-    guest, synchronization::SyncObjects, thread,
+    callbacks, eh, guest, synchronization::SyncObjects, thread,
 };
 
 const MAX_THREADS: u32 = 32;
@@ -12,17 +12,35 @@ pub(super) const END: u32 = START + MAX_THREADS * SLOT_SIZE;
 
 #[derive(Default)]
 pub(super) struct Threads {
-    primary_priority: thread::Priority,
+    primary: State,
     suspended: BTreeMap<u32, Suspended>,
+}
+
+#[derive(Default)]
+pub(super) struct State {
+    priority: thread::Priority,
+    pub(super) callbacks: callbacks::Callbacks,
+    pub(super) exception: Option<eh::Pending>,
 }
 
 struct Suspended {
     id: u32,
     cpu: Cpu32,
-    priority: thread::Priority,
+    state: State,
 }
 
 impl Threads {
+    pub(super) fn state_mut(&mut self, teb: u32) -> Result<&mut State, DispatchError> {
+        if teb == thread::BASE {
+            return Ok(&mut self.primary);
+        }
+        self.suspended
+            .values_mut()
+            .find(|context| context.cpu.fs_base() == teb)
+            .map(|context| &mut context.state)
+            .ok_or(DispatchError::Unsupported)
+    }
+
     pub(super) fn priority(
         &mut self,
         call: thread::PriorityCall,
@@ -32,22 +50,13 @@ impl Threads {
         memory: &mut GuestMemory,
     ) -> Result<u32, DispatchError> {
         let priority = if args[0] == u32::MAX - 1 {
-            if teb.0 == thread::BASE {
-                &mut self.primary_priority
-            } else {
-                &mut self
-                    .suspended
-                    .values_mut()
-                    .find(|context| context.cpu.fs_base() == teb.0)
-                    .ok_or(DispatchError::Unsupported)?
-                    .priority
-            }
+            &mut self.state_mut(teb.0)?.priority
         } else if let Some(context) = self
             .suspended
             .get_mut(&args[0])
             .filter(|_| handles.is_thread(args[0]))
         {
-            &mut context.priority
+            &mut context.state.priority
         } else {
             teb.set_last_error(memory, 6)?;
             return Ok(if matches!(call, thread::PriorityCall::Get) {
@@ -117,7 +126,7 @@ impl Threads {
             Suspended {
                 id,
                 cpu,
-                priority: thread::Priority::default(),
+                state: State::default(),
             },
         );
         Ok((handle, thread::Teb(high)))

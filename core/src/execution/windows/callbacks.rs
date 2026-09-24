@@ -24,24 +24,27 @@ impl Process32 {
             return Err(DispatchError::Unsupported);
         }
         let stack = self.cpu.register(Register32::Esp);
-        self.callbacks.enter(
-            &mut self.cpu,
-            &mut self.memory,
-            Frame {
-                stack,
-                caller: stack,
-                cleanup: 8,
-                creation: None,
-                cbt_hook: None,
-                module: None,
-                dialog: None,
-                destroy: None,
-                paint: false,
-                sound_enumeration: false,
-            },
-            window.procedure,
-            &message[..4],
-        )?;
+        self.threads
+            .state_mut(self.cpu.fs_base())?
+            .callbacks
+            .enter(
+                &mut self.cpu,
+                &mut self.memory,
+                Frame {
+                    stack,
+                    caller: stack,
+                    cleanup: 8,
+                    creation: None,
+                    cbt_hook: None,
+                    module: None,
+                    dialog: None,
+                    destroy: None,
+                    paint: false,
+                    sound_enumeration: false,
+                },
+                window.procedure,
+                &message[..4],
+            )?;
         Ok(true)
     }
 
@@ -72,24 +75,27 @@ impl Process32 {
             return Err(DispatchError::Unsupported);
         }
         let stack = self.cpu.register(Register32::Esp);
-        self.callbacks.enter(
-            &mut self.cpu,
-            &mut self.memory,
-            Frame {
-                stack,
-                caller: stack,
-                cleanup: 20,
-                creation: None,
-                cbt_hook: None,
-                module: None,
-                dialog: None,
-                destroy: None,
-                paint: false,
-                sound_enumeration: false,
-            },
-            procedure,
-            args,
-        )?;
+        self.threads
+            .state_mut(self.cpu.fs_base())?
+            .callbacks
+            .enter(
+                &mut self.cpu,
+                &mut self.memory,
+                Frame {
+                    stack,
+                    caller: stack,
+                    cleanup: 20,
+                    creation: None,
+                    cbt_hook: None,
+                    module: None,
+                    dialog: None,
+                    destroy: None,
+                    paint: false,
+                    sound_enumeration: false,
+                },
+                procedure,
+                args,
+            )?;
         Ok(true)
     }
 }

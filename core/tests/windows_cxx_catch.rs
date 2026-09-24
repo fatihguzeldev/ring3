@@ -116,6 +116,70 @@ fn fixture_variant(two_frame: bool) -> Process32 {
 }
 
 #[test]
+fn pending_throws_and_returns_belong_to_their_registered_threads() {
+    let mut process = fixture();
+    let throw_cpu = process.cpu;
+    put(&mut process, 0x1000_ff00, &[CONTINUE, 0, 0, CODE, 0, 4, 0]);
+    process.cpu.eip = 0x7000_0548;
+    process.cpu.set_register(Register32::Esp, 0x1000_ff00);
+    assert_eq!(process.run(1).api_calls, 1);
+    let handle = process.cpu.register(Register32::Eax);
+    process.cpu = throw_cpu;
+    assert_eq!(process.run(1).api_calls, 1);
+    let primary = process.cpu;
+    let child_record = 0x1100_ef00;
+    let child_stack = child_record - 0x200;
+    put(&mut process, child_record - 4, &[child_stack + 12]);
+    put(&mut process, child_record, &[u32::MAX, CODE, 2]);
+    put(&mut process, child_stack, &[CONTINUE, OBJECT, THROW_INFO]);
+    put(&mut process, 0x1101_0000, &[child_record]);
+    process.cpu = throw_cpu;
+    process.cpu.set_fs_base(0x1101_0000);
+    process.cpu.set_register(Register32::Ebp, child_record + 12);
+    process.cpu.set_register(Register32::Esp, child_stack);
+    assert_eq!(process.run(1).api_calls, 1);
+    let child = process.cpu;
+    put(&mut process, 0x1000_ff00, &[CONTINUE, handle]);
+    process.cpu.eip = 0x7000_021c;
+    process.cpu.set_register(Register32::Esp, 0x1000_ff00);
+    assert_eq!(process.run(1).api_calls, 1);
+    assert_eq!(process.cpu.register(Register32::Eax), 1);
+    process.cpu = primary;
+    assert_eq!(
+        process.run(32).reason,
+        ProcessStop::Stopped(StopReason::Breakpoint)
+    );
+    assert_eq!(process.cpu.register(Register32::Esp), STACK + 12);
+    assert_eq!(word(&process, RECORD + 8), 1);
+    assert_eq!(word(&process, child_record + 8), 1);
+    process.cpu = child;
+    assert_eq!(process.run(2).instructions, 2);
+    assert_eq!(process.cpu.eip, 0x7000_0ff4);
+    let child_return = process.cpu;
+    for teb in [0x7ffd_e000, 0x5000_0000] {
+        process.cpu = child_return;
+        process.cpu.set_fs_base(teb);
+        let before = process.cpu;
+        let run = process.run(1);
+        assert_eq!(
+            run.reason,
+            ProcessStop::UnsupportedApi {
+                address: 0x7000_0ff4
+            }
+        );
+        assert_eq!((run.instructions, run.api_calls), (0, 0));
+        assert_eq!(process.cpu, before);
+    }
+    process.cpu = child_return;
+    assert_eq!(
+        process.run(32).reason,
+        ProcessStop::Stopped(StopReason::Breakpoint)
+    );
+    assert_eq!(process.cpu.register(Register32::Esp), child_stack + 12);
+    assert_eq!(process.cpu.register(Register32::Ecx), 1);
+}
+
+#[test]
 fn guest_cleanup_runs_before_catch_and_resumes_at_saved_frame_stack() {
     let mut process = fixture();
     let mut reached = false;

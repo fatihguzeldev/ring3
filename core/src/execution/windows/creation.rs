@@ -119,7 +119,10 @@ impl Process32 {
         let base = lowest + 20;
         let hook = self.hooks.newest_cbt();
         let procedure = hook.map_or(class[1], |(_, procedure)| procedure);
-        self.callbacks.check_entry(procedure)?;
+        self.threads
+            .state_mut(self.cpu.fs_base())?
+            .callbacks
+            .check_entry(procedure)?;
         let initial = [
             args[11], args[10], args[9], args[8], args[7], args[6], args[5], args[4], args[3],
             args[2], args[1], args[0],
@@ -170,13 +173,16 @@ impl Process32 {
         } else {
             [handle, 0x24, 0, base + 56]
         };
-        self.callbacks.enter(
-            &mut self.cpu,
-            &mut self.memory,
-            frame,
-            procedure,
-            &arguments[..if hook.is_some() { 3 } else { 4 }],
-        )?;
+        self.threads
+            .state_mut(self.cpu.fs_base())?
+            .callbacks
+            .enter(
+                &mut self.cpu,
+                &mut self.memory,
+                frame,
+                procedure,
+                &arguments[..if hook.is_some() { 3 } else { 4 }],
+            )?;
         self.desktop.insert(handle, window);
         Ok(true)
     }
@@ -188,14 +194,24 @@ impl Process32 {
     }
 
     pub(super) fn finish_callback(&mut self) -> Result<(), DispatchError> {
-        let frame = self.callbacks.current(&self.cpu)?;
+        let frame = self
+            .threads
+            .state_mut(self.cpu.fs_base())?
+            .callbacks
+            .current(&self.cpu)?;
         if frame.sound_enumeration {
-            self.callbacks.finish(&mut self.cpu, &self.memory)?;
+            self.threads
+                .state_mut(self.cpu.fs_base())?
+                .callbacks
+                .finish(&mut self.cpu, &self.memory)?;
             self.cpu.set_register(Register32::Eax, 0);
             return Ok(());
         }
         if frame.paint {
-            self.callbacks.finish(&mut self.cpu, &self.memory)?;
+            self.threads
+                .state_mut(self.cpu.fs_base())?
+                .callbacks
+                .finish(&mut self.cpu, &self.memory)?;
             self.cpu.set_register(Register32::Eax, 1);
             return Ok(());
         }
@@ -210,14 +226,21 @@ impl Process32 {
             if !success {
                 thread::Teb(self.cpu.fs_base()).set_last_error(&mut self.memory, 1114)?;
             }
-            self.callbacks.finish(&mut self.cpu, &self.memory)?;
+            self.threads
+                .state_mut(self.cpu.fs_base())?
+                .callbacks
+                .finish(&mut self.cpu, &self.memory)?;
             self.modules.finish(pending, success);
             self.cpu
                 .set_register(Register32::Eax, if success { pending.handle } else { 0 });
             return Ok(());
         }
         let Some(pending) = frame.creation else {
-            return self.callbacks.finish(&mut self.cpu, &self.memory);
+            return self
+                .threads
+                .state_mut(self.cpu.fs_base())?
+                .callbacks
+                .finish(&mut self.cpu, &self.memory);
         };
         let result = self.cpu.register(Register32::Eax);
         match pending.phase {
@@ -235,7 +258,10 @@ impl Process32 {
     }
 
     fn finish_creation(&mut self, pending: Pending, success: bool) -> Result<(), DispatchError> {
-        self.callbacks.finish(&mut self.cpu, &self.memory)?;
+        self.threads
+            .state_mut(self.cpu.fs_base())?
+            .callbacks
+            .finish(&mut self.cpu, &self.memory)?;
         if success {
             self.desktop.activate_created(pending.window);
         } else {
@@ -272,18 +298,21 @@ impl Process32 {
         pending.phase = phase;
         frame.creation = Some(pending);
         frame.cbt_hook = None;
-        self.callbacks.replace(
-            &mut self.cpu,
-            &mut self.memory,
-            frame,
-            procedure,
-            &[
-                pending.window,
-                phase.message(),
-                0,
-                phase.parameter(frame.stack),
-            ],
-        )
+        self.threads
+            .state_mut(self.cpu.fs_base())?
+            .callbacks
+            .replace(
+                &mut self.cpu,
+                &mut self.memory,
+                frame,
+                procedure,
+                &[
+                    pending.window,
+                    phase.message(),
+                    0,
+                    phase.parameter(frame.stack),
+                ],
+            )
     }
 
     fn after_cbt(

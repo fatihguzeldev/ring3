@@ -296,24 +296,26 @@ impl Pending {
 
 impl Process32 {
     pub(super) fn throw_exception(&mut self, args: &[u32]) -> Result<(), DispatchError> {
-        if self.exception.is_some() {
+        let exception = &mut self.threads.state_mut(self.cpu.fs_base())?.exception;
+        if exception.is_some() {
             return Err(DispatchError::Unsupported);
         }
         let mut pending = Pending::inspect(&self.cpu, &self.memory, args)?;
         pending.advance(&mut self.cpu, &mut self.memory)?;
-        self.exception = Some(pending);
+        *exception = Some(pending);
         Ok(())
     }
 
     pub(super) fn finish_exception_call(&mut self) -> Result<(), DispatchError> {
-        let Some(mut pending) = self.exception.take() else {
+        let exception = &mut self.threads.state_mut(self.cpu.fs_base())?.exception;
+        let Some(mut pending) = exception.take() else {
             return Err(DispatchError::Unsupported);
         };
         let expected_frame = pending.inner.map_or(pending.frame, |inner| inner.frame);
         if self.cpu.register(Register32::Esp) != pending.call_stack
             || self.cpu.register(Register32::Ebp) != expected_frame
         {
-            self.exception = Some(pending);
+            *exception = Some(pending);
             return Err(DispatchError::Unsupported);
         }
         if let Some(inner) = pending.inner {
@@ -326,21 +328,21 @@ impl Process32 {
                 pending.inner = None;
                 pending.advance(&mut self.cpu, &mut self.memory)
             })();
-            self.exception = Some(pending);
+            *exception = Some(pending);
             result?;
             return Ok(());
         }
         if pending.catch_started {
             let continuation = self.cpu.register(Register32::Eax);
             if let Err(error) = guest::check(&self.memory, continuation, 1, Access::Execute) {
-                self.exception = Some(pending);
+                *exception = Some(pending);
                 return Err(error.into());
             }
             self.cpu.set_register(Register32::Esp, pending.saved_stack);
             self.cpu.eip = continuation;
         } else {
             let result = pending.advance(&mut self.cpu, &mut self.memory);
-            self.exception = Some(pending);
+            *exception = Some(pending);
             result?;
         }
         Ok(())

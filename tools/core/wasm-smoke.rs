@@ -3208,6 +3208,56 @@ fn execute_thread_state() {
     assert_eq!(process.last_error().unwrap(), 77);
 }
 
+fn execute_thread_callbacks() {
+    use ring3_core::execution::{Process32, ProcessStop, Register32, StopReason};
+    fn enter(process: &mut Process32, api: u32, stack: u32, args: &[u32]) {
+        process.cpu.eip = api;
+        process.cpu.set_register(Register32::Esp, stack);
+        for (index, value) in std::iter::once(&0x0040_1050_u32).chain(args).enumerate() {
+            process
+                .memory
+                .write(u64::from(stack) + index as u64 * 4, &value.to_le_bytes())
+                .unwrap();
+        }
+        assert_eq!(process.run(1).api_calls, 1);
+    }
+    let mut process = Process32::load(&window_proc_executable::guest(), 64).unwrap();
+    enter(
+        &mut process,
+        0x7000_0548,
+        0x1000_ff00,
+        &[0, 0, 0x0040_1060, 0, 4, 0],
+    );
+    let args = [0x0040_1060, 11, 13, 17, 19];
+    enter(&mut process, 0x7000_02a4, 0x1000_ff00, &args);
+    assert_eq!(process.run(5).instructions, 5);
+    let primary = process.cpu;
+    process.cpu.set_fs_base(0x1101_0000);
+    let before = process.cpu;
+    assert_eq!(
+        process.run(1).reason,
+        ProcessStop::UnsupportedApi {
+            address: 0x7000_0ff8
+        }
+    );
+    assert_eq!(process.cpu, before);
+    enter(&mut process, 0x7000_02a4, 0x1100_ff00, &args);
+    assert_eq!(process.run(5).instructions, 5);
+    let child = process.cpu;
+    for cpu in [primary, child] {
+        process.cpu = cpu;
+        assert_eq!(
+            process.run(1).reason,
+            ProcessStop::Stopped(StopReason::Breakpoint)
+        );
+        assert_eq!(
+            process.cpu.register(Register32::Esp),
+            cpu.register(Register32::Esp) + 24
+        );
+        assert_eq!(process.cpu.register(Register32::Eax), 60);
+    }
+}
+
 fn execute_tls() {
     use ring3_core::execution::{Process32, ProcessStop, Register32, StopReason};
     let mut process = Process32::load(&tls_executable::pe32(), 32).unwrap();
@@ -4623,6 +4673,7 @@ pub extern "C" fn run() -> u32 {
     execute_critical_sections();
     execute_tls();
     execute_thread_state();
+    execute_thread_callbacks();
     execute_global_memory();
     execute_memset();
     execute_reverse_search();

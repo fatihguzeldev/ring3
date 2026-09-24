@@ -3,7 +3,7 @@ mod imported_executable;
 #[path = "support/window_proc_executable.rs"]
 mod window_proc_executable;
 
-use ring3_core::execution::{Permissions, Process32, ProcessStop, Register32, StopReason};
+use ring3_core::execution::{Cpu32, Permissions, Process32, ProcessStop, Register32, StopReason};
 
 const API: u32 = 0x7000_02a4;
 const RETURN: u32 = 0x7000_0ff8;
@@ -37,6 +37,104 @@ fn bytes(p: &Process32, address: u32, length: usize) -> Vec<u8> {
     let mut data = vec![0; length];
     p.memory.read(u64::from(address), &mut data).unwrap();
     data
+}
+
+fn threaded_process() -> (Process32, u32) {
+    let mut p = Process32::load(&window_proc_executable::guest(), 64).unwrap();
+    let handle = create_child(&mut p);
+    (p, handle)
+}
+
+fn create_child(p: &mut Process32) -> u32 {
+    for (index, value) in [0x0040_1050, 0, 0, PROCEDURE, 0, 4, 0]
+        .into_iter()
+        .enumerate()
+    {
+        put(p, STACK + u32::try_from(index).unwrap() * 4, value);
+    }
+    p.cpu.eip = 0x7000_0548;
+    p.cpu.set_register(Register32::Esp, STACK);
+    assert_eq!(p.run(1).api_calls, 1);
+    p.cpu.register(Register32::Eax)
+}
+
+fn pending_callback(p: &mut Process32, teb: u32, stack: u32) -> Cpu32 {
+    p.cpu.set_fs_base(teb);
+    p.cpu.eip = API;
+    p.cpu.set_register(Register32::Esp, stack);
+    for (index, value) in [0x0040_1050, PROCEDURE, 11, 13, 17, 19]
+        .into_iter()
+        .enumerate()
+    {
+        put(p, stack + u32::try_from(index).unwrap() * 4, value);
+    }
+    assert_eq!(p.run(1).api_calls, 1);
+    assert_eq!(p.run(5).instructions, 5);
+    assert_eq!(p.cpu.eip, RETURN);
+    p.cpu
+}
+
+#[test]
+fn pending_callbacks_finish_in_either_thread_order_after_handle_close() {
+    for child_first in [false, true] {
+        let (mut p, handle) = threaded_process();
+        let primary = pending_callback(&mut p, 0x7ffd_e000, STACK);
+        let child = pending_callback(&mut p, 0x1101_0000, 0x1100_ff00);
+        p.cpu.eip = 0x7000_021c;
+        p.cpu.set_register(Register32::Esp, 0x1000_fe00);
+        put(&mut p, 0x1000_fe00, 0x0040_1050);
+        put(&mut p, 0x1000_fe04, handle);
+        assert_eq!(p.run(1).api_calls, 1);
+        for cpu in if child_first {
+            [child, primary]
+        } else {
+            [primary, child]
+        } {
+            p.cpu = cpu;
+            p.memory
+                .protect(u64::from(cpu.fs_base()), 4096, Permissions::NONE)
+                .unwrap();
+            assert_eq!(
+                p.run(1).reason,
+                ProcessStop::Stopped(StopReason::Breakpoint)
+            );
+            assert_eq!(
+                p.cpu.register(Register32::Esp),
+                cpu.register(Register32::Esp) + 24
+            );
+            assert_eq!(p.cpu.register(Register32::Eax), 60);
+        }
+    }
+}
+
+#[test]
+fn foreign_and_unknown_actors_cannot_pop_a_matching_callback_stack() {
+    let (mut p, _) = threaded_process();
+    let primary = pending_callback(&mut p, 0x7ffd_e000, STACK);
+    for teb in [0x1101_0000, 0x5000_0000] {
+        p.cpu = primary;
+        p.cpu.set_fs_base(teb);
+        let before = p.cpu;
+        let run = p.run(1);
+        assert_eq!(run.reason, ProcessStop::UnsupportedApi { address: RETURN });
+        assert_eq!((run.instructions, run.api_calls), (0, 0));
+        assert_eq!(p.cpu, before);
+    }
+    p.cpu = primary;
+    assert_eq!(
+        p.run(1).reason,
+        ProcessStop::Stopped(StopReason::Breakpoint)
+    );
+    prepare(&mut p, PROCEDURE);
+    p.cpu.set_fs_base(0x5000_0000);
+    let before = p.cpu;
+    let saved = bytes(&p, STACK - 20, 20);
+    assert_eq!(
+        p.run(1).reason,
+        ProcessStop::UnsupportedApi { address: API }
+    );
+    assert_eq!(p.cpu, before);
+    assert_eq!(bytes(&p, STACK - 20, 20), saved);
 }
 
 #[test]
@@ -319,7 +417,8 @@ fn recursion_depth_is_bounded_before_mutation_and_released_on_return() {
         0x60, 0x10, 0x40, 0, 0xff, 0x15, 0x60, 0x20, 0x40, 0, 0x40, 0xc2, 16, 0, 0x31, 0xc0, 0xc2,
         16, 0,
     ];
-    let mut p = Process32::load(&window_proc_executable::pe32(&procedure), 32).unwrap();
+    let mut p = Process32::load(&window_proc_executable::pe32(&procedure), 64).unwrap();
+    create_child(&mut p);
     prepare(&mut p, PROCEDURE);
     put(&mut p, STACK + 12, 63);
     let run = p.run(5000);
@@ -345,6 +444,23 @@ fn recursion_depth_is_bounded_before_mutation_and_released_on_return() {
         assert_eq!(p.cpu, before);
         assert_eq!(bytes(&p, stack - 20, 20), frame);
         assert_eq!(calls, 64);
+        let blocked = p.cpu;
+        p.cpu.set_fs_base(0x1101_0000);
+        p.cpu.eip = API;
+        p.cpu.set_register(Register32::Esp, 0x1100_ff00);
+        for (index, value) in [0x0040_1050, PROCEDURE, 0, 0, 0, 0].into_iter().enumerate() {
+            put(
+                &mut p,
+                0x1100_ff00 + u32::try_from(index).unwrap() * 4,
+                value,
+            );
+        }
+        assert_eq!(
+            p.run(100).reason,
+            ProcessStop::Stopped(StopReason::Breakpoint)
+        );
+        assert_eq!(p.cpu.register(Register32::Eax), 0);
+        p.cpu = blocked;
         // model the active procedure returning after the unsupported nested call.
         p.cpu.eip = RETURN;
         p.cpu.set_register(Register32::Esp, stack + 44);
