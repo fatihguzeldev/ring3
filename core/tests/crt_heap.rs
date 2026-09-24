@@ -73,7 +73,7 @@ fn legacy_new_and_delete_own_guest_memory_and_preserve_errors_even_on_exhaustion
     let zero = call(&mut process, NEW, &[0]);
     assert_ne!(zero, 0);
     assert_ne!(zero, pointer);
-    for size in [0, 1, u32::MAX] {
+    for size in [2049, 4096, u32::MAX] {
         assert_eq!(call(&mut process, NEW, &[size]), 0);
         assert_eq!(process.memory.mapped_pages(), initial + 3);
         assert_eq!(read(&process, ERROR), 123);
@@ -87,7 +87,7 @@ fn legacy_new_and_delete_own_guest_memory_and_preserve_errors_even_on_exhaustion
         .memory
         .protect(0x7ffd_e000, PAGE_SIZE, Permissions::NONE)
         .unwrap();
-    assert_eq!(call(&mut process, NEW, &[1]), 0);
+    assert_eq!(call(&mut process, NEW, &[2049]), 0);
     assert_eq!(call(&mut process, DELETE, &[pointer]), 99);
     assert_eq!(call(&mut process, NEW, &[4097]), pointer);
     assert_eq!(call(&mut process, DELETE, &[pointer]), 99);
@@ -184,7 +184,7 @@ fn exhaustion_sets_only_errno_and_a_faulting_errno_write_leaves_capacity_intact(
         .unwrap();
     let pointer = call(&mut process, MALLOC, &[1]);
     let pages = process.memory.mapped_pages();
-    for size in [0, 1, u32::MAX] {
+    for size in [2049, 4096, u32::MAX] {
         assert_eq!(call(&mut process, MALLOC, &[size]), 0);
         assert_eq!(read(&process, ERROR), 12);
         assert_eq!(process.last_error().unwrap(), 77);
@@ -198,7 +198,7 @@ fn exhaustion_sets_only_errno_and_a_faulting_errno_write_leaves_capacity_intact(
         .memory
         .protect(0x7ffd_e000, PAGE_SIZE, Permissions::NONE)
         .unwrap();
-    prepare(&mut process, MALLOC, &[1]);
+    prepare(&mut process, MALLOC, &[2049]);
     let before = process.cpu;
     let result = process.run(1);
     assert!(matches!(

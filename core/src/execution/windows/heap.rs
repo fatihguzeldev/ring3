@@ -5,6 +5,7 @@ use super::{DispatchError, GuestMemory, MemoryError, PAGE_SIZE, Permissions, thr
 
 pub(super) const START: u64 = 0x2000_0000;
 pub(super) const END: u64 = 0x3000_0000;
+const SMALL_MAX: u32 = 2048;
 
 #[derive(Clone, Copy)]
 pub(super) enum Call {
@@ -53,6 +54,7 @@ struct Allocation {
     length: u64,
     size: u32,
     kind: Kind,
+    slab: Option<u32>,
 }
 
 impl Allocation {
@@ -64,6 +66,13 @@ impl Allocation {
 #[derive(Default)]
 pub(super) struct Heap {
     allocations: BTreeMap<u32, Allocation>,
+    slabs: BTreeMap<u32, Slab>,
+}
+
+struct Slab {
+    slot_size: u32,
+    used: Vec<bool>,
+    live: usize,
 }
 
 impl Heap {
@@ -130,6 +139,9 @@ impl Heap {
         kind: Kind,
         memory: &mut GuestMemory,
     ) -> Result<Option<u32>, MemoryError> {
+        if matches!(kind, Kind::Crt) && size <= SMALL_MAX {
+            return self.reserve_small_crt(size, memory);
+        }
         let permissions = if matches!(
             kind,
             Kind::GlobalMovable {
@@ -160,6 +172,7 @@ impl Heap {
                             length,
                             size,
                             kind,
+                            slab: None,
                         },
                     );
                     return Ok(Some(handle));
@@ -169,6 +182,78 @@ impl Heap {
             }
         }
         Ok(None)
+    }
+
+    fn reserve_small_crt(
+        &mut self,
+        size: u32,
+        memory: &mut GuestMemory,
+    ) -> Result<Option<u32>, MemoryError> {
+        let slot_size = size.max(16).next_power_of_two();
+        let page_bytes = usize::try_from(PAGE_SIZE).expect("page size fits usize");
+        for (&page, slab) in &mut self.slabs {
+            if slab.slot_size != slot_size || slab.live == slab.used.len() {
+                continue;
+            }
+            if memory
+                .check_access(u64::from(page), page_bytes, Access::Write)
+                .is_err()
+            {
+                continue;
+            }
+            let slot = slab
+                .used
+                .iter()
+                .position(|&used| !used)
+                .expect("slab has room");
+            let address = page + u32::try_from(slot).expect("slab slot fits u32") * slot_size;
+            memory
+                .fill(u64::from(address), slot_size as usize, 0)
+                .expect("slab page is writable");
+            slab.used[slot] = true;
+            slab.live += 1;
+            self.allocations.insert(
+                address,
+                Allocation {
+                    base: address,
+                    length: u64::from(slot_size),
+                    size,
+                    kind: Kind::Crt,
+                    slab: Some(page),
+                },
+            );
+            return Ok(Some(address));
+        }
+        let Some(page) = memory.first_free_span(START, END, PAGE_SIZE)? else {
+            return Ok(None);
+        };
+        match memory.map_zeroed(page, PAGE_SIZE, Permissions::READ_WRITE) {
+            Ok(()) => {}
+            Err(MemoryError::PageLimitExceeded) => return Ok(None),
+            Err(error) => return Err(error),
+        }
+        let page = u32::try_from(page).expect("heap window fits u32");
+        let mut used = vec![false; page_bytes / slot_size as usize];
+        used[0] = true;
+        self.slabs.insert(
+            page,
+            Slab {
+                slot_size,
+                used,
+                live: 1,
+            },
+        );
+        self.allocations.insert(
+            page,
+            Allocation {
+                base: page,
+                length: u64::from(slot_size),
+                size,
+                kind: Kind::Crt,
+                slab: Some(page),
+            },
+        );
+        Ok(Some(page))
     }
 
     fn reallocate(
@@ -380,7 +465,20 @@ impl Heap {
         if address < u64::from(stack) + 8 && u64::from(stack) < address + allocation.length {
             return Err(DispatchError::Unsupported);
         }
-        memory.unmap(address, allocation.length)?;
+        if let Some(page) = allocation.slab {
+            let slab = &self.slabs[&page];
+            if slab.live == 1 {
+                memory.unmap(u64::from(page), PAGE_SIZE)?;
+                self.slabs.remove(&page);
+            } else {
+                let slot = (handle - page) / slab.slot_size;
+                let slab = self.slabs.get_mut(&page).expect("owned slab exists");
+                slab.used[slot as usize] = false;
+                slab.live -= 1;
+            }
+        } else {
+            memory.unmap(address, allocation.length)?;
+        }
         self.allocations.remove(&handle);
         Ok(())
     }
