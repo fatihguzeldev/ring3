@@ -1,11 +1,23 @@
 use super::{Access, DispatchError, ERRNO, GuestMemory, MemoryError, buffers, guest, heap};
 
 pub(super) fn lowercase(character: u32) -> Result<u32, DispatchError> {
+    character_case(character, false)
+}
+
+pub(super) fn uppercase_character(character: u32) -> Result<u32, DispatchError> {
+    character_case(character, true)
+}
+
+fn character_case(character: u32, make_uppercase: bool) -> Result<u32, DispatchError> {
     if character == u32::MAX {
         return Ok(character);
     }
     let byte = u8::try_from(character).map_err(|_| DispatchError::Unsupported)?;
-    Ok(u32::from(byte.to_ascii_lowercase()))
+    Ok(u32::from(if make_uppercase {
+        byte.to_ascii_uppercase()
+    } else {
+        byte.to_ascii_lowercase()
+    }))
 }
 
 pub(super) fn uppercase(memory: &mut GuestMemory, source: u32) -> Result<u32, DispatchError> {
