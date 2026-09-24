@@ -58,7 +58,10 @@ pub(super) fn is_arithmetic(code: Code) -> bool {
 }
 
 pub(super) fn is_unary(code: Code) -> bool {
-    matches!(code, Code::Fabs | Code::Fchs | Code::Fptan | Code::Fsin)
+    matches!(
+        code,
+        Code::Fabs | Code::Fchs | Code::Fptan | Code::Fsin | Code::Fcos
+    )
 }
 
 pub(super) fn is_register_transfer(code: Code) -> bool {

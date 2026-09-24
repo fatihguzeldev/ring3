@@ -50,12 +50,12 @@ impl Cpu32 {
         match code {
             Code::Fabs | Code::Fchs => self.x87_sign(code),
             Code::Fptan => self.x87_tangent(),
-            Code::Fsin => self.x87_sine(),
+            Code::Fsin | Code::Fcos => self.x87_trigonometric(code),
             _ => Err(StopReason::UnsupportedInstruction),
         }
     }
 
-    fn x87_sine(&mut self) -> Result<(), StopReason> {
+    fn x87_trigonometric(&mut self, code: Code) -> Result<(), StopReason> {
         self.x87_masked()?;
         if self.x87_control_word & 0x0c00 != 0 {
             return Err(StopReason::UnsupportedInstruction);
@@ -64,11 +64,15 @@ impl Cpu32 {
         if !(angle == 0.0 || angle.is_normal()) || angle.abs() >= 3.0 * std::f64::consts::PI / 4.0 {
             return Err(StopReason::UnsupportedInstruction);
         }
-        let sine = angle.sin();
-        if !sine.is_finite() || (sine != 0.0 && !sine.is_normal()) {
+        let result = if code == Code::Fsin {
+            angle.sin()
+        } else {
+            angle.cos()
+        };
+        if !result.is_finite() || (result != 0.0 && !result.is_normal()) {
             return Err(StopReason::UnsupportedInstruction);
         }
-        self.x87_stack.values[usize::from(self.x87_stack.top)] = sine.to_bits();
+        self.x87_stack.values[usize::from(self.x87_stack.top)] = result.to_bits();
         self.x87_stack.status &= !0x0400;
         self.x87_stack.rounded(angle != 0.0, false);
         Ok(())
