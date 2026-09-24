@@ -623,8 +623,10 @@ mod tests {
             .write(0x1020, &super::super::DEVICE_INTERFACES[0])
             .unwrap();
         let mouse = super::super::MICE;
+        words(&mut memory, 0x2400, &[44]);
         for (call, args, expected) in [
             (Call::SetMouseCooperativeLevel, vec![mouse, 4, 5], 0),
+            (Call::MouseCapabilities, vec![mouse, 0x2400], 0),
             (
                 Call::QueryInterface(Class::Mouse),
                 vec![mouse, 0x1020, 0x1000],

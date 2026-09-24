@@ -1,5 +1,27 @@
 use super::{Access, Desktop, DispatchError, GuestMemory, INVALID_ARGUMENT, NULL_POINTER, guest};
 
+pub(super) fn capabilities(address: u32, memory: &mut GuestMemory) -> Result<u32, DispatchError> {
+    if address == 0 {
+        return Ok(NULL_POINTER);
+    }
+    let mut size = [0];
+    guest::read_words(memory, address, &mut size)?;
+    let length = match size[0] {
+        24 => 24,
+        44 => 44,
+        _ => return Ok(INVALID_ARGUMENT),
+    };
+    guest::check(memory, address, length, Access::Write)?;
+    // this process-owned virtual device exposes eight buttons, not host hardware counts.
+    let words = [size[0], 5, 0x202, 3, 8, 0, 0, 0, 0, 0, 0];
+    let mut bytes = [0; 44];
+    for (word, output) in words.into_iter().zip(bytes.chunks_exact_mut(4)) {
+        output.copy_from_slice(&word.to_le_bytes());
+    }
+    memory.write(u64::from(address), &bytes[..length])?;
+    Ok(0)
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Format {
     StandardMouse2,
@@ -184,6 +206,8 @@ mod tests {
         assert_eq!(first.set_format(0x1001, &memory).ok(), Some(0));
         assert_eq!(first.cooperative_window, Some(4));
         assert_eq!(first.set_cooperative_level(8, 5, &desktop).ok(), Some(0));
+        words(&mut memory, 0x1301, &[44]);
+        assert_eq!(capabilities(0x1301, &mut memory).ok(), Some(0));
         assert_eq!(first.cooperative_window, Some(8));
         assert_eq!(first.format, Some(Format::StandardMouse2));
         assert_eq!(second.cooperative_window, Some(8));
