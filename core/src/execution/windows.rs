@@ -872,7 +872,10 @@ impl Process32 {
         let words = api.arguments() + 1;
         let mut frame = [0; 13];
         guest::read_words(&self.memory, stack, &mut frame[..words])?;
-        if matches!(api, Api::SuspendThread | Api::ResumeThread | Api::Input(_)) {
+        if matches!(
+            api,
+            Api::SuspendThread | Api::ResumeThread | Api::Input(_) | Api::Hook(_)
+        ) {
             stack
                 .checked_add(api.stack_cleanup())
                 .ok_or(MemoryError::AddressOverflow)?;

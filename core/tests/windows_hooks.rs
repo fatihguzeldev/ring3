@@ -14,6 +14,7 @@ const STACK: u32 = 0x1000_ff00;
 const ERROR: u32 = 0x7ffd_e034;
 const FIRST: u32 = 0x7400_0004;
 const KEYBOARD: [u32; 4] = [13, 0xdead_beef, 0x0040_0000, 0];
+const THREAD_KEYBOARD: [u32; 4] = [2, 0xdead_beef, 0x0040_0000, 1];
 const ARGS: [u32; 4] = [u32::MAX, 0xdead_beef, 0, 1];
 const CBT: [u32; 4] = [5, 0xdead_beef, 0, 1];
 
@@ -63,8 +64,10 @@ fn imported_hook_lifetime_runs_whole_or_stepwise() {
         hook_executable::pe32(),
         hook_executable::keyboard(),
         hook_executable::cbt(),
+        hook_executable::thread_keyboard(),
     ] {
-        for budget in [1, 100] {
+        let mut previous = None;
+        for budget in [1, 7, 4096, 20000] {
             let mut p = Process32::load(&bytes, 32).unwrap();
             let mut counts = (0, 0);
             loop {
@@ -82,6 +85,10 @@ fn imported_hook_lifetime_runs_whole_or_stepwise() {
             assert_eq!(p.cpu.register(Register32::Ebx), FIRST);
             assert_eq!(p.cpu.register(Register32::Esp), 0x1001_0000);
             assert_eq!(p.last_error().unwrap(), 1404);
+            if let Some(cpu) = previous {
+                assert_eq!(p.cpu, cpu);
+            }
+            previous = Some(p.cpu);
         }
     }
 }
@@ -119,10 +126,11 @@ fn capacity_recovery_does_not_recycle_stale_handles() {
     let mut p = load();
     let pages = p.memory.mapped_pages();
     for index in 0..4096 {
-        let args = match index % 3 {
+        let args = match index % 4 {
             0 => ARGS,
             1 => KEYBOARD,
-            _ => CBT,
+            2 => CBT,
+            _ => THREAD_KEYBOARD,
         };
         assert_eq!(call(&mut p, SET, &args), FIRST + index * 4);
     }
@@ -144,10 +152,11 @@ fn capacity_recovery_does_not_recycle_stale_handles() {
         assert_eq!(call(&mut p, REMOVE, &[FIRST + index * 4]), 1);
     }
     for index in 4096..8192 {
-        let args = match index % 3 {
+        let args = match index % 4 {
             0 => ARGS,
             1 => KEYBOARD,
-            _ => CBT,
+            2 => CBT,
+            _ => THREAD_KEYBOARD,
         };
         assert_eq!(call(&mut p, SET, &args), FIRST + index * 4);
     }
@@ -250,46 +259,58 @@ fn keyboard_hooks_accept_owned_modules_and_keep_process_local_lifetimes() {
         name: "demo.dll",
         bytes: &library,
     }];
-    let mut p = Process32::load_with_options(
-        &hook_executable::keyboard(),
-        64,
-        ProcessOptions {
-            modules: &modules,
-            ..ProcessOptions::default()
-        },
-    )
-    .unwrap();
-    let mut other = load();
-    let pages = p.memory.mapped_pages();
-    put(&mut p, ERROR, 77);
-    put(&mut p, 0x7000_2020, 88);
-    for (index, module) in [0, 0x0040_0000, 0x5000_0000, 0x7000_080c]
-        .into_iter()
-        .enumerate()
-    {
-        let handle = FIRST + u32::try_from(index).unwrap() * 4;
-        assert_eq!(call(&mut p, SET, &[13, 0xdead_beef, module, 0]), handle);
-        assert_eq!(p.last_error().unwrap(), 77);
+    for (kind, target) in [(13, 0), (2, 1)] {
+        let mut p = Process32::load_with_options(
+            &hook_executable::keyboard(),
+            64,
+            ProcessOptions {
+                modules: &modules,
+                ..ProcessOptions::default()
+            },
+        )
+        .unwrap();
+        let mut other = load();
+        let pages = p.memory.mapped_pages();
+        put(&mut p, ERROR, 77);
+        put(&mut p, 0x7000_2020, 88);
+        for (index, module) in [0, 0x0040_0000, 0x5000_0000, 0x7000_080c]
+            .into_iter()
+            .enumerate()
+        {
+            let handle = FIRST + u32::try_from(index).unwrap() * 4;
+            assert_eq!(
+                call(&mut p, SET, &[kind, 0xdead_beef, module, target]),
+                handle
+            );
+            assert_eq!(p.last_error().unwrap(), 77);
+        }
+        assert_eq!(call(&mut p, SET, &ARGS), FIRST + 16);
+        assert_eq!(call(&mut other, REMOVE, &[FIRST]), 0);
+        assert_eq!(
+            call(&mut other, SET, &[kind, 0xdead_beef, 0x0040_0000, target]),
+            FIRST
+        );
+        for index in [2, 0, 4, 3, 1] {
+            assert_eq!(call(&mut p, REMOVE, &[FIRST + index * 4]), 1);
+            assert_eq!(p.last_error().unwrap(), 77);
+        }
+        assert_eq!(call(&mut other, REMOVE, &[FIRST]), 1);
+        assert_eq!(
+            call(&mut p, SET, &[kind, 0xdead_beef, 0x0040_0000, target]),
+            FIRST + 20
+        );
+        assert_eq!(p.memory.mapped_pages(), pages);
+        let mut errno = [0; 4];
+        p.memory.read(0x7000_2020, &mut errno).unwrap();
+        assert_eq!(errno, 88_u32.to_le_bytes());
     }
-    assert_eq!(call(&mut p, SET, &ARGS), FIRST + 16);
-    assert_eq!(call(&mut other, REMOVE, &[FIRST]), 0);
-    assert_eq!(call(&mut other, SET, &KEYBOARD), FIRST);
-    for index in [2, 0, 4, 3, 1] {
-        assert_eq!(call(&mut p, REMOVE, &[FIRST + index * 4]), 1);
-        assert_eq!(p.last_error().unwrap(), 77);
-    }
-    assert_eq!(call(&mut other, REMOVE, &[FIRST]), 1);
-    assert_eq!(call(&mut p, SET, &KEYBOARD), FIRST + 20);
-    assert_eq!(p.memory.mapped_pages(), pages);
-    let mut errno = [0; 4];
-    p.memory.read(0x7000_2020, &mut errno).unwrap();
-    assert_eq!(errno, 88_u32.to_le_bytes());
 }
 
 #[test]
 fn keyboard_scope_and_callback_errors_do_not_consume_handles() {
     let mut p = load();
     for (args, error) in [
+        ([2, 0, 0x0040_0000, 1], 1427),
         ([13, 0, 0, 0], 1427),
         ([13, 0, 0x0040_0000, 1], 1427),
         ([13, 1, 0, 1], 1429),
@@ -298,7 +319,14 @@ fn keyboard_scope_and_callback_errors_do_not_consume_handles() {
         assert_eq!(call(&mut p, SET, &args), 0);
         assert_eq!(p.last_error().unwrap(), error);
     }
-    for args in [[13, 1, 1, 0], [13, 1, 0x0040_0001, 0], [14, 1, 0, 0]] {
+    for args in [
+        [2, 1, 0, 0],
+        [2, 1, 0, 2],
+        [2, 1, 1, 1],
+        [13, 1, 1, 0],
+        [13, 1, 0x0040_0001, 0],
+        [14, 1, 0, 0],
+    ] {
         let before = prepare(&mut p, SET, &args);
         assert_eq!(
             p.run(1).reason,
@@ -319,7 +347,7 @@ fn keyboard_registration_does_not_read_callbacks_or_error_cells_on_success() {
     p.memory
         .protect(0x7000_2000, 4096, Permissions::NONE)
         .unwrap();
-    for args in [[13, 0, 0, 0], [13, 1, 0, 1]] {
+    for args in [[2, 0, 0, 1], [13, 0, 0, 0], [13, 1, 0, 1]] {
         let before = prepare(&mut p, SET, &args);
         let result = p.run(1);
         assert!(matches!(
@@ -329,36 +357,44 @@ fn keyboard_registration_does_not_read_callbacks_or_error_cells_on_success() {
         assert_eq!((result.instructions, result.api_calls), (0, 0));
         assert_eq!(p.cpu, before);
     }
-    for (index, callback) in [1, 0x0040_1000, u32::MAX].into_iter().enumerate() {
+    for (index, (kind, target, callback)) in [(13, 0), (2, 1)]
+        .into_iter()
+        .flat_map(|(kind, target)| {
+            [1, 0x0040_1000, u32::MAX].map(|callback| (kind, target, callback))
+        })
+        .enumerate()
+    {
         let handle = FIRST + u32::try_from(index).unwrap() * 4;
-        assert_eq!(call(&mut p, SET, &[13, callback, 0, 0]), handle);
+        assert_eq!(call(&mut p, SET, &[kind, callback, 0, target]), handle);
         assert_eq!(call(&mut p, REMOVE, &[handle]), 1);
     }
 }
 
 #[test]
 fn keyboard_zero_budget_and_incomplete_frame_leave_registration_unchanged() {
-    let mut p = load();
-    let before = prepare(&mut p, SET, &KEYBOARD);
-    assert_eq!(p.run(0).api_calls, 0);
-    assert_eq!(p.cpu, before);
-    p.cpu.set_register(Register32::Esp, 0x1000_fff0);
-    let before = p.cpu;
-    assert!(matches!(
-        p.run(1).reason,
-        ProcessStop::Stopped(StopReason::MemoryFault(_))
-    ));
-    assert_eq!(p.cpu, before);
-    assert_eq!(call(&mut p, SET, &KEYBOARD), FIRST);
-    prepare(&mut p, REMOVE, &[FIRST]);
-    p.cpu.set_register(Register32::Esp, 0x1000_fffc);
-    let before = p.cpu;
-    assert!(matches!(
-        p.run(1).reason,
-        ProcessStop::Stopped(StopReason::MemoryFault(_))
-    ));
-    assert_eq!(p.cpu, before);
-    assert_eq!(call(&mut p, REMOVE, &[FIRST]), 1);
+    for args in [KEYBOARD, THREAD_KEYBOARD] {
+        let mut p = load();
+        let before = prepare(&mut p, SET, &args);
+        assert_eq!(p.run(0).api_calls, 0);
+        assert_eq!(p.cpu, before);
+        p.cpu.set_register(Register32::Esp, 0x1000_fff0);
+        let before = p.cpu;
+        assert!(matches!(
+            p.run(1).reason,
+            ProcessStop::Stopped(StopReason::MemoryFault(_))
+        ));
+        assert_eq!(p.cpu, before);
+        assert_eq!(call(&mut p, SET, &args), FIRST);
+        prepare(&mut p, REMOVE, &[FIRST]);
+        p.cpu.set_register(Register32::Esp, 0x1000_fffc);
+        let before = p.cpu;
+        assert!(matches!(
+            p.run(1).reason,
+            ProcessStop::Stopped(StopReason::MemoryFault(_))
+        ));
+        assert_eq!(p.cpu, before);
+        assert_eq!(call(&mut p, REMOVE, &[FIRST]), 1);
+    }
 }
 
 #[test]
@@ -394,4 +430,42 @@ fn cbt_lifetimes_do_not_read_callbacks_and_preserve_other_hook_kinds() {
         assert_eq!(call(&mut p, REMOVE, &[FIRST + index * 4]), 1);
     }
     assert_eq!(call(&mut p, SET, &CBT), FIRST + 20);
+}
+
+#[test]
+fn complete_top_address_frames_do_not_mutate_hook_lifetimes() {
+    use ring3_core::execution::MemoryError;
+    let mut p = load();
+    assert_eq!(call(&mut p, SET, &THREAD_KEYBOARD), FIRST);
+    p.memory
+        .map_zeroed(0xffff_f000, 4096, Permissions::READ_WRITE)
+        .unwrap();
+    for (api, args) in [
+        (SET, THREAD_KEYBOARD.to_vec()),
+        (SET, ARGS.to_vec()),
+        (REMOVE, vec![FIRST]),
+    ] {
+        let frame: Vec<_> = std::iter::once(0x0040_1000_u32)
+            .chain(args)
+            .flat_map(u32::to_le_bytes)
+            .collect();
+        let start = (1_u64 << 32) - frame.len() as u64;
+        p.memory.write(start, &frame).unwrap();
+        p.cpu.eip = api;
+        p.cpu
+            .set_register(Register32::Esp, u32::try_from(start).unwrap());
+        let before = p.cpu;
+        for _ in 0..2 {
+            let run = p.run(1);
+            assert_eq!(
+                run.reason,
+                ProcessStop::Stopped(StopReason::MemoryFault(MemoryError::AddressOverflow))
+            );
+            assert_eq!((run.instructions, run.api_calls), (0, 0));
+            assert_eq!(p.cpu, before);
+        }
+    }
+    assert_eq!(call(&mut p, SET, &THREAD_KEYBOARD), FIRST + 4);
+    assert_eq!(call(&mut p, REMOVE, &[FIRST]), 1);
+    assert_eq!(call(&mut p, REMOVE, &[FIRST + 4]), 1);
 }

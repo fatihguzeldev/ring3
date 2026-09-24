@@ -20,6 +20,10 @@ fn stored(code: &mut Vec<u8>, offset: u32) {
 }
 
 pub fn executable() -> Vec<u8> {
+    with_hooks([(u32::MAX, 0), (5, 0)])
+}
+
+fn with_hooks(hooks: [(u32, u32); 2]) -> Vec<u8> {
     let mut code = Vec::new();
     for value in [0, 0, 1, 0] {
         word(&mut code, 0x68, value);
@@ -45,9 +49,9 @@ pub fn executable() -> Vec<u8> {
     code.resize(256, 0xcc);
     api(&mut code, 0xdc);
     code.extend_from_slice(&[0x89, 0xc3]);
-    for (kind, offset) in [(u32::MAX, 4), (5, 8)] {
+    for ((kind, module), offset) in hooks.into_iter().zip([4, 8]) {
         code.push(0x53);
-        word(&mut code, 0x68, 0);
+        word(&mut code, 0x68, module);
         word(&mut code, 0x68, 0xdead_beef);
         word(&mut code, 0x68, kind);
         code.extend_from_slice(&[0xff, 0x15, 0x60, 0x20, 0x40, 0]);
@@ -64,9 +68,17 @@ pub fn executable() -> Vec<u8> {
 }
 
 pub fn scheduled_hook_lifetimes() {
+    verify_lifetimes(&executable());
+}
+
+pub fn scheduled_keyboard_hook_lifetimes() {
+    verify_lifetimes(&with_hooks([(2, 0x0040_0000), (2, 0)]));
+}
+
+fn verify_lifetimes(executable: &[u8]) {
     let mut expected = None;
     for budget in [1, 7, 4096, 20000] {
-        let mut p = Process32::load(&executable(), 64).unwrap();
+        let mut p = Process32::load(executable, 64).unwrap();
         let mut counts = (0, 0);
         loop {
             let run = p.run(budget);

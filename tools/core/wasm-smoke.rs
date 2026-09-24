@@ -2290,6 +2290,7 @@ fn execute_hook_registration() {
         hook_executable::pe32(),
         hook_executable::keyboard(),
         hook_executable::cbt(),
+        hook_executable::thread_keyboard(),
     ] {
         let mut process = Process32::load(&bytes, 32).unwrap();
         let run = process.run(100);
@@ -4703,6 +4704,7 @@ pub extern "C" fn run() -> u32 {
     execute_thread_callbacks();
     thread_window_query_cases::verify();
     thread_hook_cases::scheduled_hook_lifetimes();
+    thread_hook_cases::scheduled_keyboard_hook_lifetimes();
     event_wait_cases::event_handshake_runs_across_host_budgets();
     resumed_thread_cases::resumed_guest_preserves_context_across_host_budgets();
     suspended_thread_cases::suspended_guest_preserves_counts_across_host_budgets();

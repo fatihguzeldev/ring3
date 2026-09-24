@@ -35,6 +35,7 @@ impl Call {
 enum Kind {
     MessageFilter,
     LowLevelKeyboard,
+    Keyboard,
     Cbt,
 }
 
@@ -92,6 +93,9 @@ impl Hooks {
         let kind = match arguments[0] {
             u32::MAX if arguments[2] == 0 && arguments[3] == owner => Kind::MessageFilter,
             5 if arguments[2] == 0 && arguments[3] == owner => Kind::Cbt,
+            2 if arguments[3] == owner && (arguments[2] == 0 || modules.contains(arguments[2])) => {
+                Kind::Keyboard
+            }
             13 if owner == thread::CURRENT_ID
                 && (arguments[2] == 0 || modules.contains(arguments[2])) =>
             {

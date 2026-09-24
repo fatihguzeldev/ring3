@@ -181,6 +181,7 @@ fn foreign_hooks_are_skipped_at_window_entry_and_between_forwarded_callbacks() {
         call(&mut p, SET, &[5, 0xdead_beef, 0, 2]);
         p.cpu.set_fs_base(PRIMARY);
         call(&mut p, 0x7000_021c, &[thread]);
+        call(&mut p, SET, &[2, 0xdead_beef, 0x0040_0000, 1]);
         hook_chain_cases::run(&mut p, budget);
         assert_eq!(p.cpu.register(Register32::Ebx), 0x7500_0004);
         assert_eq!(p.last_error().unwrap(), 77);
@@ -205,6 +206,7 @@ fn dialog_entry_ignores_a_newer_foreign_hook() {
     p.cpu.set_fs_base(CHILD);
     call(&mut p, SET, &[5, 0xdead_beef, 0, 2]);
     p.cpu.set_fs_base(PRIMARY);
+    call(&mut p, SET, &[2, 0xdead_beef, 0x0040_0000, 1]);
     let template = [
         1_u16,
         0xffff,
@@ -243,4 +245,54 @@ fn dialog_entry_ignores_a_newer_foreign_hook() {
     assert_eq!((run.instructions, run.api_calls), (0, 1));
     assert_eq!(p.cpu.eip, primary_hook);
     assert_eq!(p.window_snapshots().len(), 1);
+}
+
+#[test]
+fn scheduled_children_register_thread_keyboard_hooks() {
+    thread_hook_cases::scheduled_keyboard_hook_lifetimes();
+}
+
+#[test]
+fn thread_keyboard_scope_uses_immutable_owner_and_caller_error_storage() {
+    let mut p = Process32::load(&thread_hook_cases::executable(), 64).unwrap();
+    let thread = child(&mut p);
+    put(&mut p, PRIMARY + 0x34, &[88]);
+    p.cpu.set_fs_base(CHILD);
+    put(&mut p, CHILD + 0x24, &[1]);
+    put(&mut p, CHILD + 0x34, &[77]);
+    for args in [[2, 1, 0, 1], [2, 0, 0, 0], [2, 1, 1, 2]] {
+        let before = prepare(&mut p, SET, &args);
+        assert_eq!(
+            stopped(&mut p, before),
+            ProcessStop::UnsupportedApi { address: SET }
+        );
+        assert_eq!(p.last_error().unwrap(), 77);
+    }
+    p.memory
+        .protect(u64::from(CHILD), 4096, Permissions::READ)
+        .unwrap();
+    let before = prepare(&mut p, SET, &[2, 0, 0x0040_0000, 2]);
+    assert!(matches!(
+        stopped(&mut p, before),
+        ProcessStop::Stopped(StopReason::MemoryFault(_))
+    ));
+    assert_eq!(call(&mut p, SET, &[2, 1, 0x0040_0000, 2]), FIRST);
+    p.memory
+        .protect(u64::from(CHILD), 4096, Permissions::READ_WRITE)
+        .unwrap();
+    assert_eq!(call(&mut p, SET, &[2, 0, 0, 2]), 0);
+    assert_eq!(p.last_error().unwrap(), 1427);
+    p.cpu.set_fs_base(PRIMARY);
+    assert_eq!(p.last_error().unwrap(), 88);
+    assert_eq!(call(&mut p, 0x7000_021c, &[thread]), 1);
+    assert_eq!(call(&mut p, REMOVE, &[FIRST]), 1);
+    p.cpu.set_fs_base(0x5000_0000);
+    let before = prepare(&mut p, SET, &[2, 1, 0, 1]);
+    assert_eq!(
+        stopped(&mut p, before),
+        ProcessStop::UnsupportedApi { address: SET }
+    );
+    p.cpu.set_fs_base(CHILD);
+    assert_eq!(call(&mut p, SET, &[2, 1, 0, 2]), FIRST + 4);
+    assert_eq!(call(&mut p, REMOVE, &[FIRST + 4]), 1);
 }
