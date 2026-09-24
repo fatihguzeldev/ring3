@@ -27,6 +27,64 @@ fn load(opcode: u8, numerator: u64, source: u64, address: u32) -> (Cpu32, GuestM
     (cpu, memory)
 }
 
+fn load_single(numerator: f64, divisor: f32) -> (Cpu32, GuestMemory) {
+    let mut code = memory_instruction(0xdd, 0x05, 0x0040_2200);
+    code.extend(memory_instruction(0xd8, 0x35, 0x0040_2210));
+    code.extend([0xdf, 0xe0]);
+    code.extend(memory_instruction(0xd9, 0x1d, 0x0040_2300));
+    let mut image = load_pe32(&executable::pe32(&code), 32).unwrap();
+    image
+        .memory
+        .write(0x0040_2200, &numerator.to_le_bytes())
+        .unwrap();
+    image
+        .memory
+        .write(0x0040_2210, &divisor.to_le_bytes())
+        .unwrap();
+    let mut cpu = Cpu32::new(image.entry_point);
+    cpu.set_x87_control_word(0x007f);
+    (cpu, image.memory)
+}
+
+#[test]
+fn single_precision_memory_division_rounds_and_keeps_the_stack() {
+    for (numerator, divisor, expected, status) in [
+        (8.0, 2.0, 4.0_f32, 0),
+        (1.0, 3.0, 1.0_f32 / 3.0, 0x220),
+        (1.0, 31.0, 1.0_f32 / 31.0, 0x20),
+        (-1.0, 3.0, -1.0_f32 / 3.0, 0x20),
+    ] {
+        let (mut cpu, mut memory) = load_single(numerator, divisor);
+        assert_eq!(cpu.run(&mut memory, 3).instructions, 3);
+        assert_eq!(cpu.register(Register32::Eax) & 0x3a20, 0x3800 | status);
+        assert_eq!(cpu.run(&mut memory, 1).instructions, 1);
+        let mut output = [0; 4];
+        memory.read(0x0040_2300, &mut output).unwrap();
+        assert_eq!(u32::from_le_bytes(output), expected.to_bits());
+        let mut input = [0; 4];
+        memory.read(0x0040_2210, &mut input).unwrap();
+        assert_eq!(u32::from_le_bytes(input), divisor.to_bits());
+    }
+}
+
+#[test]
+fn single_precision_memory_division_rejects_invalid_results_atomically() {
+    for (numerator, divisor) in [
+        (1.0, 0.0),
+        (f64::from(f32::MAX) * 2.0, 1.0),
+        (f64::from(f32::MIN_POSITIVE), 2.0),
+    ] {
+        let (mut cpu, mut memory) = load_single(numerator, divisor);
+        assert_eq!(cpu.run(&mut memory, 1).instructions, 1);
+        let before = cpu;
+        assert_eq!(
+            cpu.run(&mut memory, 1).reason,
+            StopReason::UnsupportedInstruction
+        );
+        assert_eq!(cpu, before);
+    }
+}
+
 #[test]
 fn normal_division_executes_both_widths_whole_or_stepwise() {
     for budget in [1, 40] {

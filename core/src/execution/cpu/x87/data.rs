@@ -349,7 +349,9 @@ impl Cpu32 {
                 return Err(StopReason::UnsupportedInstruction);
             }
             if single_precision {
-                result = if self.x87_control_word & 0x0f3f == 0x0c3f {
+                result = if !multiply {
+                    rounding::single_quotient(result, left, right)
+                } else if self.x87_control_word & 0x0f3f == 0x0c3f {
                     rounding::single_product_toward_zero(result, left, right)
                 } else {
                     rounding::single_product(result, left, right)
@@ -358,6 +360,8 @@ impl Cpu32 {
             }
             let rounding = if multiply {
                 rounding::product_result(result, top, source)
+            } else if single_precision {
+                rounding::signed_quotient_result(result, left, right)
             } else {
                 rounding::quotient_result(result, left, right)
             };
@@ -539,6 +543,7 @@ impl Cpu32 {
                 if matches!(
                     code,
                     Code::Fdivp_sti_st0
+                        | Code::Fdiv_m32fp
                         | Code::Fadd_st0_sti
                         | Code::Faddp_sti_st0
                         | Code::Fmul_st0_sti
