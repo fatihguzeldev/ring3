@@ -19,6 +19,10 @@ fn store(code: &mut Vec<u8>, address: u32) {
 }
 
 pub fn imported_keyboard_buffer_setting_across_budgets() {
+    imported_buffer_setting_across_budgets(KEYBOARD);
+}
+
+pub fn imported_buffer_setting_across_budgets(guid: [u8; 16]) {
     let mut code = Vec::new();
     for value in [0, DATA, 0x700, 0x0040_0000] {
         push(&mut code, value);
@@ -67,7 +71,7 @@ pub fn imported_keyboard_buffer_setting_across_budgets() {
         p.memory
             .protect(0x3000_0000, 4096, Permissions::READ)
             .unwrap();
-        p.memory.write(u64::from(DATA + 64), &KEYBOARD).unwrap();
+        p.memory.write(u64::from(DATA + 64), &guid).unwrap();
         let stack = p.cpu.register(Register32::Esp);
         let mut counts = (0, 0);
         loop {

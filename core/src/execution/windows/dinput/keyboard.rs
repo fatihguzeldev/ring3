@@ -1,3 +1,4 @@
+use super::buffer::BufferSize;
 use super::{Access, Desktop, DispatchError, GuestMemory, INVALID_ARGUMENT, NULL_POINTER, guest};
 
 const KEY: [u8; 16] = [
@@ -14,12 +15,6 @@ enum Format {
 struct CooperativeLevel {
     window: u32,
     suppress_windows_key: bool,
-}
-
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-struct BufferSize {
-    requested: u32,
-    capacity: u32,
 }
 
 pub(super) struct Device {
@@ -87,32 +82,8 @@ impl Device {
         memory: &GuestMemory,
         desktop: &Desktop,
     ) -> Result<u32, DispatchError> {
-        if property != 1 {
-            return Err(DispatchError::Unsupported);
-        }
-        if address == 0 {
-            return Ok(INVALID_ARGUMENT);
-        }
-        let mut header = [0; 5];
-        guest::read_words(memory, address, &mut header[..2])?;
-        if header[1] != 16 || header[0] != 20 {
-            return Ok(INVALID_ARGUMENT);
-        }
-        guest::read_words(memory, address, &mut header)?;
-        if header[3] != 0 {
-            return Err(DispatchError::Unsupported);
-        }
-        if header[2] != 0 {
-            return Ok(INVALID_ARGUMENT);
-        }
-        if self.is_acquired(desktop) {
-            return Ok(ACQUIRED);
-        }
-        self.buffer_size = BufferSize {
-            requested: header[4],
-            capacity: header[4].min(1024),
-        };
-        Ok(0)
+        let acquired = self.is_acquired(desktop);
+        self.buffer_size.set(property, address, memory, acquired)
     }
 
     pub(super) fn set_cooperative_level(
@@ -624,9 +595,11 @@ mod tests {
             .unwrap();
         let mouse = super::super::MICE;
         words(&mut memory, 0x2400, &[44]);
+        words(&mut memory, 0x2500, &[20, 16, 0, 0, 32]);
         for (call, args, expected) in [
             (Call::SetMouseCooperativeLevel, vec![mouse, 4, 5], 0),
             (Call::MouseCapabilities, vec![mouse, 0x2400], 0),
+            (Call::SetMouseProperty, vec![mouse, 1, 0x2500], 0),
             (
                 Call::QueryInterface(Class::Mouse),
                 vec![mouse, 0x1020, 0x1000],

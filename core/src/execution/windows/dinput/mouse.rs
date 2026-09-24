@@ -1,3 +1,4 @@
+use super::buffer::BufferSize;
 use super::{Access, Desktop, DispatchError, GuestMemory, INVALID_ARGUMENT, NULL_POINTER, guest};
 
 pub(super) fn capabilities(address: u32, memory: &mut GuestMemory) -> Result<u32, DispatchError> {
@@ -31,6 +32,7 @@ pub(super) struct Device {
     pub(super) references: u32,
     format: Option<Format>,
     cooperative_window: Option<u32>,
+    buffer_size: BufferSize,
 }
 
 impl Device {
@@ -39,7 +41,17 @@ impl Device {
             references: 1,
             format: None,
             cooperative_window: None,
+            buffer_size: BufferSize::default(),
         }
+    }
+
+    pub(super) fn set_property(
+        &mut self,
+        property: u32,
+        address: u32,
+        memory: &GuestMemory,
+    ) -> Result<u32, DispatchError> {
+        self.buffer_size.set(property, address, memory, false)
     }
 
     pub(super) fn set_cooperative_level(
@@ -185,6 +197,94 @@ mod tests {
         );
         desktop.activate_created(4);
         desktop
+    }
+
+    #[test]
+    fn buffer_capacity_is_owned_per_mouse_and_keeps_other_configuration() {
+        let mut memory = GuestMemory::new(1);
+        memory
+            .map_zeroed(0x1000, 4096, Permissions::READ_WRITE)
+            .unwrap();
+        let mut device = Device::new();
+        let second = Device::new();
+        assert_eq!(device.buffer_size, BufferSize::default());
+        let desktop = desktop();
+        standard(&mut memory);
+        assert_eq!(device.set_format(0x1001, &memory).ok(), Some(0));
+        assert_eq!(device.set_cooperative_level(4, 5, &desktop).ok(), Some(0));
+        let activation = desktop.activation();
+        for requested in [0, 1, 16, 1024, 1025, u32::MAX, 0] {
+            words(&mut memory, 0x1301, &[20, 16, 0, 0, requested]);
+            assert_eq!(device.set_property(1, 0x1301, &memory).ok(), Some(0));
+            assert_eq!(
+                device.buffer_size,
+                BufferSize {
+                    requested,
+                    capacity: requested.min(1024)
+                }
+            );
+            memory.write(0x1301, &[0; 20]).unwrap();
+            assert_eq!(device.buffer_size.requested, requested);
+            assert_eq!(device.buffer_size.capacity, requested.min(1024));
+            assert_eq!(second.buffer_size, BufferSize::default());
+            assert_eq!(device.format, Some(Format::StandardMouse2));
+            assert_eq!(device.cooperative_window, Some(4));
+            assert_eq!((device.references, second.references), (1, 1));
+        }
+        words(&mut memory, 0x1301, &[20, 16, 0, 0, 16]);
+        assert_eq!(device.set_property(1, 0x1301, &memory).ok(), Some(0));
+        memory.unmap(0x1000, 4096).unwrap();
+        assert_eq!(
+            device.buffer_size,
+            BufferSize {
+                requested: 16,
+                capacity: 16
+            }
+        );
+        assert_eq!(desktop.activation(), activation);
+    }
+
+    #[test]
+    fn failed_buffer_replacement_keeps_same_mouse_setting_and_can_recover() {
+        let mut memory = GuestMemory::new(1);
+        memory
+            .map_zeroed(0x1000, 4096, Permissions::READ_WRITE)
+            .unwrap();
+        let mut device = Device::new();
+        words(&mut memory, 0x1301, &[20, 16, 0, 0, 16]);
+        assert_eq!(device.set_property(1, 0x1301, &memory).ok(), Some(0));
+        let before = device.buffer_size;
+        for header in [
+            [19, 16, 0, 0, 32],
+            [20, 15, 0, 0, 32],
+            [20, 16, 1, 0, 32],
+            [20, 16, 0, 1, 32],
+        ] {
+            words(&mut memory, 0x1301, &header);
+            assert!(!matches!(device.set_property(1, 0x1301, &memory), Ok(0)));
+            assert_eq!(device.buffer_size, before);
+        }
+        for (property, address) in [(0, 0x5000), (2, 0x5000), (1, 0), (1, 0x5000), (1, 0x1ff8)] {
+            words(&mut memory, 0x1ff8, &[20, 16]);
+            assert!(!matches!(
+                device.set_property(property, address, &memory),
+                Ok(0)
+            ));
+            assert_eq!(device.buffer_size, before);
+        }
+        words(&mut memory, 0x1301, &[20, 16, 0, 0, 32]);
+        assert_eq!(device.set_property(1, 0x1301, &memory).ok(), Some(0));
+        assert_eq!(
+            device.buffer_size,
+            BufferSize {
+                requested: 32,
+                capacity: 32
+            }
+        );
+        assert_eq!(device.references, 1);
+        assert_eq!(device.format, None);
+        assert_eq!(device.cooperative_window, None);
+        assert_eq!(memory.mapped_pages(), 1);
     }
 
     #[test]

@@ -30,6 +30,8 @@ mod dinput_mouse_cases;
 mod dinput_mouse_cooperative_cases;
 #[path = "../../core/tests/support/dinput_mouse_format_cases.rs"]
 mod dinput_mouse_format_cases;
+#[path = "../../core/tests/support/dinput_mouse_property_cases.rs"]
+mod dinput_mouse_property_cases;
 #[path = "../../core/tests/support/dinput_property_cases.rs"]
 mod dinput_property_cases;
 #[path = "../../core/tests/support/dinput_root_cases.rs"]
@@ -4734,6 +4736,7 @@ pub extern "C" fn run() -> u32 {
     dinput_mouse_caps_cases::imported_mouse_capabilities_across_budgets();
     dinput_mouse_cooperative_cases::imported_foreground_mouse_setting_across_budgets();
     dinput_mouse_format_cases::imported_standard_mouse_format_across_budgets();
+    dinput_mouse_property_cases::imported_mouse_buffer_setting_across_budgets();
     dinput_format_cases::imported_standard_keyboard_format_across_budgets();
     dinput_property_cases::imported_keyboard_buffer_setting_across_budgets();
     dinput_cooperative_cases::imported_foreground_keyboard_setting_across_budgets();
