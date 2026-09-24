@@ -2709,3 +2709,16 @@ fn index_buffer_lock_rejects_invalid_ranges_flags_and_faults_atomically() {
     assert_eq!(read(&process, INDEX_DATA_OUTPUT), buffer + 4096);
     assert_eq!(direct_call(&mut process, unlock, &[buffer]), 0);
 }
+
+#[test]
+fn fixed_function_pixel_shader_accepts_only_zero_on_a_live_device() {
+    let (mut process, _, device) = create();
+    let set = method(&process, device, 88);
+    assert_ne!(set, 0x7000_0ffc);
+    assert_eq!(invoke(&mut process, set, &[device, 0]), 0);
+    assert_eq!(invoke(&mut process, set, &[device, 1]), 0x8876_086c);
+    assert_eq!(invoke(&mut process, set, &[device + 4, 0]), 0x8876_086c);
+    let release = method(&process, device, 2);
+    assert_eq!(invoke(&mut process, release, &[device]), 0);
+    assert_eq!(invoke(&mut process, set, &[device, 0]), 0x8876_086c);
+}

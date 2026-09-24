@@ -114,6 +114,7 @@ pub(super) enum Call {
     TextureSurfaceLockRect,
     TextureSurfaceUnlockRect,
     SetVertexShader,
+    SetPixelShader,
     SetViewport,
     SetTransform,
     GetTransform,
@@ -168,6 +169,7 @@ impl Call {
             0x4c8 => Self::TextureSurfaceLockRect,
             0x4cc => Self::TextureSurfaceUnlockRect,
             0x41c => Self::SetVertexShader,
+            0x520 => Self::SetPixelShader,
             0x420 => Self::DrawPrimitiveUp,
             0x498 => Self::SetViewport,
             0x4f0 => Self::SetTransform,
@@ -216,6 +218,7 @@ impl Call {
             Self::AdapterModeCount
             | Self::TextureUnlockRect
             | Self::SetVertexShader
+            | Self::SetPixelShader
             | Self::SetViewport
             | Self::GetDepthStencilSurface
             | Self::TextureSurfaceDesc
@@ -413,6 +416,7 @@ impl Graphics {
             (DEVICE_TABLE, 24, 0x50c),
             (DEVICE_TABLE, 72, 0x420),
             (DEVICE_TABLE, 76, 0x41c),
+            (DEVICE_TABLE, 88, 0x520),
             (TEXTURE_TABLE, 1, 0x404),
             (TEXTURE_TABLE, 2, 0x408),
             (TEXTURE_TABLE, 9, 0x4d0),
@@ -488,14 +492,7 @@ impl Graphics {
             Call::TextureSurfaceDesc => return self.texture_surface_desc(args, memory),
             Call::TextureSurfaceLockRect => return self.texture_surface_lock_rect(args, memory),
             Call::TextureSurfaceUnlockRect => self.texture_surface_unlock_rect(args[0]),
-            Call::SetVertexShader => {
-                if args[0] != DEVICE || self.device_refs == 0 || args[1] != 0x44 {
-                    INVALID_CALL
-                } else {
-                    self.vertex_fvf = args[1];
-                    0
-                }
-            }
+            Call::SetVertexShader | Call::SetPixelShader => self.set_shader(call, args),
             Call::SetViewport => return self.set_viewport(args, memory),
             Call::SetTransform => return self.set_transform(args, memory),
             Call::GetTransform => return self.get_transform(args, memory),
@@ -1020,6 +1017,20 @@ impl Graphics {
             std::mem::swap(back, spare);
         }
         0
+    }
+
+    fn set_shader(&mut self, call: Call, args: &[u32]) -> u32 {
+        if args[0] != DEVICE || self.device_refs == 0 {
+            return INVALID_CALL;
+        }
+        match call {
+            Call::SetVertexShader if args[1] == 0x44 => {
+                self.vertex_fvf = args[1];
+                0
+            }
+            Call::SetPixelShader if args[1] == 0 => 0,
+            _ => INVALID_CALL,
+        }
     }
 
     fn draw_primitive_up(
