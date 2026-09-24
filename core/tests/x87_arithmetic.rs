@@ -291,12 +291,10 @@ fn truncating_single_precision_memory_multiply_rejects_faults_atomically() {
 }
 
 #[test]
-fn single_precision_profile_rejects_other_math_and_excluded_ranges_atomically() {
+fn single_precision_profile_rejects_remaining_math_and_excluded_ranges_atomically() {
     for operation in [
         &[0xd9, 0xfa][..],
-        &[0xd8, 0x3d, 0x10, 0x22, 0x40, 0],
         &[0xdc, 0x3d, 0x10, 0x22, 0x40, 0],
-        &[0xd8, 0x35, 0x10, 0x22, 0x40, 0],
     ] {
         let (mut cpu, mut memory) = load(operation, 4.0_f64.to_bits(), 2.0_f64.to_bits());
         assert_eq!(cpu.run(&mut memory, 1).instructions, 1);
