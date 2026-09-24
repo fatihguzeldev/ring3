@@ -28,6 +28,7 @@ const SURFACE_OUTPUT: u32 = 0x0040_2c00;
 const SURFACE_RECT: u32 = 0x0040_2c20;
 const MATRIX: u32 = 0x0040_2d00;
 const MATRIX_OUTPUT: u32 = 0x0040_2d80;
+const VERTEX_BUFFER_OUTPUT: u32 = 0x0040_2e00;
 
 #[test]
 fn executes_an_uninterrupted_guest_graphics_program() {
@@ -2317,4 +2318,85 @@ fn faulty_clear_and_unknown_com_method_cannot_produce_a_successful_frame() {
         }
     );
     assert_eq!(result.api_calls, 0);
+}
+
+#[test]
+fn vertex_buffer_creation_owns_guest_storage_and_device_lifetime() {
+    let (mut process, _, device) = create();
+    let create_buffer = method(&process, device, 23);
+    assert_ne!(create_buffer, 0x7000_0ffc);
+    assert_eq!(
+        direct_call(
+            &mut process,
+            create_buffer,
+            &[device, 96, 0x218, 0x142, 0, VERTEX_BUFFER_OUTPUT]
+        ),
+        0
+    );
+    let buffer = read(&process, VERTEX_BUFFER_OUTPUT);
+    assert!((0x7200_0000..0x7f00_0000).contains(&buffer));
+    assert_ne!(read(&process, buffer), 0);
+    assert_eq!(read_bytes(&process, buffer + 4096, 96), vec![0; 96]);
+    assert!(process.memory.write(u64::from(buffer), &[0]).is_err());
+    assert!(
+        process
+            .memory
+            .write(u64::from(buffer + 4096), &[7; 96])
+            .is_ok()
+    );
+    let add_ref = method(&process, buffer, 1);
+    let release = method(&process, buffer, 2);
+    assert_eq!(direct_call(&mut process, add_ref, &[buffer]), 2);
+    assert_eq!(direct_call(&mut process, release, &[buffer]), 1);
+    let release_device = method(&process, device, 2);
+    assert_eq!(direct_call(&mut process, release_device, &[device]), 1);
+    assert_eq!(direct_call(&mut process, release, &[buffer]), 0);
+    assert!(process.memory.read(u64::from(buffer), &mut [0]).is_err());
+    assert_eq!(direct_call(&mut process, release, &[buffer]), 0x8876_086c);
+}
+
+#[test]
+fn vertex_buffer_creation_failures_keep_output_and_page_capacity() {
+    let (mut process, _, device) = create();
+    let create_buffer = method(&process, device, 23);
+    let pages = process.memory.mapped_pages();
+    for [length, usage, fvf, pool] in [
+        [0, 0x218, 0x142, 0],
+        [96, 0x8000_0000, 0x142, 0],
+        [96, 0x218, 0, 0],
+        [96, 0x218, 0x142, 4],
+    ] {
+        write(&mut process, VERTEX_BUFFER_OUTPUT, &[0x1234_5678]);
+        assert_eq!(
+            direct_call(
+                &mut process,
+                create_buffer,
+                &[device, length, usage, fvf, pool, VERTEX_BUFFER_OUTPUT]
+            ),
+            0x8876_086c
+        );
+        assert_eq!(read(&process, VERTEX_BUFFER_OUTPUT), 0x1234_5678);
+        assert_eq!(process.memory.mapped_pages(), pages);
+    }
+    write(&mut process, VERTEX_BUFFER_OUTPUT, &[0x1234_5678]);
+    assert_eq!(
+        direct_call(
+            &mut process,
+            create_buffer,
+            &[device, 1_048_576, 0, 0x142, 0, VERTEX_BUFFER_OUTPUT]
+        ),
+        0x8876_017c
+    );
+    assert_eq!(read(&process, VERTEX_BUFFER_OUTPUT), 0x1234_5678);
+    assert_eq!(process.memory.mapped_pages(), pages);
+    let fault = call(
+        &mut process,
+        create_buffer,
+        &[device, 96, 0x218, 0x142, 0, 0x0040_1000],
+    );
+    assert!(matches!(
+        fault.reason,
+        ProcessStop::Stopped(StopReason::MemoryFault(_))
+    ));
+    assert_eq!(process.memory.mapped_pages(), pages);
 }

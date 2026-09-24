@@ -15,6 +15,7 @@ const ROOT_TABLE: u32 = OBJECT_BASE + 0x100;
 const DEVICE_TABLE: u32 = OBJECT_BASE + 0x200;
 const DEPTH_SURFACE_TABLE: u32 = OBJECT_BASE + 0x500;
 const TEXTURE_SURFACE_TABLE: u32 = OBJECT_BASE + 0x600;
+const VERTEX_BUFFER_TABLE: u32 = OBJECT_BASE + 0x700;
 const INVALID_CALL: u32 = 0x8876_086c;
 const NOT_AVAILABLE: u32 = 0x8876_086a;
 const UNSUPPORTED_COLOR_OPERATION: u32 = 0x8876_0819;
@@ -75,6 +76,7 @@ pub(super) enum Call {
     DeviceCaps,
     CreateDevice,
     CreateTexture,
+    CreateVertexBuffer,
     Clear,
     Present,
     RootAddRef,
@@ -83,6 +85,8 @@ pub(super) enum Call {
     DeviceRelease,
     TextureAddRef,
     TextureRelease,
+    VertexBufferAddRef,
+    VertexBufferRelease,
     TexturePreLoad,
     SetTexture,
     GetTextureStageState,
@@ -125,6 +129,9 @@ impl Call {
             0x58 => Self::DeviceAddRef,
             0x5c => Self::DeviceRelease,
             0x400 => Self::CreateTexture,
+            0x4f8 => Self::CreateVertexBuffer,
+            0x4fc => Self::VertexBufferAddRef,
+            0x500 => Self::VertexBufferRelease,
             0x404 => Self::TextureAddRef,
             0x408 => Self::TextureRelease,
             0x4d0 => Self::TexturePreLoad,
@@ -194,7 +201,10 @@ impl Call {
             | Self::GetDepthStencilSurface
             | Self::TextureSurfaceDesc
             | Self::ValidateDevice => 2,
-            Self::CheckDeviceType | Self::CheckMultiSampleType | Self::CheckDepthStencilMatch => 6,
+            Self::CreateVertexBuffer
+            | Self::CheckDeviceType
+            | Self::CheckMultiSampleType
+            | Self::CheckDepthStencilMatch => 6,
             _ => 1,
         }
     }
@@ -214,6 +224,7 @@ pub(super) struct Graphics {
     transforms: BTreeMap<u32, [u32; 16]>,
     front: Option<Frame>,
     textures: BTreeMap<u32, Texture>,
+    vertex_buffers: BTreeMap<u32, VertexBuffer>,
     texture_stages: [u32; 8],
     color_arg0: [u32; 8],
     vertex_fvf: u32,
@@ -225,6 +236,11 @@ struct Texture {
     format: u32,
     pool: u32,
     levels: Vec<TextureLevel>,
+}
+
+struct VertexBuffer {
+    refs: u32,
+    length: u64,
 }
 
 struct TextureLevel {
@@ -276,6 +292,9 @@ impl Graphics {
         for index in 0..13 {
             guest::write_word(memory, TEXTURE_SURFACE_TABLE + index * 4, API_BASE + 0xffc)?;
         }
+        for index in 0..14 {
+            guest::write_word(memory, VERTEX_BUFFER_TABLE + index * 4, API_BASE + 0xffc)?;
+        }
         for (table, index, offset) in [
             (ROOT_TABLE, 1, 0x50),
             (ROOT_TABLE, 2, 0x54),
@@ -310,6 +329,7 @@ impl Graphics {
             (DEPTH_SURFACE_TABLE, 1, 0x4a4),
             (DEPTH_SURFACE_TABLE, 2, 0x4a8),
             (DEVICE_TABLE, 20, 0x400),
+            (DEVICE_TABLE, 23, 0x4f8),
             (DEVICE_TABLE, 72, 0x420),
             (DEVICE_TABLE, 76, 0x41c),
             (TEXTURE_TABLE, 1, 0x404),
@@ -325,6 +345,8 @@ impl Graphics {
             (TEXTURE_SURFACE_TABLE, 8, 0x4c4),
             (TEXTURE_SURFACE_TABLE, 9, 0x4c8),
             (TEXTURE_SURFACE_TABLE, 10, 0x4cc),
+            (VERTEX_BUFFER_TABLE, 1, 0x4fc),
+            (VERTEX_BUFFER_TABLE, 2, 0x500),
         ] {
             guest::write_word(memory, table + index * 4, API_BASE + offset)?;
         }
@@ -367,6 +389,7 @@ impl Graphics {
             Call::DeviceCaps => return self.device_caps(args, memory),
             Call::CreateDevice => return self.create_device(args, memory, desktop),
             Call::CreateTexture => return self.create_texture(args, memory),
+            Call::CreateVertexBuffer => return self.create_vertex_buffer(args, memory),
             Call::TextureLevelDesc => return self.texture_level_desc(args, memory),
             Call::TextureLockRect => return self.texture_lock_rect(args, memory),
             Call::TextureUnlockRect => self.texture_unlock_rect(args),
@@ -404,21 +427,13 @@ impl Graphics {
             Call::TextureLevelCount => self.texture_level_count(args[0]),
             Call::TextureAddRef => self.texture_add_ref(args[0]),
             Call::TextureRelease => return self.texture_release(args[0], memory),
+            Call::VertexBufferAddRef => self.vertex_buffer_add_ref(args[0]),
+            Call::VertexBufferRelease => return self.vertex_buffer_release(args[0], memory),
             Call::TexturePreLoad => self.textures.get(&args[0]).map_or(INVALID_CALL, |texture| {
                 if texture.refs == 0 { INVALID_CALL } else { 0 }
             }),
             Call::Clear => return self.clear(args, memory),
-            Call::Present => {
-                if args[0] != DEVICE || self.device_refs == 0 || args[1..5] != [0; 4] {
-                    INVALID_CALL
-                } else {
-                    self.front.clone_from(&self.back);
-                    if let (Some(back), Some(spare)) = (&mut self.back, &mut self.spare) {
-                        std::mem::swap(back, spare);
-                    }
-                    0
-                }
-            }
+            Call::Present => self.present(args),
             Call::RootAddRef | Call::RootRelease if args[0] == ROOT && self.root_refs != 0 => {
                 if matches!(call, Call::RootAddRef) {
                     self.root_refs = self.root_refs.saturating_add(1);
@@ -883,9 +898,29 @@ impl Graphics {
         if device != DEVICE || self.device_refs == 0 {
             return 0;
         }
-        let used: u64 = self.textures.values().map(|texture| texture.length).sum();
+        let used: u64 = self
+            .textures
+            .values()
+            .map(|texture| texture.length)
+            .sum::<u64>()
+            + self
+                .vertex_buffers
+                .values()
+                .map(|buffer| buffer.length)
+                .sum::<u64>();
         let free = (TEXTURE_END - TEXTURE_START).saturating_sub(used);
         u32::try_from(((free + MIB / 2) / MIB) * MIB).expect("bounded texture aperture")
+    }
+
+    fn present(&mut self, args: &[u32]) -> u32 {
+        if args[0] != DEVICE || self.device_refs == 0 || args[1..5] != [0; 4] {
+            return INVALID_CALL;
+        }
+        self.front.clone_from(&self.back);
+        if let (Some(back), Some(spare)) = (&mut self.back, &mut self.spare) {
+            std::mem::swap(back, spare);
+        }
+        0
     }
 
     fn draw_primitive_up(
@@ -904,6 +939,76 @@ impl Graphics {
             args,
             memory,
         )
+    }
+
+    fn create_vertex_buffer(
+        &mut self,
+        args: &[u32],
+        memory: &mut GuestMemory,
+    ) -> Result<u32, MemoryError> {
+        let [device, byte_length, usage, fvf, pool, output] =
+            <[u32; 6]>::try_from(args).expect("d3d8 call arity");
+        let position = fvf & 0x000e;
+        let supported_fvf = matches!(position, 0x0002 | 0x0004)
+            && fvf & !(0x000e | 0x0010 | 0x0040 | 0x0080 | 0x0100) == 0
+            && (position != 0x0004 || fvf & 0x0010 == 0);
+        if device != DEVICE
+            || self.device_refs == 0
+            || byte_length == 0
+            || usage & !(0x0008 | 0x0010 | 0x0200) != 0
+            || !supported_fvf
+            || !matches!(pool, 0..=2)
+        {
+            return Ok(INVALID_CALL);
+        }
+        guest::check(memory, output, 4, Access::Write)?;
+        let length = PAGE_SIZE + u64::from(byte_length).div_ceil(PAGE_SIZE) * PAGE_SIZE;
+        let Some(address) = memory.first_free_span(TEXTURE_START, TEXTURE_END, length)? else {
+            return Ok(OUT_OF_VIDEO_MEMORY);
+        };
+        if memory
+            .map_zeroed(address, length, Permissions::READ_WRITE)
+            .is_err()
+        {
+            return Ok(OUT_OF_VIDEO_MEMORY);
+        }
+        let address = u32::try_from(address).expect("vertex buffer guest range is 32-bit");
+        guest::write_word(memory, address, VERTEX_BUFFER_TABLE)?;
+        memory.protect(u64::from(address), PAGE_SIZE, Permissions::READ)?;
+        guest::write_word(memory, output, address)?;
+        self.vertex_buffers
+            .insert(address, VertexBuffer { refs: 1, length });
+        self.device_refs = self.device_refs.saturating_add(1);
+        Ok(0)
+    }
+
+    fn vertex_buffer_add_ref(&mut self, address: u32) -> u32 {
+        let Some(buffer) = self.vertex_buffers.get_mut(&address) else {
+            return INVALID_CALL;
+        };
+        buffer.refs = buffer.refs.saturating_add(1);
+        buffer.refs
+    }
+
+    fn vertex_buffer_release(
+        &mut self,
+        address: u32,
+        memory: &mut GuestMemory,
+    ) -> Result<u32, MemoryError> {
+        let Some(buffer) = self.vertex_buffers.get_mut(&address) else {
+            return Ok(INVALID_CALL);
+        };
+        if buffer.refs > 1 {
+            buffer.refs -= 1;
+            return Ok(buffer.refs);
+        }
+        memory.unmap(u64::from(address), buffer.length)?;
+        self.vertex_buffers.remove(&address);
+        self.device_refs -= 1;
+        if self.device_refs == 0 {
+            self.finish_device();
+        }
+        Ok(0)
     }
 
     fn create_texture(
