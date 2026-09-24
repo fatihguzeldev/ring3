@@ -10,14 +10,26 @@ pub(super) fn initialize(
     stack_base: u32,
 ) -> Result<(), MemoryError> {
     memory.map_zeroed(u64::from(BASE), PAGE_SIZE, Permissions::READ_WRITE)?;
+    initialize_contents(memory, BASE, CURRENT_ID, stack_limit, stack_base)
+}
+
+pub(super) fn initialize_contents(
+    memory: &mut GuestMemory,
+    base: u32,
+    id: u32,
+    stack_limit: u32,
+    stack_base: u32,
+) -> Result<(), MemoryError> {
+    guest::check(memory, base, 0x38, super::super::Access::Write)?;
     for (offset, value) in [
         (0, u32::MAX),
         (4, stack_base),
         (8, stack_limit),
-        (0x18, BASE),
-        (0x24, CURRENT_ID),
+        (0x18, base),
+        (0x24, id),
+        (0x34, 0),
     ] {
-        guest::write_word(memory, BASE + offset, value)?;
+        guest::write_word(memory, base + offset, value)?;
     }
     Ok(())
 }
@@ -92,5 +104,38 @@ impl Priority {
         }
         self.0 = value;
         Ok(1)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn distinct_tebs_keep_identity_stack_bounds_and_error_state_separate() {
+        let mut memory = GuestMemory::new(2);
+        initialize(&mut memory, 0x1000_0000, 0x1001_0000).unwrap();
+        set_last_error(&mut memory, 77).unwrap();
+        memory
+            .map_zeroed(0x1101_0000, PAGE_SIZE, Permissions::READ_WRITE)
+            .unwrap();
+        initialize_contents(&mut memory, 0x1101_0000, 2, 0x1100_0000, 0x1101_0000).unwrap();
+        for (base, id, low, high, error) in [
+            (BASE, 1, 0x1000_0000, 0x1001_0000, 77),
+            (0x1101_0000, 2, 0x1100_0000, 0x1101_0000, 0),
+        ] {
+            for (offset, expected) in [
+                (0, u32::MAX),
+                (4, high),
+                (8, low),
+                (0x18, base),
+                (0x24, id),
+                (0x34, error),
+            ] {
+                let mut word = [0];
+                guest::read_words(&memory, base + offset, &mut word).unwrap();
+                assert_eq!(word[0], expected);
+            }
+        }
     }
 }
