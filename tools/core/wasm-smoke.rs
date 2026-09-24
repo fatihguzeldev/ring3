@@ -14,6 +14,8 @@ mod thread_hook_cases;
 #[allow(dead_code)]
 mod thread_window_query_cases;
 
+#[path = "../../core/tests/support/dinput_root_cases.rs"]
+mod dinput_root_cases;
 #[path = "../../core/tests/support/event_wait_control.rs"]
 mod event_wait_control;
 #[path = "../../core/tests/support/resumed_thread_cases.rs"]
@@ -4706,6 +4708,7 @@ pub extern "C" fn run() -> u32 {
     suspended_thread_cases::suspended_guest_preserves_counts_across_host_budgets();
     suspended_event_cases::suspended_event_waits_preserve_signal_and_handle_ownership();
     timed_event_cases::finite_wait_uses_exact_host_time_across_budgets();
+    dinput_root_cases::imported_root_lifetime_across_budgets();
     thread_start_cases::ordered_notifications_precede_each_child_entry();
     thread_start_cases::retryable_notification_frames();
     cxx_exception_cases::outer_transition_faults_preserve_cleanup_and_catch_progress();

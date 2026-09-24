@@ -20,6 +20,7 @@ mod d3d8;
 mod desktop;
 mod diagnostics;
 mod dialogs;
+mod dinput;
 mod directory;
 mod dsound;
 mod eh;
@@ -88,6 +89,7 @@ pub struct Process32 {
     gdi: gdi::Gdi,
     crt: crt::Crt,
     com: com::Com,
+    input: dinput::Input,
     diagnostic_imports: diagnostics::Imports,
 }
 
@@ -173,6 +175,7 @@ enum Api {
     Desktop(desktop::Call),
     Crt(crt::Call),
     Com(com::Call),
+    Input(dinput::Call),
     CodePage(code_pages::Call),
     Module(modules::Call),
     Resource(resources::Call),
@@ -199,13 +202,14 @@ fn collect_modules<'a>(
     startup.iter().chain(deferred).copied().collect()
 }
 
-fn reserved_ranges() -> [std::ops::Range<u64>; 8] {
+fn reserved_ranges() -> [std::ops::Range<u64>; 9] {
     [
         u64::from(STACK_BASE)..u64::from(STACK_BASE + STACK_SIZE),
         heap::START..heap::END,
         u64::from(API_BASE)..u64::from(startup::BASE) + PAGE_SIZE,
         u64::from(com::BASE)..u64::from(com::BASE) + PAGE_SIZE,
         u64::from(dsound::BASE)..u64::from(dsound::BASE) + PAGE_SIZE,
+        u64::from(dinput::BASE)..u64::from(dinput::BASE) + PAGE_SIZE,
         u64::from(diagnostics::BASE)
             ..u64::from(diagnostics::BASE) + u64::from(diagnostics::MAX_IMPORTS) * 4,
         u64::from(thread::BASE)..u64::from(thread::BASE) + PAGE_SIZE,
@@ -282,6 +286,7 @@ impl Api {
             offset => d3d8::Call::at(offset)
                 .map(Self::Graphics)
                 .or_else(|| dsound::Call::at(offset).map(Self::Sound))
+                .or_else(|| dinput::Call::at(offset).map(Self::Input))
                 .or_else(|| system::Call::at(offset).map(Self::System))
                 .or_else(|| creation::Call::at(offset).map(Self::Window))
                 .or_else(|| gdi::Call::at(offset).map(Self::Gdi))
@@ -316,6 +321,9 @@ impl Api {
     }
 
     fn resolve_name(module: &str, name: &str) -> Option<u32> {
+        if module.eq_ignore_ascii_case("dinput.dll") {
+            return dinput::Call::resolve(name);
+        }
         if module.eq_ignore_ascii_case("advapi32.dll") {
             return Some(
                 API_BASE
@@ -528,6 +536,7 @@ impl Api {
             Self::Crt(call) => call.arguments(),
             Self::CodePage(call) => call.arguments(),
             Self::Com(call) => call.arguments(),
+            Self::Input(call) => call.arguments(),
             Self::Heap(call) => call.arguments(),
             Self::Tls(call) => call.arguments(),
             Self::Module(call) => call.arguments(),
@@ -675,6 +684,7 @@ impl Process32 {
             sound_data_mapped: false,
             crt: crt::Crt::default(),
             com: com::Com::default(),
+            input: dinput::Input::default(),
             diagnostic_imports,
         })
     }
@@ -853,14 +863,16 @@ impl Process32 {
     }
 
     fn dispatch(&mut self, api: Api) -> Result<(), DispatchError> {
-        if self.threads.scheduled_child() && api.requires_primary() {
+        if (self.threads.scheduled_child() && api.requires_primary())
+            || (matches!(api, Api::Input(_)) && self.cpu.fs_base() != thread::BASE)
+        {
             return Err(DispatchError::Unsupported);
         }
         let stack = self.cpu.register(Register32::Esp);
         let words = api.arguments() + 1;
         let mut frame = [0; 13];
         guest::read_words(&self.memory, stack, &mut frame[..words])?;
-        if matches!(api, Api::SuspendThread | Api::ResumeThread) {
+        if matches!(api, Api::SuspendThread | Api::ResumeThread | Api::Input(_)) {
             stack
                 .checked_add(api.stack_cleanup())
                 .ok_or(MemoryError::AddressOverflow)?;
@@ -1227,6 +1239,10 @@ impl Process32 {
                 self.cpu.set_register(Register32::Eax, value);
             }
             Api::Com(call) => self.com_api(call, args)?,
+            Api::Input(call) => {
+                let value = self.input.dispatch(call, args, &mut self.memory)?;
+                self.cpu.set_register(Register32::Eax, value);
+            }
             Api::String(call) => {
                 let value =
                     call.dispatch(&mut self.memory, thread::Teb(self.cpu.fs_base()), args)?;

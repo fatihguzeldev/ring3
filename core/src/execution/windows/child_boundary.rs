@@ -45,6 +45,7 @@ impl Api {
                 | Self::Gdi(_)
                 | Self::Graphics(_)
                 | Self::Com(_)
+                | Self::Input(_)
         )
     }
 }
