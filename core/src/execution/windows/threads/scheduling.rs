@@ -50,30 +50,37 @@ impl Threads {
             teb.set_last_error(memory, 6)?;
             return Ok(u32::MAX);
         };
-        if context.resumed {
+        let previous = context.suspend_count;
+        if previous == 0 {
             return Ok(0);
         }
-        context.resumed = true;
-        if self.schedule.resumed == 0 {
-            self.schedule.remaining = QUANTUM;
+        context.suspend_count -= 1;
+        if previous == 1 {
+            if !context.ever_resumed {
+                context.ever_resumed = true;
+                if self.schedule.resumed == 0 {
+                    self.schedule.remaining = QUANTUM;
+                }
+                self.schedule.resumed += 1;
+            }
+            self.schedule.requested = true;
         }
-        self.schedule.resumed += 1;
-        self.schedule.requested = true;
-        Ok(1)
+        Ok(previous)
     }
 
     pub(super) fn contexts(&self) -> impl Iterator<Item = (u32, &State)> + Clone {
         std::iter::once((0, &self.primary)).chain(
             self.children
                 .iter()
-                .filter(|(_, context)| context.resumed)
+                .filter(|(_, context)| context.ever_resumed)
                 .map(|(&handle, context)| (handle, &context.state)),
         )
     }
 
     fn ready(&self) -> impl Iterator<Item = (u32, &State)> + Clone {
-        self.contexts()
-            .filter(|(_, state)| !state.wait.is_some_and(super::waiting::Wait::pending))
+        self.contexts().filter(|(handle, state)| {
+            !self.suspended(*handle) && !state.wait.is_some_and(super::waiting::Wait::pending)
+        })
     }
 
     pub(in super::super) fn slice(

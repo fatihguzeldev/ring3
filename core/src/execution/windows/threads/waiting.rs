@@ -52,14 +52,21 @@ impl Threads {
 
     pub(in super::super) fn event_waiters(&self, event: u32, manual: bool) -> Vec<u32> {
         self.contexts()
-            .filter(|(_, state)| {
-                state
-                    .wait
-                    .is_some_and(|wait| wait.event == event && wait.pending())
+            .filter(|(handle, state)| {
+                !self.suspended(*handle)
+                    && state
+                        .wait
+                        .is_some_and(|wait| wait.event == event && wait.pending())
             })
             .map(|(handle, _)| handle)
             .take(if manual { usize::MAX } else { 1 })
             .collect()
+    }
+
+    pub(in super::super) fn event_on_resume(&self, handle: u32) -> Option<u32> {
+        let context = self.children.get(&handle)?;
+        let wait = context.state.wait?;
+        (context.suspend_count == 1 && wait.pending()).then_some(wait.handle)
     }
 
     pub(in super::super) fn release_waiters(&mut self, waiters: &[u32]) {

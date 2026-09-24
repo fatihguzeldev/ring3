@@ -1,6 +1,30 @@
 use super::{DispatchError, Process32, Register32, synchronization, thread};
 
 impl Process32 {
+    pub(super) fn resume_thread(&mut self, handle: u32) -> Result<(), DispatchError> {
+        let event = self
+            .threads
+            .event_on_resume(handle)
+            .and_then(|handle| self.sync_objects.event(handle))
+            .filter(|event| event.signaled);
+        let previous = self.threads.resume(
+            handle,
+            thread::Teb(self.cpu.fs_base()),
+            &self.sync_objects,
+            &mut self.memory,
+        )?;
+        if previous == 1
+            && let Some(event) = event
+        {
+            self.threads.release_waiters(&[handle]);
+            if !event.manual_reset {
+                self.sync_objects.consume_event(event.id);
+            }
+        }
+        self.cpu.set_register(Register32::Eax, previous);
+        Ok(())
+    }
+
     pub(super) fn wait_event(&mut self, args: &[u32]) -> Result<bool, DispatchError> {
         if args[1] == u32::MAX
             && let Some(event) = self.sync_objects.event(args[0])

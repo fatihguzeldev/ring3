@@ -2,6 +2,7 @@ use std::collections::BTreeMap;
 
 mod entry;
 mod scheduling;
+mod suspension;
 mod waiting;
 pub(super) use entry::{ENTER, RETURN};
 
@@ -31,7 +32,8 @@ pub(super) struct State {
 }
 
 struct Context {
-    resumed: bool,
+    ever_resumed: bool,
+    suspend_count: u32,
     id: u32,
     teb: u32,
     cpu: Cpu32,
@@ -134,7 +136,8 @@ impl Threads {
         self.children.insert(
             handle,
             Context {
-                resumed: false,
+                ever_resumed: false,
+                suspend_count: 1,
                 id,
                 teb: high,
                 cpu,
@@ -150,6 +153,46 @@ impl Threads {
 mod tests {
     use super::super::PAGE_SIZE;
     use super::*;
+
+    #[test]
+    fn loader_owner_cannot_be_suspended_or_lose_its_saved_context() {
+        let mut memory = GuestMemory::new(20);
+        memory
+            .map_zeroed(0x4000, PAGE_SIZE, Permissions::READ_EXECUTE)
+            .unwrap();
+        let mut threads = Threads::default();
+        let mut handles = SyncObjects::default();
+        let (handle, child) = threads
+            .create_suspended(&[0, 0, 0x4000, 0, 4, 0], &mut memory, &mut handles)
+            .unwrap_or_else(|_| panic!("suspended creation failed"));
+        let cpu = threads.children[&handle].cpu;
+        for _ in 0..2 {
+            assert!(matches!(
+                threads.suspend(
+                    handle,
+                    thread::Teb(thread::BASE),
+                    Some(child.0),
+                    &handles,
+                    &mut memory
+                ),
+                Err(DispatchError::Unsupported)
+            ));
+            assert_eq!(threads.children[&handle].cpu, cpu);
+            assert_eq!(threads.children[&handle].suspend_count, 1);
+            assert!(!threads.scheduling_enabled());
+        }
+        assert!(matches!(
+            threads.suspend(
+                handle,
+                thread::Teb(thread::BASE),
+                None,
+                &handles,
+                &mut memory
+            ),
+            Ok(1)
+        ));
+        assert_eq!(threads.children[&handle].cpu, cpu);
+    }
 
     #[test]
     fn closed_child_retains_its_unexecuted_cpu_and_independent_stack() {

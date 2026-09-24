@@ -128,6 +128,7 @@ enum Api {
     GetCurrentThread,
     GetCurrentThreadId,
     ResumeThread,
+    SuspendThread,
     ExitProcess,
     Interlocked(atomics::Call),
     Clock(clock::Call),
@@ -234,6 +235,7 @@ impl Api {
             0 => Some(Self::SetLastError),
             4 => Some(Self::GetLastError),
             0x550 => Some(Self::ResumeThread),
+            0x554 => Some(Self::SuspendThread),
             0xd8 => Some(Self::GetCurrentThread),
             0xdc => Some(Self::GetCurrentThreadId),
             8 => Some(Self::ExitProcess),
@@ -416,6 +418,7 @@ impl Api {
             "SetLastError" => 0,
             "GetLastError" => 4,
             "ResumeThread" => 0x550,
+            "SuspendThread" => 0x554,
             "GetCurrentThread" => 0xd8,
             "GetCurrentThreadId" => 0xdc,
             "SetThreadPriority" => 0x254,
@@ -860,6 +863,11 @@ impl Process32 {
         let words = api.arguments() + 1;
         let mut frame = [0; 13];
         guest::read_words(&self.memory, stack, &mut frame[..words])?;
+        if matches!(api, Api::SuspendThread | Api::ResumeThread) {
+            stack
+                .checked_add(api.stack_cleanup())
+                .ok_or(MemoryError::AddressOverflow)?;
+        }
         if matches!(api, Api::CallWindowProc) {
             return self.threads.state_mut(self.cpu.fs_base())?.callbacks.start(
                 &mut self.cpu,
@@ -1189,10 +1197,12 @@ impl Process32 {
                 thread::Teb(self.cpu.fs_base()).set_last_error(&mut self.memory, argument)?;
             }
             Api::GetLastError => self.cpu.set_register(Register32::Eax, self.last_error()?),
-            Api::ResumeThread => {
-                let value = self.threads.resume(
+            Api::ResumeThread => self.resume_thread(argument)?,
+            Api::SuspendThread => {
+                let value = self.threads.suspend(
                     argument,
                     thread::Teb(self.cpu.fs_base()),
+                    self.modules.loader_owner(),
                     &self.sync_objects,
                     &mut self.memory,
                 )?;
