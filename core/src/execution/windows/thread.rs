@@ -107,6 +107,10 @@ impl PriorityCall {
 pub(super) struct Priority(u32);
 
 impl Priority {
+    pub(super) fn relative(&self) -> i32 {
+        i32::from_ne_bytes(self.0.to_ne_bytes())
+    }
+
     pub(super) fn dispatch(
         &mut self,
         call: PriorityCall,

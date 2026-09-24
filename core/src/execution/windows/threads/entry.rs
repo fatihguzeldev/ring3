@@ -100,7 +100,7 @@ impl Process32 {
         }
         let context = self
             .threads
-            .suspended
+            .children
             .values_mut()
             .find(|context| context.teb == self.cpu.fs_base())
             .ok_or(DispatchError::Unsupported)?;

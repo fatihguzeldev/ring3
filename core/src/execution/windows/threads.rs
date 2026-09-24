@@ -1,6 +1,7 @@
 use std::collections::BTreeMap;
 
 mod entry;
+mod scheduling;
 pub(super) use entry::{ENTER, RETURN};
 
 use super::{
@@ -16,7 +17,8 @@ pub(super) const END: u32 = START + MAX_THREADS * SLOT_SIZE;
 #[derive(Default)]
 pub(super) struct Threads {
     primary: State,
-    suspended: BTreeMap<u32, Suspended>,
+    children: BTreeMap<u32, Context>,
+    schedule: scheduling::Schedule,
 }
 
 #[derive(Default)]
@@ -26,13 +28,10 @@ pub(super) struct State {
     pub(super) exception: Option<eh::Pending>,
 }
 
-struct Suspended {
+struct Context {
+    runnable: bool,
     id: u32,
     teb: u32,
-    #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "retained cpu is not scheduled yet")
-    )]
     cpu: Cpu32,
     state: State,
     entry: entry::Entry,
@@ -43,7 +42,7 @@ impl Threads {
         if teb == thread::BASE {
             return Ok(&mut self.primary);
         }
-        self.suspended
+        self.children
             .values_mut()
             .find(|context| context.teb == teb)
             .map(|context| &mut context.state)
@@ -61,7 +60,7 @@ impl Threads {
         let priority = if args[0] == u32::MAX - 1 {
             &mut self.state_mut(teb.0)?.priority
         } else if let Some(context) = self
-            .suspended
+            .children
             .get_mut(&args[0])
             .filter(|_| handles.is_thread(args[0]))
         {
@@ -81,7 +80,7 @@ impl Threads {
         if teb.0 == thread::BASE {
             return Some(thread::CURRENT_ID);
         }
-        self.suspended
+        self.children
             .values()
             .find(|context| context.teb == teb.0)
             .map(|context| context.id)
@@ -96,7 +95,7 @@ impl Threads {
         if args[0] != 0 || args[1] != 0 || args[4] != 4 {
             return Err(DispatchError::Unsupported);
         }
-        let slot = u32::try_from(self.suspended.len()).unwrap();
+        let slot = u32::try_from(self.children.len()).unwrap();
         if slot == MAX_THREADS || handles.next_handle().is_none() {
             return Err(DispatchError::Unsupported);
         }
@@ -130,9 +129,10 @@ impl Threads {
         cpu.set_fs_base(high);
         cpu.set_x87_control_word(0x027f);
         let handle = handles.insert_thread();
-        self.suspended.insert(
+        self.children.insert(
             handle,
-            Suspended {
+            Context {
+                runnable: false,
                 id,
                 teb: high,
                 cpu,
@@ -167,7 +167,7 @@ mod tests {
             expected.set_register(Register32::Esp, high - 8);
             expected.set_fs_base(high);
             expected.set_x87_control_word(0x027f);
-            assert_eq!(threads.suspended[&handle].cpu, expected);
+            assert_eq!(threads.children[&handle].cpu, expected);
             assert!(matches!(
                 handles.dispatch(
                     super::super::synchronization::Call::Close,
@@ -178,10 +178,10 @@ mod tests {
                 ),
                 Ok(1)
             ));
-            assert_eq!(threads.suspended[&handle].cpu, expected);
+            assert_eq!(threads.children[&handle].cpu, expected);
             assert_eq!(threads.id(teb), Some(slot + 2));
             threads
-                .suspended
+                .children
                 .get_mut(&handle)
                 .unwrap()
                 .cpu
@@ -193,6 +193,6 @@ mod tests {
             assert!(memory.fetch(u64::from(high - 8), &mut [0]).is_err());
             assert!(memory.fetch(u64::from(high), &mut [0]).is_err());
         }
-        assert_eq!(threads.suspended.len(), 2);
+        assert_eq!(threads.children.len(), 2);
     }
 }

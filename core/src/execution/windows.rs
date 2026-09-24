@@ -7,6 +7,7 @@ use crate::PeImportSymbol;
 
 mod atomics;
 mod callbacks;
+mod child_boundary;
 mod classes;
 mod clock;
 mod code_pages;
@@ -55,7 +56,7 @@ const STACK_SIZE: u32 = 64 * 1024;
 // immutable nt 5.1/build 2600 guest identity, independent of the host and executable.
 const GUEST_VERSION: u32 = (2600 << 16) | (1 << 8) | 5;
 
-/// a guest process with one executing thread and a bounded win32 import boundary.
+/// a guest process with bounded thread scheduling and a win32 import boundary.
 pub struct Process32 {
     pub memory: GuestMemory,
     pub cpu: Cpu32,
@@ -123,6 +124,7 @@ enum Api {
     GetLastError,
     GetCurrentThread,
     GetCurrentThreadId,
+    ResumeThread,
     ExitProcess,
     Interlocked(atomics::Call),
     Clock(clock::Call),
@@ -228,6 +230,7 @@ impl Api {
         match address.checked_sub(API_BASE)? {
             0 => Some(Self::SetLastError),
             4 => Some(Self::GetLastError),
+            0x550 => Some(Self::ResumeThread),
             0xd8 => Some(Self::GetCurrentThread),
             0xdc => Some(Self::GetCurrentThreadId),
             8 => Some(Self::ExitProcess),
@@ -409,6 +412,7 @@ impl Api {
         let offset = match name {
             "SetLastError" => 0,
             "GetLastError" => 4,
+            "ResumeThread" => 0x550,
             "GetCurrentThread" => 0xd8,
             "GetCurrentThreadId" => 0xdc,
             "SetThreadPriority" => 0x254,
@@ -723,6 +727,10 @@ impl Process32 {
     }
 
     /// each guest execution step and dispatched api call costs one budget unit.
+    /// resumed threads share a 4096-operation quantum independent of host budgets.
+    /// highest relative priority runs first; equal priorities rotate in creation order.
+    /// dll initialization pins its owning thread until the notification finishes.
+    /// the public cpu is the selected thread; scheduling validates its fs identity.
     /// a dispatched callback may still be in progress when the budget ends.
     /// repeated strings use one step per element, or one for a zero-count operation.
     /// faults consume no unit for the faulting operation. exit is terminal and
@@ -743,7 +751,19 @@ impl Process32 {
         }
         let mut remaining = budget;
         while remaining != 0 {
-            let step = self.cpu.run_until(&mut self.memory, remaining, |address| {
+            let pinned = if self.startup.is_complete() {
+                self.modules.loader_owner()
+            } else {
+                Some(thread::BASE)
+            };
+            let slice = match self.threads.slice(&mut self.cpu, remaining, pinned) {
+                Ok(slice) => slice,
+                Err(error) => {
+                    result.reason = error.stop(self.cpu.eip);
+                    return result;
+                }
+            };
+            let step = self.cpu.run_until(&mut self.memory, slice, |address| {
                 Api::at(address).is_some()
                     || self.diagnostic_imports.contains(address)
                     || self.startup.contains(address)
@@ -754,33 +774,21 @@ impl Process32 {
             });
             result.instructions += step.instructions;
             remaining -= step.instructions;
+            self.threads.account(step.instructions);
+            if step.reason == StopReason::InstructionLimit {
+                continue;
+            }
             if step.reason != StopReason::Intercepted {
                 result.reason = ProcessStop::Stopped(step.reason);
                 return result;
             }
-            if self.startup.complete_at(self.cpu.eip) {
-                continue;
-            }
-            if matches!(self.cpu.eip, threads::ENTER | threads::RETURN) {
-                if let Err(error) = self.advance_thread_entry() {
+            match self.resume_continuation() {
+                Ok(true) => continue,
+                Ok(false) => {}
+                Err(error) => {
                     result.reason = error.stop(self.cpu.eip);
                     return result;
                 }
-                continue;
-            }
-            if self.cpu.eip == callbacks::RETURN {
-                if let Err(error) = self.finish_callback() {
-                    result.reason = error.stop(self.cpu.eip);
-                    return result;
-                }
-                continue;
-            }
-            if self.cpu.eip == eh::RETURN {
-                if let Err(error) = self.finish_exception_call() {
-                    result.reason = error.stop(self.cpu.eip);
-                    return result;
-                }
-                continue;
             }
             if let Some(stop) = self
                 .startup
@@ -805,6 +813,7 @@ impl Process32 {
             }
             result.api_calls += 1;
             remaining -= 1;
+            self.threads.account(1);
             if let Some(code) = self.exit_code {
                 result.reason = ProcessStop::Exited(code);
                 return result;
@@ -813,7 +822,23 @@ impl Process32 {
         result
     }
 
+    fn resume_continuation(&mut self) -> Result<bool, DispatchError> {
+        if self.startup.complete_at(self.cpu.eip) {
+            return Ok(true);
+        }
+        match self.cpu.eip {
+            threads::ENTER | threads::RETURN => self.advance_thread_entry()?,
+            callbacks::RETURN => self.finish_callback()?,
+            eh::RETURN => self.finish_exception_call()?,
+            _ => return Ok(false),
+        }
+        Ok(true)
+    }
+
     fn dispatch(&mut self, api: Api) -> Result<(), DispatchError> {
+        if self.threads.scheduled_child() && api.requires_primary() {
+            return Err(DispatchError::Unsupported);
+        }
         let stack = self.cpu.register(Register32::Esp);
         let words = api.arguments() + 1;
         let mut frame = [0; 13];
@@ -1149,6 +1174,15 @@ impl Process32 {
                 thread::Teb(self.cpu.fs_base()).set_last_error(&mut self.memory, argument)?;
             }
             Api::GetLastError => self.cpu.set_register(Register32::Eax, self.last_error()?),
+            Api::ResumeThread => {
+                let value = self.threads.resume(
+                    argument,
+                    thread::Teb(self.cpu.fs_base()),
+                    &self.sync_objects,
+                    &mut self.memory,
+                )?;
+                self.cpu.set_register(Register32::Eax, value);
+            }
             Api::GetCurrentThread => self.cpu.set_register(Register32::Eax, u32::MAX - 1),
             Api::GetCurrentThreadId => self.cpu.set_register(
                 Register32::Eax,
