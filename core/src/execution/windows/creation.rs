@@ -145,6 +145,7 @@ impl Process32 {
             dialog: None,
             destroy: None,
             paint: false,
+            sound_enumeration: false,
         };
         let style = if hook.is_some() {
             args[3]
@@ -188,6 +189,11 @@ impl Process32 {
 
     pub(super) fn finish_callback(&mut self) -> Result<(), DispatchError> {
         let frame = self.callbacks.current(&self.cpu)?;
+        if frame.sound_enumeration {
+            self.callbacks.finish(&mut self.cpu, &self.memory)?;
+            self.cpu.set_register(Register32::Eax, 0);
+            return Ok(());
+        }
         if frame.paint {
             self.callbacks.finish(&mut self.cpu, &self.memory)?;
             self.cpu.set_register(Register32::Eax, 1);

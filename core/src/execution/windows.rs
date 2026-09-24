@@ -20,6 +20,7 @@ mod desktop;
 mod diagnostics;
 mod dialogs;
 mod directory;
+mod dsound;
 mod eh;
 mod environment;
 mod formatting;
@@ -159,6 +160,7 @@ enum Api {
     ExceptionProlog,
     CxxThrow,
     Graphics(d3d8::Call),
+    Sound(dsound::Call),
     Gdi(gdi::Call),
     Cursor(cursors::Call),
     Class(classes::Call),
@@ -205,12 +207,13 @@ fn partition_initializers(
     })
 }
 
-fn reserved_ranges() -> [std::ops::Range<u64>; 6] {
+fn reserved_ranges() -> [std::ops::Range<u64>; 7] {
     [
         u64::from(STACK_BASE)..u64::from(STACK_BASE + STACK_SIZE),
         heap::START..heap::END,
         u64::from(API_BASE)..u64::from(startup::BASE) + PAGE_SIZE,
         u64::from(com::BASE)..u64::from(com::BASE) + PAGE_SIZE,
+        u64::from(dsound::BASE)..u64::from(dsound::BASE) + PAGE_SIZE,
         u64::from(diagnostics::BASE)
             ..u64::from(diagnostics::BASE) + u64::from(diagnostics::MAX_IMPORTS) * 4,
         u64::from(thread::BASE)..u64::from(thread::BASE) + PAGE_SIZE,
@@ -283,6 +286,7 @@ impl Api {
             0x494 | 0xffc => Some(Self::Unsupported),
             offset => d3d8::Call::at(offset)
                 .map(Self::Graphics)
+                .or_else(|| dsound::Call::at(offset).map(Self::Sound))
                 .or_else(|| system::Call::at(offset).map(Self::System))
                 .or_else(|| creation::Call::at(offset).map(Self::Window))
                 .or_else(|| gdi::Call::at(offset).map(Self::Gdi))
@@ -307,6 +311,9 @@ impl Api {
     }
 
     fn resolve(module: &str, symbol: PeImportSymbol<'_>) -> Option<u32> {
+        if module.eq_ignore_ascii_case("dsound.dll") {
+            return dsound::Call::resolve(symbol);
+        }
         let PeImportSymbol::ByName { name, .. } = symbol else {
             return None;
         };
@@ -513,6 +520,7 @@ impl Api {
             | Self::ExceptionProlog
             | Self::Unsupported => 0,
             Self::Graphics(call) => call.arguments(),
+            Self::Sound(_) => dsound::Call::arguments(),
             Self::Gdi(call) => call.arguments(),
             Self::Cursor(call) => call.arguments(),
             Self::Class(call) => call.arguments(),
@@ -630,6 +638,7 @@ impl Process32 {
         image
             .memory
             .map_zeroed(u64::from(API_BASE), PAGE_SIZE, Permissions::NONE)?;
+        dsound::initialize(&mut image.memory)?;
         d3d8::Graphics::initialize(&mut image.memory)?;
         diagnostic_imports.map(&mut image.memory)?;
         thread::initialize(&mut image.memory, STACK_BASE, STACK_BASE + STACK_SIZE)?;
@@ -840,6 +849,7 @@ impl Process32 {
             Api::CallNextHook => self.call_next_hook(&frame[1..words])?,
             Api::Window(creation::Call::Create) => self.create_window(&frame[1..words])?,
             Api::Module(modules::Call::Load) => self.load_module(&frame[1..words])?,
+            Api::Sound(dsound::Call::EnumerateA) => self.enumerate_sound(&frame[1..words])?,
             _ => {
                 self.invoke(api, &frame[1..words], stack)?;
                 false
@@ -878,6 +888,7 @@ impl Process32 {
                         dialog: None,
                         destroy: None,
                         paint: false,
+                        sound_enumeration: false,
                     },
                     pending.entry,
                     &[pending.handle, 1, 0],
@@ -1057,6 +1068,7 @@ impl Process32 {
                 dialog: None,
                 destroy: None,
                 paint: true,
+                sound_enumeration: false,
             },
             procedure,
             &[handle, 0x0f, 0, 0],
@@ -1190,7 +1202,8 @@ impl Process32 {
                 self.cursors.dispatch(call, args, &mut self.memory)?,
             ),
             Api::Crt(call) => self.crt_call(call, args)?,
-            Api::CreateDialog
+            Api::Sound(_)
+            | Api::CreateDialog
             | Api::DestroyWindow
             | Api::UpdateWindow
             | Api::CallWindowProc

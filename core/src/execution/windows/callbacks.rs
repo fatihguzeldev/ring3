@@ -37,6 +37,7 @@ impl Process32 {
                 dialog: None,
                 destroy: None,
                 paint: false,
+                sound_enumeration: false,
             },
             window.procedure,
             &message[..4],
@@ -84,6 +85,7 @@ impl Process32 {
                 dialog: None,
                 destroy: None,
                 paint: false,
+                sound_enumeration: false,
             },
             procedure,
             args,
@@ -108,6 +110,7 @@ pub(super) struct Frame {
     pub(super) dialog: Option<dialogs::Pending>,
     pub(super) destroy: Option<desktop::DestroyPending>,
     pub(super) paint: bool,
+    pub(super) sound_enumeration: bool,
 }
 
 impl Callbacks {
@@ -131,6 +134,7 @@ impl Callbacks {
                 dialog: None,
                 destroy: None,
                 paint: false,
+                sound_enumeration: false,
             },
             arguments[0],
             &arguments[1..],

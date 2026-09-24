@@ -285,6 +285,7 @@ impl Process32 {
                 dialog: Some(pending),
                 destroy: None,
                 paint: false,
+                sound_enumeration: false,
             },
             hook.map_or(procedure, |(_, procedure)| procedure),
             arguments,

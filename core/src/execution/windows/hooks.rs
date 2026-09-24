@@ -128,6 +128,7 @@ impl Process32 {
                 dialog: None,
                 destroy: None,
                 paint: false,
+                sound_enumeration: false,
             },
             procedure,
             &args[1..],

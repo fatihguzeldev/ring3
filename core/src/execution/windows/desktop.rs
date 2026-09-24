@@ -508,6 +508,7 @@ impl super::Process32 {
                 dialog: None,
                 destroy: Some(pending),
                 paint: false,
+                sound_enumeration: false,
             },
             pending.procedure,
             &[handle, 2, 0, 0],
