@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use super::{DispatchError, GuestMemory, thread};
+use super::{DispatchError, GuestMemory, MemoryError, thread};
 
 const MAX_OBJECTS: usize = 4096;
 const FIRST_HANDLE: u32 = 0x7200_0004;
@@ -44,6 +44,7 @@ struct Mutex {
     // a positive depth belongs to the sole guest thread.
     depth: u32,
     handles: usize,
+    name: Option<Vec<u8>>,
 }
 
 impl Default for Mutexes {
@@ -113,25 +114,61 @@ impl Mutexes {
         arguments: &[u32],
         memory: &mut GuestMemory,
     ) -> Result<u32, DispatchError> {
-        if arguments[0] != 0 || arguments[2] != 0 {
+        if arguments[0] != 0 {
             return Err(DispatchError::Unsupported);
         }
+        let name = read_name(memory, arguments[2])?;
         if self.handles.len() == MAX_OBJECTS || self.next > LAST_HANDLE {
             return failure(memory, 8, 0);
         }
-        thread::set_last_error(memory, 0)?;
+        let existing = name.as_ref().and_then(|name| {
+            self.objects
+                .iter()
+                .find(|(_, object)| object.name.as_ref() == Some(name))
+                .map(|(&id, _)| id)
+        });
+        thread::set_last_error(memory, if existing.is_some() { 183 } else { 0 })?;
         let handle = self.next;
-        self.objects.insert(
-            handle,
-            Mutex {
-                depth: u32::from(arguments[1] != 0),
-                handles: 1,
-            },
-        );
-        self.handles.insert(handle, handle);
+        let object_id = if let Some(id) = existing {
+            self.objects.get_mut(&id).unwrap().handles += 1;
+            id
+        } else {
+            self.objects.insert(
+                handle,
+                Mutex {
+                    depth: u32::from(arguments[1] != 0),
+                    handles: 1,
+                    name,
+                },
+            );
+            handle
+        };
+        self.handles.insert(handle, object_id);
         self.next += 4;
         Ok(handle)
     }
+}
+
+fn read_name(memory: &GuestMemory, address: u32) -> Result<Option<Vec<u8>>, DispatchError> {
+    if address == 0 {
+        return Ok(None);
+    }
+    let mut name = Vec::new();
+    for offset in 0..260 {
+        let current = address
+            .checked_add(offset)
+            .ok_or(MemoryError::AddressOverflow)?;
+        let mut byte = [0];
+        memory.read(u64::from(current), &mut byte)?;
+        if byte[0] == 0 && !name.is_empty() {
+            return Ok(Some(name));
+        }
+        if byte[0] == 0 || !byte[0].is_ascii() || byte[0] == b'\\' {
+            return Err(DispatchError::Unsupported);
+        }
+        name.push(byte[0]);
+    }
+    Err(DispatchError::Unsupported)
 }
 
 fn failure(memory: &mut GuestMemory, error: u32, value: u32) -> Result<u32, DispatchError> {
@@ -179,6 +216,7 @@ mod tests {
             Mutex {
                 depth: u32::MAX,
                 handles: 1,
+                name: None,
             },
         );
         mutexes.handles.insert(FIRST_HANDLE, FIRST_HANDLE);

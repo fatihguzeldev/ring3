@@ -243,3 +243,182 @@ fn imported_lifecycle_agrees_whole_and_single_step() {
         assert_eq!(p.cpu.register(Register32::Esp), 0x1001_0000);
     }
 }
+
+const NAME: u32 = 0x0040_2200;
+
+fn name(p: &mut Process32, bytes: &[u8]) {
+    p.memory.write(u64::from(NAME), bytes).unwrap();
+}
+
+#[test]
+fn named_handles_share_ownership_until_the_last_close() {
+    for initial_owner in [0, 1] {
+        let mut p = load();
+        name(&mut p, b"shared mutex\0");
+        let first = call(&mut p, CREATE, &[0, initial_owner, NAME]);
+        assert_eq!(first, FIRST);
+        assert_eq!(p.last_error().unwrap(), 0);
+        let second = call(&mut p, CREATE, &[0, 1, NAME]);
+        assert_eq!(second, FIRST + 4);
+        assert_eq!(p.last_error().unwrap(), 183);
+        assert_eq!(call(&mut p, RELEASE, &[second]), initial_owner);
+        assert_eq!(call(&mut p, RELEASE, &[first]), 0);
+        assert_eq!(p.last_error().unwrap(), 288);
+        assert_eq!(call(&mut p, WAIT, &[first, 0]), 0);
+        assert_eq!(call(&mut p, WAIT, &[second, u32::MAX]), 0);
+        assert_eq!(call(&mut p, CLOSE, &[first]), 1);
+        assert_eq!(call(&mut p, WAIT, &[first, 0]), u32::MAX);
+        let third = call(&mut p, CREATE, &[0, 0, NAME]);
+        assert_eq!(p.last_error().unwrap(), 183);
+        assert_eq!(call(&mut p, RELEASE, &[third]), 1);
+        assert_eq!(call(&mut p, RELEASE, &[second]), 1);
+        assert_eq!(call(&mut p, RELEASE, &[third]), 0);
+        assert_eq!(call(&mut p, CLOSE, &[third]), 1);
+        assert_eq!(call(&mut p, CLOSE, &[second]), 1);
+        assert_eq!(call(&mut p, CREATE, &[0, 1, NAME]), FIRST + 12);
+        assert_eq!(p.last_error().unwrap(), 0);
+        assert_eq!(call(&mut p, RELEASE, &[FIRST + 12]), 1);
+    }
+}
+
+#[test]
+fn names_are_owned_case_sensitive_and_process_local() {
+    let mut p = load();
+    let mut other = load();
+    name(&mut p, b"Shared\0");
+    name(&mut other, b"Shared\0");
+    assert_eq!(call(&mut p, CREATE, &[0, 1, NAME]), FIRST);
+    assert_eq!(call(&mut other, CREATE, &[0, 0, NAME]), FIRST);
+    assert_eq!(other.last_error().unwrap(), 0);
+    assert_eq!(call(&mut other, RELEASE, &[FIRST]), 0);
+    name(&mut p, b"shared\0");
+    assert_eq!(call(&mut p, CREATE, &[0, 0, NAME]), FIRST + 4);
+    assert_eq!(p.last_error().unwrap(), 0);
+    assert_eq!(call(&mut p, RELEASE, &[FIRST + 4]), 0);
+    name(&mut p, b"Shared\0");
+    assert_eq!(call(&mut p, CREATE, &[0, 0, NAME]), FIRST + 8);
+    assert_eq!(p.last_error().unwrap(), 183);
+    assert_eq!(call(&mut p, RELEASE, &[FIRST + 8]), 1);
+}
+
+#[test]
+fn named_mutex_reopens_are_bounded_by_live_handle_limit() {
+    let mut p = load();
+    name(&mut p, b"bounded\0");
+    for index in 0..4096 {
+        assert_eq!(call(&mut p, CREATE, &[0, 0, NAME]), FIRST + index * 4);
+        assert_eq!(p.last_error().unwrap(), if index == 0 { 0 } else { 183 });
+    }
+    assert_eq!(call(&mut p, CREATE, &[0, 1, NAME]), 0);
+    assert_eq!(p.last_error().unwrap(), 8);
+    assert_eq!(call(&mut p, RELEASE, &[FIRST]), 0);
+    assert_eq!(call(&mut p, CLOSE, &[FIRST]), 1);
+    assert_eq!(call(&mut p, CREATE, &[0, 1, NAME]), FIRST + 4096 * 4);
+    assert_eq!(p.last_error().unwrap(), 183);
+    assert_eq!(call(&mut p, RELEASE, &[FIRST + 4096 * 4]), 0);
+}
+
+#[test]
+fn unsupported_names_and_memory_faults_do_not_consume_handles() {
+    let mut p = load();
+    put(&mut p, ERROR, 77);
+    for bytes in [
+        b"\0".as_slice(),
+        b"Global\\lock\0",
+        b"Local\\lock\0",
+        b"bad\xff\0",
+        &[b'a'; 260],
+    ] {
+        name(&mut p, bytes);
+        let before = prepare(&mut p, CREATE, &[0, 0, NAME]);
+        assert_eq!(
+            p.run(1).reason,
+            ProcessStop::UnsupportedApi { address: CREATE }
+        );
+        assert_eq!(p.cpu, before);
+        assert_eq!(p.last_error().unwrap(), 77);
+    }
+    for pointer in [0x003f_ffff, 0x0040_3000] {
+        let before = prepare(&mut p, CREATE, &[0, 0, pointer]);
+        assert!(matches!(
+            p.run(1).reason,
+            ProcessStop::Stopped(StopReason::MemoryFault(_))
+        ));
+        assert_eq!(p.cpu, before);
+        assert_eq!(p.last_error().unwrap(), 77);
+    }
+    let mut longest = [b'a'; 260];
+    longest[259] = 0;
+    name(&mut p, &longest);
+    assert_eq!(call(&mut p, CREATE, &[0, 1, NAME]), FIRST);
+    assert_eq!(p.last_error().unwrap(), 0);
+}
+
+#[test]
+fn name_and_last_error_faults_preserve_shared_object_lifetime() {
+    let mut p = load();
+    name(&mut p, b"faults\0");
+    p.memory
+        .protect(0x7ffd_e000, PAGE_SIZE, Permissions::READ)
+        .unwrap();
+    let before = prepare(&mut p, CREATE, &[0, 1, NAME]);
+    assert!(matches!(
+        p.run(1).reason,
+        ProcessStop::Stopped(StopReason::MemoryFault(_))
+    ));
+    assert_eq!(p.cpu, before);
+    p.memory
+        .protect(0x7ffd_e000, PAGE_SIZE, Permissions::READ_WRITE)
+        .unwrap();
+    let first = call(&mut p, CREATE, &[0, 0, NAME]);
+    assert_eq!(first, FIRST);
+    assert_eq!(p.last_error().unwrap(), 0);
+    for page in [0x0040_2000, 0x7ffd_e000] {
+        p.memory
+            .protect(page, PAGE_SIZE, Permissions::NONE)
+            .unwrap();
+        let before = prepare(&mut p, CREATE, &[0, 1, NAME]);
+        assert!(matches!(
+            p.run(1).reason,
+            ProcessStop::Stopped(StopReason::MemoryFault(_))
+        ));
+        assert_eq!(p.cpu, before);
+        p.memory
+            .protect(page, PAGE_SIZE, Permissions::READ_WRITE)
+            .unwrap();
+    }
+    assert_eq!(call(&mut p, RELEASE, &[first]), 0);
+    assert_eq!(call(&mut p, CLOSE, &[first]), 1);
+    assert_eq!(call(&mut p, CREATE, &[0, 0, NAME]), FIRST + 4);
+    assert_eq!(p.last_error().unwrap(), 0);
+}
+
+#[test]
+fn named_imported_lifecycle_agrees_whole_and_single_step() {
+    for budget in [1, 100] {
+        let mut p = Process32::load(&mutex_executable::named_pe32(), 32).unwrap();
+        let (mut steps, mut calls) = (0, 0);
+        loop {
+            let result = p.run(budget);
+            steps += result.instructions;
+            calls += result.api_calls;
+            if result.reason != ProcessStop::Stopped(StopReason::InstructionLimit) {
+                assert_eq!(result.reason, ProcessStop::Stopped(StopReason::Breakpoint));
+                break;
+            }
+            assert!(steps + calls < 100);
+        }
+        assert_eq!((steps, calls), (32, 10));
+        for (register, expected) in [
+            (Register32::Eax, 0),
+            (Register32::Ebx, FIRST),
+            (Register32::Esi, FIRST + 4),
+            (Register32::Edi, FIRST + 8),
+            (Register32::Ebp, 1),
+            (Register32::Esp, 0x1001_0000),
+        ] {
+            assert_eq!(p.cpu.register(register), expected);
+        }
+        assert_eq!(p.last_error().unwrap(), 288);
+    }
+}

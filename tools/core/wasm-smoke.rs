@@ -2420,6 +2420,17 @@ fn execute_mutex_lifecycle() {
     assert_eq!(process.cpu.register(Register32::Eax), 1);
     assert_eq!(process.cpu.register(Register32::Ebx), 0x7200_0004);
     assert_eq!(process.cpu.register(Register32::Esp), 0x1001_0000);
+    let mut process = Process32::load(&mutex_executable::named_pe32(), 32).unwrap();
+    let result = process.run(100);
+    assert_eq!(result.reason, ProcessStop::Stopped(StopReason::Breakpoint));
+    assert_eq!((result.instructions, result.api_calls), (32, 10));
+    assert_eq!(process.cpu.register(Register32::Eax), 0);
+    assert_eq!(process.cpu.register(Register32::Ebx), 0x7200_0004);
+    assert_eq!(process.cpu.register(Register32::Esi), 0x7200_0008);
+    assert_eq!(process.cpu.register(Register32::Edi), 0x7200_000c);
+    assert_eq!(process.cpu.register(Register32::Ebp), 1);
+    assert_eq!(process.cpu.register(Register32::Esp), 0x1001_0000);
+    assert_eq!(process.last_error().unwrap(), 288);
     #[cfg(windows_demo)]
     {
         let mut process =
