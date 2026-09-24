@@ -26,6 +26,8 @@ const VIEWPORT: u32 = 0x0040_2bc0;
 const DEPTH_OUTPUT: u32 = 0x0040_2be0;
 const SURFACE_OUTPUT: u32 = 0x0040_2c00;
 const SURFACE_RECT: u32 = 0x0040_2c20;
+const MATRIX: u32 = 0x0040_2d00;
+const MATRIX_OUTPUT: u32 = 0x0040_2d80;
 
 #[test]
 fn executes_an_uninterrupted_guest_graphics_program() {
@@ -859,6 +861,130 @@ fn invalid_viewport_or_guest_fault_preserves_the_previous_clip() {
     let frame = process.take_frame().unwrap();
     assert_eq!(&frame.rgba[0..4], &[0, 0, 0, 255]);
     assert_eq!(&frame.rgba[(4 + 1) * 4..(4 + 2) * 4], &[255, 0, 0, 255]);
+}
+
+#[test]
+fn transform_states_round_trip_exact_matrix_bits_and_reset_with_the_device() {
+    let (mut process, root, device) = create();
+    let set = method(&process, device, 37);
+    let get = method(&process, device, 38);
+    let identity = [
+        1_f32.to_bits(),
+        0,
+        0,
+        0,
+        0,
+        1_f32.to_bits(),
+        0,
+        0,
+        0,
+        0,
+        1_f32.to_bits(),
+        0,
+        0,
+        0,
+        0,
+        1_f32.to_bits(),
+    ];
+    assert_eq!(invoke(&mut process, get, &[device, 2, MATRIX_OUTPUT]), 0);
+    assert_eq!(
+        read_bytes(&process, MATRIX_OUTPUT, 64),
+        identity
+            .iter()
+            .flat_map(|word| word.to_le_bytes())
+            .collect::<Vec<_>>()
+    );
+    for (state, changed) in [(2, 12), (3, 13), (16, 0), (256, 14), (511, 11)] {
+        let mut matrix = identity;
+        matrix[changed] = if state == 2 {
+            (-0_f32).to_bits()
+        } else {
+            0x3f80_0000 | state
+        };
+        write(&mut process, MATRIX, &matrix);
+        assert_eq!(invoke(&mut process, set, &[device, state, MATRIX]), 0);
+        write(&mut process, MATRIX_OUTPUT, &[0xa5a5_a5a5; 16]);
+        assert_eq!(
+            invoke(&mut process, get, &[device, state, MATRIX_OUTPUT]),
+            0
+        );
+        assert_eq!(
+            read_bytes(&process, MATRIX_OUTPUT, 64),
+            read_bytes(&process, MATRIX, 64)
+        );
+    }
+    assert_eq!(invoke(&mut process, get, &[device, 2, MATRIX_OUTPUT]), 0);
+    assert_eq!(read(&process, MATRIX_OUTPUT + 12 * 4), (-0_f32).to_bits());
+    let release = method(&process, device, 2);
+    assert_eq!(invoke(&mut process, release, &[device]), 0);
+    let create_device = method(&process, root, 15);
+    assert_eq!(
+        invoke(
+            &mut process,
+            create_device,
+            &[root, 0, 1, 1, 0x20, PARAMETERS, OUTPUT]
+        ),
+        0
+    );
+    let recreated = read(&process, OUTPUT);
+    assert_eq!(invoke(&mut process, get, &[recreated, 2, MATRIX_OUTPUT]), 0);
+    assert_eq!(
+        read_bytes(&process, MATRIX_OUTPUT, 64),
+        identity
+            .iter()
+            .flat_map(|word| word.to_le_bytes())
+            .collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn invalid_transform_state_or_guest_fault_preserves_the_previous_matrix() {
+    let (mut process, _, device) = create();
+    let set = method(&process, device, 37);
+    let get = method(&process, device, 38);
+    let matrix = [1_f32.to_bits(); 16];
+    write(&mut process, MATRIX, &matrix);
+    assert_eq!(invoke(&mut process, set, &[device, 2, MATRIX]), 0);
+    for state in [0, 24, 255, 512, u32::MAX] {
+        assert_eq!(
+            invoke(&mut process, set, &[device, state, MATRIX]),
+            0x8876_086c
+        );
+        assert_eq!(
+            invoke(&mut process, get, &[device, state, MATRIX_OUTPUT]),
+            0x8876_086c
+        );
+    }
+    assert_eq!(
+        invoke(&mut process, set, &[device + 4, 2, MATRIX]),
+        0x8876_086c
+    );
+    assert_eq!(invoke(&mut process, set, &[device, 2, 0]), 0x8876_086c);
+    let mut invalid = matrix;
+    invalid[5] = f32::NAN.to_bits();
+    write(&mut process, MATRIX, &invalid);
+    assert_eq!(invoke(&mut process, set, &[device, 2, MATRIX]), 0x8876_086c);
+    let result = call(&mut process, set, &[device, 2, 0x6000_0000]);
+    assert!(matches!(
+        result.reason,
+        ProcessStop::Stopped(StopReason::MemoryFault(_))
+    ));
+    assert_eq!(result.api_calls, 0);
+    write(&mut process, MATRIX_OUTPUT, &[0xa5a5_a5a5; 16]);
+    let result = call(&mut process, get, &[device, 2, 0x6000_0000]);
+    assert!(matches!(
+        result.reason,
+        ProcessStop::Stopped(StopReason::MemoryFault(_))
+    ));
+    assert_eq!(result.api_calls, 0);
+    assert_eq!(invoke(&mut process, get, &[device, 2, MATRIX_OUTPUT]), 0);
+    assert_eq!(
+        read_bytes(&process, MATRIX_OUTPUT, 64),
+        matrix
+            .iter()
+            .flat_map(|word| word.to_le_bytes())
+            .collect::<Vec<_>>()
+    );
 }
 
 #[test]

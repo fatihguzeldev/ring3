@@ -31,6 +31,24 @@ const TEXTURE_START: u64 = 0x7200_0000;
 const TEXTURE_END: u64 = 0x7f00_0000;
 const MIB: u64 = 1024 * 1024;
 const OUT_OF_VIDEO_MEMORY: u32 = 0x8876_017c;
+const IDENTITY_MATRIX: [u32; 16] = [
+    1_f32.to_bits(),
+    0,
+    0,
+    0,
+    0,
+    1_f32.to_bits(),
+    0,
+    0,
+    0,
+    0,
+    1_f32.to_bits(),
+    0,
+    0,
+    0,
+    0,
+    1_f32.to_bits(),
+];
 
 mod primitives;
 
@@ -85,6 +103,8 @@ pub(super) enum Call {
     TextureSurfaceUnlockRect,
     SetVertexShader,
     SetViewport,
+    SetTransform,
+    GetTransform,
     SetRenderState,
     GetDepthStencilSurface,
     DepthSurfaceAddRef,
@@ -128,6 +148,8 @@ impl Call {
             0x41c => Self::SetVertexShader,
             0x420 => Self::DrawPrimitiveUp,
             0x498 => Self::SetViewport,
+            0x4f0 => Self::SetTransform,
+            0x4f4 => Self::GetTransform,
             0x49c => Self::SetRenderState,
             0x4a0 => Self::GetDepthStencilSurface,
             0x4a4 => Self::DepthSurfaceAddRef,
@@ -156,6 +178,8 @@ impl Call {
             | Self::TextureGetSurface
             | Self::CurrentDisplayMode
             | Self::SetRenderState
+            | Self::SetTransform
+            | Self::GetTransform
             | Self::SetTexture => 3,
             Self::AdapterIdentifier
             | Self::AdapterMode
@@ -187,6 +211,7 @@ pub(super) struct Graphics {
     z_enabled: bool,
     scene_open: bool,
     viewport: Option<Viewport>,
+    transforms: BTreeMap<u32, [u32; 16]>,
     front: Option<Frame>,
     textures: BTreeMap<u32, Texture>,
     texture_stages: [u32; 8],
@@ -216,6 +241,10 @@ impl Texture {
             refs.saturating_add(level.surface_refs)
         })
     }
+}
+
+fn valid_transform_state(state: u32) -> bool {
+    matches!(state, 2 | 3 | 16..=23 | 256..=511)
 }
 
 #[derive(Clone, Copy)]
@@ -266,6 +295,8 @@ impl Graphics {
             (DEVICE_TABLE, 15, 0x48),
             (DEVICE_TABLE, 36, 0x44),
             (DEVICE_TABLE, 40, 0x498),
+            (DEVICE_TABLE, 37, 0x4f0),
+            (DEVICE_TABLE, 38, 0x4f4),
             (DEVICE_TABLE, 50, 0x49c),
             (DEVICE_TABLE, 33, 0x4a0),
             (DEVICE_TABLE, 4, 0x4ac),
@@ -355,6 +386,8 @@ impl Graphics {
                 }
             }
             Call::SetViewport => return self.set_viewport(args, memory),
+            Call::SetTransform => return self.set_transform(args, memory),
+            Call::GetTransform => return self.get_transform(args, memory),
             Call::SetRenderState => self.set_render_state(args),
             Call::SetTexture => return self.set_texture(args, memory),
             Call::GetTextureStageState => return self.get_texture_stage_state(args, memory),
@@ -616,6 +649,7 @@ impl Graphics {
         self.z_enabled = false;
         self.scene_open = false;
         self.viewport = None;
+        self.transforms.clear();
         self.vertex_fvf = 0;
         self.texture_stages = [0; 8];
         self.color_arg0 = [1; 8];
@@ -648,6 +682,45 @@ impl Graphics {
             right: (x + width) as usize,
             bottom: (y + height) as usize,
         });
+        Ok(0)
+    }
+
+    fn set_transform(&mut self, args: &[u32], memory: &GuestMemory) -> Result<u32, MemoryError> {
+        if args[0] != DEVICE
+            || self.device_refs == 0
+            || !valid_transform_state(args[1])
+            || args[2] == 0
+        {
+            return Ok(INVALID_CALL);
+        }
+        let mut matrix = [0; 16];
+        guest::read_words(memory, args[2], &mut matrix)?;
+        if matrix.iter().any(|word| !f32::from_bits(*word).is_finite()) {
+            return Ok(INVALID_CALL);
+        }
+        self.transforms.insert(args[1], matrix);
+        Ok(0)
+    }
+
+    fn get_transform(&self, args: &[u32], memory: &mut GuestMemory) -> Result<u32, MemoryError> {
+        if args[0] != DEVICE
+            || self.device_refs == 0
+            || !valid_transform_state(args[1])
+            || args[2] == 0
+        {
+            return Ok(INVALID_CALL);
+        }
+        guest::check(memory, args[2], 64, Access::Write)?;
+        let matrix = self
+            .transforms
+            .get(&args[1])
+            .copied()
+            .unwrap_or(IDENTITY_MATRIX);
+        let mut bytes = [0; 64];
+        for (word, chunk) in matrix.iter().zip(bytes.chunks_exact_mut(4)) {
+            chunk.copy_from_slice(&word.to_le_bytes());
+        }
+        memory.write(u64::from(args[2]), &bytes)?;
         Ok(0)
     }
 
