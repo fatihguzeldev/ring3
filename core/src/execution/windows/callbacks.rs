@@ -50,7 +50,7 @@ impl Process32 {
             return Err(DispatchError::Unsupported);
         }
         let Some(window) = self.desktop.window(args[0]) else {
-            thread::set_last_error(&mut self.memory, 1400)?;
+            thread::Teb(self.cpu.fs_base()).set_last_error(&mut self.memory, 1400)?;
             self.cpu.set_register(Register32::Eax, 0);
             return Ok(false);
         };

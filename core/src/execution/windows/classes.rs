@@ -36,6 +36,10 @@ pub(super) struct Classes {
 }
 
 impl Classes {
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "class dispatch combines process registries with caller memory"
+    )]
     pub(super) fn dispatch(
         &mut self,
         call: Call,
@@ -43,10 +47,11 @@ impl Classes {
         modules: &Modules,
         atoms: &mut UserAtoms,
         desktop: &super::desktop::Desktop,
+        teb: thread::Teb,
         memory: &mut GuestMemory,
     ) -> Result<u32, DispatchError> {
         if matches!(call, Call::Register) {
-            return self.register(args[0], modules, atoms, memory);
+            return self.register(args[0], modules, atoms, teb, memory);
         }
         let (instance, name) = if matches!(call, Call::Query) {
             (args[0], args[1])
@@ -54,7 +59,7 @@ impl Classes {
             (args[1], args[0])
         };
         let Some((atom, record)) = self.find(instance, name, modules, atoms, memory)? else {
-            return failure(memory, 1411);
+            return failure(teb, memory, 1411);
         };
         if matches!(call, Call::Query) {
             let mut bytes = [0; 40];
@@ -66,7 +71,7 @@ impl Classes {
             return Ok(atom);
         }
         if desktop.has_class(instance, atom) {
-            return failure(memory, 1412);
+            return failure(teb, memory, 1412);
         }
         self.definitions.remove(&(instance, atom));
         atoms.release_class(atom);
@@ -106,6 +111,7 @@ impl Classes {
         pointer: u32,
         modules: &Modules,
         atoms: &mut UserAtoms,
+        teb: thread::Teb,
         memory: &mut GuestMemory,
     ) -> Result<u32, DispatchError> {
         let mut record = [0; 10];
@@ -127,12 +133,12 @@ impl Classes {
             .lookup(&name)
             .is_some_and(|atom| self.definitions.contains_key(&(record[4], atom)))
         {
-            return failure(memory, 1410);
+            return failure(teb, memory, 1410);
         }
         if self.definitions.len() == MAX_CLASSES {
-            return failure(memory, 8);
+            return failure(teb, memory, 8);
         }
-        let atom = atoms.retain_class(name, memory)?;
+        let atom = atoms.retain_class(name, teb, memory)?;
         if atom != 0 {
             self.definitions.insert(
                 (record[4], atom),
@@ -164,8 +170,8 @@ fn read_name(memory: &GuestMemory, pointer: u32) -> Result<String, DispatchError
     Ok(name)
 }
 
-fn failure(memory: &mut GuestMemory, error: u32) -> Result<u32, DispatchError> {
-    thread::set_last_error(memory, error)?;
+fn failure(teb: thread::Teb, memory: &mut GuestMemory, error: u32) -> Result<u32, DispatchError> {
+    teb.set_last_error(memory, error)?;
     Ok(0)
 }
 
@@ -181,6 +187,7 @@ impl super::Process32 {
             &self.modules,
             &mut self.user_atoms,
             &self.desktop,
+            thread::Teb(self.cpu.fs_base()),
             &mut self.memory,
         )?;
         self.cpu.set_register(super::Register32::Eax, value);

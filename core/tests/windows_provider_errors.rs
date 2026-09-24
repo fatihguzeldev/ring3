@@ -401,3 +401,97 @@ fn module_and_string_resource_outputs_can_alias_the_caller_error() {
     assert_eq!(bytes(&p, OUTPUT, 15), b"C:\\program.exe\0");
     assert_eq!(bytes(&p, PRIMARY + 0x34, 4), 77_u32.to_le_bytes());
 }
+
+#[test]
+fn ui_and_priority_failures_report_only_to_the_calling_thread() {
+    let bad = 0x7500_9900;
+    let cases = [
+        (0x440, vec![bad, 5], 0, 1400),
+        (0x444, vec![bad], 0, 1400),
+        (0x464, vec![bad, 0x400, 0, 0], 0, 1400),
+        (0x2cc, vec![bad, 0x400, 0, 0], 0, 1400),
+        (0x45c, vec![bad, SOURCE], 0, 1400),
+        (0x460, vec![bad, 1], 0, 1400),
+        (0x468, vec![bad, 0], 0, 1400),
+        (0x46c, vec![bad, 0, 0, 0, 0, 0, 0], 0, 1400),
+        (0x470, vec![bad], 0, 1400),
+        (0x4b0, vec![bad, 0, 0], 0, 1400),
+        (0x454, vec![bad], 0, 1400),
+        (0x458, vec![bad, 0], 0, 1400),
+        (0x2b8, vec![bad], 0, 1400),
+        (0x2bc, vec![bad, u32::MAX - 3], 0, 1400),
+        (0x2c0, vec![bad, u32::MAX - 3, 0x0040_1000], 0, 1400),
+        (0x2b0, vec![bad, OUTPUT], 0, 1400),
+        (0x2b4, vec![bad, OUTPUT], 0, 1400),
+        (0x2ac, vec![bad, 0, 0, 0], 0, 1400),
+        (0x254, vec![bad, 0], 0, 6),
+        (0x258, vec![bad], 0x7fff_ffff, 6),
+        (0xc0, vec![bad], 0, 1402),
+        (0xcc, vec![0], 0, 998),
+        (0x250, vec![bad], 0, 1404),
+        (0x24c, vec![13, 0, 0, 0], 0, 1427),
+        (0x24c, vec![13, 0x0040_1000, 0, 1], 0, 1429),
+        (0x260, vec![0x0040_0000, SOURCE, OUTPUT], 0, 1411),
+        (0x268, vec![SOURCE, 0x0040_0000], 0, 1411),
+    ];
+    for (offset, args, result, error) in cases {
+        let mut p = load();
+        p.cpu.set_fs_base(CHILD);
+        let output = bytes(&p, OUTPUT, 64);
+        p.memory
+            .protect(u64::from(CHILD), PAGE_SIZE, Permissions::READ)
+            .unwrap();
+        let before = prepare(&mut p, offset, &args);
+        let run = p.run(1);
+        assert!(
+            matches!(run.reason, ProcessStop::Stopped(StopReason::MemoryFault(_))),
+            "api {offset:x}"
+        );
+        assert_eq!((run.instructions, run.api_calls), (0, 0));
+        assert_eq!(p.cpu, before);
+        assert_eq!(bytes(&p, OUTPUT, 64), output);
+        assert_eq!(bytes(&p, PRIMARY + 0x34, 4), 77_u32.to_le_bytes());
+        p.memory
+            .protect(u64::from(CHILD), PAGE_SIZE, Permissions::READ_WRITE)
+            .unwrap();
+        call(&mut p, offset, &args, result);
+        assert_eq!(p.last_error().unwrap(), error, "api {offset:x}");
+        assert_eq!(bytes(&p, PRIMARY + 0x34, 4), 77_u32.to_le_bytes());
+        assert_eq!(bytes(&p, OUTPUT, 64), output);
+    }
+}
+
+#[test]
+fn duplicate_class_error_fault_preserves_registration_and_atom_lifetime() {
+    let mut p = load();
+    let record = 0x0040_2500;
+    for (index, value) in [0, 0x0040_1000, 0, 0, 0x0040_0000, 0, 0, 0, 0, SOURCE]
+        .into_iter()
+        .enumerate()
+    {
+        put(&mut p, record + u32::try_from(index).unwrap() * 4, value);
+    }
+    call(&mut p, 0x264, &[record], 0xc000);
+    p.cpu.set_fs_base(CHILD);
+    p.memory
+        .protect(u64::from(CHILD), PAGE_SIZE, Permissions::READ)
+        .unwrap();
+    let before = prepare(&mut p, 0x264, &[record]);
+    assert!(matches!(
+        p.run(1).reason,
+        ProcessStop::Stopped(StopReason::MemoryFault(_))
+    ));
+    assert_eq!(p.cpu, before);
+    call(&mut p, 0x260, &[0x0040_0000, SOURCE, OUTPUT], 0xc000);
+    p.memory
+        .protect(u64::from(CHILD), PAGE_SIZE, Permissions::READ_WRITE)
+        .unwrap();
+    call(&mut p, 0x264, &[record], 0);
+    assert_eq!(p.last_error().unwrap(), 1410);
+    p.memory
+        .protect(u64::from(CHILD), PAGE_SIZE, Permissions::NONE)
+        .unwrap();
+    call(&mut p, 0x268, &[SOURCE, 0x0040_0000], 1);
+    call(&mut p, 0x264, &[record], 0xc001);
+    assert_eq!(bytes(&p, PRIMARY + 0x34, 4), 77_u32.to_le_bytes());
+}

@@ -182,7 +182,7 @@ impl Process32 {
     }
 
     fn creation_failure(&mut self, error: u32) -> Result<bool, DispatchError> {
-        thread::set_last_error(&mut self.memory, error)?;
+        thread::Teb(self.cpu.fs_base()).set_last_error(&mut self.memory, error)?;
         self.cpu.set_register(Register32::Eax, 0);
         Ok(false)
     }
@@ -409,7 +409,7 @@ impl Process32 {
             return Err(DispatchError::Unsupported);
         }
         let Some(window) = self.desktop.window_mut(args[0]) else {
-            thread::set_last_error(&mut self.memory, 1400)?;
+            thread::Teb(self.cpu.fs_base()).set_last_error(&mut self.memory, 1400)?;
             return Ok(0);
         };
         match call {
@@ -427,7 +427,7 @@ impl Process32 {
 
     fn default_window_proc(&mut self, args: &[u32]) -> Result<u32, DispatchError> {
         let Some(window) = self.desktop.window(args[0]) else {
-            thread::set_last_error(&mut self.memory, 1400)?;
+            thread::Teb(self.cpu.fs_base()).set_last_error(&mut self.memory, 1400)?;
             return Ok(0);
         };
         match args[1] {
@@ -492,7 +492,7 @@ impl Process32 {
             ]
         } else {
             let Some(window) = self.desktop.window(args[0]) else {
-                thread::set_last_error(&mut self.memory, 1400)?;
+                thread::Teb(self.cpu.fs_base()).set_last_error(&mut self.memory, 1400)?;
                 return Ok(0);
             };
             if window.dialog_units.is_some() {

@@ -71,13 +71,14 @@ impl Hooks {
         call: Call,
         arguments: &[u32],
         modules: &Modules,
+        teb: thread::Teb,
         memory: &mut GuestMemory,
     ) -> Result<u32, DispatchError> {
         if matches!(call, Call::Remove) {
             return if self.callbacks.remove(&arguments[0]).is_some() {
                 Ok(1)
             } else {
-                failure(memory, 1404)
+                failure(teb, memory, 1404)
             };
         }
         let kind = match arguments[0] {
@@ -89,13 +90,13 @@ impl Hooks {
             _ => return Err(DispatchError::Unsupported),
         };
         if arguments[1] == 0 {
-            return failure(memory, 1427);
+            return failure(teb, memory, 1427);
         }
         if kind == Kind::LowLevelKeyboard && arguments[3] != 0 {
-            return failure(memory, 1429);
+            return failure(teb, memory, 1429);
         }
         if self.callbacks.len() == MAX_HOOKS || self.next > LAST_HANDLE {
-            return failure(memory, 8);
+            return failure(teb, memory, 8);
         }
         let handle = self.next;
         self.callbacks.insert(handle, (kind, arguments[1]));
@@ -137,8 +138,8 @@ impl Process32 {
     }
 }
 
-fn failure(memory: &mut GuestMemory, error: u32) -> Result<u32, DispatchError> {
-    thread::set_last_error(memory, error)?;
+fn failure(teb: thread::Teb, memory: &mut GuestMemory, error: u32) -> Result<u32, DispatchError> {
+    teb.set_last_error(memory, error)?;
     Ok(0)
 }
 
@@ -162,6 +163,7 @@ mod tests {
                         Call::Install,
                         &[u32::MAX, callback, 0, 1],
                         &modules,
+                        thread::Teb(thread::BASE),
                         &mut memory
                     )
                     .is_ok()
@@ -177,11 +179,23 @@ mod tests {
             [(LAST_HANDLE, 0x3000_5678), (LAST_HANDLE - 4, 0x0040_1234)]
         );
         assert!(matches!(
-            hooks.dispatch(Call::Remove, &[LAST_HANDLE], &modules, &mut memory),
+            hooks.dispatch(
+                Call::Remove,
+                &[LAST_HANDLE],
+                &modules,
+                thread::Teb(thread::BASE),
+                &mut memory
+            ),
             Ok(1)
         ));
         assert!(matches!(
-            hooks.dispatch(Call::Install, &[u32::MAX, 1, 0, 1], &modules, &mut memory),
+            hooks.dispatch(
+                Call::Install,
+                &[u32::MAX, 1, 0, 1],
+                &modules,
+                thread::Teb(thread::BASE),
+                &mut memory
+            ),
             Ok(0)
         ));
         assert_eq!(thread::last_error(&memory).unwrap(), 8);
@@ -205,7 +219,13 @@ mod tests {
         ] {
             assert!(
                 hooks
-                    .dispatch(Call::Install, &args, &modules, &mut memory)
+                    .dispatch(
+                        Call::Install,
+                        &args,
+                        &modules,
+                        thread::Teb(thread::BASE),
+                        &mut memory
+                    )
                     .is_ok()
             );
         }
@@ -223,7 +243,13 @@ mod tests {
             assert_eq!(callbacks, expected);
         }
         assert!(matches!(
-            hooks.dispatch(Call::Remove, &[FIRST_HANDLE + 4], &modules, &mut memory),
+            hooks.dispatch(
+                Call::Remove,
+                &[FIRST_HANDLE + 4],
+                &modules,
+                thread::Teb(thread::BASE),
+                &mut memory
+            ),
             Ok(1)
         ));
         assert_eq!(

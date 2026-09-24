@@ -53,6 +53,7 @@ impl Cursors {
         &mut self,
         call: Call,
         arguments: &[u32],
+        teb: thread::Teb,
         memory: &mut GuestMemory,
     ) -> Result<u32, DispatchError> {
         match call {
@@ -70,7 +71,7 @@ impl Cursors {
             Call::Set => {
                 let handle = arguments[0];
                 if handle != 0 && !self.contains(handle) {
-                    thread::set_last_error(memory, 1402)?;
+                    teb.set_last_error(memory, 1402)?;
                     return Ok(0);
                 }
                 Ok(std::mem::replace(&mut self.current, handle))
@@ -79,7 +80,7 @@ impl Cursors {
             Call::GetPosition => {
                 let output = arguments[0];
                 if output == 0 {
-                    thread::set_last_error(memory, 998)?;
+                    teb.set_last_error(memory, 998)?;
                     return Ok(0);
                 }
                 guest::check(memory, output, 8, Access::Write)?;

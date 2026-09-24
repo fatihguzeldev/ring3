@@ -988,11 +988,11 @@ impl Process32 {
         match self.post_message(posted) {
             Ok(()) => self.cpu.set_register(Register32::Eax, 1),
             Err(PostMessageError::InvalidWindow) => {
-                thread::set_last_error(&mut self.memory, 1400)?;
+                thread::Teb(self.cpu.fs_base()).set_last_error(&mut self.memory, 1400)?;
                 self.cpu.set_register(Register32::Eax, 0);
             }
             Err(PostMessageError::Full) => {
-                thread::set_last_error(&mut self.memory, 1816)?;
+                thread::Teb(self.cpu.fs_base()).set_last_error(&mut self.memory, 1816)?;
                 self.cpu.set_register(Register32::Eax, 0);
             }
             Err(PostMessageError::InvalidMessage | PostMessageError::Exited) => {
@@ -1042,7 +1042,7 @@ impl Process32 {
             _ => return Err(DispatchError::Unsupported),
         };
         let Some(was_visible) = was_visible else {
-            thread::set_last_error(&mut self.memory, 1400)?;
+            thread::Teb(self.cpu.fs_base()).set_last_error(&mut self.memory, 1400)?;
             self.cpu.set_register(Register32::Eax, 0);
             return Ok(());
         };
@@ -1055,7 +1055,7 @@ impl Process32 {
             return Err(DispatchError::Unsupported);
         }
         let Some(window) = self.desktop.window(handle) else {
-            thread::set_last_error(&mut self.memory, 1400)?;
+            thread::Teb(self.cpu.fs_base()).set_last_error(&mut self.memory, 1400)?;
             self.cpu.set_register(Register32::Eax, 0);
             return Ok(false);
         };
@@ -1100,7 +1100,7 @@ impl Process32 {
         if self.desktop.invalidate_full(args[0]) {
             self.cpu.set_register(Register32::Eax, 1);
         } else {
-            thread::set_last_error(&mut self.memory, 1400)?;
+            thread::Teb(self.cpu.fs_base()).set_last_error(&mut self.memory, 1400)?;
             self.cpu.set_register(Register32::Eax, 0);
         }
         Ok(())
@@ -1233,17 +1233,32 @@ impl Process32 {
                 }
                 self.cpu.set_register(
                     Register32::Eax,
-                    self.priority.dispatch(call, args, &mut self.memory)?,
+                    self.priority.dispatch(
+                        call,
+                        args,
+                        thread::Teb(self.cpu.fs_base()),
+                        &mut self.memory,
+                    )?,
                 );
             }
             Api::Hook(call) => self.cpu.set_register(
                 Register32::Eax,
-                self.hooks
-                    .dispatch(call, args, &self.modules, &mut self.memory)?,
+                self.hooks.dispatch(
+                    call,
+                    args,
+                    &self.modules,
+                    thread::Teb(self.cpu.fs_base()),
+                    &mut self.memory,
+                )?,
             ),
             Api::Cursor(call) => self.cpu.set_register(
                 Register32::Eax,
-                self.cursors.dispatch(call, args, &mut self.memory)?,
+                self.cursors.dispatch(
+                    call,
+                    args,
+                    thread::Teb(self.cpu.fs_base()),
+                    &mut self.memory,
+                )?,
             ),
             Api::Crt(call) => self.crt_call(call, args)?,
             Api::Sound(_)

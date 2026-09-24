@@ -70,7 +70,7 @@ pub(super) fn initialize_contents(
     Ok(())
 }
 
-// unmigrated providers still serve only the primary executing thread.
+#[cfg(test)]
 pub(super) fn set_last_error(memory: &mut GuestMemory, value: u32) -> Result<(), MemoryError> {
     Teb(BASE).set_last_error(memory, value)
 }
@@ -111,10 +111,11 @@ impl Priority {
         &mut self,
         call: PriorityCall,
         arguments: &[u32],
+        teb: Teb,
         memory: &mut GuestMemory,
     ) -> Result<u32, super::DispatchError> {
         if arguments[0] != u32::MAX - 1 {
-            set_last_error(memory, 6)?;
+            teb.set_last_error(memory, 6)?;
             return Ok(if matches!(call, PriorityCall::Get) {
                 0x7fff_ffff
             } else {

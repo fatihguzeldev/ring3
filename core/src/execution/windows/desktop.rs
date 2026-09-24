@@ -478,7 +478,7 @@ pub(super) fn read_title(memory: &GuestMemory, pointer: u32) -> Result<String, D
 impl super::Process32 {
     pub(super) fn destroy_dialog(&mut self, handle: u32) -> Result<bool, DispatchError> {
         let Some(window) = self.desktop.window(handle) else {
-            thread::set_last_error(&mut self.memory, 1400)?;
+            thread::Teb(self.cpu.fs_base()).set_last_error(&mut self.memory, 1400)?;
             self.cpu.set_register(Register32::Eax, 0);
             return Ok(false);
         };
@@ -547,7 +547,7 @@ impl super::Process32 {
 
     pub(super) fn set_dialog_window_pos(&mut self, args: &[u32]) -> Result<(), DispatchError> {
         let Some(window) = self.desktop.window(args[0]) else {
-            thread::set_last_error(&mut self.memory, 1400)?;
+            thread::Teb(self.cpu.fs_base()).set_last_error(&mut self.memory, 1400)?;
             self.cpu.set_register(Register32::Eax, 0);
             return Ok(());
         };
@@ -567,7 +567,7 @@ impl super::Process32 {
 
     pub(super) fn end_dialog(&mut self, args: &[u32]) -> Result<(), DispatchError> {
         let Some(window) = self.desktop.window(args[0]) else {
-            thread::set_last_error(&mut self.memory, 1400)?;
+            thread::Teb(self.cpu.fs_base()).set_last_error(&mut self.memory, 1400)?;
             self.cpu.set_register(Register32::Eax, 0);
             return Ok(());
         };
@@ -581,7 +581,7 @@ impl super::Process32 {
 
     pub(super) fn enable_dialog_control(&mut self, args: &[u32]) -> Result<(), DispatchError> {
         let Some(window) = self.desktop.window(args[0]) else {
-            thread::set_last_error(&mut self.memory, 1400)?;
+            thread::Teb(self.cpu.fs_base()).set_last_error(&mut self.memory, 1400)?;
             self.cpu.set_register(Register32::Eax, 0);
             return Ok(());
         };
@@ -643,7 +643,7 @@ impl super::Process32 {
 
     pub(super) fn set_window_text(&mut self, args: &[u32]) -> Result<(), DispatchError> {
         if self.desktop.window(args[0]).is_none() {
-            thread::set_last_error(&mut self.memory, 1400)?;
+            thread::Teb(self.cpu.fs_base()).set_last_error(&mut self.memory, 1400)?;
             self.cpu.set_register(Register32::Eax, 0);
             return Ok(());
         }
@@ -661,7 +661,7 @@ impl super::Process32 {
             && !matches!(args[0], 0 | DESKTOP)
             && self.desktop.window(args[0]).is_none()
         {
-            thread::set_last_error(&mut self.memory, 1400)?;
+            thread::Teb(self.cpu.fs_base()).set_last_error(&mut self.memory, 1400)?;
             self.cpu.set_register(Register32::Eax, 0);
             return Ok(());
         }
@@ -670,7 +670,7 @@ impl super::Process32 {
                 return Err(DispatchError::Unsupported);
             }
             if self.desktop.window(args[0]).is_none() {
-                thread::set_last_error(&mut self.memory, 1400)?;
+                thread::Teb(self.cpu.fs_base()).set_last_error(&mut self.memory, 1400)?;
                 self.cpu.set_register(Register32::Eax, 0);
                 return Ok(());
             }
@@ -904,7 +904,8 @@ mod tests {
         memory.write(0x10020, b"TITLE\0").unwrap();
         memory.write(0x10040, b"unknown\0").unwrap();
         let mut atoms = UserAtoms::default();
-        let Ok(atom) = atoms.retain_class("demo".into(), &mut memory) else {
+        let Ok(atom) = atoms.retain_class("demo".into(), thread::Teb(thread::BASE), &mut memory)
+        else {
             panic!("class atom allocation failed");
         };
         let mut desktop = Desktop::default();
