@@ -1,5 +1,7 @@
 use super::{API_BASE, Access, DispatchError, GuestMemory, PAGE_SIZE, Permissions, guest};
 
+mod keyboard;
+
 pub(super) const BASE: u32 = 0x7001_7000;
 const TABLE: u32 = BASE + 0x100;
 const OBJECTS: u32 = BASE + 0x800;
@@ -65,6 +67,7 @@ impl Class {
 pub(super) enum Call {
     Create,
     CreateDevice,
+    SetDataFormat,
     QueryInterface(Class),
     AddRef(Class),
     Release(Class),
@@ -81,6 +84,7 @@ impl Call {
             0x56c => Some(Self::QueryInterface(Class::Keyboard)),
             0x570 => Some(Self::AddRef(Class::Keyboard)),
             0x574 => Some(Self::Release(Class::Keyboard)),
+            0x578 => Some(Self::SetDataFormat),
             _ => None,
         }
     }
@@ -93,6 +97,7 @@ impl Call {
         match self {
             Self::Create | Self::CreateDevice => 4,
             Self::QueryInterface(_) => 3,
+            Self::SetDataFormat => 2,
             Self::AddRef(_) | Self::Release(_) => 1,
         }
     }
@@ -101,28 +106,27 @@ impl Call {
 #[derive(Default)]
 pub(super) struct Input {
     roots: Vec<u32>,
-    devices: Vec<u32>,
+    devices: Vec<keyboard::Device>,
 }
 
 impl Input {
-    fn counts(&mut self, class: Class) -> &mut Vec<u32> {
+    fn references(&mut self, class: Class, index: usize) -> &mut u32 {
         match class {
-            Class::Root => &mut self.roots,
-            Class::Keyboard => &mut self.devices,
+            Class::Root => &mut self.roots[index],
+            Class::Keyboard => &mut self.devices[index].references,
         }
     }
 
-    fn object(&mut self, class: Class, pointer: u32) -> Result<usize, DispatchError> {
+    fn object(&self, class: Class, pointer: u32) -> Result<usize, DispatchError> {
         let offset = pointer
             .checked_sub(class.objects())
             .ok_or(DispatchError::Unsupported)?;
         let index = usize::try_from(offset / 4).expect("32-bit object index");
-        if !offset.is_multiple_of(4)
-            || self
-                .counts(class)
-                .get(index)
-                .is_none_or(|count| *count == 0)
-        {
+        let count = match class {
+            Class::Root => self.roots.get(index),
+            Class::Keyboard => self.devices.get(index).map(|device| &device.references),
+        };
+        if !offset.is_multiple_of(4) || count.is_none_or(|count| *count == 0) {
             return Err(DispatchError::Unsupported);
         }
         Ok(index)
@@ -150,6 +154,7 @@ impl Input {
                     0 => 0x56c_u32,
                     1 => 0x570,
                     2 => 0x574,
+                    11 => 0x578,
                     _ => 0xffc,
                 };
             bytes[0x200 + slot * 4..0x204 + slot * 4].copy_from_slice(&address.to_le_bytes());
@@ -223,7 +228,7 @@ impl Input {
         let pointer =
             DEVICES + u32::try_from(self.devices.len()).expect("bounded device count") * 4;
         guest::write_word(memory, args[2], pointer)?;
-        self.devices.push(1);
+        self.devices.push(keyboard::Device::new());
         Ok(0)
     }
 
@@ -245,11 +250,12 @@ impl Input {
             guest::write_word(memory, args[2], 0)?;
             return Ok(NO_INTERFACE);
         }
-        let count = self.counts(class)[index]
+        let count = self
+            .references(class, index)
             .checked_add(1)
             .ok_or(DispatchError::Unsupported)?;
         guest::write_word(memory, args[2], args[0])?;
-        self.counts(class)[index] = count;
+        *self.references(class, index) = count;
         Ok(0)
     }
 
@@ -262,18 +268,22 @@ impl Input {
         match call {
             Call::Create => self.create(args, memory),
             Call::CreateDevice => self.create_device(args, memory),
+            Call::SetDataFormat => {
+                let index = self.object(Class::Keyboard, args[0])?;
+                self.devices[index].set_format(args[1], memory)
+            }
             Call::QueryInterface(class) => self.query(class, args, memory),
             Call::AddRef(class) | Call::Release(class) => {
                 let index = self.object(class, args[0])?;
-                let counts = self.counts(class);
+                let references = self.references(class, index);
                 let count = if matches!(call, Call::AddRef(_)) {
-                    counts[index]
+                    references
                         .checked_add(1)
                         .ok_or(DispatchError::Unsupported)?
                 } else {
-                    counts[index] - 1
+                    *references - 1
                 };
-                counts[index] = count;
+                *references = count;
                 Ok(count)
             }
         }
@@ -294,7 +304,9 @@ mod tests {
         for class in [Class::Root, Class::Keyboard] {
             guest::write_word(&mut memory, 0x1020, 77).unwrap();
             let mut input = Input::default();
-            input.counts(class).push(u32::MAX);
+            input.roots.push(u32::MAX);
+            input.devices.push(keyboard::Device::new());
+            *input.references(class, 0) = u32::MAX;
             let pointer = class.objects();
             assert!(matches!(
                 input.dispatch(Call::AddRef(class), &[pointer], &mut memory),
@@ -311,7 +323,7 @@ mod tests {
             let mut output = [0];
             guest::read_words(&memory, 0x1020, &mut output).unwrap();
             assert_eq!(output, [77]);
-            assert_eq!(input.counts(class), &[u32::MAX]);
+            assert_eq!(*input.references(class, 0), u32::MAX);
             assert_eq!(
                 input
                     .dispatch(Call::Release(class), &[pointer], &mut memory)

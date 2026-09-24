@@ -16,6 +16,8 @@ mod thread_window_query_cases;
 
 #[path = "../../core/tests/support/dinput_device_cases.rs"]
 mod dinput_device_cases;
+#[path = "../../core/tests/support/dinput_format_cases.rs"]
+mod dinput_format_cases;
 #[path = "../../core/tests/support/dinput_root_cases.rs"]
 mod dinput_root_cases;
 #[path = "../../core/tests/support/event_wait_control.rs"]
@@ -4714,6 +4716,7 @@ pub extern "C" fn run() -> u32 {
     timed_event_cases::finite_wait_uses_exact_host_time_across_budgets();
     dinput_root_cases::imported_root_lifetime_across_budgets();
     dinput_device_cases::imported_keyboard_lifetime_across_budgets();
+    dinput_format_cases::imported_standard_keyboard_format_across_budgets();
     thread_start_cases::ordered_notifications_precede_each_child_entry();
     thread_start_cases::retryable_notification_frames();
     cxx_exception_cases::outer_transition_faults_preserve_cleanup_and_catch_progress();

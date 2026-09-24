@@ -313,10 +313,11 @@ fn device_creation_uses_existing_read_only_non_executable_page_at_full_budget() 
                 0 => QUERY,
                 1 => ADD,
                 2 => RELEASE,
+                11 => 0x7000_0578,
                 _ => 0x7000_0ffc,
             }
         );
-        if slot >= 3 {
+        if slot >= 3 && slot != 11 {
             denied(&mut p, method, &[]);
         }
     }
