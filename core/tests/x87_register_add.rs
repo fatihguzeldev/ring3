@@ -65,6 +65,88 @@ fn load_subtract_pop(indexed: f64, top: f64, control: u16) -> (Cpu32, GuestMemor
     (cpu, image.memory)
 }
 
+fn load_reverse_subtract_pop(
+    indexed: f64,
+    middle: f64,
+    top: f64,
+    control: u16,
+) -> (Cpu32, GuestMemory) {
+    let mut code = Vec::new();
+    for address in [SOURCE, SOURCE + 0x10, TOP] {
+        code.extend([0xdd, 0x05]);
+        code.extend(address.to_le_bytes());
+    }
+    code.extend([0xde, 0xe2, 0xdf, 0xe0]);
+    for address in [RESULT, RESULT + 4] {
+        code.extend([0xd9, 0x1d]);
+        code.extend(address.to_le_bytes());
+    }
+    let mut image = load_pe32(&executable::pe32(&code), 16).unwrap();
+    for (address, value) in [(SOURCE, indexed), (SOURCE + 0x10, middle), (TOP, top)] {
+        image
+            .memory
+            .write(u64::from(address), &value.to_le_bytes())
+            .unwrap();
+    }
+    let mut cpu = Cpu32::new(image.entry_point);
+    cpu.set_x87_control_word(control);
+    (cpu, image.memory)
+}
+
+#[test]
+fn reverse_subtract_pop_writes_indexed_result_and_keeps_middle_register() {
+    let quarter_ulp = f64::from(f32::EPSILON) * 0.25;
+    for (indexed, top, expected, status) in [
+        (3.0, 5.0, 2.0_f32, 0),
+        (3.0, -1.0, -4.0_f32, 0),
+        (1.0, 2.0 + quarter_ulp, 1.0_f32, 0x20),
+        (1.0, 2.0 - quarter_ulp, 1.0_f32, 0x220),
+    ] {
+        let (mut cpu, mut memory) = load_reverse_subtract_pop(indexed, 7.0, top, 0x007f);
+        assert_eq!(cpu.run(&mut memory, 5).instructions, 5);
+        assert_eq!(cpu.register(Register32::Eax) & 0x3a20, 0x3000 | status);
+        assert_eq!(cpu.run(&mut memory, 2).instructions, 2);
+        for (address, value) in [(RESULT, 7.0_f32), (RESULT + 4, expected)] {
+            let mut bytes = [0; 4];
+            memory.read(u64::from(address), &mut bytes).unwrap();
+            assert_eq!(u32::from_le_bytes(bytes), value.to_bits());
+        }
+    }
+}
+
+#[test]
+fn reverse_subtract_pop_rejects_missing_target_range_and_control_atomically() {
+    for (indexed, top, control) in [
+        (-f64::MAX, f64::MAX, 0x007f),
+        (
+            f64::from(f32::MIN_POSITIVE) / 2.0,
+            f64::from(f32::MIN_POSITIVE),
+            0x007f,
+        ),
+        (3.0, 5.0, 0x0c7f),
+    ] {
+        let (mut cpu, mut memory) = load_reverse_subtract_pop(indexed, 7.0, top, control);
+        assert_eq!(cpu.run(&mut memory, 3).instructions, 3);
+        let before = cpu;
+        assert_eq!(
+            cpu.run(&mut memory, 1).reason,
+            StopReason::UnsupportedInstruction
+        );
+        assert_eq!(cpu, before);
+    }
+
+    let (mut cpu, mut memory) = load_reverse_subtract_pop(3.0, 7.0, 5.0, 0x007f);
+    let entry = cpu.eip;
+    assert_eq!(cpu.run(&mut memory, 2).instructions, 2);
+    cpu.eip = entry + 18;
+    let before = cpu;
+    assert_eq!(
+        cpu.run(&mut memory, 1).reason,
+        StopReason::UnsupportedInstruction
+    );
+    assert_eq!(cpu, before);
+}
+
 #[test]
 fn subtract_pop_stores_indexed_minus_top_with_single_precision() {
     let quarter_ulp = f64::from(f32::EPSILON) * 0.25;

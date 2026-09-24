@@ -153,9 +153,10 @@ impl Cpu32 {
         let single_precision = self.x87_arithmetic_precision(instruction.code())?;
         let destination_is_top = instruction.code() == Code::Fadd_st0_sti;
         let subtract = instruction.code() == Code::Fsubp_sti_st0;
+        let reverse_subtract = instruction.code() == Code::Fsubrp_sti_st0;
         let pop = matches!(
             instruction.code(),
-            Code::Faddp_sti_st0 | Code::Fsubp_sti_st0
+            Code::Faddp_sti_st0 | Code::Fsubp_sti_st0 | Code::Fsubrp_sti_st0
         );
         let indexed_register = if destination_is_top {
             instruction.op1_register()
@@ -171,12 +172,16 @@ impl Cpu32 {
         let top = self.x87_stack.value()?;
         let slot = (usize::from(self.x87_stack.top) + index) & 7;
         let indexed = f64::from_bits(self.x87_stack.values[slot]);
-        let (left, right) = if subtract {
+        let (left, right) = if reverse_subtract {
+            (top, -indexed)
+        } else if subtract {
             (indexed, -top)
         } else {
             (top, indexed)
         };
-        let mut result = if subtract {
+        let mut result = if reverse_subtract {
+            top - indexed
+        } else if subtract {
             indexed - top
         } else {
             top + indexed
@@ -592,6 +597,7 @@ impl Cpu32 {
                     Code::Fdivp_sti_st0
                         | Code::Fmulp_sti_st0
                         | Code::Fsubp_sti_st0
+                        | Code::Fsubrp_sti_st0
                         | Code::Fdiv_m32fp
                         | Code::Fdivr_m32fp
                         | Code::Fsubr_st0_sti
