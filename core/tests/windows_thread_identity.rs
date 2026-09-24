@@ -1,3 +1,5 @@
+#[path = "support/alternate_teb.rs"]
+mod alternate_teb;
 #[path = "support/imported_executable.rs"]
 mod imported_executable;
 
@@ -72,6 +74,34 @@ fn current_identity_agrees_with_initial_teb_and_critical_section_owner() {
     let mut owner = [0; 4];
     p.memory.read(0x0040_218c, &mut owner).unwrap();
     assert_eq!(u32::from_le_bytes(owner), call(&mut p, ID));
+}
+
+#[test]
+fn identity_api_and_fs_relative_reads_agree_at_an_alternate_teb() {
+    for budget in [1, 100] {
+        let mut p = Process32::load(&thread_identity_executable::pe32(), 32).unwrap();
+        alternate_teb::map(&mut p, 0x5000_0000, 23);
+        p.cpu.set_fs_base(0x5000_0000);
+        let mut completed = false;
+        for _ in 0..30 {
+            let result = p.run(budget);
+            if result.reason == ProcessStop::Stopped(StopReason::Breakpoint) {
+                completed = true;
+                break;
+            }
+            assert_eq!(
+                result.reason,
+                ProcessStop::Stopped(StopReason::InstructionLimit)
+            );
+        }
+        assert!(completed);
+        assert_eq!(p.cpu.register(Register32::Eax), 23);
+        assert_eq!(p.cpu.register(Register32::Ecx), 23);
+        assert_eq!(p.cpu.register(Register32::Edx), 23);
+        assert_eq!(p.cpu.register(Register32::Ebx), u32::MAX - 1);
+        p.cpu.set_fs_base(0x7ffd_e000);
+        assert_eq!(call(&mut p, ID), 1);
+    }
 }
 
 #[test]

@@ -699,7 +699,7 @@ impl Process32 {
     /// returns a guest memory fault if the thread field is no longer readable.
     #[expect(clippy::missing_errors_doc, reason = "project headings are lower case")]
     pub fn last_error(&self) -> Result<u32, MemoryError> {
-        thread::last_error(&self.memory)
+        thread::Teb(self.cpu.fs_base()).last_error(&self.memory)
     }
 
     #[must_use]
@@ -1143,12 +1143,15 @@ impl Process32 {
                 Register32::Eax,
                 self.sync_objects.dispatch(call, args, &mut self.memory)?,
             ),
-            Api::SetLastError => thread::set_last_error(&mut self.memory, argument)?,
+            Api::SetLastError => {
+                thread::Teb(self.cpu.fs_base()).set_last_error(&mut self.memory, argument)?;
+            }
             Api::GetLastError => self.cpu.set_register(Register32::Eax, self.last_error()?),
             Api::GetCurrentThread => self.cpu.set_register(Register32::Eax, u32::MAX - 1),
-            Api::GetCurrentThreadId => self
-                .cpu
-                .set_register(Register32::Eax, thread::current_id(&self.memory)?),
+            Api::GetCurrentThreadId => self.cpu.set_register(
+                Register32::Eax,
+                thread::Teb(self.cpu.fs_base()).current_id(&self.memory)?,
+            ),
             Api::Desktop(call) => self.window_query(call, args)?,
             Api::RegisterUserAtom => self.register_user_atom(argument)?,
             Api::System(call) => self

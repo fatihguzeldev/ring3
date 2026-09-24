@@ -2,7 +2,43 @@ use super::{GuestMemory, MemoryError, PAGE_SIZE, Permissions, guest};
 
 pub(super) const CURRENT_ID: u32 = 1;
 pub(super) const BASE: u32 = 0x7ffd_e000;
-const LAST_ERROR: u32 = BASE + 0x34;
+
+#[derive(Clone, Copy)]
+pub(super) struct Teb(pub(super) u32);
+
+impl Teb {
+    fn field(self, offset: u32) -> Result<u32, MemoryError> {
+        self.0
+            .checked_add(offset)
+            .ok_or(MemoryError::AddressOverflow)
+    }
+
+    fn read(self, memory: &GuestMemory, offset: u32) -> Result<u32, MemoryError> {
+        let mut value = [0];
+        guest::read_words(memory, self.field(offset)?, &mut value)?;
+        Ok(value[0])
+    }
+
+    pub(super) fn last_error(self, memory: &GuestMemory) -> Result<u32, MemoryError> {
+        self.read(memory, 0x34)
+    }
+
+    pub(super) fn set_last_error(
+        self,
+        memory: &mut GuestMemory,
+        value: u32,
+    ) -> Result<(), MemoryError> {
+        guest::write_word(memory, self.field(0x34)?, value)
+    }
+
+    pub(super) fn current_id(self, memory: &GuestMemory) -> Result<u32, MemoryError> {
+        self.read(memory, 0x24)
+    }
+
+    pub(super) fn check_last_error_write(self, memory: &GuestMemory) -> Result<(), MemoryError> {
+        guest::check(memory, self.field(0x34)?, 4, super::super::Access::Write)
+    }
+}
 
 pub(super) fn initialize(
     memory: &mut GuestMemory,
@@ -34,24 +70,18 @@ pub(super) fn initialize_contents(
     Ok(())
 }
 
-pub(super) fn last_error(memory: &GuestMemory) -> Result<u32, MemoryError> {
-    let mut value = [0];
-    guest::read_words(memory, LAST_ERROR, &mut value)?;
-    Ok(value[0])
-}
-
+// unmigrated providers still serve only the primary executing thread.
 pub(super) fn set_last_error(memory: &mut GuestMemory, value: u32) -> Result<(), MemoryError> {
-    guest::write_word(memory, LAST_ERROR, value)
-}
-
-pub(super) fn current_id(memory: &GuestMemory) -> Result<u32, MemoryError> {
-    let mut value = [0];
-    guest::read_words(memory, BASE + 0x24, &mut value)?;
-    Ok(value[0])
+    Teb(BASE).set_last_error(memory, value)
 }
 
 pub(super) fn check_last_error_write(memory: &GuestMemory) -> Result<(), MemoryError> {
-    guest::check(memory, LAST_ERROR, 4, super::super::Access::Write)
+    Teb(BASE).check_last_error_write(memory)
+}
+
+#[cfg(test)]
+pub(super) fn last_error(memory: &GuestMemory) -> Result<u32, MemoryError> {
+    Teb(BASE).last_error(memory)
 }
 
 #[derive(Clone, Copy)]
