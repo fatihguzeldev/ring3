@@ -87,6 +87,8 @@ pub(super) enum Call {
     TextureRelease,
     VertexBufferAddRef,
     VertexBufferRelease,
+    VertexBufferLock,
+    VertexBufferUnlock,
     TexturePreLoad,
     SetTexture,
     GetTextureStageState,
@@ -132,6 +134,8 @@ impl Call {
             0x4f8 => Self::CreateVertexBuffer,
             0x4fc => Self::VertexBufferAddRef,
             0x500 => Self::VertexBufferRelease,
+            0x504 => Self::VertexBufferLock,
+            0x508 => Self::VertexBufferUnlock,
             0x404 => Self::TextureAddRef,
             0x408 => Self::TextureRelease,
             0x4d0 => Self::TexturePreLoad,
@@ -180,7 +184,10 @@ impl Call {
         match self {
             Self::CreateDevice | Self::Clear | Self::CheckDeviceFormat => 7,
             Self::CreateTexture => 8,
-            Self::Present | Self::TextureLockRect | Self::DrawPrimitiveUp => 5,
+            Self::Present
+            | Self::TextureLockRect
+            | Self::DrawPrimitiveUp
+            | Self::VertexBufferLock => 5,
             Self::TextureLevelDesc
             | Self::TextureGetSurface
             | Self::CurrentDisplayMode
@@ -241,6 +248,9 @@ struct Texture {
 struct VertexBuffer {
     refs: u32,
     length: u64,
+    byte_length: u32,
+    usage: u32,
+    locks: u32,
 }
 
 struct TextureLevel {
@@ -347,6 +357,8 @@ impl Graphics {
             (TEXTURE_SURFACE_TABLE, 10, 0x4cc),
             (VERTEX_BUFFER_TABLE, 1, 0x4fc),
             (VERTEX_BUFFER_TABLE, 2, 0x500),
+            (VERTEX_BUFFER_TABLE, 11, 0x504),
+            (VERTEX_BUFFER_TABLE, 12, 0x508),
         ] {
             guest::write_word(memory, table + index * 4, API_BASE + offset)?;
         }
@@ -429,6 +441,8 @@ impl Graphics {
             Call::TextureRelease => return self.texture_release(args[0], memory),
             Call::VertexBufferAddRef => self.vertex_buffer_add_ref(args[0]),
             Call::VertexBufferRelease => return self.vertex_buffer_release(args[0], memory),
+            Call::VertexBufferLock => return self.vertex_buffer_lock(args, memory),
+            Call::VertexBufferUnlock => self.vertex_buffer_unlock(args[0]),
             Call::TexturePreLoad => self.textures.get(&args[0]).map_or(INVALID_CALL, |texture| {
                 if texture.refs == 0 { INVALID_CALL } else { 0 }
             }),
@@ -976,8 +990,16 @@ impl Graphics {
         guest::write_word(memory, address, VERTEX_BUFFER_TABLE)?;
         memory.protect(u64::from(address), PAGE_SIZE, Permissions::READ)?;
         guest::write_word(memory, output, address)?;
-        self.vertex_buffers
-            .insert(address, VertexBuffer { refs: 1, length });
+        self.vertex_buffers.insert(
+            address,
+            VertexBuffer {
+                refs: 1,
+                length,
+                byte_length,
+                usage,
+                locks: 0,
+            },
+        );
         self.device_refs = self.device_refs.saturating_add(1);
         Ok(0)
     }
@@ -988,6 +1010,58 @@ impl Graphics {
         };
         buffer.refs = buffer.refs.saturating_add(1);
         buffer.refs
+    }
+
+    fn vertex_buffer_lock(
+        &mut self,
+        args: &[u32],
+        memory: &mut GuestMemory,
+    ) -> Result<u32, MemoryError> {
+        let [address, offset, size, output, flags] =
+            <[u32; 5]>::try_from(args).expect("d3d8 call arity");
+        let Some(buffer) = self.vertex_buffers.get(&address) else {
+            return Ok(INVALID_CALL);
+        };
+        let discard = flags & 0x2000 != 0;
+        let no_overwrite = flags & 0x1000 != 0;
+        let read_only = flags & 0x0010 != 0;
+        let size = if size == 0 && offset == 0 {
+            buffer.byte_length
+        } else {
+            size
+        };
+        if offset >= buffer.byte_length
+            || size == 0
+            || offset
+                .checked_add(size)
+                .is_none_or(|end| end > buffer.byte_length)
+            || flags & !(0x0010 | 0x0800 | 0x1000 | 0x2000) != 0
+            || (discard && (no_overwrite || read_only || offset != 0 || size != buffer.byte_length))
+            || ((discard || no_overwrite) && buffer.usage & 0x0200 == 0)
+            || (read_only && buffer.usage & 0x0008 != 0)
+            || buffer.locks == u32::MAX
+        {
+            return Ok(INVALID_CALL);
+        }
+        guest::check(memory, output, 4, Access::Write)?;
+        let data = address + u32::try_from(PAGE_SIZE).expect("guest page fits u32") + offset;
+        guest::write_word(memory, output, data)?;
+        self.vertex_buffers
+            .get_mut(&address)
+            .expect("validated vertex buffer")
+            .locks += 1;
+        Ok(0)
+    }
+
+    fn vertex_buffer_unlock(&mut self, address: u32) -> u32 {
+        let Some(buffer) = self.vertex_buffers.get_mut(&address) else {
+            return INVALID_CALL;
+        };
+        if buffer.locks == 0 {
+            return INVALID_CALL;
+        }
+        buffer.locks -= 1;
+        0
     }
 
     fn vertex_buffer_release(

@@ -29,6 +29,7 @@ const SURFACE_RECT: u32 = 0x0040_2c20;
 const MATRIX: u32 = 0x0040_2d00;
 const MATRIX_OUTPUT: u32 = 0x0040_2d80;
 const VERTEX_BUFFER_OUTPUT: u32 = 0x0040_2e00;
+const VERTEX_DATA_OUTPUT: u32 = 0x0040_2e04;
 
 #[test]
 fn executes_an_uninterrupted_guest_graphics_program() {
@@ -2399,4 +2400,119 @@ fn vertex_buffer_creation_failures_keep_output_and_page_capacity() {
         ProcessStop::Stopped(StopReason::MemoryFault(_))
     ));
     assert_eq!(process.memory.mapped_pages(), pages);
+}
+
+#[test]
+fn vertex_buffer_lock_exposes_a_bounded_writable_range_and_balances_nested_locks() {
+    let (mut process, _, device) = create();
+    let create_buffer = method(&process, device, 23);
+    assert_eq!(
+        direct_call(
+            &mut process,
+            create_buffer,
+            &[device, 96, 0x218, 0x142, 0, VERTEX_BUFFER_OUTPUT]
+        ),
+        0
+    );
+    let buffer = read(&process, VERTEX_BUFFER_OUTPUT);
+    let lock = method(&process, buffer, 11);
+    let unlock = method(&process, buffer, 12);
+    assert_ne!(lock, 0x7000_0ffc);
+    assert_ne!(unlock, 0x7000_0ffc);
+    assert_eq!(
+        direct_call(
+            &mut process,
+            lock,
+            &[buffer, 0, 96, VERTEX_DATA_OUTPUT, 0x2000]
+        ),
+        0
+    );
+    let data = read(&process, VERTEX_DATA_OUTPUT);
+    assert_eq!(data, buffer + 4096);
+    process
+        .memory
+        .write(u64::from(data), &[1, 2, 3, 4])
+        .unwrap();
+    assert_eq!(
+        direct_call(
+            &mut process,
+            lock,
+            &[buffer, 24, 24, VERTEX_DATA_OUTPUT, 0x1000]
+        ),
+        0
+    );
+    assert_eq!(read(&process, VERTEX_DATA_OUTPUT), data + 24);
+    assert_eq!(direct_call(&mut process, unlock, &[buffer]), 0);
+    assert_eq!(direct_call(&mut process, unlock, &[buffer]), 0);
+    assert_eq!(direct_call(&mut process, unlock, &[buffer]), 0x8876_086c);
+    assert_eq!(read_bytes(&process, data, 4), [1, 2, 3, 4]);
+    let release = method(&process, buffer, 2);
+    assert_eq!(direct_call(&mut process, release, &[buffer]), 0);
+}
+
+#[test]
+fn vertex_buffer_lock_rejects_invalid_ranges_flags_and_faults_without_state_change() {
+    let (mut process, _, device) = create();
+    let create_buffer = method(&process, device, 23);
+    assert_eq!(
+        direct_call(
+            &mut process,
+            create_buffer,
+            &[device, 96, 0x218, 0x142, 0, VERTEX_BUFFER_OUTPUT]
+        ),
+        0
+    );
+    let buffer = read(&process, VERTEX_BUFFER_OUTPUT);
+    let lock = method(&process, buffer, 11);
+    let unlock = method(&process, buffer, 12);
+    for (offset, size, flags) in [
+        (95, 2, 0),
+        (96, 0, 0),
+        (u32::MAX, 1, 0),
+        (0, 96, 0x10),
+        (0, 96, 0x2000 | 0x1000),
+        (0, 96, 0x4000),
+    ] {
+        write(&mut process, VERTEX_DATA_OUTPUT, &[0x1234_5678]);
+        assert_eq!(
+            direct_call(
+                &mut process,
+                lock,
+                &[buffer, offset, size, VERTEX_DATA_OUTPUT, flags]
+            ),
+            0x8876_086c
+        );
+        assert_eq!(read(&process, VERTEX_DATA_OUTPUT), 0x1234_5678);
+        assert_eq!(direct_call(&mut process, unlock, &[buffer]), 0x8876_086c);
+    }
+    let fault = call(&mut process, lock, &[buffer, 0, 96, 0x0040_1000, 0]);
+    assert!(matches!(
+        fault.reason,
+        ProcessStop::Stopped(StopReason::MemoryFault(_))
+    ));
+    assert_eq!(direct_call(&mut process, unlock, &[buffer]), 0x8876_086c);
+    assert_eq!(
+        direct_call(&mut process, lock, &[buffer, 0, 0, VERTEX_DATA_OUTPUT, 0]),
+        0
+    );
+    assert_eq!(read(&process, VERTEX_DATA_OUTPUT), buffer + 4096);
+    assert_eq!(direct_call(&mut process, unlock, &[buffer]), 0);
+    assert_eq!(
+        direct_call(
+            &mut process,
+            create_buffer,
+            &[device, 32, 0, 0x142, 0, VERTEX_BUFFER_OUTPUT]
+        ),
+        0
+    );
+    let static_buffer = read(&process, VERTEX_BUFFER_OUTPUT);
+    let static_lock = method(&process, static_buffer, 11);
+    assert_eq!(
+        direct_call(
+            &mut process,
+            static_lock,
+            &[static_buffer, 0, 32, VERTEX_DATA_OUTPUT, 0x2000]
+        ),
+        0x8876_086c
+    );
 }
