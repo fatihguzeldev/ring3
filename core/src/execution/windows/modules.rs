@@ -2,7 +2,7 @@ use super::super::Access;
 use super::{
     API_BASE, Api, DispatchError, GuestMemory, MemoryError, guest, parameters, system, thread,
 };
-use crate::execution::loader::modules::MappedModule;
+use crate::execution::loader::modules::{Initializer, MappedModule};
 
 #[derive(Clone, Copy)]
 pub(super) enum Call {
@@ -43,18 +43,19 @@ struct Module {
     references: u32,
     builtin: bool,
     thread_notifications: bool,
+    entry: Option<u32>,
     state: State,
 }
 
 enum State {
     Ready,
-    Deferred { entry: Option<u32> },
-    Initializing { entry: u32 },
+    Deferred,
+    Initializing,
 }
 
 impl Module {
     fn visible(&self) -> bool {
-        matches!(self.state, State::Ready | State::Initializing { .. })
+        matches!(self.state, State::Ready | State::Initializing)
     }
 }
 
@@ -73,6 +74,7 @@ pub(super) struct Modules {
     program: u32,
     program_path: Vec<u8>,
     resident: Vec<Module>,
+    initializer_order: Vec<u32>,
 }
 
 impl Modules {
@@ -109,18 +111,18 @@ impl Modules {
                     .ok_or(DispatchError::Unsupported)?;
                 Ok(Load::Complete(module.handle))
             }
-            State::Deferred { entry: None } if initialized => {
+            State::Deferred if initialized => {
+                if let Some(entry) = module.entry {
+                    return Ok(Load::Initialize(Pending {
+                        handle: module.handle,
+                        entry,
+                    }));
+                }
                 module.state = State::Ready;
                 module.references = 1;
                 Ok(Load::Complete(module.handle))
             }
-            State::Deferred { entry: Some(entry) } if initialized => {
-                Ok(Load::Initialize(Pending {
-                    handle: module.handle,
-                    entry,
-                }))
-            }
-            State::Deferred { .. } | State::Initializing { .. } => Err(DispatchError::Unsupported),
+            State::Deferred | State::Initializing => Err(DispatchError::Unsupported),
         }
     }
 
@@ -130,15 +132,9 @@ impl Modules {
             .iter_mut()
             .find(|module| module.handle == pending.handle)
             .expect("prepared deferred module is retained");
-        debug_assert!(matches!(
-            module.state,
-            State::Deferred {
-                entry: Some(entry)
-            } if entry == pending.entry
-        ));
-        module.state = State::Initializing {
-            entry: pending.entry,
-        };
+        debug_assert!(matches!(module.state, State::Deferred));
+        debug_assert_eq!(module.entry, Some(pending.entry));
+        module.state = State::Initializing;
     }
 
     pub(super) fn finish(&mut self, pending: Pending, success: bool) {
@@ -147,18 +143,33 @@ impl Modules {
             .iter_mut()
             .find(|module| module.handle == pending.handle)
             .expect("initializing module is retained");
-        debug_assert!(matches!(
-            module.state,
-            State::Initializing { entry } if entry == pending.entry
-        ));
+        debug_assert!(matches!(module.state, State::Initializing));
+        debug_assert_eq!(module.entry, Some(pending.entry));
         if success {
             module.state = State::Ready;
             module.references = 1;
+            self.initializer_order.push(pending.handle);
         } else {
-            module.state = State::Deferred {
-                entry: Some(pending.entry),
-            };
+            module.state = State::Deferred;
         }
+    }
+
+    pub(super) fn initializers(&self) -> Vec<Initializer> {
+        self.initializer_order
+            .iter()
+            .map(|&handle| {
+                let module = self
+                    .resident
+                    .iter()
+                    .find(|module| module.handle == handle)
+                    .expect("initialized module is retained");
+                Initializer {
+                    name: module.name.clone(),
+                    base: handle,
+                    entry: module.entry.expect("initializer has an entry point"),
+                }
+            })
+            .collect()
     }
 
     pub(super) fn contains(&self, handle: u32) -> bool {
@@ -174,7 +185,7 @@ impl Modules {
         program_path: &[u8],
         providers: Vec<MappedModule>,
         startup_count: usize,
-        deferred_initializers: &[crate::execution::loader::modules::Initializer],
+        initializers: &[Initializer],
     ) -> Self {
         let parent_end = program_path
             .iter()
@@ -189,13 +200,12 @@ impl Modules {
                 state: if index < startup_count {
                     State::Ready
                 } else {
-                    State::Deferred {
-                        entry: deferred_initializers
-                            .iter()
-                            .find(|initializer| initializer.name == provider.name)
-                            .map(|initializer| initializer.entry),
-                    }
+                    State::Deferred
                 },
+                entry: initializers
+                    .iter()
+                    .find(|initializer| initializer.base == provider.base)
+                    .map(|initializer| initializer.entry),
                 path: [parent, provider.name.as_bytes(), &[0]].concat(),
                 name: provider.name,
                 handle: provider.base,
@@ -224,15 +234,26 @@ impl Modules {
                     handle: API_BASE + offset,
                     references: 1,
                     builtin: true,
+                    entry: None,
                     thread_notifications: true,
                     state: State::Ready,
                 });
             }
         }
+        let initializer_order = initializers
+            .iter()
+            .filter(|initializer| {
+                resident.iter().any(|module| {
+                    module.handle == initializer.base && matches!(module.state, State::Ready)
+                })
+            })
+            .map(|initializer| initializer.base)
+            .collect();
         Self {
             program,
             program_path: [program_path, &[0]].concat(),
             resident,
+            initializer_order,
         }
     }
 
@@ -281,7 +302,7 @@ impl Modules {
                 teb.set_last_error(memory, 6)?;
                 return Ok(0);
             };
-            if matches!(module.state, State::Initializing { .. }) {
+            if matches!(module.state, State::Initializing) {
                 return Err(DispatchError::Unsupported);
             }
             if module.references == 1 {
@@ -461,6 +482,106 @@ mod tests {
     use crate::execution::{PAGE_SIZE, Permissions};
 
     #[test]
+    fn initializer_order_survives_failed_and_successful_deferred_loads() {
+        let names = [
+            "first.dll",
+            "second.dll",
+            "third.dll",
+            "fourth.dll",
+            "empty.dll",
+        ];
+        let handles = [
+            0x5000_0000,
+            0x5001_0000,
+            0x5002_0000,
+            0x5003_0000,
+            0x5004_0000,
+        ];
+        let providers = names
+            .iter()
+            .zip(handles)
+            .map(|(&name, base)| MappedModule {
+                name: name.to_owned(),
+                base,
+            })
+            .collect();
+        let entries: Vec<_> = [1, 0, 2, 3]
+            .into_iter()
+            .map(|index| Initializer {
+                name: names[index].to_owned(),
+                base: handles[index],
+                entry: handles[index] + 0x1000,
+            })
+            .collect();
+        let mut modules = Modules::new(0x0040_0000, b"C:\\program.exe", providers, 2, &entries);
+        let order = |modules: &Modules| {
+            modules
+                .initializers()
+                .into_iter()
+                .map(|entry| (entry.name, entry.base, entry.entry))
+                .collect::<Vec<_>>()
+        };
+        let expected = |indices: &[usize]| {
+            indices
+                .iter()
+                .map(|&index| {
+                    (
+                        names[index].to_owned(),
+                        handles[index],
+                        handles[index] + 0x1000,
+                    )
+                })
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(order(&modules), expected(&[1, 0]));
+        let mut memory = GuestMemory::new(1);
+        memory
+            .map_zeroed(0x1000, PAGE_SIZE, Permissions::READ_WRITE)
+            .unwrap();
+        let load = |modules: &mut Modules, memory: &mut GuestMemory, index: usize| {
+            memory
+                .write(0x1000, format!("{}\0", names[index]).as_bytes())
+                .unwrap();
+            modules
+                .load(0x1000, true, thread::Teb(thread::BASE), memory)
+                .ok()
+                .unwrap()
+        };
+        let Load::Initialize(fourth) = load(&mut modules, &mut memory, 3) else {
+            panic!()
+        };
+        assert_eq!(
+            (fourth.handle, fourth.entry),
+            (handles[3], handles[3] + 0x1000)
+        );
+        modules.start(fourth);
+        assert_eq!(order(&modules), expected(&[1, 0]));
+        modules.finish(fourth, false);
+        assert_eq!(order(&modules), expected(&[1, 0]));
+        let Load::Initialize(third) = load(&mut modules, &mut memory, 2) else {
+            panic!()
+        };
+        modules.start(third);
+        modules.finish(third, true);
+        assert_eq!(order(&modules), expected(&[1, 0, 2]));
+        assert!(
+            matches!(load(&mut modules, &mut memory, 4), Load::Complete(handle) if handle == handles[4])
+        );
+        let Load::Initialize(retry) = load(&mut modules, &mut memory, 3) else {
+            panic!()
+        };
+        assert_eq!((retry.handle, retry.entry), (fourth.handle, fourth.entry));
+        modules.start(retry);
+        modules.finish(retry, true);
+        for _ in 0..2 {
+            assert!(
+                matches!(load(&mut modules, &mut memory, 2), Load::Complete(handle) if handle == handles[2])
+            );
+        }
+        assert_eq!(order(&modules), expected(&[1, 0, 2, 3]));
+    }
+
+    #[test]
     fn notification_policy_is_per_module_and_per_process_without_reference_changes() {
         let create = || {
             Modules::new(
@@ -550,7 +671,7 @@ mod tests {
     fn initializing_module_cannot_release_its_unpublished_reference() {
         let mut memory = GuestMemory::new(1);
         let mut modules = Modules::new(0x0040_0000, b"C:\\program.exe", Vec::new(), 0, &[]);
-        modules.resident[0].state = State::Initializing { entry: 1 };
+        modules.resident[0].state = State::Initializing;
         modules.resident[0].references = 0;
         let handle = modules.resident[0].handle;
         assert!(matches!(

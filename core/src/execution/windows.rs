@@ -193,20 +193,6 @@ fn collect_modules<'a>(
     startup.iter().chain(deferred).copied().collect()
 }
 
-fn partition_initializers(
-    initializers: Vec<super::loader::modules::Initializer>,
-    deferred: &[GuestModule<'_>],
-) -> (
-    Vec<super::loader::modules::Initializer>,
-    Vec<super::loader::modules::Initializer>,
-) {
-    initializers.into_iter().partition(|initializer| {
-        deferred
-            .iter()
-            .any(|module| initializer.name.eq_ignore_ascii_case(module.name))
-    })
-}
-
 fn reserved_ranges() -> [std::ops::Range<u64>; 8] {
     [
         u64::from(STACK_BASE)..u64::from(STACK_BASE + STACK_SIZE),
@@ -603,7 +589,7 @@ impl Process32 {
         let mut diagnostic_imports = diagnostics::Imports::default();
         let reserved = reserved_ranges();
         let all_modules = collect_modules(options.modules, options.deferred_modules);
-        let mut loaded = load_modules(
+        let loaded = load_modules(
             bytes,
             page_limit,
             &all_modules,
@@ -619,10 +605,6 @@ impl Process32 {
                 })
             },
         )?;
-        let (deferred_initializers, startup_initializers) = partition_initializers(
-            std::mem::take(&mut loaded.initializers),
-            options.deferred_modules,
-        );
         let (major, minor) = loaded.subsystem_version;
         let mut image = loaded.image;
         let resources =
@@ -632,7 +614,7 @@ impl Process32 {
             options.image_path,
             loaded.providers,
             options.modules.len(),
-            &deferred_initializers,
+            &loaded.initializers,
         );
         image.memory.map_zeroed(
             u64::from(STACK_BASE),
@@ -648,7 +630,7 @@ impl Process32 {
         parameters.map(&mut image.memory)?;
         crt::initialize(&mut image.memory, &parameters)?;
         let (startup, entry) =
-            startup::Startup::map(&mut image.memory, startup_initializers, image.entry_point)?;
+            startup::Startup::map(&mut image.memory, modules.initializers(), image.entry_point)?;
         let mut cpu = Cpu32::new(entry);
         cpu.set_register(Register32::Esp, STACK_BASE + STACK_SIZE);
         cpu.set_fs_base(thread::BASE);
