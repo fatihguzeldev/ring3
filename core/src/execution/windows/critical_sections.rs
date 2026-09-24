@@ -34,9 +34,13 @@ impl Process32 {
         call: Call,
         pointer: u32,
     ) -> Result<(), DispatchError> {
-        if let Some(value) = self
-            .critical_sections
-            .dispatch(call, pointer, &mut self.memory)?
+        let actor = self
+            .threads
+            .id(thread::Teb(self.cpu.fs_base()))
+            .ok_or(DispatchError::Unsupported)?;
+        if let Some(value) =
+            self.critical_sections
+                .dispatch(call, pointer, actor, &mut self.memory)?
         {
             self.cpu.set_register(Register32::Eax, value);
         }
@@ -46,8 +50,13 @@ impl Process32 {
 
 #[derive(Default)]
 pub(super) struct CriticalSections {
-    // only one guest thread exists; a positive depth identifies its ownership.
-    objects: BTreeMap<u64, u32>,
+    objects: BTreeMap<u64, Ownership>,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+struct Ownership {
+    owner: u32,
+    depth: u32,
 }
 
 impl CriticalSections {
@@ -55,6 +64,7 @@ impl CriticalSections {
         &mut self,
         call: Call,
         pointer: u32,
+        actor: u32,
         memory: &mut GuestMemory,
     ) -> Result<Option<u32>, DispatchError> {
         let address = u64::from(pointer);
@@ -69,24 +79,36 @@ impl CriticalSections {
             {
                 return Err(DispatchError::Unsupported);
             }
-            write_object(memory, pointer, representation(0))?;
-            self.objects.insert(address, 0);
+            let unowned = Ownership::default();
+            write_object(memory, pointer, representation(unowned))?;
+            self.objects.insert(address, unowned);
             return Ok(None);
         }
-        let &depth = self
+        let &state = self
             .objects
             .get(&address)
             .ok_or(DispatchError::Unsupported)?;
         let mut words = [0; 6];
         guest::read_words(memory, pointer, &mut words)?;
-        if words != representation(depth) {
+        if words != representation(state) {
             return Err(DispatchError::Unsupported);
         }
+        if matches!(call, Call::TryEnter) && state.depth != 0 && state.owner != actor {
+            return Ok(Some(0));
+        }
         let next = match call {
-            Call::Enter | Call::TryEnter if depth < i32::MAX as u32 => depth + 1,
-            Call::Leave if depth > 0 => depth - 1,
-            Call::Delete if depth == 0 => 0,
+            Call::Enter | Call::TryEnter
+                if (state.depth == 0 || state.owner == actor) && state.depth < i32::MAX as u32 =>
+            {
+                state.depth + 1
+            }
+            Call::Leave if state.depth > 0 && state.owner == actor => state.depth - 1,
+            Call::Delete if state.depth == 0 => 0,
             _ => return Err(DispatchError::Unsupported),
+        };
+        let next = Ownership {
+            owner: if next == 0 { 0 } else { actor },
+            depth: next,
         };
         let deleting = matches!(call, Call::Delete);
         write_object(
@@ -107,13 +129,13 @@ impl CriticalSections {
     }
 }
 
-fn representation(depth: u32) -> [u32; 6] {
-    // debug lists and wait semaphores are absent in this single-thread profile.
+fn representation(state: Ownership) -> [u32; 6] {
+    // debug lists and wait semaphores are absent in this immediate-acquisition profile.
     [
         0,
-        depth.wrapping_sub(1),
-        depth,
-        if depth == 0 { 0 } else { thread::CURRENT_ID },
+        state.depth.wrapping_sub(1),
+        state.depth,
+        state.owner,
         0,
         0,
     ]
@@ -148,31 +170,38 @@ mod tests {
         for index in 0..4096_u32 {
             assert!(
                 sections
-                    .dispatch(Call::Initialize, 0x1000 + index * 24, &mut memory)
+                    .dispatch(Call::Initialize, 0x1000 + index * 24, 1, &mut memory)
                     .is_ok()
             );
         }
         let extra = 0x1000 + 4096 * 24;
         assert!(matches!(
-            sections.dispatch(Call::Initialize, extra, &mut memory),
+            sections.dispatch(Call::Initialize, extra, 1, &mut memory),
             Err(DispatchError::Unsupported)
         ));
         assert_eq!(sections.objects.len(), MAX_OBJECTS);
         let mut bytes = [1; SIZE];
         memory.read(u64::from(extra), &mut bytes).unwrap();
         assert_eq!(bytes, [0; SIZE]);
-        assert!(sections.dispatch(Call::Delete, 0x1000, &mut memory).is_ok());
         assert!(
             sections
-                .dispatch(Call::Initialize, extra, &mut memory)
+                .dispatch(Call::Delete, 0x1000, 1, &mut memory)
                 .is_ok()
         );
-        let depth = i32::MAX as u32;
+        assert!(
+            sections
+                .dispatch(Call::Initialize, extra, 1, &mut memory)
+                .is_ok()
+        );
+        let depth = Ownership {
+            owner: 1,
+            depth: i32::MAX as u32,
+        };
         sections.objects.insert(u64::from(extra), depth);
         assert!(write_object(&mut memory, extra, representation(depth)).is_ok());
         for call in [Call::Enter, Call::TryEnter] {
             assert!(matches!(
-                sections.dispatch(call, extra, &mut memory),
+                sections.dispatch(call, extra, 1, &mut memory),
                 Err(DispatchError::Unsupported)
             ));
             assert_eq!(sections.objects[&u64::from(extra)], depth);

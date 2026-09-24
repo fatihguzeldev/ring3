@@ -1139,10 +1139,14 @@ impl Process32 {
             Api::SetWindowPos => self.set_dialog_window_pos(args)?,
             Api::Class(call) => self.window_class(call, args)?,
             Api::Window(call) => self.window_api(call, args)?,
-            Api::Synchronization(call) => self.cpu.set_register(
-                Register32::Eax,
-                self.sync_objects.dispatch(call, args, &mut self.memory)?,
-            ),
+            Api::Synchronization(call) => {
+                let teb = thread::Teb(self.cpu.fs_base());
+                let actor = self.threads.id(teb).ok_or(DispatchError::Unsupported)?;
+                let value = self
+                    .sync_objects
+                    .dispatch(call, args, actor, teb, &mut self.memory)?;
+                self.cpu.set_register(Register32::Eax, value);
+            }
             Api::SetLastError => {
                 thread::Teb(self.cpu.fs_base()).set_last_error(&mut self.memory, argument)?;
             }

@@ -54,8 +54,7 @@ struct Object {
 }
 
 enum State {
-    // a positive depth belongs to the sole guest thread.
-    Mutex { depth: u32 },
+    Mutex { owner: u32, depth: u32 },
     Event { manual_reset: bool, signaled: bool },
     Thread,
 }
@@ -102,10 +101,12 @@ impl SyncObjects {
         &mut self,
         call: Call,
         arguments: &[u32],
+        actor: u32,
+        teb: thread::Teb,
         memory: &mut GuestMemory,
     ) -> Result<u32, DispatchError> {
         if matches!(call, Call::CreateMutex | Call::CreateEvent) {
-            return self.create(call, arguments, memory);
+            return self.create(call, arguments, actor, teb, memory);
         }
         let handle = arguments[0];
         if matches!(call, Call::Wait | Call::Close) && handle >= u32::MAX - 1 {
@@ -114,6 +115,7 @@ impl SyncObjects {
         let Some(&object_id) = self.handles.get(&handle) else {
             return failure(
                 memory,
+                teb,
                 6,
                 if matches!(call, Call::Wait) {
                     u32::MAX
@@ -131,8 +133,16 @@ impl SyncObjects {
                     Err(DispatchError::Unsupported)
                 }
             }
-            (Call::Wait, State::Mutex { depth }) => {
+            (Call::Wait, State::Mutex { owner, depth }) => {
+                if *depth != 0 && *owner != actor {
+                    return if arguments[1] == 0 {
+                        Ok(258)
+                    } else {
+                        Err(DispatchError::Unsupported)
+                    };
+                }
                 let next = depth.checked_add(1).ok_or(DispatchError::Unsupported)?;
+                *owner = actor;
                 *depth = next;
                 Ok(0)
             }
@@ -158,9 +168,14 @@ impl SyncObjects {
                 *signaled = matches!(call, Call::SetEvent);
                 Ok(1)
             }
-            (Call::ReleaseMutex, State::Mutex { depth: 0 }) => failure(memory, 288, 0),
-            (Call::ReleaseMutex, State::Mutex { depth }) => {
+            (Call::ReleaseMutex, State::Mutex { owner, depth }) => {
+                if *depth == 0 || *owner != actor {
+                    return failure(memory, teb, 288, 0);
+                }
                 *depth -= 1;
+                if *depth == 0 {
+                    *owner = 0;
+                }
                 Ok(1)
             }
             (Call::Close, _) => {
@@ -172,7 +187,7 @@ impl SyncObjects {
                 Ok(1)
             }
             (Call::CreateMutex | Call::CreateEvent, _) => unreachable!(),
-            _ => failure(memory, 6, 0),
+            _ => failure(memory, teb, 6, 0),
         }
     }
 
@@ -180,6 +195,8 @@ impl SyncObjects {
         &mut self,
         call: Call,
         arguments: &[u32],
+        actor: u32,
+        teb: thread::Teb,
         memory: &mut GuestMemory,
     ) -> Result<u32, DispatchError> {
         if arguments[0] != 0 {
@@ -195,6 +212,7 @@ impl SyncObjects {
             ),
             _ => (
                 State::Mutex {
+                    owner: if arguments[1] != 0 { actor } else { 0 },
                     depth: u32::from(arguments[1] != 0),
                 },
                 arguments[2],
@@ -210,12 +228,12 @@ impl SyncObjects {
         if let Some(id) = existing
             && std::mem::discriminant(&self.objects[&id].state) != std::mem::discriminant(&state)
         {
-            return failure(memory, 6, 0);
+            return failure(memory, teb, 6, 0);
         }
         if self.next_handle().is_none() {
-            return failure(memory, 8, 0);
+            return failure(memory, teb, 8, 0);
         }
-        thread::set_last_error(memory, if existing.is_some() { 183 } else { 0 })?;
+        teb.set_last_error(memory, if existing.is_some() { 183 } else { 0 })?;
         let handle = self.next;
         let object_id = if let Some(id) = existing {
             self.objects.get_mut(&id).unwrap().handles += 1;
@@ -259,8 +277,13 @@ fn read_name(memory: &GuestMemory, address: u32) -> Result<Option<Vec<u8>>, Disp
     Err(DispatchError::Unsupported)
 }
 
-fn failure(memory: &mut GuestMemory, error: u32, value: u32) -> Result<u32, DispatchError> {
-    thread::set_last_error(memory, error)?;
+fn failure(
+    memory: &mut GuestMemory,
+    teb: thread::Teb,
+    error: u32,
+    value: u32,
+) -> Result<u32, DispatchError> {
+    teb.set_last_error(memory, error)?;
     Ok(value)
 }
 
@@ -277,15 +300,33 @@ mod tests {
             ..SyncObjects::default()
         };
         assert!(matches!(
-            mutexes.dispatch(Call::CreateMutex, &[0, 0, 0], &mut memory),
+            mutexes.dispatch(
+                Call::CreateMutex,
+                &[0, 0, 0],
+                1,
+                thread::Teb(thread::BASE),
+                &mut memory
+            ),
             Ok(LAST_HANDLE)
         ));
         assert!(matches!(
-            mutexes.dispatch(Call::Close, &[LAST_HANDLE], &mut memory),
+            mutexes.dispatch(
+                Call::Close,
+                &[LAST_HANDLE],
+                1,
+                thread::Teb(thread::BASE),
+                &mut memory
+            ),
             Ok(1)
         ));
         assert!(matches!(
-            mutexes.dispatch(Call::CreateMutex, &[0, 0, 0], &mut memory),
+            mutexes.dispatch(
+                Call::CreateMutex,
+                &[0, 0, 0],
+                1,
+                thread::Teb(thread::BASE),
+                &mut memory
+            ),
             Ok(0)
         ));
         assert_eq!(thread::last_error(&memory).unwrap(), 8);
@@ -302,27 +343,51 @@ mod tests {
         mutexes.objects.insert(
             FIRST_HANDLE,
             Object {
-                state: State::Mutex { depth: u32::MAX },
+                state: State::Mutex {
+                    owner: 1,
+                    depth: u32::MAX,
+                },
                 handles: 1,
                 name: None,
             },
         );
         mutexes.handles.insert(FIRST_HANDLE, FIRST_HANDLE);
         assert!(matches!(
-            mutexes.dispatch(Call::Wait, &[FIRST_HANDLE, 0], &mut memory),
+            mutexes.dispatch(
+                Call::Wait,
+                &[FIRST_HANDLE, 0],
+                1,
+                thread::Teb(thread::BASE),
+                &mut memory
+            ),
             Err(DispatchError::Unsupported)
         ));
         assert!(matches!(
             mutexes.objects.get(&FIRST_HANDLE).unwrap().state,
-            State::Mutex { depth: u32::MAX }
+            State::Mutex {
+                owner: 1,
+                depth: u32::MAX
+            }
         ));
         assert_eq!(thread::last_error(&memory).unwrap(), 77);
         assert!(matches!(
-            mutexes.dispatch(Call::ReleaseMutex, &[FIRST_HANDLE], &mut memory),
+            mutexes.dispatch(
+                Call::ReleaseMutex,
+                &[FIRST_HANDLE],
+                1,
+                thread::Teb(thread::BASE),
+                &mut memory
+            ),
             Ok(1)
         ));
         assert!(matches!(
-            mutexes.dispatch(Call::Wait, &[FIRST_HANDLE, 0], &mut memory),
+            mutexes.dispatch(
+                Call::Wait,
+                &[FIRST_HANDLE, 0],
+                1,
+                thread::Teb(thread::BASE),
+                &mut memory
+            ),
             Ok(0)
         ));
     }

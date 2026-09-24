@@ -3076,7 +3076,7 @@ fn execute_global_memory() {
     }
 }
 
-fn execute_tls_threads() {
+fn execute_thread_state() {
     use ring3_core::execution::{Process32, ProcessStop, Register32, StopReason};
     fn call(process: &mut Process32, api: u32, args: &[u32]) -> u32 {
         let stack = 0x1000_ff00;
@@ -3104,6 +3104,28 @@ fn execute_tls_threads() {
     assert_eq!(call(&mut process, 0x7000_0074, &[0, 111]), 1);
     process.cpu.set_fs_base(0x1101_0000);
     assert_eq!(call(&mut process, 0x7000_0070, &[0]), 0);
+    process.cpu.set_fs_base(0x7ffd_e000);
+    let mutex = call(&mut process, 0x7000_0210, &[0, 1, 0]);
+    call(&mut process, 0x7000_0034, &[0x0040_2280]);
+    call(&mut process, 0x7000_0038, &[0x0040_2280]);
+    process.cpu.set_fs_base(0x1101_0000);
+    process
+        .memory
+        .write(0x1101_0024, &1_u32.to_le_bytes())
+        .unwrap();
+    assert_eq!(call(&mut process, 0x7000_0214, &[mutex, 0]), 258);
+    assert_eq!(call(&mut process, 0x7000_0218, &[mutex]), 0);
+    assert_eq!(process.last_error().unwrap(), 288);
+    assert_eq!(call(&mut process, 0x7000_003c, &[0x0040_2280]), 0);
+    process.cpu.set_fs_base(0x7ffd_e000);
+    assert_eq!(call(&mut process, 0x7000_0218, &[mutex]), 1);
+    call(&mut process, 0x7000_0060, &[0x0040_2280]);
+    process.cpu.set_fs_base(0x1101_0000);
+    assert_eq!(call(&mut process, 0x7000_0214, &[mutex, 0]), 0);
+    assert_eq!(call(&mut process, 0x7000_003c, &[0x0040_2280]), 1);
+    let mut owner = [0; 4];
+    process.memory.read(0x0040_228c, &mut owner).unwrap();
+    assert_eq!(u32::from_le_bytes(owner), 2);
     assert_eq!(call(&mut process, 0x7000_0074, &[0, 222]), 1);
     assert_eq!(call(&mut process, 0x7000_021c, &[handle]), 1);
     assert_eq!(call(&mut process, 0x7000_0070, &[0]), 222);
@@ -4529,7 +4551,7 @@ pub extern "C" fn run() -> u32 {
     execute_version();
     execute_critical_sections();
     execute_tls();
-    execute_tls_threads();
+    execute_thread_state();
     execute_global_memory();
     execute_memset();
     execute_reverse_search();

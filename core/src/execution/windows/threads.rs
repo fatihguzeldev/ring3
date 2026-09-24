@@ -12,10 +12,25 @@ pub(super) const END: u32 = START + MAX_THREADS * SLOT_SIZE;
 
 #[derive(Default)]
 pub(super) struct Threads {
-    suspended: BTreeMap<u32, Cpu32>,
+    suspended: BTreeMap<u32, Suspended>,
+}
+
+struct Suspended {
+    id: u32,
+    cpu: Cpu32,
 }
 
 impl Threads {
+    pub(super) fn id(&self, teb: thread::Teb) -> Option<u32> {
+        if teb.0 == thread::BASE {
+            return Some(thread::CURRENT_ID);
+        }
+        self.suspended
+            .values()
+            .find(|context| context.cpu.fs_base() == teb.0)
+            .map(|context| context.id)
+    }
+
     pub(super) fn create_suspended(
         &mut self,
         args: &[u32],
@@ -59,7 +74,7 @@ impl Threads {
         cpu.set_fs_base(high);
         cpu.set_x87_control_word(0x027f);
         let handle = handles.insert_thread();
-        self.suspended.insert(handle, cpu);
+        self.suspended.insert(handle, Suspended { id, cpu });
         Ok((handle, thread::Teb(high)))
     }
 }
@@ -87,16 +102,19 @@ mod tests {
             expected.set_register(Register32::Esp, high - 8);
             expected.set_fs_base(high);
             expected.set_x87_control_word(0x027f);
-            assert_eq!(threads.suspended[&handle], expected);
+            assert_eq!(threads.suspended[&handle].cpu, expected);
             assert!(matches!(
                 handles.dispatch(
                     super::super::synchronization::Call::Close,
                     &[handle],
+                    slot + 2,
+                    teb,
                     &mut memory
                 ),
                 Ok(1)
             ));
-            assert_eq!(threads.suspended[&handle], expected);
+            assert_eq!(threads.suspended[&handle].cpu, expected);
+            assert_eq!(threads.id(teb), Some(slot + 2));
             assert!(memory.fetch(u64::from(high - 8), &mut [0]).is_err());
             assert!(memory.fetch(u64::from(high), &mut [0]).is_err());
         }
