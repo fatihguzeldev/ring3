@@ -147,8 +147,7 @@ fn unreadable_sources_and_unsupported_forms_leave_cpu_unchanged() {
         assert_eq!(cpu, before);
     }
     for code in [
-        &[0xf7, 0xe0][..],
-        &[0xf6, 0xe0],
+        &[0xf6, 0xe0][..],
         &[0xf7, 0xf8],
         &[0x67, 0x0f, 0xaf, 0],
         &[0xf3, 0x0f, 0xaf, 0xc0],

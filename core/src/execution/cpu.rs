@@ -179,13 +179,7 @@ impl Cpu32 {
                 let input = self.read_operand(destination, memory)?;
                 self.write_operand(destination, !input & destination.width.mask(), memory)?;
             }
-            Code::Neg_rm8 | Code::Neg_rm16 | Code::Neg_rm32 => {
-                let destination = self.operand(instruction, 0)?;
-                let input = self.read_operand(destination, memory)?;
-                let result = 0_u32.wrapping_sub(input) & destination.width.mask();
-                self.write_operand(destination, result, memory)?;
-                self.arithmetic_flags(0, input, result, input != 0, true, destination.width);
-            }
+            Code::Neg_rm8 | Code::Neg_rm16 | Code::Neg_rm32 => self.negate(instruction, memory)?,
             code if shifts::is_shift(code) => self.shift(instruction, memory)?,
             Code::Imul_r16_rm16
             | Code::Imul_r32_rm32
@@ -196,6 +190,7 @@ impl Cpu32 {
             Code::Imul_rm8 | Code::Imul_rm16 | Code::Imul_rm32 => {
                 self.multiply_wide(instruction, memory)?;
             }
+            Code::Mul_rm32 => self.multiply_unsigned_dword(instruction, memory)?,
             Code::Div_rm8 | Code::Div_rm16 | Code::Div_rm32 => self.divide(instruction, memory)?,
             Code::Cdq => self.sign_extend_accumulator(),
             Code::Inc_rm8
@@ -258,6 +253,19 @@ impl Cpu32 {
     fn sign_extend_accumulator(&mut self) {
         let high = (self.register(Register32::Eax).cast_signed() >> 31).cast_unsigned();
         self.set_register(Register32::Edx, high);
+    }
+
+    fn negate(
+        &mut self,
+        instruction: &Instruction,
+        memory: &mut GuestMemory,
+    ) -> Result<(), StopReason> {
+        let destination = self.operand(instruction, 0)?;
+        let input = self.read_operand(destination, memory)?;
+        let result = 0_u32.wrapping_sub(input) & destination.width.mask();
+        self.write_operand(destination, result, memory)?;
+        self.arithmetic_flags(0, input, result, input != 0, true, destination.width);
+        Ok(())
     }
 
     fn binary(
@@ -374,6 +382,21 @@ impl Cpu32 {
             );
         }
         self.eflags = (self.eflags & !0x801) | if product == signed(low) { 0 } else { 0x801 };
+        Ok(())
+    }
+
+    fn multiply_unsigned_dword(
+        &mut self,
+        instruction: &Instruction,
+        memory: &GuestMemory,
+    ) -> Result<(), StopReason> {
+        let source = self.read_operand(self.operand(instruction, 0)?, memory)?;
+        let product = u64::from(self.register(Register32::Eax)) * u64::from(source);
+        let low = u32::try_from(product & u64::from(u32::MAX)).expect("masked product fits u32");
+        let high = u32::try_from(product >> 32).expect("high product fits u32");
+        self.set_register(Register32::Eax, low);
+        self.set_register(Register32::Edx, high);
+        self.eflags = (self.eflags & !0x801) | if high == 0 { 0 } else { 0x801 };
         Ok(())
     }
 
