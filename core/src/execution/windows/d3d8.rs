@@ -115,6 +115,8 @@ pub(super) enum Call {
     TextureSurfaceUnlockRect,
     SetVertexShader,
     SetPixelShader,
+    SetIndices,
+    GetIndices,
     SetViewport,
     SetTransform,
     GetTransform,
@@ -170,6 +172,8 @@ impl Call {
             0x4cc => Self::TextureSurfaceUnlockRect,
             0x41c => Self::SetVertexShader,
             0x520 => Self::SetPixelShader,
+            0x524 => Self::SetIndices,
+            0x528 => Self::GetIndices,
             0x420 => Self::DrawPrimitiveUp,
             0x498 => Self::SetViewport,
             0x4f0 => Self::SetTransform,
@@ -208,7 +212,9 @@ impl Call {
             | Self::SetRenderState
             | Self::SetTransform
             | Self::GetTransform
-            | Self::SetTexture => 3,
+            | Self::SetTexture
+            | Self::SetIndices
+            | Self::GetIndices => 3,
             Self::AdapterIdentifier
             | Self::AdapterMode
             | Self::DeviceCaps
@@ -249,6 +255,7 @@ pub(super) struct Graphics {
     textures: BTreeMap<u32, Texture>,
     vertex_buffers: BTreeMap<u32, VertexBuffer>,
     index_buffers: BTreeMap<u32, IndexBuffer>,
+    indices: Option<(u32, u32)>,
     texture_stages: [u32; 8],
     color_arg0: [u32; 8],
     vertex_fvf: u32,
@@ -417,6 +424,8 @@ impl Graphics {
             (DEVICE_TABLE, 72, 0x420),
             (DEVICE_TABLE, 76, 0x41c),
             (DEVICE_TABLE, 88, 0x520),
+            (DEVICE_TABLE, 85, 0x524),
+            (DEVICE_TABLE, 86, 0x528),
             (TEXTURE_TABLE, 1, 0x404),
             (TEXTURE_TABLE, 2, 0x408),
             (TEXTURE_TABLE, 9, 0x4d0),
@@ -493,6 +502,8 @@ impl Graphics {
             Call::TextureSurfaceLockRect => return self.texture_surface_lock_rect(args, memory),
             Call::TextureSurfaceUnlockRect => self.texture_surface_unlock_rect(args[0]),
             Call::SetVertexShader | Call::SetPixelShader => self.set_shader(call, args),
+            Call::SetIndices => return self.set_indices(args, memory),
+            Call::GetIndices => return self.get_indices(args, memory),
             Call::SetViewport => return self.set_viewport(args, memory),
             Call::SetTransform => return self.set_transform(args, memory),
             Call::GetTransform => return self.get_transform(args, memory),
@@ -732,6 +743,7 @@ impl Graphics {
         self.device_refs = 1;
         self.scene_open = false;
         self.texture_stages = [0; 8];
+        self.indices = None;
         self.color_arg0 = [1; 8];
         self.depth = (enable_depth == 1).then(|| vec![u16::MAX; (width * height) as usize]);
         self.depth_surface_refs = 0;
@@ -758,6 +770,7 @@ impl Graphics {
         self.transforms.clear();
         self.vertex_fvf = 0;
         self.texture_stages = [0; 8];
+        self.indices = None;
         self.color_arg0 = [1; 8];
         self.root_refs = self.root_refs.saturating_sub(1);
     }
@@ -1031,6 +1044,59 @@ impl Graphics {
             Call::SetPixelShader if args[1] == 0 => 0,
             _ => INVALID_CALL,
         }
+    }
+
+    fn set_indices(&mut self, args: &[u32], memory: &mut GuestMemory) -> Result<u32, MemoryError> {
+        let [device, next, base] = <[u32; 3]>::try_from(args).expect("d3d8 call arity");
+        if device != DEVICE || self.device_refs == 0 {
+            return Ok(INVALID_CALL);
+        }
+        let previous = self.indices.map_or(0, |(buffer, _)| buffer);
+        if next == previous {
+            self.indices = (next != 0).then_some((next, base));
+            return Ok(0);
+        }
+        if next != 0
+            && self
+                .index_buffers
+                .get(&next)
+                .is_none_or(|buffer| buffer.refs == u32::MAX)
+        {
+            return Ok(INVALID_CALL);
+        }
+        if previous != 0 {
+            self.index_buffer_release(previous, memory)?;
+        }
+        if next != 0 {
+            self.index_buffer_add_ref(next);
+        }
+        self.indices = (next != 0).then_some((next, base));
+        Ok(0)
+    }
+
+    fn get_indices(&mut self, args: &[u32], memory: &mut GuestMemory) -> Result<u32, MemoryError> {
+        let [device, output_buffer, output_base] =
+            <[u32; 3]>::try_from(args).expect("d3d8 call arity");
+        if device != DEVICE || self.device_refs == 0 || output_buffer.abs_diff(output_base) < 4 {
+            return Ok(INVALID_CALL);
+        }
+        let (buffer, base) = self.indices.unwrap_or((0, 0));
+        if buffer != 0
+            && self
+                .index_buffers
+                .get(&buffer)
+                .is_none_or(|buffer| buffer.refs == u32::MAX)
+        {
+            return Ok(INVALID_CALL);
+        }
+        guest::check(memory, output_buffer, 4, Access::Write)?;
+        guest::check(memory, output_base, 4, Access::Write)?;
+        guest::write_word(memory, output_buffer, buffer)?;
+        guest::write_word(memory, output_base, base)?;
+        if buffer != 0 {
+            self.index_buffer_add_ref(buffer);
+        }
+        Ok(0)
     }
 
     fn draw_primitive_up(
