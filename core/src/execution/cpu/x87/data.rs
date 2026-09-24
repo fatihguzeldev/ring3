@@ -374,7 +374,7 @@ impl Cpu32 {
             }
             (result, rounding::sum_result(result, left, signed_right))
         } else {
-            let source = if instruction.code() == Code::Fmul_st0_sti {
+            let source = if matches!(instruction.code(), Code::Fmul_st0_sti | Code::Fdiv_st0_sti) {
                 self.x87_register_value(instruction.op1_register())?
             } else if instruction.code() == Code::Fimul_m32int {
                 self.read_integer_m32(instruction, memory)?
@@ -624,6 +624,7 @@ impl Cpu32 {
                     code,
                     Code::Fsqrt
                         | Code::Fdivp_sti_st0
+                        | Code::Fdiv_st0_sti
                         | Code::Fmulp_sti_st0
                         | Code::Fsubp_sti_st0
                         | Code::Fsubrp_sti_st0

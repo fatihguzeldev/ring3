@@ -39,6 +39,7 @@ pub(super) fn is_arithmetic(code: Code) -> bool {
         code,
         Code::Fsqrt
             | Code::Fmul_st0_sti
+            | Code::Fdiv_st0_sti
             | Code::Fdiv_m32fp
             | Code::Fdiv_m64fp
             | Code::Fdivr_m32fp
