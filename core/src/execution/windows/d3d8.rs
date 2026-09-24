@@ -117,6 +117,8 @@ pub(super) enum Call {
     SetPixelShader,
     SetIndices,
     GetIndices,
+    SetStreamSource,
+    GetStreamSource,
     SetViewport,
     SetTransform,
     GetTransform,
@@ -174,6 +176,8 @@ impl Call {
             0x520 => Self::SetPixelShader,
             0x524 => Self::SetIndices,
             0x528 => Self::GetIndices,
+            0x52c => Self::SetStreamSource,
+            0x530 => Self::GetStreamSource,
             0x420 => Self::DrawPrimitiveUp,
             0x498 => Self::SetViewport,
             0x4f0 => Self::SetTransform,
@@ -220,7 +224,9 @@ impl Call {
             | Self::DeviceCaps
             | Self::TextureSurfaceLockRect
             | Self::GetTextureStageState
-            | Self::SetTextureStageState => 4,
+            | Self::SetTextureStageState
+            | Self::SetStreamSource
+            | Self::GetStreamSource => 4,
             Self::AdapterModeCount
             | Self::TextureUnlockRect
             | Self::SetVertexShader
@@ -256,6 +262,7 @@ pub(super) struct Graphics {
     vertex_buffers: BTreeMap<u32, VertexBuffer>,
     index_buffers: BTreeMap<u32, IndexBuffer>,
     indices: Option<(u32, u32)>,
+    stream: Option<(u32, u32)>,
     texture_stages: [u32; 8],
     color_arg0: [u32; 8],
     vertex_fvf: u32,
@@ -426,6 +433,8 @@ impl Graphics {
             (DEVICE_TABLE, 88, 0x520),
             (DEVICE_TABLE, 85, 0x524),
             (DEVICE_TABLE, 86, 0x528),
+            (DEVICE_TABLE, 83, 0x52c),
+            (DEVICE_TABLE, 84, 0x530),
             (TEXTURE_TABLE, 1, 0x404),
             (TEXTURE_TABLE, 2, 0x408),
             (TEXTURE_TABLE, 9, 0x4d0),
@@ -504,6 +513,8 @@ impl Graphics {
             Call::SetVertexShader | Call::SetPixelShader => self.set_shader(call, args),
             Call::SetIndices => return self.set_indices(args, memory),
             Call::GetIndices => return self.get_indices(args, memory),
+            Call::SetStreamSource => return self.set_stream_source(args, memory),
+            Call::GetStreamSource => return self.get_stream_source(args, memory),
             Call::SetViewport => return self.set_viewport(args, memory),
             Call::SetTransform => return self.set_transform(args, memory),
             Call::GetTransform => return self.get_transform(args, memory),
@@ -744,6 +755,7 @@ impl Graphics {
         self.scene_open = false;
         self.texture_stages = [0; 8];
         self.indices = None;
+        self.stream = None;
         self.color_arg0 = [1; 8];
         self.depth = (enable_depth == 1).then(|| vec![u16::MAX; (width * height) as usize]);
         self.depth_surface_refs = 0;
@@ -771,6 +783,7 @@ impl Graphics {
         self.vertex_fvf = 0;
         self.texture_stages = [0; 8];
         self.indices = None;
+        self.stream = None;
         self.color_arg0 = [1; 8];
         self.root_refs = self.root_refs.saturating_sub(1);
     }
@@ -1095,6 +1108,76 @@ impl Graphics {
         guest::write_word(memory, output_base, base)?;
         if buffer != 0 {
             self.index_buffer_add_ref(buffer);
+        }
+        Ok(0)
+    }
+
+    fn set_stream_source(
+        &mut self,
+        args: &[u32],
+        memory: &mut GuestMemory,
+    ) -> Result<u32, MemoryError> {
+        let [device, stream, next, stride] = <[u32; 4]>::try_from(args).expect("d3d8 call arity");
+        if device != DEVICE
+            || self.device_refs == 0
+            || stream != 0
+            || (next == 0 && stride != 0)
+            || (next != 0 && !(1..=primitives::MAX_STRIDE).contains(&stride))
+        {
+            return Ok(INVALID_CALL);
+        }
+        let previous = self.stream.map_or(0, |(buffer, _)| buffer);
+        if previous == next {
+            self.stream = (next != 0).then_some((next, stride));
+            return Ok(0);
+        }
+        if next != 0
+            && self
+                .vertex_buffers
+                .get(&next)
+                .is_none_or(|buffer| buffer.refs == u32::MAX)
+        {
+            return Ok(INVALID_CALL);
+        }
+        if previous != 0 {
+            self.vertex_buffer_release(previous, memory)?;
+        }
+        if next != 0 {
+            self.vertex_buffer_add_ref(next);
+        }
+        self.stream = (next != 0).then_some((next, stride));
+        Ok(0)
+    }
+
+    fn get_stream_source(
+        &mut self,
+        args: &[u32],
+        memory: &mut GuestMemory,
+    ) -> Result<u32, MemoryError> {
+        let [device, stream, output_buffer, output_stride] =
+            <[u32; 4]>::try_from(args).expect("d3d8 call arity");
+        if device != DEVICE
+            || self.device_refs == 0
+            || stream != 0
+            || output_buffer.abs_diff(output_stride) < 4
+        {
+            return Ok(INVALID_CALL);
+        }
+        let (buffer, stride) = self.stream.unwrap_or((0, 0));
+        if buffer != 0
+            && self
+                .vertex_buffers
+                .get(&buffer)
+                .is_none_or(|buffer| buffer.refs == u32::MAX)
+        {
+            return Ok(INVALID_CALL);
+        }
+        guest::check(memory, output_buffer, 4, Access::Write)?;
+        guest::check(memory, output_stride, 4, Access::Write)?;
+        guest::write_word(memory, output_buffer, buffer)?;
+        guest::write_word(memory, output_stride, stride)?;
+        if buffer != 0 {
+            self.vertex_buffer_add_ref(buffer);
         }
         Ok(0)
     }

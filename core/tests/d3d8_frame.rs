@@ -34,6 +34,8 @@ const INDEX_BUFFER_OUTPUT: u32 = 0x0040_2e08;
 const INDEX_DATA_OUTPUT: u32 = 0x0040_2e0c;
 const INDEX_QUERY_OUTPUT: u32 = 0x0040_2e10;
 const INDEX_BASE_OUTPUT: u32 = 0x0040_2e14;
+const STREAM_QUERY_OUTPUT: u32 = 0x0040_2e18;
+const STREAM_STRIDE_OUTPUT: u32 = 0x0040_2e1c;
 
 #[test]
 fn executes_an_uninterrupted_guest_graphics_program() {
@@ -2821,4 +2823,106 @@ fn index_binding_rejects_foreign_resources_and_get_faults_atomically() {
     assert_eq!(direct_call(&mut process, release, &[index]), 1);
     assert_eq!(invoke(&mut process, set, &[device, 0, 0]), 0);
     assert!(process.memory.read(u64::from(index), &mut [0]).is_err());
+}
+
+#[test]
+fn bound_vertex_stream_keeps_buffer_alive_and_get_adds_a_reference() {
+    let (mut process, _, device) = create();
+    let create_vertex = method(&process, device, 23);
+    assert_eq!(
+        direct_call(
+            &mut process,
+            create_vertex,
+            &[device, 96, 0x218, 0x142, 0, VERTEX_BUFFER_OUTPUT]
+        ),
+        0
+    );
+    let vertex = read(&process, VERTEX_BUFFER_OUTPUT);
+    let set = method(&process, device, 83);
+    let get = method(&process, device, 84);
+    assert_ne!(set, 0x7000_0ffc);
+    assert_ne!(get, 0x7000_0ffc);
+    assert_eq!(invoke(&mut process, set, &[device, 0, vertex, 24]), 0);
+    assert_eq!(invoke(&mut process, set, &[device, 0, vertex, 32]), 0);
+    assert_eq!(
+        invoke(
+            &mut process,
+            get,
+            &[device, 0, STREAM_QUERY_OUTPUT, STREAM_STRIDE_OUTPUT]
+        ),
+        0
+    );
+    assert_eq!(read(&process, STREAM_QUERY_OUTPUT), vertex);
+    assert_eq!(read(&process, STREAM_STRIDE_OUTPUT), 32);
+    let release = method(&process, vertex, 2);
+    assert_eq!(direct_call(&mut process, release, &[vertex]), 2);
+    assert_eq!(invoke(&mut process, set, &[device, 0, 0, 0]), 0);
+    assert_eq!(direct_call(&mut process, release, &[vertex]), 0);
+    assert!(process.memory.read(u64::from(vertex), &mut [0]).is_err());
+    assert_eq!(
+        invoke(
+            &mut process,
+            get,
+            &[device, 0, STREAM_QUERY_OUTPUT, STREAM_STRIDE_OUTPUT]
+        ),
+        0
+    );
+    assert_eq!(read(&process, STREAM_QUERY_OUTPUT), 0);
+    assert_eq!(read(&process, STREAM_STRIDE_OUTPUT), 0);
+}
+
+#[test]
+fn stream_binding_rejects_bad_identity_stride_and_get_faults_atomically() {
+    let (mut process, _, device) = create();
+    let create_vertex = method(&process, device, 23);
+    assert_eq!(
+        direct_call(
+            &mut process,
+            create_vertex,
+            &[device, 96, 0x218, 0x142, 0, VERTEX_BUFFER_OUTPUT]
+        ),
+        0
+    );
+    let vertex = read(&process, VERTEX_BUFFER_OUTPUT);
+    let set = method(&process, device, 83);
+    let get = method(&process, device, 84);
+    assert_eq!(invoke(&mut process, set, &[device, 0, vertex, 24]), 0);
+    for [owner, stream, buffer, stride] in [
+        [device, 1, vertex, 24],
+        [device, 0, vertex, 0],
+        [device, 0, vertex, 257],
+        [device, 0, vertex + 4, 24],
+        [device + 4, 0, vertex, 24],
+    ] {
+        assert_eq!(
+            invoke(&mut process, set, &[owner, stream, buffer, stride]),
+            0x8876_086c
+        );
+    }
+    write(&mut process, STREAM_QUERY_OUTPUT, &[0x1234_5678]);
+    let fault = call(
+        &mut process,
+        get,
+        &[device, 0, STREAM_QUERY_OUTPUT, 0x0040_1000],
+    );
+    assert!(matches!(
+        fault.reason,
+        ProcessStop::Stopped(StopReason::MemoryFault(_))
+    ));
+    assert_eq!(read(&process, STREAM_QUERY_OUTPUT), 0x1234_5678);
+    assert_eq!(
+        invoke(
+            &mut process,
+            get,
+            &[device, 0, STREAM_QUERY_OUTPUT, STREAM_STRIDE_OUTPUT]
+        ),
+        0
+    );
+    assert_eq!(read(&process, STREAM_QUERY_OUTPUT), vertex);
+    assert_eq!(read(&process, STREAM_STRIDE_OUTPUT), 24);
+    let release = method(&process, vertex, 2);
+    assert_eq!(direct_call(&mut process, release, &[vertex]), 2);
+    assert_eq!(direct_call(&mut process, release, &[vertex]), 1);
+    assert_eq!(invoke(&mut process, set, &[device, 0, 0, 0]), 0);
+    assert!(process.memory.read(u64::from(vertex), &mut [0]).is_err());
 }
