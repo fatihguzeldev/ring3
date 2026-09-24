@@ -83,6 +83,7 @@ pub struct Process32 {
     priority: thread::Priority,
     tls: tls::Tls,
     graphics: d3d8::Graphics,
+    sound_data_mapped: bool,
     gdi: gdi::Gdi,
     crt: crt::Crt,
     com: com::Com,
@@ -638,7 +639,6 @@ impl Process32 {
         image
             .memory
             .map_zeroed(u64::from(API_BASE), PAGE_SIZE, Permissions::NONE)?;
-        dsound::initialize(&mut image.memory)?;
         d3d8::Graphics::initialize(&mut image.memory)?;
         diagnostic_imports.map(&mut image.memory)?;
         thread::initialize(&mut image.memory, STACK_BASE, STACK_BASE + STACK_SIZE)?;
@@ -679,6 +679,7 @@ impl Process32 {
             priority: thread::Priority::default(),
             tls: tls::Tls::default(),
             graphics: d3d8::Graphics::default(),
+            sound_data_mapped: false,
             crt: crt::Crt::default(),
             com: com::Com::default(),
             diagnostic_imports,

@@ -28,6 +28,7 @@ fn word(process: &Process32, address: u32) -> u32 {
 fn direct_sound_enumerates_a_primary_device_by_name_and_ordinal() {
     for ordinal in [false, true] {
         let mut process = process(ordinal);
+        let pages_before_enumeration = process.memory.mapped_pages();
         let target = word(&process, 0x0040_2060);
         process.cpu.eip = target;
         process.cpu.set_register(Register32::Esp, STACK);
@@ -44,6 +45,7 @@ fn direct_sound_enumerates_a_primary_device_by_name_and_ordinal() {
             ProcessStop::Stopped(StopReason::InstructionLimit)
         );
         assert_eq!(process.cpu.eip, CALLBACK);
+        assert_eq!(process.memory.mapped_pages(), pages_before_enumeration + 1);
         let callback_stack = process.cpu.register(Register32::Esp);
         assert_eq!(word(&process, callback_stack), 0x7000_0ff8);
         assert_eq!(word(&process, callback_stack + 4), 0);

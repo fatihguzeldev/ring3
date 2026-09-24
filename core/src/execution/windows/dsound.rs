@@ -42,6 +42,11 @@ pub(super) fn initialize(memory: &mut super::GuestMemory) -> Result<(), super::M
 
 impl Process32 {
     pub(super) fn enumerate_sound(&mut self, args: &[u32]) -> Result<bool, DispatchError> {
+        self.callbacks.check_entry(args[0])?;
+        if !self.sound_data_mapped {
+            initialize(&mut self.memory)?;
+            self.sound_data_mapped = true;
+        }
         let stack = self.cpu.register(Register32::Esp);
         self.callbacks.enter(
             &mut self.cpu,
