@@ -9,6 +9,21 @@ pub(super) fn lowercase(character: u32) -> Result<u32, DispatchError> {
 }
 
 pub(super) fn uppercase(memory: &mut GuestMemory, source: u32) -> Result<u32, DispatchError> {
+    change_case(memory, source, true)
+}
+
+pub(super) fn lowercase_string(
+    memory: &mut GuestMemory,
+    source: u32,
+) -> Result<u32, DispatchError> {
+    change_case(memory, source, false)
+}
+
+fn change_case(
+    memory: &mut GuestMemory,
+    source: u32,
+    make_uppercase: bool,
+) -> Result<u32, DispatchError> {
     if source == 0 {
         guest::write_word(memory, ERRNO, 22)?;
         return Ok(0);
@@ -17,9 +32,13 @@ pub(super) fn uppercase(memory: &mut GuestMemory, source: u32) -> Result<u32, Di
     let length = bytes.len() - 1;
     let mut changed = false;
     for byte in &mut bytes[..length] {
-        let uppercase = byte.to_ascii_uppercase();
-        changed |= uppercase != *byte;
-        *byte = uppercase;
+        let mapped = if make_uppercase {
+            byte.to_ascii_uppercase()
+        } else {
+            byte.to_ascii_lowercase()
+        };
+        changed |= mapped != *byte;
+        *byte = mapped;
     }
     if changed {
         guest::check(memory, source, length, Access::Write)?;

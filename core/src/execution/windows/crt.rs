@@ -77,6 +77,7 @@ pub(super) enum Call {
     Snprintf,
     Sscanf,
     Lowercase,
+    LowercaseString,
     UppercaseString,
     SetMbCodePage,
     OnExit,
@@ -126,6 +127,7 @@ impl Call {
             0x1a0 => Some(Self::Stream(streams::Call::Seek)),
             0x1a4 => Some(Self::Stream(streams::Call::Tell)),
             0x1a8 => Some(Self::UppercaseString),
+            0x1c0 => Some(Self::LowercaseString),
             0x1ac => Some(Self::Sprintf),
             0x1bc => Some(Self::Snprintf),
             0x1b0 => Some(Self::Move),
@@ -150,6 +152,7 @@ impl Call {
             | Self::Length
             | Self::SeedRandom
             | Self::Lowercase
+            | Self::LowercaseString
             | Self::UppercaseString
             | Self::SetMbCodePage
             | Self::OnExit
@@ -277,6 +280,7 @@ impl Crt {
                 cpu.register(Register32::Esp),
             )?),
             Call::Lowercase => Some(strings::lowercase(args[0])?),
+            Call::LowercaseString => Some(strings::lowercase_string(memory, args[0])?),
             Call::UppercaseString => Some(strings::uppercase(memory, args[0])?),
             Call::CompareIgnoringCase => {
                 Some(strings::compare_ignoring_case(memory, args[0], args[1])?)
@@ -365,6 +369,7 @@ pub(super) fn resolve(name: &str) -> Option<u32> {
         "fseek" => Some(API_BASE + 0x1a0),
         "ftell" => Some(API_BASE + 0x1a4),
         "_strupr" => Some(API_BASE + 0x1a8),
+        "_strlwr" => Some(API_BASE + 0x1c0),
         "sprintf" => Some(API_BASE + 0x1ac),
         "_snprintf" => Some(API_BASE + 0x1bc),
         "sscanf" => Some(API_BASE + 0x1b8),
