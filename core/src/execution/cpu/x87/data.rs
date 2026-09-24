@@ -289,21 +289,11 @@ impl Cpu32 {
                 | Code::Fsub_m32fp
                 | Code::Fsub_m64fp
                 | Code::Fsub_st0_sti
+                | Code::Fsubr_st0_sti
                 | Code::Fsubr_m32fp
                 | Code::Fsubr_m64fp
         ) {
-            let source = if instruction.code() == Code::Fsub_st0_sti {
-                self.x87_register_value(instruction.op1_register())?
-            } else {
-                self.read_float(instruction, memory)?
-            };
-            let (left, right) =
-                if matches!(instruction.code(), Code::Fsubr_m32fp | Code::Fsubr_m64fp) {
-                    (source, top)
-                } else {
-                    (top, source)
-                };
-            let add = matches!(instruction.code(), Code::Fadd_m32fp | Code::Fadd_m64fp);
+            let (left, right, add) = self.x87_add_sub_operands(instruction, memory, top)?;
             let mut result = if add { left + right } else { left - right };
             if !result.is_finite() || (result != 0.0 && !result.is_normal()) {
                 return Err(StopReason::UnsupportedInstruction);
@@ -373,6 +363,31 @@ impl Cpu32 {
         );
         self.x87_stack.values[usize::from(self.x87_stack.top)] = result.to_bits();
         Ok(())
+    }
+
+    fn x87_add_sub_operands(
+        &self,
+        instruction: &Instruction,
+        memory: &GuestMemory,
+        top: f64,
+    ) -> Result<(f64, f64, bool), StopReason> {
+        let code = instruction.code();
+        let source = if matches!(code, Code::Fsub_st0_sti | Code::Fsubr_st0_sti) {
+            self.x87_register_value(instruction.op1_register())?
+        } else {
+            self.read_float(instruction, memory)?
+        };
+        let reverse = matches!(
+            code,
+            Code::Fsubr_st0_sti | Code::Fsubr_m32fp | Code::Fsubr_m64fp
+        );
+        let (left, right) = if reverse {
+            (source, top)
+        } else {
+            (top, source)
+        };
+        let add = matches!(code, Code::Fadd_m32fp | Code::Fadd_m64fp);
+        Ok((left, right, add))
     }
 
     pub(in super::super) fn x87_integer_load(
@@ -544,6 +559,7 @@ impl Cpu32 {
                     code,
                     Code::Fdivp_sti_st0
                         | Code::Fdiv_m32fp
+                        | Code::Fsubr_st0_sti
                         | Code::Fadd_st0_sti
                         | Code::Faddp_sti_st0
                         | Code::Fmul_st0_sti
