@@ -16,6 +16,7 @@ const DEVICE_TABLE: u32 = OBJECT_BASE + 0x200;
 const DEPTH_SURFACE_TABLE: u32 = OBJECT_BASE + 0x500;
 const TEXTURE_SURFACE_TABLE: u32 = OBJECT_BASE + 0x600;
 const VERTEX_BUFFER_TABLE: u32 = OBJECT_BASE + 0x700;
+const INDEX_BUFFER_TABLE: u32 = OBJECT_BASE + 0x800;
 const INVALID_CALL: u32 = 0x8876_086c;
 const NOT_AVAILABLE: u32 = 0x8876_086a;
 const UNSUPPORTED_COLOR_OPERATION: u32 = 0x8876_0819;
@@ -77,6 +78,7 @@ pub(super) enum Call {
     CreateDevice,
     CreateTexture,
     CreateVertexBuffer,
+    CreateIndexBuffer,
     Clear,
     Present,
     RootAddRef,
@@ -89,6 +91,8 @@ pub(super) enum Call {
     VertexBufferRelease,
     VertexBufferLock,
     VertexBufferUnlock,
+    IndexBufferAddRef,
+    IndexBufferRelease,
     TexturePreLoad,
     SetTexture,
     GetTextureStageState,
@@ -136,6 +140,9 @@ impl Call {
             0x500 => Self::VertexBufferRelease,
             0x504 => Self::VertexBufferLock,
             0x508 => Self::VertexBufferUnlock,
+            0x50c => Self::CreateIndexBuffer,
+            0x510 => Self::IndexBufferAddRef,
+            0x514 => Self::IndexBufferRelease,
             0x404 => Self::TextureAddRef,
             0x408 => Self::TextureRelease,
             0x4d0 => Self::TexturePreLoad,
@@ -209,6 +216,7 @@ impl Call {
             | Self::TextureSurfaceDesc
             | Self::ValidateDevice => 2,
             Self::CreateVertexBuffer
+            | Self::CreateIndexBuffer
             | Self::CheckDeviceType
             | Self::CheckMultiSampleType
             | Self::CheckDepthStencilMatch => 6,
@@ -232,6 +240,7 @@ pub(super) struct Graphics {
     front: Option<Frame>,
     textures: BTreeMap<u32, Texture>,
     vertex_buffers: BTreeMap<u32, VertexBuffer>,
+    index_buffers: BTreeMap<u32, IndexBuffer>,
     texture_stages: [u32; 8],
     color_arg0: [u32; 8],
     vertex_fvf: u32,
@@ -251,6 +260,11 @@ struct VertexBuffer {
     byte_length: u32,
     usage: u32,
     locks: u32,
+}
+
+struct IndexBuffer {
+    refs: u32,
+    length: u64,
 }
 
 struct TextureLevel {
@@ -304,6 +318,7 @@ impl Graphics {
         }
         for index in 0..14 {
             guest::write_word(memory, VERTEX_BUFFER_TABLE + index * 4, API_BASE + 0xffc)?;
+            guest::write_word(memory, INDEX_BUFFER_TABLE + index * 4, API_BASE + 0xffc)?;
         }
         for (table, index, offset) in [
             (ROOT_TABLE, 1, 0x50),
@@ -340,6 +355,7 @@ impl Graphics {
             (DEPTH_SURFACE_TABLE, 2, 0x4a8),
             (DEVICE_TABLE, 20, 0x400),
             (DEVICE_TABLE, 23, 0x4f8),
+            (DEVICE_TABLE, 24, 0x50c),
             (DEVICE_TABLE, 72, 0x420),
             (DEVICE_TABLE, 76, 0x41c),
             (TEXTURE_TABLE, 1, 0x404),
@@ -359,6 +375,8 @@ impl Graphics {
             (VERTEX_BUFFER_TABLE, 2, 0x500),
             (VERTEX_BUFFER_TABLE, 11, 0x504),
             (VERTEX_BUFFER_TABLE, 12, 0x508),
+            (INDEX_BUFFER_TABLE, 1, 0x510),
+            (INDEX_BUFFER_TABLE, 2, 0x514),
         ] {
             guest::write_word(memory, table + index * 4, API_BASE + offset)?;
         }
@@ -402,6 +420,7 @@ impl Graphics {
             Call::CreateDevice => return self.create_device(args, memory, desktop),
             Call::CreateTexture => return self.create_texture(args, memory),
             Call::CreateVertexBuffer => return self.create_vertex_buffer(args, memory),
+            Call::CreateIndexBuffer => return self.create_index_buffer(args, memory),
             Call::TextureLevelDesc => return self.texture_level_desc(args, memory),
             Call::TextureLockRect => return self.texture_lock_rect(args, memory),
             Call::TextureUnlockRect => self.texture_unlock_rect(args),
@@ -443,6 +462,8 @@ impl Graphics {
             Call::VertexBufferRelease => return self.vertex_buffer_release(args[0], memory),
             Call::VertexBufferLock => return self.vertex_buffer_lock(args, memory),
             Call::VertexBufferUnlock => self.vertex_buffer_unlock(args[0]),
+            Call::IndexBufferAddRef => self.index_buffer_add_ref(args[0]),
+            Call::IndexBufferRelease => return self.index_buffer_release(args[0], memory),
             Call::TexturePreLoad => self.textures.get(&args[0]).map_or(INVALID_CALL, |texture| {
                 if texture.refs == 0 { INVALID_CALL } else { 0 }
             }),
@@ -921,6 +942,11 @@ impl Graphics {
                 .vertex_buffers
                 .values()
                 .map(|buffer| buffer.length)
+                .sum::<u64>()
+            + self
+                .index_buffers
+                .values()
+                .map(|buffer| buffer.length)
                 .sum::<u64>();
         let free = (TEXTURE_END - TEXTURE_START).saturating_sub(used);
         u32::try_from(((free + MIB / 2) / MIB) * MIB).expect("bounded texture aperture")
@@ -1078,6 +1104,77 @@ impl Graphics {
         }
         memory.unmap(u64::from(address), buffer.length)?;
         self.vertex_buffers.remove(&address);
+        self.device_refs -= 1;
+        if self.device_refs == 0 {
+            self.finish_device();
+        }
+        Ok(0)
+    }
+
+    fn create_index_buffer(
+        &mut self,
+        args: &[u32],
+        memory: &mut GuestMemory,
+    ) -> Result<u32, MemoryError> {
+        let [device, byte_length, usage, format, pool, output] =
+            <[u32; 6]>::try_from(args).expect("d3d8 call arity");
+        let index_size = match format {
+            101 => 2,
+            102 => 4,
+            _ => return Ok(INVALID_CALL),
+        };
+        if device != DEVICE
+            || self.device_refs == 0
+            || byte_length == 0
+            || byte_length % index_size != 0
+            || usage & !(0x0008 | 0x0010 | 0x0200) != 0
+            || !matches!(pool, 0..=2)
+        {
+            return Ok(INVALID_CALL);
+        }
+        guest::check(memory, output, 4, Access::Write)?;
+        let length = PAGE_SIZE + u64::from(byte_length).div_ceil(PAGE_SIZE) * PAGE_SIZE;
+        let Some(address) = memory.first_free_span(TEXTURE_START, TEXTURE_END, length)? else {
+            return Ok(OUT_OF_VIDEO_MEMORY);
+        };
+        if memory
+            .map_zeroed(address, length, Permissions::READ_WRITE)
+            .is_err()
+        {
+            return Ok(OUT_OF_VIDEO_MEMORY);
+        }
+        let address = u32::try_from(address).expect("index buffer guest range is 32-bit");
+        guest::write_word(memory, address, INDEX_BUFFER_TABLE)?;
+        memory.protect(u64::from(address), PAGE_SIZE, Permissions::READ)?;
+        guest::write_word(memory, output, address)?;
+        self.index_buffers
+            .insert(address, IndexBuffer { refs: 1, length });
+        self.device_refs = self.device_refs.saturating_add(1);
+        Ok(0)
+    }
+
+    fn index_buffer_add_ref(&mut self, address: u32) -> u32 {
+        let Some(buffer) = self.index_buffers.get_mut(&address) else {
+            return INVALID_CALL;
+        };
+        buffer.refs = buffer.refs.saturating_add(1);
+        buffer.refs
+    }
+
+    fn index_buffer_release(
+        &mut self,
+        address: u32,
+        memory: &mut GuestMemory,
+    ) -> Result<u32, MemoryError> {
+        let Some(buffer) = self.index_buffers.get_mut(&address) else {
+            return Ok(INVALID_CALL);
+        };
+        if buffer.refs > 1 {
+            buffer.refs -= 1;
+            return Ok(buffer.refs);
+        }
+        memory.unmap(u64::from(address), buffer.length)?;
+        self.index_buffers.remove(&address);
         self.device_refs -= 1;
         if self.device_refs == 0 {
             self.finish_device();

@@ -30,6 +30,7 @@ const MATRIX: u32 = 0x0040_2d00;
 const MATRIX_OUTPUT: u32 = 0x0040_2d80;
 const VERTEX_BUFFER_OUTPUT: u32 = 0x0040_2e00;
 const VERTEX_DATA_OUTPUT: u32 = 0x0040_2e04;
+const INDEX_BUFFER_OUTPUT: u32 = 0x0040_2e08;
 
 #[test]
 fn executes_an_uninterrupted_guest_graphics_program() {
@@ -2514,5 +2515,105 @@ fn vertex_buffer_lock_rejects_invalid_ranges_flags_and_faults_without_state_chan
             &[static_buffer, 0, 32, VERTEX_DATA_OUTPUT, 0x2000]
         ),
         0x8876_086c
+    );
+}
+
+#[test]
+fn index_buffer_creation_shares_resource_aperture_and_releases_its_pages() {
+    let (mut process, _, device) = create();
+    let create_vertex = method(&process, device, 23);
+    let create_index = method(&process, device, 24);
+    assert_ne!(create_index, 0x7000_0ffc);
+    assert_eq!(
+        direct_call(
+            &mut process,
+            create_vertex,
+            &[device, 96, 0x218, 0x142, 0, VERTEX_BUFFER_OUTPUT]
+        ),
+        0
+    );
+    assert_eq!(
+        direct_call(
+            &mut process,
+            create_index,
+            &[device, 12, 0x218, 101, 0, INDEX_BUFFER_OUTPUT]
+        ),
+        0
+    );
+    let vertex = read(&process, VERTEX_BUFFER_OUTPUT);
+    let index = read(&process, INDEX_BUFFER_OUTPUT);
+    assert_eq!(index, vertex + 8192);
+    assert_ne!(read(&process, index), 0);
+    assert_eq!(read_bytes(&process, index + 4096, 12), vec![0; 12]);
+    assert!(process.memory.write(u64::from(index), &[0]).is_err());
+    process
+        .memory
+        .write(u64::from(index + 4096), &[1; 12])
+        .unwrap();
+    let add_ref = method(&process, index, 1);
+    let release = method(&process, index, 2);
+    assert_eq!(direct_call(&mut process, add_ref, &[index]), 2);
+    assert_eq!(direct_call(&mut process, release, &[index]), 1);
+    let release_device = method(&process, device, 2);
+    assert_eq!(direct_call(&mut process, release_device, &[device]), 2);
+    assert_eq!(direct_call(&mut process, release, &[index]), 0);
+    assert!(process.memory.read(u64::from(index), &mut [0]).is_err());
+    assert_eq!(direct_call(&mut process, release, &[index]), 0x8876_086c);
+    let release_vertex = method(&process, vertex, 2);
+    assert_eq!(direct_call(&mut process, release_vertex, &[vertex]), 0);
+}
+
+#[test]
+fn index_buffer_creation_rejects_invalid_requests_and_faults_atomically() {
+    let (mut process, _, device) = create();
+    let create_index = method(&process, device, 24);
+    let pages = process.memory.mapped_pages();
+    for [length, usage, format, pool] in [
+        [0, 0x218, 101, 0],
+        [11, 0x218, 101, 0],
+        [14, 0x218, 102, 0],
+        [12, 0x8000_0000, 101, 0],
+        [12, 0x218, 100, 0],
+        [12, 0x218, 101, 4],
+    ] {
+        write(&mut process, INDEX_BUFFER_OUTPUT, &[0x1234_5678]);
+        assert_eq!(
+            direct_call(
+                &mut process,
+                create_index,
+                &[device, length, usage, format, pool, INDEX_BUFFER_OUTPUT]
+            ),
+            0x8876_086c
+        );
+        assert_eq!(read(&process, INDEX_BUFFER_OUTPUT), 0x1234_5678);
+        assert_eq!(process.memory.mapped_pages(), pages);
+    }
+    assert_eq!(
+        direct_call(
+            &mut process,
+            create_index,
+            &[device, 1_048_576, 0, 101, 0, INDEX_BUFFER_OUTPUT]
+        ),
+        0x8876_017c
+    );
+    assert_eq!(read(&process, INDEX_BUFFER_OUTPUT), 0x1234_5678);
+    assert_eq!(process.memory.mapped_pages(), pages);
+    let fault = call(
+        &mut process,
+        create_index,
+        &[device, 12, 0x218, 101, 0, 0x0040_1000],
+    );
+    assert!(matches!(
+        fault.reason,
+        ProcessStop::Stopped(StopReason::MemoryFault(_))
+    ));
+    assert_eq!(process.memory.mapped_pages(), pages);
+    assert_eq!(
+        direct_call(
+            &mut process,
+            create_index,
+            &[device, 16, 0, 102, 0, INDEX_BUFFER_OUTPUT]
+        ),
+        0
     );
 }
