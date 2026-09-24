@@ -27,9 +27,9 @@ fn load(opcode: u8, numerator: u64, source: u64, address: u32) -> (Cpu32, GuestM
     (cpu, memory)
 }
 
-fn load_single(numerator: f64, divisor: f32) -> (Cpu32, GuestMemory) {
+fn load_single_code(numerator: f64, divisor: f32, mode: u8) -> (Cpu32, GuestMemory) {
     let mut code = memory_instruction(0xdd, 0x05, 0x0040_2200);
-    code.extend(memory_instruction(0xd8, 0x35, 0x0040_2210));
+    code.extend(memory_instruction(0xd8, mode, 0x0040_2210));
     code.extend([0xdf, 0xe0]);
     code.extend(memory_instruction(0xd9, 0x1d, 0x0040_2300));
     let mut image = load_pe32(&executable::pe32(&code), 32).unwrap();
@@ -44,6 +44,50 @@ fn load_single(numerator: f64, divisor: f32) -> (Cpu32, GuestMemory) {
     let mut cpu = Cpu32::new(image.entry_point);
     cpu.set_x87_control_word(0x007f);
     (cpu, image.memory)
+}
+
+fn load_single(numerator: f64, divisor: f32) -> (Cpu32, GuestMemory) {
+    load_single_code(numerator, divisor, 0x35)
+}
+
+#[test]
+fn single_precision_reverse_memory_division_uses_source_over_top() {
+    for (top, source, expected, status) in [
+        (3.0, 6.0_f32, 2.0_f32, 0),
+        (3.0, 1.0_f32, 1.0_f32 / 3.0, 0x220),
+        (31.0, 1.0_f32, 1.0_f32 / 31.0, 0x20),
+        (3.0, -1.0_f32, -1.0_f32 / 3.0, 0x20),
+    ] {
+        let (mut cpu, mut memory) = load_single_code(top, source, 0x3d);
+        assert_eq!(cpu.run(&mut memory, 3).instructions, 3);
+        assert_eq!(cpu.register(Register32::Eax) & 0x3a20, 0x3800 | status);
+        assert_eq!(cpu.run(&mut memory, 1).instructions, 1);
+        let mut bytes = [0; 4];
+        memory.read(0x0040_2300, &mut bytes).unwrap();
+        assert_eq!(u32::from_le_bytes(bytes), expected.to_bits());
+        memory.read(0x0040_2210, &mut bytes).unwrap();
+        assert_eq!(u32::from_le_bytes(bytes), source.to_bits());
+    }
+}
+
+#[test]
+fn single_precision_reverse_memory_division_rejects_invalid_results_atomically() {
+    for (top, source, control) in [
+        (0.0, 1.0_f32, 0x007f),
+        (0.5, f32::MAX, 0x007f),
+        (2.0, f32::MIN_POSITIVE, 0x007f),
+        (2.0, 1.0_f32, 0x0c7f),
+    ] {
+        let (mut cpu, mut memory) = load_single_code(top, source, 0x3d);
+        cpu.set_x87_control_word(control);
+        assert_eq!(cpu.run(&mut memory, 1).instructions, 1);
+        let before = cpu;
+        assert_eq!(
+            cpu.run(&mut memory, 1).reason,
+            StopReason::UnsupportedInstruction
+        );
+        assert_eq!(cpu, before);
+    }
 }
 
 #[test]

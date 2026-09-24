@@ -593,6 +593,7 @@ impl Cpu32 {
                         | Code::Fmulp_sti_st0
                         | Code::Fsubp_sti_st0
                         | Code::Fdiv_m32fp
+                        | Code::Fdivr_m32fp
                         | Code::Fsubr_st0_sti
                         | Code::Fadd_st0_sti
                         | Code::Faddp_sti_st0
