@@ -55,7 +55,7 @@ pub fn process(veto: u32) -> Process32 {
     bytes[0x380..0x380 + old.len()].copy_from_slice(&old);
     let new = forwarder();
     bytes[0x3c0..0x3c0 + new.len()].copy_from_slice(&new);
-    let mut p = Process32::load(&bytes, 32).unwrap();
+    let mut p = Process32::load(&bytes, 64).unwrap();
     assert_eq!(call(&mut p, 0x7000_024c, &[5, OLD, 0, 1]), 0x7400_0004);
     call(&mut p, 0x7000_024c, &[u32::MAX, 0xdead_beef, 0, 1]);
     call(&mut p, 0x7000_024c, &[5, NEW, 0, 1]);

@@ -429,8 +429,8 @@ fn ui_and_priority_failures_report_only_to_the_calling_thread() {
         (0xc0, vec![bad], 0, 1402),
         (0xcc, vec![0], 0, 998),
         (0x250, vec![bad], 0, 1404),
-        (0x24c, vec![13, 0, 0, 0], 0, 1427),
-        (0x24c, vec![13, 0x0040_1000, 0, 1], 0, 1429),
+        (0x24c, vec![u32::MAX, 0, 0, 2], 0, 1427),
+        (0x24c, vec![5, 0, 0, 2], 0, 1427),
         (0x260, vec![0x0040_0000, SOURCE, OUTPUT], 0, 1411),
         (0x268, vec![SOURCE, 0x0040_0000], 0, 1411),
     ];

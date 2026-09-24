@@ -117,7 +117,7 @@ impl Process32 {
             .ok_or(MemoryError::AddressOverflow)?;
         guest::check(&self.memory, lowest, (SCRATCH + 20) as usize, Access::Write)?;
         let base = lowest + 20;
-        let hook = self.hooks.newest_cbt();
+        let hook = self.newest_cbt()?;
         let procedure = hook.map_or(class[1], |(_, procedure)| procedure);
         self.threads
             .state_mut(self.cpu.fs_base())?

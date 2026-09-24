@@ -211,7 +211,7 @@ impl Process32 {
     ) -> Result<(), DispatchError> {
         let [instance, _, parent, procedure, init] = args.try_into().unwrap();
         let caller = self.cpu.register(Register32::Esp);
-        let hook = self.hooks.newest_cbt();
+        let hook = self.newest_cbt()?;
         self.threads
             .state_mut(self.cpu.fs_base())?
             .callbacks

@@ -23,7 +23,6 @@ impl Api {
                 | Self::CallNextHook
                 | Self::Window(_)
                 | Self::Desktop(_)
-                | Self::Hook(_)
                 | Self::Cursor(_)
                 | Self::Gdi(_)
                 | Self::Graphics(_)

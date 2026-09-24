@@ -1287,6 +1287,9 @@ impl Process32 {
                     call,
                     args,
                     &self.modules,
+                    self.threads
+                        .id(thread::Teb(self.cpu.fs_base()))
+                        .ok_or(DispatchError::Unsupported)?,
                     thread::Teb(self.cpu.fs_base()),
                     &mut self.memory,
                 )?,

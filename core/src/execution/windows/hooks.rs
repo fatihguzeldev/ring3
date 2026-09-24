@@ -38,9 +38,16 @@ enum Kind {
     Cbt,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct Hook {
+    kind: Kind,
+    procedure: u32,
+    owner: u32,
+}
+
 pub(super) struct Hooks {
     // monotonic handles retain registration order; callbacks run only on delivery.
-    callbacks: BTreeMap<u32, (Kind, u32)>,
+    callbacks: BTreeMap<u32, Hook>,
     next: u32,
 }
 
@@ -54,16 +61,16 @@ impl Default for Hooks {
 }
 
 impl Hooks {
-    pub(super) fn newest_cbt(&self) -> Option<(u32, u32)> {
-        self.next_cbt(self.next)
+    pub(super) fn newest_cbt(&self, owner: u32) -> Option<(u32, u32)> {
+        self.next_cbt(self.next, owner)
     }
 
-    fn next_cbt(&self, current: u32) -> Option<(u32, u32)> {
+    fn next_cbt(&self, current: u32, owner: u32) -> Option<(u32, u32)> {
         self.callbacks
             .range(..current)
             .rev()
-            .find_map(|(&handle, &(kind, procedure))| {
-                (kind == Kind::Cbt).then_some((handle, procedure))
+            .find_map(|(&handle, hook)| {
+                (hook.kind == Kind::Cbt && hook.owner == owner).then_some((handle, hook.procedure))
             })
     }
     pub(super) fn dispatch(
@@ -71,6 +78,7 @@ impl Hooks {
         call: Call,
         arguments: &[u32],
         modules: &Modules,
+        owner: u32,
         teb: thread::Teb,
         memory: &mut GuestMemory,
     ) -> Result<u32, DispatchError> {
@@ -82,11 +90,13 @@ impl Hooks {
             };
         }
         let kind = match arguments[0] {
-            u32::MAX if arguments[2] == 0 && arguments[3] == thread::CURRENT_ID => {
-                Kind::MessageFilter
+            u32::MAX if arguments[2] == 0 && arguments[3] == owner => Kind::MessageFilter,
+            5 if arguments[2] == 0 && arguments[3] == owner => Kind::Cbt,
+            13 if owner == thread::CURRENT_ID
+                && (arguments[2] == 0 || modules.contains(arguments[2])) =>
+            {
+                Kind::LowLevelKeyboard
             }
-            5 if arguments[2] == 0 && arguments[3] == thread::CURRENT_ID => Kind::Cbt,
-            13 if arguments[2] == 0 || modules.contains(arguments[2]) => Kind::LowLevelKeyboard,
             _ => return Err(DispatchError::Unsupported),
         };
         if arguments[1] == 0 {
@@ -99,13 +109,28 @@ impl Hooks {
             return failure(teb, memory, 8);
         }
         let handle = self.next;
-        self.callbacks.insert(handle, (kind, arguments[1]));
+        self.callbacks.insert(
+            handle,
+            Hook {
+                kind,
+                procedure: arguments[1],
+                owner,
+            },
+        );
         self.next += 4;
         Ok(handle)
     }
 }
 
 impl Process32 {
+    pub(super) fn newest_cbt(&self) -> Result<Option<(u32, u32)>, DispatchError> {
+        let owner = self
+            .threads
+            .id(thread::Teb(self.cpu.fs_base()))
+            .ok_or(DispatchError::Unsupported)?;
+        Ok(self.hooks.newest_cbt(owner))
+    }
+
     pub(super) fn call_next_hook(&mut self, args: &[u32]) -> Result<bool, DispatchError> {
         let current = self
             .threads
@@ -113,7 +138,11 @@ impl Process32 {
             .callbacks
             .active_cbt()
             .ok_or(DispatchError::Unsupported)?;
-        let Some((handle, procedure)) = self.hooks.next_cbt(current) else {
+        let owner = self
+            .threads
+            .id(thread::Teb(self.cpu.fs_base()))
+            .ok_or(DispatchError::Unsupported)?;
+        let Some((handle, procedure)) = self.hooks.next_cbt(current, owner) else {
             self.cpu.set_register(Register32::Eax, 0);
             return Ok(false);
         };
@@ -168,6 +197,7 @@ mod tests {
                         Call::Install,
                         &[u32::MAX, callback, 0, 1],
                         &modules,
+                        1,
                         thread::Teb(thread::BASE),
                         &mut memory
                     )
@@ -179,7 +209,7 @@ mod tests {
                 .callbacks
                 .iter()
                 .rev()
-                .map(|(&h, &(_, p))| (h, p))
+                .map(|(&h, hook)| (h, hook.procedure))
                 .collect::<Vec<_>>(),
             [(LAST_HANDLE, 0x3000_5678), (LAST_HANDLE - 4, 0x0040_1234)]
         );
@@ -188,6 +218,7 @@ mod tests {
                 Call::Remove,
                 &[LAST_HANDLE],
                 &modules,
+                1,
                 thread::Teb(thread::BASE),
                 &mut memory
             ),
@@ -198,6 +229,7 @@ mod tests {
                 Call::Install,
                 &[u32::MAX, 1, 0, 1],
                 &modules,
+                1,
                 thread::Teb(thread::BASE),
                 &mut memory
             ),
@@ -228,6 +260,7 @@ mod tests {
                         Call::Install,
                         &args,
                         &modules,
+                        1,
                         thread::Teb(thread::BASE),
                         &mut memory
                     )
@@ -243,7 +276,7 @@ mod tests {
                 .callbacks
                 .values()
                 .rev()
-                .filter_map(|&(stored, callback)| (stored == kind).then_some(callback))
+                .filter_map(|hook| (hook.kind == kind).then_some(hook.procedure))
                 .collect();
             assert_eq!(callbacks, expected);
         }
@@ -252,6 +285,7 @@ mod tests {
                 Call::Remove,
                 &[FIRST_HANDLE + 4],
                 &modules,
+                1,
                 thread::Teb(thread::BASE),
                 &mut memory
             ),
@@ -259,8 +293,19 @@ mod tests {
         ));
         assert_eq!(
             hooks.callbacks[&(FIRST_HANDLE + 12)],
-            (Kind::LowLevelKeyboard, 40)
+            Hook {
+                kind: Kind::LowLevelKeyboard,
+                procedure: 40,
+                owner: 1
+            }
         );
-        assert_eq!(hooks.callbacks[&FIRST_HANDLE], (Kind::MessageFilter, 10));
+        assert_eq!(
+            hooks.callbacks[&FIRST_HANDLE],
+            Hook {
+                kind: Kind::MessageFilter,
+                procedure: 10,
+                owner: 1
+            }
+        );
     }
 }
