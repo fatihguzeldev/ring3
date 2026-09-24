@@ -896,7 +896,7 @@ impl Process32 {
                         pending.entry,
                         &[pending.handle, 1, 0],
                     )?;
-                self.modules.start(pending);
+                self.modules.start(pending, self.cpu.fs_base());
                 Ok(true)
             }
         }

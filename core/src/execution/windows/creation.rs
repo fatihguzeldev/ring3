@@ -222,6 +222,8 @@ impl Process32 {
             return self.finish_dialog_callback(frame, dialog);
         }
         if let Some(pending) = frame.module {
+            self.modules
+                .check_initializer_owner(pending, self.cpu.fs_base())?;
             let success = self.cpu.register(Register32::Eax) != 0;
             if !success {
                 thread::Teb(self.cpu.fs_base()).set_last_error(&mut self.memory, 1114)?;

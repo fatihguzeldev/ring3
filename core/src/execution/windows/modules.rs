@@ -50,12 +50,12 @@ struct Module {
 enum State {
     Ready,
     Deferred,
-    Initializing,
+    Initializing { owner: u32 },
 }
 
 impl Module {
     fn visible(&self) -> bool {
-        matches!(self.state, State::Ready | State::Initializing)
+        matches!(self.state, State::Ready | State::Initializing { .. })
     }
 }
 
@@ -86,6 +86,10 @@ impl Modules {
         teb: thread::Teb,
         memory: &mut GuestMemory,
     ) -> Result<Load, DispatchError> {
+        let foreign_initializer = self
+            .resident
+            .iter()
+            .any(|module| matches!(module.state, State::Initializing { owner } if owner != teb.0));
         let name = read_name(memory, argument)?;
         let absolute = name.as_bytes().get(1) == Some(&b':');
         if absolute && matches_path(&self.program_path, &name) {
@@ -113,7 +117,7 @@ impl Modules {
                 Ok(Load::Complete(module.handle))
             }
             State::Deferred if initialized => {
-                if self.notification_owner.is_some() {
+                if self.notification_owner.is_some() || foreign_initializer {
                     return Err(DispatchError::Unsupported);
                 }
                 if let Some(entry) = module.entry {
@@ -126,11 +130,11 @@ impl Modules {
                 module.references = 1;
                 Ok(Load::Complete(module.handle))
             }
-            State::Deferred | State::Initializing => Err(DispatchError::Unsupported),
+            State::Deferred | State::Initializing { .. } => Err(DispatchError::Unsupported),
         }
     }
 
-    pub(super) fn start(&mut self, pending: Pending) {
+    pub(super) fn start(&mut self, pending: Pending, owner: u32) {
         let module = self
             .resident
             .iter_mut()
@@ -138,7 +142,7 @@ impl Modules {
             .expect("prepared deferred module is retained");
         debug_assert!(matches!(module.state, State::Deferred));
         debug_assert_eq!(module.entry, Some(pending.entry));
-        module.state = State::Initializing;
+        module.state = State::Initializing { owner };
     }
 
     pub(super) fn finish(&mut self, pending: Pending, success: bool) {
@@ -147,7 +151,7 @@ impl Modules {
             .iter_mut()
             .find(|module| module.handle == pending.handle)
             .expect("initializing module is retained");
-        debug_assert!(matches!(module.state, State::Initializing));
+        debug_assert!(matches!(module.state, State::Initializing { .. }));
         debug_assert_eq!(module.entry, Some(pending.entry));
         if success {
             module.state = State::Ready;
@@ -177,12 +181,7 @@ impl Modules {
     }
 
     pub(super) fn thread_initializers(&self) -> Result<Vec<Pending>, DispatchError> {
-        if self.notification_owner.is_some()
-            || self
-                .resident
-                .iter()
-                .any(|module| matches!(module.state, State::Initializing))
-        {
+        if self.loader_owner().is_some() {
             return Err(DispatchError::Unsupported);
         }
         Ok(self
@@ -202,6 +201,34 @@ impl Modules {
                 && module.thread_notifications
                 && matches!(module.state, State::Ready)
         })
+    }
+
+    pub(super) fn loader_owner(&self) -> Option<u32> {
+        self.notification_owner.or_else(|| {
+            self.resident.iter().find_map(|module| {
+                if let State::Initializing { owner } = module.state {
+                    Some(owner)
+                } else {
+                    None
+                }
+            })
+        })
+    }
+
+    pub(super) fn check_initializer_owner(
+        &self,
+        pending: Pending,
+        teb: u32,
+    ) -> Result<(), DispatchError> {
+        if self.resident.iter().any(|module| {
+            module.handle == pending.handle
+                && module.entry == Some(pending.entry)
+                && matches!(module.state, State::Initializing { owner } if owner == teb)
+        }) {
+            Ok(())
+        } else {
+            Err(DispatchError::Unsupported)
+        }
     }
 
     pub(super) fn notification_owner(&self) -> Option<u32> {
@@ -352,7 +379,7 @@ impl Modules {
                 teb.set_last_error(memory, 6)?;
                 return Ok(0);
             };
-            if matches!(module.state, State::Initializing) {
+            if matches!(module.state, State::Initializing { .. }) {
                 return Err(DispatchError::Unsupported);
             }
             if module.references == 1 {
@@ -604,14 +631,38 @@ mod tests {
             (fourth.handle, fourth.entry),
             (handles[3], handles[3] + 0x1000)
         );
-        modules.start(fourth);
+        modules.start(fourth, thread::BASE);
+        assert_eq!(modules.loader_owner(), Some(thread::BASE));
+        assert!(
+            modules
+                .check_initializer_owner(fourth, thread::BASE)
+                .is_ok()
+        );
+        assert!(matches!(
+            modules.check_initializer_owner(fourth, 0x1101_0000),
+            Err(DispatchError::Unsupported)
+        ));
+        memory.write(0x1000, b"third.dll\0").unwrap();
+        assert!(matches!(
+            modules.load(0x1000, true, thread::Teb(0x1101_0000), &mut memory),
+            Err(DispatchError::Unsupported)
+        ));
+        assert!(matches!(
+            load(&mut modules, &mut memory, 2),
+            Load::Initialize(_)
+        ));
         assert_eq!(order(&modules), expected(&[1, 0]));
         modules.finish(fourth, false);
+        assert_eq!(modules.loader_owner(), None);
+        assert!(matches!(
+            modules.check_initializer_owner(fourth, thread::BASE),
+            Err(DispatchError::Unsupported)
+        ));
         assert_eq!(order(&modules), expected(&[1, 0]));
         let Load::Initialize(third) = load(&mut modules, &mut memory, 2) else {
             panic!()
         };
-        modules.start(third);
+        modules.start(third, thread::BASE);
         modules.finish(third, true);
         assert_eq!(order(&modules), expected(&[1, 0, 2]));
         assert!(
@@ -621,7 +672,7 @@ mod tests {
             panic!()
         };
         assert_eq!((retry.handle, retry.entry), (fourth.handle, fourth.entry));
-        modules.start(retry);
+        modules.start(retry, thread::BASE);
         modules.finish(retry, true);
         for _ in 0..2 {
             assert!(
@@ -721,7 +772,9 @@ mod tests {
     fn initializing_module_cannot_release_its_unpublished_reference() {
         let mut memory = GuestMemory::new(1);
         let mut modules = Modules::new(0x0040_0000, b"C:\\program.exe", Vec::new(), 0, &[]);
-        modules.resident[0].state = State::Initializing;
+        modules.resident[0].state = State::Initializing {
+            owner: thread::BASE,
+        };
         modules.resident[0].references = 0;
         let handle = modules.resident[0].handle;
         assert!(matches!(
