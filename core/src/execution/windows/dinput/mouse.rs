@@ -1,3 +1,4 @@
+use super::super::MemoryError;
 use super::buffer::BufferSize;
 use super::{Access, Desktop, DispatchError, GuestMemory, INVALID_ARGUMENT, NULL_POINTER, guest};
 
@@ -52,6 +53,47 @@ impl Device {
         memory: &GuestMemory,
     ) -> Result<u32, DispatchError> {
         self.buffer_size.set(property, address, memory, false)
+    }
+
+    pub(super) fn get_property(
+        &self,
+        property: u32,
+        address: u32,
+        memory: &mut GuestMemory,
+    ) -> Result<u32, DispatchError> {
+        if property != 3 {
+            return Err(DispatchError::Unsupported);
+        }
+        if address == 0 {
+            return Ok(INVALID_ARGUMENT);
+        }
+        let mut header = [0; 4];
+        guest::read_words(memory, address, &mut header[..2])?;
+        if header[1] != 16 || header[0] != 20 {
+            return Ok(INVALID_ARGUMENT);
+        }
+        guest::read_words(memory, address, &mut header)?;
+        if header[3] > 3 {
+            return Ok(INVALID_ARGUMENT);
+        }
+        if header[3] != 1 {
+            return Err(DispatchError::Unsupported);
+        }
+        if self.format.is_none() {
+            return Ok(0x8007_0002);
+        }
+        // virtual wheel steps use wheel-delta units; x/y use single units.
+        let granularity = match header[2] {
+            0 | 4 => 1,
+            8 => 120,
+            12..=19 => return Err(DispatchError::Unsupported),
+            _ => return Ok(0x8007_0002),
+        };
+        let output = address
+            .checked_add(16)
+            .ok_or(MemoryError::AddressOverflow)?;
+        guest::write_word(memory, output, granularity)?;
+        Ok(0)
     }
 
     pub(super) fn set_cooperative_level(
@@ -197,6 +239,78 @@ mod tests {
         );
         desktop.activate_created(4);
         desktop
+    }
+
+    #[test]
+    fn granularity_queries_preserve_owned_mouse_configuration_and_other_devices() {
+        let mut memory = GuestMemory::new(1);
+        memory
+            .map_zeroed(0x1000, 4096, Permissions::READ_WRITE)
+            .unwrap();
+        let mut device = Device::new();
+        let other = Device::new();
+        let desktop = desktop();
+        standard(&mut memory);
+        assert_eq!(device.set_format(0x1001, &memory).ok(), Some(0));
+        assert_eq!(device.set_cooperative_level(4, 5, &desktop).ok(), Some(0));
+        words(&mut memory, 0x1301, &[20, 16, 0, 0, 32]);
+        assert_eq!(device.set_property(1, 0x1301, &memory).ok(), Some(0));
+        let before = (
+            device.references,
+            device.format,
+            device.cooperative_window,
+            device.buffer_size,
+        );
+        let activation = desktop.activation();
+        memory.write(0x1000, &[0; 4096]).unwrap();
+        for (offset, expected) in [
+            (0, Some(0)),
+            (8, Some(0)),
+            (12, None),
+            (20, Some(0x8007_0002)),
+        ] {
+            words(&mut memory, 0x1301, &[20, 16, offset, 1, 77]);
+            assert_eq!(device.get_property(3, 0x1301, &mut memory).ok(), expected);
+            assert_eq!(
+                (
+                    device.references,
+                    device.format,
+                    device.cooperative_window,
+                    device.buffer_size
+                ),
+                before
+            );
+        }
+        assert!(device.get_property(3, 0x5000, &mut memory).is_err());
+        assert_eq!(
+            (
+                device.references,
+                device.format,
+                device.cooperative_window,
+                device.buffer_size
+            ),
+            before
+        );
+        assert_eq!(
+            (
+                other.references,
+                other.format,
+                other.cooperative_window,
+                other.buffer_size
+            ),
+            (1, None, None, BufferSize::default())
+        );
+        assert_eq!(desktop.activation(), activation);
+        memory.unmap(0x1000, 4096).unwrap();
+        memory
+            .map_zeroed(0x3000, 4096, Permissions::READ_WRITE)
+            .unwrap();
+        words(&mut memory, 0x3001, &[20, 16, 8, 1, 77]);
+        assert_eq!(device.get_property(3, 0x3001, &mut memory).ok(), Some(0));
+        let mut value = [0];
+        guest::read_words(&memory, 0x3011, &mut value).unwrap();
+        assert_eq!(value, [120]);
+        assert_eq!(memory.mapped_pages(), 1);
     }
 
     #[test]

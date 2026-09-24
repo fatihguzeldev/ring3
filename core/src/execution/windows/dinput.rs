@@ -83,6 +83,7 @@ pub(super) enum Call {
     SetMouseCooperativeLevel,
     MouseCapabilities,
     SetMouseProperty,
+    GetMouseProperty,
     SetCooperativeLevel,
     SetProperty,
     Acquire,
@@ -115,6 +116,7 @@ impl Call {
             0x59c => Some(Self::SetMouseCooperativeLevel),
             0x5a0 => Some(Self::MouseCapabilities),
             0x5a4 => Some(Self::SetMouseProperty),
+            0x5a8 => Some(Self::GetMouseProperty),
             _ => None,
         }
     }
@@ -130,6 +132,7 @@ impl Call {
             | Self::SetCooperativeLevel
             | Self::SetMouseCooperativeLevel
             | Self::SetMouseProperty
+            | Self::GetMouseProperty
             | Self::SetProperty => 3,
             Self::SetDataFormat | Self::SetMouseDataFormat | Self::MouseCapabilities => 2,
             Self::AddRef(_) | Self::Release(_) | Self::Acquire | Self::Unacquire => 1,
@@ -205,6 +208,7 @@ impl Input {
                     1 => 0x590,
                     2 => 0x594,
                     3 => 0x5a0,
+                    5 => 0x5a8,
                     6 => 0x5a4,
                     11 => 0x598,
                     13 => 0x59c,
@@ -349,6 +353,10 @@ impl Input {
             Call::SetMouseProperty => {
                 let index = self.object(Class::Mouse, args[0])?;
                 self.mice[index].set_property(args[1], args[2], memory)
+            }
+            Call::GetMouseProperty => {
+                let index = self.object(Class::Mouse, args[0])?;
+                self.mice[index].get_property(args[1], args[2], memory)
             }
             Call::SetCooperativeLevel => {
                 let index = self.object(Class::Keyboard, args[0])?;

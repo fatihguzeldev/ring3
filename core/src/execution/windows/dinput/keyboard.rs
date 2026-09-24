@@ -596,10 +596,12 @@ mod tests {
         let mouse = super::super::MICE;
         words(&mut memory, 0x2400, &[44]);
         words(&mut memory, 0x2500, &[20, 16, 0, 0, 32]);
+        words(&mut memory, 0x2600, &[20, 16, 8, 1, 0]);
         for (call, args, expected) in [
             (Call::SetMouseCooperativeLevel, vec![mouse, 4, 5], 0),
             (Call::MouseCapabilities, vec![mouse, 0x2400], 0),
             (Call::SetMouseProperty, vec![mouse, 1, 0x2500], 0),
+            (Call::GetMouseProperty, vec![mouse, 3, 0x2600], 0),
             (
                 Call::QueryInterface(Class::Mouse),
                 vec![mouse, 0x1020, 0x1000],
