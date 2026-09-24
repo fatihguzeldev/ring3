@@ -1,4 +1,6 @@
-use ring3_core::execution::{Permissions, Process32, ProcessStop, Register32, StopReason};
+use ring3_core::execution::{
+    GuestMemory, Permissions, Process32, ProcessStop, Register32, StopReason,
+};
 
 use super::{dinput_cooperative_cases, dinput_format_cases};
 
@@ -16,7 +18,7 @@ fn store(code: &mut Vec<u8>, address: u32) {
     code.extend_from_slice(&address.to_le_bytes());
 }
 
-fn code() -> Vec<u8> {
+fn code(flags: u32) -> Vec<u8> {
     let mut code = Vec::new();
     for value in [0, DATA, 0x700, 0x0040_0000] {
         push(&mut code, value);
@@ -40,7 +42,7 @@ fn code() -> Vec<u8> {
     push(&mut code, dinput_format_cases::FORMAT);
     code.extend_from_slice(&[0x53, 0xff, 0x55, 44]);
     store(&mut code, DATA + 28);
-    push(&mut code, 6);
+    push(&mut code, flags);
     push(&mut code, WINDOW);
     code.extend_from_slice(&[0x53, 0xff, 0x55, 52]);
     store(&mut code, DATA + 32);
@@ -53,8 +55,12 @@ fn code() -> Vec<u8> {
 }
 
 pub fn process() -> Process32 {
+    process_with_format(6, dinput_format_cases::standard)
+}
+
+pub fn process_with_format(flags: u32, setup: fn(&mut GuestMemory, bool)) -> Process32 {
     let mut p = dinput_cooperative_cases::process();
-    let code = code();
+    let code = code(flags);
     assert!(code.len() <= 0xc0);
     p.memory
         .protect(0x0040_1000, 4096, Permissions::READ_WRITE)
@@ -67,7 +73,7 @@ pub fn process() -> Process32 {
     p.memory
         .map_zeroed(0x3000_0000, 12288, Permissions::READ_WRITE)
         .unwrap();
-    dinput_format_cases::standard(&mut p.memory, false);
+    setup(&mut p.memory, false);
     p.memory
         .protect(0x3000_0000, 12288, Permissions::READ)
         .unwrap();
@@ -95,9 +101,13 @@ pub fn process() -> Process32 {
 }
 
 pub fn imported_keyboard_acquisition_across_budgets() {
+    imported_acquisition_across_budgets(process);
+}
+
+pub fn imported_acquisition_across_budgets(setup: fn() -> Process32) {
     let mut results = Vec::new();
     for budget in [1, 7, 4096, 20000] {
-        let mut p = process();
+        let mut p = setup();
         let windows = p.window_snapshots();
         let stack = p.cpu.register(Register32::Esp);
         let mut counts = (0, 0);

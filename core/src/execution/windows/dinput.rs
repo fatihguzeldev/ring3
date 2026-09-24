@@ -84,6 +84,8 @@ pub(super) enum Call {
     MouseCapabilities,
     SetMouseProperty,
     GetMouseProperty,
+    AcquireMouse,
+    UnacquireMouse,
     SetCooperativeLevel,
     SetProperty,
     Acquire,
@@ -117,6 +119,8 @@ impl Call {
             0x5a0 => Some(Self::MouseCapabilities),
             0x5a4 => Some(Self::SetMouseProperty),
             0x5a8 => Some(Self::GetMouseProperty),
+            0x5ac => Some(Self::AcquireMouse),
+            0x5b0 => Some(Self::UnacquireMouse),
             _ => None,
         }
     }
@@ -135,7 +139,12 @@ impl Call {
             | Self::GetMouseProperty
             | Self::SetProperty => 3,
             Self::SetDataFormat | Self::SetMouseDataFormat | Self::MouseCapabilities => 2,
-            Self::AddRef(_) | Self::Release(_) | Self::Acquire | Self::Unacquire => 1,
+            Self::AddRef(_)
+            | Self::Release(_)
+            | Self::Acquire
+            | Self::Unacquire
+            | Self::AcquireMouse
+            | Self::UnacquireMouse => 1,
         }
     }
 }
@@ -210,6 +219,8 @@ impl Input {
                     3 => 0x5a0,
                     5 => 0x5a8,
                     6 => 0x5a4,
+                    7 => 0x5ac,
+                    8 => 0x5b0,
                     11 => 0x598,
                     13 => 0x59c,
                     _ => 0xffc,
@@ -340,7 +351,7 @@ impl Input {
             }
             Call::SetMouseDataFormat => {
                 let index = self.object(Class::Mouse, args[0])?;
-                self.mice[index].set_format(args[1], memory)
+                self.mice[index].set_format(args[1], memory, desktop)
             }
             Call::SetMouseCooperativeLevel => {
                 let index = self.object(Class::Mouse, args[0])?;
@@ -352,11 +363,26 @@ impl Input {
             }
             Call::SetMouseProperty => {
                 let index = self.object(Class::Mouse, args[0])?;
-                self.mice[index].set_property(args[1], args[2], memory)
+                self.mice[index].set_property(args[1], args[2], memory, desktop)
             }
             Call::GetMouseProperty => {
                 let index = self.object(Class::Mouse, args[0])?;
                 self.mice[index].get_property(args[1], args[2], memory)
+            }
+            Call::AcquireMouse => {
+                let index = self.object(Class::Mouse, args[0])?;
+                let (before, rest) = self.mice.split_at_mut(index);
+                let (device, after) = rest.split_first_mut().expect("validated mouse identity");
+                device.acquire(desktop, || {
+                    before
+                        .iter()
+                        .chain(after.iter())
+                        .any(|other| other.is_acquired(desktop))
+                })
+            }
+            Call::UnacquireMouse => {
+                let index = self.object(Class::Mouse, args[0])?;
+                Ok(self.mice[index].unacquire(desktop))
             }
             Call::SetCooperativeLevel => {
                 let index = self.object(Class::Keyboard, args[0])?;

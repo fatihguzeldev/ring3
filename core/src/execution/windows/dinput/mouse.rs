@@ -34,6 +34,7 @@ pub(super) struct Device {
     format: Option<Format>,
     cooperative_window: Option<u32>,
     buffer_size: BufferSize,
+    acquired_epoch: Option<u64>,
 }
 
 impl Device {
@@ -43,7 +44,55 @@ impl Device {
             format: None,
             cooperative_window: None,
             buffer_size: BufferSize::default(),
+            acquired_epoch: None,
         }
+    }
+
+    pub(super) fn is_acquired(&self, desktop: &Desktop) -> bool {
+        let (Some(epoch), Some(window)) = (self.acquired_epoch, self.cooperative_window) else {
+            return false;
+        };
+        self.references != 0
+            && desktop.activation() == (window, Some(epoch))
+            && desktop
+                .window(window)
+                .is_some_and(|window| window.style & 0x4000_0000 == 0)
+    }
+
+    pub(super) fn acquire(
+        &mut self,
+        desktop: &Desktop,
+        occupied: impl FnOnce() -> bool,
+    ) -> Result<u32, DispatchError> {
+        if self.is_acquired(desktop) {
+            return Ok(1);
+        }
+        if self.format.is_none() {
+            return Ok(INVALID_ARGUMENT);
+        }
+        let window = self.cooperative_window.ok_or(DispatchError::Unsupported)?;
+        if desktop
+            .window(window)
+            .is_none_or(|window| window.style & 0x4000_0000 != 0)
+        {
+            return Ok(INVALID_ARGUMENT);
+        }
+        let (active, epoch) = desktop.activation();
+        if active != window {
+            return Ok(0x8007_0005);
+        }
+        let epoch = epoch.ok_or(DispatchError::Unsupported)?;
+        if occupied() {
+            return Ok(0x8007_0005);
+        }
+        self.acquired_epoch = Some(epoch);
+        Ok(0)
+    }
+
+    pub(super) fn unacquire(&mut self, desktop: &Desktop) -> u32 {
+        let previous = self.is_acquired(desktop);
+        self.acquired_epoch = None;
+        u32::from(!previous)
     }
 
     pub(super) fn set_property(
@@ -51,8 +100,10 @@ impl Device {
         property: u32,
         address: u32,
         memory: &GuestMemory,
+        desktop: &Desktop,
     ) -> Result<u32, DispatchError> {
-        self.buffer_size.set(property, address, memory, false)
+        let acquired = self.is_acquired(desktop);
+        self.buffer_size.set(property, address, memory, acquired)
     }
 
     pub(super) fn get_property(
@@ -114,6 +165,9 @@ impl Device {
         {
             return Ok(0x8007_0006);
         }
+        if self.is_acquired(desktop) {
+            return Ok(0x8007_00aa);
+        }
         self.cooperative_window = Some(window);
         Ok(0)
     }
@@ -122,6 +176,7 @@ impl Device {
         &mut self,
         address: u32,
         memory: &GuestMemory,
+        desktop: &Desktop,
     ) -> Result<u32, DispatchError> {
         if address == 0 {
             return Ok(NULL_POINTER);
@@ -134,6 +189,9 @@ impl Device {
         guest::read_words(memory, address, &mut header[..2])?;
         if header[1] != 16 {
             return Ok(INVALID_ARGUMENT);
+        }
+        if self.is_acquired(desktop) {
+            return Ok(0x8007_00aa);
         }
         guest::read_words(memory, address, &mut header)?;
         if header[2..5] != [2, 20, 11] {
@@ -242,6 +300,126 @@ mod tests {
     }
 
     #[test]
+    fn acquisition_keeps_owned_settings_and_validates_before_competing_claims() {
+        let mut memory = GuestMemory::new(1);
+        memory
+            .map_zeroed(0x1000, 4096, Permissions::READ_WRITE)
+            .unwrap();
+        let mut desktop = desktop();
+        assert_eq!(desktop.show_activated(4), Some(0));
+        let mut device = Device::new();
+        let not_reached = || panic!("conflict check before device validation");
+        assert_eq!(
+            device.acquire(&desktop, not_reached).ok(),
+            Some(INVALID_ARGUMENT)
+        );
+        standard(&mut memory);
+        assert_eq!(device.set_format(0x1001, &memory, &desktop).ok(), Some(0));
+        assert!(matches!(
+            device.acquire(&desktop, not_reached),
+            Err(DispatchError::Unsupported)
+        ));
+        assert_eq!(device.set_cooperative_level(4, 5, &desktop).ok(), Some(0));
+        words(&mut memory, 0x1301, &[20, 16, 0, 0, 32]);
+        assert_eq!(
+            device.set_property(1, 0x1301, &memory, &desktop).ok(),
+            Some(0)
+        );
+        let before = (
+            device.references,
+            device.format,
+            device.cooperative_window,
+            device.buffer_size,
+        );
+        assert_eq!(device.acquire(&desktop, || true).ok(), Some(0x8007_0005));
+        assert_eq!(device.acquired_epoch, None);
+        assert_eq!(device.acquire(&desktop, || false).ok(), Some(0));
+        assert_eq!(device.acquire(&desktop, not_reached).ok(), Some(1));
+        assert_eq!(
+            device.set_format(0x1001, &memory, &desktop).ok(),
+            Some(0x8007_00aa)
+        );
+        assert_eq!(
+            device.set_cooperative_level(8, 5, &desktop).ok(),
+            Some(0x8007_00aa)
+        );
+        assert_eq!(
+            device.set_property(1, 0x1301, &memory, &desktop).ok(),
+            Some(0x8007_00aa)
+        );
+        assert_eq!(
+            (
+                device.references,
+                device.format,
+                device.cooperative_window,
+                device.buffer_size
+            ),
+            before
+        );
+        memory.unmap(0x1000, 4096).unwrap();
+        assert!(device.is_acquired(&desktop));
+        assert_eq!(device.unacquire(&desktop), 0);
+        assert_eq!(device.unacquire(&desktop), 1);
+        assert_eq!(device.acquire(&desktop, || false).ok(), Some(0));
+        assert_eq!(
+            (
+                device.references,
+                device.format,
+                device.cooperative_window,
+                device.buffer_size
+            ),
+            before
+        );
+        device.references = 0;
+        assert!(!device.is_acquired(&desktop));
+        assert_eq!(memory.mapped_pages(), 0);
+    }
+
+    #[test]
+    fn focus_child_conversion_and_window_removal_invalidate_mouse_access() {
+        let mut memory = GuestMemory::new(1);
+        memory
+            .map_zeroed(0x1000, 4096, Permissions::READ_WRITE)
+            .unwrap();
+        standard(&mut memory);
+        let mut desktop = desktop();
+        assert_eq!(desktop.show_activated(4), Some(0));
+        let mut device = Device::new();
+        assert_eq!(device.set_format(0x1001, &memory, &desktop).ok(), Some(0));
+        assert_eq!(device.set_cooperative_level(4, 5, &desktop).ok(), Some(0));
+        assert_eq!(device.acquire(&desktop, || false).ok(), Some(0));
+        let old = device.acquired_epoch;
+        desktop.show_activated(8);
+        assert!(!device.is_acquired(&desktop));
+        assert_eq!(
+            device.acquire(&desktop, || panic!("inactive window")).ok(),
+            Some(0x8007_0005)
+        );
+        desktop.show_activated(4);
+        assert!(!device.is_acquired(&desktop));
+        assert_eq!(device.acquire(&desktop, || false).ok(), Some(0));
+        assert_ne!(device.acquired_epoch, old);
+        desktop.window_mut(4).unwrap().style |= 0x4000_0000;
+        assert!(!device.is_acquired(&desktop));
+        assert_eq!(
+            device.acquire(&desktop, || panic!("child window")).ok(),
+            Some(INVALID_ARGUMENT)
+        );
+        assert_eq!(device.unacquire(&desktop), 1);
+        desktop.remove(4);
+        assert_eq!(
+            device.acquire(&desktop, || panic!("removed window")).ok(),
+            Some(INVALID_ARGUMENT)
+        );
+        assert_eq!(device.cooperative_window, Some(4));
+        assert_eq!(device.set_cooperative_level(8, 5, &desktop).ok(), Some(0));
+        desktop.show_activated(8);
+        assert_eq!(device.acquire(&desktop, || false).ok(), Some(0));
+        assert!(device.is_acquired(&desktop));
+        assert_eq!(device.format, Some(Format::StandardMouse2));
+    }
+
+    #[test]
     fn granularity_queries_preserve_owned_mouse_configuration_and_other_devices() {
         let mut memory = GuestMemory::new(1);
         memory
@@ -251,10 +429,13 @@ mod tests {
         let other = Device::new();
         let desktop = desktop();
         standard(&mut memory);
-        assert_eq!(device.set_format(0x1001, &memory).ok(), Some(0));
+        assert_eq!(device.set_format(0x1001, &memory, &desktop).ok(), Some(0));
         assert_eq!(device.set_cooperative_level(4, 5, &desktop).ok(), Some(0));
         words(&mut memory, 0x1301, &[20, 16, 0, 0, 32]);
-        assert_eq!(device.set_property(1, 0x1301, &memory).ok(), Some(0));
+        assert_eq!(
+            device.set_property(1, 0x1301, &memory, &desktop).ok(),
+            Some(0)
+        );
         let before = (
             device.references,
             device.format,
@@ -324,12 +505,15 @@ mod tests {
         assert_eq!(device.buffer_size, BufferSize::default());
         let desktop = desktop();
         standard(&mut memory);
-        assert_eq!(device.set_format(0x1001, &memory).ok(), Some(0));
+        assert_eq!(device.set_format(0x1001, &memory, &desktop).ok(), Some(0));
         assert_eq!(device.set_cooperative_level(4, 5, &desktop).ok(), Some(0));
         let activation = desktop.activation();
         for requested in [0, 1, 16, 1024, 1025, u32::MAX, 0] {
             words(&mut memory, 0x1301, &[20, 16, 0, 0, requested]);
-            assert_eq!(device.set_property(1, 0x1301, &memory).ok(), Some(0));
+            assert_eq!(
+                device.set_property(1, 0x1301, &memory, &desktop).ok(),
+                Some(0)
+            );
             assert_eq!(
                 device.buffer_size,
                 BufferSize {
@@ -346,7 +530,10 @@ mod tests {
             assert_eq!((device.references, second.references), (1, 1));
         }
         words(&mut memory, 0x1301, &[20, 16, 0, 0, 16]);
-        assert_eq!(device.set_property(1, 0x1301, &memory).ok(), Some(0));
+        assert_eq!(
+            device.set_property(1, 0x1301, &memory, &desktop).ok(),
+            Some(0)
+        );
         memory.unmap(0x1000, 4096).unwrap();
         assert_eq!(
             device.buffer_size,
@@ -360,13 +547,17 @@ mod tests {
 
     #[test]
     fn failed_buffer_replacement_keeps_same_mouse_setting_and_can_recover() {
+        let desktop = desktop();
         let mut memory = GuestMemory::new(1);
         memory
             .map_zeroed(0x1000, 4096, Permissions::READ_WRITE)
             .unwrap();
         let mut device = Device::new();
         words(&mut memory, 0x1301, &[20, 16, 0, 0, 16]);
-        assert_eq!(device.set_property(1, 0x1301, &memory).ok(), Some(0));
+        assert_eq!(
+            device.set_property(1, 0x1301, &memory, &desktop).ok(),
+            Some(0)
+        );
         let before = device.buffer_size;
         for header in [
             [19, 16, 0, 0, 32],
@@ -375,19 +566,25 @@ mod tests {
             [20, 16, 0, 1, 32],
         ] {
             words(&mut memory, 0x1301, &header);
-            assert!(!matches!(device.set_property(1, 0x1301, &memory), Ok(0)));
+            assert!(!matches!(
+                device.set_property(1, 0x1301, &memory, &desktop),
+                Ok(0)
+            ));
             assert_eq!(device.buffer_size, before);
         }
         for (property, address) in [(0, 0x5000), (2, 0x5000), (1, 0), (1, 0x5000), (1, 0x1ff8)] {
             words(&mut memory, 0x1ff8, &[20, 16]);
             assert!(!matches!(
-                device.set_property(property, address, &memory),
+                device.set_property(property, address, &memory, &desktop),
                 Ok(0)
             ));
             assert_eq!(device.buffer_size, before);
         }
         words(&mut memory, 0x1301, &[20, 16, 0, 0, 32]);
-        assert_eq!(device.set_property(1, 0x1301, &memory).ok(), Some(0));
+        assert_eq!(
+            device.set_property(1, 0x1301, &memory, &desktop).ok(),
+            Some(0)
+        );
         assert_eq!(
             device.buffer_size,
             BufferSize {
@@ -417,7 +614,7 @@ mod tests {
             .map_zeroed(0x1000, 4096, Permissions::READ_WRITE)
             .unwrap();
         standard(&mut memory);
-        assert_eq!(first.set_format(0x1001, &memory).ok(), Some(0));
+        assert_eq!(first.set_format(0x1001, &memory, &desktop).ok(), Some(0));
         assert_eq!(first.cooperative_window, Some(4));
         assert_eq!(first.set_cooperative_level(8, 5, &desktop).ok(), Some(0));
         words(&mut memory, 0x1301, &[44]);
@@ -474,6 +671,7 @@ mod tests {
 
     #[test]
     fn failed_replacements_preserve_owned_format_and_recover_on_same_device() {
+        let desktop = desktop();
         let mut memory = GuestMemory::new(1);
         memory
             .map_zeroed(0x1000, 4096, Permissions::READ_WRITE)
@@ -482,7 +680,7 @@ mod tests {
             let mut device = Device::new();
             standard(&mut memory);
             if configured {
-                assert_eq!(device.set_format(0x1001, &memory).ok(), Some(0));
+                assert_eq!(device.set_format(0x1001, &memory, &desktop).ok(), Some(0));
             }
             let before = device.format;
             for (address, value) in [
@@ -497,17 +695,17 @@ mod tests {
             ] {
                 standard(&mut memory);
                 words(&mut memory, address, &[value]);
-                let result = device.set_format(0x1001, &memory);
+                let result = device.set_format(0x1001, &memory, &desktop);
                 assert!(!matches!(result, Ok(0)));
                 assert_eq!(device.format, before);
                 assert_eq!(device.references, 1);
             }
             standard(&mut memory);
-            assert_eq!(device.set_format(0x1001, &memory).ok(), Some(0));
+            assert_eq!(device.set_format(0x1001, &memory, &desktop).ok(), Some(0));
             assert_eq!(device.format, Some(Format::StandardMouse2));
             memory.write(0x1000, &[0; 4096]).unwrap();
             assert_eq!(
-                device.set_format(0x1001, &memory).ok(),
+                device.set_format(0x1001, &memory, &desktop).ok(),
                 Some(INVALID_ARGUMENT)
             );
             assert_eq!(device.format, Some(Format::StandardMouse2));
@@ -515,9 +713,9 @@ mod tests {
         let mut first = Device::new();
         let second = Device::new();
         standard(&mut memory);
-        assert_eq!(first.set_format(0x1001, &memory).ok(), Some(0));
+        assert_eq!(first.set_format(0x1001, &memory, &desktop).ok(), Some(0));
         memory.unmap(0x1000, 4096).unwrap();
-        assert!(first.set_format(0x1001, &memory).is_err());
+        assert!(first.set_format(0x1001, &memory, &desktop).is_err());
         assert_eq!(first.format, Some(Format::StandardMouse2));
         assert_eq!(second.format, None);
         assert_eq!((first.references, second.references), (1, 1));

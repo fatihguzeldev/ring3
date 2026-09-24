@@ -212,6 +212,8 @@ fn mouse_uses_read_only_nonexecutable_table_at_full_page_budget() {
                 3 => 0x7000_05a0,
                 5 => 0x7000_05a8,
                 6 => 0x7000_05a4,
+                7 => 0x7000_05ac,
+                8 => 0x7000_05b0,
                 13 => 0x7000_059c,
                 _ => 0x7000_0ffc,
             }
