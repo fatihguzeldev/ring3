@@ -373,6 +373,7 @@ impl Cpu32 {
             instruction.code(),
             Code::Fadd_m32fp
                 | Code::Fadd_m64fp
+                | Code::Fiadd_m32int
                 | Code::Fsub_m32fp
                 | Code::Fsub_m64fp
                 | Code::Fsub_st0_sti
@@ -462,6 +463,8 @@ impl Cpu32 {
         let code = instruction.code();
         let source = if matches!(code, Code::Fsub_st0_sti | Code::Fsubr_st0_sti) {
             self.x87_register_value(instruction.op1_register())?
+        } else if code == Code::Fiadd_m32int {
+            self.read_integer_m32(instruction, memory)?
         } else {
             self.read_float(instruction, memory)?
         };
@@ -474,7 +477,10 @@ impl Cpu32 {
         } else {
             (top, source)
         };
-        let add = matches!(code, Code::Fadd_m32fp | Code::Fadd_m64fp);
+        let add = matches!(
+            code,
+            Code::Fadd_m32fp | Code::Fadd_m64fp | Code::Fiadd_m32int
+        );
         Ok((left, right, add))
     }
 
@@ -665,6 +671,7 @@ impl Cpu32 {
                         | Code::Fmul_m32fp
                         | Code::Fmul_m64fp
                         | Code::Fimul_m32int
+                        | Code::Fiadd_m32int
                         | Code::Fadd_m32fp
                         | Code::Fsub_m32fp
                         | Code::Fsubr_m32fp

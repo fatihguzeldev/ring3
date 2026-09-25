@@ -48,6 +48,7 @@ pub(super) fn is_arithmetic(code: Code) -> bool {
             | Code::Fmul_m64fp
             | Code::Fimul_m32int
             | Code::Fidiv_m32int
+            | Code::Fiadd_m32int
             | Code::Fadd_m32fp
             | Code::Fadd_m64fp
             | Code::Fsub_m32fp
