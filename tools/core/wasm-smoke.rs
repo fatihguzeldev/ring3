@@ -59,6 +59,8 @@ mod cxx_exception_cases;
 
 #[path = "../../core/tests/support/executable.rs"]
 mod executable;
+#[path = "../../core/tests/support/single_register_subtract_cases.rs"]
+mod single_register_subtract_cases;
 #[path = "../../core/tests/support/x87_roundup_cases.rs"]
 mod x87_roundup_cases;
 
@@ -4886,6 +4888,7 @@ pub extern "C" fn run() -> u32 {
     execute_x87_status();
     x87_roundup_cases::sums();
     x87_roundup_cases::products_and_quotients();
+    single_register_subtract_cases::arithmetic();
     execute_x87_division();
     integer_division_cases::signed_quotients_across_budgets();
     execute_x87_memory_sum();
