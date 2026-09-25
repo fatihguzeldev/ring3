@@ -744,13 +744,58 @@ fn z_enable_render_state_controls_depth_tests_and_writes() {
 }
 
 #[test]
+fn depth_policy_resets_when_the_device_is_recreated() {
+    let (mut process, root) = root();
+    write(
+        &mut process,
+        PARAMETERS,
+        &[4, 3, 22, 1, 0, 1, 1, 1, 1, 80, 0, 0, 0],
+    );
+    let create_device = method(&process, root, 15);
+    assert_eq!(
+        invoke(
+            &mut process,
+            create_device,
+            &[root, 0, 1, 1, 0x20, PARAMETERS, OUTPUT]
+        ),
+        0
+    );
+    let device = read(&process, OUTPUT);
+    let set = method(&process, device, 50);
+    assert_eq!(invoke(&mut process, set, &[device, 14, 0]), 0);
+    assert_eq!(invoke(&mut process, set, &[device, 23, 1]), 0);
+    for args in [[device + 4, 14, 1], [device + 4, 23, 8]] {
+        assert_eq!(invoke(&mut process, set, &args), 0x8876_086c);
+    }
+    let release = method(&process, device, 2);
+    assert_eq!(invoke(&mut process, release, &[device]), 0);
+    for args in [[device, 14, 1], [device, 23, 8]] {
+        assert_eq!(invoke(&mut process, set, &args), 0x8876_086c);
+    }
+    assert_eq!(
+        invoke(
+            &mut process,
+            create_device,
+            &[root, 0, 1, 1, 0x20, PARAMETERS, OUTPUT]
+        ),
+        0
+    );
+    let device = read(&process, OUTPUT);
+    draw_depth_triangle(&mut process, device, 0.25, 0xffff_0000);
+    draw_depth_triangle(&mut process, device, 0.75, 0xff00_00ff);
+    let present = method(&process, device, 15);
+    assert_eq!(invoke(&mut process, present, &[device, 0, 0, 0, 0]), 0);
+    assert_eq!(&process.take_frame().unwrap().rgba[..4], &[255, 0, 0, 255]);
+}
+
+#[test]
 fn invalid_z_enable_requests_preserve_the_owned_device_state() {
     let (mut process, device) = depth_device();
     let set_state = method(&process, device, 50);
     let clear = method(&process, device, 36);
     let present = method(&process, device, 15);
     assert_eq!(invoke(&mut process, set_state, &[device, 7, 0]), 0);
-    for args in [[device, 7, 2], [device, 14, 1], [device + 4, 7, 1]] {
+    for args in [[device, 7, 2], [device, 14, 2], [device + 4, 7, 1]] {
         assert_eq!(invoke(&mut process, set_state, &args), 0x8876_086c);
     }
     assert_eq!(
@@ -1160,7 +1205,10 @@ fn device_caps_report_only_the_owned_windowed_device() {
     assert!(caps[8..12].iter().all(|byte| *byte == 0));
     assert!(caps[16..28].iter().all(|byte| *byte == 0));
     assert_eq!(u32::from_le_bytes(caps[28..32].try_into().unwrap()), 0x400);
-    assert!(caps[32..180].iter().all(|byte| *byte == 0));
+    assert_eq!(u32::from_le_bytes(caps[32..36].try_into().unwrap()), 2);
+    assert!(caps[36..40].iter().all(|byte| *byte == 0));
+    assert_eq!(u32::from_le_bytes(caps[40..44].try_into().unwrap()), 0xff);
+    assert!(caps[44..180].iter().all(|byte| *byte == 0));
     assert_eq!(u32::from_le_bytes(caps[180..184].try_into().unwrap()), 4096);
     assert!(caps[184..188].iter().all(|byte| *byte == 0));
     assert_eq!(u32::from_le_bytes(caps[188..192].try_into().unwrap()), 1);

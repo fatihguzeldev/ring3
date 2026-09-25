@@ -257,6 +257,7 @@ pub(super) struct Graphics {
     depth: Option<Vec<u16>>,
     depth_surface_refs: u32,
     z_enabled: bool,
+    depth_policy: DepthPolicy,
     scene_open: bool,
     viewport: Option<Viewport>,
     transforms: BTreeMap<u32, [u32; 16]>,
@@ -269,6 +270,37 @@ pub(super) struct Graphics {
     texture_stages: [u32; 8],
     color_arg0: [u32; 8],
     vertex_fvf: u32,
+}
+
+#[derive(Clone, Copy)]
+struct DepthPolicy {
+    write_enabled: bool,
+    function: u32,
+}
+
+impl Default for DepthPolicy {
+    fn default() -> Self {
+        Self {
+            write_enabled: true,
+            function: 4,
+        }
+    }
+}
+
+impl DepthPolicy {
+    fn passes(self, incoming: u16, stored: u16) -> bool {
+        match self.function {
+            1 => false,
+            2 => incoming < stored,
+            3 => incoming == stored,
+            4 => incoming <= stored,
+            5 => incoming > stored,
+            6 => incoming != stored,
+            7 => incoming >= stored,
+            8 => true,
+            _ => unreachable!("validated depth comparison"),
+        }
+    }
 }
 
 struct Texture {
@@ -607,6 +639,8 @@ impl Graphics {
         caps[..4].copy_from_slice(&1_u32.to_le_bytes());
         caps[12..16].copy_from_slice(&CAPS2_CAN_RENDER_WINDOWED.to_le_bytes());
         caps[28..32].copy_from_slice(&DEVCAPS_DRAWPRIM_TLVERTEX.to_le_bytes());
+        caps[32..36].copy_from_slice(&2_u32.to_le_bytes());
+        caps[40..44].copy_from_slice(&0xff_u32.to_le_bytes());
         caps[180..184].copy_from_slice(&primitives::MAX_PRIMITIVES.to_le_bytes());
         caps[188..192].copy_from_slice(&1_u32.to_le_bytes());
         caps[192..196].copy_from_slice(&primitives::MAX_STRIDE.to_le_bytes());
@@ -766,6 +800,7 @@ impl Graphics {
         self.depth = (enable_depth == 1).then(|| vec![u16::MAX; (width * height) as usize]);
         self.depth_surface_refs = 0;
         self.z_enabled = enable_depth == 1;
+        self.depth_policy = DepthPolicy::default();
         self.spare = (count == 2).then(|| frame.clone());
         self.viewport = Some(Viewport {
             left: 0,
@@ -783,6 +818,7 @@ impl Graphics {
         self.depth = None;
         self.depth_surface_refs = 0;
         self.z_enabled = false;
+        self.depth_policy = DepthPolicy::default();
         self.scene_open = false;
         self.viewport = None;
         self.transforms.clear();
@@ -863,10 +899,15 @@ impl Graphics {
     }
 
     fn set_render_state(&mut self, args: &[u32]) -> u32 {
-        if args[0] != DEVICE || self.device_refs == 0 || args[1] != 7 || args[2] > 1 {
+        if args[0] != DEVICE || self.device_refs == 0 {
             return INVALID_CALL;
         }
-        self.z_enabled = args[2] == 1;
+        match args[1] {
+            7 if args[2] <= 1 => self.z_enabled = args[2] == 1,
+            14 if args[2] <= 1 => self.depth_policy.write_enabled = args[2] == 1,
+            23 if (1..=8).contains(&args[2]) => self.depth_policy.function = args[2],
+            _ => return INVALID_CALL,
+        }
         0
     }
 
@@ -1199,6 +1240,7 @@ impl Graphics {
         primitives::draw_up(
             self.back.as_mut(),
             self.depth.as_deref_mut().filter(|_| self.z_enabled),
+            self.depth_policy,
             self.viewport,
             self.vertex_fvf,
             args,

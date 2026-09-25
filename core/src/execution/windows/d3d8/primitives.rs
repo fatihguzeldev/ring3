@@ -1,4 +1,4 @@
-use super::{Frame, Graphics, IDENTITY_MATRIX, INVALID_CALL, Viewport, quantize_d16};
+use super::{DepthPolicy, Frame, Graphics, IDENTITY_MATRIX, INVALID_CALL, Viewport, quantize_d16};
 use crate::execution::{GuestMemory, MemoryError};
 use std::collections::BTreeMap;
 
@@ -277,9 +277,8 @@ pub(super) fn draw_indexed(
         raster_triangle(
             frame,
             depth.as_deref_mut(),
-            a,
-            b,
-            c,
+            graphics.depth_policy,
+            [a, b, c],
             bounds,
             texture.as_ref(),
         );
@@ -365,6 +364,7 @@ fn screen_vertex(clip: ClipVertex, viewport: Viewport) -> Option<Vertex> {
 pub(super) fn draw_up(
     frame: Option<&mut Frame>,
     mut depth: Option<&mut [u16]>,
+    depth_policy: DepthPolicy,
     viewport: Option<Viewport>,
     fvf: u32,
     args: &[u32],
@@ -453,9 +453,12 @@ pub(super) fn draw_up(
             raster_triangle(
                 frame,
                 depth.as_deref_mut(),
-                vertices[indices[0]],
-                vertices[indices[1]],
-                vertices[indices[2]],
+                depth_policy,
+                [
+                    vertices[indices[0]],
+                    vertices[indices[1]],
+                    vertices[indices[2]],
+                ],
                 bounds,
                 None,
             );
@@ -507,9 +510,8 @@ fn triangle_bounds(viewport: Viewport, a: Vertex, b: Vertex, c: Vertex) -> Optio
 fn raster_triangle(
     frame: &mut Frame,
     mut depth: Option<&mut [u16]>,
-    a: Vertex,
-    b: Vertex,
-    c: Vertex,
+    depth_policy: DepthPolicy,
+    [a, b, c]: [Vertex; 3],
     bounds: Bounds,
     texture: Option<&SampledTexture>,
 ) {
@@ -526,10 +528,12 @@ fn raster_triangle(
             let pixel_index = y * frame.width as usize + x;
             if let Some(depth) = depth.as_deref_mut() {
                 let z = quantize_d16((wa * a.z + wb * b.z + wc * c.z).clamp(0.0, 1.0));
-                if z > depth[pixel_index] {
+                if !depth_policy.passes(z, depth[pixel_index]) {
                     continue;
                 }
-                depth[pixel_index] = z;
+                if depth_policy.write_enabled {
+                    depth[pixel_index] = z;
+                }
             }
             let offset = pixel_index * 4;
             let sampled = texture.and_then(|texture| {

@@ -29,3 +29,18 @@ fn world_transform_moves_both_indexed_layouts() {
 fn texture_transform_is_not_a_world_transform() {
     normal_vertex_cases::texture_matrix_does_not_substitute_for_world();
 }
+
+#[test]
+fn depth_comparisons_apply_to_indexed_and_up_triangles() {
+    normal_vertex_cases::depth_comparison_functions_match_d16_values();
+}
+
+#[test]
+fn depth_writes_tests_and_clears_are_independent() {
+    normal_vertex_cases::depth_writes_are_independent_of_tests_and_clear();
+}
+
+#[test]
+fn invalid_depth_states_preserve_the_last_policy() {
+    normal_vertex_cases::invalid_depth_policy_preserves_the_previous_state();
+}

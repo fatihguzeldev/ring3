@@ -303,3 +303,133 @@ pub fn texture_matrix_does_not_substitute_for_world() {
         );
     }
 }
+
+fn draw_at_depth(process: &mut Process32, device: u32, vertex: u32, stride: u32, z: f32, up: bool) {
+    if up {
+        let mut words = Vec::new();
+        for (x, y) in [(0_f32, 0_f32), (4.0, 0.0), (0.0, 3.0)] {
+            words.extend_from_slice(&[
+                x.to_bits(),
+                y.to_bits(),
+                z.to_bits(),
+                1_f32.to_bits(),
+                0xff80_ffff,
+            ]);
+        }
+        write(process, OUTPUT + 128, &words);
+        assert_eq!(invoke(process, device, 76, &[0x44]), 0);
+        assert_eq!(invoke(process, device, 72, &[4, 1, OUTPUT + 128, 20]), 0);
+    } else {
+        for index in 2..6 {
+            write(process, vertex + 4096 + index * stride + 8, &[z.to_bits()]);
+        }
+        assert_eq!(draw(process, device), 0);
+    }
+}
+
+fn clear_depth_case(process: &mut Process32, device: u32, flags: u32, z: f32) {
+    assert_eq!(
+        invoke(
+            process,
+            device,
+            36,
+            &[0, 0, flags, 0xff00_0000, z.to_bits(), 0]
+        ),
+        0
+    );
+}
+
+pub fn depth_comparison_functions_match_d16_values() {
+    let expected = [
+        [false, false, false],
+        [true, false, false],
+        [false, true, false],
+        [true, true, false],
+        [false, false, true],
+        [true, false, true],
+        [false, true, true],
+        [true, true, true],
+    ];
+    for (fvf, stride, up) in [(0x142, 24, false), (0x152, 36, false), (0x142, 24, true)] {
+        let (mut process, device, vertex) = setup(fvf, stride, false, 0);
+        assert_eq!(invoke(&mut process, device, 50, &[14, 0]), 0);
+        assert_eq!(read(&process, 0x0040_2828), 0xff);
+        assert_eq!(read(&process, 0x0040_2820) & 2, 2);
+        for (index, outcomes) in expected.iter().enumerate() {
+            let function = u32::try_from(index + 1).unwrap();
+            assert_eq!(invoke(&mut process, device, 50, &[23, function]), 0);
+            for (z, pass) in [0.25_f32, 0.5, 0.75].into_iter().zip(outcomes) {
+                clear_depth_case(&mut process, device, 3, 0.5);
+                draw_at_depth(&mut process, device, vertex, stride, z, up);
+                let expected = if *pass {
+                    [128, 255, 255, 255]
+                } else {
+                    [0, 0, 0, 255]
+                };
+                assert_eq!(
+                    &frame(&mut process, device)[..4],
+                    &expected,
+                    "fvf={fvf:x} up={up} function={function} z={z}"
+                );
+            }
+        }
+        assert_eq!(invoke(&mut process, device, 50, &[23, 3]), 0);
+        clear_depth_case(&mut process, device, 3, 0.5);
+        draw_at_depth(&mut process, device, vertex, stride, 0.500_000_1, up);
+        assert_eq!(&frame(&mut process, device)[..4], &[128, 255, 255, 255]);
+    }
+}
+
+pub fn depth_writes_are_independent_of_tests_and_clear() {
+    for (fvf, stride, up) in [(0x142, 24, false), (0x152, 36, false), (0x142, 24, true)] {
+        let (mut process, device, vertex) = setup(fvf, stride, false, 0);
+        assert_eq!(invoke(&mut process, device, 50, &[14, 0]), 0);
+        draw_at_depth(&mut process, device, vertex, stride, 0.25, up);
+        clear_depth_case(&mut process, device, 1, 0.0);
+        draw_at_depth(&mut process, device, vertex, stride, 0.75, up);
+        assert_eq!(&frame(&mut process, device)[..4], &[128, 255, 255, 255]);
+        assert_eq!(invoke(&mut process, device, 50, &[14, 1]), 0);
+        draw_at_depth(&mut process, device, vertex, stride, 0.25, up);
+        assert_eq!(invoke(&mut process, device, 50, &[14, 0]), 0);
+        clear_depth_case(&mut process, device, 1, 0.0);
+        draw_at_depth(&mut process, device, vertex, stride, 0.75, up);
+        assert_eq!(&frame(&mut process, device)[..4], &[0, 0, 0, 255]);
+
+        assert_eq!(invoke(&mut process, device, 50, &[7, 0]), 0);
+        assert_eq!(invoke(&mut process, device, 50, &[14, 1]), 0);
+        assert_eq!(invoke(&mut process, device, 50, &[23, 1]), 0);
+        draw_at_depth(&mut process, device, vertex, stride, 0.75, up);
+        assert_eq!(&frame(&mut process, device)[..4], &[128, 255, 255, 255]);
+        assert_eq!(invoke(&mut process, device, 50, &[7, 1]), 0);
+        assert_eq!(invoke(&mut process, device, 50, &[23, 4]), 0);
+        clear_depth_case(&mut process, device, 1, 0.0);
+        draw_at_depth(&mut process, device, vertex, stride, 0.5, up);
+        assert_eq!(&frame(&mut process, device)[..4], &[0, 0, 0, 255]);
+
+        assert_eq!(invoke(&mut process, device, 50, &[14, 0]), 0);
+        assert_eq!(invoke(&mut process, device, 50, &[23, 1]), 0);
+        clear_depth_case(&mut process, device, 3, 1.0);
+        assert_eq!(invoke(&mut process, device, 50, &[23, 4]), 0);
+        draw_at_depth(&mut process, device, vertex, stride, 0.75, up);
+        assert_eq!(&frame(&mut process, device)[..4], &[128, 255, 255, 255]);
+    }
+}
+
+pub fn invalid_depth_policy_preserves_the_previous_state() {
+    let (mut process, device, vertex) = setup(0x152, 36, false, 0);
+    clear_depth_case(&mut process, device, 3, 0.5);
+    assert_eq!(invoke(&mut process, device, 50, &[14, 0]), 0);
+    assert_eq!(invoke(&mut process, device, 50, &[23, 8]), 0);
+    for (state, value) in [(14, 2), (14, u32::MAX), (23, 0), (23, 9), (23, u32::MAX)] {
+        assert_eq!(
+            invoke(&mut process, device, 50, &[state, value]),
+            INVALID_CALL
+        );
+    }
+    draw_at_depth(&mut process, device, vertex, 36, 0.75, false);
+    assert_eq!(&frame(&mut process, device)[..4], &[128, 255, 255, 255]);
+    assert_eq!(invoke(&mut process, device, 50, &[23, 2]), 0);
+    clear_depth_case(&mut process, device, 1, 0.0);
+    draw_at_depth(&mut process, device, vertex, 36, 0.6, false);
+    assert_eq!(&frame(&mut process, device)[..4], &[0, 0, 0, 255]);
+}
