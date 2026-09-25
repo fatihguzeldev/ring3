@@ -20,7 +20,7 @@
     "corpus:test": "node --test tools/corpus/shared.test.mjs tools/corpus/build-pe32.test.mjs tools/corpus/build-imports.test.mjs tools/corpus/build-import-ordinals.test.mjs tools/corpus/build-forwarders.test.mjs tools/corpus/build-pe32plus.test.mjs tools/corpus/verify.test.mjs tools/corpus/build-relocations.test.mjs tools/corpus/build-tls.test.mjs tools/corpus/build-delay-imports.test.mjs tools/corpus/build-delay-ordinals.test.mjs tools/corpus/build-resources.test.mjs tools/corpus/build-debug-payloads.test.mjs tools/corpus/build-managed.test.mjs tools/corpus/build-amd64-exceptions.test.mjs tools/corpus/build-dependency-chain.test.mjs tools/corpus/build-dependency-cycle.test.mjs tools/corpus/build-load-config.test.mjs",
     "corpus:verify": "node tools/corpus/verify.mjs",
     "format:rust": "cargo fmt --all -- --check",
-    "lint:rust": "cargo clippy --workspace --all-targets -- -D warnings",
+    "lint:rust": "cargo clippy --workspace --all-targets --locked -- -D warnings",
     "test:rust": "cargo test --workspace --locked",
     "preinstall": "node tools/verify-toolchain.mjs",
     "toolchain:check": "node tools/verify-toolchain.mjs",
@@ -37,9 +37,26 @@
     "corpus:build:load-config": "node tools/corpus/build-load-config.mjs",
     "corpus:build:cycle": "node tools/corpus/build-dependency-chain.mjs --cycle",
     "browser:build": "cargo build -p ring3-browser --locked --release --target wasm32-unknown-unknown && pnpm build:typescript",
-    "browser": "node tools/browser/serve.mjs"
+    "browser": "node tools/browser/serve.mjs",
+    "prepare": "husky",
+    "format": "prettier . --write && cargo fmt --all",
+    "format:check": "prettier . --check && pnpm format:rust",
+    "format:web": "prettier . --write",
+    "lint:web": "eslint . --max-warnings=0",
+    "lint:web:fix": "eslint . --fix --max-warnings=0",
+    "lint": "pnpm lint:web && pnpm lint:rust"
   },
   "devDependencies": {
-    "typescript": "5.9.3"
+    "@eslint/js": "10.0.1",
+    "@html-eslint/eslint-plugin": "0.66.1",
+    "@html-eslint/parser": "0.66.1",
+    "eslint": "10.11.0",
+    "eslint-config-prettier": "10.1.8",
+    "globals": "17.12.0",
+    "husky": "9.1.7",
+    "lint-staged": "16.2.7",
+    "prettier": "3.9.9",
+    "typescript": "5.9.3",
+    "typescript-eslint": "8.70.1"
   }
 }

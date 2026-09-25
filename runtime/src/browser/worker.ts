@@ -15,9 +15,10 @@ let running = false;
 let started = false;
 let remaining = 3_000_000_000;
 let lastReport = 0;
-let commands: Extract<WorkerInput, { hwnd: number }>[] = [];
+const commands: Extract<WorkerInput, { hwnd: number }>[] = [];
 
-const yieldTask = (milliseconds = 0): Promise<void> => new Promise((resolve) => setTimeout(resolve, milliseconds));
+const yieldTask = (milliseconds = 0): Promise<void> =>
+  new Promise((resolve) => setTimeout(resolve, milliseconds));
 
 function report(note = ""): void {
   scope.postMessage({ type: "status", snapshot, paused, note });
@@ -34,7 +35,8 @@ async function file(index: number): Promise<Uint8Array> {
   const entry = manifest.files[index];
   if (!entry || entry.size > 128 * 1024 * 1024) throw new Error("Dosya aktarım sınırı aşıldı.");
   const response = await resource(`/files/${index}`);
-  if (Number(response.headers.get("content-length")) !== entry.size) throw new Error("Dosya boyutu değişti.");
+  if (Number(response.headers.get("content-length")) !== entry.size)
+    throw new Error("Dosya boyutu değişti.");
   const bytes = new Uint8Array(await response.arrayBuffer());
   if (bytes.length !== entry.size) throw new Error("Eksik dosya aktarımı.");
   return bytes;
@@ -44,8 +46,9 @@ async function start(value: string): Promise<void> {
   if (started) throw new Error("Oturum zaten başlatıldı.");
   started = true;
   token = value;
-  manifest = await (await resource("/manifest")).json() as Manifest;
-  if (!Array.isArray(manifest.files) || manifest.files.length > 100_000) throw new Error("Geçersiz dosya listesi.");
+  manifest = (await (await resource("/manifest")).json()) as Manifest;
+  if (!Array.isArray(manifest.files) || manifest.files.length > 100_000)
+    throw new Error("Geçersiz dosya listesi.");
   const wasm = await (await resource("/core.wasm")).arrayBuffer();
   bridge = new Bridge((await WebAssembly.instantiate(wasm, {})).instance);
   snapshot = bridge.command(0, 0, manifest);
@@ -64,12 +67,24 @@ function postCommands(): void {
   for (const command of commands.splice(0)) {
     snapshot = bridge.command(6);
     const window = snapshot.windows.find((entry) => entry.hwnd === command.hwnd);
-    if (!window || !(window.style & 0x10000000) || (window.style & 0x08000000)) continue;
+    if (!window || !(window.style & 0x10000000) || window.style & 0x08000000) continue;
     const time = Math.floor(performance.now() - origin) >>> 0;
     if (command.type === "button" && window.class === 0x80 && window.parent !== 0) {
-      snapshot = bridge.command(5, 0, { hwnd: window.parent, message: 0x111, wparam: window.id & 0xffff, lparam: window.hwnd, time });
+      snapshot = bridge.command(5, 0, {
+        hwnd: window.parent,
+        message: 0x111,
+        wparam: window.id & 0xffff,
+        lparam: window.hwnd,
+        time,
+      });
     } else if (command.type === "activate" && window.parent === 0) {
-      snapshot = bridge.command(5, 0, { hwnd: window.hwnd, message: 0x1c, wparam: 1, lparam: 0, time });
+      snapshot = bridge.command(5, 0, {
+        hwnd: window.hwnd,
+        message: 0x1c,
+        wparam: 1,
+        lparam: 0,
+        time,
+      });
     }
   }
 }
@@ -77,8 +92,11 @@ function postCommands(): void {
 async function supply(): Promise<void> {
   const pending = snapshot.pending;
   if (!bridge || !pending) throw new Error("Eksik dosya isteği.");
-  const index = manifest.files.findIndex((entry) => entry.path.toLowerCase() === pending.path.toLowerCase());
-  if (index < 0 || manifest.files[index]?.size !== pending.size) throw new Error(`Dosya listesinde yok: ${pending.path}`);
+  const index = manifest.files.findIndex(
+    (entry) => entry.path.toLowerCase() === pending.path.toLowerCase(),
+  );
+  if (index < 0 || manifest.files[index]?.size !== pending.size)
+    throw new Error(`Dosya listesinde yok: ${pending.path}`);
   const bytes = await file(index);
   const input = new Uint8Array(bytes.length + 8);
   new DataView(input.buffer).setBigUint64(0, BigInt(pending.id), true);
@@ -94,31 +112,57 @@ async function pump(): Promise<void> {
       postCommands();
       if (snapshot.state === "file") await supply();
       if (paused) break;
-      if (["exited", "stopped"].includes(snapshot.state)) { report(); break; }
-      if (snapshot.reason === "Some(WaitingForMessage)") { report("Oyun bir pencere yanıtı bekliyor."); break; }
+      if (["exited", "stopped"].includes(snapshot.state)) {
+        report();
+        break;
+      }
+      if (snapshot.reason === "Some(WaitingForMessage)") {
+        report("Oyun bir pencere yanıtı bekliyor.");
+        break;
+      }
       const before = BigInt(snapshot.instructions) + BigInt(snapshot.apiCalls);
-      snapshot = bridge.command(3, Math.min(100_000, remaining), { elapsedMs: Math.floor(performance.now() - origin) });
+      snapshot = bridge.command(3, Math.min(100_000, remaining), {
+        elapsedMs: Math.floor(performance.now() - origin),
+      });
       const consumed = Number(BigInt(snapshot.instructions) + BigInt(snapshot.apiCalls) - before);
       remaining -= consumed;
       const rgba = bridge.frame(snapshot);
-      if (rgba && snapshot.frame) scope.postMessage({ type: "frame", ...snapshot.frame, rgba }, [rgba]);
+      if (rgba && snapshot.frame)
+        scope.postMessage({ type: "frame", ...snapshot.frame, rgba }, [rgba]);
       if (performance.now() - lastReport > 250) report();
-      if (remaining === 0) { paused = true; report("Çalışma sınırına ulaşıldı; devam edebilirsin."); break; }
-      if (consumed === 0 && snapshot.state === "running") throw new Error("Core ilerleme sağlamadan döndü.");
+      if (remaining === 0) {
+        paused = true;
+        report("Çalışma sınırına ulaşıldı; devam edebilirsin.");
+        break;
+      }
+      if (consumed === 0 && snapshot.state === "running")
+        throw new Error("Core ilerleme sağlamadan döndü.");
       await yieldTask(snapshot.state === "waiting" ? 16 : 0);
     }
     if (paused) report("Duraklatıldı.");
-  } finally { running = false; }
+  } finally {
+    running = false;
+  }
 }
 
 function fail(error: unknown): void {
   paused = true;
-  scope.postMessage({ type: "error", message: error instanceof Error ? error.message : String(error) });
+  scope.postMessage({
+    type: "error",
+    message: error instanceof Error ? error.message : String(error),
+  });
 }
 
 scope.onmessage = ({ data }): void => {
-  if (data.type === "start") { void start(data.token).catch(fail); return; }
-  if (data.type === "pause") { paused = true; if (bridge) report("Duraklatıldı."); return; }
+  if (data.type === "start") {
+    void start(data.token).catch(fail);
+    return;
+  }
+  if (data.type === "pause") {
+    paused = true;
+    if (bridge) report("Duraklatıldı.");
+    return;
+  }
   if (data.type === "button" || data.type === "activate") commands.push(data);
   paused = false;
   if (remaining === 0) remaining = 3_000_000_000;
