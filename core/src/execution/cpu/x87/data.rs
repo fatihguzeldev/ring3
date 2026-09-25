@@ -281,7 +281,15 @@ impl Cpu32 {
     ) -> Result<(), StopReason> {
         self.x87_masked()?;
         let left = self.x87_stack.value()?;
-        let right = self.read_float(instruction, memory)?;
+        let right = if instruction.code() == Code::Fcomp_st0_sti {
+            let right = self.x87_register_value(instruction.op1_register())?;
+            if !(left.is_normal() || left == 0.0) || !(right.is_normal() || right == 0.0) {
+                return Err(StopReason::UnsupportedInstruction);
+            }
+            right
+        } else {
+            self.read_float(instruction, memory)?
+        };
         let condition = match left
             .partial_cmp(&right)
             .ok_or(StopReason::UnsupportedInstruction)?
@@ -291,7 +299,10 @@ impl Cpu32 {
             Ordering::Greater => 0,
         };
         self.x87_stack.status = (self.x87_stack.status & !0x4700) | condition;
-        if matches!(instruction.code(), Code::Fcomp_m32fp | Code::Fcomp_m64fp) {
+        if matches!(
+            instruction.code(),
+            Code::Fcomp_m32fp | Code::Fcomp_m64fp | Code::Fcomp_st0_sti
+        ) {
             self.x87_stack.pop();
         }
         Ok(())

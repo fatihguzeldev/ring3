@@ -218,9 +218,7 @@ impl Cpu32 {
                 next = self.store_string(instruction, memory)?;
             }
             Code::Fldcw_m2byte | Code::Fnstcw_m2byte => self.x87_control(instruction, memory)?,
-            Code::Fcom_m32fp | Code::Fcom_m64fp | Code::Fcomp_m32fp | Code::Fcomp_m64fp => {
-                self.x87_compare(instruction, memory)?;
-            }
+            code if x87::is_comparison(code) => self.x87_compare(instruction, memory)?,
             Code::Fnstsw_AX | Code::Fnstsw_m2byte => self.x87_store_status(instruction, memory)?,
             Code::Fldz => self.x87_load_constant(0.0)?,
             Code::Fld1 => self.x87_load_constant(1.0)?,

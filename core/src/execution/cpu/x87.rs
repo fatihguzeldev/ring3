@@ -73,6 +73,17 @@ pub(super) fn is_register_transfer(code: Code) -> bool {
     )
 }
 
+pub(super) fn is_comparison(code: Code) -> bool {
+    matches!(
+        code,
+        Code::Fcom_m32fp
+            | Code::Fcom_m64fp
+            | Code::Fcomp_m32fp
+            | Code::Fcomp_m64fp
+            | Code::Fcomp_st0_sti
+    )
+}
+
 pub(super) fn is_register_add_sub(code: Code) -> bool {
     matches!(
         code,

@@ -911,6 +911,9 @@ mod division_cases;
 mod integer_division_cases;
 #[path = "../../core/tests/support/nan_compare_cases.rs"]
 mod nan_compare_cases;
+
+#[path = "../../core/tests/support/register_compare_pop_cases.rs"]
+mod register_compare_pop_cases;
 #[path = "../../core/tests/support/signed_division_cases.rs"]
 mod signed_division_cases;
 #[path = "../../core/tests/support/unsigned_division_executable.rs"]
@@ -4902,6 +4905,7 @@ pub extern "C" fn run() -> u32 {
     space_classification_cases::imported_calls_across_budgets();
     space_classification_cases::all_bytes_and_eof_preserve_state();
     nan_compare_cases::nan_top_refuses_comparison_atomically();
+    register_compare_pop_cases::register_comparisons_pop_once_across_profiles_and_budgets();
     execute_x87_memory_sum();
     execute_x87_register_add();
     execute_x87_divide_pop();
