@@ -874,7 +874,11 @@ impl Process32 {
         guest::read_words(&self.memory, stack, &mut frame[..words])?;
         if matches!(
             api,
-            Api::SuspendThread | Api::ResumeThread | Api::Input(_) | Api::Hook(_)
+            Api::SuspendThread
+                | Api::ResumeThread
+                | Api::Input(_)
+                | Api::Hook(_)
+                | Api::Crt(crt::Call::Sort)
         ) {
             stack
                 .checked_add(api.stack_cleanup())
@@ -898,6 +902,7 @@ impl Process32 {
             return Ok(());
         }
         let suspended = match api {
+            Api::Crt(crt::Call::Sort) => self.sort(&frame[1..words])?,
             Api::Synchronization(synchronization::Call::Wait) => {
                 self.wait_event(&frame[1..words])?
             }

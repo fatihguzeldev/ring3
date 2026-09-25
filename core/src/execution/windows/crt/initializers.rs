@@ -12,6 +12,7 @@ const INITTERM: &[u8] = &[
 pub(super) fn initialize(memory: &mut GuestMemory) -> Result<(), MemoryError> {
     memory.map_zeroed(u64::from(BASE), PAGE_SIZE, Permissions::READ_WRITE)?;
     memory.write(u64::from(BASE), INITTERM)?;
+    memory.write(u64::from(super::sorting::ENTRY), super::sorting_code::CODE)?;
     memory.protect(u64::from(BASE), PAGE_SIZE, Permissions::READ_EXECUTE)
 }
 

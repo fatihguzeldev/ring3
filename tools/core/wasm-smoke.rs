@@ -298,6 +298,8 @@ mod thread_executable;
 
 #[path = "../../core/tests/support/crt_executable.rs"]
 mod crt_executable;
+#[path = "../../core/tests/support/crt_sort_cases.rs"]
+mod crt_sort_cases;
 
 #[path = "../../core/tests/support/fp_control_executable.rs"]
 mod fp_control_executable;
@@ -4736,6 +4738,7 @@ pub extern "C" fn run() -> u32 {
     timed_event_cases::finite_wait_uses_exact_host_time_across_budgets();
     dinput_root_cases::imported_root_lifetime_across_budgets();
     dinput_device_cases::imported_keyboard_lifetime_across_budgets();
+    crt_sort_cases::imported_guest_sort_across_budgets();
     dinput_mouse_acquire_cases::imported_mouse_acquisition_across_budgets();
     dinput_mouse_cases::imported_mouse_lifetime_across_budgets();
     dinput_mouse_caps_cases::imported_mouse_capabilities_across_budgets();

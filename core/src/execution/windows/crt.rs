@@ -15,6 +15,8 @@ mod paths;
 mod random;
 mod rtti;
 mod scanning;
+mod sorting;
+mod sorting_code;
 mod status;
 mod streams;
 mod strings;
@@ -86,6 +88,7 @@ pub(super) enum Call {
     SetMbCodePage,
     OnExit,
     DynamicCast,
+    Sort,
 }
 
 impl Call {
@@ -135,6 +138,7 @@ impl Call {
             0x1c0 => Some(Self::LowercaseString),
             0x1c4 => Some(Self::UppercaseCharacter),
             0x1c8 => Some(Self::FindByte),
+            0x1cc => Some(Self::Sort),
             0x1ac => Some(Self::Sprintf),
             0x1bc => Some(Self::Snprintf),
             0x1b0 => Some(Self::Move),
@@ -174,7 +178,7 @@ impl Call {
             | Self::Sprintf
             | Self::Sscanf => 2,
             Self::GetMainArgs | Self::SplitPath | Self::DynamicCast => 5,
-            Self::Format => 4,
+            Self::Format | Self::Sort => 4,
             Self::Snprintf
             | Self::Memset
             | Self::DllOnExit
@@ -208,6 +212,10 @@ pub(super) struct Crt {
 }
 
 impl super::Process32 {
+    pub(super) fn sort(&mut self, arguments: &[u32]) -> Result<bool, DispatchError> {
+        sorting::start(&mut self.cpu, &self.memory, arguments)
+    }
+
     pub(super) fn crt_call(&mut self, call: Call, arguments: &[u32]) -> Result<(), DispatchError> {
         if matches!(call, Call::BeginThreadEx) {
             let (value, teb) = self.threads.create_suspended(
@@ -248,7 +256,7 @@ impl Crt {
         let stack = cpu.register(Register32::Esp);
         let errno = || self.locals.errno(teb);
         Ok(match call {
-            Call::BeginThreadEx => unreachable!("thread creation is owned by the process"),
+            Call::BeginThreadEx | Call::Sort => unreachable!("call entry is owned by the process"),
             Call::Stream(call) => self
                 .streams
                 .dispatch(call, args, cpu, memory, heap, directory, errno()?)
@@ -390,6 +398,7 @@ pub(super) fn resolve(name: &str) -> Option<u32> {
         "__p___argv" => Some(API_BASE + 0x184),
         "_controlfp" => Some(API_BASE + 0x10c),
         "_initterm" => Some(initializers::BASE),
+        "qsort" => Some(API_BASE + 0x1cc),
         "__getmainargs" => Some(API_BASE + 0x110),
         "memset" => Some(API_BASE + 0x114),
         "memcmp" => Some(API_BASE + 0x138),
