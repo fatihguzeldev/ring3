@@ -2,6 +2,7 @@ use super::desktop::Desktop;
 use super::{API_BASE, Access, DispatchError, GuestMemory, PAGE_SIZE, Permissions, guest};
 
 mod buffer;
+mod events;
 mod keyboard;
 mod mouse;
 
@@ -91,6 +92,7 @@ pub(super) enum Call {
     Acquire,
     Unacquire,
     KeyboardState,
+    KeyboardEvents,
     QueryInterface(Class),
     AddRef(Class),
     Release(Class),
@@ -123,6 +125,7 @@ impl Call {
             0x5ac => Some(Self::AcquireMouse),
             0x5b0 => Some(Self::UnacquireMouse),
             0x5c8 => Some(Self::KeyboardState),
+            0x5cc => Some(Self::KeyboardEvents),
             _ => None,
         }
     }
@@ -133,6 +136,7 @@ impl Call {
 
     pub(super) fn arguments(self) -> usize {
         match self {
+            Self::KeyboardEvents => 5,
             Self::Create | Self::CreateDevice => 4,
             Self::QueryInterface(_)
             | Self::SetCooperativeLevel
@@ -158,11 +162,31 @@ pub(super) struct Input {
     devices: Vec<keyboard::Device>,
     mice: Vec<mouse::Device>,
     keyboard_state: keyboard::State,
+    keyboard_sequence: u32,
 }
 
 impl Input {
-    pub(super) fn set_keyboard_state(&mut self, keys: [bool; 256]) {
-        self.keyboard_state.0 = keys.map(|pressed| u8::from(pressed) << 7);
+    pub(super) fn set_keyboard_state(&mut self, keys: [bool; 256], time: u32, desktop: &Desktop) {
+        let updated = keys.map(|pressed| u8::from(pressed) << 7);
+        if updated == self.keyboard_state.0 {
+            return;
+        }
+        self.keyboard_sequence = self.keyboard_sequence.wrapping_add(1);
+        for (offset, (&old, &new)) in self.keyboard_state.0.iter().zip(&updated).enumerate() {
+            if old == new {
+                continue;
+            }
+            let record = [
+                u32::try_from(offset).expect("key offset"),
+                u32::from(new),
+                time,
+                self.keyboard_sequence,
+            ];
+            for device in &mut self.devices {
+                device.queue_event(record, desktop);
+            }
+        }
+        self.keyboard_state.0 = updated;
     }
 
     fn references(&mut self, class: Class, index: usize) -> &mut u32 {
@@ -215,6 +239,7 @@ impl Input {
                     7 => 0x584,
                     8 => 0x588,
                     9 => 0x5c8,
+                    10 => 0x5cc,
                     11 => 0x578,
                     13 => 0x57c,
                     _ => 0xffc,
@@ -419,6 +444,10 @@ impl Input {
                     desktop,
                 )
             }
+            Call::KeyboardEvents => {
+                let index = self.object(Class::Keyboard, args[0])?;
+                self.devices[index].get_events(&args[1..], memory, desktop)
+            }
             Call::QueryInterface(class) => self.query(class, args, memory),
             Call::AddRef(class) | Call::Release(class) => {
                 let index = self.object(class, args[0])?;
@@ -431,6 +460,9 @@ impl Input {
                     *references - 1
                 };
                 *references = count;
+                if count == 0 && matches!(class, Class::Keyboard) {
+                    self.devices[index].retire();
+                }
                 Ok(count)
             }
         }

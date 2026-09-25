@@ -753,6 +753,9 @@ impl Process32 {
     /// reads do not consume it; acquisition and device lifetimes do not clear it.
     /// the host owns key mapping and must clear released keys on host focus loss;
     /// this does not change guest window activation or synthesize messages.
+    /// changed keys form one simultaneous batch for acquired buffered keyboards,
+    /// ordered by scan code with the current supplied clock and one shared sequence.
+    /// the host must publish each transition it needs delivered between snapshots.
     ///
     /// # errors
     /// rejects an exited process without changing the snapshot.
@@ -761,7 +764,8 @@ impl Process32 {
         if self.exit_code.is_some() {
             return Err(KeyboardInputError::Exited);
         }
-        self.input.set_keyboard_state(keys);
+        self.input
+            .set_keyboard_state(keys, self.elapsed_milliseconds(), &self.desktop);
         Ok(())
     }
 

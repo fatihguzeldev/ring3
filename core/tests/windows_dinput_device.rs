@@ -217,12 +217,13 @@ fn device_creation_uses_existing_read_only_non_executable_page_at_full_budget() 
                 7 => 0x7000_0584,
                 8 => 0x7000_0588,
                 9 => 0x7000_05c8,
+                10 => 0x7000_05cc,
                 11 => 0x7000_0578,
                 13 => 0x7000_057c,
                 _ => 0x7000_0ffc,
             }
         );
-        if slot >= 3 && !matches!(slot, 6..=9 | 11 | 13) {
+        if slot >= 3 && !matches!(slot, 6..=11 | 13) {
             denied(&mut p, method, &[]);
         }
     }

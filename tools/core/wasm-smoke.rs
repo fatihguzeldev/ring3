@@ -20,6 +20,8 @@ mod dinput_acquire_cases;
 mod dinput_cooperative_cases;
 #[path = "../../core/tests/support/dinput_device_cases.rs"]
 mod dinput_device_cases;
+#[path = "../../core/tests/support/dinput_event_cases.rs"]
+mod dinput_event_cases;
 #[path = "../../core/tests/support/dinput_format_cases.rs"]
 mod dinput_format_cases;
 #[path = "../../core/tests/support/dinput_mouse_acquire_cases.rs"]
@@ -4808,6 +4810,7 @@ pub extern "C" fn run() -> u32 {
     dinput_cooperative_cases::imported_foreground_keyboard_setting_across_budgets();
     dinput_acquire_cases::imported_keyboard_acquisition_across_budgets();
     dinput_state_cases::keyboard_snapshots_across_budgets();
+    dinput_event_cases::keyboard_events_across_budgets();
     thread_start_cases::ordered_notifications_precede_each_child_entry();
     thread_start_cases::retryable_notification_frames();
     cxx_exception_cases::outer_transition_faults_preserve_cleanup_and_catch_progress();

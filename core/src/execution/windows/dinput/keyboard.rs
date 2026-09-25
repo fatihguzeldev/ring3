@@ -1,4 +1,5 @@
 use super::buffer::BufferSize;
+use super::events::Events;
 use super::{Access, Desktop, DispatchError, GuestMemory, INVALID_ARGUMENT, NULL_POINTER, guest};
 
 const KEY: [u8; 16] = [
@@ -31,6 +32,7 @@ pub(super) struct Device {
     cooperative_level: Option<CooperativeLevel>,
     buffer_size: BufferSize,
     acquired_epoch: Option<u64>,
+    events: Events,
 }
 
 impl Device {
@@ -41,6 +43,7 @@ impl Device {
             cooperative_level: None,
             buffer_size: BufferSize::default(),
             acquired_epoch: None,
+            events: Events::default(),
         }
     }
 
@@ -74,13 +77,46 @@ impl Device {
             return Ok(0x8007_0005);
         }
         self.acquired_epoch = Some(epoch.ok_or(DispatchError::Unsupported)?);
+        self.events.clear();
         Ok(0)
     }
 
     pub(super) fn unacquire(&mut self, desktop: &Desktop) -> u32 {
         let previous = self.is_acquired(desktop);
         self.acquired_epoch = None;
+        self.events.clear();
         u32::from(!previous)
+    }
+
+    pub(super) fn retire(&mut self) {
+        self.events = Events::default();
+    }
+
+    pub(super) fn queue_event(&mut self, record: [u32; 4], desktop: &Desktop) {
+        if self.is_acquired(desktop) {
+            self.events.push(record, self.buffer_size.capacity);
+        }
+    }
+
+    pub(super) fn get_events(
+        &mut self,
+        args: &[u32],
+        memory: &mut GuestMemory,
+        desktop: &Desktop,
+    ) -> Result<u32, DispatchError> {
+        if args[0] != 16 || args[3] > 1 || args[2] == 0 {
+            return Ok(INVALID_ARGUMENT);
+        }
+        if self.acquired_epoch.is_none() {
+            return Ok(0x8007_000c);
+        }
+        if !self.is_acquired(desktop) {
+            return Ok(0x8007_001e);
+        }
+        if self.buffer_size.capacity == 0 {
+            return Ok(0x8004_0207);
+        }
+        self.events.read(args[1], args[2], args[3] == 1, memory)
     }
 
     pub(super) fn get_state(
@@ -113,7 +149,11 @@ impl Device {
         desktop: &Desktop,
     ) -> Result<u32, DispatchError> {
         let acquired = self.is_acquired(desktop);
-        self.buffer_size.set(property, address, memory, acquired)
+        let result = self.buffer_size.set(property, address, memory, acquired)?;
+        if result == 0 {
+            self.events.clear();
+        }
+        Ok(result)
     }
 
     pub(super) fn set_cooperative_level(
@@ -141,6 +181,7 @@ impl Device {
             window,
             suppress_windows_key: flags & 0x10 != 0,
         });
+        self.events.clear();
         Ok(0)
     }
 
@@ -193,6 +234,7 @@ impl Device {
             keys[key] = true;
         }
         self.format = Some(Format::StandardKeyboard);
+        self.events.clear();
         Ok(0)
     }
 }
@@ -735,6 +777,66 @@ mod tests {
         assert_eq!(input.devices[1].buffer_size, BufferSize::default());
         assert!(!input.devices[1].is_acquired(&desktop));
         assert_eq!(input.roots, [0]);
+    }
+
+    #[test]
+    fn buffered_sample_sequences_wrap_once_per_changed_batch() {
+        let (mut input, mut memory) = configured_first();
+        let desktop = foreground();
+        let device = &mut input.devices[0];
+        assert_eq!(device.set_cooperative_level(4, 6, &desktop).ok(), Some(0));
+        words(&mut memory, 0x1101, &[20, 16, 0, 0, 16]);
+        assert_eq!(
+            device.set_property(1, 0x1101, &memory, &desktop).ok(),
+            Some(0)
+        );
+        assert_eq!(device.acquire(&desktop).ok(), Some(0));
+        input.keyboard_sequence = u32::MAX - 1;
+        let mut keys = [false; 256];
+        keys[0] = true;
+        keys[255] = true;
+        input.set_keyboard_state(keys, 9, &desktop);
+        input.set_keyboard_state(keys, 10, &desktop);
+        input.set_keyboard_state([false; 256], 11, &desktop);
+        words(&mut memory, 0x1100, &[16]);
+        assert_eq!(
+            input
+                .dispatch(
+                    Call::KeyboardEvents,
+                    &[DEVICES, 16, 0x1200, 0x1100, 0],
+                    &mut memory,
+                    &desktop
+                )
+                .ok(),
+            Some(0)
+        );
+        let mut count = [0];
+        guest::read_words(&memory, 0x1100, &mut count).unwrap();
+        assert_eq!(count, [4]);
+        let mut events = [0; 16];
+        guest::read_words(&memory, 0x1200, &mut events).unwrap();
+        assert_eq!(
+            events,
+            [
+                0,
+                0x80,
+                9,
+                u32::MAX,
+                255,
+                0x80,
+                9,
+                u32::MAX,
+                0,
+                0,
+                11,
+                0,
+                255,
+                0,
+                11,
+                0
+            ]
+        );
+        assert_eq!(input.keyboard_sequence, 0);
     }
 
     #[test]

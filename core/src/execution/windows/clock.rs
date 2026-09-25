@@ -54,11 +54,8 @@ impl Process32 {
             Call::Frequency => 1_000_000_000,
             Call::Counter => self.elapsed_nanoseconds,
             Call::Milliseconds => {
-                let millis = (self.elapsed_nanoseconds / 1_000_000) & i64::from(u32::MAX);
-                self.cpu.set_register(
-                    Register32::Eax,
-                    u32::try_from(millis).expect("masked millisecond counter"),
-                );
+                self.cpu
+                    .set_register(Register32::Eax, self.elapsed_milliseconds());
                 return Ok(());
             }
         };
@@ -66,5 +63,10 @@ impl Process32 {
         self.memory.write(u64::from(output), &value.to_le_bytes())?;
         self.cpu.set_register(Register32::Eax, 1);
         Ok(())
+    }
+
+    pub(super) fn elapsed_milliseconds(&self) -> u32 {
+        let millis = (self.elapsed_nanoseconds / 1_000_000) & i64::from(u32::MAX);
+        u32::try_from(millis).expect("masked millisecond counter")
     }
 }
