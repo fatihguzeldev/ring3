@@ -2,6 +2,22 @@ use super::super::MemoryError;
 use super::buffer::BufferSize;
 use super::{Access, Desktop, DispatchError, GuestMemory, INVALID_ARGUMENT, NULL_POINTER, guest};
 
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct MouseInput {
+    /// relative x/y movement in device units, not pixels.
+    pub relative: [i32; 2],
+    /// signed wheel steps; each virtual step is 120 device units.
+    pub wheel_steps: i32,
+    /// complete current button snapshot, in device button order.
+    pub buttons: [bool; 8],
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum MouseInputError {
+    Exited,
+    MotionOverflow,
+}
+
 pub(super) fn capabilities(address: u32, memory: &mut GuestMemory) -> Result<u32, DispatchError> {
     if address == 0 {
         return Ok(NULL_POINTER);
@@ -35,6 +51,7 @@ pub(super) struct Device {
     cooperative_window: Option<u32>,
     buffer_size: BufferSize,
     acquired_epoch: Option<u64>,
+    motion: [i32; 3],
 }
 
 impl Device {
@@ -45,6 +62,7 @@ impl Device {
             cooperative_window: None,
             buffer_size: BufferSize::default(),
             acquired_epoch: None,
+            motion: [0; 3],
         }
     }
 
@@ -86,13 +104,62 @@ impl Device {
             return Ok(0x8007_0005);
         }
         self.acquired_epoch = Some(epoch);
+        self.reset_motion();
         Ok(0)
     }
 
     pub(super) fn unacquire(&mut self, desktop: &Desktop) -> u32 {
         let previous = self.is_acquired(desktop);
         self.acquired_epoch = None;
+        self.reset_motion();
         u32::from(!previous)
+    }
+
+    pub(super) fn reset_motion(&mut self) {
+        self.motion = [0; 3];
+    }
+
+    pub(super) fn can_add_motion(&self, delta: [i32; 3]) -> bool {
+        self.motion
+            .iter()
+            .zip(delta)
+            .all(|(&value, delta)| value.checked_add(delta).is_some())
+    }
+
+    pub(super) fn add_motion(&mut self, delta: [i32; 3]) {
+        for (value, delta) in self.motion.iter_mut().zip(delta) {
+            *value = value
+                .checked_add(delta)
+                .expect("preflighted relative motion");
+        }
+    }
+
+    pub(super) fn get_state(
+        &mut self,
+        size: u32,
+        output: u32,
+        buttons: [u8; 8],
+        memory: &mut GuestMemory,
+        desktop: &Desktop,
+    ) -> Result<u32, DispatchError> {
+        if size != 20 || output == 0 {
+            return Ok(INVALID_ARGUMENT);
+        }
+        if self.acquired_epoch.is_none() {
+            return Ok(0x8007_000c);
+        }
+        if !self.is_acquired(desktop) {
+            return Ok(0x8007_001e);
+        }
+        guest::check(memory, output, 20, Access::Write)?;
+        let mut bytes = [0; 20];
+        for (axis, target) in self.motion.iter().zip(bytes[..12].chunks_exact_mut(4)) {
+            target.copy_from_slice(&axis.to_le_bytes());
+        }
+        bytes[12..].copy_from_slice(&buttons);
+        memory.write(u64::from(output), &bytes)?;
+        self.reset_motion();
+        Ok(0)
     }
 
     pub(super) fn set_property(
@@ -169,6 +236,7 @@ impl Device {
             return Ok(0x8007_00aa);
         }
         self.cooperative_window = Some(window);
+        self.reset_motion();
         Ok(0)
     }
 
@@ -237,6 +305,7 @@ impl Device {
             }
         }
         self.format = Some(Format::StandardMouse2);
+        self.reset_motion();
         Ok(0)
     }
 }

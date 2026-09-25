@@ -6,6 +6,8 @@ mod events;
 mod keyboard;
 mod mouse;
 
+pub use mouse::{MouseInput, MouseInputError};
+
 pub(super) const BASE: u32 = 0x7001_7000;
 const TABLE: u32 = BASE + 0x100;
 const OBJECTS: u32 = BASE + 0x800;
@@ -93,6 +95,7 @@ pub(super) enum Call {
     Unacquire,
     KeyboardState,
     KeyboardEvents,
+    MouseState,
     QueryInterface(Class),
     AddRef(Class),
     Release(Class),
@@ -126,6 +129,7 @@ impl Call {
             0x5b0 => Some(Self::UnacquireMouse),
             0x5c8 => Some(Self::KeyboardState),
             0x5cc => Some(Self::KeyboardEvents),
+            0x5d0 => Some(Self::MouseState),
             _ => None,
         }
     }
@@ -144,6 +148,7 @@ impl Call {
             | Self::SetMouseProperty
             | Self::GetMouseProperty
             | Self::KeyboardState
+            | Self::MouseState
             | Self::SetProperty => 3,
             Self::SetDataFormat | Self::SetMouseDataFormat | Self::MouseCapabilities => 2,
             Self::AddRef(_)
@@ -163,9 +168,36 @@ pub(super) struct Input {
     mice: Vec<mouse::Device>,
     keyboard_state: keyboard::State,
     keyboard_sequence: u32,
+    mouse_buttons: [u8; 8],
 }
 
 impl Input {
+    pub(super) fn submit_mouse_input(
+        &mut self,
+        input: MouseInput,
+        desktop: &Desktop,
+    ) -> Result<(), MouseInputError> {
+        let wheel = input
+            .wheel_steps
+            .checked_mul(120)
+            .ok_or(MouseInputError::MotionOverflow)?;
+        let delta = [input.relative[0], input.relative[1], wheel];
+        if self
+            .mice
+            .iter()
+            .any(|device| device.is_acquired(desktop) && !device.can_add_motion(delta))
+        {
+            return Err(MouseInputError::MotionOverflow);
+        }
+        for device in &mut self.mice {
+            if device.is_acquired(desktop) {
+                device.add_motion(delta);
+            }
+        }
+        self.mouse_buttons = input.buttons.map(|pressed| u8::from(pressed) << 7);
+        Ok(())
+    }
+
     pub(super) fn set_keyboard_state(&mut self, keys: [bool; 256], time: u32, desktop: &Desktop) {
         let updated = keys.map(|pressed| u8::from(pressed) << 7);
         if updated == self.keyboard_state.0 {
@@ -255,6 +287,7 @@ impl Input {
                     6 => 0x5a4,
                     7 => 0x5ac,
                     8 => 0x5b0,
+                    9 => 0x5d0,
                     11 => 0x598,
                     13 => 0x59c,
                     _ => 0xffc,
@@ -448,6 +481,10 @@ impl Input {
                 let index = self.object(Class::Keyboard, args[0])?;
                 self.devices[index].get_events(&args[1..], memory, desktop)
             }
+            Call::MouseState => {
+                let index = self.object(Class::Mouse, args[0])?;
+                self.mice[index].get_state(args[1], args[2], self.mouse_buttons, memory, desktop)
+            }
             Call::QueryInterface(class) => self.query(class, args, memory),
             Call::AddRef(class) | Call::Release(class) => {
                 let index = self.object(class, args[0])?;
@@ -462,6 +499,9 @@ impl Input {
                 *references = count;
                 if count == 0 && matches!(class, Class::Keyboard) {
                     self.devices[index].retire();
+                }
+                if count == 0 && matches!(class, Class::Mouse) {
+                    self.mice[index].reset_motion();
                 }
                 Ok(count)
             }

@@ -48,6 +48,7 @@ mod user_atoms;
 pub use clock::ClockError;
 pub use d3d8::Frame;
 pub use desktop::WindowSnapshot;
+pub use dinput::{MouseInput, MouseInputError};
 pub use directory::{
     FileContents, FileContentsMode, FileContentsRequest, FileMetadata, SupplyFileContentsError,
 };
@@ -767,6 +768,23 @@ impl Process32 {
         self.input
             .set_keyboard_state(keys, self.elapsed_milliseconds(), &self.desktop);
         Ok(())
+    }
+
+    /// adds device-unit motion to acquired mice and replaces all button states.
+    /// unacquired motion is discarded; buttons persist across device lifetimes.
+    /// successful state reads consume motion, while faults and repeated acquire do not.
+    /// the host owns physical mapping and must release buttons on host focus loss;
+    /// this does not change guest focus, cursor position, messages or execution.
+    ///
+    /// # errors
+    /// rejects an exited process or wheel conversion/accumulation overflow before
+    /// changing any motion or buttons; no component is clamped or wrapped.
+    #[expect(clippy::missing_errors_doc, reason = "project headings are lower case")]
+    pub fn submit_mouse_input(&mut self, input: MouseInput) -> Result<(), MouseInputError> {
+        if self.exit_code.is_some() {
+            return Err(MouseInputError::Exited);
+        }
+        self.input.submit_mouse_input(input, &self.desktop)
     }
 
     /// adds one host-provided message to this process's bounded thread queue.
