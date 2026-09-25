@@ -77,9 +77,14 @@ fn created() -> (Process32, u32, u32) {
 
 pub fn distinct_keys_are_definite_misses() {
     let (mut process, table, translate) = created();
-    for message in [0x100, 0x104] {
-        for key in [0, 40, 255] {
-            let words = [0, message, key, 0x2150_0001, 123, 17, 19, 0];
+    for message in [0x100, 0x101, 0x104, 0x105] {
+        for (key, flags) in [
+            (0, 0),
+            (40, 0xc150_0001),
+            (40, 0xe150_0001),
+            (255, u32::MAX),
+        ] {
+            let words = [0, message, key, flags, 123, 17, 19, 0];
             write(&mut process, MESSAGE, &words);
             assert_eq!(call(&mut process, translate, &[WINDOW, table, MESSAGE]), 0);
             for (index, expected) in words.into_iter().enumerate() {
@@ -139,7 +144,7 @@ fn check_refusal(process: &mut Process32, api: u32, memory_fault: bool) {
 
 pub fn candidates_and_unsupported_messages_remain_unhandled() {
     let (mut process, table, translate) = created();
-    for message in [0x100, 0x104] {
+    for message in [0x100, 0x101, 0x104, 0x105] {
         for key in [65, 66, 67] {
             for flags in [0, 0x2000_0000, 0x0100_0000] {
                 write(
@@ -152,12 +157,12 @@ pub fn candidates_and_unsupported_messages_remain_unhandled() {
         }
     }
     for (message, key) in [
-        (0x101, 40),
-        (0x105, 40),
         (0x102, 40),
         (0x106, 40),
         (0x200, 0),
         (0x100, 256),
+        (0x101, 256),
+        (0x105, u32::MAX),
         (0x104, u32::MAX),
     ] {
         write(
@@ -172,13 +177,19 @@ pub fn candidates_and_unsupported_messages_remain_unhandled() {
 }
 
 pub fn misses_preserve_owned_data_and_queued_messages() {
+    for message in [0x104, 0x101, 0x105] {
+        preserved_miss(message);
+    }
+}
+
+fn preserved_miss(kind: u32) {
     let (mut process, table, translate) = created();
     let address = 0x5000_0001;
     process
         .memory
         .map_zeroed(0x5000_0000, PAGE_SIZE, Permissions::READ_WRITE)
         .unwrap();
-    let message = [0, 0x104, 40, 0, 77, 1, 2, 3];
+    let message = [0, kind, 40, 0xc150_0001, 77, 1, 2, 3];
     write(&mut process, address, &message);
     write(&mut process, 0x7ffd_e034, &[77]);
     write(&mut process, 0x7000_2020, &[88]);

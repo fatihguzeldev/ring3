@@ -38,7 +38,7 @@ impl Tables {
             .ok_or(DispatchError::Unsupported)?;
         let mut message = [0; 8];
         guest::read_words(memory, args[2], &mut message)?;
-        if !matches!(message[1], 0x100 | 0x104) || message[2] > 0xff {
+        if !matches!(message[1], 0x100 | 0x101 | 0x104 | 0x105) || message[2] > 0xff {
             return Err(DispatchError::Unsupported);
         }
         // a possible match needs modifier and command semantics, even for ascii entries.
