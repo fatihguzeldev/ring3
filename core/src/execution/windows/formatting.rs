@@ -111,10 +111,24 @@ fn render(
             append(&mut output, &[byte], limits.output)?;
             continue;
         }
-        let conversion = bytes.next().ok_or(DispatchError::Unsupported)?;
+        let mut conversion = bytes.next().ok_or(DispatchError::Unsupported)?;
         if conversion == b'%' {
             append(&mut output, b"%", limits.output)?;
             continue;
+        }
+        let mut width = 0_usize;
+        if matches!(conversion, b'1'..=b'9') {
+            loop {
+                width = width
+                    .checked_mul(10)
+                    .and_then(|value| value.checked_add(usize::from(conversion - b'0')))
+                    .filter(|value| *value <= limits.output)
+                    .ok_or(DispatchError::Unsupported)?;
+                conversion = bytes.next().ok_or(DispatchError::Unsupported)?;
+                if !conversion.is_ascii_digit() {
+                    break;
+                }
+            }
         }
         if !matches!(conversion, b's' | b'c' | b'd' | b'i' | b'u' | b'x' | b'X')
             || (conversion == b'c' && !limits.character)
@@ -135,6 +149,10 @@ fn render(
             b'X' => format!("{value:X}").into_bytes(),
             _ => unreachable!("conversion was validated"),
         };
+        if width.max(text.len()) > limits.output - output.len() {
+            return Err(DispatchError::Unsupported);
+        }
+        output.resize(output.len() + width.saturating_sub(text.len()), b' ');
         append(&mut output, &text, limits.output)?;
     }
     Ok(output)
