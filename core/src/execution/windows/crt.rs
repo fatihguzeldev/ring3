@@ -89,6 +89,7 @@ pub(super) enum Call {
     OnExit,
     DynamicCast,
     Sort,
+    Floor,
 }
 
 impl Call {
@@ -139,6 +140,7 @@ impl Call {
             0x1c4 => Some(Self::UppercaseCharacter),
             0x1c8 => Some(Self::FindByte),
             0x1cc => Some(Self::Sort),
+            0x1d0 => Some(Self::Floor),
             0x1ac => Some(Self::Sprintf),
             0x1bc => Some(Self::Snprintf),
             0x1b0 => Some(Self::Move),
@@ -171,6 +173,7 @@ impl Call {
             | Self::OnExit
             | Self::Remove => 1,
             Self::ControlFp
+            | Self::Floor
             | Self::MbSearchReverse
             | Self::FindCharacter
             | Self::Stat
@@ -278,6 +281,10 @@ impl Crt {
             }
             Call::Random => Some(self.locals.random(cpu.fs_base())?.next()),
             Call::FloatToInteger => Some(floating::to_integer(cpu)?),
+            Call::Floor => {
+                floating::floor(cpu, args)?;
+                None
+            }
             Call::TypeName => Some(type_names::name(
                 memory,
                 heap,
@@ -399,6 +406,7 @@ pub(super) fn resolve(name: &str) -> Option<u32> {
         "_controlfp" => Some(API_BASE + 0x10c),
         "_initterm" => Some(initializers::BASE),
         "qsort" => Some(API_BASE + 0x1cc),
+        "floor" => Some(API_BASE + 0x1d0),
         "__getmainargs" => Some(API_BASE + 0x110),
         "memset" => Some(API_BASE + 0x114),
         "memcmp" => Some(API_BASE + 0x138),

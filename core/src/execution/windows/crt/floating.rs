@@ -1,5 +1,14 @@
 use super::{Cpu32, DispatchError, Register32};
 
+pub(super) fn floor(cpu: &mut Cpu32, args: &[u32]) -> Result<(), DispatchError> {
+    let value = f64::from_bits(u64::from(args[0]) | (u64::from(args[1]) << 32));
+    if !value.is_finite() {
+        return Err(DispatchError::Unsupported);
+    }
+    cpu.push_x87_double(value.floor())
+        .ok_or(DispatchError::Unsupported)
+}
+
 pub(super) fn to_integer(cpu: &mut Cpu32) -> Result<u32, DispatchError> {
     let bytes = cpu
         .pop_x87_truncated_integer()

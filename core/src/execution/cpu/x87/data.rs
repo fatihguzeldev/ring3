@@ -310,6 +310,14 @@ impl Cpu32 {
         self.write_operand(destination, u32::from(status), memory)
     }
 
+    pub(crate) fn push_x87_double(&mut self, value: f64) -> Option<()> {
+        self.x87_masked().ok()?;
+        if value != 0.0 && !value.is_normal() {
+            return None;
+        }
+        self.x87_stack.push(value).ok()
+    }
+
     pub(crate) fn pop_x87_truncated_integer(&mut self) -> Option<i64> {
         if self.x87_control_word & 0x3f != 0x3f {
             return None;
