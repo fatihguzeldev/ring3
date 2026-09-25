@@ -2,7 +2,7 @@ import type { Snapshot, WorkerInput, WorkerOutput } from "./types.js";
 
 function element<T extends HTMLElement>(id: string): T {
   const value = document.getElementById(id);
-  if (!value) throw new Error(`Eksik arayüz öğesi: ${id}`);
+  if (!value) throw new Error(`eksik arayüz öğesi: ${id}`);
   return value as T;
 }
 const canvas = element<HTMLCanvasElement>("screen");
@@ -12,7 +12,6 @@ const pause = element<HTMLButtonElement>("pause");
 const resume = element<HTMLButtonElement>("resume");
 const stop = element<HTMLButtonElement>("stop");
 const state = element("state");
-const detail = element("detail");
 const error = element("error");
 const windows = element("windows");
 let worker: Worker | undefined;
@@ -31,17 +30,17 @@ function renderWindows(snapshot: Snapshot): void {
     const section = document.createElement("div");
     section.className = "guest-window";
     const heading = document.createElement("h3");
-    heading.textContent = window.title || "Oyun penceresi";
+    heading.textContent = window.title || "oyun penceresi";
     section.append(heading);
     for (const child of snapshot.windows.filter((entry) => entry.parent === window.hwnd && entry.class === 0x80 && (entry.style & 0x10000000))) {
       const button = document.createElement("button");
-      button.textContent = child.title.replaceAll("&", "") || `Düğme ${child.id}`;
+      button.textContent = child.title.replaceAll("&", "") || `düğme ${child.id}`;
       button.disabled = Boolean(child.style & 0x08000000);
       button.onclick = (): void => send({ type: "button", hwnd: child.hwnd });
       section.append(button);
     }
     const activate = document.createElement("button");
-    activate.textContent = "Etkinleşme bildirimi gönder";
+    activate.textContent = "etkinleşme bildirimi gönder";
     activate.disabled = Boolean(window.style & 0x08000000);
     activate.onclick = (): void => send({ type: "activate", hwnd: window.hwnd });
     section.append(activate);
@@ -51,7 +50,7 @@ function renderWindows(snapshot: Snapshot): void {
 }
 
 function failed(message: string): void {
-  state.textContent = "Çalışma durdu";
+  state.textContent = "çalışma durdu";
   error.textContent = message;
   error.hidden = false;
   pause.disabled = true;
@@ -66,7 +65,7 @@ function failed(message: string): void {
 function receive(message: WorkerOutput): void {
   if (message.type === "error") { failed(message.message); return; }
   if (message.type === "frame") {
-    if (!context || message.rgba.byteLength !== message.width * message.height * 4) { failed("Geçersiz görüntü."); return; }
+    if (!context || message.rgba.byteLength !== message.width * message.height * 4) { failed("geçersiz görüntü."); return; }
     canvas.width = message.width;
     canvas.height = message.height;
     context.putImageData(new ImageData(new Uint8ClampedArray(message.rgba), message.width, message.height), 0, 0);
@@ -74,11 +73,10 @@ function receive(message: WorkerOutput): void {
     element("frames").textContent = String(++frames);
     return;
   }
-  const { snapshot, paused, note } = message;
+  const { snapshot, paused } = message;
   const finished = snapshot.state === "stopped" || snapshot.state === "exited";
-  const labels = { ready: "Hazırlanıyor", running: "Çalışıyor", waiting: "Pencere yanıtı bekleniyor", file: "Dosya yükleniyor", exited: "Program kapandı", stopped: "Core sınırına ulaşıldı" };
-  state.textContent = paused ? "Duraklatıldı" : labels[snapshot.state];
-  detail.textContent = note || (snapshot.state === "stopped" ? "Core bu işlemi henüz desteklemiyor. Son üretilen görüntü ekranda korunuyor." : "Yükleme birkaç dakika sürebilir. İstediğin zaman durdurabilirsin.");
+  const labels = { ready: "hazırlanıyor", running: "çalışıyor", waiting: "pencere yanıtı bekleniyor", file: "dosya yükleniyor", exited: "program kapandı", stopped: "core sınırına ulaşıldı" };
+  state.textContent = paused ? "duraklatıldı" : labels[snapshot.state];
   element("steps").textContent = (Number(snapshot.instructions) + Number(snapshot.apiCalls)).toLocaleString("tr-TR");
   element("elapsed").textContent = `${Math.floor((performance.now() - began) / 1000)} sn`;
   element("diagnostics").textContent = `${snapshot.reason}\nEIP: 0x${snapshot.eip.toString(16).padStart(8, "0")}\nCPU: ${snapshot.instructions} · API: ${snapshot.apiCalls}\nYürütme: browser Worker / WebAssembly`;
@@ -91,8 +89,8 @@ function receive(message: WorkerOutput): void {
 start.onclick = (): void => {
   worker?.terminate();
   const token = document.documentElement.dataset["token"];
-  if (!token || token === "RING3_SESSION_TOKEN") { failed("Yerel sunucu üzerinden açmalısın."); return; }
-  if (!context) { failed("Canvas desteği bulunamadı."); return; }
+  if (!token || token === "RING3_SESSION_TOKEN") { failed("yerel sunucu üzerinden açmalısın."); return; }
+  if (!context) { failed("canvas desteği bulunamadı."); return; }
   frames = 0;
   began = performance.now();
   windowSignature = "";
@@ -102,10 +100,9 @@ start.onclick = (): void => {
   context.clearRect(0, 0, canvas.width, canvas.height);
   element("frames").textContent = "0";
   element("steps").textContent = "—";
-  element("empty").textContent = "İlk oyun görüntüsü bekleniyor…";
+  element("empty").textContent = "ilk oyun görüntüsü bekleniyor…";
   element("empty").hidden = false;
-  state.textContent = "Hazırlanıyor";
-  detail.textContent = "Core ve program dosyaları yükleniyor.";
+  state.textContent = "hazırlanıyor";
   start.disabled = true;
   stop.disabled = false;
   pause.disabled = true;
@@ -126,7 +123,6 @@ stop.onclick = (): void => {
   resume.disabled = true;
   stop.disabled = true;
   windows.hidden = true;
-  state.textContent = "Durduruldu";
-  detail.textContent = "Süreç kapatıldı. Başlat yeni bir süreç oluşturur.";
+  state.textContent = "durduruldu";
 };
 window.addEventListener("pagehide", (): void => worker?.terminate());
