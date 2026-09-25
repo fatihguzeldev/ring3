@@ -209,8 +209,12 @@ fn failure(teb: thread::Teb, memory: &mut GuestMemory, error: u32) -> Result<u32
 }
 
 #[cfg(test)]
+#[path = "../../../../tests/support/executable.rs"]
+mod executable;
+#[cfg(test)]
 #[path = "../../../../tests/support/icon_executable.rs"]
 mod icon_executable;
+
 #[cfg(test)]
 #[path = "../../../../tests/support/imported_executable.rs"]
 mod imported_executable;

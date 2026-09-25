@@ -1,7 +1,6 @@
 use super::imported_executable;
 
-#[path = "resource_executable.rs"]
-mod resource_executable;
+use super::resource_executable;
 
 pub fn pe32(entries: &[[u16; 4]]) -> Vec<u8> {
     let mut bytes = resource_executable::guest();

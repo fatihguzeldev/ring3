@@ -1,5 +1,4 @@
-#[path = "executable.rs"]
-mod executable;
+use super::executable;
 
 pub fn pe32(code: &[u8]) -> Vec<u8> {
     let mut bytes = executable::pe32(code);

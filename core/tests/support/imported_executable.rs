@@ -1,5 +1,4 @@
-#[path = "executable.rs"]
-mod executable;
+use super::executable;
 
 pub fn pe32(code: &[u8], module: &str, names: &[&str]) -> Vec<u8> {
     assert!(module.len() < 32 && names.len() <= 4);

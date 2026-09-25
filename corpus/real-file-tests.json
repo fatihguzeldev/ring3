@@ -12,266 +12,164 @@
     }
   },
   "tests": {
-    "pe_export_evidence": [
-      "generated_owned_exports_preserve_compiled_metadata",
-      "generated_owned_export_refusals_preserve_compiled_budget_operands",
-      "generated_owned_export_queries_preserve_compiled_selections_after_release",
-      "generated_owned_export_query_refusals_preserve_compiled_view_limits",
-      "generated_owned_export_batches_preserve_compiled_results_and_budgets"
+    "pe": [
+      "pe_amd64_exceptions::generated_amd64_exception_functions_preserve_raw_records",
+      "pe_amd64_exceptions::generated_amd64_leaf_image_has_no_exception_functions",
+      "pe_amd64_unwind::generated_amd64_unwind_records_preserve_slots_and_padding",
+      "pe_architecture_declarations::generated_managed_pe32_architecture_declarations_match_compiled_fields",
+      "pe_architecture_declarations::generated_managed_pe32plus_architecture_declarations_match_compiled_fields",
+      "pe_architecture_declarations::generated_pe32_architecture_declarations_match_compiled_fields",
+      "pe_architecture_declarations::generated_pe32plus_architecture_declarations_match_compiled_fields",
+      "pe_base_relocations::generated_pe32_relocation_blocks_match_raw_metadata",
+      "pe_base_relocations::generated_pe32plus_relocation_blocks_match_raw_metadata",
+      "pe_bound_evidence::generated_owned_bound_imports_preserve_compiled_absence",
+      "pe_bound_imports::generated_named_importers_and_providers_have_no_bound_import_table",
+      "pe_bound_names::generated_named_importers_and_providers_have_no_bound_import_names",
+      "pe_certificate_entries::generated_pe32_with_synthetic_certificate_entries_matches_file_metadata",
+      "pe_certificate_entries::generated_pe32plus_with_synthetic_certificate_entries_matches_file_metadata",
+      "pe_certificates::generated_pe32_with_opaque_certificate_table_matches_file_bytes",
+      "pe_certificates::generated_pe32plus_with_opaque_certificate_table_matches_file_bytes",
+      "pe_clr::generated_pe32_managed_clr_matches_compiler_header",
+      "pe_clr::generated_pe32_with_synthetic_clr_matches_raw_header",
+      "pe_clr::generated_pe32plus_managed_clr_matches_compiler_header",
+      "pe_clr::generated_pe32plus_with_synthetic_clr_matches_raw_header",
+      "pe_debug::generated_pe32_debug_directory_matches_linked_metadata",
+      "pe_debug::generated_pe32_with_synthetic_debug_directory_matches_raw_metadata",
+      "pe_debug::generated_pe32plus_debug_directory_matches_linked_metadata",
+      "pe_debug::generated_pe32plus_with_synthetic_debug_directory_matches_raw_metadata",
+      "pe_debug_payloads::generated_pe32_debug_payloads_match_linked_bytes",
+      "pe_debug_payloads::generated_pe32_with_synthetic_debug_payload_matches_overlay_bytes",
+      "pe_debug_payloads::generated_pe32plus_debug_payloads_match_linked_bytes",
+      "pe_debug_payloads::generated_pe32plus_with_synthetic_debug_payload_matches_overlay_bytes",
+      "pe_declared_evidence::generated_managed_pe32_declared_evidence_matches_compiled_fields",
+      "pe_declared_evidence::generated_managed_pe32plus_declared_evidence_matches_compiled_fields",
+      "pe_declared_evidence::generated_pe32_declared_evidence_matches_compiled_fields",
+      "pe_declared_evidence::generated_pe32plus_declared_evidence_matches_compiled_fields",
+      "pe_delay_import_evidence::generated_owned_delay_import_refusals_preserve_compiled_budget_operands",
+      "pe_delay_import_evidence::generated_owned_delay_imports_preserve_compiled_metadata",
+      "pe_delay_import_exports::generated_owned_delay_imports_match_compiled_explicit_providers",
+      "pe_delay_import_exports::generated_pe32_named_delay_imports_match_explicit_exports",
+      "pe_delay_import_exports::generated_pe32_ordinal_delay_imports_match_explicit_exports",
+      "pe_delay_import_exports::generated_pe32plus_named_delay_imports_match_explicit_exports",
+      "pe_delay_import_exports::generated_pe32plus_ordinal_delay_imports_match_explicit_exports",
+      "pe_delay_imports::generated_pe32_delay_descriptors_match_raw_metadata",
+      "pe_delay_imports::generated_pe32plus_delay_descriptors_match_raw_metadata",
+      "pe_delay_lookups::generated_pe32_delay_lookups_match_raw_metadata",
+      "pe_delay_lookups::generated_pe32_ordinal_delay_lookup_matches_raw_metadata",
+      "pe_delay_lookups::generated_pe32plus_delay_lookups_match_raw_metadata",
+      "pe_delay_lookups::generated_pe32plus_ordinal_delay_lookup_matches_raw_metadata",
+      "pe_delay_names::generated_pe32_delay_names_match_raw_metadata",
+      "pe_delay_names::generated_pe32plus_delay_names_match_raw_metadata",
+      "pe_export_addresses::forwarder_pe32_dll_matches_recorded_sparse_address_metadata",
+      "pe_export_addresses::forwarder_pe32plus_dll_matches_recorded_sparse_address_metadata",
+      "pe_export_addresses::named_pe32_dll_matches_recorded_address_metadata",
+      "pe_export_addresses::named_pe32plus_dll_matches_recorded_address_metadata",
+      "pe_export_addresses::ordinal_pe32_dll_matches_recorded_address_metadata",
+      "pe_export_addresses::ordinal_pe32plus_dll_matches_recorded_address_metadata",
+      "pe_export_batch::generated_pe32_export_batch_matches_metadata",
+      "pe_export_batch::generated_pe32plus_export_batch_matches_metadata",
+      "pe_export_evidence::generated_owned_export_batches_preserve_compiled_results_and_budgets",
+      "pe_export_evidence::generated_owned_export_queries_preserve_compiled_selections_after_release",
+      "pe_export_evidence::generated_owned_export_query_refusals_preserve_compiled_view_limits",
+      "pe_export_evidence::generated_owned_export_refusals_preserve_compiled_budget_operands",
+      "pe_export_evidence::generated_owned_exports_preserve_compiled_metadata",
+      "pe_export_lookup::generated_pe32_forwarder_export_selection_matches_metadata",
+      "pe_export_lookup::generated_pe32_named_export_selection_matches_metadata",
+      "pe_export_lookup::generated_pe32_ordinal_export_selection_matches_metadata",
+      "pe_export_lookup::generated_pe32_reusable_export_lookup_matches_metadata",
+      "pe_export_lookup::generated_pe32plus_forwarder_export_selection_matches_metadata",
+      "pe_export_lookup::generated_pe32plus_named_export_selection_matches_metadata",
+      "pe_export_lookup::generated_pe32plus_ordinal_export_selection_matches_metadata",
+      "pe_export_lookup::generated_pe32plus_reusable_export_lookup_matches_metadata",
+      "pe_export_names::forwarder_pe32_dll_matches_recorded_name_metadata",
+      "pe_export_names::forwarder_pe32plus_dll_matches_recorded_name_metadata",
+      "pe_export_names::named_pe32_dll_matches_recorded_name_metadata",
+      "pe_export_names::named_pe32plus_dll_matches_recorded_name_metadata",
+      "pe_export_names::ordinal_pe32_dll_matches_recorded_name_metadata",
+      "pe_export_names::ordinal_pe32plus_dll_matches_recorded_name_metadata",
+      "pe_exports::named_pe32_dll_matches_recorded_export_metadata",
+      "pe_exports::named_pe32plus_dll_matches_recorded_export_metadata",
+      "pe_exports::ordinal_pe32_dll_matches_recorded_export_metadata",
+      "pe_exports::ordinal_pe32plus_dll_matches_recorded_export_metadata",
+      "pe_fingerprints::generated_managed_pe32_fingerprints_match_compiled_bytes_and_fields",
+      "pe_fingerprints::generated_managed_pe32plus_fingerprints_match_compiled_bytes_and_fields",
+      "pe_fingerprints::generated_pe32_fingerprints_match_compiled_bytes_and_fields",
+      "pe_fingerprints::generated_pe32plus_fingerprints_match_compiled_bytes_and_fields",
+      "pe_forwarder_requests::generated_pe32_forwarder_requests_preserve_borrowed_metadata",
+      "pe_forwarder_requests::generated_pe32plus_forwarder_requests_preserve_borrowed_metadata",
+      "pe_forwarder_walk::generated_owned_forwarder_batches_preserve_compiled_order_and_limits",
+      "pe_forwarder_walk::generated_owned_forwarder_walks_preserve_compiled_routes",
+      "pe_forwarder_walk::generated_pe32_named_forwarder_walk_preserves_missing_target",
+      "pe_forwarder_walk::generated_pe32_ordinal_forwarder_walk_selects_explicit_provider",
+      "pe_forwarder_walk::generated_pe32plus_named_forwarder_walk_preserves_missing_target",
+      "pe_forwarder_walk::generated_pe32plus_ordinal_forwarder_walk_selects_explicit_provider",
+      "pe_forwarder_walk::named_target::generated_pe32_named_forwarder_selects_terminal",
+      "pe_forwarder_walk::named_target::generated_pe32plus_named_forwarder_selects_terminal",
+      "pe_header_batch::generated_mixed_header_batch_matches_owned_metadata_and_budgets",
+      "pe_header_prefix::generated_corpus_matches_recorded_header_metadata",
+      "pe_header_prefix::generated_pe32plus_corpus_matches_recorded_header_prefix",
+      "pe_headers::disposable_pe32_plus_matches_recorded_header_metadata",
+      "pe_headers::generated_pe32_matches_recorded_header_metadata",
+      "pe_import_exports::generated_owned_imports_match_compiled_explicit_providers",
+      "pe_import_exports::generated_pe32_named_imports_match_explicit_exports",
+      "pe_import_exports::generated_pe32_ordinal_imports_match_explicit_exports",
+      "pe_import_exports::generated_pe32plus_named_imports_match_explicit_exports",
+      "pe_import_exports::generated_pe32plus_ordinal_imports_match_explicit_exports",
+      "pe_import_lookups::generated_pe32_named_lookup_matches_llvm_and_raw_metadata",
+      "pe_import_lookups::generated_pe32_ordinal_lookup_preserves_bit15",
+      "pe_import_lookups::generated_pe32plus_named_lookup_matches_llvm_and_raw_metadata",
+      "pe_import_lookups::generated_pe32plus_ordinal_lookup_preserves_bit15_and_raw_bit63",
+      "pe_imports::generated_pe32_imports_match_recorded_llvm_and_raw_metadata",
+      "pe_imports::generated_pe32plus_imports_match_recorded_llvm_and_raw_metadata",
+      "pe_load_config::generated_pe32_load_config_matches_prefix_metadata",
+      "pe_load_config::generated_pe32_with_synthetic_load_config_matches_prefix_metadata",
+      "pe_load_config::generated_pe32plus_load_config_matches_prefix_metadata",
+      "pe_load_config::generated_pe32plus_with_synthetic_load_config_matches_prefix_metadata",
+      "pe_module_evidence::generated_owned_module_evidence_preserves_compiled_observations",
+      "pe_module_evidence::generated_owned_module_refusals_preserve_family_isolation",
+      "pe_resource_data::generated_pe32_resource_data_entries_match_linked_records",
+      "pe_resource_data::generated_pe32plus_resource_data_entries_match_linked_records",
+      "pe_resource_directories::generated_pe32_resource_directories_match_linked_graph",
+      "pe_resource_directories::generated_pe32plus_resource_directories_match_linked_graph",
+      "pe_resource_directory_names::generated_pe32_resource_directory_names_match_linked_bytes",
+      "pe_resource_directory_names::generated_pe32plus_resource_directory_names_match_linked_bytes",
+      "pe_resource_names::generated_pe32_resource_names_match_linked_bytes",
+      "pe_resource_names::generated_pe32_with_synthetic_resource_names_matches_raw_bytes",
+      "pe_resource_names::generated_pe32plus_resource_names_match_linked_bytes",
+      "pe_resource_names::generated_pe32plus_with_synthetic_resource_names_matches_raw_bytes",
+      "pe_resource_payloads::generated_pe32_resource_payloads_match_linked_bytes",
+      "pe_resource_payloads::generated_pe32plus_resource_payloads_match_linked_bytes",
+      "pe_resources::generated_pe32_resource_root_matches_linked_metadata",
+      "pe_resources::generated_pe32_with_synthetic_resource_root_matches_raw_metadata",
+      "pe_resources::generated_pe32plus_resource_root_matches_linked_metadata",
+      "pe_resources::generated_pe32plus_with_synthetic_resource_root_matches_raw_metadata",
+      "pe_rva::generated_pe32_entry_range_matches_recorded_file_bytes",
+      "pe_rva::generated_pe32plus_entry_range_matches_recorded_file_bytes",
+      "pe_sections::disposable_pe32_plus_section_matches_recorded_bytes",
+      "pe_sections::generated_pe32_section_matches_recorded_bytes",
+      "pe_static_import_evidence::generated_owned_import_refusals_preserve_compiled_budget_operands",
+      "pe_static_import_evidence::generated_owned_imports_preserve_compiled_named_and_ordinal_metadata",
+      "pe_tls::generated_pe32_tls_directory_matches_raw_metadata",
+      "pe_tls::generated_pe32plus_tls_directory_matches_raw_metadata"
     ],
-    "pe_export_addresses": [
-      "named_pe32_dll_matches_recorded_address_metadata",
-      "named_pe32plus_dll_matches_recorded_address_metadata",
-      "ordinal_pe32_dll_matches_recorded_address_metadata",
-      "ordinal_pe32plus_dll_matches_recorded_address_metadata",
-      "forwarder_pe32_dll_matches_recorded_sparse_address_metadata",
-      "forwarder_pe32plus_dll_matches_recorded_sparse_address_metadata"
-    ],
-    "pe_export_names": [
-      "named_pe32_dll_matches_recorded_name_metadata",
-      "named_pe32plus_dll_matches_recorded_name_metadata",
-      "ordinal_pe32_dll_matches_recorded_name_metadata",
-      "ordinal_pe32plus_dll_matches_recorded_name_metadata",
-      "forwarder_pe32_dll_matches_recorded_name_metadata",
-      "forwarder_pe32plus_dll_matches_recorded_name_metadata"
-    ],
-    "pe_exports": [
-      "named_pe32_dll_matches_recorded_export_metadata",
-      "named_pe32plus_dll_matches_recorded_export_metadata",
-      "ordinal_pe32_dll_matches_recorded_export_metadata",
-      "ordinal_pe32plus_dll_matches_recorded_export_metadata"
-    ],
-    "pe_header_prefix": [
-      "generated_corpus_matches_recorded_header_metadata",
-      "generated_pe32plus_corpus_matches_recorded_header_prefix"
-    ],
-    "pe_headers": [
-      "generated_pe32_matches_recorded_header_metadata",
-      "disposable_pe32_plus_matches_recorded_header_metadata"
-    ],
-    "pe_import_lookups": [
-      "generated_pe32_named_lookup_matches_llvm_and_raw_metadata",
-      "generated_pe32plus_named_lookup_matches_llvm_and_raw_metadata",
-      "generated_pe32_ordinal_lookup_preserves_bit15",
-      "generated_pe32plus_ordinal_lookup_preserves_bit15_and_raw_bit63"
-    ],
-    "pe_imports": [
-      "generated_pe32_imports_match_recorded_llvm_and_raw_metadata",
-      "generated_pe32plus_imports_match_recorded_llvm_and_raw_metadata"
-    ],
-    "pe_rva": [
-      "generated_pe32_entry_range_matches_recorded_file_bytes",
-      "generated_pe32plus_entry_range_matches_recorded_file_bytes"
-    ],
-    "pe_sections": [
-      "generated_pe32_section_matches_recorded_bytes",
-      "disposable_pe32_plus_section_matches_recorded_bytes"
-    ],
-    "pe_base_relocations": [
-      "generated_pe32_relocation_blocks_match_raw_metadata",
-      "generated_pe32plus_relocation_blocks_match_raw_metadata"
-    ],
-    "pe_tls": [
-      "generated_pe32_tls_directory_matches_raw_metadata",
-      "generated_pe32plus_tls_directory_matches_raw_metadata"
-    ],
-    "pe_delay_imports": [
-      "generated_pe32_delay_descriptors_match_raw_metadata",
-      "generated_pe32plus_delay_descriptors_match_raw_metadata"
-    ],
-    "pe_delay_names": [
-      "generated_pe32_delay_names_match_raw_metadata",
-      "generated_pe32plus_delay_names_match_raw_metadata"
-    ],
-    "pe_certificate_entries": [
-      "generated_pe32_with_synthetic_certificate_entries_matches_file_metadata",
-      "generated_pe32plus_with_synthetic_certificate_entries_matches_file_metadata"
-    ],
-    "pe_load_config": [
-      "generated_pe32_load_config_matches_prefix_metadata",
-      "generated_pe32plus_load_config_matches_prefix_metadata",
-      "generated_pe32_with_synthetic_load_config_matches_prefix_metadata",
-      "generated_pe32plus_with_synthetic_load_config_matches_prefix_metadata"
-    ],
-    "pe_resources": [
-      "generated_pe32_with_synthetic_resource_root_matches_raw_metadata",
-      "generated_pe32plus_with_synthetic_resource_root_matches_raw_metadata",
-      "generated_pe32_resource_root_matches_linked_metadata",
-      "generated_pe32plus_resource_root_matches_linked_metadata"
-    ],
-    "pe_debug": [
-      "generated_pe32_with_synthetic_debug_directory_matches_raw_metadata",
-      "generated_pe32plus_with_synthetic_debug_directory_matches_raw_metadata",
-      "generated_pe32_debug_directory_matches_linked_metadata",
-      "generated_pe32plus_debug_directory_matches_linked_metadata"
-    ],
-    "pe_delay_lookups": [
-      "generated_pe32_delay_lookups_match_raw_metadata",
-      "generated_pe32plus_delay_lookups_match_raw_metadata",
-      "generated_pe32_ordinal_delay_lookup_matches_raw_metadata",
-      "generated_pe32plus_ordinal_delay_lookup_matches_raw_metadata"
-    ],
-    "pe_resource_names": [
-      "generated_pe32_with_synthetic_resource_names_matches_raw_bytes",
-      "generated_pe32plus_with_synthetic_resource_names_matches_raw_bytes",
-      "generated_pe32_resource_names_match_linked_bytes",
-      "generated_pe32plus_resource_names_match_linked_bytes"
-    ],
-    "pe_resource_directories": [
-      "generated_pe32_resource_directories_match_linked_graph",
-      "generated_pe32plus_resource_directories_match_linked_graph"
-    ],
-    "pe_resource_data": [
-      "generated_pe32_resource_data_entries_match_linked_records",
-      "generated_pe32plus_resource_data_entries_match_linked_records"
-    ],
-    "pe_resource_directory_names": [
-      "generated_pe32_resource_directory_names_match_linked_bytes",
-      "generated_pe32plus_resource_directory_names_match_linked_bytes"
-    ],
-    "pe_resource_payloads": [
-      "generated_pe32_resource_payloads_match_linked_bytes",
-      "generated_pe32plus_resource_payloads_match_linked_bytes"
-    ],
-    "pe_debug_payloads": [
-      "generated_pe32_with_synthetic_debug_payload_matches_overlay_bytes",
-      "generated_pe32plus_with_synthetic_debug_payload_matches_overlay_bytes",
-      "generated_pe32_debug_payloads_match_linked_bytes",
-      "generated_pe32plus_debug_payloads_match_linked_bytes"
-    ],
-    "pe_clr": [
-      "generated_pe32_with_synthetic_clr_matches_raw_header",
-      "generated_pe32plus_with_synthetic_clr_matches_raw_header",
-      "generated_pe32_managed_clr_matches_compiler_header",
-      "generated_pe32plus_managed_clr_matches_compiler_header"
-    ],
-    "pe_certificates": [
-      "generated_pe32_with_opaque_certificate_table_matches_file_bytes",
-      "generated_pe32plus_with_opaque_certificate_table_matches_file_bytes"
-    ],
-    "pe_header_batch": [
-      "generated_mixed_header_batch_matches_owned_metadata_and_budgets"
-    ],
-    "pe_export_lookup": [
-      "generated_pe32_named_export_selection_matches_metadata",
-      "generated_pe32plus_named_export_selection_matches_metadata",
-      "generated_pe32_ordinal_export_selection_matches_metadata",
-      "generated_pe32plus_ordinal_export_selection_matches_metadata",
-      "generated_pe32_forwarder_export_selection_matches_metadata",
-      "generated_pe32plus_forwarder_export_selection_matches_metadata",
-      "generated_pe32_reusable_export_lookup_matches_metadata",
-      "generated_pe32plus_reusable_export_lookup_matches_metadata"
-    ],
-    "pe_export_batch": [
-      "generated_pe32_export_batch_matches_metadata",
-      "generated_pe32plus_export_batch_matches_metadata"
-    ],
-    "pe_import_exports": [
-      "generated_pe32_named_imports_match_explicit_exports",
-      "generated_pe32_ordinal_imports_match_explicit_exports",
-      "generated_pe32plus_named_imports_match_explicit_exports",
-      "generated_pe32plus_ordinal_imports_match_explicit_exports",
-      "generated_owned_imports_match_compiled_explicit_providers"
-    ],
-    "pe_amd64_exceptions": [
-      "generated_amd64_exception_functions_preserve_raw_records",
-      "generated_amd64_leaf_image_has_no_exception_functions"
-    ],
-    "pe_delay_import_exports": [
-      "generated_pe32_named_delay_imports_match_explicit_exports",
-      "generated_pe32_ordinal_delay_imports_match_explicit_exports",
-      "generated_pe32plus_named_delay_imports_match_explicit_exports",
-      "generated_pe32plus_ordinal_delay_imports_match_explicit_exports",
-      "generated_owned_delay_imports_match_compiled_explicit_providers"
-    ],
-    "pe_forwarder_requests": [
-      "generated_pe32_forwarder_requests_preserve_borrowed_metadata",
-      "generated_pe32plus_forwarder_requests_preserve_borrowed_metadata"
-    ],
-    "pe_forwarder_walk": [
-      "generated_pe32_named_forwarder_walk_preserves_missing_target",
-      "generated_pe32plus_named_forwarder_walk_preserves_missing_target",
-      "generated_pe32_ordinal_forwarder_walk_selects_explicit_provider",
-      "generated_pe32plus_ordinal_forwarder_walk_selects_explicit_provider",
-      "generated_owned_forwarder_walks_preserve_compiled_routes",
-      "generated_owned_forwarder_batches_preserve_compiled_order_and_limits",
-      "named_target::generated_pe32_named_forwarder_selects_terminal",
-      "named_target::generated_pe32plus_named_forwarder_selects_terminal"
-    ],
-    "pe_amd64_unwind": [
-      "generated_amd64_unwind_records_preserve_slots_and_padding"
-    ],
-    "source_pe_headers": [
-      "generated_named_headers_preserve_both_widths_and_aliases",
-      "generated_named_admission_refusals_preserve_priority_and_indices"
-    ],
-    "pe_declared_evidence": [
-      "generated_pe32_declared_evidence_matches_compiled_fields",
-      "generated_pe32plus_declared_evidence_matches_compiled_fields",
-      "generated_managed_pe32_declared_evidence_matches_compiled_fields",
-      "generated_managed_pe32plus_declared_evidence_matches_compiled_fields"
-    ],
-    "source_pe_evidence": [
-      "generated_named_evidence_preserves_mixed_pairings_and_aliases",
-      "generated_named_evidence_refusals_preserve_priority_and_operands"
-    ],
-    "pe_architecture_declarations": [
-      "generated_pe32_architecture_declarations_match_compiled_fields",
-      "generated_pe32plus_architecture_declarations_match_compiled_fields",
-      "generated_managed_pe32_architecture_declarations_match_compiled_fields",
-      "generated_managed_pe32plus_architecture_declarations_match_compiled_fields"
-    ],
-    "pe_fingerprints": [
-      "generated_pe32_fingerprints_match_compiled_bytes_and_fields",
-      "generated_pe32plus_fingerprints_match_compiled_bytes_and_fields",
-      "generated_managed_pe32_fingerprints_match_compiled_bytes_and_fields",
-      "generated_managed_pe32plus_fingerprints_match_compiled_bytes_and_fields"
-    ],
-    "source_pe_fingerprints": [
-      "generated_named_fingerprints_preserve_mixed_pairings_and_aliases",
-      "generated_named_fingerprint_refusals_preserve_priority_and_operands"
-    ],
-    "pe_delay_import_evidence": [
-      "generated_owned_delay_imports_preserve_compiled_metadata",
-      "generated_owned_delay_import_refusals_preserve_compiled_budget_operands"
-    ],
-    "pe_static_import_evidence": [
-      "generated_owned_imports_preserve_compiled_named_and_ordinal_metadata",
-      "generated_owned_import_refusals_preserve_compiled_budget_operands"
-    ],
-    "pe_module_evidence": [
-      "generated_owned_module_evidence_preserves_compiled_observations",
-      "generated_owned_module_refusals_preserve_family_isolation"
-    ],
-    "source_pe_modules": [
-      "generated_named_modules_preserve_compiled_source_pairings",
-      "generated_named_module_refusals_preserve_admission_and_family_limits"
-    ],
-    "pe_bound_imports": [
-      "generated_named_importers_and_providers_have_no_bound_import_table"
-    ],
-    "pe_bound_names": [
-      "generated_named_importers_and_providers_have_no_bound_import_names"
-    ],
-    "pe_bound_evidence": [
-      "generated_owned_bound_imports_preserve_compiled_absence"
-    ],
-    "source_provider_composition": [
-      "generated_application_candidates_select_retained_static_and_delay_providers"
-    ],
-    "source_compiled_cycle": [
-      "generated_pe32_cycle_preserves_revisit_coordinates",
-      "generated_pe32plus_cycle_preserves_revisit_coordinates"
-    ],
-    "source_compiled_chain": [
-      "generated_pe32_chain_preserves_multihop_closure",
-      "generated_pe32plus_chain_preserves_multihop_closure",
-      "generated_pe32_chain_candidates_select_retained_symbols",
-      "generated_pe32plus_chain_candidates_select_retained_symbols"
-    ],
-    "source_compiled_delay": [
-      "compiled_pe32_delay_modes_preserve_owned_closure",
-      "compiled_pe32plus_delay_modes_preserve_owned_closure"
+    "sources": [
+      "source_compiled_chain::generated_pe32_chain_candidates_select_retained_symbols",
+      "source_compiled_chain::generated_pe32_chain_preserves_multihop_closure",
+      "source_compiled_chain::generated_pe32plus_chain_candidates_select_retained_symbols",
+      "source_compiled_chain::generated_pe32plus_chain_preserves_multihop_closure",
+      "source_compiled_cycle::generated_pe32_cycle_preserves_revisit_coordinates",
+      "source_compiled_cycle::generated_pe32plus_cycle_preserves_revisit_coordinates",
+      "source_compiled_delay::compiled_pe32_delay_modes_preserve_owned_closure",
+      "source_compiled_delay::compiled_pe32plus_delay_modes_preserve_owned_closure",
+      "source_pe_evidence::generated_named_evidence_preserves_mixed_pairings_and_aliases",
+      "source_pe_evidence::generated_named_evidence_refusals_preserve_priority_and_operands",
+      "source_pe_fingerprints::generated_named_fingerprint_refusals_preserve_priority_and_operands",
+      "source_pe_fingerprints::generated_named_fingerprints_preserve_mixed_pairings_and_aliases",
+      "source_pe_headers::generated_named_admission_refusals_preserve_priority_and_indices",
+      "source_pe_headers::generated_named_headers_preserve_both_widths_and_aliases",
+      "source_pe_modules::generated_named_module_refusals_preserve_admission_and_family_limits",
+      "source_pe_modules::generated_named_modules_preserve_compiled_source_pairings",
+      "source_provider_composition::generated_application_candidates_select_retained_static_and_delay_providers"
     ]
   }
 }

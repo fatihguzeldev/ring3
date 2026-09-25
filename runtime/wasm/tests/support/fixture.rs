@@ -1,3 +1,5 @@
+#[path = "../../../../core/tests/support/executable.rs"]
+mod executable;
 #[path = "../../../../core/tests/support/imported_executable.rs"]
 mod imported_executable;
 
