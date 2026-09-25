@@ -27,6 +27,31 @@ impl Default for Tables {
 }
 
 impl Tables {
+    pub(super) fn translate_miss(
+        &self,
+        args: &[u32],
+        memory: &GuestMemory,
+    ) -> Result<u32, DispatchError> {
+        let table = self
+            .loaded
+            .get(&args[1])
+            .ok_or(DispatchError::Unsupported)?;
+        let mut message = [0; 8];
+        guest::read_words(memory, args[2], &mut message)?;
+        if !matches!(message[1], 0x100 | 0x104) || message[2] > 0xff {
+            return Err(DispatchError::Unsupported);
+        }
+        // a possible match needs modifier and command semantics, even for ascii entries.
+        if table
+            .entries
+            .iter()
+            .any(|entry| u32::from(u16::from_le_bytes([entry[2], entry[3]])) == message[2])
+        {
+            return Err(DispatchError::Unsupported);
+        }
+        Ok(0)
+    }
+
     pub(super) fn load(
         &mut self,
         resource: &Resource,

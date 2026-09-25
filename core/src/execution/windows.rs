@@ -387,6 +387,7 @@ impl Api {
                 "LoadIconA" => 0x2c8,
                 "LoadAcceleratorsA" => 0x29c,
                 "CopyAcceleratorTableA" => 0x2a0,
+                "TranslateAcceleratorA" => 0x5d8,
                 "CallWindowProcA" => 0x2a4,
                 "SendMessageA" => 0x2cc,
                 "PeekMessageA" => 0x43c,
@@ -937,7 +938,10 @@ impl Process32 {
 
     fn dispatch(&mut self, api: Api) -> Result<(), DispatchError> {
         if (self.threads.scheduled_child() && api.requires_primary())
-            || (matches!(api, Api::Input(_)) && self.cpu.fs_base() != thread::BASE)
+            || (matches!(
+                api,
+                Api::Input(_) | Api::Resource(resources::Call::TranslateAccelerator)
+            ) && self.cpu.fs_base() != thread::BASE)
         {
             return Err(DispatchError::Unsupported);
         }
@@ -960,6 +964,7 @@ impl Process32 {
                 | Api::Input(_)
                 | Api::Hook(_)
                 | Api::Crt(crt::Call::Sort)
+                | Api::Resource(resources::Call::TranslateAccelerator)
         ) {
             stack
                 .checked_add(api.stack_cleanup())

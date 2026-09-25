@@ -46,6 +46,7 @@ impl Api {
                 | Self::Graphics(_)
                 | Self::Com(_)
                 | Self::Input(_)
+                | Self::Resource(super::resources::Call::TranslateAccelerator)
         )
     }
 }

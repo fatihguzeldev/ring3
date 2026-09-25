@@ -407,6 +407,8 @@ mod process_version_executable;
 
 #[path = "../../core/tests/support/accelerator_executable.rs"]
 mod accelerator_executable;
+#[path = "../../core/tests/support/accelerator_miss_cases.rs"]
+mod accelerator_miss_cases;
 #[path = "../../core/tests/support/metrics_executable.rs"]
 mod metrics_executable;
 
@@ -719,6 +721,10 @@ fn execute_accelerators() {
 }
 
 fn execute_resources() {
+    accelerator_miss_cases::distinct_keys_are_definite_misses();
+    accelerator_miss_cases::candidates_and_unsupported_messages_remain_unhandled();
+    accelerator_miss_cases::misses_preserve_owned_data_and_queued_messages();
+    accelerator_miss_cases::invalid_targets_and_memory_are_atomic();
     use ring3_core::execution::{Process32, ProcessStop, Register32, StopReason};
     let mut process = Process32::load(&resource_executable::guest(), 25).unwrap();
     let result = process.run(50);

@@ -19,6 +19,7 @@ pub(super) enum Call {
     String,
     LoadAccelerators,
     CopyAccelerators,
+    TranslateAccelerator,
     LoadIcon,
     LoadResource,
     LockResource,
@@ -28,7 +29,7 @@ pub(super) enum Call {
 impl Call {
     pub(super) fn arguments(self) -> usize {
         match self {
-            Self::Find | Self::CopyAccelerators => 3,
+            Self::Find | Self::CopyAccelerators | Self::TranslateAccelerator => 3,
             Self::String => 4,
             Self::LoadAccelerators | Self::LoadIcon | Self::LoadResource | Self::SizeofResource => {
                 2
@@ -43,6 +44,7 @@ impl Call {
             0xec => Some(Self::String),
             0x29c => Some(Self::LoadAccelerators),
             0x2a0 => Some(Self::CopyAccelerators),
+            0x5d8 => Some(Self::TranslateAccelerator),
             0x2c8 => Some(Self::LoadIcon),
             0x424 => Some(Self::LoadResource),
             0x428 => Some(Self::LockResource),
@@ -137,6 +139,7 @@ impl Resources {
                 Ok(0)
             }
             Call::CopyAccelerators => self.accelerators.copy(arguments, memory),
+            Call::TranslateAccelerator => self.accelerators.translate_miss(arguments, memory),
             Call::Find => {
                 let (name, kind) = (arguments[1], arguments[2]);
                 if name > 0xffff || kind > 0xffff {
@@ -279,6 +282,9 @@ impl Resources {
 
 impl Process32 {
     pub(super) fn resource_api(&mut self, call: Call, args: &[u32]) -> Result<(), DispatchError> {
+        if matches!(call, Call::TranslateAccelerator) && self.desktop.window(args[0]).is_none() {
+            return Err(DispatchError::Unsupported);
+        }
         let value = self.resources.dispatch(
             call,
             args,
