@@ -206,7 +206,7 @@ fn execute_string_stores() {
             0x78, 0x56, 0x34, 0x12, 0x78, 0x56, 0x34, 0x12, 0x78, 0x56, 0x78, 0xaa, 0xaa
         ]
     );
-    #[cfg(windows_demo)]
+    #[cfg(feature = "windows-demo")]
     {
         let mut p = Process32::load(
             include_bytes!("../../target/windows-api/string-stores.exe"),
@@ -235,7 +235,7 @@ fn execute_string_comparisons() {
         assert_eq!(process.cpu.register(register), 0x0040_20c4);
     }
     assert_eq!(process.cpu.eflags, 0x46);
-    #[cfg(windows_demo)]
+    #[cfg(feature = "windows-demo")]
     {
         let mut process = Process32::load(
             include_bytes!("../../target/windows-api/string-comparisons.exe"),
@@ -569,7 +569,7 @@ fn execute_interlocked() {
     assert_eq!(process.cpu.register(Register32::Ebx), 0x8000_0000);
     assert_eq!(process.cpu.register(Register32::Edi), 42);
     assert_eq!(process.cpu.register(Register32::Esp), 0x1001_0000);
-    #[cfg(windows_demo)]
+    #[cfg(feature = "windows-demo")]
     {
         let mut process = Process32::load(
             include_bytes!("../../target/windows-api/interlocked.exe"),
@@ -593,7 +593,7 @@ fn execute_local_realloc() {
     assert_eq!(process.cpu.register(Register32::Edx), 0);
     assert_eq!(process.cpu.register(Register32::Esp), 0x1001_0000);
     assert!(process.memory.read(0x2000_0000, &mut [0]).is_err());
-    #[cfg(windows_demo)]
+    #[cfg(feature = "windows-demo")]
     {
         let mut process = Process32::load(
             include_bytes!("../../target/windows-api/local-realloc.exe"),
@@ -648,7 +648,7 @@ fn execute_thread_identity() {
     assert_eq!(process.cpu.register(Register32::Ecx), 1);
     assert_eq!(process.cpu.register(Register32::Edx), 1);
     assert_eq!(process.cpu.register(Register32::Esp), 0x1001_0000);
-    #[cfg(windows_demo)]
+    #[cfg(feature = "windows-demo")]
     {
         let mut process = Process32::load(
             include_bytes!("../../target/windows-api/thread-identity.exe"),
@@ -680,7 +680,7 @@ fn execute_module_file_name() {
     let mut path = [0; 15];
     process.memory.read(0x0040_2180, &mut path).unwrap();
     assert_eq!(&path, b"C:\\program.exe\0");
-    #[cfg(windows_demo)]
+    #[cfg(feature = "windows-demo")]
     {
         let mut process = Process32::load(
             include_bytes!("../../target/windows-api/module-file-name.exe"),
@@ -709,7 +709,7 @@ fn execute_accelerators() {
     let mut bytes = [0; 12];
     process.memory.read(0x0040_2180, &mut bytes).unwrap();
     assert_eq!(bytes, [9, 0, 65, 0, 100, 0, 0, 0, 120, 0, 200, 0]);
-    #[cfg(windows_demo)]
+    #[cfg(feature = "windows-demo")]
     {
         let mut process = Process32::load(
             include_bytes!("../../target/windows-api/accelerators.exe"),
@@ -737,7 +737,7 @@ fn execute_resources() {
     assert_eq!(process.cpu.register(Register32::Ecx), 0x0070_6c41);
     assert_eq!(process.cpu.register(Register32::Esp), 0x1001_0000);
     assert_eq!(process.memory.mapped_pages(), 25);
-    #[cfg(windows_demo)]
+    #[cfg(feature = "windows-demo")]
     {
         let mut process =
             Process32::load(include_bytes!("../../target/windows-api/resources.exe"), 64).unwrap();
@@ -792,7 +792,7 @@ fn execute_command_line() {
         .read(u64::from(pointer), &mut output)
         .unwrap();
     assert_eq!(&output, b"\"demo.exe\" --mode test\0");
-    #[cfg(windows_demo)]
+    #[cfg(feature = "windows-demo")]
     {
         let mut process = Process32::load(
             include_bytes!("../../target/windows-api/command-line.exe"),
@@ -828,7 +828,7 @@ fn execute_change_directory() {
     let mut bytes = [0; 10];
     process.memory.read(0x0040_2280, &mut bytes).unwrap();
     assert_eq!(&bytes, b"d:\\Assets\0");
-    #[cfg(windows_demo)]
+    #[cfg(feature = "windows-demo")]
     {
         let mut process = Process32::load(
             include_bytes!("../../target/windows-api/change-directory.exe"),
@@ -875,7 +875,7 @@ fn execute_find_files() {
     assert_eq!(record[0], 0x80);
     assert_eq!(&record[32..36], &5_u32.to_le_bytes());
     assert_eq!(&record[44..53], b"beta.bin\0");
-    #[cfg(windows_demo)]
+    #[cfg(feature = "windows-demo")]
     for (options, steps, calls) in [(ProcessOptions::default(), 57, 10), (options, 151, 21)] {
         let mut process = Process32::load_with_options(
             include_bytes!("../../target/windows-api/find-files.exe"),
@@ -909,10 +909,10 @@ mod case_compare_executable;
 
 #[path = "../../core/tests/support/format_width_cases.rs"]
 mod format_width_cases;
-#[path = "../../core/tests/support/message_box_cases.rs"]
-mod message_box_cases;
 #[path = "../../core/tests/support/formatting_executable.rs"]
 mod formatting_executable;
+#[path = "../../core/tests/support/message_box_cases.rs"]
+mod message_box_cases;
 
 #[path = "../../core/tests/support/x87_register_executable.rs"]
 mod x87_register_executable;
@@ -963,7 +963,7 @@ fn execute_unsigned_division() {
         assert_eq!(process.cpu.register(Register32::Eax), 0xabcd_00ff);
         assert_eq!(process.cpu.register(Register32::Edx), 4);
     }
-    #[cfg(windows_demo)]
+    #[cfg(feature = "windows-demo")]
     {
         let mut process = Process32::load(
             include_bytes!("../../target/windows-api/unsigned-division.exe"),
@@ -987,7 +987,7 @@ fn execute_wide_product() {
         assert_eq!(process.cpu.register(register), u32::MAX);
     }
     assert_eq!(process.cpu.eflags, 2);
-    #[cfg(windows_demo)]
+    #[cfg(feature = "windows-demo")]
     {
         let mut process = Process32::load(
             include_bytes!("../../target/windows-api/signed-products.exe"),
@@ -1174,7 +1174,7 @@ fn execute_x87_status() {
         assert_eq!(cpu.register(Register32::Esi), first);
         assert_eq!(cpu.register(Register32::Eax), last);
     }
-    #[cfg(windows_demo)]
+    #[cfg(feature = "windows-demo")]
     {
         use ring3_core::execution::{Process32, ProcessStop};
         let mut process = Process32::load(
@@ -1418,7 +1418,7 @@ fn execute_millisecond_clock() {
     assert_eq!(process.cpu.register(Register32::Eax), 1234);
     assert_eq!(process.cpu.register(Register32::Ebx), 1234);
     assert_eq!(process.cpu.register(Register32::Esp), 0x1001_0000);
-    #[cfg(windows_demo)]
+    #[cfg(feature = "windows-demo")]
     {
         let mut process = Process32::load(
             include_bytes!("../../target/windows-api/millisecond-clock.exe"),
@@ -1572,7 +1572,7 @@ fn execute_x87_data() {
         image.memory.read(0x0040_2188, &mut bytes).unwrap();
         assert_eq!(u32::from_le_bytes(bytes), expected);
     }
-    #[cfg(windows_demo)]
+    #[cfg(feature = "windows-demo")]
     {
         use ring3_core::execution::{Process32, ProcessStop};
         let mut process = Process32::load(
@@ -1655,7 +1655,7 @@ mod file_size_cases;
 #[path = "../../core/tests/support/file_handle_cases.rs"]
 mod file_handle_cases;
 
-#[cfg(windows_demo)]
+#[cfg(feature = "windows-demo")]
 fn verify_compiled_file_streams() -> (u64, u64) {
     use file_stream_cases::PAYLOAD;
     use ring3_core::execution::{
@@ -1709,13 +1709,13 @@ fn execute_file_streams() {
     file_seek_cases::imported_seek_has_independent_position_and_preserves_size();
     file_read_cases::imported_reads_copy_real_bytes_and_stop_at_eof();
     on_demand_file_cases::imported_opens_resume_read_and_refill_evicted_snapshots();
-    #[cfg(windows_demo)]
+    #[cfg(feature = "windows-demo")]
     verify_compiled_file_streams();
 }
 
 fn execute_path_components() {
     path_component_cases::verify();
-    #[cfg(windows_demo)]
+    #[cfg(feature = "windows-demo")]
     {
         use ring3_core::execution::{Process32, ProcessStop, StopReason};
         let mut final_state = None;
@@ -1762,7 +1762,7 @@ fn execute_window_messages() {
     default_key_cases::special_keys_and_faults_remain_atomic();
     default_key_cases::default_key_callbacks_resume_whole_or_stepwise();
     window_message_retirement_cases::verify();
-    #[cfg(windows_demo)]
+    #[cfg(feature = "windows-demo")]
     {
         use ring3_core::execution::{Process32, ProcessStop, StopReason};
         let mut final_state = None;
@@ -1792,7 +1792,7 @@ fn execute_window_messages() {
     }
 }
 
-#[cfg(windows_demo)]
+#[cfg(feature = "windows-demo")]
 fn execute_get_message_wait() {
     use ring3_core::execution::{PostedMessage, Process32, ProcessStop, Register32};
     let mut process = Process32::load(
@@ -1837,7 +1837,7 @@ fn execute_get_message_wait() {
     assert_eq!(process.last_error().unwrap(), 77);
 }
 
-#[cfg(windows_demo)]
+#[cfg(feature = "windows-demo")]
 fn execute_translate_message() {
     use ring3_core::execution::{PostedMessage, Process32, ProcessStop};
     let mut process = Process32::load(
@@ -1860,7 +1860,7 @@ fn execute_translate_message() {
     assert_eq!(process.last_error().unwrap(), 77);
 }
 
-#[cfg(windows_demo)]
+#[cfg(feature = "windows-demo")]
 fn execute_dispatch_message() {
     use ring3_core::execution::{PostedMessage, Process32, ProcessStop};
     let mut process = Process32::load(
@@ -1887,7 +1887,7 @@ fn execute_dispatch_message() {
     assert_eq!(process.last_error().unwrap(), 77);
 }
 
-#[cfg(windows_demo)]
+#[cfg(feature = "windows-demo")]
 fn execute_dialog_cbt() {
     use ring3_core::execution::{Process32, ProcessStop};
     let mut process = Process32::load(
@@ -1907,7 +1907,7 @@ fn execute_icons() {
         bytes.as_slice(),
         ProcessStop::Stopped(StopReason::Breakpoint),
     ));
-    #[cfg(windows_demo)]
+    #[cfg(feature = "windows-demo")]
     let fixtures = fixtures.chain(std::iter::once((
         include_bytes!("../../target/windows-api/icons.exe").as_slice(),
         ProcessStop::Exited(42),
@@ -1943,7 +1943,7 @@ fn execute_icons() {
 
 fn execute_hook_chain() {
     hook_chain_cases::verify();
-    #[cfg(windows_demo)]
+    #[cfg(feature = "windows-demo")]
     {
         use ring3_core::execution::{Process32, ProcessStop, StopReason};
         let mut final_state = None;
@@ -1975,7 +1975,7 @@ fn execute_hook_chain() {
 
 fn execute_window_properties() {
     window_property_cases::ownership();
-    #[cfg(windows_demo)]
+    #[cfg(feature = "windows-demo")]
     {
         use ring3_core::execution::{Process32, ProcessStop, StopReason};
         let mut final_state = None;
@@ -2053,7 +2053,7 @@ fn execute_window_creation() {
         assert_ne!(shown[0].style & 0x1000_0000, 0);
         assert!(shown[0].active);
     }
-    #[cfg(windows_demo)]
+    #[cfg(feature = "windows-demo")]
     {
         let mut final_state = None;
         for budget in [1, 10000] {
@@ -2080,7 +2080,7 @@ fn execute_window_creation() {
             final_state = Some((process.cpu, counts));
         }
     }
-    #[cfg(windows_demo)]
+    #[cfg(feature = "windows-demo")]
     {
         let mut process =
             Process32::load(include_bytes!("../../target/windows-api/dialog.exe"), 64).unwrap();
@@ -2119,7 +2119,7 @@ fn execute_window_procedures() {
             final_cpu = Some(process.cpu);
         }
     }
-    #[cfg(windows_demo)]
+    #[cfg(feature = "windows-demo")]
     for budget in [1, 1000] {
         let mut process = Process32::load(
             include_bytes!("../../target/windows-api/window-procedures.exe"),
@@ -2154,7 +2154,7 @@ fn execute_desktop_queries() {
     assert_eq!(process.cpu.register(Register32::Eax), 0);
     assert_eq!(process.cpu.register(Register32::Ebx), 1);
     assert_eq!(process.cpu.register(Register32::Esp), 0x1001_0000);
-    #[cfg(windows_demo)]
+    #[cfg(feature = "windows-demo")]
     {
         let mut process = Process32::load(
             include_bytes!("../../target/windows-api/desktop-queries.exe"),
@@ -2180,7 +2180,7 @@ fn execute_window_classes() {
     process.memory.read(0x0040_2280, &mut record).unwrap();
     assert_eq!(record[..4], 3_u32.to_le_bytes());
     assert_eq!(record[36..], 0x0040_2180_u32.to_le_bytes());
-    #[cfg(windows_demo)]
+    #[cfg(feature = "windows-demo")]
     {
         let mut process = Process32::load(
             include_bytes!("../../target/windows-api/window-classes.exe"),
@@ -2204,7 +2204,7 @@ fn execute_windows_formatting() {
     let mut text = [0xff; 11];
     process.memory.read(0x0040_2400, &mut text).unwrap();
     assert_eq!(&text, b"-42:ABCD:%\0");
-    #[cfg(windows_demo)]
+    #[cfg(feature = "windows-demo")]
     {
         let mut process = Process32::load(
             include_bytes!("../../target/windows-api/formatting.exe"),
@@ -2218,7 +2218,7 @@ fn execute_windows_formatting() {
 }
 
 fn execute_buffer_move() {
-    #[cfg(windows_demo)]
+    #[cfg(feature = "windows-demo")]
     {
         use ring3_core::execution::{Process32, ProcessStop};
         let mut process = Process32::load(
@@ -2240,7 +2240,7 @@ fn execute_thread_priority() {
     assert_eq!((run.instructions, run.api_calls), (8, 4));
     assert_eq!(process.cpu.register(Register32::Eax), 1);
     assert_eq!(process.cpu.register(Register32::Esp), 0x1001_0000);
-    #[cfg(windows_demo)]
+    #[cfg(feature = "windows-demo")]
     {
         let mut process = Process32::load(
             include_bytes!("../../target/windows-api/thread-priority.exe"),
@@ -2265,7 +2265,7 @@ fn execute_x87_register_stores() {
     let mut output = [0; 8];
     memory.read(0x0040_21a0, &mut output).unwrap();
     assert_eq!(output, (-0_f64).to_le_bytes());
-    #[cfg(windows_demo)]
+    #[cfg(feature = "windows-demo")]
     {
         use ring3_core::execution::{Process32, ProcessStop};
         let mut process = Process32::load(
@@ -2288,7 +2288,7 @@ fn execute_procedure_lookup() {
     assert_eq!(process.cpu.register(Register32::Ebx), 0x7000_0030);
     assert_eq!(process.cpu.register(Register32::Eax), 0x0a28_0105);
     assert_eq!(process.cpu.register(Register32::Esp), 0x1001_0000);
-    #[cfg(windows_demo)]
+    #[cfg(feature = "windows-demo")]
     {
         let mut process = Process32::load(
             include_bytes!("../../target/windows-api/procedures.exe"),
@@ -2309,7 +2309,7 @@ fn execute_registry_keys() {
     assert_eq!((run.instructions, run.api_calls), (22, 3));
     assert_eq!(process.cpu.register(Register32::Eax), 1);
     assert_eq!(process.cpu.register(Register32::Esp), 0x1001_0000);
-    #[cfg(windows_demo)]
+    #[cfg(feature = "windows-demo")]
     {
         let mut process =
             Process32::load(include_bytes!("../../target/windows-api/registry.exe"), 64).unwrap();
@@ -2327,7 +2327,7 @@ fn execute_registry_values() {
     assert_eq!((run.instructions, run.api_calls), (16, 2));
     assert_eq!(process.cpu.register(Register32::Eax), 0x7856_3412);
     assert_eq!(process.cpu.register(Register32::Esp), 0x1001_0000);
-    #[cfg(windows_demo)]
+    #[cfg(feature = "windows-demo")]
     {
         let mut process = Process32::load(
             include_bytes!("../../target/windows-api/registry-values.exe"),
@@ -2350,7 +2350,7 @@ fn execute_windows_string_length() {
     assert_eq!(process.cpu.register(Register32::Ebx), 3);
     assert_eq!(process.cpu.register(Register32::Ecx), 2);
     assert_eq!(process.cpu.register(Register32::Esp), 0x1001_0000);
-    #[cfg(windows_demo)]
+    #[cfg(feature = "windows-demo")]
     {
         let mut process = Process32::load(
             include_bytes!("../../target/windows-api/string-length.exe"),
@@ -2390,7 +2390,7 @@ fn execute_file_attributes() {
         assert_eq!(process.cpu.register(Register32::Eax), value);
         assert_eq!(process.cpu.register(Register32::Ebx), 16);
         assert_eq!(process.cpu.register(Register32::Esp), 0x1001_0000);
-        #[cfg(windows_demo)]
+        #[cfg(feature = "windows-demo")]
         {
             let mut process = Process32::load_with_options(
                 include_bytes!("../../target/windows-api/file-attributes.exe"),
@@ -2418,7 +2418,7 @@ fn execute_short_path() {
     let mut bytes = [0; 4];
     process.memory.read(0x0040_21a0, &mut bytes).unwrap();
     assert_eq!(&bytes, b"c:\\\0");
-    #[cfg(windows_demo)]
+    #[cfg(feature = "windows-demo")]
     {
         use ring3_core::execution::{FileMetadata, ProcessOptions};
         let files = [FileMetadata {
@@ -2454,7 +2454,7 @@ fn execute_registry_defaults() {
     let mut bytes = [0; 6];
     process.memory.read(0x0040_2220, &mut bytes).unwrap();
     assert_eq!(&bytes, b"hello\0");
-    #[cfg(windows_demo)]
+    #[cfg(feature = "windows-demo")]
     {
         let mut process = Process32::load(
             include_bytes!("../../target/windows-api/registry-defaults.exe"),
@@ -2484,7 +2484,7 @@ fn execute_hook_registration() {
         assert_eq!(process.cpu.register(Register32::Esp), 0x1001_0000);
         assert_eq!(process.last_error().unwrap(), 1404);
     }
-    #[cfg(windows_demo)]
+    #[cfg(feature = "windows-demo")]
     {
         let mut process =
             Process32::load(include_bytes!("../../target/windows-api/hooks.exe"), 64).unwrap();
@@ -2507,7 +2507,7 @@ fn execute_startup_information() {
     let mut expected = [0; 68];
     expected[0] = 68;
     assert_eq!(bytes, expected);
-    #[cfg(windows_demo)]
+    #[cfg(feature = "windows-demo")]
     {
         let mut process = Process32::load(
             include_bytes!("../../target/windows-api/startup-info.exe"),
@@ -2536,7 +2536,7 @@ fn execute_environment_query() {
     let mut bytes = [0; 6];
     process.memory.read(0x0040_2280, &mut bytes).unwrap();
     assert_eq!(&bytes, b"hello\0");
-    #[cfg(windows_demo)]
+    #[cfg(feature = "windows-demo")]
     for (options, steps, calls) in [(ProcessOptions::default(), 36, 6), (options, 115, 13)] {
         let mut process = Process32::load_with_options(
             include_bytes!("../../target/windows-api/environment.exe"),
@@ -2607,7 +2607,7 @@ fn execute_current_directory() {
     let mut output = [0; 8];
     process.memory.read(0x0040_2280, &mut output).unwrap();
     assert_eq!(&output, b"Q:\\Data\0");
-    #[cfg(windows_demo)]
+    #[cfg(feature = "windows-demo")]
     {
         let mut process = Process32::load(
             include_bytes!("../../target/windows-api/current-directory.exe"),
@@ -2640,7 +2640,7 @@ fn execute_performance_clock() {
     {
         assert_eq!(bytes, value.to_le_bytes());
     }
-    #[cfg(windows_demo)]
+    #[cfg(feature = "windows-demo")]
     {
         let mut process = Process32::load(
             include_bytes!("../../target/windows-api/performance-clock.exe"),
@@ -2674,7 +2674,7 @@ fn execute_mutex_lifecycle() {
     assert_eq!(process.cpu.register(Register32::Ebp), 1);
     assert_eq!(process.cpu.register(Register32::Esp), 0x1001_0000);
     assert_eq!(process.last_error().unwrap(), 288);
-    #[cfg(windows_demo)]
+    #[cfg(feature = "windows-demo")]
     {
         let mut process =
             Process32::load(include_bytes!("../../target/windows-api/mutex.exe"), 64).unwrap();
@@ -2740,7 +2740,7 @@ fn execute_computer_name() {
     ] {
         assert_eq!(process.cpu.register(register), expected);
     }
-    #[cfg(windows_demo)]
+    #[cfg(feature = "windows-demo")]
     {
         let mut process = Process32::load(
             include_bytes!("../../target/windows-api/computer-name.exe"),
@@ -2765,7 +2765,7 @@ fn execute_system_directory() {
     let mut bytes = [0; 20];
     process.memory.read(0x0040_2180, &mut bytes).unwrap();
     assert_eq!(&bytes, b"C:\\Windows\\System32\0");
-    #[cfg(windows_demo)]
+    #[cfg(feature = "windows-demo")]
     {
         let mut process = Process32::load(
             include_bytes!("../../target/windows-api/system-directory.exe"),
@@ -2788,7 +2788,7 @@ fn execute_cursor_position() {
     assert_eq!(process.cpu.register(Register32::Ecx), 210);
     assert_eq!(process.cpu.register(Register32::Edx), 120);
     assert_eq!(process.cpu.register(Register32::Esp), 0x1001_0000);
-    #[cfg(windows_demo)]
+    #[cfg(feature = "windows-demo")]
     {
         let mut process = Process32::load(
             include_bytes!("../../target/windows-api/cursor-position.exe"),
@@ -2818,7 +2818,7 @@ fn execute_cursors() {
         process.cpu.register(Register32::Edi)
     );
     assert_eq!(process.cpu.register(Register32::Esp), 0x1001_0000);
-    #[cfg(windows_demo)]
+    #[cfg(feature = "windows-demo")]
     {
         let mut process =
             Process32::load(include_bytes!("../../target/windows-api/cursors.exe"), 64).unwrap();
@@ -2843,7 +2843,7 @@ fn execute_brushes() {
     assert_eq!(process.cpu.register(Register32::Esi), 12);
     assert_eq!(process.cpu.register(Register32::Edi), 1);
     assert_eq!(process.cpu.register(Register32::Esp), 0x1001_0000);
-    #[cfg(windows_demo)]
+    #[cfg(feature = "windows-demo")]
     {
         let mut process =
             Process32::load(include_bytes!("../../target/windows-api/brushes.exe"), 64).unwrap();
@@ -2864,7 +2864,7 @@ fn execute_gdi() {
     assert_eq!(process.cpu.register(Register32::Esi), 640);
     assert_eq!(process.cpu.register(Register32::Edi), 480);
     assert_eq!(process.cpu.register(Register32::Esp), 0x1001_0000);
-    #[cfg(windows_demo)]
+    #[cfg(feature = "windows-demo")]
     {
         let mut process =
             Process32::load(include_bytes!("../../target/windows-api/gdi.exe"), 64).unwrap();
@@ -2888,7 +2888,7 @@ fn execute_colors() {
     assert_eq!(process.cpu.register(Register32::Ecx), 0x00a5_6e3a);
     assert_eq!(process.cpu.register(Register32::Edx), 0x00ff_ffff);
     assert_eq!(process.cpu.register(Register32::Esp), 0x1001_0000);
-    #[cfg(windows_demo)]
+    #[cfg(feature = "windows-demo")]
     {
         let mut process =
             Process32::load(include_bytes!("../../target/windows-api/colors.exe"), 64).unwrap();
@@ -2914,7 +2914,7 @@ fn execute_metrics() {
         assert_eq!(process.cpu.register(Register32::Edx), values[3]);
         assert_eq!(process.cpu.register(Register32::Esp), 0x1001_0000);
     }
-    #[cfg(windows_demo)]
+    #[cfg(feature = "windows-demo")]
     {
         let mut process =
             Process32::load(include_bytes!("../../target/windows-api/metrics.exe"), 64).unwrap();
@@ -2932,7 +2932,7 @@ fn execute_process_version() {
     assert_eq!((result.instructions, result.api_calls), (3, 1));
     assert_eq!(process.cpu.register(Register32::Eax), 0x0009_0002);
     assert_eq!(process.cpu.register(Register32::Esp), 0x1001_0000);
-    #[cfg(windows_demo)]
+    #[cfg(feature = "windows-demo")]
     {
         let mut process = Process32::load(
             include_bytes!("../../target/windows-api/process-version.exe"),
@@ -3004,7 +3004,7 @@ fn execute_clipboard_formats() {
     assert_eq!(process.cpu.register(Register32::Ebx), 0xc000);
     assert_eq!(process.cpu.register(Register32::Ecx), 0xc000);
     assert_eq!(process.cpu.register(Register32::Esp), 0x1001_0000);
-    #[cfg(windows_demo)]
+    #[cfg(feature = "windows-demo")]
     {
         let mut process = Process32::load(
             include_bytes!("../../target/windows-api/clipboard-formats.exe"),
@@ -3027,7 +3027,7 @@ fn execute_messages() {
     assert_eq!(process.cpu.register(Register32::Ebx), 0xc000);
     assert_eq!(process.cpu.register(Register32::Ecx), 0xc000);
     assert_eq!(process.cpu.register(Register32::Esp), 0x1001_0000);
-    #[cfg(windows_demo)]
+    #[cfg(feature = "windows-demo")]
     {
         let mut process =
             Process32::load(include_bytes!("../../target/windows-api/messages.exe"), 64).unwrap();
@@ -3053,7 +3053,7 @@ fn execute_cpinfo() {
     expected[0] = 1;
     expected[4] = b'?';
     assert_eq!(bytes, expected);
-    #[cfg(windows_demo)]
+    #[cfg(feature = "windows-demo")]
     {
         let mut process =
             Process32::load(include_bytes!("../../target/windows-api/cpinfo.exe"), 64).unwrap();
@@ -3072,7 +3072,7 @@ fn execute_code_pages() {
     assert_eq!(process.cpu.register(Register32::Eax), 437);
     assert_eq!(process.cpu.register(Register32::Ebx), 1252);
     assert_eq!(process.cpu.register(Register32::Esp), 0x1001_0000);
-    #[cfg(windows_demo)]
+    #[cfg(feature = "windows-demo")]
     {
         let mut process = Process32::load(
             include_bytes!("../../target/windows-api/code-pages.exe"),
@@ -3083,7 +3083,7 @@ fn execute_code_pages() {
         assert_eq!(result.reason, ProcessStop::Exited(42));
         assert_eq!(result.api_calls, 5);
     }
-    #[cfg(windows_demo)]
+    #[cfg(feature = "windows-demo")]
     {
         let mut process = Process32::load(
             include_bytes!("../../target/windows-api/wide-character.exe"),
@@ -3274,7 +3274,7 @@ fn execute_global_memory() {
     assert_eq!(process.cpu.register(Register32::Eax), 0);
     assert_eq!(process.last_error().unwrap(), 0);
     assert_eq!(process.memory.mapped_pages(), pages);
-    #[cfg(windows_demo)]
+    #[cfg(feature = "windows-demo")]
     {
         let mut process = Process32::load(
             include_bytes!("../../target/windows-api/global-memory.exe"),
@@ -3478,7 +3478,7 @@ fn execute_tls() {
     assert_eq!(process.cpu.register(Register32::Esi), 0x1234_5678);
     assert_eq!(process.cpu.register(Register32::Eax), 0);
     assert_eq!(process.last_error().unwrap(), 0);
-    #[cfg(windows_demo)]
+    #[cfg(feature = "windows-demo")]
     {
         let mut process =
             Process32::load(include_bytes!("../../target/windows-api/tls.exe"), 64).unwrap();
@@ -3499,7 +3499,7 @@ fn execute_critical_sections() {
     let mut bytes = [1; 24];
     process.memory.read(0x0040_2180, &mut bytes).unwrap();
     assert_eq!(bytes, [0; 24]);
-    #[cfg(windows_demo)]
+    #[cfg(feature = "windows-demo")]
     {
         let mut process = Process32::load(
             include_bytes!("../../target/windows-api/critical-sections.exe"),
@@ -3525,7 +3525,7 @@ fn execute_version() {
     assert_eq!(result.api_calls, 1);
     assert_eq!(process.cpu.register(Register32::Eax), 0x0a28_0105);
     assert_eq!(process.cpu.register(Register32::Esp), 0x1001_0000);
-    #[cfg(windows_demo)]
+    #[cfg(feature = "windows-demo")]
     {
         let mut process =
             Process32::load(include_bytes!("../../target/windows-api/version.exe"), 64).unwrap();
@@ -3550,7 +3550,7 @@ fn execute_heap() {
             address: 0x2000_0000
         })
     );
-    #[cfg(windows_demo)]
+    #[cfg(feature = "windows-demo")]
     {
         let mut process =
             Process32::load(include_bytes!("../../target/windows-api/heap.exe"), 64).unwrap();
@@ -3601,7 +3601,7 @@ fn execute_resident_modules() {
         assert_eq!(process.last_error().unwrap(), 126);
         assert_eq!(process.cpu.register(Register32::Esp), 0x1001_0000);
     }
-    #[cfg(windows_demo)]
+    #[cfg(feature = "windows-demo")]
     {
         let mut process =
             Process32::load(include_bytes!("../../target/windows-api/modules.exe"), 64).unwrap();
@@ -3882,7 +3882,7 @@ fn execute_dlls() {
             assert_eq!(process.run(100).instructions, 0);
         }
     }
-    #[cfg(guest_dll_demo)]
+    #[cfg(feature = "guest-dll-demo")]
     {
         for library in [
             include_bytes!("../../target/guest-dll/demo.dll").as_slice(),
@@ -4211,11 +4211,11 @@ fn execute_graphics() {
                 .all(|pixel| pixel == [r, g, b, 255])
         );
     }
-    #[cfg(windows_demo)]
+    #[cfg(feature = "windows-demo")]
     execute_compiled_graphics();
 }
 
-#[cfg(windows_demo)]
+#[cfg(feature = "windows-demo")]
 fn execute_compiled_graphics() {
     use ring3_core::execution::{Process32, ProcessStop};
 
@@ -4235,7 +4235,7 @@ fn execute_compiled_graphics() {
     assert_eq!(pixel(0, 0), &[0x10, 0x20, 0x30, 255]);
 }
 
-#[cfg(windows_demo)]
+#[cfg(feature = "windows-demo")]
 fn execute_compiled_rtti() {
     use ring3_core::execution::{Process32, ProcessStop};
 
@@ -4813,7 +4813,7 @@ fn execute_string_traversal() {
         process.memory.read(0x0040_2190, &mut output).unwrap();
         assert_eq!(output, expected_output);
     }
-    #[cfg(windows_demo)]
+    #[cfg(feature = "windows-demo")]
     {
         let mut process = Process32::load(
             include_bytes!("../../target/windows-api/string-copy.exe"),
@@ -4866,11 +4866,12 @@ fn execute_strdup() {
 }
 
 // this isolated test cdylib owns its unique zero-argument export.
+#[allow(unsafe_code)]
 #[unsafe(no_mangle)]
 pub extern "C" fn run() -> u32 {
     execute_accumulator_sign_extension();
     execute_graphics();
-    #[cfg(windows_demo)]
+    #[cfg(feature = "windows-demo")]
     execute_compiled_rtti();
     execute_thread();
     execute_crt();
@@ -5013,13 +5014,13 @@ pub extern "C" fn run() -> u32 {
     execute_hook_chain();
     execute_icons();
     execute_window_messages();
-    #[cfg(windows_demo)]
+    #[cfg(feature = "windows-demo")]
     execute_get_message_wait();
-    #[cfg(windows_demo)]
+    #[cfg(feature = "windows-demo")]
     execute_translate_message();
-    #[cfg(windows_demo)]
+    #[cfg(feature = "windows-demo")]
     execute_dispatch_message();
-    #[cfg(windows_demo)]
+    #[cfg(feature = "windows-demo")]
     execute_dialog_cbt();
     execute_path_components();
     execute_file_streams();

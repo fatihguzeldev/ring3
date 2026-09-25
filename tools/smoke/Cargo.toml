@@ -1,0 +1,26 @@
+[package]
+name = "ring3-smoke"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[features]
+smoke = []
+guest-dll-demo = ["smoke"]
+windows-demo = ["smoke"]
+
+[[example]]
+name = "core-smoke"
+path = "../core/wasm-smoke.rs"
+crate-type = ["cdylib"]
+required-features = ["smoke"]
+test = false
+
+[dependencies]
+ring3-core = { path = "../../core" }
+
+[lints.rust]
+warnings = "deny"
+unsafe_code = "deny"

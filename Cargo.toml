@@ -1,5 +1,5 @@
 [workspace]
-members = ["core", "runtime/wasm"]
+members = ["core", "runtime/wasm", "tools/smoke"]
 resolver = "3"
 
 [workspace.package]
