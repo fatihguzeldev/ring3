@@ -40,6 +40,8 @@ mod dinput_mouse_property_cases;
 mod dinput_property_cases;
 #[path = "../../core/tests/support/dinput_root_cases.rs"]
 mod dinput_root_cases;
+#[path = "../../core/tests/support/dinput_state_cases.rs"]
+mod dinput_state_cases;
 #[path = "../../core/tests/support/event_wait_control.rs"]
 mod event_wait_control;
 #[path = "../../core/tests/support/resumed_thread_cases.rs"]
@@ -4805,6 +4807,7 @@ pub extern "C" fn run() -> u32 {
     dinput_property_cases::imported_keyboard_buffer_setting_across_budgets();
     dinput_cooperative_cases::imported_foreground_keyboard_setting_across_budgets();
     dinput_acquire_cases::imported_keyboard_acquisition_across_budgets();
+    dinput_state_cases::keyboard_snapshots_across_budgets();
     thread_start_cases::ordered_notifications_precede_each_child_entry();
     thread_start_cases::retryable_notification_frames();
     cxx_exception_cases::outer_transition_faults_preserve_cleanup_and_catch_progress();

@@ -6,6 +6,14 @@ const KEY: [u8; 16] = [
 ];
 const ACQUIRED: u32 = 0x8007_00aa;
 
+pub(super) struct State(pub(super) [u8; 256]);
+
+impl Default for State {
+    fn default() -> Self {
+        Self([0; 256])
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Format {
     StandardKeyboard,
@@ -73,6 +81,28 @@ impl Device {
         let previous = self.is_acquired(desktop);
         self.acquired_epoch = None;
         u32::from(!previous)
+    }
+
+    pub(super) fn get_state(
+        &self,
+        size: u32,
+        address: u32,
+        state: &State,
+        memory: &mut GuestMemory,
+        desktop: &Desktop,
+    ) -> Result<u32, DispatchError> {
+        if size != 256 || address == 0 {
+            return Ok(INVALID_ARGUMENT);
+        }
+        if self.acquired_epoch.is_none() {
+            return Ok(0x8007_000c);
+        }
+        if !self.is_acquired(desktop) {
+            return Ok(0x8007_001e);
+        }
+        guest::check(memory, address, 256, Access::Write)?;
+        memory.write(u64::from(address), &state.0)?;
+        Ok(0)
     }
 
     pub(super) fn set_property(

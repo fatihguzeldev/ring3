@@ -54,6 +54,11 @@ pub use directory::{
 pub use messages::{PostMessageError, PostedMessage};
 pub use parameters::ProcessOptions;
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum KeyboardInputError {
+    Exited,
+}
+
 const API_BASE: u32 = 0x7000_0000;
 const STACK_BASE: u32 = 0x1000_0000;
 const STACK_SIZE: u32 = 64 * 1024;
@@ -741,6 +746,23 @@ impl Process32 {
     #[must_use]
     pub fn window_snapshots(&self) -> Vec<WindowSnapshot> {
         self.desktop.snapshots()
+    }
+
+    /// replaces the process's immediate keyboard snapshot, initially all released.
+    /// indexes are directinput DIK scan codes, not virtual keys or text characters.
+    /// reads do not consume it; acquisition and device lifetimes do not clear it.
+    /// the host owns key mapping and must clear released keys on host focus loss;
+    /// this does not change guest window activation or synthesize messages.
+    ///
+    /// # errors
+    /// rejects an exited process without changing the snapshot.
+    #[expect(clippy::missing_errors_doc, reason = "project headings are lower case")]
+    pub fn set_keyboard_state(&mut self, keys: [bool; 256]) -> Result<(), KeyboardInputError> {
+        if self.exit_code.is_some() {
+            return Err(KeyboardInputError::Exited);
+        }
+        self.input.set_keyboard_state(keys);
+        Ok(())
     }
 
     /// adds one host-provided message to this process's bounded thread queue.

@@ -90,6 +90,7 @@ pub(super) enum Call {
     SetProperty,
     Acquire,
     Unacquire,
+    KeyboardState,
     QueryInterface(Class),
     AddRef(Class),
     Release(Class),
@@ -121,6 +122,7 @@ impl Call {
             0x5a8 => Some(Self::GetMouseProperty),
             0x5ac => Some(Self::AcquireMouse),
             0x5b0 => Some(Self::UnacquireMouse),
+            0x5c8 => Some(Self::KeyboardState),
             _ => None,
         }
     }
@@ -137,6 +139,7 @@ impl Call {
             | Self::SetMouseCooperativeLevel
             | Self::SetMouseProperty
             | Self::GetMouseProperty
+            | Self::KeyboardState
             | Self::SetProperty => 3,
             Self::SetDataFormat | Self::SetMouseDataFormat | Self::MouseCapabilities => 2,
             Self::AddRef(_)
@@ -154,9 +157,14 @@ pub(super) struct Input {
     roots: Vec<u32>,
     devices: Vec<keyboard::Device>,
     mice: Vec<mouse::Device>,
+    keyboard_state: keyboard::State,
 }
 
 impl Input {
+    pub(super) fn set_keyboard_state(&mut self, keys: [bool; 256]) {
+        self.keyboard_state.0 = keys.map(|pressed| u8::from(pressed) << 7);
+    }
+
     fn references(&mut self, class: Class, index: usize) -> &mut u32 {
         match class {
             Class::Root => &mut self.roots[index],
@@ -206,6 +214,7 @@ impl Input {
                     6 => 0x580,
                     7 => 0x584,
                     8 => 0x588,
+                    9 => 0x5c8,
                     11 => 0x578,
                     13 => 0x57c,
                     _ => 0xffc,
@@ -399,6 +408,16 @@ impl Input {
             Call::Unacquire => {
                 let index = self.object(Class::Keyboard, args[0])?;
                 Ok(self.devices[index].unacquire(desktop))
+            }
+            Call::KeyboardState => {
+                let index = self.object(Class::Keyboard, args[0])?;
+                self.devices[index].get_state(
+                    args[1],
+                    args[2],
+                    &self.keyboard_state,
+                    memory,
+                    desktop,
+                )
             }
             Call::QueryInterface(class) => self.query(class, args, memory),
             Call::AddRef(class) | Call::Release(class) => {
