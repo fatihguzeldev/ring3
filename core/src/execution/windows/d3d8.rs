@@ -1056,7 +1056,7 @@ impl Graphics {
             return INVALID_CALL;
         }
         match call {
-            Call::SetVertexShader if matches!(args[1], 0x44 | 0x142) => {
+            Call::SetVertexShader if matches!(args[1], 0x44 | 0x142 | 0x152) => {
                 self.vertex_fvf = args[1];
                 0
             }

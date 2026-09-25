@@ -304,6 +304,8 @@ mod imported_executable;
 
 #[path = "../../core/tests/support/d3d8_executable.rs"]
 mod d3d8_executable;
+#[path = "../../core/tests/support/normal_vertex_cases.rs"]
+mod normal_vertex_cases;
 #[path = "../../core/tests/support/readonly_texture_cases.rs"]
 mod readonly_texture_cases;
 
@@ -4128,6 +4130,9 @@ fn execute_diagnostic() {
 fn execute_graphics() {
     use ring3_core::execution::{Process32, ProcessStop, StopReason};
     readonly_texture_cases::read_source_mip_while_writing_another();
+    normal_vertex_cases::equivalent_diffuse_and_textured_pixels();
+    normal_vertex_cases::rejects_short_records_and_nonfinite_inputs_atomically();
+    normal_vertex_cases::rejected_selection_preserves_the_normal_layout();
 
     for (width, height, color) in [(4, 3, 0xff12_3456_u32), (9, 7, 0xffed_cba9)] {
         let mut process =

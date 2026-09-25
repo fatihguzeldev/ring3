@@ -92,13 +92,17 @@ pub(super) fn draw_indexed(
     let Some((vertex_address, stride)) = graphics.stream else {
         return Ok(INVALID_CALL);
     };
+    let (vertex_size, color_offset) = match graphics.vertex_fvf {
+        0x142 => (24_u32, 12_usize),
+        0x152 => (36, 24),
+        _ => return Ok(INVALID_CALL),
+    };
     if device != super::DEVICE
         || graphics.device_refs == 0
         || graphics.back.is_none()
-        || graphics.vertex_fvf != 0x142
         || topology != 4
         || primitive_count > MAX_PRIMITIVES
-        || stride < 24
+        || stride < vertex_size
         || graphics.texture_stages[1..]
             .iter()
             .any(|texture| *texture != 0)
@@ -178,7 +182,7 @@ pub(super) fn draw_indexed(
             };
             let Some(end) = vertex
                 .checked_mul(stride)
-                .and_then(|start| start.checked_add(24))
+                .and_then(|start| start.checked_add(vertex_size))
             else {
                 return Ok(INVALID_CALL);
             };
@@ -198,16 +202,22 @@ pub(super) fn draw_indexed(
         if unique.contains_key(key) {
             continue;
         }
-        let mut bytes = [0; 24];
+        let mut bytes = [0; 36];
         memory.read(
             vertex_base + u64::from(*key) * u64::from(stride),
-            &mut bytes,
+            &mut bytes[..vertex_size as usize],
         )?;
         let xyz = std::array::from_fn::<_, 3, _>(|i| {
             f32::from_le_bytes(bytes[i * 4..i * 4 + 4].try_into().expect("position"))
         });
+        // normals occupy layout space but are unused by the diffuse-only raster path.
+        let uv_offset = color_offset + 4;
         let uv = std::array::from_fn::<_, 2, _>(|i| {
-            f32::from_le_bytes(bytes[16 + i * 4..20 + i * 4].try_into().expect("texcoord"))
+            f32::from_le_bytes(
+                bytes[uv_offset + i * 4..uv_offset + i * 4 + 4]
+                    .try_into()
+                    .expect("texcoord"),
+            )
         });
         if xyz.iter().chain(uv.iter()).any(|value| !value.is_finite()) {
             return Ok(INVALID_CALL);
@@ -224,9 +234,9 @@ pub(super) fn draw_indexed(
             ClipVertex {
                 position,
                 color: [
-                    f64::from(bytes[14]),
-                    f64::from(bytes[13]),
-                    f64::from(bytes[12]),
+                    f64::from(bytes[color_offset + 2]),
+                    f64::from(bytes[color_offset + 1]),
+                    f64::from(bytes[color_offset]),
                 ],
                 uv: uv.map(f64::from),
             },
