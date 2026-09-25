@@ -36,7 +36,8 @@
     "corpus:build:chain": "node tools/corpus/build-dependency-chain.mjs",
     "corpus:build:load-config": "node tools/corpus/build-load-config.mjs",
     "corpus:build:cycle": "node tools/corpus/build-dependency-chain.mjs --cycle",
-    "browser:build": "cargo build -p ring3-browser --locked --release --target wasm32-unknown-unknown && pnpm build:typescript"
+    "browser:build": "cargo build -p ring3-browser --locked --release --target wasm32-unknown-unknown && pnpm build:typescript",
+    "browser": "node tools/browser/serve.mjs"
   },
   "devDependencies": {
     "typescript": "5.9.3"

@@ -43,3 +43,9 @@ jobs:
         run: node --test tools/corpus/shared.test.mjs tools/corpus/verify.test.mjs tools/core/run-wasm.test.mjs
       - name: Wasm release build and smoke
         run: node tools/core/verify-wasm.mjs
+      - name: Browser host build and tests
+        run: |
+          corepack enable
+          pnpm install --frozen-lockfile
+          pnpm browser:build
+          node --test tools/browser/serve.test.mjs tools/browser/bridge.test.mjs

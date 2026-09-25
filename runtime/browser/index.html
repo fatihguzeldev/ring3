@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="tr" data-token="RING3_SESSION_TOKEN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Ring3 · Local player</title>
+  <link rel="stylesheet" href="/style.css">
+  <script type="module" src="/assets/app.js"></script>
+</head>
+<body>
+  <header><a class="wordmark" href="/">ring3<span>local player</span></a><span class="tag">experimental</span></header>
+  <main>
+    <div class="heading"><div><p class="eyebrow">YOUR FILES. YOUR BROWSER.</p><h1>Oyunu burada çalıştır.</h1></div><p class="intro">Oyun core’u tarayıcıda çalışır. Dosyalar bu bilgisayardaki yerel sunucudan okunur.</p></div>
+    <section class="player" aria-label="Oyun görüntüsü">
+      <div class="screen"><canvas id="screen" width="640" height="480" aria-label="Oyunun ürettiği görüntü"></canvas><p id="empty">Başlatmaya hazır.<span>İlk görüntü üretildiğinde burada görünecek.</span></p></div>
+      <div class="toolbar"><div class="buttons"><button id="start" class="primary">Başlat</button><button id="pause" disabled>Duraklat</button><button id="resume" disabled>Devam et</button><button id="stop" disabled>Durdur</button></div><span id="engine">Wasm · Worker</span></div>
+    </section>
+    <section class="status" aria-labelledby="state"><div><h2 id="state" role="status" aria-live="polite">Hazır</h2><p id="detail">Bu erken sürüm, desteklenmeyen bir işlemde durabilir. Oynanabilirlik henüz tamamlanmadı.</p></div><dl><div><dt>İşlem</dt><dd id="steps">—</dd></div><div><dt>Görüntü</dt><dd id="frames">0</dd></div><div><dt>Geçen süre</dt><dd id="elapsed">—</dd></div></dl></section>
+    <section id="windows" class="windows" aria-label="Oyun pencereleri" hidden></section>
+    <p id="error" role="alert" hidden></p>
+    <details><summary>Çalışma ayrıntıları</summary><pre id="diagnostics">Henüz bir süreç başlatılmadı.</pre></details>
+  </main>
+  <footer>Görüntü kaydı oynatılmaz. Ekrandaki her kare çalışan core tarafından üretilir.</footer>
+</body>
+</html>
