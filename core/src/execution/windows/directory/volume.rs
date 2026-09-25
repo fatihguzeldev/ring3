@@ -1,6 +1,6 @@
 use super::{Access, Directory, DispatchError, GuestMemory, guest, paths, thread};
 
-const SECTOR_BYTES: u32 = 512;
+pub(super) const SECTOR_BYTES: u32 = 512;
 const SECTORS_PER_CLUSTER: u32 = 8;
 const CLUSTER_BYTES: u64 = (SECTOR_BYTES * SECTORS_PER_CLUSTER) as u64;
 

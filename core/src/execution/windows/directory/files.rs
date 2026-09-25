@@ -8,8 +8,14 @@ const MAX_LIVE: usize = 4096;
 
 pub(super) struct Opened {
     // stable file index and opening flags; no guest pointers are retained.
-    live: BTreeMap<u32, (usize, u32)>,
+    live: BTreeMap<u32, OpenFile>,
     next: u32,
+}
+
+struct OpenFile {
+    index: usize,
+    flags: u32,
+    position: u32,
 }
 
 impl Default for Opened {
@@ -74,7 +80,14 @@ impl Directory {
             return failed(teb, memory, 8);
         }
         let handle = self.opened.next;
-        self.opened.live.insert(handle, (index, args[5]));
+        self.opened.live.insert(
+            handle,
+            OpenFile {
+                index,
+                flags: args[5],
+                position: 0,
+            },
+        );
         self.opened.next += 4;
         self.retain_reader(index);
         Ok(handle)
@@ -87,22 +100,60 @@ impl Directory {
         teb: thread::Teb,
         memory: &mut GuestMemory,
     ) -> Result<u32, DispatchError> {
-        let Some(&(index, _flags)) = self.opened.live.get(&handle) else {
+        let Some(file) = self.opened.live.get(&handle) else {
             return failed(teb, memory, 6);
         };
-        let size =
-            u32::try_from(self.contents(index).len()).map_err(|_| DispatchError::Unsupported)?;
+        let size = u32::try_from(self.contents(file.index).len())
+            .map_err(|_| DispatchError::Unsupported)?;
         if high != 0 {
             super::guest::write_word(memory, high, 0)?;
         }
         Ok(size)
     }
 
+    pub(super) fn seek_file(
+        &mut self,
+        args: &[u32],
+        teb: thread::Teb,
+        memory: &mut GuestMemory,
+    ) -> Result<u32, DispatchError> {
+        if args[2] != 0 || args[3] > 2 {
+            return Err(DispatchError::Unsupported);
+        }
+        let Some(file) = self.opened.live.get(&args[0]) else {
+            return failed(teb, memory, 6);
+        };
+        let base = match args[3] {
+            0 => 0,
+            1 => i64::from(file.position),
+            _ => i64::try_from(self.contents(file.index).len()).expect("bounded file contents"),
+        };
+        let target = base + i64::from(args[1].cast_signed());
+        if target < 0 {
+            return failed(teb, memory, 131);
+        }
+        let Ok(position) = u32::try_from(target) else {
+            return failed(teb, memory, 87);
+        };
+        if file.flags & 0x2000_0000 != 0 && !position.is_multiple_of(super::volume::SECTOR_BYTES) {
+            return failed(teb, memory, 87);
+        }
+        if position == u32::MAX {
+            teb.set_last_error(memory, 0)?;
+        }
+        self.opened
+            .live
+            .get_mut(&args[0])
+            .expect("validated file handle")
+            .position = position;
+        Ok(position)
+    }
+
     pub(super) fn close_file(&mut self, handle: u32) -> bool {
-        let Some((index, _flags)) = self.opened.live.remove(&handle) else {
+        let Some(file) = self.opened.live.remove(&handle) else {
             return false;
         };
-        self.release_reader(index);
+        self.release_reader(file.index);
         true
     }
 }
@@ -152,7 +203,8 @@ mod tests {
                 directory.open_file(&args, teb, &mut memory),
                 Ok(LAST)
             ));
-            assert_eq!(directory.opened.live.get(&LAST), Some(&(0, flags)));
+            let file = &directory.opened.live[&LAST];
+            assert_eq!((file.index, file.flags, file.position), (0, flags, 0));
             assert_eq!(directory.files[0].readers, 1);
             memory
                 .protect(u64::from(thread::BASE), 4096, Permissions::NONE)
@@ -204,7 +256,8 @@ mod tests {
         ));
         memory.unmap(0x1000, 4096).unwrap();
         assert_eq!(directory.contents(0), b"next");
-        assert_eq!(directory.opened.live.get(&FIRST), Some(&(0, 0x2000_0080)));
+        let file = &directory.opened.live[&FIRST];
+        assert_eq!((file.index, file.flags, file.position), (0, 0x2000_0080, 0));
         assert_eq!(directory.files[0].readers, 1);
         assert!(directory.close_file(FIRST));
         assert_eq!(directory.files[0].readers, 0);

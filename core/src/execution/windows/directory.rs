@@ -48,6 +48,7 @@ pub(super) enum Call {
     OpenFile,
     FileSize,
     DiskGeometry,
+    SeekFile,
 }
 
 impl Call {
@@ -55,6 +56,7 @@ impl Call {
         match self {
             Self::OpenFile => 7,
             Self::DiskGeometry => 5,
+            Self::SeekFile => 4,
             Self::ShortPath => 3,
             Self::Query | Self::FindFirst | Self::FindNext | Self::FileSize => 2,
             Self::Change | Self::FindClose | Self::Attributes => 1,
@@ -65,12 +67,17 @@ impl Call {
 impl Process32 {
     pub(super) fn directory(&mut self, call: Call, arguments: &[u32]) -> Result<(), DispatchError> {
         let teb = thread::Teb(self.cpu.fs_base());
-        if matches!(call, Call::OpenFile | Call::FileSize | Call::DiskGeometry)
-            && self.threads.id(teb).is_none()
+        if matches!(
+            call,
+            Call::OpenFile | Call::FileSize | Call::DiskGeometry | Call::SeekFile
+        ) && self.threads.id(teb).is_none()
         {
             return Err(DispatchError::Unsupported);
         }
         let result = match call {
+            Call::SeekFile => self
+                .current_directory
+                .seek_file(arguments, teb, &mut self.memory)?,
             Call::DiskGeometry => {
                 self.current_directory
                     .disk_geometry(arguments, teb, &mut self.memory)?

@@ -1546,6 +1546,9 @@ mod path_component_cases;
 #[path = "../../core/tests/support/file_stream_cases.rs"]
 mod file_stream_cases;
 
+#[path = "../../core/tests/support/file_seek_cases.rs"]
+mod file_seek_cases;
+
 #[path = "../../core/tests/support/disk_geometry_cases.rs"]
 mod disk_geometry_cases;
 
@@ -1606,6 +1609,7 @@ fn execute_file_streams() {
     file_handle_cases::imported_open_close_preserves_state_and_releases_identity();
     file_size_cases::imported_size_preserves_lifetime_and_abi();
     disk_geometry_cases::imported_geometry_is_deterministic_and_drive_local();
+    file_seek_cases::imported_seek_has_independent_position_and_preserves_size();
     #[cfg(windows_demo)]
     verify_compiled_file_streams();
 }

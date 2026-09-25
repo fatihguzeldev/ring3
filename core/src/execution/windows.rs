@@ -258,6 +258,7 @@ impl Api {
             0x5b4 => Some(Self::Directory(directory::Call::OpenFile)),
             0x5b8 => Some(Self::Directory(directory::Call::FileSize)),
             0x5bc => Some(Self::Directory(directory::Call::DiskGeometry)),
+            0x5c0 => Some(Self::Directory(directory::Call::SeekFile)),
             0x240 => Some(Self::GetEnvironmentVariable),
             0x248 => Some(Self::GetStartupInfo),
             0x25c => Some(Self::WindowsFormat),
@@ -457,6 +458,7 @@ impl Api {
             "CreateFileA" => 0x5b4,
             "GetFileSize" => 0x5b8,
             "GetDiskFreeSpaceA" => 0x5bc,
+            "SetFilePointer" => 0x5c0,
             "QueryPerformanceFrequency" => 0x220,
             "QueryPerformanceCounter" => 0x224,
             "GetCurrentDirectoryA" => 0x228,
@@ -889,6 +891,7 @@ impl Process32 {
                     directory::Call::OpenFile
                         | directory::Call::FileSize
                         | directory::Call::DiskGeometry
+                        | directory::Call::SeekFile
                 )
                 | Api::Input(_)
                 | Api::Hook(_)
