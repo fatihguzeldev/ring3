@@ -22,6 +22,8 @@
     "corpus:verify": "node tools/corpus/verify.mjs",
     "format:rust": "cargo fmt --all -- --check",
     "lint:rust": "cargo clippy --workspace --all-targets --locked -- -D warnings",
+    "lint:rust:quick": "cargo clippy --workspace --lib --locked -- -D warnings",
+    "test:core": "cargo test -p ring3-core --locked",
     "test:rust": "cargo test --workspace --locked",
     "preinstall": "node tools/verify-toolchain.mjs",
     "toolchain:check": "node tools/verify-toolchain.mjs",
