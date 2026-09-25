@@ -80,6 +80,24 @@ impl Directory {
         Ok(handle)
     }
 
+    pub(super) fn file_size(
+        &self,
+        handle: u32,
+        high: u32,
+        teb: thread::Teb,
+        memory: &mut GuestMemory,
+    ) -> Result<u32, DispatchError> {
+        let Some(&(index, _flags)) = self.opened.live.get(&handle) else {
+            return failed(teb, memory, 6);
+        };
+        let size =
+            u32::try_from(self.contents(index).len()).map_err(|_| DispatchError::Unsupported)?;
+        if high != 0 {
+            super::guest::write_word(memory, high, 0)?;
+        }
+        Ok(size)
+    }
+
     pub(super) fn close_file(&mut self, handle: u32) -> bool {
         let Some((index, _flags)) = self.opened.live.remove(&handle) else {
             return false;

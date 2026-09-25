@@ -256,6 +256,7 @@ impl Api {
             0x290 => Some(Self::Directory(directory::Call::Attributes)),
             0x294 => Some(Self::Directory(directory::Call::ShortPath)),
             0x5b4 => Some(Self::Directory(directory::Call::OpenFile)),
+            0x5b8 => Some(Self::Directory(directory::Call::FileSize)),
             0x240 => Some(Self::GetEnvironmentVariable),
             0x248 => Some(Self::GetStartupInfo),
             0x25c => Some(Self::WindowsFormat),
@@ -453,6 +454,7 @@ impl Api {
             "ReleaseMutex" => 0x218,
             "CloseHandle" => 0x21c,
             "CreateFileA" => 0x5b4,
+            "GetFileSize" => 0x5b8,
             "QueryPerformanceFrequency" => 0x220,
             "QueryPerformanceCounter" => 0x224,
             "GetCurrentDirectoryA" => 0x228,
@@ -881,7 +883,7 @@ impl Process32 {
             Api::SuspendThread
                 | Api::ResumeThread
                 | Api::CloseHandle
-                | Api::Directory(directory::Call::OpenFile)
+                | Api::Directory(directory::Call::OpenFile | directory::Call::FileSize)
                 | Api::Input(_)
                 | Api::Hook(_)
                 | Api::Crt(crt::Call::Sort)
