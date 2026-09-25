@@ -1033,6 +1033,37 @@ fn execute_x87_memory_sum() {
     }
 }
 
+fn execute_x87_compare_pop_twice() {
+    use ring3_core::execution::{Cpu32, Register32, StopReason, load_pe32};
+    let code = [
+        0xdd, 0x05, 0x00, 0x22, 0x40, 0x00, 0xdd, 0x05, 0x08, 0x22, 0x40, 0x00, 0xd9, 0xee, 0xde,
+        0xd9, 0xdf, 0xe0, 0xdd, 0x1d, 0x20, 0x22, 0x40, 0x00,
+    ];
+    for (right, condition) in [(-3.0_f64, 0), (3.0, 0x100), (-0.0, 0x4000)] {
+        let mut image = load_pe32(&executable::pe32(&code), 16).unwrap();
+        image
+            .memory
+            .write(0x0040_2200, &7.5_f64.to_le_bytes())
+            .unwrap();
+        image
+            .memory
+            .write(0x0040_2208, &right.to_le_bytes())
+            .unwrap();
+        let mut cpu = Cpu32::new(image.entry_point);
+        cpu.set_x87_control_word(0x0f7f);
+        assert_eq!(cpu.run(&mut image.memory, 5).instructions, 5);
+        assert_eq!(cpu.register(Register32::Eax), 0x3800 | condition);
+        cpu.set_x87_control_word(0x027f);
+        assert_eq!(
+            cpu.run(&mut image.memory, 1).reason,
+            StopReason::InstructionLimit
+        );
+        let mut bytes = [0; 8];
+        image.memory.read(0x0040_2220, &mut bytes).unwrap();
+        assert_eq!(u64::from_le_bytes(bytes), 7.5_f64.to_bits());
+    }
+}
+
 fn execute_x87_integer_add() {
     use ring3_core::execution::{Cpu32, Register32, StopReason, load_pe32};
     let code = [
@@ -4982,6 +5013,7 @@ pub extern "C" fn run() -> u32 {
     register_compare_pop_cases::register_comparisons_pop_once_across_profiles_and_budgets();
     execute_x87_memory_sum();
     execute_x87_integer_add();
+    execute_x87_compare_pop_twice();
     execute_x87_register_add();
     execute_x87_divide_pop();
     execute_wide_product();

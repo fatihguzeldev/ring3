@@ -162,7 +162,6 @@ fn comparisons_clear_roundup_and_replace_conditions_but_keep_sticky_exceptions()
 fn excluded_forms_prefixes_and_truncated_fetch_keep_the_stack_atomic() {
     for code in [
         vec![0xd8, 0xd1],
-        vec![0xde, 0xd9],
         vec![0xdc, 0xd9],
         vec![0xde, 0xd1],
         vec![0xf2, 0xd8, 0xd9],

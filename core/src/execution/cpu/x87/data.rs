@@ -281,8 +281,13 @@ impl Cpu32 {
     ) -> Result<(), StopReason> {
         self.x87_masked()?;
         let left = self.x87_stack.value()?;
-        let right = if instruction.code() == Code::Fcomp_st0_sti {
-            let right = self.x87_register_value(instruction.op1_register())?;
+        let right = if matches!(instruction.code(), Code::Fcomp_st0_sti | Code::Fcompp) {
+            let source = if instruction.code() == Code::Fcompp {
+                Register::ST1
+            } else {
+                instruction.op1_register()
+            };
+            let right = self.x87_register_value(source)?;
             if !(left.is_normal() || left == 0.0) || !(right.is_normal() || right == 0.0) {
                 return Err(StopReason::UnsupportedInstruction);
             }
@@ -301,8 +306,11 @@ impl Cpu32 {
         self.x87_stack.status = (self.x87_stack.status & !0x4700) | condition;
         if matches!(
             instruction.code(),
-            Code::Fcomp_m32fp | Code::Fcomp_m64fp | Code::Fcomp_st0_sti
+            Code::Fcomp_m32fp | Code::Fcomp_m64fp | Code::Fcomp_st0_sti | Code::Fcompp
         ) {
+            self.x87_stack.pop();
+        }
+        if instruction.code() == Code::Fcompp {
             self.x87_stack.pop();
         }
         Ok(())

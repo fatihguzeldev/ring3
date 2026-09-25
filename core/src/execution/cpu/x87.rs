@@ -82,6 +82,7 @@ pub(super) fn is_comparison(code: Code) -> bool {
             | Code::Fcomp_m32fp
             | Code::Fcomp_m64fp
             | Code::Fcomp_st0_sti
+            | Code::Fcompp
     )
 }
 
