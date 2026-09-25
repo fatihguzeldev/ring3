@@ -2,6 +2,8 @@ use std::collections::BTreeMap;
 
 use super::{Directory, DispatchError, GuestMemory, paths, thread};
 
+mod reading;
+
 const FIRST: u32 = 0x7a00_0004;
 const LAST: u32 = 0x7aff_fffc;
 const MAX_LIVE: usize = 4096;
