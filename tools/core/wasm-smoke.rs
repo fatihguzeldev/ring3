@@ -304,6 +304,8 @@ mod imported_executable;
 
 #[path = "../../core/tests/support/d3d8_executable.rs"]
 mod d3d8_executable;
+#[path = "../../core/tests/support/discard_resource_cases.rs"]
+mod discard_resource_cases;
 #[path = "../../core/tests/support/normal_vertex_cases.rs"]
 mod normal_vertex_cases;
 #[path = "../../core/tests/support/readonly_texture_cases.rs"]
@@ -4146,6 +4148,9 @@ fn execute_diagnostic() {
 
 fn execute_graphics() {
     use ring3_core::execution::{Process32, ProcessStop, StopReason};
+    discard_resource_cases::imported_discard_uses_device_vtable();
+    discard_resource_cases::discard_preserves_resources_scene_and_frame();
+    discard_resource_cases::discard_rejections_preserve_state();
     readonly_texture_cases::read_source_mip_while_writing_another();
     normal_vertex_cases::equivalent_diffuse_and_textured_pixels();
     normal_vertex_cases::rejects_short_records_and_nonfinite_inputs_atomically();

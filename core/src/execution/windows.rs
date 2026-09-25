@@ -1378,6 +1378,9 @@ impl Process32 {
             }
             Api::Resource(call) => self.resource_api(call, args)?,
             Api::Graphics(call) => {
+                if matches!(call, d3d8::Call::ResourceManagerDiscardBytes) && args[1] != 0 {
+                    return Err(DispatchError::Unsupported);
+                }
                 let value = self
                     .graphics
                     .dispatch(call, args, &mut self.memory, &self.desktop)?;

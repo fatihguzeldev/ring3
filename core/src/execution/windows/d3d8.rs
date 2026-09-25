@@ -127,6 +127,7 @@ pub(super) enum Call {
     DepthSurfaceAddRef,
     DepthSurfaceRelease,
     AvailableTextureMemory,
+    ResourceManagerDiscardBytes,
     DrawPrimitiveUp,
     DrawIndexedPrimitive,
 }
@@ -189,6 +190,7 @@ impl Call {
             0x4a4 => Self::DepthSurfaceAddRef,
             0x4a8 => Self::DepthSurfaceRelease,
             0x4ac => Self::AvailableTextureMemory,
+            0x5dc => Self::ResourceManagerDiscardBytes,
             0x2d0 => Self::AdapterCount,
             0x2d4 => Self::AdapterIdentifier,
             0x2d8 => Self::DeviceCaps,
@@ -235,6 +237,7 @@ impl Call {
             | Self::SetPixelShader
             | Self::SetViewport
             | Self::GetDepthStencilSurface
+            | Self::ResourceManagerDiscardBytes
             | Self::TextureSurfaceDesc
             | Self::ValidateDevice => 2,
             Self::CreateVertexBuffer
@@ -452,6 +455,7 @@ impl Graphics {
             (DEVICE_TABLE, 50, 0x49c),
             (DEVICE_TABLE, 33, 0x4a0),
             (DEVICE_TABLE, 4, 0x4ac),
+            (DEVICE_TABLE, 5, 0x5dc),
             (DEVICE_TABLE, 61, 0x4d4),
             (DEVICE_TABLE, 62, 0x4d8),
             (DEVICE_TABLE, 63, 0x4dc),
@@ -560,7 +564,10 @@ impl Graphics {
             Call::GetTextureStageState => return self.get_texture_stage_state(args, memory),
             Call::SetTextureStageState => self.set_texture_stage_state(args),
             Call::ValidateDevice => return self.validate_device(args, memory),
-            Call::TestCooperativeLevel => self.test_cooperative_level(args[0]),
+            Call::TestCooperativeLevel | Call::ResourceManagerDiscardBytes => {
+                // resources have only cpu backing, with no resident copy to evict.
+                self.test_cooperative_level(args[0])
+            }
             Call::BeginScene | Call::EndScene => self.scene(call, args[0]),
             Call::GetDepthStencilSurface => return self.get_depth_surface(args, memory),
             Call::DepthSurfaceAddRef | Call::DepthSurfaceRelease => {

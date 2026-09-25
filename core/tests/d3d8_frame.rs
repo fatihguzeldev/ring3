@@ -3,6 +3,8 @@ mod imported_executable;
 
 #[path = "support/d3d8_executable.rs"]
 mod d3d8_executable;
+#[path = "support/discard_resource_cases.rs"]
+mod discard_resource_cases;
 #[path = "support/readonly_texture_cases.rs"]
 mod readonly_texture_cases;
 #[path = "support/window_creation_executable.rs"]
@@ -38,6 +40,21 @@ const INDEX_QUERY_OUTPUT: u32 = 0x0040_2e10;
 const INDEX_BASE_OUTPUT: u32 = 0x0040_2e14;
 const STREAM_QUERY_OUTPUT: u32 = 0x0040_2e18;
 const STREAM_STRIDE_OUTPUT: u32 = 0x0040_2e1c;
+
+#[test]
+fn imported_discard_uses_device_vtable() {
+    discard_resource_cases::imported_discard_uses_device_vtable();
+}
+
+#[test]
+fn discard_preserves_resources_scene_and_frame() {
+    discard_resource_cases::discard_preserves_resources_scene_and_frame();
+}
+
+#[test]
+fn discard_rejections_preserve_state() {
+    discard_resource_cases::discard_rejections_preserve_state();
+}
 
 #[test]
 fn executes_an_uninterrupted_guest_graphics_program() {
