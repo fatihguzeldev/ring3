@@ -100,6 +100,28 @@ pub(super) fn compare_prefix(
     right: u32,
     count: u32,
 ) -> Result<u32, DispatchError> {
+    compare_bounded(memory, left, right, count, false)
+}
+
+pub(super) fn compare_prefix_ignoring_case(
+    memory: &GuestMemory,
+    left: u32,
+    right: u32,
+    count: u32,
+) -> Result<u32, DispatchError> {
+    if left == 0 || right == 0 {
+        return Err(DispatchError::Unsupported);
+    }
+    compare_bounded(memory, left, right, count, true)
+}
+
+fn compare_bounded(
+    memory: &GuestMemory,
+    left: u32,
+    right: u32,
+    count: u32,
+    ignore_case: bool,
+) -> Result<u32, DispatchError> {
     if count > 65536 {
         return Err(DispatchError::Unsupported);
     }
@@ -113,6 +135,10 @@ pub(super) fn compare_prefix(
         let (mut a, mut b) = ([0], [0]);
         memory.read(u64::from(left), &mut a)?;
         memory.read(u64::from(right), &mut b)?;
+        if ignore_case {
+            a[0] = a[0].to_ascii_lowercase();
+            b[0] = b[0].to_ascii_lowercase();
+        }
         if a[0] != b[0] {
             return Ok((i32::from(a[0]) - i32::from(b[0])).cast_unsigned());
         }

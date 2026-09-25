@@ -90,6 +90,7 @@ pub(super) enum Call {
     DynamicCast,
     Sort,
     Floor,
+    ComparePrefixIgnoringCase,
 }
 
 impl Call {
@@ -141,6 +142,7 @@ impl Call {
             0x1c8 => Some(Self::FindByte),
             0x1cc => Some(Self::Sort),
             0x1d0 => Some(Self::Floor),
+            0x1d4 => Some(Self::ComparePrefixIgnoringCase),
             0x1ac => Some(Self::Sprintf),
             0x1bc => Some(Self::Snprintf),
             0x1b0 => Some(Self::Move),
@@ -191,7 +193,8 @@ impl Call {
             | Self::Move
             | Self::CopyString
             | Self::AppendString
-            | Self::CompareStringPrefix => 3,
+            | Self::CompareStringPrefix
+            | Self::ComparePrefixIgnoringCase => 3,
             Self::FmodePointer
             | Self::CommodePointer
             | Self::ArgcPointer
@@ -315,6 +318,9 @@ impl Crt {
             Call::CompareStringPrefix => {
                 Some(strings::compare_prefix(memory, args[0], args[1], args[2])?)
             }
+            Call::ComparePrefixIgnoringCase => Some(strings::compare_prefix_ignoring_case(
+                memory, args[0], args[1], args[2],
+            )?),
             Call::FindCharacter => Some(strings::find(memory, args[0], args[1])?),
             Call::SplitPath => {
                 self.multibyte.split_path(memory, args)?;
@@ -447,6 +453,7 @@ pub(super) fn resolve(name: &str) -> Option<u32> {
         "__RTDynamicCast" => Some(API_BASE + 0x1b4),
         "strncmp" => Some(API_BASE + 0x170),
         "_stricmp" => Some(API_BASE + 0x174),
+        "_strnicmp" => Some(API_BASE + 0x1d4),
         "_vsnprintf" => Some(API_BASE + 0x178),
         "tolower" => Some(API_BASE + 0x17c),
         "toupper" => Some(API_BASE + 0x1c4),
