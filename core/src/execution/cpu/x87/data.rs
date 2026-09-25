@@ -282,7 +282,10 @@ impl Cpu32 {
         self.x87_masked()?;
         let left = self.x87_stack.value()?;
         let right = self.read_float(instruction, memory)?;
-        let condition = match left.partial_cmp(&right).expect("admitted finite operands") {
+        let condition = match left
+            .partial_cmp(&right)
+            .ok_or(StopReason::UnsupportedInstruction)?
+        {
             Ordering::Less => 0x0100,
             Ordering::Equal => 0x4000,
             Ordering::Greater => 0,

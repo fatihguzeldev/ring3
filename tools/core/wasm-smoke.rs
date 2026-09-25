@@ -905,6 +905,8 @@ mod wide_product_executable;
 mod division_cases;
 #[path = "../../core/tests/support/integer_division_cases.rs"]
 mod integer_division_cases;
+#[path = "../../core/tests/support/nan_compare_cases.rs"]
+mod nan_compare_cases;
 #[path = "../../core/tests/support/signed_division_cases.rs"]
 mod signed_division_cases;
 #[path = "../../core/tests/support/unsigned_division_executable.rs"]
@@ -4895,6 +4897,7 @@ pub extern "C" fn run() -> u32 {
     integer_division_cases::signed_quotients_across_budgets();
     integer_division_cases::single_quotients_across_budgets();
     zero_constant_cases::positive_zero_preserves_lower_stack_across_budgets();
+    nan_compare_cases::nan_top_refuses_comparison_atomically();
     execute_x87_memory_sum();
     execute_x87_register_add();
     execute_x87_divide_pop();
