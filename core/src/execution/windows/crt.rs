@@ -6,6 +6,7 @@ use super::{
 
 mod arguments;
 mod buffers;
+mod environment;
 mod floating;
 mod initializers;
 mod jump;
@@ -93,6 +94,7 @@ pub(super) enum Call {
     Floor,
     ComparePrefixIgnoringCase,
     SetJump,
+    GetEnvironment,
 }
 
 impl Call {
@@ -146,6 +148,7 @@ impl Call {
             0x1d0 => Some(Self::Floor),
             0x1d4 => Some(Self::ComparePrefixIgnoringCase),
             0x1d8 => Some(Self::SetJump),
+            0x1dc => Some(Self::GetEnvironment),
             0x1ac => Some(Self::Sprintf),
             0x1bc => Some(Self::Snprintf),
             0x1b0 => Some(Self::Move),
@@ -176,6 +179,7 @@ impl Call {
             | Self::UppercaseString
             | Self::SetMbCodePage
             | Self::OnExit
+            | Self::GetEnvironment
             | Self::Remove => 1,
             Self::ControlFp
             | Self::Floor
@@ -288,11 +292,9 @@ impl Crt {
             }
             Call::Random => Some(self.locals.random(cpu.fs_base())?.next()),
             Call::FloatToInteger => Some(floating::to_integer(cpu)?),
-            Call::Floor => {
-                floating::floor(cpu, args)?;
-                None
-            }
+            Call::Floor => floating::floor(cpu, args).map(|()| None)?,
             Call::SetJump => Some(jump::capture(cpu, memory, args)?),
+            Call::GetEnvironment => Some(environment::get(memory, args[0])?),
             Call::TypeName => Some(type_names::name(
                 memory,
                 heap,
@@ -419,6 +421,7 @@ pub(super) fn resolve(name: &str) -> Option<u32> {
         "qsort" => Some(API_BASE + 0x1cc),
         "floor" => Some(API_BASE + 0x1d0),
         "_setjmp3" => Some(API_BASE + 0x1d8),
+        "getenv" => Some(API_BASE + 0x1dc),
         "__getmainargs" => Some(API_BASE + 0x110),
         "memset" => Some(API_BASE + 0x114),
         "memcmp" => Some(API_BASE + 0x138),

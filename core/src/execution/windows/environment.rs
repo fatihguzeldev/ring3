@@ -65,7 +65,7 @@ impl Process32 {
     }
 }
 
-fn read_name(memory: &GuestMemory, source: u32) -> Result<Vec<u8>, DispatchError> {
+pub(super) fn read_name(memory: &GuestMemory, source: u32) -> Result<Vec<u8>, DispatchError> {
     let mut name = Vec::new();
     for offset in 0..32768 {
         let address = source
