@@ -7,6 +7,7 @@ version = "0.0.0"
 edition = "2024"
 rust-version = "1.97.1"
 repository = "https://github.com/fatihguzeldev/ring3"
+license = "Apache-2.0"
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

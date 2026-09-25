@@ -1,6 +1,7 @@
 {
   "name": "ring3-workspace",
   "version": "0.0.0",
+  "license": "Apache-2.0",
   "private": true,
   "description": "Workspace for the ring3 compatibility runtime library.",
   "engines": {
