@@ -27,6 +27,7 @@ export default defineConfig(
     language: "html/html",
     rules: {
       "html/no-duplicate-class": "error",
+      "html/require-closing-tags": ["error", { selfClosing: "always" }],
       // prettier owns html whitespace and quote style.
       "html/attrs-newline": "off",
       "html/element-newline": "off",

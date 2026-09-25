@@ -17,23 +17,36 @@ export class Bridge {
 
   constructor(instance: WebAssembly.Instance) {
     const exports = instance.exports;
-    if (!(exports["memory"] instanceof WebAssembly.Memory)) throw new Error("Wasm belleği eksik.");
-    for (const name of ["ring3_input", "ring3_command", "ring3_output_pointer", "ring3_output_length", "ring3_frame_pointer", "ring3_frame_length"]) {
-      if (typeof exports[name] !== "function") throw new Error(`Wasm bağlantısı eksik: ${name}`);
+    if (!(exports["memory"] instanceof WebAssembly.Memory))
+      throw new Error("wasm memory is missing.");
+    for (const name of [
+      "ring3_input",
+      "ring3_command",
+      "ring3_output_pointer",
+      "ring3_output_length",
+      "ring3_frame_pointer",
+      "ring3_frame_length",
+    ]) {
+      if (typeof exports[name] !== "function") throw new Error(`missing wasm export: ${name}`);
     }
     this.#exports = exports as unknown as Exports;
   }
 
   command(operation: number, argument = 0, input: unknown = null): Snapshot {
     const bytes = input instanceof Uint8Array ? input : this.#encoder.encode(JSON.stringify(input));
-    if (bytes.length > 128 * 1024 * 1024 + 8) throw new Error("Dosya aktarım sınırı aşıldı.");
+    if (bytes.length > 128 * 1024 * 1024 + 8) throw new Error("file transfer limit exceeded.");
     const pointer = this.#exports.ring3_input(bytes.length);
-    if (pointer === 0) throw new Error("Wasm giriş sınırı aşıldı.");
+    if (pointer === 0) throw new Error("wasm input limit exceeded.");
     new Uint8Array(this.#exports.memory.buffer, pointer, bytes.length).set(bytes);
     const success = this.#exports.ring3_command(operation, argument);
-    const output = new Uint8Array(this.#exports.memory.buffer, this.#exports.ring3_output_pointer(), this.#exports.ring3_output_length());
+    const output = new Uint8Array(
+      this.#exports.memory.buffer,
+      this.#exports.ring3_output_pointer(),
+      this.#exports.ring3_output_length(),
+    );
     const response: unknown = JSON.parse(this.#decoder.decode(output));
-    if (typeof response !== "object" || response === null) throw new Error("Geçersiz Wasm yanıtı.");
+    if (typeof response !== "object" || response === null)
+      throw new Error("invalid wasm response.");
     if (!success) throw new Error(String((response as { error?: unknown }).error));
     return response as Snapshot;
   }
@@ -42,7 +55,12 @@ export class Bridge {
     if (!snapshot.frame) return null;
     const { width, height } = snapshot.frame;
     const size = this.#exports.ring3_frame_length();
-    if (size !== width * height * 4 || size > 16 * 1024 * 1024) throw new Error("Geçersiz görüntü boyutu.");
-    return new Uint8Array(this.#exports.memory.buffer, this.#exports.ring3_frame_pointer(), size).slice().buffer;
+    if (size !== width * height * 4 || size > 16 * 1024 * 1024)
+      throw new Error("invalid frame size.");
+    return new Uint8Array(
+      this.#exports.memory.buffer,
+      this.#exports.ring3_frame_pointer(),
+      size,
+    ).slice().buffer;
   }
 }

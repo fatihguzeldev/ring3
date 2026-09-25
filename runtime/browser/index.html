@@ -1,23 +1,55 @@
 <!doctype html>
-<html lang="tr" data-token="RING3_SESSION_TOKEN">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>ring3 · local player</title>
-  <link rel="stylesheet" href="/style.css">
-  <script type="module" src="/assets/app.js"></script>
-</head>
-<body>
-  <header><h1><a class="wordmark" href="/">ring3<span>local player</span></a></h1></header>
-  <main>
-    <section class="player" aria-label="oyun görüntüsü">
-      <div class="screen"><canvas id="screen" width="640" height="480" aria-label="oyun görüntüsü"></canvas><p id="empty">başlatmaya hazır</p></div>
-      <div class="toolbar"><div class="buttons"><button id="start" class="primary">başlat</button><button id="pause" disabled>duraklat</button><button id="resume" disabled>devam et</button><button id="stop" disabled>durdur</button></div></div>
-    </section>
-    <section class="status" aria-labelledby="state"><h2 id="state" role="status" aria-live="polite">hazır</h2><dl><div><dt>işlem</dt><dd id="steps">—</dd></div><div><dt>görüntü</dt><dd id="frames">0</dd></div><div><dt>geçen süre</dt><dd id="elapsed">—</dd></div></dl></section>
-    <section id="windows" class="windows" aria-label="oyun pencereleri" hidden></section>
-    <p id="error" role="alert" hidden></p>
-    <details><summary>çalışma ayrıntıları</summary><pre id="diagnostics">henüz bir süreç başlatılmadı.</pre></details>
-  </main>
-</body>
+<html lang="en" data-token="RING3_SESSION_TOKEN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>ring3 · local player</title>
+    <link rel="stylesheet" href="/style.css" />
+    <script type="module" src="/assets/app.js"></script>
+  </head>
+  <body>
+    <header>
+      <h1>
+        <a class="wordmark" href="/">ring3<span>local player</span></a>
+      </h1>
+    </header>
+    <main>
+      <section class="player" aria-label="game display">
+        <div class="screen">
+          <canvas id="screen" width="640" height="480" aria-label="game display"></canvas>
+          <p id="empty">ready to start</p>
+        </div>
+        <div class="toolbar">
+          <div class="buttons">
+            <button id="start" class="primary">start</button
+            ><button id="pause" disabled>pause</button><button id="resume" disabled>resume</button
+            ><button id="stop" disabled>stop</button>
+          </div>
+        </div>
+      </section>
+      <section class="status" aria-labelledby="state">
+        <h2 id="state" role="status" aria-live="polite">ready</h2>
+        <dl>
+          <div>
+            <dt>operations</dt>
+            <dd id="steps">—</dd>
+          </div>
+          <div>
+            <dt>frames</dt>
+            <dd id="frames">0</dd>
+          </div>
+          <div>
+            <dt>elapsed</dt>
+            <dd id="elapsed">—</dd>
+          </div>
+        </dl>
+      </section>
+      <section id="windows" class="windows" aria-label="game windows" hidden></section>
+      <p id="error" role="alert" hidden></p>
+      <details>
+        <summary>execution details</summary>
+        <pre id="diagnostics">no process has started yet.</pre>
+      </details>
+    </main>
+  </body>
 </html>

@@ -27,32 +27,32 @@ function report(note = ""): void {
 
 async function resource(path: string): Promise<Response> {
   const response = await fetch(path, { headers: { "X-Ring3-Token": token }, cache: "no-store" });
-  if (!response.ok) throw new Error(`Yerel dosya okunamadı (${response.status}): ${path}`);
+  if (!response.ok) throw new Error(`could not read local file (${response.status}): ${path}`);
   return response;
 }
 
 async function file(index: number): Promise<Uint8Array> {
   const entry = manifest.files[index];
-  if (!entry || entry.size > 128 * 1024 * 1024) throw new Error("Dosya aktarım sınırı aşıldı.");
+  if (!entry || entry.size > 128 * 1024 * 1024) throw new Error("file transfer limit exceeded.");
   const response = await resource(`/files/${index}`);
   if (Number(response.headers.get("content-length")) !== entry.size)
-    throw new Error("Dosya boyutu değişti.");
+    throw new Error("file size changed.");
   const bytes = new Uint8Array(await response.arrayBuffer());
-  if (bytes.length !== entry.size) throw new Error("Eksik dosya aktarımı.");
+  if (bytes.length !== entry.size) throw new Error("incomplete file transfer.");
   return bytes;
 }
 
 async function start(value: string): Promise<void> {
-  if (started) throw new Error("Oturum zaten başlatıldı.");
+  if (started) throw new Error("session already started.");
   started = true;
   token = value;
   manifest = (await (await resource("/manifest")).json()) as Manifest;
   if (!Array.isArray(manifest.files) || manifest.files.length > 100_000)
-    throw new Error("Geçersiz dosya listesi.");
+    throw new Error("invalid file list.");
   const wasm = await (await resource("/core.wasm")).arrayBuffer();
   bridge = new Bridge((await WebAssembly.instantiate(wasm, {})).instance);
   snapshot = bridge.command(0, 0, manifest);
-  report("Program dosyaları yükleniyor.");
+  report("loading program files.");
   for (let index = 0; index < manifest.files.length; index++) {
     if (manifest.files[index]?.role !== "data") bridge.command(1, index, await file(index));
   }
@@ -91,12 +91,12 @@ function postCommands(): void {
 
 async function supply(): Promise<void> {
   const pending = snapshot.pending;
-  if (!bridge || !pending) throw new Error("Eksik dosya isteği.");
+  if (!bridge || !pending) throw new Error("missing file request.");
   const index = manifest.files.findIndex(
     (entry) => entry.path.toLowerCase() === pending.path.toLowerCase(),
   );
   if (index < 0 || manifest.files[index]?.size !== pending.size)
-    throw new Error(`Dosya listesinde yok: ${pending.path}`);
+    throw new Error(`file not listed: ${pending.path}`);
   const bytes = await file(index);
   const input = new Uint8Array(bytes.length + 8);
   new DataView(input.buffer).setBigUint64(0, BigInt(pending.id), true);
@@ -117,7 +117,7 @@ async function pump(): Promise<void> {
         break;
       }
       if (snapshot.reason === "Some(WaitingForMessage)") {
-        report("Oyun bir pencere yanıtı bekliyor.");
+        report("the game is waiting for a window response.");
         break;
       }
       const before = BigInt(snapshot.instructions) + BigInt(snapshot.apiCalls);
@@ -132,14 +132,14 @@ async function pump(): Promise<void> {
       if (performance.now() - lastReport > 250) report();
       if (remaining === 0) {
         paused = true;
-        report("Çalışma sınırına ulaşıldı; devam edebilirsin.");
+        report("execution limit reached; you can resume.");
         break;
       }
       if (consumed === 0 && snapshot.state === "running")
-        throw new Error("Core ilerleme sağlamadan döndü.");
+        throw new Error("core returned without making progress.");
       await yieldTask(snapshot.state === "waiting" ? 16 : 0);
     }
-    if (paused) report("Duraklatıldı.");
+    if (paused) report("paused.");
   } finally {
     running = false;
   }
@@ -160,7 +160,7 @@ scope.onmessage = ({ data }): void => {
   }
   if (data.type === "pause") {
     paused = true;
-    if (bridge) report("Duraklatıldı.");
+    if (bridge) report("paused.");
     return;
   }
   if (data.type === "button" || data.type === "activate") commands.push(data);
