@@ -1748,6 +1748,7 @@ fn execute_window_messages() {
     window_message_cases::verify_default_activation();
     format_width_cases::imported_width_runs_whole_or_stepwise();
     format_width_cases::minimum_widths_preserve_values_and_wrapper_rules();
+    format_width_cases::zero_padding_preserves_signs_and_wrapper_rules();
     format_width_cases::widths_obey_total_output_bounds();
     format_width_cases::unsupported_widths_and_late_faults_are_atomic();
     default_key_cases::ordinary_keys_preserve_state();

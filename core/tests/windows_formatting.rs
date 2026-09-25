@@ -167,7 +167,7 @@ fn payload_and_input_bounds_reject_before_writes() {
         b"%c\0".as_slice(),
         b"%n\0",
         b"%p\0",
-        b"%08x\0",
+        b"%#08x\0",
         b"%.2s\0",
         b"%ld\0",
         b"%\0",

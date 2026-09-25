@@ -116,8 +116,12 @@ fn render(
             append(&mut output, b"%", limits.output)?;
             continue;
         }
+        let zero_pad = conversion == b'0';
+        if zero_pad {
+            conversion = bytes.next().ok_or(DispatchError::Unsupported)?;
+        }
         let mut width = 0_usize;
-        if matches!(conversion, b'1'..=b'9') {
+        if conversion.is_ascii_digit() {
             loop {
                 width = width
                     .checked_mul(10)
@@ -132,6 +136,7 @@ fn render(
         }
         if !matches!(conversion, b's' | b'c' | b'd' | b'i' | b'u' | b'x' | b'X')
             || (conversion == b'c' && !limits.character)
+            || (zero_pad && matches!(conversion, b's' | b'c'))
         {
             return Err(DispatchError::Unsupported);
         }
@@ -152,8 +157,15 @@ fn render(
         if width.max(text.len()) > limits.output - output.len() {
             return Err(DispatchError::Unsupported);
         }
-        output.resize(output.len() + width.saturating_sub(text.len()), b' ');
-        append(&mut output, &text, limits.output)?;
+        let padding = width.saturating_sub(text.len());
+        let text = if zero_pad && text.first() == Some(&b'-') {
+            output.push(b'-');
+            &text[1..]
+        } else {
+            &text
+        };
+        output.resize(output.len() + padding, if zero_pad { b'0' } else { b' ' });
+        append(&mut output, text, limits.output)?;
     }
     Ok(output)
 }

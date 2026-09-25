@@ -171,7 +171,7 @@ fn unsupported_formats_and_null_strings_do_not_partially_write() {
     p.memory.write(u64::from(OUTPUT), &[b'!'; 128]).unwrap();
     for format in [
         b"ok%\0".as_slice(),
-        b"ok%08x\0",
+        b"ok%#08x\0",
         b"ok%.2s\0",
         b"ok%*s\0",
         b"ok%ld\0",

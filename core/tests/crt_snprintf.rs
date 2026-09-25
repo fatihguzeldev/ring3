@@ -90,7 +90,7 @@ fn legacy_capacity_rules_do_not_terminate_exact_or_truncated_output() {
 fn unsupported_format_and_output_fault_leave_guest_state_untouched() {
     let mut p = process();
     p.memory.write(u64::from(OUTPUT), &[b'!'; 16]).unwrap();
-    p.memory.write(u64::from(FORMAT), b"%08x\0").unwrap();
+    p.memory.write(u64::from(FORMAT), b"%#08x\0").unwrap();
     let before = prepare(&mut p, OUTPUT, 8, FORMAT, &[42]);
     let result = p.run(1);
     assert_eq!(result.reason, ProcessStop::UnsupportedApi { address: API });

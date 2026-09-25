@@ -24,3 +24,8 @@ fn widths_obey_total_output_bounds() {
 fn unsupported_widths_and_late_faults_are_atomic() {
     format_width_cases::unsupported_widths_and_late_faults_are_atomic();
 }
+
+#[test]
+fn zero_padding_preserves_signs_and_wrapper_rules() {
+    format_width_cases::zero_padding_preserves_signs_and_wrapper_rules();
+}
