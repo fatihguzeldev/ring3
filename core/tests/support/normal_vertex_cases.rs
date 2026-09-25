@@ -239,3 +239,67 @@ pub fn rejected_selection_preserves_the_normal_layout() {
     assert_eq!(invoke(&mut process, device, 76, &[0x152]), 0);
     assert_eq!(draw(&mut process, device), 0);
 }
+
+fn translate_z(process: &mut Process32, device: u32, state: u32, z: f32) {
+    let mut matrix = [0; 16];
+    for index in [0, 5, 10, 15] {
+        matrix[index] = 1_f32.to_bits();
+    }
+    matrix[14] = z.to_bits();
+    write(process, OUTPUT + 64, &matrix);
+    assert_eq!(invoke(process, device, 37, &[state, OUTPUT + 64]), 0);
+}
+
+pub fn world_transform_controls_positions() {
+    for (fvf, stride) in [(0x142, 24), (0x152, 36)] {
+        let (mut process, device, _) = setup(fvf, stride, false, 0);
+        translate_z(&mut process, device, 257, 1.0);
+        assert_eq!(draw(&mut process, device), 0);
+        assert_eq!(&frame(&mut process, device)[..4], &[128, 255, 255, 255]);
+        assert_eq!(
+            invoke(
+                &mut process,
+                device,
+                36,
+                &[0, 0, 3, 0xff00_0000, 1_f32.to_bits(), 0]
+            ),
+            0
+        );
+        translate_z(&mut process, device, 256, 1.0);
+        assert_eq!(draw(&mut process, device), 0);
+        assert!(
+            frame(&mut process, device)
+                .chunks_exact(4)
+                .all(|pixel| pixel == [0, 0, 0, 255])
+        );
+        translate_z(&mut process, device, 256, 0.0);
+        assert_eq!(draw(&mut process, device), 0);
+        assert_eq!(&frame(&mut process, device)[..4], &[128, 255, 255, 255]);
+    }
+}
+
+pub fn texture_matrix_does_not_substitute_for_world() {
+    for (fvf, stride) in [(0x142, 24), (0x152, 36)] {
+        let (mut process, device, _) = setup(fvf, stride, false, 0);
+        translate_z(&mut process, device, 16, 1.0);
+        assert_eq!(draw(&mut process, device), 0);
+        assert_eq!(&frame(&mut process, device)[..4], &[128, 255, 255, 255]);
+        assert_eq!(
+            invoke(
+                &mut process,
+                device,
+                36,
+                &[0, 0, 3, 0xff00_0000, 1_f32.to_bits(), 0]
+            ),
+            0
+        );
+        translate_z(&mut process, device, 256, 1.0);
+        translate_z(&mut process, device, 16, -1.0);
+        assert_eq!(draw(&mut process, device), 0);
+        assert!(
+            frame(&mut process, device)
+                .chunks_exact(4)
+                .all(|pixel| pixel == [0, 0, 0, 255])
+        );
+    }
+}

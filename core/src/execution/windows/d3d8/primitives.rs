@@ -194,7 +194,7 @@ pub(super) fn draw_indexed(
         triangles.push(keys);
     }
 
-    let world = graphics.transforms.get(&16).unwrap_or(&IDENTITY_MATRIX);
+    let world = graphics.transforms.get(&256).unwrap_or(&IDENTITY_MATRIX);
     let view = graphics.transforms.get(&2).unwrap_or(&IDENTITY_MATRIX);
     let projection = graphics.transforms.get(&3).unwrap_or(&IDENTITY_MATRIX);
     let vertex_base = u64::from(vertex_address) + super::PAGE_SIZE;

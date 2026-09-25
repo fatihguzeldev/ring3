@@ -4133,6 +4133,8 @@ fn execute_graphics() {
     normal_vertex_cases::equivalent_diffuse_and_textured_pixels();
     normal_vertex_cases::rejects_short_records_and_nonfinite_inputs_atomically();
     normal_vertex_cases::rejected_selection_preserves_the_normal_layout();
+    normal_vertex_cases::world_transform_controls_positions();
+    normal_vertex_cases::texture_matrix_does_not_substitute_for_world();
 
     for (width, height, color) in [(4, 3, 0xff12_3456_u32), (9, 7, 0xffed_cba9)] {
         let mut process =

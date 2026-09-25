@@ -19,3 +19,13 @@ fn invalid_normal_records_preserve_color_and_depth() {
 fn unsupported_format_selection_preserves_normal_layout() {
     normal_vertex_cases::rejected_selection_preserves_the_normal_layout();
 }
+
+#[test]
+fn world_transform_moves_both_indexed_layouts() {
+    normal_vertex_cases::world_transform_controls_positions();
+}
+
+#[test]
+fn texture_transform_is_not_a_world_transform() {
+    normal_vertex_cases::texture_matrix_does_not_substitute_for_world();
+}

@@ -3000,7 +3000,7 @@ fn indexed_xyz_triangle_rasterizes_bound_guest_buffers() {
         ],
     );
     assert_eq!(
-        invoke(&mut process, set_transform, &[device, 16, MATRIX]),
+        invoke(&mut process, set_transform, &[device, 256, MATRIX]),
         0
     );
     assert_eq!(direct_call(&mut process, draw, &[device, 4, 0, 3, 0, 1]), 0);
