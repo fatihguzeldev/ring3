@@ -4891,6 +4891,7 @@ pub extern "C" fn run() -> u32 {
     single_register_subtract_cases::arithmetic();
     execute_x87_division();
     integer_division_cases::signed_quotients_across_budgets();
+    integer_division_cases::single_quotients_across_budgets();
     execute_x87_memory_sum();
     execute_x87_register_add();
     execute_x87_divide_pop();
