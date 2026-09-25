@@ -131,6 +131,7 @@ enum Api {
     GetCurrentThreadId,
     ResumeThread,
     SuspendThread,
+    CloseHandle,
     ExitProcess,
     Interlocked(atomics::Call),
     Clock(clock::Call),
@@ -240,6 +241,7 @@ impl Api {
             4 => Some(Self::GetLastError),
             0x550 => Some(Self::ResumeThread),
             0x554 => Some(Self::SuspendThread),
+            0x21c => Some(Self::CloseHandle),
             0xd8 => Some(Self::GetCurrentThread),
             0xdc => Some(Self::GetCurrentThreadId),
             8 => Some(Self::ExitProcess),
@@ -253,6 +255,7 @@ impl Api {
             0x23c => Some(Self::Directory(directory::Call::FindClose)),
             0x290 => Some(Self::Directory(directory::Call::Attributes)),
             0x294 => Some(Self::Directory(directory::Call::ShortPath)),
+            0x5b4 => Some(Self::Directory(directory::Call::OpenFile)),
             0x240 => Some(Self::GetEnvironmentVariable),
             0x248 => Some(Self::GetStartupInfo),
             0x25c => Some(Self::WindowsFormat),
@@ -449,6 +452,7 @@ impl Api {
             "WaitForSingleObject" => 0x214,
             "ReleaseMutex" => 0x218,
             "CloseHandle" => 0x21c,
+            "CreateFileA" => 0x5b4,
             "QueryPerformanceFrequency" => 0x220,
             "QueryPerformanceCounter" => 0x224,
             "GetCurrentDirectoryA" => 0x228,
@@ -876,6 +880,8 @@ impl Process32 {
             api,
             Api::SuspendThread
                 | Api::ResumeThread
+                | Api::CloseHandle
+                | Api::Directory(directory::Call::OpenFile)
                 | Api::Input(_)
                 | Api::Hook(_)
                 | Api::Crt(crt::Call::Sort)
@@ -1186,6 +1192,7 @@ impl Process32 {
             Api::Interlocked(call) => self.interlocked(call, args)?,
             Api::Clock(call) => self.query_clock(call, argument)?,
             Api::Directory(call) => self.directory(call, args)?,
+            Api::CloseHandle => self.close_handle(argument)?,
             Api::Registry(call) => self.registry(call, args)?,
             Api::GetCommandLine => self.cpu.set_register(Register32::Eax, self.command_line),
             Api::GetEnvironmentVariable => self.environment_query(args)?,

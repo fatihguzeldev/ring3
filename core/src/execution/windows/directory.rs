@@ -1,11 +1,12 @@
 use super::super::Access;
 use super::{
     DispatchError, GuestMemory, LoadError, MemoryError, Process32, Register32, guest, parameters,
-    thread,
+    synchronization, thread,
 };
 
 mod catalog;
 mod contents;
+mod files;
 mod paths;
 mod search;
 pub use catalog::FileMetadata;
@@ -17,6 +18,7 @@ pub(super) struct Directory {
     declarations: Vec<Box<[u8]>>,
     files: Vec<catalog::File>,
     searches: search::Searches,
+    opened: files::Opened,
 }
 
 pub(super) struct Status {
@@ -42,11 +44,13 @@ pub(super) enum Call {
     FindClose,
     Attributes,
     ShortPath,
+    OpenFile,
 }
 
 impl Call {
     pub(super) fn arguments(self) -> usize {
         match self {
+            Self::OpenFile => 7,
             Self::ShortPath => 3,
             Self::Query | Self::FindFirst | Self::FindNext => 2,
             Self::Change | Self::FindClose | Self::Attributes => 1,
@@ -57,7 +61,13 @@ impl Call {
 impl Process32 {
     pub(super) fn directory(&mut self, call: Call, arguments: &[u32]) -> Result<(), DispatchError> {
         let teb = thread::Teb(self.cpu.fs_base());
+        if matches!(call, Call::OpenFile) && self.threads.id(teb).is_none() {
+            return Err(DispatchError::Unsupported);
+        }
         let result = match call {
+            Call::OpenFile => self
+                .current_directory
+                .open_file(arguments, teb, &mut self.memory)?,
             Call::Query => {
                 self.current_directory
                     .query(arguments[0], arguments[1], &mut self.memory)?
@@ -95,6 +105,18 @@ impl Process32 {
         };
         self.cpu.set_register(Register32::Eax, result);
         Ok(())
+    }
+
+    pub(super) fn close_handle(&mut self, handle: u32) -> Result<(), DispatchError> {
+        if self.threads.id(thread::Teb(self.cpu.fs_base())).is_none() {
+            return Err(DispatchError::Unsupported);
+        }
+        if self.current_directory.close_file(handle) {
+            self.cpu.set_register(Register32::Eax, 1);
+            Ok(())
+        } else {
+            self.synchronization(synchronization::Call::Close, &[handle])
+        }
     }
 }
 
@@ -142,6 +164,7 @@ impl Directory {
             declarations,
             files,
             searches: search::Searches::default(),
+            opened: files::Opened::default(),
         })
     }
 

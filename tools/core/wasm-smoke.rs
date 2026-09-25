@@ -1546,6 +1546,9 @@ mod path_component_cases;
 #[path = "../../core/tests/support/file_stream_cases.rs"]
 mod file_stream_cases;
 
+#[path = "../../core/tests/support/file_handle_cases.rs"]
+mod file_handle_cases;
+
 #[cfg(windows_demo)]
 fn verify_compiled_file_streams() -> (u64, u64) {
     use file_stream_cases::PAYLOAD;
@@ -1594,6 +1597,7 @@ fn verify_compiled_file_streams() -> (u64, u64) {
 
 fn execute_file_streams() {
     file_stream_cases::verify();
+    file_handle_cases::imported_open_close_preserves_state_and_releases_identity();
     #[cfg(windows_demo)]
     verify_compiled_file_streams();
 }

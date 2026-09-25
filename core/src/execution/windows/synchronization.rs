@@ -23,7 +23,6 @@ impl Call {
             0x210 => Some(Self::CreateMutex),
             0x214 => Some(Self::Wait),
             0x218 => Some(Self::ReleaseMutex),
-            0x21c => Some(Self::Close),
             0x53c => Some(Self::CreateEvent),
             0x540 => Some(Self::SetEvent),
             0x544 => Some(Self::ResetEvent),
