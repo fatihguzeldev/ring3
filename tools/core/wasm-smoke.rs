@@ -889,6 +889,8 @@ mod wide_product_executable;
 
 #[path = "../../core/tests/support/division_cases.rs"]
 mod division_cases;
+#[path = "../../core/tests/support/integer_division_cases.rs"]
+mod integer_division_cases;
 #[path = "../../core/tests/support/unsigned_division_executable.rs"]
 mod unsigned_division_executable;
 
@@ -4864,6 +4866,7 @@ pub extern "C" fn run() -> u32 {
     execute_file_removal();
     execute_x87_status();
     execute_x87_division();
+    integer_division_cases::signed_quotients_across_budgets();
     execute_x87_memory_sum();
     execute_x87_register_add();
     execute_x87_divide_pop();

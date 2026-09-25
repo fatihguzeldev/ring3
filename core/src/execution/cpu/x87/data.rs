@@ -376,7 +376,7 @@ impl Cpu32 {
         } else {
             let source = if matches!(instruction.code(), Code::Fmul_st0_sti | Code::Fdiv_st0_sti) {
                 self.x87_register_value(instruction.op1_register())?
-            } else if instruction.code() == Code::Fimul_m32int {
+            } else if matches!(instruction.code(), Code::Fimul_m32int | Code::Fidiv_m32int) {
                 self.read_integer_m32(instruction, memory)?
             } else {
                 self.read_float(instruction, memory)?
