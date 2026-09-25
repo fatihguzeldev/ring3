@@ -8,6 +8,14 @@ pub(super) fn uppercase_character(character: u32) -> Result<u32, DispatchError> 
     character_case(character, true)
 }
 
+pub(super) fn is_space(character: u32) -> Result<u32, DispatchError> {
+    if character == u32::MAX {
+        return Ok(0);
+    }
+    let byte = u8::try_from(character).map_err(|_| DispatchError::Unsupported)?;
+    Ok(u32::from(matches!(byte, b'\t'..=b'\r' | b' ')))
+}
+
 fn character_case(character: u32, make_uppercase: bool) -> Result<u32, DispatchError> {
     if character == u32::MAX {
         return Ok(character);

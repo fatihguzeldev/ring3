@@ -314,6 +314,8 @@ mod crt_getenv_cases;
 mod crt_setjmp_cases;
 #[path = "../../core/tests/support/crt_sort_cases.rs"]
 mod crt_sort_cases;
+#[path = "../../core/tests/support/space_classification_cases.rs"]
+mod space_classification_cases;
 
 #[path = "../../core/tests/support/fp_control_executable.rs"]
 mod fp_control_executable;
@@ -4897,6 +4899,8 @@ pub extern "C" fn run() -> u32 {
     integer_division_cases::signed_quotients_across_budgets();
     integer_division_cases::single_quotients_across_budgets();
     constant_load_cases::exact_constants_preserve_lower_stack_across_budgets();
+    space_classification_cases::imported_calls_across_budgets();
+    space_classification_cases::all_bytes_and_eof_preserve_state();
     nan_compare_cases::nan_top_refuses_comparison_atomically();
     execute_x87_memory_sum();
     execute_x87_register_add();

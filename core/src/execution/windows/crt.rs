@@ -85,6 +85,7 @@ pub(super) enum Call {
     Sscanf,
     Lowercase,
     UppercaseCharacter,
+    IsSpace,
     LowercaseString,
     UppercaseString,
     SetMbCodePage,
@@ -149,6 +150,7 @@ impl Call {
             0x1d4 => Some(Self::ComparePrefixIgnoringCase),
             0x1d8 => Some(Self::SetJump),
             0x1dc => Some(Self::GetEnvironment),
+            0x1e0 => Some(Self::IsSpace),
             0x1ac => Some(Self::Sprintf),
             0x1bc => Some(Self::Snprintf),
             0x1b0 => Some(Self::Move),
@@ -175,6 +177,7 @@ impl Call {
             | Self::SeedRandom
             | Self::Lowercase
             | Self::UppercaseCharacter
+            | Self::IsSpace
             | Self::LowercaseString
             | Self::UppercaseString
             | Self::SetMbCodePage
@@ -317,6 +320,7 @@ impl Crt {
             Call::Sscanf => Some(scanning::sscanf(memory, args, stack, errno()?)?),
             Call::Lowercase => Some(strings::lowercase(args[0])?),
             Call::UppercaseCharacter => Some(strings::uppercase_character(args[0])?),
+            Call::IsSpace => Some(strings::is_space(args[0])?),
             Call::LowercaseString => Some(strings::lowercase_string(memory, args[0], errno()?)?),
             Call::UppercaseString => Some(strings::uppercase(memory, args[0], errno()?)?),
             Call::CompareIgnoringCase => {
@@ -466,6 +470,7 @@ pub(super) fn resolve(name: &str) -> Option<u32> {
         "_vsnprintf" => Some(API_BASE + 0x178),
         "tolower" => Some(API_BASE + 0x17c),
         "toupper" => Some(API_BASE + 0x1c4),
+        "isspace" => Some(API_BASE + 0x1e0),
         "__dllonexit" => Some(API_BASE + 0x128),
         "_mbsrchr" => Some(API_BASE + 0x12c),
         "_mbsinc" => Some(API_BASE + 0x130),
