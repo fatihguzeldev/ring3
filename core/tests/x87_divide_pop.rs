@@ -63,7 +63,7 @@ fn single_precision_divide_pop_rounds_and_updates_status() {
         (2.0, 8.0, 4.0_f32, 0),
         (3.0, 1.0, 1.0_f32 / 3.0, 0x220),
         (31.0, 1.0, 1.0_f32 / 31.0, 0x20),
-        (3.0, -1.0, -1.0_f32 / 3.0, 0x20),
+        (3.0, -1.0, -1.0_f32 / 3.0, 0x220),
     ] {
         let (mut cpu, mut memory) = load_single(top, indexed);
         assert_eq!(cpu.run(&mut memory, 4).instructions, 4);

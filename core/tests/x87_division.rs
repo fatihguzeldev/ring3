@@ -77,7 +77,7 @@ fn single_precision_reverse_m64_division_rounds_and_keeps_its_source() {
         (3.0, 6.0, 2.0_f32, 0),
         (3.0, 1.0, 1.0_f32 / 3.0, 0x220),
         (31.0, 1.0, 1.0_f32 / 31.0, 0x20),
-        (3.0, -1.0, -1.0_f32 / 3.0, 0x20),
+        (3.0, -1.0, -1.0_f32 / 3.0, 0x220),
     ] {
         let (mut cpu, mut memory) = load_single_reverse_m64(top, numerator, 0x007f, 0x0040_2210);
         assert_eq!(cpu.run(&mut memory, 3).instructions, 3);
@@ -120,7 +120,7 @@ fn single_precision_reverse_memory_division_uses_source_over_top() {
         (3.0, 6.0_f32, 2.0_f32, 0),
         (3.0, 1.0_f32, 1.0_f32 / 3.0, 0x220),
         (31.0, 1.0_f32, 1.0_f32 / 31.0, 0x20),
-        (3.0, -1.0_f32, -1.0_f32 / 3.0, 0x20),
+        (3.0, -1.0_f32, -1.0_f32 / 3.0, 0x220),
     ] {
         let (mut cpu, mut memory) = load_single_code(top, source, 0x3d);
         assert_eq!(cpu.run(&mut memory, 3).instructions, 3);
@@ -160,7 +160,7 @@ fn single_precision_memory_division_rounds_and_keeps_the_stack() {
         (8.0, 2.0, 4.0_f32, 0),
         (1.0, 3.0, 1.0_f32 / 3.0, 0x220),
         (1.0, 31.0, 1.0_f32 / 31.0, 0x20),
-        (-1.0, 3.0, -1.0_f32 / 3.0, 0x20),
+        (-1.0, 3.0, -1.0_f32 / 3.0, 0x220),
     ] {
         let (mut cpu, mut memory) = load_single(numerator, divisor);
         assert_eq!(cpu.run(&mut memory, 3).instructions, 3);

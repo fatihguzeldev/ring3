@@ -99,14 +99,14 @@ fn absolute_value_clears_c1_and_keeps_sticky_precision() {
     code.extend(SOURCE.to_le_bytes());
     code.extend([0xdf, 0xe0, 0xd9, 0xe1, 0xdf, 0xe0, 0xdd, 0x1d]);
     code.extend(OUTPUT.to_le_bytes());
-    let (mut cpu, mut memory) = load(&code, -1.0, -2.0_f32.powi(-24), 0x007f);
+    let (mut cpu, mut memory) = load(&code, -1.0 - 2.0_f64.powi(-23), -2.0_f32.powi(-24), 0x007f);
     assert_eq!(cpu.run(&mut memory, 3).instructions, 3);
     assert_eq!(cpu.register(Register32::Eax) & 0x220, 0x220);
     assert_eq!(cpu.run(&mut memory, 2).instructions, 2);
     assert_eq!(cpu.register(Register32::Eax) & 0x220, 0x20);
     cpu.set_x87_control_word(0x027f);
     assert_eq!(cpu.run(&mut memory, 1).instructions, 1);
-    assert_eq!(output(&memory), 1.0_f64.to_bits());
+    assert_eq!(output(&memory), (1.0 + 2.0_f64.powi(-22)).to_bits());
     assert_eq!(cpu.eflags, 0xced7);
 }
 

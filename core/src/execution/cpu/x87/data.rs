@@ -158,13 +158,8 @@ impl Cpu32 {
         } else {
             rounding::quotient_result(result, left, right)
         };
-        let rounded_up = if single_precision && result.is_sign_negative() {
-            rounding == Ordering::Less
-        } else {
-            rounding == Ordering::Greater
-        };
         self.x87_stack
-            .rounded(rounding != Ordering::Equal, rounded_up);
+            .rounded(rounding != Ordering::Equal, rounding == Ordering::Greater);
         self.x87_stack.values[slot] = result.to_bits();
         self.x87_stack.pop();
         Ok(())
@@ -222,7 +217,7 @@ impl Cpu32 {
             }
             .ok_or(StopReason::UnsupportedInstruction)?;
         }
-        let rounding = rounding::sum_result(result, left, right);
+        let rounding = rounding::sum_magnitude_result(result, left, right);
         self.x87_stack.rounded(
             rounding != Ordering::Equal,
             !truncating && rounding == Ordering::Greater,
@@ -380,7 +375,10 @@ impl Cpu32 {
                 }
                 .ok_or(StopReason::UnsupportedInstruction)?;
             }
-            (result, rounding::sum_result(result, left, signed_right))
+            (
+                result,
+                rounding::sum_magnitude_result(result, left, signed_right),
+            )
         } else {
             let source = if matches!(instruction.code(), Code::Fmul_st0_sti | Code::Fdiv_st0_sti) {
                 self.x87_register_value(instruction.op1_register())?
@@ -423,8 +421,6 @@ impl Cpu32 {
             }
             let rounding = if multiply {
                 rounding::product_result(result, top, source)
-            } else if single_precision {
-                rounding::signed_quotient_result(result, left, right)
             } else {
                 rounding::quotient_result(result, left, right)
             };

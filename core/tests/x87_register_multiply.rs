@@ -51,7 +51,7 @@ fn register_multiply_pop_rounds_and_removes_top() {
     for (indexed, top, expected, status) in [
         (2.0, 3.0, 6.0_f32, 0),
         (1.0 + quarter_ulp, 1.0, 1.0_f32, 0x20),
-        (-1.0 - quarter_ulp, 1.0, -1.0_f32, 0x220),
+        (-1.0 - quarter_ulp, 1.0, -1.0_f32, 0x20),
         (-0.0, 2.0, -0.0_f32, 0),
     ] {
         let (mut cpu, mut memory) = multiply_pop_fixture(indexed, top, 0x007f);

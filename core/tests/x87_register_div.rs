@@ -39,7 +39,7 @@ fn single_precision_register_divide_preserves_source_and_rounds_quotient() {
         (8.0, 2.0, 4.0_f32, 0),
         (1.0, 3.0, 1.0_f32 / 3.0, 0x220),
         (1.0, 31.0, 1.0_f32 / 31.0, 0x20),
-        (-1.0, 3.0, -1.0_f32 / 3.0, 0x20),
+        (-1.0, 3.0, -1.0_f32 / 3.0, 0x220),
     ] {
         let (mut cpu, mut memory) = load(numerator, denominator, 0x007f);
         assert_eq!(cpu.run(&mut memory, 4).instructions, 4);

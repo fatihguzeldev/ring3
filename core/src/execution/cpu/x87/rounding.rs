@@ -107,8 +107,8 @@ pub(super) fn quotient_result(result: f64, numerator: f64, denominator: f64) -> 
     product_result(numerator, result, denominator).reverse()
 }
 
-pub(super) fn signed_quotient_result(result: f64, numerator: f64, denominator: f64) -> Ordering {
-    let rounding = quotient_result(result, numerator, denominator);
+pub(super) fn sum_magnitude_result(result: f64, left: f64, right: f64) -> Ordering {
+    let rounding = sum_result(result, left, right);
     if result.is_sign_negative() {
         rounding.reverse()
     } else {
@@ -120,7 +120,7 @@ pub(super) fn square_root_result(result: f64, input: f64) -> Ordering {
     product_result(input, result, result).reverse()
 }
 
-pub(super) fn sum_result(result: f64, left: f64, right: f64) -> Ordering {
+fn sum_result(result: f64, left: f64, right: f64) -> Ordering {
     let approximated_right = result - left;
     let error = (left - (result - approximated_right)) + (right - approximated_right);
     if error > 0.0 {

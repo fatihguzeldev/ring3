@@ -63,12 +63,12 @@ fn final_single_precision_rounding_controls_precision_and_c1() {
             0x220,
         ),
         (1.0, f32::MIN_POSITIVE, 1.0_f32, 0x20),
-        (-1.0, -2.0_f32.powi(-24), -1.0_f32, 0x220),
+        (-1.0, -2.0_f32.powi(-24), -1.0_f32, 0x20),
         (
             -1.0 - 2.0_f64.powi(-23),
             -2.0_f32.powi(-24),
             -1.0_f32 - 2.0_f32.powi(-22),
-            0x20,
+            0x220,
         ),
     ] {
         let (mut cpu, mut memory) = load(0x05, top, source, SOURCE);

@@ -59,6 +59,8 @@ mod cxx_exception_cases;
 
 #[path = "../../core/tests/support/executable.rs"]
 mod executable;
+#[path = "../../core/tests/support/x87_roundup_cases.rs"]
+mod x87_roundup_cases;
 
 fn execute_accumulator_sign_extension() {
     use ring3_core::execution::{Cpu32, Register32, StopReason, load_pe32};
@@ -4882,6 +4884,8 @@ pub extern "C" fn run() -> u32 {
     execute_argument_pointers();
     execute_file_removal();
     execute_x87_status();
+    x87_roundup_cases::sums();
+    x87_roundup_cases::products_and_quotients();
     execute_x87_division();
     integer_division_cases::signed_quotients_across_budgets();
     execute_x87_memory_sum();
