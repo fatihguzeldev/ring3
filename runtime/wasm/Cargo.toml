@@ -1,0 +1,21 @@
+[package]
+name = "ring3-browser"
+description = "Bounded local browser adapter for the ring3 core."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+ring3-core = { path = "../../core" }
+serde_json = "=1.0.151"
+
+[lints.rust]
+unsafe_code = "deny"
+
+[lints.clippy]
+all = "warn"
+pedantic = "warn"

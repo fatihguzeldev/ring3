@@ -35,7 +35,8 @@
     "corpus:build:exceptions": "node tools/corpus/build-amd64-exceptions.mjs",
     "corpus:build:chain": "node tools/corpus/build-dependency-chain.mjs",
     "corpus:build:load-config": "node tools/corpus/build-load-config.mjs",
-    "corpus:build:cycle": "node tools/corpus/build-dependency-chain.mjs --cycle"
+    "corpus:build:cycle": "node tools/corpus/build-dependency-chain.mjs --cycle",
+    "browser:build": "cargo build -p ring3-browser --locked --release --target wasm32-unknown-unknown && pnpm build:typescript"
   },
   "devDependencies": {
     "typescript": "5.9.3"
