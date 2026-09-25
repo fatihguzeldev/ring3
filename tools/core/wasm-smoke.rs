@@ -901,6 +901,8 @@ mod division_executable;
 #[path = "../../core/tests/support/wide_product_executable.rs"]
 mod wide_product_executable;
 
+#[path = "../../core/tests/support/constant_load_cases.rs"]
+mod constant_load_cases;
 #[path = "../../core/tests/support/division_cases.rs"]
 mod division_cases;
 #[path = "../../core/tests/support/integer_division_cases.rs"]
@@ -911,8 +913,6 @@ mod nan_compare_cases;
 mod signed_division_cases;
 #[path = "../../core/tests/support/unsigned_division_executable.rs"]
 mod unsigned_division_executable;
-#[path = "../../core/tests/support/zero_constant_cases.rs"]
-mod zero_constant_cases;
 
 fn execute_unsigned_division() {
     use ring3_core::execution::{Process32, ProcessStop, Register32, StopReason};
@@ -4896,7 +4896,7 @@ pub extern "C" fn run() -> u32 {
     execute_x87_division();
     integer_division_cases::signed_quotients_across_budgets();
     integer_division_cases::single_quotients_across_budgets();
-    zero_constant_cases::positive_zero_preserves_lower_stack_across_budgets();
+    constant_load_cases::exact_constants_preserve_lower_stack_across_budgets();
     nan_compare_cases::nan_top_refuses_comparison_atomically();
     execute_x87_memory_sum();
     execute_x87_register_add();

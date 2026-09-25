@@ -355,7 +355,7 @@ fn examination_and_unimplemented_stack_forms_remain_explicit_stops() {
         vec![0xd9, 0xe5],
         vec![0xd9, 0xe4],
         vec![0xd9, 0xc0],
-        vec![0xd9, 0xe8],
+        vec![0xd9, 0xe9],
         vec![0xdb, 0xe2],
     ] {
         let (mut cpu, mut memory) = load(&code);

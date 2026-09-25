@@ -87,8 +87,8 @@ fn control_memory_faults_preserve_cpu_and_do_not_partially_write() {
 }
 
 #[test]
-fn floating_point_arithmetic_is_still_an_explicit_stop() {
-    let mut image = load_pe32(&executable::pe32(&[0xd9, 0xe8]), 3).unwrap();
+fn irrational_constant_load_is_still_an_explicit_stop() {
+    let mut image = load_pe32(&executable::pe32(&[0xd9, 0xe9]), 3).unwrap();
     let mut cpu = Cpu32::new(image.entry_point);
     let before = cpu;
     assert_eq!(

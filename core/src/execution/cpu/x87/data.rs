@@ -46,9 +46,9 @@ impl Stack {
 }
 
 impl Cpu32 {
-    pub(in super::super) fn x87_load_zero(&mut self) -> Result<(), StopReason> {
+    pub(in super::super) fn x87_load_constant(&mut self, value: f64) -> Result<(), StopReason> {
         self.x87_masked()?;
-        self.x87_stack.push(0.0)
+        self.x87_stack.push(value)
     }
 
     pub(in super::super) fn x87_unary(&mut self, code: Code) -> Result<(), StopReason> {

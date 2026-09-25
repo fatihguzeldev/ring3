@@ -3,13 +3,13 @@ use ring3_core::execution::{Cpu32, GuestMemory, Register32, StopReason, load_pe3
 pub const INPUT: u32 = 0x0040_2200;
 pub const OUTPUT: u32 = 0x0040_2300;
 
-pub fn load(values: &[f64]) -> (Cpu32, GuestMemory) {
+pub fn load(values: &[f64], constant: u8) -> (Cpu32, GuestMemory) {
     let mut code = Vec::new();
     for i in 0..values.len() {
         code.extend([0xdd, 0x05]);
         code.extend((INPUT + u32::try_from(i).unwrap() * 8).to_le_bytes());
     }
-    code.extend([0xd9, 0xee, 0xdf, 0xe0]);
+    code.extend([0xd9, constant, 0xdf, 0xe0]);
     for i in 0..=values.len() {
         code.extend([0xdd, 0x1d]);
         code.extend((OUTPUT + u32::try_from(i).unwrap() * 8).to_le_bytes());
@@ -50,20 +50,22 @@ pub fn read(memory: &GuestMemory, address: u32) -> u64 {
     u64::from_le_bytes(bytes)
 }
 
-pub fn positive_zero_preserves_lower_stack_across_budgets() {
+pub fn exact_constants_preserve_lower_stack_across_budgets() {
     let values = [-0.0, 1.25, -2.5, 3.0, f64::MIN_POSITIVE, -f64::MAX, 42.0];
     for depth in 0..=7 {
         for pc in [0, 0x100, 0x200, 0x300] {
             for rc in [0, 0x400, 0x800, 0xc00] {
-                check(&values[..depth], pc | rc | 0x7f);
+                for constant in [0xee, 0xe8] {
+                    check(&values[..depth], pc | rc | 0x7f, constant);
+                }
             }
         }
     }
 }
 
-fn check(values: &[f64], control: u16) {
+fn check(values: &[f64], control: u16, constant: u8) {
     for budget in [1, 3, 30] {
-        let (mut cpu, mut memory) = load(values);
+        let (mut cpu, mut memory) = load(values, constant);
         cpu.set_x87_control_word(control);
         let before = cpu;
         let pages = memory.mapped_pages();
@@ -90,7 +92,10 @@ fn check(values: &[f64], control: u16) {
             assert!(steps < 20);
         }
         assert_eq!(steps, u64::try_from(values.len() * 2 + 4).unwrap());
-        assert_eq!(read(&memory, OUTPUT), 0);
+        assert_eq!(
+            read(&memory, OUTPUT),
+            if constant == 0xee { 0 } else { 1_f64.to_bits() }
+        );
         for (i, value) in values.iter().rev().enumerate() {
             assert_eq!(
                 read(&memory, OUTPUT + u32::try_from(i + 1).unwrap() * 8),
