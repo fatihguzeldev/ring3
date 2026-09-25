@@ -46,6 +46,11 @@ impl Stack {
 }
 
 impl Cpu32 {
+    pub(in super::super) fn x87_load_zero(&mut self) -> Result<(), StopReason> {
+        self.x87_masked()?;
+        self.x87_stack.push(0.0)
+    }
+
     pub(in super::super) fn x87_unary(&mut self, code: Code) -> Result<(), StopReason> {
         match code {
             Code::Fabs | Code::Fchs => self.x87_sign(code),

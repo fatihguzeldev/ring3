@@ -222,6 +222,7 @@ impl Cpu32 {
                 self.x87_compare(instruction, memory)?;
             }
             Code::Fnstsw_AX | Code::Fnstsw_m2byte => self.x87_store_status(instruction, memory)?,
+            Code::Fldz => self.x87_load_zero()?,
             Code::Fld_m32fp
             | Code::Fld_m64fp
             | Code::Fst_m32fp

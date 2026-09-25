@@ -909,6 +909,8 @@ mod integer_division_cases;
 mod signed_division_cases;
 #[path = "../../core/tests/support/unsigned_division_executable.rs"]
 mod unsigned_division_executable;
+#[path = "../../core/tests/support/zero_constant_cases.rs"]
+mod zero_constant_cases;
 
 fn execute_unsigned_division() {
     use ring3_core::execution::{Process32, ProcessStop, Register32, StopReason};
@@ -4892,6 +4894,7 @@ pub extern "C" fn run() -> u32 {
     execute_x87_division();
     integer_division_cases::signed_quotients_across_budgets();
     integer_division_cases::single_quotients_across_budgets();
+    zero_constant_cases::positive_zero_preserves_lower_stack_across_budgets();
     execute_x87_memory_sum();
     execute_x87_register_add();
     execute_x87_divide_pop();
