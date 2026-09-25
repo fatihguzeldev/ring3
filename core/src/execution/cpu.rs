@@ -42,7 +42,7 @@ pub enum StopReason {
     Intercepted,
     UnsupportedInstruction,
     InvalidInstruction,
-    /// zero divisor or an unsigned quotient too large for its destination.
+    /// zero divisor or a quotient outside its signed or unsigned destination range.
     DivideError,
     MemoryFault(MemoryError),
 }
@@ -192,6 +192,7 @@ impl Cpu32 {
             }
             Code::Mul_rm32 => self.multiply_unsigned_dword(instruction, memory)?,
             Code::Div_rm8 | Code::Div_rm16 | Code::Div_rm32 => self.divide(instruction, memory)?,
+            Code::Idiv_rm32 => self.divide_signed_dword(instruction, memory)?,
             Code::Cdq => self.sign_extend_accumulator(),
             Code::Inc_rm8
             | Code::Inc_rm16

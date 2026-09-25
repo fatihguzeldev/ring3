@@ -901,6 +901,8 @@ mod wide_product_executable;
 mod division_cases;
 #[path = "../../core/tests/support/integer_division_cases.rs"]
 mod integer_division_cases;
+#[path = "../../core/tests/support/signed_division_cases.rs"]
+mod signed_division_cases;
 #[path = "../../core/tests/support/unsigned_division_executable.rs"]
 mod unsigned_division_executable;
 
@@ -4887,6 +4889,8 @@ pub extern "C" fn run() -> u32 {
     execute_x87_divide_pop();
     execute_wide_product();
     execute_unsigned_division();
+    signed_division_cases::arithmetic();
+    signed_division_cases::errors();
     execute_command_line();
     execute_image();
     execute_function();

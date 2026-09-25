@@ -1,6 +1,27 @@
 use super::{Cpu32, GuestMemory, Instruction, Register32, StopReason};
 
 impl Cpu32 {
+    pub(super) fn divide_signed_dword(
+        &mut self,
+        instruction: &Instruction,
+        memory: &GuestMemory,
+    ) -> Result<(), StopReason> {
+        let source = self.operand(instruction, 0)?;
+        let divisor = i64::from(self.read_operand(source, memory)?.cast_signed());
+        let dividend = ((u64::from(self.register(Register32::Edx)) << 32)
+            | u64::from(self.register(Register32::Eax)))
+        .cast_signed();
+        let quotient = dividend
+            .checked_div(divisor)
+            .and_then(|value| i32::try_from(value).ok())
+            .ok_or(StopReason::DivideError)?;
+        let remainder = i32::try_from(dividend % divisor).expect("remainder fits signed divisor");
+        self.set_register(Register32::Eax, quotient.cast_unsigned());
+        self.set_register(Register32::Edx, remainder.cast_unsigned());
+        // arithmetic flags are undefined and deterministically preserved.
+        Ok(())
+    }
+
     pub(super) fn divide(
         &mut self,
         instruction: &Instruction,
