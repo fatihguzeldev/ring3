@@ -1547,6 +1547,8 @@ mod icon_executable;
 
 #[path = "../../core/tests/support/window_message_cases.rs"]
 mod window_message_cases;
+#[path = "../../core/tests/support/window_message_retirement_cases.rs"]
+mod window_message_retirement_cases;
 
 #[path = "../../core/tests/support/path_component_cases.rs"]
 mod path_component_cases;
@@ -1663,6 +1665,7 @@ fn execute_path_components() {
 
 fn execute_window_messages() {
     window_message_cases::verify();
+    window_message_retirement_cases::verify();
     #[cfg(windows_demo)]
     {
         use ring3_core::execution::{Process32, ProcessStop, StopReason};

@@ -267,7 +267,7 @@ impl Process32 {
         if success {
             self.desktop.activate_created(pending.window);
         } else {
-            self.desktop.remove(pending.window);
+            self.retire_window(pending.window);
         }
         self.cpu
             .set_register(Register32::Eax, if success { pending.window } else { 0 });

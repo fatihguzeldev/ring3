@@ -84,6 +84,11 @@ impl Queue {
             .map(|(index, message)| (index, *message))
     }
 
+    pub(super) fn discard_retired_windows(&mut self, desktop: &Desktop) {
+        self.entries
+            .retain(|message| message.hwnd == 0 || desktop.window(message.hwnd).is_some());
+    }
+
     pub(super) fn remove(&mut self, index: usize) {
         self.entries
             .remove(index)

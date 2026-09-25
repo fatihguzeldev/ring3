@@ -309,7 +309,7 @@ impl Process32 {
                     .state_mut(self.cpu.fs_base())?
                     .callbacks
                     .finish(&mut self.cpu, &self.memory)?;
-                self.desktop.remove(pending.window);
+                self.retire_window(pending.window);
                 self.cpu.set_register(Register32::Eax, 0);
                 return Ok(());
             }

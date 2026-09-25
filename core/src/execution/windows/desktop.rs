@@ -489,6 +489,16 @@ pub(super) fn read_title(memory: &GuestMemory, pointer: u32) -> Result<String, D
 }
 
 impl super::Process32 {
+    pub(super) fn retire_window(&mut self, handle: u32) {
+        self.desktop.remove(handle);
+        self.messages.discard_retired_windows(&self.desktop);
+    }
+
+    fn retire_window_children(&mut self, handle: u32) {
+        self.desktop.remove_children(handle);
+        self.messages.discard_retired_windows(&self.desktop);
+    }
+
     pub(super) fn destroy_dialog(&mut self, handle: u32) -> Result<bool, DispatchError> {
         let Some(window) = self.desktop.window(handle) else {
             thread::Teb(self.cpu.fs_base()).set_last_error(&mut self.memory, 1400)?;
@@ -539,13 +549,11 @@ impl super::Process32 {
         pending: DestroyPending,
     ) -> Result<(), DispatchError> {
         if !pending.nc_destroy {
-            self.desktop.remove_children(pending.handle);
             let next = DestroyPending {
                 nc_destroy: true,
                 ..pending
             };
-            return self
-                .threads
+            self.threads
                 .state_mut(self.cpu.fs_base())?
                 .callbacks
                 .replace(
@@ -557,13 +565,15 @@ impl super::Process32 {
                     },
                     pending.procedure,
                     &[pending.handle, 0x82, 0, 0],
-                );
+                )?;
+            self.retire_window_children(pending.handle);
+            return Ok(());
         }
         self.threads
             .state_mut(self.cpu.fs_base())?
             .callbacks
             .finish(&mut self.cpu, &self.memory)?;
-        self.desktop.remove(pending.handle);
+        self.retire_window(pending.handle);
         self.cpu.set_register(Register32::Eax, 1);
         Ok(())
     }
