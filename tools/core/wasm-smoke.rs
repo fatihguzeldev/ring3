@@ -909,6 +909,8 @@ mod case_compare_executable;
 
 #[path = "../../core/tests/support/format_width_cases.rs"]
 mod format_width_cases;
+#[path = "../../core/tests/support/message_box_cases.rs"]
+mod message_box_cases;
 #[path = "../../core/tests/support/formatting_executable.rs"]
 mod formatting_executable;
 
@@ -1746,6 +1748,11 @@ fn execute_path_components() {
 fn execute_window_messages() {
     window_message_cases::verify();
     window_message_cases::verify_default_activation();
+    message_box_cases::imported_message_box_waits_for_acknowledgement();
+    message_box_cases::message_snapshots_preserve_bytes_owner_and_error_state();
+    message_box_cases::malformed_messages_do_not_publish_or_mutate();
+    message_box_cases::changed_continuations_cannot_consume_acknowledgements();
+    message_box_cases::pending_message_pauses_ready_threads_and_pins_completion();
     format_width_cases::imported_width_runs_whole_or_stepwise();
     format_width_cases::minimum_widths_preserve_values_and_wrapper_rules();
     format_width_cases::zero_padding_preserves_signs_and_wrapper_rules();

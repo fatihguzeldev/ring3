@@ -31,6 +31,7 @@ mod gdi;
 mod guest;
 mod heap;
 mod hooks;
+mod message_box;
 mod messages;
 mod modules;
 mod parameters;
@@ -52,6 +53,7 @@ pub use dinput::{MouseInput, MouseInputError};
 pub use directory::{
     FileContents, FileContentsMode, FileContentsRequest, FileMetadata, SupplyFileContentsError,
 };
+pub use message_box::{MessageBoxRequest, MessageBoxResponseError};
 pub use messages::{PostMessageError, PostedMessage};
 pub use parameters::ProcessOptions;
 
@@ -85,6 +87,7 @@ pub struct Process32 {
     classes: classes::Classes,
     desktop: desktop::Desktop,
     messages: messages::Queue,
+    message_box: message_box::State,
     cursors: cursors::Cursors,
     heap: heap::Heap,
     critical_sections: critical_sections::CriticalSections,
@@ -106,6 +109,8 @@ pub enum ProcessStop {
     Exited(u32),
     /// all guest work is paused until the host supplies the pending file snapshot.
     FileContentsRequired,
+    /// all guest work is paused until the host acknowledges the pending `MB_OK` request.
+    MessageBoxRequired,
     /// the current thread has no queued message and can resume after one arrives.
     WaitingForMessage,
     /// every activated thread is waiting for an event; no guest work is ready.
@@ -160,6 +165,7 @@ enum Api {
     SetWindowText,
     EnableWindow,
     EndDialog,
+    MessageBox,
     SetWindowPos,
     DestroyWindow,
     ShowWindow,
@@ -205,6 +211,7 @@ enum DispatchError {
     Unsupported,
     WaitingForMessage,
     FileContentsRequired,
+    MessageBoxRequired,
 }
 
 fn collect_modules<'a>(
@@ -236,6 +243,7 @@ impl DispatchError {
             Self::Unsupported => ProcessStop::UnsupportedApi { address },
             Self::WaitingForMessage => ProcessStop::WaitingForMessage,
             Self::FileContentsRequired => ProcessStop::FileContentsRequired,
+            Self::MessageBoxRequired => ProcessStop::MessageBoxRequired,
         }
     }
 }
@@ -285,6 +293,7 @@ impl Api {
             0x45c => Some(Self::SetWindowText),
             0x460 => Some(Self::EnableWindow),
             0x468 => Some(Self::EndDialog),
+            0x5e0 => Some(Self::MessageBox),
             0x46c => Some(Self::SetWindowPos),
             0x470 => Some(Self::DestroyWindow),
             0x440 => Some(Self::ShowWindow),
@@ -400,6 +409,7 @@ impl Api {
                 "SetWindowTextA" => 0x45c,
                 "EnableWindow" => 0x460,
                 "EndDialog" => 0x468,
+                "MessageBoxA" => 0x5e0,
                 "SetWindowPos" => 0x46c,
                 "DestroyWindow" => 0x470,
                 "ShowWindow" => 0x440,
@@ -542,7 +552,11 @@ impl Api {
             | Self::CxxThrow => 2,
             Self::CallWindowProc | Self::CreateDialog | Self::PeekMessage => 5,
             Self::SetWindowPos => 7,
-            Self::CallNextHook | Self::SendMessage | Self::PostMessage | Self::GetMessage => 4,
+            Self::CallNextHook
+            | Self::SendMessage
+            | Self::PostMessage
+            | Self::GetMessage
+            | Self::MessageBox => 4,
             Self::Window(call) => call.arguments(),
             Self::GetLastError
             | Self::GetCommandLine
@@ -697,6 +711,7 @@ impl Process32 {
             classes: classes::Classes::default(),
             desktop: desktop::Desktop::default(),
             messages: messages::Queue::default(),
+            message_box: message_box::State::default(),
             registry: registry::Registry::default(),
             gdi: gdi::Gdi::default(),
             cursors: cursors::Cursors::default(),
@@ -822,6 +837,8 @@ impl Process32 {
     /// the host may advance elapsed time and run again; execution never advances the clock.
     /// a pending file-content request pauses every thread before scheduling on positive
     /// budgets; supplying its snapshot permits the original file open to be retried.
+    /// a pending `MB_OK` request likewise pauses all work until host acknowledgement,
+    /// then pins its original call through completion before scheduling other threads.
     /// repeated strings use one step per element, or one for a zero-count operation.
     /// faults consume no unit for the faulting operation. exit is terminal and
     /// later calls return the same code without executing more guest work.
@@ -839,8 +856,13 @@ impl Process32 {
             result.reason = stop;
             return result;
         }
-        if budget != 0 && self.pending_file_contents().is_some() {
-            result.reason = ProcessStop::FileContentsRequired;
+        if budget != 0
+            && let Some(stop) = self
+                .pending_file_contents()
+                .map(|_| ProcessStop::FileContentsRequired)
+                .or_else(|| self.message_box.stop(&self.cpu))
+        {
+            result.reason = stop;
             return result;
         }
         let mut remaining = budget;
@@ -951,7 +973,8 @@ impl Process32 {
         guest::read_words(&self.memory, stack, &mut frame[..words])?;
         if matches!(
             api,
-            Api::SuspendThread
+            Api::MessageBox
+                | Api::SuspendThread
                 | Api::ResumeThread
                 | Api::CloseHandle
                 | Api::Directory(
@@ -997,6 +1020,7 @@ impl Process32 {
             Api::DestroyWindow => self.destroy_dialog(frame[1])?,
             Api::DispatchMessage => self.dispatch_message(frame[1])?,
             Api::CreateDialog => self.create_dialog(&frame[1..words])?,
+            Api::MessageBox => self.message_box(&frame[..words])?,
             Api::CallNextHook => self.call_next_hook(&frame[1..words])?,
             Api::Window(creation::Call::Create) => self.create_window(&frame[1..words])?,
             Api::Module(modules::Call::Load) => self.load_module(&frame[1..words])?,
@@ -1428,6 +1452,7 @@ impl Process32 {
             ),
             Api::Crt(call) => self.crt_call(call, args)?,
             Api::Sound(_)
+            | Api::MessageBox
             | Api::CreateDialog
             | Api::DestroyWindow
             | Api::UpdateWindow

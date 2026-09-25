@@ -179,7 +179,9 @@ impl Process32 {
         &mut self,
         budget: u64,
     ) -> Result<Option<u64>, DispatchError> {
-        let pinned = if self.startup.is_complete() {
+        let pinned = if self.message_box.is_pending() {
+            Some(thread::BASE)
+        } else if self.startup.is_complete() {
             self.modules.loader_owner()
         } else {
             Some(thread::BASE)

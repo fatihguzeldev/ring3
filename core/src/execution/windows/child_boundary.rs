@@ -32,6 +32,7 @@ impl Api {
                 | Self::DispatchMessage
                 | Self::SetWindowText
                 | Self::EnableWindow
+                | Self::MessageBox
                 | Self::EndDialog
                 | Self::SetWindowPos
                 | Self::DestroyWindow

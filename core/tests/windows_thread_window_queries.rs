@@ -36,7 +36,9 @@ fn query_frames_are_read_but_stateful_child_gui_remains_guarded_before_frame_rea
             ProcessStop::Stopped(StopReason::MemoryFault(_))
         ));
     }
-    for offset in [0x2a8, 0x2ac, 0x2c0, 0x430, 0x464, 0x2c4, 0x434, 12, 0xa0] {
+    for offset in [
+        0x2a8, 0x2ac, 0x2c0, 0x430, 0x464, 0x2c4, 0x434, 0x5e0, 12, 0xa0,
+    ] {
         p.cpu.eip = 0x7000_0000 + offset;
         p.cpu.set_register(Register32::Esp, 0);
         let before = p.cpu;
