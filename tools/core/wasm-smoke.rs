@@ -1619,6 +1619,8 @@ mod hook_chain_cases;
 #[path = "../../core/tests/support/icon_executable.rs"]
 mod icon_executable;
 
+#[path = "../../core/tests/support/default_key_cases.rs"]
+mod default_key_cases;
 #[path = "../../core/tests/support/window_message_cases.rs"]
 mod window_message_cases;
 #[path = "../../core/tests/support/window_message_retirement_cases.rs"]
@@ -1740,6 +1742,9 @@ fn execute_path_components() {
 fn execute_window_messages() {
     window_message_cases::verify();
     window_message_cases::verify_default_activation();
+    default_key_cases::ordinary_keys_preserve_state();
+    default_key_cases::special_keys_and_faults_remain_atomic();
+    default_key_cases::default_key_callbacks_resume_whole_or_stepwise();
     window_message_retirement_cases::verify();
     #[cfg(windows_demo)]
     {

@@ -508,6 +508,11 @@ impl Process32 {
                 )?;
                 Ok(0)
             }
+            0x100 | 0x101
+                if args[2] <= 255 && !matches!(args[2], 0x12 | 0x5d | 0x79 | 0xa4 | 0xa5) =>
+            {
+                Ok(0)
+            }
             0x1c | 0x24 | 1 | 2 | 0x82 => Ok(0),
             _ => Err(DispatchError::Unsupported),
         }
