@@ -8,6 +8,7 @@ mod arguments;
 mod buffers;
 mod floating;
 mod initializers;
+mod jump;
 mod locals;
 mod multibyte;
 mod onexit;
@@ -91,6 +92,7 @@ pub(super) enum Call {
     Sort,
     Floor,
     ComparePrefixIgnoringCase,
+    SetJump,
 }
 
 impl Call {
@@ -143,6 +145,7 @@ impl Call {
             0x1cc => Some(Self::Sort),
             0x1d0 => Some(Self::Floor),
             0x1d4 => Some(Self::ComparePrefixIgnoringCase),
+            0x1d8 => Some(Self::SetJump),
             0x1ac => Some(Self::Sprintf),
             0x1bc => Some(Self::Snprintf),
             0x1b0 => Some(Self::Move),
@@ -176,6 +179,7 @@ impl Call {
             | Self::Remove => 1,
             Self::ControlFp
             | Self::Floor
+            | Self::SetJump
             | Self::MbSearchReverse
             | Self::FindCharacter
             | Self::Stat
@@ -288,6 +292,7 @@ impl Crt {
                 floating::floor(cpu, args)?;
                 None
             }
+            Call::SetJump => Some(jump::capture(cpu, memory, args)?),
             Call::TypeName => Some(type_names::name(
                 memory,
                 heap,
@@ -413,6 +418,7 @@ pub(super) fn resolve(name: &str) -> Option<u32> {
         "_initterm" => Some(initializers::BASE),
         "qsort" => Some(API_BASE + 0x1cc),
         "floor" => Some(API_BASE + 0x1d0),
+        "_setjmp3" => Some(API_BASE + 0x1d8),
         "__getmainargs" => Some(API_BASE + 0x110),
         "memset" => Some(API_BASE + 0x114),
         "memcmp" => Some(API_BASE + 0x138),
