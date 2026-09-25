@@ -1548,6 +1548,8 @@ mod file_stream_cases;
 
 #[path = "../../core/tests/support/file_read_cases.rs"]
 mod file_read_cases;
+#[path = "../../core/tests/support/on_demand_file_cases.rs"]
+mod on_demand_file_cases;
 
 #[path = "../../core/tests/support/file_seek_cases.rs"]
 mod file_seek_cases;
@@ -1614,6 +1616,7 @@ fn execute_file_streams() {
     disk_geometry_cases::imported_geometry_is_deterministic_and_drive_local();
     file_seek_cases::imported_seek_has_independent_position_and_preserves_size();
     file_read_cases::imported_reads_copy_real_bytes_and_stop_at_eof();
+    on_demand_file_cases::imported_opens_resume_read_and_refill_evicted_snapshots();
     #[cfg(windows_demo)]
     verify_compiled_file_streams();
 }

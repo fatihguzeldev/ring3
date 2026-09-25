@@ -75,10 +75,13 @@ impl Directory {
             };
             return failed(teb, memory, error);
         };
-        if self.files[index].contents.is_none() {
+        if self.files[index].contents.is_none() && !self.content_cache.on_demand() {
             return Err(DispatchError::Unsupported);
         }
         if self.opened.live.len() == MAX_LIVE || self.opened.next > LAST {
+            return failed(teb, memory, 8);
+        }
+        if !self.ensure_contents(index)? {
             return failed(teb, memory, 8);
         }
         let handle = self.opened.next;
@@ -264,5 +267,30 @@ mod tests {
         assert!(directory.close_file(FIRST));
         assert_eq!(directory.files[0].readers, 0);
         assert_eq!(directory.contents(0), b"next");
+    }
+
+    #[test]
+    fn exhausted_handle_identity_precedes_an_on_demand_content_request() {
+        let (mut directory, mut memory, teb) = setup();
+        directory
+            .configure_file_contents(super::super::FileContentsMode::OnDemand { cache_bytes: 4 })
+            .unwrap();
+        directory.files[0].contents = None;
+        directory.opened.next = LAST + 4;
+        let args = [0x1000, 0x8000_0000, 1, 0, 3, 0, 0];
+        assert!(matches!(
+            directory.open_file(&args, teb, &mut memory),
+            Ok(u32::MAX)
+        ));
+        assert_eq!(teb.last_error(&memory).unwrap(), 8);
+        assert!(directory.files[0].contents.is_none());
+        assert_eq!(directory.files[0].readers, 0);
+        directory.opened.next = FIRST;
+        assert!(matches!(
+            directory.open_file(&args, teb, &mut memory),
+            Err(DispatchError::FileContentsRequired)
+        ));
+        assert_eq!(directory.files[0].readers, 0);
+        assert!(directory.opened.live.is_empty());
     }
 }

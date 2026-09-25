@@ -48,7 +48,9 @@ mod user_atoms;
 pub use clock::ClockError;
 pub use d3d8::Frame;
 pub use desktop::WindowSnapshot;
-pub use directory::{FileContents, FileMetadata};
+pub use directory::{
+    FileContents, FileContentsMode, FileContentsRequest, FileMetadata, SupplyFileContentsError,
+};
 pub use messages::{PostMessageError, PostedMessage};
 pub use parameters::ProcessOptions;
 
@@ -96,6 +98,8 @@ pub struct Process32 {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ProcessStop {
     Exited(u32),
+    /// all guest work is paused until the host supplies the pending file snapshot.
+    FileContentsRequired,
     /// the current thread has no queued message and can resume after one arrives.
     WaitingForMessage,
     /// every activated thread is waiting for an event; no guest work is ready.
@@ -194,6 +198,7 @@ enum DispatchError {
     Memory(MemoryError),
     Unsupported,
     WaitingForMessage,
+    FileContentsRequired,
 }
 
 fn collect_modules<'a>(
@@ -224,6 +229,7 @@ impl DispatchError {
             Self::Memory(error) => ProcessStop::Stopped(StopReason::MemoryFault(error)),
             Self::Unsupported => ProcessStop::UnsupportedApi { address },
             Self::WaitingForMessage => ProcessStop::WaitingForMessage,
+            Self::FileContentsRequired => ProcessStop::FileContentsRequired,
         }
     }
 }
@@ -616,6 +622,7 @@ impl Process32 {
             options.directories,
             options.files,
         )?;
+        current_directory.configure_file_contents(options.file_contents_mode)?;
         current_directory.attach_contents(options.file_contents)?;
         let mut diagnostic_imports = diagnostics::Imports::default();
         let reserved = reserved_ranges();
@@ -764,6 +771,8 @@ impl Process32 {
     /// finite event waits expire at a positive run boundary using the supplied elapsed time.
     /// when no thread is ready, returns the synchronization wait without more work.
     /// the host may advance elapsed time and run again; execution never advances the clock.
+    /// a pending file-content request pauses every thread before scheduling on positive
+    /// budgets; supplying its snapshot permits the original file open to be retried.
     /// repeated strings use one step per element, or one for a zero-count operation.
     /// faults consume no unit for the faulting operation. exit is terminal and
     /// later calls return the same code without executing more guest work.
@@ -779,6 +788,10 @@ impl Process32 {
         }
         if let Some(stop) = self.startup.failed() {
             result.reason = stop;
+            return result;
+        }
+        if budget != 0 && self.pending_file_contents().is_some() {
+            result.reason = ProcessStop::FileContentsRequired;
             return result;
         }
         let mut remaining = budget;

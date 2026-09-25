@@ -13,7 +13,7 @@ pub(super) struct File {
     pub(super) path: Box<[u8]>,
     pub(super) size: u64,
     pub(super) removed: bool,
-    pub(super) contents: Option<Vec<u8>>,
+    pub(super) contents: Option<Box<[u8]>>,
     pub(super) readers: u16,
 }
 

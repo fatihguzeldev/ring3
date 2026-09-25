@@ -6,6 +6,7 @@ use super::{
 
 mod catalog;
 mod contents;
+mod demand;
 mod files;
 mod paths;
 mod search;
@@ -13,6 +14,7 @@ mod volume;
 pub use catalog::FileMetadata;
 pub use contents::FileContents;
 pub(super) use contents::ReadFile;
+pub use demand::{FileContentsMode, FileContentsRequest, SupplyFileContentsError};
 
 pub(super) struct Directory {
     terminated: Vec<u8>,
@@ -20,6 +22,7 @@ pub(super) struct Directory {
     files: Vec<catalog::File>,
     searches: search::Searches,
     opened: files::Opened,
+    content_cache: demand::Cache,
 }
 
 pub(super) struct Status {
@@ -193,6 +196,7 @@ impl Directory {
             files,
             searches: search::Searches::default(),
             opened: files::Opened::default(),
+            content_cache: demand::Cache::default(),
         })
     }
 

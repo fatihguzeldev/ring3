@@ -19,7 +19,7 @@ impl std::fmt::Debug for FileContents<'_> {
 }
 
 pub(in super::super) enum ReadFile {
-    Ready(usize),
+    File(usize),
     Missing,
     Directory,
 }
@@ -54,7 +54,7 @@ impl Directory {
             total = total
                 .checked_add(input.bytes.len())
                 .ok_or(LoadError::FileContentsLimitExceeded)?;
-            if total > 1024 * 1024 * 1024 {
+            if total > self.content_cache.limit() {
                 return Err(LoadError::FileContentsLimitExceeded);
             }
         }
@@ -65,7 +65,7 @@ impl Directory {
                 .try_reserve_exact(input.bytes.len())
                 .map_err(|_| LoadError::FileContentsAllocationFailed)?;
             bytes.extend_from_slice(input.bytes);
-            self.files[index].contents = Some(bytes);
+            self.files[index].contents = Some(bytes.into_boxed_slice());
         }
         Ok(())
     }
@@ -88,8 +88,8 @@ impl Directory {
                 .enumerate()
                 .find(|(_, file)| !file.removed && file.path.eq_ignore_ascii_case(&path))
         {
-            return if file.contents.is_some() {
-                Ok(ReadFile::Ready(index))
+            return if file.contents.is_some() || self.content_cache.on_demand() {
+                Ok(ReadFile::File(index))
             } else {
                 Err(DispatchError::Unsupported)
             };

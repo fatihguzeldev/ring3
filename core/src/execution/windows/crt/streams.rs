@@ -109,7 +109,7 @@ impl Streams {
             return Err(DispatchError::Unsupported);
         }
         let file = match directory.read_file(&mut path)? {
-            ReadFile::Ready(index) => index,
+            ReadFile::File(index) => index,
             ReadFile::Missing => return failed(memory, errno, 2),
             ReadFile::Directory => return failed(memory, errno, 13),
         };
@@ -118,6 +118,9 @@ impl Streams {
         else {
             return failed(memory, errno, 24);
         };
+        if !directory.ensure_contents(file)? {
+            return failed(memory, errno, 12);
+        }
         let Some(pointer) = heap.allocate_stream(memory)? else {
             return failed(memory, errno, 12);
         };

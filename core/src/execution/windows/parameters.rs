@@ -23,6 +23,8 @@ pub struct ProcessOptions<'a> {
     pub files: &'a [super::directory::FileMetadata<'a>],
     /// immutable snapshots for declared files, limited to one gib in total.
     pub file_contents: &'a [super::directory::FileContents<'a>],
+    /// defaults to supplied snapshots; on-demand mode permits bounded cache eviction.
+    pub file_contents_mode: super::directory::FileContentsMode,
     pub command_line: &'a [u8],
     /// explicit name=value entries; win32 queries own a snapshot separate from `_environ`.
     /// ordinary ascii names match case-insensitively; the first duplicate wins.
@@ -41,6 +43,7 @@ impl Default for ProcessOptions<'_> {
             directories: &[],
             files: &[],
             file_contents: &[],
+            file_contents_mode: super::directory::FileContentsMode::Supplied,
             command_line: b"program.exe",
             environment: &[],
             diagnostic_imports: false,
