@@ -9,6 +9,7 @@ mod contents;
 mod files;
 mod paths;
 mod search;
+mod volume;
 pub use catalog::FileMetadata;
 pub use contents::FileContents;
 pub(super) use contents::ReadFile;
@@ -46,12 +47,14 @@ pub(super) enum Call {
     ShortPath,
     OpenFile,
     FileSize,
+    DiskGeometry,
 }
 
 impl Call {
     pub(super) fn arguments(self) -> usize {
         match self {
             Self::OpenFile => 7,
+            Self::DiskGeometry => 5,
             Self::ShortPath => 3,
             Self::Query | Self::FindFirst | Self::FindNext | Self::FileSize => 2,
             Self::Change | Self::FindClose | Self::Attributes => 1,
@@ -62,10 +65,16 @@ impl Call {
 impl Process32 {
     pub(super) fn directory(&mut self, call: Call, arguments: &[u32]) -> Result<(), DispatchError> {
         let teb = thread::Teb(self.cpu.fs_base());
-        if matches!(call, Call::OpenFile | Call::FileSize) && self.threads.id(teb).is_none() {
+        if matches!(call, Call::OpenFile | Call::FileSize | Call::DiskGeometry)
+            && self.threads.id(teb).is_none()
+        {
             return Err(DispatchError::Unsupported);
         }
         let result = match call {
+            Call::DiskGeometry => {
+                self.current_directory
+                    .disk_geometry(arguments, teb, &mut self.memory)?
+            }
             Call::FileSize => self.current_directory.file_size(
                 arguments[0],
                 arguments[1],
