@@ -508,7 +508,7 @@ impl Process32 {
                 )?;
                 Ok(0)
             }
-            0x24 | 1 | 2 | 0x82 => Ok(0),
+            0x1c | 0x24 | 1 | 2 | 0x82 => Ok(0),
             _ => Err(DispatchError::Unsupported),
         }
     }

@@ -1665,6 +1665,7 @@ fn execute_path_components() {
 
 fn execute_window_messages() {
     window_message_cases::verify();
+    window_message_cases::verify_default_activation();
     window_message_retirement_cases::verify();
     #[cfg(windows_demo)]
     {

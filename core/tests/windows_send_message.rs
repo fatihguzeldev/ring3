@@ -22,6 +22,41 @@ fn sends_execute_the_current_procedure_with_real_arguments_and_results() {
 }
 
 #[test]
+fn default_application_activation_returns_through_guest_procedures() {
+    window_message_cases::verify_default_activation();
+}
+
+#[test]
+fn default_activation_keeps_invalid_window_and_unknown_message_boundaries() {
+    let mut p = created();
+    for hwnd in [0, 123, WINDOW + 4] {
+        assert_eq!(call(&mut p, 0x7000_02ac, &[hwnd, 0x1c, 1, 0]), 0);
+        assert_eq!(p.last_error().unwrap(), 1400);
+    }
+    let windows = p.window_snapshots();
+    for message in [0x1b, 0x1d, 0x1_001c] {
+        prepare(&mut p, 0x7000_02ac, &[WINDOW, message, 1, 0]);
+        assert_eq!(
+            unchanged_stop(&mut p),
+            ProcessStop::UnsupportedApi {
+                address: 0x7000_02ac
+            }
+        );
+        assert_eq!(p.window_snapshots(), windows);
+        assert_eq!(p.last_error().unwrap(), 1400);
+    }
+    p.memory
+        .protect(0x7ffd_e000, 4096, Permissions::READ)
+        .unwrap();
+    assert_eq!(call(&mut p, 0x7000_02ac, &[WINDOW, 0x1c, 0, u32::MAX]), 0);
+    prepare(&mut p, 0x7000_02ac, &[0, 0x1c, 1, 0]);
+    assert!(matches!(
+        unchanged_stop(&mut p),
+        ProcessStop::Stopped(StopReason::MemoryFault(_))
+    ));
+}
+
+#[test]
 fn invalid_and_stale_windows_fail_without_dispatch_and_error_writes_are_checked() {
     let mut p = created();
     for handle in [0, 123, WINDOW + 4] {

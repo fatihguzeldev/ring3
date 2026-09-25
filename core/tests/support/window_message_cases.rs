@@ -1,4 +1,4 @@
-use ring3_core::execution::{Cpu32, Process32, ProcessStop, Register32, StopReason};
+use ring3_core::execution::{Cpu32, Permissions, Process32, ProcessStop, Register32, StopReason};
 
 use super::window_creation_executable;
 
@@ -97,4 +97,60 @@ pub fn verify() {
         }
         expected = Some((p.cpu, counts));
     }
+}
+
+pub fn verify_default_activation() {
+    let mut results = Vec::new();
+    for budget in [1, 5, 100] {
+        let mut p = created();
+        let windows = p.window_snapshots();
+        call(&mut p, 0x7000_0000, &[77]);
+        for (active, other_thread) in [(0, 0), (1, 123), (2, 0xdead_beef), (u32::MAX, u32::MAX)] {
+            assert_eq!(
+                call(&mut p, 0x7000_02ac, &[WINDOW, 0x1c, active, other_thread]),
+                0
+            );
+            assert_eq!(p.last_error().unwrap(), 77);
+            assert_eq!(p.window_snapshots(), windows);
+        }
+        let mut code = [0xff, 0x74, 0x24, 16].repeat(4);
+        code.extend_from_slice(&[0xb8, 0xac, 2, 0, 0x70, 0xff, 0xd0]);
+        code.extend_from_slice(&[0xff, 5, 0x10, 0x23, 0x40, 0, 0xc2, 16, 0]);
+        p.memory
+            .protect(0x0040_1000, 4096, Permissions::READ_WRITE)
+            .unwrap();
+        p.memory.write(u64::from(PROCEDURE), &code).unwrap();
+        p.memory
+            .protect(0x0040_1000, 4096, Permissions::READ_EXECUTE)
+            .unwrap();
+        let mut counts = (0, 0);
+        for (api, args) in [
+            (SEND, vec![WINDOW, 0x1c, 1, 123]),
+            (0x7000_02a4, vec![PROCEDURE, WINDOW, 0x1c, 0, u32::MAX]),
+        ] {
+            prepare(&mut p, api, &args);
+            loop {
+                let result = p.run(budget);
+                counts.0 += result.instructions;
+                counts.1 += result.api_calls;
+                if result.reason != ProcessStop::Stopped(StopReason::InstructionLimit) {
+                    assert_eq!(result.reason, ProcessStop::Stopped(StopReason::Breakpoint));
+                    break;
+                }
+                assert!(counts.0 + counts.1 < 1000);
+            }
+            assert_eq!(p.cpu.register(Register32::Eax), 0);
+            assert_eq!(
+                p.cpu.register(Register32::Esp),
+                STACK + u32::try_from(args.len() + 1).unwrap() * 4
+            );
+        }
+        let mut completed = [0; 4];
+        p.memory.read(0x0040_2310, &mut completed).unwrap();
+        assert_eq!(u32::from_le_bytes(completed), 2);
+        assert_eq!(p.last_error().unwrap(), 77);
+        assert_eq!(p.window_snapshots(), windows);
+        results.push((p.cpu, counts));
+    }
+    assert!(results.windows(2).all(|pair| pair[0] == pair[1]));
 }
