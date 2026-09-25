@@ -775,16 +775,20 @@ impl Process32 {
     /// successful state reads consume motion, while faults and repeated acquire do not.
     /// the host owns physical mapping and must release buttons on host focus loss;
     /// this does not change guest focus, cursor position, messages or execution.
+    /// nonzero axes and changed buttons form one buffered batch, axes then buttons,
+    /// with the supplied clock and a sequence shared with keyboard events.
+    /// immediate state and buffered events are consumed independently.
     ///
     /// # errors
     /// rejects an exited process or wheel conversion/accumulation overflow before
-    /// changing any motion or buttons; no component is clamped or wrapped.
+    /// changing motion, buttons, events or sequence; motion is not clamped or wrapped.
     #[expect(clippy::missing_errors_doc, reason = "project headings are lower case")]
     pub fn submit_mouse_input(&mut self, input: MouseInput) -> Result<(), MouseInputError> {
         if self.exit_code.is_some() {
             return Err(MouseInputError::Exited);
         }
-        self.input.submit_mouse_input(input, &self.desktop)
+        self.input
+            .submit_mouse_input(input, self.elapsed_milliseconds(), &self.desktop)
     }
 
     /// adds one host-provided message to this process's bounded thread queue.

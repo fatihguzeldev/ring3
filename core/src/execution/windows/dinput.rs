@@ -96,6 +96,7 @@ pub(super) enum Call {
     KeyboardState,
     KeyboardEvents,
     MouseState,
+    MouseEvents,
     QueryInterface(Class),
     AddRef(Class),
     Release(Class),
@@ -130,6 +131,7 @@ impl Call {
             0x5c8 => Some(Self::KeyboardState),
             0x5cc => Some(Self::KeyboardEvents),
             0x5d0 => Some(Self::MouseState),
+            0x5d4 => Some(Self::MouseEvents),
             _ => None,
         }
     }
@@ -140,7 +142,7 @@ impl Call {
 
     pub(super) fn arguments(self) -> usize {
         match self {
-            Self::KeyboardEvents => 5,
+            Self::KeyboardEvents | Self::MouseEvents => 5,
             Self::Create | Self::CreateDevice => 4,
             Self::QueryInterface(_)
             | Self::SetCooperativeLevel
@@ -167,7 +169,7 @@ pub(super) struct Input {
     devices: Vec<keyboard::Device>,
     mice: Vec<mouse::Device>,
     keyboard_state: keyboard::State,
-    keyboard_sequence: u32,
+    event_sequence: u32,
     mouse_buttons: [u8; 8],
 }
 
@@ -175,6 +177,7 @@ impl Input {
     pub(super) fn submit_mouse_input(
         &mut self,
         input: MouseInput,
+        time: u32,
         desktop: &Desktop,
     ) -> Result<(), MouseInputError> {
         let wheel = input
@@ -189,12 +192,38 @@ impl Input {
         {
             return Err(MouseInputError::MotionOverflow);
         }
+        let buttons = input.buttons.map(|pressed| u8::from(pressed) << 7);
+        if delta == [0; 3] && buttons == self.mouse_buttons {
+            return Ok(());
+        }
+        self.event_sequence = self.event_sequence.wrapping_add(1);
         for device in &mut self.mice {
-            if device.is_acquired(desktop) {
-                device.add_motion(delta);
+            if !device.is_acquired(desktop) {
+                continue;
+            }
+            device.add_motion(delta);
+            for (axis, value) in delta.into_iter().enumerate() {
+                if value != 0 {
+                    device.queue_event([
+                        u32::try_from(axis).expect("bounded axis") * 4,
+                        value.cast_unsigned(),
+                        time,
+                        self.event_sequence,
+                    ]);
+                }
+            }
+            for (index, (&old, &new)) in self.mouse_buttons.iter().zip(&buttons).enumerate() {
+                if old != new {
+                    device.queue_event([
+                        12 + u32::try_from(index).expect("bounded button"),
+                        u32::from(new),
+                        time,
+                        self.event_sequence,
+                    ]);
+                }
             }
         }
-        self.mouse_buttons = input.buttons.map(|pressed| u8::from(pressed) << 7);
+        self.mouse_buttons = buttons;
         Ok(())
     }
 
@@ -203,7 +232,7 @@ impl Input {
         if updated == self.keyboard_state.0 {
             return;
         }
-        self.keyboard_sequence = self.keyboard_sequence.wrapping_add(1);
+        self.event_sequence = self.event_sequence.wrapping_add(1);
         for (offset, (&old, &new)) in self.keyboard_state.0.iter().zip(&updated).enumerate() {
             if old == new {
                 continue;
@@ -212,7 +241,7 @@ impl Input {
                 u32::try_from(offset).expect("key offset"),
                 u32::from(new),
                 time,
-                self.keyboard_sequence,
+                self.event_sequence,
             ];
             for device in &mut self.devices {
                 device.queue_event(record, desktop);
@@ -288,6 +317,7 @@ impl Input {
                     7 => 0x5ac,
                     8 => 0x5b0,
                     9 => 0x5d0,
+                    10 => 0x5d4,
                     11 => 0x598,
                     13 => 0x59c,
                     _ => 0xffc,
@@ -468,14 +498,8 @@ impl Input {
                 Ok(self.devices[index].unacquire(desktop))
             }
             Call::KeyboardState => {
-                let index = self.object(Class::Keyboard, args[0])?;
-                self.devices[index].get_state(
-                    args[1],
-                    args[2],
-                    &self.keyboard_state,
-                    memory,
-                    desktop,
-                )
+                let device = &self.devices[self.object(Class::Keyboard, args[0])?];
+                device.get_state(args[1], args[2], &self.keyboard_state, memory, desktop)
             }
             Call::KeyboardEvents => {
                 let index = self.object(Class::Keyboard, args[0])?;
@@ -484,6 +508,10 @@ impl Input {
             Call::MouseState => {
                 let index = self.object(Class::Mouse, args[0])?;
                 self.mice[index].get_state(args[1], args[2], self.mouse_buttons, memory, desktop)
+            }
+            Call::MouseEvents => {
+                let index = self.object(Class::Mouse, args[0])?;
+                self.mice[index].get_events(&args[1..], memory, desktop)
             }
             Call::QueryInterface(class) => self.query(class, args, memory),
             Call::AddRef(class) | Call::Release(class) => {
@@ -501,7 +529,7 @@ impl Input {
                     self.devices[index].retire();
                 }
                 if count == 0 && matches!(class, Class::Mouse) {
-                    self.mice[index].reset_motion();
+                    self.mice[index].retire();
                 }
                 Ok(count)
             }
@@ -512,6 +540,48 @@ impl Input {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn device_samples_share_wrapping_sequence_and_rejected_samples_are_inert() {
+        let mut input = Input {
+            event_sequence: u32::MAX - 1,
+            ..Input::default()
+        };
+        let desktop = Desktop::default();
+        input.set_keyboard_state([true; 256], 1, &desktop);
+        assert_eq!(input.event_sequence, u32::MAX);
+        assert_eq!(
+            input.submit_mouse_input(
+                MouseInput {
+                    wheel_steps: i32::MAX,
+                    buttons: [true; 8],
+                    ..MouseInput::default()
+                },
+                2,
+                &desktop
+            ),
+            Err(MouseInputError::MotionOverflow)
+        );
+        assert_eq!(input.event_sequence, u32::MAX);
+        input
+            .submit_mouse_input(MouseInput::default(), 3, &desktop)
+            .unwrap();
+        assert_eq!(input.event_sequence, u32::MAX);
+        input
+            .submit_mouse_input(
+                MouseInput {
+                    relative: [1, -1],
+                    buttons: [true; 8],
+                    ..MouseInput::default()
+                },
+                4,
+                &desktop,
+            )
+            .unwrap();
+        assert_eq!(input.event_sequence, 0);
+        input.set_keyboard_state([false; 256], 5, &desktop);
+        assert_eq!(input.event_sequence, 1);
+    }
 
     #[test]
     fn overflow_retains_count_and_query_output() {

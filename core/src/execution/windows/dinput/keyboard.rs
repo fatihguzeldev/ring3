@@ -791,7 +791,7 @@ mod tests {
             Some(0)
         );
         assert_eq!(device.acquire(&desktop).ok(), Some(0));
-        input.keyboard_sequence = u32::MAX - 1;
+        input.event_sequence = u32::MAX - 1;
         let mut keys = [false; 256];
         keys[0] = true;
         keys[255] = true;
@@ -836,7 +836,7 @@ mod tests {
                 0
             ]
         );
-        assert_eq!(input.keyboard_sequence, 0);
+        assert_eq!(input.event_sequence, 0);
     }
 
     #[test]

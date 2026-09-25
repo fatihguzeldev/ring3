@@ -1,5 +1,6 @@
 use super::super::MemoryError;
 use super::buffer::BufferSize;
+use super::events::Events;
 use super::{Access, Desktop, DispatchError, GuestMemory, INVALID_ARGUMENT, NULL_POINTER, guest};
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -52,6 +53,7 @@ pub(super) struct Device {
     buffer_size: BufferSize,
     acquired_epoch: Option<u64>,
     motion: [i32; 3],
+    events: Events,
 }
 
 impl Device {
@@ -63,6 +65,7 @@ impl Device {
             buffer_size: BufferSize::default(),
             acquired_epoch: None,
             motion: [0; 3],
+            events: Events::default(),
         }
     }
 
@@ -104,19 +107,50 @@ impl Device {
             return Ok(0x8007_0005);
         }
         self.acquired_epoch = Some(epoch);
-        self.reset_motion();
+        self.reset_input();
         Ok(0)
     }
 
     pub(super) fn unacquire(&mut self, desktop: &Desktop) -> u32 {
         let previous = self.is_acquired(desktop);
         self.acquired_epoch = None;
-        self.reset_motion();
+        self.reset_input();
         u32::from(!previous)
     }
 
-    pub(super) fn reset_motion(&mut self) {
+    fn reset_input(&mut self) {
         self.motion = [0; 3];
+        self.events.clear();
+    }
+
+    pub(super) fn retire(&mut self) {
+        self.motion = [0; 3];
+        self.events = Events::default();
+    }
+
+    pub(super) fn queue_event(&mut self, record: [u32; 4]) {
+        self.events.push(record, self.buffer_size.capacity);
+    }
+
+    pub(super) fn get_events(
+        &mut self,
+        args: &[u32],
+        memory: &mut GuestMemory,
+        desktop: &Desktop,
+    ) -> Result<u32, DispatchError> {
+        if args[0] != 16 || args[3] > 1 || args[2] == 0 {
+            return Ok(INVALID_ARGUMENT);
+        }
+        if self.acquired_epoch.is_none() {
+            return Ok(0x8007_000c);
+        }
+        if !self.is_acquired(desktop) {
+            return Ok(0x8007_001e);
+        }
+        if self.buffer_size.capacity == 0 {
+            return Ok(0x8004_0207);
+        }
+        self.events.read(args[1], args[2], args[3] == 1, memory)
     }
 
     pub(super) fn can_add_motion(&self, delta: [i32; 3]) -> bool {
@@ -158,7 +192,7 @@ impl Device {
         }
         bytes[12..].copy_from_slice(&buttons);
         memory.write(u64::from(output), &bytes)?;
-        self.reset_motion();
+        self.motion = [0; 3];
         Ok(0)
     }
 
@@ -170,7 +204,11 @@ impl Device {
         desktop: &Desktop,
     ) -> Result<u32, DispatchError> {
         let acquired = self.is_acquired(desktop);
-        self.buffer_size.set(property, address, memory, acquired)
+        let result = self.buffer_size.set(property, address, memory, acquired)?;
+        if result == 0 {
+            self.events.clear();
+        }
+        Ok(result)
     }
 
     pub(super) fn get_property(
@@ -236,7 +274,7 @@ impl Device {
             return Ok(0x8007_00aa);
         }
         self.cooperative_window = Some(window);
-        self.reset_motion();
+        self.reset_input();
         Ok(0)
     }
 
@@ -305,7 +343,7 @@ impl Device {
             }
         }
         self.format = Some(Format::StandardMouse2);
-        self.reset_motion();
+        self.reset_input();
         Ok(0)
     }
 }
@@ -366,6 +404,50 @@ mod tests {
         );
         desktop.activate_created(4);
         desktop
+    }
+
+    #[test]
+    fn successful_stale_configuration_and_retirement_clear_event_history() {
+        let mut memory = GuestMemory::new(1);
+        memory
+            .map_zeroed(0x1000, 4096, Permissions::READ_WRITE)
+            .unwrap();
+        standard(&mut memory);
+        words(&mut memory, 0x1301, &[20, 16, 0, 0, 16]);
+        let mut desktop = desktop();
+        desktop.show_activated(4);
+        let mut device = Device::new();
+        assert_eq!(device.set_format(0x1001, &memory, &desktop).ok(), Some(0));
+        assert_eq!(device.set_cooperative_level(4, 5, &desktop).ok(), Some(0));
+        assert_eq!(
+            device.set_property(1, 0x1301, &memory, &desktop).ok(),
+            Some(0)
+        );
+        for setting in 0..4 {
+            assert_eq!(device.acquire(&desktop, || false).ok(), Some(0));
+            device.add_motion([1, 2, 3]);
+            device.queue_event([4, 2, 0, 1]);
+            desktop.show_activated(8);
+            match setting {
+                0 => assert_eq!(device.set_format(0x1001, &memory, &desktop).ok(), Some(0)),
+                1 => assert_eq!(device.set_cooperative_level(4, 5, &desktop).ok(), Some(0)),
+                2 => assert_eq!(
+                    device.set_property(1, 0x1301, &memory, &desktop).ok(),
+                    Some(0)
+                ),
+                _ => device.retire(),
+            }
+            words(&mut memory, 0x1400, &[16]);
+            assert_eq!(
+                device.events.read(0, 0x1400, true, &mut memory).ok(),
+                Some(0)
+            );
+            let mut count = [99];
+            guest::read_words(&memory, 0x1400, &mut count).unwrap();
+            assert_eq!(count, [0]);
+            assert_eq!(device.motion, if setting == 2 { [1, 2, 3] } else { [0; 3] });
+            desktop.show_activated(4);
+        }
     }
 
     #[test]

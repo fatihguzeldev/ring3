@@ -32,6 +32,8 @@ mod dinput_mouse_caps_cases;
 mod dinput_mouse_cases;
 #[path = "../../core/tests/support/dinput_mouse_cooperative_cases.rs"]
 mod dinput_mouse_cooperative_cases;
+#[path = "../../core/tests/support/dinput_mouse_event_cases.rs"]
+mod dinput_mouse_event_cases;
 #[path = "../../core/tests/support/dinput_mouse_format_cases.rs"]
 mod dinput_mouse_format_cases;
 #[path = "../../core/tests/support/dinput_mouse_granularity_cases.rs"]
@@ -4802,6 +4804,7 @@ pub extern "C" fn run() -> u32 {
     case_prefix_compare_cases::imported_results_across_budgets();
     dinput_mouse_acquire_cases::imported_mouse_acquisition_across_budgets();
     dinput_mouse_state_cases::mouse_state_across_budgets();
+    dinput_mouse_event_cases::mouse_events_across_budgets();
     dinput_mouse_cases::imported_mouse_lifetime_across_budgets();
     dinput_mouse_caps_cases::imported_mouse_capabilities_across_budgets();
     dinput_mouse_cooperative_cases::imported_foreground_mouse_setting_across_budgets();
