@@ -3,6 +3,8 @@ mod imported_executable;
 
 #[path = "support/d3d8_executable.rs"]
 mod d3d8_executable;
+#[path = "support/readonly_texture_cases.rs"]
+mod readonly_texture_cases;
 #[path = "support/window_creation_executable.rs"]
 mod window_creation_executable;
 
@@ -1993,6 +1995,151 @@ fn surface_and_texture_lock_rect_share_mip_pixels_and_lock_state() {
         invoke(&mut process, surface_unlock, &[surface]),
         0x8876_086c
     );
+}
+
+#[test]
+fn readonly_texture_surface_lock_preserves_pixels_and_excludes_alias_locks() {
+    let (mut process, _, device) = create();
+    let create_texture = method(&process, device, 20);
+    assert_eq!(
+        invoke(
+            &mut process,
+            create_texture,
+            &[device, 4, 2, 1, 0, 22, 2, TEXTURE_OUTPUT]
+        ),
+        0
+    );
+    let texture = read(&process, TEXTURE_OUTPUT);
+    let get_surface = method(&process, texture, 15);
+    assert_eq!(
+        invoke(&mut process, get_surface, &[texture, 0, SURFACE_OUTPUT]),
+        0
+    );
+    let surface = read(&process, SURFACE_OUTPUT);
+    let surface_lock = method(&process, surface, 9);
+    let surface_unlock = method(&process, surface, 10);
+    let texture_lock = method(&process, texture, 16);
+    let texture_unlock = method(&process, texture, 17);
+    assert_eq!(
+        invoke(&mut process, texture_lock, &[texture, 0, LOCKED_RECT, 0, 0]),
+        0
+    );
+    let pixels = read(&process, LOCKED_RECT + 4);
+    process
+        .memory
+        .write(u64::from(pixels), &[0x17; 32])
+        .unwrap();
+    assert_eq!(invoke(&mut process, texture_unlock, &[texture, 0]), 0);
+    let pages = process.memory.mapped_pages();
+    write(&mut process, SURFACE_RECT, &[1, 1, 3, 2]);
+    assert_eq!(
+        invoke(
+            &mut process,
+            surface_lock,
+            &[surface, LOCKED_RECT, SURFACE_RECT, 0x10]
+        ),
+        0
+    );
+    assert_eq!(read(&process, LOCKED_RECT), 16);
+    assert_eq!(read(&process, LOCKED_RECT + 4), pixels + 20);
+    for flags in [0, 0x10] {
+        assert_eq!(
+            invoke(
+                &mut process,
+                texture_lock,
+                &[texture, 0, LOCKED_RECT, 0, flags]
+            ),
+            0x8876_086c
+        );
+    }
+    assert_eq!(invoke(&mut process, texture_unlock, &[texture, 0]), 0);
+    assert_eq!(
+        invoke(
+            &mut process,
+            texture_lock,
+            &[texture, 0, LOCKED_RECT, 0, 0x10]
+        ),
+        0
+    );
+    assert_eq!(read(&process, LOCKED_RECT + 4), pixels);
+    assert_eq!(invoke(&mut process, surface_unlock, &[surface]), 0);
+    assert_eq!(read_bytes(&process, pixels, 32), [0x17; 32]);
+    assert_eq!(process.memory.mapped_pages(), pages);
+}
+
+#[test]
+fn readonly_source_mip_and_writable_destination_share_owned_storage() {
+    readonly_texture_cases::read_source_mip_while_writing_another();
+}
+
+#[test]
+fn readonly_lock_refusals_and_output_faults_leave_the_level_available() {
+    let (mut process, _, device) = create();
+    let create_texture = method(&process, device, 20);
+    assert_eq!(
+        invoke(
+            &mut process,
+            create_texture,
+            &[device, 4, 2, 1, 0, 21, 1, TEXTURE_OUTPUT]
+        ),
+        0
+    );
+    let texture = read(&process, TEXTURE_OUTPUT);
+    let get_surface = method(&process, texture, 15);
+    assert_eq!(
+        invoke(&mut process, get_surface, &[texture, 0, SURFACE_OUTPUT]),
+        0
+    );
+    let surface = read(&process, SURFACE_OUTPUT);
+    let lock = method(&process, surface, 9);
+    let unlock = method(&process, surface, 10);
+    write(&mut process, LOCKED_RECT, &[0xa5a5_a5a5; 2]);
+    for flags in [1, 0x11, 0x800, 0x810, 0x2000, 0x2010, 0x8000, u32::MAX] {
+        assert_eq!(
+            invoke(&mut process, lock, &[surface, LOCKED_RECT, 0, flags]),
+            0x8876_086c
+        );
+        assert_eq!(read(&process, LOCKED_RECT), 0xa5a5_a5a5);
+    }
+    write(&mut process, SURFACE_RECT, &[0, 0, 5, 2]);
+    assert_eq!(
+        invoke(
+            &mut process,
+            lock,
+            &[surface, LOCKED_RECT, SURFACE_RECT, 0x10]
+        ),
+        0x8876_086c
+    );
+    let partial = 0x0040_2ffc;
+    write(&mut process, partial, &[0xa5a5_a5a5]);
+    let fault = call(&mut process, lock, &[surface, partial, 0, 0x10]);
+    assert!(matches!(
+        fault.reason,
+        ProcessStop::Stopped(StopReason::MemoryFault(_))
+    ));
+    assert_eq!(fault.api_calls, 0);
+    assert_eq!(read(&process, partial), 0xa5a5_a5a5);
+    let before = process.cpu;
+    process
+        .memory
+        .map_zeroed(
+            0x0040_3000,
+            4096,
+            ring3_core::execution::Permissions::READ_WRITE,
+        )
+        .unwrap();
+    assert_eq!(process.cpu, before);
+    assert_eq!(process.run(1).api_calls, 1);
+    assert_eq!(process.cpu.register(Register32::Eax), 0);
+    assert_eq!(read(&process, partial), 16);
+    assert_eq!(invoke(&mut process, unlock, &[surface]), 0);
+    let release = method(&process, surface, 2);
+    assert_eq!(invoke(&mut process, release, &[surface]), 0);
+    assert_eq!(
+        invoke(&mut process, lock, &[surface, LOCKED_RECT, 0, 0x10]),
+        0x8876_086c
+    );
+    assert_eq!(read(&process, LOCKED_RECT), 0xa5a5_a5a5);
 }
 
 #[test]

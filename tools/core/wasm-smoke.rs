@@ -292,6 +292,8 @@ mod imported_executable;
 
 #[path = "../../core/tests/support/d3d8_executable.rs"]
 mod d3d8_executable;
+#[path = "../../core/tests/support/readonly_texture_cases.rs"]
+mod readonly_texture_cases;
 
 #[path = "../../core/tests/support/thread_executable.rs"]
 mod thread_executable;
@@ -4001,6 +4003,7 @@ fn execute_diagnostic() {
 
 fn execute_graphics() {
     use ring3_core::execution::{Process32, ProcessStop, StopReason};
+    readonly_texture_cases::read_source_mip_while_writing_another();
 
     for (width, height, color) in [(4, 3, 0xff12_3456_u32), (9, 7, 0xffed_cba9)] {
         let mut process =

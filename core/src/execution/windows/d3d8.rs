@@ -1683,7 +1683,7 @@ impl Graphics {
         let Some(level) = texture.levels.get(args[1] as usize) else {
             return Ok(INVALID_CALL);
         };
-        if level.locked || args[4] != 0 {
+        if level.locked || !matches!(args[4], 0 | 0x10) {
             return Ok(INVALID_CALL);
         }
         let (left, top) = if args[3] == 0 {
