@@ -9,8 +9,22 @@ pub(super) fn floor(cpu: &mut Cpu32, args: &[u32]) -> Result<(), DispatchError> 
         .ok_or(DispatchError::Unsupported)
 }
 
-pub(super) fn inline_fmod(cpu: &mut Cpu32) -> Result<(), DispatchError> {
-    cpu.x87_inline_fmod().ok_or(DispatchError::Unsupported)
+#[derive(Clone, Copy)]
+pub(in crate::execution::windows) enum InlineMath {
+    Fmod,
+    Asin,
+    Acos,
+    Pow,
+}
+
+pub(super) fn inline_math(cpu: &mut Cpu32, math: InlineMath) -> Result<(), DispatchError> {
+    let result = match math {
+        InlineMath::Fmod => cpu.x87_inline_fmod(),
+        InlineMath::Asin => cpu.x87_inline_inverse_trig(false),
+        InlineMath::Acos => cpu.x87_inline_inverse_trig(true),
+        InlineMath::Pow => cpu.x87_inline_pow(),
+    };
+    result.ok_or(DispatchError::Unsupported)
 }
 
 pub(super) fn to_integer(cpu: &mut Cpu32) -> Result<u32, DispatchError> {

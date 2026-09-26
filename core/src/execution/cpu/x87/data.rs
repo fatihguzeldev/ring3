@@ -388,22 +388,60 @@ impl Cpu32 {
     }
 
     pub(crate) fn x87_inline_fmod(&mut self) -> Option<()> {
+        self.x87_inline_binary(|numerator, divisor| {
+            if divisor == 0.0 {
+                return None;
+            }
+            Some(numerator % divisor)
+        })
+    }
+
+    pub(crate) fn x87_inline_inverse_trig(&mut self, acos: bool) -> Option<()> {
+        self.x87_masked().ok()?;
+        self.x87_stack.numeric().ok()?;
+        let input = self.x87_stack.value().ok()?;
+        if !input.is_finite() || !(-1.0..=1.0).contains(&input) {
+            return None;
+        }
+        let result = if acos { input.acos() } else { input.asin() };
+        if result != 0.0 && !result.is_normal() {
+            return None;
+        }
+        self.x87_stack.values[usize::from(self.x87_stack.top)] = result.to_bits();
+        self.x87_stack.status &= !0x0200;
+        Some(())
+    }
+
+    pub(crate) fn x87_inline_pow(&mut self) -> Option<()> {
+        self.x87_inline_binary(|base, exponent| {
+            if (base < 0.0 && exponent.fract() != 0.0) || (base == 0.0 && exponent < 0.0) {
+                return None;
+            }
+            let result = base.powf(exponent);
+            if base != 0.0 && result == 0.0 {
+                return None;
+            }
+            Some(result)
+        })
+    }
+
+    fn x87_inline_binary(&mut self, evaluate: impl FnOnce(f64, f64) -> Option<f64>) -> Option<()> {
         self.x87_masked().ok()?;
         self.x87_stack.numeric().ok()?;
         if self.x87_stack.occupied < 2 {
             return None;
         }
-        let divisor = self.x87_stack.value().ok()?;
-        let numerator_slot = (usize::from(self.x87_stack.top) + 1) & 7;
-        let numerator = f64::from_bits(self.x87_stack.values[numerator_slot]);
-        if !numerator.is_finite() || !divisor.is_finite() || divisor == 0.0 {
+        let right = self.x87_stack.value().ok()?;
+        let left_slot = (usize::from(self.x87_stack.top) + 1) & 7;
+        let left = f64::from_bits(self.x87_stack.values[left_slot]);
+        if !left.is_finite() || !right.is_finite() {
             return None;
         }
-        let result = numerator % divisor;
-        if result != 0.0 && !result.is_normal() {
+        let result = evaluate(left, right)?;
+        if !result.is_finite() || (result != 0.0 && !result.is_normal()) {
             return None;
         }
-        self.x87_stack.values[numerator_slot] = result.to_bits();
+        self.x87_stack.values[left_slot] = result.to_bits();
         self.x87_stack.pop();
         self.x87_stack.status &= !0x0200;
         Some(())

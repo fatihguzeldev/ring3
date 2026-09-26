@@ -14,6 +14,8 @@ mod crt_floor_cases;
 mod crt_getenv_cases;
 #[path = "support/crt_inline_fmod_cases.rs"]
 mod crt_inline_fmod_cases;
+#[path = "support/crt_inline_math_cases.rs"]
+mod crt_inline_math_cases;
 #[path = "support/crt_setjmp_cases.rs"]
 mod crt_setjmp_cases;
 #[path = "support/executable.rs"]
@@ -103,6 +105,8 @@ mod crt_heap;
 mod crt_heap_small_blocks;
 #[path = "crt/crt_inline_fmod.rs"]
 mod crt_inline_fmod;
+#[path = "crt/crt_inline_math.rs"]
+mod crt_inline_math;
 #[path = "crt/crt_locale_activity.rs"]
 mod crt_locale_activity;
 #[path = "crt/crt_locale_metadata.rs"]

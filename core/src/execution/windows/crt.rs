@@ -93,7 +93,7 @@ pub(super) enum Call {
     DynamicCast,
     Sort,
     Floor,
-    InlineFmod,
+    InlineMath(floating::InlineMath),
     ComparePrefixIgnoringCase,
     SetJump,
     GetEnvironment,
@@ -148,11 +148,14 @@ impl Call {
             0x1c8 => Some(Self::FindByte),
             0x1cc => Some(Self::Sort),
             0x1d0 => Some(Self::Floor),
-            0x1e4 => Some(Self::InlineFmod),
             0x1d4 => Some(Self::ComparePrefixIgnoringCase),
             0x1d8 => Some(Self::SetJump),
             0x1dc => Some(Self::GetEnvironment),
             0x1e0 => Some(Self::IsSpace),
+            0x1e4 => Some(Self::InlineMath(floating::InlineMath::Fmod)),
+            0x1e8 => Some(Self::InlineMath(floating::InlineMath::Asin)),
+            0x1ec => Some(Self::InlineMath(floating::InlineMath::Acos)),
+            0x1f0 => Some(Self::InlineMath(floating::InlineMath::Pow)),
             0x1ac => Some(Self::Sprintf),
             0x1bc => Some(Self::Snprintf),
             0x1b0 => Some(Self::Move),
@@ -215,7 +218,7 @@ impl Call {
             | Self::ErrnoPointer
             | Self::Random
             | Self::FloatToInteger
-            | Self::InlineFmod
+            | Self::InlineMath(_)
             | Self::TypeName => 0,
         }
     }
@@ -299,7 +302,7 @@ impl Crt {
             Call::Random => Some(self.locals.random(cpu.fs_base())?.next()),
             Call::FloatToInteger => Some(floating::to_integer(cpu)?),
             Call::Floor => floating::floor(cpu, args).map(|()| None)?,
-            Call::InlineFmod => floating::inline_fmod(cpu).map(|()| None)?,
+            Call::InlineMath(math) => floating::inline_math(cpu, math).map(|()| None)?,
             Call::SetJump => Some(jump::capture(cpu, memory, args)?),
             Call::GetEnvironment => Some(environment::get(memory, args[0])?),
             Call::TypeName => Some(type_names::name(
@@ -429,6 +432,9 @@ pub(super) fn resolve(name: &str) -> Option<u32> {
         "qsort" => Some(API_BASE + 0x1cc),
         "floor" => Some(API_BASE + 0x1d0),
         "_CIfmod" => Some(API_BASE + 0x1e4),
+        "_CIasin" => Some(API_BASE + 0x1e8),
+        "_CIacos" => Some(API_BASE + 0x1ec),
+        "_CIpow" => Some(API_BASE + 0x1f0),
         "_setjmp3" => Some(API_BASE + 0x1d8),
         "getenv" => Some(API_BASE + 0x1dc),
         "__getmainargs" => Some(API_BASE + 0x110),
