@@ -1,6 +1,11 @@
 use super::normal_vertex_cases;
 
 #[test]
+fn vertex_storage_accepts_all_texture_coordinate_counts() {
+    normal_vertex_cases::vertex_storage_accepts_texture_coordinate_counts();
+}
+
+#[test]
 fn normal_layout_matches_diffuse_and_textured_pixels() {
     normal_vertex_cases::equivalent_diffuse_and_textured_pixels();
 }

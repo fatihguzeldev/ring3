@@ -433,3 +433,44 @@ pub fn invalid_depth_policy_preserves_the_previous_state() {
     draw_at_depth(&mut process, device, vertex, 36, 0.6, false);
     assert_eq!(&frame(&mut process, device)[..4], &[0, 0, 0, 255]);
 }
+
+pub fn vertex_storage_accepts_texture_coordinate_counts() {
+    let (mut process, device, _) = setup(0x142, 24, false, 0);
+    let pages = process.memory.mapped_pages();
+    for count in 0..=8 {
+        for pool in 0..=2 {
+            let fvf = 0x12 | (count << 8);
+            assert_eq!(
+                invoke(&mut process, device, 23, &[5760, 0x18, fvf, pool, OUTPUT]),
+                0
+            );
+            let buffer = read(&process, OUTPUT);
+            let mut bytes = vec![1; 5760];
+            process
+                .memory
+                .read(u64::from(buffer + 4096), &mut bytes)
+                .unwrap();
+            assert!(bytes.iter().all(|byte| *byte == 0));
+            assert_eq!(invoke(&mut process, buffer, 11, &[0, 5760, OUTPUT, 0]), 0);
+            let data = read(&process, OUTPUT);
+            process
+                .memory
+                .write(u64::from(data + 5756), &[1, 2, 3, 4])
+                .unwrap();
+            assert_eq!(invoke(&mut process, buffer, 12, &[]), 0);
+            assert_eq!(invoke(&mut process, buffer, 2, &[]), 0);
+            assert_eq!(process.memory.mapped_pages(), pages);
+        }
+    }
+    for fvf in [0x912, 0xf12, 0x214, 0x0001_0212, 0x213] {
+        write(&mut process, OUTPUT, &[0x1234_5678]);
+        assert_eq!(
+            invoke(&mut process, device, 23, &[5760, 0x18, fvf, 0, OUTPUT]),
+            INVALID_CALL
+        );
+        assert_eq!(read(&process, OUTPUT), 0x1234_5678);
+        assert_eq!(process.memory.mapped_pages(), pages);
+    }
+    assert_eq!(invoke(&mut process, device, 76, &[0x212]), INVALID_CALL);
+    assert_eq!(draw(&mut process, device), 0);
+}

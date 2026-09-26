@@ -4170,6 +4170,7 @@ fn execute_graphics() {
     discard_resource_cases::discard_rejections_preserve_state();
     readonly_texture_cases::read_source_mip_while_writing_another();
     normal_vertex_cases::equivalent_diffuse_and_textured_pixels();
+    normal_vertex_cases::vertex_storage_accepts_texture_coordinate_counts();
     normal_vertex_cases::rejects_short_records_and_nonfinite_inputs_atomically();
     normal_vertex_cases::rejected_selection_preserves_the_normal_layout();
     normal_vertex_cases::world_transform_controls_positions();
