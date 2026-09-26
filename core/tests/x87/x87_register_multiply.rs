@@ -226,6 +226,68 @@ fn register_multiply_preserves_signed_zero_and_reports_rounding() {
 }
 
 #[test]
+fn masked_infinity_multiplies_finite_register_and_keeps_zero_divide_status() {
+    let numerator = INPUT + 8;
+    let factor = INPUT + 16;
+    let scratch = INPUT + 24;
+    let mut code = Vec::new();
+    fld(&mut code, numerator);
+    code.extend([0xd8, 0x35]); // FDIV m32fp
+    code.extend(INPUT.to_le_bytes());
+    code.extend([0xd9, 0x1d]); // FSTP m32fp
+    code.extend(scratch.to_le_bytes());
+    fld(&mut code, factor);
+    code.extend([0xd9, 0x05]); // FLD m32fp
+    code.extend(scratch.to_le_bytes());
+    code.extend([0xd8, 0xc9, 0xdf, 0xe0]); // FMUL ST(0),ST(1); FNSTSW AX
+    fstp(&mut code, OUTPUT);
+    for (top, indexed, expected) in [
+        (3.0_f64, 1.0_f64, f64::INFINITY.to_bits()),
+        (-3.0, 1.0, f64::NEG_INFINITY.to_bits()),
+        (3.0, -1.0, f64::NEG_INFINITY.to_bits()),
+        (-3.0, -1.0, f64::INFINITY.to_bits()),
+    ] {
+        for control in [0x007f, 0x027f] {
+            let (mut cpu, mut memory) = load(&code);
+            cpu.set_x87_control_word(control);
+            memory
+                .write(u64::from(INPUT), &0_u32.to_le_bytes())
+                .unwrap();
+            memory
+                .write(u64::from(numerator), &top.to_le_bytes())
+                .unwrap();
+            memory
+                .write(u64::from(factor), &indexed.to_le_bytes())
+                .unwrap();
+            assert_eq!(cpu.run(&mut memory, 7).instructions, 7);
+            assert_eq!(cpu.register(Register32::Eax) & 0x3a3f, 0x3004);
+            assert_eq!(cpu.run(&mut memory, 1).instructions, 1);
+            let mut bytes = [0; 8];
+            memory.read(u64::from(OUTPUT), &mut bytes).unwrap();
+            assert_eq!(u64::from_le_bytes(bytes), expected);
+        }
+    }
+
+    let (mut cpu, mut memory) = load(&code);
+    memory
+        .write(u64::from(INPUT), &0_u32.to_le_bytes())
+        .unwrap();
+    memory
+        .write(u64::from(numerator), &3_f64.to_le_bytes())
+        .unwrap();
+    memory
+        .write(u64::from(factor), &0_f64.to_le_bytes())
+        .unwrap();
+    assert_eq!(cpu.run(&mut memory, 5).instructions, 5);
+    let before = cpu;
+    assert_eq!(
+        cpu.run(&mut memory, 1).reason,
+        StopReason::UnsupportedInstruction
+    );
+    assert_eq!(cpu, before);
+}
+
+#[test]
 fn register_multiply_rejects_empty_source_and_unmasked_control_atomically() {
     let mut code = Vec::new();
     fld(&mut code, INPUT);
