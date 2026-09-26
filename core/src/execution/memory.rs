@@ -234,6 +234,35 @@ impl GuestMemory {
         self.copy_out(address, output, Access::Execute)
     }
 
+    pub(super) fn matches_executable(
+        &self,
+        mut address: u64,
+        mut expected: &[u8],
+    ) -> Result<bool, MemoryError> {
+        address
+            .checked_add(expected.len() as u64)
+            .ok_or(MemoryError::AddressOverflow)?;
+        while !expected.is_empty() {
+            let (index, offset, count) = chunk(address, expected.len());
+            let page = self
+                .pages
+                .get(&index)
+                .ok_or(MemoryError::Unmapped { address })?;
+            if !page.permissions.execute {
+                return Err(MemoryError::PermissionDenied {
+                    address,
+                    access: Access::Execute,
+                });
+            }
+            if page.bytes[offset..offset + count] != expected[..count] {
+                return Ok(false);
+            }
+            address += count as u64;
+            expected = &expected[count..];
+        }
+        Ok(true)
+    }
+
     pub fn write(&mut self, mut address: u64, mut input: &[u8]) -> Result<(), MemoryError> {
         self.check_access(address, input.len(), Access::Write)?;
         while !input.is_empty() {
@@ -463,5 +492,33 @@ mod tests {
         );
         memory.read(addresses[3], &mut byte).unwrap();
         assert_eq!(byte, [4]);
+    }
+
+    #[test]
+    fn executable_bytes_match_across_pages_without_ignoring_permissions() {
+        let rwx = Permissions {
+            execute: true,
+            ..Permissions::READ_WRITE
+        };
+        let mut memory = GuestMemory::new(2);
+        memory.map_zeroed(0x1000, 2 * PAGE_SIZE, rwx).unwrap();
+        memory.write(0x1fff, &[0x40, 0x78]).unwrap();
+        assert_eq!(memory.matches_executable(0x1fff, &[0x40, 0x78]), Ok(true));
+        assert_eq!(memory.matches_executable(0x1fff, &[0x40, 0x79]), Ok(false));
+        memory
+            .protect(0x2000, PAGE_SIZE, Permissions::READ)
+            .unwrap();
+        assert_eq!(
+            memory.matches_executable(0x1fff, &[0x40, 0x78]),
+            Err(MemoryError::PermissionDenied {
+                address: 0x2000,
+                access: Access::Execute,
+            })
+        );
+        memory.unmap(0x2000, PAGE_SIZE).unwrap();
+        assert_eq!(
+            memory.matches_executable(0x1fff, &[0x40, 0x78]),
+            Err(MemoryError::Unmapped { address: 0x2000 })
+        );
     }
 }

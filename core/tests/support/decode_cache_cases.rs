@@ -90,6 +90,7 @@ pub fn cached_fetches_preserve_permissions_lengths_collisions_and_faults() {
         .write(u64::from(ip), &[0xb8, 0x78, 0x56, 0x34, 0x12])
         .unwrap();
     step(&mut p, ip);
+    step(&mut p, ip);
     p.memory
         .protect(0x6000_1000, PAGE_SIZE, Permissions::NONE)
         .unwrap();
