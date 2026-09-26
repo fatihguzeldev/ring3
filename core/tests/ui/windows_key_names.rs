@@ -89,7 +89,14 @@ fn imported_us_key_names_are_nul_terminated_and_bounded_by_capacity() {
 #[test]
 fn unmapped_us_scans_return_an_empty_name() {
     let mut process = process();
-    for parameter in [0, 0x0088_0000, 0x00c8_0000, 0x00ff_0000, 0x01c8_0000] {
+    for parameter in [
+        0,
+        0x0055_0000,
+        0x0088_0000,
+        0x00c8_0000,
+        0x00ff_0000,
+        0x01c8_0000,
+    ] {
         process.memory.write(u64::from(OUTPUT), &[0xaa; 2]).unwrap();
         call(&mut process, parameter, OUTPUT, 2, 0);
         assert_eq!(read(&process, 2), [0, 0xaa]);
@@ -97,15 +104,47 @@ fn unmapped_us_scans_return_an_empty_name() {
 }
 
 #[test]
-fn unmodeled_codes_and_faulting_output_preserve_the_call_frame() {
+fn fixed_us_names_cover_named_and_character_fallback_keys() {
     let mut process = process();
-    for parameter in [0x0111_0000, 0x0087_0000] {
-        let before = prepare(&mut process, parameter, OUTPUT, 12);
-        let result = process.run(1);
-        assert_eq!(result.reason, ProcessStop::UnsupportedApi { address: API });
-        assert_eq!((result.instructions, result.api_calls), (0, 0));
-        assert_eq!(process.cpu, before);
+    for (parameter, name) in [
+        (0x0052_0000, &b"Num 0"[..]),
+        (0x0048_0000, &b"Num 8"[..]),
+        (0x002a_0000, &b"Shift"[..]),
+        (0x0036_0000, &b"Right Shift"[..]),
+        (0x0236_0000, &b"Shift"[..]),
+        (0x011d_0000, &b"Right Ctrl"[..]),
+        (0x031d_0000, &b"Ctrl"[..]),
+        (0x0138_0000, &b"Right Alt"[..]),
+        (0x0338_0000, &b"Alt"[..]),
+        (0x0087_0000, &b"F24"[..]),
+        (0x000c_0000, &b"-"[..]),
+        (0x001a_0000, &b"["[..]),
+        (0x0111_0000, &b"W"[..]),
+        (0x0101_0000, &b"\x1b"[..]),
+        (0x014a_0000, &b"-"[..]),
+        (0x017c_0000, &b"\t"[..]),
+        (0x015b_0000, &b"Left Windows"[..]),
+    ] {
+        process
+            .memory
+            .write(u64::from(OUTPUT), &[0xaa; 16])
+            .unwrap();
+        call(
+            &mut process,
+            parameter,
+            OUTPUT,
+            16,
+            u32::try_from(name.len()).unwrap(),
+        );
+        let mut expected = name.to_vec();
+        expected.extend_from_slice(&[0, 0xaa]);
+        assert_eq!(read(&process, expected.len()), expected);
     }
+}
+
+#[test]
+fn faulting_output_preserves_the_call_frame() {
+    let mut process = process();
     for output in [0, u32::MAX] {
         let before = prepare(&mut process, 0x00c8_0000, output, 12);
         let result = process.run(1);
