@@ -44,3 +44,16 @@ fn depth_writes_tests_and_clears_are_independent() {
 fn invalid_depth_states_preserve_the_last_policy() {
     normal_vertex_cases::invalid_depth_policy_preserves_the_previous_state();
 }
+
+#[test]
+fn two_texture_color_stages_use_independent_coordinates_and_ordered_operations() {
+    normal_vertex_cases::two_texture_color_stages();
+}
+#[test]
+fn second_texture_coordinates_survive_perspective_and_clipping() {
+    normal_vertex_cases::two_texture_perspective_and_clipping();
+}
+#[test]
+fn invalid_two_texture_draws_preserve_color_and_depth() {
+    normal_vertex_cases::two_texture_failures_preserve_pixels_and_depth();
+}

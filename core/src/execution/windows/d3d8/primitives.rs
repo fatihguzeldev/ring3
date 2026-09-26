@@ -16,7 +16,7 @@ struct Vertex {
     z: f64,
     color: [u8; 3],
     inv_w: f64,
-    uv_over_w: [f64; 2],
+    uv_over_w: [[f64; 2]; 2],
 }
 
 #[derive(Clone, Copy)]
@@ -32,7 +32,7 @@ struct Bounds {
 struct ClipVertex {
     position: [f64; 4],
     color: [f64; 3],
-    uv: [f64; 2],
+    uv: [[f64; 2]; 2],
 }
 
 impl ClipVertex {
@@ -42,7 +42,9 @@ impl ClipVertex {
                 self.position[i] + (other.position[i] - self.position[i]) * t
             }),
             color: std::array::from_fn(|i| self.color[i] + (other.color[i] - self.color[i]) * t),
-            uv: std::array::from_fn(|i| self.uv[i] + (other.uv[i] - self.uv[i]) * t),
+            uv: std::array::from_fn(|set| {
+                std::array::from_fn(|i| self.uv[set][i] + (other.uv[set][i] - self.uv[set][i]) * t)
+            }),
         }
     }
 }
@@ -69,6 +71,74 @@ impl SampledTexture {
     }
 }
 
+pub(super) struct VertexLayout {
+    size: u32,
+    color: Option<usize>,
+    coordinates: usize,
+    uv_offset: usize,
+}
+
+pub(super) fn vertex_layout(fvf: u32) -> Option<VertexLayout> {
+    if !matches!(
+        fvf,
+        0x102 | 0x112 | 0x142 | 0x152 | 0x202 | 0x212 | 0x242 | 0x252
+    ) {
+        return None;
+    }
+    let before_color = if fvf & 0x10 == 0 { 12 } else { 24 };
+    let color = (fvf & 0x40 != 0).then_some(before_color);
+    let uv_offset = before_color + usize::from(color.is_some()) * 4;
+    let coordinates = ((fvf >> 8) & 0xf) as usize;
+    Some(VertexLayout {
+        size: u32::try_from(uv_offset + coordinates * 8).unwrap(),
+        color,
+        coordinates,
+        uv_offset,
+    })
+}
+
+struct SampledStage {
+    state: super::color::Stage,
+    texture: Option<SampledTexture>,
+}
+
+fn sampled_stages(
+    graphics: &Graphics,
+    coordinates: usize,
+    memory: &GuestMemory,
+) -> Result<Option<Vec<SampledStage>>, MemoryError> {
+    let mut stages = Vec::new();
+    for (index, state) in graphics.color_stages.iter().copied().enumerate() {
+        let address = graphics.texture_stages[index];
+        if state.operation == 1 || (state.argument1 == 2 && address == 0) {
+            break;
+        }
+        if index >= 2 {
+            return Ok(None);
+        }
+        let texture = if state.uses_texture() {
+            if state.coordinate as usize >= coordinates {
+                return Ok(None);
+            }
+            let Some(texture) = graphics.textures.get(&address) else {
+                return Ok(None);
+            };
+            let level = &texture.levels[0];
+            let mut bgra = vec![0; level.width as usize * level.height as usize * 4];
+            memory.read(u64::from(address) + u64::from(level.offset), &mut bgra)?;
+            Some(SampledTexture {
+                width: level.width,
+                height: level.height,
+                bgra,
+            })
+        } else {
+            None
+        };
+        stages.push(SampledStage { state, texture });
+    }
+    Ok(Some(stages))
+}
+
 #[allow(clippy::too_many_lines)]
 pub(super) fn draw_indexed(
     graphics: &mut Graphics,
@@ -92,20 +162,16 @@ pub(super) fn draw_indexed(
     let Some((vertex_address, stride)) = graphics.stream else {
         return Ok(INVALID_CALL);
     };
-    let (vertex_size, color_offset) = match graphics.vertex_fvf {
-        0x142 => (24_u32, 12_usize),
-        0x152 => (36, 24),
-        _ => return Ok(INVALID_CALL),
+    let Some(layout) = vertex_layout(graphics.vertex_fvf) else {
+        return Ok(INVALID_CALL);
     };
+    let vertex_size = layout.size;
     if device != super::DEVICE
         || graphics.device_refs == 0
         || graphics.back.is_none()
         || topology != 4
         || primitive_count > MAX_PRIMITIVES
         || stride < vertex_size
-        || graphics.texture_stages[1..]
-            .iter()
-            .any(|texture| *texture != 0)
     {
         return Ok(INVALID_CALL);
     }
@@ -139,24 +205,9 @@ pub(super) fn draw_indexed(
         return Ok(0);
     }
 
-    // Snapshot texture pixels before changing the back buffer.
-    let texture = if graphics.texture_stages[0] == 0 {
-        None
-    } else {
-        let Some(texture) = graphics.textures.get(&graphics.texture_stages[0]) else {
-            return Ok(INVALID_CALL);
-        };
-        let level = &texture.levels[0];
-        let mut bgra = vec![0; level.width as usize * level.height as usize * 4];
-        memory.read(
-            u64::from(graphics.texture_stages[0]) + u64::from(level.offset),
-            &mut bgra,
-        )?;
-        Some(SampledTexture {
-            width: level.width,
-            height: level.height,
-            bgra,
-        })
+    // snapshot every active texture before changing color or depth.
+    let Some(stages) = sampled_stages(graphics, layout.coordinates, memory)? else {
+        return Ok(INVALID_CALL);
     };
 
     let index_start = u64::from(index_address)
@@ -202,7 +253,7 @@ pub(super) fn draw_indexed(
         if unique.contains_key(key) {
             continue;
         }
-        let mut bytes = [0; 36];
+        let mut bytes = [0; 44];
         memory.read(
             vertex_base + u64::from(*key) * u64::from(stride),
             &mut bytes[..vertex_size as usize],
@@ -211,15 +262,19 @@ pub(super) fn draw_indexed(
             f32::from_le_bytes(bytes[i * 4..i * 4 + 4].try_into().expect("position"))
         });
         // normals occupy layout space but are unused by the diffuse-only raster path.
-        let uv_offset = color_offset + 4;
-        let uv = std::array::from_fn::<_, 2, _>(|i| {
-            f32::from_le_bytes(
-                bytes[uv_offset + i * 4..uv_offset + i * 4 + 4]
-                    .try_into()
-                    .expect("texcoord"),
-            )
-        });
-        if xyz.iter().chain(uv.iter()).any(|value| !value.is_finite()) {
+        let mut uv = [[0.0; 2]; 2];
+        for (set, values) in uv.iter_mut().enumerate().take(layout.coordinates) {
+            for (i, value) in values.iter_mut().enumerate() {
+                let offset = layout.uv_offset + set * 8 + i * 4;
+                *value =
+                    f32::from_le_bytes(bytes[offset..offset + 4].try_into().expect("texcoord"));
+            }
+        }
+        if xyz
+            .iter()
+            .chain(uv.iter().flatten())
+            .any(|value| !value.is_finite())
+        {
             return Ok(INVALID_CALL);
         }
         let mut position = [f64::from(xyz[0]), f64::from(xyz[1]), f64::from(xyz[2]), 1.0];
@@ -233,12 +288,14 @@ pub(super) fn draw_indexed(
             *key,
             ClipVertex {
                 position,
-                color: [
-                    f64::from(bytes[color_offset + 2]),
-                    f64::from(bytes[color_offset + 1]),
-                    f64::from(bytes[color_offset]),
-                ],
-                uv: uv.map(f64::from),
+                color: layout.color.map_or([255.0; 3], |offset| {
+                    [
+                        f64::from(bytes[offset + 2]),
+                        f64::from(bytes[offset + 1]),
+                        f64::from(bytes[offset]),
+                    ]
+                }),
+                uv: uv.map(|set| set.map(f64::from)),
             },
         );
     }
@@ -246,7 +303,7 @@ pub(super) fn draw_indexed(
     let mut prepared = Vec::new();
     let mut samples = 0_u64;
     for triangle in triangles {
-        let polygon = clip_triangle([
+        let polygon = clip_triangle(&[
             unique[&triangle[0]],
             unique[&triangle[1]],
             unique[&triangle[2]],
@@ -280,7 +337,7 @@ pub(super) fn draw_indexed(
             graphics.depth_policy,
             [a, b, c],
             bounds,
-            texture.as_ref(),
+            &stages,
         );
     }
     Ok(0)
@@ -294,7 +351,7 @@ fn transform(position: [f64; 4], matrix: &[u32; 16]) -> [f64; 4] {
     })
 }
 
-fn clip_triangle(vertices: [ClipVertex; 3]) -> Vec<ClipVertex> {
+fn clip_triangle(vertices: &[ClipVertex; 3]) -> Vec<ClipVertex> {
     let mut polygon = vertices.to_vec();
     for plane in [
         [1.0, 0.0, 0.0, 1.0],
@@ -357,7 +414,7 @@ fn screen_vertex(clip: ClipVertex, viewport: Viewport) -> Option<Vertex> {
             .color
             .map(|channel| channel.round().clamp(0.0, 255.0) as u8),
         inv_w: 1.0 / w,
-        uv_over_w: clip.uv.map(|coord| coord / w),
+        uv_over_w: clip.uv.map(|set| set.map(|coord| coord / w)),
     })
 }
 
@@ -426,7 +483,7 @@ pub(super) fn draw_up(
             z: f64::from(z),
             color: [bytes[18], bytes[17], bytes[16]],
             inv_w: 1.0,
-            uv_over_w: [0.0, 0.0],
+            uv_over_w: [[0.0; 2]; 2],
         });
     }
 
@@ -460,7 +517,7 @@ pub(super) fn draw_up(
                     vertices[indices[2]],
                 ],
                 bounds,
-                None,
+                &[],
             );
         }
     }
@@ -513,7 +570,7 @@ fn raster_triangle(
     depth_policy: DepthPolicy,
     [a, b, c]: [Vertex; 3],
     bounds: Bounds,
-    texture: Option<&SampledTexture>,
+    stages: &[SampledStage],
 ) {
     for y in bounds.top..bounds.bottom {
         for x in bounds.left..bounds.right {
@@ -536,24 +593,27 @@ fn raster_triangle(
                 }
             }
             let offset = pixel_index * 4;
-            let sampled = texture.and_then(|texture| {
-                let inv_w = wa * a.inv_w + wb * b.inv_w + wc * c.inv_w;
-                if inv_w <= 0.0 || !inv_w.is_finite() {
-                    return None;
-                }
-                let uv = std::array::from_fn(|i| {
-                    (wa * a.uv_over_w[i] + wb * b.uv_over_w[i] + wc * c.uv_over_w[i]) / inv_w
-                });
-                uv.iter()
-                    .all(|value| value.is_finite())
-                    .then(|| texture.sample(uv))
-            });
-            for channel in 0..3 {
-                let value = wa * f64::from(a.color[channel])
+            let diffuse = std::array::from_fn(|channel| {
+                wa * f64::from(a.color[channel])
                     + wb * f64::from(b.color[channel])
-                    + wc * f64::from(c.color[channel]);
-                let value =
-                    sampled.map_or(value, |pixel| value * f64::from(pixel[channel]) / 255.0);
+                    + wc * f64::from(c.color[channel])
+            });
+            let mut current = diffuse;
+            for stage in stages {
+                let sampled = stage.texture.as_ref().map_or([255; 3], |texture| {
+                    let inv_w = wa * a.inv_w + wb * b.inv_w + wc * c.inv_w;
+                    let set = stage.state.coordinate as usize;
+                    let uv = std::array::from_fn(|i| {
+                        (wa * a.uv_over_w[set][i]
+                            + wb * b.uv_over_w[set][i]
+                            + wc * c.uv_over_w[set][i])
+                            / inv_w
+                    });
+                    texture.sample(uv)
+                });
+                current = stage.state.combine(diffuse, current, sampled);
+            }
+            for (channel, value) in current.into_iter().enumerate() {
                 frame.rgba[offset + channel] = value.round().clamp(0.0, 255.0) as u8;
             }
             frame.rgba[offset + 3] = 255;

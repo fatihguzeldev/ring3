@@ -1,5 +1,7 @@
 use std::collections::BTreeMap;
 
+mod color;
+
 use super::super::Access;
 use super::{
     API_BASE, GuestMemory, MemoryError, PAGE_SIZE, Permissions,
@@ -272,6 +274,7 @@ pub(super) struct Graphics {
     stream: Option<(u32, u32)>,
     texture_stages: [u32; 8],
     color_arg0: [u32; 8],
+    color_stages: [color::Stage; 8],
     vertex_fvf: u32,
 }
 
@@ -804,6 +807,7 @@ impl Graphics {
         self.indices = None;
         self.stream = None;
         self.color_arg0 = [1; 8];
+        self.color_stages = color::Stage::defaults();
         self.depth = (enable_depth == 1).then(|| vec![u16::MAX; (width * height) as usize]);
         self.depth_surface_refs = 0;
         self.z_enabled = enable_depth == 1;
@@ -834,6 +838,7 @@ impl Graphics {
         self.indices = None;
         self.stream = None;
         self.color_arg0 = [1; 8];
+        self.color_stages = color::Stage::defaults();
         self.root_refs = self.root_refs.saturating_sub(1);
     }
 
@@ -953,15 +958,14 @@ impl Graphics {
         let Ok(index) = usize::try_from(stage) else {
             return INVALID_CALL;
         };
-        if device != DEVICE
-            || self.device_refs == 0
-            || index >= self.color_arg0.len()
-            || kind != 26
-            || value > 2
-        {
+        if device != DEVICE || self.device_refs == 0 || index >= self.color_arg0.len() {
             return INVALID_CALL;
         }
-        self.color_arg0[index] = value;
+        if kind == 26 && value <= 2 {
+            self.color_arg0[index] = value;
+        } else if !self.color_stages[index].set(index, kind, value) {
+            return INVALID_CALL;
+        }
         0
     }
 
@@ -974,12 +978,18 @@ impl Graphics {
         let Ok(index) = usize::try_from(stage) else {
             return Ok(INVALID_CALL);
         };
-        if device != DEVICE || self.device_refs == 0 || index >= self.color_arg0.len() || kind != 26
-        {
+        if device != DEVICE || self.device_refs == 0 || index >= self.color_arg0.len() {
             return Ok(INVALID_CALL);
         }
+        let value = if kind == 26 {
+            self.color_arg0[index]
+        } else if let Some(value) = self.color_stages[index].get(kind) {
+            value
+        } else {
+            return Ok(INVALID_CALL);
+        };
         guest::check(memory, output, 4, Access::Write)?;
-        guest::write_word(memory, output, self.color_arg0[index])?;
+        guest::write_word(memory, output, value)?;
         Ok(0)
     }
 
@@ -1104,7 +1114,9 @@ impl Graphics {
             return INVALID_CALL;
         }
         match call {
-            Call::SetVertexShader if matches!(args[1], 0x44 | 0x142 | 0x152) => {
+            Call::SetVertexShader
+                if args[1] == 0x44 || primitives::vertex_layout(args[1]).is_some() =>
+            {
                 self.vertex_fvf = args[1];
                 0
             }
@@ -1241,7 +1253,10 @@ impl Graphics {
         args: &[u32],
         memory: &GuestMemory,
     ) -> Result<u32, MemoryError> {
-        if args[0] != DEVICE || self.device_refs == 0 {
+        if args[0] != DEVICE
+            || self.device_refs == 0
+            || self.color_stages != color::Stage::defaults()
+        {
             return Ok(INVALID_CALL);
         }
         primitives::draw_up(

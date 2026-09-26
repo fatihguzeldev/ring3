@@ -1735,7 +1735,7 @@ fn colorarg0_texture_stage_state_round_trips_and_rejects_bad_requests() {
     for args in [
         [device, 8, 26, LEVEL_DESC],
         [device + 4, 0, 26, LEVEL_DESC],
-        [device, 0, 1, LEVEL_DESC],
+        [device, 0, 27, LEVEL_DESC],
     ] {
         assert_eq!(invoke(&mut process, get, &args), 0x8876_086c);
         assert_eq!(read(&process, LEVEL_DESC), 0x5555_5555);
