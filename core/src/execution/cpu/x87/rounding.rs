@@ -15,13 +15,13 @@ pub(super) fn single_arithmetic_result(
     left: f64,
     right: f64,
     multiply: bool,
-    allow_below_normal: bool,
+    extended_range: bool,
     toward_zero: bool,
 ) -> Option<f64> {
     if !multiply {
         single_quotient(result, left, right)
-    } else if allow_below_normal && result != 0.0 && result.abs() < f64::from(f32::MIN_POSITIVE) {
-        single_product_below_f32_normal(result, left, right, toward_zero)
+    } else if extended_range {
+        single_product_extended_range(result, left, right, toward_zero)
     } else if toward_zero {
         single_product_toward_zero(result, left, right)
     } else {
@@ -29,7 +29,7 @@ pub(super) fn single_arithmetic_result(
     }
 }
 
-fn single_product_below_f32_normal(
+fn single_product_extended_range(
     result: f64,
     left: f64,
     right: f64,

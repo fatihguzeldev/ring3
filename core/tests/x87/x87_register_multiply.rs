@@ -121,6 +121,70 @@ fn register_multiply_uses_each_occupied_source_without_popping() {
 }
 
 #[test]
+fn register_multiply_keeps_extended_exponent_with_single_precision_mantissa() {
+    for (top, indexed, expected, status) in [
+        (
+            0x47ef_ffff_c000_0000_u64,
+            0x47ef_ffff_c000_0000,
+            0x4fef_ffff_8000_0000,
+            0x2820,
+        ),
+        (
+            0xc7ef_ffff_c000_0000,
+            0x47ef_ffff_c000_0000,
+            0xcfef_ffff_8000_0000,
+            0x2820,
+        ),
+        (
+            0x47f0_0000_0000_0000,
+            0x3ff0_0000_1000_0000,
+            0x47f0_0000_0000_0000,
+            0x2820,
+        ),
+        (
+            0x47f0_0000_0000_0000,
+            0x3ff0_0000_3000_0000,
+            0x47f0_0000_4000_0000,
+            0x2a20,
+        ),
+        (
+            0x47ef_ffff_e000_0000,
+            0x3ff0_0000_2000_0000,
+            0x47f0_0000_0000_0000,
+            0x2820,
+        ),
+    ] {
+        let mut code = Vec::new();
+        fld(&mut code, INPUT);
+        fld(&mut code, INPUT + 8);
+        fld(&mut code, INPUT + 16);
+        code.extend([0xd8, 0xca, 0xdf, 0xe0]);
+        fstp(&mut code, OUTPUT);
+        let (mut cpu, mut memory) = load(&code);
+        cpu.set_x87_control_word(0x007f);
+        for (address, bits) in [
+            (INPUT, indexed),
+            (INPUT + 8, 17.5_f64.to_bits()),
+            (INPUT + 16, top),
+        ] {
+            memory
+                .write(u64::from(address), &bits.to_le_bytes())
+                .unwrap();
+        }
+        assert_eq!(
+            cpu.run(&mut memory, 5).instructions,
+            5,
+            "{top:x}/{indexed:x}"
+        );
+        assert_eq!(cpu.register(Register32::Eax) & 0x3a3f, status);
+        assert_eq!(cpu.run(&mut memory, 1).instructions, 1);
+        let mut bytes = [0; 8];
+        memory.read(u64::from(OUTPUT), &mut bytes).unwrap();
+        assert_eq!(u64::from_le_bytes(bytes), expected);
+    }
+}
+
+#[test]
 fn register_multiply_preserves_signed_zero_and_reports_rounding() {
     for (top, source, control, expected, status) in [
         (

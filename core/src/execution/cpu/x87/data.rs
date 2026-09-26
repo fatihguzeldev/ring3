@@ -4,6 +4,14 @@ use std::cmp::Ordering;
 use super::super::operands::Location;
 use super::{Cpu32, GuestMemory, MemoryError, StopReason, rounding};
 
+fn extended_product_range(code: Code, result: f64) -> bool {
+    match code {
+        Code::Fmul_m32fp => result != 0.0 && result.abs() < f64::from(f32::MIN_POSITIVE),
+        Code::Fmul_st0_sti => result.abs() > f64::from(f32::MAX),
+        _ => false,
+    }
+}
+
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub(crate) struct Stack {
     values: [u64; 8],
@@ -555,7 +563,7 @@ impl Cpu32 {
                     left,
                     right,
                     multiply,
-                    instruction.code() == Code::Fmul_m32fp,
+                    extended_product_range(instruction.code(), result),
                     self.x87_control_word & 0x0f3f == 0x0c3f,
                 )
                 .ok_or(StopReason::UnsupportedInstruction)?;
