@@ -550,13 +550,14 @@ impl Cpu32 {
                 return Err(StopReason::UnsupportedInstruction);
             }
             if single_precision {
-                result = if !multiply {
-                    rounding::single_quotient(result, left, right)
-                } else if self.x87_control_word & 0x0f3f == 0x0c3f {
-                    rounding::single_product_toward_zero(result, left, right)
-                } else {
-                    rounding::single_product(result, left, right)
-                }
+                result = rounding::single_arithmetic_result(
+                    result,
+                    left,
+                    right,
+                    multiply,
+                    instruction.code() == Code::Fmul_m32fp,
+                    self.x87_control_word & 0x0f3f == 0x0c3f,
+                )
                 .ok_or(StopReason::UnsupportedInstruction)?;
             }
             let rounding = if multiply {

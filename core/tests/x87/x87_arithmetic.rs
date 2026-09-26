@@ -341,22 +341,21 @@ fn truncating_single_precision_memory_multiply_rejects_faults_atomically() {
 }
 
 #[test]
-fn single_precision_profile_rejects_remaining_excluded_ranges_atomically() {
+fn single_precision_profile_rejects_upper_excluded_range_atomically() {
     let multiply = &[0xd8, 0x0d, 0x10, 0x22, 0x40, 0];
-    for (top, source) in [
-        (f64::from(f32::MAX), 2.0_f32),
-        (f64::from(f32::MIN_POSITIVE), 0.5_f32),
-    ] {
-        let (mut cpu, mut memory) = load(multiply, top.to_bits(), u64::from(source.to_bits()));
-        assert_eq!(cpu.run(&mut memory, 1).instructions, 1);
-        cpu.set_x87_control_word(0x007f);
-        let before = cpu;
-        assert_eq!(
-            cpu.run(&mut memory, 1).reason,
-            StopReason::UnsupportedInstruction
-        );
-        assert_eq!(cpu, before);
-    }
+    let (mut cpu, mut memory) = load(
+        multiply,
+        f64::from(f32::MAX).to_bits(),
+        u64::from(2.0_f32.to_bits()),
+    );
+    assert_eq!(cpu.run(&mut memory, 1).instructions, 1);
+    cpu.set_x87_control_word(0x007f);
+    let before = cpu;
+    assert_eq!(
+        cpu.run(&mut memory, 1).reason,
+        StopReason::UnsupportedInstruction
+    );
+    assert_eq!(cpu, before);
 }
 
 #[test]

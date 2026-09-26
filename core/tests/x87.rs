@@ -7,6 +7,11 @@ fn masked_subnormal_stores_match_scalar_x87() {
 }
 
 #[test]
+fn extended_single_multiply_matches_scalar_x87() {
+    x87_subnormal_cases::extended_single_multiply_matches_scalar_x87();
+}
+
+#[test]
 fn subnormal_faults_and_memory_operands_preserve_state() {
     x87_subnormal_cases::subnormal_faults_and_memory_operands_preserve_state();
 }

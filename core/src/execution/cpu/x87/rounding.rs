@@ -10,6 +10,56 @@ pub(super) fn single_product(result: f64, left: f64, right: f64) -> Option<f64> 
     single_rounded(result, |midpoint| product_result(midpoint, left, right))
 }
 
+pub(super) fn single_arithmetic_result(
+    result: f64,
+    left: f64,
+    right: f64,
+    multiply: bool,
+    allow_below_normal: bool,
+    toward_zero: bool,
+) -> Option<f64> {
+    if !multiply {
+        single_quotient(result, left, right)
+    } else if allow_below_normal && result != 0.0 && result.abs() < f64::from(f32::MIN_POSITIVE) {
+        single_product_below_f32_normal(result, left, right, toward_zero)
+    } else if toward_zero {
+        single_product_toward_zero(result, left, right)
+    } else {
+        single_product(result, left, right)
+    }
+}
+
+fn single_product_below_f32_normal(
+    result: f64,
+    left: f64,
+    right: f64,
+    toward_zero: bool,
+) -> Option<f64> {
+    let bits = result.abs().to_bits();
+    let lower = bits & !((1_u64 << 29) - 1);
+    let remainder = bits - lower;
+    let upper = lower.checked_add(1_u64 << 29)?;
+    let nearest = match remainder.cmp(&(1_u64 << 28)) {
+        Ordering::Less => lower,
+        Ordering::Greater => upper,
+        Ordering::Equal => match product_result(result.abs(), left, right) {
+            Ordering::Greater => lower,
+            Ordering::Equal if lower & (1_u64 << 29) == 0 => lower,
+            Ordering::Less | Ordering::Equal => upper,
+        },
+    };
+    let nearest = f64::from_bits(nearest);
+    if !nearest.is_normal() {
+        return None;
+    }
+    let rounded = if toward_zero && product_result(nearest, left, right) == Ordering::Greater {
+        f64::from_bits(nearest.to_bits().checked_sub(1_u64 << 29)?)
+    } else {
+        nearest
+    };
+    rounded.is_normal().then(|| rounded.copysign(result))
+}
+
 pub(super) fn single_product_toward_zero(result: f64, left: f64, right: f64) -> Option<f64> {
     let nearest = single_product(result, left, right)?;
     if product_result(nearest, left, right) != Ordering::Greater {

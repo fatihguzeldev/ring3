@@ -4948,6 +4948,7 @@ pub extern "C" fn run() -> u32 {
     mutex_wait_cases::mutex_wait_timeout_does_not_acquire_ownership();
     mutex_wait_cases::suspended_mutex_waiters_and_return_faults_preserve_ownership();
     x87_subnormal_cases::masked_subnormal_stores_match_scalar_x87();
+    x87_subnormal_cases::extended_single_multiply_matches_scalar_x87();
     x87_subnormal_cases::subnormal_faults_and_memory_operands_preserve_state();
     dinput_root_cases::imported_root_lifetime_across_budgets();
     dinput_device_cases::imported_keyboard_lifetime_across_budgets();

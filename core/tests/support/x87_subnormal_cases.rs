@@ -26,6 +26,79 @@ fn read<const N: usize>(memory: &GuestMemory, address: u32) -> [u8; N] {
     bytes
 }
 
+pub fn extended_single_multiply_matches_scalar_x87() {
+    for (top, source, control, expected, status) in [
+        (
+            0x3b40_0000_2000_0000,
+            0x1a40_0000_u32,
+            0x007f,
+            0x3698_0000_4000_0000,
+            0x220,
+        ),
+        (
+            0x3b40_0000_2000_0000,
+            0x1a40_0000,
+            0x0c7f,
+            0x3698_0000_2000_0000,
+            0x20,
+        ),
+        (
+            0xbb40_0000_2000_0000,
+            0x1a40_0000,
+            0x007f,
+            0xb698_0000_4000_0000,
+            0x220,
+        ),
+        (
+            0xbb40_0000_2000_0000,
+            0x1a40_0000,
+            0x0c7f,
+            0xb698_0000_2000_0000,
+            0x20,
+        ),
+        (
+            0x3810_0000_0000_0000,
+            0x3f00_0000,
+            0x007f,
+            0x3800_0000_0000_0000,
+            0,
+        ),
+        (
+            0x3b4f_ffff_f000_0000,
+            0x1a00_0000,
+            0x007f,
+            0x36a0_0000_0000_0000,
+            0x220,
+        ),
+        (
+            0x3b4f_ffff_f000_0000,
+            0x1a00_0000,
+            0x0c7f,
+            0x369f_ffff_e000_0000,
+            0x20,
+        ),
+    ] {
+        let mut code = Vec::new();
+        operand(&mut code, 0xdd, 0x05, INPUT);
+        code.extend([0xd8, 0x48, 0x20, 0xdf, 0xe0]);
+        operand(&mut code, 0xdd, 0x1d, OUTPUT);
+        let (mut cpu, mut memory) = fixture(&code, top, control);
+        memory
+            .write(u64::from(INPUT + 16), &source.to_le_bytes())
+            .unwrap();
+        cpu.set_register(Register32::Eax, INPUT - 16);
+        assert_eq!(cpu.run(&mut memory, 3).instructions, 3);
+        assert_eq!(
+            cpu.register(Register32::Eax) & 0x220,
+            status,
+            "{top:x}/{source:x}/{control:x}"
+        );
+        cpu.set_x87_control_word(0x027f);
+        assert_eq!(cpu.run(&mut memory, 1).instructions, 1);
+        assert_eq!(u64::from_le_bytes(read(&memory, OUTPUT)), expected);
+    }
+}
+
 pub fn masked_subnormal_stores_match_scalar_x87() {
     // scalar x87 oracle: input, nearest bits/status, toward-zero bits/status.
     let cases = [
