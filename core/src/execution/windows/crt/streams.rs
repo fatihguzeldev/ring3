@@ -12,6 +12,7 @@ use super::{
 pub(in super::super) enum Call {
     Open,
     Read,
+    Write,
     Close,
     Seek,
     Tell,
@@ -21,7 +22,7 @@ impl Call {
     pub(super) fn arguments(self) -> usize {
         match self {
             Self::Open => 2,
-            Self::Read => 4,
+            Self::Read | Self::Write => 4,
             Self::Close | Self::Tell => 1,
             Self::Seek => 3,
         }
@@ -74,6 +75,7 @@ impl Streams {
         match call {
             Call::Open => self.open(args, memory, heap, directory, errno),
             Call::Read => self.read(args, memory, directory),
+            Call::Write => self.write(args, memory, directory, errno),
             Call::Close => {
                 let file = self.validated(args[0], memory)?.file;
                 heap.free_stream(args[0], cpu.register(Register32::Esp), memory)?;
@@ -221,6 +223,45 @@ impl Streams {
         stream.position += copied;
         stream.eof = eof;
         Ok(u32::try_from(copied).expect("bounded read fits u32") / args[1])
+    }
+
+    fn write(
+        &mut self,
+        args: &[u32],
+        memory: &mut GuestMemory,
+        directory: &mut Directory,
+        errno: u32,
+    ) -> Result<u32, DispatchError> {
+        let stream = self.validated(args[3], memory)?;
+        let StreamFile::Output(index) = stream.file else {
+            return Err(DispatchError::Unsupported);
+        };
+        let Some(requested) = args[1].checked_mul(args[2]).map(|value| value as usize) else {
+            return failed(memory, errno, 28);
+        };
+        if requested == 0 {
+            return Ok(0);
+        }
+        let Some(end) = stream.position.checked_add(requested) else {
+            return failed(memory, errno, 28);
+        };
+        if end > 64 * 1024 * 1024 {
+            return failed(memory, errno, 28);
+        }
+        let mut bytes = Vec::new();
+        if bytes.try_reserve_exact(requested).is_err() {
+            return failed(memory, errno, 12);
+        }
+        bytes.resize(requested, 0);
+        memory.read(u64::from(args[0]), &mut bytes)?;
+        if !directory.write_output(index, stream.position, &bytes) {
+            return failed(memory, errno, 28);
+        }
+        self.live
+            .get_mut(&args[3])
+            .expect("validated stream")
+            .position = end;
+        Ok(args[2])
     }
 
     fn seek(

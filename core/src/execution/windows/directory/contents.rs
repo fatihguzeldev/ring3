@@ -2,6 +2,8 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use super::{Directory, DispatchError, LoadError, VirtualFile, paths};
 
+const OUTPUT_BYTES_LIMIT: usize = 64 * 1024 * 1024;
+
 /// bytes copied into the process for an existing declared file.
 #[derive(Clone, Copy)]
 pub struct FileContents<'a> {
@@ -101,6 +103,30 @@ impl Directory {
         self.created_files[index].bytes.len()
     }
 
+    pub(in super::super) fn write_output(
+        &mut self,
+        index: usize,
+        position: usize,
+        input: &[u8],
+    ) -> bool {
+        let Some(end) = position.checked_add(input.len()) else {
+            return false;
+        };
+        let current = self.created_files[index].bytes.len();
+        let new_len = current.max(end);
+        let used: usize = self.created_files.iter().map(|file| file.bytes.len()).sum();
+        if new_len > OUTPUT_BYTES_LIMIT || used > OUTPUT_BYTES_LIMIT - (new_len - current) {
+            return false;
+        }
+        let file = &mut self.created_files[index].bytes;
+        if file.try_reserve_exact(new_len - current).is_err() {
+            return false;
+        }
+        file.resize(new_len, 0);
+        file[position..end].copy_from_slice(input);
+        true
+    }
+
     pub(in super::super) fn attach_contents(
         &mut self,
         inputs: &[FileContents<'_>],
@@ -190,5 +216,28 @@ impl Directory {
 
     pub(in super::super) fn release_reader(&mut self, index: usize) {
         self.files[index].readers -= 1;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Directory, OutputTarget};
+
+    #[test]
+    fn virtual_output_writes_owned_bytes_with_zero_gap_and_truncation() {
+        let mut directory = Directory::new(b"C:\\", &[b"C:\\savegames"], &[]).unwrap();
+        let Ok(Ok(target)) = directory.output_target(&mut b"C:\\savegames\\slot.mps".to_vec())
+        else {
+            panic!("valid output target");
+        };
+        let index = directory.publish_output(target);
+        assert!(directory.write_output(index, 5, b"abc"));
+        assert_eq!(&directory.created_files[index].bytes, b"\0\0\0\0\0abc");
+        assert!(directory.write_output(index, 6, b"XY"));
+        assert_eq!(&directory.created_files[index].bytes, b"\0\0\0\0\0aXY");
+        assert!(!directory.write_output(index, 64 * 1024 * 1024, b"x"));
+        assert_eq!(&directory.created_files[index].bytes, b"\0\0\0\0\0aXY");
+        directory.publish_output(OutputTarget::Existing(index));
+        assert!(directory.created_files[index].bytes.is_empty());
     }
 }

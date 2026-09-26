@@ -100,6 +100,8 @@ mod windows_cpinfo;
 mod windows_create_directory;
 #[path = "windows/windows_crt.rs"]
 mod windows_crt;
+#[path = "windows/windows_crt_fwrite.rs"]
+mod windows_crt_fwrite;
 #[path = "windows/windows_crt_localtime.rs"]
 mod windows_crt_localtime;
 #[path = "windows/windows_crt_sort.rs"]
