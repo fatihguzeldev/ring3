@@ -20,6 +20,7 @@ const TEXTURE_SURFACE_TABLE: u32 = OBJECT_BASE + 0x600;
 const VERTEX_BUFFER_TABLE: u32 = OBJECT_BASE + 0x700;
 const INDEX_BUFFER_TABLE: u32 = OBJECT_BASE + 0x800;
 const INVALID_CALL: u32 = 0x8876_086c;
+const MAX_LIGHTS: usize = 256;
 const NOT_AVAILABLE: u32 = 0x8876_086a;
 const UNSUPPORTED_COLOR_OPERATION: u32 = 0x8876_0819;
 const ADAPTER_IDENTIFIER_SIZE: usize = 1068;
@@ -123,6 +124,7 @@ pub(super) enum Call {
     GetStreamSource,
     SetViewport,
     SetMaterial,
+    SetLight,
     SetTransform,
     GetTransform,
     SetRenderState,
@@ -187,6 +189,7 @@ impl Call {
             0x534 => Self::DrawIndexedPrimitive,
             0x498 => Self::SetViewport,
             0x5e4 => Self::SetMaterial,
+            0x5e8 => Self::SetLight,
             0x4f0 => Self::SetTransform,
             0x4f4 => Self::GetTransform,
             0x49c => Self::SetRenderState,
@@ -222,6 +225,7 @@ impl Call {
             | Self::TextureGetSurface
             | Self::CurrentDisplayMode
             | Self::SetRenderState
+            | Self::SetLight
             | Self::SetTransform
             | Self::GetTransform
             | Self::SetTexture
@@ -269,6 +273,7 @@ pub(super) struct Graphics {
     scene_open: bool,
     viewport: Option<Viewport>,
     material: Option<[u8; 68]>,
+    lights: BTreeMap<u32, [u8; 104]>,
     transforms: BTreeMap<u32, [u32; 16]>,
     front: Option<Frame>,
     textures: BTreeMap<u32, Texture>,
@@ -458,6 +463,7 @@ impl Graphics {
             (DEVICE_TABLE, 36, 0x44),
             (DEVICE_TABLE, 40, 0x498),
             (DEVICE_TABLE, 42, 0x5e4),
+            (DEVICE_TABLE, 44, 0x5e8),
             (DEVICE_TABLE, 37, 0x4f0),
             (DEVICE_TABLE, 38, 0x4f4),
             (DEVICE_TABLE, 50, 0x49c),
@@ -567,6 +573,7 @@ impl Graphics {
             Call::GetStreamSource => return self.get_stream_source(args, memory),
             Call::SetViewport => return self.set_viewport(args, memory),
             Call::SetMaterial => return self.set_material(args, memory),
+            Call::SetLight => return self.set_light(args, memory),
             Call::SetTransform => return self.set_transform(args, memory),
             Call::GetTransform => return self.get_transform(args, memory),
             Call::SetRenderState => self.set_render_state(args),
@@ -810,6 +817,7 @@ impl Graphics {
         self.root_refs = self.root_refs.saturating_add(1);
         self.device_refs = 1;
         self.scene_open = false;
+        self.lights.clear();
         self.texture_stages = [0; 8];
         self.indices = None;
         self.stream = None;
@@ -840,6 +848,7 @@ impl Graphics {
         self.scene_open = false;
         self.viewport = None;
         self.material = None;
+        self.lights.clear();
         self.transforms.clear();
         self.vertex_fvf = 0;
         self.texture_stages = [0; 8];
@@ -886,6 +895,20 @@ impl Graphics {
         let mut material = [0; 68];
         memory.read(u64::from(args[1]), &mut material)?;
         self.material = Some(material);
+        Ok(0)
+    }
+
+    fn set_light(&mut self, args: &[u32], memory: &GuestMemory) -> Result<u32, MemoryError> {
+        if args[0] != DEVICE
+            || self.device_refs == 0
+            || args[2] == 0
+            || (self.lights.len() >= MAX_LIGHTS && !self.lights.contains_key(&args[1]))
+        {
+            return Ok(INVALID_CALL);
+        }
+        let mut light = [0; 104];
+        memory.read(u64::from(args[2]), &mut light)?;
+        self.lights.insert(args[1], light);
         Ok(0)
     }
 
@@ -1910,5 +1933,41 @@ mod tests {
         assert_eq!(graphics.material, Some(material));
         graphics.finish_device();
         assert_eq!(graphics.material, None);
+    }
+
+    #[test]
+    fn light_copy_is_owned_atomic_and_bounded() {
+        let mut graphics = Graphics {
+            device_refs: 1,
+            ..Graphics::default()
+        };
+        let mut memory = GuestMemory::new(1);
+        memory
+            .map_zeroed(0x1000, PAGE_SIZE, Permissions::READ_WRITE)
+            .unwrap();
+        let mut light = [0; 104];
+        light[..4].copy_from_slice(&1_u32.to_le_bytes());
+        light[4..8].copy_from_slice(&1_f32.to_le_bytes());
+        memory.write(0x1000, &light).unwrap();
+        assert_eq!(graphics.set_light(&[DEVICE, 0, 0x1000], &memory), Ok(0));
+        memory.write(0x1000, &[0; 104]).unwrap();
+        assert_eq!(graphics.lights[&0], light);
+        assert!(graphics.set_light(&[DEVICE, 0, 0x1ff0], &memory).is_err());
+        assert_eq!(graphics.lights[&0], light);
+
+        for index in 1..u32::try_from(MAX_LIGHTS).unwrap() {
+            assert_eq!(graphics.set_light(&[DEVICE, index, 0x1000], &memory), Ok(0));
+        }
+        assert_eq!(graphics.lights.len(), MAX_LIGHTS);
+        assert_eq!(
+            graphics.set_light(
+                &[DEVICE, u32::try_from(MAX_LIGHTS).unwrap(), 0x1000],
+                &memory
+            ),
+            Ok(INVALID_CALL)
+        );
+        assert_eq!(graphics.set_light(&[DEVICE, 0, 0x1000], &memory), Ok(0));
+        graphics.finish_device();
+        assert!(graphics.lights.is_empty());
     }
 }

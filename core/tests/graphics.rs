@@ -6,6 +6,8 @@ mod discard_resource_cases;
 mod executable;
 #[path = "support/imported_executable.rs"]
 mod imported_executable;
+#[path = "support/light_cases.rs"]
+mod light_cases;
 #[path = "support/material_cases.rs"]
 mod material_cases;
 #[path = "support/normal_vertex_cases.rs"]
@@ -28,4 +30,14 @@ fn material_state_accepts_a_full_readable_structure() {
 #[test]
 fn material_read_fault_does_not_complete_the_call() {
     material_cases::material_read_fault_does_not_complete_the_call();
+}
+
+#[test]
+fn light_state_accepts_a_full_readable_structure() {
+    light_cases::light_state_accepts_a_full_readable_structure();
+}
+
+#[test]
+fn light_read_fault_does_not_complete_the_call() {
+    light_cases::light_read_fault_does_not_complete_the_call();
 }
