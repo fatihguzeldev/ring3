@@ -26,7 +26,7 @@ fn read(memory: &GuestMemory, address: u32, size: usize) -> Vec<u8> {
 }
 
 #[test]
-fn memory_transfers_preserve_finite_bits_and_signed_zero() {
+fn memory_transfers_preserve_supported_bits_and_signed_zero() {
     for (opcode, inputs) in [
         (
             0xd9,
@@ -37,6 +37,8 @@ fn memory_transfers_preserve_finite_bits_and_signed_zero() {
                 0xbf80_0000,
                 0x0080_0000,
                 0x7f7f_ffff,
+                0x7f80_0000,
+                0xff80_0000,
             ],
         ),
         (
@@ -71,6 +73,40 @@ fn memory_transfers_preserve_finite_bits_and_signed_zero() {
             );
             assert_eq!(cpu.eflags, 0xced7);
             assert_eq!(cpu.x87_control_word(), 0x027f);
+        }
+    }
+}
+
+#[test]
+fn masked_zero_divide_infinity_can_be_loaded_from_single_memory() {
+    let top = INPUT + 8;
+    let result = OUTPUT + 16;
+    let mut code = instruction(0xdd, 0x05, top); // FLD m64fp
+    code.extend(instruction(0xd8, 0x35, INPUT)); // FDIV m32fp
+    code.extend(instruction(0xd9, 0x1d, OUTPUT)); // FSTP m32fp
+    code.extend(instruction(0xd9, 0x05, OUTPUT)); // FLD m32fp
+    code.extend([0xdf, 0xe0]); // FNSTSW AX
+    code.extend(instruction(0xdd, 0x1d, result)); // FSTP m64fp
+    for (value, expected32, expected64) in [
+        (3.0_f64, f32::INFINITY.to_bits(), f64::INFINITY.to_bits()),
+        (
+            -3.0,
+            f32::NEG_INFINITY.to_bits(),
+            f64::NEG_INFINITY.to_bits(),
+        ),
+    ] {
+        for control in [0x007f, 0x027f] {
+            let (mut cpu, mut memory) = load(&code);
+            cpu.set_x87_control_word(control);
+            memory
+                .write(u64::from(INPUT), &0_u32.to_le_bytes())
+                .unwrap();
+            memory.write(u64::from(top), &value.to_le_bytes()).unwrap();
+            assert_eq!(cpu.run(&mut memory, 5).instructions, 5);
+            assert_eq!(cpu.register(Register32::Eax) & 0x3a3f, 0x3804);
+            assert_eq!(read(&memory, OUTPUT, 4), expected32.to_le_bytes());
+            assert_eq!(cpu.run(&mut memory, 1).instructions, 1);
+            assert_eq!(read(&memory, result, 8), expected64.to_le_bytes());
         }
     }
 }
@@ -215,10 +251,7 @@ fn eight_slots_are_lifo_and_stack_faults_do_not_mutate_state() {
 #[test]
 fn loads_reject_special_values_and_excluded_control_modes() {
     for (opcode, values) in [
-        (
-            0xd9,
-            vec![0x7f80_0000_u64, 0xff80_0000, 0x7fc0_0000, 0x7f80_0001],
-        ),
+        (0xd9, vec![0x7fc0_0000_u64, 0x7f80_0001]),
         (0xdd, vec![0x7ff0_0000_0000_0000, 0xfff0_0000_0000_0000]),
     ] {
         for value in values {

@@ -895,9 +895,6 @@ impl Cpu32 {
             .map_err(StopReason::MemoryFault)?;
         let value = if size == 4 {
             let value = f32::from_le_bytes(bytes[..4].try_into().expect("float width"));
-            if !value.is_finite() {
-                return Err(StopReason::UnsupportedInstruction);
-            }
             if value.is_subnormal() {
                 self.x87_stack.status |= 2;
             }
@@ -905,7 +902,9 @@ impl Cpu32 {
         } else {
             f64::from_le_bytes(bytes)
         };
-        if !value.is_normal() && value != 0.0 {
+        let load_single_infinity =
+            size == 4 && instruction.code() == Code::Fld_m32fp && value.is_infinite();
+        if !value.is_normal() && value != 0.0 && !load_single_infinity {
             return Err(StopReason::UnsupportedInstruction);
         }
         Ok(value)
