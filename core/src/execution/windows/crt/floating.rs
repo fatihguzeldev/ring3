@@ -9,6 +9,10 @@ pub(super) fn floor(cpu: &mut Cpu32, args: &[u32]) -> Result<(), DispatchError> 
         .ok_or(DispatchError::Unsupported)
 }
 
+pub(super) fn inline_fmod(cpu: &mut Cpu32) -> Result<(), DispatchError> {
+    cpu.x87_inline_fmod().ok_or(DispatchError::Unsupported)
+}
+
 pub(super) fn to_integer(cpu: &mut Cpu32) -> Result<u32, DispatchError> {
     let bytes = cpu
         .pop_x87_truncated_integer()

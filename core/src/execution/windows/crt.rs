@@ -93,6 +93,7 @@ pub(super) enum Call {
     DynamicCast,
     Sort,
     Floor,
+    InlineFmod,
     ComparePrefixIgnoringCase,
     SetJump,
     GetEnvironment,
@@ -147,6 +148,7 @@ impl Call {
             0x1c8 => Some(Self::FindByte),
             0x1cc => Some(Self::Sort),
             0x1d0 => Some(Self::Floor),
+            0x1e4 => Some(Self::InlineFmod),
             0x1d4 => Some(Self::ComparePrefixIgnoringCase),
             0x1d8 => Some(Self::SetJump),
             0x1dc => Some(Self::GetEnvironment),
@@ -213,6 +215,7 @@ impl Call {
             | Self::ErrnoPointer
             | Self::Random
             | Self::FloatToInteger
+            | Self::InlineFmod
             | Self::TypeName => 0,
         }
     }
@@ -296,6 +299,7 @@ impl Crt {
             Call::Random => Some(self.locals.random(cpu.fs_base())?.next()),
             Call::FloatToInteger => Some(floating::to_integer(cpu)?),
             Call::Floor => floating::floor(cpu, args).map(|()| None)?,
+            Call::InlineFmod => floating::inline_fmod(cpu).map(|()| None)?,
             Call::SetJump => Some(jump::capture(cpu, memory, args)?),
             Call::GetEnvironment => Some(environment::get(memory, args[0])?),
             Call::TypeName => Some(type_names::name(
@@ -424,6 +428,7 @@ pub(super) fn resolve(name: &str) -> Option<u32> {
         "_initterm" => Some(initializers::BASE),
         "qsort" => Some(API_BASE + 0x1cc),
         "floor" => Some(API_BASE + 0x1d0),
+        "_CIfmod" => Some(API_BASE + 0x1e4),
         "_setjmp3" => Some(API_BASE + 0x1d8),
         "getenv" => Some(API_BASE + 0x1dc),
         "__getmainargs" => Some(API_BASE + 0x110),

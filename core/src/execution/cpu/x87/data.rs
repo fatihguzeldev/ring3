@@ -387,6 +387,28 @@ impl Cpu32 {
         self.x87_stack.push(value).ok()
     }
 
+    pub(crate) fn x87_inline_fmod(&mut self) -> Option<()> {
+        self.x87_masked().ok()?;
+        self.x87_stack.numeric().ok()?;
+        if self.x87_stack.occupied < 2 {
+            return None;
+        }
+        let divisor = self.x87_stack.value().ok()?;
+        let numerator_slot = (usize::from(self.x87_stack.top) + 1) & 7;
+        let numerator = f64::from_bits(self.x87_stack.values[numerator_slot]);
+        if !numerator.is_finite() || !divisor.is_finite() || divisor == 0.0 {
+            return None;
+        }
+        let result = numerator % divisor;
+        if result != 0.0 && !result.is_normal() {
+            return None;
+        }
+        self.x87_stack.values[numerator_slot] = result.to_bits();
+        self.x87_stack.pop();
+        self.x87_stack.status &= !0x0200;
+        Some(())
+    }
+
     pub(crate) fn pop_x87_truncated_integer(&mut self) -> Option<i64> {
         if self.x87_control_word & 0x3f != 0x3f {
             return None;

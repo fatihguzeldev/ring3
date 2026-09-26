@@ -337,6 +337,8 @@ mod crt_executable;
 mod crt_floor_cases;
 #[path = "../../core/tests/support/crt_getenv_cases.rs"]
 mod crt_getenv_cases;
+#[path = "../../core/tests/support/crt_inline_fmod_cases.rs"]
+mod crt_inline_fmod_cases;
 #[path = "../../core/tests/support/crt_setjmp_cases.rs"]
 mod crt_setjmp_cases;
 #[path = "../../core/tests/support/crt_sort_cases.rs"]
@@ -4947,6 +4949,9 @@ pub extern "C" fn run() -> u32 {
     dinput_device_cases::imported_keyboard_lifetime_across_budgets();
     crt_sort_cases::imported_guest_sort_across_budgets();
     crt_floor_cases::finite_results_across_budgets();
+    crt_inline_fmod_cases::finite_results_across_budgets();
+    crt_inline_fmod_cases::invalid_operands_are_atomic_and_retryable();
+    crt_inline_fmod_cases::missing_second_operand_is_atomic();
     crt_getenv_cases::imported_lookup_across_budgets();
     crt_setjmp_cases::imported_capture_across_budgets();
     case_prefix_compare_cases::imported_results_across_budgets();
