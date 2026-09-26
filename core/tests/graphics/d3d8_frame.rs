@@ -2570,6 +2570,37 @@ fn vertex_buffer_creation_owns_guest_storage_and_device_lifetime() {
 }
 
 #[test]
+fn blended_vertex_buffer_fvf_owns_lockable_storage() {
+    let (mut process, _, device) = create();
+    let create_buffer = method(&process, device, 23);
+    for fvf in [0x118, 0x1118] {
+        assert_eq!(
+            direct_call(
+                &mut process,
+                create_buffer,
+                &[device, 0x3890, 0x18, fvf, 0, VERTEX_BUFFER_OUTPUT]
+            ),
+            0
+        );
+        let buffer = read(&process, VERTEX_BUFFER_OUTPUT);
+        let lock = method(&process, buffer, 11);
+        let unlock = method(&process, buffer, 12);
+        assert_eq!(
+            direct_call(
+                &mut process,
+                lock,
+                &[buffer, 0, 0x3890, VERTEX_DATA_OUTPUT, 0]
+            ),
+            0
+        );
+        assert_eq!(read(&process, VERTEX_DATA_OUTPUT), buffer + 4096);
+        assert_eq!(direct_call(&mut process, unlock, &[buffer]), 0);
+        let release = method(&process, buffer, 2);
+        assert_eq!(direct_call(&mut process, release, &[buffer]), 0);
+    }
+}
+
+#[test]
 fn vertex_buffer_creation_failures_keep_output_and_page_capacity() {
     let (mut process, _, device) = create();
     let create_buffer = method(&process, device, 23);
@@ -2578,6 +2609,9 @@ fn vertex_buffer_creation_failures_keep_output_and_page_capacity() {
         [0, 0x218, 0x142, 0],
         [96, 0x8000_0000, 0x142, 0],
         [96, 0x218, 0, 0],
+        [96, 0x218, 0x1002, 0],
+        [96, 0x218, 0x1004, 0],
+        [96, 0x218, 0x1119, 0],
         [96, 0x218, 0x142, 4],
     ] {
         write(&mut process, VERTEX_BUFFER_OUTPUT, &[0x1234_5678]);

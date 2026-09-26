@@ -1365,10 +1365,11 @@ impl Graphics {
         let [device, byte_length, usage, fvf, pool, output] =
             <[u32; 6]>::try_from(args).expect("d3d8 call arity");
         let position = fvf & 0x000e;
-        let supported_fvf = matches!(position, 0x0002 | 0x0004)
-            && fvf & !(0x000e | 0x0010 | 0x0040 | 0x0080 | 0x0f00) == 0
+        let supported_fvf = matches!(position, 0x0002 | 0x0004 | 0x0008)
+            && fvf & !(0x000e | 0x0010 | 0x0040 | 0x0080 | 0x0f00 | 0x1000) == 0
             && (fvf & 0x0f00) >> 8 <= 8
-            && (position != 0x0004 || fvf & 0x0010 == 0);
+            && (position != 0x0004 || fvf & 0x0010 == 0)
+            && (fvf & 0x1000 == 0 || position == 0x0008);
         if device != DEVICE
             || self.device_refs == 0
             || byte_length == 0
