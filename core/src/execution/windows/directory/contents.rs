@@ -1,6 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use super::{Directory, DispatchError, LoadError, paths};
+use super::{Directory, DispatchError, LoadError, VirtualFile, paths};
 
 /// bytes copied into the process for an existing declared file.
 #[derive(Clone, Copy)]
@@ -24,7 +24,83 @@ pub(in super::super) enum ReadFile {
     Directory,
 }
 
+pub(in super::super) enum OutputTarget {
+    New(Box<[u8]>),
+    Existing(usize),
+}
+
 impl Directory {
+    pub(in super::super) fn output_target(
+        &self,
+        input: &mut [u8],
+    ) -> Result<Result<OutputTarget, u32>, DispatchError> {
+        for byte in input.iter_mut() {
+            if *byte == b'/' {
+                *byte = b'\\';
+            }
+        }
+        if input.len() >= 260 {
+            return Err(DispatchError::Unsupported);
+        }
+        let path = match paths::resolve(&self.terminated[..self.terminated.len() - 1], input) {
+            Ok(path) => path,
+            Err(paths::PathError::Unsupported) => return Err(DispatchError::Unsupported),
+            Err(paths::PathError::Windows(_)) => return Ok(Err(2)),
+        };
+        if path.len() >= 260 {
+            return Err(DispatchError::Unsupported);
+        }
+        if let Some(index) = self
+            .created_files
+            .iter()
+            .position(|file| file.path.eq_ignore_ascii_case(&path))
+        {
+            return Ok(Ok(OutputTarget::Existing(index)));
+        }
+        if self
+            .files
+            .iter()
+            .any(|file| !file.removed && file.path.eq_ignore_ascii_case(&path))
+        {
+            return Err(DispatchError::Unsupported);
+        }
+        if self.exists(&path) || input.last() == Some(&b'\\') {
+            return Ok(Err(13));
+        }
+        let parent_end = path
+            .iter()
+            .rposition(|&byte| byte == b'\\')
+            .expect("absolute path");
+        if !self.exists(&path[..parent_end.max(3)]) {
+            return Ok(Err(2));
+        }
+        if self.created_files.len() >= 256 {
+            return Ok(Err(24));
+        }
+        Ok(Ok(OutputTarget::New(path.into_boxed_slice())))
+    }
+
+    pub(in super::super) fn publish_output(&mut self, target: OutputTarget) -> usize {
+        match target {
+            OutputTarget::New(path) => {
+                let index = self.created_files.len();
+                self.created_files.push(VirtualFile {
+                    path,
+                    bytes: Vec::new(),
+                });
+                index
+            }
+            OutputTarget::Existing(index) => {
+                self.created_files[index].bytes.clear();
+                index
+            }
+        }
+    }
+
+    pub(in super::super) fn output_len(&self, index: usize) -> usize {
+        self.created_files[index].bytes.len()
+    }
+
     pub(in super::super) fn attach_contents(
         &mut self,
         inputs: &[FileContents<'_>],

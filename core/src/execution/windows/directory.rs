@@ -21,9 +21,15 @@ pub(super) struct Directory {
     declarations: Vec<Box<[u8]>>,
     files: Vec<catalog::File>,
     created: Vec<Box<[u8]>>,
+    created_files: Vec<VirtualFile>,
     searches: search::Searches,
     opened: files::Opened,
     content_cache: demand::Cache,
+}
+
+pub(super) struct VirtualFile {
+    path: Box<[u8]>,
+    bytes: Vec<u8>,
 }
 
 pub(super) struct Status {
@@ -168,7 +174,11 @@ impl Directory {
         Ok(self
             .files
             .iter()
-            .any(|file| !file.removed && file.path.eq_ignore_ascii_case(&path)))
+            .any(|file| !file.removed && file.path.eq_ignore_ascii_case(&path))
+            || self
+                .created_files
+                .iter()
+                .any(|file| file.path.eq_ignore_ascii_case(&path)))
     }
 
     pub(super) fn new(
@@ -201,6 +211,7 @@ impl Directory {
             declarations,
             files,
             created: Vec::new(),
+            created_files: Vec::new(),
             searches: search::Searches::default(),
             opened: files::Opened::default(),
             content_cache: demand::Cache::default(),
@@ -235,10 +246,13 @@ impl Directory {
             .map(AsRef::as_ref)
             .chain(self.files.iter().map(|file| file.path.as_ref()))
             .chain(self.created.iter().map(AsRef::as_ref))
+            .chain(self.created_files.iter().map(|file| file.path.as_ref()))
     }
 
     fn directory_source(&self, index: usize) -> bool {
-        index < self.declarations.len() || index >= self.declarations.len() + self.files.len()
+        index < self.declarations.len()
+            || (index >= self.declarations.len() + self.files.len()
+                && index < self.declarations.len() + self.files.len() + self.created.len())
     }
 
     fn exists(&self, candidate: &[u8]) -> bool {
@@ -279,6 +293,10 @@ impl Directory {
                 .files
                 .iter()
                 .any(|file| !file.removed && file.path.eq_ignore_ascii_case(&path))
+            || self
+                .created_files
+                .iter()
+                .any(|file| file.path.eq_ignore_ascii_case(&path))
         {
             return failed(teb, memory, 183);
         }
@@ -329,6 +347,10 @@ impl Directory {
             .files
             .iter()
             .any(|file| !file.removed && file.path.eq_ignore_ascii_case(&path))
+            || self
+                .created_files
+                .iter()
+                .any(|file| file.path.eq_ignore_ascii_case(&path))
         {
             if input.last() == Some(&b'\\') {
                 return Err(DispatchError::Unsupported);

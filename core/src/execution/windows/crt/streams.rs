@@ -29,10 +29,16 @@ impl Call {
 }
 
 struct Stream {
-    file: usize,
+    file: StreamFile,
     position: usize,
     descriptor: u32,
     eof: bool,
+}
+
+#[derive(Clone, Copy)]
+enum StreamFile {
+    Input(usize),
+    Output(usize),
 }
 
 impl Stream {
@@ -72,7 +78,9 @@ impl Streams {
                 let file = self.validated(args[0], memory)?.file;
                 heap.free_stream(args[0], cpu.register(Register32::Esp), memory)?;
                 self.live.remove(&args[0]);
-                directory.release_reader(file);
+                if let StreamFile::Input(index) = file {
+                    directory.release_reader(index);
+                }
                 Ok(0)
             }
             Call::Seek => self.seek(args, memory, directory, errno),
@@ -92,37 +100,58 @@ impl Streams {
             return Err(DispatchError::Unsupported);
         }
         let mode = strings::terminated_bytes(memory, args[1])?;
-        match mode.as_slice() {
-            b"rb\0" => {}
+        let writing = match mode.as_slice() {
+            b"wb\0" => true,
+            b"rb\0" => false,
             b"r\0" => {
                 let mut value = [0];
                 guest::read_words(memory, FMODE, &mut value)?;
                 if value[0] != 0x8000 {
                     return Err(DispatchError::Unsupported);
                 }
+                false
             }
             _ => return Err(DispatchError::Unsupported),
-        }
+        };
         let mut path = strings::terminated_bytes(memory, args[0])?;
         path.pop();
         if path.is_empty() || path.len() > 32767 {
             return Err(DispatchError::Unsupported);
         }
-        let file = match directory.read_file(&mut path)? {
-            ReadFile::File(index) => index,
-            ReadFile::Missing => return failed(memory, errno, 2),
-            ReadFile::Directory => return failed(memory, errno, 13),
+        let target = if writing {
+            match directory.output_target(&mut path)? {
+                Ok(target) => Some(target),
+                Err(error) => return failed(memory, errno, error),
+            }
+        } else {
+            None
+        };
+        let input = if writing {
+            None
+        } else {
+            match directory.read_file(&mut path)? {
+                ReadFile::File(index) => Some(index),
+                ReadFile::Missing => return failed(memory, errno, 2),
+                ReadFile::Directory => return failed(memory, errno, 13),
+            }
         };
         let Some(descriptor) =
             (3..515).find(|id| self.live.values().all(|stream| stream.descriptor != *id))
         else {
             return failed(memory, errno, 24);
         };
-        if !directory.ensure_contents(file)? {
+        if let Some(index) = input
+            && !directory.ensure_contents(index)?
+        {
             return failed(memory, errno, 12);
         }
         let Some(pointer) = heap.allocate_stream(memory)? else {
             return failed(memory, errno, 12);
+        };
+        let file = match (input, target) {
+            (Some(index), None) => StreamFile::Input(index),
+            (None, Some(target)) => StreamFile::Output(directory.publish_output(target)),
+            _ => unreachable!(),
         };
         let stream = Stream {
             file,
@@ -133,7 +162,9 @@ impl Streams {
         memory
             .write(u64::from(pointer), &stream.record())
             .expect("new stream allocation is writable");
-        directory.retain_reader(file);
+        if let StreamFile::Input(index) = file {
+            directory.retain_reader(index);
+        }
         self.live.insert(pointer, stream);
         Ok(pointer)
     }
@@ -165,7 +196,10 @@ impl Streams {
             return Err(DispatchError::Unsupported);
         }
         let stream = self.validated(args[3], memory)?;
-        let contents = directory.contents(stream.file);
+        let StreamFile::Input(file) = stream.file else {
+            return Err(DispatchError::Unsupported);
+        };
+        let contents = directory.contents(file);
         let source = contents.get(stream.position..).unwrap_or_default();
         let copied = requested.min(source.len());
         let pointer = u64::from(args[3]);
@@ -200,8 +234,11 @@ impl Streams {
         let base = match args[2] {
             0 => 0,
             1 => i64::try_from(stream.position).expect("stream position fits u32"),
-            2 => i64::try_from(directory.contents(stream.file).len())
-                .expect("file contents are bounded below i64"),
+            2 => i64::try_from(match stream.file {
+                StreamFile::Input(index) => directory.contents(index).len(),
+                StreamFile::Output(index) => directory.output_len(index),
+            })
+            .expect("file contents are bounded below i64"),
             _ => return invalid_position(memory, errno),
         };
         let offset = i64::from(args[1].cast_signed());

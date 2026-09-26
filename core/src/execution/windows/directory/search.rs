@@ -103,12 +103,15 @@ impl Directory {
     }
 
     fn path(&self, source: usize) -> &[u8] {
+        let created_base = self.declarations.len() + self.files.len();
         if source < self.declarations.len() {
             &self.declarations[source]
-        } else if source < self.declarations.len() + self.files.len() {
+        } else if source < created_base {
             &self.files[source - self.declarations.len()].path
+        } else if source < created_base + 256 {
+            &self.created[source - created_base]
         } else {
-            &self.created[source - self.declarations.len() - self.files.len()]
+            &self.created_files[source - created_base - 256].path
         }
     }
 
@@ -118,9 +121,19 @@ impl Directory {
 
     fn matches(&self, parent: &[u8], pattern: &[u8]) -> Result<Vec<Entry>, DispatchError> {
         let start = parent.len() + usize::from(parent.len() > 3);
-        let mut entries =
-            Vec::with_capacity(self.declarations.len() + self.files.len() + self.created.len());
-        for (source, path) in self.all_paths().enumerate() {
+        let mut entries = Vec::with_capacity(
+            self.declarations.len()
+                + self.files.len()
+                + self.created.len()
+                + self.created_files.len(),
+        );
+        let created_base = self.declarations.len() + self.files.len();
+        for (ordinal, path) in self.all_paths().enumerate() {
+            let source = if ordinal >= created_base + self.created.len() {
+                ordinal - self.created.len() + 256
+            } else {
+                ordinal
+            };
             if !path
                 .get(..parent.len())
                 .is_some_and(|prefix| prefix.eq_ignore_ascii_case(parent))
@@ -133,7 +146,7 @@ impl Directory {
             };
             let name = tail.split(|&b| b == b'\\').next().expect("nonempty tail");
             if source >= self.declarations.len()
-                && source < self.declarations.len() + self.files.len()
+                && source < created_base
                 && start + name.len() == path.len()
                 && self.files[source - self.declarations.len()].removed
             {
@@ -168,9 +181,14 @@ impl Directory {
         let mut record = [0; 320];
         record[0] = if directory { 0x10 } else { 0x80 };
         if !directory {
-            let size = self.files[source - self.declarations.len()]
-                .size
-                .to_le_bytes();
+            let size = if source < self.declarations.len() + self.files.len() {
+                self.files[source - self.declarations.len()].size
+            } else {
+                self.created_files[source - self.declarations.len() - self.files.len() - 256]
+                    .bytes
+                    .len() as u64
+            }
+            .to_le_bytes();
             record[28..32].copy_from_slice(&size[4..]);
             record[32..36].copy_from_slice(&size[..4]);
         }

@@ -108,6 +108,8 @@ mod windows_crt_sort;
 mod windows_crt_strftime;
 #[path = "windows/windows_crt_time.rs"]
 mod windows_crt_time;
+#[path = "windows/windows_crt_write_open.rs"]
+mod windows_crt_write_open;
 #[path = "windows/windows_current_directory.rs"]
 mod windows_current_directory;
 #[path = "windows/windows_cxx_catch.rs"]
