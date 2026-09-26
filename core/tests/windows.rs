@@ -98,6 +98,8 @@ mod windows_computer_name;
 mod windows_cpinfo;
 #[path = "windows/windows_crt.rs"]
 mod windows_crt;
+#[path = "windows/windows_crt_localtime.rs"]
+mod windows_crt_localtime;
 #[path = "windows/windows_crt_sort.rs"]
 mod windows_crt_sort;
 #[path = "windows/windows_crt_time.rs"]
