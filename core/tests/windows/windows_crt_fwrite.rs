@@ -6,12 +6,16 @@ use ring3_core::execution::{
 
 const FOPEN: u32 = 0x7000_0194;
 const FWRITE: u32 = 0x7000_05f4;
+const FREAD: u32 = 0x7000_0198;
+const FCLOSE: u32 = 0x7000_019c;
+const STAT: u32 = 0x7000_015c;
 const FSEEK: u32 = 0x7000_01a0;
 const FTELL: u32 = 0x7000_01a4;
 const FIND_FIRST: u32 = 0x7000_0234;
 const PATH: u32 = 0x0040_2200;
 const MODE: u32 = 0x0040_2300;
 const RECORD: u32 = 0x0040_2600;
+const STATS: u32 = 0x0040_2800;
 const BUFFER: u32 = 0x2300_0000;
 const COUNT: usize = 287_527;
 
@@ -22,7 +26,7 @@ fn word(p: &Process32, address: u32) -> u32 {
 }
 
 fn load() -> Process32 {
-    let exe = imported_executable::pe32(&[0xcc], "MSVCRT.dll", &["fopen", "fwrite"]);
+    let exe = imported_executable::pe32(&[0xcc], "MSVCRT.dll", &["fopen", "fwrite", "fread"]);
     let mut p = Process32::load_with_options(
         &exe,
         256,
@@ -34,6 +38,7 @@ fn load() -> Process32 {
     .unwrap();
     assert_eq!(word(&p, 0x0040_2060), FOPEN);
     assert_eq!(word(&p, 0x0040_2064), FWRITE);
+    assert_eq!(word(&p, 0x0040_2068), FREAD);
     p.memory
         .write(u64::from(PATH), b"C:\\\\savegames\\savegame000.mps\0")
         .unwrap();
@@ -85,10 +90,32 @@ fn imported_fwrite_copies_the_tutorial_size_and_updates_position_and_catalog_siz
     assert_eq!(word(&p, RECORD + 32), count);
 
     assert_eq!(crt_call(&mut p, FSEEK, &[stream, 0, 0]), 0);
+    p.memory.write(u64::from(BUFFER), b"ZZZZZZ").unwrap();
     assert_eq!(crt_call(&mut p, FWRITE, &[BUFFER, 3, 2, stream]), 2);
     assert_eq!(crt_call(&mut p, FTELL, &[stream]), 6);
     assert_eq!(crt_call(&mut p, FSEEK, &[stream, 0, 2]), 0);
     assert_eq!(crt_call(&mut p, FTELL, &[stream]), count);
+    assert_eq!(crt_call(&mut p, FCLOSE, &[stream]), 0);
+    assert_eq!(crt_call(&mut p, STAT, &[PATH, STATS]), 0);
+    assert_eq!(word(&p, STATS + 20), count);
+    p.memory.write(u64::from(MODE), b"rb\0").unwrap();
+    let read_stream = crt_call(&mut p, FOPEN, &[PATH, MODE]);
+    assert_ne!(read_stream, 0);
+    p.memory
+        .write(u64::from(BUFFER), &vec![0xa5; COUNT])
+        .unwrap();
+    assert_eq!(
+        crt_call(&mut p, FREAD, &[BUFFER, 1, count, read_stream]),
+        count
+    );
+    let mut readback = vec![0; COUNT];
+    p.memory.read(u64::from(BUFFER), &mut readback).unwrap();
+    let mut expected = bytes;
+    expected[..6].copy_from_slice(b"ZZZZZZ");
+    assert_eq!(readback, expected);
+    assert_eq!(crt_call(&mut p, FREAD, &[BUFFER, 1, 1, read_stream]), 0);
+    assert_eq!(crt_call(&mut p, FTELL, &[read_stream]), count);
+    assert_eq!(crt_call(&mut p, FCLOSE, &[read_stream]), 0);
 }
 
 #[test]

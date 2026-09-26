@@ -418,7 +418,11 @@ impl Directory {
             .files
             .iter()
             .find(|file| !file.removed && file.path.eq_ignore_ascii_case(&path));
-        if file.is_none() && !self.exists(&path) {
+        let virtual_file = self
+            .created_files
+            .iter()
+            .find(|file| file.path.eq_ignore_ascii_case(&path));
+        if file.is_none() && virtual_file.is_none() && !self.exists(&path) {
             return Ok(None);
         }
         let executable = [b".exe", b".com", b".bat", b".cmd"]
@@ -429,8 +433,11 @@ impl Directory {
             });
         Ok(Some(Status {
             drive: path[0].to_ascii_uppercase() - b'A',
-            size: file.map_or(0, |file| file.size),
-            directory: file.is_none(),
+            size: file.map_or_else(
+                || virtual_file.map_or(0, |file| file.bytes.len() as u64),
+                |file| file.size,
+            ),
+            directory: file.is_none() && virtual_file.is_none(),
             executable,
         }))
     }

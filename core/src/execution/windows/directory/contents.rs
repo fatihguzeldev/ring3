@@ -22,6 +22,7 @@ impl std::fmt::Debug for FileContents<'_> {
 
 pub(in super::super) enum ReadFile {
     File(usize),
+    Virtual(usize),
     Missing,
     Directory,
 }
@@ -101,6 +102,10 @@ impl Directory {
 
     pub(in super::super) fn output_len(&self, index: usize) -> usize {
         self.created_files[index].bytes.len()
+    }
+
+    pub(in super::super) fn output_contents(&self, index: usize) -> &[u8] {
+        &self.created_files[index].bytes
     }
 
     pub(in super::super) fn write_output(
@@ -195,6 +200,14 @@ impl Directory {
             } else {
                 Err(DispatchError::Unsupported)
             };
+        }
+        if input.last() != Some(&b'\\')
+            && let Some(index) = self
+                .created_files
+                .iter()
+                .position(|file| file.path.eq_ignore_ascii_case(&path))
+        {
+            return Ok(ReadFile::Virtual(index));
         }
         Ok(if self.exists(&path) {
             ReadFile::Directory

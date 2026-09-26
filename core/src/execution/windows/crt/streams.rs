@@ -39,6 +39,7 @@ struct Stream {
 #[derive(Clone, Copy)]
 enum StreamFile {
     Input(usize),
+    VirtualInput(usize),
     Output(usize),
 }
 
@@ -132,7 +133,8 @@ impl Streams {
             None
         } else {
             match directory.read_file(&mut path)? {
-                ReadFile::File(index) => Some(index),
+                ReadFile::File(index) => Some(StreamFile::Input(index)),
+                ReadFile::Virtual(index) => Some(StreamFile::VirtualInput(index)),
                 ReadFile::Missing => return failed(memory, errno, 2),
                 ReadFile::Directory => return failed(memory, errno, 13),
             }
@@ -142,7 +144,7 @@ impl Streams {
         else {
             return failed(memory, errno, 24);
         };
-        if let Some(index) = input
+        if let Some(StreamFile::Input(index)) = input
             && !directory.ensure_contents(index)?
         {
             return failed(memory, errno, 12);
@@ -151,7 +153,7 @@ impl Streams {
             return failed(memory, errno, 12);
         };
         let file = match (input, target) {
-            (Some(index), None) => StreamFile::Input(index),
+            (Some(file), None) => file,
             (None, Some(target)) => StreamFile::Output(directory.publish_output(target)),
             _ => unreachable!(),
         };
@@ -198,10 +200,11 @@ impl Streams {
             return Err(DispatchError::Unsupported);
         }
         let stream = self.validated(args[3], memory)?;
-        let StreamFile::Input(file) = stream.file else {
-            return Err(DispatchError::Unsupported);
+        let contents = match stream.file {
+            StreamFile::Input(index) => directory.contents(index),
+            StreamFile::VirtualInput(index) => directory.output_contents(index),
+            StreamFile::Output(_) => return Err(DispatchError::Unsupported),
         };
-        let contents = directory.contents(file);
         let source = contents.get(stream.position..).unwrap_or_default();
         let copied = requested.min(source.len());
         let pointer = u64::from(args[3]);
@@ -277,7 +280,9 @@ impl Streams {
             1 => i64::try_from(stream.position).expect("stream position fits u32"),
             2 => i64::try_from(match stream.file {
                 StreamFile::Input(index) => directory.contents(index).len(),
-                StreamFile::Output(index) => directory.output_len(index),
+                StreamFile::VirtualInput(index) | StreamFile::Output(index) => {
+                    directory.output_len(index)
+                }
             })
             .expect("file contents are bounded below i64"),
             _ => return invalid_position(memory, errno),
