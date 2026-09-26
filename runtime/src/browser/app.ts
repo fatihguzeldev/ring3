@@ -18,10 +18,72 @@ let worker: Worker | undefined;
 let frames = 0;
 let began = 0;
 let windowSignature = "";
+let pointerButtons = 0;
+let lastPointer: { x: number; y: number } | undefined;
 
 function send(message: WorkerInput): void {
   worker?.postMessage(message);
 }
+
+function sendMouse(relativeX = 0, relativeY = 0): void {
+  send({ type: "mouse", relativeX, relativeY, buttons: pointerButtons });
+}
+
+function releasePointer(): void {
+  if (pointerButtons !== 0) {
+    pointerButtons = 0;
+    sendMouse();
+  }
+  lastPointer = undefined;
+}
+
+function buttonBit(button: number): number {
+  return [1, 4, 2][button] ?? 0;
+}
+
+canvas.onpointerenter = (event): void => {
+  if (event.pointerType === "mouse") lastPointer = { x: event.clientX, y: event.clientY };
+};
+canvas.onpointermove = (event): void => {
+  if (event.pointerType !== "mouse") return;
+  const previous = lastPointer;
+  lastPointer = { x: event.clientX, y: event.clientY };
+  if (!previous || !worker || pause.disabled) return;
+  const bounds = canvas.getBoundingClientRect();
+  if (bounds.width === 0 || bounds.height === 0) return;
+  const x = Math.round(((event.clientX - previous.x) * canvas.width) / bounds.width);
+  const y = Math.round(((event.clientY - previous.y) * canvas.height) / bounds.height);
+  if (x !== 0 || y !== 0) sendMouse(x, y);
+};
+canvas.onpointerleave = (): void => {
+  if (pointerButtons === 0) lastPointer = undefined;
+};
+canvas.onpointerdown = (event): void => {
+  const bit = buttonBit(event.button);
+  if (event.pointerType !== "mouse" || bit === 0 || !worker || pause.disabled) return;
+  pointerButtons |= bit;
+  lastPointer = { x: event.clientX, y: event.clientY };
+  canvas.setPointerCapture(event.pointerId);
+  sendMouse();
+  event.preventDefault();
+};
+canvas.onpointerup = (event): void => {
+  const bit = buttonBit(event.button);
+  if (event.pointerType !== "mouse" || !(pointerButtons & bit)) return;
+  pointerButtons &= ~bit;
+  sendMouse();
+  if (pointerButtons === 0) {
+    if (canvas.hasPointerCapture(event.pointerId)) canvas.releasePointerCapture(event.pointerId);
+    lastPointer = undefined;
+  }
+};
+canvas.onpointercancel = (event): void => {
+  if (event.pointerType === "mouse") releasePointer();
+};
+canvas.oncontextmenu = (event): void => {
+  if (worker) event.preventDefault();
+};
+window.addEventListener("blur", releasePointer);
 
 function renderWindows(snapshot: Snapshot): void {
   const signature = JSON.stringify(snapshot.windows);
@@ -56,6 +118,7 @@ function renderWindows(snapshot: Snapshot): void {
 }
 
 function failed(message: string): void {
+  releasePointer();
   state.textContent = "execution stopped";
   error.textContent = message;
   error.hidden = false;
@@ -116,6 +179,7 @@ function receive(message: WorkerOutput): void {
 }
 
 start.onclick = (): void => {
+  releasePointer();
   worker?.terminate();
   const token = document.documentElement.dataset["token"];
   if (!token || token === "RING3_SESSION_TOKEN") {
@@ -152,9 +216,13 @@ start.onclick = (): void => {
   };
   send({ type: "start", token });
 };
-pause.onclick = (): void => send({ type: "pause" });
+pause.onclick = (): void => {
+  releasePointer();
+  send({ type: "pause" });
+};
 resume.onclick = (): void => send({ type: "resume" });
 stop.onclick = (): void => {
+  releasePointer();
   worker?.terminate();
   worker = undefined;
   start.disabled = false;
@@ -164,4 +232,7 @@ stop.onclick = (): void => {
   windows.hidden = true;
   state.textContent = "stopped";
 };
-window.addEventListener("pagehide", (): void => worker?.terminate());
+window.addEventListener("pagehide", (): void => {
+  releasePointer();
+  worker?.terminate();
+});

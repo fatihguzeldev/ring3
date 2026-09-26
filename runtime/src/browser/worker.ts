@@ -158,6 +158,16 @@ scope.onmessage = ({ data }): void => {
     void start(data.token).catch(fail);
     return;
   }
+  if (data.type === "mouse") {
+    if (bridge && snapshot && snapshot.state !== "exited" && snapshot.state !== "stopped") {
+      try {
+        snapshot = bridge.command(7, 0, data);
+      } catch (error) {
+        fail(error);
+      }
+    }
+    return;
+  }
   if (data.type === "pause") {
     paused = true;
     if (bridge) report("paused.");

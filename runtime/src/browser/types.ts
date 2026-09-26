@@ -4,7 +4,9 @@ export interface GuestFile {
   role: "executable" | "module" | "deferred" | "data";
 }
 
-export interface Manifest { files: GuestFile[] }
+export interface Manifest {
+  files: GuestFile[];
+}
 
 export interface GuestWindow {
   hwnd: number;
@@ -30,7 +32,8 @@ export interface Snapshot {
 export type WorkerInput =
   | { type: "start"; token: string }
   | { type: "pause" | "resume" }
-  | { type: "button" | "activate"; hwnd: number };
+  | { type: "button" | "activate"; hwnd: number }
+  | { type: "mouse"; relativeX: number; relativeY: number; buttons: number };
 
 export type WorkerOutput =
   | { type: "status"; snapshot: Snapshot; paused: boolean; note: string }
