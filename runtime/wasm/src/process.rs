@@ -1,8 +1,8 @@
 use std::time::Duration;
 
 use ring3_core::execution::{
-    FileContents, FileContentsMode, FileMetadata, Frame, GuestModule, PostedMessage, Process32,
-    ProcessOptions, ProcessStop, StopReason,
+    FileContents, FileContentsMode, FileMetadata, Frame, GuestModule, MouseInput, PostedMessage,
+    Process32, ProcessOptions, ProcessStop, StopReason,
 };
 use serde_json::{Value, json};
 
@@ -35,6 +35,13 @@ fn word(value: &Value, name: &str) -> Result<u32, String> {
     u32::try_from(integer(value, name)?).map_err(|_| format!("invalid {name}"))
 }
 
+fn signed_word(value: &Value, name: &str) -> Result<i32, String> {
+    value[name]
+        .as_i64()
+        .and_then(|number| i32::try_from(number).ok())
+        .ok_or_else(|| format!("invalid {name}"))
+}
+
 fn json_input(input: &[u8]) -> Result<Value, String> {
     if input.len() > 16 * 1024 * 1024 {
         return Err("control input exceeds limit".into());
@@ -57,6 +64,7 @@ impl Session {
             4 => self.supply(input)?,
             5 => self.post(&json_input(&input)?)?,
             6 => (),
+            7 => self.mouse(&json_input(&input)?)?,
             _ => return Err("unknown operation".into()),
         }
         Ok(self.snapshot())
@@ -254,6 +262,24 @@ impl Session {
             self.reason = Some(ProcessStop::Stopped(StopReason::InstructionLimit));
         }
         Ok(())
+    }
+
+    fn mouse(&mut self, value: &Value) -> Result<(), String> {
+        let relative = [
+            signed_word(value, "relativeX")?,
+            signed_word(value, "relativeY")?,
+        ];
+        let mask = u8::try_from(word(value, "buttons")?)
+            .ok()
+            .filter(|mask| *mask < 8)
+            .ok_or("invalid buttons")?;
+        self.process()?
+            .submit_mouse_input(MouseInput {
+                relative,
+                wheel_steps: 0,
+                buttons: std::array::from_fn(|index| mask & (1 << index) != 0),
+            })
+            .map_err(|error| format!("mouse input: {error:?}"))
     }
 
     fn snapshot(&self) -> Value {

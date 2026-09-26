@@ -101,3 +101,66 @@ fn invalid_reconfiguration_and_contents_do_not_replace_valid_inputs() {
     );
     assert_eq!(super::ring3_input(u32::MAX), 0);
 }
+
+#[test]
+fn mouse_command_validates_the_snapshot_without_changing_execution() {
+    let mut session = configured();
+    let snapshot = session.command(2, 0, Vec::new()).unwrap();
+    for input in [
+        json!({"relativeX": 1.5, "relativeY": 0, "buttons": 0}),
+        json!({"relativeX": -2_147_483_649_i64, "relativeY": 0, "buttons": 0}),
+        json!({"relativeX": 0, "relativeY": 0, "buttons": 8}),
+        json!({"relativeX": 0, "relativeY": 0}),
+    ] {
+        assert!(
+            session
+                .command(7, 0, input.to_string().into_bytes())
+                .is_err()
+        );
+        assert_eq!(session.command(6, 0, Vec::new()).unwrap(), snapshot);
+    }
+    assert_eq!(
+        session
+            .command(
+                7,
+                0,
+                json!({"relativeX": -20, "relativeY": 10, "buttons": 1})
+                    .to_string()
+                    .into_bytes(),
+            )
+            .unwrap(),
+        snapshot
+    );
+    let request = loop {
+        let result = run(&mut session, 100_000);
+        if result["state"] == "file" {
+            break result;
+        }
+    };
+    let id = request["pending"]["id"]
+        .as_str()
+        .unwrap()
+        .parse::<u64>()
+        .unwrap();
+    session
+        .command(4, 0, id.to_le_bytes().into_iter().chain(*b"data").collect())
+        .unwrap();
+    let exit = loop {
+        let result = run(&mut session, 100_000);
+        if result["state"] == "exited" {
+            break result;
+        }
+    };
+    assert!(
+        session
+            .command(
+                7,
+                0,
+                json!({"relativeX": 0, "relativeY": 0, "buttons": 0})
+                    .to_string()
+                    .into_bytes(),
+            )
+            .is_err()
+    );
+    assert_eq!(session.command(6, 0, Vec::new()).unwrap(), exit);
+}
