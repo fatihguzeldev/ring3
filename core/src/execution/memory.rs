@@ -214,6 +214,21 @@ impl GuestMemory {
         mut output: &mut [u8],
         access: Access,
     ) -> Result<(), MemoryError> {
+        let (index, offset, count) = chunk(address, output.len());
+        if count == output.len() && count != 0 {
+            address
+                .checked_add(count as u64)
+                .ok_or(MemoryError::AddressOverflow)?;
+            let page = self
+                .pages
+                .get(&index)
+                .ok_or(MemoryError::Unmapped { address })?;
+            if !page.permissions.permits(access) {
+                return Err(MemoryError::PermissionDenied { address, access });
+            }
+            output.copy_from_slice(&page.bytes[offset..offset + count]);
+            return Ok(());
+        }
         self.check_access(address, output.len(), access)?;
         while !output.is_empty() {
             let (index, offset, count) = chunk(address, output.len());

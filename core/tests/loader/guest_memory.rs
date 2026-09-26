@@ -93,3 +93,55 @@ fn bounds_and_alignment_are_explicit_errors() {
     );
     memory.read(u64::MAX, &mut []).unwrap();
 }
+
+#[test]
+fn failed_reads_and_fetches_preserve_output_at_single_and_cross_page_boundaries() {
+    let mut memory = GuestMemory::new(2);
+    memory
+        .map_zeroed(0x1000, 2 * PAGE_SIZE, Permissions::READ_WRITE)
+        .unwrap();
+    memory.write(0x1ffc, &[0x5a; 8]).unwrap();
+    memory
+        .protect(0x1000, PAGE_SIZE, Permissions::READ_EXECUTE)
+        .unwrap();
+    memory
+        .protect(0x2000, PAGE_SIZE, Permissions::NONE)
+        .unwrap();
+    for access in [Access::Read, Access::Execute] {
+        let copy = |address, output: &mut [u8]| match access {
+            Access::Read => memory.read(address, output),
+            Access::Execute => memory.fetch(address, output),
+            Access::Write => unreachable!(),
+        };
+        let mut bytes = [0xa5; 4];
+        copy(0x1ffc, &mut bytes).unwrap();
+        assert_eq!(bytes, [0x5a; 4]);
+        for (address, length, expected) in [
+            (
+                0x2000,
+                1,
+                MemoryError::PermissionDenied {
+                    address: 0x2000,
+                    access,
+                },
+            ),
+            (
+                0x1ffe,
+                4,
+                MemoryError::PermissionDenied {
+                    address: 0x2000,
+                    access,
+                },
+            ),
+            (0x3000, 1, MemoryError::Unmapped { address: 0x3000 }),
+            (u64::MAX, 1, MemoryError::AddressOverflow),
+            (u64::MAX, 2, MemoryError::AddressOverflow),
+        ] {
+            let mut output = vec![0xa5; length];
+            assert_eq!(copy(address, &mut output), Err(expected));
+            assert_eq!(output, vec![0xa5; length]);
+        }
+        copy(u64::MAX, &mut []).unwrap();
+        copy(0x2000, &mut []).unwrap();
+    }
+}
