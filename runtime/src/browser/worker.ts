@@ -1,4 +1,5 @@
 import { Bridge } from "./bridge.js";
+import { GuestClock } from "./guest-clock.js";
 import type { Manifest, Snapshot, WorkerInput, WorkerOutput } from "./types.js";
 
 const scope = self as unknown as {
@@ -9,7 +10,7 @@ let bridge: Bridge | undefined;
 let manifest: Manifest;
 let snapshot: Snapshot;
 let token = "";
-let origin = 0;
+let clock: GuestClock | undefined;
 let paused = false;
 let running = false;
 let started = false;
@@ -57,18 +58,19 @@ async function start(value: string): Promise<void> {
     if (manifest.files[index]?.role !== "data") bridge.command(1, index, await file(index));
   }
   snapshot = bridge.command(2);
-  origin = performance.now();
+  clock = new GuestClock(performance.now());
+  if (paused) clock.stop(performance.now());
   report();
   await pump();
 }
 
 function postCommands(): void {
-  if (!bridge) return;
+  if (!bridge || !clock) return;
   for (const command of commands.splice(0)) {
     snapshot = bridge.command(6);
     const window = snapshot.windows.find((entry) => entry.hwnd === command.hwnd);
     if (!window || !(window.style & 0x10000000) || window.style & 0x08000000) continue;
-    const time = Math.floor(performance.now() - origin) >>> 0;
+    const time = clock.elapsed(performance.now()) >>> 0;
     if (command.type === "button" && window.class === 0x80 && window.parent !== 0) {
       snapshot = bridge.command(5, 0, {
         hwnd: window.parent,
@@ -105,7 +107,7 @@ async function supply(): Promise<void> {
 }
 
 async function pump(): Promise<void> {
-  if (running || !bridge) return;
+  if (running || !bridge || !clock) return;
   running = true;
   try {
     while (!paused) {
@@ -117,12 +119,13 @@ async function pump(): Promise<void> {
         break;
       }
       if (snapshot.reason === "Some(WaitingForMessage)") {
+        clock.stop(performance.now());
         report("the game is waiting for a window response.");
         break;
       }
       const before = BigInt(snapshot.instructions) + BigInt(snapshot.apiCalls);
       snapshot = bridge.command(3, Math.min(100_000, remaining), {
-        elapsedMs: Math.floor(performance.now() - origin),
+        elapsedMs: clock.elapsed(performance.now()),
       });
       const consumed = Number(BigInt(snapshot.instructions) + BigInt(snapshot.apiCalls) - before);
       remaining -= consumed;
@@ -132,6 +135,7 @@ async function pump(): Promise<void> {
       if (performance.now() - lastReport > 250) report();
       if (remaining === 0) {
         paused = true;
+        clock.stop(performance.now());
         report("execution limit reached; you can resume.");
         break;
       }
@@ -170,10 +174,12 @@ scope.onmessage = ({ data }): void => {
   }
   if (data.type === "pause") {
     paused = true;
+    clock?.stop(performance.now());
     if (bridge) report("paused.");
     return;
   }
   if (data.type === "button" || data.type === "activate") commands.push(data);
+  clock?.resume(performance.now());
   paused = false;
   if (remaining === 0) remaining = 3_000_000_000;
   void pump().catch(fail);

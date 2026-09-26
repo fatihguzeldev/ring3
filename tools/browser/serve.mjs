@@ -10,7 +10,7 @@ const maxFile = 128 * 1024 * 1024;
 const staticFiles = new Map([
   ["/style.css", ["runtime/browser/style.css", "text/css"]],
   ["/core.wasm", ["target/wasm32-unknown-unknown/release/ring3_browser.wasm", "application/wasm"]],
-  ...["app", "worker", "bridge", "types"].map((name) => [
+  ...["app", "worker", "bridge", "guest-clock", "types"].map((name) => [
     `/assets/${name}.js`,
     [`runtime/dist/browser/${name}.js`, "text/javascript"],
   ]),

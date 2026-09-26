@@ -32,6 +32,7 @@ test("local host serves localhost and IPv4 with configured files and a session t
     localUrl.hostname = hostname;
     assert.equal((await fetch(localUrl)).status, 200, hostname);
     assert.equal((await fetch(new URL("/assets/worker.js", localUrl))).status, 200, hostname);
+    assert.equal((await fetch(new URL("/assets/guest-clock.js", localUrl))).status, 200, hostname);
     assert.equal((await fetch(new URL("/core.wasm", localUrl), { headers })).status, 200, hostname);
     assert.equal(
       (

@@ -49,4 +49,4 @@ jobs:
           pnpm install --frozen-lockfile
           pnpm lint:web
           pnpm browser:build
-          node --test tools/browser/serve.test.mjs tools/browser/bridge.test.mjs
+          node --test tools/browser/serve.test.mjs tools/browser/bridge.test.mjs tools/browser/worker-clock.test.mjs
