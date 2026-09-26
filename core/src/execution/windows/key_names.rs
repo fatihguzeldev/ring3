@@ -11,7 +11,11 @@ pub(super) fn get(
     }
     let scan = ((parameter >> 16) & 0xff) as u8;
     let extended = parameter & (1 << 24) != 0;
-    let name = us_key_name(scan, extended).ok_or(DispatchError::Unsupported)?;
+    let name: &[u8] = if scan == 0 || scan > 0x87 {
+        b""
+    } else {
+        us_key_name(scan, extended).ok_or(DispatchError::Unsupported)?
+    };
     let count = name.len().min((capacity - 1) as usize);
     guest::check(memory, output, count + 1, Access::Write)?;
     let mut bytes = [0; 16];

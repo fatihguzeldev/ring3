@@ -87,9 +87,19 @@ fn imported_us_key_names_are_nul_terminated_and_bounded_by_capacity() {
 }
 
 #[test]
+fn unmapped_us_scans_return_an_empty_name() {
+    let mut process = process();
+    for parameter in [0, 0x0088_0000, 0x00c8_0000, 0x00ff_0000, 0x01c8_0000] {
+        process.memory.write(u64::from(OUTPUT), &[0xaa; 2]).unwrap();
+        call(&mut process, parameter, OUTPUT, 2, 0);
+        assert_eq!(read(&process, 2), [0, 0xaa]);
+    }
+}
+
+#[test]
 fn unmodeled_codes_and_faulting_output_preserve_the_call_frame() {
     let mut process = process();
-    for parameter in [0, 0x00ff_0000, 0x0111_0000] {
+    for parameter in [0x0111_0000, 0x0087_0000] {
         let before = prepare(&mut process, parameter, OUTPUT, 12);
         let result = process.run(1);
         assert_eq!(result.reason, ProcessStop::UnsupportedApi { address: API });
@@ -97,7 +107,7 @@ fn unmodeled_codes_and_faulting_output_preserve_the_call_frame() {
         assert_eq!(process.cpu, before);
     }
     for output in [0, u32::MAX] {
-        let before = prepare(&mut process, 0x0011_0000, output, 12);
+        let before = prepare(&mut process, 0x00c8_0000, output, 12);
         let result = process.run(1);
         assert!(matches!(
             result.reason,
