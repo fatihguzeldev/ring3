@@ -6,6 +6,7 @@ mod branches;
 mod division;
 mod flag_stack;
 mod identification;
+mod mmx;
 mod operands;
 mod register_stack;
 mod shifts;
@@ -159,6 +160,7 @@ impl Cpu32 {
         let mut next = instruction.next_ip32();
         match instruction.code() {
             Code::Cpuid => self.identify(),
+            code if mmx::is_transfer(code) => self.mmx_transfer(instruction, memory)?,
             code if is_move(code) => {
                 let destination = self.operand(instruction, 0)?;
                 let source = self.operand(instruction, 1)?;

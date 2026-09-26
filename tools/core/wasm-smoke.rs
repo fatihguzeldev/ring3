@@ -69,6 +69,8 @@ mod cxx_exception_cases;
 mod executable;
 #[path = "../../core/tests/support/instruction_fetch_cases.rs"]
 mod instruction_fetch_cases;
+#[path = "../../core/tests/support/mmx_transfer_cases.rs"]
+mod mmx_transfer_cases;
 #[path = "../../core/tests/support/single_register_subtract_cases.rs"]
 mod single_register_subtract_cases;
 #[path = "../../core/tests/support/x87_roundup_cases.rs"]
@@ -4871,6 +4873,11 @@ fn execute_strdup() {
 #[allow(unsafe_code)]
 #[unsafe(no_mangle)]
 pub extern "C" fn run() -> u32 {
+    mmx_transfer_cases::transfers_preserve_bits_in_every_register_and_memory();
+    mmx_transfer_cases::dword_moves_zero_extend_and_truncate();
+    mmx_transfer_cases::emms_preserves_physical_bits_status_and_top();
+    mmx_transfer_cases::physical_significands_survive_pops_and_pending_faults_stop_mmx();
+    mmx_transfer_cases::faults_and_unsupported_numeric_transitions_are_atomic();
     instruction_fetch_cases::complete_instructions_respect_page_and_address_limits();
     instruction_fetch_cases::failed_fetches_preserve_fault_order_and_cpu_state();
     execute_accumulator_sign_extension();

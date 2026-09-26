@@ -228,7 +228,7 @@ fn exact_copies_ignore_precision_and_rounding_controls_and_preserve_integer_stat
             let mut expected = empty;
             expected.eip += 10;
             assert_eq!(cpu.run(&mut memory, 1).instructions, 1);
-            assert_eq!(cpu, expected);
+            super::integer_cpu_state::assert_unchanged(&cpu, &expected);
         }
     }
 }

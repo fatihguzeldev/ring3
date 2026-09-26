@@ -7,6 +7,7 @@ use super::{Cpu32, GuestMemory, MemoryError, StopReason, rounding};
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub(crate) struct Stack {
     values: [u64; 8],
+    packed: u8,
     top: u8,
     occupied: u8,
     status: u16,
@@ -14,6 +15,7 @@ pub(crate) struct Stack {
 
 impl Stack {
     fn value(self) -> Result<f64, StopReason> {
+        self.numeric()?;
         if self.occupied == 0 {
             return Err(StopReason::UnsupportedInstruction);
         }
@@ -26,15 +28,59 @@ impl Stack {
         }
         self.top = self.top.wrapping_sub(1) & 7;
         self.values[usize::from(self.top)] = value.to_bits();
+        self.packed &= !(1 << self.top);
         self.occupied += 1;
         self.status &= !0x0200;
         Ok(())
     }
 
     fn pop(&mut self) {
-        self.values[usize::from(self.top)] = 0;
         self.top = (self.top + 1) & 7;
         self.occupied -= 1;
+    }
+
+    fn numeric(self) -> Result<(), StopReason> {
+        if (0..self.occupied).any(|offset| self.packed & (1 << ((self.top + offset) & 7)) != 0) {
+            return Err(StopReason::UnsupportedInstruction);
+        }
+        Ok(())
+    }
+
+    pub(in super::super) fn mmx_ready(self, control: u16) -> Result<(), StopReason> {
+        if self.status & !control & 0x3f != 0 {
+            return Err(StopReason::UnsupportedInstruction);
+        }
+        Ok(())
+    }
+
+    pub(in super::super) fn mmx_read(self, index: usize) -> u64 {
+        let bits = self.values[index];
+        if self.packed & (1 << index) != 0 {
+            return bits;
+        }
+        let fraction = bits & 0x000f_ffff_ffff_ffff;
+        // mmx aliases the extended significand, not the binary64 encoding.
+        if bits & 0x7ff0_0000_0000_0000 != 0 {
+            (1 << 63) | (fraction << 11)
+        } else if fraction != 0 {
+            fraction << fraction.leading_zeros()
+        } else {
+            0
+        }
+    }
+
+    pub(in super::super) fn mmx_write(&mut self, index: usize, value: u64) {
+        self.values[index] = value;
+        self.packed |= 1 << index;
+    }
+
+    pub(in super::super) fn mmx_enter(&mut self) {
+        self.top = 0;
+        self.occupied = 8;
+    }
+
+    pub(in super::super) fn mmx_empty(&mut self) {
+        self.occupied = 0;
     }
 
     fn rounded(&mut self, inexact: bool, up: bool) {
@@ -244,6 +290,7 @@ impl Cpu32 {
         instruction: &Instruction,
     ) -> Result<(), StopReason> {
         self.x87_masked()?;
+        self.x87_stack.numeric()?;
         let register = if instruction.code() == Code::Fxch_st0_sti {
             instruction.op1_register()
         } else {

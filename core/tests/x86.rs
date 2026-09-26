@@ -103,3 +103,8 @@ mod x86_unsigned_branches;
 mod x86_wide_imul;
 #[path = "x86/x86_zero_extend.rs"]
 mod x86_zero_extend;
+
+#[path = "support/mmx_transfer_cases.rs"]
+mod mmx_transfer_cases;
+#[path = "x86/mmx_transfers.rs"]
+mod mmx_transfers;

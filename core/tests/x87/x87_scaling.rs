@@ -92,7 +92,7 @@ fn signed_integer_widths_load_exact_values_without_rounding() {
             expected_cpu.eip += 12;
             assert_eq!(cpu.run(&mut memory, 2).instructions, 2);
             assert_eq!(result(&memory), expected);
-            assert_eq!(cpu, expected_cpu);
+            super::integer_cpu_state::assert_unchanged(&cpu, &expected_cpu);
         }
     }
 }

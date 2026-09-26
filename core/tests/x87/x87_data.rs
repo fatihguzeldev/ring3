@@ -1,4 +1,4 @@
-use super::executable;
+use super::{executable, integer_cpu_state};
 
 use ring3_core::execution::{Cpu32, GuestMemory, Permissions, Register32, StopReason, load_pe32};
 
@@ -208,7 +208,7 @@ fn eight_slots_are_lifo_and_stack_faults_do_not_mutate_state() {
         assert_eq!(read(&memory, OUTPUT, 4), (0x3f80_0000 + i).to_le_bytes());
     }
     cpu.eip = entry;
-    assert_eq!(cpu, empty);
+    integer_cpu_state::assert_unchanged(&cpu, &empty);
     cpu.eip = entry + 6;
     let before = cpu;
     assert_eq!(
@@ -329,7 +329,7 @@ fn fs_addressing_aliases_and_last_address_span_work() {
     let mut expected = cpu;
     expected.eip += 14;
     assert_eq!(cpu.run(&mut memory, 2).instructions, 2);
-    assert_eq!(cpu, expected);
+    integer_cpu_state::assert_unchanged(&cpu, &expected);
     assert_eq!(read(&memory, INPUT, 4), 0xbf80_0000_u32.to_le_bytes());
     for opcode in [0xd9, 0xdd] {
         let size = if opcode == 0xd9 { 4 } else { 8 };
