@@ -100,3 +100,19 @@ pub fn light_read_fault_does_not_complete_the_call() {
     ));
     assert_eq!(process.cpu, before);
 }
+
+pub fn light_enable_accepts_boolean_state_and_device_lifecycle() {
+    let mut process = created();
+    let method = read(&process, read(&process, DEVICE) + 46 * 4);
+    assert_eq!(method, 0x7000_05ec);
+    assert_eq!(call(&mut process, method, &[DEVICE, 0, 1]), 0);
+    assert_eq!(call(&mut process, method, &[DEVICE, 0, 0]), 0);
+    assert_eq!(call(&mut process, method, &[DEVICE, 0, 4]), 0);
+    assert_eq!(
+        call(&mut process, method, &[DEVICE + 1, 0, 1]),
+        INVALID_CALL
+    );
+    let release = read(&process, read(&process, DEVICE) + 2 * 4);
+    assert_eq!(call(&mut process, release, &[DEVICE]), 0);
+    assert_eq!(call(&mut process, method, &[DEVICE, 0, 1]), INVALID_CALL);
+}

@@ -41,3 +41,8 @@ fn light_state_accepts_a_full_readable_structure() {
 fn light_read_fault_does_not_complete_the_call() {
     light_cases::light_read_fault_does_not_complete_the_call();
 }
+
+#[test]
+fn light_enable_accepts_boolean_state_and_device_lifecycle() {
+    light_cases::light_enable_accepts_boolean_state_and_device_lifecycle();
+}

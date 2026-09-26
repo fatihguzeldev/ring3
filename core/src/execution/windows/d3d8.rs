@@ -125,6 +125,7 @@ pub(super) enum Call {
     SetViewport,
     SetMaterial,
     SetLight,
+    LightEnable,
     SetTransform,
     GetTransform,
     SetRenderState,
@@ -190,6 +191,7 @@ impl Call {
             0x498 => Self::SetViewport,
             0x5e4 => Self::SetMaterial,
             0x5e8 => Self::SetLight,
+            0x5ec => Self::LightEnable,
             0x4f0 => Self::SetTransform,
             0x4f4 => Self::GetTransform,
             0x49c => Self::SetRenderState,
@@ -226,6 +228,7 @@ impl Call {
             | Self::CurrentDisplayMode
             | Self::SetRenderState
             | Self::SetLight
+            | Self::LightEnable
             | Self::SetTransform
             | Self::GetTransform
             | Self::SetTexture
@@ -273,7 +276,7 @@ pub(super) struct Graphics {
     scene_open: bool,
     viewport: Option<Viewport>,
     material: Option<[u8; 68]>,
-    lights: BTreeMap<u32, [u8; 104]>,
+    lights: BTreeMap<u32, LightState>,
     transforms: BTreeMap<u32, [u32; 16]>,
     front: Option<Frame>,
     textures: BTreeMap<u32, Texture>,
@@ -291,6 +294,29 @@ pub(super) struct Graphics {
 struct DepthPolicy {
     write_enabled: bool,
     function: u32,
+}
+
+struct LightState {
+    #[allow(
+        dead_code,
+        reason = "retained for fixed-function lighting and light queries"
+    )]
+    parameters: [u8; 104],
+    enabled: bool,
+}
+
+impl Default for LightState {
+    fn default() -> Self {
+        let mut parameters = [0; 104];
+        parameters[..4].copy_from_slice(&3_u32.to_le_bytes());
+        for offset in [4, 8, 12, 72] {
+            parameters[offset..offset + 4].copy_from_slice(&1_f32.to_le_bytes());
+        }
+        Self {
+            parameters,
+            enabled: false,
+        }
+    }
 }
 
 impl Default for DepthPolicy {
@@ -464,6 +490,7 @@ impl Graphics {
             (DEVICE_TABLE, 40, 0x498),
             (DEVICE_TABLE, 42, 0x5e4),
             (DEVICE_TABLE, 44, 0x5e8),
+            (DEVICE_TABLE, 46, 0x5ec),
             (DEVICE_TABLE, 37, 0x4f0),
             (DEVICE_TABLE, 38, 0x4f4),
             (DEVICE_TABLE, 50, 0x49c),
@@ -574,6 +601,7 @@ impl Graphics {
             Call::SetViewport => return self.set_viewport(args, memory),
             Call::SetMaterial => return self.set_material(args, memory),
             Call::SetLight => return self.set_light(args, memory),
+            Call::LightEnable => self.light_enable(args),
             Call::SetTransform => return self.set_transform(args, memory),
             Call::GetTransform => return self.get_transform(args, memory),
             Call::SetRenderState => self.set_render_state(args),
@@ -908,8 +936,26 @@ impl Graphics {
         }
         let mut light = [0; 104];
         memory.read(u64::from(args[2]), &mut light)?;
-        self.lights.insert(args[1], light);
+        let enabled = self.lights.get(&args[1]).is_some_and(|state| state.enabled);
+        self.lights.insert(
+            args[1],
+            LightState {
+                parameters: light,
+                enabled,
+            },
+        );
         Ok(0)
+    }
+
+    fn light_enable(&mut self, args: &[u32]) -> u32 {
+        if args[0] != DEVICE
+            || self.device_refs == 0
+            || (self.lights.len() >= MAX_LIGHTS && !self.lights.contains_key(&args[1]))
+        {
+            return INVALID_CALL;
+        }
+        self.lights.entry(args[1]).or_default().enabled = args[2] != 0;
+        0
     }
 
     fn set_transform(&mut self, args: &[u32], memory: &GuestMemory) -> Result<u32, MemoryError> {
@@ -1951,9 +1997,9 @@ mod tests {
         memory.write(0x1000, &light).unwrap();
         assert_eq!(graphics.set_light(&[DEVICE, 0, 0x1000], &memory), Ok(0));
         memory.write(0x1000, &[0; 104]).unwrap();
-        assert_eq!(graphics.lights[&0], light);
+        assert_eq!(graphics.lights[&0].parameters, light);
         assert!(graphics.set_light(&[DEVICE, 0, 0x1ff0], &memory).is_err());
-        assert_eq!(graphics.lights[&0], light);
+        assert_eq!(graphics.lights[&0].parameters, light);
 
         for index in 1..u32::try_from(MAX_LIGHTS).unwrap() {
             assert_eq!(graphics.set_light(&[DEVICE, index, 0x1000], &memory), Ok(0));
@@ -1967,6 +2013,46 @@ mod tests {
             Ok(INVALID_CALL)
         );
         assert_eq!(graphics.set_light(&[DEVICE, 0, 0x1000], &memory), Ok(0));
+        assert_eq!(
+            graphics.light_enable(&[DEVICE, u32::try_from(MAX_LIGHTS).unwrap(), 1]),
+            INVALID_CALL
+        );
+        graphics.finish_device();
+        assert!(graphics.lights.is_empty());
+    }
+
+    #[test]
+    fn light_enable_creates_documented_default_and_preserves_state_on_overwrite() {
+        let mut graphics = Graphics {
+            device_refs: 1,
+            ..Graphics::default()
+        };
+        let mut memory = GuestMemory::new(1);
+        memory
+            .map_zeroed(0x1000, PAGE_SIZE, Permissions::READ_WRITE)
+            .unwrap();
+        assert_eq!(graphics.light_enable(&[DEVICE, 7, 1]), 0);
+        let state = &graphics.lights[&7];
+        assert!(state.enabled);
+        assert_eq!(
+            u32::from_le_bytes(state.parameters[..4].try_into().unwrap()),
+            3
+        );
+        for offset in [4, 8, 12, 72] {
+            assert_eq!(&state.parameters[offset..offset + 4], &1_f32.to_le_bytes());
+        }
+        assert!(state.parameters[16..20].iter().all(|byte| *byte == 0));
+
+        let mut light = [0; 104];
+        light[..4].copy_from_slice(&1_u32.to_le_bytes());
+        memory.write(0x1000, &light).unwrap();
+        assert_eq!(graphics.set_light(&[DEVICE, 7, 0x1000], &memory), Ok(0));
+        assert_eq!(graphics.lights[&7].parameters, light);
+        assert!(graphics.lights[&7].enabled);
+        assert_eq!(graphics.light_enable(&[DEVICE, 7, 0]), 0);
+        assert!(!graphics.lights[&7].enabled);
+        assert_eq!(graphics.set_light(&[DEVICE, 7, 0x1000], &memory), Ok(0));
+        assert!(!graphics.lights[&7].enabled);
         graphics.finish_device();
         assert!(graphics.lights.is_empty());
     }
