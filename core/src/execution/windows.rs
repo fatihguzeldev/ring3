@@ -30,6 +30,7 @@ mod gdi;
 mod guest;
 mod heap;
 mod hooks;
+mod key_names;
 mod message_box;
 mod messages;
 mod modules;
@@ -161,6 +162,7 @@ enum Api {
     PostMessage,
     PeekMessage,
     GetMessage,
+    KeyName,
     TranslateMessage,
     DispatchMessage,
     SetWindowText,
@@ -289,6 +291,7 @@ impl Api {
             0x464 => Some(Self::PostMessage),
             0x43c => Some(Self::PeekMessage),
             0x448 => Some(Self::GetMessage),
+            0x700 => Some(Self::KeyName),
             0x44c => Some(Self::TranslateMessage),
             0x450 => Some(Self::DispatchMessage),
             0x45c => Some(Self::SetWindowText),
@@ -380,65 +383,7 @@ impl Api {
         } else if module.eq_ignore_ascii_case("d3d8.dll") && name == "Direct3DCreate8" {
             12
         } else if module.eq_ignore_ascii_case("user32.dll") {
-            match name {
-                "GetDesktopWindow" => 16,
-                "FindWindowA" => 0x26c,
-                "IsWindow" => 0x270,
-                "GetActiveWindow" => 0x430,
-                "GetDlgItem" => 0x438,
-                "CreateDialogIndirectParamA" => 0x434,
-                "wsprintfA" => 0x25c,
-                "GetClassInfoA" => 0x260,
-                "RegisterClassA" => 0x264,
-                "UnregisterClassA" => 0x268,
-                "SetWindowsHookExA" => 0x24c,
-                "UnhookWindowsHookEx" => 0x250,
-                "LoadStringA" => 0xec,
-                "LoadIconA" => 0x2c8,
-                "LoadAcceleratorsA" => 0x29c,
-                "CopyAcceleratorTableA" => 0x2a0,
-                "TranslateAcceleratorA" => 0x5d8,
-                "CallWindowProcA" => 0x2a4,
-                "SendMessageA" => 0x2cc,
-                "PeekMessageA" => 0x43c,
-                "GetMessageA" => 0x448,
-                "TranslateMessage" => 0x44c,
-                "DispatchMessageA" => 0x450,
-                "PostMessageA" => 0x464,
-                "GetTopWindow" => 0x454,
-                "GetWindow" => 0x458,
-                "SetWindowTextA" => 0x45c,
-                "EnableWindow" => 0x460,
-                "EndDialog" => 0x468,
-                "MessageBoxA" => 0x5e0,
-                "SetWindowPos" => 0x46c,
-                "DestroyWindow" => 0x470,
-                "ShowWindow" => 0x440,
-                "UpdateWindow" => 0x444,
-                "InvalidateRect" => 0x4b0,
-                "SetForegroundWindow" => 0x4b4,
-                "CallNextHookEx" => 0x2c4,
-                "CreateWindowExA" => 0x2a8,
-                "DefWindowProcA" => 0x2ac,
-                "GetWindowRect" => 0x2b0,
-                "GetClientRect" => 0x2b4,
-                "GetParent" => 0x2b8,
-                "GetWindowLongA" => 0x2bc,
-                "SetWindowLongA" => 0x2c0,
-                "RegisterWindowMessageA" => 0x94,
-                "RegisterClipboardFormatA" => 0xc8,
-                "GetSystemMetrics" => 0x9c,
-                "GetSysColor" => 0xac,
-                "GetSysColorBrush" => 0xb0,
-                "LoadCursorA" => 0xbc,
-                "SetCursor" => 0xc0,
-                "GetCursor" => 0xc4,
-                "GetCursorPos" => 0xcc,
-                "SetCursorPos" => 0xd0,
-                "GetDC" => 0xa0,
-                "ReleaseDC" => 0xa4,
-                _ => return None,
-            }
+            Self::user32(name)?
         } else if module.eq_ignore_ascii_case("gdi32.dll") {
             match name {
                 "GetDeviceCaps" => 0xa8,
@@ -450,6 +395,69 @@ impl Api {
             return None;
         };
         Some(API_BASE + offset)
+    }
+
+    fn user32(name: &str) -> Option<u32> {
+        Some(match name {
+            "GetDesktopWindow" => 16,
+            "FindWindowA" => 0x26c,
+            "IsWindow" => 0x270,
+            "GetActiveWindow" => 0x430,
+            "GetDlgItem" => 0x438,
+            "CreateDialogIndirectParamA" => 0x434,
+            "wsprintfA" => 0x25c,
+            "GetClassInfoA" => 0x260,
+            "RegisterClassA" => 0x264,
+            "UnregisterClassA" => 0x268,
+            "SetWindowsHookExA" => 0x24c,
+            "UnhookWindowsHookEx" => 0x250,
+            "LoadStringA" => 0xec,
+            "LoadIconA" => 0x2c8,
+            "LoadAcceleratorsA" => 0x29c,
+            "CopyAcceleratorTableA" => 0x2a0,
+            "TranslateAcceleratorA" => 0x5d8,
+            "CallWindowProcA" => 0x2a4,
+            "SendMessageA" => 0x2cc,
+            "PeekMessageA" => 0x43c,
+            "GetMessageA" => 0x448,
+            "GetKeyNameTextA" => 0x700,
+            "TranslateMessage" => 0x44c,
+            "DispatchMessageA" => 0x450,
+            "PostMessageA" => 0x464,
+            "GetTopWindow" => 0x454,
+            "GetWindow" => 0x458,
+            "SetWindowTextA" => 0x45c,
+            "EnableWindow" => 0x460,
+            "EndDialog" => 0x468,
+            "MessageBoxA" => 0x5e0,
+            "SetWindowPos" => 0x46c,
+            "DestroyWindow" => 0x470,
+            "ShowWindow" => 0x440,
+            "UpdateWindow" => 0x444,
+            "InvalidateRect" => 0x4b0,
+            "SetForegroundWindow" => 0x4b4,
+            "CallNextHookEx" => 0x2c4,
+            "CreateWindowExA" => 0x2a8,
+            "DefWindowProcA" => 0x2ac,
+            "GetWindowRect" => 0x2b0,
+            "GetClientRect" => 0x2b4,
+            "GetParent" => 0x2b8,
+            "GetWindowLongA" => 0x2bc,
+            "SetWindowLongA" => 0x2c0,
+            "RegisterWindowMessageA" => 0x94,
+            "RegisterClipboardFormatA" => 0xc8,
+            "GetSystemMetrics" => 0x9c,
+            "GetSysColor" => 0xac,
+            "GetSysColorBrush" => 0xb0,
+            "LoadCursorA" => 0xbc,
+            "SetCursor" => 0xc0,
+            "GetCursor" => 0xc4,
+            "GetCursorPos" => 0xcc,
+            "SetCursorPos" => 0xd0,
+            "GetDC" => 0xa0,
+            "ReleaseDC" => 0xa4,
+            _ => return None,
+        })
     }
 
     fn kernel32(name: &str) -> Option<u32> {
@@ -544,7 +552,7 @@ impl Api {
             Self::ThreadPriority(call) => call.arguments(),
             Self::Directory(call) => call.arguments(),
             Self::Clock(call) => call.arguments(),
-            Self::GetEnvironmentVariable | Self::InvalidateRect => 3,
+            Self::GetEnvironmentVariable | Self::InvalidateRect | Self::KeyName => 3,
             Self::WindowsFormat
             | Self::ShowWindow
             | Self::SetWindowText
@@ -1359,6 +1367,10 @@ impl Process32 {
                     call.dispatch(args, thread::Teb(self.cpu.fs_base()), &mut self.memory)?;
                 self.cpu.set_register(Register32::Eax, value);
             }
+            Api::KeyName => self.cpu.set_register(
+                Register32::Eax,
+                key_names::get(&mut self.memory, args[0], args[1], args[2])?,
+            ),
             Api::SetErrorMode => self.set_error_mode(argument)?,
             Api::GetErrorMode => self.cpu.set_register(Register32::Eax, self.error_mode),
             Api::GetVersion => self.cpu.set_register(Register32::Eax, GUEST_VERSION),

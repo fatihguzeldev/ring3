@@ -92,6 +92,8 @@ mod windows_get_window;
 mod windows_guest_post_message;
 #[path = "ui/windows_icons.rs"]
 mod windows_icons;
+#[path = "ui/windows_key_names.rs"]
+mod windows_key_names;
 #[path = "ui/windows_message_retirement.rs"]
 mod windows_message_retirement;
 #[path = "ui/windows_messages.rs"]
