@@ -254,8 +254,13 @@ impl GuestMemory {
                     access: Access::Execute,
                 });
             }
-            if page.bytes[offset..offset + count] != expected[..count] {
-                return Ok(false);
+            for (&actual, &wanted) in page.bytes[offset..offset + count]
+                .iter()
+                .zip(&expected[..count])
+            {
+                if actual != wanted {
+                    return Ok(false);
+                }
             }
             address += count as u64;
             expected = &expected[count..];
