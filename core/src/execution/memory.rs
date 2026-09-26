@@ -3,7 +3,7 @@
     reason = "all operations return explicit range, mapping, or permission errors"
 )]
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeSet, HashMap};
 
 pub const PAGE_SIZE: u64 = 4096;
 
@@ -65,7 +65,8 @@ struct Page {
 }
 
 pub struct GuestMemory {
-    pages: BTreeMap<u64, Page>,
+    pages: HashMap<u64, Page>,
+    occupied: BTreeSet<u64>,
     page_limit: u32,
 }
 
@@ -73,7 +74,8 @@ impl GuestMemory {
     #[must_use]
     pub fn new(page_limit: u32) -> Self {
         Self {
-            pages: BTreeMap::new(),
+            pages: HashMap::new(),
+            occupied: BTreeSet::new(),
             page_limit,
         }
     }
@@ -108,6 +110,7 @@ impl GuestMemory {
                     permissions,
                 },
             );
+            self.occupied.insert(index);
         }
         Ok(())
     }
@@ -123,6 +126,7 @@ impl GuestMemory {
         }
         for index in range {
             self.pages.remove(&index);
+            self.occupied.remove(&index);
         }
         Ok(())
     }
@@ -139,7 +143,7 @@ impl GuestMemory {
         )?;
         let count = page_range(0, length)?.end;
         let mut cursor = window.start;
-        for (&index, _) in self.pages.range(window.clone()) {
+        for &index in self.occupied.range(window.clone()) {
             if index - cursor >= count {
                 return Ok(Some(cursor * PAGE_SIZE));
             }
@@ -162,7 +166,10 @@ impl GuestMemory {
                 });
             }
         }
-        for (_, page) in self.pages.range_mut(range) {
+        for index in range {
+            let page = self.pages.get_mut(&index).ok_or(MemoryError::Unmapped {
+                address: index * PAGE_SIZE,
+            })?;
             page.permissions = permissions;
         }
         Ok(())
