@@ -120,7 +120,13 @@ impl Cpu32 {
             return Err(StopReason::UnsupportedInstruction);
         }
         let angle = self.x87_stack.value()?;
-        if !(angle == 0.0 || angle.is_normal()) || angle.abs() > f64::from(std::f32::consts::TAU) {
+        // Keep host reduction bounded until wider x87 reduction is modeled.
+        let max_angle = if code == Code::Fsin {
+            16.0
+        } else {
+            f64::from(std::f32::consts::TAU)
+        };
+        if !(angle == 0.0 || angle.is_normal()) || angle.abs() > max_angle {
             return Err(StopReason::UnsupportedInstruction);
         }
         let result = if code == Code::Fsin {
