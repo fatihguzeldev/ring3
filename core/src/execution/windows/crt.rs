@@ -100,6 +100,7 @@ pub(super) enum Call {
     GetEnvironment,
     Time,
     LocalTime,
+    Strftime,
 }
 
 impl Call {
@@ -161,6 +162,7 @@ impl Call {
             0x1f0 => Some(Self::InlineMath(floating::InlineMath::Pow)),
             0x1f4 => Some(Self::Time),
             0x1f8 => Some(Self::LocalTime),
+            0x1fc => Some(Self::Strftime),
             0x1ac => Some(Self::Sprintf),
             0x1bc => Some(Self::Snprintf),
             0x1b0 => Some(Self::Move),
@@ -206,7 +208,7 @@ impl Call {
             | Self::Sprintf
             | Self::Sscanf => 2,
             Self::GetMainArgs | Self::SplitPath | Self::DynamicCast => 5,
-            Self::Format | Self::Sort => 4,
+            Self::Format | Self::Sort | Self::Strftime => 4,
             Self::Snprintf
             | Self::Memset
             | Self::DllOnExit
@@ -273,6 +275,11 @@ impl super::Process32 {
             self.cpu.set_register(Register32::Eax, output);
             return Ok(());
         }
+        if matches!(call, Call::Strftime) {
+            let count = calendar::strftime(&mut self.memory, arguments)?;
+            self.cpu.set_register(Register32::Eax, count);
+            return Ok(());
+        }
         if let Some(value) = self.crt.dispatch(
             call,
             arguments,
@@ -288,6 +295,7 @@ impl super::Process32 {
 }
 
 impl Crt {
+    #[expect(clippy::too_many_lines, reason = "flat crt call routing")]
     pub(super) fn dispatch(
         &mut self,
         call: Call,
@@ -301,7 +309,9 @@ impl Crt {
         let stack = cpu.register(Register32::Esp);
         let errno = || self.locals.errno(teb);
         Ok(match call {
-            Call::BeginThreadEx | Call::Sort | Call::Time | Call::LocalTime => unreachable!(),
+            Call::BeginThreadEx | Call::Sort | Call::Time | Call::LocalTime | Call::Strftime => {
+                unreachable!()
+            }
             Call::Stream(call) => self
                 .streams
                 .dispatch(call, args, cpu, memory, heap, directory, errno()?)
@@ -459,6 +469,7 @@ pub(super) fn resolve(name: &str) -> Option<u32> {
         "_CIpow" => Some(API_BASE + 0x1f0),
         "time" => Some(API_BASE + 0x1f4),
         "localtime" => Some(API_BASE + 0x1f8),
+        "strftime" => Some(API_BASE + 0x1fc),
         "_setjmp3" => Some(API_BASE + 0x1d8),
         "getenv" => Some(API_BASE + 0x1dc),
         "__getmainargs" => Some(API_BASE + 0x110),

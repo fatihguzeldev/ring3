@@ -102,6 +102,8 @@ mod windows_crt;
 mod windows_crt_localtime;
 #[path = "windows/windows_crt_sort.rs"]
 mod windows_crt_sort;
+#[path = "windows/windows_crt_strftime.rs"]
+mod windows_crt_strftime;
 #[path = "windows/windows_crt_time.rs"]
 mod windows_crt_time;
 #[path = "windows/windows_current_directory.rs"]
