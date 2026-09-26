@@ -128,6 +128,7 @@ fn execute_cpuid() {
     let mut expected = [0; 32];
     expected[0] = 1;
     expected[4..16].copy_from_slice(b"Ring3CPUCore");
+    expected[28..32].copy_from_slice(&(1_u32 << 23).to_le_bytes());
     assert_eq!(actual, expected);
     assert_eq!(process.cpu.register(Register32::Eax), 0x8000_0000);
     assert_eq!(process.cpu.register(Register32::Esp), 0x1001_0000);

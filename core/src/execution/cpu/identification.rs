@@ -10,8 +10,8 @@ impl Cpu32 {
                 u32::from_le_bytes(*b"3CPU"),
             ],
             0x8000_0000 => [0x8000_0000, 0, 0, 0],
-            // leaf 1 has no optional features; out-of-range inputs return that leaf.
-            _ => [0; 4],
+            // leaf 1 advertises base mmx; out-of-range inputs return that leaf.
+            _ => [0, 0, 0, 1 << 23],
         };
         for (register, value) in [
             Register32::Eax,

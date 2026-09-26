@@ -76,7 +76,7 @@ fn software_vendor_order_and_identity_do_not_depend_on_id_or_ignored_prefixes() 
 }
 
 #[test]
-fn absent_features_extended_bound_and_out_of_range_fallback_are_deterministic() {
+fn mmx_feature_extended_bound_and_out_of_range_fallback_are_deterministic() {
     for leaf in [
         1,
         2,
@@ -103,6 +103,8 @@ fn absent_features_extended_bound_and_out_of_range_fallback_are_deterministic() 
             }
             if leaf == 0x8000_0000 {
                 expected.set_register(Register32::Eax, 0x8000_0000);
+            } else {
+                expected.set_register(Register32::Edx, 1 << 23);
             }
             let mut before = [0; 4096];
             memory.read(0x1000, &mut before).unwrap();
@@ -166,6 +168,7 @@ fn authored_query_keeps_metadata_in_guest_memory_in_whole_and_single_step_runs()
     let mut expected = [0; 32];
     expected[0] = 1;
     expected[4..16].copy_from_slice(b"Ring3CPUCore");
+    expected[28..32].copy_from_slice(&(1_u32 << 23).to_le_bytes());
     for process in [whole, stepped] {
         let mut bytes = [0xff; 32];
         process.memory.read(0x0040_2080, &mut bytes).unwrap();
