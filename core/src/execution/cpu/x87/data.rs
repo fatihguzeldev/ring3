@@ -515,7 +515,10 @@ impl Cpu32 {
                 rounding::sum_magnitude_result(result, left, signed_right),
             )
         } else {
-            let source = if matches!(instruction.code(), Code::Fmul_st0_sti | Code::Fdiv_st0_sti) {
+            let source = if matches!(
+                instruction.code(),
+                Code::Fmul_st0_sti | Code::Fdiv_st0_sti | Code::Fdivr_st0_sti
+            ) {
                 self.x87_register_value(instruction.op1_register())?
             } else if matches!(instruction.code(), Code::Fimul_m32int | Code::Fidiv_m32int) {
                 self.read_integer_m32(instruction, memory)?
@@ -526,12 +529,14 @@ impl Cpu32 {
                 instruction.code(),
                 Code::Fmul_st0_sti | Code::Fmul_m32fp | Code::Fmul_m64fp | Code::Fimul_m32int
             );
-            let (left, right) =
-                if matches!(instruction.code(), Code::Fdivr_m32fp | Code::Fdivr_m64fp) {
-                    (source, top)
-                } else {
-                    (top, source)
-                };
+            let (left, right) = if matches!(
+                instruction.code(),
+                Code::Fdivr_st0_sti | Code::Fdivr_m32fp | Code::Fdivr_m64fp
+            ) {
+                (source, top)
+            } else {
+                (top, source)
+            };
             let (mut result, exact_zero) = if multiply {
                 (left * right, left == 0.0 || right == 0.0)
             } else {
@@ -781,6 +786,7 @@ impl Cpu32 {
                     Code::Fsqrt
                         | Code::Fdivp_sti_st0
                         | Code::Fdiv_st0_sti
+                        | Code::Fdivr_st0_sti
                         | Code::Fmulp_sti_st0
                         | Code::Fsubp_sti_st0
                         | Code::Fsubrp_sti_st0

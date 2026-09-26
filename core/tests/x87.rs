@@ -35,6 +35,8 @@ mod single_register_subtract_cases;
 mod x87_executable;
 #[path = "support/x87_register_executable.rs"]
 mod x87_register_executable;
+#[path = "support/x87_reverse_divide_cases.rs"]
+mod x87_reverse_divide_cases;
 #[path = "support/x87_roundup_cases.rs"]
 mod x87_roundup_cases;
 #[path = "support/x87_scaling_executable.rs"]
@@ -97,6 +99,8 @@ mod x87_register_multiply;
 mod x87_register_stores;
 #[path = "x87/x87_register_subtract.rs"]
 mod x87_register_subtract;
+#[path = "x87/x87_reverse_divide.rs"]
+mod x87_reverse_divide;
 #[path = "x87/x87_roundup_status.rs"]
 mod x87_roundup_status;
 #[path = "x87/x87_scaling.rs"]

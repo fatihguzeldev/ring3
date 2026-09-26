@@ -81,6 +81,8 @@ mod mmx_packed_cases;
 mod mmx_transfer_cases;
 #[path = "../../core/tests/support/single_register_subtract_cases.rs"]
 mod single_register_subtract_cases;
+#[path = "../../core/tests/support/x87_reverse_divide_cases.rs"]
+mod x87_reverse_divide_cases;
 #[path = "../../core/tests/support/x87_roundup_cases.rs"]
 mod x87_roundup_cases;
 #[path = "../../core/tests/support/x87_trigonometry_cases.rs"]
@@ -5090,6 +5092,8 @@ pub extern "C" fn run() -> u32 {
     execute_x87_status();
     x87_roundup_cases::sums();
     x87_roundup_cases::products_and_quotients();
+    x87_reverse_divide_cases::register_reverse_divide();
+    x87_reverse_divide_cases::register_reverse_divide_rejects_atomically();
     x87_trigonometry_cases::full_turn();
     single_register_subtract_cases::arithmetic();
     execute_x87_division();
