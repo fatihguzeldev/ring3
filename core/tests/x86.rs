@@ -108,3 +108,8 @@ mod x86_zero_extend;
 mod mmx_transfer_cases;
 #[path = "x86/mmx_transfers.rs"]
 mod mmx_transfers;
+
+#[path = "x86/mmx_packed.rs"]
+mod mmx_packed;
+#[path = "support/mmx_packed_cases.rs"]
+mod mmx_packed_cases;

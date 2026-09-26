@@ -160,7 +160,7 @@ impl Cpu32 {
         let mut next = instruction.next_ip32();
         match instruction.code() {
             Code::Cpuid => self.identify(),
-            code if mmx::is_transfer(code) => self.mmx_transfer(instruction, memory)?,
+            code if mmx::is_instruction(code) => self.mmx_instruction(instruction, memory)?,
             code if is_move(code) => {
                 let destination = self.operand(instruction, 0)?;
                 let source = self.operand(instruction, 1)?;

@@ -2,7 +2,9 @@ use iced_x86::{Code, Instruction, OpKind, Register};
 
 use super::{Cpu32, GuestMemory, MemoryError, StopReason};
 
-pub(super) fn is_transfer(code: Code) -> bool {
+mod packed;
+
+pub(super) fn is_instruction(code: Code) -> bool {
     matches!(
         code,
         Code::Movd_mm_rm32
@@ -10,11 +12,11 @@ pub(super) fn is_transfer(code: Code) -> bool {
             | Code::Movq_mm_mmm64
             | Code::Movq_mmm64_mm
             | Code::Emms
-    )
+    ) || packed::supports(code)
 }
 
 impl Cpu32 {
-    pub(super) fn mmx_transfer(
+    pub(super) fn mmx_instruction(
         &mut self,
         instruction: &Instruction,
         memory: &mut GuestMemory,
@@ -41,16 +43,7 @@ impl Cpu32 {
                 )?;
             }
             Code::Movq_mm_mmm64 => {
-                let value = if instruction.op1_kind() == OpKind::Register {
-                    self.x87_stack
-                        .mmx_read(mmx_index(instruction.op1_register())?)
-                } else {
-                    let mut bytes = [0; 8];
-                    memory
-                        .read(u64::from(self.mmx_address(instruction)?), &mut bytes)
-                        .map_err(StopReason::MemoryFault)?;
-                    u64::from_le_bytes(bytes)
-                };
+                let value = self.mmx_source(instruction, memory)?;
                 self.x87_stack
                     .mmx_write(mmx_index(instruction.op0_register())?, value);
             }
@@ -64,19 +57,55 @@ impl Cpu32 {
                 } else {
                     memory
                         .write(
-                            u64::from(self.mmx_address(instruction)?),
+                            u64::from(self.mmx_address(instruction, 8)?),
                             &value.to_le_bytes(),
                         )
                         .map_err(StopReason::MemoryFault)?;
                 }
             }
-            _ => return Err(StopReason::UnsupportedInstruction),
+            _ => {
+                let destination = mmx_index(instruction.op0_register())?;
+                let left = self.x87_stack.mmx_read(destination);
+                let right = self.mmx_source(instruction, memory)?;
+                let result = packed::execute(instruction.mnemonic(), left, right)?;
+                self.x87_stack.mmx_write(destination, result);
+            }
         }
         self.x87_stack.mmx_enter();
         Ok(())
     }
 
-    fn mmx_address(&self, instruction: &Instruction) -> Result<u32, StopReason> {
+    fn mmx_source(
+        &self,
+        instruction: &Instruction,
+        memory: &GuestMemory,
+    ) -> Result<u64, StopReason> {
+        match instruction.op1_kind() {
+            OpKind::Register => Ok(self
+                .x87_stack
+                .mmx_read(mmx_index(instruction.op1_register())?)),
+            OpKind::Immediate8 => Ok(u64::from(instruction.immediate8())),
+            OpKind::Memory => {
+                let size = if matches!(
+                    instruction.code(),
+                    Code::Punpcklbw_mm_mmm32 | Code::Punpcklwd_mm_mmm32 | Code::Punpckldq_mm_mmm32
+                ) {
+                    4
+                } else {
+                    8
+                };
+                let address = self.mmx_address(instruction, size)?;
+                let mut bytes = [0; 8];
+                memory
+                    .read(u64::from(address), &mut bytes[..size as usize])
+                    .map_err(StopReason::MemoryFault)?;
+                Ok(u64::from_le_bytes(bytes))
+            }
+            _ => Err(StopReason::UnsupportedInstruction),
+        }
+    }
+
+    fn mmx_address(&self, instruction: &Instruction, size: u32) -> Result<u32, StopReason> {
         let base = if instruction.memory_segment() == Register::FS {
             self.fs_base
         } else {
@@ -84,7 +113,7 @@ impl Cpu32 {
         };
         let address = base.wrapping_add(self.effective_address(instruction)?);
         address
-            .checked_add(7)
+            .checked_add(size - 1)
             .ok_or(StopReason::MemoryFault(MemoryError::AddressOverflow))?;
         Ok(address)
     }

@@ -69,6 +69,8 @@ mod cxx_exception_cases;
 mod executable;
 #[path = "../../core/tests/support/instruction_fetch_cases.rs"]
 mod instruction_fetch_cases;
+#[path = "../../core/tests/support/mmx_packed_cases.rs"]
+mod mmx_packed_cases;
 #[path = "../../core/tests/support/mmx_transfer_cases.rs"]
 mod mmx_transfer_cases;
 #[path = "../../core/tests/support/single_register_subtract_cases.rs"]
@@ -4873,6 +4875,9 @@ fn execute_strdup() {
 #[allow(unsafe_code)]
 #[unsafe(no_mangle)]
 pub extern "C" fn run() -> u32 {
+    mmx_packed_cases::packed_register_and_memory_results_match_independent_oracles();
+    mmx_packed_cases::immediate_shifts_match_verified_full_width_count_forms();
+    mmx_packed_cases::narrow_unpacks_and_faults_respect_the_complete_operand_width();
     mmx_transfer_cases::transfers_preserve_bits_in_every_register_and_memory();
     mmx_transfer_cases::dword_moves_zero_extend_and_truncate();
     mmx_transfer_cases::emms_preserves_physical_bits_status_and_top();
