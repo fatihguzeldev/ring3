@@ -100,6 +100,8 @@ mod windows_cpinfo;
 mod windows_crt;
 #[path = "windows/windows_crt_sort.rs"]
 mod windows_crt_sort;
+#[path = "windows/windows_crt_time.rs"]
+mod windows_crt_time;
 #[path = "windows/windows_current_directory.rs"]
 mod windows_current_directory;
 #[path = "windows/windows_cxx_catch.rs"]

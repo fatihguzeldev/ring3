@@ -97,6 +97,7 @@ pub(super) enum Call {
     ComparePrefixIgnoringCase,
     SetJump,
     GetEnvironment,
+    Time,
 }
 
 impl Call {
@@ -156,6 +157,7 @@ impl Call {
             0x1e8 => Some(Self::InlineMath(floating::InlineMath::Asin)),
             0x1ec => Some(Self::InlineMath(floating::InlineMath::Acos)),
             0x1f0 => Some(Self::InlineMath(floating::InlineMath::Pow)),
+            0x1f4 => Some(Self::Time),
             0x1ac => Some(Self::Sprintf),
             0x1bc => Some(Self::Snprintf),
             0x1b0 => Some(Self::Move),
@@ -188,7 +190,8 @@ impl Call {
             | Self::SetMbCodePage
             | Self::OnExit
             | Self::GetEnvironment
-            | Self::Remove => 1,
+            | Self::Remove
+            | Self::Time => 1,
             Self::ControlFp
             | Self::Floor
             | Self::SetJump
@@ -251,6 +254,16 @@ impl super::Process32 {
             self.cpu.set_register(Register32::Eax, value);
             return Ok(());
         }
+        if matches!(call, Call::Time) {
+            // the virtual wall clock starts at the unix epoch and advances only from host samples.
+            let seconds = i32::try_from(self.elapsed_nanoseconds / 1_000_000_000)
+                .map_or(u32::MAX, i32::cast_unsigned);
+            if arguments[0] != 0 {
+                guest::write_word(&mut self.memory, arguments[0], seconds)?;
+            }
+            self.cpu.set_register(Register32::Eax, seconds);
+            return Ok(());
+        }
         if let Some(value) = self.crt.dispatch(
             call,
             arguments,
@@ -279,7 +292,7 @@ impl Crt {
         let stack = cpu.register(Register32::Esp);
         let errno = || self.locals.errno(teb);
         Ok(match call {
-            Call::BeginThreadEx | Call::Sort => unreachable!("call entry is owned by the process"),
+            Call::BeginThreadEx | Call::Sort | Call::Time => unreachable!(),
             Call::Stream(call) => self
                 .streams
                 .dispatch(call, args, cpu, memory, heap, directory, errno()?)
@@ -435,6 +448,7 @@ pub(super) fn resolve(name: &str) -> Option<u32> {
         "_CIasin" => Some(API_BASE + 0x1e8),
         "_CIacos" => Some(API_BASE + 0x1ec),
         "_CIpow" => Some(API_BASE + 0x1f0),
+        "time" => Some(API_BASE + 0x1f4),
         "_setjmp3" => Some(API_BASE + 0x1d8),
         "getenv" => Some(API_BASE + 0x1dc),
         "__getmainargs" => Some(API_BASE + 0x110),
