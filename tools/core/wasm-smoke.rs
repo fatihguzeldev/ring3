@@ -323,6 +323,8 @@ mod imported_executable;
 mod d3d8_executable;
 #[path = "../../core/tests/support/discard_resource_cases.rs"]
 mod discard_resource_cases;
+#[path = "../../core/tests/support/material_cases.rs"]
+mod material_cases;
 #[path = "../../core/tests/support/normal_vertex_cases.rs"]
 mod normal_vertex_cases;
 #[path = "../../core/tests/support/readonly_texture_cases.rs"]
@@ -4180,6 +4182,8 @@ fn execute_graphics() {
     discard_resource_cases::imported_discard_uses_device_vtable();
     discard_resource_cases::discard_preserves_resources_scene_and_frame();
     discard_resource_cases::discard_rejections_preserve_state();
+    material_cases::material_state_accepts_a_full_readable_structure();
+    material_cases::material_read_fault_does_not_complete_the_call();
     readonly_texture_cases::read_source_mip_while_writing_another();
     normal_vertex_cases::equivalent_diffuse_and_textured_pixels();
     normal_vertex_cases::vertex_storage_accepts_texture_coordinate_counts();

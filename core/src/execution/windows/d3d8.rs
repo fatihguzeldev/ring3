@@ -122,6 +122,7 @@ pub(super) enum Call {
     SetStreamSource,
     GetStreamSource,
     SetViewport,
+    SetMaterial,
     SetTransform,
     GetTransform,
     SetRenderState,
@@ -185,6 +186,7 @@ impl Call {
             0x420 => Self::DrawPrimitiveUp,
             0x534 => Self::DrawIndexedPrimitive,
             0x498 => Self::SetViewport,
+            0x5e4 => Self::SetMaterial,
             0x4f0 => Self::SetTransform,
             0x4f4 => Self::GetTransform,
             0x49c => Self::SetRenderState,
@@ -238,6 +240,7 @@ impl Call {
             | Self::SetVertexShader
             | Self::SetPixelShader
             | Self::SetViewport
+            | Self::SetMaterial
             | Self::GetDepthStencilSurface
             | Self::ResourceManagerDiscardBytes
             | Self::TextureSurfaceDesc
@@ -265,6 +268,7 @@ pub(super) struct Graphics {
     depth_policy: DepthPolicy,
     scene_open: bool,
     viewport: Option<Viewport>,
+    material: Option<[u8; 68]>,
     transforms: BTreeMap<u32, [u32; 16]>,
     front: Option<Frame>,
     textures: BTreeMap<u32, Texture>,
@@ -453,6 +457,7 @@ impl Graphics {
             (DEVICE_TABLE, 15, 0x48),
             (DEVICE_TABLE, 36, 0x44),
             (DEVICE_TABLE, 40, 0x498),
+            (DEVICE_TABLE, 42, 0x5e4),
             (DEVICE_TABLE, 37, 0x4f0),
             (DEVICE_TABLE, 38, 0x4f4),
             (DEVICE_TABLE, 50, 0x49c),
@@ -510,6 +515,7 @@ impl Graphics {
         self.front.take()
     }
 
+    #[expect(clippy::too_many_lines, reason = "flat d3d8 call routing")]
     pub(super) fn dispatch(
         &mut self,
         call: Call,
@@ -560,6 +566,7 @@ impl Graphics {
             Call::SetStreamSource => return self.set_stream_source(args, memory),
             Call::GetStreamSource => return self.get_stream_source(args, memory),
             Call::SetViewport => return self.set_viewport(args, memory),
+            Call::SetMaterial => return self.set_material(args, memory),
             Call::SetTransform => return self.set_transform(args, memory),
             Call::GetTransform => return self.get_transform(args, memory),
             Call::SetRenderState => self.set_render_state(args),
@@ -832,6 +839,7 @@ impl Graphics {
         self.depth_policy = DepthPolicy::default();
         self.scene_open = false;
         self.viewport = None;
+        self.material = None;
         self.transforms.clear();
         self.vertex_fvf = 0;
         self.texture_stages = [0; 8];
@@ -868,6 +876,16 @@ impl Graphics {
             right: (x + width) as usize,
             bottom: (y + height) as usize,
         });
+        Ok(0)
+    }
+
+    fn set_material(&mut self, args: &[u32], memory: &GuestMemory) -> Result<u32, MemoryError> {
+        if args[0] != DEVICE || self.device_refs == 0 || args[1] == 0 {
+            return Ok(INVALID_CALL);
+        }
+        let mut material = [0; 68];
+        memory.read(u64::from(args[1]), &mut material)?;
+        self.material = Some(material);
         Ok(0)
     }
 
@@ -1863,4 +1881,34 @@ impl Graphics {
 #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
 fn quantize_d16(value: f64) -> u16 {
     (value * f64::from(u16::MAX)).round() as u16
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn material_copy_survives_guest_changes_and_faults_until_device_close() {
+        let mut graphics = Graphics {
+            device_refs: 1,
+            ..Graphics::default()
+        };
+        let mut memory = GuestMemory::new(1);
+        memory
+            .map_zeroed(0x1000, PAGE_SIZE, Permissions::READ_WRITE)
+            .unwrap();
+        let mut material = [0; 68];
+        for (index, field) in material.chunks_exact_mut(4).enumerate() {
+            field.copy_from_slice(&(f32::from(u16::try_from(index).unwrap()) / 16.0).to_le_bytes());
+        }
+        memory.write(0x1000, &material).unwrap();
+        assert_eq!(graphics.set_material(&[DEVICE, 0x1000], &memory), Ok(0));
+        assert_eq!(graphics.material, Some(material));
+        memory.write(0x1000, &[0; 68]).unwrap();
+        assert_eq!(graphics.material, Some(material));
+        assert!(graphics.set_material(&[DEVICE, 0x1ff0], &memory).is_err());
+        assert_eq!(graphics.material, Some(material));
+        graphics.finish_device();
+        assert_eq!(graphics.material, None);
+    }
 }
