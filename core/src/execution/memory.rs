@@ -4,6 +4,7 @@
 )]
 
 use std::collections::{BTreeSet, HashMap};
+use std::hash::{BuildHasher, Hasher, RandomState};
 
 pub const PAGE_SIZE: u64 = 4096;
 
@@ -64,8 +65,58 @@ struct Page {
     permissions: Permissions,
 }
 
+struct PageHashBuilder {
+    seed: u64,
+}
+
+impl Default for PageHashBuilder {
+    fn default() -> Self {
+        let mut seed = RandomState::new().build_hasher();
+        seed.write_u64(0x9e37_79b9_7f4a_7c15);
+        Self {
+            seed: seed.finish(),
+        }
+    }
+}
+
+impl BuildHasher for PageHashBuilder {
+    type Hasher = PageHasher;
+
+    fn build_hasher(&self) -> Self::Hasher {
+        PageHasher { state: self.seed }
+    }
+}
+
+struct PageHasher {
+    state: u64,
+}
+
+impl Hasher for PageHasher {
+    fn finish(&self) -> u64 {
+        self.state
+    }
+
+    fn write(&mut self, bytes: &[u8]) {
+        for &byte in bytes {
+            self.state = mix_page_key(self.state ^ u64::from(byte));
+        }
+    }
+
+    fn write_u64(&mut self, value: u64) {
+        self.state = mix_page_key(self.state ^ value);
+    }
+}
+
+fn mix_page_key(mut value: u64) -> u64 {
+    value ^= value >> 30;
+    value = value.wrapping_mul(0xbf58_476d_1ce4_e5b9);
+    value ^= value >> 27;
+    value = value.wrapping_mul(0x94d0_49bb_1331_11eb);
+    value ^ (value >> 31)
+}
+
 pub struct GuestMemory {
-    pages: HashMap<u64, Page>,
+    pages: HashMap<u64, Page, PageHashBuilder>,
     occupied: BTreeSet<u64>,
     page_limit: u32,
 }
@@ -74,7 +125,7 @@ impl GuestMemory {
     #[must_use]
     pub fn new(page_limit: u32) -> Self {
         Self {
-            pages: HashMap::new(),
+            pages: HashMap::with_hasher(PageHashBuilder::default()),
             occupied: BTreeSet::new(),
             page_limit,
         }
@@ -373,5 +424,44 @@ mod tests {
             .unwrap();
         memory.read(0x1000, &mut byte).unwrap();
         assert_eq!(byte, [0]);
+    }
+
+    #[test]
+    fn page_lookup_keeps_distant_u64_indices_independent() {
+        let mut memory = GuestMemory::new(4);
+        let addresses = [0, 0x1_0000_0000, 0x8000_0000_0000_0000, u64::MAX - 8191];
+        let values = [1, 2, 3, 4];
+        for (&address, &value) in addresses.iter().zip(&values) {
+            memory
+                .map_zeroed(address, PAGE_SIZE, Permissions::READ_WRITE)
+                .unwrap();
+            memory.write(address, &[value]).unwrap();
+        }
+        memory
+            .protect(addresses[1], PAGE_SIZE, Permissions::READ)
+            .unwrap();
+        assert_eq!(
+            memory.write(addresses[1], &[99]),
+            Err(MemoryError::PermissionDenied {
+                address: addresses[1],
+                access: Access::Write,
+            })
+        );
+        for (&address, &value) in addresses.iter().zip(&values) {
+            let mut byte = [0];
+            memory.read(address, &mut byte).unwrap();
+            assert_eq!(byte, [value]);
+        }
+        memory.unmap(addresses[2], PAGE_SIZE).unwrap();
+        assert_eq!(memory.mapped_pages(), 3);
+        let mut byte = [0];
+        assert_eq!(
+            memory.read(addresses[2], &mut byte),
+            Err(MemoryError::Unmapped {
+                address: addresses[2],
+            })
+        );
+        memory.read(addresses[3], &mut byte).unwrap();
+        assert_eq!(byte, [4]);
     }
 }
