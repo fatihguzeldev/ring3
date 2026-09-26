@@ -2573,7 +2573,9 @@ fn vertex_buffer_creation_owns_guest_storage_and_device_lifetime() {
 fn blended_vertex_buffer_fvf_owns_lockable_storage() {
     let (mut process, _, device) = create();
     let create_buffer = method(&process, device, 23);
-    for fvf in [0x118, 0x1118] {
+    for fvf in [
+        0x116, 0x118, 0x11a, 0x11c, 0x11e, 0x1116, 0x1118, 0x111a, 0x111c, 0x111e,
+    ] {
         assert_eq!(
             direct_call(
                 &mut process,
