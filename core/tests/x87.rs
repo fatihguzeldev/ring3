@@ -28,6 +28,13 @@ mod x87_roundup_cases;
 mod x87_scaling_executable;
 #[path = "support/x87_status_executable.rs"]
 mod x87_status_executable;
+#[path = "support/x87_trigonometry_cases.rs"]
+mod x87_trigonometry_cases;
+
+#[test]
+fn full_turn_trigonometry() {
+    x87_trigonometry_cases::full_turn();
+}
 
 #[path = "x87/fpu_wait.rs"]
 mod fpu_wait;

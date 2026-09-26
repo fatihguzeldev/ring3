@@ -112,7 +112,7 @@ impl Cpu32 {
             return Err(StopReason::UnsupportedInstruction);
         }
         let angle = self.x87_stack.value()?;
-        if !(angle == 0.0 || angle.is_normal()) || angle.abs() >= 3.0 * std::f64::consts::PI / 4.0 {
+        if !(angle == 0.0 || angle.is_normal()) || angle.abs() > f64::from(std::f32::consts::TAU) {
             return Err(StopReason::UnsupportedInstruction);
         }
         let result = if code == Code::Fsin {
