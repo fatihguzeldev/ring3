@@ -1,6 +1,6 @@
 use iced_x86::{Code, Decoder, DecoderError, DecoderOptions, Instruction, Mnemonic, Register};
 
-use super::{GuestMemory, MemoryError};
+use super::{GuestMemory, MemoryError, PAGE_SIZE};
 
 mod branches;
 mod division;
@@ -453,14 +453,21 @@ fn register32(register: Register) -> Result<Register32, StopReason> {
 
 fn decode(memory: &GuestMemory, ip: u32) -> Result<Instruction, StopReason> {
     let mut bytes = [0; 15];
-    for length in 1_u8..=15 {
-        let index = usize::from(length - 1);
+    let mut length = 0_u8;
+    while usize::from(length) < bytes.len() {
         let address = ip
-            .checked_add(u32::from(length - 1))
+            .checked_add(u32::from(length))
             .ok_or(StopReason::MemoryFault(MemoryError::AddressOverflow))?;
+        // only cross an executable page boundary when the instruction needs more bytes.
+        let available = (PAGE_SIZE - u64::from(address) % PAGE_SIZE).min(u64::from(15 - length));
+        let end = length + u8::try_from(available).expect("instruction length is at most 15");
         memory
-            .fetch(u64::from(address), &mut bytes[index..=index])
+            .fetch(
+                u64::from(address),
+                &mut bytes[usize::from(length)..usize::from(end)],
+            )
             .map_err(StopReason::MemoryFault)?;
+        length = end;
         let mut decoder = Decoder::with_ip(
             32,
             &bytes[..usize::from(length)],

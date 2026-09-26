@@ -12,6 +12,8 @@ mod division_cases;
 mod executable;
 #[path = "support/flag_stack_executable.rs"]
 mod flag_stack_executable;
+#[path = "support/instruction_fetch_cases.rs"]
+mod instruction_fetch_cases;
 #[path = "support/register_stack_executable.rs"]
 mod register_stack_executable;
 #[path = "support/repeated_moves_executable.rs"]

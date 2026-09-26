@@ -5,6 +5,16 @@ use ring3_core::execution::{
 };
 
 #[test]
+fn complete_instruction_fetch_boundaries() {
+    super::instruction_fetch_cases::complete_instructions_respect_page_and_address_limits();
+}
+
+#[test]
+fn incomplete_instruction_fetch_boundaries() {
+    super::instruction_fetch_cases::failed_fetches_preserve_fault_order_and_cpu_state();
+}
+
+#[test]
 fn executes_guest_arithmetic_from_loaded_pe_bytes() {
     for (left, right) in [(7_u32, 35_u32), (123, 456), (u32::MAX, 1), (0x7fff_ffff, 1)] {
         let mut code = vec![0xb8];

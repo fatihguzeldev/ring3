@@ -67,6 +67,8 @@ mod cxx_exception_cases;
 
 #[path = "../../core/tests/support/executable.rs"]
 mod executable;
+#[path = "../../core/tests/support/instruction_fetch_cases.rs"]
+mod instruction_fetch_cases;
 #[path = "../../core/tests/support/single_register_subtract_cases.rs"]
 mod single_register_subtract_cases;
 #[path = "../../core/tests/support/x87_roundup_cases.rs"]
@@ -4869,6 +4871,8 @@ fn execute_strdup() {
 #[allow(unsafe_code)]
 #[unsafe(no_mangle)]
 pub extern "C" fn run() -> u32 {
+    instruction_fetch_cases::complete_instructions_respect_page_and_address_limits();
+    instruction_fetch_cases::failed_fetches_preserve_fault_order_and_cpu_state();
     execute_accumulator_sign_extension();
     execute_graphics();
     #[cfg(feature = "windows-demo")]
