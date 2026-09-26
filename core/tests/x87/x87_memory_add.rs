@@ -98,6 +98,64 @@ fn overflow_stops_without_publishing_result_or_cpu_state() {
 }
 
 #[test]
+fn masked_infinity_adds_finite_single_memory_and_keeps_zero_divide_status() {
+    let zero = TOP + 8;
+    let scratch = TOP + 0x18;
+    let mut code = vec![0xdd, 0x05]; // FLD m64fp
+    code.extend(TOP.to_le_bytes());
+    code.extend([0xd8, 0x35]); // FDIV m32fp
+    code.extend(zero.to_le_bytes());
+    code.extend([0xd9, 0x1d]); // FSTP m32fp
+    code.extend(scratch.to_le_bytes());
+    code.extend([0xd9, 0x05]); // FLD m32fp
+    code.extend(scratch.to_le_bytes());
+    code.extend([0xd8, 0x05]); // FADD m32fp
+    code.extend(SOURCE.to_le_bytes());
+    code.extend([0xdf, 0xe0, 0xdd, 0x1d]); // FNSTSW AX; FSTP m64fp
+    code.extend(RESULT.to_le_bytes());
+    for (top, source, expected) in [
+        (3.0_f64, 0.0_f32, f64::INFINITY.to_bits()),
+        (3.0, -0.0, f64::INFINITY.to_bits()),
+        (3.0, 1.0, f64::INFINITY.to_bits()),
+        (-3.0, 0.0, f64::NEG_INFINITY.to_bits()),
+        (-3.0, -1.0, f64::NEG_INFINITY.to_bits()),
+    ] {
+        for control in [0x007f, 0x027f] {
+            let image = load_pe32(&executable::pe32(&code), 16).unwrap();
+            let mut cpu = Cpu32::new(image.entry_point);
+            cpu.set_x87_control_word(control);
+            let mut memory = image.memory;
+            memory.write(u64::from(TOP), &top.to_le_bytes()).unwrap();
+            memory.write(u64::from(zero), &0_u32.to_le_bytes()).unwrap();
+            memory
+                .write(u64::from(SOURCE), &source.to_le_bytes())
+                .unwrap();
+            assert_eq!(cpu.run(&mut memory, 6).instructions, 6);
+            assert_eq!(cpu.register(Register32::Eax) & 0x3a3f, 0x3804);
+            assert_eq!(cpu.run(&mut memory, 1).instructions, 1);
+            assert_eq!(result(&memory), expected);
+        }
+    }
+
+    let image = load_pe32(&executable::pe32(&code), 16).unwrap();
+    let mut cpu = Cpu32::new(image.entry_point);
+    cpu.set_x87_control_word(0x027f);
+    let mut memory = image.memory;
+    memory.write(u64::from(TOP), &3_f64.to_le_bytes()).unwrap();
+    memory.write(u64::from(zero), &0_u32.to_le_bytes()).unwrap();
+    memory
+        .write(u64::from(SOURCE), &f32::INFINITY.to_le_bytes())
+        .unwrap();
+    assert_eq!(cpu.run(&mut memory, 4).instructions, 4);
+    let before = cpu;
+    assert_eq!(
+        cpu.run(&mut memory, 1).reason,
+        StopReason::UnsupportedInstruction
+    );
+    assert_eq!(cpu, before);
+}
+
+#[test]
 fn frame_relative_add_truncates_single_precision_sum() {
     for (top, source, expected, status) in [
         (0.5_f64, 0.5_f32, 1.0_f64, 0),

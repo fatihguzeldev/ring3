@@ -508,7 +508,7 @@ impl Cpu32 {
             let (left, right, add) = self.x87_add_sub_operands(instruction, memory, top)?;
             let mut result = if add { left + right } else { left - right };
             if !result.is_finite() || (result != 0.0 && !result.is_normal()) {
-                return Err(StopReason::UnsupportedInstruction);
+                return self.x87_infinite_memory_sum(instruction.code(), left, right);
             }
             let signed_right = if add { right } else { -right };
             if single_precision {
@@ -612,6 +612,20 @@ impl Cpu32 {
         }
         self.x87_stack.rounded(false, false);
         self.x87_stack.values[usize::from(self.x87_stack.top)] = (left * right).to_bits();
+        Ok(())
+    }
+
+    fn x87_infinite_memory_sum(
+        &mut self,
+        code: Code,
+        left: f64,
+        right: f64,
+    ) -> Result<(), StopReason> {
+        if code != Code::Fadd_m32fp || !left.is_infinite() || !right.is_finite() {
+            return Err(StopReason::UnsupportedInstruction);
+        }
+        self.x87_stack.rounded(false, false);
+        self.x87_stack.values[usize::from(self.x87_stack.top)] = (left + right).to_bits();
         Ok(())
     }
 
