@@ -4,7 +4,7 @@ use super::Threads;
 #[derive(Clone, Copy)]
 pub(super) struct Wait {
     handle: u32,
-    event: u32,
+    object: u32,
     stack: u32,
     deadline: Option<u64>,
     completion: Option<Completion>,
@@ -46,11 +46,11 @@ impl Wait {
 }
 
 impl Threads {
-    pub(in super::super) fn park_event(
+    pub(in super::super) fn park_wait(
         &mut self,
         cpu: &Cpu32,
         handle: u32,
-        event: u32,
+        object: u32,
         deadline: Option<u64>,
     ) -> Result<(), DispatchError> {
         if !self.scheduling_enabled() || cpu.fs_base() != self.active_teb() {
@@ -58,7 +58,7 @@ impl Threads {
         }
         let wait = Wait {
             handle,
-            event,
+            object,
             stack: cpu.register(Register32::Esp),
             deadline,
             completion: None,
@@ -72,23 +72,31 @@ impl Threads {
         Ok(())
     }
 
-    pub(in super::super) fn event_waiters(&self, event: u32, manual: bool) -> Vec<u32> {
+    pub(in super::super) fn object_waiters(&self, object: u32, all: bool) -> Vec<u32> {
         self.contexts()
             .filter(|(handle, state)| {
                 !self.suspended(*handle)
                     && state
                         .wait
-                        .is_some_and(|wait| wait.event == event && wait.pending())
+                        .is_some_and(|wait| wait.object == object && wait.pending())
             })
             .map(|(handle, _)| handle)
-            .take(if manual { usize::MAX } else { 1 })
+            .take(if all { usize::MAX } else { 1 })
             .collect()
     }
 
-    pub(in super::super) fn event_on_resume(&self, handle: u32) -> Option<u32> {
+    pub(in super::super) fn wait_on_resume(&self, handle: u32) -> Option<u32> {
         let context = self.children.get(&handle)?;
         let wait = context.state.wait?;
         (context.suspend_count == 1 && wait.pending()).then_some(wait.handle)
+    }
+
+    pub(in super::super) fn waiter_id(&self, handle: u32) -> u32 {
+        if handle == 0 {
+            super::thread::CURRENT_ID
+        } else {
+            self.children[&handle].id
+        }
     }
 
     pub(in super::super) fn expired_on_resume(&self, handle: u32, now: u64) -> bool {

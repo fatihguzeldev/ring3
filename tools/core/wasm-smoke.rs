@@ -50,6 +50,8 @@ mod dinput_root_cases;
 mod dinput_state_cases;
 #[path = "../../core/tests/support/event_wait_control.rs"]
 mod event_wait_control;
+#[path = "../../core/tests/support/mutex_wait_cases.rs"]
+mod mutex_wait_cases;
 #[path = "../../core/tests/support/resumed_thread_cases.rs"]
 mod resumed_thread_cases;
 #[path = "../../core/tests/support/suspended_event_cases.rs"]
@@ -4929,6 +4931,9 @@ pub extern "C" fn run() -> u32 {
     suspended_thread_cases::suspended_guest_preserves_counts_across_host_budgets();
     suspended_event_cases::suspended_event_waits_preserve_signal_and_handle_ownership();
     timed_event_cases::finite_wait_uses_exact_host_time_across_budgets();
+    mutex_wait_cases::mutex_release_transfers_recursive_ownership();
+    mutex_wait_cases::mutex_wait_timeout_does_not_acquire_ownership();
+    mutex_wait_cases::suspended_mutex_waiters_and_return_faults_preserve_ownership();
     dinput_root_cases::imported_root_lifetime_across_budgets();
     dinput_device_cases::imported_keyboard_lifetime_across_budgets();
     crt_sort_cases::imported_guest_sort_across_budgets();

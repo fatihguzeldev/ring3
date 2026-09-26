@@ -25,6 +25,8 @@ mod imported_executable;
 mod interlocked_executable;
 #[path = "support/mutex_executable.rs"]
 mod mutex_executable;
+#[path = "support/mutex_wait_cases.rs"]
+mod mutex_wait_cases;
 #[path = "support/resumed_thread_cases.rs"]
 mod resumed_thread_cases;
 #[path = "support/suspended_event_cases.rs"]
@@ -64,6 +66,8 @@ mod windows_hooks;
 mod windows_interlocked;
 #[path = "threads/windows_interlocked_counters.rs"]
 mod windows_interlocked_counters;
+#[path = "threads/windows_mutex_waits.rs"]
+mod windows_mutex_waits;
 #[path = "threads/windows_mutexes.rs"]
 mod windows_mutexes;
 #[path = "threads/windows_resume_thread.rs"]

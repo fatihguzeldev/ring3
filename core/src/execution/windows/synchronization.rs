@@ -53,6 +53,13 @@ pub(super) struct Event {
     pub(super) signaled: bool,
 }
 
+#[derive(Clone, Copy)]
+pub(super) struct Mutex {
+    pub(super) id: u32,
+    pub(super) owner: u32,
+    pub(super) depth: u32,
+}
+
 struct Object {
     state: State,
     handles: usize,
@@ -76,6 +83,23 @@ impl Default for SyncObjects {
 }
 
 impl SyncObjects {
+    pub(super) fn mutex(&self, handle: u32) -> Option<Mutex> {
+        let &id = self.handles.get(&handle)?;
+        let State::Mutex { owner, depth } = self.objects[&id].state else {
+            return None;
+        };
+        Some(Mutex { id, owner, depth })
+    }
+
+    pub(super) fn acquire_mutex(&mut self, id: u32, actor: u32) {
+        let State::Mutex { owner, depth } = &mut self.objects.get_mut(&id).unwrap().state else {
+            unreachable!("prepared mutex retains its type")
+        };
+        debug_assert_eq!(*depth, 0);
+        *owner = actor;
+        *depth = 1;
+    }
+
     pub(super) fn event(&self, handle: u32) -> Option<Event> {
         let &id = self.handles.get(&handle)?;
         let State::Event {

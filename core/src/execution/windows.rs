@@ -25,7 +25,6 @@ mod directory;
 mod dsound;
 mod eh;
 mod environment;
-mod event_waits;
 mod formatting;
 mod gdi;
 mod guest;
@@ -40,6 +39,7 @@ mod resources;
 mod startup;
 mod strings;
 mod synchronization;
+mod synchronization_waits;
 mod system;
 mod thread;
 mod threads;
@@ -831,8 +831,8 @@ impl Process32 {
     /// dll initialization pins its owning thread until the notification finishes.
     /// the public cpu is the selected thread; scheduling validates its fs identity.
     /// a dispatched callback may still be in progress when the budget ends.
-    /// an event wait is charged when parked; its released continuation costs no unit.
-    /// finite event waits expire at a positive run boundary using the supplied elapsed time.
+    /// an object wait is charged when parked; its released continuation costs no unit.
+    /// finite object waits expire at a positive run boundary using the supplied elapsed time.
     /// when no thread is ready, returns the synchronization wait without more work.
     /// the host may advance elapsed time and run again; execution never advances the clock.
     /// a pending file-content request pauses every thread before scheduling on positive
@@ -1013,7 +1013,7 @@ impl Process32 {
         let suspended = match api {
             Api::Crt(crt::Call::Sort) => self.sort(&frame[1..words])?,
             Api::Synchronization(synchronization::Call::Wait) => {
-                self.wait_event(&frame[1..words])?
+                self.wait_object(&frame[1..words])?
             }
             Api::SendMessage => self.send_message(&frame[1..words])?,
             Api::UpdateWindow => self.update_window(frame[1])?,
