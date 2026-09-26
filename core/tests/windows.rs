@@ -178,3 +178,21 @@ mod windows_terminated_copy;
 mod windows_version;
 #[path = "windows/windows_wide_character.rs"]
 mod windows_wide_character;
+
+#[path = "support/decode_cache_cases.rs"]
+mod decode_cache_cases;
+
+#[test]
+fn cached_execution_matches_uncached_and_observes_guest_writes() {
+    decode_cache_cases::cached_execution_matches_uncached_and_observes_guest_writes();
+}
+
+#[test]
+fn cached_fetches_preserve_permissions_lengths_collisions_and_faults() {
+    decode_cache_cases::cached_fetches_preserve_permissions_lengths_collisions_and_faults();
+}
+
+#[test]
+fn freed_and_remapped_code_never_uses_stale_decode() {
+    decode_cache_cases::freed_and_remapped_code_never_uses_stale_decode();
+}

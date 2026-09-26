@@ -3,6 +3,7 @@ use iced_x86::{Code, Decoder, DecoderError, DecoderOptions, Instruction, Mnemoni
 use super::{GuestMemory, MemoryError, PAGE_SIZE};
 
 mod branches;
+mod decode_cache;
 mod division;
 mod flag_stack;
 mod identification;
@@ -13,6 +14,8 @@ mod shifts;
 mod stack;
 mod strings;
 mod x87;
+
+pub(super) use decode_cache::DecodeCache;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Register32 {
@@ -109,7 +112,29 @@ impl Cpu32 {
         &mut self,
         memory: &mut GuestMemory,
         instruction_limit: u64,
+        intercept: impl FnMut(u32) -> bool,
+    ) -> RunResult {
+        self.run_decoded(memory, instruction_limit, intercept, decode)
+    }
+
+    pub(super) fn run_cached(
+        &mut self,
+        memory: &mut GuestMemory,
+        instruction_limit: u64,
+        intercept: impl FnMut(u32) -> bool,
+        cache: &mut DecodeCache,
+    ) -> RunResult {
+        self.run_decoded(memory, instruction_limit, intercept, |memory, ip| {
+            cache.decode(memory, ip)
+        })
+    }
+
+    fn run_decoded(
+        &mut self,
+        memory: &mut GuestMemory,
+        instruction_limit: u64,
         mut intercept: impl FnMut(u32) -> bool,
+        mut decode: impl FnMut(&GuestMemory, u32) -> Result<Instruction, StopReason>,
     ) -> RunResult {
         for executed in 0..instruction_limit {
             let start = self.eip;
@@ -455,6 +480,14 @@ fn register32(register: Register) -> Result<Register32, StopReason> {
 
 fn decode(memory: &GuestMemory, ip: u32) -> Result<Instruction, StopReason> {
     let mut bytes = [0; 15];
+    decode_bytes(memory, ip, &mut bytes)
+}
+
+fn decode_bytes(
+    memory: &GuestMemory,
+    ip: u32,
+    bytes: &mut [u8; 15],
+) -> Result<Instruction, StopReason> {
     let mut length = 0_u8;
     while usize::from(length) < bytes.len() {
         let address = ip

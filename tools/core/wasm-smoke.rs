@@ -69,6 +69,8 @@ mod thread_start_cases;
 #[path = "../../core/tests/support/cxx_exception_cases.rs"]
 mod cxx_exception_cases;
 
+#[path = "../../core/tests/support/decode_cache_cases.rs"]
+mod decode_cache_cases;
 #[path = "../../core/tests/support/executable.rs"]
 mod executable;
 #[path = "../../core/tests/support/instruction_fetch_cases.rs"]
@@ -4894,6 +4896,9 @@ pub extern "C" fn run() -> u32 {
     mmx_transfer_cases::emms_preserves_physical_bits_status_and_top();
     mmx_transfer_cases::physical_significands_survive_pops_and_pending_faults_stop_mmx();
     mmx_transfer_cases::faults_and_unsupported_numeric_transitions_are_atomic();
+    decode_cache_cases::cached_execution_matches_uncached_and_observes_guest_writes();
+    decode_cache_cases::cached_fetches_preserve_permissions_lengths_collisions_and_faults();
+    decode_cache_cases::freed_and_remapped_code_never_uses_stale_decode();
     instruction_fetch_cases::complete_instructions_respect_page_and_address_limits();
     instruction_fetch_cases::failed_fetches_preserve_fault_order_and_cpu_state();
     execute_accumulator_sign_extension();

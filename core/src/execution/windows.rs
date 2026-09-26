@@ -72,6 +72,7 @@ const GUEST_VERSION: u32 = (2600 << 16) | (1 << 8) | 5;
 pub struct Process32 {
     pub memory: GuestMemory,
     pub cpu: Cpu32,
+    decode_cache: super::cpu::DecodeCache,
     exit_code: Option<u32>,
     error_mode: u32,
     elapsed_nanoseconds: i64,
@@ -697,6 +698,7 @@ impl Process32 {
         Ok(Self {
             memory: image.memory,
             cpu,
+            decode_cache: super::cpu::DecodeCache::default(),
             exit_code: None,
             error_mode: 0,
             elapsed_nanoseconds: 0,
@@ -886,15 +888,7 @@ impl Process32 {
                     return result;
                 }
             }
-            let step = self.cpu.run_until(&mut self.memory, slice, |address| {
-                Api::at(address).is_some()
-                    || self.diagnostic_imports.contains(address)
-                    || self.startup.contains(address)
-                    || address == callbacks::RETURN
-                    || address == eh::RETURN
-                    || address == threads::ENTER
-                    || address == threads::RETURN
-            });
+            let step = self.run_cpu(slice);
             result.instructions += step.instructions;
             remaining -= step.instructions;
             self.threads.account(step.instructions);
@@ -943,6 +937,23 @@ impl Process32 {
             }
         }
         result
+    }
+
+    fn run_cpu(&mut self, slice: u64) -> super::RunResult {
+        self.cpu.run_cached(
+            &mut self.memory,
+            slice,
+            |address| {
+                Api::at(address).is_some()
+                    || self.diagnostic_imports.contains(address)
+                    || self.startup.contains(address)
+                    || address == callbacks::RETURN
+                    || address == eh::RETURN
+                    || address == threads::ENTER
+                    || address == threads::RETURN
+            },
+            &mut self.decode_cache,
+        )
     }
 
     fn resume_continuation(&mut self) -> Result<bool, DispatchError> {
