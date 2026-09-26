@@ -105,8 +105,10 @@ impl Directory {
     fn path(&self, source: usize) -> &[u8] {
         if source < self.declarations.len() {
             &self.declarations[source]
-        } else {
+        } else if source < self.declarations.len() + self.files.len() {
             &self.files[source - self.declarations.len()].path
+        } else {
+            &self.created[source - self.declarations.len() - self.files.len()]
         }
     }
 
@@ -116,7 +118,8 @@ impl Directory {
 
     fn matches(&self, parent: &[u8], pattern: &[u8]) -> Result<Vec<Entry>, DispatchError> {
         let start = parent.len() + usize::from(parent.len() > 3);
-        let mut entries = Vec::with_capacity(self.declarations.len() + self.files.len());
+        let mut entries =
+            Vec::with_capacity(self.declarations.len() + self.files.len() + self.created.len());
         for (source, path) in self.all_paths().enumerate() {
             if !path
                 .get(..parent.len())
@@ -130,6 +133,7 @@ impl Directory {
             };
             let name = tail.split(|&b| b == b'\\').next().expect("nonempty tail");
             if source >= self.declarations.len()
+                && source < self.declarations.len() + self.files.len()
                 && start + name.len() == path.len()
                 && self.files[source - self.declarations.len()].removed
             {
@@ -160,7 +164,7 @@ impl Directory {
     fn record(&self, entry: Entry) -> [u8; 320] {
         let source = usize::from(entry.source);
         let directory =
-            source < self.declarations.len() || usize::from(entry.end) < self.path(source).len();
+            self.directory_source(source) || usize::from(entry.end) < self.path(source).len();
         let mut record = [0; 320];
         record[0] = if directory { 0x10 } else { 0x80 };
         if !directory {

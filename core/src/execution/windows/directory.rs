@@ -20,6 +20,7 @@ pub(super) struct Directory {
     terminated: Vec<u8>,
     declarations: Vec<Box<[u8]>>,
     files: Vec<catalog::File>,
+    created: Vec<Box<[u8]>>,
     searches: search::Searches,
     opened: files::Opened,
     content_cache: demand::Cache,
@@ -53,6 +54,7 @@ pub(super) enum Call {
     DiskGeometry,
     SeekFile,
     ReadFile,
+    Create,
 }
 
 impl Call {
@@ -62,7 +64,7 @@ impl Call {
             Self::DiskGeometry | Self::ReadFile => 5,
             Self::SeekFile => 4,
             Self::ShortPath => 3,
-            Self::Query | Self::FindFirst | Self::FindNext | Self::FileSize => 2,
+            Self::Query | Self::FindFirst | Self::FindNext | Self::FileSize | Self::Create => 2,
             Self::Change | Self::FindClose | Self::Attributes => 1,
         }
     }
@@ -99,6 +101,10 @@ impl Process32 {
             Call::OpenFile => self
                 .current_directory
                 .open_file(arguments, teb, &mut self.memory)?,
+            Call::Create => {
+                self.current_directory
+                    .create(arguments[0], arguments[1], teb, &mut self.memory)?
+            }
             Call::Query => {
                 self.current_directory
                     .query(arguments[0], arguments[1], &mut self.memory)?
@@ -194,6 +200,7 @@ impl Directory {
             terminated,
             declarations,
             files,
+            created: Vec::new(),
             searches: search::Searches::default(),
             opened: files::Opened::default(),
             content_cache: demand::Cache::default(),
@@ -227,6 +234,11 @@ impl Directory {
             .iter()
             .map(AsRef::as_ref)
             .chain(self.files.iter().map(|file| file.path.as_ref()))
+            .chain(self.created.iter().map(AsRef::as_ref))
+    }
+
+    fn directory_source(&self, index: usize) -> bool {
+        index < self.declarations.len() || index >= self.declarations.len() + self.files.len()
     }
 
     fn exists(&self, candidate: &[u8]) -> bool {
@@ -234,10 +246,54 @@ impl Directory {
             declared
                 .get(..candidate.len())
                 .is_some_and(|prefix| prefix.eq_ignore_ascii_case(candidate))
-                && ((candidate.len() == declared.len() && index < self.declarations.len())
+                && ((candidate.len() == declared.len() && self.directory_source(index))
                     || candidate.len() == 3
                     || declared.get(candidate.len()) == Some(&b'\\'))
         })
+    }
+
+    fn create(
+        &mut self,
+        source: u32,
+        security: u32,
+        teb: thread::Teb,
+        memory: &mut GuestMemory,
+    ) -> Result<u32, DispatchError> {
+        if security != 0 {
+            return Err(DispatchError::Unsupported);
+        }
+        let input = paths::read(memory, source)?;
+        if input.len() >= 260 {
+            return Err(DispatchError::Unsupported);
+        }
+        let path = match paths::resolve(&self.terminated[..self.terminated.len() - 1], &input) {
+            Ok(path) => path,
+            Err(paths::PathError::Unsupported) => return Err(DispatchError::Unsupported),
+            Err(paths::PathError::Windows(error)) => return failed(teb, memory, error),
+        };
+        if path.len() >= 260 {
+            return Err(DispatchError::Unsupported);
+        }
+        if self.exists(&path)
+            || self
+                .files
+                .iter()
+                .any(|file| !file.removed && file.path.eq_ignore_ascii_case(&path))
+        {
+            return failed(teb, memory, 183);
+        }
+        let parent_end = path
+            .iter()
+            .rposition(|&byte| byte == b'\\')
+            .expect("absolute path");
+        if !self.exists(&path[..parent_end.max(3)]) {
+            return failed(teb, memory, 3);
+        }
+        if self.created.len() >= 256 {
+            return failed(teb, memory, 8);
+        }
+        self.created.push(path.into_boxed_slice());
+        Ok(1)
     }
 
     fn attributes(

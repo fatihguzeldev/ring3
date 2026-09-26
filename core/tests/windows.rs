@@ -96,6 +96,8 @@ mod windows_command_line;
 mod windows_computer_name;
 #[path = "windows/windows_cpinfo.rs"]
 mod windows_cpinfo;
+#[path = "windows/windows_create_directory.rs"]
+mod windows_create_directory;
 #[path = "windows/windows_crt.rs"]
 mod windows_crt;
 #[path = "windows/windows_crt_localtime.rs"]
