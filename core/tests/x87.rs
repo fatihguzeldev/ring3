@@ -1,3 +1,16 @@
+#[path = "support/x87_subnormal_cases.rs"]
+mod x87_subnormal_cases;
+
+#[test]
+fn masked_subnormal_stores_match_scalar_x87() {
+    x87_subnormal_cases::masked_subnormal_stores_match_scalar_x87();
+}
+
+#[test]
+fn subnormal_faults_and_memory_operands_preserve_state() {
+    x87_subnormal_cases::subnormal_faults_and_memory_operands_preserve_state();
+}
+
 #[path = "support/constant_load_cases.rs"]
 mod constant_load_cases;
 #[path = "support/division_executable.rs"]

@@ -60,6 +60,8 @@ mod suspended_event_cases;
 mod suspended_thread_cases;
 #[path = "../../core/tests/support/timed_event_cases.rs"]
 mod timed_event_cases;
+#[path = "../../core/tests/support/x87_subnormal_cases.rs"]
+mod x87_subnormal_cases;
 
 #[path = "../../core/tests/support/thread_start_cases.rs"]
 mod thread_start_cases;
@@ -4934,6 +4936,8 @@ pub extern "C" fn run() -> u32 {
     mutex_wait_cases::mutex_release_transfers_recursive_ownership();
     mutex_wait_cases::mutex_wait_timeout_does_not_acquire_ownership();
     mutex_wait_cases::suspended_mutex_waiters_and_return_faults_preserve_ownership();
+    x87_subnormal_cases::masked_subnormal_stores_match_scalar_x87();
+    x87_subnormal_cases::subnormal_faults_and_memory_operands_preserve_state();
     dinput_root_cases::imported_root_lifetime_across_budgets();
     dinput_device_cases::imported_keyboard_lifetime_across_budgets();
     crt_sort_cases::imported_guest_sort_across_budgets();

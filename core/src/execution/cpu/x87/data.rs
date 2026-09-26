@@ -510,7 +510,7 @@ impl Cpu32 {
     }
 
     fn x87_add_sub_operands(
-        &self,
+        &mut self,
         instruction: &Instruction,
         memory: &GuestMemory,
         top: f64,
@@ -664,12 +664,19 @@ impl Cpu32 {
         let (address, size) = self.data_address(instruction)?;
         let mut bytes = value.to_le_bytes();
         let mut rounded = value;
+        let mut tiny = false;
         if size == 4 {
-            if value != 0.0
-                && !(f64::from(f32::MIN_POSITIVE)..=f64::from(f32::MAX)).contains(&value.abs())
-            {
+            if !value.is_finite() || value.abs() > f64::from(f32::MAX) {
                 return Err(StopReason::UnsupportedInstruction);
             }
+            // tininess uses p24 rounding with an unbounded exponent, before denormalization.
+            let normal = f64::from(f32::MIN_POSITIVE);
+            let threshold = if profile == 0x0c3f {
+                normal
+            } else {
+                normal - f64::from(f32::from_bits(1)) * 0.25
+            };
+            tiny = value.abs() < threshold;
             #[expect(clippy::cast_possible_truncation, reason = "checked f32 range")]
             let mut narrowed = value as f32;
             if profile == 0x0c3f && f64::from(narrowed).abs() > value.abs() {
@@ -685,6 +692,9 @@ impl Cpu32 {
         memory
             .write(u64::from(address), &bytes[..size])
             .map_err(StopReason::MemoryFault)?;
+        if tiny && rounded.to_bits() != value.to_bits() {
+            self.x87_stack.status |= 0x10;
+        }
         self.x87_stack.rounded(
             rounded.to_bits() != value.to_bits(),
             rounded.abs() > value.abs(),
@@ -774,7 +784,7 @@ impl Cpu32 {
     }
 
     fn read_float(
-        &self,
+        &mut self,
         instruction: &Instruction,
         memory: &GuestMemory,
     ) -> Result<f64, StopReason> {
@@ -785,8 +795,11 @@ impl Cpu32 {
             .map_err(StopReason::MemoryFault)?;
         let value = if size == 4 {
             let value = f32::from_le_bytes(bytes[..4].try_into().expect("float width"));
-            if !value.is_normal() && value != 0.0 {
+            if !value.is_finite() {
                 return Err(StopReason::UnsupportedInstruction);
+            }
+            if value.is_subnormal() {
+                self.x87_stack.status |= 2;
             }
             f64::from(value)
         } else {

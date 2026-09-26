@@ -64,7 +64,7 @@ fn fault_range_control_and_empty_stack_preserve_cpu_and_output() {
     for case in 0..5 {
         let (value, destination) = match case {
             0 => (f64::MAX, OUTPUT),
-            1 => (f64::from(f32::MIN_POSITIVE).next_down(), OUTPUT),
+            1 => (f64::from(f32::MAX).next_up(), OUTPUT),
             2 => (1.5, 0x5000_0000),
             _ => (1.5, OUTPUT),
         };
@@ -188,7 +188,7 @@ fn truncating_m32_pop_store_keeps_faults_atomic() {
 
     for (value, control) in [
         (f64::MAX, 0x0c7f),
-        (f64::from(f32::MIN_POSITIVE).next_down(), 0x0c7f),
+        (f64::from(f32::MAX).next_up(), 0x0c7f),
         (0.5, 0x087f),
     ] {
         let (mut cpu, mut memory) = load(value, OUTPUT);

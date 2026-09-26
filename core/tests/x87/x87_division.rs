@@ -257,7 +257,6 @@ fn excluded_divisors_ranges_and_control_modes_preserve_the_loaded_operand() {
             (0x8000_0000, 0x8000_0000_0000_0000),
             (0x7fc0_0000, 0x7ff8_0000_0000_0000),
             (0x7f80_0000, 0x7ff0_0000_0000_0000),
-            (1, 1),
         ] {
             let source = if opcode == 0xd8 {
                 u64::from(bits32)
@@ -275,6 +274,7 @@ fn excluded_divisors_ranges_and_control_modes_preserve_the_loaded_operand() {
         }
     }
     for (top, divisor) in [
+        (1., f64::from_bits(1)),
         (f64::MAX, 0.5),
         (f64::MIN_POSITIVE, 2.),
         (f64::MIN_POSITIVE, 1.),
