@@ -86,6 +86,8 @@ mod x87_integer_multiply;
 mod x87_integer_stores;
 #[path = "x87/x87_load_constants.rs"]
 mod x87_load_constants;
+#[path = "x87/x87_masked_divide_zero.rs"]
+mod x87_masked_divide_zero;
 #[path = "x87/x87_memory_add.rs"]
 mod x87_memory_add;
 #[path = "x87/x87_memory_subtract.rs"]

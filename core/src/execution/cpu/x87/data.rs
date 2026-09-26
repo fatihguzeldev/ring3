@@ -555,7 +555,7 @@ impl Cpu32 {
                 (left * right, left == 0.0 || right == 0.0)
             } else {
                 if right == 0.0 {
-                    return Err(StopReason::UnsupportedInstruction);
+                    return self.x87_masked_divide_zero(instruction, left, right);
                 }
                 (left / right, left == 0.0)
             };
@@ -586,6 +586,21 @@ impl Cpu32 {
             self.x87_control_word & 0x0f3f != 0x0c3f && rounding == Ordering::Greater,
         );
         self.x87_stack.values[usize::from(self.x87_stack.top)] = result.to_bits();
+        Ok(())
+    }
+
+    fn x87_masked_divide_zero(
+        &mut self,
+        instruction: &Instruction,
+        left: f64,
+        right: f64,
+    ) -> Result<(), StopReason> {
+        if left == 0.0 || instruction.code() != Code::Fdiv_m32fp {
+            return Err(StopReason::UnsupportedInstruction);
+        }
+        self.x87_stack.rounded(false, false);
+        self.x87_stack.status |= 0x04;
+        self.x87_stack.values[usize::from(self.x87_stack.top)] = (left / right).to_bits();
         Ok(())
     }
 
@@ -746,28 +761,37 @@ impl Cpu32 {
         let mut rounded = value;
         let mut tiny = false;
         if size == 4 {
-            if !value.is_finite() || value.abs() > f64::from(f32::MAX) {
-                return Err(StopReason::UnsupportedInstruction);
-            }
-            // tininess uses p24 rounding with an unbounded exponent, before denormalization.
-            let normal = f64::from(f32::MIN_POSITIVE);
-            let threshold = if profile == 0x0c3f {
-                normal
-            } else {
-                normal - f64::from(f32::from_bits(1)) * 0.25
-            };
-            tiny = value.abs() < threshold;
-            #[expect(clippy::cast_possible_truncation, reason = "checked f32 range")]
-            let mut narrowed = value as f32;
-            if profile == 0x0c3f && f64::from(narrowed).abs() > value.abs() {
-                narrowed = if value.is_sign_negative() {
-                    narrowed.next_up()
+            if value.is_infinite() {
+                let narrowed = if value.is_sign_negative() {
+                    f32::NEG_INFINITY
                 } else {
-                    narrowed.next_down()
+                    f32::INFINITY
                 };
+                bytes[..4].copy_from_slice(&narrowed.to_le_bytes());
+            } else {
+                if !value.is_finite() || value.abs() > f64::from(f32::MAX) {
+                    return Err(StopReason::UnsupportedInstruction);
+                }
+                // tininess uses p24 rounding with an unbounded exponent, before denormalization.
+                let normal = f64::from(f32::MIN_POSITIVE);
+                let threshold = if profile == 0x0c3f {
+                    normal
+                } else {
+                    normal - f64::from(f32::from_bits(1)) * 0.25
+                };
+                tiny = value.abs() < threshold;
+                #[expect(clippy::cast_possible_truncation, reason = "checked f32 range")]
+                let mut narrowed = value as f32;
+                if profile == 0x0c3f && f64::from(narrowed).abs() > value.abs() {
+                    narrowed = if value.is_sign_negative() {
+                        narrowed.next_up()
+                    } else {
+                        narrowed.next_down()
+                    };
+                }
+                rounded = f64::from(narrowed);
+                bytes[..4].copy_from_slice(&narrowed.to_le_bytes());
             }
-            rounded = f64::from(narrowed);
-            bytes[..4].copy_from_slice(&narrowed.to_le_bytes());
         }
         memory
             .write(u64::from(address), &bytes[..size])
