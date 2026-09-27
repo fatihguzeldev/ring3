@@ -30,6 +30,68 @@ fn output(memory: &GuestMemory) -> u32 {
 }
 
 #[test]
+fn masked_single_precision_store_overflow_writes_rounded_result_and_pops() {
+    for (input, control, expected, flags) in [
+        (
+            -f64::from(f32::MAX) * 1.2,
+            0x007f,
+            f32::NEG_INFINITY.to_bits(),
+            0x28,
+        ),
+        (
+            -f64::from(f32::MAX) * 1.2,
+            0x0c7f,
+            (-f32::MAX).to_bits(),
+            0x28,
+        ),
+        (f64::MAX, 0x007f, f32::INFINITY.to_bits(), 0x28),
+        (f64::MAX, 0x0c7f, f32::MAX.to_bits(), 0x28),
+        (
+            f64::from(f32::MAX).next_up(),
+            0x007f,
+            f32::MAX.to_bits(),
+            0x20,
+        ),
+        (
+            f64::from(f32::MAX).next_up(),
+            0x0c7f,
+            f32::MAX.to_bits(),
+            0x20,
+        ),
+    ] {
+        let (mut cpu, mut memory) = load(input, OUTPUT);
+        cpu.set_x87_control_word(control);
+        assert_eq!(cpu.run(&mut memory, 2).instructions, 2);
+        assert_eq!(output(&memory), expected);
+        assert_eq!(cpu.run(&mut memory, 1).instructions, 1);
+        assert_eq!(cpu.register(Register32::Eax) & 0x28, flags);
+    }
+}
+
+#[test]
+fn frame_relative_masked_overflow_matches_tutorial_store() {
+    let mut code = vec![0xdd, 0x05];
+    code.extend(TOP.to_le_bytes());
+    code.extend([0xd9, 0x58, 0x08, 0xdf, 0xe0]);
+    let mut image = load_pe32(&executable::pe32(&code), 16).unwrap();
+    image
+        .memory
+        .write(
+            u64::from(TOP),
+            &(-4.070_400_532_412_072e38_f64).to_le_bytes(),
+        )
+        .unwrap();
+    let mut cpu = Cpu32::new(image.entry_point);
+    cpu.set_register(Register32::Eax, OUTPUT - 8);
+    cpu.set_x87_control_word(0x027f);
+
+    assert_eq!(cpu.run(&mut image.memory, 2).instructions, 2);
+    assert_eq!(output(&image.memory), f32::NEG_INFINITY.to_bits());
+    assert_eq!(cpu.run(&mut image.memory, 1).instructions, 1);
+    assert_eq!(cpu.register(Register32::Eax) & 0x28, 0x28);
+}
+
+#[test]
 fn store_rounds_to_m32_sets_status_and_pops() {
     for (input, expected, status) in [
         (1.5_f64, 1.5_f32.to_bits(), 0),
@@ -61,25 +123,24 @@ fn store_rounds_to_m32_sets_status_and_pops() {
 
 #[test]
 fn fault_range_control_and_empty_stack_preserve_cpu_and_output() {
-    for case in 0..5 {
+    for case in 0..4 {
         let (value, destination) = match case {
-            0 => (f64::MAX, OUTPUT),
-            1 => (f64::from(f32::MAX).next_up(), OUTPUT),
-            2 => (1.5, 0x5000_0000),
+            0 => (f64::NAN, OUTPUT),
+            1 => (1.5, 0x5000_0000),
             _ => (1.5, OUTPUT),
         };
         let (mut cpu, mut memory) = load(value, destination);
-        if case == 4 {
+        if case == 3 {
             cpu.eip += 6;
         } else {
             assert_eq!(cpu.run(&mut memory, 1).instructions, 1);
         }
-        if case == 3 {
+        if case == 2 {
             cpu.set_x87_control_word(0x037f);
         }
         let before = cpu;
         let stop = cpu.run(&mut memory, 1).reason;
-        if case == 2 {
+        if case == 1 {
             assert!(matches!(stop, StopReason::MemoryFault(_)));
         } else {
             assert_eq!(stop, StopReason::UnsupportedInstruction);
@@ -186,11 +247,7 @@ fn truncating_m32_pop_store_keeps_faults_atomic() {
     ));
     assert_eq!(cpu, before);
 
-    for (value, control) in [
-        (f64::MAX, 0x0c7f),
-        (f64::from(f32::MAX).next_up(), 0x0c7f),
-        (0.5, 0x087f),
-    ] {
+    for (value, control) in [(f64::NAN, 0x0c7f), (0.5, 0x087f)] {
         let (mut cpu, mut memory) = load(value, OUTPUT);
         cpu.set_x87_control_word(control);
         assert_eq!(cpu.run(&mut memory, 1).instructions, 1);

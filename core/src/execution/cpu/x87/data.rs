@@ -818,6 +818,7 @@ impl Cpu32 {
         let mut bytes = value.to_le_bytes();
         let mut rounded = value;
         let mut tiny = false;
+        let mut overflow = false;
         if size == 4 {
             if value.is_infinite() {
                 let narrowed = if value.is_sign_negative() {
@@ -827,7 +828,7 @@ impl Cpu32 {
                 };
                 bytes[..4].copy_from_slice(&narrowed.to_le_bytes());
             } else {
-                if !value.is_finite() || value.abs() > f64::from(f32::MAX) {
+                if !value.is_finite() {
                     return Err(StopReason::UnsupportedInstruction);
                 }
                 // tininess uses p24 rounding with an unbounded exponent, before denormalization.
@@ -838,7 +839,7 @@ impl Cpu32 {
                     normal - f64::from(f32::from_bits(1)) * 0.25
                 };
                 tiny = value.abs() < threshold;
-                #[expect(clippy::cast_possible_truncation, reason = "checked f32 range")]
+                #[expect(clippy::cast_possible_truncation, reason = "x87 narrows to m32fp")]
                 let mut narrowed = value as f32;
                 if profile == 0x0c3f && f64::from(narrowed).abs() > value.abs() {
                     narrowed = if value.is_sign_negative() {
@@ -847,6 +848,8 @@ impl Cpu32 {
                         narrowed.next_down()
                     };
                 }
+                overflow = value.abs() >= 2.0_f64.powi(128)
+                    || (profile != 0x0c3f && narrowed.is_infinite());
                 rounded = f64::from(narrowed);
                 bytes[..4].copy_from_slice(&narrowed.to_le_bytes());
             }
@@ -854,6 +857,9 @@ impl Cpu32 {
         memory
             .write(u64::from(address), &bytes[..size])
             .map_err(StopReason::MemoryFault)?;
+        if overflow {
+            self.x87_stack.status |= 0x08;
+        }
         if tiny && rounded.to_bits() != value.to_bits() {
             self.x87_stack.status |= 0x10;
         }

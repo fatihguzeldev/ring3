@@ -176,7 +176,7 @@ fn masked_double_denormal_load_keeps_bits_and_sets_denormal_status() {
 }
 
 #[test]
-fn narrowing_uses_nearest_even_and_rejects_unsupported_ranges() {
+fn narrowing_uses_nearest_even_and_preserves_unsupported_nan() {
     let mut code = instruction(0xdd, 0x05, INPUT);
     code.extend(instruction(0xd9, 0x1d, OUTPUT));
     for (value, expected) in [
@@ -192,21 +192,19 @@ fn narrowing_uses_nearest_even_and_rejects_unsupported_ranges() {
         assert_eq!(cpu.run(&mut memory, 2).instructions, 2);
         assert_eq!(read(&memory, OUTPUT, 4), expected.to_le_bytes());
     }
-    for value in [f64::MAX, -f64::MAX, f64::from(f32::MAX).next_up()] {
-        let (mut cpu, mut memory) = load(&code);
-        memory
-            .write(u64::from(INPUT), &value.to_le_bytes())
-            .unwrap();
-        memory.write(u64::from(OUTPUT), &[0x55; 8]).unwrap();
-        assert_eq!(cpu.run(&mut memory, 1).instructions, 1);
-        let before = cpu;
-        assert_eq!(
-            cpu.run(&mut memory, 1).reason,
-            StopReason::UnsupportedInstruction
-        );
-        assert_eq!(cpu, before);
-        assert_eq!(read(&memory, OUTPUT, 8), [0x55; 8]);
-    }
+    let (mut cpu, mut memory) = load(&code);
+    memory
+        .write(u64::from(INPUT), &f64::NAN.to_le_bytes())
+        .unwrap();
+    memory.write(u64::from(OUTPUT), &[0x55; 8]).unwrap();
+    assert_eq!(cpu.run(&mut memory, 1).instructions, 1);
+    let before = cpu;
+    assert_eq!(
+        cpu.run(&mut memory, 1).reason,
+        StopReason::UnsupportedInstruction
+    );
+    assert_eq!(cpu, before);
+    assert_eq!(read(&memory, OUTPUT, 8), [0x55; 8]);
 }
 
 #[test]
