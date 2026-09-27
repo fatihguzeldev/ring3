@@ -280,6 +280,8 @@ pub(super) struct Graphics {
     scene_open: bool,
     viewport: Option<Viewport>,
     material: Option<[u8; 68]>,
+    lighting_enabled: Option<bool>,
+    ambient_color: u32,
     lights: BTreeMap<u32, LightState>,
     transforms: BTreeMap<u32, [u32; 16]>,
     front: Option<Frame>,
@@ -920,6 +922,8 @@ impl Graphics {
         self.root_refs = self.root_refs.saturating_add(1);
         self.device_refs = 1;
         self.scene_open = false;
+        self.lighting_enabled = None;
+        self.ambient_color = 0;
         self.lights.clear();
         self.texture_stages = [0; 8];
         self.indices = None;
@@ -954,6 +958,8 @@ impl Graphics {
         self.scene_open = false;
         self.viewport = None;
         self.material = None;
+        self.lighting_enabled = None;
+        self.ambient_color = 0;
         self.lights.clear();
         self.transforms.clear();
         self.vertex_fvf = 0;
@@ -1095,6 +1101,8 @@ impl Graphics {
                     u8::try_from(args[2]).expect("validated alpha reference");
             }
             25 if (1..=8).contains(&args[2]) => self.alpha_test.function = args[2],
+            137 if args[2] <= 1 => self.lighting_enabled = Some(args[2] == 1),
+            139 => self.ambient_color = args[2],
             _ => return INVALID_CALL,
         }
         0
@@ -2058,6 +2066,29 @@ fn quantize_d16(value: f64) -> u16 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn lighting_and_ambient_render_states_accept_guest_values_and_reset() {
+        let mut graphics = Graphics {
+            device_refs: 1,
+            ..Graphics::default()
+        };
+        assert_eq!(graphics.set_render_state(&[DEVICE, 137, 0]), 0);
+        assert_eq!(graphics.lighting_enabled, Some(false));
+        assert_eq!(graphics.set_render_state(&[DEVICE, 139, 0x0030_3030]), 0);
+        assert_eq!(graphics.ambient_color, 0x0030_3030);
+        assert_eq!(graphics.set_render_state(&[DEVICE, 137, 2]), INVALID_CALL);
+        assert_eq!(graphics.lighting_enabled, Some(false));
+        assert_eq!(graphics.set_render_state(&[DEVICE, 137, 1]), 0);
+        assert_eq!(graphics.lighting_enabled, Some(true));
+        graphics.finish_device();
+        assert_eq!(graphics.lighting_enabled, None);
+        assert_eq!(graphics.ambient_color, 0);
+        assert_eq!(
+            graphics.set_render_state(&[DEVICE + 1, 139, 1]),
+            INVALID_CALL
+        );
+    }
 
     #[test]
     fn material_copy_survives_guest_changes_and_faults_until_device_close() {
