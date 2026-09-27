@@ -29,6 +29,8 @@ const ADAPTER_DESCRIPTION: &[u8] = b"Ring3 Virtual Display Adapter\0";
 const DEVICE_CAPS_SIZE: usize = 212;
 const CAPS2_CAN_RENDER_WINDOWED: u32 = 0x0008_0000;
 const DEVCAPS_DRAWPRIM_TLVERTEX: u32 = 0x0000_0400;
+// DISABLE, SELECTARG1, SELECTARG2, MODULATE, and MODULATE2X.
+const SUPPORTED_TEXTURE_OP_CAPS: u32 = 0x1f;
 const MAX_PIXELS: u64 = 1_048_576;
 const MAX_RECTS: u32 = 64;
 const TEXTURE_TABLE: u32 = OBJECT_BASE + 0x400;
@@ -763,6 +765,9 @@ impl Graphics {
         caps[40..44].copy_from_slice(&0xff_u32.to_le_bytes());
         caps[44..48].copy_from_slice(&0x33_u32.to_le_bytes());
         caps[48..52].copy_from_slice(&0x33_u32.to_le_bytes());
+        caps[144..148].copy_from_slice(&SUPPORTED_TEXTURE_OP_CAPS.to_le_bytes());
+        caps[148..152].copy_from_slice(&2_u32.to_le_bytes());
+        caps[152..156].copy_from_slice(&2_u32.to_le_bytes());
         caps[180..184].copy_from_slice(&primitives::MAX_PRIMITIVES.to_le_bytes());
         caps[188..192].copy_from_slice(&1_u32.to_le_bytes());
         caps[192..196].copy_from_slice(&primitives::MAX_STRIDE.to_le_bytes());

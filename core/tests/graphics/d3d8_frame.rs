@@ -1222,7 +1222,11 @@ fn device_caps_report_only_the_owned_windowed_device() {
     assert_eq!(u32::from_le_bytes(caps[40..44].try_into().unwrap()), 0xff);
     assert_eq!(u32::from_le_bytes(caps[44..48].try_into().unwrap()), 0x33);
     assert_eq!(u32::from_le_bytes(caps[48..52].try_into().unwrap()), 0x33);
-    assert!(caps[52..180].iter().all(|byte| *byte == 0));
+    assert!(caps[52..144].iter().all(|byte| *byte == 0));
+    assert_eq!(u32::from_le_bytes(caps[144..148].try_into().unwrap()), 0x1f);
+    assert_eq!(u32::from_le_bytes(caps[148..152].try_into().unwrap()), 2);
+    assert_eq!(u32::from_le_bytes(caps[152..156].try_into().unwrap()), 2);
+    assert!(caps[156..180].iter().all(|byte| *byte == 0));
     assert_eq!(u32::from_le_bytes(caps[180..184].try_into().unwrap()), 4096);
     assert!(caps[184..188].iter().all(|byte| *byte == 0));
     assert_eq!(u32::from_le_bytes(caps[188..192].try_into().unwrap()), 1);
