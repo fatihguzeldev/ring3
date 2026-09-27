@@ -773,6 +773,7 @@ impl Graphics {
         for offset in [88, 92, 100, 104] {
             caps[offset..offset + 4].copy_from_slice(&1024_u32.to_le_bytes());
         }
+        caps[140..144].copy_from_slice(&2_u32.to_le_bytes());
         caps[144..148].copy_from_slice(&SUPPORTED_TEXTURE_OP_CAPS.to_le_bytes());
         caps[148..152].copy_from_slice(&2_u32.to_le_bytes());
         caps[152..156].copy_from_slice(&2_u32.to_le_bytes());
