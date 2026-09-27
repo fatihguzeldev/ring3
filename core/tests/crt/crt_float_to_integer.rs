@@ -163,6 +163,26 @@ fn helper_truncation_ignores_pc_rc_and_preserves_deeper_stack_values() {
 }
 
 #[test]
+fn masked_indefinite_nan_converts_to_integer_indefinite_and_pops() {
+    let mut p = process();
+    push(&mut p, 0xfff8_0000_0000_0000);
+    prepare(&mut p);
+    let run = p.run(1);
+    assert_eq!(run.api_calls, 1);
+    assert_eq!(integer(&p), 0x8000_0000_0000_0000);
+    p.cpu.eip = 0x0040_1006;
+    assert_eq!(p.run(1).instructions, 1);
+    assert_eq!(p.cpu.register(Register32::Eax) & 0x3f, 1);
+    prepare(&mut p);
+    let before = p.cpu;
+    assert_eq!(
+        p.run(1).reason,
+        ProcessStop::UnsupportedApi { address: API }
+    );
+    assert_eq!(p.cpu, before);
+}
+
+#[test]
 fn invalid_ranges_masks_and_frames_preserve_the_unconsumed_input() {
     for input in [
         0x43e0_0000_0000_0000_u64,

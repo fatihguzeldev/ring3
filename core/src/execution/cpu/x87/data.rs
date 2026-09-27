@@ -507,6 +507,12 @@ impl Cpu32 {
             return None;
         }
         let value = self.x87_stack.value().ok()?;
+        if value.is_nan() {
+            self.x87_stack.rounded(false, false);
+            self.x87_stack.status |= 1;
+            self.x87_stack.pop();
+            return Some(i64::MIN);
+        }
         // the positive i64 limit rounds to 2^63 in binary64 and must stay exclusive.
         if !(-9_223_372_036_854_775_808.0..9_223_372_036_854_775_808.0).contains(&value) {
             return None;
