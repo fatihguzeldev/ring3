@@ -1,5 +1,6 @@
 import type { Snapshot, WorkerInput, WorkerOutput } from "./types.js";
 import { KeyboardState, scanCode } from "./keyboard.js";
+import { pointerDelta } from "./pointer.js";
 
 function element<T extends HTMLElement>(id: string): T {
   const value = document.getElementById(id);
@@ -11,6 +12,7 @@ const context = canvas.getContext("2d");
 const start = element<HTMLButtonElement>("start");
 const pause = element<HTMLButtonElement>("pause");
 const resume = element<HTMLButtonElement>("resume");
+const mouseLock = element<HTMLButtonElement>("mouse-lock");
 const stop = element<HTMLButtonElement>("stop");
 const state = element("state");
 const error = element("error");
@@ -36,6 +38,10 @@ function releaseKeyboard(): void {
   if (keys) send({ type: "keyboard", keys });
 }
 
+function unlockPointer(): void {
+  if (document.pointerLockElement === canvas) document.exitPointerLock();
+}
+
 function releasePointer(): void {
   if (pointerButtons !== 0) {
     pointerButtons = 0;
@@ -49,18 +55,26 @@ function buttonBit(button: number): number {
 }
 
 canvas.onpointerenter = (event): void => {
-  if (event.pointerType === "mouse") lastPointer = { x: event.clientX, y: event.clientY };
+  if (event.pointerType === "mouse" && document.pointerLockElement !== canvas)
+    lastPointer = { x: event.clientX, y: event.clientY };
 };
 canvas.onpointermove = (event): void => {
   if (event.pointerType !== "mouse") return;
+  const locked = document.pointerLockElement === canvas;
   const previous = lastPointer;
-  lastPointer = { x: event.clientX, y: event.clientY };
-  if (!previous || !worker || pause.disabled) return;
+  lastPointer = locked ? undefined : { x: event.clientX, y: event.clientY };
+  if (!worker || pause.disabled) return;
   const bounds = canvas.getBoundingClientRect();
-  if (bounds.width === 0 || bounds.height === 0) return;
-  const x = Math.round(((event.clientX - previous.x) * canvas.width) / bounds.width);
-  const y = Math.round(((event.clientY - previous.y) * canvas.height) / bounds.height);
-  if (x !== 0 || y !== 0) sendMouse(x, y);
+  const delta = pointerDelta(
+    event,
+    previous,
+    locked,
+    canvas.width,
+    canvas.height,
+    bounds.width,
+    bounds.height,
+  );
+  if (delta) sendMouse(...delta);
 };
 canvas.onpointerleave = (): void => {
   if (pointerButtons === 0) lastPointer = undefined;
@@ -91,6 +105,30 @@ canvas.onpointercancel = (event): void => {
 canvas.oncontextmenu = (event): void => {
   if (worker) event.preventDefault();
 };
+document.addEventListener("pointerlockchange", () => {
+  lastPointer = undefined;
+  mouseLock.textContent = document.pointerLockElement === canvas ? "release mouse" : "lock mouse";
+  if (document.pointerLockElement !== canvas) {
+    releasePointer();
+    releaseKeyboard();
+  }
+});
+mouseLock.onclick = (): void => {
+  if (document.pointerLockElement === canvas) {
+    unlockPointer();
+    return;
+  }
+  canvas.focus();
+  const blocked = (): void => {
+    error.textContent = "mouse lock was blocked by the browser.";
+    error.hidden = false;
+  };
+  try {
+    void Promise.resolve(canvas.requestPointerLock()).catch(blocked);
+  } catch {
+    blocked();
+  }
+};
 canvas.onwheel = (event): void => {
   if (!worker || pause.disabled || document.activeElement !== canvas || event.deltaY === 0) return;
   sendMouse(0, 0, Math.sign(-event.deltaY));
@@ -110,6 +148,7 @@ canvas.onkeyup = (event): void => {
 };
 canvas.addEventListener("blur", releaseKeyboard);
 window.addEventListener("blur", () => {
+  unlockPointer();
   releasePointer();
   releaseKeyboard();
 });
@@ -147,6 +186,7 @@ function renderWindows(snapshot: Snapshot): void {
 }
 
 function failed(message: string): void {
+  unlockPointer();
   releasePointer();
   releaseKeyboard();
   state.textContent = "execution stopped";
@@ -154,6 +194,7 @@ function failed(message: string): void {
   error.hidden = false;
   pause.disabled = true;
   resume.disabled = true;
+  mouseLock.disabled = true;
   worker?.terminate();
   worker = undefined;
   start.disabled = false;
@@ -201,8 +242,10 @@ function receive(message: WorkerOutput): void {
     `${snapshot.reason}\nEIP: 0x${snapshot.eip.toString(16).padStart(8, "0")}\nCPU: ${snapshot.instructions} · API: ${snapshot.apiCalls}\nexecution: browser worker / webassembly`;
   pause.disabled = paused || finished || snapshot.state === "ready";
   resume.disabled = !paused || finished;
+  mouseLock.disabled = paused || finished || snapshot.state === "ready";
   renderWindows(snapshot);
   if (finished) {
+    unlockPointer();
     releaseKeyboard();
     windows.hidden = true;
     start.disabled = false;
@@ -210,6 +253,7 @@ function receive(message: WorkerOutput): void {
 }
 
 start.onclick = (): void => {
+  unlockPointer();
   releasePointer();
   releaseKeyboard();
   worker?.terminate();
@@ -238,6 +282,7 @@ start.onclick = (): void => {
   stop.disabled = false;
   pause.disabled = true;
   resume.disabled = true;
+  mouseLock.disabled = true;
   const current = new Worker(new URL("./worker.js", import.meta.url), { type: "module" });
   worker = current;
   canvas.focus();
@@ -250,6 +295,7 @@ start.onclick = (): void => {
   send({ type: "start", token });
 };
 pause.onclick = (): void => {
+  unlockPointer();
   releasePointer();
   releaseKeyboard();
   send({ type: "pause" });
@@ -259,6 +305,7 @@ resume.onclick = (): void => {
   send({ type: "resume" });
 };
 stop.onclick = (): void => {
+  unlockPointer();
   releasePointer();
   releaseKeyboard();
   worker?.terminate();
@@ -266,11 +313,13 @@ stop.onclick = (): void => {
   start.disabled = false;
   pause.disabled = true;
   resume.disabled = true;
+  mouseLock.disabled = true;
   stop.disabled = true;
   windows.hidden = true;
   state.textContent = "stopped";
 };
 window.addEventListener("pagehide", (): void => {
+  unlockPointer();
   releasePointer();
   releaseKeyboard();
   worker?.terminate();
