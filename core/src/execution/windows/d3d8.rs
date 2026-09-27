@@ -273,6 +273,7 @@ pub(super) struct Graphics {
     depth_surface_refs: u32,
     z_enabled: bool,
     depth_policy: DepthPolicy,
+    alpha_test: AlphaTest,
     scene_open: bool,
     viewport: Option<Viewport>,
     material: Option<[u8; 68]>,
@@ -287,6 +288,7 @@ pub(super) struct Graphics {
     texture_stages: [u32; 8],
     color_arg0: [u32; 8],
     color_stages: [color::Stage; 8],
+    alpha_stages: [color::Stage; 8],
     vertex_fvf: u32,
 }
 
@@ -294,6 +296,42 @@ pub(super) struct Graphics {
 struct DepthPolicy {
     write_enabled: bool,
     function: u32,
+}
+
+#[derive(Clone, Copy)]
+struct AlphaTest {
+    enabled: bool,
+    reference: u8,
+    function: u32,
+}
+
+impl Default for AlphaTest {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            reference: 0,
+            function: 8,
+        }
+    }
+}
+
+impl AlphaTest {
+    fn passes(self, alpha: u8) -> bool {
+        if !self.enabled {
+            return true;
+        }
+        match self.function {
+            1 => false,
+            2 => alpha < self.reference,
+            3 => alpha == self.reference,
+            4 => alpha <= self.reference,
+            5 => alpha > self.reference,
+            6 => alpha != self.reference,
+            7 => alpha >= self.reference,
+            8 => true,
+            _ => unreachable!("validated alpha comparison"),
+        }
+    }
 }
 
 struct LightState {
@@ -851,6 +889,8 @@ impl Graphics {
         self.stream = None;
         self.color_arg0 = [1; 8];
         self.color_stages = color::Stage::defaults();
+        self.alpha_stages = color::Stage::defaults();
+        self.alpha_test = AlphaTest::default();
         self.depth = (enable_depth == 1).then(|| vec![u16::MAX; (width * height) as usize]);
         self.depth_surface_refs = 0;
         self.z_enabled = enable_depth == 1;
@@ -884,6 +924,8 @@ impl Graphics {
         self.stream = None;
         self.color_arg0 = [1; 8];
         self.color_stages = color::Stage::defaults();
+        self.alpha_stages = color::Stage::defaults();
+        self.alpha_test = AlphaTest::default();
         self.root_refs = self.root_refs.saturating_sub(1);
     }
 
@@ -1004,7 +1046,13 @@ impl Graphics {
         match args[1] {
             7 if args[2] <= 1 => self.z_enabled = args[2] == 1,
             14 if args[2] <= 1 => self.depth_policy.write_enabled = args[2] == 1,
+            15 if args[2] <= 1 => self.alpha_test.enabled = args[2] == 1,
             23 if (1..=8).contains(&args[2]) => self.depth_policy.function = args[2],
+            24 if args[2] <= 255 => {
+                self.alpha_test.reference =
+                    u8::try_from(args[2]).expect("validated alpha reference");
+            }
+            25 if (1..=8).contains(&args[2]) => self.alpha_test.function = args[2],
             _ => return INVALID_CALL,
         }
         0
@@ -1050,6 +1098,10 @@ impl Graphics {
         }
         if kind == 26 && value <= 2 {
             self.color_arg0[index] = value;
+        } else if (4..=6).contains(&kind) {
+            if !self.alpha_stages[index].set(index, kind - 3, value) {
+                return INVALID_CALL;
+            }
         } else if !self.color_stages[index].set(index, kind, value) {
             return INVALID_CALL;
         }
@@ -1070,6 +1122,11 @@ impl Graphics {
         }
         let value = if kind == 26 {
             self.color_arg0[index]
+        } else if (4..=6).contains(&kind) {
+            let Some(value) = self.alpha_stages[index].get(kind - 3) else {
+                return Ok(INVALID_CALL);
+            };
+            value
         } else if let Some(value) = self.color_stages[index].get(kind) {
             value
         } else {
@@ -1350,6 +1407,7 @@ impl Graphics {
             self.back.as_mut(),
             self.depth.as_deref_mut().filter(|_| self.z_enabled),
             self.depth_policy,
+            self.alpha_test,
             self.viewport,
             self.vertex_fvf,
             args,

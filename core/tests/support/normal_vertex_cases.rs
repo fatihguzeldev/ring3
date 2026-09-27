@@ -184,6 +184,63 @@ pub fn equivalent_diffuse_and_textured_pixels() {
     }
 }
 
+pub fn texture_alpha_test_preserves_background_and_depth() {
+    let (mut process, device, vertex) = setup(0x142, 24, false, 0);
+    assert_eq!(
+        invoke(&mut process, device, 20, &[2, 2, 1, 0, 21, 1, OUTPUT]),
+        0
+    );
+    let texture = read(&process, OUTPUT);
+    write(
+        &mut process,
+        texture + 4096,
+        &[0x00ff_0000, 0xff00_ff00, 0xff00_00ff, 0xffff_ffff],
+    );
+    assert_eq!(invoke(&mut process, device, 61, &[0, texture]), 0);
+    assert_eq!(invoke(&mut process, device, 63, &[0, 4, 2]), 0);
+    assert_eq!(invoke(&mut process, device, 63, &[0, 5, 2]), 0);
+    assert_eq!(invoke(&mut process, device, 50, &[15, 1]), 0);
+    assert_eq!(invoke(&mut process, device, 50, &[24, 0]), 0);
+    assert_eq!(invoke(&mut process, device, 50, &[25, 5]), 0);
+    assert_eq!(draw(&mut process, device), 0);
+
+    assert_eq!(invoke(&mut process, device, 50, &[15, 0]), 0);
+    assert_eq!(invoke(&mut process, device, 61, &[0, 0]), 0);
+    for index in 2..6 {
+        write(
+            &mut process,
+            vertex + 4096 + index * 24 + 8,
+            &[0.75_f32.to_bits()],
+        );
+        write(
+            &mut process,
+            vertex + 4096 + index * 24 + 12,
+            &[0xffff_ffff],
+        );
+    }
+    assert_eq!(draw(&mut process, device), 0);
+    let pixels = frame(&mut process, device);
+    assert_eq!(&pixels[..4], &[255, 255, 255, 255]);
+    assert_eq!(&pixels[8..12], &[0, 255, 0, 255]);
+    assert_eq!(&pixels[32..36], &[0, 0, 255, 255]);
+}
+
+pub fn x8_texture_passes_alpha_test() {
+    let (mut process, device, _) = setup(0x142, 24, false, 0);
+    assert_eq!(
+        invoke(&mut process, device, 20, &[2, 2, 1, 0, 22, 1, OUTPUT]),
+        0
+    );
+    let texture = read(&process, OUTPUT);
+    write(&mut process, texture + 4096, &[0x00ff_0000; 4]);
+    assert_eq!(invoke(&mut process, device, 61, &[0, texture]), 0);
+    assert_eq!(invoke(&mut process, device, 63, &[0, 4, 2]), 0);
+    assert_eq!(invoke(&mut process, device, 50, &[15, 1]), 0);
+    assert_eq!(invoke(&mut process, device, 50, &[25, 5]), 0);
+    assert_eq!(draw(&mut process, device), 0);
+    assert_eq!(&frame(&mut process, device)[..4], &[128, 0, 0, 255]);
+}
+
 pub fn rejects_short_records_and_nonfinite_inputs_atomically() {
     for bad_offset in [0, 4, 8, 28, 32] {
         let (mut process, device, vertex) = setup(0x152, 36, false, 0);

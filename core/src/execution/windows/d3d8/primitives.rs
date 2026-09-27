@@ -1,4 +1,6 @@
-use super::{DepthPolicy, Frame, Graphics, IDENTITY_MATRIX, INVALID_CALL, Viewport, quantize_d16};
+use super::{
+    AlphaTest, DepthPolicy, Frame, Graphics, IDENTITY_MATRIX, INVALID_CALL, Viewport, quantize_d16,
+};
 use crate::execution::{GuestMemory, MemoryError};
 use std::collections::BTreeMap;
 
@@ -14,7 +16,7 @@ struct Vertex {
     x: f64,
     y: f64,
     z: f64,
-    color: [u8; 3],
+    color: [u8; 4],
     inv_w: f64,
     uv_over_w: [[f64; 2]; 2],
 }
@@ -31,7 +33,7 @@ struct Bounds {
 #[derive(Clone, Copy)]
 struct ClipVertex {
     position: [f64; 4],
-    color: [f64; 3],
+    color: [f64; 4],
     uv: [[f64; 2]; 2],
 }
 
@@ -52,12 +54,13 @@ impl ClipVertex {
 struct SampledTexture {
     width: u32,
     height: u32,
+    format: u32,
     bgra: Vec<u8>,
 }
 
 impl SampledTexture {
     #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
-    fn sample(&self, uv: [f64; 2]) -> [u8; 3] {
+    fn sample(&self, uv: [f64; 2]) -> [u8; 4] {
         let x = ((uv[0].rem_euclid(1.0) * f64::from(self.width)).floor() as usize)
             .min(self.width as usize - 1);
         let y = ((uv[1].rem_euclid(1.0) * f64::from(self.height)).floor() as usize)
@@ -67,6 +70,11 @@ impl SampledTexture {
             self.bgra[offset + 2],
             self.bgra[offset + 1],
             self.bgra[offset],
+            if self.format == 22 {
+                255
+            } else {
+                self.bgra[offset + 3]
+            },
         ]
     }
 }
@@ -99,6 +107,7 @@ pub(super) fn vertex_layout(fvf: u32) -> Option<VertexLayout> {
 
 struct SampledStage {
     state: super::color::Stage,
+    alpha_state: super::color::Stage,
     texture: Option<SampledTexture>,
 }
 
@@ -109,6 +118,7 @@ fn sampled_stages(
 ) -> Result<Option<Vec<SampledStage>>, MemoryError> {
     let mut stages = Vec::new();
     for (index, state) in graphics.color_stages.iter().copied().enumerate() {
+        let alpha_state = graphics.alpha_stages[index];
         let address = graphics.texture_stages[index];
         if state.operation == 1 || (state.argument1 == 2 && address == 0) {
             break;
@@ -116,7 +126,9 @@ fn sampled_stages(
         if index >= 2 {
             return Ok(None);
         }
-        let texture = if state.uses_texture() {
+        let texture = if state.uses_texture()
+            || (graphics.alpha_test.enabled && alpha_state.uses_texture())
+        {
             if state.coordinate as usize >= coordinates {
                 return Ok(None);
             }
@@ -129,12 +141,17 @@ fn sampled_stages(
             Some(SampledTexture {
                 width: level.width,
                 height: level.height,
+                format: texture.format,
                 bgra,
             })
         } else {
             None
         };
-        stages.push(SampledStage { state, texture });
+        stages.push(SampledStage {
+            state,
+            alpha_state,
+            texture,
+        });
     }
     Ok(Some(stages))
 }
@@ -288,11 +305,12 @@ pub(super) fn draw_indexed(
             *key,
             ClipVertex {
                 position,
-                color: layout.color.map_or([255.0; 3], |offset| {
+                color: layout.color.map_or([255.0; 4], |offset| {
                     [
                         f64::from(bytes[offset + 2]),
                         f64::from(bytes[offset + 1]),
                         f64::from(bytes[offset]),
+                        f64::from(bytes[offset + 3]),
                     ]
                 }),
                 uv: uv.map(|set| set.map(f64::from)),
@@ -335,6 +353,7 @@ pub(super) fn draw_indexed(
             frame,
             depth.as_deref_mut(),
             graphics.depth_policy,
+            graphics.alpha_test,
             [a, b, c],
             bounds,
             &stages,
@@ -418,10 +437,15 @@ fn screen_vertex(clip: ClipVertex, viewport: Viewport) -> Option<Vertex> {
     })
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "owned raster state and guest draw input"
+)]
 pub(super) fn draw_up(
     frame: Option<&mut Frame>,
     mut depth: Option<&mut [u16]>,
     depth_policy: DepthPolicy,
+    alpha_test: AlphaTest,
     viewport: Option<Viewport>,
     fvf: u32,
     args: &[u32],
@@ -481,7 +505,7 @@ pub(super) fn draw_up(
             x: f64::from(x),
             y: f64::from(y),
             z: f64::from(z),
-            color: [bytes[18], bytes[17], bytes[16]],
+            color: [bytes[18], bytes[17], bytes[16], bytes[19]],
             inv_w: 1.0,
             uv_over_w: [[0.0; 2]; 2],
         });
@@ -511,6 +535,7 @@ pub(super) fn draw_up(
                 frame,
                 depth.as_deref_mut(),
                 depth_policy,
+                alpha_test,
                 [
                     vertices[indices[0]],
                     vertices[indices[1]],
@@ -568,6 +593,7 @@ fn raster_triangle(
     frame: &mut Frame,
     mut depth: Option<&mut [u16]>,
     depth_policy: DepthPolicy,
+    alpha_test: AlphaTest,
     [a, b, c]: [Vertex; 3],
     bounds: Bounds,
     stages: &[SampledStage],
@@ -583,24 +609,23 @@ fn raster_triangle(
                 continue;
             }
             let pixel_index = y * frame.width as usize + x;
-            if let Some(depth) = depth.as_deref_mut() {
-                let z = quantize_d16((wa * a.z + wb * b.z + wc * c.z).clamp(0.0, 1.0));
-                if !depth_policy.passes(z, depth[pixel_index]) {
-                    continue;
-                }
-                if depth_policy.write_enabled {
-                    depth[pixel_index] = z;
-                }
+            let z = quantize_d16((wa * a.z + wb * b.z + wc * c.z).clamp(0.0, 1.0));
+            if depth
+                .as_deref()
+                .is_some_and(|depth| !depth_policy.passes(z, depth[pixel_index]))
+            {
+                continue;
             }
             let offset = pixel_index * 4;
-            let diffuse = std::array::from_fn(|channel| {
+            let diffuse: [f64; 4] = std::array::from_fn(|channel| {
                 wa * f64::from(a.color[channel])
                     + wb * f64::from(b.color[channel])
                     + wc * f64::from(c.color[channel])
             });
-            let mut current = diffuse;
+            let mut current = [diffuse[0], diffuse[1], diffuse[2]];
+            let mut alpha = diffuse[3];
             for stage in stages {
-                let sampled = stage.texture.as_ref().map_or([255; 3], |texture| {
+                let sampled = stage.texture.as_ref().map_or([255; 4], |texture| {
                     let inv_w = wa * a.inv_w + wb * b.inv_w + wc * c.inv_w;
                     let set = stage.state.coordinate as usize;
                     let uv = std::array::from_fn(|i| {
@@ -611,7 +636,22 @@ fn raster_triangle(
                     });
                     texture.sample(uv)
                 });
-                current = stage.state.combine(diffuse, current, sampled);
+                current = stage.state.combine(
+                    [diffuse[0], diffuse[1], diffuse[2]],
+                    current,
+                    [sampled[0], sampled[1], sampled[2]],
+                );
+                alpha = stage
+                    .alpha_state
+                    .combine_alpha(diffuse[3], alpha, sampled[3]);
+            }
+            if !alpha_test.passes(alpha.round().clamp(0.0, 255.0) as u8) {
+                continue;
+            }
+            if let Some(depth) = depth.as_deref_mut()
+                && depth_policy.write_enabled
+            {
+                depth[pixel_index] = z;
             }
             for (channel, value) in current.into_iter().enumerate() {
                 frame.rgba[offset + channel] = value.round().clamp(0.0, 255.0) as u8;

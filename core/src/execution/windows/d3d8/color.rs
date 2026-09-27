@@ -63,4 +63,24 @@ impl Stage {
             .clamp(0.0, 255.0)
         })
     }
+
+    pub fn combine_alpha(self, diffuse: f64, current: f64, texture: u8) -> f64 {
+        let argument = |kind| match kind {
+            0 => diffuse,
+            1 => current,
+            2 => f64::from(texture),
+            _ => unreachable!("validated alpha argument"),
+        };
+        let a = argument(self.argument1);
+        let b = argument(self.argument2);
+        match self.operation {
+            1 => current,
+            2 => a,
+            3 => b,
+            4 => a * b / 255.0,
+            5 => 2.0 * a * b / 255.0,
+            _ => unreachable!("validated active alpha operation"),
+        }
+        .clamp(0.0, 255.0)
+    }
 }

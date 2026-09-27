@@ -11,6 +11,16 @@ fn normal_layout_matches_diffuse_and_textured_pixels() {
 }
 
 #[test]
+fn texture_alpha_test_discards_transparent_pixels_before_depth_write() {
+    normal_vertex_cases::texture_alpha_test_preserves_background_and_depth();
+}
+
+#[test]
+fn x8_texture_ignores_unused_alpha_bits_during_alpha_test() {
+    normal_vertex_cases::x8_texture_passes_alpha_test();
+}
+
+#[test]
 fn invalid_normal_records_preserve_color_and_depth() {
     normal_vertex_cases::rejects_short_records_and_nonfinite_inputs_atomically();
 }
