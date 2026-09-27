@@ -12,6 +12,19 @@ fn extended_product_range(code: Code, result: f64) -> bool {
     }
 }
 
+fn masked_nan_product(code: Code, left: f64, right: f64) -> Option<u64> {
+    if code != Code::Fmul_st0_sti {
+        return None;
+    }
+    if left.is_nan() && right.is_finite() {
+        Some(left.to_bits())
+    } else if right.is_nan() && left.is_finite() {
+        Some(right.to_bits())
+    } else {
+        None
+    }
+}
+
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub(crate) struct Stack {
     values: [u64; 8],
@@ -509,6 +522,10 @@ impl Cpu32 {
         Some(integer)
     }
 
+    #[expect(
+        clippy::too_many_lines,
+        reason = "x87 arithmetic keeps its shared status update"
+    )]
     pub(in super::super) fn x87_arithmetic(
         &mut self,
         instruction: &Instruction,
@@ -579,6 +596,11 @@ impl Cpu32 {
             } else {
                 (top, source)
             };
+            if let Some(bits) = masked_nan_product(instruction.code(), left, right) {
+                self.x87_stack.rounded(false, false);
+                self.x87_stack.values[usize::from(self.x87_stack.top)] = bits;
+                return Ok(());
+            }
             let (mut result, exact_zero) = if multiply {
                 (left * right, left == 0.0 || right == 0.0)
             } else {
@@ -623,12 +645,18 @@ impl Cpu32 {
         left: f64,
         right: f64,
     ) -> Result<(), StopReason> {
-        if left == 0.0 || instruction.code() != Code::Fdiv_m32fp {
+        if !left.is_finite() || !matches!(instruction.code(), Code::Fdiv_m32fp | Code::Fidiv_m32int)
+        {
             return Err(StopReason::UnsupportedInstruction);
         }
         self.x87_stack.rounded(false, false);
-        self.x87_stack.status |= 0x04;
-        self.x87_stack.values[usize::from(self.x87_stack.top)] = (left / right).to_bits();
+        if left == 0.0 {
+            self.x87_stack.status |= 0x01;
+            self.x87_stack.values[usize::from(self.x87_stack.top)] = 0xfff8_0000_0000_0000;
+        } else {
+            self.x87_stack.status |= 0x04;
+            self.x87_stack.values[usize::from(self.x87_stack.top)] = (left / right).to_bits();
+        }
         Ok(())
     }
 
