@@ -1836,6 +1836,37 @@ fn colorarg0_texture_stage_state_round_trips_and_rejects_bad_requests() {
 }
 
 #[test]
+fn default_sampler_stage_states_round_trip_without_claiming_other_modes() {
+    let (mut process, _, device) = create();
+    let set = method(&process, device, 63);
+    let get = method(&process, device, 62);
+    for stage in [0, 1, 7] {
+        for (kind, default, unsupported) in
+            [(13, 1, 2), (14, 1, 3), (16, 1, 2), (17, 1, 2), (18, 0, 1)]
+        {
+            assert_eq!(
+                invoke(&mut process, set, &[device, stage, kind, default]),
+                0
+            );
+            assert_eq!(
+                invoke(&mut process, get, &[device, stage, kind, LEVEL_DESC]),
+                0
+            );
+            assert_eq!(read(&process, LEVEL_DESC), default);
+            assert_eq!(
+                invoke(&mut process, set, &[device, stage, kind, unsupported]),
+                0x8876_086c
+            );
+            assert_eq!(
+                invoke(&mut process, get, &[device, stage, kind, LEVEL_DESC]),
+                0
+            );
+            assert_eq!(read(&process, LEVEL_DESC), default);
+        }
+    }
+}
+
+#[test]
 fn validate_device_reports_one_untextured_pass_and_preserves_failed_outputs() {
     let (mut process, _, device) = create();
     let validate = method(&process, device, 64);

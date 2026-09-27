@@ -24,6 +24,8 @@ impl Stage {
             2 if value <= 2 => self.argument1 = value,
             3 if value <= 2 => self.argument2 = value,
             11 if value <= 7 => self.coordinate = value,
+            13 | 14 | 16 | 17 if value == 1 => {}
+            18 if value == 0 => {}
             _ => return false,
         }
         true
@@ -35,6 +37,8 @@ impl Stage {
             2 => Some(self.argument1),
             3 => Some(self.argument2),
             11 => Some(self.coordinate),
+            13 | 14 | 16 | 17 => Some(1),
+            18 => Some(0),
             _ => None,
         }
     }
