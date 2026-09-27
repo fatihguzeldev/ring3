@@ -12,9 +12,11 @@ const HIERARCHY: u32 = PAGE + 0x300;
 const ARRAY: u32 = PAGE + 0x400;
 const TARGET_BASE: u32 = PAGE + 0x500;
 const SOURCE_BASE: u32 = PAGE + 0x520;
+const UNRELATED_BASE: u32 = PAGE + 0x540;
 const TARGET_TYPE: u32 = PAGE + 0x600;
 const SOURCE_TYPE: u32 = PAGE + 0x640;
 const OTHER_TYPE: u32 = PAGE + 0x680;
+const MISSING_TYPE: u32 = PAGE + 0x6c0;
 
 fn put(process: &mut Process32, address: u32, words: &[u32]) {
     for (index, word) in words.iter().enumerate() {
@@ -96,6 +98,37 @@ fn rtti_offsets_adjust_from_source_subobject_to_target_subobject() {
     prepare(&mut process, source_object, TARGET_TYPE, 0);
     assert_eq!(process.run(1).api_calls, 1);
     assert_eq!(process.cpu.register(Register32::Eax), OBJECT + 8);
+}
+
+#[test]
+fn unrelated_unsupported_base_does_not_block_pointer_casts() {
+    let mut process = process();
+    put(&mut process, HIERARCHY + 8, &[3]);
+    put(&mut process, ARRAY + 8, &[UNRELATED_BASE]);
+    put(
+        &mut process,
+        UNRELATED_BASE,
+        &[OTHER_TYPE, 0, 16, u32::MAX, 0, 9],
+    );
+    process
+        .memory
+        .write(u64::from(MISSING_TYPE + 8), b".?AVMissing@@\0")
+        .unwrap();
+
+    prepare(&mut process, OBJECT, TARGET_TYPE, 0);
+    assert_eq!(process.run(1).api_calls, 1);
+    assert_eq!(process.cpu.register(Register32::Eax), OBJECT);
+
+    prepare(&mut process, OBJECT, MISSING_TYPE, 0);
+    assert_eq!(process.run(1).api_calls, 1);
+    assert_eq!(process.cpu.register(Register32::Eax), 0);
+
+    put(&mut process, TARGET_BASE + 20, &[9]);
+    prepare(&mut process, OBJECT, TARGET_TYPE, 0);
+    assert_eq!(
+        process.run(1).reason,
+        ProcessStop::UnsupportedApi { address: API }
+    );
 }
 
 #[test]

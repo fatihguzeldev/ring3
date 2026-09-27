@@ -46,14 +46,19 @@ pub(super) fn dynamic_cast(memory: &GuestMemory, args: &[u32]) -> Result<u32, Di
         let mut descriptor = [0; 6];
         guest::read_words(memory, descriptor_address, &mut descriptor)?;
         let [type_address, _, offset, virtual_base, _, base_attributes] = descriptor;
+        let name = type_name(memory, type_address)?;
+        let source_match = name == source_name;
+        let target_match = name == target_name;
+        if !source_match && !target_match {
+            continue;
+        }
         if virtual_base != u32::MAX || base_attributes & !0x40 != 0 {
             return Err(DispatchError::Unsupported);
         }
-        let name = type_name(memory, type_address)?;
-        if name == source_name && offset == object_offset {
+        if source_match && offset == object_offset {
             source_matches += 1;
         }
-        if name == target_name && target.replace(offset).is_some() {
+        if target_match && target.replace(offset).is_some() {
             ambiguous_target = true;
         }
     }
