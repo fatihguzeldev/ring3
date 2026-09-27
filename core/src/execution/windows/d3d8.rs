@@ -767,6 +767,12 @@ impl Graphics {
         caps[40..44].copy_from_slice(&0xff_u32.to_le_bytes());
         caps[44..48].copy_from_slice(&0x33_u32.to_le_bytes());
         caps[48..52].copy_from_slice(&0x33_u32.to_le_bytes());
+        caps[60..64].copy_from_slice(&0x5_u32.to_le_bytes());
+        caps[64..68].copy_from_slice(&0x0100_0100_u32.to_le_bytes());
+        caps[76..80].copy_from_slice(&1_u32.to_le_bytes());
+        for offset in [88, 92, 100, 104] {
+            caps[offset..offset + 4].copy_from_slice(&1024_u32.to_le_bytes());
+        }
         caps[144..148].copy_from_slice(&SUPPORTED_TEXTURE_OP_CAPS.to_le_bytes());
         caps[148..152].copy_from_slice(&2_u32.to_le_bytes());
         caps[152..156].copy_from_slice(&2_u32.to_le_bytes());

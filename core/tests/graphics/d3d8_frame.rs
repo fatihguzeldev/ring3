@@ -1222,7 +1222,23 @@ fn device_caps_report_only_the_owned_windowed_device() {
     assert_eq!(u32::from_le_bytes(caps[40..44].try_into().unwrap()), 0xff);
     assert_eq!(u32::from_le_bytes(caps[44..48].try_into().unwrap()), 0x33);
     assert_eq!(u32::from_le_bytes(caps[48..52].try_into().unwrap()), 0x33);
-    assert!(caps[52..144].iter().all(|byte| *byte == 0));
+    assert!(caps[52..60].iter().all(|byte| *byte == 0));
+    assert_eq!(u32::from_le_bytes(caps[60..64].try_into().unwrap()), 0x5);
+    assert_eq!(
+        u32::from_le_bytes(caps[64..68].try_into().unwrap()),
+        0x0100_0100
+    );
+    assert!(caps[68..76].iter().all(|byte| *byte == 0));
+    assert_eq!(u32::from_le_bytes(caps[76..80].try_into().unwrap()), 1);
+    assert!(caps[80..88].iter().all(|byte| *byte == 0));
+    for offset in [88, 92, 100, 104] {
+        assert_eq!(
+            u32::from_le_bytes(caps[offset..offset + 4].try_into().unwrap()),
+            1024
+        );
+    }
+    assert!(caps[96..100].iter().all(|byte| *byte == 0));
+    assert!(caps[108..144].iter().all(|byte| *byte == 0));
     assert_eq!(u32::from_le_bytes(caps[144..148].try_into().unwrap()), 0x1f);
     assert_eq!(u32::from_le_bytes(caps[148..152].try_into().unwrap()), 2);
     assert_eq!(u32::from_le_bytes(caps[152..156].try_into().unwrap()), 2);
