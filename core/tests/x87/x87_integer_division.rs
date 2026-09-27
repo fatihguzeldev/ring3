@@ -19,7 +19,7 @@ fn refuses_unchanged(cpu: &mut Cpu32, memory: &mut GuestMemory) {
 }
 
 #[test]
-fn zero_divisor_control_and_empty_stack_refuse_then_retry() {
+fn masked_zero_divisor_succeeds_while_control_and_empty_stack_refuse_then_retry() {
     for profile in [0x007f, 0x027f] {
         let (mut cpu, mut memory) = load(6.0, 0, SOURCE, false);
         cpu.set_x87_control_word(profile);
@@ -27,11 +27,13 @@ fn zero_divisor_control_and_empty_stack_refuse_then_retry() {
         cpu.eip += 6;
         refuses_unchanged(&mut cpu, &mut memory);
         cpu.eip = entry;
+        assert_eq!(cpu.run(&mut memory, 4).instructions, 4);
+        assert_eq!(cpu.register(Register32::Eax) & 0x3f, 4);
+        assert_eq!(result(&memory), f64::INFINITY.to_bits());
+
+        let (mut cpu, mut memory) = load(6.0, 3, SOURCE, false);
+        cpu.set_x87_control_word(profile);
         assert_eq!(cpu.run(&mut memory, 1).instructions, 1);
-        refuses_unchanged(&mut cpu, &mut memory);
-        memory
-            .write(u64::from(SOURCE), &3_i32.to_le_bytes())
-            .unwrap();
         for control in [
             0x047f, 0x087f, 0x0c7f, 0x017f, 0x037f, 0x067f, 0x0a7f, 0x0e7f, 0x027e,
         ] {
