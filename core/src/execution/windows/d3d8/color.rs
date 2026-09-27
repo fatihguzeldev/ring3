@@ -18,7 +18,7 @@ impl Stage {
 
     pub fn set(&mut self, index: usize, kind: u32, value: u32) -> bool {
         match kind {
-            1 if ((1..=5).contains(&value) || value == 7) && (index < 2 || value == 1) => {
+            1 if (1..=5).contains(&value) && (index < 2 || value == 1) => {
                 self.operation = value;
             }
             2 if value <= 2 => self.argument1 = value,
@@ -58,7 +58,6 @@ impl Stage {
                 3 => b[channel],
                 4 => a[channel] * b[channel] / 255.0,
                 5 => 2.0 * a[channel] * b[channel] / 255.0,
-                7 => a[channel] + b[channel],
                 _ => unreachable!("validated active color operation"),
             }
             .clamp(0.0, 255.0)
@@ -80,7 +79,6 @@ impl Stage {
             3 => b,
             4 => a * b / 255.0,
             5 => 2.0 * a * b / 255.0,
-            7 => a + b,
             _ => unreachable!("validated active alpha operation"),
         }
         .clamp(0.0, 255.0)

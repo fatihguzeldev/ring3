@@ -566,17 +566,6 @@ fn texture(process: &mut Process32, device: u32, width: u32, height: u32, pixels
 }
 
 pub fn two_texture_color_stages() {
-    let (mut p, d, vertex) = setup(0x152, 36, false, 0);
-    for index in 2..6 {
-        write(&mut p, vertex + 4096 + index * 36 + 24, &[0xff28_323c]);
-    }
-    let t = texture(&mut p, d, 2, 2, &[0xff0a_141e; 4]);
-    assert_eq!(invoke(&mut p, d, 61, &[0, t]), 0);
-    stage(&mut p, d, 0, 3, 0);
-    stage(&mut p, d, 0, 1, 7);
-    assert_eq!(draw(&mut p, d), 0);
-    assert_eq!(&frame(&mut p, d)[..4], &[50, 70, 90, 255]);
-
     for (fvf, stride, diffuse) in [
         (0x102, 20, 255),
         (0x112, 32, 255),
