@@ -352,10 +352,28 @@ fn single_precision_register_add_rounds_nearest_or_toward_zero() {
 }
 
 #[test]
+fn single_precision_indexed_add_accepts_self_and_second_slot() {
+    for (top, source, expected) in [(10_000.0_f64, None, 20_000.0_f64), (2.5, Some(1.25), 3.75)] {
+        let (mut cpu, mut memory) = load(top, source, 0xdc);
+        cpu.set_x87_control_word(0x007f);
+        let add_steps = 2 + u64::from(source.is_some());
+        assert_eq!(cpu.run(&mut memory, add_steps).instructions, add_steps);
+        let store_steps = 2 + u64::from(source.is_some());
+        assert_eq!(cpu.run(&mut memory, store_steps).instructions, store_steps);
+        assert_eq!(result(&memory), expected.to_bits());
+        if source.is_some() {
+            let mut bytes = [0; 8];
+            memory.read(u64::from(RESULT + 8), &mut bytes).unwrap();
+            assert_eq!(u64::from_le_bytes(bytes), top.to_bits());
+        }
+    }
+}
+
+#[test]
 fn single_precision_register_add_rejects_bad_operands_atomically() {
     for (top, source, opcode, control) in [
         (f64::MAX, f64::MAX, 0xd8, 0x0c7f),
-        (1.0, 2.0, 0xdc, 0x0c7f),
+        (f64::MAX, f64::MAX, 0xdc, 0x007f),
         (1.0, 2.0, 0xd8, 0x087f),
     ] {
         let (mut cpu, mut memory) = load(top, Some(source), opcode);
