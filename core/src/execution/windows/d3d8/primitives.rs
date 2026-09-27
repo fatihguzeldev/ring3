@@ -685,14 +685,25 @@ fn raster_triangle(
     bounds: Bounds,
     stages: &[SampledStage],
 ) {
+    let inclusive = [
+        top_left(b, c, bounds.area),
+        top_left(c, a, bounds.area),
+        top_left(a, b, bounds.area),
+    ];
     for y in bounds.top..bounds.bottom {
         for x in bounds.left..bounds.right {
-            let px = x as f64 + 0.5;
-            let py = y as f64 + 0.5;
+            let px = x as f64;
+            let py = y as f64;
             let wa = edge(b, c, px, py) / bounds.area;
             let wb = edge(c, a, px, py) / bounds.area;
             let wc = edge(a, b, px, py) / bounds.area;
-            if wa < 0.0 || wb < 0.0 || wc < 0.0 {
+            if wa < 0.0
+                || wb < 0.0
+                || wc < 0.0
+                || (wa == 0.0 && !inclusive[0])
+                || (wb == 0.0 && !inclusive[1])
+                || (wc == 0.0 && !inclusive[2])
+            {
                 continue;
             }
             let pixel_index = y * frame.width as usize + x;
@@ -760,6 +771,15 @@ fn raster_triangle(
             }
             frame.rgba[offset + 3] = 255;
         }
+    }
+}
+
+fn top_left(a: Vertex, b: Vertex, area: f64) -> bool {
+    let (a, b) = if area > 0.0 { (a, b) } else { (b, a) };
+    match b.y.total_cmp(&a.y) {
+        std::cmp::Ordering::Less => true,
+        std::cmp::Ordering::Equal => b.x > a.x,
+        std::cmp::Ordering::Greater => false,
     }
 }
 

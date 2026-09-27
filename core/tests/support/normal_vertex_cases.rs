@@ -172,7 +172,7 @@ pub fn equivalent_diffuse_and_textured_pixels() {
             assert_eq!(draw(&mut process, device), 0);
             let textured = frame(&mut process, device);
             assert_eq!(&textured[..4], &[128, 0, 0, 255]);
-            assert_eq!(&textured[8..12], &[0, 255, 0, 255]);
+            assert_eq!(&textured[12..16], &[0, 255, 0, 255]);
             assert_eq!(&textured[32..36], &[0, 0, 255, 255]);
             if let Some((expected_solid, expected_textured)) = &expected {
                 assert_eq!(&solid, expected_solid);
@@ -221,7 +221,7 @@ pub fn texture_alpha_test_preserves_background_and_depth() {
     assert_eq!(draw(&mut process, device), 0);
     let pixels = frame(&mut process, device);
     assert_eq!(&pixels[..4], &[255, 255, 255, 255]);
-    assert_eq!(&pixels[8..12], &[0, 255, 0, 255]);
+    assert_eq!(&pixels[12..16], &[0, 255, 0, 255]);
     assert_eq!(&pixels[32..36], &[0, 0, 255, 255]);
 }
 
@@ -265,7 +265,7 @@ pub fn source_alpha_blends_texture_over_existing_color() {
     assert_eq!(invoke(&mut process, device, 71, &[4, 1, 4, 1, 1]), 0);
     let pixels = frame(&mut process, device);
     assert_eq!(&pixels[..4], &[128, 255, 255, 255]);
-    assert_eq!(&pixels[8..12], &[192, 127, 127, 255]);
+    assert_eq!(&pixels[12..16], &[192, 127, 127, 255]);
     assert_eq!(&pixels[32..36], &[255, 0, 0, 255]);
 }
 
@@ -676,7 +676,7 @@ pub fn two_texture_color_stages() {
 }
 
 pub fn two_texture_perspective_and_clipping() {
-    for first_x in [-0.5_f32, -1.0] {
+    for (first_x, expected_red) in [(-0.5_f32, 40), (-1.0, 80)] {
         let (mut p, d, vertex) = setup(0x212, 40, false, 0);
         for (index, (x, y, z, u)) in [
             (first_x, 0.5_f32, 0.5_f32, 0_f32),
@@ -703,8 +703,8 @@ pub fn two_texture_perspective_and_clipping() {
         stage(&mut p, d, 0, 1, 3);
         stage(&mut p, d, 1, 1, 2);
         assert_eq!(draw(&mut p, d), 0);
-        // perspective-correct u is 15/29 or 25/41 here; affine u selects texel five.
-        assert_eq!(&frame(&mut p, d)[8..12], &[80, 0, 0, 255]);
+        // at integer pixel x=2, perspective u is 1/3 or 1/2; affine u is 1/2 or 2/3.
+        assert_eq!(&frame(&mut p, d)[8..12], &[expected_red, 0, 0, 255]);
     }
 }
 

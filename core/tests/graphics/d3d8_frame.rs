@@ -1373,6 +1373,49 @@ fn transformed_triangle_up_changes_the_presented_back_buffer() {
 }
 
 #[test]
+fn subpixel_triangle_covers_an_integer_pixel_center() {
+    let (mut process, _, device) = create();
+    let vertices = 0x0040_2b00;
+    let set_shader = method(&process, device, 76);
+    let clear = method(&process, device, 36);
+    let draw = method(&process, device, 72);
+    let present = method(&process, device, 15);
+    assert_eq!(invoke(&mut process, set_shader, &[device, 0x44]), 0);
+    write(
+        &mut process,
+        vertices,
+        &[
+            1.55_f32.to_bits(),
+            1.55_f32.to_bits(),
+            0,
+            1_f32.to_bits(),
+            0xffff_0000,
+            2.45_f32.to_bits(),
+            1.55_f32.to_bits(),
+            0,
+            1_f32.to_bits(),
+            0xffff_0000,
+            2.0_f32.to_bits(),
+            2.45_f32.to_bits(),
+            0,
+            1_f32.to_bits(),
+            0xffff_0000,
+        ],
+    );
+    assert_eq!(
+        invoke(&mut process, clear, &[device, 0, 0, 1, 0xff00_0000, 0, 0]),
+        0
+    );
+    assert_eq!(invoke(&mut process, draw, &[device, 4, 1, vertices, 20]), 0);
+    assert_eq!(invoke(&mut process, present, &[device, 0, 0, 0, 0]), 0);
+    let frame = process.take_frame().unwrap();
+    assert_eq!(
+        &frame.rgba[(2 * frame.width as usize + 2) * 4..][..4],
+        &[255, 0, 0, 255]
+    );
+}
+
+#[test]
 fn transformed_triangle_up_culls_counterclockwise_winding() {
     let (mut process, _, device) = create();
     let vertices = 0x0040_2b00;
@@ -3407,7 +3450,7 @@ fn indexed_xyz_triangle_rasterizes_bound_guest_buffers() {
     assert_eq!(invoke(&mut process, present, &[device, 0, 0, 0, 0]), 0);
     let frame = process.take_frame().unwrap();
     assert_eq!(&frame.rgba[0..4], &[255, 0, 0, 255]);
-    assert_eq!(&frame.rgba[2 * 4..3 * 4], &[0, 255, 0, 255]);
+    assert_eq!(&frame.rgba[3 * 4..4 * 4], &[0, 255, 0, 255]);
     assert_eq!(&frame.rgba[2 * 4 * 4..(2 * 4 + 1) * 4], &[0, 0, 255, 255]);
 }
 
