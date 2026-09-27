@@ -46,6 +46,9 @@ fn cosine_accepts_the_tutorial_angle_beyond_one_turn() {
         (0x401c_0000_0000_0000, 0x3fe8_1ff7_9ed9_2017),
         (0x4020_0000_0000_0000, 0xbfc2_9fbe_bf63_2f94),
         (0x402e_0000_0000_0000, 0xbfe8_4f5d_069c_a4f3),
+        (0xc03f_62a1_8000_0000, 0x3fef_fc27_09af_f19a),
+        (0x4031_0000_0000_0000, 0xbfd1_9c46_b07f_58e7),
+        (0x4040_0000_0000_0000, 0x3fea_b1f5_305d_e8e5),
     ] {
         for control in [0x007f, 0x027f] {
             let mut code = vec![0xdd, 0x05];
@@ -80,7 +83,7 @@ fn cosine_rejects_empty_out_of_range_and_unmasked_controls_atomically() {
     );
     assert_eq!(cpu, before);
 
-    for (angle, control) in [(17.0, 0x007f), (0.5, 0x0c7f)] {
+    for (angle, control) in [(33.0, 0x007f), (0.5, 0x0c7f)] {
         let (mut cpu, mut memory) = load(angle, control);
         assert_eq!(cpu.run(&mut memory, 1).instructions, 1);
         let before = cpu;

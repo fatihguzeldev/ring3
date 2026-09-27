@@ -176,7 +176,7 @@ pub fn full_turn() {
             }
         }
         for opcode in [0xfe, 0xff] {
-            let outside = f64::from_bits(16.0_f64.to_bits() + 1);
+            let outside = f64::from_bits(32.0_f64.to_bits() + 1);
             for angle in [outside, -outside] {
                 let (mut cpu, mut memory) = setup(angle, opcode, control);
                 assert_eq!(cpu.run(&mut memory, 1).instructions, 1);
