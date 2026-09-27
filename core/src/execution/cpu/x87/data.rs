@@ -122,7 +122,7 @@ impl Cpu32 {
         }
         let angle = self.x87_stack.value()?;
         // keep host reduction bounded until wider x87 reduction is modeled.
-        if !(angle == 0.0 || angle.is_normal()) || angle.abs() > 32.0 {
+        if !(angle == 0.0 || angle.is_normal()) || angle.abs() > 64.0 {
             return Err(StopReason::UnsupportedInstruction);
         }
         let result = if code == Code::Fsin {

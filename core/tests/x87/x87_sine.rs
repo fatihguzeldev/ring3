@@ -83,7 +83,7 @@ fn sine_rejects_empty_out_of_range_and_unmasked_controls_atomically() {
     );
     assert_eq!(cpu, before);
 
-    for (angle, control) in [(33.0, 0x007f), (0.5, 0x0c7f)] {
+    for (angle, control) in [(65.0, 0x007f), (0.5, 0x0c7f)] {
         let (mut cpu, mut memory) = load(angle, control);
         assert_eq!(cpu.run(&mut memory, 1).instructions, 1);
         let before = cpu;
