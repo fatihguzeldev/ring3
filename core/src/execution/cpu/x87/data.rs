@@ -397,15 +397,19 @@ impl Cpu32 {
         } else {
             self.read_float(instruction, memory)?
         };
-        let condition = match left
-            .partial_cmp(&right)
-            .ok_or(StopReason::UnsupportedInstruction)?
-        {
-            Ordering::Less => 0x0100,
-            Ordering::Equal => 0x4000,
-            Ordering::Greater => 0,
+        let (condition, invalid) = match left.partial_cmp(&right) {
+            Some(Ordering::Less) => (0x0100, false),
+            Some(Ordering::Equal) => (0x4000, false),
+            Some(Ordering::Greater) => (0, false),
+            None if instruction.code() == Code::Fcomp_m32fp && !left.is_nan() && right.is_nan() => {
+                (0x4500, true)
+            }
+            None => return Err(StopReason::UnsupportedInstruction),
         };
         self.x87_stack.status = (self.x87_stack.status & !0x4700) | condition;
+        if invalid {
+            self.x87_stack.status |= 1;
+        }
         if matches!(
             instruction.code(),
             Code::Fcomp_m32fp | Code::Fcomp_m64fp | Code::Fcomp_st0_sti | Code::Fcompp
@@ -1021,7 +1025,11 @@ impl Cpu32 {
         };
         let load_single_infinity =
             size == 4 && instruction.code() == Code::Fld_m32fp && value.is_infinite();
-        if !value.is_normal() && value != 0.0 && !load_single_infinity {
+        let compare_single_indefinite = size == 4
+            && instruction.code() == Code::Fcomp_m32fp
+            && bytes[..4] == 0xffc0_0000_u32.to_le_bytes();
+        if !value.is_normal() && value != 0.0 && !load_single_infinity && !compare_single_indefinite
+        {
             return Err(StopReason::UnsupportedInstruction);
         }
         Ok(value)

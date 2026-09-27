@@ -337,3 +337,17 @@ fn comparisons_expose_condition_codes_and_stack_top() {
         }
     }
 }
+
+#[test]
+fn masked_fcomp_m32_reports_unordered_for_stored_indefinite() {
+    let mut code = instruction(0xdd, 0x05, LEFT);
+    code.extend(instruction(0xd8, 0x1d, RIGHT));
+    code.extend([0xdf, 0xe0]);
+    let (mut cpu, mut memory) = load(&code, 0., 0.);
+    memory
+        .write(u64::from(RIGHT), &0xffc0_0000_u32.to_le_bytes())
+        .unwrap();
+    assert_eq!(cpu.run(&mut memory, 3).instructions, 3);
+    assert_eq!(cpu.register(Register32::Eax), 0xabcd_4501);
+    assert_eq!(cpu.eflags, 0xced7);
+}
