@@ -2719,6 +2719,130 @@ fn blended_vertex_buffer_fvf_owns_lockable_storage() {
 }
 
 #[test]
+#[allow(clippy::too_many_lines)]
+fn indexed_blended_vertices_use_their_selected_world_matrices() {
+    for (fvf, mode, stride) in [(0x1116, 256, 36), (0x1118, 1, 40)] {
+        let (mut process, _, device) = create();
+        let create_vertex = method(&process, device, 23);
+        let create_index = method(&process, device, 24);
+        assert_eq!(
+            direct_call(
+                &mut process,
+                create_vertex,
+                &[device, stride * 3, 0, fvf, 0, VERTEX_BUFFER_OUTPUT]
+            ),
+            0
+        );
+        assert_eq!(
+            direct_call(
+                &mut process,
+                create_index,
+                &[device, 6, 0, 101, 0, INDEX_BUFFER_OUTPUT]
+            ),
+            0
+        );
+        let vertex = read(&process, VERTEX_BUFFER_OUTPUT);
+        let index = read(&process, INDEX_BUFFER_OUTPUT);
+        for (slot, (x, y)) in [(-1_f32, 1_f32), (1.0, 1.0), (-1.0, -1.0)]
+            .into_iter()
+            .enumerate()
+        {
+            let mut words = vec![x.to_bits(), y.to_bits(), 0.5_f32.to_bits()];
+            if mode == 1 {
+                words.push(0_f32.to_bits());
+            }
+            words.push(if mode == 256 { 1 } else { 0x100 });
+            words.extend([0, 0, 1_f32.to_bits(), 0, 0]);
+            write(
+                &mut process,
+                vertex + 4096 + u32::try_from(slot).unwrap() * stride,
+                &words,
+            );
+        }
+        process
+            .memory
+            .write(u64::from(index + 4096), &[0, 0, 1, 0, 2, 0])
+            .unwrap();
+        write(
+            &mut process,
+            MATRIX,
+            &[
+                1_f32.to_bits(),
+                0,
+                0,
+                0,
+                0,
+                1_f32.to_bits(),
+                0,
+                0,
+                0,
+                0,
+                1_f32.to_bits(),
+                0,
+                4_f32.to_bits(),
+                0,
+                0,
+                1_f32.to_bits(),
+            ],
+        );
+        let set_transform = method(&process, device, 37);
+        let set_state = method(&process, device, 50);
+        let set_shader = method(&process, device, 76);
+        let set_stream = method(&process, device, 83);
+        let set_indices = method(&process, device, 85);
+        let draw = method(&process, device, 71);
+        let clear = method(&process, device, 36);
+        let present = method(&process, device, 15);
+        assert_eq!(
+            invoke(&mut process, set_transform, &[device, 256, MATRIX]),
+            0
+        );
+        assert_eq!(invoke(&mut process, set_state, &[device, 167, 1]), 0);
+        assert_eq!(invoke(&mut process, set_state, &[device, 151, mode]), 0);
+        assert_eq!(
+            invoke(&mut process, set_state, &[device, 151, 2]),
+            0x8876_086c
+        );
+        assert_eq!(
+            invoke(&mut process, set_state, &[device, 167, 2]),
+            0x8876_086c
+        );
+        assert_eq!(invoke(&mut process, set_shader, &[device, fvf]), 0);
+        assert_eq!(
+            invoke(&mut process, set_stream, &[device, 0, vertex, stride]),
+            0
+        );
+        assert_eq!(invoke(&mut process, set_indices, &[device, index, 0]), 0);
+        assert_eq!(direct_call(&mut process, draw, &[device, 4, 0, 3, 0, 1]), 0);
+        assert_eq!(invoke(&mut process, present, &[device, 0, 0, 0, 0]), 0);
+        assert_eq!(&process.take_frame().unwrap().rgba[0..4], &[255; 4]);
+
+        let replacement = if mode == 256 { 0 } else { 1_f32.to_bits() };
+        for slot in 0..3 {
+            write(
+                &mut process,
+                vertex + 4096 + slot * stride + 12,
+                &[replacement],
+            );
+        }
+        assert_eq!(
+            direct_call(&mut process, clear, &[device, 0, 0, 1, 0xff00_0000, 0, 0]),
+            0
+        );
+        assert_eq!(direct_call(&mut process, draw, &[device, 4, 0, 3, 0, 1]), 0);
+        assert_eq!(invoke(&mut process, present, &[device, 0, 0, 0, 0]), 0);
+        assert!(
+            process
+                .take_frame()
+                .unwrap()
+                .rgba
+                .chunks_exact(4)
+                .all(|pixel| pixel == [0, 0, 0, 255])
+        );
+    }
+}
+
+#[test]
 fn vertex_buffer_creation_failures_keep_output_and_page_capacity() {
     let (mut process, _, device) = create();
     let create_buffer = method(&process, device, 23);

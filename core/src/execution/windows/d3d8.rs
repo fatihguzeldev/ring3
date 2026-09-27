@@ -279,6 +279,8 @@ pub(super) struct Graphics {
     alpha_test: AlphaTest,
     blend: BlendState,
     cull_mode: CullMode,
+    vertex_blend: u32,
+    indexed_vertex_blend: bool,
     scene_open: bool,
     viewport: Option<Viewport>,
     material: Option<[u8; 68]>,
@@ -990,6 +992,8 @@ impl Graphics {
         self.alpha_test = AlphaTest::default();
         self.blend = BlendState::default();
         self.cull_mode = CullMode::default();
+        self.vertex_blend = 0;
+        self.indexed_vertex_blend = false;
         self.root_refs = self.root_refs.saturating_sub(1);
     }
 
@@ -1129,6 +1133,8 @@ impl Graphics {
             25 if (1..=8).contains(&args[2]) => self.alpha_test.function = args[2],
             137 if args[2] <= 1 => self.lighting_enabled = Some(args[2] == 1),
             139 => self.ambient_color = args[2],
+            151 if matches!(args[2], 0 | 1 | 256) => self.vertex_blend = args[2],
+            167 if args[2] <= 1 => self.indexed_vertex_blend = args[2] == 1,
             _ => return INVALID_CALL,
         }
         0

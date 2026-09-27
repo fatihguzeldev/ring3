@@ -91,9 +91,20 @@ pub(super) struct VertexLayout {
     color: Option<usize>,
     coordinates: usize,
     uv_offset: usize,
+    blend_weights: Option<usize>,
 }
 
 pub(super) fn vertex_layout(fvf: u32) -> Option<VertexLayout> {
+    if matches!(fvf, 0x1116 | 0x1118) {
+        let blend_weights = usize::from(fvf == 0x1118);
+        return Some(VertexLayout {
+            size: if blend_weights == 0 { 36 } else { 40 },
+            color: None,
+            coordinates: 1,
+            uv_offset: 28 + blend_weights * 4,
+            blend_weights: Some(blend_weights),
+        });
+    }
     if !matches!(
         fvf,
         0x102 | 0x112 | 0x142 | 0x152 | 0x202 | 0x212 | 0x242 | 0x252
@@ -109,6 +120,7 @@ pub(super) fn vertex_layout(fvf: u32) -> Option<VertexLayout> {
         color,
         coordinates,
         uv_offset,
+        blend_weights: None,
     })
 }
 
@@ -189,6 +201,13 @@ pub(super) fn draw_indexed(
     let Some(layout) = vertex_layout(graphics.vertex_fvf) else {
         return Ok(INVALID_CALL);
     };
+    if layout.blend_weights.is_some_and(|weights| {
+        !graphics.indexed_vertex_blend
+            || graphics.vertex_blend != if weights == 0 { 256 } else { 1 }
+    }) || (layout.blend_weights.is_none() && graphics.vertex_blend != 0)
+    {
+        return Ok(INVALID_CALL);
+    }
     let vertex_size = layout.size;
     if device != super::DEVICE
         || graphics.device_refs == 0
@@ -301,8 +320,19 @@ pub(super) fn draw_indexed(
         {
             return Ok(INVALID_CALL);
         }
-        let mut position = [f64::from(xyz[0]), f64::from(xyz[1]), f64::from(xyz[2]), 1.0];
-        for matrix in [world, view, projection] {
+        let mut position = if let Some(weights) = layout.blend_weights {
+            let Some(position) = blended_position(xyz, &bytes, weights, &graphics.transforms)
+            else {
+                return Ok(INVALID_CALL);
+            };
+            position
+        } else {
+            transform(
+                [f64::from(xyz[0]), f64::from(xyz[1]), f64::from(xyz[2]), 1.0],
+                world,
+            )
+        };
+        for matrix in [view, projection] {
             position = transform(position, matrix);
         }
         if position.iter().any(|value| !value.is_finite()) {
@@ -378,6 +408,39 @@ fn transform(position: [f64; 4], matrix: &[u32; 16]) -> [f64; 4] {
             .map(|row| position[row] * f64::from(f32::from_bits(matrix[row * 4 + column])))
             .sum()
     })
+}
+
+fn blended_position(
+    xyz: [f32; 3],
+    bytes: &[u8],
+    explicit_weights: usize,
+    transforms: &BTreeMap<u32, [u32; 16]>,
+) -> Option<[f64; 4]> {
+    let weight = if explicit_weights == 0 {
+        1.0
+    } else {
+        f64::from(f32::from_le_bytes(bytes[12..16].try_into().ok()?))
+    };
+    if !weight.is_finite() {
+        return None;
+    }
+    let offset = 12 + explicit_weights * 4;
+    let indices = u32::from_le_bytes(bytes[offset..offset + 4].try_into().ok()?);
+    let input = [f64::from(xyz[0]), f64::from(xyz[1]), f64::from(xyz[2]), 1.0];
+    let mut blended = [0.0; 4];
+    for slot in 0..=explicit_weights {
+        let index = (indices >> (slot * 8)) & 0xff;
+        let matrix = transforms.get(&(256 + index)).unwrap_or(&IDENTITY_MATRIX);
+        let transformed = transform(input, matrix);
+        let contribution = if slot == 0 { weight } else { 1.0 - weight };
+        for (value, component) in blended.iter_mut().zip(transformed) {
+            *value += contribution * component;
+        }
+    }
+    blended
+        .iter()
+        .all(|value| value.is_finite())
+        .then_some(blended)
 }
 
 fn clip_triangle(vertices: &[ClipVertex; 3]) -> Vec<ClipVertex> {
