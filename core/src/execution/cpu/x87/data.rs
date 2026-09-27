@@ -13,7 +13,7 @@ fn extended_product_range(code: Code, result: f64) -> bool {
 }
 
 fn masked_nan_product(code: Code, left: f64, right: f64) -> Option<u64> {
-    if code != Code::Fmul_st0_sti {
+    if !matches!(code, Code::Fmul_st0_sti | Code::Fmul_m32fp) {
         return None;
     }
     if left.is_nan() && right.is_finite() {
@@ -455,8 +455,14 @@ impl Cpu32 {
         self.x87_masked().ok()?;
         self.x87_stack.numeric().ok()?;
         let input = self.x87_stack.value().ok()?;
-        if !input.is_finite() || !(-1.0..=1.0).contains(&input) {
+        if !input.is_finite() {
             return None;
+        }
+        if !(-1.0..=1.0).contains(&input) {
+            self.x87_stack.values[usize::from(self.x87_stack.top)] = 0xfff8_0000_0000_0000;
+            self.x87_stack.rounded(false, false);
+            self.x87_stack.status |= 1;
+            return Some(());
         }
         let result = if acos { input.acos() } else { input.asin() };
         if result != 0.0 && !result.is_normal() {
@@ -562,6 +568,11 @@ impl Cpu32 {
                 | Code::Fsubr_m64fp
         ) {
             let (left, right, add) = self.x87_add_sub_operands(instruction, memory, top)?;
+            if instruction.code() == Code::Fsubr_m32fp && right.is_nan() && left.is_finite() {
+                self.x87_stack.rounded(false, false);
+                self.x87_stack.values[usize::from(self.x87_stack.top)] = right.to_bits();
+                return Ok(());
+            }
             let mut result = if add { left + right } else { left - right };
             if !result.is_finite() || (result != 0.0 && !result.is_normal()) {
                 return self.x87_infinite_memory_sum(instruction.code(), left, right);
@@ -854,7 +865,9 @@ impl Cpu32 {
         let mut tiny = false;
         let mut overflow = false;
         if size == 4 {
-            if value.is_infinite() {
+            if value.to_bits() == 0xfff8_0000_0000_0000 {
+                bytes[..4].copy_from_slice(&0xffc0_0000_u32.to_le_bytes());
+            } else if value.is_infinite() {
                 let narrowed = if value.is_sign_negative() {
                     f32::NEG_INFINITY
                 } else {

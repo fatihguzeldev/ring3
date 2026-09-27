@@ -11,6 +11,16 @@ fn invalid_inline_math_domains_are_atomic() {
 }
 
 #[test]
+fn masked_finite_inverse_trig_domain_returns_indefinite() {
+    crt_inline_math_cases::masked_finite_inverse_trig_domain_returns_indefinite();
+}
+
+#[test]
+fn masked_indefinite_survives_tutorial_angle_ops() {
+    crt_inline_math_cases::masked_indefinite_survives_tutorial_angle_ops();
+}
+
+#[test]
 fn missing_operands_and_unmasked_control_can_retry() {
     crt_inline_math_cases::missing_operand_and_unmasked_control_are_retryable();
 }

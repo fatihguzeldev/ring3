@@ -8,7 +8,7 @@ const SECOND: u32 = LOWER + 16;
 const RESULT: u32 = LOWER + 24;
 const LOWER_RESULT: u32 = LOWER + 32;
 
-fn executable(symbol: &str, binary: bool) -> Vec<u8> {
+fn executable(symbol: &str, binary: bool, multiply: bool) -> Vec<u8> {
     let mut code = Vec::new();
     for address in [LOWER, FIRST] {
         code.extend([0xdd, 0x05]);
@@ -19,6 +19,14 @@ fn executable(symbol: &str, binary: bool) -> Vec<u8> {
         code.extend(SECOND.to_le_bytes());
     }
     code.extend([0xff, 0x15, 0x60, 0x20, 0x40, 0]);
+    if multiply {
+        code.extend([0xd8, 0x0d]);
+        code.extend((LOWER + 40).to_le_bytes());
+        code.extend([0xd8, 0x2d]);
+        code.extend((LOWER + 44).to_le_bytes());
+        code.extend([0xd9, 0x15]);
+        code.extend((LOWER + 48).to_le_bytes());
+    }
     for address in [RESULT, LOWER_RESULT] {
         code.extend([0xdd, 0x1d]);
         code.extend(address.to_le_bytes());
@@ -34,7 +42,7 @@ fn read(process: &Process32, address: u32) -> u64 {
 }
 
 fn prepare(symbol: &str, first: f64, second: Option<f64>) -> Process32 {
-    let mut process = Process32::load(&executable(symbol, second.is_some()), 40).unwrap();
+    let mut process = Process32::load(&executable(symbol, second.is_some(), false), 40).unwrap();
     for (address, value) in [
         (LOWER, Some(42.5_f64)),
         (FIRST, Some(first)),
@@ -112,8 +120,6 @@ pub fn finite_values_across_budgets() {
 
 pub fn invalid_domains_are_atomic() {
     for (symbol, first, second) in [
-        ("_CIasin", 1.5_f64, None),
-        ("_CIacos", -1.5, None),
         ("_CIasin", f64::NAN, None),
         ("_CIpow", -2.0, Some(0.5)),
         ("_CIpow", 0.0, Some(-1.0)),
@@ -130,6 +136,49 @@ pub fn invalid_domains_are_atomic() {
         assert_eq!((run.instructions, run.api_calls), (0, 0));
         assert_eq!(process.cpu, before);
     }
+}
+
+pub fn masked_finite_inverse_trig_domain_returns_indefinite() {
+    for (symbol, input) in [("_CIacos", 1.000_000_378_892_481_f64), ("_CIasin", -1.5)] {
+        let mut process = prepare(symbol, input, None);
+        let run = process.run(30);
+        assert_eq!(run.reason, ProcessStop::Stopped(StopReason::Breakpoint));
+        assert_eq!(read(&process, RESULT), 0xfff8_0000_0000_0000);
+        assert_eq!(read(&process, LOWER_RESULT), 42.5_f64.to_bits());
+    }
+}
+
+pub fn masked_indefinite_survives_tutorial_angle_ops() {
+    let mut process = Process32::load(&executable("_CIacos", false, true), 40).unwrap();
+    for (address, value) in [(LOWER, 42.5_f64), (FIRST, 1.000_000_378_892_481)] {
+        process
+            .memory
+            .write(u64::from(address), &value.to_le_bytes())
+            .unwrap();
+    }
+    process
+        .memory
+        .write(u64::from(LOWER + 40), &57.295_776_f32.to_le_bytes())
+        .unwrap();
+    process
+        .memory
+        .write(u64::from(LOWER + 44), &90.0_f32.to_le_bytes())
+        .unwrap();
+    let run = process.run(30);
+    assert_eq!(
+        run.reason,
+        ProcessStop::Stopped(StopReason::Breakpoint),
+        "eip={:#x}",
+        process.cpu.eip
+    );
+    assert_eq!(read(&process, RESULT), 0xfff8_0000_0000_0000);
+    let mut single = [0; 4];
+    process
+        .memory
+        .read(u64::from(LOWER + 48), &mut single)
+        .unwrap();
+    assert_eq!(u32::from_le_bytes(single), 0xffc0_0000);
+    assert_eq!(read(&process, LOWER_RESULT), 42.5_f64.to_bits());
 }
 
 pub fn missing_operand_and_unmasked_control_are_retryable() {
