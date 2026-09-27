@@ -1,5 +1,6 @@
 use super::{
-    AlphaTest, DepthPolicy, Frame, Graphics, IDENTITY_MATRIX, INVALID_CALL, Viewport, quantize_d16,
+    AlphaTest, BlendState, DepthPolicy, Frame, Graphics, IDENTITY_MATRIX, INVALID_CALL, Viewport,
+    quantize_d16,
 };
 use crate::execution::{GuestMemory, MemoryError};
 use std::collections::BTreeMap;
@@ -28,6 +29,12 @@ struct Bounds {
     right: usize,
     bottom: usize,
     area: f64,
+}
+
+#[derive(Clone, Copy)]
+struct PixelState {
+    alpha_test: AlphaTest,
+    blend: BlendState,
 }
 
 #[derive(Clone, Copy)]
@@ -353,7 +360,10 @@ pub(super) fn draw_indexed(
             frame,
             depth.as_deref_mut(),
             graphics.depth_policy,
-            graphics.alpha_test,
+            PixelState {
+                alpha_test: graphics.alpha_test,
+                blend: graphics.blend,
+            },
             [a, b, c],
             bounds,
             &stages,
@@ -446,6 +456,7 @@ pub(super) fn draw_up(
     mut depth: Option<&mut [u16]>,
     depth_policy: DepthPolicy,
     alpha_test: AlphaTest,
+    blend: BlendState,
     viewport: Option<Viewport>,
     fvf: u32,
     args: &[u32],
@@ -535,7 +546,7 @@ pub(super) fn draw_up(
                 frame,
                 depth.as_deref_mut(),
                 depth_policy,
-                alpha_test,
+                PixelState { alpha_test, blend },
                 [
                     vertices[indices[0]],
                     vertices[indices[1]],
@@ -593,7 +604,7 @@ fn raster_triangle(
     frame: &mut Frame,
     mut depth: Option<&mut [u16]>,
     depth_policy: DepthPolicy,
-    alpha_test: AlphaTest,
+    pixel_state: PixelState,
     [a, b, c]: [Vertex; 3],
     bounds: Bounds,
     stages: &[SampledStage],
@@ -645,7 +656,10 @@ fn raster_triangle(
                     .alpha_state
                     .combine_alpha(diffuse[3], alpha, sampled[3]);
             }
-            if !alpha_test.passes(alpha.round().clamp(0.0, 255.0) as u8) {
+            if !pixel_state
+                .alpha_test
+                .passes(alpha.round().clamp(0.0, 255.0) as u8)
+            {
                 continue;
             }
             if let Some(depth) = depth.as_deref_mut()
@@ -653,7 +667,19 @@ fn raster_triangle(
             {
                 depth[pixel_index] = z;
             }
+            let factors = pixel_state.blend.enabled.then(|| {
+                (
+                    BlendState::factor(pixel_state.blend.source, alpha),
+                    BlendState::factor(pixel_state.blend.destination, alpha),
+                )
+            });
             for (channel, value) in current.into_iter().enumerate() {
+                let value = if let Some((source_factor, destination_factor)) = factors {
+                    value * source_factor
+                        + f64::from(frame.rgba[offset + channel]) * destination_factor
+                } else {
+                    value
+                };
                 frame.rgba[offset + channel] = value.round().clamp(0.0, 255.0) as u8;
             }
             frame.rgba[offset + 3] = 255;

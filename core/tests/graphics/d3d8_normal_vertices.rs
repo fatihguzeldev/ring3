@@ -21,6 +21,11 @@ fn x8_texture_ignores_unused_alpha_bits_during_alpha_test() {
 }
 
 #[test]
+fn source_alpha_blend_preserves_the_background_and_mixes_half_alpha() {
+    normal_vertex_cases::source_alpha_blends_texture_over_existing_color();
+}
+
+#[test]
 fn invalid_normal_records_preserve_color_and_depth() {
     normal_vertex_cases::rejects_short_records_and_nonfinite_inputs_atomically();
 }

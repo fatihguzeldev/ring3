@@ -4188,6 +4188,7 @@ fn execute_graphics() {
     normal_vertex_cases::equivalent_diffuse_and_textured_pixels();
     normal_vertex_cases::texture_alpha_test_preserves_background_and_depth();
     normal_vertex_cases::x8_texture_passes_alpha_test();
+    normal_vertex_cases::source_alpha_blends_texture_over_existing_color();
     normal_vertex_cases::vertex_storage_accepts_texture_coordinate_counts();
     normal_vertex_cases::two_texture_color_stages();
     normal_vertex_cases::two_texture_perspective_and_clipping();

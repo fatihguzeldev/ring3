@@ -241,6 +241,34 @@ pub fn x8_texture_passes_alpha_test() {
     assert_eq!(&frame(&mut process, device)[..4], &[128, 0, 0, 255]);
 }
 
+pub fn source_alpha_blends_texture_over_existing_color() {
+    let (mut process, device, _) = setup(0x142, 24, false, 0);
+    assert_eq!(draw(&mut process, device), 0);
+    assert_eq!(invoke(&mut process, device, 50, &[7, 0]), 0);
+    assert_eq!(
+        invoke(&mut process, device, 20, &[2, 2, 1, 0, 21, 1, OUTPUT]),
+        0
+    );
+    let texture = read(&process, OUTPUT);
+    write(
+        &mut process,
+        texture + 4096,
+        &[0x00ff_0000, 0x80ff_0000, 0xffff_0000, 0x80ff_0000],
+    );
+    assert_eq!(invoke(&mut process, device, 61, &[0, texture]), 0);
+    assert_eq!(invoke(&mut process, device, 63, &[0, 1, 2]), 0);
+    assert_eq!(invoke(&mut process, device, 63, &[0, 4, 2]), 0);
+    assert_eq!(invoke(&mut process, device, 50, &[19, 5]), 0);
+    assert_eq!(invoke(&mut process, device, 50, &[20, 6]), 0);
+    assert_eq!(invoke(&mut process, device, 50, &[27, 1]), 0);
+    assert_eq!(invoke(&mut process, device, 50, &[19, 7]), INVALID_CALL);
+    assert_eq!(invoke(&mut process, device, 71, &[4, 1, 4, 1, 1]), 0);
+    let pixels = frame(&mut process, device);
+    assert_eq!(&pixels[..4], &[128, 255, 255, 255]);
+    assert_eq!(&pixels[8..12], &[192, 127, 127, 255]);
+    assert_eq!(&pixels[32..36], &[255, 0, 0, 255]);
+}
+
 pub fn rejects_short_records_and_nonfinite_inputs_atomically() {
     for bad_offset in [0, 4, 8, 28, 32] {
         let (mut process, device, vertex) = setup(0x152, 36, false, 0);

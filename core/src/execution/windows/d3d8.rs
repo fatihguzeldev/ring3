@@ -274,6 +274,7 @@ pub(super) struct Graphics {
     z_enabled: bool,
     depth_policy: DepthPolicy,
     alpha_test: AlphaTest,
+    blend: BlendState,
     scene_open: bool,
     viewport: Option<Viewport>,
     material: Option<[u8; 68]>,
@@ -303,6 +304,35 @@ struct AlphaTest {
     enabled: bool,
     reference: u8,
     function: u32,
+}
+
+#[derive(Clone, Copy)]
+struct BlendState {
+    enabled: bool,
+    source: u32,
+    destination: u32,
+}
+
+impl Default for BlendState {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            source: 2,
+            destination: 1,
+        }
+    }
+}
+
+impl BlendState {
+    fn factor(mode: u32, alpha: f64) -> f64 {
+        match mode {
+            1 => 0.0,
+            2 => 1.0,
+            5 => alpha / 255.0,
+            6 => 1.0 - alpha / 255.0,
+            _ => unreachable!("validated blend factor"),
+        }
+    }
 }
 
 impl Default for AlphaTest {
@@ -731,6 +761,8 @@ impl Graphics {
         caps[28..32].copy_from_slice(&DEVCAPS_DRAWPRIM_TLVERTEX.to_le_bytes());
         caps[32..36].copy_from_slice(&2_u32.to_le_bytes());
         caps[40..44].copy_from_slice(&0xff_u32.to_le_bytes());
+        caps[44..48].copy_from_slice(&0x33_u32.to_le_bytes());
+        caps[48..52].copy_from_slice(&0x33_u32.to_le_bytes());
         caps[180..184].copy_from_slice(&primitives::MAX_PRIMITIVES.to_le_bytes());
         caps[188..192].copy_from_slice(&1_u32.to_le_bytes());
         caps[192..196].copy_from_slice(&primitives::MAX_STRIDE.to_le_bytes());
@@ -891,6 +923,7 @@ impl Graphics {
         self.color_stages = color::Stage::defaults();
         self.alpha_stages = color::Stage::defaults();
         self.alpha_test = AlphaTest::default();
+        self.blend = BlendState::default();
         self.depth = (enable_depth == 1).then(|| vec![u16::MAX; (width * height) as usize]);
         self.depth_surface_refs = 0;
         self.z_enabled = enable_depth == 1;
@@ -926,6 +959,7 @@ impl Graphics {
         self.color_stages = color::Stage::defaults();
         self.alpha_stages = color::Stage::defaults();
         self.alpha_test = AlphaTest::default();
+        self.blend = BlendState::default();
         self.root_refs = self.root_refs.saturating_sub(1);
     }
 
@@ -1047,6 +1081,9 @@ impl Graphics {
             7 if args[2] <= 1 => self.z_enabled = args[2] == 1,
             14 if args[2] <= 1 => self.depth_policy.write_enabled = args[2] == 1,
             15 if args[2] <= 1 => self.alpha_test.enabled = args[2] == 1,
+            19 if matches!(args[2], 1 | 2 | 5 | 6) => self.blend.source = args[2],
+            20 if matches!(args[2], 1 | 2 | 5 | 6) => self.blend.destination = args[2],
+            27 if args[2] <= 1 => self.blend.enabled = args[2] == 1,
             23 if (1..=8).contains(&args[2]) => self.depth_policy.function = args[2],
             24 if args[2] <= 255 => {
                 self.alpha_test.reference =
@@ -1408,6 +1445,7 @@ impl Graphics {
             self.depth.as_deref_mut().filter(|_| self.z_enabled),
             self.depth_policy,
             self.alpha_test,
+            self.blend,
             self.viewport,
             self.vertex_fvf,
             args,
