@@ -64,7 +64,7 @@ pub(super) fn is_arithmetic(code: Code) -> bool {
 pub(super) fn is_unary(code: Code) -> bool {
     matches!(
         code,
-        Code::Fabs | Code::Fchs | Code::Fptan | Code::Fsin | Code::Fcos
+        Code::Fabs | Code::Fchs | Code::Fptan | Code::Fpatan | Code::Fsin | Code::Fcos
     )
 }
 

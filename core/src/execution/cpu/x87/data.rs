@@ -109,6 +109,7 @@ impl Cpu32 {
         match code {
             Code::Fabs | Code::Fchs => self.x87_sign(code),
             Code::Fptan => self.x87_tangent(),
+            Code::Fpatan => self.x87_arctangent(),
             Code::Fsin | Code::Fcos => self.x87_trigonometric(code),
             _ => Err(StopReason::UnsupportedInstruction),
         }
@@ -156,6 +157,38 @@ impl Cpu32 {
         self.x87_stack.push(1.0)?;
         self.x87_stack.status &= !0x0400;
         self.x87_stack.rounded(angle != 0.0, false);
+        Ok(())
+    }
+
+    fn x87_arctangent(&mut self) -> Result<(), StopReason> {
+        self.x87_masked()?;
+        if self.x87_control_word & 0x0c00 != 0 || self.x87_stack.occupied < 2 {
+            return Err(StopReason::UnsupportedInstruction);
+        }
+        self.x87_stack.numeric()?;
+        let top = usize::from(self.x87_stack.top);
+        let next = (top + 1) & 7;
+        let x = f64::from_bits(self.x87_stack.values[top]);
+        let y = f64::from_bits(self.x87_stack.values[next]);
+        if !(x == 0.0 || x.is_normal())
+            || !(y == 0.0 || y.is_normal())
+            || x.abs() > 16.0
+            || y.abs() > 16.0
+            || (x == 0.0 && y == 0.0)
+        {
+            return Err(StopReason::UnsupportedInstruction);
+        }
+        let result = y.atan2(x);
+        if !result.is_finite()
+            || (result != 0.0 && !result.is_normal())
+            || (result == 0.0 && y != 0.0)
+        {
+            return Err(StopReason::UnsupportedInstruction);
+        }
+        self.x87_stack.values[next] = result.to_bits();
+        self.x87_stack.pop();
+        self.x87_stack.status &= !0x0400;
+        self.x87_stack.rounded(result != 0.0, false);
         Ok(())
     }
 

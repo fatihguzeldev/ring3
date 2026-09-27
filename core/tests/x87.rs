@@ -60,6 +60,8 @@ fn full_turn_trigonometry() {
 mod fpu_wait;
 #[path = "x87/x87_absolute_value.rs"]
 mod x87_absolute_value;
+#[path = "x87/x87_arctangent.rs"]
+mod x87_arctangent;
 #[path = "x87/x87_arithmetic.rs"]
 mod x87_arithmetic;
 #[path = "x87/x87_compare_pop_twice.rs"]
