@@ -4,10 +4,16 @@ import { spawnSync } from "node:child_process";
 import test from "node:test";
 import { Bridge } from "../../runtime/dist/browser/bridge.js";
 
-const fixture = spawnSync("cargo", ["run", "--quiet", "-p", "ring3-browser", "--example", "browser_fixture"], { encoding: "utf8", timeout: 120_000 });
+const fixture = spawnSync(
+  "cargo",
+  ["run", "--quiet", "-p", "ring3-browser", "--example", "browser_fixture"],
+  { encoding: "utf8", timeout: 120_000 },
+);
 assert.equal(fixture.status, 0, fixture.stderr);
 const executable = Uint8Array.from(JSON.parse(fixture.stdout));
-const wasm = readFileSync(new URL("../../target/wasm32-unknown-unknown/release/ring3_browser.wasm", import.meta.url));
+const wasm = readFileSync(
+  new URL("../../target/wasm32-unknown-unknown/release/ring3_browser.wasm", import.meta.url),
+);
 const module = await WebAssembly.compile(wasm);
 
 test("actual browser Wasm resumes exact file requests across budgets and memory growth", async () => {
@@ -17,13 +23,22 @@ test("actual browser Wasm resumes exact file requests across budgets and memory 
     const instance = await WebAssembly.instantiate(module, {});
     const bridge = new Bridge(instance);
     assert.throws(() => bridge.command(99), /unknown operation/);
-    bridge.command(0, 0, { files: [
-      { path: "C:\\sample.exe", size: executable.length, role: "executable" },
-      { path: "C:\\a.bin", size: 4, role: "data" },
-    ] });
+    bridge.command(0, 0, {
+      files: [
+        { path: "C:\\sample.exe", size: executable.length, role: "executable" },
+        { path: "C:\\a.bin", size: 4, role: "data" },
+      ],
+    });
     assert.throws(() => bridge.command(1, 0, new Uint8Array(1)), /invalid module/);
     bridge.command(1, 0, executable);
-    bridge.command(2);
+    const ready = bridge.command(2);
+    assert.deepEqual(bridge.command(8, 0, { keys: [0x11, 0x12] }), ready);
+    assert.deepEqual(bridge.command(8, 0, { keys: [] }), ready);
+    assert.throws(() => bridge.command(8, 0, { keys: [256] }), /invalid key code/);
+    assert.deepEqual(
+      bridge.command(7, 0, { relativeX: 0, relativeY: 0, buttons: 0, wheelSteps: 1 }),
+      ready,
+    );
     const oldBuffer = instance.exports.memory.buffer;
     instance.exports.memory.grow(1);
     assert.equal(oldBuffer.byteLength, 0);

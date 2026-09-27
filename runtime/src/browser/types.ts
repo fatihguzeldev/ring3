@@ -33,7 +33,8 @@ export type WorkerInput =
   | { type: "start"; token: string }
   | { type: "pause" | "resume" }
   | { type: "button" | "activate"; hwnd: number }
-  | { type: "mouse"; relativeX: number; relativeY: number; buttons: number };
+  | { type: "mouse"; relativeX: number; relativeY: number; buttons: number; wheelSteps: number }
+  | { type: "keyboard"; keys: number[] };
 
 export type WorkerOutput =
   | { type: "status"; snapshot: Snapshot; paused: boolean; note: string }

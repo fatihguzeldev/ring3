@@ -110,6 +110,7 @@ fn mouse_command_validates_the_snapshot_without_changing_execution() {
         json!({"relativeX": 1.5, "relativeY": 0, "buttons": 0}),
         json!({"relativeX": -2_147_483_649_i64, "relativeY": 0, "buttons": 0}),
         json!({"relativeX": 0, "relativeY": 0, "buttons": 8}),
+        json!({"relativeX": 0, "relativeY": 0, "buttons": 0, "wheelSteps": 1.5}),
         json!({"relativeX": 0, "relativeY": 0}),
     ] {
         assert!(
@@ -163,4 +164,32 @@ fn mouse_command_validates_the_snapshot_without_changing_execution() {
             .is_err()
     );
     assert_eq!(session.command(6, 0, Vec::new()).unwrap(), exit);
+}
+
+#[test]
+fn keyboard_command_accepts_scan_codes_and_rejects_malformed_snapshots() {
+    let mut session = configured();
+    let snapshot = session.command(2, 0, Vec::new()).unwrap();
+    for input in [
+        json!({"keys": 4}),
+        json!({"keys": [-1]}),
+        json!({"keys": [256]}),
+        json!({"keys": [17, 17]}),
+        json!({"keys": [17.5]}),
+    ] {
+        assert!(
+            session
+                .command(8, 0, input.to_string().into_bytes())
+                .is_err()
+        );
+        assert_eq!(session.command(6, 0, Vec::new()).unwrap(), snapshot);
+    }
+    for keys in [json!([17, 18]), json!([18]), json!([])] {
+        assert_eq!(
+            session
+                .command(8, 0, json!({"keys": keys}).to_string().into_bytes())
+                .unwrap(),
+            snapshot
+        );
+    }
 }

@@ -65,6 +65,7 @@ impl Session {
             5 => self.post(&json_input(&input)?)?,
             6 => (),
             7 => self.mouse(&json_input(&input)?)?,
+            8 => self.keyboard(&json_input(&input)?)?,
             _ => return Err("unknown operation".into()),
         }
         Ok(self.snapshot())
@@ -273,13 +274,38 @@ impl Session {
             .ok()
             .filter(|mask| *mask < 8)
             .ok_or("invalid buttons")?;
+        let wheel_steps = if value.get("wheelSteps").is_some() {
+            signed_word(value, "wheelSteps")?
+        } else {
+            0
+        };
         self.process()?
             .submit_mouse_input(MouseInput {
                 relative,
-                wheel_steps: 0,
+                wheel_steps,
                 buttons: std::array::from_fn(|index| mask & (1 << index) != 0),
             })
             .map_err(|error| format!("mouse input: {error:?}"))
+    }
+
+    fn keyboard(&mut self, value: &Value) -> Result<(), String> {
+        let codes = value["keys"].as_array().ok_or("invalid keys")?;
+        if codes.len() > 256 {
+            return Err("invalid keys".into());
+        }
+        let mut keys = [false; 256];
+        for code in codes {
+            let index = code
+                .as_u64()
+                .and_then(|value| u8::try_from(value).ok())
+                .ok_or("invalid key code")?;
+            if std::mem::replace(&mut keys[usize::from(index)], true) {
+                return Err("duplicate key code".into());
+            }
+        }
+        self.process()?
+            .set_keyboard_state(keys)
+            .map_err(|error| format!("keyboard input: {error:?}"))
     }
 
     fn snapshot(&self) -> Value {

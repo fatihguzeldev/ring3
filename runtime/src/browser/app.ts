@@ -1,4 +1,5 @@
 import type { Snapshot, WorkerInput, WorkerOutput } from "./types.js";
+import { KeyboardState, scanCode } from "./keyboard.js";
 
 function element<T extends HTMLElement>(id: string): T {
   const value = document.getElementById(id);
@@ -20,13 +21,19 @@ let began = 0;
 let windowSignature = "";
 let pointerButtons = 0;
 let lastPointer: { x: number; y: number } | undefined;
+const keyboard = new KeyboardState();
 
 function send(message: WorkerInput): void {
   worker?.postMessage(message);
 }
 
-function sendMouse(relativeX = 0, relativeY = 0): void {
-  send({ type: "mouse", relativeX, relativeY, buttons: pointerButtons });
+function sendMouse(relativeX = 0, relativeY = 0, wheelSteps = 0): void {
+  send({ type: "mouse", relativeX, relativeY, buttons: pointerButtons, wheelSteps });
+}
+
+function releaseKeyboard(): void {
+  const keys = keyboard.clear();
+  if (keys) send({ type: "keyboard", keys });
 }
 
 function releasePointer(): void {
@@ -61,6 +68,7 @@ canvas.onpointerleave = (): void => {
 canvas.onpointerdown = (event): void => {
   const bit = buttonBit(event.button);
   if (event.pointerType !== "mouse" || bit === 0 || !worker || pause.disabled) return;
+  canvas.focus();
   pointerButtons |= bit;
   lastPointer = { x: event.clientX, y: event.clientY };
   canvas.setPointerCapture(event.pointerId);
@@ -83,7 +91,28 @@ canvas.onpointercancel = (event): void => {
 canvas.oncontextmenu = (event): void => {
   if (worker) event.preventDefault();
 };
-window.addEventListener("blur", releasePointer);
+canvas.onwheel = (event): void => {
+  if (!worker || pause.disabled || document.activeElement !== canvas || event.deltaY === 0) return;
+  sendMouse(0, 0, Math.sign(-event.deltaY));
+  event.preventDefault();
+};
+canvas.onkeydown = (event): void => {
+  if (!worker || pause.disabled || scanCode(event.code) === undefined) return;
+  const keys = keyboard.set(event.code, true);
+  if (keys) send({ type: "keyboard", keys });
+  event.preventDefault();
+};
+canvas.onkeyup = (event): void => {
+  if (scanCode(event.code) === undefined) return;
+  const keys = keyboard.set(event.code, false);
+  if (keys) send({ type: "keyboard", keys });
+  event.preventDefault();
+};
+canvas.addEventListener("blur", releaseKeyboard);
+window.addEventListener("blur", () => {
+  releasePointer();
+  releaseKeyboard();
+});
 
 function renderWindows(snapshot: Snapshot): void {
   const signature = JSON.stringify(snapshot.windows);
@@ -119,6 +148,7 @@ function renderWindows(snapshot: Snapshot): void {
 
 function failed(message: string): void {
   releasePointer();
+  releaseKeyboard();
   state.textContent = "execution stopped";
   error.textContent = message;
   error.hidden = false;
@@ -173,6 +203,7 @@ function receive(message: WorkerOutput): void {
   resume.disabled = !paused || finished;
   renderWindows(snapshot);
   if (finished) {
+    releaseKeyboard();
     windows.hidden = true;
     start.disabled = false;
   }
@@ -180,6 +211,7 @@ function receive(message: WorkerOutput): void {
 
 start.onclick = (): void => {
   releasePointer();
+  releaseKeyboard();
   worker?.terminate();
   const token = document.documentElement.dataset["token"];
   if (!token || token === "RING3_SESSION_TOKEN") {
@@ -208,6 +240,7 @@ start.onclick = (): void => {
   resume.disabled = true;
   const current = new Worker(new URL("./worker.js", import.meta.url), { type: "module" });
   worker = current;
+  canvas.focus();
   current.onmessage = ({ data }: MessageEvent<WorkerOutput>): void => {
     if (worker === current) receive(data);
   };
@@ -218,11 +251,16 @@ start.onclick = (): void => {
 };
 pause.onclick = (): void => {
   releasePointer();
+  releaseKeyboard();
   send({ type: "pause" });
 };
-resume.onclick = (): void => send({ type: "resume" });
+resume.onclick = (): void => {
+  canvas.focus();
+  send({ type: "resume" });
+};
 stop.onclick = (): void => {
   releasePointer();
+  releaseKeyboard();
   worker?.terminate();
   worker = undefined;
   start.disabled = false;
@@ -234,5 +272,6 @@ stop.onclick = (): void => {
 };
 window.addEventListener("pagehide", (): void => {
   releasePointer();
+  releaseKeyboard();
   worker?.terminate();
 });
