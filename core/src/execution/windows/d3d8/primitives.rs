@@ -1,6 +1,6 @@
 use super::{
-    AlphaTest, BlendState, DepthPolicy, Frame, Graphics, IDENTITY_MATRIX, INVALID_CALL, Viewport,
-    quantize_d16,
+    AlphaTest, BlendState, CullMode, DepthPolicy, Frame, Graphics, IDENTITY_MATRIX, INVALID_CALL,
+    Viewport, quantize_d16,
 };
 use crate::execution::{GuestMemory, MemoryError};
 use std::collections::BTreeMap;
@@ -343,7 +343,7 @@ pub(super) fn draw_indexed(
             let Some(c) = screen_vertex(polygon[slot + 1], viewport) else {
                 continue;
             };
-            if let Some(bounds) = triangle_bounds(viewport, a, b, c) {
+            if let Some(bounds) = triangle_bounds(viewport, graphics.cull_mode, a, b, c) {
                 samples += ((bounds.right - bounds.left) * (bounds.bottom - bounds.top)) as u64;
                 if samples > MAX_RASTER_SAMPLES {
                     return Ok(INVALID_CALL);
@@ -457,6 +457,7 @@ pub(super) fn draw_up(
     depth_policy: DepthPolicy,
     alpha_test: AlphaTest,
     blend: BlendState,
+    cull_mode: CullMode,
     viewport: Option<Viewport>,
     fvf: u32,
     args: &[u32],
@@ -528,6 +529,7 @@ pub(super) fn draw_up(
         let indices = primitive_indices(topology, primitive);
         let bounds = triangle_bounds(
             viewport,
+            cull_mode,
             vertices[indices[0]],
             vertices[indices[1]],
             vertices[indices[2]],
@@ -572,10 +574,21 @@ fn primitive_indices(topology: u32, primitive: usize) -> [usize; 3] {
 
 // Finite coordinates saturate on integer conversion, then clip to the owned viewport.
 #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
-fn triangle_bounds(viewport: Viewport, a: Vertex, b: Vertex, c: Vertex) -> Option<Bounds> {
+fn triangle_bounds(
+    viewport: Viewport,
+    cull_mode: CullMode,
+    a: Vertex,
+    b: Vertex,
+    c: Vertex,
+) -> Option<Bounds> {
     let area = edge(a, b, c.x, c.y);
-    // the default D3D cull mode rejects counterclockwise screen-space triangles.
-    if area <= 0.0 || !area.is_finite() {
+    if !area.is_finite()
+        || match cull_mode {
+            CullMode::None => area == 0.0,
+            CullMode::Cw => area >= 0.0,
+            CullMode::Ccw => area <= 0.0,
+        }
+    {
         return None;
     }
     let left = (a.x.min(b.x).min(c.x).floor() as usize).max(viewport.left);

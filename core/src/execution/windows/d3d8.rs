@@ -29,6 +29,7 @@ const ADAPTER_DESCRIPTION: &[u8] = b"Ring3 Virtual Display Adapter\0";
 const DEVICE_CAPS_SIZE: usize = 212;
 const CAPS2_CAN_RENDER_WINDOWED: u32 = 0x0008_0000;
 const DEVCAPS_DRAWPRIM_TLVERTEX: u32 = 0x0000_0400;
+const PRIMITIVE_MISC_CAPS: u32 = 0x72;
 // DISABLE, SELECTARG1, SELECTARG2, MODULATE, and MODULATE2X.
 const SUPPORTED_TEXTURE_OP_CAPS: u32 = 0x1f;
 const MAX_PIXELS: u64 = 1_048_576;
@@ -277,6 +278,7 @@ pub(super) struct Graphics {
     depth_policy: DepthPolicy,
     alpha_test: AlphaTest,
     blend: BlendState,
+    cull_mode: CullMode,
     scene_open: bool,
     viewport: Option<Viewport>,
     material: Option<[u8; 68]>,
@@ -315,6 +317,14 @@ struct BlendState {
     enabled: bool,
     source: u32,
     destination: u32,
+}
+
+#[derive(Clone, Copy, Default)]
+enum CullMode {
+    None,
+    Cw,
+    #[default]
+    Ccw,
 }
 
 impl Default for BlendState {
@@ -763,7 +773,7 @@ impl Graphics {
         caps[..4].copy_from_slice(&1_u32.to_le_bytes());
         caps[12..16].copy_from_slice(&CAPS2_CAN_RENDER_WINDOWED.to_le_bytes());
         caps[28..32].copy_from_slice(&DEVCAPS_DRAWPRIM_TLVERTEX.to_le_bytes());
-        caps[32..36].copy_from_slice(&2_u32.to_le_bytes());
+        caps[32..36].copy_from_slice(&PRIMITIVE_MISC_CAPS.to_le_bytes());
         caps[40..44].copy_from_slice(&0xff_u32.to_le_bytes());
         caps[44..48].copy_from_slice(&0x33_u32.to_le_bytes());
         caps[48..52].copy_from_slice(&0x33_u32.to_le_bytes());
@@ -940,6 +950,7 @@ impl Graphics {
         self.alpha_stages = color::Stage::defaults();
         self.alpha_test = AlphaTest::default();
         self.blend = BlendState::default();
+        self.cull_mode = CullMode::default();
         self.depth = (enable_depth == 1).then(|| vec![u16::MAX; (width * height) as usize]);
         self.depth_surface_refs = 0;
         self.z_enabled = enable_depth == 1;
@@ -978,6 +989,7 @@ impl Graphics {
         self.alpha_stages = color::Stage::defaults();
         self.alpha_test = AlphaTest::default();
         self.blend = BlendState::default();
+        self.cull_mode = CullMode::default();
         self.root_refs = self.root_refs.saturating_sub(1);
     }
 
@@ -1101,6 +1113,13 @@ impl Graphics {
             15 if args[2] <= 1 => self.alpha_test.enabled = args[2] == 1,
             19 if matches!(args[2], 1 | 2 | 5 | 6) => self.blend.source = args[2],
             20 if matches!(args[2], 1 | 2 | 5 | 6) => self.blend.destination = args[2],
+            22 if matches!(args[2], 1..=3) => {
+                self.cull_mode = match args[2] {
+                    1 => CullMode::None,
+                    2 => CullMode::Cw,
+                    _ => CullMode::Ccw,
+                };
+            }
             27 if args[2] <= 1 => self.blend.enabled = args[2] == 1,
             23 if (1..=8).contains(&args[2]) => self.depth_policy.function = args[2],
             24 if args[2] <= 255 => {
@@ -1466,6 +1485,7 @@ impl Graphics {
             self.depth_policy,
             self.alpha_test,
             self.blend,
+            self.cull_mode,
             self.viewport,
             self.vertex_fvf,
             args,

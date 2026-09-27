@@ -1217,7 +1217,7 @@ fn device_caps_report_only_the_owned_windowed_device() {
     assert!(caps[8..12].iter().all(|byte| *byte == 0));
     assert!(caps[16..28].iter().all(|byte| *byte == 0));
     assert_eq!(u32::from_le_bytes(caps[28..32].try_into().unwrap()), 0x400);
-    assert_eq!(u32::from_le_bytes(caps[32..36].try_into().unwrap()), 2);
+    assert_eq!(u32::from_le_bytes(caps[32..36].try_into().unwrap()), 0x72);
     assert!(caps[36..40].iter().all(|byte| *byte == 0));
     assert_eq!(u32::from_le_bytes(caps[40..44].try_into().unwrap()), 0xff);
     assert_eq!(u32::from_le_bytes(caps[44..48].try_into().unwrap()), 0x33);
@@ -1411,6 +1411,68 @@ fn transformed_triangle_up_culls_counterclockwise_winding() {
             .chunks_exact(4)
             .all(|pixel| pixel == [0, 0, 0, 255])
     );
+}
+
+#[test]
+fn cull_render_state_selects_both_triangle_windings() {
+    let (mut process, _, device) = create();
+    let vertices = 0x0040_2b00;
+    let a = [
+        0_f32.to_bits(),
+        0_f32.to_bits(),
+        0,
+        1_f32.to_bits(),
+        0xffff_0000,
+    ];
+    let b = [
+        4_f32.to_bits(),
+        0_f32.to_bits(),
+        0,
+        1_f32.to_bits(),
+        0xffff_0000,
+    ];
+    let c = [
+        0_f32.to_bits(),
+        3_f32.to_bits(),
+        0,
+        1_f32.to_bits(),
+        0xffff_0000,
+    ];
+    let set_shader = method(&process, device, 76);
+    let set_state = method(&process, device, 50);
+    let clear = method(&process, device, 36);
+    let draw = method(&process, device, 72);
+    let present = method(&process, device, 15);
+    assert_eq!(invoke(&mut process, set_shader, &[device, 0x44]), 0);
+    assert_eq!(
+        invoke(&mut process, set_state, &[device, 22, 0]),
+        0x8876_086c
+    );
+    for (mode, positive, negative) in [(1, true, true), (2, false, true), (3, true, false)] {
+        assert_eq!(invoke(&mut process, set_state, &[device, 22, mode]), 0);
+        for (winding, visible) in [(false, positive), (true, negative)] {
+            let mut words = Vec::new();
+            for vertex in if winding { [a, c, b] } else { [a, b, c] } {
+                words.extend(vertex);
+            }
+            write(&mut process, vertices, &words);
+            assert_eq!(
+                invoke(&mut process, clear, &[device, 0, 0, 1, 0xff00_0000, 0, 0]),
+                0
+            );
+            assert_eq!(invoke(&mut process, draw, &[device, 4, 1, vertices, 20]), 0);
+            assert_eq!(invoke(&mut process, present, &[device, 0, 0, 0, 0]), 0);
+            assert_eq!(
+                &process.take_frame().unwrap().rgba[..4],
+                if visible {
+                    &[255, 0, 0, 255]
+                } else {
+                    &[0, 0, 0, 255]
+                },
+                "mode={mode} reverse={winding}"
+            );
+        }
+    }
 }
 
 #[test]
