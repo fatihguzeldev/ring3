@@ -129,6 +129,16 @@ fn unsupported_value_on_either_side_preserves_state_and_finite_replacement_retri
 }
 
 #[test]
+fn masked_fcomp_st1_reports_unordered_for_canonical_indefinite() {
+    let indefinite = f64::from_bits(0xfff8_0000_0000_0000);
+    let (mut cpu, mut memory) = load(&[indefinite, -0.0], 1);
+    assert_eq!(cpu.run(&mut memory, 5).instructions, 5);
+    assert_eq!(cpu.register(Register32::Eax), 0xabcd_7d01);
+    assert_eq!(read(&memory, OUTPUT), indefinite.to_bits());
+    assert_eq!(cpu.eflags, 0xced7);
+}
+
+#[test]
 fn comparisons_clear_roundup_and_replace_conditions_but_keep_sticky_exceptions() {
     for (right, condition) in [(2., 0), (4., 0x100)] {
         let values = [

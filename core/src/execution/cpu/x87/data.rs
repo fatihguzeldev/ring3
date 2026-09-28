@@ -390,7 +390,11 @@ impl Cpu32 {
                 instruction.op1_register()
             };
             let right = self.x87_register_value(source)?;
-            if !(left.is_normal() || left == 0.0) || !(right.is_normal() || right == 0.0) {
+            let canonical_indefinite = instruction.code() == Code::Fcomp_st0_sti
+                && right.to_bits() == 0xfff8_0000_0000_0000;
+            if !(left.is_normal() || left == 0.0)
+                || !(right.is_normal() || right == 0.0 || canonical_indefinite)
+            {
                 return Err(StopReason::UnsupportedInstruction);
             }
             right
@@ -401,7 +405,13 @@ impl Cpu32 {
             Some(Ordering::Less) => (0x0100, false),
             Some(Ordering::Equal) => (0x4000, false),
             Some(Ordering::Greater) => (0, false),
-            None if instruction.code() == Code::Fcomp_m32fp && !left.is_nan() && right.is_nan() => {
+            None if (instruction.code() == Code::Fcomp_m32fp
+                && !left.is_nan()
+                && right.is_nan())
+                || (instruction.code() == Code::Fcomp_st0_sti
+                    && !left.is_nan()
+                    && right.to_bits() == 0xfff8_0000_0000_0000) =>
+            {
                 (0x4500, true)
             }
             None => return Err(StopReason::UnsupportedInstruction),
