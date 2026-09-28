@@ -85,7 +85,7 @@ canvas.onpointerdown = (event): void => {
   canvas.focus();
   pointerButtons |= bit;
   lastPointer = { x: event.clientX, y: event.clientY };
-  canvas.setPointerCapture(event.pointerId);
+  if (document.pointerLockElement !== canvas) canvas.setPointerCapture(event.pointerId);
   sendMouse();
   event.preventDefault();
 };
