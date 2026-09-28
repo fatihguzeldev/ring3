@@ -231,7 +231,9 @@ function receive(message: WorkerOutput): void {
     waiting: "waiting for window response",
     file: "loading file",
     exited: "program exited",
-    stopped: "core limit reached",
+    stopped: snapshot.reason.includes("UnsupportedInstruction")
+      ? "unsupported cpu instruction"
+      : "execution stopped",
   };
   state.textContent = paused ? "paused" : labels[snapshot.state];
   element("steps").textContent = (
