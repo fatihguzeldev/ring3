@@ -66,6 +66,16 @@ fn authored_three_width_conversion_agrees_whole_or_stepwise() {
 }
 
 #[test]
+fn masked_fistp_m32_out_of_range_stores_indefinite_and_pops() {
+    let (mut cpu, mut memory) = load(0xdb, 0x1d, OUTPUT, 3_432_986_624.0, 0x007f);
+    assert_eq!(cpu.run(&mut memory, 1).instructions, 1);
+    assert_eq!(cpu.run(&mut memory, 1).instructions, 1);
+    assert_eq!(read(&memory, OUTPUT, 4), i32::MIN.to_le_bytes());
+    assert_eq!(cpu.run(&mut memory, 1).instructions, 1);
+    assert_eq!(cpu.register(Register32::Eax) & 0x3801, 1);
+}
+
+#[test]
 fn every_store_form_uses_guest_rounding_and_changes_only_its_output_and_optional_pop() {
     for (input, expected) in [
         (0.0_f64, [0_i64; 4]),
@@ -115,7 +125,7 @@ fn every_store_form_uses_guest_rounding_and_changes_only_its_output_and_optional
 }
 
 #[test]
-fn destination_ranges_are_checked_after_rounding_without_indefinite_outputs() {
+fn destination_ranges_are_checked_after_rounding_with_masked_indefinite_outputs() {
     for (opcode, mode, size, _) in FORMS {
         let cases = match size {
             2 => vec![
@@ -152,19 +162,19 @@ fn destination_ranges_are_checked_after_rounding_without_indefinite_outputs() {
                 let control = 0x027f | (u16::try_from(rc).unwrap() << 10);
                 let (mut cpu, mut memory) = load(opcode, mode, OUTPUT, input, control);
                 assert_eq!(cpu.run(&mut memory, 1).instructions, 1);
-                let before = cpu;
                 let run = cpu.run(&mut memory, 1);
-                if let Some(integer) = expected {
-                    assert_eq!(run.instructions, 1);
-                    assert_eq!(read(&memory, OUTPUT, size), integer.to_le_bytes()[..size]);
-                } else {
-                    assert_eq!(
-                        (run.reason, run.instructions),
-                        (StopReason::UnsupportedInstruction, 0)
-                    );
-                    assert_eq!(cpu, before);
-                    assert_eq!(read(&memory, OUTPUT, 16), vec![0xaa; 16]);
-                }
+                assert_eq!(run.instructions, 1);
+                let integer = expected.unwrap_or_else(|| match size {
+                    2 => i64::from(i16::MIN),
+                    4 => i64::from(i32::MIN),
+                    _ => i64::MIN,
+                });
+                assert_eq!(read(&memory, OUTPUT, size), integer.to_le_bytes()[..size]);
+                assert_eq!(cpu.run(&mut memory, 1).instructions, 1);
+                assert_eq!(
+                    cpu.register(Register32::Eax) & 1,
+                    u32::from(expected.is_none())
+                );
             }
         }
     }

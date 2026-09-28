@@ -806,21 +806,32 @@ impl Cpu32 {
             4 => 2_147_483_648.0,
             _ => 9_223_372_036_854_775_808.0,
         };
-        if !(-limit..limit).contains(&rounded) {
-            return Err(StopReason::UnsupportedInstruction);
-        }
+        let invalid = !(-limit..limit).contains(&rounded);
         #[expect(
             clippy::cast_possible_truncation,
             reason = "rounded and range-checked integer"
         )]
-        let integer = rounded as i64;
+        let integer = if invalid {
+            match size {
+                2 => i64::from(i16::MIN),
+                4 => i64::from(i32::MIN),
+                _ => i64::MIN,
+            }
+        } else {
+            rounded as i64
+        };
         memory
             .write(u64::from(address), &integer.to_le_bytes()[..size])
             .map_err(StopReason::MemoryFault)?;
-        self.x87_stack.rounded(
-            rounded.to_bits() != value.to_bits(),
-            rounded.abs() > value.abs(),
-        );
+        if invalid {
+            self.x87_stack.rounded(false, false);
+            self.x87_stack.status |= 1;
+        } else {
+            self.x87_stack.rounded(
+                rounded.to_bits() != value.to_bits(),
+                rounded.abs() > value.abs(),
+            );
+        }
         if matches!(
             instruction.code(),
             Code::Fistp_m16int | Code::Fistp_m32int | Code::Fistp_m64int
