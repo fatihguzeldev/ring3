@@ -642,7 +642,7 @@ impl Cpu32 {
             };
             // binary64's bottom binade cannot stand in for x87's extended exponent range.
             if !result.is_finite() || (!exact_zero && result.abs() < 2.0 * f64::MIN_POSITIVE) {
-                return self.x87_infinite_register_product(instruction.code(), left, right);
+                return self.x87_infinite_product(instruction.code(), left, right);
             }
             if single_precision {
                 result = rounding::single_arithmetic_result(
@@ -691,7 +691,7 @@ impl Cpu32 {
         Ok(())
     }
 
-    fn x87_infinite_register_product(
+    fn x87_infinite_product(
         &mut self,
         code: Code,
         left: f64,
@@ -699,7 +699,11 @@ impl Cpu32 {
     ) -> Result<(), StopReason> {
         let one_infinite = left.is_infinite() ^ right.is_infinite();
         let factor = if left.is_infinite() { right } else { left };
-        if code != Code::Fmul_st0_sti || !one_infinite || !factor.is_finite() || factor == 0.0 {
+        if !matches!(code, Code::Fmul_st0_sti | Code::Fmul_m32fp)
+            || !one_infinite
+            || !factor.is_finite()
+            || factor == 0.0
+        {
             return Err(StopReason::UnsupportedInstruction);
         }
         self.x87_stack.rounded(false, false);

@@ -61,6 +61,44 @@ fn result(memory: &GuestMemory) -> u64 {
     u64::from_le_bytes(bytes)
 }
 
+#[test]
+fn masked_infinity_multiplies_finite_single_memory_operand() {
+    let code = [
+        0xdd, 0x05, 0x00, 0x22, 0x40, 0x00, // FLD m64fp
+        0xd8, 0x35, 0x10, 0x22, 0x40, 0x00, // FDIV m32fp
+        0xd8, 0x09, // FMUL m32fp [ECX]
+        0xdf, 0xe0, // FNSTSW AX
+        0xdd, 0x1d, 0x20, 0x22, 0x40, 0x00, // FSTP m64fp
+    ];
+    for (numerator, factor, expected) in [
+        (-3.0_f64, 0x3f6a_2b87_u32, f64::NEG_INFINITY),
+        (-3.0, 0xbf6a_2b87, f64::INFINITY),
+        (3.0, 0x3f6a_2b87, f64::INFINITY),
+    ] {
+        let mut image = load_pe32(&executable::pe32(&code), 16).unwrap();
+        image
+            .memory
+            .write(0x0040_2200, &numerator.to_le_bytes())
+            .unwrap();
+        image
+            .memory
+            .write(0x0040_2210, &0_u32.to_le_bytes())
+            .unwrap();
+        image
+            .memory
+            .write(0x0040_2214, &factor.to_le_bytes())
+            .unwrap();
+        let mut cpu = Cpu32::new(image.entry_point);
+        cpu.set_x87_control_word(0x027f);
+        cpu.set_register(Register32::Ecx, 0x0040_2214);
+        assert_eq!(cpu.run(&mut image.memory, 2).instructions, 2);
+        assert_eq!(cpu.run(&mut image.memory, 1).instructions, 1);
+        assert_eq!(cpu.run(&mut image.memory, 2).instructions, 2);
+        assert_eq!(result(&image.memory), expected.to_bits());
+        assert_eq!(cpu.register(Register32::Eax) & 0x3f, 0x04);
+    }
+}
+
 fn load_single_sqrt(input: f64, control: u16) -> (Cpu32, GuestMemory) {
     let code = [
         0xdd, 0x05, 0x00, 0x22, 0x40, 0x00, 0xd9, 0xfa, 0xdf, 0xe0, 0xd9, 0x1d, 0x20, 0x22, 0x40,
