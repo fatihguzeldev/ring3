@@ -1,9 +1,10 @@
-use crate::abi::AbiError;
 use crate::abi::header::{self, read_u32, write_u32};
-use crate::cpu::{ExecutionExit, ExitReason, UnsupportedFeature};
+use crate::abi::{ABI_VERSION, AbiError};
+use crate::cpu::{ExecutionExit, ExitReason, InfrastructureFailure, UnsupportedFeature};
 use crate::memory::{Access, FaultReason, GuestAddress, MemoryFault};
 
 pub const EXIT_SIZE: usize = 40;
+pub const EXIT_VERSION_2: u16 = 2;
 pub const REASON_OFFSET: usize = 16;
 pub const RETIRED_OFFSET: usize = 20;
 pub const DETAIL_OFFSET: usize = 24;
@@ -12,6 +13,14 @@ pub const ACCESS_OFFSET: usize = 32;
 pub const ACCESS_LENGTH_OFFSET: usize = 36;
 
 pub fn encode_exit(exit: &ExecutionExit, output: &mut [u8]) -> Result<(), AbiError> {
+    encode(exit, output, ABI_VERSION)
+}
+
+pub fn encode_exit_v2(exit: &ExecutionExit, output: &mut [u8]) -> Result<(), AbiError> {
+    encode(exit, output, EXIT_VERSION_2)
+}
+
+fn encode(exit: &ExecutionExit, output: &mut [u8], version: u16) -> Result<(), AbiError> {
     if output.len() != EXIT_SIZE {
         return Err(AbiError::Length);
     }
@@ -42,8 +51,19 @@ pub fn encode_exit(exit: &ExecutionExit, output: &mut [u8]) -> Result<(), AbiErr
             5
         }
         ExitReason::CodeInvalidated => 6,
+        ExitReason::Infrastructure(reason) => {
+            if version != EXIT_VERSION_2 {
+                return Err(AbiError::Exit);
+            }
+            fields[2] = match reason {
+                InfrastructureFailure::VersionExhausted => 1,
+                InfrastructureFailure::HelperProtocol => 2,
+                InfrastructureFailure::HelperRejected => 3,
+            };
+            7
+        }
     };
-    header::write(output, *b"R3EX");
+    header::write_version(output, *b"R3EX", version);
     for (index, value) in fields.iter().enumerate() {
         write_u32(output, REASON_OFFSET + index * 4, *value);
     }
@@ -51,7 +71,8 @@ pub fn encode_exit(exit: &ExecutionExit, output: &mut [u8]) -> Result<(), AbiErr
 }
 
 pub fn decode_exit(input: &[u8]) -> Result<ExecutionExit, AbiError> {
-    header::validate(input, *b"R3EX", EXIT_SIZE)?;
+    let version =
+        header::validate_versions(input, *b"R3EX", EXIT_SIZE, &[ABI_VERSION, EXIT_VERSION_2])?;
     let detail = read_u32(input, DETAIL_OFFSET);
     let address = read_u32(input, FAULT_ADDRESS_OFFSET);
     let access = read_u32(input, ACCESS_OFFSET);
@@ -76,7 +97,7 @@ pub fn decode_exit(input: &[u8]) -> Result<ExecutionExit, AbiError> {
         validate_fault(fault, length)?;
         ExitReason::MemoryFault { fault, length }
     } else {
-        if address != 0 || access != 0 || length != 0 || (tag != 4 && detail != 0) {
+        if address != 0 || access != 0 || length != 0 || (!matches!(tag, 4 | 7) && detail != 0) {
             return Err(AbiError::Exit);
         }
         match tag {
@@ -85,6 +106,12 @@ pub fn decode_exit(input: &[u8]) -> Result<ExecutionExit, AbiError> {
             3 => ExitReason::NeedCode,
             4 => ExitReason::Unsupported(decode_feature(detail)?),
             6 => ExitReason::CodeInvalidated,
+            7 if version == EXIT_VERSION_2 => ExitReason::Infrastructure(match detail {
+                1 => InfrastructureFailure::VersionExhausted,
+                2 => InfrastructureFailure::HelperProtocol,
+                3 => InfrastructureFailure::HelperRejected,
+                _ => return Err(AbiError::Exit),
+            }),
             _ => return Err(AbiError::Exit),
         }
     };

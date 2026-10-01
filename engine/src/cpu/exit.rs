@@ -11,6 +11,13 @@ pub enum UnsupportedFeature {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum InfrastructureFailure {
+    VersionExhausted,
+    HelperProtocol,
+    HelperRejected,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ExitReason {
     Budget,
     Cancelled,
@@ -18,6 +25,7 @@ pub enum ExitReason {
     Unsupported(UnsupportedFeature),
     MemoryFault { fault: MemoryFault, length: u32 },
     CodeInvalidated,
+    Infrastructure(InfrastructureFailure),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

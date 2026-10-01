@@ -1,13 +1,23 @@
 use super::{ABI_VERSION, AbiError, X86_INTEGER_PROFILE};
 
 pub(crate) fn validate(bytes: &[u8], magic: [u8; 4], size: usize) -> Result<(), AbiError> {
+    validate_versions(bytes, magic, size, &[ABI_VERSION]).map(|_| ())
+}
+
+pub(crate) fn validate_versions(
+    bytes: &[u8],
+    magic: [u8; 4],
+    size: usize,
+    versions: &[u16],
+) -> Result<u16, AbiError> {
     if bytes.len() != size {
         return Err(AbiError::Length);
     }
     if bytes[..4] != magic {
         return Err(AbiError::Magic);
     }
-    if u16::from_le_bytes([bytes[4], bytes[5]]) != ABI_VERSION {
+    let version = u16::from_le_bytes([bytes[4], bytes[5]]);
+    if !versions.contains(&version) {
         return Err(AbiError::Version);
     }
     if u16::from_le_bytes([bytes[6], bytes[7]]) != X86_INTEGER_PROFILE {
@@ -19,13 +29,17 @@ pub(crate) fn validate(bytes: &[u8], magic: [u8; 4], size: usize) -> Result<(), 
     if read_u32(bytes, 12) != 0 {
         return Err(AbiError::Reserved);
     }
-    Ok(())
+    Ok(version)
 }
 
 pub(crate) fn write(bytes: &mut [u8], magic: [u8; 4]) {
+    write_version(bytes, magic, ABI_VERSION);
+}
+
+pub(crate) fn write_version(bytes: &mut [u8], magic: [u8; 4], version: u16) {
     bytes.fill(0);
     bytes[..4].copy_from_slice(&magic);
-    bytes[4..6].copy_from_slice(&ABI_VERSION.to_le_bytes());
+    bytes[4..6].copy_from_slice(&version.to_le_bytes());
     bytes[6..8].copy_from_slice(&X86_INTEGER_PROFILE.to_le_bytes());
     write_u32(bytes, 8, bytes.len() as u32);
 }

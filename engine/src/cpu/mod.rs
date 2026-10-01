@@ -2,4 +2,4 @@ pub mod dbt;
 mod exit;
 pub mod x86;
 
-pub use exit::{ExecutionExit, ExitReason, UnsupportedFeature};
+pub use exit::{ExecutionExit, ExitReason, InfrastructureFailure, UnsupportedFeature};
