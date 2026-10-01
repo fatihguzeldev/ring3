@@ -23,6 +23,12 @@ pub enum HostError {
     Infrastructure,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum StoreCompletion {
+    Complete,
+    CodeInvalidated,
+}
+
 pub struct EngineInstance {
     memory: Option<AddressSpace>,
     arena: Pin<Box<[u8]>>,
@@ -190,6 +196,25 @@ impl EngineInstance {
         self.write_helper(result)
     }
 
+    pub fn store32(&mut self, address: u32, value: u32) -> Result<StoreCompletion, HostError> {
+        self.artifact_bytes()?;
+        let memory = self.memory.as_mut().ok_or(HostError::Closed)?;
+        let result = memory
+            .write(GuestAddress(address), &value.to_le_bytes())
+            .map(|()| 0);
+        let succeeded = result.is_ok();
+        self.write_helper(result)?;
+        if succeeded {
+            match self.artifact_bytes() {
+                Ok(_) => Ok(StoreCompletion::Complete),
+                Err(HostError::CodeInvalidated) => Ok(StoreCompletion::CodeInvalidated),
+                Err(error) => Err(error),
+            }
+        } else {
+            Ok(StoreCompletion::Complete)
+        }
+    }
+
     pub fn close(&mut self) {
         self.artifact = None;
         self.memory = None;
@@ -211,6 +236,56 @@ fn permissions(bits: u32) -> Result<Permissions, HostError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn exhausted_memory_versions_complete_store_without_committing_or_invalidating() {
+        let mut instance = EngineInstance::new(2, 7).unwrap();
+        instance.map(0x1000, 1, 7).unwrap();
+        instance.map(0x4000, 1, 7).unwrap();
+        instance.write32(0x1000, 0x9090_9090).unwrap();
+        instance.write32(0x4000, 0x4433_2211).unwrap();
+        instance.arena_mut().unwrap()[TRANSFER_OFFSET..TRANSFER_OFFSET + 8]
+            .copy_from_slice(&[0, 0x10, 0, 0, 1, 0, 0, 0]);
+        let generation = instance.compile(1).unwrap();
+        let code_snapshot = instance
+            .memory()
+            .unwrap()
+            .snapshot_code(GuestAddress(0x1000), 4)
+            .unwrap();
+        let data_snapshot = instance
+            .memory()
+            .unwrap()
+            .snapshot_code(GuestAddress(0x4000), 4)
+            .unwrap();
+        let artifact = instance.artifact_bytes().unwrap().to_vec();
+        let mut expected_arena = instance.arena().to_vec();
+        expected_arena[100..140].copy_from_slice(&[
+            0x52, 0x33, 0x4d, 0x48, 1, 0, 1, 0, 40, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 1,
+            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        ]);
+        instance
+            .memory
+            .as_mut()
+            .unwrap()
+            .exhaust_versions_for_test();
+
+        assert_eq!(
+            instance.store32(0x4000, u32::MAX),
+            Ok(StoreCompletion::Complete)
+        );
+        assert_eq!(instance.arena(), expected_arena);
+        assert_eq!(instance.generation(), generation);
+        assert_eq!(instance.artifact_bytes().unwrap(), artifact);
+        assert_eq!(instance.guard(7, generation), Ok(()));
+        let memory = instance.memory().unwrap();
+        assert!(memory.is_code_current(&code_snapshot));
+        assert!(memory.is_code_current(&data_snapshot));
+        for (address, expected) in [(0x1000, [0x90; 4]), (0x4000, [0x11, 0x22, 0x33, 0x44])] {
+            let mut bytes = [0; 4];
+            memory.read(GuestAddress(address), &mut bytes).unwrap();
+            assert_eq!(bytes, expected);
+        }
+    }
 
     #[test]
     fn last_generation_installs_once_and_never_wraps_or_replaces() {

@@ -130,3 +130,12 @@ pub extern "C" fn write32(address: u32, value: u32) -> u32 {
         crate::process::wasm::write32(address, value)
     }
 }
+
+#[allow(unsafe_code)]
+#[unsafe(export_name = "ring3_abi_v1_store32")]
+pub extern "C" fn store32(address: u32, value: u32) -> u32 {
+    {
+        #![forbid(unsafe_code)]
+        crate::process::wasm::store32(address, value)
+    }
+}

@@ -238,6 +238,11 @@ impl AddressSpace {
         Ok(slot)
     }
 
+    #[cfg(test)]
+    pub(crate) fn exhaust_versions_for_test(&mut self) {
+        self.version = u64::MAX;
+    }
+
     fn advance_version(&mut self) -> Result<u64, MemoryError> {
         let next = self
             .version

@@ -2,7 +2,7 @@
 
 use std::cell::RefCell;
 
-use super::{EngineInstance, HostError};
+use super::{EngineInstance, HostError, StoreCompletion};
 use crate::abi::arena::{CANCEL_OFFSET, EXIT_OFFSET, STATE_OFFSET};
 
 struct Registry {
@@ -135,6 +135,22 @@ pub(crate) fn read32(address: u32) -> u32 {
 
 pub(crate) fn write32(address: u32, value: u32) -> u32 {
     mutate(|instance| instance.write32(address, value))
+}
+
+pub(crate) fn store32(address: u32, value: u32) -> u32 {
+    REGISTRY.with(|registry| {
+        let Ok(mut registry) = registry.try_borrow_mut() else {
+            return 9;
+        };
+        let Some(instance) = registry.instance.as_mut() else {
+            return 5;
+        };
+        match instance.store32(address, value) {
+            Ok(StoreCompletion::Complete) => 0,
+            Ok(StoreCompletion::CodeInvalidated) => 11,
+            Err(error) => status(error),
+        }
+    })
 }
 
 fn inspect(operation: impl FnOnce(&EngineInstance) -> u32) -> u32 {
