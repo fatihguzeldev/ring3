@@ -1,3 +1,4 @@
+use super::region::prepare_embedded_region;
 use super::{BlockSpec, CompileError, CompileLimits, PreparedRegion, prepare_region, wasm};
 use crate::{
     abi::{ABI_VERSION, X86_INTEGER_PROFILE},
@@ -72,7 +73,11 @@ fn compile(
     limits: CompileLimits,
     binding: Option<wasm::EmbeddedBinding>,
 ) -> Result<CompiledRegion, CompileError> {
-    let prepared = prepare_region(memory, specs, limits)?;
+    let prepared = if binding.is_some() {
+        prepare_embedded_region(memory, specs, limits)?
+    } else {
+        prepare_region(memory, specs, limits)?
+    };
     let bytes = wasm::emit(&prepared.blocks, binding);
     if bytes.len() > limits.wasm_bytes {
         return Err(CompileError::WasmLimit);

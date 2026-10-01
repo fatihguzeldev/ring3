@@ -3,6 +3,7 @@ mod control;
 mod emitter;
 mod integer;
 mod locals;
+mod memory;
 
 #[derive(Clone, Copy)]
 pub(super) struct EmbeddedBinding {

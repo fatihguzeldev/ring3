@@ -1,20 +1,37 @@
 use wasm_encoder::{BlockType, InstructionSink, ValType};
 
-use super::{control, locals::*};
+use super::{control, locals::*, memory};
 use crate::cpu::x86::{
     decode::DecodedInstruction,
     ir::{BinaryKind, BranchTarget, Location32, Operation, Value32},
 };
 
-pub(super) fn instruction(code: &mut InstructionSink<'_>, instruction: &DecodedInstruction) {
+pub(super) fn instruction(
+    code: &mut InstructionSink<'_>,
+    instruction: &DecodedInstruction,
+    imports: memory::Imports,
+    exit_depth: u32,
+) {
+    let mut store = false;
     match *instruction.operation() {
         Operation::Nop => {}
         Operation::Move {
             destination: Location32::Register(destination),
             source,
         } => {
-            value(code, source);
-            code.local_set(register(destination));
+            if let Value32::Memory(address) = source {
+                memory::load(code, address, destination, imports, exit_depth);
+            } else {
+                value(code, source);
+                code.local_set(register(destination));
+            }
+        }
+        Operation::Move {
+            destination: Location32::Memory(address),
+            source,
+        } => {
+            memory::store(code, address, source, imports, exit_depth);
+            store = true;
         }
         Operation::Binary {
             kind: kind @ (BinaryKind::Add | BinaryKind::Sub | BinaryKind::Cmp),
@@ -66,6 +83,9 @@ pub(super) fn instruction(code: &mut InstructionSink<'_>, instruction: &DecodedI
         .i32_const(1)
         .i32_add()
         .local_set(RETIRED);
+    if store {
+        memory::exit_if_invalidated(code, exit_depth);
+    }
 }
 
 fn value(code: &mut InstructionSink<'_>, value: Value32) {

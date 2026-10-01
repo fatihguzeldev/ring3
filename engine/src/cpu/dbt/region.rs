@@ -91,6 +91,23 @@ pub fn prepare_region(
     specs: &[BlockSpec],
     limits: CompileLimits,
 ) -> Result<PreparedRegion, CompileError> {
+    prepare(memory, specs, limits, false)
+}
+
+pub(super) fn prepare_embedded_region(
+    memory: &AddressSpace,
+    specs: &[BlockSpec],
+    limits: CompileLimits,
+) -> Result<PreparedRegion, CompileError> {
+    prepare(memory, specs, limits, true)
+}
+
+fn prepare(
+    memory: &AddressSpace,
+    specs: &[BlockSpec],
+    limits: CompileLimits,
+    embedded: bool,
+) -> Result<PreparedRegion, CompileError> {
     validate_limits(limits)?;
     validate_blocks(specs, limits.blocks)?;
 
@@ -119,7 +136,7 @@ pub fn prepare_region(
             if next > end || (terminates && next != end) {
                 return Err(instruction_error(pc, InstructionError::InvalidBlockEnd));
             }
-            if !supports(instruction.operation()) {
+            if !supports(instruction.operation(), embedded) {
                 return Err(instruction_error(pc, InstructionError::BackendUnsupported));
             }
             instructions
@@ -173,22 +190,33 @@ fn instruction_error(pc: GuestAddress, cause: InstructionError) -> CompileError 
     CompileError::Instruction { pc, cause }
 }
 
-fn supports(operation: &Operation) -> bool {
-    matches!(
+fn supports(operation: &Operation, embedded: bool) -> bool {
+    let memory_move = matches!(
         operation,
-        Operation::Nop
-            | Operation::Move {
-                destination: Location32::Register(_),
-                source: Value32::Register(_) | Value32::Immediate(_),
-            }
-            | Operation::Binary {
-                kind: BinaryKind::Add | BinaryKind::Sub | BinaryKind::Cmp,
-                destination: Location32::Register(_),
-                source: Value32::Register(_) | Value32::Immediate(_),
-            }
-            | Operation::Jump {
-                target: BranchTarget::Direct(_),
-            }
-            | Operation::ConditionalJump { .. }
-    )
+        Operation::Move {
+            destination: Location32::Register(_),
+            source: Value32::Memory(_),
+        } | Operation::Move {
+            destination: Location32::Memory(_),
+            source: Value32::Register(_) | Value32::Immediate(_),
+        }
+    );
+    (embedded && memory_move)
+        || matches!(
+            operation,
+            Operation::Nop
+                | Operation::Move {
+                    destination: Location32::Register(_),
+                    source: Value32::Register(_) | Value32::Immediate(_),
+                }
+                | Operation::Binary {
+                    kind: BinaryKind::Add | BinaryKind::Sub | BinaryKind::Cmp,
+                    destination: Location32::Register(_),
+                    source: Value32::Register(_) | Value32::Immediate(_),
+                }
+                | Operation::Jump {
+                    target: BranchTarget::Direct(_),
+                }
+                | Operation::ConditionalJump { .. }
+        )
 }

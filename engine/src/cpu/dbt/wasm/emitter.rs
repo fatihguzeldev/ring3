@@ -3,7 +3,7 @@ use wasm_encoder::{
     ImportSection, InstructionSink, MemoryType, Module, TypeSection, ValType,
 };
 
-use super::{EmbeddedBinding, abi, integer, locals::*};
+use super::{EmbeddedBinding, abi, integer, locals::*, memory};
 use crate::cpu::dbt::region::CompiledBlock;
 
 pub(in crate::cpu::dbt) fn emit(
@@ -11,10 +11,19 @@ pub(in crate::cpu::dbt) fn emit(
     binding: Option<EmbeddedBinding>,
 ) -> Vec<u8> {
     let mut module = Module::new();
+    let (needs_read, needs_store) = memory::Imports::needed(blocks);
+    let has_memory = needs_read || needs_store;
+    debug_assert!(!has_memory || binding.is_some());
     let mut types = TypeSection::new();
     types.ty().function([ValType::I32; 4], [ValType::I32]);
     if binding.is_some() {
         types.ty().function([ValType::I32; 6], [ValType::I32]);
+    }
+    if needs_read {
+        types.ty().function([ValType::I32], [ValType::I32]);
+    }
+    if needs_store {
+        types.ty().function([ValType::I32; 2], [ValType::I32]);
     }
     module.section(&types);
     let mut imports = ImportSection::new();
@@ -32,14 +41,32 @@ pub(in crate::cpu::dbt) fn emit(
     if binding.is_some() {
         imports.import("ring3", "guard", EntityType::Function(1));
     }
+    let mut helper_imports = memory::Imports::default();
+    let mut function_index = u32::from(binding.is_some());
+    let mut type_index = 1 + u32::from(binding.is_some());
+    if needs_read {
+        imports.import("ring3", "read32", EntityType::Function(type_index));
+        helper_imports.read = Some(function_index);
+        function_index += 1;
+        type_index += 1;
+    }
+    if needs_store {
+        imports.import("ring3", "store32", EntityType::Function(type_index));
+        helper_imports.store = Some(function_index);
+        function_index += 1;
+    }
     module.section(&imports);
     let mut functions = FunctionSection::new();
     functions.function(0);
     module.section(&functions);
     let mut exports = ExportSection::new();
-    exports.export("run", ExportKind::Func, u32::from(binding.is_some()));
+    exports.export("run", ExportKind::Func, function_index);
     module.section(&exports);
-    let mut function = Function::new([(16, ValType::I32), (1, ValType::I64)]);
+    let mut declarations = vec![(16, ValType::I32), (1, ValType::I64)];
+    if has_memory {
+        declarations.push((6, ValType::I32));
+    }
+    let mut function = Function::new(declarations);
     let mut code = function.instructions();
     if let Some(binding) = binding {
         code.i32_const(binding.key as u32 as i32)
@@ -60,10 +87,10 @@ pub(in crate::cpu::dbt) fn emit(
     code.block(BlockType::Empty).loop_(BlockType::Empty);
     abi::safepoint(&mut code, 1);
     for block in blocks {
-        emit_block(&mut code, block);
+        emit_block(&mut code, block, helper_imports);
     }
     code.i32_const(3).local_set(REASON).br(1).end().end();
-    abi::flush(&mut code);
+    abi::flush(&mut code, has_memory);
     code.i32_const(0).end();
     let mut bodies = CodeSection::new();
     bodies.function(&function);
@@ -71,7 +98,7 @@ pub(in crate::cpu::dbt) fn emit(
     module.finish()
 }
 
-fn emit_block(code: &mut InstructionSink<'_>, block: &CompiledBlock) {
+fn emit_block(code: &mut InstructionSink<'_>, block: &CompiledBlock, imports: memory::Imports) {
     code.i32_const(-1).local_set(RESUME);
     for (index, instruction) in block.instructions.iter().enumerate() {
         code.local_get(EIP)
@@ -96,7 +123,7 @@ fn emit_block(code: &mut InstructionSink<'_>, block: &CompiledBlock) {
         code.end();
         let remaining = count - index as u32 - 1;
         abi::safepoint(code, remaining + 2);
-        integer::instruction(code, instruction);
+        integer::instruction(code, instruction, imports, remaining + 2);
     }
     code.br(1).end();
 }

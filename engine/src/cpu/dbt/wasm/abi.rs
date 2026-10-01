@@ -9,7 +9,8 @@ use crate::abi::{
 };
 
 use super::locals::{
-    BUDGET, CANCEL_PTR, EIP, EXIT_PTR, FLAGS, MEMORY_BYTES, REASON, RETIRED, STATE_PTR,
+    BUDGET, CANCEL_PTR, DETAIL, EIP, EXIT_PTR, FAULT_ACCESS, FAULT_ADDRESS, FAULT_LENGTH, FLAGS,
+    MEMORY_BYTES, REASON, RETIRED, STATE_PTR,
 };
 
 pub(super) fn preflight(sink: &mut InstructionSink<'_>) {
@@ -75,7 +76,7 @@ pub(super) fn load_state(sink: &mut InstructionSink<'_>) {
     sink.local_set(FLAGS);
 }
 
-pub(super) fn flush(sink: &mut InstructionSink<'_>) {
+pub(super) fn flush(sink: &mut InstructionSink<'_>, memory: bool) {
     for index in 0..8 {
         store_local(
             sink,
@@ -89,7 +90,14 @@ pub(super) fn flush(sink: &mut InstructionSink<'_>) {
 
     for (offset, value) in [
         (0, u32::from_le_bytes(*b"R3EX")),
-        (4, header_version()),
+        (
+            4,
+            if memory {
+                2 | (u32::from(X86_INTEGER_PROFILE) << 16)
+            } else {
+                header_version()
+            },
+        ),
         (8, EXIT_SIZE as u32),
         (12, 0),
         (DETAIL_OFFSET, 0),
@@ -103,6 +111,16 @@ pub(super) fn flush(sink: &mut InstructionSink<'_>) {
     }
     store_local(sink, EXIT_PTR, REASON_OFFSET, REASON);
     store_local(sink, EXIT_PTR, RETIRED_OFFSET, RETIRED);
+    if memory {
+        for (offset, local) in [
+            (DETAIL_OFFSET, DETAIL),
+            (FAULT_ADDRESS_OFFSET, FAULT_ADDRESS),
+            (ACCESS_OFFSET, FAULT_ACCESS),
+            (ACCESS_LENGTH_OFFSET, FAULT_LENGTH),
+        ] {
+            store_local(sink, EXIT_PTR, offset, local);
+        }
+    }
 }
 
 pub(super) fn safepoint(sink: &mut InstructionSink<'_>, exit_depth: u32) {
