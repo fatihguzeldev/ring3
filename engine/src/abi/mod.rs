@@ -1,4 +1,5 @@
 mod header;
+pub mod memory_helper;
 pub mod x86;
 
 pub const ABI_VERSION: u16 = 1;
@@ -13,4 +14,5 @@ pub enum AbiError {
     Reserved,
     Flags,
     Exit,
+    MemoryHelper,
 }
