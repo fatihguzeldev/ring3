@@ -1,0 +1,147 @@
+use crate::abi::AbiError;
+use crate::abi::header::{self, read_u32, write_u32};
+use crate::cpu::{ExecutionExit, ExitReason, UnsupportedFeature};
+use crate::memory::{Access, FaultReason, GuestAddress, MemoryFault};
+
+pub const EXIT_SIZE: usize = 40;
+pub const REASON_OFFSET: usize = 16;
+pub const RETIRED_OFFSET: usize = 20;
+pub const DETAIL_OFFSET: usize = 24;
+pub const FAULT_ADDRESS_OFFSET: usize = 28;
+pub const ACCESS_OFFSET: usize = 32;
+pub const ACCESS_LENGTH_OFFSET: usize = 36;
+
+pub fn encode_exit(exit: &ExecutionExit, output: &mut [u8]) -> Result<(), AbiError> {
+    if output.len() != EXIT_SIZE {
+        return Err(AbiError::Length);
+    }
+    let mut fields = [0; 6];
+    fields[1] = exit.retired;
+    fields[0] = match exit.reason {
+        ExitReason::Budget => 1,
+        ExitReason::Cancelled => 2,
+        ExitReason::NeedCode => 3,
+        ExitReason::Unsupported(feature) => {
+            fields[2] = feature_code(feature);
+            4
+        }
+        ExitReason::MemoryFault { fault, length } => {
+            validate_fault(fault, length)?;
+            fields[2] = match fault.reason {
+                FaultReason::Unmapped => 1,
+                FaultReason::Permission => 2,
+                FaultReason::AddressOverflow => 3,
+            };
+            fields[3] = fault.address.0;
+            fields[4] = match fault.access {
+                Access::Read => 1,
+                Access::Write => 2,
+                Access::Execute => 3,
+            };
+            fields[5] = length;
+            5
+        }
+        ExitReason::CodeInvalidated => 6,
+    };
+    header::write(output, *b"R3EX");
+    for (index, value) in fields.iter().enumerate() {
+        write_u32(output, REASON_OFFSET + index * 4, *value);
+    }
+    Ok(())
+}
+
+pub fn decode_exit(input: &[u8]) -> Result<ExecutionExit, AbiError> {
+    header::validate(input, *b"R3EX", EXIT_SIZE)?;
+    let detail = read_u32(input, DETAIL_OFFSET);
+    let address = read_u32(input, FAULT_ADDRESS_OFFSET);
+    let access = read_u32(input, ACCESS_OFFSET);
+    let length = read_u32(input, ACCESS_LENGTH_OFFSET);
+    let tag = read_u32(input, REASON_OFFSET);
+    let reason = if tag == 5 {
+        let fault = MemoryFault {
+            address: GuestAddress(address),
+            access: match access {
+                1 => Access::Read,
+                2 => Access::Write,
+                3 => Access::Execute,
+                _ => return Err(AbiError::Exit),
+            },
+            reason: match detail {
+                1 => FaultReason::Unmapped,
+                2 => FaultReason::Permission,
+                3 => FaultReason::AddressOverflow,
+                _ => return Err(AbiError::Exit),
+            },
+        };
+        validate_fault(fault, length)?;
+        ExitReason::MemoryFault { fault, length }
+    } else {
+        if address != 0 || access != 0 || length != 0 || (tag != 4 && detail != 0) {
+            return Err(AbiError::Exit);
+        }
+        match tag {
+            1 => ExitReason::Budget,
+            2 => ExitReason::Cancelled,
+            3 => ExitReason::NeedCode,
+            4 => ExitReason::Unsupported(decode_feature(detail)?),
+            6 => ExitReason::CodeInvalidated,
+            _ => return Err(AbiError::Exit),
+        }
+    };
+    Ok(ExecutionExit {
+        retired: read_u32(input, RETIRED_OFFSET),
+        reason,
+    })
+}
+
+fn validate_fault(fault: MemoryFault, length: u32) -> Result<(), AbiError> {
+    let valid_length = match fault.access {
+        Access::Read | Access::Write => matches!(length, 1 | 2 | 4),
+        Access::Execute => (1..=15).contains(&length),
+    };
+    let overflows = u64::from(fault.address.0) + u64::from(length) > 1 << 32;
+    if !valid_length || overflows != (fault.reason == FaultReason::AddressOverflow) {
+        return Err(AbiError::Exit);
+    }
+    Ok(())
+}
+
+fn feature_code(feature: UnsupportedFeature) -> u32 {
+    match feature {
+        UnsupportedFeature::Opcode => 1,
+        UnsupportedFeature::FloatingPoint => 2,
+        UnsupportedFeature::Simd => 3,
+        UnsupportedFeature::Segment => 4,
+        UnsupportedFeature::RepeatedString => 5,
+        UnsupportedFeature::Privileged => 6,
+    }
+}
+
+fn decode_feature(code: u32) -> Result<UnsupportedFeature, AbiError> {
+    Ok(match code {
+        1 => UnsupportedFeature::Opcode,
+        2 => UnsupportedFeature::FloatingPoint,
+        3 => UnsupportedFeature::Simd,
+        4 => UnsupportedFeature::Segment,
+        5 => UnsupportedFeature::RepeatedString,
+        6 => UnsupportedFeature::Privileged,
+        _ => return Err(AbiError::Exit),
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::cpu::ExitReason;
+
+    #[test]
+    fn budget_exit_has_a_binary_roundtrip() {
+        let exit = ExecutionExit {
+            retired: 4,
+            reason: ExitReason::Budget,
+        };
+        let mut bytes = [0; EXIT_SIZE];
+        encode_exit(&exit, &mut bytes).unwrap();
+        assert_eq!(decode_exit(&bytes).unwrap(), exit);
+    }
+}
