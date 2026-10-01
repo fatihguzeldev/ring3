@@ -13,7 +13,7 @@ iced-x86 = { version = "=1.21.0", default-features = false, features = ["std", "
 wasm-encoder = { version = "=0.259.0", default-features = false, features = ["std"] }
 
 [lints.rust]
-unsafe_code = "forbid"
+unsafe_code = "deny"
 
 [lints.clippy]
 all = "warn"

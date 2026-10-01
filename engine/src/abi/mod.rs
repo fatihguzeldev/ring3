@@ -2,6 +2,8 @@ pub mod arena;
 #[forbid(unsafe_code)]
 mod header;
 pub mod memory_helper;
+#[cfg(target_arch = "wasm32")]
+mod wasm;
 #[forbid(unsafe_code)]
 pub mod x86;
 

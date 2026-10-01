@@ -39,6 +39,12 @@ fn fixed_arena_has_canonical_initial_state_exit_and_helper_records() {
     }
     assert_eq!(&arena[16..52], &[0; 36]);
     assert_eq!(&arena[52..56], &[2, 0, 0, 0]);
+    assert_eq!(
+        &arena[72..96],
+        &[
+            1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+        ]
+    );
     assert_eq!(&arena[96..100], &[0; 4]);
     assert_eq!(&arena[116..140], &[0; 24]);
     assert_eq!(&arena[140..], &[0; 4096]);
