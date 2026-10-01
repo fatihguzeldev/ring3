@@ -48,8 +48,32 @@ pub fn compile_region(
     specs: &[BlockSpec],
     limits: CompileLimits,
 ) -> Result<CompiledRegion, CompileError> {
+    compile(memory, specs, limits, None)
+}
+
+pub(crate) fn compile_embedded_region(
+    memory: &AddressSpace,
+    specs: &[BlockSpec],
+    limits: CompileLimits,
+    key: u64,
+    generation: u32,
+) -> Result<CompiledRegion, CompileError> {
+    compile(
+        memory,
+        specs,
+        limits,
+        Some(wasm::EmbeddedBinding { key, generation }),
+    )
+}
+
+fn compile(
+    memory: &AddressSpace,
+    specs: &[BlockSpec],
+    limits: CompileLimits,
+    binding: Option<wasm::EmbeddedBinding>,
+) -> Result<CompiledRegion, CompileError> {
     let prepared = prepare_region(memory, specs, limits)?;
-    let bytes = wasm::emit(&prepared.blocks);
+    let bytes = wasm::emit(&prepared.blocks, binding);
     if bytes.len() > limits.wasm_bytes {
         return Err(CompileError::WasmLimit);
     }

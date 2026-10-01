@@ -1,5 +1,8 @@
+pub mod arena;
+#[forbid(unsafe_code)]
 mod header;
 pub mod memory_helper;
+#[forbid(unsafe_code)]
 pub mod x86;
 
 pub const ABI_VERSION: u16 = 1;

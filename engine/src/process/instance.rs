@@ -1,0 +1,233 @@
+#![forbid(unsafe_code)]
+
+use std::pin::Pin;
+
+use crate::{
+    abi::{
+        arena::{self, ARENA_SIZE, HELPER_OFFSET, TRANSFER_OFFSET, TRANSFER_SIZE},
+        memory_helper::{HELPER_SIZE, encode_helper_result},
+    },
+    cpu::dbt::{BlockSpec, CompileError, CompileLimits, CompiledRegion, compile_embedded_region},
+    memory::{AddressSpace, GuestAddress, MemoryError, PageRange, Permissions},
+};
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum HostError {
+    Closed,
+    InvalidRequest,
+    InvalidArtifact,
+    CodeInvalidated,
+    GenerationExhausted,
+    Memory(MemoryError),
+    Compile(CompileError),
+    Infrastructure,
+}
+
+pub struct EngineInstance {
+    memory: Option<AddressSpace>,
+    arena: Pin<Box<[u8]>>,
+    artifact: Option<CompiledRegion>,
+    key: u64,
+    generation: u32,
+}
+
+impl EngineInstance {
+    pub fn new(pages: u32, key: u64) -> Result<Self, HostError> {
+        if pages == 0 || pages > 4096 || key == 0 {
+            return Err(HostError::InvalidRequest);
+        }
+        let memory = AddressSpace::new(pages).map_err(HostError::Memory)?;
+        let mut arena = Vec::new();
+        arena
+            .try_reserve_exact(ARENA_SIZE)
+            .map_err(|_| HostError::Infrastructure)?;
+        arena.resize(ARENA_SIZE, 0);
+        arena::initialize(&mut arena).map_err(|_| HostError::Infrastructure)?;
+        Ok(Self {
+            memory: Some(memory),
+            arena: Box::into_pin(arena.into_boxed_slice()),
+            artifact: None,
+            key,
+            generation: 0,
+        })
+    }
+
+    pub fn is_open(&self) -> bool {
+        self.memory.is_some()
+    }
+
+    pub fn key(&self) -> u64 {
+        self.key
+    }
+
+    pub fn arena(&self) -> &[u8] {
+        self.arena.as_ref().get_ref()
+    }
+
+    pub fn arena_mut(&mut self) -> Result<&mut [u8], HostError> {
+        self.memory()?;
+        Ok(self.arena.as_mut().get_mut())
+    }
+
+    pub fn arena_address(&self) -> usize {
+        self.arena.as_ptr() as usize
+    }
+
+    pub fn memory(&self) -> Result<&AddressSpace, HostError> {
+        self.memory.as_ref().ok_or(HostError::Closed)
+    }
+
+    pub fn map(&mut self, address: u32, pages: u32, bits: u32) -> Result<(), HostError> {
+        let memory = self.memory.as_mut().ok_or(HostError::Closed)?;
+        let permissions = permissions(bits)?;
+        let range = PageRange::new(GuestAddress(address), pages).map_err(HostError::Memory)?;
+        memory
+            .map_zeroed(range, permissions)
+            .map_err(HostError::Memory)
+    }
+
+    pub fn protect(&mut self, address: u32, pages: u32, bits: u32) -> Result<(), HostError> {
+        let memory = self.memory.as_mut().ok_or(HostError::Closed)?;
+        let permissions = permissions(bits)?;
+        let range = PageRange::new(GuestAddress(address), pages).map_err(HostError::Memory)?;
+        memory
+            .protect(range, permissions)
+            .map_err(HostError::Memory)
+    }
+
+    pub fn unmap(&mut self, address: u32, pages: u32) -> Result<(), HostError> {
+        let memory = self.memory.as_mut().ok_or(HostError::Closed)?;
+        let range = PageRange::new(GuestAddress(address), pages).map_err(HostError::Memory)?;
+        memory.unmap(range).map_err(HostError::Memory)
+    }
+
+    pub fn upload(&mut self, address: u32, length: u32) -> Result<(), HostError> {
+        let memory = self.memory.as_mut().ok_or(HostError::Closed)?;
+        if length as usize > TRANSFER_SIZE {
+            return Err(HostError::InvalidRequest);
+        }
+        let input =
+            &self.arena.as_ref().get_ref()[TRANSFER_OFFSET..TRANSFER_OFFSET + length as usize];
+        memory
+            .write(GuestAddress(address), input)
+            .map_err(HostError::Memory)
+    }
+
+    pub fn compile(&mut self, count: u32) -> Result<u32, HostError> {
+        let memory = self.memory()?;
+        if !(1..=8).contains(&count) {
+            return Err(HostError::InvalidRequest);
+        }
+        let generation = self
+            .generation
+            .checked_add(1)
+            .ok_or(HostError::GenerationExhausted)?;
+        let transfer = &self.arena()[TRANSFER_OFFSET..];
+        let mut specs = [BlockSpec {
+            entry: GuestAddress(0),
+            byte_length: 0,
+        }; 8];
+        for (index, spec) in specs[..count as usize].iter_mut().enumerate() {
+            let offset = index * 8;
+            spec.entry = GuestAddress(u32::from_le_bytes(
+                transfer[offset..offset + 4].try_into().unwrap(),
+            ));
+            spec.byte_length =
+                u32::from_le_bytes(transfer[offset + 4..offset + 8].try_into().unwrap());
+        }
+        let artifact = compile_embedded_region(
+            memory,
+            &specs[..count as usize],
+            CompileLimits::default(),
+            self.key,
+            generation,
+        )
+        .map_err(HostError::Compile)?;
+        self.artifact = Some(artifact);
+        self.generation = generation;
+        Ok(generation)
+    }
+
+    pub fn generation(&self) -> u32 {
+        if self.is_open() && self.artifact.is_some() {
+            self.generation
+        } else {
+            0
+        }
+    }
+
+    pub fn artifact_bytes(&self) -> Result<&[u8], HostError> {
+        let memory = self.memory()?;
+        self.artifact
+            .as_ref()
+            .ok_or(HostError::InvalidArtifact)?
+            .wasm_bytes(memory)
+            .map_err(|_| HostError::CodeInvalidated)
+    }
+
+    pub fn guard(&self, key: u64, generation: u32) -> Result<(), HostError> {
+        self.memory()?;
+        if key != self.key || generation == 0 || generation != self.generation() {
+            return Err(HostError::InvalidArtifact);
+        }
+        self.artifact_bytes().map(|_| ())
+    }
+
+    pub fn read32(&mut self, address: u32) -> Result<(), HostError> {
+        let memory = self.memory()?;
+        let mut bytes = [0; 4];
+        let result = memory
+            .read(GuestAddress(address), &mut bytes)
+            .map(|()| u32::from_le_bytes(bytes));
+        self.write_helper(result)
+    }
+
+    pub fn write32(&mut self, address: u32, value: u32) -> Result<(), HostError> {
+        let memory = self.memory.as_mut().ok_or(HostError::Closed)?;
+        let result = memory
+            .write(GuestAddress(address), &value.to_le_bytes())
+            .map(|()| 0);
+        self.write_helper(result)
+    }
+
+    pub fn close(&mut self) {
+        self.artifact = None;
+        self.memory = None;
+    }
+
+    fn write_helper(&mut self, result: Result<u32, MemoryError>) -> Result<(), HostError> {
+        let output = &mut self.arena.as_mut().get_mut()[HELPER_OFFSET..HELPER_OFFSET + HELPER_SIZE];
+        encode_helper_result(result, output).map_err(|_| HostError::Infrastructure)
+    }
+}
+
+fn permissions(bits: u32) -> Result<Permissions, HostError> {
+    u8::try_from(bits)
+        .ok()
+        .and_then(Permissions::from_bits)
+        .ok_or(HostError::InvalidRequest)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn last_generation_installs_once_and_never_wraps_or_replaces() {
+        let mut instance = EngineInstance::new(1, 1).unwrap();
+        instance.map(0x1000, 1, 7).unwrap();
+        instance.arena_mut().unwrap()[TRANSFER_OFFSET] = 0x90;
+        instance.upload(0x1000, 1).unwrap();
+        let descriptor = &mut instance.arena_mut().unwrap()[TRANSFER_OFFSET..TRANSFER_OFFSET + 8];
+        descriptor[..4].copy_from_slice(&0x1000_u32.to_le_bytes());
+        descriptor[4..].copy_from_slice(&1_u32.to_le_bytes());
+        instance.generation = u32::MAX - 1;
+        assert_eq!(instance.compile(1), Ok(u32::MAX));
+        let bytes = instance.artifact_bytes().unwrap().to_vec();
+        assert_eq!(instance.compile(1), Err(HostError::GenerationExhausted));
+        assert_eq!(instance.generation(), u32::MAX);
+        assert_eq!(instance.artifact_bytes().unwrap(), bytes);
+        assert_eq!(instance.guard(1, u32::MAX), Ok(()));
+        assert_eq!(instance.guard(1, 0), Err(HostError::InvalidArtifact));
+    }
+}

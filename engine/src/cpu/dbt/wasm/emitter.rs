@@ -3,13 +3,19 @@ use wasm_encoder::{
     ImportSection, InstructionSink, MemoryType, Module, TypeSection, ValType,
 };
 
-use super::{abi, integer, locals::*};
+use super::{EmbeddedBinding, abi, integer, locals::*};
 use crate::cpu::dbt::region::CompiledBlock;
 
-pub(in crate::cpu::dbt) fn emit(blocks: &[CompiledBlock]) -> Vec<u8> {
+pub(in crate::cpu::dbt) fn emit(
+    blocks: &[CompiledBlock],
+    binding: Option<EmbeddedBinding>,
+) -> Vec<u8> {
     let mut module = Module::new();
     let mut types = TypeSection::new();
     types.ty().function([ValType::I32; 4], [ValType::I32]);
+    if binding.is_some() {
+        types.ty().function([ValType::I32; 6], [ValType::I32]);
+    }
     module.section(&types);
     let mut imports = ImportSection::new();
     imports.import(
@@ -23,15 +29,32 @@ pub(in crate::cpu::dbt) fn emit(blocks: &[CompiledBlock]) -> Vec<u8> {
             page_size_log2: None,
         }),
     );
+    if binding.is_some() {
+        imports.import("ring3", "guard", EntityType::Function(1));
+    }
     module.section(&imports);
     let mut functions = FunctionSection::new();
     functions.function(0);
     module.section(&functions);
     let mut exports = ExportSection::new();
-    exports.export("run", ExportKind::Func, 0);
+    exports.export("run", ExportKind::Func, u32::from(binding.is_some()));
     module.section(&exports);
     let mut function = Function::new([(16, ValType::I32), (1, ValType::I64)]);
     let mut code = function.instructions();
+    if let Some(binding) = binding {
+        code.i32_const(binding.key as u32 as i32)
+            .i32_const((binding.key >> 32) as u32 as i32)
+            .i32_const(binding.generation as i32)
+            .local_get(STATE_PTR)
+            .local_get(EXIT_PTR)
+            .local_get(CANCEL_PTR)
+            .call(0)
+            .local_tee(LHS)
+            .if_(BlockType::Empty)
+            .local_get(LHS)
+            .return_()
+            .end();
+    }
     abi::preflight(&mut code);
     abi::load_state(&mut code);
     code.block(BlockType::Empty).loop_(BlockType::Empty);

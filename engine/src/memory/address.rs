@@ -26,6 +26,14 @@ impl Permissions {
     pub const READ_EXECUTE: Self = Self(5);
     pub const ALL: Self = Self(7);
 
+    pub const fn from_bits(bits: u8) -> Option<Self> {
+        if bits & !7 == 0 {
+            Some(Self(bits))
+        } else {
+            None
+        }
+    }
+
     pub(crate) fn allows(self, access: Access) -> bool {
         self.0
             & match access {
