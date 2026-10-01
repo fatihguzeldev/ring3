@@ -1,3 +1,0 @@
-LIBRARY MSVCRT.dll
-EXPORTS
-    __RTDynamicCast

@@ -1,3 +1,0 @@
-LIBRARY WINMM.dll
-EXPORTS
-    _timeGetTime@0==timeGetTime

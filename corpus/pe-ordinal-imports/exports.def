@@ -1,3 +1,0 @@
-LIBRARY Ring3Ordinal.dll
-EXPORTS
-    ring3_probe @32768 NONAME

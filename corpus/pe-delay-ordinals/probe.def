@@ -1,3 +1,0 @@
-LIBRARY Ring3Delay.dll
-EXPORTS
-    probe @32768 NONAME

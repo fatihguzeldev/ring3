@@ -1,3 +1,0 @@
-LIBRARY OtherModule.dll
-EXPORTS
-    ring3_target @32768
