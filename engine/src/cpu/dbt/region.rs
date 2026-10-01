@@ -109,9 +109,8 @@ pub fn prepare_region(
                 return Err(CompileError::InstructionLimit);
             }
             let pc = GuestAddress(cursor as u32);
-            let instruction = decode_one(memory, pc).map_err(|error| {
-                instruction_error(pc, InstructionError::Decode(error))
-            })?;
+            let instruction = decode_one(memory, pc)
+                .map_err(|error| instruction_error(pc, InstructionError::Decode(error)))?;
             let next = cursor + u64::from(instruction.length());
             let terminates = matches!(
                 instruction.operation(),

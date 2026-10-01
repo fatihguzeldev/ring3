@@ -10,6 +10,7 @@ crate-type = ["rlib", "cdylib"]
 
 [dependencies]
 iced-x86 = { version = "=1.21.0", default-features = false, features = ["std", "decoder", "instr_info"] }
+wasm-encoder = { version = "=0.259.0", default-features = false, features = ["std"] }
 
 [lints.rust]
 unsafe_code = "forbid"
