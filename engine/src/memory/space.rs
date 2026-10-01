@@ -1,4 +1,5 @@
 use super::address::{ADDRESS_LIMIT, GUEST_PAGES};
+use super::code::{PageVersion, new_identity};
 use super::*;
 
 pub struct AddressSpace {
@@ -6,9 +7,49 @@ pub struct AddressSpace {
     mappings: Box<[u32]>,
     permissions: Box<[Permissions]>,
     free: Vec<u32>,
+    identity: u64,
+    version: u64,
+    versions: Box<[PageVersion]>,
 }
 
 impl AddressSpace {
+    pub fn snapshot_code(
+        &self,
+        address: GuestAddress,
+        length: usize,
+    ) -> Result<CodeSnapshot, MemoryError> {
+        if length == 0 {
+            return Err(MemoryError::InvalidRange);
+        }
+        self.check_access(address, length, Access::Execute)?;
+        let first = (address.0 / PAGE_SIZE) as usize;
+        let last = ((u64::from(address.0) + length as u64 - 1) / u64::from(PAGE_SIZE)) as usize;
+        let mut versions = Vec::new();
+        versions
+            .try_reserve_exact(last - first + 1)
+            .map_err(|_| MemoryError::Allocation)?;
+        for page in first..=last {
+            versions.push(self.versions[self.mappings[page] as usize - 1]);
+        }
+        Ok(CodeSnapshot {
+            identity: self.identity,
+            first,
+            versions: versions.into_boxed_slice(),
+        })
+    }
+
+    pub fn is_code_current(&self, snapshot: &CodeSnapshot) -> bool {
+        self.identity == snapshot.identity
+            && snapshot
+                .versions
+                .iter()
+                .enumerate()
+                .all(|(index, version)| {
+                    let mapping = self.mappings[snapshot.first + index];
+                    mapping != 0 && self.versions[mapping as usize - 1] == *version
+                })
+    }
+
     pub fn new(resident_pages: u32) -> Result<Self, MemoryError> {
         let bytes = u64::from(resident_pages) * u64::from(PAGE_SIZE);
         if resident_pages == 0 || bytes > u64::from(u32::MAX) || bytes > isize::MAX as u64 {
@@ -17,6 +58,7 @@ impl AddressSpace {
         let backing = filled(bytes as usize, 0)?.into_boxed_slice();
         let mappings = filled(GUEST_PAGES, 0)?.into_boxed_slice();
         let permissions = filled(resident_pages as usize, Permissions::NONE)?.into_boxed_slice();
+        let versions = filled(resident_pages as usize, PageVersion::default())?.into_boxed_slice();
         let mut free = Vec::new();
         free.try_reserve_exact(resident_pages as usize)
             .map_err(|_| MemoryError::Allocation)?;
@@ -26,6 +68,9 @@ impl AddressSpace {
             mappings,
             permissions,
             free,
+            identity: new_identity()?,
+            version: 0,
+            versions,
         })
     }
 
@@ -52,11 +97,16 @@ impl AddressSpace {
         if range.count > self.free.len() {
             return Err(MemoryError::Capacity);
         }
+        let version = self.advance_version()?;
         for page in range.indices() {
             let slot = self.free.pop().unwrap();
             let offset = slot as usize * PAGE_SIZE as usize;
             self.backing[offset..offset + PAGE_SIZE as usize].fill(0);
             self.permissions[slot as usize] = permissions;
+            self.versions[slot as usize] = PageVersion {
+                mapping: version,
+                content: version,
+            };
             self.mappings[page] = slot + 1;
         }
         Ok(())
@@ -68,15 +118,18 @@ impl AddressSpace {
         permissions: Permissions,
     ) -> Result<(), MemoryError> {
         self.require_mapped(range)?;
+        let version = self.advance_version()?;
         for page in range.indices() {
             let slot = self.mappings[page] as usize - 1;
             self.permissions[slot] = permissions;
+            self.versions[slot].mapping = version;
         }
         Ok(())
     }
 
     pub fn unmap(&mut self, range: PageRange) -> Result<(), MemoryError> {
         self.require_mapped(range)?;
+        self.advance_version()?;
         for page in range.indices() {
             let slot = self.mappings[page] - 1;
             self.mappings[page] = 0;
@@ -108,6 +161,10 @@ impl AddressSpace {
 
     pub fn write(&mut self, address: GuestAddress, input: &[u8]) -> Result<(), MemoryError> {
         self.check_access(address, input.len(), Access::Write)?;
+        if input.is_empty() {
+            return Ok(());
+        }
+        let version = self.advance_version()?;
         let mut copied = 0;
         while copied < input.len() {
             let current = address.0 as u64 + copied as u64;
@@ -116,6 +173,7 @@ impl AddressSpace {
             let count = (PAGE_SIZE as usize - within).min(input.len() - copied);
             let offset = (self.mappings[page] as usize - 1) * PAGE_SIZE as usize + within;
             self.backing[offset..offset + count].copy_from_slice(&input[copied..copied + count]);
+            self.versions[self.mappings[page] as usize - 1].content = version;
             copied += count;
         }
         Ok(())
@@ -180,6 +238,15 @@ impl AddressSpace {
         Ok(slot)
     }
 
+    fn advance_version(&mut self) -> Result<u64, MemoryError> {
+        let next = self
+            .version
+            .checked_add(1)
+            .ok_or(MemoryError::VersionExhausted)?;
+        self.version = next;
+        Ok(next)
+    }
+
     fn require_mapped(&self, range: PageRange) -> Result<(), MemoryError> {
         for page in range.indices() {
             if self.mappings[page] == 0 {
@@ -222,6 +289,7 @@ mod tests {
         let space = AddressSpace::new(2).unwrap();
         assert_eq!(space.capacity_pages(), 2);
         assert_eq!(space.mapped_pages(), 0);
+        assert_eq!(space.backing.len(), 2 * PAGE_SIZE as usize);
     }
 
     #[test]
@@ -231,5 +299,63 @@ mod tests {
             AddressSpace::new(u32::MAX),
             Err(MemoryError::Capacity)
         ));
+    }
+
+    #[test]
+    fn snapshots_track_the_current_executable_mapping() {
+        let mut space = AddressSpace::new(1).unwrap();
+        let range = PageRange::new(GuestAddress(0x1000), 1).unwrap();
+        space.map_zeroed(range, Permissions::ALL).unwrap();
+        let snapshot = space.snapshot_code(GuestAddress(0x1000), 4).unwrap();
+        assert!(space.is_code_current(&snapshot));
+        space.write(GuestAddress(0x1000), &[0x90]).unwrap();
+        assert!(!space.is_code_current(&snapshot));
+    }
+
+    #[test]
+    fn exhausted_versions_reject_every_mutation_without_changing_memory() {
+        let mut space = AddressSpace::new(2).unwrap();
+        let mapped = PageRange::new(GuestAddress(0x1000), 1).unwrap();
+        let vacant = PageRange::new(GuestAddress(0x2000), 1).unwrap();
+        space.map_zeroed(mapped, Permissions::ALL).unwrap();
+        space.write(GuestAddress(0x1000), &[0x90]).unwrap();
+        let snapshot = space.snapshot_code(GuestAddress(0x1000), 1).unwrap();
+        space.version = u64::MAX;
+
+        assert_eq!(
+            space.map_zeroed(vacant, Permissions::ALL),
+            Err(MemoryError::VersionExhausted)
+        );
+        assert_eq!(
+            space.protect(mapped, Permissions::NONE),
+            Err(MemoryError::VersionExhausted)
+        );
+        assert_eq!(space.unmap(mapped), Err(MemoryError::VersionExhausted));
+        assert_eq!(
+            space.write(GuestAddress(0x1000), &[0xcc]),
+            Err(MemoryError::VersionExhausted)
+        );
+        space.write(GuestAddress(0x1000), &[]).unwrap();
+        assert_eq!(space.mapped_pages(), 1);
+        assert!(space.is_code_current(&snapshot));
+        assert!(space.resolve(GuestAddress(0x2000), Access::Read).is_err());
+        let mut bytes = [0];
+        space.fetch(GuestAddress(0x1000), &mut bytes).unwrap();
+        assert_eq!(bytes, [0x90]);
+    }
+
+    #[test]
+    fn the_final_version_is_usable_but_never_wraps() {
+        let mut space = AddressSpace::new(1).unwrap();
+        let range = PageRange::new(GuestAddress(0), 1).unwrap();
+        space.version = u64::MAX - 1;
+        space.map_zeroed(range, Permissions::ALL).unwrap();
+        let snapshot = space.snapshot_code(GuestAddress(0), 1).unwrap();
+        assert_eq!(
+            space.write(GuestAddress(0), &[1]),
+            Err(MemoryError::VersionExhausted)
+        );
+        assert!(space.is_code_current(&snapshot));
+        assert_eq!(space.version, u64::MAX);
     }
 }
