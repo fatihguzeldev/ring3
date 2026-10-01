@@ -22,6 +22,7 @@ impl Permissions {
     pub const NONE: Self = Self(0);
     pub const READ: Self = Self(1);
     pub const READ_WRITE: Self = Self(3);
+    pub const EXECUTE: Self = Self(4);
     pub const READ_EXECUTE: Self = Self(5);
     pub const ALL: Self = Self(7);
 

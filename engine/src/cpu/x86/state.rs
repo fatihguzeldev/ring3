@@ -15,3 +15,29 @@ impl Default for State32 {
         }
     }
 }
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Register32 {
+    Eax,
+    Ecx,
+    Edx,
+    Ebx,
+    Esp,
+    Ebp,
+    Esi,
+    Edi,
+}
+
+impl Register32 {
+    pub const fn index(self) -> usize {
+        match self {
+            Self::Eax => 0,
+            Self::Ecx => 1,
+            Self::Edx => 2,
+            Self::Ebx => 3,
+            Self::Esp => 4,
+            Self::Ebp => 5,
+            Self::Esi => 6,
+            Self::Edi => 7,
+        }
+    }
+}
