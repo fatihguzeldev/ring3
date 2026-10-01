@@ -7,7 +7,11 @@ use crate::{
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DecodeError {
-    MemoryFault { fault: MemoryFault, length: u32 },
+    MemoryFault {
+        pc: GuestAddress,
+        fault: MemoryFault,
+        length: u32,
+    },
     InvalidEncoding,
     Unsupported(UnsupportedFeature),
     Infrastructure(MemoryError),
@@ -52,7 +56,7 @@ pub fn decode_one(
     for length in 1..=bytes.len() {
         memory
             .fetch(pc, &mut bytes[..length])
-            .map_err(|error| memory_error(error, length))?;
+            .map_err(|error| memory_error(error, pc, length))?;
         let mut decoder =
             Decoder::with_ip(32, &bytes[..length], u64::from(pc.0), DecoderOptions::NONE);
         let instruction = decoder.decode();
@@ -64,7 +68,7 @@ pub fn decode_one(
                 let operation = super::lower::lower(&instruction, &bytes[..consumed])?;
                 let code_snapshot = memory
                     .snapshot_code(pc, consumed)
-                    .map_err(|error| memory_error(error, consumed))?;
+                    .map_err(|error| memory_error(error, pc, consumed))?;
                 return Ok(DecodedInstruction {
                     pc,
                     length: consumed as u8,
@@ -79,9 +83,10 @@ pub fn decode_one(
     Err(DecodeError::InvalidEncoding)
 }
 
-fn memory_error(error: MemoryError, length: usize) -> DecodeError {
+fn memory_error(error: MemoryError, pc: GuestAddress, length: usize) -> DecodeError {
     match error {
         MemoryError::Fault(fault) => DecodeError::MemoryFault {
+            pc,
             fault,
             length: length as u32,
         },
