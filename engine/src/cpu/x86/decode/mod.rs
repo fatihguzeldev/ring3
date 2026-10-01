@@ -1,4 +1,5 @@
 mod decoder;
+mod flow;
 mod integer;
 mod lower;
 mod operands;

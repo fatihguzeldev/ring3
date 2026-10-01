@@ -1,4 +1,5 @@
 use super::Register32;
+use crate::memory::GuestAddress;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct EffectiveAddress {
@@ -66,6 +67,32 @@ pub enum UnaryKind {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BranchTarget {
+    Direct(GuestAddress),
+    Indirect(Location32),
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Condition {
+    Overflow,
+    NotOverflow,
+    Below,
+    AboveOrEqual,
+    Equal,
+    NotEqual,
+    BelowOrEqual,
+    Above,
+    Sign,
+    NotSign,
+    Parity,
+    NotParity,
+    Less,
+    GreaterOrEqual,
+    LessOrEqual,
+    Greater,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Operation {
     Nop,
     Move {
@@ -89,5 +116,24 @@ pub enum Operation {
     Unary {
         kind: UnaryKind,
         destination: Location32,
+    },
+    Jump {
+        target: BranchTarget,
+    },
+    ConditionalJump {
+        condition: Condition,
+        target: GuestAddress,
+    },
+    Call {
+        target: BranchTarget,
+    },
+    Push {
+        source: Value32,
+    },
+    Pop {
+        destination: Location32,
+    },
+    Return {
+        stack_adjust: u16,
     },
 }
