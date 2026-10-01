@@ -47,6 +47,25 @@ pub enum ExtensionKind {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BinaryKind {
+    Add,
+    Sub,
+    Cmp,
+    Test,
+    And,
+    Or,
+    Xor,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum UnaryKind {
+    Inc,
+    Dec,
+    Not,
+    Neg,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Operation {
     Nop,
     Move {
@@ -61,5 +80,14 @@ pub enum Operation {
     Lea {
         destination: Register32,
         address: EffectiveAddress,
+    },
+    Binary {
+        kind: BinaryKind,
+        destination: Location32,
+        source: Value32,
+    },
+    Unary {
+        kind: UnaryKind,
+        destination: Location32,
     },
 }

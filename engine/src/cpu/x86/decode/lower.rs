@@ -43,6 +43,6 @@ pub(super) fn lower(instruction: &Instruction, bytes: &[u8]) -> Result<Operation
             destination: register(instruction.op0_register())?,
             address: effective_address(instruction)?,
         }),
-        _ => Err(unsupported()),
+        _ => super::integer::lower(instruction).unwrap_or_else(|| Err(unsupported())),
     }
 }
