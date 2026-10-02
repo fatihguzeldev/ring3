@@ -67,7 +67,7 @@ pub struct PreparedRegion {
 enum PreparationProfile {
     Standalone,
     Embedded,
-    ResidentReadOnly,
+    Resident,
 }
 
 #[derive(Debug)]
@@ -110,18 +110,12 @@ pub fn prepare_region(
     prepare(memory, specs, limits, PreparationProfile::Standalone, &[])
 }
 
-pub(super) fn prepare_resident_read_region(
+pub(super) fn prepare_resident_region(
     memory: &AddressSpace,
     specs: &[BlockSpec],
     limits: CompileLimits,
 ) -> Result<PreparedRegion, CompileError> {
-    prepare(
-        memory,
-        specs,
-        limits,
-        PreparationProfile::ResidentReadOnly,
-        &[],
-    )
+    prepare(memory, specs, limits, PreparationProfile::Resident, &[])
 }
 
 pub(super) fn prepare_embedded_region(
@@ -180,9 +174,10 @@ fn prepare(
                 return Err(instruction_error(pc, InstructionError::InvalidBlockEnd));
             }
             if !(supports(&instruction, embedded)
-                || (matches!(profile, PreparationProfile::ResidentReadOnly)
+                || (matches!(profile, PreparationProfile::Resident)
                     && (supports_memory_reads(instruction.operation())
-                        || supports_indirect_jump(instruction.operation()))))
+                        || supports_indirect_jump(instruction.operation())
+                        || supports_memory_move_store(instruction.operation()))))
             {
                 return Err(instruction_error(pc, InstructionError::BackendUnsupported));
             }
@@ -301,18 +296,21 @@ fn supports_indirect_jump(operation: &Operation) -> bool {
     )
 }
 
-pub(super) fn supports(instruction: &DecodedInstruction, embedded: bool) -> bool {
-    let operation = instruction.operation();
-    let memory_write = matches!(
+fn supports_memory_move_store(operation: &Operation) -> bool {
+    matches!(
         operation,
         Operation::Move {
             destination: Location32::Memory(_),
             source: Value32::Register(_) | Value32::Immediate(_),
         }
-    );
+    )
+}
+
+pub(super) fn supports(instruction: &DecodedInstruction, embedded: bool) -> bool {
+    let operation = instruction.operation();
     (embedded
         && (supports_memory_reads(operation)
-            || memory_write
+            || supports_memory_move_store(operation)
             || supports_stack(instruction)
             || supports_indirect_jump(operation)))
         || (embedded

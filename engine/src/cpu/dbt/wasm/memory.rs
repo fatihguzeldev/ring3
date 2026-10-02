@@ -9,10 +9,31 @@ use super::locals::*;
 
 mod narrow;
 
+#[derive(Clone, Copy)]
+pub(super) enum StoreImport {
+    Replacement(u32),
+    Resident { index: u32, key: u64, id: u64 },
+}
+
+impl StoreImport {
+    fn emit_binding(self, code: &mut InstructionSink<'_>) -> u32 {
+        match self {
+            Self::Replacement(index) => index,
+            Self::Resident { index, key, id } => {
+                code.i32_const(key as u32 as i32)
+                    .i32_const((key >> 32) as u32 as i32)
+                    .i32_const(id as u32 as i32)
+                    .i32_const((id >> 32) as u32 as i32);
+                index
+            }
+        }
+    }
+}
+
 #[derive(Clone, Copy, Default)]
 pub(super) struct Imports {
     pub(super) read: Option<u32>,
-    pub(super) store: Option<u32>,
+    pub(super) store: Option<StoreImport>,
     pub(super) read8: Option<u32>,
     pub(super) read16: Option<u32>,
 }
@@ -126,6 +147,10 @@ pub(super) fn store(
     exit_depth: u32,
 ) {
     effective_address(code, address);
+    let index = imports
+        .store
+        .expect("prepared memory store has an import")
+        .emit_binding(code);
     code.local_get(ADDRESS);
     match source {
         Value32::Register(source) => {
@@ -136,8 +161,7 @@ pub(super) fn store(
         }
         Value32::Memory(_) => unreachable!("prepared move cannot have two memory operands"),
     }
-    code.call(imports.store.expect("prepared memory store has an import"))
-        .local_set(HELPER_STATUS);
+    code.call(index).local_set(HELPER_STATUS);
     validate_result(code, true);
     exit_if_failed(code, exit_depth);
 }
@@ -219,13 +243,13 @@ pub(super) fn store_result(
     exit_depth: u32,
 ) {
     effective_address(code, destination);
+    let index = imports
+        .store
+        .expect("prepared memory operand has a store import")
+        .emit_binding(code);
     code.local_get(ADDRESS)
         .local_get(RESULT)
-        .call(
-            imports
-                .store
-                .expect("prepared memory operand has a store import"),
-        )
+        .call(index)
         .local_set(HELPER_STATUS);
     validate_result(code, true);
     exit_if_failed(code, exit_depth);

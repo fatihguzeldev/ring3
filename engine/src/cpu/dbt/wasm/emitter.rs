@@ -32,7 +32,15 @@ pub(in crate::cpu::dbt) fn emit(
         types.ty().function([ValType::I32], [ValType::I32]);
     }
     if needs_store {
-        types.ty().function([ValType::I32; 2], [ValType::I32]);
+        let parameters = if matches!(binding, Some(EmbeddedBinding::Resident { .. })) {
+            6
+        } else {
+            2
+        };
+        types.ty().function(
+            std::iter::repeat_n(ValType::I32, parameters),
+            [ValType::I32],
+        );
     }
     module.section(&types);
     let mut imports = ImportSection::new();
@@ -67,8 +75,19 @@ pub(in crate::cpu::dbt) fn emit(
         type_index += 1;
     }
     if needs_store {
-        imports.import("ring3", "store32", EntityType::Function(type_index));
-        helper_imports.store = Some(function_index);
+        let (name, store) = match binding {
+            Some(EmbeddedBinding::Resident { key, id }) => (
+                "store_resident32",
+                memory::StoreImport::Resident {
+                    index: function_index,
+                    key,
+                    id,
+                },
+            ),
+            _ => ("store32", memory::StoreImport::Replacement(function_index)),
+        };
+        imports.import("ring3", name, EntityType::Function(type_index));
+        helper_imports.store = Some(store);
         function_index += 1;
     }
     if needs_read8 {

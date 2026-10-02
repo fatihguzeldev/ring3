@@ -4,7 +4,7 @@ use crate::memory::{AddressSpace, GuestAddress};
 
 use super::{
     ArtifactError, BlockSpec, CompileError, CompileLimits, CompiledRegion, artifact::emit_prepared,
-    compile_region, region::prepare_resident_read_region, wasm::EmbeddedBinding,
+    compile_region, region::prepare_resident_region, wasm::EmbeddedBinding,
 };
 
 const MAX_UNITS: usize = 8;
@@ -129,7 +129,7 @@ impl ResidentRegistry {
             return Err(RegistryError::UnitCapacity);
         }
         let prepared =
-            prepare_resident_read_region(memory, specs, limits).map_err(RegistryError::Compile)?;
+            prepare_resident_region(memory, specs, limits).map_err(RegistryError::Compile)?;
         // final emission can fail after reservation; unpublished ids are never reused.
         let id = allocate_id(counter)?;
         let region = emit_prepared(
