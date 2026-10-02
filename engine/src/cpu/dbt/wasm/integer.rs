@@ -34,6 +34,13 @@ pub(super) fn instruction(
             memory::store(code, address, source, imports, exit_depth);
             store = true;
         }
+        Operation::Lea {
+            destination,
+            address,
+        } => {
+            memory::address_value(code, address);
+            code.local_set(register(destination));
+        }
         Operation::Binary {
             kind,
             destination: Location32::Register(destination),

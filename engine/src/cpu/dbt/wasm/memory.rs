@@ -241,6 +241,11 @@ pub(super) fn exit_if_invalidated(code: &mut InstructionSink<'_>, exit_depth: u3
 }
 
 fn effective_address(code: &mut InstructionSink<'_>, address: EffectiveAddress) {
+    address_value(code, address);
+    code.local_set(ADDRESS);
+}
+
+pub(super) fn address_value(code: &mut InstructionSink<'_>, address: EffectiveAddress) {
     code.i32_const(address.displacement as i32);
     if let Some(base) = address.base {
         code.local_get(register(base)).i32_add();
@@ -251,7 +256,6 @@ fn effective_address(code: &mut InstructionSink<'_>, address: EffectiveAddress) 
             .i32_mul()
             .i32_add();
     }
-    code.local_set(ADDRESS);
 }
 
 fn validate_result(code: &mut InstructionSink<'_>, store: bool) {

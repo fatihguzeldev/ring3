@@ -266,6 +266,7 @@ pub(super) fn supports(instruction: &DecodedInstruction, embedded: bool) -> bool
                     destination: Location32::Register(_),
                     source: Value32::Register(_) | Value32::Immediate(_),
                 }
+                | Operation::Lea { .. }
                 | Operation::Binary {
                     kind: BinaryKind::Add
                         | BinaryKind::Sub
