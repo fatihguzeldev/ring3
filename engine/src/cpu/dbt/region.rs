@@ -138,6 +138,7 @@ fn prepare(
     validate_blocks(specs, limits.blocks)?;
     gate::validate(specs, gates)?;
     let embedded = matches!(profile, PreparationProfile::Embedded);
+    let resident = matches!(profile, PreparationProfile::Resident);
 
     let mut blocks = Vec::new();
     blocks
@@ -169,18 +170,20 @@ fn prepare(
             let instruction = decode_one(memory, pc)
                 .map_err(|error| instruction_error(pc, InstructionError::Decode(error)))?;
             let next = cursor + u64::from(instruction.length());
-            let terminates = terminates(&instruction, embedded);
+            let terminates = terminates(&instruction, embedded)
+                || (resident && supports_near_control(&instruction));
             if next > end || (terminates && next != end) {
                 return Err(instruction_error(pc, InstructionError::InvalidBlockEnd));
             }
             if !(supports(&instruction, embedded)
-                || (matches!(profile, PreparationProfile::Resident)
+                || (resident
                     && (supports_memory_reads(instruction.operation())
                         || supports_indirect_jump(instruction.operation())
                         || supports_memory_move_store(instruction.operation())
                         || supports_memory_unary(instruction.operation())
                         || supports_memory_binary(instruction.operation())
-                        || supports_stack_values(instruction.operation()))))
+                        || supports_stack_values(instruction.operation())
+                        || supports_near_control(&instruction))))
             {
                 return Err(instruction_error(pc, InstructionError::BackendUnsupported));
             }
@@ -242,7 +245,7 @@ fn supports_stack_values(operation: &Operation) -> bool {
     matches!(operation, Operation::Push { .. } | Operation::Pop { .. })
 }
 
-fn supports_stack(instruction: &DecodedInstruction) -> bool {
+fn supports_near_control(instruction: &DecodedInstruction) -> bool {
     match instruction.operation() {
         Operation::Call {
             target: BranchTarget::Direct(_),
@@ -251,8 +254,12 @@ fn supports_stack(instruction: &DecodedInstruction) -> bool {
             target: BranchTarget::Indirect(_),
         } => true,
         Operation::Return { .. } => matches!(instruction.length(), 1 | 3),
-        _ => supports_stack_values(instruction.operation()),
+        _ => false,
     }
+}
+
+fn supports_stack(instruction: &DecodedInstruction) -> bool {
+    supports_near_control(instruction) || supports_stack_values(instruction.operation())
 }
 
 pub(super) fn terminates(instruction: &DecodedInstruction, embedded: bool) -> bool {

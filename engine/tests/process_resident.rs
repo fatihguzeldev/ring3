@@ -436,13 +436,13 @@ fn rejected_counts_spans_and_resident_profile_keep_legacy_and_resident_state() {
         ),
         (
             &[0xff, 0x10, 0xeb, 0][..],
-            InstructionError::BackendUnsupported,
+            InstructionError::InvalidBlockEnd,
         ),
         (
-            &[0xe8, 0, 0, 0, 0][..],
-            InstructionError::BackendUnsupported,
+            &[0xe8, 0, 0, 0, 0, 0x90][..],
+            InstructionError::InvalidBlockEnd,
         ),
-        (&[0xc3][..], InstructionError::BackendUnsupported),
+        (&[0xc3, 0x90][..], InstructionError::InvalidBlockEnd),
     ] {
         upload(&mut engine, BAD, bytes);
         describe(&mut engine, &[(BAD, bytes.len() as u32)]);

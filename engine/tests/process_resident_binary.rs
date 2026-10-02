@@ -524,7 +524,7 @@ fn span_poison_prefix_and_remaining_exclusions_preserve_arena_units_and_capacity
             &bytes,
             bytes.len(),
             CODE + 1,
-            InstructionError::BackendUnsupported,
+            InstructionError::InvalidBlockEnd,
         );
     }
     describe(&mut engine, &[(CODE, 3)]);

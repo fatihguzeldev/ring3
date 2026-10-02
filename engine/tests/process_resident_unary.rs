@@ -380,7 +380,7 @@ fn span_poison_and_remaining_exclusions_preserve_arena_and_installed_units() {
             &bytes,
             bytes.len(),
             CODE + 1,
-            InstructionError::BackendUnsupported,
+            InstructionError::InvalidBlockEnd,
         );
     }
     describe(&mut engine, &[(CODE, 3)]);

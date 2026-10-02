@@ -223,22 +223,18 @@ fn all_seventeen_reads_admit_without_data_and_preserve_legacy_and_retained_units
 #[test]
 fn excluded_operations_and_poison_keep_original_pc_and_block_end_priority() {
     let (mut engine, keep) = fixture(&[0x90, 0xeb, 0]);
-    let excluded: &[&[u8]] = &[
+    let nonterminal: &[&[u8]] = &[
         &[0xe8, 0, 0, 0, 0],
         &[0xff, 0xd0],
         &[0xff, 0x13],
         &[0xc3],
         &[0xc2, 8, 0],
     ];
-    for instruction in excluded {
+    for instruction in nonterminal {
         let mut bytes = vec![0x90];
         bytes.extend_from_slice(instruction);
-        rejected(
-            &mut engine,
-            keep,
-            &bytes,
-            InstructionError::BackendUnsupported,
-        );
+        bytes.push(0x90);
+        rejected(&mut engine, keep, &bytes, InstructionError::InvalidBlockEnd);
     }
     rejected(
         &mut engine,
@@ -265,12 +261,7 @@ fn excluded_operations_and_poison_keep_original_pc_and_block_end_priority() {
         let mut bytes = vec![0x90];
         bytes.extend_from_slice(instruction);
         bytes.extend_from_slice(&[0x0f, 0x06]);
-        rejected(
-            &mut engine,
-            keep,
-            &bytes,
-            InstructionError::BackendUnsupported,
-        );
+        rejected(&mut engine, keep, &bytes, InstructionError::InvalidBlockEnd);
     }
     rejected(
         &mut engine,

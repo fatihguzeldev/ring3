@@ -512,7 +512,7 @@ fn span_poison_prefix_and_control_exclusions_preserve_arena_units_and_capacity()
             &bytes,
             bytes.len(),
             CODE + 1,
-            InstructionError::BackendUnsupported,
+            InstructionError::InvalidBlockEnd,
         );
     }
     for instruction in [&[0xff, 0x1b][..], &[0xcb], &[0x60], &[0x61]] {

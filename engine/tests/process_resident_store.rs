@@ -360,9 +360,9 @@ fn accepted_moves_reach_later_poison_but_cut_spans_and_remaining_operations_do_n
         assert_eq!(saved(&engine, &[keep]), before);
     }
     for (instruction, cause) in [
-        (&[0xff, 0x13][..], InstructionError::BackendUnsupported),
-        (&[0xe8, 0, 0, 0, 0], InstructionError::BackendUnsupported),
-        (&[0xc3], InstructionError::BackendUnsupported),
+        (&[0xff, 0x13][..], InstructionError::InvalidBlockEnd),
+        (&[0xe8, 0, 0, 0, 0], InstructionError::InvalidBlockEnd),
+        (&[0xc3], InstructionError::InvalidBlockEnd),
         (
             &[0x66, 0x89, 0x03],
             InstructionError::Decode(DecodeError::Unsupported(UnsupportedFeature::Opcode)),

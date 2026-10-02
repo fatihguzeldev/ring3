@@ -323,7 +323,7 @@ fn jump_span_priority_and_adjacent_exclusions_preserve_previous_state() {
             keep,
             &bytes,
             bytes.len(),
-            InstructionError::BackendUnsupported,
+            InstructionError::InvalidBlockEnd,
         );
     }
     for (instruction, feature) in [
