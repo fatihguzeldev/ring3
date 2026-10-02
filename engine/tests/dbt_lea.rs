@@ -290,9 +290,20 @@ fn malformed_lea_prefixes_and_adjacent_exclusions_keep_exact_error_categories() 
         &[0x64, 0x8d, 0x03],
         InstructionError::Decode(DecodeError::Unsupported(UnsupportedFeature::Segment)),
     );
-    for bytes in [&[0x03, 0x03][..], &[0x0f, 0xb6, 0x03][..]] {
-        rejected(bytes, InstructionError::BackendUnsupported);
-    }
+    rejected(&[0x03, 0x03], InstructionError::BackendUnsupported);
+    let memory = code(0x1000, &[0x90, 0x0f, 0xb6, 0x03]);
+    let expected = Some(CompileError::Instruction {
+        pc: GuestAddress(0x1001),
+        cause: InstructionError::BackendUnsupported,
+    });
+    assert_eq!(
+        prepare_region(&memory, &[spec(0x1000, 4)], CompileLimits::default()).err(),
+        expected
+    );
+    assert_eq!(
+        prepare_entry_region(&memory, &[GuestAddress(0x1000)], CompileLimits::default()).err(),
+        expected
+    );
 }
 
 #[test]

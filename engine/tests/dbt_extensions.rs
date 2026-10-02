@@ -303,7 +303,7 @@ fn rejected(instruction: &[u8], cause: InstructionError) {
 }
 
 #[test]
-fn memory_source_extensions_remain_backend_excluded_before_any_guest_data_read() {
+fn standalone_memory_source_extensions_remain_backend_excluded_before_any_guest_data_read() {
     for instruction in [
         &[0x0f, 0xb6, 0x03][..],
         &[0x0f, 0xb7, 0x03][..],
@@ -312,7 +312,26 @@ fn memory_source_extensions_remain_backend_excluded_before_any_guest_data_read()
         &[0x0f, 0xb6, 0x04, 0x24][..],
         &[0x0f, 0xbf, 0x05, 0xff, 0xff, 0xff, 0xff][..],
     ] {
-        rejected(instruction, InstructionError::BackendUnsupported);
+        let mut bytes = vec![0x90];
+        bytes.extend_from_slice(instruction);
+        let memory = code(0x1000, &bytes);
+        let expected = Some(CompileError::Instruction {
+            pc: GuestAddress(0x1001),
+            cause: InstructionError::BackendUnsupported,
+        });
+        assert_eq!(
+            prepare_region(
+                &memory,
+                &[spec(0x1000, bytes.len())],
+                CompileLimits::default()
+            )
+            .err(),
+            expected
+        );
+        assert_eq!(
+            prepare_entry_region(&memory, &[GuestAddress(0x1000)], CompileLimits::default()).err(),
+            expected
+        );
     }
 }
 
