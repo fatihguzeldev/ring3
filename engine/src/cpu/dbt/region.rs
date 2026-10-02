@@ -63,6 +63,13 @@ pub struct PreparedRegion {
     pub(super) blocks: Vec<CompiledBlock>,
 }
 
+#[derive(Clone, Copy)]
+enum PreparationProfile {
+    Standalone,
+    Embedded,
+    ResidentReadOnly,
+}
+
 #[derive(Debug)]
 pub(super) struct CompiledBlock {
     pub(super) instructions: Vec<DecodedInstruction>,
@@ -100,7 +107,21 @@ pub fn prepare_region(
     specs: &[BlockSpec],
     limits: CompileLimits,
 ) -> Result<PreparedRegion, CompileError> {
-    prepare(memory, specs, limits, false, &[])
+    prepare(memory, specs, limits, PreparationProfile::Standalone, &[])
+}
+
+pub(super) fn prepare_resident_read_region(
+    memory: &AddressSpace,
+    specs: &[BlockSpec],
+    limits: CompileLimits,
+) -> Result<PreparedRegion, CompileError> {
+    prepare(
+        memory,
+        specs,
+        limits,
+        PreparationProfile::ResidentReadOnly,
+        &[],
+    )
 }
 
 pub(super) fn prepare_embedded_region(
@@ -109,19 +130,20 @@ pub(super) fn prepare_embedded_region(
     limits: CompileLimits,
     gates: &[GateSpec],
 ) -> Result<PreparedRegion, CompileError> {
-    prepare(memory, specs, limits, true, gates)
+    prepare(memory, specs, limits, PreparationProfile::Embedded, gates)
 }
 
 fn prepare(
     memory: &AddressSpace,
     specs: &[BlockSpec],
     limits: CompileLimits,
-    embedded: bool,
+    profile: PreparationProfile,
     gates: &[GateSpec],
 ) -> Result<PreparedRegion, CompileError> {
     validate_limits(limits)?;
     validate_blocks(specs, limits.blocks)?;
     gate::validate(specs, gates)?;
+    let embedded = matches!(profile, PreparationProfile::Embedded);
 
     let mut blocks = Vec::new();
     blocks
@@ -157,7 +179,10 @@ fn prepare(
             if next > end || (terminates && next != end) {
                 return Err(instruction_error(pc, InstructionError::InvalidBlockEnd));
             }
-            if !supports(&instruction, embedded) {
+            if !(supports(&instruction, embedded)
+                || (matches!(profile, PreparationProfile::ResidentReadOnly)
+                    && supports_memory_reads(instruction.operation())))
+            {
                 return Err(instruction_error(pc, InstructionError::BackendUnsupported));
             }
             instructions
@@ -240,14 +265,37 @@ pub(super) fn terminates(instruction: &DecodedInstruction, embedded: bool) -> bo
         ))
 }
 
-pub(super) fn supports(instruction: &DecodedInstruction, embedded: bool) -> bool {
-    let operation = instruction.operation();
-    let memory_move = matches!(
+fn supports_memory_reads(operation: &Operation) -> bool {
+    matches!(
         operation,
         Operation::Move {
             destination: Location32::Register(_),
             source: Value32::Memory(_),
-        } | Operation::Move {
+        } | Operation::Extend {
+            source: SmallSource::Memory { .. },
+            ..
+        } | Operation::Binary {
+            kind: BinaryKind::Add
+                | BinaryKind::Sub
+                | BinaryKind::Cmp
+                | BinaryKind::And
+                | BinaryKind::Or
+                | BinaryKind::Xor,
+            destination: Location32::Register(_),
+            source: Value32::Memory(_),
+        } | Operation::Binary {
+            kind: BinaryKind::Cmp | BinaryKind::Test,
+            destination: Location32::Memory(_),
+            source: Value32::Register(_) | Value32::Immediate(_),
+        }
+    )
+}
+
+pub(super) fn supports(instruction: &DecodedInstruction, embedded: bool) -> bool {
+    let operation = instruction.operation();
+    let memory_write = matches!(
+        operation,
+        Operation::Move {
             destination: Location32::Memory(_),
             source: Value32::Register(_) | Value32::Immediate(_),
         }
@@ -258,30 +306,20 @@ pub(super) fn supports(instruction: &DecodedInstruction, embedded: bool) -> bool
             target: BranchTarget::Indirect(_),
         }
     );
-    (embedded && (memory_move || supports_stack(instruction) || indirect_jump))
+    (embedded
+        && (supports_memory_reads(operation)
+            || memory_write
+            || supports_stack(instruction)
+            || indirect_jump))
         || (embedded
             && matches!(
                 operation,
-                Operation::Extend {
-                    source: SmallSource::Memory { .. },
-                    ..
-                } | Operation::Binary {
+                Operation::Binary {
                     kind: BinaryKind::Add
                         | BinaryKind::Sub
-                        | BinaryKind::Cmp
                         | BinaryKind::And
                         | BinaryKind::Or
                         | BinaryKind::Xor,
-                    destination: Location32::Register(_),
-                    source: Value32::Memory(_),
-                } | Operation::Binary {
-                    kind: BinaryKind::Add
-                        | BinaryKind::Sub
-                        | BinaryKind::Cmp
-                        | BinaryKind::And
-                        | BinaryKind::Or
-                        | BinaryKind::Xor
-                        | BinaryKind::Test,
                     destination: Location32::Memory(_),
                     source: Value32::Register(_) | Value32::Immediate(_),
                 } | Operation::Unary {
