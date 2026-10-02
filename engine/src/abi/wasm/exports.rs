@@ -148,3 +148,42 @@ pub extern "C" fn store32(address: u32, value: u32) -> u32 {
         crate::process::wasm::store32(address, value)
     }
 }
+
+#[allow(unsafe_code)]
+#[unsafe(export_name = "ring3_abi_v1_capture_call")]
+pub extern "C" fn capture_call(
+    low: u32,
+    high: u32,
+    generation: u32,
+    convention: u32,
+    words: u32,
+) -> u32 {
+    {
+        #![forbid(unsafe_code)]
+        crate::process::wasm::capture_call(low, high, generation, convention, words)
+    }
+}
+
+#[allow(unsafe_code)]
+#[unsafe(export_name = "ring3_abi_v1_complete_call")]
+pub extern "C" fn complete_call(
+    low: u32,
+    high: u32,
+    generation: u32,
+    token: u32,
+    result: u32,
+) -> u32 {
+    {
+        #![forbid(unsafe_code)]
+        crate::process::wasm::complete_call(low, high, generation, token, result)
+    }
+}
+
+#[allow(unsafe_code)]
+#[unsafe(export_name = "ring3_abi_v1_abandon_call")]
+pub extern "C" fn abandon_call(low: u32, high: u32, token: u32) -> u32 {
+    {
+        #![forbid(unsafe_code)]
+        crate::process::wasm::abandon_call(low, high, token)
+    }
+}

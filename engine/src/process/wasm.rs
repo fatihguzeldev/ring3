@@ -2,7 +2,7 @@
 
 use std::cell::RefCell;
 
-use super::{EngineInstance, HostError, StoreCompletion};
+use super::{CallError, EngineInstance, HostError, StoreCompletion};
 use crate::abi::arena::{CANCEL_OFFSET, EXIT_OFFSET, STATE_OFFSET};
 
 struct Registry {
@@ -81,6 +81,31 @@ pub(crate) fn compile(count: u32) -> u32 {
 
 pub(crate) fn compile_with_gates(count: u32, gate_count: u32) -> u32 {
     mutate(|instance| instance.compile_with_gates(count, gate_count).map(|_| ()))
+}
+
+pub(crate) fn capture_call(
+    low: u32,
+    high: u32,
+    generation: u32,
+    convention: u32,
+    words: u32,
+) -> u32 {
+    let key = u64::from(low) | (u64::from(high) << 32);
+    mutate(|instance| {
+        instance
+            .capture_call_raw(key, generation, convention, words)
+            .map(|_| ())
+    })
+}
+
+pub(crate) fn complete_call(low: u32, high: u32, generation: u32, token: u32, result: u32) -> u32 {
+    let key = u64::from(low) | (u64::from(high) << 32);
+    mutate(|instance| instance.complete_call(key, generation, token, result))
+}
+
+pub(crate) fn abandon_call(low: u32, high: u32, token: u32) -> u32 {
+    let key = u64::from(low) | (u64::from(high) << 32);
+    mutate(|instance| instance.abandon_call(key, token))
 }
 
 pub(crate) fn generation() -> u32 {
@@ -187,5 +212,15 @@ fn status(error: HostError) -> u32 {
         HostError::Memory(_) => 8,
         HostError::Compile(_) => 10,
         HostError::GenerationExhausted | HostError::Infrastructure => 9,
+        HostError::Call(error) => match error {
+            CallError::Busy => 12,
+            CallError::InvalidStop => 13,
+            CallError::InvalidToken => 14,
+            CallError::StateChanged => 15,
+            CallError::Cancelled => 16,
+            CallError::InvalidRequest => 7,
+            CallError::TokenExhausted => 9,
+            CallError::Memory(_) => 8,
+        },
     }
 }

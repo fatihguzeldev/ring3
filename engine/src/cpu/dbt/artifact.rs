@@ -28,6 +28,15 @@ pub struct CompiledRegion {
 }
 
 impl CompiledRegion {
+    pub(crate) fn matches_gate(&self, entry: u32, id: u32) -> bool {
+        self.prepared.blocks.iter().any(|block| {
+            block
+                .gate
+                .as_ref()
+                .is_some_and(|gate| gate.entry.0 == entry && gate.id == id)
+        })
+    }
+
     pub fn wasm_bytes(&self, memory: &AddressSpace) -> Result<&[u8], ArtifactError> {
         if !self.prepared.is_current(memory) {
             return Err(ArtifactError::CodeInvalidated);

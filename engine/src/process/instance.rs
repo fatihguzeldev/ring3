@@ -2,6 +2,8 @@
 
 use std::pin::Pin;
 
+use super::call::{CallError, PendingCall};
+
 use crate::{
     abi::{
         arena::{self, ARENA_SIZE, HELPER_OFFSET, TRANSFER_OFFSET, TRANSFER_SIZE},
@@ -23,6 +25,7 @@ pub enum HostError {
     Memory(MemoryError),
     Compile(CompileError),
     Infrastructure,
+    Call(CallError),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -32,11 +35,13 @@ pub enum StoreCompletion {
 }
 
 pub struct EngineInstance {
-    memory: Option<AddressSpace>,
-    arena: Pin<Box<[u8]>>,
-    artifact: Option<CompiledRegion>,
-    key: u64,
-    generation: u32,
+    pub(super) memory: Option<AddressSpace>,
+    pub(super) arena: Pin<Box<[u8]>>,
+    pub(super) artifact: Option<CompiledRegion>,
+    pub(super) key: u64,
+    pub(super) generation: u32,
+    pub(super) pending_call: Option<PendingCall>,
+    pub(super) call_token: u32,
 }
 
 impl EngineInstance {
@@ -57,6 +62,8 @@ impl EngineInstance {
             artifact: None,
             key,
             generation: 0,
+            pending_call: None,
+            call_token: 0,
         })
     }
 
@@ -127,6 +134,9 @@ impl EngineInstance {
 
     pub fn compile_with_gates(&mut self, count: u32, gate_count: u32) -> Result<u32, HostError> {
         let memory = self.memory()?;
+        if self.pending_call.is_some() {
+            return Err(HostError::Call(CallError::Busy));
+        }
         if !(1..=8).contains(&count) || gate_count > count {
             return Err(HostError::InvalidRequest);
         }
@@ -190,6 +200,14 @@ impl EngineInstance {
     }
 
     pub fn guard(&self, key: u64, generation: u32) -> Result<(), HostError> {
+        self.guard_artifact(key, generation)?;
+        if self.pending_call.is_some() {
+            return Err(HostError::Call(CallError::Busy));
+        }
+        Ok(())
+    }
+
+    pub(super) fn guard_artifact(&self, key: u64, generation: u32) -> Result<(), HostError> {
         self.memory()?;
         if key != self.key || generation == 0 || generation != self.generation() {
             return Err(HostError::InvalidArtifact);
@@ -234,6 +252,7 @@ impl EngineInstance {
     }
 
     pub fn close(&mut self) {
+        self.pending_call = None;
         self.artifact = None;
         self.memory = None;
     }
