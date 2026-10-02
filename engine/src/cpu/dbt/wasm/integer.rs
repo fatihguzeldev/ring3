@@ -4,7 +4,10 @@ use super::{control, locals::*, memory};
 use crate::cpu::x86::{
     Register32,
     decode::DecodedInstruction,
-    ir::{BinaryKind, BranchTarget, EffectiveAddress, Location32, Operation, UnaryKind, Value32},
+    ir::{
+        BinaryKind, BranchTarget, EffectiveAddress, ExtensionKind, Location32, Operation,
+        SmallSource, SmallWidth, UnaryKind, Value32,
+    },
 };
 
 #[derive(Clone, Copy)]
@@ -39,6 +42,37 @@ pub(super) fn instruction(
         } => {
             memory::store(code, address, source, imports, exit_depth);
             store = true;
+        }
+        Operation::Extend {
+            kind,
+            destination,
+            source:
+                SmallSource::Register {
+                    register: source,
+                    width,
+                    high_byte,
+                },
+        } => {
+            code.local_get(register(source));
+            if high_byte {
+                code.i32_const(8).i32_shr_u();
+            }
+            let bits = match width {
+                SmallWidth::Byte => 8,
+                SmallWidth::Word => 16,
+            };
+            match kind {
+                ExtensionKind::Zero => {
+                    code.i32_const((1 << bits) - 1).i32_and();
+                }
+                ExtensionKind::Sign => {
+                    code.i32_const(32 - bits)
+                        .i32_shl()
+                        .i32_const(32 - bits)
+                        .i32_shr_s();
+                }
+            }
+            code.local_set(register(destination));
         }
         Operation::Lea {
             destination,

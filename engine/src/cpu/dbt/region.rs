@@ -1,7 +1,7 @@
 use crate::{
     cpu::x86::{
         decode::{DecodeError, DecodedInstruction, decode_one},
-        ir::{BinaryKind, BranchTarget, Location32, Operation, UnaryKind, Value32},
+        ir::{BinaryKind, BranchTarget, Location32, Operation, SmallSource, UnaryKind, Value32},
     },
     memory::{AddressSpace, GuestAddress},
 };
@@ -267,6 +267,10 @@ pub(super) fn supports(instruction: &DecodedInstruction, embedded: bool) -> bool
                     source: Value32::Register(_) | Value32::Immediate(_),
                 }
                 | Operation::Lea { .. }
+                | Operation::Extend {
+                    source: SmallSource::Register { .. },
+                    ..
+                }
                 | Operation::Unary {
                     kind: UnaryKind::Inc | UnaryKind::Dec | UnaryKind::Not | UnaryKind::Neg,
                     destination: Location32::Register(_),
