@@ -140,6 +140,18 @@ pub(super) fn instruction(
             kind,
             destination: Location32::Register(destination),
         } => unary(code, kind, destination),
+        Operation::Unary {
+            kind: UnaryKind::Not,
+            destination: Location32::Memory(address),
+        } => {
+            memory::load_result(code, address, imports, exit_depth);
+            code.local_get(RESULT)
+                .i32_const(-1)
+                .i32_xor()
+                .local_set(RESULT);
+            memory::store_result(code, address, imports, exit_depth);
+            store = true;
+        }
         Operation::Jump {
             target: BranchTarget::Direct(target),
         } => {

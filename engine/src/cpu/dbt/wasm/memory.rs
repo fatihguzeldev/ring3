@@ -2,7 +2,7 @@ use wasm_encoder::{BlockType, InstructionSink, MemArg};
 
 use crate::cpu::x86::ir::{
     BinaryKind, BranchTarget, EffectiveAddress, Location32, Operation, SmallSource, SmallWidth,
-    Value32,
+    UnaryKind, Value32,
 };
 
 use super::locals::*;
@@ -42,6 +42,10 @@ impl Imports {
                 }
                 | Operation::Call {
                     target: BranchTarget::Indirect(Location32::Memory(_)),
+                }
+                | Operation::Unary {
+                    kind: UnaryKind::Not,
+                    destination: Location32::Memory(_),
                 } => {
                     read = true;
                     store = true;
@@ -198,7 +202,7 @@ pub(super) fn load_result(
     code.local_set(RESULT);
 }
 
-fn store_result(
+pub(super) fn store_result(
     code: &mut InstructionSink<'_>,
     destination: EffectiveAddress,
     imports: Imports,
@@ -210,7 +214,7 @@ fn store_result(
         .call(
             imports
                 .store
-                .expect("prepared memory push/pop has a store import"),
+                .expect("prepared memory operand has a store import"),
         )
         .local_set(HELPER_STATUS);
     validate_result(code, true);

@@ -227,13 +227,8 @@ fn rejected(instruction: &[u8], cause: InstructionError) {
 }
 
 #[test]
-fn memory_unary_destinations_remain_backend_excluded_without_data_access() {
-    for bytes in [
-        &[0xff, 0x03][..],
-        &[0xff, 0x0b][..],
-        &[0xf7, 0x13][..],
-        &[0xf7, 0x1b][..],
-    ] {
+fn other_memory_unary_destinations_remain_backend_excluded_without_data_access() {
+    for bytes in [&[0xff, 0x03][..], &[0xff, 0x0b][..], &[0xf7, 0x1b][..]] {
         rejected(bytes, InstructionError::BackendUnsupported);
     }
 }

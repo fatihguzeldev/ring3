@@ -363,7 +363,7 @@ fn embedded_small_width_prefix_and_other_memory_arithmetic_errors_remain_precise
             InstructionError::Decode(DecodeError::Unsupported(UnsupportedFeature::Segment)),
         ),
         (&[0x01, 0x03][..], InstructionError::BackendUnsupported),
-        (&[0xf7, 0x13][..], InstructionError::BackendUnsupported),
+        (&[0xf7, 0x1b][..], InstructionError::BackendUnsupported),
     ] {
         let mut bytes = vec![0x90];
         bytes.extend_from_slice(instruction);

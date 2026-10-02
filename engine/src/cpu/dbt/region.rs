@@ -278,6 +278,9 @@ pub(super) fn supports(instruction: &DecodedInstruction, embedded: bool) -> bool
                     kind: BinaryKind::Cmp | BinaryKind::Test,
                     destination: Location32::Memory(_),
                     source: Value32::Register(_) | Value32::Immediate(_),
+                } | Operation::Unary {
+                    kind: UnaryKind::Not,
+                    destination: Location32::Memory(_),
                 }
             ))
         || matches!(
