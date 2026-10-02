@@ -7,6 +7,9 @@
 **/dist/
 *.tsbuildinfo
 
+# Local working context
+/.context/
+
 # Local environment and credentials
 .env
 .env.*
