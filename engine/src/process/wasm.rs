@@ -108,6 +108,56 @@ pub(crate) fn abandon_call(low: u32, high: u32, token: u32) -> u32 {
     mutate(|instance| instance.abandon_call(key, token))
 }
 
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn begin_callback(
+    low: u32,
+    high: u32,
+    generation: u32,
+    outer_token: u32,
+    entry_pc: u32,
+    return_pc: u32,
+    return_id: u32,
+    count: u32,
+) -> u32 {
+    let key = u64::from(low) | (u64::from(high) << 32);
+    REGISTRY.with(|registry| {
+        let Ok(mut registry) = registry.try_borrow_mut() else {
+            return 9;
+        };
+        let Some(instance) = registry.instance.as_mut() else {
+            return 5;
+        };
+        match instance.begin_callback_from_transfer(
+            key,
+            generation,
+            outer_token,
+            entry_pc,
+            return_pc,
+            return_id,
+            count,
+        ) {
+            Ok(record) => {
+                if record.outcome == 1 {
+                    17
+                } else {
+                    0
+                }
+            }
+            Err(error) => status(error),
+        }
+    })
+}
+
+pub(crate) fn finish_callback(low: u32, high: u32, generation: u32, token: u32) -> u32 {
+    let key = u64::from(low) | (u64::from(high) << 32);
+    mutate(|instance| instance.finish_callback(key, generation, token).map(|_| ()))
+}
+
+pub(crate) fn abort_callback(low: u32, high: u32, token: u32) -> u32 {
+    let key = u64::from(low) | (u64::from(high) << 32);
+    mutate(|instance| instance.abort_callback(key, token))
+}
+
 pub(crate) fn generation() -> u32 {
     inspect(EngineInstance::generation)
 }

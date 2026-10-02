@@ -196,3 +196,48 @@ pub extern "C" fn abandon_call(low: u32, high: u32, token: u32) -> u32 {
         crate::process::wasm::abandon_call(low, high, token)
     }
 }
+
+#[allow(unsafe_code, clippy::too_many_arguments)]
+#[unsafe(export_name = "ring3_abi_v1_begin_callback")]
+pub extern "C" fn begin_callback(
+    low: u32,
+    high: u32,
+    generation: u32,
+    outer_token: u32,
+    entry_pc: u32,
+    return_pc: u32,
+    return_id: u32,
+    count: u32,
+) -> u32 {
+    {
+        #![forbid(unsafe_code)]
+        crate::process::wasm::begin_callback(
+            low,
+            high,
+            generation,
+            outer_token,
+            entry_pc,
+            return_pc,
+            return_id,
+            count,
+        )
+    }
+}
+
+#[allow(unsafe_code)]
+#[unsafe(export_name = "ring3_abi_v1_finish_callback")]
+pub extern "C" fn finish_callback(low: u32, high: u32, generation: u32, token: u32) -> u32 {
+    {
+        #![forbid(unsafe_code)]
+        crate::process::wasm::finish_callback(low, high, generation, token)
+    }
+}
+
+#[allow(unsafe_code)]
+#[unsafe(export_name = "ring3_abi_v1_abort_callback")]
+pub extern "C" fn abort_callback(low: u32, high: u32, token: u32) -> u32 {
+    {
+        #![forbid(unsafe_code)]
+        crate::process::wasm::abort_callback(low, high, token)
+    }
+}

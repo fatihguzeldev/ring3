@@ -25,11 +25,11 @@ pub enum CallError {
 }
 
 pub(super) struct PendingCall {
-    token: u32,
-    generation: u32,
-    frame: CallFrame32,
-    state: [u8; STATE_SIZE],
-    exit: [u8; EXIT_SIZE],
+    pub(super) token: u32,
+    pub(super) generation: u32,
+    pub(super) frame: CallFrame32,
+    pub(super) state: [u8; STATE_SIZE],
+    pub(super) exit: [u8; EXIT_SIZE],
 }
 
 impl EngineInstance {
@@ -77,6 +77,13 @@ impl EngineInstance {
             .artifact
             .as_ref()
             .is_some_and(|artifact| artifact.matches_gate(state.eip, id))
+        {
+            return Err(HostError::Call(CallError::InvalidStop));
+        }
+        if self
+            .callback
+            .as_ref()
+            .is_some_and(|callback| callback.matches_return(state.eip, id))
         {
             return Err(HostError::Call(CallError::InvalidStop));
         }
@@ -131,6 +138,13 @@ impl EngineInstance {
         result: u32,
     ) -> Result<(), HostError> {
         self.guard_artifact(key, generation)?;
+        if self
+            .callback
+            .as_ref()
+            .is_some_and(|callback| callback.outer_token() == token)
+        {
+            return Err(HostError::Call(CallError::Busy));
+        }
         let pending = self
             .pending_call
             .as_ref()
@@ -170,6 +184,13 @@ impl EngineInstance {
         if key != self.key {
             return Err(HostError::InvalidArtifact);
         }
+        if self
+            .callback
+            .as_ref()
+            .is_some_and(|callback| callback.outer_token() == token)
+        {
+            return Err(HostError::Call(CallError::Busy));
+        }
         if token == 0
             || self
                 .pending_call
@@ -182,7 +203,7 @@ impl EngineInstance {
         Ok(())
     }
 
-    fn call_cancelled(&self) -> bool {
+    pub(super) fn call_cancelled(&self) -> bool {
         u32::from_le_bytes(
             self.arena()[CANCEL_OFFSET..CANCEL_OFFSET + 4]
                 .try_into()

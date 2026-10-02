@@ -28,6 +28,15 @@ pub struct CompiledRegion {
 }
 
 impl CompiledRegion {
+    pub(crate) fn contains_instruction(&self, pc: u32) -> bool {
+        self.prepared.blocks.iter().any(|block| {
+            block
+                .instructions
+                .iter()
+                .any(|instruction| instruction.pc().0 == pc)
+        })
+    }
+
     pub(crate) fn matches_gate(&self, entry: u32, id: u32) -> bool {
         self.prepared.blocks.iter().any(|block| {
             block

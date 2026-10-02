@@ -1,6 +1,7 @@
 #![forbid(unsafe_code)]
 
 mod call;
+mod callback;
 mod instance;
 #[cfg(target_arch = "wasm32")]
 pub(crate) mod wasm;

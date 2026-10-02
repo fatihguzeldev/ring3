@@ -3,6 +3,7 @@
 use std::pin::Pin;
 
 use super::call::{CallError, PendingCall};
+use super::callback::SuspendedCallback;
 
 use crate::{
     abi::{
@@ -44,6 +45,7 @@ pub struct EngineInstance {
     pub(super) key: u64,
     pub(super) generation: u32,
     pub(super) pending_call: Option<PendingCall>,
+    pub(super) callback: Option<SuspendedCallback>,
     pub(super) call_token: u32,
 }
 
@@ -66,6 +68,7 @@ impl EngineInstance {
             key,
             generation: 0,
             pending_call: None,
+            callback: None,
             call_token: 0,
         })
     }
@@ -137,7 +140,7 @@ impl EngineInstance {
 
     pub fn compile_with_gates(&mut self, count: u32, gate_count: u32) -> Result<u32, HostError> {
         let memory = self.memory()?;
-        if self.pending_call.is_some() {
+        if self.pending_call.is_some() || self.callback.is_some() {
             return Err(HostError::Call(CallError::Busy));
         }
         if !(1..=8).contains(&count) || gate_count > count {
@@ -278,6 +281,7 @@ impl EngineInstance {
 
     pub fn close(&mut self) {
         self.pending_call = None;
+        self.callback = None;
         self.artifact = None;
         self.memory = None;
     }
