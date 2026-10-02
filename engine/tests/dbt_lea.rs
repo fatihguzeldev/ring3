@@ -290,7 +290,7 @@ fn malformed_lea_prefixes_and_adjacent_exclusions_keep_exact_error_categories() 
         &[0x64, 0x8d, 0x03],
         InstructionError::Decode(DecodeError::Unsupported(UnsupportedFeature::Segment)),
     );
-    for bytes in [&[0x03, 0x03][..], &[0x0f, 0xb6, 0xc0][..]] {
+    for bytes in [&[0x03, 0x03][..], &[0x0f, 0xb6, 0x03][..]] {
         rejected(bytes, InstructionError::BackendUnsupported);
     }
 }

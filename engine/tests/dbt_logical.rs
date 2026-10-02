@@ -288,7 +288,7 @@ fn small_width_prefix_and_adjacent_operation_errors_retain_their_exact_categorie
         &[0xf0, 0x21, 0xc0],
         InstructionError::Decode(DecodeError::InvalidEncoding),
     );
-    for instruction in [&[0xf7, 0x10][..], &[0x0f, 0xb6, 0xc0][..]] {
+    for instruction in [&[0xf7, 0x10][..], &[0x0f, 0xb6, 0x03][..]] {
         rejected(instruction, InstructionError::BackendUnsupported);
     }
 }

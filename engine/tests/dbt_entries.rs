@@ -231,7 +231,7 @@ fn standalone_admission_rejects_decodable_out_of_profile_before_termination() {
         &[0xc3][..],
         &[0xc2, 8, 0][..],
         &[0x03, 0x03][..],
-        &[0x0f, 0xb6, 0xc0][..],
+        &[0x0f, 0xb6, 0x03][..],
     ] {
         let mut instruction = vec![0x90];
         instruction.extend_from_slice(bytes);

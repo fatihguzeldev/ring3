@@ -269,7 +269,7 @@ fn small_width_prefix_and_adjacent_rejections_keep_exact_categories() {
         &[0x64, 0xff, 0xc0],
         InstructionError::Decode(DecodeError::Unsupported(UnsupportedFeature::Segment)),
     );
-    for bytes in [&[0x03, 0x03][..], &[0x0f, 0xb6, 0xc0][..]] {
+    for bytes in [&[0x03, 0x03][..], &[0x0f, 0xb6, 0x03][..]] {
         rejected(bytes, InstructionError::BackendUnsupported);
     }
 }
