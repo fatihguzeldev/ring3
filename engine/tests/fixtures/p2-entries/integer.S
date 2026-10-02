@@ -63,7 +63,7 @@ callback_after_inner:
 .globl unsupported_integer
 .type unsupported_integer, @function
 unsupported_integer:
-    inc eax
+    hlt
 .size unsupported_integer, .-unsupported_integer
 
 .org 0x3000, 0x90

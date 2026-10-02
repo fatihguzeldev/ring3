@@ -228,7 +228,7 @@ const llvmFixtures = [
   {name: 'callback_after_callee', offset: 0x40f, bytes: afterCalleeBytes},
   {name: 'callback_after_inner', offset: 0x415, bytes: afterInnerBytes},
   {name: 'absent_callee', offset: 0x3000, bytes: calleeBytes},
-  {name: 'unsupported_integer', offset: 0x600, bytes: [0x40]},
+  {name: 'unsupported_integer', offset: 0x600, bytes: [0xf4]},
 ];
 for (const {name, offset, bytes} of llvmFixtures) {
   assert.deepEqual([...assembled.get(name).bytes], bytes, `independent LLVM entry-region fixture ${name}`);
@@ -314,13 +314,13 @@ function prepare(values = [7, 9], checkIngress = false) {
   for (const address of [0x1100, 0x1200, 0x1300]) upload(engine, address, Uint8Array.from([0x0f, 0x0b]));
   upload(engine, 0x1400, Uint8Array.from([...callbackBytes, ...afterCalleeBytes, ...afterInnerBytes]));
   upload(engine, 0x4000, Uint8Array.from(calleeBytes));
-  upload(engine, 0x1600, Uint8Array.from([0x40]));
+  upload(engine, 0x1600, Uint8Array.from([0xf4]));
   if (checkIngress) {
     fail(engine, () => engine.api.compile_entries(0, 0), 7, 'ordinary seed count validation precedes descriptor reads');
     descriptors(engine, oldSeeds.map(entry => entry === 0x1415 ? 0x1001 : entry), gates);
     fail(engine, () => engine.api.compile_entries(8, 3), 10, 'seed inside first PUSH instruction rejects overlapping streams');
     descriptors(engine, [0x1600]);
-    fail(engine, () => engine.api.compile_entries(1, 0), 10, 'ordinary discovery rejects decoded INC without broadening backend');
+    fail(engine, () => engine.api.compile_entries(1, 0), 10, 'ordinary discovery rejects privileged HLT without changing artifact');
   }
   const child = compile(engine, oldSeeds, gates, ['read32', 'store32']);
   const start = state();
@@ -428,7 +428,7 @@ for (const [values, singleStepCall] of [[[7, 9], false], [[0xffffffff, 1], true]
     }
     const unsupported = newSeeds.map(entry => entry === 0x4000 ? 0x1600 : entry);
     descriptors(engine, unsupported, gates);
-    fail(engine, () => engine.api.resume_callback_entries(engine.low, engine.high, oldGeneration, 2, 8, 3), 10, 'decoded but backend-unsupported seed cannot install or widen profile');
+    fail(engine, () => engine.api.resume_callback_entries(engine.low, engine.high, oldGeneration, 2, 8, 3), 10, 'privileged HLT seed cannot install or change callback authority');
   }
   install(test);
   const {child, oldChild} = test;
