@@ -167,8 +167,6 @@ fn other_memory_operations_and_existing_exclusions_remain_rejected_at_their_pc()
     for instruction in [
         &[0x01, 0x03][..],
         &[0x29, 0x03][..],
-        &[0x39, 0x03][..],
-        &[0x85, 0x03][..],
         &[0x21, 0x03][..],
         &[0x09, 0x03][..],
         &[0x31, 0x03][..],

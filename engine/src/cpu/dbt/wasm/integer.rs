@@ -77,20 +77,30 @@ pub(super) fn instruction(
         }
         Operation::Binary {
             kind,
-            destination: Location32::Register(destination),
+            destination,
             source,
         } => {
-            if let Value32::Memory(address) = source {
-                memory::load_result(code, address, imports, exit_depth);
-                // helper validation uses lhs/rhs scratch; capture operands only after it succeeds.
-                code.local_get(register(destination))
-                    .local_set(LHS)
-                    .local_get(RESULT)
-                    .local_set(RHS);
-            } else {
-                code.local_get(register(destination)).local_set(LHS);
-                value(code, source);
-                code.local_set(RHS);
+            match destination {
+                Location32::Register(destination) => {
+                    if let Value32::Memory(address) = source {
+                        memory::load_result(code, address, imports, exit_depth);
+                        // helper validation uses operand scratch; capture operands after it succeeds.
+                        code.local_get(register(destination))
+                            .local_set(LHS)
+                            .local_get(RESULT)
+                            .local_set(RHS);
+                    } else {
+                        code.local_get(register(destination)).local_set(LHS);
+                        value(code, source);
+                        code.local_set(RHS);
+                    }
+                }
+                Location32::Memory(address) => {
+                    memory::load_result(code, address, imports, exit_depth);
+                    code.local_get(RESULT).local_set(LHS);
+                    value(code, source);
+                    code.local_set(RHS);
+                }
             }
             code.local_get(LHS).local_get(RHS);
             match kind {
@@ -120,6 +130,9 @@ pub(super) fn instruction(
                 }
             }
             if !matches!(kind, BinaryKind::Cmp | BinaryKind::Test) {
+                let Location32::Register(destination) = destination else {
+                    unreachable!("prepared binary operation cannot write memory")
+                };
                 code.local_get(RESULT).local_set(register(destination));
             }
         }

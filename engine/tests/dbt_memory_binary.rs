@@ -392,18 +392,17 @@ fn standalone_memory_sources_stay_excluded_in_all_four_apis_before_later_poison(
 }
 
 #[test]
-fn every_memory_destination_including_cmp_and_test_stays_excluded() {
+fn writing_binary_memory_destinations_stay_excluded() {
     let mut instructions = Vec::new();
-    for opcode in [0x01, 0x29, 0x39, 0x21, 0x09, 0x31, 0x85] {
+    for opcode in [0x01, 0x29, 0x21, 0x09, 0x31] {
         for source in 0..8 {
             instructions.push(vec![opcode, 0x03 | source << 3]);
         }
     }
-    for extension in [0, 5, 7, 4, 1, 6] {
+    for extension in [0, 5, 4, 1, 6] {
         instructions.push(vec![0x81, 0x03 | extension << 3, 1, 0, 0, 0]);
         instructions.push(vec![0x83, 0x03 | extension << 3, 0x80]);
     }
-    instructions.push(vec![0xf7, 0x03, 1, 0, 0, 0]);
     for instruction in instructions {
         let mut bytes = vec![0x90];
         bytes.extend_from_slice(&instruction);

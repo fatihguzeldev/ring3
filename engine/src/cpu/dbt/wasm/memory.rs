@@ -1,7 +1,8 @@
 use wasm_encoder::{BlockType, InstructionSink, MemArg};
 
 use crate::cpu::x86::ir::{
-    BranchTarget, EffectiveAddress, Location32, Operation, SmallSource, SmallWidth, Value32,
+    BinaryKind, BranchTarget, EffectiveAddress, Location32, Operation, SmallSource, SmallWidth,
+    Value32,
 };
 
 use super::locals::*;
@@ -51,6 +52,11 @@ impl Imports {
                 }
                 | Operation::Binary {
                     source: Value32::Memory(_),
+                    ..
+                }
+                | Operation::Binary {
+                    kind: BinaryKind::Cmp | BinaryKind::Test,
+                    destination: Location32::Memory(_),
                     ..
                 }
                 | Operation::Return { .. }
