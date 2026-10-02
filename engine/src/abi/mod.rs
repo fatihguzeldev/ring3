@@ -1,4 +1,5 @@
 pub mod arena;
+pub mod call_frame;
 #[forbid(unsafe_code)]
 mod header;
 pub mod memory_helper;
@@ -20,4 +21,5 @@ pub enum AbiError {
     Flags,
     Exit,
     MemoryHelper,
+    CallFrame,
 }
