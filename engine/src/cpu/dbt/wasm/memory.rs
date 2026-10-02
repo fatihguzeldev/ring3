@@ -49,6 +49,10 @@ impl Imports {
                     source: Value32::Memory(_),
                     ..
                 }
+                | Operation::Binary {
+                    source: Value32::Memory(_),
+                    ..
+                }
                 | Operation::Return { .. }
                 | Operation::Jump {
                     target: BranchTarget::Indirect(Location32::Memory(_)),

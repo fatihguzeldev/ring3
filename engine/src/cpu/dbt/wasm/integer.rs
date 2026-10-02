@@ -80,9 +80,19 @@ pub(super) fn instruction(
             destination: Location32::Register(destination),
             source,
         } => {
-            code.local_get(register(destination)).local_set(LHS);
-            value(code, source);
-            code.local_set(RHS).local_get(LHS).local_get(RHS);
+            if let Value32::Memory(address) = source {
+                memory::load_result(code, address, imports, exit_depth);
+                // helper validation uses lhs/rhs scratch; capture operands only after it succeeds.
+                code.local_get(register(destination))
+                    .local_set(LHS)
+                    .local_get(RESULT)
+                    .local_set(RHS);
+            } else {
+                code.local_get(register(destination)).local_set(LHS);
+                value(code, source);
+                code.local_set(RHS);
+            }
+            code.local_get(LHS).local_get(RHS);
             match kind {
                 BinaryKind::Add => {
                     code.i32_add();

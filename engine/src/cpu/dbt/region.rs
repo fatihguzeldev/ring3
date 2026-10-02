@@ -265,6 +265,15 @@ pub(super) fn supports(instruction: &DecodedInstruction, embedded: bool) -> bool
                 Operation::Extend {
                     source: SmallSource::Memory { .. },
                     ..
+                } | Operation::Binary {
+                    kind: BinaryKind::Add
+                        | BinaryKind::Sub
+                        | BinaryKind::Cmp
+                        | BinaryKind::And
+                        | BinaryKind::Or
+                        | BinaryKind::Xor,
+                    destination: Location32::Register(_),
+                    source: Value32::Memory(_),
                 }
             ))
         || matches!(

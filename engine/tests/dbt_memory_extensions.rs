@@ -362,7 +362,7 @@ fn embedded_small_width_prefix_and_other_memory_arithmetic_errors_remain_precise
             &[0x64, 0x0f, 0xb6, 0x03][..],
             InstructionError::Decode(DecodeError::Unsupported(UnsupportedFeature::Segment)),
         ),
-        (&[0x03, 0x03][..], InstructionError::BackendUnsupported),
+        (&[0x01, 0x03][..], InstructionError::BackendUnsupported),
         (&[0xf7, 0x13][..], InstructionError::BackendUnsupported),
     ] {
         let mut bytes = vec![0x90];

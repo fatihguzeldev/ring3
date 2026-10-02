@@ -239,14 +239,11 @@ fn rejected(instruction: &[u8], cause: InstructionError) {
 }
 
 #[test]
-fn memory_logical_sources_destinations_and_immediates_remain_backend_excluded() {
+fn memory_logical_destinations_and_immediates_remain_backend_excluded() {
     for instruction in [
         &[0x21, 0x03][..],
-        &[0x23, 0x03][..],
         &[0x09, 0x03][..],
-        &[0x0b, 0x03][..],
         &[0x31, 0x03][..],
-        &[0x33, 0x03][..],
         &[0x85, 0x03][..],
         &[0x81, 0x23, 1, 0, 0, 0][..],
         &[0x81, 0x0b, 1, 0, 0, 0][..],

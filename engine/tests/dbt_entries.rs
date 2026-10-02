@@ -509,7 +509,7 @@ fn embedded_discovery_admits_current_memory_stack_and_indirect_profile_without_d
         engine.artifact_bytes().unwrap();
         assert_eq!(engine.memory().unwrap().mapped_pages(), 1);
     }
-    let mut engine = embedded(0x1000, &[0x03, 0x03]);
+    let mut engine = embedded(0x1000, &[0x01, 0x03]);
     entry_descriptors(&mut engine, &[0x1000], &[]);
     let arena = engine.arena().to_vec();
     assert_eq!(
