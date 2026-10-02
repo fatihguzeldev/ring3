@@ -41,7 +41,7 @@ fn instruction_error(pc: u32, cause: InstructionError) -> CompileError {
 #[test]
 fn standalone_seed_discovers_authored_block_and_matches_explicit_emission() {
     // mov eax,0x12345678; add eax,1; jmp next; unsupported successor is outside the block.
-    let bytes = [0xb8, 0x78, 0x56, 0x34, 0x12, 0x83, 0xc0, 1, 0xeb, 0, 0x40];
+    let bytes = [0xb8, 0x78, 0x56, 0x34, 0x12, 0x83, 0xc0, 1, 0xeb, 0, 0xf4];
     let memory = code(0x1000, &bytes);
     let snapshot = memory
         .snapshot_code(GuestAddress(0x1000), bytes.len())
@@ -332,7 +332,7 @@ fn invalid_and_unsupported_decoder_errors_remain_distinct_from_backend_rejection
 #[test]
 fn global_and_lower_instruction_caps_fail_before_the_next_needed_decode() {
     let mut bytes = vec![0x90; 63];
-    bytes.extend_from_slice(&[0xeb, 0, 0x40]);
+    bytes.extend_from_slice(&[0xeb, 0, 0xf4]);
     let memory = code(0x1000, &bytes);
     let entries: Vec<_> = (0..8)
         .map(|index| GuestAddress(0x1000 + index * 8))
@@ -347,7 +347,7 @@ fn global_and_lower_instruction_caps_fail_before_the_next_needed_decode() {
         prepare_entry_region(&memory, &[GuestAddress(0x1fc0)], CompileLimits::default()).err(),
         Some(CompileError::InstructionLimit)
     );
-    let memory = code(0x1000, &[0x90, 0x40]);
+    let memory = code(0x1000, &[0x90, 0xf4]);
     assert_eq!(
         prepare_entry_region(
             &memory,
@@ -552,7 +552,7 @@ fn gate_structure_and_interior_overlaps_are_rejected_before_unrelated_decode() {
         vec![(0x1002, 17), (0x1002, 18)],
         vec![(0x1000, 17), (0x1002, 17)],
     ] {
-        let mut engine = embedded(0x1000, &[0x40, 0x90, 0x0f, 0x0b]);
+        let mut engine = embedded(0x1000, &[0xf4, 0x90, 0x0f, 0x0b]);
         entry_descriptors(&mut engine, &[0x1000, 0x1002], &gates);
         let arena = engine.arena().to_vec();
         assert_eq!(

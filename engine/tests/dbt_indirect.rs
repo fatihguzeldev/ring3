@@ -312,7 +312,7 @@ fn far_prefixed_and_other_unimplemented_forms_keep_their_precise_errors() {
             &[0x64, 0xff, 0x23][..],
             InstructionError::Decode(DecodeError::Unsupported(UnsupportedFeature::Segment)),
         ),
-        (&[0x40][..], InstructionError::BackendUnsupported),
+        (&[0xf7, 0x18][..], InstructionError::BackendUnsupported),
     ] {
         let mut bytes = vec![0x90];
         bytes.extend_from_slice(instruction);
@@ -362,7 +362,10 @@ fn failed_indirect_compile_preserves_installed_artifact_and_generation_until_ret
             &[0x90, 0xff, 0x24, 0x24, 0x90][..],
             InstructionError::InvalidBlockEnd,
         ),
-        (&[0x90, 0x40][..], InstructionError::BackendUnsupported),
+        (
+            &[0x90, 0xf4][..],
+            InstructionError::Decode(DecodeError::Unsupported(UnsupportedFeature::Privileged)),
+        ),
     ] {
         upload(&mut engine, 0x3000, bad);
         describe(&mut engine, 0x3000, bad.len() as u32);

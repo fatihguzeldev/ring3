@@ -1,7 +1,7 @@
 use ring3_engine::abi::x86::{decode_exit, decode_state, encode_exit_v3, encode_state};
 use ring3_engine::cpu::dbt::{CompileError, InstructionError};
 use ring3_engine::cpu::x86::{State32, decode::DecodeError};
-use ring3_engine::cpu::{ExecutionExit, ExitReason};
+use ring3_engine::cpu::{ExecutionExit, ExitReason, UnsupportedFeature};
 use ring3_engine::memory::{Access, FaultReason, GuestAddress, MemoryFault};
 use ring3_engine::process::{CallError, EngineInstance, HostError};
 use ring3_engine::windows::CallingConvention32;
@@ -485,13 +485,15 @@ fn structural_decode_and_fetch_compile_errors_are_typed_atomic_and_retryable() {
         HostError::Compile(CompileError::InvalidGates),
         |engine| engine.resume_callback_code(KEY, 1, 2, 3, 2),
     );
-    upload(&mut engine, TARGET, &[0x40]);
+    upload(&mut engine, TARGET, &[0xf4]);
     descriptors(&mut engine, &[(TARGET, 1)], &[]);
     unchanged(
         &mut engine,
         HostError::Compile(CompileError::Instruction {
             pc: GuestAddress(TARGET),
-            cause: InstructionError::BackendUnsupported,
+            cause: InstructionError::Decode(DecodeError::Unsupported(
+                UnsupportedFeature::Privileged,
+            )),
         }),
         |engine| engine.resume_callback_code(KEY, 1, 2, 1, 0),
     );

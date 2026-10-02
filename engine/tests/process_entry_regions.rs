@@ -1,7 +1,7 @@
 use ring3_engine::{
     abi::x86::{decode_exit, decode_state, encode_exit_v3, encode_state},
     cpu::{
-        ExecutionExit, ExitReason,
+        ExecutionExit, ExitReason, UnsupportedFeature,
         dbt::{CompileError, InstructionError},
         x86::{State32, decode::DecodeError},
     },
@@ -294,7 +294,7 @@ fn failed_discovery_preserves_artifact_arena_and_stamps_then_retry_spends_one_ge
         engine.map(address, 1, 7).unwrap();
     }
     upload(&mut engine, 0x1000, &[0x90, 0xeb, 0x7f]);
-    upload(&mut engine, 0x4000, &[0x40]);
+    upload(&mut engine, 0x4000, &[0xf4]);
     entries(&mut engine, &[0x1000], &[]);
     assert_eq!(engine.compile_entries(1, 0), Ok(1));
     let code = engine
@@ -312,13 +312,15 @@ fn failed_discovery_preserves_artifact_arena_and_stamps_then_retry_spends_one_ge
         &mut engine,
         HostError::Compile(CompileError::Instruction {
             pc: GuestAddress(0x4000),
-            cause: InstructionError::BackendUnsupported,
+            cause: InstructionError::Decode(DecodeError::Unsupported(
+                UnsupportedFeature::Privileged,
+            )),
         }),
         |engine| engine.compile_entries(1, 0),
     );
     assert!(engine.memory().unwrap().is_code_current(&code));
     assert!(engine.memory().unwrap().is_code_current(&unsupported));
-    assert_eq!(guest_bytes(&engine, 0x4000, 1), [0x40]);
+    assert_eq!(guest_bytes(&engine, 0x4000, 1), [0xf4]);
     upload(&mut engine, 0x4000, &[0xb8, 0x78, 0x56, 0x34, 0x12, 0xc3]);
     entries(&mut engine, &[0x4000], &[]);
     assert_eq!(engine.compile_entries(1, 0), Ok(2));

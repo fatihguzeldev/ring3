@@ -1,3 +1,4 @@
+use ring3_engine::cpu::{UnsupportedFeature, x86::decode::DecodeError};
 use ring3_engine::memory::{Access, GuestAddress, MemoryError};
 use ring3_engine::process::{EngineInstance, HostError};
 
@@ -284,7 +285,7 @@ fn compile_reads_all_eight_block_descriptors_including_the_last() {
     for unsupported_last in [true, false] {
         let mut bytes = [0x90; 8];
         if unsupported_last {
-            bytes[7] = 0x40;
+            bytes[7] = 0xf4;
         }
         upload(&mut engine, 0x1000, &bytes);
         let transfer = &mut engine.arena_mut().unwrap()[140..204];
@@ -299,7 +300,9 @@ fn compile_reads_all_eight_block_descriptors_including_the_last() {
                 Err(HostError::Compile(
                     ring3_engine::cpu::dbt::CompileError::Instruction {
                         pc: GuestAddress(0x1007),
-                        cause: ring3_engine::cpu::dbt::InstructionError::BackendUnsupported,
+                        cause: ring3_engine::cpu::dbt::InstructionError::Decode(
+                            DecodeError::Unsupported(UnsupportedFeature::Privileged)
+                        ),
                     }
                 ))
             ));
