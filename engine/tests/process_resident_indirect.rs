@@ -308,9 +308,7 @@ fn jump_span_priority_and_adjacent_exclusions_preserve_previous_state() {
         );
     }
     for instruction in [
-        &[0x89, 0x03][..],
-        &[0xa3, 0, 0x50, 0, 0],
-        &[0xc7, 0x03, 1, 0, 0, 0],
+        &[0x01, 0x00][..],
         &[0xe8, 0, 0, 0, 0],
         &[0xff, 0xd0],
         &[0xff, 0x13],

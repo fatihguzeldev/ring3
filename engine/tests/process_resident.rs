@@ -435,7 +435,7 @@ fn rejected_counts_spans_and_resident_profile_keep_legacy_and_resident_state() {
             InstructionError::Decode(DecodeError::Unsupported(UnsupportedFeature::Opcode)),
         ),
         (
-            &[0x89, 0x03, 0xeb, 0][..],
+            &[0x01, 0x00, 0xeb, 0][..],
             InstructionError::BackendUnsupported,
         ),
         (
@@ -589,6 +589,7 @@ fn pending_calls_and_callbacks_block_new_units_without_changing_legacy_callbacks
     upload(&mut engine, ENTRY, &[0x90, 0xc3]);
     upload(&mut engine, RETURN, &[0x0f, 0x0b]);
     upload(&mut engine, 0x8010, &0x4000_u32.to_le_bytes());
+    upload(&mut engine, 0x8040, &[0xa5; 16]);
     describe(&mut engine, &[(OUTER, 2), (ENTRY, 2), (RETURN, 2)]);
     for (index, value) in [OUTER, 17, RETURN, 18].into_iter().enumerate() {
         engine.arena_mut().unwrap()[164 + index * 4..168 + index * 4]
@@ -614,6 +615,32 @@ fn pending_calls_and_callbacks_block_new_units_without_changing_legacy_callbacks
     let outer = engine
         .capture_call(KEY, 1, CallingConvention32::Cdecl, 0)
         .unwrap();
+    let rejected_store = |engine: &mut EngineInstance, key, id, expected| {
+        let mut before = [0; 16];
+        engine
+            .memory()
+            .unwrap()
+            .read(GuestAddress(0x8040), &mut before)
+            .unwrap();
+        failed(engine, &[a, b], expected, |engine| {
+            engine.store_resident32(key, id, 0x8040, 0x1234_5678)
+        });
+        let mut after = [0; 16];
+        engine
+            .memory()
+            .unwrap()
+            .read(GuestAddress(0x8040), &mut after)
+            .unwrap();
+        assert_eq!(after, before);
+    };
+    rejected_store(&mut engine, KEY, b, HostError::Call(CallError::Busy));
+    rejected_store(&mut engine, KEY ^ 1, 0, HostError::InvalidArtifact);
+    rejected_store(
+        &mut engine,
+        KEY,
+        0,
+        HostError::Resident(RegistryError::InvalidUnit),
+    );
     preserved(&mut engine, &[a, b], |engine| {
         assert_eq!(engine.lookup_resident(A + 1).map(|id| id.get()), Ok(a));
         assert_eq!(engine.lookup_resident(B + 1).map(|id| id.get()), Ok(b));
@@ -640,6 +667,12 @@ fn pending_calls_and_callbacks_block_new_units_without_changing_legacy_callbacks
         |engine| engine.guard_resident(KEY, 0),
     );
     upload(&mut engine, A, &A_CODE);
+    rejected_store(
+        &mut engine,
+        KEY,
+        a,
+        HostError::Resident(RegistryError::CodeInvalidated),
+    );
     failed(
         &mut engine,
         &[a, b],
@@ -659,6 +692,20 @@ fn pending_calls_and_callbacks_block_new_units_without_changing_legacy_callbacks
         .begin_callback(KEY, 1, outer.token, ENTRY, RETURN, 18, &[])
         .unwrap();
     assert_eq!(engine.guard(KEY, 1), Ok(()));
+    rejected_store(&mut engine, KEY, b, HostError::Call(CallError::Busy));
+    rejected_store(
+        &mut engine,
+        KEY,
+        a,
+        HostError::Resident(RegistryError::CodeInvalidated),
+    );
+    rejected_store(&mut engine, KEY ^ 1, 0, HostError::InvalidArtifact);
+    rejected_store(
+        &mut engine,
+        KEY,
+        0,
+        HostError::Resident(RegistryError::InvalidUnit),
+    );
     preserved(&mut engine, &[a, b], |engine| {
         assert_eq!(engine.lookup_resident(B + 1).map(|id| id.get()), Ok(b));
     });
