@@ -97,6 +97,23 @@ pub(crate) fn compile_resident(count: u32) -> u32 {
     })
 }
 
+pub(crate) fn find_resident(pc: u32) -> u32 {
+    REGISTRY.with(|registry| {
+        let Ok(mut registry) = registry.try_borrow_mut() else {
+            return 9;
+        };
+        let Some(instance) = registry.instance.as_mut() else {
+            return 5;
+        };
+        let id = match instance.lookup_resident(pc) {
+            Ok(id) => id,
+            Err(HostError::Resident(RegistryError::NotFound { .. })) => return 17,
+            Err(error) => return status(error),
+        };
+        resident_record(instance, id.get()).map_or_else(status, |()| 0)
+    })
+}
+
 pub(crate) fn resident_module(low: u32, high: u32) -> u32 {
     let id = u64::from(low) | (u64::from(high) << 32);
     mutate(|instance| resident_record(instance, id))

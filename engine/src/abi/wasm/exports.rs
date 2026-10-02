@@ -107,6 +107,15 @@ pub extern "C" fn compile_resident(count: u32) -> u32 {
 }
 
 #[allow(unsafe_code)]
+#[unsafe(export_name = "ring3_abi_v1_find_resident")]
+pub extern "C" fn find_resident(pc: u32) -> u32 {
+    {
+        #![forbid(unsafe_code)]
+        crate::process::wasm::find_resident(pc)
+    }
+}
+
+#[allow(unsafe_code)]
 #[unsafe(export_name = "ring3_abi_v1_resident_module")]
 pub extern "C" fn resident_module(low: u32, high: u32) -> u32 {
     {

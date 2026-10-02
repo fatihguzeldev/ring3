@@ -47,6 +47,16 @@ impl EngineInstance {
         }
     }
 
+    pub fn lookup_resident(&self, pc: u32) -> Result<UnitId, HostError> {
+        let memory = self.memory()?;
+        let pc = GuestAddress(pc);
+        self.resident
+            .as_ref()
+            .ok_or(HostError::Resident(RegistryError::NotFound { pc }))?
+            .lookup(memory, pc)
+            .map_err(HostError::Resident)
+    }
+
     pub fn resident_bytes(&self, id: u64) -> Result<&[u8], HostError> {
         let memory = self.memory()?;
         let registry = self
