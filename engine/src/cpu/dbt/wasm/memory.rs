@@ -20,12 +20,14 @@ impl Imports {
                     source: Value32::Memory(_),
                     ..
                 }
-                | Operation::Return { .. } => read = true,
+                | Operation::Return { .. }
+                | Operation::Pop { .. } => read = true,
                 Operation::Move {
                     destination: Location32::Memory(_),
                     ..
                 }
-                | Operation::Call { .. } => store = true,
+                | Operation::Call { .. }
+                | Operation::Push { .. } => store = true,
                 _ => {}
             }
         }
@@ -74,7 +76,39 @@ pub(super) fn store(
     exit_if_failed(code, exit_depth);
 }
 
-pub(super) fn pop_return(code: &mut InstructionSink<'_>, imports: Imports, exit_depth: u32) {
+pub(super) fn pop_register(
+    code: &mut InstructionSink<'_>,
+    destination: crate::cpu::x86::Register32,
+    imports: Imports,
+    exit_depth: u32,
+) {
+    let esp = crate::cpu::x86::Register32::Esp;
+    load(
+        code,
+        EffectiveAddress {
+            base: Some(esp),
+            index: None,
+            scale: 1,
+            displacement: 0,
+        },
+        destination,
+        imports,
+        exit_depth,
+    );
+    if destination != esp {
+        code.local_get(register(esp))
+            .i32_const(4)
+            .i32_add()
+            .local_set(register(esp));
+    }
+}
+
+pub(super) fn pop_return(
+    code: &mut InstructionSink<'_>,
+    stack_adjust: u16,
+    imports: Imports,
+    exit_depth: u32,
+) {
     let esp = register(crate::cpu::x86::Register32::Esp);
     code.local_get(esp)
         .local_set(ADDRESS)
@@ -86,7 +120,7 @@ pub(super) fn pop_return(code: &mut InstructionSink<'_>, imports: Imports, exit_
     helper_field(code, 20);
     code.local_set(EIP)
         .local_get(esp)
-        .i32_const(4)
+        .i32_const(4 + i32::from(stack_adjust))
         .i32_add()
         .local_set(esp);
 }

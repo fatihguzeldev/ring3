@@ -461,10 +461,10 @@ for (const call of [true, false]) {
 
 {
   const engine = fresh();
-  upload(engine, 0x1000, Uint8Array.from([0xc2, 0, 0]));
+  upload(engine, 0x1000, Uint8Array.from([0xff, 0x34, 0x24]));
   refresh(engine).view.setUint32(engine.base + 140, 0x1000, true);
   engine.view.setUint32(engine.base + 144, 3, true);
-  assert.equal(engine.api.compile(1), 10, 'RET imm16 zero stays outside exact C3 profile');
+  assert.equal(engine.api.compile(1), 10, 'PUSH [ESP] memory operand stays outside the single-access stack profile');
 }
 
 const injectedCases = [

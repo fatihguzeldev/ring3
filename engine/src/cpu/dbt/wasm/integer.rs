@@ -88,8 +88,29 @@ pub(super) fn instruction(
                 .local_set(EIP);
             store = true;
         }
-        Operation::Return { stack_adjust: 0 } => {
-            memory::pop_return(code, imports, exit_depth);
+        Operation::Push { source } => {
+            memory::store(
+                code,
+                EffectiveAddress {
+                    base: Some(Register32::Esp),
+                    index: None,
+                    scale: 1,
+                    displacement: (-4_i32) as u32,
+                },
+                source,
+                imports,
+                exit_depth,
+            );
+            code.local_get(ADDRESS).local_set(register(Register32::Esp));
+            store = true;
+        }
+        Operation::Pop {
+            destination: Location32::Register(destination),
+        } => {
+            memory::pop_register(code, destination, imports, exit_depth);
+        }
+        Operation::Return { stack_adjust } => {
+            memory::pop_return(code, stack_adjust, imports, exit_depth);
         }
         _ => unreachable!("prepared region contains an unsupported operation"),
     }

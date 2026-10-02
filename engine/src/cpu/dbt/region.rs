@@ -132,7 +132,12 @@ fn prepare(
             let terminates = matches!(
                 instruction.operation(),
                 Operation::Jump { .. } | Operation::ConditionalJump { .. }
-            ) || (embedded && supports_stack(&instruction));
+            ) || (embedded
+                && supports_stack(&instruction)
+                && matches!(
+                    instruction.operation(),
+                    Operation::Call { .. } | Operation::Return { .. }
+                ));
             if next > end || (terminates && next != end) {
                 return Err(instruction_error(pc, InstructionError::InvalidBlockEnd));
             }
@@ -195,7 +200,13 @@ fn supports_stack(instruction: &DecodedInstruction) -> bool {
         Operation::Call {
             target: BranchTarget::Direct(_),
         } => instruction.length() == 5,
-        Operation::Return { stack_adjust: 0 } => instruction.length() == 1,
+        Operation::Return { .. } => matches!(instruction.length(), 1 | 3),
+        Operation::Push {
+            source: Value32::Register(_) | Value32::Immediate(_),
+        }
+        | Operation::Pop {
+            destination: Location32::Register(_),
+        } => true,
         _ => false,
     }
 }

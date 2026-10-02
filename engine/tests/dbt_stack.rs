@@ -166,7 +166,7 @@ fn supported_mid_block_call_and_ret_report_invalid_end_at_their_original_pc() {
 }
 
 #[test]
-fn zero_adjustment_immediate_ret_is_excluded_despite_sharing_the_plain_ret_ir() {
+fn zero_adjustment_immediate_ret_shares_plain_ret_ir_but_has_its_own_terminator_span() {
     let mut engine = with_code(0x1000, &[0xc3, 0xc2, 0, 0, 0x90]);
     let memory = engine.memory().unwrap();
     let plain = decode_one(memory, GuestAddress(0x1000)).unwrap();
@@ -175,31 +175,24 @@ fn zero_adjustment_immediate_ret_is_excluded_despite_sharing_the_plain_ret_ir() 
     assert_eq!(immediate.operation(), plain.operation());
     assert_eq!(plain.length(), 1);
     assert_eq!(immediate.length(), 3);
-    for length in [3, 4] {
-        assert_eq!(
-            compile(&mut engine, &[(0x1001, length)]),
-            Err(HostError::Compile(instruction_error(
-                0x1001,
-                InstructionError::BackendUnsupported
-            )))
-        );
-    }
-    assert_eq!(compile(&mut engine, &[(0x1000, 1)]), Ok(1));
+    assert_eq!(compile(&mut engine, &[(0x1001, 3)]), Ok(1));
+    assert_eq!(
+        compile(&mut engine, &[(0x1001, 4)]),
+        Err(HostError::Compile(instruction_error(
+            0x1001,
+            InstructionError::InvalidBlockEnd
+        )))
+    );
+    assert_eq!(compile(&mut engine, &[(0x1000, 1)]), Ok(2));
 }
 
 #[test]
 fn decoded_but_excluded_stack_forms_report_backend_error_even_with_trailing_bytes() {
     for instruction in [
-        &[0xc2, 4, 0][..],
-        &[0xc2, 0xff, 0xff][..],
         &[0xff, 0xd0][..],
         &[0xff, 0x13][..],
         &[0xff, 0x15, 0, 0x80, 0, 0][..],
-        &[0x50][..],
         &[0xff, 0x33][..],
-        &[0x68, 1, 0, 0, 0][..],
-        &[0x6a, 0xff][..],
-        &[0x58][..],
         &[0x8f, 0x03][..],
     ] {
         for trailing in [false, true] {
@@ -364,7 +357,7 @@ fn failed_stack_compile_preserves_the_installed_artifact_and_successful_retry_re
     let original = engine.artifact_bytes().unwrap().to_vec();
     for (bytes, cause) in [
         (
-            &[0x90, 0xc2, 0, 0, 0x90][..],
+            &[0x90, 0xff, 0x33, 0x90][..],
             InstructionError::BackendUnsupported,
         ),
         (
