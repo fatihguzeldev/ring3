@@ -1,9 +1,16 @@
 pub const PAGE_SIZE: u32 = 4096;
+pub const MAX_WORD_WRITES32: usize = 17;
 pub(crate) const GUEST_PAGES: usize = 1 << 20;
 pub(crate) const ADDRESS_LIMIT: u64 = 1 << 32;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct GuestAddress(pub u32);
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct WordWrite32 {
+    pub address: GuestAddress,
+    pub value: u32,
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct BackingOffset(pub u32);

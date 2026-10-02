@@ -165,6 +165,28 @@ impl AddressSpace {
             return Ok(());
         }
         let version = self.advance_version()?;
+        self.copy_in_validated(address, input, version);
+        Ok(())
+    }
+
+    pub fn write_words32(&mut self, words: &[WordWrite32]) -> Result<(), MemoryError> {
+        if words.len() > MAX_WORD_WRITES32 {
+            return Err(MemoryError::InvalidRange);
+        }
+        for word in words {
+            self.check_access(word.address, 4, Access::Write)?;
+        }
+        if words.is_empty() {
+            return Ok(());
+        }
+        let version = self.advance_version()?;
+        for word in words {
+            self.copy_in_validated(word.address, &word.value.to_le_bytes(), version);
+        }
+        Ok(())
+    }
+
+    fn copy_in_validated(&mut self, address: GuestAddress, input: &[u8], version: u64) {
         let mut copied = 0;
         while copied < input.len() {
             let current = address.0 as u64 + copied as u64;
@@ -176,7 +198,6 @@ impl AddressSpace {
             self.versions[self.mappings[page] as usize - 1].content = version;
             copied += count;
         }
-        Ok(())
     }
 
     fn copy_out(
@@ -362,5 +383,128 @@ mod tests {
         );
         assert!(space.is_code_current(&snapshot));
         assert_eq!(space.version, u64::MAX);
+    }
+
+    #[test]
+    fn word_batch_uses_one_last_version_for_all_pages_and_overlaps() {
+        let mut space = AddressSpace::new(3).unwrap();
+        space
+            .map_zeroed(
+                PageRange::new(GuestAddress(0x1000), 3).unwrap(),
+                Permissions::ALL,
+            )
+            .unwrap();
+        let first = space.snapshot_code(GuestAddress(0x1004), 4).unwrap();
+        let crossing = space.snapshot_code(GuestAddress(0x1ffe), 6).unwrap();
+        let unrelated = space.snapshot_code(GuestAddress(0x3000), 4).unwrap();
+        let mappings = space
+            .versions
+            .iter()
+            .map(|version| version.mapping)
+            .collect::<Vec<_>>();
+        let mut words = [WordWrite32 {
+            address: GuestAddress(0x1004),
+            value: 0,
+        }; MAX_WORD_WRITES32];
+        for (index, word) in words[..15].iter_mut().enumerate() {
+            word.value = 0xa000_0000 + index as u32;
+        }
+        words[15] = WordWrite32 {
+            address: GuestAddress(0x1ffe),
+            value: 0x4433_2211,
+        };
+        words[16] = WordWrite32 {
+            address: GuestAddress(0x2000),
+            value: 0x8877_6655,
+        };
+        space.version = u64::MAX - 1;
+        space.write_words32(&words).unwrap();
+        assert_eq!(space.version, u64::MAX);
+        assert!(!space.is_code_current(&first));
+        assert!(!space.is_code_current(&crossing));
+        assert!(space.is_code_current(&unrelated));
+        for address in [0x1000, 0x2000] {
+            let slot = space.mappings[address / PAGE_SIZE as usize] as usize - 1;
+            assert_eq!(space.versions[slot].content, u64::MAX);
+        }
+        assert_eq!(
+            space
+                .versions
+                .iter()
+                .map(|version| version.mapping)
+                .collect::<Vec<_>>(),
+            mappings
+        );
+        let mut bytes = [0; 6];
+        space.read(GuestAddress(0x1ffe), &mut bytes).unwrap();
+        assert_eq!(bytes, [0x11, 0x22, 0x55, 0x66, 0x77, 0x88]);
+        let current = space.snapshot_code(GuestAddress(0x1000), 8192).unwrap();
+        let backing = space.backing.to_vec();
+        assert_eq!(
+            space.write_words32(&words[..1]),
+            Err(MemoryError::VersionExhausted)
+        );
+        space.write_words32(&[]).unwrap();
+        assert_eq!(
+            space.write_words32(&[words[0]; 18]),
+            Err(MemoryError::InvalidRange)
+        );
+        assert_eq!(
+            space.write_words32(&[
+                words[0],
+                WordWrite32 {
+                    address: GuestAddress(0x9000),
+                    value: 1
+                },
+            ]),
+            Err(fault(
+                GuestAddress(0x9000),
+                Access::Write,
+                FaultReason::Unmapped
+            ))
+        );
+        assert_eq!(space.backing.as_ref(), backing);
+        assert!(space.is_code_current(&current));
+        assert!(space.is_code_current(&unrelated));
+        assert_eq!(space.version, u64::MAX);
+        assert_eq!(space.mapped_pages(), 3);
+    }
+
+    #[test]
+    fn failed_word_preflight_does_not_consume_the_last_available_version() {
+        let mut space = AddressSpace::new(2).unwrap();
+        space
+            .map_zeroed(
+                PageRange::new(GuestAddress(0x1000), 2).unwrap(),
+                Permissions::ALL,
+            )
+            .unwrap();
+        let snapshot = space.snapshot_code(GuestAddress(0x1ffe), 4).unwrap();
+        let words = [
+            WordWrite32 {
+                address: GuestAddress(0x1ffe),
+                value: 0x4433_2211,
+            },
+            WordWrite32 {
+                address: GuestAddress(0x9000),
+                value: 0x8877_6655,
+            },
+        ];
+        let backing = space.backing.to_vec();
+        space.version = u64::MAX - 1;
+        assert_eq!(
+            space.write_words32(&words),
+            Err(fault(
+                GuestAddress(0x9000),
+                Access::Write,
+                FaultReason::Unmapped
+            ))
+        );
+        assert_eq!(space.version, u64::MAX - 1);
+        assert_eq!(space.backing.as_ref(), backing);
+        assert!(space.is_code_current(&snapshot));
+        space.write_words32(&words[..1]).unwrap();
+        assert_eq!(space.version, u64::MAX);
+        assert!(!space.is_code_current(&snapshot));
     }
 }
