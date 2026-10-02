@@ -141,6 +141,15 @@ pub extern "C" fn write32(address: u32, value: u32) -> u32 {
 }
 
 #[allow(unsafe_code)]
+#[unsafe(export_name = "ring3_abi_v1_write_words32")]
+pub extern "C" fn write_words32(count: u32) -> u32 {
+    {
+        #![forbid(unsafe_code)]
+        crate::process::wasm::write_words32(count)
+    }
+}
+
+#[allow(unsafe_code)]
 #[unsafe(export_name = "ring3_abi_v1_store32")]
 pub extern "C" fn store32(address: u32, value: u32) -> u32 {
     {

@@ -12,7 +12,10 @@ use crate::{
     cpu::dbt::{
         BlockSpec, CompileError, CompileLimits, CompiledRegion, GateSpec, compile_embedded_region,
     },
-    memory::{AddressSpace, GuestAddress, MemoryError, PageRange, Permissions},
+    memory::{
+        AddressSpace, GuestAddress, MAX_WORD_WRITES32, MemoryError, PageRange, Permissions,
+        WordWrite32,
+    },
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -230,6 +233,28 @@ impl EngineInstance {
             .write(GuestAddress(address), &value.to_le_bytes())
             .map(|()| 0);
         self.write_helper(result)
+    }
+
+    pub fn write_words32(&mut self, count: u32) -> Result<(), HostError> {
+        let memory = self.memory.as_mut().ok_or(HostError::Closed)?;
+        if count > MAX_WORD_WRITES32 as u32 {
+            return Err(HostError::InvalidRequest);
+        }
+        let transfer = &self.arena.as_ref().get_ref()[TRANSFER_OFFSET..];
+        let mut words = [WordWrite32 {
+            address: GuestAddress(0),
+            value: 0,
+        }; MAX_WORD_WRITES32];
+        for (index, word) in words[..count as usize].iter_mut().enumerate() {
+            let offset = index * 8;
+            word.address = GuestAddress(u32::from_le_bytes(
+                transfer[offset..offset + 4].try_into().unwrap(),
+            ));
+            word.value = u32::from_le_bytes(transfer[offset + 4..offset + 8].try_into().unwrap());
+        }
+        memory
+            .write_words32(&words[..count as usize])
+            .map_err(HostError::Memory)
     }
 
     pub fn store32(&mut self, address: u32, value: u32) -> Result<StoreCompletion, HostError> {

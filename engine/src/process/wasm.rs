@@ -166,6 +166,10 @@ pub(crate) fn write32(address: u32, value: u32) -> u32 {
     mutate(|instance| instance.write32(address, value))
 }
 
+pub(crate) fn write_words32(count: u32) -> u32 {
+    mutate(|instance| instance.write_words32(count))
+}
+
 pub(crate) fn store32(address: u32, value: u32) -> u32 {
     REGISTRY.with(|registry| {
         let Ok(mut registry) = registry.try_borrow_mut() else {
