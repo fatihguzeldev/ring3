@@ -181,7 +181,8 @@ fn prepare(
             }
             if !(supports(&instruction, embedded)
                 || (matches!(profile, PreparationProfile::ResidentReadOnly)
-                    && supports_memory_reads(instruction.operation())))
+                    && (supports_memory_reads(instruction.operation())
+                        || supports_indirect_jump(instruction.operation()))))
             {
                 return Err(instruction_error(pc, InstructionError::BackendUnsupported));
             }
@@ -291,6 +292,15 @@ fn supports_memory_reads(operation: &Operation) -> bool {
     )
 }
 
+fn supports_indirect_jump(operation: &Operation) -> bool {
+    matches!(
+        operation,
+        Operation::Jump {
+            target: BranchTarget::Indirect(_),
+        }
+    )
+}
+
 pub(super) fn supports(instruction: &DecodedInstruction, embedded: bool) -> bool {
     let operation = instruction.operation();
     let memory_write = matches!(
@@ -300,17 +310,11 @@ pub(super) fn supports(instruction: &DecodedInstruction, embedded: bool) -> bool
             source: Value32::Register(_) | Value32::Immediate(_),
         }
     );
-    let indirect_jump = matches!(
-        operation,
-        Operation::Jump {
-            target: BranchTarget::Indirect(_),
-        }
-    );
     (embedded
         && (supports_memory_reads(operation)
             || memory_write
             || supports_stack(instruction)
-            || indirect_jump))
+            || supports_indirect_jump(operation)))
         || (embedded
             && matches!(
                 operation,
