@@ -354,8 +354,8 @@ fn failed_stack_compile_preserves_the_installed_artifact_and_successful_retry_re
     let original = engine.artifact_bytes().unwrap().to_vec();
     for (bytes, cause) in [
         (
-            &[0x90, 0x31, 0x03, 0x90][..],
-            InstructionError::BackendUnsupported,
+            &[0x90, 0x0f, 0x06, 0x90][..],
+            InstructionError::Decode(DecodeError::Unsupported(UnsupportedFeature::Privileged)),
         ),
         (
             &[0x90, 0xe8, 0, 0, 0, 0, 0x90][..],

@@ -121,6 +121,11 @@ pub(super) fn instruction(
                 }
             }
             code.local_set(RESULT);
+            let writes = !matches!(kind, BinaryKind::Cmp | BinaryKind::Test);
+            if writes && let Location32::Memory(address) = destination {
+                binary_memory_store(code, kind, address, source, imports, exit_depth);
+                store = true;
+            }
             match kind {
                 BinaryKind::Add | BinaryKind::Sub | BinaryKind::Cmp => {
                     arithmetic_flags(code, kind, CarryFlag::Calculate)
@@ -129,10 +134,7 @@ pub(super) fn instruction(
                     logical_flags(code)
                 }
             }
-            if !matches!(kind, BinaryKind::Cmp | BinaryKind::Test) {
-                let Location32::Register(destination) = destination else {
-                    unreachable!("prepared binary operation cannot write memory")
-                };
+            if writes && let Location32::Register(destination) = destination {
                 code.local_get(RESULT).local_set(register(destination));
             }
         }
@@ -313,6 +315,28 @@ fn extend_value(code: &mut InstructionSink<'_>, kind: ExtensionKind, width: Smal
                 .i32_const(32 - bits)
                 .i32_shr_s();
         }
+    }
+}
+
+fn binary_memory_store(
+    code: &mut InstructionSink<'_>,
+    kind: BinaryKind,
+    address: EffectiveAddress,
+    source: Value32,
+    imports: memory::Imports,
+    exit_depth: u32,
+) {
+    memory::store_result(code, address, imports, exit_depth);
+    if matches!(kind, BinaryKind::Add | BinaryKind::Sub) {
+        // store validation uses operand scratch; recover the old destination from the unchanged source.
+        value(code, source);
+        code.local_set(RHS).local_get(RESULT).local_get(RHS);
+        if kind == BinaryKind::Add {
+            code.i32_sub();
+        } else {
+            code.i32_add();
+        }
+        code.local_set(LHS);
     }
 }
 

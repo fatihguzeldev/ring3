@@ -392,7 +392,7 @@ fn standalone_memory_sources_stay_excluded_in_all_four_apis_before_later_poison(
 }
 
 #[test]
-fn writing_binary_memory_destinations_stay_excluded() {
+fn standalone_writing_binary_memory_destinations_stay_excluded() {
     let mut instructions = Vec::new();
     for opcode in [0x01, 0x29, 0x21, 0x09, 0x31] {
         for source in 0..8 {
@@ -409,7 +409,6 @@ fn writing_binary_memory_destinations_stay_excluded() {
         bytes.push(0xf4);
         let expected = instruction_error(InstructionError::BackendUnsupported);
         standalone_rejected(&bytes, expected);
-        embedded_rejected(&bytes, expected);
     }
 }
 
@@ -440,7 +439,10 @@ fn prefixes_small_width_and_adjacent_exclusions_keep_precise_errors() {
             &[0x02, 0x03][..],
             InstructionError::Decode(DecodeError::Unsupported(UnsupportedFeature::Opcode)),
         ),
-        (&[0x01, 0x03][..], InstructionError::BackendUnsupported),
+        (
+            &[0x0f, 0x06][..],
+            InstructionError::Decode(DecodeError::Unsupported(UnsupportedFeature::Privileged)),
+        ),
     ] {
         let mut bytes = vec![0x90];
         bytes.extend_from_slice(instruction);

@@ -1,3 +1,4 @@
+use ring3_engine::cpu::UnsupportedFeature;
 use ring3_engine::cpu::dbt::{
     BlockSpec, CompileError, CompileLimits, InstructionError, compile_region, prepare_region,
 };
@@ -163,13 +164,10 @@ fn embedded_compilation_accepts_execute_only_instruction_pages() {
 }
 
 #[test]
-fn other_memory_operations_and_existing_exclusions_remain_rejected_at_their_pc() {
-    for instruction in [
-        &[0x01, 0x03][..],
-        &[0x29, 0x03][..],
-        &[0x21, 0x03][..],
-        &[0x09, 0x03][..],
-        &[0x31, 0x03][..],
+fn decoder_exclusions_after_a_memory_prefix_remain_rejected_at_their_pc() {
+    for (instruction, feature) in [
+        (&[0xd1, 0xe0][..], UnsupportedFeature::Opcode),
+        (&[0x0f, 0x06][..], UnsupportedFeature::Privileged),
     ] {
         let mut engine = EngineInstance::new(1, KEY).unwrap();
         engine.map(0x1000, 1, 7).unwrap();
@@ -178,7 +176,10 @@ fn other_memory_operations_and_existing_exclusions_remain_rejected_at_their_pc()
         upload(&mut engine, 0x1000, &bytes);
         assert_eq!(
             compile(&mut engine, 0x1000, bytes.len() as u32),
-            Err(HostError::Compile(backend_error(0x1003)))
+            Err(HostError::Compile(CompileError::Instruction {
+                pc: GuestAddress(0x1003),
+                cause: InstructionError::Decode(DecodeError::Unsupported(feature)),
+            }))
         );
         assert_eq!(engine.generation(), 0);
         assert_eq!(engine.artifact_bytes(), Err(HostError::InvalidArtifact));
@@ -191,7 +192,7 @@ fn failed_embedded_compile_preserves_current_artifact_and_successful_retry_repla
     engine.map(0x1000, 1, 7).unwrap();
     engine.map(0x3000, 1, 7).unwrap();
     upload(&mut engine, 0x1000, &[0x90]);
-    upload(&mut engine, 0x3000, &[0x8b, 0x03, 0x01, 0x03]);
+    upload(&mut engine, 0x3000, &[0x8b, 0x03, 0x0f, 0x06]);
     assert_eq!(compile(&mut engine, 0x1000, 1), Ok(1));
     let original = engine.artifact_bytes().unwrap().to_vec();
     let descriptor = &mut engine.arena_mut().unwrap()[140..148];
@@ -199,7 +200,12 @@ fn failed_embedded_compile_preserves_current_artifact_and_successful_retry_repla
     let before = engine.arena().to_vec();
     assert_eq!(
         engine.compile(1),
-        Err(HostError::Compile(backend_error(0x3002)))
+        Err(HostError::Compile(CompileError::Instruction {
+            pc: GuestAddress(0x3002),
+            cause: InstructionError::Decode(DecodeError::Unsupported(
+                UnsupportedFeature::Privileged
+            )),
+        }))
     );
     assert_eq!(engine.arena(), before);
     assert_eq!(engine.generation(), 1);

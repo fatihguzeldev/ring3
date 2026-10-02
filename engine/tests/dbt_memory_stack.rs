@@ -251,7 +251,7 @@ fn failed_compile_preserves_an_installed_memory_stack_artifact_and_retry_replace
     engine.map(0x3000, 1, 7).unwrap();
     assert_eq!(compile(&mut engine, 0x1000, 6), Ok(1));
     let installed = engine.artifact_bytes().unwrap().to_vec();
-    let bad = [0xff, 0x34, 0x24, 0x31, 0x03];
+    let bad = [0xff, 0x34, 0x24, 0x0f, 0x06];
     upload(&mut engine, 0x3000, &bad);
     describe(&mut engine, 0x3000, bad.len() as u32);
     let before = engine.arena().to_vec();
@@ -259,7 +259,7 @@ fn failed_compile_preserves_an_installed_memory_stack_artifact_and_retry_replace
         engine.compile(1),
         Err(HostError::Compile(instruction_error(
             0x3003,
-            InstructionError::BackendUnsupported
+            InstructionError::Decode(DecodeError::Unsupported(UnsupportedFeature::Privileged))
         )))
     );
     assert_eq!(engine.arena(), before);

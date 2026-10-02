@@ -46,6 +46,16 @@ impl Imports {
                 | Operation::Unary {
                     kind: UnaryKind::Inc | UnaryKind::Dec | UnaryKind::Not | UnaryKind::Neg,
                     destination: Location32::Memory(_),
+                }
+                | Operation::Binary {
+                    kind:
+                        BinaryKind::Add
+                        | BinaryKind::Sub
+                        | BinaryKind::And
+                        | BinaryKind::Or
+                        | BinaryKind::Xor,
+                    destination: Location32::Memory(_),
+                    source: Value32::Register(_) | Value32::Immediate(_),
                 } => {
                     read = true;
                     store = true;

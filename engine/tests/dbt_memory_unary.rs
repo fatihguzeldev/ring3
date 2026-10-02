@@ -343,7 +343,7 @@ fn standalone_memory_inc_dec_neg_remain_excluded_in_all_four_apis_before_later_p
 }
 
 #[test]
-fn writing_binary_memory_forms_remain_excluded() {
+fn standalone_writing_binary_memory_forms_remain_excluded() {
     for instruction in [
         &[0x01, 0x03][..],
         &[0x29, 0x03][..],
@@ -358,7 +358,6 @@ fn writing_binary_memory_forms_remain_excluded() {
         bytes.push(0xf4);
         let expected = instruction_error(InstructionError::BackendUnsupported);
         standalone_rejected(&bytes, expected);
-        embedded_rejected(&bytes, expected);
     }
 }
 

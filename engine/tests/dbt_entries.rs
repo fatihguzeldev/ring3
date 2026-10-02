@@ -509,14 +509,14 @@ fn embedded_discovery_admits_current_memory_stack_and_indirect_profile_without_d
         engine.artifact_bytes().unwrap();
         assert_eq!(engine.memory().unwrap().mapped_pages(), 1);
     }
-    let mut engine = embedded(0x1000, &[0x01, 0x03]);
+    let mut engine = embedded(0x1000, &[0x0f, 0x06]);
     entry_descriptors(&mut engine, &[0x1000], &[]);
     let arena = engine.arena().to_vec();
     assert_eq!(
         engine.compile_entries(1, 0),
         Err(HostError::Compile(instruction_error(
             0x1000,
-            InstructionError::BackendUnsupported
+            InstructionError::Decode(DecodeError::Unsupported(UnsupportedFeature::Privileged))
         )))
     );
     assert_eq!(engine.arena(), arena);

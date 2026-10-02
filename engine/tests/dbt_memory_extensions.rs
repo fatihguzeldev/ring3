@@ -340,7 +340,7 @@ fn standalone_memory_conversion_remains_excluded_in_explicit_and_entry_apis() {
 }
 
 #[test]
-fn embedded_small_width_prefix_and_other_memory_arithmetic_errors_remain_precise() {
+fn embedded_small_width_prefix_and_adjacent_errors_remain_precise() {
     for (instruction, cause) in [
         (
             &[0x66, 0x0f, 0xb6, 0x03][..],
@@ -362,8 +362,14 @@ fn embedded_small_width_prefix_and_other_memory_arithmetic_errors_remain_precise
             &[0x64, 0x0f, 0xb6, 0x03][..],
             InstructionError::Decode(DecodeError::Unsupported(UnsupportedFeature::Segment)),
         ),
-        (&[0x01, 0x03][..], InstructionError::BackendUnsupported),
-        (&[0x09, 0x03][..], InstructionError::BackendUnsupported),
+        (
+            &[0xd1, 0xe0][..],
+            InstructionError::Decode(DecodeError::Unsupported(UnsupportedFeature::Opcode)),
+        ),
+        (
+            &[0x0f, 0x06][..],
+            InstructionError::Decode(DecodeError::Unsupported(UnsupportedFeature::Privileged)),
+        ),
     ] {
         let mut bytes = vec![0x90];
         bytes.extend_from_slice(instruction);

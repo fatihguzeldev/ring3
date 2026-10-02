@@ -275,7 +275,13 @@ pub(super) fn supports(instruction: &DecodedInstruction, embedded: bool) -> bool
                     destination: Location32::Register(_),
                     source: Value32::Memory(_),
                 } | Operation::Binary {
-                    kind: BinaryKind::Cmp | BinaryKind::Test,
+                    kind: BinaryKind::Add
+                        | BinaryKind::Sub
+                        | BinaryKind::Cmp
+                        | BinaryKind::And
+                        | BinaryKind::Or
+                        | BinaryKind::Xor
+                        | BinaryKind::Test,
                     destination: Location32::Memory(_),
                     source: Value32::Register(_) | Value32::Immediate(_),
                 } | Operation::Unary {

@@ -239,7 +239,7 @@ fn rejected(instruction: &[u8], cause: InstructionError) {
 }
 
 #[test]
-fn memory_logical_destinations_and_immediates_remain_backend_excluded() {
+fn standalone_memory_logical_destinations_and_immediates_remain_backend_excluded() {
     for instruction in [
         &[0x21, 0x03][..],
         &[0x09, 0x03][..],
@@ -251,7 +251,22 @@ fn memory_logical_destinations_and_immediates_remain_backend_excluded() {
         &[0x83, 0x0b, 0x80][..],
         &[0x83, 0x33, 0x80][..],
     ] {
-        rejected(instruction, InstructionError::BackendUnsupported);
+        let mut bytes = vec![0x90];
+        bytes.extend_from_slice(instruction);
+        let memory = code(0x1000, &bytes);
+        let specs = [spec(0x1000, bytes.len())];
+        let expected = Some(CompileError::Instruction {
+            pc: GuestAddress(0x1001),
+            cause: InstructionError::BackendUnsupported,
+        });
+        for actual in [
+            prepare_region(&memory, &specs, CompileLimits::default()).err(),
+            compile_region(&memory, &specs, CompileLimits::default()).err(),
+            prepare_entry_region(&memory, &[GuestAddress(0x1000)], CompileLimits::default()).err(),
+            compile_entry_region(&memory, &[GuestAddress(0x1000)], CompileLimits::default()).err(),
+        ] {
+            assert_eq!(actual, expected, "{instruction:02x?}");
+        }
     }
 }
 
@@ -283,7 +298,10 @@ fn small_width_prefix_and_adjacent_operation_errors_retain_their_exact_categorie
         &[0xf0, 0x21, 0xc0],
         InstructionError::Decode(DecodeError::InvalidEncoding),
     );
-    rejected(&[0x01, 0x00], InstructionError::BackendUnsupported);
+    rejected(
+        &[0x0f, 0x06],
+        InstructionError::Decode(DecodeError::Unsupported(UnsupportedFeature::Privileged)),
+    );
     let memory = code(0x1000, &[0x90, 0x0f, 0xb6, 0x03]);
     let expected = Some(CompileError::Instruction {
         pc: GuestAddress(0x1001),
