@@ -4,7 +4,10 @@ use std::cell::RefCell;
 
 use super::{CallError, EngineInstance, HostError, ResidentInstallation, StoreCompletion};
 use crate::{
-    abi::arena::{CANCEL_OFFSET, EXIT_OFFSET, STATE_OFFSET, TRANSFER_OFFSET},
+    abi::{
+        arena::{CANCEL_OFFSET, EXIT_OFFSET, STATE_OFFSET, TRANSFER_OFFSET},
+        x86::{STATE_SIZE, decode_state},
+    },
     cpu::dbt::RegistryError,
 };
 
@@ -190,6 +193,38 @@ fn resident_record(instance: &mut EngineInstance, id: u64) -> Result<(), HostErr
         output.copy_from_slice(&value.to_le_bytes());
     }
     Ok(())
+}
+
+pub(crate) fn guard_dispatch_entry(
+    key_low: u32,
+    key_high: u32,
+    state: u32,
+    exit: u32,
+    cancel: u32,
+) -> u32 {
+    REGISTRY.with(|registry| {
+        let Ok(registry) = registry.try_borrow() else {
+            return 9;
+        };
+        let Some(instance) = registry.instance.as_ref() else {
+            return 5;
+        };
+        let key = u64::from(key_low) | (u64::from(key_high) << 32);
+        if let Err(error) = instance.guard_dispatch_entry(key) {
+            return status(error);
+        }
+        let base = instance.arena_address() as u32;
+        if state != base + STATE_OFFSET as u32
+            || exit != base + EXIT_OFFSET as u32
+            || cancel != base + CANCEL_OFFSET as u32
+        {
+            return 1;
+        }
+        if decode_state(&instance.arena()[STATE_OFFSET..STATE_OFFSET + STATE_SIZE]).is_err() {
+            return 2;
+        }
+        0
+    })
 }
 
 pub(crate) fn guard_resident(

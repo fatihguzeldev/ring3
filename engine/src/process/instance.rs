@@ -274,6 +274,18 @@ impl EngineInstance {
             .map_err(|_| HostError::CodeInvalidated)
     }
 
+    /// checks process authority; the wasm boundary also validates pointers and state.
+    pub fn guard_dispatch_entry(&self, key: u64) -> Result<(), HostError> {
+        self.memory()?;
+        if key != self.key {
+            return Err(HostError::InvalidArtifact);
+        }
+        if self.pending_call.is_some() || self.callback.is_some() {
+            return Err(HostError::Call(CallError::Busy));
+        }
+        Ok(())
+    }
+
     pub fn guard(&self, key: u64, generation: u32) -> Result<(), HostError> {
         self.guard_artifact(key, generation)?;
         if self.pending_call.is_some() {

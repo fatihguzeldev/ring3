@@ -160,6 +160,21 @@ pub extern "C" fn find_installed_resident(key_low: u32, key_high: u32, pc: u32) 
 }
 
 #[allow(unsafe_code)]
+#[unsafe(export_name = "ring3_abi_v1_guard_dispatch_entry")]
+pub extern "C" fn guard_dispatch_entry(
+    key_low: u32,
+    key_high: u32,
+    state: u32,
+    exit: u32,
+    cancel: u32,
+) -> u32 {
+    {
+        #![forbid(unsafe_code)]
+        crate::process::wasm::guard_dispatch_entry(key_low, key_high, state, exit, cancel)
+    }
+}
+
+#[allow(unsafe_code)]
 #[unsafe(export_name = "ring3_abi_v1_guard_resident")]
 pub extern "C" fn guard_resident(
     key_low: u32,
