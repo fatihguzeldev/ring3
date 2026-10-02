@@ -283,7 +283,7 @@ fn small_width_prefix_and_adjacent_operation_errors_retain_their_exact_categorie
         &[0xf0, 0x21, 0xc0],
         InstructionError::Decode(DecodeError::InvalidEncoding),
     );
-    rejected(&[0xf7, 0x18], InstructionError::BackendUnsupported);
+    rejected(&[0x01, 0x00], InstructionError::BackendUnsupported);
     let memory = code(0x1000, &[0x90, 0x0f, 0xb6, 0x03]);
     let expected = Some(CompileError::Instruction {
         pc: GuestAddress(0x1001),

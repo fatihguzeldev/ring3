@@ -44,7 +44,7 @@ impl Imports {
                     target: BranchTarget::Indirect(Location32::Memory(_)),
                 }
                 | Operation::Unary {
-                    kind: UnaryKind::Not,
+                    kind: UnaryKind::Inc | UnaryKind::Dec | UnaryKind::Not | UnaryKind::Neg,
                     destination: Location32::Memory(_),
                 } => {
                     read = true;

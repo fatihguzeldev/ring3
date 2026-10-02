@@ -279,7 +279,7 @@ pub(super) fn supports(instruction: &DecodedInstruction, embedded: bool) -> bool
                     destination: Location32::Memory(_),
                     source: Value32::Register(_) | Value32::Immediate(_),
                 } | Operation::Unary {
-                    kind: UnaryKind::Not,
+                    kind: UnaryKind::Inc | UnaryKind::Dec | UnaryKind::Not | UnaryKind::Neg,
                     destination: Location32::Memory(_),
                 }
             ))

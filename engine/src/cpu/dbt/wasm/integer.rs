@@ -141,15 +141,10 @@ pub(super) fn instruction(
             destination: Location32::Register(destination),
         } => unary(code, kind, destination),
         Operation::Unary {
-            kind: UnaryKind::Not,
+            kind,
             destination: Location32::Memory(address),
         } => {
-            memory::load_result(code, address, imports, exit_depth);
-            code.local_get(RESULT)
-                .i32_const(-1)
-                .i32_xor()
-                .local_set(RESULT);
-            memory::store_result(code, address, imports, exit_depth);
+            unary_memory(code, kind, address, imports, exit_depth);
             store = true;
         }
         Operation::Jump {
@@ -251,7 +246,6 @@ pub(super) fn instruction(
         Operation::Return { stack_adjust } => {
             memory::pop_return(code, stack_adjust, imports, exit_depth);
         }
-        _ => unreachable!("prepared region contains an unsupported operation"),
     }
     if !matches!(
         instruction.operation(),
@@ -320,6 +314,59 @@ fn extend_value(code: &mut InstructionSink<'_>, kind: ExtensionKind, width: Smal
                 .i32_shr_s();
         }
     }
+}
+
+fn unary_memory(
+    code: &mut InstructionSink<'_>,
+    kind: UnaryKind,
+    address: EffectiveAddress,
+    imports: memory::Imports,
+    exit_depth: u32,
+) {
+    memory::load_result(code, address, imports, exit_depth);
+    match kind {
+        UnaryKind::Inc => {
+            code.local_get(RESULT).i32_const(1).i32_add();
+        }
+        UnaryKind::Dec => {
+            code.local_get(RESULT).i32_const(1).i32_sub();
+        }
+        UnaryKind::Not => {
+            code.local_get(RESULT).i32_const(-1).i32_xor();
+        }
+        UnaryKind::Neg => {
+            code.i32_const(0).local_get(RESULT).i32_sub();
+        }
+    }
+    code.local_set(RESULT);
+    memory::store_result(code, address, imports, exit_depth);
+
+    // store validation uses operand scratch; recover reversible operands after it succeeds.
+    let (binary, carry) = match kind {
+        UnaryKind::Not => return,
+        UnaryKind::Inc | UnaryKind::Dec => {
+            code.local_get(RESULT).i32_const(1);
+            let binary = if kind == UnaryKind::Inc {
+                code.i32_sub();
+                BinaryKind::Add
+            } else {
+                code.i32_add();
+                BinaryKind::Sub
+            };
+            code.local_set(LHS).i32_const(1).local_set(RHS);
+            (binary, CarryFlag::Preserve)
+        }
+        UnaryKind::Neg => {
+            code.i32_const(0)
+                .local_set(LHS)
+                .i32_const(0)
+                .local_get(RESULT)
+                .i32_sub()
+                .local_set(RHS);
+            (BinaryKind::Sub, CarryFlag::Calculate)
+        }
+    };
+    arithmetic_flags(code, binary, carry);
 }
 
 fn unary(code: &mut InstructionSink<'_>, kind: UnaryKind, destination: Register32) {

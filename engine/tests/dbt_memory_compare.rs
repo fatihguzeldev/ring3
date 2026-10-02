@@ -423,7 +423,7 @@ fn standalone_read_only_memory_forms_remain_excluded_before_later_poison() {
 }
 
 #[test]
-fn other_writing_binary_and_unary_memory_forms_remain_excluded() {
+fn writing_binary_memory_forms_remain_excluded() {
     for instruction in [
         &[0x01, 0x03][..],
         &[0x29, 0x03][..],
@@ -432,9 +432,6 @@ fn other_writing_binary_and_unary_memory_forms_remain_excluded() {
         &[0x31, 0x03][..],
         &[0x81, 0x03, 1, 0, 0, 0][..],
         &[0x83, 0x2b, 0x80][..],
-        &[0xff, 0x03][..],
-        &[0xff, 0x0b][..],
-        &[0xf7, 0x1b][..],
     ] {
         let mut bytes = vec![0x90];
         bytes.extend_from_slice(instruction);

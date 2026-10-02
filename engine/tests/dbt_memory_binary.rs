@@ -440,7 +440,7 @@ fn prefixes_small_width_and_adjacent_exclusions_keep_precise_errors() {
             &[0x02, 0x03][..],
             InstructionError::Decode(DecodeError::Unsupported(UnsupportedFeature::Opcode)),
         ),
-        (&[0xf7, 0x1b][..], InstructionError::BackendUnsupported),
+        (&[0x01, 0x03][..], InstructionError::BackendUnsupported),
     ] {
         let mut bytes = vec![0x90];
         bytes.extend_from_slice(instruction);

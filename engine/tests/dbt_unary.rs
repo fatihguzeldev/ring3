@@ -227,9 +227,36 @@ fn rejected(instruction: &[u8], cause: InstructionError) {
 }
 
 #[test]
-fn other_memory_unary_destinations_remain_backend_excluded_without_data_access() {
-    for bytes in [&[0xff, 0x03][..], &[0xff, 0x0b][..], &[0xf7, 0x1b][..]] {
-        rejected(bytes, InstructionError::BackendUnsupported);
+fn standalone_memory_unary_destinations_remain_backend_excluded_without_data_access() {
+    for instruction in [&[0xff, 0x03][..], &[0xff, 0x0b][..], &[0xf7, 0x1b][..]] {
+        let mut bytes = vec![0x90];
+        bytes.extend_from_slice(instruction);
+        let mut memory = code(0x1000, &bytes);
+        memory
+            .protect(
+                PageRange::new(GuestAddress(0x1000), 1).unwrap(),
+                Permissions::EXECUTE,
+            )
+            .unwrap();
+        let snapshot = memory
+            .snapshot_code(GuestAddress(0x1000), bytes.len())
+            .unwrap();
+        let expected = Some(CompileError::Instruction {
+            pc: GuestAddress(0x1001),
+            cause: InstructionError::BackendUnsupported,
+        });
+        let specs = [spec(0x1000, bytes.len())];
+        for actual in [
+            prepare_region(&memory, &specs, CompileLimits::default()).err(),
+            compile_region(&memory, &specs, CompileLimits::default()).err(),
+            prepare_entry_region(&memory, &[GuestAddress(0x1000)], CompileLimits::default()).err(),
+            compile_entry_region(&memory, &[GuestAddress(0x1000)], CompileLimits::default()).err(),
+        ] {
+            assert_eq!(actual, expected, "{instruction:02x?}");
+        }
+        assert!(memory.is_code_current(&snapshot));
+        assert_eq!(memory.mapped_pages(), 1);
+        assert!(memory.resolve(GuestAddress(0x1000), Access::Read).is_err());
     }
 }
 

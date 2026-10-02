@@ -329,11 +329,8 @@ fn standalone_memory_not_remains_excluded_in_all_four_apis_before_later_poison()
 }
 
 #[test]
-fn memory_inc_dec_neg_and_writing_binary_forms_remain_excluded() {
+fn writing_binary_memory_forms_remain_excluded() {
     for instruction in [
-        &[0xff, 0x03][..],
-        &[0xff, 0x0b][..],
-        &[0xf7, 0x1b][..],
         &[0x01, 0x03][..],
         &[0x29, 0x03][..],
         &[0x21, 0x03][..],
