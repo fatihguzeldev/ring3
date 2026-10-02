@@ -1,5 +1,7 @@
 use super::region::prepare_embedded_region;
-use super::{BlockSpec, CompileError, CompileLimits, PreparedRegion, prepare_region, wasm};
+use super::{
+    BlockSpec, CompileError, CompileLimits, GateSpec, PreparedRegion, prepare_region, wasm,
+};
 use crate::{
     abi::{ABI_VERSION, X86_INTEGER_PROFILE},
     memory::AddressSpace,
@@ -49,7 +51,7 @@ pub fn compile_region(
     specs: &[BlockSpec],
     limits: CompileLimits,
 ) -> Result<CompiledRegion, CompileError> {
-    compile(memory, specs, limits, None)
+    compile(memory, specs, limits, None, &[])
 }
 
 pub(crate) fn compile_embedded_region(
@@ -58,12 +60,14 @@ pub(crate) fn compile_embedded_region(
     limits: CompileLimits,
     key: u64,
     generation: u32,
+    gates: &[GateSpec],
 ) -> Result<CompiledRegion, CompileError> {
     compile(
         memory,
         specs,
         limits,
         Some(wasm::EmbeddedBinding { key, generation }),
+        gates,
     )
 }
 
@@ -72,9 +76,10 @@ fn compile(
     specs: &[BlockSpec],
     limits: CompileLimits,
     binding: Option<wasm::EmbeddedBinding>,
+    gates: &[GateSpec],
 ) -> Result<CompiledRegion, CompileError> {
     let prepared = if binding.is_some() {
-        prepare_embedded_region(memory, specs, limits)?
+        prepare_embedded_region(memory, specs, limits, gates)?
     } else {
         prepare_region(memory, specs, limits)?
     };

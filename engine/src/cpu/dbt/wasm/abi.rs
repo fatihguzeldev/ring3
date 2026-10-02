@@ -76,7 +76,7 @@ pub(super) fn load_state(sink: &mut InstructionSink<'_>) {
     sink.local_set(FLAGS);
 }
 
-pub(super) fn flush(sink: &mut InstructionSink<'_>, memory: bool) {
+pub(super) fn flush(sink: &mut InstructionSink<'_>, memory: bool, gates: bool) {
     for index in 0..8 {
         store_local(
             sink,
@@ -92,7 +92,9 @@ pub(super) fn flush(sink: &mut InstructionSink<'_>, memory: bool) {
         (0, u32::from_le_bytes(*b"R3EX")),
         (
             4,
-            if memory {
+            if gates {
+                3 | (u32::from(X86_INTEGER_PROFILE) << 16)
+            } else if memory {
                 2 | (u32::from(X86_INTEGER_PROFILE) << 16)
             } else {
                 header_version()
@@ -111,7 +113,7 @@ pub(super) fn flush(sink: &mut InstructionSink<'_>, memory: bool) {
     }
     store_local(sink, EXIT_PTR, REASON_OFFSET, REASON);
     store_local(sink, EXIT_PTR, RETIRED_OFFSET, RETIRED);
-    if memory {
+    if memory || gates {
         for (offset, local) in [
             (DETAIL_OFFSET, DETAIL),
             (FAULT_ADDRESS_OFFSET, FAULT_ADDRESS),

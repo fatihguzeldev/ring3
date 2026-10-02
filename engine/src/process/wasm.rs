@@ -79,6 +79,10 @@ pub(crate) fn compile(count: u32) -> u32 {
     mutate(|instance| instance.compile(count).map(|_| ()))
 }
 
+pub(crate) fn compile_with_gates(count: u32, gate_count: u32) -> u32 {
+    mutate(|instance| instance.compile_with_gates(count, gate_count).map(|_| ()))
+}
+
 pub(crate) fn generation() -> u32 {
     inspect(EngineInstance::generation)
 }

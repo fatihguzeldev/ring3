@@ -13,7 +13,8 @@ pub(in crate::cpu::dbt) fn emit(
     let mut module = Module::new();
     let (needs_read, needs_store) = memory::Imports::needed(blocks);
     let has_memory = needs_read || needs_store;
-    debug_assert!(!has_memory || binding.is_some());
+    let has_gates = blocks.iter().any(|block| block.gate.is_some());
+    debug_assert!(!(has_memory || has_gates) || binding.is_some());
     let mut types = TypeSection::new();
     types.ty().function([ValType::I32; 4], [ValType::I32]);
     if binding.is_some() {
@@ -63,7 +64,7 @@ pub(in crate::cpu::dbt) fn emit(
     exports.export("run", ExportKind::Func, function_index);
     module.section(&exports);
     let mut declarations = vec![(16, ValType::I32), (1, ValType::I64)];
-    if has_memory {
+    if has_memory || has_gates {
         declarations.push((6, ValType::I32));
     }
     let mut function = Function::new(declarations);
@@ -90,7 +91,7 @@ pub(in crate::cpu::dbt) fn emit(
         emit_block(&mut code, block, helper_imports);
     }
     code.i32_const(3).local_set(REASON).br(1).end().end();
-    abi::flush(&mut code, has_memory);
+    abi::flush(&mut code, has_memory, has_gates);
     code.i32_const(0).end();
     let mut bodies = CodeSection::new();
     bodies.function(&function);
@@ -99,6 +100,19 @@ pub(in crate::cpu::dbt) fn emit(
 }
 
 fn emit_block(code: &mut InstructionSink<'_>, block: &CompiledBlock, imports: memory::Imports) {
+    if let Some(gate) = &block.gate {
+        code.local_get(EIP)
+            .i32_const(gate.entry.0 as i32)
+            .i32_eq()
+            .if_(BlockType::Empty)
+            .i32_const(gate.id as i32)
+            .local_set(DETAIL)
+            .i32_const(8)
+            .local_set(REASON)
+            .br(2)
+            .end();
+        return;
+    }
     code.i32_const(-1).local_set(RESUME);
     for (index, instruction) in block.instructions.iter().enumerate() {
         code.local_get(EIP)

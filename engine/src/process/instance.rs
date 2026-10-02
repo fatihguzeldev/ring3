@@ -7,7 +7,9 @@ use crate::{
         arena::{self, ARENA_SIZE, HELPER_OFFSET, TRANSFER_OFFSET, TRANSFER_SIZE},
         memory_helper::{HELPER_SIZE, encode_helper_result},
     },
-    cpu::dbt::{BlockSpec, CompileError, CompileLimits, CompiledRegion, compile_embedded_region},
+    cpu::dbt::{
+        BlockSpec, CompileError, CompileLimits, CompiledRegion, GateSpec, compile_embedded_region,
+    },
     memory::{AddressSpace, GuestAddress, MemoryError, PageRange, Permissions},
 };
 
@@ -120,8 +122,12 @@ impl EngineInstance {
     }
 
     pub fn compile(&mut self, count: u32) -> Result<u32, HostError> {
+        self.compile_with_gates(count, 0)
+    }
+
+    pub fn compile_with_gates(&mut self, count: u32, gate_count: u32) -> Result<u32, HostError> {
         let memory = self.memory()?;
-        if !(1..=8).contains(&count) {
+        if !(1..=8).contains(&count) || gate_count > count {
             return Err(HostError::InvalidRequest);
         }
         let generation = self
@@ -141,12 +147,24 @@ impl EngineInstance {
             spec.byte_length =
                 u32::from_le_bytes(transfer[offset + 4..offset + 8].try_into().unwrap());
         }
+        let mut gates = [GateSpec {
+            entry: GuestAddress(0),
+            id: 0,
+        }; 8];
+        for (index, gate) in gates[..gate_count as usize].iter_mut().enumerate() {
+            let offset = (count as usize + index) * 8;
+            gate.entry = GuestAddress(u32::from_le_bytes(
+                transfer[offset..offset + 4].try_into().unwrap(),
+            ));
+            gate.id = u32::from_le_bytes(transfer[offset + 4..offset + 8].try_into().unwrap());
+        }
         let artifact = compile_embedded_region(
             memory,
             &specs[..count as usize],
             CompileLimits::default(),
             self.key,
             generation,
+            &gates[..gate_count as usize],
         )
         .map_err(HostError::Compile)?;
         self.artifact = Some(artifact);

@@ -2,8 +2,9 @@ mod exit;
 mod state;
 
 pub use exit::{
-    ACCESS_LENGTH_OFFSET, ACCESS_OFFSET, DETAIL_OFFSET, EXIT_SIZE, EXIT_VERSION_2,
+    ACCESS_LENGTH_OFFSET, ACCESS_OFFSET, DETAIL_OFFSET, EXIT_SIZE, EXIT_VERSION_2, EXIT_VERSION_3,
     FAULT_ADDRESS_OFFSET, REASON_OFFSET, RETIRED_OFFSET, decode_exit, encode_exit, encode_exit_v2,
+    encode_exit_v3,
 };
 
 pub use state::{

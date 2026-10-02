@@ -80,6 +80,15 @@ pub extern "C" fn generation() -> u32 {
 }
 
 #[allow(unsafe_code)]
+#[unsafe(export_name = "ring3_abi_v1_compile_with_gates")]
+pub extern "C" fn compile_with_gates(count: u32, gate_count: u32) -> u32 {
+    {
+        #![forbid(unsafe_code)]
+        crate::process::wasm::compile_with_gates(count, gate_count)
+    }
+}
+
+#[allow(unsafe_code)]
 #[unsafe(export_name = "ring3_abi_v1_module_ptr")]
 pub extern "C" fn module_ptr() -> u32 {
     {

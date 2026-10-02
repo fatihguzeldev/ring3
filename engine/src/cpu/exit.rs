@@ -26,6 +26,7 @@ pub enum ExitReason {
     MemoryFault { fault: MemoryFault, length: u32 },
     CodeInvalidated,
     Infrastructure(InfrastructureFailure),
+    Gate { id: u32 },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

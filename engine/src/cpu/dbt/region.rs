@@ -6,6 +6,8 @@ use crate::{
     memory::{AddressSpace, GuestAddress},
 };
 
+use super::gate::{self, GateSpec, PreparedGate};
+
 const MAX_BLOCKS: usize = 8;
 const MAX_INSTRUCTIONS: usize = 64;
 const MAX_WASM_BYTES: usize = 65_536;
@@ -38,6 +40,7 @@ impl Default for CompileLimits {
 pub enum CompileError {
     InvalidLimits,
     InvalidBlocks,
+    InvalidGates,
     Instruction {
         pc: GuestAddress,
         cause: InstructionError,
@@ -52,6 +55,7 @@ pub enum InstructionError {
     Decode(DecodeError),
     BackendUnsupported,
     InvalidBlockEnd,
+    InvalidGate,
 }
 
 #[derive(Debug)]
@@ -62,15 +66,20 @@ pub struct PreparedRegion {
 #[derive(Debug)]
 pub(super) struct CompiledBlock {
     pub(super) instructions: Vec<DecodedInstruction>,
+    pub(super) gate: Option<PreparedGate>,
 }
 
 impl PreparedRegion {
     pub fn is_current(&self, memory: &AddressSpace) -> bool {
         self.blocks.iter().all(|block| {
             block
-                .instructions
-                .iter()
-                .all(|instruction| memory.is_code_current(instruction.code_snapshot()))
+                .gate
+                .as_ref()
+                .is_none_or(|gate| gate.is_current(memory))
+                && block
+                    .instructions
+                    .iter()
+                    .all(|instruction| memory.is_code_current(instruction.code_snapshot()))
         })
     }
 
@@ -81,7 +90,7 @@ impl PreparedRegion {
     pub fn instruction_count(&self) -> usize {
         self.blocks
             .iter()
-            .map(|block| block.instructions.len())
+            .map(|block| block.instructions.len() + usize::from(block.gate.is_some()))
             .sum()
     }
 }
@@ -91,15 +100,16 @@ pub fn prepare_region(
     specs: &[BlockSpec],
     limits: CompileLimits,
 ) -> Result<PreparedRegion, CompileError> {
-    prepare(memory, specs, limits, false)
+    prepare(memory, specs, limits, false, &[])
 }
 
 pub(super) fn prepare_embedded_region(
     memory: &AddressSpace,
     specs: &[BlockSpec],
     limits: CompileLimits,
+    gates: &[GateSpec],
 ) -> Result<PreparedRegion, CompileError> {
-    prepare(memory, specs, limits, true)
+    prepare(memory, specs, limits, true, gates)
 }
 
 fn prepare(
@@ -107,9 +117,11 @@ fn prepare(
     specs: &[BlockSpec],
     limits: CompileLimits,
     embedded: bool,
+    gates: &[GateSpec],
 ) -> Result<PreparedRegion, CompileError> {
     validate_limits(limits)?;
     validate_blocks(specs, limits.blocks)?;
+    gate::validate(specs, gates)?;
 
     let mut blocks = Vec::new();
     blocks
@@ -118,6 +130,18 @@ fn prepare(
     let mut instruction_count = 0;
 
     for spec in specs {
+        if let Some(gate) = gates.iter().find(|gate| gate.entry == spec.entry) {
+            if instruction_count == limits.instructions {
+                return Err(CompileError::InstructionLimit);
+            }
+            let gate = gate::prepare(memory, *gate)?;
+            blocks.push(CompiledBlock {
+                instructions: Vec::new(),
+                gate: Some(gate),
+            });
+            instruction_count += 1;
+            continue;
+        }
         let mut instructions = Vec::new();
         let mut cursor = u64::from(spec.entry.0);
         let end = cursor + u64::from(spec.byte_length);
@@ -151,7 +175,10 @@ fn prepare(
             instruction_count += 1;
             cursor = next;
         }
-        blocks.push(CompiledBlock { instructions });
+        blocks.push(CompiledBlock {
+            instructions,
+            gate: None,
+        });
     }
 
     Ok(PreparedRegion { blocks })
