@@ -509,11 +509,7 @@ fn span_poison_prefix_and_remaining_exclusions_preserve_arena_units_and_capacity
         );
     }
     for instruction in [
-        &[0x50][..],
-        &[0x58],
-        &[0xff, 0x33],
-        &[0x8f, 0x03],
-        &[0xe8, 0, 0, 0, 0],
+        &[0xe8, 0, 0, 0, 0][..],
         &[0xff, 0xd0],
         &[0xff, 0x13],
         &[0xc3],

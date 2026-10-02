@@ -308,16 +308,12 @@ fn jump_span_priority_and_adjacent_exclusions_preserve_previous_state() {
         );
     }
     for instruction in [
-        &[0xff, 0x30][..],
+        &[0xff, 0x10][..],
         &[0xe8, 0, 0, 0, 0],
         &[0xff, 0xd0],
         &[0xff, 0x13],
         &[0xc3],
         &[0xc2, 8, 0],
-        &[0x50],
-        &[0x58],
-        &[0xff, 0x33],
-        &[0x8f, 0x03],
     ] {
         let mut bytes = vec![0x90];
         bytes.extend_from_slice(instruction);

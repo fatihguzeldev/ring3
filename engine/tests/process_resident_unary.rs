@@ -370,13 +370,7 @@ fn span_poison_and_remaining_exclusions_preserve_arena_and_installed_units() {
             InstructionError::Decode(DecodeError::Unsupported(UnsupportedFeature::Opcode)),
         );
     }
-    for instruction in [
-        &[0x50][..],
-        &[0x58],
-        &[0xe8, 0, 0, 0, 0],
-        &[0xff, 0x13],
-        &[0xc3],
-    ] {
+    for instruction in [&[0xe8, 0, 0, 0, 0][..], &[0xff, 0x13], &[0xc3]] {
         let mut bytes = vec![0x90];
         bytes.extend_from_slice(instruction);
         bytes.extend_from_slice(&[0x0f, 0x06]);

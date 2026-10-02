@@ -224,10 +224,6 @@ fn all_seventeen_reads_admit_without_data_and_preserve_legacy_and_retained_units
 fn excluded_operations_and_poison_keep_original_pc_and_block_end_priority() {
     let (mut engine, keep) = fixture(&[0x90, 0xeb, 0]);
     let excluded: &[&[u8]] = &[
-        &[0x50],
-        &[0x58],
-        &[0xff, 0x33],
-        &[0x8f, 0x03],
         &[0xe8, 0, 0, 0, 0],
         &[0xff, 0xd0],
         &[0xff, 0x13],
@@ -265,7 +261,7 @@ fn excluded_operations_and_poison_keep_original_pc_and_block_end_priority() {
             InstructionError::Decode(DecodeError::Unsupported(UnsupportedFeature::Opcode)),
         );
     }
-    for instruction in [&[0xff, 0x30][..], &[0xe8, 0, 0, 0, 0], &[0xc3]] {
+    for instruction in [&[0xff, 0x10][..], &[0xe8, 0, 0, 0, 0], &[0xc3]] {
         let mut bytes = vec![0x90];
         bytes.extend_from_slice(instruction);
         bytes.extend_from_slice(&[0x0f, 0x06]);

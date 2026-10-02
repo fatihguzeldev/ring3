@@ -179,7 +179,8 @@ fn prepare(
                         || supports_indirect_jump(instruction.operation())
                         || supports_memory_move_store(instruction.operation())
                         || supports_memory_unary(instruction.operation())
-                        || supports_memory_binary(instruction.operation()))))
+                        || supports_memory_binary(instruction.operation())
+                        || supports_stack_values(instruction.operation()))))
             {
                 return Err(instruction_error(pc, InstructionError::BackendUnsupported));
             }
@@ -237,6 +238,10 @@ pub(super) fn instruction_error(pc: GuestAddress, cause: InstructionError) -> Co
     CompileError::Instruction { pc, cause }
 }
 
+fn supports_stack_values(operation: &Operation) -> bool {
+    matches!(operation, Operation::Push { .. } | Operation::Pop { .. })
+}
+
 fn supports_stack(instruction: &DecodedInstruction) -> bool {
     match instruction.operation() {
         Operation::Call {
@@ -246,8 +251,7 @@ fn supports_stack(instruction: &DecodedInstruction) -> bool {
             target: BranchTarget::Indirect(_),
         } => true,
         Operation::Return { .. } => matches!(instruction.length(), 1 | 3),
-        Operation::Push { .. } | Operation::Pop { .. } => true,
-        _ => false,
+        _ => supports_stack_values(instruction.operation()),
     }
 }
 

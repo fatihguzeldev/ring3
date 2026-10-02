@@ -435,7 +435,7 @@ fn rejected_counts_spans_and_resident_profile_keep_legacy_and_resident_state() {
             InstructionError::Decode(DecodeError::Unsupported(UnsupportedFeature::Opcode)),
         ),
         (
-            &[0xff, 0x30, 0xeb, 0][..],
+            &[0xff, 0x10, 0xeb, 0][..],
             InstructionError::BackendUnsupported,
         ),
         (
