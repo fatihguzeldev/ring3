@@ -3,8 +3,9 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use crate::memory::{AddressSpace, GuestAddress};
 
 use super::{
-    ArtifactError, BlockSpec, CompileError, CompileLimits, CompiledRegion, artifact::emit_prepared,
-    compile_region, region::prepare_resident_region, wasm::EmbeddedBinding,
+    ArtifactError, BlockSpec, CompileError, CompileLimits, CompiledRegion, GateSpec,
+    artifact::emit_prepared, compile_region, region::prepare_resident_region,
+    wasm::EmbeddedBinding,
 };
 
 const MAX_UNITS: usize = 8;
@@ -110,16 +111,18 @@ impl ResidentRegistry {
         &mut self,
         memory: &AddressSpace,
         specs: &[BlockSpec],
+        gates: &[GateSpec],
         limits: CompileLimits,
         key: u64,
     ) -> Result<UnitId, RegistryError> {
-        self.compile_bound_with_counter(memory, specs, limits, key, &NEXT_UNIT_ID)
+        self.compile_bound_with_counter(memory, specs, gates, limits, key, &NEXT_UNIT_ID)
     }
 
     fn compile_bound_with_counter(
         &mut self,
         memory: &AddressSpace,
         specs: &[BlockSpec],
+        gates: &[GateSpec],
         limits: CompileLimits,
         key: u64,
         counter: &AtomicU64,
@@ -128,8 +131,8 @@ impl ResidentRegistry {
         if self.entries.len() == self.limits.units {
             return Err(RegistryError::UnitCapacity);
         }
-        let prepared =
-            prepare_resident_region(memory, specs, limits).map_err(RegistryError::Compile)?;
+        let prepared = prepare_resident_region(memory, specs, limits, gates)
+            .map_err(RegistryError::Compile)?;
         // final emission can fail after reservation; unpublished ids are never reused.
         let id = allocate_id(counter)?;
         let region = emit_prepared(
@@ -157,9 +160,9 @@ impl ResidentRegistry {
             .checked_add(bytes)
             .filter(|&total| total <= self.limits.wasm_bytes)
             .ok_or(RegistryError::ByteCapacity)?;
-        for pc in region.instruction_addresses() {
+        for pc in region.executable_addresses() {
             if self.entries.iter().any(|unit| {
-                unit.region.contains_instruction(pc.0) && unit.region.wasm_bytes(memory).is_ok()
+                unit.region.contains_executable(pc.0) && unit.region.wasm_bytes(memory).is_ok()
             }) {
                 return Err(RegistryError::InstructionOverlap { pc });
             }
@@ -198,7 +201,7 @@ impl ResidentRegistry {
         self.check_memory(memory)?;
         let mut stale = false;
         for unit in &self.entries {
-            if unit.region.contains_instruction(pc.0) {
+            if unit.region.contains_executable(pc.0) {
                 match unit.region.wasm_bytes(memory) {
                     Ok(_) => return Ok(unit.id),
                     Err(ArtifactError::CodeInvalidated) => stale = true,
@@ -269,6 +272,7 @@ mod tests {
             .compile_bound_with_counter(
                 &memory,
                 &specs(0x1000),
+                &[],
                 CompileLimits::default(),
                 7,
                 &counter,
@@ -292,6 +296,7 @@ mod tests {
             registry.compile_bound_with_counter(
                 &memory,
                 &specs(0x2000),
+                &[],
                 CompileLimits {
                     wasm_bytes: 1,
                     ..CompileLimits::default()
@@ -306,6 +311,7 @@ mod tests {
             registry.compile_bound_with_counter(
                 &memory,
                 &specs(0x1000),
+                &[],
                 CompileLimits::default(),
                 7,
                 &counter
@@ -343,6 +349,7 @@ mod tests {
             .compile_bound_with_counter(
                 &memory,
                 &specs(0x2000),
+                &[],
                 CompileLimits::default(),
                 7,
                 &counter,
@@ -363,6 +370,7 @@ mod tests {
             .compile_bound_with_counter(
                 &memory,
                 &specs(0x1000),
+                &[],
                 CompileLimits::default(),
                 7,
                 &counter,
@@ -373,6 +381,7 @@ mod tests {
             tight.compile_bound_with_counter(
                 &memory,
                 &specs(0x2000),
+                &[],
                 CompileLimits::default(),
                 7,
                 &counter
@@ -397,6 +406,7 @@ mod tests {
             tight.compile_bound_with_counter(
                 &memory,
                 &specs(0x2000),
+                &[],
                 CompileLimits {
                     blocks: 0,
                     ..CompileLimits::default()

@@ -31,13 +31,18 @@ pub struct CompiledRegion {
 }
 
 impl CompiledRegion {
-    pub(super) fn instruction_addresses(&self) -> impl Iterator<Item = GuestAddress> + '_ {
+    pub(super) fn executable_addresses(&self) -> impl Iterator<Item = GuestAddress> + '_ {
         self.prepared.blocks.iter().flat_map(|block| {
             block
                 .instructions
                 .iter()
                 .map(|instruction| instruction.pc())
+                .chain(block.gate.iter().map(|gate| gate.entry))
         })
+    }
+
+    pub(super) fn contains_executable(&self, pc: u32) -> bool {
+        self.executable_addresses().any(|entry| entry.0 == pc)
     }
 
     pub(crate) fn contains_instruction(&self, pc: u32) -> bool {

@@ -114,8 +114,9 @@ pub(super) fn prepare_resident_region(
     memory: &AddressSpace,
     specs: &[BlockSpec],
     limits: CompileLimits,
+    gates: &[GateSpec],
 ) -> Result<PreparedRegion, CompileError> {
-    prepare(memory, specs, limits, PreparationProfile::Resident, &[])
+    prepare(memory, specs, limits, PreparationProfile::Resident, gates)
 }
 
 pub(super) fn prepare_embedded_region(

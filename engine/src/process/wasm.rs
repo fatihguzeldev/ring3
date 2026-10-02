@@ -91,8 +91,12 @@ pub(crate) fn compile_entries(count: u32, gate_count: u32) -> u32 {
 }
 
 pub(crate) fn compile_resident(count: u32) -> u32 {
+    compile_resident_with_gates(count, 0)
+}
+
+pub(crate) fn compile_resident_with_gates(count: u32, gate_count: u32) -> u32 {
     mutate(|instance| {
-        let id = instance.compile_resident(count)?;
+        let id = instance.compile_resident_with_gates(count, gate_count)?;
         resident_record(instance, id.get())
     })
 }
