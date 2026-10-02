@@ -177,7 +177,8 @@ fn prepare(
                 || (matches!(profile, PreparationProfile::Resident)
                     && (supports_memory_reads(instruction.operation())
                         || supports_indirect_jump(instruction.operation())
-                        || supports_memory_move_store(instruction.operation()))))
+                        || supports_memory_move_store(instruction.operation())
+                        || supports_memory_unary(instruction.operation()))))
             {
                 return Err(instruction_error(pc, InstructionError::BackendUnsupported));
             }
@@ -306,11 +307,22 @@ fn supports_memory_move_store(operation: &Operation) -> bool {
     )
 }
 
+fn supports_memory_unary(operation: &Operation) -> bool {
+    matches!(
+        operation,
+        Operation::Unary {
+            kind: UnaryKind::Inc | UnaryKind::Dec | UnaryKind::Not | UnaryKind::Neg,
+            destination: Location32::Memory(_),
+        }
+    )
+}
+
 pub(super) fn supports(instruction: &DecodedInstruction, embedded: bool) -> bool {
     let operation = instruction.operation();
     (embedded
         && (supports_memory_reads(operation)
             || supports_memory_move_store(operation)
+            || supports_memory_unary(operation)
             || supports_stack(instruction)
             || supports_indirect_jump(operation)))
         || (embedded
@@ -324,9 +336,6 @@ pub(super) fn supports(instruction: &DecodedInstruction, embedded: bool) -> bool
                         | BinaryKind::Xor,
                     destination: Location32::Memory(_),
                     source: Value32::Register(_) | Value32::Immediate(_),
-                } | Operation::Unary {
-                    kind: UnaryKind::Inc | UnaryKind::Dec | UnaryKind::Not | UnaryKind::Neg,
-                    destination: Location32::Memory(_),
                 }
             ))
         || matches!(
