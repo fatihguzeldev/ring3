@@ -46,32 +46,26 @@ pub(super) fn instruction(
         Operation::Extend {
             kind,
             destination,
-            source:
+            source,
+        } => {
+            let width = match source {
                 SmallSource::Register {
                     register: source,
                     width,
                     high_byte,
-                },
-        } => {
-            code.local_get(register(source));
-            if high_byte {
-                code.i32_const(8).i32_shr_u();
-            }
-            let bits = match width {
-                SmallWidth::Byte => 8,
-                SmallWidth::Word => 16,
+                } => {
+                    code.local_get(register(source));
+                    if high_byte {
+                        code.i32_const(8).i32_shr_u();
+                    }
+                    width
+                }
+                SmallSource::Memory { address, width } => {
+                    memory::load_narrow_value(code, address, width, imports, exit_depth);
+                    width
+                }
             };
-            match kind {
-                ExtensionKind::Zero => {
-                    code.i32_const((1 << bits) - 1).i32_and();
-                }
-                ExtensionKind::Sign => {
-                    code.i32_const(32 - bits)
-                        .i32_shl()
-                        .i32_const(32 - bits)
-                        .i32_shr_s();
-                }
-            }
+            extend_value(code, kind, width);
             code.local_set(register(destination));
         }
         Operation::Lea {
@@ -272,6 +266,24 @@ fn value(code: &mut InstructionSink<'_>, value: Value32) {
             code.i32_const(value as i32);
         }
         Value32::Memory(_) => unreachable!("prepared region contains a memory operand"),
+    }
+}
+
+fn extend_value(code: &mut InstructionSink<'_>, kind: ExtensionKind, width: SmallWidth) {
+    let bits = match width {
+        SmallWidth::Byte => 8,
+        SmallWidth::Word => 16,
+    };
+    match kind {
+        ExtensionKind::Zero => {
+            code.i32_const((1 << bits) - 1).i32_and();
+        }
+        ExtensionKind::Sign => {
+            code.i32_const(32 - bits)
+                .i32_shl()
+                .i32_const(32 - bits)
+                .i32_shr_s();
+        }
     }
 }
 

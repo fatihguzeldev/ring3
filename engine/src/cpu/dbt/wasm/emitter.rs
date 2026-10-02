@@ -11,8 +11,9 @@ pub(in crate::cpu::dbt) fn emit(
     binding: Option<EmbeddedBinding>,
 ) -> Vec<u8> {
     let mut module = Module::new();
-    let (needs_read, needs_store) = memory::Imports::needed(blocks);
-    let has_memory = needs_read || needs_store;
+    let (needs_read, needs_store, needs_read8, needs_read16) = memory::Imports::needed(blocks);
+    let has_reads = needs_read || needs_read8 || needs_read16;
+    let has_memory = has_reads || needs_store;
     let has_gates = blocks.iter().any(|block| block.gate.is_some());
     debug_assert!(!(has_memory || has_gates) || binding.is_some());
     let mut types = TypeSection::new();
@@ -20,7 +21,7 @@ pub(in crate::cpu::dbt) fn emit(
     if binding.is_some() {
         types.ty().function([ValType::I32; 6], [ValType::I32]);
     }
-    if needs_read {
+    if has_reads {
         types.ty().function([ValType::I32], [ValType::I32]);
     }
     if needs_store {
@@ -45,15 +46,28 @@ pub(in crate::cpu::dbt) fn emit(
     let mut helper_imports = memory::Imports::default();
     let mut function_index = u32::from(binding.is_some());
     let mut type_index = 1 + u32::from(binding.is_some());
+    let read_type_index = type_index;
     if needs_read {
         imports.import("ring3", "read32", EntityType::Function(type_index));
         helper_imports.read = Some(function_index);
         function_index += 1;
         type_index += 1;
+    } else if has_reads {
+        type_index += 1;
     }
     if needs_store {
         imports.import("ring3", "store32", EntityType::Function(type_index));
         helper_imports.store = Some(function_index);
+        function_index += 1;
+    }
+    if needs_read8 {
+        imports.import("ring3", "read8", EntityType::Function(read_type_index));
+        helper_imports.read8 = Some(function_index);
+        function_index += 1;
+    }
+    if needs_read16 {
+        imports.import("ring3", "read16", EntityType::Function(read_type_index));
+        helper_imports.read16 = Some(function_index);
         function_index += 1;
     }
     module.section(&imports);

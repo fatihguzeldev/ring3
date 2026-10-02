@@ -1,21 +1,38 @@
 use wasm_encoder::{BlockType, InstructionSink, MemArg};
 
-use crate::cpu::x86::ir::{BranchTarget, EffectiveAddress, Location32, Operation, Value32};
+use crate::cpu::x86::ir::{
+    BranchTarget, EffectiveAddress, Location32, Operation, SmallSource, SmallWidth, Value32,
+};
 
 use super::locals::*;
+
+mod narrow;
 
 #[derive(Clone, Copy, Default)]
 pub(super) struct Imports {
     pub(super) read: Option<u32>,
     pub(super) store: Option<u32>,
+    pub(super) read8: Option<u32>,
+    pub(super) read16: Option<u32>,
 }
 
 impl Imports {
-    pub(super) fn needed(blocks: &[crate::cpu::dbt::region::CompiledBlock]) -> (bool, bool) {
+    pub(super) fn needed(
+        blocks: &[crate::cpu::dbt::region::CompiledBlock],
+    ) -> (bool, bool, bool, bool) {
         let mut read = false;
         let mut store = false;
+        let mut read8 = false;
+        let mut read16 = false;
         for instruction in blocks.iter().flat_map(|block| &block.instructions) {
             match instruction.operation() {
+                Operation::Extend {
+                    source: SmallSource::Memory { width, .. },
+                    ..
+                } => match width {
+                    SmallWidth::Byte => read8 = true,
+                    SmallWidth::Word => read16 = true,
+                },
                 Operation::Push {
                     source: Value32::Memory(_),
                 }
@@ -46,8 +63,18 @@ impl Imports {
                 _ => {}
             }
         }
-        (read, store)
+        (read, store, read8, read16)
     }
+}
+
+pub(super) fn load_narrow_value(
+    code: &mut InstructionSink<'_>,
+    address: EffectiveAddress,
+    width: SmallWidth,
+    imports: Imports,
+    exit_depth: u32,
+) {
+    narrow::load_value(code, address, width, imports, exit_depth);
 }
 
 pub(super) fn load(

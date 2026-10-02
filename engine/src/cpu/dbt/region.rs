@@ -259,6 +259,14 @@ pub(super) fn supports(instruction: &DecodedInstruction, embedded: bool) -> bool
         }
     );
     (embedded && (memory_move || supports_stack(instruction) || indirect_jump))
+        || (embedded
+            && matches!(
+                operation,
+                Operation::Extend {
+                    source: SmallSource::Memory { .. },
+                    ..
+                }
+            ))
         || matches!(
             operation,
             Operation::Nop
