@@ -31,6 +31,15 @@ pub struct CompiledRegion {
 }
 
 impl CompiledRegion {
+    pub(super) fn instruction_addresses(&self) -> impl Iterator<Item = GuestAddress> + '_ {
+        self.prepared.blocks.iter().flat_map(|block| {
+            block
+                .instructions
+                .iter()
+                .map(|instruction| instruction.pc())
+        })
+    }
+
     pub(crate) fn contains_instruction(&self, pc: u32) -> bool {
         self.prepared.blocks.iter().any(|block| {
             block

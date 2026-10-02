@@ -13,6 +13,10 @@ pub struct AddressSpace {
 }
 
 impl AddressSpace {
+    pub(crate) fn identity(&self) -> u64 {
+        self.identity
+    }
+
     pub fn snapshot_code(
         &self,
         address: GuestAddress,

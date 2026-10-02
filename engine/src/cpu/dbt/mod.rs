@@ -2,6 +2,7 @@ mod artifact;
 mod cold;
 mod gate;
 mod region;
+mod resident;
 mod wasm;
 
 pub(crate) use artifact::{compile_embedded_entry_region, compile_embedded_region};
@@ -15,3 +16,5 @@ pub use gate::GateSpec;
 pub use region::{
     BlockSpec, CompileError, CompileLimits, InstructionError, PreparedRegion, prepare_region,
 };
+
+pub use resident::{RegistryError, RegistryLimits, RegistryUsage, ResidentRegistry, UnitId};
