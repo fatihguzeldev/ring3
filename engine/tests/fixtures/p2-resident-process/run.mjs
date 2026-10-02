@@ -15,7 +15,7 @@ assert.deepEqual(WebAssembly.Module.imports(dispatcherModule), [{module: 'env', 
 assert.deepEqual(WebAssembly.Module.exports(dispatcherModule), [{name: 'run', kind: 'function'}]);
 const names = ['open', 'close', 'arena_ptr', 'map', 'protect', 'unmap', 'upload', 'compile', 'compile_with_gates', 'generation', 'module_ptr', 'module_len', 'guard', 'read32', 'write32', 'capture_call', 'abandon_call', 'compile_resident', 'resident_module', 'guard_resident', 'find_resident'];
 const SIZE = 4236, TRANSFER = 140, READY = 4224, CALLS = 4228;
-const authored = {a: Buffer.from('40e9fa0f0000', 'hex'), b: Buffer.from('490f85f9efffff', 'hex'), gate: Buffer.from('0f0b', 'hex'), unsupported: Buffer.from('8900', 'hex')};
+const authored = {a: Buffer.from('40e9fa0f0000', 'hex'), b: Buffer.from('490f85f9efffff', 'hex'), gate: Buffer.from('0f0b', 'hex'), unsupported: Buffer.from('0100', 'hex')};
 for (const [name, bytes] of Object.entries(authored)) writeFileSync(join(outputDir, `${name}.x86`), bytes);
 const artifacts = {'dispatcher.wasm': hash(dispatcherBytes)}, units = [], metadata = [];
 const stats = {engine_instances: 0, resident_compiles: 0, resident_getters: 0, find_success: 0, find_failure: 0, find_misses: 0, find_stale: 0, find_closed: 0, find_metadata_snapshots: 0, dispatcher_calls: 0, dispatcher_child_calls: 0, direct_unit_calls: 0, direct_unit_canonical: 0, direct_unit_rejections: 0, direct_guard_calls: 0, direct_guard_successes: 0, direct_guard_rejections: 0, compile_rejections: 0, getter_rejections: 0, full_arena_snapshots: 0, metadata_only_snapshots: 0, continuation_initial_calls: 0, continuation_resumes: 0, cold_b_installations: 0, budget_exits: 0, cancelled_exits: 0, need_code_exits: 0, legacy_runs: 0, pending_captures: 0, pending_abandons: 0};
@@ -234,7 +234,7 @@ guard(engine, b, 3, {high: engine.high ^ 1}); guard(engine, b, 3, {idLow: 0, idH
 for (const options of [{state: 0}, {exit: engine.base + 57}, {cancel: 0}]) guard(engine, b, 1, options);
 rejectUnit(engine, b, 1, 'unit pointer guard before CPU preflight', [0, engine.base + 56, engine.base + 96]);
 engine.bytes[engine.base] ^= 1; rejectUnit(engine, b, 2, 'valid unit guard then malformed CPU header'); engine.bytes[engine.base] ^= 1;
-failedCompile(engine, [], 0, 7, 'zero descriptors'); failedCompile(engine, [], 9, 7, 'too many descriptors'); failedCompile(engine, [[0x1000, authored.a.length]], 1, 7, 'current instruction-start overlap'); failedCompile(engine, [[0x4000, authored.unsupported.length]], 1, 10, 'resident memory store remains unsupported');
+failedCompile(engine, [], 0, 7, 'zero descriptors'); failedCompile(engine, [], 9, 7, 'too many descriptors'); failedCompile(engine, [[0x1000, authored.a.length]], 1, 7, 'current instruction-start overlap'); failedCompile(engine, [[0x4000, authored.unsupported.length]], 1, 10, 'resident writing binary remains unsupported');
 for (const [low, high] of [[0, 0], [0xffffffff, 0xffffffff]]) unchanged(engine, () => engine.api.resident_module(low, high), 3, 'unknown module ID preserves transfer', 'getter_rejections');
 getter(engine, a, 'failed admissions retain A bytes and pointer'); getter(engine, b, 'failed admissions retain B bytes and pointer'); legacyStable(engine, oldLegacy);
 
