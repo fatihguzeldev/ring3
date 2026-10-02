@@ -206,7 +206,7 @@ fn standalone_keeps_new_stack_values_outside_its_profile_with_original_error_pri
 }
 
 #[test]
-fn memory_push_and_pop_remain_backend_errors_after_an_admitted_stack_prefix() {
+fn memory_push_and_pop_compile_sequentially_after_a_register_stack_prefix() {
     for instruction in [
         &[0xff, 0x33][..],
         &[0xff, 0x74, 0x24, 4][..],
@@ -222,15 +222,9 @@ fn memory_push_and_pop_remain_backend_errors_after_an_admitted_stack_prefix() {
                 bytes.push(0x90);
             }
             let mut engine = with_code(&bytes);
-            assert_eq!(
-                compile(&mut engine, 0x1000, bytes.len() as u32),
-                Err(HostError::Compile(instruction_error(
-                    0x1002,
-                    InstructionError::BackendUnsupported
-                )))
-            );
-            assert_eq!(engine.generation(), 0);
-            assert_eq!(engine.artifact_bytes(), Err(HostError::InvalidArtifact));
+            assert_eq!(compile(&mut engine, 0x1000, bytes.len() as u32), Ok(1));
+            assert_eq!(engine.generation(), 1);
+            engine.guard(KEY, 1).unwrap();
         }
     }
 }

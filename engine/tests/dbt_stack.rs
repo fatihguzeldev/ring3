@@ -187,13 +187,11 @@ fn zero_adjustment_immediate_ret_shares_plain_ret_ir_but_has_its_own_terminator_
 }
 
 #[test]
-fn decoded_but_excluded_stack_forms_report_backend_error_even_with_trailing_bytes() {
+fn indirect_control_forms_report_backend_error_even_with_trailing_call_bytes() {
     for instruction in [
         &[0xff, 0xd0][..],
         &[0xff, 0x13][..],
         &[0xff, 0x15, 0, 0x80, 0, 0][..],
-        &[0xff, 0x33][..],
-        &[0x8f, 0x03][..],
     ] {
         for trailing in [false, true] {
             let mut bytes = vec![0x90];
@@ -357,7 +355,7 @@ fn failed_stack_compile_preserves_the_installed_artifact_and_successful_retry_re
     let original = engine.artifact_bytes().unwrap().to_vec();
     for (bytes, cause) in [
         (
-            &[0x90, 0xff, 0x33, 0x90][..],
+            &[0x90, 0xff, 0xd0, 0x90][..],
             InstructionError::BackendUnsupported,
         ),
         (

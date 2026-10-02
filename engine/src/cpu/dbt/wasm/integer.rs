@@ -88,6 +88,12 @@ pub(super) fn instruction(
                 .local_set(EIP);
             store = true;
         }
+        Operation::Push {
+            source: Value32::Memory(source),
+        } => {
+            memory::push_memory(code, source, imports, exit_depth);
+            store = true;
+        }
         Operation::Push { source } => {
             memory::store(
                 code,
@@ -108,6 +114,12 @@ pub(super) fn instruction(
             destination: Location32::Register(destination),
         } => {
             memory::pop_register(code, destination, imports, exit_depth);
+        }
+        Operation::Pop {
+            destination: Location32::Memory(destination),
+        } => {
+            memory::pop_memory(code, destination, imports, exit_depth);
+            store = true;
         }
         Operation::Return { stack_adjust } => {
             memory::pop_return(code, stack_adjust, imports, exit_depth);

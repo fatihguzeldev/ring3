@@ -16,6 +16,15 @@ impl Imports {
         let mut store = false;
         for instruction in blocks.iter().flat_map(|block| &block.instructions) {
             match instruction.operation() {
+                Operation::Push {
+                    source: Value32::Memory(_),
+                }
+                | Operation::Pop {
+                    destination: Location32::Memory(_),
+                } => {
+                    read = true;
+                    store = true;
+                }
                 Operation::Move {
                     source: Value32::Memory(_),
                     ..
@@ -71,6 +80,95 @@ pub(super) fn store(
         Value32::Memory(_) => unreachable!("prepared move cannot have two memory operands"),
     }
     code.call(imports.store.expect("prepared memory store has an import"))
+        .local_set(HELPER_STATUS);
+    validate_result(code, true);
+    exit_if_failed(code, exit_depth);
+}
+
+pub(super) fn push_memory(
+    code: &mut InstructionSink<'_>,
+    source: EffectiveAddress,
+    imports: Imports,
+    exit_depth: u32,
+) {
+    load_result(code, source, imports, exit_depth);
+    store_result(
+        code,
+        EffectiveAddress {
+            base: Some(crate::cpu::x86::Register32::Esp),
+            index: None,
+            scale: 1,
+            displacement: (-4_i32) as u32,
+        },
+        imports,
+        exit_depth,
+    );
+    code.local_get(ADDRESS)
+        .local_set(register(crate::cpu::x86::Register32::Esp));
+}
+
+pub(super) fn pop_memory(
+    code: &mut InstructionSink<'_>,
+    mut destination: EffectiveAddress,
+    imports: Imports,
+    exit_depth: u32,
+) {
+    let esp = crate::cpu::x86::Register32::Esp;
+    load_result(
+        code,
+        EffectiveAddress {
+            base: Some(esp),
+            index: None,
+            scale: 1,
+            displacement: 0,
+        },
+        imports,
+        exit_depth,
+    );
+    if destination.base == Some(esp) {
+        destination.displacement = destination.displacement.wrapping_add(4);
+    }
+    store_result(code, destination, imports, exit_depth);
+    code.local_get(register(esp))
+        .i32_const(4)
+        .i32_add()
+        .local_set(register(esp));
+}
+
+fn load_result(
+    code: &mut InstructionSink<'_>,
+    source: EffectiveAddress,
+    imports: Imports,
+    exit_depth: u32,
+) {
+    effective_address(code, source);
+    code.local_get(ADDRESS)
+        .call(
+            imports
+                .read
+                .expect("prepared memory push/pop has a read import"),
+        )
+        .local_set(HELPER_STATUS);
+    validate_result(code, false);
+    exit_if_failed(code, exit_depth);
+    helper_field(code, 20);
+    code.local_set(RESULT);
+}
+
+fn store_result(
+    code: &mut InstructionSink<'_>,
+    destination: EffectiveAddress,
+    imports: Imports,
+    exit_depth: u32,
+) {
+    effective_address(code, destination);
+    code.local_get(ADDRESS)
+        .local_get(RESULT)
+        .call(
+            imports
+                .store
+                .expect("prepared memory push/pop has a store import"),
+        )
         .local_set(HELPER_STATUS);
     validate_result(code, true);
     exit_if_failed(code, exit_depth);

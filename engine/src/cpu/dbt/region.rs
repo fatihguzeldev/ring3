@@ -201,12 +201,7 @@ fn supports_stack(instruction: &DecodedInstruction) -> bool {
             target: BranchTarget::Direct(_),
         } => instruction.length() == 5,
         Operation::Return { .. } => matches!(instruction.length(), 1 | 3),
-        Operation::Push {
-            source: Value32::Register(_) | Value32::Immediate(_),
-        }
-        | Operation::Pop {
-            destination: Location32::Register(_),
-        } => true,
+        Operation::Push { .. } | Operation::Pop { .. } => true,
         _ => false,
     }
 }
