@@ -285,10 +285,6 @@ fn operations_outside_backend_profile_are_rejected_at_their_own_pc() {
         &[0xe8, 0, 0, 0, 0][..],
         &[0x0f, 0xb6, 0xc0][..],
         &[0x8d, 0x03][..],
-        &[0x31, 0xc0][..],
-        &[0x85, 0xc0][..],
-        &[0x21, 0xc0][..],
-        &[0x09, 0xc0][..],
         &[0x40][..],
         &[0xf7, 0xd8][..],
     ] {

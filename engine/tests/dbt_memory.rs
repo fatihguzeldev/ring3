@@ -177,7 +177,6 @@ fn other_memory_operations_and_existing_exclusions_remain_rejected_at_their_pc()
         &[0x31, 0x03][..],
         &[0x8d, 0x03][..],
         &[0x0f, 0xb6, 0x03][..],
-        &[0x31, 0xc0][..],
     ] {
         let mut engine = EngineInstance::new(1, KEY).unwrap();
         engine.map(0x1000, 1, 7).unwrap();

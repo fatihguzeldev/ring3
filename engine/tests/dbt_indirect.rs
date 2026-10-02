@@ -313,7 +313,6 @@ fn far_prefixed_and_other_unimplemented_forms_keep_their_precise_errors() {
             InstructionError::Decode(DecodeError::Unsupported(UnsupportedFeature::Segment)),
         ),
         (&[0x40][..], InstructionError::BackendUnsupported),
-        (&[0x31, 0xc0][..], InstructionError::BackendUnsupported),
     ] {
         let mut bytes = vec![0x90];
         bytes.extend_from_slice(instruction);

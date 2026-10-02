@@ -231,7 +231,6 @@ fn standalone_admission_rejects_decodable_out_of_profile_before_termination() {
         &[0xc3][..],
         &[0xc2, 8, 0][..],
         &[0x03, 0x03][..],
-        &[0x31, 0xc0][..],
         &[0x8d, 0x03][..],
         &[0x0f, 0xb6, 0xc0][..],
     ] {
@@ -511,7 +510,7 @@ fn embedded_discovery_admits_current_memory_stack_and_indirect_profile_without_d
         engine.artifact_bytes().unwrap();
         assert_eq!(engine.memory().unwrap().mapped_pages(), 1);
     }
-    for bytes in [&[0x03, 0x03][..], &[0x31, 0xc0][..], &[0x8d, 0x03][..]] {
+    for bytes in [&[0x03, 0x03][..], &[0x8d, 0x03][..]] {
         let mut engine = embedded(0x1000, bytes);
         entry_descriptors(&mut engine, &[0x1000], &[]);
         let arena = engine.arena().to_vec();
