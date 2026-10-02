@@ -35,21 +35,38 @@ pub(super) fn instruction(
             store = true;
         }
         Operation::Binary {
-            kind: kind @ (BinaryKind::Add | BinaryKind::Sub | BinaryKind::Cmp),
+            kind,
             destination: Location32::Register(destination),
             source,
         } => {
             code.local_get(register(destination)).local_set(LHS);
             value(code, source);
             code.local_set(RHS).local_get(LHS).local_get(RHS);
-            if kind == BinaryKind::Add {
-                code.i32_add();
-            } else {
-                code.i32_sub();
+            match kind {
+                BinaryKind::Add => {
+                    code.i32_add();
+                }
+                BinaryKind::Sub | BinaryKind::Cmp => {
+                    code.i32_sub();
+                }
+                BinaryKind::And | BinaryKind::Test => {
+                    code.i32_and();
+                }
+                BinaryKind::Or => {
+                    code.i32_or();
+                }
+                BinaryKind::Xor => {
+                    code.i32_xor();
+                }
             }
             code.local_set(RESULT);
-            flags(code, kind);
-            if kind != BinaryKind::Cmp {
+            match kind {
+                BinaryKind::Add | BinaryKind::Sub | BinaryKind::Cmp => arithmetic_flags(code, kind),
+                BinaryKind::And | BinaryKind::Or | BinaryKind::Xor | BinaryKind::Test => {
+                    logical_flags(code)
+                }
+            }
+            if !matches!(kind, BinaryKind::Cmp | BinaryKind::Test) {
                 code.local_get(RESULT).local_set(register(destination));
             }
         }
@@ -205,7 +222,7 @@ fn value(code: &mut InstructionSink<'_>, value: Value32) {
     }
 }
 
-fn flags(code: &mut InstructionSink<'_>, kind: BinaryKind) {
+fn arithmetic_flags(code: &mut InstructionSink<'_>, kind: BinaryKind) {
     code.local_get(FLAGS)
         .i32_const(0x400)
         .i32_and()
@@ -216,39 +233,18 @@ fn flags(code: &mut InstructionSink<'_>, kind: BinaryKind) {
     } else {
         code.local_get(LHS).local_get(RHS).i32_lt_u();
     }
-    code.i32_or()
-        .local_get(RESULT)
-        .i32_const(0xff)
-        .i32_and()
-        .i32_popcnt()
-        .i32_const(1)
-        .i32_and()
-        .i32_eqz()
-        .i32_const(2)
-        .i32_shl()
-        .i32_or()
-        .local_get(LHS)
+    code.i32_or();
+    parity_flag(code);
+    code.local_get(LHS)
         .local_get(RHS)
         .i32_xor()
         .local_get(RESULT)
         .i32_xor()
         .i32_const(0x10)
         .i32_and()
-        .i32_or()
-        .local_get(RESULT)
-        .i32_eqz()
-        .i32_const(6)
-        .i32_shl()
-        .i32_or()
-        .local_get(RESULT)
-        .i32_const(24)
-        .i32_shr_u()
-        .i32_const(0x80)
-        .i32_and()
-        .i32_or()
-        .local_get(LHS)
-        .local_get(RHS)
-        .i32_xor();
+        .i32_or();
+    zero_sign_flags(code);
+    code.local_get(LHS).local_get(RHS).i32_xor();
     if kind == BinaryKind::Add {
         code.i32_const(-1).i32_xor();
     }
@@ -262,4 +258,43 @@ fn flags(code: &mut InstructionSink<'_>, kind: BinaryKind) {
         .i32_shl()
         .i32_or()
         .local_set(FLAGS);
+}
+
+fn logical_flags(code: &mut InstructionSink<'_>) {
+    // af is undefined on x86; this profile deterministically clears it with cf/of.
+    code.local_get(FLAGS)
+        .i32_const(0x400)
+        .i32_and()
+        .i32_const(2)
+        .i32_or();
+    parity_flag(code);
+    zero_sign_flags(code);
+    code.local_set(FLAGS);
+}
+
+fn parity_flag(code: &mut InstructionSink<'_>) {
+    code.local_get(RESULT)
+        .i32_const(0xff)
+        .i32_and()
+        .i32_popcnt()
+        .i32_const(1)
+        .i32_and()
+        .i32_eqz()
+        .i32_const(2)
+        .i32_shl()
+        .i32_or();
+}
+
+fn zero_sign_flags(code: &mut InstructionSink<'_>) {
+    code.local_get(RESULT)
+        .i32_eqz()
+        .i32_const(6)
+        .i32_shl()
+        .i32_or()
+        .local_get(RESULT)
+        .i32_const(24)
+        .i32_shr_u()
+        .i32_const(0x80)
+        .i32_and()
+        .i32_or();
 }
