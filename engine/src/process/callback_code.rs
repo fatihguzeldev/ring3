@@ -1,6 +1,8 @@
 #![forbid(unsafe_code)]
 
-use super::{CallError, EngineInstance, HostError, callback::SuspendedCallback};
+use super::{
+    CallError, EngineInstance, HostError, callback::SuspendedCallback, instance::DescriptorFormat,
+};
 use crate::{
     abi::{
         arena::{EXIT_OFFSET, STATE_OFFSET, TRANSFER_OFFSET},
@@ -36,6 +38,25 @@ impl EngineInstance {
         self.install_callback_code(prepared)
     }
 
+    pub fn resume_callback_entries(
+        &mut self,
+        key: u64,
+        generation: u32,
+        callback_token: u32,
+        count: u32,
+        gate_count: u32,
+    ) -> Result<u32, HostError> {
+        let prepared = self.prepare_callback_region(
+            key,
+            generation,
+            callback_token,
+            count,
+            gate_count,
+            DescriptorFormat::Entries,
+        )?;
+        self.install_callback_code(prepared)
+    }
+
     fn prepare_callback_code(
         &self,
         key: u64,
@@ -43,6 +64,25 @@ impl EngineInstance {
         token: u32,
         count: u32,
         gate_count: u32,
+    ) -> Result<PreparedCallbackCode, HostError> {
+        self.prepare_callback_region(
+            key,
+            generation,
+            token,
+            count,
+            gate_count,
+            DescriptorFormat::BlockSpecs,
+        )
+    }
+
+    fn prepare_callback_region(
+        &self,
+        key: u64,
+        generation: u32,
+        token: u32,
+        count: u32,
+        gate_count: u32,
+        format: DescriptorFormat,
     ) -> Result<PreparedCallbackCode, HostError> {
         let callback = self.callback_code_context(key, generation, token)?;
         Self::check_region_counts(count, gate_count)?;
@@ -67,7 +107,7 @@ impl EngineInstance {
         let next_generation = generation
             .checked_add(1)
             .ok_or(HostError::GenerationExhausted)?;
-        let artifact = self.prepare_artifact(count, gate_count, next_generation)?;
+        let artifact = self.prepare_artifact(count, gate_count, next_generation, format)?;
         replacement_admission(&artifact, callback, stopped.eip)?;
         let record = CallbackRecord32 {
             generation: next_generation,

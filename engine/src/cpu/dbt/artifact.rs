@@ -1,10 +1,13 @@
-use super::region::prepare_embedded_region;
 use super::{
     BlockSpec, CompileError, CompileLimits, GateSpec, PreparedRegion, prepare_region, wasm,
 };
+use super::{
+    cold::{prepare_embedded_entry_region, prepare_entry_region},
+    region::prepare_embedded_region,
+};
 use crate::{
     abi::{ABI_VERSION, X86_INTEGER_PROFILE},
-    memory::AddressSpace,
+    memory::{AddressSpace, GuestAddress},
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -72,6 +75,31 @@ pub fn compile_region(
     compile(memory, specs, limits, None, &[])
 }
 
+pub fn compile_entry_region(
+    memory: &AddressSpace,
+    entries: &[GuestAddress],
+    limits: CompileLimits,
+) -> Result<CompiledRegion, CompileError> {
+    let prepared = prepare_entry_region(memory, entries, limits)?;
+    emit_prepared(prepared, limits, None)
+}
+
+pub(crate) fn compile_embedded_entry_region(
+    memory: &AddressSpace,
+    entries: &[GuestAddress],
+    limits: CompileLimits,
+    key: u64,
+    generation: u32,
+    gates: &[GateSpec],
+) -> Result<CompiledRegion, CompileError> {
+    let prepared = prepare_embedded_entry_region(memory, entries, limits, gates)?;
+    emit_prepared(
+        prepared,
+        limits,
+        Some(wasm::EmbeddedBinding { key, generation }),
+    )
+}
+
 pub(crate) fn compile_embedded_region(
     memory: &AddressSpace,
     specs: &[BlockSpec],
@@ -101,6 +129,14 @@ fn compile(
     } else {
         prepare_region(memory, specs, limits)?
     };
+    emit_prepared(prepared, limits, binding)
+}
+
+fn emit_prepared(
+    prepared: PreparedRegion,
+    limits: CompileLimits,
+    binding: Option<wasm::EmbeddedBinding>,
+) -> Result<CompiledRegion, CompileError> {
     let bytes = wasm::emit(&prepared.blocks, binding);
     if bytes.len() > limits.wasm_bytes {
         return Err(CompileError::WasmLimit);

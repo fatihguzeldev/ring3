@@ -8,10 +8,10 @@ use crate::{
 
 use super::gate::{self, GateSpec, PreparedGate};
 
-const MAX_BLOCKS: usize = 8;
+pub(super) const MAX_BLOCKS: usize = 8;
 const MAX_INSTRUCTIONS: usize = 64;
 const MAX_WASM_BYTES: usize = 65_536;
-const GUEST_END: u64 = 1 << 32;
+pub(super) const GUEST_END: u64 = 1 << 32;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct BlockSpec {
@@ -153,15 +153,7 @@ fn prepare(
             let instruction = decode_one(memory, pc)
                 .map_err(|error| instruction_error(pc, InstructionError::Decode(error)))?;
             let next = cursor + u64::from(instruction.length());
-            let terminates = matches!(
-                instruction.operation(),
-                Operation::Jump { .. } | Operation::ConditionalJump { .. }
-            ) || (embedded
-                && supports_stack(&instruction)
-                && matches!(
-                    instruction.operation(),
-                    Operation::Call { .. } | Operation::Return { .. }
-                ));
+            let terminates = terminates(&instruction, embedded);
             if next > end || (terminates && next != end) {
                 return Err(instruction_error(pc, InstructionError::InvalidBlockEnd));
             }
@@ -184,7 +176,7 @@ fn prepare(
     Ok(PreparedRegion { blocks })
 }
 
-fn validate_limits(limits: CompileLimits) -> Result<(), CompileError> {
+pub(super) fn validate_limits(limits: CompileLimits) -> Result<(), CompileError> {
     if limits.blocks == 0
         || limits.blocks > MAX_BLOCKS
         || limits.instructions == 0
@@ -197,7 +189,7 @@ fn validate_limits(limits: CompileLimits) -> Result<(), CompileError> {
     Ok(())
 }
 
-fn validate_blocks(specs: &[BlockSpec], limit: usize) -> Result<(), CompileError> {
+pub(super) fn validate_blocks(specs: &[BlockSpec], limit: usize) -> Result<(), CompileError> {
     if specs.is_empty() || specs.len() > limit {
         return Err(CompileError::InvalidBlocks);
     }
@@ -218,7 +210,7 @@ fn validate_blocks(specs: &[BlockSpec], limit: usize) -> Result<(), CompileError
     Ok(())
 }
 
-fn instruction_error(pc: GuestAddress, cause: InstructionError) -> CompileError {
+pub(super) fn instruction_error(pc: GuestAddress, cause: InstructionError) -> CompileError {
     CompileError::Instruction { pc, cause }
 }
 
@@ -236,7 +228,19 @@ fn supports_stack(instruction: &DecodedInstruction) -> bool {
     }
 }
 
-fn supports(instruction: &DecodedInstruction, embedded: bool) -> bool {
+pub(super) fn terminates(instruction: &DecodedInstruction, embedded: bool) -> bool {
+    matches!(
+        instruction.operation(),
+        Operation::Jump { .. } | Operation::ConditionalJump { .. }
+    ) || (embedded
+        && supports_stack(instruction)
+        && matches!(
+            instruction.operation(),
+            Operation::Call { .. } | Operation::Return { .. }
+        ))
+}
+
+pub(super) fn supports(instruction: &DecodedInstruction, embedded: bool) -> bool {
     let operation = instruction.operation();
     let memory_move = matches!(
         operation,

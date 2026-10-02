@@ -11,7 +11,8 @@ use crate::{
         memory_helper::{HELPER_SIZE, encode_helper_result},
     },
     cpu::dbt::{
-        BlockSpec, CompileError, CompileLimits, CompiledRegion, GateSpec, compile_embedded_region,
+        BlockSpec, CompileError, CompileLimits, CompiledRegion, GateSpec,
+        compile_embedded_entry_region, compile_embedded_region,
     },
     memory::{
         AddressSpace, GuestAddress, MAX_WORD_WRITES32, MemoryError, PageRange, Permissions,
@@ -36,6 +37,12 @@ pub enum HostError {
 pub enum StoreCompletion {
     Complete,
     CodeInvalidated,
+}
+
+#[derive(Clone, Copy)]
+pub(super) enum DescriptorFormat {
+    BlockSpecs,
+    Entries,
 }
 
 pub struct EngineInstance {
@@ -139,6 +146,19 @@ impl EngineInstance {
     }
 
     pub fn compile_with_gates(&mut self, count: u32, gate_count: u32) -> Result<u32, HostError> {
+        self.compile_descriptors(count, gate_count, DescriptorFormat::BlockSpecs)
+    }
+
+    pub fn compile_entries(&mut self, count: u32, gate_count: u32) -> Result<u32, HostError> {
+        self.compile_descriptors(count, gate_count, DescriptorFormat::Entries)
+    }
+
+    fn compile_descriptors(
+        &mut self,
+        count: u32,
+        gate_count: u32,
+        format: DescriptorFormat,
+    ) -> Result<u32, HostError> {
         self.memory()?;
         if self.pending_call.is_some() || self.callback.is_some() {
             return Err(HostError::Call(CallError::Busy));
@@ -148,7 +168,7 @@ impl EngineInstance {
             .generation
             .checked_add(1)
             .ok_or(HostError::GenerationExhausted)?;
-        let artifact = self.prepare_artifact(count, gate_count, generation)?;
+        let artifact = self.prepare_artifact(count, gate_count, generation, format)?;
         self.artifact = Some(artifact);
         self.generation = generation;
         Ok(generation)
@@ -166,41 +186,66 @@ impl EngineInstance {
         count: u32,
         gate_count: u32,
         generation: u32,
+        format: DescriptorFormat,
     ) -> Result<CompiledRegion, HostError> {
         Self::check_region_counts(count, gate_count)?;
         let memory = self.memory()?;
         let transfer = &self.arena()[TRANSFER_OFFSET..];
+        let stride = match format {
+            DescriptorFormat::BlockSpecs => 8,
+            DescriptorFormat::Entries => 4,
+        };
+        let mut entries = [GuestAddress(0); 8];
         let mut specs = [BlockSpec {
             entry: GuestAddress(0),
             byte_length: 0,
         }; 8];
-        for (index, spec) in specs[..count as usize].iter_mut().enumerate() {
-            let offset = index * 8;
-            spec.entry = GuestAddress(u32::from_le_bytes(
+        for index in 0..count as usize {
+            let offset = index * stride;
+            let entry = GuestAddress(u32::from_le_bytes(
                 transfer[offset..offset + 4].try_into().unwrap(),
             ));
-            spec.byte_length =
-                u32::from_le_bytes(transfer[offset + 4..offset + 8].try_into().unwrap());
+            match format {
+                DescriptorFormat::BlockSpecs => {
+                    specs[index] = BlockSpec {
+                        entry,
+                        byte_length: u32::from_le_bytes(
+                            transfer[offset + 4..offset + 8].try_into().unwrap(),
+                        ),
+                    };
+                }
+                DescriptorFormat::Entries => entries[index] = entry,
+            }
         }
         let mut gates = [GateSpec {
             entry: GuestAddress(0),
             id: 0,
         }; 8];
         for (index, gate) in gates[..gate_count as usize].iter_mut().enumerate() {
-            let offset = (count as usize + index) * 8;
+            let offset = count as usize * stride + index * 8;
             gate.entry = GuestAddress(u32::from_le_bytes(
                 transfer[offset..offset + 4].try_into().unwrap(),
             ));
             gate.id = u32::from_le_bytes(transfer[offset + 4..offset + 8].try_into().unwrap());
         }
-        compile_embedded_region(
-            memory,
-            &specs[..count as usize],
-            CompileLimits::default(),
-            self.key,
-            generation,
-            &gates[..gate_count as usize],
-        )
+        match format {
+            DescriptorFormat::BlockSpecs => compile_embedded_region(
+                memory,
+                &specs[..count as usize],
+                CompileLimits::default(),
+                self.key,
+                generation,
+                &gates[..gate_count as usize],
+            ),
+            DescriptorFormat::Entries => compile_embedded_entry_region(
+                memory,
+                &entries[..count as usize],
+                CompileLimits::default(),
+                self.key,
+                generation,
+                &gates[..gate_count as usize],
+            ),
+        }
         .map_err(HostError::Compile)
     }
 

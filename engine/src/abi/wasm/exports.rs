@@ -89,6 +89,15 @@ pub extern "C" fn compile_with_gates(count: u32, gate_count: u32) -> u32 {
 }
 
 #[allow(unsafe_code)]
+#[unsafe(export_name = "ring3_abi_v1_compile_entries")]
+pub extern "C" fn compile_entries(count: u32, gate_count: u32) -> u32 {
+    {
+        #![forbid(unsafe_code)]
+        crate::process::wasm::compile_entries(count, gate_count)
+    }
+}
+
+#[allow(unsafe_code)]
 #[unsafe(export_name = "ring3_abi_v1_module_ptr")]
 pub extern "C" fn module_ptr() -> u32 {
     {
@@ -255,6 +264,29 @@ pub extern "C" fn resume_callback_code(
     {
         #![forbid(unsafe_code)]
         crate::process::wasm::resume_callback_code(
+            low,
+            high,
+            generation,
+            callback_token,
+            count,
+            gate_count,
+        )
+    }
+}
+
+#[allow(unsafe_code)]
+#[unsafe(export_name = "ring3_abi_v1_resume_callback_entries")]
+pub extern "C" fn resume_callback_entries(
+    low: u32,
+    high: u32,
+    generation: u32,
+    callback_token: u32,
+    count: u32,
+    gate_count: u32,
+) -> u32 {
+    {
+        #![forbid(unsafe_code)]
+        crate::process::wasm::resume_callback_entries(
             low,
             high,
             generation,

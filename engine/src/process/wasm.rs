@@ -83,6 +83,10 @@ pub(crate) fn compile_with_gates(count: u32, gate_count: u32) -> u32 {
     mutate(|instance| instance.compile_with_gates(count, gate_count).map(|_| ()))
 }
 
+pub(crate) fn compile_entries(count: u32, gate_count: u32) -> u32 {
+    mutate(|instance| instance.compile_entries(count, gate_count).map(|_| ()))
+}
+
 pub(crate) fn capture_call(
     low: u32,
     high: u32,
@@ -170,6 +174,22 @@ pub(crate) fn resume_callback_code(
     mutate(|instance| {
         instance
             .resume_callback_code(key, generation, callback_token, count, gate_count)
+            .map(|_| ())
+    })
+}
+
+pub(crate) fn resume_callback_entries(
+    low: u32,
+    high: u32,
+    generation: u32,
+    callback_token: u32,
+    count: u32,
+    gate_count: u32,
+) -> u32 {
+    let key = u64::from(low) | (u64::from(high) << 32);
+    mutate(|instance| {
+        instance
+            .resume_callback_entries(key, generation, callback_token, count, gate_count)
             .map(|_| ())
     })
 }
