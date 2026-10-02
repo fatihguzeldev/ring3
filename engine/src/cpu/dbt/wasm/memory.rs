@@ -19,11 +19,13 @@ impl Imports {
                 Operation::Move {
                     source: Value32::Memory(_),
                     ..
-                } => read = true,
+                }
+                | Operation::Return { .. } => read = true,
                 Operation::Move {
                     destination: Location32::Memory(_),
                     ..
-                } => store = true,
+                }
+                | Operation::Call { .. } => store = true,
                 _ => {}
             }
         }
@@ -70,6 +72,23 @@ pub(super) fn store(
         .local_set(HELPER_STATUS);
     validate_result(code, true);
     exit_if_failed(code, exit_depth);
+}
+
+pub(super) fn pop_return(code: &mut InstructionSink<'_>, imports: Imports, exit_depth: u32) {
+    let esp = register(crate::cpu::x86::Register32::Esp);
+    code.local_get(esp)
+        .local_set(ADDRESS)
+        .local_get(ADDRESS)
+        .call(imports.read.expect("prepared return has a read import"))
+        .local_set(HELPER_STATUS);
+    validate_result(code, false);
+    exit_if_failed(code, exit_depth);
+    helper_field(code, 20);
+    code.local_set(EIP)
+        .local_get(esp)
+        .i32_const(4)
+        .i32_add()
+        .local_set(esp);
 }
 
 pub(super) fn exit_if_invalidated(code: &mut InstructionSink<'_>, exit_depth: u32) {

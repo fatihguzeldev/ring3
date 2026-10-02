@@ -132,11 +132,11 @@ fn prepare(
             let terminates = matches!(
                 instruction.operation(),
                 Operation::Jump { .. } | Operation::ConditionalJump { .. }
-            );
+            ) || (embedded && supports_stack(&instruction));
             if next > end || (terminates && next != end) {
                 return Err(instruction_error(pc, InstructionError::InvalidBlockEnd));
             }
-            if !supports(instruction.operation(), embedded) {
+            if !supports(&instruction, embedded) {
                 return Err(instruction_error(pc, InstructionError::BackendUnsupported));
             }
             instructions
@@ -190,7 +190,18 @@ fn instruction_error(pc: GuestAddress, cause: InstructionError) -> CompileError 
     CompileError::Instruction { pc, cause }
 }
 
-fn supports(operation: &Operation, embedded: bool) -> bool {
+fn supports_stack(instruction: &DecodedInstruction) -> bool {
+    match instruction.operation() {
+        Operation::Call {
+            target: BranchTarget::Direct(_),
+        } => instruction.length() == 5,
+        Operation::Return { stack_adjust: 0 } => instruction.length() == 1,
+        _ => false,
+    }
+}
+
+fn supports(instruction: &DecodedInstruction, embedded: bool) -> bool {
+    let operation = instruction.operation();
     let memory_move = matches!(
         operation,
         Operation::Move {
@@ -201,7 +212,7 @@ fn supports(operation: &Operation, embedded: bool) -> bool {
             source: Value32::Register(_) | Value32::Immediate(_),
         }
     );
-    (embedded && memory_move)
+    (embedded && (memory_move || supports_stack(instruction)))
         || matches!(
             operation,
             Operation::Nop

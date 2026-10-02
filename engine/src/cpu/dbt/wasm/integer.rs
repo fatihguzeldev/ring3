@@ -2,8 +2,9 @@ use wasm_encoder::{BlockType, InstructionSink, ValType};
 
 use super::{control, locals::*, memory};
 use crate::cpu::x86::{
+    Register32,
     decode::DecodedInstruction,
-    ir::{BinaryKind, BranchTarget, Location32, Operation, Value32},
+    ir::{BinaryKind, BranchTarget, EffectiveAddress, Location32, Operation, Value32},
 };
 
 pub(super) fn instruction(
@@ -66,11 +67,38 @@ pub(super) fn instruction(
                 .end()
                 .local_set(EIP);
         }
+        Operation::Call {
+            target: BranchTarget::Direct(target),
+        } => {
+            memory::store(
+                code,
+                EffectiveAddress {
+                    base: Some(Register32::Esp),
+                    index: None,
+                    scale: 1,
+                    displacement: (-4_i32) as u32,
+                },
+                Value32::Immediate(instruction.next_pc().0),
+                imports,
+                exit_depth,
+            );
+            code.local_get(ADDRESS)
+                .local_set(register(Register32::Esp))
+                .i32_const(target.0 as i32)
+                .local_set(EIP);
+            store = true;
+        }
+        Operation::Return { stack_adjust: 0 } => {
+            memory::pop_return(code, imports, exit_depth);
+        }
         _ => unreachable!("prepared region contains an unsupported operation"),
     }
     if !matches!(
         instruction.operation(),
-        Operation::Jump { .. } | Operation::ConditionalJump { .. }
+        Operation::Jump { .. }
+            | Operation::ConditionalJump { .. }
+            | Operation::Call { .. }
+            | Operation::Return { .. }
     ) {
         code.i32_const(instruction.next_pc().0 as i32)
             .local_set(EIP);
