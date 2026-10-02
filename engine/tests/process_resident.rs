@@ -414,7 +414,7 @@ fn whole_region_snapshot_invalidates_other_block_even_on_unchanged_page() {
 }
 
 #[test]
-fn rejected_counts_spans_and_standalone_profile_keep_legacy_and_resident_state() {
+fn rejected_counts_spans_and_resident_profile_keep_legacy_and_resident_state() {
     let mut engine = fixture();
     describe(&mut engine, &[(A, 6)]);
     assert_eq!(engine.compile(1), Ok(1));
@@ -435,7 +435,7 @@ fn rejected_counts_spans_and_standalone_profile_keep_legacy_and_resident_state()
             InstructionError::Decode(DecodeError::Unsupported(UnsupportedFeature::Opcode)),
         ),
         (
-            &[0x8b, 0x03, 0xeb, 0][..],
+            &[0x89, 0x03, 0xeb, 0][..],
             InstructionError::BackendUnsupported,
         ),
         (
