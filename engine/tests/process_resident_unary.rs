@@ -371,14 +371,7 @@ fn span_poison_and_remaining_exclusions_preserve_arena_and_installed_units() {
         );
     }
     for instruction in [
-        &[0x01, 0x03][..],
-        &[0x29, 0x03],
-        &[0x21, 0x03],
-        &[0x09, 0x03],
-        &[0x31, 0x03],
-        &[0x81, 0x03, 1, 0, 0, 0],
-        &[0x83, 0x03, 0xff],
-        &[0x50],
+        &[0x50][..],
         &[0x58],
         &[0xe8, 0, 0, 0, 0],
         &[0xff, 0x13],

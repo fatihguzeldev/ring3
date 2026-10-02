@@ -178,7 +178,8 @@ fn prepare(
                     && (supports_memory_reads(instruction.operation())
                         || supports_indirect_jump(instruction.operation())
                         || supports_memory_move_store(instruction.operation())
-                        || supports_memory_unary(instruction.operation()))))
+                        || supports_memory_unary(instruction.operation())
+                        || supports_memory_binary(instruction.operation()))))
             {
                 return Err(instruction_error(pc, InstructionError::BackendUnsupported));
             }
@@ -317,27 +318,30 @@ fn supports_memory_unary(operation: &Operation) -> bool {
     )
 }
 
+fn supports_memory_binary(operation: &Operation) -> bool {
+    matches!(
+        operation,
+        Operation::Binary {
+            kind: BinaryKind::Add
+                | BinaryKind::Sub
+                | BinaryKind::And
+                | BinaryKind::Or
+                | BinaryKind::Xor,
+            destination: Location32::Memory(_),
+            source: Value32::Register(_) | Value32::Immediate(_),
+        }
+    )
+}
+
 pub(super) fn supports(instruction: &DecodedInstruction, embedded: bool) -> bool {
     let operation = instruction.operation();
     (embedded
         && (supports_memory_reads(operation)
             || supports_memory_move_store(operation)
             || supports_memory_unary(operation)
+            || supports_memory_binary(operation)
             || supports_stack(instruction)
             || supports_indirect_jump(operation)))
-        || (embedded
-            && matches!(
-                operation,
-                Operation::Binary {
-                    kind: BinaryKind::Add
-                        | BinaryKind::Sub
-                        | BinaryKind::And
-                        | BinaryKind::Or
-                        | BinaryKind::Xor,
-                    destination: Location32::Memory(_),
-                    source: Value32::Register(_) | Value32::Immediate(_),
-                }
-            ))
         || matches!(
             operation,
             Operation::Nop
