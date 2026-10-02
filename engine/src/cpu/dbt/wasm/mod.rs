@@ -6,9 +6,9 @@ mod locals;
 mod memory;
 
 #[derive(Clone, Copy)]
-pub(super) struct EmbeddedBinding {
-    pub(super) key: u64,
-    pub(super) generation: u32,
+pub(super) enum EmbeddedBinding {
+    Replacement { key: u64, generation: u32 },
+    Resident { key: u64, id: u64 },
 }
 
 pub(super) use emitter::emit;

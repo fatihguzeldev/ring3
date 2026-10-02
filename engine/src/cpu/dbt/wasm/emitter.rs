@@ -18,8 +18,15 @@ pub(in crate::cpu::dbt) fn emit(
     debug_assert!(!(has_memory || has_gates) || binding.is_some());
     let mut types = TypeSection::new();
     types.ty().function([ValType::I32; 4], [ValType::I32]);
-    if binding.is_some() {
-        types.ty().function([ValType::I32; 6], [ValType::I32]);
+    if let Some(binding) = binding {
+        let parameters = match binding {
+            EmbeddedBinding::Replacement { .. } => 6,
+            EmbeddedBinding::Resident { .. } => 7,
+        };
+        types.ty().function(
+            std::iter::repeat_n(ValType::I32, parameters),
+            [ValType::I32],
+        );
     }
     if has_reads {
         types.ty().function([ValType::I32], [ValType::I32]);
@@ -40,8 +47,12 @@ pub(in crate::cpu::dbt) fn emit(
             page_size_log2: None,
         }),
     );
-    if binding.is_some() {
-        imports.import("ring3", "guard", EntityType::Function(1));
+    if let Some(binding) = binding {
+        let name = match binding {
+            EmbeddedBinding::Replacement { .. } => "guard",
+            EmbeddedBinding::Resident { .. } => "guard_resident",
+        };
+        imports.import("ring3", name, EntityType::Function(1));
     }
     let mut helper_imports = memory::Imports::default();
     let mut function_index = u32::from(binding.is_some());
@@ -84,10 +95,20 @@ pub(in crate::cpu::dbt) fn emit(
     let mut function = Function::new(declarations);
     let mut code = function.instructions();
     if let Some(binding) = binding {
-        code.i32_const(binding.key as u32 as i32)
-            .i32_const((binding.key >> 32) as u32 as i32)
-            .i32_const(binding.generation as i32)
-            .local_get(STATE_PTR)
+        match binding {
+            EmbeddedBinding::Replacement { key, generation } => {
+                code.i32_const(key as u32 as i32)
+                    .i32_const((key >> 32) as u32 as i32)
+                    .i32_const(generation as i32);
+            }
+            EmbeddedBinding::Resident { key, id } => {
+                code.i32_const(key as u32 as i32)
+                    .i32_const((key >> 32) as u32 as i32)
+                    .i32_const(id as u32 as i32)
+                    .i32_const((id >> 32) as u32 as i32);
+            }
+        }
+        code.local_get(STATE_PTR)
             .local_get(EXIT_PTR)
             .local_get(CANCEL_PTR)
             .call(0)

@@ -105,7 +105,7 @@ pub(crate) fn compile_embedded_entry_region(
     emit_prepared(
         prepared,
         limits,
-        Some(wasm::EmbeddedBinding { key, generation }),
+        Some(wasm::EmbeddedBinding::Replacement { key, generation }),
     )
 }
 
@@ -121,7 +121,7 @@ pub(crate) fn compile_embedded_region(
         memory,
         specs,
         limits,
-        Some(wasm::EmbeddedBinding { key, generation }),
+        Some(wasm::EmbeddedBinding::Replacement { key, generation }),
         gates,
     )
 }
@@ -141,7 +141,7 @@ fn compile(
     emit_prepared(prepared, limits, binding)
 }
 
-fn emit_prepared(
+pub(super) fn emit_prepared(
     prepared: PreparedRegion,
     limits: CompileLimits,
     binding: Option<wasm::EmbeddedBinding>,

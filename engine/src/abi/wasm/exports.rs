@@ -98,6 +98,43 @@ pub extern "C" fn compile_entries(count: u32, gate_count: u32) -> u32 {
 }
 
 #[allow(unsafe_code)]
+#[unsafe(export_name = "ring3_abi_v1_compile_resident")]
+pub extern "C" fn compile_resident(count: u32) -> u32 {
+    {
+        #![forbid(unsafe_code)]
+        crate::process::wasm::compile_resident(count)
+    }
+}
+
+#[allow(unsafe_code)]
+#[unsafe(export_name = "ring3_abi_v1_resident_module")]
+pub extern "C" fn resident_module(low: u32, high: u32) -> u32 {
+    {
+        #![forbid(unsafe_code)]
+        crate::process::wasm::resident_module(low, high)
+    }
+}
+
+#[allow(unsafe_code)]
+#[unsafe(export_name = "ring3_abi_v1_guard_resident")]
+pub extern "C" fn guard_resident(
+    key_low: u32,
+    key_high: u32,
+    id_low: u32,
+    id_high: u32,
+    state: u32,
+    exit: u32,
+    cancel: u32,
+) -> u32 {
+    {
+        #![forbid(unsafe_code)]
+        crate::process::wasm::guard_resident(
+            key_low, key_high, id_low, id_high, state, exit, cancel,
+        )
+    }
+}
+
+#[allow(unsafe_code)]
 #[unsafe(export_name = "ring3_abi_v1_module_ptr")]
 pub extern "C" fn module_ptr() -> u32 {
     {

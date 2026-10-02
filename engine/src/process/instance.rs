@@ -13,8 +13,8 @@ use crate::{
         },
     },
     cpu::dbt::{
-        BlockSpec, CompileError, CompileLimits, CompiledRegion, GateSpec,
-        compile_embedded_entry_region, compile_embedded_region,
+        BlockSpec, CompileError, CompileLimits, CompiledRegion, GateSpec, RegistryError,
+        ResidentRegistry, compile_embedded_entry_region, compile_embedded_region,
     },
     memory::{
         AddressSpace, GuestAddress, MAX_WORD_WRITES32, MemoryError, PageRange, Permissions,
@@ -31,6 +31,7 @@ pub enum HostError {
     GenerationExhausted,
     Memory(MemoryError),
     Compile(CompileError),
+    Resident(RegistryError),
     Infrastructure,
     Call(CallError),
 }
@@ -51,6 +52,7 @@ pub struct EngineInstance {
     pub(super) memory: Option<AddressSpace>,
     pub(super) arena: Pin<Box<[u8]>>,
     pub(super) artifact: Option<CompiledRegion>,
+    pub(super) resident: Option<ResidentRegistry>,
     pub(super) key: u64,
     pub(super) generation: u32,
     pub(super) pending_call: Option<PendingCall>,
@@ -74,6 +76,7 @@ impl EngineInstance {
             memory: Some(memory),
             arena: Box::into_pin(arena.into_boxed_slice()),
             artifact: None,
+            resident: None,
             key,
             generation: 0,
             pending_call: None,
@@ -364,6 +367,7 @@ impl EngineInstance {
         self.pending_call = None;
         self.callback = None;
         self.artifact = None;
+        self.resident = None;
         self.memory = None;
     }
 

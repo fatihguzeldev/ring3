@@ -3,7 +3,10 @@
 use std::cell::RefCell;
 
 use super::{CallError, EngineInstance, HostError, StoreCompletion};
-use crate::abi::arena::{CANCEL_OFFSET, EXIT_OFFSET, STATE_OFFSET};
+use crate::{
+    abi::arena::{CANCEL_OFFSET, EXIT_OFFSET, STATE_OFFSET, TRANSFER_OFFSET},
+    cpu::dbt::RegistryError,
+};
 
 struct Registry {
     opened: bool,
@@ -85,6 +88,67 @@ pub(crate) fn compile_with_gates(count: u32, gate_count: u32) -> u32 {
 
 pub(crate) fn compile_entries(count: u32, gate_count: u32) -> u32 {
     mutate(|instance| instance.compile_entries(count, gate_count).map(|_| ()))
+}
+
+pub(crate) fn compile_resident(count: u32) -> u32 {
+    mutate(|instance| {
+        let id = instance.compile_resident(count)?;
+        resident_record(instance, id.get())
+    })
+}
+
+pub(crate) fn resident_module(low: u32, high: u32) -> u32 {
+    let id = u64::from(low) | (u64::from(high) << 32);
+    mutate(|instance| resident_record(instance, id))
+}
+
+fn resident_record(instance: &mut EngineInstance, id: u64) -> Result<(), HostError> {
+    let bytes = instance.resident_bytes(id)?;
+    let fields = [
+        1,
+        24,
+        id as u32,
+        (id >> 32) as u32,
+        bytes.as_ptr() as u32,
+        bytes.len() as u32,
+    ];
+    let transfer = &mut instance.arena.as_mut().get_mut()[TRANSFER_OFFSET..TRANSFER_OFFSET + 24];
+    for (output, value) in transfer.chunks_exact_mut(4).zip(fields) {
+        output.copy_from_slice(&value.to_le_bytes());
+    }
+    Ok(())
+}
+
+pub(crate) fn guard_resident(
+    key_low: u32,
+    key_high: u32,
+    id_low: u32,
+    id_high: u32,
+    state: u32,
+    exit: u32,
+    cancel: u32,
+) -> u32 {
+    REGISTRY.with(|registry| {
+        let Ok(registry) = registry.try_borrow() else {
+            return 9;
+        };
+        let Some(instance) = registry.instance.as_ref() else {
+            return 5;
+        };
+        let key = u64::from(key_low) | (u64::from(key_high) << 32);
+        let id = u64::from(id_low) | (u64::from(id_high) << 32);
+        if let Err(error) = instance.guard_resident(key, id) {
+            return status(error);
+        }
+        let base = instance.arena_address() as u32;
+        if state != base + STATE_OFFSET as u32
+            || exit != base + EXIT_OFFSET as u32
+            || cancel != base + CANCEL_OFFSET as u32
+        {
+            return 1;
+        }
+        0
+    })
 }
 
 pub(crate) fn capture_call(
@@ -309,6 +373,16 @@ fn status(error: HostError) -> u32 {
         HostError::CodeInvalidated => 4,
         HostError::Memory(_) => 8,
         HostError::Compile(_) => 10,
+        HostError::Resident(error) => match error {
+            RegistryError::InvalidLimits | RegistryError::InstructionOverlap { .. } => 7,
+            RegistryError::Allocation | RegistryError::IdentityExhausted => 9,
+            RegistryError::WrongAddressSpace
+            | RegistryError::InvalidUnit
+            | RegistryError::NotFound { .. } => 3,
+            RegistryError::UnitCapacity | RegistryError::ByteCapacity => 18,
+            RegistryError::Compile(_) => 10,
+            RegistryError::CodeInvalidated => 4,
+        },
         HostError::GenerationExhausted | HostError::Infrastructure => 9,
         HostError::Call(error) => match error {
             CallError::Busy => 12,

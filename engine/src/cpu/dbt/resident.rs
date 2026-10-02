@@ -3,7 +3,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use crate::memory::{AddressSpace, GuestAddress};
 
 use super::{
-    ArtifactError, BlockSpec, CompileError, CompileLimits, CompiledRegion, compile_region,
+    ArtifactError, BlockSpec, CompileError, CompileLimits, CompiledRegion, artifact::emit_prepared,
+    compile_region, prepare_region, wasm::EmbeddedBinding,
 };
 
 const MAX_UNITS: usize = 8;
@@ -99,6 +100,53 @@ impl ResidentRegistry {
             return Err(RegistryError::UnitCapacity);
         }
         let region = compile_region(memory, specs, limits).map_err(RegistryError::Compile)?;
+        let wasm_bytes = self.admit(memory, &region)?;
+        let id = allocate_id(&NEXT_UNIT_ID)?;
+        self.publish(id, region, wasm_bytes);
+        Ok(id)
+    }
+
+    pub(crate) fn compile_bound(
+        &mut self,
+        memory: &AddressSpace,
+        specs: &[BlockSpec],
+        limits: CompileLimits,
+        key: u64,
+    ) -> Result<UnitId, RegistryError> {
+        self.compile_bound_with_counter(memory, specs, limits, key, &NEXT_UNIT_ID)
+    }
+
+    fn compile_bound_with_counter(
+        &mut self,
+        memory: &AddressSpace,
+        specs: &[BlockSpec],
+        limits: CompileLimits,
+        key: u64,
+        counter: &AtomicU64,
+    ) -> Result<UnitId, RegistryError> {
+        self.check_memory(memory)?;
+        if self.entries.len() == self.limits.units {
+            return Err(RegistryError::UnitCapacity);
+        }
+        let prepared = prepare_region(memory, specs, limits).map_err(RegistryError::Compile)?;
+        // final emission can fail after reservation; unpublished ids are never reused.
+        let id = allocate_id(counter)?;
+        let region = emit_prepared(
+            prepared,
+            limits,
+            Some(EmbeddedBinding::Resident { key, id: id.get() }),
+        )
+        .map_err(RegistryError::Compile)?;
+        let wasm_bytes = self.admit(memory, &region)?;
+        self.publish(id, region, wasm_bytes);
+        Ok(id)
+    }
+
+    fn admit(
+        &self,
+        memory: &AddressSpace,
+        region: &CompiledRegion,
+    ) -> Result<usize, RegistryError> {
         let bytes = region
             .wasm_bytes(memory)
             .map_err(|ArtifactError::CodeInvalidated| RegistryError::CodeInvalidated)?
@@ -115,11 +163,21 @@ impl ResidentRegistry {
                 return Err(RegistryError::InstructionOverlap { pc });
             }
         }
-        let id = allocate_id(&NEXT_UNIT_ID)?;
+        Ok(wasm_bytes)
+    }
+
+    fn publish(&mut self, id: UnitId, region: CompiledRegion, wasm_bytes: usize) {
         // the reserved vector makes publication infallible after the id claim.
         self.entries.push(ResidentUnit { id, region });
         self.wasm_bytes = wasm_bytes;
-        Ok(id)
+    }
+
+    pub(crate) fn get_raw(
+        &self,
+        memory: &AddressSpace,
+        id: u64,
+    ) -> Result<&CompiledRegion, RegistryError> {
+        self.get(memory, UnitId(id))
     }
 
     pub fn get(&self, memory: &AddressSpace, id: UnitId) -> Result<&CompiledRegion, RegistryError> {
@@ -184,6 +242,171 @@ fn allocate_id(counter: &AtomicU64) -> Result<UnitId, RegistryError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::memory::{PageRange, Permissions};
+
+    #[test]
+    fn guarded_admission_never_reuses_unpublished_ids_or_changes_retained_units() {
+        let mut memory = AddressSpace::new(2).unwrap();
+        memory
+            .map_zeroed(
+                PageRange::new(GuestAddress(0x1000), 2).unwrap(),
+                Permissions::ALL,
+            )
+            .unwrap();
+        for pc in [0x1000, 0x2000] {
+            memory.write(GuestAddress(pc), &[0x40, 0xeb, 0]).unwrap();
+        }
+        let specs = |pc| {
+            [BlockSpec {
+                entry: GuestAddress(pc),
+                byte_length: 3,
+            }]
+        };
+        let counter = AtomicU64::new(1);
+        let mut registry = ResidentRegistry::new(&memory, RegistryLimits::default()).unwrap();
+        let first = registry
+            .compile_bound_with_counter(
+                &memory,
+                &specs(0x1000),
+                CompileLimits::default(),
+                7,
+                &counter,
+            )
+            .unwrap();
+        assert_eq!(first.get(), 1);
+        let bytes = registry
+            .get(&memory, first)
+            .unwrap()
+            .wasm_bytes(&memory)
+            .unwrap()
+            .to_vec();
+        let pointer = registry
+            .get(&memory, first)
+            .unwrap()
+            .wasm_bytes(&memory)
+            .unwrap()
+            .as_ptr();
+        let usage = registry.usage();
+        assert_eq!(
+            registry.compile_bound_with_counter(
+                &memory,
+                &specs(0x2000),
+                CompileLimits {
+                    wasm_bytes: 1,
+                    ..CompileLimits::default()
+                },
+                7,
+                &counter
+            ),
+            Err(RegistryError::Compile(CompileError::WasmLimit))
+        );
+        assert_eq!(counter.load(Ordering::Relaxed), 3);
+        assert_eq!(
+            registry.compile_bound_with_counter(
+                &memory,
+                &specs(0x1000),
+                CompileLimits::default(),
+                7,
+                &counter
+            ),
+            Err(RegistryError::InstructionOverlap {
+                pc: GuestAddress(0x1000)
+            })
+        );
+        assert_eq!(counter.load(Ordering::Relaxed), 4);
+        for id in [2, 3] {
+            assert_eq!(
+                registry.get_raw(&memory, id).unwrap_err(),
+                RegistryError::InvalidUnit
+            );
+        }
+        assert_eq!(registry.usage(), usage);
+        assert_eq!(
+            registry
+                .get(&memory, first)
+                .unwrap()
+                .wasm_bytes(&memory)
+                .unwrap(),
+            bytes
+        );
+        assert_eq!(
+            registry
+                .get(&memory, first)
+                .unwrap()
+                .wasm_bytes(&memory)
+                .unwrap()
+                .as_ptr(),
+            pointer
+        );
+        let next = registry
+            .compile_bound_with_counter(
+                &memory,
+                &specs(0x2000),
+                CompileLimits::default(),
+                7,
+                &counter,
+            )
+            .unwrap();
+        assert_eq!(next.get(), 4);
+
+        let counter = AtomicU64::new(1);
+        let mut tight = ResidentRegistry::new(
+            &memory,
+            RegistryLimits {
+                units: 8,
+                wasm_bytes: bytes.len(),
+            },
+        )
+        .unwrap();
+        let first = tight
+            .compile_bound_with_counter(
+                &memory,
+                &specs(0x1000),
+                CompileLimits::default(),
+                7,
+                &counter,
+            )
+            .unwrap();
+        let usage = tight.usage();
+        assert_eq!(
+            tight.compile_bound_with_counter(
+                &memory,
+                &specs(0x2000),
+                CompileLimits::default(),
+                7,
+                &counter
+            ),
+            Err(RegistryError::ByteCapacity)
+        );
+        assert_eq!(counter.load(Ordering::Relaxed), 3);
+        assert_eq!(tight.usage(), usage);
+        assert_eq!(
+            tight.get_raw(&memory, 2).unwrap_err(),
+            RegistryError::InvalidUnit
+        );
+        assert_eq!(
+            tight
+                .get(&memory, first)
+                .unwrap()
+                .wasm_bytes(&memory)
+                .unwrap(),
+            bytes
+        );
+        assert_eq!(
+            tight.compile_bound_with_counter(
+                &memory,
+                &specs(0x2000),
+                CompileLimits {
+                    blocks: 0,
+                    ..CompileLimits::default()
+                },
+                7,
+                &counter
+            ),
+            Err(RegistryError::Compile(CompileError::InvalidLimits))
+        );
+        assert_eq!(counter.load(Ordering::Relaxed), 3);
+    }
 
     #[test]
     fn unit_ids_are_nonzero_monotonic_and_never_wrap() {
