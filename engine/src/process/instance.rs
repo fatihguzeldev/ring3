@@ -139,17 +139,36 @@ impl EngineInstance {
     }
 
     pub fn compile_with_gates(&mut self, count: u32, gate_count: u32) -> Result<u32, HostError> {
-        let memory = self.memory()?;
+        self.memory()?;
         if self.pending_call.is_some() || self.callback.is_some() {
             return Err(HostError::Call(CallError::Busy));
         }
-        if !(1..=8).contains(&count) || gate_count > count {
-            return Err(HostError::InvalidRequest);
-        }
+        Self::check_region_counts(count, gate_count)?;
         let generation = self
             .generation
             .checked_add(1)
             .ok_or(HostError::GenerationExhausted)?;
+        let artifact = self.prepare_artifact(count, gate_count, generation)?;
+        self.artifact = Some(artifact);
+        self.generation = generation;
+        Ok(generation)
+    }
+
+    pub(super) fn check_region_counts(count: u32, gate_count: u32) -> Result<(), HostError> {
+        if !(1..=8).contains(&count) || gate_count > count {
+            return Err(HostError::InvalidRequest);
+        }
+        Ok(())
+    }
+
+    pub(super) fn prepare_artifact(
+        &self,
+        count: u32,
+        gate_count: u32,
+        generation: u32,
+    ) -> Result<CompiledRegion, HostError> {
+        Self::check_region_counts(count, gate_count)?;
+        let memory = self.memory()?;
         let transfer = &self.arena()[TRANSFER_OFFSET..];
         let mut specs = [BlockSpec {
             entry: GuestAddress(0),
@@ -174,7 +193,7 @@ impl EngineInstance {
             ));
             gate.id = u32::from_le_bytes(transfer[offset + 4..offset + 8].try_into().unwrap());
         }
-        let artifact = compile_embedded_region(
+        compile_embedded_region(
             memory,
             &specs[..count as usize],
             CompileLimits::default(),
@@ -182,10 +201,7 @@ impl EngineInstance {
             generation,
             &gates[..gate_count as usize],
         )
-        .map_err(HostError::Compile)?;
-        self.artifact = Some(artifact);
-        self.generation = generation;
-        Ok(generation)
+        .map_err(HostError::Compile)
     }
 
     pub fn generation(&self) -> u32 {

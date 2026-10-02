@@ -12,8 +12,8 @@ use crate::{
 };
 
 pub(super) struct SuspendedCallback {
-    record: CallbackRecord32,
-    outer: PendingCall,
+    pub(super) record: CallbackRecord32,
+    pub(super) outer: PendingCall,
 }
 
 impl SuspendedCallback {

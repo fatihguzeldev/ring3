@@ -158,6 +158,22 @@ pub(crate) fn abort_callback(low: u32, high: u32, token: u32) -> u32 {
     mutate(|instance| instance.abort_callback(key, token))
 }
 
+pub(crate) fn resume_callback_code(
+    low: u32,
+    high: u32,
+    generation: u32,
+    callback_token: u32,
+    count: u32,
+    gate_count: u32,
+) -> u32 {
+    let key = u64::from(low) | (u64::from(high) << 32);
+    mutate(|instance| {
+        instance
+            .resume_callback_code(key, generation, callback_token, count, gate_count)
+            .map(|_| ())
+    })
+}
+
 pub(crate) fn generation() -> u32 {
     inspect(EngineInstance::generation)
 }

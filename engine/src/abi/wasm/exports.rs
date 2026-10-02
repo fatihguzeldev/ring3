@@ -241,3 +241,26 @@ pub extern "C" fn abort_callback(low: u32, high: u32, token: u32) -> u32 {
         crate::process::wasm::abort_callback(low, high, token)
     }
 }
+
+#[allow(unsafe_code)]
+#[unsafe(export_name = "ring3_abi_v1_resume_callback_code")]
+pub extern "C" fn resume_callback_code(
+    low: u32,
+    high: u32,
+    generation: u32,
+    callback_token: u32,
+    count: u32,
+    gate_count: u32,
+) -> u32 {
+    {
+        #![forbid(unsafe_code)]
+        crate::process::wasm::resume_callback_code(
+            low,
+            high,
+            generation,
+            callback_token,
+            count,
+            gate_count,
+        )
+    }
+}

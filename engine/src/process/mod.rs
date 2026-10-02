@@ -2,6 +2,7 @@
 
 mod call;
 mod callback;
+mod callback_code;
 mod instance;
 #[cfg(target_arch = "wasm32")]
 pub(crate) mod wasm;
