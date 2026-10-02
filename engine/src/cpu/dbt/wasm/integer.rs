@@ -58,6 +58,12 @@ pub(super) fn instruction(
         } => {
             code.i32_const(target.0 as i32).local_set(EIP);
         }
+        Operation::Jump {
+            target: BranchTarget::Indirect(target),
+        } => {
+            indirect_target(code, target, imports, exit_depth);
+            code.local_get(RESULT).local_set(EIP);
+        }
         Operation::ConditionalJump { condition, target } => {
             control::condition(code, condition);
             code.if_(BlockType::Result(ValType::I32))
@@ -85,6 +91,28 @@ pub(super) fn instruction(
             code.local_get(ADDRESS)
                 .local_set(register(Register32::Esp))
                 .i32_const(target.0 as i32)
+                .local_set(EIP);
+            store = true;
+        }
+        Operation::Call {
+            target: BranchTarget::Indirect(target),
+        } => {
+            indirect_target(code, target, imports, exit_depth);
+            memory::store(
+                code,
+                EffectiveAddress {
+                    base: Some(Register32::Esp),
+                    index: None,
+                    scale: 1,
+                    displacement: (-4_i32) as u32,
+                },
+                Value32::Immediate(instruction.next_pc().0),
+                imports,
+                exit_depth,
+            );
+            code.local_get(ADDRESS)
+                .local_set(register(Register32::Esp))
+                .local_get(RESULT)
                 .local_set(EIP);
             store = true;
         }
@@ -146,6 +174,22 @@ pub(super) fn instruction(
         .local_set(RETIRED);
     if store {
         memory::exit_if_invalidated(code, exit_depth);
+    }
+}
+
+fn indirect_target(
+    code: &mut InstructionSink<'_>,
+    target: Location32,
+    imports: memory::Imports,
+    exit_depth: u32,
+) {
+    match target {
+        Location32::Register(target) => {
+            code.local_get(register(target)).local_set(RESULT);
+        }
+        Location32::Memory(address) => {
+            memory::load_result(code, address, imports, exit_depth);
+        }
     }
 }
 

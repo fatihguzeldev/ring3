@@ -1,6 +1,6 @@
 use wasm_encoder::{BlockType, InstructionSink, MemArg};
 
-use crate::cpu::x86::ir::{EffectiveAddress, Location32, Operation, Value32};
+use crate::cpu::x86::ir::{BranchTarget, EffectiveAddress, Location32, Operation, Value32};
 
 use super::locals::*;
 
@@ -21,6 +21,9 @@ impl Imports {
                 }
                 | Operation::Pop {
                     destination: Location32::Memory(_),
+                }
+                | Operation::Call {
+                    target: BranchTarget::Indirect(Location32::Memory(_)),
                 } => {
                     read = true;
                     store = true;
@@ -30,6 +33,9 @@ impl Imports {
                     ..
                 }
                 | Operation::Return { .. }
+                | Operation::Jump {
+                    target: BranchTarget::Indirect(Location32::Memory(_)),
+                }
                 | Operation::Pop { .. } => read = true,
                 Operation::Move {
                     destination: Location32::Memory(_),
@@ -135,7 +141,7 @@ pub(super) fn pop_memory(
         .local_set(register(esp));
 }
 
-fn load_result(
+pub(super) fn load_result(
     code: &mut InstructionSink<'_>,
     source: EffectiveAddress,
     imports: Imports,
@@ -146,7 +152,7 @@ fn load_result(
         .call(
             imports
                 .read
-                .expect("prepared memory push/pop has a read import"),
+                .expect("prepared memory operand has a read import"),
         )
         .local_set(HELPER_STATUS);
     validate_result(code, false);

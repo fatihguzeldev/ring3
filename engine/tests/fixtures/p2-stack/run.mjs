@@ -464,7 +464,7 @@ for (const call of [true, false]) {
   upload(engine, 0x1000, Uint8Array.from([0xff, 0xd0, 0x90]));
   refresh(engine).view.setUint32(engine.base + 140, 0x1000, true);
   engine.view.setUint32(engine.base + 144, 3, true);
-  assert.equal(engine.api.compile(1), 10, 'indirect CALL EAX stays outside the direct control-transfer profile');
+  assert.equal(engine.api.compile(1), 10, 'CALL EAX must end its declared block before the trailing NOP');
 }
 
 const injectedCases = [

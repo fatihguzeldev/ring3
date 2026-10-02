@@ -284,7 +284,7 @@ fn compile_reads_all_eight_block_descriptors_including_the_last() {
     for unsupported_last in [true, false] {
         let mut bytes = [0x90; 8];
         if unsupported_last {
-            bytes[7] = 0xc3;
+            bytes[7] = 0x40;
         }
         upload(&mut engine, 0x1000, &bytes);
         let transfer = &mut engine.arena_mut().unwrap()[140..204];

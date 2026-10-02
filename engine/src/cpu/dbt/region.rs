@@ -200,6 +200,9 @@ fn supports_stack(instruction: &DecodedInstruction) -> bool {
         Operation::Call {
             target: BranchTarget::Direct(_),
         } => instruction.length() == 5,
+        Operation::Call {
+            target: BranchTarget::Indirect(_),
+        } => true,
         Operation::Return { .. } => matches!(instruction.length(), 1 | 3),
         Operation::Push { .. } | Operation::Pop { .. } => true,
         _ => false,
@@ -218,7 +221,13 @@ fn supports(instruction: &DecodedInstruction, embedded: bool) -> bool {
             source: Value32::Register(_) | Value32::Immediate(_),
         }
     );
-    (embedded && (memory_move || supports_stack(instruction)))
+    let indirect_jump = matches!(
+        operation,
+        Operation::Jump {
+            target: BranchTarget::Indirect(_),
+        }
+    );
+    (embedded && (memory_move || supports_stack(instruction) || indirect_jump))
         || matches!(
             operation,
             Operation::Nop

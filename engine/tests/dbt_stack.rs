@@ -187,7 +187,7 @@ fn zero_adjustment_immediate_ret_shares_plain_ret_ir_but_has_its_own_terminator_
 }
 
 #[test]
-fn indirect_control_forms_report_backend_error_even_with_trailing_call_bytes() {
+fn embedded_indirect_control_compiles_only_at_the_declared_block_end() {
     for instruction in [
         &[0xff, 0xd0][..],
         &[0xff, 0x13][..],
@@ -200,27 +200,26 @@ fn indirect_control_forms_report_backend_error_even_with_trailing_call_bytes() {
                 bytes.push(0x90);
             }
             let mut engine = with_code(0x1000, &bytes);
-            assert_eq!(
-                compile(&mut engine, &[(0x1000, bytes.len() as u32)]),
+            let expected = if trailing {
                 Err(HostError::Compile(instruction_error(
                     0x1001,
-                    InstructionError::BackendUnsupported
+                    InstructionError::InvalidBlockEnd,
                 )))
+            } else {
+                Ok(1)
+            };
+            assert_eq!(
+                compile(&mut engine, &[(0x1000, bytes.len() as u32)]),
+                expected
             );
-            assert_eq!(engine.generation(), 0);
+            assert_eq!(engine.generation(), u32::from(!trailing));
         }
     }
     for instruction in [&[0xff, 0xe0][..], &[0xff, 0x23][..]] {
         let mut bytes = vec![0x90];
         bytes.extend_from_slice(instruction);
         let mut engine = with_code(0x1000, &bytes);
-        assert_eq!(
-            compile(&mut engine, &[(0x1000, bytes.len() as u32)]),
-            Err(HostError::Compile(instruction_error(
-                0x1001,
-                InstructionError::BackendUnsupported
-            )))
-        );
+        assert_eq!(compile(&mut engine, &[(0x1000, bytes.len() as u32)]), Ok(1));
     }
 }
 
@@ -355,7 +354,7 @@ fn failed_stack_compile_preserves_the_installed_artifact_and_successful_retry_re
     let original = engine.artifact_bytes().unwrap().to_vec();
     for (bytes, cause) in [
         (
-            &[0x90, 0xff, 0xd0, 0x90][..],
+            &[0x90, 0x31, 0xc0, 0x90][..],
             InstructionError::BackendUnsupported,
         ),
         (

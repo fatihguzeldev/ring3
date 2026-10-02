@@ -157,7 +157,7 @@ fn standalone_memory_stack_exclusion_and_original_pc_priority_remain_unchanged()
 }
 
 #[test]
-fn unsupported_indirect_control_reports_exact_pc_after_a_memory_stack_prefix() {
+fn indirect_control_compiles_at_the_end_of_a_memory_stack_prefix() {
     for instruction in [
         &[0xff, 0xd0][..],
         &[0xff, 0x13][..],
@@ -167,15 +167,9 @@ fn unsupported_indirect_control_reports_exact_pc_after_a_memory_stack_prefix() {
         let mut bytes = vec![0x90, 0xff, 0x34, 0x24, 0x8f, 0x04, 0x24];
         bytes.extend_from_slice(instruction);
         let mut engine = with_code(&bytes);
-        assert_eq!(
-            compile(&mut engine, 0x1000, bytes.len() as u32),
-            Err(HostError::Compile(instruction_error(
-                0x1007,
-                InstructionError::BackendUnsupported
-            )))
-        );
-        assert_eq!(engine.generation(), 0);
-        assert_eq!(engine.artifact_bytes(), Err(HostError::InvalidArtifact));
+        assert_eq!(compile(&mut engine, 0x1000, bytes.len() as u32), Ok(1));
+        assert_eq!(engine.generation(), 1);
+        engine.guard(KEY, 1).unwrap();
     }
 }
 
@@ -257,7 +251,7 @@ fn failed_compile_preserves_an_installed_memory_stack_artifact_and_retry_replace
     engine.map(0x3000, 1, 7).unwrap();
     assert_eq!(compile(&mut engine, 0x1000, 6), Ok(1));
     let installed = engine.artifact_bytes().unwrap().to_vec();
-    let bad = [0xff, 0x34, 0x24, 0xff, 0xd0];
+    let bad = [0xff, 0x34, 0x24, 0x31, 0xc0];
     upload(&mut engine, 0x3000, &bad);
     describe(&mut engine, 0x3000, bad.len() as u32);
     let before = engine.arena().to_vec();
