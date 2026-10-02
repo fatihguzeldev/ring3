@@ -8,7 +8,9 @@ use super::callback::SuspendedCallback;
 use crate::{
     abi::{
         arena::{self, ARENA_SIZE, HELPER_OFFSET, TRANSFER_OFFSET, TRANSFER_SIZE},
-        memory_helper::{HELPER_SIZE, encode_helper_result},
+        memory_helper::{
+            HELPER_SIZE, NarrowReadWidth, encode_helper_result, encode_narrow_helper_result,
+        },
     },
     cpu::dbt::{
         BlockSpec, CompileError, CompileLimits, CompiledRegion, GateSpec,
@@ -282,6 +284,24 @@ impl EngineInstance {
         self.artifact_bytes().map(|_| ())
     }
 
+    pub fn read8(&mut self, address: u32) -> Result<(), HostError> {
+        let memory = self.memory()?;
+        let mut bytes = [0; 1];
+        let result = memory
+            .read(GuestAddress(address), &mut bytes)
+            .map(|()| u32::from(bytes[0]));
+        self.write_narrow_helper(address, NarrowReadWidth::Byte, result)
+    }
+
+    pub fn read16(&mut self, address: u32) -> Result<(), HostError> {
+        let memory = self.memory()?;
+        let mut bytes = [0; 2];
+        let result = memory
+            .read(GuestAddress(address), &mut bytes)
+            .map(|()| u32::from(u16::from_le_bytes(bytes)));
+        self.write_narrow_helper(address, NarrowReadWidth::Word, result)
+    }
+
     pub fn read32(&mut self, address: u32) -> Result<(), HostError> {
         let memory = self.memory()?;
         let mut bytes = [0; 4];
@@ -350,6 +370,17 @@ impl EngineInstance {
     fn write_helper(&mut self, result: Result<u32, MemoryError>) -> Result<(), HostError> {
         let output = &mut self.arena.as_mut().get_mut()[HELPER_OFFSET..HELPER_OFFSET + HELPER_SIZE];
         encode_helper_result(result, output).map_err(|_| HostError::Infrastructure)
+    }
+
+    fn write_narrow_helper(
+        &mut self,
+        address: u32,
+        width: NarrowReadWidth,
+        result: Result<u32, MemoryError>,
+    ) -> Result<(), HostError> {
+        let output = &mut self.arena.as_mut().get_mut()[HELPER_OFFSET..HELPER_OFFSET + HELPER_SIZE];
+        encode_narrow_helper_result(GuestAddress(address), width, result, output)
+            .map_err(|_| HostError::Infrastructure)
     }
 }
 

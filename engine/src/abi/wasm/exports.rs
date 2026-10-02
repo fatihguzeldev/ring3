@@ -132,6 +132,24 @@ pub extern "C" fn guard(
 }
 
 #[allow(unsafe_code)]
+#[unsafe(export_name = "ring3_abi_v1_read8")]
+pub extern "C" fn read8(address: u32) -> u32 {
+    {
+        #![forbid(unsafe_code)]
+        crate::process::wasm::read8(address)
+    }
+}
+
+#[allow(unsafe_code)]
+#[unsafe(export_name = "ring3_abi_v1_read16")]
+pub extern "C" fn read16(address: u32) -> u32 {
+    {
+        #![forbid(unsafe_code)]
+        crate::process::wasm::read16(address)
+    }
+}
+
+#[allow(unsafe_code)]
 #[unsafe(export_name = "ring3_abi_v1_read32")]
 pub extern "C" fn read32(address: u32) -> u32 {
     {

@@ -244,6 +244,14 @@ pub(crate) fn guard(
     })
 }
 
+pub(crate) fn read8(address: u32) -> u32 {
+    mutate(|instance| instance.read8(address))
+}
+
+pub(crate) fn read16(address: u32) -> u32 {
+    mutate(|instance| instance.read16(address))
+}
+
 pub(crate) fn read32(address: u32) -> u32 {
     mutate(|instance| instance.read32(address))
 }
