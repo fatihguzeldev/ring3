@@ -134,6 +134,32 @@ pub extern "C" fn resident_module(low: u32, high: u32) -> u32 {
 }
 
 #[allow(unsafe_code)]
+#[unsafe(export_name = "ring3_abi_v1_acknowledge_resident_installation")]
+pub extern "C" fn acknowledge_resident_installation(
+    key_low: u32,
+    key_high: u32,
+    id_low: u32,
+    id_high: u32,
+    slot: u32,
+) -> u32 {
+    {
+        #![forbid(unsafe_code)]
+        crate::process::wasm::acknowledge_resident_installation(
+            key_low, key_high, id_low, id_high, slot,
+        )
+    }
+}
+
+#[allow(unsafe_code)]
+#[unsafe(export_name = "ring3_abi_v1_find_installed_resident")]
+pub extern "C" fn find_installed_resident(key_low: u32, key_high: u32, pc: u32) -> u32 {
+    {
+        #![forbid(unsafe_code)]
+        crate::process::wasm::find_installed_resident(key_low, key_high, pc)
+    }
+}
+
+#[allow(unsafe_code)]
 #[unsafe(export_name = "ring3_abi_v1_guard_resident")]
 pub extern "C" fn guard_resident(
     key_low: u32,

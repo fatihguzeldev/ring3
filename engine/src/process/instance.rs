@@ -4,6 +4,7 @@ use std::pin::Pin;
 
 use super::call::{CallError, PendingCall};
 use super::callback::SuspendedCallback;
+use super::installation::{RESIDENT_INSTALLATION_SLOTS, ResidentInstallation};
 
 use crate::{
     abi::{
@@ -53,6 +54,7 @@ pub struct EngineInstance {
     pub(super) arena: Pin<Box<[u8]>>,
     pub(super) artifact: Option<CompiledRegion>,
     pub(super) resident: Option<ResidentRegistry>,
+    pub(super) resident_installations: [Option<ResidentInstallation>; RESIDENT_INSTALLATION_SLOTS],
     pub(super) key: u64,
     pub(super) generation: u32,
     pub(super) pending_call: Option<PendingCall>,
@@ -77,6 +79,7 @@ impl EngineInstance {
             arena: Box::into_pin(arena.into_boxed_slice()),
             artifact: None,
             resident: None,
+            resident_installations: [None; RESIDENT_INSTALLATION_SLOTS],
             key,
             generation: 0,
             pending_call: None,
@@ -395,6 +398,7 @@ impl EngineInstance {
         self.callback = None;
         self.artifact = None;
         self.resident = None;
+        self.resident_installations = [None; RESIDENT_INSTALLATION_SLOTS];
         self.memory = None;
     }
 

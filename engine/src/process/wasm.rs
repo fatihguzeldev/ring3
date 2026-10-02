@@ -2,7 +2,7 @@
 
 use std::cell::RefCell;
 
-use super::{CallError, EngineInstance, HostError, StoreCompletion};
+use super::{CallError, EngineInstance, HostError, ResidentInstallation, StoreCompletion};
 use crate::{
     abi::arena::{CANCEL_OFFSET, EXIT_OFFSET, STATE_OFFSET, TRANSFER_OFFSET},
     cpu::dbt::RegistryError,
@@ -116,6 +116,58 @@ pub(crate) fn find_resident(pc: u32) -> u32 {
         };
         resident_record(instance, id.get()).map_or_else(status, |()| 0)
     })
+}
+
+pub(crate) fn acknowledge_resident_installation(
+    key_low: u32,
+    key_high: u32,
+    id_low: u32,
+    id_high: u32,
+    slot: u32,
+) -> u32 {
+    let key = u64::from(key_low) | (u64::from(key_high) << 32);
+    let id = u64::from(id_low) | (u64::from(id_high) << 32);
+    mutate(|instance| {
+        let installed = instance.acknowledge_resident_installation(key, id, slot)?;
+        installation_record(instance, installed);
+        Ok(())
+    })
+}
+
+pub(crate) fn find_installed_resident(key_low: u32, key_high: u32, pc: u32) -> u32 {
+    REGISTRY.with(|registry| {
+        let Ok(mut registry) = registry.try_borrow_mut() else {
+            return 9;
+        };
+        let Some(instance) = registry.instance.as_mut() else {
+            return 5;
+        };
+        let key = u64::from(key_low) | (u64::from(key_high) << 32);
+        let installed = match instance.lookup_installed_resident(key, pc) {
+            Ok(installed) => installed,
+            Err(HostError::Resident(RegistryError::NotFound { .. })) => return 17,
+            Err(error) => return status(error),
+        };
+        installation_record(instance, installed);
+        0
+    })
+}
+
+fn installation_record(instance: &mut EngineInstance, installed: ResidentInstallation) {
+    let fields = [
+        u32::from_le_bytes(*b"R3IN"),
+        0x10001,
+        32,
+        0,
+        installed.unit_id as u32,
+        (installed.unit_id >> 32) as u32,
+        installed.slot,
+        0,
+    ];
+    let output = &mut instance.arena.as_mut().get_mut()[TRANSFER_OFFSET..TRANSFER_OFFSET + 32];
+    for (word, value) in output.chunks_exact_mut(4).zip(fields) {
+        word.copy_from_slice(&value.to_le_bytes());
+    }
 }
 
 pub(crate) fn resident_module(low: u32, high: u32) -> u32 {
