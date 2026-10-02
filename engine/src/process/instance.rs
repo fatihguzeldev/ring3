@@ -363,6 +363,33 @@ impl EngineInstance {
         }
     }
 
+    pub fn store_resident32(
+        &mut self,
+        key: u64,
+        id: u64,
+        address: u32,
+        value: u32,
+    ) -> Result<StoreCompletion, HostError> {
+        self.guard_resident(key, id)?;
+        let memory = self.memory.as_mut().ok_or(HostError::Closed)?;
+        let result = memory
+            .write(GuestAddress(address), &value.to_le_bytes())
+            .map(|()| 0);
+        let succeeded = result.is_ok();
+        self.write_helper(result)?;
+        if succeeded {
+            match self.resident_bytes(id) {
+                Ok(_) => Ok(StoreCompletion::Complete),
+                Err(HostError::Resident(RegistryError::CodeInvalidated)) => {
+                    Ok(StoreCompletion::CodeInvalidated)
+                }
+                Err(error) => Err(error),
+            }
+        } else {
+            Ok(StoreCompletion::Complete)
+        }
+    }
+
     pub fn close(&mut self) {
         self.pending_call = None;
         self.callback = None;
@@ -398,6 +425,64 @@ fn permissions(bits: u32) -> Result<Permissions, HostError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn exhausted_versions_preserve_resident_store_ram_and_executing_snapshot() {
+        let mut instance = EngineInstance::new(2, 7).unwrap();
+        instance.map(0x1000, 1, 7).unwrap();
+        instance.map(0x4000, 1, 7).unwrap();
+        instance.write32(0x1000, 0x00eb_0389).unwrap();
+        instance.write32(0x4000, 0x4433_2211).unwrap();
+        instance.arena_mut().unwrap()[TRANSFER_OFFSET..TRANSFER_OFFSET + 8]
+            .copy_from_slice(&[0, 0x10, 0, 0, 4, 0, 0, 0]);
+        let id = instance.compile_resident(1).unwrap().get();
+        let code_snapshot = instance
+            .memory()
+            .unwrap()
+            .snapshot_code(GuestAddress(0x1000), 4)
+            .unwrap();
+        let data_snapshot = instance
+            .memory()
+            .unwrap()
+            .snapshot_code(GuestAddress(0x4000), 4)
+            .unwrap();
+        let unit = instance.resident_bytes(id).unwrap().to_vec();
+        let pointer = instance.resident_bytes(id).unwrap().as_ptr();
+        let mut expected_arena = instance.arena().to_vec();
+        expected_arena[100..140].copy_from_slice(&[
+            0x52, 0x33, 0x4d, 0x48, 1, 0, 1, 0, 40, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 1,
+            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        ]);
+        instance
+            .memory
+            .as_mut()
+            .unwrap()
+            .exhaust_versions_for_test();
+
+        for (address, value) in [(0x4000, u32::MAX), (0x1000, 0x00eb_0390)] {
+            assert_eq!(
+                instance.store_resident32(7, id, address, value),
+                Ok(StoreCompletion::Complete)
+            );
+            assert_eq!(instance.arena(), expected_arena);
+        }
+        assert_eq!(instance.generation(), 0);
+        assert_eq!(instance.artifact_bytes(), Err(HostError::InvalidArtifact));
+        assert_eq!(instance.guard_resident(7, id), Ok(()));
+        assert_eq!(instance.resident_bytes(id).unwrap(), unit);
+        assert_eq!(instance.resident_bytes(id).unwrap().as_ptr(), pointer);
+        let memory = instance.memory().unwrap();
+        assert!(memory.is_code_current(&code_snapshot));
+        assert!(memory.is_code_current(&data_snapshot));
+        for (address, expected) in [
+            (0x1000, [0x89, 0x03, 0xeb, 0]),
+            (0x4000, [0x11, 0x22, 0x33, 0x44]),
+        ] {
+            let mut actual = [0; 4];
+            memory.read(GuestAddress(address), &mut actual).unwrap();
+            assert_eq!(actual, expected);
+        }
+    }
 
     #[test]
     fn exhausted_memory_versions_complete_store_without_committing_or_invalidating() {
