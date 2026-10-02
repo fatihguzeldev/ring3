@@ -4,8 +4,14 @@ use super::{control, locals::*, memory};
 use crate::cpu::x86::{
     Register32,
     decode::DecodedInstruction,
-    ir::{BinaryKind, BranchTarget, EffectiveAddress, Location32, Operation, Value32},
+    ir::{BinaryKind, BranchTarget, EffectiveAddress, Location32, Operation, UnaryKind, Value32},
 };
+
+#[derive(Clone, Copy)]
+enum CarryFlag {
+    Calculate,
+    Preserve,
+}
 
 pub(super) fn instruction(
     code: &mut InstructionSink<'_>,
@@ -68,7 +74,9 @@ pub(super) fn instruction(
             }
             code.local_set(RESULT);
             match kind {
-                BinaryKind::Add | BinaryKind::Sub | BinaryKind::Cmp => arithmetic_flags(code, kind),
+                BinaryKind::Add | BinaryKind::Sub | BinaryKind::Cmp => {
+                    arithmetic_flags(code, kind, CarryFlag::Calculate)
+                }
                 BinaryKind::And | BinaryKind::Or | BinaryKind::Xor | BinaryKind::Test => {
                     logical_flags(code)
                 }
@@ -77,6 +85,10 @@ pub(super) fn instruction(
                 code.local_get(RESULT).local_set(register(destination));
             }
         }
+        Operation::Unary {
+            kind,
+            destination: Location32::Register(destination),
+        } => unary(code, kind, destination),
         Operation::Jump {
             target: BranchTarget::Direct(target),
         } => {
@@ -229,18 +241,64 @@ fn value(code: &mut InstructionSink<'_>, value: Value32) {
     }
 }
 
-fn arithmetic_flags(code: &mut InstructionSink<'_>, kind: BinaryKind) {
+fn unary(code: &mut InstructionSink<'_>, kind: UnaryKind, destination: Register32) {
+    code.local_get(register(destination)).local_set(LHS);
+    let (binary, carry) = match kind {
+        UnaryKind::Not => {
+            code.local_get(LHS)
+                .i32_const(-1)
+                .i32_xor()
+                .local_set(register(destination));
+            return;
+        }
+        UnaryKind::Inc | UnaryKind::Dec => {
+            code.i32_const(1).local_set(RHS);
+            (
+                if kind == UnaryKind::Inc {
+                    BinaryKind::Add
+                } else {
+                    BinaryKind::Sub
+                },
+                CarryFlag::Preserve,
+            )
+        }
+        UnaryKind::Neg => {
+            code.local_get(LHS)
+                .local_set(RHS)
+                .i32_const(0)
+                .local_set(LHS);
+            (BinaryKind::Sub, CarryFlag::Calculate)
+        }
+    };
+    code.local_get(LHS).local_get(RHS);
+    if binary == BinaryKind::Add {
+        code.i32_add();
+    } else {
+        code.i32_sub();
+    }
+    code.local_set(RESULT);
+    arithmetic_flags(code, binary, carry);
+    code.local_get(RESULT).local_set(register(destination));
+}
+
+fn arithmetic_flags(code: &mut InstructionSink<'_>, kind: BinaryKind, carry: CarryFlag) {
     code.local_get(FLAGS)
-        .i32_const(0x400)
+        .i32_const(if matches!(carry, CarryFlag::Preserve) {
+            0x401
+        } else {
+            0x400
+        })
         .i32_and()
         .i32_const(2)
         .i32_or();
-    if kind == BinaryKind::Add {
-        code.local_get(RESULT).local_get(LHS).i32_lt_u();
-    } else {
-        code.local_get(LHS).local_get(RHS).i32_lt_u();
+    if matches!(carry, CarryFlag::Calculate) {
+        if kind == BinaryKind::Add {
+            code.local_get(RESULT).local_get(LHS).i32_lt_u();
+        } else {
+            code.local_get(LHS).local_get(RHS).i32_lt_u();
+        }
+        code.i32_or();
     }
-    code.i32_or();
     parity_flag(code);
     code.local_get(LHS)
         .local_get(RHS)
