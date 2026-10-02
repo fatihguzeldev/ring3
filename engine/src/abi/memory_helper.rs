@@ -1,9 +1,77 @@
 #![forbid(unsafe_code)]
 
 use super::{AbiError, header};
-use crate::memory::{Access, FaultReason, MemoryError};
+use crate::memory::{Access, FaultReason, GuestAddress, MemoryError};
 
 pub const HELPER_SIZE: usize = 40;
+pub const NARROW_HELPER_VERSION: u16 = 2;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum NarrowReadWidth {
+    Byte,
+    Word,
+}
+
+pub fn encode_narrow_helper_result(
+    address: GuestAddress,
+    width: NarrowReadWidth,
+    result: Result<u32, MemoryError>,
+    output: &mut [u8],
+) -> Result<(), AbiError> {
+    if output.len() != HELPER_SIZE {
+        return Err(AbiError::Length);
+    }
+    let (length, maximum) = match width {
+        NarrowReadWidth::Byte => (1, 0xff),
+        NarrowReadWidth::Word => (2, 0xffff),
+    };
+    let start = u64::from(address.0);
+    let end = start + u64::from(length);
+    let overflows = end > 1 << 32;
+    let fields = match result {
+        Ok(value) => {
+            if overflows || value > maximum {
+                return Err(AbiError::MemoryHelper);
+            }
+            [0, value, 0, 0, 0, length]
+        }
+        Err(MemoryError::Fault(fault)) => {
+            if fault.access != Access::Read
+                || overflows != (fault.reason == FaultReason::AddressOverflow)
+            {
+                return Err(AbiError::MemoryHelper);
+            }
+            let at = u64::from(fault.address.0);
+            if (overflows && fault.address != address) || (!overflows && (at < start || at >= end))
+            {
+                return Err(AbiError::MemoryHelper);
+            }
+            let detail = match fault.reason {
+                FaultReason::Unmapped => 1,
+                FaultReason::Permission => 2,
+                FaultReason::AddressOverflow => 3,
+            };
+            [1, 0, detail, fault.address.0, 1, length]
+        }
+        Err(error) => [
+            2,
+            0,
+            if error == MemoryError::VersionExhausted {
+                1
+            } else {
+                2
+            },
+            0,
+            0,
+            length,
+        ],
+    };
+    header::write_version(output, *b"R3MH", NARROW_HELPER_VERSION);
+    for (index, field) in fields.into_iter().enumerate() {
+        header::write_u32(output, 16 + index * 4, field);
+    }
+    Ok(())
+}
 
 pub fn encode_helper_result(
     result: Result<u32, MemoryError>,
