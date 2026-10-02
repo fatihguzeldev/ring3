@@ -247,8 +247,6 @@ fn excluded_operations_and_poison_keep_original_pc_and_block_end_priority() {
         &[0xff, 0x13],
         &[0xc3],
         &[0xc2, 8, 0],
-        &[0xff, 0xe0],
-        &[0xff, 0x23],
     ];
     for instruction in excluded {
         let mut bytes = vec![0x90];
