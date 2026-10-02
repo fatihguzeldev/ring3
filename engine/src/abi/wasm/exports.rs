@@ -287,6 +287,42 @@ pub extern "C" fn complete_call(
 }
 
 #[allow(unsafe_code)]
+#[unsafe(export_name = "ring3_abi_v1_capture_resident_call")]
+pub extern "C" fn capture_resident_call(
+    key_low: u32,
+    key_high: u32,
+    id_low: u32,
+    id_high: u32,
+    convention: u32,
+    words: u32,
+) -> u32 {
+    {
+        #![forbid(unsafe_code)]
+        crate::process::wasm::capture_resident_call(
+            key_low, key_high, id_low, id_high, convention, words,
+        )
+    }
+}
+
+#[allow(unsafe_code)]
+#[unsafe(export_name = "ring3_abi_v1_complete_resident_call")]
+pub extern "C" fn complete_resident_call(
+    key_low: u32,
+    key_high: u32,
+    id_low: u32,
+    id_high: u32,
+    token: u32,
+    result: u32,
+) -> u32 {
+    {
+        #![forbid(unsafe_code)]
+        crate::process::wasm::complete_resident_call(
+            key_low, key_high, id_low, id_high, token, result,
+        )
+    }
+}
+
+#[allow(unsafe_code)]
 #[unsafe(export_name = "ring3_abi_v1_abandon_call")]
 pub extern "C" fn abandon_call(low: u32, high: u32, token: u32) -> u32 {
     {

@@ -4,7 +4,8 @@ use super::{CallError, EngineInstance, HostError};
 use crate::{
     abi::arena::TRANSFER_OFFSET,
     cpu::dbt::{
-        BlockSpec, CompileLimits, GateSpec, RegistryError, RegistryLimits, ResidentRegistry, UnitId,
+        BlockSpec, CompileLimits, CompiledRegion, GateSpec, RegistryError, RegistryLimits,
+        ResidentRegistry, UnitId,
     },
     memory::GuestAddress,
 };
@@ -95,14 +96,26 @@ impl EngineInstance {
     }
 
     pub fn guard_resident(&self, key: u64, id: u64) -> Result<(), HostError> {
-        self.memory()?;
-        if key != self.key {
-            return Err(HostError::InvalidArtifact);
-        }
-        self.resident_bytes(id)?;
+        self.guard_resident_unit(key, id)?;
         if self.pending_call.is_some() || self.callback.is_some() {
             return Err(HostError::Call(CallError::Busy));
         }
         Ok(())
+    }
+
+    pub(super) fn guard_resident_unit(
+        &self,
+        key: u64,
+        id: u64,
+    ) -> Result<&CompiledRegion, HostError> {
+        let memory = self.memory()?;
+        if key != self.key {
+            return Err(HostError::InvalidArtifact);
+        }
+        self.resident
+            .as_ref()
+            .ok_or(HostError::Resident(RegistryError::InvalidUnit))?
+            .get_raw(memory, id)
+            .map_err(HostError::Resident)
     }
 }

@@ -1,7 +1,8 @@
 #![forbid(unsafe_code)]
 
 use super::{
-    CallError, EngineInstance, HostError, callback::SuspendedCallback, instance::DescriptorFormat,
+    CallError, EngineInstance, HostError, call::PendingOwner, callback::SuspendedCallback,
+    instance::DescriptorFormat,
 };
 use crate::{
     abi::{
@@ -154,7 +155,7 @@ impl EngineInstance {
         self.generation = generation;
         let callback = self.callback.as_mut().unwrap();
         callback.record = prepared.record;
-        callback.outer.generation = generation;
+        callback.outer.owner = PendingOwner::Replacement(generation);
         self.arena.as_mut().get_mut()[TRANSFER_OFFSET..TRANSFER_OFFSET + CALLBACK_RECORD_SIZE]
             .copy_from_slice(&prepared.output);
         Ok(generation)
@@ -171,7 +172,10 @@ impl EngineInstance {
             .callback
             .as_ref()
             .ok_or(HostError::Call(CallError::InvalidToken))?;
-        if token == 0 || callback.record.token != token || callback.record.generation != generation
+        if token == 0
+            || callback.record.token != token
+            || callback.record.generation != generation
+            || callback.outer.owner != PendingOwner::Replacement(generation)
         {
             return Err(HostError::Call(CallError::InvalidToken));
         }
@@ -187,6 +191,9 @@ fn replacement_admission(
     callback: &SuspendedCallback,
     pc: u32,
 ) -> Result<(), HostError> {
+    if callback.outer.owner != PendingOwner::Replacement(callback.record.generation) {
+        return Err(HostError::Call(CallError::InvalidToken));
+    }
     let outer_exit =
         decode_exit(&callback.outer.exit).map_err(|_| HostError::Call(CallError::InvalidStop))?;
     let ExitReason::Gate { id } = outer_exit.reason else {

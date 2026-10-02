@@ -1,6 +1,9 @@
 #![forbid(unsafe_code)]
 
-use super::{CallError, EngineInstance, HostError, call::PendingCall};
+use super::{
+    CallError, EngineInstance, HostError,
+    call::{PendingCall, PendingOwner},
+};
 use crate::{
     abi::{
         arena::{EXIT_OFFSET, STATE_OFFSET, TRANSFER_OFFSET},
@@ -71,7 +74,10 @@ impl EngineInstance {
             .pending_call
             .as_ref()
             .ok_or(call_error(CallError::InvalidToken))?;
-        if outer_token == 0 || outer.token != outer_token || outer.generation != generation {
+        if outer_token == 0
+            || outer.token != outer_token
+            || outer.owner != PendingOwner::Replacement(generation)
+        {
             return Err(call_error(CallError::InvalidToken));
         }
         if self.arena()[STATE_OFFSET..STATE_OFFSET + STATE_SIZE] != outer.state

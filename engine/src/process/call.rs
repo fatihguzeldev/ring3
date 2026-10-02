@@ -24,15 +24,47 @@ pub enum CallError {
     Memory(MemoryError),
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum PendingOwner {
+    Replacement(u32),
+    Resident(u64),
+}
+
 pub(super) struct PendingCall {
     pub(super) token: u32,
-    pub(super) generation: u32,
+    pub(super) owner: PendingOwner,
     pub(super) frame: CallFrame32,
     pub(super) state: [u8; STATE_SIZE],
     pub(super) exit: [u8; EXIT_SIZE],
 }
 
 impl EngineInstance {
+    pub fn capture_resident_call(
+        &mut self,
+        key: u64,
+        id: u64,
+        convention: CallingConvention32,
+        stack_words: u32,
+    ) -> Result<CallRecord32, HostError> {
+        let tag = match convention {
+            CallingConvention32::Cdecl => 1,
+            CallingConvention32::Stdcall => 2,
+            CallingConvention32::Thiscall => 3,
+        };
+        self.capture_resident_call_raw(key, id, tag, stack_words)
+    }
+
+    pub fn capture_resident_call_raw(
+        &mut self,
+        key: u64,
+        id: u64,
+        convention_tag: u32,
+        stack_words: u32,
+    ) -> Result<CallRecord32, HostError> {
+        self.guard_resident(key, id)?;
+        self.capture_call_frame(PendingOwner::Resident(id), convention_tag, stack_words)
+    }
+
     pub fn capture_call(
         &mut self,
         key: u64,
@@ -56,6 +88,19 @@ impl EngineInstance {
         stack_words: u32,
     ) -> Result<CallRecord32, HostError> {
         self.guard(key, generation)?;
+        self.capture_call_frame(
+            PendingOwner::Replacement(generation),
+            convention_tag,
+            stack_words,
+        )
+    }
+
+    fn capture_call_frame(
+        &mut self,
+        owner: PendingOwner,
+        convention_tag: u32,
+        stack_words: u32,
+    ) -> Result<CallRecord32, HostError> {
         if stack_words > MAX_STACK_WORDS as u32 {
             return Err(HostError::Call(CallError::InvalidRequest));
         }
@@ -73,11 +118,16 @@ impl EngineInstance {
         let ExitReason::Gate { id } = exit.reason else {
             return Err(HostError::Call(CallError::InvalidStop));
         };
-        if !self
-            .artifact
-            .as_ref()
-            .is_some_and(|artifact| artifact.matches_gate(state.eip, id))
-        {
+        let matches_gate = match owner {
+            PendingOwner::Replacement(_) => self
+                .artifact
+                .as_ref()
+                .is_some_and(|artifact| artifact.matches_gate(state.eip, id)),
+            PendingOwner::Resident(unit) => self
+                .guard_resident_unit(self.key, unit)?
+                .matches_gate(state.eip, id),
+        };
+        if !matches_gate {
             return Err(HostError::Call(CallError::InvalidStop));
         }
         if self
@@ -119,7 +169,7 @@ impl EngineInstance {
         encode_call_frame(&record, &mut output).map_err(|_| HostError::Infrastructure)?;
         self.pending_call = Some(PendingCall {
             token,
-            generation,
+            owner,
             frame,
             state: state_bytes,
             exit: exit_bytes,
@@ -138,6 +188,26 @@ impl EngineInstance {
         result: u32,
     ) -> Result<(), HostError> {
         self.guard_artifact(key, generation)?;
+        self.complete_call_frame(PendingOwner::Replacement(generation), token, result)
+    }
+
+    pub fn complete_resident_call(
+        &mut self,
+        key: u64,
+        id: u64,
+        token: u32,
+        result: u32,
+    ) -> Result<(), HostError> {
+        self.guard_resident_unit(key, id)?;
+        self.complete_call_frame(PendingOwner::Resident(id), token, result)
+    }
+
+    fn complete_call_frame(
+        &mut self,
+        owner: PendingOwner,
+        token: u32,
+        result: u32,
+    ) -> Result<(), HostError> {
         if self
             .callback
             .as_ref()
@@ -149,7 +219,7 @@ impl EngineInstance {
             .pending_call
             .as_ref()
             .ok_or(HostError::Call(CallError::InvalidToken))?;
-        if token == 0 || pending.token != token || pending.generation != generation {
+        if token == 0 || pending.token != token || pending.owner != owner {
             return Err(HostError::Call(CallError::InvalidToken));
         }
         if self.arena()[STATE_OFFSET..STATE_OFFSET + STATE_SIZE] != pending.state

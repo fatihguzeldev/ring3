@@ -78,12 +78,12 @@ fn fixture(previous_generation: u32) -> (EngineInstance, u32, u32) {
     (engine, generation, callback.token)
 }
 
-fn authority(engine: &EngineInstance) -> (u32, u32, u32, u32, u32) {
+fn authority(engine: &EngineInstance) -> (u32, u32, PendingOwner, u32, u32) {
     let callback = engine.callback.as_ref().unwrap();
     (
         engine.generation,
         callback.record.generation,
-        callback.outer.generation,
+        callback.outer.owner,
         callback.record.token,
         engine.call_token,
     )
@@ -158,7 +158,10 @@ fn final_install_rejects_aborted_token_without_consuming_outer_authority() {
     assert_eq!(engine.artifact_bytes().unwrap(), artifact);
     assert!(engine.callback.is_none());
     assert_eq!(engine.pending_call.as_ref().unwrap().token, 1);
-    assert_eq!(engine.pending_call.as_ref().unwrap().generation, generation);
+    assert_eq!(
+        engine.pending_call.as_ref().unwrap().owner,
+        PendingOwner::Replacement(generation)
+    );
     assert_eq!(engine.call_token, token);
     engine.complete_call(KEY, generation, 1, 55).unwrap();
 }
@@ -193,7 +196,16 @@ fn last_artifact_generation_migrates_once_and_exhaustion_is_atomic() {
         Ok(u32::MAX)
     );
     assert_eq!(engine.arena()[..96], cpu);
-    assert_eq!(authority(&engine), (u32::MAX, u32::MAX, u32::MAX, 2, 2));
+    assert_eq!(
+        authority(&engine),
+        (
+            u32::MAX,
+            u32::MAX,
+            PendingOwner::Replacement(u32::MAX),
+            2,
+            2
+        )
+    );
     let arena = engine.arena().to_vec();
     let artifact = engine.artifact_bytes().unwrap().to_vec();
     assert_eq!(
@@ -202,9 +214,21 @@ fn last_artifact_generation_migrates_once_and_exhaustion_is_atomic() {
     );
     assert_eq!(engine.arena(), arena);
     assert_eq!(engine.artifact_bytes().unwrap(), artifact);
-    assert_eq!(authority(&engine), (u32::MAX, u32::MAX, u32::MAX, 2, 2));
+    assert_eq!(
+        authority(&engine),
+        (
+            u32::MAX,
+            u32::MAX,
+            PendingOwner::Replacement(u32::MAX),
+            2,
+            2
+        )
+    );
     engine.abort_callback(KEY, token).unwrap();
-    assert_eq!(engine.pending_call.as_ref().unwrap().generation, u32::MAX);
+    assert_eq!(
+        engine.pending_call.as_ref().unwrap().owner,
+        PendingOwner::Replacement(u32::MAX)
+    );
     engine.complete_call(KEY, u32::MAX, 1, 77).unwrap();
     assert_eq!(engine.call_token, 2);
 }
