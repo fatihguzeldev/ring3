@@ -49,11 +49,10 @@ fn compile(engine: &mut EngineInstance, pc: u32, length: usize) -> u64 {
     id
 }
 
-fn failed<T>(
+fn preserved(
     engine: &mut EngineInstance,
     ids: &[u64],
-    error: HostError,
-    operation: impl FnOnce(&mut EngineInstance) -> Result<T, HostError>,
+    operation: impl FnOnce(&mut EngineInstance),
 ) {
     let arena = engine.arena().to_vec();
     let address = engine.arena_address();
@@ -70,7 +69,7 @@ fn failed<T>(
             )
         })
         .collect();
-    assert_eq!(operation(engine).err(), Some(error));
+    operation(engine);
     assert_eq!(engine.arena(), arena);
     assert_eq!(engine.arena_address(), address);
     assert_eq!(engine.generation(), generation);
@@ -85,11 +84,90 @@ fn failed<T>(
     }
 }
 
+fn failed<T>(
+    engine: &mut EngineInstance,
+    ids: &[u64],
+    error: HostError,
+    operation: impl FnOnce(&mut EngineInstance) -> Result<T, HostError>,
+) {
+    preserved(engine, ids, |engine| {
+        assert_eq!(operation(engine).err(), Some(error));
+    });
+}
+
 fn instruction_error(pc: u32, cause: InstructionError) -> HostError {
     HostError::Resident(RegistryError::Compile(CompileError::Instruction {
         pc: GuestAddress(pc),
         cause,
     }))
+}
+
+#[test]
+fn resident_lookup_without_units_returns_precise_misses_and_closed_errors() {
+    let mut engine = EngineInstance::new(1, KEY).unwrap();
+    for pc in [0, A, u32::MAX] {
+        failed(
+            &mut engine,
+            &[],
+            HostError::Resident(RegistryError::NotFound {
+                pc: GuestAddress(pc),
+            }),
+            |engine| engine.lookup_resident(pc),
+        );
+    }
+    engine.map(A, 1, 7).unwrap();
+    upload(&mut engine, A, &[0x0f, 0x06]);
+    failed(
+        &mut engine,
+        &[],
+        HostError::Resident(RegistryError::NotFound {
+            pc: GuestAddress(A),
+        }),
+        |engine| engine.lookup_resident(A),
+    );
+    engine.close();
+    for pc in [0, A, u32::MAX] {
+        failed(&mut engine, &[], HostError::Closed, |engine| {
+            engine.lookup_resident(pc)
+        });
+    }
+}
+
+#[test]
+fn resident_lookup_selects_exact_unit_entries_and_interiors_without_changing_state() {
+    let mut engine = fixture();
+    upload(&mut engine, BAD, &[0x0f, 0x06]);
+    engine.protect(BAD, 1, 1).unwrap();
+    describe(&mut engine, &[(A, A_CODE.len() as u32)]);
+    assert_eq!(engine.compile(1), Ok(1));
+    let a = compile(&mut engine, A, A_CODE.len());
+    let b = compile(&mut engine, B, B_CODE.len());
+    preserved(&mut engine, &[a, b], |engine| {
+        for (pc, expected) in [(A, a), (A + 1, a), (B, b), (B + 1, b)] {
+            assert_eq!(engine.lookup_resident(pc).map(|id| id.get()), Ok(expected));
+        }
+    });
+    for pc in [
+        0,
+        A + 2,
+        A + 5,
+        A + 6,
+        B + 2,
+        B + 6,
+        B + 7,
+        BAD,
+        0x8000,
+        u32::MAX,
+    ] {
+        failed(
+            &mut engine,
+            &[a, b],
+            HostError::Resident(RegistryError::NotFound {
+                pc: GuestAddress(pc),
+            }),
+            |engine| engine.lookup_resident(pc),
+        );
+    }
 }
 
 #[test]
@@ -190,6 +268,11 @@ fn raw_id_membership_wrong_key_and_closed_errors_keep_the_arena_unchanged() {
     failed(&mut engine, &[], HostError::Closed, |engine| {
         engine.compile_resident(0)
     });
+    for pc in [0, A, B + 1, u32::MAX] {
+        failed(&mut engine, &[], HostError::Closed, |engine| {
+            engine.lookup_resident(pc)
+        });
+    }
     assert_eq!(other.guard_resident(KEY, foreign), Ok(()));
 }
 
@@ -228,6 +311,25 @@ fn stale_a_rejects_while_b_survives_and_fresh_same_pc_units_keep_distinct_ids() 
             engine.resident_bytes(old).err(),
             Some(HostError::Resident(RegistryError::CodeInvalidated))
         );
+        for pc in [A, A + 1] {
+            failed(
+                &mut engine,
+                &[old, b],
+                HostError::Resident(RegistryError::CodeInvalidated),
+                |engine| engine.lookup_resident(pc),
+            );
+        }
+        failed(
+            &mut engine,
+            &[old, b],
+            HostError::Resident(RegistryError::NotFound {
+                pc: GuestAddress(A + 2),
+            }),
+            |engine| engine.lookup_resident(A + 2),
+        );
+        preserved(&mut engine, &[old, b], |engine| {
+            assert_eq!(engine.lookup_resident(B + 1).map(|id| id.get()), Ok(b));
+        });
         let fresh = compile(&mut engine, A, A_CODE.len());
         assert!(fresh > old && fresh != b);
         assert_eq!(engine.guard_resident(KEY, fresh), Ok(()));
@@ -239,6 +341,11 @@ fn stale_a_rejects_while_b_survives_and_fresh_same_pc_units_keep_distinct_ids() 
         assert_eq!(engine.resident_bytes(b).unwrap(), b_bytes);
         assert_eq!(engine.resident_bytes(b).unwrap().as_ptr(), b_pointer);
         assert_ne!(engine.resident_bytes(fresh).unwrap(), old_bytes);
+        preserved(&mut engine, &[old, b, fresh], |engine| {
+            assert_eq!(engine.lookup_resident(A).map(|id| id.get()), Ok(fresh));
+            assert_eq!(engine.lookup_resident(A + 1).map(|id| id.get()), Ok(fresh));
+            assert_eq!(engine.lookup_resident(B).map(|id| id.get()), Ok(b));
+        });
         let mut source = [0; 6];
         engine
             .memory()
@@ -254,6 +361,11 @@ fn whole_region_snapshot_invalidates_other_block_even_on_unchanged_page() {
     let mut engine = fixture();
     describe(&mut engine, &[(A, 6), (B, 7)]);
     let whole = engine.compile_resident(2).unwrap().get();
+    preserved(&mut engine, &[whole], |engine| {
+        for pc in [A, A + 1, B, B + 1] {
+            assert_eq!(engine.lookup_resident(pc).map(|id| id.get()), Ok(whole));
+        }
+    });
     let b_snapshot = engine
         .memory()
         .unwrap()
@@ -265,11 +377,39 @@ fn whole_region_snapshot_invalidates_other_block_even_on_unchanged_page() {
         engine.guard_resident(KEY, whole),
         Err(HostError::Resident(RegistryError::CodeInvalidated))
     );
+    for pc in [A, A + 1, B, B + 1] {
+        failed(
+            &mut engine,
+            &[whole],
+            HostError::Resident(RegistryError::CodeInvalidated),
+            |engine| engine.lookup_resident(pc),
+        );
+    }
     let fresh_b = compile(&mut engine, B, B_CODE.len());
     assert_eq!(engine.guard_resident(KEY, fresh_b), Ok(()));
     assert_eq!(
         engine.resident_bytes(whole).err(),
         Some(HostError::Resident(RegistryError::CodeInvalidated))
+    );
+    preserved(&mut engine, &[whole, fresh_b], |engine| {
+        assert_eq!(
+            engine.lookup_resident(B + 1).map(|id| id.get()),
+            Ok(fresh_b)
+        );
+    });
+    failed(
+        &mut engine,
+        &[whole, fresh_b],
+        HostError::Resident(RegistryError::CodeInvalidated),
+        |engine| engine.lookup_resident(A),
+    );
+    failed(
+        &mut engine,
+        &[whole, fresh_b],
+        HostError::Resident(RegistryError::NotFound {
+            pc: GuestAddress(BAD),
+        }),
+        |engine| engine.lookup_resident(BAD),
     );
 }
 
@@ -348,6 +488,25 @@ fn distinct_overlapping_decodings_are_valid_but_instruction_collisions_are_not()
     let overlapping = compile(&mut engine, A + 1, 4);
     assert_eq!(engine.guard_resident(KEY, original), Ok(()));
     assert_eq!(engine.guard_resident(KEY, overlapping), Ok(()));
+    preserved(&mut engine, &[original, overlapping], |engine| {
+        for (pc, expected) in [
+            (A, original),
+            (A + 5, original),
+            (A + 1, overlapping),
+            (A + 2, overlapping),
+            (A + 3, overlapping),
+        ] {
+            assert_eq!(engine.lookup_resident(pc).map(|id| id.get()), Ok(expected));
+        }
+    });
+    failed(
+        &mut engine,
+        &[original, overlapping],
+        HostError::Resident(RegistryError::NotFound {
+            pc: GuestAddress(A + 4),
+        }),
+        |engine| engine.lookup_resident(A + 4),
+    );
     describe(&mut engine, &[(A + 5, 2)]);
     failed(
         &mut engine,
@@ -455,6 +614,10 @@ fn pending_calls_and_callbacks_block_new_units_without_changing_legacy_callbacks
     let outer = engine
         .capture_call(KEY, 1, CallingConvention32::Cdecl, 0)
         .unwrap();
+    preserved(&mut engine, &[a, b], |engine| {
+        assert_eq!(engine.lookup_resident(A + 1).map(|id| id.get()), Ok(a));
+        assert_eq!(engine.lookup_resident(B + 1).map(|id| id.get()), Ok(b));
+    });
     failed(
         &mut engine,
         &[a, b],
@@ -483,10 +646,36 @@ fn pending_calls_and_callbacks_block_new_units_without_changing_legacy_callbacks
         HostError::Resident(RegistryError::CodeInvalidated),
         |engine| engine.guard_resident(KEY, a),
     );
+    failed(
+        &mut engine,
+        &[a, b],
+        HostError::Resident(RegistryError::CodeInvalidated),
+        |engine| engine.lookup_resident(A),
+    );
+    preserved(&mut engine, &[a, b], |engine| {
+        assert_eq!(engine.lookup_resident(B).map(|id| id.get()), Ok(b));
+    });
     let callback = engine
         .begin_callback(KEY, 1, outer.token, ENTRY, RETURN, 18, &[])
         .unwrap();
     assert_eq!(engine.guard(KEY, 1), Ok(()));
+    preserved(&mut engine, &[a, b], |engine| {
+        assert_eq!(engine.lookup_resident(B + 1).map(|id| id.get()), Ok(b));
+    });
+    failed(
+        &mut engine,
+        &[a, b],
+        HostError::Resident(RegistryError::CodeInvalidated),
+        |engine| engine.lookup_resident(A + 1),
+    );
+    failed(
+        &mut engine,
+        &[a, b],
+        HostError::Resident(RegistryError::NotFound {
+            pc: GuestAddress(u32::MAX),
+        }),
+        |engine| engine.lookup_resident(u32::MAX),
+    );
     failed(
         &mut engine,
         &[a, b],
