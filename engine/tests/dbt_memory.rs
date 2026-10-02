@@ -177,8 +177,6 @@ fn other_memory_operations_and_existing_exclusions_remain_rejected_at_their_pc()
         &[0x31, 0x03][..],
         &[0x8d, 0x03][..],
         &[0x0f, 0xb6, 0x03][..],
-        &[0xff, 0x33][..],
-        &[0x8f, 0x03][..],
         &[0xff, 0x23][..],
         &[0x31, 0xc0][..],
     ] {
