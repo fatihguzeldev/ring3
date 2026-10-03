@@ -89,6 +89,15 @@ pub extern "C" fn load_pe32_linked_at(length: u32, actual_base: u32, gate_base: 
 }
 
 #[allow(unsafe_code)]
+#[unsafe(export_name = "ring3_abi_v1_start_loaded_image")]
+pub extern "C" fn start_loaded_image(stack_base: u32, pages: u32) -> u32 {
+    {
+        #![forbid(unsafe_code)]
+        crate::process::wasm::start_loaded_image(stack_base, pages)
+    }
+}
+
+#[allow(unsafe_code)]
 #[unsafe(export_name = "ring3_abi_v1_compile")]
 pub extern "C" fn compile(count: u32) -> u32 {
     {

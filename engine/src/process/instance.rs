@@ -63,6 +63,7 @@ pub struct EngineInstance {
     pub(super) callback: Option<SuspendedCallback>,
     pub(super) call_token: u32,
     pub(super) image: Option<crate::loader::ImageMetadata32>,
+    pub(super) image_started: bool,
     pub(super) windows_thread: crate::windows::ThreadState32,
 }
 
@@ -91,6 +92,7 @@ impl EngineInstance {
             callback: None,
             call_token: 0,
             image: None,
+            image_started: false,
             windows_thread: crate::windows::ThreadState32::default(),
         })
     }

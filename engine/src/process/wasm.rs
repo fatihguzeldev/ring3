@@ -126,6 +126,10 @@ pub(crate) fn load_pe32_linked_at(length: u32, actual_base: u32, gate_base: u32)
     })
 }
 
+pub(crate) fn start_loaded_image(stack_base: u32, pages: u32) -> u32 {
+    mutate(|instance| instance.start_loaded_image(stack_base, pages))
+}
+
 fn image_record(instance: &mut EngineInstance, image: crate::loader::ImageMetadata32) {
     let fields = [
         u32::from_le_bytes(*b"R3PE"),
