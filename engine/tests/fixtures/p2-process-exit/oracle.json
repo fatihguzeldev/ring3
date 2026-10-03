@@ -1,0 +1,263 @@
+{
+  "profile": "bounded engine-owned nonreturning ExitProcess from reserved numeric Gate, without named import linking",
+  "program": {
+    "prefix_hex": "b8df9b571368674523f1e8f1000000",
+    "canary_hex": "b8efbeaddea300304000eb000f0b",
+    "text_hex": "b8df9b571368674523f1e8f1000000b8efbeaddea300304000eb000f0b00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000f0b",
+    "text_length": 258,
+    "text_sha256": "ed02b3afa4e6c40131d2e4b9ba24f80442c7f75cf02f42f2707f144549154dcc",
+    "symbols": {
+      "exit_sequence": {
+        "offset": 0,
+        "size": 29,
+        "hex": "b8df9b571368674523f1e8f1000000b8efbeaddea300304000eb000f0b"
+      },
+      "exit_canary": {
+        "offset": 15,
+        "size": 14,
+        "hex": "b8efbeaddea300304000eb000f0b"
+      },
+      "exit_gate": {
+        "offset": 256,
+        "size": 2,
+        "hex": "0f0b"
+      }
+    },
+    "no_ELF_text_relocations": true,
+    "prefix_instructions": 3,
+    "canary_instructions_before_UD2": 3,
+    "canary_done": 4198427
+  },
+  "pe": {
+    "sha256": "a048256f6b24a1fbba5a1ce34f21dfbae3236acc1ece65df1251061888f24c92",
+    "file_size": 1536,
+    "preferred_base": 4194304,
+    "image_size": 16384,
+    "header_size": 512,
+    "entry_point": 4198400,
+    "mapped_pages": 3,
+    "coff_characteristics": 259,
+    "all_directories_zero": true,
+    "sections": [
+      {
+        "name": ".text",
+        "rva": 4096,
+        "virtual_size": 258,
+        "raw_size": 512,
+        "raw_pointer": 512,
+        "flags": 1610612768
+      },
+      {
+        "name": ".data",
+        "rva": 12288,
+        "virtual_size": 4,
+        "raw_size": 512,
+        "raw_pointer": 1024,
+        "flags": 3221225536
+      }
+    ]
+  },
+  "runtime": {
+    "pages": 4,
+    "stack_base": 32768,
+    "stack_pages": 1,
+    "stack_top": 36864,
+    "budget": 64,
+    "entry": 4198400,
+    "return_canary": 4198415,
+    "gate_pc": 4198656,
+    "gate_id": 65539,
+    "data_address": 4206592,
+    "data_initial_and_terminal": 0,
+    "exit_code": 4045620583,
+    "eflags": 2,
+    "startup_registers": [
+      0,
+      0,
+      0,
+      0,
+      36864,
+      0,
+      0,
+      0
+    ],
+    "gate_registers": [
+      324508639,
+      0,
+      0,
+      0,
+      36856,
+      0,
+      0,
+      0
+    ],
+    "terminal_registers": [
+      324508639,
+      0,
+      0,
+      0,
+      36856,
+      0,
+      0,
+      0
+    ],
+    "terminal_eip": 4198656,
+    "stack_addresses": [
+      36852,
+      36856,
+      36860
+    ],
+    "stack_initial": [
+      0,
+      0,
+      0
+    ],
+    "stack_at_gate": [
+      0,
+      4198415,
+      4045620583
+    ],
+    "prefix_retired": 3,
+    "Gate_retired": 0,
+    "terminal_fresh_retired": 0,
+    "total_positive_guest_retired": 3,
+    "cases": [
+      "replacement",
+      "resident"
+    ]
+  },
+  "capture": {
+    "convention": 2,
+    "stack_words": 1,
+    "token": 1,
+    "frame_length": 112,
+    "frame_before_tamper_hex": "523343460100010070000000000000000100000003000100020000000100000000114000f88f00000f10400000000000674523f1000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+    "diagnostic_arg_tamper": 3735928559,
+    "guest_arg_tamper": 16909060,
+    "stack_after_tamper": [
+      0,
+      4198415,
+      16909060
+    ],
+    "authority": "terminal code from verified saved CallFrame arguments[0], neither current diagnosticCF nor guest argument; State/Exit remain exact Gate capture"
+  },
+  "records": {
+    "startup_state_hex": "5233535401000100380000000000000000000000000000000000000000000000009000000000000000000000000000000010400002000000",
+    "startup_exit_hex": "52334558030001002800000000000000030000000000000000000000000000000000000000000000",
+    "gate_state_hex": "52335354010001003800000000000000df9b5713000000000000000000000000f88f00000000000000000000000000000011400002000000",
+    "gate_exit_hex": "52334558030001002800000000000000080000000300000003000100000000000000000000000000",
+    "terminal_exit_hex": "523345580400010028000000000000000900000000000000674523f1000000000000000000000000",
+    "terminal_publication": "only arena56..96 changes; State56/CF/helper/cancel/transfer/RAM preserved; privatecodeSome and pending consumed"
+  },
+  "transport": {
+    "replacement": {
+      "compile": "compile_entries seeds[receipt entry, authored return canary, authored Gate] and one numeric GateSpec; canary is precompiled negative-control admission only",
+      "generation": 1,
+      "helper_imports": [
+        "guard",
+        "store32"
+      ],
+      "run_arity": 4,
+      "module_ptr_and_len_after_terminal": 0
+    },
+    "resident": {
+      "compile": "compile_resident_entries Gate B and caller A with[receipt entry, authored return canary]; no caller extents",
+      "caller_helper_imports": [
+        "guard_resident",
+        "store_resident32"
+      ],
+      "gate_helper_imports": [
+        "guard_resident"
+      ],
+      "units": 2,
+      "returned_ids": "dynamic distinct nonzero full-u64",
+      "gate_slot": 0,
+      "caller_slot": 1,
+      "generation": 0,
+      "resident_record_prefix_hex": "0100000018000000",
+      "resident_record_length": 24,
+      "installed_record_prefix_hex": "5233494e010001002000000000000000",
+      "dispatcher_record_prefix_hex": "52334450010001002000000000000000",
+      "dispatcher_imports": [
+        "env.memory",
+        "env.table",
+        "ring3.guard_dispatch_entry",
+        "ring3.find_installed_resident"
+      ],
+      "last_lookup_at_gate": "R3IN32 returned Gate B full owner slot0; returning dispatcher aggregates caller3+Gate0 as3"
+    },
+    "startup": "private image receipt entry; precompiled canary/current owners preserved; host positive path no CPU/Exit or stack map/write initialization",
+    "trusted_host": "same actual Memory/Table/generated functions; acknowledgement does not authenticate provenance"
+  },
+  "negative_controls": {
+    "scalar_reserved_ID_refusal": 7,
+    "cancel_completion": 16,
+    "same_token_retry_terminal": 0,
+    "live_terminal_rejection": 21,
+    "Closed": 5,
+    "module_ptr_and_len_terminal_value": 0,
+    "open_when_terminal": 6,
+    "retained_arena_ptr": "same nonzero base",
+    "generation_preserved": true,
+    "status_bearing_module_getters_terminal": 21,
+    "postmortem_read_status": 0,
+    "postmortem_read_helper_only": true,
+    "canary_data_remains0": true,
+    "retained_module_bytes": "compare saved pointers/content in raw shared memory; status getters21 do not republish metadata"
+  },
+  "canary_restore": {
+    "registers": [
+      324508639,
+      0,
+      0,
+      0,
+      36864,
+      0,
+      0,
+      0
+    ],
+    "eip": 4198415,
+    "eflags": 2,
+    "exit_hex": "52334558010001002800000000000000010000000000000000000000000000000000000000000000",
+    "authority": "explicit postterminal negative raw State/Exit restoration to supported precompiled canary, never positive startup; private exit latch must reject before CPU/pointer/cancel/budget reads",
+    "retained_replacement_resident_Gate_dispatcher_status": 21,
+    "malformed_pointer_zero_budget_cancel1_status": 21
+  },
+  "forged_terminal_without_private_latch": {
+    "owner": "separate fresh replacement instance with same PE/engine startup",
+    "patch": "only diagnostic Exit40 to frozen terminal_v4, no State/stack initialization patch",
+    "budget": 1,
+    "status": 0,
+    "registers_after_MOV": [
+      324508639,
+      0,
+      0,
+      0,
+      36864,
+      0,
+      0,
+      0
+    ],
+    "eip_after_MOV": 4198405,
+    "exit_hex_after_MOV": "52334558030001002800000000000000010000000100000000000000000000000000000000000000",
+    "helper_and_stack": "unchanged by one MOV",
+    "data": 0,
+    "authority": "valid terminal codec bytes alone do not create private process-exit latch"
+  },
+  "codec": {
+    "version": 4,
+    "length": 40,
+    "reason": 9,
+    "detail": "all-u32 private exitcode",
+    "retired": 0,
+    "reserved_address_access_length": 0,
+    "old_versions_reject_reason9": [
+      1,
+      2,
+      3
+    ],
+    "old_v1_v2_v3_producers_unchanged": true
+  },
+  "linker": "current Get/Set-only named linking/R3LI64 remains unchanged; native independent authored named ExitProcess is Unsupported20 and failure atomic; numeric Gate proof makes no named-link claim",
+  "claim": "single guestcontext nonreturning terminal result from numeric ExitProcess Gate, private full-u32 saved-frame code and one-way latch; retained resources inert until close. No named ExitProcess linking, Windows cleanup/thread/handle/startup emulation, scheduler/reset/SDK/browser/performance/game/full P2-V0."
+}
