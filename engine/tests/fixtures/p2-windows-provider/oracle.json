@@ -1,0 +1,324 @@
+{
+  "profile": "closed single-context Windows Get/SetLastError; no import lookup or host scalar",
+  "code_hex": "e8fb0f000089c368674523f1e8ef10000089c6e8e80f000089c76a00e8df10000089c5e8d80f00008d4007eb000f0b",
+  "symbols": [
+    {
+      "name": "windows_sequence",
+      "offset": 0,
+      "size": 47
+    },
+    {
+      "name": "get_gate",
+      "offset": 4096,
+      "hex": "0f0b"
+    },
+    {
+      "name": "set_gate",
+      "offset": 4352,
+      "hex": "0f0b"
+    }
+  ],
+  "entry": 4096,
+  "eflags": 3287,
+  "startup_registers": [
+    324508639,
+    610839776,
+    2309737967,
+    270544960,
+    36864,
+    1432778632,
+    2578103244,
+    3723427584
+  ],
+  "caller_blocks": [
+    [
+      4096,
+      5
+    ],
+    [
+      4101,
+      12
+    ],
+    [
+      4113,
+      7
+    ],
+    [
+      4120,
+      9
+    ],
+    [
+      4129,
+      7
+    ],
+    [
+      4136,
+      5
+    ]
+  ],
+  "gates": [
+    [
+      8192,
+      65537
+    ],
+    [
+      8448,
+      65538
+    ]
+  ],
+  "stack_addresses": [
+    36852,
+    36856,
+    36860,
+    36864
+  ],
+  "initial_stack_values": [
+    287454020,
+    1432778632,
+    2578103244,
+    3723427584
+  ],
+  "stages": [
+    {
+      "api": "GetLastError",
+      "id": 65537,
+      "gate_pc": 8192,
+      "return_pc": 4101,
+      "args": [],
+      "retired": 1,
+      "last_error_before": 0,
+      "last_error_after": 0,
+      "stop_registers": [
+        324508639,
+        610839776,
+        2309737967,
+        270544960,
+        36860,
+        1432778632,
+        2578103244,
+        3723427584
+      ],
+      "returned_registers": [
+        0,
+        610839776,
+        2309737967,
+        270544960,
+        36864,
+        1432778632,
+        2578103244,
+        3723427584
+      ],
+      "stack_values": [
+        287454020,
+        1432778632,
+        4101,
+        3723427584
+      ]
+    },
+    {
+      "api": "SetLastError",
+      "id": 65538,
+      "gate_pc": 8448,
+      "return_pc": 4113,
+      "args": [
+        4045620583
+      ],
+      "retired": 3,
+      "last_error_before": 0,
+      "last_error_after": 4045620583,
+      "stop_registers": [
+        0,
+        610839776,
+        2309737967,
+        0,
+        36856,
+        1432778632,
+        2578103244,
+        3723427584
+      ],
+      "returned_registers": [
+        0,
+        610839776,
+        2309737967,
+        0,
+        36864,
+        1432778632,
+        2578103244,
+        3723427584
+      ],
+      "stack_values": [
+        287454020,
+        4113,
+        4045620583,
+        3723427584
+      ]
+    },
+    {
+      "api": "GetLastError",
+      "id": 65537,
+      "gate_pc": 8192,
+      "return_pc": 4120,
+      "args": [],
+      "retired": 2,
+      "last_error_before": 4045620583,
+      "last_error_after": 4045620583,
+      "stop_registers": [
+        0,
+        610839776,
+        2309737967,
+        0,
+        36860,
+        1432778632,
+        0,
+        3723427584
+      ],
+      "returned_registers": [
+        4045620583,
+        610839776,
+        2309737967,
+        0,
+        36864,
+        1432778632,
+        0,
+        3723427584
+      ],
+      "stack_values": [
+        287454020,
+        4113,
+        4120,
+        3723427584
+      ]
+    },
+    {
+      "api": "SetLastError",
+      "id": 65538,
+      "gate_pc": 8448,
+      "return_pc": 4129,
+      "args": [
+        0
+      ],
+      "retired": 3,
+      "last_error_before": 4045620583,
+      "last_error_after": 0,
+      "stop_registers": [
+        4045620583,
+        610839776,
+        2309737967,
+        0,
+        36856,
+        1432778632,
+        0,
+        4045620583
+      ],
+      "returned_registers": [
+        4045620583,
+        610839776,
+        2309737967,
+        0,
+        36864,
+        1432778632,
+        0,
+        4045620583
+      ],
+      "stack_values": [
+        287454020,
+        4129,
+        0,
+        3723427584
+      ]
+    },
+    {
+      "api": "GetLastError",
+      "id": 65537,
+      "gate_pc": 8192,
+      "return_pc": 4136,
+      "args": [],
+      "retired": 2,
+      "last_error_before": 0,
+      "last_error_after": 0,
+      "stop_registers": [
+        4045620583,
+        610839776,
+        2309737967,
+        0,
+        36860,
+        4045620583,
+        0,
+        4045620583
+      ],
+      "returned_registers": [
+        0,
+        610839776,
+        2309737967,
+        0,
+        36864,
+        4045620583,
+        0,
+        4045620583
+      ],
+      "stack_values": [
+        287454020,
+        4129,
+        4136,
+        3723427584
+      ]
+    }
+  ],
+  "total_retired": 13,
+  "exit_profiles": {
+    "replacement_gate": 3,
+    "resident_caller": 2,
+    "resident_gate": 3,
+    "provider_completion": 3,
+    "replacement_final": 3,
+    "resident_final": 2
+  },
+  "final": {
+    "registers": [
+      7,
+      610839776,
+      2309737967,
+      0,
+      36864,
+      4045620583,
+      0,
+      4045620583
+    ],
+    "eip": 4141,
+    "reason": 3,
+    "retired": 2,
+    "stack_values": [
+      287454020,
+      4129,
+      4136,
+      3723427584
+    ]
+  },
+  "native_name_profile": {
+    "module": "kernel32.dll",
+    "ascii_case_insensitive_module": true,
+    "symbols": [
+      "GetLastError",
+      "SetLastError"
+    ],
+    "symbol_case_sensitive": true,
+    "ids": [
+      65537,
+      65538
+    ],
+    "convention": 2,
+    "stack_words": [
+      0,
+      1
+    ]
+  },
+  "abi_errors": {
+    "wrong_identity": 3,
+    "wrong_token": 14,
+    "state_changed": 15,
+    "cancelled": 16,
+    "invalid_provider": 7,
+    "busy": 12,
+    "closed": 5
+  }
+}
