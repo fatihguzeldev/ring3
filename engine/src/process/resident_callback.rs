@@ -9,15 +9,73 @@ use crate::{
     abi::{
         arena::{EXIT_OFFSET, STATE_OFFSET, TRANSFER_OFFSET},
         resident_callback::{
-            RESIDENT_CALLBACK_RECORD_SIZE, ResidentCallbackRecord32, encode_resident_callback,
+            RESIDENT_CALLBACK_RECORD_SIZE, RESIDENT_CALLBACK_RESULT_SIZE, ResidentCallbackRecord32,
+            ResidentCallbackResult32, encode_resident_callback, encode_resident_callback_result,
         },
-        x86::{EXIT_SIZE, STATE_SIZE, decode_exit, encode_exit_v3, encode_state},
+        x86::{EXIT_SIZE, STATE_SIZE, decode_exit, decode_state, encode_exit_v3, encode_state},
     },
     cpu::{ExecutionExit, ExitReason},
     windows::{CallbackFrame32, FrameError, MAX_STACK_WORDS},
 };
 
 impl EngineInstance {
+    pub fn finish_resident_callback(
+        &mut self,
+        key: u64,
+        callback_id: u64,
+        token: u32,
+    ) -> Result<ResidentCallbackResult32, HostError> {
+        let callback_unit = self.guard_resident_unit(key, callback_id)?;
+        let callback = self
+            .callback
+            .as_ref()
+            .ok_or(HostError::Call(CallError::InvalidToken))?;
+        let SuspendedRecord::Resident { record, authorized } = callback.record else {
+            return Err(HostError::Call(CallError::InvalidToken));
+        };
+        if token == 0 || record.token != token || record.callback_unit_id != callback_id {
+            return Err(HostError::Call(CallError::InvalidToken));
+        }
+        self.guard_resident_unit(key, record.outer_unit_id)?;
+        if self.pending_call.is_some() || !authorized {
+            return Err(HostError::Call(CallError::Busy));
+        }
+        let state = decode_state(&self.arena()[STATE_OFFSET..STATE_OFFSET + STATE_SIZE])
+            .map_err(|_| HostError::Call(CallError::InvalidStop))?;
+        let exit = decode_exit(&self.arena()[EXIT_OFFSET..EXIT_OFFSET + EXIT_SIZE])
+            .map_err(|_| HostError::Call(CallError::InvalidStop))?;
+        let ExitReason::Gate { id } = exit.reason else {
+            return Err(HostError::Call(CallError::InvalidStop));
+        };
+        if !callback.matches_return(state.eip, id)
+            || !callback_unit.matches_gate(state.eip, id)
+            || state.registers[4] != callback.outer.frame.state().registers[4]
+        {
+            return Err(HostError::Call(CallError::InvalidStop));
+        }
+        if self.call_cancelled() {
+            return Err(HostError::Call(CallError::Cancelled));
+        }
+        let result = ResidentCallbackResult32 {
+            token,
+            outer_token: record.outer_token,
+            result: state.registers[0],
+            outer_unit_id: record.outer_unit_id,
+            callback_unit_id: record.callback_unit_id,
+        };
+        let mut output = [0; RESIDENT_CALLBACK_RESULT_SIZE];
+        encode_resident_callback_result(&result, &mut output)
+            .map_err(|_| HostError::Infrastructure)?;
+        let callback = self.callback.take().unwrap();
+        let arena = self.arena.as_mut().get_mut();
+        arena[STATE_OFFSET..STATE_OFFSET + STATE_SIZE].copy_from_slice(&callback.outer.state);
+        arena[EXIT_OFFSET..EXIT_OFFSET + EXIT_SIZE].copy_from_slice(&callback.outer.exit);
+        arena[TRANSFER_OFFSET..TRANSFER_OFFSET + RESIDENT_CALLBACK_RESULT_SIZE]
+            .copy_from_slice(&output);
+        self.pending_call = Some(callback.outer);
+        Ok(result)
+    }
+
     pub fn authorize_resident_callback(
         &mut self,
         key: u64,
@@ -252,6 +310,134 @@ impl EngineInstance {
 mod tests {
     use super::*;
     use crate::{cpu::x86::State32, windows::CallingConvention32};
+
+    #[test]
+    fn last_resident_callback_token_finishes_and_restores_without_issuing_a_token() {
+        let mut engine = EngineInstance::new(2, 91).unwrap();
+        engine.map(0x1000, 1, 7).unwrap();
+        engine.map(0x8000, 1, 3).unwrap();
+        for (pc, bytes) in [
+            (0x1000, &[0x0f, 0x0b][..]),
+            (0x1100, &[0x90][..]),
+            (0x1200, &[0x0f, 0x0b][..]),
+        ] {
+            engine.arena_mut().unwrap()[TRANSFER_OFFSET..TRANSFER_OFFSET + bytes.len()]
+                .copy_from_slice(bytes);
+            engine.upload(pc, bytes.len() as u32).unwrap();
+        }
+        let mut ids = Vec::new();
+        for descriptors in [
+            &[(0x1000_u32, 2_u32), (0x1000, 17)][..],
+            &[(0x1100, 1), (0x1200, 2), (0x1200, 18)][..],
+        ] {
+            for (index, (pc, value)) in descriptors.iter().enumerate() {
+                let offset = TRANSFER_OFFSET + index * 8;
+                engine.arena_mut().unwrap()[offset..offset + 4].copy_from_slice(&pc.to_le_bytes());
+                engine.arena_mut().unwrap()[offset + 4..offset + 8]
+                    .copy_from_slice(&value.to_le_bytes());
+            }
+            ids.push(
+                engine
+                    .compile_resident_with_gates(descriptors.len() as u32 - 1, 1)
+                    .unwrap()
+                    .get(),
+            );
+        }
+        let (outer_id, callback_id) = (ids[0], ids[1]);
+        engine.write32(0x8010, 0x2000).unwrap();
+        let mut outer = State32 {
+            eip: 0x1000,
+            ..State32::default()
+        };
+        outer.registers[4] = 0x8010;
+        encode_state(&outer, &mut engine.arena_mut().unwrap()[..STATE_SIZE]).unwrap();
+        encode_exit_v3(
+            &ExecutionExit {
+                retired: 7,
+                reason: ExitReason::Gate { id: 17 },
+            },
+            &mut engine.arena_mut().unwrap()[EXIT_OFFSET..EXIT_OFFSET + EXIT_SIZE],
+        )
+        .unwrap();
+        let frozen = engine.arena()[..EXIT_OFFSET + EXIT_SIZE].to_vec();
+        let call = engine
+            .capture_resident_call(91, outer_id, CallingConvention32::Cdecl, 0)
+            .unwrap();
+        assert_eq!(call.token, 1);
+        engine.call_token = u32::MAX - 1;
+        let admitted = engine
+            .begin_resident_callback(91, outer_id, callback_id, 1, 0x1100, 0x1200, 18, &[])
+            .unwrap();
+        assert_eq!(admitted.token, u32::MAX);
+        engine
+            .authorize_resident_callback(91, callback_id, u32::MAX)
+            .unwrap();
+        let mut returned = outer;
+        returned.eip = 0x1200;
+        returned.registers[0] = u32::MAX;
+        encode_state(&returned, &mut engine.arena_mut().unwrap()[..STATE_SIZE]).unwrap();
+        encode_exit_v3(
+            &ExecutionExit {
+                retired: 0,
+                reason: ExitReason::Gate { id: 18 },
+            },
+            &mut engine.arena_mut().unwrap()[EXIT_OFFSET..EXIT_OFFSET + EXIT_SIZE],
+        )
+        .unwrap();
+        engine.unmap(0x8000, 1).unwrap();
+        let before = engine.arena().to_vec();
+        let result = engine
+            .finish_resident_callback(91, callback_id, u32::MAX)
+            .unwrap();
+        assert_eq!(result.result, u32::MAX);
+        assert_eq!(engine.call_token, u32::MAX);
+        assert!(engine.callback.is_none());
+        assert_eq!(engine.pending_call.as_ref().unwrap().token, 1);
+        assert_eq!(
+            engine.pending_call.as_ref().unwrap().owner,
+            PendingOwner::Resident(outer_id)
+        );
+        assert_eq!(&engine.arena()[..EXIT_OFFSET + EXIT_SIZE], frozen);
+        assert_eq!(
+            &engine.arena()[EXIT_OFFSET + EXIT_SIZE..TRANSFER_OFFSET],
+            &before[EXIT_OFFSET + EXIT_SIZE..TRANSFER_OFFSET]
+        );
+        assert_eq!(
+            &engine.arena()[TRANSFER_OFFSET + 48..],
+            &before[TRANSFER_OFFSET + 48..]
+        );
+        let receipt = crate::abi::resident_callback::decode_resident_callback_result(
+            &engine.arena()[TRANSFER_OFFSET..TRANSFER_OFFSET + 48],
+        )
+        .unwrap();
+        assert_eq!(receipt, result);
+        let arena = engine.arena().to_vec();
+        assert_eq!(
+            engine.begin_resident_callback(91, outer_id, callback_id, 1, 0x1100, 0x1200, 18, &[]),
+            Err(HostError::Call(CallError::TokenExhausted))
+        );
+        assert_eq!(engine.arena(), arena);
+        assert_eq!(
+            engine.finish_resident_callback(91, callback_id, u32::MAX),
+            Err(HostError::Call(CallError::InvalidToken))
+        );
+        assert_eq!(
+            engine.abort_callback(91, u32::MAX),
+            Err(HostError::Call(CallError::InvalidToken))
+        );
+        assert_eq!(engine.arena(), arena);
+        engine
+            .complete_resident_call(91, outer_id, 1, result.result)
+            .unwrap();
+        assert_eq!(engine.call_token, u32::MAX);
+        assert!(engine.pending_call.is_none());
+        assert_eq!(
+            decode_state(&engine.arena()[..STATE_SIZE])
+                .unwrap()
+                .registers[0],
+            u32::MAX
+        );
+    }
 
     #[test]
     fn last_resident_callback_token_commits_once_and_exhaustion_precedes_stack_access() {

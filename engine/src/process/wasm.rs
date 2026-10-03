@@ -427,6 +427,22 @@ pub(crate) fn begin_resident_callback(
     })
 }
 
+pub(crate) fn finish_resident_callback(
+    key_low: u32,
+    key_high: u32,
+    callback_low: u32,
+    callback_high: u32,
+    token: u32,
+) -> u32 {
+    let key = u64::from(key_low) | (u64::from(key_high) << 32);
+    let callback_id = u64::from(callback_low) | (u64::from(callback_high) << 32);
+    mutate(|instance| {
+        instance
+            .finish_resident_callback(key, callback_id, token)
+            .map(|_| ())
+    })
+}
+
 pub(crate) fn authorize_resident_callback(
     key_low: u32,
     key_high: u32,

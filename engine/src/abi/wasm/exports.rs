@@ -451,6 +451,27 @@ pub extern "C" fn begin_resident_callback(
 }
 
 #[allow(unsafe_code)]
+#[unsafe(export_name = "ring3_abi_v1_finish_resident_callback")]
+pub extern "C" fn finish_resident_callback(
+    key_low: u32,
+    key_high: u32,
+    callback_low: u32,
+    callback_high: u32,
+    token: u32,
+) -> u32 {
+    {
+        #![forbid(unsafe_code)]
+        crate::process::wasm::finish_resident_callback(
+            key_low,
+            key_high,
+            callback_low,
+            callback_high,
+            token,
+        )
+    }
+}
+
+#[allow(unsafe_code)]
 #[unsafe(export_name = "ring3_abi_v1_authorize_resident_callback")]
 pub extern "C" fn authorize_resident_callback(
     key_low: u32,

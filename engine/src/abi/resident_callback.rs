@@ -4,6 +4,16 @@ use super::{AbiError, header};
 use crate::windows::MAX_STACK_WORDS;
 
 pub const RESIDENT_CALLBACK_RECORD_SIZE: usize = 72;
+pub const RESIDENT_CALLBACK_RESULT_SIZE: usize = 48;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ResidentCallbackResult32 {
+    pub token: u32,
+    pub outer_token: u32,
+    pub result: u32,
+    pub outer_unit_id: u64,
+    pub callback_unit_id: u64,
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ResidentCallbackRecord32 {
@@ -88,6 +98,64 @@ fn validate(record: &ResidentCallbackRecord32) -> Result<(), AbiError> {
         || record.return_id == 0
         || record.stack_words > MAX_STACK_WORDS as u32
         || record.entry_pc == record.return_pc
+    {
+        return Err(AbiError::CallbackFrame);
+    }
+    Ok(())
+}
+
+pub fn encode_resident_callback_result(
+    record: &ResidentCallbackResult32,
+    output: &mut [u8],
+) -> Result<(), AbiError> {
+    if output.len() != RESIDENT_CALLBACK_RESULT_SIZE {
+        return Err(AbiError::Length);
+    }
+    validate_result(record)?;
+    header::write(output, *b"R3RR");
+    for (index, value) in [
+        record.token,
+        record.outer_token,
+        record.result,
+        0,
+        record.outer_unit_id as u32,
+        (record.outer_unit_id >> 32) as u32,
+        record.callback_unit_id as u32,
+        (record.callback_unit_id >> 32) as u32,
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        header::write_u32(output, 16 + index * 4, value);
+    }
+    Ok(())
+}
+
+pub fn decode_resident_callback_result(input: &[u8]) -> Result<ResidentCallbackResult32, AbiError> {
+    header::validate(input, *b"R3RR", RESIDENT_CALLBACK_RESULT_SIZE)?;
+    if header::read_u32(input, 28) != 0 {
+        return Err(AbiError::Reserved);
+    }
+    let record = ResidentCallbackResult32 {
+        token: header::read_u32(input, 16),
+        outer_token: header::read_u32(input, 20),
+        result: header::read_u32(input, 24),
+        outer_unit_id: u64::from(header::read_u32(input, 32))
+            | (u64::from(header::read_u32(input, 36)) << 32),
+        callback_unit_id: u64::from(header::read_u32(input, 40))
+            | (u64::from(header::read_u32(input, 44)) << 32),
+    };
+    validate_result(&record)?;
+    Ok(record)
+}
+
+fn validate_result(record: &ResidentCallbackResult32) -> Result<(), AbiError> {
+    if record.token == 0
+        || record.outer_token == 0
+        || record.token <= record.outer_token
+        || record.outer_unit_id == 0
+        || record.callback_unit_id == 0
+        || record.outer_unit_id == record.callback_unit_id
     {
         return Err(AbiError::CallbackFrame);
     }
