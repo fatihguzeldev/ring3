@@ -1,0 +1,610 @@
+{
+  "profile": "one-shot engine-owned loaded PE32 context and empty zero RW stack with ordinary resident discovery",
+  "reused_program": {
+    "path": "engine/tests/fixtures/p2-pe32-imports/program.S",
+    "sha256": "edb1f5f7bc98699a39159c25e41121ea8f19c67cf8ee050316ecf7fa38bb8fe3"
+  },
+  "reused_code_oracle": {
+    "path": "engine/tests/fixtures/p2-pe32-imports/oracle.json",
+    "sha256": "631d0774fa6ca0fdf4841fa74d3c07b8c6bf872a4d04054401c9cbb81e3a7096",
+    "authority": "code encoding and authored input shape only; none of its CPU or stack arrays supplies these expected values"
+  },
+  "reused_pe_sha256": "4ede51dfa2d9a96b7b0bb20faffc8d468b3a8edae2d1dfcf8a1210412d56ccb5",
+  "actual_base": 5242880,
+  "gate_base": 1610612736,
+  "entry_point": 5246976,
+  "budget": 64,
+  "eflags": 2,
+  "table_slots": 8,
+  "positive_units_per_case": 7,
+  "stages": [
+    {
+      "api": "GetLastError",
+      "id": 65537,
+      "gate_index": 0,
+      "args": [],
+      "retired": 1,
+      "return_pc": 5246982,
+      "last_error_after": 0,
+      "data_after_dispatch": 0
+    },
+    {
+      "api": "SetLastError",
+      "id": 65538,
+      "gate_index": 1,
+      "args": [
+        4045620583
+      ],
+      "retired": 3,
+      "return_pc": 5246995,
+      "last_error_after": 4045620583,
+      "data_after_dispatch": 0
+    },
+    {
+      "api": "GetLastError",
+      "id": 65537,
+      "gate_index": 0,
+      "args": [],
+      "retired": 2,
+      "return_pc": 5247003,
+      "last_error_after": 4045620583,
+      "data_after_dispatch": 0
+    },
+    {
+      "api": "SetLastError",
+      "id": 65538,
+      "gate_index": 1,
+      "args": [
+        0
+      ],
+      "retired": 4,
+      "return_pc": 5247018,
+      "last_error_after": 0,
+      "data_after_dispatch": 4045620583
+    },
+    {
+      "api": "GetLastError",
+      "id": 65537,
+      "gate_index": 0,
+      "args": [],
+      "retired": 2,
+      "return_pc": 5247026,
+      "last_error_after": 0,
+      "data_after_dispatch": 4045620583
+    }
+  ],
+  "cases": [
+    {
+      "name": "low",
+      "pages": 8,
+      "stack_base": 32768,
+      "stack_pages": 2,
+      "startup_registers": [
+        0,
+        0,
+        0,
+        0,
+        40960,
+        0,
+        0,
+        0
+      ],
+      "lower_stack_word": 32768,
+      "stack_addresses": [
+        40948,
+        40952,
+        40956
+      ],
+      "initial_stack_values": [
+        0,
+        0,
+        0
+      ],
+      "one_past_probe": 40960,
+      "stages": [
+        {
+          "stop_registers": [
+            0,
+            0,
+            0,
+            0,
+            40956,
+            0,
+            0,
+            0
+          ],
+          "returned_registers": [
+            0,
+            0,
+            0,
+            0,
+            40960,
+            0,
+            0,
+            0
+          ],
+          "stack_values": [
+            0,
+            0,
+            5246982
+          ]
+        },
+        {
+          "stop_registers": [
+            0,
+            0,
+            0,
+            0,
+            40952,
+            0,
+            0,
+            0
+          ],
+          "returned_registers": [
+            0,
+            0,
+            0,
+            0,
+            40960,
+            0,
+            0,
+            0
+          ],
+          "stack_values": [
+            0,
+            5246995,
+            4045620583
+          ]
+        },
+        {
+          "stop_registers": [
+            0,
+            0,
+            0,
+            0,
+            40956,
+            0,
+            0,
+            0
+          ],
+          "returned_registers": [
+            4045620583,
+            0,
+            0,
+            0,
+            40960,
+            0,
+            0,
+            0
+          ],
+          "stack_values": [
+            0,
+            5246995,
+            5247003
+          ]
+        },
+        {
+          "stop_registers": [
+            4045620583,
+            0,
+            0,
+            0,
+            40952,
+            0,
+            0,
+            4045620583
+          ],
+          "returned_registers": [
+            4045620583,
+            0,
+            0,
+            0,
+            40960,
+            0,
+            0,
+            4045620583
+          ],
+          "stack_values": [
+            0,
+            5247018,
+            0
+          ]
+        },
+        {
+          "stop_registers": [
+            4045620583,
+            0,
+            0,
+            0,
+            40956,
+            4045620583,
+            0,
+            4045620583
+          ],
+          "returned_registers": [
+            0,
+            0,
+            0,
+            0,
+            40960,
+            4045620583,
+            0,
+            4045620583
+          ],
+          "stack_values": [
+            0,
+            5247018,
+            5247026
+          ]
+        }
+      ],
+      "final_registers": [
+        7,
+        0,
+        0,
+        0,
+        40960,
+        4045620583,
+        0,
+        4045620583
+      ],
+      "final_stack_values": [
+        0,
+        5247018,
+        5247026
+      ]
+    },
+    {
+      "name": "upper",
+      "pages": 7,
+      "stack_base": 4294963200,
+      "stack_pages": 1,
+      "startup_registers": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "lower_stack_word": 4294963200,
+      "stack_addresses": [
+        4294967284,
+        4294967288,
+        4294967292
+      ],
+      "initial_stack_values": [
+        0,
+        0,
+        0
+      ],
+      "one_past_probe": 0,
+      "stages": [
+        {
+          "stop_registers": [
+            0,
+            0,
+            0,
+            0,
+            4294967292,
+            0,
+            0,
+            0
+          ],
+          "returned_registers": [
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          "stack_values": [
+            0,
+            0,
+            5246982
+          ]
+        },
+        {
+          "stop_registers": [
+            0,
+            0,
+            0,
+            0,
+            4294967288,
+            0,
+            0,
+            0
+          ],
+          "returned_registers": [
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          "stack_values": [
+            0,
+            5246995,
+            4045620583
+          ]
+        },
+        {
+          "stop_registers": [
+            0,
+            0,
+            0,
+            0,
+            4294967292,
+            0,
+            0,
+            0
+          ],
+          "returned_registers": [
+            4045620583,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          "stack_values": [
+            0,
+            5246995,
+            5247003
+          ]
+        },
+        {
+          "stop_registers": [
+            4045620583,
+            0,
+            0,
+            0,
+            4294967288,
+            0,
+            0,
+            4045620583
+          ],
+          "returned_registers": [
+            4045620583,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            4045620583
+          ],
+          "stack_values": [
+            0,
+            5247018,
+            0
+          ]
+        },
+        {
+          "stop_registers": [
+            4045620583,
+            0,
+            0,
+            0,
+            4294967292,
+            4045620583,
+            0,
+            4045620583
+          ],
+          "returned_registers": [
+            0,
+            0,
+            0,
+            0,
+            0,
+            4045620583,
+            0,
+            4045620583
+          ],
+          "stack_values": [
+            0,
+            5247018,
+            5247026
+          ]
+        }
+      ],
+      "final_registers": [
+        7,
+        0,
+        0,
+        0,
+        0,
+        4045620583,
+        0,
+        4045620583
+      ],
+      "final_stack_values": [
+        0,
+        5247018,
+        5247026
+      ]
+    }
+  ],
+  "final": {
+    "eip": 5247031,
+    "retired": 2,
+    "exit_reason": 3,
+    "exit_version": 3,
+    "data": 4045620583,
+    "total_retired": 14
+  },
+  "startup": {
+    "arity": 2,
+    "success_status": 0,
+    "one_shot": true,
+    "private_entry_authority": true,
+    "before_context": {
+      "State_registers": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "State_EIP": 0,
+      "State_EFLAGS": 2,
+      "State_version": 1,
+      "Exit_version": 1,
+      "Exit_reason": 1,
+      "Exit_retired": 0
+    },
+    "success_mutates": [
+      "State56",
+      "Exit40v3NeedCode0",
+      "exact configured zero RW nonX stack",
+      "private image_started latch"
+    ],
+    "success_preserves": [
+      "arena address",
+      "cancel4",
+      "helper40",
+      "entire transfer4096",
+      "same address-space identity",
+      "image metadata",
+      "unrelated guest RAM and code",
+      "precompiled Gate and first caller bytes/pointers/full IDs",
+      "installed slots",
+      "returning dispatcher bytes/pointer",
+      "generation0",
+      "private Windows state"
+    ],
+    "prepare_before_start": "Gate unit, caller1 from Rust receipt entry and returning dispatcher are compiled/installed without changing original first96",
+    "positive_host_forbidden": [
+      "map",
+      "write32",
+      "write_words32",
+      "upload guest stack",
+      "write State",
+      "write Exit"
+    ],
+    "empty_stack": "no synthetic return PC or startup argument; first return word is written by real guest CALL",
+    "upper_stack": "end2^32 is accepted; ESP0 pushes/calls to last valid width4 words; provider Stdcall cleanup wraps back0; low page0 remains unmapped"
+  },
+  "transport": {
+    "resident_record_prefix_hex": "0100000018000000",
+    "resident_length": 24,
+    "resident_ids": "dynamic distinct nonzero full-u64 returned IDs; no expected sequence",
+    "installation_record_prefix_hex": "5233494e010001002000000000000000",
+    "installation_length": 32,
+    "gate_slot": 0,
+    "caller_slots": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6
+    ],
+    "dispatcher_record_prefix_hex": "52334450010001002000000000000000",
+    "dispatcher_length": 32,
+    "dispatcher_imports": [
+      "env.memory",
+      "env.table",
+      "ring3.guard_dispatch_entry",
+      "ring3.find_installed_resident"
+    ],
+    "gate_module_helpers": [
+      "guard_resident"
+    ],
+    "caller_module_helpers": [
+      [
+        "guard_resident",
+        "read32",
+        "store_resident32"
+      ],
+      [
+        "guard_resident",
+        "read32",
+        "store_resident32"
+      ],
+      [
+        "guard_resident",
+        "read32",
+        "store_resident32"
+      ],
+      [
+        "guard_resident",
+        "read32",
+        "store_resident32"
+      ],
+      [
+        "guard_resident",
+        "read32",
+        "store_resident32"
+      ],
+      [
+        "guard_resident"
+      ]
+    ],
+    "cold_miss": {
+      "version": 3,
+      "reason": 3,
+      "retired": 0,
+      "after_provider_tokens": [
+        1,
+        2,
+        3,
+        4,
+        5
+      ],
+      "mutates": "only Exit40; State/helper/transfer retained on finder17"
+    },
+    "caller_seed_authority": "first only Rust R3LI private image receipt entry; later only observed canonical State.EIP after dispatcher NeedCode0; expected return literals are assertions only",
+    "gate_exit": {
+      "version": 3,
+      "reason": 8,
+      "last_lookup": "R3IN32 returned Gate owner/full-u64 slot0",
+      "gate_retired": 0
+    },
+    "provider": {
+      "convention": 2,
+      "capture_length": 112,
+      "args": "real guest stack privately captured",
+      "completion_exit_version": 3,
+      "completion_reason": 3,
+      "completion_retired": 0,
+      "no_host_scalar": true,
+      "replay_status": 14
+    },
+    "final_exit": "missing authored UD2 yields NeedCodev3/retired2; final caller6 R3IN32 remains, helper unchanged",
+    "fresh_retirement": "14 from dispatcher invocations only; startup/Gate/provider/cold miss/restored exits add0",
+    "trusted_host": "same Memory/Table/generated functions; acknowledgement does not authenticate provenance"
+  },
+  "errors": {
+    "prestart_capacity": 8,
+    "prestart_cancel": 16,
+    "prestart_PE_gap_overlap": 7,
+    "one_shot": 7,
+    "Closed": 5,
+    "pending": 12,
+    "stack_nonexecute_compile": 10,
+    "boundary_read_status": 0,
+    "boundary_read_helper_fields": [
+      "fault1",
+      "value0",
+      "unmapped1",
+      "probe address",
+      "Read1",
+      "width4"
+    ]
+  },
+  "claim": "one-shot bounded loaded-PE CPU context and empty zero RW stack, with existing real IAT/provider/resident/returning-dispatcher path. No Windows entry conventions, synthetic return, argv, TLS/CRT/PEB/TEB/SEH, process return/ExitProcess, autorun/scheduler, graph/cache/optimizer, SDK/browser/performance/game/full P2-V0 claim."
+}
