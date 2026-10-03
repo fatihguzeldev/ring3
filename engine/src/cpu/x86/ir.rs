@@ -137,6 +137,11 @@ pub enum Operation {
         destination: Location32,
         count: ShiftCount,
     },
+    SignedMultiply {
+        destination: Register32,
+        source: Location32,
+        immediate: Option<u32>,
+    },
     Jump {
         target: BranchTarget,
     },

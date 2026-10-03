@@ -378,6 +378,10 @@ pub(super) fn supports(instruction: &DecodedInstruction, embedded: bool) -> bool
                     destination: Location32::Register(_),
                     ..
                 }
+                | Operation::SignedMultiply {
+                    source: Location32::Register(_),
+                    ..
+                }
                 | Operation::Binary {
                     kind: BinaryKind::Add
                         | BinaryKind::Adc

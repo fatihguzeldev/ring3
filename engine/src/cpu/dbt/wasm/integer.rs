@@ -169,6 +169,16 @@ pub(super) fn instruction(
             };
             shift(code, kind, destination, count);
         }
+        Operation::SignedMultiply {
+            destination,
+            source,
+            immediate,
+        } => {
+            let Location32::Register(source) = source else {
+                unreachable!("prepared region contains a memory multiply")
+            };
+            signed_multiply(code, destination, source, immediate);
+        }
         Operation::Jump {
             target: BranchTarget::Direct(target),
         } => {
@@ -532,6 +542,50 @@ fn shift(
     code.local_get(RESULT)
         .local_set(register(destination))
         .end();
+}
+
+fn signed_multiply(
+    code: &mut InstructionSink<'_>,
+    destination: Register32,
+    source: Register32,
+    immediate: Option<u32>,
+) {
+    match immediate {
+        Some(immediate) => {
+            code.local_get(register(source))
+                .local_set(LHS)
+                .i32_const(immediate as i32)
+                .local_set(RHS);
+        }
+        None => {
+            code.local_get(register(destination))
+                .local_set(LHS)
+                .local_get(register(source))
+                .local_set(RHS);
+        }
+    }
+    code.local_get(LHS)
+        .local_get(RHS)
+        .i32_mul()
+        .local_set(RESULT);
+    // PF/AF/ZF/SF are undefined; this profile clears them.
+    code.local_get(FLAGS)
+        .i32_const(0x402)
+        .i32_and()
+        .local_get(LHS)
+        .i64_extend_i32_s()
+        .local_get(RHS)
+        .i64_extend_i32_s()
+        .i64_mul()
+        .local_get(RESULT)
+        .i64_extend_i32_s()
+        .i64_ne()
+        .i32_const(0x801)
+        .i32_mul()
+        .i32_or()
+        .local_set(FLAGS)
+        .local_get(RESULT)
+        .local_set(register(destination));
 }
 
 fn arithmetic_flags(code: &mut InstructionSink<'_>, kind: BinaryKind, carry: CarryFlag) {

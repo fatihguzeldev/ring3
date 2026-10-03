@@ -2,7 +2,7 @@ use iced_x86::{Code, Instruction};
 
 use super::{
     DecodeError,
-    operands::{location, value},
+    operands::{location, register, value},
 };
 use crate::cpu::x86::ir::{BinaryKind, Operation, ShiftCount, ShiftKind, UnaryKind};
 
@@ -49,7 +49,11 @@ pub(super) fn lower(instruction: &Instruction) -> Option<Result<Operation, Decod
         | Code::Xor_EAX_imm32
         | Code::Xor_rm32_imm32
         | Code::Xor_rm32_imm8 => BinaryKind::Xor,
-        _ => return lower_shift(instruction).or_else(|| lower_unary(instruction)),
+        _ => {
+            return lower_multiply(instruction)
+                .or_else(|| lower_shift(instruction))
+                .or_else(|| lower_unary(instruction));
+        }
     };
     Some(binary(instruction, kind))
 }
@@ -102,4 +106,20 @@ fn lower_shift(instruction: &Instruction) -> Option<Result<Operation, DecodeErro
             count,
         }),
     )
+}
+
+fn lower_multiply(instruction: &Instruction) -> Option<Result<Operation, DecodeError>> {
+    let immediate = match instruction.code() {
+        Code::Imul_r32_rm32 => None,
+        Code::Imul_r32_rm32_imm32 => Some(instruction.immediate32()),
+        Code::Imul_r32_rm32_imm8 => Some(instruction.immediate8to32() as u32),
+        _ => return None,
+    };
+    Some((|| {
+        Ok(Operation::SignedMultiply {
+            destination: register(instruction.op0_register())?,
+            source: location(instruction, 1)?,
+            immediate,
+        })
+    })())
 }
