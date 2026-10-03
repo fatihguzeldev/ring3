@@ -6,6 +6,7 @@ use crate::memory::{Access, FaultReason, GuestAddress, MemoryFault};
 pub const EXIT_SIZE: usize = 40;
 pub const EXIT_VERSION_2: u16 = 2;
 pub const EXIT_VERSION_3: u16 = 3;
+pub const EXIT_VERSION_4: u16 = 4;
 pub const REASON_OFFSET: usize = 16;
 pub const RETIRED_OFFSET: usize = 20;
 pub const DETAIL_OFFSET: usize = 24;
@@ -23,6 +24,10 @@ pub fn encode_exit_v2(exit: &ExecutionExit, output: &mut [u8]) -> Result<(), Abi
 
 pub fn encode_exit_v3(exit: &ExecutionExit, output: &mut [u8]) -> Result<(), AbiError> {
     encode(exit, output, EXIT_VERSION_3)
+}
+
+pub fn encode_exit_v4(exit: &ExecutionExit, output: &mut [u8]) -> Result<(), AbiError> {
+    encode(exit, output, EXIT_VERSION_4)
 }
 
 fn encode(exit: &ExecutionExit, output: &mut [u8], version: u16) -> Result<(), AbiError> {
@@ -57,7 +62,7 @@ fn encode(exit: &ExecutionExit, output: &mut [u8], version: u16) -> Result<(), A
         }
         ExitReason::CodeInvalidated => 6,
         ExitReason::Infrastructure(reason) => {
-            if !matches!(version, EXIT_VERSION_2 | EXIT_VERSION_3) {
+            if !matches!(version, EXIT_VERSION_2 | EXIT_VERSION_3 | EXIT_VERSION_4) {
                 return Err(AbiError::Exit);
             }
             fields[2] = match reason {
@@ -68,11 +73,18 @@ fn encode(exit: &ExecutionExit, output: &mut [u8], version: u16) -> Result<(), A
             7
         }
         ExitReason::Gate { id } => {
-            if version != EXIT_VERSION_3 || id == 0 {
+            if !matches!(version, EXIT_VERSION_3 | EXIT_VERSION_4) || id == 0 {
                 return Err(AbiError::Exit);
             }
             fields[2] = id;
             8
+        }
+        ExitReason::ProcessExited { code } => {
+            if version != EXIT_VERSION_4 {
+                return Err(AbiError::Exit);
+            }
+            fields[2] = code;
+            9
         }
     };
     header::write_version(output, *b"R3EX", version);
@@ -87,7 +99,7 @@ pub fn decode_exit(input: &[u8]) -> Result<ExecutionExit, AbiError> {
         input,
         *b"R3EX",
         EXIT_SIZE,
-        &[ABI_VERSION, EXIT_VERSION_2, EXIT_VERSION_3],
+        &[ABI_VERSION, EXIT_VERSION_2, EXIT_VERSION_3, EXIT_VERSION_4],
     )?;
     let detail = read_u32(input, DETAIL_OFFSET);
     let address = read_u32(input, FAULT_ADDRESS_OFFSET);
@@ -113,7 +125,10 @@ pub fn decode_exit(input: &[u8]) -> Result<ExecutionExit, AbiError> {
         validate_fault(fault, length)?;
         ExitReason::MemoryFault { fault, length }
     } else {
-        if address != 0 || access != 0 || length != 0 || (!matches!(tag, 4 | 7 | 8) && detail != 0)
+        if address != 0
+            || access != 0
+            || length != 0
+            || (!matches!(tag, 4 | 7 | 8 | 9) && detail != 0)
         {
             return Err(AbiError::Exit);
         }
@@ -123,7 +138,7 @@ pub fn decode_exit(input: &[u8]) -> Result<ExecutionExit, AbiError> {
             3 => ExitReason::NeedCode,
             4 => ExitReason::Unsupported(decode_feature(detail)?),
             6 => ExitReason::CodeInvalidated,
-            7 if matches!(version, EXIT_VERSION_2 | EXIT_VERSION_3) => {
+            7 if matches!(version, EXIT_VERSION_2 | EXIT_VERSION_3 | EXIT_VERSION_4) => {
                 ExitReason::Infrastructure(match detail {
                     1 => InfrastructureFailure::VersionExhausted,
                     2 => InfrastructureFailure::HelperProtocol,
@@ -131,7 +146,10 @@ pub fn decode_exit(input: &[u8]) -> Result<ExecutionExit, AbiError> {
                     _ => return Err(AbiError::Exit),
                 })
             }
-            8 if version == EXIT_VERSION_3 && detail != 0 => ExitReason::Gate { id: detail },
+            8 if matches!(version, EXIT_VERSION_3 | EXIT_VERSION_4) && detail != 0 => {
+                ExitReason::Gate { id: detail }
+            }
+            9 if version == EXIT_VERSION_4 => ExitReason::ProcessExited { code: detail },
             _ => return Err(AbiError::Exit),
         }
     };

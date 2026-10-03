@@ -6,6 +6,13 @@ use crate::cpu::x86::Register32;
 pub enum WindowsApi32 {
     GetLastError = 0x0001_0001,
     SetLastError = 0x0001_0002,
+    ExitProcess = 0x0001_0003,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum WindowsOutcome32 {
+    Return(u32),
+    ExitProcess(u32),
 }
 
 impl WindowsApi32 {
@@ -16,6 +23,7 @@ impl WindowsApi32 {
         match symbol {
             "GetLastError" => Some(Self::GetLastError),
             "SetLastError" => Some(Self::SetLastError),
+            "ExitProcess" => Some(Self::ExitProcess),
             _ => None,
         }
     }
@@ -24,6 +32,7 @@ impl WindowsApi32 {
         match id {
             0x0001_0001 => Some(Self::GetLastError),
             0x0001_0002 => Some(Self::SetLastError),
+            0x0001_0003 => Some(Self::ExitProcess),
             _ => None,
         }
     }
@@ -39,7 +48,7 @@ impl WindowsApi32 {
     pub fn stack_words(self) -> u32 {
         match self {
             Self::GetLastError => 0,
-            Self::SetLastError => 1,
+            Self::SetLastError | Self::ExitProcess => 1,
         }
     }
 }
@@ -54,18 +63,21 @@ impl ThreadState32 {
         self,
         api: WindowsApi32,
         frame: &CallFrame32,
-    ) -> Result<(u32, Self), FrameError> {
+    ) -> Result<(WindowsOutcome32, Self), FrameError> {
         if frame.convention() != api.convention() || frame.stack_words() != api.stack_words() {
             return Err(FrameError::InvalidRequest);
         }
         Ok(match api {
-            WindowsApi32::GetLastError => (self.last_error, self),
+            WindowsApi32::GetLastError => (WindowsOutcome32::Return(self.last_error), self),
             WindowsApi32::SetLastError => (
-                frame.state().registers[Register32::Eax.index()],
+                WindowsOutcome32::Return(frame.state().registers[Register32::Eax.index()]),
                 Self {
                     last_error: frame.arguments()[0],
                 },
             ),
+            WindowsApi32::ExitProcess => {
+                (WindowsOutcome32::ExitProcess(frame.arguments()[0]), self)
+            }
         })
     }
 }

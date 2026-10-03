@@ -301,7 +301,7 @@ fn closed_names_ids_and_exact_stdcall_profile() {
     ] {
         assert_eq!(WindowsApi32::resolve("kernel32.dll", name), None);
     }
-    for id in [0, 1, UNKNOWN, GET - 1, SET + 1, u32::MAX] {
+    for id in [0, 1, UNKNOWN, GET - 1, SET + 2, u32::MAX] {
         assert_eq!(WindowsApi32::from_id(id), None);
     }
 }

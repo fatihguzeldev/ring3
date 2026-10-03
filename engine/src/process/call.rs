@@ -9,7 +9,7 @@ use crate::{
     },
     cpu::{ExecutionExit, ExitReason, x86::State32},
     memory::MemoryError,
-    windows::{CallFrame32, CallingConvention32, FrameError, MAX_STACK_WORDS},
+    windows::{CallFrame32, CallingConvention32, FrameError, MAX_STACK_WORDS, WindowsApi32},
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -375,10 +375,12 @@ impl EngineInstance {
         token: u32,
         result: u32,
     ) -> Result<(), HostError> {
-        let state = self
-            .checked_pending_call(owner, token)?
-            .frame
-            .complete(result);
+        let pending = self.checked_pending_call(owner, token)?;
+        let exit = decode_exit(&pending.exit).map_err(|_| HostError::Infrastructure)?;
+        if matches!(exit.reason, ExitReason::Gate { id } if id == WindowsApi32::ExitProcess.id()) {
+            return Err(HostError::Call(CallError::InvalidRequest));
+        }
+        let state = pending.frame.complete(result);
         self.publish_completed_call(state)
     }
 

@@ -26,6 +26,7 @@ use crate::{
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum HostError {
     Closed,
+    ProcessExited,
     InvalidRequest,
     InvalidArtifact,
     CodeInvalidated,
@@ -64,6 +65,7 @@ pub struct EngineInstance {
     pub(super) call_token: u32,
     pub(super) image: Option<crate::loader::ImageMetadata32>,
     pub(super) image_started: bool,
+    pub(super) exit_code: Option<u32>,
     pub(super) windows_thread: crate::windows::ThreadState32,
 }
 
@@ -93,6 +95,7 @@ impl EngineInstance {
             call_token: 0,
             image: None,
             image_started: false,
+            exit_code: None,
             windows_thread: crate::windows::ThreadState32::default(),
         })
     }
@@ -127,10 +130,19 @@ impl EngineInstance {
     }
 
     pub fn memory(&self) -> Result<&AddressSpace, HostError> {
+        let memory = self.retained_memory()?;
+        if self.exit_code.is_some() {
+            return Err(HostError::ProcessExited);
+        }
+        Ok(memory)
+    }
+
+    fn retained_memory(&self) -> Result<&AddressSpace, HostError> {
         self.memory.as_ref().ok_or(HostError::Closed)
     }
 
     pub fn map(&mut self, address: u32, pages: u32, bits: u32) -> Result<(), HostError> {
+        self.memory()?;
         let memory = self.memory.as_mut().ok_or(HostError::Closed)?;
         let permissions = permissions(bits)?;
         let range = PageRange::new(GuestAddress(address), pages).map_err(HostError::Memory)?;
@@ -140,6 +152,7 @@ impl EngineInstance {
     }
 
     pub fn protect(&mut self, address: u32, pages: u32, bits: u32) -> Result<(), HostError> {
+        self.memory()?;
         let memory = self.memory.as_mut().ok_or(HostError::Closed)?;
         let permissions = permissions(bits)?;
         let range = PageRange::new(GuestAddress(address), pages).map_err(HostError::Memory)?;
@@ -149,12 +162,14 @@ impl EngineInstance {
     }
 
     pub fn unmap(&mut self, address: u32, pages: u32) -> Result<(), HostError> {
+        self.memory()?;
         let memory = self.memory.as_mut().ok_or(HostError::Closed)?;
         let range = PageRange::new(GuestAddress(address), pages).map_err(HostError::Memory)?;
         memory.unmap(range).map_err(HostError::Memory)
     }
 
     pub fn upload(&mut self, address: u32, length: u32) -> Result<(), HostError> {
+        self.memory()?;
         let memory = self.memory.as_mut().ok_or(HostError::Closed)?;
         if length as usize > TRANSFER_SIZE {
             return Err(HostError::InvalidRequest);
@@ -333,7 +348,7 @@ impl EngineInstance {
     }
 
     pub fn read8(&mut self, address: u32) -> Result<(), HostError> {
-        let memory = self.memory()?;
+        let memory = self.retained_memory()?;
         let mut bytes = [0; 1];
         let result = memory
             .read(GuestAddress(address), &mut bytes)
@@ -342,7 +357,7 @@ impl EngineInstance {
     }
 
     pub fn read16(&mut self, address: u32) -> Result<(), HostError> {
-        let memory = self.memory()?;
+        let memory = self.retained_memory()?;
         let mut bytes = [0; 2];
         let result = memory
             .read(GuestAddress(address), &mut bytes)
@@ -351,7 +366,7 @@ impl EngineInstance {
     }
 
     pub fn read32(&mut self, address: u32) -> Result<(), HostError> {
-        let memory = self.memory()?;
+        let memory = self.retained_memory()?;
         let mut bytes = [0; 4];
         let result = memory
             .read(GuestAddress(address), &mut bytes)
@@ -360,6 +375,7 @@ impl EngineInstance {
     }
 
     pub fn write32(&mut self, address: u32, value: u32) -> Result<(), HostError> {
+        self.memory()?;
         let memory = self.memory.as_mut().ok_or(HostError::Closed)?;
         let result = memory
             .write(GuestAddress(address), &value.to_le_bytes())
@@ -368,6 +384,7 @@ impl EngineInstance {
     }
 
     pub fn write_words32(&mut self, count: u32) -> Result<(), HostError> {
+        self.memory()?;
         let memory = self.memory.as_mut().ok_or(HostError::Closed)?;
         if count > MAX_WORD_WRITES32 as u32 {
             return Err(HostError::InvalidRequest);

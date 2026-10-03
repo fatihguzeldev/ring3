@@ -27,6 +27,7 @@ pub enum ExitReason {
     CodeInvalidated,
     Infrastructure(InfrastructureFailure),
     Gate { id: u32 },
+    ProcessExited { code: u32 },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

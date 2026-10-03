@@ -116,6 +116,7 @@ impl ImportPlan<'_> {
             let gate_index = match api {
                 WindowsApi32::GetLastError => 0,
                 WindowsApi32::SetLastError => 1,
+                WindowsApi32::ExitProcess => return Err(LoadError::Unsupported),
             };
             used[gate_index] = true;
             resolved.slots[index] = gate_base + gate_index as u32 * 16;

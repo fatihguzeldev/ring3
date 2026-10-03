@@ -4,7 +4,7 @@ use crate::{
     loader::ImageMetadata32,
     memory::{Access, MemoryError},
     process::ResidentInstallation,
-    windows::{CallFrame32, CallingConvention32, WindowsApi32},
+    windows::{CallFrame32, CallingConvention32, WindowsApi32, WindowsOutcome32},
 };
 
 const KEY: u64 = 0x1020_3040_5060_7080;
@@ -56,11 +56,15 @@ fn frame(engine: &EngineInstance, words: u32) -> CallFrame32 {
 }
 
 fn last_error(engine: &EngineInstance) -> u32 {
-    engine
+    match engine
         .windows_thread
         .prepare(WindowsApi32::GetLastError, &frame(engine, 0))
         .unwrap()
         .0
+    {
+        WindowsOutcome32::Return(value) => value,
+        WindowsOutcome32::ExitProcess(_) => panic!("GetLastError cannot terminate the process"),
+    }
 }
 
 fn retained_fixture() -> (EngineInstance, [u64; 2]) {

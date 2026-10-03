@@ -1,5 +1,12 @@
 use super::{CallError, EngineInstance, HostError, call::PendingOwner};
-use crate::{abi::x86::decode_exit, cpu::ExitReason, windows::WindowsApi32};
+use crate::{
+    abi::{
+        arena::EXIT_OFFSET,
+        x86::{EXIT_SIZE, decode_exit, encode_exit_v4},
+    },
+    cpu::{ExecutionExit, ExitReason},
+    windows::{WindowsApi32, WindowsOutcome32},
+};
 
 impl EngineInstance {
     pub fn complete_windows_call(
@@ -36,13 +43,36 @@ impl EngineInstance {
             return Err(HostError::Infrastructure);
         };
         let api = WindowsApi32::from_id(id).ok_or(HostError::Call(CallError::InvalidRequest))?;
-        let (result, thread) = self
+        let (outcome, thread) = self
             .windows_thread
             .prepare(api, &pending.frame)
             .map_err(|_| HostError::Call(CallError::InvalidRequest))?;
-        let state = pending.frame.complete(result);
-        self.publish_completed_call(state)?;
-        self.windows_thread = thread;
+        match outcome {
+            WindowsOutcome32::Return(result) => {
+                let state = pending.frame.complete(result);
+                self.publish_completed_call(state)?;
+                self.windows_thread = thread;
+            }
+            WindowsOutcome32::ExitProcess(code) => {
+                let mut bytes = [0; EXIT_SIZE];
+                encode_exit_v4(
+                    &ExecutionExit {
+                        retired: 0,
+                        reason: ExitReason::ProcessExited { code },
+                    },
+                    &mut bytes,
+                )
+                .map_err(|_| HostError::Infrastructure)?;
+                self.arena.as_mut().get_mut()[EXIT_OFFSET..EXIT_OFFSET + EXIT_SIZE]
+                    .copy_from_slice(&bytes);
+                self.exit_code = Some(code);
+                self.pending_call = None;
+            }
+        }
         Ok(())
     }
 }
+
+#[cfg(test)]
+#[path = "windows_tests.rs"]
+mod windows_tests;
