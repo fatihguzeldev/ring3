@@ -18,7 +18,10 @@ impl EngineInstance {
         id: u64,
         slot: u32,
     ) -> Result<ResidentInstallation, HostError> {
-        self.guard_resident(key, id)?;
+        self.guard_resident_unit(key, id)?;
+        if self.pending_call.is_some() || self.callback.is_some() {
+            return Err(HostError::Call(CallError::Busy));
+        }
         let existing = self
             .resident_installations
             .get(slot as usize)
@@ -54,6 +57,14 @@ impl EngineInstance {
             return Err(HostError::InvalidArtifact);
         }
         let unit_id = self.lookup_resident(pc)?.get();
+        if self
+            .callback
+            .as_ref()
+            .and_then(|callback| callback.authorized_resident_record())
+            .is_some_and(|record| record.callback_unit_id != unit_id)
+        {
+            return Err(HostError::Call(CallError::Busy));
+        }
         self.resident_installations
             .iter()
             .flatten()

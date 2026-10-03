@@ -23,25 +23,38 @@ pub(super) struct SuspendedCallback {
 #[derive(Clone, Copy)]
 pub(super) enum SuspendedRecord {
     Replacement(CallbackRecord32),
-    Resident(ResidentCallbackRecord32),
+    Resident {
+        record: ResidentCallbackRecord32,
+        authorized: bool,
+    },
 }
 
 impl SuspendedCallback {
     pub(super) fn token(&self) -> u32 {
         match self.record {
             SuspendedRecord::Replacement(record) => record.token,
-            SuspendedRecord::Resident(record) => record.token,
+            SuspendedRecord::Resident { record, .. } => record.token,
         }
     }
 
     pub(super) fn is_resident(&self) -> bool {
-        matches!(self.record, SuspendedRecord::Resident(_))
+        matches!(self.record, SuspendedRecord::Resident { .. })
+    }
+
+    pub(super) fn authorized_resident_record(&self) -> Option<ResidentCallbackRecord32> {
+        match self.record {
+            SuspendedRecord::Resident {
+                record,
+                authorized: true,
+            } => Some(record),
+            _ => None,
+        }
     }
 
     pub(super) fn replacement_record(&self) -> Result<CallbackRecord32, HostError> {
         match self.record {
             SuspendedRecord::Replacement(record) => Ok(record),
-            SuspendedRecord::Resident(_) => Err(call_error(CallError::InvalidToken)),
+            SuspendedRecord::Resident { .. } => Err(call_error(CallError::InvalidToken)),
         }
     }
 
@@ -52,7 +65,7 @@ impl SuspendedCallback {
     pub(super) fn matches_return(&self, pc: u32, id: u32) -> bool {
         let (return_pc, return_id) = match self.record {
             SuspendedRecord::Replacement(record) => (record.return_pc, record.return_id),
-            SuspendedRecord::Resident(record) => (record.return_pc, record.return_id),
+            SuspendedRecord::Resident { record, .. } => (record.return_pc, record.return_id),
         };
         return_pc == pc && return_id == id
     }

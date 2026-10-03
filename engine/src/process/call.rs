@@ -61,7 +61,10 @@ impl EngineInstance {
         convention_tag: u32,
         stack_words: u32,
     ) -> Result<CallRecord32, HostError> {
-        self.guard_resident(key, id)?;
+        self.guard_resident_unit(key, id)?;
+        if self.pending_call.is_some() || self.callback.is_some() {
+            return Err(HostError::Call(CallError::Busy));
+        }
         self.capture_call_frame(PendingOwner::Resident(id), convention_tag, stack_words)
     }
 

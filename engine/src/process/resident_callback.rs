@@ -18,6 +18,75 @@ use crate::{
 };
 
 impl EngineInstance {
+    pub fn authorize_resident_callback(
+        &mut self,
+        key: u64,
+        callback_id: u64,
+        token: u32,
+    ) -> Result<(), HostError> {
+        let callback_unit = self.guard_resident_unit(key, callback_id)?;
+        let callback = self
+            .callback
+            .as_ref()
+            .ok_or(HostError::Call(CallError::InvalidToken))?;
+        let SuspendedRecord::Resident { record, authorized } = callback.record else {
+            return Err(HostError::Call(CallError::InvalidToken));
+        };
+        if token == 0 || record.token != token || record.callback_unit_id != callback_id {
+            return Err(HostError::Call(CallError::InvalidToken));
+        }
+        let outer_unit = self.guard_resident_unit(key, record.outer_unit_id)?;
+        if authorized || self.pending_call.is_some() {
+            return Err(HostError::Call(CallError::Busy));
+        }
+        if record.outer_unit_id == callback_id {
+            return Err(HostError::Call(CallError::InvalidRequest));
+        }
+        let mut initial = *callback.outer.frame.state();
+        initial.eip = record.entry_pc;
+        initial.registers[4] = record.entry_esp;
+        let mut state = [0; STATE_SIZE];
+        let mut exit = [0; EXIT_SIZE];
+        encode_state(&initial, &mut state).map_err(|_| HostError::Infrastructure)?;
+        encode_exit_v3(
+            &ExecutionExit {
+                retired: 0,
+                reason: ExitReason::NeedCode,
+            },
+            &mut exit,
+        )
+        .map_err(|_| HostError::Infrastructure)?;
+        if self.arena()[STATE_OFFSET..STATE_OFFSET + STATE_SIZE] != state
+            || self.arena()[EXIT_OFFSET..EXIT_OFFSET + EXIT_SIZE] != exit
+        {
+            return Err(HostError::Call(CallError::StateChanged));
+        }
+        if self.call_cancelled() {
+            return Err(HostError::Call(CallError::Cancelled));
+        }
+        let outer_exit = decode_exit(&callback.outer.exit)
+            .map_err(|_| HostError::Call(CallError::InvalidStop))?;
+        let ExitReason::Gate { id: outer_gate_id } = outer_exit.reason else {
+            return Err(HostError::Call(CallError::InvalidStop));
+        };
+        if !outer_unit.matches_gate(callback.outer.frame.state().eip, outer_gate_id) {
+            return Err(HostError::Call(CallError::InvalidStop));
+        }
+        if !callback_unit.contains_instruction(record.entry_pc)
+            || !callback_unit.matches_gate(record.return_pc, record.return_id)
+            || record.return_id == outer_gate_id
+        {
+            return Err(HostError::Call(CallError::InvalidRequest));
+        }
+        let SuspendedRecord::Resident { authorized, .. } =
+            &mut self.callback.as_mut().unwrap().record
+        else {
+            unreachable!()
+        };
+        *authorized = true;
+        Ok(())
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub fn begin_resident_callback_from_transfer(
         &mut self,
@@ -145,7 +214,10 @@ impl EngineInstance {
         output[28..32].copy_from_slice(&record.outcome.to_le_bytes());
         let outer = self.pending_call.take().unwrap();
         self.callback = Some(SuspendedCallback {
-            record: SuspendedRecord::Resident(record),
+            record: SuspendedRecord::Resident {
+                record,
+                authorized: false,
+            },
             outer,
         });
         self.call_token = token;

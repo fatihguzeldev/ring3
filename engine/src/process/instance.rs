@@ -290,8 +290,15 @@ impl EngineInstance {
         if key != self.key {
             return Err(HostError::InvalidArtifact);
         }
-        if self.pending_call.is_some() || self.callback.is_some() {
+        if self.pending_call.is_some() {
             return Err(HostError::Call(CallError::Busy));
+        }
+        if let Some(callback) = self.callback.as_ref() {
+            let Some(record) = callback.authorized_resident_record() else {
+                return Err(HostError::Call(CallError::Busy));
+            };
+            self.guard_resident_unit(key, record.callback_unit_id)?;
+            self.guard_resident_unit(key, record.outer_unit_id)?;
         }
         Ok(())
     }

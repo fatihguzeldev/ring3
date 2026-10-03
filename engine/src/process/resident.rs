@@ -97,8 +97,17 @@ impl EngineInstance {
 
     pub fn guard_resident(&self, key: u64, id: u64) -> Result<(), HostError> {
         self.guard_resident_unit(key, id)?;
-        if self.pending_call.is_some() || self.callback.is_some() {
+        if self.pending_call.is_some() {
             return Err(HostError::Call(CallError::Busy));
+        }
+        if let Some(callback) = self.callback.as_ref() {
+            let Some(record) = callback.authorized_resident_record() else {
+                return Err(HostError::Call(CallError::Busy));
+            };
+            if id != record.callback_unit_id {
+                return Err(HostError::Call(CallError::Busy));
+            }
+            self.guard_resident_unit(key, record.outer_unit_id)?;
         }
         Ok(())
     }
