@@ -40,6 +40,88 @@ pub(super) struct PendingCall {
 }
 
 impl EngineInstance {
+    pub fn capture_active_resident_callback_call(
+        &mut self,
+        key: u64,
+        unit_id: u64,
+        callback_token: u32,
+        convention: CallingConvention32,
+        stack_words: u32,
+    ) -> Result<CallRecord32, HostError> {
+        let tag = match convention {
+            CallingConvention32::Cdecl => 1,
+            CallingConvention32::Stdcall => 2,
+            CallingConvention32::Thiscall => 3,
+        };
+        self.capture_active_resident_callback_call_raw(
+            key,
+            unit_id,
+            callback_token,
+            tag,
+            stack_words,
+        )
+    }
+
+    pub fn capture_active_resident_callback_call_raw(
+        &mut self,
+        key: u64,
+        unit_id: u64,
+        callback_token: u32,
+        convention_tag: u32,
+        stack_words: u32,
+    ) -> Result<CallRecord32, HostError> {
+        let owner = self.active_resident_callback_call_owner(key, unit_id, callback_token)?;
+        if self.pending_call.is_some() {
+            return Err(HostError::Call(CallError::Busy));
+        }
+        self.capture_call_frame(owner, convention_tag, stack_words)
+    }
+
+    pub fn complete_active_resident_callback_call(
+        &mut self,
+        key: u64,
+        unit_id: u64,
+        callback_token: u32,
+        inner_token: u32,
+        result: u32,
+    ) -> Result<(), HostError> {
+        let owner = self.active_resident_callback_call_owner(key, unit_id, callback_token)?;
+        self.complete_call_frame(owner, inner_token, result)
+    }
+
+    fn active_resident_callback_call_owner(
+        &self,
+        key: u64,
+        unit_id: u64,
+        callback_token: u32,
+    ) -> Result<PendingOwner, HostError> {
+        self.guard_resident_unit(key, unit_id)?;
+        let callback = self
+            .callback
+            .as_ref()
+            .ok_or(HostError::Call(CallError::InvalidToken))?;
+        let SuspendedRecord::Resident {
+            record,
+            authorized,
+            active_unit_id,
+        } = callback.record
+        else {
+            return Err(HostError::Call(CallError::InvalidToken));
+        };
+        if callback_token == 0 || record.token != callback_token {
+            return Err(HostError::Call(CallError::InvalidToken));
+        }
+        self.guard_resident_unit(key, record.callback_unit_id)?;
+        self.guard_resident_unit(key, record.outer_unit_id)?;
+        if !authorized || active_unit_id != unit_id {
+            return Err(HostError::Call(CallError::Busy));
+        }
+        Ok(PendingOwner::ResidentCallback {
+            unit_id,
+            callback_token,
+        })
+    }
+
     pub fn capture_resident_callback_call(
         &mut self,
         key: u64,

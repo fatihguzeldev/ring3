@@ -407,6 +407,56 @@ pub extern "C" fn select_resident_callback_unit(
 }
 
 #[allow(unsafe_code)]
+#[unsafe(export_name = "ring3_abi_v1_capture_active_resident_callback_call")]
+pub extern "C" fn capture_active_resident_callback_call(
+    key_low: u32,
+    key_high: u32,
+    id_low: u32,
+    id_high: u32,
+    callback_token: u32,
+    convention: u32,
+    words: u32,
+) -> u32 {
+    {
+        #![forbid(unsafe_code)]
+        crate::process::wasm::capture_active_resident_callback_call(
+            key_low,
+            key_high,
+            id_low,
+            id_high,
+            callback_token,
+            convention,
+            words,
+        )
+    }
+}
+
+#[allow(unsafe_code)]
+#[unsafe(export_name = "ring3_abi_v1_complete_active_resident_callback_call")]
+pub extern "C" fn complete_active_resident_callback_call(
+    key_low: u32,
+    key_high: u32,
+    id_low: u32,
+    id_high: u32,
+    callback_token: u32,
+    inner_token: u32,
+    result: u32,
+) -> u32 {
+    {
+        #![forbid(unsafe_code)]
+        crate::process::wasm::complete_active_resident_callback_call(
+            key_low,
+            key_high,
+            id_low,
+            id_high,
+            callback_token,
+            inner_token,
+            result,
+        )
+    }
+}
+
+#[allow(unsafe_code)]
 #[unsafe(export_name = "ring3_abi_v1_capture_resident_callback_call")]
 pub extern "C" fn capture_resident_callback_call(
     key_low: u32,

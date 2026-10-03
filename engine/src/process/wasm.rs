@@ -363,6 +363,46 @@ pub(crate) fn abandon_call(low: u32, high: u32, token: u32) -> u32 {
     mutate(|instance| instance.abandon_call(key, token))
 }
 
+pub(crate) fn capture_active_resident_callback_call(
+    key_low: u32,
+    key_high: u32,
+    id_low: u32,
+    id_high: u32,
+    callback_token: u32,
+    convention: u32,
+    words: u32,
+) -> u32 {
+    let key = u64::from(key_low) | (u64::from(key_high) << 32);
+    let id = u64::from(id_low) | (u64::from(id_high) << 32);
+    mutate(|instance| {
+        instance
+            .capture_active_resident_callback_call_raw(key, id, callback_token, convention, words)
+            .map(|_| ())
+    })
+}
+
+pub(crate) fn complete_active_resident_callback_call(
+    key_low: u32,
+    key_high: u32,
+    id_low: u32,
+    id_high: u32,
+    callback_token: u32,
+    inner_token: u32,
+    result: u32,
+) -> u32 {
+    let key = u64::from(key_low) | (u64::from(key_high) << 32);
+    let id = u64::from(id_low) | (u64::from(id_high) << 32);
+    mutate(|instance| {
+        instance.complete_active_resident_callback_call(
+            key,
+            id,
+            callback_token,
+            inner_token,
+            result,
+        )
+    })
+}
+
 pub(crate) fn capture_resident_callback_call(
     key_low: u32,
     key_high: u32,
