@@ -1,0 +1,4448 @@
+{
+  "profile": "bounded register-only truncated signed IMUL32; three canonical forms; no memory multiply",
+  "primary_references": [
+    {
+      "url": "https://cdrdv2-public.intel.com/812383/253666-sdm-vol-2a.pdf#page=611",
+      "manual": "IMUL3-501..3-503",
+      "revision": "253666-082US December2023",
+      "note": "pinned stable legacy semantics; no latest claim"
+    },
+    {
+      "url": "https://webassembly.github.io/spec/core/exec/numerics.html#op-imul",
+      "note": "Wasm modulo multiplication/signed extension; guest flags independently specified"
+    }
+  ],
+  "independent_reference": "Python arbitrary-precision integers: convert raw32 words to signed range, multiply mathematically, test signed32 range, reduce product modulo2^32. No emitted instruction formula, current decoder or observed output is an input.",
+  "flag_policy": {
+    "mask": 3287,
+    "defined": "CF=OF iff exact signed product outside[-2^31,2^31-1]",
+    "undefined": "Ring3 clears PF/AF/ZF/SF deterministically for every successful IMUL; preserveDF/bit1",
+    "undefined_caveat": "zero result hasZF0 and negative result hasSF0 by profile choice, not portable processor guarantees"
+  },
+  "anchors": [
+    {
+      "left_word": 0,
+      "right_word": 4294967295,
+      "result": 0,
+      "flags": 2,
+      "exact_signed_product": "0"
+    },
+    {
+      "left_word": 4294967295,
+      "right_word": 4294967295,
+      "result": 1,
+      "flags": 2,
+      "exact_signed_product": "1"
+    },
+    {
+      "left_word": 2147483648,
+      "right_word": 1,
+      "result": 2147483648,
+      "flags": 2,
+      "exact_signed_product": "-2147483648"
+    },
+    {
+      "left_word": 2147483648,
+      "right_word": 4294967295,
+      "result": 2147483648,
+      "flags": 2051,
+      "exact_signed_product": "2147483648"
+    },
+    {
+      "left_word": 2147483647,
+      "right_word": 2,
+      "result": 4294967294,
+      "flags": 2051,
+      "exact_signed_product": "4294967294"
+    },
+    {
+      "left_word": 2147483648,
+      "right_word": 2,
+      "result": 0,
+      "flags": 2051,
+      "exact_signed_product": "-4294967296"
+    },
+    {
+      "left_word": 65536,
+      "right_word": 65536,
+      "result": 0,
+      "flags": 2051,
+      "exact_signed_product": "4294967296"
+    },
+    {
+      "left_word": 4294967287,
+      "right_word": 4294967287,
+      "result": 81,
+      "flags": 2,
+      "exact_signed_product": "81"
+    },
+    {
+      "left_word": 46340,
+      "right_word": 46340,
+      "result": 2147395600,
+      "flags": 2,
+      "exact_signed_product": "2147395600"
+    },
+    {
+      "left_word": 46341,
+      "right_word": 46341,
+      "result": 2147488281,
+      "flags": 2051,
+      "exact_signed_product": "2147488281"
+    },
+    {
+      "left_word": 2147483648,
+      "right_word": 2147483648,
+      "result": 0,
+      "flags": 2051,
+      "exact_signed_product": "4611686018427387904"
+    },
+    {
+      "left_word": 6,
+      "right_word": 4294967295,
+      "result": 4294967290,
+      "flags": 2,
+      "exact_signed_product": "-6"
+    }
+  ],
+  "program": {
+    "guest_base": 4096,
+    "text_length": 746,
+    "text_hex": "b800000080b9ffffffff0fafc17005baefbeadde6bd8ff7205beefbeadde6beb017105bfefbeaddeeb000f0b0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000b8f9ffffffba060000000fafc26bc87f6bd98069f10000008069feffffffffbd000001000fafedbcf7ffffff6be4ffeb000f0b000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000fafc2eb000f0b0000000000000000000fafcbeb000f0b0000000000000000000fafd1eb000f0b0000000000000000000fafd8eb000f0b0000000000000000000fafe4eb000f0b0000000000000000000fafedeb000f0b0000000000000000000faff7eb000f0b0000000000000000000faffeeb000f0b0000000000000000006bc17feb000f0b0000000000000000006bc980eb000f0b0000000000000000006be4ffeb000f0b0000000000000000006bda00eb000f0b00000000000000000069f100000080eb000f0b00000000000069feffffff7feb000f0b00000000000069ebffffffffeb000f0b",
+    "text_sha256": "11249e2417e4fc0213f302aaf784d0ec18d09223b7917e2a6574c438559611b5",
+    "symbols": {
+      "overflow_after_first": {
+        "offset": 13,
+        "size": 0,
+        "hex": ""
+      },
+      "overflow_first_taken": {
+        "offset": 20,
+        "size": 0,
+        "hex": ""
+      },
+      "overflow_first_fallthrough": {
+        "offset": 15,
+        "size": 0,
+        "hex": ""
+      },
+      "overflow_after_second": {
+        "offset": 23,
+        "size": 0,
+        "hex": ""
+      },
+      "overflow_second_taken": {
+        "offset": 30,
+        "size": 0,
+        "hex": ""
+      },
+      "overflow_second_fallthrough": {
+        "offset": 25,
+        "size": 0,
+        "hex": ""
+      },
+      "overflow_after_third": {
+        "offset": 33,
+        "size": 0,
+        "hex": ""
+      },
+      "overflow_third_taken": {
+        "offset": 40,
+        "size": 0,
+        "hex": ""
+      },
+      "overflow_third_fallthrough": {
+        "offset": 35,
+        "size": 0,
+        "hex": ""
+      },
+      "overflow_done": {
+        "offset": 42,
+        "size": 0,
+        "hex": ""
+      },
+      "source_after_two": {
+        "offset": 269,
+        "size": 0,
+        "hex": ""
+      },
+      "source_after_7f": {
+        "offset": 272,
+        "size": 0,
+        "hex": ""
+      },
+      "source_after_80": {
+        "offset": 275,
+        "size": 0,
+        "hex": ""
+      },
+      "source_after_min": {
+        "offset": 281,
+        "size": 0,
+        "hex": ""
+      },
+      "source_after_full_ff": {
+        "offset": 287,
+        "size": 0,
+        "hex": ""
+      },
+      "source_after_square": {
+        "offset": 295,
+        "size": 0,
+        "hex": ""
+      },
+      "source_after_esp": {
+        "offset": 303,
+        "size": 0,
+        "hex": ""
+      },
+      "source_done": {
+        "offset": 305,
+        "size": 0,
+        "hex": ""
+      },
+      "imul_eax_edx_done": {
+        "offset": 517,
+        "size": 0,
+        "hex": ""
+      },
+      "imul_ecx_ebx_done": {
+        "offset": 533,
+        "size": 0,
+        "hex": ""
+      },
+      "imul_edx_ecx_done": {
+        "offset": 549,
+        "size": 0,
+        "hex": ""
+      },
+      "imul_ebx_eax_done": {
+        "offset": 565,
+        "size": 0,
+        "hex": ""
+      },
+      "imul_esp_self_done": {
+        "offset": 581,
+        "size": 0,
+        "hex": ""
+      },
+      "imul_ebp_self_done": {
+        "offset": 597,
+        "size": 0,
+        "hex": ""
+      },
+      "imul_esi_edi_done": {
+        "offset": 613,
+        "size": 0,
+        "hex": ""
+      },
+      "imul_edi_esi_done": {
+        "offset": 629,
+        "size": 0,
+        "hex": ""
+      },
+      "imul_7f_eax_ecx_done": {
+        "offset": 645,
+        "size": 0,
+        "hex": ""
+      },
+      "imul_80_ecx_self_done": {
+        "offset": 661,
+        "size": 0,
+        "hex": ""
+      },
+      "imul_ff_esp_self_done": {
+        "offset": 677,
+        "size": 0,
+        "hex": ""
+      },
+      "imul_zero_ebx_edx_done": {
+        "offset": 693,
+        "size": 0,
+        "hex": ""
+      },
+      "imul_min_esi_ecx_done": {
+        "offset": 712,
+        "size": 0,
+        "hex": ""
+      },
+      "imul_max_edi_esi_done": {
+        "offset": 728,
+        "size": 0,
+        "hex": ""
+      },
+      "imul_full_ff_ebp_ebx_done": {
+        "offset": 744,
+        "size": 0,
+        "hex": ""
+      },
+      "overflow_branch_chain": {
+        "offset": 0,
+        "size": 44,
+        "hex": "b800000080b9ffffffff0fafc17005baefbeadde6bd8ff7205beefbeadde6beb017105bfefbeaddeeb000f0b"
+      },
+      "source_alias_chain": {
+        "offset": 256,
+        "size": 51,
+        "hex": "b8f9ffffffba060000000fafc26bc87f6bd98069f10000008069feffffffffbd000001000fafedbcf7ffffff6be4ffeb000f0b"
+      },
+      "imul_eax_edx": {
+        "offset": 512,
+        "size": 7,
+        "hex": "0fafc2eb000f0b"
+      },
+      "imul_ecx_ebx": {
+        "offset": 528,
+        "size": 7,
+        "hex": "0fafcbeb000f0b"
+      },
+      "imul_edx_ecx": {
+        "offset": 544,
+        "size": 7,
+        "hex": "0fafd1eb000f0b"
+      },
+      "imul_ebx_eax": {
+        "offset": 560,
+        "size": 7,
+        "hex": "0fafd8eb000f0b"
+      },
+      "imul_esp_self": {
+        "offset": 576,
+        "size": 7,
+        "hex": "0fafe4eb000f0b"
+      },
+      "imul_ebp_self": {
+        "offset": 592,
+        "size": 7,
+        "hex": "0fafedeb000f0b"
+      },
+      "imul_esi_edi": {
+        "offset": 608,
+        "size": 7,
+        "hex": "0faff7eb000f0b"
+      },
+      "imul_edi_esi": {
+        "offset": 624,
+        "size": 7,
+        "hex": "0faffeeb000f0b"
+      },
+      "imul_7f_eax_ecx": {
+        "offset": 640,
+        "size": 7,
+        "hex": "6bc17feb000f0b"
+      },
+      "imul_80_ecx_self": {
+        "offset": 656,
+        "size": 7,
+        "hex": "6bc980eb000f0b"
+      },
+      "imul_ff_esp_self": {
+        "offset": 672,
+        "size": 7,
+        "hex": "6be4ffeb000f0b"
+      },
+      "imul_zero_ebx_edx": {
+        "offset": 688,
+        "size": 7,
+        "hex": "6bda00eb000f0b"
+      },
+      "imul_min_esi_ecx": {
+        "offset": 704,
+        "size": 10,
+        "hex": "69f100000080eb000f0b"
+      },
+      "imul_max_edi_esi": {
+        "offset": 720,
+        "size": 10,
+        "hex": "69feffffff7feb000f0b"
+      },
+      "imul_full_ff_ebp_ebx": {
+        "offset": 736,
+        "size": 10,
+        "hex": "69ebffffffffeb000f0b"
+      }
+    },
+    "functions": 17,
+    "no_text_relocations": true,
+    "initial_exit_hex": "a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5",
+    "initial_helper_hex": "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a",
+    "padding_and_UD2": "LLVM linear sweep can render zero gaps as unrelated byte instructions; only named seeded extents execute and end JMP before adjacent unsupportedUD2"
+  },
+  "owners": [
+    "replacement",
+    "resident"
+  ],
+  "programmes": [
+    {
+      "name": "overflow-branch-DF0",
+      "symbol": "overflow_branch_chain",
+      "DF": 0,
+      "entry_seeds": [
+        4096,
+        4111,
+        4116,
+        4121,
+        4126,
+        4131,
+        4136
+      ],
+      "budget": 24,
+      "executed_instructions": 9,
+      "decoded_instructions": 12,
+      "initial": {
+        "registers": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "eip": 4096,
+        "eflags": 2,
+        "state_hex": "5233535401000100380000000000000000000000000000000000000000000000000000000000000000000000000000000010000002000000"
+      },
+      "complete": {
+        "registers": [
+          2147483648,
+          4294967295,
+          0,
+          2147483648,
+          0,
+          2147483648,
+          0,
+          0
+        ],
+        "eip": 4138,
+        "eflags": 2,
+        "state_hex": "5233535401000100380000000000000000000080ffffffff0000000000000080000000000000008000000000000000002a10000002000000",
+        "reason": 3,
+        "fresh_retired": 9,
+        "exit_hex": "52334558010001002800000000000000030000000900000000000000000000000000000000000000",
+        "helper_hex": "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a"
+      },
+      "split": [
+        {
+          "label": "after_first",
+          "budget": 3,
+          "cumulative_retired": 3,
+          "registers": [
+            2147483648,
+            4294967295,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          "eip": 4109,
+          "eflags": 2051,
+          "state_hex": "5233535401000100380000000000000000000080ffffffff0000000000000000000000000000000000000000000000000d10000003080000",
+          "reason": 1,
+          "fresh_retired": 3,
+          "exit_hex": "52334558010001002800000000000000010000000300000000000000000000000000000000000000",
+          "helper_hex": "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a",
+          "pauses": {
+            "cancel": {
+              "registers": [
+                2147483648,
+                4294967295,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0
+              ],
+              "eip": 4109,
+              "eflags": 2051,
+              "state_hex": "5233535401000100380000000000000000000080ffffffff0000000000000000000000000000000000000000000000000d10000003080000",
+              "reason": 2,
+              "fresh_retired": 0,
+              "exit_hex": "52334558010001002800000000000000020000000000000000000000000000000000000000000000",
+              "helper_hex": "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a"
+            },
+            "zero_budget": {
+              "registers": [
+                2147483648,
+                4294967295,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0
+              ],
+              "eip": 4109,
+              "eflags": 2051,
+              "state_hex": "5233535401000100380000000000000000000080ffffffff0000000000000000000000000000000000000000000000000d10000003080000",
+              "reason": 1,
+              "fresh_retired": 0,
+              "exit_hex": "52334558010001002800000000000000010000000000000000000000000000000000000000000000",
+              "helper_hex": "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a"
+            }
+          }
+        },
+        {
+          "label": "after_second",
+          "budget": 2,
+          "cumulative_retired": 5,
+          "registers": [
+            2147483648,
+            4294967295,
+            0,
+            2147483648,
+            0,
+            0,
+            0,
+            0
+          ],
+          "eip": 4119,
+          "eflags": 2051,
+          "state_hex": "5233535401000100380000000000000000000080ffffffff0000000000000080000000000000000000000000000000001710000003080000",
+          "reason": 1,
+          "fresh_retired": 2,
+          "exit_hex": "52334558010001002800000000000000010000000200000000000000000000000000000000000000",
+          "helper_hex": "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a",
+          "pauses": {
+            "cancel": {
+              "registers": [
+                2147483648,
+                4294967295,
+                0,
+                2147483648,
+                0,
+                0,
+                0,
+                0
+              ],
+              "eip": 4119,
+              "eflags": 2051,
+              "state_hex": "5233535401000100380000000000000000000080ffffffff0000000000000080000000000000000000000000000000001710000003080000",
+              "reason": 2,
+              "fresh_retired": 0,
+              "exit_hex": "52334558010001002800000000000000020000000000000000000000000000000000000000000000",
+              "helper_hex": "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a"
+            },
+            "zero_budget": {
+              "registers": [
+                2147483648,
+                4294967295,
+                0,
+                2147483648,
+                0,
+                0,
+                0,
+                0
+              ],
+              "eip": 4119,
+              "eflags": 2051,
+              "state_hex": "5233535401000100380000000000000000000080ffffffff0000000000000080000000000000000000000000000000001710000003080000",
+              "reason": 1,
+              "fresh_retired": 0,
+              "exit_hex": "52334558010001002800000000000000010000000000000000000000000000000000000000000000",
+              "helper_hex": "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a"
+            }
+          }
+        },
+        {
+          "label": "after_third",
+          "budget": 2,
+          "cumulative_retired": 7,
+          "registers": [
+            2147483648,
+            4294967295,
+            0,
+            2147483648,
+            0,
+            2147483648,
+            0,
+            0
+          ],
+          "eip": 4129,
+          "eflags": 2,
+          "state_hex": "5233535401000100380000000000000000000080ffffffff0000000000000080000000000000008000000000000000002110000002000000",
+          "reason": 1,
+          "fresh_retired": 2,
+          "exit_hex": "52334558010001002800000000000000010000000200000000000000000000000000000000000000",
+          "helper_hex": "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a",
+          "pauses": {
+            "cancel": {
+              "registers": [
+                2147483648,
+                4294967295,
+                0,
+                2147483648,
+                0,
+                2147483648,
+                0,
+                0
+              ],
+              "eip": 4129,
+              "eflags": 2,
+              "state_hex": "5233535401000100380000000000000000000080ffffffff0000000000000080000000000000008000000000000000002110000002000000",
+              "reason": 2,
+              "fresh_retired": 0,
+              "exit_hex": "52334558010001002800000000000000020000000000000000000000000000000000000000000000",
+              "helper_hex": "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a"
+            },
+            "zero_budget": {
+              "registers": [
+                2147483648,
+                4294967295,
+                0,
+                2147483648,
+                0,
+                2147483648,
+                0,
+                0
+              ],
+              "eip": 4129,
+              "eflags": 2,
+              "state_hex": "5233535401000100380000000000000000000080ffffffff0000000000000080000000000000008000000000000000002110000002000000",
+              "reason": 1,
+              "fresh_retired": 0,
+              "exit_hex": "52334558010001002800000000000000010000000000000000000000000000000000000000000000",
+              "helper_hex": "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a"
+            }
+          }
+        },
+        {
+          "label": "done",
+          "budget": 24,
+          "cumulative_retired": 9,
+          "registers": [
+            2147483648,
+            4294967295,
+            0,
+            2147483648,
+            0,
+            2147483648,
+            0,
+            0
+          ],
+          "eip": 4138,
+          "eflags": 2,
+          "state_hex": "5233535401000100380000000000000000000080ffffffff0000000000000080000000000000008000000000000000002a10000002000000",
+          "reason": 3,
+          "fresh_retired": 2,
+          "exit_hex": "52334558010001002800000000000000030000000200000000000000000000000000000000000000",
+          "helper_hex": "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a",
+          "pauses": {
+            "cancel": {
+              "registers": [
+                2147483648,
+                4294967295,
+                0,
+                2147483648,
+                0,
+                2147483648,
+                0,
+                0
+              ],
+              "eip": 4138,
+              "eflags": 2,
+              "state_hex": "5233535401000100380000000000000000000080ffffffff0000000000000080000000000000008000000000000000002a10000002000000",
+              "reason": 2,
+              "fresh_retired": 0,
+              "exit_hex": "52334558010001002800000000000000020000000000000000000000000000000000000000000000",
+              "helper_hex": "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a"
+            },
+            "zero_budget": {
+              "registers": [
+                2147483648,
+                4294967295,
+                0,
+                2147483648,
+                0,
+                2147483648,
+                0,
+                0
+              ],
+              "eip": 4138,
+              "eflags": 2,
+              "state_hex": "5233535401000100380000000000000000000080ffffffff0000000000000080000000000000008000000000000000002a10000002000000",
+              "reason": 1,
+              "fresh_retired": 0,
+              "exit_hex": "52334558010001002800000000000000010000000000000000000000000000000000000000000000",
+              "helper_hex": "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a"
+            }
+          }
+        }
+      ],
+      "branch_expectations": [
+        {
+          "instruction_pc": 4109,
+          "condition": "OF1",
+          "selected_pc": 4116,
+          "unexecuted_pc": 4111
+        },
+        {
+          "instruction_pc": 4119,
+          "condition": "CF1",
+          "selected_pc": 4126,
+          "unexecuted_pc": 4121
+        },
+        {
+          "instruction_pc": 4129,
+          "condition": "OF0",
+          "selected_pc": 4136,
+          "unexecuted_pc": 4131
+        }
+      ],
+      "unexecuted_canaries": {
+        "EDX": 3735928559,
+        "ESI": 3735928559,
+        "EDI": 3735928559
+      }
+    },
+    {
+      "name": "source-alias-DF0",
+      "symbol": "source_alias_chain",
+      "DF": 0,
+      "entry_seeds": [
+        4352
+      ],
+      "budget": 24,
+      "executed_instructions": 12,
+      "decoded_instructions": 12,
+      "initial": {
+        "registers": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "eip": 4352,
+        "eflags": 2,
+        "state_hex": "5233535401000100380000000000000000000000000000000000000000000000000000000000000000000000000000000011000002000000"
+      },
+      "complete": {
+        "registers": [
+          4294967254,
+          4294961962,
+          6,
+          682752,
+          9,
+          0,
+          0,
+          0
+        ],
+        "eip": 4401,
+        "eflags": 2,
+        "state_hex": "52335354010001003800000000000000d6ffffff2aebffff06000000006b0a00090000000000000000000000000000003111000002000000",
+        "reason": 3,
+        "fresh_retired": 12,
+        "exit_hex": "52334558010001002800000000000000030000000c00000000000000000000000000000000000000",
+        "helper_hex": "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a"
+      },
+      "split": [
+        {
+          "label": "after_two",
+          "budget": 3,
+          "cumulative_retired": 3,
+          "registers": [
+            4294967254,
+            0,
+            6,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          "eip": 4365,
+          "eflags": 2,
+          "state_hex": "52335354010001003800000000000000d6ffffff000000000600000000000000000000000000000000000000000000000d11000002000000",
+          "reason": 1,
+          "fresh_retired": 3,
+          "exit_hex": "52334558010001002800000000000000010000000300000000000000000000000000000000000000",
+          "helper_hex": "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a",
+          "pauses": {
+            "cancel": {
+              "registers": [
+                4294967254,
+                0,
+                6,
+                0,
+                0,
+                0,
+                0,
+                0
+              ],
+              "eip": 4365,
+              "eflags": 2,
+              "state_hex": "52335354010001003800000000000000d6ffffff000000000600000000000000000000000000000000000000000000000d11000002000000",
+              "reason": 2,
+              "fresh_retired": 0,
+              "exit_hex": "52334558010001002800000000000000020000000000000000000000000000000000000000000000",
+              "helper_hex": "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a"
+            },
+            "zero_budget": {
+              "registers": [
+                4294967254,
+                0,
+                6,
+                0,
+                0,
+                0,
+                0,
+                0
+              ],
+              "eip": 4365,
+              "eflags": 2,
+              "state_hex": "52335354010001003800000000000000d6ffffff000000000600000000000000000000000000000000000000000000000d11000002000000",
+              "reason": 1,
+              "fresh_retired": 0,
+              "exit_hex": "52334558010001002800000000000000010000000000000000000000000000000000000000000000",
+              "helper_hex": "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a"
+            }
+          }
+        },
+        {
+          "label": "source_after_7f",
+          "budget": 1,
+          "cumulative_retired": 4,
+          "registers": [
+            4294967254,
+            4294961962,
+            6,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          "eip": 4368,
+          "eflags": 2,
+          "state_hex": "52335354010001003800000000000000d6ffffff2aebffff0600000000000000000000000000000000000000000000001011000002000000",
+          "reason": 1,
+          "fresh_retired": 1,
+          "exit_hex": "52334558010001002800000000000000010000000100000000000000000000000000000000000000",
+          "helper_hex": "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a",
+          "pauses": {
+            "cancel": {
+              "registers": [
+                4294967254,
+                4294961962,
+                6,
+                0,
+                0,
+                0,
+                0,
+                0
+              ],
+              "eip": 4368,
+              "eflags": 2,
+              "state_hex": "52335354010001003800000000000000d6ffffff2aebffff0600000000000000000000000000000000000000000000001011000002000000",
+              "reason": 2,
+              "fresh_retired": 0,
+              "exit_hex": "52334558010001002800000000000000020000000000000000000000000000000000000000000000",
+              "helper_hex": "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a"
+            },
+            "zero_budget": {
+              "registers": [
+                4294967254,
+                4294961962,
+                6,
+                0,
+                0,
+                0,
+                0,
+                0
+              ],
+              "eip": 4368,
+              "eflags": 2,
+              "state_hex": "52335354010001003800000000000000d6ffffff2aebffff0600000000000000000000000000000000000000000000001011000002000000",
+              "reason": 1,
+              "fresh_retired": 0,
+              "exit_hex": "52334558010001002800000000000000010000000000000000000000000000000000000000000000",
+              "helper_hex": "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a"
+            }
+          }
+        },
+        {
+          "label": "source_after_80",
+          "budget": 1,
+          "cumulative_retired": 5,
+          "registers": [
+            4294967254,
+            4294961962,
+            6,
+            682752,
+            0,
+            0,
+            0,
+            0
+          ],
+          "eip": 4371,
+          "eflags": 2,
+          "state_hex": "52335354010001003800000000000000d6ffffff2aebffff06000000006b0a00000000000000000000000000000000001311000002000000",
+          "reason": 1,
+          "fresh_retired": 1,
+          "exit_hex": "52334558010001002800000000000000010000000100000000000000000000000000000000000000",
+          "helper_hex": "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a",
+          "pauses": {
+            "cancel": {
+              "registers": [
+                4294967254,
+                4294961962,
+                6,
+                682752,
+                0,
+                0,
+                0,
+                0
+              ],
+              "eip": 4371,
+              "eflags": 2,
+              "state_hex": "52335354010001003800000000000000d6ffffff2aebffff06000000006b0a00000000000000000000000000000000001311000002000000",
+              "reason": 2,
+              "fresh_retired": 0,
+              "exit_hex": "52334558010001002800000000000000020000000000000000000000000000000000000000000000",
+              "helper_hex": "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a"
+            },
+            "zero_budget": {
+              "registers": [
+                4294967254,
+                4294961962,
+                6,
+                682752,
+                0,
+                0,
+                0,
+                0
+              ],
+              "eip": 4371,
+              "eflags": 2,
+              "state_hex": "52335354010001003800000000000000d6ffffff2aebffff06000000006b0a00000000000000000000000000000000001311000002000000",
+              "reason": 1,
+              "fresh_retired": 0,
+              "exit_hex": "52334558010001002800000000000000010000000000000000000000000000000000000000000000",
+              "helper_hex": "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a"
+            }
+          }
+        },
+        {
+          "label": "source_after_min",
+          "budget": 1,
+          "cumulative_retired": 6,
+          "registers": [
+            4294967254,
+            4294961962,
+            6,
+            682752,
+            0,
+            0,
+            0,
+            0
+          ],
+          "eip": 4377,
+          "eflags": 2051,
+          "state_hex": "52335354010001003800000000000000d6ffffff2aebffff06000000006b0a00000000000000000000000000000000001911000003080000",
+          "reason": 1,
+          "fresh_retired": 1,
+          "exit_hex": "52334558010001002800000000000000010000000100000000000000000000000000000000000000",
+          "helper_hex": "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a",
+          "pauses": {
+            "cancel": {
+              "registers": [
+                4294967254,
+                4294961962,
+                6,
+                682752,
+                0,
+                0,
+                0,
+                0
+              ],
+              "eip": 4377,
+              "eflags": 2051,
+              "state_hex": "52335354010001003800000000000000d6ffffff2aebffff06000000006b0a00000000000000000000000000000000001911000003080000",
+              "reason": 2,
+              "fresh_retired": 0,
+              "exit_hex": "52334558010001002800000000000000020000000000000000000000000000000000000000000000",
+              "helper_hex": "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a"
+            },
+            "zero_budget": {
+              "registers": [
+                4294967254,
+                4294961962,
+                6,
+                682752,
+                0,
+                0,
+                0,
+                0
+              ],
+              "eip": 4377,
+              "eflags": 2051,
+              "state_hex": "52335354010001003800000000000000d6ffffff2aebffff06000000006b0a00000000000000000000000000000000001911000003080000",
+              "reason": 1,
+              "fresh_retired": 0,
+              "exit_hex": "52334558010001002800000000000000010000000000000000000000000000000000000000000000",
+              "helper_hex": "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a"
+            }
+          }
+        },
+        {
+          "label": "source_after_full_ff",
+          "budget": 1,
+          "cumulative_retired": 7,
+          "registers": [
+            4294967254,
+            4294961962,
+            6,
+            682752,
+            0,
+            0,
+            0,
+            0
+          ],
+          "eip": 4383,
+          "eflags": 2,
+          "state_hex": "52335354010001003800000000000000d6ffffff2aebffff06000000006b0a00000000000000000000000000000000001f11000002000000",
+          "reason": 1,
+          "fresh_retired": 1,
+          "exit_hex": "52334558010001002800000000000000010000000100000000000000000000000000000000000000",
+          "helper_hex": "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a",
+          "pauses": {
+            "cancel": {
+              "registers": [
+                4294967254,
+                4294961962,
+                6,
+                682752,
+                0,
+                0,
+                0,
+                0
+              ],
+              "eip": 4383,
+              "eflags": 2,
+              "state_hex": "52335354010001003800000000000000d6ffffff2aebffff06000000006b0a00000000000000000000000000000000001f11000002000000",
+              "reason": 2,
+              "fresh_retired": 0,
+              "exit_hex": "52334558010001002800000000000000020000000000000000000000000000000000000000000000",
+              "helper_hex": "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a"
+            },
+            "zero_budget": {
+              "registers": [
+                4294967254,
+                4294961962,
+                6,
+                682752,
+                0,
+                0,
+                0,
+                0
+              ],
+              "eip": 4383,
+              "eflags": 2,
+              "state_hex": "52335354010001003800000000000000d6ffffff2aebffff06000000006b0a00000000000000000000000000000000001f11000002000000",
+              "reason": 1,
+              "fresh_retired": 0,
+              "exit_hex": "52334558010001002800000000000000010000000000000000000000000000000000000000000000",
+              "helper_hex": "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a"
+            }
+          }
+        },
+        {
+          "label": "after_square",
+          "budget": 2,
+          "cumulative_retired": 9,
+          "registers": [
+            4294967254,
+            4294961962,
+            6,
+            682752,
+            0,
+            0,
+            0,
+            0
+          ],
+          "eip": 4391,
+          "eflags": 2051,
+          "state_hex": "52335354010001003800000000000000d6ffffff2aebffff06000000006b0a00000000000000000000000000000000002711000003080000",
+          "reason": 1,
+          "fresh_retired": 2,
+          "exit_hex": "52334558010001002800000000000000010000000200000000000000000000000000000000000000",
+          "helper_hex": "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a",
+          "pauses": {
+            "cancel": {
+              "registers": [
+                4294967254,
+                4294961962,
+                6,
+                682752,
+                0,
+                0,
+                0,
+                0
+              ],
+              "eip": 4391,
+              "eflags": 2051,
+              "state_hex": "52335354010001003800000000000000d6ffffff2aebffff06000000006b0a00000000000000000000000000000000002711000003080000",
+              "reason": 2,
+              "fresh_retired": 0,
+              "exit_hex": "52334558010001002800000000000000020000000000000000000000000000000000000000000000",
+              "helper_hex": "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a"
+            },
+            "zero_budget": {
+              "registers": [
+                4294967254,
+                4294961962,
+                6,
+                682752,
+                0,
+                0,
+                0,
+                0
+              ],
+              "eip": 4391,
+              "eflags": 2051,
+              "state_hex": "52335354010001003800000000000000d6ffffff2aebffff06000000006b0a00000000000000000000000000000000002711000003080000",
+              "reason": 1,
+              "fresh_retired": 0,
+              "exit_hex": "52334558010001002800000000000000010000000000000000000000000000000000000000000000",
+              "helper_hex": "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a"
+            }
+          }
+        },
+        {
+          "label": "after_esp",
+          "budget": 2,
+          "cumulative_retired": 11,
+          "registers": [
+            4294967254,
+            4294961962,
+            6,
+            682752,
+            9,
+            0,
+            0,
+            0
+          ],
+          "eip": 4399,
+          "eflags": 2,
+          "state_hex": "52335354010001003800000000000000d6ffffff2aebffff06000000006b0a00090000000000000000000000000000002f11000002000000",
+          "reason": 1,
+          "fresh_retired": 2,
+          "exit_hex": "52334558010001002800000000000000010000000200000000000000000000000000000000000000",
+          "helper_hex": "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a",
+          "pauses": {
+            "cancel": {
+              "registers": [
+                4294967254,
+                4294961962,
+                6,
+                682752,
+                9,
+                0,
+                0,
+                0
+              ],
+              "eip": 4399,
+              "eflags": 2,
+              "state_hex": "52335354010001003800000000000000d6ffffff2aebffff06000000006b0a00090000000000000000000000000000002f11000002000000",
+              "reason": 2,
+              "fresh_retired": 0,
+              "exit_hex": "52334558010001002800000000000000020000000000000000000000000000000000000000000000",
+              "helper_hex": "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a"
+            },
+            "zero_budget": {
+              "registers": [
+                4294967254,
+                4294961962,
+                6,
+                682752,
+                9,
+                0,
+                0,
+                0
+              ],
+              "eip": 4399,
+              "eflags": 2,
+              "state_hex": "52335354010001003800000000000000d6ffffff2aebffff06000000006b0a00090000000000000000000000000000002f11000002000000",
+              "reason": 1,
+              "fresh_retired": 0,
+              "exit_hex": "52334558010001002800000000000000010000000000000000000000000000000000000000000000",
+              "helper_hex": "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a"
+            }
+          }
+        },
+        {
+          "label": "done",
+          "budget": 24,
+          "cumulative_retired": 12,
+          "registers": [
+            4294967254,
+            4294961962,
+            6,
+            682752,
+            9,
+            0,
+            0,
+            0
+          ],
+          "eip": 4401,
+          "eflags": 2,
+          "state_hex": "52335354010001003800000000000000d6ffffff2aebffff06000000006b0a00090000000000000000000000000000003111000002000000",
+          "reason": 3,
+          "fresh_retired": 1,
+          "exit_hex": "52334558010001002800000000000000030000000100000000000000000000000000000000000000",
+          "helper_hex": "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a",
+          "pauses": {
+            "cancel": {
+              "registers": [
+                4294967254,
+                4294961962,
+                6,
+                682752,
+                9,
+                0,
+                0,
+                0
+              ],
+              "eip": 4401,
+              "eflags": 2,
+              "state_hex": "52335354010001003800000000000000d6ffffff2aebffff06000000006b0a00090000000000000000000000000000003111000002000000",
+              "reason": 2,
+              "fresh_retired": 0,
+              "exit_hex": "52334558010001002800000000000000020000000000000000000000000000000000000000000000",
+              "helper_hex": "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a"
+            },
+            "zero_budget": {
+              "registers": [
+                4294967254,
+                4294961962,
+                6,
+                682752,
+                9,
+                0,
+                0,
+                0
+              ],
+              "eip": 4401,
+              "eflags": 2,
+              "state_hex": "52335354010001003800000000000000d6ffffff2aebffff06000000006b0a00090000000000000000000000000000003111000002000000",
+              "reason": 1,
+              "fresh_retired": 0,
+              "exit_hex": "52334558010001002800000000000000010000000000000000000000000000000000000000000000",
+              "helper_hex": "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "overflow-branch-DF1",
+      "symbol": "overflow_branch_chain",
+      "DF": 1,
+      "entry_seeds": [
+        4096,
+        4111,
+        4116,
+        4121,
+        4126,
+        4131,
+        4136
+      ],
+      "budget": 24,
+      "executed_instructions": 9,
+      "decoded_instructions": 12,
+      "initial": {
+        "registers": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "eip": 4096,
+        "eflags": 1026,
+        "state_hex": "5233535401000100380000000000000000000000000000000000000000000000000000000000000000000000000000000010000002040000"
+      },
+      "complete": {
+        "registers": [
+          2147483648,
+          4294967295,
+          0,
+          2147483648,
+          0,
+          2147483648,
+          0,
+          0
+        ],
+        "eip": 4138,
+        "eflags": 1026,
+        "state_hex": "5233535401000100380000000000000000000080ffffffff0000000000000080000000000000008000000000000000002a10000002040000",
+        "reason": 3,
+        "fresh_retired": 9,
+        "exit_hex": "52334558010001002800000000000000030000000900000000000000000000000000000000000000",
+        "helper_hex": "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a"
+      },
+      "split": [
+        {
+          "label": "after_first",
+          "budget": 3,
+          "cumulative_retired": 3,
+          "registers": [
+            2147483648,
+            4294967295,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          "eip": 4109,
+          "eflags": 3075,
+          "state_hex": "5233535401000100380000000000000000000080ffffffff0000000000000000000000000000000000000000000000000d100000030c0000",
+          "reason": 1,
+          "fresh_retired": 3,
+          "exit_hex": "52334558010001002800000000000000010000000300000000000000000000000000000000000000",
+          "helper_hex": "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a",
+          "pauses": {
+            "cancel": {
+              "registers": [
+                2147483648,
+                4294967295,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0
+              ],
+              "eip": 4109,
+              "eflags": 3075,
+              "state_hex": "5233535401000100380000000000000000000080ffffffff0000000000000000000000000000000000000000000000000d100000030c0000",
+              "reason": 2,
+              "fresh_retired": 0,
+              "exit_hex": "52334558010001002800000000000000020000000000000000000000000000000000000000000000",
+              "helper_hex": "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a"
+            },
+            "zero_budget": {
+              "registers": [
+                2147483648,
+                4294967295,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0
+              ],
+              "eip": 4109,
+              "eflags": 3075,
+              "state_hex": "5233535401000100380000000000000000000080ffffffff0000000000000000000000000000000000000000000000000d100000030c0000",
+              "reason": 1,
+              "fresh_retired": 0,
+              "exit_hex": "52334558010001002800000000000000010000000000000000000000000000000000000000000000",
+              "helper_hex": "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a"
+            }
+          }
+        },
+        {
+          "label": "after_second",
+          "budget": 2,
+          "cumulative_retired": 5,
+          "registers": [
+            2147483648,
+            4294967295,
+            0,
+            2147483648,
+            0,
+            0,
+            0,
+            0
+          ],
+          "eip": 4119,
+          "eflags": 3075,
+          "state_hex": "5233535401000100380000000000000000000080ffffffff00000000000000800000000000000000000000000000000017100000030c0000",
+          "reason": 1,
+          "fresh_retired": 2,
+          "exit_hex": "52334558010001002800000000000000010000000200000000000000000000000000000000000000",
+          "helper_hex": "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a",
+          "pauses": {
+            "cancel": {
+              "registers": [
+                2147483648,
+                4294967295,
+                0,
+                2147483648,
+                0,
+                0,
+                0,
+                0
+              ],
+              "eip": 4119,
+              "eflags": 3075,
+              "state_hex": "5233535401000100380000000000000000000080ffffffff00000000000000800000000000000000000000000000000017100000030c0000",
+              "reason": 2,
+              "fresh_retired": 0,
+              "exit_hex": "52334558010001002800000000000000020000000000000000000000000000000000000000000000",
+              "helper_hex": "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a"
+            },
+            "zero_budget": {
+              "registers": [
+                2147483648,
+                4294967295,
+                0,
+                2147483648,
+                0,
+                0,
+                0,
+                0
+              ],
+              "eip": 4119,
+              "eflags": 3075,
+              "state_hex": "5233535401000100380000000000000000000080ffffffff00000000000000800000000000000000000000000000000017100000030c0000",
+              "reason": 1,
+              "fresh_retired": 0,
+              "exit_hex": "52334558010001002800000000000000010000000000000000000000000000000000000000000000",
+              "helper_hex": "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a"
+            }
+          }
+        },
+        {
+          "label": "after_third",
+          "budget": 2,
+          "cumulative_retired": 7,
+          "registers": [
+            2147483648,
+            4294967295,
+            0,
+            2147483648,
+            0,
+            2147483648,
+            0,
+            0
+          ],
+          "eip": 4129,
+          "eflags": 1026,
+          "state_hex": "5233535401000100380000000000000000000080ffffffff0000000000000080000000000000008000000000000000002110000002040000",
+          "reason": 1,
+          "fresh_retired": 2,
+          "exit_hex": "52334558010001002800000000000000010000000200000000000000000000000000000000000000",
+          "helper_hex": "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a",
+          "pauses": {
+            "cancel": {
+              "registers": [
+                2147483648,
+                4294967295,
+                0,
+                2147483648,
+                0,
+                2147483648,
+                0,
+                0
+              ],
+              "eip": 4129,
+              "eflags": 1026,
+              "state_hex": "5233535401000100380000000000000000000080ffffffff0000000000000080000000000000008000000000000000002110000002040000",
+              "reason": 2,
+              "fresh_retired": 0,
+              "exit_hex": "52334558010001002800000000000000020000000000000000000000000000000000000000000000",
+              "helper_hex": "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a"
+            },
+            "zero_budget": {
+              "registers": [
+                2147483648,
+                4294967295,
+                0,
+                2147483648,
+                0,
+                2147483648,
+                0,
+                0
+              ],
+              "eip": 4129,
+              "eflags": 1026,
+              "state_hex": "5233535401000100380000000000000000000080ffffffff0000000000000080000000000000008000000000000000002110000002040000",
+              "reason": 1,
+              "fresh_retired": 0,
+              "exit_hex": "52334558010001002800000000000000010000000000000000000000000000000000000000000000",
+              "helper_hex": "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a"
+            }
+          }
+        },
+        {
+          "label": "done",
+          "budget": 24,
+          "cumulative_retired": 9,
+          "registers": [
+            2147483648,
+            4294967295,
+            0,
+            2147483648,
+            0,
+            2147483648,
+            0,
+            0
+          ],
+          "eip": 4138,
+          "eflags": 1026,
+          "state_hex": "5233535401000100380000000000000000000080ffffffff0000000000000080000000000000008000000000000000002a10000002040000",
+          "reason": 3,
+          "fresh_retired": 2,
+          "exit_hex": "52334558010001002800000000000000030000000200000000000000000000000000000000000000",
+          "helper_hex": "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a",
+          "pauses": {
+            "cancel": {
+              "registers": [
+                2147483648,
+                4294967295,
+                0,
+                2147483648,
+                0,
+                2147483648,
+                0,
+                0
+              ],
+              "eip": 4138,
+              "eflags": 1026,
+              "state_hex": "5233535401000100380000000000000000000080ffffffff0000000000000080000000000000008000000000000000002a10000002040000",
+              "reason": 2,
+              "fresh_retired": 0,
+              "exit_hex": "52334558010001002800000000000000020000000000000000000000000000000000000000000000",
+              "helper_hex": "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a"
+            },
+            "zero_budget": {
+              "registers": [
+                2147483648,
+                4294967295,
+                0,
+                2147483648,
+                0,
+                2147483648,
+                0,
+                0
+              ],
+              "eip": 4138,
+              "eflags": 1026,
+              "state_hex": "5233535401000100380000000000000000000080ffffffff0000000000000080000000000000008000000000000000002a10000002040000",
+              "reason": 1,
+              "fresh_retired": 0,
+              "exit_hex": "52334558010001002800000000000000010000000000000000000000000000000000000000000000",
+              "helper_hex": "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a"
+            }
+          }
+        }
+      ],
+      "branch_expectations": [
+        {
+          "instruction_pc": 4109,
+          "condition": "OF1",
+          "selected_pc": 4116,
+          "unexecuted_pc": 4111
+        },
+        {
+          "instruction_pc": 4119,
+          "condition": "CF1",
+          "selected_pc": 4126,
+          "unexecuted_pc": 4121
+        },
+        {
+          "instruction_pc": 4129,
+          "condition": "OF0",
+          "selected_pc": 4136,
+          "unexecuted_pc": 4131
+        }
+      ],
+      "unexecuted_canaries": {
+        "EDX": 3735928559,
+        "ESI": 3735928559,
+        "EDI": 3735928559
+      }
+    },
+    {
+      "name": "source-alias-DF1",
+      "symbol": "source_alias_chain",
+      "DF": 1,
+      "entry_seeds": [
+        4352
+      ],
+      "budget": 24,
+      "executed_instructions": 12,
+      "decoded_instructions": 12,
+      "initial": {
+        "registers": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "eip": 4352,
+        "eflags": 1026,
+        "state_hex": "5233535401000100380000000000000000000000000000000000000000000000000000000000000000000000000000000011000002040000"
+      },
+      "complete": {
+        "registers": [
+          4294967254,
+          4294961962,
+          6,
+          682752,
+          9,
+          0,
+          0,
+          0
+        ],
+        "eip": 4401,
+        "eflags": 1026,
+        "state_hex": "52335354010001003800000000000000d6ffffff2aebffff06000000006b0a00090000000000000000000000000000003111000002040000",
+        "reason": 3,
+        "fresh_retired": 12,
+        "exit_hex": "52334558010001002800000000000000030000000c00000000000000000000000000000000000000",
+        "helper_hex": "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a"
+      },
+      "split": [
+        {
+          "label": "after_two",
+          "budget": 3,
+          "cumulative_retired": 3,
+          "registers": [
+            4294967254,
+            0,
+            6,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          "eip": 4365,
+          "eflags": 1026,
+          "state_hex": "52335354010001003800000000000000d6ffffff000000000600000000000000000000000000000000000000000000000d11000002040000",
+          "reason": 1,
+          "fresh_retired": 3,
+          "exit_hex": "52334558010001002800000000000000010000000300000000000000000000000000000000000000",
+          "helper_hex": "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a",
+          "pauses": {
+            "cancel": {
+              "registers": [
+                4294967254,
+                0,
+                6,
+                0,
+                0,
+                0,
+                0,
+                0
+              ],
+              "eip": 4365,
+              "eflags": 1026,
+              "state_hex": "52335354010001003800000000000000d6ffffff000000000600000000000000000000000000000000000000000000000d11000002040000",
+              "reason": 2,
+              "fresh_retired": 0,
+              "exit_hex": "52334558010001002800000000000000020000000000000000000000000000000000000000000000",
+              "helper_hex": "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a"
+            },
+            "zero_budget": {
+              "registers": [
+                4294967254,
+                0,
+                6,
+                0,
+                0,
+                0,
+                0,
+                0
+              ],
+              "eip": 4365,
+              "eflags": 1026,
+              "state_hex": "52335354010001003800000000000000d6ffffff000000000600000000000000000000000000000000000000000000000d11000002040000",
+              "reason": 1,
+              "fresh_retired": 0,
+              "exit_hex": "52334558010001002800000000000000010000000000000000000000000000000000000000000000",
+              "helper_hex": "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a"
+            }
+          }
+        },
+        {
+          "label": "source_after_7f",
+          "budget": 1,
+          "cumulative_retired": 4,
+          "registers": [
+            4294967254,
+            4294961962,
+            6,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          "eip": 4368,
+          "eflags": 1026,
+          "state_hex": "52335354010001003800000000000000d6ffffff2aebffff0600000000000000000000000000000000000000000000001011000002040000",
+          "reason": 1,
+          "fresh_retired": 1,
+          "exit_hex": "52334558010001002800000000000000010000000100000000000000000000000000000000000000",
+          "helper_hex": "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a",
+          "pauses": {
+            "cancel": {
+              "registers": [
+                4294967254,
+                4294961962,
+                6,
+                0,
+                0,
+                0,
+                0,
+                0
+              ],
+              "eip": 4368,
+              "eflags": 1026,
+              "state_hex": "52335354010001003800000000000000d6ffffff2aebffff0600000000000000000000000000000000000000000000001011000002040000",
+              "reason": 2,
+              "fresh_retired": 0,
+              "exit_hex": "52334558010001002800000000000000020000000000000000000000000000000000000000000000",
+              "helper_hex": "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a"
+            },
+            "zero_budget": {
+              "registers": [
+                4294967254,
+                4294961962,
+                6,
+                0,
+                0,
+                0,
+                0,
+                0
+              ],
+              "eip": 4368,
+              "eflags": 1026,
+              "state_hex": "52335354010001003800000000000000d6ffffff2aebffff0600000000000000000000000000000000000000000000001011000002040000",
+              "reason": 1,
+              "fresh_retired": 0,
+              "exit_hex": "52334558010001002800000000000000010000000000000000000000000000000000000000000000",
+              "helper_hex": "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a"
+            }
+          }
+        },
+        {
+          "label": "source_after_80",
+          "budget": 1,
+          "cumulative_retired": 5,
+          "registers": [
+            4294967254,
+            4294961962,
+            6,
+            682752,
+            0,
+            0,
+            0,
+            0
+          ],
+          "eip": 4371,
+          "eflags": 1026,
+          "state_hex": "52335354010001003800000000000000d6ffffff2aebffff06000000006b0a00000000000000000000000000000000001311000002040000",
+          "reason": 1,
+          "fresh_retired": 1,
+          "exit_hex": "52334558010001002800000000000000010000000100000000000000000000000000000000000000",
+          "helper_hex": "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a",
+          "pauses": {
+            "cancel": {
+              "registers": [
+                4294967254,
+                4294961962,
+                6,
+                682752,
+                0,
+                0,
+                0,
+                0
+              ],
+              "eip": 4371,
+              "eflags": 1026,
+              "state_hex": "52335354010001003800000000000000d6ffffff2aebffff06000000006b0a00000000000000000000000000000000001311000002040000",
+              "reason": 2,
+              "fresh_retired": 0,
+              "exit_hex": "52334558010001002800000000000000020000000000000000000000000000000000000000000000",
+              "helper_hex": "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a"
+            },
+            "zero_budget": {
+              "registers": [
+                4294967254,
+                4294961962,
+                6,
+                682752,
+                0,
+                0,
+                0,
+                0
+              ],
+              "eip": 4371,
+              "eflags": 1026,
+              "state_hex": "52335354010001003800000000000000d6ffffff2aebffff06000000006b0a00000000000000000000000000000000001311000002040000",
+              "reason": 1,
+              "fresh_retired": 0,
+              "exit_hex": "52334558010001002800000000000000010000000000000000000000000000000000000000000000",
+              "helper_hex": "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a"
+            }
+          }
+        },
+        {
+          "label": "source_after_min",
+          "budget": 1,
+          "cumulative_retired": 6,
+          "registers": [
+            4294967254,
+            4294961962,
+            6,
+            682752,
+            0,
+            0,
+            0,
+            0
+          ],
+          "eip": 4377,
+          "eflags": 3075,
+          "state_hex": "52335354010001003800000000000000d6ffffff2aebffff06000000006b0a000000000000000000000000000000000019110000030c0000",
+          "reason": 1,
+          "fresh_retired": 1,
+          "exit_hex": "52334558010001002800000000000000010000000100000000000000000000000000000000000000",
+          "helper_hex": "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a",
+          "pauses": {
+            "cancel": {
+              "registers": [
+                4294967254,
+                4294961962,
+                6,
+                682752,
+                0,
+                0,
+                0,
+                0
+              ],
+              "eip": 4377,
+              "eflags": 3075,
+              "state_hex": "52335354010001003800000000000000d6ffffff2aebffff06000000006b0a000000000000000000000000000000000019110000030c0000",
+              "reason": 2,
+              "fresh_retired": 0,
+              "exit_hex": "52334558010001002800000000000000020000000000000000000000000000000000000000000000",
+              "helper_hex": "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a"
+            },
+            "zero_budget": {
+              "registers": [
+                4294967254,
+                4294961962,
+                6,
+                682752,
+                0,
+                0,
+                0,
+                0
+              ],
+              "eip": 4377,
+              "eflags": 3075,
+              "state_hex": "52335354010001003800000000000000d6ffffff2aebffff06000000006b0a000000000000000000000000000000000019110000030c0000",
+              "reason": 1,
+              "fresh_retired": 0,
+              "exit_hex": "52334558010001002800000000000000010000000000000000000000000000000000000000000000",
+              "helper_hex": "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a"
+            }
+          }
+        },
+        {
+          "label": "source_after_full_ff",
+          "budget": 1,
+          "cumulative_retired": 7,
+          "registers": [
+            4294967254,
+            4294961962,
+            6,
+            682752,
+            0,
+            0,
+            0,
+            0
+          ],
+          "eip": 4383,
+          "eflags": 1026,
+          "state_hex": "52335354010001003800000000000000d6ffffff2aebffff06000000006b0a00000000000000000000000000000000001f11000002040000",
+          "reason": 1,
+          "fresh_retired": 1,
+          "exit_hex": "52334558010001002800000000000000010000000100000000000000000000000000000000000000",
+          "helper_hex": "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a",
+          "pauses": {
+            "cancel": {
+              "registers": [
+                4294967254,
+                4294961962,
+                6,
+                682752,
+                0,
+                0,
+                0,
+                0
+              ],
+              "eip": 4383,
+              "eflags": 1026,
+              "state_hex": "52335354010001003800000000000000d6ffffff2aebffff06000000006b0a00000000000000000000000000000000001f11000002040000",
+              "reason": 2,
+              "fresh_retired": 0,
+              "exit_hex": "52334558010001002800000000000000020000000000000000000000000000000000000000000000",
+              "helper_hex": "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a"
+            },
+            "zero_budget": {
+              "registers": [
+                4294967254,
+                4294961962,
+                6,
+                682752,
+                0,
+                0,
+                0,
+                0
+              ],
+              "eip": 4383,
+              "eflags": 1026,
+              "state_hex": "52335354010001003800000000000000d6ffffff2aebffff06000000006b0a00000000000000000000000000000000001f11000002040000",
+              "reason": 1,
+              "fresh_retired": 0,
+              "exit_hex": "52334558010001002800000000000000010000000000000000000000000000000000000000000000",
+              "helper_hex": "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a"
+            }
+          }
+        },
+        {
+          "label": "after_square",
+          "budget": 2,
+          "cumulative_retired": 9,
+          "registers": [
+            4294967254,
+            4294961962,
+            6,
+            682752,
+            0,
+            0,
+            0,
+            0
+          ],
+          "eip": 4391,
+          "eflags": 3075,
+          "state_hex": "52335354010001003800000000000000d6ffffff2aebffff06000000006b0a000000000000000000000000000000000027110000030c0000",
+          "reason": 1,
+          "fresh_retired": 2,
+          "exit_hex": "52334558010001002800000000000000010000000200000000000000000000000000000000000000",
+          "helper_hex": "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a",
+          "pauses": {
+            "cancel": {
+              "registers": [
+                4294967254,
+                4294961962,
+                6,
+                682752,
+                0,
+                0,
+                0,
+                0
+              ],
+              "eip": 4391,
+              "eflags": 3075,
+              "state_hex": "52335354010001003800000000000000d6ffffff2aebffff06000000006b0a000000000000000000000000000000000027110000030c0000",
+              "reason": 2,
+              "fresh_retired": 0,
+              "exit_hex": "52334558010001002800000000000000020000000000000000000000000000000000000000000000",
+              "helper_hex": "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a"
+            },
+            "zero_budget": {
+              "registers": [
+                4294967254,
+                4294961962,
+                6,
+                682752,
+                0,
+                0,
+                0,
+                0
+              ],
+              "eip": 4391,
+              "eflags": 3075,
+              "state_hex": "52335354010001003800000000000000d6ffffff2aebffff06000000006b0a000000000000000000000000000000000027110000030c0000",
+              "reason": 1,
+              "fresh_retired": 0,
+              "exit_hex": "52334558010001002800000000000000010000000000000000000000000000000000000000000000",
+              "helper_hex": "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a"
+            }
+          }
+        },
+        {
+          "label": "after_esp",
+          "budget": 2,
+          "cumulative_retired": 11,
+          "registers": [
+            4294967254,
+            4294961962,
+            6,
+            682752,
+            9,
+            0,
+            0,
+            0
+          ],
+          "eip": 4399,
+          "eflags": 1026,
+          "state_hex": "52335354010001003800000000000000d6ffffff2aebffff06000000006b0a00090000000000000000000000000000002f11000002040000",
+          "reason": 1,
+          "fresh_retired": 2,
+          "exit_hex": "52334558010001002800000000000000010000000200000000000000000000000000000000000000",
+          "helper_hex": "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a",
+          "pauses": {
+            "cancel": {
+              "registers": [
+                4294967254,
+                4294961962,
+                6,
+                682752,
+                9,
+                0,
+                0,
+                0
+              ],
+              "eip": 4399,
+              "eflags": 1026,
+              "state_hex": "52335354010001003800000000000000d6ffffff2aebffff06000000006b0a00090000000000000000000000000000002f11000002040000",
+              "reason": 2,
+              "fresh_retired": 0,
+              "exit_hex": "52334558010001002800000000000000020000000000000000000000000000000000000000000000",
+              "helper_hex": "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a"
+            },
+            "zero_budget": {
+              "registers": [
+                4294967254,
+                4294961962,
+                6,
+                682752,
+                9,
+                0,
+                0,
+                0
+              ],
+              "eip": 4399,
+              "eflags": 1026,
+              "state_hex": "52335354010001003800000000000000d6ffffff2aebffff06000000006b0a00090000000000000000000000000000002f11000002040000",
+              "reason": 1,
+              "fresh_retired": 0,
+              "exit_hex": "52334558010001002800000000000000010000000000000000000000000000000000000000000000",
+              "helper_hex": "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a"
+            }
+          }
+        },
+        {
+          "label": "done",
+          "budget": 24,
+          "cumulative_retired": 12,
+          "registers": [
+            4294967254,
+            4294961962,
+            6,
+            682752,
+            9,
+            0,
+            0,
+            0
+          ],
+          "eip": 4401,
+          "eflags": 1026,
+          "state_hex": "52335354010001003800000000000000d6ffffff2aebffff06000000006b0a00090000000000000000000000000000003111000002040000",
+          "reason": 3,
+          "fresh_retired": 1,
+          "exit_hex": "52334558010001002800000000000000030000000100000000000000000000000000000000000000",
+          "helper_hex": "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a",
+          "pauses": {
+            "cancel": {
+              "registers": [
+                4294967254,
+                4294961962,
+                6,
+                682752,
+                9,
+                0,
+                0,
+                0
+              ],
+              "eip": 4401,
+              "eflags": 1026,
+              "state_hex": "52335354010001003800000000000000d6ffffff2aebffff06000000006b0a00090000000000000000000000000000003111000002040000",
+              "reason": 2,
+              "fresh_retired": 0,
+              "exit_hex": "52334558010001002800000000000000020000000000000000000000000000000000000000000000",
+              "helper_hex": "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a"
+            },
+            "zero_budget": {
+              "registers": [
+                4294967254,
+                4294961962,
+                6,
+                682752,
+                9,
+                0,
+                0,
+                0
+              ],
+              "eip": 4401,
+              "eflags": 1026,
+              "state_hex": "52335354010001003800000000000000d6ffffff2aebffff06000000006b0a00090000000000000000000000000000003111000002040000",
+              "reason": 1,
+              "fresh_retired": 0,
+              "exit_hex": "52334558010001002800000000000000010000000000000000000000000000000000000000000000",
+              "helper_hex": "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a"
+            }
+          }
+        }
+      ]
+    }
+  ],
+  "finite_vectors": [
+    {
+      "name": "zero-times-minus-one",
+      "symbol": "imul_eax_edx",
+      "form": "two",
+      "destination_index": 0,
+      "source_index": 2,
+      "immediate": null,
+      "original_destination": 0,
+      "original_source": 4294967295,
+      "left_word": 0,
+      "right_word": 4294967295,
+      "exact_signed_product": "0",
+      "overflow": false,
+      "instruction_hex": "0fafc2",
+      "entry_seeds": [
+        4608
+      ],
+      "budget": 4,
+      "variants": [
+        {
+          "DF": 0,
+          "initial": {
+            "registers": [
+              0,
+              610839776,
+              4294967295,
+              1164413355,
+              1450744508,
+              1737075661,
+              2023406814,
+              2309737967
+            ],
+            "eip": 4608,
+            "eflags": 2263,
+            "state_hex": "5233535401000100380000000000000000000000e0ac6824ffffffffab896745bc9a7856cdab8967debc9a78efcdab8900120000d7080000"
+          },
+          "expected": {
+            "registers": [
+              0,
+              610839776,
+              4294967295,
+              1164413355,
+              1450744508,
+              1737075661,
+              2023406814,
+              2309737967
+            ],
+            "eip": 4613,
+            "eflags": 2,
+            "state_hex": "5233535401000100380000000000000000000000e0ac6824ffffffffab896745bc9a7856cdab8967debc9a78efcdab890512000002000000",
+            "reason": 3,
+            "fresh_retired": 2,
+            "exit_hex": "52334558010001002800000000000000030000000200000000000000000000000000000000000000",
+            "helper_hex": "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a"
+          }
+        },
+        {
+          "DF": 1,
+          "initial": {
+            "registers": [
+              0,
+              610839776,
+              4294967295,
+              1164413355,
+              1450744508,
+              1737075661,
+              2023406814,
+              2309737967
+            ],
+            "eip": 4608,
+            "eflags": 3287,
+            "state_hex": "5233535401000100380000000000000000000000e0ac6824ffffffffab896745bc9a7856cdab8967debc9a78efcdab8900120000d70c0000"
+          },
+          "expected": {
+            "registers": [
+              0,
+              610839776,
+              4294967295,
+              1164413355,
+              1450744508,
+              1737075661,
+              2023406814,
+              2309737967
+            ],
+            "eip": 4613,
+            "eflags": 1026,
+            "state_hex": "5233535401000100380000000000000000000000e0ac6824ffffffffab896745bc9a7856cdab8967debc9a78efcdab890512000002040000",
+            "reason": 3,
+            "fresh_retired": 2,
+            "exit_hex": "52334558010001002800000000000000030000000200000000000000000000000000000000000000",
+            "helper_hex": "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a"
+          }
+        }
+      ]
+    },
+    {
+      "name": "minus-one-square",
+      "symbol": "imul_eax_edx",
+      "form": "two",
+      "destination_index": 0,
+      "source_index": 2,
+      "immediate": null,
+      "original_destination": 4294967295,
+      "original_source": 4294967295,
+      "left_word": 4294967295,
+      "right_word": 4294967295,
+      "exact_signed_product": "1",
+      "overflow": false,
+      "instruction_hex": "0fafc2",
+      "entry_seeds": [
+        4608
+      ],
+      "budget": 4,
+      "variants": [
+        {
+          "DF": 0,
+          "initial": {
+            "registers": [
+              4294967295,
+              610839776,
+              4294967295,
+              1164413355,
+              1450744508,
+              1737075661,
+              2023406814,
+              2309737967
+            ],
+            "eip": 4608,
+            "eflags": 2263,
+            "state_hex": "52335354010001003800000000000000ffffffffe0ac6824ffffffffab896745bc9a7856cdab8967debc9a78efcdab8900120000d7080000"
+          },
+          "expected": {
+            "registers": [
+              1,
+              610839776,
+              4294967295,
+              1164413355,
+              1450744508,
+              1737075661,
+              2023406814,
+              2309737967
+            ],
+            "eip": 4613,
+            "eflags": 2,
+            "state_hex": "5233535401000100380000000000000001000000e0ac6824ffffffffab896745bc9a7856cdab8967debc9a78efcdab890512000002000000",
+            "reason": 3,
+            "fresh_retired": 2,
+            "exit_hex": "52334558010001002800000000000000030000000200000000000000000000000000000000000000",
+            "helper_hex": "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a"
+          }
+        },
+        {
+          "DF": 1,
+          "initial": {
+            "registers": [
+              4294967295,
+              610839776,
+              4294967295,
+              1164413355,
+              1450744508,
+              1737075661,
+              2023406814,
+              2309737967
+            ],
+            "eip": 4608,
+            "eflags": 3287,
+            "state_hex": "52335354010001003800000000000000ffffffffe0ac6824ffffffffab896745bc9a7856cdab8967debc9a78efcdab8900120000d70c0000"
+          },
+          "expected": {
+            "registers": [
+              1,
+              610839776,
+              4294967295,
+              1164413355,
+              1450744508,
+              1737075661,
+              2023406814,
+              2309737967
+            ],
+            "eip": 4613,
+            "eflags": 1026,
+            "state_hex": "5233535401000100380000000000000001000000e0ac6824ffffffffab896745bc9a7856cdab8967debc9a78efcdab890512000002040000",
+            "reason": 3,
+            "fresh_retired": 2,
+            "exit_hex": "52334558010001002800000000000000030000000200000000000000000000000000000000000000",
+            "helper_hex": "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a"
+          }
+        }
+      ]
+    },
+    {
+      "name": "minimum-times-one",
+      "symbol": "imul_ecx_ebx",
+      "form": "two",
+      "destination_index": 1,
+      "source_index": 3,
+      "immediate": null,
+      "original_destination": 2147483648,
+      "original_source": 1,
+      "left_word": 2147483648,
+      "right_word": 1,
+      "exact_signed_product": "-2147483648",
+      "overflow": false,
+      "instruction_hex": "0fafcb",
+      "entry_seeds": [
+        4624
+      ],
+      "budget": 4,
+      "variants": [
+        {
+          "DF": 0,
+          "initial": {
+            "registers": [
+              305419896,
+              2147483648,
+              878082202,
+              1,
+              1450744508,
+              1737075661,
+              2023406814,
+              2309737967
+            ],
+            "eip": 4624,
+            "eflags": 2263,
+            "state_hex": "5233535401000100380000000000000078563412000000809a78563401000000bc9a7856cdab8967debc9a78efcdab8910120000d7080000"
+          },
+          "expected": {
+            "registers": [
+              305419896,
+              2147483648,
+              878082202,
+              1,
+              1450744508,
+              1737075661,
+              2023406814,
+              2309737967
+            ],
+            "eip": 4629,
+            "eflags": 2,
+            "state_hex": "5233535401000100380000000000000078563412000000809a78563401000000bc9a7856cdab8967debc9a78efcdab891512000002000000",
+            "reason": 3,
+            "fresh_retired": 2,
+            "exit_hex": "52334558010001002800000000000000030000000200000000000000000000000000000000000000",
+            "helper_hex": "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a"
+          }
+        },
+        {
+          "DF": 1,
+          "initial": {
+            "registers": [
+              305419896,
+              2147483648,
+              878082202,
+              1,
+              1450744508,
+              1737075661,
+              2023406814,
+              2309737967
+            ],
+            "eip": 4624,
+            "eflags": 3287,
+            "state_hex": "5233535401000100380000000000000078563412000000809a78563401000000bc9a7856cdab8967debc9a78efcdab8910120000d70c0000"
+          },
+          "expected": {
+            "registers": [
+              305419896,
+              2147483648,
+              878082202,
+              1,
+              1450744508,
+              1737075661,
+              2023406814,
+              2309737967
+            ],
+            "eip": 4629,
+            "eflags": 1026,
+            "state_hex": "5233535401000100380000000000000078563412000000809a78563401000000bc9a7856cdab8967debc9a78efcdab891512000002040000",
+            "reason": 3,
+            "fresh_retired": 2,
+            "exit_hex": "52334558010001002800000000000000030000000200000000000000000000000000000000000000",
+            "helper_hex": "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a"
+          }
+        }
+      ]
+    },
+    {
+      "name": "minimum-times-minus-one",
+      "symbol": "imul_edx_ecx",
+      "form": "two",
+      "destination_index": 2,
+      "source_index": 1,
+      "immediate": null,
+      "original_destination": 2147483648,
+      "original_source": 4294967295,
+      "left_word": 2147483648,
+      "right_word": 4294967295,
+      "exact_signed_product": "2147483648",
+      "overflow": true,
+      "instruction_hex": "0fafd1",
+      "entry_seeds": [
+        4640
+      ],
+      "budget": 4,
+      "variants": [
+        {
+          "DF": 0,
+          "initial": {
+            "registers": [
+              305419896,
+              4294967295,
+              2147483648,
+              1164413355,
+              1450744508,
+              1737075661,
+              2023406814,
+              2309737967
+            ],
+            "eip": 4640,
+            "eflags": 2263,
+            "state_hex": "5233535401000100380000000000000078563412ffffffff00000080ab896745bc9a7856cdab8967debc9a78efcdab8920120000d7080000"
+          },
+          "expected": {
+            "registers": [
+              305419896,
+              4294967295,
+              2147483648,
+              1164413355,
+              1450744508,
+              1737075661,
+              2023406814,
+              2309737967
+            ],
+            "eip": 4645,
+            "eflags": 2051,
+            "state_hex": "5233535401000100380000000000000078563412ffffffff00000080ab896745bc9a7856cdab8967debc9a78efcdab892512000003080000",
+            "reason": 3,
+            "fresh_retired": 2,
+            "exit_hex": "52334558010001002800000000000000030000000200000000000000000000000000000000000000",
+            "helper_hex": "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a"
+          }
+        },
+        {
+          "DF": 1,
+          "initial": {
+            "registers": [
+              305419896,
+              4294967295,
+              2147483648,
+              1164413355,
+              1450744508,
+              1737075661,
+              2023406814,
+              2309737967
+            ],
+            "eip": 4640,
+            "eflags": 3287,
+            "state_hex": "5233535401000100380000000000000078563412ffffffff00000080ab896745bc9a7856cdab8967debc9a78efcdab8920120000d70c0000"
+          },
+          "expected": {
+            "registers": [
+              305419896,
+              4294967295,
+              2147483648,
+              1164413355,
+              1450744508,
+              1737075661,
+              2023406814,
+              2309737967
+            ],
+            "eip": 4645,
+            "eflags": 3075,
+            "state_hex": "5233535401000100380000000000000078563412ffffffff00000080ab896745bc9a7856cdab8967debc9a78efcdab8925120000030c0000",
+            "reason": 3,
+            "fresh_retired": 2,
+            "exit_hex": "52334558010001002800000000000000030000000200000000000000000000000000000000000000",
+            "helper_hex": "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a"
+          }
+        }
+      ]
+    },
+    {
+      "name": "maximum-times-two",
+      "symbol": "imul_ebx_eax",
+      "form": "two",
+      "destination_index": 3,
+      "source_index": 0,
+      "immediate": null,
+      "original_destination": 2147483647,
+      "original_source": 2,
+      "left_word": 2147483647,
+      "right_word": 2,
+      "exact_signed_product": "4294967294",
+      "overflow": true,
+      "instruction_hex": "0fafd8",
+      "entry_seeds": [
+        4656
+      ],
+      "budget": 4,
+      "variants": [
+        {
+          "DF": 0,
+          "initial": {
+            "registers": [
+              2,
+              610839776,
+              878082202,
+              2147483647,
+              1450744508,
+              1737075661,
+              2023406814,
+              2309737967
+            ],
+            "eip": 4656,
+            "eflags": 2263,
+            "state_hex": "5233535401000100380000000000000002000000e0ac68249a785634ffffff7fbc9a7856cdab8967debc9a78efcdab8930120000d7080000"
+          },
+          "expected": {
+            "registers": [
+              2,
+              610839776,
+              878082202,
+              4294967294,
+              1450744508,
+              1737075661,
+              2023406814,
+              2309737967
+            ],
+            "eip": 4661,
+            "eflags": 2051,
+            "state_hex": "5233535401000100380000000000000002000000e0ac68249a785634feffffffbc9a7856cdab8967debc9a78efcdab893512000003080000",
+            "reason": 3,
+            "fresh_retired": 2,
+            "exit_hex": "52334558010001002800000000000000030000000200000000000000000000000000000000000000",
+            "helper_hex": "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a"
+          }
+        },
+        {
+          "DF": 1,
+          "initial": {
+            "registers": [
+              2,
+              610839776,
+              878082202,
+              2147483647,
+              1450744508,
+              1737075661,
+              2023406814,
+              2309737967
+            ],
+            "eip": 4656,
+            "eflags": 3287,
+            "state_hex": "5233535401000100380000000000000002000000e0ac68249a785634ffffff7fbc9a7856cdab8967debc9a78efcdab8930120000d70c0000"
+          },
+          "expected": {
+            "registers": [
+              2,
+              610839776,
+              878082202,
+              4294967294,
+              1450744508,
+              1737075661,
+              2023406814,
+              2309737967
+            ],
+            "eip": 4661,
+            "eflags": 3075,
+            "state_hex": "5233535401000100380000000000000002000000e0ac68249a785634feffffffbc9a7856cdab8967debc9a78efcdab8935120000030c0000",
+            "reason": 3,
+            "fresh_retired": 2,
+            "exit_hex": "52334558010001002800000000000000030000000200000000000000000000000000000000000000",
+            "helper_hex": "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a"
+          }
+        }
+      ]
+    },
+    {
+      "name": "maximum-self-square",
+      "symbol": "imul_esp_self",
+      "form": "two",
+      "destination_index": 4,
+      "source_index": 4,
+      "immediate": null,
+      "original_destination": 2147483647,
+      "original_source": 2147483647,
+      "left_word": 2147483647,
+      "right_word": 2147483647,
+      "exact_signed_product": "4611686014132420609",
+      "overflow": true,
+      "instruction_hex": "0fafe4",
+      "entry_seeds": [
+        4672
+      ],
+      "budget": 4,
+      "variants": [
+        {
+          "DF": 0,
+          "initial": {
+            "registers": [
+              305419896,
+              610839776,
+              878082202,
+              1164413355,
+              2147483647,
+              1737075661,
+              2023406814,
+              2309737967
+            ],
+            "eip": 4672,
+            "eflags": 2263,
+            "state_hex": "5233535401000100380000000000000078563412e0ac68249a785634ab896745ffffff7fcdab8967debc9a78efcdab8940120000d7080000"
+          },
+          "expected": {
+            "registers": [
+              305419896,
+              610839776,
+              878082202,
+              1164413355,
+              1,
+              1737075661,
+              2023406814,
+              2309737967
+            ],
+            "eip": 4677,
+            "eflags": 2051,
+            "state_hex": "5233535401000100380000000000000078563412e0ac68249a785634ab89674501000000cdab8967debc9a78efcdab894512000003080000",
+            "reason": 3,
+            "fresh_retired": 2,
+            "exit_hex": "52334558010001002800000000000000030000000200000000000000000000000000000000000000",
+            "helper_hex": "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a"
+          }
+        },
+        {
+          "DF": 1,
+          "initial": {
+            "registers": [
+              305419896,
+              610839776,
+              878082202,
+              1164413355,
+              2147483647,
+              1737075661,
+              2023406814,
+              2309737967
+            ],
+            "eip": 4672,
+            "eflags": 3287,
+            "state_hex": "5233535401000100380000000000000078563412e0ac68249a785634ab896745ffffff7fcdab8967debc9a78efcdab8940120000d70c0000"
+          },
+          "expected": {
+            "registers": [
+              305419896,
+              610839776,
+              878082202,
+              1164413355,
+              1,
+              1737075661,
+              2023406814,
+              2309737967
+            ],
+            "eip": 4677,
+            "eflags": 3075,
+            "state_hex": "5233535401000100380000000000000078563412e0ac68249a785634ab89674501000000cdab8967debc9a78efcdab8945120000030c0000",
+            "reason": 3,
+            "fresh_retired": 2,
+            "exit_hex": "52334558010001002800000000000000030000000200000000000000000000000000000000000000",
+            "helper_hex": "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a"
+          }
+        }
+      ]
+    },
+    {
+      "name": "zero-square-overflow",
+      "symbol": "imul_ebp_self",
+      "form": "two",
+      "destination_index": 5,
+      "source_index": 5,
+      "immediate": null,
+      "original_destination": 65536,
+      "original_source": 65536,
+      "left_word": 65536,
+      "right_word": 65536,
+      "exact_signed_product": "4294967296",
+      "overflow": true,
+      "instruction_hex": "0fafed",
+      "entry_seeds": [
+        4688
+      ],
+      "budget": 4,
+      "variants": [
+        {
+          "DF": 0,
+          "initial": {
+            "registers": [
+              305419896,
+              610839776,
+              878082202,
+              1164413355,
+              1450744508,
+              65536,
+              2023406814,
+              2309737967
+            ],
+            "eip": 4688,
+            "eflags": 2263,
+            "state_hex": "5233535401000100380000000000000078563412e0ac68249a785634ab896745bc9a785600000100debc9a78efcdab8950120000d7080000"
+          },
+          "expected": {
+            "registers": [
+              305419896,
+              610839776,
+              878082202,
+              1164413355,
+              1450744508,
+              0,
+              2023406814,
+              2309737967
+            ],
+            "eip": 4693,
+            "eflags": 2051,
+            "state_hex": "5233535401000100380000000000000078563412e0ac68249a785634ab896745bc9a785600000000debc9a78efcdab895512000003080000",
+            "reason": 3,
+            "fresh_retired": 2,
+            "exit_hex": "52334558010001002800000000000000030000000200000000000000000000000000000000000000",
+            "helper_hex": "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a"
+          }
+        },
+        {
+          "DF": 1,
+          "initial": {
+            "registers": [
+              305419896,
+              610839776,
+              878082202,
+              1164413355,
+              1450744508,
+              65536,
+              2023406814,
+              2309737967
+            ],
+            "eip": 4688,
+            "eflags": 3287,
+            "state_hex": "5233535401000100380000000000000078563412e0ac68249a785634ab896745bc9a785600000100debc9a78efcdab8950120000d70c0000"
+          },
+          "expected": {
+            "registers": [
+              305419896,
+              610839776,
+              878082202,
+              1164413355,
+              1450744508,
+              0,
+              2023406814,
+              2309737967
+            ],
+            "eip": 4693,
+            "eflags": 3075,
+            "state_hex": "5233535401000100380000000000000078563412e0ac68249a785634ab896745bc9a785600000000debc9a78efcdab8955120000030c0000",
+            "reason": 3,
+            "fresh_retired": 2,
+            "exit_hex": "52334558010001002800000000000000030000000200000000000000000000000000000000000000",
+            "helper_hex": "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a"
+          }
+        }
+      ]
+    },
+    {
+      "name": "negative-overflow-zero",
+      "symbol": "imul_esi_edi",
+      "form": "two",
+      "destination_index": 6,
+      "source_index": 7,
+      "immediate": null,
+      "original_destination": 2147483648,
+      "original_source": 2,
+      "left_word": 2147483648,
+      "right_word": 2,
+      "exact_signed_product": "-4294967296",
+      "overflow": true,
+      "instruction_hex": "0faff7",
+      "entry_seeds": [
+        4704
+      ],
+      "budget": 4,
+      "variants": [
+        {
+          "DF": 0,
+          "initial": {
+            "registers": [
+              305419896,
+              610839776,
+              878082202,
+              1164413355,
+              1450744508,
+              1737075661,
+              2147483648,
+              2
+            ],
+            "eip": 4704,
+            "eflags": 2263,
+            "state_hex": "5233535401000100380000000000000078563412e0ac68249a785634ab896745bc9a7856cdab8967000000800200000060120000d7080000"
+          },
+          "expected": {
+            "registers": [
+              305419896,
+              610839776,
+              878082202,
+              1164413355,
+              1450744508,
+              1737075661,
+              0,
+              2
+            ],
+            "eip": 4709,
+            "eflags": 2051,
+            "state_hex": "5233535401000100380000000000000078563412e0ac68249a785634ab896745bc9a7856cdab896700000000020000006512000003080000",
+            "reason": 3,
+            "fresh_retired": 2,
+            "exit_hex": "52334558010001002800000000000000030000000200000000000000000000000000000000000000",
+            "helper_hex": "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a"
+          }
+        },
+        {
+          "DF": 1,
+          "initial": {
+            "registers": [
+              305419896,
+              610839776,
+              878082202,
+              1164413355,
+              1450744508,
+              1737075661,
+              2147483648,
+              2
+            ],
+            "eip": 4704,
+            "eflags": 3287,
+            "state_hex": "5233535401000100380000000000000078563412e0ac68249a785634ab896745bc9a7856cdab8967000000800200000060120000d70c0000"
+          },
+          "expected": {
+            "registers": [
+              305419896,
+              610839776,
+              878082202,
+              1164413355,
+              1450744508,
+              1737075661,
+              0,
+              2
+            ],
+            "eip": 4709,
+            "eflags": 3075,
+            "state_hex": "5233535401000100380000000000000078563412e0ac68249a785634ab896745bc9a7856cdab8967000000000200000065120000030c0000",
+            "reason": 3,
+            "fresh_retired": 2,
+            "exit_hex": "52334558010001002800000000000000030000000200000000000000000000000000000000000000",
+            "helper_hex": "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a"
+          }
+        }
+      ]
+    },
+    {
+      "name": "negative-nonoverflow",
+      "symbol": "imul_edi_esi",
+      "form": "two",
+      "destination_index": 7,
+      "source_index": 6,
+      "immediate": null,
+      "original_destination": 4294967287,
+      "original_source": 3,
+      "left_word": 4294967287,
+      "right_word": 3,
+      "exact_signed_product": "-27",
+      "overflow": false,
+      "instruction_hex": "0faffe",
+      "entry_seeds": [
+        4720
+      ],
+      "budget": 4,
+      "variants": [
+        {
+          "DF": 0,
+          "initial": {
+            "registers": [
+              305419896,
+              610839776,
+              878082202,
+              1164413355,
+              1450744508,
+              1737075661,
+              3,
+              4294967287
+            ],
+            "eip": 4720,
+            "eflags": 2263,
+            "state_hex": "5233535401000100380000000000000078563412e0ac68249a785634ab896745bc9a7856cdab896703000000f7ffffff70120000d7080000"
+          },
+          "expected": {
+            "registers": [
+              305419896,
+              610839776,
+              878082202,
+              1164413355,
+              1450744508,
+              1737075661,
+              3,
+              4294967269
+            ],
+            "eip": 4725,
+            "eflags": 2,
+            "state_hex": "5233535401000100380000000000000078563412e0ac68249a785634ab896745bc9a7856cdab896703000000e5ffffff7512000002000000",
+            "reason": 3,
+            "fresh_retired": 2,
+            "exit_hex": "52334558010001002800000000000000030000000200000000000000000000000000000000000000",
+            "helper_hex": "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a"
+          }
+        },
+        {
+          "DF": 1,
+          "initial": {
+            "registers": [
+              305419896,
+              610839776,
+              878082202,
+              1164413355,
+              1450744508,
+              1737075661,
+              3,
+              4294967287
+            ],
+            "eip": 4720,
+            "eflags": 3287,
+            "state_hex": "5233535401000100380000000000000078563412e0ac68249a785634ab896745bc9a7856cdab896703000000f7ffffff70120000d70c0000"
+          },
+          "expected": {
+            "registers": [
+              305419896,
+              610839776,
+              878082202,
+              1164413355,
+              1450744508,
+              1737075661,
+              3,
+              4294967269
+            ],
+            "eip": 4725,
+            "eflags": 1026,
+            "state_hex": "5233535401000100380000000000000078563412e0ac68249a785634ab896745bc9a7856cdab896703000000e5ffffff7512000002040000",
+            "reason": 3,
+            "fresh_retired": 2,
+            "exit_hex": "52334558010001002800000000000000030000000200000000000000000000000000000000000000",
+            "helper_hex": "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a"
+          }
+        }
+      ]
+    },
+    {
+      "name": "negative-self-square",
+      "symbol": "imul_ebp_self",
+      "form": "two",
+      "destination_index": 5,
+      "source_index": 5,
+      "immediate": null,
+      "original_destination": 4294967287,
+      "original_source": 4294967287,
+      "left_word": 4294967287,
+      "right_word": 4294967287,
+      "exact_signed_product": "81",
+      "overflow": false,
+      "instruction_hex": "0fafed",
+      "entry_seeds": [
+        4688
+      ],
+      "budget": 4,
+      "variants": [
+        {
+          "DF": 0,
+          "initial": {
+            "registers": [
+              305419896,
+              610839776,
+              878082202,
+              1164413355,
+              1450744508,
+              4294967287,
+              2023406814,
+              2309737967
+            ],
+            "eip": 4688,
+            "eflags": 2263,
+            "state_hex": "5233535401000100380000000000000078563412e0ac68249a785634ab896745bc9a7856f7ffffffdebc9a78efcdab8950120000d7080000"
+          },
+          "expected": {
+            "registers": [
+              305419896,
+              610839776,
+              878082202,
+              1164413355,
+              1450744508,
+              81,
+              2023406814,
+              2309737967
+            ],
+            "eip": 4693,
+            "eflags": 2,
+            "state_hex": "5233535401000100380000000000000078563412e0ac68249a785634ab896745bc9a785651000000debc9a78efcdab895512000002000000",
+            "reason": 3,
+            "fresh_retired": 2,
+            "exit_hex": "52334558010001002800000000000000030000000200000000000000000000000000000000000000",
+            "helper_hex": "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a"
+          }
+        },
+        {
+          "DF": 1,
+          "initial": {
+            "registers": [
+              305419896,
+              610839776,
+              878082202,
+              1164413355,
+              1450744508,
+              4294967287,
+              2023406814,
+              2309737967
+            ],
+            "eip": 4688,
+            "eflags": 3287,
+            "state_hex": "5233535401000100380000000000000078563412e0ac68249a785634ab896745bc9a7856f7ffffffdebc9a78efcdab8950120000d70c0000"
+          },
+          "expected": {
+            "registers": [
+              305419896,
+              610839776,
+              878082202,
+              1164413355,
+              1450744508,
+              81,
+              2023406814,
+              2309737967
+            ],
+            "eip": 4693,
+            "eflags": 1026,
+            "state_hex": "5233535401000100380000000000000078563412e0ac68249a785634ab896745bc9a785651000000debc9a78efcdab895512000002040000",
+            "reason": 3,
+            "fresh_retired": 2,
+            "exit_hex": "52334558010001002800000000000000030000000200000000000000000000000000000000000000",
+            "helper_hex": "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a"
+          }
+        }
+      ]
+    },
+    {
+      "name": "square-last-fit",
+      "symbol": "imul_ebp_self",
+      "form": "two",
+      "destination_index": 5,
+      "source_index": 5,
+      "immediate": null,
+      "original_destination": 46340,
+      "original_source": 46340,
+      "left_word": 46340,
+      "right_word": 46340,
+      "exact_signed_product": "2147395600",
+      "overflow": false,
+      "instruction_hex": "0fafed",
+      "entry_seeds": [
+        4688
+      ],
+      "budget": 4,
+      "variants": [
+        {
+          "DF": 0,
+          "initial": {
+            "registers": [
+              305419896,
+              610839776,
+              878082202,
+              1164413355,
+              1450744508,
+              46340,
+              2023406814,
+              2309737967
+            ],
+            "eip": 4688,
+            "eflags": 2263,
+            "state_hex": "5233535401000100380000000000000078563412e0ac68249a785634ab896745bc9a785604b50000debc9a78efcdab8950120000d7080000"
+          },
+          "expected": {
+            "registers": [
+              305419896,
+              610839776,
+              878082202,
+              1164413355,
+              1450744508,
+              2147395600,
+              2023406814,
+              2309737967
+            ],
+            "eip": 4693,
+            "eflags": 2,
+            "state_hex": "5233535401000100380000000000000078563412e0ac68249a785634ab896745bc9a785610a8fe7fdebc9a78efcdab895512000002000000",
+            "reason": 3,
+            "fresh_retired": 2,
+            "exit_hex": "52334558010001002800000000000000030000000200000000000000000000000000000000000000",
+            "helper_hex": "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a"
+          }
+        },
+        {
+          "DF": 1,
+          "initial": {
+            "registers": [
+              305419896,
+              610839776,
+              878082202,
+              1164413355,
+              1450744508,
+              46340,
+              2023406814,
+              2309737967
+            ],
+            "eip": 4688,
+            "eflags": 3287,
+            "state_hex": "5233535401000100380000000000000078563412e0ac68249a785634ab896745bc9a785604b50000debc9a78efcdab8950120000d70c0000"
+          },
+          "expected": {
+            "registers": [
+              305419896,
+              610839776,
+              878082202,
+              1164413355,
+              1450744508,
+              2147395600,
+              2023406814,
+              2309737967
+            ],
+            "eip": 4693,
+            "eflags": 1026,
+            "state_hex": "5233535401000100380000000000000078563412e0ac68249a785634ab896745bc9a785610a8fe7fdebc9a78efcdab895512000002040000",
+            "reason": 3,
+            "fresh_retired": 2,
+            "exit_hex": "52334558010001002800000000000000030000000200000000000000000000000000000000000000",
+            "helper_hex": "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a"
+          }
+        }
+      ]
+    },
+    {
+      "name": "square-first-overflow",
+      "symbol": "imul_ebp_self",
+      "form": "two",
+      "destination_index": 5,
+      "source_index": 5,
+      "immediate": null,
+      "original_destination": 46341,
+      "original_source": 46341,
+      "left_word": 46341,
+      "right_word": 46341,
+      "exact_signed_product": "2147488281",
+      "overflow": true,
+      "instruction_hex": "0fafed",
+      "entry_seeds": [
+        4688
+      ],
+      "budget": 4,
+      "variants": [
+        {
+          "DF": 0,
+          "initial": {
+            "registers": [
+              305419896,
+              610839776,
+              878082202,
+              1164413355,
+              1450744508,
+              46341,
+              2023406814,
+              2309737967
+            ],
+            "eip": 4688,
+            "eflags": 2263,
+            "state_hex": "5233535401000100380000000000000078563412e0ac68249a785634ab896745bc9a785605b50000debc9a78efcdab8950120000d7080000"
+          },
+          "expected": {
+            "registers": [
+              305419896,
+              610839776,
+              878082202,
+              1164413355,
+              1450744508,
+              2147488281,
+              2023406814,
+              2309737967
+            ],
+            "eip": 4693,
+            "eflags": 2051,
+            "state_hex": "5233535401000100380000000000000078563412e0ac68249a785634ab896745bc9a785619120080debc9a78efcdab895512000003080000",
+            "reason": 3,
+            "fresh_retired": 2,
+            "exit_hex": "52334558010001002800000000000000030000000200000000000000000000000000000000000000",
+            "helper_hex": "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a"
+          }
+        },
+        {
+          "DF": 1,
+          "initial": {
+            "registers": [
+              305419896,
+              610839776,
+              878082202,
+              1164413355,
+              1450744508,
+              46341,
+              2023406814,
+              2309737967
+            ],
+            "eip": 4688,
+            "eflags": 3287,
+            "state_hex": "5233535401000100380000000000000078563412e0ac68249a785634ab896745bc9a785605b50000debc9a78efcdab8950120000d70c0000"
+          },
+          "expected": {
+            "registers": [
+              305419896,
+              610839776,
+              878082202,
+              1164413355,
+              1450744508,
+              2147488281,
+              2023406814,
+              2309737967
+            ],
+            "eip": 4693,
+            "eflags": 3075,
+            "state_hex": "5233535401000100380000000000000078563412e0ac68249a785634ab896745bc9a785619120080debc9a78efcdab8955120000030c0000",
+            "reason": 3,
+            "fresh_retired": 2,
+            "exit_hex": "52334558010001002800000000000000030000000200000000000000000000000000000000000000",
+            "helper_hex": "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a"
+          }
+        }
+      ]
+    },
+    {
+      "name": "wide-product-maximum",
+      "symbol": "imul_esp_self",
+      "form": "two",
+      "destination_index": 4,
+      "source_index": 4,
+      "immediate": null,
+      "original_destination": 2147483648,
+      "original_source": 2147483648,
+      "left_word": 2147483648,
+      "right_word": 2147483648,
+      "exact_signed_product": "4611686018427387904",
+      "overflow": true,
+      "instruction_hex": "0fafe4",
+      "entry_seeds": [
+        4672
+      ],
+      "budget": 4,
+      "variants": [
+        {
+          "DF": 0,
+          "initial": {
+            "registers": [
+              305419896,
+              610839776,
+              878082202,
+              1164413355,
+              2147483648,
+              1737075661,
+              2023406814,
+              2309737967
+            ],
+            "eip": 4672,
+            "eflags": 2263,
+            "state_hex": "5233535401000100380000000000000078563412e0ac68249a785634ab89674500000080cdab8967debc9a78efcdab8940120000d7080000"
+          },
+          "expected": {
+            "registers": [
+              305419896,
+              610839776,
+              878082202,
+              1164413355,
+              0,
+              1737075661,
+              2023406814,
+              2309737967
+            ],
+            "eip": 4677,
+            "eflags": 2051,
+            "state_hex": "5233535401000100380000000000000078563412e0ac68249a785634ab89674500000000cdab8967debc9a78efcdab894512000003080000",
+            "reason": 3,
+            "fresh_retired": 2,
+            "exit_hex": "52334558010001002800000000000000030000000200000000000000000000000000000000000000",
+            "helper_hex": "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a"
+          }
+        },
+        {
+          "DF": 1,
+          "initial": {
+            "registers": [
+              305419896,
+              610839776,
+              878082202,
+              1164413355,
+              2147483648,
+              1737075661,
+              2023406814,
+              2309737967
+            ],
+            "eip": 4672,
+            "eflags": 3287,
+            "state_hex": "5233535401000100380000000000000078563412e0ac68249a785634ab89674500000080cdab8967debc9a78efcdab8940120000d70c0000"
+          },
+          "expected": {
+            "registers": [
+              305419896,
+              610839776,
+              878082202,
+              1164413355,
+              0,
+              1737075661,
+              2023406814,
+              2309737967
+            ],
+            "eip": 4677,
+            "eflags": 3075,
+            "state_hex": "5233535401000100380000000000000078563412e0ac68249a785634ab89674500000000cdab8967debc9a78efcdab8945120000030c0000",
+            "reason": 3,
+            "fresh_retired": 2,
+            "exit_hex": "52334558010001002800000000000000030000000200000000000000000000000000000000000000",
+            "helper_hex": "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a"
+          }
+        }
+      ]
+    },
+    {
+      "name": "imm7f-positive",
+      "symbol": "imul_7f_eax_ecx",
+      "form": "imm8",
+      "destination_index": 0,
+      "source_index": 1,
+      "immediate": 127,
+      "original_destination": 305419896,
+      "original_source": 6,
+      "left_word": 6,
+      "right_word": 127,
+      "exact_signed_product": "762",
+      "overflow": false,
+      "instruction_hex": "6bc17f",
+      "entry_seeds": [
+        4736
+      ],
+      "budget": 4,
+      "variants": [
+        {
+          "DF": 0,
+          "initial": {
+            "registers": [
+              305419896,
+              6,
+              878082202,
+              1164413355,
+              1450744508,
+              1737075661,
+              2023406814,
+              2309737967
+            ],
+            "eip": 4736,
+            "eflags": 2263,
+            "state_hex": "5233535401000100380000000000000078563412060000009a785634ab896745bc9a7856cdab8967debc9a78efcdab8980120000d7080000"
+          },
+          "expected": {
+            "registers": [
+              762,
+              6,
+              878082202,
+              1164413355,
+              1450744508,
+              1737075661,
+              2023406814,
+              2309737967
+            ],
+            "eip": 4741,
+            "eflags": 2,
+            "state_hex": "52335354010001003800000000000000fa020000060000009a785634ab896745bc9a7856cdab8967debc9a78efcdab898512000002000000",
+            "reason": 3,
+            "fresh_retired": 2,
+            "exit_hex": "52334558010001002800000000000000030000000200000000000000000000000000000000000000",
+            "helper_hex": "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a"
+          }
+        },
+        {
+          "DF": 1,
+          "initial": {
+            "registers": [
+              305419896,
+              6,
+              878082202,
+              1164413355,
+              1450744508,
+              1737075661,
+              2023406814,
+              2309737967
+            ],
+            "eip": 4736,
+            "eflags": 3287,
+            "state_hex": "5233535401000100380000000000000078563412060000009a785634ab896745bc9a7856cdab8967debc9a78efcdab8980120000d70c0000"
+          },
+          "expected": {
+            "registers": [
+              762,
+              6,
+              878082202,
+              1164413355,
+              1450744508,
+              1737075661,
+              2023406814,
+              2309737967
+            ],
+            "eip": 4741,
+            "eflags": 1026,
+            "state_hex": "52335354010001003800000000000000fa020000060000009a785634ab896745bc9a7856cdab8967debc9a78efcdab898512000002040000",
+            "reason": 3,
+            "fresh_retired": 2,
+            "exit_hex": "52334558010001002800000000000000030000000200000000000000000000000000000000000000",
+            "helper_hex": "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a"
+          }
+        }
+      ]
+    },
+    {
+      "name": "imm7f-negative",
+      "symbol": "imul_7f_eax_ecx",
+      "form": "imm8",
+      "destination_index": 0,
+      "source_index": 1,
+      "immediate": 127,
+      "original_destination": 305419896,
+      "original_source": 4294967295,
+      "left_word": 4294967295,
+      "right_word": 127,
+      "exact_signed_product": "-127",
+      "overflow": false,
+      "instruction_hex": "6bc17f",
+      "entry_seeds": [
+        4736
+      ],
+      "budget": 4,
+      "variants": [
+        {
+          "DF": 0,
+          "initial": {
+            "registers": [
+              305419896,
+              4294967295,
+              878082202,
+              1164413355,
+              1450744508,
+              1737075661,
+              2023406814,
+              2309737967
+            ],
+            "eip": 4736,
+            "eflags": 2263,
+            "state_hex": "5233535401000100380000000000000078563412ffffffff9a785634ab896745bc9a7856cdab8967debc9a78efcdab8980120000d7080000"
+          },
+          "expected": {
+            "registers": [
+              4294967169,
+              4294967295,
+              878082202,
+              1164413355,
+              1450744508,
+              1737075661,
+              2023406814,
+              2309737967
+            ],
+            "eip": 4741,
+            "eflags": 2,
+            "state_hex": "5233535401000100380000000000000081ffffffffffffff9a785634ab896745bc9a7856cdab8967debc9a78efcdab898512000002000000",
+            "reason": 3,
+            "fresh_retired": 2,
+            "exit_hex": "52334558010001002800000000000000030000000200000000000000000000000000000000000000",
+            "helper_hex": "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a"
+          }
+        },
+        {
+          "DF": 1,
+          "initial": {
+            "registers": [
+              305419896,
+              4294967295,
+              878082202,
+              1164413355,
+              1450744508,
+              1737075661,
+              2023406814,
+              2309737967
+            ],
+            "eip": 4736,
+            "eflags": 3287,
+            "state_hex": "5233535401000100380000000000000078563412ffffffff9a785634ab896745bc9a7856cdab8967debc9a78efcdab8980120000d70c0000"
+          },
+          "expected": {
+            "registers": [
+              4294967169,
+              4294967295,
+              878082202,
+              1164413355,
+              1450744508,
+              1737075661,
+              2023406814,
+              2309737967
+            ],
+            "eip": 4741,
+            "eflags": 1026,
+            "state_hex": "5233535401000100380000000000000081ffffffffffffff9a785634ab896745bc9a7856cdab8967debc9a78efcdab898512000002040000",
+            "reason": 3,
+            "fresh_retired": 2,
+            "exit_hex": "52334558010001002800000000000000030000000200000000000000000000000000000000000000",
+            "helper_hex": "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a"
+          }
+        }
+      ]
+    },
+    {
+      "name": "imm80-negative-source",
+      "symbol": "imul_80_ecx_self",
+      "form": "imm8",
+      "destination_index": 1,
+      "source_index": 1,
+      "immediate": 4294967168,
+      "original_destination": 4294967295,
+      "original_source": 4294967295,
+      "left_word": 4294967295,
+      "right_word": 4294967168,
+      "exact_signed_product": "128",
+      "overflow": false,
+      "instruction_hex": "6bc980",
+      "entry_seeds": [
+        4752
+      ],
+      "budget": 4,
+      "variants": [
+        {
+          "DF": 0,
+          "initial": {
+            "registers": [
+              305419896,
+              4294967295,
+              878082202,
+              1164413355,
+              1450744508,
+              1737075661,
+              2023406814,
+              2309737967
+            ],
+            "eip": 4752,
+            "eflags": 2263,
+            "state_hex": "5233535401000100380000000000000078563412ffffffff9a785634ab896745bc9a7856cdab8967debc9a78efcdab8990120000d7080000"
+          },
+          "expected": {
+            "registers": [
+              305419896,
+              128,
+              878082202,
+              1164413355,
+              1450744508,
+              1737075661,
+              2023406814,
+              2309737967
+            ],
+            "eip": 4757,
+            "eflags": 2,
+            "state_hex": "5233535401000100380000000000000078563412800000009a785634ab896745bc9a7856cdab8967debc9a78efcdab899512000002000000",
+            "reason": 3,
+            "fresh_retired": 2,
+            "exit_hex": "52334558010001002800000000000000030000000200000000000000000000000000000000000000",
+            "helper_hex": "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a"
+          }
+        },
+        {
+          "DF": 1,
+          "initial": {
+            "registers": [
+              305419896,
+              4294967295,
+              878082202,
+              1164413355,
+              1450744508,
+              1737075661,
+              2023406814,
+              2309737967
+            ],
+            "eip": 4752,
+            "eflags": 3287,
+            "state_hex": "5233535401000100380000000000000078563412ffffffff9a785634ab896745bc9a7856cdab8967debc9a78efcdab8990120000d70c0000"
+          },
+          "expected": {
+            "registers": [
+              305419896,
+              128,
+              878082202,
+              1164413355,
+              1450744508,
+              1737075661,
+              2023406814,
+              2309737967
+            ],
+            "eip": 4757,
+            "eflags": 1026,
+            "state_hex": "5233535401000100380000000000000078563412800000009a785634ab896745bc9a7856cdab8967debc9a78efcdab899512000002040000",
+            "reason": 3,
+            "fresh_retired": 2,
+            "exit_hex": "52334558010001002800000000000000030000000200000000000000000000000000000000000000",
+            "helper_hex": "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a"
+          }
+        }
+      ]
+    },
+    {
+      "name": "imm80-minimum-source",
+      "symbol": "imul_80_ecx_self",
+      "form": "imm8",
+      "destination_index": 1,
+      "source_index": 1,
+      "immediate": 4294967168,
+      "original_destination": 2147483648,
+      "original_source": 2147483648,
+      "left_word": 2147483648,
+      "right_word": 4294967168,
+      "exact_signed_product": "274877906944",
+      "overflow": true,
+      "instruction_hex": "6bc980",
+      "entry_seeds": [
+        4752
+      ],
+      "budget": 4,
+      "variants": [
+        {
+          "DF": 0,
+          "initial": {
+            "registers": [
+              305419896,
+              2147483648,
+              878082202,
+              1164413355,
+              1450744508,
+              1737075661,
+              2023406814,
+              2309737967
+            ],
+            "eip": 4752,
+            "eflags": 2263,
+            "state_hex": "5233535401000100380000000000000078563412000000809a785634ab896745bc9a7856cdab8967debc9a78efcdab8990120000d7080000"
+          },
+          "expected": {
+            "registers": [
+              305419896,
+              0,
+              878082202,
+              1164413355,
+              1450744508,
+              1737075661,
+              2023406814,
+              2309737967
+            ],
+            "eip": 4757,
+            "eflags": 2051,
+            "state_hex": "5233535401000100380000000000000078563412000000009a785634ab896745bc9a7856cdab8967debc9a78efcdab899512000003080000",
+            "reason": 3,
+            "fresh_retired": 2,
+            "exit_hex": "52334558010001002800000000000000030000000200000000000000000000000000000000000000",
+            "helper_hex": "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a"
+          }
+        },
+        {
+          "DF": 1,
+          "initial": {
+            "registers": [
+              305419896,
+              2147483648,
+              878082202,
+              1164413355,
+              1450744508,
+              1737075661,
+              2023406814,
+              2309737967
+            ],
+            "eip": 4752,
+            "eflags": 3287,
+            "state_hex": "5233535401000100380000000000000078563412000000809a785634ab896745bc9a7856cdab8967debc9a78efcdab8990120000d70c0000"
+          },
+          "expected": {
+            "registers": [
+              305419896,
+              0,
+              878082202,
+              1164413355,
+              1450744508,
+              1737075661,
+              2023406814,
+              2309737967
+            ],
+            "eip": 4757,
+            "eflags": 3075,
+            "state_hex": "5233535401000100380000000000000078563412000000009a785634ab896745bc9a7856cdab8967debc9a78efcdab8995120000030c0000",
+            "reason": 3,
+            "fresh_retired": 2,
+            "exit_hex": "52334558010001002800000000000000030000000200000000000000000000000000000000000000",
+            "helper_hex": "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a"
+          }
+        }
+      ]
+    },
+    {
+      "name": "immff-esp-negative",
+      "symbol": "imul_ff_esp_self",
+      "form": "imm8",
+      "destination_index": 4,
+      "source_index": 4,
+      "immediate": 4294967295,
+      "original_destination": 4294967287,
+      "original_source": 4294967287,
+      "left_word": 4294967287,
+      "right_word": 4294967295,
+      "exact_signed_product": "9",
+      "overflow": false,
+      "instruction_hex": "6be4ff",
+      "entry_seeds": [
+        4768
+      ],
+      "budget": 4,
+      "variants": [
+        {
+          "DF": 0,
+          "initial": {
+            "registers": [
+              305419896,
+              610839776,
+              878082202,
+              1164413355,
+              4294967287,
+              1737075661,
+              2023406814,
+              2309737967
+            ],
+            "eip": 4768,
+            "eflags": 2263,
+            "state_hex": "5233535401000100380000000000000078563412e0ac68249a785634ab896745f7ffffffcdab8967debc9a78efcdab89a0120000d7080000"
+          },
+          "expected": {
+            "registers": [
+              305419896,
+              610839776,
+              878082202,
+              1164413355,
+              9,
+              1737075661,
+              2023406814,
+              2309737967
+            ],
+            "eip": 4773,
+            "eflags": 2,
+            "state_hex": "5233535401000100380000000000000078563412e0ac68249a785634ab89674509000000cdab8967debc9a78efcdab89a512000002000000",
+            "reason": 3,
+            "fresh_retired": 2,
+            "exit_hex": "52334558010001002800000000000000030000000200000000000000000000000000000000000000",
+            "helper_hex": "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a"
+          }
+        },
+        {
+          "DF": 1,
+          "initial": {
+            "registers": [
+              305419896,
+              610839776,
+              878082202,
+              1164413355,
+              4294967287,
+              1737075661,
+              2023406814,
+              2309737967
+            ],
+            "eip": 4768,
+            "eflags": 3287,
+            "state_hex": "5233535401000100380000000000000078563412e0ac68249a785634ab896745f7ffffffcdab8967debc9a78efcdab89a0120000d70c0000"
+          },
+          "expected": {
+            "registers": [
+              305419896,
+              610839776,
+              878082202,
+              1164413355,
+              9,
+              1737075661,
+              2023406814,
+              2309737967
+            ],
+            "eip": 4773,
+            "eflags": 1026,
+            "state_hex": "5233535401000100380000000000000078563412e0ac68249a785634ab89674509000000cdab8967debc9a78efcdab89a512000002040000",
+            "reason": 3,
+            "fresh_retired": 2,
+            "exit_hex": "52334558010001002800000000000000030000000200000000000000000000000000000000000000",
+            "helper_hex": "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a"
+          }
+        }
+      ]
+    },
+    {
+      "name": "immff-esp-overflow",
+      "symbol": "imul_ff_esp_self",
+      "form": "imm8",
+      "destination_index": 4,
+      "source_index": 4,
+      "immediate": 4294967295,
+      "original_destination": 2147483648,
+      "original_source": 2147483648,
+      "left_word": 2147483648,
+      "right_word": 4294967295,
+      "exact_signed_product": "2147483648",
+      "overflow": true,
+      "instruction_hex": "6be4ff",
+      "entry_seeds": [
+        4768
+      ],
+      "budget": 4,
+      "variants": [
+        {
+          "DF": 0,
+          "initial": {
+            "registers": [
+              305419896,
+              610839776,
+              878082202,
+              1164413355,
+              2147483648,
+              1737075661,
+              2023406814,
+              2309737967
+            ],
+            "eip": 4768,
+            "eflags": 2263,
+            "state_hex": "5233535401000100380000000000000078563412e0ac68249a785634ab89674500000080cdab8967debc9a78efcdab89a0120000d7080000"
+          },
+          "expected": {
+            "registers": [
+              305419896,
+              610839776,
+              878082202,
+              1164413355,
+              2147483648,
+              1737075661,
+              2023406814,
+              2309737967
+            ],
+            "eip": 4773,
+            "eflags": 2051,
+            "state_hex": "5233535401000100380000000000000078563412e0ac68249a785634ab89674500000080cdab8967debc9a78efcdab89a512000003080000",
+            "reason": 3,
+            "fresh_retired": 2,
+            "exit_hex": "52334558010001002800000000000000030000000200000000000000000000000000000000000000",
+            "helper_hex": "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a"
+          }
+        },
+        {
+          "DF": 1,
+          "initial": {
+            "registers": [
+              305419896,
+              610839776,
+              878082202,
+              1164413355,
+              2147483648,
+              1737075661,
+              2023406814,
+              2309737967
+            ],
+            "eip": 4768,
+            "eflags": 3287,
+            "state_hex": "5233535401000100380000000000000078563412e0ac68249a785634ab89674500000080cdab8967debc9a78efcdab89a0120000d70c0000"
+          },
+          "expected": {
+            "registers": [
+              305419896,
+              610839776,
+              878082202,
+              1164413355,
+              2147483648,
+              1737075661,
+              2023406814,
+              2309737967
+            ],
+            "eip": 4773,
+            "eflags": 3075,
+            "state_hex": "5233535401000100380000000000000078563412e0ac68249a785634ab89674500000080cdab8967debc9a78efcdab89a5120000030c0000",
+            "reason": 3,
+            "fresh_retired": 2,
+            "exit_hex": "52334558010001002800000000000000030000000200000000000000000000000000000000000000",
+            "helper_hex": "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a"
+          }
+        }
+      ]
+    },
+    {
+      "name": "immzero-minimum-source",
+      "symbol": "imul_zero_ebx_edx",
+      "form": "imm8",
+      "destination_index": 3,
+      "source_index": 2,
+      "immediate": 0,
+      "original_destination": 1164413355,
+      "original_source": 2147483648,
+      "left_word": 2147483648,
+      "right_word": 0,
+      "exact_signed_product": "0",
+      "overflow": false,
+      "instruction_hex": "6bda00",
+      "entry_seeds": [
+        4784
+      ],
+      "budget": 4,
+      "variants": [
+        {
+          "DF": 0,
+          "initial": {
+            "registers": [
+              305419896,
+              610839776,
+              2147483648,
+              1164413355,
+              1450744508,
+              1737075661,
+              2023406814,
+              2309737967
+            ],
+            "eip": 4784,
+            "eflags": 2263,
+            "state_hex": "5233535401000100380000000000000078563412e0ac682400000080ab896745bc9a7856cdab8967debc9a78efcdab89b0120000d7080000"
+          },
+          "expected": {
+            "registers": [
+              305419896,
+              610839776,
+              2147483648,
+              0,
+              1450744508,
+              1737075661,
+              2023406814,
+              2309737967
+            ],
+            "eip": 4789,
+            "eflags": 2,
+            "state_hex": "5233535401000100380000000000000078563412e0ac68240000008000000000bc9a7856cdab8967debc9a78efcdab89b512000002000000",
+            "reason": 3,
+            "fresh_retired": 2,
+            "exit_hex": "52334558010001002800000000000000030000000200000000000000000000000000000000000000",
+            "helper_hex": "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a"
+          }
+        },
+        {
+          "DF": 1,
+          "initial": {
+            "registers": [
+              305419896,
+              610839776,
+              2147483648,
+              1164413355,
+              1450744508,
+              1737075661,
+              2023406814,
+              2309737967
+            ],
+            "eip": 4784,
+            "eflags": 3287,
+            "state_hex": "5233535401000100380000000000000078563412e0ac682400000080ab896745bc9a7856cdab8967debc9a78efcdab89b0120000d70c0000"
+          },
+          "expected": {
+            "registers": [
+              305419896,
+              610839776,
+              2147483648,
+              0,
+              1450744508,
+              1737075661,
+              2023406814,
+              2309737967
+            ],
+            "eip": 4789,
+            "eflags": 1026,
+            "state_hex": "5233535401000100380000000000000078563412e0ac68240000008000000000bc9a7856cdab8967debc9a78efcdab89b512000002040000",
+            "reason": 3,
+            "fresh_retired": 2,
+            "exit_hex": "52334558010001002800000000000000030000000200000000000000000000000000000000000000",
+            "helper_hex": "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a"
+          }
+        }
+      ]
+    },
+    {
+      "name": "imm32-minimum-fit",
+      "symbol": "imul_min_esi_ecx",
+      "form": "imm32",
+      "destination_index": 6,
+      "source_index": 1,
+      "immediate": 2147483648,
+      "original_destination": 2023406814,
+      "original_source": 1,
+      "left_word": 1,
+      "right_word": 2147483648,
+      "exact_signed_product": "-2147483648",
+      "overflow": false,
+      "instruction_hex": "69f100000080",
+      "entry_seeds": [
+        4800
+      ],
+      "budget": 4,
+      "variants": [
+        {
+          "DF": 0,
+          "initial": {
+            "registers": [
+              305419896,
+              1,
+              878082202,
+              1164413355,
+              1450744508,
+              1737075661,
+              2023406814,
+              2309737967
+            ],
+            "eip": 4800,
+            "eflags": 2263,
+            "state_hex": "5233535401000100380000000000000078563412010000009a785634ab896745bc9a7856cdab8967debc9a78efcdab89c0120000d7080000"
+          },
+          "expected": {
+            "registers": [
+              305419896,
+              1,
+              878082202,
+              1164413355,
+              1450744508,
+              1737075661,
+              2147483648,
+              2309737967
+            ],
+            "eip": 4808,
+            "eflags": 2,
+            "state_hex": "5233535401000100380000000000000078563412010000009a785634ab896745bc9a7856cdab896700000080efcdab89c812000002000000",
+            "reason": 3,
+            "fresh_retired": 2,
+            "exit_hex": "52334558010001002800000000000000030000000200000000000000000000000000000000000000",
+            "helper_hex": "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a"
+          }
+        },
+        {
+          "DF": 1,
+          "initial": {
+            "registers": [
+              305419896,
+              1,
+              878082202,
+              1164413355,
+              1450744508,
+              1737075661,
+              2023406814,
+              2309737967
+            ],
+            "eip": 4800,
+            "eflags": 3287,
+            "state_hex": "5233535401000100380000000000000078563412010000009a785634ab896745bc9a7856cdab8967debc9a78efcdab89c0120000d70c0000"
+          },
+          "expected": {
+            "registers": [
+              305419896,
+              1,
+              878082202,
+              1164413355,
+              1450744508,
+              1737075661,
+              2147483648,
+              2309737967
+            ],
+            "eip": 4808,
+            "eflags": 1026,
+            "state_hex": "5233535401000100380000000000000078563412010000009a785634ab896745bc9a7856cdab896700000080efcdab89c812000002040000",
+            "reason": 3,
+            "fresh_retired": 2,
+            "exit_hex": "52334558010001002800000000000000030000000200000000000000000000000000000000000000",
+            "helper_hex": "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a"
+          }
+        }
+      ]
+    },
+    {
+      "name": "imm32-minimum-overflow",
+      "symbol": "imul_min_esi_ecx",
+      "form": "imm32",
+      "destination_index": 6,
+      "source_index": 1,
+      "immediate": 2147483648,
+      "original_destination": 2023406814,
+      "original_source": 4294967294,
+      "left_word": 4294967294,
+      "right_word": 2147483648,
+      "exact_signed_product": "4294967296",
+      "overflow": true,
+      "instruction_hex": "69f100000080",
+      "entry_seeds": [
+        4800
+      ],
+      "budget": 4,
+      "variants": [
+        {
+          "DF": 0,
+          "initial": {
+            "registers": [
+              305419896,
+              4294967294,
+              878082202,
+              1164413355,
+              1450744508,
+              1737075661,
+              2023406814,
+              2309737967
+            ],
+            "eip": 4800,
+            "eflags": 2263,
+            "state_hex": "5233535401000100380000000000000078563412feffffff9a785634ab896745bc9a7856cdab8967debc9a78efcdab89c0120000d7080000"
+          },
+          "expected": {
+            "registers": [
+              305419896,
+              4294967294,
+              878082202,
+              1164413355,
+              1450744508,
+              1737075661,
+              0,
+              2309737967
+            ],
+            "eip": 4808,
+            "eflags": 2051,
+            "state_hex": "5233535401000100380000000000000078563412feffffff9a785634ab896745bc9a7856cdab896700000000efcdab89c812000003080000",
+            "reason": 3,
+            "fresh_retired": 2,
+            "exit_hex": "52334558010001002800000000000000030000000200000000000000000000000000000000000000",
+            "helper_hex": "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a"
+          }
+        },
+        {
+          "DF": 1,
+          "initial": {
+            "registers": [
+              305419896,
+              4294967294,
+              878082202,
+              1164413355,
+              1450744508,
+              1737075661,
+              2023406814,
+              2309737967
+            ],
+            "eip": 4800,
+            "eflags": 3287,
+            "state_hex": "5233535401000100380000000000000078563412feffffff9a785634ab896745bc9a7856cdab8967debc9a78efcdab89c0120000d70c0000"
+          },
+          "expected": {
+            "registers": [
+              305419896,
+              4294967294,
+              878082202,
+              1164413355,
+              1450744508,
+              1737075661,
+              0,
+              2309737967
+            ],
+            "eip": 4808,
+            "eflags": 3075,
+            "state_hex": "5233535401000100380000000000000078563412feffffff9a785634ab896745bc9a7856cdab896700000000efcdab89c8120000030c0000",
+            "reason": 3,
+            "fresh_retired": 2,
+            "exit_hex": "52334558010001002800000000000000030000000200000000000000000000000000000000000000",
+            "helper_hex": "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a"
+          }
+        }
+      ]
+    },
+    {
+      "name": "imm32-maximum-negative",
+      "symbol": "imul_max_edi_esi",
+      "form": "imm32",
+      "destination_index": 7,
+      "source_index": 6,
+      "immediate": 2147483647,
+      "original_destination": 2309737967,
+      "original_source": 4294967295,
+      "left_word": 4294967295,
+      "right_word": 2147483647,
+      "exact_signed_product": "-2147483647",
+      "overflow": false,
+      "instruction_hex": "69feffffff7f",
+      "entry_seeds": [
+        4816
+      ],
+      "budget": 4,
+      "variants": [
+        {
+          "DF": 0,
+          "initial": {
+            "registers": [
+              305419896,
+              610839776,
+              878082202,
+              1164413355,
+              1450744508,
+              1737075661,
+              4294967295,
+              2309737967
+            ],
+            "eip": 4816,
+            "eflags": 2263,
+            "state_hex": "5233535401000100380000000000000078563412e0ac68249a785634ab896745bc9a7856cdab8967ffffffffefcdab89d0120000d7080000"
+          },
+          "expected": {
+            "registers": [
+              305419896,
+              610839776,
+              878082202,
+              1164413355,
+              1450744508,
+              1737075661,
+              4294967295,
+              2147483649
+            ],
+            "eip": 4824,
+            "eflags": 2,
+            "state_hex": "5233535401000100380000000000000078563412e0ac68249a785634ab896745bc9a7856cdab8967ffffffff01000080d812000002000000",
+            "reason": 3,
+            "fresh_retired": 2,
+            "exit_hex": "52334558010001002800000000000000030000000200000000000000000000000000000000000000",
+            "helper_hex": "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a"
+          }
+        },
+        {
+          "DF": 1,
+          "initial": {
+            "registers": [
+              305419896,
+              610839776,
+              878082202,
+              1164413355,
+              1450744508,
+              1737075661,
+              4294967295,
+              2309737967
+            ],
+            "eip": 4816,
+            "eflags": 3287,
+            "state_hex": "5233535401000100380000000000000078563412e0ac68249a785634ab896745bc9a7856cdab8967ffffffffefcdab89d0120000d70c0000"
+          },
+          "expected": {
+            "registers": [
+              305419896,
+              610839776,
+              878082202,
+              1164413355,
+              1450744508,
+              1737075661,
+              4294967295,
+              2147483649
+            ],
+            "eip": 4824,
+            "eflags": 1026,
+            "state_hex": "5233535401000100380000000000000078563412e0ac68249a785634ab896745bc9a7856cdab8967ffffffff01000080d812000002040000",
+            "reason": 3,
+            "fresh_retired": 2,
+            "exit_hex": "52334558010001002800000000000000030000000200000000000000000000000000000000000000",
+            "helper_hex": "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a"
+          }
+        }
+      ]
+    },
+    {
+      "name": "forced-imm32-minus-one-nonzero",
+      "symbol": "imul_full_ff_ebp_ebx",
+      "form": "imm32",
+      "destination_index": 5,
+      "source_index": 3,
+      "immediate": 4294967295,
+      "original_destination": 1737075661,
+      "original_source": 6,
+      "left_word": 6,
+      "right_word": 4294967295,
+      "exact_signed_product": "-6",
+      "overflow": false,
+      "instruction_hex": "69ebffffffff",
+      "entry_seeds": [
+        4832
+      ],
+      "budget": 4,
+      "variants": [
+        {
+          "DF": 0,
+          "initial": {
+            "registers": [
+              305419896,
+              610839776,
+              878082202,
+              6,
+              1450744508,
+              1737075661,
+              2023406814,
+              2309737967
+            ],
+            "eip": 4832,
+            "eflags": 2263,
+            "state_hex": "5233535401000100380000000000000078563412e0ac68249a78563406000000bc9a7856cdab8967debc9a78efcdab89e0120000d7080000"
+          },
+          "expected": {
+            "registers": [
+              305419896,
+              610839776,
+              878082202,
+              6,
+              1450744508,
+              4294967290,
+              2023406814,
+              2309737967
+            ],
+            "eip": 4840,
+            "eflags": 2,
+            "state_hex": "5233535401000100380000000000000078563412e0ac68249a78563406000000bc9a7856faffffffdebc9a78efcdab89e812000002000000",
+            "reason": 3,
+            "fresh_retired": 2,
+            "exit_hex": "52334558010001002800000000000000030000000200000000000000000000000000000000000000",
+            "helper_hex": "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a"
+          }
+        },
+        {
+          "DF": 1,
+          "initial": {
+            "registers": [
+              305419896,
+              610839776,
+              878082202,
+              6,
+              1450744508,
+              1737075661,
+              2023406814,
+              2309737967
+            ],
+            "eip": 4832,
+            "eflags": 3287,
+            "state_hex": "5233535401000100380000000000000078563412e0ac68249a78563406000000bc9a7856cdab8967debc9a78efcdab89e0120000d70c0000"
+          },
+          "expected": {
+            "registers": [
+              305419896,
+              610839776,
+              878082202,
+              6,
+              1450744508,
+              4294967290,
+              2023406814,
+              2309737967
+            ],
+            "eip": 4840,
+            "eflags": 1026,
+            "state_hex": "5233535401000100380000000000000078563412e0ac68249a78563406000000bc9a7856faffffffdebc9a78efcdab89e812000002040000",
+            "reason": 3,
+            "fresh_retired": 2,
+            "exit_hex": "52334558010001002800000000000000030000000200000000000000000000000000000000000000",
+            "helper_hex": "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a"
+          }
+        }
+      ]
+    }
+  ],
+  "controls": {
+    "cancel_zero": "all split stops including finalNeedCode have frozen cancel1 reason2 then cancel0/budget0 reason1 pauses, freshret0",
+    "retained_stale": {
+      "replacement_status": 4,
+      "resident_status": 4,
+      "trigger": "negative code permission change without fresh owner publication",
+      "publication": "whole4236 unchanged"
+    },
+    "retained_closed": {
+      "replacement_status": 5,
+      "resident_status": 5,
+      "publication": "whole4236 unchanged"
+    },
+    "fresh_replacement_owner_caveat": "after fresh compilation old replacementgeneration rejects3 before codecurrency; fixture does not recompile after stale"
+  },
+  "transport": {
+    "arena_bytes": 4236,
+    "State_offset": 0,
+    "State_bytes": 56,
+    "Exit_offset": 56,
+    "Exit_bytes": 40,
+    "Cancel_offset": 96,
+    "helper_offset": 100,
+    "helper_bytes": 40,
+    "transfer_offset": 140,
+    "transfer_bytes": 4096,
+    "run_arity": "4i32->i32",
+    "Exit_version": 1,
+    "helper_rule": "opaque literal5a40 exactly preserved; no guest data helper or diagnostic read",
+    "whole_arena_rule": "copy exact pre-call4236 and apply ONLY frozen State56/Exit40; preserve Cancel/helper/Transfer includingdynamic24receipt/reserved bytes",
+    "one_initial_context": "one State/Exit/helper initialization per fresh programme or finiteDFvariant; no CPU/flags/EIP patch on positive continuation",
+    "child_layout": {
+      "parameter_i32": 4,
+      "additional_i32": 16,
+      "additional_i64": 1
+    },
+    "imports": {
+      "replacement": [
+        "env.memory",
+        "ring3.guard"
+      ],
+      "resident": [
+        "env.memory",
+        "ring3.guard_resident"
+      ]
+    },
+    "full_IDs": "actual nonzero u64 receipt and bound privatekey; no global unit-ID assumptions",
+    "RAM": "no guest data page/helper/read/store/stack; ESP is a register operand",
+    "negative_controls": "bounded code stale/closed retain exact current arena; broader owner/fault/SMC evidence source-reused"
+  },
+  "claim": "authored9/12-instruction programmes and24finite rows\u00d7DFboth prove threecanonical forms, signedwide truncation/CF/OF, explicit undefinedbit policy, all8destinations/source/self/ESP aliases, realJO/JC/JNO and precise split/budget/cancel/resume with no postinitial CPU patch. Arithmetic results await actual guarded generatedWasm execution; independent expected literals predate product. No memorymultiply/divide/narrowISA/optimize/browser/performance/PE/provider/SDK/game/fullP2-V0 claim."
+}
