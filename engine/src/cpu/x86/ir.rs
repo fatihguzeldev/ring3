@@ -69,6 +69,19 @@ pub enum UnaryKind {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ShiftKind {
+    Shl,
+    Shr,
+    Sar,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ShiftCount {
+    Immediate(u8),
+    Cl,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum BranchTarget {
     Direct(GuestAddress),
     Indirect(Location32),
@@ -118,6 +131,11 @@ pub enum Operation {
     Unary {
         kind: UnaryKind,
         destination: Location32,
+    },
+    Shift {
+        kind: ShiftKind,
+        destination: Location32,
+        count: ShiftCount,
     },
     Jump {
         target: BranchTarget,

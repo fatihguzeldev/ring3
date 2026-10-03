@@ -4,7 +4,7 @@ use super::{
     DecodeError,
     operands::{location, value},
 };
-use crate::cpu::x86::ir::{BinaryKind, Operation, UnaryKind};
+use crate::cpu::x86::ir::{BinaryKind, Operation, ShiftCount, ShiftKind, UnaryKind};
 
 pub(super) fn lower(instruction: &Instruction) -> Option<Result<Operation, DecodeError>> {
     let kind = match instruction.code() {
@@ -49,7 +49,7 @@ pub(super) fn lower(instruction: &Instruction) -> Option<Result<Operation, Decod
         | Code::Xor_EAX_imm32
         | Code::Xor_rm32_imm32
         | Code::Xor_rm32_imm8 => BinaryKind::Xor,
-        _ => return lower_unary(instruction),
+        _ => return lower_shift(instruction).or_else(|| lower_unary(instruction)),
     };
     Some(binary(instruction, kind))
 }
@@ -71,4 +71,35 @@ fn lower_unary(instruction: &Instruction) -> Option<Result<Operation, DecodeErro
         _ => return None,
     };
     Some(location(instruction, 0).map(|destination| Operation::Unary { kind, destination }))
+}
+
+fn lower_shift(instruction: &Instruction) -> Option<Result<Operation, DecodeError>> {
+    let (kind, count) = match instruction.code() {
+        Code::Shl_rm32_1 => (ShiftKind::Shl, ShiftCount::Immediate(1)),
+        Code::Shr_rm32_1 => (ShiftKind::Shr, ShiftCount::Immediate(1)),
+        Code::Sar_rm32_1 => (ShiftKind::Sar, ShiftCount::Immediate(1)),
+        Code::Shl_rm32_imm8 => (
+            ShiftKind::Shl,
+            ShiftCount::Immediate(instruction.immediate8()),
+        ),
+        Code::Shr_rm32_imm8 => (
+            ShiftKind::Shr,
+            ShiftCount::Immediate(instruction.immediate8()),
+        ),
+        Code::Sar_rm32_imm8 => (
+            ShiftKind::Sar,
+            ShiftCount::Immediate(instruction.immediate8()),
+        ),
+        Code::Shl_rm32_CL => (ShiftKind::Shl, ShiftCount::Cl),
+        Code::Shr_rm32_CL => (ShiftKind::Shr, ShiftCount::Cl),
+        Code::Sar_rm32_CL => (ShiftKind::Sar, ShiftCount::Cl),
+        _ => return None,
+    };
+    Some(
+        location(instruction, 0).map(|destination| Operation::Shift {
+            kind,
+            destination,
+            count,
+        }),
+    )
 }

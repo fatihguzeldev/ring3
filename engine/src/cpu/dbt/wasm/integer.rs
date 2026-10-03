@@ -6,7 +6,7 @@ use crate::cpu::x86::{
     decode::DecodedInstruction,
     ir::{
         BinaryKind, BranchTarget, EffectiveAddress, ExtensionKind, Location32, Operation,
-        SmallSource, SmallWidth, UnaryKind, Value32,
+        ShiftCount, ShiftKind, SmallSource, SmallWidth, UnaryKind, Value32,
     },
 };
 
@@ -158,6 +158,16 @@ pub(super) fn instruction(
         } => {
             unary_memory(code, kind, address, imports, exit_depth);
             store = true;
+        }
+        Operation::Shift {
+            kind,
+            destination,
+            count,
+        } => {
+            let Location32::Register(destination) = destination else {
+                unreachable!("prepared region contains a memory shift")
+            };
+            shift(code, kind, destination, count);
         }
         Operation::Jump {
             target: BranchTarget::Direct(target),
@@ -452,6 +462,76 @@ fn unary(code: &mut InstructionSink<'_>, kind: UnaryKind, destination: Register3
     code.local_set(RESULT);
     arithmetic_flags(code, binary, carry);
     code.local_get(RESULT).local_set(register(destination));
+}
+
+fn shift(
+    code: &mut InstructionSink<'_>,
+    kind: ShiftKind,
+    destination: Register32,
+    count: ShiftCount,
+) {
+    code.local_get(register(destination)).local_set(LHS);
+    match count {
+        ShiftCount::Immediate(count) => {
+            code.i32_const(i32::from(count));
+        }
+        ShiftCount::Cl => {
+            code.local_get(register(Register32::Ecx));
+        }
+    }
+    code.i32_const(31)
+        .i32_and()
+        .local_tee(RHS)
+        .if_(BlockType::Empty)
+        .local_get(LHS)
+        .local_get(RHS);
+    match kind {
+        ShiftKind::Shl => {
+            code.i32_shl();
+        }
+        ShiftKind::Shr => {
+            code.i32_shr_u();
+        }
+        ShiftKind::Sar => {
+            code.i32_shr_s();
+        }
+    }
+    code.local_set(RESULT);
+    // af and multi-bit of are undefined; this profile clears them.
+    logical_flags(code);
+    code.local_get(FLAGS).local_get(LHS);
+    if kind == ShiftKind::Shl {
+        code.i32_const(32).local_get(RHS).i32_sub();
+    } else {
+        code.local_get(RHS).i32_const(1).i32_sub();
+    }
+    code.i32_shr_u()
+        .i32_const(1)
+        .i32_and()
+        .i32_or()
+        .local_set(FLAGS);
+    if kind != ShiftKind::Sar {
+        code.local_get(RHS)
+            .i32_const(1)
+            .i32_eq()
+            .if_(BlockType::Empty)
+            .local_get(FLAGS);
+        if kind == ShiftKind::Shl {
+            code.local_get(RESULT)
+                .i32_const(31)
+                .i32_shr_u()
+                .local_get(FLAGS)
+                .i32_const(1)
+                .i32_and()
+                .i32_xor();
+        } else {
+            code.local_get(LHS).i32_const(31).i32_shr_u();
+        }
+        code.i32_const(11).i32_shl().i32_or().local_set(FLAGS).end();
+    }
+    code.local_get(RESULT)
+        .local_set(register(destination))
+        .end();
 }
 
 fn arithmetic_flags(code: &mut InstructionSink<'_>, kind: BinaryKind, carry: CarryFlag) {

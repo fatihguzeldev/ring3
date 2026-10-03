@@ -374,6 +374,10 @@ pub(super) fn supports(instruction: &DecodedInstruction, embedded: bool) -> bool
                     kind: UnaryKind::Inc | UnaryKind::Dec | UnaryKind::Not | UnaryKind::Neg,
                     destination: Location32::Register(_),
                 }
+                | Operation::Shift {
+                    destination: Location32::Register(_),
+                    ..
+                }
                 | Operation::Binary {
                     kind: BinaryKind::Add
                         | BinaryKind::Adc
