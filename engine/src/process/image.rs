@@ -1,5 +1,5 @@
 use super::{EngineInstance, HostError};
-use crate::loader::{ImageMetadata32, LoadedPe32, load_pe32};
+use crate::loader::{ImageMetadata32, LoadedPe32, load_pe32, load_pe32_at};
 
 impl EngineInstance {
     pub fn load_pe32(&mut self, bytes: &[u8]) -> Result<ImageMetadata32, HostError> {
@@ -8,8 +8,36 @@ impl EngineInstance {
         Ok(self.publish_image(image))
     }
 
+    pub fn load_pe32_at(
+        &mut self,
+        bytes: &[u8],
+        actual_base: u32,
+    ) -> Result<ImageMetadata32, HostError> {
+        let pages = self.image_capacity()?;
+        let image = load_pe32_at(bytes, actual_base, pages).map_err(HostError::Loader)?;
+        Ok(self.publish_image(image))
+    }
+
     #[cfg(target_arch = "wasm32")]
     pub(super) fn load_pe32_transfer(&mut self, length: u32) -> Result<ImageMetadata32, HostError> {
+        self.load_image_transfer(length, None)
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    pub(super) fn load_pe32_transfer_at(
+        &mut self,
+        length: u32,
+        actual_base: u32,
+    ) -> Result<ImageMetadata32, HostError> {
+        self.load_image_transfer(length, Some(actual_base))
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    fn load_image_transfer(
+        &mut self,
+        length: u32,
+        actual_base: Option<u32>,
+    ) -> Result<ImageMetadata32, HostError> {
         use crate::abi::arena::{TRANSFER_OFFSET, TRANSFER_SIZE};
 
         let pages = self.image_capacity()?;
@@ -17,7 +45,11 @@ impl EngineInstance {
             return Err(HostError::InvalidRequest);
         }
         let bytes = &self.arena()[TRANSFER_OFFSET..TRANSFER_OFFSET + length as usize];
-        let image = load_pe32(bytes, pages).map_err(HostError::Loader)?;
+        let image = match actual_base {
+            None => load_pe32(bytes, pages),
+            Some(base) => load_pe32_at(bytes, base, pages),
+        }
+        .map_err(HostError::Loader)?;
         Ok(self.publish_image(image))
     }
 

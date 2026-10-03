@@ -1,3 +1,4 @@
+use super::relocation::{RelocationDirectory, prepare_fixups};
 use super::{ImageMetadata32, LoadError, LoadedPe32};
 use crate::memory::{AddressSpace, GuestAddress, PAGE_SIZE, PageRange, Permissions};
 
@@ -11,6 +12,7 @@ struct Section {
     pages: u32,
     raw_pointer: usize,
     raw_size: usize,
+    virtual_size: u32,
     permissions: Permissions,
 }
 
@@ -20,23 +22,48 @@ impl Section {
         pages: 0,
         raw_pointer: 0,
         raw_size: 0,
+        virtual_size: 0,
         permissions: Permissions::NONE,
     };
 }
 
-struct ImagePlan {
+pub(super) struct ImagePlan {
     metadata: ImageMetadata32,
     header_size: usize,
     header_pages: u32,
     sections: [Section; SECTION_LIMIT],
     section_count: usize,
+    relocation_directory: Option<RelocationDirectory>,
+}
+
+impl ImagePlan {
+    pub(super) fn image_size(&self) -> u32 {
+        self.metadata.image_size
+    }
+
+    pub(super) fn file_range(
+        &self,
+        rva: u32,
+        length: u32,
+    ) -> Result<std::ops::Range<usize>, LoadError> {
+        for section in &self.sections[..self.section_count] {
+            if let Some(offset) = rva.checked_sub(section.rva)
+                && u64::from(offset) + u64::from(length)
+                    <= u64::from(section.virtual_size.min(section.raw_size as u32))
+            {
+                let start = section.raw_pointer + offset as usize;
+                return Ok(start..start + length as usize);
+            }
+        }
+        Err(LoadError::Malformed)
+    }
 }
 
 pub fn load_pe32(bytes: &[u8], resident_pages: u32) -> Result<LoadedPe32, LoadError> {
     if !(1..=4096).contains(&resident_pages) || bytes.len() > MAX_IMAGE_BYTES as usize {
         return Err(LoadError::Capacity);
     }
-    let plan = parse(bytes)?;
+    let plan = parse(bytes, false)?;
     if plan.metadata.mapped_pages > resident_pages {
         return Err(LoadError::Capacity);
     }
@@ -63,6 +90,75 @@ pub fn load_pe32(bytes: &[u8], resident_pages: u32) -> Result<LoadedPe32, LoadEr
     })
 }
 
+pub fn load_pe32_at(
+    bytes: &[u8],
+    actual_base: u32,
+    resident_pages: u32,
+) -> Result<LoadedPe32, LoadError> {
+    if !(1..=4096).contains(&resident_pages) || bytes.len() > MAX_IMAGE_BYTES as usize {
+        return Err(LoadError::Capacity);
+    }
+    if actual_base == 0 || !actual_base.is_multiple_of(65536) {
+        return Err(LoadError::Malformed);
+    }
+    let mut plan = parse(bytes, true)?;
+    if u64::from(actual_base) + u64::from(plan.metadata.image_size) > 1 << 32 {
+        return Err(LoadError::Malformed);
+    }
+    if plan.metadata.mapped_pages > resident_pages {
+        return Err(LoadError::Capacity);
+    }
+    let preferred_base = plan.metadata.image_base;
+    let delta = actual_base.wrapping_sub(preferred_base);
+    if delta != 0 && plan.relocation_directory.is_none() {
+        return Err(LoadError::Unsupported);
+    }
+    let fixups = prepare_fixups(bytes, &plan, plan.relocation_directory, delta)?;
+    let mut memory = AddressSpace::new(resident_pages).map_err(LoadError::Memory)?;
+    initialize(
+        &mut memory,
+        actual_base,
+        plan.header_pages,
+        &bytes[..plan.header_size],
+    )?;
+    for section in &plan.sections[..plan.section_count] {
+        initialize(
+            &mut memory,
+            actual_base + section.rva,
+            section.pages,
+            &bytes[section.raw_pointer..section.raw_pointer + section.raw_size],
+        )?;
+    }
+    for fixup in fixups {
+        memory
+            .write(
+                GuestAddress(actual_base + fixup.rva),
+                &fixup.value.to_le_bytes(),
+            )
+            .map_err(LoadError::Memory)?;
+    }
+    protect(
+        &mut memory,
+        actual_base,
+        plan.header_pages,
+        Permissions::READ,
+    )?;
+    for section in &plan.sections[..plan.section_count] {
+        protect(
+            &mut memory,
+            actual_base + section.rva,
+            section.pages,
+            section.permissions,
+        )?;
+    }
+    plan.metadata.entry_point = actual_base + (plan.metadata.entry_point - preferred_base);
+    plan.metadata.image_base = actual_base;
+    Ok(LoadedPe32 {
+        memory,
+        metadata: plan.metadata,
+    })
+}
+
 fn stage(
     memory: &mut AddressSpace,
     address: u32,
@@ -70,18 +166,37 @@ fn stage(
     bytes: &[u8],
     permissions: Permissions,
 ) -> Result<(), LoadError> {
+    initialize(memory, address, pages, bytes)?;
+    protect(memory, address, pages, permissions)
+}
+
+fn initialize(
+    memory: &mut AddressSpace,
+    address: u32,
+    pages: u32,
+    bytes: &[u8],
+) -> Result<(), LoadError> {
     let address = GuestAddress(address);
     let range = PageRange::new(address, pages).map_err(LoadError::Memory)?;
     memory
         .map_zeroed(range, Permissions::READ_WRITE)
         .map_err(LoadError::Memory)?;
-    memory.write(address, bytes).map_err(LoadError::Memory)?;
+    memory.write(address, bytes).map_err(LoadError::Memory)
+}
+
+fn protect(
+    memory: &mut AddressSpace,
+    address: u32,
+    pages: u32,
+    permissions: Permissions,
+) -> Result<(), LoadError> {
+    let range = PageRange::new(GuestAddress(address), pages).map_err(LoadError::Memory)?;
     memory
         .protect(range, permissions)
         .map_err(LoadError::Memory)
 }
 
-fn parse(bytes: &[u8]) -> Result<ImagePlan, LoadError> {
+fn parse(bytes: &[u8], allow_relocations: bool) -> Result<ImagePlan, LoadError> {
     if bytes.len() < 64 || bytes.get(..2) != Some(b"MZ") {
         return Err(LoadError::Malformed);
     }
@@ -125,9 +240,23 @@ fn parse(bytes: &[u8]) -> Result<ImagePlan, LoadError> {
         || read16(bytes, optional + 70)? & !0x0100 != 0
         || read32(bytes, optional + 88)? != 0
         || read32(bytes, optional + 92)? != 16
-        || bytes[optional + 96..table].iter().any(|byte| *byte != 0)
     {
         return Err(LoadError::Unsupported);
+    }
+    let mut relocation_directory = None;
+    for index in 0..16 {
+        let rva = read32(bytes, optional + 96 + index * 8)?;
+        let size = read32(bytes, optional + 100 + index * 8)?;
+        if rva == 0 && size == 0 {
+            continue;
+        }
+        if !allow_relocations || index != 5 {
+            return Err(LoadError::Unsupported);
+        }
+        if rva == 0 || size == 0 || characteristics & 1 != 0 {
+            return Err(LoadError::Malformed);
+        }
+        relocation_directory = Some(RelocationDirectory { rva, size });
     }
     let image_base = read32(bytes, optional + 28)?;
     let image_size = read32(bytes, optional + 56)?;
@@ -164,6 +293,7 @@ fn parse(bytes: &[u8]) -> Result<ImagePlan, LoadError> {
         header_pages,
         sections: [Section::EMPTY; SECTION_LIMIT],
         section_count,
+        relocation_directory,
     };
     let mut previous_virtual_end = header_end;
     let mut previous_raw_end = u64::from(header_size);
@@ -206,6 +336,7 @@ fn parse(bytes: &[u8]) -> Result<ImagePlan, LoadError> {
             pages,
             raw_pointer: raw_pointer as usize,
             raw_size: raw_size as usize,
+            virtual_size,
             permissions,
         };
         plan.metadata.mapped_pages += pages;

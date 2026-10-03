@@ -84,22 +84,34 @@ pub(crate) fn upload(address: u32, length: u32) -> u32 {
 pub(crate) fn load_pe32(length: u32) -> u32 {
     mutate(|instance| {
         let image = instance.load_pe32_transfer(length)?;
-        let fields = [
-            u32::from_le_bytes(*b"R3PE"),
-            0x10001,
-            32,
-            0,
-            image.image_base,
-            image.image_size,
-            image.entry_point,
-            image.mapped_pages,
-        ];
-        let output = &mut instance.arena.as_mut().get_mut()[TRANSFER_OFFSET..TRANSFER_OFFSET + 32];
-        for (output, field) in output.chunks_exact_mut(4).zip(fields) {
-            output.copy_from_slice(&field.to_le_bytes());
-        }
+        image_record(instance, image);
         Ok(())
     })
+}
+
+pub(crate) fn load_pe32_at(length: u32, actual_base: u32) -> u32 {
+    mutate(|instance| {
+        let image = instance.load_pe32_transfer_at(length, actual_base)?;
+        image_record(instance, image);
+        Ok(())
+    })
+}
+
+fn image_record(instance: &mut EngineInstance, image: crate::loader::ImageMetadata32) {
+    let fields = [
+        u32::from_le_bytes(*b"R3PE"),
+        0x10001,
+        32,
+        0,
+        image.image_base,
+        image.image_size,
+        image.entry_point,
+        image.mapped_pages,
+    ];
+    let output = &mut instance.arena.as_mut().get_mut()[TRANSFER_OFFSET..TRANSFER_OFFSET + 32];
+    for (output, field) in output.chunks_exact_mut(4).zip(fields) {
+        output.copy_from_slice(&field.to_le_bytes());
+    }
 }
 
 pub(crate) fn compile(count: u32) -> u32 {

@@ -1,8 +1,9 @@
 mod pe32;
+mod relocation;
 
 use crate::memory::{AddressSpace, MemoryError};
 
-pub use pe32::load_pe32;
+pub use pe32::{load_pe32, load_pe32_at};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ImageMetadata32 {
