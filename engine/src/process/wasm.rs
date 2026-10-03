@@ -173,6 +173,28 @@ fn installation_record(instance: &mut EngineInstance, installed: ResidentInstall
     }
 }
 
+pub(crate) fn dispatcher_module(low: u32, high: u32) -> u32 {
+    let key = u64::from(low) | (u64::from(high) << 32);
+    mutate(|instance| {
+        let bytes = instance.dispatcher_bytes(key)?;
+        let fields = [
+            u32::from_le_bytes(*b"R3DP"),
+            0x10001,
+            32,
+            0,
+            low,
+            high,
+            bytes.as_ptr() as u32,
+            bytes.len() as u32,
+        ];
+        let output = &mut instance.arena.as_mut().get_mut()[TRANSFER_OFFSET..TRANSFER_OFFSET + 32];
+        for (word, value) in output.chunks_exact_mut(4).zip(fields) {
+            word.copy_from_slice(&value.to_le_bytes());
+        }
+        Ok(())
+    })
+}
+
 pub(crate) fn resident_module(low: u32, high: u32) -> u32 {
     let id = u64::from(low) | (u64::from(high) << 32);
     mutate(|instance| resident_record(instance, id))

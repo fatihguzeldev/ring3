@@ -1,5 +1,6 @@
 mod abi;
 mod control;
+mod dispatcher;
 mod emitter;
 mod integer;
 mod locals;
@@ -12,3 +13,5 @@ pub(super) enum EmbeddedBinding {
 }
 
 pub(super) use emitter::emit;
+
+pub(crate) use dispatcher::emit_dispatcher;

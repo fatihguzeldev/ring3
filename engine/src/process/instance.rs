@@ -15,7 +15,7 @@ use crate::{
     },
     cpu::dbt::{
         BlockSpec, CompileError, CompileLimits, CompiledRegion, GateSpec, RegistryError,
-        ResidentRegistry, compile_embedded_entry_region, compile_embedded_region,
+        ResidentRegistry, compile_embedded_entry_region, compile_embedded_region, emit_dispatcher,
     },
     memory::{
         AddressSpace, GuestAddress, MAX_WORD_WRITES32, MemoryError, PageRange, Permissions,
@@ -53,6 +53,7 @@ pub struct EngineInstance {
     pub(super) memory: Option<AddressSpace>,
     pub(super) arena: Pin<Box<[u8]>>,
     pub(super) artifact: Option<CompiledRegion>,
+    pub(super) dispatcher: Option<Vec<u8>>,
     pub(super) resident: Option<ResidentRegistry>,
     pub(super) resident_installations: [Option<ResidentInstallation>; RESIDENT_INSTALLATION_SLOTS],
     pub(super) key: u64,
@@ -78,6 +79,7 @@ impl EngineInstance {
             memory: Some(memory),
             arena: Box::into_pin(arena.into_boxed_slice()),
             artifact: None,
+            dispatcher: Some(emit_dispatcher(key)),
             resident: None,
             resident_installations: [None; RESIDENT_INSTALLATION_SLOTS],
             key,
@@ -86,6 +88,14 @@ impl EngineInstance {
             callback: None,
             call_token: 0,
         })
+    }
+
+    pub fn dispatcher_bytes(&self, key: u64) -> Result<&[u8], HostError> {
+        self.memory()?;
+        if key != self.key {
+            return Err(HostError::InvalidArtifact);
+        }
+        self.dispatcher.as_deref().ok_or(HostError::Infrastructure)
     }
 
     pub fn is_open(&self) -> bool {
@@ -409,6 +419,7 @@ impl EngineInstance {
         self.pending_call = None;
         self.callback = None;
         self.artifact = None;
+        self.dispatcher = None;
         self.resident = None;
         self.resident_installations = [None; RESIDENT_INSTALLATION_SLOTS];
         self.memory = None;
