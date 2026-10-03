@@ -1,0 +1,240 @@
+{
+  "profile": "ordinary resident cold discovery and returning-dispatcher linked-PE transport",
+  "reused_program": {
+    "path": "engine/tests/fixtures/p2-pe32-imports/program.S",
+    "sha256": "edb1f5f7bc98699a39159c25e41121ea8f19c67cf8ee050316ecf7fa38bb8fe3"
+  },
+  "reused_cpu_oracle": {
+    "path": "engine/tests/fixtures/p2-pe32-imports/oracle.json",
+    "sha256": "631d0774fa6ca0fdf4841fa74d3c07b8c6bf872a4d04054401c9cbb81e3a7096"
+  },
+  "reused_pe_sha256": "4ede51dfa2d9a96b7b0bb20faffc8d468b3a8edae2d1dfcf8a1210412d56ccb5",
+  "actual_base": 5242880,
+  "gate_base": 1610612736,
+  "pages": 8,
+  "table_slots": 8,
+  "live_units": 7,
+  "startup": {
+    "registers": [
+      324508639,
+      610839776,
+      2309737967,
+      270544960,
+      36864,
+      1432778632,
+      2578103244,
+      3723427584
+    ],
+    "eflags": 3287,
+    "stack_addresses": [
+      36852,
+      36856,
+      36860,
+      36864
+    ],
+    "stack_values": [
+      287454020,
+      1432778632,
+      2578103244,
+      3723427584
+    ]
+  },
+  "seed_authority": {
+    "gate_unit": "only returned R3LI gate entries and GateSpecs, before startup",
+    "first_caller": "only returned R3LI entry_point",
+    "subsequent_callers": "only canonical State.EIP following successful zero-retirement dispatcher NeedCode; reused oracle PCs are assertions only",
+    "terminal": "assertion-only pinned authored UD2 NeedCode; never compile it"
+  },
+  "compiler": {
+    "arity": 2,
+    "entry_stride": 4,
+    "gate_stride": 8,
+    "receipt_prefix_hex": "0100000018000000",
+    "receipt_length": 24,
+    "receipt_fields": [
+      "version1",
+      "length24",
+      "returned_unit_low",
+      "returned_unit_high",
+      "returned_module_pointer",
+      "returned_module_length"
+    ],
+    "mutates": [
+      "resident registry",
+      "transfer first24 only"
+    ],
+    "does_not_mutate": [
+      "replacement generation",
+      "State56",
+      "Exit40",
+      "helper40",
+      "cancel4",
+      "transfer suffix",
+      "guest RAM",
+      "existing module bytes and pointers",
+      "dispatcher bytes and pointer"
+    ],
+    "returned_ids": "nonzero distinct full-u64, not a numeric sequence"
+  },
+  "installation": {
+    "gate_slot": 0,
+    "caller_slots": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6
+    ],
+    "record_prefix_hex": "5233494e010001002000000000000000",
+    "length": 32,
+    "fields": [
+      "returned_unit_low",
+      "returned_unit_high",
+      "fresh_slot",
+      "reserved0"
+    ],
+    "logical_find": "same raw resident24 pointer/length/id",
+    "before_ack_find_status": 17,
+    "before_ack_find_preserves_arena": true,
+    "ack_success_changes_only_transfer32": true,
+    "trusted_table": "same memory/table/function objects; acknowledgement does not authenticate table provenance"
+  },
+  "dispatcher": {
+    "record_prefix_hex": "52334450010001002000000000000000",
+    "receipt_length": 32,
+    "fields": [
+      "own_key_low",
+      "own_key_high",
+      "immutable_module_pointer",
+      "immutable_module_length"
+    ],
+    "module_imports": [
+      "env.memory",
+      "env.table",
+      "ring3.guard_dispatch_entry",
+      "ring3.find_installed_resident"
+    ],
+    "run_arity": 4,
+    "gate_exit": {
+      "version": 3,
+      "reason": 8,
+      "retired_slices": [
+        1,
+        3,
+        2,
+        4,
+        2
+      ],
+      "detail": "observed Gate ID, asserted against pinned CPU oracle",
+      "last_lookup": "returned Gate B full-u64 id and slot0; R3IN32 only"
+    },
+    "cold_miss": {
+      "version": 3,
+      "reason": 3,
+      "retired": 0,
+      "after_provider_tokens": [
+        1,
+        2,
+        3,
+        4,
+        5
+      ],
+      "State": "unchanged exact restored provider state",
+      "helper": "unchanged",
+      "transfer": "unchanged on finder17"
+    },
+    "final": {
+      "version": 3,
+      "reason": 3,
+      "retired": 2,
+      "last_lookup": "caller6 R3IN32 remains after final missing-UD2 finder17",
+      "helper": "unchanged because final LEA/JMP needs no helper"
+    }
+  },
+  "module_helpers": {
+    "gate": [
+      "guard_resident"
+    ],
+    "callers": [
+      [
+        "guard_resident",
+        "read32",
+        "store_resident32"
+      ],
+      [
+        "guard_resident",
+        "read32",
+        "store_resident32"
+      ],
+      [
+        "guard_resident",
+        "read32",
+        "store_resident32"
+      ],
+      [
+        "guard_resident",
+        "read32",
+        "store_resident32"
+      ],
+      [
+        "guard_resident",
+        "read32",
+        "store_resident32"
+      ],
+      [
+        "guard_resident"
+      ]
+    ]
+  },
+  "provider": {
+    "capture": "existing private Stdcall frame, owner from dispatcher R3IN32; args from real guest stack",
+    "capture_transfer_length": 112,
+    "completion": {
+      "version": 3,
+      "reason": 3,
+      "retired": 0,
+      "mutates": [
+        "State56",
+        "Exit40",
+        "private Windows state only"
+      ],
+      "return_pc": "private captured PC, reused CPU oracle only asserts it"
+    },
+    "no_host_scalar": true,
+    "replay_status": 14
+  },
+  "cancellation": {
+    "compiler_success_with_nonzero_cancel": 0,
+    "compiler_receipt_length": 24,
+    "ack_failure": 16,
+    "ack_failure_preserves_arena": true,
+    "dispatcher": {
+      "status": 0,
+      "version": 3,
+      "reason": 2,
+      "retired": 0,
+      "State": "unchanged",
+      "helper": "unchanged",
+      "transfer": "unchanged before any finder/child"
+    },
+    "retry": "clear cancel and install/ack same returned unit and same slot; never compile duplicate for ack retry"
+  },
+  "errors": {
+    "count": 7,
+    "overlap": 7,
+    "decode_or_nonexecute": 10,
+    "pending_before_invalid_count": 12,
+    "closed_before_invalid_count": 5,
+    "wrong_key_or_unit_high": 3,
+    "capacity": 18,
+    "stale": 4
+  },
+  "fresh_retirement_only": {
+    "gate_and_provider": 0,
+    "restored_exit_not_recharged": true,
+    "zero_misses_not_recharged": true,
+    "total": 14
+  },
+  "claim": "one synchronous trusted-host ordinary resident cold discovery path for pinned authored linked PE; no recursive graph, auto executor, callback entry discovery, startup ownership, ExitProcess, slot reuse, eviction, SDK/browser/performance/game/full P2-V0 claim"
+}
