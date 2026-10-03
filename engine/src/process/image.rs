@@ -1,5 +1,8 @@
 use super::{EngineInstance, HostError};
-use crate::loader::{ImageMetadata32, LoadedPe32, load_pe32, load_pe32_at};
+use crate::loader::{
+    ImageMetadata32, LinkedImageMetadata32, LoadedLinkedPe32, LoadedPe32, load_pe32, load_pe32_at,
+    load_pe32_linked_at,
+};
 
 impl EngineInstance {
     pub fn load_pe32(&mut self, bytes: &[u8]) -> Result<ImageMetadata32, HostError> {
@@ -16,6 +19,37 @@ impl EngineInstance {
         let pages = self.image_capacity()?;
         let image = load_pe32_at(bytes, actual_base, pages).map_err(HostError::Loader)?;
         Ok(self.publish_image(image))
+    }
+
+    pub fn load_pe32_linked_at(
+        &mut self,
+        bytes: &[u8],
+        actual_base: u32,
+        gate_base: u32,
+    ) -> Result<LinkedImageMetadata32, HostError> {
+        let pages = self.image_capacity()?;
+        let image =
+            load_pe32_linked_at(bytes, actual_base, gate_base, pages).map_err(HostError::Loader)?;
+        Ok(self.publish_linked_image(image))
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    pub(super) fn load_pe32_linked_transfer_at(
+        &mut self,
+        length: u32,
+        actual_base: u32,
+        gate_base: u32,
+    ) -> Result<LinkedImageMetadata32, HostError> {
+        use crate::abi::arena::{TRANSFER_OFFSET, TRANSFER_SIZE};
+
+        let pages = self.image_capacity()?;
+        if length as usize > TRANSFER_SIZE {
+            return Err(HostError::InvalidRequest);
+        }
+        let bytes = &self.arena()[TRANSFER_OFFSET..TRANSFER_OFFSET + length as usize];
+        let image =
+            load_pe32_linked_at(bytes, actual_base, gate_base, pages).map_err(HostError::Loader)?;
+        Ok(self.publish_linked_image(image))
     }
 
     #[cfg(target_arch = "wasm32")]
@@ -75,6 +109,13 @@ impl EngineInstance {
         self.image = Some(image);
         image
     }
+
+    fn publish_linked_image(&mut self, loaded: LoadedLinkedPe32) -> LinkedImageMetadata32 {
+        let (memory, linked) = loaded.into_parts();
+        self.memory = Some(memory);
+        self.image = Some(linked.image);
+        linked
+    }
 }
 
 #[cfg(test)]
@@ -94,6 +135,13 @@ mod tests {
             .exhaust_versions_for_test();
         assert_eq!(
             instance.load_pe32(b"bad"),
+            Err(HostError::Loader(LoadError::Malformed))
+        );
+        assert_eq!(instance.memory().unwrap().identity(), identity);
+        assert_eq!(instance.arena(), arena);
+        assert!(instance.image.is_none());
+        assert_eq!(
+            instance.load_pe32_linked_at(b"bad", 0x0040_0000, 0x7000_0000),
             Err(HostError::Loader(LoadError::Malformed))
         );
         assert_eq!(instance.memory().unwrap().identity(), identity);

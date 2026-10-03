@@ -1,10 +1,18 @@
+use super::imports::{ImportDirectory, prepare_imports};
 use super::relocation::{RelocationDirectory, prepare_fixups};
-use super::{ImageMetadata32, LoadError, LoadedPe32};
+use super::{ImageMetadata32, LinkedImageMetadata32, LoadError, LoadedLinkedPe32, LoadedPe32};
 use crate::memory::{AddressSpace, GuestAddress, PAGE_SIZE, PageRange, Permissions};
 
 const MAX_IMAGE_BYTES: u32 = 16 * 1024 * 1024;
 const FILE_ALIGNMENT: u32 = 512;
 const SECTION_LIMIT: usize = 8;
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Profile {
+    Fixed,
+    Relocated,
+    Linked,
+}
 
 #[derive(Clone, Copy)]
 struct Section {
@@ -34,6 +42,8 @@ pub(super) struct ImagePlan {
     sections: [Section; SECTION_LIMIT],
     section_count: usize,
     relocation_directory: Option<RelocationDirectory>,
+    import_directory: Option<ImportDirectory>,
+    iat_directory: Option<ImportDirectory>,
 }
 
 impl ImagePlan {
@@ -63,7 +73,7 @@ pub fn load_pe32(bytes: &[u8], resident_pages: u32) -> Result<LoadedPe32, LoadEr
     if !(1..=4096).contains(&resident_pages) || bytes.len() > MAX_IMAGE_BYTES as usize {
         return Err(LoadError::Capacity);
     }
-    let plan = parse(bytes, false)?;
+    let plan = parse(bytes, Profile::Fixed)?;
     if plan.metadata.mapped_pages > resident_pages {
         return Err(LoadError::Capacity);
     }
@@ -101,7 +111,7 @@ pub fn load_pe32_at(
     if actual_base == 0 || !actual_base.is_multiple_of(65536) {
         return Err(LoadError::Malformed);
     }
-    let mut plan = parse(bytes, true)?;
+    let mut plan = parse(bytes, Profile::Relocated)?;
     if u64::from(actual_base) + u64::from(plan.metadata.image_size) > 1 << 32 {
         return Err(LoadError::Malformed);
     }
@@ -159,6 +169,113 @@ pub fn load_pe32_at(
     })
 }
 
+pub fn load_pe32_linked_at(
+    bytes: &[u8],
+    actual_base: u32,
+    gate_base: u32,
+    resident_pages: u32,
+) -> Result<LoadedLinkedPe32, LoadError> {
+    if !(1..=4096).contains(&resident_pages) || bytes.len() > MAX_IMAGE_BYTES as usize {
+        return Err(LoadError::Capacity);
+    }
+    if actual_base == 0 || !actual_base.is_multiple_of(65536) {
+        return Err(LoadError::Malformed);
+    }
+    let mut plan = parse(bytes, Profile::Linked)?;
+    let image_end = u64::from(actual_base) + u64::from(plan.metadata.image_size);
+    let gate_end = u64::from(gate_base) + u64::from(PAGE_SIZE);
+    if image_end > 1 << 32
+        || gate_base == 0
+        || !gate_base.is_multiple_of(PAGE_SIZE)
+        || gate_end > 1 << 32
+        || (u64::from(gate_base) < image_end && u64::from(actual_base) < gate_end)
+    {
+        return Err(LoadError::Malformed);
+    }
+    let mapped_pages = plan
+        .metadata
+        .mapped_pages
+        .checked_add(1)
+        .ok_or(LoadError::Capacity)?;
+    if mapped_pages > resident_pages {
+        return Err(LoadError::Capacity);
+    }
+    let preferred_base = plan.metadata.image_base;
+    let delta = actual_base.wrapping_sub(preferred_base);
+    if delta != 0 && plan.relocation_directory.is_none() {
+        return Err(LoadError::Unsupported);
+    }
+    let imports = prepare_imports(bytes, &plan, plan.import_directory, plan.iat_directory)?;
+    let fixups = prepare_fixups(bytes, &plan, plan.relocation_directory, delta)?;
+    imports.validate_aliases(plan.relocation_directory, &fixups)?;
+    let imports = imports.resolve(gate_base)?;
+
+    let mut memory = AddressSpace::new(resident_pages).map_err(LoadError::Memory)?;
+    initialize(
+        &mut memory,
+        actual_base,
+        plan.header_pages,
+        &bytes[..plan.header_size],
+    )?;
+    for section in &plan.sections[..plan.section_count] {
+        initialize(
+            &mut memory,
+            actual_base + section.rva,
+            section.pages,
+            &bytes[section.raw_pointer..section.raw_pointer + section.raw_size],
+        )?;
+    }
+    initialize(&mut memory, gate_base, 1, &[])?;
+    for fixup in fixups {
+        memory
+            .write(
+                GuestAddress(actual_base + fixup.rva),
+                &fixup.value.to_le_bytes(),
+            )
+            .map_err(LoadError::Memory)?;
+    }
+    for (index, address) in imports.slots[..imports.slot_count].iter().enumerate() {
+        memory
+            .write(
+                GuestAddress(actual_base + imports.iat_rva + index as u32 * 4),
+                &address.to_le_bytes(),
+            )
+            .map_err(LoadError::Memory)?;
+    }
+    for gate in &imports.gates[..imports.gate_count as usize] {
+        memory
+            .write(gate.entry, &[0x0f, 0x0b])
+            .map_err(LoadError::Memory)?;
+    }
+    protect(
+        &mut memory,
+        actual_base,
+        plan.header_pages,
+        Permissions::READ,
+    )?;
+    for section in &plan.sections[..plan.section_count] {
+        protect(
+            &mut memory,
+            actual_base + section.rva,
+            section.pages,
+            section.permissions,
+        )?;
+    }
+    protect(&mut memory, gate_base, 1, Permissions::READ_EXECUTE)?;
+    plan.metadata.entry_point = actual_base + (plan.metadata.entry_point - preferred_base);
+    plan.metadata.image_base = actual_base;
+    plan.metadata.mapped_pages = mapped_pages;
+    Ok(LoadedLinkedPe32 {
+        memory,
+        metadata: LinkedImageMetadata32 {
+            image: plan.metadata,
+            gate_base,
+            gate_count: imports.gate_count,
+            gates: imports.gates,
+        },
+    })
+}
+
 fn stage(
     memory: &mut AddressSpace,
     address: u32,
@@ -196,7 +313,7 @@ fn protect(
         .map_err(LoadError::Memory)
 }
 
-fn parse(bytes: &[u8], allow_relocations: bool) -> Result<ImagePlan, LoadError> {
+fn parse(bytes: &[u8], profile: Profile) -> Result<ImagePlan, LoadError> {
     if bytes.len() < 64 || bytes.get(..2) != Some(b"MZ") {
         return Err(LoadError::Malformed);
     }
@@ -244,13 +361,27 @@ fn parse(bytes: &[u8], allow_relocations: bool) -> Result<ImagePlan, LoadError> 
         return Err(LoadError::Unsupported);
     }
     let mut relocation_directory = None;
+    let mut import_directory = None;
+    let mut iat_directory = None;
     for index in 0..16 {
         let rva = read32(bytes, optional + 96 + index * 8)?;
         let size = read32(bytes, optional + 100 + index * 8)?;
         if rva == 0 && size == 0 {
             continue;
         }
-        if !allow_relocations || index != 5 {
+        if profile == Profile::Linked && matches!(index, 1 | 12) {
+            if rva == 0 || size == 0 {
+                return Err(LoadError::Malformed);
+            }
+            let directory = ImportDirectory { rva, size };
+            if index == 1 {
+                import_directory = Some(directory);
+            } else {
+                iat_directory = Some(directory);
+            }
+            continue;
+        }
+        if profile == Profile::Fixed || index != 5 {
             return Err(LoadError::Unsupported);
         }
         if rva == 0 || size == 0 || characteristics & 1 != 0 {
@@ -294,6 +425,8 @@ fn parse(bytes: &[u8], allow_relocations: bool) -> Result<ImagePlan, LoadError> 
         sections: [Section::EMPTY; SECTION_LIMIT],
         section_count,
         relocation_directory,
+        import_directory,
+        iat_directory,
     };
     let mut previous_virtual_end = header_end;
     let mut previous_raw_end = u64::from(header_size);
