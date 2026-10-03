@@ -446,6 +446,23 @@ pub(crate) fn abandon_call(low: u32, high: u32, token: u32) -> u32 {
     mutate(|instance| instance.abandon_call(key, token))
 }
 
+pub(crate) fn complete_windows_call(low: u32, high: u32, generation: u32, token: u32) -> u32 {
+    let key = u64::from(low) | (u64::from(high) << 32);
+    mutate(|instance| instance.complete_windows_call(key, generation, token))
+}
+
+pub(crate) fn complete_resident_windows_call(
+    key_low: u32,
+    key_high: u32,
+    id_low: u32,
+    id_high: u32,
+    token: u32,
+) -> u32 {
+    let key = u64::from(key_low) | (u64::from(key_high) << 32);
+    let id = u64::from(id_low) | (u64::from(id_high) << 32);
+    mutate(|instance| instance.complete_resident_windows_call(key, id, token))
+}
+
 pub(crate) fn capture_active_resident_callback_call(
     key_low: u32,
     key_high: u32,

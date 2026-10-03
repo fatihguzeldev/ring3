@@ -7,7 +7,7 @@ use crate::{
         call_frame::{CALL_FRAME_SIZE, CallRecord32, encode_call_frame},
         x86::{EXIT_SIZE, STATE_SIZE, decode_exit, decode_state, encode_exit_v3, encode_state},
     },
-    cpu::{ExecutionExit, ExitReason},
+    cpu::{ExecutionExit, ExitReason, x86::State32},
     memory::MemoryError,
     windows::{CallFrame32, CallingConvention32, FrameError, MAX_STACK_WORDS},
 };
@@ -375,6 +375,18 @@ impl EngineInstance {
         token: u32,
         result: u32,
     ) -> Result<(), HostError> {
+        let state = self
+            .checked_pending_call(owner, token)?
+            .frame
+            .complete(result);
+        self.publish_completed_call(state)
+    }
+
+    pub(super) fn checked_pending_call(
+        &self,
+        owner: PendingOwner,
+        token: u32,
+    ) -> Result<&PendingCall, HostError> {
         if self
             .callback
             .as_ref()
@@ -397,7 +409,10 @@ impl EngineInstance {
         if self.call_cancelled() {
             return Err(HostError::Call(CallError::Cancelled));
         }
-        let state = pending.frame.complete(result);
+        Ok(pending)
+    }
+
+    pub(super) fn publish_completed_call(&mut self, state: State32) -> Result<(), HostError> {
         let mut state_bytes = [0; STATE_SIZE];
         let mut exit_bytes = [0; EXIT_SIZE];
         encode_state(&state, &mut state_bytes).map_err(|_| HostError::Infrastructure)?;

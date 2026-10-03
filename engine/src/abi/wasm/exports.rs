@@ -452,6 +452,32 @@ pub extern "C" fn abandon_call(low: u32, high: u32, token: u32) -> u32 {
 }
 
 #[allow(unsafe_code)]
+#[unsafe(export_name = "ring3_abi_v1_complete_windows_call")]
+pub extern "C" fn complete_windows_call(low: u32, high: u32, generation: u32, token: u32) -> u32 {
+    {
+        #![forbid(unsafe_code)]
+        crate::process::wasm::complete_windows_call(low, high, generation, token)
+    }
+}
+
+#[allow(unsafe_code)]
+#[unsafe(export_name = "ring3_abi_v1_complete_resident_windows_call")]
+pub extern "C" fn complete_resident_windows_call(
+    key_low: u32,
+    key_high: u32,
+    id_low: u32,
+    id_high: u32,
+    token: u32,
+) -> u32 {
+    {
+        #![forbid(unsafe_code)]
+        crate::process::wasm::complete_resident_windows_call(
+            key_low, key_high, id_low, id_high, token,
+        )
+    }
+}
+
+#[allow(unsafe_code)]
 #[unsafe(export_name = "ring3_abi_v1_select_resident_callback_unit")]
 pub extern "C" fn select_resident_callback_unit(
     key_low: u32,
