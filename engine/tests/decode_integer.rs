@@ -295,8 +295,8 @@ fn adjacent_unsupported_integer_instructions_remain_rejected() {
     let cases: [(&str, &[u8]); 14] = [
         ("add byte", &[0x00, 0xd0]),
         ("add word", &[0x66, 0x01, 0xd0]),
-        ("adc", &[0x11, 0xd0]),
-        ("sbb", &[0x19, 0xd0]),
+        ("adc byte", &[0x10, 0xd0]),
+        ("sbb byte", &[0x18, 0xd0]),
         ("shl", &[0xd1, 0xe0]),
         ("shr", &[0xd1, 0xe8]),
         ("sar", &[0xd1, 0xf8]),
