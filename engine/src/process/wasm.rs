@@ -126,6 +126,37 @@ pub(crate) fn load_pe32_linked_at(length: u32, actual_base: u32, gate_base: u32)
     })
 }
 
+pub(crate) fn load_pe32_linked_v2_at(length: u32, actual_base: u32, gate_base: u32) -> u32 {
+    mutate(|instance| {
+        let linked = instance.load_pe32_linked_v2_transfer_at(length, actual_base, gate_base)?;
+        let fields = [
+            u32::from_le_bytes(*b"R3LI"),
+            0x10002,
+            72,
+            0,
+            linked.image.image_base,
+            linked.image.image_size,
+            linked.image.entry_point,
+            linked.image.mapped_pages,
+            linked.gate_base,
+            linked.gate_count,
+            0,
+            0,
+            linked.gates[0].entry.0,
+            linked.gates[0].id,
+            linked.gates[1].entry.0,
+            linked.gates[1].id,
+            linked.gates[2].entry.0,
+            linked.gates[2].id,
+        ];
+        let output = &mut instance.arena.as_mut().get_mut()[TRANSFER_OFFSET..TRANSFER_OFFSET + 72];
+        for (output, field) in output.chunks_exact_mut(4).zip(fields) {
+            output.copy_from_slice(&field.to_le_bytes());
+        }
+        Ok(())
+    })
+}
+
 pub(crate) fn start_loaded_image(stack_base: u32, pages: u32) -> u32 {
     mutate(|instance| instance.start_loaded_image(stack_base, pages))
 }

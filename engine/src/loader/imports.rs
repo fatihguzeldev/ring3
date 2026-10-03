@@ -9,6 +9,12 @@ const MAX_SLOTS: usize = 8;
 const MAX_METADATA_RANGES: usize = 4 + MAX_SLOTS;
 
 #[derive(Clone, Copy)]
+pub(super) enum ProviderProfile {
+    LastErrorOnly,
+    LastErrorAndExit,
+}
+
+#[derive(Clone, Copy)]
 pub(super) struct ImportDirectory {
     pub rva: u32,
     pub size: u32,
@@ -48,7 +54,7 @@ pub(super) struct ResolvedImports {
     pub slot_count: usize,
     pub slots: [u32; MAX_SLOTS],
     pub gate_count: u32,
-    pub gates: [GateSpec; 2],
+    pub gates: [GateSpec; 3],
 }
 
 impl ImportPlan<'_> {
@@ -99,7 +105,11 @@ impl ImportPlan<'_> {
         Ok(())
     }
 
-    pub(super) fn resolve(&self, gate_base: u32) -> Result<ResolvedImports, LoadError> {
+    pub(super) fn resolve(
+        &self,
+        gate_base: u32,
+        profile: ProviderProfile,
+    ) -> Result<ResolvedImports, LoadError> {
         let mut resolved = ResolvedImports {
             iat_rva: self.iat_rva,
             slot_count: self.slot_count,
@@ -108,22 +118,29 @@ impl ImportPlan<'_> {
             gates: [GateSpec {
                 entry: GuestAddress(0),
                 id: 0,
-            }; 2],
+            }; 3],
         };
-        let mut used = [false; 2];
+        let mut used = [false; 3];
         for (index, symbol) in self.symbols[..self.slot_count].iter().enumerate() {
             let api = WindowsApi32::resolve(self.module, symbol).ok_or(LoadError::Unsupported)?;
             let gate_index = match api {
                 WindowsApi32::GetLastError => 0,
                 WindowsApi32::SetLastError => 1,
-                WindowsApi32::ExitProcess => return Err(LoadError::Unsupported),
+                WindowsApi32::ExitProcess => match profile {
+                    ProviderProfile::LastErrorOnly => return Err(LoadError::Unsupported),
+                    ProviderProfile::LastErrorAndExit => 2,
+                },
             };
             used[gate_index] = true;
             resolved.slots[index] = gate_base + gate_index as u32 * 16;
         }
-        for (index, api) in [WindowsApi32::GetLastError, WindowsApi32::SetLastError]
-            .into_iter()
-            .enumerate()
+        for (index, api) in [
+            WindowsApi32::GetLastError,
+            WindowsApi32::SetLastError,
+            WindowsApi32::ExitProcess,
+        ]
+        .into_iter()
+        .enumerate()
         {
             if used[index] {
                 resolved.gates[resolved.gate_count as usize] = GateSpec {

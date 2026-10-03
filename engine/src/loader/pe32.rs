@@ -1,6 +1,9 @@
-use super::imports::{ImportDirectory, prepare_imports};
+use super::imports::{ImportDirectory, ProviderProfile, prepare_imports};
 use super::relocation::{RelocationDirectory, prepare_fixups};
-use super::{ImageMetadata32, LinkedImageMetadata32, LoadError, LoadedLinkedPe32, LoadedPe32};
+use super::{
+    ImageMetadata32, LinkedImageMetadata32, LinkedImageMetadata32V2, LoadError, LoadedLinkedPe32,
+    LoadedLinkedPe32V2, LoadedPe32,
+};
 use crate::memory::{AddressSpace, GuestAddress, PAGE_SIZE, PageRange, Permissions};
 
 const MAX_IMAGE_BYTES: u32 = 16 * 1024 * 1024;
@@ -175,6 +178,46 @@ pub fn load_pe32_linked_at(
     gate_base: u32,
     resident_pages: u32,
 ) -> Result<LoadedLinkedPe32, LoadError> {
+    let linked = load_linked_profile(
+        bytes,
+        actual_base,
+        gate_base,
+        resident_pages,
+        ProviderProfile::LastErrorOnly,
+    )?;
+    Ok(LoadedLinkedPe32 {
+        memory: linked.memory,
+        metadata: LinkedImageMetadata32 {
+            image: linked.metadata.image,
+            gate_base: linked.metadata.gate_base,
+            gate_count: linked.metadata.gate_count,
+            gates: [linked.metadata.gates[0], linked.metadata.gates[1]],
+        },
+    })
+}
+
+pub fn load_pe32_linked_v2_at(
+    bytes: &[u8],
+    actual_base: u32,
+    gate_base: u32,
+    resident_pages: u32,
+) -> Result<LoadedLinkedPe32V2, LoadError> {
+    load_linked_profile(
+        bytes,
+        actual_base,
+        gate_base,
+        resident_pages,
+        ProviderProfile::LastErrorAndExit,
+    )
+}
+
+fn load_linked_profile(
+    bytes: &[u8],
+    actual_base: u32,
+    gate_base: u32,
+    resident_pages: u32,
+    profile: ProviderProfile,
+) -> Result<LoadedLinkedPe32V2, LoadError> {
     if !(1..=4096).contains(&resident_pages) || bytes.len() > MAX_IMAGE_BYTES as usize {
         return Err(LoadError::Capacity);
     }
@@ -208,7 +251,7 @@ pub fn load_pe32_linked_at(
     let imports = prepare_imports(bytes, &plan, plan.import_directory, plan.iat_directory)?;
     let fixups = prepare_fixups(bytes, &plan, plan.relocation_directory, delta)?;
     imports.validate_aliases(plan.relocation_directory, &fixups)?;
-    let imports = imports.resolve(gate_base)?;
+    let imports = imports.resolve(gate_base, profile)?;
 
     let mut memory = AddressSpace::new(resident_pages).map_err(LoadError::Memory)?;
     initialize(
@@ -265,9 +308,9 @@ pub fn load_pe32_linked_at(
     plan.metadata.entry_point = actual_base + (plan.metadata.entry_point - preferred_base);
     plan.metadata.image_base = actual_base;
     plan.metadata.mapped_pages = mapped_pages;
-    Ok(LoadedLinkedPe32 {
+    Ok(LoadedLinkedPe32V2 {
         memory,
-        metadata: LinkedImageMetadata32 {
+        metadata: LinkedImageMetadata32V2 {
             image: plan.metadata,
             gate_base,
             gate_count: imports.gate_count,
