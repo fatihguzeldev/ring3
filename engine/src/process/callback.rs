@@ -8,6 +8,7 @@ use crate::{
     abi::{
         arena::{EXIT_OFFSET, STATE_OFFSET, TRANSFER_OFFSET},
         callback::{CALLBACK_RECORD_SIZE, CallbackRecord32, encode_callback},
+        resident_callback::ResidentCallbackRecord32,
         x86::{EXIT_SIZE, STATE_SIZE, decode_exit, decode_state, encode_exit_v3, encode_state},
     },
     cpu::{ExecutionExit, ExitReason},
@@ -15,17 +16,45 @@ use crate::{
 };
 
 pub(super) struct SuspendedCallback {
-    pub(super) record: CallbackRecord32,
+    pub(super) record: SuspendedRecord,
     pub(super) outer: PendingCall,
 }
 
+#[derive(Clone, Copy)]
+pub(super) enum SuspendedRecord {
+    Replacement(CallbackRecord32),
+    Resident(ResidentCallbackRecord32),
+}
+
 impl SuspendedCallback {
+    pub(super) fn token(&self) -> u32 {
+        match self.record {
+            SuspendedRecord::Replacement(record) => record.token,
+            SuspendedRecord::Resident(record) => record.token,
+        }
+    }
+
+    pub(super) fn is_resident(&self) -> bool {
+        matches!(self.record, SuspendedRecord::Resident(_))
+    }
+
+    pub(super) fn replacement_record(&self) -> Result<CallbackRecord32, HostError> {
+        match self.record {
+            SuspendedRecord::Replacement(record) => Ok(record),
+            SuspendedRecord::Resident(_) => Err(call_error(CallError::InvalidToken)),
+        }
+    }
+
     pub(super) fn outer_token(&self) -> u32 {
         self.outer.token
     }
 
     pub(super) fn matches_return(&self, pc: u32, id: u32) -> bool {
-        self.record.return_pc == pc && self.record.return_id == id
+        let (return_pc, return_id) = match self.record {
+            SuspendedRecord::Replacement(record) => (record.return_pc, record.return_id),
+            SuspendedRecord::Resident(record) => (record.return_pc, record.return_id),
+        };
+        return_pc == pc && return_id == id
     }
 }
 
@@ -147,7 +176,10 @@ impl EngineInstance {
             output[28..32].copy_from_slice(&1_u32.to_le_bytes());
         }
         let outer = self.pending_call.take().unwrap();
-        self.callback = Some(SuspendedCallback { record, outer });
+        self.callback = Some(SuspendedCallback {
+            record: SuspendedRecord::Replacement(record),
+            outer,
+        });
         self.call_token = token;
         let arena = self.arena.as_mut().get_mut();
         arena[STATE_OFFSET..STATE_OFFSET + STATE_SIZE].copy_from_slice(&state);
@@ -167,8 +199,8 @@ impl EngineInstance {
             .callback
             .as_ref()
             .ok_or(call_error(CallError::InvalidToken))?;
-        if token == 0 || callback.record.token != token || callback.record.generation != generation
-        {
+        let record = callback.replacement_record()?;
+        if token == 0 || record.token != token || record.generation != generation {
             return Err(call_error(CallError::InvalidToken));
         }
         if self.pending_call.is_some() {
@@ -194,7 +226,7 @@ impl EngineInstance {
             phase: 2,
             outcome: 0,
             result: state.registers[0],
-            ..callback.record
+            ..record
         };
         let mut output = [0; CALLBACK_RECORD_SIZE];
         encode_callback(&record, &mut output).map_err(|_| HostError::Infrastructure)?;
@@ -216,7 +248,7 @@ impl EngineInstance {
             || self
                 .callback
                 .as_ref()
-                .is_none_or(|callback| callback.record.token != token)
+                .is_none_or(|callback| callback.token() != token)
         {
             return Err(call_error(CallError::InvalidToken));
         }

@@ -80,11 +80,12 @@ fn fixture(previous_generation: u32) -> (EngineInstance, u32, u32) {
 
 fn authority(engine: &EngineInstance) -> (u32, u32, PendingOwner, u32, u32) {
     let callback = engine.callback.as_ref().unwrap();
+    let record = callback.replacement_record().unwrap();
     (
         engine.generation,
-        callback.record.generation,
+        record.generation,
         callback.outer.owner,
-        callback.record.token,
+        record.token,
         engine.call_token,
     )
 }

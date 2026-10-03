@@ -1,7 +1,9 @@
 #![forbid(unsafe_code)]
 
 use super::{
-    CallError, EngineInstance, HostError, call::PendingOwner, callback::SuspendedCallback,
+    CallError, EngineInstance, HostError,
+    call::PendingOwner,
+    callback::{SuspendedCallback, SuspendedRecord},
     instance::DescriptorFormat,
 };
 use crate::{
@@ -115,7 +117,7 @@ impl EngineInstance {
             phase: 1,
             outcome: 0,
             result: 0,
-            ..callback.record
+            ..callback.replacement_record()?
         };
         let mut output = [0; CALLBACK_RECORD_SIZE];
         encode_callback(&record, &mut output).map_err(|_| HostError::Infrastructure)?;
@@ -154,7 +156,7 @@ impl EngineInstance {
         self.artifact = Some(prepared.artifact);
         self.generation = generation;
         let callback = self.callback.as_mut().unwrap();
-        callback.record = prepared.record;
+        callback.record = SuspendedRecord::Replacement(prepared.record);
         callback.outer.owner = PendingOwner::Replacement(generation);
         self.arena.as_mut().get_mut()[TRANSFER_OFFSET..TRANSFER_OFFSET + CALLBACK_RECORD_SIZE]
             .copy_from_slice(&prepared.output);
@@ -172,9 +174,10 @@ impl EngineInstance {
             .callback
             .as_ref()
             .ok_or(HostError::Call(CallError::InvalidToken))?;
+        let record = callback.replacement_record()?;
         if token == 0
-            || callback.record.token != token
-            || callback.record.generation != generation
+            || record.token != token
+            || record.generation != generation
             || callback.outer.owner != PendingOwner::Replacement(generation)
         {
             return Err(HostError::Call(CallError::InvalidToken));
@@ -191,7 +194,8 @@ fn replacement_admission(
     callback: &SuspendedCallback,
     pc: u32,
 ) -> Result<(), HostError> {
-    if callback.outer.owner != PendingOwner::Replacement(callback.record.generation) {
+    let record = callback.replacement_record()?;
+    if callback.outer.owner != PendingOwner::Replacement(record.generation) {
         return Err(HostError::Call(CallError::InvalidToken));
     }
     let outer_exit =
@@ -200,7 +204,7 @@ fn replacement_admission(
         return Err(HostError::Call(CallError::InvalidStop));
     };
     if !artifact.contains_instruction(pc)
-        || !artifact.matches_gate(callback.record.return_pc, callback.record.return_id)
+        || !artifact.matches_gate(record.return_pc, record.return_id)
         || !artifact.matches_gate(callback.outer.frame.state().eip, id)
     {
         return Err(HostError::InvalidRequest);

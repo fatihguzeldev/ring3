@@ -6,6 +6,7 @@ mod callback_code;
 mod installation;
 mod instance;
 mod resident;
+mod resident_callback;
 #[cfg(target_arch = "wasm32")]
 pub(crate) mod wasm;
 

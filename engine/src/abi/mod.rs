@@ -4,6 +4,7 @@ pub mod callback;
 #[forbid(unsafe_code)]
 mod header;
 pub mod memory_helper;
+pub mod resident_callback;
 #[cfg(target_arch = "wasm32")]
 mod wasm;
 #[forbid(unsafe_code)]

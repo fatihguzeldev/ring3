@@ -298,7 +298,12 @@ impl EngineInstance {
 
     pub fn guard(&self, key: u64, generation: u32) -> Result<(), HostError> {
         self.guard_artifact(key, generation)?;
-        if self.pending_call.is_some() {
+        if self.pending_call.is_some()
+            || self
+                .callback
+                .as_ref()
+                .is_some_and(SuspendedCallback::is_resident)
+        {
             return Err(HostError::Call(CallError::Busy));
         }
         Ok(())
