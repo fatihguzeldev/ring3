@@ -125,6 +125,58 @@ pub extern "C" fn find_resident(pc: u32) -> u32 {
 }
 
 #[allow(unsafe_code)]
+#[unsafe(export_name = "ring3_abi_v1_compile_resident_callback_unit")]
+pub extern "C" fn compile_resident_callback_unit(
+    key_low: u32,
+    key_high: u32,
+    home_low: u32,
+    home_high: u32,
+    callback_token: u32,
+    count: u32,
+    gate_count: u32,
+) -> u32 {
+    {
+        #![forbid(unsafe_code)]
+        crate::process::wasm::compile_resident_callback_unit(
+            key_low,
+            key_high,
+            home_low,
+            home_high,
+            callback_token,
+            count,
+            gate_count,
+        )
+    }
+}
+
+#[allow(unsafe_code, clippy::too_many_arguments)]
+#[unsafe(export_name = "ring3_abi_v1_acknowledge_resident_callback_installation")]
+pub extern "C" fn acknowledge_resident_callback_installation(
+    key_low: u32,
+    key_high: u32,
+    home_low: u32,
+    home_high: u32,
+    callback_token: u32,
+    unit_low: u32,
+    unit_high: u32,
+    slot: u32,
+) -> u32 {
+    {
+        #![forbid(unsafe_code)]
+        crate::process::wasm::acknowledge_resident_callback_installation(
+            key_low,
+            key_high,
+            home_low,
+            home_high,
+            callback_token,
+            unit_low,
+            unit_high,
+            slot,
+        )
+    }
+}
+
+#[allow(unsafe_code)]
 #[unsafe(export_name = "ring3_abi_v1_dispatcher_module")]
 pub extern "C" fn dispatcher_module(low: u32, high: u32) -> u32 {
     {

@@ -24,6 +24,15 @@ impl EngineInstance {
         if self.pending_call.is_some() || self.callback.is_some() {
             return Err(HostError::Call(CallError::Busy));
         }
+        self.compile_resident_descriptors(count, gate_count, None)
+    }
+
+    pub(super) fn compile_resident_descriptors(
+        &mut self,
+        count: u32,
+        gate_count: u32,
+        required_entry: Option<u32>,
+    ) -> Result<UnitId, HostError> {
         Self::check_region_counts(count, gate_count)?;
         let mut specs = [BlockSpec {
             entry: GuestAddress(0),
@@ -57,6 +66,11 @@ impl EngineInstance {
         let memory = self.memory.as_ref().ok_or(HostError::Closed)?;
         let specs = &specs[..count as usize];
         let gates = &gates[..gate_count as usize];
+        if required_entry
+            .is_some_and(|pc| specs[0].entry.0 != pc || gates.iter().any(|gate| gate.entry.0 == pc))
+        {
+            return Err(HostError::InvalidRequest);
+        }
         if let Some(registry) = self.resident.as_mut() {
             registry
                 .compile_bound(memory, specs, gates, CompileLimits::default(), self.key)

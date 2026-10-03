@@ -22,6 +22,14 @@ impl EngineInstance {
         if self.pending_call.is_some() || self.callback.is_some() {
             return Err(HostError::Call(CallError::Busy));
         }
+        self.acknowledge_resident_slot(id, slot)
+    }
+
+    pub(super) fn acknowledge_resident_slot(
+        &mut self,
+        id: u64,
+        slot: u32,
+    ) -> Result<ResidentInstallation, HostError> {
         let existing = self
             .resident_installations
             .get(slot as usize)

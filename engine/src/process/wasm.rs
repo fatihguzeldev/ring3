@@ -104,6 +104,56 @@ pub(crate) fn compile_resident_with_gates(count: u32, gate_count: u32) -> u32 {
     })
 }
 
+pub(crate) fn compile_resident_callback_unit(
+    key_low: u32,
+    key_high: u32,
+    home_low: u32,
+    home_high: u32,
+    callback_token: u32,
+    count: u32,
+    gate_count: u32,
+) -> u32 {
+    let key = u64::from(key_low) | (u64::from(key_high) << 32);
+    let home_id = u64::from(home_low) | (u64::from(home_high) << 32);
+    mutate(|instance| {
+        let id = instance.compile_resident_callback_unit(
+            key,
+            home_id,
+            callback_token,
+            count,
+            gate_count,
+        )?;
+        resident_record(instance, id.get())
+    })
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn acknowledge_resident_callback_installation(
+    key_low: u32,
+    key_high: u32,
+    home_low: u32,
+    home_high: u32,
+    callback_token: u32,
+    unit_low: u32,
+    unit_high: u32,
+    slot: u32,
+) -> u32 {
+    let key = u64::from(key_low) | (u64::from(key_high) << 32);
+    let home_id = u64::from(home_low) | (u64::from(home_high) << 32);
+    let unit_id = u64::from(unit_low) | (u64::from(unit_high) << 32);
+    mutate(|instance| {
+        let installed = instance.acknowledge_resident_callback_installation(
+            key,
+            home_id,
+            callback_token,
+            unit_id,
+            slot,
+        )?;
+        installation_record(instance, installed);
+        Ok(())
+    })
+}
+
 pub(crate) fn find_resident(pc: u32) -> u32 {
     REGISTRY.with(|registry| {
         let Ok(mut registry) = registry.try_borrow_mut() else {
