@@ -276,7 +276,7 @@ fn small_width_prefix_and_adjacent_rejections_keep_exact_categories() {
         &[0x67, 0xff, 0xc0][..],
         &[0xf3, 0xff, 0xc0][..],
         &[0xf0, 0xff, 0x03][..],
-        &[0xd1, 0xe0][..],
+        &[0xd0, 0xe0][..],
     ] {
         rejected(
             bytes,

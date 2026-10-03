@@ -166,7 +166,7 @@ fn embedded_compilation_accepts_execute_only_instruction_pages() {
 #[test]
 fn decoder_exclusions_after_a_memory_prefix_remain_rejected_at_their_pc() {
     for (instruction, feature) in [
-        (&[0xd1, 0xe0][..], UnsupportedFeature::Opcode),
+        (&[0xd0, 0xe0][..], UnsupportedFeature::Opcode),
         (&[0x0f, 0x06][..], UnsupportedFeature::Privileged),
     ] {
         let mut engine = EngineInstance::new(1, KEY).unwrap();
