@@ -1,0 +1,26 @@
+{
+  "profile": "authored fixed-base import-free PE32; caller supplies stack and CPU",
+  "startup": {"registers": [0, 0, 0, 0, 1879052288, 0, 0, 0], "eflags": 2},
+  "data_bss": {
+    "metadata": {"image_base": 4194304, "image_size": 20480, "entry_point": 4198400, "mapped_pages": 3},
+    "code_hex": "a1003040008b0d003240008d4005a300324000eb000f0b",
+    "entry_offsets": [0],
+    "initialized_word": {"address": 4206592, "before": 37, "after": 37},
+    "bss_word": {"address": 4207104, "before": 0, "after": 42},
+    "runs": [
+      {"budget": 64, "registers": [42, 0, 0, 0, 1879052288, 0, 0, 0], "eip": 4198421, "eflags": 2, "reason": 3, "retired": 5, "exit_version": 2}
+    ],
+    "total_retired": 5
+  },
+  "bounded_loop": {
+    "metadata": {"image_base": 6291456, "image_size": 12288, "entry_point": 6295552, "mapped_pages": 2},
+    "code_hex": "b903000000b8000000008d400283e90175f8eb000f0b",
+    "entry_offsets": [0, 10, 18],
+    "runs": [
+      {"budget": 7, "registers": [4, 1, 0, 0, 1879052288, 0, 0, 0], "eip": 6295568, "eflags": 2, "reason": 1, "retired": 7, "exit_version": 1},
+      {"budget": 64, "registers": [6, 0, 0, 0, 1879052288, 0, 0, 0], "eip": 6295572, "eflags": 70, "reason": 3, "retired": 5, "exit_version": 1}
+    ],
+    "total_retired": 12
+  },
+  "abi_errors": {"malformed": 19, "unsupported": 20, "capacity": 8, "non_pristine": 7, "closed": 5, "oversized_transfer": 7}
+}
