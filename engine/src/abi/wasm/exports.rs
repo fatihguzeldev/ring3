@@ -62,6 +62,15 @@ pub extern "C" fn upload(address: u32, length: u32) -> u32 {
 }
 
 #[allow(unsafe_code)]
+#[unsafe(export_name = "ring3_abi_v1_load_pe32")]
+pub extern "C" fn load_pe32(length: u32) -> u32 {
+    {
+        #![forbid(unsafe_code)]
+        crate::process::wasm::load_pe32(length)
+    }
+}
+
+#[allow(unsafe_code)]
 #[unsafe(export_name = "ring3_abi_v1_compile")]
 pub extern "C" fn compile(count: u32) -> u32 {
     {

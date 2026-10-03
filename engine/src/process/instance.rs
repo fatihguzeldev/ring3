@@ -31,6 +31,7 @@ pub enum HostError {
     CodeInvalidated,
     GenerationExhausted,
     Memory(MemoryError),
+    Loader(crate::loader::LoadError),
     Compile(CompileError),
     Resident(RegistryError),
     Infrastructure,
@@ -61,6 +62,7 @@ pub struct EngineInstance {
     pub(super) pending_call: Option<PendingCall>,
     pub(super) callback: Option<SuspendedCallback>,
     pub(super) call_token: u32,
+    pub(super) image: Option<crate::loader::ImageMetadata32>,
 }
 
 impl EngineInstance {
@@ -87,6 +89,7 @@ impl EngineInstance {
             pending_call: None,
             callback: None,
             call_token: 0,
+            image: None,
         })
     }
 

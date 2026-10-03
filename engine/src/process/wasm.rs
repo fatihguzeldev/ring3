@@ -81,6 +81,27 @@ pub(crate) fn upload(address: u32, length: u32) -> u32 {
     mutate(|instance| instance.upload(address, length))
 }
 
+pub(crate) fn load_pe32(length: u32) -> u32 {
+    mutate(|instance| {
+        let image = instance.load_pe32_transfer(length)?;
+        let fields = [
+            u32::from_le_bytes(*b"R3PE"),
+            0x10001,
+            32,
+            0,
+            image.image_base,
+            image.image_size,
+            image.entry_point,
+            image.mapped_pages,
+        ];
+        let output = &mut instance.arena.as_mut().get_mut()[TRANSFER_OFFSET..TRANSFER_OFFSET + 32];
+        for (output, field) in output.chunks_exact_mut(4).zip(fields) {
+            output.copy_from_slice(&field.to_le_bytes());
+        }
+        Ok(())
+    })
+}
+
 pub(crate) fn compile(count: u32) -> u32 {
     mutate(|instance| instance.compile(count).map(|_| ()))
 }
@@ -782,6 +803,11 @@ fn status(error: HostError) -> u32 {
         HostError::InvalidArtifact => 3,
         HostError::CodeInvalidated => 4,
         HostError::Memory(_) => 8,
+        HostError::Loader(error) => match error {
+            crate::loader::LoadError::Malformed => 19,
+            crate::loader::LoadError::Unsupported => 20,
+            crate::loader::LoadError::Capacity | crate::loader::LoadError::Memory(_) => 8,
+        },
         HostError::Compile(_) => 10,
         HostError::Resident(error) => match error {
             RegistryError::InvalidLimits | RegistryError::InstructionOverlap { .. } => 7,
