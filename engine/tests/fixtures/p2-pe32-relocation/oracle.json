@@ -1,0 +1,24 @@
+{
+  "profile": "authored I386 HIGHLOW: RX absolute operands and initialized data pointer",
+  "preferred_base": 4194304,
+  "image_size": 24576,
+  "mapped_pages": 4,
+  "code_hex": "8b15003040008b028b0d003240008d4005a300324000eb000f0b",
+  "directory_hex": "001000001000000002300a3012300000003000000c00000000300000",
+  "target_rvas": [4098, 4106, 4114, 12288],
+  "startup_registers": [0, 0, 0, 0, 1879052288, 0, 0, 0],
+  "startup_eflags": 2,
+  "initialized_value": 37,
+  "initial_bss": 0,
+  "final_bss": 42,
+  "budget": 64,
+  "reason": 3,
+  "retired": 6,
+  "exit_version": 2,
+  "cases": [
+    {"name": "preferred", "base": 4194304, "entry": 4198400, "done": 4198424, "patched_words": [4206592, 4207104, 4207104, 4206596], "registers": [42, 0, 4206596, 0, 1879052288, 0, 0, 0], "eflags": 2},
+    {"name": "up", "base": 5242880, "entry": 5246976, "done": 5247000, "patched_words": [5255168, 5255680, 5255680, 5255172], "registers": [42, 0, 5255172, 0, 1879052288, 0, 0, 0], "eflags": 2},
+    {"name": "down", "base": 3145728, "entry": 3149824, "done": 3149848, "patched_words": [3158016, 3158528, 3158528, 3158020], "registers": [42, 0, 3158020, 0, 1879052288, 0, 0, 0], "eflags": 2}
+  ],
+  "abi_errors": {"malformed": 19, "unsupported": 20, "capacity": 8, "non_pristine": 7, "closed": 5, "oversized_transfer": 7, "legacy_nonzero_directory": 20}
+}
