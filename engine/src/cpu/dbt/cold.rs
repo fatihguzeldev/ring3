@@ -24,6 +24,15 @@ pub(super) fn prepare_embedded_entry_region(
     prepare(memory, entries, limits, true, gates)
 }
 
+pub(super) fn prepare_resident_entry_region(
+    memory: &AddressSpace,
+    entries: &[GuestAddress],
+    limits: CompileLimits,
+    gates: &[GateSpec],
+) -> Result<PreparedRegion, CompileError> {
+    prepare_embedded_entry_region(memory, entries, limits, gates)
+}
+
 fn prepare(
     memory: &AddressSpace,
     entries: &[GuestAddress],

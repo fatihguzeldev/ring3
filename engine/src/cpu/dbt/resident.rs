@@ -4,8 +4,8 @@ use crate::memory::{AddressSpace, GuestAddress};
 
 use super::{
     ArtifactError, BlockSpec, CompileError, CompileLimits, CompiledRegion, GateSpec,
-    artifact::emit_prepared, compile_region, region::prepare_resident_region,
-    wasm::EmbeddedBinding,
+    PreparedRegion, artifact::emit_prepared, cold::prepare_resident_entry_region, compile_region,
+    region::prepare_resident_region, wasm::EmbeddedBinding,
 };
 
 const MAX_UNITS: usize = 8;
@@ -118,6 +118,17 @@ impl ResidentRegistry {
         self.compile_bound_with_counter(memory, specs, gates, limits, key, &NEXT_UNIT_ID)
     }
 
+    pub(crate) fn compile_entries_bound(
+        &mut self,
+        memory: &AddressSpace,
+        entries: &[GuestAddress],
+        gates: &[GateSpec],
+        limits: CompileLimits,
+        key: u64,
+    ) -> Result<UnitId, RegistryError> {
+        self.compile_entries_bound_with_counter(memory, entries, gates, limits, key, &NEXT_UNIT_ID)
+    }
+
     fn compile_bound_with_counter(
         &mut self,
         memory: &AddressSpace,
@@ -133,6 +144,35 @@ impl ResidentRegistry {
         }
         let prepared = prepare_resident_region(memory, specs, limits, gates)
             .map_err(RegistryError::Compile)?;
+        self.compile_prepared_bound(memory, prepared, limits, key, counter)
+    }
+
+    fn compile_entries_bound_with_counter(
+        &mut self,
+        memory: &AddressSpace,
+        entries: &[GuestAddress],
+        gates: &[GateSpec],
+        limits: CompileLimits,
+        key: u64,
+        counter: &AtomicU64,
+    ) -> Result<UnitId, RegistryError> {
+        self.check_memory(memory)?;
+        if self.entries.len() == self.limits.units {
+            return Err(RegistryError::UnitCapacity);
+        }
+        let prepared = prepare_resident_entry_region(memory, entries, limits, gates)
+            .map_err(RegistryError::Compile)?;
+        self.compile_prepared_bound(memory, prepared, limits, key, counter)
+    }
+
+    fn compile_prepared_bound(
+        &mut self,
+        memory: &AddressSpace,
+        prepared: PreparedRegion,
+        limits: CompileLimits,
+        key: u64,
+        counter: &AtomicU64,
+    ) -> Result<UnitId, RegistryError> {
         // final emission can fail after reservation; unpublished ids are never reused.
         let id = allocate_id(counter)?;
         let region = emit_prepared(
@@ -229,6 +269,10 @@ impl ResidentRegistry {
         Ok(())
     }
 }
+
+#[cfg(test)]
+#[path = "resident_entries_tests.rs"]
+mod resident_entries_tests;
 
 fn allocate_id(counter: &AtomicU64) -> Result<UnitId, RegistryError> {
     counter

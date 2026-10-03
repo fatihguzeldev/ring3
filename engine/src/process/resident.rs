@@ -27,6 +27,55 @@ impl EngineInstance {
         self.compile_resident_descriptors(count, gate_count, None)
     }
 
+    pub fn compile_resident_entries(
+        &mut self,
+        count: u32,
+        gate_count: u32,
+    ) -> Result<UnitId, HostError> {
+        self.memory()?;
+        if self.pending_call.is_some() || self.callback.is_some() {
+            return Err(HostError::Call(CallError::Busy));
+        }
+        Self::check_region_counts(count, gate_count)?;
+        let mut entries = [GuestAddress(0); 8];
+        let mut gates = [GateSpec {
+            entry: GuestAddress(0),
+            id: 0,
+        }; 8];
+        let transfer = &self.arena()[TRANSFER_OFFSET..];
+        for (index, entry) in entries[..count as usize].iter_mut().enumerate() {
+            let offset = index * 4;
+            *entry = GuestAddress(u32::from_le_bytes(
+                transfer[offset..offset + 4].try_into().unwrap(),
+            ));
+        }
+        for (index, gate) in gates[..gate_count as usize].iter_mut().enumerate() {
+            let offset = count as usize * 4 + index * 8;
+            *gate = GateSpec {
+                entry: GuestAddress(u32::from_le_bytes(
+                    transfer[offset..offset + 4].try_into().unwrap(),
+                )),
+                id: u32::from_le_bytes(transfer[offset + 4..offset + 8].try_into().unwrap()),
+            };
+        }
+        let memory = self.memory.as_ref().ok_or(HostError::Closed)?;
+        let entries = &entries[..count as usize];
+        let gates = &gates[..gate_count as usize];
+        if let Some(registry) = self.resident.as_mut() {
+            registry
+                .compile_entries_bound(memory, entries, gates, CompileLimits::default(), self.key)
+                .map_err(HostError::Resident)
+        } else {
+            let mut registry = ResidentRegistry::new(memory, RegistryLimits::default())
+                .map_err(HostError::Resident)?;
+            let id = registry
+                .compile_entries_bound(memory, entries, gates, CompileLimits::default(), self.key)
+                .map_err(HostError::Resident)?;
+            self.resident = Some(registry);
+            Ok(id)
+        }
+    }
+
     pub(super) fn compile_resident_descriptors(
         &mut self,
         count: u32,
