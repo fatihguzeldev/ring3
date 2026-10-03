@@ -303,7 +303,7 @@ fn adjacent_unsupported_integer_instructions_remain_rejected() {
         ("rol", &[0xd1, 0xc0]),
         ("ror", &[0xd1, 0xc8]),
         ("mul", &[0xf7, 0xe2]),
-        ("imul", &[0x0f, 0xaf, 0xc2]),
+        ("imul word", &[0x66, 0x0f, 0xaf, 0xc2]),
         ("idiv", &[0xf7, 0xfa]),
         ("inc byte", &[0xfe, 0xc0]),
         ("inc word", &[0x66, 0x40]),
