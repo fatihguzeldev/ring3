@@ -71,7 +71,9 @@ impl Imports {
                 | Operation::Binary {
                     kind:
                         BinaryKind::Add
+                        | BinaryKind::Adc
                         | BinaryKind::Sub
+                        | BinaryKind::Sbb
                         | BinaryKind::And
                         | BinaryKind::Or
                         | BinaryKind::Xor,

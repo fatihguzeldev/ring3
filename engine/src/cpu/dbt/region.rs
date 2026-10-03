@@ -286,7 +286,9 @@ fn supports_memory_reads(operation: &Operation) -> bool {
             ..
         } | Operation::Binary {
             kind: BinaryKind::Add
+                | BinaryKind::Adc
                 | BinaryKind::Sub
+                | BinaryKind::Sbb
                 | BinaryKind::Cmp
                 | BinaryKind::And
                 | BinaryKind::Or
@@ -335,7 +337,9 @@ fn supports_memory_binary(operation: &Operation) -> bool {
         operation,
         Operation::Binary {
             kind: BinaryKind::Add
+                | BinaryKind::Adc
                 | BinaryKind::Sub
+                | BinaryKind::Sbb
                 | BinaryKind::And
                 | BinaryKind::Or
                 | BinaryKind::Xor,
@@ -372,7 +376,9 @@ pub(super) fn supports(instruction: &DecodedInstruction, embedded: bool) -> bool
                 }
                 | Operation::Binary {
                     kind: BinaryKind::Add
+                        | BinaryKind::Adc
                         | BinaryKind::Sub
+                        | BinaryKind::Sbb
                         | BinaryKind::Cmp
                         | BinaryKind::And
                         | BinaryKind::Or

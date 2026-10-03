@@ -13,11 +13,21 @@ pub(super) fn lower(instruction: &Instruction) -> Option<Result<Operation, Decod
         | Code::Add_EAX_imm32
         | Code::Add_rm32_imm32
         | Code::Add_rm32_imm8 => BinaryKind::Add,
+        Code::Adc_rm32_r32
+        | Code::Adc_r32_rm32
+        | Code::Adc_EAX_imm32
+        | Code::Adc_rm32_imm32
+        | Code::Adc_rm32_imm8 => BinaryKind::Adc,
         Code::Sub_rm32_r32
         | Code::Sub_r32_rm32
         | Code::Sub_EAX_imm32
         | Code::Sub_rm32_imm32
         | Code::Sub_rm32_imm8 => BinaryKind::Sub,
+        Code::Sbb_rm32_r32
+        | Code::Sbb_r32_rm32
+        | Code::Sbb_EAX_imm32
+        | Code::Sbb_rm32_imm32
+        | Code::Sbb_rm32_imm8 => BinaryKind::Sbb,
         Code::Cmp_rm32_r32
         | Code::Cmp_r32_rm32
         | Code::Cmp_EAX_imm32

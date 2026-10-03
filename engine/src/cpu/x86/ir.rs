@@ -50,7 +50,9 @@ pub enum ExtensionKind {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum BinaryKind {
     Add,
+    Adc,
     Sub,
+    Sbb,
     Cmp,
     Test,
     And,

@@ -104,10 +104,10 @@ pub(super) fn instruction(
             }
             code.local_get(LHS).local_get(RHS);
             match kind {
-                BinaryKind::Add => {
+                BinaryKind::Add | BinaryKind::Adc => {
                     code.i32_add();
                 }
-                BinaryKind::Sub | BinaryKind::Cmp => {
+                BinaryKind::Sub | BinaryKind::Sbb | BinaryKind::Cmp => {
                     code.i32_sub();
                 }
                 BinaryKind::And | BinaryKind::Test => {
@@ -120,6 +120,14 @@ pub(super) fn instruction(
                     code.i32_xor();
                 }
             }
+            if matches!(kind, BinaryKind::Adc | BinaryKind::Sbb) {
+                code.local_get(FLAGS).i32_const(1).i32_and();
+                if kind == BinaryKind::Adc {
+                    code.i32_add();
+                } else {
+                    code.i32_sub();
+                }
+            }
             code.local_set(RESULT);
             let writes = !matches!(kind, BinaryKind::Cmp | BinaryKind::Test);
             if writes && let Location32::Memory(address) = destination {
@@ -127,9 +135,11 @@ pub(super) fn instruction(
                 store = true;
             }
             match kind {
-                BinaryKind::Add | BinaryKind::Sub | BinaryKind::Cmp => {
-                    arithmetic_flags(code, kind, CarryFlag::Calculate)
-                }
+                BinaryKind::Add
+                | BinaryKind::Adc
+                | BinaryKind::Sub
+                | BinaryKind::Sbb
+                | BinaryKind::Cmp => arithmetic_flags(code, kind, CarryFlag::Calculate),
                 BinaryKind::And | BinaryKind::Or | BinaryKind::Xor | BinaryKind::Test => {
                     logical_flags(code)
                 }
@@ -327,14 +337,25 @@ fn binary_memory_store(
     exit_depth: u32,
 ) {
     memory::store_result(code, address, imports, exit_depth);
-    if matches!(kind, BinaryKind::Add | BinaryKind::Sub) {
+    if matches!(
+        kind,
+        BinaryKind::Add | BinaryKind::Adc | BinaryKind::Sub | BinaryKind::Sbb
+    ) {
         // store validation uses operand scratch; recover the old destination from the unchanged source.
         value(code, source);
         code.local_set(RHS).local_get(RESULT).local_get(RHS);
-        if kind == BinaryKind::Add {
+        if matches!(kind, BinaryKind::Add | BinaryKind::Adc) {
             code.i32_sub();
         } else {
             code.i32_add();
+        }
+        if matches!(kind, BinaryKind::Adc | BinaryKind::Sbb) {
+            code.local_get(FLAGS).i32_const(1).i32_and();
+            if kind == BinaryKind::Adc {
+                code.i32_sub();
+            } else {
+                code.i32_add();
+            }
         }
         code.local_set(LHS);
     }
@@ -444,10 +465,19 @@ fn arithmetic_flags(code: &mut InstructionSink<'_>, kind: BinaryKind, carry: Car
         .i32_const(2)
         .i32_or();
     if matches!(carry, CarryFlag::Calculate) {
-        if kind == BinaryKind::Add {
+        if matches!(kind, BinaryKind::Add | BinaryKind::Adc) {
             code.local_get(RESULT).local_get(LHS).i32_lt_u();
         } else {
             code.local_get(LHS).local_get(RHS).i32_lt_u();
+        }
+        if matches!(kind, BinaryKind::Adc | BinaryKind::Sbb) {
+            code.local_get(FLAGS).i32_const(1).i32_and();
+            if kind == BinaryKind::Adc {
+                code.local_get(RESULT).local_get(LHS).i32_eq();
+            } else {
+                code.local_get(LHS).local_get(RHS).i32_eq();
+            }
+            code.i32_and().i32_or();
         }
         code.i32_or();
     }
@@ -462,7 +492,7 @@ fn arithmetic_flags(code: &mut InstructionSink<'_>, kind: BinaryKind, carry: Car
         .i32_or();
     zero_sign_flags(code);
     code.local_get(LHS).local_get(RHS).i32_xor();
-    if kind == BinaryKind::Add {
+    if matches!(kind, BinaryKind::Add | BinaryKind::Adc) {
         code.i32_const(-1).i32_xor();
     }
     code.local_get(LHS)
