@@ -5,6 +5,7 @@ mod callback;
 mod callback_code;
 mod callback_installation;
 mod image;
+mod image_input;
 mod installation;
 mod instance;
 mod resident;

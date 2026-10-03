@@ -119,7 +119,7 @@ impl EngineInstance {
         Ok(self.publish_image(image))
     }
 
-    fn image_capacity(&self) -> Result<u32, HostError> {
+    pub(super) fn image_capacity(&self) -> Result<u32, HostError> {
         let memory = self.memory()?;
         if memory.mapped_pages() != 0
             || self.image.is_some()
@@ -149,7 +149,10 @@ impl EngineInstance {
         linked
     }
 
-    fn publish_linked_image_v2(&mut self, loaded: LoadedLinkedPe32V2) -> LinkedImageMetadata32V2 {
+    pub(super) fn publish_linked_image_v2(
+        &mut self,
+        loaded: LoadedLinkedPe32V2,
+    ) -> LinkedImageMetadata32V2 {
         let (memory, linked) = loaded.into_parts();
         self.memory = Some(memory);
         self.image = Some(linked.image);

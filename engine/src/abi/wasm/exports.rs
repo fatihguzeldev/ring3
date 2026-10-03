@@ -98,6 +98,42 @@ pub extern "C" fn load_pe32_linked_v2_at(length: u32, actual_base: u32, gate_bas
 }
 
 #[allow(unsafe_code)]
+#[unsafe(export_name = "ring3_abi_v1_begin_image_input")]
+pub extern "C" fn begin_image_input(total: u32) -> u32 {
+    {
+        #![forbid(unsafe_code)]
+        crate::process::wasm::begin_image_input(total)
+    }
+}
+
+#[allow(unsafe_code)]
+#[unsafe(export_name = "ring3_abi_v1_append_image_input")]
+pub extern "C" fn append_image_input(offset: u32, length: u32) -> u32 {
+    {
+        #![forbid(unsafe_code)]
+        crate::process::wasm::append_image_input(offset, length)
+    }
+}
+
+#[allow(unsafe_code)]
+#[unsafe(export_name = "ring3_abi_v1_abort_image_input")]
+pub extern "C" fn abort_image_input() -> u32 {
+    {
+        #![forbid(unsafe_code)]
+        crate::process::wasm::abort_image_input()
+    }
+}
+
+#[allow(unsafe_code)]
+#[unsafe(export_name = "ring3_abi_v1_load_pe32_linked_v2_input_at")]
+pub extern "C" fn load_pe32_linked_v2_input_at(actual_base: u32, gate_base: u32) -> u32 {
+    {
+        #![forbid(unsafe_code)]
+        crate::process::wasm::load_pe32_linked_v2_input_at(actual_base, gate_base)
+    }
+}
+
+#[allow(unsafe_code)]
 #[unsafe(export_name = "ring3_abi_v1_start_loaded_image")]
 pub extern "C" fn start_loaded_image(stack_base: u32, pages: u32) -> u32 {
     {
