@@ -1,0 +1,466 @@
+{
+  "profile": "authored unbound PE32 named KERNEL32 imports, HIGHLOW and real indirect calls to engine-owned Windows providers",
+  "preferred_base": 4194304,
+  "image_size": 24576,
+  "header_size": 1024,
+  "file_size": 3072,
+  "mapped_pages": 6,
+  "gate_base": 1610612736,
+  "gates": [
+    [
+      1610612736,
+      65537
+    ],
+    [
+      1610612752,
+      65538
+    ]
+  ],
+  "code_hex": "ff155040400089c368674523f1ff155440400089c6ff155040400089c7a3003040006a00ff155440400089c5ff15504040008d4007eb000f0b",
+  "relocation_hex": "001000001400000002300f3017301e3026302e30",
+  "target_rvas": [
+    4098,
+    4111,
+    4119,
+    4126,
+    4134,
+    4142
+  ],
+  "sections": [
+    {
+      "name": ".text",
+      "rva": 4096,
+      "virtual_size": 57,
+      "raw_pointer": 1024,
+      "flags": 1610612768
+    },
+    {
+      "name": ".data",
+      "rva": 12288,
+      "virtual_size": 4,
+      "raw_pointer": 1536,
+      "flags": 3221225536
+    },
+    {
+      "name": ".imports",
+      "rva": 16384,
+      "virtual_size": 144,
+      "raw_pointer": 2048,
+      "flags": 1073741888
+    },
+    {
+      "name": ".fixups",
+      "rva": 20480,
+      "virtual_size": 20,
+      "raw_pointer": 2560,
+      "flags": 1073741888
+    }
+  ],
+  "import_directory": [
+    16384,
+    40
+  ],
+  "relocation_directory": [
+    20480,
+    20
+  ],
+  "iat_directory": [
+    16464,
+    12
+  ],
+  "import_descriptor": [
+    16448,
+    0,
+    0,
+    16480,
+    16464
+  ],
+  "original_thunks": [
+    16496,
+    16512,
+    0
+  ],
+  "module_name": "KeRnEl32.dLl",
+  "hint_names": [
+    {
+      "rva": 16496,
+      "hint": 4660,
+      "name": "GetLastError"
+    },
+    {
+      "rva": 16512,
+      "hint": 65535,
+      "name": "SetLastError"
+    }
+  ],
+  "caller_blocks": [
+    [
+      0,
+      6
+    ],
+    [
+      6,
+      13
+    ],
+    [
+      19,
+      8
+    ],
+    [
+      27,
+      15
+    ],
+    [
+      42,
+      8
+    ],
+    [
+      50,
+      5
+    ]
+  ],
+  "startup_registers": [
+    324508639,
+    610839776,
+    2309737967,
+    270544960,
+    36864,
+    1432778632,
+    2578103244,
+    3723427584
+  ],
+  "eflags": 3287,
+  "stack_addresses": [
+    36852,
+    36856,
+    36860,
+    36864
+  ],
+  "initial_stack_values": [
+    287454020,
+    1432778632,
+    2578103244,
+    3723427584
+  ],
+  "initial_data": 0,
+  "final_data": 4045620583,
+  "budget": 64,
+  "stages": [
+    {
+      "api": "GetLastError",
+      "gate_index": 0,
+      "id": 65537,
+      "args": [],
+      "retired": 1,
+      "return_offset": 6,
+      "stop_registers": [
+        324508639,
+        610839776,
+        2309737967,
+        270544960,
+        36860,
+        1432778632,
+        2578103244,
+        3723427584
+      ],
+      "returned_registers": [
+        0,
+        610839776,
+        2309737967,
+        270544960,
+        36864,
+        1432778632,
+        2578103244,
+        3723427584
+      ],
+      "last_error_after": 0,
+      "data_after_dispatch": 0
+    },
+    {
+      "api": "SetLastError",
+      "gate_index": 1,
+      "id": 65538,
+      "args": [
+        4045620583
+      ],
+      "retired": 3,
+      "return_offset": 19,
+      "stop_registers": [
+        0,
+        610839776,
+        2309737967,
+        0,
+        36856,
+        1432778632,
+        2578103244,
+        3723427584
+      ],
+      "returned_registers": [
+        0,
+        610839776,
+        2309737967,
+        0,
+        36864,
+        1432778632,
+        2578103244,
+        3723427584
+      ],
+      "last_error_after": 4045620583,
+      "data_after_dispatch": 0
+    },
+    {
+      "api": "GetLastError",
+      "gate_index": 0,
+      "id": 65537,
+      "args": [],
+      "retired": 2,
+      "return_offset": 27,
+      "stop_registers": [
+        0,
+        610839776,
+        2309737967,
+        0,
+        36860,
+        1432778632,
+        0,
+        3723427584
+      ],
+      "returned_registers": [
+        4045620583,
+        610839776,
+        2309737967,
+        0,
+        36864,
+        1432778632,
+        0,
+        3723427584
+      ],
+      "last_error_after": 4045620583,
+      "data_after_dispatch": 0
+    },
+    {
+      "api": "SetLastError",
+      "gate_index": 1,
+      "id": 65538,
+      "args": [
+        0
+      ],
+      "retired": 4,
+      "return_offset": 42,
+      "stop_registers": [
+        4045620583,
+        610839776,
+        2309737967,
+        0,
+        36856,
+        1432778632,
+        0,
+        4045620583
+      ],
+      "returned_registers": [
+        4045620583,
+        610839776,
+        2309737967,
+        0,
+        36864,
+        1432778632,
+        0,
+        4045620583
+      ],
+      "last_error_after": 0,
+      "data_after_dispatch": 4045620583
+    },
+    {
+      "api": "GetLastError",
+      "gate_index": 0,
+      "id": 65537,
+      "args": [],
+      "retired": 2,
+      "return_offset": 50,
+      "stop_registers": [
+        4045620583,
+        610839776,
+        2309737967,
+        0,
+        36860,
+        4045620583,
+        0,
+        4045620583
+      ],
+      "returned_registers": [
+        0,
+        610839776,
+        2309737967,
+        0,
+        36864,
+        4045620583,
+        0,
+        4045620583
+      ],
+      "last_error_after": 0,
+      "data_after_dispatch": 4045620583
+    }
+  ],
+  "final": {
+    "registers": [
+      7,
+      610839776,
+      2309737967,
+      0,
+      36864,
+      4045620583,
+      0,
+      4045620583
+    ],
+    "retired": 2,
+    "reason": 3
+  },
+  "total_retired": 14,
+  "cases": [
+    {
+      "name": "preferred",
+      "base": 4194304,
+      "owner": "replacement",
+      "entry": 4198400,
+      "done": 4198455,
+      "patched_words": [
+        4210768,
+        4210772,
+        4210768,
+        4206592,
+        4210772,
+        4210768
+      ],
+      "stages": [
+        {
+          "return_pc": 4198406,
+          "stack_values": [
+            287454020,
+            1432778632,
+            4198406,
+            3723427584
+          ]
+        },
+        {
+          "return_pc": 4198419,
+          "stack_values": [
+            287454020,
+            4198419,
+            4045620583,
+            3723427584
+          ]
+        },
+        {
+          "return_pc": 4198427,
+          "stack_values": [
+            287454020,
+            4198419,
+            4198427,
+            3723427584
+          ]
+        },
+        {
+          "return_pc": 4198442,
+          "stack_values": [
+            287454020,
+            4198442,
+            0,
+            3723427584
+          ]
+        },
+        {
+          "return_pc": 4198450,
+          "stack_values": [
+            287454020,
+            4198442,
+            4198450,
+            3723427584
+          ]
+        }
+      ],
+      "final_stack_values": [
+        287454020,
+        4198442,
+        4198450,
+        3723427584
+      ]
+    },
+    {
+      "name": "selected",
+      "base": 5242880,
+      "owner": "resident",
+      "entry": 5246976,
+      "done": 5247031,
+      "patched_words": [
+        5259344,
+        5259348,
+        5259344,
+        5255168,
+        5259348,
+        5259344
+      ],
+      "stages": [
+        {
+          "return_pc": 5246982,
+          "stack_values": [
+            287454020,
+            1432778632,
+            5246982,
+            3723427584
+          ]
+        },
+        {
+          "return_pc": 5246995,
+          "stack_values": [
+            287454020,
+            5246995,
+            4045620583,
+            3723427584
+          ]
+        },
+        {
+          "return_pc": 5247003,
+          "stack_values": [
+            287454020,
+            5246995,
+            5247003,
+            3723427584
+          ]
+        },
+        {
+          "return_pc": 5247018,
+          "stack_values": [
+            287454020,
+            5247018,
+            0,
+            3723427584
+          ]
+        },
+        {
+          "return_pc": 5247026,
+          "stack_values": [
+            287454020,
+            5247018,
+            5247026,
+            3723427584
+          ]
+        }
+      ],
+      "final_stack_values": [
+        287454020,
+        5247018,
+        5247026,
+        3723427584
+      ]
+    }
+  ],
+  "abi_errors": {
+    "malformed": 19,
+    "unsupported": 20,
+    "capacity": 8,
+    "non_pristine": 7,
+    "oversized_transfer": 7,
+    "closed": 5,
+    "legacy_imports": 20
+  }
+}
