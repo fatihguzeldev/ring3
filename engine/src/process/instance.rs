@@ -299,6 +299,7 @@ impl EngineInstance {
             };
             self.guard_resident_unit(key, record.callback_unit_id)?;
             self.guard_resident_unit(key, record.outer_unit_id)?;
+            self.guard_resident_unit(key, callback.authorized_resident_active_id().unwrap())?;
         }
         Ok(())
     }

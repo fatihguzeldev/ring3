@@ -281,6 +281,33 @@ pub(crate) fn guard_resident(
     })
 }
 
+pub(crate) fn select_resident_callback_unit(
+    key_low: u32,
+    key_high: u32,
+    home_low: u32,
+    home_high: u32,
+    callback_token: u32,
+    target_low: u32,
+    target_high: u32,
+) -> u32 {
+    REGISTRY.with(|registry| {
+        let Ok(mut registry) = registry.try_borrow_mut() else {
+            return 9;
+        };
+        let Some(instance) = registry.instance.as_mut() else {
+            return 5;
+        };
+        let key = u64::from(key_low) | (u64::from(key_high) << 32);
+        let home_id = u64::from(home_low) | (u64::from(home_high) << 32);
+        let target_id = u64::from(target_low) | (u64::from(target_high) << 32);
+        match instance.select_resident_callback_unit(key, home_id, callback_token, target_id) {
+            Ok(()) => 0,
+            Err(HostError::Resident(RegistryError::NotFound { .. })) => 17,
+            Err(error) => status(error),
+        }
+    })
+}
+
 pub(crate) fn capture_call(
     low: u32,
     high: u32,

@@ -14,11 +14,81 @@ use crate::{
         },
         x86::{EXIT_SIZE, STATE_SIZE, decode_exit, decode_state, encode_exit_v3, encode_state},
     },
-    cpu::{ExecutionExit, ExitReason},
+    cpu::{ExecutionExit, ExitReason, dbt::RegistryError},
+    memory::GuestAddress,
     windows::{CallbackFrame32, FrameError, MAX_STACK_WORDS},
 };
 
 impl EngineInstance {
+    pub fn select_resident_callback_unit(
+        &mut self,
+        key: u64,
+        home_id: u64,
+        callback_token: u32,
+        target_id: u64,
+    ) -> Result<(), HostError> {
+        self.guard_resident_unit(key, home_id)?;
+        let callback = self
+            .callback
+            .as_ref()
+            .ok_or(HostError::Call(CallError::InvalidToken))?;
+        let SuspendedRecord::Resident {
+            record,
+            authorized,
+            active_unit_id,
+        } = callback.record
+        else {
+            return Err(HostError::Call(CallError::InvalidToken));
+        };
+        if callback_token == 0
+            || record.token != callback_token
+            || record.callback_unit_id != home_id
+        {
+            return Err(HostError::Call(CallError::InvalidToken));
+        }
+        self.guard_resident_unit(key, record.outer_unit_id)?;
+        if !authorized || self.pending_call.is_some() {
+            return Err(HostError::Call(CallError::Busy));
+        }
+        self.guard_resident_unit(key, active_unit_id)?;
+        let target = self.guard_resident_unit(key, target_id)?;
+        if target_id == record.outer_unit_id {
+            return Err(HostError::InvalidRequest);
+        }
+        let state = decode_state(&self.arena()[STATE_OFFSET..STATE_OFFSET + STATE_SIZE])
+            .map_err(|_| HostError::Call(CallError::InvalidStop))?;
+        let exit = decode_exit(&self.arena()[EXIT_OFFSET..EXIT_OFFSET + EXIT_SIZE])
+            .map_err(|_| HostError::Call(CallError::InvalidStop))?;
+        if exit.reason != ExitReason::NeedCode
+            || !(target.contains_instruction(state.eip)
+                || (target_id == home_id
+                    && state.eip == record.return_pc
+                    && target.matches_gate(state.eip, record.return_id)))
+        {
+            return Err(HostError::Call(CallError::InvalidStop));
+        }
+        if !self
+            .resident_installations
+            .iter()
+            .flatten()
+            .any(|installed| installed.unit_id == target_id)
+        {
+            return Err(HostError::Resident(RegistryError::NotFound {
+                pc: GuestAddress(state.eip),
+            }));
+        }
+        if self.call_cancelled() {
+            return Err(HostError::Call(CallError::Cancelled));
+        }
+        let SuspendedRecord::Resident { active_unit_id, .. } =
+            &mut self.callback.as_mut().unwrap().record
+        else {
+            unreachable!()
+        };
+        *active_unit_id = target_id;
+        Ok(())
+    }
+
     pub fn finish_resident_callback(
         &mut self,
         key: u64,
@@ -30,14 +100,19 @@ impl EngineInstance {
             .callback
             .as_ref()
             .ok_or(HostError::Call(CallError::InvalidToken))?;
-        let SuspendedRecord::Resident { record, authorized } = callback.record else {
+        let SuspendedRecord::Resident {
+            record,
+            authorized,
+            active_unit_id,
+        } = callback.record
+        else {
             return Err(HostError::Call(CallError::InvalidToken));
         };
         if token == 0 || record.token != token || record.callback_unit_id != callback_id {
             return Err(HostError::Call(CallError::InvalidToken));
         }
         self.guard_resident_unit(key, record.outer_unit_id)?;
-        if self.pending_call.is_some() || !authorized {
+        if self.pending_call.is_some() || !authorized || active_unit_id != callback_id {
             return Err(HostError::Call(CallError::Busy));
         }
         let state = decode_state(&self.arena()[STATE_OFFSET..STATE_OFFSET + STATE_SIZE])
@@ -87,7 +162,10 @@ impl EngineInstance {
             .callback
             .as_ref()
             .ok_or(HostError::Call(CallError::InvalidToken))?;
-        let SuspendedRecord::Resident { record, authorized } = callback.record else {
+        let SuspendedRecord::Resident {
+            record, authorized, ..
+        } = callback.record
+        else {
             return Err(HostError::Call(CallError::InvalidToken));
         };
         if token == 0 || record.token != token || record.callback_unit_id != callback_id {
@@ -275,6 +353,7 @@ impl EngineInstance {
             record: SuspendedRecord::Resident {
                 record,
                 authorized: false,
+                active_unit_id: callback_id,
             },
             outer,
         });

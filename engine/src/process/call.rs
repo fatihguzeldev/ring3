@@ -94,7 +94,12 @@ impl EngineInstance {
             .callback
             .as_ref()
             .ok_or(HostError::Call(CallError::InvalidToken))?;
-        let SuspendedRecord::Resident { record, authorized } = callback.record else {
+        let SuspendedRecord::Resident {
+            record,
+            authorized,
+            active_unit_id,
+        } = callback.record
+        else {
             return Err(HostError::Call(CallError::InvalidToken));
         };
         if callback_token == 0
@@ -104,7 +109,7 @@ impl EngineInstance {
             return Err(HostError::Call(CallError::InvalidToken));
         }
         self.guard_resident_unit(key, record.outer_unit_id)?;
-        if !authorized {
+        if !authorized || active_unit_id != callback_id {
             return Err(HostError::Call(CallError::Busy));
         }
         Ok(PendingOwner::ResidentCallback {

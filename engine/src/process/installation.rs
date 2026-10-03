@@ -60,8 +60,8 @@ impl EngineInstance {
         if self
             .callback
             .as_ref()
-            .and_then(|callback| callback.authorized_resident_record())
-            .is_some_and(|record| record.callback_unit_id != unit_id)
+            .and_then(|callback| callback.authorized_resident_active_id())
+            .is_some_and(|active_id| active_id != unit_id)
         {
             return Err(HostError::Call(CallError::Busy));
         }

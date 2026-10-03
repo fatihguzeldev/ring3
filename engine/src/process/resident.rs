@@ -104,9 +104,10 @@ impl EngineInstance {
             let Some(record) = callback.authorized_resident_record() else {
                 return Err(HostError::Call(CallError::Busy));
             };
-            if id != record.callback_unit_id {
+            if Some(id) != callback.authorized_resident_active_id() {
                 return Err(HostError::Call(CallError::Busy));
             }
+            self.guard_resident_unit(key, record.callback_unit_id)?;
             self.guard_resident_unit(key, record.outer_unit_id)?;
         }
         Ok(())

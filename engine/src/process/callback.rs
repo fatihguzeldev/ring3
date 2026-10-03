@@ -26,6 +26,7 @@ pub(super) enum SuspendedRecord {
     Resident {
         record: ResidentCallbackRecord32,
         authorized: bool,
+        active_unit_id: u64,
     },
 }
 
@@ -46,7 +47,19 @@ impl SuspendedCallback {
             SuspendedRecord::Resident {
                 record,
                 authorized: true,
+                ..
             } => Some(record),
+            _ => None,
+        }
+    }
+
+    pub(super) fn authorized_resident_active_id(&self) -> Option<u64> {
+        match self.record {
+            SuspendedRecord::Resident {
+                authorized: true,
+                active_unit_id,
+                ..
+            } => Some(active_unit_id),
             _ => None,
         }
     }
