@@ -2480,9 +2480,9 @@
   "transport": {
     "arena_bytes": 4236,
     "transfer_offset": 140,
-    "producer_sources": 86,
-    "engine_function_exports": 66,
-    "engine_total_exports": 67,
+    "producer_sources": 89,
+    "engine_function_exports": 69,
+    "engine_total_exports": 70,
     "engine_imports": 0,
     "run_arity": 4,
     "locals": [

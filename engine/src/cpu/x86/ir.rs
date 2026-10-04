@@ -41,6 +41,12 @@ pub enum ByteValue {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BytePredicateKind {
+    Cmp,
+    Test,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ByteLogicalKind {
     And,
     Or,
@@ -157,6 +163,11 @@ pub enum Operation {
     },
     TestByte {
         left: ByteRegister,
+        right: ByteValue,
+    },
+    MemoryPredicateByte {
+        kind: BytePredicateKind,
+        address: EffectiveAddress,
         right: ByteValue,
     },
     LogicalByte {

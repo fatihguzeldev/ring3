@@ -469,11 +469,11 @@ fn prefixes_small_width_and_declared_spans_retain_precise_errors() {
             InstructionError::Decode(DecodeError::Unsupported(UnsupportedFeature::Segment)),
         ),
         (
-            &[0x38, 0x03][..],
+            &[0x66, 0x38, 0x03][..],
             InstructionError::Decode(DecodeError::Unsupported(UnsupportedFeature::Opcode)),
         ),
         (
-            &[0x84, 0x03][..],
+            &[0x66, 0x84, 0x03][..],
             InstructionError::Decode(DecodeError::Unsupported(UnsupportedFeature::Opcode)),
         ),
     ] {

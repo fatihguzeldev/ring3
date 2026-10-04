@@ -1,14 +1,31 @@
-use iced_x86::{Code, Instruction};
+use iced_x86::{Code, Instruction, OpKind};
 
 use super::{
     DecodeError,
-    operands::{byte_register, byte_value, location, register, value},
+    operands::{byte_register, byte_value, effective_address, location, register, value},
 };
 use crate::cpu::x86::ir::{
-    BinaryKind, ByteArithmeticKind, ByteLogicalKind, Operation, ShiftCount, ShiftKind, UnaryKind,
+    BinaryKind, ByteArithmeticKind, ByteLogicalKind, BytePredicateKind, Operation, ShiftCount,
+    ShiftKind, UnaryKind,
 };
 
 pub(super) fn lower(instruction: &Instruction) -> Option<Result<Operation, DecodeError>> {
+    let memory_predicate = match instruction.code() {
+        Code::Cmp_rm8_r8 | Code::Cmp_rm8_imm8 => Some(BytePredicateKind::Cmp),
+        Code::Test_rm8_r8 | Code::Test_rm8_imm8 => Some(BytePredicateKind::Test),
+        _ => None,
+    };
+    if instruction.op0_kind() == OpKind::Memory
+        && let Some(kind) = memory_predicate
+    {
+        return Some((|| {
+            Ok(Operation::MemoryPredicateByte {
+                kind,
+                address: effective_address(instruction)?,
+                right: byte_value(instruction)?,
+            })
+        })());
+    }
     let arithmetic_kind = match instruction.code() {
         Code::Add_rm8_r8 | Code::Add_r8_rm8 | Code::Add_AL_imm8 | Code::Add_rm8_imm8 => {
             Some(ByteArithmeticKind::Add)

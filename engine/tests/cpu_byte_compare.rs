@@ -249,11 +249,11 @@ fn compare_chain_admits_standalone_and_all_four_bound_profiles_without_data() {
 fn memory_byte_compares_and_excluded_forms_fail_closed() {
     let opcode = DecodeError::Unsupported(UnsupportedFeature::Opcode);
     for (bytes, expected) in [
-        (&[0x38, 0x03][..], opcode),
+        (&[0x66, 0x38, 0x03][..], opcode),
         (&[0x3a, 0x03][..], opcode),
-        (&[0x80, 0x3b, 0xff][..], opcode),
+        (&[0x66, 0x80, 0x3b, 0xff][..], opcode),
         (&[0x82, 0xf8, 0xff][..], opcode),
-        (&[0x84, 0x00][..], opcode),
+        (&[0x66, 0x84, 0x00][..], opcode),
         (&[0xf6, 0xc8, 0xff][..], opcode),
         (&[0x66, 0x39, 0xc0][..], opcode),
         (&[0x66, 0x38, 0xc0][..], opcode),
@@ -333,9 +333,9 @@ fn failed_compare_preparation_preserves_both_published_owners() {
     for owner in [Owner::Replacement, Owner::Resident] {
         for entries in [false, true] {
             for bytes in [
-                &[0x90, 0x38, 0x03][..],
+                &[0x90, 0x66, 0x38, 0x03][..],
                 &[0x90, 0x3a, 0x03],
-                &[0x90, 0x80, 0x3b, 0xff],
+                &[0x90, 0x66, 0x80, 0x3b, 0xff],
             ] {
                 let (mut engine, keep) = prior_owners();
                 upload(&mut engine, CODE, bytes);
