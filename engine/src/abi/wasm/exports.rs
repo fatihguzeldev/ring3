@@ -379,6 +379,40 @@ pub extern "C" fn guard(
 }
 
 #[allow(unsafe_code)]
+#[unsafe(export_name = "ring3_abi_v1_write8")]
+pub extern "C" fn write8(address: u32, value: u32) -> u32 {
+    {
+        #![forbid(unsafe_code)]
+        crate::process::wasm::write8(address, value)
+    }
+}
+
+#[allow(unsafe_code)]
+#[unsafe(export_name = "ring3_abi_v1_store8")]
+pub extern "C" fn store8(address: u32, value: u32) -> u32 {
+    {
+        #![forbid(unsafe_code)]
+        crate::process::wasm::store8(address, value)
+    }
+}
+
+#[allow(unsafe_code)]
+#[unsafe(export_name = "ring3_abi_v1_store_resident8")]
+pub extern "C" fn store_resident8(
+    key_low: u32,
+    key_high: u32,
+    id_low: u32,
+    id_high: u32,
+    address: u32,
+    value: u32,
+) -> u32 {
+    {
+        #![forbid(unsafe_code)]
+        crate::process::wasm::store_resident8(key_low, key_high, id_low, id_high, address, value)
+    }
+}
+
+#[allow(unsafe_code)]
 #[unsafe(export_name = "ring3_abi_v1_read8")]
 pub extern "C" fn read8(address: u32) -> u32 {
     {

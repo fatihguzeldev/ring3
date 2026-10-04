@@ -5,6 +5,7 @@ use crate::memory::{Access, FaultReason, GuestAddress, MemoryError};
 
 pub const HELPER_SIZE: usize = 40;
 pub const NARROW_HELPER_VERSION: u16 = 2;
+pub const BYTE_STORE_HELPER_VERSION: u16 = 3;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum NarrowReadWidth {
@@ -67,6 +68,47 @@ pub fn encode_narrow_helper_result(
         ],
     };
     header::write_version(output, *b"R3MH", NARROW_HELPER_VERSION);
+    for (index, field) in fields.into_iter().enumerate() {
+        header::write_u32(output, 16 + index * 4, field);
+    }
+    Ok(())
+}
+
+pub fn encode_byte_store_result(
+    address: GuestAddress,
+    result: Result<(), MemoryError>,
+    output: &mut [u8],
+) -> Result<(), AbiError> {
+    if output.len() != HELPER_SIZE {
+        return Err(AbiError::Length);
+    }
+    let fields = match result {
+        Ok(()) => [0, 0, 0, 0, 0, 1],
+        Err(MemoryError::Fault(fault)) => {
+            if fault.access != Access::Write || fault.address != address {
+                return Err(AbiError::MemoryHelper);
+            }
+            let detail = match fault.reason {
+                FaultReason::Unmapped => 1,
+                FaultReason::Permission => 2,
+                FaultReason::AddressOverflow => return Err(AbiError::MemoryHelper),
+            };
+            [1, 0, detail, address.0, 2, 1]
+        }
+        Err(error) => [
+            2,
+            0,
+            if error == MemoryError::VersionExhausted {
+                1
+            } else {
+                2
+            },
+            0,
+            0,
+            1,
+        ],
+    };
+    header::write_version(output, *b"R3MH", BYTE_STORE_HELPER_VERSION);
     for (index, field) in fields.into_iter().enumerate() {
         header::write_u32(output, 16 + index * 4, field);
     }

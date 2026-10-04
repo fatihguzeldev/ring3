@@ -853,12 +853,57 @@ pub(crate) fn read32(address: u32) -> u32 {
     mutate(|instance| instance.read32(address))
 }
 
+pub(crate) fn write8(address: u32, value: u32) -> u32 {
+    mutate(|instance| instance.write8(address, value))
+}
+
 pub(crate) fn write32(address: u32, value: u32) -> u32 {
     mutate(|instance| instance.write32(address, value))
 }
 
 pub(crate) fn write_words32(count: u32) -> u32 {
     mutate(|instance| instance.write_words32(count))
+}
+
+pub(crate) fn store8(address: u32, value: u32) -> u32 {
+    REGISTRY.with(|registry| {
+        let Ok(mut registry) = registry.try_borrow_mut() else {
+            return 9;
+        };
+        let Some(instance) = registry.instance.as_mut() else {
+            return 5;
+        };
+        match instance.store8(address, value) {
+            Ok(StoreCompletion::Complete) => 0,
+            Ok(StoreCompletion::CodeInvalidated) => 11,
+            Err(error) => status(error),
+        }
+    })
+}
+
+pub(crate) fn store_resident8(
+    key_low: u32,
+    key_high: u32,
+    id_low: u32,
+    id_high: u32,
+    address: u32,
+    value: u32,
+) -> u32 {
+    REGISTRY.with(|registry| {
+        let Ok(mut registry) = registry.try_borrow_mut() else {
+            return 9;
+        };
+        let Some(instance) = registry.instance.as_mut() else {
+            return 5;
+        };
+        let key = u64::from(key_low) | (u64::from(key_high) << 32);
+        let id = u64::from(id_low) | (u64::from(id_high) << 32);
+        match instance.store_resident8(key, id, address, value) {
+            Ok(StoreCompletion::Complete) => 0,
+            Ok(StoreCompletion::CodeInvalidated) => 11,
+            Err(error) => status(error),
+        }
+    })
 }
 
 pub(crate) fn store32(address: u32, value: u32) -> u32 {

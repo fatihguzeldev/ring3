@@ -7,6 +7,7 @@ use crate::cpu::x86::ir::{
 
 use super::locals::*;
 
+mod byte_store;
 mod narrow;
 
 #[derive(Clone, Copy)]
@@ -36,18 +37,21 @@ pub(super) struct Imports {
     pub(super) store: Option<StoreImport>,
     pub(super) read8: Option<u32>,
     pub(super) read16: Option<u32>,
+    pub(super) store8: Option<StoreImport>,
 }
 
 impl Imports {
     pub(super) fn needed(
         blocks: &[crate::cpu::dbt::region::CompiledBlock],
-    ) -> (bool, bool, bool, bool) {
+    ) -> (bool, bool, bool, bool, bool) {
         let mut read = false;
         let mut store = false;
         let mut read8 = false;
         let mut read16 = false;
+        let mut store8 = false;
         for instruction in blocks.iter().flat_map(|block| &block.instructions) {
             match instruction.operation() {
+                Operation::StoreByte { .. } => store8 = true,
                 Operation::Extend {
                     source: SmallSource::Memory { width, .. },
                     ..
@@ -118,8 +122,18 @@ impl Imports {
                 _ => {}
             }
         }
-        (read, store, read8, read16)
+        (read, store, read8, read16, store8)
     }
+}
+
+pub(super) fn store_byte(
+    code: &mut InstructionSink<'_>,
+    address: EffectiveAddress,
+    source: crate::cpu::x86::ir::ByteValue,
+    imports: Imports,
+    exit_depth: u32,
+) {
+    byte_store::store(code, address, source, imports, exit_depth);
 }
 
 pub(super) fn load_narrow_value(

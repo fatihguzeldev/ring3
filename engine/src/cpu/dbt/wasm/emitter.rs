@@ -11,9 +11,11 @@ pub(in crate::cpu::dbt) fn emit(
     binding: Option<EmbeddedBinding>,
 ) -> Vec<u8> {
     let mut module = Module::new();
-    let (needs_read, needs_store, needs_read8, needs_read16) = memory::Imports::needed(blocks);
+    let (needs_read, needs_store, needs_read8, needs_read16, needs_store8) =
+        memory::Imports::needed(blocks);
+    let has_stores = needs_store || needs_store8;
     let has_reads = needs_read || needs_read8 || needs_read16;
-    let has_memory = has_reads || needs_store;
+    let has_memory = has_reads || has_stores;
     let has_gates = blocks.iter().any(|block| block.gate.is_some());
     debug_assert!(!(has_memory || has_gates) || binding.is_some());
     let mut types = TypeSection::new();
@@ -31,7 +33,7 @@ pub(in crate::cpu::dbt) fn emit(
     if has_reads {
         types.ty().function([ValType::I32], [ValType::I32]);
     }
-    if needs_store {
+    if has_stores {
         let parameters = if matches!(binding, Some(EmbeddedBinding::Resident { .. })) {
             6
         } else {
@@ -98,6 +100,22 @@ pub(in crate::cpu::dbt) fn emit(
     if needs_read16 {
         imports.import("ring3", "read16", EntityType::Function(read_type_index));
         helper_imports.read16 = Some(function_index);
+        function_index += 1;
+    }
+    if needs_store8 {
+        let (name, store) = match binding {
+            Some(EmbeddedBinding::Resident { key, id }) => (
+                "store_resident8",
+                memory::StoreImport::Resident {
+                    index: function_index,
+                    key,
+                    id,
+                },
+            ),
+            _ => ("store8", memory::StoreImport::Replacement(function_index)),
+        };
+        imports.import("ring3", name, EntityType::Function(type_index));
+        helper_imports.store8 = Some(store);
         function_index += 1;
     }
     module.section(&imports);

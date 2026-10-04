@@ -43,6 +43,10 @@ pub(super) fn instruction(
             memory::store(code, address, source, imports, exit_depth);
             store = true;
         }
+        Operation::StoreByte { address, source } => {
+            memory::store_byte(code, address, source, imports, exit_depth);
+            store = true;
+        }
         Operation::Extend {
             kind,
             destination,

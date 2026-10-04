@@ -1,8 +1,10 @@
-use iced_x86::{Code, Instruction};
+use iced_x86::{Code, Instruction, OpKind};
 
 use super::{
     DecodeError,
-    operands::{effective_address, location, register, small_source, value},
+    operands::{
+        byte_value, effective_address, location, register, small_source, unsupported, value,
+    },
     profile::check_profile,
 };
 use crate::cpu::x86::ir::{ExtensionKind, Operation, SmallWidth};
@@ -24,6 +26,15 @@ pub(super) fn lower(instruction: &Instruction, bytes: &[u8]) -> Result<Operation
             destination: location(instruction, 0)?,
             source: value(instruction, 1)?,
         }),
+        Code::Mov_rm8_r8 | Code::Mov_rm8_imm8 => {
+            if instruction.op0_kind() != OpKind::Memory {
+                return Err(unsupported());
+            }
+            Ok(Operation::StoreByte {
+                address: effective_address(instruction)?,
+                source: byte_value(instruction)?,
+            })
+        }
         Code::Movzx_r32_rm8 | Code::Movsx_r32_rm8 | Code::Movzx_r32_rm16 | Code::Movsx_r32_rm16 => {
             let kind = match instruction.code() {
                 Code::Movzx_r32_rm8 | Code::Movzx_r32_rm16 => ExtensionKind::Zero,

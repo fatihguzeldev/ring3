@@ -5,7 +5,9 @@ use crate::cpu::{
     UnsupportedFeature,
     x86::{
         Register32,
-        ir::{EffectiveAddress, Location32, SmallSource, SmallWidth, Value32},
+        ir::{
+            ByteRegister, ByteValue, EffectiveAddress, Location32, SmallSource, SmallWidth, Value32,
+        },
     },
 };
 
@@ -66,6 +68,27 @@ pub(super) fn value(instruction: &Instruction, index: u32) -> Result<Value32, De
         OpKind::Memory => effective_address(instruction).map(Value32::Memory),
         OpKind::Immediate32 => Ok(Value32::Immediate(instruction.immediate32())),
         OpKind::Immediate8to32 => Ok(Value32::Immediate(instruction.immediate8to32() as u32)),
+        _ => Err(unsupported()),
+    }
+}
+
+pub(super) fn byte_value(instruction: &Instruction) -> Result<ByteValue, DecodeError> {
+    match instruction.op1_kind() {
+        OpKind::Immediate8 => Ok(ByteValue::Immediate(instruction.immediate8())),
+        OpKind::Register => {
+            let source = match instruction.op1_register() {
+                Register::AL => ByteRegister::Al,
+                Register::CL => ByteRegister::Cl,
+                Register::DL => ByteRegister::Dl,
+                Register::BL => ByteRegister::Bl,
+                Register::AH => ByteRegister::Ah,
+                Register::CH => ByteRegister::Ch,
+                Register::DH => ByteRegister::Dh,
+                Register::BH => ByteRegister::Bh,
+                _ => return Err(unsupported()),
+            };
+            Ok(ByteValue::Register(source))
+        }
         _ => Err(unsupported()),
     }
 }

@@ -23,6 +23,24 @@ pub enum Value32 {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ByteRegister {
+    Al,
+    Cl,
+    Dl,
+    Bl,
+    Ah,
+    Ch,
+    Dh,
+    Bh,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ByteValue {
+    Register(ByteRegister),
+    Immediate(u8),
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SmallWidth {
     Byte,
     Word,
@@ -113,6 +131,10 @@ pub enum Operation {
     Move {
         destination: Location32,
         source: Value32,
+    },
+    StoreByte {
+        address: EffectiveAddress,
+        source: ByteValue,
     },
     Extend {
         kind: ExtensionKind,
