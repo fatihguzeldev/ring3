@@ -39,6 +39,11 @@ pub(super) struct PendingCall {
     pub(super) exit: [u8; EXIT_SIZE],
 }
 
+pub(super) struct PreparedCall32 {
+    state: [u8; STATE_SIZE],
+    exit: [u8; EXIT_SIZE],
+}
+
 impl EngineInstance {
     pub fn capture_active_resident_callback_call(
         &mut self,
@@ -415,6 +420,12 @@ impl EngineInstance {
     }
 
     pub(super) fn publish_completed_call(&mut self, state: State32) -> Result<(), HostError> {
+        let prepared = Self::prepare_completed_call(state)?;
+        self.publish_prepared_call(prepared);
+        Ok(())
+    }
+
+    pub(super) fn prepare_completed_call(state: State32) -> Result<PreparedCall32, HostError> {
         let mut state_bytes = [0; STATE_SIZE];
         let mut exit_bytes = [0; EXIT_SIZE];
         encode_state(&state, &mut state_bytes).map_err(|_| HostError::Infrastructure)?;
@@ -426,11 +437,17 @@ impl EngineInstance {
             &mut exit_bytes,
         )
         .map_err(|_| HostError::Infrastructure)?;
+        Ok(PreparedCall32 {
+            state: state_bytes,
+            exit: exit_bytes,
+        })
+    }
+
+    pub(super) fn publish_prepared_call(&mut self, prepared: PreparedCall32) {
         let arena = self.arena.as_mut().get_mut();
-        arena[STATE_OFFSET..STATE_OFFSET + STATE_SIZE].copy_from_slice(&state_bytes);
-        arena[EXIT_OFFSET..EXIT_OFFSET + EXIT_SIZE].copy_from_slice(&exit_bytes);
+        arena[STATE_OFFSET..STATE_OFFSET + STATE_SIZE].copy_from_slice(&prepared.state);
+        arena[EXIT_OFFSET..EXIT_OFFSET + EXIT_SIZE].copy_from_slice(&prepared.exit);
         self.pending_call = None;
-        Ok(())
     }
 
     pub fn abandon_call(&mut self, key: u64, token: u32) -> Result<(), HostError> {
