@@ -187,9 +187,9 @@ fn excluded() -> Vec<(Vec<u8>, DecodeError)> {
     }
     for bytes in [
         vec![0x66, 0x00, 0x00],
-        vec![0x10, 0x00],
+        vec![0x66, 0x10, 0x00],
         vec![0x66, 0x28, 0x00],
-        vec![0x18, 0x00],
+        vec![0x66, 0x18, 0x00],
     ] {
         forms.push((bytes, opcode));
     }

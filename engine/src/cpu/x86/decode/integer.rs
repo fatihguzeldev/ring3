@@ -28,7 +28,9 @@ pub(super) fn lower(instruction: &Instruction) -> Option<Result<Operation, Decod
     }
     let memory_arithmetic = match instruction.code() {
         Code::Add_rm8_r8 | Code::Add_rm8_imm8 => Some(MemoryByteArithmeticKind::Add),
+        Code::Adc_rm8_r8 | Code::Adc_rm8_imm8 => Some(MemoryByteArithmeticKind::Adc),
         Code::Sub_rm8_r8 | Code::Sub_rm8_imm8 => Some(MemoryByteArithmeticKind::Sub),
+        Code::Sbb_rm8_r8 | Code::Sbb_rm8_imm8 => Some(MemoryByteArithmeticKind::Sbb),
         _ => None,
     };
     if instruction.op0_kind() == OpKind::Memory

@@ -64,7 +64,9 @@ pub enum ByteArithmeticKind {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum MemoryByteArithmeticKind {
     Add,
+    Adc,
     Sub,
+    Sbb,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

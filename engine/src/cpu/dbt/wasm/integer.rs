@@ -580,20 +580,47 @@ fn arithmetic_memory_byte(
             code.i32_add();
             BinaryKind::Add
         }
+        MemoryByteArithmeticKind::Adc => {
+            code.i32_add();
+            BinaryKind::Adc
+        }
         MemoryByteArithmeticKind::Sub => {
             code.i32_sub();
             BinaryKind::Sub
         }
+        MemoryByteArithmeticKind::Sbb => {
+            code.i32_sub();
+            BinaryKind::Sbb
+        }
     };
+    if matches!(binary, BinaryKind::Adc | BinaryKind::Sbb) {
+        code.local_get(FLAGS).i32_const(1).i32_and();
+        if binary == BinaryKind::Adc {
+            code.i32_add();
+        } else {
+            code.i32_sub();
+        }
+    }
     code.i32_const(0xff).i32_and().local_set(RESULT);
     memory::store_byte_result(code, address, imports, exit_depth);
     // store validation uses operand scratch; recover the original byte after success.
     byte_value(code, source);
     code.local_set(RHS).local_get(RESULT).local_get(RHS);
-    if kind == MemoryByteArithmeticKind::Add {
+    if matches!(
+        kind,
+        MemoryByteArithmeticKind::Add | MemoryByteArithmeticKind::Adc
+    ) {
         code.i32_sub();
     } else {
         code.i32_add();
+    }
+    if matches!(binary, BinaryKind::Adc | BinaryKind::Sbb) {
+        code.local_get(FLAGS).i32_const(1).i32_and();
+        if binary == BinaryKind::Adc {
+            code.i32_sub();
+        } else {
+            code.i32_add();
+        }
     }
     code.i32_const(0xff).i32_and().local_set(LHS);
     arithmetic_flags(code, binary, CarryFlag::Calculate, 7);
