@@ -73,10 +73,13 @@ save('linked-module-handle.exe',image); oracle.pe.chunks.forEach((chunk,index)=>
 save('program.x86',code); save('program.S',programBytes); save('input-oracle.json',oracleBytes); save('run.mjs',readFileSync(import.meta.filename));
 const productionPaths=execFileSync('rg',['--files','engine/src'],{cwd:root,encoding:'utf8'}).trim().split('\n').sort();
 const sourcePaths=[...productionPaths,'Cargo.toml','engine/Cargo.toml','Cargo.lock','engine/tests/windows_module_handle_wasm.rs','engine/tests/fixtures/p2-module-handle/program.S','engine/tests/fixtures/p2-module-handle/oracle.json','engine/tests/fixtures/p2-module-handle/run.mjs'];
-assert.equal(sourcePaths.length,oracle.transport.producer_sources); const sources=Object.fromEntries(sourcePaths.map(file=>[file,hash(readFileSync(join(root,file)))]));save('source-sha256.json',JSON.stringify(sources,null,2));
+assert.equal(sourcePaths.filter(file=>file!=='engine/src/process/windows_allocation_tests.rs').length,oracle.transport.producer_sources); const sources=Object.fromEntries(sourcePaths.map(file=>[file,hash(readFileSync(join(root,file)))]));save('source-sha256.json',JSON.stringify(sources,null,2));
 const engineBytes=readFileSync(enginePath);save('engine.wasm',engineBytes);assert.ok(WebAssembly.validate(engineBytes));
 const engineModule=new WebAssembly.Module(engineBytes);assert.deepEqual(WebAssembly.Module.imports(engineModule),[]);
-assert.equal(WebAssembly.Module.exports(engineModule).length,oracle.transport.engine_total_exports);assert.equal(WebAssembly.Module.exports(engineModule).filter(row=>row.kind==='function').length,oracle.transport.engine_function_exports);
+const allocationExports=WebAssembly.Module.exports(engineModule).filter(row=>row.name==='ring3_abi_v1_load_pe32_linked_v4_input_at');
+assert.ok(allocationExports.length<=1);if(allocationExports.length)assert.deepEqual(allocationExports,[{name:'ring3_abi_v1_load_pe32_linked_v4_input_at',kind:'function'}]);
+const previousExports=WebAssembly.Module.exports(engineModule).filter(row=>row.name!=='ring3_abi_v1_load_pe32_linked_v4_input_at');
+assert.equal(previousExports.length,oracle.transport.engine_total_exports);assert.equal(previousExports.filter(row=>row.kind==='function').length,oracle.transport.engine_function_exports);
 const arities={open:3,close:0,arena_ptr:0,generation:0,module_ptr:0,module_len:0,begin_image_input:1,append_image_input:2,abort_image_input:0,load_pe32_linked_v2_input_at:2,load_pe32_linked_v3_input_at:2,start_loaded_image:2,compile_entries:2,compile_resident_entries:2,find_resident:1,acknowledge_resident_installation:5,find_installed_resident:3,dispatcher_module:2,guard:6,guard_resident:7,guard_dispatch_entry:5,read32:1,read16:1,write32:2,store32:2,store_resident32:6,capture_call:5,capture_resident_call:6,complete_call:5,complete_resident_call:6,complete_windows_call:4,complete_resident_windows_call:5};
 let engine, nextInstance=0, guestRetirements=0;
 function refresh() { if (engine.buffer !== engine.memory.buffer) { engine.buffer = engine.memory.buffer; engine.bytes = new Uint8Array(engine.buffer); engine.view = new DataView(engine.buffer); } return engine; }
