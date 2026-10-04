@@ -1,8 +1,9 @@
 use super::{EngineInstance, HostError};
 use crate::loader::{
     ImageMetadata32, LinkedImageMetadata32, LinkedImageMetadata32V2, LinkedImageMetadata32V3,
-    LoadedLinkedPe32, LoadedLinkedPe32V2, LoadedLinkedPe32V3, LoadedPe32, load_pe32, load_pe32_at,
-    load_pe32_linked_at, load_pe32_linked_v2_at, load_pe32_linked_v3_at,
+    LinkedImageMetadata32V4, LoadedLinkedPe32, LoadedLinkedPe32V2, LoadedLinkedPe32V3,
+    LoadedLinkedPe32V4, LoadedPe32, load_pe32, load_pe32_at, load_pe32_linked_at,
+    load_pe32_linked_v2_at, load_pe32_linked_v3_at, load_pe32_linked_v4_at,
 };
 
 impl EngineInstance {
@@ -62,6 +63,28 @@ impl EngineInstance {
         &mut self,
         loaded: LoadedLinkedPe32V3,
     ) -> LinkedImageMetadata32V3 {
+        let (memory, linked) = loaded.into_parts();
+        self.memory = Some(memory);
+        self.image = Some(linked.image);
+        linked
+    }
+
+    pub fn load_pe32_linked_v4_at(
+        &mut self,
+        bytes: &[u8],
+        actual_base: u32,
+        gate_base: u32,
+    ) -> Result<LinkedImageMetadata32V4, HostError> {
+        let pages = self.image_capacity()?;
+        let loaded = load_pe32_linked_v4_at(bytes, actual_base, gate_base, pages)
+            .map_err(HostError::Loader)?;
+        Ok(self.publish_linked_image_v4(loaded))
+    }
+
+    pub(super) fn publish_linked_image_v4(
+        &mut self,
+        loaded: LoadedLinkedPe32V4,
+    ) -> LinkedImageMetadata32V4 {
         let (memory, linked) = loaded.into_parts();
         self.memory = Some(memory);
         self.image = Some(linked.image);

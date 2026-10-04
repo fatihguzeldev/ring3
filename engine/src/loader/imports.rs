@@ -13,6 +13,7 @@ pub(super) enum ProviderProfile {
     LastErrorOnly,
     LastErrorAndExit,
     MainImageHandle,
+    VirtualAllocation,
 }
 
 #[derive(Clone, Copy)]
@@ -55,7 +56,7 @@ pub(super) struct ResolvedImports {
     pub slot_count: usize,
     pub slots: [u32; MAX_SLOTS],
     pub gate_count: u32,
-    pub gates: [GateSpec; 4],
+    pub gates: [GateSpec; 5],
 }
 
 impl ImportPlan<'_> {
@@ -119,9 +120,9 @@ impl ImportPlan<'_> {
             gates: [GateSpec {
                 entry: GuestAddress(0),
                 id: 0,
-            }; 4],
+            }; 5],
         };
-        let mut used = [false; 4];
+        let mut used = [false; 5];
         for (index, symbol) in self.symbols[..self.slot_count].iter().enumerate() {
             let api = WindowsApi32::resolve(self.module, symbol).ok_or(LoadError::Unsupported)?;
             let gate_index = match api {
@@ -129,15 +130,22 @@ impl ImportPlan<'_> {
                 WindowsApi32::SetLastError => 1,
                 WindowsApi32::ExitProcess => match profile {
                     ProviderProfile::LastErrorOnly => return Err(LoadError::Unsupported),
-                    ProviderProfile::LastErrorAndExit | ProviderProfile::MainImageHandle => 2,
+                    ProviderProfile::LastErrorAndExit
+                    | ProviderProfile::MainImageHandle
+                    | ProviderProfile::VirtualAllocation => 2,
                 },
                 WindowsApi32::GetModuleHandleA => match profile {
-                    ProviderProfile::MainImageHandle => 3,
+                    ProviderProfile::MainImageHandle | ProviderProfile::VirtualAllocation => 3,
                     ProviderProfile::LastErrorOnly | ProviderProfile::LastErrorAndExit => {
                         return Err(LoadError::Unsupported);
                     }
                 },
-                WindowsApi32::VirtualAlloc => return Err(LoadError::Unsupported),
+                WindowsApi32::VirtualAlloc => match profile {
+                    ProviderProfile::VirtualAllocation => 4,
+                    ProviderProfile::LastErrorOnly
+                    | ProviderProfile::LastErrorAndExit
+                    | ProviderProfile::MainImageHandle => return Err(LoadError::Unsupported),
+                },
             };
             used[gate_index] = true;
             resolved.slots[index] = gate_base + gate_index as u32 * 16;
@@ -147,6 +155,7 @@ impl ImportPlan<'_> {
             WindowsApi32::SetLastError,
             WindowsApi32::ExitProcess,
             WindowsApi32::GetModuleHandleA,
+            WindowsApi32::VirtualAlloc,
         ]
         .into_iter()
         .enumerate()

@@ -2,7 +2,8 @@ use super::imports::{ImportDirectory, ProviderProfile, prepare_imports};
 use super::relocation::{RelocationDirectory, prepare_fixups};
 use super::{
     ImageMetadata32, LinkedImageMetadata32, LinkedImageMetadata32V2, LinkedImageMetadata32V3,
-    LoadError, LoadedLinkedPe32, LoadedLinkedPe32V2, LoadedLinkedPe32V3, LoadedPe32,
+    LinkedImageMetadata32V4, LoadError, LoadedLinkedPe32, LoadedLinkedPe32V2, LoadedLinkedPe32V3,
+    LoadedLinkedPe32V4, LoadedPe32,
 };
 use crate::memory::{AddressSpace, GuestAddress, PAGE_SIZE, PageRange, Permissions};
 
@@ -230,12 +231,41 @@ pub fn load_pe32_linked_v3_at(
     gate_base: u32,
     resident_pages: u32,
 ) -> Result<LoadedLinkedPe32V3, LoadError> {
-    load_linked_profile(
+    let linked = load_linked_profile(
         bytes,
         actual_base,
         gate_base,
         resident_pages,
         ProviderProfile::MainImageHandle,
+    )?;
+    Ok(LoadedLinkedPe32V3 {
+        memory: linked.memory,
+        metadata: LinkedImageMetadata32V3 {
+            image: linked.metadata.image,
+            gate_base: linked.metadata.gate_base,
+            gate_count: linked.metadata.gate_count,
+            gates: [
+                linked.metadata.gates[0],
+                linked.metadata.gates[1],
+                linked.metadata.gates[2],
+                linked.metadata.gates[3],
+            ],
+        },
+    })
+}
+
+pub fn load_pe32_linked_v4_at(
+    bytes: &[u8],
+    actual_base: u32,
+    gate_base: u32,
+    resident_pages: u32,
+) -> Result<LoadedLinkedPe32V4, LoadError> {
+    load_linked_profile(
+        bytes,
+        actual_base,
+        gate_base,
+        resident_pages,
+        ProviderProfile::VirtualAllocation,
     )
 }
 
@@ -245,7 +275,7 @@ fn load_linked_profile(
     gate_base: u32,
     resident_pages: u32,
     profile: ProviderProfile,
-) -> Result<LoadedLinkedPe32V3, LoadError> {
+) -> Result<LoadedLinkedPe32V4, LoadError> {
     if !(1..=4096).contains(&resident_pages) || bytes.len() > MAX_IMAGE_BYTES as usize {
         return Err(LoadError::Capacity);
     }
@@ -336,9 +366,9 @@ fn load_linked_profile(
     plan.metadata.entry_point = actual_base + (plan.metadata.entry_point - preferred_base);
     plan.metadata.image_base = actual_base;
     plan.metadata.mapped_pages = mapped_pages;
-    Ok(LoadedLinkedPe32V3 {
+    Ok(LoadedLinkedPe32V4 {
         memory,
-        metadata: LinkedImageMetadata32V3 {
+        metadata: LinkedImageMetadata32V4 {
             image: plan.metadata,
             gate_base,
             gate_count: imports.gate_count,
