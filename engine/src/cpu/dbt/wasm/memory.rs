@@ -53,6 +53,10 @@ impl Imports {
             match instruction.operation() {
                 Operation::LoadByte { .. } | Operation::MemoryPredicateByte { .. } => read8 = true,
                 Operation::StoreByte { .. } => store8 = true,
+                Operation::MemoryUnaryByte { .. } => {
+                    read8 = true;
+                    store8 = true;
+                }
                 Operation::Extend {
                     source: SmallSource::Memory { width, .. },
                     ..
@@ -135,6 +139,15 @@ pub(super) fn store_byte(
     exit_depth: u32,
 ) {
     byte_store::store(code, address, source, imports, exit_depth);
+}
+
+pub(super) fn store_byte_result(
+    code: &mut InstructionSink<'_>,
+    address: EffectiveAddress,
+    imports: Imports,
+    exit_depth: u32,
+) {
+    byte_store::store_result(code, address, imports, exit_depth);
 }
 
 pub(super) fn load_narrow_value(

@@ -351,7 +351,7 @@ fn standalone_writing_binary_memory_forms_remain_excluded() {
 fn narrow_prefix_and_declared_span_errors_remain_precise() {
     for (instruction, cause) in [
         (
-            &[0xf6, 0x13][..],
+            &[0x66, 0xf6, 0x13][..],
             InstructionError::Decode(DecodeError::Unsupported(UnsupportedFeature::Opcode)),
         ),
         (

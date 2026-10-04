@@ -210,6 +210,10 @@ pub enum Operation {
         kind: UnaryKind,
         destination: ByteRegister,
     },
+    MemoryUnaryByte {
+        kind: UnaryKind,
+        address: EffectiveAddress,
+    },
     Unary {
         kind: UnaryKind,
         destination: Location32,

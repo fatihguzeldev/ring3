@@ -340,10 +340,11 @@ fn supports_byte_store(operation: &Operation) -> bool {
 fn supports_memory_unary(operation: &Operation) -> bool {
     matches!(
         operation,
-        Operation::Unary {
-            kind: UnaryKind::Inc | UnaryKind::Dec | UnaryKind::Not | UnaryKind::Neg,
-            destination: Location32::Memory(_),
-        }
+        Operation::MemoryUnaryByte { .. }
+            | Operation::Unary {
+                kind: UnaryKind::Inc | UnaryKind::Dec | UnaryKind::Not | UnaryKind::Neg,
+                destination: Location32::Memory(_),
+            }
     )
 }
 

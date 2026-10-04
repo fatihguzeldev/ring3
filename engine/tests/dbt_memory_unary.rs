@@ -367,7 +367,7 @@ fn narrow_prefix_and_declared_span_errors_remain_precise() {
         let narrow_opcode = if opcode == 0xff { 0xfe } else { 0xf6 };
         let cause = InstructionError::Decode(DecodeError::Unsupported(UnsupportedFeature::Opcode));
         embedded_rejected(
-            &[0x90, narrow_opcode, 0x03 | extension << 3],
+            &[0x90, 0x66, narrow_opcode, 0x03 | extension << 3],
             instruction_error(cause),
         );
         for prefix in [0x66, 0x67, 0xf3, 0xf0, 0x64] {

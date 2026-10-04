@@ -51,6 +51,25 @@ pub(super) fn store(
     exit_if_failed(code, exit_depth);
 }
 
+pub(super) fn store_result(
+    code: &mut InstructionSink<'_>,
+    address: EffectiveAddress,
+    imports: Imports,
+    exit_depth: u32,
+) {
+    effective_address(code, address);
+    let index = imports
+        .store8
+        .expect("prepared byte result store has an import")
+        .emit_binding(code);
+    code.local_get(ADDRESS)
+        .local_get(RESULT)
+        .call(index)
+        .local_set(HELPER_STATUS);
+    validate_result(code);
+    exit_if_failed(code, exit_depth);
+}
+
 fn validate_result(code: &mut InstructionSink<'_>) {
     code.local_get(HELPER_STATUS)
         .i32_eqz()

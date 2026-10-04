@@ -360,7 +360,7 @@ fn span_poison_and_remaining_exclusions_preserve_arena_and_installed_units() {
             );
         }
         let narrow = if opcode == 0xff { 0xfe } else { 0xf6 };
-        let bytes = [0x90, narrow, instruction[1], 0x0f, 0x06];
+        let bytes = [0x90, 0x66, narrow, instruction[1], 0x0f, 0x06];
         rejected(
             &mut engine,
             keep,

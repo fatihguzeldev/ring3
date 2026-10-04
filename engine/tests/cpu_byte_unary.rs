@@ -128,7 +128,7 @@ fn excluded() -> Vec<(Vec<u8>, DecodeError)> {
         let register = 0xc0 | extension << 3;
         let memory = extension << 3;
         for bytes in [
-            vec![opcode, memory],
+            vec![0x66, opcode, memory],
             vec![0x66, opcode, register],
             vec![0x66, opcode + 1, register],
             vec![0x67, opcode, register],

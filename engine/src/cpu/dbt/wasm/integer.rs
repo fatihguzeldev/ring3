@@ -294,6 +294,10 @@ pub(super) fn instruction(
             }
         }
         Operation::UnaryByte { kind, destination } => unary_byte(code, kind, destination),
+        Operation::MemoryUnaryByte { kind, address } => {
+            unary_memory_byte(code, kind, address, imports, exit_depth);
+            store = true;
+        }
         Operation::Unary {
             kind,
             destination: Location32::Register(destination),
@@ -451,6 +455,71 @@ pub(super) fn instruction(
     if store {
         memory::exit_if_invalidated(code, exit_depth);
     }
+}
+
+fn unary_memory_byte(
+    code: &mut InstructionSink<'_>,
+    kind: UnaryKind,
+    address: EffectiveAddress,
+    imports: memory::Imports,
+    exit_depth: u32,
+) {
+    memory::load_narrow_value(code, address, SmallWidth::Byte, imports, exit_depth);
+    code.local_set(RESULT);
+    match kind {
+        UnaryKind::Inc => {
+            code.local_get(RESULT).i32_const(1).i32_add();
+        }
+        UnaryKind::Dec => {
+            code.local_get(RESULT).i32_const(1).i32_sub();
+        }
+        UnaryKind::Neg => {
+            code.i32_const(0).local_get(RESULT).i32_sub();
+        }
+        UnaryKind::Not => {
+            code.local_get(RESULT).i32_const(0xff).i32_xor();
+        }
+    }
+    code.i32_const(0xff).i32_and().local_set(RESULT);
+    memory::store_byte_result(code, address, imports, exit_depth);
+    // store validation uses LHS/RHS scratch; recover operands only after success.
+    let (binary, carry) = match kind {
+        UnaryKind::Inc => {
+            code.local_get(RESULT)
+                .i32_const(1)
+                .i32_sub()
+                .i32_const(0xff)
+                .i32_and()
+                .local_set(LHS)
+                .i32_const(1)
+                .local_set(RHS);
+            (BinaryKind::Add, CarryFlag::Preserve)
+        }
+        UnaryKind::Dec => {
+            code.local_get(RESULT)
+                .i32_const(1)
+                .i32_add()
+                .i32_const(0xff)
+                .i32_and()
+                .local_set(LHS)
+                .i32_const(1)
+                .local_set(RHS);
+            (BinaryKind::Sub, CarryFlag::Preserve)
+        }
+        UnaryKind::Neg => {
+            code.i32_const(0)
+                .local_set(LHS)
+                .i32_const(0)
+                .local_get(RESULT)
+                .i32_sub()
+                .i32_const(0xff)
+                .i32_and()
+                .local_set(RHS);
+            (BinaryKind::Sub, CarryFlag::Calculate)
+        }
+        UnaryKind::Not => return,
+    };
+    arithmetic_flags(code, binary, carry, 7);
 }
 
 fn indirect_target(

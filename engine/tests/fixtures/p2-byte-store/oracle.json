@@ -2580,8 +2580,8 @@
   "transport": {
     "arena_bytes": 4236,
     "transfer_offset": 140,
-    "engine_function_exports": 65,
-    "engine_total_exports": 66,
+    "engine_function_exports": 69,
+    "engine_total_exports": 70,
     "engine_imports": 0,
     "locals": [
       [

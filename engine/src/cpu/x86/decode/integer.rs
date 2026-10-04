@@ -161,6 +161,12 @@ fn lower_unary(instruction: &Instruction) -> Option<Result<Operation, DecodeErro
         _ => None,
     };
     if let Some(kind) = byte_kind {
+        if instruction.op0_kind() == OpKind::Memory {
+            return Some(
+                effective_address(instruction)
+                    .map(|address| Operation::MemoryUnaryByte { kind, address }),
+            );
+        }
         return Some(
             byte_register(instruction.op0_register())
                 .map(|destination| Operation::UnaryByte { kind, destination }),

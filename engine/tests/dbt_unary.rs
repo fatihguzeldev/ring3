@@ -263,10 +263,10 @@ fn standalone_memory_unary_destinations_remain_backend_excluded_without_data_acc
 #[test]
 fn small_width_prefix_and_adjacent_rejections_keep_exact_categories() {
     for bytes in [
-        &[0xfe, 0x00][..],
-        &[0xfe, 0x08][..],
-        &[0xf6, 0x10][..],
-        &[0xf6, 0x18][..],
+        &[0x66, 0xfe, 0x00][..],
+        &[0x66, 0xfe, 0x08][..],
+        &[0x66, 0xf6, 0x10][..],
+        &[0x66, 0xf6, 0x18][..],
         &[0x66, 0x40][..],
         &[0x66, 0x48][..],
         &[0x66, 0xff, 0xc0][..],
