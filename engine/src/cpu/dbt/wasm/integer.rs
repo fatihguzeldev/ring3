@@ -5,8 +5,8 @@ use crate::cpu::x86::{
     Register32,
     decode::DecodedInstruction,
     ir::{
-        BinaryKind, BranchTarget, ByteRegister, EffectiveAddress, ExtensionKind, Location32,
-        Operation, ShiftCount, ShiftKind, SmallSource, SmallWidth, UnaryKind, Value32,
+        BinaryKind, BranchTarget, ByteRegister, ByteValue, EffectiveAddress, ExtensionKind,
+        Location32, Operation, ShiftCount, ShiftKind, SmallSource, SmallWidth, UnaryKind, Value32,
     },
 };
 
@@ -42,6 +42,33 @@ pub(super) fn instruction(
         } => {
             memory::store(code, address, source, imports, exit_depth);
             store = true;
+        }
+        Operation::MoveByte {
+            destination,
+            source,
+        } => {
+            match source {
+                ByteValue::Immediate(value) => {
+                    code.i32_const(i32::from(value));
+                }
+                ByteValue::Register(source) => {
+                    let (parent, high) = byte_parent(source);
+                    code.local_get(register(parent));
+                    if high {
+                        code.i32_const(8).i32_shr_u();
+                    }
+                    code.i32_const(0xff).i32_and();
+                }
+            }
+            let (parent, high) = byte_parent(destination);
+            if high {
+                code.i32_const(8).i32_shl();
+            }
+            code.local_get(register(parent))
+                .i32_const(if high { !0xff00 } else { !0xff })
+                .i32_and()
+                .i32_or()
+                .local_set(register(parent));
         }
         Operation::LoadByte {
             destination,
@@ -343,6 +370,19 @@ fn indirect_target(
         Location32::Memory(address) => {
             memory::load_result(code, address, imports, exit_depth);
         }
+    }
+}
+
+fn byte_parent(byte: ByteRegister) -> (Register32, bool) {
+    match byte {
+        ByteRegister::Al => (Register32::Eax, false),
+        ByteRegister::Cl => (Register32::Ecx, false),
+        ByteRegister::Dl => (Register32::Edx, false),
+        ByteRegister::Bl => (Register32::Ebx, false),
+        ByteRegister::Ah => (Register32::Eax, true),
+        ByteRegister::Ch => (Register32::Ecx, true),
+        ByteRegister::Dh => (Register32::Edx, true),
+        ByteRegister::Bh => (Register32::Ebx, true),
     }
 }
 

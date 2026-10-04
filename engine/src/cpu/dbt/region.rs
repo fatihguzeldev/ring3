@@ -387,6 +387,7 @@ pub(super) fn supports(instruction: &DecodedInstruction, embedded: bool) -> bool
         || matches!(
             operation,
             Operation::Nop
+                | Operation::MoveByte { .. }
                 | Operation::Move {
                     destination: Location32::Register(_),
                     source: Value32::Register(_) | Value32::Immediate(_),

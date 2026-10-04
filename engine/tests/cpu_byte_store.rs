@@ -521,11 +521,11 @@ fn standalone_explicit_and_cold_profiles_refuse_only_the_memory_backend() {
 fn byte_destinations_adjacent_forms_and_excluded_prefixes_keep_existing_categories() {
     let opcode = DecodeError::Unsupported(UnsupportedFeature::Opcode);
     let cases: &[(&[u8], DecodeError)] = &[
-        (&[0x88, 0xc0], opcode),
+        (&[0x10, 0xd0], opcode),
         (&[0xc6, 0xc0, 0], opcode),
-        (&[0x8a, 0xc3], opcode),
+        (&[0x18, 0xd0], opcode),
         (&[0xa2, 0x10, 0x50, 0, 0], opcode),
-        (&[0xb0, 0x80], opcode),
+        (&[0x10, 0xd0], opcode),
         (&[0xc6, 0x0b, 0], DecodeError::InvalidEncoding),
         (&[0x66, 0x88, 0x03], opcode),
         (&[0x67, 0x88, 0x03], opcode),
