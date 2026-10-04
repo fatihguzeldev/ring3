@@ -316,6 +316,10 @@ impl ResidentRegistry {
 #[path = "resident_entries_tests.rs"]
 mod resident_entries_tests;
 
+#[cfg(test)]
+#[path = "resident_retirement_tests.rs"]
+mod resident_retirement_tests;
+
 fn allocate_id(counter: &AtomicU64) -> Result<UnitId, RegistryError> {
     counter
         .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |identity| {
