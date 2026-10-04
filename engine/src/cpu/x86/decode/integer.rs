@@ -136,6 +136,19 @@ fn binary(instruction: &Instruction, kind: BinaryKind) -> Result<Operation, Deco
 }
 
 fn lower_unary(instruction: &Instruction) -> Option<Result<Operation, DecodeError>> {
+    let byte_kind = match instruction.code() {
+        Code::Inc_rm8 => Some(UnaryKind::Inc),
+        Code::Dec_rm8 => Some(UnaryKind::Dec),
+        Code::Not_rm8 => Some(UnaryKind::Not),
+        Code::Neg_rm8 => Some(UnaryKind::Neg),
+        _ => None,
+    };
+    if let Some(kind) = byte_kind {
+        return Some(
+            byte_register(instruction.op0_register())
+                .map(|destination| Operation::UnaryByte { kind, destination }),
+        );
+    }
     let kind = match instruction.code() {
         Code::Inc_r32 | Code::Inc_rm32 => UnaryKind::Inc,
         Code::Dec_r32 | Code::Dec_rm32 => UnaryKind::Dec,

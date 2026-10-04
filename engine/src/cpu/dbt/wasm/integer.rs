@@ -273,6 +273,7 @@ pub(super) fn instruction(
                 code.local_get(RESULT).local_set(register(destination));
             }
         }
+        Operation::UnaryByte { kind, destination } => unary_byte(code, kind, destination),
         Operation::Unary {
             kind,
             destination: Location32::Register(destination),
@@ -598,6 +599,46 @@ fn unary_memory(
         }
     };
     arithmetic_flags(code, binary, carry, 31);
+}
+
+fn unary_byte(code: &mut InstructionSink<'_>, kind: UnaryKind, destination: ByteRegister) {
+    byte_value(code, ByteValue::Register(destination));
+    code.local_set(LHS);
+    let (binary, carry) = match kind {
+        UnaryKind::Not => {
+            code.local_get(LHS).i32_const(0xff).i32_xor();
+            insert_byte(code, destination);
+            return;
+        }
+        UnaryKind::Inc | UnaryKind::Dec => {
+            code.i32_const(1).local_set(RHS);
+            (
+                if kind == UnaryKind::Inc {
+                    BinaryKind::Add
+                } else {
+                    BinaryKind::Sub
+                },
+                CarryFlag::Preserve,
+            )
+        }
+        UnaryKind::Neg => {
+            code.local_get(LHS)
+                .local_set(RHS)
+                .i32_const(0)
+                .local_set(LHS);
+            (BinaryKind::Sub, CarryFlag::Calculate)
+        }
+    };
+    code.local_get(LHS).local_get(RHS);
+    if binary == BinaryKind::Add {
+        code.i32_add();
+    } else {
+        code.i32_sub();
+    }
+    code.i32_const(0xff).i32_and().local_set(RESULT);
+    arithmetic_flags(code, binary, carry, 7);
+    code.local_get(RESULT);
+    insert_byte(code, destination);
 }
 
 fn unary(code: &mut InstructionSink<'_>, kind: UnaryKind, destination: Register32) {

@@ -195,6 +195,10 @@ pub enum Operation {
         destination: Location32,
         source: Value32,
     },
+    UnaryByte {
+        kind: UnaryKind,
+        destination: ByteRegister,
+    },
     Unary {
         kind: UnaryKind,
         destination: Location32,
