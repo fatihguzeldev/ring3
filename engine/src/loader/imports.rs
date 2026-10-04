@@ -12,6 +12,7 @@ const MAX_METADATA_RANGES: usize = 4 + MAX_SLOTS;
 pub(super) enum ProviderProfile {
     LastErrorOnly,
     LastErrorAndExit,
+    MainImageHandle,
 }
 
 #[derive(Clone, Copy)]
@@ -54,7 +55,7 @@ pub(super) struct ResolvedImports {
     pub slot_count: usize,
     pub slots: [u32; MAX_SLOTS],
     pub gate_count: u32,
-    pub gates: [GateSpec; 3],
+    pub gates: [GateSpec; 4],
 }
 
 impl ImportPlan<'_> {
@@ -118,9 +119,9 @@ impl ImportPlan<'_> {
             gates: [GateSpec {
                 entry: GuestAddress(0),
                 id: 0,
-            }; 3],
+            }; 4],
         };
-        let mut used = [false; 3];
+        let mut used = [false; 4];
         for (index, symbol) in self.symbols[..self.slot_count].iter().enumerate() {
             let api = WindowsApi32::resolve(self.module, symbol).ok_or(LoadError::Unsupported)?;
             let gate_index = match api {
@@ -128,7 +129,13 @@ impl ImportPlan<'_> {
                 WindowsApi32::SetLastError => 1,
                 WindowsApi32::ExitProcess => match profile {
                     ProviderProfile::LastErrorOnly => return Err(LoadError::Unsupported),
-                    ProviderProfile::LastErrorAndExit => 2,
+                    ProviderProfile::LastErrorAndExit | ProviderProfile::MainImageHandle => 2,
+                },
+                WindowsApi32::GetModuleHandleA => match profile {
+                    ProviderProfile::MainImageHandle => 3,
+                    ProviderProfile::LastErrorOnly | ProviderProfile::LastErrorAndExit => {
+                        return Err(LoadError::Unsupported);
+                    }
                 },
             };
             used[gate_index] = true;
@@ -138,6 +145,7 @@ impl ImportPlan<'_> {
             WindowsApi32::GetLastError,
             WindowsApi32::SetLastError,
             WindowsApi32::ExitProcess,
+            WindowsApi32::GetModuleHandleA,
         ]
         .into_iter()
         .enumerate()

@@ -111,7 +111,11 @@ fn probe_frame(words: u32, argument: u32) -> CallFrame32 {
 fn last_error(engine: &EngineInstance) -> u32 {
     match engine
         .windows_thread
-        .prepare(WindowsApi32::GetLastError, &probe_frame(0, 0))
+        .prepare(
+            WindowsApi32::GetLastError,
+            &probe_frame(0, 0),
+            crate::windows::ProcessContext32::default(),
+        )
         .unwrap()
         .0
     {
@@ -123,7 +127,11 @@ fn last_error(engine: &EngineInstance) -> u32 {
 fn seed_last_error(engine: &mut EngineInstance) {
     engine.windows_thread = engine
         .windows_thread
-        .prepare(WindowsApi32::SetLastError, &probe_frame(1, LAST_ERROR))
+        .prepare(
+            WindowsApi32::SetLastError,
+            &probe_frame(1, LAST_ERROR),
+            crate::windows::ProcessContext32::default(),
+        )
         .unwrap()
         .1;
 }

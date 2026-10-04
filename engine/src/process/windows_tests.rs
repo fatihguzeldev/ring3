@@ -68,7 +68,11 @@ fn thread_frame(engine: &EngineInstance, words: u32) -> CallFrame32 {
 fn last_error(engine: &EngineInstance) -> u32 {
     match engine
         .windows_thread
-        .prepare(WindowsApi32::GetLastError, &thread_frame(engine, 0))
+        .prepare(
+            WindowsApi32::GetLastError,
+            &thread_frame(engine, 0),
+            crate::windows::ProcessContext32::default(),
+        )
         .unwrap()
         .0
     {
@@ -90,7 +94,11 @@ fn fixture() -> Fixture {
     write(&mut engine, RAM + 4, &LAST_ERROR.to_le_bytes());
     let (_, thread) = engine
         .windows_thread
-        .prepare(WindowsApi32::SetLastError, &thread_frame(&engine, 1))
+        .prepare(
+            WindowsApi32::SetLastError,
+            &thread_frame(&engine, 1),
+            crate::windows::ProcessContext32::default(),
+        )
         .unwrap();
     engine.windows_thread = thread;
     engine.image = Some(ImageMetadata32 {
@@ -419,12 +427,20 @@ fn public_terminal_codec_cannot_set_private_exit_and_pure_outcome_preserves_thre
     let (outcome, thread) = f
         .engine
         .windows_thread
-        .prepare(WindowsApi32::ExitProcess, &frame)
+        .prepare(
+            WindowsApi32::ExitProcess,
+            &frame,
+            crate::windows::ProcessContext32::default(),
+        )
         .unwrap();
     assert_eq!(outcome, WindowsOutcome32::ExitProcess(LAST_ERROR));
     assert_eq!(
         thread
-            .prepare(WindowsApi32::GetLastError, &thread_frame(&f.engine, 0))
+            .prepare(
+                WindowsApi32::GetLastError,
+                &thread_frame(&f.engine, 0),
+                crate::windows::ProcessContext32::default()
+            )
             .unwrap()
             .0,
         WindowsOutcome32::Return(LAST_ERROR)

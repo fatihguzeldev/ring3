@@ -5,7 +5,7 @@ use crate::{
         x86::{EXIT_SIZE, decode_exit, encode_exit_v4},
     },
     cpu::{ExecutionExit, ExitReason},
-    windows::{WindowsApi32, WindowsOutcome32},
+    windows::{ProcessContext32, WindowsApi32, WindowsOutcome32},
 };
 
 impl EngineInstance {
@@ -45,7 +45,15 @@ impl EngineInstance {
         let api = WindowsApi32::from_id(id).ok_or(HostError::Call(CallError::InvalidRequest))?;
         let (outcome, thread) = self
             .windows_thread
-            .prepare(api, &pending.frame)
+            .prepare(
+                api,
+                &pending.frame,
+                ProcessContext32 {
+                    main_image_base: self
+                        .image
+                        .map(|image| crate::memory::GuestAddress(image.image_base)),
+                },
+            )
             .map_err(|_| HostError::Call(CallError::InvalidRequest))?;
         match outcome {
             WindowsOutcome32::Return(result) => {

@@ -5,7 +5,9 @@ mod relocation;
 use crate::cpu::dbt::GateSpec;
 use crate::memory::{AddressSpace, MemoryError};
 
-pub use pe32::{load_pe32, load_pe32_at, load_pe32_linked_at, load_pe32_linked_v2_at};
+pub use pe32::{
+    load_pe32, load_pe32_at, load_pe32_linked_at, load_pe32_linked_v2_at, load_pe32_linked_v3_at,
+};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ImageMetadata32 {
@@ -94,6 +96,34 @@ impl std::fmt::Debug for LoadedLinkedPe32V2 {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter
             .debug_struct("LoadedLinkedPe32V2")
+            .field("metadata", &self.metadata)
+            .finish_non_exhaustive()
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct LinkedImageMetadata32V3 {
+    pub image: ImageMetadata32,
+    pub gate_base: u32,
+    pub gate_count: u32,
+    pub gates: [GateSpec; 4],
+}
+
+pub struct LoadedLinkedPe32V3 {
+    memory: AddressSpace,
+    metadata: LinkedImageMetadata32V3,
+}
+
+impl LoadedLinkedPe32V3 {
+    pub fn into_parts(self) -> (AddressSpace, LinkedImageMetadata32V3) {
+        (self.memory, self.metadata)
+    }
+}
+
+impl std::fmt::Debug for LoadedLinkedPe32V3 {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("LoadedLinkedPe32V3")
             .field("metadata", &self.metadata)
             .finish_non_exhaustive()
     }

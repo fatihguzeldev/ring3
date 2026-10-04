@@ -49,7 +49,11 @@ fn frame(words: u32) -> CallFrame32 {
 fn seed_last_error(engine: &mut EngineInstance) {
     engine.windows_thread = engine
         .windows_thread
-        .prepare(WindowsApi32::SetLastError, &frame(1))
+        .prepare(
+            WindowsApi32::SetLastError,
+            &frame(1),
+            crate::windows::ProcessContext32::default(),
+        )
         .unwrap()
         .1;
 }
@@ -57,7 +61,11 @@ fn seed_last_error(engine: &mut EngineInstance) {
 fn last_error(engine: &EngineInstance) -> u32 {
     match engine
         .windows_thread
-        .prepare(WindowsApi32::GetLastError, &frame(0))
+        .prepare(
+            WindowsApi32::GetLastError,
+            &frame(0),
+            crate::windows::ProcessContext32::default(),
+        )
         .unwrap()
         .0
     {

@@ -58,7 +58,11 @@ fn frame(engine: &EngineInstance, words: u32) -> CallFrame32 {
 fn last_error(engine: &EngineInstance) -> u32 {
     match engine
         .windows_thread
-        .prepare(WindowsApi32::GetLastError, &frame(engine, 0))
+        .prepare(
+            WindowsApi32::GetLastError,
+            &frame(engine, 0),
+            crate::windows::ProcessContext32::default(),
+        )
         .unwrap()
         .0
     {
@@ -76,7 +80,11 @@ fn retained_fixture() -> (EngineInstance, [u64; 2]) {
     write(&mut engine, OTHER_RAM + 4, &0xf123_4567_u32.to_le_bytes());
     let (_, thread) = engine
         .windows_thread
-        .prepare(WindowsApi32::SetLastError, &frame(&engine, 1))
+        .prepare(
+            WindowsApi32::SetLastError,
+            &frame(&engine, 1),
+            crate::windows::ProcessContext32::default(),
+        )
         .unwrap();
     engine.windows_thread = thread;
     entry(&mut engine, ENTRY);

@@ -873,3 +873,12 @@ pub extern "C" fn resume_callback_entries(
         )
     }
 }
+
+#[allow(unsafe_code)]
+#[unsafe(export_name = "ring3_abi_v1_load_pe32_linked_v3_input_at")]
+pub extern "C" fn load_pe32_linked_v3_input_at(actual_base: u32, gate_base: u32) -> u32 {
+    {
+        #![forbid(unsafe_code)]
+        crate::process::wasm::load_pe32_linked_v3_input_at(actual_base, gate_base)
+    }
+}
