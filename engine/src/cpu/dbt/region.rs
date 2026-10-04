@@ -280,31 +280,36 @@ pub(super) fn terminates(instruction: &DecodedInstruction, embedded: bool) -> bo
 fn supports_memory_reads(operation: &Operation) -> bool {
     matches!(
         operation,
-        Operation::Move {
-            destination: Location32::Register(_),
-            source: Value32::Memory(_),
-        } | Operation::Extend {
-            source: SmallSource::Memory { .. },
-            ..
-        } | Operation::Binary {
-            kind: BinaryKind::Add
-                | BinaryKind::Adc
-                | BinaryKind::Sub
-                | BinaryKind::Sbb
-                | BinaryKind::Cmp
-                | BinaryKind::And
-                | BinaryKind::Or
-                | BinaryKind::Xor,
-            destination: Location32::Register(_),
-            source: Value32::Memory(_),
-        } | Operation::Binary {
-            kind: BinaryKind::Cmp | BinaryKind::Test,
-            destination: Location32::Memory(_),
-            source: Value32::Register(_) | Value32::Immediate(_),
-        } | Operation::SignedMultiply {
-            source: Location32::Memory(_),
-            ..
-        }
+        Operation::LoadByte { .. }
+            | Operation::Move {
+                destination: Location32::Register(_),
+                source: Value32::Memory(_),
+            }
+            | Operation::Extend {
+                source: SmallSource::Memory { .. },
+                ..
+            }
+            | Operation::Binary {
+                kind: BinaryKind::Add
+                    | BinaryKind::Adc
+                    | BinaryKind::Sub
+                    | BinaryKind::Sbb
+                    | BinaryKind::Cmp
+                    | BinaryKind::And
+                    | BinaryKind::Or
+                    | BinaryKind::Xor,
+                destination: Location32::Register(_),
+                source: Value32::Memory(_),
+            }
+            | Operation::Binary {
+                kind: BinaryKind::Cmp | BinaryKind::Test,
+                destination: Location32::Memory(_),
+                source: Value32::Register(_) | Value32::Immediate(_),
+            }
+            | Operation::SignedMultiply {
+                source: Location32::Memory(_),
+                ..
+            }
     )
 }
 

@@ -72,23 +72,24 @@ pub(super) fn value(instruction: &Instruction, index: u32) -> Result<Value32, De
     }
 }
 
+pub(super) fn byte_register(register: Register) -> Result<ByteRegister, DecodeError> {
+    match register {
+        Register::AL => Ok(ByteRegister::Al),
+        Register::CL => Ok(ByteRegister::Cl),
+        Register::DL => Ok(ByteRegister::Dl),
+        Register::BL => Ok(ByteRegister::Bl),
+        Register::AH => Ok(ByteRegister::Ah),
+        Register::CH => Ok(ByteRegister::Ch),
+        Register::DH => Ok(ByteRegister::Dh),
+        Register::BH => Ok(ByteRegister::Bh),
+        _ => Err(unsupported()),
+    }
+}
+
 pub(super) fn byte_value(instruction: &Instruction) -> Result<ByteValue, DecodeError> {
     match instruction.op1_kind() {
         OpKind::Immediate8 => Ok(ByteValue::Immediate(instruction.immediate8())),
-        OpKind::Register => {
-            let source = match instruction.op1_register() {
-                Register::AL => ByteRegister::Al,
-                Register::CL => ByteRegister::Cl,
-                Register::DL => ByteRegister::Dl,
-                Register::BL => ByteRegister::Bl,
-                Register::AH => ByteRegister::Ah,
-                Register::CH => ByteRegister::Ch,
-                Register::DH => ByteRegister::Dh,
-                Register::BH => ByteRegister::Bh,
-                _ => return Err(unsupported()),
-            };
-            Ok(ByteValue::Register(source))
-        }
+        OpKind::Register => byte_register(instruction.op1_register()).map(ByteValue::Register),
         _ => Err(unsupported()),
     }
 }

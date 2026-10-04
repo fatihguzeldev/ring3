@@ -523,7 +523,7 @@ fn byte_destinations_adjacent_forms_and_excluded_prefixes_keep_existing_categori
     let cases: &[(&[u8], DecodeError)] = &[
         (&[0x88, 0xc0], opcode),
         (&[0xc6, 0xc0, 0], opcode),
-        (&[0x8a, 0x03], opcode),
+        (&[0x8a, 0xc3], opcode),
         (&[0xa2, 0x10, 0x50, 0, 0], opcode),
         (&[0xb0, 0x80], opcode),
         (&[0xc6, 0x0b, 0], DecodeError::InvalidEncoding),

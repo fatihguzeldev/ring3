@@ -5,8 +5,8 @@ use crate::cpu::x86::{
     Register32,
     decode::DecodedInstruction,
     ir::{
-        BinaryKind, BranchTarget, EffectiveAddress, ExtensionKind, Location32, Operation,
-        ShiftCount, ShiftKind, SmallSource, SmallWidth, UnaryKind, Value32,
+        BinaryKind, BranchTarget, ByteRegister, EffectiveAddress, ExtensionKind, Location32,
+        Operation, ShiftCount, ShiftKind, SmallSource, SmallWidth, UnaryKind, Value32,
     },
 };
 
@@ -42,6 +42,30 @@ pub(super) fn instruction(
         } => {
             memory::store(code, address, source, imports, exit_depth);
             store = true;
+        }
+        Operation::LoadByte {
+            destination,
+            address,
+        } => {
+            memory::load_narrow_value(code, address, SmallWidth::Byte, imports, exit_depth);
+            let (parent, high) = match destination {
+                ByteRegister::Al => (Register32::Eax, false),
+                ByteRegister::Cl => (Register32::Ecx, false),
+                ByteRegister::Dl => (Register32::Edx, false),
+                ByteRegister::Bl => (Register32::Ebx, false),
+                ByteRegister::Ah => (Register32::Eax, true),
+                ByteRegister::Ch => (Register32::Ecx, true),
+                ByteRegister::Dh => (Register32::Edx, true),
+                ByteRegister::Bh => (Register32::Ebx, true),
+            };
+            if high {
+                code.i32_const(8).i32_shl();
+            }
+            code.local_get(register(parent))
+                .i32_const(if high { !0xff00 } else { !0xff })
+                .i32_and()
+                .i32_or()
+                .local_set(register(parent));
         }
         Operation::StoreByte { address, source } => {
             memory::store_byte(code, address, source, imports, exit_depth);

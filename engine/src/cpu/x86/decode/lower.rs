@@ -3,7 +3,8 @@ use iced_x86::{Code, Instruction, OpKind};
 use super::{
     DecodeError,
     operands::{
-        byte_value, effective_address, location, register, small_source, unsupported, value,
+        byte_register, byte_value, effective_address, location, register, small_source,
+        unsupported, value,
     },
     profile::check_profile,
 };
@@ -26,6 +27,15 @@ pub(super) fn lower(instruction: &Instruction, bytes: &[u8]) -> Result<Operation
             destination: location(instruction, 0)?,
             source: value(instruction, 1)?,
         }),
+        Code::Mov_r8_rm8 => {
+            if instruction.op1_kind() != OpKind::Memory {
+                return Err(unsupported());
+            }
+            Ok(Operation::LoadByte {
+                destination: byte_register(instruction.op0_register())?,
+                address: effective_address(instruction)?,
+            })
+        }
         Code::Mov_rm8_r8 | Code::Mov_rm8_imm8 => {
             if instruction.op0_kind() != OpKind::Memory {
                 return Err(unsupported());

@@ -245,7 +245,7 @@ fn excluded_operations_and_poison_keep_original_pc_and_block_end_priority() {
     for instruction in [
         &[0x66, 0x8b, 0x03][..],
         &[0x67, 0x8b, 0x03],
-        &[0x8a, 0x03],
+        &[0x8a, 0xc3],
         &[0xf0, 0x01, 0x03],
     ] {
         let mut bytes = vec![0x90];

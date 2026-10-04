@@ -51,6 +51,7 @@ impl Imports {
         let mut store8 = false;
         for instruction in blocks.iter().flat_map(|block| &block.instructions) {
             match instruction.operation() {
+                Operation::LoadByte { .. } => read8 = true,
                 Operation::StoreByte { .. } => store8 = true,
                 Operation::Extend {
                     source: SmallSource::Memory { width, .. },

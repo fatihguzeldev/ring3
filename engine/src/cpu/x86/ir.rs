@@ -132,6 +132,10 @@ pub enum Operation {
         destination: Location32,
         source: Value32,
     },
+    LoadByte {
+        destination: ByteRegister,
+        address: EffectiveAddress,
+    },
     StoreByte {
         address: EffectiveAddress,
         source: ByteValue,
