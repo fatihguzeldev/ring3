@@ -47,19 +47,7 @@ pub(super) fn instruction(
             destination,
             source,
         } => {
-            match source {
-                ByteValue::Immediate(value) => {
-                    code.i32_const(i32::from(value));
-                }
-                ByteValue::Register(source) => {
-                    let (parent, high) = byte_parent(source);
-                    code.local_get(register(parent));
-                    if high {
-                        code.i32_const(8).i32_shr_u();
-                    }
-                    code.i32_const(0xff).i32_and();
-                }
-            }
+            byte_value(code, source);
             let (parent, high) = byte_parent(destination);
             if high {
                 code.i32_const(8).i32_shl();
@@ -69,6 +57,19 @@ pub(super) fn instruction(
                 .i32_and()
                 .i32_or()
                 .local_set(register(parent));
+        }
+        Operation::CompareByte { left, right } => {
+            byte_value(code, ByteValue::Register(left));
+            code.local_set(LHS);
+            byte_value(code, right);
+            code.local_set(RHS)
+                .local_get(LHS)
+                .local_get(RHS)
+                .i32_sub()
+                .i32_const(0xff)
+                .i32_and()
+                .local_set(RESULT);
+            arithmetic_flags(code, BinaryKind::Cmp, CarryFlag::Calculate, 7);
         }
         Operation::LoadByte {
             destination,
@@ -194,7 +195,7 @@ pub(super) fn instruction(
                 | BinaryKind::Adc
                 | BinaryKind::Sub
                 | BinaryKind::Sbb
-                | BinaryKind::Cmp => arithmetic_flags(code, kind, CarryFlag::Calculate),
+                | BinaryKind::Cmp => arithmetic_flags(code, kind, CarryFlag::Calculate, 31),
                 BinaryKind::And | BinaryKind::Or | BinaryKind::Xor | BinaryKind::Test => {
                     logical_flags(code)
                 }
@@ -386,6 +387,22 @@ fn byte_parent(byte: ByteRegister) -> (Register32, bool) {
     }
 }
 
+fn byte_value(code: &mut InstructionSink<'_>, value: ByteValue) {
+    match value {
+        ByteValue::Immediate(value) => {
+            code.i32_const(i32::from(value));
+        }
+        ByteValue::Register(source) => {
+            let (parent, high) = byte_parent(source);
+            code.local_get(register(parent));
+            if high {
+                code.i32_const(8).i32_shr_u();
+            }
+            code.i32_const(0xff).i32_and();
+        }
+    }
+}
+
 fn value(code: &mut InstructionSink<'_>, value: Value32) {
     match value {
         Value32::Register(source) => {
@@ -499,7 +516,7 @@ fn unary_memory(
             (BinaryKind::Sub, CarryFlag::Calculate)
         }
     };
-    arithmetic_flags(code, binary, carry);
+    arithmetic_flags(code, binary, carry, 31);
 }
 
 fn unary(code: &mut InstructionSink<'_>, kind: UnaryKind, destination: Register32) {
@@ -538,7 +555,7 @@ fn unary(code: &mut InstructionSink<'_>, kind: UnaryKind, destination: Register3
         code.i32_sub();
     }
     code.local_set(RESULT);
-    arithmetic_flags(code, binary, carry);
+    arithmetic_flags(code, binary, carry, 31);
     code.local_get(RESULT).local_set(register(destination));
 }
 
@@ -699,7 +716,12 @@ fn signed_multiply(
         .local_set(register(destination));
 }
 
-fn arithmetic_flags(code: &mut InstructionSink<'_>, kind: BinaryKind, carry: CarryFlag) {
+fn arithmetic_flags(
+    code: &mut InstructionSink<'_>,
+    kind: BinaryKind,
+    carry: CarryFlag,
+    sign_bit: i32,
+) {
     code.local_get(FLAGS)
         .i32_const(if matches!(carry, CarryFlag::Preserve) {
             0x401
@@ -735,7 +757,7 @@ fn arithmetic_flags(code: &mut InstructionSink<'_>, kind: BinaryKind, carry: Car
         .i32_const(0x10)
         .i32_and()
         .i32_or();
-    zero_sign_flags(code);
+    zero_sign_flags(code, sign_bit);
     code.local_get(LHS).local_get(RHS).i32_xor();
     if matches!(kind, BinaryKind::Add | BinaryKind::Adc) {
         code.i32_const(-1).i32_xor();
@@ -744,7 +766,7 @@ fn arithmetic_flags(code: &mut InstructionSink<'_>, kind: BinaryKind, carry: Car
         .local_get(RESULT)
         .i32_xor()
         .i32_and()
-        .i32_const(31)
+        .i32_const(sign_bit)
         .i32_shr_u()
         .i32_const(11)
         .i32_shl()
@@ -760,7 +782,7 @@ fn logical_flags(code: &mut InstructionSink<'_>) {
         .i32_const(2)
         .i32_or();
     parity_flag(code);
-    zero_sign_flags(code);
+    zero_sign_flags(code, 31);
     code.local_set(FLAGS);
 }
 
@@ -777,14 +799,14 @@ fn parity_flag(code: &mut InstructionSink<'_>) {
         .i32_or();
 }
 
-fn zero_sign_flags(code: &mut InstructionSink<'_>) {
+fn zero_sign_flags(code: &mut InstructionSink<'_>, sign_bit: i32) {
     code.local_get(RESULT)
         .i32_eqz()
         .i32_const(6)
         .i32_shl()
         .i32_or()
         .local_get(RESULT)
-        .i32_const(24)
+        .i32_const(sign_bit - 7)
         .i32_shr_u()
         .i32_const(0x80)
         .i32_and()

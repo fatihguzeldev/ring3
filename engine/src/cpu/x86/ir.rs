@@ -136,6 +136,10 @@ pub enum Operation {
         destination: ByteRegister,
         source: ByteValue,
     },
+    CompareByte {
+        left: ByteRegister,
+        right: ByteValue,
+    },
     LoadByte {
         destination: ByteRegister,
         address: EffectiveAddress,

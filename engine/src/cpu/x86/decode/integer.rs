@@ -2,11 +2,22 @@ use iced_x86::{Code, Instruction};
 
 use super::{
     DecodeError,
-    operands::{location, register, value},
+    operands::{byte_register, byte_value, location, register, value},
 };
 use crate::cpu::x86::ir::{BinaryKind, Operation, ShiftCount, ShiftKind, UnaryKind};
 
 pub(super) fn lower(instruction: &Instruction) -> Option<Result<Operation, DecodeError>> {
+    if matches!(
+        instruction.code(),
+        Code::Cmp_rm8_r8 | Code::Cmp_r8_rm8 | Code::Cmp_AL_imm8 | Code::Cmp_rm8_imm8
+    ) {
+        return Some((|| {
+            Ok(Operation::CompareByte {
+                left: byte_register(instruction.op0_register())?,
+                right: byte_value(instruction)?,
+            })
+        })());
+    }
     let kind = match instruction.code() {
         Code::Add_rm32_r32
         | Code::Add_r32_rm32
