@@ -166,7 +166,7 @@ fn excluded() -> Vec<(Vec<u8>, DecodeError)> {
     for (_, to_rm, to_reg, al, extension) in ARITHMETIC {
         for bytes in [
             vec![0x66, to_rm, 0x00],
-            vec![to_reg, 0x00],
+            vec![0x66, to_reg, 0x00],
             vec![0x66, 0x80, extension << 3, 0xff],
             vec![0x82, 0xc0 | extension << 3, 0xff],
             vec![0x66, to_rm, 0xc0],

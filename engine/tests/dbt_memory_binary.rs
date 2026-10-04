@@ -436,7 +436,7 @@ fn prefixes_small_width_and_adjacent_exclusions_keep_precise_errors() {
             InstructionError::Decode(DecodeError::Unsupported(UnsupportedFeature::Segment)),
         ),
         (
-            &[0x02, 0x03][..],
+            &[0x66, 0x02, 0x03][..],
             InstructionError::Decode(DecodeError::Unsupported(UnsupportedFeature::Opcode)),
         ),
         (

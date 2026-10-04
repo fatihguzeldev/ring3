@@ -6,9 +6,9 @@ use crate::cpu::x86::{
     decode::DecodedInstruction,
     ir::{
         BinaryKind, BranchTarget, ByteArithmeticKind, ByteLogicalKind, BytePredicateKind,
-        ByteRegister, ByteValue, EffectiveAddress, ExtensionKind, Location32,
-        MemoryByteArithmeticKind, Operation, ShiftCount, ShiftKind, SmallSource, SmallWidth,
-        UnaryKind, Value32,
+        ByteReadArithmeticKind, ByteRegister, ByteValue, EffectiveAddress, ExtensionKind,
+        Location32, MemoryByteArithmeticKind, Operation, ShiftCount, ShiftKind, SmallSource,
+        SmallWidth, UnaryKind, Value32,
     },
 };
 
@@ -172,6 +172,31 @@ pub(super) fn instruction(
                     code.i32_sub();
                 }
             }
+            code.i32_const(0xff).i32_and().local_set(RESULT);
+            arithmetic_flags(code, binary, CarryFlag::Calculate, 7);
+            code.local_get(RESULT);
+            insert_byte(code, destination);
+        }
+        Operation::ReadArithmeticByte {
+            kind,
+            destination,
+            address,
+        } => {
+            memory::load_narrow_value(code, address, SmallWidth::Byte, imports, exit_depth);
+            // helper validation uses operand scratch; capture operands after it succeeds.
+            code.local_set(RHS);
+            byte_value(code, ByteValue::Register(destination));
+            code.local_set(LHS).local_get(LHS).local_get(RHS);
+            let binary = match kind {
+                ByteReadArithmeticKind::Add => {
+                    code.i32_add();
+                    BinaryKind::Add
+                }
+                ByteReadArithmeticKind::Sub => {
+                    code.i32_sub();
+                    BinaryKind::Sub
+                }
+            };
             code.i32_const(0xff).i32_and().local_set(RESULT);
             arithmetic_flags(code, binary, CarryFlag::Calculate, 7);
             code.local_get(RESULT);

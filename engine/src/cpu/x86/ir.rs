@@ -62,6 +62,12 @@ pub enum ByteArithmeticKind {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ByteReadArithmeticKind {
+    Add,
+    Sub,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum MemoryByteArithmeticKind {
     Add,
     Adc,
@@ -197,6 +203,11 @@ pub enum Operation {
         kind: ByteArithmeticKind,
         destination: ByteRegister,
         source: ByteValue,
+    },
+    ReadArithmeticByte {
+        kind: ByteReadArithmeticKind,
+        destination: ByteRegister,
+        address: EffectiveAddress,
     },
     SetByte {
         condition: Condition,

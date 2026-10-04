@@ -282,6 +282,7 @@ fn supports_memory_reads(operation: &Operation) -> bool {
         operation,
         Operation::LoadByte { .. }
             | Operation::MemoryPredicateByte { .. }
+            | Operation::ReadArithmeticByte { .. }
             | Operation::Move {
                 destination: Location32::Register(_),
                 source: Value32::Memory(_),

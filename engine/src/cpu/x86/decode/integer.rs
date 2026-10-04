@@ -5,8 +5,8 @@ use super::{
     operands::{byte_register, byte_value, effective_address, location, register, value},
 };
 use crate::cpu::x86::ir::{
-    BinaryKind, ByteArithmeticKind, ByteLogicalKind, BytePredicateKind, MemoryByteArithmeticKind,
-    Operation, ShiftCount, ShiftKind, UnaryKind,
+    BinaryKind, ByteArithmeticKind, ByteLogicalKind, BytePredicateKind, ByteReadArithmeticKind,
+    MemoryByteArithmeticKind, Operation, ShiftCount, ShiftKind, UnaryKind,
 };
 
 pub(super) fn lower(instruction: &Instruction) -> Option<Result<Operation, DecodeError>> {
@@ -41,6 +41,22 @@ pub(super) fn lower(instruction: &Instruction) -> Option<Result<Operation, Decod
                 kind,
                 address: effective_address(instruction)?,
                 source: byte_value(instruction)?,
+            })
+        })());
+    }
+    let read_arithmetic = match instruction.code() {
+        Code::Add_r8_rm8 => Some(ByteReadArithmeticKind::Add),
+        Code::Sub_r8_rm8 => Some(ByteReadArithmeticKind::Sub),
+        _ => None,
+    };
+    if instruction.op1_kind() == OpKind::Memory
+        && let Some(kind) = read_arithmetic
+    {
+        return Some((|| {
+            Ok(Operation::ReadArithmeticByte {
+                kind,
+                destination: byte_register(instruction.op0_register())?,
+                address: effective_address(instruction)?,
             })
         })());
     }
