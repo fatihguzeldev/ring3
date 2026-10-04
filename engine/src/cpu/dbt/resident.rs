@@ -54,6 +54,7 @@ pub enum RegistryError {
     InstructionOverlap { pc: GuestAddress },
     IdentityExhausted,
     InvalidUnit,
+    CurrentUnit,
     CodeInvalidated,
     NotFound { pc: GuestAddress },
 }
@@ -259,6 +260,47 @@ impl ResidentRegistry {
         RegistryUsage {
             units: self.entries.len(),
             wasm_bytes: self.wasm_bytes,
+        }
+    }
+
+    pub fn retire_stale(&mut self, memory: &AddressSpace, id: UnitId) -> Result<(), RegistryError> {
+        let index = self.stale_index(memory, id.get())?;
+        let bytes = self.entries[index].region.retained_wasm_byte_len();
+        let remaining = self
+            .wasm_bytes
+            .checked_sub(bytes)
+            .ok_or(RegistryError::InvalidLimits)?;
+        self.entries.remove(index);
+        self.wasm_bytes = remaining;
+        Ok(())
+    }
+
+    pub(crate) fn retire_stale_raw(
+        &mut self,
+        memory: &AddressSpace,
+        id: u64,
+    ) -> Result<(), RegistryError> {
+        self.retire_stale(memory, UnitId(id))
+    }
+
+    pub(crate) fn check_stale_raw(
+        &self,
+        memory: &AddressSpace,
+        id: u64,
+    ) -> Result<(), RegistryError> {
+        self.stale_index(memory, id).map(|_| ())
+    }
+
+    fn stale_index(&self, memory: &AddressSpace, id: u64) -> Result<usize, RegistryError> {
+        self.check_memory(memory)?;
+        let index = self
+            .entries
+            .iter()
+            .position(|unit| unit.id.get() == id)
+            .ok_or(RegistryError::InvalidUnit)?;
+        match self.entries[index].region.wasm_bytes(memory) {
+            Ok(_) => Err(RegistryError::CurrentUnit),
+            Err(ArtifactError::CodeInvalidated) => Ok(index),
         }
     }
 

@@ -70,6 +70,10 @@ impl CompiledRegion {
         Ok(&self.bytes)
     }
 
+    pub(super) fn retained_wasm_byte_len(&self) -> usize {
+        self.bytes.len()
+    }
+
     pub fn metadata(&self) -> RegionMetadata {
         RegionMetadata {
             backend_version: 1,

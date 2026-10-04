@@ -370,6 +370,12 @@ pub(crate) fn find_resident(pc: u32) -> u32 {
     })
 }
 
+pub(crate) fn retire_stale_resident(key_low: u32, key_high: u32, id_low: u32, id_high: u32) -> u32 {
+    let key = u64::from(key_low) | (u64::from(key_high) << 32);
+    let id = u64::from(id_low) | (u64::from(id_high) << 32);
+    mutate(|instance| instance.retire_stale_resident(key, id))
+}
+
 pub(crate) fn acknowledge_resident_installation(
     key_low: u32,
     key_high: u32,
@@ -1071,7 +1077,9 @@ fn status(error: HostError) -> u32 {
         },
         HostError::Compile(_) => 10,
         HostError::Resident(error) => match error {
-            RegistryError::InvalidLimits | RegistryError::InstructionOverlap { .. } => 7,
+            RegistryError::InvalidLimits
+            | RegistryError::CurrentUnit
+            | RegistryError::InstructionOverlap { .. } => 7,
             RegistryError::Allocation | RegistryError::IdentityExhausted => 9,
             RegistryError::WrongAddressSpace
             | RegistryError::InvalidUnit

@@ -11,6 +11,37 @@ use crate::{
 };
 
 impl EngineInstance {
+    /// call only after generated execution returns; retired module pointers expire.
+    pub fn retire_stale_resident(&mut self, key: u64, id: u64) -> Result<(), HostError> {
+        self.memory()?;
+        if key != self.key {
+            return Err(HostError::InvalidArtifact);
+        }
+        if self.pending_call.is_some() || self.callback.is_some() {
+            return Err(HostError::Call(CallError::Busy));
+        }
+        let memory = self.memory.as_ref().ok_or(HostError::Closed)?;
+        self.resident
+            .as_ref()
+            .ok_or(HostError::Resident(RegistryError::InvalidUnit))?
+            .check_stale_raw(memory, id)
+            .map_err(HostError::Resident)?;
+        if self.call_cancelled() {
+            return Err(HostError::Call(CallError::Cancelled));
+        }
+        self.resident
+            .as_mut()
+            .ok_or(HostError::Resident(RegistryError::InvalidUnit))?
+            .retire_stale_raw(memory, id)
+            .map_err(HostError::Resident)?;
+        for installed in &mut self.resident_installations {
+            if installed.is_some_and(|entry| entry.unit_id == id) {
+                *installed = None;
+            }
+        }
+        Ok(())
+    }
+
     pub fn compile_resident(&mut self, count: u32) -> Result<UnitId, HostError> {
         self.compile_resident_with_gates(count, 0)
     }
