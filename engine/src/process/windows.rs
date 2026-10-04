@@ -142,3 +142,7 @@ mod windows_tests;
 #[cfg(test)]
 #[path = "windows_allocation_tests.rs"]
 mod windows_allocation_tests;
+
+#[cfg(test)]
+#[path = "windows_callback_tests.rs"]
+mod windows_callback_tests;
