@@ -299,6 +299,9 @@ fn supports_memory_reads(operation: &Operation) -> bool {
             kind: BinaryKind::Cmp | BinaryKind::Test,
             destination: Location32::Memory(_),
             source: Value32::Register(_) | Value32::Immediate(_),
+        } | Operation::SignedMultiply {
+            source: Location32::Memory(_),
+            ..
         }
     )
 }

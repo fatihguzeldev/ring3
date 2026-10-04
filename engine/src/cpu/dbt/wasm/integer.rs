@@ -174,10 +174,7 @@ pub(super) fn instruction(
             source,
             immediate,
         } => {
-            let Location32::Register(source) = source else {
-                unreachable!("prepared region contains a memory multiply")
-            };
-            signed_multiply(code, destination, source, immediate);
+            signed_multiply(code, destination, source, immediate, imports, exit_depth);
         }
         Operation::Jump {
             target: BranchTarget::Direct(target),
@@ -547,12 +544,22 @@ fn shift(
 fn signed_multiply(
     code: &mut InstructionSink<'_>,
     destination: Register32,
-    source: Register32,
+    source: Location32,
     immediate: Option<u32>,
+    imports: memory::Imports,
+    exit_depth: u32,
 ) {
+    let source = match source {
+        Location32::Register(source) => register(source),
+        Location32::Memory(address) => {
+            // helper validation uses operand scratch; capture operands after it succeeds.
+            memory::load_result(code, address, imports, exit_depth);
+            RESULT
+        }
+    };
     match immediate {
         Some(immediate) => {
-            code.local_get(register(source))
+            code.local_get(source)
                 .local_set(LHS)
                 .i32_const(immediate as i32)
                 .local_set(RHS);
@@ -560,7 +567,7 @@ fn signed_multiply(
         None => {
             code.local_get(register(destination))
                 .local_set(LHS)
-                .local_get(register(source))
+                .local_get(source)
                 .local_set(RHS);
         }
     }

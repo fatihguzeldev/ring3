@@ -96,6 +96,10 @@ impl Imports {
                     destination: Location32::Memory(_),
                     ..
                 }
+                | Operation::SignedMultiply {
+                    source: Location32::Memory(_),
+                    ..
+                }
                 | Operation::Return { .. }
                 | Operation::Jump {
                     target: BranchTarget::Indirect(Location32::Memory(_)),
