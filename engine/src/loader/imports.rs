@@ -137,6 +137,7 @@ impl ImportPlan<'_> {
                         return Err(LoadError::Unsupported);
                     }
                 },
+                WindowsApi32::VirtualAlloc => return Err(LoadError::Unsupported),
             };
             used[gate_index] = true;
             resolved.slots[index] = gate_base + gate_index as u32 * 16;
