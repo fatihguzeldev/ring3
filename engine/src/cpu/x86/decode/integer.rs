@@ -4,9 +4,32 @@ use super::{
     DecodeError,
     operands::{byte_register, byte_value, location, register, value},
 };
-use crate::cpu::x86::ir::{BinaryKind, Operation, ShiftCount, ShiftKind, UnaryKind};
+use crate::cpu::x86::ir::{
+    BinaryKind, ByteLogicalKind, Operation, ShiftCount, ShiftKind, UnaryKind,
+};
 
 pub(super) fn lower(instruction: &Instruction) -> Option<Result<Operation, DecodeError>> {
+    let byte_kind = match instruction.code() {
+        Code::And_rm8_r8 | Code::And_r8_rm8 | Code::And_AL_imm8 | Code::And_rm8_imm8 => {
+            Some(ByteLogicalKind::And)
+        }
+        Code::Or_rm8_r8 | Code::Or_r8_rm8 | Code::Or_AL_imm8 | Code::Or_rm8_imm8 => {
+            Some(ByteLogicalKind::Or)
+        }
+        Code::Xor_rm8_r8 | Code::Xor_r8_rm8 | Code::Xor_AL_imm8 | Code::Xor_rm8_imm8 => {
+            Some(ByteLogicalKind::Xor)
+        }
+        _ => None,
+    };
+    if let Some(kind) = byte_kind {
+        return Some((|| {
+            Ok(Operation::LogicalByte {
+                kind,
+                destination: byte_register(instruction.op0_register())?,
+                source: byte_value(instruction)?,
+            })
+        })());
+    }
     if matches!(
         instruction.code(),
         Code::Test_rm8_r8 | Code::Test_AL_imm8 | Code::Test_rm8_imm8

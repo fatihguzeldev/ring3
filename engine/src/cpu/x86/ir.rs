@@ -41,6 +41,13 @@ pub enum ByteValue {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ByteLogicalKind {
+    And,
+    Or,
+    Xor,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SmallWidth {
     Byte,
     Word,
@@ -143,6 +150,11 @@ pub enum Operation {
     TestByte {
         left: ByteRegister,
         right: ByteValue,
+    },
+    LogicalByte {
+        kind: ByteLogicalKind,
+        destination: ByteRegister,
+        source: ByteValue,
     },
     SetByte {
         condition: Condition,

@@ -5,8 +5,9 @@ use crate::cpu::x86::{
     Register32,
     decode::DecodedInstruction,
     ir::{
-        BinaryKind, BranchTarget, ByteRegister, ByteValue, EffectiveAddress, ExtensionKind,
-        Location32, Operation, ShiftCount, ShiftKind, SmallSource, SmallWidth, UnaryKind, Value32,
+        BinaryKind, BranchTarget, ByteLogicalKind, ByteRegister, ByteValue, EffectiveAddress,
+        ExtensionKind, Location32, Operation, ShiftCount, ShiftKind, SmallSource, SmallWidth,
+        UnaryKind, Value32,
     },
 };
 
@@ -75,6 +76,29 @@ pub(super) fn instruction(
             byte_value(code, right);
             code.i32_and().local_set(RESULT);
             logical_flags(code, 7);
+        }
+        Operation::LogicalByte {
+            kind,
+            destination,
+            source,
+        } => {
+            byte_value(code, ByteValue::Register(destination));
+            byte_value(code, source);
+            match kind {
+                ByteLogicalKind::And => {
+                    code.i32_and();
+                }
+                ByteLogicalKind::Or => {
+                    code.i32_or();
+                }
+                ByteLogicalKind::Xor => {
+                    code.i32_xor();
+                }
+            }
+            code.local_set(RESULT);
+            logical_flags(code, 7);
+            code.local_get(RESULT);
+            insert_byte(code, destination);
         }
         Operation::LoadByte {
             destination,

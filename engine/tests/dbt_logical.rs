@@ -273,9 +273,9 @@ fn standalone_memory_logical_destinations_and_immediates_remain_backend_excluded
 #[test]
 fn small_width_prefix_and_adjacent_operation_errors_retain_their_exact_categories() {
     for instruction in [
-        &[0x20, 0xc0][..],
-        &[0x08, 0xc0][..],
-        &[0x30, 0xc0][..],
+        &[0x20, 0x00][..],
+        &[0x08, 0x00][..],
+        &[0x30, 0x00][..],
         &[0x84, 0x03][..],
         &[0x66, 0x21, 0xc0][..],
         &[0x66, 0x09, 0xc0][..],
