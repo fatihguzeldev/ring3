@@ -9,6 +9,17 @@ use crate::cpu::x86::ir::{BinaryKind, Operation, ShiftCount, ShiftKind, UnaryKin
 pub(super) fn lower(instruction: &Instruction) -> Option<Result<Operation, DecodeError>> {
     if matches!(
         instruction.code(),
+        Code::Test_rm8_r8 | Code::Test_AL_imm8 | Code::Test_rm8_imm8
+    ) {
+        return Some((|| {
+            Ok(Operation::TestByte {
+                left: byte_register(instruction.op0_register())?,
+                right: byte_value(instruction)?,
+            })
+        })());
+    }
+    if matches!(
+        instruction.code(),
         Code::Cmp_rm8_r8 | Code::Cmp_r8_rm8 | Code::Cmp_AL_imm8 | Code::Cmp_rm8_imm8
     ) {
         return Some((|| {

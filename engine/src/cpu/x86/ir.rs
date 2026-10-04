@@ -140,6 +140,10 @@ pub enum Operation {
         left: ByteRegister,
         right: ByteValue,
     },
+    TestByte {
+        left: ByteRegister,
+        right: ByteValue,
+    },
     LoadByte {
         destination: ByteRegister,
         address: EffectiveAddress,

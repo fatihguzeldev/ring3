@@ -71,6 +71,12 @@ pub(super) fn instruction(
                 .local_set(RESULT);
             arithmetic_flags(code, BinaryKind::Cmp, CarryFlag::Calculate, 7);
         }
+        Operation::TestByte { left, right } => {
+            byte_value(code, ByteValue::Register(left));
+            byte_value(code, right);
+            code.i32_and().local_set(RESULT);
+            logical_flags(code, 7);
+        }
         Operation::LoadByte {
             destination,
             address,
@@ -197,7 +203,7 @@ pub(super) fn instruction(
                 | BinaryKind::Sbb
                 | BinaryKind::Cmp => arithmetic_flags(code, kind, CarryFlag::Calculate, 31),
                 BinaryKind::And | BinaryKind::Or | BinaryKind::Xor | BinaryKind::Test => {
-                    logical_flags(code)
+                    logical_flags(code, 31)
                 }
             }
             if writes && let Location32::Register(destination) = destination {
@@ -629,7 +635,7 @@ fn shift_value(code: &mut InstructionSink<'_>, kind: ShiftKind) {
 
 fn shift_flags(code: &mut InstructionSink<'_>, kind: ShiftKind) {
     // af and multi-bit of are undefined; this profile clears them.
-    logical_flags(code);
+    logical_flags(code, 31);
     code.local_get(FLAGS).local_get(LHS);
     if kind == ShiftKind::Shl {
         code.i32_const(32).local_get(RHS).i32_sub();
@@ -774,7 +780,7 @@ fn arithmetic_flags(
         .local_set(FLAGS);
 }
 
-fn logical_flags(code: &mut InstructionSink<'_>) {
+fn logical_flags(code: &mut InstructionSink<'_>, sign_bit: i32) {
     // af is undefined on x86; this profile deterministically clears it with cf/of.
     code.local_get(FLAGS)
         .i32_const(0x400)
@@ -782,7 +788,7 @@ fn logical_flags(code: &mut InstructionSink<'_>) {
         .i32_const(2)
         .i32_or();
     parity_flag(code);
-    zero_sign_flags(code, 31);
+    zero_sign_flags(code, sign_bit);
     code.local_set(FLAGS);
 }
 
