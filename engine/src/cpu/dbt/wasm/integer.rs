@@ -48,15 +48,14 @@ pub(super) fn instruction(
             source,
         } => {
             byte_value(code, source);
-            let (parent, high) = byte_parent(destination);
-            if high {
-                code.i32_const(8).i32_shl();
-            }
-            code.local_get(register(parent))
-                .i32_const(if high { !0xff00 } else { !0xff })
-                .i32_and()
-                .i32_or()
-                .local_set(register(parent));
+            insert_byte(code, destination);
+        }
+        Operation::SetByte {
+            condition,
+            destination,
+        } => {
+            control::condition(code, condition);
+            insert_byte(code, destination);
         }
         Operation::CompareByte { left, right } => {
             byte_value(code, ByteValue::Register(left));
@@ -391,6 +390,18 @@ fn byte_parent(byte: ByteRegister) -> (Register32, bool) {
         ByteRegister::Dh => (Register32::Edx, true),
         ByteRegister::Bh => (Register32::Ebx, true),
     }
+}
+
+fn insert_byte(code: &mut InstructionSink<'_>, destination: ByteRegister) {
+    let (parent, high) = byte_parent(destination);
+    if high {
+        code.i32_const(8).i32_shl();
+    }
+    code.local_get(register(parent))
+        .i32_const(if high { !0xff00 } else { !0xff })
+        .i32_and()
+        .i32_or()
+        .local_set(register(parent));
 }
 
 fn byte_value(code: &mut InstructionSink<'_>, value: ByteValue) {

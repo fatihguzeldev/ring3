@@ -144,6 +144,10 @@ pub enum Operation {
         left: ByteRegister,
         right: ByteValue,
     },
+    SetByte {
+        condition: Condition,
+        destination: ByteRegister,
+    },
     LoadByte {
         destination: ByteRegister,
         address: EffectiveAddress,
