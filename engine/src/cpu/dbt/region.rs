@@ -393,6 +393,7 @@ pub(super) fn supports(instruction: &DecodedInstruction, embedded: bool) -> bool
                 | Operation::LogicalByte { .. }
                 | Operation::ArithmeticByte { .. }
                 | Operation::UnaryByte { .. }
+                | Operation::ShiftByte { .. }
                 | Operation::SetByte { .. }
                 | Operation::Move {
                     destination: Location32::Register(_),

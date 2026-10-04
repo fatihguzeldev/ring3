@@ -285,6 +285,11 @@ pub(super) fn instruction(
             unary_memory(code, kind, address, imports, exit_depth);
             store = true;
         }
+        Operation::ShiftByte {
+            kind,
+            destination,
+            count,
+        } => shift_byte(code, kind, destination, count),
         Operation::Shift {
             kind,
             destination: Location32::Register(destination),
@@ -679,6 +684,89 @@ fn unary(code: &mut InstructionSink<'_>, kind: UnaryKind, destination: Register3
     code.local_set(RESULT);
     arithmetic_flags(code, binary, carry, 31);
     code.local_get(RESULT).local_set(register(destination));
+}
+
+fn shift_byte(
+    code: &mut InstructionSink<'_>,
+    kind: ShiftKind,
+    destination: ByteRegister,
+    count: ShiftCount,
+) {
+    byte_value(code, ByteValue::Register(destination));
+    code.local_set(LHS);
+    shift_count(code, count);
+    code.local_tee(RHS).if_(BlockType::Empty);
+    code.local_get(LHS);
+    if kind == ShiftKind::Sar {
+        code.i32_const(24).i32_shl().i32_const(24).i32_shr_s();
+    }
+    code.local_get(RHS);
+    match kind {
+        ShiftKind::Shl => {
+            code.i32_shl();
+        }
+        ShiftKind::Shr => {
+            code.i32_shr_u();
+        }
+        ShiftKind::Sar => {
+            code.i32_shr_s();
+        }
+    }
+    code.i32_const(0xff).i32_and().local_set(RESULT);
+    shift_byte_flags(code, kind);
+    code.local_get(RESULT);
+    insert_byte(code, destination);
+    code.end();
+}
+
+fn shift_byte_flags(code: &mut InstructionSink<'_>, kind: ShiftKind) {
+    // undefined af, multi-bit of and shl/shr carry at counts >= 8 are cleared by this profile.
+    logical_flags(code, 7);
+    code.local_get(RHS)
+        .i32_const(8)
+        .i32_lt_u()
+        .if_(BlockType::Empty)
+        .local_get(FLAGS)
+        .local_get(LHS);
+    if kind == ShiftKind::Shl {
+        code.i32_const(8).local_get(RHS).i32_sub();
+    } else {
+        code.local_get(RHS).i32_const(1).i32_sub();
+    }
+    code.i32_shr_u()
+        .i32_const(1)
+        .i32_and()
+        .i32_or()
+        .local_set(FLAGS);
+    if kind == ShiftKind::Sar {
+        code.else_()
+            .local_get(FLAGS)
+            .local_get(LHS)
+            .i32_const(7)
+            .i32_shr_u()
+            .i32_or()
+            .local_set(FLAGS);
+    }
+    code.end();
+    if kind != ShiftKind::Sar {
+        code.local_get(RHS)
+            .i32_const(1)
+            .i32_eq()
+            .if_(BlockType::Empty)
+            .local_get(FLAGS);
+        if kind == ShiftKind::Shl {
+            code.local_get(RESULT)
+                .i32_const(7)
+                .i32_shr_u()
+                .local_get(FLAGS)
+                .i32_const(1)
+                .i32_and()
+                .i32_xor();
+        } else {
+            code.local_get(LHS).i32_const(7).i32_shr_u();
+        }
+        code.i32_const(11).i32_shl().i32_or().local_set(FLAGS).end();
+    }
 }
 
 fn shift(

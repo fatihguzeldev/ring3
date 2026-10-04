@@ -203,6 +203,11 @@ pub enum Operation {
         kind: UnaryKind,
         destination: Location32,
     },
+    ShiftByte {
+        kind: ShiftKind,
+        destination: ByteRegister,
+        count: ShiftCount,
+    },
     Shift {
         kind: ShiftKind,
         destination: Location32,

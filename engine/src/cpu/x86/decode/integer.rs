@@ -160,6 +160,36 @@ fn lower_unary(instruction: &Instruction) -> Option<Result<Operation, DecodeErro
 }
 
 fn lower_shift(instruction: &Instruction) -> Option<Result<Operation, DecodeError>> {
+    let byte_shift = match instruction.code() {
+        Code::Shl_rm8_1 => Some((ShiftKind::Shl, ShiftCount::Immediate(1))),
+        Code::Shr_rm8_1 => Some((ShiftKind::Shr, ShiftCount::Immediate(1))),
+        Code::Sar_rm8_1 => Some((ShiftKind::Sar, ShiftCount::Immediate(1))),
+        Code::Shl_rm8_imm8 => Some((
+            ShiftKind::Shl,
+            ShiftCount::Immediate(instruction.immediate8()),
+        )),
+        Code::Shr_rm8_imm8 => Some((
+            ShiftKind::Shr,
+            ShiftCount::Immediate(instruction.immediate8()),
+        )),
+        Code::Sar_rm8_imm8 => Some((
+            ShiftKind::Sar,
+            ShiftCount::Immediate(instruction.immediate8()),
+        )),
+        Code::Shl_rm8_CL => Some((ShiftKind::Shl, ShiftCount::Cl)),
+        Code::Shr_rm8_CL => Some((ShiftKind::Shr, ShiftCount::Cl)),
+        Code::Sar_rm8_CL => Some((ShiftKind::Sar, ShiftCount::Cl)),
+        _ => None,
+    };
+    if let Some((kind, count)) = byte_shift {
+        return Some(
+            byte_register(instruction.op0_register()).map(|destination| Operation::ShiftByte {
+                kind,
+                destination,
+                count,
+            }),
+        );
+    }
     let (kind, count) = match instruction.code() {
         Code::Shl_rm32_1 => (ShiftKind::Shl, ShiftCount::Immediate(1)),
         Code::Shr_rm32_1 => (ShiftKind::Shr, ShiftCount::Immediate(1)),
