@@ -161,13 +161,16 @@ pub(super) fn instruction(
         }
         Operation::Shift {
             kind,
-            destination,
+            destination: Location32::Register(destination),
+            count,
+        } => shift(code, kind, destination, count),
+        Operation::Shift {
+            kind,
+            destination: Location32::Memory(address),
             count,
         } => {
-            let Location32::Register(destination) = destination else {
-                unreachable!("prepared region contains a memory shift")
-            };
-            shift(code, kind, destination, count);
+            shift_memory(code, kind, address, count, imports, exit_depth);
+            store = true;
         }
         Operation::SignedMultiply {
             destination,
@@ -478,6 +481,40 @@ fn shift(
     count: ShiftCount,
 ) {
     code.local_get(register(destination)).local_set(LHS);
+    shift_count(code, count);
+    code.local_tee(RHS).if_(BlockType::Empty);
+    shift_value(code, kind);
+    shift_flags(code, kind);
+    code.local_get(RESULT)
+        .local_set(register(destination))
+        .end();
+}
+
+fn shift_memory(
+    code: &mut InstructionSink<'_>,
+    kind: ShiftKind,
+    address: EffectiveAddress,
+    count: ShiftCount,
+    imports: memory::Imports,
+    exit_depth: u32,
+) {
+    memory::load_result(code, address, imports, exit_depth);
+    code.local_get(RESULT).local_set(LHS);
+    shift_count(code, count);
+    code.local_set(RHS);
+    shift_value(code, kind);
+    // store validation clobbers operand scratch; keep the lossy inputs on the operand stack.
+    code.local_get(LHS).local_get(RHS);
+    memory::store_result(code, address, imports, exit_depth);
+    code.local_set(RHS)
+        .local_set(LHS)
+        .local_get(RHS)
+        .if_(BlockType::Empty);
+    shift_flags(code, kind);
+    code.end();
+}
+
+fn shift_count(code: &mut InstructionSink<'_>, count: ShiftCount) {
     match count {
         ShiftCount::Immediate(count) => {
             code.i32_const(i32::from(count));
@@ -486,12 +523,11 @@ fn shift(
             code.local_get(register(Register32::Ecx));
         }
     }
-    code.i32_const(31)
-        .i32_and()
-        .local_tee(RHS)
-        .if_(BlockType::Empty)
-        .local_get(LHS)
-        .local_get(RHS);
+    code.i32_const(31).i32_and();
+}
+
+fn shift_value(code: &mut InstructionSink<'_>, kind: ShiftKind) {
+    code.local_get(LHS).local_get(RHS);
     match kind {
         ShiftKind::Shl => {
             code.i32_shl();
@@ -504,6 +540,9 @@ fn shift(
         }
     }
     code.local_set(RESULT);
+}
+
+fn shift_flags(code: &mut InstructionSink<'_>, kind: ShiftKind) {
     // af and multi-bit of are undefined; this profile clears them.
     logical_flags(code);
     code.local_get(FLAGS).local_get(LHS);
@@ -536,9 +575,6 @@ fn shift(
         }
         code.i32_const(11).i32_shl().i32_or().local_set(FLAGS).end();
     }
-    code.local_get(RESULT)
-        .local_set(register(destination))
-        .end();
 }
 
 fn signed_multiply(

@@ -68,6 +68,10 @@ impl Imports {
                     kind: UnaryKind::Inc | UnaryKind::Dec | UnaryKind::Not | UnaryKind::Neg,
                     destination: Location32::Memory(_),
                 }
+                | Operation::Shift {
+                    destination: Location32::Memory(_),
+                    ..
+                }
                 | Operation::Binary {
                     kind:
                         BinaryKind::Add

@@ -620,7 +620,7 @@ fn saved(engine: &EngineInstance, keep: u64) -> Saved {
 }
 
 #[test]
-fn admitted_prefix_then_each_memory_refusal_preserves_both_old_owners_and_publication() {
+fn admitted_prefix_and_each_memory_then_decode_refusal_preserves_both_old_owners_and_publication() {
     for owner in [Owner::Replacement, Owner::Resident] {
         for entries in [false, true] {
             let mut engine = EngineInstance::new(2, KEY).unwrap();
@@ -643,7 +643,10 @@ fn admitted_prefix_then_each_memory_refusal_preserves_both_old_owners_and_public
                 upload(&mut engine, CODE, &bytes);
                 describe(&mut engine, CODE, bytes.len(), entries);
                 let before = saved(&engine, keep);
-                let error = instruction_error(CODE + 2, InstructionError::BackendUnsupported);
+                let error = instruction_error(
+                    CODE + 2 + instruction.len() as u32,
+                    InstructionError::Decode(DecodeError::Unsupported(UnsupportedFeature::Opcode)),
+                );
                 let expected = match owner {
                     Owner::Replacement => HostError::Compile(error),
                     Owner::Resident => HostError::Resident(RegistryError::Compile(error)),

@@ -183,6 +183,7 @@ fn prepare(
                         || supports_memory_move_store(instruction.operation())
                         || supports_memory_unary(instruction.operation())
                         || supports_memory_binary(instruction.operation())
+                        || supports_memory_shift(instruction.operation())
                         || supports_stack_values(instruction.operation())
                         || supports_near_control(&instruction))))
             {
@@ -352,6 +353,16 @@ fn supports_memory_binary(operation: &Operation) -> bool {
     )
 }
 
+fn supports_memory_shift(operation: &Operation) -> bool {
+    matches!(
+        operation,
+        Operation::Shift {
+            destination: Location32::Memory(_),
+            ..
+        }
+    )
+}
+
 pub(super) fn supports(instruction: &DecodedInstruction, embedded: bool) -> bool {
     let operation = instruction.operation();
     (embedded
@@ -359,6 +370,7 @@ pub(super) fn supports(instruction: &DecodedInstruction, embedded: bool) -> bool
             || supports_memory_move_store(operation)
             || supports_memory_unary(operation)
             || supports_memory_binary(operation)
+            || supports_memory_shift(operation)
             || supports_stack(instruction)
             || supports_indirect_jump(operation)))
         || matches!(
