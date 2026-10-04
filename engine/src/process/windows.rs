@@ -122,3 +122,7 @@ impl EngineInstance {
 #[cfg(test)]
 #[path = "windows_tests.rs"]
 mod windows_tests;
+
+#[cfg(test)]
+#[path = "windows_allocation_tests.rs"]
+mod windows_allocation_tests;
