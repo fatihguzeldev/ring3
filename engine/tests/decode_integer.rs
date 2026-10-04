@@ -293,7 +293,7 @@ fn unary_forms_preserve_register_and_memory_destinations() {
 #[test]
 fn adjacent_unsupported_integer_instructions_remain_rejected() {
     let cases: [(&str, &[u8]); 14] = [
-        ("add byte", &[0x00, 0xd0]),
+        ("add byte memory", &[0x00, 0x10]),
         ("add word", &[0x66, 0x01, 0xd0]),
         ("adc byte", &[0x10, 0xd0]),
         ("sbb byte", &[0x18, 0xd0]),

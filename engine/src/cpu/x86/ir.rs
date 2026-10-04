@@ -48,6 +48,12 @@ pub enum ByteLogicalKind {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ByteArithmeticKind {
+    Add,
+    Sub,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SmallWidth {
     Byte,
     Word,
@@ -153,6 +159,11 @@ pub enum Operation {
     },
     LogicalByte {
         kind: ByteLogicalKind,
+        destination: ByteRegister,
+        source: ByteValue,
+    },
+    ArithmeticByte {
+        kind: ByteArithmeticKind,
         destination: ByteRegister,
         source: ByteValue,
     },

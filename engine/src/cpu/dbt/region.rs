@@ -391,6 +391,7 @@ pub(super) fn supports(instruction: &DecodedInstruction, embedded: bool) -> bool
                 | Operation::CompareByte { .. }
                 | Operation::TestByte { .. }
                 | Operation::LogicalByte { .. }
+                | Operation::ArithmeticByte { .. }
                 | Operation::SetByte { .. }
                 | Operation::Move {
                     destination: Location32::Register(_),

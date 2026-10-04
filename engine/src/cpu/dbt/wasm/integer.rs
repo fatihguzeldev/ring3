@@ -5,9 +5,9 @@ use crate::cpu::x86::{
     Register32,
     decode::DecodedInstruction,
     ir::{
-        BinaryKind, BranchTarget, ByteLogicalKind, ByteRegister, ByteValue, EffectiveAddress,
-        ExtensionKind, Location32, Operation, ShiftCount, ShiftKind, SmallSource, SmallWidth,
-        UnaryKind, Value32,
+        BinaryKind, BranchTarget, ByteArithmeticKind, ByteLogicalKind, ByteRegister, ByteValue,
+        EffectiveAddress, ExtensionKind, Location32, Operation, ShiftCount, ShiftKind, SmallSource,
+        SmallWidth, UnaryKind, Value32,
     },
 };
 
@@ -97,6 +97,30 @@ pub(super) fn instruction(
             }
             code.local_set(RESULT);
             logical_flags(code, 7);
+            code.local_get(RESULT);
+            insert_byte(code, destination);
+        }
+        Operation::ArithmeticByte {
+            kind,
+            destination,
+            source,
+        } => {
+            byte_value(code, ByteValue::Register(destination));
+            code.local_set(LHS);
+            byte_value(code, source);
+            code.local_set(RHS).local_get(LHS).local_get(RHS);
+            let binary = match kind {
+                ByteArithmeticKind::Add => {
+                    code.i32_add();
+                    BinaryKind::Add
+                }
+                ByteArithmeticKind::Sub => {
+                    code.i32_sub();
+                    BinaryKind::Sub
+                }
+            };
+            code.i32_const(0xff).i32_and().local_set(RESULT);
+            arithmetic_flags(code, binary, CarryFlag::Calculate, 7);
             code.local_get(RESULT);
             insert_byte(code, destination);
         }
