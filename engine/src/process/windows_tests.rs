@@ -453,3 +453,342 @@ fn public_terminal_codec_cannot_set_private_exit_and_pure_outcome_preserves_thre
     assert_eq!(f.engine.exit_code, None);
     assert_eq!(&f.engine.arena()[56..96], &terminal);
 }
+
+const MODULE_HANDLE: u32 = 0x0001_0004;
+
+fn module_fixture() -> Fixture {
+    // private publication and saved-stop model; no executed call is claimed here.
+    let mut engine = EngineInstance::new(5, KEY).unwrap();
+    engine.map(BASE, 1, 1).unwrap();
+    engine.map(ENTRY, 1, 7).unwrap();
+    engine.map(STALE, 1, 7).unwrap();
+    engine.map(RAM, 1, 3).unwrap();
+    write(&mut engine, ENTRY, &[0x0f, 0x0b]);
+    write(&mut engine, STALE, &[0x90]);
+    write(&mut engine, RAM, &ENTRY.to_le_bytes());
+    write(&mut engine, RAM + 4, &LAST_ERROR.to_le_bytes());
+    let (_, thread) = engine
+        .windows_thread
+        .prepare(
+            WindowsApi32::SetLastError,
+            &thread_frame(&engine, 1),
+            crate::windows::ProcessContext32::default(),
+        )
+        .unwrap();
+    engine.windows_thread = thread;
+    engine.image = Some(ImageMetadata32 {
+        image_base: BASE,
+        image_size: 0x4000,
+        entry_point: ENTRY,
+        mapped_pages: 2,
+    });
+    for (index, word) in [ENTRY, 2, ENTRY, MODULE_HANDLE].into_iter().enumerate() {
+        let at = TRANSFER_OFFSET + index * 4;
+        engine.arena_mut().unwrap()[at..at + 4].copy_from_slice(&word.to_le_bytes());
+    }
+    engine.compile_with_gates(1, 1).unwrap();
+    let current = engine.compile_resident_with_gates(1, 1).unwrap();
+    engine
+        .acknowledge_resident_installation(KEY, current.get(), 0)
+        .unwrap();
+    descriptors(&mut engine, STALE, false);
+    let stale = engine.compile_resident(1).unwrap();
+    engine
+        .acknowledge_resident_installation(KEY, stale.get(), 1)
+        .unwrap();
+    write(&mut engine, STALE, &[0x90]);
+    engine.start_loaded_image(STACK, 1).unwrap();
+    Fixture {
+        engine,
+        current,
+        stale,
+    }
+}
+
+fn capture_module(f: &mut Fixture, resident: bool, argument: u32) -> u32 {
+    write(&mut f.engine, ESP, &(ENTRY + 15).to_le_bytes());
+    write(&mut f.engine, ESP + 4, &argument.to_le_bytes());
+    let state = State32 {
+        registers: [
+            0x1357_9bdf,
+            0x2468_ace0,
+            0x3456_789a,
+            0x4567_89ab,
+            ESP,
+            0x5678_9abc,
+            0x6789_abcd,
+            0x789a_bcde,
+        ],
+        eip: ENTRY,
+        eflags: 0xcd7,
+    };
+    let arena = f.engine.arena_mut().unwrap();
+    encode_state(&state, &mut arena[..56]).unwrap();
+    encode_exit_v3(
+        &ExecutionExit {
+            retired: 7,
+            reason: ExitReason::Gate { id: MODULE_HANDLE },
+        },
+        &mut arena[56..96],
+    )
+    .unwrap();
+    if resident {
+        f.engine
+            .capture_resident_call(KEY, f.current.get(), CallingConvention32::Stdcall, 1)
+    } else {
+        f.engine
+            .capture_call(KEY, f.engine.generation, CallingConvention32::Stdcall, 1)
+    }
+    .unwrap()
+    .token
+}
+
+fn module_context(base: Option<u32>) -> crate::windows::ProcessContext32 {
+    crate::windows::ProcessContext32 {
+        main_image_base: base.map(GuestAddress),
+    }
+}
+
+#[test]
+fn module_handle_typed_context_is_ephemeral_and_old_outcomes_do_not_require_an_image() {
+    let mut f = module_fixture();
+    write(&mut f.engine, RAM + 4, &0_u32.to_le_bytes());
+    let frame = thread_frame(&f.engine, 1);
+    for base in [BASE, 0x0050_0000, 0xffff_f000] {
+        let (outcome, thread) = f
+            .engine
+            .windows_thread
+            .prepare(
+                WindowsApi32::GetModuleHandleA,
+                &frame,
+                module_context(Some(base)),
+            )
+            .unwrap();
+        assert_eq!(outcome, WindowsOutcome32::Return(base));
+        assert_eq!(
+            thread
+                .prepare(
+                    WindowsApi32::GetLastError,
+                    &thread_frame(&f.engine, 0),
+                    module_context(None)
+                )
+                .unwrap()
+                .0,
+            WindowsOutcome32::Return(LAST_ERROR)
+        );
+    }
+    assert_eq!(
+        f.engine
+            .windows_thread
+            .prepare(WindowsApi32::GetModuleHandleA, &frame, module_context(None))
+            .err(),
+        Some(crate::windows::FrameError::InvalidRequest)
+    );
+    for argument in [1, u32::MAX, BASE] {
+        write(&mut f.engine, RAM + 4, &argument.to_le_bytes());
+        let frame = thread_frame(&f.engine, 1);
+        assert_eq!(
+            f.engine
+                .windows_thread
+                .prepare(
+                    WindowsApi32::GetModuleHandleA,
+                    &frame,
+                    module_context(Some(BASE))
+                )
+                .err(),
+            Some(crate::windows::FrameError::InvalidRequest)
+        );
+        assert_eq!(last_error(&f.engine), LAST_ERROR);
+    }
+    write(&mut f.engine, RAM + 4, &LAST_ERROR.to_le_bytes());
+    let frame = thread_frame(&f.engine, 1);
+    let (set, thread) = f
+        .engine
+        .windows_thread
+        .prepare(WindowsApi32::SetLastError, &frame, module_context(None))
+        .unwrap();
+    assert_eq!(set, WindowsOutcome32::Return(0x1357_9bdf));
+    assert_eq!(
+        thread
+            .prepare(WindowsApi32::ExitProcess, &frame, module_context(None))
+            .unwrap()
+            .0,
+        WindowsOutcome32::ExitProcess(LAST_ERROR)
+    );
+    assert_eq!(last_error(&f.engine), LAST_ERROR);
+}
+
+#[test]
+fn module_completion_preserves_private_versions_latches_owners_and_exhausted_memory() {
+    for resident in [false, true] {
+        let mut f = module_fixture();
+        let token = capture_module(&mut f, resident, 0);
+        let current = f
+            .engine
+            .memory
+            .as_ref()
+            .unwrap()
+            .snapshot_code(GuestAddress(ENTRY), 2)
+            .unwrap();
+        let stale = f
+            .engine
+            .memory
+            .as_ref()
+            .unwrap()
+            .snapshot_code(GuestAddress(STALE), 1)
+            .unwrap();
+        write(&mut f.engine, STALE, &[0x90]);
+        f.engine
+            .memory
+            .as_mut()
+            .unwrap()
+            .exhaust_versions_for_test();
+        let before = owners(&f);
+        assert!(before.image_started);
+        assert_eq!(before.usage.units, 2);
+        assert_eq!(
+            before.stale,
+            Err(crate::cpu::dbt::RegistryError::CodeInvalidated)
+        );
+        let pending = f.engine.pending_call.as_ref().unwrap();
+        assert_eq!(
+            pending.owner,
+            if resident {
+                PendingOwner::Resident(f.current.get())
+            } else {
+                PendingOwner::Replacement(f.engine.generation)
+            }
+        );
+        let mut expected = f.engine.arena().to_vec();
+        let mut returned = *pending.frame.state();
+        returned.registers[0] = BASE;
+        returned.registers[4] = ESP.wrapping_add(8);
+        returned.eip = ENTRY + 15;
+        encode_state(&returned, &mut expected[..56]).unwrap();
+        encode_exit_v3(
+            &ExecutionExit {
+                retired: 0,
+                reason: ExitReason::NeedCode,
+            },
+            &mut expected[56..96],
+        )
+        .unwrap();
+        assert_eq!(complete(&mut f, resident, token), Ok(()));
+        assert_eq!(f.engine.arena(), expected);
+        assert_eq!(owners(&f), before);
+        assert!(f.engine.pending_call.is_none());
+        assert!(f.engine.callback.is_none());
+        assert_eq!(f.engine.exit_code, None);
+        assert!(f.engine.memory.as_ref().unwrap().is_code_current(&current));
+        assert!(!f.engine.memory.as_ref().unwrap().is_code_current(&stale));
+        assert_eq!(
+            f.engine
+                .memory
+                .as_mut()
+                .unwrap()
+                .write(GuestAddress(RAM), &0_u32.to_le_bytes()),
+            Err(crate::memory::MemoryError::VersionExhausted)
+        );
+        assert_eq!(owners(&f), before);
+    }
+}
+
+#[test]
+fn module_callback_busy_cancel_state_and_terminal_priority_preserve_saved_authority() {
+    use crate::process::{
+        call::PendingCall,
+        callback::{SuspendedCallback, SuspendedRecord},
+    };
+    for resident in [false, true] {
+        let mut f = module_fixture();
+        let token = capture_module(&mut f, resident, 0);
+        let pending = f.engine.pending_call.as_ref().unwrap();
+        let outer_token = token + 100;
+        let outer = PendingCall {
+            token: outer_token,
+            owner: pending.owner,
+            frame: pending.frame,
+            state: pending.state,
+            exit: pending.exit,
+        };
+        // typed suspended ownership control; no callback guest execution is claimed.
+        f.engine.callback = Some(SuspendedCallback {
+            outer,
+            record: SuspendedRecord::Replacement(crate::abi::callback::CallbackRecord32 {
+                token: token + 1,
+                outer_token,
+                phase: 1,
+                outcome: 0,
+                entry_pc: ENTRY,
+                entry_esp: ESP,
+                return_pc: ENTRY + 32,
+                return_id: 0x1357,
+                stack_words: 0,
+                result: 0,
+                generation: f.engine.generation,
+            }),
+        });
+        let before = owners(&f);
+        let arena = f.engine.arena().to_vec();
+        assert_eq!(
+            f.engine.load_pe32_linked_v3_input_at(0, 0),
+            Err(HostError::Call(CallError::Busy))
+        );
+        assert_eq!(
+            f.engine.load_pe32_linked_v3_at(b"bad", 0, 0),
+            Err(HostError::InvalidRequest)
+        );
+        assert_eq!(f.engine.arena(), arena);
+        assert_eq!(owners(&f), before);
+        for (state_changed, cancelled, expected) in [
+            (false, false, CallError::Busy),
+            (false, true, CallError::Cancelled),
+            (true, true, CallError::StateChanged),
+        ] {
+            if state_changed {
+                f.engine.arena_mut().unwrap()[16] ^= 1;
+            }
+            f.engine.arena_mut().unwrap()[CANCEL_OFFSET] = u8::from(cancelled);
+            let arena = f.engine.arena().to_vec();
+            assert_eq!(
+                complete(&mut f, resident, token),
+                Err(HostError::Call(expected))
+            );
+            assert_eq!(f.engine.arena(), arena);
+            assert_eq!(owners(&f), before);
+            assert_eq!(f.engine.pending_call.as_ref().unwrap().token, token);
+            assert_eq!(
+                f.engine.pending_call.as_ref().unwrap().frame.arguments(),
+                &[0]
+            );
+            assert_eq!(f.engine.callback.as_ref().unwrap().outer.token, outer_token);
+            assert_eq!(f.engine.exit_code, None);
+            if state_changed {
+                f.engine.arena_mut().unwrap()[16] ^= 1;
+            }
+        }
+        f.engine.exit_code = Some(0xf123_4567);
+        let arena = f.engine.arena().to_vec();
+        assert_eq!(
+            complete(&mut f, resident, token),
+            Err(HostError::ProcessExited)
+        );
+        assert_eq!(owners(&f), before);
+        assert_eq!(f.engine.arena(), arena);
+        assert_eq!(
+            f.engine.load_pe32_linked_v3_input_at(0, 0),
+            Err(HostError::ProcessExited)
+        );
+        f.engine.close();
+        assert_eq!(complete(&mut f, resident, token), Err(HostError::Closed));
+        assert_eq!(
+            f.engine.load_pe32_linked_v3_input_at(0, 0),
+            Err(HostError::Closed)
+        );
+        assert_eq!(f.engine.exit_code, Some(0xf123_4567));
+        assert_eq!(f.engine.arena(), arena);
+        assert!(f.engine.memory.is_none());
+        assert!(f.engine.image.is_some());
+        assert!(f.engine.image_started);
+    }
+}
