@@ -89,7 +89,7 @@ for(const file of ['program.o','program.disassembly.txt','program.x86','program.
   artifacts[file]=hash(readFileSync(join(outputDir,file)));
 assert.ok(WebAssembly.validate(engineBytes));
 const engineModule=new WebAssembly.Module(engineBytes);assert.deepEqual(WebAssembly.Module.imports(engineModule),[]);
-assert.equal(WebAssembly.Module.exports(engineModule).filter(entry=>entry.kind==='function').length,58);
+assert.equal(WebAssembly.Module.exports(engineModule).filter(entry=>entry.kind==='function').length,62);
 const names=['open','close','arena_ptr','map','protect','upload','generation','module_ptr','module_len',
   'compile_entries','compile_resident_entries','guard','guard_resident','find_resident'];
 let engine,ordinal=0,moduleOrdinal=0;

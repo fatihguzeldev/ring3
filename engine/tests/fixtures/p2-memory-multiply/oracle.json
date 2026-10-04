@@ -1,0 +1,2324 @@
+{
+  "schema": "ring3-memory-multiply/v1",
+  "contract_sha256": "e73ce4e5b7812e7169cdb9247bcb527005e13286671b655af90b6d772719ccb3",
+  "authority": {
+    "Intel": "https://cdrdv2-public.intel.com/812383/253666-sdm-vol-2a.pdf",
+    "pages_zero_based": [
+      610,
+      611,
+      612
+    ],
+    "order": "253666-082US December 2023",
+    "reference": "arbitrary-precision signed product and explicit executed instruction rows; independent LE wire encoder; no engine/decoder/emitter/runtime-output dependency"
+  },
+  "program": {
+    "text_hex": "bb00304000b8070000000faf0389430c6b4b04807105b8efbeadde89df697f08000001007005b80df0adba01c831f889431050ff1550404000c74314efbeaddeeb000f0bcccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc8d52010faf4448feeb000f0bcccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc8d52016b4c8bfe80eb000f0bcccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc8d52016964240800000000eb000f0bcccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc8d5201693f00000100eb000f0b",
+    "text_length": 461,
+    "text_sha256": "c39f43bded01e313a38686c2d756705be56632f9534dcdf7561f436abd365da1",
+    "symbols": {
+      "memory_terminal_sequence": {
+        "offset": 0,
+        "size": 68,
+        "hex": "bb00304000b8070000000faf0389430c6b4b04807105b8efbeadde89df697f08000001007005b80df0adba01c831f889431050ff1550404000c74314efbeaddeeb000f0b"
+      },
+      "memory_after_jno": {
+        "offset": 27,
+        "size": 16,
+        "hex": "89df697f08000001007005b80df0adba"
+      },
+      "memory_after_jo": {
+        "offset": 43,
+        "size": 14,
+        "hex": "01c831f889431050ff1550404000"
+      },
+      "memory_exit_canary": {
+        "offset": 57,
+        "size": 9,
+        "hex": "c74314efbeaddeeb00"
+      },
+      "micro_none_alias": {
+        "offset": 256,
+        "size": 12,
+        "hex": "8d52010faf4448feeb000f0b"
+      },
+      "micro_imm8_alias": {
+        "offset": 320,
+        "size": 12,
+        "hex": "8d52016b4c8bfe80eb000f0b"
+      },
+      "micro_zero_alias": {
+        "offset": 384,
+        "size": 15,
+        "hex": "8d52016964240800000000eb000f0b"
+      },
+      "micro_last_dword": {
+        "offset": 448,
+        "size": 13,
+        "hex": "8d5201693f00000100eb000f0b"
+      }
+    },
+    "labels": {
+      "memory_canary_done": 66,
+      "memory_terminal_sequence": 0,
+      "memory_after_jno": 27,
+      "memory_after_jo": 43,
+      "memory_exit_canary": 57,
+      "micro_none_alias": 256,
+      "micro_none_imul": 259,
+      "micro_none_done": 266,
+      "micro_imm8_alias": 320,
+      "micro_imm8_imul": 323,
+      "micro_imm8_done": 330,
+      "micro_zero_alias": 384,
+      "micro_zero_imul": 387,
+      "micro_zero_done": 397,
+      "micro_last_dword": 448,
+      "micro_last_imul": 451,
+      "micro_last_done": 459
+    },
+    "no_ELF_text_relocations": true,
+    "main_offsets": [
+      0,
+      27,
+      43,
+      57
+    ],
+    "branch_offsets": [
+      27,
+      43
+    ],
+    "canary_offset": 57,
+    "canary_done_offset": 66,
+    "main_imul_sites": [
+      [
+        10,
+        "0faf03"
+      ],
+      [
+        16,
+        "6b4b0480"
+      ],
+      [
+        29,
+        "697f0800000100"
+      ]
+    ]
+  },
+  "pe": {
+    "file_size": 12800,
+    "preferred_base": 4194304,
+    "selected_base": 5242880,
+    "image_size": 28672,
+    "entry_rva": 4604,
+    "header_size": 1024,
+    "coff_characteristics": 258,
+    "mapped_pages": 7,
+    "sections": [
+      {
+        "name": ".text",
+        "virtual_size": 1024,
+        "rva": 4096,
+        "raw_pointer": 3584,
+        "raw_size": 1024,
+        "flags": 1610612768
+      },
+      {
+        "name": ".data",
+        "virtual_size": 24,
+        "rva": 12288,
+        "raw_pointer": 4608,
+        "raw_size": 512,
+        "flags": 3221225536
+      },
+      {
+        "name": ".imports",
+        "virtual_size": 6656,
+        "rva": 16384,
+        "raw_pointer": 5120,
+        "raw_size": 6656,
+        "flags": 1073741888
+      },
+      {
+        "name": ".fixups",
+        "virtual_size": 1024,
+        "rva": 24576,
+        "raw_pointer": 11776,
+        "raw_size": 1024,
+        "flags": 1073741888
+      }
+    ],
+    "import_directory": [
+      19440,
+      40
+    ],
+    "descriptor": [
+      20032,
+      0,
+      0,
+      20064,
+      16464
+    ],
+    "iat_directory": [
+      16464,
+      8
+    ],
+    "original_thunks": [
+      20080,
+      0
+    ],
+    "module": "KeRnEl32.dLl",
+    "hint": 48879,
+    "symbol": "ExitProcess",
+    "relocation_directory": [
+      25084,
+      12
+    ],
+    "relocation_hex": "001000000c000000fd313132",
+    "target_rvas": [
+      4605,
+      4657
+    ],
+    "images": [
+      {
+        "name": "A",
+        "first": 4294967293,
+        "filename": "image-A-preproduct.exe",
+        "sha256": "0acfeeecd7b004e20fb9f8d35bc6e3032dfa1dad5311f0b8ac722824df1ee054",
+        "chunks": [
+          {
+            "offset": 0,
+            "length": 4096,
+            "sha256": "5ed4ba6056992d49fcae113f3166e67661c0a6f350ff6f9ddf9ba921166a5ae6"
+          },
+          {
+            "offset": 4096,
+            "length": 4096,
+            "sha256": "0614da7534f6bc275b0d1933cbd2bf2973dc75e02c66c8514ebd46daad7cc7e6"
+          },
+          {
+            "offset": 8192,
+            "length": 4096,
+            "sha256": "e82a21650e0ba9111b3c43fc3a4b6f648f09a6f77eb7b5988ee69c70669f280c"
+          },
+          {
+            "offset": 12288,
+            "length": 512,
+            "sha256": "d9549d83cedf9d4cc203b210b2a0f9f7359725498a50f55088087a9c4ee59503"
+          }
+        ],
+        "initial_data_hex": "fdffffff0000000101000100000000000000000000000000"
+      },
+      {
+        "name": "B",
+        "first": 4294967291,
+        "filename": "image-B-preproduct.exe",
+        "sha256": "63072704cc42943415c314e722cc464533e9283f785ece7249b563ba26767541",
+        "chunks": [
+          {
+            "offset": 0,
+            "length": 4096,
+            "sha256": "5ed4ba6056992d49fcae113f3166e67661c0a6f350ff6f9ddf9ba921166a5ae6"
+          },
+          {
+            "offset": 4096,
+            "length": 4096,
+            "sha256": "43b9108a219d49bf3a733db2a4c06b8802ececfefe1b3e9b6c6bdb508bf2770b"
+          },
+          {
+            "offset": 8192,
+            "length": 4096,
+            "sha256": "e82a21650e0ba9111b3c43fc3a4b6f648f09a6f77eb7b5988ee69c70669f280c"
+          },
+          {
+            "offset": 12288,
+            "length": 512,
+            "sha256": "d9549d83cedf9d4cc203b210b2a0f9f7359725498a50f55088087a9c4ee59503"
+          }
+        ],
+        "initial_data_hex": "fbffffff0000000101000100000000000000000000000000"
+      }
+    ]
+  },
+  "runtime": {
+    "pages": 8,
+    "stack_base": 32768,
+    "stack_pages": 1,
+    "stack_top": 36864,
+    "data_rva": 12288,
+    "data_bytes": 24,
+    "gate_base": 1610612736,
+    "gates": [
+      [
+        1610612768,
+        65539
+      ]
+    ],
+    "budget": 64,
+    "total_retired": 14,
+    "resident_segments": [
+      6,
+      3,
+      5
+    ],
+    "stack_addresses": [
+      36852,
+      36856,
+      36860
+    ],
+    "stack_initial": [
+      0,
+      0,
+      0
+    ],
+    "LastError": 0
+  },
+  "records": {
+    "initial_state_hex": "5233535401000100380000000000000000000000000000000000000000000000000000000000000000000000000000000000000002000000",
+    "initial_exit_hex": "52334558010001002800000000000000010000000000000000000000000000000000000000000000",
+    "startup_exit_hex": "52334558030001002800000000000000030000000000000000000000000000000000000000000000",
+    "entry_missing_exit_hex": "52334558030001002800000000000000030000000000000000000000000000000000000000000000",
+    "helper_zero_hex": "52334d48010001002800000000000000000000000000000000000000000000000000000000000000",
+    "restore_exit_hex": "52334558030001002800000000000000030000000000000000000000000000000000000000000000"
+  },
+  "transport": {
+    "arena_bytes": 4236,
+    "transfer_offset": 140,
+    "engine_function_exports": 62,
+    "engine_total_exports": 63,
+    "engine_imports": 0,
+    "main_replacement_imports": [
+      "guard",
+      "read32",
+      "store32"
+    ],
+    "resident_caller_imports": [
+      "guard_resident",
+      "read32",
+      "store_resident32"
+    ],
+    "resident_gate_imports": [
+      "guard_resident"
+    ],
+    "micro_replacement_imports": [
+      "guard",
+      "read32"
+    ],
+    "micro_resident_imports": [
+      "guard_resident",
+      "read32"
+    ],
+    "dispatcher_imports": [
+      "env.memory",
+      "env.table",
+      "ring3.guard_dispatch_entry",
+      "ring3.find_installed_resident"
+    ],
+    "resident_units": 5,
+    "Gate_slot": 0,
+    "canary_slot": 1,
+    "caller_slots": [
+      2,
+      3,
+      4
+    ],
+    "run_arity": 4,
+    "key_and_ids": "dynamic fullu64; independent wire arithmetic never chosen from metadata",
+    "host_rule": "no positive PE CPU/data/IAT/stack patch; direct finite controls seed State/Exit/helper once, repairs data only; postterminal canary State/Exit is explicit negative challenge"
+  },
+  "cases": [
+    {
+      "name": "data-A-replacement",
+      "data": "A",
+      "owner": "replacement",
+      "base": 5242880,
+      "entry": 5247484,
+      "image_sha256": "0acfeeecd7b004e20fb9f8d35bc6e3032dfa1dad5311f0b8ac722824df1ee054",
+      "receipt_hex": "52334c490200010048000000000000000000500000700000fc1150000700000000000060010000000000000000000000200000600300010000000000000000000000000000000000",
+      "startup_state_hex": "523353540100010038000000000000000000000000000000000000000000000000900000000000000000000000000000fc11500002000000",
+      "steps": [
+        {
+          "ordinal": 1,
+          "instruction": "mov-data",
+          "pc_before": 5247484,
+          "pc_after": 5247489,
+          "registers": [
+            0,
+            0,
+            0,
+            5255168,
+            36864,
+            0,
+            0,
+            0
+          ],
+          "flags": 2,
+          "state_hex": "5233535401000100380000000000000000000000000000000000000000305000009000000000000000000000000000000112500002000000"
+        },
+        {
+          "ordinal": 2,
+          "instruction": "mov-seven",
+          "pc_before": 5247489,
+          "pc_after": 5247494,
+          "registers": [
+            7,
+            0,
+            0,
+            5255168,
+            36864,
+            0,
+            0,
+            0
+          ],
+          "flags": 2,
+          "state_hex": "5233535401000100380000000000000007000000000000000000000000305000009000000000000000000000000000000612500002000000"
+        },
+        {
+          "ordinal": 3,
+          "instruction": "imul-none",
+          "pc_before": 5247494,
+          "pc_after": 5247497,
+          "registers": [
+            4294967275,
+            0,
+            0,
+            5255168,
+            36864,
+            0,
+            0,
+            0
+          ],
+          "flags": 2,
+          "state_hex": "52335354010001003800000000000000ebffffff000000000000000000305000009000000000000000000000000000000912500002000000"
+        },
+        {
+          "ordinal": 4,
+          "instruction": "save-product",
+          "pc_before": 5247497,
+          "pc_after": 5247500,
+          "registers": [
+            4294967275,
+            0,
+            0,
+            5255168,
+            36864,
+            0,
+            0,
+            0
+          ],
+          "flags": 2,
+          "state_hex": "52335354010001003800000000000000ebffffff000000000000000000305000009000000000000000000000000000000c12500002000000"
+        },
+        {
+          "ordinal": 5,
+          "instruction": "imul-imm8",
+          "pc_before": 5247500,
+          "pc_after": 5247504,
+          "registers": [
+            4294967275,
+            2147483648,
+            0,
+            5255168,
+            36864,
+            0,
+            0,
+            0
+          ],
+          "flags": 2,
+          "state_hex": "52335354010001003800000000000000ebffffff000000800000000000305000009000000000000000000000000000001012500002000000"
+        },
+        {
+          "ordinal": 6,
+          "instruction": "jno-taken",
+          "pc_before": 5247504,
+          "pc_after": 5247511,
+          "registers": [
+            4294967275,
+            2147483648,
+            0,
+            5255168,
+            36864,
+            0,
+            0,
+            0
+          ],
+          "flags": 2,
+          "state_hex": "52335354010001003800000000000000ebffffff000000800000000000305000009000000000000000000000000000001712500002000000"
+        },
+        {
+          "ordinal": 7,
+          "instruction": "mov-alias",
+          "pc_before": 5247511,
+          "pc_after": 5247513,
+          "registers": [
+            4294967275,
+            2147483648,
+            0,
+            5255168,
+            36864,
+            0,
+            0,
+            5255168
+          ],
+          "flags": 2,
+          "state_hex": "52335354010001003800000000000000ebffffff000000800000000000305000009000000000000000000000003050001912500002000000"
+        },
+        {
+          "ordinal": 8,
+          "instruction": "imul-imm32",
+          "pc_before": 5247513,
+          "pc_after": 5247520,
+          "registers": [
+            4294967275,
+            2147483648,
+            0,
+            5255168,
+            36864,
+            0,
+            0,
+            65536
+          ],
+          "flags": 2051,
+          "state_hex": "52335354010001003800000000000000ebffffff000000800000000000305000009000000000000000000000000001002012500003080000"
+        },
+        {
+          "ordinal": 9,
+          "instruction": "jo-taken",
+          "pc_before": 5247520,
+          "pc_after": 5247527,
+          "registers": [
+            4294967275,
+            2147483648,
+            0,
+            5255168,
+            36864,
+            0,
+            0,
+            65536
+          ],
+          "flags": 2051,
+          "state_hex": "52335354010001003800000000000000ebffffff000000800000000000305000009000000000000000000000000001002712500003080000"
+        },
+        {
+          "ordinal": 10,
+          "instruction": "add",
+          "pc_before": 5247527,
+          "pc_after": 5247529,
+          "registers": [
+            2147483627,
+            2147483648,
+            0,
+            5255168,
+            36864,
+            0,
+            0,
+            65536
+          ],
+          "flags": 2055,
+          "state_hex": "52335354010001003800000000000000ebffff7f000000800000000000305000009000000000000000000000000001002912500007080000"
+        },
+        {
+          "ordinal": 11,
+          "instruction": "xor",
+          "pc_before": 5247529,
+          "pc_after": 5247531,
+          "registers": [
+            2147418091,
+            2147483648,
+            0,
+            5255168,
+            36864,
+            0,
+            0,
+            65536
+          ],
+          "flags": 6,
+          "state_hex": "52335354010001003800000000000000ebfffe7f000000800000000000305000009000000000000000000000000001002b12500006000000"
+        },
+        {
+          "ordinal": 12,
+          "instruction": "save-checksum",
+          "pc_before": 5247531,
+          "pc_after": 5247534,
+          "registers": [
+            2147418091,
+            2147483648,
+            0,
+            5255168,
+            36864,
+            0,
+            0,
+            65536
+          ],
+          "flags": 6,
+          "state_hex": "52335354010001003800000000000000ebfffe7f000000800000000000305000009000000000000000000000000001002e12500006000000"
+        },
+        {
+          "ordinal": 13,
+          "instruction": "push-code",
+          "pc_before": 5247534,
+          "pc_after": 5247535,
+          "registers": [
+            2147418091,
+            2147483648,
+            0,
+            5255168,
+            36860,
+            0,
+            0,
+            65536
+          ],
+          "flags": 6,
+          "state_hex": "52335354010001003800000000000000ebfffe7f000000800000000000305000fc8f00000000000000000000000001002f12500006000000"
+        },
+        {
+          "ordinal": 14,
+          "instruction": "call-exit",
+          "pc_before": 5247535,
+          "pc_after": 1610612768,
+          "registers": [
+            2147418091,
+            2147483648,
+            0,
+            5255168,
+            36856,
+            0,
+            0,
+            65536
+          ],
+          "flags": 6,
+          "state_hex": "52335354010001003800000000000000ebfffe7f000000800000000000305000f88f00000000000000000000000001002000006006000000"
+        }
+      ],
+      "math": [
+        {
+          "left": 7,
+          "right": 4294967293,
+          "wide_decimal": -21,
+          "result": 4294967275,
+          "overflow": false,
+          "flags": 2
+        },
+        {
+          "left": 16777216,
+          "right": 4294967168,
+          "wide_decimal": -2147483648,
+          "result": 2147483648,
+          "overflow": false,
+          "flags": 2
+        },
+        {
+          "left": 65537,
+          "right": 65536,
+          "wide_decimal": 4295032832,
+          "result": 65536,
+          "overflow": true,
+          "flags": 2051
+        }
+      ],
+      "checksum": 2147418091,
+      "product": 4294967275,
+      "patched_words": [
+        5255168,
+        5259344
+      ],
+      "after_jno": {
+        "state_hex": "52335354010001003800000000000000ebffffff000000800000000000305000009000000000000000000000000000001712500002000000",
+        "exit_hex": "52334558030001002800000000000000030000000600000000000000000000000000000000000000",
+        "helper_hex": "52334d48010001002800000000000000000000000000000100000000000000000000000000000000",
+        "data_hex": "fdffffff0000000101000100ebffffff0000000000000000"
+      },
+      "after_jo": {
+        "state_hex": "52335354010001003800000000000000ebffffff000000800000000000305000009000000000000000000000000001002712500003080000",
+        "exit_hex": "52334558030001002800000000000000030000000300000000000000000000000000000000000000",
+        "helper_hex": "52334d48010001002800000000000000000000000100010000000000000000000000000000000000",
+        "data_hex": "fdffffff0000000101000100ebffffff0000000000000000"
+      },
+      "api": {
+        "state_hex": "52335354010001003800000000000000ebfffe7f000000800000000000305000f88f00000000000000000000000001002000006006000000",
+        "exit_hex": "52334558030001002800000000000000080000000e00000003000100000000000000000000000000",
+        "helper_hex": "52334d48010001002800000000000000000000000000000000000000000000000000000000000000",
+        "frame_hex": "523343460100010070000000000000000100000003000100020000000100000020000060f88f00003512500000000000ebfffe7f000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+        "stack": [
+          0,
+          5247541,
+          2147418091
+        ]
+      },
+      "terminal": {
+        "state_hex": "52335354010001003800000000000000ebfffe7f000000800000000000305000f88f00000000000000000000000001002000006006000000",
+        "exit_hex": "523345580400010028000000000000000900000000000000ebfffe7f000000000000000000000000",
+        "data_hex": "fdffffff0000000101000100ebffffffebfffe7f00000000"
+      },
+      "canary_restore_state_hex": "52335354010001003800000000000000ebfffe7f000000800000000000305000009000000000000000000000000001003512500006000000"
+    },
+    {
+      "name": "data-A-resident",
+      "data": "A",
+      "owner": "resident",
+      "base": 5242880,
+      "entry": 5247484,
+      "image_sha256": "0acfeeecd7b004e20fb9f8d35bc6e3032dfa1dad5311f0b8ac722824df1ee054",
+      "receipt_hex": "52334c490200010048000000000000000000500000700000fc1150000700000000000060010000000000000000000000200000600300010000000000000000000000000000000000",
+      "startup_state_hex": "523353540100010038000000000000000000000000000000000000000000000000900000000000000000000000000000fc11500002000000",
+      "steps": [
+        {
+          "ordinal": 1,
+          "instruction": "mov-data",
+          "pc_before": 5247484,
+          "pc_after": 5247489,
+          "registers": [
+            0,
+            0,
+            0,
+            5255168,
+            36864,
+            0,
+            0,
+            0
+          ],
+          "flags": 2,
+          "state_hex": "5233535401000100380000000000000000000000000000000000000000305000009000000000000000000000000000000112500002000000"
+        },
+        {
+          "ordinal": 2,
+          "instruction": "mov-seven",
+          "pc_before": 5247489,
+          "pc_after": 5247494,
+          "registers": [
+            7,
+            0,
+            0,
+            5255168,
+            36864,
+            0,
+            0,
+            0
+          ],
+          "flags": 2,
+          "state_hex": "5233535401000100380000000000000007000000000000000000000000305000009000000000000000000000000000000612500002000000"
+        },
+        {
+          "ordinal": 3,
+          "instruction": "imul-none",
+          "pc_before": 5247494,
+          "pc_after": 5247497,
+          "registers": [
+            4294967275,
+            0,
+            0,
+            5255168,
+            36864,
+            0,
+            0,
+            0
+          ],
+          "flags": 2,
+          "state_hex": "52335354010001003800000000000000ebffffff000000000000000000305000009000000000000000000000000000000912500002000000"
+        },
+        {
+          "ordinal": 4,
+          "instruction": "save-product",
+          "pc_before": 5247497,
+          "pc_after": 5247500,
+          "registers": [
+            4294967275,
+            0,
+            0,
+            5255168,
+            36864,
+            0,
+            0,
+            0
+          ],
+          "flags": 2,
+          "state_hex": "52335354010001003800000000000000ebffffff000000000000000000305000009000000000000000000000000000000c12500002000000"
+        },
+        {
+          "ordinal": 5,
+          "instruction": "imul-imm8",
+          "pc_before": 5247500,
+          "pc_after": 5247504,
+          "registers": [
+            4294967275,
+            2147483648,
+            0,
+            5255168,
+            36864,
+            0,
+            0,
+            0
+          ],
+          "flags": 2,
+          "state_hex": "52335354010001003800000000000000ebffffff000000800000000000305000009000000000000000000000000000001012500002000000"
+        },
+        {
+          "ordinal": 6,
+          "instruction": "jno-taken",
+          "pc_before": 5247504,
+          "pc_after": 5247511,
+          "registers": [
+            4294967275,
+            2147483648,
+            0,
+            5255168,
+            36864,
+            0,
+            0,
+            0
+          ],
+          "flags": 2,
+          "state_hex": "52335354010001003800000000000000ebffffff000000800000000000305000009000000000000000000000000000001712500002000000"
+        },
+        {
+          "ordinal": 7,
+          "instruction": "mov-alias",
+          "pc_before": 5247511,
+          "pc_after": 5247513,
+          "registers": [
+            4294967275,
+            2147483648,
+            0,
+            5255168,
+            36864,
+            0,
+            0,
+            5255168
+          ],
+          "flags": 2,
+          "state_hex": "52335354010001003800000000000000ebffffff000000800000000000305000009000000000000000000000003050001912500002000000"
+        },
+        {
+          "ordinal": 8,
+          "instruction": "imul-imm32",
+          "pc_before": 5247513,
+          "pc_after": 5247520,
+          "registers": [
+            4294967275,
+            2147483648,
+            0,
+            5255168,
+            36864,
+            0,
+            0,
+            65536
+          ],
+          "flags": 2051,
+          "state_hex": "52335354010001003800000000000000ebffffff000000800000000000305000009000000000000000000000000001002012500003080000"
+        },
+        {
+          "ordinal": 9,
+          "instruction": "jo-taken",
+          "pc_before": 5247520,
+          "pc_after": 5247527,
+          "registers": [
+            4294967275,
+            2147483648,
+            0,
+            5255168,
+            36864,
+            0,
+            0,
+            65536
+          ],
+          "flags": 2051,
+          "state_hex": "52335354010001003800000000000000ebffffff000000800000000000305000009000000000000000000000000001002712500003080000"
+        },
+        {
+          "ordinal": 10,
+          "instruction": "add",
+          "pc_before": 5247527,
+          "pc_after": 5247529,
+          "registers": [
+            2147483627,
+            2147483648,
+            0,
+            5255168,
+            36864,
+            0,
+            0,
+            65536
+          ],
+          "flags": 2055,
+          "state_hex": "52335354010001003800000000000000ebffff7f000000800000000000305000009000000000000000000000000001002912500007080000"
+        },
+        {
+          "ordinal": 11,
+          "instruction": "xor",
+          "pc_before": 5247529,
+          "pc_after": 5247531,
+          "registers": [
+            2147418091,
+            2147483648,
+            0,
+            5255168,
+            36864,
+            0,
+            0,
+            65536
+          ],
+          "flags": 6,
+          "state_hex": "52335354010001003800000000000000ebfffe7f000000800000000000305000009000000000000000000000000001002b12500006000000"
+        },
+        {
+          "ordinal": 12,
+          "instruction": "save-checksum",
+          "pc_before": 5247531,
+          "pc_after": 5247534,
+          "registers": [
+            2147418091,
+            2147483648,
+            0,
+            5255168,
+            36864,
+            0,
+            0,
+            65536
+          ],
+          "flags": 6,
+          "state_hex": "52335354010001003800000000000000ebfffe7f000000800000000000305000009000000000000000000000000001002e12500006000000"
+        },
+        {
+          "ordinal": 13,
+          "instruction": "push-code",
+          "pc_before": 5247534,
+          "pc_after": 5247535,
+          "registers": [
+            2147418091,
+            2147483648,
+            0,
+            5255168,
+            36860,
+            0,
+            0,
+            65536
+          ],
+          "flags": 6,
+          "state_hex": "52335354010001003800000000000000ebfffe7f000000800000000000305000fc8f00000000000000000000000001002f12500006000000"
+        },
+        {
+          "ordinal": 14,
+          "instruction": "call-exit",
+          "pc_before": 5247535,
+          "pc_after": 1610612768,
+          "registers": [
+            2147418091,
+            2147483648,
+            0,
+            5255168,
+            36856,
+            0,
+            0,
+            65536
+          ],
+          "flags": 6,
+          "state_hex": "52335354010001003800000000000000ebfffe7f000000800000000000305000f88f00000000000000000000000001002000006006000000"
+        }
+      ],
+      "math": [
+        {
+          "left": 7,
+          "right": 4294967293,
+          "wide_decimal": -21,
+          "result": 4294967275,
+          "overflow": false,
+          "flags": 2
+        },
+        {
+          "left": 16777216,
+          "right": 4294967168,
+          "wide_decimal": -2147483648,
+          "result": 2147483648,
+          "overflow": false,
+          "flags": 2
+        },
+        {
+          "left": 65537,
+          "right": 65536,
+          "wide_decimal": 4295032832,
+          "result": 65536,
+          "overflow": true,
+          "flags": 2051
+        }
+      ],
+      "checksum": 2147418091,
+      "product": 4294967275,
+      "patched_words": [
+        5255168,
+        5259344
+      ],
+      "after_jno": {
+        "state_hex": "52335354010001003800000000000000ebffffff000000800000000000305000009000000000000000000000000000001712500002000000",
+        "exit_hex": "52334558030001002800000000000000030000000600000000000000000000000000000000000000",
+        "helper_hex": "52334d48010001002800000000000000000000000000000100000000000000000000000000000000",
+        "data_hex": "fdffffff0000000101000100ebffffff0000000000000000"
+      },
+      "after_jo": {
+        "state_hex": "52335354010001003800000000000000ebffffff000000800000000000305000009000000000000000000000000001002712500003080000",
+        "exit_hex": "52334558030001002800000000000000030000000300000000000000000000000000000000000000",
+        "helper_hex": "52334d48010001002800000000000000000000000100010000000000000000000000000000000000",
+        "data_hex": "fdffffff0000000101000100ebffffff0000000000000000"
+      },
+      "api": {
+        "state_hex": "52335354010001003800000000000000ebfffe7f000000800000000000305000f88f00000000000000000000000001002000006006000000",
+        "exit_hex": "52334558030001002800000000000000080000000500000003000100000000000000000000000000",
+        "helper_hex": "52334d48010001002800000000000000000000000000000000000000000000000000000000000000",
+        "frame_hex": "523343460100010070000000000000000100000003000100020000000100000020000060f88f00003512500000000000ebfffe7f000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+        "stack": [
+          0,
+          5247541,
+          2147418091
+        ]
+      },
+      "terminal": {
+        "state_hex": "52335354010001003800000000000000ebfffe7f000000800000000000305000f88f00000000000000000000000001002000006006000000",
+        "exit_hex": "523345580400010028000000000000000900000000000000ebfffe7f000000000000000000000000",
+        "data_hex": "fdffffff0000000101000100ebffffffebfffe7f00000000"
+      },
+      "canary_restore_state_hex": "52335354010001003800000000000000ebfffe7f000000800000000000305000009000000000000000000000000001003512500006000000"
+    },
+    {
+      "name": "data-B-replacement",
+      "data": "B",
+      "owner": "replacement",
+      "base": 5242880,
+      "entry": 5247484,
+      "image_sha256": "63072704cc42943415c314e722cc464533e9283f785ece7249b563ba26767541",
+      "receipt_hex": "52334c490200010048000000000000000000500000700000fc1150000700000000000060010000000000000000000000200000600300010000000000000000000000000000000000",
+      "startup_state_hex": "523353540100010038000000000000000000000000000000000000000000000000900000000000000000000000000000fc11500002000000",
+      "steps": [
+        {
+          "ordinal": 1,
+          "instruction": "mov-data",
+          "pc_before": 5247484,
+          "pc_after": 5247489,
+          "registers": [
+            0,
+            0,
+            0,
+            5255168,
+            36864,
+            0,
+            0,
+            0
+          ],
+          "flags": 2,
+          "state_hex": "5233535401000100380000000000000000000000000000000000000000305000009000000000000000000000000000000112500002000000"
+        },
+        {
+          "ordinal": 2,
+          "instruction": "mov-seven",
+          "pc_before": 5247489,
+          "pc_after": 5247494,
+          "registers": [
+            7,
+            0,
+            0,
+            5255168,
+            36864,
+            0,
+            0,
+            0
+          ],
+          "flags": 2,
+          "state_hex": "5233535401000100380000000000000007000000000000000000000000305000009000000000000000000000000000000612500002000000"
+        },
+        {
+          "ordinal": 3,
+          "instruction": "imul-none",
+          "pc_before": 5247494,
+          "pc_after": 5247497,
+          "registers": [
+            4294967261,
+            0,
+            0,
+            5255168,
+            36864,
+            0,
+            0,
+            0
+          ],
+          "flags": 2,
+          "state_hex": "52335354010001003800000000000000ddffffff000000000000000000305000009000000000000000000000000000000912500002000000"
+        },
+        {
+          "ordinal": 4,
+          "instruction": "save-product",
+          "pc_before": 5247497,
+          "pc_after": 5247500,
+          "registers": [
+            4294967261,
+            0,
+            0,
+            5255168,
+            36864,
+            0,
+            0,
+            0
+          ],
+          "flags": 2,
+          "state_hex": "52335354010001003800000000000000ddffffff000000000000000000305000009000000000000000000000000000000c12500002000000"
+        },
+        {
+          "ordinal": 5,
+          "instruction": "imul-imm8",
+          "pc_before": 5247500,
+          "pc_after": 5247504,
+          "registers": [
+            4294967261,
+            2147483648,
+            0,
+            5255168,
+            36864,
+            0,
+            0,
+            0
+          ],
+          "flags": 2,
+          "state_hex": "52335354010001003800000000000000ddffffff000000800000000000305000009000000000000000000000000000001012500002000000"
+        },
+        {
+          "ordinal": 6,
+          "instruction": "jno-taken",
+          "pc_before": 5247504,
+          "pc_after": 5247511,
+          "registers": [
+            4294967261,
+            2147483648,
+            0,
+            5255168,
+            36864,
+            0,
+            0,
+            0
+          ],
+          "flags": 2,
+          "state_hex": "52335354010001003800000000000000ddffffff000000800000000000305000009000000000000000000000000000001712500002000000"
+        },
+        {
+          "ordinal": 7,
+          "instruction": "mov-alias",
+          "pc_before": 5247511,
+          "pc_after": 5247513,
+          "registers": [
+            4294967261,
+            2147483648,
+            0,
+            5255168,
+            36864,
+            0,
+            0,
+            5255168
+          ],
+          "flags": 2,
+          "state_hex": "52335354010001003800000000000000ddffffff000000800000000000305000009000000000000000000000003050001912500002000000"
+        },
+        {
+          "ordinal": 8,
+          "instruction": "imul-imm32",
+          "pc_before": 5247513,
+          "pc_after": 5247520,
+          "registers": [
+            4294967261,
+            2147483648,
+            0,
+            5255168,
+            36864,
+            0,
+            0,
+            65536
+          ],
+          "flags": 2051,
+          "state_hex": "52335354010001003800000000000000ddffffff000000800000000000305000009000000000000000000000000001002012500003080000"
+        },
+        {
+          "ordinal": 9,
+          "instruction": "jo-taken",
+          "pc_before": 5247520,
+          "pc_after": 5247527,
+          "registers": [
+            4294967261,
+            2147483648,
+            0,
+            5255168,
+            36864,
+            0,
+            0,
+            65536
+          ],
+          "flags": 2051,
+          "state_hex": "52335354010001003800000000000000ddffffff000000800000000000305000009000000000000000000000000001002712500003080000"
+        },
+        {
+          "ordinal": 10,
+          "instruction": "add",
+          "pc_before": 5247527,
+          "pc_after": 5247529,
+          "registers": [
+            2147483613,
+            2147483648,
+            0,
+            5255168,
+            36864,
+            0,
+            0,
+            65536
+          ],
+          "flags": 2055,
+          "state_hex": "52335354010001003800000000000000ddffff7f000000800000000000305000009000000000000000000000000001002912500007080000"
+        },
+        {
+          "ordinal": 11,
+          "instruction": "xor",
+          "pc_before": 5247529,
+          "pc_after": 5247531,
+          "registers": [
+            2147418077,
+            2147483648,
+            0,
+            5255168,
+            36864,
+            0,
+            0,
+            65536
+          ],
+          "flags": 6,
+          "state_hex": "52335354010001003800000000000000ddfffe7f000000800000000000305000009000000000000000000000000001002b12500006000000"
+        },
+        {
+          "ordinal": 12,
+          "instruction": "save-checksum",
+          "pc_before": 5247531,
+          "pc_after": 5247534,
+          "registers": [
+            2147418077,
+            2147483648,
+            0,
+            5255168,
+            36864,
+            0,
+            0,
+            65536
+          ],
+          "flags": 6,
+          "state_hex": "52335354010001003800000000000000ddfffe7f000000800000000000305000009000000000000000000000000001002e12500006000000"
+        },
+        {
+          "ordinal": 13,
+          "instruction": "push-code",
+          "pc_before": 5247534,
+          "pc_after": 5247535,
+          "registers": [
+            2147418077,
+            2147483648,
+            0,
+            5255168,
+            36860,
+            0,
+            0,
+            65536
+          ],
+          "flags": 6,
+          "state_hex": "52335354010001003800000000000000ddfffe7f000000800000000000305000fc8f00000000000000000000000001002f12500006000000"
+        },
+        {
+          "ordinal": 14,
+          "instruction": "call-exit",
+          "pc_before": 5247535,
+          "pc_after": 1610612768,
+          "registers": [
+            2147418077,
+            2147483648,
+            0,
+            5255168,
+            36856,
+            0,
+            0,
+            65536
+          ],
+          "flags": 6,
+          "state_hex": "52335354010001003800000000000000ddfffe7f000000800000000000305000f88f00000000000000000000000001002000006006000000"
+        }
+      ],
+      "math": [
+        {
+          "left": 7,
+          "right": 4294967291,
+          "wide_decimal": -35,
+          "result": 4294967261,
+          "overflow": false,
+          "flags": 2
+        },
+        {
+          "left": 16777216,
+          "right": 4294967168,
+          "wide_decimal": -2147483648,
+          "result": 2147483648,
+          "overflow": false,
+          "flags": 2
+        },
+        {
+          "left": 65537,
+          "right": 65536,
+          "wide_decimal": 4295032832,
+          "result": 65536,
+          "overflow": true,
+          "flags": 2051
+        }
+      ],
+      "checksum": 2147418077,
+      "product": 4294967261,
+      "patched_words": [
+        5255168,
+        5259344
+      ],
+      "after_jno": {
+        "state_hex": "52335354010001003800000000000000ddffffff000000800000000000305000009000000000000000000000000000001712500002000000",
+        "exit_hex": "52334558030001002800000000000000030000000600000000000000000000000000000000000000",
+        "helper_hex": "52334d48010001002800000000000000000000000000000100000000000000000000000000000000",
+        "data_hex": "fbffffff0000000101000100ddffffff0000000000000000"
+      },
+      "after_jo": {
+        "state_hex": "52335354010001003800000000000000ddffffff000000800000000000305000009000000000000000000000000001002712500003080000",
+        "exit_hex": "52334558030001002800000000000000030000000300000000000000000000000000000000000000",
+        "helper_hex": "52334d48010001002800000000000000000000000100010000000000000000000000000000000000",
+        "data_hex": "fbffffff0000000101000100ddffffff0000000000000000"
+      },
+      "api": {
+        "state_hex": "52335354010001003800000000000000ddfffe7f000000800000000000305000f88f00000000000000000000000001002000006006000000",
+        "exit_hex": "52334558030001002800000000000000080000000e00000003000100000000000000000000000000",
+        "helper_hex": "52334d48010001002800000000000000000000000000000000000000000000000000000000000000",
+        "frame_hex": "523343460100010070000000000000000100000003000100020000000100000020000060f88f00003512500000000000ddfffe7f000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+        "stack": [
+          0,
+          5247541,
+          2147418077
+        ]
+      },
+      "terminal": {
+        "state_hex": "52335354010001003800000000000000ddfffe7f000000800000000000305000f88f00000000000000000000000001002000006006000000",
+        "exit_hex": "523345580400010028000000000000000900000000000000ddfffe7f000000000000000000000000",
+        "data_hex": "fbffffff0000000101000100ddffffffddfffe7f00000000"
+      },
+      "canary_restore_state_hex": "52335354010001003800000000000000ddfffe7f000000800000000000305000009000000000000000000000000001003512500006000000"
+    },
+    {
+      "name": "data-B-resident",
+      "data": "B",
+      "owner": "resident",
+      "base": 5242880,
+      "entry": 5247484,
+      "image_sha256": "63072704cc42943415c314e722cc464533e9283f785ece7249b563ba26767541",
+      "receipt_hex": "52334c490200010048000000000000000000500000700000fc1150000700000000000060010000000000000000000000200000600300010000000000000000000000000000000000",
+      "startup_state_hex": "523353540100010038000000000000000000000000000000000000000000000000900000000000000000000000000000fc11500002000000",
+      "steps": [
+        {
+          "ordinal": 1,
+          "instruction": "mov-data",
+          "pc_before": 5247484,
+          "pc_after": 5247489,
+          "registers": [
+            0,
+            0,
+            0,
+            5255168,
+            36864,
+            0,
+            0,
+            0
+          ],
+          "flags": 2,
+          "state_hex": "5233535401000100380000000000000000000000000000000000000000305000009000000000000000000000000000000112500002000000"
+        },
+        {
+          "ordinal": 2,
+          "instruction": "mov-seven",
+          "pc_before": 5247489,
+          "pc_after": 5247494,
+          "registers": [
+            7,
+            0,
+            0,
+            5255168,
+            36864,
+            0,
+            0,
+            0
+          ],
+          "flags": 2,
+          "state_hex": "5233535401000100380000000000000007000000000000000000000000305000009000000000000000000000000000000612500002000000"
+        },
+        {
+          "ordinal": 3,
+          "instruction": "imul-none",
+          "pc_before": 5247494,
+          "pc_after": 5247497,
+          "registers": [
+            4294967261,
+            0,
+            0,
+            5255168,
+            36864,
+            0,
+            0,
+            0
+          ],
+          "flags": 2,
+          "state_hex": "52335354010001003800000000000000ddffffff000000000000000000305000009000000000000000000000000000000912500002000000"
+        },
+        {
+          "ordinal": 4,
+          "instruction": "save-product",
+          "pc_before": 5247497,
+          "pc_after": 5247500,
+          "registers": [
+            4294967261,
+            0,
+            0,
+            5255168,
+            36864,
+            0,
+            0,
+            0
+          ],
+          "flags": 2,
+          "state_hex": "52335354010001003800000000000000ddffffff000000000000000000305000009000000000000000000000000000000c12500002000000"
+        },
+        {
+          "ordinal": 5,
+          "instruction": "imul-imm8",
+          "pc_before": 5247500,
+          "pc_after": 5247504,
+          "registers": [
+            4294967261,
+            2147483648,
+            0,
+            5255168,
+            36864,
+            0,
+            0,
+            0
+          ],
+          "flags": 2,
+          "state_hex": "52335354010001003800000000000000ddffffff000000800000000000305000009000000000000000000000000000001012500002000000"
+        },
+        {
+          "ordinal": 6,
+          "instruction": "jno-taken",
+          "pc_before": 5247504,
+          "pc_after": 5247511,
+          "registers": [
+            4294967261,
+            2147483648,
+            0,
+            5255168,
+            36864,
+            0,
+            0,
+            0
+          ],
+          "flags": 2,
+          "state_hex": "52335354010001003800000000000000ddffffff000000800000000000305000009000000000000000000000000000001712500002000000"
+        },
+        {
+          "ordinal": 7,
+          "instruction": "mov-alias",
+          "pc_before": 5247511,
+          "pc_after": 5247513,
+          "registers": [
+            4294967261,
+            2147483648,
+            0,
+            5255168,
+            36864,
+            0,
+            0,
+            5255168
+          ],
+          "flags": 2,
+          "state_hex": "52335354010001003800000000000000ddffffff000000800000000000305000009000000000000000000000003050001912500002000000"
+        },
+        {
+          "ordinal": 8,
+          "instruction": "imul-imm32",
+          "pc_before": 5247513,
+          "pc_after": 5247520,
+          "registers": [
+            4294967261,
+            2147483648,
+            0,
+            5255168,
+            36864,
+            0,
+            0,
+            65536
+          ],
+          "flags": 2051,
+          "state_hex": "52335354010001003800000000000000ddffffff000000800000000000305000009000000000000000000000000001002012500003080000"
+        },
+        {
+          "ordinal": 9,
+          "instruction": "jo-taken",
+          "pc_before": 5247520,
+          "pc_after": 5247527,
+          "registers": [
+            4294967261,
+            2147483648,
+            0,
+            5255168,
+            36864,
+            0,
+            0,
+            65536
+          ],
+          "flags": 2051,
+          "state_hex": "52335354010001003800000000000000ddffffff000000800000000000305000009000000000000000000000000001002712500003080000"
+        },
+        {
+          "ordinal": 10,
+          "instruction": "add",
+          "pc_before": 5247527,
+          "pc_after": 5247529,
+          "registers": [
+            2147483613,
+            2147483648,
+            0,
+            5255168,
+            36864,
+            0,
+            0,
+            65536
+          ],
+          "flags": 2055,
+          "state_hex": "52335354010001003800000000000000ddffff7f000000800000000000305000009000000000000000000000000001002912500007080000"
+        },
+        {
+          "ordinal": 11,
+          "instruction": "xor",
+          "pc_before": 5247529,
+          "pc_after": 5247531,
+          "registers": [
+            2147418077,
+            2147483648,
+            0,
+            5255168,
+            36864,
+            0,
+            0,
+            65536
+          ],
+          "flags": 6,
+          "state_hex": "52335354010001003800000000000000ddfffe7f000000800000000000305000009000000000000000000000000001002b12500006000000"
+        },
+        {
+          "ordinal": 12,
+          "instruction": "save-checksum",
+          "pc_before": 5247531,
+          "pc_after": 5247534,
+          "registers": [
+            2147418077,
+            2147483648,
+            0,
+            5255168,
+            36864,
+            0,
+            0,
+            65536
+          ],
+          "flags": 6,
+          "state_hex": "52335354010001003800000000000000ddfffe7f000000800000000000305000009000000000000000000000000001002e12500006000000"
+        },
+        {
+          "ordinal": 13,
+          "instruction": "push-code",
+          "pc_before": 5247534,
+          "pc_after": 5247535,
+          "registers": [
+            2147418077,
+            2147483648,
+            0,
+            5255168,
+            36860,
+            0,
+            0,
+            65536
+          ],
+          "flags": 6,
+          "state_hex": "52335354010001003800000000000000ddfffe7f000000800000000000305000fc8f00000000000000000000000001002f12500006000000"
+        },
+        {
+          "ordinal": 14,
+          "instruction": "call-exit",
+          "pc_before": 5247535,
+          "pc_after": 1610612768,
+          "registers": [
+            2147418077,
+            2147483648,
+            0,
+            5255168,
+            36856,
+            0,
+            0,
+            65536
+          ],
+          "flags": 6,
+          "state_hex": "52335354010001003800000000000000ddfffe7f000000800000000000305000f88f00000000000000000000000001002000006006000000"
+        }
+      ],
+      "math": [
+        {
+          "left": 7,
+          "right": 4294967291,
+          "wide_decimal": -35,
+          "result": 4294967261,
+          "overflow": false,
+          "flags": 2
+        },
+        {
+          "left": 16777216,
+          "right": 4294967168,
+          "wide_decimal": -2147483648,
+          "result": 2147483648,
+          "overflow": false,
+          "flags": 2
+        },
+        {
+          "left": 65537,
+          "right": 65536,
+          "wide_decimal": 4295032832,
+          "result": 65536,
+          "overflow": true,
+          "flags": 2051
+        }
+      ],
+      "checksum": 2147418077,
+      "product": 4294967261,
+      "patched_words": [
+        5255168,
+        5259344
+      ],
+      "after_jno": {
+        "state_hex": "52335354010001003800000000000000ddffffff000000800000000000305000009000000000000000000000000000001712500002000000",
+        "exit_hex": "52334558030001002800000000000000030000000600000000000000000000000000000000000000",
+        "helper_hex": "52334d48010001002800000000000000000000000000000100000000000000000000000000000000",
+        "data_hex": "fbffffff0000000101000100ddffffff0000000000000000"
+      },
+      "after_jo": {
+        "state_hex": "52335354010001003800000000000000ddffffff000000800000000000305000009000000000000000000000000001002712500003080000",
+        "exit_hex": "52334558030001002800000000000000030000000300000000000000000000000000000000000000",
+        "helper_hex": "52334d48010001002800000000000000000000000100010000000000000000000000000000000000",
+        "data_hex": "fbffffff0000000101000100ddffffff0000000000000000"
+      },
+      "api": {
+        "state_hex": "52335354010001003800000000000000ddfffe7f000000800000000000305000f88f00000000000000000000000001002000006006000000",
+        "exit_hex": "52334558030001002800000000000000080000000500000003000100000000000000000000000000",
+        "helper_hex": "52334d48010001002800000000000000000000000000000000000000000000000000000000000000",
+        "frame_hex": "523343460100010070000000000000000100000003000100020000000100000020000060f88f00003512500000000000ddfffe7f000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+        "stack": [
+          0,
+          5247541,
+          2147418077
+        ]
+      },
+      "terminal": {
+        "state_hex": "52335354010001003800000000000000ddfffe7f000000800000000000305000f88f00000000000000000000000001002000006006000000",
+        "exit_hex": "523345580400010028000000000000000900000000000000ddfffe7f000000000000000000000000",
+        "data_hex": "fbffffff0000000101000100ddffffffddfffe7f00000000"
+      },
+      "canary_restore_state_hex": "52335354010001003800000000000000ddfffe7f000000800000000000305000009000000000000000000000000001003512500006000000"
+    }
+  ],
+  "controls": [
+    {
+      "name": "M1-replacement",
+      "symbol": "micro_none_alias",
+      "form": "0FAF",
+      "registers": [
+        4096,
+        2048,
+        858993459,
+        1145324612,
+        1431655765,
+        1717986918,
+        2004318071,
+        2290649224
+      ],
+      "flags": 3287,
+      "ea": 8190,
+      "detail": 1,
+      "fault_address": 8192,
+      "source": 4294967293,
+      "destination": 0,
+      "immediate": null,
+      "maps": [
+        [
+          4096,
+          3
+        ]
+      ],
+      "fills": [
+        [
+          8190,
+          "fdff"
+        ]
+      ],
+      "protect": [],
+      "repair_maps": [
+        [
+          8192,
+          3
+        ]
+      ],
+      "repair_fills": [
+        [
+          8192,
+          "ffff"
+        ]
+      ],
+      "repair_protect": [],
+      "condition": "M1",
+      "owner": "replacement",
+      "code_hex": "8d52010faf4448feeb000f0b",
+      "code_sha256": "d7a870bee0f5ed3cd2680f45fa938c6be7ea7777bd8168dbc7c815e425745802",
+      "done_pc": 32778,
+      "initial_state_hex": "52335354010001003800000000000000001000000008000033333333444444445555555566666666777777778888888800800000d70c0000",
+      "initial_exit_hex": "52334558010001002800000000000000030000000000000000000000000000000000000000000000",
+      "initial_helper_hex": "a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5",
+      "fault_state_hex": "52335354010001003800000000000000001000000008000034333333444444445555555566666666777777778888888803800000d70c0000",
+      "fault_exit_hex": "52334558020001002800000000000000050000000100000001000000002000000100000004000000",
+      "fault_helper_hex": "52334d48010001002800000000000000010000000000000001000000002000000100000004000000",
+      "math": {
+        "left": 4096,
+        "right": 4294967293,
+        "wide_decimal": -12288,
+        "result": 4294955008,
+        "overflow": false,
+        "flags": 1026
+      },
+      "success_state_hex": "5233535401000100380000000000000000d0ffff000800003433333344444444555555556666666677777777888888880a80000002040000",
+      "success_exit_hex": "52334558020001002800000000000000030000000200000000000000000000000000000000000000",
+      "success_helper_hex": "52334d4801000100280000000000000000000000fdffffff00000000000000000000000000000000",
+      "pause_cancel_exit_hex": "52334558020001002800000000000000020000000000000000000000000000000000000000000000",
+      "pause_budget_exit_hex": "52334558020001002800000000000000010000000000000000000000000000000000000000000000",
+      "stale_status": 4,
+      "closed_status": 5
+    },
+    {
+      "name": "M1-resident",
+      "symbol": "micro_none_alias",
+      "form": "0FAF",
+      "registers": [
+        4096,
+        2048,
+        858993459,
+        1145324612,
+        1431655765,
+        1717986918,
+        2004318071,
+        2290649224
+      ],
+      "flags": 3287,
+      "ea": 8190,
+      "detail": 1,
+      "fault_address": 8192,
+      "source": 4294967293,
+      "destination": 0,
+      "immediate": null,
+      "maps": [
+        [
+          4096,
+          3
+        ]
+      ],
+      "fills": [
+        [
+          8190,
+          "fdff"
+        ]
+      ],
+      "protect": [],
+      "repair_maps": [
+        [
+          8192,
+          3
+        ]
+      ],
+      "repair_fills": [
+        [
+          8192,
+          "ffff"
+        ]
+      ],
+      "repair_protect": [],
+      "condition": "M1",
+      "owner": "resident",
+      "code_hex": "8d52010faf4448feeb000f0b",
+      "code_sha256": "d7a870bee0f5ed3cd2680f45fa938c6be7ea7777bd8168dbc7c815e425745802",
+      "done_pc": 32778,
+      "initial_state_hex": "52335354010001003800000000000000001000000008000033333333444444445555555566666666777777778888888800800000d70c0000",
+      "initial_exit_hex": "52334558010001002800000000000000030000000000000000000000000000000000000000000000",
+      "initial_helper_hex": "a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5",
+      "fault_state_hex": "52335354010001003800000000000000001000000008000034333333444444445555555566666666777777778888888803800000d70c0000",
+      "fault_exit_hex": "52334558020001002800000000000000050000000100000001000000002000000100000004000000",
+      "fault_helper_hex": "52334d48010001002800000000000000010000000000000001000000002000000100000004000000",
+      "math": {
+        "left": 4096,
+        "right": 4294967293,
+        "wide_decimal": -12288,
+        "result": 4294955008,
+        "overflow": false,
+        "flags": 1026
+      },
+      "success_state_hex": "5233535401000100380000000000000000d0ffff000800003433333344444444555555556666666677777777888888880a80000002040000",
+      "success_exit_hex": "52334558020001002800000000000000030000000200000000000000000000000000000000000000",
+      "success_helper_hex": "52334d4801000100280000000000000000000000fdffffff00000000000000000000000000000000",
+      "pause_cancel_exit_hex": "52334558020001002800000000000000020000000000000000000000000000000000000000000000",
+      "pause_budget_exit_hex": "52334558020001002800000000000000010000000000000000000000000000000000000000000000",
+      "stale_status": 4,
+      "closed_status": 5
+    },
+    {
+      "name": "M2-replacement",
+      "symbol": "micro_imm8_alias",
+      "form": "6B",
+      "registers": [
+        286331153,
+        1024,
+        858993459,
+        8192,
+        1431655765,
+        1717986918,
+        2004318071,
+        2290649224
+      ],
+      "flags": 2263,
+      "ea": 12286,
+      "detail": 2,
+      "fault_address": 12288,
+      "source": 16777216,
+      "destination": 1,
+      "immediate": 4294967168,
+      "maps": [
+        [
+          8192,
+          3
+        ],
+        [
+          12288,
+          3
+        ]
+      ],
+      "fills": [
+        [
+          12286,
+          "0000"
+        ],
+        [
+          12288,
+          "0001"
+        ]
+      ],
+      "protect": [
+        [
+          12288,
+          4
+        ]
+      ],
+      "repair_maps": [],
+      "repair_fills": [],
+      "repair_protect": [
+        [
+          12288,
+          1
+        ]
+      ],
+      "condition": "M2",
+      "owner": "replacement",
+      "code_hex": "8d52016b4c8bfe80eb000f0b",
+      "code_sha256": "46b8bc779b41579fb1734b27b830a795c679a8a3610d16463586113402d77c53",
+      "done_pc": 32778,
+      "initial_state_hex": "52335354010001003800000000000000111111110004000033333333002000005555555566666666777777778888888800800000d7080000",
+      "initial_exit_hex": "52334558010001002800000000000000030000000000000000000000000000000000000000000000",
+      "initial_helper_hex": "a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5",
+      "fault_state_hex": "52335354010001003800000000000000111111110004000034333333002000005555555566666666777777778888888803800000d7080000",
+      "fault_exit_hex": "52334558020001002800000000000000050000000100000002000000003000000100000004000000",
+      "fault_helper_hex": "52334d48010001002800000000000000010000000000000002000000003000000100000004000000",
+      "math": {
+        "left": 16777216,
+        "right": 4294967168,
+        "wide_decimal": -2147483648,
+        "result": 2147483648,
+        "overflow": false,
+        "flags": 2
+      },
+      "success_state_hex": "5233535401000100380000000000000011111111000000803433333300200000555555556666666677777777888888880a80000002000000",
+      "success_exit_hex": "52334558020001002800000000000000030000000200000000000000000000000000000000000000",
+      "success_helper_hex": "52334d48010001002800000000000000000000000000000100000000000000000000000000000000"
+    },
+    {
+      "name": "M2-resident",
+      "symbol": "micro_imm8_alias",
+      "form": "6B",
+      "registers": [
+        286331153,
+        1024,
+        858993459,
+        8192,
+        1431655765,
+        1717986918,
+        2004318071,
+        2290649224
+      ],
+      "flags": 2263,
+      "ea": 12286,
+      "detail": 2,
+      "fault_address": 12288,
+      "source": 16777216,
+      "destination": 1,
+      "immediate": 4294967168,
+      "maps": [
+        [
+          8192,
+          3
+        ],
+        [
+          12288,
+          3
+        ]
+      ],
+      "fills": [
+        [
+          12286,
+          "0000"
+        ],
+        [
+          12288,
+          "0001"
+        ]
+      ],
+      "protect": [
+        [
+          12288,
+          4
+        ]
+      ],
+      "repair_maps": [],
+      "repair_fills": [],
+      "repair_protect": [
+        [
+          12288,
+          1
+        ]
+      ],
+      "condition": "M2",
+      "owner": "resident",
+      "code_hex": "8d52016b4c8bfe80eb000f0b",
+      "code_sha256": "46b8bc779b41579fb1734b27b830a795c679a8a3610d16463586113402d77c53",
+      "done_pc": 32778,
+      "initial_state_hex": "52335354010001003800000000000000111111110004000033333333002000005555555566666666777777778888888800800000d7080000",
+      "initial_exit_hex": "52334558010001002800000000000000030000000000000000000000000000000000000000000000",
+      "initial_helper_hex": "a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5",
+      "fault_state_hex": "52335354010001003800000000000000111111110004000034333333002000005555555566666666777777778888888803800000d7080000",
+      "fault_exit_hex": "52334558020001002800000000000000050000000100000002000000003000000100000004000000",
+      "fault_helper_hex": "52334d48010001002800000000000000010000000000000002000000003000000100000004000000",
+      "math": {
+        "left": 16777216,
+        "right": 4294967168,
+        "wide_decimal": -2147483648,
+        "result": 2147483648,
+        "overflow": false,
+        "flags": 2
+      },
+      "success_state_hex": "5233535401000100380000000000000011111111000000803433333300200000555555556666666677777777888888880a80000002000000",
+      "success_exit_hex": "52334558020001002800000000000000030000000200000000000000000000000000000000000000",
+      "success_helper_hex": "52334d48010001002800000000000000000000000000000100000000000000000000000000000000"
+    },
+    {
+      "name": "M3-unmapped-replacement",
+      "symbol": "micro_zero_alias",
+      "form": "69",
+      "registers": [
+        286331153,
+        572662306,
+        858993459,
+        1145324612,
+        16376,
+        1717986918,
+        2004318071,
+        2290649224
+      ],
+      "flags": 2263,
+      "ea": 16384,
+      "detail": 1,
+      "fault_address": 16384,
+      "source": 305419896,
+      "destination": 4,
+      "immediate": 0,
+      "maps": [],
+      "fills": [],
+      "protect": [],
+      "repair_maps": [
+        [
+          16384,
+          3
+        ]
+      ],
+      "repair_fills": [
+        [
+          16384,
+          "78563412"
+        ]
+      ],
+      "repair_protect": [],
+      "condition": "M3-unmapped",
+      "owner": "replacement",
+      "code_hex": "8d52016964240800000000eb000f0b",
+      "code_sha256": "cdeac64a06cae706df235aa633b057349cf0f0b16b85bd599f459ba40bb1438d",
+      "done_pc": 32781,
+      "initial_state_hex": "5233535401000100380000000000000011111111222222223333333344444444f83f000066666666777777778888888800800000d7080000",
+      "initial_exit_hex": "52334558010001002800000000000000030000000000000000000000000000000000000000000000",
+      "initial_helper_hex": "a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5",
+      "fault_state_hex": "5233535401000100380000000000000011111111222222223433333344444444f83f000066666666777777778888888803800000d7080000",
+      "fault_exit_hex": "52334558020001002800000000000000050000000100000001000000004000000100000004000000",
+      "fault_helper_hex": "52334d48010001002800000000000000010000000000000001000000004000000100000004000000",
+      "math": {
+        "left": 305419896,
+        "right": 0,
+        "wide_decimal": 0,
+        "result": 0,
+        "overflow": false,
+        "flags": 2
+      },
+      "success_state_hex": "5233535401000100380000000000000011111111222222223433333344444444000000006666666677777777888888880d80000002000000",
+      "success_exit_hex": "52334558020001002800000000000000030000000200000000000000000000000000000000000000",
+      "success_helper_hex": "52334d48010001002800000000000000000000007856341200000000000000000000000000000000"
+    },
+    {
+      "name": "M3-unmapped-resident",
+      "symbol": "micro_zero_alias",
+      "form": "69",
+      "registers": [
+        286331153,
+        572662306,
+        858993459,
+        1145324612,
+        16376,
+        1717986918,
+        2004318071,
+        2290649224
+      ],
+      "flags": 2263,
+      "ea": 16384,
+      "detail": 1,
+      "fault_address": 16384,
+      "source": 305419896,
+      "destination": 4,
+      "immediate": 0,
+      "maps": [],
+      "fills": [],
+      "protect": [],
+      "repair_maps": [
+        [
+          16384,
+          3
+        ]
+      ],
+      "repair_fills": [
+        [
+          16384,
+          "78563412"
+        ]
+      ],
+      "repair_protect": [],
+      "condition": "M3-unmapped",
+      "owner": "resident",
+      "code_hex": "8d52016964240800000000eb000f0b",
+      "code_sha256": "cdeac64a06cae706df235aa633b057349cf0f0b16b85bd599f459ba40bb1438d",
+      "done_pc": 32781,
+      "initial_state_hex": "5233535401000100380000000000000011111111222222223333333344444444f83f000066666666777777778888888800800000d7080000",
+      "initial_exit_hex": "52334558010001002800000000000000030000000000000000000000000000000000000000000000",
+      "initial_helper_hex": "a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5",
+      "fault_state_hex": "5233535401000100380000000000000011111111222222223433333344444444f83f000066666666777777778888888803800000d7080000",
+      "fault_exit_hex": "52334558020001002800000000000000050000000100000001000000004000000100000004000000",
+      "fault_helper_hex": "52334d48010001002800000000000000010000000000000001000000004000000100000004000000",
+      "math": {
+        "left": 305419896,
+        "right": 0,
+        "wide_decimal": 0,
+        "result": 0,
+        "overflow": false,
+        "flags": 2
+      },
+      "success_state_hex": "5233535401000100380000000000000011111111222222223433333344444444000000006666666677777777888888880d80000002000000",
+      "success_exit_hex": "52334558020001002800000000000000030000000200000000000000000000000000000000000000",
+      "success_helper_hex": "52334d48010001002800000000000000000000007856341200000000000000000000000000000000"
+    },
+    {
+      "name": "M3-overflow-replacement",
+      "symbol": "micro_zero_alias",
+      "form": "69",
+      "registers": [
+        286331153,
+        572662306,
+        858993459,
+        1145324612,
+        4294967285,
+        1717986918,
+        2004318071,
+        2290649224
+      ],
+      "flags": 2263,
+      "ea": 4294967293,
+      "detail": 3,
+      "fault_address": 4294967293,
+      "source": 305419896,
+      "destination": 4,
+      "immediate": 0,
+      "maps": [
+        [
+          4294963200,
+          3
+        ],
+        [
+          0,
+          3
+        ]
+      ],
+      "fills": [
+        [
+          4294967293,
+          "785634"
+        ],
+        [
+          0,
+          "12"
+        ]
+      ],
+      "protect": [
+        [
+          4294963200,
+          1
+        ],
+        [
+          0,
+          1
+        ]
+      ],
+      "repair_maps": [],
+      "repair_fills": [],
+      "repair_protect": [],
+      "condition": "M3-overflow",
+      "owner": "replacement",
+      "code_hex": "8d52016964240800000000eb000f0b",
+      "code_sha256": "cdeac64a06cae706df235aa633b057349cf0f0b16b85bd599f459ba40bb1438d",
+      "done_pc": 32781,
+      "initial_state_hex": "5233535401000100380000000000000011111111222222223333333344444444f5ffffff66666666777777778888888800800000d7080000",
+      "initial_exit_hex": "52334558010001002800000000000000030000000000000000000000000000000000000000000000",
+      "initial_helper_hex": "a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5",
+      "fault_state_hex": "5233535401000100380000000000000011111111222222223433333344444444f5ffffff66666666777777778888888803800000d7080000",
+      "fault_exit_hex": "52334558020001002800000000000000050000000100000003000000fdffffff0100000004000000",
+      "fault_helper_hex": "52334d48010001002800000000000000010000000000000003000000fdffffff0100000004000000"
+    },
+    {
+      "name": "M3-overflow-resident",
+      "symbol": "micro_zero_alias",
+      "form": "69",
+      "registers": [
+        286331153,
+        572662306,
+        858993459,
+        1145324612,
+        4294967285,
+        1717986918,
+        2004318071,
+        2290649224
+      ],
+      "flags": 2263,
+      "ea": 4294967293,
+      "detail": 3,
+      "fault_address": 4294967293,
+      "source": 305419896,
+      "destination": 4,
+      "immediate": 0,
+      "maps": [
+        [
+          4294963200,
+          3
+        ],
+        [
+          0,
+          3
+        ]
+      ],
+      "fills": [
+        [
+          4294967293,
+          "785634"
+        ],
+        [
+          0,
+          "12"
+        ]
+      ],
+      "protect": [
+        [
+          4294963200,
+          1
+        ],
+        [
+          0,
+          1
+        ]
+      ],
+      "repair_maps": [],
+      "repair_fills": [],
+      "repair_protect": [],
+      "condition": "M3-overflow",
+      "owner": "resident",
+      "code_hex": "8d52016964240800000000eb000f0b",
+      "code_sha256": "cdeac64a06cae706df235aa633b057349cf0f0b16b85bd599f459ba40bb1438d",
+      "done_pc": 32781,
+      "initial_state_hex": "5233535401000100380000000000000011111111222222223333333344444444f5ffffff66666666777777778888888800800000d7080000",
+      "initial_exit_hex": "52334558010001002800000000000000030000000000000000000000000000000000000000000000",
+      "initial_helper_hex": "a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5",
+      "fault_state_hex": "5233535401000100380000000000000011111111222222223433333344444444f5ffffff66666666777777778888888803800000d7080000",
+      "fault_exit_hex": "52334558020001002800000000000000050000000100000003000000fdffffff0100000004000000",
+      "fault_helper_hex": "52334d48010001002800000000000000010000000000000003000000fdffffff0100000004000000"
+    },
+    {
+      "name": "M4-replacement",
+      "symbol": "micro_last_dword",
+      "form": "69",
+      "registers": [
+        286331153,
+        572662306,
+        858993459,
+        1145324612,
+        1431655765,
+        1717986918,
+        2004318071,
+        4294967292
+      ],
+      "flags": 2263,
+      "ea": 4294967292,
+      "detail": 0,
+      "fault_address": 0,
+      "source": 65537,
+      "destination": 7,
+      "immediate": 65536,
+      "maps": [
+        [
+          4294963200,
+          3
+        ]
+      ],
+      "fills": [
+        [
+          4294967292,
+          "01000100"
+        ]
+      ],
+      "protect": [
+        [
+          4294963200,
+          1
+        ]
+      ],
+      "repair_maps": [],
+      "repair_fills": [],
+      "repair_protect": [],
+      "condition": "M4",
+      "owner": "replacement",
+      "code_hex": "8d5201693f00000100eb000f0b",
+      "code_sha256": "e411decb11a9e6b6cbdd6adc7cce1354af91e95da46712811cd8b78ec07479ac",
+      "done_pc": 32779,
+      "initial_state_hex": "5233535401000100380000000000000011111111222222223333333344444444555555556666666677777777fcffffff00800000d7080000",
+      "initial_exit_hex": "52334558010001002800000000000000030000000000000000000000000000000000000000000000",
+      "initial_helper_hex": "a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5",
+      "fault_state_hex": null,
+      "fault_exit_hex": null,
+      "fault_helper_hex": null,
+      "math": {
+        "left": 65537,
+        "right": 65536,
+        "wide_decimal": 4295032832,
+        "result": 65536,
+        "overflow": true,
+        "flags": 2051
+      },
+      "success_state_hex": "5233535401000100380000000000000011111111222222223433333344444444555555556666666677777777000001000b80000003080000",
+      "success_exit_hex": "52334558020001002800000000000000030000000300000000000000000000000000000000000000",
+      "success_helper_hex": "52334d48010001002800000000000000000000000100010000000000000000000000000000000000"
+    },
+    {
+      "name": "M4-resident",
+      "symbol": "micro_last_dword",
+      "form": "69",
+      "registers": [
+        286331153,
+        572662306,
+        858993459,
+        1145324612,
+        1431655765,
+        1717986918,
+        2004318071,
+        4294967292
+      ],
+      "flags": 2263,
+      "ea": 4294967292,
+      "detail": 0,
+      "fault_address": 0,
+      "source": 65537,
+      "destination": 7,
+      "immediate": 65536,
+      "maps": [
+        [
+          4294963200,
+          3
+        ]
+      ],
+      "fills": [
+        [
+          4294967292,
+          "01000100"
+        ]
+      ],
+      "protect": [
+        [
+          4294963200,
+          1
+        ]
+      ],
+      "repair_maps": [],
+      "repair_fills": [],
+      "repair_protect": [],
+      "condition": "M4",
+      "owner": "resident",
+      "code_hex": "8d5201693f00000100eb000f0b",
+      "code_sha256": "e411decb11a9e6b6cbdd6adc7cce1354af91e95da46712811cd8b78ec07479ac",
+      "done_pc": 32779,
+      "initial_state_hex": "5233535401000100380000000000000011111111222222223333333344444444555555556666666677777777fcffffff00800000d7080000",
+      "initial_exit_hex": "52334558010001002800000000000000030000000000000000000000000000000000000000000000",
+      "initial_helper_hex": "a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5",
+      "fault_state_hex": null,
+      "fault_exit_hex": null,
+      "fault_helper_hex": null,
+      "math": {
+        "left": 65537,
+        "right": 65536,
+        "wide_decimal": 4295032832,
+        "result": 65536,
+        "overflow": true,
+        "flags": 2051
+      },
+      "success_state_hex": "5233535401000100380000000000000011111111222222223433333344444444555555556666666677777777000001000b80000003080000",
+      "success_exit_hex": "52334558020001002800000000000000030000000300000000000000000000000000000000000000",
+      "success_helper_hex": "52334d48010001002800000000000000000000000100010000000000000000000000000000000000"
+    }
+  ],
+  "counts": {
+    "positive_cases": 4,
+    "micro_conditions": 5,
+    "direct_owner_contexts": 10
+  },
+  "claim": "three bound memory-source signedIMUL32 forms and authored data-dependent selected PE32 terminal path; no general ISA/PE/Windows/SDK/browser/performance/game claim"
+}
