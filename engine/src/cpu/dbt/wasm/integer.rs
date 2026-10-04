@@ -6,8 +6,9 @@ use crate::cpu::x86::{
     decode::DecodedInstruction,
     ir::{
         BinaryKind, BranchTarget, ByteArithmeticKind, ByteLogicalKind, BytePredicateKind,
-        ByteRegister, ByteValue, EffectiveAddress, ExtensionKind, Location32, Operation,
-        ShiftCount, ShiftKind, SmallSource, SmallWidth, UnaryKind, Value32,
+        ByteRegister, ByteValue, EffectiveAddress, ExtensionKind, Location32,
+        MemoryByteArithmeticKind, Operation, ShiftCount, ShiftKind, SmallSource, SmallWidth,
+        UnaryKind, Value32,
     },
 };
 
@@ -96,6 +97,14 @@ pub(super) fn instruction(
                     logical_flags(code, 7);
                 }
             }
+        }
+        Operation::MemoryArithmeticByte {
+            kind,
+            address,
+            source,
+        } => {
+            arithmetic_memory_byte(code, kind, address, source, imports, exit_depth);
+            store = true;
         }
         Operation::MemoryLogicalByte {
             kind,
@@ -554,6 +563,40 @@ fn logical_memory_byte(
     code.local_set(RESULT);
     memory::store_byte_result(code, address, imports, exit_depth);
     logical_flags(code, 7);
+}
+
+fn arithmetic_memory_byte(
+    code: &mut InstructionSink<'_>,
+    kind: MemoryByteArithmeticKind,
+    address: EffectiveAddress,
+    source: ByteValue,
+    imports: memory::Imports,
+    exit_depth: u32,
+) {
+    memory::load_narrow_value(code, address, SmallWidth::Byte, imports, exit_depth);
+    byte_value(code, source);
+    let binary = match kind {
+        MemoryByteArithmeticKind::Add => {
+            code.i32_add();
+            BinaryKind::Add
+        }
+        MemoryByteArithmeticKind::Sub => {
+            code.i32_sub();
+            BinaryKind::Sub
+        }
+    };
+    code.i32_const(0xff).i32_and().local_set(RESULT);
+    memory::store_byte_result(code, address, imports, exit_depth);
+    // store validation uses operand scratch; recover the original byte after success.
+    byte_value(code, source);
+    code.local_set(RHS).local_get(RESULT).local_get(RHS);
+    if kind == MemoryByteArithmeticKind::Add {
+        code.i32_sub();
+    } else {
+        code.i32_add();
+    }
+    code.i32_const(0xff).i32_and().local_set(LHS);
+    arithmetic_flags(code, binary, CarryFlag::Calculate, 7);
 }
 
 fn indirect_target(

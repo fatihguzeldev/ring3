@@ -493,7 +493,10 @@ fn span_poison_prefix_and_remaining_exclusions_preserve_arena_units_and_capacity
             );
         }
         let mut bytes = vec![0x90];
-        if matches!(kind, BinaryKind::And | BinaryKind::Or | BinaryKind::Xor) {
+        if matches!(
+            kind,
+            BinaryKind::Add | BinaryKind::Sub | BinaryKind::And | BinaryKind::Or | BinaryKind::Xor
+        ) {
             bytes.push(0x66);
         }
         if matches!(instruction[0], 0x81 | 0x83) {

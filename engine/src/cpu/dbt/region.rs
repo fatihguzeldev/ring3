@@ -352,6 +352,7 @@ fn supports_memory_binary(operation: &Operation) -> bool {
     matches!(
         operation,
         Operation::MemoryLogicalByte { .. }
+            | Operation::MemoryArithmeticByte { .. }
             | Operation::Binary {
                 kind: BinaryKind::Add
                     | BinaryKind::Adc

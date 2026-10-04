@@ -479,14 +479,28 @@ fn narrow_prefix_and_declared_span_errors_remain_precise() {
     for (opcode, extension, kind, _, immediate) in FORMS {
         if immediate.is_empty() {
             let mut bytes = vec![0x90];
-            if matches!(kind, BinaryKind::And | BinaryKind::Or | BinaryKind::Xor) {
+            if matches!(
+                kind,
+                BinaryKind::Add
+                    | BinaryKind::Sub
+                    | BinaryKind::And
+                    | BinaryKind::Or
+                    | BinaryKind::Xor
+            ) {
                 bytes.push(0x66);
             }
             bytes.extend_from_slice(&[opcode - 1, 0x03]);
             embedded_rejected(&bytes, instruction_error(0x1001, opcode_error));
         } else if opcode == 0x83 {
             let mut bytes = vec![0x90];
-            if matches!(kind, BinaryKind::And | BinaryKind::Or | BinaryKind::Xor) {
+            if matches!(
+                kind,
+                BinaryKind::Add
+                    | BinaryKind::Sub
+                    | BinaryKind::And
+                    | BinaryKind::Or
+                    | BinaryKind::Xor
+            ) {
                 bytes.push(0x66);
             }
             bytes.extend_from_slice(&[0x80, 0x03 | extension << 3, 0x80]);
