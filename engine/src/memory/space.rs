@@ -86,6 +86,35 @@ impl AddressSpace {
         self.capacity_pages() - self.free.len() as u32
     }
 
+    /// finds an unmapped fit without changing mappings or consuming versions.
+    pub fn find_free_range(
+        &self,
+        bounds: PageRange,
+        page_count: u32,
+        alignment: u32,
+    ) -> Result<PageRange, MemoryError> {
+        if page_count == 0 || alignment < PAGE_SIZE || !alignment.is_power_of_two() {
+            return Err(MemoryError::InvalidRange);
+        }
+        let count = page_count as usize;
+        if count > self.free.len() || count > bounds.count {
+            return Err(MemoryError::Capacity);
+        }
+        let stride = (alignment / PAGE_SIZE) as usize;
+        let end = bounds.first + bounds.count;
+        let mut first = bounds.first.div_ceil(stride) * stride;
+        while first + count <= end {
+            if self.mappings[first..first + count]
+                .iter()
+                .all(|mapping| *mapping == 0)
+            {
+                return Ok(PageRange { first, count });
+            }
+            first += stride;
+        }
+        Err(MemoryError::Capacity)
+    }
+
     pub fn map_zeroed(
         &mut self,
         range: PageRange,
