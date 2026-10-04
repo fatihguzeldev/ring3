@@ -669,6 +669,26 @@ pub(crate) fn complete_active_resident_callback_call(
     })
 }
 
+pub(crate) fn complete_active_resident_callback_windows_call(
+    key_low: u32,
+    key_high: u32,
+    id_low: u32,
+    id_high: u32,
+    callback_token: u32,
+    inner_token: u32,
+) -> u32 {
+    let key = u64::from(key_low) | (u64::from(key_high) << 32);
+    let id = u64::from(id_low) | (u64::from(id_high) << 32);
+    mutate(|instance| {
+        instance.complete_active_resident_callback_windows_call(
+            key,
+            id,
+            callback_token,
+            inner_token,
+        )
+    })
+}
+
 pub(crate) fn capture_resident_callback_call(
     key_low: u32,
     key_high: u32,

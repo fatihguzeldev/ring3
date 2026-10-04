@@ -30,13 +30,24 @@ impl EngineInstance {
         self.complete_windows_call_frame(PendingOwner::Resident(unit_id), token)
     }
 
+    pub fn complete_active_resident_callback_windows_call(
+        &mut self,
+        key: u64,
+        unit_id: u64,
+        callback_token: u32,
+        inner_token: u32,
+    ) -> Result<(), HostError> {
+        let owner = self.active_resident_callback_call_owner(key, unit_id, callback_token)?;
+        self.complete_windows_call_frame(owner, inner_token)
+    }
+
     fn complete_windows_call_frame(
         &mut self,
         owner: PendingOwner,
         token: u32,
     ) -> Result<(), HostError> {
         let pending = self.checked_pending_call(owner, token)?;
-        if self.callback.is_some() {
+        if self.callback.is_some() && !matches!(owner, PendingOwner::ResidentCallback { .. }) {
             return Err(HostError::Call(CallError::Busy));
         }
         let exit = decode_exit(&pending.exit).map_err(|_| HostError::Infrastructure)?;
@@ -44,6 +55,11 @@ impl EngineInstance {
             return Err(HostError::Infrastructure);
         };
         let api = WindowsApi32::from_id(id).ok_or(HostError::Call(CallError::InvalidRequest))?;
+        if matches!(owner, PendingOwner::ResidentCallback { .. })
+            && api == WindowsApi32::ExitProcess
+        {
+            return Err(HostError::Call(CallError::InvalidRequest));
+        }
         let (outcome, thread) = self
             .windows_thread
             .prepare(

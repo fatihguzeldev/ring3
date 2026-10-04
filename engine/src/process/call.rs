@@ -94,7 +94,7 @@ impl EngineInstance {
         self.complete_call_frame(owner, inner_token, result)
     }
 
-    fn active_resident_callback_call_owner(
+    pub(super) fn active_resident_callback_call_owner(
         &self,
         key: u64,
         unit_id: u64,
