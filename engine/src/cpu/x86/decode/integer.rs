@@ -46,7 +46,9 @@ pub(super) fn lower(instruction: &Instruction) -> Option<Result<Operation, Decod
     }
     let read_arithmetic = match instruction.code() {
         Code::Add_r8_rm8 => Some(ByteReadArithmeticKind::Add),
+        Code::Adc_r8_rm8 => Some(ByteReadArithmeticKind::Adc),
         Code::Sub_r8_rm8 => Some(ByteReadArithmeticKind::Sub),
+        Code::Sbb_r8_rm8 => Some(ByteReadArithmeticKind::Sbb),
         _ => None,
     };
     if instruction.op1_kind() == OpKind::Memory
