@@ -53,7 +53,7 @@ impl Imports {
             match instruction.operation() {
                 Operation::LoadByte { .. } | Operation::MemoryPredicateByte { .. } => read8 = true,
                 Operation::StoreByte { .. } => store8 = true,
-                Operation::MemoryUnaryByte { .. } => {
+                Operation::MemoryUnaryByte { .. } | Operation::MemoryLogicalByte { .. } => {
                     read8 = true;
                     store8 = true;
                 }

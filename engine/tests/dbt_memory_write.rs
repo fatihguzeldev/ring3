@@ -476,17 +476,21 @@ fn standalone_all_fifteen_memory_writes_remain_excluded_in_four_apis_before_late
 fn narrow_prefix_and_declared_span_errors_remain_precise() {
     let opcode_error =
         InstructionError::Decode(DecodeError::Unsupported(UnsupportedFeature::Opcode));
-    for (opcode, extension, _, _, immediate) in FORMS {
+    for (opcode, extension, kind, _, immediate) in FORMS {
         if immediate.is_empty() {
-            embedded_rejected(
-                &[0x90, opcode - 1, 0x03],
-                instruction_error(0x1001, opcode_error),
-            );
+            let mut bytes = vec![0x90];
+            if matches!(kind, BinaryKind::And | BinaryKind::Or | BinaryKind::Xor) {
+                bytes.push(0x66);
+            }
+            bytes.extend_from_slice(&[opcode - 1, 0x03]);
+            embedded_rejected(&bytes, instruction_error(0x1001, opcode_error));
         } else if opcode == 0x83 {
-            embedded_rejected(
-                &[0x90, 0x80, 0x03 | extension << 3, 0x80],
-                instruction_error(0x1001, opcode_error),
-            );
+            let mut bytes = vec![0x90];
+            if matches!(kind, BinaryKind::And | BinaryKind::Or | BinaryKind::Xor) {
+                bytes.push(0x66);
+            }
+            bytes.extend_from_slice(&[0x80, 0x03 | extension << 3, 0x80]);
+            embedded_rejected(&bytes, instruction_error(0x1001, opcode_error));
         }
         for prefix in [0x66, 0x67, 0xf3, 0xf0, 0x64] {
             let mut bytes = vec![0x90, prefix];

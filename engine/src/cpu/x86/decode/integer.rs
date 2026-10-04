@@ -64,6 +64,13 @@ pub(super) fn lower(instruction: &Instruction) -> Option<Result<Operation, Decod
     };
     if let Some(kind) = byte_kind {
         return Some((|| {
+            if instruction.op0_kind() == OpKind::Memory {
+                return Ok(Operation::MemoryLogicalByte {
+                    kind,
+                    address: effective_address(instruction)?,
+                    source: byte_value(instruction)?,
+                });
+            }
             Ok(Operation::LogicalByte {
                 kind,
                 destination: byte_register(instruction.op0_register())?,

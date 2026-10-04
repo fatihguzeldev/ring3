@@ -454,7 +454,7 @@ fn resident_profile_keeps_public_cold_unbound_exclusions_and_legacy_equivalence(
 #[test]
 fn span_poison_prefix_and_remaining_exclusions_preserve_arena_units_and_capacity() {
     let (mut engine, keep) = fixture(&[0x90, 0xeb, 0]);
-    for (instruction, _, _) in FORMS {
+    for (instruction, kind, _) in FORMS {
         let mut bytes = vec![0x90];
         bytes.extend_from_slice(instruction);
         bytes.extend_from_slice(&[0x0f, 0x06]);
@@ -493,6 +493,9 @@ fn span_poison_prefix_and_remaining_exclusions_preserve_arena_units_and_capacity
             );
         }
         let mut bytes = vec![0x90];
+        if matches!(kind, BinaryKind::And | BinaryKind::Or | BinaryKind::Xor) {
+            bytes.push(0x66);
+        }
         if matches!(instruction[0], 0x81 | 0x83) {
             bytes.extend_from_slice(&[0x80, instruction[1], 0x80]);
         } else {

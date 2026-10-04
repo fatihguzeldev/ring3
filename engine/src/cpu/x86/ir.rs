@@ -170,6 +170,11 @@ pub enum Operation {
         address: EffectiveAddress,
         right: ByteValue,
     },
+    MemoryLogicalByte {
+        kind: ByteLogicalKind,
+        address: EffectiveAddress,
+        source: ByteValue,
+    },
     LogicalByte {
         kind: ByteLogicalKind,
         destination: ByteRegister,

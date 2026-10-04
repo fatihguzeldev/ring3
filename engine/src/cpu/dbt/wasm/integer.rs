@@ -97,6 +97,14 @@ pub(super) fn instruction(
                 }
             }
         }
+        Operation::MemoryLogicalByte {
+            kind,
+            address,
+            source,
+        } => {
+            logical_memory_byte(code, kind, address, source, imports, exit_depth);
+            store = true;
+        }
         Operation::LogicalByte {
             kind,
             destination,
@@ -520,6 +528,32 @@ fn unary_memory_byte(
         UnaryKind::Not => return,
     };
     arithmetic_flags(code, binary, carry, 7);
+}
+
+fn logical_memory_byte(
+    code: &mut InstructionSink<'_>,
+    kind: ByteLogicalKind,
+    address: EffectiveAddress,
+    source: ByteValue,
+    imports: memory::Imports,
+    exit_depth: u32,
+) {
+    memory::load_narrow_value(code, address, SmallWidth::Byte, imports, exit_depth);
+    byte_value(code, source);
+    match kind {
+        ByteLogicalKind::And => {
+            code.i32_and();
+        }
+        ByteLogicalKind::Or => {
+            code.i32_or();
+        }
+        ByteLogicalKind::Xor => {
+            code.i32_xor();
+        }
+    }
+    code.local_set(RESULT);
+    memory::store_byte_result(code, address, imports, exit_depth);
+    logical_flags(code, 7);
 }
 
 fn indirect_target(

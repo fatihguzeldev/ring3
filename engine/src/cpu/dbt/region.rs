@@ -351,17 +351,18 @@ fn supports_memory_unary(operation: &Operation) -> bool {
 fn supports_memory_binary(operation: &Operation) -> bool {
     matches!(
         operation,
-        Operation::Binary {
-            kind: BinaryKind::Add
-                | BinaryKind::Adc
-                | BinaryKind::Sub
-                | BinaryKind::Sbb
-                | BinaryKind::And
-                | BinaryKind::Or
-                | BinaryKind::Xor,
-            destination: Location32::Memory(_),
-            source: Value32::Register(_) | Value32::Immediate(_),
-        }
+        Operation::MemoryLogicalByte { .. }
+            | Operation::Binary {
+                kind: BinaryKind::Add
+                    | BinaryKind::Adc
+                    | BinaryKind::Sub
+                    | BinaryKind::Sbb
+                    | BinaryKind::And
+                    | BinaryKind::Or
+                    | BinaryKind::Xor,
+                destination: Location32::Memory(_),
+                source: Value32::Register(_) | Value32::Immediate(_),
+            }
     )
 }
 
