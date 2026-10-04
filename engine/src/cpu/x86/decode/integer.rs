@@ -13,8 +13,14 @@ pub(super) fn lower(instruction: &Instruction) -> Option<Result<Operation, Decod
         Code::Add_rm8_r8 | Code::Add_r8_rm8 | Code::Add_AL_imm8 | Code::Add_rm8_imm8 => {
             Some(ByteArithmeticKind::Add)
         }
+        Code::Adc_rm8_r8 | Code::Adc_r8_rm8 | Code::Adc_AL_imm8 | Code::Adc_rm8_imm8 => {
+            Some(ByteArithmeticKind::Adc)
+        }
         Code::Sub_rm8_r8 | Code::Sub_r8_rm8 | Code::Sub_AL_imm8 | Code::Sub_rm8_imm8 => {
             Some(ByteArithmeticKind::Sub)
+        }
+        Code::Sbb_rm8_r8 | Code::Sbb_r8_rm8 | Code::Sbb_AL_imm8 | Code::Sbb_rm8_imm8 => {
+            Some(ByteArithmeticKind::Sbb)
         }
         _ => None,
     };

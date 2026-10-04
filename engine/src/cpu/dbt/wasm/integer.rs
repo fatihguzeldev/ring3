@@ -114,11 +114,27 @@ pub(super) fn instruction(
                     code.i32_add();
                     BinaryKind::Add
                 }
+                ByteArithmeticKind::Adc => {
+                    code.i32_add();
+                    BinaryKind::Adc
+                }
                 ByteArithmeticKind::Sub => {
                     code.i32_sub();
                     BinaryKind::Sub
                 }
+                ByteArithmeticKind::Sbb => {
+                    code.i32_sub();
+                    BinaryKind::Sbb
+                }
             };
+            if matches!(binary, BinaryKind::Adc | BinaryKind::Sbb) {
+                code.local_get(FLAGS).i32_const(1).i32_and();
+                if binary == BinaryKind::Adc {
+                    code.i32_add();
+                } else {
+                    code.i32_sub();
+                }
+            }
             code.i32_const(0xff).i32_and().local_set(RESULT);
             arithmetic_flags(code, binary, CarryFlag::Calculate, 7);
             code.local_get(RESULT);

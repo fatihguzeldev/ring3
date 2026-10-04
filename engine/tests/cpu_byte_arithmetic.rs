@@ -185,8 +185,8 @@ fn excluded() -> Vec<(Vec<u8>, DecodeError)> {
         ));
     }
     for bytes in [
-        vec![0x10, 0xc0],
-        vec![0x18, 0xc0],
+        vec![0x10, 0x00],
+        vec![0x18, 0x00],
         vec![0xfe, 0xc0],
         vec![0xfe, 0xc8],
         vec![0xf6, 0xd0],

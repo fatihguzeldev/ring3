@@ -50,7 +50,9 @@ pub enum ByteLogicalKind {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ByteArithmeticKind {
     Add,
+    Adc,
     Sub,
+    Sbb,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
