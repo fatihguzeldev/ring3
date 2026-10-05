@@ -453,8 +453,8 @@ fn excluded_widths_alternatives_and_prefixes_keep_categories_and_old_publication
         (&[0xc6, 0xc0, 0][..], opcode),
         (&[0xa0, 0x10, 0x50, 0, 0], opcode),
         (&[0xa2, 0x10, 0x50, 0, 0], opcode),
-        (&[0x10, 0xd0], opcode),
-        (&[0x18, 0xd0], opcode),
+        (&[0x66, 0x10, 0xd0], opcode),
+        (&[0x66, 0x18, 0xd0], opcode),
         (&[0x66, 0x89, 0xc3], opcode),
         (&[0x66, 0x88, 0xc3], opcode),
         (&[0x67, 0x8a, 0xc3], opcode),
@@ -477,8 +477,8 @@ fn excluded_widths_alternatives_and_prefixes_keep_categories_and_old_publication
     for owner in [Owner::Replacement, Owner::Resident] {
         for entries in [false, true] {
             let (mut engine, keep) = prior_owners();
-            upload(&mut engine, CODE, &[0x90, 0x10, 0xd0]);
-            describe(&mut engine, &[(CODE, 3)], entries);
+            upload(&mut engine, CODE, &[0x90, 0x66, 0x10, 0xd0]);
+            describe(&mut engine, &[(CODE, 4)], entries);
             let before = saved(&engine, keep);
             assert_eq!(
                 compile(&mut engine, owner, entries, 1),

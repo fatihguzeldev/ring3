@@ -546,10 +546,10 @@ fn standalone_explicit_and_cold_profiles_refuse_only_the_memory_backend() {
 fn register_sources_adjacent_forms_and_excluded_prefixes_keep_existing_categories() {
     let opcode = DecodeError::Unsupported(UnsupportedFeature::Opcode);
     let cases: &[(&[u8], DecodeError)] = &[
-        (&[0x10, 0xd0], opcode),
-        (&[0x18, 0xd0], opcode),
+        (&[0x66, 0x10, 0xd0], opcode),
+        (&[0x66, 0x18, 0xd0], opcode),
         (&[0xc6, 0xc0, 0], opcode),
-        (&[0x10, 0xd0], opcode),
+        (&[0x66, 0x10, 0xd0], opcode),
         (&[0xa0, 0x10, 0x50, 0, 0], opcode),
         (&[0x66, 0x8a, 0x03], opcode),
         (&[0x67, 0x8a, 0x03], opcode),
