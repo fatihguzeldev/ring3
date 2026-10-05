@@ -555,3 +555,188 @@ fn cleanup_preserves_current_stale_code_owners_and_generation_after_unmap() {
     assert_eq!(last_error(&engine), LAST_ERROR);
     assert_eq!(engine.arena(), before.arena);
 }
+
+fn v5_small_free_image() -> Vec<u8> {
+    let mut bytes = small_image();
+    bytes[0x502..0x50f].fill(0);
+    bytes[0x502..0x50e].copy_from_slice(b"VirtualFree\0");
+    bytes
+}
+
+fn v5_small_expected() -> crate::loader::LinkedImageMetadata32V5 {
+    use crate::cpu::dbt::GateSpec;
+    let empty = GateSpec {
+        entry: GuestAddress(0),
+        id: 0,
+    };
+    crate::loader::LinkedImageMetadata32V5 {
+        image: ImageMetadata32 {
+            image_base: BASE,
+            image_size: 0x4000,
+            entry_point: BASE + 0x1000,
+            mapped_pages: 4,
+        },
+        gate_base: GATE,
+        gate_count: 1,
+        gates: [
+            GateSpec {
+                entry: GuestAddress(GATE + 80),
+                id: 0x0001_0006,
+            },
+            empty,
+            empty,
+            empty,
+            empty,
+            empty,
+        ],
+    }
+}
+
+#[test]
+fn v5_refusal_preserves_exact_input_allocation_identity_and_all_existing_owners() {
+    for mode in 0..7 {
+        let mut bytes = v5_small_free_image();
+        let error = match mode {
+            0 | 6 => HostError::InvalidRequest,
+            1 => {
+                bytes[0] = 0;
+                HostError::Loader(LoadError::Malformed)
+            }
+            2 => {
+                bytes[0x502] = b'v';
+                HostError::Loader(LoadError::Unsupported)
+            }
+            3 => {
+                put32(&mut bytes, 0x40c, 0x3102);
+                HostError::Loader(LoadError::Malformed)
+            }
+            4 => {
+                put16(&mut bytes, 0x96, 0x0102);
+                put32(&mut bytes, 0x120, 0x3180);
+                put32(&mut bytes, 0x124, 12);
+                put32(&mut bytes, 0x580, 0x3000);
+                put32(&mut bytes, 0x584, 12);
+                put16(&mut bytes, 0x588, 0x3080);
+                put16(&mut bytes, 0x58a, 0);
+                HostError::Loader(LoadError::Malformed)
+            }
+            5 => HostError::Loader(LoadError::Capacity),
+            _ => unreachable!(),
+        };
+        let mut engine = EngineInstance::new(if mode == 5 { 3 } else { 4 }, KEY).unwrap();
+        seed_last_error(&mut engine);
+        engine.call_token = 73;
+        engine.image_started = true;
+        engine.arena_mut().unwrap().fill(0xd3);
+        put32(engine.arena_mut().unwrap(), CANCEL_OFFSET, 1);
+        engine.begin_image_input(bytes.len() as u32).unwrap();
+        let length = if mode == 0 { 7 } else { bytes.len() };
+        let mut copied = bytes[..length].to_vec();
+        engine.append_image_input(0, &copied).unwrap();
+        copied.fill(0xee);
+        if mode == 6 {
+            engine.map(0x9000, 1, 3).unwrap();
+            engine.write32(0x9000, 0xdead_beef).unwrap();
+        }
+        let before = owners(&engine);
+        let staged = input(&engine);
+        assert_eq!(staged.as_ref().unwrap().total, 1536);
+        assert_eq!(staged.as_ref().unwrap().bytes, bytes[..length]);
+        assert!(staged.as_ref().unwrap().capacity >= 1536);
+        assert!(engine.virtual_allocations.is_empty());
+        assert_eq!(engine.load_pe32_linked_v5_input_at(BASE, GATE), Err(error));
+        assert_eq!(input(&engine), staged);
+        assert_eq!(owners(&engine), before);
+        assert!(engine.virtual_allocations.is_empty());
+        if mode == 6 {
+            let mut word = [0; 4];
+            engine
+                .memory()
+                .unwrap()
+                .read(GuestAddress(0x9000), &mut word)
+                .unwrap();
+            assert_eq!(word, 0xdead_beef_u32.to_le_bytes());
+        }
+        engine.abort_image_input().unwrap();
+        assert!(engine.image_input.is_none());
+        assert_eq!(owners(&engine), before);
+        assert!(engine.virtual_allocations.is_empty());
+    }
+}
+
+#[test]
+fn v5_success_after_old_profile_and_gate_refusals_consumes_only_input_and_publishes() {
+    let mut engine = EngineInstance::new(4, KEY).unwrap();
+    seed_last_error(&mut engine);
+    engine.call_token = 73;
+    engine.image_started = true;
+    engine.memory.as_mut().unwrap().exhaust_versions_for_test();
+    engine.arena_mut().unwrap().fill(0xd3);
+    put32(engine.arena_mut().unwrap(), CANCEL_OFFSET, 1);
+    let before = owners(&engine);
+    let bytes = v5_small_free_image();
+    engine.begin_image_input(1536).unwrap();
+    engine.append_image_input(0, &bytes).unwrap();
+    let staged = input(&engine);
+    assert_eq!(staged.as_ref().unwrap().bytes, bytes);
+    assert_eq!(
+        engine.load_pe32_linked_v4_input_at(BASE, GATE),
+        Err(HostError::Loader(LoadError::Unsupported))
+    );
+    assert_eq!(input(&engine), staged);
+    assert_eq!(owners(&engine), before);
+    assert_eq!(
+        engine.load_pe32_linked_v5_input_at(BASE, BASE + 0x2000),
+        Err(HostError::Loader(LoadError::Malformed))
+    );
+    assert_eq!(input(&engine), staged);
+    assert_eq!(owners(&engine), before);
+    assert_eq!(
+        engine.map(0x9000, 1, 3),
+        Err(HostError::Memory(MemoryError::VersionExhausted))
+    );
+    assert_eq!(input(&engine), staged);
+    assert_eq!(owners(&engine), before);
+    let linked = engine.load_pe32_linked_v5_input_at(BASE, GATE).unwrap();
+    assert_eq!(linked, v5_small_expected());
+    assert!(engine.image_input.is_none());
+    assert_ne!(
+        engine.memory().unwrap().identity(),
+        before.identity.unwrap()
+    );
+    assert_eq!(engine.memory().unwrap().mapped_pages(), 4);
+    assert_eq!(engine.image, Some(linked.image));
+    assert!(engine.virtual_allocations.is_empty());
+    let mut data = bytes[0x400..0x600].to_vec();
+    put32(&mut data, 0x80, GATE + 80);
+    let mut actual_data = vec![0; 512];
+    engine
+        .memory()
+        .unwrap()
+        .read(GuestAddress(BASE + 0x3000), &mut actual_data)
+        .unwrap();
+    assert_eq!(actual_data, data);
+    let mut gates = vec![0; 4096];
+    gates[80..82].copy_from_slice(&[0x0f, 0x0b]);
+    let mut actual_gates = vec![0; 4096];
+    engine
+        .memory()
+        .unwrap()
+        .read(GuestAddress(GATE), &mut actual_gates)
+        .unwrap();
+    assert_eq!(actual_gates, gates);
+    let mut after = owners(&engine);
+    after.identity = before.identity;
+    after.pages = before.pages;
+    after.image = before.image;
+    assert_eq!(after, before);
+    let committed = owners(&engine);
+    engine.abort_image_input().unwrap();
+    assert_eq!(owners(&engine), committed);
+    assert!(engine.image_input.is_none());
+    assert_eq!(
+        engine.load_pe32_linked_v5_input_at(0, 0),
+        Err(HostError::InvalidRequest)
+    );
+    assert_eq!(owners(&engine), committed);
+}

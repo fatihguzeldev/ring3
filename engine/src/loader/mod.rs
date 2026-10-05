@@ -7,7 +7,7 @@ use crate::memory::{AddressSpace, MemoryError};
 
 pub use pe32::{
     load_pe32, load_pe32_at, load_pe32_linked_at, load_pe32_linked_v2_at, load_pe32_linked_v3_at,
-    load_pe32_linked_v4_at,
+    load_pe32_linked_v4_at, load_pe32_linked_v5_at,
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -153,6 +153,34 @@ impl std::fmt::Debug for LoadedLinkedPe32V4 {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter
             .debug_struct("LoadedLinkedPe32V4")
+            .field("metadata", &self.metadata)
+            .finish_non_exhaustive()
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct LinkedImageMetadata32V5 {
+    pub image: ImageMetadata32,
+    pub gate_base: u32,
+    pub gate_count: u32,
+    pub gates: [GateSpec; 6],
+}
+
+pub struct LoadedLinkedPe32V5 {
+    memory: AddressSpace,
+    metadata: LinkedImageMetadata32V5,
+}
+
+impl LoadedLinkedPe32V5 {
+    pub fn into_parts(self) -> (AddressSpace, LinkedImageMetadata32V5) {
+        (self.memory, self.metadata)
+    }
+}
+
+impl std::fmt::Debug for LoadedLinkedPe32V5 {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("LoadedLinkedPe32V5")
             .field("metadata", &self.metadata)
             .finish_non_exhaustive()
     }

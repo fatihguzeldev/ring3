@@ -2,9 +2,10 @@ use super::imports::{ImportDirectory, ProviderProfile, prepare_imports};
 use super::relocation::{RelocationDirectory, prepare_fixups};
 use super::{
     ImageMetadata32, LinkedImageMetadata32, LinkedImageMetadata32V2, LinkedImageMetadata32V3,
-    LinkedImageMetadata32V4, LoadError, LoadedLinkedPe32, LoadedLinkedPe32V2, LoadedLinkedPe32V3,
-    LoadedLinkedPe32V4, LoadedPe32,
+    LinkedImageMetadata32V4, LinkedImageMetadata32V5, LoadError, LoadedLinkedPe32,
+    LoadedLinkedPe32V2, LoadedLinkedPe32V3, LoadedLinkedPe32V4, LoadedLinkedPe32V5, LoadedPe32,
 };
+use crate::cpu::dbt::GateSpec;
 use crate::memory::{AddressSpace, GuestAddress, PAGE_SIZE, PageRange, Permissions};
 
 const MAX_IMAGE_BYTES: u32 = 16 * 1024 * 1024;
@@ -16,6 +17,18 @@ enum Profile {
     Fixed,
     Relocated,
     Linked,
+}
+
+struct LinkedMetadata {
+    image: ImageMetadata32,
+    gate_base: u32,
+    gate_count: u32,
+    gates: [GateSpec; 6],
+}
+
+struct LoadedLinkedImage {
+    memory: AddressSpace,
+    metadata: LinkedMetadata,
 }
 
 #[derive(Clone, Copy)]
@@ -260,13 +273,52 @@ pub fn load_pe32_linked_v4_at(
     gate_base: u32,
     resident_pages: u32,
 ) -> Result<LoadedLinkedPe32V4, LoadError> {
-    load_linked_profile(
+    let linked = load_linked_profile(
         bytes,
         actual_base,
         gate_base,
         resident_pages,
         ProviderProfile::VirtualAllocation,
-    )
+    )?;
+    Ok(LoadedLinkedPe32V4 {
+        memory: linked.memory,
+        metadata: LinkedImageMetadata32V4 {
+            image: linked.metadata.image,
+            gate_base: linked.metadata.gate_base,
+            gate_count: linked.metadata.gate_count,
+            gates: [
+                linked.metadata.gates[0],
+                linked.metadata.gates[1],
+                linked.metadata.gates[2],
+                linked.metadata.gates[3],
+                linked.metadata.gates[4],
+            ],
+        },
+    })
+}
+
+pub fn load_pe32_linked_v5_at(
+    bytes: &[u8],
+    actual_base: u32,
+    gate_base: u32,
+    resident_pages: u32,
+) -> Result<LoadedLinkedPe32V5, LoadError> {
+    let linked = load_linked_profile(
+        bytes,
+        actual_base,
+        gate_base,
+        resident_pages,
+        ProviderProfile::VirtualMemory,
+    )?;
+    Ok(LoadedLinkedPe32V5 {
+        memory: linked.memory,
+        metadata: LinkedImageMetadata32V5 {
+            image: linked.metadata.image,
+            gate_base: linked.metadata.gate_base,
+            gate_count: linked.metadata.gate_count,
+            gates: linked.metadata.gates,
+        },
+    })
 }
 
 fn load_linked_profile(
@@ -275,7 +327,7 @@ fn load_linked_profile(
     gate_base: u32,
     resident_pages: u32,
     profile: ProviderProfile,
-) -> Result<LoadedLinkedPe32V4, LoadError> {
+) -> Result<LoadedLinkedImage, LoadError> {
     if !(1..=4096).contains(&resident_pages) || bytes.len() > MAX_IMAGE_BYTES as usize {
         return Err(LoadError::Capacity);
     }
@@ -366,9 +418,9 @@ fn load_linked_profile(
     plan.metadata.entry_point = actual_base + (plan.metadata.entry_point - preferred_base);
     plan.metadata.image_base = actual_base;
     plan.metadata.mapped_pages = mapped_pages;
-    Ok(LoadedLinkedPe32V4 {
+    Ok(LoadedLinkedImage {
         memory,
-        metadata: LinkedImageMetadata32V4 {
+        metadata: LinkedMetadata {
             image: plan.metadata,
             gate_base,
             gate_count: imports.gate_count,
