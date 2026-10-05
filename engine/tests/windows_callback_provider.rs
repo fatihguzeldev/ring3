@@ -686,7 +686,7 @@ fn invalid_provider_shapes_and_callback_exit_process_refuse_before_effects() {
         (
             WindowsApi32::ExitProcess,
             CallingConvention32::Stdcall,
-            vec![42],
+            vec![],
         ),
         (
             WindowsApi32::ExitProcess,
@@ -747,7 +747,7 @@ fn committed_allocation_and_last_error_survive_neutral_abort_and_private_outer_r
             &mut f,
             WindowsApi32::ExitProcess,
             CallingConvention32::Stdcall,
-            &[99],
+            &[],
         );
         reject(&mut f, HostError::Call(CallError::InvalidRequest), |f| {
             complete(f, dead_inner)
@@ -796,5 +796,373 @@ fn committed_allocation_and_last_error_survive_neutral_abort_and_private_outer_r
             &ram(&f.engine, WINDOW + 4096).unwrap()[4092..],
             &0x8877_6655_u32.to_le_bytes()
         );
+    }
+}
+
+#[test]
+fn active_callback_exit_process_is_a_terminal_provider_outcome() {
+    let mut f = fixture(12, false, true);
+    let (inner, _) = capture(
+        &mut f,
+        WindowsApi32::ExitProcess,
+        CallingConvention32::Stdcall,
+        &[0],
+    );
+    assert_eq!(complete(&mut f, inner), Ok(()));
+}
+
+fn terminal_record(code: u32) -> [u8; 40] {
+    let mut bytes = [0; 40];
+    bytes[..4].copy_from_slice(b"R3EX");
+    bytes[4..8].copy_from_slice(&0x0001_0004_u32.to_le_bytes());
+    bytes[8..12].copy_from_slice(&40_u32.to_le_bytes());
+    bytes[16..20].copy_from_slice(&9_u32.to_le_bytes());
+    bytes[24..28].copy_from_slice(&code.to_le_bytes());
+    bytes
+}
+
+fn publish_terminal(f: &mut Fixture, inner: u32, state: State32, code: u32) {
+    let before = saved(f);
+    let mut expected = before.arena.clone();
+    expected[56..96].copy_from_slice(&terminal_record(code));
+    assert_eq!(complete(f, inner), Ok(()));
+    assert_eq!(f.engine.arena(), expected);
+    assert_eq!(decode_state(&f.engine.arena()[..56]).unwrap(), state);
+    assert_eq!(f.engine.arena_address(), before.pointer);
+    assert_eq!(f.engine.generation(), before.generation);
+    assert_eq!(f.engine.key(), KEY);
+    assert!(f.engine.is_open());
+}
+
+fn terminal_reject<T: std::fmt::Debug + PartialEq>(
+    f: &mut Fixture,
+    error: HostError,
+    operation: impl FnOnce(&mut Fixture) -> Result<T, HostError>,
+) {
+    let before = saved(f);
+    assert_eq!(operation(f), Err(error));
+    assert_eq!(saved(f), before);
+}
+
+fn diagnostic_page(engine: &mut EngineInstance, address: u32) -> Vec<u8> {
+    let before = engine.arena().to_vec();
+    let mut bytes = Vec::with_capacity(4096);
+    for offset in (0..4096).step_by(4) {
+        engine.read32(address + offset).unwrap();
+        assert_eq!(&engine.arena()[116..120], &0_u32.to_le_bytes());
+        bytes.extend_from_slice(&engine.arena()[120..124]);
+    }
+    assert_eq!(&engine.arena()[..100], &before[..100]);
+    assert_eq!(&engine.arena()[140..], &before[140..]);
+    bytes
+}
+
+#[test]
+fn callback_exit_uses_saved_argument_and_preserves_cpu_pages_and_committed_effects() {
+    for foreign in [false, true] {
+        for code in [0, u32::MAX] {
+            let mut f = fixture(12, foreign, true);
+            invoke(&mut f, WindowsApi32::SetLastError, &[LAST_ERROR], SENTINEL);
+            invoke(
+                &mut f,
+                WindowsApi32::VirtualAlloc,
+                &[0, 4097, 0x3000, 4],
+                WINDOW,
+            );
+            f.engine.write32(WINDOW, 0x4433_2211).unwrap();
+            f.engine.write32(WINDOW + 8192 - 4, 0x8877_6655).unwrap();
+            let (inner, state) = capture(
+                &mut f,
+                WindowsApi32::ExitProcess,
+                CallingConvention32::Stdcall,
+                &[code],
+            );
+            terminal_reject(&mut f, HostError::Call(CallError::InvalidRequest), |f| {
+                f.engine.complete_active_resident_callback_call(
+                    KEY,
+                    f.active,
+                    f.callback_token,
+                    inner,
+                    123,
+                )
+            });
+            f.engine.write32(state.registers[4], 0xdead_beef).unwrap();
+            f.engine
+                .write32(state.registers[4] + 4, code ^ u32::MAX)
+                .unwrap();
+            f.engine.write32(0x8ff8, 0xdead_0018).unwrap();
+            f.engine.write32(0x8ffc, 0xdead_0017).unwrap();
+            f.engine.arena_mut().unwrap()[100..].fill(0xa5);
+            let addresses = ORIGINAL_PAGES
+                .into_iter()
+                .chain([WINDOW, WINDOW + 4096])
+                .collect::<Vec<_>>();
+            let pages = addresses
+                .iter()
+                .map(|address| ram(&f.engine, *address).unwrap())
+                .collect::<Vec<_>>();
+            publish_terminal(&mut f, inner, state, code);
+            for (address, expected) in addresses.into_iter().zip(pages) {
+                assert_eq!(diagnostic_page(&mut f.engine, address), expected);
+            }
+            terminal_reject(&mut f, HostError::ProcessExited, |f| complete(f, inner));
+        }
+    }
+}
+
+#[test]
+fn callback_exit_authority_state_and_cancel_priorities_leave_pending_retryable() {
+    for foreign in [false, true] {
+        let mut f = fixture(12, foreign, true);
+        let (inner, state) = capture(
+            &mut f,
+            WindowsApi32::ExitProcess,
+            CallingConvention32::Stdcall,
+            &[u32::MAX],
+        );
+        for (key, unit, callback, token, error) in [
+            (KEY ^ 1, f.active, 0, 0, HostError::InvalidArtifact),
+            (
+                KEY,
+                f.active ^ (1_u64 << 32),
+                0,
+                0,
+                HostError::Resident(RegistryError::InvalidUnit),
+            ),
+            (
+                KEY,
+                f.units[3],
+                f.callback_token,
+                inner,
+                HostError::Call(CallError::Busy),
+            ),
+            (
+                KEY,
+                f.active,
+                0,
+                inner,
+                HostError::Call(CallError::InvalidToken),
+            ),
+            (
+                KEY,
+                f.active,
+                f.callback_token,
+                0,
+                HostError::Call(CallError::InvalidToken),
+            ),
+            (
+                KEY,
+                f.active,
+                f.callback_token,
+                1,
+                HostError::Call(CallError::Busy),
+            ),
+        ] {
+            reject(&mut f, error, |f| {
+                f.engine
+                    .complete_active_resident_callback_windows_call(key, unit, callback, token)
+            });
+        }
+        reject(&mut f, HostError::Call(CallError::Busy), |f| {
+            f.engine.complete_resident_windows_call(KEY, f.units[0], 1)
+        });
+        let frozen = f.engine.arena()[..96].to_vec();
+        for offset in [0, 52, 56, 76] {
+            f.engine.arena_mut().unwrap()[offset] ^= 1;
+            f.engine.arena_mut().unwrap()[CANCEL_OFFSET..CANCEL_OFFSET + 4]
+                .copy_from_slice(&1_u32.to_le_bytes());
+            reject(&mut f, HostError::Call(CallError::StateChanged), |f| {
+                complete(f, inner)
+            });
+            f.engine.arena_mut().unwrap()[..96].copy_from_slice(&frozen);
+            reject(&mut f, HostError::Call(CallError::Cancelled), |f| {
+                complete(f, inner)
+            });
+            f.engine.arena_mut().unwrap()[CANCEL_OFFSET..CANCEL_OFFSET + 4].fill(0);
+        }
+        publish_terminal(&mut f, inner, state, u32::MAX);
+    }
+}
+
+#[test]
+fn callback_exit_shapes_refuse_after_cancel_without_consuming_callback_or_inner() {
+    for foreign in [false, true] {
+        for (convention, arguments) in [
+            (CallingConvention32::Stdcall, vec![]),
+            (CallingConvention32::Stdcall, vec![0, 1]),
+            (CallingConvention32::Cdecl, vec![0]),
+            (CallingConvention32::Thiscall, vec![0]),
+        ] {
+            let mut f = fixture(12, foreign, true);
+            let (inner, _) = capture(&mut f, WindowsApi32::ExitProcess, convention, &arguments);
+            f.engine.arena_mut().unwrap()[CANCEL_OFFSET..CANCEL_OFFSET + 4]
+                .copy_from_slice(&1_u32.to_le_bytes());
+            reject(&mut f, HostError::Call(CallError::Cancelled), |f| {
+                complete(f, inner)
+            });
+            f.engine.arena_mut().unwrap()[CANCEL_OFFSET..CANCEL_OFFSET + 4].fill(0);
+            reject(&mut f, HostError::Call(CallError::InvalidRequest), |f| {
+                complete(f, inner)
+            });
+            reject(&mut f, HostError::Call(CallError::InvalidRequest), |f| {
+                f.engine.complete_active_resident_callback_call(
+                    KEY,
+                    f.active,
+                    f.callback_token,
+                    inner,
+                    99,
+                )
+            });
+            f.engine.abandon_call(KEY, inner).unwrap();
+            let (retry, state) = capture(
+                &mut f,
+                WindowsApi32::ExitProcess,
+                CallingConvention32::Stdcall,
+                &[0],
+            );
+            assert_eq!(retry, inner + 1);
+            publish_terminal(&mut f, retry, state, 0);
+        }
+    }
+}
+
+#[test]
+fn callback_exit_stale_active_home_and_outer_precede_bad_inner_and_allow_abort() {
+    for foreign in [false, true] {
+        for page in [OUTER, HOME, ACTIVE] {
+            let mut f = fixture(12, foreign, true);
+            let (inner, _) = capture(
+                &mut f,
+                WindowsApi32::ExitProcess,
+                CallingConvention32::Stdcall,
+                &[99],
+            );
+            f.engine.write8(page, 0x90).unwrap();
+            f.engine.arena_mut().unwrap()[CANCEL_OFFSET..CANCEL_OFFSET + 4]
+                .copy_from_slice(&1_u32.to_le_bytes());
+            let relevant = page != ACTIVE || foreign;
+            let error = if relevant {
+                HostError::Resident(RegistryError::CodeInvalidated)
+            } else {
+                HostError::Call(CallError::InvalidToken)
+            };
+            reject(&mut f, error, |f| {
+                f.engine.complete_active_resident_callback_windows_call(
+                    KEY,
+                    f.active,
+                    f.callback_token,
+                    0,
+                )
+            });
+            if relevant {
+                reject(
+                    &mut f,
+                    HostError::Resident(RegistryError::CodeInvalidated),
+                    |f| complete(f, inner),
+                );
+            } else {
+                reject(&mut f, HostError::Call(CallError::Cancelled), |f| {
+                    complete(f, inner)
+                });
+            }
+            let mut expected = f.engine.arena().to_vec();
+            expected[..96].copy_from_slice(&f.outer_bytes);
+            f.engine.abort_callback(KEY, f.callback_token).unwrap();
+            assert_eq!(f.engine.arena(), expected);
+            f.engine.arena_mut().unwrap()[CANCEL_OFFSET..CANCEL_OFFSET + 4].fill(0);
+            if page == OUTER {
+                reject(
+                    &mut f,
+                    HostError::Resident(RegistryError::CodeInvalidated),
+                    |f| f.engine.complete_resident_call(KEY, f.units[0], 1, 99),
+                );
+            } else {
+                f.engine
+                    .complete_resident_call(KEY, f.units[0], 1, 99)
+                    .unwrap();
+            }
+        }
+    }
+}
+
+#[test]
+fn callback_terminal_latch_precedes_live_controls_and_close_keeps_tombstone() {
+    for foreign in [false, true] {
+        let mut f = fixture(12, foreign, true);
+        let (inner, state) = capture(
+            &mut f,
+            WindowsApi32::ExitProcess,
+            CallingConvention32::Stdcall,
+            &[0],
+        );
+        publish_terminal(&mut f, inner, state, 0);
+        terminal_reject(&mut f, HostError::ProcessExited, |f| {
+            f.engine
+                .complete_active_resident_callback_windows_call(KEY ^ 1, 0, 0, 0)
+        });
+        terminal_reject(&mut f, HostError::ProcessExited, |f| {
+            f.engine
+                .complete_active_resident_callback_call(KEY ^ 1, 0, 0, 0, 0)
+        });
+        terminal_reject(&mut f, HostError::ProcessExited, |f| {
+            f.engine.complete_resident_windows_call(KEY, f.units[0], 1)
+        });
+        terminal_reject(&mut f, HostError::ProcessExited, |f| {
+            f.engine.complete_resident_call(KEY, f.units[0], 1, 0)
+        });
+        terminal_reject(&mut f, HostError::ProcessExited, |f| {
+            f.engine
+                .finish_resident_callback(KEY, f.units[1], f.callback_token)
+        });
+        terminal_reject(&mut f, HostError::ProcessExited, |f| {
+            f.engine.abort_callback(KEY, f.callback_token)
+        });
+        terminal_reject(&mut f, HostError::ProcessExited, |f| {
+            f.engine.guard_resident(0, 0)
+        });
+        terminal_reject(&mut f, HostError::ProcessExited, |f| {
+            f.engine.guard_dispatch_entry(0)
+        });
+        terminal_reject(&mut f, HostError::ProcessExited, |f| f.engine.guard(0, 0));
+        terminal_reject(&mut f, HostError::ProcessExited, |f| {
+            f.engine.map(u32::MAX, 0, u32::MAX)
+        });
+        terminal_reject(&mut f, HostError::ProcessExited, |f| {
+            f.engine.write8(u32::MAX, u32::MAX)
+        });
+        terminal_reject(&mut f, HostError::ProcessExited, |f| {
+            f.engine.compile_resident(0)
+        });
+        assert!(matches!(
+            f.engine.arena_mut(),
+            Err(HostError::ProcessExited)
+        ));
+        assert!(matches!(
+            f.engine.dispatcher_bytes(0),
+            Err(HostError::ProcessExited)
+        ));
+        let before_read = f.engine.arena().to_vec();
+        f.engine.read8(STACK).unwrap();
+        f.engine.read16(STACK).unwrap();
+        f.engine.read32(STACK).unwrap();
+        assert_eq!(&f.engine.arena()[..100], &before_read[..100]);
+        assert_eq!(&f.engine.arena()[140..], &before_read[140..]);
+        let tombstone = f.engine.arena().to_vec();
+        let pointer = f.engine.arena_address();
+        f.engine.close();
+        f.engine.close();
+        assert!(!f.engine.is_open());
+        assert_eq!(f.engine.arena(), tombstone);
+        assert_eq!(f.engine.arena_address(), pointer);
+        assert_eq!(f.engine.key(), KEY);
+        assert_eq!(f.engine.generation(), 0);
+        terminal_reject(&mut f, HostError::Closed, |f| {
+            f.engine
+                .complete_active_resident_callback_windows_call(KEY ^ 1, 0, 0, 0)
+        });
+        terminal_reject(&mut f, HostError::Closed, |f| {
+            f.engine.abort_callback(KEY ^ 1, 0)
+        });
+        terminal_reject(&mut f, HostError::Closed, |f| f.engine.read8(STACK));
     }
 }

@@ -55,11 +55,6 @@ impl EngineInstance {
             return Err(HostError::Infrastructure);
         };
         let api = WindowsApi32::from_id(id).ok_or(HostError::Call(CallError::InvalidRequest))?;
-        if matches!(owner, PendingOwner::ResidentCallback { .. })
-            && api == WindowsApi32::ExitProcess
-        {
-            return Err(HostError::Call(CallError::InvalidRequest));
-        }
         let (outcome, thread) = self
             .windows_thread
             .prepare(
@@ -92,6 +87,7 @@ impl EngineInstance {
                     .copy_from_slice(&bytes);
                 self.exit_code = Some(code);
                 self.pending_call = None;
+                self.callback = None;
             }
             WindowsOutcome32::Allocate { size } => {
                 let frame = pending.frame;
