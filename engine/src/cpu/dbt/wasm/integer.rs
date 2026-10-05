@@ -324,6 +324,29 @@ pub(super) fn instruction(
             extend_value(code, kind, width);
             code.local_set(register(destination));
         }
+        Operation::ByteSwap { destination } => {
+            let destination = register(destination);
+            code.local_get(destination)
+                .i32_const(24)
+                .i32_shl()
+                .local_get(destination)
+                .i32_const(0xff00)
+                .i32_and()
+                .i32_const(8)
+                .i32_shl()
+                .i32_or()
+                .local_get(destination)
+                .i32_const(8)
+                .i32_shr_u()
+                .i32_const(0xff00)
+                .i32_and()
+                .i32_or()
+                .local_get(destination)
+                .i32_const(24)
+                .i32_shr_u()
+                .i32_or()
+                .local_set(destination);
+        }
         Operation::Lea {
             destination,
             address,

@@ -89,6 +89,9 @@ pub(super) fn lower(instruction: &Instruction, bytes: &[u8]) -> Result<Operation
                 source: small_source(instruction, width)?,
             })
         }
+        Code::Bswap_r32 => Ok(Operation::ByteSwap {
+            destination: register(instruction.op0_register())?,
+        }),
         Code::Lea_r32_m => Ok(Operation::Lea {
             destination: register(instruction.op0_register())?,
             address: effective_address(instruction)?,

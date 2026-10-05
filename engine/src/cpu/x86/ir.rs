@@ -246,6 +246,9 @@ pub enum Operation {
         destination: Register32,
         source: SmallSource,
     },
+    ByteSwap {
+        destination: Register32,
+    },
     Lea {
         destination: Register32,
         address: EffectiveAddress,
