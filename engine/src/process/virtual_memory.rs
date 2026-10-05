@@ -13,9 +13,28 @@ impl EngineInstance {
     ) -> Result<(), HostError> {
         let bounds = PageRange::new(GuestAddress(0x1000_0000), 0x6000_0000 / PAGE_SIZE)
             .map_err(HostError::Memory)?;
-        let planned = self
+        let mut planned = self
             .memory()?
             .find_free_range(bounds, size.div_ceil(PAGE_SIZE), 65536);
+        if let (Ok(range), Some(image)) = (planned, self.image) {
+            let range_start = range.first as u64 * u64::from(PAGE_SIZE);
+            let range_end = range_start + range.count as u64 * u64::from(PAGE_SIZE);
+            let image_start = u64::from(image.image_base);
+            let image_end = image_start + u64::from(image.image_size);
+            if range_start < image_end && image_start < range_end {
+                planned = if image_end >= 0x7000_0000 {
+                    Err(MemoryError::Capacity)
+                } else {
+                    let bounds = PageRange::new(
+                        GuestAddress(image_end as u32),
+                        (0x7000_0000 - image_end) as u32 / PAGE_SIZE,
+                    )
+                    .map_err(HostError::Memory)?;
+                    self.memory()?
+                        .find_free_range(bounds, size.div_ceil(PAGE_SIZE), 65536)
+                };
+            }
+        }
         let range = match planned {
             Ok(range) => range,
             Err(MemoryError::Capacity) => {

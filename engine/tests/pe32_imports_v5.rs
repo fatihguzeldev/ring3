@@ -518,3 +518,173 @@ fn copied_free_input_retries_from_owned_prefix_and_abort_preserves_published_ima
     );
     assert_eq!(engine.arena(), arena);
 }
+
+use ring3_engine::{
+    abi::{
+        arena::TRANSFER_OFFSET,
+        x86::{decode_state, encode_exit_v3, encode_state},
+    },
+    cpu::{ExecutionExit, ExitReason, x86::State32},
+    windows::CallingConvention32,
+};
+
+fn allocate_from_loaded_image(engine: &mut EngineInstance, generation: u32, return_pc: u32) -> u32 {
+    let esp = 0x8080;
+    for (index, value) in [return_pc, 0, 1, 0x3000, 4].into_iter().enumerate() {
+        engine.write32(esp + index as u32 * 4, value).unwrap();
+    }
+    let state = State32 {
+        registers: [
+            0x89ab_cdef,
+            0x1357_9bdf,
+            0x2345_6789,
+            0x3456_789a,
+            esp,
+            0x5678_9abc,
+            0x6789_abcd,
+            0x789a_bcde,
+        ],
+        eip: GATE + 64,
+        eflags: 0xcd7,
+    };
+    let arena = engine.arena_mut().unwrap();
+    encode_state(&state, &mut arena[..56]).unwrap();
+    encode_exit_v3(
+        &ExecutionExit {
+            retired: 0,
+            reason: ExitReason::Gate { id: 0x0001_0005 },
+        },
+        &mut arena[56..96],
+    )
+    .unwrap();
+    arena[CANCEL_OFFSET..CANCEL_OFFSET + 4].fill(0);
+    let call = engine
+        .capture_call(KEY, generation, CallingConvention32::Stdcall, 4)
+        .unwrap();
+    assert_eq!(&call.arguments[..4], &[0, 1, 0x3000, 4]);
+    engine
+        .complete_windows_call(KEY, generation, call.token)
+        .unwrap();
+    let completed = decode_state(&engine.arena()[..56]).unwrap();
+    let address = completed.registers[0];
+    let mut expected = state;
+    expected.registers[0] = address;
+    expected.registers[4] = esp + 20;
+    expected.eip = return_pc;
+    assert_eq!(completed, expected);
+    address
+}
+
+#[test]
+fn named_virtual_alloc_excludes_the_loaded_image_extent_and_preserves_sparse_gaps() {
+    let cases: [(u32, u32, u32, u32, &[u32]); 7] = [
+        (0x0040_0000, 0x7000, 0x5000, 0x2000, &[0x1000_0000]),
+        (0x1000_0000, 0x20000, 0x5000, 0x10000, &[0x1002_0000]),
+        (0x1000_0000, 0x21000, 0x5000, 0x10000, &[0x1003_0000]),
+        (
+            0x1001_0000,
+            0x20000,
+            0x5000,
+            0x10000,
+            &[0x1000_0000, 0x1003_0000],
+        ),
+        (0x1000_0000, 0x40000, 0x30000, 0x10000, &[0x1004_0000]),
+        (0x0fff_0000, 0x30000, 0x5000, 0x10000, &[0x1002_0000]),
+        (0xffff_0000, 0x10000, 0x5000, 0x2000, &[0x1000_0000]),
+    ];
+    for (base, image_size, bss_rva, gap_rva, allocations) in cases {
+        let mut bytes = named_free_and_alloc_image();
+        pe::put32(&mut bytes, pe::OPTIONAL + 28, base);
+        pe::put32(&mut bytes, pe::OPTIONAL + 56, image_size);
+        pe::put32(&mut bytes, pe::section(2) + 12, bss_rva);
+        let mut engine = EngineInstance::new(9, KEY).unwrap();
+        let linked = engine.load_pe32_linked_v5_at(&bytes, base, GATE).unwrap();
+        assert_eq!(linked.image.image_base, base);
+        assert_eq!(linked.image.image_size, image_size);
+        assert_eq!(linked.image.mapped_pages, 5);
+        assert_eq!(linked.gate_count, 2);
+        assert_eq!(linked.gates[0].entry, GuestAddress(GATE + 64));
+        assert_eq!(linked.gates[0].id, 0x0001_0005);
+        let gap = base + gap_rva;
+        assert!(matches!(
+            engine.memory().unwrap().resolve(GuestAddress(gap), Access::Read),
+            Err(MemoryError::Fault(fault))
+                if fault.address == GuestAddress(gap)
+                    && fault.access == Access::Read
+                    && fault.reason == FaultReason::Unmapped
+        ));
+        assert_eq!(
+            engine.start_loaded_image(gap, 1),
+            Err(HostError::InvalidRequest)
+        );
+        engine.start_loaded_image(0x8000, 1).unwrap();
+        for (index, value) in [GATE + 64, 2, GATE + 64, 0x0001_0005]
+            .into_iter()
+            .enumerate()
+        {
+            let at = TRANSFER_OFFSET + index * 4;
+            engine.arena_mut().unwrap()[at..at + 4].copy_from_slice(&value.to_le_bytes());
+        }
+        let resident = engine.compile_resident_with_gates(1, 1).unwrap().get();
+        let generation = engine.compile_with_gates(1, 1).unwrap();
+        let resident_bytes = engine.resident_bytes(resident).unwrap().to_vec();
+        let artifact_bytes = engine.artifact_bytes().unwrap().to_vec();
+        let samples = [
+            (base, 512),
+            (base + 0x1000, 512),
+            (base + 0x3000, 512),
+            (base + bss_rva, 4096),
+        ];
+        let image_bytes =
+            samples.map(|(address, length)| read(engine.memory().unwrap(), address, length));
+        let image_code = engine
+            .memory()
+            .unwrap()
+            .snapshot_code(GuestAddress(base + 0x1000), 16)
+            .unwrap();
+        for (index, &expected_address) in allocations.iter().enumerate() {
+            let address = allocate_from_loaded_image(&mut engine, generation, base + 0x1000);
+            assert_eq!(
+                address, expected_address,
+                "base={base:08x}, image_size={image_size:x}, allocation={index}"
+            );
+            assert_eq!(engine.memory().unwrap().mapped_pages(), 7 + index as u32);
+            assert_eq!(read(engine.memory().unwrap(), address, 4096), vec![0; 4096]);
+            assert!(
+                engine
+                    .memory()
+                    .unwrap()
+                    .resolve(GuestAddress(address), Access::Write)
+                    .is_ok()
+            );
+            assert!(matches!(
+                engine.memory().unwrap().resolve(GuestAddress(address), Access::Execute),
+                Err(MemoryError::Fault(fault)) if fault.reason == FaultReason::Permission
+            ));
+            engine.write32(address + 4092, 0xf123_4567).unwrap();
+            assert_eq!(
+                read(engine.memory().unwrap(), address + 4092, 4),
+                0xf123_4567_u32.to_le_bytes()
+            );
+            for &previous in &allocations[..=index] {
+                assert_eq!(
+                    read(engine.memory().unwrap(), previous + 4092, 4),
+                    0xf123_4567_u32.to_le_bytes()
+                );
+            }
+            assert!(matches!(
+                engine.memory().unwrap().resolve(GuestAddress(gap), Access::Read),
+                Err(MemoryError::Fault(fault))
+                    if fault.address == GuestAddress(gap)
+                        && fault.reason == FaultReason::Unmapped
+            ));
+            for ((sample, length), expected) in samples.into_iter().zip(&image_bytes) {
+                assert_eq!(&read(engine.memory().unwrap(), sample, length), expected);
+            }
+            assert!(engine.memory().unwrap().is_code_current(&image_code));
+            assert_eq!(engine.generation(), generation);
+            assert_eq!(engine.resident_bytes(resident).unwrap(), resident_bytes);
+            assert_eq!(engine.artifact_bytes().unwrap(), artifact_bytes);
+        }
+    }
+}
