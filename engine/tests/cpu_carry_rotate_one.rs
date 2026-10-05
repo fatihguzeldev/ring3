@@ -270,7 +270,11 @@ fn excluded_forms_and_two_byte_fetch_preserve_fault_and_snapshot_boundaries() {
             exclusions += 1;
         }
         for count in [0, 1, 2, 255] {
-            rejected(&[0xc1, modrm, count], opcode_error);
+            let mut bytes = vec![0xc1, modrm, count];
+            if count == 1 {
+                bytes.insert(0, 0x66);
+            }
+            rejected(&bytes, opcode_error);
             exclusions += 1;
         }
         let bytes = [0xd1, modrm | 3];
