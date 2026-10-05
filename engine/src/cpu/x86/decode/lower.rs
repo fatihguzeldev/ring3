@@ -27,7 +27,7 @@ pub(super) fn lower(instruction: &Instruction, bytes: &[u8]) -> Result<Operation
             destination: location(instruction, 0)?,
             source: value(instruction, 1)?,
         }),
-        Code::Mov_r8_rm8 => match instruction.op1_kind() {
+        Code::Mov_r8_rm8 | Code::Mov_AL_moffs8 => match instruction.op1_kind() {
             OpKind::Memory => Ok(Operation::LoadByte {
                 destination: byte_register(instruction.op0_register())?,
                 address: effective_address(instruction)?,
@@ -38,7 +38,7 @@ pub(super) fn lower(instruction: &Instruction, bytes: &[u8]) -> Result<Operation
             }),
             _ => Err(unsupported()),
         },
-        Code::Mov_rm8_r8 => match instruction.op0_kind() {
+        Code::Mov_rm8_r8 | Code::Mov_moffs8_AL => match instruction.op0_kind() {
             OpKind::Memory => Ok(Operation::StoreByte {
                 address: effective_address(instruction)?,
                 source: byte_value(instruction)?,
