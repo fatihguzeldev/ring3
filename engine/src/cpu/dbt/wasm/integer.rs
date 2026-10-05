@@ -7,8 +7,8 @@ use crate::cpu::x86::{
     ir::{
         BinaryKind, BranchTarget, ByteArithmeticKind, ByteLogicalKind, BytePredicateKind,
         ByteReadArithmeticKind, ByteRegister, ByteValue, CarryKind, EffectiveAddress,
-        ExtensionKind, Location32, MemoryByteArithmeticKind, Operation, ShiftCount, ShiftKind,
-        SmallSource, SmallWidth, UnaryKind, Value32,
+        ExtensionKind, Location32, MemoryByteArithmeticKind, MultiplyKind, Operation, ShiftCount,
+        ShiftKind, SmallSource, SmallWidth, UnaryKind, Value32,
     },
 };
 
@@ -521,6 +521,9 @@ pub(super) fn instruction(
             immediate,
         } => {
             signed_multiply(code, destination, source, immediate, imports, exit_depth);
+        }
+        Operation::MultiplyAccumulator { kind, source } => {
+            accumulator_multiply(code, kind, source);
         }
         Operation::Jump {
             target: BranchTarget::Direct(target),
@@ -1274,6 +1277,52 @@ fn shift_flags(code: &mut InstructionSink<'_>, kind: ShiftKind) {
         }
         code.i32_const(11).i32_shl().i32_or().local_set(FLAGS).end();
     }
+}
+
+fn accumulator_multiply(code: &mut InstructionSink<'_>, kind: MultiplyKind, source: Register32) {
+    code.local_get(register(Register32::Eax))
+        .local_set(LHS)
+        .local_get(register(source))
+        .local_set(RHS)
+        .local_get(LHS)
+        .local_get(RHS)
+        .i32_mul()
+        .local_set(register(Register32::Eax));
+    for operand in [LHS, RHS] {
+        code.local_get(operand);
+        match kind {
+            MultiplyKind::Unsigned => {
+                code.i64_extend_i32_u();
+            }
+            MultiplyKind::Signed => {
+                code.i64_extend_i32_s();
+            }
+        }
+    }
+    code.i64_mul()
+        .i64_const(32)
+        .i64_shr_u()
+        .i32_wrap_i64()
+        .local_set(register(Register32::Edx))
+        .local_get(FLAGS)
+        .i32_const(0x402)
+        .i32_and()
+        .local_get(register(Register32::Edx));
+    match kind {
+        MultiplyKind::Unsigned => {
+            code.i32_const(0);
+        }
+        MultiplyKind::Signed => {
+            code.local_get(register(Register32::Eax))
+                .i32_const(31)
+                .i32_shr_s();
+        }
+    }
+    code.i32_ne()
+        .i32_const(0x801)
+        .i32_mul()
+        .i32_or()
+        .local_set(FLAGS);
 }
 
 fn signed_multiply(

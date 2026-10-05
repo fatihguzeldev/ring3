@@ -103,6 +103,12 @@ pub enum ExtensionKind {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MultiplyKind {
+    Unsigned,
+    Signed,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum BinaryKind {
     Add,
     Adc,
@@ -310,6 +316,10 @@ pub enum Operation {
         destination: Register32,
         source: Location32,
         immediate: Option<u32>,
+    },
+    MultiplyAccumulator {
+        kind: MultiplyKind,
+        source: Register32,
     },
     Jump {
         target: BranchTarget,

@@ -2,11 +2,13 @@ use iced_x86::{Code, Instruction, OpKind};
 
 use super::{
     DecodeError,
-    operands::{byte_register, byte_value, effective_address, location, register, value},
+    operands::{
+        byte_register, byte_value, effective_address, location, register, unsupported, value,
+    },
 };
 use crate::cpu::x86::ir::{
     BinaryKind, ByteArithmeticKind, ByteLogicalKind, BytePredicateKind, ByteReadArithmeticKind,
-    MemoryByteArithmeticKind, Operation, ShiftCount, ShiftKind, UnaryKind,
+    MemoryByteArithmeticKind, MultiplyKind, Operation, ShiftCount, ShiftKind, UnaryKind,
 };
 
 pub(super) fn lower(instruction: &Instruction) -> Option<Result<Operation, DecodeError>> {
@@ -311,6 +313,22 @@ fn lower_shift(instruction: &Instruction) -> Option<Result<Operation, DecodeErro
 }
 
 fn lower_multiply(instruction: &Instruction) -> Option<Result<Operation, DecodeError>> {
+    let kind = match instruction.code() {
+        Code::Mul_rm32 => Some(MultiplyKind::Unsigned),
+        Code::Imul_rm32 => Some(MultiplyKind::Signed),
+        _ => None,
+    };
+    if let Some(kind) = kind {
+        return Some((|| {
+            if instruction.op0_kind() != OpKind::Register {
+                return Err(unsupported());
+            }
+            Ok(Operation::MultiplyAccumulator {
+                kind,
+                source: register(instruction.op0_register())?,
+            })
+        })());
+    }
     let immediate = match instruction.code() {
         Code::Imul_r32_rm32 => None,
         Code::Imul_r32_rm32_imm32 => Some(instruction.immediate32()),
