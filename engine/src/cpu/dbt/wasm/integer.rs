@@ -516,6 +516,13 @@ pub(super) fn instruction(
             store = true;
         }
         Operation::RotateOne { kind, destination } => rotate_one(code, kind, destination),
+        Operation::MemoryRotateOne { kind, address } => {
+            memory::load_result(code, address, imports, exit_depth);
+            rotate_one_value(code, kind);
+            memory::store_result(code, address, imports, exit_depth);
+            rotate_one_flags(code, kind);
+            store = true;
+        }
         Operation::SignedMultiply {
             destination,
             source,
@@ -1300,7 +1307,14 @@ fn shift_flags(code: &mut InstructionSink<'_>, kind: ShiftKind) {
 }
 
 fn rotate_one(code: &mut InstructionSink<'_>, kind: RotateKind, destination: Register32) {
-    code.local_get(register(destination)).i32_const(1);
+    code.local_get(register(destination)).local_set(RESULT);
+    rotate_one_value(code, kind);
+    code.local_get(RESULT).local_set(register(destination));
+    rotate_one_flags(code, kind);
+}
+
+fn rotate_one_value(code: &mut InstructionSink<'_>, kind: RotateKind) {
+    code.local_get(RESULT).i32_const(1);
     match kind {
         RotateKind::Left => {
             code.i32_rotl();
@@ -1309,7 +1323,10 @@ fn rotate_one(code: &mut InstructionSink<'_>, kind: RotateKind, destination: Reg
             code.i32_rotr();
         }
     }
-    code.local_tee(RESULT).local_set(register(destination));
+    code.local_set(RESULT);
+}
+
+fn rotate_one_flags(code: &mut InstructionSink<'_>, kind: RotateKind) {
     code.local_get(FLAGS)
         .i32_const(!0x801)
         .i32_and()

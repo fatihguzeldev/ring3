@@ -90,6 +90,7 @@ impl Imports {
                     destination: Location32::Memory(_),
                     ..
                 }
+                | Operation::MemoryRotateOne { .. }
                 | Operation::Binary {
                     kind:
                         BinaryKind::Add

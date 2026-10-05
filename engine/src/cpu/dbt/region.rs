@@ -183,7 +183,7 @@ fn prepare(
                         || supports_byte_store(instruction.operation())
                         || supports_memory_unary(instruction.operation())
                         || supports_memory_binary(instruction.operation())
-                        || supports_memory_shift(instruction.operation())
+                        || supports_memory_shift_or_rotate(instruction.operation())
                         || supports_stack_values(instruction.operation())
                         || supports_near_control(&instruction))))
             {
@@ -402,10 +402,11 @@ fn supports_memory_binary(operation: &Operation) -> bool {
     )
 }
 
-fn supports_memory_shift(operation: &Operation) -> bool {
+fn supports_memory_shift_or_rotate(operation: &Operation) -> bool {
     matches!(
         operation,
         Operation::MemoryShiftByte { .. }
+            | Operation::MemoryRotateOne { .. }
             | Operation::Shift {
                 destination: Location32::Memory(_),
                 ..
@@ -421,7 +422,7 @@ pub(super) fn supports(instruction: &DecodedInstruction, embedded: bool) -> bool
             || supports_byte_store(operation)
             || supports_memory_unary(operation)
             || supports_memory_binary(operation)
-            || supports_memory_shift(operation)
+            || supports_memory_shift_or_rotate(operation)
             || supports_stack(instruction)
             || supports_indirect_jump(operation)))
         || matches!(
