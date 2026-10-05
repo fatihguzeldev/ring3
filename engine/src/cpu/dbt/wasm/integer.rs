@@ -27,6 +27,12 @@ pub(super) fn instruction(
     let mut store = false;
     match *instruction.operation() {
         Operation::Nop => {}
+        Operation::SignExtendHigh => {
+            code.local_get(register(Register32::Eax))
+                .i32_const(31)
+                .i32_shr_s()
+                .local_set(register(Register32::Edx));
+        }
         Operation::Carry { kind } => {
             code.local_get(FLAGS);
             match kind {

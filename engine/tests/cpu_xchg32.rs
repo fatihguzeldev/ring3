@@ -541,8 +541,8 @@ fn late_decode_failures_preserve_both_publications_and_all_mapped_pages() {
     for (pc, bytes, length, error_pc, error) in [
         (
             CODE,
-            &[0x87, 0xc8, 0x99][..],
-            3,
+            &[0x87, 0xc8, 0x0f, 0x0b][..],
+            4,
             CODE + 2,
             DecodeError::Unsupported(UnsupportedFeature::Opcode),
         ),

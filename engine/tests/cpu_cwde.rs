@@ -202,7 +202,6 @@ fn strict_prefixes_adjacent_forms_and_one_byte_fetch_boundaries_keep_categories(
         (&[0x67, 0x98][..], opcode),
         (&[0xf2, 0x98][..], opcode),
         (&[0xf3, 0x98][..], opcode),
-        (&[0x99][..], opcode),
         (&[0x66, 0x99][..], opcode),
         (&[0x26, 0x98][..], segment),
         (&[0x2e, 0x98][..], segment),
@@ -236,7 +235,7 @@ fn strict_prefixes_adjacent_forms_and_one_byte_fetch_boundaries_keep_categories(
         );
         refusals += 1;
     }
-    assert_eq!(refusals, 13);
+    assert_eq!(refusals, 12);
     for (pc, bytes, next) in [
         (CODE, &[0x98, 0x0f, 0x0b][..], CODE + 1),
         (0x1fff, &[0x98][..], 0x2000),
@@ -349,8 +348,8 @@ fn late_decode_failures_preserve_both_publications_and_all_mapped_pages() {
     for (pc, bytes, length, error_pc, error) in [
         (
             CODE,
-            &[0x98, 0x99][..],
-            2,
+            &[0x98, 0x0f, 0x0b][..],
+            3,
             CODE + 1,
             DecodeError::Unsupported(UnsupportedFeature::Opcode),
         ),

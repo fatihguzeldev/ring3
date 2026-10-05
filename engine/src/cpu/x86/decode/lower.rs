@@ -83,6 +83,7 @@ pub(super) fn lower(instruction: &Instruction, bytes: &[u8]) -> Result<Operation
                 high_byte: false,
             },
         }),
+        Code::Cdq => Ok(Operation::SignExtendHigh),
         Code::Movzx_r32_rm8 | Code::Movsx_r32_rm8 | Code::Movzx_r32_rm16 | Code::Movsx_r32_rm16 => {
             let kind = match instruction.code() {
                 Code::Movzx_r32_rm8 | Code::Movzx_r32_rm16 => ExtensionKind::Zero,

@@ -261,6 +261,7 @@ pub enum Operation {
         destination: Register32,
         source: SmallSource,
     },
+    SignExtendHigh,
     ByteSwap {
         destination: Register32,
     },
