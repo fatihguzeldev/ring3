@@ -201,6 +201,11 @@ pub enum Operation {
         destination: ByteRegister,
         source: ByteValue,
     },
+    ReadLogicalByte {
+        kind: ByteLogicalKind,
+        destination: ByteRegister,
+        address: EffectiveAddress,
+    },
     ArithmeticByte {
         kind: ByteArithmeticKind,
         destination: ByteRegister,

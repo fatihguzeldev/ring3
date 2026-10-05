@@ -114,6 +114,29 @@ pub(super) fn instruction(
             logical_memory_byte(code, kind, address, source, imports, exit_depth);
             store = true;
         }
+        Operation::ReadLogicalByte {
+            kind,
+            destination,
+            address,
+        } => {
+            memory::load_narrow_value(code, address, SmallWidth::Byte, imports, exit_depth);
+            byte_value(code, ByteValue::Register(destination));
+            match kind {
+                ByteLogicalKind::And => {
+                    code.i32_and();
+                }
+                ByteLogicalKind::Or => {
+                    code.i32_or();
+                }
+                ByteLogicalKind::Xor => {
+                    code.i32_xor();
+                }
+            }
+            code.local_set(RESULT);
+            logical_flags(code, 7);
+            code.local_get(RESULT);
+            insert_byte(code, destination);
+        }
         Operation::LogicalByte {
             kind,
             destination,

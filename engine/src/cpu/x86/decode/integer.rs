@@ -107,6 +107,13 @@ pub(super) fn lower(instruction: &Instruction) -> Option<Result<Operation, Decod
                     source: byte_value(instruction)?,
                 });
             }
+            if instruction.op1_kind() == OpKind::Memory {
+                return Ok(Operation::ReadLogicalByte {
+                    kind,
+                    destination: byte_register(instruction.op0_register())?,
+                    address: effective_address(instruction)?,
+                });
+            }
             Ok(Operation::LogicalByte {
                 kind,
                 destination: byte_register(instruction.op0_register())?,
