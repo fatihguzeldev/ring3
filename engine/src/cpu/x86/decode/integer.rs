@@ -8,8 +8,8 @@ use super::{
 };
 use crate::cpu::x86::ir::{
     BinaryKind, BitScanKind, ByteArithmeticKind, ByteLogicalKind, BytePredicateKind,
-    ByteReadArithmeticKind, MemoryByteArithmeticKind, MultiplyKind, Operation, ShiftCount,
-    ShiftKind, UnaryKind,
+    ByteReadArithmeticKind, MemoryByteArithmeticKind, MultiplyKind, Operation, RotateKind,
+    ShiftCount, ShiftKind, UnaryKind,
 };
 
 pub(super) fn lower(instruction: &Instruction) -> Option<Result<Operation, DecodeError>> {
@@ -197,6 +197,7 @@ pub(super) fn lower(instruction: &Instruction) -> Option<Result<Operation, Decod
         _ => {
             return lower_multiply(instruction)
                 .or_else(|| lower_shift(instruction))
+                .or_else(|| lower_rotate_one(instruction))
                 .or_else(|| lower_unary(instruction))
                 .or_else(|| lower_bit_scan(instruction));
         }
@@ -311,6 +312,18 @@ fn lower_shift(instruction: &Instruction) -> Option<Result<Operation, DecodeErro
             destination,
             count,
         }),
+    )
+}
+
+fn lower_rotate_one(instruction: &Instruction) -> Option<Result<Operation, DecodeError>> {
+    let kind = match instruction.code() {
+        Code::Rol_rm32_1 => RotateKind::Left,
+        Code::Ror_rm32_1 => RotateKind::Right,
+        _ => return None,
+    };
+    Some(
+        register(instruction.op0_register())
+            .map(|destination| Operation::RotateOne { kind, destination }),
     )
 }
 

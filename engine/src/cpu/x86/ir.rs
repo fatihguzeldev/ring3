@@ -143,6 +143,12 @@ pub enum ShiftKind {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RotateKind {
+    Left,
+    Right,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ShiftCount {
     Immediate(u8),
     Cl,
@@ -317,6 +323,10 @@ pub enum Operation {
         kind: ShiftKind,
         destination: Location32,
         count: ShiftCount,
+    },
+    RotateOne {
+        kind: RotateKind,
+        destination: Register32,
     },
     SignedMultiply {
         destination: Register32,

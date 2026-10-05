@@ -8,7 +8,7 @@ use crate::cpu::x86::{
         BinaryKind, BitScanKind, BranchTarget, ByteArithmeticKind, ByteLogicalKind,
         BytePredicateKind, ByteReadArithmeticKind, ByteRegister, ByteValue, CarryKind,
         EffectiveAddress, ExtensionKind, Location32, MemoryByteArithmeticKind, MultiplyKind,
-        Operation, ShiftCount, ShiftKind, SmallSource, SmallWidth, UnaryKind, Value32,
+        Operation, RotateKind, ShiftCount, ShiftKind, SmallSource, SmallWidth, UnaryKind, Value32,
     },
 };
 
@@ -515,6 +515,7 @@ pub(super) fn instruction(
             shift_memory(code, kind, address, count, imports, exit_depth);
             store = true;
         }
+        Operation::RotateOne { kind, destination } => rotate_one(code, kind, destination),
         Operation::SignedMultiply {
             destination,
             source,
@@ -1296,6 +1297,49 @@ fn shift_flags(code: &mut InstructionSink<'_>, kind: ShiftKind) {
         }
         code.i32_const(11).i32_shl().i32_or().local_set(FLAGS).end();
     }
+}
+
+fn rotate_one(code: &mut InstructionSink<'_>, kind: RotateKind, destination: Register32) {
+    code.local_get(register(destination)).i32_const(1);
+    match kind {
+        RotateKind::Left => {
+            code.i32_rotl();
+        }
+        RotateKind::Right => {
+            code.i32_rotr();
+        }
+    }
+    code.local_tee(RESULT).local_set(register(destination));
+    code.local_get(FLAGS)
+        .i32_const(!0x801)
+        .i32_and()
+        .local_get(RESULT);
+    match kind {
+        RotateKind::Left => {
+            code.i32_const(1).i32_and();
+        }
+        RotateKind::Right => {
+            code.i32_const(31).i32_shr_u();
+        }
+    }
+    code.i32_or()
+        .local_get(RESULT)
+        .i32_const(31)
+        .i32_shr_u()
+        .local_get(RESULT);
+    match kind {
+        RotateKind::Left => {
+            code.i32_const(1).i32_and();
+        }
+        RotateKind::Right => {
+            code.i32_const(30).i32_shr_u().i32_const(1).i32_and();
+        }
+    }
+    code.i32_xor()
+        .i32_const(11)
+        .i32_shl()
+        .i32_or()
+        .local_set(FLAGS);
 }
 
 fn bit_scan(
