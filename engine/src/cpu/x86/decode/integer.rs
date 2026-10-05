@@ -321,14 +321,20 @@ fn lower_bit_scan(instruction: &Instruction) -> Option<Result<Operation, DecodeE
         _ => return None,
     };
     Some((|| {
-        if instruction.op1_kind() != OpKind::Register {
-            return Err(unsupported());
+        let destination = register(instruction.op0_register())?;
+        match instruction.op1_kind() {
+            OpKind::Register => Ok(Operation::BitScan {
+                kind,
+                destination,
+                source: register(instruction.op1_register())?,
+            }),
+            OpKind::Memory => Ok(Operation::ReadBitScan {
+                kind,
+                destination,
+                address: effective_address(instruction)?,
+            }),
+            _ => Err(unsupported()),
         }
-        Ok(Operation::BitScan {
-            kind,
-            destination: register(instruction.op0_register())?,
-            source: register(instruction.op1_register())?,
-        })
     })())
 }
 

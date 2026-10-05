@@ -534,7 +534,15 @@ pub(super) fn instruction(
             destination,
             source,
         } => {
-            bit_scan(code, kind, destination, source);
+            bit_scan(code, kind, destination, register(source));
+        }
+        Operation::ReadBitScan {
+            kind,
+            destination,
+            address,
+        } => {
+            memory::load_result(code, address, imports, exit_depth);
+            bit_scan(code, kind, destination, RESULT);
         }
         Operation::Jump {
             target: BranchTarget::Direct(target),
@@ -1294,9 +1302,9 @@ fn bit_scan(
     code: &mut InstructionSink<'_>,
     kind: BitScanKind,
     destination: Register32,
-    source: Register32,
+    source: u32,
 ) {
-    code.local_get(register(source))
+    code.local_get(source)
         .local_set(LHS)
         .local_get(LHS)
         .if_(BlockType::Empty);

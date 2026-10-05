@@ -231,7 +231,7 @@ fn excluded_forms_and_three_byte_fetch_preserve_fault_and_snapshot_boundaries() 
             &[0x04, 0x8a],
             &[0x04, 0x8d, 0x78, 0x56, 0x34, 0x12],
         ] {
-            let bytes = [vec![0x0f, opcode], tail.to_vec()].concat();
+            let bytes = [vec![0x66, 0x0f, opcode], tail.to_vec()].concat();
             let engine = code(CODE, &bytes);
             assert_eq!(
                 decode_one(engine.memory().unwrap(), GuestAddress(CODE)).err(),

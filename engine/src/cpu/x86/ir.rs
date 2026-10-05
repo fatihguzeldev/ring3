@@ -336,6 +336,11 @@ pub enum Operation {
         destination: Register32,
         source: Register32,
     },
+    ReadBitScan {
+        kind: BitScanKind,
+        destination: Register32,
+        address: EffectiveAddress,
+    },
     Jump {
         target: BranchTarget,
     },
