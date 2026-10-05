@@ -123,6 +123,7 @@ impl Imports {
                     ..
                 }
                 | Operation::Return { .. }
+                | Operation::Leave
                 | Operation::Jump {
                     target: BranchTarget::Indirect(Location32::Memory(_)),
                 }

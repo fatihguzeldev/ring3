@@ -297,6 +297,7 @@ pub enum Operation {
     Pop {
         destination: Location32,
     },
+    Leave,
     Return {
         stack_adjust: u16,
     },

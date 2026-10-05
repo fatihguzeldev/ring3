@@ -534,6 +534,25 @@ pub(super) fn instruction(
             memory::pop_memory(code, destination, imports, exit_depth);
             store = true;
         }
+        Operation::Leave => {
+            memory::load_result(
+                code,
+                EffectiveAddress {
+                    base: Some(Register32::Ebp),
+                    index: None,
+                    scale: 1,
+                    displacement: 0,
+                },
+                imports,
+                exit_depth,
+            );
+            code.local_get(ADDRESS)
+                .i32_const(4)
+                .i32_add()
+                .local_set(register(Register32::Esp))
+                .local_get(RESULT)
+                .local_set(register(Register32::Ebp));
+        }
         Operation::Return { stack_adjust } => {
             memory::pop_return(code, stack_adjust, imports, exit_depth);
         }

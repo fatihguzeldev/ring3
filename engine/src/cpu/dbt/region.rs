@@ -245,7 +245,10 @@ pub(super) fn instruction_error(pc: GuestAddress, cause: InstructionError) -> Co
 }
 
 fn supports_stack_values(operation: &Operation) -> bool {
-    matches!(operation, Operation::Push { .. } | Operation::Pop { .. })
+    matches!(
+        operation,
+        Operation::Push { .. } | Operation::Pop { .. } | Operation::Leave
+    )
 }
 
 fn supports_near_control(instruction: &DecodedInstruction) -> bool {

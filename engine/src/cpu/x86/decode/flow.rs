@@ -31,6 +31,7 @@ pub(super) fn lower(instruction: &Instruction) -> Result<Operation, DecodeError>
         Code::Pop_r32 | Code::Pop_rm32 => Operation::Pop {
             destination: location(instruction, 0)?,
         },
+        Code::Leaved => Operation::Leave,
         Code::Retnd => Operation::Return { stack_adjust: 0 },
         Code::Retnd_imm16 => Operation::Return {
             stack_adjust: instruction.immediate16(),
