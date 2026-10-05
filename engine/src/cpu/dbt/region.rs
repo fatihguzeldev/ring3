@@ -3,7 +3,7 @@ use crate::{
         decode::{DecodeError, DecodedInstruction, decode_one},
         ir::{BinaryKind, BranchTarget, Location32, Operation, SmallSource, UnaryKind, Value32},
     },
-    memory::{AddressSpace, GuestAddress},
+    memory::{AddressSpace, CodeSnapshot, GuestAddress, MemoryError},
 };
 
 use super::gate::{self, GateSpec, PreparedGate};
@@ -74,19 +74,17 @@ enum PreparationProfile {
 pub(super) struct CompiledBlock {
     pub(super) instructions: Vec<DecodedInstruction>,
     pub(super) gate: Option<PreparedGate>,
+    pub(super) code_snapshot: Option<CodeSnapshot>,
 }
 
 impl PreparedRegion {
     pub fn is_current(&self, memory: &AddressSpace) -> bool {
-        self.blocks.iter().all(|block| {
-            block
-                .gate
+        self.blocks.iter().all(|block| match &block.gate {
+            Some(gate) => gate.is_current(memory),
+            None => block
+                .code_snapshot
                 .as_ref()
-                .is_none_or(|gate| gate.is_current(memory))
-                && block
-                    .instructions
-                    .iter()
-                    .all(|instruction| memory.is_code_current(instruction.code_snapshot()))
+                .is_some_and(|snapshot| memory.is_code_current(snapshot)),
         })
     }
 
@@ -156,6 +154,7 @@ fn prepare(
             blocks.push(CompiledBlock {
                 instructions: Vec::new(),
                 gate: Some(gate),
+                code_snapshot: None,
             });
             instruction_count += 1;
             continue;
@@ -198,6 +197,11 @@ fn prepare(
             cursor = next;
         }
         blocks.push(CompiledBlock {
+            code_snapshot: Some(prepare_block_snapshot(
+                memory,
+                spec.entry,
+                (cursor - u64::from(spec.entry.0)) as usize,
+            )?),
             instructions,
             gate: None,
         });
@@ -242,6 +246,25 @@ pub(super) fn validate_blocks(specs: &[BlockSpec], limit: usize) -> Result<(), C
 
 pub(super) fn instruction_error(pc: GuestAddress, cause: InstructionError) -> CompileError {
     CompileError::Instruction { pc, cause }
+}
+
+pub(super) fn prepare_block_snapshot(
+    memory: &AddressSpace,
+    entry: GuestAddress,
+    length: usize,
+) -> Result<CodeSnapshot, CompileError> {
+    memory.snapshot_code(entry, length).map_err(|error| {
+        let error = match error {
+            MemoryError::Allocation => return CompileError::Allocation,
+            MemoryError::Fault(fault) => DecodeError::MemoryFault {
+                pc: entry,
+                fault,
+                length: length as u32,
+            },
+            other => DecodeError::Infrastructure(other),
+        };
+        instruction_error(entry, InstructionError::Decode(error))
+    })
 }
 
 fn supports_stack_values(operation: &Operation) -> bool {

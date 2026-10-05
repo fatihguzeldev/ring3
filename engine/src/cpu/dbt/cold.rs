@@ -74,6 +74,7 @@ fn prepare(
             blocks.push(CompiledBlock {
                 instructions: Vec::new(),
                 gate: Some(gate::prepare(memory, *gate)?),
+                code_snapshot: None,
             });
             instruction_count += 1;
             continue;
@@ -117,6 +118,11 @@ fn prepare(
         }
         specs[index].byte_length = (cursor - start) as u32;
         blocks.push(CompiledBlock {
+            code_snapshot: Some(region::prepare_block_snapshot(
+                memory,
+                *entry,
+                (cursor - start) as usize,
+            )?),
             instructions,
             gate: None,
         });

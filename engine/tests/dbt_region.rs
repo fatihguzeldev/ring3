@@ -1,5 +1,5 @@
 use ring3_engine::cpu::dbt::{
-    BlockSpec, CompileError, CompileLimits, InstructionError, prepare_region,
+    BlockSpec, CompileError, CompileLimits, InstructionError, prepare_entry_region, prepare_region,
 };
 use ring3_engine::cpu::x86::decode::DecodeError;
 use ring3_engine::memory::{
@@ -410,4 +410,50 @@ fn unrelated_page_changes_preserve_plan_but_cross_space_identity_does_not() {
     memory.protect(range(0x8000, 1), Permissions::READ).unwrap();
     memory.unmap(range(0x8000, 1)).unwrap();
     assert!(prepared.is_current(&memory));
+}
+
+#[test]
+fn cold_block_snapshots_exclude_unconsumed_pages_between_entries() {
+    let mut memory = AddressSpace::new(4).unwrap();
+    for address in [0x1000, 0x4000] {
+        memory
+            .map_zeroed(range(address, 1), Permissions::ALL)
+            .unwrap();
+    }
+    memory.write(GuestAddress(0x1ffe), &[0xeb, 0]).unwrap();
+    memory.write(GuestAddress(0x4000), &[0xeb, 0xfe]).unwrap();
+    let prepared = prepare_entry_region(
+        &memory,
+        &[GuestAddress(0x1ffe), GuestAddress(0x4000)],
+        CompileLimits::default(),
+    )
+    .unwrap();
+    assert_eq!(prepared.instruction_count(), 2);
+    assert!(prepared.is_current(&memory));
+    for address in [0x2000, 0x3000] {
+        memory
+            .map_zeroed(range(address, 1), Permissions::ALL)
+            .unwrap();
+        memory.write(GuestAddress(address), &[0x90]).unwrap();
+        memory
+            .protect(range(address, 1), Permissions::READ)
+            .unwrap();
+        memory.unmap(range(address, 1)).unwrap();
+        assert!(prepared.is_current(&memory));
+    }
+    memory.write(GuestAddress(0x4000), &[0xeb, 0xfe]).unwrap();
+    assert!(!prepared.is_current(&memory));
+}
+
+#[test]
+fn block_snapshot_retains_both_pages_of_a_crossing_instruction() {
+    for changed in [0x1fff, 0x2000] {
+        let mut memory = code_memory(0x1ffd, &[0xb8, 0x12, 0x34, 0x56, 0x78]);
+        let prepared =
+            prepare_region(&memory, &[spec(0x1ffd, 5)], CompileLimits::default()).unwrap();
+        assert_eq!(prepared.instruction_count(), 1);
+        assert!(prepared.is_current(&memory));
+        memory.write(GuestAddress(changed), &[0x90]).unwrap();
+        assert!(!prepared.is_current(&memory));
+    }
 }
