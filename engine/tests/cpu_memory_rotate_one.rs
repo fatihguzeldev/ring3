@@ -452,8 +452,8 @@ fn excluded_forms_and_exact_operand_fetch_preserve_fault_and_wrap_boundaries() {
         }
     }
     for bytes in [
-        &[0xd1, 0x13][..],
-        &[0xd1, 0x1b],
+        &[0x66, 0xd1, 0x13][..],
+        &[0x66, 0xd1, 0x1b],
         &[0x66, 0xd1, 0xd0],
         &[0x66, 0xd1, 0xd8],
     ] {

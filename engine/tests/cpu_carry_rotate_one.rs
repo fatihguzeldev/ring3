@@ -256,6 +256,7 @@ fn excluded_forms_and_two_byte_fetch_preserve_fault_and_snapshot_boundaries() {
             let mut bytes = vec![0xd1];
             bytes.extend_from_slice(tail);
             bytes[1] |= field << 3;
+            bytes.insert(0, 0x66);
             rejected(&bytes, opcode_error);
             exclusions += 1;
         }

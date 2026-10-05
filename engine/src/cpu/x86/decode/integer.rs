@@ -339,10 +339,13 @@ fn lower_rotate_through_carry_one(
         Code::Rcr_rm32_1 => RotateKind::Right,
         _ => return None,
     };
-    Some(
-        register(instruction.op0_register())
+    Some(match instruction.op0_kind() {
+        OpKind::Register => register(instruction.op0_register())
             .map(|destination| Operation::RotateThroughCarryOne { kind, destination }),
-    )
+        OpKind::Memory => effective_address(instruction)
+            .map(|address| Operation::MemoryRotateThroughCarryOne { kind, address }),
+        _ => Err(unsupported()),
+    })
 }
 
 fn lower_bit_scan(instruction: &Instruction) -> Option<Result<Operation, DecodeError>> {

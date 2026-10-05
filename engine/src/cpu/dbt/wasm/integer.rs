@@ -519,6 +519,21 @@ pub(super) fn instruction(
         Operation::RotateThroughCarryOne { kind, destination } => {
             rotate_through_carry_one(code, kind, destination);
         }
+        Operation::MemoryRotateThroughCarryOne { kind, address } => {
+            memory::load_result(code, address, imports, exit_depth);
+            code.local_get(RESULT)
+                .local_set(LHS)
+                .local_get(FLAGS)
+                .i32_const(1)
+                .i32_and()
+                .local_set(RHS);
+            rotate_through_carry_one_value(code, kind);
+            code.local_get(LHS).local_get(RHS);
+            memory::store_result(code, address, imports, exit_depth);
+            code.local_set(RHS).local_set(LHS);
+            rotate_through_carry_one_flags(code, kind);
+            store = true;
+        }
         Operation::MemoryRotateOne { kind, address } => {
             memory::load_result(code, address, imports, exit_depth);
             rotate_one_value(code, kind);
@@ -1372,9 +1387,14 @@ fn rotate_through_carry_one(
         .local_get(FLAGS)
         .i32_const(1)
         .i32_and()
-        .local_set(RHS)
-        .local_get(LHS)
-        .i32_const(1);
+        .local_set(RHS);
+    rotate_through_carry_one_value(code, kind);
+    code.local_get(RESULT).local_set(register(destination));
+    rotate_through_carry_one_flags(code, kind);
+}
+
+fn rotate_through_carry_one_value(code: &mut InstructionSink<'_>, kind: RotateKind) {
+    code.local_get(LHS).i32_const(1);
     match kind {
         RotateKind::Left => {
             code.i32_shl();
@@ -1387,10 +1407,11 @@ fn rotate_through_carry_one(
     if kind == RotateKind::Right {
         code.i32_const(31).i32_shl();
     }
-    code.i32_or()
-        .local_tee(RESULT)
-        .local_set(register(destination))
-        .local_get(FLAGS)
+    code.i32_or().local_set(RESULT);
+}
+
+fn rotate_through_carry_one_flags(code: &mut InstructionSink<'_>, kind: RotateKind) {
+    code.local_get(FLAGS)
         .i32_const(!0x801)
         .i32_and()
         .local_get(LHS);

@@ -407,6 +407,7 @@ fn supports_memory_shift_or_rotate(operation: &Operation) -> bool {
         operation,
         Operation::MemoryShiftByte { .. }
             | Operation::MemoryRotateOne { .. }
+            | Operation::MemoryRotateThroughCarryOne { .. }
             | Operation::Shift {
                 destination: Location32::Memory(_),
                 ..
