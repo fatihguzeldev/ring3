@@ -14,8 +14,8 @@ assert.equal(sourcePaths.length, 88); assert.equal(new Set(sourcePaths).size, 88
 const sources = () => Object.fromEntries(sourcePaths.map(path => [path, hash(readFileSync(join(root, path)))]));
 const beforeSources = sources(), engineBytes = readFileSync(enginePath), engineModule = new WebAssembly.Module(engineBytes);
 assert.deepEqual(WebAssembly.Module.imports(engineModule), []);
-assert.equal(WebAssembly.Module.exports(engineModule).length, 70);
-assert.equal(WebAssembly.Module.exports(engineModule).filter(row => row.kind === 'function').length, 69);
+assert.equal(WebAssembly.Module.exports(engineModule).length, 71);
+assert.equal(WebAssembly.Module.exports(engineModule).filter(row => row.kind === 'function').length, 70);
 writeFileSync(join(output, 'engine.wasm'), engineBytes);
 writeFileSync(join(output, 'source-before.json'), JSON.stringify(beforeSources, null, 2));
 for (const file of ['run.mjs', 'integer.S']) writeFileSync(join(output, file), readFileSync(join(root, 'engine/tests/fixtures/p2-byte-moffs', file)));

@@ -23,7 +23,7 @@ save('producer-wrapper.rs', readFileSync(join(root, 'engine/tests/windows_callba
 const engineBytes = new Uint8Array(readFileSync(enginePath)); save('engine.wasm', engineBytes);
 const engineModule = new WebAssembly.Module(engineBytes), exports = WebAssembly.Module.exports(engineModule);
 assert.deepEqual(WebAssembly.Module.imports(engineModule), []);
-assert.equal(exports.length, 70); assert.equal(exports.filter(row => row.kind === 'function').length, 69);
+assert.equal(exports.length, 71); assert.equal(exports.filter(row => row.kind === 'function').length, 70);
 const apiArities = {open: 3, close: 0, arena_ptr: 0, begin_image_input: 1, append_image_input: 2, load_pe32_linked_v4_input_at: 2, start_loaded_image: 2, read32: 1, compile_resident_entries: 2, acknowledge_resident_installation: 5, dispatcher_module: 2, guard_dispatch_entry: 5, find_installed_resident: 3, guard_resident: 7, capture_resident_call: 6, complete_resident_windows_call: 5, begin_resident_callback: 11, authorize_resident_callback: 5, select_resident_callback_unit: 7, capture_active_resident_callback_call: 7, complete_active_resident_callback_windows_call: 6, complete_active_resident_callback_call: 7, finish_resident_callback: 5, abort_callback: 3, complete_resident_call: 6, generation: 0, module_ptr: 0, module_len: 0, resident_module: 2, store_resident32: 6};
 const SIZE = 4236, TRANSFER = 140, OUTER = 0x80000011, RETURN = 0x80000012, ERROR = 0xf1234567, CODE = 0xffffffff;
 const outerHex = '68674523f1ff1564314000e8f0000000c7050030400011111111ebfe';

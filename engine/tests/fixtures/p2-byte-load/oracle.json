@@ -2481,8 +2481,8 @@
     "arena_bytes": 4236,
     "transfer_offset": 140,
     "producer_sources": 89,
-    "engine_function_exports": 69,
-    "engine_total_exports": 70,
+    "engine_function_exports": 70,
+    "engine_total_exports": 71,
     "engine_imports": 0,
     "run_arity": 4,
     "locals": [

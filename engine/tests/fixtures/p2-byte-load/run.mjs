@@ -10,7 +10,7 @@ const fixtureRoot = join(root, 'engine/tests/fixtures/p2-byte-load');
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
 const oracleBytes = readFileSync(join(fixtureRoot, 'oracle.json')), oracle = JSON.parse(oracleBytes);
 const programBytes = readFileSync(join(fixtureRoot, 'program.S'));
-assert.equal(hash(oracleBytes), '7a63e69a2858cb7968ff4fcd01390b72efc73aef378aaa127c0df564c05a5bfd');
+assert.equal(hash(oracleBytes), '1c7552e267142630a6c94fe00ab8724733e589ae421a6c47a31a4784f4f7be8e');
 assert.equal(hash(programBytes), '15886209e03e8839ca539c3ae630cff08645a2238a0eab9939425db05850f236');
 const size = 4236, transfer = 140, artifacts = {}, identities = [], operations = [], hostInputs = [], observations = [], ramChecks = [], stackChecks = [], syntheticBindings = [], syntheticObservations = [];
 const fromHex = hex => new Uint8Array(Buffer.from(hex, 'hex'));

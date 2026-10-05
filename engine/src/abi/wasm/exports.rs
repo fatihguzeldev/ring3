@@ -299,6 +299,20 @@ pub extern "C" fn retire_stale_resident(
 }
 
 #[allow(unsafe_code)]
+#[unsafe(export_name = "ring3_abi_v1_discard_unacknowledged_resident")]
+pub extern "C" fn discard_unacknowledged_resident(
+    key_low: u32,
+    key_high: u32,
+    id_low: u32,
+    id_high: u32,
+) -> u32 {
+    {
+        #![forbid(unsafe_code)]
+        crate::process::wasm::discard_unacknowledged_resident(key_low, key_high, id_low, id_high)
+    }
+}
+
+#[allow(unsafe_code)]
 #[unsafe(export_name = "ring3_abi_v1_acknowledge_resident_installation")]
 pub extern "C" fn acknowledge_resident_installation(
     key_low: u32,
