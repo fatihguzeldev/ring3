@@ -243,24 +243,9 @@ fn conditions_registers_and_aliases_admit_all_six_extent_and_entry_profiles() {
 }
 
 #[test]
-fn memory_sources_prefixes_and_exact_fetch_boundaries_keep_categories() {
+fn prefixes_and_exact_fetch_boundaries_keep_categories() {
     let opcode = DecodeError::Unsupported(UnsupportedFeature::Opcode);
-    let mut excluded: Vec<(Vec<u8>, DecodeError)> = (0..16_u8)
-        .map(|cc| (vec![0x0f, 0x40 + cc, 0x00], opcode))
-        .collect();
-    for address in [
-        &[0x04, 0x24][..],
-        &[0x41, 0x80],
-        &[0x44, 0x8b, 0x7f],
-        &[0x83, 1, 2, 3, 4],
-        &[0x84, 0x94, 1, 2, 3, 4],
-        &[0x05, 0, 0x30, 0, 0],
-        &[0x04, 0x95, 0, 0x30, 0, 0],
-    ] {
-        let mut bytes = vec![0x0f, 0x44];
-        bytes.extend_from_slice(address);
-        excluded.push((bytes, opcode));
-    }
+    let mut excluded: Vec<(Vec<u8>, DecodeError)> = Vec::new();
     for prefix in [0x66, 0x67, 0xf2, 0xf3] {
         excluded.push((vec![prefix, 0x0f, 0x44, 0xc1], opcode));
     }
@@ -271,7 +256,7 @@ fn memory_sources_prefixes_and_exact_fetch_boundaries_keep_categories() {
         ));
     }
     excluded.push((vec![0xf0, 0x0f, 0x44, 0xc1], DecodeError::InvalidEncoding));
-    assert_eq!(excluded.len(), 34);
+    assert_eq!(excluded.len(), 11);
     let mut refused = 0;
     for (bytes, expected) in excluded {
         let mut engine = code(CODE, &bytes, true);
@@ -301,7 +286,7 @@ fn memory_sources_prefixes_and_exact_fetch_boundaries_keep_categories() {
         );
         refused += 1;
     }
-    assert_eq!(refused, 34);
+    assert_eq!(refused, 11);
     let mut fetched = 0;
     for bytes in [[0x0f, 0x40, 0xc1], [0x0f, 0x44, 0xed], [0x0f, 0x4f, 0xf7]] {
         for pc in [0x1ffd, 0x1ffe] {
@@ -437,8 +422,8 @@ fn late_refusals_preserve_both_publications_and_all_pages() {
     for (pc, bytes, declared_length, error_pc, expected) in [
         (
             CODE,
-            &[0x0f, 0x44, 0xc1, 0x0f, 0x44, 0x00][..],
-            6,
+            &[0x0f, 0x44, 0x03, 0x0f, 0x0b][..],
+            5,
             CODE + 3,
             opcode,
         ),

@@ -52,15 +52,20 @@ pub(super) fn lower(instruction: &Instruction) -> Result<Operation, DecodeError>
         | Code::Cmovge_r32_rm32
         | Code::Cmovle_r32_rm32
         | Code::Cmovg_r32_rm32 => {
-            if instruction.op0_kind() != OpKind::Register
-                || instruction.op1_kind() != OpKind::Register
-            {
-                return Err(unsupported());
-            }
-            Operation::ConditionalMove {
-                condition: condition(instruction.code())?,
-                destination: register(instruction.op0_register())?,
-                source: register(instruction.op1_register())?,
+            let condition = condition(instruction.code())?;
+            let destination = register(instruction.op0_register())?;
+            match instruction.op1_kind() {
+                OpKind::Memory => Operation::ReadConditionalMove {
+                    condition,
+                    destination,
+                    address: effective_address(instruction)?,
+                },
+                OpKind::Register => Operation::ConditionalMove {
+                    condition,
+                    destination,
+                    source: register(instruction.op1_register())?,
+                },
+                _ => return Err(unsupported()),
             }
         }
         Code::Seto_rm8

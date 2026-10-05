@@ -105,7 +105,8 @@ impl Imports {
                     read = true;
                     store = true;
                 }
-                Operation::Move {
+                Operation::ReadConditionalMove { .. }
+                | Operation::Move {
                     source: Value32::Memory(_),
                     ..
                 }

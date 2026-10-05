@@ -523,9 +523,7 @@ fn excluded() -> Vec<(Vec<u8>, DecodeError)> {
         forms.push((vec![prefix, 0x0f, 0x94, 0xc0], opcode));
     }
     for bytes in [
-        &[0x0f, 0x44, 0x03][..],
-        &[0x0f, 0x44, 0x00],
-        &[0x86, 0x03],
+        &[0x86, 0x03][..],
         &[0x86, 0xc0],
         &[0x0f, 0xc0, 0x03],
         &[0x0f, 0xc0, 0xc0],
@@ -548,7 +546,7 @@ fn excluded() -> Vec<(Vec<u8>, DecodeError)> {
         forms.push((bytes.to_vec(), opcode));
     }
     forms.push((vec![0xfe, 0x13], DecodeError::InvalidEncoding));
-    assert_eq!(forms.len(), 92);
+    assert_eq!(forms.len(), 90);
     forms
 }
 

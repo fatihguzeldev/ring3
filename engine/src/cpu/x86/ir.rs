@@ -239,6 +239,11 @@ pub enum Operation {
         destination: Register32,
         source: Register32,
     },
+    ReadConditionalMove {
+        condition: Condition,
+        destination: Register32,
+        address: EffectiveAddress,
+    },
     MemorySetByte {
         condition: Condition,
         address: EffectiveAddress,

@@ -85,6 +85,16 @@ pub(super) fn instruction(
             code.select();
             code.local_set(register(destination));
         }
+        Operation::ReadConditionalMove {
+            condition,
+            destination,
+            address,
+        } => {
+            memory::load_result(code, address, imports, exit_depth);
+            code.local_get(RESULT).local_get(register(destination));
+            control::condition(code, condition);
+            code.select().local_set(register(destination));
+        }
         Operation::MemorySetByte { condition, address } => {
             control::condition(code, condition);
             code.local_set(RESULT);
