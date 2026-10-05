@@ -416,3 +416,33 @@ fn native_and_copied_failures_preserve_arena_and_success_consumes_only_complete_
         expected(pe::BASE, GATE, &NAMES)
     );
 }
+
+#[test]
+fn virtual_free_is_rejected_by_every_existing_linked_profile() {
+    let mut bytes = image(&[NAMES[4]]);
+    let at = file(NAMES[4]) + 2;
+    bytes[at..at + 13].fill(0);
+    bytes[at..at + 12].copy_from_slice(b"VirtualFree\0");
+    let original = bytes.clone();
+    assert_eq!(
+        ring3_engine::windows::WindowsApi32::from_id(0x0001_0006),
+        Some(ring3_engine::windows::WindowsApi32::VirtualFree)
+    );
+    for error in [
+        loader::load_pe32_linked_at(&bytes, pe::BASE, GATE, 5).err(),
+        loader::load_pe32_linked_v2_at(&bytes, pe::BASE, GATE, 5).err(),
+        loader::load_pe32_linked_v3_at(&bytes, pe::BASE, GATE, 5).err(),
+        loader::load_pe32_linked_v4_at(&bytes, pe::BASE, GATE, 5).err(),
+    ] {
+        assert_eq!(error, Some(LoadError::Unsupported));
+    }
+    assert_eq!(bytes, original);
+    let mut engine = staged(&bytes, 5);
+    let arena = engine.arena().to_vec();
+    assert_eq!(
+        engine.load_pe32_linked_v4_input_at(pe::BASE, GATE),
+        Err(HostError::Loader(LoadError::Unsupported))
+    );
+    assert_eq!(engine.arena(), arena);
+    assert_eq!(engine.memory().unwrap().mapped_pages(), 0);
+}
