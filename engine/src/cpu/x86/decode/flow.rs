@@ -1,8 +1,8 @@
-use iced_x86::{Code, Instruction};
+use iced_x86::{Code, Instruction, OpKind};
 
 use super::{
     DecodeError,
-    operands::{byte_register, location, unsupported, value},
+    operands::{byte_register, effective_address, location, unsupported, value},
 };
 use crate::{
     cpu::x86::ir::{BranchTarget, Condition, Operation},
@@ -50,10 +50,19 @@ pub(super) fn lower(instruction: &Instruction) -> Result<Operation, DecodeError>
         | Code::Setl_rm8
         | Code::Setge_rm8
         | Code::Setle_rm8
-        | Code::Setg_rm8 => Operation::SetByte {
-            condition: condition(instruction.code())?,
-            destination: byte_register(instruction.op0_register())?,
-        },
+        | Code::Setg_rm8 => {
+            if instruction.op0_kind() == OpKind::Memory {
+                Operation::MemorySetByte {
+                    condition: condition(instruction.code())?,
+                    address: effective_address(instruction)?,
+                }
+            } else {
+                Operation::SetByte {
+                    condition: condition(instruction.code())?,
+                    destination: byte_register(instruction.op0_register())?,
+                }
+            }
+        }
         code => Operation::ConditionalJump {
             condition: condition(code)?,
             target: GuestAddress(instruction.near_branch32()),

@@ -337,7 +337,10 @@ fn supports_memory_move_store(operation: &Operation) -> bool {
 }
 
 fn supports_byte_store(operation: &Operation) -> bool {
-    matches!(operation, Operation::StoreByte { .. })
+    matches!(
+        operation,
+        Operation::StoreByte { .. } | Operation::MemorySetByte { .. }
+    )
 }
 
 fn supports_memory_unary(operation: &Operation) -> bool {

@@ -224,6 +224,10 @@ pub enum Operation {
         condition: Condition,
         destination: ByteRegister,
     },
+    MemorySetByte {
+        condition: Condition,
+        address: EffectiveAddress,
+    },
     LoadByte {
         destination: ByteRegister,
         address: EffectiveAddress,

@@ -56,7 +56,9 @@ impl Imports {
                 | Operation::ReadCompareByte { .. }
                 | Operation::ReadLogicalByte { .. }
                 | Operation::ReadArithmeticByte { .. } => read8 = true,
-                Operation::StoreByte { .. } => store8 = true,
+                Operation::StoreByte { .. } | Operation::MemorySetByte { .. } => {
+                    store8 = true;
+                }
                 Operation::MemoryUnaryByte { .. }
                 | Operation::MemoryLogicalByte { .. }
                 | Operation::MemoryArithmeticByte { .. } => {

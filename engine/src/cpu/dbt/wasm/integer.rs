@@ -59,6 +59,12 @@ pub(super) fn instruction(
             control::condition(code, condition);
             insert_byte(code, destination);
         }
+        Operation::MemorySetByte { condition, address } => {
+            control::condition(code, condition);
+            code.local_set(RESULT);
+            memory::store_byte_result(code, address, imports, exit_depth);
+            store = true;
+        }
         Operation::CompareByte { left, right } => {
             byte_value(code, ByteValue::Register(left));
             code.local_set(LHS);
