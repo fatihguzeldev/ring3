@@ -284,6 +284,21 @@ for (const [pc, next, eax, ecx, flags] of [
   execute('baseline', state, expected, `interior PC resume ${pc}`);
 }
 
+for (let index = 0; index < 64; index++) {
+  for (const budget of [0, 1, 7, 64, 129]) {
+    const state = initial(0x1000 + index);
+    const expected = copyState(state);
+    expected.eip = 0x1000 + (index + budget) % 64;
+    execute('dense_resume', state, expected, `dense resume ${index}/${budget}`, budget, 1, budget);
+  }
+  const state = initial(0x1000 + index);
+  execute('dense_resume', state, state, `dense cancel ${index}`, 129, 2, 0, defaults, 1);
+}
+for (const pc of [0x0fff, 0x1040, 0x1041]) {
+  const state = initial(pc);
+  execute('dense_resume', state, state, `dense unknown PC ${pc}`, 129, 3, 0);
+}
+
 const checkpoint = initial();
 checkpoint.registers[1] = 10;
 reset(baseline, checkpoint);

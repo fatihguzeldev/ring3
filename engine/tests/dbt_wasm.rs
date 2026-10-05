@@ -188,6 +188,16 @@ fn generated_modules_execute_in_node_against_independent_oracles() {
         )
         .unwrap();
     }
+    let mut dense = vec![0x90; 63];
+    dense.extend_from_slice(&[0xeb, 0xbf]);
+    let memory = memory_with_code(0x1000, &dense);
+    let compiled = compile_region(&memory, &[block(0x1000, 65)], CompileLimits::default()).unwrap();
+    assert_eq!(compiled.metadata().instructions, 64);
+    fs::write(
+        output.join("dense_resume.wasm"),
+        compiled.wasm_bytes(&memory).unwrap(),
+    )
+    .unwrap();
     for (condition, opcode) in [
         0x70, 0x71, 0x72, 0x73, 0x74, 0x75, 0x76, 0x77, 0x78, 0x79, 0x7a, 0x7b, 0x7c, 0x7d, 0x7e,
         0x7f,

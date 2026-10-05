@@ -185,7 +185,7 @@ fn emit_block(code: &mut InstructionSink<'_>, block: &CompiledBlock, imports: me
             .end();
         return;
     }
-    code.i32_const(-1).local_set(RESUME);
+    code.i32_const(-1).local_set(RESUME).block(BlockType::Empty);
     for (index, instruction) in block.instructions.iter().enumerate() {
         code.local_get(EIP)
             .i32_const(instruction.pc().0 as i32)
@@ -193,9 +193,11 @@ fn emit_block(code: &mut InstructionSink<'_>, block: &CompiledBlock, imports: me
             .if_(BlockType::Empty)
             .i32_const(index as i32)
             .local_set(RESUME)
+            .br(1)
             .end();
     }
-    code.local_get(RESUME)
+    code.end()
+        .local_get(RESUME)
         .i32_const(-1)
         .i32_ne()
         .if_(BlockType::Empty);
