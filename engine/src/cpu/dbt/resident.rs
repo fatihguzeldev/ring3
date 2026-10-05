@@ -265,6 +265,28 @@ impl ResidentRegistry {
 
     pub fn retire_stale(&mut self, memory: &AddressSpace, id: UnitId) -> Result<(), RegistryError> {
         let index = self.stale_index(memory, id.get())?;
+        self.remove_unit(index)
+    }
+
+    pub(crate) fn discard_current_raw(
+        &mut self,
+        memory: &AddressSpace,
+        id: u64,
+    ) -> Result<(), RegistryError> {
+        self.check_memory(memory)?;
+        let index = self
+            .entries
+            .iter()
+            .position(|unit| unit.id.get() == id)
+            .ok_or(RegistryError::InvalidUnit)?;
+        self.entries[index]
+            .region
+            .wasm_bytes(memory)
+            .map_err(|ArtifactError::CodeInvalidated| RegistryError::CodeInvalidated)?;
+        self.remove_unit(index)
+    }
+
+    fn remove_unit(&mut self, index: usize) -> Result<(), RegistryError> {
         let bytes = self.entries[index].region.retained_wasm_byte_len();
         let remaining = self
             .wasm_bytes

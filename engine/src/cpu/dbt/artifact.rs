@@ -74,6 +74,11 @@ impl CompiledRegion {
         self.bytes.len()
     }
 
+    #[cfg(test)]
+    pub(super) fn retained_wasm_bytes_for_test(&self) -> &[u8] {
+        &self.bytes
+    }
+
     pub fn metadata(&self) -> RegionMetadata {
         RegionMetadata {
             backend_version: 1,
