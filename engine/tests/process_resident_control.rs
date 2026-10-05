@@ -448,7 +448,7 @@ fn near_control_end_prefix_and_decode_errors_preserve_arena_units_and_capacity()
             DecodeError::Unsupported(UnsupportedFeature::Opcode),
         ),
         (
-            &[0xc0, 0x20, 1],
+            &[0xc0, 0x20, 2],
             DecodeError::Unsupported(UnsupportedFeature::Opcode),
         ),
         (

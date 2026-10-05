@@ -268,10 +268,7 @@ fn lower_shift(instruction: &Instruction) -> Option<Result<Operation, DecodeErro
     };
     if let Some((kind, count)) = byte_shift {
         if instruction.op0_kind() == OpKind::Memory
-            && matches!(
-                instruction.code(),
-                Code::Shl_rm8_1 | Code::Shr_rm8_1 | Code::Sar_rm8_1
-            )
+            && matches!(count, ShiftCount::Immediate(raw) if raw & 31 == 1)
         {
             return Some(
                 effective_address(instruction)

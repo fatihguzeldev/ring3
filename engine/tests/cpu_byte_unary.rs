@@ -150,9 +150,9 @@ fn excluded() -> Vec<(Vec<u8>, DecodeError)> {
         vec![0xf6, 0xe8],
         vec![0xf6, 0xf0],
         vec![0xf6, 0xf8],
-        vec![0xc0, 0x20, 1],
-        vec![0xc0, 0x28, 1],
-        vec![0xc0, 0x38, 1],
+        vec![0xc0, 0x20, 2],
+        vec![0xc0, 0x28, 2],
+        vec![0xc0, 0x38, 2],
     ] {
         forms.push((bytes, unsupported));
     }
