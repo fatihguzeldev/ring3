@@ -177,6 +177,10 @@ pub enum Operation {
         left: ByteRegister,
         right: ByteValue,
     },
+    ReadCompareByte {
+        left: ByteRegister,
+        address: EffectiveAddress,
+    },
     TestByte {
         left: ByteRegister,
         right: ByteValue,

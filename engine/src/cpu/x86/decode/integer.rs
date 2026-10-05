@@ -137,6 +137,12 @@ pub(super) fn lower(instruction: &Instruction) -> Option<Result<Operation, Decod
         Code::Cmp_rm8_r8 | Code::Cmp_r8_rm8 | Code::Cmp_AL_imm8 | Code::Cmp_rm8_imm8
     ) {
         return Some((|| {
+            if instruction.code() == Code::Cmp_r8_rm8 && instruction.op1_kind() == OpKind::Memory {
+                return Ok(Operation::ReadCompareByte {
+                    left: byte_register(instruction.op0_register())?,
+                    address: effective_address(instruction)?,
+                });
+            }
             Ok(Operation::CompareByte {
                 left: byte_register(instruction.op0_register())?,
                 right: byte_value(instruction)?,

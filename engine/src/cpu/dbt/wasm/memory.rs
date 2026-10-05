@@ -53,6 +53,7 @@ impl Imports {
             match instruction.operation() {
                 Operation::LoadByte { .. }
                 | Operation::MemoryPredicateByte { .. }
+                | Operation::ReadCompareByte { .. }
                 | Operation::ReadLogicalByte { .. }
                 | Operation::ReadArithmeticByte { .. } => read8 = true,
                 Operation::StoreByte { .. } => store8 = true,

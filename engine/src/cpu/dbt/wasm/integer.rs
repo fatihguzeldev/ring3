@@ -72,6 +72,19 @@ pub(super) fn instruction(
                 .local_set(RESULT);
             arithmetic_flags(code, BinaryKind::Cmp, CarryFlag::Calculate, 7);
         }
+        Operation::ReadCompareByte { left, address } => {
+            memory::load_narrow_value(code, address, SmallWidth::Byte, imports, exit_depth);
+            code.local_set(RHS);
+            byte_value(code, ByteValue::Register(left));
+            code.local_set(LHS)
+                .local_get(LHS)
+                .local_get(RHS)
+                .i32_sub()
+                .i32_const(0xff)
+                .i32_and()
+                .local_set(RESULT);
+            arithmetic_flags(code, BinaryKind::Cmp, CarryFlag::Calculate, 7);
+        }
         Operation::TestByte { left, right } => {
             byte_value(code, ByteValue::Register(left));
             byte_value(code, right);
