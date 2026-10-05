@@ -175,6 +175,8 @@ pub enum Operation {
     Carry {
         kind: CarryKind,
     },
+    FlagsToAh,
+    AhToFlags,
     Move {
         destination: Location32,
         source: Value32,

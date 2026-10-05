@@ -426,6 +426,8 @@ pub(super) fn supports(instruction: &DecodedInstruction, embedded: bool) -> bool
             operation,
             Operation::Nop
                 | Operation::Carry { .. }
+                | Operation::FlagsToAh
+                | Operation::AhToFlags
                 | Operation::MoveByte { .. }
                 | Operation::CompareByte { .. }
                 | Operation::TestByte { .. }

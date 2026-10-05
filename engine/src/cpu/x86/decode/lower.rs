@@ -26,6 +26,8 @@ pub(super) fn lower(instruction: &Instruction, bytes: &[u8]) -> Result<Operation
         Code::Cmc => Ok(Operation::Carry {
             kind: CarryKind::Complement,
         }),
+        Code::Lahf => Ok(Operation::FlagsToAh),
+        Code::Sahf => Ok(Operation::AhToFlags),
         Code::Nop_rm32 => {
             location(instruction, 0)?;
             Ok(Operation::Nop)

@@ -33,6 +33,19 @@ pub(super) fn instruction(
                 .i32_shr_s()
                 .local_set(register(Register32::Edx));
         }
+        Operation::FlagsToAh => {
+            code.local_get(FLAGS)
+                .i32_const(0xd5)
+                .i32_and()
+                .i32_const(2)
+                .i32_or();
+            insert_byte(code, ByteRegister::Ah);
+        }
+        Operation::AhToFlags => {
+            code.local_get(FLAGS).i32_const(!0xd5).i32_and();
+            byte_value(code, ByteValue::Register(ByteRegister::Ah));
+            code.i32_const(0xd5).i32_and().i32_or().local_set(FLAGS);
+        }
         Operation::Carry { kind } => {
             code.local_get(FLAGS);
             match kind {
