@@ -249,6 +249,10 @@ pub enum Operation {
     ByteSwap {
         destination: Register32,
     },
+    Exchange {
+        left: Register32,
+        right: Register32,
+    },
     Lea {
         destination: Register32,
         address: EffectiveAddress,

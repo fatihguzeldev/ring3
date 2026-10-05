@@ -92,6 +92,17 @@ pub(super) fn lower(instruction: &Instruction, bytes: &[u8]) -> Result<Operation
         Code::Bswap_r32 => Ok(Operation::ByteSwap {
             destination: register(instruction.op0_register())?,
         }),
+        Code::Xchg_rm32_r32 | Code::Xchg_r32_EAX => {
+            if instruction.op0_kind() != OpKind::Register
+                || instruction.op1_kind() != OpKind::Register
+            {
+                return Err(unsupported());
+            }
+            Ok(Operation::Exchange {
+                left: register(instruction.op0_register())?,
+                right: register(instruction.op1_register())?,
+            })
+        }
         Code::Lea_r32_m => Ok(Operation::Lea {
             destination: register(instruction.op0_register())?,
             address: effective_address(instruction)?,

@@ -347,6 +347,12 @@ pub(super) fn instruction(
                 .i32_or()
                 .local_set(destination);
         }
+        Operation::Exchange { left, right } => {
+            code.local_get(register(left))
+                .local_get(register(right))
+                .local_set(register(left))
+                .local_set(register(right));
+        }
         Operation::Lea {
             destination,
             address,

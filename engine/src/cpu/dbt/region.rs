@@ -411,6 +411,7 @@ pub(super) fn supports(instruction: &DecodedInstruction, embedded: bool) -> bool
                 | Operation::SetByte { .. }
                 | Operation::ConditionalMove { .. }
                 | Operation::ByteSwap { .. }
+                | Operation::Exchange { .. }
                 | Operation::Move {
                     destination: Location32::Register(_),
                     source: Value32::Register(_) | Value32::Immediate(_),
