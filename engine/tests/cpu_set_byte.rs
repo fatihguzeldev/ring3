@@ -296,7 +296,7 @@ fn memory_targets_prefixes_and_adjacent_operations_fail_closed() {
             &[0x64, 0x0f, 0x94, 0xc0][..],
             DecodeError::Unsupported(UnsupportedFeature::Segment),
         ),
-        (&[0x0f, 0x44, 0xc0][..], opcode),
+        (&[0x0f, 0x44, 0x00][..], opcode),
         (&[0x86, 0xc0][..], opcode),
     ] {
         upload(&mut engine, CODE, bytes);

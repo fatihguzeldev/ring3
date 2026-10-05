@@ -59,6 +59,17 @@ pub(super) fn instruction(
             control::condition(code, condition);
             insert_byte(code, destination);
         }
+        Operation::ConditionalMove {
+            condition,
+            destination,
+            source,
+        } => {
+            code.local_get(register(source));
+            code.local_get(register(destination));
+            control::condition(code, condition);
+            code.select();
+            code.local_set(register(destination));
+        }
         Operation::MemorySetByte { condition, address } => {
             control::condition(code, condition);
             code.local_set(RESULT);

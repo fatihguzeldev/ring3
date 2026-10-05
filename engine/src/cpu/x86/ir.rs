@@ -224,6 +224,11 @@ pub enum Operation {
         condition: Condition,
         destination: ByteRegister,
     },
+    ConditionalMove {
+        condition: Condition,
+        destination: Register32,
+        source: Register32,
+    },
     MemorySetByte {
         condition: Condition,
         address: EffectiveAddress,
