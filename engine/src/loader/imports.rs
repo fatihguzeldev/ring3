@@ -146,6 +146,7 @@ impl ImportPlan<'_> {
                     | ProviderProfile::LastErrorAndExit
                     | ProviderProfile::MainImageHandle => return Err(LoadError::Unsupported),
                 },
+                WindowsApi32::VirtualFree => return Err(LoadError::Unsupported),
             };
             used[gate_index] = true;
             resolved.slots[index] = gate_base + gate_index as u32 * 16;

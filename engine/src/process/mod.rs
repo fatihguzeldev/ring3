@@ -11,6 +11,7 @@ mod instance;
 mod resident;
 mod resident_callback;
 mod startup;
+mod virtual_memory;
 #[cfg(target_arch = "wasm32")]
 pub(crate) mod wasm;
 mod windows;

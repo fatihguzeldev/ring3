@@ -69,6 +69,7 @@ pub struct EngineInstance {
     pub(super) image_started: bool,
     pub(super) exit_code: Option<u32>,
     pub(super) windows_thread: crate::windows::ThreadState32,
+    pub(super) virtual_allocations: Vec<PageRange>,
 }
 
 impl EngineInstance {
@@ -100,6 +101,7 @@ impl EngineInstance {
             image_started: false,
             exit_code: None,
             windows_thread: crate::windows::ThreadState32::default(),
+            virtual_allocations: Vec::new(),
         })
     }
 
@@ -168,7 +170,9 @@ impl EngineInstance {
         self.memory()?;
         let memory = self.memory.as_mut().ok_or(HostError::Closed)?;
         let range = PageRange::new(GuestAddress(address), pages).map_err(HostError::Memory)?;
-        memory.unmap(range).map_err(HostError::Memory)
+        memory.unmap(range).map_err(HostError::Memory)?;
+        self.revoke_virtual_allocations(range);
+        Ok(())
     }
 
     pub fn upload(&mut self, address: u32, length: u32) -> Result<(), HostError> {
@@ -513,6 +517,7 @@ impl EngineInstance {
         self.resident = None;
         self.resident_installations = [None; RESIDENT_INSTALLATION_SLOTS];
         self.memory = None;
+        self.virtual_allocations = Vec::new();
     }
 
     fn write_byte_store_helper(

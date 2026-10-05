@@ -5,8 +5,9 @@ use crate::{
         x86::{STATE_SIZE, encode_exit_v3, encode_state},
     },
     cpu::x86::{Register32, State32},
+    memory::{GuestAddress, MemoryError},
     process::call::PendingOwner,
-    windows::CallingConvention32,
+    windows::{CallFrame32, CallingConvention32},
 };
 
 const KEY: u64 = 0xa113_2233_4455_6677;

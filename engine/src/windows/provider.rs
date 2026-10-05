@@ -9,6 +9,7 @@ pub enum WindowsApi32 {
     ExitProcess = 0x0001_0003,
     GetModuleHandleA = 0x0001_0004,
     VirtualAlloc = 0x0001_0005,
+    VirtualFree = 0x0001_0006,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -16,6 +17,7 @@ pub(crate) enum WindowsOutcome32 {
     Return(u32),
     ExitProcess(u32),
     Allocate { size: u32 },
+    Release { address: u32 },
 }
 
 impl WindowsApi32 {
@@ -29,6 +31,7 @@ impl WindowsApi32 {
             "ExitProcess" => Some(Self::ExitProcess),
             "GetModuleHandleA" => Some(Self::GetModuleHandleA),
             "VirtualAlloc" => Some(Self::VirtualAlloc),
+            "VirtualFree" => Some(Self::VirtualFree),
             _ => None,
         }
     }
@@ -40,6 +43,7 @@ impl WindowsApi32 {
             0x0001_0003 => Some(Self::ExitProcess),
             0x0001_0004 => Some(Self::GetModuleHandleA),
             0x0001_0005 => Some(Self::VirtualAlloc),
+            0x0001_0006 => Some(Self::VirtualFree),
             _ => None,
         }
     }
@@ -57,6 +61,7 @@ impl WindowsApi32 {
             Self::GetLastError => 0,
             Self::SetLastError | Self::ExitProcess | Self::GetModuleHandleA => 1,
             Self::VirtualAlloc => 4,
+            Self::VirtualFree => 3,
         }
     }
 }
@@ -74,6 +79,11 @@ pub(crate) struct ThreadState32 {
 impl ThreadState32 {
     pub(crate) fn allocation_failed(mut self) -> Self {
         self.last_error = 8;
+        self
+    }
+
+    pub(crate) fn release_failed(mut self) -> Self {
+        self.last_error = 487;
         self
     }
 
@@ -116,6 +126,15 @@ impl ThreadState32 {
                     return Err(FrameError::InvalidRequest);
                 }
                 (WindowsOutcome32::Allocate { size: *size }, self)
+            }
+            WindowsApi32::VirtualFree => {
+                let [address, size, free_type] = frame.arguments() else {
+                    return Err(FrameError::InvalidRequest);
+                };
+                if *size != 0 || *free_type != 0x8000 {
+                    return Err(FrameError::InvalidRequest);
+                }
+                (WindowsOutcome32::Release { address: *address }, self)
             }
         })
     }

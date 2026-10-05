@@ -5,8 +5,7 @@ use crate::{
         x86::{EXIT_SIZE, decode_exit, encode_exit_v4},
     },
     cpu::{ExecutionExit, ExitReason},
-    memory::{GuestAddress, MemoryError, PAGE_SIZE, PageRange, Permissions},
-    windows::{CallFrame32, ProcessContext32, ThreadState32, WindowsApi32, WindowsOutcome32},
+    windows::{ProcessContext32, WindowsApi32, WindowsOutcome32},
 };
 
 impl EngineInstance {
@@ -93,40 +92,11 @@ impl EngineInstance {
                 let frame = pending.frame;
                 self.complete_virtual_alloc(frame, thread, size)?;
             }
-        }
-        Ok(())
-    }
-
-    fn complete_virtual_alloc(
-        &mut self,
-        frame: CallFrame32,
-        thread: ThreadState32,
-        size: u32,
-    ) -> Result<(), HostError> {
-        let bounds = PageRange::new(GuestAddress(0x1000_0000), 0x6000_0000 / PAGE_SIZE)
-            .map_err(HostError::Memory)?;
-        let planned = self
-            .memory()?
-            .find_free_range(bounds, size.div_ceil(PAGE_SIZE), 65536);
-        let range = match planned {
-            Ok(range) => range,
-            Err(MemoryError::Capacity) => {
-                let prepared = Self::prepare_completed_call(frame.complete(0))?;
-                self.publish_prepared_call(prepared);
-                self.windows_thread = thread.allocation_failed();
-                return Ok(());
+            WindowsOutcome32::Release { address } => {
+                let frame = pending.frame;
+                self.complete_virtual_free(frame, thread, address)?;
             }
-            Err(error) => return Err(HostError::Memory(error)),
-        };
-        let address = range.first as u32 * PAGE_SIZE;
-        let prepared = Self::prepare_completed_call(frame.complete(address))?;
-        self.memory
-            .as_mut()
-            .ok_or(HostError::Closed)?
-            .map_zeroed(range, Permissions::READ_WRITE)
-            .map_err(HostError::Memory)?;
-        self.publish_prepared_call(prepared);
-        self.windows_thread = thread;
+        }
         Ok(())
     }
 }

@@ -167,6 +167,7 @@ impl EngineInstance {
     pub(super) fn image_capacity(&self) -> Result<u32, HostError> {
         let memory = self.memory()?;
         if memory.mapped_pages() != 0
+            || !self.virtual_allocations.is_empty()
             || self.image.is_some()
             || self.generation != 0
             || self.artifact.is_some()
