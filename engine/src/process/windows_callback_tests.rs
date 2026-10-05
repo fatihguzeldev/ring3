@@ -54,6 +54,14 @@ fn stop(engine: &mut EngineInstance, state: State32, reason: ExitReason) {
 }
 
 fn fixture(selected: bool) -> (EngineInstance, Vec<u64>, u32, u64) {
+    fixture_for_api(selected, WindowsApi32::VirtualAlloc, &[0, 4097, 0x3000, 4])
+}
+
+fn fixture_for_api(
+    selected: bool,
+    api: WindowsApi32,
+    arguments: &[u32],
+) -> (EngineInstance, Vec<u64>, u32, u64) {
     let mut engine = EngineInstance::new(7, KEY).unwrap();
     for address in PAGES {
         engine.map(address, 1, 7).unwrap();
@@ -87,23 +95,12 @@ fn fixture(selected: bool) -> (EngineInstance, Vec<u64>, u32, u64) {
                 0x5200,
                 2,
                 0x5100,
-                WindowsApi32::VirtualAlloc.id(),
+                api.id(),
                 0x5200,
                 18,
             ],
         ),
-        (
-            2,
-            1,
-            vec![
-                0x6000,
-                1,
-                0x6100,
-                2,
-                0x6100,
-                WindowsApi32::VirtualAlloc.id(),
-            ],
-        ),
+        (2, 1, vec![0x6000, 1, 0x6100, 2, 0x6100, api.id()]),
     ] {
         for (index, word) in words.into_iter().enumerate() {
             let at = TRANSFER_OFFSET + index * 4;
@@ -156,7 +153,10 @@ fn fixture(selected: bool) -> (EngineInstance, Vec<u64>, u32, u64) {
             .select_resident_callback_unit(KEY, ids[1], callback.token, active)
             .unwrap();
     }
-    for (index, value) in [0x5001_u32, 0, 4097, 0x3000, 4].into_iter().enumerate() {
+    for (index, value) in std::iter::once(0x5001_u32)
+        .chain(arguments.iter().copied())
+        .enumerate()
+    {
         engine
             .memory
             .as_mut()
@@ -169,20 +169,14 @@ fn fixture(selected: bool) -> (EngineInstance, Vec<u64>, u32, u64) {
     }
     state.eip = if selected { 0x6100 } else { 0x5100 };
     state.registers[4] = 0x8fe0;
-    stop(
-        &mut engine,
-        state,
-        ExitReason::Gate {
-            id: WindowsApi32::VirtualAlloc.id(),
-        },
-    );
+    stop(&mut engine, state, ExitReason::Gate { id: api.id() });
     engine
         .capture_active_resident_callback_call(
             KEY,
             active,
             callback.token,
             CallingConvention32::Stdcall,
-            4,
+            arguments.len() as u32,
         )
         .unwrap();
     (engine, ids, callback.token, active)
@@ -328,6 +322,140 @@ fn invalid_internal_return_fails_before_mapping_and_valid_repair_keeps_callback_
         engine.guard_resident(KEY, active).unwrap();
         for id in ids {
             engine.guard_resident_unit(KEY, id).unwrap();
+        }
+    }
+}
+
+#[test]
+fn active_callback_terminal_discards_private_calls_and_retains_resources_until_close() {
+    for selected in [false, true] {
+        for code in [0, u32::MAX] {
+            let (mut engine, ids, callback_token, active) =
+                fixture_for_api(selected, WindowsApi32::ExitProcess, &[code]);
+            engine.windows_thread = engine.windows_thread.allocation_failed();
+            let before = saved(&engine, &ids);
+            let memory = engine.memory.as_ref().unwrap();
+            let capacity = memory.capacity_pages();
+            let versions =
+                PAGES.map(|address| memory.snapshot_code(GuestAddress(address), 4096).unwrap());
+            let dispatcher = engine.dispatcher.as_ref().unwrap();
+            let dispatcher_before = (dispatcher.clone(), dispatcher.as_ptr() as usize);
+            let address = engine.arena_address();
+            let generation = engine.generation;
+            let mut expected = before.arena.clone();
+            let mut exit = [0; EXIT_SIZE];
+            exit[..4].copy_from_slice(b"R3EX");
+            exit[4..8].copy_from_slice(&0x0001_0004_u32.to_le_bytes());
+            exit[8..12].copy_from_slice(&40_u32.to_le_bytes());
+            exit[16..20].copy_from_slice(&9_u32.to_le_bytes());
+            exit[24..28].copy_from_slice(&code.to_le_bytes());
+            expected[EXIT_OFFSET..EXIT_OFFSET + EXIT_SIZE].copy_from_slice(&exit);
+            engine
+                .complete_active_resident_callback_windows_call(
+                    KEY,
+                    active,
+                    callback_token,
+                    before.inner.0,
+                )
+                .unwrap();
+            assert_eq!(engine.arena(), expected);
+            assert_eq!(engine.arena_address(), address);
+            assert_eq!(engine.exit_code, Some(code));
+            assert!(engine.pending_call.is_none());
+            assert!(engine.callback.is_none());
+            assert_eq!(engine.call_token, before.call_token);
+            assert_eq!(engine.generation, generation);
+            assert_eq!(engine.resident_installations.to_vec(), before.installations);
+            let dispatcher = engine.dispatcher.as_ref().unwrap();
+            assert_eq!(
+                (dispatcher.clone(), dispatcher.as_ptr() as usize),
+                dispatcher_before
+            );
+            let memory = engine.memory.as_ref().unwrap();
+            assert_eq!(memory.identity(), before.memory_identity);
+            assert_eq!(memory.capacity_pages(), capacity);
+            assert_eq!(memory.mapped_pages(), before.mapped_pages);
+            for ((page, expected), version) in PAGES.into_iter().zip(&before.ram).zip(&versions) {
+                let mut bytes = vec![0; 4096];
+                memory.read(GuestAddress(page), &mut bytes).unwrap();
+                assert_eq!(&bytes, expected);
+                assert!(memory.is_code_current(version));
+            }
+            let modules = ids
+                .iter()
+                .map(|id| {
+                    let bytes = engine
+                        .resident
+                        .as_ref()
+                        .unwrap()
+                        .get_raw(memory, *id)
+                        .unwrap()
+                        .wasm_bytes(memory)
+                        .unwrap();
+                    (bytes.to_vec(), bytes.as_ptr() as usize)
+                })
+                .collect::<Vec<_>>();
+            assert_eq!(modules, before.modules);
+            let frame = CallFrame32::capture(
+                memory,
+                *before.inner.2.state(),
+                CallingConvention32::Stdcall,
+                0,
+            )
+            .unwrap();
+            let (outcome, _) = engine
+                .windows_thread
+                .prepare(
+                    WindowsApi32::GetLastError,
+                    &frame,
+                    ProcessContext32::default(),
+                )
+                .unwrap();
+            assert!(matches!(outcome, WindowsOutcome32::Return(8)));
+            assert_eq!(before.last_error, 8);
+            // restoring public records cannot recreate either consumed private call.
+            let arena = engine.arena.as_mut().get_mut();
+            arena[..STATE_SIZE].copy_from_slice(&before.outer.3);
+            arena[EXIT_OFFSET..EXIT_OFFSET + EXIT_SIZE].copy_from_slice(&before.outer.4);
+            arena[crate::abi::arena::CANCEL_OFFSET..crate::abi::arena::CANCEL_OFFSET + 4]
+                .copy_from_slice(&1_u32.to_le_bytes());
+            let restored = engine.arena().to_vec();
+            assert_eq!(
+                engine.complete_active_resident_callback_windows_call(KEY ^ 1, 0, 0, 0),
+                Err(HostError::ProcessExited)
+            );
+            assert_eq!(
+                engine.finish_resident_callback(KEY ^ 1, 0, 0),
+                Err(HostError::ProcessExited)
+            );
+            assert_eq!(
+                engine.abort_callback(KEY ^ 1, 0),
+                Err(HostError::ProcessExited)
+            );
+            assert_eq!(
+                engine.complete_resident_call(KEY ^ 1, 0, 0, 0),
+                Err(HostError::ProcessExited)
+            );
+            assert_eq!(
+                engine.guard_dispatch_entry(KEY ^ 1),
+                Err(HostError::ProcessExited)
+            );
+            assert_eq!(engine.arena(), restored);
+            assert_eq!(engine.exit_code, Some(code));
+            assert!(engine.pending_call.is_none() && engine.callback.is_none());
+            engine.close();
+            engine.close();
+            assert_eq!(engine.arena(), restored);
+            assert_eq!(engine.arena_address(), address);
+            assert!(engine.memory.is_none());
+            assert!(engine.artifact.is_none());
+            assert!(engine.dispatcher.is_none());
+            assert!(engine.resident.is_none());
+            assert!(engine.resident_installations.iter().all(Option::is_none));
+            assert!(engine.pending_call.is_none() && engine.callback.is_none());
+            assert_eq!(engine.call_token, before.call_token);
+            assert_eq!(engine.exit_code, Some(code));
+            assert_eq!(engine.guard_dispatch_entry(KEY), Err(HostError::Closed));
         }
     }
 }
