@@ -650,3 +650,106 @@ fn pending_inner_call_blocks_cold_operations_and_abort_preserves_installed_code(
     let continued = decode_state(&f.engine.arena()[..STATE_SIZE]).unwrap();
     assert_eq!((continued.eip, continued.registers[0]), (0x3005, 47));
 }
+
+#[test]
+fn failed_cold_installation_aborts_discards_and_recaptures_the_same_outer_gate() {
+    let mut f = fixture(true);
+    assert_eq!(f.token, 2);
+    let unit = compile_cold(&mut f, &[(COLD, 3)], &[]);
+    reject(&mut f, &[unit], HostError::InvalidRequest, |f| {
+        ack(f, unit, 0)
+    });
+    reject(&mut f, &[unit], busy(), |f| {
+        f.engine.discard_unacknowledged_resident(KEY, unit)
+    });
+
+    f.engine.write32(0x7000, 0xaabb_ccdd).unwrap();
+    let committed_ram = ram(&f.engine);
+    assert_eq!(&committed_ram[4][..4], &0xaabb_ccdd_u32.to_le_bytes());
+    assert_eq!(&committed_ram[5][4092..], &0x3005_u32.to_le_bytes());
+    f.engine.abort_callback(KEY, f.token).unwrap();
+    assert_eq!(&f.engine.arena()[..EXIT_OFFSET + EXIT_SIZE], f.frozen_outer);
+    assert_eq!(ram(&f.engine), committed_ram);
+    reject(&mut f, &[unit], busy(), |f| {
+        f.engine.discard_unacknowledged_resident(KEY, unit)
+    });
+
+    let before_abandon = observe(&f, &[unit]);
+    f.engine.abandon_call(KEY, 1).unwrap();
+    let after_abandon = observe(&f, &[unit]);
+    assert_eq!(after_abandon.arena, before_abandon.arena);
+    assert_eq!(after_abandon.ram, before_abandon.ram);
+    assert_eq!(after_abandon.generation, before_abandon.generation);
+    assert_eq!(after_abandon.artifact, before_abandon.artifact);
+    for (after, before) in after_abandon.modules.iter().zip(&before_abandon.modules) {
+        assert_eq!(after.id, before.id);
+        assert_eq!(after.bytes, before.bytes);
+        assert_eq!(after.pointer, before.pointer);
+    }
+
+    let before_discard = observe(&f, &[]);
+    f.engine.discard_unacknowledged_resident(KEY, unit).unwrap();
+    let after_discard = observe(&f, &[]);
+    assert_eq!(after_discard.arena, before_discard.arena);
+    assert_eq!(after_discard.ram, before_discard.ram);
+    assert_eq!(after_discard.generation, before_discard.generation);
+    assert_eq!(after_discard.artifact, before_discard.artifact);
+    assert_eq!(after_discard.modules, before_discard.modules);
+    assert_eq!(after_discard.installations, before_discard.installations);
+    assert_eq!(
+        f.engine.lookup_resident(COLD),
+        Err(HostError::Resident(RegistryError::NotFound {
+            pc: GuestAddress(COLD),
+        }))
+    );
+    let removed = HostError::Resident(RegistryError::InvalidUnit);
+    reject(&mut f, &[], removed, |f| {
+        f.engine.discard_unacknowledged_resident(KEY, unit)
+    });
+    reject(&mut f, &[], removed, |f| {
+        f.engine.resident_bytes(unit).map(|bytes| bytes.len())
+    });
+
+    assert_eq!(&f.engine.arena()[..EXIT_OFFSET + EXIT_SIZE], f.frozen_outer);
+    let recaptured = f
+        .engine
+        .capture_resident_call(KEY, f.outer, CallingConvention32::Cdecl, 0)
+        .unwrap();
+    assert_eq!(recaptured.token, 3);
+    assert_eq!((recaptured.gate_pc, recaptured.return_pc), (OUTER, 0x3005));
+    assert_eq!(&f.engine.arena()[..EXIT_OFFSET + EXIT_SIZE], f.frozen_outer);
+    assert_eq!(ram(&f.engine), committed_ram);
+    let fresh = f
+        .engine
+        .begin_resident_callback(
+            KEY,
+            f.outer,
+            f.home,
+            recaptured.token,
+            HOME,
+            RETURN,
+            18,
+            &[],
+        )
+        .unwrap();
+    assert_eq!((fresh.token, fresh.outer_token), (4, 3));
+    f.engine
+        .authorize_resident_callback(KEY, f.home, fresh.token)
+        .unwrap();
+    assert_eq!(
+        decode_state(&f.engine.arena()[..STATE_SIZE]).unwrap(),
+        State32 {
+            registers: [10, 0x1357_9bdf, 3, 4, 0x8ff8, 6, 7, 8],
+            eip: HOME,
+            eflags: 0xcd7,
+        }
+    );
+    assert_eq!(ram(&f.engine), committed_ram);
+    reject(&mut f, &[], invalid_token(), |f| {
+        f.engine.complete_resident_call(KEY, f.outer, 1, 47)
+    });
+    reject(&mut f, &[], invalid_token(), |f| {
+        f.engine.authorize_resident_callback(KEY, f.home, 2)
+    });
+    assert_eq!(f.engine.guard_resident(KEY, f.home), Ok(()));
+}
