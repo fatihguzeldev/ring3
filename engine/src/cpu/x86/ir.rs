@@ -109,6 +109,12 @@ pub enum MultiplyKind {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BitScanKind {
+    Forward,
+    Reverse,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum BinaryKind {
     Add,
     Adc,
@@ -324,6 +330,11 @@ pub enum Operation {
     ReadMultiplyAccumulator {
         kind: MultiplyKind,
         address: EffectiveAddress,
+    },
+    BitScan {
+        kind: BitScanKind,
+        destination: Register32,
+        source: Register32,
     },
     Jump {
         target: BranchTarget,

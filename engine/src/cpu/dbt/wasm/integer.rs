@@ -5,10 +5,10 @@ use crate::cpu::x86::{
     Register32,
     decode::DecodedInstruction,
     ir::{
-        BinaryKind, BranchTarget, ByteArithmeticKind, ByteLogicalKind, BytePredicateKind,
-        ByteReadArithmeticKind, ByteRegister, ByteValue, CarryKind, EffectiveAddress,
-        ExtensionKind, Location32, MemoryByteArithmeticKind, MultiplyKind, Operation, ShiftCount,
-        ShiftKind, SmallSource, SmallWidth, UnaryKind, Value32,
+        BinaryKind, BitScanKind, BranchTarget, ByteArithmeticKind, ByteLogicalKind,
+        BytePredicateKind, ByteReadArithmeticKind, ByteRegister, ByteValue, CarryKind,
+        EffectiveAddress, ExtensionKind, Location32, MemoryByteArithmeticKind, MultiplyKind,
+        Operation, ShiftCount, ShiftKind, SmallSource, SmallWidth, UnaryKind, Value32,
     },
 };
 
@@ -528,6 +528,13 @@ pub(super) fn instruction(
         Operation::ReadMultiplyAccumulator { kind, address } => {
             memory::load_result(code, address, imports, exit_depth);
             accumulator_multiply(code, kind, RESULT);
+        }
+        Operation::BitScan {
+            kind,
+            destination,
+            source,
+        } => {
+            bit_scan(code, kind, destination, source);
         }
         Operation::Jump {
             target: BranchTarget::Direct(target),
@@ -1281,6 +1288,45 @@ fn shift_flags(code: &mut InstructionSink<'_>, kind: ShiftKind) {
         }
         code.i32_const(11).i32_shl().i32_or().local_set(FLAGS).end();
     }
+}
+
+fn bit_scan(
+    code: &mut InstructionSink<'_>,
+    kind: BitScanKind,
+    destination: Register32,
+    source: Register32,
+) {
+    code.local_get(register(source))
+        .local_set(LHS)
+        .local_get(LHS)
+        .if_(BlockType::Empty);
+    match kind {
+        BitScanKind::Forward => {
+            code.local_get(LHS).i32_ctz();
+        }
+        BitScanKind::Reverse => {
+            code.i32_const(31).local_get(LHS).i32_clz().i32_sub();
+        }
+    }
+    code.local_set(register(destination))
+        .end()
+        .local_get(FLAGS)
+        .i32_const(0x402)
+        .i32_and()
+        .local_get(LHS)
+        .i32_eqz()
+        .i32_const(6)
+        .i32_shl()
+        .i32_or()
+        .local_get(LHS)
+        .i32_popcnt()
+        .i32_const(1)
+        .i32_and()
+        .i32_eqz()
+        .i32_const(2)
+        .i32_shl()
+        .i32_or()
+        .local_set(FLAGS);
 }
 
 fn accumulator_multiply(code: &mut InstructionSink<'_>, kind: MultiplyKind, source: u32) {

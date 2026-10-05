@@ -7,8 +7,9 @@ use super::{
     },
 };
 use crate::cpu::x86::ir::{
-    BinaryKind, ByteArithmeticKind, ByteLogicalKind, BytePredicateKind, ByteReadArithmeticKind,
-    MemoryByteArithmeticKind, MultiplyKind, Operation, ShiftCount, ShiftKind, UnaryKind,
+    BinaryKind, BitScanKind, ByteArithmeticKind, ByteLogicalKind, BytePredicateKind,
+    ByteReadArithmeticKind, MemoryByteArithmeticKind, MultiplyKind, Operation, ShiftCount,
+    ShiftKind, UnaryKind,
 };
 
 pub(super) fn lower(instruction: &Instruction) -> Option<Result<Operation, DecodeError>> {
@@ -196,7 +197,8 @@ pub(super) fn lower(instruction: &Instruction) -> Option<Result<Operation, Decod
         _ => {
             return lower_multiply(instruction)
                 .or_else(|| lower_shift(instruction))
-                .or_else(|| lower_unary(instruction));
+                .or_else(|| lower_unary(instruction))
+                .or_else(|| lower_bit_scan(instruction));
         }
     };
     Some(binary(instruction, kind))
@@ -310,6 +312,24 @@ fn lower_shift(instruction: &Instruction) -> Option<Result<Operation, DecodeErro
             count,
         }),
     )
+}
+
+fn lower_bit_scan(instruction: &Instruction) -> Option<Result<Operation, DecodeError>> {
+    let kind = match instruction.code() {
+        Code::Bsf_r32_rm32 => BitScanKind::Forward,
+        Code::Bsr_r32_rm32 => BitScanKind::Reverse,
+        _ => return None,
+    };
+    Some((|| {
+        if instruction.op1_kind() != OpKind::Register {
+            return Err(unsupported());
+        }
+        Ok(Operation::BitScan {
+            kind,
+            destination: register(instruction.op0_register())?,
+            source: register(instruction.op1_register())?,
+        })
+    })())
 }
 
 fn lower_multiply(instruction: &Instruction) -> Option<Result<Operation, DecodeError>> {

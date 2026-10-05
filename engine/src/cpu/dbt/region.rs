@@ -440,6 +440,7 @@ pub(super) fn supports(instruction: &DecodedInstruction, embedded: bool) -> bool
                 | Operation::ConditionalMove { .. }
                 | Operation::SignExtendHigh
                 | Operation::MultiplyAccumulator { .. }
+                | Operation::BitScan { .. }
                 | Operation::ByteSwap { .. }
                 | Operation::Exchange { .. }
                 | Operation::Move {
