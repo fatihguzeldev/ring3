@@ -8,7 +8,10 @@ use super::{
     },
     profile::check_profile,
 };
-use crate::cpu::x86::ir::{ExtensionKind, Operation, SmallWidth};
+use crate::cpu::x86::{
+    Register32,
+    ir::{ExtensionKind, Operation, SmallSource, SmallWidth},
+};
 
 pub(super) fn lower(instruction: &Instruction, bytes: &[u8]) -> Result<Operation, DecodeError> {
     check_profile(instruction, bytes)?;
@@ -62,6 +65,15 @@ pub(super) fn lower(instruction: &Instruction, bytes: &[u8]) -> Result<Operation
                 source: byte_value(instruction)?,
             })
         }
+        Code::Cwde => Ok(Operation::Extend {
+            kind: ExtensionKind::Sign,
+            destination: Register32::Eax,
+            source: SmallSource::Register {
+                register: Register32::Eax,
+                width: SmallWidth::Word,
+                high_byte: false,
+            },
+        }),
         Code::Movzx_r32_rm8 | Code::Movsx_r32_rm8 | Code::Movzx_r32_rm16 | Code::Movsx_r32_rm16 => {
             let kind = match instruction.code() {
                 Code::Movzx_r32_rm8 | Code::Movzx_r32_rm16 => ExtensionKind::Zero,
