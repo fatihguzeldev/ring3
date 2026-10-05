@@ -163,8 +163,18 @@ pub enum Condition {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CarryKind {
+    Clear,
+    Set,
+    Complement,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Operation {
     Nop,
+    Carry {
+        kind: CarryKind,
+    },
     Move {
         destination: Location32,
         source: Value32,

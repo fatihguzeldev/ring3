@@ -10,13 +10,22 @@ use super::{
 };
 use crate::cpu::x86::{
     Register32,
-    ir::{ExtensionKind, Operation, SmallSource, SmallWidth},
+    ir::{CarryKind, ExtensionKind, Operation, SmallSource, SmallWidth},
 };
 
 pub(super) fn lower(instruction: &Instruction, bytes: &[u8]) -> Result<Operation, DecodeError> {
     check_profile(instruction, bytes)?;
     match instruction.code() {
         Code::Nopd => Ok(Operation::Nop),
+        Code::Clc => Ok(Operation::Carry {
+            kind: CarryKind::Clear,
+        }),
+        Code::Stc => Ok(Operation::Carry {
+            kind: CarryKind::Set,
+        }),
+        Code::Cmc => Ok(Operation::Carry {
+            kind: CarryKind::Complement,
+        }),
         Code::Nop_rm32 => {
             location(instruction, 0)?;
             Ok(Operation::Nop)

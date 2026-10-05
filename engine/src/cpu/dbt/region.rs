@@ -424,6 +424,7 @@ pub(super) fn supports(instruction: &DecodedInstruction, embedded: bool) -> bool
         || matches!(
             operation,
             Operation::Nop
+                | Operation::Carry { .. }
                 | Operation::MoveByte { .. }
                 | Operation::CompareByte { .. }
                 | Operation::TestByte { .. }

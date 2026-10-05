@@ -6,9 +6,9 @@ use crate::cpu::x86::{
     decode::DecodedInstruction,
     ir::{
         BinaryKind, BranchTarget, ByteArithmeticKind, ByteLogicalKind, BytePredicateKind,
-        ByteReadArithmeticKind, ByteRegister, ByteValue, EffectiveAddress, ExtensionKind,
-        Location32, MemoryByteArithmeticKind, Operation, ShiftCount, ShiftKind, SmallSource,
-        SmallWidth, UnaryKind, Value32,
+        ByteReadArithmeticKind, ByteRegister, ByteValue, CarryKind, EffectiveAddress,
+        ExtensionKind, Location32, MemoryByteArithmeticKind, Operation, ShiftCount, ShiftKind,
+        SmallSource, SmallWidth, UnaryKind, Value32,
     },
 };
 
@@ -27,6 +27,21 @@ pub(super) fn instruction(
     let mut store = false;
     match *instruction.operation() {
         Operation::Nop => {}
+        Operation::Carry { kind } => {
+            code.local_get(FLAGS);
+            match kind {
+                CarryKind::Clear => {
+                    code.i32_const(!1).i32_and();
+                }
+                CarryKind::Set => {
+                    code.i32_const(1).i32_or();
+                }
+                CarryKind::Complement => {
+                    code.i32_const(1).i32_xor();
+                }
+            }
+            code.local_set(FLAGS);
+        }
         Operation::Move {
             destination: Location32::Register(destination),
             source,
