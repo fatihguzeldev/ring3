@@ -276,7 +276,7 @@ fn memory_targets_prefixes_and_adjacent_operations_fail_closed() {
     let opcode = DecodeError::Unsupported(UnsupportedFeature::Opcode);
     let mut engine = code(CODE, &[0x90], false);
     for condition in 0..16 {
-        let bytes = [0x0f, 0x90 + condition, 0x03];
+        let bytes = [0x66, 0x0f, 0x90 + condition, 0x03];
         upload(&mut engine, CODE, &bytes);
         assert_eq!(
             decode_one(engine.memory().unwrap(), GuestAddress(CODE)).err(),
@@ -285,8 +285,8 @@ fn memory_targets_prefixes_and_adjacent_operations_fail_closed() {
         );
     }
     for (bytes, expected) in [
-        (&[0x0f, 0x94, 0x3c, 0x24][..], opcode),
-        (&[0x0f, 0x94, 0x05, 0, 0x50, 0, 0][..], opcode),
+        (&[0x66, 0x0f, 0x94, 0x3c, 0x24][..], opcode),
+        (&[0x66, 0x0f, 0x94, 0x05, 0, 0x50, 0, 0][..], opcode),
         (&[0x66, 0x0f, 0x94, 0xc0][..], opcode),
         (&[0x67, 0x0f, 0x94, 0xc0][..], opcode),
         (&[0xf2, 0x0f, 0x94, 0xc0][..], opcode),
@@ -410,7 +410,7 @@ fn instruction_cap_and_failed_preparation_preserve_both_published_owners() {
             for (pc, bytes, error) in [
                 (
                     CODE,
-                    &[0x0f, 0x94, 0xc0, 0x0f, 0x94, 0x03][..],
+                    &[0x0f, 0x94, 0xc0, 0x66, 0x0f, 0x94, 0x03][..],
                     compile_error(
                         owner,
                         CODE + 3,
