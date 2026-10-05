@@ -106,6 +106,7 @@ impl Imports {
                     store = true;
                 }
                 Operation::ReadConditionalMove { .. }
+                | Operation::ReadMultiplyAccumulator { .. }
                 | Operation::Move {
                     source: Value32::Memory(_),
                     ..

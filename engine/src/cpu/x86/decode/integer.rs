@@ -319,14 +319,16 @@ fn lower_multiply(instruction: &Instruction) -> Option<Result<Operation, DecodeE
         _ => None,
     };
     if let Some(kind) = kind {
-        return Some((|| {
-            if instruction.op0_kind() != OpKind::Register {
-                return Err(unsupported());
-            }
-            Ok(Operation::MultiplyAccumulator {
+        return Some((|| match instruction.op0_kind() {
+            OpKind::Register => Ok(Operation::MultiplyAccumulator {
                 kind,
                 source: register(instruction.op0_register())?,
-            })
+            }),
+            OpKind::Memory => Ok(Operation::ReadMultiplyAccumulator {
+                kind,
+                address: effective_address(instruction)?,
+            }),
+            _ => Err(unsupported()),
         })());
     }
     let immediate = match instruction.code() {

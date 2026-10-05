@@ -321,6 +321,10 @@ pub enum Operation {
         kind: MultiplyKind,
         source: Register32,
     },
+    ReadMultiplyAccumulator {
+        kind: MultiplyKind,
+        address: EffectiveAddress,
+    },
     Jump {
         target: BranchTarget,
     },

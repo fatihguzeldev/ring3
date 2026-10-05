@@ -523,7 +523,11 @@ pub(super) fn instruction(
             signed_multiply(code, destination, source, immediate, imports, exit_depth);
         }
         Operation::MultiplyAccumulator { kind, source } => {
-            accumulator_multiply(code, kind, source);
+            accumulator_multiply(code, kind, register(source));
+        }
+        Operation::ReadMultiplyAccumulator { kind, address } => {
+            memory::load_result(code, address, imports, exit_depth);
+            accumulator_multiply(code, kind, RESULT);
         }
         Operation::Jump {
             target: BranchTarget::Direct(target),
@@ -1279,10 +1283,10 @@ fn shift_flags(code: &mut InstructionSink<'_>, kind: ShiftKind) {
     }
 }
 
-fn accumulator_multiply(code: &mut InstructionSink<'_>, kind: MultiplyKind, source: Register32) {
+fn accumulator_multiply(code: &mut InstructionSink<'_>, kind: MultiplyKind, source: u32) {
     code.local_get(register(Register32::Eax))
         .local_set(LHS)
-        .local_get(register(source))
+        .local_get(source)
         .local_set(RHS)
         .local_get(LHS)
         .local_get(RHS)

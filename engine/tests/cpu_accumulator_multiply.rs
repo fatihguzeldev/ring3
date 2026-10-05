@@ -181,9 +181,9 @@ fn strict_exclusions_and_two_byte_fetch_preserve_fault_and_wrap_boundaries() {
             &[0x24, 0x8a],
             &[0x24, 0x8d, 0x78, 0x56, 0x34, 0x12],
         ] {
-            let mut bytes = vec![0xf7];
+            let mut bytes = vec![0x66, 0xf7];
             bytes.extend_from_slice(tail);
-            bytes[1] |= base & 8;
+            bytes[2] |= base & 8;
             let engine = code(CODE, &bytes);
             assert_eq!(
                 decode_one(engine.memory().unwrap(), GuestAddress(CODE)).err(),
