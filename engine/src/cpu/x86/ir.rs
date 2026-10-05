@@ -267,6 +267,10 @@ pub enum Operation {
         destination: ByteRegister,
         count: ShiftCount,
     },
+    MemoryShiftByte {
+        kind: ShiftKind,
+        address: EffectiveAddress,
+    },
     Shift {
         kind: ShiftKind,
         destination: Location32,

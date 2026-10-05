@@ -147,7 +147,9 @@ fn excluded() -> Vec<(Vec<u8>, DecodeError)> {
         for opcode in OPCODES {
             let register = encoding(opcode, 0xc0 | extension << 3, 0xff);
             let memory = encoding(opcode, extension << 3, 0xff);
-            forms.push((memory.clone(), unsupported));
+            if opcode != 0xd0 {
+                forms.push((memory.clone(), unsupported));
+            }
             for prefix in [0x66, 0x67, 0xf2, 0xf3] {
                 let mut bytes = vec![prefix];
                 bytes.extend(&register);
@@ -177,7 +179,7 @@ fn excluded() -> Vec<(Vec<u8>, DecodeError)> {
             forms.push((encoding(opcode, 0xc0 | extension << 3, 1), unsupported));
         }
     }
-    assert_eq!(forms.len(), 111);
+    assert_eq!(forms.len(), 108);
     forms
 }
 

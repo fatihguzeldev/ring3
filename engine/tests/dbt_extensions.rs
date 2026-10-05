@@ -345,7 +345,7 @@ fn narrow_destinations_and_prefixes_keep_exact_decoder_categories() {
         &[0x67, 0x0f, 0xb6, 0xc0][..],
         &[0xf3, 0x0f, 0xb6, 0xc0][..],
         &[0xf2, 0x0f, 0xbf, 0xc0][..],
-        &[0xd0, 0x20][..],
+        &[0xc0, 0x20, 1][..],
     ] {
         rejected(
             instruction,

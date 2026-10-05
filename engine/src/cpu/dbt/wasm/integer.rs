@@ -414,6 +414,10 @@ pub(super) fn instruction(
             destination,
             count,
         } => shift_byte(code, kind, destination, count),
+        Operation::MemoryShiftByte { kind, address } => {
+            shift_memory_byte(code, kind, address, imports, exit_depth);
+            store = true;
+        }
         Operation::Shift {
             kind,
             destination: Location32::Register(destination),
@@ -972,6 +976,31 @@ fn shift_byte(
     code.local_set(LHS);
     shift_count(code, count);
     code.local_tee(RHS).if_(BlockType::Empty);
+    shift_byte_value(code, kind);
+    shift_byte_flags(code, kind);
+    code.local_get(RESULT);
+    insert_byte(code, destination);
+    code.end();
+}
+
+fn shift_memory_byte(
+    code: &mut InstructionSink<'_>,
+    kind: ShiftKind,
+    address: EffectiveAddress,
+    imports: memory::Imports,
+    exit_depth: u32,
+) {
+    memory::load_narrow_value(code, address, SmallWidth::Byte, imports, exit_depth);
+    code.local_set(LHS).i32_const(1).local_set(RHS);
+    shift_byte_value(code, kind);
+    // checked store clobbers operand scratch; preserve the lossy original byte.
+    code.local_get(LHS);
+    memory::store_byte_result(code, address, imports, exit_depth);
+    code.local_set(LHS).i32_const(1).local_set(RHS);
+    shift_byte_flags(code, kind);
+}
+
+fn shift_byte_value(code: &mut InstructionSink<'_>, kind: ShiftKind) {
     code.local_get(LHS);
     if kind == ShiftKind::Sar {
         code.i32_const(24).i32_shl().i32_const(24).i32_shr_s();
@@ -989,10 +1018,6 @@ fn shift_byte(
         }
     }
     code.i32_const(0xff).i32_and().local_set(RESULT);
-    shift_byte_flags(code, kind);
-    code.local_get(RESULT);
-    insert_byte(code, destination);
-    code.end();
 }
 
 fn shift_byte_flags(code: &mut InstructionSink<'_>, kind: ShiftKind) {

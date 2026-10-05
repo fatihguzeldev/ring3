@@ -363,7 +363,7 @@ fn embedded_small_width_prefix_and_adjacent_errors_remain_precise() {
             InstructionError::Decode(DecodeError::Unsupported(UnsupportedFeature::Segment)),
         ),
         (
-            &[0xd0, 0x20][..],
+            &[0xc0, 0x20, 1][..],
             InstructionError::Decode(DecodeError::Unsupported(UnsupportedFeature::Opcode)),
         ),
         (

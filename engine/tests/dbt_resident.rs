@@ -594,7 +594,7 @@ fn exact_emitted_byte_caps_and_compiler_error_priority_preserve_units() {
             InstructionError::Decode(DecodeError::Unsupported(UnsupportedFeature::Privileged)),
         ),
         (
-            &[0xd0, 0x20][..],
+            &[0xc0, 0x20, 1][..],
             InstructionError::Decode(DecodeError::Unsupported(UnsupportedFeature::Opcode)),
         ),
         (

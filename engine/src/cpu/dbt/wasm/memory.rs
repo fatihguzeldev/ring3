@@ -61,7 +61,8 @@ impl Imports {
                 }
                 Operation::MemoryUnaryByte { .. }
                 | Operation::MemoryLogicalByte { .. }
-                | Operation::MemoryArithmeticByte { .. } => {
+                | Operation::MemoryArithmeticByte { .. }
+                | Operation::MemoryShiftByte { .. } => {
                     read8 = true;
                     store8 = true;
                 }

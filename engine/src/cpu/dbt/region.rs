@@ -376,10 +376,11 @@ fn supports_memory_binary(operation: &Operation) -> bool {
 fn supports_memory_shift(operation: &Operation) -> bool {
     matches!(
         operation,
-        Operation::Shift {
-            destination: Location32::Memory(_),
-            ..
-        }
+        Operation::MemoryShiftByte { .. }
+            | Operation::Shift {
+                destination: Location32::Memory(_),
+                ..
+            }
     )
 }
 
