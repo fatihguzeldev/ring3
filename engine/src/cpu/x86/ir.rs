@@ -332,6 +332,10 @@ pub enum Operation {
         kind: RotateKind,
         address: EffectiveAddress,
     },
+    RotateThroughCarryOne {
+        kind: RotateKind,
+        destination: Register32,
+    },
     SignedMultiply {
         destination: Register32,
         source: Location32,

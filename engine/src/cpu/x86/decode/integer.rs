@@ -198,6 +198,7 @@ pub(super) fn lower(instruction: &Instruction) -> Option<Result<Operation, Decod
             return lower_multiply(instruction)
                 .or_else(|| lower_shift(instruction))
                 .or_else(|| lower_rotate_one(instruction))
+                .or_else(|| lower_rotate_through_carry_one(instruction))
                 .or_else(|| lower_unary(instruction))
                 .or_else(|| lower_bit_scan(instruction));
         }
@@ -328,6 +329,20 @@ fn lower_rotate_one(instruction: &Instruction) -> Option<Result<Operation, Decod
             .map(|address| Operation::MemoryRotateOne { kind, address }),
         _ => Err(unsupported()),
     })
+}
+
+fn lower_rotate_through_carry_one(
+    instruction: &Instruction,
+) -> Option<Result<Operation, DecodeError>> {
+    let kind = match instruction.code() {
+        Code::Rcl_rm32_1 => RotateKind::Left,
+        Code::Rcr_rm32_1 => RotateKind::Right,
+        _ => return None,
+    };
+    Some(
+        register(instruction.op0_register())
+            .map(|destination| Operation::RotateThroughCarryOne { kind, destination }),
+    )
 }
 
 fn lower_bit_scan(instruction: &Instruction) -> Option<Result<Operation, DecodeError>> {

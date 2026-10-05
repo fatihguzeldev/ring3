@@ -368,8 +368,11 @@ fn excluded_forms_and_two_byte_fetch_preserve_fault_and_snapshot_boundaries() {
         }
     }
     for field in [2, 3] {
-        for modrm in [0xc0 | field << 3, 0x03 | field << 3] {
-            rejected(&[0xd1, modrm], opcode_error);
+        for bytes in [
+            vec![0x66, 0xd1, 0xc0 | field << 3],
+            vec![0xd1, 0x03 | field << 3],
+        ] {
+            rejected(&bytes, opcode_error);
             exclusions += 1;
         }
     }
