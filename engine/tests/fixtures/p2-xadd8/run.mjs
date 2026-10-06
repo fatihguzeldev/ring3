@@ -2,13 +2,12 @@ import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
 import {readFileSync, readdirSync, writeFileSync} from 'node:fs';
 import {join} from 'node:path';
+import {readEngine} from '../support/engine.mjs';
 
 const [enginePath, output, root] = process.argv.slice(2);
 assert.ok(root, 'expected actual engine Wasm, output directory and repository root');
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
-const engineBytes = readFileSync(enginePath), engineModule = new WebAssembly.Module(engineBytes);
-assert.equal(hash(engineBytes), 'b2cd1a44a81deb6765ed787f0528dc15dcb699d6d3dab5f8717bb0e81d7278d5');
-assert.equal(engineBytes.length, 13723472);
+const {bytes: engineBytes, module: engineModule, sha256: engineSha256} = readEngine(enginePath);
 assert.deepEqual(WebAssembly.Module.imports(engineModule), []);
 const tools = {node: process.version, v8: process.versions.v8};
 assert.deepEqual(tools, {node: 'v22.16.0', v8: '12.4.254.21-node.26'});
@@ -338,7 +337,7 @@ for (const module of modules) {
 assert.equal(contexts.length, 24); assert.equal(mutations.length, 2); assert.equal(dataControls.length, 2); assert.equal(invalidations.length, 16); assert.equal(hostInputs.length, 100);
 const artifactNames = [...sources.map((_, bank) => `bank-${bank}.x86`), ...modules.map(module => module.file), 'result.json'];
 assert.equal(artifactNames.length, 35); assert.equal(new Set(artifactNames).size, 35);
-const result = {status: 'ok', engine_sha256: hash(engineBytes), tools, counts, contexts, modules, pages: pageRows, data_only_controls: dataControls,
+const result = {status: 'ok', engine_sha256: engineSha256, engine_bytes: engineBytes.length, tools, counts, contexts, modules, pages: pageRows, data_only_controls: dataControls,
   consumed_modrm_mutations: mutations, code_invalidations: invalidations, host_inputs: hostInputs,
   source: {url: 'https://cdrdv2-public.intel.com/929356/334569-093-sdm-vol-2d.pdf', order: '334569-093US', edition: 'September 2026',
     pdf_path: 'target/p2-memory-binary-spec/334569-093-sdm-vol-2d.pdf', pdf_bytes: 1814965, pdf_sha256: '17b632da847e4757448e8afc950487b5d489da6c238de4551dc8cf6f799d3dcd',
@@ -364,7 +363,7 @@ const result = {status: 'ok', engine_sha256: hash(engineBytes), tools, counts, c
     policy: 'widened unsigned byte sum and separate signed numeric-range overflow, nibble carry and eight-bit division parity; hex-byte capture/current-parent insertion, captured old destination goes to source before result goes to destination including self final priority and sibling merges; current operand capture after both live consumers with no intermediate CPU repair; changed consumed C8 to D9 stays behind EIP 1011, fresh SETB continues at 1011 without replay',
     diagnostic_helper_policy: 'guest modules import no data helpers and retain R3MHv1; separate complete page Read32 diagnostics change only helper v1 success value with length/reserved zero, with before/after whole-arena checks'},
   artifact_census: {x86_banks: 8, modules: 26, result_files: 1, total: 35, names: artifactNames},
-  test_sha256: Object.fromEntries(['engine/tests/cpu_xadd8.rs', 'engine/tests/cpu_xadd8_wasm.rs', 'engine/tests/fixtures/p2-xadd8/run.mjs'].map(path => [path, hash(readFileSync(join(root, path)))])),
+  test_sha256: Object.fromEntries(['engine/tests/cpu_xadd8.rs', 'engine/tests/cpu_xadd8_wasm.rs', 'engine/tests/fixtures/p2-xadd8/run.mjs', 'engine/tests/fixtures/support/engine.mjs'].map(path => [path, hash(readFileSync(join(root, path)))])),
   claim: 'prefix-free flat32 register-only byte XADD through native-generated standalone and actual engine-Wasm replacement/resident modules: all 64 ordered byte aliases/eight self/eight siblings/48 different-parent pairs, two declared asymmetric vectors and complementary FLAGS 2/cd7 plus twenty literal chains; independent byte addition/source/self/current-parent consumer oracle and 40 target anchors, full CPU before both SETcc and current second XADD, defined ADD flags with DF/fixed2 retained and incoming CF ignored; 888 seeds/1776 XADD8/888 SETB/888 SETO/888 JMP, exact pure ABI/default caps/4236-byte arenas/128 current complete pages, two unrelated data-validity controls, two consumed-ModRM stale owners and fresh no-replay same-CPU 1011 continuations with whole physical module retention after stale before fresh/close, sixteen same-opcode stale4/closed5 controls before cancelled malformed arguments; no exhaustive byte-pair/FLAGS Cartesian, memory/atomic/LOCK/HLE/word/dword/prefix/x64/REX/RTM/guest SMC/new helpers-ABI-local-caps/PE/Windows/SDK/browser/performance/fullCI/game claim'};
 const resultBytes = Buffer.from(JSON.stringify(result, null, 2)); writeFileSync(join(output, 'result.json'), resultBytes, {flag: 'wx'});
 assert.deepEqual(readdirSync(output).sort(), [...artifactNames].sort(), 'exact saved artifact filenames');

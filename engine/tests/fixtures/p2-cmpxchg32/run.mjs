@@ -2,12 +2,12 @@ import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
 import {readFileSync, readdirSync, writeFileSync} from 'node:fs';
 import {join} from 'node:path';
+import {readEngine} from '../support/engine.mjs';
 
 const [enginePath, output, root] = process.argv.slice(2);
 assert.ok(root, 'expected actual engine Wasm, output directory and repository root');
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
-const engineBytes = readFileSync(enginePath), engineModule = new WebAssembly.Module(engineBytes);
-assert.equal(hash(engineBytes), '0ac061154a23b56bfc1551540e2758282609c6f3936986ed6f583c070ffd6bef');
+const {bytes: engineBytes, module: engineModule, sha256: engineSha256} = readEngine(enginePath);
 assert.deepEqual(WebAssembly.Module.imports(engineModule), []);
 const tools = {node: process.version, v8: process.versions.v8};
 assert.deepEqual(tools, {node: 'v22.16.0', v8: '12.4.254.21-node.26'});
@@ -310,7 +310,7 @@ for (const module of modules) {
 assert.equal(contexts.length, 24); assert.equal(mutations.length, 2); assert.equal(dataControls.length, 2); assert.equal(invalidations.length, 16); assert.equal(hostInputs.length, 100);
 const artifactNames = [...sources.map((_, bank) => `bank-${bank}.x86`), ...modules.map(module => module.file), 'result.json'];
 assert.equal(artifactNames.length, 35); assert.equal(new Set(artifactNames).size, 35);
-const result = {status: 'ok', engine_sha256: hash(engineBytes), tools, counts, contexts, modules, pages: pageRows, data_only_controls: dataControls,
+const result = {status: 'ok', engine_sha256: engineSha256, engine_bytes: engineBytes.length, tools, counts, contexts, modules, pages: pageRows, data_only_controls: dataControls,
   consumed_modrm_mutations: mutations, code_invalidations: invalidations, host_inputs: hostInputs,
   source: {provenance: 'existing physically pinned local Intel primary; no fresh download or newest-edition claim', order: '253666-093US', edition: 'September 2026',
     pdf_path: 'target/p2-memory-binary-spec/253666-093-sdm-vol-2a.pdf', pdf_bytes: 3404694, pdf_sha256: '87c5acb6f27e24d9d364841a0d2346c91a8482e36f403409954e2d2a8c817bac',
@@ -334,7 +334,7 @@ const result = {status: 'ok', engine_sha256: hash(engineBytes), tools, counts, c
     policy: 'widened unsigned BigInt subtraction of current old EAX minus current destination and separate signed numeric-range overflow, nibble borrow and eight-bit division parity; equality captures old source before destination assignment, inequality captures old destination before implicit EAX assignment, including source EAX and self; numerical AL/DL insertion and current operand capture after both live consumers; no intermediate CPU repair; destination EAX always equals; changed consumed C8 to D9 stays behind EIP 1011, fresh SETZ retains ECX 2 rather than replaying the changed equality assignment of EBX 45665aff',
     diagnostic_helper_policy: 'guest modules import no data helpers and retain R3MHv1; separate complete page Read32 diagnostics change only helper v1 success value with length/reserved zero, with before/after whole-arena checks'},
   artifact_census: {x86_banks: 8, modules: 26, result_files: 1, total: 35, names: artifactNames},
-  test_sha256: Object.fromEntries(['engine/tests/cpu_cmpxchg32.rs', 'engine/tests/cpu_cmpxchg32_wasm.rs', 'engine/tests/fixtures/p2-cmpxchg32/run.mjs'].map(path => [path, hash(readFileSync(join(root, path)))])),
+  test_sha256: Object.fromEntries(['engine/tests/cpu_cmpxchg32.rs', 'engine/tests/cpu_cmpxchg32_wasm.rs', 'engine/tests/fixtures/p2-cmpxchg32/run.mjs', 'engine/tests/fixtures/support/engine.mjs'].map(path => [path, hash(readFileSync(join(root, path)))])),
   claim: 'prefix-free flat32 register-only CMPXCHG32 through native-generated standalone and actual engine-Wasm replacement/resident modules: all 64 ordered GPR pairs/eight self pairs, V0 inequality for non-EAX destinations and bank-adjusted V1 equality, complementary FLAGS 2/cd7 plus sixteen literal chains; independent current EAX-minus-destination subtraction oracle and 32 literal full target anchors, defined comparison flags with DF/fixed2 retained and incoming CF/ZF ignored, full CPU before SETZ AL/SETB DL and the current second target, implicit EAX/source/self/fixed cases; 864 seeds/1728 CMPXCHG/864 SETZ/864 SETB/864 JMP/4522 calls with exact observed branch transitions, pure ABI/default caps/4236-byte arenas/128 current complete pages, two unrelated data-validity controls, two consumed-ModRM stale owners and fresh no-replay same-CPU 1011 continuations retaining ECX 2, sixteen same-opcode stale4/closed5 controls before cancelled malformed arguments; no inequality for destination EAX, exhaustive operand-FLAGS Cartesian, memory/atomic/LOCK/byte/word/prefix/x64/RTM/guest SMC/new helpers-ABI-local-caps/PE/Windows/SDK/browser/performance/fullCI/game claim'};
 
 const resultBytes = Buffer.from(JSON.stringify(result, null, 2)); writeFileSync(join(output, 'result.json'), resultBytes, {flag: 'wx'});
