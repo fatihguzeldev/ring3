@@ -328,6 +328,10 @@ pub enum Operation {
         kind: RotateKind,
         destination: ByteRegister,
     },
+    MemoryByteRotateOne {
+        kind: RotateKind,
+        address: EffectiveAddress,
+    },
     RotateOne {
         kind: RotateKind,
         destination: Register32,

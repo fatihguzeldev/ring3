@@ -296,7 +296,11 @@ fn excluded() -> Vec<(Vec<u8>, DecodeError)> {
         ));
     }
     for field in [0, 1, 2, 3, 6] {
-        cases.push((vec![0xd0, field << 3 | 3], unsupported));
+        let mut bytes = vec![0xd0, field << 3 | 3];
+        if matches!(field, 0 | 1) {
+            bytes.insert(0, 0x66);
+        }
+        cases.push((bytes, unsupported));
     }
     assert_eq!(cases.len(), 29);
     cases

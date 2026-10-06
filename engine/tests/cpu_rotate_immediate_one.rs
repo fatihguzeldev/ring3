@@ -462,11 +462,7 @@ fn raw_immediate_domain_and_strict_neighbors_preserve_decode_boundaries() {
                 exclusions += 1;
             }
             for bytes in [
-                if memory {
-                    vec![0xd0, modrm]
-                } else {
-                    vec![0x66, 0xd0, modrm]
-                },
+                vec![0x66, 0xd0, modrm],
                 vec![0xc0, modrm, 33],
                 vec![0xd2, modrm],
                 vec![0xd3, modrm],

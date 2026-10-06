@@ -516,6 +516,14 @@ pub(super) fn instruction(
             store = true;
         }
         Operation::ByteRotateOne { kind, destination } => byte_rotate_one(code, kind, destination),
+        Operation::MemoryByteRotateOne { kind, address } => {
+            memory::load_narrow_value(code, address, SmallWidth::Byte, imports, exit_depth);
+            code.local_set(RESULT);
+            byte_rotate_one_value(code, kind);
+            memory::store_byte_result(code, address, imports, exit_depth);
+            byte_rotate_one_flags(code, kind);
+            store = true;
+        }
         Operation::RotateOne { kind, destination } => rotate_one(code, kind, destination),
         Operation::RotateThroughCarryOne { kind, destination } => {
             rotate_through_carry_one(code, kind, destination);
@@ -1328,6 +1336,13 @@ fn shift_flags(code: &mut InstructionSink<'_>, kind: ShiftKind) {
 fn byte_rotate_one(code: &mut InstructionSink<'_>, kind: RotateKind, destination: ByteRegister) {
     byte_value(code, ByteValue::Register(destination));
     code.local_set(RESULT);
+    byte_rotate_one_value(code, kind);
+    code.local_get(RESULT);
+    insert_byte(code, destination);
+    byte_rotate_one_flags(code, kind);
+}
+
+fn byte_rotate_one_value(code: &mut InstructionSink<'_>, kind: RotateKind) {
     let (left_shift, right_shift) = match kind {
         RotateKind::Left => (1, 7),
         RotateKind::Right => (7, 1),
@@ -1341,9 +1356,10 @@ fn byte_rotate_one(code: &mut InstructionSink<'_>, kind: RotateKind, destination
         .i32_or()
         .i32_const(0xff)
         .i32_and()
-        .local_set(RESULT)
-        .local_get(RESULT);
-    insert_byte(code, destination);
+        .local_set(RESULT);
+}
+
+fn byte_rotate_one_flags(code: &mut InstructionSink<'_>, kind: RotateKind) {
     code.local_get(FLAGS)
         .i32_const(!0x801)
         .i32_and()

@@ -323,6 +323,8 @@ fn lower_rotate_one(instruction: &Instruction) -> Option<Result<Operation, Decod
         return Some(match instruction.op0_kind() {
             OpKind::Register => byte_register(instruction.op0_register())
                 .map(|destination| Operation::ByteRotateOne { kind, destination }),
+            OpKind::Memory => effective_address(instruction)
+                .map(|address| Operation::MemoryByteRotateOne { kind, address }),
             _ => Err(unsupported()),
         });
     }
