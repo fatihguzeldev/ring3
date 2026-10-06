@@ -115,6 +115,17 @@ pub(super) fn lower(instruction: &Instruction, bytes: &[u8]) -> Result<Operation
                 right: register(instruction.op1_register())?,
             })
         }
+        Code::Xchg_rm8_r8 => {
+            if instruction.op0_kind() != OpKind::Register
+                || instruction.op1_kind() != OpKind::Register
+            {
+                return Err(unsupported());
+            }
+            Ok(Operation::ExchangeByte {
+                left: byte_register(instruction.op0_register())?,
+                right: byte_register(instruction.op1_register())?,
+            })
+        }
         Code::Lea_r32_m => Ok(Operation::Lea {
             destination: register(instruction.op0_register())?,
             address: effective_address(instruction)?,

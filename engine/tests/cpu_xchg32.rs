@@ -292,7 +292,7 @@ fn strict_categories_fetch_wrap_and_fixed32_adjacency_remain_exact() {
         (&[0x64, 0x87, 0xc8][..], segment),
         (&[0x65, 0x87, 0xc8][..], segment),
         (&[0xf0, 0x87, 0xc8][..], DecodeError::InvalidEncoding),
-        (&[0x86, 0xc8][..], opcode),
+        (&[0x66, 0x86, 0xc8][..], opcode),
         (&[0x66, 0x97][..], opcode),
         (&[0x87, 0x08][..], opcode),
         (&[0x87, 0x4c, 0x24, 0x04][..], opcode),

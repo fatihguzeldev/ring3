@@ -397,6 +397,12 @@ pub(super) fn instruction(
                 .local_set(register(left))
                 .local_set(register(right));
         }
+        Operation::ExchangeByte { left, right } => {
+            byte_value(code, ByteValue::Register(left));
+            byte_value(code, ByteValue::Register(right));
+            insert_byte(code, left);
+            insert_byte(code, right);
+        }
         Operation::Lea {
             destination,
             address,

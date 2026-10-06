@@ -289,6 +289,10 @@ pub enum Operation {
         left: Register32,
         right: Register32,
     },
+    ExchangeByte {
+        left: ByteRegister,
+        right: ByteRegister,
+    },
     Lea {
         destination: Register32,
         address: EffectiveAddress,
