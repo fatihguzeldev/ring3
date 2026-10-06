@@ -415,6 +415,29 @@ pub(super) fn instruction(
                 .local_get(RESULT)
                 .local_set(register(destination));
         }
+        Operation::CompareExchange {
+            destination,
+            source,
+        } => {
+            code.local_get(register(Register32::Eax))
+                .local_set(LHS)
+                .local_get(register(destination))
+                .local_set(RHS)
+                .local_get(LHS)
+                .local_get(RHS)
+                .i32_sub()
+                .local_set(RESULT);
+            arithmetic_flags(code, BinaryKind::Cmp, CarryFlag::Calculate, 31);
+            code.local_get(RESULT)
+                .i32_eqz()
+                .if_(BlockType::Empty)
+                .local_get(register(source))
+                .local_set(register(destination))
+                .else_()
+                .local_get(RHS)
+                .local_set(register(Register32::Eax))
+                .end();
+        }
         Operation::ExchangeByte { left, right } => {
             byte_value(code, ByteValue::Register(left));
             byte_value(code, ByteValue::Register(right));

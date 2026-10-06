@@ -453,6 +453,7 @@ pub(super) fn supports(instruction: &DecodedInstruction, embedded: bool) -> bool
                 | Operation::ByteSwap { .. }
                 | Operation::Exchange { .. }
                 | Operation::ExchangeAdd { .. }
+                | Operation::CompareExchange { .. }
                 | Operation::ExchangeByte { .. }
                 | Operation::Move {
                     destination: Location32::Register(_),

@@ -132,6 +132,17 @@ pub(super) fn lower(instruction: &Instruction, bytes: &[u8]) -> Result<Operation
                 source: register(instruction.op1_register())?,
             })
         }
+        Code::Cmpxchg_rm32_r32 => {
+            if instruction.op0_kind() != OpKind::Register
+                || instruction.op1_kind() != OpKind::Register
+            {
+                return Err(unsupported());
+            }
+            Ok(Operation::CompareExchange {
+                destination: register(instruction.op0_register())?,
+                source: register(instruction.op1_register())?,
+            })
+        }
         Code::Xchg_rm8_r8 => {
             if instruction.op0_kind() != OpKind::Register
                 || instruction.op1_kind() != OpKind::Register
