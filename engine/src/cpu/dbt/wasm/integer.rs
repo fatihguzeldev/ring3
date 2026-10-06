@@ -708,6 +708,15 @@ pub(super) fn instruction(
             source,
             count,
         } => double_shift(code, kind, destination, source, count),
+        Operation::MemoryDoubleShift {
+            kind,
+            address,
+            source,
+            count,
+        } => {
+            double_shift_memory(code, kind, address, source, count, imports, exit_depth);
+            store = true;
+        }
         Operation::BitTest {
             kind,
             destination,
@@ -1475,6 +1484,14 @@ fn double_shift(
         .local_set(RESULT)
         .local_get(RHS)
         .if_(BlockType::Empty);
+    double_shift_value(code, kind);
+    double_shift_flags(code, kind);
+    code.local_get(RESULT)
+        .local_set(register(destination))
+        .end();
+}
+
+fn double_shift_value(code: &mut InstructionSink<'_>, kind: DoubleShiftKind) {
     code.local_get(LHS).local_get(RHS);
     match kind {
         DoubleShiftKind::Left => {
@@ -1495,6 +1512,9 @@ fn double_shift(
         }
     }
     code.i32_or().local_set(RESULT);
+}
+
+fn double_shift_flags(code: &mut InstructionSink<'_>, kind: DoubleShiftKind) {
     // af and multi-bit of are undefined; this profile clears them.
     logical_flags(code, 31);
     code.local_get(FLAGS).local_get(LHS);
@@ -1525,10 +1545,36 @@ fn double_shift(
         .i32_shl()
         .i32_or()
         .local_set(FLAGS)
-        .end()
-        .local_get(RESULT)
-        .local_set(register(destination))
         .end();
+}
+
+fn double_shift_memory(
+    code: &mut InstructionSink<'_>,
+    kind: DoubleShiftKind,
+    address: EffectiveAddress,
+    source: Register32,
+    count: ShiftCount,
+    imports: memory::Imports,
+    exit_depth: u32,
+) {
+    memory::load_result(code, address, imports, exit_depth);
+    code.local_get(RESULT).local_set(LHS);
+    shift_count(code, count);
+    code.local_tee(RHS)
+        .if_(BlockType::Empty)
+        .local_get(register(source))
+        .local_set(RESULT);
+    double_shift_value(code, kind);
+    code.end();
+    // store validation clobbers scratch; preserve the old word and count until flags commit.
+    code.local_get(LHS).local_get(RHS);
+    memory::store_result(code, address, imports, exit_depth);
+    code.local_set(RHS)
+        .local_set(LHS)
+        .local_get(RHS)
+        .if_(BlockType::Empty);
+    double_shift_flags(code, kind);
+    code.end();
 }
 
 fn shift_memory(

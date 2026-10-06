@@ -367,6 +367,7 @@ fn exclusions() -> Vec<(Vec<u8>, DecodeError)> {
         let bytes = instruction(opcode, 0, 2, 0);
         let mut memory = bytes.clone();
         memory[2] = 0x13;
+        memory.insert(0, 0x66);
         cases.push((memory, DecodeError::Unsupported(UnsupportedFeature::Opcode)));
         for prefix in [
             0x66, 0x67, 0xf2, 0xf3, 0x26, 0x2e, 0x36, 0x3e, 0x64, 0x65, 0xf0,

@@ -8,8 +8,9 @@ use super::{
 };
 use crate::cpu::x86::ir::{
     BinaryKind, BitIndex, BitScanKind, BitTestKind, ByteArithmeticKind, ByteLogicalKind,
-    BytePredicateKind, ByteReadArithmeticKind, DoubleShiftKind, MemoryByteArithmeticKind,
-    MultiplyKind, Operation, RotateKind, ShiftCount, ShiftKind, UnaryKind,
+    BytePredicateKind, ByteReadArithmeticKind, DoubleShiftKind, Location32,
+    MemoryByteArithmeticKind, MultiplyKind, Operation, RotateKind, ShiftCount, ShiftKind,
+    UnaryKind,
 };
 
 pub(super) fn lower(instruction: &Instruction) -> Option<Result<Operation, DecodeError>> {
@@ -330,15 +331,23 @@ fn lower_double_shift(instruction: &Instruction) -> Option<Result<Operation, Dec
         _ => return None,
     };
     Some((|| {
-        if instruction.op0_kind() != OpKind::Register || instruction.op1_kind() != OpKind::Register
-        {
+        if instruction.op1_kind() != OpKind::Register {
             return Err(unsupported());
         }
-        Ok(Operation::DoubleShift {
-            kind,
-            destination: register(instruction.op0_register())?,
-            source: register(instruction.op1_register())?,
-            count,
+        let source = register(instruction.op1_register())?;
+        location(instruction, 0).map(|destination| match destination {
+            Location32::Register(destination) => Operation::DoubleShift {
+                kind,
+                destination,
+                source,
+                count,
+            },
+            Location32::Memory(address) => Operation::MemoryDoubleShift {
+                kind,
+                address,
+                source,
+                count,
+            },
         })
     })())
 }

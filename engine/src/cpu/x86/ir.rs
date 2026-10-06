@@ -386,6 +386,12 @@ pub enum Operation {
         source: Register32,
         count: ShiftCount,
     },
+    MemoryDoubleShift {
+        kind: DoubleShiftKind,
+        address: EffectiveAddress,
+        source: Register32,
+        count: ShiftCount,
+    },
     ByteRotateOne {
         kind: RotateKind,
         destination: ByteRegister,

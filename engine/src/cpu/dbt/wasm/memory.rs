@@ -95,6 +95,7 @@ impl Imports {
                     ..
                 }
                 | Operation::MemoryRotateOne { .. }
+                | Operation::MemoryDoubleShift { .. }
                 | Operation::MemoryRotateThroughCarryOne { .. }
                 | Operation::MemoryExchangeAdd { .. }
                 | Operation::MemoryCompareExchange { .. }
