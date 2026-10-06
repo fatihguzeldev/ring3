@@ -397,6 +397,24 @@ pub(super) fn instruction(
                 .local_set(register(left))
                 .local_set(register(right));
         }
+        Operation::ExchangeAdd {
+            destination,
+            source,
+        } => {
+            code.local_get(register(destination))
+                .local_set(LHS)
+                .local_get(register(source))
+                .local_set(RHS)
+                .local_get(LHS)
+                .local_get(RHS)
+                .i32_add()
+                .local_set(RESULT);
+            arithmetic_flags(code, BinaryKind::Add, CarryFlag::Calculate, 31);
+            code.local_get(LHS)
+                .local_set(register(source))
+                .local_get(RESULT)
+                .local_set(register(destination));
+        }
         Operation::ExchangeByte { left, right } => {
             byte_value(code, ByteValue::Register(left));
             byte_value(code, ByteValue::Register(right));
