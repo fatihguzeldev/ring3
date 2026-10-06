@@ -9,7 +9,10 @@ use ring3_engine::{
         x86::{
             Register32,
             decode::{DecodeError, decode_one},
-            ir::{BinaryKind, ByteRegister, Condition, Location32, Operation, UnaryKind, Value32},
+            ir::{
+                ByteArithmeticKind, ByteRegister, ByteValue, Condition, Location32, Operation,
+                UnaryKind,
+            },
         },
     },
     memory::{Access, CodeSnapshot, FaultReason, GuestAddress, MemoryFault},
@@ -17,9 +20,9 @@ use ring3_engine::{
 };
 
 #[test]
-fn cmpxchg_eax_ecx_admits_before_jump_with_unmapped_data() {
-    let mut engine = EngineInstance::new(1, 0xc0ec_0000_f123_4567).unwrap();
-    let bytes = [0x0f, 0xb1, 0xc8, 0xeb, 0];
+fn cmpxchg_ah_al_admits_before_jump_with_unmapped_data() {
+    let mut engine = EngineInstance::new(1, 0xc0b0_0000_f123_4567).unwrap();
+    let bytes = [0x0f, 0xb0, 0xc4, 0xeb, 0];
     engine.map(0x1000, 1, 7).unwrap();
     engine.arena_mut().unwrap()[TRANSFER_OFFSET..TRANSFER_OFFSET + bytes.len()]
         .copy_from_slice(&bytes);
@@ -51,13 +54,13 @@ fn cmpxchg_eax_ecx_admits_before_jump_with_unmapped_data() {
     request[4..].copy_from_slice(&(bytes.len() as u32).to_le_bytes());
     engine
         .compile(1)
-        .expect("register CMPXCHG must admit before a jump without reading data");
+        .expect("register byte CMPXCHG must admit before a jump without reading data");
 }
 
 const CODE: u32 = 0x1000;
 const KEEP: u32 = 0x3000;
 const DATA: u32 = 0x5000;
-const KEY: u64 = 0xc0ec_0000_f123_4567;
+const KEY: u64 = 0xc0b0_0000_f123_4567;
 const REGISTERS: [Register32; 8] = [
     Register32::Eax,
     Register32::Ecx,
@@ -68,7 +71,17 @@ const REGISTERS: [Register32; 8] = [
     Register32::Esi,
     Register32::Edi,
 ];
-const WITNESSES: [u8; 3] = [0xc0, 0xc8, 0xc1];
+const ALIASES: [ByteRegister; 8] = [
+    ByteRegister::Al,
+    ByteRegister::Cl,
+    ByteRegister::Dl,
+    ByteRegister::Bl,
+    ByteRegister::Ah,
+    ByteRegister::Ch,
+    ByteRegister::Dh,
+    ByteRegister::Bh,
+];
+const WITNESSES: [u8; 3] = [0xc0, 0xc4, 0xe0];
 
 #[derive(Debug, Default, PartialEq, Eq)]
 struct Census {
@@ -465,9 +478,9 @@ fn pure(
 
 fn cmpxchg(modrm: u8) -> Operation {
     assert_eq!(modrm >> 6, 3);
-    Operation::CompareExchange {
-        destination: REGISTERS[usize::from(modrm & 7)],
-        source: REGISTERS[usize::from((modrm >> 3) & 7)],
+    Operation::CompareExchangeByte {
+        destination: ALIASES[usize::from(modrm & 7)],
+        source: ALIASES[usize::from((modrm >> 3) & 7)],
     }
 }
 
@@ -547,14 +560,14 @@ fn rejected(bytes: &[u8], error: DecodeError, census: &mut Census) {
 fn bank(first: u8, count: usize) -> Vec<u8> {
     let mut bytes = Vec::new();
     for ordinal in 0..count {
-        bytes.extend([0x0f, 0xb1, first + ordinal as u8]);
+        bytes.extend([0x0f, 0xb0, first + ordinal as u8]);
     }
     bytes.extend([0xeb, 0]);
     bytes
 }
 
 #[test]
-fn all_sixty_four_ordered_register_pairs_admit_two_banks_in_six_profiles() {
+fn all_sixty_four_ordered_byte_alias_pairs_admit_two_banks_in_six_profiles() {
     let limits = CompileLimits::default();
     assert_eq!(
         (limits.instructions, limits.blocks, limits.wasm_bytes),
@@ -562,8 +575,9 @@ fn all_sixty_four_ordered_register_pairs_admit_two_banks_in_six_profiles() {
     );
     let mut census = Census::default();
     let mut identities = std::collections::BTreeSet::new();
-    let mut classes = [0; 2];
-    let mut eax_aliases = [0; 5];
+    let mut classes = [0; 3];
+    let mut al_aliases = [0; 5];
+    let mut destination_source_lanes = [0; 4];
     for first in [0xc0, 0xe0] {
         let bytes = bank(first, 32);
         assert_eq!(bytes.len(), 98);
@@ -581,11 +595,20 @@ fn all_sixty_four_ordered_register_pairs_admit_two_banks_in_six_profiles() {
             let raw = first + index as u8;
             assert!(identities.insert(raw));
             let pc = CODE + 3 * index as u32;
-            assert_eq!(&bytes[3 * index..3 * index + 3], &[0x0f, 0xb1, raw]);
+            assert_eq!(&bytes[3 * index..3 * index + 3], &[0x0f, 0xb0, raw]);
             assert_decode(&engine, pc, 3, pc + 3, cmpxchg(raw));
-            classes[usize::from(raw & 7 != (raw >> 3) & 7)] += 1;
             let destination = raw & 7;
             let source = (raw >> 3) & 7;
+            let class = if destination == source {
+                0
+            } else if destination & 3 == source & 3 {
+                1
+            } else {
+                2
+            };
+            classes[class] += 1;
+            destination_source_lanes
+                [usize::from(destination >= 4) * 2 + usize::from(source >= 4)] += 1;
             let alias = match (destination, source) {
                 (0, 0) => 0,
                 (0, _) => 1,
@@ -593,7 +616,7 @@ fn all_sixty_four_ordered_register_pairs_admit_two_banks_in_six_profiles() {
                 (left, right) if left == right => 3,
                 _ => 4,
             };
-            eax_aliases[alias] += 1;
+            al_aliases[alias] += 1;
         }
         let extent = pure(&engine, &[(CODE, 98)], false, limits, &mut census).unwrap();
         let entry = pure(&engine, &[(CODE, 98)], true, limits, &mut census).unwrap();
@@ -644,8 +667,9 @@ fn all_sixty_four_ordered_register_pairs_admit_two_banks_in_six_profiles() {
             }
         }
     }
-    assert_eq!((identities.len(), classes), (64, [8, 56]));
-    assert_eq!(eax_aliases, [1, 7, 7, 7, 42]);
+    assert_eq!((identities.len(), classes), (64, [8, 8, 48]));
+    assert_eq!(al_aliases, [1, 7, 7, 7, 42]);
+    assert_eq!(destination_source_lanes, [16; 4]);
     assert_census(&census, (4, 8, 0, 0));
 }
 
@@ -653,7 +677,7 @@ fn canonical_memory(modrm: u8) -> Vec<u8> {
     let mode = modrm >> 6;
     assert!(mode < 3);
     let rm = modrm & 7;
-    let mut bytes = vec![0x0f, 0xb1, modrm];
+    let mut bytes = vec![0x0f, 0xb0, modrm];
     if rm == 4 {
         bytes.push(0x24);
     }
@@ -688,7 +712,7 @@ fn full_modrm_domain_strict_categories_and_supported_neighbors_are_exact() {
     assert_eq!(domain, [64; 4]);
     let registers: Vec<u8> = (0..8)
         .map(|i| 0xc0 | i << 3 | i)
-        .chain([0xc8, 0xc1])
+        .chain([0xc4, 0xe0])
         .collect();
     let prefixes = [
         0x66, 0x67, 0xf2, 0xf3, 0x26, 0x2e, 0x36, 0x3e, 0x64, 0x65, 0xf0,
@@ -702,7 +726,7 @@ fn full_modrm_domain_strict_categories_and_supported_neighbors_are_exact() {
         };
         for &raw in &registers {
             strict.push((
-                vec![prefix, 0x0f, 0xb1, raw],
+                vec![prefix, 0x0f, 0xb0, raw],
                 if prefix == 0xf0 {
                     DecodeError::InvalidEncoding
                 } else {
@@ -710,18 +734,18 @@ fn full_modrm_domain_strict_categories_and_supported_neighbors_are_exact() {
                 },
             ));
         }
-        for memory in [&[0x0f, 0xb1, 0x03][..], &[0x0f, 0xb1, 0x04, 0x24][..]] {
+        for memory in [&[0x0f, 0xb0, 0x03][..], &[0x0f, 0xb0, 0x04, 0x24][..]] {
             let mut bytes = vec![prefix];
             bytes.extend(memory);
             strict.push((bytes, category));
         }
     }
     for &raw in &registers {
-        strict.push((vec![0x66, 0x0f, 0xb0, raw], opcode));
+        strict.push((vec![0x66, 0x0f, 0xb1, raw], opcode));
     }
     strict.extend([
-        (vec![0x0f, 0xb0, 0x03], opcode),
-        (vec![0x0f, 0xb0, 0x04, 0x24], opcode),
+        (vec![0x0f, 0xb1, 0x03], opcode),
+        (vec![0x0f, 0xb1, 0x04, 0x24], opcode),
         (vec![0x0f, 0xc7, 0x0b], opcode),
         (vec![0x66, 0x0f, 0xc1, 0xc8], opcode),
         (vec![0x66, 0x87, 0xc8], opcode),
@@ -747,16 +771,22 @@ fn full_modrm_domain_strict_categories_and_supported_neighbors_are_exact() {
     for &raw in &registers {
         for (bytes, operation) in [
             (
-                vec![0x39, raw],
-                Operation::Binary {
-                    kind: BinaryKind::Cmp,
-                    destination: Location32::Register(REGISTERS[usize::from(raw & 7)]),
-                    source: Value32::Register(REGISTERS[usize::from((raw >> 3) & 7)]),
+                vec![0x38, raw],
+                Operation::CompareByte {
+                    left: ALIASES[usize::from(raw & 7)],
+                    right: ByteValue::Register(ALIASES[usize::from((raw >> 3) & 7)]),
                 },
             ),
             (
-                vec![0x0f, 0xc1, raw],
-                Operation::ExchangeAdd {
+                vec![0x86, raw],
+                Operation::ExchangeByte {
+                    left: ALIASES[usize::from(raw & 7)],
+                    right: ALIASES[usize::from((raw >> 3) & 7)],
+                },
+            ),
+            (
+                vec![0x0f, 0xb1, raw],
+                Operation::CompareExchange {
                     destination: REGISTERS[usize::from(raw & 7)],
                     source: REGISTERS[usize::from((raw >> 3) & 7)],
                 },
@@ -771,33 +801,33 @@ fn full_modrm_domain_strict_categories_and_supported_neighbors_are_exact() {
     }
     for (bytes, operation) in [
         (
-            vec![0x0f, 0x92, 0xc0],
+            vec![0x0f, 0x94, 0xc0],
             Operation::SetByte {
-                condition: Condition::Below,
+                condition: Condition::Equal,
                 destination: ByteRegister::Al,
             },
         ),
         (
-            vec![0x0f, 0x90, 0xc4],
+            vec![0x0f, 0x92, 0xc2],
             Operation::SetByte {
-                condition: Condition::Overflow,
-                destination: ByteRegister::Ah,
+                condition: Condition::Below,
+                destination: ByteRegister::Dl,
             },
         ),
         (
-            vec![0x11, 0xc8],
-            Operation::Binary {
-                kind: BinaryKind::Adc,
-                destination: Location32::Register(Register32::Eax),
-                source: Value32::Register(Register32::Ecx),
+            vec![0x10, 0xc8],
+            Operation::ArithmeticByte {
+                kind: ByteArithmeticKind::Adc,
+                destination: ByteRegister::Al,
+                source: ByteValue::Register(ByteRegister::Cl),
             },
         ),
         (
-            vec![0x19, 0xc8],
-            Operation::Binary {
-                kind: BinaryKind::Sbb,
-                destination: Location32::Register(Register32::Eax),
-                source: Value32::Register(Register32::Ecx),
+            vec![0x18, 0xc8],
+            Operation::ArithmeticByte {
+                kind: ByteArithmeticKind::Sbb,
+                destination: ByteRegister::Al,
+                source: ByteValue::Register(ByteRegister::Cl),
             },
         ),
     ] {
@@ -807,9 +837,9 @@ fn full_modrm_domain_strict_categories_and_supported_neighbors_are_exact() {
         assert_decode(&engine, CODE, length, CODE + u32::from(length), operation);
         observations += 1;
     }
-    for (opcode, raw, kind) in [(0x40, 0xc8, UnaryKind::Inc), (0x48, 0xc1, UnaryKind::Dec)] {
+    for (opcode, raw, kind) in [(0x40, 0xc4, UnaryKind::Inc), (0x48, 0xe0, UnaryKind::Dec)] {
         assert!(old_neighbors.insert(vec![opcode]));
-        let engine = code(CODE, &[opcode, 0x0f, 0xb1, raw]);
+        let engine = code(CODE, &[opcode, 0x0f, 0xb0, raw]);
         assert_decode(
             &engine,
             CODE,
@@ -823,7 +853,7 @@ fn full_modrm_domain_strict_categories_and_supported_neighbors_are_exact() {
         assert_decode(&engine, CODE + 1, 3, CODE + 4, cmpxchg(raw));
         observations += 2;
     }
-    assert_eq!((observations, old_neighbors.len()), (28, 26));
+    assert_eq!((observations, old_neighbors.len()), (38, 36));
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -962,7 +992,7 @@ fn exact_caps_and_eight_failures_preserve_complete_installed_publication() {
     let rows: Vec<_> = (0..9).map(|i| (CODE + i * 8, 5)).collect();
     let mut nine = vec![0; 69];
     for i in 0..9 {
-        nine[i * 8..i * 8 + 5].copy_from_slice(&[0x0f, 0xb1, 0xc8, 0xeb, 0]);
+        nine[i * 8..i * 8 + 5].copy_from_slice(&[0x0f, 0xb0, 0xc4, 0xeb, 0]);
     }
     let engine = code(CODE, &nine);
     for entries in [false, true] {
@@ -980,7 +1010,7 @@ fn exact_caps_and_eight_failures_preserve_complete_installed_publication() {
         );
         assert_eq!(inputs(&engine, &[CODE]), before);
     }
-    let mut overflow = [0x0f, 0xb1, 0xc8].repeat(64);
+    let mut overflow = [0x0f, 0xb0, 0xc4].repeat(64);
     overflow.extend([0xeb, 0]);
     assert_eq!(overflow.len(), 194);
     let engine = code(CODE, &overflow);
@@ -1084,7 +1114,7 @@ fn exact_three_byte_fetch_cuts_permissions_top_and_consumed_span_are_preserved()
     let mut cuts = 0;
     let mut permissions = 0;
     for raw in WITNESSES {
-        let bytes = [0x0f, 0xb1, raw];
+        let bytes = [0x0f, 0xb0, raw];
         for pc in [0x1ffd, 0x1ffe, 0x1fff, u32::MAX - 2] {
             let mut engine = code(pc, &bytes);
             assert_decode(&engine, pc, 3, pc.wrapping_add(3), cmpxchg(raw));
@@ -1177,7 +1207,7 @@ fn exact_three_byte_fetch_cuts_permissions_top_and_consumed_span_are_preserved()
     }
     let mut opcode_controls = 0;
     for readable in [false, true] {
-        let mut engine = code(CODE, &[0x0f, 0xb1, 0xc8]);
+        let mut engine = code(CODE, &[0x0f, 0xb0, 0xc4]);
         let pc = if readable { CODE } else { 0x2000 };
         if readable {
             engine.protect(CODE, 1, 1).unwrap();
@@ -1206,8 +1236,8 @@ fn exact_three_byte_fetch_cuts_permissions_top_and_consumed_span_are_preserved()
         );
         opcode_controls += 1;
     }
-    let mut poisoned = code(CODE, &[0x0f, 0xb1, 0xc8, 0x0f, 0x0b]);
-    assert_decode(&poisoned, CODE, 3, CODE + 3, cmpxchg(0xc8));
+    let mut poisoned = code(CODE, &[0x0f, 0xb0, 0xc4, 0x0f, 0x0b]);
+    assert_decode(&poisoned, CODE, 3, CODE + 3, cmpxchg(0xc4));
     three_admissions(&mut poisoned, CODE, false, &[CODE], &mut census);
     assert_eq!(
         (complete, cuts, permissions, opcode_controls),
@@ -1224,12 +1254,12 @@ fn every_consumed_byte_and_both_operand_fields_stale_owners_then_fresh_ir_admits
     for raw in WITNESSES {
         for (offset, new, kind) in [
             (0, 0x0f, 0),
-            (1, 0xb1, 0),
+            (1, 0xb0, 0),
             (2, raw, 0),
             (2, raw ^ 1, 1),
             (2, raw ^ 8, 2),
         ] {
-            let mut engine = writable_code(pc, &[0x0f, 0xb1, raw]);
+            let mut engine = writable_code(pc, &[0x0f, 0xb0, raw]);
             let decoded = decode_one(engine.memory().unwrap(), GuestAddress(pc)).unwrap();
             assert_decode(&engine, pc, 3, pc + 3, cmpxchg(raw));
             describe(&mut engine, &[(pc, 3)], false);
@@ -1289,14 +1319,14 @@ fn every_consumed_byte_and_both_operand_fields_stale_owners_then_fresh_ir_admits
             } else {
                 assert_ne!(fresh.operation(), decoded.operation());
             }
-            let Operation::CompareExchange {
+            let Operation::CompareExchangeByte {
                 destination: old_destination,
                 source: old_source,
             } = *decoded.operation()
             else {
                 panic!("old target")
             };
-            let Operation::CompareExchange {
+            let Operation::CompareExchangeByte {
                 destination,
                 source,
             } = *fresh.operation()
@@ -1358,7 +1388,7 @@ fn unrelated_data_map_upload_protect_unmap_and_remap_preserve_code_and_owners() 
     let mut census = Census::default();
     let mut scenarios = 0;
     for raw in WITNESSES {
-        let mut engine = code(pc, &[0x0f, 0xb1, raw]);
+        let mut engine = code(pc, &[0x0f, 0xb0, raw]);
         let decoded = decode_one(engine.memory().unwrap(), GuestAddress(pc)).unwrap();
         assert_decode(&engine, pc, 3, pc + 3, cmpxchg(raw));
         describe(&mut engine, &[(pc, 3)], false);
@@ -1476,19 +1506,19 @@ fn thirty_six_late_failures_preserve_complete_two_owner_publication_and_installa
         for (pc, bytes, length, expected) in [
             (
                 CODE,
-                vec![0x0f, 0xb1, raw, 0x0f, 0x0b],
+                vec![0x0f, 0xb0, raw, 0x0f, 0x0b],
                 5,
                 instruction_error(CODE + 3, opcode),
             ),
             (
                 CODE,
-                vec![0x0f, 0xb1, raw, 0x66, 0x0f, 0xb1, raw],
+                vec![0x0f, 0xb0, raw, 0x66, 0x0f, 0xb0, raw],
                 7,
                 instruction_error(CODE + 3, opcode),
             ),
             (
                 0x1ffb,
-                vec![0x0f, 0xb1, raw, 0x0f, 0xb1],
+                vec![0x0f, 0xb0, raw, 0x0f, 0xb0],
                 6,
                 instruction_error(
                     0x1ffe,
