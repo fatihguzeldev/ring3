@@ -68,6 +68,12 @@ pub(super) fn lower(instruction: &Instruction, bytes: &[u8]) -> Result<Operation
             source: byte_value(instruction)?,
         }),
         Code::Mov_rm8_imm8 => {
+            if instruction.op0_kind() == OpKind::Register {
+                return Ok(Operation::MoveByte {
+                    destination: byte_register(instruction.op0_register())?,
+                    source: byte_value(instruction)?,
+                });
+            }
             if instruction.op0_kind() != OpKind::Memory {
                 return Err(unsupported());
             }

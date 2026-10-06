@@ -522,7 +522,7 @@ fn byte_destinations_adjacent_forms_and_excluded_prefixes_keep_existing_categori
     let opcode = DecodeError::Unsupported(UnsupportedFeature::Opcode);
     let cases: &[(&[u8], DecodeError)] = &[
         (&[0x66, 0x10, 0xd0], opcode),
-        (&[0xc6, 0xc0, 0], opcode),
+        (&[0x66, 0xc6, 0xc0, 0], opcode),
         (&[0x66, 0x18, 0xd0], opcode),
         (&[0x66, 0xa2, 0x10, 0x50, 0, 0], opcode),
         (&[0x66, 0x10, 0xd0], opcode),

@@ -450,7 +450,7 @@ fn register_chain_admits_standalone_and_all_four_bound_profiles_without_data() {
 fn excluded_widths_alternatives_and_prefixes_keep_categories_and_old_publication() {
     let opcode = DecodeError::Unsupported(UnsupportedFeature::Opcode);
     for (bytes, expected) in [
-        (&[0xc6, 0xc0, 0][..], opcode),
+        (&[0x66, 0xc6, 0xc0, 0][..], opcode),
         (&[0x66, 0xa0, 0x10, 0x50, 0, 0], opcode),
         (&[0x66, 0xa2, 0x10, 0x50, 0, 0], opcode),
         (&[0x66, 0x10, 0xd0], opcode),
