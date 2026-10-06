@@ -94,6 +94,7 @@ impl Imports {
                 }
                 | Operation::MemoryRotateOne { .. }
                 | Operation::MemoryRotateThroughCarryOne { .. }
+                | Operation::MemoryExchangeAdd { .. }
                 | Operation::Binary {
                     kind:
                         BinaryKind::Add

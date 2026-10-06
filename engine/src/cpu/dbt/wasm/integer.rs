@@ -415,6 +415,24 @@ pub(super) fn instruction(
                 .local_get(RESULT)
                 .local_set(register(destination));
         }
+        Operation::MemoryExchangeAdd { address, source } => {
+            memory::load_result(code, address, imports, exit_depth);
+            code.local_get(RESULT)
+                .local_set(LHS)
+                .local_get(register(source))
+                .local_set(RHS)
+                .local_get(LHS)
+                .local_get(RHS)
+                .i32_add()
+                .local_set(RESULT)
+                .local_get(LHS)
+                .local_get(RHS);
+            memory::store_result(code, address, imports, exit_depth);
+            code.local_set(RHS).local_set(LHS);
+            arithmetic_flags(code, BinaryKind::Add, CarryFlag::Calculate, 31);
+            code.local_get(LHS).local_set(register(source));
+            store = true;
+        }
         Operation::ExchangeAddByte {
             destination,
             source,

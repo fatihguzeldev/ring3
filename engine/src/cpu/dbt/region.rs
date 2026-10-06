@@ -388,6 +388,7 @@ fn supports_memory_binary(operation: &Operation) -> bool {
         operation,
         Operation::MemoryLogicalByte { .. }
             | Operation::MemoryArithmeticByte { .. }
+            | Operation::MemoryExchangeAdd { .. }
             | Operation::Binary {
                 kind: BinaryKind::Add
                     | BinaryKind::Adc
