@@ -516,6 +516,9 @@ pub(super) fn instruction(
             store = true;
         }
         Operation::ByteRotateOne { kind, destination } => byte_rotate_one(code, kind, destination),
+        Operation::ByteRotateThroughCarryOne { kind, destination } => {
+            byte_rotate_through_carry_one(code, kind, destination);
+        }
         Operation::MemoryByteRotateOne { kind, address } => {
             memory::load_narrow_value(code, address, SmallWidth::Byte, imports, exit_depth);
             code.local_set(RESULT);
@@ -1428,6 +1431,70 @@ fn rotate_one_flags(code: &mut InstructionSink<'_>, kind: RotateKind) {
         }
         RotateKind::Right => {
             code.i32_const(30).i32_shr_u().i32_const(1).i32_and();
+        }
+    }
+    code.i32_xor()
+        .i32_const(11)
+        .i32_shl()
+        .i32_or()
+        .local_set(FLAGS);
+}
+
+fn byte_rotate_through_carry_one(
+    code: &mut InstructionSink<'_>,
+    kind: RotateKind,
+    destination: ByteRegister,
+) {
+    byte_value(code, ByteValue::Register(destination));
+    code.local_set(LHS)
+        .local_get(FLAGS)
+        .i32_const(1)
+        .i32_and()
+        .local_set(RHS)
+        .local_get(LHS)
+        .i32_const(1);
+    match kind {
+        RotateKind::Left => {
+            code.i32_shl();
+        }
+        RotateKind::Right => {
+            code.i32_shr_u();
+        }
+    }
+    code.local_get(RHS);
+    if kind == RotateKind::Right {
+        code.i32_const(7).i32_shl();
+    }
+    code.i32_or()
+        .i32_const(0xff)
+        .i32_and()
+        .local_set(RESULT)
+        .local_get(RESULT);
+    insert_byte(code, destination);
+    code.local_get(FLAGS)
+        .i32_const(!0x801)
+        .i32_and()
+        .local_get(LHS);
+    match kind {
+        RotateKind::Left => {
+            code.i32_const(7).i32_shr_u();
+        }
+        RotateKind::Right => {
+            code.i32_const(1).i32_and();
+        }
+    }
+    code.i32_or();
+    match kind {
+        RotateKind::Left => {
+            code.local_get(RESULT)
+                .i32_const(7)
+                .i32_shr_u()
+                .local_get(LHS)
+                .i32_const(7)
+                .i32_shr_u();
+        }
+        RotateKind::Right => {
+            code.local_get(LHS).i32_const(7).i32_shr_u().local_get(RHS);
         }
     }
     code.i32_xor()

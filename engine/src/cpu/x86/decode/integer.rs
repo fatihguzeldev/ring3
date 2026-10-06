@@ -349,6 +349,19 @@ fn lower_rotate_one(instruction: &Instruction) -> Option<Result<Operation, Decod
 fn lower_rotate_through_carry_one(
     instruction: &Instruction,
 ) -> Option<Result<Operation, DecodeError>> {
+    let byte_kind = match instruction.code() {
+        Code::Rcl_rm8_1 => Some(RotateKind::Left),
+        Code::Rcr_rm8_1 => Some(RotateKind::Right),
+        _ => None,
+    };
+    if let Some(kind) = byte_kind {
+        return Some(if instruction.op0_kind() == OpKind::Register {
+            byte_register(instruction.op0_register())
+                .map(|destination| Operation::ByteRotateThroughCarryOne { kind, destination })
+        } else {
+            Err(unsupported())
+        });
+    }
     let kind = match instruction.code() {
         Code::Rcl_rm32_1 => RotateKind::Left,
         Code::Rcr_rm32_1 => RotateKind::Right,

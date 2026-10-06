@@ -443,6 +443,7 @@ pub(super) fn supports(instruction: &DecodedInstruction, embedded: bool) -> bool
                 | Operation::ByteRotateOne { .. }
                 | Operation::RotateOne { .. }
                 | Operation::RotateThroughCarryOne { .. }
+                | Operation::ByteRotateThroughCarryOne { .. }
                 | Operation::SetByte { .. }
                 | Operation::ConditionalMove { .. }
                 | Operation::SignExtendHigh
