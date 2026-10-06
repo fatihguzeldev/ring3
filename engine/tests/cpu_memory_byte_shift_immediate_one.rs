@@ -445,7 +445,11 @@ fn raw_immediate_domain_and_strict_memory_neighbors_preserve_decode_boundaries()
     }
     for extension in [0, 1, 2, 3, 6] {
         for count in COUNTS {
-            rejected(&[0xc0, 3 | extension << 3, count], opcode);
+            let mut bytes = vec![0xc0, 3 | extension << 3, count];
+            if matches!(extension, 0 | 1) {
+                bytes.insert(0, 0x66);
+            }
+            rejected(&bytes, opcode);
             exclusions += 1;
         }
     }

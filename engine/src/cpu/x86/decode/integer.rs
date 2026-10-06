@@ -317,6 +317,8 @@ fn lower_rotate_one(instruction: &Instruction) -> Option<Result<Operation, Decod
     let byte_kind = match instruction.code() {
         Code::Rol_rm8_1 => Some(RotateKind::Left),
         Code::Ror_rm8_1 => Some(RotateKind::Right),
+        Code::Rol_rm8_imm8 if instruction.immediate8() & 31 == 1 => Some(RotateKind::Left),
+        Code::Ror_rm8_imm8 if instruction.immediate8() & 31 == 1 => Some(RotateKind::Right),
         _ => None,
     };
     if let Some(kind) = byte_kind {
