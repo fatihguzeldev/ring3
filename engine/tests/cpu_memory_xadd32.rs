@@ -401,7 +401,7 @@ fn consumed_bytes_preserve_fetch_wrap_and_snapshot_currency() {
 #[test]
 fn byte_word_and_prefix_refusals_keep_exact_categories_and_inputs() {
     let opcode = DecodeError::Unsupported(UnsupportedFeature::Opcode);
-    let mut cases = vec![(vec![0x0f, 0xc0, 0x03], opcode)];
+    let mut cases = vec![(vec![0x66, 0x0f, 0xc0, 0x03], opcode)];
     for prefix in [
         0x66, 0x67, 0xf2, 0xf3, 0x26, 0x2e, 0x36, 0x3e, 0x64, 0x65, 0xf0,
     ] {

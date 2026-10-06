@@ -62,6 +62,7 @@ impl Imports {
                 Operation::MemoryUnaryByte { .. }
                 | Operation::MemoryLogicalByte { .. }
                 | Operation::MemoryArithmeticByte { .. }
+                | Operation::MemoryExchangeAddByte { .. }
                 | Operation::MemoryShiftByte { .. }
                 | Operation::MemoryByteRotateOne { .. }
                 | Operation::MemoryByteRotateThroughCarryOne { .. } => {

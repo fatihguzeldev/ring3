@@ -301,6 +301,10 @@ pub enum Operation {
         destination: ByteRegister,
         source: ByteRegister,
     },
+    MemoryExchangeAddByte {
+        address: EffectiveAddress,
+        source: ByteRegister,
+    },
     CompareExchange {
         destination: Register32,
         source: Register32,

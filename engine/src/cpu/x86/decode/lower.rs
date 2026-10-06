@@ -139,15 +139,21 @@ pub(super) fn lower(instruction: &Instruction, bytes: &[u8]) -> Result<Operation
             }
         }
         Code::Xadd_rm8_r8 => {
-            if instruction.op0_kind() != OpKind::Register
-                || instruction.op1_kind() != OpKind::Register
-            {
+            if instruction.op1_kind() != OpKind::Register {
                 return Err(unsupported());
             }
-            Ok(Operation::ExchangeAddByte {
-                destination: byte_register(instruction.op0_register())?,
-                source: byte_register(instruction.op1_register())?,
-            })
+            let source = byte_register(instruction.op1_register())?;
+            match instruction.op0_kind() {
+                OpKind::Register => Ok(Operation::ExchangeAddByte {
+                    destination: byte_register(instruction.op0_register())?,
+                    source,
+                }),
+                OpKind::Memory => Ok(Operation::MemoryExchangeAddByte {
+                    address: effective_address(instruction)?,
+                    source,
+                }),
+                _ => Err(unsupported()),
+            }
         }
         Code::Cmpxchg_rm32_r32 => {
             if instruction.op0_kind() != OpKind::Register
