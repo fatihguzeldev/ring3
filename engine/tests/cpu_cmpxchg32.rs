@@ -17,9 +17,9 @@ use ring3_engine::{
 };
 
 #[test]
-fn xadd_eax_ecx_admits_before_jump_with_unmapped_data() {
-    let mut engine = EngineInstance::new(1, 0xcadd_0000_f123_4567).unwrap();
-    let bytes = [0x0f, 0xc1, 0xc8, 0xeb, 0];
+fn cmpxchg_eax_ecx_admits_before_jump_with_unmapped_data() {
+    let mut engine = EngineInstance::new(1, 0xc0ec_0000_f123_4567).unwrap();
+    let bytes = [0x0f, 0xb1, 0xc8, 0xeb, 0];
     engine.map(0x1000, 1, 7).unwrap();
     engine.arena_mut().unwrap()[TRANSFER_OFFSET..TRANSFER_OFFSET + bytes.len()]
         .copy_from_slice(&bytes);
@@ -51,13 +51,13 @@ fn xadd_eax_ecx_admits_before_jump_with_unmapped_data() {
     request[4..].copy_from_slice(&(bytes.len() as u32).to_le_bytes());
     engine
         .compile(1)
-        .expect("register XADD must admit before a jump without reading data");
+        .expect("register CMPXCHG must admit before a jump without reading data");
 }
 
 const CODE: u32 = 0x1000;
 const KEEP: u32 = 0x3000;
 const DATA: u32 = 0x5000;
-const KEY: u64 = 0xcadd_0000_f123_4567;
+const KEY: u64 = 0xc0ec_0000_f123_4567;
 const REGISTERS: [Register32; 8] = [
     Register32::Eax,
     Register32::Ecx,
@@ -299,7 +299,16 @@ fn section(wasm: &[u8], requested: u8) -> &[u8] {
 }
 
 fn assert_module(wasm: &[u8], owner: Option<Owner>, id: u64) {
-    assert!(wasm.len() <= CompileLimits::default().wasm_bytes);
+    assert!(wasm.len() > 8 && wasm.len() <= CompileLimits::default().wasm_bytes);
+    assert_eq!(&wasm[..8], b"\0asm\x01\0\0\0");
+    let mut remaining = &wasm[8..];
+    let mut sections = Vec::new();
+    while !remaining.is_empty() {
+        sections.push(byte(&mut remaining));
+        let length = unsigned(&mut remaining) as usize;
+        take(&mut remaining, length);
+    }
+    assert_eq!(sections, [1, 2, 3, 7, 10]);
     let resident = matches!(owner, Some(Owner::Resident));
     let arities = if owner.is_some() {
         vec![4, if resident { 7 } else { 6 }]
@@ -344,6 +353,7 @@ fn assert_module(wasm: &[u8], owner: Option<Owner>, id: u64) {
     let length = unsigned(&mut bodies) as usize;
     let mut body = take(&mut bodies, length);
     assert!(bodies.is_empty());
+    assert_eq!(body.last(), Some(&0x0b));
     assert_eq!(unsigned(&mut body), 2);
     for expected in [(16, 0x7f), (1, 0x7e)] {
         assert_eq!((unsigned(&mut body), byte(&mut body)), expected);
@@ -453,9 +463,9 @@ fn pure(
     result
 }
 
-fn xadd(modrm: u8) -> Operation {
+fn cmpxchg(modrm: u8) -> Operation {
     assert_eq!(modrm >> 6, 3);
-    Operation::ExchangeAdd {
+    Operation::CompareExchange {
         destination: REGISTERS[usize::from(modrm & 7)],
         source: REGISTERS[usize::from((modrm >> 3) & 7)],
     }
@@ -537,7 +547,7 @@ fn rejected(bytes: &[u8], error: DecodeError, census: &mut Census) {
 fn bank(first: u8, count: usize) -> Vec<u8> {
     let mut bytes = Vec::new();
     for ordinal in 0..count {
-        bytes.extend([0x0f, 0xc1, first + ordinal as u8]);
+        bytes.extend([0x0f, 0xb1, first + ordinal as u8]);
     }
     bytes.extend([0xeb, 0]);
     bytes
@@ -553,6 +563,7 @@ fn all_sixty_four_ordered_register_pairs_admit_two_banks_in_six_profiles() {
     let mut census = Census::default();
     let mut identities = std::collections::BTreeSet::new();
     let mut classes = [0; 2];
+    let mut eax_aliases = [0; 5];
     for first in [0xc0, 0xe0] {
         let bytes = bank(first, 32);
         assert_eq!(bytes.len(), 98);
@@ -570,9 +581,19 @@ fn all_sixty_four_ordered_register_pairs_admit_two_banks_in_six_profiles() {
             let raw = first + index as u8;
             assert!(identities.insert(raw));
             let pc = CODE + 3 * index as u32;
-            assert_eq!(&bytes[3 * index..3 * index + 3], &[0x0f, 0xc1, raw]);
-            assert_decode(&engine, pc, 3, pc + 3, xadd(raw));
+            assert_eq!(&bytes[3 * index..3 * index + 3], &[0x0f, 0xb1, raw]);
+            assert_decode(&engine, pc, 3, pc + 3, cmpxchg(raw));
             classes[usize::from(raw & 7 != (raw >> 3) & 7)] += 1;
+            let destination = raw & 7;
+            let source = (raw >> 3) & 7;
+            let alias = match (destination, source) {
+                (0, 0) => 0,
+                (0, _) => 1,
+                (_, 0) => 2,
+                (left, right) if left == right => 3,
+                _ => 4,
+            };
+            eax_aliases[alias] += 1;
         }
         let extent = pure(&engine, &[(CODE, 98)], false, limits, &mut census).unwrap();
         let entry = pure(&engine, &[(CODE, 98)], true, limits, &mut census).unwrap();
@@ -624,6 +645,7 @@ fn all_sixty_four_ordered_register_pairs_admit_two_banks_in_six_profiles() {
         }
     }
     assert_eq!((identities.len(), classes), (64, [8, 56]));
+    assert_eq!(eax_aliases, [1, 7, 7, 7, 42]);
     assert_census(&census, (4, 8, 0, 0));
 }
 
@@ -631,7 +653,7 @@ fn canonical_memory(modrm: u8) -> Vec<u8> {
     let mode = modrm >> 6;
     assert!(mode < 3);
     let rm = modrm & 7;
-    let mut bytes = vec![0x0f, 0xc1, modrm];
+    let mut bytes = vec![0x0f, 0xb1, modrm];
     if rm == 4 {
         bytes.push(0x24);
     }
@@ -680,7 +702,7 @@ fn full_modrm_domain_strict_categories_and_supported_neighbors_are_exact() {
         };
         for &raw in &registers {
             strict.push((
-                vec![prefix, 0x0f, 0xc1, raw],
+                vec![prefix, 0x0f, 0xb1, raw],
                 if prefix == 0xf0 {
                     DecodeError::InvalidEncoding
                 } else {
@@ -688,20 +710,20 @@ fn full_modrm_domain_strict_categories_and_supported_neighbors_are_exact() {
                 },
             ));
         }
-        for memory in [&[0x0f, 0xc1, 0x03][..], &[0x0f, 0xc1, 0x04, 0x24][..]] {
+        for memory in [&[0x0f, 0xb1, 0x03][..], &[0x0f, 0xb1, 0x04, 0x24][..]] {
             let mut bytes = vec![prefix];
             bytes.extend(memory);
             strict.push((bytes, category));
         }
     }
     for &raw in &registers {
-        strict.push((vec![0x0f, 0xc0, raw], opcode));
+        strict.push((vec![0x0f, 0xb0, raw], opcode));
     }
     strict.extend([
-        (vec![0x0f, 0xc0, 0x03], opcode),
-        (vec![0x0f, 0xc0, 0x04, 0x24], opcode),
-        (vec![0x66, 0x0f, 0xb1, 0xc8], opcode),
-        (vec![0x0f, 0xb1, 0x03], opcode),
+        (vec![0x0f, 0xb0, 0x03], opcode),
+        (vec![0x0f, 0xb0, 0x04, 0x24], opcode),
+        (vec![0x0f, 0xc7, 0x0b], opcode),
+        (vec![0x66, 0x0f, 0xc1, 0xc8], opcode),
         (vec![0x66, 0x87, 0xc8], opcode),
         (vec![0x0f, 0x0b], opcode),
     ]);
@@ -725,24 +747,25 @@ fn full_modrm_domain_strict_categories_and_supported_neighbors_are_exact() {
     for &raw in &registers {
         for (bytes, operation) in [
             (
-                vec![0x01, raw],
+                vec![0x39, raw],
                 Operation::Binary {
-                    kind: BinaryKind::Add,
+                    kind: BinaryKind::Cmp,
                     destination: Location32::Register(REGISTERS[usize::from(raw & 7)]),
                     source: Value32::Register(REGISTERS[usize::from((raw >> 3) & 7)]),
                 },
             ),
             (
-                vec![0x87, raw],
-                Operation::Exchange {
-                    left: REGISTERS[usize::from(raw & 7)],
-                    right: REGISTERS[usize::from((raw >> 3) & 7)],
+                vec![0x0f, 0xc1, raw],
+                Operation::ExchangeAdd {
+                    destination: REGISTERS[usize::from(raw & 7)],
+                    source: REGISTERS[usize::from((raw >> 3) & 7)],
                 },
             ),
         ] {
             assert!(old_neighbors.insert(bytes.clone()));
             let engine = code(CODE, &bytes);
-            assert_decode(&engine, CODE, 2, CODE + 2, operation);
+            let length = bytes.len() as u8;
+            assert_decode(&engine, CODE, length, CODE + u32::from(length), operation);
             observations += 1;
         }
     }
@@ -786,7 +809,7 @@ fn full_modrm_domain_strict_categories_and_supported_neighbors_are_exact() {
     }
     for (opcode, raw, kind) in [(0x40, 0xc8, UnaryKind::Inc), (0x48, 0xc1, UnaryKind::Dec)] {
         assert!(old_neighbors.insert(vec![opcode]));
-        let engine = code(CODE, &[opcode, 0x0f, 0xc1, raw]);
+        let engine = code(CODE, &[opcode, 0x0f, 0xb1, raw]);
         assert_decode(
             &engine,
             CODE,
@@ -797,7 +820,7 @@ fn full_modrm_domain_strict_categories_and_supported_neighbors_are_exact() {
                 destination: Location32::Register(Register32::Eax),
             },
         );
-        assert_decode(&engine, CODE + 1, 3, CODE + 4, xadd(raw));
+        assert_decode(&engine, CODE + 1, 3, CODE + 4, cmpxchg(raw));
         observations += 2;
     }
     assert_eq!((observations, old_neighbors.len()), (28, 26));
@@ -939,7 +962,7 @@ fn exact_caps_and_eight_failures_preserve_complete_installed_publication() {
     let rows: Vec<_> = (0..9).map(|i| (CODE + i * 8, 5)).collect();
     let mut nine = vec![0; 69];
     for i in 0..9 {
-        nine[i * 8..i * 8 + 5].copy_from_slice(&[0x0f, 0xc1, 0xc8, 0xeb, 0]);
+        nine[i * 8..i * 8 + 5].copy_from_slice(&[0x0f, 0xb1, 0xc8, 0xeb, 0]);
     }
     let engine = code(CODE, &nine);
     for entries in [false, true] {
@@ -957,7 +980,7 @@ fn exact_caps_and_eight_failures_preserve_complete_installed_publication() {
         );
         assert_eq!(inputs(&engine, &[CODE]), before);
     }
-    let mut overflow = [0x0f, 0xc1, 0xc8].repeat(64);
+    let mut overflow = [0x0f, 0xb1, 0xc8].repeat(64);
     overflow.extend([0xeb, 0]);
     assert_eq!(overflow.len(), 194);
     let engine = code(CODE, &overflow);
@@ -1061,10 +1084,10 @@ fn exact_three_byte_fetch_cuts_permissions_top_and_consumed_span_are_preserved()
     let mut cuts = 0;
     let mut permissions = 0;
     for raw in WITNESSES {
-        let bytes = [0x0f, 0xc1, raw];
+        let bytes = [0x0f, 0xb1, raw];
         for pc in [0x1ffd, 0x1ffe, 0x1fff, u32::MAX - 2] {
             let mut engine = code(pc, &bytes);
-            assert_decode(&engine, pc, 3, pc.wrapping_add(3), xadd(raw));
+            assert_decode(&engine, pc, 3, pc.wrapping_add(3), cmpxchg(raw));
             unmapped_data(&engine);
             let bases = if matches!(pc, 0x1ffe | 0x1fff) {
                 vec![CODE, 0x2000]
@@ -1154,7 +1177,7 @@ fn exact_three_byte_fetch_cuts_permissions_top_and_consumed_span_are_preserved()
     }
     let mut opcode_controls = 0;
     for readable in [false, true] {
-        let mut engine = code(CODE, &[0x0f, 0xc1, 0xc8]);
+        let mut engine = code(CODE, &[0x0f, 0xb1, 0xc8]);
         let pc = if readable { CODE } else { 0x2000 };
         if readable {
             engine.protect(CODE, 1, 1).unwrap();
@@ -1183,8 +1206,8 @@ fn exact_three_byte_fetch_cuts_permissions_top_and_consumed_span_are_preserved()
         );
         opcode_controls += 1;
     }
-    let mut poisoned = code(CODE, &[0x0f, 0xc1, 0xc8, 0x0f, 0x0b]);
-    assert_decode(&poisoned, CODE, 3, CODE + 3, xadd(0xc8));
+    let mut poisoned = code(CODE, &[0x0f, 0xb1, 0xc8, 0x0f, 0x0b]);
+    assert_decode(&poisoned, CODE, 3, CODE + 3, cmpxchg(0xc8));
     three_admissions(&mut poisoned, CODE, false, &[CODE], &mut census);
     assert_eq!(
         (complete, cuts, permissions, opcode_controls),
@@ -1201,14 +1224,14 @@ fn every_consumed_byte_and_both_operand_fields_stale_owners_then_fresh_ir_admits
     for raw in WITNESSES {
         for (offset, new, kind) in [
             (0, 0x0f, 0),
-            (1, 0xc1, 0),
+            (1, 0xb1, 0),
             (2, raw, 0),
             (2, raw ^ 1, 1),
             (2, raw ^ 8, 2),
         ] {
-            let mut engine = writable_code(pc, &[0x0f, 0xc1, raw]);
+            let mut engine = writable_code(pc, &[0x0f, 0xb1, raw]);
             let decoded = decode_one(engine.memory().unwrap(), GuestAddress(pc)).unwrap();
-            assert_decode(&engine, pc, 3, pc + 3, xadd(raw));
+            assert_decode(&engine, pc, 3, pc + 3, cmpxchg(raw));
             describe(&mut engine, &[(pc, 3)], false);
             let before = inputs(&engine, &[CODE, 0x2000]);
             let generation =
@@ -1234,6 +1257,13 @@ fn every_consumed_byte_and_both_operand_fields_stale_owners_then_fresh_ir_admits
             assert_eq!(engine.arena(), expected_arena);
             assert_eq!(engine.arena_address(), before.pointer);
             assert_eq!((engine.is_open(), engine.key()), before.authority);
+            assert_eq!(u64::from(engine.generation()), generation);
+            assert_eq!(engine.memory().unwrap().mapped_pages(), before.mapped);
+            assert_eq!(engine.artifact_bytes(), Err(HostError::CodeInvalidated));
+            assert_eq!(
+                engine.resident_bytes(resident),
+                Err(HostError::Resident(RegistryError::CodeInvalidated))
+            );
             assert_eq!(
                 engine.guard(KEY, generation as u32),
                 Err(HostError::CodeInvalidated)
@@ -1252,21 +1282,21 @@ fn every_consumed_byte_and_both_operand_fields_stale_owners_then_fresh_ir_admits
             expected_pages[usize::from(address >= 0x2000)][(address & 0xfff) as usize] = new;
             assert_eq!([page(&engine, CODE), page(&engine, 0x2000)], expected_pages);
             let fresh_raw = if offset == 2 { new } else { raw };
-            assert_decode(&engine, pc, 3, pc + 3, xadd(fresh_raw));
+            assert_decode(&engine, pc, 3, pc + 3, cmpxchg(fresh_raw));
             let fresh = decode_one(engine.memory().unwrap(), GuestAddress(pc)).unwrap();
             if kind == 0 {
                 assert_eq!(fresh.operation(), decoded.operation());
             } else {
                 assert_ne!(fresh.operation(), decoded.operation());
             }
-            let Operation::ExchangeAdd {
+            let Operation::CompareExchange {
                 destination: old_destination,
                 source: old_source,
             } = *decoded.operation()
             else {
                 panic!("old target")
             };
-            let Operation::ExchangeAdd {
+            let Operation::CompareExchange {
                 destination,
                 source,
             } = *fresh.operation()
@@ -1328,9 +1358,9 @@ fn unrelated_data_map_upload_protect_unmap_and_remap_preserve_code_and_owners() 
     let mut census = Census::default();
     let mut scenarios = 0;
     for raw in WITNESSES {
-        let mut engine = code(pc, &[0x0f, 0xc1, raw]);
+        let mut engine = code(pc, &[0x0f, 0xb1, raw]);
         let decoded = decode_one(engine.memory().unwrap(), GuestAddress(pc)).unwrap();
-        assert_decode(&engine, pc, 3, pc + 3, xadd(raw));
+        assert_decode(&engine, pc, 3, pc + 3, cmpxchg(raw));
         describe(&mut engine, &[(pc, 3)], false);
         let before = inputs(&engine, &[CODE, 0x2000]);
         let generation = compile(&mut engine, Owner::Replacement, false, 1, &mut census).unwrap();
@@ -1446,19 +1476,19 @@ fn thirty_six_late_failures_preserve_complete_two_owner_publication_and_installa
         for (pc, bytes, length, expected) in [
             (
                 CODE,
-                vec![0x0f, 0xc1, raw, 0x0f, 0x0b],
+                vec![0x0f, 0xb1, raw, 0x0f, 0x0b],
                 5,
                 instruction_error(CODE + 3, opcode),
             ),
             (
                 CODE,
-                vec![0x0f, 0xc1, raw, 0x66, 0x0f, 0xc1, raw],
+                vec![0x0f, 0xb1, raw, 0x66, 0x0f, 0xb1, raw],
                 7,
                 instruction_error(CODE + 3, opcode),
             ),
             (
                 0x1ffb,
-                vec![0x0f, 0xc1, raw, 0x0f, 0xc1],
+                vec![0x0f, 0xb1, raw, 0x0f, 0xb1],
                 6,
                 instruction_error(
                     0x1ffe,
@@ -1469,7 +1499,7 @@ fn thirty_six_late_failures_preserve_complete_two_owner_publication_and_installa
             for owner in [Owner::Replacement, Owner::Resident] {
                 for entries in [false, true] {
                     let mut engine = code(pc, &bytes);
-                    assert_decode(&engine, pc, 3, pc + 3, xadd(raw));
+                    assert_decode(&engine, pc, 3, pc + 3, cmpxchg(raw));
                     let resident = prior_owners(&mut engine, &mut census);
                     failed(
                         &mut engine,
