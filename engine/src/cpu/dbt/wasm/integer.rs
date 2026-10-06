@@ -7,8 +7,9 @@ use crate::cpu::x86::{
     ir::{
         BinaryKind, BitScanKind, BranchTarget, ByteArithmeticKind, ByteLogicalKind,
         BytePredicateKind, ByteReadArithmeticKind, ByteRegister, ByteValue, CarryKind,
-        EffectiveAddress, ExtensionKind, Location32, MemoryByteArithmeticKind, MultiplyKind,
-        Operation, RotateKind, ShiftCount, ShiftKind, SmallSource, SmallWidth, UnaryKind, Value32,
+        DoubleShiftKind, EffectiveAddress, ExtensionKind, Location32, MemoryByteArithmeticKind,
+        MultiplyKind, Operation, RotateKind, ShiftCount, ShiftKind, SmallSource, SmallWidth,
+        UnaryKind, Value32,
     },
 };
 
@@ -701,6 +702,12 @@ pub(super) fn instruction(
             shift_memory(code, kind, address, count, imports, exit_depth);
             store = true;
         }
+        Operation::DoubleShift {
+            kind,
+            destination,
+            source,
+            count,
+        } => double_shift(code, kind, destination, source, count),
         Operation::ByteRotateOne { kind, destination } => byte_rotate_one(code, kind, destination),
         Operation::ByteRotateThroughCarryOne { kind, destination } => {
             byte_rotate_through_carry_one(code, kind, destination);
@@ -1445,6 +1452,76 @@ fn shift(
     shift_value(code, kind);
     shift_flags(code, kind);
     code.local_get(RESULT)
+        .local_set(register(destination))
+        .end();
+}
+
+fn double_shift(
+    code: &mut InstructionSink<'_>,
+    kind: DoubleShiftKind,
+    destination: Register32,
+    source: Register32,
+    count: ShiftCount,
+) {
+    code.local_get(register(destination)).local_set(LHS);
+    shift_count(code, count);
+    code.local_set(RHS)
+        .local_get(register(source))
+        .local_set(RESULT)
+        .local_get(RHS)
+        .if_(BlockType::Empty);
+    code.local_get(LHS).local_get(RHS);
+    match kind {
+        DoubleShiftKind::Left => {
+            code.i32_shl()
+                .local_get(RESULT)
+                .i32_const(32)
+                .local_get(RHS)
+                .i32_sub()
+                .i32_shr_u();
+        }
+        DoubleShiftKind::Right => {
+            code.i32_shr_u()
+                .local_get(RESULT)
+                .i32_const(32)
+                .local_get(RHS)
+                .i32_sub()
+                .i32_shl();
+        }
+    }
+    code.i32_or().local_set(RESULT);
+    // af and multi-bit of are undefined; this profile clears them.
+    logical_flags(code, 31);
+    code.local_get(FLAGS).local_get(LHS);
+    match kind {
+        DoubleShiftKind::Left => {
+            code.i32_const(32).local_get(RHS).i32_sub();
+        }
+        DoubleShiftKind::Right => {
+            code.local_get(RHS).i32_const(1).i32_sub();
+        }
+    }
+    code.i32_shr_u()
+        .i32_const(1)
+        .i32_and()
+        .i32_or()
+        .local_set(FLAGS)
+        .local_get(RHS)
+        .i32_const(1)
+        .i32_eq()
+        .if_(BlockType::Empty)
+        .local_get(FLAGS)
+        .local_get(LHS)
+        .local_get(RESULT)
+        .i32_xor()
+        .i32_const(31)
+        .i32_shr_u()
+        .i32_const(11)
+        .i32_shl()
+        .i32_or()
+        .local_set(FLAGS)
+        .end()
+        .local_get(RESULT)
         .local_set(register(destination))
         .end();
 }

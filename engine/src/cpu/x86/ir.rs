@@ -143,6 +143,12 @@ pub enum ShiftKind {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DoubleShiftKind {
+    Left,
+    Right,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum RotateKind {
     Left,
     Right,
@@ -358,6 +364,12 @@ pub enum Operation {
     Shift {
         kind: ShiftKind,
         destination: Location32,
+        count: ShiftCount,
+    },
+    DoubleShift {
+        kind: DoubleShiftKind,
+        destination: Register32,
+        source: Register32,
         count: ShiftCount,
     },
     ByteRotateOne {

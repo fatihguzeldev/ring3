@@ -8,8 +8,8 @@ use super::{
 };
 use crate::cpu::x86::ir::{
     BinaryKind, BitScanKind, ByteArithmeticKind, ByteLogicalKind, BytePredicateKind,
-    ByteReadArithmeticKind, MemoryByteArithmeticKind, MultiplyKind, Operation, RotateKind,
-    ShiftCount, ShiftKind, UnaryKind,
+    ByteReadArithmeticKind, DoubleShiftKind, MemoryByteArithmeticKind, MultiplyKind, Operation,
+    RotateKind, ShiftCount, ShiftKind, UnaryKind,
 };
 
 pub(super) fn lower(instruction: &Instruction) -> Option<Result<Operation, DecodeError>> {
@@ -197,6 +197,7 @@ pub(super) fn lower(instruction: &Instruction) -> Option<Result<Operation, Decod
         _ => {
             return lower_multiply(instruction)
                 .or_else(|| lower_shift(instruction))
+                .or_else(|| lower_double_shift(instruction))
                 .or_else(|| lower_rotate_one(instruction))
                 .or_else(|| lower_rotate_through_carry_one(instruction))
                 .or_else(|| lower_unary(instruction))
@@ -311,6 +312,34 @@ fn lower_shift(instruction: &Instruction) -> Option<Result<Operation, DecodeErro
             count,
         }),
     )
+}
+
+fn lower_double_shift(instruction: &Instruction) -> Option<Result<Operation, DecodeError>> {
+    let (kind, count) = match instruction.code() {
+        Code::Shld_rm32_r32_imm8 => (
+            DoubleShiftKind::Left,
+            ShiftCount::Immediate(instruction.immediate8()),
+        ),
+        Code::Shld_rm32_r32_CL => (DoubleShiftKind::Left, ShiftCount::Cl),
+        Code::Shrd_rm32_r32_imm8 => (
+            DoubleShiftKind::Right,
+            ShiftCount::Immediate(instruction.immediate8()),
+        ),
+        Code::Shrd_rm32_r32_CL => (DoubleShiftKind::Right, ShiftCount::Cl),
+        _ => return None,
+    };
+    Some((|| {
+        if instruction.op0_kind() != OpKind::Register || instruction.op1_kind() != OpKind::Register
+        {
+            return Err(unsupported());
+        }
+        Ok(Operation::DoubleShift {
+            kind,
+            destination: register(instruction.op0_register())?,
+            source: register(instruction.op1_register())?,
+            count,
+        })
+    })())
 }
 
 fn lower_rotate_one(instruction: &Instruction) -> Option<Result<Operation, DecodeError>> {

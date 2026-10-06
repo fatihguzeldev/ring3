@@ -445,6 +445,7 @@ pub(super) fn supports(instruction: &DecodedInstruction, embedded: bool) -> bool
                 | Operation::ArithmeticByte { .. }
                 | Operation::UnaryByte { .. }
                 | Operation::ShiftByte { .. }
+                | Operation::DoubleShift { .. }
                 | Operation::ByteRotateOne { .. }
                 | Operation::RotateOne { .. }
                 | Operation::RotateThroughCarryOne { .. }
