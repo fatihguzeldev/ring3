@@ -297,7 +297,7 @@ fn excluded() -> Vec<(Vec<u8>, DecodeError)> {
     }
     for field in [0, 1, 2, 3, 6] {
         let mut bytes = vec![0xd0, field << 3 | 3];
-        if matches!(field, 0 | 1) {
+        if matches!(field, 0..=3) {
             bytes.insert(0, 0x66);
         }
         cases.push((bytes, unsupported));

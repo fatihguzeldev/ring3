@@ -519,6 +519,20 @@ pub(super) fn instruction(
         Operation::ByteRotateThroughCarryOne { kind, destination } => {
             byte_rotate_through_carry_one(code, kind, destination);
         }
+        Operation::MemoryByteRotateThroughCarryOne { kind, address } => {
+            memory::load_narrow_value(code, address, SmallWidth::Byte, imports, exit_depth);
+            code.local_set(LHS)
+                .local_get(FLAGS)
+                .i32_const(1)
+                .i32_and()
+                .local_set(RHS);
+            byte_rotate_through_carry_one_value(code, kind);
+            code.local_get(LHS).local_get(RHS);
+            memory::store_byte_result(code, address, imports, exit_depth);
+            code.local_set(RHS).local_set(LHS);
+            byte_rotate_through_carry_one_flags(code, kind);
+            store = true;
+        }
         Operation::MemoryByteRotateOne { kind, address } => {
             memory::load_narrow_value(code, address, SmallWidth::Byte, imports, exit_depth);
             code.local_set(RESULT);
@@ -1450,9 +1464,15 @@ fn byte_rotate_through_carry_one(
         .local_get(FLAGS)
         .i32_const(1)
         .i32_and()
-        .local_set(RHS)
-        .local_get(LHS)
-        .i32_const(1);
+        .local_set(RHS);
+    byte_rotate_through_carry_one_value(code, kind);
+    code.local_get(RESULT);
+    insert_byte(code, destination);
+    byte_rotate_through_carry_one_flags(code, kind);
+}
+
+fn byte_rotate_through_carry_one_value(code: &mut InstructionSink<'_>, kind: RotateKind) {
+    code.local_get(LHS).i32_const(1);
     match kind {
         RotateKind::Left => {
             code.i32_shl();
@@ -1465,12 +1485,10 @@ fn byte_rotate_through_carry_one(
     if kind == RotateKind::Right {
         code.i32_const(7).i32_shl();
     }
-    code.i32_or()
-        .i32_const(0xff)
-        .i32_and()
-        .local_set(RESULT)
-        .local_get(RESULT);
-    insert_byte(code, destination);
+    code.i32_or().i32_const(0xff).i32_and().local_set(RESULT);
+}
+
+fn byte_rotate_through_carry_one_flags(code: &mut InstructionSink<'_>, kind: RotateKind) {
     code.local_get(FLAGS)
         .i32_const(!0x801)
         .i32_and()

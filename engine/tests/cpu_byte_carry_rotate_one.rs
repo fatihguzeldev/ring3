@@ -275,6 +275,7 @@ fn excluded_byte_forms_and_supported_neighbors_keep_exact_ir_boundaries() {
             let mut bytes = vec![0xd0];
             bytes.extend_from_slice(tail);
             bytes[1] |= field << 3;
+            bytes.insert(0, 0x66);
             rejected(&bytes, opcode);
             exclusions += 1;
         }

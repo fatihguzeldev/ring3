@@ -63,7 +63,8 @@ impl Imports {
                 | Operation::MemoryLogicalByte { .. }
                 | Operation::MemoryArithmeticByte { .. }
                 | Operation::MemoryShiftByte { .. }
-                | Operation::MemoryByteRotateOne { .. } => {
+                | Operation::MemoryByteRotateOne { .. }
+                | Operation::MemoryByteRotateThroughCarryOne { .. } => {
                     read8 = true;
                     store8 = true;
                 }

@@ -279,9 +279,7 @@ fn excluded_byte_forms_and_supported_neighbors_keep_exact_ir_boundaries() {
     for field in [2, 3] {
         for modrm in [0xc4 | field << 3, 0x03 | field << 3] {
             let mut implicit = vec![0xd0, modrm];
-            if modrm & 0xc0 == 0xc0 {
-                implicit.insert(0, 0x66);
-            }
+            implicit.insert(0, 0x66);
             for bytes in [implicit, vec![0xc0, modrm, 1], vec![0xd2, modrm]] {
                 rejected(&bytes, opcode);
                 exclusions += 1;

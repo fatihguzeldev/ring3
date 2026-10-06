@@ -348,6 +348,10 @@ pub enum Operation {
         kind: RotateKind,
         destination: ByteRegister,
     },
+    MemoryByteRotateThroughCarryOne {
+        kind: RotateKind,
+        address: EffectiveAddress,
+    },
     MemoryRotateThroughCarryOne {
         kind: RotateKind,
         address: EffectiveAddress,

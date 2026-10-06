@@ -328,7 +328,7 @@ fn excluded_forms_and_exact_operand_fetch_preserve_fault_and_wrap_boundaries() {
         }
         let field = 0x10 | (u8::from(kind == RotateKind::Right) << 3);
         for bytes in [
-            vec![0xd0, field | 3],
+            vec![0x66, 0xd0, field | 3],
             vec![0xc0, field | 3, 1],
             vec![0xd2, field | 3],
             vec![0xd3, field | 3],

@@ -355,11 +355,12 @@ fn lower_rotate_through_carry_one(
         _ => None,
     };
     if let Some(kind) = byte_kind {
-        return Some(if instruction.op0_kind() == OpKind::Register {
-            byte_register(instruction.op0_register())
-                .map(|destination| Operation::ByteRotateThroughCarryOne { kind, destination })
-        } else {
-            Err(unsupported())
+        return Some(match instruction.op0_kind() {
+            OpKind::Register => byte_register(instruction.op0_register())
+                .map(|destination| Operation::ByteRotateThroughCarryOne { kind, destination }),
+            OpKind::Memory => effective_address(instruction)
+                .map(|address| Operation::MemoryByteRotateThroughCarryOne { kind, address }),
+            _ => Err(unsupported()),
         });
     }
     let kind = match instruction.code() {
