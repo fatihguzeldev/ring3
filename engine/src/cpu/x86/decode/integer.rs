@@ -352,6 +352,8 @@ fn lower_rotate_through_carry_one(
     let byte_kind = match instruction.code() {
         Code::Rcl_rm8_1 => Some(RotateKind::Left),
         Code::Rcr_rm8_1 => Some(RotateKind::Right),
+        Code::Rcl_rm8_imm8 if instruction.immediate8() & 31 == 1 => Some(RotateKind::Left),
+        Code::Rcr_rm8_imm8 if instruction.immediate8() & 31 == 1 => Some(RotateKind::Right),
         _ => None,
     };
     if let Some(kind) = byte_kind {

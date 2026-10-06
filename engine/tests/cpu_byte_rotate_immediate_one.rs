@@ -508,6 +508,7 @@ fn raw_byte_immediate_domain_and_strict_neighbors_preserve_decode_boundaries() {
                 bytes.extend_from_slice(tail);
                 bytes[1] |= field << 3;
                 bytes.push(count);
+                bytes.insert(0, 0x66);
                 rejected(&bytes, opcode);
                 exclusions += 1;
             }
