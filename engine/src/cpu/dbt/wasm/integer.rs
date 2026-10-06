@@ -415,6 +415,26 @@ pub(super) fn instruction(
                 .local_get(RESULT)
                 .local_set(register(destination));
         }
+        Operation::ExchangeAddByte {
+            destination,
+            source,
+        } => {
+            byte_value(code, ByteValue::Register(destination));
+            code.local_set(LHS);
+            byte_value(code, ByteValue::Register(source));
+            code.local_set(RHS)
+                .local_get(LHS)
+                .local_get(RHS)
+                .i32_add()
+                .i32_const(0xff)
+                .i32_and()
+                .local_set(RESULT);
+            arithmetic_flags(code, BinaryKind::Add, CarryFlag::Calculate, 7);
+            code.local_get(LHS);
+            insert_byte(code, source);
+            code.local_get(RESULT);
+            insert_byte(code, destination);
+        }
         Operation::CompareExchange {
             destination,
             source,
