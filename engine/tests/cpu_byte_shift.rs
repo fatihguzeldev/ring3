@@ -176,7 +176,11 @@ fn excluded() -> Vec<(Vec<u8>, DecodeError)> {
     }
     for opcode in OPCODES {
         for extension in [0, 1, 2, 3, 6] {
-            forms.push((encoding(opcode, 0xc0 | extension << 3, 1), unsupported));
+            let mut bytes = encoding(opcode, 0xc0 | extension << 3, 1);
+            if opcode == 0xd0 && matches!(extension, 0 | 1) {
+                bytes.insert(0, 0x66);
+            }
+            forms.push((bytes, unsupported));
         }
     }
     assert_eq!(forms.len(), 108);

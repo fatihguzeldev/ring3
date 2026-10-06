@@ -314,6 +314,18 @@ fn lower_shift(instruction: &Instruction) -> Option<Result<Operation, DecodeErro
 }
 
 fn lower_rotate_one(instruction: &Instruction) -> Option<Result<Operation, DecodeError>> {
+    let byte_kind = match instruction.code() {
+        Code::Rol_rm8_1 => Some(RotateKind::Left),
+        Code::Ror_rm8_1 => Some(RotateKind::Right),
+        _ => None,
+    };
+    if let Some(kind) = byte_kind {
+        return Some(match instruction.op0_kind() {
+            OpKind::Register => byte_register(instruction.op0_register())
+                .map(|destination| Operation::ByteRotateOne { kind, destination }),
+            _ => Err(unsupported()),
+        });
+    }
     let kind = match instruction.code() {
         Code::Rol_rm32_1 => RotateKind::Left,
         Code::Ror_rm32_1 => RotateKind::Right,

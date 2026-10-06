@@ -324,6 +324,10 @@ pub enum Operation {
         destination: Location32,
         count: ShiftCount,
     },
+    ByteRotateOne {
+        kind: RotateKind,
+        destination: ByteRegister,
+    },
     RotateOne {
         kind: RotateKind,
         destination: Register32,
