@@ -297,6 +297,10 @@ pub enum Operation {
         destination: Register32,
         source: Register32,
     },
+    CompareExchangeByte {
+        destination: ByteRegister,
+        source: ByteRegister,
+    },
     ExchangeByte {
         left: ByteRegister,
         right: ByteRegister,

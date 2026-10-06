@@ -438,6 +438,28 @@ pub(super) fn instruction(
                 .local_set(register(Register32::Eax))
                 .end();
         }
+        Operation::CompareExchangeByte {
+            destination,
+            source,
+        } => {
+            byte_value(code, ByteValue::Register(ByteRegister::Al));
+            code.local_set(LHS);
+            byte_value(code, ByteValue::Register(destination));
+            code.local_set(RHS)
+                .local_get(LHS)
+                .local_get(RHS)
+                .i32_sub()
+                .i32_const(0xff)
+                .i32_and()
+                .local_set(RESULT);
+            arithmetic_flags(code, BinaryKind::Cmp, CarryFlag::Calculate, 7);
+            code.local_get(RESULT).i32_eqz().if_(BlockType::Empty);
+            byte_value(code, ByteValue::Register(source));
+            insert_byte(code, destination);
+            code.else_().local_get(RHS);
+            insert_byte(code, ByteRegister::Al);
+            code.end();
+        }
         Operation::ExchangeByte { left, right } => {
             byte_value(code, ByteValue::Register(left));
             byte_value(code, ByteValue::Register(right));
