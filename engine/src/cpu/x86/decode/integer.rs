@@ -7,9 +7,9 @@ use super::{
     },
 };
 use crate::cpu::x86::ir::{
-    BinaryKind, BitScanKind, ByteArithmeticKind, ByteLogicalKind, BytePredicateKind,
-    ByteReadArithmeticKind, DoubleShiftKind, MemoryByteArithmeticKind, MultiplyKind, Operation,
-    RotateKind, ShiftCount, ShiftKind, UnaryKind,
+    BinaryKind, BitIndex, BitScanKind, BitTestKind, ByteArithmeticKind, ByteLogicalKind,
+    BytePredicateKind, ByteReadArithmeticKind, DoubleShiftKind, MemoryByteArithmeticKind,
+    MultiplyKind, Operation, RotateKind, ShiftCount, ShiftKind, UnaryKind,
 };
 
 pub(super) fn lower(instruction: &Instruction) -> Option<Result<Operation, DecodeError>> {
@@ -201,7 +201,8 @@ pub(super) fn lower(instruction: &Instruction) -> Option<Result<Operation, Decod
                 .or_else(|| lower_rotate_one(instruction))
                 .or_else(|| lower_rotate_through_carry_one(instruction))
                 .or_else(|| lower_unary(instruction))
-                .or_else(|| lower_bit_scan(instruction));
+                .or_else(|| lower_bit_scan(instruction))
+                .or_else(|| lower_bit_test(instruction));
         }
     };
     Some(binary(instruction, kind))
@@ -431,6 +432,38 @@ fn lower_bit_scan(instruction: &Instruction) -> Option<Result<Operation, DecodeE
             }),
             _ => Err(unsupported()),
         }
+    })())
+}
+
+fn lower_bit_test(instruction: &Instruction) -> Option<Result<Operation, DecodeError>> {
+    let (kind, immediate) = match instruction.code() {
+        Code::Bt_rm32_r32 => (BitTestKind::Test, false),
+        Code::Bts_rm32_r32 => (BitTestKind::Set, false),
+        Code::Btr_rm32_r32 => (BitTestKind::Reset, false),
+        Code::Btc_rm32_r32 => (BitTestKind::Complement, false),
+        Code::Bt_rm32_imm8 => (BitTestKind::Test, true),
+        Code::Bts_rm32_imm8 => (BitTestKind::Set, true),
+        Code::Btr_rm32_imm8 => (BitTestKind::Reset, true),
+        Code::Btc_rm32_imm8 => (BitTestKind::Complement, true),
+        _ => return None,
+    };
+    Some((|| {
+        if instruction.op0_kind() != OpKind::Register {
+            return Err(unsupported());
+        }
+        let index = if immediate {
+            BitIndex::Immediate(instruction.immediate8())
+        } else {
+            if instruction.op1_kind() != OpKind::Register {
+                return Err(unsupported());
+            }
+            BitIndex::Register(register(instruction.op1_register())?)
+        };
+        Ok(Operation::BitTest {
+            kind,
+            destination: register(instruction.op0_register())?,
+            index,
+        })
     })())
 }
 

@@ -5,11 +5,11 @@ use crate::cpu::x86::{
     Register32,
     decode::DecodedInstruction,
     ir::{
-        BinaryKind, BitScanKind, BranchTarget, ByteArithmeticKind, ByteLogicalKind,
-        BytePredicateKind, ByteReadArithmeticKind, ByteRegister, ByteValue, CarryKind,
-        DoubleShiftKind, EffectiveAddress, ExtensionKind, Location32, MemoryByteArithmeticKind,
-        MultiplyKind, Operation, RotateKind, ShiftCount, ShiftKind, SmallSource, SmallWidth,
-        UnaryKind, Value32,
+        BinaryKind, BitIndex, BitScanKind, BitTestKind, BranchTarget, ByteArithmeticKind,
+        ByteLogicalKind, BytePredicateKind, ByteReadArithmeticKind, ByteRegister, ByteValue,
+        CarryKind, DoubleShiftKind, EffectiveAddress, ExtensionKind, Location32,
+        MemoryByteArithmeticKind, MultiplyKind, Operation, RotateKind, ShiftCount, ShiftKind,
+        SmallSource, SmallWidth, UnaryKind, Value32,
     },
 };
 
@@ -708,6 +708,11 @@ pub(super) fn instruction(
             source,
             count,
         } => double_shift(code, kind, destination, source, count),
+        Operation::BitTest {
+            kind,
+            destination,
+            index,
+        } => bit_test(code, kind, destination, index),
         Operation::ByteRotateOne { kind, destination } => byte_rotate_one(code, kind, destination),
         Operation::ByteRotateThroughCarryOne { kind, destination } => {
             byte_rotate_through_carry_one(code, kind, destination);
@@ -1889,6 +1894,52 @@ fn bit_scan(
         .i32_shl()
         .i32_or()
         .local_set(FLAGS);
+}
+
+fn bit_test(
+    code: &mut InstructionSink<'_>,
+    kind: BitTestKind,
+    destination: Register32,
+    index: BitIndex,
+) {
+    code.local_get(register(destination)).local_set(LHS);
+    match index {
+        BitIndex::Register(source) => {
+            code.local_get(register(source));
+        }
+        BitIndex::Immediate(raw) => {
+            code.i32_const(i32::from(raw));
+        }
+    }
+    code.i32_const(31)
+        .i32_and()
+        .local_set(RHS)
+        .local_get(FLAGS)
+        .i32_const(0x442)
+        .i32_and()
+        .local_get(LHS)
+        .local_get(RHS)
+        .i32_shr_u()
+        .i32_const(1)
+        .i32_and()
+        .i32_or()
+        .local_set(FLAGS);
+    if kind != BitTestKind::Test {
+        code.local_get(LHS).i32_const(1).local_get(RHS).i32_shl();
+        match kind {
+            BitTestKind::Set => {
+                code.i32_or();
+            }
+            BitTestKind::Reset => {
+                code.i32_const(-1).i32_xor().i32_and();
+            }
+            BitTestKind::Complement => {
+                code.i32_xor();
+            }
+            BitTestKind::Test => unreachable!(),
+        }
+        code.local_set(register(destination));
+    }
 }
 
 fn accumulator_multiply(code: &mut InstructionSink<'_>, kind: MultiplyKind, source: u32) {

@@ -115,6 +115,20 @@ pub enum BitScanKind {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BitTestKind {
+    Test,
+    Set,
+    Reset,
+    Complement,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BitIndex {
+    Register(Register32),
+    Immediate(u8),
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum BinaryKind {
     Add,
     Adc,
@@ -421,6 +435,11 @@ pub enum Operation {
         kind: BitScanKind,
         destination: Register32,
         source: Register32,
+    },
+    BitTest {
+        kind: BitTestKind,
+        destination: Register32,
+        index: BitIndex,
     },
     ReadBitScan {
         kind: BitScanKind,
