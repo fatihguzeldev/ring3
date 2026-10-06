@@ -749,6 +749,11 @@ pub(super) fn instruction(
             store = true;
         }
         Operation::RotateOne { kind, destination } => rotate_one(code, kind, destination),
+        Operation::Rotate {
+            kind,
+            destination,
+            count,
+        } => rotate(code, kind, destination, count),
         Operation::RotateThroughCarryOne { kind, destination } => {
             rotate_through_carry_one(code, kind, destination);
         }
@@ -1713,6 +1718,49 @@ fn byte_rotate_one_flags(code: &mut InstructionSink<'_>, kind: RotateKind) {
         .i32_shl()
         .i32_or()
         .local_set(FLAGS);
+}
+
+fn rotate(
+    code: &mut InstructionSink<'_>,
+    kind: RotateKind,
+    destination: Register32,
+    count: ShiftCount,
+) {
+    code.local_get(register(destination)).local_set(RESULT);
+    shift_count(code, count);
+    code.local_tee(RHS)
+        .if_(BlockType::Empty)
+        .local_get(RESULT)
+        .local_get(RHS);
+    match kind {
+        RotateKind::Left => {
+            code.i32_rotl();
+        }
+        RotateKind::Right => {
+            code.i32_rotr();
+        }
+    }
+    code.local_tee(RESULT)
+        .local_set(register(destination))
+        .local_get(RHS)
+        .i32_const(1)
+        .i32_eq()
+        .if_(BlockType::Empty);
+    rotate_one_flags(code, kind);
+    code.else_()
+        .local_get(FLAGS)
+        .i32_const(!0x801)
+        .i32_and()
+        .local_get(RESULT);
+    match kind {
+        RotateKind::Left => {
+            code.i32_const(1).i32_and();
+        }
+        RotateKind::Right => {
+            code.i32_const(31).i32_shr_u();
+        }
+    }
+    code.i32_or().local_set(FLAGS).end().end();
 }
 
 fn rotate_one(code: &mut InstructionSink<'_>, kind: RotateKind, destination: Register32) {

@@ -9,7 +9,7 @@ use ring3_engine::{
         x86::{
             Register32,
             decode::{DecodeError, decode_one},
-            ir::{EffectiveAddress, Operation, RotateKind},
+            ir::{EffectiveAddress, Operation, RotateKind, ShiftCount},
         },
     },
     memory::{
@@ -420,13 +420,19 @@ fn raw_immediate_domain_and_strict_neighbors_preserve_decode_boundaries() {
                     register_bytes(kind, Register32::Ebx, count).to_vec()
                 };
                 upload(&mut engine, CODE, &bytes);
-                if COUNTS.contains(&count) {
+                if !memory || COUNTS.contains(&count) {
                     let operation = if memory {
                         Operation::MemoryRotateOne { kind, address: ea }
-                    } else {
+                    } else if COUNTS.contains(&count) {
                         Operation::RotateOne {
                             kind,
                             destination: Register32::Ebx,
+                        }
+                    } else {
+                        Operation::Rotate {
+                            kind,
+                            destination: Register32::Ebx,
+                            count: ShiftCount::Immediate(count),
                         }
                     };
                     assert_instruction(engine.memory().unwrap(), CODE, 3, operation);
@@ -442,7 +448,7 @@ fn raw_immediate_domain_and_strict_neighbors_preserve_decode_boundaries() {
             }
         }
     }
-    assert_eq!((accepted, refused), (32, 992));
+    assert_eq!((accepted, refused), (528, 496));
     let mut exclusions = 0;
     for kind in KINDS {
         let field = u8::from(kind == RotateKind::Right) << 3;
@@ -461,12 +467,15 @@ fn raw_immediate_domain_and_strict_neighbors_preserve_decode_boundaries() {
                 rejected(&[prefix, 0xc1, modrm, 225], expected);
                 exclusions += 1;
             }
-            for bytes in [
+            for mut bytes in [
                 vec![0x66, 0xd0, modrm],
                 vec![0x66, 0xc0, modrm, 33],
                 vec![0xd2, modrm],
                 vec![0xd3, modrm],
             ] {
+                if !memory && bytes[0] == 0xd3 {
+                    bytes.insert(0, 0x66);
+                }
                 rejected(&bytes, opcode);
                 exclusions += 1;
             }
