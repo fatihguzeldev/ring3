@@ -317,6 +317,10 @@ pub enum Operation {
         destination: ByteRegister,
         source: ByteRegister,
     },
+    MemoryCompareExchangeByte {
+        address: EffectiveAddress,
+        source: ByteRegister,
+    },
     ExchangeByte {
         left: ByteRegister,
         right: ByteRegister,

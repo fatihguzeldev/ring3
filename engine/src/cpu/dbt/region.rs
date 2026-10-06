@@ -391,6 +391,7 @@ fn supports_memory_binary(operation: &Operation) -> bool {
             | Operation::MemoryExchangeAdd { .. }
             | Operation::MemoryExchangeAddByte { .. }
             | Operation::MemoryCompareExchange { .. }
+            | Operation::MemoryCompareExchangeByte { .. }
             | Operation::Binary {
                 kind: BinaryKind::Add
                     | BinaryKind::Adc

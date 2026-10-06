@@ -548,6 +548,35 @@ pub(super) fn instruction(
             insert_byte(code, ByteRegister::Al);
             code.end();
         }
+        Operation::MemoryCompareExchangeByte { address, source } => {
+            memory::load_narrow_value(code, address, SmallWidth::Byte, imports, exit_depth);
+            code.local_set(RHS);
+            byte_value(code, ByteValue::Register(ByteRegister::Al));
+            code.local_set(LHS);
+            byte_value(code, ByteValue::Register(source));
+            code.local_get(RHS)
+                .local_get(LHS)
+                .local_get(RHS)
+                .i32_eq()
+                .select()
+                .local_set(RESULT)
+                .local_get(LHS)
+                .local_get(RHS);
+            memory::store_byte_result(code, address, imports, exit_depth);
+            code.local_set(RHS)
+                .local_set(LHS)
+                .local_get(LHS)
+                .local_get(RHS)
+                .i32_sub()
+                .i32_const(0xff)
+                .i32_and()
+                .local_set(RESULT);
+            arithmetic_flags(code, BinaryKind::Cmp, CarryFlag::Calculate, 7);
+            code.local_get(RESULT).if_(BlockType::Empty).local_get(RHS);
+            insert_byte(code, ByteRegister::Al);
+            code.end();
+            store = true;
+        }
         Operation::ExchangeByte { left, right } => {
             byte_value(code, ByteValue::Register(left));
             byte_value(code, ByteValue::Register(right));

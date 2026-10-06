@@ -677,7 +677,7 @@ fn canonical_memory(modrm: u8) -> Vec<u8> {
     let mode = modrm >> 6;
     assert!(mode < 3);
     let rm = modrm & 7;
-    let mut bytes = vec![0x0f, 0xb0, modrm];
+    let mut bytes = vec![0x66, 0x0f, 0xb0, modrm];
     if rm == 4 {
         bytes.push(0x24);
     }
@@ -736,6 +736,9 @@ fn full_modrm_domain_strict_categories_and_supported_neighbors_are_exact() {
         }
         for memory in [&[0x0f, 0xb0, 0x03][..], &[0x0f, 0xb0, 0x04, 0x24][..]] {
             let mut bytes = vec![prefix];
+            if prefix == 0x66 {
+                bytes.push(0x66);
+            }
             bytes.extend(memory);
             strict.push((bytes, category));
         }
