@@ -754,6 +754,14 @@ pub(super) fn instruction(
             destination,
             count,
         } => rotate(code, kind, destination, count),
+        Operation::MemoryRotate {
+            kind,
+            address,
+            count,
+        } => {
+            rotate_memory(code, kind, address, count, imports, exit_depth);
+            store = true;
+        }
         Operation::RotateThroughCarryOne { kind, destination } => {
             rotate_through_carry_one(code, kind, destination);
         }
@@ -1728,10 +1736,36 @@ fn rotate(
 ) {
     code.local_get(register(destination)).local_set(RESULT);
     shift_count(code, count);
-    code.local_tee(RHS)
-        .if_(BlockType::Empty)
-        .local_get(RESULT)
-        .local_get(RHS);
+    code.local_tee(RHS).if_(BlockType::Empty);
+    rotate_value(code, kind);
+    code.local_tee(RESULT).local_set(register(destination));
+    rotate_flags(code, kind);
+    code.end();
+}
+
+fn rotate_memory(
+    code: &mut InstructionSink<'_>,
+    kind: RotateKind,
+    address: EffectiveAddress,
+    count: ShiftCount,
+    imports: memory::Imports,
+    exit_depth: u32,
+) {
+    memory::load_result(code, address, imports, exit_depth);
+    shift_count(code, count);
+    code.local_tee(RHS).if_(BlockType::Empty);
+    rotate_value(code, kind);
+    code.local_set(RESULT).end();
+    // store validation clobbers the count; flags publish only after a successful store.
+    code.local_get(RHS);
+    memory::store_result(code, address, imports, exit_depth);
+    code.local_set(RHS).local_get(RHS).if_(BlockType::Empty);
+    rotate_flags(code, kind);
+    code.end();
+}
+
+fn rotate_value(code: &mut InstructionSink<'_>, kind: RotateKind) {
+    code.local_get(RESULT).local_get(RHS);
     match kind {
         RotateKind::Left => {
             code.i32_rotl();
@@ -1740,9 +1774,10 @@ fn rotate(
             code.i32_rotr();
         }
     }
-    code.local_tee(RESULT)
-        .local_set(register(destination))
-        .local_get(RHS)
+}
+
+fn rotate_flags(code: &mut InstructionSink<'_>, kind: RotateKind) {
+    code.local_get(RHS)
         .i32_const(1)
         .i32_eq()
         .if_(BlockType::Empty);
@@ -1760,7 +1795,7 @@ fn rotate(
             code.i32_const(31).i32_shr_u();
         }
     }
-    code.i32_or().local_set(FLAGS).end().end();
+    code.i32_or().local_set(FLAGS).end();
 }
 
 fn rotate_one(code: &mut InstructionSink<'_>, kind: RotateKind, destination: Register32) {

@@ -400,15 +400,20 @@ fn lower_rotate(instruction: &Instruction) -> Option<Result<Operation, DecodeErr
         Code::Ror_rm32_CL => (RotateKind::Right, ShiftCount::Cl),
         _ => return None,
     };
-    Some(if instruction.op0_kind() == OpKind::Register {
-        register(instruction.op0_register()).map(|destination| Operation::Rotate {
-            kind,
-            destination,
-            count,
-        })
-    } else {
-        Err(unsupported())
-    })
+    Some(
+        location(instruction, 0).map(|destination| match destination {
+            Location32::Register(destination) => Operation::Rotate {
+                kind,
+                destination,
+                count,
+            },
+            Location32::Memory(address) => Operation::MemoryRotate {
+                kind,
+                address,
+                count,
+            },
+        }),
+    )
 }
 
 fn lower_rotate_through_carry_one(

@@ -408,7 +408,6 @@ fn all_memory_immediates_and_addresses_have_exact_ir_in_bound_profiles() {
 fn raw_immediate_domain_and_strict_neighbors_preserve_decode_boundaries() {
     let mut engine = code(CODE, &[0x90]);
     let mut accepted = 0;
-    let mut refused = 0;
     let opcode = DecodeError::Unsupported(UnsupportedFeature::Opcode);
     let ea = address(Some(Register32::Ebx), None, 1, 0);
     for kind in KINDS {
@@ -420,35 +419,29 @@ fn raw_immediate_domain_and_strict_neighbors_preserve_decode_boundaries() {
                     register_bytes(kind, Register32::Ebx, count).to_vec()
                 };
                 upload(&mut engine, CODE, &bytes);
-                if !memory || COUNTS.contains(&count) {
-                    let operation = if memory {
-                        Operation::MemoryRotateOne { kind, address: ea }
-                    } else if COUNTS.contains(&count) {
-                        Operation::RotateOne {
-                            kind,
-                            destination: Register32::Ebx,
-                        }
-                    } else {
-                        Operation::Rotate {
-                            kind,
-                            destination: Register32::Ebx,
-                            count: ShiftCount::Immediate(count),
-                        }
-                    };
-                    assert_instruction(engine.memory().unwrap(), CODE, 3, operation);
-                    accepted += 1;
-                } else {
-                    assert_eq!(
-                        decode_one(engine.memory().unwrap(), GuestAddress(CODE)).err(),
-                        Some(opcode),
-                        "{kind:?} memory={memory} count={count}"
-                    );
-                    refused += 1;
-                }
+                let operation = match (memory, COUNTS.contains(&count)) {
+                    (true, true) => Operation::MemoryRotateOne { kind, address: ea },
+                    (true, false) => Operation::MemoryRotate {
+                        kind,
+                        address: ea,
+                        count: ShiftCount::Immediate(count),
+                    },
+                    (false, true) => Operation::RotateOne {
+                        kind,
+                        destination: Register32::Ebx,
+                    },
+                    (false, false) => Operation::Rotate {
+                        kind,
+                        destination: Register32::Ebx,
+                        count: ShiftCount::Immediate(count),
+                    },
+                };
+                assert_instruction(engine.memory().unwrap(), CODE, 3, operation);
+                accepted += 1;
             }
         }
     }
-    assert_eq!((accepted, refused), (528, 496));
+    assert_eq!(accepted, 1024);
     let mut exclusions = 0;
     for kind in KINDS {
         let field = u8::from(kind == RotateKind::Right) << 3;
@@ -473,7 +466,7 @@ fn raw_immediate_domain_and_strict_neighbors_preserve_decode_boundaries() {
                 vec![0xd2, modrm],
                 vec![0xd3, modrm],
             ] {
-                if !memory && bytes[0] == 0xd3 {
+                if bytes[0] == 0xd3 {
                     bytes.insert(0, 0x66);
                 }
                 rejected(&bytes, opcode);

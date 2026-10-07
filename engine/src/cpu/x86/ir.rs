@@ -409,6 +409,11 @@ pub enum Operation {
         destination: Register32,
         count: ShiftCount,
     },
+    MemoryRotate {
+        kind: RotateKind,
+        address: EffectiveAddress,
+        count: ShiftCount,
+    },
     MemoryRotateOne {
         kind: RotateKind,
         address: EffectiveAddress,

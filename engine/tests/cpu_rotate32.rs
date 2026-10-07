@@ -35,7 +35,7 @@ use ring3_engine::{
         x86::{
             Register32,
             decode::{DecodeError, decode_one},
-            ir::{Operation, RotateKind, ShiftCount},
+            ir::{EffectiveAddress, Operation, RotateKind, ShiftCount},
         },
     },
     memory::{Access, AddressSpace, FaultReason, GuestAddress, MemoryFault},
@@ -390,6 +390,129 @@ fn sixteen_compact_banks_admit_six_profiles_with_exact_pure_wasm_abi() {
     validate_modules(&modules);
 }
 
+#[test]
+fn newly_admitted_memory_neighbors_keep_original_ea_and_raw_count_identity() {
+    let mut engine = code(CODE, &[0x90; 8], false);
+    let mut identities = BTreeSet::new();
+    for kind in KINDS {
+        let field = u8::from(kind == RotateKind::Right) << 3;
+        for (shape, (tail, address)) in [
+            (
+                &[0x00][..],
+                EffectiveAddress {
+                    base: Some(Register32::Eax),
+                    index: None,
+                    scale: 1,
+                    displacement: 0,
+                },
+            ),
+            (
+                &[0x40, 0x80][..],
+                EffectiveAddress {
+                    base: Some(Register32::Eax),
+                    index: None,
+                    scale: 1,
+                    displacement: 0xffff_ff80,
+                },
+            ),
+            (
+                &[0x80, 0x78, 0x56, 0x34, 0x12][..],
+                EffectiveAddress {
+                    base: Some(Register32::Eax),
+                    index: None,
+                    scale: 1,
+                    displacement: 0x1234_5678,
+                },
+            ),
+            (
+                &[0x05, 0x78, 0x56, 0x34, 0x12][..],
+                EffectiveAddress {
+                    base: None,
+                    index: None,
+                    scale: 1,
+                    displacement: 0x1234_5678,
+                },
+            ),
+            (
+                &[0x04, 0x24][..],
+                EffectiveAddress {
+                    base: Some(Register32::Esp),
+                    index: None,
+                    scale: 1,
+                    displacement: 0,
+                },
+            ),
+            (
+                &[0x04, 0x8a][..],
+                EffectiveAddress {
+                    base: Some(Register32::Edx),
+                    index: Some(Register32::Ecx),
+                    scale: 4,
+                    displacement: 0,
+                },
+            ),
+            (
+                &[0x04, 0x8d, 0x78, 0x56, 0x34, 0x12][..],
+                EffectiveAddress {
+                    base: None,
+                    index: Some(Register32::Ecx),
+                    scale: 4,
+                    displacement: 0x1234_5678,
+                },
+            ),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            for opcode in [0xc1, 0xd3] {
+                for raw in if opcode == 0xc1 {
+                    vec![0, 2, 32]
+                } else {
+                    vec![0]
+                } {
+                    let mut bytes = vec![opcode];
+                    bytes.extend_from_slice(tail);
+                    bytes[1] |= field;
+                    if opcode == 0xc1 {
+                        bytes.push(raw);
+                    }
+                    upload(&mut engine, CODE, &bytes);
+                    let decoded = decode_one(engine.memory().unwrap(), GuestAddress(CODE)).unwrap();
+                    assert_eq!(
+                        decoded.operation(),
+                        &Operation::MemoryRotate {
+                            kind,
+                            address,
+                            count: if opcode == 0xc1 {
+                                ShiftCount::Immediate(raw)
+                            } else {
+                                ShiftCount::Cl
+                            },
+                        }
+                    );
+                    assert_eq!(
+                        (decoded.length(), decoded.next_pc()),
+                        (bytes.len() as u8, GuestAddress(CODE + bytes.len() as u32))
+                    );
+                    assert!(
+                        engine
+                            .memory()
+                            .unwrap()
+                            .is_code_current(decoded.code_snapshot())
+                    );
+                    assert!(identities.insert((
+                        u8::from(kind == RotateKind::Right),
+                        shape,
+                        opcode,
+                        raw
+                    )));
+                }
+            }
+        }
+    }
+    assert_eq!(identities.len(), 56);
+}
+
 fn exclusions() -> Vec<(Vec<u8>, DecodeError)> {
     let mut cases = Vec::new();
     let unsupported = DecodeError::Unsupported(UnsupportedFeature::Opcode);
@@ -412,31 +535,6 @@ fn exclusions() -> Vec<(Vec<u8>, DecodeError)> {
             }
         }
         let field = u8::from(kind == RotateKind::Right) << 3;
-        for tail in [
-            &[0x00][..],
-            &[0x40, 0x80],
-            &[0x80, 0x78, 0x56, 0x34, 0x12],
-            &[0x05, 0x78, 0x56, 0x34, 0x12],
-            &[0x04, 0x24],
-            &[0x04, 0x8a],
-            &[0x04, 0x8d, 0x78, 0x56, 0x34, 0x12],
-        ] {
-            for opcode in [0xc1, 0xd3] {
-                for raw in if opcode == 0xc1 {
-                    vec![0, 2, 32]
-                } else {
-                    vec![0]
-                } {
-                    let mut bytes = vec![opcode];
-                    bytes.extend_from_slice(tail);
-                    bytes[1] |= field;
-                    if opcode == 0xc1 {
-                        bytes.push(raw);
-                    }
-                    cases.push((bytes, unsupported));
-                }
-            }
-        }
         for operand in [0xc0 | field, 0x03 | field] {
             for raw in [0, 2, 32] {
                 cases.push((vec![0xc0, operand, raw], unsupported));
@@ -463,14 +561,14 @@ fn exclusions() -> Vec<(Vec<u8>, DecodeError)> {
         cases.push((vec![0xc1, operand, 2], unsupported));
         cases.push((vec![0xd3, operand], unsupported));
     }
-    assert_eq!(cases.len(), 140);
+    assert_eq!(cases.len(), 84);
     assert_eq!(
         cases
             .iter()
             .map(|(bytes, _)| bytes)
             .collect::<BTreeSet<_>>()
             .len(),
-        140
+        84
     );
     cases
 }
