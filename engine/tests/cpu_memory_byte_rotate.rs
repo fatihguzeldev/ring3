@@ -700,7 +700,7 @@ fn exclusions() -> Vec<(Vec<u8>, DecodeError)> {
             for raw in [0, 2, 9] {
                 cases.push((vec![0xc0, operand, raw], unsupported));
             }
-            cases.push((vec![0xd2, operand], unsupported));
+            cases.push((vec![0x66, 0xd2, operand], unsupported));
         }
         for operand in [0xc0 | field, 0x03 | field] {
             cases.push((vec![0x66, 0xc1, operand, 2], unsupported));

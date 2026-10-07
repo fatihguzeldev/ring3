@@ -722,6 +722,7 @@ pub(super) fn instruction(
             destination,
             index,
         } => bit_test(code, kind, destination, index),
+        Operation::ByteRotateCl { kind, destination } => byte_rotate_cl(code, kind, destination),
         Operation::ByteRotateOne { kind, destination } => byte_rotate_one(code, kind, destination),
         Operation::ByteRotateThroughCarryOne { kind, destination } => {
             byte_rotate_through_carry_one(code, kind, destination);
@@ -1683,6 +1684,60 @@ fn shift_flags(code: &mut InstructionSink<'_>, kind: ShiftKind) {
         }
         code.i32_const(11).i32_shl().i32_or().local_set(FLAGS).end();
     }
+}
+
+fn byte_rotate_cl(code: &mut InstructionSink<'_>, kind: RotateKind, destination: ByteRegister) {
+    byte_value(code, ByteValue::Register(destination));
+    code.local_set(RESULT);
+    shift_count(code, ShiftCount::Cl);
+    code.local_tee(RHS)
+        .if_(BlockType::Empty)
+        .local_get(RHS)
+        .i32_const(7)
+        .i32_and()
+        .local_set(LHS)
+        .local_get(RESULT);
+    match kind {
+        RotateKind::Left => {
+            code.local_get(LHS).i32_shl();
+        }
+        RotateKind::Right => {
+            code.i32_const(8).local_get(LHS).i32_sub().i32_shl();
+        }
+    }
+    code.local_get(RESULT);
+    match kind {
+        RotateKind::Left => {
+            code.i32_const(8).local_get(LHS).i32_sub().i32_shr_u();
+        }
+        RotateKind::Right => {
+            code.local_get(LHS).i32_shr_u();
+        }
+    }
+    code.i32_or()
+        .i32_const(0xff)
+        .i32_and()
+        .local_set(RESULT)
+        .local_get(RHS)
+        .i32_const(1)
+        .i32_eq()
+        .if_(BlockType::Empty);
+    byte_rotate_one_flags(code, kind);
+    code.else_()
+        .local_get(FLAGS)
+        .i32_const(!0x801)
+        .i32_and()
+        .local_get(RESULT)
+        .i32_const(if kind == RotateKind::Left { 0 } else { 7 })
+        .i32_shr_u()
+        .i32_const(1)
+        .i32_and()
+        .i32_or()
+        .local_set(FLAGS)
+        .end()
+        .local_get(RESULT);
+    insert_byte(code, destination);
+    code.end();
 }
 
 fn byte_rotate_one(code: &mut InstructionSink<'_>, kind: RotateKind, destination: ByteRegister) {

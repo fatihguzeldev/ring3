@@ -501,9 +501,7 @@ fn raw_byte_immediate_domain_and_strict_neighbors_preserve_decode_boundaries() {
                 exclusions += 1;
             }
             let mut cl = vec![0xd2, modrm];
-            if memory {
-                cl.insert(0, 0x66);
-            }
+            cl.insert(0, 0x66);
             rejected(&cl, opcode);
             rejected(&[0x66, 0xc1, modrm, 1], opcode);
             exclusions += 2;

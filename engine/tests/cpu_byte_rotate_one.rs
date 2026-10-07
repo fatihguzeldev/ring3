@@ -272,9 +272,7 @@ fn excluded_byte_forms_and_supported_neighbors_keep_exact_ir_boundaries() {
         }
         for modrm in [modrm, 0x03 | field << 3] {
             let mut cl = vec![0xd2, modrm];
-            if modrm & 0xc0 != 0xc0 {
-                cl.insert(0, 0x66);
-            }
+            cl.insert(0, 0x66);
             rejected(&cl, opcode);
             rejected(&[0x66, 0xd1, modrm], opcode);
             exclusions += 2;

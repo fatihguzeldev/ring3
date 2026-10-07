@@ -544,9 +544,7 @@ fn exclusions() -> Vec<(Vec<u8>, DecodeError)> {
                 cases.push((bytes, unsupported));
             }
             let mut cl = vec![0xd2, operand];
-            if operand & 0xc0 != 0xc0 {
-                cl.insert(0, 0x66);
-            }
+            cl.insert(0, 0x66);
             cases.push((cl, unsupported));
         }
         for opcode in [0xc1, 0xd3] {
