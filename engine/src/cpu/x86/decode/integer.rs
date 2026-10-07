@@ -523,19 +523,27 @@ fn lower_byte_rotate_through_carry_immediate(
     instruction: &Instruction,
 ) -> Option<Result<Operation, DecodeError>> {
     let kind = match instruction.code() {
-        Code::Rcl_rm8_imm8 if instruction.op0_kind() == OpKind::Register => RotateKind::Left,
-        Code::Rcr_rm8_imm8 if instruction.op0_kind() == OpKind::Register => RotateKind::Right,
+        Code::Rcl_rm8_imm8 => RotateKind::Left,
+        Code::Rcr_rm8_imm8 => RotateKind::Right,
         _ => return None,
     };
-    Some(
-        byte_register(instruction.op0_register()).map(|destination| {
+    Some(match instruction.op0_kind() {
+        OpKind::Register => byte_register(instruction.op0_register()).map(|destination| {
             Operation::ByteRotateThroughCarryImmediate {
                 kind,
                 destination,
                 count: instruction.immediate8(),
             }
         }),
-    )
+        OpKind::Memory => effective_address(instruction).map(|address| {
+            Operation::MemoryByteRotateThroughCarryImmediate {
+                kind,
+                address,
+                count: instruction.immediate8(),
+            }
+        }),
+        _ => Err(unsupported()),
+    })
 }
 
 fn lower_byte_rotate_through_carry_cl(

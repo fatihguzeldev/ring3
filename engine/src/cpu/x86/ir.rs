@@ -453,6 +453,11 @@ pub enum Operation {
         kind: RotateKind,
         address: EffectiveAddress,
     },
+    MemoryByteRotateThroughCarryImmediate {
+        kind: RotateKind,
+        address: EffectiveAddress,
+        count: u8,
+    },
     MemoryRotateThroughCarryOne {
         kind: RotateKind,
         address: EffectiveAddress,

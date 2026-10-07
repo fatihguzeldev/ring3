@@ -754,6 +754,16 @@ pub(super) fn instruction(
             byte_rotate_through_carry_one_flags(code, kind);
             store = true;
         }
+        Operation::MemoryByteRotateThroughCarryImmediate {
+            kind,
+            address,
+            count,
+        } => {
+            byte_rotate_through_carry_memory_immediate(
+                code, kind, address, count, imports, exit_depth,
+            );
+            store = true;
+        }
         Operation::MemoryByteRotateOne { kind, address } => {
             memory::load_narrow_value(code, address, SmallWidth::Byte, imports, exit_depth);
             code.local_set(RESULT);
@@ -2106,6 +2116,66 @@ fn byte_rotate_through_carry_cl(
     destination: ByteRegister,
 ) {
     byte_rotate_through_carry(code, kind, destination, ShiftCount::Cl);
+}
+
+fn byte_rotate_through_carry_memory_immediate(
+    code: &mut InstructionSink<'_>,
+    kind: RotateKind,
+    address: EffectiveAddress,
+    count: u8,
+    imports: memory::Imports,
+    exit_depth: u32,
+) {
+    // masked-one instructions use the existing One path with its defined OF.
+    let distance = i32::from((count & 31) % 9);
+    memory::load_narrow_value(code, address, SmallWidth::Byte, imports, exit_depth);
+    code.local_set(RESULT);
+    if distance == 0 {
+        // a zero rotation still performs the checked same-value destination write.
+        memory::store_byte_result(code, address, imports, exit_depth);
+        return;
+    }
+    code.local_get(RESULT)
+        .local_get(FLAGS)
+        .i32_const(1)
+        .i32_and()
+        .i32_const(8)
+        .i32_shl()
+        .i32_or()
+        .local_set(RESULT)
+        .local_get(RESULT)
+        .i32_const(if kind == RotateKind::Left {
+            distance
+        } else {
+            9 - distance
+        })
+        .i32_shl()
+        .local_get(RESULT)
+        .i32_const(if kind == RotateKind::Left {
+            9 - distance
+        } else {
+            distance
+        })
+        .i32_shr_u()
+        .i32_or()
+        .i32_const(0x1ff)
+        .i32_and()
+        .local_tee(RESULT)
+        // keep the ring's carry bit across helpers which use LHS/RHS as scratch.
+        .local_get(RESULT)
+        .i32_const(0xff)
+        .i32_and()
+        .local_set(RESULT);
+    memory::store_byte_result(code, address, imports, exit_depth);
+    code.local_set(RESULT)
+        .local_get(FLAGS)
+        .i32_const(!0x801)
+        .i32_and()
+        .local_get(RESULT)
+        .i32_const(8)
+        .i32_shr_u()
+        .i32_or()
+        .local_set(FLAGS);
 }
 
 fn byte_rotate_through_carry(

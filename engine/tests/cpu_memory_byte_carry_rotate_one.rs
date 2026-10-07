@@ -353,9 +353,7 @@ fn excluded_counts_prefixes_and_supported_neighbors_keep_exact_ir_boundaries() {
         for count in [0, 1, 2, 8, 31, 32, 33, 65, 97, 129, 161, 193, 225, 255] {
             for operand in [modrm, 0x03 | field << 3] {
                 let mut bytes = vec![0xc0, operand, count];
-                if operand & 0xc0 == 0xc0 || count & 31 == 1 {
-                    bytes.insert(0, 0x66);
-                }
+                bytes.insert(0, 0x66);
                 rejected(&bytes, opcode);
                 exclusions += 1;
             }

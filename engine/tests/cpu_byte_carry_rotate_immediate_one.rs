@@ -448,7 +448,8 @@ fn all_memory_byte_carry_immediates_and_addresses_have_exact_ir_in_bound_profile
 fn raw_byte_carry_immediate_domain_and_strict_neighbors_preserve_decode_boundaries() {
     let mut engine = code(CODE, &[0x90]);
     let mut accepted = 0;
-    let mut refused = 0;
+    let refused = 0;
+    let (mut old_memory, mut new_memory, mut registers) = (0, 0, 0);
     let opcode = DecodeError::Unsupported(UnsupportedFeature::Opcode);
     let ea = address(Some(Register32::Ebx), None, 1, 0);
     for kind in KINDS {
@@ -484,13 +485,34 @@ fn raw_byte_carry_immediate_domain_and_strict_neighbors_preserve_decode_boundari
                     );
                     accepted += 1;
                 } else {
-                    rejected(&bytes, opcode);
-                    refused += 1;
+                    assert_instruction(
+                        engine.memory().unwrap(),
+                        CODE,
+                        3,
+                        Operation::MemoryByteRotateThroughCarryImmediate {
+                            kind,
+                            address: ea,
+                            count,
+                        },
+                    );
+                    accepted += 1;
+                }
+                if memory {
+                    if COUNTS.contains(&count) {
+                        old_memory += 1;
+                    } else {
+                        new_memory += 1;
+                    }
+                } else {
+                    registers += 1;
                 }
             }
         }
     }
-    assert_eq!((accepted, refused), (528, 496));
+    assert_eq!(
+        (accepted, refused, old_memory, new_memory, registers),
+        (1024, 0, 16, 496, 512)
+    );
     let mut exclusions = 0;
     for kind in KINDS {
         let field = 0x10 | (u8::from(kind == RotateKind::Right) << 3);
@@ -509,11 +531,7 @@ fn raw_byte_carry_immediate_domain_and_strict_neighbors_preserve_decode_boundari
                 exclusions += 1;
             }
             for count in [0, 2, 8, 9, 10, 18, 19, 27, 28, 31, 32, 255] {
-                let bytes = if operand & 0xc0 == 0xc0 {
-                    vec![0x66, 0xc0, operand, count]
-                } else {
-                    vec![0xc0, operand, count]
-                };
+                let bytes = vec![0x66, 0xc0, operand, count];
                 rejected(&bytes, opcode);
                 exclusions += 1;
             }
@@ -677,7 +695,7 @@ fn exact_carry_immediate_fetch_snapshots_and_current_count_preserve_boundaries()
     let mut permissions = 0;
     let mut invalidations = 0;
     let mut alias_changes = 0;
-    let mut count_refusals = 0;
+    let mut count_admissions = 0;
     for kind in KINDS {
         for (bytes, operation) in [
             (
@@ -910,8 +928,8 @@ fn exact_carry_immediate_fetch_snapshots_and_current_count_preserve_boundaries()
         alias_changes += 1;
         for resident in [false, true] {
             for entries in [false, true] {
-                rejected_current_count_preserves_sentinel_publication(kind, resident, entries);
-                count_refusals += 1;
+                fresh_current_count_preserves_sentinel_until_admission(kind, resident, entries);
+                count_admissions += 1;
             }
         }
     }
@@ -922,7 +940,7 @@ fn exact_carry_immediate_fetch_snapshots_and_current_count_preserve_boundaries()
             permissions,
             invalidations,
             alias_changes,
-            count_refusals
+            count_admissions
         ),
         (36, 96, 12, 4, 2, 8)
     );
@@ -1015,7 +1033,7 @@ fn publication(engine: &EngineInstance, id: u64) -> Publication {
     }
 }
 
-fn rejected_current_count_preserves_sentinel_publication(
+fn fresh_current_count_preserves_sentinel_until_admission(
     kind: RotateKind,
     resident: bool,
     entries: bool,
@@ -1035,10 +1053,20 @@ fn rejected_current_count_preserves_sentinel_publication(
         .acknowledge_resident_installation(KEY, keep, 3)
         .unwrap();
     upload(&mut engine, CODE + 2, &[10]);
-    let opcode = DecodeError::Unsupported(UnsupportedFeature::Opcode);
+    let current = decode_one(engine.memory().unwrap(), GuestAddress(CODE)).unwrap();
     assert_eq!(
-        decode_one(engine.memory().unwrap(), GuestAddress(CODE)).err(),
-        Some(opcode)
+        current.operation(),
+        &Operation::MemoryByteRotateThroughCarryImmediate {
+            kind,
+            address: address(Some(Register32::Ebx), None, 1, 0),
+            count: 10
+        }
+    );
+    assert!(
+        engine
+            .memory()
+            .unwrap()
+            .is_code_current(current.code_snapshot())
     );
     assert!(
         !engine
@@ -1053,20 +1081,41 @@ fn rejected_current_count_preserves_sentinel_publication(
         .snapshot_code(GuestAddress(CODE), 4096)
         .unwrap();
     let before = publication(&engine, keep);
-    let error = instruction_error(CODE, opcode);
-    let expected = if resident {
-        HostError::Resident(RegistryError::Compile(error))
-    } else {
-        HostError::Compile(error)
-    };
-    assert_eq!(compile(&mut engine, resident, entries), Err(expected));
-    assert_eq!(publication(&engine, keep), before);
+    let id = compile(&mut engine, resident, entries).unwrap();
+    let after = publication(&engine, keep);
+    assert_eq!(after.arena, before.arena);
+    assert_eq!(after.pointer, before.pointer);
+    assert_eq!(after.authority, before.authority);
+    assert_eq!(after.entries, before.entries);
+    assert_eq!(after.pages, before.pages);
+    assert_eq!(after.mapped, before.mapped);
+    assert_eq!(after.installed, before.installed);
+    assert_eq!(after.modules[1], before.modules[1]);
+    assert_eq!(after.modules[2], before.modules[2]);
+    assert_eq!(
+        after.generation,
+        if resident {
+            before.generation
+        } else {
+            id as u32
+        }
+    );
     assert!(engine.memory().unwrap().is_code_current(&snapshot));
-    engine.guard(KEY, before.generation).unwrap();
+    if resident {
+        assert_eq!(after.modules[0], before.modules[0]);
+        engine.guard(KEY, before.generation).unwrap();
+        engine.guard_resident(KEY, id).unwrap();
+    } else {
+        engine.guard(KEY, id as u32).unwrap();
+    }
     engine.guard_resident(KEY, keep).unwrap();
     assert_eq!(engine.lookup_resident(KEEP).unwrap().get(), keep);
     assert!(engine.lookup_resident(KEEP + 2).is_err());
-    assert!(engine.lookup_resident(CODE).is_err());
+    if resident {
+        assert_eq!(engine.lookup_resident(CODE).unwrap().get(), id);
+    } else {
+        assert!(engine.lookup_resident(CODE).is_err());
+    }
 }
 
 #[test]
