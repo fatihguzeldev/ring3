@@ -358,15 +358,16 @@ fn excluded_counts_prefixes_and_supported_neighbors_keep_exact_ir_boundaries() {
             exclusions += 1;
         }
         for count in [0, 1, 2, 8, 31, 32, 33, 65, 97, 129, 161, 193, 225, 255] {
-            let mut bytes = vec![0xc0, 0x03 | field << 3, count];
-            if count & 31 == 1 {
-                bytes.insert(0, 0x66);
-            }
+            let bytes = vec![0x66, 0xc0, 0x03 | field << 3, count];
             rejected(&bytes, opcode);
             exclusions += 1;
         }
         for modrm in [modrm, 0x03 | field << 3] {
-            rejected(&[0xd2, modrm], opcode);
+            let mut cl = vec![0xd2, modrm];
+            if modrm & 0xc0 != 0xc0 {
+                cl.insert(0, 0x66);
+            }
+            rejected(&cl, opcode);
             rejected(&[0x66, 0xd1, modrm], opcode);
             exclusions += 2;
         }

@@ -466,7 +466,7 @@ fn raw_immediate_domain_and_strict_neighbors_preserve_decode_boundaries() {
                 vec![0xd2, modrm],
                 vec![0xd3, modrm],
             ] {
-                if bytes[0] == 0xd3 {
+                if bytes[0] == 0xd3 || (bytes[0] == 0xd2 && memory) {
                     bytes.insert(0, 0x66);
                 }
                 rejected(&bytes, opcode);

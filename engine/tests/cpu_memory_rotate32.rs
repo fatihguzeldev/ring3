@@ -678,9 +678,9 @@ fn exclusions() -> Vec<(Vec<u8>, DecodeError)> {
     for kind in [RotateKind::Left, RotateKind::Right] {
         let field = u8::from(kind == RotateKind::Right) << 3;
         for raw in [0, 2, 32] {
-            cases.push((vec![0xc0, field | 3, raw], unsupported));
+            cases.push((vec![0x66, 0xc0, field | 3, raw], unsupported));
         }
-        cases.push((vec![0xd2, field | 3], unsupported));
+        cases.push((vec![0x66, 0xd2, field | 3], unsupported));
     }
     for field in [2, 3] {
         for operand in [0xc0 | field << 3, 0x03 | field << 3] {

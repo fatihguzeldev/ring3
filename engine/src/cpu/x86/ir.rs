@@ -400,6 +400,11 @@ pub enum Operation {
         kind: RotateKind,
         address: EffectiveAddress,
     },
+    MemoryByteRotate {
+        kind: RotateKind,
+        address: EffectiveAddress,
+        count: ShiftCount,
+    },
     RotateOne {
         kind: RotateKind,
         destination: Register32,

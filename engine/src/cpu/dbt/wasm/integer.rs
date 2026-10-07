@@ -748,6 +748,14 @@ pub(super) fn instruction(
             byte_rotate_one_flags(code, kind);
             store = true;
         }
+        Operation::MemoryByteRotate {
+            kind,
+            address,
+            count,
+        } => {
+            byte_rotate_memory(code, kind, address, count, imports, exit_depth);
+            store = true;
+        }
         Operation::RotateOne { kind, destination } => rotate_one(code, kind, destination),
         Operation::Rotate {
             kind,
@@ -1726,6 +1734,64 @@ fn byte_rotate_one_flags(code: &mut InstructionSink<'_>, kind: RotateKind) {
         .i32_shl()
         .i32_or()
         .local_set(FLAGS);
+}
+
+fn byte_rotate_memory(
+    code: &mut InstructionSink<'_>,
+    kind: RotateKind,
+    address: EffectiveAddress,
+    count: ShiftCount,
+    imports: memory::Imports,
+    exit_depth: u32,
+) {
+    memory::load_narrow_value(code, address, SmallWidth::Byte, imports, exit_depth);
+    code.local_set(RESULT);
+    shift_count(code, count);
+    code.local_tee(RHS)
+        .i32_const(7)
+        .i32_and()
+        .local_set(LHS)
+        .local_get(RESULT);
+    match kind {
+        RotateKind::Left => {
+            code.local_get(LHS).i32_shl();
+        }
+        RotateKind::Right => {
+            code.i32_const(8).local_get(LHS).i32_sub().i32_shl();
+        }
+    }
+    code.local_get(RESULT);
+    match kind {
+        RotateKind::Left => {
+            code.i32_const(8).local_get(LHS).i32_sub().i32_shr_u();
+        }
+        RotateKind::Right => {
+            code.local_get(LHS).i32_shr_u();
+        }
+    }
+    code.i32_or().i32_const(0xff).i32_and().local_set(RESULT);
+    // flags use the masked count, preserved across store validation.
+    code.local_get(RHS);
+    memory::store_byte_result(code, address, imports, exit_depth);
+    code.local_set(RHS).local_get(RHS).if_(BlockType::Empty);
+    code.local_get(RHS)
+        .i32_const(1)
+        .i32_eq()
+        .if_(BlockType::Empty);
+    byte_rotate_one_flags(code, kind);
+    code.else_()
+        .local_get(FLAGS)
+        .i32_const(!0x801)
+        .i32_and()
+        .local_get(RESULT)
+        .i32_const(if kind == RotateKind::Left { 0 } else { 7 })
+        .i32_shr_u()
+        .i32_const(1)
+        .i32_and()
+        .i32_or()
+        .local_set(FLAGS)
+        .end()
+        .end();
 }
 
 fn rotate(

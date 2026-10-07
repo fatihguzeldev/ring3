@@ -200,6 +200,7 @@ pub(super) fn lower(instruction: &Instruction) -> Option<Result<Operation, Decod
                 .or_else(|| lower_shift(instruction))
                 .or_else(|| lower_double_shift(instruction))
                 .or_else(|| lower_rotate_one(instruction))
+                .or_else(|| lower_byte_rotate(instruction))
                 .or_else(|| lower_rotate(instruction))
                 .or_else(|| lower_rotate_through_carry_one(instruction))
                 .or_else(|| lower_unary(instruction))
@@ -382,6 +383,32 @@ fn lower_rotate_one(instruction: &Instruction) -> Option<Result<Operation, Decod
             .map(|destination| Operation::RotateOne { kind, destination }),
         OpKind::Memory => effective_address(instruction)
             .map(|address| Operation::MemoryRotateOne { kind, address }),
+        _ => Err(unsupported()),
+    })
+}
+
+fn lower_byte_rotate(instruction: &Instruction) -> Option<Result<Operation, DecodeError>> {
+    let (kind, count) = match instruction.code() {
+        Code::Rol_rm8_imm8 => (
+            RotateKind::Left,
+            ShiftCount::Immediate(instruction.immediate8()),
+        ),
+        Code::Ror_rm8_imm8 => (
+            RotateKind::Right,
+            ShiftCount::Immediate(instruction.immediate8()),
+        ),
+        Code::Rol_rm8_CL => (RotateKind::Left, ShiftCount::Cl),
+        Code::Ror_rm8_CL => (RotateKind::Right, ShiftCount::Cl),
+        _ => return None,
+    };
+    Some(match instruction.op0_kind() {
+        OpKind::Memory => {
+            effective_address(instruction).map(|address| Operation::MemoryByteRotate {
+                kind,
+                address,
+                count,
+            })
+        }
         _ => Err(unsupported()),
     })
 }

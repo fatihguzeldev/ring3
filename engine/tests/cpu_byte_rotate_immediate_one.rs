@@ -455,14 +455,18 @@ fn raw_byte_immediate_domain_and_strict_neighbors_preserve_decode_boundaries() {
                     register_bytes(kind, ByteRegister::Ah, count).to_vec()
                 };
                 upload(&mut engine, CODE, &bytes);
-                if COUNTS.contains(&count) {
-                    let operation = if memory {
-                        Operation::MemoryByteRotateOne { kind, address: ea }
-                    } else {
-                        Operation::ByteRotateOne {
+                if memory || COUNTS.contains(&count) {
+                    let operation = match (memory, COUNTS.contains(&count)) {
+                        (true, true) => Operation::MemoryByteRotateOne { kind, address: ea },
+                        (true, false) => Operation::MemoryByteRotate {
+                            kind,
+                            address: ea,
+                            count: ShiftCount::Immediate(count),
+                        },
+                        (false, _) => Operation::ByteRotateOne {
                             kind,
                             destination: ByteRegister::Ah,
-                        }
+                        },
                     };
                     assert_instruction(engine.memory().unwrap(), CODE, 3, operation);
                     accepted += 1;
@@ -477,7 +481,7 @@ fn raw_byte_immediate_domain_and_strict_neighbors_preserve_decode_boundaries() {
             }
         }
     }
-    assert_eq!((accepted, refused), (32, 992));
+    assert_eq!((accepted, refused), (528, 496));
     let mut exclusions = 0;
     for kind in KINDS {
         let field = u8::from(kind == RotateKind::Right) << 3;
@@ -496,7 +500,11 @@ fn raw_byte_immediate_domain_and_strict_neighbors_preserve_decode_boundaries() {
                 rejected(&[prefix, 0xc0, modrm, 33], expected);
                 exclusions += 1;
             }
-            rejected(&[0xd2, modrm], opcode);
+            let mut cl = vec![0xd2, modrm];
+            if memory {
+                cl.insert(0, 0x66);
+            }
+            rejected(&cl, opcode);
             rejected(&[0x66, 0xc1, modrm, 1], opcode);
             exclusions += 2;
         }
