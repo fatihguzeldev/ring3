@@ -281,9 +281,7 @@ fn excluded_byte_forms_and_supported_neighbors_keep_exact_ir_boundaries() {
         }
         for count in [0, 1, 2, 8, 31, 32, 33, 65, 97, 129, 161, 193, 225, 255] {
             let mut bytes = vec![0xc0, modrm, count];
-            if count & 31 == 1 {
-                bytes.insert(0, 0x66);
-            }
+            bytes.insert(0, 0x66);
             rejected(&bytes, opcode);
             exclusions += 1;
         }

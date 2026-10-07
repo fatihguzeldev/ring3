@@ -471,6 +471,18 @@ fn raw_byte_carry_immediate_domain_and_strict_neighbors_preserve_decode_boundari
                     };
                     assert_instruction(engine.memory().unwrap(), CODE, 3, operation);
                     accepted += 1;
+                } else if !memory {
+                    assert_instruction(
+                        engine.memory().unwrap(),
+                        CODE,
+                        3,
+                        Operation::ByteRotateThroughCarryImmediate {
+                            kind,
+                            destination: ByteRegister::Ah,
+                            count,
+                        },
+                    );
+                    accepted += 1;
                 } else {
                     rejected(&bytes, opcode);
                     refused += 1;
@@ -478,7 +490,7 @@ fn raw_byte_carry_immediate_domain_and_strict_neighbors_preserve_decode_boundari
             }
         }
     }
-    assert_eq!((accepted, refused), (32, 992));
+    assert_eq!((accepted, refused), (528, 496));
     let mut exclusions = 0;
     for kind in KINDS {
         let field = 0x10 | (u8::from(kind == RotateKind::Right) << 3);
@@ -497,7 +509,12 @@ fn raw_byte_carry_immediate_domain_and_strict_neighbors_preserve_decode_boundari
                 exclusions += 1;
             }
             for count in [0, 2, 8, 9, 10, 18, 19, 27, 28, 31, 32, 255] {
-                rejected(&[0xc0, operand, count], opcode);
+                let bytes = if operand & 0xc0 == 0xc0 {
+                    vec![0x66, 0xc0, operand, count]
+                } else {
+                    vec![0xc0, operand, count]
+                };
+                rejected(&bytes, opcode);
                 exclusions += 1;
             }
             let mut cl = vec![0xd2, operand];

@@ -205,6 +205,7 @@ pub(super) fn lower(instruction: &Instruction) -> Option<Result<Operation, Decod
                 .or_else(|| lower_byte_rotate(instruction))
                 .or_else(|| lower_rotate(instruction))
                 .or_else(|| lower_rotate_through_carry_one(instruction))
+                .or_else(|| lower_byte_rotate_through_carry_immediate(instruction))
                 .or_else(|| lower_byte_rotate_through_carry_cl(instruction))
                 .or_else(|| lower_unary(instruction))
                 .or_else(|| lower_bit_scan(instruction))
@@ -516,6 +517,25 @@ fn lower_rotate_through_carry_one(
             .map(|address| Operation::MemoryRotateThroughCarryOne { kind, address }),
         _ => Err(unsupported()),
     })
+}
+
+fn lower_byte_rotate_through_carry_immediate(
+    instruction: &Instruction,
+) -> Option<Result<Operation, DecodeError>> {
+    let kind = match instruction.code() {
+        Code::Rcl_rm8_imm8 if instruction.op0_kind() == OpKind::Register => RotateKind::Left,
+        Code::Rcr_rm8_imm8 if instruction.op0_kind() == OpKind::Register => RotateKind::Right,
+        _ => return None,
+    };
+    Some(
+        byte_register(instruction.op0_register()).map(|destination| {
+            Operation::ByteRotateThroughCarryImmediate {
+                kind,
+                destination,
+                count: instruction.immediate8(),
+            }
+        }),
+    )
 }
 
 fn lower_byte_rotate_through_carry_cl(

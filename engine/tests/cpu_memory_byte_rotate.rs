@@ -710,7 +710,12 @@ fn exclusions() -> Vec<(Vec<u8>, DecodeError)> {
     for field in [2, 3] {
         for operand in [0xc0 | field << 3, 0x03 | field << 3] {
             for raw in [0, 2, 32] {
-                cases.push((vec![0xc0, operand, raw], unsupported));
+                let bytes = if operand & 0xc0 == 0xc0 {
+                    vec![0x66, 0xc0, operand, raw]
+                } else {
+                    vec![0xc0, operand, raw]
+                };
+                cases.push((bytes, unsupported));
             }
             let cl = if operand & 0xc0 == 0xc0 {
                 vec![0x66, 0xd2, operand]

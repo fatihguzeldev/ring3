@@ -732,6 +732,11 @@ pub(super) fn instruction(
         Operation::ByteRotateThroughCarryOne { kind, destination } => {
             byte_rotate_through_carry_one(code, kind, destination);
         }
+        Operation::ByteRotateThroughCarryImmediate {
+            kind,
+            destination,
+            count,
+        } => byte_rotate_through_carry(code, kind, destination, ShiftCount::Immediate(count)),
         Operation::ByteRotateThroughCarryCl { kind, destination } => {
             byte_rotate_through_carry_cl(code, kind, destination);
         }
@@ -2100,7 +2105,16 @@ fn byte_rotate_through_carry_cl(
     kind: RotateKind,
     destination: ByteRegister,
 ) {
-    shift_count(code, ShiftCount::Cl);
+    byte_rotate_through_carry(code, kind, destination, ShiftCount::Cl);
+}
+
+fn byte_rotate_through_carry(
+    code: &mut InstructionSink<'_>,
+    kind: RotateKind,
+    destination: ByteRegister,
+    count: ShiftCount,
+) {
+    shift_count(code, count);
     code.local_tee(RHS)
         .i32_const(1)
         .i32_eq()
