@@ -200,6 +200,7 @@ pub(super) fn lower(instruction: &Instruction) -> Option<Result<Operation, Decod
                 .or_else(|| lower_shift(instruction))
                 .or_else(|| lower_double_shift(instruction))
                 .or_else(|| lower_rotate_one(instruction))
+                .or_else(|| lower_byte_rotate_immediate(instruction))
                 .or_else(|| lower_byte_rotate_cl(instruction))
                 .or_else(|| lower_byte_rotate(instruction))
                 .or_else(|| lower_rotate(instruction))
@@ -386,6 +387,28 @@ fn lower_rotate_one(instruction: &Instruction) -> Option<Result<Operation, Decod
             .map(|address| Operation::MemoryRotateOne { kind, address }),
         _ => Err(unsupported()),
     })
+}
+
+fn lower_byte_rotate_immediate(
+    instruction: &Instruction,
+) -> Option<Result<Operation, DecodeError>> {
+    let kind = match instruction.code() {
+        Code::Rol_rm8_imm8 => RotateKind::Left,
+        Code::Ror_rm8_imm8 => RotateKind::Right,
+        _ => return None,
+    };
+    if instruction.op0_kind() != OpKind::Register {
+        return None;
+    }
+    Some(
+        byte_register(instruction.op0_register()).map(|destination| {
+            Operation::ByteRotateImmediate {
+                kind,
+                destination,
+                count: instruction.immediate8(),
+            }
+        }),
+    )
 }
 
 fn lower_byte_rotate_cl(instruction: &Instruction) -> Option<Result<Operation, DecodeError>> {

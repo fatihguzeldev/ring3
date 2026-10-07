@@ -698,7 +698,7 @@ fn exclusions() -> Vec<(Vec<u8>, DecodeError)> {
         for alias in 0..8 {
             let operand = 0xc0 | field | alias;
             for raw in [0, 2, 9] {
-                cases.push((vec![0xc0, operand, raw], unsupported));
+                cases.push((vec![0x66, 0xc0, operand, raw], unsupported));
             }
             cases.push((vec![0x66, 0xd2, operand], unsupported));
         }

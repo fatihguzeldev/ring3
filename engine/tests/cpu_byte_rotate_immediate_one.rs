@@ -443,7 +443,8 @@ fn all_memory_byte_immediates_and_addresses_have_exact_ir_in_bound_profiles() {
 fn raw_byte_immediate_domain_and_strict_neighbors_preserve_decode_boundaries() {
     let mut engine = code(CODE, &[0x90]);
     let mut accepted = 0;
-    let mut refused = 0;
+    let refused = 0;
+    let (mut old, mut new) = (0, 0);
     let opcode = DecodeError::Unsupported(UnsupportedFeature::Opcode);
     let ea = address(Some(Register32::Ebx), None, 1, 0);
     for kind in KINDS {
@@ -470,18 +471,25 @@ fn raw_byte_immediate_domain_and_strict_neighbors_preserve_decode_boundaries() {
                     };
                     assert_instruction(engine.memory().unwrap(), CODE, 3, operation);
                     accepted += 1;
+                    old += 1;
                 } else {
-                    assert_eq!(
-                        decode_one(engine.memory().unwrap(), GuestAddress(CODE)).err(),
-                        Some(opcode),
-                        "{kind:?} memory={memory} count={count}"
+                    assert_instruction(
+                        engine.memory().unwrap(),
+                        CODE,
+                        3,
+                        Operation::ByteRotateImmediate {
+                            kind,
+                            destination: ByteRegister::Ah,
+                            count,
+                        },
                     );
-                    refused += 1;
+                    accepted += 1;
+                    new += 1;
                 }
             }
         }
     }
-    assert_eq!((accepted, refused), (528, 496));
+    assert_eq!((accepted, refused, old, new), (1024, 0, 528, 496));
     let mut exclusions = 0;
     for kind in KINDS {
         let field = u8::from(kind == RotateKind::Right) << 3;

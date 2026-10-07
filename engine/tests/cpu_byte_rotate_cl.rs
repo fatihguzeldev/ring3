@@ -432,7 +432,10 @@ fn exclusions() -> Vec<(Vec<u8>, DecodeError)> {
         }
         for alias in [0, 5] {
             for raw in [0, 2, 8, 9, 31, 32, 255] {
-                cases.push((instruction(0xc0, kind, alias, raw), unsupported));
+                cases.push((
+                    [vec![0x66], instruction(0xc0, kind, alias, raw)].concat(),
+                    unsupported,
+                ));
             }
             cases.push((
                 vec![

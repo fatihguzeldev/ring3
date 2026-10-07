@@ -392,6 +392,11 @@ pub enum Operation {
         source: Register32,
         count: ShiftCount,
     },
+    ByteRotateImmediate {
+        kind: RotateKind,
+        destination: ByteRegister,
+        count: u8,
+    },
     ByteRotateCl {
         kind: RotateKind,
         destination: ByteRegister,
