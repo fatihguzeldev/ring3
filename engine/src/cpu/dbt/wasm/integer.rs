@@ -732,6 +732,9 @@ pub(super) fn instruction(
         Operation::ByteRotateThroughCarryOne { kind, destination } => {
             byte_rotate_through_carry_one(code, kind, destination);
         }
+        Operation::ByteRotateThroughCarryCl { kind, destination } => {
+            byte_rotate_through_carry_cl(code, kind, destination);
+        }
         Operation::MemoryByteRotateThroughCarryOne { kind, address } => {
             memory::load_narrow_value(code, address, SmallWidth::Byte, imports, exit_depth);
             code.local_set(LHS)
@@ -2090,6 +2093,68 @@ fn byte_rotate_through_carry_one_flags(code: &mut InstructionSink<'_>, kind: Rot
         .i32_shl()
         .i32_or()
         .local_set(FLAGS);
+}
+
+fn byte_rotate_through_carry_cl(
+    code: &mut InstructionSink<'_>,
+    kind: RotateKind,
+    destination: ByteRegister,
+) {
+    shift_count(code, ShiftCount::Cl);
+    code.local_tee(RHS)
+        .i32_const(1)
+        .i32_eq()
+        .if_(BlockType::Empty);
+    byte_rotate_through_carry_one(code, kind, destination);
+    code.else_()
+        .local_get(RHS)
+        .i32_const(9)
+        .i32_rem_u()
+        .local_tee(LHS)
+        .if_(BlockType::Empty);
+    byte_value(code, ByteValue::Register(destination));
+    code.local_get(FLAGS)
+        .i32_const(1)
+        .i32_and()
+        .i32_const(8)
+        .i32_shl()
+        .i32_or()
+        .local_set(RESULT)
+        .local_get(RESULT);
+    match kind {
+        RotateKind::Left => {
+            code.local_get(LHS).i32_shl();
+        }
+        RotateKind::Right => {
+            code.i32_const(9).local_get(LHS).i32_sub().i32_shl();
+        }
+    }
+    code.local_get(RESULT);
+    match kind {
+        RotateKind::Left => {
+            code.i32_const(9).local_get(LHS).i32_sub().i32_shr_u();
+        }
+        RotateKind::Right => {
+            code.local_get(LHS).i32_shr_u();
+        }
+    }
+    code.i32_or()
+        .i32_const(0x1ff)
+        .i32_and()
+        .local_set(RESULT)
+        .local_get(FLAGS)
+        .i32_const(!0x801)
+        .i32_and()
+        .local_get(RESULT)
+        .i32_const(8)
+        .i32_shr_u()
+        .i32_or()
+        .local_set(FLAGS)
+        .local_get(RESULT)
+        .i32_const(0xff)
+        .i32_and();
+    insert_byte(code, destination);
+    code.end().end();
 }
 
 fn rotate_through_carry_one(

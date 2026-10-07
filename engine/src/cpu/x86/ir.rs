@@ -440,6 +440,10 @@ pub enum Operation {
         kind: RotateKind,
         destination: ByteRegister,
     },
+    ByteRotateThroughCarryCl {
+        kind: RotateKind,
+        destination: ByteRegister,
+    },
     MemoryByteRotateThroughCarryOne {
         kind: RotateKind,
         address: EffectiveAddress,

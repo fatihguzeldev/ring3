@@ -450,7 +450,7 @@ fn exclusions() -> Vec<(Vec<u8>, DecodeError)> {
             for raw in [0, 2, 9] {
                 cases.push((vec![0xc0, 0xc0 | field << 3 | alias, raw], opcode));
             }
-            cases.push((vec![0xd2, 0xc0 | field << 3 | alias], opcode));
+            cases.push((vec![0x66, 0xd2, 0xc0 | field << 3 | alias], opcode));
         }
     }
     for operand in [0xf0, 0x33] {

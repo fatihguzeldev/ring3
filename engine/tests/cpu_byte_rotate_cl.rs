@@ -449,7 +449,7 @@ fn exclusions() -> Vec<(Vec<u8>, DecodeError)> {
     }
     for field in [2, 3] {
         for alias in 0..8 {
-            cases.push((vec![0xd2, 0xc0 | field << 3 | alias], unsupported));
+            cases.push((vec![0x66, 0xd2, 0xc0 | field << 3 | alias], unsupported));
         }
     }
     assert_eq!(cases.len(), 224);
