@@ -415,6 +415,7 @@ fn supports_memory_shift_or_rotate(operation: &Operation) -> bool {
             | Operation::MemoryByteRotate { .. }
             | Operation::MemoryByteRotateThroughCarryOne { .. }
             | Operation::MemoryByteRotateThroughCarryImmediate { .. }
+            | Operation::MemoryByteRotateThroughCarryCl { .. }
             | Operation::MemoryRotateOne { .. }
             | Operation::MemoryRotate { .. }
             | Operation::MemoryRotateThroughCarryOne { .. }

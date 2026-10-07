@@ -458,6 +458,10 @@ pub enum Operation {
         address: EffectiveAddress,
         count: u8,
     },
+    MemoryByteRotateThroughCarryCl {
+        kind: RotateKind,
+        address: EffectiveAddress,
+    },
     MemoryRotateThroughCarryOne {
         kind: RotateKind,
         address: EffectiveAddress,

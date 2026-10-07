@@ -588,7 +588,9 @@ fn exclusions() -> Vec<(Vec<u8>, DecodeError)> {
             cases.push((instruction(0xd3, kind, shape, 0), unsupported));
         }
         for shape in shapes() {
-            cases.push((instruction(0xd2, kind, &shape, 0), unsupported));
+            let mut bytes = instruction(0xd2, kind, &shape, 0);
+            bytes.insert(0, 0x66);
+            cases.push((bytes, unsupported));
         }
     }
     assert_eq!(cases.len(), 96);

@@ -456,8 +456,8 @@ fn exclusions() -> Vec<(Vec<u8>, DecodeError)> {
                 }
                 if opcode_byte == 0xc0 {
                     bytes.push(2);
-                    bytes.insert(0, 0x66);
                 }
+                bytes.insert(0, 0x66);
                 cases.push((bytes, opcode));
             }
         }

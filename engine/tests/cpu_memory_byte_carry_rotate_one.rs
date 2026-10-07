@@ -360,9 +360,7 @@ fn excluded_counts_prefixes_and_supported_neighbors_keep_exact_ir_boundaries() {
         }
         for operand in [modrm, 0x03 | field << 3] {
             let mut cl = vec![0xd2, operand];
-            if operand & 0xc0 == 0xc0 {
-                cl.insert(0, 0x66);
-            }
+            cl.insert(0, 0x66);
             rejected(&cl, opcode);
             rejected(&[0x66, 0xd1, operand], opcode);
             exclusions += 2;

@@ -550,14 +550,17 @@ fn lower_byte_rotate_through_carry_cl(
     instruction: &Instruction,
 ) -> Option<Result<Operation, DecodeError>> {
     let kind = match instruction.code() {
-        Code::Rcl_rm8_CL if instruction.op0_kind() == OpKind::Register => RotateKind::Left,
-        Code::Rcr_rm8_CL if instruction.op0_kind() == OpKind::Register => RotateKind::Right,
+        Code::Rcl_rm8_CL => RotateKind::Left,
+        Code::Rcr_rm8_CL => RotateKind::Right,
         _ => return None,
     };
-    Some(
-        byte_register(instruction.op0_register())
+    Some(match instruction.op0_kind() {
+        OpKind::Register => byte_register(instruction.op0_register())
             .map(|destination| Operation::ByteRotateThroughCarryCl { kind, destination }),
-    )
+        OpKind::Memory => effective_address(instruction)
+            .map(|address| Operation::MemoryByteRotateThroughCarryCl { kind, address }),
+        _ => Err(unsupported()),
+    })
 }
 
 fn lower_bit_scan(instruction: &Instruction) -> Option<Result<Operation, DecodeError>> {

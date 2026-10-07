@@ -420,6 +420,7 @@ fn exclusions() -> Vec<(Vec<u8>, DecodeError)> {
             } else if alias == 5 {
                 bytes.extend([0; 4]);
             }
+            bytes.insert(0, 0x66);
             cases.push((bytes, unsupported));
         }
     }

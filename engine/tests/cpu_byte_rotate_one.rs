@@ -283,11 +283,7 @@ fn excluded_byte_forms_and_supported_neighbors_keep_exact_ir_boundaries() {
             for bytes in [
                 implicit,
                 vec![0x66, 0xc0, modrm, 1],
-                if modrm & 0xc0 == 0xc0 {
-                    vec![0x66, 0xd2, modrm]
-                } else {
-                    vec![0xd2, modrm]
-                },
+                vec![0x66, 0xd2, modrm],
             ] {
                 rejected(&bytes, opcode);
                 exclusions += 1;

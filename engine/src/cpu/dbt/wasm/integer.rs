@@ -764,6 +764,10 @@ pub(super) fn instruction(
             );
             store = true;
         }
+        Operation::MemoryByteRotateThroughCarryCl { kind, address } => {
+            byte_rotate_through_carry_memory_cl(code, kind, address, imports, exit_depth);
+            store = true;
+        }
         Operation::MemoryByteRotateOne { kind, address } => {
             memory::load_narrow_value(code, address, SmallWidth::Byte, imports, exit_depth);
             code.local_set(RESULT);
@@ -2176,6 +2180,92 @@ fn byte_rotate_through_carry_memory_immediate(
         .i32_shr_u()
         .i32_or()
         .local_set(FLAGS);
+}
+
+fn byte_rotate_through_carry_memory_cl(
+    code: &mut InstructionSink<'_>,
+    kind: RotateKind,
+    address: EffectiveAddress,
+    imports: memory::Imports,
+    exit_depth: u32,
+) {
+    memory::load_narrow_value(code, address, SmallWidth::Byte, imports, exit_depth);
+    code.local_set(RESULT)
+        .local_get(register(Register32::Ecx))
+        .i32_const(31)
+        .i32_and()
+        .local_tee(LHS)
+        .i32_const(9)
+        .i32_rem_u()
+        .local_set(RHS)
+        .local_get(RESULT)
+        .local_get(FLAGS)
+        .i32_const(1)
+        .i32_and()
+        .i32_const(8)
+        .i32_shl()
+        .i32_or()
+        .local_set(RESULT)
+        .local_get(RESULT);
+    match kind {
+        RotateKind::Left => {
+            code.local_get(RHS).i32_shl();
+        }
+        RotateKind::Right => {
+            code.i32_const(9).local_get(RHS).i32_sub().i32_shl();
+        }
+    }
+    code.local_get(RESULT);
+    match kind {
+        RotateKind::Left => {
+            code.i32_const(9).local_get(RHS).i32_sub().i32_shr_u();
+        }
+        RotateKind::Right => {
+            code.local_get(RHS).i32_shr_u();
+        }
+    }
+    code.i32_or()
+        .i32_const(0x1ff)
+        .i32_and()
+        .local_set(RESULT)
+        .local_get(RHS)
+        .if_(BlockType::Result(ValType::I32))
+        .local_get(FLAGS)
+        .i32_const(!0x801)
+        .i32_and()
+        .local_get(RESULT)
+        .i32_const(8)
+        .i32_shr_u()
+        .i32_or()
+        .local_get(LHS)
+        .i32_const(1)
+        .i32_eq()
+        .if_(BlockType::Result(ValType::I32))
+        .local_get(RESULT)
+        .i32_const(7)
+        .i32_shr_u()
+        .local_get(RESULT)
+        .i32_const(if kind == RotateKind::Left { 8 } else { 6 })
+        .i32_shr_u()
+        .i32_xor()
+        .i32_const(1)
+        .i32_and()
+        .i32_const(11)
+        .i32_shl()
+        .else_()
+        .i32_const(0)
+        .end()
+        .i32_or()
+        .else_()
+        .local_get(FLAGS)
+        .end()
+        // keep candidate FLAGS across helpers which use LHS/RHS as scratch.
+        .local_get(RESULT)
+        .i32_const(0xff)
+        .i32_and()
+        .local_set(RESULT);
+    memory::store_byte_result(code, address, imports, exit_depth);
+    code.local_set(FLAGS);
 }
 
 fn byte_rotate_through_carry(
