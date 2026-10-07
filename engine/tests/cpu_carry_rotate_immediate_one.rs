@@ -478,7 +478,11 @@ fn raw_immediate_domain_and_strict_neighbors_preserve_decode_boundaries() {
                 vec![0x66, 0xd0, modrm],
                 vec![0x66, 0xc0, modrm, 33],
                 vec![0x66, 0xd2, modrm],
-                vec![0xd3, modrm],
+                if memory {
+                    vec![0xd3, modrm]
+                } else {
+                    vec![0x66, 0xd3, modrm]
+                },
             ] {
                 rejected(&bytes, opcode);
                 exclusions += 1;

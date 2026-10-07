@@ -458,6 +458,7 @@ pub(super) fn supports(instruction: &DecodedInstruction, embedded: bool) -> bool
                 | Operation::Rotate { .. }
                 | Operation::RotateThroughCarryOne { .. }
                 | Operation::RotateThroughCarryImmediate { .. }
+                | Operation::RotateThroughCarryCl { .. }
                 | Operation::ByteRotateThroughCarryOne { .. }
                 | Operation::ByteRotateThroughCarryImmediate { .. }
                 | Operation::ByteRotateThroughCarryCl { .. }

@@ -441,6 +441,10 @@ pub enum Operation {
         destination: Register32,
         count: u8,
     },
+    RotateThroughCarryCl {
+        kind: RotateKind,
+        destination: Register32,
+    },
     ByteRotateThroughCarryOne {
         kind: RotateKind,
         destination: ByteRegister,
