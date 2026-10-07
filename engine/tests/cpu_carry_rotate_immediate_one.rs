@@ -427,13 +427,19 @@ fn raw_immediate_domain_and_strict_neighbors_preserve_decode_boundaries() {
                     register_bytes(kind, Register32::Ebx, count).to_vec()
                 };
                 upload(&mut engine, CODE, &bytes);
-                if COUNTS.contains(&count) {
+                if COUNTS.contains(&count) || !memory {
                     let operation = if memory {
                         Operation::MemoryRotateThroughCarryOne { kind, address: ea }
-                    } else {
+                    } else if count & 31 == 1 {
                         Operation::RotateThroughCarryOne {
                             kind,
                             destination: Register32::Ebx,
+                        }
+                    } else {
+                        Operation::RotateThroughCarryImmediate {
+                            kind,
+                            destination: Register32::Ebx,
+                            count,
                         }
                     };
                     assert_instruction(engine.memory().unwrap(), CODE, 3, operation);
@@ -449,7 +455,7 @@ fn raw_immediate_domain_and_strict_neighbors_preserve_decode_boundaries() {
             }
         }
     }
-    assert_eq!((accepted, refused), (32, 992));
+    assert_eq!((accepted, refused), (528, 496));
     let mut exclusions = 0;
     for kind in KINDS {
         let field = 0x10 | (u8::from(kind == RotateKind::Right) << 3);

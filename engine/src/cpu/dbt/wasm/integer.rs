@@ -801,6 +801,11 @@ pub(super) fn instruction(
         Operation::RotateThroughCarryOne { kind, destination } => {
             rotate_through_carry_one(code, kind, destination);
         }
+        Operation::RotateThroughCarryImmediate {
+            kind,
+            destination,
+            count,
+        } => rotate_through_carry_immediate(code, kind, destination, count),
         Operation::MemoryRotateThroughCarryOne { kind, address } => {
             memory::load_result(code, address, imports, exit_depth);
             code.local_get(RESULT)
@@ -2329,6 +2334,70 @@ fn byte_rotate_through_carry(
         .i32_and();
     insert_byte(code, destination);
     code.end().end();
+}
+
+fn rotate_through_carry_immediate(
+    code: &mut InstructionSink<'_>,
+    kind: RotateKind,
+    destination: Register32,
+    raw: u8,
+) {
+    let count = i32::from(raw & 31);
+    match count {
+        0 => return,
+        1 => {
+            rotate_through_carry_one(code, kind, destination);
+            return;
+        }
+        _ => {}
+    }
+    code.local_get(register(destination))
+        .local_set(LHS)
+        .local_get(FLAGS)
+        .i32_const(1)
+        .i32_and()
+        .local_set(RHS)
+        .local_get(LHS)
+        .i32_const(count);
+    match kind {
+        RotateKind::Left => {
+            code.i32_shl();
+        }
+        RotateKind::Right => {
+            code.i32_shr_u();
+        }
+    }
+    code.local_get(LHS).i32_const(33 - count);
+    match kind {
+        RotateKind::Left => {
+            code.i32_shr_u();
+        }
+        RotateKind::Right => {
+            code.i32_shl();
+        }
+    }
+    let (carry_in_shift, carry_out_shift) = match kind {
+        RotateKind::Left => (count - 1, 32 - count),
+        RotateKind::Right => (32 - count, count - 1),
+    };
+    code.i32_or()
+        .local_get(RHS)
+        .i32_const(carry_in_shift)
+        .i32_shl()
+        .i32_or()
+        .local_set(RESULT)
+        .local_get(FLAGS)
+        .i32_const(!0x801)
+        .i32_and()
+        .local_get(LHS)
+        .i32_const(carry_out_shift)
+        .i32_shr_u()
+        .i32_const(1)
+        .i32_and()
+        .i32_or()
+        .local_set(FLAGS)
+        .local_get(RESULT)
+        .local_set(register(destination));
 }
 
 fn rotate_through_carry_one(

@@ -11,7 +11,7 @@ use ring3_engine::{
 };
 
 #[test]
-fn actual_wasm_accepts_only_masked_one_carry_rotate_immediates() {
+fn actual_wasm_executes_masked_one_and_preserves_strict_refusals() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
     let engine = root.join("target/wasm32-unknown-unknown/debug/ring3_engine.wasm");
     assert!(
