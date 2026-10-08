@@ -97,7 +97,8 @@ impl Imports {
                     SmallWidth::Byte => read8 = true,
                     SmallWidth::Word => read16 = true,
                 },
-                Operation::Push {
+                Operation::MoveStringDword
+                | Operation::Push {
                     source: Value32::Memory(_),
                 }
                 | Operation::Pop {

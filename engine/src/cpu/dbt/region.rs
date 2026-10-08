@@ -366,10 +366,11 @@ fn supports_indirect_jump(operation: &Operation) -> bool {
 fn supports_memory_move_store(operation: &Operation) -> bool {
     matches!(
         operation,
-        Operation::Move {
-            destination: Location32::Memory(_),
-            source: Value32::Register(_) | Value32::Immediate(_),
-        }
+        Operation::MoveStringDword
+            | Operation::Move {
+                destination: Location32::Memory(_),
+                source: Value32::Register(_) | Value32::Immediate(_),
+            }
     )
 }
 

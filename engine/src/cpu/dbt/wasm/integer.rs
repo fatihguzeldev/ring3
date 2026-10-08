@@ -126,6 +126,44 @@ pub(super) fn instruction(
             }
             store = true;
         }
+        Operation::MoveStringDword => {
+            memory::load_result(
+                code,
+                EffectiveAddress {
+                    base: Some(Register32::Esi),
+                    index: None,
+                    scale: 1,
+                    displacement: 0,
+                },
+                imports,
+                exit_depth,
+            );
+            memory::store_result(
+                code,
+                EffectiveAddress {
+                    base: Some(Register32::Edi),
+                    index: None,
+                    scale: 1,
+                    displacement: 0,
+                },
+                imports,
+                exit_depth,
+            );
+            code.i32_const(-4)
+                .i32_const(4)
+                .local_get(FLAGS)
+                .i32_const(0x400)
+                .i32_and()
+                .select()
+                .local_set(RESULT);
+            for pointer in [Register32::Esi, Register32::Edi] {
+                code.local_get(register(pointer))
+                    .local_get(RESULT)
+                    .i32_add()
+                    .local_set(register(pointer));
+            }
+            store = true;
+        }
         Operation::LoadStringByte => {
             memory::load_narrow_value(
                 code,

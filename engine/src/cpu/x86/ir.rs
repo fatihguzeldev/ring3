@@ -240,6 +240,7 @@ pub enum Operation {
         set: bool,
     },
     MoveStringByte,
+    MoveStringDword,
     LoadStringByte,
     TranslateByte,
     StoreStringByte,
