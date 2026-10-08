@@ -447,7 +447,7 @@ fn raw_immediate_domain_and_strict_memory_neighbors_preserve_decode_boundaries()
             rejected(&bytes, opcode);
             exclusions += 1;
         }
-        rejected(&[0xd2, modrm], opcode);
+        rejected(&[0x66, 0xd2, modrm], opcode);
         rejected(&[0x66, 0xc1, modrm, 33], opcode);
         exclusions += 2;
     }

@@ -380,6 +380,10 @@ pub enum Operation {
         address: EffectiveAddress,
         count: u8,
     },
+    MemoryShiftByteCl {
+        kind: ShiftKind,
+        address: EffectiveAddress,
+    },
     Shift {
         kind: ShiftKind,
         destination: Location32,

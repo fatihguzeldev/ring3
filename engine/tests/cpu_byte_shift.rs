@@ -149,7 +149,7 @@ fn excluded() -> Vec<(Vec<u8>, DecodeError)> {
             let memory = encoding(opcode, extension << 3, 0xff);
             if opcode != 0xd0 {
                 let mut bytes = memory.clone();
-                if opcode == 0xc0 {
+                if matches!(opcode, 0xc0 | 0xd2) {
                     bytes.insert(0, 0x66);
                 }
                 forms.push((bytes, unsupported));

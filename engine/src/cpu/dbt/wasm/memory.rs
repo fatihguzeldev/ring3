@@ -66,6 +66,7 @@ impl Imports {
                 | Operation::MemoryCompareExchangeByte { .. }
                 | Operation::MemoryShiftByte { .. }
                 | Operation::MemoryShiftByteImmediate { .. }
+                | Operation::MemoryShiftByteCl { .. }
                 | Operation::MemoryByteRotateOne { .. }
                 | Operation::MemoryByteRotate { .. }
                 | Operation::MemoryByteRotateThroughCarryOne { .. }

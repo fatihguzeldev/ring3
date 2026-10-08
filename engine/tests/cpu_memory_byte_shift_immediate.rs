@@ -539,7 +539,7 @@ fn strict_fetch_and_late_failures_keep_precise_categories_and_publications() {
             };
             strict.push((vec![prefix, 0xc0, 3 | field << 3, 2], expected));
         }
-        strict.push((vec![0xd2, 3 | field << 3], unsupported));
+        strict.push((vec![0x66, 0xd2, 3 | field << 3], unsupported));
         strict.push((vec![0x66, 0xc1, 3 | field << 3, 2], unsupported));
     }
     strict.push((vec![0xc0, 0x33, 2], unsupported));

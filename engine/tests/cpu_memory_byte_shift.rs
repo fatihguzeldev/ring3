@@ -282,7 +282,7 @@ fn excluded() -> Vec<(Vec<u8>, DecodeError)> {
     let mut cases = Vec::new();
     for (_, field) in KINDS {
         cases.push((vec![0x66, 0xc0, field << 3 | 3, 2], unsupported));
-        cases.push((vec![0xd2, field << 3 | 3], unsupported));
+        cases.push((vec![0x66, 0xd2, field << 3 | 3], unsupported));
         for prefix in [0x66, 0x67, 0xf2, 0xf3] {
             cases.push((vec![prefix, 0xd0, field << 3 | 3], unsupported));
         }

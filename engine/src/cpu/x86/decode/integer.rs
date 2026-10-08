@@ -198,6 +198,7 @@ pub(super) fn lower(instruction: &Instruction) -> Option<Result<Operation, Decod
         _ => {
             return lower_multiply(instruction)
                 .or_else(|| lower_memory_shift_byte_immediate(instruction))
+                .or_else(|| lower_memory_shift_byte_cl(instruction))
                 .or_else(|| lower_shift(instruction))
                 .or_else(|| lower_double_shift(instruction))
                 .or_else(|| lower_rotate_one(instruction))
@@ -280,6 +281,22 @@ fn lower_memory_shift_byte_immediate(
             address,
             count,
         }),
+    )
+}
+
+fn lower_memory_shift_byte_cl(instruction: &Instruction) -> Option<Result<Operation, DecodeError>> {
+    if instruction.op0_kind() != OpKind::Memory {
+        return None;
+    }
+    let kind = match instruction.code() {
+        Code::Shl_rm8_CL => ShiftKind::Shl,
+        Code::Shr_rm8_CL => ShiftKind::Shr,
+        Code::Sar_rm8_CL => ShiftKind::Sar,
+        _ => return None,
+    };
+    Some(
+        effective_address(instruction)
+            .map(|address| Operation::MemoryShiftByteCl { kind, address }),
     )
 }
 
