@@ -146,7 +146,7 @@ fn strict_prefixes_and_both_standalone_profiles_stay_refused() {
             }
         );
     }
-    for bytes in [&[0x66, 0xad][..], &[0x66, 0xab]] {
+    for bytes in [&[0x66, 0xa7][..], &[0x66, 0xaf]] {
         assert_eq!(
             decode_one(&memory(PC, bytes), GuestAddress(PC)).unwrap_err(),
             DecodeError::Unsupported(UnsupportedFeature::Opcode)

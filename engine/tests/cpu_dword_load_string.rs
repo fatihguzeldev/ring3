@@ -187,7 +187,9 @@ fn strict_prefixes_and_both_standalone_profiles_stay_refused() {
     ] {
         assert_eq!(
             decode_one(
-                fixture(PC, &[prefix, 0xad]).memory().unwrap(),
+                fixture(PC, &[prefix, if prefix == 0x66 { 0xac } else { 0xad }])
+                    .memory()
+                    .unwrap(),
                 GuestAddress(PC)
             )
             .err(),
@@ -293,7 +295,7 @@ fn late_refusals_caps_and_data_currency_preserve_bound_publications() {
             let failures = [
                 (
                     PC,
-                    vec![0xad, 0x66, 0xad, 0xeb, 0],
+                    vec![0xad, 0x66, 0xac, 0xeb, 0],
                     5,
                     CompileError::Instruction {
                         pc: GuestAddress(PC + 1),

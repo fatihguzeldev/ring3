@@ -130,7 +130,11 @@ fn strict_prefixes_and_both_standalone_profiles_stay_refused() {
         (0x67, UnsupportedFeature::Opcode),
     ] {
         assert_eq!(
-            decode_one(&memory(PC, &[prefix, 0xab]), GuestAddress(PC)).unwrap_err(),
+            decode_one(
+                &memory(PC, &[prefix, if prefix == 0x66 { 0xaa } else { 0xab }]),
+                GuestAddress(PC),
+            )
+            .unwrap_err(),
             DecodeError::Unsupported(feature)
         );
     }
@@ -160,7 +164,7 @@ fn strict_prefixes_and_both_standalone_profiles_stay_refused() {
         );
     }
     assert_eq!(
-        decode_one(&memory(PC, &[0x66, 0xad]), GuestAddress(PC)).unwrap_err(),
+        decode_one(&memory(PC, &[0x66, 0xa7]), GuestAddress(PC)).unwrap_err(),
         DecodeError::Unsupported(UnsupportedFeature::Opcode)
     );
 }
@@ -220,7 +224,7 @@ fn instruction_block_caps_and_late_refusal_preserve_prior_bound_owners() {
         let mut engine = EngineInstance::new(2, 7).unwrap();
         for (pc, bytes) in [
             (PC, &[0xab, 0xeb, 0][..]),
-            (0x3000, &[0x90, 0x66, 0xab, 0xeb, 0][..]),
+            (0x3000, &[0x90, 0x66, 0xaa, 0xeb, 0][..]),
         ] {
             engine.map(pc, 1, 7).unwrap();
             upload(&mut engine, pc, bytes);
