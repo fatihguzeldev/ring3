@@ -129,7 +129,7 @@ for (const owner of ['replacement', 'resident']) for (const entries of [false, t
     }
     const r = [...REG]; r[0] = 0xa53c0200; put(c, DATA + 24, 1); seed(c, r, PC, 0xcd7); assert.equal(divide(kind, r, 1), null);
     run(c, u, 1, r, PC, 0xcd7, 10, 0, 1); put(c, DATA + 24, 5); const repaired = divide(kind, r, 5); assert.ok(repaired); run(c, u, 1, repaired, PC + 2, 0xcd7, 1, 1, 5); stats.repairs++;
-    upload(c, PC, Buffer.from([0xf6])); neutral(c, u, 4, c.base, 'stale'); stats.controls++; assert.equal(c.api.close(), 0); neutral(c, u, 5, c.base, 'closed'); stats.controls++;
+    protect(c, PC, 7); upload(c, PC, Buffer.from([0xf6])); neutral(c, u, 4, c.base, 'stale'); stats.controls++; assert.equal(c.api.close(), 0); neutral(c, u, 5, c.base, 'closed'); stats.controls++;
   }
   const [c, u] = fresh(owner, entries, 'chain'), r = [...REG]; put(c, ALIAS + 17, 5); put(c, DATA + 24, 0); seed(c, r, CHAIN, 0xcd7);
   r[0] = ALIAS + 17; run(c, u, 1, r, CHAIN + 5, 0xcd7);
