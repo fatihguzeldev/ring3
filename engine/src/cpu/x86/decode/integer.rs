@@ -749,14 +749,16 @@ fn lower_byte_accumulator_multiply(
         Code::Imul_rm8 => MultiplyKind::Signed,
         _ => return None,
     };
-    Some((|| {
-        if instruction.op0_kind() != OpKind::Register {
-            return Err(unsupported());
-        }
-        Ok(Operation::ByteMultiplyAccumulator {
+    Some((|| match instruction.op0_kind() {
+        OpKind::Register => Ok(Operation::ByteMultiplyAccumulator {
             kind,
             source: byte_register(instruction.op0_register())?,
-        })
+        }),
+        OpKind::Memory => Ok(Operation::ReadByteMultiplyAccumulator {
+            kind,
+            address: effective_address(instruction)?,
+        }),
+        _ => Err(unsupported()),
     })())
 }
 

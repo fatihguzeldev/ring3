@@ -8,20 +8,20 @@ fn admission(modrm: u8) {
         .copy_from_slice(&bytes);
     engine.upload(0x1000, bytes.len() as u32).unwrap();
     engine.protect(0x1000, 1, 4).unwrap();
-    let transfer = &mut engine.arena_mut().unwrap()[TRANSFER_OFFSET..];
+    let transfer = &mut engine.arena_mut().unwrap()[TRANSFER_OFFSET..TRANSFER_OFFSET + 8];
     transfer[..4].copy_from_slice(&0x1000_u32.to_le_bytes());
-    transfer[4..8].copy_from_slice(&(bytes.len() as u32).to_le_bytes());
-    engine.compile(1).expect("memory byte divide admission");
+    transfer[4..].copy_from_slice(&(bytes.len() as u32).to_le_bytes());
+    engine.compile(1).expect("memory byte multiply admission");
 }
 
 #[test]
-fn memory_byte_div_admits_public_api() {
-    admission(0x33);
+fn memory_byte_mul_admits_public_api() {
+    admission(0x23);
 }
 
 #[test]
-fn memory_byte_idiv_admits_public_api() {
-    admission(0x3b);
+fn memory_byte_imul_admits_public_api() {
+    admission(0x2b);
 }
 
 use ring3_engine::{
@@ -34,7 +34,7 @@ use ring3_engine::{
         x86::{
             Register32,
             decode::{DecodeError, decode_one},
-            ir::{DivideKind, EffectiveAddress, Operation},
+            ir::{EffectiveAddress, MultiplyKind, Operation},
         },
     },
     memory::{Access, FaultReason, GuestAddress, MemoryFault},
@@ -81,13 +81,13 @@ fn bound(engine: &mut EngineInstance, resident: bool, entries: bool) -> Result<u
     }
 }
 
-fn encoded(kind: DivideKind, tail: &[u8]) -> Vec<u8> {
+fn encoded(kind: MultiplyKind, tail: &[u8]) -> Vec<u8> {
     let mut bytes = vec![0xf6];
     bytes.extend_from_slice(tail);
-    bytes[1] |= if kind == DivideKind::Unsigned {
-        0x30
+    bytes[1] |= if kind == MultiplyKind::Unsigned {
+        0x20
     } else {
-        0x38
+        0x28
     };
     bytes
 }
@@ -123,7 +123,7 @@ fn forms() -> Vec<(Vec<u8>, EffectiveAddress)> {
 fn memory_byte_ea_identities_need_read8_in_four_bound_profiles() {
     let mut bytes = Vec::new();
     let mut expected = Vec::new();
-    for kind in [DivideKind::Unsigned, DivideKind::Signed] {
+    for kind in [MultiplyKind::Unsigned, MultiplyKind::Signed] {
         for (tail, address) in forms() {
             let form = encoded(kind, &tail);
             expected.push((CODE + bytes.len() as u32, form.len(), kind, address));
@@ -136,7 +136,7 @@ fn memory_byte_ea_identities_need_read8_in_four_bound_profiles() {
         let decoded = decode_one(engine.memory().unwrap(), GuestAddress(pc)).unwrap();
         assert_eq!(
             decoded.operation(),
-            &Operation::ReadByteDivideAccumulator { kind, address }
+            &Operation::ReadByteMultiplyAccumulator { kind, address }
         );
         assert_eq!(
             (decoded.length() as usize, decoded.next_pc()),
@@ -171,7 +171,7 @@ fn memory_byte_ea_identities_need_read8_in_four_bound_profiles() {
     let output = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()
         .unwrap()
-        .join("target/r448-memory-byte-division")
+        .join("target/r449-memory-byte-multiply")
         .join(format!(
             "native-modules-{}-{}",
             std::process::id(),
@@ -213,7 +213,7 @@ fn memory_byte_ea_identities_need_read8_in_four_bound_profiles() {
 #[test]
 fn strict_neighbors_and_fetch_boundaries_keep_exact_categories() {
     let opcode = DecodeError::Unsupported(UnsupportedFeature::Opcode);
-    for kind in [DivideKind::Unsigned, DivideKind::Signed] {
+    for kind in [MultiplyKind::Unsigned, MultiplyKind::Signed] {
         for (prefix, wanted) in [
             (0x66, opcode),
             (0x67, opcode),
@@ -270,10 +270,10 @@ fn strict_neighbors_and_fetch_boundaries_keep_exact_categories() {
         }
     }
     for bytes in [
-        &[0x66, 0xf6, 0x23][..],
-        &[0x66, 0xf6, 0x2b],
-        &[0x66, 0xf7, 0x33],
-        &[0x66, 0xf7, 0x3b],
+        &[0x66, 0xf6, 0x33][..],
+        &[0x66, 0xf6, 0x3b],
+        &[0x66, 0xf7, 0x23],
+        &[0x66, 0xf7, 0x2b],
     ] {
         let engine = fixture(CODE, bytes);
         assert_eq!(
@@ -330,7 +330,7 @@ fn data_currency_late_refusals_and_caps_preserve_all_publications() {
             engine.guard(KEY, generation).unwrap();
             engine.guard_resident(KEY, keep).unwrap();
             let mut failures = Vec::new();
-            for modrm in [0x33, 0x3b] {
+            for modrm in [0x23, 0x2b] {
                 for tail in [vec![0x0f, 0x0b], vec![0x66, 0xf6, modrm]] {
                     let mut bytes = vec![0xf6, modrm];
                     bytes.extend(tail);
@@ -365,7 +365,7 @@ fn data_currency_late_refusals_and_caps_preserve_all_publications() {
                     }),
                 },
             ));
-            let mut over = [0xf6, 0x33].repeat(64);
+            let mut over = [0xf6, 0x23].repeat(64);
             over.extend([0xeb, 0]);
             let length = over.len();
             failures.push((CODE, over, length, CompileError::InstructionLimit));
@@ -386,7 +386,7 @@ fn data_currency_late_refusals_and_caps_preserve_all_publications() {
                 engine.guard(KEY, generation).unwrap();
                 engine.guard_resident(KEY, keep).unwrap();
             }
-            for modrm in [0x33, 0x3b] {
+            for modrm in [0x23, 0x2b] {
                 let mut at_limit = [0xf6, modrm].repeat(63);
                 at_limit.extend([0xeb, 0]);
                 upload(&mut engine, CODE, &at_limit);

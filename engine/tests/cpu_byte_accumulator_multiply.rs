@@ -415,9 +415,9 @@ fn strict_forms() -> Vec<(Vec<u8>, DecodeError)> {
             &[0x24, 0x8a],
             &[0x24, 0x8d, 0x78, 0x56, 0x34, 0x12],
         ] {
-            let mut bytes = vec![0xf6];
+            let mut bytes = vec![0x66, 0xf6];
             bytes.extend_from_slice(tail);
-            bytes[1] |= base & 8;
+            bytes[2] |= base & 8;
             rows.push((bytes, opcode));
         }
     }

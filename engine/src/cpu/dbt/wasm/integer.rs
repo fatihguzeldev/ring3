@@ -1030,6 +1030,13 @@ pub(super) fn instruction(
         Operation::ByteMultiplyAccumulator { kind, source } => {
             byte_accumulator_multiply(code, kind, source);
         }
+        Operation::ReadByteMultiplyAccumulator { kind, address } => {
+            memory::load_narrow_value(code, address, SmallWidth::Byte, imports, exit_depth);
+            code.local_set(RHS);
+            byte_value(code, ByteValue::Register(ByteRegister::Al));
+            code.local_set(LHS);
+            byte_accumulator_multiply_value(code, kind);
+        }
         Operation::ReadMultiplyAccumulator { kind, address } => {
             memory::load_result(code, address, imports, exit_depth);
             accumulator_multiply(code, kind, RESULT);
@@ -3116,6 +3123,10 @@ fn byte_accumulator_multiply(
     code.local_set(LHS);
     byte_value(code, ByteValue::Register(source));
     code.local_set(RHS);
+    byte_accumulator_multiply_value(code, kind);
+}
+
+fn byte_accumulator_multiply_value(code: &mut InstructionSink<'_>, kind: MultiplyKind) {
     for operand in [LHS, RHS] {
         code.local_get(operand);
         if kind == MultiplyKind::Signed {
