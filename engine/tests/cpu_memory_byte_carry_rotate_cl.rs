@@ -572,7 +572,10 @@ fn exclusions() -> Vec<(Vec<u8>, DecodeError)> {
                     unsupported,
                 ));
             }
-            cases.push((instruction(0xd3, kind, shape, 0), unsupported));
+            cases.push((
+                [vec![0x66], instruction(0xd3, kind, shape, 0)].concat(),
+                unsupported,
+            ));
         }
     }
     assert_eq!(cases.len(), 68);

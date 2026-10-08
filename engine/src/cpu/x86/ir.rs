@@ -480,6 +480,10 @@ pub enum Operation {
         address: EffectiveAddress,
         count: u8,
     },
+    MemoryRotateThroughCarryCl {
+        kind: RotateKind,
+        address: EffectiveAddress,
+    },
     SignedMultiply {
         destination: Register32,
         source: Location32,

@@ -102,6 +102,7 @@ impl Imports {
                 | Operation::MemoryDoubleShift { .. }
                 | Operation::MemoryRotateThroughCarryOne { .. }
                 | Operation::MemoryRotateThroughCarryImmediate { .. }
+                | Operation::MemoryRotateThroughCarryCl { .. }
                 | Operation::MemoryExchangeAdd { .. }
                 | Operation::MemoryCompareExchange { .. }
                 | Operation::Binary {

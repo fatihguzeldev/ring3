@@ -588,7 +588,10 @@ fn exclusions() -> Vec<(Vec<u8>, DecodeError)> {
                     unsupported,
                 ));
             }
-            cases.push((instruction(0xd3, kind, shape, 0), unsupported));
+            cases.push((
+                [vec![0x66], instruction(0xd3, kind, shape, 0)].concat(),
+                unsupported,
+            ));
         }
         for shape in shapes() {
             let mut bytes = instruction(0xd2, kind, &shape, 0);

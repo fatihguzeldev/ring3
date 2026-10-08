@@ -618,7 +618,10 @@ fn exclusions() -> Vec<(Vec<u8>, DecodeError)> {
                 };
                 cases.push(([vec![prefix], bytes.clone()].concat(), cause));
             }
-            cases.push((instruction(0xd3, kind, shape, 0), opcode));
+            cases.push((
+                [vec![0x66], instruction(0xd3, kind, shape, 0)].concat(),
+                opcode,
+            ));
             for byte_opcode in [0xc0, 0xd2, 0xd0] {
                 cases.push((
                     [vec![0x66], instruction(byte_opcode, kind, shape, 2)].concat(),

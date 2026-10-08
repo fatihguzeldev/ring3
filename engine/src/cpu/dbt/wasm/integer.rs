@@ -832,6 +832,10 @@ pub(super) fn instruction(
             memory_rotate_through_carry_immediate(code, kind, address, count, imports, exit_depth);
             store = true;
         }
+        Operation::MemoryRotateThroughCarryCl { kind, address } => {
+            memory_rotate_through_carry_cl(code, kind, address, imports, exit_depth);
+            store = true;
+        }
         Operation::MemoryRotateOne { kind, address } => {
             memory::load_result(code, address, imports, exit_depth);
             rotate_one_value(code, kind);
@@ -2477,6 +2481,118 @@ fn memory_rotate_through_carry_immediate(
         .i32_and()
         .i32_or();
     // store validation clobbers scratch locals; publish flags only after success.
+    memory::store_result(code, address, imports, exit_depth);
+    code.local_set(FLAGS);
+}
+
+fn memory_rotate_through_carry_cl(
+    code: &mut InstructionSink<'_>,
+    kind: RotateKind,
+    address: EffectiveAddress,
+    imports: memory::Imports,
+    exit_depth: u32,
+) {
+    memory::load_result(code, address, imports, exit_depth);
+    code.local_get(RESULT).local_set(LHS);
+    shift_count(code, ShiftCount::Cl);
+    code.local_tee(RHS)
+        .if_(BlockType::Result(ValType::I32))
+        .local_get(RHS)
+        .i32_const(1)
+        .i32_eq()
+        .if_(BlockType::Result(ValType::I32))
+        .local_get(FLAGS)
+        .i32_const(1)
+        .i32_and()
+        .local_set(RHS);
+    rotate_through_carry_one_value(code, kind);
+    code.local_get(FLAGS)
+        .i32_const(!0x801)
+        .i32_and()
+        .local_get(LHS);
+    match kind {
+        RotateKind::Left => {
+            code.i32_const(31).i32_shr_u();
+        }
+        RotateKind::Right => {
+            code.i32_const(1).i32_and();
+        }
+    }
+    code.i32_or();
+    match kind {
+        RotateKind::Left => {
+            code.local_get(RESULT)
+                .i32_const(31)
+                .i32_shr_u()
+                .local_get(LHS)
+                .i32_const(31)
+                .i32_shr_u();
+        }
+        RotateKind::Right => {
+            code.local_get(LHS).i32_const(31).i32_shr_u().local_get(RHS);
+        }
+    }
+    code.i32_xor()
+        .i32_const(11)
+        .i32_shl()
+        .i32_or()
+        .else_()
+        .local_get(FLAGS)
+        .i32_const(1)
+        .i32_and()
+        .local_set(RESULT)
+        .local_get(LHS)
+        .local_get(RHS);
+    match kind {
+        RotateKind::Left => {
+            code.i32_shl();
+        }
+        RotateKind::Right => {
+            code.i32_shr_u();
+        }
+    }
+    code.local_get(LHS).i32_const(33).local_get(RHS).i32_sub();
+    match kind {
+        RotateKind::Left => {
+            code.i32_shr_u();
+        }
+        RotateKind::Right => {
+            code.i32_shl();
+        }
+    }
+    code.i32_or().local_get(RESULT);
+    match kind {
+        RotateKind::Left => {
+            code.local_get(RHS).i32_const(1).i32_sub();
+        }
+        RotateKind::Right => {
+            code.i32_const(32).local_get(RHS).i32_sub();
+        }
+    }
+    code.i32_shl()
+        .i32_or()
+        .local_set(RESULT)
+        .local_get(FLAGS)
+        .i32_const(!0x801)
+        .i32_and()
+        .local_get(LHS);
+    match kind {
+        RotateKind::Left => {
+            code.i32_const(32).local_get(RHS).i32_sub();
+        }
+        RotateKind::Right => {
+            code.local_get(RHS).i32_const(1).i32_sub();
+        }
+    }
+    code.i32_shr_u()
+        .i32_const(1)
+        .i32_and()
+        .i32_or()
+        .end()
+        .else_()
+        .local_get(FLAGS)
+        .end();
+    // candidate flags survives store scratch and publishes only after success.
     memory::store_result(code, address, imports, exit_depth);
     code.local_set(FLAGS);
 }
