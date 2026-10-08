@@ -146,9 +146,9 @@ fn strict_prefixes_and_both_standalone_profiles_stay_refused() {
             }
         );
     }
-    for opcode in [0xad, 0xab] {
+    for bytes in [&[0x66, 0xad][..], &[0xab]] {
         assert_eq!(
-            decode_one(&memory(PC, &[opcode]), GuestAddress(PC)).unwrap_err(),
+            decode_one(&memory(PC, bytes), GuestAddress(PC)).unwrap_err(),
             DecodeError::Unsupported(UnsupportedFeature::Opcode)
         );
     }

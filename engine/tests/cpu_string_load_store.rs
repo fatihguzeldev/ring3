@@ -102,9 +102,9 @@ fn prefixes_wider_forms_and_standalone_memory_remain_excluded() {
             })
         ));
     }
-    for opcode in [0xad, 0xab] {
+    for bytes in [&[0x66, 0xad][..], &[0xab]] {
         assert_eq!(
-            decode_one(&memory(PC, &[opcode]), GuestAddress(PC)).unwrap_err(),
+            decode_one(&memory(PC, bytes), GuestAddress(PC)).unwrap_err(),
             DecodeError::Unsupported(UnsupportedFeature::Opcode)
         );
     }

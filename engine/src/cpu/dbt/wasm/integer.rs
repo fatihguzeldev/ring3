@@ -180,6 +180,21 @@ pub(super) fn instruction(
             insert_byte(code, ByteRegister::Al);
             string_pointer(code, Register32::Esi);
         }
+        Operation::LoadStringDword => {
+            memory::load_result(
+                code,
+                EffectiveAddress {
+                    base: Some(Register32::Esi),
+                    index: None,
+                    scale: 1,
+                    displacement: 0,
+                },
+                imports,
+                exit_depth,
+            );
+            code.local_get(RESULT).local_set(register(Register32::Eax));
+            dword_string_pointer(code, Register32::Esi);
+        }
         Operation::TranslateByte => {
             code.local_get(register(Register32::Ebx))
                 .local_get(register(Register32::Eax))

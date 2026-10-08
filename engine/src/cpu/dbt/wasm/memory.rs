@@ -139,6 +139,7 @@ impl Imports {
                     store = true;
                 }
                 Operation::CompareStringDword
+                | Operation::LoadStringDword
                 | Operation::ScanStringDword
                 | Operation::ReadConditionalMove { .. }
                 | Operation::ReadMultiplyAccumulator { .. }
