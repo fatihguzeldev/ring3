@@ -57,13 +57,16 @@ pub(super) fn check_profile(instruction: &Instruction, bytes: &[u8]) -> Result<(
     {
         return Err(DecodeError::Unsupported(UnsupportedFeature::RepeatedString));
     }
+    let exact_word_string = instruction.code() == Code::Lodsw_AX_m16 && bytes == [0x66, 0xad]
+        || instruction.code() == Code::Stosw_m16_AX && bytes == [0x66, 0xab];
     if instruction.has_lock_prefix()
         || instruction.has_rep_prefix()
         || instruction.has_repne_prefix()
-        || bytes
-            .iter()
-            .take_while(|byte| is_prefix(**byte))
-            .any(|byte| matches!(*byte, 0x66 | 0x67))
+        || (!exact_word_string
+            && bytes
+                .iter()
+                .take_while(|byte| is_prefix(**byte))
+                .any(|byte| matches!(*byte, 0x66 | 0x67)))
     {
         return Err(unsupported());
     }
