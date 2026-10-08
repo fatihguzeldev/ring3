@@ -408,6 +408,9 @@ fn exclusions() -> Vec<(Vec<u8>, DecodeError)> {
                 if immediate {
                     memory.push(255);
                 }
+                if kind == BitTestKind::Test {
+                    memory.insert(0, 0x66);
+                }
                 cases.push((memory, opcode));
             }
             let mut locked = vec![

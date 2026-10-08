@@ -141,6 +141,7 @@ impl Imports {
                 | Operation::ReadMultiplyAccumulator { .. }
                 | Operation::ReadDivideAccumulator { .. }
                 | Operation::ReadBitScan { .. }
+                | Operation::ReadBitTest { .. }
                 | Operation::Move {
                     source: Value32::Memory(_),
                     ..
@@ -325,6 +326,14 @@ pub(super) fn load_result(
     exit_depth: u32,
 ) {
     effective_address(code, source);
+    load_result_at_address(code, imports, exit_depth);
+}
+
+pub(super) fn load_result_at_address(
+    code: &mut InstructionSink<'_>,
+    imports: Imports,
+    exit_depth: u32,
+) {
     code.local_get(ADDRESS)
         .call(
             imports

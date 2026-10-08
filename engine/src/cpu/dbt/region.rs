@@ -317,6 +317,7 @@ fn supports_memory_reads(operation: &Operation) -> bool {
             | Operation::ReadByteDivideAccumulator { .. }
             | Operation::ReadDivideAccumulator { .. }
             | Operation::ReadBitScan { .. }
+            | Operation::ReadBitTest { .. }
             | Operation::MemoryPredicateByte { .. }
             | Operation::ReadCompareByte { .. }
             | Operation::ReadLogicalByte { .. }
