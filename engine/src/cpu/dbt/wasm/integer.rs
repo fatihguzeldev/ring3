@@ -865,6 +865,9 @@ pub(super) fn instruction(
         Operation::MultiplyAccumulator { kind, source } => {
             accumulator_multiply(code, kind, register(source));
         }
+        Operation::ByteMultiplyAccumulator { kind, source } => {
+            byte_accumulator_multiply(code, kind, source);
+        }
         Operation::ReadMultiplyAccumulator { kind, address } => {
             memory::load_result(code, address, imports, exit_depth);
             accumulator_multiply(code, kind, RESULT);
@@ -2880,6 +2883,48 @@ fn bit_test(
         }
         code.local_set(register(destination));
     }
+}
+
+fn byte_accumulator_multiply(
+    code: &mut InstructionSink<'_>,
+    kind: MultiplyKind,
+    source: ByteRegister,
+) {
+    byte_value(code, ByteValue::Register(ByteRegister::Al));
+    code.local_set(LHS);
+    byte_value(code, ByteValue::Register(source));
+    code.local_set(RHS);
+    for operand in [LHS, RHS] {
+        code.local_get(operand);
+        if kind == MultiplyKind::Signed {
+            extend_value(code, ExtensionKind::Sign, SmallWidth::Byte);
+        }
+    }
+    code.i32_mul()
+        .local_set(RESULT)
+        .local_get(register(Register32::Eax))
+        .i32_const(!0xffff)
+        .i32_and()
+        .local_get(RESULT)
+        .i32_const(0xffff)
+        .i32_and()
+        .i32_or()
+        .local_set(register(Register32::Eax))
+        .local_get(FLAGS)
+        .i32_const(0x402)
+        .i32_and()
+        .local_get(RESULT);
+    match kind {
+        MultiplyKind::Unsigned => {
+            code.i32_const(0xff).i32_gt_u();
+        }
+        MultiplyKind::Signed => {
+            code.local_get(RESULT);
+            extend_value(code, ExtensionKind::Sign, SmallWidth::Byte);
+            code.i32_ne();
+        }
+    }
+    code.i32_const(0x801).i32_mul().i32_or().local_set(FLAGS);
 }
 
 fn accumulator_multiply(code: &mut InstructionSink<'_>, kind: MultiplyKind, source: u32) {

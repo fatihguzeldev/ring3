@@ -502,6 +502,10 @@ pub enum Operation {
         kind: MultiplyKind,
         source: Register32,
     },
+    ByteMultiplyAccumulator {
+        kind: MultiplyKind,
+        source: ByteRegister,
+    },
     ReadMultiplyAccumulator {
         kind: MultiplyKind,
         address: EffectiveAddress,
