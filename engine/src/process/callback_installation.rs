@@ -7,7 +7,8 @@ use crate::{
     abi::{
         arena::{EXIT_OFFSET, STATE_OFFSET, X87_OFFSET},
         x86::{
-            EXIT_SIZE, EXIT_VERSION_3, EXIT_VERSION_5, STATE_SIZE, X87_SIZE, decode_exit, decode_state, decode_x87,
+            EXIT_SIZE, EXIT_VERSION_3, EXIT_VERSION_5, STATE_SIZE, X87_SIZE, decode_exit,
+            decode_state, decode_x87,
         },
     },
     cpu::{ExitReason, dbt::UnitId},
