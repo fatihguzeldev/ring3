@@ -222,6 +222,22 @@ pub(super) fn instruction(
             string_pointer(code, Register32::Edi);
             store = true;
         }
+        Operation::StoreStringDword => {
+            code.local_get(register(Register32::Eax)).local_set(RESULT);
+            memory::store_result(
+                code,
+                EffectiveAddress {
+                    base: Some(Register32::Edi),
+                    index: None,
+                    scale: 1,
+                    displacement: 0,
+                },
+                imports,
+                exit_depth,
+            );
+            dword_string_pointer(code, Register32::Edi);
+            store = true;
+        }
         Operation::CompareStringByte => {
             memory::load_narrow_value(
                 code,

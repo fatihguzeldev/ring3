@@ -3,17 +3,30 @@ use ring3_engine::{abi::arena::TRANSFER_OFFSET, process::EngineInstance};
 const PC: u32 = 0x1000;
 
 #[test]
-fn movsd_admits_in_bound_engine() {
-    let mut engine = EngineInstance::new(1, 0x5152_5354_5556_5758).unwrap();
-    engine.map(PC, 1, 7).unwrap();
-    engine.arena_mut().unwrap()[TRANSFER_OFFSET..TRANSFER_OFFSET + 3]
-        .copy_from_slice(&[0xa5, 0xeb, 0]);
-    engine.upload(PC, 3).unwrap();
-    engine.protect(PC, 1, 4).unwrap();
-    let descriptor = &mut engine.arena_mut().unwrap()[TRANSFER_OFFSET..TRANSFER_OFFSET + 8];
-    descriptor[..4].copy_from_slice(&PC.to_le_bytes());
-    descriptor[4..].copy_from_slice(&3_u32.to_le_bytes());
-    engine.compile(1).expect("bare movsd must compile");
+fn stosd_admits_in_bound_engine() {
+    for opcode in [0xaa, 0xab] {
+        let mut engine = EngineInstance::new(1, 0x5152_5354_5556_5758).unwrap();
+        engine.map(PC, 1, 7).unwrap();
+        engine.arena_mut().unwrap()[TRANSFER_OFFSET..TRANSFER_OFFSET + 3]
+            .copy_from_slice(&[opcode, 0xeb, 0]);
+        engine.upload(PC, 3).unwrap();
+        engine.protect(PC, 1, 4).unwrap();
+        let descriptor = &mut engine.arena_mut().unwrap()[TRANSFER_OFFSET..TRANSFER_OFFSET + 8];
+        descriptor[..4].copy_from_slice(&PC.to_le_bytes());
+        descriptor[4..].copy_from_slice(&3_u32.to_le_bytes());
+        engine
+            .compile(1)
+            .expect("bare accumulator store must compile");
+        if let (0xaa, Some(path)) = (opcode, std::env::var_os("RING3_STOSB_MODULE_OUTPUT")) {
+            use std::io::Write;
+            let mut output = std::fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(path)
+                .unwrap();
+            output.write_all(engine.artifact_bytes().unwrap()).unwrap();
+        }
+    }
 }
 
 use ring3_engine::{
@@ -59,9 +72,9 @@ fn descriptor(engine: &mut EngineInstance, pc: u32, length: u32) {
 #[test]
 fn typed_single_byte_fetch_wrap_and_execute_permission_are_exact() {
     for pc in [PC, 0x1fff, u32::MAX] {
-        let memory = memory(pc, &[0xa5]);
+        let memory = memory(pc, &[0xab]);
         let decoded = decode_one(&memory, GuestAddress(pc)).unwrap();
-        assert_eq!(decoded.operation(), &Operation::MoveStringDword);
+        assert_eq!(decoded.operation(), &Operation::StoreStringDword);
         assert_eq!(
             (decoded.length(), decoded.next_pc()),
             (1, GuestAddress(pc.wrapping_add(1)))
@@ -77,7 +90,7 @@ fn typed_single_byte_fetch_wrap_and_execute_permission_are_exact() {
             ..
         })
     ));
-    let mut denied = memory(PC, &[0xa5]);
+    let mut denied = memory(PC, &[0xab]);
     denied
         .protect(
             PageRange::new(GuestAddress(PC), 1).unwrap(),
@@ -95,7 +108,7 @@ fn typed_single_byte_fetch_wrap_and_execute_permission_are_exact() {
             }
         })
     ));
-    let mut changed = memory(PC, &[0xa5]);
+    let mut changed = memory(PC, &[0xab]);
     let decoded = decode_one(&changed, GuestAddress(PC)).unwrap();
     changed
         .protect(
@@ -117,15 +130,15 @@ fn strict_prefixes_and_both_standalone_profiles_stay_refused() {
         (0x67, UnsupportedFeature::Opcode),
     ] {
         assert_eq!(
-            decode_one(&memory(PC, &[prefix, 0xa5]), GuestAddress(PC)).unwrap_err(),
+            decode_one(&memory(PC, &[prefix, 0xab]), GuestAddress(PC)).unwrap_err(),
             DecodeError::Unsupported(feature)
         );
     }
     assert_eq!(
-        decode_one(&memory(PC, &[0xf0, 0xa5]), GuestAddress(PC)).unwrap_err(),
+        decode_one(&memory(PC, &[0xf0, 0xab]), GuestAddress(PC)).unwrap_err(),
         DecodeError::InvalidEncoding
     );
-    let code = memory(PC, &[0x90, 0xa5, 0xeb, 0]);
+    let code = memory(PC, &[0x90, 0xab, 0xeb, 0]);
     for error in [
         compile_region(
             &code,
@@ -146,22 +159,20 @@ fn strict_prefixes_and_both_standalone_profiles_stay_refused() {
             }
         );
     }
-    for bytes in [&[0x66, 0xad][..], &[0x66, 0xab]] {
-        assert_eq!(
-            decode_one(&memory(PC, bytes), GuestAddress(PC)).unwrap_err(),
-            DecodeError::Unsupported(UnsupportedFeature::Opcode)
-        );
-    }
+    assert_eq!(
+        decode_one(&memory(PC, &[0x66, 0xad]), GuestAddress(PC)).unwrap_err(),
+        DecodeError::Unsupported(UnsupportedFeature::Opcode)
+    );
 }
 
 #[test]
-fn four_bound_profiles_validate_existing_dword_imports_without_guest_execution() {
+fn four_bound_profiles_validate_store_only_imports_without_guest_execution() {
     let mut input = Vec::new();
     for resident in [false, true] {
         for entries in [false, true] {
             let mut engine = EngineInstance::new(1, 7).unwrap();
             engine.map(PC, 1, 7).unwrap();
-            upload(&mut engine, PC, &[0xa5, 0xeb, 0]);
+            upload(&mut engine, PC, &[0xab, 0xeb, 0]);
             engine.protect(PC, 1, 4).unwrap();
             descriptor(&mut engine, PC, 3);
             let bytes = if resident {
@@ -190,7 +201,7 @@ let at=0,count=0;
 while(at<input.length){const resident=input[at++],size=input.readUInt32LE(at);at+=4;
 const module=new WebAssembly.Module(input.subarray(at,at+size));at+=size;
 assert.deepEqual(WebAssembly.Module.imports(module),[{module:'env',name:'memory',kind:'memory'},
-...[resident?'guard_resident':'guard','read32',resident?'store_resident32':'store32'].map(name=>({module:'ring3',name,kind:'function'}))]);
+...[resident?'guard_resident':'guard',resident?'store_resident32':'store32'].map(name=>({module:'ring3',name,kind:'function'}))]);
 assert.deepEqual(WebAssembly.Module.exports(module),[{name:'run',kind:'function'}]);count++;}
 assert.equal(count,4);
 "#]).stdin(Stdio::piped()).stderr(Stdio::piped()).spawn().unwrap();
@@ -208,8 +219,8 @@ fn instruction_block_caps_and_late_refusal_preserve_prior_bound_owners() {
     for resident in [false, true] {
         let mut engine = EngineInstance::new(2, 7).unwrap();
         for (pc, bytes) in [
-            (PC, &[0xa5, 0xeb, 0][..]),
-            (0x3000, &[0x90, 0x66, 0xa5, 0xeb, 0][..]),
+            (PC, &[0xab, 0xeb, 0][..]),
+            (0x3000, &[0x90, 0x66, 0xab, 0xeb, 0][..]),
         ] {
             engine.map(pc, 1, 7).unwrap();
             upload(&mut engine, pc, bytes);
@@ -258,7 +269,7 @@ fn instruction_block_caps_and_late_refusal_preserve_prior_bound_owners() {
         let mut engine = EngineInstance::new(1, 7).unwrap();
         engine.map(PC, 1, 7).unwrap();
         let mut bytes = vec![0x90; count];
-        bytes[0] = 0xa5;
+        bytes[0] = 0xab;
         bytes.extend([0xeb, 0]);
         upload(&mut engine, PC, &bytes);
         engine.protect(PC, 1, 4).unwrap();
@@ -287,7 +298,7 @@ fn instruction_block_caps_and_late_refusal_preserve_prior_bound_owners() {
     engine.map(PC, 1, 7).unwrap();
     let mut bytes = vec![0xcc; 128];
     for offset in (0..128).step_by(16) {
-        bytes[offset..offset + 3].copy_from_slice(&[0xa5, 0xeb, 0]);
+        bytes[offset..offset + 3].copy_from_slice(&[0xab, 0xeb, 0]);
     }
     upload(&mut engine, PC, &bytes);
     engine.protect(PC, 1, 4).unwrap();

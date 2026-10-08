@@ -370,6 +370,7 @@ fn supports_memory_move_store(operation: &Operation) -> bool {
     matches!(
         operation,
         Operation::MoveStringDword
+            | Operation::StoreStringDword
             | Operation::Move {
                 destination: Location32::Memory(_),
                 source: Value32::Register(_) | Value32::Immediate(_),

@@ -169,7 +169,8 @@ impl Imports {
                     target: BranchTarget::Indirect(Location32::Memory(_)),
                 }
                 | Operation::Pop { .. } => read = true,
-                Operation::Move {
+                Operation::StoreStringDword
+                | Operation::Move {
                     destination: Location32::Memory(_),
                     ..
                 }

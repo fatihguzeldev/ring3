@@ -245,6 +245,7 @@ pub enum Operation {
     LoadStringDword,
     TranslateByte,
     StoreStringByte,
+    StoreStringDword,
     CompareStringByte,
     ScanStringByte,
     CompareStringDword,
