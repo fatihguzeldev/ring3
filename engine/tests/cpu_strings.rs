@@ -92,7 +92,7 @@ fn repeated_prefixed_and_wider_strings_remain_excluded() {
         (vec![0x66, 0xa4], UnsupportedFeature::Opcode),
         (vec![0x67, 0xa4], UnsupportedFeature::Opcode),
         (vec![0xa5], UnsupportedFeature::Opcode),
-        (vec![0xaa], UnsupportedFeature::Opcode),
+        (vec![0x66, 0xaa], UnsupportedFeature::Opcode),
     ] {
         assert_eq!(
             decode_one(&memory(&bytes), GuestAddress(PC)).unwrap_err(),

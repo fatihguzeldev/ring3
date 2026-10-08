@@ -114,6 +114,39 @@ pub(super) fn instruction(
             }
             store = true;
         }
+        Operation::LoadStringByte => {
+            memory::load_narrow_value(
+                code,
+                EffectiveAddress {
+                    base: Some(Register32::Esi),
+                    index: None,
+                    scale: 1,
+                    displacement: 0,
+                },
+                SmallWidth::Byte,
+                imports,
+                exit_depth,
+            );
+            insert_byte(code, ByteRegister::Al);
+            string_pointer(code, Register32::Esi);
+        }
+        Operation::StoreStringByte => {
+            byte_value(code, ByteValue::Register(ByteRegister::Al));
+            code.local_set(RESULT);
+            memory::store_byte_result(
+                code,
+                EffectiveAddress {
+                    base: Some(Register32::Edi),
+                    index: None,
+                    scale: 1,
+                    displacement: 0,
+                },
+                imports,
+                exit_depth,
+            );
+            string_pointer(code, Register32::Edi);
+            store = true;
+        }
         Operation::Move {
             destination: Location32::Register(destination),
             source,
@@ -1303,6 +1336,18 @@ fn value(code: &mut InstructionSink<'_>, value: Value32) {
         }
         Value32::Memory(_) => unreachable!("prepared region contains a memory operand"),
     }
+}
+
+fn string_pointer(code: &mut InstructionSink<'_>, pointer: Register32) {
+    code.local_get(register(pointer))
+        .i32_const(-1)
+        .i32_const(1)
+        .local_get(FLAGS)
+        .i32_const(0x400)
+        .i32_and()
+        .select()
+        .i32_add()
+        .local_set(register(pointer));
 }
 
 fn extend_value(code: &mut InstructionSink<'_>, kind: ExtensionKind, width: SmallWidth) {

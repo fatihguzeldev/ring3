@@ -226,6 +226,8 @@ pub enum Operation {
         set: bool,
     },
     MoveStringByte,
+    LoadStringByte,
+    StoreStringByte,
     FlagsToAh,
     AhToFlags,
     Move {

@@ -307,6 +307,7 @@ fn supports_memory_reads(operation: &Operation) -> bool {
     matches!(
         operation,
         Operation::LoadByte { .. }
+            | Operation::LoadStringByte
             | Operation::ReadConditionalMove { .. }
             | Operation::ReadMultiplyAccumulator { .. }
             | Operation::ReadBitScan { .. }
@@ -368,7 +369,10 @@ fn supports_memory_move_store(operation: &Operation) -> bool {
 fn supports_byte_store(operation: &Operation) -> bool {
     matches!(
         operation,
-        Operation::StoreByte { .. } | Operation::MemorySetByte { .. } | Operation::MoveStringByte
+        Operation::StoreByte { .. }
+            | Operation::MemorySetByte { .. }
+            | Operation::MoveStringByte
+            | Operation::StoreStringByte
     )
 }
 

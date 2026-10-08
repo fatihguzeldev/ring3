@@ -52,11 +52,14 @@ impl Imports {
         for instruction in blocks.iter().flat_map(|block| &block.instructions) {
             match instruction.operation() {
                 Operation::LoadByte { .. }
+                | Operation::LoadStringByte
                 | Operation::MemoryPredicateByte { .. }
                 | Operation::ReadCompareByte { .. }
                 | Operation::ReadLogicalByte { .. }
                 | Operation::ReadArithmeticByte { .. } => read8 = true,
-                Operation::StoreByte { .. } | Operation::MemorySetByte { .. } => {
+                Operation::StoreByte { .. }
+                | Operation::MemorySetByte { .. }
+                | Operation::StoreStringByte => {
                     store8 = true;
                 }
                 Operation::MoveStringByte
