@@ -3,7 +3,7 @@ use wasm_encoder::{
     ImportSection, InstructionSink, MemoryType, Module, TypeSection, ValType,
 };
 
-use super::{EmbeddedBinding, abi, integer, locals::*, memory};
+use super::{EmbeddedBinding, abi, integer, locals::*, memory, x87};
 use crate::cpu::dbt::region::CompiledBlock;
 use crate::cpu::x86::ir::Operation;
 
@@ -22,6 +22,14 @@ pub(in crate::cpu::dbt) fn emit(
         .iter()
         .flat_map(|block| &block.instructions)
         .any(|instruction| matches!(instruction.operation(), Operation::DivideAccumulator { .. }));
+    let has_x87 = blocks.iter().any(|block| {
+        block.instructions.iter().any(|instruction| {
+            matches!(
+                instruction.operation(),
+                Operation::InitializeX87 | Operation::X87StatusToAx
+            )
+        })
+    });
     debug_assert!(!(has_memory || has_gates) || binding.is_some());
     let mut types = TypeSection::new();
     types.ty().function([ValType::I32; 4], [ValType::I32]);
@@ -161,6 +169,9 @@ pub(in crate::cpu::dbt) fn emit(
             .end();
     }
     abi::preflight(&mut code);
+    if has_x87 {
+        x87::preflight(&mut code);
+    }
     abi::load_state(&mut code);
     code.block(BlockType::Empty).loop_(BlockType::Empty);
     abi::safepoint(&mut code, 1);

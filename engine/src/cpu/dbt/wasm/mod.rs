@@ -5,6 +5,7 @@ mod emitter;
 mod integer;
 mod locals;
 mod memory;
+mod x87;
 
 #[derive(Clone, Copy)]
 pub(super) enum EmbeddedBinding {

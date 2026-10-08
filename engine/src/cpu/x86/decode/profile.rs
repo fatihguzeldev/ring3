@@ -11,7 +11,12 @@ pub(super) fn check_profile(instruction: &Instruction, bytes: &[u8]) -> Result<(
     if instruction.is_privileged() {
         return Err(DecodeError::Unsupported(UnsupportedFeature::Privileged));
     }
-    if features.contains(&CpuidFeature::FPU) || registers.clone().any(|register| register.is_st()) {
+    let x87_control = matches!(instruction.code(), Code::Fninit) && bytes == [0xdb, 0xe3]
+        || matches!(instruction.code(), Code::Fnstsw_AX) && bytes == [0xdf, 0xe0];
+    if !x87_control
+        && (features.contains(&CpuidFeature::FPU)
+            || registers.clone().any(|register| register.is_st()))
+    {
         return Err(DecodeError::Unsupported(UnsupportedFeature::FloatingPoint));
     }
     if instruction.code() != Code::Pause

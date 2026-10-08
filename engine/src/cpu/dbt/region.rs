@@ -444,6 +444,8 @@ pub(super) fn supports(instruction: &DecodedInstruction, embedded: bool) -> bool
         || matches!(
             operation,
             Operation::Nop
+                | Operation::InitializeX87
+                | Operation::X87StatusToAx
                 | Operation::Carry { .. }
                 | Operation::Direction { .. }
                 | Operation::FlagsToAh

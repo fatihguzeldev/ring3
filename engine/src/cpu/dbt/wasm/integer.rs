@@ -1,6 +1,6 @@
 use wasm_encoder::{BlockType, InstructionSink, ValType};
 
-use super::{control, locals::*, memory};
+use super::{control, locals::*, memory, x87};
 use crate::cpu::x86::{
     Register32,
     decode::DecodedInstruction,
@@ -28,6 +28,8 @@ pub(super) fn instruction(
     let mut store = false;
     match *instruction.operation() {
         Operation::Nop => {}
+        Operation::InitializeX87 => x87::initialize(code),
+        Operation::X87StatusToAx => x87::status_to_ax(code),
         Operation::SignExtendHigh => {
             code.local_get(register(Register32::Eax))
                 .i32_const(31)

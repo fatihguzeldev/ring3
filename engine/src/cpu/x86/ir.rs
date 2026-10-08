@@ -216,6 +216,8 @@ pub enum CarryKind {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Operation {
     Nop,
+    InitializeX87,
+    X87StatusToAx,
     Carry {
         kind: CarryKind,
     },
