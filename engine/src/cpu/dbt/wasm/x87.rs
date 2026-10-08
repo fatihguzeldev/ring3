@@ -109,6 +109,11 @@ pub(super) fn status_value(code: &mut InstructionSink<'_>) {
         .i32_load16_u(memarg(X87_STATUS_OFFSET, 1));
 }
 
+pub(super) fn control_value(code: &mut InstructionSink<'_>) {
+    code.local_get(STATE_PTR)
+        .i32_load16_u(memarg(X87_CONTROL_OFFSET, 1));
+}
+
 fn start(code: &mut InstructionSink<'_>) {
     code.local_get(STATE_PTR)
         .i64_extend_i32_u()

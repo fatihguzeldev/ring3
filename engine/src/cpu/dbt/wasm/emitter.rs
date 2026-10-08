@@ -37,6 +37,7 @@ pub(in crate::cpu::dbt) fn emit(
                     | Operation::ClearX87Exceptions
                     | Operation::X87StatusToAx
                     | Operation::X87StatusToMemory { .. }
+                    | Operation::X87ControlToMemory { .. }
             )
         })
     });

@@ -23,6 +23,9 @@ pub(super) fn lower(instruction: &Instruction, bytes: &[u8]) -> Result<Operation
         Code::Fnstsw_m2byte => Ok(Operation::X87StatusToMemory {
             address: effective_address(instruction)?,
         }),
+        Code::Fnstcw_m2byte => Ok(Operation::X87ControlToMemory {
+            address: effective_address(instruction)?,
+        }),
         Code::Clc => Ok(Operation::Carry {
             kind: CarryKind::Clear,
         }),

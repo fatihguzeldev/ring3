@@ -222,6 +222,9 @@ pub enum Operation {
     X87StatusToMemory {
         address: EffectiveAddress,
     },
+    X87ControlToMemory {
+        address: EffectiveAddress,
+    },
     Carry {
         kind: CarryKind,
     },

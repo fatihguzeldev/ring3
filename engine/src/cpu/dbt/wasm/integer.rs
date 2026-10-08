@@ -37,6 +37,12 @@ pub(super) fn instruction(
             memory::store_word_result(code, address, imports, exit_depth);
             store = true;
         }
+        Operation::X87ControlToMemory { address } => {
+            x87::control_value(code);
+            code.local_set(RESULT);
+            memory::store_word_result(code, address, imports, exit_depth);
+            store = true;
+        }
         Operation::SignExtendHigh => {
             code.local_get(register(Register32::Eax))
                 .i32_const(31)

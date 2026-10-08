@@ -54,7 +54,9 @@ impl Imports {
         let mut store16 = false;
         for instruction in blocks.iter().flat_map(|block| &block.instructions) {
             match instruction.operation() {
-                Operation::X87StatusToMemory { .. } => store16 = true,
+                Operation::X87StatusToMemory { .. } | Operation::X87ControlToMemory { .. } => {
+                    store16 = true;
+                }
                 Operation::LoadByte { .. }
                 | Operation::LoadStringByte
                 | Operation::MemoryPredicateByte { .. }
