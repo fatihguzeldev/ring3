@@ -91,7 +91,7 @@ fn repeated_prefixed_and_wider_strings_remain_excluded() {
         (vec![0x64, 0xa4], UnsupportedFeature::Segment),
         (vec![0x66, 0xa4], UnsupportedFeature::Opcode),
         (vec![0x67, 0xa4], UnsupportedFeature::Opcode),
-        (vec![0x66, 0xa5], UnsupportedFeature::Opcode),
+        (vec![0x67, 0xa5], UnsupportedFeature::Opcode),
         (vec![0x66, 0xaa], UnsupportedFeature::Opcode),
     ] {
         assert_eq!(

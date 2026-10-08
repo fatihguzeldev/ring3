@@ -164,7 +164,7 @@ fn strict_prefixes_and_both_standalone_profiles_stay_refused() {
         );
     }
     assert_eq!(
-        decode_one(&memory(PC, &[0x66, 0xa7]), GuestAddress(PC)).unwrap_err(),
+        decode_one(&memory(PC, &[0x66, 0xa6]), GuestAddress(PC)).unwrap_err(),
         DecodeError::Unsupported(UnsupportedFeature::Opcode)
     );
 }

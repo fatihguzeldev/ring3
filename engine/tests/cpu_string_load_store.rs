@@ -102,7 +102,7 @@ fn prefixes_wider_forms_and_standalone_memory_remain_excluded() {
             })
         ));
     }
-    for bytes in [&[0x66, 0xa7][..], &[0x66, 0xaf]] {
+    for bytes in [&[0x66, 0xa6][..], &[0x66, 0xae]] {
         assert_eq!(
             decode_one(&memory(PC, bytes), GuestAddress(PC)).unwrap_err(),
             DecodeError::Unsupported(UnsupportedFeature::Opcode)

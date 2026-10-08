@@ -123,7 +123,14 @@ fn exact_dword_decode_fetch_prefix_and_standalone_boundaries() {
             (0x67, UnsupportedFeature::Opcode),
         ] {
             assert_eq!(
-                decode_one(&memory(&[prefix, opcode], PC), GuestAddress(PC)).unwrap_err(),
+                decode_one(
+                    &memory(
+                        &[prefix, if prefix == 0x66 { opcode - 1 } else { opcode }],
+                        PC
+                    ),
+                    GuestAddress(PC)
+                )
+                .unwrap_err(),
                 DecodeError::Unsupported(feature)
             );
         }
@@ -234,7 +241,7 @@ fn late_refusal_retains_previous_owner_full_arena_and_source_currency() {
         describe(&mut engine, 3);
         let id = bound_compile(&mut engine, resident, false, 1).unwrap();
         let old = module(&engine, id);
-        let bytes = [0x90, 0xa7, 0x66, 0xaf];
+        let bytes = [0x90, 0xa7, 0x66, 0xae];
         engine.map(0x3000, 1, 7).unwrap();
         engine.arena_mut().unwrap()[140..144].copy_from_slice(&bytes);
         engine.upload(0x3000, 4).unwrap();
