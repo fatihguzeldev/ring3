@@ -90,6 +90,7 @@ impl Imports {
                     read8 = true;
                     store8 = true;
                 }
+                Operation::LoadStringWord => read16 = true,
                 Operation::Extend {
                     source: SmallSource::Memory { width, .. },
                     ..

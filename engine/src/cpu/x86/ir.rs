@@ -242,6 +242,7 @@ pub enum Operation {
     MoveStringByte,
     MoveStringDword,
     LoadStringByte,
+    LoadStringWord,
     LoadStringDword,
     TranslateByte,
     StoreStringByte,

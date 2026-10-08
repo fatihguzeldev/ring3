@@ -180,6 +180,26 @@ pub(super) fn instruction(
             insert_byte(code, ByteRegister::Al);
             string_pointer(code, Register32::Esi);
         }
+        Operation::LoadStringWord => {
+            memory::load_narrow_value(
+                code,
+                EffectiveAddress {
+                    base: Some(Register32::Esi),
+                    index: None,
+                    scale: 1,
+                    displacement: 0,
+                },
+                SmallWidth::Word,
+                imports,
+                exit_depth,
+            );
+            code.local_get(register(Register32::Eax))
+                .i32_const(!0xffff)
+                .i32_and()
+                .i32_or()
+                .local_set(register(Register32::Eax));
+            word_string_pointer(code, Register32::Esi);
+        }
         Operation::LoadStringDword => {
             memory::load_result(
                 code,
@@ -1669,6 +1689,18 @@ fn string_pointer(code: &mut InstructionSink<'_>, pointer: Register32) {
     code.local_get(register(pointer))
         .i32_const(-1)
         .i32_const(1)
+        .local_get(FLAGS)
+        .i32_const(0x400)
+        .i32_and()
+        .select()
+        .i32_add()
+        .local_set(register(pointer));
+}
+
+fn word_string_pointer(code: &mut InstructionSink<'_>, pointer: Register32) {
+    code.local_get(register(pointer))
+        .i32_const(-2)
+        .i32_const(2)
         .local_get(FLAGS)
         .i32_const(0x400)
         .i32_and()
