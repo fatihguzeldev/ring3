@@ -104,6 +104,11 @@ pub(super) fn status_to_ax(code: &mut InstructionSink<'_>) {
         .local_set(register(Register32::Eax));
 }
 
+pub(super) fn status_value(code: &mut InstructionSink<'_>) {
+    code.local_get(STATE_PTR)
+        .i32_load16_u(memarg(X87_STATUS_OFFSET, 1));
+}
+
 fn start(code: &mut InstructionSink<'_>) {
     code.local_get(STATE_PTR)
         .i64_extend_i32_u()

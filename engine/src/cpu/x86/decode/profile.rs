@@ -13,7 +13,8 @@ pub(super) fn check_profile(instruction: &Instruction, bytes: &[u8]) -> Result<(
     }
     let x87_control = matches!(instruction.code(), Code::Fninit) && bytes == [0xdb, 0xe3]
         || matches!(instruction.code(), Code::Fnclex) && bytes == [0xdb, 0xe2]
-        || matches!(instruction.code(), Code::Fnstsw_AX) && bytes == [0xdf, 0xe0];
+        || matches!(instruction.code(), Code::Fnstsw_AX) && bytes == [0xdf, 0xe0]
+        || matches!(instruction.code(), Code::Fnstsw_m2byte);
     if !x87_control
         && (features.contains(&CpuidFeature::FPU)
             || registers.clone().any(|register| register.is_st()))

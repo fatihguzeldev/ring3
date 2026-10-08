@@ -31,6 +31,12 @@ pub(super) fn instruction(
         Operation::InitializeX87 => x87::initialize(code),
         Operation::ClearX87Exceptions => x87::clear_exceptions(code),
         Operation::X87StatusToAx => x87::status_to_ax(code),
+        Operation::X87StatusToMemory { address } => {
+            x87::status_value(code);
+            code.local_set(RESULT);
+            memory::store_word_result(code, address, imports, exit_depth);
+            store = true;
+        }
         Operation::SignExtendHigh => {
             code.local_get(register(Register32::Eax))
                 .i32_const(31)

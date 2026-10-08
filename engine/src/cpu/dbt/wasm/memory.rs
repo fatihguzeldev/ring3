@@ -9,6 +9,7 @@ use super::locals::*;
 
 mod byte_store;
 mod narrow;
+mod word_store;
 
 #[derive(Clone, Copy)]
 pub(super) enum StoreImport {
@@ -38,19 +39,22 @@ pub(super) struct Imports {
     pub(super) read8: Option<u32>,
     pub(super) read16: Option<u32>,
     pub(super) store8: Option<StoreImport>,
+    pub(super) store16: Option<StoreImport>,
 }
 
 impl Imports {
     pub(super) fn needed(
         blocks: &[crate::cpu::dbt::region::CompiledBlock],
-    ) -> (bool, bool, bool, bool, bool) {
+    ) -> (bool, bool, bool, bool, bool, bool) {
         let mut read = false;
         let mut store = false;
         let mut read8 = false;
         let mut read16 = false;
         let mut store8 = false;
+        let mut store16 = false;
         for instruction in blocks.iter().flat_map(|block| &block.instructions) {
             match instruction.operation() {
+                Operation::X87StatusToMemory { .. } => store16 = true,
                 Operation::LoadByte { .. }
                 | Operation::LoadStringByte
                 | Operation::MemoryPredicateByte { .. }
@@ -162,7 +166,7 @@ impl Imports {
                 _ => {}
             }
         }
-        (read, store, read8, read16, store8)
+        (read, store, read8, read16, store8, store16)
     }
 }
 
@@ -183,6 +187,15 @@ pub(super) fn store_byte_result(
     exit_depth: u32,
 ) {
     byte_store::store_result(code, address, imports, exit_depth);
+}
+
+pub(super) fn store_word_result(
+    code: &mut InstructionSink<'_>,
+    address: EffectiveAddress,
+    imports: Imports,
+    exit_depth: u32,
+) {
+    word_store::store_result(code, address, imports, exit_depth);
 }
 
 pub(super) fn load_narrow_value(

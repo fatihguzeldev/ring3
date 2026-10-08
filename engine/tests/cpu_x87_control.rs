@@ -135,7 +135,7 @@ fn waited_stack_memory_arithmetic_and_prefixed_forms_remain_rejected() {
         vec![0xd9, 0xc9],
         vec![0xdd, 0xd8],
         vec![0xd8, 0xc1],
-        vec![0xdd, 0x38],
+        vec![0x9b, 0xdd, 0x38],
     ] {
         let engine = code(0x1000, &bytes);
         assert!(

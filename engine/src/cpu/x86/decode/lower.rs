@@ -20,6 +20,9 @@ pub(super) fn lower(instruction: &Instruction, bytes: &[u8]) -> Result<Operation
         Code::Fninit => Ok(Operation::InitializeX87),
         Code::Fnclex => Ok(Operation::ClearX87Exceptions),
         Code::Fnstsw_AX => Ok(Operation::X87StatusToAx),
+        Code::Fnstsw_m2byte => Ok(Operation::X87StatusToMemory {
+            address: effective_address(instruction)?,
+        }),
         Code::Clc => Ok(Operation::Carry {
             kind: CarryKind::Clear,
         }),

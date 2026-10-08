@@ -180,7 +180,7 @@ fn prepare(
                     && (supports_memory_reads(instruction.operation())
                         || supports_indirect_jump(instruction.operation())
                         || supports_memory_move_store(instruction.operation())
-                        || supports_byte_store(instruction.operation())
+                        || supports_narrow_store(instruction.operation())
                         || supports_memory_unary(instruction.operation())
                         || supports_memory_binary(instruction.operation())
                         || supports_memory_shift_or_rotate(instruction.operation())
@@ -367,10 +367,11 @@ fn supports_memory_move_store(operation: &Operation) -> bool {
     )
 }
 
-fn supports_byte_store(operation: &Operation) -> bool {
+fn supports_narrow_store(operation: &Operation) -> bool {
     matches!(
         operation,
-        Operation::StoreByte { .. }
+        Operation::X87StatusToMemory { .. }
+            | Operation::StoreByte { .. }
             | Operation::MemorySetByte { .. }
             | Operation::MoveStringByte
             | Operation::StoreStringByte
@@ -440,7 +441,7 @@ pub(super) fn supports(instruction: &DecodedInstruction, embedded: bool) -> bool
     (embedded
         && (supports_memory_reads(operation)
             || supports_memory_move_store(operation)
-            || supports_byte_store(operation)
+            || supports_narrow_store(operation)
             || supports_memory_unary(operation)
             || supports_memory_binary(operation)
             || supports_memory_shift_or_rotate(operation)

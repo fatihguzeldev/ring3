@@ -12,9 +12,9 @@ pub(in crate::cpu::dbt) fn emit(
     binding: Option<EmbeddedBinding>,
 ) -> Vec<u8> {
     let mut module = Module::new();
-    let (needs_read, needs_store, needs_read8, needs_read16, needs_store8) =
+    let (needs_read, needs_store, needs_read8, needs_read16, needs_store8, needs_store16) =
         memory::Imports::needed(blocks);
-    let has_stores = needs_store || needs_store8;
+    let has_stores = needs_store || needs_store8 || needs_store16;
     let has_reads = needs_read || needs_read8 || needs_read16;
     let has_memory = has_reads || has_stores;
     let has_gates = blocks.iter().any(|block| block.gate.is_some());
@@ -33,7 +33,10 @@ pub(in crate::cpu::dbt) fn emit(
         block.instructions.iter().any(|instruction| {
             matches!(
                 instruction.operation(),
-                Operation::InitializeX87 | Operation::ClearX87Exceptions | Operation::X87StatusToAx
+                Operation::InitializeX87
+                    | Operation::ClearX87Exceptions
+                    | Operation::X87StatusToAx
+                    | Operation::X87StatusToMemory { .. }
             )
         })
     });
@@ -136,6 +139,22 @@ pub(in crate::cpu::dbt) fn emit(
         };
         imports.import("ring3", name, EntityType::Function(type_index));
         helper_imports.store8 = Some(store);
+        function_index += 1;
+    }
+    if needs_store16 {
+        let (name, store) = match binding {
+            Some(EmbeddedBinding::Resident { key, id }) => (
+                "store_resident16",
+                memory::StoreImport::Resident {
+                    index: function_index,
+                    key,
+                    id,
+                },
+            ),
+            _ => ("store16", memory::StoreImport::Replacement(function_index)),
+        };
+        imports.import("ring3", name, EntityType::Function(type_index));
+        helper_imports.store16 = Some(store);
         function_index += 1;
     }
     module.section(&imports);

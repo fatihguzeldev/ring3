@@ -219,6 +219,9 @@ pub enum Operation {
     InitializeX87,
     ClearX87Exceptions,
     X87StatusToAx,
+    X87StatusToMemory {
+        address: EffectiveAddress,
+    },
     Carry {
         kind: CarryKind,
     },
