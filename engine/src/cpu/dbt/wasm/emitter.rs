@@ -21,7 +21,12 @@ pub(in crate::cpu::dbt) fn emit(
     let has_arithmetic = blocks
         .iter()
         .flat_map(|block| &block.instructions)
-        .any(|instruction| matches!(instruction.operation(), Operation::DivideAccumulator { .. }));
+        .any(|instruction| {
+            matches!(
+                instruction.operation(),
+                Operation::DivideAccumulator { .. } | Operation::ReadDivideAccumulator { .. }
+            )
+        });
     let has_x87 = blocks.iter().any(|block| {
         block.instructions.iter().any(|instruction| {
             matches!(

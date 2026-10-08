@@ -765,14 +765,16 @@ fn lower_divide(instruction: &Instruction) -> Option<Result<Operation, DecodeErr
         Code::Idiv_rm32 => DivideKind::Signed,
         _ => return None,
     };
-    Some((|| {
-        if instruction.op0_kind() != OpKind::Register {
-            return Err(unsupported());
-        }
-        Ok(Operation::DivideAccumulator {
+    Some((|| match instruction.op0_kind() {
+        OpKind::Register => Ok(Operation::DivideAccumulator {
             kind,
             source: register(instruction.op0_register())?,
-        })
+        }),
+        OpKind::Memory => Ok(Operation::ReadDivideAccumulator {
+            kind,
+            address: effective_address(instruction)?,
+        }),
+        _ => Err(unsupported()),
     })())
 }
 

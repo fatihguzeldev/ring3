@@ -958,7 +958,11 @@ pub(super) fn instruction(
             accumulator_multiply(code, kind, RESULT);
         }
         Operation::DivideAccumulator { kind, source } => {
-            accumulator_divide(code, kind, source, exit_depth);
+            accumulator_divide(code, kind, register(source), exit_depth);
+        }
+        Operation::ReadDivideAccumulator { kind, address } => {
+            memory::load_result(code, address, imports, exit_depth);
+            accumulator_divide(code, kind, RESULT, exit_depth);
         }
         Operation::BitScan {
             kind,
@@ -3076,10 +3080,10 @@ fn accumulator_multiply(code: &mut InstructionSink<'_>, kind: MultiplyKind, sour
 fn accumulator_divide(
     code: &mut InstructionSink<'_>,
     kind: DivideKind,
-    source: Register32,
+    source: u32,
     exit_depth: u32,
 ) {
-    code.local_get(register(source))
+    code.local_get(source)
         .local_set(RHS)
         .local_get(RHS)
         .i32_eqz();

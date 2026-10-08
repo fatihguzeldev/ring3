@@ -529,6 +529,10 @@ pub enum Operation {
         kind: DivideKind,
         source: Register32,
     },
+    ReadDivideAccumulator {
+        kind: DivideKind,
+        address: EffectiveAddress,
+    },
     BitScan {
         kind: BitScanKind,
         destination: Register32,

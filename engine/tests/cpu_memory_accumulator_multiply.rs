@@ -364,8 +364,8 @@ fn excluded_forms_and_exact_operand_fetch_preserve_fault_and_wrap_boundaries() {
         &[0xf6, 0x2b],
         &[0x66, 0xf7, 0xf2],
         &[0x66, 0xf7, 0xfa],
-        &[0xf7, 0x33],
-        &[0xf7, 0x3b],
+        &[0x66, 0xf7, 0x33],
+        &[0x66, 0xf7, 0x3b],
     ] {
         let engine = code(CODE, bytes);
         assert_eq!(

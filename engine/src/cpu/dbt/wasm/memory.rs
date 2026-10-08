@@ -128,6 +128,7 @@ impl Imports {
                 }
                 Operation::ReadConditionalMove { .. }
                 | Operation::ReadMultiplyAccumulator { .. }
+                | Operation::ReadDivideAccumulator { .. }
                 | Operation::ReadBitScan { .. }
                 | Operation::Move {
                     source: Value32::Memory(_),
