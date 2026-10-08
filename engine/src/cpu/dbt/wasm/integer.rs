@@ -142,6 +142,16 @@ pub(super) fn instruction(
             insert_byte(code, ByteRegister::Al);
             string_pointer(code, Register32::Esi);
         }
+        Operation::TranslateByte => {
+            code.local_get(register(Register32::Ebx))
+                .local_get(register(Register32::Eax))
+                .i32_const(0xff)
+                .i32_and()
+                .i32_add()
+                .local_set(ADDRESS);
+            memory::load_narrow_at_address(code, SmallWidth::Byte, imports, exit_depth);
+            insert_byte(code, ByteRegister::Al);
+        }
         Operation::StoreStringByte => {
             byte_value(code, ByteValue::Register(ByteRegister::Al));
             code.local_set(RESULT);

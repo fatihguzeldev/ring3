@@ -15,11 +15,20 @@ pub(super) fn load_value(
     imports: Imports,
     exit_depth: u32,
 ) {
+    effective_address(code, address);
+    load_at_address(code, width, imports, exit_depth);
+}
+
+pub(super) fn load_at_address(
+    code: &mut InstructionSink<'_>,
+    width: SmallWidth,
+    imports: Imports,
+    exit_depth: u32,
+) {
     let (length, import) = match width {
         SmallWidth::Byte => (1, imports.read8),
         SmallWidth::Word => (2, imports.read16),
     };
-    effective_address(code, address);
     code.local_get(ADDRESS)
         .call(import.expect("prepared narrow read has an import"))
         .local_set(HELPER_STATUS);

@@ -241,6 +241,7 @@ pub enum Operation {
     },
     MoveStringByte,
     LoadStringByte,
+    TranslateByte,
     StoreStringByte,
     CompareStringByte,
     ScanStringByte,

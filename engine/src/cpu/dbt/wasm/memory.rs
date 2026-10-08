@@ -59,6 +59,7 @@ impl Imports {
                 }
                 Operation::LoadByte { .. }
                 | Operation::LoadStringByte
+                | Operation::TranslateByte
                 | Operation::CompareStringByte
                 | Operation::ScanStringByte
                 | Operation::MemoryPredicateByte { .. }
@@ -212,6 +213,15 @@ pub(super) fn load_narrow_value(
     exit_depth: u32,
 ) {
     narrow::load_value(code, address, width, imports, exit_depth);
+}
+
+pub(super) fn load_narrow_at_address(
+    code: &mut InstructionSink<'_>,
+    width: SmallWidth,
+    imports: Imports,
+    exit_depth: u32,
+) {
+    narrow::load_at_address(code, width, imports, exit_depth);
 }
 
 pub(super) fn load(
