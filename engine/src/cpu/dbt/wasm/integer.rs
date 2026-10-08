@@ -1359,6 +1359,25 @@ pub(super) fn instruction(
             code.local_get(ADDRESS).local_set(register(Register32::Esp));
             store = true;
         }
+        Operation::PushFlags => {
+            code.local_get(FLAGS)
+                .i32_const(0x00fc_ffff)
+                .i32_and()
+                .local_set(RESULT);
+            memory::store_result(
+                code,
+                EffectiveAddress {
+                    base: Some(Register32::Esp),
+                    index: None,
+                    scale: 1,
+                    displacement: (-4_i32) as u32,
+                },
+                imports,
+                exit_depth,
+            );
+            code.local_get(ADDRESS).local_set(register(Register32::Esp));
+            store = true;
+        }
         Operation::Pop {
             destination: Location32::Register(destination),
         } => {

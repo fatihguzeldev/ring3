@@ -40,6 +40,7 @@ pub(super) fn lower(instruction: &Instruction) -> Result<Operation, DecodeError>
                 source: value(instruction, 0)?,
             }
         }
+        Code::Pushfd => Operation::PushFlags,
         Code::Pop_r32 | Code::Pop_rm32 => Operation::Pop {
             destination: location(instruction, 0)?,
         },

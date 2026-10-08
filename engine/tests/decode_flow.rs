@@ -455,7 +455,7 @@ fn segment_stack_flags_bulk_stack_and_loop_forms_are_outside_profile() {
         &[0x1f][..],
         &[0x0f, 0xa1][..],
         &[0x0f, 0xa9][..],
-        &[0x9c][..],
+        &[0x66, 0x9c][..],
         &[0x9d][..],
         &[0x60][..],
         &[0x61][..],

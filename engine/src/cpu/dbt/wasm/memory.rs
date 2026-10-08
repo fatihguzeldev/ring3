@@ -175,7 +175,8 @@ impl Imports {
                     ..
                 }
                 | Operation::Call { .. }
-                | Operation::Push { .. } => store = true,
+                | Operation::Push { .. }
+                | Operation::PushFlags => store = true,
                 _ => {}
             }
         }

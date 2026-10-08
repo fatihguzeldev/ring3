@@ -603,6 +603,7 @@ pub enum Operation {
     Push {
         source: Value32,
     },
+    PushFlags,
     Pop {
         destination: Location32,
     },

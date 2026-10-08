@@ -270,7 +270,7 @@ pub(super) fn prepare_block_snapshot(
 fn supports_stack_values(operation: &Operation) -> bool {
     matches!(
         operation,
-        Operation::Push { .. } | Operation::Pop { .. } | Operation::Leave
+        Operation::Push { .. } | Operation::PushFlags | Operation::Pop { .. } | Operation::Leave
     )
 }
 
