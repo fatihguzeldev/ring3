@@ -337,10 +337,7 @@ fn excluded_forms_and_exact_operand_fetch_preserve_fault_and_wrap_boundaries() {
             exclusions += 1;
         }
         for count in [0, 1, 2, 255] {
-            let mut bytes = vec![0xc1, field | 3, count];
-            if count == 1 {
-                bytes.insert(0, 0x66);
-            }
+            let bytes = vec![0x66, 0xc1, field | 3, count];
             rejected(&bytes, opcode);
             exclusions += 1;
         }

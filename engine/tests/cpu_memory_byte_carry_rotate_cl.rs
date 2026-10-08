@@ -567,7 +567,10 @@ fn exclusions() -> Vec<(Vec<u8>, DecodeError)> {
                 cases.push(([vec![prefix], bytes.clone()].concat(), cause));
             }
             for raw in [0, 2, 9, 32, 255] {
-                cases.push((instruction(0xc1, kind, shape, raw), unsupported));
+                cases.push((
+                    [vec![0x66], instruction(0xc1, kind, shape, raw)].concat(),
+                    unsupported,
+                ));
             }
             cases.push((instruction(0xd3, kind, shape, 0), unsupported));
         }

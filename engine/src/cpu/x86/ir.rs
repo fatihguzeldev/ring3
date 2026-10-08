@@ -475,6 +475,11 @@ pub enum Operation {
         kind: RotateKind,
         address: EffectiveAddress,
     },
+    MemoryRotateThroughCarryImmediate {
+        kind: RotateKind,
+        address: EffectiveAddress,
+        count: u8,
+    },
     SignedMultiply {
         destination: Register32,
         source: Location32,

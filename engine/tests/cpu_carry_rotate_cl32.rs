@@ -450,7 +450,10 @@ fn exclusions() -> Vec<(Vec<u8>, DecodeError)> {
         for absolute in [false, true] {
             rows.push((memory_instruction(kind, absolute, 0xd3, 0), opcode));
             for raw in [0, 2, 31, 32, 255] {
-                rows.push((memory_instruction(kind, absolute, 0xc1, raw), opcode));
+                rows.push((
+                    [vec![0x66], memory_instruction(kind, absolute, 0xc1, raw)].concat(),
+                    opcode,
+                ));
             }
         }
     }
@@ -530,7 +533,7 @@ fn strict_and_late_failures_keep_both_published_owners() {
             DecodeError::Unsupported(UnsupportedFeature::Segment),
         ),
         (vec![0xf0, 0xd3, 0xd0], DecodeError::InvalidEncoding),
-        (vec![0xc1, 0x13, 2], opcode),
+        (vec![0x66, 0xc1, 0x13, 2], opcode),
         (vec![0xd3, 0x13], opcode),
         (vec![0xd3, 0xf0], opcode),
     ] {

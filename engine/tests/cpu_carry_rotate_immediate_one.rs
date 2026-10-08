@@ -427,35 +427,47 @@ fn raw_immediate_domain_and_strict_neighbors_preserve_decode_boundaries() {
                     register_bytes(kind, Register32::Ebx, count).to_vec()
                 };
                 upload(&mut engine, CODE, &bytes);
-                if COUNTS.contains(&count) || !memory {
-                    let operation = if memory {
-                        Operation::MemoryRotateThroughCarryOne { kind, address: ea }
-                    } else if count & 31 == 1 {
-                        Operation::RotateThroughCarryOne {
-                            kind,
-                            destination: Register32::Ebx,
-                        }
-                    } else {
-                        Operation::RotateThroughCarryImmediate {
-                            kind,
-                            destination: Register32::Ebx,
-                            count,
-                        }
-                    };
-                    assert_instruction(engine.memory().unwrap(), CODE, 3, operation);
-                    accepted += 1;
+                let operation = if memory && count & 31 == 1 {
+                    Operation::MemoryRotateThroughCarryOne { kind, address: ea }
+                } else if memory {
+                    Operation::MemoryRotateThroughCarryImmediate {
+                        kind,
+                        address: ea,
+                        count,
+                    }
+                } else if count & 31 == 1 {
+                    Operation::RotateThroughCarryOne {
+                        kind,
+                        destination: Register32::Ebx,
+                    }
                 } else {
-                    assert_eq!(
-                        decode_one(engine.memory().unwrap(), GuestAddress(CODE)).err(),
-                        Some(opcode),
-                        "{kind:?} memory={memory} count={count}"
-                    );
-                    refused += 1;
+                    Operation::RotateThroughCarryImmediate {
+                        kind,
+                        destination: Register32::Ebx,
+                        count,
+                    }
+                };
+                match decode_one(engine.memory().unwrap(), GuestAddress(CODE)) {
+                    Ok(decoded) => {
+                        assert_eq!(decoded.operation(), &operation);
+                        assert_eq!(
+                            (decoded.pc(), decoded.length(), decoded.next_pc()),
+                            (GuestAddress(CODE), 3, GuestAddress(CODE + 3))
+                        );
+                        assert!(
+                            engine
+                                .memory()
+                                .unwrap()
+                                .is_code_current(decoded.code_snapshot())
+                        );
+                        accepted += 1;
+                    }
+                    Err(_) => refused += 1,
                 }
             }
         }
     }
-    assert_eq!((accepted, refused), (528, 496));
+    assert_eq!((accepted, refused), (1024, 0));
     let mut exclusions = 0;
     for kind in KINDS {
         let field = 0x10 | (u8::from(kind == RotateKind::Right) << 3);

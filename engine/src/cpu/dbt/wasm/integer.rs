@@ -824,6 +824,14 @@ pub(super) fn instruction(
             rotate_through_carry_one_flags(code, kind);
             store = true;
         }
+        Operation::MemoryRotateThroughCarryImmediate {
+            kind,
+            address,
+            count,
+        } => {
+            memory_rotate_through_carry_immediate(code, kind, address, count, imports, exit_depth);
+            store = true;
+        }
         Operation::MemoryRotateOne { kind, address } => {
             memory::load_result(code, address, imports, exit_depth);
             rotate_one_value(code, kind);
@@ -2401,6 +2409,76 @@ fn rotate_through_carry_immediate(
         .local_set(FLAGS)
         .local_get(RESULT)
         .local_set(register(destination));
+}
+
+fn memory_rotate_through_carry_immediate(
+    code: &mut InstructionSink<'_>,
+    kind: RotateKind,
+    address: EffectiveAddress,
+    raw: u8,
+    imports: memory::Imports,
+    exit_depth: u32,
+) {
+    let count = i32::from(raw & 31);
+    memory::load_result(code, address, imports, exit_depth);
+    if count == 0 {
+        memory::store_result(code, address, imports, exit_depth);
+        return;
+    }
+    code.local_get(RESULT)
+        .local_set(LHS)
+        .local_get(FLAGS)
+        .i32_const(1)
+        .i32_and()
+        .local_set(RHS);
+    if count == 1 {
+        rotate_through_carry_one_value(code, kind);
+        code.local_get(LHS).local_get(RHS);
+        memory::store_result(code, address, imports, exit_depth);
+        code.local_set(RHS).local_set(LHS);
+        rotate_through_carry_one_flags(code, kind);
+        return;
+    }
+    code.local_get(LHS).i32_const(count);
+    match kind {
+        RotateKind::Left => {
+            code.i32_shl();
+        }
+        RotateKind::Right => {
+            code.i32_shr_u();
+        }
+    }
+    code.local_get(LHS).i32_const(33 - count);
+    match kind {
+        RotateKind::Left => {
+            code.i32_shr_u();
+        }
+        RotateKind::Right => {
+            code.i32_shl();
+        }
+    }
+    let (carry_in_shift, carry_out_shift) = match kind {
+        RotateKind::Left => (count - 1, 32 - count),
+        RotateKind::Right => (32 - count, count - 1),
+    };
+    code.i32_or()
+        .local_get(RHS)
+        .i32_const(carry_in_shift)
+        .i32_shl()
+        .i32_or()
+        .local_set(RESULT)
+        .local_get(FLAGS)
+        .i32_const(!0x801)
+        .i32_and()
+        .local_get(LHS)
+        .i32_const(carry_out_shift)
+        .i32_shr_u()
+        .i32_const(1)
+        .i32_and()
+        .i32_or();
+    // store validation clobbers scratch locals; publish flags only after success.
+    memory::store_result(code, address, imports, exit_depth);
+    code.local_set(FLAGS);
 }
 
 fn rotate_through_carry_cl(
