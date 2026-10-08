@@ -16,6 +16,7 @@ fn memory_set_byte_admits_in_bound_engine() {
         .expect("memory SETcc must admit in the bound engine");
 }
 use ring3_engine::{
+    abi::arena::{ARENA_SIZE, TRANSFER_OFFSET, TRANSFER_SIZE},
     cpu::{
         UnsupportedFeature,
         dbt::{
@@ -55,7 +56,6 @@ const CONDITIONS: [Condition; 16] = [
     Condition::LessOrEqual,
     Condition::Greater,
 ];
-const ARENA_BYTES: usize = 4_236;
 
 #[derive(Clone, Copy, Debug)]
 enum Owner {
@@ -72,7 +72,7 @@ fn code(pc: u32, bytes: &[u8], execute_only: bool) -> EngineInstance {
     let base = pc & !0xfff;
     let pages = (u64::from(pc - base) + bytes.len() as u64).div_ceil(4096) as u32;
     let mut engine = EngineInstance::new(pages + 3, KEY).unwrap();
-    assert_eq!(engine.arena().len(), ARENA_BYTES);
+    assert_eq!(engine.arena().len(), ARENA_SIZE);
     engine.map(base, pages, 7).unwrap();
     upload(&mut engine, pc, bytes);
     if execute_only {
@@ -82,7 +82,7 @@ fn code(pc: u32, bytes: &[u8], execute_only: bool) -> EngineInstance {
 }
 
 fn describe(engine: &mut EngineInstance, pc: u32, length: usize, entries: bool) {
-    let transfer = &mut engine.arena_mut().unwrap()[140..];
+    let transfer = &mut engine.arena_mut().unwrap()[TRANSFER_OFFSET..TRANSFER_OFFSET + TRANSFER_SIZE];
     transfer.fill(0xa5);
     transfer[..4].copy_from_slice(&pc.to_le_bytes());
     if !entries {
@@ -869,7 +869,7 @@ fn family_caps_and_late_failures_preserve_all_publications() {
     for owner in [Owner::Replacement, Owner::Resident] {
         for entries in [false, true] {
             let mut engine = code(CODE, &bytes, true);
-            let transfer = &mut engine.arena_mut().unwrap()[140..];
+            let transfer = &mut engine.arena_mut().unwrap()[TRANSFER_OFFSET..TRANSFER_OFFSET + TRANSFER_SIZE];
             transfer.fill(0xa5);
             for index in 0..8 {
                 let stride = if entries { 4 } else { 8 };
