@@ -722,9 +722,7 @@ fn lower_bit_test(instruction: &Instruction) -> Option<Result<Operation, DecodeE
         _ => return None,
     };
     Some((|| {
-        if instruction.op0_kind() != OpKind::Register
-            && !(instruction.op0_kind() == OpKind::Memory && kind == BitTestKind::Test)
-        {
+        if instruction.op0_kind() != OpKind::Register && instruction.op0_kind() != OpKind::Memory {
             return Err(unsupported());
         }
         let index = if immediate {
@@ -736,9 +734,15 @@ fn lower_bit_test(instruction: &Instruction) -> Option<Result<Operation, DecodeE
             BitIndex::Register(register(instruction.op1_register())?)
         };
         if instruction.op0_kind() == OpKind::Memory {
-            return Ok(Operation::ReadBitTest {
-                address: effective_address(instruction)?,
-                index,
+            let address = effective_address(instruction)?;
+            return Ok(if kind == BitTestKind::Test {
+                Operation::ReadBitTest { address, index }
+            } else {
+                Operation::MemoryBitMutation {
+                    kind,
+                    address,
+                    index,
+                }
             });
         }
         Ok(Operation::BitTest {

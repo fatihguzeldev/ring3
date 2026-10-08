@@ -98,6 +98,7 @@ impl Imports {
                     SmallWidth::Word => read16 = true,
                 },
                 Operation::MoveStringDword
+                | Operation::MemoryBitMutation { .. }
                 | Operation::Push {
                     source: Value32::Memory(_),
                 }
@@ -360,6 +361,14 @@ pub(super) fn store_result(
     exit_depth: u32,
 ) {
     effective_address(code, destination);
+    store_result_at_address(code, imports, exit_depth);
+}
+
+pub(super) fn store_result_at_address(
+    code: &mut InstructionSink<'_>,
+    imports: Imports,
+    exit_depth: u32,
+) {
     let index = imports
         .store
         .expect("prepared memory operand has a store import")

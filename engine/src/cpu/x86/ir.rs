@@ -581,6 +581,11 @@ pub enum Operation {
         address: EffectiveAddress,
         index: BitIndex,
     },
+    MemoryBitMutation {
+        kind: BitTestKind,
+        address: EffectiveAddress,
+        index: BitIndex,
+    },
     ReadBitScan {
         kind: BitScanKind,
         destination: Register32,

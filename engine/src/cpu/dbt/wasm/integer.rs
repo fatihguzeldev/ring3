@@ -1034,6 +1034,14 @@ pub(super) fn instruction(
             destination,
             index,
         } => bit_test(code, kind, destination, index),
+        Operation::MemoryBitMutation {
+            kind,
+            address,
+            index,
+        } => {
+            memory_bit_mutation(code, kind, address, index, imports, exit_depth);
+            store = true;
+        }
         Operation::ReadBitTest { address, index } => {
             memory::address_value(code, address);
             if let BitIndex::Register(source) = index {
@@ -3268,6 +3276,63 @@ fn bit_scan(
         .i32_shl()
         .i32_or()
         .local_set(FLAGS);
+}
+
+fn memory_bit_mutation(
+    code: &mut InstructionSink<'_>,
+    kind: BitTestKind,
+    address: EffectiveAddress,
+    index: BitIndex,
+    imports: memory::Imports,
+    exit_depth: u32,
+) {
+    memory::address_value(code, address);
+    if let BitIndex::Register(source) = index {
+        code.local_get(register(source))
+            .i32_const(5)
+            .i32_shr_s()
+            .i32_const(2)
+            .i32_shl()
+            .i32_add();
+    }
+    code.local_set(ADDRESS);
+    match index {
+        BitIndex::Register(source) => {
+            code.local_get(register(source));
+        }
+        BitIndex::Immediate(raw) => {
+            code.i32_const(i32::from(raw));
+        }
+    }
+    code.i32_const(31).i32_and();
+    memory::load_result_at_address(code, imports, exit_depth);
+    code.local_set(RHS)
+        .local_get(FLAGS)
+        .i32_const(0x442)
+        .i32_and()
+        .local_get(RESULT)
+        .local_get(RHS)
+        .i32_shr_u()
+        .i32_const(1)
+        .i32_and()
+        .i32_or();
+    code.local_get(RESULT).i32_const(1).local_get(RHS).i32_shl();
+    match kind {
+        BitTestKind::Set => {
+            code.i32_or();
+        }
+        BitTestKind::Reset => {
+            code.i32_const(-1).i32_xor().i32_and();
+        }
+        BitTestKind::Complement => {
+            code.i32_xor();
+        }
+        BitTestKind::Test => unreachable!("read-only BT has a separate operation"),
+    }
+    code.local_set(RESULT);
+    // candidate flags stay below the checked store's scratch operands.
+    memory::store_result_at_address(code, imports, exit_depth);
+    code.local_set(FLAGS);
 }
 
 fn bit_test(

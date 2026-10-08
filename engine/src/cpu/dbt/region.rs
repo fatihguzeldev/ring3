@@ -405,6 +405,7 @@ fn supports_memory_binary(operation: &Operation) -> bool {
     matches!(
         operation,
         Operation::MemoryLogicalByte { .. }
+            | Operation::MemoryBitMutation { .. }
             | Operation::MemoryArithmeticByte { .. }
             | Operation::MemoryExchangeAdd { .. }
             | Operation::MemoryExchangeAddByte { .. }
