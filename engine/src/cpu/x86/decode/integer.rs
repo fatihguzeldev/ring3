@@ -197,6 +197,7 @@ pub(super) fn lower(instruction: &Instruction) -> Option<Result<Operation, Decod
         | Code::Xor_rm32_imm8 => BinaryKind::Xor,
         _ => {
             return lower_multiply(instruction)
+                .or_else(|| lower_memory_shift_byte_immediate(instruction))
                 .or_else(|| lower_shift(instruction))
                 .or_else(|| lower_double_shift(instruction))
                 .or_else(|| lower_rotate_one(instruction))
@@ -255,6 +256,31 @@ fn lower_unary(instruction: &Instruction) -> Option<Result<Operation, DecodeErro
         _ => return None,
     };
     Some(location(instruction, 0).map(|destination| Operation::Unary { kind, destination }))
+}
+
+fn lower_memory_shift_byte_immediate(
+    instruction: &Instruction,
+) -> Option<Result<Operation, DecodeError>> {
+    if instruction.op0_kind() != OpKind::Memory {
+        return None;
+    }
+    let kind = match instruction.code() {
+        Code::Shl_rm8_imm8 => ShiftKind::Shl,
+        Code::Shr_rm8_imm8 => ShiftKind::Shr,
+        Code::Sar_rm8_imm8 => ShiftKind::Sar,
+        _ => return None,
+    };
+    let count = instruction.immediate8();
+    if count & 31 == 1 {
+        return None;
+    }
+    Some(
+        effective_address(instruction).map(|address| Operation::MemoryShiftByteImmediate {
+            kind,
+            address,
+            count,
+        }),
+    )
 }
 
 fn lower_shift(instruction: &Instruction) -> Option<Result<Operation, DecodeError>> {

@@ -393,7 +393,7 @@ fn all_memory_immediates_and_addresses_have_exact_ir_in_bound_profiles() {
 fn raw_immediate_domain_and_strict_memory_neighbors_preserve_decode_boundaries() {
     let mut engine = code(CODE, &[0x90]);
     let mut accepted = 0;
-    let mut refused = 0;
+    let mut promoted = 0;
     let opcode = DecodeError::Unsupported(UnsupportedFeature::Opcode);
     let ea = address(Some(Register32::Ebx), None, 1, 0);
     for (kind, _) in KINDS {
@@ -409,16 +409,22 @@ fn raw_immediate_domain_and_strict_memory_neighbors_preserve_decode_boundaries()
                 );
                 accepted += 1;
             } else {
-                assert_eq!(
-                    decode_one(engine.memory().unwrap(), GuestAddress(CODE)).err(),
-                    Some(opcode),
-                    "{kind:?} count={count}"
+                assert_instruction(
+                    engine.memory().unwrap(),
+                    CODE,
+                    3,
+                    Operation::MemoryShiftByteImmediate {
+                        kind,
+                        address: ea,
+                        count,
+                    },
                 );
-                refused += 1;
+                promoted += 1;
             }
         }
     }
-    assert_eq!((accepted, refused), (24, 744));
+    assert_eq!((accepted, promoted), (24, 744));
+    assert_eq!(accepted + promoted, 768);
     let mut exclusions = 0;
     for (kind, extension) in KINDS {
         let modrm = 3 | extension << 3;
@@ -436,7 +442,9 @@ fn raw_immediate_domain_and_strict_memory_neighbors_preserve_decode_boundaries()
             exclusions += 1;
         }
         for count in [0, 2, 32, 255] {
-            rejected(&encoding(kind, &[0x03], count), opcode);
+            let mut bytes = encoding(kind, &[0x03], count);
+            bytes.insert(0, 0x66);
+            rejected(&bytes, opcode);
             exclusions += 1;
         }
         rejected(&[0xd2, modrm], opcode);
@@ -683,7 +691,7 @@ fn late_immediate_byte_shift_failures_preserve_both_publications() {
                 instruction_error(CODE + 3, opcode),
             ),
             (
-                vec![0xc0, modrm, 33, 0xc0, modrm, 2],
+                vec![0xc0, modrm, 33, 0x66, 0xc0, modrm, 2],
                 instruction_error(CODE + 3, opcode),
             ),
         ] {

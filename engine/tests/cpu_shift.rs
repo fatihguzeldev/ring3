@@ -291,7 +291,7 @@ fn memory_descriptions_preserve_base_index_scales_and_wrapping_displacement() {
 fn width_rotates_sal_alias_and_prefixes_keep_precise_rejection_categories() {
     for (_, extension) in KINDS {
         for bytes in [
-            vec![0xc0, extension << 3, 2],
+            vec![0x66, 0xc0, extension << 3, 2],
             vec![0xd2, extension << 3],
             vec![0x66, 0xd1, 0xc0 | extension << 3],
             vec![0x67, 0xd3, extension << 3 | 3],

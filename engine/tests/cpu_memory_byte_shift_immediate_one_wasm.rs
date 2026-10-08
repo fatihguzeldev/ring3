@@ -6,7 +6,7 @@ use std::{
 };
 
 #[test]
-fn actual_wasm_accepts_only_masked_one_memory_byte_shift_immediates() {
+fn actual_wasm_retains_masked_one_memory_byte_shifts_and_strict_neighbors() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
     let engine = root.join("target/wasm32-unknown-unknown/debug/ring3_engine.wasm");
     assert!(

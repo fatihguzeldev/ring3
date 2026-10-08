@@ -281,7 +281,7 @@ fn excluded() -> Vec<(Vec<u8>, DecodeError)> {
     let unsupported = DecodeError::Unsupported(UnsupportedFeature::Opcode);
     let mut cases = Vec::new();
     for (_, field) in KINDS {
-        cases.push((vec![0xc0, field << 3 | 3, 2], unsupported));
+        cases.push((vec![0x66, 0xc0, field << 3 | 3, 2], unsupported));
         cases.push((vec![0xd2, field << 3 | 3], unsupported));
         for prefix in [0x66, 0x67, 0xf2, 0xf3] {
             cases.push((vec![prefix, 0xd0, field << 3 | 3], unsupported));
@@ -375,7 +375,7 @@ fn invalid_second_memory_instruction_preserves_both_published_owners_and_install
             for entries in [false, true] {
                 let mut engine = code(
                     CODE,
-                    &[0xd0, field << 3 | 3, 0xc0, field << 3 | 3, 2],
+                    &[0xd0, field << 3 | 3, 0x66, 0xc0, field << 3 | 3, 2],
                     false,
                 );
                 engine.map(KEEP, 1, 7).unwrap();
@@ -388,7 +388,7 @@ fn invalid_second_memory_instruction_preserves_both_published_owners_and_install
                 engine
                     .acknowledge_resident_installation(KEY, keep, 3)
                     .unwrap();
-                describe(&mut engine, CODE, 5, entries);
+                describe(&mut engine, CODE, 6, entries);
                 let snapshot = engine
                     .memory()
                     .unwrap()

@@ -375,6 +375,11 @@ pub enum Operation {
         kind: ShiftKind,
         address: EffectiveAddress,
     },
+    MemoryShiftByteImmediate {
+        kind: ShiftKind,
+        address: EffectiveAddress,
+        count: u8,
+    },
     Shift {
         kind: ShiftKind,
         destination: Location32,

@@ -250,17 +250,17 @@ function ownerChecks(ctx, unit) {
 function rejectedCounts(ctx, unit) {
   protect(ctx, KEEP, 7);
   for (const immediate of [0, 2, 32, 255]) {
-    const bytes = Buffer.from([0xc0, 5 | ctx.bank.extension, 0x10, 0x40, 0, 0, immediate, 0xeb, 0, 0x0f, 0x0b]);
+    const bytes = Buffer.from([0x66, 0xc0, 5 | ctx.bank.extension, 0x10, 0x40, 0, 0, immediate, 0xeb, 0, 0x0f, 0x0b]);
     dataInput(ctx, KEEP, bytes); const published = [ctx.api.generation(), ctx.api.module_ptr(), ctx.api.module_len()];
     request(ctx, words(ctx.owner === 'replacement' ? [KEEP] : [KEEP, bytes.length - 2]));
-    pure(ctx, () => ctx.owner === 'replacement' ? ctx.api.compile_entries(1, 0) : ctx.api.compile_resident(1), 'other effective memory count refused', 10); counts.compiler_refusals++;
+    pure(ctx, () => ctx.owner === 'replacement' ? ctx.api.compile_entries(1, 0) : ctx.api.compile_resident(1), 'strict operand-size prefix memory count refused', 10); counts.compiler_refusals++;
     assert.deepEqual([ctx.api.generation(), ctx.api.module_ptr(), ctx.api.module_len()], published, 'failed compiler preserves published metadata');
     assert.deepEqual(Buffer.from(refresh(ctx).bytes.subarray(unit.pointer, unit.pointer + unit.length)), unit.bytes, 'failed compiler preserves published module bytes');
     const registers = Array.from({length: 8}, (_, index) => ctx.expected.readUInt32LE(16 + index * 4)), pc = ctx.expected.readUInt32LE(48), flags = ctx.expected.readUInt32LE(52);
     run(ctx, unit, 0, 'published owner remains valid after refusal', registers, pc, flags, 1, 0); counts.rejection_survivals++;
     refusalRows.push({owner: ctx.owner, bank: ctx.bank.id, immediate, status: 10, published_module_sha256: hash(unit.bytes)});
   }
-  dataInput(ctx, KEEP, pattern.subarray(0, 11)); protect(ctx, KEEP, 3); pages(ctx, 'restored patterned compiler-rejection page', [KEEP]);
+  dataInput(ctx, KEEP, pattern.subarray(0, 12)); protect(ctx, KEEP, 3); pages(ctx, 'restored patterned compiler-rejection page', [KEEP]);
 }
 function mutation(ctx, unit) {
   const scan = ctx.bank.scans[0], registers = addressRegisters(0, BYTE, ECX[4]); dataInput(ctx, BYTE, Buffer.from([0x81])); seed(ctx, registers, scan.shift, 0xcd7);
@@ -296,7 +296,7 @@ const expectedCounts = {contexts: 14, modules: 40, seeds: 428, memory_matrix: 28
   setb: 428, seto: 428, jumps: 428, canaries: 50, boundaries: 36, live_producers: 12, fault_calls: 72, read_faults: 48, write_faults: 24, prefixes: 36,
   repairs: 36, permission_only_repairs: 6, map_only_repairs: 6, changed_value_repairs: 24, code_stores: 14, same_value_code_stores: 8, changing_code_stores: 6,
   continuation_canaries: 14, mutations: 6, compiler_refusals: 24, rejection_survivals: 24, preflight: 90, owner_controls: 88, generated_calls: 2020,
-  maps: 88, unmaps: 18, protects: 150, host_uploads: 558, host_uploaded_bytes: 281320, pages: 350, arena_checks: 724642};
+  maps: 88, unmaps: 18, protects: 150, host_uploads: 558, host_uploaded_bytes: 281350, pages: 350, arena_checks: 724642};
 for (const [name, expected] of Object.entries(expectedCounts)) assert.equal(counts[name], expected, `exact observed ${name} census`);
 assert.deepEqual([...observedCl].sort((a, b) => a - b), [0, 1, 3, 31, 32, 255], 'literal count one despite CL and indexed ECX values');
 const result = {status: 'ok', engine_sha256: hash(engineBytes), tools: {node: process.version, v8: process.versions.v8}, counts, modules, faults: faultRows, code_stores: smcRows, mutations: mutationRows, compiler_refusals: refusalRows, pages: pageRows,
@@ -308,6 +308,6 @@ const result = {status: 'ok', engine_sha256: hash(engineBytes), tools: {node: pr
     flag_policy: 'defined count-one CF/OF/SF/ZF/PF, existing undefined-AF clear policy, retain DF/fixed bit 1; flags publish only after successful Store8'},
   artifact_census: {x86_banks: 3, generated_modules: 40, result_files: 1, total: 44},
   test_sha256: Object.fromEntries(['engine/tests/cpu_memory_byte_shift_immediate_one_wasm.rs', 'engine/tests/fixtures/p2-memory-byte-shift-immediate-one/run.mjs'].map(path => [path, hash(readFileSync(join(root, path)))])),
-  claim: 'finite flat32 C0 memory SHL/SHR/SAR byte encodings for masked-one immediate bytes 1/33/65/97/129/161/193/225: eight declared EA/immediate rows through actual replacement/resident modules, three initial bytes and two FLAGS seeds, independent widened-numeric/literal byte shift and ADD oracles, complete producer and shift CPU before live partial consumers without CPU repair; compact unchanged D0 controls and prior unchanged D0 arithmetic evidence reused; exact existing Read8 v2/Store8 v3 width-one imports and 4236-byte arena/current whole declared pages with non-target neighbors; last/first/final valid byte endpoints, precise Read1/Store1 faults, retired LEA, zero-retirement retry and permission-only/map-only/changed-value repairs in the same CPU/module; unchanged zero and SAR ff plus changing code stores reason 6 then stale 4, fresh pure current consumers/canary/JMP without CPU writes or memory replay, closed 5; one-byte consumed immediate 1 to 33 upload invalidation and fresh same-CPU/EIP continuation; actual memory compiler refusals 0/2/32/255 preserve published modules; no width-one overflow or cross-page access claim, no new full FLAGS/byte suite or PE/browser/game claim'};
+  claim: 'finite flat32 C0 memory SHL/SHR/SAR byte encodings for masked-one immediate bytes 1/33/65/97/129/161/193/225: eight declared EA/immediate rows through actual replacement/resident modules, three initial bytes and two FLAGS seeds, independent widened-numeric/literal byte shift and ADD oracles, complete producer and shift CPU before live partial consumers without CPU repair; compact unchanged D0 controls and prior unchanged D0 arithmetic evidence reused; exact existing Read8 v2/Store8 v3 width-one imports and 4236-byte arena/current whole declared pages with non-target neighbors; last/first/final valid byte endpoints, precise Read1/Store1 faults, retired LEA, zero-retirement retry and permission-only/map-only/changed-value repairs in the same CPU/module; unchanged zero and SAR ff plus changing code stores reason 6 then stale 4, fresh pure current consumers/canary/JMP without CPU writes or memory replay, closed 5; one-byte consumed immediate 1 to 33 upload invalidation and fresh same-CPU/EIP continuation; strict operand-size-prefixed memory compiler refusals 0/2/32/255 preserve published modules; no width-one overflow or cross-page access claim, no new full FLAGS/byte suite or PE/browser/game claim'};
 const resultBytes = Buffer.from(JSON.stringify(result, null, 2)); writeFileSync(join(output, 'result.json'), resultBytes, {flag: 'wx'});
 console.log(JSON.stringify({status: result.status, engine_sha256: result.engine_sha256, result_sha256: hash(resultBytes), counts, output}));
