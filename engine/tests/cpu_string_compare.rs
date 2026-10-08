@@ -101,7 +101,7 @@ fn decode_fetch_and_prefix_barriers_remain_byte_exact() {
     }
     for opcode in [0xa7, 0xaf] {
         assert_eq!(
-            decode_one(&memory(&[opcode], PC), GuestAddress(PC)).unwrap_err(),
+            decode_one(&memory(&[0x66, opcode], PC), GuestAddress(PC)).unwrap_err(),
             DecodeError::Unsupported(UnsupportedFeature::Opcode)
         );
     }

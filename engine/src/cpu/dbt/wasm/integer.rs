@@ -272,6 +272,65 @@ pub(super) fn instruction(
             arithmetic_flags(code, BinaryKind::Cmp, CarryFlag::Calculate, 7);
             string_pointer(code, Register32::Edi);
         }
+        Operation::CompareStringDword => {
+            memory::load_result(
+                code,
+                EffectiveAddress {
+                    base: Some(Register32::Esi),
+                    index: None,
+                    scale: 1,
+                    displacement: 0,
+                },
+                imports,
+                exit_depth,
+            );
+            // the second checked read overwrites result and scratch; retain the first word on the stack.
+            code.local_get(RESULT);
+            memory::load_result(
+                code,
+                EffectiveAddress {
+                    base: Some(Register32::Edi),
+                    index: None,
+                    scale: 1,
+                    displacement: 0,
+                },
+                imports,
+                exit_depth,
+            );
+            code.local_get(RESULT)
+                .local_set(RHS)
+                .local_set(LHS)
+                .local_get(LHS)
+                .local_get(RHS)
+                .i32_sub()
+                .local_set(RESULT);
+            arithmetic_flags(code, BinaryKind::Cmp, CarryFlag::Calculate, 31);
+            dword_string_pointer(code, Register32::Esi);
+            dword_string_pointer(code, Register32::Edi);
+        }
+        Operation::ScanStringDword => {
+            memory::load_result(
+                code,
+                EffectiveAddress {
+                    base: Some(Register32::Edi),
+                    index: None,
+                    scale: 1,
+                    displacement: 0,
+                },
+                imports,
+                exit_depth,
+            );
+            code.local_get(RESULT)
+                .local_set(RHS)
+                .local_get(register(Register32::Eax))
+                .local_set(LHS)
+                .local_get(LHS)
+                .local_get(RHS)
+                .i32_sub()
+                .local_set(RESULT);
+            arithmetic_flags(code, BinaryKind::Cmp, CarryFlag::Calculate, 31);
+            dword_string_pointer(code, Register32::Edi);
+        }
         Operation::Move {
             destination: Location32::Register(destination),
             source,
@@ -1552,6 +1611,18 @@ fn string_pointer(code: &mut InstructionSink<'_>, pointer: Register32) {
     code.local_get(register(pointer))
         .i32_const(-1)
         .i32_const(1)
+        .local_get(FLAGS)
+        .i32_const(0x400)
+        .i32_and()
+        .select()
+        .i32_add()
+        .local_set(register(pointer));
+}
+
+fn dword_string_pointer(code: &mut InstructionSink<'_>, pointer: Register32) {
+    code.local_get(register(pointer))
+        .i32_const(-4)
+        .i32_const(4)
         .local_get(FLAGS)
         .i32_const(0x400)
         .i32_and()

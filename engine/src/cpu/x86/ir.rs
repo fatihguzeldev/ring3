@@ -246,6 +246,8 @@ pub enum Operation {
     StoreStringByte,
     CompareStringByte,
     ScanStringByte,
+    CompareStringDword,
+    ScanStringDword,
     FlagsToAh,
     AhToFlags,
     Move {

@@ -138,7 +138,9 @@ impl Imports {
                     read = true;
                     store = true;
                 }
-                Operation::ReadConditionalMove { .. }
+                Operation::CompareStringDword
+                | Operation::ScanStringDword
+                | Operation::ReadConditionalMove { .. }
                 | Operation::ReadMultiplyAccumulator { .. }
                 | Operation::ReadDivideAccumulator { .. }
                 | Operation::ReadBitScan { .. }

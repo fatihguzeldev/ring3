@@ -43,6 +43,8 @@ pub(super) fn lower(instruction: &Instruction, bytes: &[u8]) -> Result<Operation
         Code::Stosb_m8_AL => Ok(Operation::StoreStringByte),
         Code::Cmpsb_m8_m8 => Ok(Operation::CompareStringByte),
         Code::Scasb_AL_m8 => Ok(Operation::ScanStringByte),
+        Code::Cmpsd_m32_m32 => Ok(Operation::CompareStringDword),
+        Code::Scasd_EAX_m32 => Ok(Operation::ScanStringDword),
         Code::Xlat_m8 => Ok(Operation::TranslateByte),
         Code::Lahf => Ok(Operation::FlagsToAh),
         Code::Sahf => Ok(Operation::AhToFlags),
