@@ -41,9 +41,11 @@ function fresh(owner,kind){
   const bytes=Buffer.alloc(0x120,0xcc),specs=[];
   for(const [index,tail] of tails.entries()){
     const form=[0xf7,...tail];form[1]|=kind==='unsigned'?0x30:0x38;
-    const at=index*16;bytes.set(form,at);bytes[at+form.length]=0xe9;bytes.writeInt32LE(COLD-(PC+at+form.length+5),at+form.length+1);specs.push([PC+at,form.length+5]);
+    const at=index*16;bytes.set(form,at);bytes[at+form.length]=0xe9;bytes.writeInt32LE(COLD-(PC+at+form.length+5),at+form.length+1);
+    if(index===7){bytes.set([0x8d,0x49,1],at-3);specs.push([PC+at-3,form.length+8]);}
+    else specs.push([PC+at,form.length+5]);
   }
-  bytes.set([0x8d,0x49,1,0xf7,kind==='unsigned'?0x33:0x3b,0xe9],0x100);bytes.writeInt32LE(COLD-(PC+0x10a),0x106);specs.push([PC+0x100,10]);
+  assert.equal(specs.length,8);
   writeFileSync(join(output,`${owner}-${kind}.x86`),bytes,{flag:'wx'});upload(c,PC,bytes);request(c,words(specs.flat()));
   let binding;
   if(owner==='replacement'){pure(c,()=>api.compile(specs.length));binding={generation:api.generation(),pointer:api.module_ptr()>>>0,length:api.module_len()>>>0};}
@@ -91,9 +93,9 @@ for(const owner of ['replacement','resident'])for(const kind of ['unsigned','sig
     assert.equal(divide(kind,r,bad),null);run(c,u,1,r,PC,0xcd7,10,0,bad);run(c,u,1,r,PC,0xcd7,10,0,bad);
     const fixed=kind==='signed'&&edx===1?0x7fffffff:repair;put(c,DATA,fixed);const result=divide(kind,r,fixed);assert.ok(result);run(c,u,1,result,PC+2,0xcd7,1,1,fixed);stats.divide_repairs++;
   }
-  const r=[...REG];r[3]=0x8000;unmap(c,0x8000);seed(c,r,PC+0x100,0xcd7);const prefix=[...r];prefix[1]=(prefix[1]+1)>>>0;
-  run(c,u,9,prefix,PC+0x103,0xcd7,5,1,undefined,1,0x8000);run(c,u,9,prefix,PC+0x103,0xcd7,5,0,undefined,1,0x8000);
-  map(c,0x8000);put(c,0x8000,5);const result=divide(kind,prefix,5);run(c,u,1,result,PC+0x105,0xcd7,1,1,5);stats.prefix_faults++;stats.retained_retries++;
+  const r=[...REG];unmap(c,SECOND);seed(c,r,PC+7*16-3,0xcd7);const prefix=[...r];prefix[1]=(prefix[1]+1)>>>0;
+  run(c,u,9,prefix,PC+7*16,0xcd7,5,1,undefined,1,SECOND+16);run(c,u,9,prefix,PC+7*16,0xcd7,5,0,undefined,1,SECOND+16);
+  map(c,SECOND);put(c,SECOND+16,5);const result=divide(kind,prefix,5);assert.ok(result);run(c,u,1,result,PC+7*16+6,0xcd7,1,1,5);stats.prefix_faults++;stats.retained_retries++;
   pages(c);
   upload(c,PC,Buffer.from([0xf7]));const before=arena(c);assert.equal(u.run(c.base,c.base+56,1,c.base+96),4);assert.deepEqual(arena(c),before);stats.controls++;
   assert.equal(c.api.close(),0);const closed=arena(c);assert.equal(u.run(c.base,c.base+56,1,c.base+96),5);assert.deepEqual(arena(c),closed);stats.controls++;
