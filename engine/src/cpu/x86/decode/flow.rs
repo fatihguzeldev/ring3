@@ -5,7 +5,7 @@ use super::{
     operands::{byte_register, effective_address, location, register, unsupported, value},
 };
 use crate::{
-    cpu::x86::ir::{BranchTarget, Condition, Operation},
+    cpu::x86::ir::{BranchTarget, Condition, CountBranchKind, Operation},
     memory::GuestAddress,
 };
 
@@ -13,6 +13,18 @@ pub(super) fn lower(instruction: &Instruction) -> Result<Operation, DecodeError>
     Ok(match instruction.code() {
         Code::Jmp_rel8_32 | Code::Jmp_rel32_32 => Operation::Jump {
             target: BranchTarget::Direct(GuestAddress(instruction.near_branch32())),
+        },
+        Code::Loop_rel8_32_ECX
+        | Code::Loope_rel8_32_ECX
+        | Code::Loopne_rel8_32_ECX
+        | Code::Jecxz_rel8_32 => Operation::CountBranch {
+            kind: match instruction.code() {
+                Code::Loop_rel8_32_ECX => CountBranchKind::Loop,
+                Code::Loope_rel8_32_ECX => CountBranchKind::LoopEqual,
+                Code::Loopne_rel8_32_ECX => CountBranchKind::LoopNotEqual,
+                _ => CountBranchKind::EcxZero,
+            },
+            target: GuestAddress(instruction.near_branch32()),
         },
         Code::Jmp_rm32 => Operation::Jump {
             target: BranchTarget::Indirect(location(instruction, 0)?),

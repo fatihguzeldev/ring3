@@ -294,7 +294,7 @@ fn supports_stack(instruction: &DecodedInstruction) -> bool {
 pub(super) fn terminates(instruction: &DecodedInstruction, embedded: bool) -> bool {
     matches!(
         instruction.operation(),
-        Operation::Jump { .. } | Operation::ConditionalJump { .. }
+        Operation::Jump { .. } | Operation::ConditionalJump { .. } | Operation::CountBranch { .. }
     ) || (embedded
         && supports_stack(instruction)
         && matches!(
@@ -534,5 +534,6 @@ pub(super) fn supports(instruction: &DecodedInstruction, embedded: bool) -> bool
                     target: BranchTarget::Direct(_),
                 }
                 | Operation::ConditionalJump { .. }
+                | Operation::CountBranch { .. }
         )
 }

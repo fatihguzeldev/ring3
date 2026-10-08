@@ -7,9 +7,9 @@ use crate::cpu::x86::{
     ir::{
         BinaryKind, BitIndex, BitScanKind, BitTestKind, BranchTarget, ByteArithmeticKind,
         ByteLogicalKind, BytePredicateKind, ByteReadArithmeticKind, ByteRegister, ByteValue,
-        CarryKind, DivideKind, DoubleShiftKind, EffectiveAddress, ExtensionKind, Location32,
-        MemoryByteArithmeticKind, MultiplyKind, Operation, RotateKind, ShiftCount, ShiftKind,
-        SmallSource, SmallWidth, UnaryKind, Value32,
+        CarryKind, Condition, CountBranchKind, DivideKind, DoubleShiftKind, EffectiveAddress,
+        ExtensionKind, Location32, MemoryByteArithmeticKind, MultiplyKind, Operation, RotateKind,
+        ShiftCount, ShiftKind, SmallSource, SmallWidth, UnaryKind, Value32,
     },
 };
 
@@ -1083,6 +1083,39 @@ pub(super) fn instruction(
                 .end()
                 .local_set(EIP);
         }
+        Operation::CountBranch { kind, target } => {
+            let ecx = register(Register32::Ecx);
+            if kind == CountBranchKind::EcxZero {
+                code.local_get(ecx).i32_eqz();
+            } else {
+                code.local_get(ecx)
+                    .i32_const(1)
+                    .i32_sub()
+                    .local_tee(ecx)
+                    .i32_const(0)
+                    .i32_ne();
+                match kind {
+                    CountBranchKind::LoopEqual | CountBranchKind::LoopNotEqual => {
+                        control::condition(
+                            code,
+                            if kind == CountBranchKind::LoopEqual {
+                                Condition::Equal
+                            } else {
+                                Condition::NotEqual
+                            },
+                        );
+                        code.i32_and();
+                    }
+                    _ => {}
+                }
+            }
+            code.if_(BlockType::Result(ValType::I32))
+                .i32_const(target.0 as i32)
+                .else_()
+                .i32_const(instruction.next_pc().0 as i32)
+                .end()
+                .local_set(EIP);
+        }
         Operation::Call {
             target: BranchTarget::Direct(target),
         } => {
@@ -1186,6 +1219,7 @@ pub(super) fn instruction(
         instruction.operation(),
         Operation::Jump { .. }
             | Operation::ConditionalJump { .. }
+            | Operation::CountBranch { .. }
             | Operation::Call { .. }
             | Operation::Return { .. }
     ) {

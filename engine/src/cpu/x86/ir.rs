@@ -187,6 +187,14 @@ pub enum BranchTarget {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CountBranchKind {
+    Loop,
+    LoopEqual,
+    LoopNotEqual,
+    EcxZero,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Condition {
     Overflow,
     NotOverflow,
@@ -569,6 +577,10 @@ pub enum Operation {
     },
     ConditionalJump {
         condition: Condition,
+        target: GuestAddress,
+    },
+    CountBranch {
+        kind: CountBranchKind,
         target: GuestAddress,
     },
     Call {
