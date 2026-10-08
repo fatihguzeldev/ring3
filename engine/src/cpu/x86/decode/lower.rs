@@ -44,6 +44,7 @@ pub(super) fn lower(instruction: &Instruction, bytes: &[u8]) -> Result<Operation
         Code::Lodsd_EAX_m32 => Ok(Operation::LoadStringDword),
         Code::Stosb_m8_AL => Ok(Operation::StoreStringByte),
         Code::Stosd_m32_EAX => Ok(Operation::StoreStringDword),
+        Code::Stosw_m16_AX => Ok(Operation::StoreStringWord),
         Code::Cmpsb_m8_m8 => Ok(Operation::CompareStringByte),
         Code::Scasb_AL_m8 => Ok(Operation::ScanStringByte),
         Code::Cmpsd_m32_m32 => Ok(Operation::CompareStringDword),

@@ -384,6 +384,7 @@ fn supports_narrow_store(operation: &Operation) -> bool {
         operation,
         Operation::X87StatusToMemory { .. }
             | Operation::X87ControlToMemory { .. }
+            | Operation::StoreStringWord
             | Operation::StoreByte { .. }
             | Operation::MemorySetByte { .. }
             | Operation::MoveStringByte
