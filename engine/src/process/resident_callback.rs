@@ -7,12 +7,15 @@ use super::{
 };
 use crate::{
     abi::{
-        arena::{EXIT_OFFSET, STATE_OFFSET, TRANSFER_OFFSET},
+        arena::{EXIT_OFFSET, STATE_OFFSET, TRANSFER_OFFSET, X87_OFFSET},
         resident_callback::{
             RESIDENT_CALLBACK_RECORD_SIZE, RESIDENT_CALLBACK_RESULT_SIZE, ResidentCallbackRecord32,
             ResidentCallbackResult32, encode_resident_callback, encode_resident_callback_result,
         },
-        x86::{EXIT_SIZE, STATE_SIZE, decode_exit, decode_state, encode_exit_v3, encode_state},
+        x86::{
+            EXIT_SIZE, STATE_SIZE, X87_SIZE, decode_exit, decode_state, decode_x87, encode_exit_v3,
+            encode_state,
+        },
     },
     cpu::{ExecutionExit, ExitReason, dbt::RegistryError},
     memory::GuestAddress,
@@ -55,6 +58,8 @@ impl EngineInstance {
         if target_id == record.outer_unit_id {
             return Err(HostError::InvalidRequest);
         }
+        decode_x87(&self.arena()[X87_OFFSET..X87_OFFSET + X87_SIZE])
+            .map_err(|_| HostError::Call(CallError::InvalidStop))?;
         let state = decode_state(&self.arena()[STATE_OFFSET..STATE_OFFSET + STATE_SIZE])
             .map_err(|_| HostError::Call(CallError::InvalidStop))?;
         let exit = decode_exit(&self.arena()[EXIT_OFFSET..EXIT_OFFSET + EXIT_SIZE])
@@ -115,6 +120,8 @@ impl EngineInstance {
         if self.pending_call.is_some() || !authorized || active_unit_id != callback_id {
             return Err(HostError::Call(CallError::Busy));
         }
+        decode_x87(&self.arena()[X87_OFFSET..X87_OFFSET + X87_SIZE])
+            .map_err(|_| HostError::Call(CallError::InvalidStop))?;
         let state = decode_state(&self.arena()[STATE_OFFSET..STATE_OFFSET + STATE_SIZE])
             .map_err(|_| HostError::Call(CallError::InvalidStop))?;
         let exit = decode_exit(&self.arena()[EXIT_OFFSET..EXIT_OFFSET + EXIT_SIZE])
@@ -145,6 +152,7 @@ impl EngineInstance {
         let arena = self.arena.as_mut().get_mut();
         arena[STATE_OFFSET..STATE_OFFSET + STATE_SIZE].copy_from_slice(&callback.outer.state);
         arena[EXIT_OFFSET..EXIT_OFFSET + EXIT_SIZE].copy_from_slice(&callback.outer.exit);
+        arena[X87_OFFSET..X87_OFFSET + X87_SIZE].copy_from_slice(&callback.outer.x87);
         arena[TRANSFER_OFFSET..TRANSFER_OFFSET + RESIDENT_CALLBACK_RESULT_SIZE]
             .copy_from_slice(&output);
         self.pending_call = Some(callback.outer);
@@ -194,6 +202,7 @@ impl EngineInstance {
         .map_err(|_| HostError::Infrastructure)?;
         if self.arena()[STATE_OFFSET..STATE_OFFSET + STATE_SIZE] != state
             || self.arena()[EXIT_OFFSET..EXIT_OFFSET + EXIT_SIZE] != exit
+            || self.arena()[X87_OFFSET..X87_OFFSET + X87_SIZE] != callback.outer.x87
         {
             return Err(HostError::Call(CallError::StateChanged));
         }
@@ -278,6 +287,7 @@ impl EngineInstance {
         }
         if self.arena()[STATE_OFFSET..STATE_OFFSET + STATE_SIZE] != outer.state
             || self.arena()[EXIT_OFFSET..EXIT_OFFSET + EXIT_SIZE] != outer.exit
+            || self.arena()[X87_OFFSET..X87_OFFSET + X87_SIZE] != outer.x87
         {
             return Err(HostError::Call(CallError::StateChanged));
         }

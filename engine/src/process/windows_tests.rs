@@ -713,6 +713,7 @@ fn module_callback_busy_cancel_state_and_terminal_priority_preserve_saved_author
             frame: pending.frame,
             state: pending.state,
             exit: pending.exit,
+            x87: pending.x87,
         };
         // typed suspended ownership control; no callback guest execution is claimed.
         f.engine.callback = Some(SuspendedCallback {

@@ -96,8 +96,8 @@ fn input(engine: &EngineInstance) -> Option<Input> {
 
 fn call(call: &PendingCall) -> String {
     format!(
-        "{:?}/{:?}/{:?}/{:?}/{:?}",
-        call.token, call.owner, call.frame, call.state, call.exit
+        "{:?}/{:?}/{:?}/{:?}/{:?}/{:?}",
+        call.token, call.owner, call.frame, call.state, call.exit, call.x87
     )
 }
 
@@ -109,6 +109,7 @@ fn pending() -> PendingCall {
         frame: frame(1),
         state: [0x51; 56],
         exit: [0x62; 40],
+        x87: [0x73; crate::abi::x86::X87_SIZE],
     }
 }
 

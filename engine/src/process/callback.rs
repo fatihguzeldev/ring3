@@ -6,10 +6,13 @@ use super::{
 };
 use crate::{
     abi::{
-        arena::{EXIT_OFFSET, STATE_OFFSET, TRANSFER_OFFSET},
+        arena::{EXIT_OFFSET, STATE_OFFSET, TRANSFER_OFFSET, X87_OFFSET},
         callback::{CALLBACK_RECORD_SIZE, CallbackRecord32, encode_callback},
         resident_callback::ResidentCallbackRecord32,
-        x86::{EXIT_SIZE, STATE_SIZE, decode_exit, decode_state, encode_exit_v3, encode_state},
+        x86::{
+            EXIT_SIZE, STATE_SIZE, X87_SIZE, decode_exit, decode_state, decode_x87, encode_exit_v3,
+            encode_state,
+        },
     },
     cpu::{ExecutionExit, ExitReason},
     windows::{CallbackFrame32, FrameError, MAX_STACK_WORDS},
@@ -137,6 +140,7 @@ impl EngineInstance {
         }
         if self.arena()[STATE_OFFSET..STATE_OFFSET + STATE_SIZE] != outer.state
             || self.arena()[EXIT_OFFSET..EXIT_OFFSET + EXIT_SIZE] != outer.exit
+            || self.arena()[X87_OFFSET..X87_OFFSET + X87_SIZE] != outer.x87
         {
             return Err(call_error(CallError::StateChanged));
         }
@@ -232,6 +236,8 @@ impl EngineInstance {
         if self.pending_call.is_some() {
             return Err(call_error(CallError::Busy));
         }
+        decode_x87(&self.arena()[X87_OFFSET..X87_OFFSET + X87_SIZE])
+            .map_err(|_| HostError::Call(CallError::InvalidStop))?;
         let state = decode_state(&self.arena()[STATE_OFFSET..STATE_OFFSET + STATE_SIZE])
             .map_err(|_| call_error(CallError::InvalidStop))?;
         let exit = decode_exit(&self.arena()[EXIT_OFFSET..EXIT_OFFSET + EXIT_SIZE])
@@ -260,6 +266,7 @@ impl EngineInstance {
         let arena = self.arena.as_mut().get_mut();
         arena[STATE_OFFSET..STATE_OFFSET + STATE_SIZE].copy_from_slice(&callback.outer.state);
         arena[EXIT_OFFSET..EXIT_OFFSET + EXIT_SIZE].copy_from_slice(&callback.outer.exit);
+        arena[X87_OFFSET..X87_OFFSET + X87_SIZE].copy_from_slice(&callback.outer.x87);
         arena[TRANSFER_OFFSET..TRANSFER_OFFSET + CALLBACK_RECORD_SIZE].copy_from_slice(&output);
         self.pending_call = Some(callback.outer);
         Ok(record)
@@ -282,6 +289,7 @@ impl EngineInstance {
         let arena = self.arena.as_mut().get_mut();
         arena[STATE_OFFSET..STATE_OFFSET + STATE_SIZE].copy_from_slice(&callback.outer.state);
         arena[EXIT_OFFSET..EXIT_OFFSET + EXIT_SIZE].copy_from_slice(&callback.outer.exit);
+        arena[X87_OFFSET..X87_OFFSET + X87_SIZE].copy_from_slice(&callback.outer.x87);
         self.pending_call = Some(callback.outer);
         Ok(())
     }

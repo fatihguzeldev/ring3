@@ -3,9 +3,12 @@
 use super::{EngineInstance, HostError, callback::SuspendedRecord};
 use crate::{
     abi::{
-        arena::{CANCEL_OFFSET, EXIT_OFFSET, STATE_OFFSET, TRANSFER_OFFSET},
+        arena::{CANCEL_OFFSET, EXIT_OFFSET, STATE_OFFSET, TRANSFER_OFFSET, X87_OFFSET},
         call_frame::{CALL_FRAME_SIZE, CallRecord32, encode_call_frame},
-        x86::{EXIT_SIZE, STATE_SIZE, decode_exit, decode_state, encode_exit_v3, encode_state},
+        x86::{
+            EXIT_SIZE, STATE_SIZE, X87_SIZE, decode_exit, decode_state, decode_x87, encode_exit_v3,
+            encode_state,
+        },
     },
     cpu::{ExecutionExit, ExitReason, x86::State32},
     memory::MemoryError,
@@ -37,6 +40,7 @@ pub(super) struct PendingCall {
     pub(super) frame: CallFrame32,
     pub(super) state: [u8; STATE_SIZE],
     pub(super) exit: [u8; EXIT_SIZE],
+    pub(super) x87: [u8; X87_SIZE],
 }
 
 pub(super) struct PreparedCall32 {
@@ -281,6 +285,10 @@ impl EngineInstance {
         let exit_bytes: [u8; EXIT_SIZE] = self.arena()[EXIT_OFFSET..EXIT_OFFSET + EXIT_SIZE]
             .try_into()
             .unwrap();
+        let x87: [u8; X87_SIZE] = self.arena()[X87_OFFSET..X87_OFFSET + X87_SIZE]
+            .try_into()
+            .unwrap();
+        decode_x87(&x87).map_err(|_| HostError::Call(CallError::InvalidStop))?;
         let state =
             decode_state(&state_bytes).map_err(|_| HostError::Call(CallError::InvalidStop))?;
         let exit = decode_exit(&exit_bytes).map_err(|_| HostError::Call(CallError::InvalidStop))?;
@@ -345,6 +353,7 @@ impl EngineInstance {
             frame,
             state: state_bytes,
             exit: exit_bytes,
+            x87,
         });
         self.call_token = token;
         self.arena.as_mut().get_mut()[TRANSFER_OFFSET..TRANSFER_OFFSET + CALL_FRAME_SIZE]
@@ -410,6 +419,7 @@ impl EngineInstance {
         }
         if self.arena()[STATE_OFFSET..STATE_OFFSET + STATE_SIZE] != pending.state
             || self.arena()[EXIT_OFFSET..EXIT_OFFSET + EXIT_SIZE] != pending.exit
+            || self.arena()[X87_OFFSET..X87_OFFSET + X87_SIZE] != pending.x87
         {
             return Err(HostError::Call(CallError::StateChanged));
         }

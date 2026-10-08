@@ -5,8 +5,10 @@ use super::{
 };
 use crate::{
     abi::{
-        arena::{EXIT_OFFSET, STATE_OFFSET},
-        x86::{EXIT_SIZE, EXIT_VERSION_3, STATE_SIZE, decode_exit, decode_state},
+        arena::{EXIT_OFFSET, STATE_OFFSET, X87_OFFSET},
+        x86::{
+            EXIT_SIZE, EXIT_VERSION_3, STATE_SIZE, X87_SIZE, decode_exit, decode_state, decode_x87,
+        },
     },
     cpu::{ExitReason, dbt::UnitId},
 };
@@ -76,6 +78,8 @@ impl EngineInstance {
             return Err(HostError::Call(CallError::Busy));
         }
         self.guard_resident_unit(key, active_unit_id)?;
+        decode_x87(&self.arena()[X87_OFFSET..X87_OFFSET + X87_SIZE])
+            .map_err(|_| HostError::Call(CallError::InvalidStop))?;
         let state = decode_state(&self.arena()[STATE_OFFSET..STATE_OFFSET + STATE_SIZE])
             .map_err(|_| HostError::Call(CallError::InvalidStop))?;
         let exit_bytes = &self.arena()[EXIT_OFFSET..EXIT_OFFSET + EXIT_SIZE];

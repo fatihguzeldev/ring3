@@ -103,7 +103,7 @@ fn retained_fixture() -> (EngineInstance, [u64; 2]) {
         .unwrap();
     // even a same-byte write makes the second unit stale; startup must not resurrect it.
     write(&mut engine, OTHER_CODE, &[0x90]);
-    engine.arena_mut().unwrap()[100..].fill(0xa5);
+    engine.arena_mut().unwrap()[100..crate::abi::arena::X87_OFFSET].fill(0xa5);
     (engine, [current, stale])
 }
 
