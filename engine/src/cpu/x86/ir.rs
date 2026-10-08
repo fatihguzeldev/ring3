@@ -213,6 +213,10 @@ pub enum Operation {
     Carry {
         kind: CarryKind,
     },
+    Direction {
+        set: bool,
+    },
+    MoveStringByte,
     FlagsToAh,
     AhToFlags,
     Move {

@@ -62,6 +62,55 @@ pub(super) fn instruction(
             }
             code.local_set(FLAGS);
         }
+        Operation::Direction { set } => {
+            code.local_get(FLAGS);
+            if set {
+                code.i32_const(0x400).i32_or();
+            } else {
+                code.i32_const(!0x400).i32_and();
+            }
+            code.local_set(FLAGS);
+        }
+        Operation::MoveStringByte => {
+            memory::load_narrow_value(
+                code,
+                EffectiveAddress {
+                    base: Some(Register32::Esi),
+                    index: None,
+                    scale: 1,
+                    displacement: 0,
+                },
+                SmallWidth::Byte,
+                imports,
+                exit_depth,
+            );
+            code.local_set(RESULT);
+            memory::store_byte_result(
+                code,
+                EffectiveAddress {
+                    base: Some(Register32::Edi),
+                    index: None,
+                    scale: 1,
+                    displacement: 0,
+                },
+                imports,
+                exit_depth,
+            );
+            code.i32_const(-1)
+                .i32_const(1)
+                .local_get(FLAGS)
+                .i32_const(0x400)
+                .i32_and()
+                .select()
+                .local_set(RESULT);
+            for pointer in [Register32::Esi, Register32::Edi] {
+                code.local_get(register(pointer))
+                    .local_get(RESULT)
+                    .i32_add()
+                    .local_set(register(pointer));
+            }
+            store = true;
+        }
         Operation::Move {
             destination: Location32::Register(destination),
             source,

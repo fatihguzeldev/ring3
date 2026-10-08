@@ -368,7 +368,7 @@ fn supports_memory_move_store(operation: &Operation) -> bool {
 fn supports_byte_store(operation: &Operation) -> bool {
     matches!(
         operation,
-        Operation::StoreByte { .. } | Operation::MemorySetByte { .. }
+        Operation::StoreByte { .. } | Operation::MemorySetByte { .. } | Operation::MoveStringByte
     )
 }
 
@@ -445,6 +445,7 @@ pub(super) fn supports(instruction: &DecodedInstruction, embedded: bool) -> bool
             operation,
             Operation::Nop
                 | Operation::Carry { .. }
+                | Operation::Direction { .. }
                 | Operation::FlagsToAh
                 | Operation::AhToFlags
                 | Operation::MoveByte { .. }

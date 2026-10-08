@@ -59,7 +59,8 @@ impl Imports {
                 Operation::StoreByte { .. } | Operation::MemorySetByte { .. } => {
                     store8 = true;
                 }
-                Operation::MemoryUnaryByte { .. }
+                Operation::MoveStringByte
+                | Operation::MemoryUnaryByte { .. }
                 | Operation::MemoryLogicalByte { .. }
                 | Operation::MemoryArithmeticByte { .. }
                 | Operation::MemoryExchangeAddByte { .. }
