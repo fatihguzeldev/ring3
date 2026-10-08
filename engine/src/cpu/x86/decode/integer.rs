@@ -197,6 +197,7 @@ pub(super) fn lower(instruction: &Instruction) -> Option<Result<Operation, Decod
         | Code::Xor_rm32_imm8 => BinaryKind::Xor,
         _ => {
             return lower_byte_accumulator_multiply(instruction)
+                .or_else(|| lower_byte_accumulator_divide(instruction))
                 .or_else(|| lower_divide(instruction))
                 .or_else(|| lower_multiply(instruction))
                 .or_else(|| lower_memory_shift_byte_immediate(instruction))
@@ -753,6 +754,25 @@ fn lower_byte_accumulator_multiply(
             return Err(unsupported());
         }
         Ok(Operation::ByteMultiplyAccumulator {
+            kind,
+            source: byte_register(instruction.op0_register())?,
+        })
+    })())
+}
+
+fn lower_byte_accumulator_divide(
+    instruction: &Instruction,
+) -> Option<Result<Operation, DecodeError>> {
+    let kind = match instruction.code() {
+        Code::Div_rm8 => DivideKind::Unsigned,
+        Code::Idiv_rm8 => DivideKind::Signed,
+        _ => return None,
+    };
+    Some((|| {
+        if instruction.op0_kind() != OpKind::Register {
+            return Err(unsupported());
+        }
+        Ok(Operation::ByteDivideAccumulator {
             kind,
             source: byte_register(instruction.op0_register())?,
         })

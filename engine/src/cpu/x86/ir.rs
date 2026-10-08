@@ -529,6 +529,10 @@ pub enum Operation {
         kind: DivideKind,
         source: Register32,
     },
+    ByteDivideAccumulator {
+        kind: DivideKind,
+        source: ByteRegister,
+    },
     ReadDivideAccumulator {
         kind: DivideKind,
         address: EffectiveAddress,

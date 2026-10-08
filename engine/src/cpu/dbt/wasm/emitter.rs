@@ -24,7 +24,9 @@ pub(in crate::cpu::dbt) fn emit(
         .any(|instruction| {
             matches!(
                 instruction.operation(),
-                Operation::DivideAccumulator { .. } | Operation::ReadDivideAccumulator { .. }
+                Operation::DivideAccumulator { .. }
+                    | Operation::ByteDivideAccumulator { .. }
+                    | Operation::ReadDivideAccumulator { .. }
             )
         });
     let has_x87 = blocks.iter().any(|block| {

@@ -960,6 +960,9 @@ pub(super) fn instruction(
         Operation::DivideAccumulator { kind, source } => {
             accumulator_divide(code, kind, register(source), exit_depth);
         }
+        Operation::ByteDivideAccumulator { kind, source } => {
+            byte_accumulator_divide(code, kind, source, exit_depth);
+        }
         Operation::ReadDivideAccumulator { kind, address } => {
             memory::load_result(code, address, imports, exit_depth);
             accumulator_divide(code, kind, RESULT, exit_depth);
@@ -3075,6 +3078,74 @@ fn accumulator_multiply(code: &mut InstructionSink<'_>, kind: MultiplyKind, sour
         .i32_mul()
         .i32_or()
         .local_set(FLAGS);
+}
+
+fn byte_accumulator_divide(
+    code: &mut InstructionSink<'_>,
+    kind: DivideKind,
+    source: ByteRegister,
+    exit_depth: u32,
+) {
+    byte_value(code, ByteValue::Register(source));
+    if kind == DivideKind::Signed {
+        extend_value(code, ExtensionKind::Sign, SmallWidth::Byte);
+    }
+    code.local_set(RHS).local_get(register(Register32::Eax));
+    extend_value(
+        code,
+        if kind == DivideKind::Signed {
+            ExtensionKind::Sign
+        } else {
+            ExtensionKind::Zero
+        },
+        SmallWidth::Word,
+    );
+    code.local_set(LHS).local_get(RHS).i32_eqz();
+    divide_error_if(code, exit_depth);
+    code.local_get(LHS).local_get(RHS);
+    match kind {
+        DivideKind::Unsigned => {
+            code.i32_div_u();
+        }
+        DivideKind::Signed => {
+            code.i32_div_s();
+        }
+    }
+    code.local_set(RESULT).local_get(RESULT);
+    match kind {
+        DivideKind::Unsigned => {
+            code.i32_const(0xff).i32_gt_u();
+        }
+        DivideKind::Signed => {
+            code.i32_const(-128)
+                .i32_lt_s()
+                .local_get(RESULT)
+                .i32_const(127)
+                .i32_gt_s()
+                .i32_or();
+        }
+    }
+    divide_error_if(code, exit_depth);
+    code.local_get(LHS)
+        .local_get(RESULT)
+        .local_get(RHS)
+        .i32_mul()
+        .i32_sub()
+        .local_set(RHS)
+        .local_get(register(Register32::Eax))
+        .i32_const(!0xffff)
+        .i32_and()
+        .local_get(RESULT)
+        .i32_const(0xff)
+        .i32_and()
+        .i32_or()
+        .local_get(RHS)
+        .i32_const(0xff)
+        .i32_and()
+        .i32_const(8)
+        .i32_shl()
+        .i32_or()
+        .local_set(register(Register32::Eax));
 }
 
 fn accumulator_divide(

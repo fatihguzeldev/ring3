@@ -481,6 +481,7 @@ pub(super) fn supports(instruction: &DecodedInstruction, embedded: bool) -> bool
                 | Operation::MultiplyAccumulator { .. }
                 | Operation::ByteMultiplyAccumulator { .. }
                 | Operation::DivideAccumulator { .. }
+                | Operation::ByteDivideAccumulator { .. }
                 | Operation::BitScan { .. }
                 | Operation::BitTest { .. }
                 | Operation::ByteSwap { .. }
