@@ -9,6 +9,36 @@ use ring3_engine::{
     windows::CallingConvention32,
 };
 
+#[test]
+fn version_five_need_code_allows_cold_callback_installation_and_fault_does_not() {
+    let mut f = fixture(true);
+    ring3_engine::abi::x86::encode_exit_v5(
+        &ExecutionExit {
+            retired: 2,
+            reason: ExitReason::DivideError,
+        },
+        &mut f.engine.arena_mut().unwrap()[EXIT_OFFSET..EXIT_OFFSET + EXIT_SIZE],
+    )
+    .unwrap();
+    reject_both(&mut f, invalid_stop());
+    ring3_engine::abi::x86::encode_exit_v5(
+        &ExecutionExit {
+            retired: 2,
+            reason: ExitReason::NeedCode,
+        },
+        &mut f.engine.arena_mut().unwrap()[EXIT_OFFSET..EXIT_OFFSET + EXIT_SIZE],
+    )
+    .unwrap();
+    let before = f.engine.arena().to_vec();
+    let unit = compile_cold(&mut f, &[(COLD, 3)], &[]);
+    assert_eq!(f.engine.arena(), before);
+    ack(&mut f, unit, 2).unwrap();
+    assert_eq!(
+        &f.engine.arena()[..TRANSFER_OFFSET],
+        &before[..TRANSFER_OFFSET]
+    );
+}
+
 const KEY: u64 = 0x1020_3040_5060_7080;
 const OUTER: u32 = 0x4000;
 const HOME: u32 = 0x5000;

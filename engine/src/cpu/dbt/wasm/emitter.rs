@@ -5,6 +5,7 @@ use wasm_encoder::{
 
 use super::{EmbeddedBinding, abi, integer, locals::*, memory};
 use crate::cpu::dbt::region::CompiledBlock;
+use crate::cpu::x86::ir::Operation;
 
 pub(in crate::cpu::dbt) fn emit(
     blocks: &[CompiledBlock],
@@ -17,6 +18,10 @@ pub(in crate::cpu::dbt) fn emit(
     let has_reads = needs_read || needs_read8 || needs_read16;
     let has_memory = has_reads || has_stores;
     let has_gates = blocks.iter().any(|block| block.gate.is_some());
+    let has_arithmetic = blocks
+        .iter()
+        .flat_map(|block| &block.instructions)
+        .any(|instruction| matches!(instruction.operation(), Operation::DivideAccumulator { .. }));
     debug_assert!(!(has_memory || has_gates) || binding.is_some());
     let mut types = TypeSection::new();
     types.ty().function([ValType::I32; 4], [ValType::I32]);
@@ -163,7 +168,7 @@ pub(in crate::cpu::dbt) fn emit(
         emit_block(&mut code, block, helper_imports);
     }
     code.i32_const(3).local_set(REASON).br(1).end().end();
-    abi::flush(&mut code, has_memory, has_gates);
+    abi::flush(&mut code, has_memory, has_gates, has_arithmetic);
     code.i32_const(0).end();
     let mut bodies = CodeSection::new();
     bodies.function(&function);

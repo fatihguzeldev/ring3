@@ -4,7 +4,8 @@ use crate::abi::{
     ABI_VERSION, X86_INTEGER_PROFILE,
     x86::{
         ACCESS_LENGTH_OFFSET, ACCESS_OFFSET, DETAIL_OFFSET, EFLAGS_OFFSET, EIP_OFFSET, EXIT_SIZE,
-        FAULT_ADDRESS_OFFSET, REASON_OFFSET, REGISTERS_OFFSET, RETIRED_OFFSET, STATE_SIZE,
+        EXIT_VERSION_5, FAULT_ADDRESS_OFFSET, REASON_OFFSET, REGISTERS_OFFSET, RETIRED_OFFSET,
+        STATE_SIZE,
     },
 };
 
@@ -76,7 +77,7 @@ pub(super) fn load_state(sink: &mut InstructionSink<'_>) {
     sink.local_set(FLAGS);
 }
 
-pub(super) fn flush(sink: &mut InstructionSink<'_>, memory: bool, gates: bool) {
+pub(super) fn flush(sink: &mut InstructionSink<'_>, memory: bool, gates: bool, arithmetic: bool) {
     for index in 0..8 {
         store_local(
             sink,
@@ -92,7 +93,9 @@ pub(super) fn flush(sink: &mut InstructionSink<'_>, memory: bool, gates: bool) {
         (0, u32::from_le_bytes(*b"R3EX")),
         (
             4,
-            if gates {
+            if arithmetic {
+                u32::from(EXIT_VERSION_5) | (u32::from(X86_INTEGER_PROFILE) << 16)
+            } else if gates {
                 3 | (u32::from(X86_INTEGER_PROFILE) << 16)
             } else if memory {
                 2 | (u32::from(X86_INTEGER_PROFILE) << 16)

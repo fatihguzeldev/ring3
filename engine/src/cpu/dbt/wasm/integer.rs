@@ -7,7 +7,7 @@ use crate::cpu::x86::{
     ir::{
         BinaryKind, BitIndex, BitScanKind, BitTestKind, BranchTarget, ByteArithmeticKind,
         ByteLogicalKind, BytePredicateKind, ByteReadArithmeticKind, ByteRegister, ByteValue,
-        CarryKind, DoubleShiftKind, EffectiveAddress, ExtensionKind, Location32,
+        CarryKind, DivideKind, DoubleShiftKind, EffectiveAddress, ExtensionKind, Location32,
         MemoryByteArithmeticKind, MultiplyKind, Operation, RotateKind, ShiftCount, ShiftKind,
         SmallSource, SmallWidth, UnaryKind, Value32,
     },
@@ -920,6 +920,9 @@ pub(super) fn instruction(
         Operation::ReadMultiplyAccumulator { kind, address } => {
             memory::load_result(code, address, imports, exit_depth);
             accumulator_multiply(code, kind, RESULT);
+        }
+        Operation::DivideAccumulator { kind, source } => {
+            accumulator_divide(code, kind, source, exit_depth);
         }
         Operation::BitScan {
             kind,
@@ -3020,6 +3023,98 @@ fn accumulator_multiply(code: &mut InstructionSink<'_>, kind: MultiplyKind, sour
         .i32_mul()
         .i32_or()
         .local_set(FLAGS);
+}
+
+fn accumulator_divide(
+    code: &mut InstructionSink<'_>,
+    kind: DivideKind,
+    source: Register32,
+    exit_depth: u32,
+) {
+    code.local_get(register(source))
+        .local_set(RHS)
+        .local_get(RHS)
+        .i32_eqz();
+    divide_error_if(code, exit_depth);
+    match kind {
+        DivideKind::Unsigned => {
+            code.local_get(register(Register32::Edx))
+                .local_get(RHS)
+                .i32_ge_u();
+        }
+        DivideKind::Signed => {
+            code.local_get(register(Register32::Edx))
+                .i32_const(i32::MIN)
+                .i32_eq()
+                .local_get(register(Register32::Eax))
+                .i32_eqz()
+                .i32_and()
+                .local_get(RHS)
+                .i32_const(-1)
+                .i32_eq()
+                .i32_and();
+        }
+    }
+    divide_error_if(code, exit_depth);
+    divide_operands(code, kind);
+    match kind {
+        DivideKind::Unsigned => {
+            code.i64_div_u();
+        }
+        DivideKind::Signed => {
+            code.i64_div_s();
+        }
+    }
+    // preflight has finished using this i64 local; keep the quotient wide until validation.
+    code.local_set(MEMORY_BYTES);
+    if kind == DivideKind::Signed {
+        code.local_get(MEMORY_BYTES)
+            .i64_const(i64::from(i32::MIN))
+            .i64_lt_s()
+            .local_get(MEMORY_BYTES)
+            .i64_const(i64::from(i32::MAX))
+            .i64_gt_s()
+            .i32_or();
+        divide_error_if(code, exit_depth);
+    }
+    divide_operands(code, kind);
+    code.local_get(MEMORY_BYTES)
+        .i64_mul()
+        .i64_sub()
+        .i32_wrap_i64()
+        .local_set(RESULT)
+        .local_get(MEMORY_BYTES)
+        .i32_wrap_i64()
+        .local_set(register(Register32::Eax))
+        .local_get(RESULT)
+        .local_set(register(Register32::Edx));
+}
+
+fn divide_operands(code: &mut InstructionSink<'_>, kind: DivideKind) {
+    code.local_get(register(Register32::Edx))
+        .i64_extend_i32_u()
+        .i64_const(32)
+        .i64_shl()
+        .local_get(register(Register32::Eax))
+        .i64_extend_i32_u()
+        .i64_or()
+        .local_get(RHS);
+    match kind {
+        DivideKind::Unsigned => {
+            code.i64_extend_i32_u();
+        }
+        DivideKind::Signed => {
+            code.i64_extend_i32_s();
+        }
+    }
+}
+
+fn divide_error_if(code: &mut InstructionSink<'_>, exit_depth: u32) {
+    code.if_(BlockType::Empty)
+        .i32_const(10)
+        .local_set(REASON)
+        .br(exit_depth + 1)
+        .end();
 }
 
 fn signed_multiply(

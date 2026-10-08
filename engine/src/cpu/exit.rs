@@ -28,6 +28,7 @@ pub enum ExitReason {
     Infrastructure(InfrastructureFailure),
     Gate { id: u32 },
     ProcessExited { code: u32 },
+    DivideError,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

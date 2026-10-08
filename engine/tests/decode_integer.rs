@@ -301,7 +301,7 @@ fn adjacent_unsupported_integer_instructions_remain_rejected() {
         ("ror word", &[0x66, 0xd1, 0xc8]),
         ("mul word", &[0x66, 0xf7, 0xe2]),
         ("imul word", &[0x66, 0x0f, 0xaf, 0xc2]),
-        ("idiv", &[0xf7, 0xfa]),
+        ("idiv word", &[0x66, 0xf7, 0xfa]),
         ("operand-prefixed inc byte memory", &[0x66, 0xfe, 0x00]),
         ("inc word", &[0x66, 0x40]),
     ];

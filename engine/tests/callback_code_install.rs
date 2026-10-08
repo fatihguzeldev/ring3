@@ -6,6 +6,36 @@ use ring3_engine::memory::{Access, FaultReason, GuestAddress, MemoryFault};
 use ring3_engine::process::{CallError, EngineInstance, HostError};
 use ring3_engine::windows::CallingConvention32;
 
+#[test]
+fn version_five_need_code_resumes_but_divide_error_cannot_publish_callback_code() {
+    let mut engine = active();
+    replacement(&mut engine, TARGET, 6);
+    ring3_engine::abi::x86::encode_exit_v5(
+        &ExecutionExit {
+            retired: 7,
+            reason: ExitReason::DivideError,
+        },
+        &mut engine.arena_mut().unwrap()[56..96],
+    )
+    .unwrap();
+    unchanged(&mut engine, error(CallError::InvalidStop), |engine| {
+        engine.resume_callback_code(KEY, 1, 2, 4, 2)
+    });
+    ring3_engine::abi::x86::encode_exit_v5(
+        &ExecutionExit {
+            retired: 7,
+            reason: ExitReason::NeedCode,
+        },
+        &mut engine.arena_mut().unwrap()[56..96],
+    )
+    .unwrap();
+    let before = engine.arena().to_vec();
+    assert_eq!(engine.resume_callback_code(KEY, 1, 2, 4, 2), Ok(2));
+    let mut expected = before;
+    expected[140..204].copy_from_slice(&wire(2));
+    assert_eq!(engine.arena(), expected);
+}
+
 const KEY: u64 = 0xfedc_ba98_1234_5678;
 const OUTER: u32 = 0x1000;
 const ENTRY: u32 = 0x1100;

@@ -11,7 +11,7 @@ use crate::{
         arena::{EXIT_OFFSET, STATE_OFFSET, TRANSFER_OFFSET, X87_OFFSET},
         callback::{CALLBACK_RECORD_SIZE, CallbackRecord32, encode_callback},
         x86::{
-            EXIT_SIZE, EXIT_VERSION_3, STATE_SIZE, X87_SIZE, decode_exit, decode_state, decode_x87,
+            EXIT_SIZE, EXIT_VERSION_3, EXIT_VERSION_5, STATE_SIZE, X87_SIZE, decode_exit, decode_state, decode_x87,
         },
     },
     cpu::{ExitReason, dbt::CompiledRegion},
@@ -103,11 +103,13 @@ impl EngineInstance {
             .unwrap();
         decode_x87(&x87).map_err(|_| HostError::Call(CallError::InvalidStop))?;
         let stopped = decode_state(&state).map_err(|_| HostError::Call(CallError::InvalidStop))?;
-        if u16::from_le_bytes(exit[4..6].try_into().unwrap()) != EXIT_VERSION_3
-            || decode_exit(&exit)
-                .map_err(|_| HostError::Call(CallError::InvalidStop))?
-                .reason
-                != ExitReason::NeedCode
+        if !matches!(
+            u16::from_le_bytes(exit[4..6].try_into().unwrap()),
+            EXIT_VERSION_3 | EXIT_VERSION_5
+        ) || decode_exit(&exit)
+            .map_err(|_| HostError::Call(CallError::InvalidStop))?
+            .reason
+            != ExitReason::NeedCode
         {
             return Err(HostError::Call(CallError::InvalidStop));
         }

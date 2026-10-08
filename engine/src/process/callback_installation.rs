@@ -7,7 +7,7 @@ use crate::{
     abi::{
         arena::{EXIT_OFFSET, STATE_OFFSET, X87_OFFSET},
         x86::{
-            EXIT_SIZE, EXIT_VERSION_3, STATE_SIZE, X87_SIZE, decode_exit, decode_state, decode_x87,
+            EXIT_SIZE, EXIT_VERSION_3, EXIT_VERSION_5, STATE_SIZE, X87_SIZE, decode_exit, decode_state, decode_x87,
         },
     },
     cpu::{ExitReason, dbt::UnitId},
@@ -84,8 +84,10 @@ impl EngineInstance {
             .map_err(|_| HostError::Call(CallError::InvalidStop))?;
         let exit_bytes = &self.arena()[EXIT_OFFSET..EXIT_OFFSET + EXIT_SIZE];
         let exit = decode_exit(exit_bytes).map_err(|_| HostError::Call(CallError::InvalidStop))?;
-        if u16::from_le_bytes([exit_bytes[4], exit_bytes[5]]) != EXIT_VERSION_3
-            || exit.reason != ExitReason::NeedCode
+        if !matches!(
+            u16::from_le_bytes([exit_bytes[4], exit_bytes[5]]),
+            EXIT_VERSION_3 | EXIT_VERSION_5
+        ) || exit.reason != ExitReason::NeedCode
         {
             return Err(HostError::Call(CallError::InvalidStop));
         }

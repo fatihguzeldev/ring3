@@ -8,7 +8,7 @@ use super::{
 };
 use crate::cpu::x86::ir::{
     BinaryKind, BitIndex, BitScanKind, BitTestKind, ByteArithmeticKind, ByteLogicalKind,
-    BytePredicateKind, ByteReadArithmeticKind, DoubleShiftKind, Location32,
+    BytePredicateKind, ByteReadArithmeticKind, DivideKind, DoubleShiftKind, Location32,
     MemoryByteArithmeticKind, MultiplyKind, Operation, RotateKind, ShiftCount, ShiftKind,
     UnaryKind,
 };
@@ -197,6 +197,7 @@ pub(super) fn lower(instruction: &Instruction) -> Option<Result<Operation, Decod
         | Code::Xor_rm32_imm8 => BinaryKind::Xor,
         _ => {
             return lower_byte_accumulator_multiply(instruction)
+                .or_else(|| lower_divide(instruction))
                 .or_else(|| lower_multiply(instruction))
                 .or_else(|| lower_memory_shift_byte_immediate(instruction))
                 .or_else(|| lower_memory_shift_byte_cl(instruction))
@@ -754,6 +755,23 @@ fn lower_byte_accumulator_multiply(
         Ok(Operation::ByteMultiplyAccumulator {
             kind,
             source: byte_register(instruction.op0_register())?,
+        })
+    })())
+}
+
+fn lower_divide(instruction: &Instruction) -> Option<Result<Operation, DecodeError>> {
+    let kind = match instruction.code() {
+        Code::Div_rm32 => DivideKind::Unsigned,
+        Code::Idiv_rm32 => DivideKind::Signed,
+        _ => return None,
+    };
+    Some((|| {
+        if instruction.op0_kind() != OpKind::Register {
+            return Err(unsupported());
+        }
+        Ok(Operation::DivideAccumulator {
+            kind,
+            source: register(instruction.op0_register())?,
         })
     })())
 }
