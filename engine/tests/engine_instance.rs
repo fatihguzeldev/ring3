@@ -29,7 +29,7 @@ fn fixed_arena_has_canonical_initial_state_exit_and_helper_records() {
     assert!(engine.is_open());
     assert_eq!(engine.key(), KEY);
     assert_eq!(engine.generation(), 0);
-    assert_eq!(engine.arena().len(), 4236);
+    assert_eq!(engine.arena().len(), ring3_engine::abi::arena::ARENA_SIZE);
     assert_ne!(engine.arena_address(), 0);
     let arena = engine.arena();
     for (offset, magic, length) in [(0, b"R3ST", 56u32), (56, b"R3EX", 40), (100, b"R3MH", 40)] {
@@ -48,7 +48,11 @@ fn fixed_arena_has_canonical_initial_state_exit_and_helper_records() {
     );
     assert_eq!(&arena[96..100], &[0; 4]);
     assert_eq!(&arena[116..140], &[0; 24]);
-    assert_eq!(&arena[140..], &[0; 4096]);
+    assert_eq!(&arena[140..4236], &[0; 4096]);
+    assert_eq!(
+        ring3_engine::abi::x86::decode_x87(&arena[4236..]).unwrap(),
+        ring3_engine::cpu::x86::X87State::default()
+    );
 }
 
 #[test]

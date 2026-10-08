@@ -2,7 +2,7 @@
 
 use super::{CallError, EngineInstance, HostError};
 use crate::{
-    abi::arena::TRANSFER_OFFSET,
+    abi::arena::{TRANSFER_OFFSET, TRANSFER_SIZE},
     cpu::dbt::{
         BlockSpec, CompileLimits, CompiledRegion, GateSpec, RegistryError, RegistryLimits,
         ResidentRegistry, UnitId,
@@ -107,7 +107,7 @@ impl EngineInstance {
             entry: GuestAddress(0),
             id: 0,
         }; 8];
-        let transfer = &self.arena()[TRANSFER_OFFSET..];
+        let transfer = &self.arena()[TRANSFER_OFFSET..TRANSFER_OFFSET + TRANSFER_SIZE];
         for (index, entry) in entries[..count as usize].iter_mut().enumerate() {
             let offset = index * 4;
             *entry = GuestAddress(u32::from_le_bytes(
@@ -152,7 +152,7 @@ impl EngineInstance {
             entry: GuestAddress(0),
             byte_length: 0,
         }; 8];
-        let transfer = &self.arena()[TRANSFER_OFFSET..];
+        let transfer = &self.arena()[TRANSFER_OFFSET..TRANSFER_OFFSET + TRANSFER_SIZE];
         for (index, spec) in specs[..count as usize].iter_mut().enumerate() {
             let offset = index * 8;
             *spec = BlockSpec {

@@ -237,7 +237,7 @@ impl EngineInstance {
     ) -> Result<CompiledRegion, HostError> {
         Self::check_region_counts(count, gate_count)?;
         let memory = self.memory()?;
-        let transfer = &self.arena()[TRANSFER_OFFSET..];
+        let transfer = &self.arena()[TRANSFER_OFFSET..TRANSFER_OFFSET + TRANSFER_SIZE];
         let stride = match format {
             DescriptorFormat::BlockSpecs => 8,
             DescriptorFormat::Entries => 4,
@@ -403,7 +403,8 @@ impl EngineInstance {
         if count > MAX_WORD_WRITES32 as u32 {
             return Err(HostError::InvalidRequest);
         }
-        let transfer = &self.arena.as_ref().get_ref()[TRANSFER_OFFSET..];
+        let transfer =
+            &self.arena.as_ref().get_ref()[TRANSFER_OFFSET..TRANSFER_OFFSET + TRANSFER_SIZE];
         let mut words = [WordWrite32 {
             address: GuestAddress(0),
             value: 0,

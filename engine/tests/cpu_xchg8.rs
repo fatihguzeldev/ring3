@@ -181,7 +181,7 @@ struct Inputs {
 }
 
 fn inputs(engine: &EngineInstance, bases: &[u32]) -> Inputs {
-    assert_eq!(engine.arena().len(), 4236);
+    assert_eq!(engine.arena().len(), ring3_engine::abi::arena::ARENA_SIZE);
     Inputs {
         arena: engine.arena().to_vec(),
         pointer: engine.arena_address(),
