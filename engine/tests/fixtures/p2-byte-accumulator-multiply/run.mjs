@@ -4,15 +4,16 @@ import {readFileSync, readdirSync, writeFileSync} from 'node:fs';
 import {join, resolve} from 'node:path';
 import {readEngine} from '../support/engine.mjs';
 
-const [enginePath, output, root] = process.argv.slice(2);
+const [enginePath, output, root, arenaSize] = process.argv.slice(2);
 assert.ok(root && enginePath && output, 'expected current engine, unique bank directory and repository root');
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
 const callerSha = process.env.RING3_ENGINE_SHA256;
 assert.match(callerSha ?? '', /^[a-f0-9]{64}$/, 'actual caller must supply the captured current engine SHA-256');
-assert.deepEqual(readdirSync(output).sort(), ['chain-signed.x86', 'chain-unsigned.x86'], 'unique Rust-authored bank directory before any artifact write');
+assert.deepEqual(readdirSync(output).sort(), ['chain-signed.x86', 'chain-unsigned.x86', 'initial-arena.bin'], 'unique Rust-authored bank directory before any artifact write');
 const {bytes: engineBytes, module: engineModule, sha256: engineSha} = readEngine(enginePath, callerSha);
 assert.deepEqual(WebAssembly.Module.imports(engineModule), []);
-const SIZE = 4236, TRANSFER = 140, PC = 0x1000, COLD = PC + 128;
+const SIZE = Number(arenaSize), TRANSFER = 140, PC = 0x1000, COLD = PC + 128;
+const initialArena = readFileSync(join(output, 'initial-arena.bin')); assert.equal(SIZE, 4364); assert.equal(initialArena.length, SIZE);
 const OWNERS = ['replacement', 'resident'], KINDS = ['unsigned', 'signed'], FLAGS = [2, 0xcd7];
 const PAIRS = [[0, 0xff], [1, 0x7f], [1, 0x80], [0x7f, 1], [0x7f, 2], [0x80, 1], [0x80, 0xff], [0xff, 0xff], [0xff, 2], [0x40, 4]];
 const REG = [0xc9d45a00, 0x1234a567, 0x89abcdef, 0x76543210, 0x0a1b2c3d, 0x98badcfe, 0x13579bdf, 0x2468ace0];
@@ -68,9 +69,9 @@ const plan = {chains: 10 * 8 * 2 * 2 * 2, targets: 10 * 8 * 2 * 2 * 2 * 2, conte
   host_calls: 4 * (1 + 1 + 1 + 1 + 2 + 1 + 1), host_inputs: 640 + 4 * (3 + 3), uploads: 4 * 2, upload_bytes: 4 * (130 + 1),
   request_inputs: 4 * 3, request_bytes: 4 * 130 + 2 * 32 + 2 * 64 + 4, cancel_inputs: 4 * 3, source_spans: 4 * 40,
   zero_budget_calls: 4, cancel_calls: 4, malformed_calls: 4, cold_calls: 4, direct_guard_calls: 8, stale_calls: 4, closed_calls: 4,
-  raw_arenas: 4 + 2 * (640 + 12 + 12) + 2 * (32 - 4) + 2 * (640 * 3 + 24), files: 1 + 2 + 4 + 2 + 1 + 1};
+  raw_arenas: 4 + 2 * (640 + 12 + 12) + 2 * (32 - 4) + 2 * (640 * 3 + 24), files: 1 + 2 + 4 + 2 + 1 + 1 + 1};
 plan.arena_checks = plan.raw_arenas + plan.modules;
-assert.deepEqual([plan.chains, plan.targets, plan.generated_calls, plan.retired, plan.host_calls, plan.host_inputs, plan.raw_arenas, plan.files], [640, 1280, 1944, 3200, 32, 664, 5276, 11]);
+assert.deepEqual([plan.chains, plan.targets, plan.generated_calls, plan.retired, plan.host_calls, plan.host_inputs, plan.raw_arenas, plan.files], [640, 1280, 1944, 3200, 32, 664, 5276, 12]);
 const counts = {contexts: 0, modules: 0, seeds: 0, targets: 0, chains: 0, generated_calls: 0, retired: 0, host_calls: 0, uploads: 0, upload_bytes: 0,
   raw_arenas: 0, arena_checks: 0, setb: 0, seto: 0, jumps: 0, zero_budget_calls: 0, cancel_calls: 0, malformed_calls: 0,
   cold_calls: 0, direct_guard_calls: 0, stale_calls: 0, closed_calls: 0};
@@ -80,6 +81,7 @@ function artifact(path, bytes, write = true) {
   const row = {path, bytes: bytes.length, sha256: hash(bytes)}; artifacts.push(row); return row;
 }
 artifact('engine.wasm', engineBytes);
+artifact('initial-arena.bin', initialArena, false);
 for (const chapter of primary) {const bytes = readFileSync(join(root, chapter.path)); assert.equal(bytes.length, chapter.bytes); assert.equal(hash(bytes), chapter.sha256);
   chapter.artifact = artifact(`intel-${chapter.kind}.txt`, bytes); chapter.authority = 'locally pinned Intel093 whole MUL/IMUL chapters; no latest edition/network claim';}
 function makeBank(kind) {
@@ -128,7 +130,7 @@ function upload(ctx, address, bytes, label) {
   assert.ok(address >= PC && address + bytes.length <= PC + ctx.code.length); ctx.code.set(bytes, address - PC); counts.uploads++; counts.upload_bytes += bytes.length; return row;
 }
 function fresh(owner, selected) {
-  const ordinal = ++counts.contexts, ctx = {ordinal, owner, selected, low: ordinal, high: 0x42594d55, expected: Buffer.alloc(SIZE), code: Buffer.from(selected.bytes)};
+  const ordinal = ++counts.contexts, ctx = {ordinal, owner, selected, low: ordinal, high: 0x42594d55, expected: Buffer.from(initialArena), code: Buffer.from(selected.bytes)};
   ctx.expected.set(state(Array(8).fill(0), 0, 2)); ctx.expected.set(exit(1, 0), 56); ctx.expected.set(record('R3MH', 40, [0, 0, 0, 0, 0, 0]), 100);
   const instance = new WebAssembly.Instance(engineModule, {}); ctx.memory = instance.exports.memory; ctx.api = {};
   const arities = {open: 3, close: 0, arena_ptr: 0, map: 3, upload: 2, compile_entries: 2, compile_resident: 1,
@@ -275,7 +277,7 @@ const modeledPages = managedContexts.map(ctx => {assert.equal(ctx.closed, true);
     model: {hex: bytes.toString('hex'), sha256: hash(bytes)}, upload_host_ordinals: hostCalls.filter(row => row.context === ctx.ordinal && row.name === 'upload').map(row => row.ordinal),
     authority: 'successful zero-map plus exact successful upload bytes; modeled code page, not physical guest-RAM readback'};});
 const result = {status: 'ok', profile: 'finite prefix-free flat32 F6 register BYTE accumulator MUL/one-operand IMUL; two actual-engine-Wasm bound origins',
-  command: [process.execPath, process.argv[1], enginePath, output, root], environment: {node: process.version, v8: process.versions.v8, platform: process.platform, arch: process.arch},
+  command: [process.execPath, process.argv[1], enginePath, output, root, arenaSize], arena_bytes: SIZE, environment: {node: process.version, v8: process.versions.v8, platform: process.platform, arch: process.arch},
   engine: {path: resolve(enginePath), bytes: engineBytes.length, sha256: engineSha, caller_sha256: callerSha}, source_pins: sourcePins, source_pins_after: sourcePinsAfter,
   selected_input_census: {repo_paths: 41, engine: 1, total: 42}, source_support_dependency: {...supportPin, selected_roster: false, authority: 'unchanged readEngine helper separately pinned; full engine source freeze includes it'},
   primary, plan, counts, corpus: {pairs: PAIRS, flags: FLAGS, registers: REG, aliases: ALIASES, owner_target_counts: ownerCounts, qualified_case_keys: caseKeys.size,

@@ -1,3 +1,4 @@
+use ring3_engine::{abi::arena::ARENA_SIZE, process::EngineInstance};
 use std::{
     fs,
     path::Path,
@@ -56,6 +57,11 @@ fn actual_byte_accumulator_products_capture_current_al_and_source_twice() {
         ));
     fs::create_dir_all(output.parent().unwrap()).unwrap();
     fs::create_dir(&output).unwrap();
+    fs::write(
+        output.join("initial-arena.bin"),
+        EngineInstance::new(1, 1).unwrap().arena(),
+    )
+    .unwrap();
     for (kind, field) in [("unsigned", 0x20u8), ("signed", 0x28)] {
         fs::write(output.join(format!("chain-{kind}.x86")), bank(field)).unwrap();
     }
@@ -64,6 +70,7 @@ fn actual_byte_accumulator_products_capture_current_al_and_source_twice() {
         .arg(&engine)
         .arg(&output)
         .arg(root)
+        .arg(ARENA_SIZE.to_string())
         .env("RING3_ENGINE_SHA256", expected)
         .output()
         .unwrap();

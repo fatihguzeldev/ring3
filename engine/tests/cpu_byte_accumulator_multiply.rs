@@ -28,7 +28,7 @@ fn register_imul_byte_ah_admits_public_api() {
 
 use ring3_engine::{
     abi::{
-        arena::HELPER_OFFSET,
+        arena::{HELPER_OFFSET, TRANSFER_SIZE},
         memory_helper::HELPER_SIZE,
         x86::{EFLAGS_OFFSET, EIP_OFFSET, REGISTERS_OFFSET},
     },
@@ -93,7 +93,8 @@ fn fresh(pc: u32, bytes: &[u8], execute_only: bool) -> EngineInstance {
 }
 
 fn describe(engine: &mut EngineInstance, pc: u32, length: usize, entries: bool) {
-    let transfer = &mut engine.arena_mut().unwrap()[TRANSFER_OFFSET..];
+    let transfer =
+        &mut engine.arena_mut().unwrap()[TRANSFER_OFFSET..TRANSFER_OFFSET + TRANSFER_SIZE];
     transfer.fill(0xa5);
     transfer[..4].copy_from_slice(&pc.to_le_bytes());
     if !entries {
