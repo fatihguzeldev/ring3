@@ -46,7 +46,7 @@ function open(owner,entries) {
   const instance=new WebAssembly.Instance(engine.module,{}), ctx={owner,entries,memory:instance.exports.memory,api:{},expected:initial()};
   for(const [name,arity] of Object.entries({open:3,close:0,arena_ptr:0,map:3,unmap:2,protect:3,upload:2,read8:1,
     compile:1,compile_entries:2,compile_resident:1,compile_resident_entries:2,generation:0,module_ptr:0,module_len:0,
-    guard:6,guard_resident:7,store16:2,store_resident16:6})) {
+    guard:6,guard_resident:7,store16:2,store_resident16:6,discard_unacknowledged_resident:4})) {
     const fn=instance.exports['ring3_abi_v1_'+name]; assert.equal(typeof fn,'function',name); assert.equal(fn.length,arity,name); ctx.api[name]=fn;
   }
   assert.equal(ctx.api.open(8,1,0x9abcde00),0); ctx.base=ctx.api.arena_ptr()>>>0; check(ctx,'default full arena');
@@ -168,7 +168,12 @@ for(const owner of ['replacement','resident'])for(const entries of [false,true])
   }
   upload(ctx,0xfffffffd,Buffer.from([0xa1,0x55,0x56])); seed(ctx,PC+32,0xfffffffe,0x81a5);
   store(ctx,unit,0xfffffffe,0xa5,0x81); diagnostic(ctx,0xfffffffd,[0xa1,0xa5,0x81]);
-  faults(ctx,unit); controls(ctx,unit); unit=compile(ctx,true); barePreflight(ctx,unit);
+  faults(ctx,unit); controls(ctx,unit);
+  if(ctx.owner==='resident') {
+    host(ctx,'discard_unacknowledged_resident',1,0x9abcde00,unit.low,unit.high);
+    unit=undefined;
+  }
+  unit=compile(ctx,true); barePreflight(ctx,unit);
   for(const [address,status,low,high] of [[PC,0x3bdd,0xdd,0x3b],[PC-1,0xdd5a,0x5a,0xdd]]) {
     if(address===PC-1)upload(ctx,PC-1,Buffer.from([0x55])); seed(ctx,PC+32,address,status);
     const row=store(ctx,unit,address,low,high,6,false); stale(ctx,unit); row.diagnostics=diagnostic(ctx,address,[low,high]);
