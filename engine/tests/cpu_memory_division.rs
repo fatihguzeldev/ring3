@@ -225,7 +225,7 @@ fn strict_neighbors_and_operand_fetch_keep_categories_and_exact_faults() {
             );
         }
     }
-    for bytes in [&[0xf6, 0x33][..], &[0xf6, 0x3b]] {
+    for bytes in [&[0x66, 0xf6, 0x33][..], &[0x66, 0xf6, 0x3b]] {
         let engine = fixture(CODE, bytes);
         assert_eq!(
             decode_one(engine.memory().unwrap(), GuestAddress(CODE)).err(),

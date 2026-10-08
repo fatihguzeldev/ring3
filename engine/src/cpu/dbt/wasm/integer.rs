@@ -1040,6 +1040,10 @@ pub(super) fn instruction(
         Operation::ByteDivideAccumulator { kind, source } => {
             byte_accumulator_divide(code, kind, source, exit_depth);
         }
+        Operation::ReadByteDivideAccumulator { kind, address } => {
+            memory::load_narrow_value(code, address, SmallWidth::Byte, imports, exit_depth);
+            byte_accumulator_divide_value(code, kind, exit_depth);
+        }
         Operation::ReadDivideAccumulator { kind, address } => {
             memory::load_result(code, address, imports, exit_depth);
             accumulator_divide(code, kind, RESULT, exit_depth);
@@ -3164,6 +3168,14 @@ fn byte_accumulator_divide(
     exit_depth: u32,
 ) {
     byte_value(code, ByteValue::Register(source));
+    byte_accumulator_divide_value(code, kind, exit_depth);
+}
+
+fn byte_accumulator_divide_value(
+    code: &mut InstructionSink<'_>,
+    kind: DivideKind,
+    exit_depth: u32,
+) {
     if kind == DivideKind::Signed {
         extend_value(code, ExtensionKind::Sign, SmallWidth::Byte);
     }

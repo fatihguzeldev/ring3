@@ -75,7 +75,8 @@ fn code(pc: u32, bytes: &[u8], execute_only: bool) -> EngineInstance {
 }
 
 fn describe(engine: &mut EngineInstance, pc: u32, length: usize, entries: bool) {
-    let transfer = &mut engine.arena_mut().unwrap()[TRANSFER_OFFSET..TRANSFER_OFFSET + TRANSFER_SIZE];
+    let transfer =
+        &mut engine.arena_mut().unwrap()[TRANSFER_OFFSET..TRANSFER_OFFSET + TRANSFER_SIZE];
     transfer.fill(0xa5);
     transfer[..4].copy_from_slice(&pc.to_le_bytes());
     if !entries {
@@ -435,7 +436,8 @@ fn canonical_batches_require_bound_read8_only_in_four_profiles_with_existing_cap
     for owner in [Owner::Replacement, Owner::Resident] {
         for entries in [false, true] {
             let mut engine = code(CODE, &bytes, true);
-            let transfer = &mut engine.arena_mut().unwrap()[TRANSFER_OFFSET..TRANSFER_OFFSET + TRANSFER_SIZE];
+            let transfer =
+                &mut engine.arena_mut().unwrap()[TRANSFER_OFFSET..TRANSFER_OFFSET + TRANSFER_SIZE];
             transfer.fill(0xa5);
             for index in 0..8 {
                 let stride = if entries { 4 } else { 8 };
@@ -611,8 +613,8 @@ fn excluded() -> Vec<(Vec<u8>, DecodeError)> {
         &[0xf6, 0x0b, 0xff],
         &[0xf6, 0x23],
         &[0xf6, 0x2b],
-        &[0xf6, 0x33],
-        &[0xf6, 0x3b],
+        &[0x66, 0xf6, 0x33],
+        &[0x66, 0xf6, 0x3b],
     ] {
         forms.push((bytes.to_vec(), opcode));
     }

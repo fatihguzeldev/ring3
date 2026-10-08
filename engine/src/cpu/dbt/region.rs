@@ -312,6 +312,7 @@ fn supports_memory_reads(operation: &Operation) -> bool {
             | Operation::ScanStringByte
             | Operation::ReadConditionalMove { .. }
             | Operation::ReadMultiplyAccumulator { .. }
+            | Operation::ReadByteDivideAccumulator { .. }
             | Operation::ReadDivideAccumulator { .. }
             | Operation::ReadBitScan { .. }
             | Operation::MemoryPredicateByte { .. }

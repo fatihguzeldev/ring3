@@ -212,7 +212,7 @@ fn strict_memory_word_prefix_and_two_byte_fetch_boundaries_remain_closed() {
                 Some(expected)
             );
         }
-        for bytes in [vec![0xf6, base & 0x3f | 3], vec![0x66, 0xf7, base]] {
+        for bytes in [vec![0x66, 0xf6, base & 0x3f | 3], vec![0x66, 0xf7, base]] {
             let engine = fresh(CODE, &bytes);
             assert_eq!(
                 decode_one(engine.memory().unwrap(), GuestAddress(CODE)).err(),

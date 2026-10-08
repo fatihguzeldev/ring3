@@ -64,6 +64,7 @@ impl Imports {
                 | Operation::MemoryPredicateByte { .. }
                 | Operation::ReadCompareByte { .. }
                 | Operation::ReadLogicalByte { .. }
+                | Operation::ReadByteDivideAccumulator { .. }
                 | Operation::ReadArithmeticByte { .. } => read8 = true,
                 Operation::StoreByte { .. }
                 | Operation::MemorySetByte { .. }

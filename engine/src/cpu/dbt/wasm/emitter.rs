@@ -26,6 +26,7 @@ pub(in crate::cpu::dbt) fn emit(
                 instruction.operation(),
                 Operation::DivideAccumulator { .. }
                     | Operation::ByteDivideAccumulator { .. }
+                    | Operation::ReadByteDivideAccumulator { .. }
                     | Operation::ReadDivideAccumulator { .. }
             )
         });

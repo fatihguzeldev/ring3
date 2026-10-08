@@ -768,14 +768,16 @@ fn lower_byte_accumulator_divide(
         Code::Idiv_rm8 => DivideKind::Signed,
         _ => return None,
     };
-    Some((|| {
-        if instruction.op0_kind() != OpKind::Register {
-            return Err(unsupported());
-        }
-        Ok(Operation::ByteDivideAccumulator {
+    Some((|| match instruction.op0_kind() {
+        OpKind::Register => Ok(Operation::ByteDivideAccumulator {
             kind,
             source: byte_register(instruction.op0_register())?,
-        })
+        }),
+        OpKind::Memory => Ok(Operation::ReadByteDivideAccumulator {
+            kind,
+            address: effective_address(instruction)?,
+        }),
+        _ => Err(unsupported()),
     })())
 }
 
