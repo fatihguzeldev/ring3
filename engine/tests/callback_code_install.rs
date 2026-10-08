@@ -1,3 +1,4 @@
+use ring3_engine::abi::arena::{TRANSFER_OFFSET, TRANSFER_SIZE};
 use ring3_engine::abi::x86::{decode_exit, decode_state, encode_exit_v3, encode_state};
 use ring3_engine::cpu::dbt::{CompileError, InstructionError};
 use ring3_engine::cpu::x86::{State32, decode::DecodeError};
@@ -65,7 +66,8 @@ fn bytes(engine: &EngineInstance, address: u32, length: usize) -> Vec<u8> {
 }
 
 fn descriptors(engine: &mut EngineInstance, blocks: &[(u32, u32)], gates: &[(u32, u32)]) {
-    let transfer = &mut engine.arena_mut().unwrap()[140..];
+    let transfer =
+        &mut engine.arena_mut().unwrap()[TRANSFER_OFFSET..TRANSFER_OFFSET + TRANSFER_SIZE];
     transfer.fill(0xcc);
     for (index, (address, value)) in blocks.iter().chain(gates).enumerate() {
         transfer[index * 8..index * 8 + 4].copy_from_slice(&address.to_le_bytes());
