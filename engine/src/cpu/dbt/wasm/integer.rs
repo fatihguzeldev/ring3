@@ -159,6 +159,71 @@ pub(super) fn instruction(
             string_pointer(code, Register32::Edi);
             store = true;
         }
+        Operation::CompareStringByte => {
+            memory::load_narrow_value(
+                code,
+                EffectiveAddress {
+                    base: Some(Register32::Esi),
+                    index: None,
+                    scale: 1,
+                    displacement: 0,
+                },
+                SmallWidth::Byte,
+                imports,
+                exit_depth,
+            );
+            code.local_set(RESULT);
+            memory::load_narrow_value(
+                code,
+                EffectiveAddress {
+                    base: Some(Register32::Edi),
+                    index: None,
+                    scale: 1,
+                    displacement: 0,
+                },
+                SmallWidth::Byte,
+                imports,
+                exit_depth,
+            );
+            // the second checked read clobbers lhs/rhs; result retains the first byte.
+            code.local_set(RHS)
+                .local_get(RESULT)
+                .local_set(LHS)
+                .local_get(LHS)
+                .local_get(RHS)
+                .i32_sub()
+                .i32_const(0xff)
+                .i32_and()
+                .local_set(RESULT);
+            arithmetic_flags(code, BinaryKind::Cmp, CarryFlag::Calculate, 7);
+            string_pointer(code, Register32::Esi);
+            string_pointer(code, Register32::Edi);
+        }
+        Operation::ScanStringByte => {
+            memory::load_narrow_value(
+                code,
+                EffectiveAddress {
+                    base: Some(Register32::Edi),
+                    index: None,
+                    scale: 1,
+                    displacement: 0,
+                },
+                SmallWidth::Byte,
+                imports,
+                exit_depth,
+            );
+            code.local_set(RHS);
+            byte_value(code, ByteValue::Register(ByteRegister::Al));
+            code.local_set(LHS)
+                .local_get(LHS)
+                .local_get(RHS)
+                .i32_sub()
+                .i32_const(0xff)
+                .i32_and()
+                .local_set(RESULT);
+            arithmetic_flags(code, BinaryKind::Cmp, CarryFlag::Calculate, 7);
+            string_pointer(code, Register32::Edi);
+        }
         Operation::Move {
             destination: Location32::Register(destination),
             source,

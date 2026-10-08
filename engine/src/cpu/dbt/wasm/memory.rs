@@ -59,6 +59,8 @@ impl Imports {
                 }
                 Operation::LoadByte { .. }
                 | Operation::LoadStringByte
+                | Operation::CompareStringByte
+                | Operation::ScanStringByte
                 | Operation::MemoryPredicateByte { .. }
                 | Operation::ReadCompareByte { .. }
                 | Operation::ReadLogicalByte { .. }
