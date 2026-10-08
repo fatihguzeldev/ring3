@@ -445,6 +445,7 @@ pub(super) fn supports(instruction: &DecodedInstruction, embedded: bool) -> bool
             operation,
             Operation::Nop
                 | Operation::InitializeX87
+                | Operation::ClearX87Exceptions
                 | Operation::X87StatusToAx
                 | Operation::Carry { .. }
                 | Operation::Direction { .. }

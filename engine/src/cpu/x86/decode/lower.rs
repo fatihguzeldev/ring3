@@ -18,6 +18,7 @@ pub(super) fn lower(instruction: &Instruction, bytes: &[u8]) -> Result<Operation
     match instruction.code() {
         Code::Nopd => Ok(Operation::Nop),
         Code::Fninit => Ok(Operation::InitializeX87),
+        Code::Fnclex => Ok(Operation::ClearX87Exceptions),
         Code::Fnstsw_AX => Ok(Operation::X87StatusToAx),
         Code::Clc => Ok(Operation::Carry {
             kind: CarryKind::Clear,

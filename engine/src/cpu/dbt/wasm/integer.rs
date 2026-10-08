@@ -29,6 +29,7 @@ pub(super) fn instruction(
     match *instruction.operation() {
         Operation::Nop => {}
         Operation::InitializeX87 => x87::initialize(code),
+        Operation::ClearX87Exceptions => x87::clear_exceptions(code),
         Operation::X87StatusToAx => x87::status_to_ax(code),
         Operation::SignExtendHigh => {
             code.local_get(register(Register32::Eax))

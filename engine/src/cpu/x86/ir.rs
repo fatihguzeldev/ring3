@@ -217,6 +217,7 @@ pub enum CarryKind {
 pub enum Operation {
     Nop,
     InitializeX87,
+    ClearX87Exceptions,
     X87StatusToAx,
     Carry {
         kind: CarryKind,

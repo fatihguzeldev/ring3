@@ -85,6 +85,15 @@ pub(super) fn initialize(code: &mut InstructionSink<'_>) {
     }
 }
 
+pub(super) fn clear_exceptions(code: &mut InstructionSink<'_>) {
+    code.local_get(STATE_PTR)
+        .local_get(STATE_PTR)
+        .i32_load16_u(memarg(X87_STATUS_OFFSET, 1))
+        .i32_const(0x7f00)
+        .i32_and()
+        .i32_store16(memarg(X87_STATUS_OFFSET, 1));
+}
+
 pub(super) fn status_to_ax(code: &mut InstructionSink<'_>) {
     code.local_get(register(Register32::Eax))
         .i32_const(!0xffff)

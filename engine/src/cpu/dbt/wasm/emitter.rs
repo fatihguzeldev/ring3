@@ -26,7 +26,7 @@ pub(in crate::cpu::dbt) fn emit(
         block.instructions.iter().any(|instruction| {
             matches!(
                 instruction.operation(),
-                Operation::InitializeX87 | Operation::X87StatusToAx
+                Operation::InitializeX87 | Operation::ClearX87Exceptions | Operation::X87StatusToAx
             )
         })
     });

@@ -12,6 +12,7 @@ pub(super) fn check_profile(instruction: &Instruction, bytes: &[u8]) -> Result<(
         return Err(DecodeError::Unsupported(UnsupportedFeature::Privileged));
     }
     let x87_control = matches!(instruction.code(), Code::Fninit) && bytes == [0xdb, 0xe3]
+        || matches!(instruction.code(), Code::Fnclex) && bytes == [0xdb, 0xe2]
         || matches!(instruction.code(), Code::Fnstsw_AX) && bytes == [0xdf, 0xe0];
     if !x87_control
         && (features.contains(&CpuidFeature::FPU)
