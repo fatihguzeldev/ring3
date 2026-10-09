@@ -283,7 +283,7 @@ for (const owner of ["replacement", "resident"]) {
     chainStep(ctx, 46, "MOV AX8000", r => {r[0] = 0xa53c8000;}, 0x57 | df);
     rotate(ctx, {family: "one", alias: 0, length: 3}, "retained");
     assert.equal(cpu(ctx).flags, 0x856 | df);
-    chainStep(ctx, 52, "SETO CL1 consumes definedOF", r => {r[1] = 0x91b20021;}, 0x856 | df);
+    chainStep(ctx, 52, "SETO CL1 consumes definedOF", r => {r[1] = 0x91b20001;}, 0x856 | df);
     chainStep(ctx, 56, "MOV AX8000", r => {r[0] = 0xa53c8000;}, 0x856 | df);
     rotate(ctx, {family: "immediate", alias: 0, length: 4, raw: 17}, "retained");
     assert.equal(cpu(ctx).flags, 0x56 | df);
