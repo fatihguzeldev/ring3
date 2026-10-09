@@ -1,6 +1,6 @@
 use ring3_engine::{
     abi::{
-        arena::{CANCEL_OFFSET, TRANSFER_OFFSET},
+        arena::{CANCEL_OFFSET, TRANSFER_OFFSET, TRANSFER_SIZE},
         x86::{decode_state, encode_exit_v3, encode_state},
     },
     cpu::{ExecutionExit, ExitReason, dbt::RegistryError, x86::State32},
@@ -117,7 +117,7 @@ fn stop(engine: &mut EngineInstance, base: u32, id: u32, esp: u32) -> State32 {
     .unwrap();
     arena[96..100].fill(0);
     arena[100..140].fill(0x5a);
-    arena[TRANSFER_OFFSET..].fill(0xcc);
+    arena[TRANSFER_OFFSET..TRANSFER_OFFSET + TRANSFER_SIZE].fill(0xcc);
     state
 }
 
@@ -357,7 +357,7 @@ fn transfer_and_guest_stack_tamper_cannot_replace_private_captured_frame() {
             1,
             0xfedc_ba98,
         );
-        f.engine.arena_mut().unwrap()[TRANSFER_OFFSET..].fill(0x3d);
+        f.engine.arena_mut().unwrap()[TRANSFER_OFFSET..TRANSFER_OFFSET + TRANSFER_SIZE].fill(0x3d);
         f.engine.write32(ESP, 0xdead_beef).unwrap();
         f.engine.write32(ESP + 4, 0x1122_3344).unwrap();
         completed(&mut f, owner, token, state, 0x89ab_cdef, 8);
