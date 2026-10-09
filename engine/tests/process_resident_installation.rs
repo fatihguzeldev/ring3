@@ -1,5 +1,8 @@
 use ring3_engine::{
-    abi::x86::{encode_exit_v3, encode_state},
+    abi::{
+        arena::{TRANSFER_OFFSET, TRANSFER_SIZE},
+        x86::{encode_exit_v3, encode_state},
+    },
     cpu::{ExecutionExit, ExitReason, dbt::RegistryError, x86::State32},
     memory::GuestAddress,
     process::{CallError, EngineInstance, HostError, ResidentInstallation},
@@ -25,7 +28,8 @@ fn upload(engine: &mut EngineInstance, pc: u32, bytes: &[u8]) {
 }
 
 fn compile(engine: &mut EngineInstance, specs: &[(u32, u32)], gates: &[(u32, u32)]) -> u64 {
-    let transfer = &mut engine.arena_mut().unwrap()[140..];
+    let transfer =
+        &mut engine.arena_mut().unwrap()[TRANSFER_OFFSET..TRANSFER_OFFSET + TRANSFER_SIZE];
     transfer.fill(0xa5);
     for (index, &(pc, value)) in specs.iter().chain(gates).enumerate() {
         transfer[index * 8..index * 8 + 4].copy_from_slice(&pc.to_le_bytes());

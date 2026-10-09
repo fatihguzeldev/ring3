@@ -1,5 +1,8 @@
 use ring3_engine::{
-    abi::x86::{decode_exit, decode_state, encode_exit_v3, encode_state},
+    abi::{
+        arena::{HELPER_OFFSET, TRANSFER_OFFSET, TRANSFER_SIZE},
+        x86::{decode_exit, decode_state, encode_exit_v3, encode_state},
+    },
     cpu::{ExecutionExit, ExitReason, x86::State32},
     memory::{Access, FaultReason, GuestAddress, MemoryError, MemoryFault},
     process::{CallError, EngineInstance, HostError, ResidentInstallation},
@@ -149,7 +152,8 @@ fn startup_bytes(entry: u32, esp: u32) -> [u8; 96] {
 }
 
 fn transfer_entries(engine: &mut EngineInstance, entries: &[u32], gates: &[(u32, u32)]) {
-    let transfer = &mut engine.arena_mut().unwrap()[140..];
+    let transfer =
+        &mut engine.arena_mut().unwrap()[TRANSFER_OFFSET..TRANSFER_OFFSET + TRANSFER_SIZE];
     transfer.fill(0xa5);
     for (index, entry) in entries.iter().enumerate() {
         put32(transfer, index * 4, *entry);
@@ -293,7 +297,7 @@ fn all_three_loader_paths_use_private_selected_entry_and_preserve_other_arena_by
             }
         );
         assert_eq!(image_pages, [2, 3, 5][profile]);
-        engine.arena_mut().unwrap()[100..].fill(0xa5);
+        engine.arena_mut().unwrap()[HELPER_OFFSET..TRANSFER_OFFSET + TRANSFER_SIZE].fill(0xa5);
         // forged transfer entry/base/stack values have no startup authority.
         put32(engine.arena_mut().unwrap(), 140 + 24, 0xffff_ffff);
         let before = engine.arena().to_vec();
