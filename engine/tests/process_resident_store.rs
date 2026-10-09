@@ -376,7 +376,7 @@ fn accepted_moves_reach_later_poison_but_cut_spans_and_remaining_operations_do_n
             InstructionError::Decode(DecodeError::Unsupported(UnsupportedFeature::Segment)),
         ),
         (
-            &[0x18, 0xd0],
+            &[0x66, 0x18, 0xd0],
             InstructionError::Decode(DecodeError::Unsupported(UnsupportedFeature::Opcode)),
         ),
         (
