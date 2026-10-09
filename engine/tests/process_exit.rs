@@ -1,7 +1,7 @@
 use ring3_engine::{
     abi::{
         AbiError,
-        arena::{CANCEL_OFFSET, TRANSFER_OFFSET},
+        arena::{CANCEL_OFFSET, TRANSFER_OFFSET, TRANSFER_SIZE},
         x86::{
             EXIT_VERSION_4, decode_exit, decode_state, encode_exit, encode_exit_v2, encode_exit_v3,
             encode_exit_v4, encode_state,
@@ -163,7 +163,7 @@ fn stop(engine: &mut EngineInstance, pc: u32, id: u32, esp: u32) {
     .unwrap();
     arena[96..100].fill(0);
     arena[100..140].fill(0x5a);
-    arena[TRANSFER_OFFSET..].fill(0xcc);
+    arena[TRANSFER_OFFSET..TRANSFER_OFFSET + TRANSFER_SIZE].fill(0xcc);
 }
 
 fn capture(

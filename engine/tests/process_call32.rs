@@ -1,4 +1,7 @@
-use ring3_engine::abi::x86::{decode_state, encode_exit_v3, encode_state};
+use ring3_engine::abi::{
+    arena::{TRANSFER_OFFSET, TRANSFER_SIZE},
+    x86::{decode_state, encode_exit_v3, encode_state},
+};
 use ring3_engine::cpu::x86::State32;
 use ring3_engine::cpu::{ExecutionExit, ExitReason};
 use ring3_engine::memory::{Access, FaultReason, GuestAddress, MemoryError, MemoryFault};
@@ -67,7 +70,7 @@ fn inject_gate_stop(engine: &mut EngineInstance, esp: u32) -> State32 {
     .unwrap();
     arena[96..100].fill(0);
     arena[100..140].fill(0x5a);
-    arena[140..].fill(0xcc);
+    arena[TRANSFER_OFFSET..TRANSFER_OFFSET + TRANSFER_SIZE].fill(0xcc);
     state
 }
 

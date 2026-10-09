@@ -1,6 +1,6 @@
 use ring3_engine::{
     abi::{
-        arena::{ARENA_SIZE, TRANSFER_OFFSET},
+        arena::{ARENA_SIZE, TRANSFER_OFFSET, TRANSFER_SIZE},
         call_frame::{CALL_FRAME_SIZE, CallRecord32, encode_call_frame},
         x86::{encode_exit_v3, encode_state},
     },
@@ -64,7 +64,7 @@ fn stop(engine: &mut EngineInstance, pc: u32, id: u32, esp: u32, retired: u32) -
     .unwrap();
     arena[96..100].fill(0);
     arena[100..140].fill(0x5a);
-    arena[TRANSFER_OFFSET..].fill(0xcc);
+    arena[TRANSFER_OFFSET..TRANSFER_OFFSET + TRANSFER_SIZE].fill(0xcc);
     state
 }
 
