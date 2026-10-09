@@ -289,18 +289,18 @@ function ownerChecks(ctx, unit) {
 function rejectedCounts(ctx, unit) {
   protect(ctx, KEEP, 7);
   for (const immediate of [0, 2, 32, 255]) {
-    const extension = ctx.kind === 'left' ? 0 : 8, bytes = ctx.bank.location === 'register' ? Buffer.from([0x66, 0xc1, 0xc0 | extension, immediate, 0xeb, 0, 0x0f, 0x0b])
+    const extension = ctx.kind === 'left' ? 0 : 8, bytes = ctx.bank.location === 'register' ? Buffer.from([0x66, 0x66, 0xc1, 0xc0 | extension, immediate, 0xeb, 0, 0x0f, 0x0b])
       : Buffer.from([0x66, 0xc1, 5 | extension, 0x10, 0x40, 0, 0, immediate, 0xeb, 0, 0x0f, 0x0b]);
     dataInput(ctx, KEEP, bytes); const published = [ctx.api.generation(), ctx.api.module_ptr(), ctx.api.module_len()];
     request(ctx, words(ctx.owner === 'replacement' ? [KEEP] : [KEEP, bytes.length - 2]));
-    pure(ctx, () => ctx.owner === 'replacement' ? ctx.api.compile_entries(1, 0) : ctx.api.compile_resident(1), ctx.bank.location === 'register' ? 'word-prefixed register count refused' : 'word-prefixed memory count refused', 10); counts.compiler_refusals++;
+    pure(ctx, () => ctx.owner === 'replacement' ? ctx.api.compile_entries(1, 0) : ctx.api.compile_resident(1), ctx.bank.location === 'register' ? 'duplicate word-prefixed register count refused' : 'word-prefixed memory count refused', 10); counts.compiler_refusals++;
     assert.deepEqual([ctx.api.generation(), ctx.api.module_ptr(), ctx.api.module_len()], published, 'failed compiler preserves published metadata');
     assert.deepEqual(Buffer.from(refresh(ctx).bytes.subarray(unit.pointer, unit.pointer + unit.length)), unit.bytes, 'failed compiler preserves published module bytes');
     const registers = Array.from({length: 8}, (_, index) => ctx.expected.readUInt32LE(16 + index * 4)), pc = ctx.expected.readUInt32LE(48), flags = ctx.expected.readUInt32LE(52);
     run(ctx, unit, 0, 'published owner remains valid after refusal', registers, pc, flags, 1, 0); counts.rejection_survivals++;
-    refusalRows.push({owner: ctx.owner, bank: ctx.bank.id, immediate, prefix: 0x66, status: 10, published_module_sha256: hash(unit.bytes)});
+    refusalRows.push({owner: ctx.owner, bank: ctx.bank.id, immediate, prefix: 0x66, prefixes: ctx.bank.location === 'register' ? [0x66, 0x66] : [0x66], status: 10, published_module_sha256: hash(unit.bytes)});
   }
-  dataInput(ctx, KEEP, pattern.subarray(0, ctx.bank.location === 'register' ? 8 : 12)); protect(ctx, KEEP, 3); pages(ctx, 'restored patterned compiler-rejection page', [KEEP]);
+  dataInput(ctx, KEEP, pattern.subarray(0, ctx.bank.location === 'register' ? 9 : 12)); protect(ctx, KEEP, 3); pages(ctx, 'restored patterned compiler-rejection page', [KEEP]);
 }
 function mutation(ctx, unit) {
   const scan = ctx.bank.scans[0], registers = [...REG], beforeFlags = 0xcd7; let flags;
@@ -350,7 +350,7 @@ const expectedCounts = {contexts: 24, modules: 54, seeds: 650, register_matrix: 
   d1_register: 18, d1_memory: 12, rol: 1427, ror: 1427, setb: 642, seto: 642, jumps: 642, canaries: 36, boundaries: 32, live_producers: 32,
   fault_calls: 112, read_faults: 80, write_faults: 32, prefixes: 56, repairs: 48, permission_only_repairs: 8, map_only_repairs: 4,
   code_stores: 12, same_value_code_stores: 8, changing_code_stores: 4, continuation_canaries: 12, mutations: 8, compiler_refusals: 32, rejection_survivals: 32,
-  preflight: 200, owner_controls: 112, generated_calls: 5264, maps: 104, unmaps: 16, protects: 264, host_uploads: 488, host_uploaded_bytes: 332500,
+  preflight: 200, owner_controls: 112, generated_calls: 5264, maps: 104, unmaps: 16, protects: 264, host_uploads: 488, host_uploaded_bytes: 332520,
   standalone_page_inputs: 8, pages: 512};
 for (const [name, expected] of Object.entries(expectedCounts)) assert.equal(counts[name], expected, `exact observed ${name} census`);
 assert.deepEqual([...observedCl].sort((a, b) => a - b), [0, 1, 31, 32, 255]);
@@ -361,6 +361,6 @@ const result = {status: 'ok', engine_sha256: hash(engineBytes), tools: {node: pr
     banks: banks.map(bank => ({id: bank.id, specs: bank.specs, scans: bank.scans, d1: bank.d1, instructions: bank.instructions, sha256: hash(bank.bytes), hex: bank.bytes.toString('hex')})),
     flag_policy: 'CF/OF from effective count-one rotation; preserve SF/ZF/AF/PF/DF/fixed bit 1; memory flags publish only after successful Store4'},
   test_sha256: Object.fromEntries(['engine/tests/cpu_rotate_immediate_one_wasm.rs', 'engine/tests/fixtures/p2-rotate-immediate-one/run.mjs'].map(path => [path, hash(readFileSync(join(root, path)))])),
-  claim: 'finite flat32 C1 ROL/ROR encodings for masked-one immediate bytes 1/33/65/97/129/161/193/225: all eight register destinations through actual standalone/replacement/resident modules, eight declared memory EA/immediate forms through actual replacement/resident modules; three initial sources and two FLAGS seeds plus declared evolved intermediates, independent binary-string/literal rotation and widened/literal ADD oracle, complete producer and rotate CPU before live partial consumers without CPU repair; compact D1 controls; exact existing imports and 4236-byte arena/current declared pages; precise Read4/Write4 faults and atomic failure, retired LEA, zero-retirement retry, permission-only/map-only/changed-value data repairs without CPU/module reset, overflow separately unrepairable; unchanged and changing code stores reason 6 then stale 4, fresh current consumers/canary/JMP without CPU writes, closed 5; one-byte consumed immediate 1 to 33 uploads invalidate despite equal semantics and fresh compiled banks resume same CPU/EIP; actual compiler refusals use word-prefixed register and memory forms with raw counts 0/2/32/255, preserving published modules; KEEP restores cover all eight register or twelve memory uploaded bytes; this fixture purpose remains finite masked-one arithmetic, with prior unchanged R400/R401 full FLAGS math evidence retained rather than rerun'};
+  claim: 'finite flat32 C1 ROL/ROR encodings for masked-one immediate bytes 1/33/65/97/129/161/193/225: all eight register destinations through actual standalone/replacement/resident modules, eight declared memory EA/immediate forms through actual replacement/resident modules; three initial sources and two FLAGS seeds plus declared evolved intermediates, independent binary-string/literal rotation and widened/literal ADD oracle, complete producer and rotate CPU before live partial consumers without CPU repair; compact D1 controls; exact existing imports and 4236-byte arena/current declared pages; precise Read4/Write4 faults and atomic failure, retired LEA, zero-retirement retry, permission-only/map-only/changed-value data repairs without CPU/module reset, overflow separately unrepairable; unchanged and changing code stores reason 6 then stale 4, fresh current consumers/canary/JMP without CPU writes, closed 5; one-byte consumed immediate 1 to 33 uploads invalidate despite equal semantics and fresh compiled banks resume same CPU/EIP; actual compiler refusals use duplicate word-prefixed register and word-prefixed memory forms with raw counts 0/2/32/255, preserving published modules; KEEP restores cover all nine register or twelve memory uploaded bytes; this fixture purpose remains finite masked-one arithmetic, with prior unchanged R400/R401 full FLAGS math evidence retained rather than rerun'};
 const resultBytes = Buffer.from(JSON.stringify(result, null, 2)); writeFileSync(join(output, 'result.json'), resultBytes, {flag: 'wx'});
 console.log(JSON.stringify({status: result.status, engine_sha256: result.engine_sha256, result_sha256: hash(resultBytes), counts, output}));

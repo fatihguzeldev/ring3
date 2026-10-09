@@ -205,6 +205,7 @@ pub(super) fn lower(instruction: &Instruction) -> Option<Result<Operation, Decod
                 .or_else(|| lower_memory_shift_byte_cl(instruction))
                 .or_else(|| lower_shift(instruction))
                 .or_else(|| lower_double_shift(instruction))
+                .or_else(|| lower_word_rotate(instruction))
                 .or_else(|| lower_rotate_one(instruction))
                 .or_else(|| lower_byte_rotate_immediate(instruction))
                 .or_else(|| lower_byte_rotate_cl(instruction))
@@ -450,6 +451,31 @@ fn lower_double_shift(instruction: &Instruction) -> Option<Result<Operation, Dec
             },
         })
     })())
+}
+
+fn lower_word_rotate(instruction: &Instruction) -> Option<Result<Operation, DecodeError>> {
+    let (kind, count) = match instruction.code() {
+        Code::Rol_rm16_1 => (RotateKind::Left, ShiftCount::Immediate(1)),
+        Code::Ror_rm16_1 => (RotateKind::Right, ShiftCount::Immediate(1)),
+        Code::Rol_rm16_imm8 => (
+            RotateKind::Left,
+            ShiftCount::Immediate(instruction.immediate8()),
+        ),
+        Code::Ror_rm16_imm8 => (
+            RotateKind::Right,
+            ShiftCount::Immediate(instruction.immediate8()),
+        ),
+        Code::Rol_rm16_CL => (RotateKind::Left, ShiftCount::Cl),
+        Code::Ror_rm16_CL => (RotateKind::Right, ShiftCount::Cl),
+        _ => return None,
+    };
+    Some(
+        word_register(instruction.op0_register()).map(|destination| Operation::RotateWord {
+            kind,
+            destination,
+            count,
+        }),
+    )
 }
 
 fn lower_rotate_one(instruction: &Instruction) -> Option<Result<Operation, DecodeError>> {

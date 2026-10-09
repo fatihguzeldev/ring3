@@ -144,6 +144,15 @@ pub(super) fn check_profile(instruction: &Instruction, bytes: &[u8]) -> Result<(
         | (Code::Sar_rm16_imm8, [0x66, 0xc1, modrm, _]) => *modrm & 0xf8 == 0xf8,
         _ => false,
     };
+    let exact_word_rotate = match (instruction.code(), bytes) {
+        (Code::Rol_rm16_1, [0x66, 0xd1, modrm])
+        | (Code::Rol_rm16_CL, [0x66, 0xd3, modrm])
+        | (Code::Rol_rm16_imm8, [0x66, 0xc1, modrm, _]) => *modrm & 0xf8 == 0xc0,
+        (Code::Ror_rm16_1, [0x66, 0xd1, modrm])
+        | (Code::Ror_rm16_CL, [0x66, 0xd3, modrm])
+        | (Code::Ror_rm16_imm8, [0x66, 0xc1, modrm, _]) => *modrm & 0xf8 == 0xc8,
+        _ => false,
+    };
     if instruction.has_lock_prefix()
         || instruction.has_rep_prefix()
         || instruction.has_repne_prefix()
@@ -153,7 +162,8 @@ pub(super) fn check_profile(instruction: &Instruction, bytes: &[u8]) -> Result<(
             || exact_word_arithmetic
             || exact_word_logical
             || exact_word_unary
-            || exact_word_shift)
+            || exact_word_shift
+            || exact_word_rotate)
             && bytes
                 .iter()
                 .take_while(|byte| is_prefix(**byte))

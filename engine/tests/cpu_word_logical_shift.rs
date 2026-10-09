@@ -339,7 +339,10 @@ fn word_logical_shift_strict_fetch_top_and_consumed_currency_stay_exact() {
     }
     for opcode in [0xd1, 0xc1, 0xd3] {
         for extension in [0, 1, 2, 3, 6] {
-            let bytes = encoding(opcode, 0xc0 | extension << 3, 1);
+            let mut bytes = encoding(opcode, 0xc0 | extension << 3, 1);
+            if extension < 2 {
+                bytes.insert(0, 0x66);
+            }
             assert_eq!(
                 decode_one(fixture(PC, &bytes).memory().unwrap(), GuestAddress(PC)).unwrap_err(),
                 unsupported,

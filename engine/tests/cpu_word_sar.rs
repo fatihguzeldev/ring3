@@ -457,6 +457,9 @@ fn exact_sar_prefix_fetch_top_and_consumed_source_boundaries() {
                 0xc0 | extension << 3
             };
             let mut refused = vec![0x66, opcode, modrm];
+            if extension < 2 {
+                refused.insert(0, 0x66);
+            }
             if opcode == 0xc1 {
                 refused.push(0xff);
             }

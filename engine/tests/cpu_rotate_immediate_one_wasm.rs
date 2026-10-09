@@ -1,6 +1,6 @@
 use std::{
     fs,
-    path::Path,
+    path::{Path, PathBuf},
     process::Command,
     time::{SystemTime, UNIX_EPOCH},
 };
@@ -13,7 +13,10 @@ use ring3_engine::{
 #[test]
 fn actual_wasm_accepts_only_masked_one_rotate_immediates() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
-    let engine = root.join("target/wasm32-unknown-unknown/debug/ring3_engine.wasm");
+    let engine = std::env::var_os("RING3_ENGINE_WASM").map_or_else(
+        || root.join("target/wasm32-unknown-unknown/debug/ring3_engine.wasm"),
+        PathBuf::from,
+    );
     assert!(
         engine.is_file(),
         "build the actual engine wasm32 cdylib first"

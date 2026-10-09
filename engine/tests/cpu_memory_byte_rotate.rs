@@ -703,8 +703,16 @@ fn exclusions() -> Vec<(Vec<u8>, DecodeError)> {
             cases.push((vec![0x66, 0xd2, operand], unsupported));
         }
         for operand in [0xc0 | field, 0x03 | field] {
-            cases.push((vec![0x66, 0xc1, operand, 2], unsupported));
-            cases.push((vec![0x66, 0xd3, operand], unsupported));
+            let prefix = if operand & 0xc0 == 0xc0 {
+                vec![0x66, 0x66]
+            } else {
+                vec![0x66]
+            };
+            cases.push((
+                [prefix.clone(), vec![0xc1, operand, 2]].concat(),
+                unsupported,
+            ));
+            cases.push(([prefix, vec![0xd3, operand]].concat(), unsupported));
         }
     }
     for field in [2, 3] {

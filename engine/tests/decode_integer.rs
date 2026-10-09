@@ -300,8 +300,14 @@ fn adjacent_unsupported_integer_instructions_remain_rejected() {
         ),
         ("operand-prefixed adc byte memory", &[0x66, 0x10, 0x10]),
         ("operand-prefixed sbb byte memory", &[0x66, 0x18, 0x10]),
-        ("rol word", &[0x66, 0xd1, 0xc0]),
-        ("ror word", &[0x66, 0xd1, 0xc8]),
+        (
+            "duplicate operand-prefixed rol word",
+            &[0x66, 0x66, 0xd1, 0xc0],
+        ),
+        (
+            "duplicate operand-prefixed ror word",
+            &[0x66, 0x66, 0xd1, 0xc8],
+        ),
         ("mul word", &[0x66, 0xf7, 0xe2]),
         ("imul word", &[0x66, 0x0f, 0xaf, 0xc2]),
         ("idiv word", &[0x66, 0xf7, 0xfa]),

@@ -457,7 +457,11 @@ fn raw_immediate_domain_and_strict_neighbors_preserve_decode_boundaries() {
                     }
                     _ => opcode,
                 };
-                rejected(&[prefix, 0xc1, modrm, 225], expected);
+                let mut bytes = vec![prefix, 0xc1, modrm, 225];
+                if prefix == 0x66 && !memory {
+                    bytes.insert(0, 0x66);
+                }
+                rejected(&bytes, expected);
                 exclusions += 1;
             }
             for mut bytes in [
@@ -468,6 +472,9 @@ fn raw_immediate_domain_and_strict_neighbors_preserve_decode_boundaries() {
             ] {
                 if bytes[0] == 0xd3 || bytes[0] == 0xd2 {
                     bytes.insert(0, 0x66);
+                    if bytes[1] == 0xd3 && !memory {
+                        bytes.insert(0, 0x66);
+                    }
                 }
                 rejected(&bytes, opcode);
                 exclusions += 1;
@@ -740,8 +747,8 @@ fn late_immediate_rotate_failures_preserve_both_publications() {
             ),
             (
                 CODE,
-                vec![0xc1, modrm, 33, 0x66, 0xc1, modrm ^ 8, 1],
-                7,
+                vec![0xc1, modrm, 33, 0x66, 0x66, 0xc1, modrm ^ 8, 1],
+                8,
                 instruction_error(CODE + 3, opcode),
             ),
             (

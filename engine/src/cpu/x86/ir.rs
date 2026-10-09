@@ -673,4 +673,9 @@ pub enum Operation {
         destination: Register32,
         count: ShiftCount,
     },
+    RotateWord {
+        kind: RotateKind,
+        destination: Register32,
+        count: ShiftCount,
+    },
 }
