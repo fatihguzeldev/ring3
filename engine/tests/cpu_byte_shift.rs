@@ -159,7 +159,7 @@ fn excluded() -> Vec<(Vec<u8>, DecodeError)> {
                 bytes.extend(&register);
                 forms.push((bytes, unsupported));
             }
-            let mut word = vec![0x66];
+            let mut word = vec![0x66, 0x66];
             word.extend(encoding(opcode + 1, 0xc0 | extension << 3, 0xff));
             forms.push((word, unsupported));
             for instruction in [register, memory] {

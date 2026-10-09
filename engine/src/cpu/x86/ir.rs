@@ -668,4 +668,9 @@ pub enum Operation {
         kind: UnaryKind,
         destination: Register32,
     },
+    ShiftWord {
+        kind: ShiftKind,
+        destination: Register32,
+        count: ShiftCount,
+    },
 }

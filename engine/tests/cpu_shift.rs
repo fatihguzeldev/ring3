@@ -293,7 +293,7 @@ fn width_rotates_sal_alias_and_prefixes_keep_precise_rejection_categories() {
         for bytes in [
             vec![0x66, 0xc0, extension << 3, 2],
             vec![0x66, 0xd2, extension << 3],
-            vec![0x66, 0xd1, 0xc0 | extension << 3],
+            vec![0x66, 0x66, 0xd1, 0xc0 | extension << 3],
             vec![0x67, 0xd3, extension << 3 | 3],
             vec![0xf3, 0xd1, 0xc0 | extension << 3],
         ] {
