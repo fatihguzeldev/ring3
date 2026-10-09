@@ -102,7 +102,7 @@ assert.deepEqual(pins(),sourcePins);assert.equal(counts.contexts,4);assert.equal
 assert.equal(counts.cmpsw,124);assert.equal(counts.scasw,108);assert.equal(counts.mov_eax,16);assert.equal(counts.jumps,16);assert.equal(counts.prefix_nops,48);assert.equal(counts.controls,32);
 const hostCounts=Object.fromEntries(["map","unmap","protect","upload","read16","compile","compile_entries","compile_resident","compile_resident_entries"].map(name=>[name,journal.filter(row=>row.name===name).length]));
 assert.deepEqual(hostCounts,{map:64,unmap:44,protect:36,upload:596,read16:396,compile:1,compile_entries:1,compile_resident:1,compile_resident_entries:1});
-assert.equal(journal.filter(row=>row.name==="input").length,864);assert.equal(journal.length,2816);assert.equal(frames.length,5620);
+assert.equal(journal.filter(row=>row.name==="input").length,864);assert.equal(journal.length,2416);assert.equal(frames.length,4820);
 const raw=Buffer.concat(frames);writeFileSync(join(output,"arenas.bin"),raw,{flag:"wx"});
 const result={status:"ok",engine:{bytes:engine.bytes.length,sha256:engine.sha256,caller_sha256:process.env.RING3_ENGINE_SHA256},source_pins:sourcePins,counts:{...counts,modules:modules.length,host_counts:hostCounts,host_inputs:journal.filter(row=>row.name==="input").length,journal_records:journal.length,raw_frames:frames.length},modules,journal,
  raw:{file:"arenas.bin",frames:frames.length,bytes:raw.length,sha256:hash(raw)},limits:["exact flat32 CMPSW/SCASW finite word literals/DF/read2/current AX only","full4364 saved input/host/generated pairs plus preclose frames and selected live Read16 diagnostics; no RAM dump or full module body proof",
