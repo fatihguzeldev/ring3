@@ -10,7 +10,10 @@ use super::{
 };
 use crate::cpu::x86::{
     Register32,
-    ir::{CarryKind, ExtensionKind, Operation, SmallSource, SmallWidth, WordArithmeticKind},
+    ir::{
+        CarryKind, ExtensionKind, Operation, SmallSource, SmallWidth, WordArithmeticKind,
+        WordLogicalKind,
+    },
 };
 
 pub(super) fn lower(instruction: &Instruction, bytes: &[u8]) -> Result<Operation, DecodeError> {
@@ -89,6 +92,33 @@ pub(super) fn lower(instruction: &Instruction, bytes: &[u8]) -> Result<Operation
         | Code::Sub_rm16_imm16
         | Code::Sub_rm16_imm8 => Ok(Operation::ArithmeticWord {
             kind: WordArithmeticKind::Sub,
+            destination: word_register(instruction.op0_register())?,
+            source: word_value(instruction)?,
+        }),
+        Code::And_rm16_r16
+        | Code::And_r16_rm16
+        | Code::And_AX_imm16
+        | Code::And_rm16_imm16
+        | Code::And_rm16_imm8 => Ok(Operation::LogicalWord {
+            kind: WordLogicalKind::And,
+            destination: word_register(instruction.op0_register())?,
+            source: word_value(instruction)?,
+        }),
+        Code::Or_rm16_r16
+        | Code::Or_r16_rm16
+        | Code::Or_AX_imm16
+        | Code::Or_rm16_imm16
+        | Code::Or_rm16_imm8 => Ok(Operation::LogicalWord {
+            kind: WordLogicalKind::Or,
+            destination: word_register(instruction.op0_register())?,
+            source: word_value(instruction)?,
+        }),
+        Code::Xor_rm16_r16
+        | Code::Xor_r16_rm16
+        | Code::Xor_AX_imm16
+        | Code::Xor_rm16_imm16
+        | Code::Xor_rm16_imm8 => Ok(Operation::LogicalWord {
+            kind: WordLogicalKind::Xor,
             destination: word_register(instruction.op0_register())?,
             source: word_value(instruction)?,
         }),

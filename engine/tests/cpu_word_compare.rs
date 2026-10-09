@@ -328,7 +328,7 @@ fn word_compare_strict_forms_fetch_and_consumed_code_currency_stay_exact() {
             if opcode_byte == 0x81 {
                 bytes.push(0);
             }
-            if matches!(extension, 0 | 5) {
+            if matches!(extension, 0 | 1 | 4 | 5 | 6) {
                 bytes.insert(0, 0x66);
             }
             assert_eq!(

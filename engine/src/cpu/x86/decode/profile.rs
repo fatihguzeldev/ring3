@@ -94,13 +94,32 @@ pub(super) fn check_profile(instruction: &Instruction, bytes: &[u8]) -> Result<(
         | (Code::Sub_rm16_imm8, [0x66, 0x83, modrm, _]) => *modrm & 0xf8 == 0xe8,
         _ => false,
     };
+    let exact_word_logical = match (instruction.code(), bytes) {
+        (Code::And_rm16_r16, [0x66, 0x21, modrm])
+        | (Code::And_r16_rm16, [0x66, 0x23, modrm])
+        | (Code::Or_rm16_r16, [0x66, 0x09, modrm])
+        | (Code::Or_r16_rm16, [0x66, 0x0b, modrm])
+        | (Code::Xor_rm16_r16, [0x66, 0x31, modrm])
+        | (Code::Xor_r16_rm16, [0x66, 0x33, modrm]) => *modrm & 0xc0 == 0xc0,
+        (Code::And_AX_imm16, [0x66, 0x25, _, _])
+        | (Code::Or_AX_imm16, [0x66, 0x0d, _, _])
+        | (Code::Xor_AX_imm16, [0x66, 0x35, _, _]) => true,
+        (Code::And_rm16_imm16, [0x66, 0x81, modrm, _, _])
+        | (Code::And_rm16_imm8, [0x66, 0x83, modrm, _]) => *modrm & 0xf8 == 0xe0,
+        (Code::Or_rm16_imm16, [0x66, 0x81, modrm, _, _])
+        | (Code::Or_rm16_imm8, [0x66, 0x83, modrm, _]) => *modrm & 0xf8 == 0xc8,
+        (Code::Xor_rm16_imm16, [0x66, 0x81, modrm, _, _])
+        | (Code::Xor_rm16_imm8, [0x66, 0x83, modrm, _]) => *modrm & 0xf8 == 0xf0,
+        _ => false,
+    };
     if instruction.has_lock_prefix()
         || instruction.has_rep_prefix()
         || instruction.has_repne_prefix()
         || (!(exact_word_string
             || exact_word_move
             || exact_word_predicate
-            || exact_word_arithmetic)
+            || exact_word_arithmetic
+            || exact_word_logical)
             && bytes
                 .iter()
                 .take_while(|byte| is_prefix(**byte))

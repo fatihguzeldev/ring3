@@ -330,6 +330,9 @@ fn word_add_strict_forms_fetch_and_consumed_code_currency_stay_exact() {
             if opcode_byte == 0x81 {
                 bytes.push(0);
             }
+            if matches!(extension, 1 | 4 | 6) {
+                bytes.insert(0, 0x66);
+            }
             assert_eq!(
                 decode_one(fixture(PC, &bytes).memory().unwrap(), GuestAddress(PC)).unwrap_err(),
                 opcode

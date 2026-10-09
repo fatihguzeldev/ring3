@@ -53,6 +53,13 @@ pub enum WordArithmeticKind {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum WordLogicalKind {
+    And,
+    Or,
+    Xor,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum BytePredicateKind {
     Cmp,
     Test,
@@ -283,6 +290,11 @@ pub enum Operation {
     },
     ArithmeticWord {
         kind: WordArithmeticKind,
+        destination: Register32,
+        source: WordValue,
+    },
+    LogicalWord {
+        kind: WordLogicalKind,
         destination: Register32,
         source: WordValue,
     },

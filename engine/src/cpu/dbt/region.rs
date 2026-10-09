@@ -478,6 +478,7 @@ pub(super) fn supports(instruction: &DecodedInstruction, embedded: bool) -> bool
                 | Operation::MoveByte { .. }
                 | Operation::MoveWord { .. }
                 | Operation::ArithmeticWord { .. }
+                | Operation::LogicalWord { .. }
                 | Operation::CompareWord { .. }
                 | Operation::TestWord { .. }
                 | Operation::CompareByte { .. }

@@ -10,7 +10,7 @@ use crate::cpu::x86::{
         CarryKind, Condition, CountBranchKind, DivideKind, DoubleShiftKind, EffectiveAddress,
         ExtensionKind, Location32, MemoryByteArithmeticKind, MultiplyKind, Operation, RotateKind,
         ShiftCount, ShiftKind, SmallSource, SmallWidth, UnaryKind, Value32, WordArithmeticKind,
-        WordValue,
+        WordLogicalKind, WordValue,
     },
 };
 
@@ -555,6 +555,27 @@ pub(super) fn instruction(
             };
             code.i32_const(0xffff).i32_and().local_set(RESULT);
             arithmetic_flags(code, binary, CarryFlag::Calculate, 15);
+            code.local_get(RESULT)
+                .local_get(register(destination))
+                .i32_const(!0xffff)
+                .i32_and()
+                .i32_or()
+                .local_set(register(destination));
+        }
+        Operation::LogicalWord {
+            kind,
+            destination,
+            source,
+        } => {
+            word_value(code, WordValue::Register(destination));
+            word_value(code, source);
+            match kind {
+                WordLogicalKind::And => code.i32_and(),
+                WordLogicalKind::Or => code.i32_or(),
+                WordLogicalKind::Xor => code.i32_xor(),
+            };
+            code.local_set(RESULT);
+            logical_flags(code, 15);
             code.local_get(RESULT)
                 .local_get(register(destination))
                 .i32_const(!0xffff)

@@ -171,7 +171,7 @@ fn excluded() -> Vec<(Vec<u8>, DecodeError)> {
             vec![0x66, 0x80, extension << 3, 0xff],
             vec![0x82, 0xc0 | extension << 3, 0xff],
             vec![0x66, to_rm, 0xc0],
-            vec![0x66, to_rm + 1, 0xc0],
+            vec![0x66, 0x66, to_rm + 1, 0xc0],
             vec![0x67, to_reg, 0xc0],
             vec![0xf2, al, 0xff],
             vec![0xf3, 0x80, 0xc0 | extension << 3, 0xff],
