@@ -526,19 +526,31 @@ pub(super) fn instruction(
             destination,
             source,
         } => {
-            match source {
-                WordValue::Register(source) => {
-                    code.local_get(register(source)).i32_const(0xffff).i32_and();
-                }
-                WordValue::Immediate(value) => {
-                    code.i32_const(i32::from(value));
-                }
-            }
+            word_value(code, source);
             code.local_get(register(destination))
                 .i32_const(!0xffff)
                 .i32_and()
                 .i32_or()
                 .local_set(register(destination));
+        }
+        Operation::CompareWord { left, right } => {
+            word_value(code, WordValue::Register(left));
+            code.local_set(LHS);
+            word_value(code, right);
+            code.local_set(RHS)
+                .local_get(LHS)
+                .local_get(RHS)
+                .i32_sub()
+                .i32_const(0xffff)
+                .i32_and()
+                .local_set(RESULT);
+            arithmetic_flags(code, BinaryKind::Cmp, CarryFlag::Calculate, 15);
+        }
+        Operation::TestWord { left, right } => {
+            word_value(code, WordValue::Register(left));
+            word_value(code, right);
+            code.i32_and().local_set(RESULT);
+            logical_flags(code, 15);
         }
         Operation::SetByte {
             condition,
@@ -1788,6 +1800,17 @@ fn insert_byte(code: &mut InstructionSink<'_>, destination: ByteRegister) {
         .i32_and()
         .i32_or()
         .local_set(register(parent));
+}
+
+fn word_value(code: &mut InstructionSink<'_>, value: WordValue) {
+    match value {
+        WordValue::Register(source) => {
+            code.local_get(register(source)).i32_const(0xffff).i32_and();
+        }
+        WordValue::Immediate(value) => {
+            code.i32_const(i32::from(value));
+        }
+    }
 }
 
 fn byte_value(code: &mut InstructionSink<'_>, value: ByteValue) {

@@ -56,6 +56,7 @@ pub(super) fn word_value(instruction: &Instruction) -> Result<WordValue, DecodeE
     match instruction.op1_kind() {
         OpKind::Register => word_register(instruction.op1_register()).map(WordValue::Register),
         OpKind::Immediate16 => Ok(WordValue::Immediate(instruction.immediate16())),
+        OpKind::Immediate8to16 => Ok(WordValue::Immediate(instruction.immediate8to16() as u16)),
         _ => Err(unsupported()),
     }
 }

@@ -70,10 +70,22 @@ pub(super) fn check_profile(instruction: &Instruction, bytes: &[u8]) -> Result<(
         (Code::Mov_rm16_imm16, [0x66, 0xc7, modrm, _, _]) => *modrm & 0xf8 == 0xc0,
         _ => false,
     };
+    let exact_word_predicate = match (instruction.code(), bytes) {
+        (Code::Cmp_rm16_r16, [0x66, 0x39, modrm])
+        | (Code::Cmp_r16_rm16, [0x66, 0x3b, modrm])
+        | (Code::Test_rm16_r16, [0x66, 0x85, modrm]) => *modrm & 0xc0 == 0xc0,
+        (Code::Cmp_AX_imm16, [0x66, 0x3d, _, _]) | (Code::Test_AX_imm16, [0x66, 0xa9, _, _]) => {
+            true
+        }
+        (Code::Cmp_rm16_imm16, [0x66, 0x81, modrm, _, _])
+        | (Code::Cmp_rm16_imm8, [0x66, 0x83, modrm, _]) => *modrm & 0xf8 == 0xf8,
+        (Code::Test_rm16_imm16, [0x66, 0xf7, modrm, _, _]) => *modrm & 0xf8 == 0xc0,
+        _ => false,
+    };
     if instruction.has_lock_prefix()
         || instruction.has_rep_prefix()
         || instruction.has_repne_prefix()
-        || (!(exact_word_string || exact_word_move)
+        || (!(exact_word_string || exact_word_move || exact_word_predicate)
             && bytes
                 .iter()
                 .take_while(|byte| is_prefix(**byte))

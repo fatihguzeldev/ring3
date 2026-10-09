@@ -74,6 +74,20 @@ pub(super) fn lower(instruction: &Instruction, bytes: &[u8]) -> Result<Operation
                 source: word_value(instruction)?,
             })
         }
+        Code::Cmp_rm16_r16
+        | Code::Cmp_r16_rm16
+        | Code::Cmp_AX_imm16
+        | Code::Cmp_rm16_imm16
+        | Code::Cmp_rm16_imm8 => Ok(Operation::CompareWord {
+            left: word_register(instruction.op0_register())?,
+            right: word_value(instruction)?,
+        }),
+        Code::Test_rm16_r16 | Code::Test_AX_imm16 | Code::Test_rm16_imm16 => {
+            Ok(Operation::TestWord {
+                left: word_register(instruction.op0_register())?,
+                right: word_value(instruction)?,
+            })
+        }
         Code::Mov_r8_rm8 | Code::Mov_AL_moffs8 => match instruction.op1_kind() {
             OpKind::Memory => Ok(Operation::LoadByte {
                 destination: byte_register(instruction.op0_register())?,

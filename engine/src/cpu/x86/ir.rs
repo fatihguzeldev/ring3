@@ -275,6 +275,14 @@ pub enum Operation {
         destination: Register32,
         source: WordValue,
     },
+    CompareWord {
+        left: Register32,
+        right: WordValue,
+    },
+    TestWord {
+        left: Register32,
+        right: WordValue,
+    },
     CompareByte {
         left: ByteRegister,
         right: ByteValue,
