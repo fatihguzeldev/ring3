@@ -63,6 +63,17 @@ pub(super) fn check_profile(instruction: &Instruction, bytes: &[u8]) -> Result<(
         || instruction.code() == Code::Cmpsw_m16_m16 && bytes == [0x66, 0xa7]
         || instruction.code() == Code::Scasw_AX_m16 && bytes == [0x66, 0xaf];
     let exact_word_move = match (instruction.code(), bytes) {
+        (Code::Mov_rm16_r16, [0x66, 0x89, modrm, ..])
+        | (Code::Mov_r16_rm16, [0x66, 0x8b, modrm, ..])
+            if *modrm & 0xc0 != 0xc0 =>
+        {
+            true
+        }
+        (Code::Mov_rm16_imm16, [0x66, 0xc7, modrm, ..])
+            if *modrm & 0xc0 != 0xc0 && *modrm & 0x38 == 0 =>
+        {
+            true
+        }
         (Code::Mov_rm16_r16, [0x66, 0x89, modrm]) | (Code::Mov_r16_rm16, [0x66, 0x8b, modrm]) => {
             *modrm & 0xc0 == 0xc0
         }

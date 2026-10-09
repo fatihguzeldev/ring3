@@ -243,7 +243,7 @@ fn excluded_operations_and_poison_keep_original_pc_and_block_end_priority() {
         InstructionError::Decode(DecodeError::Unsupported(UnsupportedFeature::Opcode)),
     );
     for instruction in [
-        &[0x66, 0x8b, 0x03][..],
+        &[0x66, 0x66, 0x8b, 0x03][..],
         &[0x67, 0x8b, 0x03],
         &[0x66, 0x10, 0xd0],
         &[0xf0, 0x01, 0x03],

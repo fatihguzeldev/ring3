@@ -875,6 +875,23 @@ pub(super) fn instruction(
             memory::store_byte(code, address, source, imports, exit_depth);
             store = true;
         }
+        Operation::LoadWord {
+            destination,
+            address,
+        } => {
+            memory::load_narrow_value(code, address, SmallWidth::Word, imports, exit_depth);
+            code.local_get(register(destination))
+                .i32_const(!0xffff)
+                .i32_and()
+                .i32_or()
+                .local_set(register(destination));
+        }
+        Operation::StoreWord { address, source } => {
+            word_value(code, source);
+            code.local_set(RESULT);
+            memory::store_word_result(code, address, imports, exit_depth);
+            store = true;
+        }
         Operation::Extend {
             kind,
             destination,

@@ -56,6 +56,7 @@ impl Imports {
             match instruction.operation() {
                 Operation::X87StatusToMemory { .. }
                 | Operation::X87ControlToMemory { .. }
+                | Operation::StoreWord { .. }
                 | Operation::StoreStringWord => {
                     store16 = true;
                 }
@@ -92,7 +93,8 @@ impl Imports {
                     read8 = true;
                     store8 = true;
                 }
-                Operation::LoadStringWord
+                Operation::LoadWord { .. }
+                | Operation::LoadStringWord
                 | Operation::CompareStringWord
                 | Operation::ScanStringWord => read16 = true,
                 Operation::MoveStringWord => {

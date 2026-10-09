@@ -381,6 +381,14 @@ pub enum Operation {
         address: EffectiveAddress,
         source: ByteValue,
     },
+    LoadWord {
+        destination: Register32,
+        address: EffectiveAddress,
+    },
+    StoreWord {
+        address: EffectiveAddress,
+        source: WordValue,
+    },
     Extend {
         kind: ExtensionKind,
         destination: Register32,

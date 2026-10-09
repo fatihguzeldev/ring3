@@ -324,8 +324,8 @@ fn strict_prefix_byte_memory_and_address_neighbors_keep_current_categories() {
             vec![0x67, opcode, 0xc3],
             vec![0xf2, 0x66, opcode, 0xc3],
             vec![0xf3, 0x66, opcode, 0xc3],
-            vec![0x66, opcode, 0x03],
-            vec![0x66, opcode, 0x43, 0],
+            vec![0x66, 0x66, opcode, 0x03],
+            vec![0x66, 0x67, opcode, 0x43, 0],
         ] {
             assert_eq!(
                 decode_one(fixture(PC, &bytes).memory().unwrap(), GuestAddress(PC)).err(),

@@ -364,7 +364,7 @@ fn accepted_moves_reach_later_poison_but_cut_spans_and_remaining_operations_do_n
         (&[0xe8, 0, 0, 0, 0], InstructionError::InvalidBlockEnd),
         (&[0xc3], InstructionError::InvalidBlockEnd),
         (
-            &[0x66, 0x89, 0x03],
+            &[0x66, 0x66, 0x89, 0x03],
             InstructionError::Decode(DecodeError::Unsupported(UnsupportedFeature::Opcode)),
         ),
         (

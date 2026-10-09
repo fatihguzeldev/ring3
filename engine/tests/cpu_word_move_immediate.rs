@@ -433,7 +433,7 @@ fn exact_immediate_prefix_fetch_and_consumed_currency_boundaries() {
         }
     }
     for bytes in [
-        vec![0x66, 0xc7, 0, 0, 0],
+        vec![0x66, 0x66, 0xc7, 0, 0, 0],
         vec![0x66, 0xc7, 0xc8, 0, 0],
         vec![0x66, 0xb0, 1],
         vec![0x66, 0xc6, 0xc0, 1],

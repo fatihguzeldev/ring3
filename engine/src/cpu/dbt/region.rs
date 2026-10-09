@@ -307,6 +307,7 @@ fn supports_memory_reads(operation: &Operation) -> bool {
     matches!(
         operation,
         Operation::LoadByte { .. }
+            | Operation::LoadWord { .. }
             | Operation::LoadStringByte
             | Operation::LoadStringWord
             | Operation::LoadStringDword
@@ -389,6 +390,7 @@ fn supports_narrow_store(operation: &Operation) -> bool {
             | Operation::StoreStringWord
             | Operation::MoveStringWord
             | Operation::StoreByte { .. }
+            | Operation::StoreWord { .. }
             | Operation::MemorySetByte { .. }
             | Operation::MoveStringByte
             | Operation::StoreStringByte
