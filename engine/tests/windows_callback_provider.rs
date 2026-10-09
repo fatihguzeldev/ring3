@@ -4,7 +4,7 @@ mod pe;
 
 use ring3_engine::{
     abi::{
-        arena::{CANCEL_OFFSET, TRANSFER_OFFSET},
+        arena::{CANCEL_OFFSET, HELPER_OFFSET, TRANSFER_OFFSET, TRANSFER_SIZE},
         x86::{decode_state, encode_exit_v3, encode_state},
     },
     cpu::{ExecutionExit, ExitReason, dbt::RegistryError, x86::State32},
@@ -619,7 +619,7 @@ fn captured_arguments_and_return_frames_ignore_public_ram_and_receipt_tampering(
             .unwrap();
         f.engine.write32(0x8ff8, 0xfeed_face).unwrap();
         f.engine.write32(0x8ffc, 0xcafe_babe).unwrap();
-        f.engine.arena_mut().unwrap()[100..].fill(0xa5);
+        f.engine.arena_mut().unwrap()[HELPER_OFFSET..TRANSFER_OFFSET + TRANSFER_SIZE].fill(0xa5);
         completed(&mut f, inner, state, SENTINEL);
         invoke(&mut f, WindowsApi32::GetLastError, &[], LAST_ERROR);
         finish(&mut f, 47);
@@ -892,7 +892,8 @@ fn callback_exit_uses_saved_argument_and_preserves_cpu_pages_and_committed_effec
                 .unwrap();
             f.engine.write32(0x8ff8, 0xdead_0018).unwrap();
             f.engine.write32(0x8ffc, 0xdead_0017).unwrap();
-            f.engine.arena_mut().unwrap()[100..].fill(0xa5);
+            f.engine.arena_mut().unwrap()[HELPER_OFFSET..TRANSFER_OFFSET + TRANSFER_SIZE]
+                .fill(0xa5);
             let addresses = ORIGINAL_PAGES
                 .into_iter()
                 .chain([WINDOW, WINDOW + 4096])

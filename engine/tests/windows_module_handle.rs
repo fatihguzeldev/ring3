@@ -1,6 +1,6 @@
 use ring3_engine::{
     abi::{
-        arena::{EXIT_OFFSET, TRANSFER_OFFSET},
+        arena::{EXIT_OFFSET, TRANSFER_OFFSET, TRANSFER_SIZE},
         x86::{decode_state, encode_exit_v3, encode_state},
     },
     cpu::{ExecutionExit, ExitReason, x86::State32},
@@ -369,7 +369,7 @@ fn saved_argument_return_and_private_image_ignore_transfer_and_live_stack_tamper
         let (token, state) = saved_call(&mut f, owner, MODULE, CallingConvention32::Stdcall, 1, 0);
         f.engine.write32(ESP, 0xdead_beef).unwrap();
         f.engine.write32(ESP + 4, u32::MAX).unwrap();
-        f.engine.arena_mut().unwrap()[TRANSFER_OFFSET..].fill(0xa5);
+        f.engine.arena_mut().unwrap()[TRANSFER_OFFSET..TRANSFER_OFFSET + TRANSFER_SIZE].fill(0xa5);
         returned(&mut f, owner, token, state, 0x0050_0000, 8);
         last_error(&mut f, owner, LAST_ERROR);
         let (token, _) = saved_call(
