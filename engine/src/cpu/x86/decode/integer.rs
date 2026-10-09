@@ -4,6 +4,7 @@ use super::{
     DecodeError,
     operands::{
         byte_register, byte_value, effective_address, location, register, unsupported, value,
+        word_register,
     },
 };
 use crate::cpu::x86::ir::{
@@ -233,6 +234,19 @@ fn binary(instruction: &Instruction, kind: BinaryKind) -> Result<Operation, Deco
 }
 
 fn lower_unary(instruction: &Instruction) -> Option<Result<Operation, DecodeError>> {
+    let word_kind = match instruction.code() {
+        Code::Inc_r16 | Code::Inc_rm16 => Some(UnaryKind::Inc),
+        Code::Dec_r16 | Code::Dec_rm16 => Some(UnaryKind::Dec),
+        Code::Not_rm16 => Some(UnaryKind::Not),
+        Code::Neg_rm16 => Some(UnaryKind::Neg),
+        _ => None,
+    };
+    if let Some(kind) = word_kind {
+        return Some(
+            word_register(instruction.op0_register())
+                .map(|destination| Operation::UnaryWord { kind, destination }),
+        );
+    }
     let byte_kind = match instruction.code() {
         Code::Inc_rm8 => Some(UnaryKind::Inc),
         Code::Dec_rm8 => Some(UnaryKind::Dec),

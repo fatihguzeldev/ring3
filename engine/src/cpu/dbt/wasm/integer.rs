@@ -1195,6 +1195,7 @@ pub(super) fn instruction(
                 code.local_get(RESULT).local_set(register(destination));
             }
         }
+        Operation::UnaryWord { kind, destination } => unary_word(code, kind, destination),
         Operation::UnaryByte { kind, destination } => unary_byte(code, kind, destination),
         Operation::MemoryUnaryByte { kind, address } => {
             unary_memory_byte(code, kind, address, imports, exit_depth);
@@ -2045,6 +2046,56 @@ fn unary_memory(
         }
     };
     arithmetic_flags(code, binary, carry, 31);
+}
+
+fn unary_word(code: &mut InstructionSink<'_>, kind: UnaryKind, destination: Register32) {
+    word_value(code, WordValue::Register(destination));
+    code.local_set(LHS);
+    let (binary, carry) = match kind {
+        UnaryKind::Not => {
+            code.local_get(LHS)
+                .i32_const(0xffff)
+                .i32_xor()
+                .local_get(register(destination))
+                .i32_const(!0xffff)
+                .i32_and()
+                .i32_or()
+                .local_set(register(destination));
+            return;
+        }
+        UnaryKind::Inc | UnaryKind::Dec => {
+            code.i32_const(1).local_set(RHS);
+            (
+                if kind == UnaryKind::Inc {
+                    BinaryKind::Add
+                } else {
+                    BinaryKind::Sub
+                },
+                CarryFlag::Preserve,
+            )
+        }
+        UnaryKind::Neg => {
+            code.local_get(LHS)
+                .local_set(RHS)
+                .i32_const(0)
+                .local_set(LHS);
+            (BinaryKind::Sub, CarryFlag::Calculate)
+        }
+    };
+    code.local_get(LHS).local_get(RHS);
+    if binary == BinaryKind::Add {
+        code.i32_add();
+    } else {
+        code.i32_sub();
+    }
+    code.i32_const(0xffff).i32_and().local_set(RESULT);
+    arithmetic_flags(code, binary, carry, 15);
+    code.local_get(RESULT)
+        .local_get(register(destination))
+        .i32_const(!0xffff)
+        .i32_and()
+        .i32_or()
+        .local_set(register(destination));
 }
 
 fn unary_byte(code: &mut InstructionSink<'_>, kind: UnaryKind, destination: ByteRegister) {

@@ -664,4 +664,8 @@ pub enum Operation {
     Return {
         stack_adjust: u16,
     },
+    UnaryWord {
+        kind: UnaryKind,
+        destination: Register32,
+    },
 }

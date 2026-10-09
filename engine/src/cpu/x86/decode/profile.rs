@@ -123,6 +123,15 @@ pub(super) fn check_profile(instruction: &Instruction, bytes: &[u8]) -> Result<(
         | (Code::Xor_rm16_imm8, [0x66, 0x83, modrm, _]) => *modrm & 0xf8 == 0xf0,
         _ => false,
     };
+    let exact_word_unary = match (instruction.code(), bytes) {
+        (Code::Inc_r16, [0x66, opcode]) => (0x40..=0x47).contains(opcode),
+        (Code::Dec_r16, [0x66, opcode]) => (0x48..=0x4f).contains(opcode),
+        (Code::Inc_rm16, [0x66, 0xff, modrm]) => *modrm & 0xf8 == 0xc0,
+        (Code::Dec_rm16, [0x66, 0xff, modrm]) => *modrm & 0xf8 == 0xc8,
+        (Code::Not_rm16, [0x66, 0xf7, modrm]) => *modrm & 0xf8 == 0xd0,
+        (Code::Neg_rm16, [0x66, 0xf7, modrm]) => *modrm & 0xf8 == 0xd8,
+        _ => false,
+    };
     if instruction.has_lock_prefix()
         || instruction.has_rep_prefix()
         || instruction.has_repne_prefix()
@@ -130,7 +139,8 @@ pub(super) fn check_profile(instruction: &Instruction, bytes: &[u8]) -> Result<(
             || exact_word_move
             || exact_word_predicate
             || exact_word_arithmetic
-            || exact_word_logical)
+            || exact_word_logical
+            || exact_word_unary)
             && bytes
                 .iter()
                 .take_while(|byte| is_prefix(**byte))
