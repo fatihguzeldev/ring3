@@ -95,6 +95,24 @@ pub(super) fn lower(instruction: &Instruction, bytes: &[u8]) -> Result<Operation
             destination: word_register(instruction.op0_register())?,
             source: word_value(instruction)?,
         }),
+        Code::Adc_rm16_r16
+        | Code::Adc_r16_rm16
+        | Code::Adc_AX_imm16
+        | Code::Adc_rm16_imm16
+        | Code::Adc_rm16_imm8 => Ok(Operation::ArithmeticWord {
+            kind: WordArithmeticKind::Adc,
+            destination: word_register(instruction.op0_register())?,
+            source: word_value(instruction)?,
+        }),
+        Code::Sbb_rm16_r16
+        | Code::Sbb_r16_rm16
+        | Code::Sbb_AX_imm16
+        | Code::Sbb_rm16_imm16
+        | Code::Sbb_rm16_imm8 => Ok(Operation::ArithmeticWord {
+            kind: WordArithmeticKind::Sbb,
+            destination: word_register(instruction.op0_register())?,
+            source: word_value(instruction)?,
+        }),
         Code::And_rm16_r16
         | Code::And_r16_rm16
         | Code::And_AX_imm16

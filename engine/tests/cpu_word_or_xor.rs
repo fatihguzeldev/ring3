@@ -487,7 +487,10 @@ fn exact_or_xor_prefix_fetch_and_consumed_source_currency() {
             );
         }
     }
-    let mut excluded = vec![vec![0x66, 0x81, 0xd0, 0, 0], vec![0x66, 0x83, 0xd8, 0]];
+    let mut excluded = vec![
+        vec![0x66, 0x66, 0x81, 0xd0, 0, 0],
+        vec![0x66, 0x66, 0x83, 0xd8, 0],
+    ];
     for (_, to_rm, to_reg, _, extension) in KINDS {
         excluded.extend([
             vec![0x66, to_rm, 3],

@@ -86,12 +86,23 @@ pub(super) fn check_profile(instruction: &Instruction, bytes: &[u8]) -> Result<(
         (Code::Add_rm16_r16, [0x66, 0x01, modrm])
         | (Code::Add_r16_rm16, [0x66, 0x03, modrm])
         | (Code::Sub_rm16_r16, [0x66, 0x29, modrm])
-        | (Code::Sub_r16_rm16, [0x66, 0x2b, modrm]) => *modrm & 0xc0 == 0xc0,
-        (Code::Add_AX_imm16, [0x66, 0x05, _, _]) | (Code::Sub_AX_imm16, [0x66, 0x2d, _, _]) => true,
+        | (Code::Sub_r16_rm16, [0x66, 0x2b, modrm])
+        | (Code::Adc_rm16_r16, [0x66, 0x11, modrm])
+        | (Code::Adc_r16_rm16, [0x66, 0x13, modrm])
+        | (Code::Sbb_rm16_r16, [0x66, 0x19, modrm])
+        | (Code::Sbb_r16_rm16, [0x66, 0x1b, modrm]) => *modrm & 0xc0 == 0xc0,
+        (Code::Add_AX_imm16, [0x66, 0x05, _, _])
+        | (Code::Sub_AX_imm16, [0x66, 0x2d, _, _])
+        | (Code::Adc_AX_imm16, [0x66, 0x15, _, _])
+        | (Code::Sbb_AX_imm16, [0x66, 0x1d, _, _]) => true,
         (Code::Add_rm16_imm16, [0x66, 0x81, modrm, _, _])
         | (Code::Add_rm16_imm8, [0x66, 0x83, modrm, _]) => *modrm & 0xf8 == 0xc0,
         (Code::Sub_rm16_imm16, [0x66, 0x81, modrm, _, _])
         | (Code::Sub_rm16_imm8, [0x66, 0x83, modrm, _]) => *modrm & 0xf8 == 0xe8,
+        (Code::Adc_rm16_imm16, [0x66, 0x81, modrm, _, _])
+        | (Code::Adc_rm16_imm8, [0x66, 0x83, modrm, _]) => *modrm & 0xf8 == 0xd0,
+        (Code::Sbb_rm16_imm16, [0x66, 0x81, modrm, _, _])
+        | (Code::Sbb_rm16_imm8, [0x66, 0x83, modrm, _]) => *modrm & 0xf8 == 0xd8,
         _ => false,
     };
     let exact_word_logical = match (instruction.code(), bytes) {

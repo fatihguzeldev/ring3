@@ -326,7 +326,7 @@ fn word_and_strict_forms_fetch_and_consumed_code_currency_stay_exact() {
     }
     for extension in [2, 3] {
         for opcode_byte in [0x81, 0x83] {
-            let mut bytes = vec![0x66, opcode_byte, 0xc0 | extension << 3, 0];
+            let mut bytes = vec![0x66, 0x66, opcode_byte, 0xc0 | extension << 3, 0];
             if opcode_byte == 0x81 {
                 bytes.push(0);
             }

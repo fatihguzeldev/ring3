@@ -356,10 +356,10 @@ fn effective_addresses_preserve_scales_ebp_absolute_and_wrapping_displacement() 
 fn unsupported_widths_prefixes_and_invalid_lock_keep_error_categories() {
     for (_, rm, reg, accumulator, _) in KINDS {
         for bytes in [
-            vec![rm - 1, 0xd0],
-            vec![reg - 1, 0xd0],
-            vec![accumulator - 1, 1],
-            vec![0x66, rm, 0xd0],
+            vec![0x66, rm - 1, 0xd0],
+            vec![0x66, reg - 1, 0xd0],
+            vec![0x66, accumulator - 1, 1],
+            vec![0x66, 0x66, rm, 0xd0],
             vec![0x67, reg, 0x03],
             vec![0xf3, rm, 0xd0],
             vec![0xf0, rm, 0x03],
@@ -664,8 +664,9 @@ fn carry_prefix_then_unsupported_width_refusal_preserves_prior_owners_and_public
                 engine.compile(1).unwrap();
                 describe(&mut engine, KEEP, 3, false);
                 let keep = engine.compile_resident(1).unwrap().get();
-                upload(&mut engine, CODE, &[rm, 0xd0, rm - 1, 0xd0]);
-                describe(&mut engine, CODE, 4, entries);
+                let bytes = [rm, 0xd0, 0x66, rm - 1, 0xd0];
+                upload(&mut engine, CODE, &bytes);
+                describe(&mut engine, CODE, bytes.len(), entries);
                 let before = saved(&engine, keep);
                 let expected = instruction_error(
                     CODE + 2,
