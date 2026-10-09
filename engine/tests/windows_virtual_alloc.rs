@@ -1,6 +1,6 @@
 use ring3_engine::{
     abi::{
-        arena::TRANSFER_OFFSET,
+        arena::{TRANSFER_OFFSET, TRANSFER_SIZE},
         x86::{decode_state, encode_exit_v3, encode_state},
     },
     cpu::{ExecutionExit, ExitReason, dbt::RegistryError, x86::State32},
@@ -133,7 +133,7 @@ fn capture(
     .unwrap();
     arena[96..100].fill(0);
     arena[100..140].fill(0x5a);
-    arena[140..].fill(0xcc);
+    arena[TRANSFER_OFFSET..TRANSFER_OFFSET + TRANSFER_SIZE].fill(0xcc);
     let record = match owner {
         Owner::Replacement => f.engine.capture_call(KEY, f.generation, convention, count),
         Owner::Resident => f
@@ -528,7 +528,7 @@ fn captured_arguments_are_owned_and_full_register_flags_arena_cleanup_remains_ex
         );
         f.engine.write32(ESP + 8, 65_536).unwrap();
         f.engine.write32(ESP, 0xffff_ffff).unwrap();
-        f.engine.arena_mut().unwrap()[TRANSFER_OFFSET..].fill(0xa5);
+        f.engine.arena_mut().unwrap()[TRANSFER_OFFSET..TRANSFER_OFFSET + TRANSFER_SIZE].fill(0xa5);
         completed(&mut f, owner, token, state, WINDOW, 4);
         assert_eq!(f.engine.memory().unwrap().mapped_pages(), 4);
         assert_eq!(ram(&f.engine, WINDOW, 4096).unwrap(), vec![0; 4096]);
