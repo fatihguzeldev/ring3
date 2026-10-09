@@ -636,6 +636,21 @@ pub(super) fn instruction(
             code.select();
             code.local_set(register(destination));
         }
+        Operation::ConditionalMoveWord {
+            condition,
+            destination,
+            source,
+        } => {
+            word_value(code, WordValue::Register(source));
+            word_value(code, WordValue::Register(destination));
+            control::condition(code, condition);
+            code.select()
+                .local_get(register(destination))
+                .i32_const(!0xffff)
+                .i32_and()
+                .i32_or()
+                .local_set(register(destination));
+        }
         Operation::ReadConditionalMove {
             condition,
             destination,

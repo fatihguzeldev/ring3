@@ -507,6 +507,7 @@ pub(super) fn supports(instruction: &DecodedInstruction, embedded: bool) -> bool
                 | Operation::ByteRotateThroughCarryCl { .. }
                 | Operation::SetByte { .. }
                 | Operation::ConditionalMove { .. }
+                | Operation::ConditionalMoveWord { .. }
                 | Operation::SignExtendHigh
                 | Operation::MultiplyAccumulator { .. }
                 | Operation::ByteMultiplyAccumulator { .. }

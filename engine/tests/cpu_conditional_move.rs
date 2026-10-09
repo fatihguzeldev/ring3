@@ -247,7 +247,11 @@ fn prefixes_and_exact_fetch_boundaries_keep_categories() {
     let opcode = DecodeError::Unsupported(UnsupportedFeature::Opcode);
     let mut excluded: Vec<(Vec<u8>, DecodeError)> = Vec::new();
     for prefix in [0x66, 0x67, 0xf2, 0xf3] {
-        excluded.push((vec![prefix, 0x0f, 0x44, 0xc1], opcode));
+        let mut bytes = vec![prefix, 0x0f, 0x44, 0xc1];
+        if prefix == 0x66 {
+            bytes.insert(0, 0x66);
+        }
+        excluded.push((bytes, opcode));
     }
     for prefix in [0x26, 0x2e, 0x36, 0x3e, 0x64, 0x65] {
         excluded.push((

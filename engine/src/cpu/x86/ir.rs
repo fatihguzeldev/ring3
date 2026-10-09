@@ -364,6 +364,11 @@ pub enum Operation {
         destination: Register32,
         source: Register32,
     },
+    ConditionalMoveWord {
+        condition: Condition,
+        destination: Register32,
+        source: Register32,
+    },
     ReadConditionalMove {
         condition: Condition,
         destination: Register32,

@@ -170,6 +170,28 @@ pub(super) fn check_profile(instruction: &Instruction, bytes: &[u8]) -> Result<(
         | (Code::Rcr_rm16_imm8, [0x66, 0xc1, modrm, _]) => *modrm & 0xf8 == 0xd8,
         _ => false,
     };
+    let exact_word_conditional_move = match (instruction.code(), bytes) {
+        (
+            Code::Cmovo_r16_rm16
+            | Code::Cmovno_r16_rm16
+            | Code::Cmovb_r16_rm16
+            | Code::Cmovae_r16_rm16
+            | Code::Cmove_r16_rm16
+            | Code::Cmovne_r16_rm16
+            | Code::Cmovbe_r16_rm16
+            | Code::Cmova_r16_rm16
+            | Code::Cmovs_r16_rm16
+            | Code::Cmovns_r16_rm16
+            | Code::Cmovp_r16_rm16
+            | Code::Cmovnp_r16_rm16
+            | Code::Cmovl_r16_rm16
+            | Code::Cmovge_r16_rm16
+            | Code::Cmovle_r16_rm16
+            | Code::Cmovg_r16_rm16,
+            [0x66, 0x0f, 0x40..=0x4f, modrm],
+        ) => *modrm & 0xc0 == 0xc0,
+        _ => false,
+    };
     if instruction.has_lock_prefix()
         || instruction.has_rep_prefix()
         || instruction.has_repne_prefix()
@@ -180,7 +202,8 @@ pub(super) fn check_profile(instruction: &Instruction, bytes: &[u8]) -> Result<(
             || exact_word_logical
             || exact_word_unary
             || exact_word_shift
-            || exact_word_rotate)
+            || exact_word_rotate
+            || exact_word_conditional_move)
             && bytes
                 .iter()
                 .take_while(|byte| is_prefix(**byte))
