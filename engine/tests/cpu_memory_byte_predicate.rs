@@ -382,7 +382,7 @@ fn excluded() -> Vec<(Vec<u8>, DecodeError)> {
             bytes.extend(&instruction);
             forms.push((bytes, unsupported));
         }
-        let mut word = vec![0x66];
+        let mut word = vec![0x66, 0x66];
         word.extend(encoding(opcode + 1, field, &[0x03], right));
         if matches!(right, ByteValue::Immediate(_)) {
             word.extend([0, 0, 0]);

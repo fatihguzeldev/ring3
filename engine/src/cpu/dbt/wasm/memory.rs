@@ -93,7 +93,10 @@ impl Imports {
                     read8 = true;
                     store8 = true;
                 }
-                Operation::ReadConditionalMoveWord { .. }
+                Operation::MemoryCompareWord { .. }
+                | Operation::ReadCompareWord { .. }
+                | Operation::MemoryTestWord { .. }
+                | Operation::ReadConditionalMoveWord { .. }
                 | Operation::LoadWord { .. }
                 | Operation::LoadStringWord
                 | Operation::CompareStringWord

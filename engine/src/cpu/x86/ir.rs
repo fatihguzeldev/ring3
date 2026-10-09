@@ -308,6 +308,18 @@ pub enum Operation {
         left: Register32,
         right: WordValue,
     },
+    MemoryCompareWord {
+        address: EffectiveAddress,
+        right: WordValue,
+    },
+    ReadCompareWord {
+        left: Register32,
+        address: EffectiveAddress,
+    },
+    MemoryTestWord {
+        address: EffectiveAddress,
+        right: WordValue,
+    },
     CompareByte {
         left: ByteRegister,
         right: ByteValue,

@@ -445,7 +445,7 @@ fn standalone_writing_binary_memory_forms_remain_excluded() {
 fn prefixes_small_width_and_declared_spans_retain_precise_errors() {
     for (instruction, cause) in [
         (
-            &[0x66, 0x39, 0x03][..],
+            &[0x66, 0x66, 0x39, 0x03][..],
             InstructionError::Decode(DecodeError::Unsupported(UnsupportedFeature::Opcode)),
         ),
         (

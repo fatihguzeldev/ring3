@@ -418,8 +418,8 @@ fn exact_test_prefix_fetch_and_consumed_source_currency() {
         }
     }
     for bytes in [
-        vec![0x66, 0x85, 3],
-        vec![0x66, 0xf7, 3, 0, 0],
+        vec![0x66, 0x66, 0x85, 3],
+        vec![0x66, 0x66, 0xf7, 3, 0, 0],
         vec![0x66, 0xf7, 0xc8, 0, 0],
     ] {
         assert_eq!(

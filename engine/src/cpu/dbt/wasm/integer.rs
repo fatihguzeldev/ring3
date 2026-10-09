@@ -618,6 +618,38 @@ pub(super) fn instruction(
             code.i32_and().local_set(RESULT);
             logical_flags(code, 15);
         }
+        Operation::MemoryCompareWord { address, right } => {
+            memory::load_narrow_value(code, address, SmallWidth::Word, imports, exit_depth);
+            code.local_set(LHS);
+            word_value(code, right);
+            code.local_set(RHS)
+                .local_get(LHS)
+                .local_get(RHS)
+                .i32_sub()
+                .i32_const(0xffff)
+                .i32_and()
+                .local_set(RESULT);
+            arithmetic_flags(code, BinaryKind::Cmp, CarryFlag::Calculate, 15);
+        }
+        Operation::ReadCompareWord { left, address } => {
+            memory::load_narrow_value(code, address, SmallWidth::Word, imports, exit_depth);
+            code.local_set(RHS);
+            word_value(code, WordValue::Register(left));
+            code.local_set(LHS)
+                .local_get(LHS)
+                .local_get(RHS)
+                .i32_sub()
+                .i32_const(0xffff)
+                .i32_and()
+                .local_set(RESULT);
+            arithmetic_flags(code, BinaryKind::Cmp, CarryFlag::Calculate, 15);
+        }
+        Operation::MemoryTestWord { address, right } => {
+            memory::load_narrow_value(code, address, SmallWidth::Word, imports, exit_depth);
+            word_value(code, right);
+            code.i32_and().local_set(RESULT);
+            logical_flags(code, 15);
+        }
         Operation::SetByte {
             condition,
             destination,
