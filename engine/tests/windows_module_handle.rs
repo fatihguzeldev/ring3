@@ -311,7 +311,7 @@ fn closed_name_id_and_stdcall_shape_have_one_new_entry() {
     for module in ["kernel32", "kernel32.dll ", "ntdll.dll", "./kernel32.dll"] {
         assert_eq!(WindowsApi32::resolve(module, "GetModuleHandleA"), None);
     }
-    assert_eq!(WindowsApi32::from_id(MODULE + 2), None);
+    assert_eq!(WindowsApi32::from_id(0x0001_0007), None);
 }
 
 #[test]

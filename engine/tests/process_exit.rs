@@ -284,7 +284,7 @@ fn exit_process_has_a_closed_exact_name_id_and_stdcall_one_word_profile() {
     ] {
         assert_eq!(WindowsApi32::resolve("kernel32.dll", symbol), None);
     }
-    for id in [0, 1, GET - 1, EXIT + 3, u32::MAX] {
+    for id in [0, 1, GET - 1, 0x0001_0007, u32::MAX] {
         assert_eq!(WindowsApi32::from_id(id), None);
     }
 }
@@ -319,7 +319,7 @@ fn terminal_v4_is_literal_full_u32_and_old_versions_refuse_without_partial_outpu
         }
         for (offset, value, error) in [
             (0, 0, AbiError::Magic),
-            (4, 5, AbiError::Version),
+            (4, 6, AbiError::Version),
             (6, 2, AbiError::Profile),
             (8, 39, AbiError::Length),
         ] {

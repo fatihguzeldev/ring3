@@ -178,7 +178,7 @@ fn malformed_version_two_headers_remain_checked() {
         };
         assert_eq!(decode_exit(&bytes), Err(error));
     }
-    for version in [0, 4, 255] {
+    for version in [0, 6, 255] {
         assert_eq!(
             decode_exit(&record(version, [1, 0, 0, 0, 0, 0])),
             Err(AbiError::Version)
