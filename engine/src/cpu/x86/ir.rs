@@ -510,6 +510,12 @@ pub enum Operation {
         source: Register32,
         count: ShiftCount,
     },
+    DoubleShiftWord {
+        kind: DoubleShiftKind,
+        destination: Register32,
+        source: Register32,
+        count: ShiftCount,
+    },
     MemoryDoubleShift {
         kind: DoubleShiftKind,
         address: EffectiveAddress,

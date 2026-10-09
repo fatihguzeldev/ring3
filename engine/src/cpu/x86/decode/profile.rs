@@ -155,6 +155,13 @@ pub(super) fn check_profile(instruction: &Instruction, bytes: &[u8]) -> Result<(
         | (Code::Sar_rm16_imm8, [0x66, 0xc1, modrm, _]) => *modrm & 0xf8 == 0xf8,
         _ => false,
     };
+    let exact_word_double_shift = match (instruction.code(), bytes) {
+        (Code::Shld_rm16_r16_imm8, [0x66, 0x0f, 0xa4, modrm, _])
+        | (Code::Shrd_rm16_r16_imm8, [0x66, 0x0f, 0xac, modrm, _])
+        | (Code::Shld_rm16_r16_CL, [0x66, 0x0f, 0xa5, modrm])
+        | (Code::Shrd_rm16_r16_CL, [0x66, 0x0f, 0xad, modrm]) => *modrm & 0xc0 == 0xc0,
+        _ => false,
+    };
     let exact_word_rotate = match (instruction.code(), bytes) {
         (Code::Rol_rm16_1, [0x66, 0xd1, modrm])
         | (Code::Rol_rm16_CL, [0x66, 0xd3, modrm])
@@ -202,6 +209,7 @@ pub(super) fn check_profile(instruction: &Instruction, bytes: &[u8]) -> Result<(
             || exact_word_logical
             || exact_word_unary
             || exact_word_shift
+            || exact_word_double_shift
             || exact_word_rotate
             || exact_word_conditional_move)
             && bytes

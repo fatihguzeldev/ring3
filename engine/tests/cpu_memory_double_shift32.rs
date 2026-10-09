@@ -659,7 +659,7 @@ fn exclusions() -> Vec<(Vec<u8>, DecodeError)> {
             bytes.extend_from_slice(&memory);
             cases.push((bytes, expected));
         }
-        let mut word_register = vec![0x66, 0x0f, opcode, 0xd0];
+        let mut word_register = vec![0x66, 0x66, 0x0f, opcode, 0xd0];
         if matches!(opcode, 0xa4 | 0xac) {
             word_register.push(1);
         }

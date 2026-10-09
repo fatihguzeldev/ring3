@@ -1346,6 +1346,12 @@ pub(super) fn instruction(
             source,
             count,
         } => double_shift(code, kind, destination, source, count),
+        Operation::DoubleShiftWord {
+            kind,
+            destination,
+            source,
+            count,
+        } => double_shift_word(code, kind, destination, source, count),
         Operation::MemoryDoubleShift {
             kind,
             address,
@@ -2686,6 +2692,105 @@ fn shift(
     shift_flags(code, kind);
     code.local_get(RESULT)
         .local_set(register(destination))
+        .end();
+}
+
+fn double_shift_word(
+    code: &mut InstructionSink<'_>,
+    kind: DoubleShiftKind,
+    destination: Register32,
+    source: Register32,
+    count: ShiftCount,
+) {
+    word_value(code, WordValue::Register(destination));
+    code.local_set(LHS);
+    shift_count(code, count);
+    code.local_set(RHS);
+    word_value(code, WordValue::Register(source));
+    code.local_set(RESULT)
+        .local_get(RHS)
+        .if_(BlockType::Empty)
+        .local_get(RHS)
+        .i32_const(16)
+        .i32_gt_u()
+        .if_(BlockType::Empty);
+    // above the word width, x86 leaves result and all arithmetic flags undefined.
+    // this profile chooses zero for both; do not derive ZF/PF from that zero result.
+    code.i32_const(0)
+        .local_set(RESULT)
+        .local_get(FLAGS)
+        .i32_const(0x400)
+        .i32_and()
+        .i32_const(2)
+        .i32_or()
+        .local_set(FLAGS)
+        .else_();
+    double_shift_word_value(code, kind);
+    double_shift_word_flags(code, kind);
+    code.end()
+        .local_get(RESULT)
+        .local_get(register(destination))
+        .i32_const(!0xffff)
+        .i32_and()
+        .i32_or()
+        .local_set(register(destination))
+        .end();
+}
+
+fn double_shift_word_value(code: &mut InstructionSink<'_>, kind: DoubleShiftKind) {
+    code.local_get(LHS).local_get(RHS);
+    match kind {
+        DoubleShiftKind::Left => {
+            code.i32_shl()
+                .local_get(RESULT)
+                .i32_const(16)
+                .local_get(RHS)
+                .i32_sub()
+                .i32_shr_u();
+        }
+        DoubleShiftKind::Right => {
+            code.i32_shr_u()
+                .local_get(RESULT)
+                .i32_const(16)
+                .local_get(RHS)
+                .i32_sub()
+                .i32_shl();
+        }
+    }
+    code.i32_or().i32_const(0xffff).i32_and().local_set(RESULT);
+}
+
+fn double_shift_word_flags(code: &mut InstructionSink<'_>, kind: DoubleShiftKind) {
+    // only counts 1..16 reach this branch; AF and multi-bit OF clear by policy.
+    logical_flags(code, 15);
+    code.local_get(FLAGS).local_get(LHS);
+    match kind {
+        DoubleShiftKind::Left => {
+            code.i32_const(16).local_get(RHS).i32_sub();
+        }
+        DoubleShiftKind::Right => {
+            code.local_get(RHS).i32_const(1).i32_sub();
+        }
+    }
+    code.i32_shr_u()
+        .i32_const(1)
+        .i32_and()
+        .i32_or()
+        .local_set(FLAGS)
+        .local_get(RHS)
+        .i32_const(1)
+        .i32_eq()
+        .if_(BlockType::Empty)
+        .local_get(FLAGS)
+        .local_get(LHS)
+        .local_get(RESULT)
+        .i32_xor()
+        .i32_const(15)
+        .i32_shr_u()
+        .i32_const(11)
+        .i32_shl()
+        .i32_or()
+        .local_set(FLAGS)
         .end();
 }
 
