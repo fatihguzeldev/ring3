@@ -1,5 +1,8 @@
 use ring3_engine::{
-    abi::x86::{encode_exit_v3, encode_state},
+    abi::{
+        arena::{TRANSFER_OFFSET, TRANSFER_SIZE},
+        x86::{encode_exit_v3, encode_state},
+    },
     cpu::{ExecutionExit, ExitReason, x86::State32},
     memory::GuestAddress,
     process::{CallError, EngineInstance, HostError},
@@ -125,7 +128,7 @@ fn callback_inner_call_captures_literal_frame_and_completes_only_frozen_inner_cp
     )
     .unwrap();
     engine.arena_mut().unwrap()[100..140].fill(0x5a);
-    engine.arena_mut().unwrap()[140..].fill(0x6d);
+    engine.arena_mut().unwrap()[TRANSFER_OFFSET..TRANSFER_OFFSET + TRANSFER_SIZE].fill(0x6d);
     let before = engine.arena().to_vec();
     let ram = pages.map(|pc| {
         let mut page = vec![0; 4096];
@@ -331,7 +334,7 @@ fn typed_stop(engine: &mut EngineInstance, state: State32, id: u32, retired: u32
     .unwrap();
     engine.arena_mut().unwrap()[96..100].fill(0);
     engine.arena_mut().unwrap()[100..140].fill(0x5a);
-    engine.arena_mut().unwrap()[140..].fill(0x6d);
+    engine.arena_mut().unwrap()[TRANSFER_OFFSET..TRANSFER_OFFSET + TRANSFER_SIZE].fill(0x6d);
 }
 
 impl Fixture {
@@ -896,7 +899,7 @@ fn callback_inner_conventions_use_frozen_frames_and_never_reread_transfer_or_sta
         f.engine.write32(esp, 0xdead_beef).unwrap();
         f.engine.write32(esp.wrapping_add(4), 0xcafe_babe).unwrap();
         f.engine.arena_mut().unwrap()[100..140].fill(0xc3);
-        f.engine.arena_mut().unwrap()[140..].fill(0xa5);
+        f.engine.arena_mut().unwrap()[TRANSFER_OFFSET..TRANSFER_OFFSET + TRANSFER_SIZE].fill(0xa5);
         let ram = observed(&f).ram;
         let protected = if esp == 0xffff_fffc {
             [0xffff_f000, 0]

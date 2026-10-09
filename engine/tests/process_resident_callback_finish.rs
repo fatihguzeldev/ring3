@@ -1,5 +1,6 @@
 use ring3_engine::{
     abi::{
+        arena::{TRANSFER_OFFSET, TRANSFER_SIZE},
         resident_callback::ResidentCallbackRecord32,
         x86::{encode_exit_v3, encode_state},
     },
@@ -105,7 +106,7 @@ fn resident_finish_delivers_literal_result_and_restores_exact_private_outer() {
         &mut engine.arena_mut().unwrap()[56..96],
     )
     .unwrap();
-    engine.arena_mut().unwrap()[140..].fill(0x6d);
+    engine.arena_mut().unwrap()[TRANSFER_OFFSET..TRANSFER_OFFSET + TRANSFER_SIZE].fill(0x6d);
     let before = engine.arena().to_vec();
     let ram = pages.map(|pc| {
         let mut bytes = vec![0; 4096];
@@ -672,7 +673,7 @@ fn finish_consumes_once_restores_owner_and_allows_fresh_unarmed_callbacks() {
         assert_eq!(record.entry_esp, esp.wrapping_sub(4 * (args + 1)));
         stop(&mut f, value, retired);
         f.engine.arena_mut().unwrap()[100..140].fill(0x5a);
-        f.engine.arena_mut().unwrap()[140..].fill(0xa5);
+        f.engine.arena_mut().unwrap()[TRANSFER_OFFSET..TRANSFER_OFFSET + TRANSFER_SIZE].fill(0xa5);
         f.engine.write32(esp.wrapping_sub(4), 0xffff_ffff).unwrap();
         let mut before = storage(&f);
         let result = f

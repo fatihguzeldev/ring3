@@ -1,7 +1,8 @@
 use ring3_engine::{
     abi::{
+        arena::{TRANSFER_OFFSET, TRANSFER_SIZE, X87_OFFSET},
         resident_callback::ResidentCallbackRecord32,
-        x86::{encode_exit_v3, encode_state},
+        x86::{X87_SIZE, encode_exit_v3, encode_state},
     },
     cpu::{ExecutionExit, ExitReason, dbt::RegistryError, x86::State32},
     memory::{CodeSnapshot, GuestAddress},
@@ -23,6 +24,7 @@ struct Fixture {
     foreign: u64,
     generation: u32,
     esp: u32,
+    outer_x87: [u8; X87_SIZE],
     snapshots: Vec<CodeSnapshot>,
 }
 fn upload(engine: &mut EngineInstance, pc: u32, bytes: &[u8]) {
@@ -92,6 +94,9 @@ fn fixture(esp: u32, same_unit: bool, installed_callback: bool) -> Fixture {
                 .unwrap()
         })
         .collect();
+    let outer_x87 = engine.arena()[X87_OFFSET..X87_OFFSET + X87_SIZE]
+        .try_into()
+        .unwrap();
     Fixture {
         engine,
         outer,
@@ -99,6 +104,7 @@ fn fixture(esp: u32, same_unit: bool, installed_callback: bool) -> Fixture {
         foreign,
         generation,
         esp,
+        outer_x87,
         snapshots,
     }
 }
@@ -302,6 +308,7 @@ fn abort_restores(f: &mut Fixture, token: u32) {
     let mut expected = before.arena.clone();
     expected[..56].copy_from_slice(&state_literal(&frozen(f.esp)));
     expected[56..96].copy_from_slice(&exit_literal(8, 1, 17));
+    expected[X87_OFFSET..X87_OFFSET + X87_SIZE].copy_from_slice(&f.outer_x87);
     let after = storage(f);
     assert_eq!(after.arena, expected);
     assert_eq!(after.arena_address, before.arena_address);
@@ -339,7 +346,7 @@ fn resident_callback_authorization_is_pure_and_opens_only_its_named_unit() {
     // private admission is authoritative even when mutable transfer and stack are forged.
     f.engine.write32(0x8000, 0xdead_beef).unwrap();
     f.engine.write32(0x8004, 0xbad0_cafe).unwrap();
-    f.engine.arena_mut().unwrap()[140..].fill(0x5a);
+    f.engine.arena_mut().unwrap()[TRANSFER_OFFSET..TRANSFER_OFFSET + TRANSFER_SIZE].fill(0x5a);
     let before = storage(&f);
     assert_eq!(
         f.engine
