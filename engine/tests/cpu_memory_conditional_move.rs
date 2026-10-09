@@ -253,7 +253,11 @@ fn prefixes_and_exact_instruction_fetch_keep_fault_boundaries() {
     for prefix in [
         0x66, 0x67, 0xf2, 0xf3, 0x26, 0x2e, 0x36, 0x3e, 0x64, 0x65, 0xf0,
     ] {
-        let engine = code(CODE, &[prefix, 0x0f, 0x44, 0x03]);
+        let mut bytes = vec![prefix, 0x0f, 0x44, 0x03];
+        if prefix == 0x66 {
+            bytes.insert(0, 0x66);
+        }
+        let engine = code(CODE, &bytes);
         let expected = match prefix {
             0xf0 => DecodeError::InvalidEncoding,
             0x26 | 0x2e | 0x36 | 0x3e | 0x64 | 0x65 => {

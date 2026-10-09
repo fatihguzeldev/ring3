@@ -661,6 +661,21 @@ pub(super) fn instruction(
             control::condition(code, condition);
             code.select().local_set(register(destination));
         }
+        Operation::ReadConditionalMoveWord {
+            condition,
+            destination,
+            address,
+        } => {
+            memory::load_narrow_value(code, address, SmallWidth::Word, imports, exit_depth);
+            word_value(code, WordValue::Register(destination));
+            control::condition(code, condition);
+            code.select()
+                .local_get(register(destination))
+                .i32_const(!0xffff)
+                .i32_and()
+                .i32_or()
+                .local_set(register(destination));
+        }
         Operation::MemorySetByte { condition, address } => {
             control::condition(code, condition);
             code.local_set(RESULT);

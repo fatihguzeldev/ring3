@@ -319,6 +319,7 @@ fn supports_memory_reads(operation: &Operation) -> bool {
             | Operation::CompareStringDword
             | Operation::ScanStringDword
             | Operation::ReadConditionalMove { .. }
+            | Operation::ReadConditionalMoveWord { .. }
             | Operation::ReadMultiplyAccumulator { .. }
             | Operation::ReadByteMultiplyAccumulator { .. }
             | Operation::ReadByteDivideAccumulator { .. }

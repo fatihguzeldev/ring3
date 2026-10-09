@@ -93,7 +93,8 @@ impl Imports {
                     read8 = true;
                     store8 = true;
                 }
-                Operation::LoadWord { .. }
+                Operation::ReadConditionalMoveWord { .. }
+                | Operation::LoadWord { .. }
                 | Operation::LoadStringWord
                 | Operation::CompareStringWord
                 | Operation::ScanStringWord => read16 = true,

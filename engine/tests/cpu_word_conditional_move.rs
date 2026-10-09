@@ -195,7 +195,7 @@ fn word_cmov_complete_prefix_and_memory_neighbors_remain_precisely_closed() {
         ));
         for tail in [&[0x03][..], &[0x04, 0x24], &[0x05, 0, 0x50, 0, 0]] {
             cases.push((
-                [vec![0x66, 0x0f, 0x40 + cc], tail.to_vec()].concat(),
+                [vec![0x66, 0x66, 0x0f, 0x40 + cc], tail.to_vec()].concat(),
                 opcode,
             ));
         }

@@ -66,11 +66,23 @@ pub(super) fn lower(instruction: &Instruction) -> Result<Operation, DecodeError>
         | Code::Cmovl_r16_rm16
         | Code::Cmovge_r16_rm16
         | Code::Cmovle_r16_rm16
-        | Code::Cmovg_r16_rm16 => Operation::ConditionalMoveWord {
-            condition: condition(instruction.code())?,
-            destination: word_register(instruction.op0_register())?,
-            source: word_register(instruction.op1_register())?,
-        },
+        | Code::Cmovg_r16_rm16 => {
+            let condition = condition(instruction.code())?;
+            let destination = word_register(instruction.op0_register())?;
+            match instruction.op1_kind() {
+                OpKind::Memory => Operation::ReadConditionalMoveWord {
+                    condition,
+                    destination,
+                    address: effective_address(instruction)?,
+                },
+                OpKind::Register => Operation::ConditionalMoveWord {
+                    condition,
+                    destination,
+                    source: word_register(instruction.op1_register())?,
+                },
+                _ => return Err(unsupported()),
+            }
+        }
         Code::Cmovo_r32_rm32
         | Code::Cmovno_r32_rm32
         | Code::Cmovb_r32_rm32
