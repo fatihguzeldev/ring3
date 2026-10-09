@@ -38,6 +38,7 @@ pub(super) fn lower(instruction: &Instruction, bytes: &[u8]) -> Result<Operation
         Code::Cld => Ok(Operation::Direction { set: false }),
         Code::Std => Ok(Operation::Direction { set: true }),
         Code::Movsb_m8_m8 => Ok(Operation::MoveStringByte),
+        Code::Movsw_m16_m16 => Ok(Operation::MoveStringWord),
         Code::Movsd_m32_m32 => Ok(Operation::MoveStringDword),
         Code::Lodsb_AL_m8 => Ok(Operation::LoadStringByte),
         Code::Lodsw_AX_m16 => Ok(Operation::LoadStringWord),

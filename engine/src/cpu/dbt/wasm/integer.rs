@@ -126,6 +126,35 @@ pub(super) fn instruction(
             }
             store = true;
         }
+        Operation::MoveStringWord => {
+            memory::load_narrow_value(
+                code,
+                EffectiveAddress {
+                    base: Some(Register32::Esi),
+                    index: None,
+                    scale: 1,
+                    displacement: 0,
+                },
+                SmallWidth::Word,
+                imports,
+                exit_depth,
+            );
+            code.local_set(RESULT);
+            memory::store_word_result(
+                code,
+                EffectiveAddress {
+                    base: Some(Register32::Edi),
+                    index: None,
+                    scale: 1,
+                    displacement: 0,
+                },
+                imports,
+                exit_depth,
+            );
+            word_string_pointer(code, Register32::Esi);
+            word_string_pointer(code, Register32::Edi);
+            store = true;
+        }
         Operation::MoveStringDword => {
             memory::load_result(
                 code,

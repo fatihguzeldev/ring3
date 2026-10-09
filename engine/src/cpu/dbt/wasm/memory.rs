@@ -95,6 +95,10 @@ impl Imports {
                 Operation::LoadStringWord
                 | Operation::CompareStringWord
                 | Operation::ScanStringWord => read16 = true,
+                Operation::MoveStringWord => {
+                    read16 = true;
+                    store16 = true;
+                }
                 Operation::Extend {
                     source: SmallSource::Memory { width, .. },
                     ..
