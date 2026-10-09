@@ -1,4 +1,7 @@
-use ring3_engine::abi::x86::{decode_state, encode_exit_v3, encode_state};
+use ring3_engine::abi::{
+    arena::{TRANSFER_OFFSET, TRANSFER_SIZE, X87_OFFSET},
+    x86::{X87_SIZE, decode_state, encode_exit_v3, encode_state},
+};
 use ring3_engine::cpu::x86::State32;
 use ring3_engine::cpu::{ExecutionExit, ExitReason};
 use ring3_engine::memory::{Access, FaultReason, GuestAddress, MemoryError, MemoryFault};
@@ -245,7 +248,7 @@ fn begin_publishes_callback_and_privately_suspends_outer() {
 fn transfer_begin_accepts_zero_and_sixteen_arguments_without_using_output_as_authority() {
     for count in [0, 16u32] {
         let (mut engine, mut expected, outer) = parked(0x8010);
-        engine.arena_mut().unwrap()[140..].fill(0xff);
+        engine.arena_mut().unwrap()[TRANSFER_OFFSET..TRANSFER_OFFSET + TRANSFER_SIZE].fill(0xff);
         for index in 0..count {
             engine.arena_mut().unwrap()[140 + index as usize * 4..144 + index as usize * 4]
                 .copy_from_slice(&(0xa0b0_c000 + index).to_le_bytes());
@@ -640,7 +643,7 @@ fn finish_captures_eax_and_restores_only_private_outer_records_without_rereading
     word(&mut engine, 0x8004, 0xdead_beef);
     word(&mut engine, 0x8010, u32::MAX);
     engine.unmap(0x7000, 2).unwrap();
-    engine.arena_mut().unwrap()[140..].fill(0xff);
+    engine.arena_mut().unwrap()[TRANSFER_OFFSET..TRANSFER_OFFSET + TRANSFER_SIZE].fill(0xff);
     return_stop(&mut engine, 0x8010, 0x8765_4321);
     let before = engine.arena().to_vec();
     let record = engine.finish_callback(KEY, 1, callback.token).unwrap();
@@ -793,6 +796,7 @@ fn forced_abort_discards_inner_authority_and_restores_outer_even_with_stale_canc
  {
     let (mut engine, state, outer) = parked(0x8010);
     let saved = engine.arena()[..96].to_vec();
+    let saved_x87 = engine.arena()[X87_OFFSET..X87_OFFSET + X87_SIZE].to_vec();
     let callback = engine
         .begin_callback(KEY, 1, outer, ENTRY, RETURN, 18, &[0x11, 0x22])
         .unwrap();
@@ -817,6 +821,7 @@ fn forced_abort_discards_inner_authority_and_restores_outer_even_with_stale_canc
     engine.abort_callback(KEY, callback.token).unwrap();
     let mut expected = before;
     expected[..96].copy_from_slice(&saved);
+    expected[X87_OFFSET..X87_OFFSET + X87_SIZE].copy_from_slice(&saved_x87);
     assert_eq!(engine.arena(), expected);
     assert_eq!(bytes(&engine, 0x7ff0, 44), guest);
     unchanged(&mut engine, error(CallError::InvalidToken), |engine| {
