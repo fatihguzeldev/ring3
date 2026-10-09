@@ -1026,6 +1026,34 @@ pub(super) fn instruction(
                 .local_get(RESULT)
                 .local_set(register(destination));
         }
+        Operation::ExchangeAddWord {
+            destination,
+            source,
+        } => {
+            word_value(code, WordValue::Register(destination));
+            code.local_set(LHS);
+            word_value(code, WordValue::Register(source));
+            code.local_set(RHS)
+                .local_get(LHS)
+                .local_get(RHS)
+                .i32_add()
+                .i32_const(0xffff)
+                .i32_and()
+                .local_set(RESULT);
+            arithmetic_flags(code, BinaryKind::Add, CarryFlag::Calculate, 15);
+            code.local_get(LHS)
+                .local_get(register(source))
+                .i32_const(!0xffff)
+                .i32_and()
+                .i32_or()
+                .local_set(register(source))
+                .local_get(RESULT)
+                .local_get(register(destination))
+                .i32_const(!0xffff)
+                .i32_and()
+                .i32_or()
+                .local_set(register(destination));
+        }
         Operation::MemoryExchangeAdd { address, source } => {
             memory::load_result(code, address, imports, exit_depth);
             code.local_get(RESULT)

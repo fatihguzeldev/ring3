@@ -739,7 +739,7 @@ fn full_modrm_domain_strict_categories_and_supported_neighbors_are_exact() {
         }
     }
     for &raw in &registers {
-        strict.push((vec![0x66, 0x0f, 0xc1, raw], opcode));
+        strict.push((vec![0x66, 0x66, 0x0f, 0xc1, raw], opcode));
     }
     strict.extend([
         (vec![0x66, 0x0f, 0xc1, 0x03], opcode),

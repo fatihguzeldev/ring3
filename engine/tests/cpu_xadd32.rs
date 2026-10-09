@@ -679,8 +679,12 @@ fn full_modrm_domain_strict_categories_and_supported_neighbors_are_exact() {
             opcode
         };
         for &raw in &registers {
+            let mut bytes = vec![prefix, 0x0f, 0xc1, raw];
+            if prefix == 0x66 {
+                bytes.insert(0, 0x66);
+            }
             strict.push((
-                vec![prefix, 0x0f, 0xc1, raw],
+                bytes,
                 if prefix == 0xf0 {
                     DecodeError::InvalidEncoding
                 } else {
@@ -1455,8 +1459,8 @@ fn thirty_six_late_failures_preserve_complete_two_owner_publication_and_installa
             ),
             (
                 CODE,
-                vec![0x0f, 0xc1, raw, 0x66, 0x0f, 0xc1, raw],
-                7,
+                vec![0x0f, 0xc1, raw, 0x66, 0x66, 0x0f, 0xc1, raw],
+                8,
                 instruction_error(CODE + 3, opcode),
             ),
             (
