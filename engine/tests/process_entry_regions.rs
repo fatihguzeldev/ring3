@@ -1,5 +1,8 @@
 use ring3_engine::{
-    abi::x86::{decode_exit, decode_state, encode_exit_v3, encode_state},
+    abi::{
+        arena::{TRANSFER_OFFSET, TRANSFER_SIZE},
+        x86::{decode_exit, decode_state, encode_exit_v3, encode_state},
+    },
     cpu::{
         ExecutionExit, ExitReason, UnsupportedFeature,
         dbt::{CompileError, InstructionError},
@@ -27,7 +30,8 @@ fn word(engine: &mut EngineInstance, address: u32, value: u32) {
 }
 
 fn entries(engine: &mut EngineInstance, seeds: &[u32], gates: &[(u32, u32)]) {
-    let transfer = &mut engine.arena_mut().unwrap()[140..];
+    let transfer =
+        &mut engine.arena_mut().unwrap()[TRANSFER_OFFSET..TRANSFER_OFFSET + TRANSFER_SIZE];
     transfer.fill(0xcc);
     for (index, entry) in seeds.iter().enumerate() {
         transfer[index * 4..index * 4 + 4].copy_from_slice(&entry.to_le_bytes());

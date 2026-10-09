@@ -1,6 +1,6 @@
 use ring3_engine::{
     abi::{
-        arena::TRANSFER_OFFSET,
+        arena::{TRANSFER_OFFSET, TRANSFER_SIZE},
         x86::{encode_exit_v3, encode_state},
     },
     cpu::{
@@ -47,7 +47,8 @@ fn upload(engine: &mut EngineInstance, pc: u32, bytes: &[u8]) {
 }
 
 fn describe(engine: &mut EngineInstance, blocks: &[(u32, u32)], gates: &[(u32, u32)]) {
-    let transfer = &mut engine.arena_mut().unwrap()[TRANSFER_OFFSET..];
+    let transfer =
+        &mut engine.arena_mut().unwrap()[TRANSFER_OFFSET..TRANSFER_OFFSET + TRANSFER_SIZE];
     transfer.fill(0xa5);
     for (index, &(first, second)) in blocks.iter().chain(gates).enumerate() {
         transfer[index * 8..index * 8 + 4].copy_from_slice(&first.to_le_bytes());
