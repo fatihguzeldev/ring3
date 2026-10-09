@@ -529,7 +529,7 @@ fn unsupported_floating_point_simd_segment_string_and_privileged_are_explicit() 
 fn valid_lock_and_sixteen_bit_encodings_are_rejected_without_lowering() {
     for bytes in [
         &[0xf0, 0x01, 0x08][..],
-        &[0x66, 0xb8, 0x34, 0x12][..],
+        &[0x66, 0x66, 0xb8, 0x34, 0x12][..],
         &[0x67, 0x8b, 0][..],
     ] {
         let space = code_space(0x1000, bytes, Permissions::EXECUTE);

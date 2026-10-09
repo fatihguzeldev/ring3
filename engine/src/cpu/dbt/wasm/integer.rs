@@ -9,7 +9,7 @@ use crate::cpu::x86::{
         ByteLogicalKind, BytePredicateKind, ByteReadArithmeticKind, ByteRegister, ByteValue,
         CarryKind, Condition, CountBranchKind, DivideKind, DoubleShiftKind, EffectiveAddress,
         ExtensionKind, Location32, MemoryByteArithmeticKind, MultiplyKind, Operation, RotateKind,
-        ShiftCount, ShiftKind, SmallSource, SmallWidth, UnaryKind, Value32,
+        ShiftCount, ShiftKind, SmallSource, SmallWidth, UnaryKind, Value32, WordValue,
     },
 };
 
@@ -521,6 +521,24 @@ pub(super) fn instruction(
         } => {
             byte_value(code, source);
             insert_byte(code, destination);
+        }
+        Operation::MoveWord {
+            destination,
+            source,
+        } => {
+            match source {
+                WordValue::Register(source) => {
+                    code.local_get(register(source)).i32_const(0xffff).i32_and();
+                }
+                WordValue::Immediate(value) => {
+                    code.i32_const(i32::from(value));
+                }
+            }
+            code.local_get(register(destination))
+                .i32_const(!0xffff)
+                .i32_and()
+                .i32_or()
+                .local_set(register(destination));
         }
         Operation::SetByte {
             condition,

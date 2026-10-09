@@ -744,7 +744,7 @@ fn full_modrm_domain_strict_categories_and_supported_neighbors_are_exact() {
         }
     }
     for register in 0_u8..8 {
-        strict.push((vec![0x66, 0xc7, 0xc0 | register, 0x34, 0x12], opcode));
+        strict.push((vec![0x66, 0x66, 0xc7, 0xc0 | register, 0x34, 0x12], opcode));
     }
     for immediate in [0, 0x80, 0xff] {
         strict.push((vec![0xc6, 0xf8, immediate], opcode));

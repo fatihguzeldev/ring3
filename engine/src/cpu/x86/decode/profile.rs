@@ -62,10 +62,18 @@ pub(super) fn check_profile(instruction: &Instruction, bytes: &[u8]) -> Result<(
         || instruction.code() == Code::Movsw_m16_m16 && bytes == [0x66, 0xa5]
         || instruction.code() == Code::Cmpsw_m16_m16 && bytes == [0x66, 0xa7]
         || instruction.code() == Code::Scasw_AX_m16 && bytes == [0x66, 0xaf];
+    let exact_word_move = match (instruction.code(), bytes) {
+        (Code::Mov_rm16_r16, [0x66, 0x89, modrm]) | (Code::Mov_r16_rm16, [0x66, 0x8b, modrm]) => {
+            *modrm & 0xc0 == 0xc0
+        }
+        (Code::Mov_r16_imm16, [0x66, opcode, _, _]) => (0xb8..=0xbf).contains(opcode),
+        (Code::Mov_rm16_imm16, [0x66, 0xc7, modrm, _, _]) => *modrm & 0xf8 == 0xc0,
+        _ => false,
+    };
     if instruction.has_lock_prefix()
         || instruction.has_rep_prefix()
         || instruction.has_repne_prefix()
-        || (!exact_word_string
+        || (!(exact_word_string || exact_word_move)
             && bytes
                 .iter()
                 .take_while(|byte| is_prefix(**byte))

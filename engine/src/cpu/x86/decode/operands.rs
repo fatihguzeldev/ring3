@@ -6,7 +6,8 @@ use crate::cpu::{
     x86::{
         Register32,
         ir::{
-            ByteRegister, ByteValue, EffectiveAddress, Location32, SmallSource, SmallWidth, Value32,
+            ByteRegister, ByteValue, EffectiveAddress, Location32, SmallSource, SmallWidth,
+            Value32, WordValue,
         },
     },
 };
@@ -34,6 +35,28 @@ fn optional_register(register: Register) -> Result<Option<Register32>, DecodeErr
         Ok(None)
     } else {
         self::register(register).map(Some)
+    }
+}
+
+pub(super) fn word_register(register: Register) -> Result<Register32, DecodeError> {
+    match register {
+        Register::AX => Ok(Register32::Eax),
+        Register::CX => Ok(Register32::Ecx),
+        Register::DX => Ok(Register32::Edx),
+        Register::BX => Ok(Register32::Ebx),
+        Register::SP => Ok(Register32::Esp),
+        Register::BP => Ok(Register32::Ebp),
+        Register::SI => Ok(Register32::Esi),
+        Register::DI => Ok(Register32::Edi),
+        _ => Err(unsupported()),
+    }
+}
+
+pub(super) fn word_value(instruction: &Instruction) -> Result<WordValue, DecodeError> {
+    match instruction.op1_kind() {
+        OpKind::Register => word_register(instruction.op1_register()).map(WordValue::Register),
+        OpKind::Immediate16 => Ok(WordValue::Immediate(instruction.immediate16())),
+        _ => Err(unsupported()),
     }
 }
 

@@ -4,7 +4,7 @@ use super::{
     DecodeError,
     operands::{
         byte_register, byte_value, effective_address, location, register, small_source,
-        unsupported, value,
+        unsupported, value, word_register, word_value,
     },
     profile::check_profile,
 };
@@ -68,6 +68,12 @@ pub(super) fn lower(instruction: &Instruction, bytes: &[u8]) -> Result<Operation
             destination: location(instruction, 0)?,
             source: value(instruction, 1)?,
         }),
+        Code::Mov_rm16_r16 | Code::Mov_r16_rm16 | Code::Mov_r16_imm16 | Code::Mov_rm16_imm16 => {
+            Ok(Operation::MoveWord {
+                destination: word_register(instruction.op0_register())?,
+                source: word_value(instruction)?,
+            })
+        }
         Code::Mov_r8_rm8 | Code::Mov_AL_moffs8 => match instruction.op1_kind() {
             OpKind::Memory => Ok(Operation::LoadByte {
                 destination: byte_register(instruction.op0_register())?,

@@ -41,6 +41,12 @@ pub enum ByteValue {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum WordValue {
+    Register(Register32),
+    Immediate(u16),
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum BytePredicateKind {
     Cmp,
     Test,
@@ -264,6 +270,10 @@ pub enum Operation {
     MoveByte {
         destination: ByteRegister,
         source: ByteValue,
+    },
+    MoveWord {
+        destination: Register32,
+        source: WordValue,
     },
     CompareByte {
         left: ByteRegister,
