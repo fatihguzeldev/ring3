@@ -440,6 +440,7 @@ fn exclusions() -> Vec<(Vec<u8>, DecodeError)> {
             cases.push((
                 vec![
                     0x66,
+                    0x66,
                     0xd3,
                     0xc0 | u8::from(kind == RotateKind::Right) << 3 | alias,
                 ],
