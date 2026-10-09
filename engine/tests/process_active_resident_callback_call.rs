@@ -1,5 +1,6 @@
 use ring3_engine::{
     abi::{
+        arena::{TRANSFER_OFFSET, TRANSFER_SIZE},
         call_frame::CallRecord32,
         x86::{encode_exit_v3, encode_state},
     },
@@ -155,7 +156,7 @@ fn active_unit_inner_capture_publishes_a_frozen_frame_without_rebinding_home() {
     )
     .unwrap();
     engine.arena_mut().unwrap()[100..140].fill(0x5a);
-    engine.arena_mut().unwrap()[212..].fill(0x6d);
+    engine.arena_mut().unwrap()[212..TRANSFER_OFFSET + TRANSFER_SIZE].fill(0x6d);
     let before = engine.arena().to_vec();
     let before_ram = ram(&engine);
     let before_versions = PAGES.map(|pc| {
@@ -326,7 +327,7 @@ fn stop(engine: &mut EngineInstance, state: State32, reason: u32, retired: u32, 
     arena[56..96].copy_from_slice(&exit_bytes(reason, retired, detail));
     arena[96..100].fill(0);
     arena[100..140].fill(0x5a);
-    arena[140..].fill(0x6d);
+    arena[TRANSFER_OFFSET..TRANSFER_OFFSET + TRANSFER_SIZE].fill(0x6d);
 }
 
 fn compile(engine: &mut EngineInstance, blocks: &[(u32, u32)], gates: &[(u32, u32)]) -> u64 {
