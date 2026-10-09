@@ -698,8 +698,8 @@ fn exclusions() -> Vec<(Vec<u8>, DecodeError)> {
             }
         }
         let field = 0x10 | u8::from(kind == RotateKind::Right) << 3;
-        rows.push((vec![0x66, 0xc1, 0xc0 | field, 2], opcode));
-        rows.push((vec![0x66, 0xd3, 0xc0 | field], opcode));
+        rows.push((vec![0x66, 0x66, 0xc1, 0xc0 | field, 2], opcode));
+        rows.push((vec![0x66, 0x66, 0xd3, 0xc0 | field], opcode));
     }
     for operand in [0xf0, 0x33] {
         rows.push((vec![0xc1, operand, 2], opcode));

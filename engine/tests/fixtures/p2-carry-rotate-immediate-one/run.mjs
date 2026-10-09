@@ -305,7 +305,7 @@ function ownerChecks(ctx, unit) {
 function rejectedCounts(ctx, unit) {
   protect(ctx, KEEP, 7);
   for (const immediate of [0, 2, 32, 255]) {
-    const extension = ctx.kind === 'left' ? 16 : 24, bytes = ctx.bank.location === 'register' ? Buffer.from([0x66, 0xc1, 0xc0 | extension, immediate, 0xeb, 0, 0x0f, 0x0b])
+    const extension = ctx.kind === 'left' ? 16 : 24, bytes = ctx.bank.location === 'register' ? Buffer.from([0x66, 0x66, 0xc1, 0xc0 | extension, immediate, 0xeb, 0, 0x0f, 0x0b])
       : Buffer.from([0x66, 0xc1, 5 | extension, 0x10, 0x40, 0, 0, immediate, 0xeb, 0, 0x0f, 0x0b]);
     dataInput(ctx, KEEP, bytes); const published = [ctx.api.generation(), ctx.api.module_ptr(), ctx.api.module_len()];
     request(ctx, words(ctx.owner === 'replacement' ? [KEEP] : [KEEP, bytes.length - 2]));
@@ -316,7 +316,7 @@ function rejectedCounts(ctx, unit) {
     run(ctx, unit, 0, 'published owner remains valid after refusal', registers, pc, flags, 1, 0); counts.rejection_survivals++;
     refusalRows.push({owner: ctx.owner, bank: ctx.bank.id, immediate, status: 10, published_module_sha256: hash(unit.bytes)});
   }
-  dataInput(ctx, KEEP, pattern.subarray(0, ctx.bank.location === 'register' ? 8 : 12)); protect(ctx, KEEP, 3); pages(ctx, 'restored patterned compiler-rejection page', [KEEP]);
+  dataInput(ctx, KEEP, pattern.subarray(0, ctx.bank.location === 'register' ? 9 : 12)); protect(ctx, KEEP, 3); pages(ctx, 'restored patterned compiler-rejection page', [KEEP]);
 }
 function mutation(ctx, unit) {
   const scan = ctx.bank.scans[0], registers = [...REG], beforeFlags = 0xcd7; let flags;

@@ -241,7 +241,11 @@ fn excluded_forms_and_two_byte_fetch_preserve_fault_and_snapshot_boundaries() {
                 }
                 _ => opcode_error,
             };
-            rejected(&[prefix, 0xd1, modrm], expected);
+            let mut bytes = vec![prefix, 0xd1, modrm];
+            if prefix == 0x66 {
+                bytes.insert(0, 0x66);
+            }
+            rejected(&bytes, expected);
             exclusions += 1;
         }
         for tail in [
@@ -264,13 +268,13 @@ fn excluded_forms_and_two_byte_fetch_preserve_fault_and_snapshot_boundaries() {
             vec![0x66, 0xd0, modrm],
             vec![0x66, 0xc0, modrm, 1],
             vec![0x66, 0xd2, modrm],
-            vec![0x66, 0xd3, modrm],
+            vec![0x66, 0x66, 0xd3, modrm],
         ] {
             rejected(&bytes, opcode_error);
             exclusions += 1;
         }
         for count in [0, 1, 2, 255] {
-            let bytes = vec![0x66, 0xc1, modrm, count];
+            let bytes = vec![0x66, 0x66, 0xc1, modrm, count];
             rejected(&bytes, opcode_error);
             exclusions += 1;
         }
@@ -390,8 +394,8 @@ fn late_carry_rotate_failures_preserve_both_publications() {
             ),
             (
                 CODE,
-                vec![0xd1, modrm, 0x66, 0xd1, modrm ^ 8],
-                5,
+                vec![0xd1, modrm, 0x66, 0x66, 0xd1, modrm ^ 8],
+                6,
                 instruction_error(CODE + 2, opcode_error),
             ),
             (

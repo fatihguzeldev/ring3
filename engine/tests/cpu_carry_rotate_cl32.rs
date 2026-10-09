@@ -441,10 +441,12 @@ fn exclusions() -> Vec<(Vec<u8>, DecodeError)> {
                     }
                     _ => opcode,
                 };
-                rows.push((
-                    [vec![prefix], instruction(kind, destination).to_vec()].concat(),
-                    failure,
-                ));
+                let mut bytes = vec![prefix];
+                if prefix == 0x66 {
+                    bytes.push(0x66);
+                }
+                bytes.extend(instruction(kind, destination));
+                rows.push((bytes, failure));
             }
         }
         for absolute in [false, true] {
@@ -530,7 +532,7 @@ fn strict_and_late_failures_keep_both_published_owners() {
     let opcode = DecodeError::Unsupported(UnsupportedFeature::Opcode);
     let mut strict = 0;
     for (excluded, expected) in [
-        (vec![0x66, 0xd3, 0xd0], opcode),
+        (vec![0x66, 0x66, 0xd3, 0xd0], opcode),
         (
             vec![0x64, 0xd3, 0xd0],
             DecodeError::Unsupported(UnsupportedFeature::Segment),
@@ -556,7 +558,7 @@ fn strict_and_late_failures_keep_both_published_owners() {
             error(CODE + 2, opcode),
         );
         let mut prefixed = target.to_vec();
-        prefixed.push(0x66);
+        prefixed.extend([0x66, 0x66]);
         prefixed.extend(instruction(kind, Register32::Ecx));
         late += failed_compile_profiles(CODE, &prefixed, prefixed.len(), error(CODE + 2, opcode));
         let mut truncated = target.to_vec();

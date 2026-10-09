@@ -437,7 +437,7 @@ fn exclusions() -> Vec<(Vec<u8>, DecodeError)> {
         }
         for alias in [0, 5] {
             for opcode_byte in [0xc1, 0xd3] {
-                let mut bytes = vec![0x66];
+                let mut bytes = vec![0x66, 0x66];
                 bytes.extend(instruction(opcode_byte, kind, alias, 2));
                 if opcode_byte == 0xc1 {
                     bytes.push(2);

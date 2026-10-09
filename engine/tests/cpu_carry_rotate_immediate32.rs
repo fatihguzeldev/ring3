@@ -419,13 +419,15 @@ fn exclusions() -> Vec<(Vec<u8>, DecodeError)> {
                     }
                     _ => opcode,
                 };
-                rows.push((
-                    [vec![prefix], instruction(kind, destination, 2).to_vec()].concat(),
-                    error,
-                ));
+                let mut bytes = vec![prefix];
+                if prefix == 0x66 {
+                    bytes.push(0x66);
+                }
+                bytes.extend(instruction(kind, destination, 2));
+                rows.push((bytes, error));
             }
             rows.push((
-                vec![0x66, 0xd3, instruction(kind, destination, 0)[1]],
+                vec![0x66, 0x66, 0xd3, instruction(kind, destination, 0)[1]],
                 opcode,
             ));
         }
@@ -514,14 +516,14 @@ fn strict_and_late_failures_keep_both_published_owners() {
     let opcode = DecodeError::Unsupported(UnsupportedFeature::Opcode);
     let mut strict = 0;
     for (excluded, expected) in [
-        (vec![0x66, 0xc1, 0xd0, 2], opcode),
+        (vec![0x66, 0x66, 0xc1, 0xd0, 2], opcode),
         (
             vec![0x64, 0xc1, 0xd0, 2],
             DecodeError::Unsupported(UnsupportedFeature::Segment),
         ),
         (vec![0xf0, 0xc1, 0xd0, 2], DecodeError::InvalidEncoding),
         (vec![0x66, 0xc1, 0x13, 2], opcode),
-        (vec![0x66, 0xd3, 0xd1], opcode),
+        (vec![0x66, 0x66, 0xd3, 0xd1], opcode),
         (vec![0x66, 0xd3, 0x13], opcode),
     ] {
         let mut bytes = instruction(RotateKind::Left, Register32::Eax, 2).to_vec();
@@ -540,7 +542,7 @@ fn strict_and_late_failures_keep_both_published_owners() {
             error(CODE + 3, opcode),
         );
         let mut prefixed = target.to_vec();
-        prefixed.push(0x66);
+        prefixed.extend([0x66, 0x66]);
         prefixed.extend(instruction(kind, Register32::Ecx, 31));
         late += failed_compile_profiles(CODE, &prefixed, prefixed.len(), error(CODE + 3, opcode));
         let mut truncated = target.to_vec();
