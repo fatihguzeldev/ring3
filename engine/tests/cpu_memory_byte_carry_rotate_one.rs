@@ -362,7 +362,11 @@ fn excluded_counts_prefixes_and_supported_neighbors_keep_exact_ir_boundaries() {
             let mut cl = vec![0xd2, operand];
             cl.insert(0, 0x66);
             rejected(&cl, opcode);
-            rejected(&[0x66, 0xd1, operand], opcode);
+            let mut word = vec![0x66, 0xd1, operand];
+            if operand & 0xc0 == 0xc0 {
+                word.insert(0, 0x66);
+            }
+            rejected(&word, opcode);
             exclusions += 2;
         }
     }
