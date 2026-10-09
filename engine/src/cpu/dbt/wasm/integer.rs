@@ -342,6 +342,73 @@ pub(super) fn instruction(
             arithmetic_flags(code, BinaryKind::Cmp, CarryFlag::Calculate, 7);
             string_pointer(code, Register32::Edi);
         }
+        Operation::CompareStringWord => {
+            memory::load_narrow_value(
+                code,
+                EffectiveAddress {
+                    base: Some(Register32::Esi),
+                    index: None,
+                    scale: 1,
+                    displacement: 0,
+                },
+                SmallWidth::Word,
+                imports,
+                exit_depth,
+            );
+            code.local_set(RESULT);
+            memory::load_narrow_value(
+                code,
+                EffectiveAddress {
+                    base: Some(Register32::Edi),
+                    index: None,
+                    scale: 1,
+                    displacement: 0,
+                },
+                SmallWidth::Word,
+                imports,
+                exit_depth,
+            );
+            // the second checked read clobbers lhs/rhs; result retains the first word.
+            code.local_set(RHS)
+                .local_get(RESULT)
+                .local_set(LHS)
+                .local_get(LHS)
+                .local_get(RHS)
+                .i32_sub()
+                .i32_const(0xffff)
+                .i32_and()
+                .local_set(RESULT);
+            arithmetic_flags(code, BinaryKind::Cmp, CarryFlag::Calculate, 15);
+            word_string_pointer(code, Register32::Esi);
+            word_string_pointer(code, Register32::Edi);
+        }
+        Operation::ScanStringWord => {
+            memory::load_narrow_value(
+                code,
+                EffectiveAddress {
+                    base: Some(Register32::Edi),
+                    index: None,
+                    scale: 1,
+                    displacement: 0,
+                },
+                SmallWidth::Word,
+                imports,
+                exit_depth,
+            );
+            code.local_set(RHS)
+                .local_get(register(Register32::Eax))
+                .i32_const(0xffff)
+                .i32_and()
+                .local_set(LHS)
+                .local_get(LHS)
+                .local_get(RHS)
+                .i32_sub()
+                .i32_const(0xffff)
+                .i32_and()
+                .local_set(RESULT);
+            arithmetic_flags(code, BinaryKind::Cmp, CarryFlag::Calculate, 15);
+            word_string_pointer(code, Register32::Edi);
+        }
         Operation::CompareStringDword => {
             memory::load_result(
                 code,

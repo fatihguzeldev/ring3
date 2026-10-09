@@ -250,6 +250,8 @@ pub enum Operation {
     StoreStringWord,
     CompareStringByte,
     ScanStringByte,
+    CompareStringWord,
+    ScanStringWord,
     CompareStringDword,
     ScanStringDword,
     FlagsToAh,
