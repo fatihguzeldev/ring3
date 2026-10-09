@@ -1234,6 +1234,11 @@ pub(super) fn instruction(
             destination,
             count,
         } => rotate_word(code, kind, destination, count),
+        Operation::RotateThroughCarryWord {
+            kind,
+            destination,
+            count,
+        } => rotate_through_carry_word(code, kind, destination, count),
         Operation::ShiftWord {
             kind,
             destination,
@@ -2273,6 +2278,89 @@ fn rotate_word(
         .local_set(FLAGS)
         .end()
         .local_get(RESULT)
+        .local_get(register(destination))
+        .i32_const(!0xffff)
+        .i32_and()
+        .i32_or()
+        .local_set(register(destination))
+        .end();
+}
+
+fn rotate_through_carry_word(
+    code: &mut InstructionSink<'_>,
+    kind: RotateKind,
+    destination: Register32,
+    count: ShiftCount,
+) {
+    word_value(code, WordValue::Register(destination));
+    code.local_set(RESULT);
+    // keep the original masked count separate from the 17-bit rotation distance.
+    shift_count(code, count);
+    code.local_tee(RHS)
+        .i32_const(17)
+        .i32_rem_u()
+        .local_tee(LHS)
+        .if_(BlockType::Empty)
+        .local_get(RESULT)
+        .local_get(FLAGS)
+        .i32_const(1)
+        .i32_and()
+        .i32_const(16)
+        .i32_shl()
+        .i32_or()
+        .local_set(RESULT)
+        .local_get(RESULT);
+    match kind {
+        RotateKind::Left => {
+            code.local_get(LHS).i32_shl();
+        }
+        RotateKind::Right => {
+            code.i32_const(17).local_get(LHS).i32_sub().i32_shl();
+        }
+    }
+    code.local_get(RESULT);
+    match kind {
+        RotateKind::Left => {
+            code.i32_const(17).local_get(LHS).i32_sub().i32_shr_u();
+        }
+        RotateKind::Right => {
+            code.local_get(LHS).i32_shr_u();
+        }
+    }
+    code.i32_or()
+        .i32_const(0x1ffff)
+        .i32_and()
+        .local_set(RESULT)
+        .local_get(FLAGS)
+        .i32_const(!0x801)
+        .i32_and()
+        .local_get(RESULT)
+        .i32_const(16)
+        .i32_shr_u()
+        .i32_or()
+        .local_set(FLAGS)
+        .local_get(RHS)
+        .i32_const(1)
+        .i32_eq()
+        .if_(BlockType::Empty)
+        .local_get(FLAGS)
+        .local_get(RESULT)
+        .i32_const(15)
+        .i32_shr_u()
+        .local_get(RESULT)
+        .i32_const(if kind == RotateKind::Left { 16 } else { 14 })
+        .i32_shr_u()
+        .i32_xor()
+        .i32_const(1)
+        .i32_and()
+        .i32_const(11)
+        .i32_shl()
+        .i32_or()
+        .local_set(FLAGS)
+        .end()
+        .local_get(RESULT)
+        .i32_const(0xffff)
+        .i32_and()
         .local_get(register(destination))
         .i32_const(!0xffff)
         .i32_and()

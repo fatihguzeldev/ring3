@@ -491,6 +491,7 @@ pub(super) fn supports(instruction: &DecodedInstruction, embedded: bool) -> bool
                 | Operation::UnaryWord { .. }
                 | Operation::ShiftWord { .. }
                 | Operation::RotateWord { .. }
+                | Operation::RotateThroughCarryWord { .. }
                 | Operation::ShiftByte { .. }
                 | Operation::DoubleShift { .. }
                 | Operation::ByteRotateImmediate { .. }

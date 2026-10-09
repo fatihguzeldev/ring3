@@ -162,6 +162,12 @@ pub(super) fn check_profile(instruction: &Instruction, bytes: &[u8]) -> Result<(
         (Code::Ror_rm16_1, [0x66, 0xd1, modrm])
         | (Code::Ror_rm16_CL, [0x66, 0xd3, modrm])
         | (Code::Ror_rm16_imm8, [0x66, 0xc1, modrm, _]) => *modrm & 0xf8 == 0xc8,
+        (Code::Rcl_rm16_1, [0x66, 0xd1, modrm])
+        | (Code::Rcl_rm16_CL, [0x66, 0xd3, modrm])
+        | (Code::Rcl_rm16_imm8, [0x66, 0xc1, modrm, _]) => *modrm & 0xf8 == 0xd0,
+        (Code::Rcr_rm16_1, [0x66, 0xd1, modrm])
+        | (Code::Rcr_rm16_CL, [0x66, 0xd3, modrm])
+        | (Code::Rcr_rm16_imm8, [0x66, 0xc1, modrm, _]) => *modrm & 0xf8 == 0xd8,
         _ => false,
     };
     if instruction.has_lock_prefix()
