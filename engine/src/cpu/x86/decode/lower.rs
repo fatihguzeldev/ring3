@@ -303,6 +303,10 @@ pub(super) fn lower(instruction: &Instruction, bytes: &[u8]) -> Result<Operation
                 _ => Err(unsupported()),
             }
         }
+        Code::Cmpxchg_rm16_r16 => Ok(Operation::CompareExchangeWord {
+            destination: word_register(instruction.op0_register())?,
+            source: word_register(instruction.op1_register())?,
+        }),
         Code::Cmpxchg_rm32_r32 => {
             if instruction.op1_kind() != OpKind::Register {
                 return Err(unsupported());

@@ -1135,6 +1135,37 @@ pub(super) fn instruction(
                 .local_set(register(Register32::Eax))
                 .end();
         }
+        Operation::CompareExchangeWord {
+            destination,
+            source,
+        } => {
+            word_value(code, WordValue::Register(Register32::Eax));
+            code.local_set(LHS);
+            word_value(code, WordValue::Register(destination));
+            code.local_set(RHS)
+                .local_get(LHS)
+                .local_get(RHS)
+                .i32_sub()
+                .i32_const(0xffff)
+                .i32_and()
+                .local_set(RESULT);
+            arithmetic_flags(code, BinaryKind::Cmp, CarryFlag::Calculate, 15);
+            code.local_get(RESULT).i32_eqz().if_(BlockType::Empty);
+            word_value(code, WordValue::Register(source));
+            code.local_get(register(destination))
+                .i32_const(!0xffff)
+                .i32_and()
+                .i32_or()
+                .local_set(register(destination))
+                .else_()
+                .local_get(RHS)
+                .local_get(register(Register32::Eax))
+                .i32_const(!0xffff)
+                .i32_and()
+                .i32_or()
+                .local_set(register(Register32::Eax))
+                .end();
+        }
         Operation::MemoryCompareExchange { address, source } => {
             memory::load_result(code, address, imports, exit_depth);
             code.local_get(register(Register32::Eax))

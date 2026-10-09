@@ -526,6 +526,7 @@ pub(super) fn supports(instruction: &DecodedInstruction, embedded: bool) -> bool
                 | Operation::ExchangeAddWord { .. }
                 | Operation::ExchangeAddByte { .. }
                 | Operation::CompareExchange { .. }
+                | Operation::CompareExchangeWord { .. }
                 | Operation::CompareExchangeByte { .. }
                 | Operation::ExchangeByte { .. }
                 | Operation::Move {

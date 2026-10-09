@@ -448,6 +448,10 @@ pub enum Operation {
         destination: Register32,
         source: Register32,
     },
+    CompareExchangeWord {
+        destination: Register32,
+        source: Register32,
+    },
     MemoryCompareExchange {
         address: EffectiveAddress,
         source: Register32,
