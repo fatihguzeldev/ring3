@@ -47,6 +47,12 @@ pub enum WordValue {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum WordArithmeticKind {
+    Add,
+    Sub,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum BytePredicateKind {
     Cmp,
     Test,
@@ -272,6 +278,11 @@ pub enum Operation {
         source: ByteValue,
     },
     MoveWord {
+        destination: Register32,
+        source: WordValue,
+    },
+    ArithmeticWord {
+        kind: WordArithmeticKind,
         destination: Register32,
         source: WordValue,
     },

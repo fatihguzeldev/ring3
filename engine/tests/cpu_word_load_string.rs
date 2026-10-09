@@ -206,7 +206,7 @@ fn exact_word_prefix_neighbors_and_both_standalone_profiles_stay_refused() {
         &[0x66, 0xae],
         &[0x66, 0x9c],
         &[0x66, 0x90],
-        &[0x66, 0x01, 0xc0],
+        &[0x66, 0x66, 0x01, 0xc0],
     ] {
         assert_eq!(
             decode_one(fixture(PC, bytes).memory().unwrap(), GuestAddress(PC)).err(),

@@ -477,6 +477,7 @@ pub(super) fn supports(instruction: &DecodedInstruction, embedded: bool) -> bool
                 | Operation::AhToFlags
                 | Operation::MoveByte { .. }
                 | Operation::MoveWord { .. }
+                | Operation::ArithmeticWord { .. }
                 | Operation::CompareWord { .. }
                 | Operation::TestWord { .. }
                 | Operation::CompareByte { .. }

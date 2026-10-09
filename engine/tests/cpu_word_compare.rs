@@ -315,7 +315,7 @@ fn word_compare_strict_forms_fetch_and_consumed_code_currency_stay_exact() {
         &[0x66, 0x3b, 0x03],
         &[0x66, 0x81, 0x3b, 0, 0],
         &[0x66, 0x83, 0x3b, 0],
-        &[0x66, 0x01, 0xc0],
+        &[0x66, 0x66, 0x01, 0xc0],
     ] {
         assert_eq!(
             decode_one(fixture(PC, bytes).memory().unwrap(), GuestAddress(PC)).unwrap_err(),
@@ -327,6 +327,9 @@ fn word_compare_strict_forms_fetch_and_consumed_code_currency_stay_exact() {
             let mut bytes = vec![0x66, opcode_byte, 0xc0 | extension << 3, 0];
             if opcode_byte == 0x81 {
                 bytes.push(0);
+            }
+            if matches!(extension, 0 | 5) {
+                bytes.insert(0, 0x66);
             }
             assert_eq!(
                 decode_one(fixture(PC, &bytes).memory().unwrap(), GuestAddress(PC)).unwrap_err(),
@@ -408,8 +411,8 @@ fn word_compare_profiles_caps_and_late_failures_preserve_published_owners() {
             for (pc, bytes, length, fault_pc, expected) in [
                 (
                     PC,
-                    [FORMS[0].to_vec(), vec![0x66, 0x01, 0xc0]].concat(),
-                    6,
+                    [FORMS[0].to_vec(), vec![0x66, 0x66, 0x01, 0xc0]].concat(),
+                    7,
                     PC + 3,
                     InstructionError::Decode(DecodeError::Unsupported(UnsupportedFeature::Opcode)),
                 ),

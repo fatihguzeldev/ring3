@@ -9,7 +9,8 @@ use crate::cpu::x86::{
         ByteLogicalKind, BytePredicateKind, ByteReadArithmeticKind, ByteRegister, ByteValue,
         CarryKind, Condition, CountBranchKind, DivideKind, DoubleShiftKind, EffectiveAddress,
         ExtensionKind, Location32, MemoryByteArithmeticKind, MultiplyKind, Operation, RotateKind,
-        ShiftCount, ShiftKind, SmallSource, SmallWidth, UnaryKind, Value32, WordValue,
+        ShiftCount, ShiftKind, SmallSource, SmallWidth, UnaryKind, Value32, WordArithmeticKind,
+        WordValue,
     },
 };
 
@@ -528,6 +529,34 @@ pub(super) fn instruction(
         } => {
             word_value(code, source);
             code.local_get(register(destination))
+                .i32_const(!0xffff)
+                .i32_and()
+                .i32_or()
+                .local_set(register(destination));
+        }
+        Operation::ArithmeticWord {
+            kind,
+            destination,
+            source,
+        } => {
+            word_value(code, WordValue::Register(destination));
+            code.local_set(LHS);
+            word_value(code, source);
+            code.local_set(RHS).local_get(LHS).local_get(RHS);
+            let binary = match kind {
+                WordArithmeticKind::Add => {
+                    code.i32_add();
+                    BinaryKind::Add
+                }
+                WordArithmeticKind::Sub => {
+                    code.i32_sub();
+                    BinaryKind::Sub
+                }
+            };
+            code.i32_const(0xffff).i32_and().local_set(RESULT);
+            arithmetic_flags(code, binary, CarryFlag::Calculate, 15);
+            code.local_get(RESULT)
+                .local_get(register(destination))
                 .i32_const(!0xffff)
                 .i32_and()
                 .i32_or()

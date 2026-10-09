@@ -10,7 +10,7 @@ use super::{
 };
 use crate::cpu::x86::{
     Register32,
-    ir::{CarryKind, ExtensionKind, Operation, SmallSource, SmallWidth},
+    ir::{CarryKind, ExtensionKind, Operation, SmallSource, SmallWidth, WordArithmeticKind},
 };
 
 pub(super) fn lower(instruction: &Instruction, bytes: &[u8]) -> Result<Operation, DecodeError> {
@@ -74,6 +74,24 @@ pub(super) fn lower(instruction: &Instruction, bytes: &[u8]) -> Result<Operation
                 source: word_value(instruction)?,
             })
         }
+        Code::Add_rm16_r16
+        | Code::Add_r16_rm16
+        | Code::Add_AX_imm16
+        | Code::Add_rm16_imm16
+        | Code::Add_rm16_imm8 => Ok(Operation::ArithmeticWord {
+            kind: WordArithmeticKind::Add,
+            destination: word_register(instruction.op0_register())?,
+            source: word_value(instruction)?,
+        }),
+        Code::Sub_rm16_r16
+        | Code::Sub_r16_rm16
+        | Code::Sub_AX_imm16
+        | Code::Sub_rm16_imm16
+        | Code::Sub_rm16_imm8 => Ok(Operation::ArithmeticWord {
+            kind: WordArithmeticKind::Sub,
+            destination: word_register(instruction.op0_register())?,
+            source: word_value(instruction)?,
+        }),
         Code::Cmp_rm16_r16
         | Code::Cmp_r16_rm16
         | Code::Cmp_AX_imm16
