@@ -157,7 +157,12 @@ fn strict_exclusions_and_two_byte_fetch_preserve_fault_and_wrap_boundaries() {
         for prefix in [
             0x66, 0x67, 0xf2, 0xf3, 0x26, 0x2e, 0x36, 0x3e, 0x64, 0x65, 0xf0,
         ] {
-            let engine = code(CODE, &[prefix, 0xf7, base]);
+            let bytes = if prefix == 0x66 {
+                vec![0x66, 0x66, 0xf7, base]
+            } else {
+                vec![prefix, 0xf7, base]
+            };
+            let engine = code(CODE, &bytes);
             let expected = match prefix {
                 0xf0 => DecodeError::InvalidEncoding,
                 0x26 | 0x2e | 0x36 | 0x3e | 0x64 | 0x65 => {
@@ -184,6 +189,7 @@ fn strict_exclusions_and_two_byte_fetch_preserve_fault_and_wrap_boundaries() {
             let mut bytes = vec![0x66, 0xf7];
             bytes.extend_from_slice(tail);
             bytes[2] |= base & 8;
+            bytes.insert(0, 0x66);
             let engine = code(CODE, &bytes);
             assert_eq!(
                 decode_one(engine.memory().unwrap(), GuestAddress(CODE)).err(),
@@ -299,8 +305,8 @@ fn late_accumulator_multiply_failures_preserve_both_publications() {
             ),
             (
                 CODE,
-                vec![0xf7, base, 0x66, 0xf7, other],
-                5,
+                vec![0xf7, base, 0x66, 0x66, 0xf7, other],
+                6,
                 instruction_error(CODE + 2, opcode),
             ),
             (

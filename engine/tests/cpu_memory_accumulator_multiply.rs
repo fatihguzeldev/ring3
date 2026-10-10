@@ -278,7 +278,12 @@ fn excluded_forms_and_exact_operand_fetch_preserve_fault_and_wrap_boundaries() {
         for prefix in [
             0x66, 0x67, 0xf2, 0xf3, 0x26, 0x2e, 0x36, 0x3e, 0x64, 0x65, 0xf0,
         ] {
-            let bytes = [vec![prefix], encoding(kind, &[0x23])].concat();
+            let prefixes = if prefix == 0x66 {
+                vec![0x66, 0x66]
+            } else {
+                vec![prefix]
+            };
+            let bytes = [prefixes, encoding(kind, &[0x23])].concat();
             let engine = code(CODE, &bytes);
             let expected = match prefix {
                 0xf0 => DecodeError::InvalidEncoding,
@@ -447,8 +452,8 @@ fn late_memory_accumulator_failures_preserve_both_publications() {
             ),
             (
                 CODE,
-                vec![0xf7, first, 0x66, 0xf7, first ^ 8],
-                5,
+                vec![0xf7, first, 0x66, 0x66, 0xf7, first ^ 8],
+                6,
                 instruction_error(CODE + 2, opcode),
             ),
             (

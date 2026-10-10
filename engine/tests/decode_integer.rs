@@ -308,7 +308,10 @@ fn adjacent_unsupported_integer_instructions_remain_rejected() {
             "duplicate operand-prefixed ror word",
             &[0x66, 0x66, 0xd1, 0xc8],
         ),
-        ("mul word", &[0x66, 0xf7, 0xe2]),
+        (
+            "duplicate operand-prefixed mul word",
+            &[0x66, 0x66, 0xf7, 0xe2],
+        ),
         (
             "duplicate operand-prefixed imul word",
             &[0x66, 0x66, 0x0f, 0xaf, 0xc2],
