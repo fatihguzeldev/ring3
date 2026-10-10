@@ -1,3 +1,4 @@
+use ring3_engine::abi::arena::{TRANSFER_OFFSET, TRANSFER_SIZE};
 use ring3_engine::abi::x86::{decode_state, encode_exit_v3, encode_state};
 use ring3_engine::cpu::x86::State32;
 use ring3_engine::cpu::{ExecutionExit, ExitReason};
@@ -8,7 +9,8 @@ use ring3_engine::windows::CallingConvention32;
 const KEY: u64 = 0xfedc_ba98_1234_5678;
 
 fn batch(engine: &mut EngineInstance, words: &[(u32, u32)]) {
-    let transfer = &mut engine.arena_mut().unwrap()[140..];
+    let transfer =
+        &mut engine.arena_mut().unwrap()[TRANSFER_OFFSET..TRANSFER_OFFSET + TRANSFER_SIZE];
     transfer.fill(0xcc);
     for (index, (address, value)) in words.iter().enumerate() {
         transfer[index * 8..index * 8 + 4].copy_from_slice(&address.to_le_bytes());
