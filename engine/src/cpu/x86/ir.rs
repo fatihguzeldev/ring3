@@ -152,6 +152,12 @@ pub enum DivideKind {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AsciiAdjustKind {
+    Add,
+    Subtract,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DecimalAdjustKind {
     Add,
     Subtract,
@@ -278,6 +284,9 @@ pub enum Operation {
     },
     Carry {
         kind: CarryKind,
+    },
+    AsciiAdjust {
+        kind: AsciiAdjustKind,
     },
     DecimalAdjust {
         kind: DecimalAdjustKind,

@@ -5,13 +5,13 @@ use crate::cpu::x86::{
     Register32,
     decode::DecodedInstruction,
     ir::{
-        BinaryKind, BitIndex, BitScanKind, BitTestKind, BranchTarget, ByteArithmeticKind,
-        ByteLogicalKind, BytePredicateKind, ByteReadArithmeticKind, ByteRegister, ByteValue,
-        CarryKind, Condition, CountBranchKind, DecimalAdjustKind, DivideKind, DoubleShiftKind,
-        EffectiveAddress, ExtensionKind, Location32, MemoryByteArithmeticKind, MultiplyKind,
-        Operation, RotateKind, ShiftCount, ShiftKind, SmallSource, SmallWidth, UnaryKind, Value32,
-        WordArithmeticKind, WordLogicalKind, WordMemoryArithmeticKind, WordReadArithmeticKind,
-        WordValue,
+        AsciiAdjustKind, BinaryKind, BitIndex, BitScanKind, BitTestKind, BranchTarget,
+        ByteArithmeticKind, ByteLogicalKind, BytePredicateKind, ByteReadArithmeticKind,
+        ByteRegister, ByteValue, CarryKind, Condition, CountBranchKind, DecimalAdjustKind,
+        DivideKind, DoubleShiftKind, EffectiveAddress, ExtensionKind, Location32,
+        MemoryByteArithmeticKind, MultiplyKind, Operation, RotateKind, ShiftCount, ShiftKind,
+        SmallSource, SmallWidth, UnaryKind, Value32, WordArithmeticKind, WordLogicalKind,
+        WordMemoryArithmeticKind, WordReadArithmeticKind, WordValue,
     },
 };
 
@@ -105,6 +105,7 @@ pub(super) fn instruction(
             code.local_set(FLAGS);
         }
         Operation::DecimalAdjust { kind } => decimal_adjust(code, kind),
+        Operation::AsciiAdjust { kind } => ascii_adjust(code, kind),
         Operation::Direction { set } => {
             code.local_get(FLAGS);
             if set {
@@ -2597,6 +2598,47 @@ fn indirect_target(
             memory::load_result(code, address, imports, exit_depth);
         }
     }
+}
+
+fn ascii_adjust(code: &mut InstructionSink<'_>, kind: AsciiAdjustKind) {
+    word_value(code, WordValue::Register(Register32::Eax));
+    code.local_set(RESULT)
+        .local_get(FLAGS)
+        .local_tee(RHS)
+        .i32_const(0x402)
+        .i32_and()
+        .local_set(FLAGS)
+        .local_get(RESULT)
+        .i32_const(0xf)
+        .i32_and()
+        .i32_const(9)
+        .i32_gt_u()
+        .local_get(RHS)
+        .i32_const(0x10)
+        .i32_and()
+        .i32_or()
+        .if_(BlockType::Empty)
+        .local_get(RESULT)
+        .i32_const(0x106);
+    if kind == AsciiAdjustKind::Add {
+        code.i32_add();
+    } else {
+        code.i32_sub();
+    }
+    code.local_set(RESULT)
+        .local_get(FLAGS)
+        .i32_const(0x11)
+        .i32_or()
+        .local_set(FLAGS)
+        .end()
+        .local_get(register(Register32::Eax))
+        .i32_const(!0xffff)
+        .i32_and()
+        .local_get(RESULT)
+        .i32_const(0xff0f)
+        .i32_and()
+        .i32_or()
+        .local_set(register(Register32::Eax));
 }
 
 fn decimal_adjust(code: &mut InstructionSink<'_>, kind: DecimalAdjustKind) {

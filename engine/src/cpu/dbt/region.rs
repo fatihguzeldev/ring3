@@ -549,6 +549,7 @@ pub(super) fn supports(instruction: &DecodedInstruction, embedded: bool) -> bool
                 | Operation::X87StatusToAx
                 | Operation::Carry { .. }
                 | Operation::DecimalAdjust { .. }
+                | Operation::AsciiAdjust { .. }
                 | Operation::Direction { .. }
                 | Operation::FlagsToAh
                 | Operation::AhToFlags

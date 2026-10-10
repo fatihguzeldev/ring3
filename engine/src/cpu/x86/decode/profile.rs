@@ -60,6 +60,14 @@ pub(super) fn check_profile(instruction: &Instruction, bytes: &[u8]) -> Result<(
     {
         return Err(unsupported());
     }
+    if matches!(instruction.code(), Code::Aaa | Code::Aas)
+        && !matches!(
+            (instruction.code(), bytes),
+            (Code::Aaa, [0x37]) | (Code::Aas, [0x3f])
+        )
+    {
+        return Err(unsupported());
+    }
     if instruction.is_string_instruction()
         && (instruction.has_rep_prefix() || instruction.has_repne_prefix())
     {
