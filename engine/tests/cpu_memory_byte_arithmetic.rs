@@ -532,7 +532,7 @@ fn excluded() -> Vec<(Vec<u8>, DecodeError)> {
             forms.push((bytes, unsupported));
         }
         let mut word = vec![0x66, opcode + 1, 0x03 | field << 3];
-        if immediate.is_none() {
+        if immediate.is_none() || matches!(field, 0 | 5) {
             word.insert(0, 0x66);
         }
         if immediate.is_some() {

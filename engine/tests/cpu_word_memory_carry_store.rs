@@ -9,7 +9,7 @@ use ring3_engine::{
         x86::{
             Register32,
             decode::{DecodeError, decode_one},
-            ir::{EffectiveAddress, Operation, WordMemoryArithmeticKind},
+            ir::{EffectiveAddress, Operation, WordMemoryArithmeticKind, WordValue},
         },
     },
     memory::{
@@ -61,7 +61,7 @@ fn decode_admission(opcode: u8) {
         panic!("WORD carry store decoded as {:?}", decoded.operation());
     };
     assert_eq!(*actual_kind, kind(opcode));
-    assert_eq!(*source, Register32::Eax);
+    assert_eq!(*source, WordValue::Register(Register32::Eax));
     assert_eq!(
         *address,
         EffectiveAddress {
@@ -247,7 +247,7 @@ fn assert_memory_operation(bytes: &[u8], source: Register32, address: EffectiveA
     assert_eq!(*actual_kind, kind(bytes[1]), "{bytes:02x?}");
     assert_eq!(
         (*actual_source, *actual_address),
-        (source, address),
+        (WordValue::Register(source), address),
         "{bytes:02x?}"
     );
     assert_eq!(
@@ -364,10 +364,10 @@ fn word_memory_carry_store_only_single_operand_override_and_flat32_are_open() {
 }
 
 #[test]
-fn word_memory_carry_store_immediate_forms_stay_closed() {
+fn word_memory_carry_store_duplicate_prefix_immediates_stay_closed() {
     for extension in [2, 3] {
         for (opcode, immediate) in [(0x81, &[0xff, 0xff][..]), (0x83, &[0x80][..])] {
-            let mut bytes = vec![0x66, opcode, 0x03 | extension << 3];
+            let mut bytes = vec![0x66, 0x66, opcode, 0x03 | extension << 3];
             bytes.extend_from_slice(immediate);
             bytes.extend([0xeb, 0]);
             let memory = code_space(CODE, &bytes);

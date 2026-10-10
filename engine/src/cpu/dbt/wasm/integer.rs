@@ -629,7 +629,7 @@ pub(super) fn instruction(
             source,
         } => {
             memory::load_narrow_value(code, address, SmallWidth::Word, imports, exit_depth);
-            word_value(code, WordValue::Register(source));
+            word_value(code, source);
             let binary = match kind {
                 WordMemoryArithmeticKind::Add => {
                     code.i32_add();
@@ -659,7 +659,7 @@ pub(super) fn instruction(
             code.i32_const(0xffff).i32_and().local_set(RESULT);
             memory::store_word_result(code, address, imports, exit_depth);
             // store validation uses operand scratch; recover the original word after success.
-            word_value(code, WordValue::Register(source));
+            word_value(code, source);
             code.local_set(RHS).local_get(RESULT).local_get(RHS);
             if matches!(
                 kind,

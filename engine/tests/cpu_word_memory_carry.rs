@@ -329,7 +329,7 @@ fn word_memory_carry_complete_prefixes_and_adjacent_families_stay_closed() {
     }
     for extension in [2, 3] {
         for opcode in [0x81, 0x83] {
-            let mut bytes = vec![0x66, opcode, 0x03 | extension << 3, 0];
+            let mut bytes = vec![0x66, 0x66, opcode, 0x03 | extension << 3, 0];
             if opcode == 0x81 {
                 bytes.push(0);
             }

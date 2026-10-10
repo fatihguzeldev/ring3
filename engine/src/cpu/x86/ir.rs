@@ -319,7 +319,7 @@ pub enum Operation {
     MemoryArithmeticWord {
         kind: WordMemoryArithmeticKind,
         address: EffectiveAddress,
-        source: Register32,
+        source: WordValue,
     },
     LogicalWord {
         kind: WordLogicalKind,

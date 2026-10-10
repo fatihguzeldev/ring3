@@ -101,18 +101,22 @@ pub(super) fn lower(instruction: &Instruction, bytes: &[u8]) -> Result<Operation
                 address: effective_address(instruction)?,
             })
         }
-        Code::Add_rm16_r16 if instruction.op0_kind() == OpKind::Memory => {
+        Code::Add_rm16_r16 | Code::Add_rm16_imm16 | Code::Add_rm16_imm8
+            if instruction.op0_kind() == OpKind::Memory =>
+        {
             Ok(Operation::MemoryArithmeticWord {
                 kind: WordMemoryArithmeticKind::Add,
                 address: effective_address(instruction)?,
-                source: word_register(instruction.op1_register())?,
+                source: word_value(instruction)?,
             })
         }
-        Code::Sub_rm16_r16 if instruction.op0_kind() == OpKind::Memory => {
+        Code::Sub_rm16_r16 | Code::Sub_rm16_imm16 | Code::Sub_rm16_imm8
+            if instruction.op0_kind() == OpKind::Memory =>
+        {
             Ok(Operation::MemoryArithmeticWord {
                 kind: WordMemoryArithmeticKind::Sub,
                 address: effective_address(instruction)?,
-                source: word_register(instruction.op1_register())?,
+                source: word_value(instruction)?,
             })
         }
         Code::Add_rm16_r16
@@ -140,11 +144,13 @@ pub(super) fn lower(instruction: &Instruction, bytes: &[u8]) -> Result<Operation
                 address: effective_address(instruction)?,
             })
         }
-        Code::Adc_rm16_r16 if instruction.op0_kind() == OpKind::Memory => {
+        Code::Adc_rm16_r16 | Code::Adc_rm16_imm16 | Code::Adc_rm16_imm8
+            if instruction.op0_kind() == OpKind::Memory =>
+        {
             Ok(Operation::MemoryArithmeticWord {
                 kind: WordMemoryArithmeticKind::Adc,
                 address: effective_address(instruction)?,
-                source: word_register(instruction.op1_register())?,
+                source: word_value(instruction)?,
             })
         }
         Code::Adc_rm16_r16
@@ -163,11 +169,13 @@ pub(super) fn lower(instruction: &Instruction, bytes: &[u8]) -> Result<Operation
                 address: effective_address(instruction)?,
             })
         }
-        Code::Sbb_rm16_r16 if instruction.op0_kind() == OpKind::Memory => {
+        Code::Sbb_rm16_r16 | Code::Sbb_rm16_imm16 | Code::Sbb_rm16_imm8
+            if instruction.op0_kind() == OpKind::Memory =>
+        {
             Ok(Operation::MemoryArithmeticWord {
                 kind: WordMemoryArithmeticKind::Sbb,
                 address: effective_address(instruction)?,
-                source: word_register(instruction.op1_register())?,
+                source: word_value(instruction)?,
             })
         }
         Code::Sbb_rm16_r16
