@@ -62,6 +62,10 @@ pub(super) fn check_profile(instruction: &Instruction, bytes: &[u8]) -> Result<(
         || instruction.code() == Code::Movsw_m16_m16 && bytes == [0x66, 0xa5]
         || instruction.code() == Code::Cmpsw_m16_m16 && bytes == [0x66, 0xa7]
         || instruction.code() == Code::Scasw_AX_m16 && bytes == [0x66, 0xaf];
+    let exact_word_accumulator_extend = matches!(
+        (instruction.code(), bytes),
+        (Code::Cbw, [0x66, 0x98]) | (Code::Cwd, [0x66, 0x99])
+    );
     let exact_word_move = match (instruction.code(), bytes) {
         (Code::Mov_rm16_r16, [0x66, 0x89, modrm, ..])
         | (Code::Mov_r16_rm16, [0x66, 0x8b, modrm, ..])
@@ -391,6 +395,7 @@ pub(super) fn check_profile(instruction: &Instruction, bytes: &[u8]) -> Result<(
         || instruction.has_rep_prefix()
         || instruction.has_repne_prefix()
         || (!(exact_word_string
+            || exact_word_accumulator_extend
             || exact_word_move
             || exact_word_predicate
             || exact_word_arithmetic

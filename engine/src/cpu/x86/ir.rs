@@ -452,6 +452,8 @@ pub enum Operation {
         destination: Register32,
         source: SmallSource,
     },
+    SignExtendAccumulatorWord,
+    SignExtendHighWord,
     SignExtendHigh,
     ByteSwap {
         destination: Register32,

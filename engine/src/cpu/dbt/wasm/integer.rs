@@ -44,6 +44,31 @@ pub(super) fn instruction(
             memory::store_word_result(code, address, imports, exit_depth);
             store = true;
         }
+        Operation::SignExtendAccumulatorWord => {
+            code.local_get(register(Register32::Eax))
+                .i32_const(!0xffff)
+                .i32_and()
+                .local_get(register(Register32::Eax));
+            extend_value(code, ExtensionKind::Sign, SmallWidth::Byte);
+            code.i32_const(0xffff)
+                .i32_and()
+                .i32_or()
+                .local_set(register(Register32::Eax));
+        }
+        Operation::SignExtendHighWord => {
+            code.local_get(register(Register32::Edx))
+                .i32_const(!0xffff)
+                .i32_and()
+                .local_get(register(Register32::Eax))
+                .i32_const(16)
+                .i32_shl()
+                .i32_const(31)
+                .i32_shr_s()
+                .i32_const(0xffff)
+                .i32_and()
+                .i32_or()
+                .local_set(register(Register32::Edx));
+        }
         Operation::SignExtendHigh => {
             code.local_get(register(Register32::Eax))
                 .i32_const(31)

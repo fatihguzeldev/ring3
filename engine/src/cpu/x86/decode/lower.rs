@@ -338,6 +338,8 @@ pub(super) fn lower(instruction: &Instruction, bytes: &[u8]) -> Result<Operation
                 source: byte_value(instruction)?,
             })
         }
+        Code::Cbw => Ok(Operation::SignExtendAccumulatorWord),
+        Code::Cwd => Ok(Operation::SignExtendHighWord),
         Code::Cwde => Ok(Operation::Extend {
             kind: ExtensionKind::Sign,
             destination: Register32::Eax,

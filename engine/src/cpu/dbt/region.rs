@@ -555,6 +555,8 @@ pub(super) fn supports(instruction: &DecodedInstruction, embedded: bool) -> bool
                 | Operation::SetByte { .. }
                 | Operation::ConditionalMove { .. }
                 | Operation::ConditionalMoveWord { .. }
+                | Operation::SignExtendAccumulatorWord
+                | Operation::SignExtendHighWord
                 | Operation::SignExtendHigh
                 | Operation::SignedMultiplyWord { .. }
                 | Operation::SignedMultiplyImmediateWord { .. }
