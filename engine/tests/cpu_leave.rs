@@ -267,7 +267,7 @@ fn standalone_and_prefixed_or_adjacent_forms_keep_explicit_refusals() {
     }
     let opcode = DecodeError::Unsupported(UnsupportedFeature::Opcode);
     let mut refused = vec![
-        (vec![0x66, 0xc9], opcode),
+        (vec![0x66, 0x66, 0xc9], opcode),
         (vec![0x67, 0xc9], opcode),
         (vec![0xf2, 0xc9], opcode),
         (vec![0xf3, 0xc9], opcode),
@@ -332,7 +332,7 @@ fn publication(engine: &EngineInstance, id: u64) -> Publication {
 #[test]
 fn late_refusal_and_missing_next_instruction_preserve_both_published_owners() {
     for (pc, bytes) in [
-        (CODE, &[0xc9, 0x66, 0xc9][..]),
+        (CODE, &[0xc9, 0x66, 0x66, 0xc9][..]),
         (CODE, &[0xc9, 0xc8, 0, 0, 0][..]),
         (0x1fff, &[0xc9][..]),
     ] {

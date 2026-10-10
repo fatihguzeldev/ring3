@@ -187,7 +187,16 @@ fn strict_prefixes_popfd_and_both_standalone_profiles_stay_refused() {
     ] {
         assert_eq!(
             decode_one(
-                fixture(PC, &[prefix, 0x9c]).memory().unwrap(),
+                fixture(
+                    PC,
+                    &if prefix == 0x66 {
+                        vec![prefix, 0x66, 0x9c]
+                    } else {
+                        vec![prefix, 0x9c]
+                    }
+                )
+                .memory()
+                .unwrap(),
                 GuestAddress(PC)
             )
             .err(),
@@ -297,8 +306,8 @@ fn late_refusals_caps_and_data_currency_preserve_bound_publications() {
             let failures = [
                 (
                     PC,
-                    vec![0x9c, 0x66, 0x9c, 0xeb, 0],
-                    5,
+                    vec![0x9c, 0x66, 0x66, 0x9c, 0xeb, 0],
+                    6,
                     CompileError::Instruction {
                         pc: GuestAddress(PC + 1),
                         cause: InstructionError::Decode(DecodeError::Unsupported(
