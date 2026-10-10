@@ -832,9 +832,21 @@ pub enum Operation {
     Push {
         source: Value32,
     },
+    PushWord {
+        source: WordValue,
+    },
+    PushMemoryWord {
+        source: EffectiveAddress,
+    },
     PushFlags,
     Pop {
         destination: Location32,
+    },
+    PopWord {
+        destination: Register32,
+    },
+    PopMemoryWord {
+        destination: EffectiveAddress,
     },
     Leave,
     Return {

@@ -7,7 +7,7 @@ use super::{
     },
 };
 use crate::{
-    cpu::x86::ir::{BranchTarget, Condition, CountBranchKind, Operation},
+    cpu::x86::ir::{BranchTarget, Condition, CountBranchKind, Operation, WordValue},
     memory::GuestAddress,
 };
 
@@ -42,9 +42,35 @@ pub(super) fn lower(instruction: &Instruction) -> Result<Operation, DecodeError>
                 source: value(instruction, 0)?,
             }
         }
+        Code::Push_r16 | Code::Push_rm16 | Code::Push_imm16 | Code::Pushw_imm8 => {
+            match instruction.op0_kind() {
+                OpKind::Register => Operation::PushWord {
+                    source: WordValue::Register(word_register(instruction.op0_register())?),
+                },
+                OpKind::Memory => Operation::PushMemoryWord {
+                    source: effective_address(instruction)?,
+                },
+                OpKind::Immediate16 => Operation::PushWord {
+                    source: WordValue::Immediate(instruction.immediate16()),
+                },
+                OpKind::Immediate8to16 => Operation::PushWord {
+                    source: WordValue::Immediate(instruction.immediate8to16() as u16),
+                },
+                _ => return Err(unsupported()),
+            }
+        }
         Code::Pushfd => Operation::PushFlags,
         Code::Pop_r32 | Code::Pop_rm32 => Operation::Pop {
             destination: location(instruction, 0)?,
+        },
+        Code::Pop_r16 | Code::Pop_rm16 => match instruction.op0_kind() {
+            OpKind::Register => Operation::PopWord {
+                destination: word_register(instruction.op0_register())?,
+            },
+            OpKind::Memory => Operation::PopMemoryWord {
+                destination: effective_address(instruction)?,
+            },
+            _ => return Err(unsupported()),
         },
         Code::Leaved => Operation::Leave,
         Code::Retnd => Operation::Return { stack_adjust: 0 },

@@ -57,6 +57,7 @@ impl Imports {
                 Operation::X87StatusToMemory { .. }
                 | Operation::X87ControlToMemory { .. }
                 | Operation::StoreWord { .. }
+                | Operation::PushWord { .. }
                 | Operation::StoreStringWord => {
                     store16 = true;
                 }
@@ -107,10 +108,13 @@ impl Imports {
                 | Operation::ReadWordDivideAccumulator { .. }
                 | Operation::ReadBitTestWord { .. }
                 | Operation::LoadWord { .. }
+                | Operation::PopWord { .. }
                 | Operation::LoadStringWord
                 | Operation::CompareStringWord
                 | Operation::ScanStringWord => read16 = true,
                 Operation::MoveStringWord
+                | Operation::PushMemoryWord { .. }
+                | Operation::PopMemoryWord { .. }
                 | Operation::MemoryUnaryWord { .. }
                 | Operation::MemoryShiftWord { .. }
                 | Operation::MemoryDoubleShiftWord { .. }
@@ -364,6 +368,87 @@ pub(super) fn pop_memory(
     store_result(code, destination, imports, exit_depth);
     code.local_get(register(esp))
         .i32_const(4)
+        .i32_add()
+        .local_set(register(esp));
+}
+
+pub(super) fn push_word_result(code: &mut InstructionSink<'_>, imports: Imports, exit_depth: u32) {
+    let esp = crate::cpu::x86::Register32::Esp;
+    store_word_result(
+        code,
+        EffectiveAddress {
+            base: Some(esp),
+            index: None,
+            scale: 1,
+            displacement: (-2_i32) as u32,
+        },
+        imports,
+        exit_depth,
+    );
+    code.local_get(ADDRESS).local_set(register(esp));
+}
+
+pub(super) fn pop_word_register(
+    code: &mut InstructionSink<'_>,
+    destination: crate::cpu::x86::Register32,
+    imports: Imports,
+    exit_depth: u32,
+) {
+    let esp = crate::cpu::x86::Register32::Esp;
+    load_narrow_value(
+        code,
+        EffectiveAddress {
+            base: Some(esp),
+            index: None,
+            scale: 1,
+            displacement: 0,
+        },
+        SmallWidth::Word,
+        imports,
+        exit_depth,
+    );
+    code.local_get(register(destination));
+    if destination == esp {
+        code.i32_const(2).i32_add();
+    }
+    code.i32_const(!0xffff)
+        .i32_and()
+        .i32_or()
+        .local_set(register(destination));
+    if destination != esp {
+        code.local_get(register(esp))
+            .i32_const(2)
+            .i32_add()
+            .local_set(register(esp));
+    }
+}
+
+pub(super) fn pop_word_memory(
+    code: &mut InstructionSink<'_>,
+    mut destination: EffectiveAddress,
+    imports: Imports,
+    exit_depth: u32,
+) {
+    let esp = crate::cpu::x86::Register32::Esp;
+    load_narrow_value(
+        code,
+        EffectiveAddress {
+            base: Some(esp),
+            index: None,
+            scale: 1,
+            displacement: 0,
+        },
+        SmallWidth::Word,
+        imports,
+        exit_depth,
+    );
+    code.local_set(RESULT);
+    if destination.base == Some(esp) {
+        destination.displacement = destination.displacement.wrapping_add(2);
+    }
+    store_word_result(code, destination, imports, exit_depth);
+    code.local_get(register(esp))
+        .i32_const(2)
         .i32_add()
         .local_set(register(esp));
 }

@@ -2147,6 +2147,18 @@ pub(super) fn instruction(
             code.local_get(ADDRESS).local_set(register(Register32::Esp));
             store = true;
         }
+        Operation::PushWord { source } => {
+            word_value(code, source);
+            code.local_set(RESULT);
+            memory::push_word_result(code, imports, exit_depth);
+            store = true;
+        }
+        Operation::PushMemoryWord { source } => {
+            memory::load_narrow_value(code, source, SmallWidth::Word, imports, exit_depth);
+            code.local_set(RESULT);
+            memory::push_word_result(code, imports, exit_depth);
+            store = true;
+        }
         Operation::PushFlags => {
             code.local_get(FLAGS)
                 .i32_const(0x00fc_ffff)
@@ -2175,6 +2187,13 @@ pub(super) fn instruction(
             destination: Location32::Memory(destination),
         } => {
             memory::pop_memory(code, destination, imports, exit_depth);
+            store = true;
+        }
+        Operation::PopWord { destination } => {
+            memory::pop_word_register(code, destination, imports, exit_depth);
+        }
+        Operation::PopMemoryWord { destination } => {
+            memory::pop_word_memory(code, destination, imports, exit_depth);
             store = true;
         }
         Operation::Leave => {

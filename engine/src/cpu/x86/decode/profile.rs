@@ -80,6 +80,15 @@ pub(super) fn check_profile(instruction: &Instruction, bytes: &[u8]) -> Result<(
         (instruction.code(), bytes),
         (Code::Lea_r16_m, [0x66, 0x8d, modrm, ..]) if *modrm & 0xc0 != 0xc0
     );
+    let exact_word_stack = match (instruction.code(), bytes) {
+        (Code::Push_r16, [0x66, 0x50..=0x57])
+        | (Code::Pop_r16, [0x66, 0x58..=0x5f])
+        | (Code::Push_imm16, [0x66, 0x68, _, _])
+        | (Code::Pushw_imm8, [0x66, 0x6a, _]) => true,
+        (Code::Push_rm16, [0x66, 0xff, modrm, ..]) => *modrm & 0x38 == 0x30,
+        (Code::Pop_rm16, [0x66, 0x8f, modrm, ..]) => *modrm & 0x38 == 0,
+        _ => false,
+    };
     let exact_word_move = match (instruction.code(), bytes) {
         (Code::Mov_rm16_r16, [0x66, 0x89, modrm, ..])
         | (Code::Mov_r16_rm16, [0x66, 0x8b, modrm, ..])
@@ -413,6 +422,7 @@ pub(super) fn check_profile(instruction: &Instruction, bytes: &[u8]) -> Result<(
             || exact_word_exchange
             || exact_word_byte_extend
             || exact_word_lea
+            || exact_word_stack
             || exact_word_move
             || exact_word_predicate
             || exact_word_arithmetic
