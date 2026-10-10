@@ -521,6 +521,10 @@ pub enum Operation {
         kind: UnaryKind,
         address: EffectiveAddress,
     },
+    MemoryUnaryWord {
+        kind: UnaryKind,
+        address: EffectiveAddress,
+    },
     Unary {
         kind: UnaryKind,
         destination: Location32,

@@ -431,6 +431,7 @@ fn supports_memory_unary(operation: &Operation) -> bool {
     matches!(
         operation,
         Operation::MemoryUnaryByte { .. }
+            | Operation::MemoryUnaryWord { .. }
             | Operation::Unary {
                 kind: UnaryKind::Inc | UnaryKind::Dec | UnaryKind::Not | UnaryKind::Neg,
                 destination: Location32::Memory(_),

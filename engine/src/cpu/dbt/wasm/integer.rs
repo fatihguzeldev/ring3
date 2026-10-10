@@ -1477,6 +1477,10 @@ pub(super) fn instruction(
             }
         }
         Operation::UnaryWord { kind, destination } => unary_word(code, kind, destination),
+        Operation::MemoryUnaryWord { kind, address } => {
+            unary_memory_word(code, kind, address, imports, exit_depth);
+            store = true;
+        }
         Operation::UnaryByte { kind, destination } => unary_byte(code, kind, destination),
         Operation::MemoryUnaryByte { kind, address } => {
             unary_memory_byte(code, kind, address, imports, exit_depth);
@@ -2041,6 +2045,65 @@ fn unary_memory_byte(
         UnaryKind::Not => return,
     };
     arithmetic_flags(code, binary, carry, 7);
+}
+
+fn unary_memory_word(
+    code: &mut InstructionSink<'_>,
+    kind: UnaryKind,
+    address: EffectiveAddress,
+    imports: memory::Imports,
+    exit_depth: u32,
+) {
+    memory::load_narrow_value(code, address, SmallWidth::Word, imports, exit_depth);
+    code.local_set(RESULT);
+    match kind {
+        UnaryKind::Inc => {
+            code.local_get(RESULT).i32_const(1).i32_add();
+        }
+        UnaryKind::Dec => {
+            code.local_get(RESULT).i32_const(1).i32_sub();
+        }
+        UnaryKind::Neg => {
+            code.i32_const(0).local_get(RESULT).i32_sub();
+        }
+        UnaryKind::Not => {
+            code.local_get(RESULT).i32_const(0xffff).i32_xor();
+        }
+    }
+    code.i32_const(0xffff).i32_and().local_set(RESULT);
+    memory::store_word_result(code, address, imports, exit_depth);
+    // store validation uses operand scratch; recover the original word after success.
+    let (binary, carry) = match kind {
+        UnaryKind::Inc | UnaryKind::Dec => {
+            code.local_get(RESULT).i32_const(1);
+            let binary = if kind == UnaryKind::Inc {
+                code.i32_sub();
+                BinaryKind::Add
+            } else {
+                code.i32_add();
+                BinaryKind::Sub
+            };
+            code.i32_const(0xffff)
+                .i32_and()
+                .local_set(LHS)
+                .i32_const(1)
+                .local_set(RHS);
+            (binary, CarryFlag::Preserve)
+        }
+        UnaryKind::Neg => {
+            code.i32_const(0)
+                .local_set(LHS)
+                .i32_const(0)
+                .local_get(RESULT)
+                .i32_sub()
+                .i32_const(0xffff)
+                .i32_and()
+                .local_set(RHS);
+            (BinaryKind::Sub, CarryFlag::Calculate)
+        }
+        UnaryKind::Not => return,
+    };
+    arithmetic_flags(code, binary, carry, 15);
 }
 
 fn logical_memory_byte(

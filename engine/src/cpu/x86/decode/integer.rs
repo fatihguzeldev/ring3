@@ -245,6 +245,12 @@ fn lower_unary(instruction: &Instruction) -> Option<Result<Operation, DecodeErro
         _ => None,
     };
     if let Some(kind) = word_kind {
+        if instruction.op0_kind() == OpKind::Memory {
+            return Some(
+                effective_address(instruction)
+                    .map(|address| Operation::MemoryUnaryWord { kind, address }),
+            );
+        }
         return Some(
             word_register(instruction.op0_register())
                 .map(|destination| Operation::UnaryWord { kind, destination }),

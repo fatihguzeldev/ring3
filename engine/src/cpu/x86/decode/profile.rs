@@ -209,6 +209,10 @@ pub(super) fn check_profile(instruction: &Instruction, bytes: &[u8]) -> Result<(
     let exact_word_unary = match (instruction.code(), bytes) {
         (Code::Inc_r16, [0x66, opcode]) => (0x40..=0x47).contains(opcode),
         (Code::Dec_r16, [0x66, opcode]) => (0x48..=0x4f).contains(opcode),
+        (Code::Inc_rm16, [0x66, 0xff, modrm, ..]) if *modrm & 0xc0 != 0xc0 => *modrm & 0x38 == 0,
+        (Code::Dec_rm16, [0x66, 0xff, modrm, ..]) if *modrm & 0xc0 != 0xc0 => *modrm & 0x38 == 0x08,
+        (Code::Not_rm16, [0x66, 0xf7, modrm, ..]) if *modrm & 0xc0 != 0xc0 => *modrm & 0x38 == 0x10,
+        (Code::Neg_rm16, [0x66, 0xf7, modrm, ..]) if *modrm & 0xc0 != 0xc0 => *modrm & 0x38 == 0x18,
         (Code::Inc_rm16, [0x66, 0xff, modrm]) => *modrm & 0xf8 == 0xc0,
         (Code::Dec_rm16, [0x66, 0xff, modrm]) => *modrm & 0xf8 == 0xc8,
         (Code::Not_rm16, [0x66, 0xf7, modrm]) => *modrm & 0xf8 == 0xd0,
