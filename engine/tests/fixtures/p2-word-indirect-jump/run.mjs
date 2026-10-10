@@ -291,7 +291,7 @@ assert.deepEqual(counts, {contexts: 4, runs: 1852, retired: 1790, register_input
 assert.equal(modules.length, 16);
 writeFileSync(join(output, 'result.json'), JSON.stringify({status: 'ok', engine_sha256: engine.sha256, source_pins: sourcePins,
   counts, modules, observations, limits: [
-    'exact single66 FF/4 register/read16 WORD JMP in four bound profiles; standalone, indirect CALL/far/prefix aliases remain outside',
+    'exact single66 FF/4 register/read16 WORD JMP in four bound profiles; standalone, far/prefix aliases remain outside',
     'arithmetic low16 and BigInt full32 EA oracle with literal scaled/wrapped/ESP aliases; all128 valid FLAGS in register and memory forms',
     'guard-only pure ExitV1 versus canonical read16 ExitV2; observed helper forwarding, no stores/stack movement/target Execute fetch',
     '6FFE/FFFFFFFE two-byte successes, unaligned/cross-page and FFFFFFFF overflow; seven read faults preserve prior retirement and full stopped CPU',
