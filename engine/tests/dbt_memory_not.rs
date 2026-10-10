@@ -355,7 +355,7 @@ fn narrow_prefix_and_declared_span_errors_remain_precise() {
             InstructionError::Decode(DecodeError::Unsupported(UnsupportedFeature::Opcode)),
         ),
         (
-            &[0x66, 0xf7, 0x13][..],
+            &[0x66, 0x66, 0xf7, 0x13][..],
             InstructionError::Decode(DecodeError::Unsupported(UnsupportedFeature::Opcode)),
         ),
         (

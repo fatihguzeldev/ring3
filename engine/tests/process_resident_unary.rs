@@ -349,7 +349,10 @@ fn span_poison_and_remaining_exclusions_preserve_arena_and_installed_units() {
             (0xf0, UnsupportedFeature::Opcode),
             (0x64, UnsupportedFeature::Segment),
         ] {
-            let bytes = [0x90, prefix, instruction[0], instruction[1], 0x0f, 0x06];
+            let mut bytes = vec![0x90, prefix, instruction[0], instruction[1], 0x0f, 0x06];
+            if prefix == 0x66 {
+                bytes.insert(1, 0x66);
+            }
             rejected(
                 &mut engine,
                 keep,

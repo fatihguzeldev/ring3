@@ -404,7 +404,7 @@ fn word_memory_predicate_complete_prefixes_and_adjacent_families_stay_closed() {
                 continue;
             }
             let mut bytes = vec![0x66, opcode_byte, 0x03 | extension << 3, 0x66];
-            if opcode_byte != 0xf7 {
+            if opcode_byte != 0xf7 || matches!(extension, 2 | 3) {
                 bytes.insert(0, 0x66);
             }
             if opcode_byte != 0x83 {

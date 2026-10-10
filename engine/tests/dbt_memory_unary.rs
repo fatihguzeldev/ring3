@@ -376,10 +376,11 @@ fn narrow_prefix_and_declared_span_errors_remain_precise() {
             } else {
                 UnsupportedFeature::Opcode
             }));
-            embedded_rejected(
-                &[0x90, prefix, opcode, 0x03 | extension << 3],
-                instruction_error(cause),
-            );
+            let mut bytes = vec![0x90, prefix, opcode, 0x03 | extension << 3];
+            if prefix == 0x66 {
+                bytes.insert(1, 0x66);
+            }
+            embedded_rejected(&bytes, instruction_error(cause));
         }
         let mut instance = engine(&[
             0x90,
