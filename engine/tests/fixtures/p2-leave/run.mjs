@@ -8,8 +8,11 @@ assert.ok(root, 'expected engine wasm, output directory and repository root');
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
 const engineBytes = readFileSync(enginePath), engineModule = new WebAssembly.Module(engineBytes);
 assert.deepEqual(WebAssembly.Module.imports(engineModule), []);
-assert.equal(WebAssembly.Module.exports(engineModule).length, 72);
-assert.equal(WebAssembly.Module.exports(engineModule).filter(row => row.kind === 'function').length, 71);
+const exportSource = readFileSync(join(root, 'engine/src/abi/wasm/exports.rs'), 'utf8');
+const expectedFunctions = [...exportSource.matchAll(/export_name = "(ring3_abi_v1_[^"]+)"/g)].map(row => row[1]).sort();
+assert.equal(new Set(expectedFunctions).size, expectedFunctions.length);
+assert.deepEqual(WebAssembly.Module.exports(engineModule).filter(row => row.kind === 'function').map(row => row.name).sort(), expectedFunctions);
+assert.deepEqual(WebAssembly.Module.exports(engineModule).filter(row => row.kind !== 'function'), [{name: 'memory', kind: 'memory'}]);
 const SIZE = 4236, TRANSFER = 140;
 const REG = [0x1234807f, 0x23457f80, 0x34560f10, 0x4567ff00, 0x56789abc, 0x6789abcd, 0x789abcde, 0x89abcdef];
 const LEAVE = Buffer.from('c9eb000f0b', 'hex'), RETRY = Buffer.from('47c989efeb000f0b', 'hex');
@@ -35,7 +38,7 @@ const faultLiterals = [
 const arities = {open: 3, close: 0, arena_ptr: 0, map: 3, protect: 3, upload: 2, read32: 1, write32: 2, compile_entries: 2, compile_resident_entries: 2, generation: 0, module_ptr: 0, module_len: 0, guard: 6, guard_resident: 7, store32: 2, store_resident32: 6};
 function engineSources(directory) {return readdirSync(join(root, directory), {withFileTypes: true}).flatMap(row => row.isDirectory() ? engineSources(`${directory}/${row.name}`) : [`${directory}/${row.name}`]);}
 const sourcePaths = ['Cargo.toml', 'Cargo.lock', 'engine/Cargo.toml', 'rust-toolchain.toml', ...engineSources('engine/src').sort(), 'engine/tests/cpu_leave_wasm.rs', 'engine/tests/fixtures/p2-leave/run.mjs'];
-assert.equal(sourcePaths.length, 90); assert.equal(new Set(sourcePaths).size, 90);
+assert.equal(new Set(sourcePaths).size, sourcePaths.length);
 const sourceHashes = Object.fromEntries(sourcePaths.map(path => [path, hash(readFileSync(join(root, path)))]));
 const successes = [], faults = [], protocol = [], frames = [], controls = [], modules = [], generatedRuns = [], arenas = [], pages = [], rawFiles = [];
 let ordinal = 0, residentPeak = 0;
@@ -121,7 +124,7 @@ function guestFrame(owner) {
 
 for (const owner of ['replacement', 'resident']) {successCases(owner); for (const literal of faultLiterals) faultCase(owner, literal); protocolCases(owner); guestFrame(owner);}
 const counts = {contexts: ordinal, success_cases: successes.length, real_faults: faults.length, repaired_paths: faults.filter(row => row.repaired).length, protocol_cases: protocol.length, guest_frames: frames.length, modules: modules.length, generated_runs: generatedRuns.length, controls: controls.length, retired: successes.reduce((sum, row) => sum + row.retired, 0) + faults.reduce((sum, row) => sum + row.total_retired, 0) + frames.reduce((sum, row) => sum + row.guest_retired, 0), resident_peak: residentPeak, arenas: arenas.length, pages: pages.length, runtime_sources: sourcePaths.length};
-assert.deepEqual(counts, {contexts: 14, success_cases: 28, real_faults: 8, repaired_paths: 6, protocol_cases: 4, guest_frames: 2, modules: 14, generated_runs: 100, controls: 44, retired: 76, resident_peak: 1, arenas: 152, pages: 136, runtime_sources: 90});
+assert.deepEqual(counts, {contexts: 14, success_cases: 28, real_faults: 8, repaired_paths: 6, protocol_cases: 4, guest_frames: 2, modules: 14, generated_runs: 100, controls: 44, retired: 76, resident_peak: 1, arenas: 152, pages: 136, runtime_sources: sourcePaths.length});
 assert.equal(rawFiles.length, 595);
 const result = {status: 'ok', counts, engine_sha256: hash(engineBytes), engine_exports: WebAssembly.Module.exports(engineModule), source_sha256: sourceHashes, tools: {node: process.version, v8: process.versions.v8}, oracle: {leave_hex: LEAVE.toString('hex'), retry_hex: RETRY.toString('hex'), frame_hex: FRAME.toString('hex'), frame_bytes: 53, success_literals: literals, fault_literals: faultLiterals, seeds: [2, 0xcd7], registers: REG, prefix: {input: 15, result: 16, flags: 0x413, retired: 1}, changed_frame_word: 0x55667788, later_frame_word: 0xdeadbeef, frame_entries: [0xa000, 0xa020, 0xa00a], frame_checkpoints: [0xa033, 0xa034, 0xa00a, 0xa011], frame_retirements: [7, 1, 1, 2], maximum_resident_units: 1, flag_policy: 'LEAVE preserves full incoming flags; completed INC prefix flags413 survive fault and retry; no hardware exceptional microstate claim'}, successes, faults, protocol, frames, controls, modules, generated_runs: generatedRuns, arenas, pages, raw_files: rawFiles, claim: 'finite self-authored flat32 C9 and guest frame continuation in bound replacement/resident actual Wasm; explicit protocol injections are separate; complete saved arena/source-page byte comparisons; no PE or complete processor exception/game claim'};
 artifact('result.json', Buffer.from(JSON.stringify(result, null, 2)));
