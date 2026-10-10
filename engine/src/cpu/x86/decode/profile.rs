@@ -83,6 +83,7 @@ pub(super) fn check_profile(instruction: &Instruction, bytes: &[u8]) -> Result<(
     let exact_word_near_control = matches!(
         (instruction.code(), bytes),
         (Code::Call_rel16, [0x66, 0xe8, _, _])
+            | (Code::Jmp_rel16, [0x66, 0xe9, _, _])
             | (Code::Retnw, [0x66, 0xc3])
             | (Code::Retnw_imm16, [0x66, 0xc2, _, _])
     );

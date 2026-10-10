@@ -16,6 +16,9 @@ pub(super) fn lower(instruction: &Instruction) -> Result<Operation, DecodeError>
         Code::Jmp_rel8_32 | Code::Jmp_rel32_32 => Operation::Jump {
             target: BranchTarget::Direct(GuestAddress(instruction.near_branch32())),
         },
+        Code::Jmp_rel16 => Operation::Jump {
+            target: BranchTarget::Direct(GuestAddress(u32::from(instruction.near_branch16()))),
+        },
         Code::Loop_rel8_32_ECX
         | Code::Loope_rel8_32_ECX
         | Code::Loopne_rel8_32_ECX
