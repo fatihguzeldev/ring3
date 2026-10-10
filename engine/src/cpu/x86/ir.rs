@@ -66,6 +66,8 @@ pub enum WordReadArithmeticKind {
 pub enum WordMemoryArithmeticKind {
     Add,
     Sub,
+    Adc,
+    Sbb,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

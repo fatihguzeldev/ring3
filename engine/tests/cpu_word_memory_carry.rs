@@ -320,11 +320,8 @@ fn word_memory_carry_complete_prefixes_and_adjacent_families_stay_closed() {
         }
     }
     assert_eq!(rows, 24);
-    for opcode in [0x11, 0x19, 0x23, 0x0b, 0x33] {
-        let mut bytes = vec![0x66, opcode, 0x03];
-        if matches!(opcode, 0x23 | 0x0b | 0x33) {
-            bytes.insert(0, 0x66);
-        }
+    for opcode in [0x23, 0x0b, 0x33] {
+        let bytes = vec![0x66, 0x66, opcode, 0x03];
         assert_eq!(
             decode_one(&code_space(CODE, &bytes), GuestAddress(CODE)).err(),
             Some(DecodeError::Unsupported(UnsupportedFeature::Opcode))

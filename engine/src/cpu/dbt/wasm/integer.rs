@@ -639,16 +639,43 @@ pub(super) fn instruction(
                     code.i32_sub();
                     BinaryKind::Sub
                 }
+                WordMemoryArithmeticKind::Adc => {
+                    code.i32_add();
+                    BinaryKind::Adc
+                }
+                WordMemoryArithmeticKind::Sbb => {
+                    code.i32_sub();
+                    BinaryKind::Sbb
+                }
             };
+            if matches!(binary, BinaryKind::Adc | BinaryKind::Sbb) {
+                code.local_get(FLAGS).i32_const(1).i32_and();
+                if binary == BinaryKind::Adc {
+                    code.i32_add();
+                } else {
+                    code.i32_sub();
+                }
+            }
             code.i32_const(0xffff).i32_and().local_set(RESULT);
             memory::store_word_result(code, address, imports, exit_depth);
             // store validation uses operand scratch; recover the original word after success.
             word_value(code, WordValue::Register(source));
             code.local_set(RHS).local_get(RESULT).local_get(RHS);
-            if kind == WordMemoryArithmeticKind::Add {
+            if matches!(
+                kind,
+                WordMemoryArithmeticKind::Add | WordMemoryArithmeticKind::Adc
+            ) {
                 code.i32_sub();
             } else {
                 code.i32_add();
+            }
+            if matches!(binary, BinaryKind::Adc | BinaryKind::Sbb) {
+                code.local_get(FLAGS).i32_const(1).i32_and();
+                if binary == BinaryKind::Adc {
+                    code.i32_sub();
+                } else {
+                    code.i32_add();
+                }
             }
             code.i32_const(0xffff).i32_and().local_set(LHS);
             arithmetic_flags(code, binary, CarryFlag::Calculate, 15);

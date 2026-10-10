@@ -437,7 +437,7 @@ fn exact_sbb_prefix_fetch_and_consumed_source_currency() {
         }
     }
     for bytes in [
-        vec![0x66, 0x19, 3],
+        vec![0x66, 0x66, 0x19, 3],
         vec![0x66, 0x66, 0x1b, 3],
         vec![0x66, 0x81, 0x1b, 0, 0],
         vec![0x66, 0x83, 0x1b, 0],

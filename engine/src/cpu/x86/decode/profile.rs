@@ -96,6 +96,8 @@ pub(super) fn check_profile(instruction: &Instruction, bytes: &[u8]) -> Result<(
     let exact_word_arithmetic = match (instruction.code(), bytes) {
         (Code::Add_rm16_r16, [0x66, 0x01, modrm, ..])
         | (Code::Sub_rm16_r16, [0x66, 0x29, modrm, ..])
+        | (Code::Adc_rm16_r16, [0x66, 0x11, modrm, ..])
+        | (Code::Sbb_rm16_r16, [0x66, 0x19, modrm, ..])
             if *modrm & 0xc0 != 0xc0 =>
         {
             true

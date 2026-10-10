@@ -531,11 +531,11 @@ fn excluded() -> Vec<(Vec<u8>, DecodeError)> {
             bytes.extend(&instruction);
             forms.push((bytes, unsupported));
         }
-        let mut word = vec![0x66, opcode + 1, 0x03 | field << 3];
         if immediate.is_some() {
+            let mut word = vec![0x66, opcode + 1, 0x03 | field << 3];
             word.extend([0xff, 0x80]);
+            forms.push((word, unsupported));
         }
-        forms.push((word, unsupported));
         let mut locked_register = vec![0xf0, opcode, 0xc0 | field << 3];
         if let Some(value) = immediate {
             locked_register.push(value);
@@ -584,7 +584,7 @@ fn excluded() -> Vec<(Vec<u8>, DecodeError)> {
         forms.push((bytes.to_vec(), unsupported));
     }
     forms.push((vec![0xfe, 0x13], DecodeError::InvalidEncoding));
-    assert_eq!(forms.len(), 63);
+    assert_eq!(forms.len(), 61);
     forms
 }
 
@@ -841,7 +841,13 @@ fn failed_late_decode_fetch_extent_and_cap_preparation_preserves_both_published_
     for owner in [Owner::Replacement, Owner::Resident] {
         for entries in [false, true] {
             let (mut engine, keep) = prior_owners();
-            for (instruction, error) in excluded() {
+            let word_prefixes = [0x11, 0x19].map(|opcode| {
+                (
+                    vec![0x66, 0x66, opcode, 0x03],
+                    DecodeError::Unsupported(UnsupportedFeature::Opcode),
+                )
+            });
+            for (instruction, error) in excluded().into_iter().chain(word_prefixes) {
                 let mut bytes = vec![0x10, 0x06];
                 bytes.extend(instruction);
                 upload(&mut engine, CODE, &bytes);

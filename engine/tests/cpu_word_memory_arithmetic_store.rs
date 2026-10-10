@@ -314,13 +314,6 @@ fn word_memory_arithmetic_store_complete_prefixes_and_adjacent_families_stay_clo
         }
     }
     assert_eq!(rows, 24);
-    for opcode in [0x11, 0x19] {
-        let bytes = [0x66, opcode, 0x03];
-        assert_eq!(
-            decode_one(&code_space(CODE, &bytes), GuestAddress(CODE)).err(),
-            Some(DecodeError::Unsupported(UnsupportedFeature::Opcode))
-        );
-    }
     for extension in [0, 1, 2, 3, 4, 5, 6] {
         for opcode in [0x81, 0x83] {
             let mut bytes = vec![0x66, opcode, 0x03 | extension << 3, 0];
