@@ -58,6 +58,8 @@ pub enum WordArithmeticKind {
 pub enum WordReadArithmeticKind {
     Add,
     Sub,
+    Adc,
+    Sbb,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

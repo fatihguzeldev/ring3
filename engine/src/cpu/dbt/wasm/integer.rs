@@ -597,7 +597,23 @@ pub(super) fn instruction(
                     code.i32_sub();
                     BinaryKind::Sub
                 }
+                WordReadArithmeticKind::Adc => {
+                    code.i32_add();
+                    BinaryKind::Adc
+                }
+                WordReadArithmeticKind::Sbb => {
+                    code.i32_sub();
+                    BinaryKind::Sbb
+                }
             };
+            if matches!(binary, BinaryKind::Adc | BinaryKind::Sbb) {
+                code.local_get(FLAGS).i32_const(1).i32_and();
+                if binary == BinaryKind::Adc {
+                    code.i32_add();
+                } else {
+                    code.i32_sub();
+                }
+            }
             code.i32_const(0xffff).i32_and().local_set(RESULT);
             arithmetic_flags(code, binary, CarryFlag::Calculate, 15);
             code.local_get(RESULT)

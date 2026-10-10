@@ -321,7 +321,10 @@ fn word_memory_arithmetic_complete_prefixes_and_adjacent_families_stay_closed() 
     }
     assert_eq!(rows, 24);
     for opcode in [0x01, 0x29, 0x13, 0x1b, 0x23, 0x0b, 0x33] {
-        let bytes = [0x66, opcode, 0x03];
+        let mut bytes = vec![0x66, opcode, 0x03];
+        if matches!(opcode, 0x13 | 0x1b) {
+            bytes.insert(0, 0x66);
+        }
         assert_eq!(
             decode_one(&code_space(CODE, &bytes), GuestAddress(CODE)).err(),
             Some(DecodeError::Unsupported(UnsupportedFeature::Opcode))

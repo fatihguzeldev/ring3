@@ -119,6 +119,13 @@ pub(super) fn lower(instruction: &Instruction, bytes: &[u8]) -> Result<Operation
             destination: word_register(instruction.op0_register())?,
             source: word_value(instruction)?,
         }),
+        Code::Adc_r16_rm16 if instruction.op1_kind() == OpKind::Memory => {
+            Ok(Operation::ReadArithmeticWord {
+                kind: WordReadArithmeticKind::Adc,
+                destination: word_register(instruction.op0_register())?,
+                address: effective_address(instruction)?,
+            })
+        }
         Code::Adc_rm16_r16
         | Code::Adc_r16_rm16
         | Code::Adc_AX_imm16
@@ -128,6 +135,13 @@ pub(super) fn lower(instruction: &Instruction, bytes: &[u8]) -> Result<Operation
             destination: word_register(instruction.op0_register())?,
             source: word_value(instruction)?,
         }),
+        Code::Sbb_r16_rm16 if instruction.op1_kind() == OpKind::Memory => {
+            Ok(Operation::ReadArithmeticWord {
+                kind: WordReadArithmeticKind::Sbb,
+                destination: word_register(instruction.op0_register())?,
+                address: effective_address(instruction)?,
+            })
+        }
         Code::Sbb_rm16_r16
         | Code::Sbb_r16_rm16
         | Code::Sbb_AX_imm16
