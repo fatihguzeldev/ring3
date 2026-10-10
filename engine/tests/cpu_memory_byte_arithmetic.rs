@@ -532,6 +532,9 @@ fn excluded() -> Vec<(Vec<u8>, DecodeError)> {
             forms.push((bytes, unsupported));
         }
         let mut word = vec![0x66, opcode + 1, 0x03 | field << 3];
+        if immediate.is_none() {
+            word.insert(0, 0x66);
+        }
         if immediate.is_some() {
             word.extend([0xff, 0x80]);
         }

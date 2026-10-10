@@ -441,7 +441,7 @@ fn exact_sub_prefix_fetch_and_consumed_source_currency() {
         }
     }
     for bytes in [
-        vec![0x66, 0x29, 3],
+        vec![0x66, 0x66, 0x29, 3],
         vec![0x66, 0x66, 0x2b, 3],
         vec![0x66, 0x81, 0x2b, 0, 0],
         vec![0x66, 0x83, 0x2b, 0],

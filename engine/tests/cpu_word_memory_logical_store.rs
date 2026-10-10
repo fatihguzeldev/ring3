@@ -323,7 +323,10 @@ fn word_memory_logical_store_complete_prefixes_and_adjacent_families_stay_closed
     }
     assert_eq!(rows, 36);
     for opcode in [0x01, 0x11, 0x29, 0x19] {
-        let bytes = [0x66, opcode, 0x03];
+        let mut bytes = vec![0x66, opcode, 0x03];
+        if matches!(opcode, 0x01 | 0x29) {
+            bytes.insert(0, 0x66);
+        }
         assert_eq!(
             decode_one(&code_space(CODE, &bytes), GuestAddress(CODE)).err(),
             Some(DecodeError::Unsupported(UnsupportedFeature::Opcode))

@@ -322,7 +322,7 @@ fn word_memory_arithmetic_complete_prefixes_and_adjacent_families_stay_closed() 
     assert_eq!(rows, 24);
     for opcode in [0x01, 0x29, 0x13, 0x1b, 0x23, 0x0b, 0x33] {
         let mut bytes = vec![0x66, opcode, 0x03];
-        if matches!(opcode, 0x13 | 0x1b | 0x23 | 0x0b | 0x33) {
+        if matches!(opcode, 0x01 | 0x29 | 0x13 | 0x1b | 0x23 | 0x0b | 0x33) {
             bytes.insert(0, 0x66);
         }
         assert_eq!(
