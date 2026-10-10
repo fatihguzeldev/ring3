@@ -318,6 +318,8 @@ fn supports_near_control(instruction: &DecodedInstruction) -> bool {
             target: BranchTarget::Indirect(_),
         } => true,
         Operation::Return { .. } => matches!(instruction.length(), 1 | 3),
+        Operation::CallWord { .. } => instruction.length() == 4,
+        Operation::ReturnWord { .. } => matches!(instruction.length(), 2 | 4),
         _ => false,
     }
 }
@@ -334,7 +336,10 @@ pub(super) fn terminates(instruction: &DecodedInstruction, embedded: bool) -> bo
         && supports_stack(instruction)
         && matches!(
             instruction.operation(),
-            Operation::Call { .. } | Operation::Return { .. }
+            Operation::Call { .. }
+                | Operation::CallWord { .. }
+                | Operation::Return { .. }
+                | Operation::ReturnWord { .. }
         ))
 }
 

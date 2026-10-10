@@ -2082,6 +2082,13 @@ pub(super) fn instruction(
                 .end()
                 .local_set(EIP);
         }
+        Operation::CallWord { target } => {
+            code.i32_const((instruction.next_pc().0 & 0xffff) as i32)
+                .local_set(RESULT);
+            memory::push_word_result(code, imports, exit_depth);
+            code.i32_const(target.0 as i32).local_set(EIP);
+            store = true;
+        }
         Operation::Call {
             target: BranchTarget::Direct(target),
         } => {
@@ -2255,6 +2262,25 @@ pub(super) fn instruction(
         Operation::Return { stack_adjust } => {
             memory::pop_return(code, stack_adjust, imports, exit_depth);
         }
+        Operation::ReturnWord { stack_adjust } => {
+            memory::load_narrow_value(
+                code,
+                EffectiveAddress {
+                    base: Some(Register32::Esp),
+                    index: None,
+                    scale: 1,
+                    displacement: 0,
+                },
+                SmallWidth::Word,
+                imports,
+                exit_depth,
+            );
+            code.local_set(EIP)
+                .local_get(register(Register32::Esp))
+                .i32_const(2 + i32::from(stack_adjust))
+                .i32_add()
+                .local_set(register(Register32::Esp));
+        }
     }
     if !matches!(
         instruction.operation(),
@@ -2262,7 +2288,9 @@ pub(super) fn instruction(
             | Operation::ConditionalJump { .. }
             | Operation::CountBranch { .. }
             | Operation::Call { .. }
+            | Operation::CallWord { .. }
             | Operation::Return { .. }
+            | Operation::ReturnWord { .. }
     ) {
         code.i32_const(instruction.next_pc().0 as i32)
             .local_set(EIP);

@@ -426,12 +426,10 @@ fn far_control_transfers_are_rejected_as_unsupported() {
 #[test]
 fn sixteen_bit_flow_and_stack_forms_are_rejected_without_lowering() {
     for bytes in [
-        &[0x66, 0xe8, 0x34, 0x12][..],
         &[0x66, 0xe9, 0x34, 0x12][..],
         &[0x66, 0x0f, 0x84, 0x34, 0x12][..],
         &[0x66, 0x66, 0x50][..],
         &[0x66, 0x66, 0x58][..],
-        &[0x66, 0xc3][..],
     ] {
         let space = code_space(0x1000, bytes);
         assert!(matches!(

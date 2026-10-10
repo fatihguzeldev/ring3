@@ -58,6 +58,7 @@ impl Imports {
                 | Operation::X87ControlToMemory { .. }
                 | Operation::StoreWord { .. }
                 | Operation::PushWord { .. }
+                | Operation::CallWord { .. }
                 | Operation::PushFlagsWord
                 | Operation::StoreStringWord => {
                     store16 = true;
@@ -110,6 +111,7 @@ impl Imports {
                 | Operation::ReadBitTestWord { .. }
                 | Operation::LoadWord { .. }
                 | Operation::PopWord { .. }
+                | Operation::ReturnWord { .. }
                 | Operation::PopAllWord
                 | Operation::LeaveWord
                 | Operation::LoadStringWord

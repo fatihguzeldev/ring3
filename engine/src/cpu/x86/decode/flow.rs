@@ -34,6 +34,9 @@ pub(super) fn lower(instruction: &Instruction) -> Result<Operation, DecodeError>
         Code::Call_rel32_32 => Operation::Call {
             target: BranchTarget::Direct(GuestAddress(instruction.near_branch32())),
         },
+        Code::Call_rel16 => Operation::CallWord {
+            target: GuestAddress(u32::from(instruction.near_branch16())),
+        },
         Code::Call_rm32 => Operation::Call {
             target: BranchTarget::Indirect(location(instruction, 0)?),
         },
@@ -79,6 +82,10 @@ pub(super) fn lower(instruction: &Instruction) -> Result<Operation, DecodeError>
         Code::Leavew => Operation::LeaveWord,
         Code::Retnd => Operation::Return { stack_adjust: 0 },
         Code::Retnd_imm16 => Operation::Return {
+            stack_adjust: instruction.immediate16(),
+        },
+        Code::Retnw => Operation::ReturnWord { stack_adjust: 0 },
+        Code::Retnw_imm16 => Operation::ReturnWord {
             stack_adjust: instruction.immediate16(),
         },
         Code::Cmovo_r16_rm16

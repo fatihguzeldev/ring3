@@ -232,8 +232,6 @@ fn far_prefixed_and_sixteen_bit_stack_forms_keep_decoder_rejection_at_their_pc()
         &[0xff, 0x2b][..],
         &[0xcb][..],
         &[0xca, 0, 0][..],
-        &[0x66, 0xe8, 0x34, 0x12][..],
-        &[0x66, 0xc3][..],
         &[0xf3, 0xc3][..],
         &[0x67, 0xe8, 0, 0, 0, 0][..],
     ] {

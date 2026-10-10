@@ -829,6 +829,9 @@ pub enum Operation {
     Call {
         target: BranchTarget,
     },
+    CallWord {
+        target: GuestAddress,
+    },
     Push {
         source: Value32,
     },
@@ -854,6 +857,9 @@ pub enum Operation {
     Leave,
     LeaveWord,
     Return {
+        stack_adjust: u16,
+    },
+    ReturnWord {
         stack_adjust: u16,
     },
     UnaryWord {

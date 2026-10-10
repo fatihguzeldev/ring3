@@ -216,9 +216,6 @@ fn word_frame_flags_prefixes_lock_and_closed_stack_neighbors_stay_precise() {
         &[0x66, 0x9d],
         &[0xc8, 0, 0, 0],
         &[0x66, 0xc8, 0, 0, 0],
-        &[0x66, 0xe8, 0, 0],
-        &[0x66, 0xc3],
-        &[0x66, 0xc2, 2, 0],
         &[0x66, 0x60],
     ] {
         assert_eq!(
