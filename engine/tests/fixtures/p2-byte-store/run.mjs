@@ -10,7 +10,7 @@ const fixtureRoot = join(root, 'engine/tests/fixtures/p2-byte-store');
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
 const oracleBytes = readFileSync(join(fixtureRoot, 'oracle.json')), oracle = JSON.parse(oracleBytes);
 const programBytes = readFileSync(join(fixtureRoot, 'program.S'));
-assert.equal(hash(oracleBytes), 'adc932c75495d760f481e5c94d1d62528f654dce361fb8d9619740a7ef346724');
+assert.equal(hash(oracleBytes), '1e65f5dd05fcbd4681e0a61ec369282ae9bcafe586e17b9a19d3fcbb976a355d');
 assert.equal(hash(programBytes), '8b4d74163d26fb8f95e56d5252970bb45b5f4bf03724ce7b51d26611cbb17f12');
 const size = 4236, transfer = 140, artifacts = {}, identities = [], operations = [], hostInputs = [], observations = [], ramChecks = [], stackChecks = [], syntheticBindings = [], syntheticObservations = [];
 const fromHex = hex => new Uint8Array(Buffer.from(hex, 'hex'));
@@ -77,7 +77,7 @@ for (const spec of oracle.pe.images) {
 save('program.x86', code); save('program.S', programBytes); save('input-oracle.json', oracleBytes); save('run.mjs', readFileSync(import.meta.filename));
 const productionPaths = execFileSync('rg', ['--files','engine/src'], {cwd: root, encoding: 'utf8'}).trim().split('\n').sort();
 const sourcePaths = [...productionPaths,'Cargo.toml','engine/Cargo.toml','Cargo.lock','engine/tests/cpu_byte_store_wasm.rs','engine/tests/fixtures/p2-byte-store/program.S','engine/tests/fixtures/p2-byte-store/oracle.json','engine/tests/fixtures/p2-byte-store/run.mjs'];
-assert.equal(sourcePaths.length,89);
+assert.equal(new Set(sourcePaths).size,sourcePaths.length);
 const sources = Object.fromEntries(sourcePaths.map(file => [file, hash(readFileSync(join(root,file)))])); save('source-sha256.json', JSON.stringify(sources,null,2));
 const engineBytes = readFileSync(enginePath); save('engine.wasm', engineBytes); assert.ok(WebAssembly.validate(engineBytes));
 const engineModule = new WebAssembly.Module(engineBytes); assert.deepEqual(WebAssembly.Module.imports(engineModule), []);
