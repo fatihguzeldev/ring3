@@ -103,6 +103,7 @@ impl Imports {
                 | Operation::ReadSignedMultiplyWord { .. }
                 | Operation::ReadSignedMultiplyImmediateWord { .. }
                 | Operation::ReadWordMultiplyAccumulator { .. }
+                | Operation::ReadWordDivideAccumulator { .. }
                 | Operation::LoadWord { .. }
                 | Operation::LoadStringWord
                 | Operation::CompareStringWord

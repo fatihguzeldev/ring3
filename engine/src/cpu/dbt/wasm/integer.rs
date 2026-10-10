@@ -1891,6 +1891,14 @@ pub(super) fn instruction(
         Operation::DivideAccumulator { kind, source } => {
             accumulator_divide(code, kind, register(source), exit_depth);
         }
+        Operation::WordDivideAccumulator { kind, source } => {
+            word_accumulator_divide(code, kind, register(source), exit_depth);
+        }
+        Operation::ReadWordDivideAccumulator { kind, address } => {
+            memory::load_narrow_value(code, address, SmallWidth::Word, imports, exit_depth);
+            code.local_set(RESULT);
+            word_accumulator_divide(code, kind, RESULT, exit_depth);
+        }
         Operation::ByteDivideAccumulator { kind, source } => {
             byte_accumulator_divide(code, kind, source, exit_depth);
         }
@@ -4839,6 +4847,95 @@ fn accumulator_multiply(code: &mut InstructionSink<'_>, kind: MultiplyKind, sour
         .i32_mul()
         .i32_or()
         .local_set(FLAGS);
+}
+
+fn word_accumulator_divide(
+    code: &mut InstructionSink<'_>,
+    kind: DivideKind,
+    source: u32,
+    exit_depth: u32,
+) {
+    code.local_get(source);
+    extend_value(
+        code,
+        if kind == DivideKind::Signed {
+            ExtensionKind::Sign
+        } else {
+            ExtensionKind::Zero
+        },
+        SmallWidth::Word,
+    );
+    code.local_set(RHS)
+        .local_get(register(Register32::Edx))
+        .i32_const(0xffff)
+        .i32_and()
+        .i32_const(16)
+        .i32_shl()
+        .local_get(register(Register32::Eax))
+        .i32_const(0xffff)
+        .i32_and()
+        .i32_or()
+        .local_set(LHS)
+        .local_get(RHS)
+        .i32_eqz();
+    divide_error_if(code, exit_depth);
+    if kind == DivideKind::Signed {
+        // wasm traps on this signed division before the WORD quotient can be checked.
+        code.local_get(LHS)
+            .i32_const(i32::MIN)
+            .i32_eq()
+            .local_get(RHS)
+            .i32_const(-1)
+            .i32_eq()
+            .i32_and();
+        divide_error_if(code, exit_depth);
+    }
+    code.local_get(LHS).local_get(RHS);
+    match kind {
+        DivideKind::Unsigned => {
+            code.i32_div_u();
+        }
+        DivideKind::Signed => {
+            code.i32_div_s();
+        }
+    }
+    code.local_set(RESULT).local_get(RESULT);
+    match kind {
+        DivideKind::Unsigned => {
+            code.i32_const(0xffff).i32_gt_u();
+        }
+        DivideKind::Signed => {
+            code.i32_const(i32::from(i16::MIN))
+                .i32_lt_s()
+                .local_get(RESULT)
+                .i32_const(i32::from(i16::MAX))
+                .i32_gt_s()
+                .i32_or();
+        }
+    }
+    divide_error_if(code, exit_depth);
+    code.local_get(LHS)
+        .local_get(RESULT)
+        .local_get(RHS)
+        .i32_mul()
+        .i32_sub()
+        .local_set(RHS)
+        .local_get(register(Register32::Eax))
+        .i32_const(!0xffff)
+        .i32_and()
+        .local_get(RESULT)
+        .i32_const(0xffff)
+        .i32_and()
+        .i32_or()
+        .local_set(register(Register32::Eax))
+        .local_get(register(Register32::Edx))
+        .i32_const(!0xffff)
+        .i32_and()
+        .local_get(RHS)
+        .i32_const(0xffff)
+        .i32_and()
+        .i32_or()
+        .local_set(register(Register32::Edx));
 }
 
 fn byte_accumulator_divide(

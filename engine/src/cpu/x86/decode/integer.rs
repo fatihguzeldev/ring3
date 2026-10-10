@@ -200,6 +200,7 @@ pub(super) fn lower(instruction: &Instruction) -> Option<Result<Operation, Decod
             return lower_byte_accumulator_multiply(instruction)
                 .or_else(|| lower_word_accumulator_multiply(instruction))
                 .or_else(|| lower_byte_accumulator_divide(instruction))
+                .or_else(|| lower_word_accumulator_divide(instruction))
                 .or_else(|| lower_divide(instruction))
                 .or_else(|| lower_multiply(instruction))
                 .or_else(|| lower_word_signed_multiply(instruction))
@@ -984,6 +985,27 @@ fn lower_byte_accumulator_multiply(
             source: byte_register(instruction.op0_register())?,
         }),
         OpKind::Memory => Ok(Operation::ReadByteMultiplyAccumulator {
+            kind,
+            address: effective_address(instruction)?,
+        }),
+        _ => Err(unsupported()),
+    })())
+}
+
+fn lower_word_accumulator_divide(
+    instruction: &Instruction,
+) -> Option<Result<Operation, DecodeError>> {
+    let kind = match instruction.code() {
+        Code::Div_rm16 => DivideKind::Unsigned,
+        Code::Idiv_rm16 => DivideKind::Signed,
+        _ => return None,
+    };
+    Some((|| match instruction.op0_kind() {
+        OpKind::Register => Ok(Operation::WordDivideAccumulator {
+            kind,
+            source: word_register(instruction.op0_register())?,
+        }),
+        OpKind::Memory => Ok(Operation::ReadWordDivideAccumulator {
             kind,
             address: effective_address(instruction)?,
         }),

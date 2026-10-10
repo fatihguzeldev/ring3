@@ -339,6 +339,10 @@ pub(super) fn check_profile(instruction: &Instruction, bytes: &[u8]) -> Result<(
         (instruction.code(), bytes),
         (Code::Mul_rm16 | Code::Imul_rm16, [0x66, 0xf7, _, ..])
     );
+    let exact_word_accumulator_divide = matches!(
+        (instruction.code(), bytes),
+        (Code::Div_rm16 | Code::Idiv_rm16, [0x66, 0xf7, _, ..])
+    );
     let exact_word_conditional_move = matches!(
         (instruction.code(), bytes),
         (
@@ -377,6 +381,7 @@ pub(super) fn check_profile(instruction: &Instruction, bytes: &[u8]) -> Result<(
             || exact_word_bit_scan
             || exact_word_signed_multiply
             || exact_word_accumulator_multiply
+            || exact_word_accumulator_divide
             || exact_word_rotate
             || exact_word_conditional_move)
             && bytes
