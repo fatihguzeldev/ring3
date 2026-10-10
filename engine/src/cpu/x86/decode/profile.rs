@@ -52,6 +52,14 @@ pub(super) fn check_profile(instruction: &Instruction, bytes: &[u8]) -> Result<(
     {
         return Err(DecodeError::Unsupported(UnsupportedFeature::Segment));
     }
+    if matches!(instruction.code(), Code::Daa | Code::Das)
+        && !matches!(
+            (instruction.code(), bytes),
+            (Code::Daa, [0x27]) | (Code::Das, [0x2f])
+        )
+    {
+        return Err(unsupported());
+    }
     if instruction.is_string_instruction()
         && (instruction.has_rep_prefix() || instruction.has_repne_prefix())
     {

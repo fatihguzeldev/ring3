@@ -7,10 +7,11 @@ use crate::cpu::x86::{
     ir::{
         BinaryKind, BitIndex, BitScanKind, BitTestKind, BranchTarget, ByteArithmeticKind,
         ByteLogicalKind, BytePredicateKind, ByteReadArithmeticKind, ByteRegister, ByteValue,
-        CarryKind, Condition, CountBranchKind, DivideKind, DoubleShiftKind, EffectiveAddress,
-        ExtensionKind, Location32, MemoryByteArithmeticKind, MultiplyKind, Operation, RotateKind,
-        ShiftCount, ShiftKind, SmallSource, SmallWidth, UnaryKind, Value32, WordArithmeticKind,
-        WordLogicalKind, WordMemoryArithmeticKind, WordReadArithmeticKind, WordValue,
+        CarryKind, Condition, CountBranchKind, DecimalAdjustKind, DivideKind, DoubleShiftKind,
+        EffectiveAddress, ExtensionKind, Location32, MemoryByteArithmeticKind, MultiplyKind,
+        Operation, RotateKind, ShiftCount, ShiftKind, SmallSource, SmallWidth, UnaryKind, Value32,
+        WordArithmeticKind, WordLogicalKind, WordMemoryArithmeticKind, WordReadArithmeticKind,
+        WordValue,
     },
 };
 
@@ -103,6 +104,7 @@ pub(super) fn instruction(
             }
             code.local_set(FLAGS);
         }
+        Operation::DecimalAdjust { kind } => decimal_adjust(code, kind),
         Operation::Direction { set } => {
             code.local_get(FLAGS);
             if set {
@@ -2595,6 +2597,78 @@ fn indirect_target(
             memory::load_result(code, address, imports, exit_depth);
         }
     }
+}
+
+fn decimal_adjust(code: &mut InstructionSink<'_>, kind: DecimalAdjustKind) {
+    byte_value(code, ByteValue::Register(ByteRegister::Al));
+    code.local_tee(LHS)
+        .local_set(RESULT)
+        .local_get(FLAGS)
+        .local_tee(RHS)
+        .i32_const(0x402)
+        .i32_and()
+        .local_set(FLAGS)
+        .local_get(LHS)
+        .i32_const(0xf)
+        .i32_and()
+        .i32_const(9)
+        .i32_gt_u()
+        .local_get(RHS)
+        .i32_const(0x10)
+        .i32_and()
+        .i32_or()
+        .if_(BlockType::Empty)
+        .local_get(RESULT)
+        .i32_const(6);
+    if kind == DecimalAdjustKind::Add {
+        code.i32_add();
+    } else {
+        code.i32_sub();
+    }
+    code.local_set(RESULT)
+        .local_get(FLAGS)
+        .i32_const(0x10)
+        .i32_or()
+        .local_set(FLAGS);
+    if kind == DecimalAdjustKind::Subtract {
+        code.local_get(FLAGS)
+            .local_get(LHS)
+            .i32_const(6)
+            .i32_lt_u()
+            .i32_or()
+            .local_set(FLAGS);
+    }
+    code.end()
+        .local_get(LHS)
+        .i32_const(0x99)
+        .i32_gt_u()
+        .local_get(RHS)
+        .i32_const(1)
+        .i32_and()
+        .i32_or()
+        .if_(BlockType::Empty)
+        .local_get(RESULT)
+        .i32_const(0x60);
+    if kind == DecimalAdjustKind::Add {
+        code.i32_add();
+    } else {
+        code.i32_sub();
+    }
+    code.local_set(RESULT)
+        .local_get(FLAGS)
+        .i32_const(1)
+        .i32_or()
+        .local_set(FLAGS)
+        .end()
+        .local_get(RESULT)
+        .i32_const(0xff)
+        .i32_and()
+        .local_set(RESULT)
+        .local_get(FLAGS);
+    parity_flag(code);
+    zero_sign_flags(code, 7);
+    code.local_set(FLAGS).local_get(RESULT);
+    insert_byte(code, ByteRegister::Al);
 }
 
 fn byte_parent(byte: ByteRegister) -> (Register32, bool) {

@@ -152,6 +152,12 @@ pub enum DivideKind {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DecimalAdjustKind {
+    Add,
+    Subtract,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum BitScanKind {
     Forward,
     Reverse,
@@ -272,6 +278,9 @@ pub enum Operation {
     },
     Carry {
         kind: CarryKind,
+    },
+    DecimalAdjust {
+        kind: DecimalAdjustKind,
     },
     Direction {
         set: bool,

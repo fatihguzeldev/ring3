@@ -11,8 +11,8 @@ use super::{
 use crate::cpu::x86::{
     Register32,
     ir::{
-        CarryKind, ExtensionKind, Operation, SmallSource, SmallWidth, WordArithmeticKind,
-        WordLogicalKind, WordMemoryArithmeticKind, WordReadArithmeticKind,
+        CarryKind, DecimalAdjustKind, ExtensionKind, Operation, SmallSource, SmallWidth,
+        WordArithmeticKind, WordLogicalKind, WordMemoryArithmeticKind, WordReadArithmeticKind,
     },
 };
 
@@ -38,6 +38,12 @@ pub(super) fn lower(instruction: &Instruction, bytes: &[u8]) -> Result<Operation
         }),
         Code::Cmc => Ok(Operation::Carry {
             kind: CarryKind::Complement,
+        }),
+        Code::Daa => Ok(Operation::DecimalAdjust {
+            kind: DecimalAdjustKind::Add,
+        }),
+        Code::Das => Ok(Operation::DecimalAdjust {
+            kind: DecimalAdjustKind::Subtract,
         }),
         Code::Cld => Ok(Operation::Direction { set: false }),
         Code::Std => Ok(Operation::Direction { set: true }),

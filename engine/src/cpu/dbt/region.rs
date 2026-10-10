@@ -548,6 +548,7 @@ pub(super) fn supports(instruction: &DecodedInstruction, embedded: bool) -> bool
                 | Operation::ClearX87Exceptions
                 | Operation::X87StatusToAx
                 | Operation::Carry { .. }
+                | Operation::DecimalAdjust { .. }
                 | Operation::Direction { .. }
                 | Operation::FlagsToAh
                 | Operation::AhToFlags
