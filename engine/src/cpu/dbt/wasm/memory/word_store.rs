@@ -15,6 +15,14 @@ pub(super) fn store_result(
     exit_depth: u32,
 ) {
     effective_address(code, address);
+    store_result_at_address(code, imports, exit_depth);
+}
+
+pub(super) fn store_result_at_address(
+    code: &mut InstructionSink<'_>,
+    imports: Imports,
+    exit_depth: u32,
+) {
     let index = imports
         .store16
         .expect("prepared word store has an import")

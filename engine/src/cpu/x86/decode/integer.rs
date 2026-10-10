@@ -964,7 +964,7 @@ fn lower_word_bit_test(instruction: &Instruction) -> Option<Result<Operation, De
         _ => return None,
     };
     Some((|| {
-        if instruction.op0_kind() != OpKind::Register {
+        if instruction.op0_kind() != OpKind::Register && instruction.op0_kind() != OpKind::Memory {
             return Err(unsupported());
         }
         let index = if immediate {
@@ -972,6 +972,18 @@ fn lower_word_bit_test(instruction: &Instruction) -> Option<Result<Operation, De
         } else {
             BitIndex::Register(word_register(instruction.op1_register())?)
         };
+        if instruction.op0_kind() == OpKind::Memory {
+            let address = effective_address(instruction)?;
+            return Ok(if kind == BitTestKind::Test {
+                Operation::ReadBitTestWord { address, index }
+            } else {
+                Operation::MemoryBitMutationWord {
+                    kind,
+                    address,
+                    index,
+                }
+            });
+        }
         Ok(Operation::BitTestWord {
             kind,
             destination: word_register(instruction.op0_register())?,

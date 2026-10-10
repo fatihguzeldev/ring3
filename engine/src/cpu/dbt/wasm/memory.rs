@@ -104,6 +104,7 @@ impl Imports {
                 | Operation::ReadSignedMultiplyImmediateWord { .. }
                 | Operation::ReadWordMultiplyAccumulator { .. }
                 | Operation::ReadWordDivideAccumulator { .. }
+                | Operation::ReadBitTestWord { .. }
                 | Operation::LoadWord { .. }
                 | Operation::LoadStringWord
                 | Operation::CompareStringWord
@@ -116,6 +117,7 @@ impl Imports {
                 | Operation::MemoryRotateThroughCarryWord { .. }
                 | Operation::MemoryExchangeAddWord { .. }
                 | Operation::MemoryCompareExchangeWord { .. }
+                | Operation::MemoryBitMutationWord { .. }
                 | Operation::MemoryArithmeticWord { .. }
                 | Operation::MemoryLogicalWord { .. } => {
                     read16 = true;
@@ -242,6 +244,14 @@ pub(super) fn store_word_result(
     exit_depth: u32,
 ) {
     word_store::store_result(code, address, imports, exit_depth);
+}
+
+pub(super) fn store_word_result_at_address(
+    code: &mut InstructionSink<'_>,
+    imports: Imports,
+    exit_depth: u32,
+) {
+    word_store::store_result_at_address(code, imports, exit_depth);
 }
 
 pub(super) fn load_narrow_value(

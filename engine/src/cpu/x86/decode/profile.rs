@@ -340,6 +340,17 @@ pub(super) fn check_profile(instruction: &Instruction, bytes: &[u8]) -> Result<(
         ) => *modrm & 0xc0 == 0xc0,
         _ => false,
     };
+    let exact_word_memory_bit_test = match (instruction.code(), bytes) {
+        (Code::Bt_rm16_r16, [0x66, 0x0f, 0xa3, modrm, ..])
+        | (Code::Bts_rm16_r16, [0x66, 0x0f, 0xab, modrm, ..])
+        | (Code::Btr_rm16_r16, [0x66, 0x0f, 0xb3, modrm, ..])
+        | (Code::Btc_rm16_r16, [0x66, 0x0f, 0xbb, modrm, ..])
+        | (
+            Code::Bt_rm16_imm8 | Code::Bts_rm16_imm8 | Code::Btr_rm16_imm8 | Code::Btc_rm16_imm8,
+            [0x66, 0x0f, 0xba, modrm, ..],
+        ) => *modrm & 0xc0 != 0xc0,
+        _ => false,
+    };
     let exact_word_signed_multiply = matches!(
         (instruction.code(), bytes),
         (Code::Imul_r16_rm16, [0x66, 0x0f, 0xaf, _, ..])
@@ -391,6 +402,7 @@ pub(super) fn check_profile(instruction: &Instruction, bytes: &[u8]) -> Result<(
             || exact_word_cmpxchg
             || exact_word_bit_scan
             || exact_word_bit_test
+            || exact_word_memory_bit_test
             || exact_word_signed_multiply
             || exact_word_accumulator_multiply
             || exact_word_accumulator_divide

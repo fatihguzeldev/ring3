@@ -1669,6 +1669,17 @@ pub(super) fn instruction(
             destination,
             index,
         } => bit_test_word(code, kind, destination, index),
+        Operation::ReadBitTestWord { address, index } => {
+            memory_bit_test_word(code, BitTestKind::Test, address, index, imports, exit_depth);
+        }
+        Operation::MemoryBitMutationWord {
+            kind,
+            address,
+            index,
+        } => {
+            memory_bit_test_word(code, kind, address, index, imports, exit_depth);
+            store = true;
+        }
         Operation::MemoryBitMutation {
             kind,
             address,
@@ -4607,6 +4618,66 @@ fn bit_scan(
         .i32_shl()
         .i32_or()
         .local_set(FLAGS);
+}
+
+fn memory_bit_test_word(
+    code: &mut InstructionSink<'_>,
+    kind: BitTestKind,
+    address: EffectiveAddress,
+    index: BitIndex,
+    imports: memory::Imports,
+    exit_depth: u32,
+) {
+    memory::address_value(code, address);
+    if let BitIndex::Register(source) = index {
+        code.local_get(register(source));
+        extend_value(code, ExtensionKind::Sign, SmallWidth::Word);
+        code.i32_const(4)
+            .i32_shr_s()
+            .i32_const(1)
+            .i32_shl()
+            .i32_add();
+    }
+    code.local_set(ADDRESS);
+    match index {
+        BitIndex::Register(source) => {
+            code.local_get(register(source));
+        }
+        BitIndex::Immediate(raw) => {
+            code.i32_const(i32::from(raw));
+        }
+    }
+    code.i32_const(15).i32_and();
+    memory::load_narrow_at_address(code, SmallWidth::Word, imports, exit_depth);
+    code.local_set(RESULT)
+        .local_set(RHS)
+        .local_get(FLAGS)
+        .i32_const(0x442)
+        .i32_and()
+        .local_get(RESULT)
+        .local_get(RHS)
+        .i32_shr_u()
+        .i32_const(1)
+        .i32_and()
+        .i32_or();
+    if kind != BitTestKind::Test {
+        code.local_get(RESULT).i32_const(1).local_get(RHS).i32_shl();
+        match kind {
+            BitTestKind::Set => {
+                code.i32_or();
+            }
+            BitTestKind::Reset => {
+                code.i32_const(-1).i32_xor().i32_and();
+            }
+            BitTestKind::Complement => {
+                code.i32_xor();
+            }
+            BitTestKind::Test => unreachable!(),
+        }
+        code.local_set(RESULT);
+        memory::store_word_result_at_address(code, imports, exit_depth);
+    }
+    code.local_set(FLAGS);
 }
 
 fn memory_bit_mutation(

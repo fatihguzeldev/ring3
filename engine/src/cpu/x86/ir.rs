@@ -771,7 +771,16 @@ pub enum Operation {
         address: EffectiveAddress,
         index: BitIndex,
     },
+    ReadBitTestWord {
+        address: EffectiveAddress,
+        index: BitIndex,
+    },
     MemoryBitMutation {
+        kind: BitTestKind,
+        address: EffectiveAddress,
+        index: BitIndex,
+    },
+    MemoryBitMutationWord {
         kind: BitTestKind,
         address: EffectiveAddress,
         index: BitIndex,

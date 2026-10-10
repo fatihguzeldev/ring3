@@ -360,6 +360,7 @@ fn supports_memory_reads(operation: &Operation) -> bool {
             | Operation::ReadBitScan { .. }
             | Operation::ReadBitScanWord { .. }
             | Operation::ReadBitTest { .. }
+            | Operation::ReadBitTestWord { .. }
             | Operation::MemoryPredicateByte { .. }
             | Operation::ReadCompareByte { .. }
             | Operation::ReadLogicalByte { .. }
@@ -451,6 +452,7 @@ fn supports_memory_binary(operation: &Operation) -> bool {
             | Operation::MemoryLogicalWord { .. }
             | Operation::MemoryLogicalByte { .. }
             | Operation::MemoryBitMutation { .. }
+            | Operation::MemoryBitMutationWord { .. }
             | Operation::MemoryArithmeticByte { .. }
             | Operation::MemoryExchangeAdd { .. }
             | Operation::MemoryExchangeAddWord { .. }
