@@ -238,7 +238,10 @@ fn word_memory_xadd_prefixes_payloads_and_neighbors_keep_precise_boundaries() {
             );
         }
         for opcode in [0xc0, 0xb0, 0xb1] {
-            let closed = [0x66, 0x0f, opcode, 0x03 | source << 3];
+            let mut closed = vec![0x66, 0x0f, opcode, 0x03 | source << 3];
+            if opcode == 0xb1 {
+                closed.insert(0, 0x66);
+            }
             assert_eq!(
                 decode_one(&code_space(CODE, &closed), GuestAddress(CODE)).err(),
                 Some(unsupported),
