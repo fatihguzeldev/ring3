@@ -300,7 +300,7 @@ fn word_memory_unary_prefixes_and_group_neighbors_keep_precise_closure() {
     }
     for extension in [0, 1, 4, 5, 6, 7] {
         let mut bytes = instruction(0xf7, extension, &[0x03]);
-        if matches!(extension, 4 | 5) {
+        if matches!(extension, 4..=7) {
             bytes.insert(0, 0x66);
         }
         if extension < 2 {

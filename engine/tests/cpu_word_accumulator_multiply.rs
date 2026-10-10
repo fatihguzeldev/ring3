@@ -328,7 +328,7 @@ fn word_accumulator_multiply_payloads_and_implicit_destination_aliases_are_liter
 }
 
 #[test]
-fn word_accumulator_multiply_prefixes_and_division_neighbors_have_exact_categories() {
+fn word_accumulator_multiply_prefixes_and_duplicate_division_neighbors_have_exact_categories() {
     let opcode = DecodeError::Unsupported(UnsupportedFeature::Opcode);
     for extension in [4, 5] {
         let tails: Vec<_> = (0..8)
@@ -370,7 +370,8 @@ fn word_accumulator_multiply_prefixes_and_division_neighbors_have_exact_categori
     }
     for extension in [6, 7] {
         for tail in [&[0xc0][..], &[0xc2][..], &[0x03][..], &[0x04, 0x8b][..]] {
-            let bytes = instruction(extension, tail);
+            let mut bytes = instruction(extension, tail);
+            bytes.insert(0, 0x66);
             assert_eq!(
                 decode_one(&code_space(CODE, &bytes), GuestAddress(CODE)).err(),
                 Some(opcode),

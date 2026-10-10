@@ -169,7 +169,12 @@ fn memory_division_ea_identities_compile_in_four_bound_profiles() {
 fn strict_neighbors_and_operand_fetch_keep_categories_and_exact_faults() {
     for kind in [DivideKind::Unsigned, DivideKind::Signed] {
         for prefix in [0x66, 0x67, 0xf2, 0xf3, 0xf0, 0x26, 0x64] {
-            let bytes = [vec![prefix], encoded(kind, &[0x03])].concat();
+            let prefixes = if prefix == 0x66 {
+                vec![0x66, 0x66]
+            } else {
+                vec![prefix]
+            };
+            let bytes = [prefixes, encoded(kind, &[0x03])].concat();
             let engine = fixture(CODE, &bytes);
             let wanted = match prefix {
                 0xf0 => DecodeError::InvalidEncoding,

@@ -316,7 +316,10 @@ fn adjacent_unsupported_integer_instructions_remain_rejected() {
             "duplicate operand-prefixed imul word",
             &[0x66, 0x66, 0x0f, 0xaf, 0xc2],
         ),
-        ("idiv word", &[0x66, 0xf7, 0xfa]),
+        (
+            "duplicate operand-prefixed idiv word",
+            &[0x66, 0x66, 0xf7, 0xfa],
+        ),
         ("operand-prefixed inc byte memory", &[0x66, 0xfe, 0x00]),
         ("duplicate operand-prefixed inc word", &[0x66, 0x66, 0x40]),
     ];
