@@ -92,6 +92,8 @@ pub(super) fn check_profile(instruction: &Instruction, bytes: &[u8]) -> Result<(
         _ => false,
     };
     let exact_word_move = match (instruction.code(), bytes) {
+        (Code::Mov_AX_moffs16, [0x66, 0xa1, _, _, _, _])
+        | (Code::Mov_moffs16_AX, [0x66, 0xa3, _, _, _, _]) => true,
         (Code::Mov_rm16_r16, [0x66, 0x89, modrm, ..])
         | (Code::Mov_r16_rm16, [0x66, 0x8b, modrm, ..])
             if *modrm & 0xc0 != 0xc0 =>

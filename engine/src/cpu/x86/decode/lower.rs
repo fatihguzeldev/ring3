@@ -72,11 +72,15 @@ pub(super) fn lower(instruction: &Instruction, bytes: &[u8]) -> Result<Operation
             destination: location(instruction, 0)?,
             source: value(instruction, 1)?,
         }),
-        Code::Mov_r16_rm16 if instruction.op1_kind() == OpKind::Memory => Ok(Operation::LoadWord {
-            destination: word_register(instruction.op0_register())?,
-            address: effective_address(instruction)?,
-        }),
-        Code::Mov_rm16_r16 | Code::Mov_rm16_imm16 if instruction.op0_kind() == OpKind::Memory => {
+        Code::Mov_r16_rm16 | Code::Mov_AX_moffs16 if instruction.op1_kind() == OpKind::Memory => {
+            Ok(Operation::LoadWord {
+                destination: word_register(instruction.op0_register())?,
+                address: effective_address(instruction)?,
+            })
+        }
+        Code::Mov_rm16_r16 | Code::Mov_rm16_imm16 | Code::Mov_moffs16_AX
+            if instruction.op0_kind() == OpKind::Memory =>
+        {
             Ok(Operation::StoreWord {
                 address: effective_address(instruction)?,
                 source: word_value(instruction)?,
