@@ -253,6 +253,14 @@ pub(super) fn check_profile(instruction: &Instruction, bytes: &[u8]) -> Result<(
         _ => false,
     };
     let exact_word_double_shift = match (instruction.code(), bytes) {
+        (Code::Shld_rm16_r16_imm8, [0x66, 0x0f, 0xa4, modrm, ..])
+        | (Code::Shrd_rm16_r16_imm8, [0x66, 0x0f, 0xac, modrm, ..])
+        | (Code::Shld_rm16_r16_CL, [0x66, 0x0f, 0xa5, modrm, ..])
+        | (Code::Shrd_rm16_r16_CL, [0x66, 0x0f, 0xad, modrm, ..])
+            if *modrm & 0xc0 != 0xc0 =>
+        {
+            true
+        }
         (Code::Shld_rm16_r16_imm8, [0x66, 0x0f, 0xa4, modrm, _])
         | (Code::Shrd_rm16_r16_imm8, [0x66, 0x0f, 0xac, modrm, _])
         | (Code::Shld_rm16_r16_CL, [0x66, 0x0f, 0xa5, modrm])

@@ -106,6 +106,7 @@ impl Imports {
                 Operation::MoveStringWord
                 | Operation::MemoryUnaryWord { .. }
                 | Operation::MemoryShiftWord { .. }
+                | Operation::MemoryDoubleShiftWord { .. }
                 | Operation::MemoryRotateWord { .. }
                 | Operation::MemoryRotateThroughCarryWord { .. }
                 | Operation::MemoryExchangeAddWord { .. }

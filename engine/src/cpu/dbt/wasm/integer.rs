@@ -1641,6 +1641,15 @@ pub(super) fn instruction(
             source,
             count,
         } => double_shift_word(code, kind, destination, source, count),
+        Operation::MemoryDoubleShiftWord {
+            kind,
+            address,
+            source,
+            count,
+        } => {
+            double_shift_memory_word(code, kind, address, source, count, imports, exit_depth);
+            store = true;
+        }
         Operation::MemoryDoubleShift {
             kind,
             address,
@@ -3303,6 +3312,53 @@ fn double_shift_flags(code: &mut InstructionSink<'_>, kind: DoubleShiftKind) {
         .i32_or()
         .local_set(FLAGS)
         .end();
+}
+
+fn double_shift_memory_word(
+    code: &mut InstructionSink<'_>,
+    kind: DoubleShiftKind,
+    address: EffectiveAddress,
+    source: Register32,
+    count: ShiftCount,
+    imports: memory::Imports,
+    exit_depth: u32,
+) {
+    memory::load_narrow_value(code, address, SmallWidth::Word, imports, exit_depth);
+    code.local_tee(LHS).local_set(RESULT);
+    shift_count(code, count);
+    code.local_tee(RHS)
+        .if_(BlockType::Empty)
+        .local_get(RHS)
+        .i32_const(16)
+        .i32_gt_u()
+        .if_(BlockType::Empty)
+        .i32_const(0)
+        .local_set(RESULT)
+        .else_();
+    word_value(code, WordValue::Register(source));
+    code.local_set(RESULT);
+    double_shift_word_value(code, kind);
+    code.end().end();
+    // store validation clobbers scratch; preserve the old word and count until flags commit.
+    code.local_get(LHS).local_get(RHS);
+    memory::store_word_result(code, address, imports, exit_depth);
+    code.local_set(RHS)
+        .local_set(LHS)
+        .local_get(RHS)
+        .if_(BlockType::Empty)
+        .local_get(RHS)
+        .i32_const(16)
+        .i32_gt_u()
+        .if_(BlockType::Empty)
+        .local_get(FLAGS)
+        .i32_const(0x400)
+        .i32_and()
+        .i32_const(2)
+        .i32_or()
+        .local_set(FLAGS)
+        .else_();
+    double_shift_word_flags(code, kind);
+    code.end().end();
 }
 
 fn double_shift_memory(

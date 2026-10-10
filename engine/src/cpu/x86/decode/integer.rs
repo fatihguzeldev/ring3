@@ -485,12 +485,22 @@ fn lower_word_double_shift(instruction: &Instruction) -> Option<Result<Operation
         _ => return None,
     };
     Some((|| {
-        Ok(Operation::DoubleShiftWord {
-            kind,
-            destination: word_register(instruction.op0_register())?,
-            source: word_register(instruction.op1_register())?,
-            count,
-        })
+        let source = word_register(instruction.op1_register())?;
+        match instruction.op0_kind() {
+            OpKind::Register => Ok(Operation::DoubleShiftWord {
+                kind,
+                destination: word_register(instruction.op0_register())?,
+                source,
+                count,
+            }),
+            OpKind::Memory => Ok(Operation::MemoryDoubleShiftWord {
+                kind,
+                address: effective_address(instruction)?,
+                source,
+                count,
+            }),
+            _ => Err(unsupported()),
+        }
     })())
 }
 
