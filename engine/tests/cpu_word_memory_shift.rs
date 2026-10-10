@@ -347,7 +347,7 @@ fn word_memory_shift_prefixes_and_rotate_sal_neighbors_keep_precise_closure() {
         }
         for extension in [0, 1, 2, 3, 6] {
             let mut bytes = encoding(opcode, extension, 33);
-            if extension <= 1 {
+            if extension <= 3 {
                 bytes.insert(0, 0x66);
             }
             assert_eq!(

@@ -329,7 +329,10 @@ fn word_memory_rotate_prefixes_and_carry_rotate_sal_neighbors_keep_precise_closu
             ));
         }
         for extension in [2, 3, 6] {
-            let bytes = encoding(opcode, extension, 33);
+            let mut bytes = encoding(opcode, extension, 33);
+            if extension != 6 {
+                bytes.insert(0, 0x66);
+            }
             assert_eq!(
                 decode_one(&code_space(CODE, &bytes), GuestAddress(CODE)).err(),
                 Some(unsupported),

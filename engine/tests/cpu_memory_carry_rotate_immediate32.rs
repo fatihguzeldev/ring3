@@ -616,10 +616,15 @@ fn exclusions() -> Vec<(Vec<u8>, DecodeError)> {
                     }
                     _ => opcode,
                 };
-                cases.push(([vec![prefix], bytes.clone()].concat(), cause));
+                let prefixes = if prefix == 0x66 {
+                    vec![0x66, 0x66]
+                } else {
+                    vec![prefix]
+                };
+                cases.push(([prefixes, bytes.clone()].concat(), cause));
             }
             cases.push((
-                [vec![0x66], instruction(0xd3, kind, shape, 0)].concat(),
+                [vec![0x66, 0x66], instruction(0xd3, kind, shape, 0)].concat(),
                 opcode,
             ));
             for byte_opcode in [0xc0, 0xd2, 0xd0] {
@@ -735,8 +740,8 @@ fn strict_neighbors_and_late_failures_preserve_both_publications() {
             ),
             (
                 CODE,
-                vec![0x66, 0xc1, 0x13, 2],
-                positive.len() + 4,
+                vec![0x66, 0x66, 0xc1, 0x13, 2],
+                positive.len() + 5,
                 error(
                     CODE + positive.len() as u32,
                     InstructionError::Decode(opcode),

@@ -484,7 +484,7 @@ fn raw_immediate_domain_and_strict_neighbors_preserve_decode_boundaries() {
                     _ => opcode,
                 };
                 let mut bytes = vec![prefix, 0xc1, modrm, 225];
-                if prefix == 0x66 && !memory {
+                if prefix == 0x66 {
                     bytes.insert(0, 0x66);
                 }
                 rejected(&bytes, expected);
@@ -496,7 +496,7 @@ fn raw_immediate_domain_and_strict_neighbors_preserve_decode_boundaries() {
                 vec![0x66, 0xd2, modrm],
                 vec![0x66, 0xd3, modrm],
             ] {
-                if !memory && bytes[1] == 0xd3 {
+                if bytes[1] == 0xd3 {
                     bytes.insert(0, 0x66);
                 }
                 rejected(&bytes, opcode);

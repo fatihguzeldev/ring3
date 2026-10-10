@@ -241,6 +241,7 @@ fn word_carry_extra_prefixes_and_memory_neighbors_remain_precisely_closed() {
                 if opcode == 0xc1 {
                     closed.push(18);
                 }
+                closed.insert(0, 0x66);
                 rejected(&closed, opcode_error);
             }
         }

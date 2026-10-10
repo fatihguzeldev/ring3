@@ -538,10 +538,7 @@ fn raw_byte_carry_immediate_domain_and_strict_neighbors_preserve_decode_boundari
             let mut cl = vec![0xd2, operand];
             cl.insert(0, 0x66);
             rejected(&cl, opcode);
-            let mut word = vec![0x66, 0xd1, operand];
-            if operand & 0xc0 == 0xc0 {
-                word.insert(0, 0x66);
-            }
+            let word = vec![0x66, 0x66, 0xd1, operand];
             rejected(&word, opcode);
             exclusions += 2;
         }
