@@ -103,7 +103,9 @@ impl Imports {
                 | Operation::LoadStringWord
                 | Operation::CompareStringWord
                 | Operation::ScanStringWord => read16 = true,
-                Operation::MoveStringWord | Operation::MemoryLogicalWord { .. } => {
+                Operation::MoveStringWord
+                | Operation::MemoryArithmeticWord { .. }
+                | Operation::MemoryLogicalWord { .. } => {
                     read16 = true;
                     store16 = true;
                 }

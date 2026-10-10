@@ -63,6 +63,12 @@ pub enum WordReadArithmeticKind {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum WordMemoryArithmeticKind {
+    Add,
+    Sub,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum WordLogicalKind {
     And,
     Or,
@@ -307,6 +313,11 @@ pub enum Operation {
         kind: WordReadArithmeticKind,
         destination: Register32,
         address: EffectiveAddress,
+    },
+    MemoryArithmeticWord {
+        kind: WordMemoryArithmeticKind,
+        address: EffectiveAddress,
+        source: Register32,
     },
     LogicalWord {
         kind: WordLogicalKind,

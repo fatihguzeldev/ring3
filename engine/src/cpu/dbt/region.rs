@@ -417,7 +417,8 @@ fn supports_memory_unary(operation: &Operation) -> bool {
 fn supports_memory_binary(operation: &Operation) -> bool {
     matches!(
         operation,
-        Operation::MemoryLogicalWord { .. }
+        Operation::MemoryArithmeticWord { .. }
+            | Operation::MemoryLogicalWord { .. }
             | Operation::MemoryLogicalByte { .. }
             | Operation::MemoryBitMutation { .. }
             | Operation::MemoryArithmeticByte { .. }

@@ -10,7 +10,7 @@ use crate::cpu::x86::{
         CarryKind, Condition, CountBranchKind, DivideKind, DoubleShiftKind, EffectiveAddress,
         ExtensionKind, Location32, MemoryByteArithmeticKind, MultiplyKind, Operation, RotateKind,
         ShiftCount, ShiftKind, SmallSource, SmallWidth, UnaryKind, Value32, WordArithmeticKind,
-        WordLogicalKind, WordReadArithmeticKind, WordValue,
+        WordLogicalKind, WordMemoryArithmeticKind, WordReadArithmeticKind, WordValue,
     },
 };
 
@@ -622,6 +622,37 @@ pub(super) fn instruction(
                 .i32_and()
                 .i32_or()
                 .local_set(register(destination));
+        }
+        Operation::MemoryArithmeticWord {
+            kind,
+            address,
+            source,
+        } => {
+            memory::load_narrow_value(code, address, SmallWidth::Word, imports, exit_depth);
+            word_value(code, WordValue::Register(source));
+            let binary = match kind {
+                WordMemoryArithmeticKind::Add => {
+                    code.i32_add();
+                    BinaryKind::Add
+                }
+                WordMemoryArithmeticKind::Sub => {
+                    code.i32_sub();
+                    BinaryKind::Sub
+                }
+            };
+            code.i32_const(0xffff).i32_and().local_set(RESULT);
+            memory::store_word_result(code, address, imports, exit_depth);
+            // store validation uses operand scratch; recover the original word after success.
+            word_value(code, WordValue::Register(source));
+            code.local_set(RHS).local_get(RESULT).local_get(RHS);
+            if kind == WordMemoryArithmeticKind::Add {
+                code.i32_sub();
+            } else {
+                code.i32_add();
+            }
+            code.i32_const(0xffff).i32_and().local_set(LHS);
+            arithmetic_flags(code, binary, CarryFlag::Calculate, 15);
+            store = true;
         }
         Operation::MemoryLogicalWord {
             kind,

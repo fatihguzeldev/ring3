@@ -12,7 +12,7 @@ use crate::cpu::x86::{
     Register32,
     ir::{
         CarryKind, ExtensionKind, Operation, SmallSource, SmallWidth, WordArithmeticKind,
-        WordLogicalKind, WordReadArithmeticKind,
+        WordLogicalKind, WordMemoryArithmeticKind, WordReadArithmeticKind,
     },
 };
 
@@ -99,6 +99,20 @@ pub(super) fn lower(instruction: &Instruction, bytes: &[u8]) -> Result<Operation
                 kind: WordReadArithmeticKind::Sub,
                 destination: word_register(instruction.op0_register())?,
                 address: effective_address(instruction)?,
+            })
+        }
+        Code::Add_rm16_r16 if instruction.op0_kind() == OpKind::Memory => {
+            Ok(Operation::MemoryArithmeticWord {
+                kind: WordMemoryArithmeticKind::Add,
+                address: effective_address(instruction)?,
+                source: word_register(instruction.op1_register())?,
+            })
+        }
+        Code::Sub_rm16_r16 if instruction.op0_kind() == OpKind::Memory => {
+            Ok(Operation::MemoryArithmeticWord {
+                kind: WordMemoryArithmeticKind::Sub,
+                address: effective_address(instruction)?,
+                source: word_register(instruction.op1_register())?,
             })
         }
         Code::Add_rm16_r16
