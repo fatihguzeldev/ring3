@@ -2099,6 +2099,22 @@ pub(super) fn instruction(
             code.i32_const(target.0 as i32).local_set(EIP);
             store = true;
         }
+        Operation::CallRegisterWord { source } => {
+            word_value(code, WordValue::Register(source));
+            code.i32_const((instruction.next_pc().0 & 0xffff) as i32)
+                .local_set(RESULT);
+            memory::push_word_result(code, imports, exit_depth);
+            code.local_set(EIP);
+            store = true;
+        }
+        Operation::ReadCallWord { address } => {
+            memory::load_narrow_value(code, address, SmallWidth::Word, imports, exit_depth);
+            code.i32_const((instruction.next_pc().0 & 0xffff) as i32)
+                .local_set(RESULT);
+            memory::push_word_result(code, imports, exit_depth);
+            code.local_set(EIP);
+            store = true;
+        }
         Operation::Call {
             target: BranchTarget::Direct(target),
         } => {
@@ -2301,6 +2317,8 @@ pub(super) fn instruction(
             | Operation::CountBranch { .. }
             | Operation::Call { .. }
             | Operation::CallWord { .. }
+            | Operation::CallRegisterWord { .. }
+            | Operation::ReadCallWord { .. }
             | Operation::Return { .. }
             | Operation::ReturnWord { .. }
     ) {

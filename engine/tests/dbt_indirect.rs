@@ -289,7 +289,7 @@ fn far_prefixed_and_other_unimplemented_forms_keep_their_precise_errors() {
             InstructionError::Decode(DecodeError::Unsupported(UnsupportedFeature::Opcode)),
         ),
         (
-            &[0x66, 0xff, 0xd4][..],
+            &[0x66, 0x66, 0xff, 0xd4][..],
             InstructionError::Decode(DecodeError::Unsupported(UnsupportedFeature::Opcode)),
         ),
         (

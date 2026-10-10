@@ -52,6 +52,15 @@ pub(super) fn lower(instruction: &Instruction) -> Result<Operation, DecodeError>
         Code::Call_rm32 => Operation::Call {
             target: BranchTarget::Indirect(location(instruction, 0)?),
         },
+        Code::Call_rm16 => match instruction.op0_kind() {
+            OpKind::Register => Operation::CallRegisterWord {
+                source: word_register(instruction.op0_register())?,
+            },
+            OpKind::Memory => Operation::ReadCallWord {
+                address: effective_address(instruction)?,
+            },
+            _ => return Err(unsupported()),
+        },
         Code::Push_r32 | Code::Push_rm32 | Code::Pushd_imm32 | Code::Pushd_imm8 => {
             Operation::Push {
                 source: value(instruction, 0)?,

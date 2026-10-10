@@ -422,7 +422,7 @@ fn near_control_end_prefix_and_decode_errors_preserve_arena_units_and_capacity()
             (0xf0, DecodeError::InvalidEncoding),
         ] {
             let mut bytes = vec![0x90, prefix];
-            if prefix == 0x66 && matches!(instruction[0], 0xe8 | 0xc3 | 0xc2) {
+            if prefix == 0x66 {
                 bytes.push(0x66);
             }
             bytes.extend_from_slice(instruction);

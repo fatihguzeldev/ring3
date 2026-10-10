@@ -59,6 +59,7 @@ impl Imports {
                 | Operation::StoreWord { .. }
                 | Operation::PushWord { .. }
                 | Operation::CallWord { .. }
+                | Operation::CallRegisterWord { .. }
                 | Operation::PushFlagsWord
                 | Operation::StoreStringWord => {
                     store16 = true;
@@ -120,6 +121,7 @@ impl Imports {
                 | Operation::ScanStringWord => read16 = true,
                 Operation::MoveStringWord
                 | Operation::PushMemoryWord { .. }
+                | Operation::ReadCallWord { .. }
                 | Operation::PopMemoryWord { .. }
                 | Operation::MemoryUnaryWord { .. }
                 | Operation::MemoryShiftWord { .. }

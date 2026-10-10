@@ -316,7 +316,9 @@ fn supports_near_control(instruction: &DecodedInstruction) -> bool {
         } => instruction.length() == 5,
         Operation::Call {
             target: BranchTarget::Indirect(_),
-        } => true,
+        }
+        | Operation::CallRegisterWord { .. }
+        | Operation::ReadCallWord { .. } => true,
         Operation::Return { .. } => matches!(instruction.length(), 1 | 3),
         Operation::CallWord { .. } => instruction.length() == 4,
         Operation::ReturnWord { .. } => matches!(instruction.length(), 2 | 4),
@@ -342,6 +344,8 @@ pub(super) fn terminates(instruction: &DecodedInstruction, embedded: bool) -> bo
             instruction.operation(),
             Operation::Call { .. }
                 | Operation::CallWord { .. }
+                | Operation::CallRegisterWord { .. }
+                | Operation::ReadCallWord { .. }
                 | Operation::Return { .. }
                 | Operation::ReturnWord { .. }
         ))

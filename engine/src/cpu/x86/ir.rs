@@ -838,6 +838,12 @@ pub enum Operation {
     CallWord {
         target: GuestAddress,
     },
+    CallRegisterWord {
+        source: Register32,
+    },
+    ReadCallWord {
+        address: EffectiveAddress,
+    },
     Push {
         source: Value32,
     },
