@@ -108,6 +108,7 @@ impl Imports {
                 | Operation::ReadSignedMultiplyImmediateWord { .. }
                 | Operation::ReadWordMultiplyAccumulator { .. }
                 | Operation::ReadWordDivideAccumulator { .. }
+                | Operation::ReadJumpWord { .. }
                 | Operation::ReadBitTestWord { .. }
                 | Operation::LoadWord { .. }
                 | Operation::PopWord { .. }

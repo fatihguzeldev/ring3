@@ -106,6 +106,10 @@ pub(super) fn check_profile(instruction: &Instruction, bytes: &[u8]) -> Result<(
                 [0x66, 0x0f, 0x80..=0x8f, _, _],
             )
     );
+    let exact_word_indirect_jump = matches!(
+        (instruction.code(), bytes),
+        (Code::Jmp_rm16, [0x66, 0xff, modrm, ..]) if *modrm & 0x38 == 0x20
+    );
     let exact_word_stack = match (instruction.code(), bytes) {
         (Code::Push_r16, [0x66, 0x50..=0x57])
         | (Code::Pop_r16, [0x66, 0x58..=0x5f])
@@ -454,6 +458,7 @@ pub(super) fn check_profile(instruction: &Instruction, bytes: &[u8]) -> Result<(
             || exact_word_byte_extend
             || exact_word_lea
             || exact_word_near_control
+            || exact_word_indirect_jump
             || exact_word_stack
             || exact_word_move
             || exact_word_predicate

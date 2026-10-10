@@ -2040,6 +2040,16 @@ pub(super) fn instruction(
             indirect_target(code, target, imports, exit_depth);
             code.local_get(RESULT).local_set(EIP);
         }
+        Operation::JumpWord { source } => {
+            code.local_get(register(source))
+                .i32_const(0xffff)
+                .i32_and()
+                .local_set(EIP);
+        }
+        Operation::ReadJumpWord { address } => {
+            memory::load_narrow_value(code, address, SmallWidth::Word, imports, exit_depth);
+            code.local_set(EIP);
+        }
         Operation::ConditionalJump { condition, target } => {
             control::condition(code, condition);
             code.if_(BlockType::Result(ValType::I32))
@@ -2285,6 +2295,8 @@ pub(super) fn instruction(
     if !matches!(
         instruction.operation(),
         Operation::Jump { .. }
+            | Operation::JumpWord { .. }
+            | Operation::ReadJumpWord { .. }
             | Operation::ConditionalJump { .. }
             | Operation::CountBranch { .. }
             | Operation::Call { .. }

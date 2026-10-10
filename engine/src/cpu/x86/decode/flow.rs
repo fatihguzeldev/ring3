@@ -34,6 +34,15 @@ pub(super) fn lower(instruction: &Instruction) -> Result<Operation, DecodeError>
         Code::Jmp_rm32 => Operation::Jump {
             target: BranchTarget::Indirect(location(instruction, 0)?),
         },
+        Code::Jmp_rm16 => match instruction.op0_kind() {
+            OpKind::Register => Operation::JumpWord {
+                source: word_register(instruction.op0_register())?,
+            },
+            OpKind::Memory => Operation::ReadJumpWord {
+                address: effective_address(instruction)?,
+            },
+            _ => return Err(unsupported()),
+        },
         Code::Call_rel32_32 => Operation::Call {
             target: BranchTarget::Direct(GuestAddress(instruction.near_branch32())),
         },

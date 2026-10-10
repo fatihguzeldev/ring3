@@ -328,7 +328,7 @@ fn jump_span_priority_and_adjacent_exclusions_preserve_previous_state() {
     }
     for (instruction, feature) in [
         (&[0xff, 0x2b][..], UnsupportedFeature::Opcode),
-        (&[0x66, 0xff, 0xe0], UnsupportedFeature::Opcode),
+        (&[0x66, 0x66, 0xff, 0xe0], UnsupportedFeature::Opcode),
         (&[0x67, 0xff, 0x23], UnsupportedFeature::Opcode),
         (&[0x64, 0xff, 0x23], UnsupportedFeature::Segment),
         (&[0x0f, 0x0b], UnsupportedFeature::Opcode),

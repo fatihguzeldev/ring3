@@ -818,6 +818,12 @@ pub enum Operation {
     Jump {
         target: BranchTarget,
     },
+    JumpWord {
+        source: Register32,
+    },
+    ReadJumpWord {
+        address: EffectiveAddress,
+    },
     ConditionalJump {
         condition: Condition,
         target: GuestAddress,

@@ -288,7 +288,7 @@ fn word_memory_unary_prefixes_and_group_neighbors_keep_precise_closure() {
     }
     for extension in 2..8 {
         let mut bytes = instruction(0xff, extension, &[0x03]);
-        if extension == 6 {
+        if matches!(extension, 4 | 6) {
             bytes.insert(0, 0x66);
         }
         assert_eq!(
