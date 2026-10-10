@@ -703,6 +703,14 @@ pub enum Operation {
         kind: MultiplyKind,
         source: Register32,
     },
+    WordMultiplyAccumulator {
+        kind: MultiplyKind,
+        source: Register32,
+    },
+    ReadWordMultiplyAccumulator {
+        kind: MultiplyKind,
+        address: EffectiveAddress,
+    },
     ByteMultiplyAccumulator {
         kind: MultiplyKind,
         source: ByteRegister,

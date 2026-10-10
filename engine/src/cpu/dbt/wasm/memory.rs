@@ -102,6 +102,7 @@ impl Imports {
                 | Operation::ReadBitScanWord { .. }
                 | Operation::ReadSignedMultiplyWord { .. }
                 | Operation::ReadSignedMultiplyImmediateWord { .. }
+                | Operation::ReadWordMultiplyAccumulator { .. }
                 | Operation::LoadWord { .. }
                 | Operation::LoadStringWord
                 | Operation::CompareStringWord

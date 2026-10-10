@@ -352,6 +352,7 @@ fn supports_memory_reads(operation: &Operation) -> bool {
             | Operation::ReadSignedMultiplyWord { .. }
             | Operation::ReadSignedMultiplyImmediateWord { .. }
             | Operation::ReadMultiplyAccumulator { .. }
+            | Operation::ReadWordMultiplyAccumulator { .. }
             | Operation::ReadByteMultiplyAccumulator { .. }
             | Operation::ReadByteDivideAccumulator { .. }
             | Operation::ReadDivideAccumulator { .. }
@@ -555,6 +556,7 @@ pub(super) fn supports(instruction: &DecodedInstruction, embedded: bool) -> bool
                 | Operation::SignedMultiplyWord { .. }
                 | Operation::SignedMultiplyImmediateWord { .. }
                 | Operation::MultiplyAccumulator { .. }
+                | Operation::WordMultiplyAccumulator { .. }
                 | Operation::ByteMultiplyAccumulator { .. }
                 | Operation::DivideAccumulator { .. }
                 | Operation::ByteDivideAccumulator { .. }

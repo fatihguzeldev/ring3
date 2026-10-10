@@ -1866,6 +1866,14 @@ pub(super) fn instruction(
         Operation::MultiplyAccumulator { kind, source } => {
             accumulator_multiply(code, kind, register(source));
         }
+        Operation::WordMultiplyAccumulator { kind, source } => {
+            word_accumulator_multiply(code, kind, register(source));
+        }
+        Operation::ReadWordMultiplyAccumulator { kind, address } => {
+            memory::load_narrow_value(code, address, SmallWidth::Word, imports, exit_depth);
+            code.local_set(RESULT);
+            word_accumulator_multiply(code, kind, RESULT);
+        }
         Operation::ByteMultiplyAccumulator { kind, source } => {
             byte_accumulator_multiply(code, kind, source);
         }
@@ -4689,6 +4697,56 @@ fn bit_test(
         }
         code.local_set(register(destination));
     }
+}
+
+fn word_accumulator_multiply(code: &mut InstructionSink<'_>, kind: MultiplyKind, source: u32) {
+    let extension = match kind {
+        MultiplyKind::Unsigned => ExtensionKind::Zero,
+        MultiplyKind::Signed => ExtensionKind::Sign,
+    };
+    code.local_get(register(Register32::Eax));
+    extend_value(code, extension, SmallWidth::Word);
+    code.local_set(LHS).local_get(source);
+    extend_value(code, extension, SmallWidth::Word);
+    code.local_set(RHS)
+        .local_get(LHS)
+        .local_get(RHS)
+        .i32_mul()
+        .local_set(RESULT)
+        .local_get(FLAGS)
+        .i32_const(0x402)
+        .i32_and()
+        .local_get(RESULT);
+    match kind {
+        MultiplyKind::Unsigned => {
+            code.i32_const(16).i32_shr_u().i32_const(0).i32_ne();
+        }
+        MultiplyKind::Signed => {
+            code.local_get(RESULT);
+            extend_value(code, ExtensionKind::Sign, SmallWidth::Word);
+            code.i32_ne();
+        }
+    }
+    code.i32_const(0x801)
+        .i32_mul()
+        .i32_or()
+        .local_set(FLAGS)
+        .local_get(register(Register32::Eax))
+        .i32_const(!0xffff)
+        .i32_and()
+        .local_get(RESULT)
+        .i32_const(0xffff)
+        .i32_and()
+        .i32_or()
+        .local_set(register(Register32::Eax))
+        .local_get(register(Register32::Edx))
+        .i32_const(!0xffff)
+        .i32_and()
+        .local_get(RESULT)
+        .i32_const(16)
+        .i32_shr_u()
+        .i32_or()
+        .local_set(register(Register32::Edx));
 }
 
 fn byte_accumulator_multiply(
