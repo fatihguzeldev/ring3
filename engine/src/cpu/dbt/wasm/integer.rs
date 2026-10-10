@@ -1122,6 +1122,22 @@ pub(super) fn instruction(
             memory::store_word_result(code, address, imports, exit_depth);
             store = true;
         }
+        Operation::ExtendByteToWord {
+            kind,
+            destination,
+            source,
+        } => {
+            byte_value(code, ByteValue::Register(source));
+            extend_byte_to_word(code, kind, destination);
+        }
+        Operation::ReadExtendByteToWord {
+            kind,
+            destination,
+            address,
+        } => {
+            memory::load_narrow_value(code, address, SmallWidth::Byte, imports, exit_depth);
+            extend_byte_to_word(code, kind, destination);
+        }
         Operation::Extend {
             kind,
             destination,
@@ -2520,6 +2536,22 @@ fn dword_string_pointer(code: &mut InstructionSink<'_>, pointer: Register32) {
         .select()
         .i32_add()
         .local_set(register(pointer));
+}
+
+fn extend_byte_to_word(
+    code: &mut InstructionSink<'_>,
+    kind: ExtensionKind,
+    destination: Register32,
+) {
+    if kind == ExtensionKind::Sign {
+        extend_value(code, kind, SmallWidth::Byte);
+        code.i32_const(0xffff).i32_and();
+    }
+    code.local_get(register(destination))
+        .i32_const(!0xffff)
+        .i32_and()
+        .i32_or()
+        .local_set(register(destination));
 }
 
 fn extend_value(code: &mut InstructionSink<'_>, kind: ExtensionKind, width: SmallWidth) {

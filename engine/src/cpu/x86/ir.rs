@@ -447,6 +447,16 @@ pub enum Operation {
         address: EffectiveAddress,
         source: WordValue,
     },
+    ExtendByteToWord {
+        kind: ExtensionKind,
+        destination: Register32,
+        source: ByteRegister,
+    },
+    ReadExtendByteToWord {
+        kind: ExtensionKind,
+        destination: Register32,
+        address: EffectiveAddress,
+    },
     Extend {
         kind: ExtensionKind,
         destination: Register32,

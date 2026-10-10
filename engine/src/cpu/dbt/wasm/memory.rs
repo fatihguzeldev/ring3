@@ -61,6 +61,7 @@ impl Imports {
                     store16 = true;
                 }
                 Operation::LoadByte { .. }
+                | Operation::ReadExtendByteToWord { .. }
                 | Operation::LoadStringByte
                 | Operation::TranslateByte
                 | Operation::CompareStringByte

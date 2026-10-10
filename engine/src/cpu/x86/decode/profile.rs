@@ -71,6 +71,11 @@ pub(super) fn check_profile(instruction: &Instruction, bytes: &[u8]) -> Result<(
         (Code::Xchg_r16_AX, [0x66, 0x91..=0x97]) | (Code::Nopw, [0x66, 0x90]) => true,
         _ => false,
     };
+    let exact_word_byte_extend = matches!(
+        (instruction.code(), bytes),
+        (Code::Movzx_r16_rm8, [0x66, 0x0f, 0xb6, _, ..])
+            | (Code::Movsx_r16_rm8, [0x66, 0x0f, 0xbe, _, ..])
+    );
     let exact_word_move = match (instruction.code(), bytes) {
         (Code::Mov_rm16_r16, [0x66, 0x89, modrm, ..])
         | (Code::Mov_r16_rm16, [0x66, 0x8b, modrm, ..])
@@ -402,6 +407,7 @@ pub(super) fn check_profile(instruction: &Instruction, bytes: &[u8]) -> Result<(
         || (!(exact_word_string
             || exact_word_accumulator_extend
             || exact_word_exchange
+            || exact_word_byte_extend
             || exact_word_move
             || exact_word_predicate
             || exact_word_arithmetic

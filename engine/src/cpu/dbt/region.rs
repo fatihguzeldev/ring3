@@ -331,6 +331,7 @@ fn supports_memory_reads(operation: &Operation) -> bool {
     matches!(
         operation,
         Operation::LoadByte { .. }
+            | Operation::ReadExtendByteToWord { .. }
             | Operation::LoadWord { .. }
             | Operation::MemoryCompareWord { .. }
             | Operation::ReadCompareWord { .. }
@@ -585,6 +586,7 @@ pub(super) fn supports(instruction: &DecodedInstruction, embedded: bool) -> bool
                     source: Value32::Register(_) | Value32::Immediate(_),
                 }
                 | Operation::Lea { .. }
+                | Operation::ExtendByteToWord { .. }
                 | Operation::Extend {
                     source: SmallSource::Register { .. },
                     ..

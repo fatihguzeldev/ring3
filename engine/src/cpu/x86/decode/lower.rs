@@ -351,6 +351,27 @@ pub(super) fn lower(instruction: &Instruction, bytes: &[u8]) -> Result<Operation
             },
         }),
         Code::Cdq => Ok(Operation::SignExtendHigh),
+        Code::Movzx_r16_rm8 | Code::Movsx_r16_rm8 => {
+            let kind = if instruction.code() == Code::Movzx_r16_rm8 {
+                ExtensionKind::Zero
+            } else {
+                ExtensionKind::Sign
+            };
+            let destination = word_register(instruction.op0_register())?;
+            match instruction.op1_kind() {
+                OpKind::Register => Ok(Operation::ExtendByteToWord {
+                    kind,
+                    destination,
+                    source: byte_register(instruction.op1_register())?,
+                }),
+                OpKind::Memory => Ok(Operation::ReadExtendByteToWord {
+                    kind,
+                    destination,
+                    address: effective_address(instruction)?,
+                }),
+                _ => Err(unsupported()),
+            }
+        }
         Code::Movzx_r32_rm8 | Code::Movsx_r32_rm8 | Code::Movzx_r32_rm16 | Code::Movsx_r32_rm16 => {
             let kind = match instruction.code() {
                 Code::Movzx_r32_rm8 | Code::Movzx_r32_rm16 => ExtensionKind::Zero,
