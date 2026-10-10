@@ -2243,6 +2243,38 @@ pub(super) fn instruction(
         Operation::PopAllWord => {
             memory::pop_all(code, true, imports, exit_depth);
         }
+        Operation::EnterZero => {
+            memory::store(
+                code,
+                EffectiveAddress {
+                    base: Some(Register32::Esp),
+                    index: None,
+                    scale: 1,
+                    displacement: (-4_i32) as u32,
+                },
+                Value32::Register(Register32::Ebp),
+                imports,
+                exit_depth,
+            );
+            code.local_get(ADDRESS)
+                .local_tee(register(Register32::Esp))
+                .local_set(register(Register32::Ebp));
+            store = true;
+        }
+        Operation::EnterZeroWord => {
+            word_value(code, WordValue::Register(Register32::Ebp));
+            code.local_set(RESULT);
+            memory::push_word_result(code, imports, exit_depth);
+            code.local_get(register(Register32::Ebp))
+                .i32_const(!0xffff)
+                .i32_and()
+                .local_get(register(Register32::Esp))
+                .i32_const(0xffff)
+                .i32_and()
+                .i32_or()
+                .local_set(register(Register32::Ebp));
+            store = true;
+        }
         Operation::Leave => {
             memory::load_result(
                 code,

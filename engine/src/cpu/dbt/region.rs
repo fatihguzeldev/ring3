@@ -304,6 +304,8 @@ fn supports_stack_values(operation: &Operation) -> bool {
             | Operation::PopMemoryWord { .. }
             | Operation::PopAll
             | Operation::PopAllWord
+            | Operation::EnterZero
+            | Operation::EnterZeroWord
             | Operation::Leave
             | Operation::LeaveWord
     )

@@ -99,6 +99,8 @@ pub(super) fn lower(instruction: &Instruction) -> Result<Operation, DecodeError>
         },
         Code::Popad => Operation::PopAll,
         Code::Popaw => Operation::PopAllWord,
+        Code::Enterd_imm16_imm8 => Operation::EnterZero,
+        Code::Enterw_imm16_imm8 => Operation::EnterZeroWord,
         Code::Leaved => Operation::Leave,
         Code::Leavew => Operation::LeaveWord,
         Code::Retnd => Operation::Return { stack_adjust: 0 },

@@ -214,8 +214,8 @@ fn word_frame_flags_prefixes_lock_and_closed_stack_neighbors_stay_precise() {
     for bytes in [
         &[0x9d][..],
         &[0x66, 0x9d],
-        &[0xc8, 0, 0, 0],
-        &[0x66, 0xc8, 0, 0, 0],
+        &[0xc8, 1, 0, 0],
+        &[0x66, 0xc8, 1, 0, 0],
         &[0x66, 0x60],
     ] {
         assert_eq!(

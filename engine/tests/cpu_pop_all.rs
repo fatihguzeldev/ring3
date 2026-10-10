@@ -212,8 +212,8 @@ fn pop_all_prefixes_lock_segments_and_unopened_neighbors_stay_precise() {
         &[0x66, 0x60],
         &[0x9d],
         &[0x66, 0x9d],
-        &[0xc8, 0, 0, 0],
-        &[0x66, 0xc8, 0, 0, 0],
+        &[0xc8, 1, 0, 0],
+        &[0x66, 0xc8, 1, 0, 0],
     ] {
         assert_eq!(
             decode_one(&code_space(CODE, bytes), GuestAddress(CODE)).err(),

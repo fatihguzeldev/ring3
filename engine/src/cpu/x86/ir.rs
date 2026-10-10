@@ -866,6 +866,8 @@ pub enum Operation {
     },
     PopAll,
     PopAllWord,
+    EnterZero,
+    EnterZeroWord,
     Leave,
     LeaveWord,
     Return {

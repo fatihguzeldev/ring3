@@ -61,6 +61,7 @@ impl Imports {
                 | Operation::CallWord { .. }
                 | Operation::CallRegisterWord { .. }
                 | Operation::PushFlagsWord
+                | Operation::EnterZeroWord
                 | Operation::StoreStringWord => {
                     store16 = true;
                 }
@@ -224,6 +225,7 @@ impl Imports {
                 }
                 | Operation::Call { .. }
                 | Operation::Push { .. }
+                | Operation::EnterZero
                 | Operation::PushFlags => store = true,
                 _ => {}
             }

@@ -272,7 +272,7 @@ fn standalone_and_prefixed_or_adjacent_forms_keep_explicit_refusals() {
         (vec![0xf2, 0xc9], opcode),
         (vec![0xf3, 0xc9], opcode),
         (vec![0xf0, 0xc9], DecodeError::InvalidEncoding),
-        (vec![0xc8, 0, 0, 0], opcode),
+        (vec![0xc8, 1, 0, 0], opcode),
         (vec![0xcb], opcode),
         (vec![0xca, 0, 0], opcode),
     ];
@@ -333,7 +333,7 @@ fn publication(engine: &EngineInstance, id: u64) -> Publication {
 fn late_refusal_and_missing_next_instruction_preserve_both_published_owners() {
     for (pc, bytes) in [
         (CODE, &[0xc9, 0x66, 0x66, 0xc9][..]),
-        (CODE, &[0xc9, 0xc8, 0, 0, 0][..]),
+        (CODE, &[0xc9, 0xc8, 1, 0, 0][..]),
         (0x1fff, &[0xc9][..]),
     ] {
         for owner in [Owner::Replacement, Owner::Resident] {

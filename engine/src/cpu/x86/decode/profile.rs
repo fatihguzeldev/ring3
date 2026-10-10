@@ -126,6 +126,18 @@ pub(super) fn check_profile(instruction: &Instruction, bytes: &[u8]) -> Result<(
         (Code::Pop_rm16, [0x66, 0x8f, modrm, ..]) => *modrm & 0x38 == 0,
         _ => false,
     };
+    let exact_enter_zero = matches!(
+        (instruction.code(), bytes),
+        (Code::Enterd_imm16_imm8, [0xc8, 0, 0, 0])
+            | (Code::Enterw_imm16_imm8, [0x66, 0xc8, 0, 0, 0])
+    );
+    if matches!(
+        instruction.code(),
+        Code::Enterd_imm16_imm8 | Code::Enterw_imm16_imm8
+    ) && !exact_enter_zero
+    {
+        return Err(unsupported());
+    }
     let exact_word_move = match (instruction.code(), bytes) {
         (Code::Mov_AX_moffs16, [0x66, 0xa1, _, _, _, _])
         | (Code::Mov_moffs16_AX, [0x66, 0xa3, _, _, _, _]) => true,
@@ -465,6 +477,7 @@ pub(super) fn check_profile(instruction: &Instruction, bytes: &[u8]) -> Result<(
             || exact_word_indirect_jump
             || exact_word_indirect_call
             || exact_word_stack
+            || exact_enter_zero
             || exact_word_move
             || exact_word_predicate
             || exact_word_arithmetic
