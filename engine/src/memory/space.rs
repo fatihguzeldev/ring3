@@ -17,6 +17,10 @@ impl AddressSpace {
         self.identity
     }
 
+    pub(crate) fn mutation_version(&self) -> u64 {
+        self.version
+    }
+
     pub fn snapshot_code(
         &self,
         address: GuestAddress,

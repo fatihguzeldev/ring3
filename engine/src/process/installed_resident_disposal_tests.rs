@@ -516,12 +516,10 @@ fn observe(
                 )
             }),
             replacement: engine.artifact.as_ref().map(|artifact| {
-                (
-                    format!("{artifact:?}"),
-                    memory
-                        .and_then(|memory| artifact.wasm_bytes(memory).ok())
-                        .map(owned),
-                )
+                let bytes = memory
+                    .and_then(|memory| artifact.wasm_bytes(memory).ok())
+                    .map(owned);
+                (format!("{artifact:?}"), bytes)
             }),
             dispatcher: engine.dispatcher.as_deref().map(owned),
             pages: memory.map_or_else(Vec::new, |memory| {

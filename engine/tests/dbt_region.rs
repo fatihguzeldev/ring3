@@ -1,5 +1,6 @@
 use ring3_engine::cpu::dbt::{
-    BlockSpec, CompileError, CompileLimits, InstructionError, prepare_entry_region, prepare_region,
+    BlockSpec, CompileError, CompileLimits, CompiledRegion, InstructionError, PreparedRegion,
+    prepare_entry_region, prepare_region,
 };
 use ring3_engine::cpu::x86::decode::DecodeError;
 use ring3_engine::memory::{
@@ -410,6 +411,45 @@ fn unrelated_page_changes_preserve_plan_but_cross_space_identity_does_not() {
     memory.protect(range(0x8000, 1), Permissions::READ).unwrap();
     memory.unmap(range(0x8000, 1)).unwrap();
     assert!(prepared.is_current(&memory));
+}
+
+#[test]
+fn prepared_and_compiled_regions_remain_send_and_sync() {
+    fn assert_send_sync<T: Send + Sync>() {}
+    assert_send_sync::<PreparedRegion>();
+    assert_send_sync::<CompiledRegion>();
+}
+
+#[test]
+fn warmed_explicit_and_cold_plans_keep_memory_identity_and_code_versions() {
+    for cold in [false, true] {
+        let mut memory = code_memory(0x1000, &[0x90, 0xeb, 0xfe]);
+        let mut other = code_memory(0x1000, &[0x90, 0xeb, 0xfe]);
+        for space in [&mut memory, &mut other] {
+            space
+                .map_zeroed(range(0x8000, 1), Permissions::ALL)
+                .unwrap();
+            space.write(GuestAddress(0x8000), &[0]).unwrap();
+        }
+        let prepared = if cold {
+            prepare_entry_region(&memory, &[GuestAddress(0x1000)], CompileLimits::default())
+        } else {
+            prepare_region(&memory, &[spec(0x1000, 3)], CompileLimits::default())
+        }
+        .unwrap();
+        assert!(prepared.is_current(&memory));
+        assert!(!prepared.is_current(&other));
+        assert!(prepared.is_current(&memory));
+
+        memory.write(GuestAddress(0x8000), &[1]).unwrap();
+        assert!(prepared.is_current(&memory));
+        assert!(prepared.is_current(&memory));
+
+        memory.write(GuestAddress(0x1000), &[0x90]).unwrap();
+        for _ in 0..2 {
+            assert!(!prepared.is_current(&memory));
+        }
+    }
 }
 
 #[test]

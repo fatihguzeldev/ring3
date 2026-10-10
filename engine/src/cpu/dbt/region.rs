@@ -1,3 +1,5 @@
+use std::sync::atomic::{AtomicU64, Ordering};
+
 use crate::{
     cpu::x86::{
         decode::{DecodeError, DecodedInstruction, decode_one},
@@ -61,6 +63,8 @@ pub enum InstructionError {
 #[derive(Debug)]
 pub struct PreparedRegion {
     pub(super) blocks: Vec<CompiledBlock>,
+    memory_identity: u64,
+    validated_version: AtomicU64,
 }
 
 #[derive(Clone, Copy)]
@@ -78,14 +82,34 @@ pub(super) struct CompiledBlock {
 }
 
 impl PreparedRegion {
+    pub(super) fn new(memory: &AddressSpace, blocks: Vec<CompiledBlock>) -> Self {
+        Self {
+            blocks,
+            memory_identity: memory.identity(),
+            validated_version: AtomicU64::new(0),
+        }
+    }
+
     pub fn is_current(&self, memory: &AddressSpace) -> bool {
-        self.blocks.iter().all(|block| match &block.gate {
+        if memory.identity() != self.memory_identity {
+            return false;
+        }
+        let version = memory.mutation_version();
+        // every mapping, permission or content mutation advances the address-space version.
+        if self.validated_version.load(Ordering::Relaxed) == version {
+            return true;
+        }
+        let current = self.blocks.iter().all(|block| match &block.gate {
             Some(gate) => gate.is_current(memory),
             None => block
                 .code_snapshot
                 .as_ref()
                 .is_some_and(|snapshot| memory.is_code_current(snapshot)),
-        })
+        });
+        if current {
+            self.validated_version.store(version, Ordering::Relaxed);
+        }
+        current
     }
 
     pub fn block_count(&self) -> usize {
@@ -207,7 +231,7 @@ fn prepare(
         });
     }
 
-    Ok(PreparedRegion { blocks })
+    Ok(PreparedRegion::new(memory, blocks))
 }
 
 pub(super) fn validate_limits(limits: CompileLimits) -> Result<(), CompileError> {

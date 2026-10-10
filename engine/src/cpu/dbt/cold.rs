@@ -128,7 +128,7 @@ fn prepare(
         });
     }
     region::validate_blocks(specs, limits.blocks)?;
-    Ok(PreparedRegion { blocks })
+    Ok(PreparedRegion::new(memory, blocks))
 }
 
 #[cfg(test)]

@@ -1,5 +1,5 @@
 use ring3_engine::cpu::UnsupportedFeature;
-use ring3_engine::cpu::dbt::{CompileError, InstructionError};
+use ring3_engine::cpu::dbt::{CompileError, InstructionError, RegistryError};
 use ring3_engine::cpu::x86::decode::DecodeError;
 use ring3_engine::memory::{Access, FaultReason, GuestAddress, MemoryFault};
 use ring3_engine::process::{EngineInstance, HostError};
@@ -323,6 +323,43 @@ fn gate_snapshots_include_both_marker_pages_and_exclude_unrelated_data() {
             }
             assert_eq!(engine.guard(KEY, 1), Err(HostError::CodeInvalidated));
             assert_eq!(engine.artifact_bytes(), Err(HostError::CodeInvalidated));
+        }
+    }
+}
+
+#[test]
+fn warmed_gate_only_replacement_and_resident_stay_stale_after_same_byte_write() {
+    for resident in [false, true] {
+        let mut engine = with_code(0x1000, &[0x0f, 0x0b]);
+        describe(&mut engine, &[(0x1000, 2)], &[(0x1000, 17)]);
+        let id = if resident {
+            engine.compile_resident_with_gates(1, 1).unwrap().get()
+        } else {
+            u64::from(engine.compile_with_gates(1, 1).unwrap())
+        };
+        for _ in 0..2 {
+            if resident {
+                engine.guard_resident(KEY, id).unwrap();
+                assert!(engine.resident_bytes(id).is_ok());
+            } else {
+                engine.guard(KEY, id as u32).unwrap();
+                assert!(engine.artifact_bytes().is_ok());
+            }
+        }
+
+        engine.write8(0x1000, 0x0f).unwrap();
+        for _ in 0..2 {
+            if resident {
+                let error = HostError::Resident(RegistryError::CodeInvalidated);
+                assert_eq!(engine.guard_resident(KEY, id), Err(error));
+                assert_eq!(engine.resident_bytes(id), Err(error));
+            } else {
+                assert_eq!(
+                    engine.guard(KEY, id as u32),
+                    Err(HostError::CodeInvalidated)
+                );
+                assert_eq!(engine.artifact_bytes(), Err(HostError::CodeInvalidated));
+            }
         }
     }
 }

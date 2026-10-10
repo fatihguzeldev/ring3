@@ -6,7 +6,7 @@ use std::{
 };
 
 use ring3_engine::cpu::dbt::{
-    ArtifactError, BlockSpec, CompileError, CompileLimits, compile_region,
+    ArtifactError, BlockSpec, CompileError, CompileLimits, compile_entry_region, compile_region,
 };
 use ring3_engine::memory::{AddressSpace, GuestAddress, PageRange, Permissions};
 
@@ -107,6 +107,44 @@ fn unrelated_guest_page_changes_preserve_generated_byte_access() {
     memory.protect(range(0x8000, 1), Permissions::READ).unwrap();
     memory.unmap(range(0x8000, 1)).unwrap();
     assert_eq!(compiled.wasm_bytes(&memory).unwrap(), original);
+}
+
+#[test]
+fn warmed_explicit_and_cold_artifacts_keep_memory_identity_and_code_versions() {
+    for cold in [false, true] {
+        let mut memory = memory_with_code(0x1000, &[0x90, 0xeb, 0xfe]);
+        let mut other = memory_with_code(0x1000, &[0x90, 0xeb, 0xfe]);
+        for space in [&mut memory, &mut other] {
+            space
+                .map_zeroed(range(0x8000, 1), Permissions::ALL)
+                .unwrap();
+            space.write(GuestAddress(0x8000), &[0]).unwrap();
+        }
+        let compiled = if cold {
+            compile_entry_region(&memory, &[GuestAddress(0x1000)], CompileLimits::default())
+        } else {
+            compile_region(&memory, &[block(0x1000, 3)], CompileLimits::default())
+        }
+        .unwrap();
+        let original = compiled.wasm_bytes(&memory).unwrap().to_vec();
+        assert!(matches!(
+            compiled.wasm_bytes(&other),
+            Err(ArtifactError::CodeInvalidated)
+        ));
+        assert_eq!(compiled.wasm_bytes(&memory).unwrap(), original);
+
+        memory.write(GuestAddress(0x8000), &[1]).unwrap();
+        assert_eq!(compiled.wasm_bytes(&memory).unwrap(), original);
+        assert_eq!(compiled.wasm_bytes(&memory).unwrap(), original);
+
+        memory.write(GuestAddress(0x1000), &[0x90]).unwrap();
+        for _ in 0..2 {
+            assert!(matches!(
+                compiled.wasm_bytes(&memory),
+                Err(ArtifactError::CodeInvalidated)
+            ));
+        }
+    }
 }
 
 #[test]
