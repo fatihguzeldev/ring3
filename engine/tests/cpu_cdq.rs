@@ -146,7 +146,12 @@ fn strict_prefixes_and_single_byte_fetch_preserve_fault_and_wrap_boundaries() {
     for prefix in [
         0x66, 0x67, 0xf2, 0xf3, 0x26, 0x2e, 0x36, 0x3e, 0x64, 0x65, 0xf0,
     ] {
-        let engine = code(CODE, &[prefix, 0x99]);
+        let bytes = if prefix == 0x66 {
+            vec![0x66, 0x66, 0x99]
+        } else {
+            vec![prefix, 0x99]
+        };
+        let engine = code(CODE, &bytes);
         let expected = match prefix {
             0xf0 => DecodeError::InvalidEncoding,
             0x26 | 0x2e | 0x36 | 0x3e | 0x64 | 0x65 => {
@@ -223,8 +228,8 @@ fn late_cdq_failures_preserve_replacement_and_resident_publications() {
         ),
         (
             CODE,
-            &[0x99, 0x66, 0x99][..],
-            3,
+            &[0x99, 0x66, 0x66, 0x99][..],
+            4,
             instruction_error(CODE + 1, opcode),
         ),
         (

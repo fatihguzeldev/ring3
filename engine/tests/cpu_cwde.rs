@@ -198,11 +198,11 @@ fn strict_prefixes_adjacent_forms_and_one_byte_fetch_boundaries_keep_categories(
     let segment = DecodeError::Unsupported(UnsupportedFeature::Segment);
     let mut refusals = 0;
     for (bytes, error) in [
-        (&[0x66, 0x98][..], opcode),
+        (&[0x66, 0x66, 0x98][..], opcode),
         (&[0x67, 0x98][..], opcode),
         (&[0xf2, 0x98][..], opcode),
         (&[0xf3, 0x98][..], opcode),
-        (&[0x66, 0x99][..], opcode),
+        (&[0x66, 0x66, 0x99][..], opcode),
         (&[0x26, 0x98][..], segment),
         (&[0x2e, 0x98][..], segment),
         (&[0x36, 0x98][..], segment),
