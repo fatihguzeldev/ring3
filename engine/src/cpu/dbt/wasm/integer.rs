@@ -1333,6 +1333,41 @@ pub(super) fn instruction(
                 .local_set(register(Register32::Eax))
                 .end();
         }
+        Operation::MemoryCompareExchangeWord { address, source } => {
+            memory::load_narrow_value(code, address, SmallWidth::Word, imports, exit_depth);
+            code.local_set(RHS);
+            word_value(code, WordValue::Register(Register32::Eax));
+            code.local_set(LHS);
+            word_value(code, WordValue::Register(source));
+            code.local_get(RHS)
+                .local_get(LHS)
+                .local_get(RHS)
+                .i32_eq()
+                .select()
+                .local_set(RESULT)
+                .local_get(LHS)
+                .local_get(RHS);
+            memory::store_word_result(code, address, imports, exit_depth);
+            code.local_set(RHS)
+                .local_set(LHS)
+                .local_get(LHS)
+                .local_get(RHS)
+                .i32_sub()
+                .i32_const(0xffff)
+                .i32_and()
+                .local_set(RESULT);
+            arithmetic_flags(code, BinaryKind::Cmp, CarryFlag::Calculate, 15);
+            code.local_get(RESULT)
+                .if_(BlockType::Empty)
+                .local_get(RHS)
+                .local_get(register(Register32::Eax))
+                .i32_const(!0xffff)
+                .i32_and()
+                .i32_or()
+                .local_set(register(Register32::Eax))
+                .end();
+            store = true;
+        }
         Operation::MemoryCompareExchange { address, source } => {
             memory::load_result(code, address, imports, exit_depth);
             code.local_get(register(Register32::Eax))

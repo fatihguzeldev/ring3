@@ -312,6 +312,9 @@ pub(super) fn check_profile(instruction: &Instruction, bytes: &[u8]) -> Result<(
     let exact_word_cmpxchg = matches!(
         (instruction.code(), bytes),
         (Code::Cmpxchg_rm16_r16, [0x66, 0x0f, 0xb1, modrm]) if *modrm & 0xc0 == 0xc0
+    ) || matches!(
+        (instruction.code(), bytes),
+        (Code::Cmpxchg_rm16_r16, [0x66, 0x0f, 0xb1, modrm, ..]) if *modrm & 0xc0 != 0xc0
     );
     let exact_word_conditional_move = matches!(
         (instruction.code(), bytes),

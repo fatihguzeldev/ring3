@@ -109,6 +109,7 @@ impl Imports {
                 | Operation::MemoryRotateWord { .. }
                 | Operation::MemoryRotateThroughCarryWord { .. }
                 | Operation::MemoryExchangeAddWord { .. }
+                | Operation::MemoryCompareExchangeWord { .. }
                 | Operation::MemoryArithmeticWord { .. }
                 | Operation::MemoryLogicalWord { .. } => {
                     read16 = true;
