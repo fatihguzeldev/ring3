@@ -190,7 +190,7 @@ fn exact_prefix_neighbors_and_both_standalone_profiles_stay_refused() {
         &[0x67, 0xa5],
         &[0x66, 0xa4],
         &[0x66, 0xaa],
-        &[0x66, 0x90],
+        &[0x66, 0x66, 0x90],
     ] {
         assert_eq!(
             decode_one(&memory(PC, bytes), GuestAddress(PC)).unwrap_err(),
