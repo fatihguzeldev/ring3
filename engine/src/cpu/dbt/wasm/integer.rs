@@ -1664,6 +1664,11 @@ pub(super) fn instruction(
             destination,
             index,
         } => bit_test(code, kind, destination, index),
+        Operation::BitTestWord {
+            kind,
+            destination,
+            index,
+        } => bit_test_word(code, kind, destination, index),
         Operation::MemoryBitMutation {
             kind,
             address,
@@ -4677,6 +4682,52 @@ fn bit_test(
         }
     }
     code.i32_const(31)
+        .i32_and()
+        .local_set(RHS)
+        .local_get(FLAGS)
+        .i32_const(0x442)
+        .i32_and()
+        .local_get(LHS)
+        .local_get(RHS)
+        .i32_shr_u()
+        .i32_const(1)
+        .i32_and()
+        .i32_or()
+        .local_set(FLAGS);
+    if kind != BitTestKind::Test {
+        code.local_get(LHS).i32_const(1).local_get(RHS).i32_shl();
+        match kind {
+            BitTestKind::Set => {
+                code.i32_or();
+            }
+            BitTestKind::Reset => {
+                code.i32_const(-1).i32_xor().i32_and();
+            }
+            BitTestKind::Complement => {
+                code.i32_xor();
+            }
+            BitTestKind::Test => unreachable!(),
+        }
+        code.local_set(register(destination));
+    }
+}
+
+fn bit_test_word(
+    code: &mut InstructionSink<'_>,
+    kind: BitTestKind,
+    destination: Register32,
+    index: BitIndex,
+) {
+    code.local_get(register(destination)).local_set(LHS);
+    match index {
+        BitIndex::Register(source) => {
+            code.local_get(register(source));
+        }
+        BitIndex::Immediate(raw) => {
+            code.i32_const(i32::from(raw));
+        }
+    }
+    code.i32_const(15)
         .i32_and()
         .local_set(RHS)
         .local_get(FLAGS)

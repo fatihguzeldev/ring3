@@ -762,6 +762,11 @@ pub enum Operation {
         destination: Register32,
         index: BitIndex,
     },
+    BitTestWord {
+        kind: BitTestKind,
+        destination: Register32,
+        index: BitIndex,
+    },
     ReadBitTest {
         address: EffectiveAddress,
         index: BitIndex,

@@ -565,6 +565,7 @@ pub(super) fn supports(instruction: &DecodedInstruction, embedded: bool) -> bool
                 | Operation::BitScan { .. }
                 | Operation::BitScanWord { .. }
                 | Operation::BitTest { .. }
+                | Operation::BitTestWord { .. }
                 | Operation::ByteSwap { .. }
                 | Operation::Exchange { .. }
                 | Operation::ExchangeAdd { .. }

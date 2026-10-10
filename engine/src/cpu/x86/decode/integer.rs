@@ -227,7 +227,8 @@ pub(super) fn lower(instruction: &Instruction) -> Option<Result<Operation, Decod
                 .or_else(|| lower_unary(instruction))
                 .or_else(|| lower_bit_scan(instruction))
                 .or_else(|| lower_word_bit_scan(instruction))
-                .or_else(|| lower_bit_test(instruction));
+                .or_else(|| lower_bit_test(instruction))
+                .or_else(|| lower_word_bit_test(instruction));
         }
     };
     Some(binary(instruction, kind))
@@ -945,6 +946,35 @@ fn lower_bit_test(instruction: &Instruction) -> Option<Result<Operation, DecodeE
         Ok(Operation::BitTest {
             kind,
             destination: register(instruction.op0_register())?,
+            index,
+        })
+    })())
+}
+
+fn lower_word_bit_test(instruction: &Instruction) -> Option<Result<Operation, DecodeError>> {
+    let (kind, immediate) = match instruction.code() {
+        Code::Bt_rm16_r16 => (BitTestKind::Test, false),
+        Code::Bts_rm16_r16 => (BitTestKind::Set, false),
+        Code::Btr_rm16_r16 => (BitTestKind::Reset, false),
+        Code::Btc_rm16_r16 => (BitTestKind::Complement, false),
+        Code::Bt_rm16_imm8 => (BitTestKind::Test, true),
+        Code::Bts_rm16_imm8 => (BitTestKind::Set, true),
+        Code::Btr_rm16_imm8 => (BitTestKind::Reset, true),
+        Code::Btc_rm16_imm8 => (BitTestKind::Complement, true),
+        _ => return None,
+    };
+    Some((|| {
+        if instruction.op0_kind() != OpKind::Register {
+            return Err(unsupported());
+        }
+        let index = if immediate {
+            BitIndex::Immediate(instruction.immediate8())
+        } else {
+            BitIndex::Register(word_register(instruction.op1_register())?)
+        };
+        Ok(Operation::BitTestWord {
+            kind,
+            destination: word_register(instruction.op0_register())?,
             index,
         })
     })())
