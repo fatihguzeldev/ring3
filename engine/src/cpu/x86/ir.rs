@@ -532,6 +532,10 @@ pub enum Operation {
         destination: Register32,
         address: EffectiveAddress,
     },
+    LeaWord {
+        destination: Register32,
+        address: EffectiveAddress,
+    },
     Binary {
         kind: BinaryKind,
         destination: Location32,

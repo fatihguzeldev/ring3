@@ -586,6 +586,7 @@ pub(super) fn supports(instruction: &DecodedInstruction, embedded: bool) -> bool
                     source: Value32::Register(_) | Value32::Immediate(_),
                 }
                 | Operation::Lea { .. }
+                | Operation::LeaWord { .. }
                 | Operation::ExtendByteToWord { .. }
                 | Operation::Extend {
                     source: SmallSource::Register { .. },

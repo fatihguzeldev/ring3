@@ -1521,6 +1521,19 @@ pub(super) fn instruction(
             memory::address_value(code, address);
             code.local_set(register(destination));
         }
+        Operation::LeaWord {
+            destination,
+            address,
+        } => {
+            memory::address_value(code, address);
+            code.i32_const(0xffff)
+                .i32_and()
+                .local_get(register(destination))
+                .i32_const(!0xffff)
+                .i32_and()
+                .i32_or()
+                .local_set(register(destination));
+        }
         Operation::Binary {
             kind,
             destination,

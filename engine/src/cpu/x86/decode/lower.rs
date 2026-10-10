@@ -523,6 +523,10 @@ pub(super) fn lower(instruction: &Instruction, bytes: &[u8]) -> Result<Operation
             destination: register(instruction.op0_register())?,
             address: effective_address(instruction)?,
         }),
+        Code::Lea_r16_m => Ok(Operation::LeaWord {
+            destination: word_register(instruction.op0_register())?,
+            address: effective_address(instruction)?,
+        }),
         _ => super::integer::lower(instruction).unwrap_or_else(|| super::flow::lower(instruction)),
     }
 }

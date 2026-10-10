@@ -76,6 +76,10 @@ pub(super) fn check_profile(instruction: &Instruction, bytes: &[u8]) -> Result<(
         (Code::Movzx_r16_rm8, [0x66, 0x0f, 0xb6, _, ..])
             | (Code::Movsx_r16_rm8, [0x66, 0x0f, 0xbe, _, ..])
     );
+    let exact_word_lea = matches!(
+        (instruction.code(), bytes),
+        (Code::Lea_r16_m, [0x66, 0x8d, modrm, ..]) if *modrm & 0xc0 != 0xc0
+    );
     let exact_word_move = match (instruction.code(), bytes) {
         (Code::Mov_rm16_r16, [0x66, 0x89, modrm, ..])
         | (Code::Mov_r16_rm16, [0x66, 0x8b, modrm, ..])
@@ -408,6 +412,7 @@ pub(super) fn check_profile(instruction: &Instruction, bytes: &[u8]) -> Result<(
             || exact_word_accumulator_extend
             || exact_word_exchange
             || exact_word_byte_extend
+            || exact_word_lea
             || exact_word_move
             || exact_word_predicate
             || exact_word_arithmetic
