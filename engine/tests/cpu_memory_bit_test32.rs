@@ -309,7 +309,11 @@ fn strict_neighbors_and_fetch_boundaries_keep_exact_categories() {
         for prefix in [
             0x66, 0x67, 0xf2, 0xf3, 0x26, 0x2e, 0x36, 0x3e, 0x64, 0x65, 0xf0,
         ] {
-            let mut bytes = vec![prefix];
+            let mut bytes = if prefix == 0x66 {
+                vec![0x66, 0x66]
+            } else {
+                vec![prefix]
+            };
             bytes.extend(encoded(index, &[0x03]));
             let wanted = match prefix {
                 0xf0 => DecodeError::InvalidEncoding,
@@ -346,12 +350,12 @@ fn strict_neighbors_and_fetch_boundaries_keep_exact_categories() {
         }
     }
     for bytes in [
-        &[0x66, 0x0f, 0xab, 0x0b][..],
-        &[0x66, 0x0f, 0xb3, 0x0b],
-        &[0x66, 0x0f, 0xbb, 0x0b],
-        &[0x66, 0x0f, 0xba, 0x2b, 255],
-        &[0x66, 0x0f, 0xba, 0x33, 255],
-        &[0x66, 0x0f, 0xba, 0x3b, 255],
+        &[0x66, 0x66, 0x0f, 0xab, 0x0b][..],
+        &[0x66, 0x66, 0x0f, 0xb3, 0x0b],
+        &[0x66, 0x66, 0x0f, 0xbb, 0x0b],
+        &[0x66, 0x66, 0x0f, 0xba, 0x2b, 255],
+        &[0x66, 0x66, 0x0f, 0xba, 0x33, 255],
+        &[0x66, 0x66, 0x0f, 0xba, 0x3b, 255],
     ] {
         assert_eq!(
             decode_one(fixture(CODE, bytes).memory().unwrap(), GuestAddress(CODE)).err(),
@@ -442,7 +446,7 @@ fn data_currency_late_refusals_and_caps_preserve_all_publications() {
             ] {
                 let form = encoded(index, &[0x03]);
                 for tail in [vec![0x0f, 0x0b], {
-                    let mut t = vec![0x66];
+                    let mut t = vec![0x66, 0x66];
                     t.extend_from_slice(&form);
                     t
                 }] {

@@ -413,6 +413,7 @@ fn exclusions() -> Vec<(Vec<u8>, DecodeError)> {
                     memory.push(255);
                 }
                 memory.insert(0, 0x66);
+                memory.insert(0, 0x66);
                 cases.push((memory, opcode));
             }
             let mut locked = vec![

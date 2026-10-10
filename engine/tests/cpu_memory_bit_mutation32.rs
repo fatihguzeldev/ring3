@@ -300,7 +300,11 @@ fn strict_neighbors_fetch_wrap_and_source_currency_are_exact() {
             for prefix in [
                 0x66, 0x67, 0xf0, 0xf2, 0xf3, 0x26, 0x2e, 0x36, 0x3e, 0x64, 0x65,
             ] {
-                let mut bytes = vec![prefix];
+                let mut bytes = if prefix == 0x66 {
+                    vec![0x66, 0x66]
+                } else {
+                    vec![prefix]
+                };
                 bytes.extend(&instruction);
                 let feature = if matches!(prefix, 0x26 | 0x2e | 0x36 | 0x3e | 0x64 | 0x65) {
                     UnsupportedFeature::Segment
@@ -404,7 +408,7 @@ fn caps_and_late_failures_preserve_bound_owners_and_full_arena() {
                     let first = encoded(kind, index, &[0x03]);
                     let late = CODE + first.len() as u32;
                     let mut bytes = first.clone();
-                    bytes.push(0x66);
+                    bytes.extend([0x66, 0x66]);
                     bytes.extend(first);
                     upload(&mut engine, CODE, &bytes);
                     descriptor(&mut engine, CODE, bytes.len(), entries);

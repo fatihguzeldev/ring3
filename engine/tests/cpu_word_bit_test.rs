@@ -276,7 +276,7 @@ fn word_bit_test_prefixes_and_reserved_ba_fields_have_precise_categories() {
 }
 
 #[test]
-fn word_bit_test_memory_forms_stay_closed_with_existing_lock_categories() {
+fn word_bit_test_duplicate_memory_prefixes_and_lock_categories_stay_precise() {
     let tails: [&[u8]; 13] = [
         &[0x00],
         &[0x02],
@@ -306,10 +306,12 @@ fn word_bit_test_memory_forms_stay_closed_with_existing_lock_categories() {
                 if immediate {
                     bytes.push(0xf3);
                 }
+                let mut duplicate = bytes.clone();
+                duplicate.insert(0, 0x66);
                 assert_eq!(
-                    decode_one(&code_space(CODE, &bytes), GuestAddress(CODE)).err(),
+                    decode_one(&code_space(CODE, &duplicate), GuestAddress(CODE)).err(),
                     Some(DecodeError::Unsupported(UnsupportedFeature::Opcode)),
-                    "{bytes:02x?}"
+                    "{duplicate:02x?}"
                 );
                 let locked = [vec![0xf0], bytes].concat();
                 assert_eq!(
