@@ -672,7 +672,12 @@ fn exclusions() -> Vec<(Vec<u8>, DecodeError)> {
                 0xf0 => DecodeError::InvalidEncoding,
                 _ => unsupported,
             };
-            cases.push(([vec![prefix], memory.clone()].concat(), expected));
+            let prefixes = if prefix == 0x66 {
+                vec![0x66, 0x66]
+            } else {
+                vec![prefix]
+            };
+            cases.push(([prefixes, memory.clone()].concat(), expected));
         }
     }
     for kind in [RotateKind::Left, RotateKind::Right] {

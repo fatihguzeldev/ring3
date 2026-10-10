@@ -450,7 +450,7 @@ fn exact_ror_prefix_fetch_top_and_consumed_source_boundaries() {
             if opcode == 0xc1 {
                 refused.push(0xff);
             }
-            if matches!(modrm, 0xd0 | 0xd8) {
+            if matches!(modrm, 0x08 | 0xd0 | 0xd8) {
                 refused.insert(0, 0x66);
             }
             assert_eq!(

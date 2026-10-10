@@ -314,7 +314,12 @@ fn excluded_forms_and_exact_operand_fetch_preserve_fault_and_wrap_boundaries() {
         for prefix in [
             0x66, 0x67, 0xf2, 0xf3, 0x26, 0x2e, 0x36, 0x3e, 0x64, 0x65, 0xf0,
         ] {
-            let bytes = [vec![prefix], encoding(kind, &[0x03])].concat();
+            let prefixes = if prefix == 0x66 {
+                vec![0x66, 0x66]
+            } else {
+                vec![prefix]
+            };
+            let bytes = [prefixes, encoding(kind, &[0x03])].concat();
             let expected = match prefix {
                 0xf0 => DecodeError::InvalidEncoding,
                 0x26 | 0x2e | 0x36 | 0x3e | 0x64 | 0x65 => {
@@ -330,13 +335,13 @@ fn excluded_forms_and_exact_operand_fetch_preserve_fault_and_wrap_boundaries() {
             vec![0x66, 0xd0, field | 3],
             vec![0x66, 0xc0, field | 3, 1],
             vec![0x66, 0xd2, field | 3],
-            vec![0x66, 0xd3, field | 3],
+            vec![0x66, 0x66, 0xd3, field | 3],
         ] {
             rejected(&bytes, opcode);
             exclusions += 1;
         }
         for count in [0, 1, 2, 255] {
-            let bytes = vec![0x66, 0xc1, field | 3, count];
+            let bytes = vec![0x66, 0x66, 0xc1, field | 3, count];
             rejected(&bytes, opcode);
             exclusions += 1;
         }
@@ -547,8 +552,8 @@ fn late_memory_rotate_failures_preserve_both_publications() {
             ),
             (
                 CODE,
-                vec![0xd1, first, 0x66, 0xd1, first ^ 8],
-                5,
+                vec![0xd1, first, 0x66, 0x66, 0xd1, first ^ 8],
+                6,
                 instruction_error(CODE + 2, opcode),
             ),
             (

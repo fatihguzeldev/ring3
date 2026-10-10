@@ -507,10 +507,7 @@ fn raw_immediate_domain_and_strict_neighbors_preserve_decode_boundaries() {
     for field in [0, 1] {
         for modrm in [0x03 | field << 3, 0xc3 | field << 3] {
             for count in COUNTS {
-                let mut word = vec![0x66, 0xc1, modrm, count];
-                if modrm & 0xc0 == 0xc0 {
-                    word.insert(0, 0x66);
-                }
+                let word = vec![0x66, 0x66, 0xc1, modrm, count];
                 rejected(&word, opcode);
                 exclusions += 1;
             }

@@ -694,7 +694,7 @@ fn exclusions() -> Vec<(Vec<u8>, DecodeError)> {
             for plain_opcode in [0xc1, 0xd3] {
                 let mut plain = instruction(plain_opcode, kind, shape, 2);
                 plain[1] &= !0x10;
-                rows.push(([vec![0x66], plain].concat(), opcode));
+                rows.push(([vec![0x66, 0x66], plain].concat(), opcode));
             }
         }
         let field = 0x10 | u8::from(kind == RotateKind::Right) << 3;
