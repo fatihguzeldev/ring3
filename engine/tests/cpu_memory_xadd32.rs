@@ -410,7 +410,11 @@ fn byte_word_and_prefix_refusals_keep_exact_categories_and_inputs() {
         } else {
             opcode
         };
-        cases.push((vec![prefix, 0x0f, 0xc1, 0x03], expected));
+        let mut bytes = vec![prefix, 0x0f, 0xc1, 0x03];
+        if prefix == 0x66 {
+            bytes.insert(0, 0x66);
+        }
+        cases.push((bytes, expected));
     }
     for (bytes, expected) in cases {
         let mut engine = code(CODE, &bytes);

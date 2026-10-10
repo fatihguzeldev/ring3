@@ -220,7 +220,9 @@ fn word_xadd_complete_memory_and_prefix_neighbors_keep_exact_error_categories() 
     let mut cases = Vec::new();
     for modrm in 0_u8..=255 {
         if modrm >> 6 < 3 {
-            cases.push((memory_encoding(modrm), opcode));
+            let mut bytes = memory_encoding(modrm);
+            bytes.insert(0, 0x66);
+            cases.push((bytes, opcode));
         }
     }
     for raw in witnesses {

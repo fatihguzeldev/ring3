@@ -408,7 +408,7 @@ fn byte_word_prefix_and_other_memory_exchange_refusals_keep_inputs_unchanged() {
     let opcode = DecodeError::Unsupported(UnsupportedFeature::Opcode);
     let mut cases = vec![
         (vec![0x66, 0x0f, 0xb0, 0x03], opcode),
-        (vec![0x66, 0x0f, 0xc1, 0x03], opcode),
+        (vec![0x66, 0x66, 0x0f, 0xc1, 0x03], opcode),
         (vec![0x86, 0x03], opcode),
     ];
     for prefix in [

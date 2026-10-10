@@ -658,7 +658,8 @@ fn full_modrm_domain_strict_categories_and_supported_neighbors_are_exact() {
         if modrm >> 6 == 3 {
             continue;
         }
-        let bytes = canonical_memory(modrm);
+        let mut bytes = canonical_memory(modrm);
+        bytes.splice(..0, [0x66, 0x66]);
         assert!(negatives.insert(bytes.clone()));
         rejected(&bytes, opcode, &mut census);
         categories[2] += 1;
