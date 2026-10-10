@@ -176,8 +176,8 @@ fn indirect_control_compiles_at_the_end_of_a_memory_stack_prefix() {
 #[test]
 fn prefixes_and_far_transfers_keep_decoder_errors_after_a_memory_stack_prefix() {
     for (instruction, feature) in [
-        (&[0x66, 0xff, 0x33][..], UnsupportedFeature::Opcode),
-        (&[0x66, 0x8f, 0x03][..], UnsupportedFeature::Opcode),
+        (&[0x66, 0x66, 0xff, 0x33][..], UnsupportedFeature::Opcode),
+        (&[0x66, 0x66, 0x8f, 0x03][..], UnsupportedFeature::Opcode),
         (&[0x67, 0xff, 0x33][..], UnsupportedFeature::Opcode),
         (&[0x67, 0x8f, 0x03][..], UnsupportedFeature::Opcode),
         (&[0x64, 0xff, 0x33][..], UnsupportedFeature::Segment),

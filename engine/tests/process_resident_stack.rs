@@ -484,6 +484,9 @@ fn span_poison_prefix_and_control_exclusions_preserve_arena_units_and_capacity()
             (0xf0, DecodeError::InvalidEncoding),
         ] {
             let mut bytes = vec![0x90, prefix];
+            if prefix == 0x66 {
+                bytes.push(0x66);
+            }
             bytes.extend_from_slice(instruction);
             bytes.extend_from_slice(&[0x0f, 0x06]);
             rejected(

@@ -287,7 +287,10 @@ fn word_memory_unary_prefixes_and_group_neighbors_keep_precise_closure() {
         );
     }
     for extension in 2..8 {
-        let bytes = instruction(0xff, extension, &[0x03]);
+        let mut bytes = instruction(0xff, extension, &[0x03]);
+        if extension == 6 {
+            bytes.insert(0, 0x66);
+        }
         assert_eq!(
             decode_one(&code_space(CODE, &bytes), GuestAddress(CODE)).err(),
             Some(if extension == 7 {

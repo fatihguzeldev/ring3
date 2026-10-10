@@ -232,8 +232,8 @@ fn memory_push_and_pop_compile_sequentially_after_a_register_stack_prefix() {
 #[test]
 fn expanded_stack_operations_keep_prefix_and_far_decoder_exclusions() {
     for instruction in [
-        &[0x66, 0x54][..],
-        &[0x66, 0x5c][..],
+        &[0x66, 0x66, 0x54][..],
+        &[0x66, 0x66, 0x5c][..],
         &[0x66, 0xc2, 4, 0][..],
         &[0x67, 0x54][..],
         &[0xf3, 0x58][..],
