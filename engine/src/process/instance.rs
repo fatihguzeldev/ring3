@@ -424,10 +424,11 @@ impl EngineInstance {
     pub fn store8(&mut self, address: u32, value: u32) -> Result<StoreCompletion, HostError> {
         self.guard(self.key, self.generation())?;
         let memory = self.memory.as_mut().ok_or(HostError::Closed)?;
+        let code_version = memory.code_validation_version();
         let result = memory.write(GuestAddress(address), &[value as u8]);
-        let succeeded = result.is_ok();
+        let code_changed = result.is_ok() && memory.code_validation_version() != code_version;
         self.write_byte_store_helper(address, result)?;
-        if succeeded {
+        if code_changed {
             match self.artifact_bytes() {
                 Ok(_) => Ok(StoreCompletion::Complete),
                 Err(HostError::CodeInvalidated) => Ok(StoreCompletion::CodeInvalidated),
@@ -447,10 +448,11 @@ impl EngineInstance {
     ) -> Result<StoreCompletion, HostError> {
         self.guard_resident(key, id)?;
         let memory = self.memory.as_mut().ok_or(HostError::Closed)?;
+        let code_version = memory.code_validation_version();
         let result = memory.write(GuestAddress(address), &[value as u8]);
-        let succeeded = result.is_ok();
+        let code_changed = result.is_ok() && memory.code_validation_version() != code_version;
         self.write_byte_store_helper(address, result)?;
-        if succeeded {
+        if code_changed {
             match self.resident_bytes(id) {
                 Ok(_) => Ok(StoreCompletion::Complete),
                 Err(HostError::Resident(RegistryError::CodeInvalidated)) => {
@@ -466,10 +468,11 @@ impl EngineInstance {
     pub fn store16(&mut self, address: u32, value: u32) -> Result<StoreCompletion, HostError> {
         self.guard(self.key, self.generation())?;
         let memory = self.memory.as_mut().ok_or(HostError::Closed)?;
+        let code_version = memory.code_validation_version();
         let result = memory.write(GuestAddress(address), &(value as u16).to_le_bytes());
-        let succeeded = result.is_ok();
+        let code_changed = result.is_ok() && memory.code_validation_version() != code_version;
         self.write_word_store_helper(address, result)?;
-        if succeeded {
+        if code_changed {
             match self.artifact_bytes() {
                 Ok(_) => Ok(StoreCompletion::Complete),
                 Err(HostError::CodeInvalidated) => Ok(StoreCompletion::CodeInvalidated),
@@ -489,10 +492,11 @@ impl EngineInstance {
     ) -> Result<StoreCompletion, HostError> {
         self.guard_resident(key, id)?;
         let memory = self.memory.as_mut().ok_or(HostError::Closed)?;
+        let code_version = memory.code_validation_version();
         let result = memory.write(GuestAddress(address), &(value as u16).to_le_bytes());
-        let succeeded = result.is_ok();
+        let code_changed = result.is_ok() && memory.code_validation_version() != code_version;
         self.write_word_store_helper(address, result)?;
-        if succeeded {
+        if code_changed {
             match self.resident_bytes(id) {
                 Ok(_) => Ok(StoreCompletion::Complete),
                 Err(HostError::Resident(RegistryError::CodeInvalidated)) => {
@@ -508,12 +512,13 @@ impl EngineInstance {
     pub fn store32(&mut self, address: u32, value: u32) -> Result<StoreCompletion, HostError> {
         self.artifact_bytes()?;
         let memory = self.memory.as_mut().ok_or(HostError::Closed)?;
+        let code_version = memory.code_validation_version();
         let result = memory
             .write(GuestAddress(address), &value.to_le_bytes())
             .map(|()| 0);
-        let succeeded = result.is_ok();
+        let code_changed = result.is_ok() && memory.code_validation_version() != code_version;
         self.write_helper(result)?;
-        if succeeded {
+        if code_changed {
             match self.artifact_bytes() {
                 Ok(_) => Ok(StoreCompletion::Complete),
                 Err(HostError::CodeInvalidated) => Ok(StoreCompletion::CodeInvalidated),
@@ -533,12 +538,13 @@ impl EngineInstance {
     ) -> Result<StoreCompletion, HostError> {
         self.guard_resident(key, id)?;
         let memory = self.memory.as_mut().ok_or(HostError::Closed)?;
+        let code_version = memory.code_validation_version();
         let result = memory
             .write(GuestAddress(address), &value.to_le_bytes())
             .map(|()| 0);
-        let succeeded = result.is_ok();
+        let code_changed = result.is_ok() && memory.code_validation_version() != code_version;
         self.write_helper(result)?;
-        if succeeded {
+        if code_changed {
             match self.resident_bytes(id) {
                 Ok(_) => Ok(StoreCompletion::Complete),
                 Err(HostError::Resident(RegistryError::CodeInvalidated)) => {
