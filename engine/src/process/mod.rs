@@ -7,6 +7,8 @@ mod callback_installation;
 mod image;
 mod image_input;
 mod installation;
+#[cfg(test)]
+mod installed_resident_disposal_tests;
 mod instance;
 mod resident;
 mod resident_callback;
