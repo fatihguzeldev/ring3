@@ -546,6 +546,15 @@ fn lower_word_rotate_through_carry(
         Code::Rcr_rm16_CL => (RotateKind::Right, ShiftCount::Cl),
         _ => return None,
     };
+    if instruction.op0_kind() == OpKind::Memory {
+        return Some(effective_address(instruction).map(|address| {
+            Operation::MemoryRotateThroughCarryWord {
+                kind,
+                address,
+                count,
+            }
+        }));
+    }
     Some(
         word_register(instruction.op0_register()).map(|destination| {
             Operation::RotateThroughCarryWord {

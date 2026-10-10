@@ -1515,6 +1515,14 @@ pub(super) fn instruction(
             destination,
             count,
         } => rotate_through_carry_word(code, kind, destination, count),
+        Operation::MemoryRotateThroughCarryWord {
+            kind,
+            address,
+            count,
+        } => {
+            rotate_through_carry_memory_word(code, kind, address, count, imports, exit_depth);
+            store = true;
+        }
         Operation::ShiftWord {
             kind,
             destination,
@@ -2674,8 +2682,53 @@ fn rotate_through_carry_word(
         .i32_const(17)
         .i32_rem_u()
         .local_tee(LHS)
-        .if_(BlockType::Empty)
+        .if_(BlockType::Empty);
+    rotate_through_carry_word_value(code, kind);
+    rotate_through_carry_word_flags(code, kind);
+    code.local_get(RESULT)
+        .i32_const(0xffff)
+        .i32_and()
+        .local_get(register(destination))
+        .i32_const(!0xffff)
+        .i32_and()
+        .i32_or()
+        .local_set(register(destination))
+        .end();
+}
+
+fn rotate_through_carry_memory_word(
+    code: &mut InstructionSink<'_>,
+    kind: RotateKind,
+    address: EffectiveAddress,
+    count: ShiftCount,
+    imports: memory::Imports,
+    exit_depth: u32,
+) {
+    memory::load_narrow_value(code, address, SmallWidth::Word, imports, exit_depth);
+    code.local_set(RESULT);
+    shift_count(code, count);
+    code.local_tee(RHS).i32_const(17).i32_rem_u().local_set(LHS);
+    rotate_through_carry_word_value(code, kind);
+    // preserve the full carry ring and original count while the helper stores only low16.
+    code.local_get(RESULT)
+        .local_get(RHS)
         .local_get(RESULT)
+        .i32_const(0xffff)
+        .i32_and()
+        .local_set(RESULT);
+    memory::store_word_result(code, address, imports, exit_depth);
+    code.local_set(RHS)
+        .local_set(RESULT)
+        .local_get(RHS)
+        .i32_const(17)
+        .i32_rem_u()
+        .if_(BlockType::Empty);
+    rotate_through_carry_word_flags(code, kind);
+    code.end();
+}
+
+fn rotate_through_carry_word_value(code: &mut InstructionSink<'_>, kind: RotateKind) {
+    code.local_get(RESULT)
         .local_get(FLAGS)
         .i32_const(1)
         .i32_and()
@@ -2701,11 +2754,11 @@ fn rotate_through_carry_word(
             code.local_get(LHS).i32_shr_u();
         }
     }
-    code.i32_or()
-        .i32_const(0x1ffff)
-        .i32_and()
-        .local_set(RESULT)
-        .local_get(FLAGS)
+    code.i32_or().i32_const(0x1ffff).i32_and().local_set(RESULT);
+}
+
+fn rotate_through_carry_word_flags(code: &mut InstructionSink<'_>, kind: RotateKind) {
+    code.local_get(FLAGS)
         .i32_const(!0x801)
         .i32_and()
         .local_get(RESULT)
@@ -2731,15 +2784,6 @@ fn rotate_through_carry_word(
         .i32_shl()
         .i32_or()
         .local_set(FLAGS)
-        .end()
-        .local_get(RESULT)
-        .i32_const(0xffff)
-        .i32_and()
-        .local_get(register(destination))
-        .i32_const(!0xffff)
-        .i32_and()
-        .i32_or()
-        .local_set(register(destination))
         .end();
 }
 

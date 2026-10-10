@@ -777,4 +777,9 @@ pub enum Operation {
         destination: Register32,
         count: ShiftCount,
     },
+    MemoryRotateThroughCarryWord {
+        kind: RotateKind,
+        address: EffectiveAddress,
+        count: ShiftCount,
+    },
 }

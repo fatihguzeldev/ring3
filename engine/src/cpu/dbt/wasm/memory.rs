@@ -107,6 +107,7 @@ impl Imports {
                 | Operation::MemoryUnaryWord { .. }
                 | Operation::MemoryShiftWord { .. }
                 | Operation::MemoryRotateWord { .. }
+                | Operation::MemoryRotateThroughCarryWord { .. }
                 | Operation::MemoryArithmeticWord { .. }
                 | Operation::MemoryLogicalWord { .. } => {
                     read16 = true;
