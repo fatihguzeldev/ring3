@@ -340,7 +340,7 @@ select(e, home, 2, home, 13, 'same-active target must contain current stopped PC
 select(e, home, 2, caller, 13, 'current acknowledged foreign target lacks stopped PC');
 tamper(e, 0, Uint8Array.of(0), () => select(e, home, 2, continuation, 13, 'malformed State header'), 'malformed State header');
 tamper(e, 52, new Uint8Array(4), () => select(e, home, 2, continuation, 13, 'invalid CPU flags'), 'invalid CPU flags');
-tamper(e, 60, Uint8Array.of(4, 0), () => select(e, home, 2, continuation, 13, 'unsupported Exit version'), 'unsupported Exit version');
+tamper(e, 60, Uint8Array.of(6, 0), () => select(e, home, 2, continuation, 13, 'unsupported Exit version'), 'unsupported Exit version');
 tamper(e, 72, Uint8Array.of(1, 0, 0, 0), () => select(e, home, 2, continuation, 13, 'canonical non-NeedCode Exit'), 'canonical non-NeedCode Exit');
 tamper(e, 80, Uint8Array.of(1, 0, 0, 0), () => select(e, home, 2, continuation, 13, 'noncanonical NeedCode detail'), 'noncanonical NeedCode detail');
 refresh(e).view.setUint32(e.base + 96, 1, true);
