@@ -305,6 +305,9 @@ pub(super) fn check_profile(instruction: &Instruction, bytes: &[u8]) -> Result<(
     let exact_word_xadd = matches!(
         (instruction.code(), bytes),
         (Code::Xadd_rm16_r16, [0x66, 0x0f, 0xc1, modrm]) if *modrm & 0xc0 == 0xc0
+    ) || matches!(
+        (instruction.code(), bytes),
+        (Code::Xadd_rm16_r16, [0x66, 0x0f, 0xc1, modrm, ..]) if *modrm & 0xc0 != 0xc0
     );
     let exact_word_cmpxchg = matches!(
         (instruction.code(), bytes),

@@ -377,10 +377,20 @@ pub(super) fn lower(instruction: &Instruction, bytes: &[u8]) -> Result<Operation
                 right: register(instruction.op1_register())?,
             })
         }
-        Code::Xadd_rm16_r16 => Ok(Operation::ExchangeAddWord {
-            destination: word_register(instruction.op0_register())?,
-            source: word_register(instruction.op1_register())?,
-        }),
+        Code::Xadd_rm16_r16 => {
+            let source = word_register(instruction.op1_register())?;
+            match instruction.op0_kind() {
+                OpKind::Register => Ok(Operation::ExchangeAddWord {
+                    destination: word_register(instruction.op0_register())?,
+                    source,
+                }),
+                OpKind::Memory => Ok(Operation::MemoryExchangeAddWord {
+                    address: effective_address(instruction)?,
+                    source,
+                }),
+                _ => Err(unsupported()),
+            }
+        }
         Code::Xadd_rm32_r32 => {
             if instruction.op1_kind() != OpKind::Register {
                 return Err(unsupported());
