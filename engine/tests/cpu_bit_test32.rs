@@ -397,7 +397,11 @@ fn exclusions() -> Vec<(Vec<u8>, DecodeError)> {
                     }
                     _ => opcode,
                 };
-                let mut prefixed = vec![prefix];
+                let mut prefixed = if prefix == 0x66 {
+                    vec![0x66, 0x66]
+                } else {
+                    vec![prefix]
+                };
                 prefixed.extend_from_slice(&bytes);
                 cases.push((prefixed, expected));
             }
