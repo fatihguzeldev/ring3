@@ -280,6 +280,7 @@ fn word_double_shift_complete_prefix_and_memory_neighbors_remain_precisely_close
                 if !cl {
                     memory_form.push(0x66);
                 }
+                memory_form.insert(0, 0x66);
                 cases.push((memory_form, opcode));
             }
             for (mut bytes, error) in cases {

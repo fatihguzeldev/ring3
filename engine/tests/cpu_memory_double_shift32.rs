@@ -656,6 +656,9 @@ fn exclusions() -> Vec<(Vec<u8>, DecodeError)> {
                 _ => DecodeError::Unsupported(UnsupportedFeature::Opcode),
             };
             let mut bytes = vec![prefix];
+            if prefix == 0x66 {
+                bytes.push(0x66);
+            }
             bytes.extend_from_slice(&memory);
             cases.push((bytes, expected));
         }
