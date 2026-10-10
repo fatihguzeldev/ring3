@@ -681,6 +681,14 @@ pub enum Operation {
         source: Location32,
         immediate: Option<u32>,
     },
+    SignedMultiplyWord {
+        destination: Register32,
+        source: Register32,
+    },
+    ReadSignedMultiplyWord {
+        destination: Register32,
+        address: EffectiveAddress,
+    },
     MultiplyAccumulator {
         kind: MultiplyKind,
         source: Register32,

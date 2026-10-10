@@ -1833,6 +1833,20 @@ pub(super) fn instruction(
         } => {
             signed_multiply(code, destination, source, immediate, imports, exit_depth);
         }
+        Operation::SignedMultiplyWord {
+            destination,
+            source,
+        } => {
+            signed_multiply_word(code, destination, register(source));
+        }
+        Operation::ReadSignedMultiplyWord {
+            destination,
+            address,
+        } => {
+            memory::load_narrow_value(code, address, SmallWidth::Word, imports, exit_depth);
+            code.local_set(RESULT);
+            signed_multiply_word(code, destination, RESULT);
+        }
         Operation::MultiplyAccumulator { kind, source } => {
             accumulator_multiply(code, kind, register(source));
         }
@@ -4919,6 +4933,48 @@ fn divide_error_if(code: &mut InstructionSink<'_>, exit_depth: u32) {
         .local_set(REASON)
         .br(exit_depth + 1)
         .end();
+}
+
+fn signed_multiply_word(code: &mut InstructionSink<'_>, destination: Register32, source: u32) {
+    code.local_get(register(destination))
+        .i32_const(16)
+        .i32_shl()
+        .i32_const(16)
+        .i32_shr_s()
+        .local_set(LHS)
+        .local_get(source)
+        .i32_const(16)
+        .i32_shl()
+        .i32_const(16)
+        .i32_shr_s()
+        .local_set(RHS)
+        .local_get(LHS)
+        .local_get(RHS)
+        .i32_mul()
+        .local_set(RESULT);
+    // signed16 products fit signed32; overflow means truncation changes the signed value.
+    code.local_get(FLAGS)
+        .i32_const(0x402)
+        .i32_and()
+        .local_get(RESULT)
+        .local_get(RESULT)
+        .i32_const(16)
+        .i32_shl()
+        .i32_const(16)
+        .i32_shr_s()
+        .i32_ne()
+        .i32_const(0x801)
+        .i32_mul()
+        .i32_or()
+        .local_set(FLAGS)
+        .local_get(register(destination))
+        .i32_const(!0xffff)
+        .i32_and()
+        .local_get(RESULT)
+        .i32_const(0xffff)
+        .i32_and()
+        .i32_or()
+        .local_set(register(destination));
 }
 
 fn signed_multiply(

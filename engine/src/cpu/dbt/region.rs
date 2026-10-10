@@ -349,6 +349,7 @@ fn supports_memory_reads(operation: &Operation) -> bool {
             | Operation::ScanStringDword
             | Operation::ReadConditionalMove { .. }
             | Operation::ReadConditionalMoveWord { .. }
+            | Operation::ReadSignedMultiplyWord { .. }
             | Operation::ReadMultiplyAccumulator { .. }
             | Operation::ReadByteMultiplyAccumulator { .. }
             | Operation::ReadByteDivideAccumulator { .. }
@@ -550,6 +551,7 @@ pub(super) fn supports(instruction: &DecodedInstruction, embedded: bool) -> bool
                 | Operation::ConditionalMove { .. }
                 | Operation::ConditionalMoveWord { .. }
                 | Operation::SignExtendHigh
+                | Operation::SignedMultiplyWord { .. }
                 | Operation::MultiplyAccumulator { .. }
                 | Operation::ByteMultiplyAccumulator { .. }
                 | Operation::DivideAccumulator { .. }

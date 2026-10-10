@@ -201,6 +201,7 @@ pub(super) fn lower(instruction: &Instruction) -> Option<Result<Operation, Decod
                 .or_else(|| lower_byte_accumulator_divide(instruction))
                 .or_else(|| lower_divide(instruction))
                 .or_else(|| lower_multiply(instruction))
+                .or_else(|| lower_word_signed_multiply(instruction))
                 .or_else(|| lower_memory_shift_byte_immediate(instruction))
                 .or_else(|| lower_memory_shift_byte_cl(instruction))
                 .or_else(|| lower_shift(instruction))
@@ -1004,6 +1005,26 @@ fn lower_divide(instruction: &Instruction) -> Option<Result<Operation, DecodeErr
             address: effective_address(instruction)?,
         }),
         _ => Err(unsupported()),
+    })())
+}
+
+fn lower_word_signed_multiply(instruction: &Instruction) -> Option<Result<Operation, DecodeError>> {
+    if instruction.code() != Code::Imul_r16_rm16 {
+        return None;
+    }
+    Some((|| {
+        let destination = word_register(instruction.op0_register())?;
+        match instruction.op1_kind() {
+            OpKind::Register => Ok(Operation::SignedMultiplyWord {
+                destination,
+                source: word_register(instruction.op1_register())?,
+            }),
+            OpKind::Memory => Ok(Operation::ReadSignedMultiplyWord {
+                destination,
+                address: effective_address(instruction)?,
+            }),
+            _ => Err(unsupported()),
+        }
     })())
 }
 

@@ -100,6 +100,7 @@ impl Imports {
                 | Operation::MemoryTestWord { .. }
                 | Operation::ReadConditionalMoveWord { .. }
                 | Operation::ReadBitScanWord { .. }
+                | Operation::ReadSignedMultiplyWord { .. }
                 | Operation::LoadWord { .. }
                 | Operation::LoadStringWord
                 | Operation::CompareStringWord
