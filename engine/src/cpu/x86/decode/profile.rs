@@ -83,6 +83,7 @@ pub(super) fn check_profile(instruction: &Instruction, bytes: &[u8]) -> Result<(
     let exact_word_stack = match (instruction.code(), bytes) {
         (Code::Push_r16, [0x66, 0x50..=0x57])
         | (Code::Pop_r16, [0x66, 0x58..=0x5f])
+        | (Code::Popaw, [0x66, 0x61])
         | (Code::Push_imm16, [0x66, 0x68, _, _])
         | (Code::Pushw_imm8, [0x66, 0x6a, _])
         | (Code::Pushfw, [0x66, 0x9c])

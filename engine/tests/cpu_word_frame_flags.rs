@@ -220,7 +220,6 @@ fn word_frame_flags_prefixes_lock_and_closed_stack_neighbors_stay_precise() {
         &[0x66, 0xc3],
         &[0x66, 0xc2, 2, 0],
         &[0x66, 0x60],
-        &[0x66, 0x61],
     ] {
         assert_eq!(
             decode_one(&code_space(CODE, bytes), GuestAddress(CODE)).err(),

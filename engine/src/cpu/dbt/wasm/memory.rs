@@ -110,6 +110,7 @@ impl Imports {
                 | Operation::ReadBitTestWord { .. }
                 | Operation::LoadWord { .. }
                 | Operation::PopWord { .. }
+                | Operation::PopAllWord
                 | Operation::LeaveWord
                 | Operation::LoadStringWord
                 | Operation::CompareStringWord
@@ -205,6 +206,7 @@ impl Imports {
                     ..
                 }
                 | Operation::Return { .. }
+                | Operation::PopAll
                 | Operation::Leave
                 | Operation::Jump {
                     target: BranchTarget::Indirect(Location32::Memory(_)),
@@ -535,6 +537,52 @@ pub(super) fn pop_register(
             .i32_add()
             .local_set(register(esp));
     }
+}
+
+pub(super) fn pop_all(
+    code: &mut InstructionSink<'_>,
+    word: bool,
+    imports: Imports,
+    exit_depth: u32,
+) {
+    use crate::cpu::x86::Register32::{Eax, Ebp, Ebx, Ecx, Edi, Edx, Esi, Esp};
+
+    let width = if word { 2 } else { 4 };
+    let registers = [
+        (0, Edi),
+        (1, Esi),
+        (2, Ebp),
+        (4, Ebx),
+        (5, Edx),
+        (6, Ecx),
+        (7, Eax),
+    ];
+    // retain all original parents until every checked read succeeds.
+    for &(slot, destination) in &registers {
+        let source = EffectiveAddress {
+            base: Some(Esp),
+            index: None,
+            scale: 1,
+            displacement: slot * width,
+        };
+        if word {
+            load_narrow_value(code, source, SmallWidth::Word, imports, exit_depth);
+            code.local_get(register(destination))
+                .i32_const(!0xffff)
+                .i32_and()
+                .i32_or();
+        } else {
+            load_result(code, source, imports, exit_depth);
+            code.local_get(RESULT);
+        }
+    }
+    for &(_, destination) in registers.iter().rev() {
+        code.local_set(register(destination));
+    }
+    code.local_get(register(Esp))
+        .i32_const((width * 8) as i32)
+        .i32_add()
+        .local_set(register(Esp));
 }
 
 pub(super) fn pop_return(

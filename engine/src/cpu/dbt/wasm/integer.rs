@@ -2204,6 +2204,12 @@ pub(super) fn instruction(
             memory::pop_word_memory(code, destination, imports, exit_depth);
             store = true;
         }
+        Operation::PopAll => {
+            memory::pop_all(code, false, imports, exit_depth);
+        }
+        Operation::PopAllWord => {
+            memory::pop_all(code, true, imports, exit_depth);
+        }
         Operation::Leave => {
             memory::load_result(
                 code,

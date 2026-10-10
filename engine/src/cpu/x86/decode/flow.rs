@@ -73,6 +73,8 @@ pub(super) fn lower(instruction: &Instruction) -> Result<Operation, DecodeError>
             },
             _ => return Err(unsupported()),
         },
+        Code::Popad => Operation::PopAll,
+        Code::Popaw => Operation::PopAllWord,
         Code::Leaved => Operation::Leave,
         Code::Leavew => Operation::LeaveWord,
         Code::Retnd => Operation::Return { stack_adjust: 0 },

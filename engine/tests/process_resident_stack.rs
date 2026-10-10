@@ -518,7 +518,7 @@ fn span_poison_prefix_and_control_exclusions_preserve_arena_units_and_capacity()
             InstructionError::InvalidBlockEnd,
         );
     }
-    for instruction in [&[0xff, 0x1b][..], &[0xcb], &[0x60], &[0x61]] {
+    for instruction in [&[0xff, 0x1b][..], &[0xcb], &[0x60]] {
         let mut bytes = vec![0x90];
         bytes.extend_from_slice(instruction);
         bytes.extend_from_slice(&[0x0f, 0x06]);

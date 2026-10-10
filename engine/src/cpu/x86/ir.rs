@@ -849,6 +849,8 @@ pub enum Operation {
     PopMemoryWord {
         destination: EffectiveAddress,
     },
+    PopAll,
+    PopAllWord,
     Leave,
     LeaveWord,
     Return {
