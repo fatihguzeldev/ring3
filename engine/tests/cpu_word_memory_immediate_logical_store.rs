@@ -9,7 +9,7 @@ use ring3_engine::{
         x86::{
             Register32,
             decode::{DecodeError, decode_one},
-            ir::{EffectiveAddress, Operation, WordMemoryArithmeticKind, WordValue},
+            ir::{EffectiveAddress, Operation, WordLogicalKind, WordValue},
         },
     },
     memory::{
@@ -19,12 +19,11 @@ use ring3_engine::{
 };
 
 const CODE: u32 = 0x1000;
-const KEY: u64 = 0x574d_4941_5354_4f31;
-const KINDS: [(u8, WordMemoryArithmeticKind); 4] = [
-    (0, WordMemoryArithmeticKind::Add),
-    (2, WordMemoryArithmeticKind::Adc),
-    (5, WordMemoryArithmeticKind::Sub),
-    (3, WordMemoryArithmeticKind::Sbb),
+const KEY: u64 = 0x574d_494c_5354_4f31;
+const KINDS: [(u8, WordLogicalKind); 3] = [
+    (4, WordLogicalKind::And),
+    (1, WordLogicalKind::Or),
+    (6, WordLogicalKind::Xor),
 ];
 
 fn encoding(opcode: u8, extension: u8) -> Vec<u8> {
@@ -52,13 +51,13 @@ fn code(bytes: &[u8]) -> EngineInstance {
     engine
 }
 
-fn decode_admission(opcode: u8, extension: u8, kind: WordMemoryArithmeticKind) {
+fn decode_admission(opcode: u8, extension: u8, kind: WordLogicalKind) {
     let bytes = encoding(opcode, extension);
     let engine = code(&bytes);
     let before = engine.arena().to_vec();
     let decoded = decode_one(engine.memory().unwrap(), GuestAddress(CODE))
-        .expect("WORD memory-destination immediate arithmetic must decode without accessing data");
-    let Operation::MemoryArithmeticWord {
+        .expect("WORD memory-destination immediate logic must decode without accessing data");
+    let Operation::MemoryLogicalWord {
         kind: actual_kind,
         address,
         source,
@@ -95,43 +94,33 @@ fn decode_admission(opcode: u8, extension: u8, kind: WordMemoryArithmeticKind) {
 }
 
 #[test]
-fn word_memory_add_imm16_decodes_without_accessing_data() {
-    decode_admission(0x81, 0, WordMemoryArithmeticKind::Add);
+fn word_memory_and_imm16_decodes_without_accessing_data() {
+    decode_admission(0x81, 4, WordLogicalKind::And);
 }
 
 #[test]
-fn word_memory_add_sign_extended_imm8_decodes_without_accessing_data() {
-    decode_admission(0x83, 0, WordMemoryArithmeticKind::Add);
+fn word_memory_and_sign_extended_imm8_decodes_without_accessing_data() {
+    decode_admission(0x83, 4, WordLogicalKind::And);
 }
 
 #[test]
-fn word_memory_adc_imm16_decodes_without_accessing_data() {
-    decode_admission(0x81, 2, WordMemoryArithmeticKind::Adc);
+fn word_memory_or_imm16_decodes_without_accessing_data() {
+    decode_admission(0x81, 1, WordLogicalKind::Or);
 }
 
 #[test]
-fn word_memory_adc_sign_extended_imm8_decodes_without_accessing_data() {
-    decode_admission(0x83, 2, WordMemoryArithmeticKind::Adc);
+fn word_memory_or_sign_extended_imm8_decodes_without_accessing_data() {
+    decode_admission(0x83, 1, WordLogicalKind::Or);
 }
 
 #[test]
-fn word_memory_sub_imm16_decodes_without_accessing_data() {
-    decode_admission(0x81, 5, WordMemoryArithmeticKind::Sub);
+fn word_memory_xor_imm16_decodes_without_accessing_data() {
+    decode_admission(0x81, 6, WordLogicalKind::Xor);
 }
 
 #[test]
-fn word_memory_sub_sign_extended_imm8_decodes_without_accessing_data() {
-    decode_admission(0x83, 5, WordMemoryArithmeticKind::Sub);
-}
-
-#[test]
-fn word_memory_sbb_imm16_decodes_without_accessing_data() {
-    decode_admission(0x81, 3, WordMemoryArithmeticKind::Sbb);
-}
-
-#[test]
-fn word_memory_sbb_sign_extended_imm8_decodes_without_accessing_data() {
-    decode_admission(0x83, 3, WordMemoryArithmeticKind::Sbb);
+fn word_memory_xor_sign_extended_imm8_decodes_without_accessing_data() {
+    decode_admission(0x83, 6, WordLogicalKind::Xor);
 }
 
 fn bound_admission(resident: bool, entries: bool) {
@@ -157,7 +146,7 @@ fn assert_bound_admission(bytes: &[u8], resident: bool, entries: bool) {
         (true, false) => engine.compile_resident(1).map(|id| id.get()),
         (true, true) => engine.compile_resident_entries(1, 0).map(|id| id.get()),
     }
-    .expect("WORD memory-destination immediate arithmetic must compile bound");
+    .expect("WORD memory-destination immediate logic must compile bound");
     let module = if resident {
         engine.resident_bytes(id).unwrap()
     } else {
@@ -170,34 +159,31 @@ fn assert_bound_admission(bytes: &[u8], resident: bool, entries: bool) {
 }
 
 #[test]
-fn word_memory_immediate_arithmetic_store_compiles_replacement_explicit() {
+fn word_memory_immediate_logical_store_compiles_replacement_explicit() {
     bound_admission(false, false);
 }
 
 #[test]
-fn word_memory_immediate_arithmetic_store_compiles_replacement_entry() {
+fn word_memory_immediate_logical_store_compiles_replacement_entry() {
     bound_admission(false, true);
 }
 
 #[test]
-fn word_memory_immediate_arithmetic_store_compiles_resident_explicit() {
+fn word_memory_immediate_logical_store_compiles_resident_explicit() {
     bound_admission(true, false);
 }
 
 #[test]
-fn word_memory_immediate_arithmetic_store_compiles_resident_entry() {
+fn word_memory_immediate_logical_store_compiles_resident_entry() {
     bound_admission(true, true);
 }
 
 #[test]
-fn word_memory_immediate_arithmetic_store_mixed_64_instruction_block_fits_every_bound_profile() {
+fn word_memory_immediate_logical_store_mixed_64_instruction_block_fits_every_bound_profile() {
     let mut bytes = Vec::new();
-    for _ in 0..4 {
-        for opcode in [0x81, 0x83] {
-            for (extension, _) in KINDS {
-                bytes.extend(encoding(opcode, extension));
-            }
-        }
+    for index in 0..32 {
+        let opcode = if index % 2 == 0 { 0x81 } else { 0x83 };
+        bytes.extend(encoding(opcode, KINDS[index % KINDS.len()].0));
     }
     bytes.extend(std::iter::repeat_n(0x90, 31));
     bytes.extend([0xeb, 0]);
@@ -267,7 +253,7 @@ fn addresses() -> [(&'static [u8], EffectiveAddress); 13] {
 
 fn assert_operation(
     bytes: &[u8],
-    kind: WordMemoryArithmeticKind,
+    kind: WordLogicalKind,
     immediate: u16,
     address: EffectiveAddress,
 ) {
@@ -275,7 +261,7 @@ fn assert_operation(
     let decoded = decode_one(&memory, GuestAddress(CODE)).unwrap();
     assert_eq!(
         decoded.operation(),
-        &Operation::MemoryArithmeticWord {
+        &Operation::MemoryLogicalWord {
             kind,
             address,
             source: WordValue::Immediate(immediate),
@@ -291,7 +277,7 @@ fn assert_operation(
 }
 
 #[test]
-fn word_memory_immediate_arithmetic_store_address_classes_have_exact_ir() {
+fn word_memory_immediate_logical_store_address_classes_have_exact_ir() {
     let mut rows = 0;
     for (extension, kind) in KINDS {
         for (opcode, immediate) in [(0x81, 0xf0f3), (0x83, 0xff80)] {
@@ -306,11 +292,11 @@ fn word_memory_immediate_arithmetic_store_address_classes_have_exact_ir() {
             }
         }
     }
-    assert_eq!(rows, 104);
+    assert_eq!(rows, 78);
 }
 
 #[test]
-fn word_memory_immediate_arithmetic_store_normalizes_values_and_prefix_looking_payloads() {
+fn word_memory_immediate_logical_store_normalizes_values_and_prefix_looking_payloads() {
     let address = addresses()[0].1;
     for (extension, kind) in KINDS {
         for immediate in [0, 1, 0x7fff, 0x8000, 0xffff, 0x6766, 0xf0f3] {
@@ -343,8 +329,7 @@ fn word_memory_immediate_arithmetic_store_normalizes_values_and_prefix_looking_p
 }
 
 #[test]
-fn word_memory_immediate_arithmetic_store_prefixes_and_duplicate_prefix_logical_neighbors_stay_closed()
- {
+fn word_memory_immediate_logical_store_prefixes_stay_closed_and_group1_neighbors_stay_open() {
     let unsupported = DecodeError::Unsupported(UnsupportedFeature::Opcode);
     for opcode in [0x81, 0x83] {
         for (extension, _) in KINDS {
@@ -366,21 +351,22 @@ fn word_memory_immediate_arithmetic_store_prefixes_and_duplicate_prefix_logical_
                 );
             }
         }
-        for extension in [1, 4, 6] {
-            let bytes = [vec![0x66], instruction(opcode, extension, &[0x03], 0xffff)].concat();
-            assert_eq!(
-                decode_one(&code_space(CODE, &bytes), GuestAddress(CODE)).err(),
-                Some(unsupported),
-                "{bytes:02x?}"
-            );
+        for extension in [0, 2, 3, 5, 7] {
+            let bytes = instruction(opcode, extension, &[0x03], 0xffff);
+            let memory = code_space(CODE, &bytes);
+            let decoded = decode_one(&memory, GuestAddress(CODE)).unwrap();
+            if extension == 7 {
+                assert!(matches!(
+                    decoded.operation(),
+                    Operation::MemoryCompareWord { .. }
+                ));
+            } else {
+                assert!(matches!(
+                    decoded.operation(),
+                    Operation::MemoryArithmeticWord { .. }
+                ));
+            }
         }
-        let cmp = instruction(opcode, 7, &[0x03], 0xffff);
-        assert!(matches!(
-            decode_one(&code_space(CODE, &cmp), GuestAddress(CODE))
-                .unwrap()
-                .operation(),
-            Operation::MemoryCompareWord { .. }
-        ));
     }
     for opcode in [0x80, 0x82] {
         for (extension, _) in KINDS {
@@ -395,7 +381,7 @@ fn word_memory_immediate_arithmetic_store_prefixes_and_duplicate_prefix_logical_
 }
 
 #[test]
-fn decoded_word_memory_immediate_arithmetic_stores_stay_closed_in_standalone_backend() {
+fn decoded_word_memory_immediate_logical_stores_stay_closed_in_standalone_backend() {
     for opcode in [0x81, 0x83] {
         for (extension, _) in KINDS {
             let mut bytes = encoding(opcode, extension);
@@ -445,7 +431,7 @@ fn fetch_error(pc: u32, address: u32, reason: FaultReason, length: usize) -> Dec
 }
 
 #[test]
-fn word_memory_immediate_arithmetic_store_fetch_checks_displacement_and_each_immediate_byte() {
+fn word_memory_immediate_logical_store_fetch_checks_displacement_and_each_immediate_byte() {
     for opcode in [0x81, 0x83] {
         for (extension, _) in KINDS {
             let bytes = instruction(
@@ -503,7 +489,7 @@ fn word_memory_immediate_arithmetic_store_fetch_checks_displacement_and_each_imm
 }
 
 #[test]
-fn word_memory_immediate_arithmetic_store_late_refusal_preserves_arena_and_both_owners() {
+fn word_memory_immediate_logical_store_late_refusal_preserves_arena_and_both_owners() {
     let mut bytes = Vec::new();
     for opcode in [0x81, 0x83] {
         for (extension, _) in KINDS {

@@ -688,7 +688,7 @@ pub(super) fn instruction(
         } => {
             memory::load_narrow_value(code, address, SmallWidth::Word, imports, exit_depth);
             // helper validation uses operand scratch; capture the source after success.
-            word_value(code, WordValue::Register(source));
+            word_value(code, source);
             match kind {
                 WordLogicalKind::And => code.i32_and(),
                 WordLogicalKind::Or => code.i32_or(),

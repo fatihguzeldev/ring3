@@ -180,6 +180,24 @@ pub(super) fn check_profile(instruction: &Instruction, bytes: &[u8]) -> Result<(
         (Code::And_AX_imm16, [0x66, 0x25, _, _])
         | (Code::Or_AX_imm16, [0x66, 0x0d, _, _])
         | (Code::Xor_AX_imm16, [0x66, 0x35, _, _]) => true,
+        (Code::And_rm16_imm16, [0x66, 0x81, modrm, ..])
+        | (Code::And_rm16_imm8, [0x66, 0x83, modrm, ..])
+            if *modrm & 0xc0 != 0xc0 =>
+        {
+            *modrm & 0x38 == 0x20
+        }
+        (Code::Or_rm16_imm16, [0x66, 0x81, modrm, ..])
+        | (Code::Or_rm16_imm8, [0x66, 0x83, modrm, ..])
+            if *modrm & 0xc0 != 0xc0 =>
+        {
+            *modrm & 0x38 == 0x08
+        }
+        (Code::Xor_rm16_imm16, [0x66, 0x81, modrm, ..])
+        | (Code::Xor_rm16_imm8, [0x66, 0x83, modrm, ..])
+            if *modrm & 0xc0 != 0xc0 =>
+        {
+            *modrm & 0x38 == 0x30
+        }
         (Code::And_rm16_imm16, [0x66, 0x81, modrm, _, _])
         | (Code::And_rm16_imm8, [0x66, 0x83, modrm, _]) => *modrm & 0xf8 == 0xe0,
         (Code::Or_rm16_imm16, [0x66, 0x81, modrm, _, _])

@@ -495,8 +495,8 @@ fn exact_or_xor_prefix_fetch_and_consumed_source_currency() {
         excluded.extend([
             vec![0x66, 0x66, to_rm, 3],
             vec![0x66, 0x66, to_reg, 3],
-            vec![0x66, 0x81, (extension << 3) | 3, 0, 0],
-            vec![0x66, 0x83, (extension << 3) | 3, 0],
+            vec![0x66, 0x66, 0x81, (extension << 3) | 3, 0, 0],
+            vec![0x66, 0x66, 0x83, (extension << 3) | 3, 0],
         ]);
     }
     for bytes in excluded {

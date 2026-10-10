@@ -316,11 +316,7 @@ fn word_memory_arithmetic_store_complete_prefixes_and_adjacent_families_stay_clo
     assert_eq!(rows, 24);
     for extension in [0, 1, 2, 3, 4, 5, 6] {
         for opcode in [0x81, 0x83] {
-            let mut bytes = if matches!(extension, 0 | 2 | 3 | 5) {
-                vec![0x66, 0x66, opcode, 0x03 | extension << 3, 0]
-            } else {
-                vec![0x66, opcode, 0x03 | extension << 3, 0]
-            };
+            let mut bytes = vec![0x66, 0x66, opcode, 0x03 | extension << 3, 0];
             if opcode == 0x81 {
                 bytes.push(0);
             }
@@ -365,7 +361,7 @@ fn word_memory_arithmetic_store_complete_prefixes_and_adjacent_families_stay_clo
                 .operation(),
             &Operation::MemoryLogicalWord {
                 kind,
-                source: Register32::Eax,
+                source: WordValue::Register(Register32::Eax),
                 address: EffectiveAddress {
                     base: Some(Register32::Ebx),
                     index: None,

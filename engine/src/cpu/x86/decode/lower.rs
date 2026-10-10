@@ -194,11 +194,13 @@ pub(super) fn lower(instruction: &Instruction, bytes: &[u8]) -> Result<Operation
                 address: effective_address(instruction)?,
             })
         }
-        Code::And_rm16_r16 if instruction.op0_kind() == OpKind::Memory => {
+        Code::And_rm16_r16 | Code::And_rm16_imm16 | Code::And_rm16_imm8
+            if instruction.op0_kind() == OpKind::Memory =>
+        {
             Ok(Operation::MemoryLogicalWord {
                 kind: WordLogicalKind::And,
                 address: effective_address(instruction)?,
-                source: word_register(instruction.op1_register())?,
+                source: word_value(instruction)?,
             })
         }
         Code::And_rm16_r16
@@ -217,11 +219,13 @@ pub(super) fn lower(instruction: &Instruction, bytes: &[u8]) -> Result<Operation
                 address: effective_address(instruction)?,
             })
         }
-        Code::Or_rm16_r16 if instruction.op0_kind() == OpKind::Memory => {
+        Code::Or_rm16_r16 | Code::Or_rm16_imm16 | Code::Or_rm16_imm8
+            if instruction.op0_kind() == OpKind::Memory =>
+        {
             Ok(Operation::MemoryLogicalWord {
                 kind: WordLogicalKind::Or,
                 address: effective_address(instruction)?,
-                source: word_register(instruction.op1_register())?,
+                source: word_value(instruction)?,
             })
         }
         Code::Or_rm16_r16
@@ -240,11 +244,13 @@ pub(super) fn lower(instruction: &Instruction, bytes: &[u8]) -> Result<Operation
                 address: effective_address(instruction)?,
             })
         }
-        Code::Xor_rm16_r16 if instruction.op0_kind() == OpKind::Memory => {
+        Code::Xor_rm16_r16 | Code::Xor_rm16_imm16 | Code::Xor_rm16_imm8
+            if instruction.op0_kind() == OpKind::Memory =>
+        {
             Ok(Operation::MemoryLogicalWord {
                 kind: WordLogicalKind::Xor,
                 address: effective_address(instruction)?,
-                source: word_register(instruction.op1_register())?,
+                source: word_value(instruction)?,
             })
         }
         Code::Xor_rm16_r16

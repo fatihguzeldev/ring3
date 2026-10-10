@@ -316,8 +316,8 @@ fn word_and_strict_forms_fetch_and_consumed_code_currency_stay_exact() {
     for bytes in [
         &[0x66, 0x66, 0x21, 0x03][..],
         &[0x66, 0x66, 0x23, 0x03],
-        &[0x66, 0x81, 0x23, 0, 0],
-        &[0x66, 0x83, 0x23, 0],
+        &[0x66, 0x66, 0x81, 0x23, 0, 0],
+        &[0x66, 0x66, 0x83, 0x23, 0],
     ] {
         assert_eq!(
             decode_one(fixture(PC, bytes).memory().unwrap(), GuestAddress(PC)).unwrap_err(),

@@ -215,7 +215,7 @@ fn all_word_memory_logical_store_kinds_sources_and_address_classes_have_exact_ir
                     decoded.operation(),
                     &Operation::MemoryLogicalWord {
                         kind,
-                        source: parent,
+                        source: WordValue::Register(parent),
                         address
                     },
                     "{bytes:02x?}"
@@ -254,7 +254,7 @@ fn word_memory_logical_store_prefix_looking_displacements_are_payload() {
             decoded.operation(),
             &Operation::MemoryLogicalWord {
                 kind,
-                source: Register32::Esp,
+                source: WordValue::Register(Register32::Esp),
                 address: EffectiveAddress {
                     base: Some(Register32::Esp),
                     index: Some(Register32::Esi),
@@ -331,7 +331,7 @@ fn word_memory_logical_store_complete_prefixes_and_adjacent_families_stay_closed
     }
     for extension in [1, 4, 6] {
         for opcode in [0x81, 0x83] {
-            let mut bytes = vec![0x66, opcode, 0x03 | extension << 3, 0];
+            let mut bytes = vec![0x66, 0x66, opcode, 0x03 | extension << 3, 0];
             if opcode == 0x81 {
                 bytes.push(0);
             }
