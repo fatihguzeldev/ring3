@@ -222,6 +222,7 @@ pub(super) fn lower(instruction: &Instruction) -> Option<Result<Operation, Decod
                 .or_else(|| lower_byte_rotate_through_carry_cl(instruction))
                 .or_else(|| lower_unary(instruction))
                 .or_else(|| lower_bit_scan(instruction))
+                .or_else(|| lower_word_bit_scan(instruction))
                 .or_else(|| lower_bit_test(instruction));
         }
     };
@@ -868,6 +869,30 @@ fn lower_bit_scan(instruction: &Instruction) -> Option<Result<Operation, DecodeE
                 source: register(instruction.op1_register())?,
             }),
             OpKind::Memory => Ok(Operation::ReadBitScan {
+                kind,
+                destination,
+                address: effective_address(instruction)?,
+            }),
+            _ => Err(unsupported()),
+        }
+    })())
+}
+
+fn lower_word_bit_scan(instruction: &Instruction) -> Option<Result<Operation, DecodeError>> {
+    let kind = match instruction.code() {
+        Code::Bsf_r16_rm16 => BitScanKind::Forward,
+        Code::Bsr_r16_rm16 => BitScanKind::Reverse,
+        _ => return None,
+    };
+    Some((|| {
+        let destination = word_register(instruction.op0_register())?;
+        match instruction.op1_kind() {
+            OpKind::Register => Ok(Operation::BitScanWord {
+                kind,
+                destination,
+                source: word_register(instruction.op1_register())?,
+            }),
+            OpKind::Memory => Ok(Operation::ReadBitScanWord {
                 kind,
                 destination,
                 address: effective_address(instruction)?,

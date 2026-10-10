@@ -1871,6 +1871,13 @@ pub(super) fn instruction(
         } => {
             bit_scan(code, kind, destination, register(source));
         }
+        Operation::BitScanWord {
+            kind,
+            destination,
+            source,
+        } => {
+            bit_scan_word(code, kind, destination, register(source));
+        }
         Operation::ReadBitScan {
             kind,
             destination,
@@ -1878,6 +1885,15 @@ pub(super) fn instruction(
         } => {
             memory::load_result(code, address, imports, exit_depth);
             bit_scan(code, kind, destination, RESULT);
+        }
+        Operation::ReadBitScanWord {
+            kind,
+            destination,
+            address,
+        } => {
+            memory::load_narrow_value(code, address, SmallWidth::Word, imports, exit_depth);
+            code.local_set(RESULT);
+            bit_scan_word(code, kind, destination, RESULT);
         }
         Operation::Jump {
             target: BranchTarget::Direct(target),
@@ -4480,6 +4496,27 @@ fn rotate_through_carry_one_flags(code: &mut InstructionSink<'_>, kind: RotateKi
         .i32_shl()
         .i32_or()
         .local_set(FLAGS);
+}
+
+fn bit_scan_word(
+    code: &mut InstructionSink<'_>,
+    kind: BitScanKind,
+    destination: Register32,
+    source: u32,
+) {
+    code.local_get(source)
+        .i32_const(0xffff)
+        .i32_and()
+        .local_set(RESULT)
+        .local_get(register(destination))
+        .i32_const(!0xffff)
+        .i32_and();
+    bit_scan(code, kind, destination, RESULT);
+    code.local_get(register(destination))
+        .i32_const(0xffff)
+        .i32_and()
+        .i32_or()
+        .local_set(register(destination));
 }
 
 fn bit_scan(

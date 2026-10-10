@@ -718,6 +718,11 @@ pub enum Operation {
         destination: Register32,
         source: Register32,
     },
+    BitScanWord {
+        kind: BitScanKind,
+        destination: Register32,
+        source: Register32,
+    },
     BitTest {
         kind: BitTestKind,
         destination: Register32,
@@ -733,6 +738,11 @@ pub enum Operation {
         index: BitIndex,
     },
     ReadBitScan {
+        kind: BitScanKind,
+        destination: Register32,
+        address: EffectiveAddress,
+    },
+    ReadBitScanWord {
         kind: BitScanKind,
         destination: Register32,
         address: EffectiveAddress,

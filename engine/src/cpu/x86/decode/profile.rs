@@ -324,6 +324,11 @@ pub(super) fn check_profile(instruction: &Instruction, bytes: &[u8]) -> Result<(
         (instruction.code(), bytes),
         (Code::Cmpxchg_rm16_r16, [0x66, 0x0f, 0xb1, modrm, ..]) if *modrm & 0xc0 != 0xc0
     );
+    let exact_word_bit_scan = matches!(
+        (instruction.code(), bytes),
+        (Code::Bsf_r16_rm16, [0x66, 0x0f, 0xbc, _, ..])
+            | (Code::Bsr_r16_rm16, [0x66, 0x0f, 0xbd, _, ..])
+    );
     let exact_word_conditional_move = matches!(
         (instruction.code(), bytes),
         (
@@ -359,6 +364,7 @@ pub(super) fn check_profile(instruction: &Instruction, bytes: &[u8]) -> Result<(
             || exact_word_double_shift
             || exact_word_xadd
             || exact_word_cmpxchg
+            || exact_word_bit_scan
             || exact_word_rotate
             || exact_word_conditional_move)
             && bytes
