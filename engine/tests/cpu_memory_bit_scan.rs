@@ -293,7 +293,10 @@ fn excluded_forms_and_exact_operand_fetch_preserve_fault_and_snapshot_boundaries
     let mut exclusions = 0;
     for (opcode, _) in FORMS {
         for prefix in [0x66, 0x67, 0xf2, 0x26, 0x2e, 0x36, 0x3e, 0x64, 0x65, 0xf0] {
-            let bytes = [prefix, 0x0f, opcode, 0x03];
+            let mut bytes = vec![prefix, 0x0f, opcode, 0x03];
+            if prefix == 0x66 {
+                bytes.insert(0, 0x66);
+            }
             let engine = code(CODE, &bytes);
             let expected = match prefix {
                 0xf0 => DecodeError::InvalidEncoding,
@@ -480,8 +483,8 @@ fn late_memory_bit_scan_failures_preserve_both_publications() {
             ),
             (
                 CODE,
-                vec![0x0f, first, 0x03, 0x66, 0x0f, first ^ 1, 0x03],
-                7,
+                vec![0x0f, first, 0x03, 0x66, 0x66, 0x0f, first ^ 1, 0x03],
+                8,
                 instruction_error(CODE + 3, opcode_error),
             ),
             (

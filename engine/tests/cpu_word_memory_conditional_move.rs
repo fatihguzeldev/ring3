@@ -330,12 +330,12 @@ fn word_memory_cmov_complete_prefixes_and_adjacent_families_stay_closed() {
     }
     assert_eq!(rows, 192);
     for bytes in [
-        [0x66, 0x0f, 0xbc, 0x03],
-        [0x66, 0x0f, 0xbd, 0x03],
-        [0x66, 0x0f, 0xaf, 0x03],
+        &[0x66, 0x66, 0x0f, 0xbc, 0x03][..],
+        &[0x66, 0x66, 0x0f, 0xbd, 0x03],
+        &[0x66, 0x0f, 0xaf, 0x03],
     ] {
         assert_eq!(
-            decode_one(&code_space(CODE, &bytes), GuestAddress(CODE)).err(),
+            decode_one(&code_space(CODE, bytes), GuestAddress(CODE)).err(),
             Some(opcode)
         );
     }
