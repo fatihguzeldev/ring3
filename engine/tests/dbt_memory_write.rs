@@ -508,6 +508,9 @@ fn narrow_prefix_and_declared_span_errors_remain_precise() {
         }
         for prefix in [0x66, 0x67, 0xf3, 0xf0, 0x64] {
             let mut bytes = vec![0x90, prefix];
+            if prefix == 0x66 && matches!(opcode, 0x21 | 0x09 | 0x31) {
+                bytes.push(0x66);
+            }
             bytes.extend_from_slice(&encode(opcode, extension, &[0x03], immediate));
             let cause = if prefix == 0x64 {
                 InstructionError::Decode(DecodeError::Unsupported(UnsupportedFeature::Segment))

@@ -481,6 +481,9 @@ fn span_poison_prefix_and_remaining_exclusions_preserve_arena_units_and_capacity
             (0x64, UnsupportedFeature::Segment),
         ] {
             let mut bytes = vec![0x90, prefix];
+            if prefix == 0x66 && matches!(instruction[0], 0x21 | 0x09 | 0x31) {
+                bytes.push(0x66);
+            }
             bytes.extend_from_slice(instruction);
             bytes.extend_from_slice(&[0x0f, 0x06]);
             rejected(
