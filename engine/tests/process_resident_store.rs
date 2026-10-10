@@ -454,6 +454,7 @@ fn data_writes_and_atomic_fault_repairs_keep_executing_and_legacy_code_current()
     let unit = engine.resident_bytes(a).unwrap().to_vec();
     let pointer = engine.resident_bytes(a).unwrap().as_ptr();
     let legacy = engine.artifact_bytes().unwrap().to_vec();
+    let legacy_pointer = engine.artifact_bytes().unwrap().as_ptr();
     store(
         &mut engine,
         a,
@@ -462,6 +463,12 @@ fn data_writes_and_atomic_fault_repairs_keep_executing_and_legacy_code_current()
         StoreCompletion::Complete,
         [0; 6],
     );
+    assert_eq!(engine.resident_bytes(a).unwrap(), unit);
+    assert_eq!(engine.resident_bytes(a).unwrap().as_ptr(), pointer);
+    assert_eq!(engine.artifact_bytes().unwrap(), legacy);
+    assert_eq!(engine.artifact_bytes().unwrap().as_ptr(), legacy_pointer);
+    assert_eq!(engine.guard_resident(KEY, a), Ok(()));
+    assert_eq!(engine.guard(KEY, 1), Ok(()));
     assert_eq!(
         ram(&engine, DATA + 0xffc, 12),
         [

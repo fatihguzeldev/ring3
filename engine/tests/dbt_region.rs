@@ -4,7 +4,8 @@ use ring3_engine::cpu::dbt::{
 };
 use ring3_engine::cpu::x86::decode::DecodeError;
 use ring3_engine::memory::{
-    Access, AddressSpace, FaultReason, GuestAddress, PageRange, Permissions,
+    Access, AddressSpace, FaultReason, GuestAddress, MemoryError, MemoryFault, PageRange,
+    Permissions, WordWrite32,
 };
 
 fn range(address: u32, pages: u32) -> PageRange {
@@ -450,6 +451,120 @@ fn warmed_explicit_and_cold_plans_keep_memory_identity_and_code_versions() {
             assert!(!prepared.is_current(&memory));
         }
     }
+}
+
+#[test]
+fn warmed_plan_rejects_mixed_data_and_code_writes_in_both_page_orders() {
+    for code_first in [false, true] {
+        let mut memory = AddressSpace::new(2).unwrap();
+        for (address, executable) in [(0x1000, code_first), (0x2000, !code_first)] {
+            memory
+                .map_zeroed(
+                    range(address, 1),
+                    if executable {
+                        Permissions::ALL
+                    } else {
+                        Permissions::READ_WRITE
+                    },
+                )
+                .unwrap();
+        }
+        memory.write(GuestAddress(0x1fff), &[0x90, 0x90]).unwrap();
+        let entry = if code_first { 0x1fff } else { 0x2000 };
+        let prepared =
+            prepare_region(&memory, &[spec(entry, 1)], CompileLimits::default()).unwrap();
+        assert!(prepared.is_current(&memory));
+
+        memory.write(GuestAddress(0x1fff), &[0x90, 0x90]).unwrap();
+        assert!(!prepared.is_current(&memory));
+        assert!(!prepared.is_current(&memory));
+    }
+}
+
+#[test]
+fn warmed_plan_stays_invalid_after_word_batch_finishes_on_data() {
+    let mut memory = code_memory(0x2000, &[0x90; 4]);
+    for address in [0x1000, 0x3000] {
+        memory
+            .map_zeroed(range(address, 1), Permissions::READ_WRITE)
+            .unwrap();
+    }
+    let prepared = prepare_region(&memory, &[spec(0x2000, 1)], CompileLimits::default()).unwrap();
+    assert!(prepared.is_current(&memory));
+    let words = [
+        WordWrite32 {
+            address: GuestAddress(0x1000),
+            value: 0x1234_5678,
+        },
+        WordWrite32 {
+            address: GuestAddress(0x2000),
+            value: 0x9090_9090,
+        },
+        WordWrite32 {
+            address: GuestAddress(0x3000),
+            value: 0xaabb_ccdd,
+        },
+    ];
+    memory.write_words32(&words).unwrap();
+    for word in words {
+        let mut bytes = [0; 4];
+        memory.read(word.address, &mut bytes).unwrap();
+        assert_eq!(bytes, word.value.to_le_bytes());
+    }
+    assert!(!prepared.is_current(&memory));
+    assert!(!prepared.is_current(&memory));
+}
+
+#[test]
+fn failed_mixed_span_and_word_batch_preserve_memory_and_warmed_plan() {
+    let mut memory = code_memory(0x2000, &[0x90; 4]);
+    for address in [0x1000, 0x3000] {
+        memory
+            .map_zeroed(range(address, 1), Permissions::READ_WRITE)
+            .unwrap();
+    }
+    memory.write(GuestAddress(0x1fff), &[0xa5]).unwrap();
+    memory.write(GuestAddress(0x3000), &[0x5a; 4]).unwrap();
+    memory
+        .protect(range(0x2000, 1), Permissions::READ_EXECUTE)
+        .unwrap();
+    let prepared = prepare_region(&memory, &[spec(0x2000, 1)], CompileLimits::default()).unwrap();
+    assert!(prepared.is_current(&memory));
+    let mut before = [0; 0x3000];
+    memory.read(GuestAddress(0x1000), &mut before).unwrap();
+    let denied = MemoryError::Fault(MemoryFault {
+        address: GuestAddress(0x2000),
+        access: Access::Write,
+        reason: FaultReason::Permission,
+    });
+
+    assert_eq!(memory.write(GuestAddress(0x1fff), &[1, 2]), Err(denied));
+    let mut after = [0; 0x3000];
+    memory.read(GuestAddress(0x1000), &mut after).unwrap();
+    assert_eq!(after, before);
+    assert!(prepared.is_current(&memory));
+
+    assert_eq!(
+        memory.write_words32(&[
+            WordWrite32 {
+                address: GuestAddress(0x1000),
+                value: 0x1234_5678
+            },
+            WordWrite32 {
+                address: GuestAddress(0x2000),
+                value: 0x9090_9090
+            },
+            WordWrite32 {
+                address: GuestAddress(0x3000),
+                value: 0xaabb_ccdd
+            },
+        ]),
+        Err(denied)
+    );
+    memory.read(GuestAddress(0x1000), &mut after).unwrap();
+    assert_eq!(after, before);
+    assert!(prepared.is_current(&memory));
+    assert!(prepared.is_current(&memory));
 }
 
 #[test]

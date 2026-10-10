@@ -9,6 +9,7 @@ pub struct AddressSpace {
     free: Vec<u32>,
     identity: u64,
     version: u64,
+    code_validation_version: u64,
     versions: Box<[PageVersion]>,
 }
 
@@ -17,8 +18,8 @@ impl AddressSpace {
         self.identity
     }
 
-    pub(crate) fn mutation_version(&self) -> u64 {
-        self.version
+    pub(crate) fn code_validation_version(&self) -> u64 {
+        self.code_validation_version
     }
 
     pub fn snapshot_code(
@@ -78,6 +79,7 @@ impl AddressSpace {
             free,
             identity: new_identity()?,
             version: 0,
+            code_validation_version: 0,
             versions,
         })
     }
@@ -135,6 +137,7 @@ impl AddressSpace {
             return Err(MemoryError::Capacity);
         }
         let version = self.advance_version()?;
+        self.code_validation_version = version;
         for page in range.indices() {
             let slot = self.free.pop().unwrap();
             let offset = slot as usize * PAGE_SIZE as usize;
@@ -156,6 +159,7 @@ impl AddressSpace {
     ) -> Result<(), MemoryError> {
         self.require_mapped(range)?;
         let version = self.advance_version()?;
+        self.code_validation_version = version;
         for page in range.indices() {
             let slot = self.mappings[page] as usize - 1;
             self.permissions[slot] = permissions;
@@ -166,7 +170,7 @@ impl AddressSpace {
 
     pub fn unmap(&mut self, range: PageRange) -> Result<(), MemoryError> {
         self.require_mapped(range)?;
-        self.advance_version()?;
+        self.code_validation_version = self.advance_version()?;
         for page in range.indices() {
             let slot = self.mappings[page] - 1;
             self.mappings[page] = 0;
@@ -230,9 +234,13 @@ impl AddressSpace {
             let page = current as usize / PAGE_SIZE as usize;
             let within = current as usize % PAGE_SIZE as usize;
             let count = (PAGE_SIZE as usize - within).min(input.len() - copied);
-            let offset = (self.mappings[page] as usize - 1) * PAGE_SIZE as usize + within;
+            let slot = self.mappings[page] as usize - 1;
+            let offset = slot * PAGE_SIZE as usize + within;
             self.backing[offset..offset + count].copy_from_slice(&input[copied..copied + count]);
-            self.versions[self.mappings[page] as usize - 1].content = version;
+            self.versions[slot].content = version;
+            if self.permissions[slot].allows(Access::Execute) {
+                self.code_validation_version = version;
+            }
             copied += count;
         }
     }
@@ -420,6 +428,75 @@ mod tests {
         );
         assert!(space.is_code_current(&snapshot));
         assert_eq!(space.version, u64::MAX);
+        assert_eq!(space.code_validation_version(), u64::MAX);
+    }
+
+    #[test]
+    fn data_writes_preserve_code_validation_but_consume_the_shared_version_budget() {
+        let mut space = AddressSpace::new(2).unwrap();
+        space
+            .map_zeroed(
+                PageRange::new(GuestAddress(0x1000), 1).unwrap(),
+                Permissions::READ_WRITE,
+            )
+            .unwrap();
+        assert_eq!(space.code_validation_version(), space.version);
+        space
+            .map_zeroed(
+                PageRange::new(GuestAddress(0x2000), 1).unwrap(),
+                Permissions::ALL,
+            )
+            .unwrap();
+        let snapshot = space.snapshot_code(GuestAddress(0x2000), 1).unwrap();
+        let code_version = space.code_validation_version();
+        space.version = u64::MAX - 2;
+
+        space.write(GuestAddress(0x1000), &[1]).unwrap();
+        assert_eq!(space.version, u64::MAX - 1);
+        assert_eq!(space.code_validation_version(), code_version);
+        let crossing = WordWrite32 {
+            address: GuestAddress(0x1ffe),
+            value: 0x4433_2211,
+        };
+        assert_eq!(
+            space.write_words32(&[
+                crossing,
+                WordWrite32 {
+                    address: GuestAddress(0x9000),
+                    value: 0,
+                },
+            ]),
+            Err(fault(
+                GuestAddress(0x9000),
+                Access::Write,
+                FaultReason::Unmapped
+            ))
+        );
+        assert_eq!(space.version, u64::MAX - 1);
+        assert_eq!(space.code_validation_version(), code_version);
+        assert!(space.is_code_current(&snapshot));
+
+        space
+            .write_words32(&[
+                crossing,
+                WordWrite32 {
+                    address: GuestAddress(0x1004),
+                    value: 0,
+                },
+            ])
+            .unwrap();
+        assert_eq!(space.version, u64::MAX);
+        assert_eq!(space.code_validation_version(), u64::MAX);
+        assert!(!space.is_code_current(&snapshot));
+        let current = space.snapshot_code(GuestAddress(0x2000), 1).unwrap();
+        assert_eq!(
+            space.write(GuestAddress(0x2000), &[0]),
+            Err(MemoryError::VersionExhausted)
+        );
+        space.write(GuestAddress(0x2000), &[]).unwrap();
+        space.write_words32(&[]).unwrap();
+        assert!(space.is_code_current(&current));
+        assert_eq!(space.code_validation_version(), u64::MAX);
     }
 
     #[test]

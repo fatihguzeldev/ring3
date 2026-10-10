@@ -94,8 +94,8 @@ impl PreparedRegion {
         if memory.identity() != self.memory_identity {
             return false;
         }
-        let version = memory.mutation_version();
-        // every mapping, permission or content mutation advances the address-space version.
+        let version = memory.code_validation_version();
+        // non-executable writes leave every executable snapshot unchanged.
         if self.validated_version.load(Ordering::Relaxed) == version {
             return true;
         }
