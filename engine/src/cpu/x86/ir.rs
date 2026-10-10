@@ -462,6 +462,10 @@ pub enum Operation {
         left: Register32,
         right: Register32,
     },
+    ExchangeWord {
+        left: Register32,
+        right: Register32,
+    },
     ExchangeAdd {
         destination: Register32,
         source: Register32,

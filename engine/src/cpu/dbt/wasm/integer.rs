@@ -1170,6 +1170,24 @@ pub(super) fn instruction(
                 .i32_or()
                 .local_set(destination);
         }
+        Operation::ExchangeWord { left, right } => {
+            code.local_get(register(left))
+                .i32_const(!0xffff)
+                .i32_and()
+                .local_get(register(right))
+                .i32_const(0xffff)
+                .i32_and()
+                .i32_or()
+                .local_get(register(right))
+                .i32_const(!0xffff)
+                .i32_and()
+                .local_get(register(left))
+                .i32_const(0xffff)
+                .i32_and()
+                .i32_or()
+                .local_set(register(right))
+                .local_set(register(left));
+        }
         Operation::Exchange { left, right } => {
             code.local_get(register(left))
                 .local_get(register(right))

@@ -20,6 +20,7 @@ pub(super) fn lower(instruction: &Instruction, bytes: &[u8]) -> Result<Operation
     check_profile(instruction, bytes)?;
     match instruction.code() {
         Code::Nopd => Ok(Operation::Nop),
+        Code::Nopw => Ok(Operation::Nop),
         Code::Fninit => Ok(Operation::InitializeX87),
         Code::Fnclex => Ok(Operation::ClearX87Exceptions),
         Code::Fnstsw_AX => Ok(Operation::X87StatusToAx),
@@ -368,6 +369,17 @@ pub(super) fn lower(instruction: &Instruction, bytes: &[u8]) -> Result<Operation
         Code::Bswap_r32 => Ok(Operation::ByteSwap {
             destination: register(instruction.op0_register())?,
         }),
+        Code::Xchg_rm16_r16 | Code::Xchg_r16_AX => {
+            if instruction.op0_kind() != OpKind::Register
+                || instruction.op1_kind() != OpKind::Register
+            {
+                return Err(unsupported());
+            }
+            Ok(Operation::ExchangeWord {
+                left: word_register(instruction.op0_register())?,
+                right: word_register(instruction.op1_register())?,
+            })
+        }
         Code::Xchg_rm32_r32 | Code::Xchg_r32_EAX => {
             if instruction.op0_kind() != OpKind::Register
                 || instruction.op1_kind() != OpKind::Register
