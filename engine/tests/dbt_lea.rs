@@ -277,7 +277,7 @@ fn malformed_lea_prefixes_and_adjacent_exclusions_keep_exact_error_categories() 
         InstructionError::Decode(DecodeError::InvalidEncoding),
     );
     for bytes in [
-        &[0x66, 0x8d, 0x03][..],
+        &[0x66, 0x66, 0x8d, 0x03][..],
         &[0x67, 0x8d, 0x03][..],
         &[0xf3, 0x8d, 0x03][..],
     ] {
