@@ -260,6 +260,20 @@ pub(super) fn check_profile(instruction: &Instruction, bytes: &[u8]) -> Result<(
         _ => false,
     };
     let exact_word_rotate = match (instruction.code(), bytes) {
+        (Code::Rol_rm16_1, [0x66, 0xd1, modrm, ..])
+        | (Code::Rol_rm16_CL, [0x66, 0xd3, modrm, ..])
+        | (Code::Rol_rm16_imm8, [0x66, 0xc1, modrm, ..])
+            if *modrm & 0xc0 != 0xc0 =>
+        {
+            *modrm & 0x38 == 0
+        }
+        (Code::Ror_rm16_1, [0x66, 0xd1, modrm, ..])
+        | (Code::Ror_rm16_CL, [0x66, 0xd3, modrm, ..])
+        | (Code::Ror_rm16_imm8, [0x66, 0xc1, modrm, ..])
+            if *modrm & 0xc0 != 0xc0 =>
+        {
+            *modrm & 0x38 == 0x08
+        }
         (Code::Rol_rm16_1, [0x66, 0xd1, modrm])
         | (Code::Rol_rm16_CL, [0x66, 0xd3, modrm])
         | (Code::Rol_rm16_imm8, [0x66, 0xc1, modrm, _]) => *modrm & 0xf8 == 0xc0,

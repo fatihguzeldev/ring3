@@ -510,6 +510,15 @@ fn lower_word_rotate(instruction: &Instruction) -> Option<Result<Operation, Deco
         Code::Ror_rm16_CL => (RotateKind::Right, ShiftCount::Cl),
         _ => return None,
     };
+    if instruction.op0_kind() == OpKind::Memory {
+        return Some(
+            effective_address(instruction).map(|address| Operation::MemoryRotateWord {
+                kind,
+                address,
+                count,
+            }),
+        );
+    }
     Some(
         word_register(instruction.op0_register()).map(|destination| Operation::RotateWord {
             kind,

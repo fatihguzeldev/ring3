@@ -1502,6 +1502,14 @@ pub(super) fn instruction(
             destination,
             count,
         } => rotate_word(code, kind, destination, count),
+        Operation::MemoryRotateWord {
+            kind,
+            address,
+            count,
+        } => {
+            rotate_memory_word(code, kind, address, count, imports, exit_depth);
+            store = true;
+        }
         Operation::RotateThroughCarryWord {
             kind,
             destination,
@@ -2560,9 +2568,41 @@ fn rotate_word(
     word_value(code, WordValue::Register(destination));
     code.local_set(RESULT);
     shift_count(code, count);
-    code.local_tee(RHS)
-        .if_(BlockType::Empty)
-        .local_get(RHS)
+    code.local_tee(RHS).if_(BlockType::Empty);
+    rotate_word_value(code, kind);
+    rotate_word_flags(code, kind);
+    code.local_get(RESULT)
+        .local_get(register(destination))
+        .i32_const(!0xffff)
+        .i32_and()
+        .i32_or()
+        .local_set(register(destination))
+        .end();
+}
+
+fn rotate_memory_word(
+    code: &mut InstructionSink<'_>,
+    kind: RotateKind,
+    address: EffectiveAddress,
+    count: ShiftCount,
+    imports: memory::Imports,
+    exit_depth: u32,
+) {
+    memory::load_narrow_value(code, address, SmallWidth::Word, imports, exit_depth);
+    code.local_set(RESULT);
+    shift_count(code, count);
+    code.local_set(RHS);
+    rotate_word_value(code, kind);
+    // flags use the original masked count, preserved across checked-store scratch.
+    code.local_get(RHS);
+    memory::store_word_result(code, address, imports, exit_depth);
+    code.local_set(RHS).local_get(RHS).if_(BlockType::Empty);
+    rotate_word_flags(code, kind);
+    code.end();
+}
+
+fn rotate_word_value(code: &mut InstructionSink<'_>, kind: RotateKind) {
+    code.local_get(RHS)
         .i32_const(15)
         .i32_and()
         .local_set(LHS)
@@ -2584,11 +2624,11 @@ fn rotate_word(
             code.local_get(LHS).i32_shr_u();
         }
     }
-    code.i32_or()
-        .i32_const(0xffff)
-        .i32_and()
-        .local_set(RESULT)
-        .local_get(FLAGS)
+    code.i32_or().i32_const(0xffff).i32_and().local_set(RESULT);
+}
+
+fn rotate_word_flags(code: &mut InstructionSink<'_>, kind: RotateKind) {
+    code.local_get(FLAGS)
         .i32_const(!0x801)
         .i32_and()
         .local_get(RESULT)
@@ -2617,13 +2657,6 @@ fn rotate_word(
         .i32_shl()
         .i32_or()
         .local_set(FLAGS)
-        .end()
-        .local_get(RESULT)
-        .local_get(register(destination))
-        .i32_const(!0xffff)
-        .i32_and()
-        .i32_or()
-        .local_set(register(destination))
         .end();
 }
 
