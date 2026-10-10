@@ -50,7 +50,7 @@ impl EngineInstance {
             return Ok(*installed);
         }
         let installed = ResidentInstallation { unit_id: id, slot };
-        // occupied slots persist until explicit stale retirement or close.
+        // occupied slots persist until explicit discard, stale retirement or close.
         self.resident_installations[slot as usize] = Some(installed);
         Ok(installed)
     }
