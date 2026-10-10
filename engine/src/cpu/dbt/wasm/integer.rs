@@ -623,6 +623,24 @@ pub(super) fn instruction(
                 .i32_or()
                 .local_set(register(destination));
         }
+        Operation::MemoryLogicalWord {
+            kind,
+            address,
+            source,
+        } => {
+            memory::load_narrow_value(code, address, SmallWidth::Word, imports, exit_depth);
+            // helper validation uses operand scratch; capture the source after success.
+            word_value(code, WordValue::Register(source));
+            match kind {
+                WordLogicalKind::And => code.i32_and(),
+                WordLogicalKind::Or => code.i32_or(),
+                WordLogicalKind::Xor => code.i32_xor(),
+            };
+            code.local_set(RESULT);
+            memory::store_word_result(code, address, imports, exit_depth);
+            logical_flags(code, 15);
+            store = true;
+        }
         Operation::ReadLogicalWord {
             kind,
             destination,

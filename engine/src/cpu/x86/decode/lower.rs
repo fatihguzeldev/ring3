@@ -158,6 +158,13 @@ pub(super) fn lower(instruction: &Instruction, bytes: &[u8]) -> Result<Operation
                 address: effective_address(instruction)?,
             })
         }
+        Code::And_rm16_r16 if instruction.op0_kind() == OpKind::Memory => {
+            Ok(Operation::MemoryLogicalWord {
+                kind: WordLogicalKind::And,
+                address: effective_address(instruction)?,
+                source: word_register(instruction.op1_register())?,
+            })
+        }
         Code::And_rm16_r16
         | Code::And_r16_rm16
         | Code::And_AX_imm16
@@ -174,6 +181,13 @@ pub(super) fn lower(instruction: &Instruction, bytes: &[u8]) -> Result<Operation
                 address: effective_address(instruction)?,
             })
         }
+        Code::Or_rm16_r16 if instruction.op0_kind() == OpKind::Memory => {
+            Ok(Operation::MemoryLogicalWord {
+                kind: WordLogicalKind::Or,
+                address: effective_address(instruction)?,
+                source: word_register(instruction.op1_register())?,
+            })
+        }
         Code::Or_rm16_r16
         | Code::Or_r16_rm16
         | Code::Or_AX_imm16
@@ -188,6 +202,13 @@ pub(super) fn lower(instruction: &Instruction, bytes: &[u8]) -> Result<Operation
                 kind: WordLogicalKind::Xor,
                 destination: word_register(instruction.op0_register())?,
                 address: effective_address(instruction)?,
+            })
+        }
+        Code::Xor_rm16_r16 if instruction.op0_kind() == OpKind::Memory => {
+            Ok(Operation::MemoryLogicalWord {
+                kind: WordLogicalKind::Xor,
+                address: effective_address(instruction)?,
+                source: word_register(instruction.op1_register())?,
             })
         }
         Code::Xor_rm16_r16

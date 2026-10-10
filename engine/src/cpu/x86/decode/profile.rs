@@ -125,6 +125,13 @@ pub(super) fn check_profile(instruction: &Instruction, bytes: &[u8]) -> Result<(
         _ => false,
     };
     let exact_word_logical = match (instruction.code(), bytes) {
+        (Code::And_rm16_r16, [0x66, 0x21, modrm, ..])
+        | (Code::Or_rm16_r16, [0x66, 0x09, modrm, ..])
+        | (Code::Xor_rm16_r16, [0x66, 0x31, modrm, ..])
+            if *modrm & 0xc0 != 0xc0 =>
+        {
+            true
+        }
         (Code::And_r16_rm16, [0x66, 0x23, modrm, ..])
         | (Code::Or_r16_rm16, [0x66, 0x0b, modrm, ..])
         | (Code::Xor_r16_rm16, [0x66, 0x33, modrm, ..])

@@ -318,6 +318,11 @@ pub enum Operation {
         destination: Register32,
         address: EffectiveAddress,
     },
+    MemoryLogicalWord {
+        kind: WordLogicalKind,
+        address: EffectiveAddress,
+        source: Register32,
+    },
     CompareWord {
         left: Register32,
         right: WordValue,
