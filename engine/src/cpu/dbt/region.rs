@@ -310,6 +310,7 @@ fn supports_memory_reads(operation: &Operation) -> bool {
             | Operation::LoadWord { .. }
             | Operation::MemoryCompareWord { .. }
             | Operation::ReadCompareWord { .. }
+            | Operation::ReadArithmeticWord { .. }
             | Operation::MemoryTestWord { .. }
             | Operation::LoadStringByte
             | Operation::LoadStringWord
