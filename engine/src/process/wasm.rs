@@ -418,6 +418,18 @@ pub(crate) fn discard_unacknowledged_resident(
     mutate(|instance| instance.discard_unacknowledged_resident(key, id))
 }
 
+pub(crate) fn discard_installed_resident(
+    key_low: u32,
+    key_high: u32,
+    id_low: u32,
+    id_high: u32,
+    expected_slot: u32,
+) -> u32 {
+    let key = u64::from(key_low) | (u64::from(key_high) << 32);
+    let id = u64::from(id_low) | (u64::from(id_high) << 32);
+    mutate(|instance| instance.discard_installed_resident(key, id, expected_slot))
+}
+
 pub(crate) fn retire_stale_resident(key_low: u32, key_high: u32, id_low: u32, id_high: u32) -> u32 {
     let key = u64::from(key_low) | (u64::from(key_high) << 32);
     let id = u64::from(id_low) | (u64::from(id_high) << 32);

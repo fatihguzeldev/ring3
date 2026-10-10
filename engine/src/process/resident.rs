@@ -45,6 +45,47 @@ impl EngineInstance {
             .map_err(HostError::Resident)
     }
 
+    /// call only after generated execution returns and the host clears the victim slot.
+    /// discarded module pointers expire; cached host references do not certify quiescence.
+    pub fn discard_installed_resident(
+        &mut self,
+        key: u64,
+        id: u64,
+        expected_slot: u32,
+    ) -> Result<(), HostError> {
+        self.memory()?;
+        if key != self.key {
+            return Err(HostError::InvalidArtifact);
+        }
+        if self.pending_call.is_some() || self.callback.is_some() {
+            return Err(HostError::Call(CallError::Busy));
+        }
+        let memory = self.memory.as_ref().ok_or(HostError::Closed)?;
+        self.resident
+            .as_ref()
+            .ok_or(HostError::Resident(RegistryError::InvalidUnit))?
+            .get_raw(memory, id)
+            .map_err(HostError::Resident)?;
+        let slot = expected_slot as usize;
+        if !self
+            .resident_installations
+            .get(slot)
+            .is_some_and(|installed| installed.is_some_and(|entry| entry.unit_id == id))
+        {
+            return Err(HostError::InvalidRequest);
+        }
+        if self.call_cancelled() {
+            return Err(HostError::Call(CallError::Cancelled));
+        }
+        self.resident
+            .as_mut()
+            .ok_or(HostError::Resident(RegistryError::InvalidUnit))?
+            .discard_current_raw(memory, id)
+            .map_err(HostError::Resident)?;
+        self.resident_installations[slot] = None;
+        Ok(())
+    }
+
     /// call only after generated execution returns; retired module pointers expire.
     pub fn retire_stale_resident(&mut self, key: u64, id: u64) -> Result<(), HostError> {
         self.memory()?;

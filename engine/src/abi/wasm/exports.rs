@@ -285,6 +285,27 @@ pub extern "C" fn resident_module(low: u32, high: u32) -> u32 {
 }
 
 #[allow(unsafe_code)]
+#[unsafe(export_name = "ring3_abi_v1_discard_installed_resident")]
+pub extern "C" fn discard_installed_resident(
+    key_low: u32,
+    key_high: u32,
+    id_low: u32,
+    id_high: u32,
+    expected_slot: u32,
+) -> u32 {
+    {
+        #![forbid(unsafe_code)]
+        crate::process::wasm::discard_installed_resident(
+            key_low,
+            key_high,
+            id_low,
+            id_high,
+            expected_slot,
+        )
+    }
+}
+
+#[allow(unsafe_code)]
 #[unsafe(export_name = "ring3_abi_v1_retire_stale_resident")]
 pub extern "C" fn retire_stale_resident(
     key_low: u32,
