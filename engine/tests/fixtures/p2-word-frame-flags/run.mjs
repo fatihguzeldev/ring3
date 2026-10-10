@@ -283,7 +283,7 @@ assert.deepEqual(counts, {contexts: 12, runs: 1416, retired: 1306, flag_inputs: 
 assert.equal(modules.length, 36);
 const result = {status: 'ok', engine_sha256: engine.sha256, source_pins: sourcePins, counts, modules,
   limits: [
-    'finite exact single66 PUSHFW/LEAVEW four bound profiles; standalone/POPF/indirect/far WORD control/16bit-stack remain closed',
+    'finite exact single66 PUSHFW/LEAVEW four bound profiles; standalone/POPF/indirect CALL/far WORD control/16bit-stack remain closed',
     'independent BigInt wrapping ESP, original fullEBP/own-high, FLAGS-image and little-endian model;13 literal anchors and all128 valid FLAGS per form',
     'seven read/store faults with prior retirement/unchanged retry and map/protect-only repair; separate explicit current FLAGS/ESP or RAM/fullEBP/high inputs',
     'live two distinct saved FLAGS images and returned frames consumed without CPU reseed; own RX LEAVE reads with PC-only repeat do not store/invalidate',
