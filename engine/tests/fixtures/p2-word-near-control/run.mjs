@@ -395,7 +395,7 @@ assert.deepEqual(counts, {contexts: 18, runs: 2098, retired: 2024, flag_inputs: 
   retained: 4, self_code: 24, dispatcher: 2, helper_calls: 2050}, 'authored finite counts and observed forwarded helper total');
 assert.equal(modules.length, 38);
 const result = {status: 'ok', engine_sha256: engine.sha256, source_pins: sourcePins, counts, modules, observations, limits: [
-  'exact single66 direct CALLrel16/plainRET/RETimm16 in four bound profiles; indirect/far/WORDJcc/segmentation/CET remain outside',
+  'exact single66 direct CALLrel16/plainRET/RETimm16 in four bound profiles; indirect/far/segmentation/CET remain outside',
   'independent BigInt target/return16/fullESP oracle, high-PC and completed top fetch, unsigned cleanup, all128 valid FLAGS per form',
   'observed canonical read16V2/store16V4 forwarding and resident binding identity; cold target is not fetched by CALL/RET',
   'seven read/store fault classes with prior retirement/unchanged retry/honest map-protect-only repair, separate explicit current inputs; overflow observes top and wrapped RAM canaries after each failure',
