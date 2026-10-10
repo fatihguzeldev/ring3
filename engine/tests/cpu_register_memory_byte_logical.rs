@@ -716,7 +716,7 @@ fn excluded() -> Vec<(Vec<u8>, DecodeError)> {
             bytes.extend(&instruction);
             forms.push((bytes, opcode));
         }
-        forms.push((vec![0x66, instruction_opcode + 1, 0x03], opcode));
+        forms.push((vec![0x66, 0x66, instruction_opcode + 1, 0x03], opcode));
         for modrm in [0x03, 0xc0] {
             forms.push((
                 vec![0xf0, instruction_opcode, modrm],

@@ -96,6 +96,7 @@ impl Imports {
                 Operation::MemoryCompareWord { .. }
                 | Operation::ReadCompareWord { .. }
                 | Operation::ReadArithmeticWord { .. }
+                | Operation::ReadLogicalWord { .. }
                 | Operation::MemoryTestWord { .. }
                 | Operation::ReadConditionalMoveWord { .. }
                 | Operation::LoadWord { .. }

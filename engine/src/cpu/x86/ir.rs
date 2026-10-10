@@ -313,6 +313,11 @@ pub enum Operation {
         destination: Register32,
         source: WordValue,
     },
+    ReadLogicalWord {
+        kind: WordLogicalKind,
+        destination: Register32,
+        address: EffectiveAddress,
+    },
     CompareWord {
         left: Register32,
         right: WordValue,
