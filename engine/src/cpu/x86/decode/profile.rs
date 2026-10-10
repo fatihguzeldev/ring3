@@ -86,6 +86,25 @@ pub(super) fn check_profile(instruction: &Instruction, bytes: &[u8]) -> Result<(
             | (Code::Jmp_rel16, [0x66, 0xe9, _, _])
             | (Code::Retnw, [0x66, 0xc3])
             | (Code::Retnw_imm16, [0x66, 0xc2, _, _])
+            | (
+                Code::Jo_rel16
+                    | Code::Jno_rel16
+                    | Code::Jb_rel16
+                    | Code::Jae_rel16
+                    | Code::Je_rel16
+                    | Code::Jne_rel16
+                    | Code::Jbe_rel16
+                    | Code::Ja_rel16
+                    | Code::Js_rel16
+                    | Code::Jns_rel16
+                    | Code::Jp_rel16
+                    | Code::Jnp_rel16
+                    | Code::Jl_rel16
+                    | Code::Jge_rel16
+                    | Code::Jle_rel16
+                    | Code::Jg_rel16,
+                [0x66, 0x0f, 0x80..=0x8f, _, _],
+            )
     );
     let exact_word_stack = match (instruction.code(), bytes) {
         (Code::Push_r16, [0x66, 0x50..=0x57])

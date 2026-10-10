@@ -185,7 +185,11 @@ pub(super) fn lower(instruction: &Instruction) -> Result<Operation, DecodeError>
         }
         code => Operation::ConditionalJump {
             condition: condition(code)?,
-            target: GuestAddress(instruction.near_branch32()),
+            target: GuestAddress(if instruction.op0_kind() == OpKind::NearBranch16 {
+                u32::from(instruction.near_branch16())
+            } else {
+                instruction.near_branch32()
+            }),
         },
     })
 }
@@ -193,81 +197,97 @@ pub(super) fn lower(instruction: &Instruction) -> Result<Operation, DecodeError>
 fn condition(code: Code) -> Result<Condition, DecodeError> {
     Ok(match code {
         Code::Jo_rel8_32
+        | Code::Jo_rel16
         | Code::Jo_rel32_32
         | Code::Seto_rm8
         | Code::Cmovo_r16_rm16
         | Code::Cmovo_r32_rm32 => Condition::Overflow,
         Code::Jno_rel8_32
+        | Code::Jno_rel16
         | Code::Jno_rel32_32
         | Code::Setno_rm8
         | Code::Cmovno_r16_rm16
         | Code::Cmovno_r32_rm32 => Condition::NotOverflow,
         Code::Jb_rel8_32
+        | Code::Jb_rel16
         | Code::Jb_rel32_32
         | Code::Setb_rm8
         | Code::Cmovb_r16_rm16
         | Code::Cmovb_r32_rm32 => Condition::Below,
         Code::Jae_rel8_32
+        | Code::Jae_rel16
         | Code::Jae_rel32_32
         | Code::Setae_rm8
         | Code::Cmovae_r16_rm16
         | Code::Cmovae_r32_rm32 => Condition::AboveOrEqual,
         Code::Je_rel8_32
+        | Code::Je_rel16
         | Code::Je_rel32_32
         | Code::Sete_rm8
         | Code::Cmove_r16_rm16
         | Code::Cmove_r32_rm32 => Condition::Equal,
         Code::Jne_rel8_32
+        | Code::Jne_rel16
         | Code::Jne_rel32_32
         | Code::Setne_rm8
         | Code::Cmovne_r16_rm16
         | Code::Cmovne_r32_rm32 => Condition::NotEqual,
         Code::Jbe_rel8_32
+        | Code::Jbe_rel16
         | Code::Jbe_rel32_32
         | Code::Setbe_rm8
         | Code::Cmovbe_r16_rm16
         | Code::Cmovbe_r32_rm32 => Condition::BelowOrEqual,
         Code::Ja_rel8_32
+        | Code::Ja_rel16
         | Code::Ja_rel32_32
         | Code::Seta_rm8
         | Code::Cmova_r16_rm16
         | Code::Cmova_r32_rm32 => Condition::Above,
         Code::Js_rel8_32
+        | Code::Js_rel16
         | Code::Js_rel32_32
         | Code::Sets_rm8
         | Code::Cmovs_r16_rm16
         | Code::Cmovs_r32_rm32 => Condition::Sign,
         Code::Jns_rel8_32
+        | Code::Jns_rel16
         | Code::Jns_rel32_32
         | Code::Setns_rm8
         | Code::Cmovns_r16_rm16
         | Code::Cmovns_r32_rm32 => Condition::NotSign,
         Code::Jp_rel8_32
+        | Code::Jp_rel16
         | Code::Jp_rel32_32
         | Code::Setp_rm8
         | Code::Cmovp_r16_rm16
         | Code::Cmovp_r32_rm32 => Condition::Parity,
         Code::Jnp_rel8_32
+        | Code::Jnp_rel16
         | Code::Jnp_rel32_32
         | Code::Setnp_rm8
         | Code::Cmovnp_r16_rm16
         | Code::Cmovnp_r32_rm32 => Condition::NotParity,
         Code::Jl_rel8_32
+        | Code::Jl_rel16
         | Code::Jl_rel32_32
         | Code::Setl_rm8
         | Code::Cmovl_r16_rm16
         | Code::Cmovl_r32_rm32 => Condition::Less,
         Code::Jge_rel8_32
+        | Code::Jge_rel16
         | Code::Jge_rel32_32
         | Code::Setge_rm8
         | Code::Cmovge_r16_rm16
         | Code::Cmovge_r32_rm32 => Condition::GreaterOrEqual,
         Code::Jle_rel8_32
+        | Code::Jle_rel16
         | Code::Jle_rel32_32
         | Code::Setle_rm8
         | Code::Cmovle_r16_rm16
         | Code::Cmovle_r32_rm32 => Condition::LessOrEqual,
         Code::Jg_rel8_32
+        | Code::Jg_rel16
         | Code::Jg_rel32_32
         | Code::Setg_rm8
         | Code::Cmovg_r16_rm16
