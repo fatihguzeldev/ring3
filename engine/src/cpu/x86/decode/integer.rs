@@ -349,6 +349,15 @@ fn lower_shift(instruction: &Instruction) -> Option<Result<Operation, DecodeErro
         _ => None,
     };
     if let Some((kind, count)) = word_shift {
+        if instruction.op0_kind() == OpKind::Memory {
+            return Some(effective_address(instruction).map(|address| {
+                Operation::MemoryShiftWord {
+                    kind,
+                    address,
+                    count,
+                }
+            }));
+        }
         return Some(
             word_register(instruction.op0_register()).map(|destination| Operation::ShiftWord {
                 kind,

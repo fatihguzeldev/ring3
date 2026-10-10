@@ -1512,6 +1512,14 @@ pub(super) fn instruction(
             destination,
             count,
         } => shift_word(code, kind, destination, count),
+        Operation::MemoryShiftWord {
+            kind,
+            address,
+            count,
+        } => {
+            shift_memory_word(code, kind, address, count, imports, exit_depth);
+            store = true;
+        }
         Operation::ShiftByte {
             kind,
             destination,
@@ -2721,6 +2729,30 @@ fn shift_word(
         .i32_or()
         .local_set(register(destination))
         .end();
+}
+
+fn shift_memory_word(
+    code: &mut InstructionSink<'_>,
+    kind: ShiftKind,
+    address: EffectiveAddress,
+    count: ShiftCount,
+    imports: memory::Imports,
+    exit_depth: u32,
+) {
+    memory::load_narrow_value(code, address, SmallWidth::Word, imports, exit_depth);
+    code.local_set(LHS);
+    shift_count(code, count);
+    code.local_set(RHS);
+    shift_word_value(code, kind);
+    // checked store clobbers operand scratch; preserve the lossy inputs on the operand stack.
+    code.local_get(LHS).local_get(RHS);
+    memory::store_word_result(code, address, imports, exit_depth);
+    code.local_set(RHS)
+        .local_set(LHS)
+        .local_get(RHS)
+        .if_(BlockType::Empty);
+    shift_word_flags(code, kind);
+    code.end();
 }
 
 fn shift_word_value(code: &mut InstructionSink<'_>, kind: ShiftKind) {
