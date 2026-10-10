@@ -298,10 +298,12 @@ fn supports_stack_values(operation: &Operation) -> bool {
             | Operation::PushWord { .. }
             | Operation::PushMemoryWord { .. }
             | Operation::PushFlags
+            | Operation::PushFlagsWord
             | Operation::Pop { .. }
             | Operation::PopWord { .. }
             | Operation::PopMemoryWord { .. }
             | Operation::Leave
+            | Operation::LeaveWord
     )
 }
 

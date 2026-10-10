@@ -839,6 +839,7 @@ pub enum Operation {
         source: EffectiveAddress,
     },
     PushFlags,
+    PushFlagsWord,
     Pop {
         destination: Location32,
     },
@@ -849,6 +850,7 @@ pub enum Operation {
         destination: EffectiveAddress,
     },
     Leave,
+    LeaveWord,
     Return {
         stack_adjust: u16,
     },

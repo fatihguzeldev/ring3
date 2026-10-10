@@ -84,7 +84,9 @@ pub(super) fn check_profile(instruction: &Instruction, bytes: &[u8]) -> Result<(
         (Code::Push_r16, [0x66, 0x50..=0x57])
         | (Code::Pop_r16, [0x66, 0x58..=0x5f])
         | (Code::Push_imm16, [0x66, 0x68, _, _])
-        | (Code::Pushw_imm8, [0x66, 0x6a, _]) => true,
+        | (Code::Pushw_imm8, [0x66, 0x6a, _])
+        | (Code::Pushfw, [0x66, 0x9c])
+        | (Code::Leavew, [0x66, 0xc9]) => true,
         (Code::Push_rm16, [0x66, 0xff, modrm, ..]) => *modrm & 0x38 == 0x30,
         (Code::Pop_rm16, [0x66, 0x8f, modrm, ..]) => *modrm & 0x38 == 0,
         _ => false,

@@ -60,6 +60,7 @@ pub(super) fn lower(instruction: &Instruction) -> Result<Operation, DecodeError>
             }
         }
         Code::Pushfd => Operation::PushFlags,
+        Code::Pushfw => Operation::PushFlagsWord,
         Code::Pop_r32 | Code::Pop_rm32 => Operation::Pop {
             destination: location(instruction, 0)?,
         },
@@ -73,6 +74,7 @@ pub(super) fn lower(instruction: &Instruction) -> Result<Operation, DecodeError>
             _ => return Err(unsupported()),
         },
         Code::Leaved => Operation::Leave,
+        Code::Leavew => Operation::LeaveWord,
         Code::Retnd => Operation::Return { stack_adjust: 0 },
         Code::Retnd_imm16 => Operation::Return {
             stack_adjust: instruction.immediate16(),

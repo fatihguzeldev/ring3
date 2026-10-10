@@ -2178,6 +2178,14 @@ pub(super) fn instruction(
             code.local_get(ADDRESS).local_set(register(Register32::Esp));
             store = true;
         }
+        Operation::PushFlagsWord => {
+            code.local_get(FLAGS)
+                .i32_const(0xffff)
+                .i32_and()
+                .local_set(RESULT);
+            memory::push_word_result(code, imports, exit_depth);
+            store = true;
+        }
         Operation::Pop {
             destination: Location32::Register(destination),
         } => {
@@ -2213,6 +2221,29 @@ pub(super) fn instruction(
                 .i32_add()
                 .local_set(register(Register32::Esp))
                 .local_get(RESULT)
+                .local_set(register(Register32::Ebp));
+        }
+        Operation::LeaveWord => {
+            memory::load_narrow_value(
+                code,
+                EffectiveAddress {
+                    base: Some(Register32::Ebp),
+                    index: None,
+                    scale: 1,
+                    displacement: 0,
+                },
+                SmallWidth::Word,
+                imports,
+                exit_depth,
+            );
+            code.local_get(ADDRESS)
+                .i32_const(2)
+                .i32_add()
+                .local_set(register(Register32::Esp))
+                .local_get(register(Register32::Ebp))
+                .i32_const(!0xffff)
+                .i32_and()
+                .i32_or()
                 .local_set(register(Register32::Ebp));
         }
         Operation::Return { stack_adjust } => {
