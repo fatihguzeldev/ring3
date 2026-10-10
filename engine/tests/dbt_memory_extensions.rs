@@ -343,7 +343,7 @@ fn standalone_memory_conversion_remains_excluded_in_explicit_and_entry_apis() {
 fn embedded_small_width_prefix_and_adjacent_errors_remain_precise() {
     for (instruction, cause) in [
         (
-            &[0x66, 0x0f, 0xb6, 0x03][..],
+            &[0x66, 0x66, 0x0f, 0xb6, 0x03][..],
             InstructionError::Decode(DecodeError::Unsupported(UnsupportedFeature::Opcode)),
         ),
         (
