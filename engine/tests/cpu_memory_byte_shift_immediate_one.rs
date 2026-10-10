@@ -448,7 +448,7 @@ fn raw_immediate_domain_and_strict_memory_neighbors_preserve_decode_boundaries()
             exclusions += 1;
         }
         rejected(&[0x66, 0xd2, modrm], opcode);
-        rejected(&[0x66, 0xc1, modrm, 33], opcode);
+        rejected(&[0x66, 0x66, 0xc1, modrm, 33], opcode);
         exclusions += 2;
     }
     for extension in [0, 1, 2, 3, 6] {

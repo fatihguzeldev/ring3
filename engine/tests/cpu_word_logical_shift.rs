@@ -280,6 +280,7 @@ fn word_logical_shift_strict_fetch_top_and_consumed_currency_stay_exact() {
         }
         let mut memory = instruction.to_vec();
         memory[2] &= 0x3f;
+        memory.insert(0, 0x66);
         assert_eq!(
             decode_one(fixture(PC, &memory).memory().unwrap(), GuestAddress(PC)).unwrap_err(),
             unsupported
