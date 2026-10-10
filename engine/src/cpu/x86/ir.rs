@@ -689,6 +689,16 @@ pub enum Operation {
         destination: Register32,
         address: EffectiveAddress,
     },
+    SignedMultiplyImmediateWord {
+        destination: Register32,
+        source: Register32,
+        immediate: u16,
+    },
+    ReadSignedMultiplyImmediateWord {
+        destination: Register32,
+        address: EffectiveAddress,
+        immediate: u16,
+    },
     MultiplyAccumulator {
         kind: MultiplyKind,
         source: Register32,

@@ -332,6 +332,8 @@ pub(super) fn check_profile(instruction: &Instruction, bytes: &[u8]) -> Result<(
     let exact_word_signed_multiply = matches!(
         (instruction.code(), bytes),
         (Code::Imul_r16_rm16, [0x66, 0x0f, 0xaf, _, ..])
+            | (Code::Imul_r16_rm16_imm16, [0x66, 0x69, _, ..])
+            | (Code::Imul_r16_rm16_imm8, [0x66, 0x6b, _, ..])
     );
     let exact_word_conditional_move = matches!(
         (instruction.code(), bytes),

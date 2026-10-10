@@ -101,6 +101,7 @@ impl Imports {
                 | Operation::ReadConditionalMoveWord { .. }
                 | Operation::ReadBitScanWord { .. }
                 | Operation::ReadSignedMultiplyWord { .. }
+                | Operation::ReadSignedMultiplyImmediateWord { .. }
                 | Operation::LoadWord { .. }
                 | Operation::LoadStringWord
                 | Operation::CompareStringWord

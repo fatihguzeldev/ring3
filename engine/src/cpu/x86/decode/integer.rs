@@ -202,6 +202,7 @@ pub(super) fn lower(instruction: &Instruction) -> Option<Result<Operation, Decod
                 .or_else(|| lower_divide(instruction))
                 .or_else(|| lower_multiply(instruction))
                 .or_else(|| lower_word_signed_multiply(instruction))
+                .or_else(|| lower_word_signed_multiply_immediate(instruction))
                 .or_else(|| lower_memory_shift_byte_immediate(instruction))
                 .or_else(|| lower_memory_shift_byte_cl(instruction))
                 .or_else(|| lower_shift(instruction))
@@ -1022,6 +1023,32 @@ fn lower_word_signed_multiply(instruction: &Instruction) -> Option<Result<Operat
             OpKind::Memory => Ok(Operation::ReadSignedMultiplyWord {
                 destination,
                 address: effective_address(instruction)?,
+            }),
+            _ => Err(unsupported()),
+        }
+    })())
+}
+
+fn lower_word_signed_multiply_immediate(
+    instruction: &Instruction,
+) -> Option<Result<Operation, DecodeError>> {
+    let immediate = match instruction.code() {
+        Code::Imul_r16_rm16_imm16 => instruction.immediate16(),
+        Code::Imul_r16_rm16_imm8 => instruction.immediate8to16() as u16,
+        _ => return None,
+    };
+    Some((|| {
+        let destination = word_register(instruction.op0_register())?;
+        match instruction.op1_kind() {
+            OpKind::Register => Ok(Operation::SignedMultiplyImmediateWord {
+                destination,
+                source: word_register(instruction.op1_register())?,
+                immediate,
+            }),
+            OpKind::Memory => Ok(Operation::ReadSignedMultiplyImmediateWord {
+                destination,
+                address: effective_address(instruction)?,
+                immediate,
             }),
             _ => Err(unsupported()),
         }

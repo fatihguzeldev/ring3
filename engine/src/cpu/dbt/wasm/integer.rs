@@ -1837,7 +1837,7 @@ pub(super) fn instruction(
             destination,
             source,
         } => {
-            signed_multiply_word(code, destination, register(source));
+            signed_multiply_word(code, destination, register(source), None);
         }
         Operation::ReadSignedMultiplyWord {
             destination,
@@ -1845,7 +1845,23 @@ pub(super) fn instruction(
         } => {
             memory::load_narrow_value(code, address, SmallWidth::Word, imports, exit_depth);
             code.local_set(RESULT);
-            signed_multiply_word(code, destination, RESULT);
+            signed_multiply_word(code, destination, RESULT, None);
+        }
+        Operation::SignedMultiplyImmediateWord {
+            destination,
+            source,
+            immediate,
+        } => {
+            signed_multiply_word(code, destination, register(source), Some(immediate));
+        }
+        Operation::ReadSignedMultiplyImmediateWord {
+            destination,
+            address,
+            immediate,
+        } => {
+            memory::load_narrow_value(code, address, SmallWidth::Word, imports, exit_depth);
+            code.local_set(RESULT);
+            signed_multiply_word(code, destination, RESULT, Some(immediate));
         }
         Operation::MultiplyAccumulator { kind, source } => {
             accumulator_multiply(code, kind, register(source));
@@ -4935,20 +4951,39 @@ fn divide_error_if(code: &mut InstructionSink<'_>, exit_depth: u32) {
         .end();
 }
 
-fn signed_multiply_word(code: &mut InstructionSink<'_>, destination: Register32, source: u32) {
-    code.local_get(register(destination))
-        .i32_const(16)
-        .i32_shl()
-        .i32_const(16)
-        .i32_shr_s()
-        .local_set(LHS)
-        .local_get(source)
-        .i32_const(16)
-        .i32_shl()
-        .i32_const(16)
-        .i32_shr_s()
-        .local_set(RHS)
-        .local_get(LHS)
+fn signed_multiply_word(
+    code: &mut InstructionSink<'_>,
+    destination: Register32,
+    source: u32,
+    immediate: Option<u16>,
+) {
+    match immediate {
+        Some(immediate) => {
+            code.local_get(source)
+                .i32_const(16)
+                .i32_shl()
+                .i32_const(16)
+                .i32_shr_s()
+                .local_set(LHS)
+                .i32_const(i32::from(immediate as i16))
+                .local_set(RHS);
+        }
+        None => {
+            code.local_get(register(destination))
+                .i32_const(16)
+                .i32_shl()
+                .i32_const(16)
+                .i32_shr_s()
+                .local_set(LHS)
+                .local_get(source)
+                .i32_const(16)
+                .i32_shl()
+                .i32_const(16)
+                .i32_shr_s()
+                .local_set(RHS);
+        }
+    }
+    code.local_get(LHS)
         .local_get(RHS)
         .i32_mul()
         .local_set(RESULT);
