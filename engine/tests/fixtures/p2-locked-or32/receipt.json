@@ -1,0 +1,153 @@
+{
+  "adapted_extractor_sha256": "92813ab5d0362c8404ecd0cfeb9315d29605eba1bdad6b70f0c15f539a6c4a3a",
+  "artifact_policy": "whole observed original text and object pinned; unchanged flags and no inline assembly",
+  "artifacts": {
+    "kernel.c": {
+      "bytes": 180,
+      "file": "kernel.c",
+      "sha256": "607fffdec3c00b16cee151fada528e14b1e351e398fdb8a25f167f38373eada0"
+    },
+    "kernel.disasm.txt": {
+      "bytes": 324,
+      "file": "kernel.disasm.txt",
+      "sha256": "bfd29d6deef5b616725bfa8c2218fb4a374926b45a30e474350127def3b4e731"
+    },
+    "kernel.obj": {
+      "bytes": 529,
+      "file": "kernel.obj",
+      "sha256": "3fc296b01859e54bfb5bf026912f680ee6ccf133fb4089e2306ed82289f1e312"
+    },
+    "kernel.text.bin": {
+      "bytes": 9,
+      "file": "kernel.text.bin",
+      "sha256": "95189adf43d025a695bb470bd6a0278fc4357841963731fd72129e7d00709976"
+    }
+  },
+  "builder": {
+    "bytes": 5610,
+    "file": "build.py",
+    "path": "/Users/fatihguzel/ring3/engine/tests/fixtures/p2-locked-or32/build.py",
+    "sha256": "2285f8e663419f5809f72b5190c4d0cc3cf897efb7560143c68824558ad65fd6"
+  },
+  "claim_ceiling": "finite private flat32 synchronous unshared execution only; no hardware lock, C11 concurrency, shared-memory ordering or performance claim",
+  "coff": {
+    "characteristics": 0,
+    "external_symbols": [
+      "_ring3_publish_bits"
+    ],
+    "function": {
+      "entry_offset": 0,
+      "extent_basis": "single function through section end, including compiler padding",
+      "extent_end_offset": 9,
+      "symbol": "_ring3_publish_bits"
+    },
+    "machine": 332,
+    "relocations": 0,
+    "sections": [
+      {
+        "bytes": 9,
+        "characteristics": 1615855648,
+        "index": 1,
+        "name": ".text",
+        "raw_offset": 180
+      },
+      {
+        "bytes": 0,
+        "characteristics": 3224371264,
+        "index": 2,
+        "name": ".data",
+        "raw_offset": 189
+      },
+      {
+        "bytes": 0,
+        "characteristics": 3224371328,
+        "index": 3,
+        "name": ".bss",
+        "raw_offset": 0
+      },
+      {
+        "bytes": 100,
+        "characteristics": 1110442048,
+        "index": 4,
+        "name": ".debug$S",
+        "raw_offset": 189
+      }
+    ],
+    "symbol_count": 12,
+    "timestamp": 0
+  },
+  "command_cwd": "/Users/fatihguzel/ring3/target/engine-next-atomic-or-scout-2026-10-11/original-formal",
+  "commands": {
+    "compile": [
+      "/Library/Developer/CommandLineTools/usr/bin/clang",
+      "--target=i686-pc-windows-msvc",
+      "-std=c11",
+      "-O2",
+      "-ffreestanding",
+      "-fno-builtin",
+      "-fno-stack-protector",
+      "-fno-vectorize",
+      "-fno-slp-vectorize",
+      "-fno-unroll-loops",
+      "-falign-loops=1",
+      "-mno-sse",
+      "-mno-sse2",
+      "-mno-mmx",
+      "-mno-incremental-linker-compatible",
+      "-fno-unwind-tables",
+      "-fno-asynchronous-unwind-tables",
+      "-fno-addrsig",
+      "-c",
+      "kernel.c",
+      "-o",
+      "kernel.obj"
+    ],
+    "compiler_version": [
+      "/Library/Developer/CommandLineTools/usr/bin/clang",
+      "--version"
+    ],
+    "disassemble": [
+      "/Library/Developer/CommandLineTools/usr/bin/llvm-objdump",
+      "--disassemble",
+      "--section=.text",
+      "--x86-asm-syntax=intel",
+      "kernel.obj"
+    ],
+    "objdump_version": [
+      "/Library/Developer/CommandLineTools/usr/bin/llvm-objdump",
+      "--version"
+    ]
+  },
+  "compiler": {
+    "path": "/Library/Developer/CommandLineTools/usr/bin/clang",
+    "resolved_path": "/Library/Developer/CommandLineTools/usr/bin/clang",
+    "sha256": "f30550eab15fdf5ab8c0dc54c52679711241e5d4b636b027e18c09fef531775d",
+    "version": "Apple clang version 21.0.0 (clang-2100.1.1.101)\nTarget: arm64-apple-darwin25.6.0\nThread model: posix\nInstalledDir: /Library/Developer/CommandLineTools/usr/bin\n"
+  },
+  "dependency": {
+    "path": "/Users/fatihguzel/ring3/engine/tests/fixtures/p2-compiled-records/build.py",
+    "sha256": "fe426f202b48664a87357c766d39099b9d35b5d8217c2b114696164a0d468258"
+  },
+  "environment": {
+    "LC_ALL": "C",
+    "PATH": "/usr/bin:/bin",
+    "SOURCE_DATE_EPOCH": "0",
+    "TZ": "UTC"
+  },
+  "extractor_delta": "only fixed function symbol and diagnostic spelling ring3_reduce to ring3_publish_bits",
+  "objdump": {
+    "path": "/Library/Developer/CommandLineTools/usr/bin/llvm-objdump",
+    "resolved_path": "/Library/Developer/CommandLineTools/usr/bin/llvm-objdump",
+    "sha256": "1dcc1432db4d828cf8cd71a84cb8d9bf63a7ca80b5eeec711a9e5f13a3f5f98e",
+    "version": "Apple LLVM version 21.0.0\n  Optimized build.\n\n\n  Registered Targets:\n    aarch64    - AArch64 (little endian)\n    aarch64_32 - AArch64 (little endian ILP32)\n    aarch64_be - AArch64 (big endian)\n    arm        - ARM\n    arm64      - ARM64 (little endian)\n    arm64_32   - ARM64 (little endian ILP32)\n    armeb      - ARM (big endian)\n    thumb      - Thumb\n    thumbeb    - Thumb (big endian)\n    x86        - 32-bit X86: Pentium-Pro and above\n    x86-64     - 64-bit X86: EM64T and AMD64\n"
+  },
+  "original_extractor_sha256": "1f93b82a664cc6047dcd3600a5fe181d30ac0f3dc1fc0cceb1d89a4d0e7ede3c",
+  "schema": "ring3.locked-atomic-or-leaf.v1",
+  "source": {
+    "bytes": 180,
+    "file": "kernel.c",
+    "path": "/Users/fatihguzel/ring3/engine/tests/fixtures/p2-locked-or32/kernel.c",
+    "sha256": "607fffdec3c00b16cee151fada528e14b1e351e398fdb8a25f167f38373eada0"
+  },
+  "source_intent": "header-free C11 atomic fetch-or of fixed mask 32, sequentially consistent ordering, discarded old value, natural void return"
+}
