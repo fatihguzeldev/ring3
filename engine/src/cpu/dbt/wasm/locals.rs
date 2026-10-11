@@ -19,6 +19,7 @@ pub(super) const FAULT_ACCESS: u32 = 23;
 pub(super) const FAULT_LENGTH: u32 = 24;
 pub(super) const HELPER_STATUS: u32 = 25;
 pub(super) const ADDRESS: u32 = 26;
+pub(super) const ORIGINAL_BUDGET: u32 = 27;
 
 pub(super) fn register(register: Register32) -> u32 {
     4 + register.index() as u32

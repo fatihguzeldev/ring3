@@ -4,10 +4,10 @@ use super::DecodeError;
 use crate::cpu::{
     UnsupportedFeature,
     x86::{
-        Register32,
+        Register32, SegmentRegister,
         ir::{
-            ByteRegister, ByteValue, EffectiveAddress, Location32, SmallSource, SmallWidth,
-            Value32, WordValue,
+            AddressSize, ByteRegister, ByteValue, EffectiveAddress, Location32, SmallSource,
+            SmallWidth, Value32, WordValue,
         },
     },
 };
@@ -34,7 +34,9 @@ fn optional_register(register: Register) -> Result<Option<Register32>, DecodeErr
     if register == Register::None {
         Ok(None)
     } else {
-        self::register(register).map(Some)
+        self::register(register)
+            .or_else(|_| word_register(register))
+            .map(Some)
     }
 }
 
@@ -67,7 +69,7 @@ pub(super) fn effective_address(
     let base = optional_register(instruction.memory_base())?;
     let index = optional_register(instruction.memory_index())?;
     let scale = instruction.memory_index_scale();
-    if instruction.memory_displ_size() == 2 || !matches!(scale, 1 | 2 | 4 | 8) {
+    if !matches!(scale, 1 | 2 | 4 | 8) {
         return Err(unsupported());
     }
     Ok(EffectiveAddress {
@@ -75,7 +77,23 @@ pub(super) fn effective_address(
         index,
         scale: scale as u8,
         displacement: instruction.memory_displacement32(),
-        ..Default::default()
+        address_size: if instruction.memory_base().is_gpr16()
+            || instruction.memory_index().is_gpr16()
+            || instruction.memory_displ_size() == 2
+        {
+            AddressSize::Bits16
+        } else {
+            AddressSize::Bits32
+        },
+        segment: match instruction.segment_prefix() {
+            Register::ES => Some(SegmentRegister::Es),
+            Register::CS => Some(SegmentRegister::Cs),
+            Register::SS => Some(SegmentRegister::Ss),
+            Register::DS => Some(SegmentRegister::Ds),
+            Register::FS => Some(SegmentRegister::Fs),
+            Register::GS => Some(SegmentRegister::Gs),
+            _ => None,
+        },
     })
 }
 

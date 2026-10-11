@@ -1,10 +1,17 @@
 mod abi;
+mod atomic;
 mod control;
+mod cpu_result;
 mod dispatcher;
 mod emitter;
 mod integer;
+mod integer_system;
 mod locals;
 mod memory;
+mod segments;
+mod simd;
+mod stack;
+mod strings;
 mod x87;
 
 #[derive(Clone, Copy)]

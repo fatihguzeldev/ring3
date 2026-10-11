@@ -12,6 +12,7 @@ const STATUS: u32 = 5;
 const SLOT: u32 = 6;
 const CHILD_RETIRED: u32 = 7;
 const REASON: u32 = 8;
+const CHILD_WORK: u32 = 9;
 
 fn memarg(offset: u64) -> MemArg {
     MemArg {
@@ -32,7 +33,7 @@ fn synthetic(code: &mut InstructionSink<'_>, reason: i32) {
         (8, 40),
         (12, 0),
         (16, reason),
-        (24, 0),
+        (24, if reason == 7 { 2 } else { 0 }),
         (28, 0),
         (32, 0),
         (36, 0),
@@ -96,7 +97,7 @@ pub(crate) fn emit_dispatcher(key: u64) -> Vec<u8> {
     let mut exports = ExportSection::new();
     exports.export("run", ExportKind::Func, 2);
     module.section(&exports);
-    let mut run = Function::new([(5, ValType::I32)]);
+    let mut run = Function::new([(6, ValType::I32)]);
     let mut code = run.instructions();
     code.i32_const(key as u32 as i32)
         .i32_const((key >> 32) as u32 as i32)
@@ -144,6 +145,9 @@ pub(crate) fn emit_dispatcher(key: u64) -> Vec<u8> {
     synthetic(&mut code, 3);
     code.end()
         .local_get(0)
+        .i32_const(0)
+        .i32_store(memarg(crate::abi::arena::WORK_CONSUMED_OFFSET as u64))
+        .local_get(0)
         .local_get(1)
         .local_get(2)
         .local_get(3)
@@ -157,9 +161,23 @@ pub(crate) fn emit_dispatcher(key: u64) -> Vec<u8> {
     code.local_tee(CHILD_RETIRED)
         .local_get(TOTAL)
         .i32_add()
-        .local_set(TOTAL)
-        .local_get(2)
+        .local_set(TOTAL);
+    load(&mut code, 0, crate::abi::arena::WORK_CONSUMED_OFFSET as u64);
+    code.local_tee(CHILD_WORK)
         .local_get(CHILD_RETIRED)
+        .i32_lt_u()
+        .if_(BlockType::Empty)
+        .local_get(CHILD_RETIRED)
+        .local_set(CHILD_WORK)
+        .end()
+        .local_get(CHILD_WORK)
+        .local_get(2)
+        .i32_gt_u()
+        .if_(BlockType::Empty);
+    synthetic(&mut code, 7);
+    code.end()
+        .local_get(2)
+        .local_get(CHILD_WORK)
         .i32_sub()
         .local_set(2);
     load(&mut code, 1, 16);

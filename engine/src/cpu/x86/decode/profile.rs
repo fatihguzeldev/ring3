@@ -1,15 +1,46 @@
-use iced_x86::{Code, CpuidFeature, Instruction, OpKind, Register};
+use iced_x86::{Code, CpuidFeature, Instruction, OpKind};
 
 use super::{DecodeError, operands::unsupported};
 use crate::cpu::UnsupportedFeature;
 
 pub(super) fn check_profile(instruction: &Instruction, bytes: &[u8]) -> Result<(), DecodeError> {
+    let mut canonical = [0_u8; 15];
+    let mut count = 0;
+    let mut prefix = true;
+    for &byte in bytes {
+        let was_prefix = prefix && is_prefix(byte);
+        prefix = was_prefix;
+        if was_prefix && matches!(byte, 0x67 | 0x26 | 0x2e | 0x36 | 0x3e | 0x64 | 0x65) {
+            continue;
+        }
+        canonical[count] = byte;
+        count += 1;
+    }
+    let bytes = &canonical[..count];
     let features = instruction.cpuid_features();
     let registers = (0..instruction.op_count())
         .filter(|&index| instruction.op_kind(index) == OpKind::Register)
         .map(|index| instruction.op_register(index));
     if instruction.is_privileged() {
         return Err(DecodeError::Unsupported(UnsupportedFeature::Privileged));
+    }
+    if let Some(operation) = super::stack::lower(instruction) {
+        return operation.map(|_| ());
+    }
+    if let Some(operation) = super::strings::lower(instruction, bytes) {
+        return operation.map(|_| ());
+    }
+    if let Some(operation) = super::segments::lower(instruction) {
+        return operation.map(|_| ());
+    }
+    if super::x87::decode(instruction).is_some() {
+        return Ok(());
+    }
+    if let Some(operation) = super::simd::lower(instruction) {
+        return operation.map(|_| ());
+    }
+    if let Some(operation) = super::atomic::lower(instruction) {
+        return operation.map(|_| ());
     }
     let x87_control = matches!(instruction.code(), Code::Fninit) && bytes == [0xdb, 0xe3]
         || matches!(instruction.code(), Code::Fnclex) && bytes == [0xdb, 0xe2]
@@ -55,10 +86,9 @@ pub(super) fn check_profile(instruction: &Instruction, bytes: &[u8]) -> Result<(
                 bytes,
                 [0x66, 0x0f, 0x1f, 0x44, 0, 0] | [0x66, 0x0f, 0x1f, 0x84, 0, 0, 0, 0, 0]
             );
-    if (instruction.segment_prefix() != Register::None && !exact_cs_alignment_nop)
-        || registers
-            .clone()
-            .any(|register| register.is_segment_register())
+    if registers
+        .clone()
+        .any(|register| register.is_segment_register())
     {
         return Err(DecodeError::Unsupported(UnsupportedFeature::Segment));
     }

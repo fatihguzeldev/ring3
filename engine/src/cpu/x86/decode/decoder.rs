@@ -24,9 +24,16 @@ pub struct DecodedInstruction {
     next_pc: GuestAddress,
     operation: Operation,
     code_snapshot: CodeSnapshot,
+    segment_accesses: u8,
 }
 
 impl DecodedInstruction {
+    pub(crate) fn uses_segments(&self) -> bool {
+        self.segment_accesses != 0
+    }
+    pub(crate) fn segment_accesses(&self) -> u8 {
+        self.segment_accesses
+    }
     pub fn pc(&self) -> GuestAddress {
         self.pc
     }
@@ -75,6 +82,7 @@ pub fn decode_one(
                     next_pc: GuestAddress(instruction.next_ip32()),
                     operation,
                     code_snapshot,
+                    segment_accesses: segment_accesses(&instruction),
                 });
             }
             _ => return Err(DecodeError::InvalidEncoding),
@@ -116,4 +124,34 @@ mod tests {
         assert_eq!(decoded.next_pc(), GuestAddress(5));
         assert!(memory.is_code_current(decoded.code_snapshot()));
     }
+}
+
+fn segment_accesses(instruction: &iced_x86::Instruction) -> u8 {
+    use iced_x86::{InstructionInfoFactory, Mnemonic, Register};
+    if matches!(
+        instruction.mnemonic(),
+        Mnemonic::Lea
+            | Mnemonic::Nop
+            | Mnemonic::Prefetchnta
+            | Mnemonic::Prefetcht0
+            | Mnemonic::Prefetcht1
+            | Mnemonic::Prefetcht2
+    ) {
+        return 0;
+    }
+    InstructionInfoFactory::new()
+        .info(instruction)
+        .used_memory()
+        .iter()
+        .fold(0, |mask, memory| {
+            mask | match memory.segment() {
+                Register::ES => 1,
+                Register::CS => 2,
+                Register::SS => 4,
+                Register::DS => 8,
+                Register::FS => 16,
+                Register::GS => 32,
+                _ => 0,
+            }
+        })
 }

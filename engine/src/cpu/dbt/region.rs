@@ -340,6 +340,7 @@ pub(super) fn terminates(instruction: &DecodedInstruction, embedded: bool) -> bo
             | Operation::ReadJumpWord { .. }
             | Operation::ConditionalJump { .. }
             | Operation::CountBranch { .. }
+            | Operation::CountBranchWord { .. }
     ) || (embedded
         && supports_stack(instruction)
         && matches!(
@@ -356,7 +357,21 @@ pub(super) fn terminates(instruction: &DecodedInstruction, embedded: bool) -> bo
 fn supports_memory_reads(operation: &Operation) -> bool {
     matches!(
         operation,
-        Operation::LoadByte { .. }
+        Operation::StackFrame { .. }
+            | Operation::AtomicMemory { .. }
+            | Operation::CompareExchange8B { .. }
+            | Operation::VirtualTimestamp
+            | Operation::TranslateByteAddress { .. }
+            | Operation::X87 { .. }
+            | Operation::Simd(_)
+            | Operation::String { .. }
+            | Operation::LoadSegment { .. }
+            | Operation::PopSegment { .. }
+            | Operation::LoadFarPointer { .. }
+            | Operation::RepeatString { .. }
+            | Operation::ReadSegment { .. }
+            | Operation::PushSegment { .. }
+            | Operation::LoadByte { .. }
             | Operation::ReadExtendByteToWord { .. }
             | Operation::LoadWord { .. }
             | Operation::MemoryCompareWord { .. }
@@ -364,16 +379,7 @@ fn supports_memory_reads(operation: &Operation) -> bool {
             | Operation::ReadArithmeticWord { .. }
             | Operation::ReadLogicalWord { .. }
             | Operation::MemoryTestWord { .. }
-            | Operation::LoadStringByte
-            | Operation::LoadStringWord
-            | Operation::LoadStringDword
             | Operation::TranslateByte
-            | Operation::CompareStringByte
-            | Operation::ScanStringByte
-            | Operation::CompareStringWord
-            | Operation::ScanStringWord
-            | Operation::CompareStringDword
-            | Operation::ScanStringDword
             | Operation::ReadConditionalMove { .. }
             | Operation::ReadConditionalMoveWord { .. }
             | Operation::ReadSignedMultiplyWord { .. }
@@ -438,12 +444,10 @@ fn supports_indirect_jump(operation: &Operation) -> bool {
 fn supports_memory_move_store(operation: &Operation) -> bool {
     matches!(
         operation,
-        Operation::MoveStringDword
-            | Operation::StoreStringDword
-            | Operation::Move {
-                destination: Location32::Memory(_),
-                source: Value32::Register(_) | Value32::Immediate(_),
-            }
+        Operation::Move {
+            destination: Location32::Memory(_),
+            source: Value32::Register(_) | Value32::Immediate(_),
+        }
     )
 }
 
@@ -452,13 +456,9 @@ fn supports_narrow_store(operation: &Operation) -> bool {
         operation,
         Operation::X87StatusToMemory { .. }
             | Operation::X87ControlToMemory { .. }
-            | Operation::StoreStringWord
-            | Operation::MoveStringWord
             | Operation::StoreByte { .. }
             | Operation::StoreWord { .. }
             | Operation::MemorySetByte { .. }
-            | Operation::MoveStringByte
-            | Operation::StoreStringByte
     )
 }
 
@@ -561,7 +561,8 @@ pub(super) fn supports(instruction: &DecodedInstruction, embedded: bool) -> bool
             || supports_indirect_jump(operation)))
         || matches!(
             operation,
-            Operation::Nop
+            Operation::CpuId
+                | Operation::Nop
                 | Operation::InitializeX87
                 | Operation::ClearX87Exceptions
                 | Operation::X87StatusToAx
@@ -672,5 +673,6 @@ pub(super) fn supports(instruction: &DecodedInstruction, embedded: bool) -> bool
                 }
                 | Operation::ConditionalJump { .. }
                 | Operation::CountBranch { .. }
+                | Operation::CountBranchWord { .. }
         )
 }

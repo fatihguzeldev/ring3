@@ -9,6 +9,29 @@ pub enum AddressSize {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum StringKind {
+    Move,
+    Store,
+    Load,
+    Compare,
+    Scan,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum StringWidth {
+    Byte,
+    Word,
+    Dword,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RepeatCondition {
+    Always,
+    Equal,
+    NotEqual,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct EffectiveAddress {
     pub base: Option<Register32>,
     pub index: Option<Register32>,
@@ -54,6 +77,13 @@ pub enum ByteRegister {
     Ch,
     Dh,
     Bh,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AtomicSource {
+    Register(Register32),
+    ByteRegister(ByteRegister),
+    Immediate(u32),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -294,6 +324,49 @@ pub enum CarryKind {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Operation {
+    X87 {
+        operation: super::X87Operation,
+        address: Option<EffectiveAddress>,
+        waiting: bool,
+        opcode: u16,
+    },
+    Simd(super::simd::SimdOperation),
+    LoadSegment {
+        segment: super::SegmentRegister,
+        source: Value32,
+    },
+    PopSegment {
+        segment: super::SegmentRegister,
+        word: bool,
+    },
+    LoadFarPointer {
+        segment: super::SegmentRegister,
+        destination: Register32,
+        address: EffectiveAddress,
+        word: bool,
+    },
+    String {
+        kind: StringKind,
+        width: StringWidth,
+        address_size: AddressSize,
+        source_segment: Option<super::SegmentRegister>,
+    },
+    ReadSegment {
+        segment: super::SegmentRegister,
+        destination: Location32,
+        word: bool,
+    },
+    PushSegment {
+        segment: super::SegmentRegister,
+        word: bool,
+    },
+    RepeatString {
+        kind: StringKind,
+        width: StringWidth,
+        repeat: RepeatCondition,
+        address_size: AddressSize,
+        source_segment: Option<SegmentRegister>,
+    },
     Nop,
     InitializeX87,
     ClearX87Exceptions,
@@ -322,22 +395,26 @@ pub enum Operation {
     Direction {
         set: bool,
     },
-    MoveStringByte,
-    MoveStringWord,
-    MoveStringDword,
-    LoadStringByte,
-    LoadStringWord,
-    LoadStringDword,
     TranslateByte,
-    StoreStringByte,
-    StoreStringDword,
-    StoreStringWord,
-    CompareStringByte,
-    ScanStringByte,
-    CompareStringWord,
-    ScanStringWord,
-    CompareStringDword,
-    ScanStringDword,
+    TranslateByteAddress {
+        address: EffectiveAddress,
+    },
+    CpuId,
+    VirtualTimestamp,
+    StackFrame {
+        kind: super::StackFrameKind,
+        allocation: u16,
+        nesting: u8,
+    },
+    AtomicMemory {
+        kind: super::atomic::AtomicKind,
+        width: u8,
+        address: EffectiveAddress,
+        source: AtomicSource,
+    },
+    CompareExchange8B {
+        address: EffectiveAddress,
+    },
     FlagsToAh,
     AhToFlags,
     Move {
@@ -948,6 +1025,10 @@ pub enum Operation {
     },
     ConditionalJump {
         condition: Condition,
+        target: GuestAddress,
+    },
+    CountBranchWord {
+        kind: CountBranchKind,
         target: GuestAddress,
     },
     CountBranch {

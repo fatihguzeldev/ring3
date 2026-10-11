@@ -77,7 +77,31 @@ pub(super) fn load_state(sink: &mut InstructionSink<'_>) {
     sink.local_set(FLAGS);
 }
 
-pub(super) fn flush(sink: &mut InstructionSink<'_>, memory: bool, gates: bool, arithmetic: bool) {
+pub(super) fn work_preflight(sink: &mut InstructionSink<'_>) {
+    use crate::abi::arena::{ARENA_SIZE, WORK_OFFSET, WORK_SIZE};
+    range_end(sink, STATE_PTR, ARENA_SIZE as u64);
+    sink.local_get(MEMORY_BYTES).i64_gt_u();
+    fail_if(sink, 1);
+    for (offset, expected) in [
+        (0, u32::from_le_bytes(*b"R3WK")),
+        (4, header_version()),
+        (8, WORK_SIZE as u32),
+        (12, 0),
+        (20, 0),
+    ] {
+        load(sink, STATE_PTR, WORK_OFFSET + offset);
+        sink.i32_const(expected as i32).i32_ne();
+        fail_if(sink, 2);
+    }
+}
+
+pub(super) fn flush(
+    sink: &mut InstructionSink<'_>,
+    memory: bool,
+    gates: bool,
+    arithmetic: bool,
+    cpu: bool,
+) {
     for index in 0..8 {
         store_local(
             sink,
@@ -93,7 +117,9 @@ pub(super) fn flush(sink: &mut InstructionSink<'_>, memory: bool, gates: bool, a
         (0, u32::from_le_bytes(*b"R3EX")),
         (
             4,
-            if arithmetic {
+            if cpu {
+                6 | (u32::from(X86_INTEGER_PROFILE) << 16)
+            } else if arithmetic {
                 u32::from(EXIT_VERSION_5) | (u32::from(X86_INTEGER_PROFILE) << 16)
             } else if gates {
                 3 | (u32::from(X86_INTEGER_PROFILE) << 16)
@@ -114,9 +140,19 @@ pub(super) fn flush(sink: &mut InstructionSink<'_>, memory: bool, gates: bool, a
             .i32_const(value as i32)
             .i32_store(memarg(offset));
     }
+    if !cpu && memory {
+        sink.local_get(REASON)
+            .i32_const(11)
+            .i32_ge_u()
+            .if_(BlockType::Empty)
+            .local_get(EXIT_PTR)
+            .i32_const(6 | (i32::from(X86_INTEGER_PROFILE) << 16))
+            .i32_store(memarg(4))
+            .end();
+    }
     store_local(sink, EXIT_PTR, REASON_OFFSET, REASON);
     store_local(sink, EXIT_PTR, RETIRED_OFFSET, RETIRED);
-    if memory || gates {
+    if memory || gates || cpu {
         for (offset, local) in [
             (DETAIL_OFFSET, DETAIL),
             (FAULT_ADDRESS_OFFSET, FAULT_ADDRESS),

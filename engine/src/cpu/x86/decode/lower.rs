@@ -19,6 +19,44 @@ use crate::cpu::x86::{
 
 pub(super) fn lower(instruction: &Instruction, bytes: &[u8]) -> Result<Operation, DecodeError> {
     check_profile(instruction, bytes)?;
+    if let Some(operation) = super::strings::lower(instruction, bytes) {
+        return operation;
+    }
+    if let Some(operation) = super::segments::lower(instruction) {
+        return operation;
+    }
+    if !matches!(
+        instruction.code(),
+        Code::Fninit | Code::Fnclex | Code::Fnstsw_AX | Code::Fnstsw_m2byte | Code::Fnstcw_m2byte
+    ) {
+        if let Some(decoded) = super::x87::decode(instruction) {
+            let opcode = bytes
+                .iter()
+                .position(|byte| (0xd8..=0xdf).contains(byte))
+                .and_then(|index| {
+                    bytes
+                        .get(index + 1)
+                        .map(|modrm| (u16::from(bytes[index] & 7) << 8) | u16::from(*modrm))
+                })
+                .unwrap_or(0);
+            return Ok(Operation::X87 {
+                operation: decoded.operation,
+                address: if decoded.memory {
+                    Some(effective_address(instruction)?)
+                } else {
+                    None
+                },
+                waiting: decoded.waiting,
+                opcode,
+            });
+        }
+    }
+    if let Some(operation) = super::simd::lower(instruction) {
+        return operation.map(Operation::Simd);
+    }
+    if let Some(operation) = super::atomic::lower(instruction) {
+        return operation;
+    }
     match instruction.code() {
         Code::Nopd => Ok(Operation::Nop),
         Code::Nopw => Ok(Operation::Nop),
@@ -62,22 +100,24 @@ pub(super) fn lower(instruction: &Instruction, bytes: &[u8]) -> Result<Operation
         }),
         Code::Cld => Ok(Operation::Direction { set: false }),
         Code::Std => Ok(Operation::Direction { set: true }),
-        Code::Movsb_m8_m8 => Ok(Operation::MoveStringByte),
-        Code::Movsw_m16_m16 => Ok(Operation::MoveStringWord),
-        Code::Movsd_m32_m32 => Ok(Operation::MoveStringDword),
-        Code::Lodsb_AL_m8 => Ok(Operation::LoadStringByte),
-        Code::Lodsw_AX_m16 => Ok(Operation::LoadStringWord),
-        Code::Lodsd_EAX_m32 => Ok(Operation::LoadStringDword),
-        Code::Stosb_m8_AL => Ok(Operation::StoreStringByte),
-        Code::Stosd_m32_EAX => Ok(Operation::StoreStringDword),
-        Code::Stosw_m16_AX => Ok(Operation::StoreStringWord),
-        Code::Cmpsb_m8_m8 => Ok(Operation::CompareStringByte),
-        Code::Scasb_AL_m8 => Ok(Operation::ScanStringByte),
-        Code::Cmpsw_m16_m16 => Ok(Operation::CompareStringWord),
-        Code::Scasw_AX_m16 => Ok(Operation::ScanStringWord),
-        Code::Cmpsd_m32_m32 => Ok(Operation::CompareStringDword),
-        Code::Scasd_EAX_m32 => Ok(Operation::ScanStringDword),
-        Code::Xlat_m8 => Ok(Operation::TranslateByte),
+        Code::Xlat_m8 => {
+            // xlat adds its implicit AL index after decoding the base address.
+            let mut base_address = *instruction;
+            base_address.set_memory_index(iced_x86::Register::None);
+            let address = effective_address(&base_address)?;
+            if address.address_size == crate::cpu::x86::ir::AddressSize::Bits32
+                && matches!(
+                    address.segment,
+                    None | Some(crate::cpu::x86::SegmentRegister::Ds)
+                )
+            {
+                Ok(Operation::TranslateByte)
+            } else {
+                Ok(Operation::TranslateByteAddress { address })
+            }
+        }
+        Code::Cpuid => Ok(Operation::CpuId),
+        Code::Rdtsc => Ok(Operation::VirtualTimestamp),
         Code::Lahf => Ok(Operation::FlagsToAh),
         Code::Sahf => Ok(Operation::AhToFlags),
         Code::Nop_rm32 => {

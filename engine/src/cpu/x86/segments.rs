@@ -58,6 +58,6 @@ impl SegmentState {
 mod descriptors;
 
 pub use descriptors::{
-    SegmentDescriptor, SegmentDescriptorKind, SegmentDescriptorTable, SegmentLoad,
-    SegmentLoadError, SegmentLoadFailure,
+    SegmentDescriptor, SegmentDescriptorKind, SegmentDescriptorTable, SegmentLoadError,
+    SegmentLoadFailure,
 };

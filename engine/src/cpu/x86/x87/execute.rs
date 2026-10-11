@@ -1059,11 +1059,12 @@ fn load(format: X87Format, bytes: &[u8]) -> (Ext80, u16) {
                 }
                 magnitude = magnitude * 100 + i64::from(high) * 10 + i64::from(low);
             }
-            Ext80::from_i64(if bytes[9] & 0x80 != 0 {
-                -magnitude
+            let value = Ext80::from_i64(magnitude);
+            if bytes[9] & 0x80 != 0 {
+                value.negated()
             } else {
-                magnitude
-            })
+                value
+            }
         }
     };
     let input_denormal = match format {

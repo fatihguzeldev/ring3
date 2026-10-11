@@ -27,8 +27,65 @@ pub(super) fn instruction(
     imports: memory::Imports,
     exit_depth: u32,
 ) {
+    if !matches!(
+        instruction.operation(),
+        Operation::String { .. } | Operation::RepeatString { .. }
+    ) && !matches!(instruction.operation(), Operation::Simd(operation) if operation.kind == crate::cpu::x86::simd::SimdKind::MaskedStore)
+    {
+        use crate::cpu::x86::SegmentRegister::*;
+        for segment in [Es, Cs, Ss, Ds, Fs, Gs] {
+            if instruction.segment_accesses() & (1 << segment.index()) != 0 {
+                super::segments::access(code, segment, exit_depth);
+            }
+        }
+    }
     let mut store = false;
     match *instruction.operation() {
+        Operation::StackFrame { .. }
+        | Operation::PopAll
+        | Operation::PopAllWord
+        | Operation::EnterZero
+        | Operation::EnterZeroWord => {
+            super::stack::instruction(code, instruction, imports, exit_depth);
+            return;
+        }
+        Operation::RepeatString { .. } => {
+            super::strings::instruction(code, instruction, imports, exit_depth);
+            return;
+        }
+        Operation::ReadSegment { .. }
+        | Operation::PushSegment { .. }
+        | Operation::LoadSegment { .. }
+        | Operation::PopSegment { .. }
+        | Operation::LoadFarPointer { .. } => {
+            super::segments::instruction(code, instruction, imports, exit_depth);
+            return;
+        }
+        Operation::X87 {
+            operation,
+            address,
+            waiting,
+            opcode,
+        } => {
+            x87::operation(
+                code,
+                operation,
+                address,
+                waiting,
+                instruction.pc().0,
+                opcode,
+                imports.x87_op.expect("x87 execution import"),
+                exit_depth,
+            );
+            store = operation.write_size() != 0;
+        }
+        Operation::Simd(operation) => {
+            store = super::simd::instruction(code, operation, imports, exit_depth)
+        }
+        Operation::String { .. } => {
+            super::strings::instruction(code, instruction, imports, exit_depth);
+            return;
+        }
         Operation::Nop => {}
         Operation::InitializeX87 => x87::initialize(code),
         Operation::ClearX87Exceptions => x87::clear_exceptions(code),
@@ -119,172 +176,39 @@ pub(super) fn instruction(
             }
             code.local_set(FLAGS);
         }
-        Operation::MoveStringByte => {
-            memory::load_narrow_value(
-                code,
-                EffectiveAddress {
-                    base: Some(Register32::Esi),
-                    index: None,
-                    scale: 1,
-                    displacement: 0,
-                    ..Default::default()
-                },
-                SmallWidth::Byte,
-                imports,
-                exit_depth,
-            );
-            code.local_set(RESULT);
-            memory::store_byte_result(
-                code,
-                EffectiveAddress {
-                    base: Some(Register32::Edi),
-                    index: None,
-                    scale: 1,
-                    displacement: 0,
-                    ..Default::default()
-                },
-                imports,
-                exit_depth,
-            );
-            code.i32_const(-1)
-                .i32_const(1)
-                .local_get(FLAGS)
-                .i32_const(0x400)
+        Operation::TranslateByteAddress { address } => {
+            code.local_get(register(Register32::Ebx))
+                .local_get(register(Register32::Eax))
+                .i32_const(255)
                 .i32_and()
-                .select()
-                .local_set(RESULT);
-            for pointer in [Register32::Esi, Register32::Edi] {
-                code.local_get(register(pointer))
-                    .local_get(RESULT)
-                    .i32_add()
-                    .local_set(register(pointer));
+                .i32_add();
+            if address.address_size == crate::cpu::x86::ir::AddressSize::Bits16 {
+                code.i32_const(65535).i32_and();
             }
-            store = true;
-        }
-        Operation::MoveStringWord => {
-            memory::load_narrow_value(
+            super::segments::base(
                 code,
-                EffectiveAddress {
-                    base: Some(Register32::Esi),
-                    index: None,
-                    scale: 1,
-                    displacement: 0,
-                    ..Default::default()
-                },
-                SmallWidth::Word,
-                imports,
-                exit_depth,
+                address
+                    .segment
+                    .unwrap_or(crate::cpu::x86::SegmentRegister::Ds),
             );
-            code.local_set(RESULT);
-            memory::store_word_result(
-                code,
-                EffectiveAddress {
-                    base: Some(Register32::Edi),
-                    index: None,
-                    scale: 1,
-                    displacement: 0,
-                    ..Default::default()
-                },
-                imports,
-                exit_depth,
-            );
-            word_string_pointer(code, Register32::Esi);
-            word_string_pointer(code, Register32::Edi);
-            store = true;
-        }
-        Operation::MoveStringDword => {
-            memory::load_result(
-                code,
-                EffectiveAddress {
-                    base: Some(Register32::Esi),
-                    index: None,
-                    scale: 1,
-                    displacement: 0,
-                    ..Default::default()
-                },
-                imports,
-                exit_depth,
-            );
-            memory::store_result(
-                code,
-                EffectiveAddress {
-                    base: Some(Register32::Edi),
-                    index: None,
-                    scale: 1,
-                    displacement: 0,
-                    ..Default::default()
-                },
-                imports,
-                exit_depth,
-            );
-            code.i32_const(-4)
-                .i32_const(4)
-                .local_get(FLAGS)
-                .i32_const(0x400)
-                .i32_and()
-                .select()
-                .local_set(RESULT);
-            for pointer in [Register32::Esi, Register32::Edi] {
-                code.local_get(register(pointer))
-                    .local_get(RESULT)
-                    .i32_add()
-                    .local_set(register(pointer));
-            }
-            store = true;
-        }
-        Operation::LoadStringByte => {
-            memory::load_narrow_value(
-                code,
-                EffectiveAddress {
-                    base: Some(Register32::Esi),
-                    index: None,
-                    scale: 1,
-                    displacement: 0,
-                    ..Default::default()
-                },
-                SmallWidth::Byte,
-                imports,
-                exit_depth,
-            );
+            code.i32_add().local_set(ADDRESS);
+            memory::load_narrow_at_address(code, SmallWidth::Byte, imports, exit_depth);
             insert_byte(code, ByteRegister::Al);
-            string_pointer(code, Register32::Esi);
         }
-        Operation::LoadStringWord => {
-            memory::load_narrow_value(
-                code,
-                EffectiveAddress {
-                    base: Some(Register32::Esi),
-                    index: None,
-                    scale: 1,
-                    displacement: 0,
-                    ..Default::default()
-                },
-                SmallWidth::Word,
-                imports,
-                exit_depth,
-            );
-            code.local_get(register(Register32::Eax))
-                .i32_const(!0xffff)
-                .i32_and()
-                .i32_or()
-                .local_set(register(Register32::Eax));
-            word_string_pointer(code, Register32::Esi);
+        Operation::CpuId => super::integer_system::cpuid(code),
+        Operation::VirtualTimestamp => super::integer_system::timestamp(code, imports, exit_depth),
+        Operation::AtomicMemory {
+            kind,
+            width,
+            address,
+            source,
+        } => {
+            super::atomic::operation(code, kind, width, address, source, imports, exit_depth);
+            store = true;
         }
-        Operation::LoadStringDword => {
-            memory::load_result(
-                code,
-                EffectiveAddress {
-                    base: Some(Register32::Esi),
-                    index: None,
-                    scale: 1,
-                    displacement: 0,
-                    ..Default::default()
-                },
-                imports,
-                exit_depth,
-            );
-            code.local_get(RESULT).local_set(register(Register32::Eax));
-            dword_string_pointer(code, Register32::Esi);
+        Operation::CompareExchange8B { address } => {
+            super::atomic::compare8(code, address, imports, exit_depth);
+            store = true;
         }
         Operation::TranslateByte => {
             code.local_get(register(Register32::Ebx))
@@ -295,261 +219,6 @@ pub(super) fn instruction(
                 .local_set(ADDRESS);
             memory::load_narrow_at_address(code, SmallWidth::Byte, imports, exit_depth);
             insert_byte(code, ByteRegister::Al);
-        }
-        Operation::StoreStringByte => {
-            byte_value(code, ByteValue::Register(ByteRegister::Al));
-            code.local_set(RESULT);
-            memory::store_byte_result(
-                code,
-                EffectiveAddress {
-                    base: Some(Register32::Edi),
-                    index: None,
-                    scale: 1,
-                    displacement: 0,
-                    ..Default::default()
-                },
-                imports,
-                exit_depth,
-            );
-            string_pointer(code, Register32::Edi);
-            store = true;
-        }
-        Operation::StoreStringDword => {
-            code.local_get(register(Register32::Eax)).local_set(RESULT);
-            memory::store_result(
-                code,
-                EffectiveAddress {
-                    base: Some(Register32::Edi),
-                    index: None,
-                    scale: 1,
-                    displacement: 0,
-                    ..Default::default()
-                },
-                imports,
-                exit_depth,
-            );
-            dword_string_pointer(code, Register32::Edi);
-            store = true;
-        }
-        Operation::StoreStringWord => {
-            code.local_get(register(Register32::Eax))
-                .i32_const(0xffff)
-                .i32_and()
-                .local_set(RESULT);
-            memory::store_word_result(
-                code,
-                EffectiveAddress {
-                    base: Some(Register32::Edi),
-                    index: None,
-                    scale: 1,
-                    displacement: 0,
-                    ..Default::default()
-                },
-                imports,
-                exit_depth,
-            );
-            word_string_pointer(code, Register32::Edi);
-            store = true;
-        }
-        Operation::CompareStringByte => {
-            memory::load_narrow_value(
-                code,
-                EffectiveAddress {
-                    base: Some(Register32::Esi),
-                    index: None,
-                    scale: 1,
-                    displacement: 0,
-                    ..Default::default()
-                },
-                SmallWidth::Byte,
-                imports,
-                exit_depth,
-            );
-            code.local_set(RESULT);
-            memory::load_narrow_value(
-                code,
-                EffectiveAddress {
-                    base: Some(Register32::Edi),
-                    index: None,
-                    scale: 1,
-                    displacement: 0,
-                    ..Default::default()
-                },
-                SmallWidth::Byte,
-                imports,
-                exit_depth,
-            );
-            // the second checked read clobbers lhs/rhs; result retains the first byte.
-            code.local_set(RHS)
-                .local_get(RESULT)
-                .local_set(LHS)
-                .local_get(LHS)
-                .local_get(RHS)
-                .i32_sub()
-                .i32_const(0xff)
-                .i32_and()
-                .local_set(RESULT);
-            arithmetic_flags(code, BinaryKind::Cmp, CarryFlag::Calculate, 7);
-            string_pointer(code, Register32::Esi);
-            string_pointer(code, Register32::Edi);
-        }
-        Operation::ScanStringByte => {
-            memory::load_narrow_value(
-                code,
-                EffectiveAddress {
-                    base: Some(Register32::Edi),
-                    index: None,
-                    scale: 1,
-                    displacement: 0,
-                    ..Default::default()
-                },
-                SmallWidth::Byte,
-                imports,
-                exit_depth,
-            );
-            code.local_set(RHS);
-            byte_value(code, ByteValue::Register(ByteRegister::Al));
-            code.local_set(LHS)
-                .local_get(LHS)
-                .local_get(RHS)
-                .i32_sub()
-                .i32_const(0xff)
-                .i32_and()
-                .local_set(RESULT);
-            arithmetic_flags(code, BinaryKind::Cmp, CarryFlag::Calculate, 7);
-            string_pointer(code, Register32::Edi);
-        }
-        Operation::CompareStringWord => {
-            memory::load_narrow_value(
-                code,
-                EffectiveAddress {
-                    base: Some(Register32::Esi),
-                    index: None,
-                    scale: 1,
-                    displacement: 0,
-                    ..Default::default()
-                },
-                SmallWidth::Word,
-                imports,
-                exit_depth,
-            );
-            code.local_set(RESULT);
-            memory::load_narrow_value(
-                code,
-                EffectiveAddress {
-                    base: Some(Register32::Edi),
-                    index: None,
-                    scale: 1,
-                    displacement: 0,
-                    ..Default::default()
-                },
-                SmallWidth::Word,
-                imports,
-                exit_depth,
-            );
-            // the second checked read clobbers lhs/rhs; result retains the first word.
-            code.local_set(RHS)
-                .local_get(RESULT)
-                .local_set(LHS)
-                .local_get(LHS)
-                .local_get(RHS)
-                .i32_sub()
-                .i32_const(0xffff)
-                .i32_and()
-                .local_set(RESULT);
-            arithmetic_flags(code, BinaryKind::Cmp, CarryFlag::Calculate, 15);
-            word_string_pointer(code, Register32::Esi);
-            word_string_pointer(code, Register32::Edi);
-        }
-        Operation::ScanStringWord => {
-            memory::load_narrow_value(
-                code,
-                EffectiveAddress {
-                    base: Some(Register32::Edi),
-                    index: None,
-                    scale: 1,
-                    displacement: 0,
-                    ..Default::default()
-                },
-                SmallWidth::Word,
-                imports,
-                exit_depth,
-            );
-            code.local_set(RHS)
-                .local_get(register(Register32::Eax))
-                .i32_const(0xffff)
-                .i32_and()
-                .local_set(LHS)
-                .local_get(LHS)
-                .local_get(RHS)
-                .i32_sub()
-                .i32_const(0xffff)
-                .i32_and()
-                .local_set(RESULT);
-            arithmetic_flags(code, BinaryKind::Cmp, CarryFlag::Calculate, 15);
-            word_string_pointer(code, Register32::Edi);
-        }
-        Operation::CompareStringDword => {
-            memory::load_result(
-                code,
-                EffectiveAddress {
-                    base: Some(Register32::Esi),
-                    index: None,
-                    scale: 1,
-                    displacement: 0,
-                    ..Default::default()
-                },
-                imports,
-                exit_depth,
-            );
-            // the second checked read overwrites result and scratch; retain the first word on the stack.
-            code.local_get(RESULT);
-            memory::load_result(
-                code,
-                EffectiveAddress {
-                    base: Some(Register32::Edi),
-                    index: None,
-                    scale: 1,
-                    displacement: 0,
-                    ..Default::default()
-                },
-                imports,
-                exit_depth,
-            );
-            code.local_get(RESULT)
-                .local_set(RHS)
-                .local_set(LHS)
-                .local_get(LHS)
-                .local_get(RHS)
-                .i32_sub()
-                .local_set(RESULT);
-            arithmetic_flags(code, BinaryKind::Cmp, CarryFlag::Calculate, 31);
-            dword_string_pointer(code, Register32::Esi);
-            dword_string_pointer(code, Register32::Edi);
-        }
-        Operation::ScanStringDword => {
-            memory::load_result(
-                code,
-                EffectiveAddress {
-                    base: Some(Register32::Edi),
-                    index: None,
-                    scale: 1,
-                    displacement: 0,
-                    ..Default::default()
-                },
-                imports,
-                exit_depth,
-            );
-            code.local_get(RESULT)
-                .local_set(RHS)
-                .local_get(register(Register32::Eax))
-                .local_set(LHS)
-                .local_get(LHS)
-                .local_get(RHS)
-                .i32_sub()
-                .local_set(RESULT);
-            arithmetic_flags(code, BinaryKind::Cmp, CarryFlag::Calculate, 31);
-            dword_string_pointer(code, Register32::Edi);
         }
         Operation::Move {
             destination: Location32::Register(destination),
@@ -1689,14 +1358,14 @@ pub(super) fn instruction(
             destination,
             address,
         } => {
-            memory::address_value(code, address);
+            memory::offset_value(code, address);
             code.local_set(register(destination));
         }
         Operation::LeaWord {
             destination,
             address,
         } => {
-            memory::address_value(code, address);
+            memory::offset_value(code, address);
             code.i32_const(0xffff)
                 .i32_and()
                 .local_get(register(destination))
@@ -2327,6 +1996,47 @@ pub(super) fn instruction(
                 .end()
                 .local_set(EIP);
         }
+        Operation::CountBranchWord { kind, target } => {
+            let ecx = register(Register32::Ecx);
+            if kind == CountBranchKind::EcxZero {
+                code.local_get(ecx).i32_const(65535).i32_and().i32_eqz();
+            } else {
+                code.local_get(ecx)
+                    .i32_const(-65536)
+                    .i32_and()
+                    .local_get(ecx)
+                    .i32_const(1)
+                    .i32_sub()
+                    .i32_const(65535)
+                    .i32_and()
+                    .i32_or()
+                    .local_tee(ecx)
+                    .i32_const(65535)
+                    .i32_and()
+                    .i32_eqz()
+                    .i32_eqz();
+                if matches!(
+                    kind,
+                    CountBranchKind::LoopEqual | CountBranchKind::LoopNotEqual
+                ) {
+                    control::condition(
+                        code,
+                        if kind == CountBranchKind::LoopEqual {
+                            Condition::Equal
+                        } else {
+                            Condition::NotEqual
+                        },
+                    );
+                    code.i32_and();
+                }
+            }
+            code.if_(BlockType::Result(ValType::I32))
+                .i32_const(target.0 as i32)
+                .else_()
+                .i32_const(instruction.next_pc().0 as i32)
+                .end()
+                .local_set(EIP);
+        }
         Operation::CountBranch { kind, target } => {
             let ecx = register(Register32::Ecx);
             if kind == CountBranchKind::EcxZero {
@@ -2509,45 +2219,6 @@ pub(super) fn instruction(
             memory::pop_word_memory(code, destination, imports, exit_depth);
             store = true;
         }
-        Operation::PopAll => {
-            memory::pop_all(code, false, imports, exit_depth);
-        }
-        Operation::PopAllWord => {
-            memory::pop_all(code, true, imports, exit_depth);
-        }
-        Operation::EnterZero => {
-            memory::store(
-                code,
-                EffectiveAddress {
-                    base: Some(Register32::Esp),
-                    index: None,
-                    scale: 1,
-                    displacement: (-4_i32) as u32,
-                    ..Default::default()
-                },
-                Value32::Register(Register32::Ebp),
-                imports,
-                exit_depth,
-            );
-            code.local_get(ADDRESS)
-                .local_tee(register(Register32::Esp))
-                .local_set(register(Register32::Ebp));
-            store = true;
-        }
-        Operation::EnterZeroWord => {
-            word_value(code, WordValue::Register(Register32::Ebp));
-            code.local_set(RESULT);
-            memory::push_word_result(code, imports, exit_depth);
-            code.local_get(register(Register32::Ebp))
-                .i32_const(!0xffff)
-                .i32_and()
-                .local_get(register(Register32::Esp))
-                .i32_const(0xffff)
-                .i32_and()
-                .i32_or()
-                .local_set(register(Register32::Ebp));
-            store = true;
-        }
         Operation::Leave => {
             memory::load_result(
                 code,
@@ -2623,6 +2294,7 @@ pub(super) fn instruction(
             | Operation::ReadJumpWord { .. }
             | Operation::ConditionalJump { .. }
             | Operation::CountBranch { .. }
+            | Operation::CountBranchWord { .. }
             | Operation::Call { .. }
             | Operation::CallWord { .. }
             | Operation::CallRegisterWord { .. }
@@ -3094,42 +2766,6 @@ fn value(code: &mut InstructionSink<'_>, value: Value32) {
         }
         Value32::Memory(_) => unreachable!("prepared region contains a memory operand"),
     }
-}
-
-fn string_pointer(code: &mut InstructionSink<'_>, pointer: Register32) {
-    code.local_get(register(pointer))
-        .i32_const(-1)
-        .i32_const(1)
-        .local_get(FLAGS)
-        .i32_const(0x400)
-        .i32_and()
-        .select()
-        .i32_add()
-        .local_set(register(pointer));
-}
-
-fn word_string_pointer(code: &mut InstructionSink<'_>, pointer: Register32) {
-    code.local_get(register(pointer))
-        .i32_const(-2)
-        .i32_const(2)
-        .local_get(FLAGS)
-        .i32_const(0x400)
-        .i32_and()
-        .select()
-        .i32_add()
-        .local_set(register(pointer));
-}
-
-fn dword_string_pointer(code: &mut InstructionSink<'_>, pointer: Register32) {
-    code.local_get(register(pointer))
-        .i32_const(-4)
-        .i32_const(4)
-        .local_get(FLAGS)
-        .i32_const(0x400)
-        .i32_and()
-        .select()
-        .i32_add()
-        .local_set(register(pointer));
 }
 
 fn extend_byte_to_word(

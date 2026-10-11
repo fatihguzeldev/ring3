@@ -12,6 +12,9 @@ use crate::{
 };
 
 pub(super) fn lower(instruction: &Instruction) -> Result<Operation, DecodeError> {
+    if let Some(operation) = super::stack::lower(instruction) {
+        return operation;
+    }
     Ok(match instruction.code() {
         Code::Jmp_rel8_32 | Code::Jmp_rel32_32 => Operation::Jump {
             target: BranchTarget::Direct(GuestAddress(instruction.near_branch32())),
@@ -27,6 +30,18 @@ pub(super) fn lower(instruction: &Instruction) -> Result<Operation, DecodeError>
                 Code::Loop_rel8_32_ECX => CountBranchKind::Loop,
                 Code::Loope_rel8_32_ECX => CountBranchKind::LoopEqual,
                 Code::Loopne_rel8_32_ECX => CountBranchKind::LoopNotEqual,
+                _ => CountBranchKind::EcxZero,
+            },
+            target: GuestAddress(instruction.near_branch32()),
+        },
+        Code::Loop_rel8_32_CX
+        | Code::Loope_rel8_32_CX
+        | Code::Loopne_rel8_32_CX
+        | Code::Jcxz_rel8_32 => Operation::CountBranchWord {
+            kind: match instruction.code() {
+                Code::Loop_rel8_32_CX => CountBranchKind::Loop,
+                Code::Loope_rel8_32_CX => CountBranchKind::LoopEqual,
+                Code::Loopne_rel8_32_CX => CountBranchKind::LoopNotEqual,
                 _ => CountBranchKind::EcxZero,
             },
             target: GuestAddress(instruction.near_branch32()),

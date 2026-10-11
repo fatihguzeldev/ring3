@@ -21,7 +21,7 @@ pub(super) enum StoreImport {
 }
 
 impl StoreImport {
-    fn emit_binding(self, code: &mut InstructionSink<'_>) -> u32 {
+    pub(super) fn emit_binding(self, code: &mut InstructionSink<'_>) -> u32 {
         match self {
             Self::Replacement(index) => index,
             Self::Resident { index, key, id } => {
@@ -37,6 +37,16 @@ impl StoreImport {
 
 #[derive(Clone, Copy, Default)]
 pub(super) struct Imports {
+    pub(super) stack_execute: Option<StoreImport>,
+    pub(super) cpu_integer: Option<StoreImport>,
+    pub(super) cpu_read: Option<u32>,
+    pub(super) cpu_write: Option<StoreImport>,
+    pub(super) x87_op: Option<StoreImport>,
+    pub(super) simd_execute: Option<StoreImport>,
+    pub(super) cpu_fxsave: Option<StoreImport>,
+    pub(super) cpu_mask_write: Option<StoreImport>,
+    pub(super) segment_load: Option<StoreImport>,
+    pub(super) segment_load_far: Option<StoreImport>,
     pub(super) read: Option<u32>,
     pub(super) store: Option<StoreImport>,
     pub(super) read8: Option<u32>,
@@ -60,6 +70,16 @@ pub(super) struct Imports {
 }
 
 pub(super) struct ImportNeeds {
+    pub(super) stack_execute: bool,
+    pub(super) cpu_integer: bool,
+    pub(super) cpu_read: bool,
+    pub(super) cpu_write: bool,
+    pub(super) x87_op: bool,
+    pub(super) simd_execute: bool,
+    pub(super) cpu_fxsave: bool,
+    pub(super) cpu_mask_write: bool,
+    pub(super) segment_load: bool,
+    pub(super) segment_load_far: bool,
     pub(super) read: bool,
     pub(super) store: bool,
     pub(super) read8: bool,
@@ -84,6 +104,16 @@ pub(super) struct ImportNeeds {
 
 impl Imports {
     pub(super) fn needed(blocks: &[crate::cpu::dbt::region::CompiledBlock]) -> ImportNeeds {
+        let mut stack_execute = false;
+        let mut cpu_integer = false;
+        let mut cpu_read = false;
+        let mut cpu_write = false;
+        let mut x87_op = false;
+        let mut simd_execute = false;
+        let mut cpu_fxsave = false;
+        let mut cpu_mask_write = false;
+        let mut segment_load = false;
+        let mut segment_load_far = false;
         let mut read = false;
         let mut store = false;
         let mut read8 = false;
@@ -106,6 +136,70 @@ impl Imports {
         let mut atomic_xor_u32 = false;
         for instruction in blocks.iter().flat_map(|block| &block.instructions) {
             match instruction.operation() {
+                Operation::StackFrame { .. }
+                | Operation::PopAll
+                | Operation::PopAllWord
+                | Operation::EnterZero
+                | Operation::EnterZeroWord => stack_execute = true,
+                Operation::AtomicMemory { .. }
+                | Operation::CompareExchange8B { .. }
+                | Operation::VirtualTimestamp => cpu_integer = true,
+                Operation::X87 { .. } => x87_op = true,
+                Operation::Simd(operation) => {
+                    use crate::cpu::x86::simd::SimdKind;
+                    if !matches!(operation.kind, SimdKind::Fence | SimdKind::Prefetch)
+                        && !super::simd::direct_hotpath(*operation)
+                    {
+                        simd_execute = true;
+                    }
+                    cpu_read |= operation.reads_memory();
+                    if operation.writes_memory() {
+                        match operation.kind {
+                            SimdKind::SaveExtended => cpu_fxsave = true,
+                            SimdKind::MaskedStore => cpu_mask_write = true,
+                            _ => cpu_write = true,
+                        }
+                    }
+                }
+                Operation::LoadSegment { source, .. } => {
+                    segment_load = true;
+                    read16 |= matches!(source, Value32::Memory(_));
+                }
+                Operation::PopSegment { word, .. } => {
+                    segment_load = true;
+                    if *word {
+                        read16 = true;
+                    } else {
+                        read = true;
+                    }
+                }
+                Operation::LoadFarPointer { .. } => segment_load_far = true,
+                Operation::String { kind, width, .. }
+                | Operation::RepeatString { kind, width, .. } => {
+                    use crate::cpu::x86::ir::{StringKind, StringWidth};
+                    let reads = !matches!(kind, StringKind::Store);
+                    let writes = matches!(kind, StringKind::Move | StringKind::Store);
+                    match width {
+                        StringWidth::Byte => {
+                            read8 |= reads;
+                            store8 |= writes;
+                        }
+                        StringWidth::Word => {
+                            read16 |= reads;
+                            store16 |= writes;
+                        }
+                        StringWidth::Dword => {
+                            read |= reads;
+                            store |= writes;
+                        }
+                    }
+                }
+                Operation::ReadSegment {
+                    destination: Location32::Memory(_),
+                    ..
+                }
+                | Operation::PushSegment { word: true, .. } => store16 = true,
+                Operation::PushSegment { word: false, .. } => store = true,
                 Operation::MemoryExchange { .. } => exchange = true,
                 Operation::MemoryExchangeByte { .. } => exchange8 = true,
                 Operation::MemoryExchangeWord { .. } => exchange16 = true,
@@ -130,30 +224,23 @@ impl Imports {
                 | Operation::PushWord { .. }
                 | Operation::CallWord { .. }
                 | Operation::CallRegisterWord { .. }
-                | Operation::PushFlagsWord
-                | Operation::EnterZeroWord
-                | Operation::StoreStringWord => {
+                | Operation::PushFlagsWord => {
                     store16 = true;
                 }
                 Operation::LoadByte { .. }
                 | Operation::ReadExtendByteToWord { .. }
-                | Operation::LoadStringByte
+                | Operation::TranslateByteAddress { .. }
                 | Operation::TranslateByte
-                | Operation::CompareStringByte
-                | Operation::ScanStringByte
                 | Operation::MemoryPredicateByte { .. }
                 | Operation::ReadCompareByte { .. }
                 | Operation::ReadLogicalByte { .. }
                 | Operation::ReadByteMultiplyAccumulator { .. }
                 | Operation::ReadByteDivideAccumulator { .. }
                 | Operation::ReadArithmeticByte { .. } => read8 = true,
-                Operation::StoreByte { .. }
-                | Operation::MemorySetByte { .. }
-                | Operation::StoreStringByte => {
+                Operation::StoreByte { .. } | Operation::MemorySetByte { .. } => {
                     store8 = true;
                 }
-                Operation::MoveStringByte
-                | Operation::MemoryUnaryByte { .. }
+                Operation::MemoryUnaryByte { .. }
                 | Operation::MemoryLogicalByte { .. }
                 | Operation::MemoryArithmeticByte { .. }
                 | Operation::MemoryExchangeAddByte { .. }
@@ -185,13 +272,8 @@ impl Imports {
                 | Operation::LoadWord { .. }
                 | Operation::PopWord { .. }
                 | Operation::ReturnWord { .. }
-                | Operation::PopAllWord
-                | Operation::LeaveWord
-                | Operation::LoadStringWord
-                | Operation::CompareStringWord
-                | Operation::ScanStringWord => read16 = true,
-                Operation::MoveStringWord
-                | Operation::PushMemoryWord { .. }
+                | Operation::LeaveWord => read16 = true,
+                Operation::PushMemoryWord { .. }
                 | Operation::ReadCallWord { .. }
                 | Operation::PopMemoryWord { .. }
                 | Operation::MemoryUnaryWord { .. }
@@ -214,8 +296,7 @@ impl Imports {
                     SmallWidth::Byte => read8 = true,
                     SmallWidth::Word => read16 = true,
                 },
-                Operation::MoveStringDword
-                | Operation::MemoryBitMutation { .. }
+                Operation::MemoryBitMutation { .. }
                 | Operation::Push {
                     source: Value32::Memory(_),
                 }
@@ -256,10 +337,7 @@ impl Imports {
                     read = true;
                     store = true;
                 }
-                Operation::CompareStringDword
-                | Operation::LoadStringDword
-                | Operation::ScanStringDword
-                | Operation::ReadConditionalMove { .. }
+                Operation::ReadConditionalMove { .. }
                 | Operation::ReadMultiplyAccumulator { .. }
                 | Operation::ReadDivideAccumulator { .. }
                 | Operation::ReadBitScan { .. }
@@ -283,25 +361,32 @@ impl Imports {
                     ..
                 }
                 | Operation::Return { .. }
-                | Operation::PopAll
                 | Operation::Leave
                 | Operation::Jump {
                     target: BranchTarget::Indirect(Location32::Memory(_)),
                 }
                 | Operation::Pop { .. } => read = true,
-                Operation::StoreStringDword
-                | Operation::Move {
+                Operation::Move {
                     destination: Location32::Memory(_),
                     ..
                 }
                 | Operation::Call { .. }
                 | Operation::Push { .. }
-                | Operation::EnterZero
                 | Operation::PushFlags => store = true,
                 _ => {}
             }
         }
         ImportNeeds {
+            stack_execute,
+            cpu_integer,
+            cpu_read,
+            cpu_write,
+            x87_op,
+            simd_execute,
+            cpu_fxsave,
+            cpu_mask_write,
+            segment_load,
+            segment_load_far,
             read,
             store,
             read8,
@@ -808,53 +893,6 @@ pub(super) fn pop_register(
     }
 }
 
-pub(super) fn pop_all(
-    code: &mut InstructionSink<'_>,
-    word: bool,
-    imports: Imports,
-    exit_depth: u32,
-) {
-    use crate::cpu::x86::Register32::{Eax, Ebp, Ebx, Ecx, Edi, Edx, Esi, Esp};
-
-    let width = if word { 2 } else { 4 };
-    let registers = [
-        (0, Edi),
-        (1, Esi),
-        (2, Ebp),
-        (4, Ebx),
-        (5, Edx),
-        (6, Ecx),
-        (7, Eax),
-    ];
-    // retain all original parents until every checked read succeeds.
-    for &(slot, destination) in &registers {
-        let source = EffectiveAddress {
-            base: Some(Esp),
-            index: None,
-            scale: 1,
-            displacement: slot * width,
-            ..Default::default()
-        };
-        if word {
-            load_narrow_value(code, source, SmallWidth::Word, imports, exit_depth);
-            code.local_get(register(destination))
-                .i32_const(!0xffff)
-                .i32_and()
-                .i32_or();
-        } else {
-            load_result(code, source, imports, exit_depth);
-            code.local_get(RESULT);
-        }
-    }
-    for &(_, destination) in registers.iter().rev() {
-        code.local_set(register(destination));
-    }
-    code.local_get(register(Esp))
-        .i32_const((width * 8) as i32)
-        .i32_add()
-        .local_set(register(Esp));
-}
-
 pub(super) fn pop_return(
     code: &mut InstructionSink<'_>,
     stack_adjust: u16,
@@ -894,6 +932,14 @@ fn effective_address(code: &mut InstructionSink<'_>, address: EffectiveAddress) 
 }
 
 pub(super) fn address_value(code: &mut InstructionSink<'_>, address: EffectiveAddress) {
+    offset_value(code, address);
+    if let Some(segment) = address.segment {
+        super::segments::base(code, segment);
+        code.i32_add();
+    }
+}
+
+pub(super) fn offset_value(code: &mut InstructionSink<'_>, address: EffectiveAddress) {
     code.i32_const(address.displacement as i32);
     if let Some(base) = address.base {
         code.local_get(register(base)).i32_add();
@@ -903,6 +949,9 @@ pub(super) fn address_value(code: &mut InstructionSink<'_>, address: EffectiveAd
             .i32_const(i32::from(address.scale))
             .i32_mul()
             .i32_add();
+    }
+    if address.address_size == crate::cpu::x86::ir::AddressSize::Bits16 {
+        code.i32_const(0xffff).i32_and();
     }
 }
 
@@ -1031,41 +1080,41 @@ fn zero_fault_fields(code: &mut InstructionSink<'_>) {
     }
 }
 
-fn infrastructure(code: &mut InstructionSink<'_>, detail: i32) {
+pub(super) fn infrastructure(code: &mut InstructionSink<'_>, detail: i32) {
     code.i32_const(7)
         .local_set(REASON)
         .i32_const(detail)
         .local_set(DETAIL);
 }
 
-fn protocol_if_bad(code: &mut InstructionSink<'_>) {
+pub(super) fn protocol_if_bad(code: &mut InstructionSink<'_>) {
     code.local_get(LHS).if_(BlockType::Empty);
     infrastructure(code, 2);
     code.end();
 }
 
-fn exit_if_failed(code: &mut InstructionSink<'_>, exit_depth: u32) {
+pub(super) fn exit_if_failed(code: &mut InstructionSink<'_>, exit_depth: u32) {
     code.local_get(REASON)
         .if_(BlockType::Empty)
         .br(exit_depth + 1)
         .end();
 }
 
-fn reset_checks(code: &mut InstructionSink<'_>) {
+pub(super) fn reset_checks(code: &mut InstructionSink<'_>) {
     code.i32_const(0).local_set(LHS);
 }
 
-fn expect_field(code: &mut InstructionSink<'_>, offset: u64, expected: u32) {
+pub(super) fn expect_field(code: &mut InstructionSink<'_>, offset: u64, expected: u32) {
     helper_field(code, offset);
     code.i32_const(expected as i32).i32_ne();
     add_check(code);
 }
 
-fn add_check(code: &mut InstructionSink<'_>) {
+pub(super) fn add_check(code: &mut InstructionSink<'_>) {
     code.local_get(LHS).i32_or().local_set(LHS);
 }
 
-fn helper_field(code: &mut InstructionSink<'_>, offset: u64) {
+pub(super) fn helper_field(code: &mut InstructionSink<'_>, offset: u64) {
     code.local_get(STATE_PTR).i32_load(MemArg {
         offset: 100 + offset,
         align: 2,

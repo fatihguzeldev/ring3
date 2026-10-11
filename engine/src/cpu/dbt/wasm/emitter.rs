@@ -13,6 +13,16 @@ pub(in crate::cpu::dbt) fn emit(
 ) -> Vec<u8> {
     let mut module = Module::new();
     let memory::ImportNeeds {
+        stack_execute: needs_stack_execute,
+        cpu_integer: needs_cpu_integer,
+        cpu_read: needs_cpu_read,
+        cpu_write: needs_cpu_write,
+        x87_op: needs_x87_op,
+        simd_execute: needs_simd_execute,
+        cpu_fxsave: needs_cpu_fxsave,
+        cpu_mask_write: needs_cpu_mask_write,
+        segment_load: needs_segment_load,
+        segment_load_far: needs_segment_load_far,
         read: needs_read,
         store: needs_store,
         read8: needs_read8,
@@ -49,7 +59,23 @@ pub(in crate::cpu::dbt) fn emit(
         || needs_atomic_and_u32
         || needs_atomic_xor_u32;
     let has_reads = needs_read || needs_read8 || needs_read16;
-    let has_memory = has_reads
+    let has_simd = blocks
+        .iter()
+        .flat_map(|block| &block.instructions)
+        .any(|instruction| matches!(instruction.operation(), Operation::Simd(_)));
+    let has_cpu = has_simd
+        || needs_stack_execute
+        || needs_cpu_integer
+        || needs_cpu_read
+        || needs_cpu_write
+        || needs_x87_op
+        || needs_simd_execute
+        || needs_cpu_fxsave
+        || needs_cpu_mask_write
+        || needs_segment_load
+        || needs_segment_load_far;
+    let has_memory = has_cpu
+        || has_reads
         || has_stores
         || needs_compare_exchange32
         || needs_compare_exchange8
@@ -74,7 +100,8 @@ pub(in crate::cpu::dbt) fn emit(
         block.instructions.iter().any(|instruction| {
             matches!(
                 instruction.operation(),
-                Operation::InitializeX87
+                Operation::X87 { .. }
+                    | Operation::InitializeX87
                     | Operation::ClearX87Exceptions
                     | Operation::X87StatusToAx
                     | Operation::X87StatusToMemory { .. }
@@ -83,6 +110,29 @@ pub(in crate::cpu::dbt) fn emit(
         })
     });
     debug_assert!(!(has_memory || has_gates) || binding.is_some());
+    let has_repeat = blocks
+        .iter()
+        .flat_map(|block| &block.instructions)
+        .any(|instruction| matches!(instruction.operation(), Operation::RepeatString { .. }));
+    let has_segments = blocks
+        .iter()
+        .flat_map(|block| &block.instructions)
+        .any(|instruction| {
+            instruction.uses_segments()
+                || matches!(
+                    instruction.operation(),
+                    Operation::StackFrame { .. }
+                        | Operation::PopAll
+                        | Operation::PopAllWord
+                        | Operation::EnterZero
+                        | Operation::EnterZeroWord
+                        | Operation::ReadSegment { .. }
+                        | Operation::PushSegment { .. }
+                        | Operation::LoadSegment { .. }
+                        | Operation::PopSegment { .. }
+                        | Operation::LoadFarPointer { .. }
+                )
+        });
     let mut types = TypeSection::new();
     types.ty().function([ValType::I32; 4], [ValType::I32]);
     if let Some(binding) = binding {
@@ -119,6 +169,37 @@ pub(in crate::cpu::dbt) fn emit(
             std::iter::repeat_n(ValType::I32, parameters),
             [ValType::I32],
         );
+    }
+    let cpu_type_base = 1
+        + u32::from(binding.is_some())
+        + u32::from(has_reads)
+        + u32::from(has_stores)
+        + u32::from(
+            needs_compare_exchange32 || needs_compare_exchange8 || needs_compare_exchange16,
+        );
+    if has_cpu {
+        let resident_extra = if matches!(binding, Some(EmbeddedBinding::Resident { .. })) {
+            4
+        } else {
+            0
+        };
+        for parameters in [
+            3,
+            3 + resident_extra,
+            6 + resident_extra,
+            6 + resident_extra,
+            1 + resident_extra,
+            3 + resident_extra,
+            2 + resident_extra,
+            3 + resident_extra,
+            2 + resident_extra,
+            1 + resident_extra,
+        ] {
+            types.ty().function(
+                std::iter::repeat_n(ValType::I32, parameters),
+                [ValType::I32],
+            );
+        }
     }
     module.section(&types);
     let mut imports = ImportSection::new();
@@ -488,6 +569,110 @@ pub(in crate::cpu::dbt) fn emit(
         helper_imports.atomic_xor_u32 = Some(atomic_xor);
         function_index += 1;
     }
+    for (needed, suffix, resident_suffix, type_offset, slot) in [(
+        needs_cpu_read,
+        "cpu_read",
+        "cpu_read",
+        0,
+        &mut helper_imports.cpu_read,
+    )] {
+        let _ = resident_suffix;
+        if needed {
+            imports.import(
+                "ring3",
+                suffix,
+                EntityType::Function(cpu_type_base + type_offset),
+            );
+            *slot = Some(function_index);
+            function_index += 1;
+        }
+    }
+    for (needed, name, resident_name, type_offset, slot) in [
+        (
+            needs_stack_execute,
+            "stack_execute",
+            "stack_execute_resident",
+            9,
+            &mut helper_imports.stack_execute,
+        ),
+        (
+            needs_cpu_integer,
+            "cpu_integer",
+            "cpu_integer_resident",
+            8,
+            &mut helper_imports.cpu_integer,
+        ),
+        (
+            needs_simd_execute,
+            "simd_execute",
+            "simd_execute_resident",
+            3,
+            &mut helper_imports.simd_execute,
+        ),
+        (
+            needs_cpu_write,
+            "cpu_write",
+            "cpu_write_resident",
+            1,
+            &mut helper_imports.cpu_write,
+        ),
+        (
+            needs_x87_op,
+            "x87_op",
+            "x87_resident_op",
+            2,
+            &mut helper_imports.x87_op,
+        ),
+        (
+            needs_cpu_fxsave,
+            "cpu_fxsave",
+            "cpu_fxsave_resident",
+            4,
+            &mut helper_imports.cpu_fxsave,
+        ),
+        (
+            needs_cpu_mask_write,
+            "cpu_mask_write",
+            "cpu_mask_write_resident",
+            5,
+            &mut helper_imports.cpu_mask_write,
+        ),
+        (
+            needs_segment_load,
+            "segment_load",
+            "segment_load_resident",
+            6,
+            &mut helper_imports.segment_load,
+        ),
+        (
+            needs_segment_load_far,
+            "segment_load_far",
+            "segment_load_far_resident",
+            7,
+            &mut helper_imports.segment_load_far,
+        ),
+    ] {
+        if needed {
+            let (name, import) = match binding {
+                Some(EmbeddedBinding::Resident { key, id }) => (
+                    resident_name,
+                    memory::StoreImport::Resident {
+                        index: function_index,
+                        key,
+                        id,
+                    },
+                ),
+                _ => (name, memory::StoreImport::Replacement(function_index)),
+            };
+            imports.import(
+                "ring3",
+                name,
+                EntityType::Function(cpu_type_base + type_offset),
+            );
+            *slot = Some(import);
+            function_index += 1;
+        }
+    }
     module.section(&imports);
     let mut functions = FunctionSection::new();
     functions.function(0);
@@ -498,6 +683,9 @@ pub(in crate::cpu::dbt) fn emit(
     let mut declarations = vec![(16, ValType::I32), (1, ValType::I64)];
     if has_memory || has_gates {
         declarations.push((6, ValType::I32));
+    }
+    if has_repeat {
+        declarations.push((1, ValType::I32));
     }
     let mut function = Function::new(declarations);
     let mut code = function.instructions();
@@ -526,8 +714,18 @@ pub(in crate::cpu::dbt) fn emit(
             .end();
     }
     abi::preflight(&mut code);
+    if has_segments {
+        super::segments::preflight(&mut code);
+    }
+    if has_repeat {
+        abi::work_preflight(&mut code);
+        code.local_get(BUDGET).local_set(ORIGINAL_BUDGET);
+    }
     if has_x87 {
         x87::preflight(&mut code);
+    }
+    if has_simd {
+        super::simd::preflight(&mut code);
     }
     abi::load_state(&mut code);
     code.block(BlockType::Empty).loop_(BlockType::Empty);
@@ -536,7 +734,24 @@ pub(in crate::cpu::dbt) fn emit(
         emit_block(&mut code, block, helper_imports);
     }
     code.i32_const(3).local_set(REASON).br(1).end().end();
-    abi::flush(&mut code, has_memory, has_gates, has_arithmetic);
+    if has_repeat {
+        code.local_get(STATE_PTR)
+            .local_get(ORIGINAL_BUDGET)
+            .local_get(BUDGET)
+            .i32_sub()
+            .i32_store(wasm_encoder::MemArg {
+                offset: crate::abi::arena::WORK_CONSUMED_OFFSET as u64,
+                align: 2,
+                memory_index: 0,
+            });
+    }
+    abi::flush(
+        &mut code,
+        has_memory,
+        has_gates,
+        has_arithmetic,
+        has_cpu || has_simd,
+    );
     code.i32_const(0).end();
     let mut bodies = CodeSection::new();
     bodies.function(&function);

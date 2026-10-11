@@ -10,10 +10,93 @@ use crate::{
             X87_STATUS_OFFSET, X87_TAG_OFFSET,
         },
     },
-    cpu::x86::{Register32, X87State},
+    cpu::x86::{Register32, SegmentRegister, X87State, ir::EffectiveAddress},
 };
 
-use super::locals::{CANCEL_PTR, EXIT_PTR, MEMORY_BYTES, STATE_PTR, register};
+use super::locals::{
+    ADDRESS, CANCEL_PTR, EXIT_PTR, FLAGS, HELPER_STATUS, MEMORY_BYTES, STATE_PTR, register,
+};
+
+pub(super) fn operation(
+    code: &mut InstructionSink<'_>,
+    operation: crate::cpu::x86::X87Operation,
+    address: Option<crate::cpu::x86::ir::EffectiveAddress>,
+    waiting: bool,
+    pc: u32,
+    opcode: u16,
+    import: super::memory::StoreImport,
+    exit_depth: u32,
+) {
+    if let Some(address) = address {
+        super::memory::address_value(code, address);
+    } else {
+        code.i32_const(0);
+    }
+    code.local_set(ADDRESS);
+    let index = import.emit_binding(code);
+    code.i32_const(operation.encode() as i32)
+        .local_get(ADDRESS)
+        .local_get(FLAGS)
+        .i32_const(pc as i32)
+        .i32_const(i32::from(opcode))
+        .i32_const(control_word(address, waiting) as i32)
+        .call(index)
+        .local_set(HELPER_STATUS);
+    let length = operation.read_size().max(operation.write_size()) as u32;
+    let access =
+        u32::from(operation.read_size() != 0) | (u32::from(operation.write_size() != 0) << 1);
+    super::cpu_result::validate(
+        code,
+        length,
+        access,
+        operation.write_size() != 0,
+        exit_depth,
+    );
+    super::cpu_result::value(code);
+    code.local_set(FLAGS);
+    if operation == crate::cpu::x86::X87Operation::StatusToAx {
+        status_to_ax(code);
+    }
+}
+
+fn control_word(address: Option<EffectiveAddress>, waiting: bool) -> u32 {
+    let segment = address.map_or(0, |address| {
+        let segment = address.segment.unwrap_or_else(|| {
+            if matches!(address.base, Some(Register32::Esp | Register32::Ebp)) {
+                SegmentRegister::Ss
+            } else {
+                SegmentRegister::Ds
+            }
+        });
+        (segment.index() as u32 + 1) << 8
+    });
+    segment | u32::from(waiting)
+}
+
+pub(super) fn pending(code: &mut InstructionSink<'_>, exit_depth: u32) {
+    use super::locals::{DETAIL, FAULT_ACCESS, FAULT_ADDRESS, FAULT_LENGTH, LHS, REASON};
+    status_value(code);
+    code.local_set(LHS);
+    control_value(code);
+    code.i32_const(-1)
+        .i32_xor()
+        .local_get(LHS)
+        .i32_and()
+        .i32_const(0x3f)
+        .i32_and()
+        .if_(BlockType::Empty);
+    code.local_get(STATE_PTR)
+        .local_get(LHS)
+        .i32_const(0x8080)
+        .i32_or()
+        .local_tee(DETAIL)
+        .i32_store16(memarg(X87_STATUS_OFFSET, 1));
+    code.i32_const(12).local_set(REASON);
+    for local in [FAULT_ADDRESS, FAULT_ACCESS, FAULT_LENGTH] {
+        code.i32_const(0).local_set(local);
+    }
+    code.br(exit_depth + 1).end();
+}
 
 pub(super) fn preflight(code: &mut InstructionSink<'_>) {
     end(code);
@@ -137,5 +220,51 @@ fn memarg(offset: usize, align: u32) -> MemArg {
         offset: (X87_OFFSET + offset) as u64,
         align,
         memory_index: 0,
+    }
+}
+
+#[cfg(test)]
+mod pointer_control_tests {
+    use super::*;
+
+    #[test]
+    fn memory_control_carries_selected_segment_without_changing_waiting_bit() {
+        assert_eq!(control_word(None, false), 0);
+        assert_eq!(control_word(None, true), 1);
+        for (address, wanted) in [
+            (EffectiveAddress::default(), 0x401),
+            (
+                EffectiveAddress {
+                    base: Some(Register32::Ebp),
+                    ..EffectiveAddress::default()
+                },
+                0x301,
+            ),
+            (
+                EffectiveAddress {
+                    base: Some(Register32::Esp),
+                    ..EffectiveAddress::default()
+                },
+                0x301,
+            ),
+            (
+                EffectiveAddress {
+                    segment: Some(SegmentRegister::Fs),
+                    ..EffectiveAddress::default()
+                },
+                0x501,
+            ),
+            (
+                EffectiveAddress {
+                    base: Some(Register32::Ebp),
+                    segment: Some(SegmentRegister::Gs),
+                    ..EffectiveAddress::default()
+                },
+                0x601,
+            ),
+        ] {
+            assert_eq!(control_word(Some(address), true), wanted);
+            assert_eq!(control_word(Some(address), false), wanted & !1);
+        }
     }
 }
