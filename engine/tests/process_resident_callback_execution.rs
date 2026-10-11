@@ -1,6 +1,6 @@
 use ring3_engine::{
     abi::{
-        arena::{TRANSFER_OFFSET, TRANSFER_SIZE, X87_OFFSET},
+        arena::{SIMD_OFFSET, TRANSFER_OFFSET, TRANSFER_SIZE, WORK_OFFSET, X87_OFFSET},
         resident_callback::ResidentCallbackRecord32,
         x86::{X87_SIZE, encode_exit_v3, encode_state},
     },
@@ -25,6 +25,7 @@ struct Fixture {
     generation: u32,
     esp: u32,
     outer_x87: [u8; X87_SIZE],
+    outer_simd_segments: [u8; WORK_OFFSET - SIMD_OFFSET],
     snapshots: Vec<CodeSnapshot>,
 }
 fn upload(engine: &mut EngineInstance, pc: u32, bytes: &[u8]) {
@@ -97,6 +98,7 @@ fn fixture(esp: u32, same_unit: bool, installed_callback: bool) -> Fixture {
     let outer_x87 = engine.arena()[X87_OFFSET..X87_OFFSET + X87_SIZE]
         .try_into()
         .unwrap();
+    let outer_simd_segments = engine.arena()[SIMD_OFFSET..WORK_OFFSET].try_into().unwrap();
     Fixture {
         engine,
         outer,
@@ -105,6 +107,7 @@ fn fixture(esp: u32, same_unit: bool, installed_callback: bool) -> Fixture {
         generation,
         esp,
         outer_x87,
+        outer_simd_segments,
         snapshots,
     }
 }
@@ -309,6 +312,7 @@ fn abort_restores(f: &mut Fixture, token: u32) {
     expected[..56].copy_from_slice(&state_literal(&frozen(f.esp)));
     expected[56..96].copy_from_slice(&exit_literal(8, 1, 17));
     expected[X87_OFFSET..X87_OFFSET + X87_SIZE].copy_from_slice(&f.outer_x87);
+    expected[SIMD_OFFSET..WORK_OFFSET].copy_from_slice(&f.outer_simd_segments);
     let after = storage(f);
     assert_eq!(after.arena, expected);
     assert_eq!(after.arena_address, before.arena_address);

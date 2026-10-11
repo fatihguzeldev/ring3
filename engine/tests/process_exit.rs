@@ -319,7 +319,7 @@ fn terminal_v4_is_literal_full_u32_and_old_versions_refuse_without_partial_outpu
         }
         for (offset, value, error) in [
             (0, 0, AbiError::Magic),
-            (4, 6, AbiError::Version),
+            (4, 7, AbiError::Version),
             (6, 2, AbiError::Profile),
             (8, 39, AbiError::Length),
         ] {
