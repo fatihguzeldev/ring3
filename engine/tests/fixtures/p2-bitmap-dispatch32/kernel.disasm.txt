@@ -1,0 +1,24 @@
+
+kernel.obj:	file format coff-i386
+
+Disassembly of section .text:
+
+00000000 <_ring3_take_ready_bit>:
+       0: 57                           	push	edi
+       1: 56                           	push	esi
+       2: 8b 4c 24 0c                  	mov	ecx, dword ptr [esp + 0xc]
+       6: 8b 11                        	mov	edx, dword ptr [ecx]
+       8: 8b 74 24 10                  	mov	esi, dword ptr [esp + 0x10]
+       c: 21 d6                        	and	esi, edx
+       e: 74 10                        	je	0x20 <_ring3_take_ready_bit+0x20>
+      10: f3 0f bc c6                  	tzcnt	eax, esi
+      14: 89 f7                        	mov	edi, esi
+      16: f7 df                        	neg	edi
+      18: 21 f7                        	and	edi, esi
+      1a: 31 d7                        	xor	edi, edx
+      1c: 89 39                        	mov	dword ptr [ecx], edi
+      1e: eb 05                        	jmp	0x25 <_ring3_take_ready_bit+0x25>
+      20: b8 20 00 00 00               	mov	eax, 0x20
+      25: 5e                           	pop	esi
+      26: 5f                           	pop	edi
+      27: c3                           	ret
