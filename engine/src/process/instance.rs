@@ -557,6 +557,50 @@ impl EngineInstance {
         }
     }
 
+    pub fn exchange32(&mut self, address: u32, value: u32) -> Result<StoreCompletion, HostError> {
+        self.guard(self.key, self.generation())?;
+        let memory = self.memory.as_mut().ok_or(HostError::Closed)?;
+        let code_version = memory.code_validation_version();
+        let result = memory.exchange32(GuestAddress(address), value);
+        let code_changed = result.is_ok() && memory.code_validation_version() != code_version;
+        self.write_helper(result)?;
+        if code_changed {
+            match self.artifact_bytes() {
+                Ok(_) => Ok(StoreCompletion::Complete),
+                Err(HostError::CodeInvalidated) => Ok(StoreCompletion::CodeInvalidated),
+                Err(error) => Err(error),
+            }
+        } else {
+            Ok(StoreCompletion::Complete)
+        }
+    }
+
+    pub fn exchange_resident32(
+        &mut self,
+        key: u64,
+        id: u64,
+        address: u32,
+        value: u32,
+    ) -> Result<StoreCompletion, HostError> {
+        self.guard_resident(key, id)?;
+        let memory = self.memory.as_mut().ok_or(HostError::Closed)?;
+        let code_version = memory.code_validation_version();
+        let result = memory.exchange32(GuestAddress(address), value);
+        let code_changed = result.is_ok() && memory.code_validation_version() != code_version;
+        self.write_helper(result)?;
+        if code_changed {
+            match self.resident_bytes(id) {
+                Ok(_) => Ok(StoreCompletion::Complete),
+                Err(HostError::Resident(RegistryError::CodeInvalidated)) => {
+                    Ok(StoreCompletion::CodeInvalidated)
+                }
+                Err(error) => Err(error),
+            }
+        } else {
+            Ok(StoreCompletion::Complete)
+        }
+    }
+
     pub fn close(&mut self) {
         self.image_input = None;
         self.pending_call = None;

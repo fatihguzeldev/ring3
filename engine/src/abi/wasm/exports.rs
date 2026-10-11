@@ -557,6 +557,33 @@ pub extern "C" fn store_resident32(
 }
 
 #[allow(unsafe_code)]
+#[unsafe(export_name = "ring3_abi_v1_exchange32")]
+pub extern "C" fn exchange32(address: u32, value: u32) -> u32 {
+    {
+        #![forbid(unsafe_code)]
+        crate::process::wasm::exchange32(address, value)
+    }
+}
+
+#[allow(unsafe_code)]
+#[unsafe(export_name = "ring3_abi_v1_exchange_resident32")]
+pub extern "C" fn exchange_resident32(
+    key_low: u32,
+    key_high: u32,
+    id_low: u32,
+    id_high: u32,
+    address: u32,
+    value: u32,
+) -> u32 {
+    {
+        #![forbid(unsafe_code)]
+        crate::process::wasm::exchange_resident32(
+            key_low, key_high, id_low, id_high, address, value,
+        )
+    }
+}
+
+#[allow(unsafe_code)]
 #[unsafe(export_name = "ring3_abi_v1_capture_call")]
 pub extern "C" fn capture_call(
     low: u32,
