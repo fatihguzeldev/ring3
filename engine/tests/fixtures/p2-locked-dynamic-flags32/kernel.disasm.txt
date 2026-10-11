@@ -1,0 +1,24 @@
+
+kernel.obj:	file format coff-i386
+
+Disassembly of section .text:
+
+00000000 <_ring3_update_dynamic_flags>:
+       0: 56                           	push	esi
+       1: 8b 44 24 14                  	mov	eax, dword ptr [esp + 0x14]
+       5: 8b 4c 24 10                  	mov	ecx, dword ptr [esp + 0x10]
+       9: 8b 54 24 0c                  	mov	edx, dword ptr [esp + 0xc]
+       d: 8b 74 24 08                  	mov	esi, dword ptr [esp + 0x8]
+      11: f0                           	lock
+      12: 09 16                        	or	dword ptr [esi], edx
+      14: 8b 16                        	mov	edx, dword ptr [esi]
+      16: f0                           	lock
+      17: 21 0e                        	and	dword ptr [esi], ecx
+      19: 8b 0e                        	mov	ecx, dword ptr [esi]
+      1b: f0                           	lock
+      1c: 31 06                        	xor	dword ptr [esi], eax
+      1e: 31 d1                        	xor	ecx, edx
+      20: 8b 06                        	mov	eax, dword ptr [esi]
+      22: 31 c8                        	xor	eax, ecx
+      24: 5e                           	pop	esi
+      25: c3                           	ret
