@@ -868,6 +868,10 @@ pub enum Operation {
         address: EffectiveAddress,
         index: Register32,
     },
+    LockedMemoryOr32 {
+        address: EffectiveAddress,
+        mask: u32,
+    },
     MemoryBitMutationWord {
         kind: BitTestKind,
         address: EffectiveAddress,

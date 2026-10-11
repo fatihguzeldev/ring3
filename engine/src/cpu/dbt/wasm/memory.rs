@@ -54,6 +54,7 @@ pub(super) struct Imports {
     pub(super) exchange_add16: Option<StoreImport>,
     pub(super) bit_test_set32: Option<StoreImport>,
     pub(super) bit_test_reset32: Option<StoreImport>,
+    pub(super) atomic_or_u32: Option<StoreImport>,
 }
 
 pub(super) struct ImportNeeds {
@@ -74,6 +75,7 @@ pub(super) struct ImportNeeds {
     pub(super) exchange_add16: bool,
     pub(super) bit_test_set32: bool,
     pub(super) bit_test_reset32: bool,
+    pub(super) atomic_or_u32: bool,
 }
 
 impl Imports {
@@ -95,6 +97,7 @@ impl Imports {
         let mut exchange_add16 = false;
         let mut bit_test_set32 = false;
         let mut bit_test_reset32 = false;
+        let mut atomic_or_u32 = false;
         for instruction in blocks.iter().flat_map(|block| &block.instructions) {
             match instruction.operation() {
                 Operation::MemoryExchange { .. } => exchange = true,
@@ -108,6 +111,7 @@ impl Imports {
                 Operation::LockedMemoryExchangeAddWord { .. } => exchange_add16 = true,
                 Operation::LockedMemoryBitSet32 { .. } => bit_test_set32 = true,
                 Operation::LockedMemoryBitReset32 { .. } => bit_test_reset32 = true,
+                Operation::LockedMemoryOr32 { .. } => atomic_or_u32 = true,
                 Operation::X87StatusToMemory { .. }
                 | Operation::X87ControlToMemory { .. }
                 | Operation::StoreWord { .. }
@@ -302,6 +306,7 @@ impl Imports {
             exchange_add16,
             bit_test_set32,
             bit_test_reset32,
+            atomic_or_u32,
         }
     }
 }
@@ -324,6 +329,16 @@ pub(super) fn bit_test_reset_result(
     exit_depth: u32,
 ) {
     exchange::bit_test_reset_result(code, address, index, imports, exit_depth);
+}
+
+pub(super) fn atomic_or_result(
+    code: &mut InstructionSink<'_>,
+    address: EffectiveAddress,
+    mask: u32,
+    imports: Imports,
+    exit_depth: u32,
+) {
+    exchange::atomic_or_result(code, address, mask, imports, exit_depth);
 }
 
 pub(super) fn exchange_add_result(

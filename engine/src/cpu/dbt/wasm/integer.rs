@@ -1932,6 +1932,15 @@ pub(super) fn instruction(
                 .local_set(FLAGS);
             store = true;
         }
+        Operation::LockedMemoryOr32 { address, mask } => {
+            memory::atomic_or_result(code, address, mask, imports, exit_depth);
+            code.local_get(RESULT)
+                .i32_const(mask as i32)
+                .i32_or()
+                .local_set(RESULT);
+            logical_flags(code, 31);
+            store = true;
+        }
         Operation::MemoryBitMutation {
             kind,
             address,
