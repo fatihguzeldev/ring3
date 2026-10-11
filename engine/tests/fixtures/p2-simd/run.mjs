@@ -136,6 +136,7 @@ const rawCases=[
  {name:'raw-preserved-df-before-memory-write',code:'f30f1100',flags:0x8d7},
  {name:'raw-high-reserved-before-gpr',code:'f30f2cc1',flags:0x1cd7},
  {name:'raw-nonzero-helper-value-before-gpr',code:'f30f2cc1',flags:0xcd7,value:1},
+ {name:'raw-invalid-compare-relation',code:'0f2ec1',flags:0x443},
  {name:'raw-valid-compare-flags',code:'0f2ec1',flags:0x403,valid:true},
 ];
 for(const owner of['replacement','resident'])for(const entries of[false,true]){

@@ -117,19 +117,34 @@ pub(super) fn instruction(
     memory::expect_field(code, 20, 0);
     memory::protocol_if_bad(code);
     memory::exit_if_failed(code, exit_depth);
-    payload(code, 4);
-    cpu_result::flags(
-        code,
-        if matches!(
-            operation.kind,
-            SimdKind::Float(FloatKind::CompareFlags | FloatKind::CompareFlagsQuiet)
-        ) {
-            0x8d5
-        } else {
-            0
-        },
-        exit_depth,
+    let compare_flags = matches!(
+        operation.kind,
+        SimdKind::Float(FloatKind::CompareFlags | FloatKind::CompareFlagsQuiet)
     );
+    payload(code, 4);
+    if compare_flags {
+        code.local_set(RESULT);
+        memory::reset_checks(code);
+        // a completed simd comparison has one of four relations; exceptions exit above.
+        code.local_get(RESULT)
+            .i32_const(0x8d5)
+            .i32_and()
+            .i32_eqz()
+            .i32_eqz();
+        for relation in [1, 0x40, 0x45] {
+            code.local_get(RESULT)
+                .i32_const(0x8d5)
+                .i32_and()
+                .i32_const(relation)
+                .i32_ne()
+                .i32_and();
+        }
+        memory::add_check(code);
+        memory::protocol_if_bad(code);
+        memory::exit_if_failed(code, exit_depth);
+        code.local_get(RESULT);
+    }
+    cpu_result::flags(code, if compare_flags { 0x8d5 } else { 0 }, exit_depth);
     if operation.writes_memory() {
         let import = if operation.kind == SimdKind::SaveExtended {
             imports.cpu_fxsave
