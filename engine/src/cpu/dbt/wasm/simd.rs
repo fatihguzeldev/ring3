@@ -8,7 +8,7 @@ use crate::{
         arena::{TRANSFER_OFFSET, X87_OFFSET},
         x86::{X87_STATUS_OFFSET, X87_TAG_OFFSET},
     },
-    cpu::x86::simd::{SimdKind, SimdOperand, SimdOperation, SimdRegister},
+    cpu::x86::simd::{FloatKind, SimdKind, SimdOperand, SimdOperation, SimdRegister},
 };
 use wasm_encoder::{InstructionSink, MemArg};
 
@@ -113,6 +113,23 @@ pub(super) fn instruction(
     code.local_get(FLAGS);
     code.call(execute).local_set(HELPER_STATUS);
     cpu_result::validate(code, 0, 0, false, exit_depth);
+    memory::reset_checks(code);
+    memory::expect_field(code, 20, 0);
+    memory::protocol_if_bad(code);
+    memory::exit_if_failed(code, exit_depth);
+    payload(code, 4);
+    cpu_result::flags(
+        code,
+        if matches!(
+            operation.kind,
+            SimdKind::Float(FloatKind::CompareFlags | FloatKind::CompareFlagsQuiet)
+        ) {
+            0x8d5
+        } else {
+            0
+        },
+        exit_depth,
+    );
     if operation.writes_memory() {
         let import = if operation.kind == SimdKind::SaveExtended {
             imports.cpu_fxsave
@@ -174,8 +191,6 @@ pub(super) fn instruction(
         payload(code, 0);
         code.local_set(register(destination));
     }
-    payload(code, 4);
-    code.local_set(FLAGS);
     operation.writes_memory()
 }
 

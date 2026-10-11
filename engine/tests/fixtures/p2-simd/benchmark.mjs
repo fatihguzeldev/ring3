@@ -1,0 +1,45 @@
+import assert from 'node:assert/strict';
+import {readFileSync,writeFileSync,mkdirSync} from 'node:fs';
+import {join} from 'node:path';
+import {createHash} from 'node:crypto';
+const [enginePath,output,label='unspecified']=process.argv.slice(2);
+assert.ok(enginePath&&output,'benchmark.mjs ENGINE_WASM OUTPUT_DIRECTORY [LABEL]');
+mkdirSync(output,{recursive:true});
+const hash=b=>createHash('sha256').update(b).digest('hex');
+const now=()=>process.hrtime.bigint(),span=(a,b)=>Number(b-a);
+const engineBytes=readFileSync(enginePath),program=Buffer.from('660ffec1660fefc2660fdbc3660febc4ebee','hex');
+const BUDGET=5000,WARMUP=20,BATCH_CALLS=100,SAMPLES=5,SV=4364,T=140,SIZE=4612;
+const started=now(),engineModule=new WebAssembly.Module(engineBytes),engineCompileEnd=now(),instance=new WebAssembly.Instance(engineModule,{}),engineInstantiateEnd=now();
+const memory=instance.exports.memory,api={};
+for(const[name,fn]of Object.entries(instance.exports))if(name.startsWith('ring3_abi_v1_')&&typeof fn==='function')api[name.slice(13)]=fn;
+const host=(name,args)=>assert.equal(api[name](...args),0,name);
+host('open',[4,0x53494d44,0x50455246]);const base=api.arena_ptr()>>>0;
+const input=(offset,bytes)=>new Uint8Array(memory.buffer,base+offset,bytes.length).set(bytes);
+const read=()=>Buffer.from(new Uint8Array(memory.buffer,base,SIZE));
+const words=values=>{const b=Buffer.alloc(values.length*4);values.forEach((v,i)=>b.writeUInt32LE(v>>>0,i*4));return b;};
+host('map',[0x1000,1,7]);input(T,program);host('upload',[0x1000,program.length]);host('protect',[0x1000,1,5]);input(T,words([0x1000,program.length]));
+const captureStart=now();host('compile',[1]);const captureEnd=now();
+const modulePointer=api.module_ptr()>>>0,moduleLength=api.module_len()>>>0,moduleBytes=Buffer.from(new Uint8Array(memory.buffer,modulePointer,moduleLength));
+let calls=0;const ring3={},guestModule=new WebAssembly.Module(moduleBytes);
+for(const im of WebAssembly.Module.imports(guestModule)){if(im.kind==='memory'){assert.equal(im.module,'env');assert.equal(im.name,'memory');continue;}assert.equal(im.kind,'function');ring3[im.name]=(...args)=>{if(!im.name.startsWith('guard'))calls++;return api[im.name](...args);};}
+const run=new WebAssembly.Instance(guestModule,{env:{memory},ring3}).exports.run,generatedEnd=now();
+const initial=[1,0xffffffff,0x12345678,0x80000000],add=[3,5,7,11],xor=[0x01020304,0x55667788,0x80000000,0],and=[0xffffffff,0x7fffffff,0xf0f0f0f0,0xfffffffe],or=[0,0x80000000,0x01010101,1];
+input(16,words([0x10203040,0x21314151,0x32425262,0x43536373,0x7080,0x65758595,0x768696a6,0x8797a7b7,0x1000,0xcd7]));
+[initial,add,xor,and,or].forEach((values,index)=>input(SV+32+index*16,words(values)));
+const invoke=()=>{const status=run(base,base+56,BUDGET,base+96);assert.equal(status,0);};
+const check=()=>{const a=read();assert.equal(a.readUInt32LE(72),1);assert.equal(a.readUInt32LE(76),BUDGET);assert.equal(a.readUInt32LE(48),0x1000);assert.equal(a.readUInt32LE(52),0xcd7);};
+const beforeFirst=calls,firstStart=now();invoke();const firstEnd=now();check();const firstHelpers=calls-beforeFirst;
+const beforeWarmup=calls;for(let i=0;i<WARMUP;i++)invoke();check();const warmupHelpers=calls-beforeWarmup;
+const samples=[];
+for(let sample=0;sample<SAMPLES;sample++){
+ const helpersBefore=calls,t0=now();for(let i=0;i<BATCH_CALLS;i++)invoke();const t1=now();check();
+ const helperCalls=calls-helpersBefore,guestInstructions=BATCH_CALLS*BUDGET;assert.ok(helperCalls===0||helperCalls===guestInstructions*4/5);
+ samples.push({sample,elapsed_ns:span(t0,t1),calls:BATCH_CALLS,retired_guest_instructions:guestInstructions,helper_calls:helperCalls,ns_per_guest_instruction:span(t0,t1)/guestInstructions});
+}
+const totalRuns=1+WARMUP+SAMPLES*BATCH_CALLS,totalRetired=totalRuns*BUDGET,totalCycles=totalRetired/5,expected=[...initial];
+for(let cycle=0;cycle<totalCycles;cycle++)for(let lane=0;lane<4;lane++)expected[lane]=(((((expected[lane]+add[lane])>>>0)^xor[lane])&and[lane])|or[lane])>>>0;
+const final=read();assert.deepEqual(final.subarray(SV+32,SV+48),words(expected));
+for(let index=0;index<4;index++)assert.deepEqual(final.subarray(SV+48+index*16,SV+64+index*16),words([add,xor,and,or][index]));
+assert.equal(calls,firstHelpers+warmupHelpers+samples.reduce((n,s)=>n+s.helper_calls,0));
+const sorted=samples.map(s=>s.ns_per_guest_instruction).sort((a,b)=>a-b),result={status:'PASS',label,engine:{path:enginePath,sha256:hash(engineBytes),bytes:engineBytes.length},program:{hex:program.toString('hex'),sha256:hash(program),instructions_per_cycle:5,vector_instructions_per_cycle:4,profile:'replacement explicit single block; read/execute code after write-protected upload'},generated:{sha256:hash(moduleBytes),bytes:moduleBytes.length,imports:WebAssembly.Module.imports(guestModule)},protocol:{budget:BUDGET,warmup_calls:WARMUP,batch_calls:BATCH_CALLS,samples:SAMPLES,clock:'process.hrtime.bigint; monotonic nanoseconds',timed:'generated run calls including forwarding/guards and status assertion; arena checks and expected-algebra loop outside measured windows'},cold:{engine_compile_ns:span(started,engineCompileEnd),engine_instantiate_ns:span(engineCompileEnd,engineInstantiateEnd),guest_capture_ns:span(captureStart,captureEnd),generated_compile_and_instantiate_ns:span(captureEnd,generatedEnd),first_run_ns:span(firstStart,firstEnd),first_run_retired:BUDGET,first_run_helper_calls:firstHelpers},warmup:{calls:WARMUP,retired:WARMUP*BUDGET,helper_calls:warmupHelpers},samples,median_ns_per_guest_instruction:sorted[2],total:{runs:totalRuns,retired:totalRetired,helpers:calls},final_xmm0:final.subarray(SV+32,SV+48).toString('hex'),scope:'One deterministic packed-integer register chain. Cold and warm values separate; no whole CPU, floating-point, memory bandwidth, or application speed claim.'};
+writeFileSync(join(output,'module.wasm'),moduleBytes);writeFileSync(join(output,'final-arena.bin'),final);writeFileSync(join(output,'result.json'),JSON.stringify(result,null,2));host('close',[]);console.log(JSON.stringify({status:'PASS',label,median_ns_per_guest_instruction:result.median_ns_per_guest_instruction,total:result.total,output}));
