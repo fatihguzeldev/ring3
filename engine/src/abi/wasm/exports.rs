@@ -891,6 +891,33 @@ pub extern "C" fn atomic_or_resident_u32(
 }
 
 #[allow(unsafe_code)]
+#[unsafe(export_name = "ring3_abi_v1_atomic_and_u32")]
+pub extern "C" fn atomic_and_u32(address: u32, mask: u32) -> u32 {
+    {
+        #![forbid(unsafe_code)]
+        crate::process::wasm::atomic_and_u32(address, mask)
+    }
+}
+
+#[allow(unsafe_code)]
+#[unsafe(export_name = "ring3_abi_v1_atomic_and_resident_u32")]
+pub extern "C" fn atomic_and_resident_u32(
+    key_low: u32,
+    key_high: u32,
+    id_low: u32,
+    id_high: u32,
+    address: u32,
+    mask: u32,
+) -> u32 {
+    {
+        #![forbid(unsafe_code)]
+        crate::process::wasm::atomic_and_resident_u32(
+            key_low, key_high, id_low, id_high, address, mask,
+        )
+    }
+}
+
+#[allow(unsafe_code)]
 #[unsafe(export_name = "ring3_abi_v1_capture_call")]
 pub extern "C" fn capture_call(
     low: u32,
