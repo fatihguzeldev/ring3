@@ -515,7 +515,7 @@ fn locked_xadd32_strict_prefixes_widths_registers_and_neighbors_stay_closed() {
     for raw in 0xc0..=0xff {
         cases.insert(vec![0xf0, 0x0f, 0xc1, raw], DecodeError::InvalidEncoding);
     }
-    cases.insert(vec![0xf0, 0x0f, 0xc0, 0x03], opcode);
+    cases.insert(vec![0xf0, 0xf0, 0x0f, 0xc0, 0x03], opcode);
     cases.insert(vec![0xf0, 0x01, 0x03], opcode);
     assert_eq!(cases.len(), 108);
     for (bytes, expected) in cases {

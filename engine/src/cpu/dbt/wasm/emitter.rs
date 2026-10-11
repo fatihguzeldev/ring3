@@ -12,27 +12,29 @@ pub(in crate::cpu::dbt) fn emit(
     binding: Option<EmbeddedBinding>,
 ) -> Vec<u8> {
     let mut module = Module::new();
-    let (
-        needs_read,
-        needs_store,
-        needs_read8,
-        needs_read16,
-        needs_store8,
-        needs_store16,
-        needs_exchange,
-        needs_exchange8,
-        needs_exchange16,
-        needs_compare_exchange32,
-        needs_exchange_add32,
-        needs_compare_exchange8,
-    ) = memory::Imports::needed(blocks);
+    let memory::ImportNeeds {
+        read: needs_read,
+        store: needs_store,
+        read8: needs_read8,
+        read16: needs_read16,
+        store8: needs_store8,
+        store16: needs_store16,
+        exchange: needs_exchange,
+        exchange8: needs_exchange8,
+        exchange16: needs_exchange16,
+        compare_exchange32: needs_compare_exchange32,
+        exchange_add32: needs_exchange_add32,
+        compare_exchange8: needs_compare_exchange8,
+        exchange_add8: needs_exchange_add8,
+    } = memory::Imports::needed(blocks);
     let has_stores = needs_store
         || needs_store8
         || needs_store16
         || needs_exchange
         || needs_exchange8
         || needs_exchange16
-        || needs_exchange_add32;
+        || needs_exchange_add32
+        || needs_exchange_add8;
     let has_reads = needs_read || needs_read8 || needs_read16;
     let has_memory = has_reads || has_stores || needs_compare_exchange32 || needs_compare_exchange8;
     let has_gates = blocks.iter().any(|block| block.gate.is_some());
@@ -311,6 +313,25 @@ pub(in crate::cpu::dbt) fn emit(
             EntityType::Function(type_index + u32::from(has_stores)),
         );
         helper_imports.compare_exchange8 = Some(exchange);
+        function_index += 1;
+    }
+    if needs_exchange_add8 {
+        let (name, exchange) = match binding {
+            Some(EmbeddedBinding::Resident { key, id }) => (
+                "exchange_add_resident8",
+                memory::StoreImport::Resident {
+                    index: function_index,
+                    key,
+                    id,
+                },
+            ),
+            _ => (
+                "exchange_add8",
+                memory::StoreImport::Replacement(function_index),
+            ),
+        };
+        imports.import("ring3", name, EntityType::Function(type_index));
+        helper_imports.exchange_add8 = Some(exchange);
         function_index += 1;
     }
     module.section(&imports);

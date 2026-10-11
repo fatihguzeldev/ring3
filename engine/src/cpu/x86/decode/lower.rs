@@ -491,6 +491,12 @@ pub(super) fn lower(instruction: &Instruction, bytes: &[u8]) -> Result<Operation
                 return Err(unsupported());
             }
             let source = byte_register(instruction.op1_register())?;
+            if instruction.has_lock_prefix() {
+                return Ok(Operation::LockedMemoryExchangeAddByte {
+                    address: effective_address(instruction)?,
+                    source,
+                });
+            }
             match instruction.op0_kind() {
                 OpKind::Register => Ok(Operation::ExchangeAddByte {
                     destination: byte_register(instruction.op0_register())?,

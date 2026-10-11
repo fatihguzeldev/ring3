@@ -49,25 +49,27 @@ pub(super) struct Imports {
     pub(super) compare_exchange32: Option<StoreImport>,
     pub(super) exchange_add32: Option<StoreImport>,
     pub(super) compare_exchange8: Option<StoreImport>,
+    pub(super) exchange_add8: Option<StoreImport>,
+}
+
+pub(super) struct ImportNeeds {
+    pub(super) read: bool,
+    pub(super) store: bool,
+    pub(super) read8: bool,
+    pub(super) read16: bool,
+    pub(super) store8: bool,
+    pub(super) store16: bool,
+    pub(super) exchange: bool,
+    pub(super) exchange8: bool,
+    pub(super) exchange16: bool,
+    pub(super) compare_exchange32: bool,
+    pub(super) exchange_add32: bool,
+    pub(super) compare_exchange8: bool,
+    pub(super) exchange_add8: bool,
 }
 
 impl Imports {
-    pub(super) fn needed(
-        blocks: &[crate::cpu::dbt::region::CompiledBlock],
-    ) -> (
-        bool,
-        bool,
-        bool,
-        bool,
-        bool,
-        bool,
-        bool,
-        bool,
-        bool,
-        bool,
-        bool,
-        bool,
-    ) {
+    pub(super) fn needed(blocks: &[crate::cpu::dbt::region::CompiledBlock]) -> ImportNeeds {
         let mut read = false;
         let mut store = false;
         let mut read8 = false;
@@ -80,6 +82,7 @@ impl Imports {
         let mut compare_exchange32 = false;
         let mut exchange_add32 = false;
         let mut compare_exchange8 = false;
+        let mut exchange_add8 = false;
         for instruction in blocks.iter().flat_map(|block| &block.instructions) {
             match instruction.operation() {
                 Operation::MemoryExchange { .. } => exchange = true,
@@ -88,6 +91,7 @@ impl Imports {
                 Operation::LockedMemoryCompareExchange32 { .. } => compare_exchange32 = true,
                 Operation::LockedMemoryExchangeAdd32 { .. } => exchange_add32 = true,
                 Operation::LockedMemoryCompareExchangeByte { .. } => compare_exchange8 = true,
+                Operation::LockedMemoryExchangeAddByte { .. } => exchange_add8 = true,
                 Operation::X87StatusToMemory { .. }
                 | Operation::X87ControlToMemory { .. }
                 | Operation::StoreWord { .. }
@@ -264,7 +268,7 @@ impl Imports {
                 _ => {}
             }
         }
-        (
+        ImportNeeds {
             read,
             store,
             read8,
@@ -277,7 +281,8 @@ impl Imports {
             compare_exchange32,
             exchange_add32,
             compare_exchange8,
-        )
+            exchange_add8,
+        }
     }
 }
 
@@ -318,6 +323,15 @@ pub(super) fn exchange_byte_result(
     exit_depth: u32,
 ) {
     byte_exchange::exchange_result(code, address, imports, exit_depth);
+}
+
+pub(super) fn exchange_add_byte_result(
+    code: &mut InstructionSink<'_>,
+    address: EffectiveAddress,
+    imports: Imports,
+    exit_depth: u32,
+) {
+    byte_exchange::exchange_add_result(code, address, imports, exit_depth);
 }
 
 pub(super) fn compare_exchange_byte_result(

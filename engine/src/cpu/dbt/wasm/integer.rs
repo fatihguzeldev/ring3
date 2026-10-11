@@ -1364,6 +1364,24 @@ pub(super) fn instruction(
             code.local_get(RESULT);
             insert_byte(code, destination);
         }
+        Operation::LockedMemoryExchangeAddByte { address, source } => {
+            byte_value(code, ByteValue::Register(source));
+            code.local_set(RESULT);
+            memory::exchange_add_byte_result(code, address, imports, exit_depth);
+            code.local_get(RESULT).local_set(LHS);
+            byte_value(code, ByteValue::Register(source));
+            code.local_set(RHS)
+                .local_get(LHS)
+                .local_get(RHS)
+                .i32_add()
+                .i32_const(0xff)
+                .i32_and()
+                .local_set(RESULT);
+            arithmetic_flags(code, BinaryKind::Add, CarryFlag::Calculate, 7);
+            code.local_get(LHS);
+            insert_byte(code, source);
+            store = true;
+        }
         Operation::MemoryExchangeAddByte { address, source } => {
             memory::load_narrow_value(code, address, SmallWidth::Byte, imports, exit_depth);
             code.local_set(LHS);

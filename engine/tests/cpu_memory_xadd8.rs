@@ -424,7 +424,12 @@ fn word_prefix_and_other_memory_exchange_refusals_keep_inputs_unchanged() {
         } else {
             opcode
         };
-        cases.push((vec![prefix, 0x0f, 0xc0, 0x03], expected));
+        let mut bytes = vec![prefix];
+        if prefix == 0xf0 {
+            bytes.push(0xf0);
+        }
+        bytes.extend([0x0f, 0xc0, 0x03]);
+        cases.push((bytes, expected));
     }
     for (bytes, expected) in cases {
         let mut engine = code(CODE, &bytes);
