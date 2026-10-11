@@ -4,6 +4,7 @@ pub mod ir;
 mod segments;
 pub mod simd;
 mod state;
+mod stack;
 mod x87;
 
 pub use segments::{
@@ -11,6 +12,7 @@ pub use segments::{
     SegmentLoadFailure, SegmentRegister, SegmentState,
 };
 pub use state::{Register32, State32};
+pub use stack::StackFrameKind;
 pub use x87::{
     Ext80, X87Binary, X87Condition, X87Error, X87Format, X87Operation, X87Outcome, X87Rounding,
     X87State,
