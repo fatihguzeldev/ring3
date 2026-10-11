@@ -68,7 +68,9 @@ fn last_error(engine: &EngineInstance) -> u32 {
     {
         WindowsOutcome32::Return(value) => value,
         WindowsOutcome32::ExitProcess(_) => panic!("GetLastError cannot terminate the process"),
-        WindowsOutcome32::Allocate { .. } | WindowsOutcome32::Release { .. } => {
+        WindowsOutcome32::Allocate { .. }
+        | WindowsOutcome32::Release { .. }
+        | WindowsOutcome32::Protect { .. } => {
             panic!("getlasterror must return")
         }
     }

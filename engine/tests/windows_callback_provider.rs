@@ -43,6 +43,7 @@ const ORIGINAL_PAGES: [u32; 9] = [
 
 struct Fixture {
     engine: EngineInstance,
+    apis: [WindowsApi32; 5],
     units: [u64; 4],
     generation: u32,
     callback_token: u32,
@@ -68,6 +69,10 @@ fn stop(engine: &mut EngineInstance, state: State32, reason: ExitReason) {
 }
 
 fn base_fixture(pages: u32) -> Fixture {
+    base_fixture_with_apis(pages, APIS)
+}
+
+fn base_fixture_with_apis(pages: u32, apis: [WindowsApi32; 5]) -> Fixture {
     let mut engine = EngineInstance::new(pages, KEY).unwrap();
     engine.load_pe32(&pe::image()).unwrap();
     for address in [OUTER, HOME, ACTIVE, OTHER] {
@@ -94,7 +99,7 @@ fn base_fixture(pages: u32) -> Fixture {
     for (index, base) in [HOME, ACTIVE].into_iter().enumerate() {
         let mut blocks = vec![(base, 1)];
         let mut gates = Vec::new();
-        for (slot, api) in APIS.into_iter().enumerate() {
+        for (slot, api) in apis.into_iter().enumerate() {
             blocks.push((base + 0x100 + slot as u32 * 16, 2));
             gates.push((base + 0x100 + slot as u32 * 16, api.id()));
         }
@@ -110,7 +115,7 @@ fn base_fixture(pages: u32) -> Fixture {
     units[3] = engine.compile_resident(1).unwrap().get();
     let mut blocks = vec![(OUTER, 2), (HOME, 1)];
     let mut gates = vec![(OUTER, 17)];
-    for (slot, api) in APIS.into_iter().enumerate() {
+    for (slot, api) in apis.into_iter().enumerate() {
         blocks.push((HOME + 0x100 + slot as u32 * 16, 2));
         gates.push((HOME + 0x100 + slot as u32 * 16, api.id()));
     }
@@ -128,6 +133,7 @@ fn base_fixture(pages: u32) -> Fixture {
     let outer_bytes = engine.arena()[..96].to_vec();
     Fixture {
         engine,
+        apis,
         units,
         generation,
         callback_token: 0,
@@ -139,7 +145,11 @@ fn base_fixture(pages: u32) -> Fixture {
 }
 
 fn fixture(pages: u32, foreign: bool, armed: bool) -> Fixture {
-    let mut f = base_fixture(pages);
+    fixture_with_apis(pages, foreign, armed, APIS)
+}
+
+fn fixture_with_apis(pages: u32, foreign: bool, armed: bool, apis: [WindowsApi32; 5]) -> Fixture {
+    let mut f = base_fixture_with_apis(pages, apis);
     let outer = f
         .engine
         .capture_resident_call(KEY, f.units[0], CallingConvention32::Cdecl, 0)
@@ -184,7 +194,7 @@ fn capture(
             .write32(esp + 4 * (index as u32 + 1), *argument)
             .unwrap();
     }
-    let slot = APIS.iter().position(|&value| value == api).unwrap() as u32;
+    let slot = f.apis.iter().position(|&value| value == api).unwrap() as u32;
     let state = State32 {
         registers: [
             SENTINEL,
@@ -285,8 +295,28 @@ fn reject(
 }
 
 fn completed(f: &mut Fixture, token: u32, state: State32, result: u32) {
+    completed_with_output(f, token, state, result, None);
+}
+
+fn completed_with_output(
+    f: &mut Fixture,
+    token: u32,
+    state: State32,
+    result: u32,
+    output: Option<(u32, u32)>,
+) {
     let before = saved(f);
-    let old_ram = ORIGINAL_PAGES.map(|address| ram(&f.engine, address));
+    let mut old_ram = ORIGINAL_PAGES.map(|address| ram(&f.engine, address));
+    if let Some((address, value)) = output {
+        for (index, byte) in value.to_le_bytes().into_iter().enumerate() {
+            let at = address + index as u32;
+            let page = ORIGINAL_PAGES
+                .iter()
+                .position(|&base| at >= base && at < base + 4096)
+                .unwrap();
+            old_ram[page].as_mut().unwrap()[(at - ORIGINAL_PAGES[page]) as usize] = byte;
+        }
+    }
     let mut next = state;
     next.registers[0] = result;
     next.registers[4] = 0x8ff8;
@@ -501,6 +531,165 @@ fn allocation_permissions_survive_home_and_foreign_callback_continuations() {
             invoke(&mut f, WindowsApi32::GetLastError, &[], 8);
             finish(&mut f, 37);
         }
+    }
+}
+
+#[test]
+fn protection_transaction_survives_home_and_foreign_callback_continuations() {
+    let mut apis = APIS;
+    apis[3] = WindowsApi32::VirtualProtect;
+    let output = STACK + 0x100;
+    for foreign in [false, true] {
+        let mut f = fixture_with_apis(11, foreign, true, apis);
+        let arena = f.engine.arena_mut().unwrap();
+        arena[X87_OFFSET + 16..X87_OFFSET + 18].copy_from_slice(&0x027f_u16.to_le_bytes());
+        arena[X87_OFFSET + 18..X87_OFFSET + 20].copy_from_slice(&0x81a5_u16.to_le_bytes());
+        for (index, byte) in arena[X87_OFFSET + 40..X87_OFFSET + 120]
+            .iter_mut()
+            .enumerate()
+        {
+            *byte = (index as u8).wrapping_mul(29).wrapping_add(17);
+        }
+        invoke(&mut f, WindowsApi32::SetLastError, &[LAST_ERROR], SENTINEL);
+        invoke(
+            &mut f,
+            WindowsApi32::VirtualAlloc,
+            &[0, 4097, 0x3000, 4],
+            WINDOW,
+        );
+        f.engine.write32(WINDOW, 0x4433_2211).unwrap();
+        f.engine.write32(WINDOW + 8192 - 4, 0x8877_6655).unwrap();
+        let allocation = [
+            ram(&f.engine, WINDOW).unwrap(),
+            ram(&f.engine, WINDOW + 4096).unwrap(),
+        ];
+        let (token, state) = capture(
+            &mut f,
+            WindowsApi32::VirtualProtect,
+            CallingConvention32::Stdcall,
+            &[WINDOW + 4095, 2, 0x20, output],
+        );
+        f.engine.arena_mut().unwrap()[CANCEL_OFFSET..CANCEL_OFFSET + 4]
+            .copy_from_slice(&1_u32.to_le_bytes());
+        f.engine.arena_mut().unwrap()[X87_OFFSET + 40] ^= 1;
+        reject(&mut f, HostError::Call(CallError::StateChanged), |f| {
+            complete(f, token)
+        });
+        f.engine.arena_mut().unwrap()[X87_OFFSET + 40] ^= 1;
+        reject(&mut f, HostError::Call(CallError::Cancelled), |f| {
+            complete(f, token)
+        });
+        f.engine.arena_mut().unwrap()[CANCEL_OFFSET..CANCEL_OFFSET + 4].fill(0);
+        completed_with_output(&mut f, token, state, 1, Some((output, 4)));
+        for address in [WINDOW, WINDOW + 8191] {
+            for access in [Access::Read, Access::Execute] {
+                assert!(
+                    f.engine
+                        .memory()
+                        .unwrap()
+                        .resolve(GuestAddress(address), access)
+                        .is_ok()
+                );
+            }
+            assert_eq!(
+                f.engine
+                    .memory()
+                    .unwrap()
+                    .resolve(GuestAddress(address), Access::Write),
+                Err(MemoryError::Fault(MemoryFault {
+                    address: GuestAddress(address),
+                    access: Access::Write,
+                    reason: FaultReason::Permission,
+                }))
+            );
+        }
+        assert_eq!(
+            [
+                ram(&f.engine, WINDOW).unwrap(),
+                ram(&f.engine, WINDOW + 4096).unwrap()
+            ],
+            allocation
+        );
+        invoke(&mut f, WindowsApi32::GetLastError, &[], LAST_ERROR);
+        let snapshot = f
+            .engine
+            .memory()
+            .unwrap()
+            .snapshot_code(GuestAddress(WINDOW), 4)
+            .unwrap();
+        let (token, state) = capture(
+            &mut f,
+            WindowsApi32::VirtualProtect,
+            CallingConvention32::Stdcall,
+            &[WINDOW, 1, 1, output],
+        );
+        completed_with_output(&mut f, token, state, 1, Some((output, 0x20)));
+        assert!(!f.engine.memory().unwrap().is_code_current(&snapshot));
+        for access in [Access::Read, Access::Write, Access::Execute] {
+            assert_eq!(
+                f.engine
+                    .memory()
+                    .unwrap()
+                    .resolve(GuestAddress(WINDOW), access),
+                Err(MemoryError::Fault(MemoryFault {
+                    address: GuestAddress(WINDOW),
+                    access,
+                    reason: FaultReason::Permission,
+                }))
+            );
+        }
+        assert!(
+            f.engine
+                .memory()
+                .unwrap()
+                .resolve(GuestAddress(WINDOW + 4096), Access::Execute)
+                .is_ok()
+        );
+        let (token, state) = capture(
+            &mut f,
+            WindowsApi32::VirtualProtect,
+            CallingConvention32::Stdcall,
+            &[WINDOW + 8, 1, 4, output],
+        );
+        completed_with_output(&mut f, token, state, 1, Some((output, 1)));
+        assert_eq!(
+            [
+                ram(&f.engine, WINDOW).unwrap(),
+                ram(&f.engine, WINDOW + 4096).unwrap()
+            ],
+            allocation
+        );
+        let (token, state) = capture(
+            &mut f,
+            WindowsApi32::VirtualProtect,
+            CallingConvention32::Stdcall,
+            &[WINDOW, 1, 0x20, STACK + 4094],
+        );
+        completed(&mut f, token, state, 0);
+        invoke(&mut f, WindowsApi32::GetLastError, &[], 998);
+        assert_eq!(
+            [
+                ram(&f.engine, WINDOW).unwrap(),
+                ram(&f.engine, WINDOW + 4096).unwrap()
+            ],
+            allocation
+        );
+        assert!(
+            f.engine
+                .memory()
+                .unwrap()
+                .resolve(GuestAddress(WINDOW), Access::Write)
+                .is_ok()
+        );
+        assert!(
+            f.engine
+                .memory()
+                .unwrap()
+                .resolve(GuestAddress(WINDOW + 4096), Access::Execute)
+                .is_ok()
+        );
+        assert_eq!(f.engine.memory().unwrap().mapped_pages(), 11);
+        finish(&mut f, 37);
     }
 }
 

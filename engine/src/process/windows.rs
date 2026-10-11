@@ -96,6 +96,14 @@ impl EngineInstance {
                 let frame = pending.frame;
                 self.complete_virtual_free(frame, thread, address)?;
             }
+            WindowsOutcome32::Protect {
+                range,
+                permissions,
+                old_output,
+            } => {
+                let frame = pending.frame;
+                self.complete_virtual_protect(frame, thread, range, permissions, old_output)?;
+            }
         }
         Ok(())
     }

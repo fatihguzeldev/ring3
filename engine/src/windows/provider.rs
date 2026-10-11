@@ -1,7 +1,7 @@
 use super::{CallFrame32, CallingConvention32, FrameError};
 use crate::{
     cpu::x86::Register32,
-    memory::{GuestAddress, Permissions},
+    memory::{GuestAddress, PAGE_SIZE, PageRange, Permissions},
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -13,14 +13,25 @@ pub enum WindowsApi32 {
     GetModuleHandleA = 0x0001_0004,
     VirtualAlloc = 0x0001_0005,
     VirtualFree = 0x0001_0006,
+    VirtualProtect = 0x0001_0007,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum WindowsOutcome32 {
     Return(u32),
     ExitProcess(u32),
-    Allocate { size: u32, permissions: Permissions },
-    Release { address: u32 },
+    Allocate {
+        size: u32,
+        permissions: Permissions,
+    },
+    Release {
+        address: u32,
+    },
+    Protect {
+        range: PageRange,
+        permissions: Permissions,
+        old_output: GuestAddress,
+    },
 }
 
 impl WindowsApi32 {
@@ -35,6 +46,7 @@ impl WindowsApi32 {
             "GetModuleHandleA" => Some(Self::GetModuleHandleA),
             "VirtualAlloc" => Some(Self::VirtualAlloc),
             "VirtualFree" => Some(Self::VirtualFree),
+            "VirtualProtect" => Some(Self::VirtualProtect),
             _ => None,
         }
     }
@@ -47,6 +59,7 @@ impl WindowsApi32 {
             0x0001_0004 => Some(Self::GetModuleHandleA),
             0x0001_0005 => Some(Self::VirtualAlloc),
             0x0001_0006 => Some(Self::VirtualFree),
+            0x0001_0007 => Some(Self::VirtualProtect),
             _ => None,
         }
     }
@@ -63,7 +76,7 @@ impl WindowsApi32 {
         match self {
             Self::GetLastError => 0,
             Self::SetLastError | Self::ExitProcess | Self::GetModuleHandleA => 1,
-            Self::VirtualAlloc => 4,
+            Self::VirtualAlloc | Self::VirtualProtect => 4,
             Self::VirtualFree => 3,
         }
     }
@@ -87,6 +100,11 @@ impl ThreadState32 {
 
     pub(crate) fn release_failed(mut self) -> Self {
         self.last_error = 487;
+        self
+    }
+
+    pub(crate) fn protection_failed(mut self, error: u32) -> Self {
+        self.last_error = error;
         self
     }
 
@@ -149,6 +167,43 @@ impl ThreadState32 {
                     return Err(FrameError::InvalidRequest);
                 }
                 (WindowsOutcome32::Release { address: *address }, self)
+            }
+            WindowsApi32::VirtualProtect => {
+                let [address, size, protection, old_output] = frame.arguments() else {
+                    return Err(FrameError::InvalidRequest);
+                };
+                let end = u64::from(*address) + u64::from(*size);
+                if !(1..=65_536).contains(size) || end > 1 << 32 {
+                    return Err(FrameError::InvalidRequest);
+                }
+                let permissions = match *protection {
+                    1 => Permissions::NONE,
+                    2 => Permissions::READ,
+                    4 => Permissions::READ_WRITE,
+                    0x10 => Permissions::EXECUTE,
+                    0x20 => Permissions::READ_EXECUTE,
+                    0x40 => Permissions::ALL,
+                    _ => return Err(FrameError::InvalidRequest),
+                };
+                let first = *address / PAGE_SIZE;
+                let count = ((end - 1) / u64::from(PAGE_SIZE) - u64::from(first) + 1) as u32;
+                let range = PageRange::new(GuestAddress(first * PAGE_SIZE), count)
+                    .map_err(|_| FrameError::InvalidRequest)?;
+                let target_end = u64::from(first + count) * u64::from(PAGE_SIZE);
+                if *old_output != 0
+                    && u64::from(*old_output) < target_end
+                    && u64::from(first) * u64::from(PAGE_SIZE) < u64::from(*old_output) + 4
+                {
+                    return Err(FrameError::InvalidRequest);
+                }
+                (
+                    WindowsOutcome32::Protect {
+                        range,
+                        permissions,
+                        old_output: GuestAddress(*old_output),
+                    },
+                    self,
+                )
             }
         })
     }
@@ -282,5 +337,90 @@ mod tests {
             ));
         }
         assert_eq!(thread.last_error, 0xf123_4567);
+    }
+
+    #[test]
+    fn virtual_protect_prepares_rounded_ranges_and_defers_output_access() {
+        let thread = ThreadState32 {
+            last_error: 0xf123_4567,
+        };
+        for (protection, permissions) in [
+            (1, Permissions::NONE),
+            (2, Permissions::READ),
+            (4, Permissions::READ_WRITE),
+            (0x10, Permissions::EXECUTE),
+            (0x20, Permissions::READ_EXECUTE),
+            (0x40, Permissions::ALL),
+        ] {
+            for output in [0, 0x8100, u32::MAX - 1] {
+                let call = frame(
+                    [0x1000_0003, 4094, protection, output],
+                    CallingConvention32::Stdcall,
+                    4,
+                );
+                let (outcome, next) = thread
+                    .prepare(
+                        WindowsApi32::VirtualProtect,
+                        &call,
+                        ProcessContext32::default(),
+                    )
+                    .unwrap();
+                assert_eq!(
+                    outcome,
+                    WindowsOutcome32::Protect {
+                        range: PageRange::new(GuestAddress(0x1000_0000), 2).unwrap(),
+                        permissions,
+                        old_output: GuestAddress(output),
+                    }
+                );
+                assert_eq!(next.last_error, thread.last_error);
+            }
+        }
+        assert_eq!(thread.protection_failed(487).last_error, 487);
+        assert_eq!(thread.protection_failed(998).last_error, 998);
+    }
+
+    #[test]
+    fn virtual_protect_rejects_shapes_and_any_rounded_page_output_overlap() {
+        let thread = ThreadState32::default();
+        for arguments in [
+            [0x1000_0000, 0, 4, 0x8100],
+            [0x1000_0000, 65_537, 4, 0x8100],
+            [u32::MAX, 2, 4, 0x8100],
+            [0x1000_0000, 1, 0x140, 0x8100],
+            [0x1000_007f, 1, 4, 0x1000_0000],
+            [0x1000_007f, 1, 4, 0x1000_0fff],
+            [0x1000_007f, 1, 4, 0x0fff_fffd],
+        ] {
+            let call = frame(arguments, CallingConvention32::Stdcall, 4);
+            assert_eq!(
+                thread
+                    .prepare(
+                        WindowsApi32::VirtualProtect,
+                        &call,
+                        ProcessContext32::default()
+                    )
+                    .map(|_| ()),
+                Err(FrameError::InvalidRequest)
+            );
+        }
+        for (convention, count) in [
+            (CallingConvention32::Cdecl, 4),
+            (CallingConvention32::Thiscall, 4),
+            (CallingConvention32::Stdcall, 3),
+            (CallingConvention32::Stdcall, 5),
+        ] {
+            let call = frame([0x1000_0000, 1, 4, 0x8100], convention, count);
+            assert_eq!(
+                thread
+                    .prepare(
+                        WindowsApi32::VirtualProtect,
+                        &call,
+                        ProcessContext32::default()
+                    )
+                    .map(|_| ()),
+                Err(FrameError::InvalidRequest)
+            );
+        }
     }
 }

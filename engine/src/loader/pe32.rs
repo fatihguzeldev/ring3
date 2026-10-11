@@ -2,8 +2,9 @@ use super::imports::{ImportDirectory, ProviderProfile, prepare_imports};
 use super::relocation::{RelocationDirectory, prepare_fixups};
 use super::{
     ImageMetadata32, LinkedImageMetadata32, LinkedImageMetadata32V2, LinkedImageMetadata32V3,
-    LinkedImageMetadata32V4, LinkedImageMetadata32V5, LoadError, LoadedLinkedPe32,
-    LoadedLinkedPe32V2, LoadedLinkedPe32V3, LoadedLinkedPe32V4, LoadedLinkedPe32V5, LoadedPe32,
+    LinkedImageMetadata32V4, LinkedImageMetadata32V5, LinkedImageMetadata32V6, LoadError,
+    LoadedLinkedPe32, LoadedLinkedPe32V2, LoadedLinkedPe32V3, LoadedLinkedPe32V4,
+    LoadedLinkedPe32V5, LoadedLinkedPe32V6, LoadedPe32,
 };
 use crate::cpu::dbt::GateSpec;
 use crate::memory::{AddressSpace, GuestAddress, PAGE_SIZE, PageRange, Permissions};
@@ -23,7 +24,7 @@ struct LinkedMetadata {
     image: ImageMetadata32,
     gate_base: u32,
     gate_count: u32,
-    gates: [GateSpec; 6],
+    gates: [GateSpec; 7],
 }
 
 struct LoadedLinkedImage {
@@ -313,6 +314,30 @@ pub fn load_pe32_linked_v5_at(
     Ok(LoadedLinkedPe32V5 {
         memory: linked.memory,
         metadata: LinkedImageMetadata32V5 {
+            image: linked.metadata.image,
+            gate_base: linked.metadata.gate_base,
+            gate_count: linked.metadata.gate_count,
+            gates: std::array::from_fn(|index| linked.metadata.gates[index]),
+        },
+    })
+}
+
+pub fn load_pe32_linked_v6_at(
+    bytes: &[u8],
+    actual_base: u32,
+    gate_base: u32,
+    resident_pages: u32,
+) -> Result<LoadedLinkedPe32V6, LoadError> {
+    let linked = load_linked_profile(
+        bytes,
+        actual_base,
+        gate_base,
+        resident_pages,
+        ProviderProfile::VirtualProtection,
+    )?;
+    Ok(LoadedLinkedPe32V6 {
+        memory: linked.memory,
+        metadata: LinkedImageMetadata32V6 {
             image: linked.metadata.image,
             gate_base: linked.metadata.gate_base,
             gate_count: linked.metadata.gate_count,

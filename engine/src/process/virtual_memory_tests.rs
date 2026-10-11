@@ -31,6 +31,10 @@ fn words(engine: &mut EngineInstance, values: &[u32]) {
 }
 
 fn fixture() -> Fixture {
+    fixture_with_terminal(WindowsApi32::ExitProcess)
+}
+
+fn fixture_with_terminal(terminal: WindowsApi32) -> Fixture {
     let mut engine = EngineInstance::new(8, KEY).unwrap();
     for address in [CODE, KEEP, STACK] {
         engine.map(address, 1, 7).unwrap();
@@ -63,7 +67,7 @@ fn fixture() -> Fixture {
             CODE + 16,
             WindowsApi32::VirtualFree.id(),
             CODE + 32,
-            WindowsApi32::ExitProcess.id(),
+            terminal.id(),
         ],
     );
     engine.compile_with_gates(3, 3).unwrap();
@@ -269,6 +273,92 @@ fn unchanged(f: &Fixture, before: &Saved) {
     assert_eq!(after.error, before.error);
     for version in &before.versions {
         assert!(f.engine.memory.as_ref().unwrap().is_code_current(version));
+    }
+}
+
+#[test]
+fn protection_internal_encoding_and_version_failures_preserve_every_published_owner() {
+    for resident in [false, true] {
+        for exhausted in [false, true] {
+            let mut f = fixture_with_terminal(WindowsApi32::VirtualProtect);
+            assert_eq!(allocate(&mut f.engine, 4097), BASE);
+            f.engine.protect(BASE, 2, 7).unwrap();
+            let (mut token, state) = capture(
+                &mut f.engine,
+                CODE + 32,
+                STACK,
+                WindowsApi32::VirtualProtect,
+                &[BASE + 4095, 2, 0x20, STACK + 0x100],
+            );
+            if resident {
+                f.engine.abandon_call(KEY, token).unwrap();
+                token = f
+                    .engine
+                    .capture_resident_call(KEY, f.caller, CallingConvention32::Stdcall, 4)
+                    .unwrap()
+                    .token;
+            }
+            if exhausted {
+                f.engine
+                    .memory
+                    .as_mut()
+                    .unwrap()
+                    .exhaust_versions_for_test();
+            } else {
+                let mut invalid = state;
+                invalid.eflags = 0;
+                f.engine.pending_call.as_mut().unwrap().frame = CallFrame32::capture(
+                    f.engine.memory.as_ref().unwrap(),
+                    invalid,
+                    CallingConvention32::Stdcall,
+                    4,
+                )
+                .unwrap();
+            }
+            let before = saved(&f);
+            let error = if exhausted {
+                HostError::Memory(MemoryError::VersionExhausted)
+            } else {
+                HostError::Infrastructure
+            };
+            for _ in 0..2 {
+                let result = if resident {
+                    f.engine
+                        .complete_resident_windows_call(KEY, f.caller, token)
+                } else {
+                    complete(&mut f.engine, token)
+                };
+                assert_eq!(result, Err(error));
+                unchanged(&f, &before);
+            }
+            if !exhausted {
+                f.engine.pending_call.as_mut().unwrap().frame = CallFrame32::capture(
+                    f.engine.memory.as_ref().unwrap(),
+                    state,
+                    CallingConvention32::Stdcall,
+                    4,
+                )
+                .unwrap();
+                if resident {
+                    f.engine
+                        .complete_resident_windows_call(KEY, f.caller, token)
+                        .unwrap();
+                } else {
+                    complete(&mut f.engine, token).unwrap();
+                }
+                let mut old = [0; 4];
+                f.engine
+                    .memory()
+                    .unwrap()
+                    .read(GuestAddress(STACK + 0x100), &mut old)
+                    .unwrap();
+                assert_eq!(old, 0x40_u32.to_le_bytes());
+                assert!(f.engine.pending_call.is_none());
+                assert_eq!(f.engine.virtual_allocations, before.rows);
+                assert_eq!(f.engine.memory().unwrap().mapped_pages(), 5);
+                assert_eq!(last_error(&f.engine), 8);
+            }
+        }
     }
 }
 

@@ -1,6 +1,6 @@
 use super::{EngineInstance, HostError};
 use crate::{
-    memory::{GuestAddress, MemoryError, PAGE_SIZE, PageRange, Permissions},
+    memory::{GuestAddress, MemoryError, PAGE_SIZE, PageRange, Permissions, WordWrite32},
     windows::{CallFrame32, ThreadState32},
 };
 
@@ -88,6 +88,68 @@ impl EngineInstance {
         self.virtual_allocations.remove(index);
         self.publish_prepared_call(prepared);
         self.windows_thread = thread;
+        Ok(())
+    }
+
+    pub(super) fn complete_virtual_protect(
+        &mut self,
+        frame: CallFrame32,
+        thread: ThreadState32,
+        range: PageRange,
+        permissions: Permissions,
+        old_output: GuestAddress,
+    ) -> Result<(), HostError> {
+        let success = Self::prepare_completed_call(frame.complete(1))?;
+        let failure = Self::prepare_completed_call(frame.complete(0))?;
+        if !self.virtual_allocations.iter().any(|allocation| {
+            range.first >= allocation.first
+                && range.first + range.count <= allocation.first + allocation.count
+        }) {
+            self.publish_prepared_call(failure);
+            self.windows_thread = thread.protection_failed(487);
+            return Ok(());
+        }
+        let old = self
+            .memory()?
+            .permissions_at(GuestAddress(range.first as u32 * PAGE_SIZE))
+            .map_err(HostError::Memory)?;
+        let value = match old {
+            Permissions::NONE => 1,
+            Permissions::READ => 2,
+            Permissions::READ_WRITE => 4,
+            Permissions::EXECUTE => 0x10,
+            Permissions::READ_EXECUTE => 0x20,
+            Permissions::ALL => 0x40,
+            _ => return Err(HostError::Call(super::CallError::InvalidRequest)),
+        };
+        if old_output.0 == 0 {
+            self.publish_prepared_call(failure);
+            self.windows_thread = thread.protection_failed(998);
+            return Ok(());
+        }
+        let result = self
+            .memory
+            .as_mut()
+            .ok_or(HostError::Closed)?
+            .protect_with_word_write32(
+                range,
+                permissions,
+                WordWrite32 {
+                    address: old_output,
+                    value,
+                },
+            );
+        match result {
+            Ok(()) => {
+                self.publish_prepared_call(success);
+                self.windows_thread = thread;
+            }
+            Err(MemoryError::Fault(_)) => {
+                self.publish_prepared_call(failure);
+                self.windows_thread = thread.protection_failed(998);
+            }
+            Err(error) => return Err(HostError::Memory(error)),
+        }
         Ok(())
     }
 

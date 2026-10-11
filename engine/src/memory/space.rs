@@ -168,6 +168,36 @@ impl AddressSpace {
         Ok(())
     }
 
+    pub(crate) fn permissions_at(&self, address: GuestAddress) -> Result<Permissions, MemoryError> {
+        let page = (address.0 / PAGE_SIZE) as usize;
+        let mapping = self.mappings[page];
+        if mapping == 0 {
+            return Err(MemoryError::NotMapped {
+                address: page_address(page),
+            });
+        }
+        Ok(self.permissions[mapping as usize - 1])
+    }
+
+    pub(crate) fn protect_with_word_write32(
+        &mut self,
+        range: PageRange,
+        permissions: Permissions,
+        word: WordWrite32,
+    ) -> Result<(), MemoryError> {
+        self.require_mapped(range)?;
+        self.check_access(word.address, 4, Access::Write)?;
+        let version = self.advance_version()?;
+        self.copy_in_validated(word.address, &word.value.to_le_bytes(), version);
+        self.code_validation_version = version;
+        for page in range.indices() {
+            let slot = self.mappings[page] as usize - 1;
+            self.permissions[slot] = permissions;
+            self.versions[slot].mapping = version;
+        }
+        Ok(())
+    }
+
     pub fn unmap(&mut self, range: PageRange) -> Result<(), MemoryError> {
         self.require_mapped(range)?;
         self.code_validation_version = self.advance_version()?;
@@ -361,6 +391,10 @@ fn fault(address: GuestAddress, access: Access, reason: FaultReason) -> MemoryEr
         reason,
     })
 }
+
+#[cfg(test)]
+#[path = "protection_transaction_tests.rs"]
+mod protection_transaction_tests;
 
 #[cfg(test)]
 mod tests {
