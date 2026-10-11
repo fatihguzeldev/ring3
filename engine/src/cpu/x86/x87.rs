@@ -1,3 +1,10 @@
+mod execute;
+mod transcendental;
+mod value;
+
+pub use execute::{X87Binary, X87Condition, X87Error, X87Format, X87Operation, X87Outcome};
+pub use value::{Ext80, X87Rounding};
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct X87State {
     pub control: u16,
