@@ -436,7 +436,7 @@ fn locked_cmpxchg16_strict_prefixes_widths_registers_and_neighbors_stay_closed()
             DecodeError::InvalidEncoding,
         );
     }
-    cases.insert(vec![0x66, 0xf0, 0x0f, 0xc1, 0x03], opcode);
+    cases.insert(vec![0x66, 0xf0, 0xf0, 0x0f, 0xc1, 0x03], opcode);
     cases.insert(vec![0xf0, 0x01, 0x03], opcode);
     for (bytes, expected) in cases {
         let engine = code(&bytes);

@@ -51,6 +51,7 @@ pub(super) struct Imports {
     pub(super) compare_exchange8: Option<StoreImport>,
     pub(super) exchange_add8: Option<StoreImport>,
     pub(super) compare_exchange16: Option<StoreImport>,
+    pub(super) exchange_add16: Option<StoreImport>,
 }
 
 pub(super) struct ImportNeeds {
@@ -68,6 +69,7 @@ pub(super) struct ImportNeeds {
     pub(super) compare_exchange8: bool,
     pub(super) exchange_add8: bool,
     pub(super) compare_exchange16: bool,
+    pub(super) exchange_add16: bool,
 }
 
 impl Imports {
@@ -86,6 +88,7 @@ impl Imports {
         let mut compare_exchange8 = false;
         let mut exchange_add8 = false;
         let mut compare_exchange16 = false;
+        let mut exchange_add16 = false;
         for instruction in blocks.iter().flat_map(|block| &block.instructions) {
             match instruction.operation() {
                 Operation::MemoryExchange { .. } => exchange = true,
@@ -96,6 +99,7 @@ impl Imports {
                 Operation::LockedMemoryCompareExchangeByte { .. } => compare_exchange8 = true,
                 Operation::LockedMemoryExchangeAddByte { .. } => exchange_add8 = true,
                 Operation::LockedMemoryCompareExchangeWord { .. } => compare_exchange16 = true,
+                Operation::LockedMemoryExchangeAddWord { .. } => exchange_add16 = true,
                 Operation::X87StatusToMemory { .. }
                 | Operation::X87ControlToMemory { .. }
                 | Operation::StoreWord { .. }
@@ -287,6 +291,7 @@ impl Imports {
             compare_exchange8,
             exchange_add8,
             compare_exchange16,
+            exchange_add16,
         }
     }
 }
@@ -355,6 +360,15 @@ pub(super) fn exchange_word_result(
     exit_depth: u32,
 ) {
     word_exchange::exchange_result(code, address, imports, exit_depth);
+}
+
+pub(super) fn exchange_add_word_result(
+    code: &mut InstructionSink<'_>,
+    address: EffectiveAddress,
+    imports: Imports,
+    exit_depth: u32,
+) {
+    word_exchange::exchange_add_result(code, address, imports, exit_depth);
 }
 
 pub(super) fn compare_exchange_word_result(

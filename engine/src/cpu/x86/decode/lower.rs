@@ -449,6 +449,12 @@ pub(super) fn lower(instruction: &Instruction, bytes: &[u8]) -> Result<Operation
                 right: register(instruction.op1_register())?,
             })
         }
+        Code::Xadd_rm16_r16 if instruction.has_lock_prefix() => {
+            Ok(Operation::LockedMemoryExchangeAddWord {
+                address: effective_address(instruction)?,
+                source: word_register(instruction.op1_register())?,
+            })
+        }
         Code::Xadd_rm16_r16 => {
             let source = word_register(instruction.op1_register())?;
             match instruction.op0_kind() {

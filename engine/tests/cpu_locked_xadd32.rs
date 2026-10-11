@@ -508,7 +508,12 @@ fn locked_xadd32_strict_prefixes_widths_registers_and_neighbors_stay_closed() {
             } else {
                 opcode
             };
-            cases.insert([vec![prefix], form.to_vec()].concat(), expected);
+            let migrated_prefix = if prefix == 0x66 {
+                vec![0x66, 0xf0]
+            } else {
+                vec![prefix]
+            };
+            cases.insert([migrated_prefix, form.to_vec()].concat(), expected);
             cases.insert([vec![0xf0, prefix], form[1..].to_vec()].concat(), expected);
         }
     }

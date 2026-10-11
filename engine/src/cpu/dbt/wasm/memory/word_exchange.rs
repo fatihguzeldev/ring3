@@ -53,6 +53,27 @@ pub(super) fn compare_exchange_result(
     code.local_set(RESULT);
 }
 
+pub(super) fn exchange_add_result(
+    code: &mut InstructionSink<'_>,
+    address: EffectiveAddress,
+    imports: Imports,
+    exit_depth: u32,
+) {
+    effective_address(code, address);
+    let index = imports
+        .exchange_add16
+        .expect("prepared locked word exchange add has an import")
+        .emit_binding(code);
+    code.local_get(ADDRESS)
+        .local_get(RESULT)
+        .call(index)
+        .local_set(HELPER_STATUS);
+    validate_result(code);
+    exit_if_failed(code, exit_depth);
+    helper_field(code, 20);
+    code.local_set(RESULT);
+}
+
 fn validate_result(code: &mut InstructionSink<'_>) {
     code.local_get(HELPER_STATUS)
         .i32_eqz()
