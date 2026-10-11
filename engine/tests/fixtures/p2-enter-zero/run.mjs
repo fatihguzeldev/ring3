@@ -6,7 +6,7 @@ import {readEngine} from '../support/engine.mjs';
 
 const [enginePath, output, root] = process.argv.slice(2);
 assert.ok(enginePath && output && root);
-const engine = readEngine(enginePath), SIZE = 4364, PC = 0x1000, DATA = 0x5000, HIGH = 0xa53c5000;
+const engine = readEngine(enginePath), SIZE = 4612, PC = 0x1000, DATA = 0x5000, HIGH = 0xa53c5000;
 const initial = readFileSync(join(output, 'initial-arena.bin'));
 assert.equal(initial.length, SIZE); assert.deepEqual(WebAssembly.Module.imports(engine.module), []);
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
@@ -17,6 +17,7 @@ const paths = [
   'engine/src/cpu/dbt/wasm/memory.rs', 'engine/src/cpu/dbt/wasm/memory/word_store.rs', 'engine/src/cpu/dbt/wasm/memory/narrow.rs',
   'engine/src/cpu/dbt/wasm/abi.rs', 'engine/src/cpu/dbt/wasm/emitter.rs', 'engine/src/memory/space.rs',
   'engine/src/process/instance.rs', 'engine/src/process/resident.rs', 'engine/src/process/wasm.rs',
+  'engine/src/cpu/x86/stack.rs', 'engine/src/cpu/x86/decode/stack.rs', 'engine/src/cpu/dbt/wasm/stack.rs', 'engine/src/process/stack.rs', 'engine/src/abi/cpu_helper.rs',
   'engine/tests/cpu_enter_zero.rs', 'engine/tests/cpu_enter_zero_wasm.rs',
   'engine/tests/fixtures/p2-enter-zero/run.mjs', 'engine/tests/fixtures/support/engine.mjs',
 ];
@@ -25,7 +26,7 @@ const sources = () => Object.fromEntries(paths.map(path => [path, hash(readFileS
 const sourcePins = sources(), modules = [], observations = [], contexts = [];
 const counts = {contexts: 0, runs: 0, retired: 0, flag_inputs: 0, matrix: 0, anchors: 0, repeats: 0,
   current_inputs: 0, controls: 0, faults: 0, repairs: 0, consumers: 0, retained: 0, currentness: 0,
-  self_code: 0, helper_calls: 0, store_calls: 0, read_calls: 0};
+  self_code: 0, helper_calls: 0, stack_calls: 0, store_calls: 0, read_calls: 0};
 const wrap = n => Number((BigInt(n) % 4294967296n + 4294967296n) % 4294967296n);
 const low = n => Number((BigInt(n) % 65536n + 65536n) % 65536n);
 const merge = (old, value) => Math.floor(old / 65536) * 65536 + low(value);
@@ -42,6 +43,7 @@ const state = c => record('R3ST', 56, [...c.registers, c.pc, c.flags]);
 const exit = (reason, retired, fault, version = 2) => record('R3EX', 40,
   [reason, retired, fault?.detail ?? 0, fault?.address ?? 0, fault?.access ?? 0, fault?.width ?? 0], version);
 function helper(event, fault) {
+  if (event.stack) return record('R3MH', 40, [fault ? 1 : 0, 0, fault?.detail ?? 0, fault?.address ?? 0, fault?.access ?? 0, fault ? event.width : 0], 7);
   const version = event.width === 4 ? 1 : event.access === 1 ? 2 : 4;
   return record('R3MH', 40, [fault ? 1 : 0, fault ? 0 : event.access === 1 ? event.value : 0,
     fault?.detail ?? 0, fault?.address ?? 0, fault?.access ?? 0, event.width === 2 || fault ? event.width : 0], version);
@@ -81,11 +83,14 @@ function run(c, unit, budget, next, {label, reason = 1, retired = 1, fault, even
   if (status === 0) {
     expected.set(state(next)); expected.set(exit(reason, retired, fault, unit.exitVersion), 56);
     if (events.length) expected.set(helper(events.at(-1), fault), 100);
+    const stack = events.find(event => event.stack);
+    if (stack) expected.set(words(fault ? stack.input : stack.result), 140);
   }
   c.trace = []; const observedStatus = unit.run(c.base, c.base + 56, budget, c.base + 96);
   assert.equal(observedStatus, status, label);
-  assert.deepEqual(c.trace, events, 'observed canonical store/read chronology: ' + label);
-  assert.deepEqual(arena(c), expected, 'full4364 GPR/FLAGS/helper/dirtyFP effect: ' + label);
+  const expectedEvents = events.map(event => event.stack && fault ? {...event, result: event.input} : event);
+  assert.deepEqual(c.trace, expectedEvents, 'observed canonical stack/read chronology: ' + label);
+  assert.deepEqual(arena(c), expected, 'full4612 GPR/FLAGS/helper/dirtyFP effect: ' + label);
   const b = arena(c);
   observations.push({context: c.id, label, expected_status: status, observed_status: observedStatus,
     expected_reason: status === 0 ? reason : null, observed_reason: status === 0 ? b.readUInt32LE(72) : null,
@@ -93,7 +98,7 @@ function run(c, unit, budget, next, {label, reason = 1, retired = 1, fault, even
     expected_pc: status === 0 ? next.pc : null, observed_pc: status === 0 ? b.readUInt32LE(48) : null,
     expected_flags: status === 0 ? next.flags : null, observed_flags: status === 0 ? b.readUInt32LE(52) : null, events: c.trace});
   counts.runs++; if (status === 0) counts.retired += b.readUInt32LE(76);
-  counts.helper_calls += c.trace.length; counts.store_calls += c.trace.filter(e => e.access === 2).length; counts.read_calls += c.trace.filter(e => e.access === 1).length;
+  counts.helper_calls += c.trace.length; counts.stack_calls += c.trace.filter(e => e.stack).length; counts.store_calls += c.trace.filter(e => e.access === 2 && !e.stack).length; counts.read_calls += c.trace.filter(e => e.access === 1).length;
 }
 function compile(c, blocks) {
   const instructions = blocks.reduce((n, b) => n + b.instructions, 0), bytesTotal = blocks.reduce((n, b) => n + b.bytes.length, 0);
@@ -108,7 +113,7 @@ function compile(c, blocks) {
   const needs = name => blocks.some(b => b[name]);
   const storeName = width => c.owner === 'resident' ? 'store_resident' + width : 'store' + width;
   const names = [c.owner === 'resident' ? 'guard_resident' : 'guard', ...(needs('read32') ? ['read32'] : []),
-    ...(needs('store32') ? [storeName(32)] : []), ...(needs('read16') ? ['read16'] : []), ...(needs('store16') ? [storeName(16)] : [])];
+    ...(needs('store32') ? [storeName(32)] : []), ...(needs('read16') ? ['read16'] : []), ...(needs('store16') ? [storeName(16)] : []), ...(needs('stack') ? [c.owner === 'resident' ? 'stack_execute_resident' : 'stack_execute'] : [])];
   assert.deepEqual(WebAssembly.Module.imports(module), [{module: 'env', name: 'memory', kind: 'memory'}, ...names.map(name => ({module: 'ring3', name, kind: 'function'}))]);
   assert.deepEqual(WebAssembly.Module.exports(module), [{name: 'run', kind: 'function'}]);
   const imports = {...c.api};
@@ -126,25 +131,36 @@ function compile(c, blocks) {
       c.trace.push({access: 2, width, address: args[4] >>> 0, value: args[5] >>> 0}); return c.api['store_resident' + bits](...args);
     };
   }
+  const stackName = c.owner === 'resident' ? 'stack_execute_resident' : 'stack_execute';
+  imports[stackName] = (...args) => {
+    if (c.owner === 'resident') assert.deepEqual(args.slice(0, 4).map(n => n >>> 0), [c.id, c.keyHigh, binding.low, binding.high]);
+    const before = arena(c), original = Array.from({length: 8}, (_, i) => before.readUInt32LE(140 + i * 4));
+    const control = args.at(-1) >>> 0, width = control === 4 ? 4 : 2; assert.ok(control === 4 || control === 5);
+    const status = c.api[stackName](...args), after = arena(c), allowed = Buffer.from(before); allowed.set(after.subarray(100, 172), 100);
+    assert.deepEqual(after, allowed, 'stack helper changes only strict packet and staged GPR result');
+    c.trace.push({access: 2, width, address: wrap(BigInt(original[4]) - BigInt(width)), value: width === 4 ? original[5] : low(original[5]),
+      stack: true, control, input: original, result: Array.from({length: 8}, (_, i) => after.readUInt32LE(140 + i * 4))});
+    return status;
+  };
   const file = `module-${modules.length + 1}.wasm`; writeFileSync(join(output, file), bytes, {flag: 'wx'});
   modules.push({context: c.id, purpose: c.purpose, capture: c.captures, owner: c.owner, entries: c.entries, file,
     sha256: hash(bytes), imports: names, blocks: blocks.length, instructions, bytes: bytesTotal});
-  return {...binding, exitVersion: names.length > 1 ? 2 : 1, run: new WebAssembly.Instance(module, {env: {memory: c.memory}, ring3: imports}).exports.run};
+  return {...binding, exitVersion: needs('stack') ? 6 : names.length > 1 ? 2 : 1, run: new WebAssembly.Instance(module, {env: {memory: c.memory}, ring3: imports}).exports.run};
 }
 const enterBytes = width => Buffer.from(width === 4 ? [0xc8, 0, 0, 0] : [0x66, 0xc8, 0, 0, 0]);
-const enterBlock = (pc, width) => ({pc, width, ['store' + width * 8]: true, instructions: 2, bytes: Buffer.concat([enterBytes(width), Buffer.from([0xeb, 0])])});
+const enterBlock = (pc, width) => ({pc, width, stack: true, instructions: 2, bytes: Buffer.concat([enterBytes(width), Buffer.from([0xeb, 0])])});
 const rows = [enterBlock(PC, 4), enterBlock(PC + 0x40, 2)], mov = Buffer.from([0xbb, 0x44, 0x33, 0x22, 0x11]);
 const faultRows = [enterBlock(PC + 0x105, 4), enterBlock(PC + 0x145, 2)];
 const faultBlocks = faultRows.map(row => ({...row, pc: row.pc - 5, instructions: 3, bytes: Buffer.concat([mov, row.bytes])}));
 const liveBlocks = [4, 2].map((width, i) => ({pc: PC + 0x200 + i * 0x40, width, instructions: 6,
-  ['store' + width * 8]: true, ['read' + width * 8]: true,
+  stack: true, ['read' + width * 8]: true,
   bytes: Buffer.concat([enterBytes(width), Buffer.from(width === 4 ? [0xc9] : [0x66, 0xc9]),
     Buffer.from([0x66, 0x11, 0xd0, 0x0f, 0x92, 0xc3, 0x0f, 0x90, 0xc7, 0xeb, 0])])}));
 const canary = Buffer.from([0x55, 0xa5, 0x66, 0x67, 0xf0, 0xf2, 0xf3, 0xaa]);
 function open(owner, entries, purpose = 'core') {
   const instance = new WebAssembly.Instance(engine.module, {}), c = {id: ++counts.contexts, keyHigh: 0x454e5452,
     owner, entries, purpose, captures: 0, memory: instance.exports.memory, api: {}, mapped: new Set(), trace: []};
-  for (const name of ['open', 'close', 'arena_ptr', 'map', 'unmap', 'protect', 'upload', 'read8', 'read16', 'read32', 'store16', 'store32', 'store_resident16', 'store_resident32',
+  for (const name of ['open', 'close', 'arena_ptr', 'map', 'unmap', 'protect', 'upload', 'read8', 'read16', 'read32', 'store16', 'store32', 'store_resident16', 'store_resident32', 'stack_execute', 'stack_execute_resident',
     'compile', 'compile_entries', 'compile_resident', 'compile_resident_entries', 'generation', 'module_ptr', 'module_len', 'guard', 'guard_resident'])
     c.api[name] = instance.exports['ring3_abi_v1_' + name];
   assert.equal(c.api.open(12, c.id, c.keyHigh), 0); c.base = c.api.arena_ptr() >>> 0; input(c, 0, initial);
@@ -162,7 +178,7 @@ function transition(before, row) {
   const address = wrap(BigInt(before.registers[4]) - BigInt(row.width));
   const value = row.width === 4 ? before.registers[5] : low(before.registers[5]);
   next.registers[4] = address; next.registers[5] = row.width === 4 ? address : merge(before.registers[5], address);
-  return {next, address, value, event: {access: 2, width: row.width, address, value}};
+  return {next, address, value, event: {access: 2, width: row.width, address, value, stack: true, control: row.width === 4 ? 4 : 5, input: [...before.registers], result: [...next.registers]}};
 }
 function operation(c, unit, row, label, reason = 1) {
   const effects = transition(cpu(c), row); run(c, unit, 1, effects.next, {label, reason, events: [effects.event]});
@@ -319,18 +335,18 @@ for (const owner of ['replacement', 'resident']) for (const entries of [false, t
 assert.deepEqual(sources(), sourcePins);
 assert.deepEqual(counts, {contexts: 20, runs: 1640, retired: 1514, flag_inputs: 1024, matrix: 192, anchors: 64,
   repeats: 16, current_inputs: 16, controls: 40, faults: 128, repairs: 48, consumers: 56, retained: 4,
-  currentness: 4, self_code: 48, helper_calls: 1522, store_calls: 1514, read_calls: 8});
+  currentness: 4, self_code: 48, helper_calls: 1522, stack_calls: 1514, store_calls: 0, read_calls: 8});
 assert.equal(modules.length, 48);
 const result = {status: 'ok', engine_sha256: engine.sha256, source_pins: sourcePins, counts, contexts, modules, observations,
   limits: [
-    'exact C8 0000 00 and66 C8 0000 00 four bound profiles only; nonzero allocation/nesting, standalone and prefix aliases remain closed',
+    'this retained fixture covers C8 0000 00 and66 C8 0000 00 under four bound profiles; general allocation/nesting is covered by the dedicated stack-family fixture',
     'independent BigInt full32 stack subtraction, original pointer little-endian digits and own-high WORD merge;16 literal anchors include odd bit0/high disagreement/carry/wrap',
-    'all128 admitted FLAGS/form/profile, original EBP never dereferenced, complete4364 GPR/helper/dirtyFP128 effects and selected real RAM/canaries',
+    'all128 admitted FLAGS/form/profile, original EBP never dereferenced, complete4612 GPR/helper/dirtyFP128 effects and selected real RAM/canaries',
     'seven real checked-write faults/form with prior MOV retirement and unchanged retry; mapping/protection-only repair and separately declared current EBP/ESP/FLAGS inputs',
-    'observed forwarded canonical store32/store16 and compatible live ENTER→LEAVE→ADC/SETcc chronology; current helper width/version checked without new protocol',
+    'observed one canonical V7 stack transaction per ENTER plus unchanged read32/read16 LEAVE; exact staged input/result GPRs, live ENTER→LEAVE→ADC/SETcc and fullarena are checked',
     'identity/changed own-code writes commit frame/nextPC/one retirement before6; old owner4 neutral before fresh helper-free suffix, replacement generation remains3',
     'four core/two SMC captures; each unit1/2blocks and1/2/6/12instructions within asserted8/64/65536/sixcapture limits; mapped-page peak tracked within12',
-    'finite flat32 Ring3 contract, Intel odd-SP pseudocode inconsistency interpreted from description; no hardware exception completeness/performance/SDK/browser/game/hostedCI claim',
+    'software flat SS.B32 stack addresses/allocation with word BP merge; transactional fault publication, selected RAM, no hardware partial-write equivalence/performance/SDK/browser/game/hostedCI claim',
   ]};
 writeFileSync(join(output, 'result.json'), JSON.stringify(result, null, 2), {flag: 'wx'});
 console.log(JSON.stringify({status: 'ok', ...counts, modules: modules.length, output}));

@@ -6,7 +6,7 @@ import {readEngine} from '../support/engine.mjs';
 
 const [enginePath, output, root] = process.argv.slice(2);
 assert.ok(enginePath && output && root);
-const engine = readEngine(enginePath), SIZE = 4364, PC = 0x1000, DATA = 0x5000, HIGH = 0xa53c5000;
+const engine = readEngine(enginePath), SIZE = 4612, PC = 0x1000, DATA = 0x5000, HIGH = 0xa53c5000;
 const initial = readFileSync(join(output, 'initial-arena.bin'));
 assert.equal(initial.length, SIZE);
 assert.deepEqual(WebAssembly.Module.imports(engine.module), []);
@@ -18,6 +18,7 @@ const paths = [
   'engine/src/cpu/dbt/wasm/integer.rs', 'engine/src/cpu/dbt/wasm/memory.rs', 'engine/src/cpu/dbt/wasm/memory/narrow.rs',
   'engine/src/cpu/dbt/wasm/abi.rs', 'engine/src/cpu/dbt/wasm/emitter.rs', 'engine/src/cpu/dbt/wasm/locals.rs',
   'engine/src/memory/space.rs', 'engine/src/process/instance.rs', 'engine/src/process/resident.rs', 'engine/src/process/wasm.rs',
+  'engine/src/cpu/x86/stack.rs', 'engine/src/cpu/x86/decode/stack.rs', 'engine/src/cpu/dbt/wasm/stack.rs', 'engine/src/process/stack.rs', 'engine/src/abi/cpu_helper.rs',
   'engine/tests/cpu_pop_all.rs', 'engine/tests/cpu_pop_all_wasm.rs',
   'engine/tests/fixtures/p2-pop-all/run.mjs', 'engine/tests/fixtures/support/engine.mjs',
 ];
@@ -54,7 +55,7 @@ function record(magic, size, fields, version = 1) {
 }
 const state = c => record('R3ST', 56, [...c.registers, c.pc, c.flags]);
 const exit = (reason, retired, f, version = 2) => record('R3EX', 40, [reason, retired, f?.detail ?? 0, f?.address ?? 0, f ? 1 : 0, f?.width ?? 0], version);
-const helper = (width, value = 0, f) => record('R3MH', 40, [f ? 1 : 0, value, f?.detail ?? 0, f?.address ?? 0, f ? 1 : 0, f ? width : width === 2 ? 2 : 0], width === 2 ? 2 : 1);
+const helper = (width, f) => record('R3MH', 40, [f ? 1 : 0, 0, f?.detail ?? 0, f?.address ?? 0, f ? 1 : 0, f ? width : 0], 7);
 const arena = c => Buffer.from(new Uint8Array(c.memory.buffer, c.base, SIZE));
 function input(c, offset, bytes) {
   const expected = arena(c); expected.set(bytes, offset); new Uint8Array(c.memory.buffer).set(bytes, c.base + offset);
@@ -89,16 +90,22 @@ function seed(c, pc, esp, flag = 0xcd7, r = registers()) {
   const b = Buffer.alloc(140); b.set(state({registers: r, pc, flags: flag})); b.set(exit(3, 0), 56);
   b.set(record('R3MH', 40, [0, 0xdecafbad, 0, 0, 0, 0]), 100); input(c, 0, b); return cpu(c);
 }
-function run(c, module, budget, next, {label, reason = 1, retired = 1, row, bytes, fault, expectedReads = [], status = 0} = {}) {
+function run(c, module, budget, next, {label, reason = 1, retired = 1, row, bytes, fault, expectedReads = [], stackInput, status = 0} = {}) {
   const expected = arena(c);
   if (status === 0) {
     expected.set(state(next)); expected.set(exit(reason, retired, fault, module.exitVersion), 56);
-    if (row) expected.set(helper(row.width, fault ? 0 : valueAt(bytes, 7, row.width), fault), 100);
+    if (row) {
+      const original = stackInput ?? cpu(c).registers;
+      expected.set(words(fault ? original : next.registers), 140);
+      expected.set(helper(row.width, fault), 100);
+    }
   }
+  const expectedCalls = row && status === 0 ? [{control: row.width === 4 ? 2 : 3,
+    input: stackInput ?? cpu(c).registers, output: fault ? (stackInput ?? cpu(c).registers) : next.registers}] : [];
   c.trace = []; assert.equal(module.run(c.base, c.base + 56, budget, c.base + 96), status, label);
-  assert.deepEqual(c.trace, expectedReads, 'exact helper order/no saved-ESP-slot read: ' + label);
-  assert.deepEqual(arena(c), expected, 'full4364 CPU/FLAGS/helper/FP effect: ' + label);
-  observations.push({context: c.id, label, status, reason, retired, reads: c.trace});
+  assert.deepEqual(c.trace, expectedCalls, 'one checked stack transaction and exact staged GPR input/output: ' + label);
+  assert.deepEqual(arena(c), expected, 'full4612 CPU/FLAGS/helper/FP effect: ' + label);
+  observations.push({context: c.id, label, status, reason, retired, helpers: c.trace, selected_read_candidates: expectedReads});
   counts.runs++; if (status === 0) counts.retired += retired; counts.helper_calls += c.trace.length;
 }
 const addresses = (esp, width, length = 7) => slots.slice(0, length).map(slot => ({width, address: wrap(BigInt(esp) + BigInt(slot * width))}));
@@ -117,17 +124,23 @@ function compile(c, blocks) {
     ? {low: b.readUInt32LE(148), high: b.readUInt32LE(152), pointer: b.readUInt32LE(156), length: b.readUInt32LE(160)}
     : {generation: c.api.generation(), pointer: c.api.module_ptr() >>> 0, length: c.api.module_len() >>> 0};
   const bytes = Buffer.from(new Uint8Array(c.memory.buffer, binding.pointer, binding.length)), module = new WebAssembly.Module(bytes);
-  const names = [c.owner === 'resident' ? 'guard_resident' : 'guard', ...(blocks.some(b => b.width === 4) ? ['read32'] : []), ...(blocks.some(b => b.width === 2) ? ['read16'] : [])];
+  const hasStack = blocks.some(b => b.width), stackName = c.owner === 'resident' ? 'stack_execute_resident' : 'stack_execute';
+  const names = [c.owner === 'resident' ? 'guard_resident' : 'guard', ...(hasStack ? [stackName] : [])];
   assert.deepEqual(WebAssembly.Module.imports(module), [{module: 'env', name: 'memory', kind: 'memory'}, ...names.map(name => ({module: 'ring3', name, kind: 'function'}))]);
   assert.deepEqual(WebAssembly.Module.exports(module), [{name: 'run', kind: 'function'}]);
   const file = `module-${modules.length + 1}.wasm`; writeFileSync(join(output, file), bytes, {flag: 'wx'});
   modules.push({context: c.id, owner: c.owner, entries: c.entries, file, sha256: hash(bytes), instructions, imports: names});
   const imports = {...c.api};
-  for (const width of [2, 4]) imports['read' + width * 8] = address => {
-    c.trace.push({width, address: address >>> 0}); return c.api['read' + width * 8](address);
+  imports[stackName] = (...args) => {
+    if (c.owner === 'resident') assert.deepEqual(args.slice(0, 4).map(n => n >>> 0), [c.id, 0x504f5041, binding.low, binding.high]);
+    const before = arena(c), original = Array.from({length: 8}, (_, i) => before.readUInt32LE(140 + i * 4));
+    const status = c.api[stackName](...args), after = arena(c), allowed = Buffer.from(before); allowed.set(after.subarray(100, 172), 100);
+    assert.deepEqual(after, allowed, 'stack helper changes only its strict packet and staged GPR result');
+    c.trace.push({control: args.at(-1) >>> 0, input: original, output: Array.from({length: 8}, (_, i) => after.readUInt32LE(140 + i * 4))});
+    return status;
   };
   return {run: new WebAssembly.Instance(module, {env: {memory: c.memory}, ring3: imports}).exports.run,
-    exitVersion: blocks.some(b => b.width) ? 2 : 1};
+    exitVersion: hasStack ? 6 : 1};
 }
 const canary = Buffer.from([0x55, 0xa5, 0x66, 0x67, 0xf0, 0xf2, 0xf3, 0xaa]);
 const values = [0x12345678, 0x89abcdef, 0x80000000, 0xdeadbeef, 0xffffffff, 1, 0x7fffffff, 0x00008001];
@@ -137,7 +150,7 @@ const mov = Buffer.from([0xbb, 0x44, 0x33, 0x22, 0x11]);
 const block = row => ({pc: row.pc, width: row.width, instructions: 2, bytes: Buffer.concat([row.op, Buffer.from([0xeb, 0])])});
 function open(owner, entries) {
   const instance = new WebAssembly.Instance(engine.module, {}), c = {id: ++counts.contexts, owner, entries, memory: instance.exports.memory, api: {}, mapped: new Set(), captures: 0, trace: []};
-  for (const name of ['open', 'close', 'arena_ptr', 'map', 'unmap', 'protect', 'upload', 'read8', 'read16', 'read32',
+  for (const name of ['open', 'close', 'arena_ptr', 'map', 'unmap', 'protect', 'upload', 'read8', 'read16', 'read32', 'stack_execute', 'stack_execute_resident',
     'compile', 'compile_entries', 'compile_resident', 'compile_resident_entries', 'generation', 'module_ptr', 'module_len', 'guard', 'guard_resident'])
     c.api[name] = instance.exports['ring3_abi_v1_' + name];
   assert.equal(c.api.open(12, c.id, 0x504f5041), 0); c.base = c.api.arena_ptr() >>> 0; input(c, 0, initial);
@@ -179,7 +192,7 @@ function stopped(c, module, row, failure, label) {
   const target = {...row, pc: held.pc};
   for (const [budget, retired] of [[2, 1], [1, 0]]) {
     run(c, module, budget, held, {label, reason: 5, retired, row: target, fault: failure.fault,
-      expectedReads: addresses(failure.esp, row.width, failure.length)}); checkRam(c, 0x8000, canary); counts.faults++;
+      expectedReads: addresses(failure.esp, row.width, failure.length), stackInput: held.registers}); checkRam(c, 0x8000, canary); counts.faults++;
   }
   return target;
 }
@@ -249,9 +262,9 @@ assert.equal(counts.flag_inputs, 1024); assert.equal(counts.frames, 128); assert
 assert.equal(counts.repairs, 72); assert.equal(counts.current_inputs, 8); assert.equal(counts.consumers, 28);
 const result = {status: 'ok', engine: {bytes: engine.bytes.length, sha256: engine.sha256}, source_pins: sourcePins,
   counts: {...counts, modules: modules.length}, modules, observations,
-  limits: ['exact61/6661; four private flat32 bound profiles; eight-slot arithmetic images and seven observed canonical reads',
-    'all128FLAGS/own-parent high16 and full4364/dirtyFP preserved; selected live RAM/canaries checked after operations',
-    'real read16/read32 wrappers only observe and forward; no synthetic host packets or arbitrary-host atomicity claim',
+  limits: ['exact61/6661; four private flat32 bound profiles; eight-slot arithmetic images and one checked stack transaction which skips the saved-SP slot',
+    'all128FLAGS/own-parent high16 and full4612/dirtyFP preserved; selected live RAM/canaries checked after operations',
+    'real stack_execute wrappers observe exact control/staged GPRs and forward; selected read candidates are source-derived metadata, not an internal per-read trace; no synthetic packets or hardware partial-write claim',
     'map/protect-only repairs are separate from declared currentRAM/CPU edits; no guest stores/SMC',
     'three captures/context; maximum two blocks/five instructions in POPA units, six instructions in pure consumer; no performance/CI claim']};
 writeFileSync(join(output, 'result.json'), JSON.stringify(result, null, 2), {flag: 'wx'});

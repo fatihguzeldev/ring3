@@ -7,7 +7,7 @@ use ring3_engine::{
             compile_entry_region, compile_region, prepare_entry_region, prepare_region,
         },
         x86::{
-            Register32,
+            Register32, StackFrameKind,
             decode::{DecodeError, decode_one},
             ir::{Location32, Operation, UnaryKind, Value32},
         },
@@ -93,6 +93,11 @@ fn assert_bound_admission(bytes: &[u8], resident: bool, entries: bool) {
         engine.artifact_bytes().unwrap()
     };
     assert_eq!(&module[..8], b"\0asm\x01\0\0\0");
+    let helper = if resident { b"stack_execute_resident".as_slice() } else { b"stack_execute".as_slice() };
+    assert!(module.windows(helper.len()).any(|bytes| bytes == helper));
+    for legacy in [b"read32".as_slice(), b"read16", b"store32", b"store16", b"store_resident32", b"store_resident16"] {
+        assert!(!module.windows(legacy.len()).any(|bytes| bytes == legacy));
+    }
     assert_eq!(engine.arena(), before);
     assert_eq!(engine.memory().unwrap().mapped_pages(), 1);
 }
@@ -184,42 +189,30 @@ fn pop_all_typed_forms_keep_fixed32_and_immediate_payload_boundaries() {
 }
 
 #[test]
-fn pop_all_prefixes_lock_segments_and_unopened_neighbors_stay_precise() {
+fn pop_all_ignored_address_segment_prefixes_and_family_neighbors_are_exact() {
     let opcode = DecodeError::Unsupported(UnsupportedFeature::Opcode);
     for prefix in [0x67, 0xf2, 0xf3, 0xf0, 0x26, 0x2e, 0x36, 0x3e, 0x64, 0x65] {
-        let expected = match prefix {
-            0xf0 => DecodeError::InvalidEncoding,
-            0x26 | 0x2e | 0x36 | 0x3e | 0x64 | 0x65 => {
-                DecodeError::Unsupported(UnsupportedFeature::Segment)
+        for bytes in [vec![prefix, 0x61], vec![prefix, 0x66, 0x61], vec![0x66, prefix, 0x61]] {
+            let decoded = decode_one(&code_space(CODE, &bytes), GuestAddress(CODE));
+            if matches!(prefix, 0xf0 | 0xf2 | 0xf3) {
+                assert_eq!(decoded.err(), Some(if prefix == 0xf0 { DecodeError::InvalidEncoding } else { opcode }), "{bytes:02x?}");
+            } else {
+                let decoded = decoded.unwrap();
+                assert_eq!(decoded.operation(), &if bytes.contains(&0x66) { Operation::PopAllWord } else { Operation::PopAll });
+                assert_eq!(usize::from(decoded.length()), bytes.len());
             }
-            _ => opcode,
-        };
-        for bytes in [
-            vec![prefix, 0x61],
-            vec![prefix, 0x66, 0x61],
-            vec![0x66, prefix, 0x61],
-        ] {
-            assert_eq!(
-                decode_one(&code_space(CODE, &bytes), GuestAddress(CODE)).err(),
-                Some(expected),
-                "{bytes:02x?}"
-            );
         }
     }
-    for bytes in [
-        &[0x66, 0x66, 0x61][..],
-        &[0x60],
-        &[0x66, 0x60],
-        &[0x9d],
-        &[0x66, 0x9d],
-        &[0xc8, 1, 0, 0],
-        &[0x66, 0xc8, 1, 0, 0],
+    for bytes in [&[0x66, 0x66, 0x61][..], &[0x9d], &[0x66, 0x9d]] {
+        assert_eq!(decode_one(&code_space(CODE, bytes), GuestAddress(CODE)).err(), Some(opcode), "{bytes:02x?}");
+    }
+    for (bytes, expected) in [
+        (&[0x60][..], Operation::StackFrame { kind: StackFrameKind::PushAll32, allocation: 0, nesting: 0 }),
+        (&[0x66, 0x60][..], Operation::StackFrame { kind: StackFrameKind::PushAll16, allocation: 0, nesting: 0 }),
+        (&[0xc8, 1, 0, 0][..], Operation::StackFrame { kind: StackFrameKind::Enter32, allocation: 1, nesting: 0 }),
+        (&[0x66, 0xc8, 1, 0, 0][..], Operation::StackFrame { kind: StackFrameKind::Enter16, allocation: 1, nesting: 0 }),
     ] {
-        assert_eq!(
-            decode_one(&code_space(CODE, bytes), GuestAddress(CODE)).err(),
-            Some(opcode),
-            "{bytes:02x?}"
-        );
+        assert_eq!(decode_one(&code_space(CODE, bytes), GuestAddress(CODE)).unwrap().operation(), &expected);
     }
 }
 
