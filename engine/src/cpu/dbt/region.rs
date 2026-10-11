@@ -480,6 +480,7 @@ fn supports_memory_binary(operation: &Operation) -> bool {
             | Operation::MemoryLogicalWord { .. }
             | Operation::MemoryLogicalByte { .. }
             | Operation::MemoryBitMutation { .. }
+            | Operation::LockedMemoryBitSet32 { .. }
             | Operation::MemoryBitMutationWord { .. }
             | Operation::MemoryArithmeticByte { .. }
             | Operation::MemoryExchange { .. }

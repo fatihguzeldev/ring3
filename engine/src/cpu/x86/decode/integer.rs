@@ -15,6 +15,17 @@ use crate::cpu::x86::ir::{
 };
 
 pub(super) fn lower(instruction: &Instruction) -> Option<Result<Operation, DecodeError>> {
+    if instruction.code() == Code::Bts_rm32_r32
+        && instruction.has_lock_prefix()
+        && instruction.op0_kind() == OpKind::Memory
+    {
+        return Some((|| {
+            Ok(Operation::LockedMemoryBitSet32 {
+                address: effective_address(instruction)?,
+                index: register(instruction.op1_register())?,
+            })
+        })());
+    }
     let memory_predicate = match instruction.code() {
         Code::Cmp_rm8_r8 | Code::Cmp_rm8_imm8 => Some(BytePredicateKind::Cmp),
         Code::Test_rm8_r8 | Code::Test_rm8_imm8 => Some(BytePredicateKind::Test),
