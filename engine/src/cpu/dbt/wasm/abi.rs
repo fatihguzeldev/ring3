@@ -82,6 +82,15 @@ pub(super) fn work_preflight(sink: &mut InstructionSink<'_>) {
     range_end(sink, STATE_PTR, ARENA_SIZE as u64);
     sink.local_get(MEMORY_BYTES).i64_gt_u();
     fail_if(sink, 1);
+    for (pointer, size) in [(EXIT_PTR, EXIT_SIZE as u64), (CANCEL_PTR, 4)] {
+        range_end(sink, STATE_PTR, WORK_OFFSET as u64);
+        range_end(sink, pointer, size);
+        sink.i64_lt_u();
+        unsigned_pointer(sink, pointer);
+        range_end(sink, STATE_PTR, (WORK_OFFSET + WORK_SIZE) as u64);
+        sink.i64_lt_u().i32_and();
+        fail_if(sink, 1);
+    }
     for (offset, expected) in [
         (0, u32::from_le_bytes(*b"R3WK")),
         (4, header_version()),
