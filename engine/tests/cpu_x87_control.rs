@@ -125,32 +125,134 @@ fn exact_no_wait_pair_decodes_and_compiles_all_six_profiles() {
 }
 
 #[test]
-fn waited_stack_memory_arithmetic_and_prefixed_forms_remain_rejected() {
-    for bytes in [
-        vec![0x9b],
-        vec![0x9b, 0xdb, 0xe3],
-        vec![0x9b, 0xdf, 0xe0],
-        vec![0xd9, 0xe8],
-        vec![0xd9, 0xee],
-        vec![0xd9, 0xc9],
-        vec![0xdd, 0xd8],
-        vec![0xd8, 0xc1],
-        vec![0x9b, 0xdd, 0x38],
+fn waiting_stack_memory_arithmetic_and_ignored_prefixes_admit_with_exact_operations() {
+    use ring3_engine::cpu::x86::{Register32, X87Binary, X87Operation, ir::EffectiveAddress};
+    for (bytes, operation, address, opcode) in [
+        (vec![0x9b], X87Operation::Wait, None, 0),
+        (
+            vec![0xd9, 0xe8],
+            X87Operation::LoadConstant { index: 0 },
+            None,
+            0x1e8,
+        ),
+        (
+            vec![0xd9, 0xee],
+            X87Operation::LoadConstant { index: 6 },
+            None,
+            0x1ee,
+        ),
+        (
+            vec![0xd9, 0xc9],
+            X87Operation::Exchange { index: 1 },
+            None,
+            0x1c9,
+        ),
+        (
+            vec![0xdd, 0xd8],
+            X87Operation::StoreRegister {
+                index: 0,
+                pop: true,
+            },
+            None,
+            0x5d8,
+        ),
+        (
+            vec![0xd8, 0xc1],
+            X87Operation::Binary {
+                kind: X87Binary::Add,
+                destination: 0,
+                source: 1,
+                pop: false,
+            },
+            None,
+            0x0c1,
+        ),
     ] {
         let engine = code(0x1000, &bytes);
-        assert!(
-            decode_one(engine.memory().unwrap(), GuestAddress(0x1000)).is_err(),
+        let decoded = decode_one(engine.memory().unwrap(), GuestAddress(0x1000)).unwrap();
+        assert_eq!(decoded.length() as usize, bytes.len(), "{bytes:02x?}");
+        assert_eq!(
+            decoded.operation(),
+            &Operation::X87 {
+                operation,
+                address,
+                waiting: true,
+                opcode
+            },
             "{bytes:02x?}"
         );
     }
-    for opcode in [[0xdb, 0xe3], [0xdf, 0xe0]] {
-        for prefix in [0x66, 0x67, 0xf2, 0xf3, 0x64, 0xf0] {
+    for (bytes, second) in [
+        (vec![0x9b, 0xdb, 0xe3], Operation::InitializeX87),
+        (vec![0x9b, 0xdf, 0xe0], Operation::X87StatusToAx),
+        (
+            vec![0x9b, 0xdd, 0x38],
+            Operation::X87StatusToMemory {
+                address: EffectiveAddress {
+                    base: Some(Register32::Eax),
+                    ..EffectiveAddress::default()
+                },
+            },
+        ),
+    ] {
+        let mut complete = bytes.clone();
+        complete.extend_from_slice(&[0xeb, 0]);
+        let engine = code(0x1000, &complete);
+        let memory = engine.memory().unwrap();
+        let wait = decode_one(memory, GuestAddress(0x1000)).unwrap();
+        assert_eq!(wait.length(), 1);
+        assert_eq!(wait.next_pc(), GuestAddress(0x1001));
+        assert_eq!(
+            wait.operation(),
+            &Operation::X87 {
+                operation: X87Operation::Wait,
+                address: None,
+                waiting: true,
+                opcode: 0,
+            }
+        );
+        let decoded = decode_one(memory, GuestAddress(0x1001)).unwrap();
+        assert_eq!(decoded.length() as usize, bytes.len() - 1);
+        assert_eq!(decoded.operation(), &second, "{bytes:02x?}");
+        for resident in [false, true] {
+            for entries in [false, true] {
+                let mut engine = code(0x1000, &complete);
+                request(&mut engine, 0x1000, complete.len() as u32);
+                let before = engine.arena().to_vec();
+                match (resident, entries) {
+                    (false, false) => {
+                        engine.compile(1).unwrap();
+                    }
+                    (false, true) => {
+                        engine.compile_entries(1, 0).unwrap();
+                    }
+                    (true, false) => {
+                        engine.compile_resident(1).unwrap();
+                    }
+                    (true, true) => {
+                        engine.compile_resident_entries(1, 0).unwrap();
+                    }
+                }
+                assert_eq!(engine.arena(), before);
+            }
+        }
+    }
+    for (opcode, operation) in [
+        ([0xdb, 0xe3], Operation::InitializeX87),
+        ([0xdf, 0xe0], Operation::X87StatusToAx),
+    ] {
+        for prefix in [0x66, 0x67, 0xf2, 0xf3, 0x64] {
             let engine = code(0x1000, &[prefix, opcode[0], opcode[1]]);
-            assert!(
-                decode_one(engine.memory().unwrap(), GuestAddress(0x1000)).is_err(),
+            let decoded = decode_one(engine.memory().unwrap(), GuestAddress(0x1000)).unwrap();
+            assert_eq!(
+                decoded.operation(),
+                &operation,
                 "{prefix:02x} {opcode:02x?}"
             );
+            assert_eq!(decoded.length(), 3);
         }
+        let engine = code(0x1000, &[0xf0, opcode[0], opcode[1]]);
+        assert!(decode_one(engine.memory().unwrap(), GuestAddress(0x1000)).is_err());
         let engine = code(0x1fff, &opcode[..1]);
         assert!(
             matches!(decode_one(engine.memory().unwrap(), GuestAddress(0x1fff)), Err(DecodeError::MemoryFault { fault, length: 2, .. }) if fault.reason == FaultReason::Unmapped && fault.address == GuestAddress(0x2000))
@@ -161,6 +263,20 @@ fn waited_stack_memory_arithmetic_and_prefixed_forms_remain_rejected() {
                 .unwrap()
                 .next_pc(),
             GuestAddress(0x2001)
+        );
+    }
+    for bytes in [
+        vec![0xdb, 0xe0],
+        vec![0xdb, 0xe1],
+        vec![0xdb, 0xe4],
+        vec![0xd9, 0xd1],
+        vec![0x0f, 0x20, 0xc0],
+        vec![0x0f, 0x0b],
+    ] {
+        let engine = code(0x1000, &bytes);
+        assert!(
+            decode_one(engine.memory().unwrap(), GuestAddress(0x1000)).is_err(),
+            "{bytes:02x?}"
         );
     }
 }

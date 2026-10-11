@@ -50,7 +50,8 @@ fn fixed_arena_has_canonical_initial_state_exit_and_helper_records() {
     assert_eq!(&arena[116..140], &[0; 24]);
     assert_eq!(&arena[140..4236], &[0; 4096]);
     assert_eq!(
-        ring3_engine::abi::x86::decode_x87(&arena[4236..]).unwrap(),
+        ring3_engine::abi::x86::decode_x87(&arena[4236..4236 + ring3_engine::abi::x86::X87_SIZE])
+            .unwrap(),
         ring3_engine::cpu::x86::X87State::default()
     );
 }

@@ -1,3 +1,5 @@
+#[path = "support/prefix_admission.rs"]
+mod prefix_admission;
 use ring3_engine::{abi::arena::TRANSFER_OFFSET, process::EngineInstance};
 
 #[test]
@@ -110,7 +112,7 @@ fn bare_fnclex_decodes_and_compiles_all_six_profiles() {
 }
 
 #[test]
-fn waited_prefixed_memory_stack_and_arithmetic_neighbors_stay_rejected() {
+fn waiting_stack_arithmetic_and_ignored_prefixes_admit() {
     for bytes in [
         vec![0x9b],
         vec![0x9b, 0xdb, 0xe2],
@@ -123,20 +125,77 @@ fn waited_prefixed_memory_stack_and_arithmetic_neighbors_stay_rejected() {
         vec![0xdd, 0xd8],
         vec![0xd8, 0xc1],
     ] {
-        let engine = code(0x1000, &bytes);
-        assert!(
-            decode_one(engine.memory().unwrap(), GuestAddress(0x1000)).is_err(),
-            "{bytes:02x?}"
-        );
+        use ring3_engine::cpu::x86::{X87Binary, X87Operation};
+        let x87 = |operation, opcode| Operation::X87 {
+            operation,
+            address: None,
+            waiting: true,
+            opcode,
+        };
+        let expected = match bytes.as_slice() {
+            [0x9b, ..] => x87(X87Operation::Wait, 0),
+            [0xd9, 0xe8] => x87(X87Operation::LoadConstant { index: 0 }, 0x1e8),
+            [0xd9, 0xee] => x87(X87Operation::LoadConstant { index: 6 }, 0x1ee),
+            [0xd9, 0xc9] => x87(X87Operation::Exchange { index: 1 }, 0x1c9),
+            [0xdd, 0xd8] => x87(
+                X87Operation::StoreRegister {
+                    index: 0,
+                    pop: true,
+                },
+                0x5d8,
+            ),
+            [0xd8, 0xc1] => x87(
+                X87Operation::Binary {
+                    kind: X87Binary::Add,
+                    destination: 0,
+                    source: 1,
+                    pop: false,
+                },
+                0xc1,
+            ),
+            _ => unreachable!(),
+        };
+        let (operation, length) = prefix_admission::admitted(&bytes);
+        assert_eq!(operation, expected, "{bytes:02x?}");
+        if bytes[0] == 0x9b && bytes.len() > 1 {
+            let tail = &bytes[length..];
+            let (operation, consumed) = prefix_admission::admitted(tail);
+            let expected = match tail {
+                [0xdb, 0xe2] => Operation::ClearX87Exceptions,
+                [0xdb, 0xe3] => Operation::InitializeX87,
+                [0xdf, 0xe0] => Operation::X87StatusToAx,
+                [0xd9, 0x38] => Operation::X87ControlToMemory {
+                    address: ring3_engine::cpu::x86::ir::EffectiveAddress {
+                        base: Some(ring3_engine::cpu::x86::Register32::Eax),
+                        ..Default::default()
+                    },
+                },
+                [0xdd, 0x38] => Operation::X87StatusToMemory {
+                    address: ring3_engine::cpu::x86::ir::EffectiveAddress {
+                        base: Some(ring3_engine::cpu::x86::Register32::Eax),
+                        ..Default::default()
+                    },
+                },
+                _ => unreachable!(),
+            };
+            assert_eq!(operation, expected, "{tail:02x?}");
+            assert_eq!(length + consumed, bytes.len());
+        } else {
+            assert_eq!(length, bytes.len());
+        }
     }
     for prefix in [
         0x66, 0x67, 0xf0, 0xf2, 0xf3, 0x26, 0x2e, 0x36, 0x3e, 0x64, 0x65,
     ] {
-        let engine = code(0x1000, &[prefix, 0xdb, 0xe2]);
-        assert!(
-            decode_one(engine.memory().unwrap(), GuestAddress(0x1000)).is_err(),
-            "prefix{prefix:02x}"
-        );
+        let bytes = [prefix, 0xdb, 0xe2];
+        if prefix == 0xf0 {
+            let engine = code(0x1000, &[prefix, 0xdb, 0xe2]);
+            assert!(decode_one(engine.memory().unwrap(), GuestAddress(0x1000)).is_err());
+            continue;
+        }
+        let (operation, length) = prefix_admission::admitted(&bytes);
+        assert_eq!(length, 3);
+        assert_eq!(operation, Operation::ClearX87Exceptions);
     }
     let engine = code(0x1fff, &[0xdb]);
     assert!(

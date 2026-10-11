@@ -271,14 +271,18 @@ fn extract_quiets_nan_payloads_and_reports_denormal_before_stack_publication() {
     assert!(unmasked.unmasked_exception);
 }
 
-
 #[test]
 fn selected_fs_gs_offsets_and_current_code_selector_survive_environment_and_fxsave() {
     use ring3_engine::{
-        abi::{arena::{TRANSFER_OFFSET, X87_OFFSET}, x86::{X87_SIZE, decode_x87}},
-        cpu::x86::{SegmentDescriptor, SegmentDescriptorKind, SegmentRegister, X87Format,
+        abi::{
+            arena::{TRANSFER_OFFSET, X87_OFFSET},
+            x86::{X87_SIZE, decode_x87},
+        },
+        cpu::x86::{
+            SegmentDescriptor, SegmentDescriptorKind, SegmentRegister, X87Format,
             ir::EffectiveAddress,
-            simd::{SimdKind, SimdOperand, SimdOperation}},
+            simd::{SimdKind, SimdOperand, SimdOperation},
+        },
         memory::GuestAddress,
         process::{EngineInstance, HostError},
     };
@@ -286,11 +290,18 @@ fn selected_fs_gs_offsets_and_current_code_selector_survive_environment_and_fxsa
     for (base, permission) in [(0x1000, 7), (0x5000, 3), (0x7000, 3)] {
         engine.map(base, 1, permission).unwrap();
     }
-    engine.set_segment_base(SegmentRegister::Fs, 0x5000).unwrap();
-    engine.configure_segment_descriptor(SegmentDescriptor {
-        selector: 0x43, base: 0x7000, dpl: 3, present: true,
-        kind: SegmentDescriptorKind::Data { writable: true },
-    }).unwrap();
+    engine
+        .set_segment_base(SegmentRegister::Fs, 0x5000)
+        .unwrap();
+    engine
+        .configure_segment_descriptor(SegmentDescriptor {
+            selector: 0x43,
+            base: 0x7000,
+            dpl: 3,
+            present: true,
+            kind: SegmentDescriptorKind::Data { writable: true },
+        })
+        .unwrap();
     for address in [0x5014, 0x7028] {
         engine.arena_mut().unwrap()[TRANSFER_OFFSET..TRANSFER_OFFSET + 4]
             .copy_from_slice(&7_u32.to_le_bytes());
@@ -308,8 +319,13 @@ fn selected_fs_gs_offsets_and_current_code_selector_survive_environment_and_fxsa
         kind: SimdKind::SaveExtended,
         destination: SimdOperand::Memory(EffectiveAddress::default()),
         source: SimdOperand::None,
-        vector_bytes: 4, lane_bytes: 0, memory_bytes: 512,
-        immediate: None, aligned: true, scalar: false, implicit_address: None,
+        vector_bytes: 4,
+        lane_bytes: 0,
+        memory_bytes: 512,
+        immediate: None,
+        aligned: true,
+        scalar: false,
+        implicit_address: None,
     };
     for (address, control, expected_offset, expected_selector) in [
         (0x5014, 0x501, 0x14_u32, 0x3b_u16),
@@ -317,28 +333,56 @@ fn selected_fs_gs_offsets_and_current_code_selector_survive_environment_and_fxsa
         // old callers with only the waiting bit continue to mean DS.
         (0x5014, 1, 0x5014, 0x23),
     ] {
-        engine.x87_op(X87Operation::Initialize.encode(), 0, 0x402, 0, 0, 0).unwrap();
-        engine.x87_op(X87Operation::Load(X87Format::Integer32).encode(),
-            address, 0x402, 0x1234_5678, 0x503, control).unwrap();
+        engine
+            .x87_op(X87Operation::Initialize.encode(), 0, 0x402, 0, 0, 0)
+            .unwrap();
+        engine
+            .x87_op(
+                X87Operation::Load(X87Format::Integer32).encode(),
+                address,
+                0x402,
+                0x1234_5678,
+                0x503,
+                control,
+            )
+            .unwrap();
         let state = decode_x87(&engine.arena()[X87_OFFSET..X87_OFFSET + X87_SIZE]).unwrap();
         assert_eq!(state.instruction_pointer, 0x1234_5678);
         assert_eq!(state.code_selector, 0x1b);
         assert_eq!(state.data_pointer, expected_offset);
         assert_eq!(state.data_selector, expected_selector);
-        engine.x87_op(X87Operation::StoreEnvironment { operand16: false }.encode(),
-            0x5200, 0x402, 0x8765_4321, 0x137, 0x401).unwrap();
+        engine
+            .x87_op(
+                X87Operation::StoreEnvironment { operand16: false }.encode(),
+                0x5200,
+                0x402,
+                0x8765_4321,
+                0x137,
+                0x401,
+            )
+            .unwrap();
         let mut environment = [0; 28];
-        engine.memory().unwrap().read(GuestAddress(0x5200), &mut environment).unwrap();
+        engine
+            .memory()
+            .unwrap()
+            .read(GuestAddress(0x5200), &mut environment)
+            .unwrap();
         assert_eq!(&environment[12..16], &0x1234_5678_u32.to_le_bytes());
         assert_eq!(&environment[16..18], &0x1b_u16.to_le_bytes());
         assert_eq!(&environment[18..20], &0x503_u16.to_le_bytes());
         assert_eq!(&environment[20..24], &expected_offset.to_le_bytes());
         assert_eq!(&environment[24..26], &expected_selector.to_le_bytes());
         let (descriptor, operands, immediate) = save.descriptor();
-        engine.simd_execute(descriptor, operands, immediate, 0, 0, 0x402).unwrap();
+        engine
+            .simd_execute(descriptor, operands, immediate, 0, 0, 0x402)
+            .unwrap();
         engine.cpu_fxsave(0x5500).unwrap();
         let mut image = [0; 512];
-        engine.memory().unwrap().read(GuestAddress(0x5500), &mut image).unwrap();
+        engine
+            .memory()
+            .unwrap()
+            .read(GuestAddress(0x5500), &mut image)
+            .unwrap();
         assert_eq!(&image[8..12], &0x1234_5678_u32.to_le_bytes());
         assert_eq!(&image[12..14], &0x1b_u16.to_le_bytes());
         assert_eq!(&image[16..20], &expected_offset.to_le_bytes());
@@ -346,12 +390,13 @@ fn selected_fs_gs_offsets_and_current_code_selector_survive_environment_and_fxsa
     }
     for control in [2, 0x80, 0x700, 0x800, 0x8000_0000] {
         let before = engine.arena().to_vec();
-        assert_eq!(engine.x87_op(X87Operation::Wait.encode(), 0, 0x402, 0, 0, control),
-            Err(HostError::InvalidRequest));
+        assert_eq!(
+            engine.x87_op(X87Operation::Wait.encode(), 0, 0x402, 0, 0, control),
+            Err(HostError::InvalidRequest)
+        );
         assert_eq!(engine.arena(), before);
     }
 }
-
 
 #[test]
 fn packed_bcd_zero_retains_its_sign_across_load_and_store_pop() {
@@ -359,15 +404,32 @@ fn packed_bcd_zero_retains_its_sign_across_load_and_store_pop() {
     for negative in [false, true] {
         let mut input = [0; 10];
         input[9] = if negative { 0x80 } else { 0 };
-        let loaded = X87State::default().evaluate(
-            X87Operation::Load(X87Format::PackedBcd), &input, 0x402).unwrap();
-        assert_eq!(loaded.state.stack(0), Some(if negative { Ext80::ZERO.negated() } else { Ext80::ZERO }));
+        let loaded = X87State::default()
+            .evaluate(X87Operation::Load(X87Format::PackedBcd), &input, 0x402)
+            .unwrap();
+        assert_eq!(
+            loaded.state.stack(0),
+            Some(if negative {
+                Ext80::ZERO.negated()
+            } else {
+                Ext80::ZERO
+            })
+        );
         assert_eq!(loaded.state.status, 0x3800);
         assert_eq!(loaded.state.tag, 0x7fff);
         assert!(!loaded.unmasked_exception);
-        let stored = loaded.state.evaluate(X87Operation::Store {
-            format: X87Format::PackedBcd, pop: true, truncate: false,
-        }, &[], 0x402).unwrap();
+        let stored = loaded
+            .state
+            .evaluate(
+                X87Operation::Store {
+                    format: X87Format::PackedBcd,
+                    pop: true,
+                    truncate: false,
+                },
+                &[],
+                0x402,
+            )
+            .unwrap();
         assert_eq!(stored.memory_len, 10);
         assert_eq!(&stored.memory[..10], &input);
         assert_eq!(stored.state.status, 0);

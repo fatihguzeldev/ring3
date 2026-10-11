@@ -1,3 +1,5 @@
+#[path = "support/prefix_admission.rs"]
+mod prefix_admission;
 use ring3_engine::{abi::arena::TRANSFER_OFFSET, process::EngineInstance};
 
 #[test]
@@ -123,7 +125,7 @@ fn control_memory_decodes_standard_32_bit_effective_addresses() {
 }
 
 #[test]
-fn waited_prefixed_neighbors_and_standalone_memory_stay_refused() {
+fn waiting_and_prefixed_neighbors_admit_while_standalone_memory_stays_refused() {
     for bytes in [
         vec![0x9b],
         vec![0x9b, 0xd9, 0x38],
@@ -132,19 +134,108 @@ fn waited_prefixed_neighbors_and_standalone_memory_stay_refused() {
         vec![0xdd, 0xd8],
         vec![0xd8, 0xc1],
     ] {
-        let engine = code_at(PC, &bytes);
-        assert!(
-            decode_one(engine.memory().unwrap(), GuestAddress(PC)).is_err(),
-            "{bytes:02x?}"
-        );
+        use ring3_engine::cpu::x86::{X87Binary, X87Operation};
+        let x87 = |operation, opcode| Operation::X87 {
+            operation,
+            address: None,
+            waiting: true,
+            opcode,
+        };
+        let expected = match bytes.as_slice() {
+            [0x9b, ..] => x87(X87Operation::Wait, 0),
+            [0xd9, 0xe8] => x87(X87Operation::LoadConstant { index: 0 }, 0x1e8),
+            [0xd9, 0xee] => x87(X87Operation::LoadConstant { index: 6 }, 0x1ee),
+            [0xd9, 0xc9] => x87(X87Operation::Exchange { index: 1 }, 0x1c9),
+            [0xdd, 0xd8] => x87(
+                X87Operation::StoreRegister {
+                    index: 0,
+                    pop: true,
+                },
+                0x5d8,
+            ),
+            [0xd8, 0xc1] => x87(
+                X87Operation::Binary {
+                    kind: X87Binary::Add,
+                    destination: 0,
+                    source: 1,
+                    pop: false,
+                },
+                0xc1,
+            ),
+            _ => unreachable!(),
+        };
+        let (operation, length) = prefix_admission::admitted(&bytes);
+        assert_eq!(operation, expected, "{bytes:02x?}");
+        if bytes[0] == 0x9b && bytes.len() > 1 {
+            let tail = &bytes[length..];
+            let (operation, consumed) = prefix_admission::admitted(tail);
+            let expected = match tail {
+                [0xdb, 0xe2] => Operation::ClearX87Exceptions,
+                [0xdb, 0xe3] => Operation::InitializeX87,
+                [0xdf, 0xe0] => Operation::X87StatusToAx,
+                [0xd9, 0x38] => Operation::X87ControlToMemory {
+                    address: ring3_engine::cpu::x86::ir::EffectiveAddress {
+                        base: Some(ring3_engine::cpu::x86::Register32::Eax),
+                        ..Default::default()
+                    },
+                },
+                [0xdd, 0x38] => Operation::X87StatusToMemory {
+                    address: ring3_engine::cpu::x86::ir::EffectiveAddress {
+                        base: Some(ring3_engine::cpu::x86::Register32::Eax),
+                        ..Default::default()
+                    },
+                },
+                _ => unreachable!(),
+            };
+            assert_eq!(operation, expected, "{tail:02x?}");
+            assert_eq!(length + consumed, bytes.len());
+        } else {
+            assert_eq!(length, bytes.len());
+        }
     }
     for prefix in [
         0x66, 0x67, 0xf0, 0xf2, 0xf3, 0x26, 0x2e, 0x36, 0x3e, 0x64, 0x65,
     ] {
-        let engine = code_at(PC, &[prefix, 0xd9, 0x38]);
-        assert!(
-            decode_one(engine.memory().unwrap(), GuestAddress(PC)).is_err(),
-            "prefix{prefix:02x}"
+        let bytes = [prefix, 0xd9, 0x38];
+        if prefix == 0xf0 {
+            let engine = code_at(PC, &[prefix, 0xd9, 0x38]);
+            assert!(decode_one(engine.memory().unwrap(), GuestAddress(PC)).is_err());
+            continue;
+        }
+        let (operation, length) = prefix_admission::admitted(&bytes);
+        assert_eq!(length, 3);
+        let Operation::X87ControlToMemory { address } = operation else {
+            panic!("{bytes:02x?}")
+        };
+        use ring3_engine::cpu::x86::{Register32, SegmentRegister, ir::AddressSize};
+        assert_eq!(
+            address.base,
+            Some(if prefix == 0x67 {
+                Register32::Ebx
+            } else {
+                Register32::Eax
+            })
+        );
+        assert_eq!(address.index, (prefix == 0x67).then_some(Register32::Esi));
+        assert_eq!(
+            address.address_size,
+            if prefix == 0x67 {
+                AddressSize::Bits16
+            } else {
+                AddressSize::Bits32
+            }
+        );
+        assert_eq!(
+            address.segment,
+            match prefix {
+                0x26 => Some(SegmentRegister::Es),
+                0x2e => Some(SegmentRegister::Cs),
+                0x36 => Some(SegmentRegister::Ss),
+                0x3e => Some(SegmentRegister::Ds),
+                0x64 => Some(SegmentRegister::Fs),
+                0x65 => Some(SegmentRegister::Gs),
+                _ => None,
+            }
         );
     }
     let engine = code_at(PC, &[0xd9, 0x38, 0xeb, 0]);

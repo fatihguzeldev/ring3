@@ -95,7 +95,11 @@ fn captured_calls_fingerprint_every_x87_byte_and_preserve_it_on_completion() {
         registers: [[0xa5; 10]; 8],
         ..X87State::default()
     };
-    encode_x87(&state, &mut engine.arena_mut().unwrap()[X87_OFFSET..]).unwrap();
+    encode_x87(
+        &state,
+        &mut engine.arena_mut().unwrap()[X87_OFFSET..X87_OFFSET + X87_SIZE],
+    )
+    .unwrap();
     let record = engine
         .capture_call(91, generation, CallingConvention32::Cdecl, 0)
         .unwrap();
@@ -149,22 +153,36 @@ fn callback_abort_and_return_restore_the_exact_outer_x87_context() {
         registers: [[0x8a; 10]; 8],
         ..X87State::default()
     };
-    encode_x87(&outer, &mut engine.arena_mut().unwrap()[X87_OFFSET..]).unwrap();
+    encode_x87(
+        &outer,
+        &mut engine.arena_mut().unwrap()[X87_OFFSET..X87_OFFSET + X87_SIZE],
+    )
+    .unwrap();
     let call = engine
         .capture_call(91, generation, CallingConvention32::Cdecl, 0)
         .unwrap();
     let callback = engine
         .begin_callback(91, generation, call.token, 0x1100, 0x1200, 78, &[])
         .unwrap();
-    assert_eq!(decode_x87(&engine.arena()[X87_OFFSET..]).unwrap(), outer);
+    assert_eq!(
+        decode_x87(&engine.arena()[X87_OFFSET..X87_OFFSET + X87_SIZE]).unwrap(),
+        outer
+    );
     let inner = X87State {
         status: 0xabcd,
         registers: [[0x35; 10]; 8],
         ..X87State::default()
     };
-    encode_x87(&inner, &mut engine.arena_mut().unwrap()[X87_OFFSET..]).unwrap();
+    encode_x87(
+        &inner,
+        &mut engine.arena_mut().unwrap()[X87_OFFSET..X87_OFFSET + X87_SIZE],
+    )
+    .unwrap();
     engine.abort_callback(91, callback.token).unwrap();
-    assert_eq!(decode_x87(&engine.arena()[X87_OFFSET..]).unwrap(), outer);
+    assert_eq!(
+        decode_x87(&engine.arena()[X87_OFFSET..X87_OFFSET + X87_SIZE]).unwrap(),
+        outer
+    );
     let callback = engine
         .begin_callback(91, generation, call.token, 0x1100, 0x1200, 78, &[])
         .unwrap();
@@ -183,7 +201,11 @@ fn callback_abort_and_return_restore_the_exact_outer_x87_context() {
         &mut engine.arena_mut().unwrap()[56..96],
     )
     .unwrap();
-    encode_x87(&inner, &mut engine.arena_mut().unwrap()[X87_OFFSET..]).unwrap();
+    encode_x87(
+        &inner,
+        &mut engine.arena_mut().unwrap()[X87_OFFSET..X87_OFFSET + X87_SIZE],
+    )
+    .unwrap();
     engine.arena_mut().unwrap()[X87_OFFSET + 120] = 1;
     let before = engine.arena().to_vec();
     assert_eq!(
@@ -199,7 +221,13 @@ fn callback_abort_and_return_restore_the_exact_outer_x87_context() {
             .result,
         0x9876
     );
-    assert_eq!(decode_x87(&engine.arena()[X87_OFFSET..]).unwrap(), outer);
+    assert_eq!(
+        decode_x87(&engine.arena()[X87_OFFSET..X87_OFFSET + X87_SIZE]).unwrap(),
+        outer
+    );
     engine.complete_call(91, generation, call.token, 5).unwrap();
-    assert_eq!(decode_x87(&engine.arena()[X87_OFFSET..]).unwrap(), outer);
+    assert_eq!(
+        decode_x87(&engine.arena()[X87_OFFSET..X87_OFFSET + X87_SIZE]).unwrap(),
+        outer
+    );
 }
