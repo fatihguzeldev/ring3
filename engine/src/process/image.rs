@@ -272,7 +272,7 @@ impl EngineInstance {
         Ok(memory.capacity_pages())
     }
 
-    fn publish_image(&mut self, loaded: LoadedPe32) -> ImageMetadata32 {
+    pub(super) fn publish_image(&mut self, loaded: LoadedPe32) -> ImageMetadata32 {
         let (memory, image) = loaded.into_parts();
         self.memory = Some(memory);
         self.image = Some(image);

@@ -409,6 +409,10 @@ fn pending_and_callback_busy_precede_pristine_and_shape_while_abort_only_cleans_
             Err(HostError::Call(CallError::Busy))
         );
         assert_eq!(
+            engine.load_pe32_input_at(0),
+            Err(HostError::Call(CallError::Busy))
+        );
+        assert_eq!(
             engine.load_pe32_linked_v2_at(b"bad", 0, 0),
             Err(HostError::InvalidRequest)
         );
@@ -442,6 +446,7 @@ fn terminal_priority_retains_input_and_close_releases_it_before_closed_priority(
         engine.load_pe32_linked_v2_input_at(0, 0),
         Err(HostError::ProcessExited)
     );
+    assert_eq!(engine.load_pe32_input_at(0), Err(HostError::ProcessExited));
     assert_eq!(input(&engine), staged);
     assert_eq!(owners(&engine), before);
     engine.close();
@@ -463,6 +468,7 @@ fn terminal_priority_retains_input_and_close_releases_it_before_closed_priority(
         engine.load_pe32_linked_v2_input_at(0, 0),
         Err(HostError::Closed)
     );
+    assert_eq!(engine.load_pe32_input_at(0), Err(HostError::Closed));
     assert!(engine.image_input.is_none());
     assert_eq!(engine.arena(), before.arena);
 }
@@ -531,6 +537,7 @@ fn cleanup_preserves_current_stale_code_owners_and_generation_after_unmap() {
         engine.load_pe32_linked_v2_input_at(0, 0),
         Err(HostError::InvalidRequest)
     );
+    assert_eq!(engine.load_pe32_input_at(0), Err(HostError::InvalidRequest));
     engine.abort_image_input().unwrap();
     engine.abort_image_input().unwrap();
     assert!(engine.image_input.is_none());
@@ -557,6 +564,155 @@ fn cleanup_preserves_current_stale_code_owners_and_generation_after_unmap() {
     assert_eq!(engine.resident_installations, installations);
     assert_eq!(last_error(&engine), LAST_ERROR);
     assert_eq!(engine.arena(), before.arena);
+}
+
+fn unlinked_image() -> Vec<u8> {
+    let mut bytes = small_image();
+    for at in [0x100, 0x104, 0x158, 0x15c] {
+        put32(&mut bytes, at, 0);
+    }
+    bytes
+}
+
+fn dirty_input_arena(engine: &mut EngineInstance) {
+    use crate::abi::arena::{ARENA_SIZE, X87_OFFSET};
+
+    let arena = engine.arena_mut().unwrap();
+    assert_eq!(arena.len(), ARENA_SIZE);
+    assert_eq!(ARENA_SIZE, 4364);
+    arena[TRANSFER_OFFSET..TRANSFER_OFFSET + TRANSFER_SIZE].fill(0xd3);
+    put32(arena, CANCEL_OFFSET, 1);
+    put16(arena, X87_OFFSET + 16, 0x027f);
+    put16(arena, X87_OFFSET + 18, 0x81a5);
+    for (index, byte) in arena[X87_OFFSET + 40..X87_OFFSET + 120]
+        .iter_mut()
+        .enumerate()
+    {
+        *byte = (index as u8).wrapping_mul(29).wrapping_add(17);
+    }
+    crate::abi::x86::decode_x87(&arena[X87_OFFSET..]).unwrap();
+}
+
+#[test]
+fn unlinked_completion_retains_exact_input_on_refusal_and_consumes_only_after_publication() {
+    let mut engine = EngineInstance::new(4, KEY).unwrap();
+    seed_last_error(&mut engine);
+    engine.call_token = 73;
+    engine.image_started = true;
+    engine.memory.as_mut().unwrap().exhaust_versions_for_test();
+    dirty_input_arena(&mut engine);
+    let before = owners(&engine);
+    assert_eq!(engine.load_pe32_input_at(0), Err(HostError::InvalidRequest));
+    assert_eq!(owners(&engine), before);
+    let bytes = unlinked_image();
+    engine.begin_image_input(bytes.len() as u32).unwrap();
+    engine.append_image_input(0, &bytes[..7]).unwrap();
+    let partial = input(&engine);
+    assert_eq!(
+        engine.load_pe32_input_at(BASE),
+        Err(HostError::InvalidRequest)
+    );
+    assert_eq!(input(&engine), partial);
+    assert_eq!(owners(&engine), before);
+    engine.append_image_input(7, &bytes[7..]).unwrap();
+    let complete = input(&engine);
+    for (base, error) in [
+        (0, LoadError::Malformed),
+        (BASE + 1, LoadError::Malformed),
+        (BASE + 0x10000, LoadError::Unsupported),
+    ] {
+        assert_eq!(
+            engine.load_pe32_input_at(base),
+            Err(HostError::Loader(error))
+        );
+        assert_eq!(input(&engine), complete);
+        assert_eq!(owners(&engine), before);
+    }
+    assert_eq!(
+        engine.load_pe32_linked_v2_input_at(BASE, GATE),
+        Err(HostError::Loader(LoadError::Unsupported))
+    );
+    assert_eq!(input(&engine), complete);
+    assert_eq!(owners(&engine), before);
+    assert_eq!(
+        engine.map(0x9000, 1, 3),
+        Err(HostError::Memory(MemoryError::VersionExhausted))
+    );
+    let image = engine.load_pe32_input_at(BASE).unwrap();
+    assert_eq!(
+        image,
+        ImageMetadata32 {
+            image_base: BASE,
+            image_size: 0x4000,
+            entry_point: BASE + 0x1000,
+            mapped_pages: 3,
+        }
+    );
+    assert!(engine.image_input.is_none());
+    assert_eq!(engine.image, Some(image));
+    assert_ne!(
+        engine.memory().unwrap().identity(),
+        before.identity.unwrap()
+    );
+    let mut after = owners(&engine);
+    after.identity = before.identity;
+    after.pages = before.pages;
+    after.image = before.image;
+    assert_eq!(after, before);
+    let committed = owners(&engine);
+    assert_eq!(
+        engine.load_pe32_input_at(BASE),
+        Err(HostError::InvalidRequest)
+    );
+    engine.abort_image_input().unwrap();
+    engine.abort_image_input().unwrap();
+    assert_eq!(owners(&engine), committed);
+}
+
+#[test]
+fn unlinked_malformed_unsupported_and_capacity_failures_retain_input_until_explicit_abort() {
+    for (bytes, pages, error) in [
+        (b"bad".to_vec(), 3, LoadError::Malformed),
+        (small_image(), 3, LoadError::Unsupported),
+        (unlinked_image(), 2, LoadError::Capacity),
+    ] {
+        let mut engine = EngineInstance::new(pages, KEY).unwrap();
+        seed_last_error(&mut engine);
+        dirty_input_arena(&mut engine);
+        let before = owners(&engine);
+        engine.begin_image_input(bytes.len() as u32).unwrap();
+        let reserved = input(&engine).unwrap();
+        let mut copied = bytes.clone();
+        engine.append_image_input(0, &copied).unwrap();
+        copied.fill(0xee);
+        let staged = input(&engine).unwrap();
+        assert_eq!(staged.bytes, bytes);
+        assert_eq!(staged.pointer, reserved.pointer);
+        assert_eq!(staged.capacity, reserved.capacity);
+        for _ in 0..2 {
+            assert_eq!(
+                engine.load_pe32_input_at(BASE),
+                Err(HostError::Loader(error))
+            );
+            assert_eq!(
+                input(&engine),
+                Some(Input {
+                    total: staged.total,
+                    bytes: staged.bytes.clone(),
+                    pointer: staged.pointer,
+                    capacity: staged.capacity,
+                })
+            );
+            assert_eq!(owners(&engine), before);
+        }
+        assert_eq!(engine.begin_image_input(1), Err(HostError::InvalidRequest));
+        engine.abort_image_input().unwrap();
+        assert!(engine.image_input.is_none());
+        assert_eq!(owners(&engine), before);
+        engine.begin_image_input(1).unwrap();
+        engine.append_image_input(0, b"x").unwrap();
+        assert_eq!(input(&engine).unwrap().bytes, b"x");
+    }
 }
 
 fn v5_small_free_image() -> Vec<u8> {

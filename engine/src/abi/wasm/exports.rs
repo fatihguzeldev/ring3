@@ -125,6 +125,15 @@ pub extern "C" fn abort_image_input() -> u32 {
 }
 
 #[allow(unsafe_code)]
+#[unsafe(export_name = "ring3_abi_v1_load_pe32_input_at")]
+pub extern "C" fn load_pe32_input_at(actual_base: u32) -> u32 {
+    {
+        #![forbid(unsafe_code)]
+        crate::process::wasm::load_pe32_input_at(actual_base)
+    }
+}
+
+#[allow(unsafe_code)]
 #[unsafe(export_name = "ring3_abi_v1_load_pe32_linked_v2_input_at")]
 pub extern "C" fn load_pe32_linked_v2_input_at(actual_base: u32, gate_base: u32) -> u32 {
     {

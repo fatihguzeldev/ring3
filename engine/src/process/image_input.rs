@@ -2,7 +2,7 @@ use super::{CallError, EngineInstance, HostError};
 use crate::{
     abi::arena::TRANSFER_SIZE,
     loader::{
-        LinkedImageMetadata32V2, LinkedImageMetadata32V3, LinkedImageMetadata32V4,
+        ImageMetadata32, LinkedImageMetadata32V2, LinkedImageMetadata32V3, LinkedImageMetadata32V4,
         LinkedImageMetadata32V5, LinkedImageMetadata32V6, LinkedImageMetadata32V7,
         LinkedImageMetadata32V8,
     },
@@ -40,6 +40,19 @@ impl EngineInstance {
         self.memory()?;
         self.image_input = None;
         Ok(())
+    }
+
+    pub fn load_pe32_input_at(&mut self, actual_base: u32) -> Result<ImageMetadata32, HostError> {
+        let pages = self.image_input_capacity()?;
+        let input = self.image_input.as_ref().ok_or(HostError::InvalidRequest)?;
+        if input.bytes.len() != input.total as usize {
+            return Err(HostError::InvalidRequest);
+        }
+        let loaded = crate::loader::load_pe32_at(&input.bytes, actual_base, pages)
+            .map_err(HostError::Loader)?;
+        let image = self.publish_image(loaded);
+        self.image_input = None;
+        Ok(image)
     }
 
     pub fn load_pe32_linked_v2_input_at(
