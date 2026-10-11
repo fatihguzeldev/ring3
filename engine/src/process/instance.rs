@@ -1100,6 +1100,50 @@ impl EngineInstance {
         }
     }
 
+    pub fn atomic_or_u32(&mut self, address: u32, mask: u32) -> Result<StoreCompletion, HostError> {
+        self.guard(self.key, self.generation())?;
+        let memory = self.memory.as_mut().ok_or(HostError::Closed)?;
+        let code_version = memory.code_validation_version();
+        let result = memory.atomic_or_u32(GuestAddress(address), mask);
+        let code_changed = result.is_ok() && memory.code_validation_version() != code_version;
+        self.write_helper(result)?;
+        if code_changed {
+            match self.artifact_bytes() {
+                Ok(_) => Ok(StoreCompletion::Complete),
+                Err(HostError::CodeInvalidated) => Ok(StoreCompletion::CodeInvalidated),
+                Err(error) => Err(error),
+            }
+        } else {
+            Ok(StoreCompletion::Complete)
+        }
+    }
+
+    pub fn atomic_or_resident_u32(
+        &mut self,
+        key: u64,
+        id: u64,
+        address: u32,
+        mask: u32,
+    ) -> Result<StoreCompletion, HostError> {
+        self.guard_resident(key, id)?;
+        let memory = self.memory.as_mut().ok_or(HostError::Closed)?;
+        let code_version = memory.code_validation_version();
+        let result = memory.atomic_or_u32(GuestAddress(address), mask);
+        let code_changed = result.is_ok() && memory.code_validation_version() != code_version;
+        self.write_helper(result)?;
+        if code_changed {
+            match self.resident_bytes(id) {
+                Ok(_) => Ok(StoreCompletion::Complete),
+                Err(HostError::Resident(RegistryError::CodeInvalidated)) => {
+                    Ok(StoreCompletion::CodeInvalidated)
+                }
+                Err(error) => Err(error),
+            }
+        } else {
+            Ok(StoreCompletion::Complete)
+        }
+    }
+
     pub fn close(&mut self) {
         self.image_input = None;
         self.pending_call = None;
@@ -3813,6 +3857,189 @@ mod tests {
         assert_eq!(engine.bit_test_reset32(u32::MAX, 1), Err(HostError::Closed));
         assert_eq!(
             engine.bit_test_reset_resident32(0, 0, u32::MAX, 1),
+            Err(HostError::Closed)
+        );
+        assert_eq!(engine.arena(), before);
+    }
+
+    #[test]
+    fn atomic_or_exhaustion_preserves_every_published_owner_and_snapshot() {
+        for resident in [false, true] {
+            let (mut engine, outer, home) = byte_store_fixture();
+            engine.unmap(0x8000, 1).unwrap();
+            engine.map(0xffff_f000, 1, 7).unwrap();
+            engine
+                .memory
+                .as_mut()
+                .unwrap()
+                .write(GuestAddress(0xffff_fffc), &0x8765_4321_u32.to_le_bytes())
+                .unwrap();
+            let bases = [0x1000, 0x3000, 0x5000, 0xffff_f000];
+            let ram = bases.map(|base| byte_store_ram(&engine, base, 4096));
+            let snapshots = bases.map(|base| {
+                engine
+                    .memory()
+                    .unwrap()
+                    .snapshot_code(GuestAddress(base), 4096)
+                    .unwrap()
+            });
+            let modules = [
+                engine.artifact_bytes().unwrap(),
+                engine.resident_bytes(outer).unwrap(),
+                engine.resident_bytes(home).unwrap(),
+            ]
+            .map(|bytes| (bytes.to_vec(), bytes.as_ptr() as usize));
+            let generation = engine.generation();
+            let identity = engine.memory().unwrap().identity();
+            let epoch = engine.memory().unwrap().code_validation_version();
+            engine.memory.as_mut().unwrap().exhaust_versions_for_test();
+            for address in [0x1000, 0x5000, 0xffff_fffc] {
+                for mask in [0, 0x20, 0xffff_ffff] {
+                    let before = engine.arena().to_vec();
+                    assert_eq!(
+                        if resident {
+                            engine.atomic_or_resident_u32(engine.key, home, address, mask)
+                        } else {
+                            engine.atomic_or_u32(address, mask)
+                        },
+                        Ok(StoreCompletion::Complete)
+                    );
+                    byte_store_helper_only(&engine, &before, 1, [2, 0, 1, 0, 0, 0]);
+                    assert_eq!(engine.generation(), generation);
+                    assert_eq!(engine.memory().unwrap().identity(), identity);
+                    assert_eq!(engine.memory().unwrap().code_validation_version(), epoch);
+                    for (index, bytes) in [
+                        engine.artifact_bytes().unwrap(),
+                        engine.resident_bytes(outer).unwrap(),
+                        engine.resident_bytes(home).unwrap(),
+                    ]
+                    .into_iter()
+                    .enumerate()
+                    {
+                        assert_eq!(bytes, modules[index].0);
+                        assert_eq!(bytes.as_ptr() as usize, modules[index].1);
+                    }
+                    for (index, base) in bases.into_iter().enumerate() {
+                        assert_eq!(byte_store_ram(&engine, base, 4096), ram[index]);
+                        assert!(engine.memory().unwrap().is_code_current(&snapshots[index]));
+                    }
+                    engine.guard(engine.key, generation).unwrap();
+                    engine.guard_resident(engine.key, outer).unwrap();
+                    engine.guard_resident(engine.key, home).unwrap();
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn atomic_or_callback_authority_and_lifecycle_precede_all_effects() {
+        use crate::process::callback::{SuspendedCallback, SuspendedRecord};
+        let (mut engine, outer_id, home_id) = byte_store_fixture();
+        byte_store_inject_gate(&mut engine);
+        engine
+            .capture_resident_call(
+                engine.key,
+                outer_id,
+                crate::windows::CallingConvention32::Cdecl,
+                1,
+            )
+            .unwrap();
+        let before = engine.arena().to_vec();
+        assert_eq!(
+            engine.atomic_or_u32(u32::MAX, 1),
+            Err(HostError::Call(CallError::Busy))
+        );
+        assert_eq!(
+            engine.atomic_or_resident_u32(engine.key, home_id, u32::MAX, 1),
+            Err(HostError::Call(CallError::Busy))
+        );
+        assert_eq!(engine.arena(), before);
+        let outer = engine.pending_call.take().unwrap();
+        let token = outer.token + 1;
+        engine.callback = Some(SuspendedCallback {
+            outer,
+            record: SuspendedRecord::Resident {
+                record: crate::abi::resident_callback::ResidentCallbackRecord32 {
+                    token,
+                    outer_token: token - 1,
+                    phase: 1,
+                    outcome: 0,
+                    entry_pc: 0x3000,
+                    entry_esp: 0x8000,
+                    return_pc: 0x1000,
+                    return_id: 8,
+                    stack_words: 0,
+                    result: 0,
+                    outer_unit_id: outer_id,
+                    callback_unit_id: home_id,
+                },
+                authorized: false,
+                active_unit_id: home_id,
+            },
+        });
+        assert_eq!(
+            engine.atomic_or_u32(0x5000, 1),
+            Err(HostError::Call(CallError::Busy))
+        );
+        assert_eq!(
+            engine.atomic_or_resident_u32(engine.key, home_id, 0x5000, 1),
+            Err(HostError::Call(CallError::Busy))
+        );
+        assert_eq!(engine.arena(), before);
+        if let SuspendedRecord::Resident { authorized, .. } =
+            &mut engine.callback.as_mut().unwrap().record
+        {
+            *authorized = true;
+        }
+        assert_eq!(
+            engine.atomic_or_resident_u32(engine.key, outer_id, 0x5000, 1),
+            Err(HostError::Call(CallError::Busy))
+        );
+        assert_eq!(
+            engine.atomic_or_u32(0x5000, 1),
+            Err(HostError::Call(CallError::Busy))
+        );
+        assert_eq!(engine.arena(), before);
+        for (mask, old, committed) in [
+            (0, 0x4433_2211_u32, 0x4433_2211_u32),
+            (0x20, 0x4433_2211, 0x4433_2231),
+            (0xffff_ff80, 0x4433_2231, 0xffff_ffb1),
+        ] {
+            let before = engine.arena().to_vec();
+            assert_eq!(
+                engine.atomic_or_resident_u32(engine.key, home_id, 0x5000, mask),
+                Ok(StoreCompletion::Complete)
+            );
+            byte_store_helper_only(&engine, &before, 1, [0, old, 0, 0, 0, 0]);
+            assert_eq!(byte_store_ram(&engine, 0x5000, 4), committed.to_le_bytes());
+        }
+        engine
+            .memory
+            .as_mut()
+            .unwrap()
+            .write(GuestAddress(0x1000), &[0x0f])
+            .unwrap();
+        let before = engine.arena().to_vec();
+        assert_eq!(
+            engine.atomic_or_resident_u32(engine.key, home_id, 0x5000, 0),
+            Err(HostError::Resident(RegistryError::CodeInvalidated))
+        );
+        assert_eq!(engine.arena(), before);
+        assert_eq!(byte_store_ram(&engine, 0x5000, 4), [0xb1, 0xff, 0xff, 0xff]);
+        engine.exit_code = Some(7);
+        assert_eq!(
+            engine.atomic_or_u32(u32::MAX, 1),
+            Err(HostError::ProcessExited)
+        );
+        assert_eq!(
+            engine.atomic_or_resident_u32(0, 0, u32::MAX, 1),
+            Err(HostError::ProcessExited)
+        );
+        assert_eq!(engine.arena(), before);
+        engine.close();
+        assert_eq!(engine.atomic_or_u32(u32::MAX, 1), Err(HostError::Closed));
+        assert_eq!(
+            engine.atomic_or_resident_u32(0, 0, u32::MAX, 1),
             Err(HostError::Closed)
         );
         assert_eq!(engine.arena(), before);
