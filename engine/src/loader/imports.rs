@@ -17,6 +17,7 @@ pub(super) enum ProviderProfile {
     VirtualMemory,
     VirtualProtection,
     InstructionCache,
+    CurrentProcess,
 }
 
 #[derive(Clone, Copy)]
@@ -125,7 +126,7 @@ impl ImportPlan<'_> {
                 id: 0,
             }; 8],
         };
-        let mut used = [false; 8];
+        let mut used = [false; 9];
         for (index, symbol) in self.symbols[..self.slot_count].iter().enumerate() {
             let api = WindowsApi32::resolve(self.module, symbol).ok_or(LoadError::Unsupported)?;
             let gate_index = match api {
@@ -138,14 +139,16 @@ impl ImportPlan<'_> {
                     | ProviderProfile::VirtualAllocation
                     | ProviderProfile::VirtualMemory
                     | ProviderProfile::VirtualProtection
-                    | ProviderProfile::InstructionCache => 2,
+                    | ProviderProfile::InstructionCache
+                    | ProviderProfile::CurrentProcess => 2,
                 },
                 WindowsApi32::GetModuleHandleA => match profile {
                     ProviderProfile::MainImageHandle
                     | ProviderProfile::VirtualAllocation
                     | ProviderProfile::VirtualMemory
                     | ProviderProfile::VirtualProtection
-                    | ProviderProfile::InstructionCache => 3,
+                    | ProviderProfile::InstructionCache
+                    | ProviderProfile::CurrentProcess => 3,
                     ProviderProfile::LastErrorOnly | ProviderProfile::LastErrorAndExit => {
                         return Err(LoadError::Unsupported);
                     }
@@ -154,7 +157,8 @@ impl ImportPlan<'_> {
                     ProviderProfile::VirtualAllocation
                     | ProviderProfile::VirtualMemory
                     | ProviderProfile::VirtualProtection
-                    | ProviderProfile::InstructionCache => 4,
+                    | ProviderProfile::InstructionCache
+                    | ProviderProfile::CurrentProcess => 4,
                     ProviderProfile::LastErrorOnly
                     | ProviderProfile::LastErrorAndExit
                     | ProviderProfile::MainImageHandle => return Err(LoadError::Unsupported),
@@ -162,14 +166,17 @@ impl ImportPlan<'_> {
                 WindowsApi32::VirtualFree => match profile {
                     ProviderProfile::VirtualMemory
                     | ProviderProfile::VirtualProtection
-                    | ProviderProfile::InstructionCache => 5,
+                    | ProviderProfile::InstructionCache
+                    | ProviderProfile::CurrentProcess => 5,
                     ProviderProfile::LastErrorOnly
                     | ProviderProfile::LastErrorAndExit
                     | ProviderProfile::MainImageHandle
                     | ProviderProfile::VirtualAllocation => return Err(LoadError::Unsupported),
                 },
                 WindowsApi32::VirtualProtect => match profile {
-                    ProviderProfile::VirtualProtection | ProviderProfile::InstructionCache => 6,
+                    ProviderProfile::VirtualProtection
+                    | ProviderProfile::InstructionCache
+                    | ProviderProfile::CurrentProcess => 6,
                     ProviderProfile::LastErrorOnly
                     | ProviderProfile::LastErrorAndExit
                     | ProviderProfile::MainImageHandle
@@ -177,7 +184,7 @@ impl ImportPlan<'_> {
                     | ProviderProfile::VirtualMemory => return Err(LoadError::Unsupported),
                 },
                 WindowsApi32::FlushInstructionCache => match profile {
-                    ProviderProfile::InstructionCache => 7,
+                    ProviderProfile::InstructionCache | ProviderProfile::CurrentProcess => 7,
                     ProviderProfile::LastErrorOnly
                     | ProviderProfile::LastErrorAndExit
                     | ProviderProfile::MainImageHandle
@@ -185,7 +192,16 @@ impl ImportPlan<'_> {
                     | ProviderProfile::VirtualMemory
                     | ProviderProfile::VirtualProtection => return Err(LoadError::Unsupported),
                 },
-                WindowsApi32::GetCurrentProcess => return Err(LoadError::Unsupported),
+                WindowsApi32::GetCurrentProcess => match profile {
+                    ProviderProfile::CurrentProcess => 8,
+                    ProviderProfile::LastErrorOnly
+                    | ProviderProfile::LastErrorAndExit
+                    | ProviderProfile::MainImageHandle
+                    | ProviderProfile::VirtualAllocation
+                    | ProviderProfile::VirtualMemory
+                    | ProviderProfile::VirtualProtection
+                    | ProviderProfile::InstructionCache => return Err(LoadError::Unsupported),
+                },
             };
             used[gate_index] = true;
             resolved.slots[index] = gate_base + gate_index as u32 * 16;
@@ -199,6 +215,7 @@ impl ImportPlan<'_> {
             WindowsApi32::VirtualFree,
             WindowsApi32::VirtualProtect,
             WindowsApi32::FlushInstructionCache,
+            WindowsApi32::GetCurrentProcess,
         ]
         .into_iter()
         .enumerate()

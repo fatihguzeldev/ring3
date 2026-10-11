@@ -4,6 +4,7 @@ use crate::{
     loader::{
         LinkedImageMetadata32V2, LinkedImageMetadata32V3, LinkedImageMetadata32V4,
         LinkedImageMetadata32V5, LinkedImageMetadata32V6, LinkedImageMetadata32V7,
+        LinkedImageMetadata32V8,
     },
 };
 
@@ -145,6 +146,24 @@ impl EngineInstance {
             crate::loader::load_pe32_linked_v7_at(&input.bytes, actual_base, gate_base, pages)
                 .map_err(HostError::Loader)?;
         let linked = self.publish_linked_image_v7(loaded);
+        self.image_input = None;
+        Ok(linked)
+    }
+
+    pub fn load_pe32_linked_v8_input_at(
+        &mut self,
+        actual_base: u32,
+        gate_base: u32,
+    ) -> Result<LinkedImageMetadata32V8, HostError> {
+        let pages = self.image_input_capacity()?;
+        let input = self.image_input.as_ref().ok_or(HostError::InvalidRequest)?;
+        if input.bytes.len() != input.total as usize {
+            return Err(HostError::InvalidRequest);
+        }
+        let loaded =
+            crate::loader::load_pe32_linked_v8_at(&input.bytes, actual_base, gate_base, pages)
+                .map_err(HostError::Loader)?;
+        let linked = self.publish_linked_image_v8(loaded);
         self.image_input = None;
         Ok(linked)
     }
