@@ -124,6 +124,7 @@ fn four_forms_all_destinations_and_ea_aliases_admit_without_reading_guest_data()
                         index: Some(Register32::Ecx),
                         scale: 4,
                         displacement: (-32_i32) as u32,
+                        ..Default::default()
                     },
                 ),
                 (
@@ -133,6 +134,7 @@ fn four_forms_all_destinations_and_ea_aliases_admit_without_reading_guest_data()
                         index: None,
                         scale: 1,
                         displacement: 0,
+                        ..Default::default()
                     },
                 ),
             ] {
@@ -171,6 +173,7 @@ fn checked_memory_address_forms_keep_scales_base_index_and_signed_displacements(
                 index: None,
                 scale: 1,
                 displacement: 0,
+                ..Default::default()
             },
         ),
         (
@@ -180,6 +183,7 @@ fn checked_memory_address_forms_keep_scales_base_index_and_signed_displacements(
                 index: None,
                 scale: 1,
                 displacement: 0,
+                ..Default::default()
             },
         ),
         (
@@ -189,6 +193,7 @@ fn checked_memory_address_forms_keep_scales_base_index_and_signed_displacements(
                 index: None,
                 scale: 1,
                 displacement: 0,
+                ..Default::default()
             },
         ),
         (
@@ -198,6 +203,7 @@ fn checked_memory_address_forms_keep_scales_base_index_and_signed_displacements(
                 index: Some(Register32::Ecx),
                 scale: 1,
                 displacement: 0,
+                ..Default::default()
             },
         ),
         (
@@ -207,6 +213,7 @@ fn checked_memory_address_forms_keep_scales_base_index_and_signed_displacements(
                 index: Some(Register32::Ecx),
                 scale: 2,
                 displacement: 0,
+                ..Default::default()
             },
         ),
         (
@@ -216,6 +223,7 @@ fn checked_memory_address_forms_keep_scales_base_index_and_signed_displacements(
                 index: Some(Register32::Ecx),
                 scale: 4,
                 displacement: 0,
+                ..Default::default()
             },
         ),
         (
@@ -225,6 +233,7 @@ fn checked_memory_address_forms_keep_scales_base_index_and_signed_displacements(
                 index: Some(Register32::Ecx),
                 scale: 8,
                 displacement: 0,
+                ..Default::default()
             },
         ),
         (
@@ -234,6 +243,7 @@ fn checked_memory_address_forms_keep_scales_base_index_and_signed_displacements(
                 index: Some(Register32::Ecx),
                 scale: 4,
                 displacement: 0xffff_fff8,
+                ..Default::default()
             },
         ),
         (
@@ -243,6 +253,7 @@ fn checked_memory_address_forms_keep_scales_base_index_and_signed_displacements(
                 index: None,
                 scale: 1,
                 displacement: u32::MAX,
+                ..Default::default()
             },
         ),
         (
@@ -252,6 +263,7 @@ fn checked_memory_address_forms_keep_scales_base_index_and_signed_displacements(
                 index: None,
                 scale: 1,
                 displacement: 0xffff_ff80,
+                ..Default::default()
             },
         ),
         (
@@ -261,6 +273,7 @@ fn checked_memory_address_forms_keep_scales_base_index_and_signed_displacements(
                 index: None,
                 scale: 1,
                 displacement: 0x9234_5678,
+                ..Default::default()
             },
         ),
     ];

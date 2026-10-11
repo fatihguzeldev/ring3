@@ -1,5 +1,12 @@
-use super::Register32;
+use super::{Register32, SegmentRegister};
 use crate::memory::GuestAddress;
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum AddressSize {
+    Bits16,
+    #[default]
+    Bits32,
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct EffectiveAddress {
@@ -7,6 +14,21 @@ pub struct EffectiveAddress {
     pub index: Option<Register32>,
     pub scale: u8,
     pub displacement: u32,
+    pub segment: Option<SegmentRegister>,
+    pub address_size: AddressSize,
+}
+
+impl Default for EffectiveAddress {
+    fn default() -> Self {
+        Self {
+            base: None,
+            index: None,
+            scale: 1,
+            displacement: 0,
+            segment: None,
+            address_size: AddressSize::Bits32,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

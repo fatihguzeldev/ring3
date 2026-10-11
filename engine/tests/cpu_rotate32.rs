@@ -404,6 +404,7 @@ fn newly_admitted_memory_neighbors_keep_original_ea_and_raw_count_identity() {
                     index: None,
                     scale: 1,
                     displacement: 0,
+                    ..Default::default()
                 },
             ),
             (
@@ -413,6 +414,7 @@ fn newly_admitted_memory_neighbors_keep_original_ea_and_raw_count_identity() {
                     index: None,
                     scale: 1,
                     displacement: 0xffff_ff80,
+                    ..Default::default()
                 },
             ),
             (
@@ -422,6 +424,7 @@ fn newly_admitted_memory_neighbors_keep_original_ea_and_raw_count_identity() {
                     index: None,
                     scale: 1,
                     displacement: 0x1234_5678,
+                    ..Default::default()
                 },
             ),
             (
@@ -431,6 +434,7 @@ fn newly_admitted_memory_neighbors_keep_original_ea_and_raw_count_identity() {
                     index: None,
                     scale: 1,
                     displacement: 0x1234_5678,
+                    ..Default::default()
                 },
             ),
             (
@@ -440,6 +444,7 @@ fn newly_admitted_memory_neighbors_keep_original_ea_and_raw_count_identity() {
                     index: None,
                     scale: 1,
                     displacement: 0,
+                    ..Default::default()
                 },
             ),
             (
@@ -449,6 +454,7 @@ fn newly_admitted_memory_neighbors_keep_original_ea_and_raw_count_identity() {
                     index: Some(Register32::Ecx),
                     scale: 4,
                     displacement: 0,
+                    ..Default::default()
                 },
             ),
             (
@@ -458,6 +464,7 @@ fn newly_admitted_memory_neighbors_keep_original_ea_and_raw_count_identity() {
                     index: Some(Register32::Ecx),
                     scale: 4,
                     displacement: 0x1234_5678,
+                    ..Default::default()
                 },
             ),
         ]

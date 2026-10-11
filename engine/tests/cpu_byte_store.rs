@@ -363,7 +363,8 @@ fn all_legacy_sources_and_immediate_bits_admit_all_four_bound_paths_without_data
                             base: None,
                             index: None,
                             scale: 1,
-                            displacement: DATA + 0x10
+                            displacement: DATA + 0x10,
+                            ..Default::default()
                         },
                         source,
                     }
@@ -420,6 +421,7 @@ fn original_parent_aliases_sib_and_signed_displacements_have_exact_descriptors()
                 index: None,
                 scale: 1,
                 displacement: 0,
+                ..Default::default()
             },
             ByteValue::Register(ByteRegister::Ah),
         ),
@@ -430,6 +432,7 @@ fn original_parent_aliases_sib_and_signed_displacements_have_exact_descriptors()
                 index: Some(Register32::Ecx),
                 scale: 4,
                 displacement: 0xbb77_32e6,
+                ..Default::default()
             },
             ByteValue::Register(ByteRegister::Ch),
         ),
@@ -440,6 +443,7 @@ fn original_parent_aliases_sib_and_signed_displacements_have_exact_descriptors()
                 index: None,
                 scale: 1,
                 displacement: u32::MAX,
+                ..Default::default()
             },
             ByteValue::Register(ByteRegister::Bh),
         ),
@@ -450,6 +454,7 @@ fn original_parent_aliases_sib_and_signed_displacements_have_exact_descriptors()
                 index: Some(Register32::Ecx),
                 scale: 2,
                 displacement: 0xddbb_b980,
+                ..Default::default()
             },
             ByteValue::Register(ByteRegister::Dl),
         ),
@@ -460,6 +465,7 @@ fn original_parent_aliases_sib_and_signed_displacements_have_exact_descriptors()
                 index: None,
                 scale: 1,
                 displacement: 0x10,
+                ..Default::default()
             },
             ByteValue::Immediate(0xff),
         ),

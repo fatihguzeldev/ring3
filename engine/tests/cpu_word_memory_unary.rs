@@ -63,6 +63,7 @@ fn decode_admission(opcode: u8, extension: u8, kind: UnaryKind) {
                 index: None,
                 scale: 1,
                 displacement: 0,
+                ..Default::default()
             },
         }
     );
@@ -192,6 +193,7 @@ fn addresses() -> [(&'static [u8], EffectiveAddress); 13] {
         index,
         scale,
         displacement,
+        ..Default::default()
     };
     [
         (&[0x03], address(Some(Ebx), None, 1, 0)),

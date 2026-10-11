@@ -217,6 +217,7 @@ fn addresses() -> [(&'static [u8], EffectiveAddress); 17] {
         index,
         scale,
         displacement,
+        ..Default::default()
     };
     [
         (&[0x00], address(Some(Eax), None, 1, 0)),
@@ -326,6 +327,7 @@ fn word_memory_predicate_prefix_looking_displacements_and_immediates_are_payload
         index: Some(Register32::Esi),
         scale: 8,
         displacement: 0xf3f0_6766,
+        ..Default::default()
     };
     for form in 0..6 {
         for immediate in [0x6766, 0xf3f0] {

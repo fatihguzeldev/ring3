@@ -105,6 +105,7 @@ fn address(
         index,
         scale,
         displacement,
+        ..Default::default()
     }
 }
 
@@ -389,6 +390,7 @@ fn excluded_counts_prefixes_and_supported_neighbors_keep_exact_ir_boundaries() {
         index: None,
         scale: 1,
         displacement: 0,
+        ..Default::default()
     };
     let mut neighbors = 0;
     for (field, kind) in KINDS {

@@ -186,6 +186,7 @@ fn both_register_forms_keep_all_eight_sources_and_base_index_esp_aliases() {
                         index: None,
                         scale: 1,
                         displacement: (-32_i32) as u32,
+                        ..Default::default()
                     },
                 ),
                 (
@@ -202,6 +203,7 @@ fn both_register_forms_keep_all_eight_sources_and_base_index_esp_aliases() {
                         index: Some(index_register),
                         scale: 4,
                         displacement: (-8_i32) as u32,
+                        ..Default::default()
                     },
                 ),
             ] {
@@ -297,6 +299,7 @@ fn five_forms_preserve_ea_scales_base_index_and_signed_displacements() {
                         index: *index,
                         scale: *scale,
                         displacement: *displacement,
+                        ..Default::default()
                     }),
                     source,
                 },
@@ -315,6 +318,7 @@ fn cmp_imm8_sign_extends_and_full_immediates_keep_all_thirty_two_bits() {
         index: None,
         scale: 1,
         displacement: 0,
+        ..Default::default()
     };
     let mut bytes = Vec::new();
     let mut expected = Vec::new();

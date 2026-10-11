@@ -154,6 +154,7 @@ fn addresses() -> [(&'static [u8], EffectiveAddress); 13] {
         index,
         scale,
         displacement,
+        ..Default::default()
     };
     [
         (&[0x03], address(Some(Ebx), None, 1, 0)),
@@ -231,6 +232,7 @@ fn word_lea_original_parent_aliases_and_prefix_looking_payloads_are_literal() {
                     },
                     scale: 1 << (sib >> 6),
                     displacement: 0,
+                    ..Default::default()
                 },
             },
         );
@@ -243,6 +245,7 @@ fn word_lea_original_parent_aliases_and_prefix_looking_payloads_are_literal() {
                 index: None,
                 scale: 1,
                 displacement: 0,
+                ..Default::default()
             },
         ),
         (
@@ -252,6 +255,7 @@ fn word_lea_original_parent_aliases_and_prefix_looking_payloads_are_literal() {
                 index: Some(Register32::Eax),
                 scale: 4,
                 displacement: 0xf3f0_6766,
+                ..Default::default()
             },
         ),
         (
@@ -261,6 +265,7 @@ fn word_lea_original_parent_aliases_and_prefix_looking_payloads_are_literal() {
                 index: Some(Register32::Eax),
                 scale: 4,
                 displacement: 0,
+                ..Default::default()
             },
         ),
     ] {

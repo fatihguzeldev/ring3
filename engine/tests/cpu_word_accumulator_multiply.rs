@@ -200,6 +200,7 @@ fn addresses() -> [(&'static [u8], EffectiveAddress); 13] {
         index,
         scale,
         displacement,
+        ..Default::default()
     };
     [
         (&[0x03], address(Some(Ebx), None, 1, 0)),
@@ -285,6 +286,7 @@ fn word_accumulator_multiply_payloads_and_implicit_destination_aliases_are_liter
                         index: (index != 4).then(|| REGISTERS[usize::from(index)]),
                         scale: 1 << (sib >> 6),
                         displacement: 0xffff_ff80,
+                        ..Default::default()
                     },
                 },
             );
@@ -320,6 +322,7 @@ fn word_accumulator_multiply_payloads_and_implicit_destination_aliases_are_liter
                         index,
                         scale,
                         displacement,
+                        ..Default::default()
                     },
                 },
             );

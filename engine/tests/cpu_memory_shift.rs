@@ -328,6 +328,7 @@ fn original_ecx_esp_and_no_base_descriptions_keep_memory_destination_and_count()
                 index: Some(Register32::Ecx),
                 scale: 2,
                 displacement: 0xffff_ffe0,
+                ..Default::default()
             },
             ShiftCount::Cl,
         ),
@@ -339,6 +340,7 @@ fn original_ecx_esp_and_no_base_descriptions_keep_memory_destination_and_count()
                 index: None,
                 scale: 1,
                 displacement: 8,
+                ..Default::default()
             },
             ShiftCount::Immediate(1),
         ),
@@ -350,6 +352,7 @@ fn original_ecx_esp_and_no_base_descriptions_keep_memory_destination_and_count()
                 index: Some(Register32::Ecx),
                 scale: 4,
                 displacement: 0xffff_fff8,
+                ..Default::default()
             },
             ShiftCount::Immediate(32),
         ),
@@ -361,6 +364,7 @@ fn original_ecx_esp_and_no_base_descriptions_keep_memory_destination_and_count()
                 index: None,
                 scale: 1,
                 displacement: u32::MAX,
+                ..Default::default()
             },
             ShiftCount::Immediate(0),
         ),

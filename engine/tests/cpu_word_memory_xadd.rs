@@ -158,6 +158,7 @@ fn addresses() -> [(&'static [u8], EffectiveAddress); 13] {
         index,
         scale,
         displacement,
+        ..Default::default()
     };
     [
         (&[0x03], address(Some(Ebx), None, 1, 0)),
@@ -285,6 +286,7 @@ fn word_memory_xadd_prefixes_payloads_and_neighbors_keep_precise_boundaries() {
             index: Some(Register32::Ebx),
             scale: 8,
             displacement: 0,
+            ..Default::default()
         },
         Register32::Ebx,
     );
@@ -299,6 +301,7 @@ fn word_memory_xadd_prefixes_payloads_and_neighbors_keep_precise_boundaries() {
             },
             scale: 1 << (sib >> 6),
             displacement: 0,
+            ..Default::default()
         };
         assert_operation(&instruction(1, &[0x04, sib]), address, Register32::Ecx);
     }

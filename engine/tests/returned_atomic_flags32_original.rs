@@ -73,6 +73,7 @@ fn whole_original_returned_atomic_flags_admits_seven_blocks_and_thirty_two_instr
         index: None,
         scale: 1,
         displacement: 0,
+        ..Default::default()
     };
     let mut failures = Vec::new();
     for (ordinal, (resident, entries)) in

@@ -157,6 +157,7 @@ fn addresses() -> [(&'static [u8], EffectiveAddress); 17] {
         index,
         scale,
         displacement,
+        ..Default::default()
     };
     [
         (&[0x00], address(Some(Eax), None, 1, 0)),
@@ -242,7 +243,8 @@ fn all_word_memory_cmov_predicates_destinations_and_address_classes_have_exact_i
                     base: Some(Register32::Ebx),
                     index: None,
                     scale: 1,
-                    displacement: 0
+                    displacement: 0,
+                    ..Default::default()
                 },
             }
         );
@@ -264,7 +266,8 @@ fn word_memory_cmov_prefix_looking_displacements_are_payload() {
                 base: Some(Register32::Esp),
                 index: Some(Register32::Esi),
                 scale: 8,
-                displacement: 0xf3f0_6766
+                displacement: 0xf3f0_6766,
+                ..Default::default()
             },
         }
     );

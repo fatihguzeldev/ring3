@@ -103,6 +103,7 @@ fn forms() -> Vec<(Vec<u8>, EffectiveAddress)> {
                 index,
                 scale,
                 displacement,
+                ..Default::default()
             },
         )
     })

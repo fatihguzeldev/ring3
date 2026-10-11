@@ -342,6 +342,7 @@ fn decoded_compiler_cfg_and_authored_cdecl_harness_fit_default_limits() {
         index: Some(Register32::Esi),
         scale: 8,
         displacement,
+        ..Default::default()
     };
     for (offset, kind, destination, width, displacement) in [
         (

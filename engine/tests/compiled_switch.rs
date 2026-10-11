@@ -299,7 +299,8 @@ fn typed_compiler_dispatch_and_cdecl_caller_keep_the_original_cfg() {
                 base: None,
                 index: Some(Register32::Esi),
                 scale: 4,
-                displacement: pe::ACTUAL_BASE + pe::TABLE_RVA
+                displacement: pe::ACTUAL_BASE + pe::TABLE_RVA,
+                ..Default::default()
             }))
         }
     );
@@ -310,7 +311,8 @@ fn typed_compiler_dispatch_and_cdecl_caller_keep_the_original_cfg() {
                 base: Some(Register32::Edx),
                 index: None,
                 scale: 1,
-                displacement: 0
+                displacement: 0,
+                ..Default::default()
             }),
             source: Value32::Register(Register32::Ecx)
         }

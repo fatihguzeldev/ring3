@@ -180,6 +180,7 @@ fn addresses() -> [(&'static [u8], EffectiveAddress); 13] {
         index,
         scale,
         displacement,
+        ..Default::default()
     };
     [
         (&[0x03], address(Some(Ebx), None, 1, 0)),
@@ -308,6 +309,7 @@ fn word_memory_double_shift_raw_counts_and_prefix_looking_payloads_stay_literal(
                 index: Some(Register32::Ecx),
                 scale: 4,
                 displacement: 0,
+                ..Default::default()
             },
             Register32::Ecx,
             0x66,
@@ -323,6 +325,7 @@ fn word_memory_double_shift_raw_counts_and_prefix_looking_payloads_stay_literal(
                 },
                 scale: 1 << (sib >> 6),
                 displacement: 0,
+                ..Default::default()
             };
             assert_operation(
                 opcode,

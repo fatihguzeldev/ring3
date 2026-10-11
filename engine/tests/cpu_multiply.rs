@@ -182,6 +182,7 @@ fn memory_sources_preserve_base_index_sib_scales_and_wrapping_displacements() {
                     index: None,
                     scale: 1,
                     displacement: 0xffff_ffe0,
+                    ..Default::default()
                 }),
                 immediate,
             );
@@ -196,6 +197,7 @@ fn memory_sources_preserve_base_index_sib_scales_and_wrapping_displacements() {
                     index: Some(Register32::Ecx),
                     scale,
                     displacement: 0,
+                    ..Default::default()
                 }),
                 immediate,
             );
@@ -208,6 +210,7 @@ fn memory_sources_preserve_base_index_sib_scales_and_wrapping_displacements() {
                     index: None,
                     scale: 1,
                     displacement: u32::MAX,
+                    ..Default::default()
                 },
             ),
             (
@@ -217,6 +220,7 @@ fn memory_sources_preserve_base_index_sib_scales_and_wrapping_displacements() {
                     index: Some(Register32::Ecx),
                     scale: 4,
                     displacement: 0xffff_fff8,
+                    ..Default::default()
                 },
             ),
         ] {

@@ -141,6 +141,7 @@ fn absolute(address: u32) -> EffectiveAddress {
         index: None,
         scale: 1,
         displacement: address,
+        ..Default::default()
     }
 }
 

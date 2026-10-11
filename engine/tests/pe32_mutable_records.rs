@@ -338,7 +338,8 @@ fn compiler_cfg_narrow_stores_and_live_second_call_fit_default_limits() {
                 base: None,
                 index: None,
                 scale: 1,
-                displacement: pe::ACTUAL_BASE + pe::CHECKSUM1_RVA
+                displacement: pe::ACTUAL_BASE + pe::CHECKSUM1_RVA,
+                ..Default::default()
             }),
             source: Value32::Register(Register32::Eax)
         }
@@ -368,7 +369,8 @@ fn compiler_cfg_narrow_stores_and_live_second_call_fit_default_limits() {
                 base: None,
                 index: None,
                 scale: 1,
-                displacement: pe::ACTUAL_BASE + pe::CHECKSUM2_RVA
+                displacement: pe::ACTUAL_BASE + pe::CHECKSUM2_RVA,
+                ..Default::default()
             }),
             source: Value32::Register(Register32::Eax)
         }
@@ -378,6 +380,7 @@ fn compiler_cfg_narrow_stores_and_live_second_call_fit_default_limits() {
         index: Some(Register32::Esi),
         scale: 8,
         displacement,
+        ..Default::default()
     };
     assert_eq!(
         operation(0x219),

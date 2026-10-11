@@ -45,6 +45,7 @@ fn ea(
         index,
         scale,
         displacement,
+        ..Default::default()
     }
 }
 

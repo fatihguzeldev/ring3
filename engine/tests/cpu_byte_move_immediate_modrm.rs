@@ -608,6 +608,7 @@ fn memory_store(modrm: u8) -> Operation {
                 2 => 0x1234_5678,
                 _ => 0,
             },
+            ..Default::default()
         },
         source: ByteValue::Immediate(0x81),
     }

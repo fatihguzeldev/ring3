@@ -278,6 +278,7 @@ fn original_base_index_esp_and_no_base_addresses_remain_typed_and_bound() {
                 index: Some(Ecx),
                 scale: 2,
                 displacement: 0,
+                ..Default::default()
             },
             None,
         ),
@@ -289,6 +290,7 @@ fn original_base_index_esp_and_no_base_addresses_remain_typed_and_bound() {
                 index: Some(Ecx),
                 scale: 4,
                 displacement: 0xffff_fffe,
+                ..Default::default()
             },
             Some(0x9234_5678),
         ),
@@ -300,6 +302,7 @@ fn original_base_index_esp_and_no_base_addresses_remain_typed_and_bound() {
                 index: None,
                 scale: 1,
                 displacement: 8,
+                ..Default::default()
             },
             Some(0xffff_ff80),
         ),
@@ -311,6 +314,7 @@ fn original_base_index_esp_and_no_base_addresses_remain_typed_and_bound() {
                 index: None,
                 scale: 1,
                 displacement: 0,
+                ..Default::default()
             },
             Some(0),
         ),
@@ -322,6 +326,7 @@ fn original_base_index_esp_and_no_base_addresses_remain_typed_and_bound() {
                 index: Some(Ecx),
                 scale: 4,
                 displacement: 0xffff_fff8,
+                ..Default::default()
             },
             Some(0x0001_0000),
         ),
@@ -333,6 +338,7 @@ fn original_base_index_esp_and_no_base_addresses_remain_typed_and_bound() {
                 index: None,
                 scale: 1,
                 displacement: 0xffff_fff8,
+                ..Default::default()
             },
             Some(u32::MAX),
         ),
@@ -344,6 +350,7 @@ fn original_base_index_esp_and_no_base_addresses_remain_typed_and_bound() {
                 index: None,
                 scale: 1,
                 displacement: 0xffff_fffc,
+                ..Default::default()
             },
             None,
         ),

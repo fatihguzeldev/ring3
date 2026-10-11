@@ -102,6 +102,7 @@ fn addresses() -> [(&'static [u8], EffectiveAddress); 17] {
         index,
         scale,
         displacement,
+        ..Default::default()
     };
     [
         (&[0x00], address(Some(Eax), None, 1, 0)),
@@ -197,6 +198,7 @@ fn prefix_like_displacement_and_immediate_bytes_are_payload() {
         index: Some(Register32::Esi),
         scale: 8,
         displacement: 0xf3f0_6766,
+        ..Default::default()
     };
     let tail = [0x84, 0xf4, 0x66, 0x67, 0xf0, 0xf3];
     let mut memory = code_space(CODE, &[0x90]);

@@ -37,6 +37,7 @@ const ADDRESS: EffectiveAddress = EffectiveAddress {
     index: Some(Register32::Ecx),
     scale: 4,
     displacement: 0xffff_ffe0,
+    ..Default::default()
 };
 const FORMS: [(BinaryKind, &[u8], Location32, Value32); 10] = [
     (
@@ -203,6 +204,7 @@ fn signed_imm8_and_full_imm32_remain_distinct_for_register_and_memory() {
                     index: None,
                     scale: 1,
                     displacement: 0,
+                    ..Default::default()
                 }),
                 Value32::Immediate(expected),
             );
@@ -246,6 +248,7 @@ fn base_and_index_aliases_include_esp_without_an_esp_index() {
                 index: None,
                 scale: 1,
                 displacement: 0xffff_ffe0,
+                ..Default::default()
             };
             let mut bytes = vec![reg];
             bytes.extend_from_slice(&tail);
@@ -276,6 +279,7 @@ fn base_and_index_aliases_include_esp_without_an_esp_index() {
                 index: Some(index_register),
                 scale: 4,
                 displacement: 0xffff_fff8,
+                ..Default::default()
             };
             let tail = [
                 0x04 | bits << 3,
@@ -322,6 +326,7 @@ fn effective_addresses_preserve_scales_ebp_absolute_and_wrapping_displacement() 
                     index: Some(Register32::Ecx),
                     scale,
                     displacement: 0,
+                    ..Default::default()
                 }),
             );
         }
@@ -335,6 +340,7 @@ fn effective_addresses_preserve_scales_ebp_absolute_and_wrapping_displacement() 
                 index: None,
                 scale: 1,
                 displacement: 0,
+                ..Default::default()
             }),
         );
         decoded(
@@ -347,6 +353,7 @@ fn effective_addresses_preserve_scales_ebp_absolute_and_wrapping_displacement() 
                 index: None,
                 scale: 1,
                 displacement: u32::MAX,
+                ..Default::default()
             }),
         );
     }

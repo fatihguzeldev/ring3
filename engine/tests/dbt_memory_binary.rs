@@ -157,6 +157,7 @@ fn six_forms_and_all_destinations_preserve_base_and_index_aliases_without_data_r
                         index: None,
                         scale: 1,
                         displacement: (-32_i32) as u32,
+                        ..Default::default()
                     },
                 ),
                 (
@@ -173,6 +174,7 @@ fn six_forms_and_all_destinations_preserve_base_and_index_aliases_without_data_r
                         index: Some(index_register),
                         scale: 4,
                         displacement: (-8_i32) as u32,
+                        ..Default::default()
                     },
                 ),
             ] {
@@ -204,6 +206,7 @@ fn effective_addresses_keep_scales_base_index_and_signed_displacements() {
                 index: None,
                 scale: 1,
                 displacement: 0,
+                ..Default::default()
             },
         ),
         (
@@ -213,6 +216,7 @@ fn effective_addresses_keep_scales_base_index_and_signed_displacements() {
                 index: None,
                 scale: 1,
                 displacement: 0,
+                ..Default::default()
             },
         ),
         (
@@ -222,6 +226,7 @@ fn effective_addresses_keep_scales_base_index_and_signed_displacements() {
                 index: None,
                 scale: 1,
                 displacement: 0,
+                ..Default::default()
             },
         ),
         (
@@ -231,6 +236,7 @@ fn effective_addresses_keep_scales_base_index_and_signed_displacements() {
                 index: Some(Register32::Ecx),
                 scale: 1,
                 displacement: 0,
+                ..Default::default()
             },
         ),
         (
@@ -240,6 +246,7 @@ fn effective_addresses_keep_scales_base_index_and_signed_displacements() {
                 index: Some(Register32::Ecx),
                 scale: 2,
                 displacement: 0,
+                ..Default::default()
             },
         ),
         (
@@ -249,6 +256,7 @@ fn effective_addresses_keep_scales_base_index_and_signed_displacements() {
                 index: Some(Register32::Ecx),
                 scale: 4,
                 displacement: 0,
+                ..Default::default()
             },
         ),
         (
@@ -258,6 +266,7 @@ fn effective_addresses_keep_scales_base_index_and_signed_displacements() {
                 index: Some(Register32::Ecx),
                 scale: 8,
                 displacement: 0,
+                ..Default::default()
             },
         ),
         (
@@ -267,6 +276,7 @@ fn effective_addresses_keep_scales_base_index_and_signed_displacements() {
                 index: Some(Register32::Ecx),
                 scale: 4,
                 displacement: (-8_i32) as u32,
+                ..Default::default()
             },
         ),
         (
@@ -276,6 +286,7 @@ fn effective_addresses_keep_scales_base_index_and_signed_displacements() {
                 index: None,
                 scale: 1,
                 displacement: u32::MAX,
+                ..Default::default()
             },
         ),
         (
@@ -285,6 +296,7 @@ fn effective_addresses_keep_scales_base_index_and_signed_displacements() {
                 index: None,
                 scale: 1,
                 displacement: (-128_i32) as u32,
+                ..Default::default()
             },
         ),
         (
@@ -294,6 +306,7 @@ fn effective_addresses_keep_scales_base_index_and_signed_displacements() {
                 index: None,
                 scale: 1,
                 displacement: 0x9234_5678,
+                ..Default::default()
             },
         ),
     ];

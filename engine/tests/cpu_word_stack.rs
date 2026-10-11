@@ -156,6 +156,7 @@ fn addresses() -> [(&'static [u8], EffectiveAddress); 13] {
         index,
         scale,
         displacement,
+        ..Default::default()
     };
     [
         (&[0x03], address(Some(Ebx), None, 1, 0)),
@@ -297,6 +298,7 @@ fn word_stack_memory_forms_and_original_esp_aliases_have_exact_ir() {
                         },
                         scale: 1 << (sib >> 6),
                         displacement: 0,
+                        ..Default::default()
                     },
                 ),
             );
@@ -309,6 +311,7 @@ fn word_stack_memory_forms_and_original_esp_aliases_have_exact_ir() {
                     index: None,
                     scale: 1,
                     displacement: 0xffff_fffe,
+                    ..Default::default()
                 },
             ),
             (
@@ -318,6 +321,7 @@ fn word_stack_memory_forms_and_original_esp_aliases_have_exact_ir() {
                     index: Some(Register32::Eax),
                     scale: 4,
                     displacement: 0,
+                    ..Default::default()
                 },
             ),
             (
@@ -327,6 +331,7 @@ fn word_stack_memory_forms_and_original_esp_aliases_have_exact_ir() {
                     index: None,
                     scale: 1,
                     displacement: 0,
+                    ..Default::default()
                 },
             ),
         ] {

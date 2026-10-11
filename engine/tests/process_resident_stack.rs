@@ -27,6 +27,7 @@ const EBX_ADDRESS: EffectiveAddress = EffectiveAddress {
     index: None,
     scale: 1,
     displacement: 0,
+    ..Default::default()
 };
 const FORMS: [(&[u8], Operation); 8] = [
     (
@@ -352,6 +353,7 @@ fn all_eight_families_register_aliases_immediates_and_memory_eas_admit_without_d
                         index: None,
                         scale: 1,
                         displacement: 0,
+                        ..Default::default()
                     },
                 ),
             );
@@ -382,6 +384,7 @@ fn all_eight_families_register_aliases_immediates_and_memory_eas_admit_without_d
                         index,
                         scale,
                         displacement,
+                        ..Default::default()
                     },
                 ),
             );

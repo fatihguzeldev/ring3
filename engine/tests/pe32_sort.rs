@@ -95,6 +95,7 @@ fn indirect_call(rva: u32) -> Operation {
             index: None,
             scale: 1,
             displacement: pe::ACTUAL_BASE + rva,
+            ..Default::default()
         })),
     }
 }
@@ -330,6 +331,7 @@ fn all_authored_entries_decode_disjoint_typed_blocks_with_unsigned_sort_branches
                 index: Some(Register32::Ecx),
                 scale: 4,
                 displacement: 0,
+                ..Default::default()
             }
         }
     );

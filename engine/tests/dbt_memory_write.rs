@@ -266,6 +266,7 @@ fn all_fifteen_forms_preserve_every_source_base_and_index_alias_including_esp() 
                         index: None,
                         scale: 1,
                         displacement: (-8_i32) as u32,
+                        ..Default::default()
                     },
                 )
             } else {
@@ -276,6 +277,7 @@ fn all_fifteen_forms_preserve_every_source_base_and_index_alias_including_esp() 
                         index: Some(register),
                         scale: 4,
                         displacement: (-8_i32) as u32,
+                        ..Default::default()
                     },
                 )
             };
@@ -287,6 +289,7 @@ fn all_fifteen_forms_preserve_every_source_base_and_index_alias_including_esp() 
                         index: None,
                         scale: 1,
                         displacement: (-32_i32) as u32,
+                        ..Default::default()
                     },
                 ),
                 (index_tail, index_address),
@@ -325,6 +328,7 @@ fn all_sign_extended_immediate_forms_decode_zero_and_both_sign_boundaries() {
                         index: Some(Register32::Ecx),
                         scale: 4,
                         displacement: (-128_i32) as u32,
+                        ..Default::default()
                     }),
                     source: Value32::Immediate(value),
                 },
@@ -344,6 +348,7 @@ fn all_fifteen_forms_keep_sib_scales_signed_displacements_and_absolute_top_words
         index,
         scale,
         displacement,
+        ..Default::default()
     };
     let cases: &[(&[u8], EffectiveAddress)] = &[
         (&[0x03], address(Some(Register32::Ebx), None, 1, 0)),
@@ -521,6 +526,7 @@ fn narrow_prefix_and_declared_span_errors_remain_precise() {
                     index: None,
                     scale: 1,
                     displacement: 0,
+                    ..Default::default()
                 };
                 let expected = match (kind, value) {
                     (BinaryKind::Or, Value32::Immediate(mask)) => {

@@ -363,7 +363,8 @@ fn all_eight_destinations_decode_and_admit_all_four_bound_paths_without_data() {
                             base: None,
                             index: None,
                             scale: 1,
-                            displacement: DATA + 0x10
+                            displacement: DATA + 0x10,
+                            ..Default::default()
                         },
                     }
                 );
@@ -420,6 +421,7 @@ fn original_parent_aliases_all_scales_and_signed_displacements_have_exact_descri
                 index: None,
                 scale: 1,
                 displacement: 0,
+                ..Default::default()
             },
         ),
         (
@@ -430,6 +432,7 @@ fn original_parent_aliases_all_scales_and_signed_displacements_have_exact_descri
                 index: None,
                 scale: 1,
                 displacement: 0,
+                ..Default::default()
             },
         ),
         (
@@ -440,6 +443,7 @@ fn original_parent_aliases_all_scales_and_signed_displacements_have_exact_descri
                 index: Some(Register32::Ecx),
                 scale: 4,
                 displacement: 0xffff_fffe,
+                ..Default::default()
             },
         ),
         (
@@ -450,6 +454,7 @@ fn original_parent_aliases_all_scales_and_signed_displacements_have_exact_descri
                 index: None,
                 scale: 1,
                 displacement: u32::MAX,
+                ..Default::default()
             },
         ),
         (
@@ -460,6 +465,7 @@ fn original_parent_aliases_all_scales_and_signed_displacements_have_exact_descri
                 index: Some(Register32::Ecx),
                 scale: 2,
                 displacement: 0xddbb_b980,
+                ..Default::default()
             },
         ),
         (
@@ -470,6 +476,7 @@ fn original_parent_aliases_all_scales_and_signed_displacements_have_exact_descri
                 index: Some(Register32::Eax),
                 scale: 8,
                 displacement: u32::MAX,
+                ..Default::default()
             },
         ),
         (
@@ -480,6 +487,7 @@ fn original_parent_aliases_all_scales_and_signed_displacements_have_exact_descri
                 index: None,
                 scale: 1,
                 displacement: u32::MAX,
+                ..Default::default()
             },
         ),
     ];

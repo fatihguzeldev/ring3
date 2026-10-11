@@ -69,6 +69,7 @@ fn decode_admission(opcode: u8) {
             index: None,
             scale: 1,
             displacement: 0,
+            ..Default::default()
         }
     );
     assert_eq!(
@@ -203,6 +204,7 @@ fn address_cases() -> [(&'static [u8], EffectiveAddress); 13] {
         index,
         scale,
         displacement,
+        ..Default::default()
     };
     [
         (&[0x03], address(Some(Ebx), None, 1, 0)),
@@ -290,6 +292,7 @@ fn word_memory_carry_store_source_can_alias_every_base_and_encodable_sib_index()
                     index: None,
                     scale: 1,
                     displacement: 0,
+                    ..Default::default()
                 },
             );
             rows += 1;
@@ -303,6 +306,7 @@ fn word_memory_carry_store_source_can_alias_every_base_and_encodable_sib_index()
                         index: Some(parent),
                         scale: 8,
                         displacement: u32::MAX,
+                        ..Default::default()
                     },
                 );
                 rows += 1;

@@ -31,6 +31,7 @@ fn original_fullmask_consumer_keeps_all_ten_instructions_and_three_literal_masks
         index: None,
         scale: 1,
         displacement: 0,
+        ..Default::default()
     };
     let mut logical_operations = 0;
     for pair in starts.windows(2) {

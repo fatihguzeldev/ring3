@@ -121,6 +121,7 @@ fn address(
         index,
         scale,
         displacement,
+        ..Default::default()
     }
 }
 
@@ -549,6 +550,7 @@ fn raw_byte_carry_immediate_domain_and_strict_neighbors_preserve_decode_boundari
         index: None,
         scale: 1,
         displacement: 0,
+        ..Default::default()
     };
     let mut neighbors = 0;
     for (field, kind) in [(0, RotateKind::Left), (1, RotateKind::Right)] {

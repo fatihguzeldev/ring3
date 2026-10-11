@@ -242,6 +242,7 @@ fn all_four_decoded_unary_forms_and_old_eas_admit_without_readable_code_or_data(
                     index: None,
                     scale: 1,
                     displacement: 0,
+                    ..Default::default()
                 },
             );
         }
@@ -261,6 +262,7 @@ fn all_four_decoded_unary_forms_and_old_eas_admit_without_readable_code_or_data(
                     index,
                     scale,
                     displacement,
+                    ..Default::default()
                 },
             );
         }

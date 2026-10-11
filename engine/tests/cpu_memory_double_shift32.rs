@@ -85,6 +85,7 @@ fn shapes() -> Vec<Shape> {
                 index: None,
                 scale: 1,
                 displacement: DATA + 0x10,
+                ..Default::default()
             },
         },
         Shape {
@@ -95,6 +96,7 @@ fn shapes() -> Vec<Shape> {
                 index: None,
                 scale: 1,
                 displacement: 0,
+                ..Default::default()
             },
         },
         Shape {
@@ -105,6 +107,7 @@ fn shapes() -> Vec<Shape> {
                 index: None,
                 scale: 1,
                 displacement: 8,
+                ..Default::default()
             },
         },
         Shape {
@@ -115,6 +118,7 @@ fn shapes() -> Vec<Shape> {
                 index: None,
                 scale: 1,
                 displacement: 0,
+                ..Default::default()
             },
         },
         Shape {
@@ -125,6 +129,7 @@ fn shapes() -> Vec<Shape> {
                 index: None,
                 scale: 1,
                 displacement: 0xffff_ff80,
+                ..Default::default()
             },
         },
         Shape {
@@ -135,6 +140,7 @@ fn shapes() -> Vec<Shape> {
                 index: Some(Register32::Ecx),
                 scale: 4,
                 displacement: 0xffff_fff0,
+                ..Default::default()
             },
         },
         Shape {
@@ -145,6 +151,7 @@ fn shapes() -> Vec<Shape> {
                 index: Some(Register32::Edx),
                 scale: 8,
                 displacement: 0xffff_fff8,
+                ..Default::default()
             },
         },
     ]

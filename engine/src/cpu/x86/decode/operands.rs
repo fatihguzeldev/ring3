@@ -75,6 +75,7 @@ pub(super) fn effective_address(
         index,
         scale: scale as u8,
         displacement: instruction.memory_displacement32(),
+        ..Default::default()
     })
 }
 

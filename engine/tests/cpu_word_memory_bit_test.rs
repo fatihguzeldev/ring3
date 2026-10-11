@@ -170,6 +170,7 @@ fn addresses() -> [(&'static [u8], EffectiveAddress); 13] {
         index,
         scale,
         displacement,
+        ..Default::default()
     };
     [
         (&[0x03], address(Some(Ebx), None, 1, 0)),
@@ -308,6 +309,7 @@ fn word_memory_bit_test_raw_indexes_and_prefix_looking_address_payloads_stay_lit
                         index: Some(Register32::Ecx),
                         scale: 4,
                         displacement: 0,
+                        ..Default::default()
                     },
                     index,
                 ),
@@ -319,6 +321,7 @@ fn word_memory_bit_test_raw_indexes_and_prefix_looking_address_payloads_stay_lit
                     index: (index_field != 4).then(|| REGISTERS[usize::from(index_field)]),
                     scale: 1 << (sib >> 6),
                     displacement: 0xffff_ff80,
+                    ..Default::default()
                 };
                 assert_operation(
                     &encoded(opcode, extension, index, &[0x44, sib, 0x80]),
@@ -336,6 +339,7 @@ fn word_memory_bit_test_raw_indexes_and_prefix_looking_address_payloads_stay_lit
                     index: Some(Register32::Eax),
                     scale: 4,
                     displacement: 0,
+                    ..Default::default()
                 },
                 index,
             ),

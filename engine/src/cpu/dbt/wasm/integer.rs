@@ -127,6 +127,7 @@ pub(super) fn instruction(
                     index: None,
                     scale: 1,
                     displacement: 0,
+                    ..Default::default()
                 },
                 SmallWidth::Byte,
                 imports,
@@ -140,6 +141,7 @@ pub(super) fn instruction(
                     index: None,
                     scale: 1,
                     displacement: 0,
+                    ..Default::default()
                 },
                 imports,
                 exit_depth,
@@ -167,6 +169,7 @@ pub(super) fn instruction(
                     index: None,
                     scale: 1,
                     displacement: 0,
+                    ..Default::default()
                 },
                 SmallWidth::Word,
                 imports,
@@ -180,6 +183,7 @@ pub(super) fn instruction(
                     index: None,
                     scale: 1,
                     displacement: 0,
+                    ..Default::default()
                 },
                 imports,
                 exit_depth,
@@ -196,6 +200,7 @@ pub(super) fn instruction(
                     index: None,
                     scale: 1,
                     displacement: 0,
+                    ..Default::default()
                 },
                 imports,
                 exit_depth,
@@ -207,6 +212,7 @@ pub(super) fn instruction(
                     index: None,
                     scale: 1,
                     displacement: 0,
+                    ..Default::default()
                 },
                 imports,
                 exit_depth,
@@ -234,6 +240,7 @@ pub(super) fn instruction(
                     index: None,
                     scale: 1,
                     displacement: 0,
+                    ..Default::default()
                 },
                 SmallWidth::Byte,
                 imports,
@@ -250,6 +257,7 @@ pub(super) fn instruction(
                     index: None,
                     scale: 1,
                     displacement: 0,
+                    ..Default::default()
                 },
                 SmallWidth::Word,
                 imports,
@@ -270,6 +278,7 @@ pub(super) fn instruction(
                     index: None,
                     scale: 1,
                     displacement: 0,
+                    ..Default::default()
                 },
                 imports,
                 exit_depth,
@@ -297,6 +306,7 @@ pub(super) fn instruction(
                     index: None,
                     scale: 1,
                     displacement: 0,
+                    ..Default::default()
                 },
                 imports,
                 exit_depth,
@@ -313,6 +323,7 @@ pub(super) fn instruction(
                     index: None,
                     scale: 1,
                     displacement: 0,
+                    ..Default::default()
                 },
                 imports,
                 exit_depth,
@@ -332,6 +343,7 @@ pub(super) fn instruction(
                     index: None,
                     scale: 1,
                     displacement: 0,
+                    ..Default::default()
                 },
                 imports,
                 exit_depth,
@@ -347,6 +359,7 @@ pub(super) fn instruction(
                     index: None,
                     scale: 1,
                     displacement: 0,
+                    ..Default::default()
                 },
                 SmallWidth::Byte,
                 imports,
@@ -360,6 +373,7 @@ pub(super) fn instruction(
                     index: None,
                     scale: 1,
                     displacement: 0,
+                    ..Default::default()
                 },
                 SmallWidth::Byte,
                 imports,
@@ -387,6 +401,7 @@ pub(super) fn instruction(
                     index: None,
                     scale: 1,
                     displacement: 0,
+                    ..Default::default()
                 },
                 SmallWidth::Byte,
                 imports,
@@ -412,6 +427,7 @@ pub(super) fn instruction(
                     index: None,
                     scale: 1,
                     displacement: 0,
+                    ..Default::default()
                 },
                 SmallWidth::Word,
                 imports,
@@ -425,6 +441,7 @@ pub(super) fn instruction(
                     index: None,
                     scale: 1,
                     displacement: 0,
+                    ..Default::default()
                 },
                 SmallWidth::Word,
                 imports,
@@ -452,6 +469,7 @@ pub(super) fn instruction(
                     index: None,
                     scale: 1,
                     displacement: 0,
+                    ..Default::default()
                 },
                 SmallWidth::Word,
                 imports,
@@ -479,6 +497,7 @@ pub(super) fn instruction(
                     index: None,
                     scale: 1,
                     displacement: 0,
+                    ..Default::default()
                 },
                 imports,
                 exit_depth,
@@ -492,6 +511,7 @@ pub(super) fn instruction(
                     index: None,
                     scale: 1,
                     displacement: 0,
+                    ..Default::default()
                 },
                 imports,
                 exit_depth,
@@ -515,6 +535,7 @@ pub(super) fn instruction(
                     index: None,
                     scale: 1,
                     displacement: 0,
+                    ..Default::default()
                 },
                 imports,
                 exit_depth,
@@ -2372,6 +2393,7 @@ pub(super) fn instruction(
                     index: None,
                     scale: 1,
                     displacement: (-4_i32) as u32,
+                    ..Default::default()
                 },
                 Value32::Immediate(instruction.next_pc().0),
                 imports,
@@ -2394,6 +2416,7 @@ pub(super) fn instruction(
                     index: None,
                     scale: 1,
                     displacement: (-4_i32) as u32,
+                    ..Default::default()
                 },
                 Value32::Immediate(instruction.next_pc().0),
                 imports,
@@ -2419,6 +2442,7 @@ pub(super) fn instruction(
                     index: None,
                     scale: 1,
                     displacement: (-4_i32) as u32,
+                    ..Default::default()
                 },
                 source,
                 imports,
@@ -2451,6 +2475,7 @@ pub(super) fn instruction(
                     index: None,
                     scale: 1,
                     displacement: (-4_i32) as u32,
+                    ..Default::default()
                 },
                 imports,
                 exit_depth,
@@ -2498,6 +2523,7 @@ pub(super) fn instruction(
                     index: None,
                     scale: 1,
                     displacement: (-4_i32) as u32,
+                    ..Default::default()
                 },
                 Value32::Register(Register32::Ebp),
                 imports,
@@ -2530,6 +2556,7 @@ pub(super) fn instruction(
                     index: None,
                     scale: 1,
                     displacement: 0,
+                    ..Default::default()
                 },
                 imports,
                 exit_depth,
@@ -2549,6 +2576,7 @@ pub(super) fn instruction(
                     index: None,
                     scale: 1,
                     displacement: 0,
+                    ..Default::default()
                 },
                 SmallWidth::Word,
                 imports,
@@ -2575,6 +2603,7 @@ pub(super) fn instruction(
                     index: None,
                     scale: 1,
                     displacement: 0,
+                    ..Default::default()
                 },
                 SmallWidth::Word,
                 imports,

@@ -48,6 +48,7 @@ fn canonical_al_moffs_decode_and_bound_profiles_reuse_byte_operations() {
                         index: None,
                         scale: 1,
                         displacement: address,
+                        ..Default::default()
                     };
                     let expected = if opcode == 0xa0 {
                         Operation::LoadByte {

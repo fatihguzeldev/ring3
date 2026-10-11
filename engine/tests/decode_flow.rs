@@ -24,6 +24,7 @@ fn address(base: Option<Register32>, displacement: u32) -> EffectiveAddress {
         index: None,
         scale: 1,
         displacement,
+        ..Default::default()
     }
 }
 

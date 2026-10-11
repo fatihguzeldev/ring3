@@ -237,6 +237,7 @@ fn all_registers_and_eight_memory_eas_preserve_profiles_without_target_access() 
                 index,
                 scale,
                 displacement,
+                ..Default::default()
             }),
         );
     }

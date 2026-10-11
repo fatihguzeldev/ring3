@@ -302,7 +302,8 @@ fn all_byte_aliases_keep_cl_and_old_one_decode_identities_distinct() {
                     base: Some(Register32::Ebx),
                     index: None,
                     scale: 1,
-                    displacement: 0
+                    displacement: 0,
+                    ..Default::default()
                 },
                 count: ShiftCount::Cl,
             }

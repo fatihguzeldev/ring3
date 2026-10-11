@@ -157,6 +157,7 @@ fn address(
         index,
         scale,
         displacement,
+        ..Default::default()
     }
 }
 

@@ -33,6 +33,7 @@ fn original_dynamic_flags_consumer_keeps_all_fifteen_instructions_and_three_regi
         index: None,
         scale: 1,
         displacement: 0,
+        ..Default::default()
     };
     let mut logical_operations = 0;
     for pair in starts.windows(2) {

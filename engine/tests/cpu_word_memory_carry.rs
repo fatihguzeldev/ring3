@@ -159,6 +159,7 @@ fn addresses() -> [(&'static [u8], EffectiveAddress); 17] {
         index,
         scale,
         displacement,
+        ..Default::default()
     };
     [
         (&[0x00], address(Some(Eax), None, 1, 0)),
@@ -254,7 +255,8 @@ fn word_memory_carry_prefix_looking_displacements_are_payload() {
                     base: Some(Register32::Esp),
                     index: Some(Register32::Esi),
                     scale: 8,
-                    displacement: 0xf3f0_6766
+                    displacement: 0xf3f0_6766,
+                    ..Default::default()
                 }
             }
         );
@@ -356,6 +358,7 @@ fn word_memory_carry_complete_prefixes_and_adjacent_families_stay_closed() {
                     index: None,
                     scale: 1,
                     displacement: 0,
+                    ..Default::default()
                 },
             }
         );

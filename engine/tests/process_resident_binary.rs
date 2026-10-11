@@ -311,6 +311,7 @@ fn all_fifteen_forms_source_aliases_eas_and_sign_extended_immediates_admit_witho
                     index: None,
                     scale: 1,
                     displacement: 0,
+                    ..Default::default()
                 },
             );
         }
@@ -338,6 +339,7 @@ fn all_fifteen_forms_source_aliases_eas_and_sign_extended_immediates_admit_witho
                     index: None,
                     scale: 1,
                     displacement: 0,
+                    ..Default::default()
                 },
             );
         }
@@ -379,6 +381,7 @@ fn all_fifteen_forms_source_aliases_eas_and_sign_extended_immediates_admit_witho
                     index,
                     scale,
                     displacement,
+                    ..Default::default()
                 },
             );
         }
@@ -392,6 +395,7 @@ fn all_fifteen_forms_source_aliases_eas_and_sign_extended_immediates_admit_witho
                     index: None,
                     scale: 1,
                     displacement: 0,
+                    ..Default::default()
                 },
             );
         }

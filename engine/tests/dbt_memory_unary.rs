@@ -158,6 +158,7 @@ fn all_three_forms_admit_every_register_base_and_encodable_index_with_esp_no_ind
                         index: None,
                         scale: 1,
                         displacement: (-8_i32) as u32,
+                        ..Default::default()
                     },
                 )
             } else {
@@ -175,6 +176,7 @@ fn all_three_forms_admit_every_register_base_and_encodable_index_with_esp_no_ind
                         index: Some(register),
                         scale: 4,
                         displacement: (-8_i32) as u32,
+                        ..Default::default()
                     },
                 )
             };
@@ -186,6 +188,7 @@ fn all_three_forms_admit_every_register_base_and_encodable_index_with_esp_no_ind
                         index: None,
                         scale: 1,
                         displacement: (-32_i32) as u32,
+                        ..Default::default()
                     },
                 ),
                 (index_tail, index_address),
@@ -208,6 +211,7 @@ fn sib_scales_signed_displacements_and_absolute_top_words_compile_without_operan
         index,
         scale,
         displacement,
+        ..Default::default()
     };
     let cases: &[(&[u8], EffectiveAddress)] = &[
         (&[0x03], address(Some(Register32::Ebx), None, 1, 0)),

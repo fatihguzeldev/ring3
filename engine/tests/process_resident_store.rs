@@ -268,6 +268,7 @@ fn three_mov_forms_all_source_registers_and_aliasing_addresses_keep_other_profil
         index: None,
         scale: 1,
         displacement: 0,
+        ..Default::default()
     };
     for (index, register) in [Eax, Ecx, Edx, Ebx, Esp, Ebp, Esi, Edi]
         .into_iter()
@@ -286,6 +287,7 @@ fn three_mov_forms_all_source_registers_and_aliasing_addresses_keep_other_profil
             index: None,
             scale: 1,
             displacement: DATA,
+            ..Default::default()
         },
         Value32::Register(Eax),
     );
@@ -323,6 +325,7 @@ fn three_mov_forms_all_source_registers_and_aliasing_addresses_keep_other_profil
                 index,
                 scale,
                 displacement,
+                ..Default::default()
             },
             Value32::Register(Eax),
         );

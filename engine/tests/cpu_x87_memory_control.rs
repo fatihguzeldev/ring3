@@ -95,7 +95,8 @@ fn control_memory_decodes_standard_32_bit_effective_addresses() {
                     base,
                     index,
                     scale,
-                    displacement
+                    displacement,
+                    ..Default::default()
                 }
             }
         );

@@ -603,6 +603,7 @@ pub(super) fn push_memory(
             index: None,
             scale: 1,
             displacement: (-4_i32) as u32,
+            ..Default::default()
         },
         imports,
         exit_depth,
@@ -625,6 +626,7 @@ pub(super) fn pop_memory(
             index: None,
             scale: 1,
             displacement: 0,
+            ..Default::default()
         },
         imports,
         exit_depth,
@@ -648,6 +650,7 @@ pub(super) fn push_word_result(code: &mut InstructionSink<'_>, imports: Imports,
             index: None,
             scale: 1,
             displacement: (-2_i32) as u32,
+            ..Default::default()
         },
         imports,
         exit_depth,
@@ -669,6 +672,7 @@ pub(super) fn pop_word_register(
             index: None,
             scale: 1,
             displacement: 0,
+            ..Default::default()
         },
         SmallWidth::Word,
         imports,
@@ -704,6 +708,7 @@ pub(super) fn pop_word_memory(
             index: None,
             scale: 1,
             displacement: 0,
+            ..Default::default()
         },
         SmallWidth::Word,
         imports,
@@ -789,6 +794,7 @@ pub(super) fn pop_register(
             index: None,
             scale: 1,
             displacement: 0,
+            ..Default::default()
         },
         destination,
         imports,
@@ -827,6 +833,7 @@ pub(super) fn pop_all(
             index: None,
             scale: 1,
             displacement: slot * width,
+            ..Default::default()
         };
         if word {
             load_narrow_value(code, source, SmallWidth::Word, imports, exit_depth);

@@ -304,6 +304,7 @@ fn excluded_byte_forms_and_supported_neighbors_keep_exact_ir_boundaries() {
         index: None,
         scale: 1,
         displacement: 0,
+        ..Default::default()
     };
     let mut neighbors = 0;
     for (field, kind) in [(0, RotateKind::Left), (1, RotateKind::Right)] {
