@@ -93,7 +93,7 @@ fn source() -> EngineInstance {
     engine.protect(CODE, 1, 4).unwrap();
     let arena = engine.arena_mut().unwrap();
     assert_eq!(arena.len(), ARENA_SIZE);
-    assert_eq!(ARENA_SIZE, 4364);
+    assert_eq!(ARENA_SIZE, 4612);
     for index in 0..8 {
         let start = 16 + index * 4;
         let value = 0xa100_1234_u32.wrapping_add(index as u32 * 0x0001_0001);

@@ -113,7 +113,7 @@ fn actual_word_sbb_wraps_low16_and_publishes_six_flags() {
         save(&output.join(format!("{name}.x86")), &bytes);
     }
     let initial = EngineInstance::new(6, 0x574f_5244_5342_4221).unwrap();
-    assert_eq!(ARENA_SIZE, 4364);
+    assert_eq!(ARENA_SIZE, 4612);
     save(&output.join("initial-arena.bin"), initial.arena());
     let result = Command::new("node")
         .arg(root.join("engine/tests/fixtures/p2-word-sbb/run.mjs"))

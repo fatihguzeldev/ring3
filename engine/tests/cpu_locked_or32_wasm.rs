@@ -26,7 +26,7 @@ fn actual_locked_or32_executes_two_original_void_calls() {
     ));
     fs::create_dir_all(&output).unwrap();
     let mut initial = EngineInstance::new(1, 7).unwrap().arena().to_vec();
-    assert_eq!(ARENA_SIZE, 4364);
+    assert_eq!(ARENA_SIZE, 4612);
     initial[X87_OFFSET + 16..X87_OFFSET + 18].copy_from_slice(&0x027f_u16.to_le_bytes());
     initial[X87_OFFSET + 18..X87_OFFSET + 20].copy_from_slice(&0x81a5_u16.to_le_bytes());
     for (index, byte) in initial[X87_OFFSET + 40..X87_OFFSET + 120]

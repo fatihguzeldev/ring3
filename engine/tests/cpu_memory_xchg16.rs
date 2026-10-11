@@ -765,7 +765,7 @@ fn memory_xchg16_late_refusal_keeps_dirty_full_arena_and_both_existing_owners() 
             }
             describe(&mut engine, CODE, 10, entries);
             let before = engine.arena().to_vec();
-            assert_eq!(before.len(), 4364);
+            assert_eq!(before.len(), 4612);
             assert_eq!(
                 compile(&mut engine, is_resident, entries),
                 Err(if is_resident {

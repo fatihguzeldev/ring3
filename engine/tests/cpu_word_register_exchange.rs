@@ -453,7 +453,7 @@ fn word_register_exchange_late_refusal_preserves_full_arena_and_both_owners() {
     bytes.resize(256, 0x90);
     bytes.extend([0xeb, 0]);
     let mut engine = code(&bytes);
-    assert_eq!(engine.arena().len(), 4364);
+    assert_eq!(engine.arena().len(), 4612);
     let descriptor = &mut engine.arena_mut().unwrap()[TRANSFER_OFFSET..TRANSFER_OFFSET + 8];
     descriptor[..4].copy_from_slice(&(CODE + 256).to_le_bytes());
     descriptor[4..].copy_from_slice(&2_u32.to_le_bytes());

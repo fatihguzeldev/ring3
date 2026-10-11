@@ -1,0 +1,216 @@
+use super::{PackedKind as P, ShuffleKind as S};
+
+pub(super) fn unsigned(bytes: &[u8], offset: usize, width: usize) -> u64 {
+    let mut value = [0; 8];
+    value[..width].copy_from_slice(&bytes[offset..offset + width]);
+    u64::from_le_bytes(value)
+}
+
+pub(super) fn signed(value: u64, width: usize) -> i64 {
+    ((value << (64 - width * 8)) as i64) >> (64 - width * 8)
+}
+
+pub(super) fn put(bytes: &mut [u8], offset: usize, width: usize, value: u64) {
+    bytes[offset..offset + width].copy_from_slice(&value.to_le_bytes()[..width]);
+}
+
+pub(super) fn packed(
+    kind: P,
+    a: [u8; 16],
+    b: [u8; 16],
+    size: usize,
+    width: usize,
+    immediate: Option<u8>,
+) -> [u8; 16] {
+    let mut out = [0; 16];
+    let bits = width * 8;
+    let mask = u64::MAX >> (64 - bits);
+    let count = immediate
+        .map(u64::from)
+        .unwrap_or_else(|| unsigned(&b, 0, 8));
+    if kind == P::MultiplyUnsignedDword {
+        for offset in (0..size).step_by(8) {
+            put(
+                &mut out,
+                offset,
+                8,
+                unsigned(&a, offset, 4) * unsigned(&b, offset, 4),
+            );
+        }
+        return out;
+    }
+    if kind == P::MultiplyAddWords {
+        for offset in (0..size).step_by(4) {
+            let x = signed(unsigned(&a, offset, 2), 2) * signed(unsigned(&b, offset, 2), 2);
+            let y = signed(unsigned(&a, offset + 2, 2), 2) * signed(unsigned(&b, offset + 2, 2), 2);
+            put(&mut out, offset, 4, x.wrapping_add(y) as u64);
+        }
+        return out;
+    }
+    if kind == P::SumAbsoluteByteDifferences {
+        for offset in (0..size).step_by(8) {
+            let sum: u64 = (offset..offset + 8)
+                .map(|i| u64::from(a[i].abs_diff(b[i])))
+                .sum();
+            put(&mut out, offset, 8, sum);
+        }
+        return out;
+    }
+    for offset in (0..size).step_by(width) {
+        let x = unsigned(&a, offset, width);
+        let y = unsigned(&b, offset, width);
+        let sx = signed(x, width) as i128;
+        let sy = signed(y, width) as i128;
+        let min = -(1i128 << (bits - 1));
+        let max = (1i128 << (bits - 1)) - 1;
+        let result = match kind {
+            P::Add => x.wrapping_add(y),
+            P::Subtract => x.wrapping_sub(y),
+            P::AddSignedSaturate => (sx + sy).clamp(min, max) as u64,
+            P::SubtractSignedSaturate => (sx - sy).clamp(min, max) as u64,
+            P::AddUnsignedSaturate => x.saturating_add(y).min(mask),
+            P::SubtractUnsignedSaturate => x.saturating_sub(y),
+            P::And => x & y,
+            P::AndNot => !x & y,
+            P::Or => x | y,
+            P::Xor => x ^ y,
+            P::Equal => {
+                if x == y {
+                    mask
+                } else {
+                    0
+                }
+            }
+            P::GreaterSigned => {
+                if sx > sy {
+                    mask
+                } else {
+                    0
+                }
+            }
+            P::MultiplyLow => x.wrapping_mul(y),
+            P::MultiplyHighSigned => ((sx * sy) >> bits) as u64,
+            P::MultiplyHighUnsigned => ((u128::from(x) * u128::from(y)) >> bits) as u64,
+            P::AverageUnsigned => (x + y + 1) >> 1,
+            P::MinimumSigned => sx.min(sy) as u64,
+            P::MaximumSigned => sx.max(sy) as u64,
+            P::MinimumUnsigned => x.min(y),
+            P::MaximumUnsigned => x.max(y),
+            P::ShiftLeft => {
+                if count >= bits as u64 {
+                    0
+                } else {
+                    x << count
+                }
+            }
+            P::ShiftRight => {
+                if count >= bits as u64 {
+                    0
+                } else {
+                    x >> count
+                }
+            }
+            P::ShiftRightSigned => (sx >> count.min((bits - 1) as u64)) as u64,
+            P::MultiplyUnsignedDword | P::MultiplyAddWords | P::SumAbsoluteByteDifferences => {
+                unreachable!()
+            }
+        };
+        put(&mut out, offset, width, result);
+    }
+    out
+}
+
+pub(super) fn shuffle(
+    kind: S,
+    a: [u8; 16],
+    b: [u8; 16],
+    size: usize,
+    width: usize,
+    immediate: u8,
+) -> ([u8; 16], Option<u32>) {
+    let mut out = a;
+    match kind {
+        S::Dwords | S::Words => {
+            for i in 0..4 {
+                let source = usize::from((immediate >> (i * 2)) & 3) * width;
+                out[i * width..(i + 1) * width].copy_from_slice(&b[source..source + width]);
+            }
+        }
+        S::HighWords | S::LowWords => {
+            out = b;
+            let start = if kind == S::HighWords { 8 } else { 0 };
+            for i in 0..4 {
+                let source = start + usize::from((immediate >> (i * 2)) & 3) * 2;
+                out[start + i * 2..start + i * 2 + 2].copy_from_slice(&b[source..source + 2]);
+            }
+        }
+        S::Singles => {
+            for i in 0..4 {
+                let input = if i < 2 { &a } else { &b };
+                let source = usize::from((immediate >> (i * 2)) & 3) * 4;
+                out[i * 4..i * 4 + 4].copy_from_slice(&input[source..source + 4]);
+            }
+        }
+        S::Doubles => {
+            let first = usize::from(immediate & 1) * 8;
+            let second = usize::from((immediate >> 1) & 1) * 8;
+            out[..8].copy_from_slice(&a[first..first + 8]);
+            out[8..].copy_from_slice(&b[second..second + 8]);
+        }
+        S::UnpackLow | S::UnpackHigh => {
+            let start = if kind == S::UnpackHigh { size / 2 } else { 0 };
+            for i in 0..size / width / 2 {
+                let source = start + i * width;
+                out[i * width * 2..i * width * 2 + width]
+                    .copy_from_slice(&a[source..source + width]);
+                out[i * width * 2 + width..(i + 1) * width * 2]
+                    .copy_from_slice(&b[source..source + width]);
+            }
+        }
+        S::PackSigned | S::PackUnsigned => {
+            for i in 0..size / width {
+                let (input, index) = if i < size / width / 2 {
+                    (&a, i)
+                } else {
+                    (&b, i - size / width / 2)
+                };
+                let value = signed(unsigned(input, index * width * 2, width * 2), width * 2);
+                let value = if kind == S::PackUnsigned {
+                    value.clamp(0, (1i64 << (width * 8)) - 1)
+                } else {
+                    value.clamp(-(1i64 << (width * 8 - 1)), (1i64 << (width * 8 - 1)) - 1)
+                };
+                put(&mut out, i * width, width, value as u64);
+            }
+        }
+        S::ShiftBytesLeft | S::ShiftBytesRight => {
+            out = [0; 16];
+            let count = usize::from(immediate).min(size);
+            if kind == S::ShiftBytesLeft {
+                out[count..size].copy_from_slice(&a[..size - count]);
+            } else {
+                out[..size - count].copy_from_slice(&a[count..size]);
+            }
+        }
+        S::InsertWord => {
+            let offset = usize::from(immediate) % (size / 2) * 2;
+            out[offset..offset + 2].copy_from_slice(&b[..2]);
+        }
+        S::ExtractWord => {
+            return (
+                out,
+                Some(unsigned(&b, usize::from(immediate) % (size / 2) * 2, 2) as u32),
+            );
+        }
+        S::MaskBytes | S::MaskSingles | S::MaskDoubles => {
+            let mut mask = 0;
+            for i in 0..size / width {
+                mask |= u32::from(b[(i + 1) * width - 1] >> 7) << i;
+            }
+            return (out, Some(mask));
+        }
+        S::MoveLowToHigh => out[8..].copy_from_slice(&b[..8]),
+        S::MoveHighToLow => out[..8].copy_from_slice(&b[8..]),
+    }
+    (out, None)
+}

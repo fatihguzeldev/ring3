@@ -378,7 +378,7 @@ fn late_poison_after_full_immediate_preserves_both_published_owners_and_dirty_ar
             describe(&mut engine, CODE, 10, entries);
             let before = engine.arena().to_vec();
             let arena_pointer = engine.arena_address();
-            assert_eq!(before.len(), 4364);
+            assert_eq!(before.len(), 4612);
             assert_eq!(
                 compile(&mut engine, is_resident, entries),
                 Err(if is_resident {

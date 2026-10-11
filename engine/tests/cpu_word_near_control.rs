@@ -544,7 +544,7 @@ fn word_near_control_late_block_refusal_preserves_dirty_full_arena_and_both_owne
             }
             describe(&mut engine, &blocks, entries);
             let before = engine.arena().to_vec();
-            assert_eq!(before.len(), 4364);
+            assert_eq!(before.len(), 4612);
             assert_eq!(
                 compile(&mut engine, &blocks, is_resident, entries),
                 Err(if is_resident {

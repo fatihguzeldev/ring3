@@ -129,7 +129,7 @@ fn actual_word_or_xor_publish_low16_and_clear_logical_flags() {
         save(&output.join(format!("{name}.x86")), &bytes);
     }
     let initial = EngineInstance::new(12, 0x574f_5244_4f52_584f).unwrap();
-    assert_eq!(ARENA_SIZE, 4364);
+    assert_eq!(ARENA_SIZE, 4612);
     save(&output.join("initial-arena.bin"), initial.arena());
     let result = Command::new("node")
         .arg(root.join("engine/tests/fixtures/p2-word-or-xor/run.mjs"))

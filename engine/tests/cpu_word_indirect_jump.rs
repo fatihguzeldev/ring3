@@ -667,7 +667,7 @@ fn word_indirect_jump_late_refusal_preserves_dirty_full_arena_and_both_existing_
             }
             describe(&mut engine, &blocks, entries);
             let before = engine.arena().to_vec();
-            assert_eq!(before.len(), 4364);
+            assert_eq!(before.len(), 4612);
             assert_eq!(
                 bound_compile(&mut engine, &blocks, is_resident, entries),
                 Err(if is_resident {

@@ -71,7 +71,7 @@ fn actual_word_move_immediate_preserves_current_parent_and_flags() {
         save(&output.join(name), &bytes);
     }
     let initial = EngineInstance::new(3, 0x5749_4d4d_4544_0001).unwrap();
-    assert_eq!(ARENA_SIZE, 4364);
+    assert_eq!(ARENA_SIZE, 4612);
     save(&output.join("initial-arena.bin"), initial.arena());
     let result = Command::new("node")
         .arg(root.join("engine/tests/fixtures/p2-word-move-immediate/run.mjs"))

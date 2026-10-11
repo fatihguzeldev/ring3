@@ -579,7 +579,7 @@ fn dirty_input_arena(engine: &mut EngineInstance) {
 
     let arena = engine.arena_mut().unwrap();
     assert_eq!(arena.len(), ARENA_SIZE);
-    assert_eq!(ARENA_SIZE, 4364);
+    assert_eq!(ARENA_SIZE, 4612);
     arena[TRANSFER_OFFSET..TRANSFER_OFFSET + TRANSFER_SIZE].fill(0xd3);
     put32(arena, CANCEL_OFFSET, 1);
     put16(arena, X87_OFFSET + 16, 0x027f);
@@ -590,7 +590,7 @@ fn dirty_input_arena(engine: &mut EngineInstance) {
     {
         *byte = (index as u8).wrapping_mul(29).wrapping_add(17);
     }
-    crate::abi::x86::decode_x87(&arena[X87_OFFSET..]).unwrap();
+    crate::abi::x86::decode_x87(&arena[X87_OFFSET..X87_OFFSET + crate::abi::x86::X87_SIZE]).unwrap();
 }
 
 #[test]

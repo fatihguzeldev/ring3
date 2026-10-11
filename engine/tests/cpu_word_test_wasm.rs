@@ -81,7 +81,7 @@ fn actual_word_test_preserves_parents_and_publishes_width16_flags() {
         save(&output.join(format!("{name}.x86")), &bytes);
     }
     let initial = EngineInstance::new(4, 0x574f_5244_5445_5354).unwrap();
-    assert_eq!(ARENA_SIZE, 4364);
+    assert_eq!(ARENA_SIZE, 4612);
     save(&output.join("initial-arena.bin"), initial.arena());
     let result = Command::new("node")
         .arg(root.join("engine/tests/fixtures/p2-word-test/run.mjs"))

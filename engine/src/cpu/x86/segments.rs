@@ -47,5 +47,17 @@ impl SegmentState {
 
     pub fn is_valid(&self) -> bool {
         self.bases[..4].iter().all(|base| *base == 0)
+            && [SegmentRegister::Cs, SegmentRegister::Ss]
+                .into_iter()
+                .all(|segment| {
+                    let selector = self.selectors[segment.index()];
+                    selector & !3 != 0 && selector & 3 == 3
+                })
     }
 }
+mod descriptors;
+
+pub use descriptors::{
+    SegmentDescriptor, SegmentDescriptorKind, SegmentDescriptorTable, SegmentLoad,
+    SegmentLoadError, SegmentLoadFailure,
+};
