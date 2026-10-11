@@ -1,3 +1,5 @@
+#[path = "support/word_prefix.rs"]
+mod word_prefix;
 use iced_x86::{Code, Decoder, DecoderOptions};
 use ring3_engine::{
     abi::arena::{TRANSFER_OFFSET, TRANSFER_SIZE},
@@ -197,9 +199,11 @@ fn all_word_carry_parents_and_raw_count_bytes_keep_typed_identity() {
 #[test]
 fn word_carry_extra_prefixes_and_memory_neighbors_remain_precisely_closed() {
     let opcode_error = DecodeError::Unsupported(UnsupportedFeature::Opcode);
-    let segment_error = DecodeError::Unsupported(UnsupportedFeature::Segment);
     let mut memory = code_space(CODE, &[0x90]);
     let mut rejected = |bytes: &[u8], expected| {
+        if word_prefix::admit_if_new_prefix(bytes) {
+            return;
+        }
         memory.write(GuestAddress(CODE), bytes).unwrap();
         assert_eq!(
             decode_one(&memory, GuestAddress(CODE)).err(),
@@ -211,6 +215,10 @@ fn word_carry_extra_prefixes_and_memory_neighbors_remain_precisely_closed() {
         for opcode in [0xd1, 0xc1, 0xd3] {
             let bytes = encoding(kind, opcode, 1, 18);
             for prefix in [0x66, 0x67, 0xf2, 0xf3] {
+                if matches!(prefix, 0x67) {
+                    word_prefix::admitted(&[vec![prefix], bytes.clone()].concat());
+                    continue;
+                }
                 rejected(&[vec![prefix], bytes.clone()].concat(), opcode_error);
             }
             rejected(
@@ -218,7 +226,7 @@ fn word_carry_extra_prefixes_and_memory_neighbors_remain_precisely_closed() {
                 opcode_error,
             );
             for prefix in [0x26, 0x2e, 0x36, 0x3e, 0x64, 0x65] {
-                rejected(&[vec![prefix], bytes.clone()].concat(), segment_error);
+                word_prefix::admitted(&[vec![prefix], bytes.clone()].concat());
             }
             rejected(
                 &[vec![0xf0], bytes.clone()].concat(),

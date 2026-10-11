@@ -102,7 +102,8 @@ fn capture_legacy_arithmetic_and_checked_word_reads_without_guest_execution() {
     }
     let mut captures = Vec::new();
     let mut ordinal = 0;
-    let mut next_resident = 1;
+    let mut resident_count = 0;
+    let mut previous_resident = 0;
     for bank in legacy_arithmetic_banks() {
         for owner in ["replacement", "resident", "standalone"] {
             if owner == "standalone" && !bank.standalone {
@@ -136,9 +137,10 @@ fn capture_legacy_arithmetic_and_checked_word_reads_without_guest_execution() {
                         }
                         .unwrap()
                         .get();
-                        // this test is the only resident allocator in this integration binary.
-                        assert_eq!(id, next_resident);
-                        next_resident += 1;
+                        // ids are process-global, including other tests in an aggregate binary.
+                        assert!(id > previous_resident);
+                        previous_resident = id;
+                        resident_count += 1;
                         engine.guard_resident(key, id).unwrap();
                         (engine.resident_bytes(id).unwrap().to_vec(), id)
                     }
@@ -195,7 +197,7 @@ fn capture_legacy_arithmetic_and_checked_word_reads_without_guest_execution() {
             "\"kind\":\"x86\",\"instructions\":33,\"blocks\":1".to_owned(),
         ));
     }
-    assert_eq!((ordinal, next_resident, captures.len()), (18, 9, 22));
+    assert_eq!((ordinal, resident_count, captures.len()), (18, 8, 22));
     if let Some(directory) = directory {
         let mut files = Vec::new();
         for (name, bytes, metadata) in captures {
@@ -452,7 +454,7 @@ fn capture_word_memory_arithmetic_store_raw_inputs_without_compilation() {
     // this only obtains the default arena; it never allocates a resident unit.
     let engine = EngineInstance::new(1, LEGACY_KEY).unwrap();
     let initial = engine.arena().to_vec();
-    assert_eq!((bank.len(), data.len(), initial.len()), (4096, 4096, 4364));
+    assert_eq!((bank.len(), data.len(), initial.len()), (4096, 4096, 4612));
     assert_eq!(initial.len(), ARENA_SIZE);
     assert_eq!(&data[0xe00..0xe03], &[0x90, 0xeb, 0]);
     assert_eq!(
@@ -489,7 +491,7 @@ fn capture_word_memory_arithmetic_store_raw_inputs_without_compilation() {
             ));
         }
         let manifest = format!(
-            "{{\"schema_version\":1,\"raw_inputs_only\":true,\"groups\":[{}],\"files\":[{{\"file\":\"bank.x86\",\"bytes\":4096}},{{\"file\":\"data.bin\",\"bytes\":4096}},{{\"file\":\"initial-arena.bin\",\"bytes\":4364}}]}}\n",
+            "{{\"schema_version\":1,\"raw_inputs_only\":true,\"groups\":[{}],\"files\":[{{\"file\":\"bank.x86\",\"bytes\":4096}},{{\"file\":\"data.bin\",\"bytes\":4096}},{{\"file\":\"initial-arena.bin\",\"bytes\":4612}}]}}\n",
             rows.join(",")
         );
         for (name, bytes) in [

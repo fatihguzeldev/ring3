@@ -1,3 +1,5 @@
+#[path = "support/word_prefix.rs"]
+mod word_prefix;
 use ring3_engine::{
     abi::arena::TRANSFER_OFFSET,
     cpu::x86::decode::decode_one,
@@ -288,6 +290,19 @@ fn word_memory_arithmetic_store_complete_prefixes_and_adjacent_families_stay_clo
         }
         cases.push(([vec![0xf0], original].concat(), opcode));
         for (mut bytes, error) in cases {
+            if bytes.first() == Some(&0xf0) {
+                let (operation, _) = word_prefix::admitted(&bytes);
+                assert!(matches!(
+                    operation,
+                    Operation::AtomicMemory { width: 2, .. }
+                ));
+                rows += 1;
+                continue;
+            }
+            if word_prefix::admit_if_new_prefix(&bytes) {
+                rows += 1;
+                continue;
+            }
             bytes.extend([0xeb, 0]);
             let memory = code_space(CODE, &bytes);
             assert_eq!(
@@ -977,7 +992,6 @@ fn previous_owners() -> (EngineInstance, u64) {
 #[test]
 fn late_word_memory_arithmetic_store_failures_preserve_prior_publication_and_installed_keepers() {
     let opcode = DecodeError::Unsupported(UnsupportedFeature::Opcode);
-    let segment = DecodeError::Unsupported(UnsupportedFeature::Segment);
     let mut cases = vec![
         (
             CODE,
@@ -993,9 +1007,9 @@ fn late_word_memory_arithmetic_store_failures_preserve_prior_publication_and_ins
         ),
         (
             CODE,
-            vec![0x66, 0x01, 0x03, 0x64, 0x01, 0x03],
+            vec![0x66, 0x01, 0x03, 0x0f, 0x0b, 0x90],
             6,
-            instruction_error(CODE + 3, segment),
+            instruction_error(CODE + 3, opcode),
         ),
         (
             0x1ffb,

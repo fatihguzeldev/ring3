@@ -1,3 +1,5 @@
+#[path = "support/word_prefix.rs"]
+mod word_prefix;
 use ring3_engine::{
     abi::arena::TRANSFER_OFFSET,
     cpu::{
@@ -371,6 +373,10 @@ fn word_stack_prefix_lock_and_closed_stack_neighbors_remain_precise() {
                 [vec![prefix], bytes.clone()].concat(),
                 [vec![0x66, prefix], bytes[1..].to_vec()].concat(),
             ] {
+                if matches!(prefix, 0x67 | 0x26 | 0x2e | 0x36 | 0x3e | 0x64 | 0x65) {
+                    word_prefix::admitted(&prefixed);
+                    continue;
+                }
                 assert_eq!(
                     decode_one(&code_space(CODE, &prefixed), GuestAddress(CODE)).err(),
                     Some(expected),
@@ -383,7 +389,6 @@ fn word_stack_prefix_lock_and_closed_stack_neighbors_remain_precise() {
         &[0x66, 0x66, 0xc9][..],
         &[0x66, 0x66, 0x9c],
         &[0x66, 0x9d],
-        &[0x66, 0x60],
         &[0x66, 0x66, 0xff, 0xd0],
         &[0x66, 0x66, 0xff, 0xe0],
         &[0x66, 0xff, 0x1b],
@@ -395,17 +400,28 @@ fn word_stack_prefix_lock_and_closed_stack_neighbors_remain_precise() {
             "{bytes:02x?}"
         );
     }
+    let (push_all, length) = word_prefix::admitted(&[0x66, 0x60]);
+    assert_eq!(length, 2);
+    assert!(matches!(
+        push_all,
+        Operation::StackFrame {
+            kind: ring3_engine::cpu::x86::StackFrameKind::PushAll16,
+            allocation: 0,
+            nesting: 0
+        }
+    ));
     for bytes in [
         &[0x66, 0x06][..],
         &[0x66, 0x07],
         &[0x66, 0x0f, 0xa0],
         &[0x66, 0x0f, 0xa1],
     ] {
-        assert_eq!(
-            decode_one(&code_space(CODE, bytes), GuestAddress(CODE)).err(),
-            Some(DecodeError::Unsupported(UnsupportedFeature::Segment)),
-            "{bytes:02x?}"
-        );
+        let (operation, length) = word_prefix::admitted(bytes);
+        assert_eq!(length, bytes.len());
+        assert!(matches!(
+            operation,
+            Operation::PushSegment { word: true, .. } | Operation::PopSegment { word: true, .. }
+        ));
     }
     for bytes in [
         &[0x66, 0xff, 0xfb][..],

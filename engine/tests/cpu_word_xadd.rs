@@ -1,3 +1,5 @@
+#[path = "support/word_prefix.rs"]
+mod word_prefix;
 use ring3_engine::{
     abi::arena::TRANSFER_OFFSET,
     cpu::{
@@ -252,6 +254,18 @@ fn word_xadd_complete_memory_and_prefix_neighbors_keep_exact_error_categories() 
     }
     let mut rows = 0;
     for (mut bytes, error) in cases {
+        if matches!(bytes.as_slice(), [0x66, 0x0f, 0xc1, raw, ..] if raw & 0xc0 != 0xc0) {
+            let (operation, _) = word_prefix::admitted(&bytes);
+            assert!(
+                matches!(operation, Operation::MemoryExchangeAddWord { source, .. } if source == PARENTS[usize::from((bytes[3] >> 3) & 7)])
+            );
+            rows += 1;
+            continue;
+        }
+        if word_prefix::admit_if_new_prefix(&bytes) {
+            rows += 1;
+            continue;
+        }
         bytes.extend([0xeb, 0]);
         let memory = code_space(CODE, &bytes);
         assert_eq!(
@@ -681,13 +695,12 @@ fn previous_owners() -> (EngineInstance, u64) {
 #[test]
 fn late_word_xadd_refusals_and_caps_preserve_full_two_owner_publication() {
     let opcode = DecodeError::Unsupported(UnsupportedFeature::Opcode);
-    let segment = DecodeError::Unsupported(UnsupportedFeature::Segment);
     let first = encoding(1, 1);
     let mut cases = Vec::new();
     for (tail, error) in [
         (vec![0x0f, 0x0b], opcode),
         (vec![0x66, 0x66, 0x0f, 0xc1, 0xc8], opcode),
-        (vec![0x64, 0x66, 0x0f, 0xc1, 0xc8], segment),
+        (vec![0x0f, 0x0b, 0x90, 0x90, 0x90], opcode),
     ] {
         let bytes = [first.clone(), tail].concat();
         cases.push((

@@ -1,3 +1,5 @@
+#[path = "support/word_prefix.rs"]
+mod word_prefix;
 use ring3_engine::{
     abi::arena::TRANSFER_OFFSET,
     cpu::{
@@ -231,6 +233,10 @@ fn word_accumulator_extend_strict_prefixes_and_dword_neighbors_keep_categories()
                 _ => DecodeError::Unsupported(UnsupportedFeature::Opcode),
             };
             for bytes in [[prefix, 0x66, opcode], [0x66, prefix, opcode]] {
+                if matches!(prefix, 0x67 | 0x26 | 0x2e | 0x36 | 0x3e | 0x64 | 0x65) {
+                    word_prefix::admitted(&bytes);
+                    continue;
+                }
                 assert_eq!(
                     decode_one(&code_space(CODE, &bytes), GuestAddress(CODE)).err(),
                     Some(expected),

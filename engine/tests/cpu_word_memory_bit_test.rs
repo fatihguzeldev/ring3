@@ -1,3 +1,5 @@
+#[path = "support/word_prefix.rs"]
+mod word_prefix;
 use ring3_engine::{
     abi::arena::TRANSFER_OFFSET,
     cpu::{
@@ -358,6 +360,10 @@ fn word_memory_bit_test_prefixes_reserved_fields_and_admitted_neighbors_are_prec
             let bytes = encoded(opcode, extension, index, &[0x03]);
             for prefix in [0x66, 0x67, 0xf2, 0xf3, 0xf0] {
                 let prefixed = [vec![prefix], bytes.clone()].concat();
+                if prefix == 0x67 || prefix == 0xf0 && opcode != 0xa3 {
+                    word_prefix::admitted(&prefixed);
+                    continue;
+                }
                 assert_eq!(
                     decode_one(&code_space(CODE, &prefixed), GuestAddress(CODE)).err(),
                     Some(if prefix == 0xf0 && opcode == 0xa3 {
@@ -370,11 +376,7 @@ fn word_memory_bit_test_prefixes_reserved_fields_and_admitted_neighbors_are_prec
             }
             for prefix in [0x26, 0x2e, 0x36, 0x3e, 0x64, 0x65] {
                 let prefixed = [vec![prefix], bytes.clone()].concat();
-                assert_eq!(
-                    decode_one(&code_space(CODE, &prefixed), GuestAddress(CODE)).err(),
-                    Some(DecodeError::Unsupported(UnsupportedFeature::Segment)),
-                    "{prefixed:02x?}"
-                );
+                word_prefix::admitted(&prefixed);
             }
             let memory = code_space(CODE, &bytes[1..]);
             assert!(matches!(

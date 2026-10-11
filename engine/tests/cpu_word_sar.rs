@@ -1,3 +1,5 @@
+#[path = "support/word_prefix.rs"]
+mod word_prefix;
 use ring3_engine::{abi::arena::TRANSFER_OFFSET, process::EngineInstance};
 use std::{
     fs::{self, OpenOptions},
@@ -433,6 +435,10 @@ fn exact_sar_prefix_fetch_top_and_consumed_source_boundaries() {
         );
         for prefix in [0x66, 0x67, 0xf2, 0xf3] {
             let refused = [vec![prefix], bytes.clone()].concat();
+            if matches!(prefix, 0x67) {
+                word_prefix::admitted(&refused);
+                continue;
+            }
             assert_eq!(
                 decode_one(&memory(0x1000, &refused), GuestAddress(0x1000)).unwrap_err(),
                 DecodeError::Unsupported(UnsupportedFeature::Opcode)
@@ -445,10 +451,7 @@ fn exact_sar_prefix_fetch_top_and_consumed_source_boundaries() {
         );
         for prefix in [0x26, 0x2e, 0x36, 0x3e, 0x64, 0x65] {
             let segmented = [vec![prefix], bytes.clone()].concat();
-            assert_eq!(
-                decode_one(&memory(0x1000, &segmented), GuestAddress(0x1000)).unwrap_err(),
-                DecodeError::Unsupported(UnsupportedFeature::Segment)
-            );
+            word_prefix::admitted(&segmented);
         }
         for extension in [0, 1, 2, 3, 6, 7] {
             let modrm = if extension == 7 {

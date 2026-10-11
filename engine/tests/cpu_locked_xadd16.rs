@@ -1,3 +1,6 @@
+#[path = "support/prefix_admission.rs"]
+mod prefix_admission;
+
 use ring3_engine::{
     abi::arena::TRANSFER_OFFSET,
     cpu::x86::decode::decode_one,
@@ -457,7 +460,14 @@ fn locked_xadd16_strict_prefixes_widths_registers_and_neighbors_stay_closed() {
     }
     cases.insert(vec![0x66, 0xf0, 0x87, 0x03], opcode);
     cases.insert(vec![0xf0, 0x01, 0x03], opcode);
-    for (bytes, expected) in cases {
+    for (mut bytes, expected) in cases {
+        // address16 mod=00/rm=6 is disp16, rather than the old [ESI] base form.
+        if bytes[..bytes.len() - 3].contains(&0x67) && bytes.ends_with(&[0x0f, 0xc1, 0x0e]) {
+            bytes.extend([0, 0]);
+        }
+        if prefix_admission::admit_if_new_prefix(&bytes) {
+            continue;
+        }
         let engine = code(&bytes);
         let before = engine.arena().to_vec();
         assert_eq!(

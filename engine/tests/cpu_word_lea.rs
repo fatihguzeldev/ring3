@@ -1,3 +1,5 @@
+#[path = "support/word_prefix.rs"]
+mod word_prefix;
 use ring3_engine::{
     abi::arena::TRANSFER_OFFSET,
     cpu::{
@@ -298,6 +300,10 @@ fn word_lea_prefixes_register_sources_lock_and_dword_neighbors_stay_precise() {
                 [vec![prefix], bytes.clone()].concat(),
                 [vec![0x66, prefix], bytes[1..].to_vec()].concat(),
             ] {
+                if matches!(prefix, 0x67 | 0x26 | 0x2e | 0x36 | 0x3e | 0x64 | 0x65) {
+                    word_prefix::admitted(&prefixed);
+                    continue;
+                }
                 assert_eq!(
                     decode_one(&code_space(CODE, &prefixed), GuestAddress(CODE)).err(),
                     Some(expected),

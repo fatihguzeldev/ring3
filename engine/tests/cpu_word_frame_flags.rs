@@ -1,3 +1,5 @@
+#[path = "support/word_prefix.rs"]
+mod word_prefix;
 use ring3_engine::{
     abi::arena::TRANSFER_OFFSET,
     cpu::{
@@ -203,6 +205,10 @@ fn word_frame_flags_prefixes_lock_and_closed_stack_neighbors_stay_precise() {
                 _ => DecodeError::Unsupported(UnsupportedFeature::Opcode),
             };
             for bytes in [[prefix, 0x66, opcode], [0x66, prefix, opcode]] {
+                if matches!(prefix, 0x67 | 0x26 | 0x2e | 0x36 | 0x3e | 0x64 | 0x65) {
+                    word_prefix::admitted(&bytes);
+                    continue;
+                }
                 assert_eq!(
                     decode_one(&code_space(CODE, &bytes), GuestAddress(CODE)).err(),
                     Some(expected),
@@ -218,6 +224,12 @@ fn word_frame_flags_prefixes_lock_and_closed_stack_neighbors_stay_precise() {
         &[0x66, 0xc8, 1, 0, 0],
         &[0x66, 0x60],
     ] {
+        if matches!(bytes, [0xc8, ..] | [0x66, 0xc8, ..] | [0x66, 0x60]) {
+            let (operation, length) = word_prefix::admitted(bytes);
+            assert_eq!(length, bytes.len());
+            assert!(matches!(operation, Operation::StackFrame { .. }));
+            continue;
+        }
         assert_eq!(
             decode_one(&code_space(CODE, bytes), GuestAddress(CODE)).err(),
             Some(DecodeError::Unsupported(UnsupportedFeature::Opcode)),
@@ -230,11 +242,12 @@ fn word_frame_flags_prefixes_lock_and_closed_stack_neighbors_stay_precise() {
         &[0x66, 0x0f, 0xa0],
         &[0x66, 0x0f, 0xa1],
     ] {
-        assert_eq!(
-            decode_one(&code_space(CODE, bytes), GuestAddress(CODE)).err(),
-            Some(DecodeError::Unsupported(UnsupportedFeature::Segment)),
-            "{bytes:02x?}"
-        );
+        let (operation, length) = word_prefix::admitted(bytes);
+        assert_eq!(length, bytes.len());
+        assert!(matches!(
+            operation,
+            Operation::PushSegment { word: true, .. } | Operation::PopSegment { word: true, .. }
+        ));
     }
 }
 

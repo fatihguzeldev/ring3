@@ -1,3 +1,5 @@
+#[path = "support/word_prefix.rs"]
+mod word_prefix;
 use ring3_engine::{
     abi::arena::TRANSFER_OFFSET,
     cpu::{
@@ -8,8 +10,9 @@ use ring3_engine::{
         },
         x86::{
             Register32,
+            atomic::AtomicKind,
             decode::{DecodeError, decode_one},
-            ir::{BitIndex, BitTestKind, Operation},
+            ir::{AtomicSource, BitIndex, BitTestKind, Operation},
         },
     },
     memory::{
@@ -237,6 +240,10 @@ fn word_bit_test_prefixes_and_reserved_ba_fields_have_precise_categories() {
             ] {
                 for prefix in [0x66, 0x67, 0xf2, 0xf3, 0xf0] {
                     let prefixed = [vec![prefix], bytes.clone()].concat();
+                    if matches!(prefix, 0x67) {
+                        word_prefix::admitted(&prefixed);
+                        continue;
+                    }
                     assert_eq!(
                         decode_one(&code_space(CODE, &prefixed), GuestAddress(CODE)).err(),
                         Some(if prefix == 0xf0 {
@@ -249,11 +256,7 @@ fn word_bit_test_prefixes_and_reserved_ba_fields_have_precise_categories() {
                 }
                 for prefix in [0x26, 0x2e, 0x36, 0x3e, 0x64, 0x65] {
                     let prefixed = [vec![prefix], bytes.clone()].concat();
-                    assert_eq!(
-                        decode_one(&code_space(CODE, &prefixed), GuestAddress(CODE)).err(),
-                        Some(DecodeError::Unsupported(UnsupportedFeature::Segment)),
-                        "{prefixed:02x?}"
-                    );
+                    word_prefix::admitted(&prefixed);
                 }
                 let memory = code_space(CODE, &bytes[1..]);
                 assert!(matches!(
@@ -314,15 +317,40 @@ fn word_bit_test_duplicate_memory_prefixes_and_lock_categories_stay_precise() {
                     "{duplicate:02x?}"
                 );
                 let locked = [vec![0xf0], bytes].concat();
-                assert_eq!(
-                    decode_one(&code_space(CODE, &locked), GuestAddress(CODE)).err(),
-                    Some(if kind(opcode) == BitTestKind::Test {
-                        DecodeError::InvalidEncoding
-                    } else {
-                        DecodeError::Unsupported(UnsupportedFeature::Opcode)
-                    }),
-                    "{locked:02x?}"
-                );
+                if kind(opcode) == BitTestKind::Test {
+                    assert_eq!(
+                        decode_one(&code_space(CODE, &locked), GuestAddress(CODE)).err(),
+                        Some(DecodeError::InvalidEncoding),
+                        "{locked:02x?}"
+                    );
+                } else {
+                    let original =
+                        decode_one(&code_space(CODE, &locked[1..]), GuestAddress(CODE)).unwrap();
+                    let Operation::MemoryBitMutationWord { address, .. } = *original.operation()
+                    else {
+                        panic!("expected WORD memory bit mutation");
+                    };
+                    let (operation, length) = word_prefix::admitted(&locked);
+                    assert_eq!(
+                        operation,
+                        Operation::AtomicMemory {
+                            kind: match kind(opcode) {
+                                BitTestKind::Set => AtomicKind::BitSet,
+                                BitTestKind::Reset => AtomicKind::BitReset,
+                                BitTestKind::Complement => AtomicKind::BitComplement,
+                                BitTestKind::Test => unreachable!(),
+                            },
+                            width: 2,
+                            address,
+                            source: if immediate {
+                                AtomicSource::Immediate(0xf3)
+                            } else {
+                                AtomicSource::Register(Register32::Edx)
+                            },
+                        }
+                    );
+                    assert_eq!(length, locked.len());
+                }
                 rows += 1;
             }
         }

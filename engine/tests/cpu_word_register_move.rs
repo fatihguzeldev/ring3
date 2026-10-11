@@ -1,3 +1,5 @@
+#[path = "support/word_prefix.rs"]
+mod word_prefix;
 use ring3_engine::{abi::arena::TRANSFER_OFFSET, process::EngineInstance};
 
 const PC: u32 = 0x1000;
@@ -327,20 +329,16 @@ fn strict_prefix_byte_memory_and_address_neighbors_keep_current_categories() {
             vec![0x66, 0x66, opcode, 0x03],
             vec![0x66, 0x67, opcode, 0x43, 0],
         ] {
+            if word_prefix::admit_if_new_prefix(&bytes) {
+                continue;
+            }
             assert_eq!(
                 decode_one(fixture(PC, &bytes).memory().unwrap(), GuestAddress(PC)).err(),
                 Some(DecodeError::Unsupported(UnsupportedFeature::Opcode))
             );
         }
         for prefix in [0x26, 0x2e, 0x36, 0x3e, 0x64, 0x65] {
-            assert_eq!(
-                decode_one(
-                    fixture(PC, &[prefix, 0x66, opcode, 0xc3]).memory().unwrap(),
-                    GuestAddress(PC)
-                )
-                .err(),
-                Some(DecodeError::Unsupported(UnsupportedFeature::Segment))
-            );
+            word_prefix::admitted(&[prefix, 0x66, opcode, 0xc3]);
         }
         assert_eq!(
             decode_one(

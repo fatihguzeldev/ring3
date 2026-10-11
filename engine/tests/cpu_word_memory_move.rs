@@ -1,3 +1,5 @@
+#[path = "support/word_prefix.rs"]
+mod word_prefix;
 use ring3_engine::{
     abi::arena::TRANSFER_OFFSET,
     cpu::{
@@ -236,9 +238,11 @@ fn prefix_like_displacement_and_immediate_bytes_are_payload() {
 #[test]
 fn complete_prefix_and_adjacent_forms_preserve_precise_refusal_categories() {
     let opcode = DecodeError::Unsupported(UnsupportedFeature::Opcode);
-    let segment = DecodeError::Unsupported(UnsupportedFeature::Segment);
     let mut memory = code_space(CODE, &[0x90]);
     let mut rejected = |bytes: &[u8], expected| {
+        if word_prefix::admit_if_new_prefix(bytes) {
+            return;
+        }
         memory.write(GuestAddress(CODE), bytes).unwrap();
         assert_eq!(
             decode_one(&memory, GuestAddress(CODE)).err(),
@@ -252,11 +256,15 @@ fn complete_prefix_and_adjacent_forms_preserve_precise_refusal_categories() {
         instruction(0xc7, 0, &[0x03], Some(0x1234)),
     ] {
         for prefix in [0x66, 0x67, 0xf2, 0xf3] {
+            if matches!(prefix, 0x67) {
+                word_prefix::admitted(&[vec![prefix], bytes.clone()].concat());
+                continue;
+            }
             rejected(&[vec![prefix], bytes.clone()].concat(), opcode);
         }
         rejected(&[vec![0x66, 0x67], bytes[1..].to_vec()].concat(), opcode);
         for prefix in [0x26, 0x2e, 0x36, 0x3e, 0x64, 0x65] {
-            rejected(&[vec![prefix], bytes.clone()].concat(), segment);
+            word_prefix::admitted(&[vec![prefix], bytes.clone()].concat());
         }
         rejected(&[vec![0xf0], bytes].concat(), DecodeError::InvalidEncoding);
     }
@@ -273,7 +281,12 @@ fn complete_prefix_and_adjacent_forms_preserve_precise_refusal_categories() {
         rejected(bytes, opcode);
     }
     for bytes in [&[0x66, 0x8c, 0x03][..], &[0x66, 0x8e, 0x03]] {
-        rejected(bytes, segment);
+        let (operation, length) = word_prefix::admitted(bytes);
+        assert_eq!(length, 3);
+        assert!(matches!(
+            operation,
+            Operation::ReadSegment { word: true, .. } | Operation::LoadSegment { .. }
+        ));
     }
     for extension in 1..8 {
         rejected(

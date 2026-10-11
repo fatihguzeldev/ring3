@@ -1,3 +1,5 @@
+#[path = "support/word_prefix.rs"]
+mod word_prefix;
 use ring3_engine::{
     abi::arena::TRANSFER_OFFSET,
     memory::{Access, GuestAddress},
@@ -389,6 +391,10 @@ fn exact_test_prefix_fetch_and_consumed_source_currency() {
             ));
         }
         for prefix in [0x66, 0x67, 0xf2, 0xf3] {
+            if matches!(prefix, 0x67) {
+                word_prefix::admitted(&[vec![prefix], bytes.clone()].concat());
+                continue;
+            }
             assert_eq!(
                 decode_one(
                     &memory(0x1000, &[vec![prefix], bytes.clone()].concat()),
@@ -407,14 +413,7 @@ fn exact_test_prefix_fetch_and_consumed_source_currency() {
             DecodeError::InvalidEncoding
         );
         for prefix in [0x26, 0x2e, 0x36, 0x3e, 0x64, 0x65] {
-            assert_eq!(
-                decode_one(
-                    &memory(0x1000, &[vec![prefix], bytes.clone()].concat()),
-                    GuestAddress(0x1000)
-                )
-                .unwrap_err(),
-                DecodeError::Unsupported(UnsupportedFeature::Segment)
-            );
+            word_prefix::admitted(&[vec![prefix], bytes.clone()].concat());
         }
     }
     for bytes in [

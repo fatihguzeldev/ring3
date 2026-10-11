@@ -1,3 +1,5 @@
+#[path = "support/word_prefix.rs"]
+mod word_prefix;
 use ring3_engine::{
     abi::arena::TRANSFER_OFFSET,
     cpu::{
@@ -353,6 +355,10 @@ fn word_memory_immediate_arithmetic_store_prefixes_and_duplicate_prefix_logical_
             let bytes = instruction(opcode, extension, &[0x03], 0xffff);
             for prefix in [0x66, 0x67, 0xf0, 0xf2, 0xf3] {
                 let prefixed = [vec![prefix], bytes.clone()].concat();
+                if matches!(prefix, 0x67 | 0xf0) {
+                    word_prefix::admitted(&prefixed);
+                    continue;
+                }
                 assert_eq!(
                     decode_one(&code_space(CODE, &prefixed), GuestAddress(CODE)).err(),
                     Some(unsupported),
@@ -361,11 +367,7 @@ fn word_memory_immediate_arithmetic_store_prefixes_and_duplicate_prefix_logical_
             }
             for prefix in [0x26, 0x2e, 0x36, 0x3e, 0x64, 0x65] {
                 let prefixed = [vec![prefix], bytes.clone()].concat();
-                assert_eq!(
-                    decode_one(&code_space(CODE, &prefixed), GuestAddress(CODE)).err(),
-                    Some(DecodeError::Unsupported(UnsupportedFeature::Segment)),
-                    "{prefixed:02x?}"
-                );
+                word_prefix::admitted(&prefixed);
             }
         }
         for extension in [1, 4, 6] {

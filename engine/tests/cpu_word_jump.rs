@@ -1,3 +1,5 @@
+#[path = "support/word_prefix.rs"]
+mod word_prefix;
 use ring3_engine::{
     abi::arena::TRANSFER_OFFSET,
     cpu::{
@@ -250,6 +252,10 @@ fn word_jump_prefix_aliases_and_other_word_jump_families_remain_closed() {
             _ => opcode,
         };
         for bytes in [[prefix, 0x66, 0xe9, 0, 0], [0x66, prefix, 0xe9, 0, 0]] {
+            if matches!(prefix, 0x67 | 0x26 | 0x2e | 0x36 | 0x3e | 0x64 | 0x65) {
+                word_prefix::admitted(&bytes);
+                continue;
+            }
             assert_eq!(
                 decode_one(&code_space(CODE, &bytes), GuestAddress(CODE)).err(),
                 Some(expected),
@@ -664,6 +670,10 @@ fn word_jcc_strict_prefixes_short_count_neighbors_and_payloads_stay_distinct() {
                 [prefix, 0x66, 0x0f, near, 0, 0],
                 [0x66, prefix, 0x0f, near, 0, 0],
             ] {
+                if matches!(prefix, 0x67 | 0x26 | 0x2e | 0x36 | 0x3e | 0x64 | 0x65) {
+                    word_prefix::admitted(&bytes);
+                    continue;
+                }
                 assert_eq!(
                     decode_one(&code_space(CODE, &bytes), GuestAddress(CODE)).err(),
                     Some(expected),

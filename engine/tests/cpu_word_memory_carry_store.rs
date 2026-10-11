@@ -1,3 +1,5 @@
+#[path = "support/word_prefix.rs"]
+mod word_prefix;
 use ring3_engine::{
     abi::arena::TRANSFER_OFFSET,
     cpu::{
@@ -339,6 +341,19 @@ fn word_memory_carry_store_only_single_operand_override_and_flat32_are_open() {
             cases.push(([vec![prefix], original.to_vec()].concat(), segment_error));
         }
         for (mut bytes, error) in cases {
+            if bytes.first() == Some(&0xf0) {
+                let (operation, _) = word_prefix::admitted(&bytes);
+                assert!(matches!(
+                    operation,
+                    Operation::AtomicMemory { width: 2, .. }
+                ));
+                rows += 1;
+                continue;
+            }
+            if word_prefix::admit_if_new_prefix(&bytes) {
+                rows += 1;
+                continue;
+            }
             bytes.extend([0xeb, 0]);
             let memory = code_space(CODE, &bytes);
             assert_eq!(

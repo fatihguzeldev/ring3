@@ -1,3 +1,6 @@
+#[path = "support/prefix_admission.rs"]
+mod prefix_admission;
+
 use ring3_engine::{
     abi::arena::TRANSFER_OFFSET,
     cpu::{
@@ -508,6 +511,9 @@ fn memory_xchg16_exact_prefix_width_and_lock_boundaries_preserve_categories() {
     let mut unique = std::collections::BTreeSet::new();
     for (bytes, expected) in &cases {
         assert!(unique.insert(bytes.clone()), "{bytes:02x?}");
+        if prefix_admission::admit_if_new_prefix(&bytes) {
+            continue;
+        }
         let mut program = bytes.clone();
         program.extend([0xeb, 0]);
         let mut engine = code(&program);

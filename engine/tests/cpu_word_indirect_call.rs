@@ -1,3 +1,5 @@
+#[path = "support/word_prefix.rs"]
+mod word_prefix;
 use ring3_engine::{
     abi::arena::TRANSFER_OFFSET,
     cpu::{
@@ -388,6 +390,10 @@ fn word_indirect_call_prefixes_lock_and_adjacent_ff_groups_remain_precise() {
         for prefix in [
             0x66, 0x67, 0xf0, 0xf2, 0xf3, 0x26, 0x2e, 0x36, 0x3e, 0x64, 0x65,
         ] {
+            if matches!(prefix, 0x67 | 0x26 | 0x2e | 0x36 | 0x3e | 0x64 | 0x65) {
+                word_prefix::admitted(&[vec![prefix], form.to_vec()].concat());
+                continue;
+            }
             let expected = match prefix {
                 0xf0 => DecodeError::InvalidEncoding,
                 0x26 | 0x2e | 0x36 | 0x3e | 0x64 | 0x65 => {

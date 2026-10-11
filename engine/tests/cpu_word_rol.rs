@@ -246,6 +246,18 @@ fn word_rol_strict_fetch_top_and_consumed_currency_stay_exact() {
     for instruction in FORMS {
         for prefix in [0x66, 0x67, 0xf2, 0xf3, 0x64, 0xf0] {
             let bytes = [vec![prefix], instruction.to_vec()].concat();
+            if matches!(prefix, 0x67 | 0x64) {
+                let original = fixture(PC, instruction);
+                let prefixed = fixture(PC, &bytes);
+                let before = prefixed.arena().to_vec();
+                let expected = decode_one(original.memory().unwrap(), GuestAddress(PC)).unwrap();
+                let decoded = decode_one(prefixed.memory().unwrap(), GuestAddress(PC)).unwrap();
+                assert_eq!(decoded.operation(), expected.operation());
+                assert_eq!(decoded.length() as usize, instruction.len() + 1);
+                assert_eq!(decoded.next_pc(), GuestAddress(PC + bytes.len() as u32));
+                assert_eq!(prefixed.arena(), before);
+                continue;
+            }
             let expected = match prefix {
                 0x64 => DecodeError::Unsupported(UnsupportedFeature::Segment),
                 0xf0 => DecodeError::InvalidEncoding,
