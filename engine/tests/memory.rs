@@ -184,6 +184,105 @@ fn same_page_reads_and_fetches_accept_exact_page_and_final_address_widths() {
 }
 
 #[test]
+fn single_page_writes_need_only_write_permission_and_preserve_denied_pages() {
+    let mut space = AddressSpace::new(1).unwrap();
+    space
+        .map_zeroed(range(0x1000, 1), Permissions::ALL)
+        .unwrap();
+    let mut expected: Vec<u8> = (0..PAGE_SIZE)
+        .map(|index| (index as u8).wrapping_mul(29).wrapping_add(17))
+        .collect();
+    space.write(GuestAddress(0x1000), &expected).unwrap();
+    space
+        .protect(range(0x1000, 1), Permissions::from_bits(2).unwrap())
+        .unwrap();
+    space
+        .write(GuestAddress(0x1017), &[0x91, 0x82, 0x73, 0x64])
+        .unwrap();
+    expected[0x17..0x1b].copy_from_slice(&[0x91, 0x82, 0x73, 0x64]);
+
+    space.protect(range(0x1000, 1), Permissions::READ).unwrap();
+    let mut output = vec![0; PAGE_SIZE as usize];
+    space.read(GuestAddress(0x1000), &mut output).unwrap();
+    assert_eq!(output, expected);
+    assert_fault(
+        space.write(GuestAddress(0x1017), &[1, 2, 3, 4]),
+        0x1017,
+        Access::Write,
+        FaultReason::Permission,
+    );
+    space.read(GuestAddress(0x1000), &mut output).unwrap();
+    assert_eq!(output, expected);
+
+    space
+        .protect(range(0x1000, 1), Permissions::EXECUTE)
+        .unwrap();
+    let snapshot = space
+        .snapshot_code(GuestAddress(0x1000), PAGE_SIZE as usize)
+        .unwrap();
+    assert_fault(
+        space.write(GuestAddress(0x1017), &[1, 2, 3, 4]),
+        0x1017,
+        Access::Write,
+        FaultReason::Permission,
+    );
+    assert!(space.is_code_current(&snapshot));
+    space.fetch(GuestAddress(0x1000), &mut output).unwrap();
+    assert_eq!(output, expected);
+}
+
+#[test]
+fn same_page_writes_preserve_canaries_at_exact_page_and_final_address_widths() {
+    let mut space = AddressSpace::new(2).unwrap();
+    let pages = [0x1000_u32, 0xffff_f000];
+    let mut expected: Vec<Vec<u8>> = [17_u8, 73]
+        .into_iter()
+        .map(|seed| {
+            (0..PAGE_SIZE)
+                .map(|index| (index as u8).wrapping_mul(29).wrapping_add(seed))
+                .collect()
+        })
+        .collect();
+    for (index, &page) in pages.iter().enumerate() {
+        space.map_zeroed(range(page, 1), Permissions::ALL).unwrap();
+        space.write(GuestAddress(page), &expected[index]).unwrap();
+    }
+
+    for (index, &page) in pages.iter().enumerate() {
+        for width in [1_usize, 2, 4, 15, PAGE_SIZE as usize] {
+            let offset = PAGE_SIZE as usize - width;
+            let snapshot = space
+                .snapshot_code(GuestAddress(page), PAGE_SIZE as usize)
+                .unwrap();
+            let other_snapshot = space
+                .snapshot_code(GuestAddress(pages[1 - index]), PAGE_SIZE as usize)
+                .unwrap();
+            let input: Vec<u8> = (0..width)
+                .map(|at| {
+                    (at as u8)
+                        .wrapping_mul(7)
+                        .wrapping_add(width as u8)
+                        .wrapping_add(0x81)
+                })
+                .collect();
+            space
+                .write(GuestAddress(page + offset as u32), &input)
+                .unwrap();
+            expected[index][offset..].copy_from_slice(&input);
+            assert!(!space.is_code_current(&snapshot));
+            assert!(space.is_code_current(&other_snapshot));
+            for (observed_index, &observed_page) in pages.iter().enumerate() {
+                let mut output = vec![0; PAGE_SIZE as usize];
+                space
+                    .read(GuestAddress(observed_page), &mut output)
+                    .unwrap();
+                assert_eq!(output, expected[observed_index]);
+            }
+        }
+    }
+}
+
+#[test]
 fn unmapped_access_reports_the_requested_address_and_preserves_output() {
     let mut space = AddressSpace::new(1).unwrap();
     let mut output = [0x5a; 3];
@@ -336,6 +435,41 @@ fn address_overflow_faults_at_start_without_wrapping_or_mutation() {
     space.read(GuestAddress(u32::MAX), &mut last).unwrap();
     assert_eq!(first, [0x41]);
     assert_eq!(last, [0x42]);
+}
+
+#[test]
+fn write_overflow_precedes_unmapped_or_permission_faults_without_wrapping() {
+    let mut space = AddressSpace::new(2).unwrap();
+    space
+        .map_zeroed(range(0, 1), Permissions::READ_WRITE)
+        .unwrap();
+    space.write(GuestAddress(0), &[0x41, 0x42]).unwrap();
+    assert_fault(
+        space.write(GuestAddress(u32::MAX), &[1, 2]),
+        u32::MAX,
+        Access::Write,
+        FaultReason::AddressOverflow,
+    );
+
+    space
+        .map_zeroed(range(0xffff_f000, 1), Permissions::ALL)
+        .unwrap();
+    space.write(GuestAddress(u32::MAX), &[0x43]).unwrap();
+    space
+        .protect(range(0xffff_f000, 1), Permissions::READ)
+        .unwrap();
+    assert_fault(
+        space.write(GuestAddress(u32::MAX), &[1, 2]),
+        u32::MAX,
+        Access::Write,
+        FaultReason::AddressOverflow,
+    );
+    let mut first = [0; 2];
+    space.read(GuestAddress(0), &mut first).unwrap();
+    assert_eq!(first, [0x41, 0x42]);
+    let mut last = [0];
+    space.read(GuestAddress(u32::MAX), &mut last).unwrap();
+    assert_eq!(last, [0x43]);
 }
 
 #[test]
