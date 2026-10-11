@@ -227,6 +227,71 @@ fn unordered_cold_gates_match_existing_snapshot_and_executable_address_ownership
 }
 
 #[test]
+fn gate_only_units_lookup_unsigned_zero_and_top_entries_in_both_preparation_paths() {
+    let mut memory = AddressSpace::new(2).unwrap();
+    for base in [0, 0xffff_f000] {
+        memory
+            .map_zeroed(
+                PageRange::new(GuestAddress(base), 1).unwrap(),
+                Permissions::ALL,
+            )
+            .unwrap();
+    }
+    let entries = [GuestAddress(u32::MAX - 1), GuestAddress(0)];
+    let gates = [
+        GateSpec {
+            entry: entries[1],
+            id: 17,
+        },
+        GateSpec {
+            entry: entries[0],
+            id: 18,
+        },
+    ];
+    for entry in entries {
+        memory.write(entry, &[0x0f, 0x0b]).unwrap();
+    }
+    for cold in [false, true] {
+        let mut registry = registry(&memory);
+        let counter = AtomicU64::new(0x1_0000_0001);
+        let id = if cold {
+            compile(
+                &mut registry,
+                &memory,
+                &entries,
+                &gates,
+                CompileLimits::default(),
+                &counter,
+            )
+        } else {
+            registry.compile_bound_with_counter(
+                &memory,
+                &entries.map(|entry| BlockSpec {
+                    entry,
+                    byte_length: 2,
+                }),
+                &gates,
+                CompileLimits::default(),
+                KEY,
+                &counter,
+            )
+        }
+        .unwrap();
+        for entry in entries {
+            assert_eq!(registry.lookup(&memory, entry), Ok(id));
+        }
+        for pc in [1, 0x8000_0000, u32::MAX - 2, u32::MAX] {
+            assert_eq!(
+                registry.lookup(&memory, GuestAddress(pc)),
+                Err(RegistryError::NotFound {
+                    pc: GuestAddress(pc)
+                })
+            );
+        }
+    }
+}
+
+#[test]
 fn preparation_failures_leave_local_counter_and_retained_usage_unchanged() {
     let mut memory = memory();
     let unsupported = GuestAddress(0x2100);

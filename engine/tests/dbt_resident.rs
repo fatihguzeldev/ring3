@@ -199,6 +199,39 @@ fn two_units_keep_independent_ids_bytes_and_interior_lookup() {
 }
 
 #[test]
+fn unsigned_zero_and_final_instruction_starts_share_one_sparse_unit() {
+    let mut memory = AddressSpace::new(2).unwrap();
+    memory.map_zeroed(range(0), Permissions::ALL).unwrap();
+    memory
+        .map_zeroed(range(0xffff_f000), Permissions::ALL)
+        .unwrap();
+    memory
+        .write(GuestAddress(0), &[0xb8, 0x90, 0x90, 0x90, 0x90])
+        .unwrap();
+    memory.write(GuestAddress(u32::MAX), &[0x90]).unwrap();
+    let mut registry = ResidentRegistry::new(&memory, RegistryLimits::default()).unwrap();
+    let id = registry
+        .compile(
+            &memory,
+            &[spec(u32::MAX, 1), spec(0, 5)],
+            CompileLimits::default(),
+        )
+        .unwrap();
+
+    for pc in [0, u32::MAX] {
+        assert_eq!(registry.lookup(&memory, GuestAddress(pc)), Ok(id));
+    }
+    for pc in [1, 4, 5, 0x7fff_ffff, 0x8000_0000, u32::MAX - 1] {
+        assert_eq!(
+            registry.lookup(&memory, GuestAddress(pc)),
+            Err(RegistryError::NotFound {
+                pc: GuestAddress(pc)
+            })
+        );
+    }
+}
+
+#[test]
 fn registry_limits_accept_inclusive_boundaries_and_reject_outside_them() {
     let memory = memory();
     for limits in [
