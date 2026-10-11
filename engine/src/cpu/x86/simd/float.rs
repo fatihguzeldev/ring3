@@ -2,7 +2,7 @@ use super::packed::{put, unsigned};
 use super::{ConvertKind as C, FloatKind as F, SimdOperation};
 use rustc_apfloat::{
     Float, FloatConvert, Round, Status,
-    ieee::{Double, Single},
+    ieee::{Double, IeeeFloat, Semantics, Single},
 };
 
 fn rounding(mxcsr: u32) -> Round {
@@ -105,6 +105,57 @@ fn root(mut n: u128) -> (u128, u128) {
         bit >>= 2;
     }
     (result, n)
+}
+
+struct WideSingle;
+impl Semantics for WideSingle {
+    const BITS: usize = 39;
+    const EXP_BITS: usize = 15;
+}
+struct WideDouble;
+impl Semantics for WideDouble {
+    const BITS: usize = 68;
+    const EXP_BITS: usize = 15;
+}
+
+fn unbounded_tiny(kind: F, a: u64, b: u64, width: usize, round: Round) -> bool {
+    if !matches!(kind, F::Add | F::Subtract | F::Multiply | F::Divide) {
+        return false;
+    }
+    let mut loses = false;
+    if width == 4 {
+        let x: IeeeFloat<WideSingle> = Single::from_bits(a as u128)
+            .convert_r(round, &mut loses)
+            .value;
+        let y: IeeeFloat<WideSingle> = Single::from_bits(b as u128)
+            .convert_r(round, &mut loses)
+            .value;
+        let value = match kind {
+            F::Add => x.add_r(y, round),
+            F::Subtract => x.sub_r(y, round),
+            F::Multiply => x.mul_r(y, round),
+            F::Divide => x.div_r(y, round),
+            _ => unreachable!(),
+        }
+        .value;
+        value.is_finite_non_zero() && value.ilogb() < -126
+    } else {
+        let x: IeeeFloat<WideDouble> = Double::from_bits(a as u128)
+            .convert_r(round, &mut loses)
+            .value;
+        let y: IeeeFloat<WideDouble> = Double::from_bits(b as u128)
+            .convert_r(round, &mut loses)
+            .value;
+        let value = match kind {
+            F::Add => x.add_r(y, round),
+            F::Subtract => x.sub_r(y, round),
+            F::Multiply => x.mul_r(y, round),
+            F::Divide => x.div_r(y, round),
+            _ => unreachable!(),
+        }
+        .value;
+        value.is_finite_non_zero() && value.ilogb() < -1022
+    }
 }
 
 // integer radical rounding retains the exact remainder; no host floating point is used.
@@ -303,10 +354,18 @@ fn binary(
     if status & 5 != 0 {
         flags = 0;
     }
-    if denormal(result, width) {
-        if mxcsr & 0x800 == 0 {
+    let minimum_normal = if width == 4 {
+        0x0080_0000
+    } else {
+        0x0010_0000_0000_0000
+    };
+    let tiny =
+        result & !format(width).0 <= minimum_normal && unbounded_tiny(kind, a, b, width, round);
+    if tiny {
+        if mxcsr & 0x800 == 0 || status & 0x20 != 0 {
             status |= 0x10;
-        } else if mxcsr & 0x8000 != 0 {
+        }
+        if mxcsr & 0x800 != 0 && mxcsr & 0x8000 != 0 {
             result &= format(width).0;
             status |= 0x30;
         }
@@ -464,10 +523,15 @@ pub(super) fn convert(
                     Double::from_bits(raw as u128).convert_r(round, &mut loses);
                 let mut value = r.value.to_bits() as u64;
                 let mut status = exceptions(r.status) | if nan(raw, 8) { 0 } else { denormal_flag };
-                if denormal(value, 4) {
-                    if mxcsr & 0x800 == 0 {
+                let unbounded: IeeeFloat<WideSingle> = Double::from_bits(raw as u128)
+                    .convert_r(round, &mut loses)
+                    .value;
+                let tiny = unbounded.is_finite_non_zero() && unbounded.ilogb() < -126;
+                if tiny {
+                    if mxcsr & 0x800 == 0 || status & 0x20 != 0 {
                         status |= 0x10;
-                    } else if mxcsr & 0x8000 != 0 {
+                    }
+                    if mxcsr & 0x800 != 0 && mxcsr & 0x8000 != 0 {
                         value &= 0x8000_0000;
                         status |= 0x30;
                     }

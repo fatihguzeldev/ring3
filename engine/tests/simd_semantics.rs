@@ -171,6 +171,83 @@ fn unmasked_exception_priority_suppresses_lower_status_without_destination_commi
 }
 
 #[test]
+fn unbounded_tininess_survives_rounding_to_the_smallest_normal() {
+    for width in [4, 8] {
+        for (mxcsr, expected_mxcsr, zero, trap) in [
+            (0x1780, 0x1790, false, true),
+            (0x1f80, 0x1fb0, false, false),
+            (0x9f80, 0x9fb0, true, false),
+        ] {
+            let mut state = SimdState {
+                mxcsr,
+                ..SimdState::default()
+            };
+            let mut op = operation(K::Float(F::Multiply), width);
+            op.scalar = true;
+            if width == 4 {
+                state.xmm[0] = dwords([0x0080_0000, 1, 2, 3]);
+                state.xmm[1] = dwords([0x3f7f_ffff, 0, 0, 0]);
+            } else {
+                state.xmm[0][..8].copy_from_slice(&0x0010_0000_0000_0000u64.to_le_bytes());
+                state.xmm[1][..8].copy_from_slice(&0x3fef_ffff_ffff_ffffu64.to_le_bytes());
+                state.xmm[0][8..].fill(0xa5);
+            }
+            let before = state.xmm;
+            if trap {
+                assert_eq!(
+                    run(op, &mut state),
+                    Err(SimdError::FloatingPoint(expected_mxcsr))
+                );
+                assert_eq!(state.xmm, before);
+            } else {
+                run(op, &mut state).unwrap();
+                let mut wanted = before[0];
+                if zero {
+                    wanted[..usize::from(width)].fill(0);
+                }
+                assert_eq!(state.xmm[0], wanted);
+            }
+            assert_eq!(state.mxcsr, expected_mxcsr);
+        }
+    }
+    for (mxcsr, expected_mxcsr, zero, trap) in [
+        (0x1780, 0x1790, false, true),
+        (0x1f80, 0x1fb0, false, false),
+        (0x9f80, 0x9fb0, true, false),
+    ] {
+        let mut state = SimdState {
+            mxcsr,
+            ..SimdState::default()
+        };
+        state.xmm[0] = dwords([1, 2, 3, 4]);
+        state.xmm[1][..8].copy_from_slice(&0x380f_ffff_e000_0000u64.to_le_bytes());
+        let before = state.xmm;
+        let mut op = operation(
+            K::Convert {
+                kind: C::DoubleToSingle,
+                truncate: false,
+            },
+            4,
+        );
+        op.scalar = true;
+        if trap {
+            assert_eq!(
+                run(op, &mut state),
+                Err(SimdError::FloatingPoint(expected_mxcsr))
+            );
+            assert_eq!(state.xmm, before);
+        } else {
+            run(op, &mut state).unwrap();
+            assert_eq!(
+                state.xmm[0],
+                dwords([if zero { 0 } else { 0x0080_0000 }, 2, 3, 4])
+            );
+        }
+        assert_eq!(state.mxcsr, expected_mxcsr);
+    }
+}
+
+#[test]
 fn daz_ftz_minimum_and_compare_flags_follow_mxcsr() {
     let mut state = SimdState {
         mxcsr: 0x1fc0,
