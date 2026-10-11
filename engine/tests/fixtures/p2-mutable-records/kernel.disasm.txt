@@ -1,0 +1,46 @@
+
+kernel.obj:	file format coff-i386
+
+Disassembly of section .text:
+
+00000000 <_ring3_reduce>:
+       0: 55                           	push	ebp
+       1: 53                           	push	ebx
+       2: 57                           	push	edi
+       3: 56                           	push	esi
+       4: 8b 44 24 1c                  	mov	eax, dword ptr [esp + 0x1c]
+       8: 8b 4c 24 18                  	mov	ecx, dword ptr [esp + 0x18]
+       c: 85 c9                        	test	ecx, ecx
+       e: 74 50                        	je	0x60 <_ring3_reduce+0x60>
+      10: 31 f6                        	xor	esi, esi
+      12: c1 c0 05                     	rol	eax, 0x5
+      15: 8b 6c 24 14                  	mov	ebp, dword ptr [esp + 0x14]
+      19: 0f b6 5c f5 01               	movzx	ebx, byte ptr [ebp + 8*esi + 0x1]
+      1e: 30 c3                        	xor	bl, al
+      20: 89 c7                        	mov	edi, eax
+      22: c1 ef 10                     	shr	edi, 0x10
+      25: 66 03 7c f5 04               	add	di, word ptr [ebp + 8*esi + 0x4]
+      2a: 88 5c f5 01                  	mov	byte ptr [ebp + 8*esi + 0x1], bl
+      2e: 66 89 7c f5 04               	mov	word ptr [ebp + 8*esi + 0x4], di
+      33: 89 ca                        	mov	edx, ecx
+      35: 0f be 4c f5 00               	movsx	ecx, byte ptr [ebp + 8*esi]
+      3a: 0f bf 6c f5 02               	movsx	ebp, word ptr [ebp + 8*esi + 0x2]
+      3f: 0f af e9                     	imul	ebp, ecx
+      42: 89 e9                        	mov	ecx, ebp
+      44: 31 c1                        	xor	ecx, eax
+      46: 01 c5                        	add	ebp, eax
+      48: 0f b6 db                     	movzx	ebx, bl
+      4b: f6 c3 01                     	test	bl, 0x1
+      4e: 0f 45 e9                     	cmovne	ebp, ecx
+      51: 89 d1                        	mov	ecx, edx
+      53: 0f b7 c7                     	movzx	eax, di
+      56: 0f af c3                     	imul	eax, ebx
+      59: 01 e8                        	add	eax, ebp
+      5b: 46                           	inc	esi
+      5c: 39 f2                        	cmp	edx, esi
+      5e: 75 b2                        	jne	0x12 <_ring3_reduce+0x12>
+      60: 5e                           	pop	esi
+      61: 5f                           	pop	edi
+      62: 5b                           	pop	ebx
+      63: 5d                           	pop	ebp
+      64: c3                           	ret

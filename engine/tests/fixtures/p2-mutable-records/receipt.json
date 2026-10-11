@@ -1,0 +1,199 @@
+{
+  "artifacts": {
+    "builder_snapshot": {
+      "bytes": 5574,
+      "file": "build.py",
+      "sha256": "53a844cabb9ea0b29ba4bec0a28a34828b28120783c556a8b510ab185f7fef70"
+    },
+    "dependency_snapshot": {
+      "bytes": 10227,
+      "file": "compiled-records-build.py",
+      "sha256": "fe426f202b48664a87357c766d39099b9d35b5d8217c2b114696164a0d468258"
+    },
+    "disassembly": {
+      "bytes": 2407,
+      "file": "kernel.disasm.txt",
+      "sha256": "0661130734af67d3b4ee6750e2a6e44081d504fb96c239fb1a8d0f7fc15daa32"
+    },
+    "object": {
+      "bytes": 615,
+      "file": "kernel.obj",
+      "sha256": "fb681debc143a8375b30a045bbdcc9247420a25242628f5794834de60f89f635"
+    },
+    "source_snapshot": {
+      "bytes": 1700,
+      "file": "kernel.c",
+      "sha256": "b144696a2cb4fafc199beff9e1d13b921fa8cda115b4a74bf35275654ecf049b"
+    },
+    "text": {
+      "bytes": 101,
+      "file": "kernel.text.bin",
+      "sha256": "600b2c46774458e4e3b1b96f032270388195c0afa65b563c9c63731623e48c5a"
+    }
+  },
+  "builder": {
+    "bytes": 5574,
+    "file": "build.py",
+    "path": "/Users/fatihguzel/ring3/engine/tests/fixtures/p2-mutable-records/build.py",
+    "sha256": "53a844cabb9ea0b29ba4bec0a28a34828b28120783c556a8b510ab185f7fef70"
+  },
+  "coff": {
+    "characteristics": 0,
+    "external_symbols": [
+      "_ring3_reduce"
+    ],
+    "function": {
+      "entry_offset": 0,
+      "extent_basis": "single function through section end, including compiler padding",
+      "extent_end_offset": 101,
+      "symbol": "_ring3_reduce"
+    },
+    "machine": 332,
+    "relocations": 0,
+    "sections": [
+      {
+        "bytes": 101,
+        "characteristics": 1615855648,
+        "index": 1,
+        "name": ".text",
+        "raw_offset": 180
+      },
+      {
+        "bytes": 0,
+        "characteristics": 3224371264,
+        "index": 2,
+        "name": ".data",
+        "raw_offset": 281
+      },
+      {
+        "bytes": 0,
+        "characteristics": 3224371328,
+        "index": 3,
+        "name": ".bss",
+        "raw_offset": 0
+      },
+      {
+        "bytes": 100,
+        "characteristics": 1110442048,
+        "index": 4,
+        "name": ".debug$S",
+        "raw_offset": 281
+      }
+    ],
+    "symbol_count": 12,
+    "timestamp": 0
+  },
+  "command_cwd": "/Users/fatihguzel/ring3/target/engine-mutable-records-2026-10-11/build-1",
+  "commands": {
+    "compile": [
+      "/Library/Developer/CommandLineTools/usr/bin/clang",
+      "--target=i686-pc-windows-msvc",
+      "-std=c11",
+      "-O2",
+      "-ffreestanding",
+      "-fno-builtin",
+      "-fno-stack-protector",
+      "-fno-vectorize",
+      "-fno-slp-vectorize",
+      "-fno-unroll-loops",
+      "-falign-loops=1",
+      "-mno-sse",
+      "-mno-sse2",
+      "-mno-mmx",
+      "-mno-incremental-linker-compatible",
+      "-fno-unwind-tables",
+      "-fno-asynchronous-unwind-tables",
+      "-fno-addrsig",
+      "-c",
+      "kernel.c",
+      "-o",
+      "kernel.obj"
+    ],
+    "compiler_version": [
+      "/Library/Developer/CommandLineTools/usr/bin/clang",
+      "--version"
+    ],
+    "disassemble": [
+      "/Library/Developer/CommandLineTools/usr/bin/llvm-objdump",
+      "--disassemble",
+      "--section=.text",
+      "--x86-asm-syntax=intel",
+      "kernel.obj"
+    ],
+    "objdump_version": [
+      "/Library/Developer/CommandLineTools/usr/bin/llvm-objdump",
+      "--version"
+    ]
+  },
+  "compiler": {
+    "path": "/Library/Developer/CommandLineTools/usr/bin/clang",
+    "resolved_path": "/Library/Developer/CommandLineTools/usr/bin/clang",
+    "sha256": "f30550eab15fdf5ab8c0dc54c52679711241e5d4b636b027e18c09fef531775d",
+    "version": "Apple clang version 21.0.0 (clang-2100.1.1.101)\nTarget: arm64-apple-darwin25.6.0\nThread model: posix\nInstalledDir: /Library/Developer/CommandLineTools/usr/bin\n"
+  },
+  "dependency": {
+    "bytes": 10227,
+    "file": "build.py",
+    "path": "/Users/fatihguzel/ring3/engine/tests/fixtures/p2-compiled-records/build.py",
+    "sha256": "fe426f202b48664a87357c766d39099b9d35b5d8217c2b114696164a0d468258"
+  },
+  "environment": {
+    "LC_ALL": "C",
+    "PATH": "/usr/bin:/bin",
+    "SOURCE_DATE_EPOCH": "0",
+    "TZ": "UTC"
+  },
+  "objdump": {
+    "path": "/Library/Developer/CommandLineTools/usr/bin/llvm-objdump",
+    "resolved_path": "/Library/Developer/CommandLineTools/usr/bin/llvm-objdump",
+    "sha256": "1dcc1432db4d828cf8cd71a84cb8d9bf63a7ca80b5eeec711a9e5f13a3f5f98e",
+    "version": "Apple LLVM version 21.0.0\n  Optimized build.\n\n\n  Registered Targets:\n    aarch64    - AArch64 (little endian)\n    aarch64_32 - AArch64 (little endian ILP32)\n    aarch64_be - AArch64 (big endian)\n    arm        - ARM\n    arm64      - ARM64 (little endian)\n    arm64_32   - ARM64 (little endian ILP32)\n    armeb      - ARM (big endian)\n    thumb      - Thumb\n    thumbeb    - Thumb (big endian)\n    x86        - 32-bit X86: Pentium-Pro and above\n    x86-64     - 64-bit X86: EM64T and AMD64\n"
+  },
+  "profile": {
+    "commands_sha256": "79c2ea7d5cebe5fe255e4a851162d61d908c05a9c944a37248dc673ed4b1da6a",
+    "environment_sha256": "3f63d7e3b0a21504805e0ab6dc9eb036b99a7f11d936a8101e2a18bd21f0eea9",
+    "flags": [
+      "--target=i686-pc-windows-msvc",
+      "-std=c11",
+      "-O2",
+      "-ffreestanding",
+      "-fno-builtin",
+      "-fno-stack-protector",
+      "-fno-vectorize",
+      "-fno-slp-vectorize",
+      "-fno-unroll-loops",
+      "-falign-loops=1",
+      "-mno-sse",
+      "-mno-sse2",
+      "-mno-mmx",
+      "-mno-incremental-linker-compatible",
+      "-fno-unwind-tables",
+      "-fno-asynchronous-unwind-tables",
+      "-fno-addrsig"
+    ],
+    "flags_sha256": "a0a813000804f066540cab2fe1d439dbb61d3e6eff8ff180d027d79df2e98be1",
+    "hash_encoding": "utf8 JSON, sorted keys, compact separators"
+  },
+  "record": {
+    "bytes": 8,
+    "mutable_offsets": [
+      1,
+      4,
+      5
+    ],
+    "offsets": {
+      "marker": 6,
+      "signed_byte": 0,
+      "signed_word": 2,
+      "tag": 1,
+      "weight": 4
+    }
+  },
+  "schema": "ring3.mutable-records.v1",
+  "source": {
+    "bytes": 1700,
+    "file": "kernel.c",
+    "path": "/Users/fatihguzel/ring3/engine/tests/fixtures/p2-mutable-records/kernel.c",
+    "sha256": "b144696a2cb4fafc199beff9e1d13b921fa8cda115b4a74bf35275654ecf049b"
+  }
+}
