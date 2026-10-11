@@ -317,6 +317,18 @@ impl AddressSpace {
         Ok(old)
     }
 
+    /// returns the old byte and performs the write transaction even when the source is zero.
+    pub fn exchange_add8(&mut self, address: GuestAddress, source: u8) -> Result<u8, MemoryError> {
+        let mut bytes = [0; 1];
+        self.read(address, &mut bytes)?;
+        self.check_access(address, bytes.len(), Access::Write)?;
+        let old = bytes[0];
+        let value = old.wrapping_add(source);
+        let version = self.advance_version()?;
+        self.copy_in_validated(address, &[value], version);
+        Ok(old)
+    }
+
     pub fn write_words32(&mut self, words: &[WordWrite32]) -> Result<(), MemoryError> {
         if words.len() > MAX_WORD_WRITES32 {
             return Err(MemoryError::InvalidRange);
@@ -1869,6 +1881,118 @@ mod tests {
                             space.compare_exchange8(GuestAddress(0x3000), 1, 0xff),
                             Ok(0)
                         );
+                        assert_eq!(space.version, u64::MAX);
+                        assert_eq!(space.code_validation_version(), u64::MAX);
+                        assert!(!space.is_code_current(&snapshot));
+                    }
+                }
+            }
+        }
+    }
+    #[test]
+    fn byte_exchange_add_wrap_and_zero_use_one_final_version() {
+        for permissions in [Permissions::READ_WRITE, Permissions::ALL] {
+            for address in [0x1011, 0x1fff, u32::MAX] {
+                for (old, source, committed) in [
+                    (0x7f, 1, 0x80),
+                    (0xff, 1, 0),
+                    (0x80, 0x80, 0),
+                    (0x5a, 0, 0x5a),
+                ] {
+                    let mut space = AddressSpace::new(2).unwrap();
+                    space
+                        .map_zeroed(
+                            PageRange::new(GuestAddress(address & !0xfff), 1).unwrap(),
+                            permissions,
+                        )
+                        .unwrap();
+                    space
+                        .map_zeroed(
+                            PageRange::new(GuestAddress(0x3000), 1).unwrap(),
+                            Permissions::ALL,
+                        )
+                        .unwrap();
+                    space.write(GuestAddress(address), &[old]).unwrap();
+                    let consumed = permissions
+                        .allows(Access::Execute)
+                        .then(|| space.snapshot_code(GuestAddress(address), 1).unwrap());
+                    let unrelated = space.snapshot_code(GuestAddress(0x3000), 1).unwrap();
+                    space.version = u64::MAX - 1;
+                    let mut after = exchange_state(&space);
+                    let offset = space
+                        .resolve(GuestAddress(address), Access::Write)
+                        .unwrap()
+                        .0 as usize;
+                    after.backing[offset] = committed;
+                    let slot = space.mappings[(address / PAGE_SIZE) as usize] as usize - 1;
+                    after.versions[slot].content = u64::MAX;
+                    after.version = u64::MAX;
+                    if consumed.is_some() {
+                        after.code_version = u64::MAX;
+                    }
+                    assert_eq!(space.exchange_add8(GuestAddress(address), source), Ok(old));
+                    assert_eq!(exchange_state(&space), after);
+                    if let Some(snapshot) = consumed {
+                        assert!(!space.is_code_current(&snapshot));
+                    }
+                    assert!(space.is_code_current(&unrelated));
+                    for source in [0, 1] {
+                        assert_eq!(
+                            space.exchange_add8(GuestAddress(address), source),
+                            Err(MemoryError::VersionExhausted)
+                        );
+                        assert_eq!(exchange_state(&space), after);
+                        assert!(space.is_code_current(&unrelated));
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn byte_exchange_add_access_faults_precede_exhaustion_without_private_mutation() {
+        for version in [u64::MAX - 1, u64::MAX] {
+            for address in [0x1fff, u32::MAX] {
+                for bits in [None, Some(0), Some(1), Some(2), Some(4), Some(5), Some(6)] {
+                    let mut space = AddressSpace::new(2).unwrap();
+                    if let Some(bits) = bits {
+                        let range = PageRange::new(GuestAddress(address & !0xfff), 1).unwrap();
+                        space.map_zeroed(range, Permissions::ALL).unwrap();
+                        space.write(GuestAddress(address), &[0x5a]).unwrap();
+                        space
+                            .protect(range, Permissions::from_bits(bits).unwrap())
+                            .unwrap();
+                    }
+                    space
+                        .map_zeroed(
+                            PageRange::new(GuestAddress(0x3000), 1).unwrap(),
+                            Permissions::ALL,
+                        )
+                        .unwrap();
+                    let snapshot = space.snapshot_code(GuestAddress(0x3000), 1).unwrap();
+                    space.version = version;
+                    let before = exchange_state(&space);
+                    let (access, reason) = match bits {
+                        None => (Access::Read, FaultReason::Unmapped),
+                        Some(bits) => (
+                            if bits & 1 == 0 {
+                                Access::Read
+                            } else {
+                                Access::Write
+                            },
+                            FaultReason::Permission,
+                        ),
+                    };
+                    for source in [0, 1] {
+                        assert_eq!(
+                            space.exchange_add8(GuestAddress(address), source),
+                            Err(fault(GuestAddress(address), access, reason))
+                        );
+                        assert_eq!(exchange_state(&space), before);
+                        assert!(space.is_code_current(&snapshot));
+                    }
+                    if version == u64::MAX - 1 {
+                        assert_eq!(space.exchange_add8(GuestAddress(0x3000), 0), Ok(0));
                         assert_eq!(space.version, u64::MAX);
                         assert_eq!(space.code_validation_version(), u64::MAX);
                         assert!(!space.is_code_current(&snapshot));
