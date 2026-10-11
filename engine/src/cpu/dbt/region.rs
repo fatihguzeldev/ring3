@@ -489,6 +489,7 @@ fn supports_memory_binary(operation: &Operation) -> bool {
             | Operation::MemoryExchangeAddWord { .. }
             | Operation::MemoryExchangeAddByte { .. }
             | Operation::MemoryCompareExchange { .. }
+            | Operation::LockedMemoryCompareExchange32 { .. }
             | Operation::MemoryCompareExchangeWord { .. }
             | Operation::MemoryCompareExchangeByte { .. }
             | Operation::Binary {

@@ -1459,6 +1459,24 @@ pub(super) fn instruction(
                 .end();
             store = true;
         }
+        Operation::LockedMemoryCompareExchange32 { address, source } => {
+            code.local_get(register(Register32::Eax));
+            memory::compare_exchange_result(code, address, source, imports, exit_depth);
+            code.local_set(LHS)
+                .local_get(RESULT)
+                .local_set(RHS)
+                .local_get(LHS)
+                .local_get(RHS)
+                .i32_sub()
+                .local_set(RESULT);
+            arithmetic_flags(code, BinaryKind::Cmp, CarryFlag::Calculate, 31);
+            code.local_get(RESULT)
+                .if_(BlockType::Empty)
+                .local_get(RHS)
+                .local_set(register(Register32::Eax))
+                .end();
+            store = true;
+        }
         Operation::MemoryCompareExchange { address, source } => {
             memory::load_result(code, address, imports, exit_depth);
             code.local_get(register(Register32::Eax))

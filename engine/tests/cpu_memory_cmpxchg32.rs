@@ -423,6 +423,9 @@ fn byte_word_prefix_and_other_memory_exchange_refusals_keep_inputs_unchanged() {
         if prefix == 0x66 {
             bytes.insert(0, 0x66);
         }
+        if prefix == 0xf0 {
+            bytes.insert(0, 0xf0);
+        }
         cases.push((bytes, expected));
     }
     assert_eq!(cases.len(), 14);

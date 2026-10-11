@@ -97,6 +97,9 @@ pub(super) fn check_profile(instruction: &Instruction, bytes: &[u8]) -> Result<(
     {
         return Err(unsupported());
     }
+    let exact_locked_cmpxchg32 = instruction.code() == Code::Cmpxchg_rm32_r32
+        && instruction.op0_kind() == OpKind::Memory
+        && matches!(bytes, [0xf0, 0x0f, 0xb1, modrm, ..] if *modrm & 0xc0 != 0xc0);
     if instruction.is_string_instruction()
         && (instruction.has_rep_prefix() || instruction.has_repne_prefix())
     {
@@ -511,7 +514,7 @@ pub(super) fn check_profile(instruction: &Instruction, bytes: &[u8]) -> Result<(
             [0x66, 0x0f, 0x40..=0x4f, _, ..],
         )
     );
-    if instruction.has_lock_prefix()
+    if (instruction.has_lock_prefix() && !exact_locked_cmpxchg32)
         || instruction.has_rep_prefix()
         || instruction.has_repne_prefix()
         || (!(exact_alignment_nop
