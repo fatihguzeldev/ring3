@@ -24,7 +24,7 @@ pub(super) fn cpuid(code: &mut InstructionSink<'_>) {
     // a software cpu profile: fpu, tsc, cx8, cmov, mmx, fxsr, sse and sse2.
     code.i32_const(0x600)
         .local_set(register(Eax))
-        .i32_const((1 | 1 << 4 | 1 << 8 | 1 << 15 | 1 << 23 | 1 << 24 | 1 << 25 | 1 << 26) as i32)
+        .i32_const(1 | 1 << 4 | 1 << 8 | 1 << 15 | 1 << 23 | 1 << 24 | 1 << 25 | 1 << 26)
         .local_set(register(Edx));
     code.end().end();
 }

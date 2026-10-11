@@ -263,8 +263,8 @@ fn shuffle(code: &mut InstructionSink<'_>, op: SimdOperation, kind: S) {
             }
         }
         S::MoveHighToLow => {
-            for j in 0..8 {
-                lanes[j] = (24 + j) as u8;
+            for (j, lane) in lanes[..8].iter_mut().enumerate() {
+                *lane = (24 + j) as u8;
             }
         }
         _ => unreachable!(),

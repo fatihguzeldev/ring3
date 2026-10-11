@@ -29,6 +29,7 @@ impl EngineInstance {
         )
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn simd_execute_resident(
         &mut self,
         key: u64,

@@ -429,10 +429,11 @@ pub(super) fn evaluate(
                 if let Some(exponent) = exact.exponent() {
                     exact.set_exponent(exponent + 24576);
                 }
-            } else if range & value::UNDERFLOW != 0 && control & value::UNDERFLOW == 0 {
-                if let Some(exponent) = exact.exponent() {
-                    exact.set_exponent(exponent - 24576);
-                }
+            } else if range & value::UNDERFLOW != 0
+                && control & value::UNDERFLOW == 0
+                && let Some(exponent) = exact.exponent()
+            {
+                exact.set_exponent(exponent - 24576);
             }
             let equal_bounds = result.low.cmp(&result.high) == Some(0);
             if !equal_bounds

@@ -519,7 +519,7 @@ impl Ext80 {
         }
         let significand = fraction | if exponent != 0 { 1 << fraction_bits } else { 0 };
         let shift = significand.leading_zeros();
-        let unbiased = exponent.max(1) as i32 - ((1 << (exponent_bits - 1)) - 1) as i32 + 63
+        let unbiased = exponent.max(1) as i32 - ((1 << (exponent_bits - 1)) - 1) + 63
             - shift as i32
             - fraction_bits as i32;
         Self::from_parts(negative, (unbiased + 16383) as u16, significand << shift)
@@ -553,7 +553,7 @@ impl Ext80 {
                 significand,
                 exponent,
             } => {
-                let min = 1 - bias as i32;
+                let min = 1 - bias;
                 let mut exponent = exponent;
                 let mut extended = u128::from(significand) << 3;
                 let (unbounded, _, _) =
@@ -571,7 +571,7 @@ impl Ext80 {
                 }
                 let mut exceptions =
                     self.operand_exceptions() | if inexact { PRECISION } else { 0 };
-                if exponent > bias as i32 {
+                if exponent > bias {
                     exceptions |= OVERFLOW | PRECISION;
                     let infinity = mode == X87Rounding::Nearest
                         || (mode == X87Rounding::Up && !self.negative())
@@ -587,11 +587,7 @@ impl Ext80 {
                 if tiny && inexact {
                     exceptions |= UNDERFLOW;
                 }
-                let encoded_exponent = if normal {
-                    (exponent + bias as i32) as u64
-                } else {
-                    0
-                };
+                let encoded_exponent = if normal { (exponent + bias) as u64 } else { 0 };
                 (
                     sign | (encoded_exponent << fraction_bits)
                         | (significand as u64 & ((1 << fraction_bits) - 1)),
@@ -610,22 +606,21 @@ impl Ext80 {
     ) -> (u64, u16, bool) {
         let mode = X87Rounding::from_control(control);
         let (bits, mut exceptions, incremented) = self.to_ieee(exponent_bits, fraction_bits, mode);
-        if control & UNDERFLOW == 0 {
-            if let Kind::Finite {
+        if control & UNDERFLOW == 0
+            && let Kind::Finite {
                 significand,
                 exponent,
             } = self.kind()
-            {
-                let (rounded, _, _) = rounded_significand(
-                    u128::from(significand) << 3,
-                    66 - fraction_bits,
-                    self.negative(),
-                    mode,
-                );
-                let exponent = exponent + i32::from(rounded >= 1_u128 << (fraction_bits + 1));
-                if exponent < 2 - (1_i32 << (exponent_bits - 1)) {
-                    exceptions |= UNDERFLOW;
-                }
+        {
+            let (rounded, _, _) = rounded_significand(
+                u128::from(significand) << 3,
+                66 - fraction_bits,
+                self.negative(),
+                mode,
+            );
+            let exponent = exponent + i32::from(rounded >= 1_u128 << (fraction_bits + 1));
+            if exponent < 2 - (1_i32 << (exponent_bits - 1)) {
+                exceptions |= UNDERFLOW;
             }
         }
         (bits, exceptions, incremented)

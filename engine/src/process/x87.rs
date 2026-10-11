@@ -28,6 +28,7 @@ impl EngineInstance {
         self.x87_apply(None, operation, address, flags, pc, opcode, waiting)
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn x87_resident_op(
         &mut self,
         key: u64,
@@ -43,6 +44,7 @@ impl EngineInstance {
         self.x87_apply(Some(id), operation, address, flags, pc, opcode, waiting)
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn x87_apply(
         &mut self,
         resident: Option<u64>,
@@ -82,31 +84,29 @@ impl EngineInstance {
         };
         let mut input = [0; 108];
         let memory = self.memory.as_mut().ok_or(HostError::Closed)?;
-        if operation.read_size() != 0 {
-            if let Err(error) =
+        if operation.read_size() != 0
+            && let Err(error) =
                 memory.read(GuestAddress(address), &mut input[..operation.read_size()])
-            {
-                return self.x87_packet(
-                    length,
-                    0,
-                    Err(CpuMemoryError::Memory(error)),
-                    false,
-                    resident,
-                );
-            }
+        {
+            return self.x87_packet(
+                length,
+                0,
+                Err(CpuMemoryError::Memory(error)),
+                false,
+                resident,
+            );
         }
-        if operation.write_size() != 0 {
-            if let Err(error) =
+        if operation.write_size() != 0
+            && let Err(error) =
                 memory.check_span(GuestAddress(address), operation.write_size(), Access::Write)
-            {
-                return self.x87_packet(
-                    length,
-                    0,
-                    Err(CpuMemoryError::Memory(error)),
-                    false,
-                    resident,
-                );
-            }
+        {
+            return self.x87_packet(
+                length,
+                0,
+                Err(CpuMemoryError::Memory(error)),
+                false,
+                resident,
+            );
         }
         if updates_pointer(operation) {
             state.instruction_pointer = pc;
@@ -129,18 +129,17 @@ impl EngineInstance {
         let mut record = [0; X87_SIZE];
         encode_x87(&outcome.state, &mut record).map_err(|_| HostError::Infrastructure)?;
         let version = memory.code_validation_version();
-        if outcome.memory_len != 0 {
-            if let Err(error) =
+        if outcome.memory_len != 0
+            && let Err(error) =
                 memory.write(GuestAddress(address), &outcome.memory[..outcome.memory_len])
-            {
-                return self.x87_packet(
-                    length,
-                    0,
-                    Err(CpuMemoryError::Memory(error)),
-                    false,
-                    resident,
-                );
-            }
+        {
+            return self.x87_packet(
+                length,
+                0,
+                Err(CpuMemoryError::Memory(error)),
+                false,
+                resident,
+            );
         }
         let changed = version != memory.code_validation_version();
         self.arena[X87_OFFSET..X87_OFFSET + X87_SIZE].copy_from_slice(&record);

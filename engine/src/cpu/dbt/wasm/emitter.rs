@@ -569,23 +569,10 @@ pub(in crate::cpu::dbt) fn emit(
         helper_imports.atomic_xor_u32 = Some(atomic_xor);
         function_index += 1;
     }
-    for (needed, suffix, resident_suffix, type_offset, slot) in [(
-        needs_cpu_read,
-        "cpu_read",
-        "cpu_read",
-        0,
-        &mut helper_imports.cpu_read,
-    )] {
-        let _ = resident_suffix;
-        if needed {
-            imports.import(
-                "ring3",
-                suffix,
-                EntityType::Function(cpu_type_base + type_offset),
-            );
-            *slot = Some(function_index);
-            function_index += 1;
-        }
+    if needs_cpu_read {
+        imports.import("ring3", "cpu_read", EntityType::Function(cpu_type_base));
+        helper_imports.cpu_read = Some(function_index);
+        function_index += 1;
     }
     for (needed, name, resident_name, type_offset, slot) in [
         (
