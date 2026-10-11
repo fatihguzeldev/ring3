@@ -1,3 +1,6 @@
+#[path = "support/prefix_admission.rs"]
+mod prefix_admission;
+
 use ring3_engine::{
     abi::arena::{TRANSFER_OFFSET, X87_OFFSET},
     cpu::x86::decode::decode_one,
@@ -433,6 +436,9 @@ fn locked_bts32_exact_prefix_scope_and_unselected_bit_forms_stay_closed() {
         cases.insert(bytes, opcode);
     }
     for (bytes, expected) in cases {
+        if prefix_admission::admit_if_new_prefix(&bytes) {
+            continue;
+        }
         let engine = code(&bytes);
         let before = engine.arena().to_vec();
         assert_eq!(

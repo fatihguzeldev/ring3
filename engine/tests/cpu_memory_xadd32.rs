@@ -1,3 +1,6 @@
+#[path = "support/prefix_admission.rs"]
+mod prefix_admission;
+
 use ring3_engine::{
     abi::arena::TRANSFER_OFFSET,
     cpu::{
@@ -420,6 +423,9 @@ fn byte_word_and_prefix_refusals_keep_exact_categories_and_inputs() {
         cases.push((bytes, expected));
     }
     for (bytes, expected) in cases {
+        if prefix_admission::admit_if_new_prefix(&bytes) {
+            continue;
+        }
         let mut engine = code(CODE, &bytes);
         assert_eq!(
             decode_one(engine.memory().unwrap(), GuestAddress(CODE)).err(),

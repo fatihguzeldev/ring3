@@ -1,3 +1,5 @@
+#[path = "support/prefix_admission.rs"]
+mod prefix_admission;
 use ring3_engine::process::EngineInstance;
 
 #[test]
@@ -25,7 +27,7 @@ use ring3_engine::{
         x86::{
             Register32,
             decode::{DecodeError, decode_one},
-            ir::{Location32, Operation, UnaryKind},
+            ir::{EffectiveAddress, Location32, Operation, UnaryKind},
         },
     },
     memory::{Access, FaultReason, GuestAddress, MemoryFault},
@@ -279,6 +281,7 @@ fn strict_categories_fetch_wrap_and_fixed32_adjacency_remain_exact() {
     let opcode = DecodeError::Unsupported(UnsupportedFeature::Opcode);
     let segment = DecodeError::Unsupported(UnsupportedFeature::Segment);
     let mut category_rows = 0;
+    let mut admissions = 0;
     let mut refusals = 0;
     for (instruction, error) in [
         (&[0x66, 0x66, 0x87, 0xc8][..], opcode),
@@ -298,12 +301,50 @@ fn strict_categories_fetch_wrap_and_fixed32_adjacency_remain_exact() {
         (&[0xf0, 0x66, 0x87, 0x4c, 0x24, 0x04][..], opcode),
         (&[0xf0, 0x87, 0x08][..], opcode),
     ] {
+        category_rows += 1;
+        if matches!(
+            instruction[0],
+            0x67 | 0x26 | 0x2e | 0x36 | 0x3e | 0x64 | 0x65
+        ) || (instruction[0] == 0xf0 && instruction[2] != 0xc8)
+        {
+            let (operation, length) = prefix_admission::admitted(instruction);
+            let expected = if instruction[0] != 0xf0 {
+                Operation::Exchange {
+                    left: Register32::Eax,
+                    right: Register32::Ecx,
+                }
+            } else {
+                let address = EffectiveAddress {
+                    base: Some(if instruction.len() == 6 {
+                        Register32::Esp
+                    } else {
+                        Register32::Eax
+                    }),
+                    displacement: if instruction.len() == 6 { 4 } else { 0 },
+                    ..Default::default()
+                };
+                if instruction[1] == 0x66 {
+                    Operation::MemoryExchangeWord {
+                        address,
+                        source: Register32::Ecx,
+                    }
+                } else {
+                    Operation::MemoryExchange {
+                        address,
+                        source: Register32::Ecx,
+                    }
+                }
+            };
+            assert_eq!(operation, expected);
+            assert_eq!(length, instruction.len());
+            admissions += 1;
+            continue;
+        }
         let direct = code(CODE, instruction, true);
         assert_eq!(
             decode_one(direct.memory().unwrap(), GuestAddress(CODE)).err(),
             Some(error)
         );
-        category_rows += 1;
         let mut program = instruction.to_vec();
         program.extend_from_slice(&[0xeb, 0]);
         let engine = code(CODE, &program, true);
@@ -327,8 +368,8 @@ fn strict_categories_fetch_wrap_and_fixed32_adjacency_remain_exact() {
         );
         refusals += 2;
     }
-    assert_eq!(category_rows, 16);
-    assert_eq!(refusals, 32);
+    assert_eq!((category_rows, admissions), (16, 10));
+    assert_eq!(refusals, (category_rows - admissions) * 2);
     let adjacent = code(CODE, &[0x48, 0x87, 0xc8], true);
     assert_decode(
         &adjacent,
@@ -536,6 +577,15 @@ fn prior_owners() -> (EngineInstance, u64) {
 
 #[test]
 fn late_decode_failures_preserve_both_publications_and_all_mapped_pages() {
+    let (operation, length) = prefix_admission::admitted(&[0x64, 0x87, 0xc8]);
+    assert_eq!(
+        operation,
+        Operation::Exchange {
+            left: Register32::Eax,
+            right: Register32::Ecx
+        }
+    );
+    assert_eq!(length, 3);
     let mut refusals = 0;
     let mut prior_compiles = 0;
     for (pc, bytes, length, error_pc, error) in [
@@ -548,10 +598,10 @@ fn late_decode_failures_preserve_both_publications_and_all_mapped_pages() {
         ),
         (
             CODE,
-            &[0x87, 0xc8, 0x64, 0x87, 0xc8][..],
+            &[0x87, 0xc8, 0x0f, 0x0b, 0x90][..],
             5,
             CODE + 2,
-            DecodeError::Unsupported(UnsupportedFeature::Segment),
+            DecodeError::Unsupported(UnsupportedFeature::Opcode),
         ),
         (
             0x1ffd,

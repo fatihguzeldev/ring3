@@ -1,3 +1,6 @@
+#[path = "support/prefix_admission.rs"]
+mod prefix_admission;
+
 use ring3_engine::{
     abi::arena::TRANSFER_OFFSET,
     cpu::{
@@ -76,9 +79,16 @@ struct Census {
     bound_success: usize,
     pure_error: usize,
     bound_error: usize,
+    prefix_admissions: usize,
 }
 
 fn assert_census(c: &Census, expected: (usize, usize, usize, usize)) {
+    let expected = (
+        expected.0,
+        expected.1,
+        expected.2 - c.prefix_admissions * 2,
+        expected.3 - c.prefix_admissions * 4,
+    );
     assert_eq!(
         (c.pure_success, c.bound_success, c.pure_error, c.bound_error),
         expected
@@ -517,6 +527,10 @@ fn six_failures(
 }
 
 fn rejected(bytes: &[u8], error: DecodeError, census: &mut Census) {
+    if prefix_admission::admit_if_new_prefix(bytes) {
+        census.prefix_admissions += 1;
+        return;
+    }
     let mut engine = code(CODE, bytes);
     unmapped_data(&engine);
     assert_eq!(

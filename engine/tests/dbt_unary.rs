@@ -1,3 +1,6 @@
+#[path = "support/prefix_admission.rs"]
+mod prefix_admission;
+
 use ring3_engine::cpu::dbt::{
     ArtifactError, BlockSpec, CompileError, CompileLimits, InstructionError, compile_entry_region,
     compile_region, prepare_entry_region, prepare_region,
@@ -278,6 +281,16 @@ fn small_width_prefix_and_adjacent_rejections_keep_exact_categories() {
         &[0xf0, 0xff, 0x03][..],
         &[0x66, 0xc0, 0x20, 2][..],
     ] {
+        if matches!(
+            bytes.first(),
+            Some(0x26 | 0x2e | 0x36 | 0x3e | 0x64 | 0x65 | 0x67)
+        ) || matches!(
+            bytes,
+            [0xf0, 0xf7, 0x13] | [0xf0, 0xff, 0x03] | [0xf0, 0x01, 0x03]
+        ) {
+            prefix_admission::admitted(bytes);
+            continue;
+        }
         rejected(
             bytes,
             InstructionError::Decode(DecodeError::Unsupported(UnsupportedFeature::Opcode)),
@@ -287,10 +300,7 @@ fn small_width_prefix_and_adjacent_rejections_keep_exact_categories() {
         &[0xf0, 0xff, 0xc0],
         InstructionError::Decode(DecodeError::InvalidEncoding),
     );
-    rejected(
-        &[0x64, 0xff, 0xc0],
-        InstructionError::Decode(DecodeError::Unsupported(UnsupportedFeature::Segment)),
-    );
+    prefix_admission::admitted(&[0x64, 0xff, 0xc0]);
     rejected(
         &[0x0f, 0x06],
         InstructionError::Decode(DecodeError::Unsupported(UnsupportedFeature::Privileged)),

@@ -1,3 +1,6 @@
+#[path = "support/prefix_admission.rs"]
+mod prefix_admission;
+
 use ring3_engine::{
     abi::arena::TRANSFER_OFFSET,
     cpu::{
@@ -159,6 +162,10 @@ fn strict_prefixes_and_single_byte_fetch_preserve_fault_and_wrap_boundaries() {
             }
             _ => DecodeError::Unsupported(UnsupportedFeature::Opcode),
         };
+        if matches!(prefix, 0x26 | 0x2e | 0x36 | 0x3e | 0x64 | 0x65 | 0x67) {
+            prefix_admission::admitted(&bytes);
+            continue;
+        }
         assert_eq!(
             decode_one(engine.memory().unwrap(), GuestAddress(CODE)).err(),
             Some(expected)

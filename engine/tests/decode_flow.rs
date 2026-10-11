@@ -441,27 +441,63 @@ fn sixteen_bit_flow_and_stack_forms_are_rejected_without_lowering() {
 }
 
 #[test]
-fn segment_stack_flags_bulk_stack_and_loop_forms_are_outside_profile() {
-    for bytes in [
-        &[0x06][..],
-        &[0x0e][..],
-        &[0x16][..],
-        &[0x1e][..],
-        &[0x0f, 0xa0][..],
-        &[0x0f, 0xa8][..],
-        &[0x07][..],
-        &[0x17][..],
-        &[0x1f][..],
-        &[0x0f, 0xa1][..],
-        &[0x0f, 0xa9][..],
-        &[0x66, 0x66, 0x9c][..],
-        &[0x9d][..],
-        &[0x60][..],
-        &[0x67, 0xe0, 0xfe][..],
-        &[0x67, 0xe1, 0xfe][..],
-        &[0x67, 0xe2, 0xfe][..],
-        &[0x67, 0xe3, 0xfe][..],
+fn segment_bulk_stack_and_address16_loops_are_typed() {
+    use ring3_engine::cpu::x86::ir::CountBranchKind;
+    use ring3_engine::cpu::x86::{SegmentRegister, StackFrameKind};
+    for (bytes, segment, pop) in [
+        (&[0x06][..], SegmentRegister::Es, false),
+        (&[0x0e][..], SegmentRegister::Cs, false),
+        (&[0x16][..], SegmentRegister::Ss, false),
+        (&[0x1e][..], SegmentRegister::Ds, false),
+        (&[0x0f, 0xa0][..], SegmentRegister::Fs, false),
+        (&[0x0f, 0xa8][..], SegmentRegister::Gs, false),
+        (&[0x07][..], SegmentRegister::Es, true),
+        (&[0x17][..], SegmentRegister::Ss, true),
+        (&[0x1f][..], SegmentRegister::Ds, true),
+        (&[0x0f, 0xa1][..], SegmentRegister::Fs, true),
+        (&[0x0f, 0xa9][..], SegmentRegister::Gs, true),
     ] {
+        assert_decodes(
+            0x1000,
+            bytes,
+            if pop {
+                Operation::PopSegment {
+                    segment,
+                    word: false,
+                }
+            } else {
+                Operation::PushSegment {
+                    segment,
+                    word: false,
+                }
+            },
+        );
+    }
+    assert_decodes(
+        0x1000,
+        &[0x60],
+        Operation::StackFrame {
+            kind: StackFrameKind::PushAll32,
+            allocation: 0,
+            nesting: 0,
+        },
+    );
+    for (opcode, kind) in [
+        (0xe0, CountBranchKind::LoopNotEqual),
+        (0xe1, CountBranchKind::LoopEqual),
+        (0xe2, CountBranchKind::Loop),
+        (0xe3, CountBranchKind::EcxZero),
+    ] {
+        assert_decodes(
+            0x1000,
+            &[0x67, opcode, 0xfe],
+            Operation::CountBranchWord {
+                kind,
+                target: GuestAddress(0x1001),
+            },
+        );
+    }
+    for bytes in [&[0x66, 0x66, 0x9c][..], &[0x9d]] {
         let space = code_space(0x1000, bytes);
         assert!(matches!(
             decode_one(&space, GuestAddress(0x1000)),

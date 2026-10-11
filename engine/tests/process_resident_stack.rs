@@ -1,3 +1,5 @@
+#[path = "support/prefix_admission.rs"]
+mod prefix_admission;
 use ring3_engine::{
     cpu::{
         UnsupportedFeature,
@@ -27,7 +29,8 @@ const EBX_ADDRESS: EffectiveAddress = EffectiveAddress {
     index: None,
     scale: 1,
     displacement: 0,
-    ..Default::default()
+    segment: None,
+    address_size: ring3_engine::cpu::x86::ir::AddressSize::Bits32,
 };
 const FORMS: [(&[u8], Operation); 8] = [
     (
@@ -497,8 +500,18 @@ fn span_poison_prefix_and_control_exclusions_preserve_arena_units_and_capacity()
                 keep,
                 &bytes,
                 bytes.len(),
-                CODE + 1,
-                InstructionError::Decode(cause),
+                if matches!(prefix, 0x67 | 0x64) {
+                    CODE + 2 + instruction.len() as u32
+                } else {
+                    CODE + 1
+                },
+                if matches!(prefix, 0x67 | 0x64) {
+                    InstructionError::Decode(DecodeError::Unsupported(
+                        UnsupportedFeature::Privileged,
+                    ))
+                } else {
+                    InstructionError::Decode(cause)
+                },
             );
         }
     }
@@ -521,6 +534,7 @@ fn span_poison_prefix_and_control_exclusions_preserve_arena_units_and_capacity()
             InstructionError::InvalidBlockEnd,
         );
     }
+    prefix_admission::admitted(&[0x60]);
     for instruction in [&[0xff, 0x1b][..], &[0xcb], &[0x60]] {
         let mut bytes = vec![0x90];
         bytes.extend_from_slice(instruction);
@@ -530,8 +544,16 @@ fn span_poison_prefix_and_control_exclusions_preserve_arena_units_and_capacity()
             keep,
             &bytes,
             bytes.len(),
-            CODE + 1,
-            InstructionError::Decode(DecodeError::Unsupported(UnsupportedFeature::Opcode)),
+            if instruction == [0x60] {
+                CODE + 2
+            } else {
+                CODE + 1
+            },
+            InstructionError::Decode(DecodeError::Unsupported(if instruction == [0x60] {
+                UnsupportedFeature::Privileged
+            } else {
+                UnsupportedFeature::Opcode
+            })),
         );
     }
     describe(&mut engine, &[(CODE, 3)]);

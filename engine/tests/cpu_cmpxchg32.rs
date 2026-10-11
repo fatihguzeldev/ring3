@@ -1,3 +1,6 @@
+#[path = "support/prefix_admission.rs"]
+mod prefix_admission;
+
 use ring3_engine::{
     abi::arena::TRANSFER_OFFSET,
     cpu::{
@@ -9,7 +12,10 @@ use ring3_engine::{
         x86::{
             Register32,
             decode::{DecodeError, decode_one},
-            ir::{BinaryKind, ByteRegister, Condition, Location32, Operation, UnaryKind, Value32},
+            ir::{
+                BinaryKind, ByteRegister, Condition, EffectiveAddress, Location32, Operation,
+                UnaryKind, Value32,
+            },
         },
     },
     memory::{Access, CodeSnapshot, FaultReason, GuestAddress, MemoryFault},
@@ -76,9 +82,16 @@ struct Census {
     bound_success: usize,
     pure_error: usize,
     bound_error: usize,
+    supported_admissions: usize,
 }
 
 fn assert_census(c: &Census, expected: (usize, usize, usize, usize)) {
+    let expected = (
+        expected.0,
+        expected.1,
+        expected.2 - c.supported_admissions * 2,
+        expected.3 - c.supported_admissions * 4,
+    );
     assert_eq!(
         (c.pure_success, c.bound_success, c.pure_error, c.bound_error),
         expected
@@ -527,6 +540,25 @@ fn six_failures(
 }
 
 fn rejected(bytes: &[u8], error: DecodeError, census: &mut Census) {
+    if bytes == [0x0f, 0xc7, 0x0b] {
+        let (operation, length) = prefix_admission::admitted(bytes);
+        assert_eq!(
+            operation,
+            Operation::CompareExchange8B {
+                address: EffectiveAddress {
+                    base: Some(Register32::Ebx),
+                    ..Default::default()
+                },
+            }
+        );
+        assert_eq!(length, bytes.len());
+        census.supported_admissions += 1;
+        return;
+    }
+    if prefix_admission::admit_if_new_prefix(bytes) {
+        census.supported_admissions += 1;
+        return;
+    }
     let mut engine = code(CODE, bytes);
     unmapped_data(&engine);
     assert_eq!(

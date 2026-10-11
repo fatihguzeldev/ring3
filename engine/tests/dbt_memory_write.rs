@@ -1,3 +1,6 @@
+#[path = "support/prefix_admission.rs"]
+mod prefix_admission;
+
 use ring3_engine::cpu::dbt::{
     BlockSpec, CompileError, CompileLimits, InstructionError, compile_entry_region, compile_region,
     prepare_entry_region, prepare_region,
@@ -517,6 +520,12 @@ fn narrow_prefix_and_declared_span_errors_remain_precise() {
                 bytes.push(0x66);
             }
             bytes.extend_from_slice(&encode(opcode, extension, &[0x03], immediate));
+            if matches!(prefix, 0x67 | 0x64)
+                || (prefix == 0xf0 && matches!(kind, BinaryKind::Add | BinaryKind::Sub))
+            {
+                prefix_admission::admitted(&bytes[1..]);
+                continue;
+            }
             if prefix == 0xf0
                 && ((matches!(opcode, 0x81 | 0x83) && matches!(extension, 1 | 4 | 6))
                     || matches!(opcode, 0x09 | 0x21 | 0x31))

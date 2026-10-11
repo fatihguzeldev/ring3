@@ -1,3 +1,6 @@
+#[path = "support/prefix_admission.rs"]
+mod prefix_admission;
+
 use ring3_engine::process::EngineInstance;
 
 #[test]
@@ -261,8 +264,12 @@ fn prefixes_and_exact_fetch_boundaries_keep_categories() {
     }
     excluded.push((vec![0xf0, 0x0f, 0x44, 0xc1], DecodeError::InvalidEncoding));
     assert_eq!(excluded.len(), 11);
-    let mut refused = 0;
+    let mut cases_checked = 0;
     for (bytes, expected) in excluded {
+        if prefix_admission::admit_if_new_prefix(&bytes) {
+            cases_checked += 1;
+            continue;
+        }
         let mut engine = code(CODE, &bytes, true);
         engine.arena_mut().unwrap()[52..56].copy_from_slice(&2_u32.to_le_bytes());
         let memory = engine.memory().unwrap();
@@ -288,9 +295,9 @@ fn prefixes_and_exact_fetch_boundaries_keep_categories() {
             compile_entry_region(memory, &[GuestAddress(CODE)], CompileLimits::default()).err(),
             Some(error)
         );
-        refused += 1;
+        cases_checked += 1;
     }
-    assert_eq!(refused, 11);
+    assert_eq!(cases_checked, 11);
     let mut fetched = 0;
     for bytes in [[0x0f, 0x40, 0xc1], [0x0f, 0x44, 0xed], [0x0f, 0x4f, 0xf7]] {
         for pc in [0x1ffd, 0x1ffe] {
@@ -420,8 +427,11 @@ fn prior_owners() -> (EngineInstance, u64) {
 
 #[test]
 fn late_refusals_preserve_both_publications_and_all_pages() {
+    let (operation, length) = prefix_admission::admitted(&[0x64, 0x0f, 0x44, 0xc1]);
+    assert_eq!(length, 4);
+    assert!(matches!(operation, Operation::ConditionalMove { .. }));
     let opcode = DecodeError::Unsupported(UnsupportedFeature::Opcode);
-    let segment = DecodeError::Unsupported(UnsupportedFeature::Segment);
+
     let mut refusals = 0;
     for (pc, bytes, declared_length, error_pc, expected) in [
         (
@@ -433,10 +443,10 @@ fn late_refusals_preserve_both_publications_and_all_pages() {
         ),
         (
             CODE,
-            &[0x0f, 0x44, 0xc1, 0x64, 0x0f, 0x44, 0xc1][..],
+            &[0x0f, 0x44, 0xc1, 0x0f, 0x0b, 0x90, 0x90][..],
             7,
             CODE + 3,
-            segment,
+            opcode,
         ),
         (
             0x1ffb,

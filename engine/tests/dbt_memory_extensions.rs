@@ -1,3 +1,6 @@
+#[path = "support/prefix_admission.rs"]
+mod prefix_admission;
+
 use ring3_engine::cpu::dbt::{
     BlockSpec, CompileError, CompileLimits, InstructionError, compile_entry_region, compile_region,
     prepare_entry_region, prepare_region,
@@ -384,6 +387,13 @@ fn embedded_small_width_prefix_and_adjacent_errors_remain_precise() {
             InstructionError::Decode(DecodeError::Unsupported(UnsupportedFeature::Privileged)),
         ),
     ] {
+        if matches!(
+            instruction.first(),
+            Some(0x26 | 0x2e | 0x36 | 0x3e | 0x64 | 0x65 | 0x67)
+        ) {
+            prefix_admission::admitted(instruction);
+            continue;
+        }
         let mut bytes = vec![0x90];
         bytes.extend_from_slice(instruction);
         for entry_format in [false, true] {

@@ -1,3 +1,6 @@
+#[path = "support/prefix_admission.rs"]
+mod prefix_admission;
+
 use ring3_engine::{
     abi::arena::TRANSFER_OFFSET,
     cpu::{
@@ -192,16 +195,18 @@ fn code_space(pc: u32, bytes: &[u8]) -> AddressSpace {
 #[test]
 fn alignment_nop_exact_grammar_keeps_prefix_segment_and_payload_neighbors_closed() {
     let opcode = DecodeError::Unsupported(UnsupportedFeature::Opcode);
-    let segment = DecodeError::Unsupported(UnsupportedFeature::Segment);
+
     for (index, bytes) in NOPS.into_iter().enumerate() {
         for prefix in [
             0x66, 0x67, 0xf0, 0xf2, 0xf3, 0x26, 0x2e, 0x36, 0x3e, 0x64, 0x65,
         ] {
             let prefixed = [vec![prefix], bytes.to_vec()].concat();
+            if matches!(prefix, 0x26 | 0x2e | 0x36 | 0x3e | 0x64 | 0x65) {
+                prefix_admission::admitted(&prefixed);
+                continue;
+            }
             let expected = if prefix == 0xf0 {
                 DecodeError::InvalidEncoding
-            } else if index == 2 || matches!(prefix, 0x26 | 0x2e | 0x36 | 0x3e | 0x64 | 0x65) {
-                segment
             } else {
                 opcode
             };
@@ -219,7 +224,7 @@ fn alignment_nop_exact_grammar_keeps_prefix_segment_and_payload_neighbors_closed
             neighbor[changed] = 1;
             assert_eq!(
                 decode_one(&code_space(CODE, &neighbor), GuestAddress(CODE)).err(),
-                Some(if index == 2 { segment } else { opcode }),
+                Some(opcode),
                 "{neighbor:02x?}"
             );
         }
@@ -231,13 +236,13 @@ fn alignment_nop_exact_grammar_keeps_prefix_segment_and_payload_neighbors_closed
         &[0x2e, 0x8b, 0],
         &[0x66, 0x2e, 0x8b, 0],
     ] {
+        if bytes.first() == Some(&0x2e) || bytes == [0x66, 0x2e, 0x8b, 0] {
+            prefix_admission::admitted(bytes);
+            continue;
+        }
         assert_eq!(
             decode_one(&code_space(CODE, bytes), GuestAddress(CODE)).err(),
-            Some(if bytes.contains(&0x2e) {
-                segment
-            } else {
-                opcode
-            }),
+            Some(opcode),
             "{bytes:02x?}"
         );
     }

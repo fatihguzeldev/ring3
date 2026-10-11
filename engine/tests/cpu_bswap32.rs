@@ -1,3 +1,6 @@
+#[path = "support/prefix_admission.rs"]
+mod prefix_admission;
+
 use ring3_engine::process::EngineInstance;
 
 #[test]
@@ -223,6 +226,11 @@ fn strict_prefixes_fetch_wrap_and_fixed32_adjacency_keep_exact_categories() {
         let program = [prefix, 0x0f, 0xc8, 0xeb, 0];
         let engine = code(CODE, &program, true);
         let memory = engine.memory().unwrap();
+        if matches!(prefix, 0x26 | 0x2e | 0x36 | 0x3e | 0x64 | 0x65 | 0x67) {
+            prefix_admission::admitted(&program);
+            refusals += 1;
+            continue;
+        }
         assert_eq!(decode_one(memory, GuestAddress(CODE)).err(), Some(error));
         let expected = Some(instruction_error(CODE, InstructionError::Decode(error)));
         assert_eq!(
@@ -423,10 +431,10 @@ fn late_decode_failures_preserve_both_publications_and_all_mapped_pages() {
         ),
         (
             CODE,
-            &[0x0f, 0xc8, 0x64, 0x0f, 0xc8][..],
+            &[0x0f, 0xc8, 0x0f, 0x0b, 0x90][..],
             5,
             CODE + 2,
-            DecodeError::Unsupported(UnsupportedFeature::Segment),
+            DecodeError::Unsupported(UnsupportedFeature::Opcode),
         ),
         (
             0x1ffd,

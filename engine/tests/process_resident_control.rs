@@ -27,7 +27,8 @@ const EBX_ADDRESS: EffectiveAddress = EffectiveAddress {
     index: None,
     scale: 1,
     displacement: 0,
-    ..Default::default()
+    segment: None,
+    address_size: ring3_engine::cpu::x86::ir::AddressSize::Bits32,
 };
 const FORMS: [(&[u8], Operation); 5] = [
     (
@@ -436,7 +437,11 @@ fn near_control_end_prefix_and_decode_errors_preserve_arena_units_and_capacity()
                 &bytes,
                 bytes.len(),
                 CODE + 1,
-                InstructionError::Decode(cause),
+                if matches!(prefix, 0x67 | 0x64) {
+                    InstructionError::InvalidBlockEnd
+                } else {
+                    InstructionError::Decode(cause)
+                },
             );
         }
     }

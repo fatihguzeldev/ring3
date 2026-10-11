@@ -1,3 +1,6 @@
+#[path = "support/prefix_admission.rs"]
+mod prefix_admission;
+
 use ring3_engine::{
     cpu::dbt::{BlockSpec, CompileLimits, compile_region},
     memory::{AddressSpace, GuestAddress, PageRange, Permissions},
@@ -514,6 +517,9 @@ fn failed_compile_profiles(pc: u32, bytes: &[u8], declared: usize, failure: Comp
 #[test]
 fn strict_and_late_failures_keep_both_published_owners() {
     for (bytes, expected) in exclusions() {
+        if prefix_admission::admit_if_new_prefix(&bytes) {
+            continue;
+        }
         let engine = code(CODE, &bytes, false);
         assert_eq!(
             decode_one(engine.memory().unwrap(), GuestAddress(CODE)).err(),
@@ -534,6 +540,14 @@ fn strict_and_late_failures_keep_both_published_owners() {
         (vec![0x66, 0x66, 0xd3, 0xd1], opcode),
         (vec![0x66, 0x66, 0xd3, 0x13], opcode),
     ] {
+        let (excluded, expected) = if prefix_admission::admit_if_new_prefix(&excluded) {
+            let mut poison = vec![0x90; excluded.len()];
+            poison[..2].copy_from_slice(&[0x0f, 0x0b]);
+            (poison, DecodeError::Unsupported(UnsupportedFeature::Opcode))
+        } else {
+            (excluded, expected)
+        };
+
         let mut bytes = instruction(RotateKind::Left, Register32::Eax, 2).to_vec();
         bytes.extend(excluded);
         strict += failed_compile_profiles(CODE, &bytes, bytes.len(), error(CODE + 3, expected));

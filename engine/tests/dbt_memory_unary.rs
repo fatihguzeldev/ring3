@@ -1,3 +1,6 @@
+#[path = "support/prefix_admission.rs"]
+mod prefix_admission;
+
 use ring3_engine::cpu::dbt::{
     BlockSpec, CompileError, CompileLimits, InstructionError, compile_entry_region, compile_region,
     prepare_entry_region, prepare_region,
@@ -383,6 +386,10 @@ fn narrow_prefix_and_declared_span_errors_remain_precise() {
             let mut bytes = vec![0x90, prefix, opcode, 0x03 | extension << 3];
             if prefix == 0x66 {
                 bytes.insert(1, 0x66);
+            }
+            if matches!(prefix, 0x67 | 0x64 | 0xf0) {
+                prefix_admission::admitted(&bytes[1..]);
+                continue;
             }
             embedded_rejected(&bytes, instruction_error(cause));
         }

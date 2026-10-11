@@ -16,7 +16,8 @@ const ADDRESS: EffectiveAddress = EffectiveAddress {
     index: Some(Register32::Ecx),
     scale: 4,
     displacement: 0xffff_ffe0,
-    ..Default::default()
+    segment: None,
+    address_size: ring3_engine::cpu::x86::ir::AddressSize::Bits32,
 };
 
 fn executable_memory() -> AddressSpace {

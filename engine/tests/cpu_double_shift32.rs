@@ -1,3 +1,6 @@
+#[path = "support/prefix_admission.rs"]
+mod prefix_admission;
+
 use ring3_engine::process::EngineInstance;
 
 #[test]
@@ -426,6 +429,14 @@ fn saved(engine: &EngineInstance, resident_id: u64) -> Saved {
 #[test]
 fn excluded_profiles_and_late_refusals_preserve_both_existing_owners() {
     for (excluded, expected) in exclusions() {
+        let (excluded, expected) = if prefix_admission::admit_if_new_prefix(&excluded) {
+            let mut poison = vec![0x90; excluded.len()];
+            poison[..2].copy_from_slice(&[0x0f, 0x0b]);
+            (poison, DecodeError::Unsupported(UnsupportedFeature::Opcode))
+        } else {
+            (excluded, expected)
+        };
+
         let mut bytes = instruction(0xa4, 0, 2, 1);
         bytes.extend_from_slice(&excluded);
         let error = error(CODE + 4, expected);

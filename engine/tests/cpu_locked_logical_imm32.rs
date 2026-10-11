@@ -1,3 +1,5 @@
+#[path = "support/prefix_admission.rs"]
+mod prefix_admission;
 use ring3_engine::{
     abi::arena::{TRANSFER_OFFSET, X87_OFFSET},
     cpu::{
@@ -8,8 +10,9 @@ use ring3_engine::{
         },
         x86::{
             Register32,
+            atomic::AtomicKind,
             decode::{DecodeError, decode_one},
-            ir::{EffectiveAddress, Operation},
+            ir::{AddressSize, AtomicSource, EffectiveAddress, Operation},
         },
     },
     memory::{Access, FaultReason, GuestAddress, MemoryFault},
@@ -262,6 +265,42 @@ fn longer_immediates_keep_exact_prefix_and_standalone_boundaries() {
         vec![0xf0, 0x81, 0x10, 0, 0, 1, 0x80],
         vec![0xf0, 0x81, 0x28, 0, 0, 1, 0x80],
     ] {
+        if prefix_admission::admit_if_new_prefix(&bytes) {
+            let (actual, length) = prefix_admission::admitted(&bytes);
+            let expected = if bytes.contains(&0x66) {
+                Operation::AtomicMemory {
+                    kind: AtomicKind::Or,
+                    width: 2,
+                    address: ea(Some(Register32::Eax), None, 1, 0),
+                    source: AtomicSource::Immediate(0x8000),
+                }
+            } else if bytes[0] == 0x67 {
+                Operation::LockedMemoryOr32 {
+                    address: EffectiveAddress {
+                        base: Some(Register32::Ebx),
+                        index: Some(Register32::Esi),
+                        address_size: AddressSize::Bits16,
+                        ..Default::default()
+                    },
+                    mask: 0x8001_0000,
+                }
+            } else {
+                Operation::AtomicMemory {
+                    kind: match bytes[2] {
+                        0x00 => AtomicKind::Add,
+                        0x10 => AtomicKind::AddCarry,
+                        0x28 => AtomicKind::Subtract,
+                        _ => unreachable!(),
+                    },
+                    width: 4,
+                    address: ea(Some(Register32::Eax), None, 1, 0),
+                    source: AtomicSource::Immediate(0x8001_0000),
+                }
+            };
+            assert_eq!(actual, expected, "{bytes:02x?}");
+            assert_eq!(length, bytes.len());
+            continue;
+        }
         let engine = code_at(CODE, &bytes);
         let before = engine.arena().to_vec();
         assert_eq!(

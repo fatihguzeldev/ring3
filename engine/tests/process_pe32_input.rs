@@ -25,7 +25,7 @@ fn engine() -> EngineInstance {
     {
         *byte = (index as u8).wrapping_mul(29).wrapping_add(17);
     }
-    decode_x87(&arena[X87_OFFSET..X87_OFFSET + crate::abi::x86::X87_SIZE]).unwrap();
+    decode_x87(&arena[X87_OFFSET..X87_OFFSET + ring3_engine::abi::x86::X87_SIZE]).unwrap();
     engine
 }
 

@@ -1,3 +1,6 @@
+#[path = "support/prefix_admission.rs"]
+mod prefix_admission;
+
 use ring3_engine::process::EngineInstance;
 
 #[test]
@@ -248,6 +251,7 @@ fn four_bound_profiles_keep_leave_sequential_and_require_only_checked_read32() {
 
 #[test]
 fn standalone_and_prefixed_or_adjacent_forms_keep_explicit_refusals() {
+    prefix_admission::admitted(&[0xc8, 1, 0, 0]);
     for bytes in [&[0x90, 0xc9][..], &[0x90, 0xc9, 0xeb, 0][..]] {
         let engine = code(CODE, bytes, true);
         let memory = engine.memory().unwrap();
@@ -272,7 +276,6 @@ fn standalone_and_prefixed_or_adjacent_forms_keep_explicit_refusals() {
         (vec![0xf2, 0xc9], opcode),
         (vec![0xf3, 0xc9], opcode),
         (vec![0xf0, 0xc9], DecodeError::InvalidEncoding),
-        (vec![0xc8, 1, 0, 0], opcode),
         (vec![0xcb], opcode),
         (vec![0xca, 0, 0], opcode),
     ];
@@ -282,8 +285,11 @@ fn standalone_and_prefixed_or_adjacent_forms_keep_explicit_refusals() {
             DecodeError::Unsupported(UnsupportedFeature::Segment),
         ));
     }
-    assert_eq!(refused.len(), 14);
+    assert_eq!(refused.len(), 13);
     for (bytes, expected) in refused {
+        if prefix_admission::admit_if_new_prefix(&bytes) {
+            continue;
+        }
         let engine = code(CODE, &bytes, true);
         assert_eq!(
             decode_one(engine.memory().unwrap(), GuestAddress(CODE)).err(),
@@ -331,9 +337,10 @@ fn publication(engine: &EngineInstance, id: u64) -> Publication {
 
 #[test]
 fn late_refusal_and_missing_next_instruction_preserve_both_published_owners() {
+    prefix_admission::admitted(&[0xc8, 1, 0, 0]);
     for (pc, bytes) in [
         (CODE, &[0xc9, 0x66, 0x66, 0xc9][..]),
-        (CODE, &[0xc9, 0xc8, 1, 0, 0][..]),
+        (CODE, &[0xc9, 0x0f, 0x0b, 0x90, 0x90][..]),
         (0x1fff, &[0xc9][..]),
     ] {
         for owner in [Owner::Replacement, Owner::Resident] {

@@ -1,3 +1,5 @@
+#[path = "support/prefix_admission.rs"]
+mod prefix_admission;
 use ring3_engine::process::EngineInstance;
 
 const KEY: u64 = 0x1234_5678_9abc_def0;
@@ -715,6 +717,7 @@ fn exclusions() -> Vec<(Vec<u8>, DecodeError)> {
 fn closed_prefix_profiles_and_split_seeds_preserve_both_prior_publications() {
     let positive = instruction(0xa4, &shapes()[1], 2, 1);
     for (excluded, cause) in exclusions() {
+        let (excluded, cause) = prefix_admission::refusal_after_prefix_admission(excluded, cause);
         let mut bytes = positive.clone();
         bytes.extend_from_slice(&excluded);
         let failed_pc = CODE + positive.len() as u32;

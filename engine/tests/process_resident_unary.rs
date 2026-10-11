@@ -360,8 +360,18 @@ fn span_poison_and_remaining_exclusions_preserve_arena_and_installed_units() {
                 keep,
                 &bytes,
                 bytes.len(),
-                CODE + 1,
-                InstructionError::Decode(DecodeError::Unsupported(feature)),
+                if matches!(prefix, 0x67 | 0x64 | 0xf0) {
+                    CODE + 4
+                } else {
+                    CODE + 1
+                },
+                InstructionError::Decode(DecodeError::Unsupported(
+                    if matches!(prefix, 0x67 | 0x64 | 0xf0) {
+                        UnsupportedFeature::Privileged
+                    } else {
+                        feature
+                    },
+                )),
             );
         }
         let narrow = if opcode == 0xff { 0xfe } else { 0xf6 };

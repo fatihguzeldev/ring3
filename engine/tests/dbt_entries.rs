@@ -1,3 +1,6 @@
+#[path = "support/prefix_admission.rs"]
+mod prefix_admission;
+
 use ring3_engine::cpu::UnsupportedFeature;
 use ring3_engine::cpu::dbt::{
     ArtifactError, BlockSpec, CompileError, CompileLimits, InstructionError, compile_entry_region,
@@ -310,15 +313,12 @@ fn decode_faults_retain_exact_pc_execute_address_reason_and_attempted_length() {
 
 #[test]
 fn invalid_and_unsupported_decoder_errors_remain_distinct_from_backend_rejection() {
+    prefix_admission::admitted(&[0xd9, 0xe8]);
     for (bytes, cause) in [
         (&[0x8d, 0xc0][..], DecodeError::InvalidEncoding),
         (
             &[0x0f, 0x0b][..],
             DecodeError::Unsupported(UnsupportedFeature::Opcode),
-        ),
-        (
-            &[0xd9, 0xe8][..],
-            DecodeError::Unsupported(UnsupportedFeature::FloatingPoint),
         ),
     ] {
         let memory = code(0x1000, bytes);

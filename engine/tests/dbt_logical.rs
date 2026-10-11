@@ -1,3 +1,6 @@
+#[path = "support/prefix_admission.rs"]
+mod prefix_admission;
+
 use ring3_engine::cpu::dbt::{
     ArtifactError, BlockSpec, CompileError, CompileLimits, InstructionError, compile_entry_region,
     compile_region, prepare_entry_region, prepare_region,
@@ -285,15 +288,19 @@ fn small_width_prefix_and_adjacent_operation_errors_retain_their_exact_categorie
         &[0xf3, 0x21, 0xc0][..],
         &[0xf0, 0xf0, 0x21, 0x03][..],
     ] {
+        if matches!(
+            instruction.first(),
+            Some(0x26 | 0x2e | 0x36 | 0x3e | 0x64 | 0x65 | 0x67)
+        ) {
+            prefix_admission::admitted(instruction);
+            continue;
+        }
         rejected(
             instruction,
             InstructionError::Decode(DecodeError::Unsupported(UnsupportedFeature::Opcode)),
         );
     }
-    rejected(
-        &[0x64, 0x21, 0xc0],
-        InstructionError::Decode(DecodeError::Unsupported(UnsupportedFeature::Segment)),
-    );
+    prefix_admission::admitted(&[0x64, 0x21, 0xc0]);
     rejected(
         &[0xf0, 0x21, 0xc0],
         InstructionError::Decode(DecodeError::InvalidEncoding),

@@ -1,3 +1,6 @@
+#[path = "support/prefix_admission.rs"]
+mod prefix_admission;
+
 use ring3_engine::process::EngineInstance;
 
 #[test]
@@ -211,6 +214,10 @@ fn strict_prefixes_adjacent_forms_and_one_byte_fetch_boundaries_keep_categories(
         (&[0x65, 0x98][..], segment),
         (&[0xf0, 0x98][..], DecodeError::InvalidEncoding),
     ] {
+        if prefix_admission::admit_if_new_prefix(&bytes) {
+            refusals += 1;
+            continue;
+        }
         let mut program = bytes.to_vec();
         program.extend_from_slice(&[0xeb, 0]);
         let engine = code(CODE, &program, true);
@@ -355,10 +362,10 @@ fn late_decode_failures_preserve_both_publications_and_all_mapped_pages() {
         ),
         (
             CODE,
-            &[0x98, 0x64, 0x98][..],
+            &[0x98, 0x0f, 0x0b][..],
             3,
             CODE + 1,
-            DecodeError::Unsupported(UnsupportedFeature::Segment),
+            DecodeError::Unsupported(UnsupportedFeature::Opcode),
         ),
         (
             0x1ffe,

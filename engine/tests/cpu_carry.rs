@@ -1,3 +1,6 @@
+#[path = "support/prefix_admission.rs"]
+mod prefix_admission;
+
 use ring3_engine::{
     cpu::{
         UnsupportedFeature,
@@ -37,7 +40,8 @@ const ADDRESS: EffectiveAddress = EffectiveAddress {
     index: Some(Register32::Ecx),
     scale: 4,
     displacement: 0xffff_ffe0,
-    ..Default::default()
+    segment: None,
+    address_size: ring3_engine::cpu::x86::ir::AddressSize::Bits32,
 };
 const FORMS: [(BinaryKind, &[u8], Location32, Value32); 10] = [
     (
@@ -371,6 +375,9 @@ fn unsupported_widths_prefixes_and_invalid_lock_keep_error_categories() {
             vec![0xf3, rm, 0xd0],
             vec![0xf0, rm, 0x03],
         ] {
+            if prefix_admission::admit_if_new_prefix(&bytes) {
+                continue;
+            }
             let memory = code(CODE, &bytes);
             assert_eq!(
                 decode_one(&memory, GuestAddress(CODE)).err(),
@@ -385,6 +392,9 @@ fn unsupported_widths_prefixes_and_invalid_lock_keep_error_categories() {
             ),
             (vec![0xf0, rm, 0xd0], DecodeError::InvalidEncoding),
         ] {
+            if prefix_admission::admit_if_new_prefix(&bytes) {
+                continue;
+            }
             let memory = code(CODE, &bytes);
             assert_eq!(
                 decode_one(&memory, GuestAddress(CODE)).err(),

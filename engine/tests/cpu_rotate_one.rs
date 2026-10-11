@@ -1,3 +1,6 @@
+#[path = "support/prefix_admission.rs"]
+mod prefix_admission;
+
 use ring3_engine::{
     abi::arena::TRANSFER_OFFSET,
     cpu::{
@@ -244,6 +247,11 @@ fn excluded_forms_and_two_byte_fetch_preserve_fault_and_snapshot_boundaries() {
             let mut bytes = vec![prefix, 0xd1, modrm];
             if prefix == 0x66 {
                 bytes.insert(0, 0x66);
+            }
+            if matches!(prefix, 0x26 | 0x2e | 0x36 | 0x3e | 0x64 | 0x65 | 0x67) {
+                prefix_admission::admitted(&bytes);
+                exclusions += 1;
+                continue;
             }
             rejected(&bytes, expected);
             exclusions += 1;

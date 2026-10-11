@@ -1,3 +1,6 @@
+#[path = "support/prefix_admission.rs"]
+mod prefix_admission;
+
 use ring3_engine::cpu::UnsupportedFeature;
 use ring3_engine::cpu::dbt::{
     BlockSpec, CompileError, CompileLimits, InstructionError, compile_region, prepare_region,
@@ -238,6 +241,13 @@ fn expanded_stack_operations_keep_prefix_and_far_decoder_exclusions() {
         &[0xf3, 0x58][..],
         &[0xca, 0xff, 0xff][..],
     ] {
+        if matches!(
+            instruction.first(),
+            Some(0x26 | 0x2e | 0x36 | 0x3e | 0x64 | 0x65 | 0x67)
+        ) {
+            prefix_admission::admitted(instruction);
+            continue;
+        }
         let mut bytes = vec![0x54, 0x5c];
         bytes.extend_from_slice(instruction);
         let mut engine = with_code(&bytes);
@@ -250,14 +260,8 @@ fn expanded_stack_operations_keep_prefix_and_far_decoder_exclusions() {
         );
         assert_eq!(engine.generation(), 0);
     }
-    let mut engine = with_code(&[0x54, 0x5c, 0x64, 0x58]);
-    assert_eq!(
-        compile(&mut engine, 0x1000, 4),
-        Err(HostError::Compile(instruction_error(
-            0x1002,
-            InstructionError::Decode(DecodeError::Unsupported(UnsupportedFeature::Segment))
-        )))
-    );
+    let mut engine = with_code(&[0x54, 0x5c, 0x64, 0x58, 0xeb, 0]);
+    assert_eq!(compile(&mut engine, 0x1000, 6), Ok(1));
 }
 
 #[test]

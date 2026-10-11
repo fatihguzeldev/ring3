@@ -508,35 +508,92 @@ fn malformed_encodings_are_distinct_from_unsupported_instructions() {
 }
 
 #[test]
-fn unsupported_floating_point_simd_segment_string_and_privileged_are_explicit() {
+fn extended_families_decode_and_privileged_or_reserved_forms_stay_explicit() {
+    use ring3_engine::cpu::x86::ir::{AddressSize, RepeatCondition, StringKind, StringWidth};
+    use ring3_engine::cpu::x86::{SegmentRegister, X87Operation};
+    let space = code_space(0x1000, &[0xd9, 0xe8], Permissions::EXECUTE);
+    assert!(matches!(
+        decode_one(&space, GuestAddress(0x1000))
+            .unwrap()
+            .operation(),
+        Operation::X87 {
+            operation: X87Operation::LoadConstant { index: 0 },
+            ..
+        }
+    ));
+    for bytes in [
+        &[0x0f, 0x57, 0xc0][..],
+        &[0xf3, 0x0f, 0x10, 0xc0],
+        &[0x66, 0x0f, 0x57, 0xc0],
+    ] {
+        let space = code_space(0x1000, bytes, Permissions::EXECUTE);
+        let decoded = decode_one(&space, GuestAddress(0x1000)).unwrap();
+        assert_eq!(decoded.length() as usize, bytes.len());
+        assert!(matches!(decoded.operation(), Operation::Simd(_)));
+    }
+    assert_decodes(
+        &[0x64, 0x8b, 0],
+        Operation::Move {
+            destination: Location32::Register(Register32::Eax),
+            source: Value32::Memory(EffectiveAddress {
+                base: Some(Register32::Eax),
+                segment: Some(SegmentRegister::Fs),
+                ..Default::default()
+            }),
+        },
+    );
+    assert_decodes(
+        &[0xf3, 0xa4],
+        Operation::RepeatString {
+            kind: StringKind::Move,
+            width: StringWidth::Byte,
+            repeat: RepeatCondition::Always,
+            address_size: AddressSize::Bits32,
+            source_segment: None,
+        },
+    );
     for (bytes, expected) in [
-        (&[0xd9, 0xe8][..], UnsupportedFeature::FloatingPoint),
-        (&[0x0f, 0x57, 0xc0][..], UnsupportedFeature::Simd),
-        (&[0xf3, 0x0f, 0x10, 0xc0][..], UnsupportedFeature::Simd),
-        (&[0x66, 0x0f, 0x57, 0xc0][..], UnsupportedFeature::Simd),
-        (&[0x64, 0x8b, 0][..], UnsupportedFeature::Segment),
-        (&[0xf3, 0xa4][..], UnsupportedFeature::RepeatedString),
         (&[0xf4][..], UnsupportedFeature::Privileged),
         (&[0xf3, 0xc3][..], UnsupportedFeature::Opcode),
         (&[0xf3, 0xf3, 0x90][..], UnsupportedFeature::Opcode),
     ] {
         let space = code_space(0x1000, bytes, Permissions::EXECUTE);
-        let error = decode_one(&space, GuestAddress(0x1000)).err().unwrap();
-        assert_eq!(error, DecodeError::Unsupported(expected));
+        assert_eq!(
+            decode_one(&space, GuestAddress(0x1000)).err(),
+            Some(DecodeError::Unsupported(expected))
+        );
     }
 }
 
 #[test]
-fn valid_lock_and_sixteen_bit_encodings_are_rejected_without_lowering() {
-    for bytes in [
-        &[0xf0, 0x01, 0x08][..],
-        &[0x66, 0x66, 0xb8, 0x34, 0x12][..],
-        &[0x67, 0x8b, 0][..],
-    ] {
-        let space = code_space(0x1000, bytes, Permissions::EXECUTE);
-        assert!(matches!(
-            decode_one(&space, GuestAddress(0x1000)),
-            Err(DecodeError::Unsupported(_))
-        ));
-    }
+fn lock_memory_and_address16_are_typed_while_duplicate_width_stays_closed() {
+    use ring3_engine::cpu::x86::ir::AddressSize;
+    let space = code_space(0x1000, &[0xf0, 0x01, 0x08], Permissions::EXECUTE);
+    assert!(matches!(
+        decode_one(&space, GuestAddress(0x1000))
+            .unwrap()
+            .operation(),
+        Operation::AtomicMemory { width: 4, .. }
+    ));
+    assert_decodes(
+        &[0x67, 0x8b, 0],
+        Operation::Move {
+            destination: Location32::Register(Register32::Eax),
+            source: Value32::Memory(EffectiveAddress {
+                base: Some(Register32::Ebx),
+                index: Some(Register32::Esi),
+                address_size: AddressSize::Bits16,
+                ..Default::default()
+            }),
+        },
+    );
+    let space = code_space(
+        0x1000,
+        &[0x66, 0x66, 0xb8, 0x34, 0x12],
+        Permissions::EXECUTE,
+    );
+    assert!(matches!(
+        decode_one(&space, GuestAddress(0x1000)),
+        Err(DecodeError::Unsupported(_))
+    ));
 }

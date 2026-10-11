@@ -1,3 +1,6 @@
+#[path = "support/prefix_admission.rs"]
+mod prefix_admission;
+
 use ring3_engine::{
     abi::arena::TRANSFER_OFFSET,
     cpu::{
@@ -168,6 +171,10 @@ fn pause_exact_grammar_keeps_prefix_and_instruction_neighbors_closed() {
         } else {
             DecodeError::Unsupported(UnsupportedFeature::Opcode)
         };
+        if matches!(prefix, 0x26 | 0x2e | 0x36 | 0x3e | 0x64 | 0x65 | 0x67) {
+            prefix_admission::admitted(&bytes);
+            continue;
+        }
         assert_eq!(
             decode_one(&code_space(CODE, &bytes), GuestAddress(CODE)).err(),
             Some(expected),
@@ -181,16 +188,19 @@ fn pause_exact_grammar_keeps_prefix_and_instruction_neighbors_closed() {
         &[0xf2, 0x90],
         &[0xf3, 0xc3],
     ] {
+        if prefix_admission::admit_if_new_prefix(bytes) {
+            continue;
+        }
         assert_eq!(
             decode_one(&code_space(CODE, bytes), GuestAddress(CODE)).err(),
             Some(DecodeError::Unsupported(UnsupportedFeature::Opcode)),
             "{bytes:02x?}"
         );
     }
-    assert_eq!(
-        decode_one(&code_space(CODE, &[0xf3, 0xa4]), GuestAddress(CODE)).err(),
-        Some(DecodeError::Unsupported(UnsupportedFeature::RepeatedString))
-    );
+    assert!(matches!(
+        prefix_admission::admitted(&[0xf3, 0xa4]).0,
+        Operation::RepeatString { .. }
+    ));
     for bytes in [&[0x90][..], &[0x66, 0x90], &PAUSE] {
         let decoded = decode_one(&code_space(CODE, bytes), GuestAddress(CODE)).unwrap();
         assert_eq!(decoded.operation(), &Operation::Nop);

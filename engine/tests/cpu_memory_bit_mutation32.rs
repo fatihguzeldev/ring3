@@ -1,3 +1,6 @@
+#[path = "support/prefix_admission.rs"]
+mod prefix_admission;
+
 use ring3_engine::{abi::arena::TRANSFER_OFFSET, process::EngineInstance};
 
 fn admitted(bytes: &[u8]) -> EngineInstance {
@@ -317,6 +320,9 @@ fn strict_neighbors_fetch_wrap_and_source_currency_are_exact() {
                 } else {
                     UnsupportedFeature::Opcode
                 };
+                if prefix_admission::admit_if_new_prefix(&bytes) {
+                    continue;
+                }
                 assert_eq!(
                     decode_one(fixture(CODE, &bytes).memory().unwrap(), GuestAddress(CODE))
                         .unwrap_err(),

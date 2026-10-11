@@ -1,3 +1,6 @@
+#[path = "support/prefix_admission.rs"]
+mod prefix_admission;
+
 use ring3_engine::{abi::arena::TRANSFER_OFFSET, process::EngineInstance};
 
 fn admission(modrm: u8) {
@@ -182,6 +185,10 @@ fn strict_neighbors_and_operand_fetch_keep_categories_and_exact_faults() {
                 0x26 | 0x64 => DecodeError::Unsupported(UnsupportedFeature::Segment),
                 _ => DecodeError::Unsupported(UnsupportedFeature::Opcode),
             };
+            if matches!(prefix, 0x26 | 0x2e | 0x36 | 0x3e | 0x64 | 0x65 | 0x67) {
+                prefix_admission::admitted(&bytes);
+                continue;
+            }
             assert_eq!(
                 decode_one(engine.memory().unwrap(), GuestAddress(CODE)).err(),
                 Some(wanted)

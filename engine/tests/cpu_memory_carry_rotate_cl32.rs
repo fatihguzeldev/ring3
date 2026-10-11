@@ -1,3 +1,5 @@
+#[path = "support/prefix_admission.rs"]
+mod prefix_admission;
 use ring3_engine::{
     abi::arena::TRANSFER_OFFSET,
     cpu::x86::decode::decode_one,
@@ -741,6 +743,7 @@ fn strict_and_late_memory_cl_failures_preserve_both_owner_publications() {
     let mut decodes = 0;
     let mut refusals = 0;
     for (excluded, cause) in exclusions() {
+        let (excluded, cause) = prefix_admission::refusal_after_prefix_admission(excluded, cause);
         let mut bytes = excluded.clone();
         bytes.extend([0xeb, 0]);
         let engine = fresh_code(CODE, &bytes, false);

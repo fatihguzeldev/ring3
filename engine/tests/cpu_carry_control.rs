@@ -1,3 +1,6 @@
+#[path = "support/prefix_admission.rs"]
+mod prefix_admission;
+
 use ring3_engine::{abi::arena::TRANSFER_OFFSET, process::EngineInstance};
 use ring3_engine::{
     cpu::{
@@ -115,6 +118,10 @@ fn prefixes_refuse_and_single_byte_fetch_preserves_boundaries() {
         for prefix in [0x66, 0x67, 0xf2, 0xf3, 0x64, 0xf0] {
             let engine = code(0x1000, &[prefix, opcode]);
             let result = decode_one(engine.memory().unwrap(), GuestAddress(0x1000));
+            if matches!(prefix, 0x26 | 0x2e | 0x36 | 0x3e | 0x64 | 0x65 | 0x67) {
+                prefix_admission::admitted(&[prefix, opcode]);
+                continue;
+            }
             assert!(
                 matches!(
                     result,

@@ -1,3 +1,5 @@
+#[path = "support/prefix_admission.rs"]
+mod prefix_admission;
 use ring3_engine::{
     abi::{
         arena::TRANSFER_OFFSET,
@@ -215,6 +217,9 @@ fn all_register_division_forms_compile_in_six_profiles_and_exclusions_stay_stric
         &[0x66, 0x66, 0xf7, 0x34, 0x8b],
         &[0x66, 0x66, 0xf7, 0x3c, 0x8b],
     ] {
+        if prefix_admission::admit_if_new_prefix(bytes) {
+            continue;
+        }
         engine.protect(CODE, 1, 7).unwrap();
         engine.arena_mut().unwrap()[TRANSFER_OFFSET..TRANSFER_OFFSET + bytes.len()]
             .copy_from_slice(bytes);

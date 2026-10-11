@@ -1,3 +1,6 @@
+#[path = "support/prefix_admission.rs"]
+mod prefix_admission;
+
 use ring3_engine::cpu::dbt::{
     ArtifactError, BlockSpec, CompileError, CompileLimits, InstructionError, compile_entry_region,
     compile_region, prepare_entry_region, prepare_region,
@@ -281,15 +284,19 @@ fn malformed_lea_prefixes_and_adjacent_exclusions_keep_exact_error_categories() 
         &[0x67, 0x8d, 0x03][..],
         &[0xf3, 0x8d, 0x03][..],
     ] {
+        if matches!(
+            bytes.first(),
+            Some(0x26 | 0x2e | 0x36 | 0x3e | 0x64 | 0x65 | 0x67)
+        ) {
+            prefix_admission::admitted(bytes);
+            continue;
+        }
         rejected(
             bytes,
             InstructionError::Decode(DecodeError::Unsupported(UnsupportedFeature::Opcode)),
         );
     }
-    rejected(
-        &[0x64, 0x8d, 0x03],
-        InstructionError::Decode(DecodeError::Unsupported(UnsupportedFeature::Segment)),
-    );
+    prefix_admission::admitted(&[0x64, 0x8d, 0x03]);
     rejected(
         &[0x0f, 0x06],
         InstructionError::Decode(DecodeError::Unsupported(UnsupportedFeature::Privileged)),

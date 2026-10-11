@@ -1,3 +1,6 @@
+#[path = "support/prefix_admission.rs"]
+mod prefix_admission;
+
 use ring3_engine::process::EngineInstance;
 
 const PC: u32 = 0x1000;
@@ -148,6 +151,10 @@ fn typed_rel8_targets_prefixes_and_fetch_boundaries_are_exact() {
             (0xf3, UnsupportedFeature::Opcode),
             (0x64, UnsupportedFeature::Segment),
         ] {
+            if matches!(prefix, 0x26 | 0x2e | 0x36 | 0x3e | 0x64 | 0x65 | 0x67) {
+                prefix_admission::admitted(&[prefix, opcode, 0]);
+                continue;
+            }
             assert_eq!(
                 decode_one(&code(&[prefix, opcode, 0], PC), GuestAddress(PC)).unwrap_err(),
                 DecodeError::Unsupported(feature)
@@ -263,9 +270,15 @@ assert.deepEqual(WebAssembly.Module.exports(m),[{name:'run',kind:'function'}]);n
 
 #[test]
 fn late_refusal_keeps_arena_owner_and_source_currency() {
+    let (operation, length) = prefix_admission::admitted(&[0x67, 0xe2, 0]);
+    assert_eq!(length, 3);
+    assert!(matches!(operation, Operation::CountBranchWord { .. }));
     for resident in [false, true] {
         let mut engine = EngineInstance::new(2, 0x6162_6364_6566_6768).unwrap();
-        for (pc, code) in [(PC, &[0xe2, 0][..]), (0x3000, &[0x90, 0x67, 0xe2, 0][..])] {
+        for (pc, code) in [
+            (PC, &[0xe2, 0][..]),
+            (0x3000, &[0x90, 0x0f, 0x0b, 0x90][..]),
+        ] {
             engine.map(pc, 1, 7).unwrap();
             upload(&mut engine, pc, code);
             engine.protect(pc, 1, 4).unwrap();

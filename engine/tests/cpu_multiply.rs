@@ -1,3 +1,5 @@
+#[path = "support/prefix_admission.rs"]
+mod prefix_admission;
 use ring3_engine::{
     cpu::{
         UnsupportedFeature,
@@ -250,6 +252,9 @@ fn word_byte_implicit_wide_forms_and_prefixes_keep_existing_error_categories() {
         &[0xf3, 0x0f, 0xaf, 0xc2],
         &[0xf2, 0x6b, 0xc2, 0x80],
     ] {
+        if prefix_admission::admit_if_new_prefix(bytes) {
+            continue;
+        }
         let memory = code(CODE, bytes);
         assert_eq!(
             decode_one(&memory, GuestAddress(CODE)).err(),
@@ -264,6 +269,9 @@ fn word_byte_implicit_wide_forms_and_prefixes_keep_existing_error_categories() {
         ),
         (&[0xf0, 0x0f, 0xaf, 0xc2], DecodeError::InvalidEncoding),
     ] {
+        if prefix_admission::admit_if_new_prefix(bytes) {
+            continue;
+        }
         let memory = code(CODE, bytes);
         assert_eq!(
             decode_one(&memory, GuestAddress(CODE)).err(),

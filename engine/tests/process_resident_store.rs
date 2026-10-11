@@ -1,3 +1,6 @@
+#[path = "support/prefix_admission.rs"]
+mod prefix_admission;
+
 use ring3_engine::process::{EngineInstance, HostError};
 
 #[test]
@@ -387,13 +390,33 @@ fn accepted_moves_reach_later_poison_but_cut_spans_and_remaining_operations_do_n
             InstructionError::Decode(DecodeError::InvalidEncoding),
         ),
     ] {
+        let prefixed = matches!(instruction.first(), Some(0x64 | 0x67));
+        if prefixed {
+            prefix_admission::admitted(instruction);
+        }
         let mut bytes = vec![0x90];
         bytes.extend_from_slice(instruction);
         bytes.extend_from_slice(&[0x0f, 0x06]);
         upload(&mut engine, CODE, &bytes);
         describe(&mut engine, &[(CODE, bytes.len())]);
         let before = saved(&engine, &[keep]);
-        assert_eq!(engine.compile_resident(1), Err(error(CODE + 1, cause)));
+        assert_eq!(
+            engine.compile_resident(1),
+            Err(error(
+                if prefixed {
+                    CODE + 1 + instruction.len() as u32
+                } else {
+                    CODE + 1
+                },
+                if prefixed {
+                    InstructionError::Decode(DecodeError::Unsupported(
+                        UnsupportedFeature::Privileged,
+                    ))
+                } else {
+                    cause
+                },
+            ))
+        );
         assert_eq!(saved(&engine, &[keep]), before);
     }
 }

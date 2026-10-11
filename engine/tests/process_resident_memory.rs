@@ -1,3 +1,6 @@
+#[path = "support/prefix_admission.rs"]
+mod prefix_admission;
+
 use ring3_engine::{
     cpu::{
         UnsupportedFeature,
@@ -248,6 +251,16 @@ fn excluded_operations_and_poison_keep_original_pc_and_block_end_priority() {
         &[0x66, 0x10, 0xd0],
         &[0xf0, 0x01, 0x03],
     ] {
+        if matches!(
+            instruction.first(),
+            Some(0x26 | 0x2e | 0x36 | 0x3e | 0x64 | 0x65 | 0x67)
+        ) || matches!(
+            instruction,
+            [0xf0, 0xf7, 0x13] | [0xf0, 0xff, 0x03] | [0xf0, 0x01, 0x03]
+        ) {
+            prefix_admission::admitted(instruction);
+            continue;
+        }
         let mut bytes = vec![0x90];
         bytes.extend_from_slice(instruction);
         rejected(

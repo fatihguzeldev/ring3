@@ -85,9 +85,23 @@ fn assert_bound_admission(bytes: &[u8], resident: bool, entries: bool) {
         engine.artifact_bytes().unwrap()
     };
     assert_eq!(&module[..8], b"\0asm\x01\0\0\0");
-    let helper = if resident { b"stack_execute_resident".as_slice() } else { b"stack_execute".as_slice() };
+    let helper = if resident {
+        b"stack_execute_resident".as_slice()
+    } else {
+        b"stack_execute".as_slice()
+    };
     assert!(contains(module, helper));
-    for legacy in [b"read32".as_slice(), b"read16", b"read8", b"store32", b"store16", b"store8", b"store_resident32", b"store_resident16", b"store_resident8"] {
+    for legacy in [
+        b"read32".as_slice(),
+        b"read16",
+        b"read8",
+        b"store32",
+        b"store16",
+        b"store8",
+        b"store_resident32",
+        b"store_resident16",
+        b"store_resident8",
+    ] {
         assert!(!contains(module, legacy));
     }
     assert_eq!(engine.arena(), before);
@@ -215,9 +229,21 @@ fn enter_zero_exact_ir_fixed32_and_prefix_payload_adjacency_are_literal() {
 fn enter_operation(word: bool, allocation: u16, nesting: u8) -> Operation {
     let nesting = nesting & 31;
     if allocation == 0 && nesting == 0 {
-        if word { Operation::EnterZeroWord } else { Operation::EnterZero }
+        if word {
+            Operation::EnterZeroWord
+        } else {
+            Operation::EnterZero
+        }
     } else {
-        Operation::StackFrame { kind: if word { StackFrameKind::Enter16 } else { StackFrameKind::Enter32 }, allocation, nesting }
+        Operation::StackFrame {
+            kind: if word {
+                StackFrameKind::Enter16
+            } else {
+                StackFrameKind::Enter32
+            },
+            allocation,
+            nesting,
+        }
     }
 }
 
@@ -227,11 +253,18 @@ fn enter_prefixes_allocation_and_five_bit_nesting_are_exact() {
         let word = form[0] == 0x66;
         for prefix in [0x67, 0xf0, 0xf2, 0xf3, 0x26, 0x2e, 0x36, 0x3e, 0x64, 0x65] {
             let mut witnesses = vec![[vec![prefix], form.to_vec()].concat()];
-            if word { witnesses.push([vec![0x66, prefix], form[1..].to_vec()].concat()); }
+            if word {
+                witnesses.push([vec![0x66, prefix], form[1..].to_vec()].concat());
+            }
             for bytes in witnesses {
                 let decoded = decode_one(&code_space(CODE, &bytes), GuestAddress(CODE));
-                if prefix == 0xf0 { assert_eq!(decoded.err(), Some(DecodeError::InvalidEncoding), "{bytes:02x?}"); }
-                else {
+                if prefix == 0xf0 {
+                    assert_eq!(
+                        decoded.err(),
+                        Some(DecodeError::InvalidEncoding),
+                        "{bytes:02x?}"
+                    );
+                } else {
                     let decoded = decoded.unwrap();
                     assert_eq!(decoded.operation(), &enter_operation(word, 0, 0));
                     assert_eq!(usize::from(decoded.length()), bytes.len());
@@ -240,24 +273,67 @@ fn enter_prefixes_allocation_and_five_bit_nesting_are_exact() {
         }
         let immediate = form.len() - 3;
         for allocation in [1_u16, 0x66, 0x67, 0x8000, 0xffff] {
-            let mut bytes = form.to_vec(); bytes[immediate..immediate+2].copy_from_slice(&allocation.to_le_bytes());
-            assert_eq!(decode_one(&code_space(CODE, &bytes), GuestAddress(CODE)).unwrap().operation(), &enter_operation(word, allocation, 0));
+            let mut bytes = form.to_vec();
+            bytes[immediate..immediate + 2].copy_from_slice(&allocation.to_le_bytes());
+            assert_eq!(
+                decode_one(&code_space(CODE, &bytes), GuestAddress(CODE))
+                    .unwrap()
+                    .operation(),
+                &enter_operation(word, allocation, 0)
+            );
         }
         for nesting in [1, 31, 32, 64, 128, 255] {
-            let mut bytes = form.to_vec(); *bytes.last_mut().unwrap() = nesting;
-            assert_eq!(decode_one(&code_space(CODE, &bytes), GuestAddress(CODE)).unwrap().operation(), &enter_operation(word, 0, nesting));
+            let mut bytes = form.to_vec();
+            *bytes.last_mut().unwrap() = nesting;
+            assert_eq!(
+                decode_one(&code_space(CODE, &bytes), GuestAddress(CODE))
+                    .unwrap()
+                    .operation(),
+                &enter_operation(word, 0, nesting)
+            );
         }
     }
-    assert_eq!(decode_one(&code_space(CODE, &[0x66, 0x66, 0xc8, 0, 0, 0]), GuestAddress(CODE)).unwrap().operation(), &Operation::EnterZeroWord);
+    assert_eq!(
+        decode_one(
+            &code_space(CODE, &[0x66, 0x66, 0xc8, 0, 0, 0]),
+            GuestAddress(CODE)
+        )
+        .unwrap()
+        .operation(),
+        &Operation::EnterZeroWord
+    );
     for (bytes, expected) in [
-        (&[0x60][..], Operation::StackFrame { kind: StackFrameKind::PushAll32, allocation: 0, nesting: 0 }),
-        (&[0x66, 0x60][..], Operation::StackFrame { kind: StackFrameKind::PushAll16, allocation: 0, nesting: 0 }),
-        (&[0xc9][..], Operation::Leave), (&[0x66, 0xc9][..], Operation::LeaveWord),
+        (
+            &[0x60][..],
+            Operation::StackFrame {
+                kind: StackFrameKind::PushAll32,
+                allocation: 0,
+                nesting: 0,
+            },
+        ),
+        (
+            &[0x66, 0x60][..],
+            Operation::StackFrame {
+                kind: StackFrameKind::PushAll16,
+                allocation: 0,
+                nesting: 0,
+            },
+        ),
+        (&[0xc9][..], Operation::Leave),
+        (&[0x66, 0xc9][..], Operation::LeaveWord),
     ] {
-        assert_eq!(decode_one(&code_space(CODE, bytes), GuestAddress(CODE)).unwrap().operation(), &expected);
+        assert_eq!(
+            decode_one(&code_space(CODE, bytes), GuestAddress(CODE))
+                .unwrap()
+                .operation(),
+            &expected
+        );
     }
     for bytes in [&[0x9d][..], &[0x66, 0x9d]] {
-        assert_eq!(decode_one(&code_space(CODE, bytes), GuestAddress(CODE)).err(), Some(DecodeError::Unsupported(UnsupportedFeature::Opcode)));
+        assert_eq!(
+            decode_one(&code_space(CODE, bytes), GuestAddress(CODE)).err(),
+            Some(DecodeError::Unsupported(UnsupportedFeature::Opcode))
+        );
     }
 }
 

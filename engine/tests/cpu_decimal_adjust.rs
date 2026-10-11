@@ -1,3 +1,6 @@
+#[path = "support/prefix_admission.rs"]
+mod prefix_admission;
+
 use ring3_engine::{
     abi::arena::TRANSFER_OFFSET,
     cpu::{
@@ -337,6 +340,15 @@ fn decimal_adjust_strict_prefixes_and_other_decimal_forms_keep_categories() {
     }
     assert_eq!(cases.len(), 72);
     for (mut bytes, error) in cases {
+        // operand-size prefixes remain closed for these byte accumulator forms.
+        let error = if bytes.starts_with(&[0x66, 0x64]) {
+            opcode_error
+        } else {
+            error
+        };
+        if !bytes.starts_with(&[0x66, 0x64]) && prefix_admission::admit_if_new_prefix(&bytes) {
+            continue;
+        }
         bytes.extend([0xeb, 0]);
         let mut engine = code(&bytes);
         let memory = engine.memory().unwrap();

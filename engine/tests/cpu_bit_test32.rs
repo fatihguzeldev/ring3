@@ -1,3 +1,6 @@
+#[path = "support/prefix_admission.rs"]
+mod prefix_admission;
+
 use ring3_engine::process::EngineInstance;
 
 #[test]
@@ -483,7 +486,16 @@ fn saved(engine: &EngineInstance, resident_id: u64) -> Saved {
 fn memory_width_prefix_and_late_refusals_preserve_both_existing_owners() {
     let mut categories = [0; 3];
     for (excluded, expected) in exclusions() {
-        categories[match expected {
+        let original_category = expected;
+        let (excluded, expected) = if prefix_admission::admit_if_new_prefix(&excluded) {
+            let mut poison = vec![0x90; excluded.len()];
+            poison[..2].copy_from_slice(&[0x0f, 0x0b]);
+            (poison, DecodeError::Unsupported(UnsupportedFeature::Opcode))
+        } else {
+            (excluded, expected)
+        };
+
+        categories[match original_category {
             DecodeError::InvalidEncoding => 0,
             DecodeError::Unsupported(UnsupportedFeature::Segment) => 1,
             DecodeError::Unsupported(UnsupportedFeature::Opcode) => 2,

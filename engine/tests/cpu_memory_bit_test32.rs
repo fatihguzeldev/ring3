@@ -1,3 +1,6 @@
+#[path = "support/prefix_admission.rs"]
+mod prefix_admission;
+
 use ring3_engine::{abi::arena::TRANSFER_OFFSET, process::EngineInstance};
 
 fn admission(bytes: &[u8]) -> EngineInstance {
@@ -323,6 +326,10 @@ fn strict_neighbors_and_fetch_boundaries_keep_exact_categories() {
                 }
                 _ => opcode,
             };
+            if matches!(prefix, 0x26 | 0x2e | 0x36 | 0x3e | 0x64 | 0x65 | 0x67) {
+                prefix_admission::admitted(&bytes);
+                continue;
+            }
             assert_eq!(
                 decode_one(fixture(CODE, &bytes).memory().unwrap(), GuestAddress(CODE)).err(),
                 Some(wanted)

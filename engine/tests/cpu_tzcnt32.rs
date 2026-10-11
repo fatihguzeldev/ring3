@@ -1,3 +1,6 @@
+#[path = "support/prefix_admission.rs"]
+mod prefix_admission;
+
 use ring3_engine::{
     abi::arena::{TRANSFER_OFFSET, X87_OFFSET},
     cpu::{
@@ -323,6 +326,9 @@ fn only_single_f3_dword_count_is_open_and_segment_priority_is_preserved() {
         (vec![0x64, 0xf3, 0x0f, 0xbc, 0x00], segment),
         (vec![0xf3, 0x65, 0x0f, 0xbc, 0xc0], segment),
     ] {
+        if prefix_admission::admit_if_new_prefix(&bytes) {
+            continue;
+        }
         let engine = code_at(CODE, &bytes);
         let before = engine.arena().to_vec();
         assert_eq!(

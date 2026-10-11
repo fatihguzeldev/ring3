@@ -1,3 +1,5 @@
+#[path = "support/prefix_admission.rs"]
+mod prefix_admission;
 use ring3_engine::cpu::UnsupportedFeature;
 use ring3_engine::cpu::dbt::{
     BlockSpec, CompileError, CompileLimits, InstructionError, compile_region, prepare_region,
@@ -235,6 +237,9 @@ fn far_prefixed_and_sixteen_bit_stack_forms_keep_decoder_rejection_at_their_pc()
         &[0xf3, 0xc3][..],
         &[0x67, 0xe8, 0, 0, 0, 0][..],
     ] {
+        if prefix_admission::admit_if_new_prefix(instruction) {
+            continue;
+        }
         let mut bytes = vec![0x90];
         bytes.extend_from_slice(instruction);
         let mut engine = with_code(0x1000, &bytes);

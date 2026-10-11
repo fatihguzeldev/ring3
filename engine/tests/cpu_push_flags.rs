@@ -1,3 +1,6 @@
+#[path = "support/prefix_admission.rs"]
+mod prefix_admission;
+
 use ring3_engine::{abi::arena::TRANSFER_OFFSET, process::EngineInstance};
 
 const PC: u32 = 0x1000;
@@ -185,6 +188,10 @@ fn strict_prefixes_popfd_and_both_standalone_profiles_stay_refused() {
         (0x66, UnsupportedFeature::Opcode),
         (0x67, UnsupportedFeature::Opcode),
     ] {
+        if matches!(prefix, 0x26 | 0x2e | 0x36 | 0x3e | 0x64 | 0x65 | 0x67) {
+            prefix_admission::admitted(&[prefix, 0x9c]);
+            continue;
+        }
         assert_eq!(
             decode_one(
                 fixture(

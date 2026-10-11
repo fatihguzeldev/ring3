@@ -1,3 +1,6 @@
+#[path = "support/prefix_admission.rs"]
+mod prefix_admission;
+
 use ring3_engine::{
     abi::arena::{TRANSFER_OFFSET, X87_OFFSET},
     cpu::{
@@ -329,6 +332,9 @@ fn extra_prefixes_reverse_destinations_and_register_destinations_remain_closed()
         (vec![0xf0, 0x31, 0xf0], DecodeError::InvalidEncoding),
         (vec![0xf0, 0x01, 0x08], opcode),
     ] {
+        if prefix_admission::admit_if_new_prefix(&bytes) {
+            continue;
+        }
         let engine = code_at(CODE, &bytes);
         let before = engine.arena().to_vec();
         assert_eq!(

@@ -62,7 +62,8 @@ const ADDRESS: EffectiveAddress = EffectiveAddress {
     index: Some(Register32::Ecx),
     scale: 4,
     displacement: 0xffff_ffe0,
-    ..Default::default()
+    segment: None,
+    address_size: ring3_engine::cpu::x86::ir::AddressSize::Bits32,
 };
 
 fn code(pc: u32, bytes: &[u8]) -> AddressSpace {
@@ -293,13 +294,12 @@ fn memory_descriptions_preserve_base_index_scales_and_wrapping_displacement() {
 }
 
 #[test]
-fn width_rotates_sal_alias_and_prefixes_keep_precise_rejection_categories() {
-    for (_, extension) in KINDS {
+fn shifts_admit_segment_and_address_size_while_retaining_unsupported_prefix_categories() {
+    for (kind, extension) in KINDS {
         for bytes in [
             vec![0x66, 0xc0, extension << 3, 2],
             vec![0x66, 0xd2, extension << 3],
             vec![0x66, 0x66, 0xd1, 0xc0 | extension << 3],
-            vec![0x67, 0xd3, extension << 3 | 3],
             vec![0xf3, 0xd1, 0xc0 | extension << 3],
         ] {
             let memory = code(CODE, &bytes);
@@ -309,16 +309,39 @@ fn width_rotates_sal_alias_and_prefixes_keep_precise_rejection_categories() {
                 "{bytes:02x?}"
             );
         }
-        for (bytes, expected) in [
+        for (prefix, address) in [
             (
-                vec![0x64, 0xd3, extension << 3 | 3],
-                DecodeError::Unsupported(UnsupportedFeature::Segment),
+                0x67,
+                EffectiveAddress {
+                    base: Some(Register32::Ebp),
+                    index: Some(Register32::Edi),
+                    address_size: ring3_engine::cpu::x86::ir::AddressSize::Bits16,
+                    ..Default::default()
+                },
             ),
             (
-                vec![0xf0, 0xd1, 0xc0 | extension << 3],
-                DecodeError::InvalidEncoding,
+                0x64,
+                EffectiveAddress {
+                    base: Some(Register32::Ebx),
+                    segment: Some(ring3_engine::cpu::x86::SegmentRegister::Fs),
+                    ..Default::default()
+                },
             ),
         ] {
+            let bytes = [prefix, 0xd3, extension << 3 | 3];
+            let mut memory = code(CODE, &bytes);
+            decoded(
+                &mut memory,
+                &bytes,
+                kind,
+                Location32::Memory(address),
+                ShiftCount::Cl,
+            );
+        }
+        for (bytes, expected) in [(
+            vec![0xf0, 0xd1, 0xc0 | extension << 3],
+            DecodeError::InvalidEncoding,
+        )] {
             let memory = code(CODE, &bytes);
             assert_eq!(
                 decode_one(&memory, GuestAddress(CODE)).err(),

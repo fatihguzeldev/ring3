@@ -1,3 +1,6 @@
+#[path = "support/prefix_admission.rs"]
+mod prefix_admission;
+
 use ring3_engine::{
     abi::arena::{TRANSFER_OFFSET, X87_OFFSET},
     cpu::{
@@ -431,6 +434,9 @@ fn locked_and32_unselected_widths_opcodes_and_prefixes_stay_closed() {
     cases.insert(vec![0xf0, 0x83, 0xe0, 0xdf], DecodeError::InvalidEncoding);
     cases.insert(vec![0xf0, 0x83, 0x38, 0xdf], DecodeError::InvalidEncoding);
     for (bytes, expected) in cases {
+        if prefix_admission::admit_if_new_prefix(&bytes) {
+            continue;
+        }
         let engine = code(&bytes);
         let before = engine.arena().to_vec();
         assert_eq!(
