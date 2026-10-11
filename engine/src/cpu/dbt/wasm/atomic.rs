@@ -161,17 +161,6 @@ pub(super) fn compare8(
 }
 
 fn flags(code: &mut InstructionSink<'_>, mutable: u32, exit_depth: u32) {
-    code.local_get(STATE_PTR)
-        .i32_load(transfer(4))
-        .local_set(RESULT);
-    memory::reset_checks(code);
-    code.local_get(RESULT)
-        .local_get(FLAGS)
-        .i32_xor()
-        .i32_const(!mutable as i32)
-        .i32_and();
-    memory::add_check(code);
-    memory::protocol_if_bad(code);
-    memory::exit_if_failed(code, exit_depth);
-    code.local_get(RESULT).local_set(FLAGS);
+    code.local_get(STATE_PTR).i32_load(transfer(4));
+    super::cpu_result::flags(code, mutable, exit_depth);
 }

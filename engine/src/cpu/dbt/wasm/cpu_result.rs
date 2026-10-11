@@ -12,6 +12,21 @@ pub(super) fn value(code: &mut InstructionSink<'_>) {
     helper_field(code, 20);
 }
 
+/// consume returned flags only after validating the instruction's preservation contract.
+pub(super) fn flags(code: &mut InstructionSink<'_>, mutable: u32, exit_depth: u32) {
+    code.local_set(RESULT);
+    reset_checks(code);
+    code.local_get(RESULT)
+        .local_get(FLAGS)
+        .i32_xor()
+        .i32_const(!mutable as i32)
+        .i32_and();
+    add_check(code);
+    protocol_if_bad(code);
+    exit_if_failed(code, exit_depth);
+    code.local_get(RESULT).local_set(FLAGS);
+}
+
 pub(super) fn validate(
     code: &mut InstructionSink<'_>,
     length: u32,
