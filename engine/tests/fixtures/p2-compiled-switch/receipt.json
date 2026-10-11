@@ -1,0 +1,409 @@
+{
+  "artifacts": {
+    "build.py": {
+      "bytes": 15982,
+      "file": "build.py",
+      "sha256": "d5943341896ecada63e70bf7bf716445bb5ce0595d9e0510d31f68484ed75b24"
+    },
+    "compiled-records-build.py": {
+      "bytes": 10227,
+      "file": "compiled-records-build.py",
+      "sha256": "fe426f202b48664a87357c766d39099b9d35b5d8217c2b114696164a0d468258"
+    },
+    "kernel.c": {
+      "bytes": 643,
+      "file": "kernel.c",
+      "sha256": "5b4f0b8c7f3f4ad03e0d12782eeb7fbf9354c89f5cbaa7db0b72da0afe9353fd"
+    },
+    "kernel.coff-relocations.txt": {
+      "bytes": 383,
+      "file": "kernel.coff-relocations.txt",
+      "sha256": "128b551f4a147d3eb4250e3c26a73eb6b9992bbc3bb89a32ca70fd2fb99fe271"
+    },
+    "kernel.disasm.txt": {
+      "bytes": 1425,
+      "file": "kernel.disasm.txt",
+      "sha256": "de989bdde30df4bd79af2e180b44ffbd582208cc7c88d9cfa9f42fb5af850c5b"
+    },
+    "kernel.obj": {
+      "bytes": 715,
+      "file": "kernel.obj",
+      "sha256": "c257d84de2faef79bec68e95a1fbfbbd05738b2ee7f2854fe3fcc4491f344d23"
+    },
+    "kernel.rdata.bin": {
+      "bytes": 16,
+      "file": "kernel.rdata.bin",
+      "sha256": "3b90c5c3e6b86c5d71982e8919a6d3824c2226234cacaf899f7d6484aba63cc9"
+    },
+    "kernel.rdata.raw.bin": {
+      "bytes": 16,
+      "file": "kernel.rdata.raw.bin",
+      "sha256": "12c3afe1108e1374282b93d130f989e6434e79127af303e71e79c3ed99fb6eda"
+    },
+    "kernel.relocations.json": {
+      "bytes": 2033,
+      "file": "kernel.relocations.json",
+      "sha256": "e3e625b7c9414a116a6dfd93b1d37e6a20e49db76e801e09c87b43cac6de17fb"
+    },
+    "kernel.text.bin": {
+      "bytes": 59,
+      "file": "kernel.text.bin",
+      "sha256": "62fea086adcfbea3941cc241f8eec89d3f660cdfcfc36563a1276717715051f7"
+    },
+    "kernel.text.raw.bin": {
+      "bytes": 59,
+      "file": "kernel.text.raw.bin",
+      "sha256": "7fea1d788a24784afb704e0958b2c2dc78b516c9af440a35844022837e98f172"
+    }
+  },
+  "builder": {
+    "bytes": 15982,
+    "file": "build.py",
+    "path": "/Users/fatihguzel/ring3/engine/tests/fixtures/p2-compiled-switch/build.py",
+    "sha256": "d5943341896ecada63e70bf7bf716445bb5ce0595d9e0510d31f68484ed75b24"
+  },
+  "coff": {
+    "characteristics": 0,
+    "discarded_metadata": [
+      "empty .data",
+      "empty .bss",
+      "nonloaded .debug$S compiler metadata"
+    ],
+    "external_symbols": [
+      "_ring3_switch"
+    ],
+    "function": {
+      "entry_offset": 0,
+      "extent_basis": "single function through the complete original text section",
+      "extent_end_offset": 59,
+      "symbol": "_ring3_switch"
+    },
+    "layout": {
+      "preferred_base": 4194304,
+      "section_rvas": {
+        ".rdata": 16384,
+        ".text": 8192
+      }
+    },
+    "machine": 332,
+    "relocations": [
+      {
+        "linked_va": 4210688,
+        "pe_highlow_rva": 8215,
+        "pe_type": 3,
+        "raw_addend": 0,
+        "source_offset": 23,
+        "source_rva": 8215,
+        "source_section": ".text",
+        "symbol_value": 0,
+        "target_offset": 0,
+        "target_section_rva": 16384,
+        "target_symbol": ".rdata",
+        "target_symbol_index": 6
+      },
+      {
+        "linked_va": 4202523,
+        "pe_highlow_rva": 16384,
+        "pe_type": 3,
+        "raw_addend": 27,
+        "source_offset": 0,
+        "source_rva": 16384,
+        "source_section": ".rdata",
+        "symbol_value": 0,
+        "target_offset": 27,
+        "target_section_rva": 8192,
+        "target_symbol": ".text",
+        "target_symbol_index": 0
+      },
+      {
+        "linked_va": 4202539,
+        "pe_highlow_rva": 16388,
+        "pe_type": 3,
+        "raw_addend": 43,
+        "source_offset": 4,
+        "source_rva": 16388,
+        "source_section": ".rdata",
+        "symbol_value": 0,
+        "target_offset": 43,
+        "target_section_rva": 8192,
+        "target_symbol": ".text",
+        "target_symbol_index": 0
+      },
+      {
+        "linked_va": 4202528,
+        "pe_highlow_rva": 16392,
+        "pe_type": 3,
+        "raw_addend": 32,
+        "source_offset": 8,
+        "source_rva": 16392,
+        "source_section": ".rdata",
+        "symbol_value": 0,
+        "target_offset": 32,
+        "target_section_rva": 8192,
+        "target_symbol": ".text",
+        "target_symbol_index": 0
+      },
+      {
+        "linked_va": 4202533,
+        "pe_highlow_rva": 16396,
+        "pe_type": 3,
+        "raw_addend": 37,
+        "source_offset": 12,
+        "source_rva": 16396,
+        "source_section": ".rdata",
+        "symbol_value": 0,
+        "target_offset": 37,
+        "target_section_rva": 8192,
+        "target_symbol": ".text",
+        "target_symbol_index": 0
+      }
+    ],
+    "sections": [
+      {
+        "bytes": 59,
+        "characteristics": 1615855648,
+        "index": 1,
+        "loaded": true,
+        "name": ".text",
+        "raw_offset": 220,
+        "raw_sha256": "7fea1d788a24784afb704e0958b2c2dc78b516c9af440a35844022837e98f172",
+        "relocation_count": 1,
+        "relocations_offset": 279
+      },
+      {
+        "bytes": 0,
+        "characteristics": 3224371264,
+        "index": 2,
+        "loaded": false,
+        "name": ".data",
+        "raw_offset": 289,
+        "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "relocation_count": 0,
+        "relocations_offset": 0
+      },
+      {
+        "bytes": 0,
+        "characteristics": 3224371328,
+        "index": 3,
+        "loaded": false,
+        "name": ".bss",
+        "raw_offset": 0,
+        "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "relocation_count": 0,
+        "relocations_offset": 0
+      },
+      {
+        "bytes": 16,
+        "characteristics": 1076887616,
+        "index": 4,
+        "loaded": true,
+        "name": ".rdata",
+        "raw_offset": 289,
+        "raw_sha256": "12c3afe1108e1374282b93d130f989e6434e79127af303e71e79c3ed99fb6eda",
+        "relocation_count": 4,
+        "relocations_offset": 305
+      },
+      {
+        "bytes": 100,
+        "characteristics": 1110442048,
+        "index": 5,
+        "loaded": false,
+        "name": ".debug$S",
+        "raw_offset": 345,
+        "raw_sha256": "cbc96764a1bb8900d6496ab9f37b68cee67dcd235eb05bc27b8a19fae4277fe1",
+        "relocation_count": 0,
+        "relocations_offset": 0
+      }
+    ],
+    "specification": "https://learn.microsoft.com/en-us/windows/win32/debug/pe-format",
+    "symbol_count": 14,
+    "symbols": [
+      {
+        "auxiliaries": 1,
+        "index": 0,
+        "name": ".text",
+        "section": 1,
+        "storage": 3,
+        "type": 0,
+        "value": 0
+      },
+      {
+        "auxiliaries": 1,
+        "index": 2,
+        "name": ".data",
+        "section": 2,
+        "storage": 3,
+        "type": 0,
+        "value": 0
+      },
+      {
+        "auxiliaries": 1,
+        "index": 4,
+        "name": ".bss",
+        "section": 3,
+        "storage": 3,
+        "type": 0,
+        "value": 0
+      },
+      {
+        "auxiliaries": 1,
+        "index": 6,
+        "name": ".rdata",
+        "section": 4,
+        "storage": 3,
+        "type": 0,
+        "value": 0
+      },
+      {
+        "auxiliaries": 1,
+        "index": 8,
+        "name": ".debug$S",
+        "section": 5,
+        "storage": 3,
+        "type": 0,
+        "value": 0
+      },
+      {
+        "auxiliaries": 0,
+        "index": 10,
+        "name": "@feat.00",
+        "section": -1,
+        "storage": 3,
+        "type": 0,
+        "value": 1
+      },
+      {
+        "auxiliaries": 0,
+        "index": 11,
+        "name": "_ring3_switch",
+        "section": 1,
+        "storage": 2,
+        "type": 32,
+        "value": 0
+      },
+      {
+        "auxiliaries": 1,
+        "index": 12,
+        "name": ".file",
+        "section": -2,
+        "storage": 103,
+        "type": 0,
+        "value": 0
+      }
+    ],
+    "table": {
+      "entries": 4,
+      "entry_bytes": 4,
+      "target_offsets": [
+        27,
+        43,
+        32,
+        37
+      ]
+    },
+    "timestamp": 0
+  },
+  "command_cwd": "/Users/fatihguzel/ring3/target/engine-compiled-switch-2026-10-11/linked-final",
+  "commands": {
+    "compile": [
+      "/Library/Developer/CommandLineTools/usr/bin/clang",
+      "--target=i686-pc-windows-msvc",
+      "-std=c11",
+      "-O2",
+      "-ffreestanding",
+      "-fno-builtin",
+      "-fno-stack-protector",
+      "-fno-vectorize",
+      "-fno-slp-vectorize",
+      "-fno-unroll-loops",
+      "-falign-loops=1",
+      "-mno-sse",
+      "-mno-sse2",
+      "-mno-mmx",
+      "-mno-incremental-linker-compatible",
+      "-fno-unwind-tables",
+      "-fno-asynchronous-unwind-tables",
+      "-fno-addrsig",
+      "-c",
+      "kernel.c",
+      "-o",
+      "kernel.obj"
+    ],
+    "compiler_version": [
+      "/Library/Developer/CommandLineTools/usr/bin/clang",
+      "--version"
+    ],
+    "disassemble": [
+      "/Library/Developer/CommandLineTools/usr/bin/llvm-objdump",
+      "--disassemble",
+      "--section=.text",
+      "--x86-asm-syntax=intel",
+      "kernel.obj"
+    ],
+    "objdump_version": [
+      "/Library/Developer/CommandLineTools/usr/bin/llvm-objdump",
+      "--version"
+    ],
+    "relocations": [
+      "/Library/Developer/CommandLineTools/usr/bin/llvm-objdump",
+      "-r",
+      "kernel.obj"
+    ]
+  },
+  "compiler": {
+    "path": "/Library/Developer/CommandLineTools/usr/bin/clang",
+    "resolved_path": "/Library/Developer/CommandLineTools/usr/bin/clang",
+    "sha256": "f30550eab15fdf5ab8c0dc54c52679711241e5d4b636b027e18c09fef531775d",
+    "version": "Apple clang version 21.0.0 (clang-2100.1.1.101)\nTarget: arm64-apple-darwin25.6.0\nThread model: posix\nInstalledDir: /Library/Developer/CommandLineTools/usr/bin\n"
+  },
+  "dependency": {
+    "bytes": 10227,
+    "file": "build.py",
+    "path": "/Users/fatihguzel/ring3/engine/tests/fixtures/p2-compiled-records/build.py",
+    "sha256": "fe426f202b48664a87357c766d39099b9d35b5d8217c2b114696164a0d468258"
+  },
+  "environment": {
+    "LC_ALL": "C",
+    "PATH": "/usr/bin:/bin",
+    "SOURCE_DATE_EPOCH": "0",
+    "TZ": "UTC"
+  },
+  "flags": [
+    "--target=i686-pc-windows-msvc",
+    "-std=c11",
+    "-O2",
+    "-ffreestanding",
+    "-fno-builtin",
+    "-fno-stack-protector",
+    "-fno-vectorize",
+    "-fno-slp-vectorize",
+    "-fno-unroll-loops",
+    "-falign-loops=1",
+    "-mno-sse",
+    "-mno-sse2",
+    "-mno-mmx",
+    "-mno-incremental-linker-compatible",
+    "-fno-unwind-tables",
+    "-fno-asynchronous-unwind-tables",
+    "-fno-addrsig"
+  ],
+  "objdump": {
+    "path": "/Library/Developer/CommandLineTools/usr/bin/llvm-objdump",
+    "resolved_path": "/Library/Developer/CommandLineTools/usr/bin/llvm-objdump",
+    "sha256": "1dcc1432db4d828cf8cd71a84cb8d9bf63a7ca80b5eeec711a9e5f13a3f5f98e",
+    "version": "Apple LLVM version 21.0.0\n  Optimized build.\n\n\n  Registered Targets:\n    aarch64    - AArch64 (little endian)\n    aarch64_32 - AArch64 (little endian ILP32)\n    aarch64_be - AArch64 (big endian)\n    arm        - ARM\n    arm64      - ARM64 (little endian)\n    arm64_32   - ARM64 (little endian ILP32)\n    armeb      - ARM (big endian)\n    thumb      - Thumb\n    thumbeb    - Thumb (big endian)\n    x86        - 32-bit X86: Pentium-Pro and above\n    x86-64     - 64-bit X86: EM64T and AMD64\n"
+  },
+  "profile": {
+    "commands_sha256": "9548666c4d984b12e73c220f722fc06fe070d5fac6a7c4e9d7d704a92882cae7",
+    "environment_sha256": "3f63d7e3b0a21504805e0ab6dc9eb036b99a7f11d936a8101e2a18bd21f0eea9",
+    "flags_sha256": "a0a813000804f066540cab2fe1d439dbb61d3e6eff8ff180d027d79df2e98be1",
+    "hash_encoding": "utf8 JSON, sorted keys, compact separators"
+  },
+  "schema": "ring3.compiled-switch.v1",
+  "source": {
+    "bytes": 643,
+    "file": "kernel.c",
+    "path": "/Users/fatihguzel/ring3/engine/tests/fixtures/p2-compiled-switch/kernel.c",
+    "sha256": "5b4f0b8c7f3f4ad03e0d12782eeb7fbf9354c89f5cbaa7db0b72da0afe9353fd"
+  }
+}

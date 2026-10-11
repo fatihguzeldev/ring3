@@ -1,0 +1,28 @@
+
+kernel.obj:	file format coff-i386
+
+Disassembly of section .text:
+
+00000000 <_ring3_switch>:
+       0: 56                           	push	esi
+       1: 8b 44 24 10                  	mov	eax, dword ptr [esp + 0x10]
+       5: 8b 74 24 0c                  	mov	esi, dword ptr [esp + 0xc]
+       9: 8b 54 24 08                  	mov	edx, dword ptr [esp + 0x8]
+       d: 8b 0a                        	mov	ecx, dword ptr [edx]
+       f: 83 fe 03                     	cmp	esi, 0x3
+      12: 77 1f                        	ja	0x33 <_ring3_switch+0x33>
+      14: ff 24 b5 00 00 00 00         	jmp	dword ptr [4*esi]
+      1b: 83 c1 07                     	add	ecx, 0x7
+      1e: eb 15                        	jmp	0x35 <_ring3_switch+0x35>
+      20: c1 c1 05                     	rol	ecx, 0x5
+      23: eb 10                        	jmp	0x35 <_ring3_switch+0x35>
+      25: 8d 0c 49                     	lea	ecx, [ecx + 2*ecx]
+      28: 41                           	inc	ecx
+      29: eb 0a                        	jmp	0x35 <_ring3_switch+0x35>
+      2b: 81 f1 5a 5a a5 a5            	xor	ecx, 0xa5a55a5a
+      31: eb 02                        	jmp	0x35 <_ring3_switch+0x35>
+      33: 29 f1                        	sub	ecx, esi
+      35: 89 0a                        	mov	dword ptr [edx], ecx
+      37: 31 c8                        	xor	eax, ecx
+      39: 5e                           	pop	esi
+      3a: c3                           	ret

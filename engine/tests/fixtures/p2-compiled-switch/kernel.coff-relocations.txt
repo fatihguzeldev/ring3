@@ -1,0 +1,13 @@
+
+kernel.obj:	file format coff-i386
+
+RELOCATION RECORDS FOR [.text]:
+OFFSET   TYPE                     VALUE
+00000017 IMAGE_REL_I386_DIR32     .rdata
+
+RELOCATION RECORDS FOR [.rdata]:
+OFFSET   TYPE                     VALUE
+00000000 IMAGE_REL_I386_DIR32     .text
+00000004 IMAGE_REL_I386_DIR32     .text
+00000008 IMAGE_REL_I386_DIR32     .text
+0000000c IMAGE_REL_I386_DIR32     .text

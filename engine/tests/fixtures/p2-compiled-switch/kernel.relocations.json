@@ -1,0 +1,91 @@
+{
+  "layout": {
+    "preferred_base": 4194304,
+    "section_rvas": {
+      ".rdata": 16384,
+      ".text": 8192
+    }
+  },
+  "relocations": [
+    {
+      "linked_va": 4210688,
+      "pe_highlow_rva": 8215,
+      "pe_type": 3,
+      "raw_addend": 0,
+      "source_offset": 23,
+      "source_rva": 8215,
+      "source_section": ".text",
+      "symbol_value": 0,
+      "target_offset": 0,
+      "target_section_rva": 16384,
+      "target_symbol": ".rdata",
+      "target_symbol_index": 6
+    },
+    {
+      "linked_va": 4202523,
+      "pe_highlow_rva": 16384,
+      "pe_type": 3,
+      "raw_addend": 27,
+      "source_offset": 0,
+      "source_rva": 16384,
+      "source_section": ".rdata",
+      "symbol_value": 0,
+      "target_offset": 27,
+      "target_section_rva": 8192,
+      "target_symbol": ".text",
+      "target_symbol_index": 0
+    },
+    {
+      "linked_va": 4202539,
+      "pe_highlow_rva": 16388,
+      "pe_type": 3,
+      "raw_addend": 43,
+      "source_offset": 4,
+      "source_rva": 16388,
+      "source_section": ".rdata",
+      "symbol_value": 0,
+      "target_offset": 43,
+      "target_section_rva": 8192,
+      "target_symbol": ".text",
+      "target_symbol_index": 0
+    },
+    {
+      "linked_va": 4202528,
+      "pe_highlow_rva": 16392,
+      "pe_type": 3,
+      "raw_addend": 32,
+      "source_offset": 8,
+      "source_rva": 16392,
+      "source_section": ".rdata",
+      "symbol_value": 0,
+      "target_offset": 32,
+      "target_section_rva": 8192,
+      "target_symbol": ".text",
+      "target_symbol_index": 0
+    },
+    {
+      "linked_va": 4202533,
+      "pe_highlow_rva": 16396,
+      "pe_type": 3,
+      "raw_addend": 37,
+      "source_offset": 12,
+      "source_rva": 16396,
+      "source_section": ".rdata",
+      "symbol_value": 0,
+      "target_offset": 37,
+      "target_section_rva": 8192,
+      "target_symbol": ".text",
+      "target_symbol_index": 0
+    }
+  ],
+  "table": {
+    "entries": 4,
+    "entry_bytes": 4,
+    "target_offsets": [
+      27,
+      43,
+      32,
+      37
+    ]
+  }
+}
