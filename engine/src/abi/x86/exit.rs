@@ -8,6 +8,7 @@ pub const EXIT_VERSION_2: u16 = 2;
 pub const EXIT_VERSION_3: u16 = 3;
 pub const EXIT_VERSION_4: u16 = 4;
 pub const EXIT_VERSION_5: u16 = 5;
+pub const EXIT_VERSION_6: u16 = 6;
 pub const REASON_OFFSET: usize = 16;
 pub const RETIRED_OFFSET: usize = 20;
 pub const DETAIL_OFFSET: usize = 24;
@@ -35,6 +36,10 @@ pub fn encode_exit_v5(exit: &ExecutionExit, output: &mut [u8]) -> Result<(), Abi
     encode(exit, output, EXIT_VERSION_5)
 }
 
+pub fn encode_exit_v6(exit: &ExecutionExit, output: &mut [u8]) -> Result<(), AbiError> {
+    encode(exit, output, EXIT_VERSION_6)
+}
+
 fn encode(exit: &ExecutionExit, output: &mut [u8], version: u16) -> Result<(), AbiError> {
     if output.len() != EXIT_SIZE {
         return Err(AbiError::Length);
@@ -50,7 +55,7 @@ fn encode(exit: &ExecutionExit, output: &mut [u8], version: u16) -> Result<(), A
             4
         }
         ExitReason::MemoryFault { fault, length } => {
-            validate_fault(fault, length)?;
+            validate_fault(fault, length, version)?;
             fields[2] = match fault.reason {
                 FaultReason::Unmapped => 1,
                 FaultReason::Permission => 2,
@@ -69,7 +74,7 @@ fn encode(exit: &ExecutionExit, output: &mut [u8], version: u16) -> Result<(), A
         ExitReason::Infrastructure(reason) => {
             if !matches!(
                 version,
-                EXIT_VERSION_2 | EXIT_VERSION_3 | EXIT_VERSION_4 | EXIT_VERSION_5
+                EXIT_VERSION_2 | EXIT_VERSION_3 | EXIT_VERSION_4 | EXIT_VERSION_5 | EXIT_VERSION_6
             ) {
                 return Err(AbiError::Exit);
             }
@@ -81,24 +86,60 @@ fn encode(exit: &ExecutionExit, output: &mut [u8], version: u16) -> Result<(), A
             7
         }
         ExitReason::Gate { id } => {
-            if !matches!(version, EXIT_VERSION_3 | EXIT_VERSION_4 | EXIT_VERSION_5) || id == 0 {
+            if !matches!(
+                version,
+                EXIT_VERSION_3 | EXIT_VERSION_4 | EXIT_VERSION_5 | EXIT_VERSION_6
+            ) || id == 0
+            {
                 return Err(AbiError::Exit);
             }
             fields[2] = id;
             8
         }
         ExitReason::ProcessExited { code } => {
-            if !matches!(version, EXIT_VERSION_4 | EXIT_VERSION_5) {
+            if !matches!(version, EXIT_VERSION_4 | EXIT_VERSION_5 | EXIT_VERSION_6) {
                 return Err(AbiError::Exit);
             }
             fields[2] = code;
             9
         }
         ExitReason::DivideError => {
-            if version != EXIT_VERSION_5 {
+            if !matches!(version, EXIT_VERSION_5 | EXIT_VERSION_6) {
                 return Err(AbiError::Exit);
             }
             10
+        }
+        ExitReason::GeneralProtection { error_code } => {
+            if version != EXIT_VERSION_6 {
+                return Err(AbiError::Exit);
+            }
+            fields[2] = error_code;
+            11
+        }
+        ExitReason::FloatingPoint { status } => {
+            if version != EXIT_VERSION_6 {
+                return Err(AbiError::Exit);
+            }
+            fields[2] = u32::from(status);
+            12
+        }
+        ExitReason::SimdFloatingPoint { mxcsr } => {
+            if version != EXIT_VERSION_6 || mxcsr & !0xffff != 0 {
+                return Err(AbiError::Exit);
+            }
+            fields[2] = mxcsr;
+            13
+        }
+        ExitReason::SegmentNotPresent { error_code } | ExitReason::StackSegment { error_code } => {
+            if version != EXIT_VERSION_6 {
+                return Err(AbiError::Exit);
+            }
+            fields[2] = error_code;
+            if matches!(exit.reason, ExitReason::SegmentNotPresent { .. }) {
+                14
+            } else {
+                15
+            }
         }
     };
     header::write_version(output, *b"R3EX", version);
@@ -119,6 +160,7 @@ pub fn decode_exit(input: &[u8]) -> Result<ExecutionExit, AbiError> {
             EXIT_VERSION_3,
             EXIT_VERSION_4,
             EXIT_VERSION_5,
+            EXIT_VERSION_6,
         ],
     )?;
     let detail = read_u32(input, DETAIL_OFFSET);
@@ -142,13 +184,13 @@ pub fn decode_exit(input: &[u8]) -> Result<ExecutionExit, AbiError> {
                 _ => return Err(AbiError::Exit),
             },
         };
-        validate_fault(fault, length)?;
+        validate_fault(fault, length, version)?;
         ExitReason::MemoryFault { fault, length }
     } else {
         if address != 0
             || access != 0
             || length != 0
-            || (!matches!(tag, 4 | 7 | 8 | 9) && detail != 0)
+            || (!matches!(tag, 4 | 7 | 8 | 9 | 11 | 12 | 13 | 14 | 15) && detail != 0)
         {
             return Err(AbiError::Exit);
         }
@@ -160,7 +202,7 @@ pub fn decode_exit(input: &[u8]) -> Result<ExecutionExit, AbiError> {
             6 => ExitReason::CodeInvalidated,
             7 if matches!(
                 version,
-                EXIT_VERSION_2 | EXIT_VERSION_3 | EXIT_VERSION_4 | EXIT_VERSION_5
+                EXIT_VERSION_2 | EXIT_VERSION_3 | EXIT_VERSION_4 | EXIT_VERSION_5 | EXIT_VERSION_6
             ) =>
             {
                 ExitReason::Infrastructure(match detail {
@@ -170,15 +212,26 @@ pub fn decode_exit(input: &[u8]) -> Result<ExecutionExit, AbiError> {
                     _ => return Err(AbiError::Exit),
                 })
             }
-            8 if matches!(version, EXIT_VERSION_3 | EXIT_VERSION_4 | EXIT_VERSION_5)
-                && detail != 0 =>
+            8 if matches!(
+                version,
+                EXIT_VERSION_3 | EXIT_VERSION_4 | EXIT_VERSION_5 | EXIT_VERSION_6
+            ) && detail != 0 =>
             {
                 ExitReason::Gate { id: detail }
             }
-            9 if matches!(version, EXIT_VERSION_4 | EXIT_VERSION_5) => {
+            9 if matches!(version, EXIT_VERSION_4 | EXIT_VERSION_5 | EXIT_VERSION_6) => {
                 ExitReason::ProcessExited { code: detail }
             }
-            10 if version == EXIT_VERSION_5 => ExitReason::DivideError,
+            10 if matches!(version, EXIT_VERSION_5 | EXIT_VERSION_6) => ExitReason::DivideError,
+            11 if version == EXIT_VERSION_6 => ExitReason::GeneralProtection { error_code: detail },
+            12 if version == EXIT_VERSION_6 && detail <= 0xffff => ExitReason::FloatingPoint {
+                status: detail as u16,
+            },
+            13 if version == EXIT_VERSION_6 && detail <= 0xffff => {
+                ExitReason::SimdFloatingPoint { mxcsr: detail }
+            }
+            14 if version == EXIT_VERSION_6 => ExitReason::SegmentNotPresent { error_code: detail },
+            15 if version == EXIT_VERSION_6 => ExitReason::StackSegment { error_code: detail },
             _ => return Err(AbiError::Exit),
         }
     };
@@ -188,13 +241,17 @@ pub fn decode_exit(input: &[u8]) -> Result<ExecutionExit, AbiError> {
     })
 }
 
-fn validate_fault(fault: MemoryFault, length: u32) -> Result<(), AbiError> {
+fn validate_fault(fault: MemoryFault, length: u32, version: u16) -> Result<(), AbiError> {
     let valid_length = match fault.access {
+        Access::Read | Access::Write if version == EXIT_VERSION_6 => (1..=512).contains(&length),
         Access::Read | Access::Write => matches!(length, 1 | 2 | 4),
         Access::Execute => (1..=15).contains(&length),
     };
     let overflows = u64::from(fault.address.0) + u64::from(length) > 1 << 32;
-    if !valid_length || overflows != (fault.reason == FaultReason::AddressOverflow) {
+    if !valid_length
+        || ((version != EXIT_VERSION_6 || fault.reason == FaultReason::AddressOverflow)
+            && overflows != (fault.reason == FaultReason::AddressOverflow))
+    {
         return Err(AbiError::Exit);
     }
     Ok(())
@@ -237,5 +294,46 @@ mod tests {
         let mut bytes = [0; EXIT_SIZE];
         encode_exit(&exit, &mut bytes).unwrap();
         assert_eq!(decode_exit(&bytes).unwrap(), exit);
+    }
+
+    #[test]
+    fn cpu_exceptions_require_version6_and_preserve_exact_details() {
+        for reason in [
+            ExitReason::GeneralProtection { error_code: 0x43 },
+            ExitReason::FloatingPoint { status: 0x8081 },
+            ExitReason::SimdFloatingPoint { mxcsr: 0x1f81 },
+            ExitReason::SegmentNotPresent { error_code: 0x48 },
+            ExitReason::StackSegment { error_code: 0x50 },
+        ] {
+            let exit = ExecutionExit { reason, retired: 3 };
+            let mut bytes = [0; EXIT_SIZE];
+            assert_eq!(encode_exit_v5(&exit, &mut bytes), Err(AbiError::Exit));
+            encode_exit_v6(&exit, &mut bytes).unwrap();
+            assert_eq!(decode_exit(&bytes), Ok(exit));
+            bytes[4] = 5;
+            assert_eq!(decode_exit(&bytes), Err(AbiError::Exit));
+        }
+    }
+
+    #[test]
+    fn version6_preserves_large_spans_and_rejects_malformed_faults() {
+        let exit = ExecutionExit {
+            retired: 0,
+            reason: ExitReason::MemoryFault {
+                fault: MemoryFault {
+                    address: GuestAddress(0x3000),
+                    access: Access::Write,
+                    reason: FaultReason::Unmapped,
+                },
+                length: 512,
+            },
+        };
+        let mut bytes = [0; EXIT_SIZE];
+        encode_exit_v6(&exit, &mut bytes).unwrap();
+        assert_eq!(decode_exit(&bytes), Ok(exit));
+        write_u32(&mut bytes, ACCESS_LENGTH_OFFSET, 513);
+        assert_eq!(decode_exit(&bytes), Err(AbiError::Exit));
+        write_u32(&mut bytes, ACCESS_LENGTH_OFFSET, 0);
+        assert_eq!(decode_exit(&bytes), Err(AbiError::Exit));
     }
 }

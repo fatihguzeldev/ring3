@@ -1,6 +1,7 @@
 pub mod arena;
 pub mod call_frame;
 pub mod callback;
+pub mod cpu_helper;
 #[forbid(unsafe_code)]
 mod header;
 pub mod memory_helper;
