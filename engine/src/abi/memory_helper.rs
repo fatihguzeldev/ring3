@@ -7,6 +7,58 @@ pub const HELPER_SIZE: usize = 40;
 pub const NARROW_HELPER_VERSION: u16 = 2;
 pub const BYTE_STORE_HELPER_VERSION: u16 = 3;
 pub const WORD_STORE_HELPER_VERSION: u16 = 4;
+pub const BYTE_EXCHANGE_HELPER_VERSION: u16 = 5;
+
+pub fn encode_byte_exchange_result(
+    address: GuestAddress,
+    result: Result<u32, MemoryError>,
+    output: &mut [u8],
+) -> Result<(), AbiError> {
+    if output.len() != HELPER_SIZE {
+        return Err(AbiError::Length);
+    }
+    let fields = match result {
+        Ok(value) => {
+            if value > 0xff {
+                return Err(AbiError::MemoryHelper);
+            }
+            [0, value, 0, 0, 0, 1]
+        }
+        Err(MemoryError::Fault(fault)) => {
+            let access = match (fault.access, fault.reason) {
+                (Access::Read, FaultReason::Unmapped | FaultReason::Permission) => 1,
+                (Access::Write, FaultReason::Permission) => 2,
+                _ => return Err(AbiError::MemoryHelper),
+            };
+            if fault.address != address {
+                return Err(AbiError::MemoryHelper);
+            }
+            let detail = if fault.reason == FaultReason::Unmapped {
+                1
+            } else {
+                2
+            };
+            [1, 0, detail, address.0, access, 1]
+        }
+        Err(error) => [
+            2,
+            0,
+            if error == MemoryError::VersionExhausted {
+                1
+            } else {
+                2
+            },
+            0,
+            0,
+            1,
+        ],
+    };
+    header::write_version(output, *b"R3MH", BYTE_EXCHANGE_HELPER_VERSION);
+    for (index, field) in fields.into_iter().enumerate() {
+        header::write_u32(output, 16 + index * 4, field);
+    }
+    Ok(())
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum NarrowReadWidth {
