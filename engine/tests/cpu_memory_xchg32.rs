@@ -397,7 +397,7 @@ fn instruction_error(pc: u32, cause: InstructionError) -> CompileError {
 fn memory_xchg32_exact_prefix_width_and_lock_boundaries_preserve_categories() {
     let opcode = DecodeError::Unsupported(UnsupportedFeature::Opcode);
     let mut cases = vec![
-        (vec![0x86, 0x0b], opcode),
+        (vec![0x66, 0x87, 0x03], opcode),
         (vec![0x66, 0x66, 0x87, 0x0b], opcode),
         (vec![0xf0, 0x87, 0xc8], DecodeError::InvalidEncoding),
     ];

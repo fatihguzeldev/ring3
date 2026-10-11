@@ -539,6 +539,12 @@ pub(super) fn lower(instruction: &Instruction, bytes: &[u8]) -> Result<Operation
                 _ => Err(unsupported()),
             }
         }
+        Code::Xchg_rm8_r8 if instruction.op0_kind() == OpKind::Memory => {
+            Ok(Operation::MemoryExchangeByte {
+                address: effective_address(instruction)?,
+                source: byte_register(instruction.op1_register())?,
+            })
+        }
         Code::Xchg_rm8_r8 => {
             if instruction.op0_kind() != OpKind::Register
                 || instruction.op1_kind() != OpKind::Register

@@ -91,6 +91,12 @@ pub(super) fn check_profile(instruction: &Instruction, bytes: &[u8]) -> Result<(
     {
         return Err(unsupported());
     }
+    if instruction.code() == Code::Xchg_rm8_r8
+        && instruction.op0_kind() == OpKind::Memory
+        && !matches!(bytes, [0x86, modrm, ..] if *modrm & 0xc0 != 0xc0)
+    {
+        return Err(unsupported());
+    }
     if instruction.is_string_instruction()
         && (instruction.has_rep_prefix() || instruction.has_repne_prefix())
     {

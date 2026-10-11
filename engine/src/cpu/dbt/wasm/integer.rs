@@ -1222,6 +1222,14 @@ pub(super) fn instruction(
             code.local_get(RESULT).local_set(register(source));
             store = true;
         }
+        Operation::MemoryExchangeByte { address, source } => {
+            byte_value(code, ByteValue::Register(source));
+            code.local_set(RESULT);
+            memory::exchange_byte_result(code, address, imports, exit_depth);
+            code.local_get(RESULT);
+            insert_byte(code, source);
+            store = true;
+        }
         Operation::ExchangeAdd {
             destination,
             source,
