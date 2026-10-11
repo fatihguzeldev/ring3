@@ -645,6 +645,34 @@ pub extern "C" fn exchange_resident32(
 }
 
 #[allow(unsafe_code)]
+#[unsafe(export_name = "ring3_abi_v1_compare_exchange8")]
+pub extern "C" fn compare_exchange8(address: u32, expected: u32, desired: u32) -> u32 {
+    {
+        #![forbid(unsafe_code)]
+        crate::process::wasm::compare_exchange8(address, expected, desired)
+    }
+}
+
+#[allow(unsafe_code)]
+#[unsafe(export_name = "ring3_abi_v1_compare_exchange_resident8")]
+pub extern "C" fn compare_exchange_resident8(
+    key_low: u32,
+    key_high: u32,
+    id_low: u32,
+    id_high: u32,
+    address: u32,
+    expected: u32,
+    desired: u32,
+) -> u32 {
+    {
+        #![forbid(unsafe_code)]
+        crate::process::wasm::compare_exchange_resident8(
+            key_low, key_high, id_low, id_high, address, expected, desired,
+        )
+    }
+}
+
+#[allow(unsafe_code)]
 #[unsafe(export_name = "ring3_abi_v1_compare_exchange32")]
 pub extern "C" fn compare_exchange32(address: u32, expected: u32, desired: u32) -> u32 {
     {
