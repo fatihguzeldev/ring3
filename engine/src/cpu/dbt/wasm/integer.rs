@@ -1950,6 +1950,15 @@ pub(super) fn instruction(
             logical_flags(code, 31);
             store = true;
         }
+        Operation::LockedMemoryXor32 { address, mask } => {
+            memory::atomic_xor_result(code, address, mask, imports, exit_depth);
+            code.local_get(RESULT)
+                .i32_const(mask as i32)
+                .i32_xor()
+                .local_set(RESULT);
+            logical_flags(code, 31);
+            store = true;
+        }
         Operation::MemoryBitMutation {
             kind,
             address,

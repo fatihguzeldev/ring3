@@ -512,7 +512,7 @@ fn narrow_prefix_and_declared_span_errors_remain_precise() {
                 bytes.push(0x66);
             }
             bytes.extend_from_slice(&encode(opcode, extension, &[0x03], immediate));
-            if prefix == 0xf0 && opcode == 0x83 && matches!(extension, 1 | 4) {
+            if prefix == 0xf0 && opcode == 0x83 && matches!(extension, 1 | 4 | 6) {
                 bytes.extend_from_slice(&[0xeb, 0]);
                 for entries in [false, true] {
                     let mut instance = engine(&bytes);
@@ -538,8 +538,18 @@ fn narrow_prefix_and_declared_span_errors_remain_precise() {
                                 },
                                 mask: 0xffff_ff80,
                             }
-                        } else {
+                        } else if extension == 4 {
                             Operation::LockedMemoryAnd32 {
+                                address: EffectiveAddress {
+                                    base: Some(Register32::Ebx),
+                                    index: None,
+                                    scale: 1,
+                                    displacement: 0,
+                                },
+                                mask: 0xffff_ff80,
+                            }
+                        } else {
+                            Operation::LockedMemoryXor32 {
                                 address: EffectiveAddress {
                                     base: Some(Register32::Ebx),
                                     index: None,
@@ -569,8 +579,10 @@ fn narrow_prefix_and_declared_span_errors_remain_precise() {
                     let artifact = instance.artifact_bytes().unwrap();
                     let required = if extension == 1 {
                         b"atomic_or_u32".as_slice()
-                    } else {
+                    } else if extension == 4 {
                         b"atomic_and_u32".as_slice()
+                    } else {
+                        b"atomic_xor_u32".as_slice()
                     };
                     assert!(
                         artifact

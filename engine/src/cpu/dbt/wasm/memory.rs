@@ -56,6 +56,7 @@ pub(super) struct Imports {
     pub(super) bit_test_reset32: Option<StoreImport>,
     pub(super) atomic_or_u32: Option<StoreImport>,
     pub(super) atomic_and_u32: Option<StoreImport>,
+    pub(super) atomic_xor_u32: Option<StoreImport>,
 }
 
 pub(super) struct ImportNeeds {
@@ -78,6 +79,7 @@ pub(super) struct ImportNeeds {
     pub(super) bit_test_reset32: bool,
     pub(super) atomic_or_u32: bool,
     pub(super) atomic_and_u32: bool,
+    pub(super) atomic_xor_u32: bool,
 }
 
 impl Imports {
@@ -101,6 +103,7 @@ impl Imports {
         let mut bit_test_reset32 = false;
         let mut atomic_or_u32 = false;
         let mut atomic_and_u32 = false;
+        let mut atomic_xor_u32 = false;
         for instruction in blocks.iter().flat_map(|block| &block.instructions) {
             match instruction.operation() {
                 Operation::MemoryExchange { .. } => exchange = true,
@@ -116,6 +119,7 @@ impl Imports {
                 Operation::LockedMemoryBitReset32 { .. } => bit_test_reset32 = true,
                 Operation::LockedMemoryOr32 { .. } => atomic_or_u32 = true,
                 Operation::LockedMemoryAnd32 { .. } => atomic_and_u32 = true,
+                Operation::LockedMemoryXor32 { .. } => atomic_xor_u32 = true,
                 Operation::X87StatusToMemory { .. }
                 | Operation::X87ControlToMemory { .. }
                 | Operation::StoreWord { .. }
@@ -312,6 +316,7 @@ impl Imports {
             bit_test_reset32,
             atomic_or_u32,
             atomic_and_u32,
+            atomic_xor_u32,
         }
     }
 }
@@ -354,6 +359,16 @@ pub(super) fn atomic_and_result(
     exit_depth: u32,
 ) {
     exchange::atomic_and_result(code, address, mask, imports, exit_depth);
+}
+
+pub(super) fn atomic_xor_result(
+    code: &mut InstructionSink<'_>,
+    address: EffectiveAddress,
+    mask: u32,
+    imports: Imports,
+    exit_depth: u32,
+) {
+    exchange::atomic_xor_result(code, address, mask, imports, exit_depth);
 }
 
 pub(super) fn exchange_add_result(
