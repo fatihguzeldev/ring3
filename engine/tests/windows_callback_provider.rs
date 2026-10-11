@@ -4,7 +4,7 @@ mod pe;
 
 use ring3_engine::{
     abi::{
-        arena::{CANCEL_OFFSET, HELPER_OFFSET, TRANSFER_OFFSET, TRANSFER_SIZE},
+        arena::{CANCEL_OFFSET, HELPER_OFFSET, TRANSFER_OFFSET, TRANSFER_SIZE, X87_OFFSET},
         x86::{decode_state, encode_exit_v3, encode_state},
     },
     cpu::{ExecutionExit, ExitReason, dbt::RegistryError, x86::State32},
@@ -431,6 +431,80 @@ fn allocation_rounding_zero_rw_and_capacity_failure_are_callback_continuations()
 }
 
 #[test]
+fn allocation_permissions_survive_home_and_foreign_callback_continuations() {
+    for foreign in [false, true] {
+        for (protection, readable, writable, executable) in [
+            (1, false, false, false),
+            (0x20, true, false, true),
+            (0x40, true, true, true),
+        ] {
+            let mut f = fixture(11, foreign, true);
+            let arena = f.engine.arena_mut().unwrap();
+            arena[X87_OFFSET + 16..X87_OFFSET + 18].copy_from_slice(&0x027f_u16.to_le_bytes());
+            arena[X87_OFFSET + 18..X87_OFFSET + 20].copy_from_slice(&0x81a5_u16.to_le_bytes());
+            for (index, byte) in arena[X87_OFFSET + 40..X87_OFFSET + 120]
+                .iter_mut()
+                .enumerate()
+            {
+                *byte = (index as u8).wrapping_mul(29).wrapping_add(17);
+            }
+            invoke(&mut f, WindowsApi32::SetLastError, &[LAST_ERROR], SENTINEL);
+            invoke(
+                &mut f,
+                WindowsApi32::VirtualAlloc,
+                &[0, 4097, 0x3000, protection],
+                WINDOW,
+            );
+            assert_eq!(f.engine.memory().unwrap().mapped_pages(), 11);
+            for (access, allowed) in [
+                (Access::Read, readable),
+                (Access::Write, writable),
+                (Access::Execute, executable),
+            ] {
+                for address in [WINDOW, WINDOW + 8191] {
+                    let result = f
+                        .engine
+                        .memory()
+                        .unwrap()
+                        .resolve(GuestAddress(address), access);
+                    if allowed {
+                        assert!(result.is_ok());
+                    } else {
+                        assert_eq!(
+                            result,
+                            Err(MemoryError::Fault(MemoryFault {
+                                address: GuestAddress(address),
+                                access,
+                                reason: FaultReason::Permission,
+                            }))
+                        );
+                    }
+                }
+            }
+            if readable {
+                assert_eq!(ram(&f.engine, WINDOW).unwrap(), vec![0; 4096]);
+                assert_eq!(ram(&f.engine, WINDOW + 4096).unwrap(), vec![0; 4096]);
+            }
+            invoke(&mut f, WindowsApi32::GetLastError, &[], LAST_ERROR);
+            let before = saved(&f);
+            invoke(
+                &mut f,
+                WindowsApi32::VirtualAlloc,
+                &[0, 1, 0x3000, protection],
+                0,
+            );
+            assert_eq!(f.engine.memory().unwrap().mapped_pages(), 11);
+            assert_eq!(
+                saved(&f).ram[ORIGINAL_PAGES.len()..],
+                before.ram[ORIGINAL_PAGES.len()..]
+            );
+            invoke(&mut f, WindowsApi32::GetLastError, &[], 8);
+            finish(&mut f, 37);
+        }
+    }
+}
+
+#[test]
 fn exact_active_callback_and_inner_tokens_keep_priorities_and_old_routes_refuse() {
     let mut f = fixture(12, true, true);
     let (inner, state) = capture(
@@ -656,7 +730,7 @@ fn invalid_provider_shapes_and_callback_exit_process_refuse_before_effects() {
         (
             WindowsApi32::VirtualAlloc,
             CallingConvention32::Stdcall,
-            vec![0, 1, 0x3000, 0x20],
+            vec![0, 1, 0x3000, 0x120],
         ),
         (
             WindowsApi32::VirtualAlloc,

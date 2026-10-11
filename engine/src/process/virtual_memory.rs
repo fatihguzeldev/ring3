@@ -10,6 +10,7 @@ impl EngineInstance {
         frame: CallFrame32,
         thread: ThreadState32,
         size: u32,
+        permissions: Permissions,
     ) -> Result<(), HostError> {
         let bounds = PageRange::new(GuestAddress(0x1000_0000), 0x6000_0000 / PAGE_SIZE)
             .map_err(HostError::Memory)?;
@@ -53,7 +54,7 @@ impl EngineInstance {
         self.memory
             .as_mut()
             .ok_or(HostError::Closed)?
-            .map_zeroed(range, Permissions::READ_WRITE)
+            .map_zeroed(range, permissions)
             .map_err(HostError::Memory)?;
         self.virtual_allocations.push(range);
         self.publish_prepared_call(prepared);

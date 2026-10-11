@@ -1,10 +1,10 @@
 use ring3_engine::{
     abi::{
-        arena::{TRANSFER_OFFSET, TRANSFER_SIZE},
+        arena::{TRANSFER_OFFSET, TRANSFER_SIZE, X87_OFFSET},
         x86::{decode_state, encode_exit_v3, encode_state},
     },
     cpu::{ExecutionExit, ExitReason, dbt::RegistryError, x86::State32},
-    memory::{Access, FaultReason, GuestAddress, MemoryError},
+    memory::{Access, FaultReason, GuestAddress, MemoryError, MemoryFault},
     process::{CallError, EngineInstance, HostError},
     windows::{CallingConvention32, WindowsApi32},
 };
@@ -265,6 +265,155 @@ fn set_error(f: &mut Fixture, owner: Owner, value: u32) {
 }
 
 #[test]
+fn simple_protection_modes_allocate_in_both_owner_paths() {
+    for owner in [Owner::Replacement, Owner::Resident] {
+        for (protection, readable, writable, executable) in [
+            (1, false, false, false),
+            (2, true, false, false),
+            (4, true, true, false),
+            (0x10, false, false, true),
+            (0x20, true, false, true),
+            (0x40, true, true, true),
+        ] {
+            let mut f = fixture(5);
+            set_error(&mut f, owner, 0xf123_4567);
+            let arena = f.engine.arena_mut().unwrap();
+            arena[X87_OFFSET + 16..X87_OFFSET + 18].copy_from_slice(&0x027f_u16.to_le_bytes());
+            arena[X87_OFFSET + 18..X87_OFFSET + 20].copy_from_slice(&0x81a5_u16.to_le_bytes());
+            for (index, byte) in arena[X87_OFFSET + 40..X87_OFFSET + 120]
+                .iter_mut()
+                .enumerate()
+            {
+                *byte = (index as u8).wrapping_mul(29).wrapping_add(17);
+            }
+            let (token, state) = capture(
+                &mut f,
+                owner,
+                ALLOC,
+                CallingConvention32::Stdcall,
+                4,
+                [0, 4097, 0x3000, protection],
+            );
+            completed(&mut f, owner, token, state, WINDOW, 4);
+            assert_eq!(f.engine.memory().unwrap().mapped_pages(), 5);
+            last_error(&mut f, owner, 0xf123_4567);
+            for (access, allowed) in [
+                (Access::Read, readable),
+                (Access::Write, writable),
+                (Access::Execute, executable),
+            ] {
+                for address in [WINDOW, WINDOW + 4096, WINDOW + 8191] {
+                    let result = f
+                        .engine
+                        .memory()
+                        .unwrap()
+                        .resolve(GuestAddress(address), access);
+                    if allowed {
+                        assert!(result.is_ok(), "protection={protection:x}, {access:?}");
+                    } else {
+                        assert_eq!(
+                            result,
+                            Err(MemoryError::Fault(MemoryFault {
+                                address: GuestAddress(address),
+                                access,
+                                reason: FaultReason::Permission,
+                            }))
+                        );
+                    }
+                }
+                assert_eq!(
+                    f.engine
+                        .memory()
+                        .unwrap()
+                        .resolve(GuestAddress(WINDOW + 8192), access),
+                    Err(MemoryError::Fault(MemoryFault {
+                        address: GuestAddress(WINDOW + 8192),
+                        access,
+                        reason: FaultReason::Unmapped,
+                    })),
+                );
+            }
+            for (access, allowed) in [(Access::Read, readable), (Access::Execute, executable)] {
+                let mut bytes = vec![0xa5; 8192];
+                let result = if access == Access::Read {
+                    f.engine
+                        .memory()
+                        .unwrap()
+                        .read(GuestAddress(WINDOW), &mut bytes)
+                } else {
+                    f.engine
+                        .memory()
+                        .unwrap()
+                        .fetch(GuestAddress(WINDOW), &mut bytes)
+                };
+                if allowed {
+                    assert_eq!(result, Ok(()));
+                    assert_eq!(bytes, vec![0; 8192]);
+                } else {
+                    assert_eq!(
+                        result,
+                        Err(MemoryError::Fault(MemoryFault {
+                            address: GuestAddress(WINDOW),
+                            access,
+                            reason: FaultReason::Permission,
+                        }))
+                    );
+                    assert_eq!(bytes, vec![0xa5; 8192]);
+                }
+            }
+            let (token, state) = capture(
+                &mut f,
+                owner,
+                ALLOC,
+                CallingConvention32::Stdcall,
+                4,
+                [0, 1, 0x3000, protection],
+            );
+            let before = saved(&f);
+            completed(&mut f, owner, token, state, 0, 4);
+            let after = saved(&f);
+            assert_eq!(
+                (after.pages, after.ram, after.artifact, after.units),
+                (before.pages, before.ram, before.artifact, before.units)
+            );
+            last_error(&mut f, owner, 8);
+            let mut expected = vec![0; 8192];
+            for (index, offset) in [0, 4096, 8191].into_iter().enumerate() {
+                f.engine.arena_mut().unwrap()[TRANSFER_OFFSET] = 0x41 + index as u8;
+                let result = f.engine.upload(WINDOW + offset, 1);
+                if writable {
+                    assert_eq!(result, Ok(()));
+                    expected[offset as usize] = 0x41 + index as u8;
+                } else {
+                    assert_eq!(
+                        result,
+                        Err(HostError::Memory(MemoryError::Fault(MemoryFault {
+                            address: GuestAddress(WINDOW + offset),
+                            access: Access::Write,
+                            reason: FaultReason::Permission,
+                        })))
+                    );
+                }
+            }
+            if protection == 1 {
+                f.engine.protect(WINDOW, 2, 3).unwrap();
+            }
+            if readable || protection == 1 {
+                assert_eq!(ram(&f.engine, WINDOW, 8192).unwrap(), expected);
+            } else {
+                let mut bytes = vec![0xa5; 8192];
+                f.engine
+                    .memory()
+                    .unwrap()
+                    .fetch(GuestAddress(WINDOW), &mut bytes)
+                    .unwrap();
+                assert_eq!(bytes, expected);
+            }
+        }
+    }
+}
+
+#[test]
 fn virtual_alloc_has_a_named_windows_provider() {
     for module in ["kernel32.dll", "KERNEL32.DLL", "KeRnEl32.dLl"] {
         assert_eq!(
@@ -395,7 +544,7 @@ fn unsupported_requests_keep_the_captured_token_retryable_without_allocation() {
             [0, 1, 0x2000, 4],
             [0, 1, 0x3001, 4],
             [0, 1, 0x3000, 0],
-            [0, 1, 0x3000, 0x40],
+            [0, 1, 0x3000, 0x140],
         ] {
             let (token, _) = capture(
                 &mut f,

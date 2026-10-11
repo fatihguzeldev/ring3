@@ -1,5 +1,8 @@
 use super::{CallFrame32, CallingConvention32, FrameError};
-use crate::{cpu::x86::Register32, memory::GuestAddress};
+use crate::{
+    cpu::x86::Register32,
+    memory::{GuestAddress, Permissions},
+};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(u32)]
@@ -16,7 +19,7 @@ pub enum WindowsApi32 {
 pub(crate) enum WindowsOutcome32 {
     Return(u32),
     ExitProcess(u32),
-    Allocate { size: u32 },
+    Allocate { size: u32, permissions: Permissions },
     Release { address: u32 },
 }
 
@@ -118,14 +121,25 @@ impl ThreadState32 {
                 let [address, size, allocation_type, protection] = frame.arguments() else {
                     return Err(FrameError::InvalidRequest);
                 };
-                if *address != 0
-                    || !(1..=65_536).contains(size)
-                    || *allocation_type != 0x3000
-                    || *protection != 4
-                {
+                if *address != 0 || !(1..=65_536).contains(size) || *allocation_type != 0x3000 {
                     return Err(FrameError::InvalidRequest);
                 }
-                (WindowsOutcome32::Allocate { size: *size }, self)
+                let permissions = match *protection {
+                    1 => Permissions::NONE,
+                    2 => Permissions::READ,
+                    4 => Permissions::READ_WRITE,
+                    0x10 => Permissions::EXECUTE,
+                    0x20 => Permissions::READ_EXECUTE,
+                    0x40 => Permissions::ALL,
+                    _ => return Err(FrameError::InvalidRequest),
+                };
+                (
+                    WindowsOutcome32::Allocate {
+                        size: *size,
+                        permissions,
+                    },
+                    self,
+                )
             }
             WindowsApi32::VirtualFree => {
                 let [address, size, free_type] = frame.arguments() else {
@@ -175,16 +189,29 @@ mod tests {
             last_error: 0xf123_4567,
         };
         for size in [1, 4096, 4097, 65_536] {
-            let call = frame([0, size, 0x3000, 4], CallingConvention32::Stdcall, 4);
-            let (outcome, next) = thread
-                .prepare(
-                    WindowsApi32::VirtualAlloc,
-                    &call,
-                    ProcessContext32::default(),
-                )
-                .unwrap();
-            assert_eq!(outcome, WindowsOutcome32::Allocate { size });
-            assert_eq!(next.last_error, thread.last_error);
+            for (protection, permissions) in [
+                (1, Permissions::NONE),
+                (2, Permissions::READ),
+                (4, Permissions::READ_WRITE),
+                (0x10, Permissions::EXECUTE),
+                (0x20, Permissions::READ_EXECUTE),
+                (0x40, Permissions::ALL),
+            ] {
+                let call = frame(
+                    [0, size, 0x3000, protection],
+                    CallingConvention32::Stdcall,
+                    4,
+                );
+                let (outcome, next) = thread
+                    .prepare(
+                        WindowsApi32::VirtualAlloc,
+                        &call,
+                        ProcessContext32::default(),
+                    )
+                    .unwrap();
+                assert_eq!(outcome, WindowsOutcome32::Allocate { size, permissions });
+                assert_eq!(next.last_error, thread.last_error);
+            }
         }
         assert_eq!(thread.allocation_failed().last_error, 8);
         assert_eq!(thread.last_error, 0xf123_4567);
@@ -204,9 +231,31 @@ mod tests {
             [0, 1, 0x2000, 4],
             [0, 1, 0x3001, 4],
             [0, 1, 0x3000, 0],
-            [0, 1, 0x3000, 0x40],
+            [0, 1, 0x3000, 0x140],
         ] {
             let call = frame(arguments, CallingConvention32::Stdcall, 4);
+            assert!(matches!(
+                thread.prepare(
+                    WindowsApi32::VirtualAlloc,
+                    &call,
+                    ProcessContext32::default()
+                ),
+                Err(FrameError::InvalidRequest)
+            ));
+        }
+        for protection in [
+            3,
+            8,
+            0x14,
+            0x60,
+            0x80,
+            0x104,
+            0x204,
+            0x404,
+            0x4000_0040,
+            u32::MAX,
+        ] {
+            let call = frame([0, 1, 0x3000, protection], CallingConvention32::Stdcall, 4);
             assert!(matches!(
                 thread.prepare(
                     WindowsApi32::VirtualAlloc,

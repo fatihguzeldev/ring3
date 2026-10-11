@@ -88,9 +88,9 @@ impl EngineInstance {
                 self.pending_call = None;
                 self.callback = None;
             }
-            WindowsOutcome32::Allocate { size } => {
+            WindowsOutcome32::Allocate { size, permissions } => {
                 let frame = pending.frame;
-                self.complete_virtual_alloc(frame, thread, size)?;
+                self.complete_virtual_alloc(frame, thread, size, permissions)?;
             }
             WindowsOutcome32::Release { address } => {
                 let frame = pending.frame;

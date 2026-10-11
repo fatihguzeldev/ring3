@@ -1,9 +1,9 @@
 use ring3_engine::{
     abi::{
-        arena::{TRANSFER_OFFSET, TRANSFER_SIZE},
+        arena::{TRANSFER_OFFSET, TRANSFER_SIZE, X87_OFFSET},
         x86::{decode_state, encode_exit_v3, encode_state},
     },
-    cpu::{ExecutionExit, ExitReason, x86::State32},
+    cpu::{ExecutionExit, ExitReason, dbt::RegistryError, x86::State32},
     memory::{Access, FaultReason, GuestAddress, MemoryError},
     process::{CallError, EngineInstance, HostError},
     windows::CallingConvention32,
@@ -281,6 +281,71 @@ fn reject(
 fn last_error_value(f: &mut Fixture, owner: Owner, value: u32) {
     let (token, state) = capture(f, owner, GET, 0, [0; 4]);
     completed(f, owner, token, state, value, 0);
+}
+
+#[test]
+fn every_simple_protection_releases_and_reuses_pages_without_old_code_ownership() {
+    for owner in [Owner::Replacement, Owner::Resident] {
+        for protection in [1, 2, 4, 0x10, 0x20, 0x40] {
+            let mut f = fixture();
+            let arena = f.engine.arena_mut().unwrap();
+            arena[X87_OFFSET + 16..X87_OFFSET + 18].copy_from_slice(&0x027f_u16.to_le_bytes());
+            arena[X87_OFFSET + 18..X87_OFFSET + 20].copy_from_slice(&0x81a5_u16.to_le_bytes());
+            for (index, byte) in arena[X87_OFFSET + 40..X87_OFFSET + 120]
+                .iter_mut()
+                .enumerate()
+            {
+                *byte = (index as u8).wrapping_mul(29).wrapping_add(17);
+            }
+            let (token, state) = capture(&mut f, owner, ALLOC, 4, [0, 4097, 0x3000, protection]);
+            completed(&mut f, owner, token, state, WINDOW, 4);
+            let old_code = if protection == 0x40 {
+                f.engine.arena_mut().unwrap()[TRANSFER_OFFSET..TRANSFER_OFFSET + 3]
+                    .copy_from_slice(&[0x90, 0xeb, 0]);
+                f.engine.upload(WINDOW, 3).unwrap();
+                for (index, value) in [WINDOW, 3].into_iter().enumerate() {
+                    let at = TRANSFER_OFFSET + index * 4;
+                    f.engine.arena_mut().unwrap()[at..at + 4].copy_from_slice(&value.to_le_bytes());
+                }
+                let id = f.engine.compile_resident(1).unwrap().get();
+                f.engine.guard_resident(KEY, id).unwrap();
+                Some(id)
+            } else {
+                None
+            };
+            let caller_units = retained(&f);
+            let (token, state) = capture(&mut f, owner, FREE, 3, [WINDOW, 0, 0x8000, 0]);
+            completed(&mut f, owner, token, state, 1, 3);
+            assert_eq!(f.engine.memory().unwrap().mapped_pages(), 3);
+            assert_eq!(retained(&f), caller_units);
+            for address in [WINDOW, WINDOW + 4096] {
+                assert!(matches!(
+                    ram(&f.engine, address, 1),
+                    Err(HostError::Memory(MemoryError::Fault(fault)))
+                        if fault.address == GuestAddress(address)
+                            && fault.access == Access::Read
+                            && fault.reason == FaultReason::Unmapped
+                ));
+            }
+            if let Some(id) = old_code {
+                assert_eq!(
+                    f.engine.guard_resident(KEY, id),
+                    Err(HostError::Resident(RegistryError::CodeInvalidated))
+                );
+            }
+            let (token, state) = capture(&mut f, owner, ALLOC, 4, [0, 4097, 0x3000, 4]);
+            completed(&mut f, owner, token, state, WINDOW, 4);
+            assert_eq!(ram(&f.engine, WINDOW, 8192).unwrap(), vec![0; 8192]);
+            assert_eq!(retained(&f), caller_units);
+            if let Some(id) = old_code {
+                assert_eq!(
+                    f.engine.guard_resident(KEY, id),
+                    Err(HostError::Resident(RegistryError::CodeInvalidated))
+                );
+            }
+            last_error(&mut f, owner);
+        }
+    }
 }
 
 #[test]
