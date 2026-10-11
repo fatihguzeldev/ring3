@@ -8,6 +8,7 @@ use crate::cpu::x86::ir::{
 use super::locals::*;
 
 mod byte_store;
+mod exchange;
 mod narrow;
 mod word_store;
 
@@ -40,20 +41,23 @@ pub(super) struct Imports {
     pub(super) read16: Option<u32>,
     pub(super) store8: Option<StoreImport>,
     pub(super) store16: Option<StoreImport>,
+    pub(super) exchange: Option<StoreImport>,
 }
 
 impl Imports {
     pub(super) fn needed(
         blocks: &[crate::cpu::dbt::region::CompiledBlock],
-    ) -> (bool, bool, bool, bool, bool, bool) {
+    ) -> (bool, bool, bool, bool, bool, bool, bool) {
         let mut read = false;
         let mut store = false;
         let mut read8 = false;
         let mut read16 = false;
         let mut store8 = false;
         let mut store16 = false;
+        let mut exchange = false;
         for instruction in blocks.iter().flat_map(|block| &block.instructions) {
             match instruction.operation() {
+                Operation::MemoryExchange { .. } => exchange = true,
                 Operation::X87StatusToMemory { .. }
                 | Operation::X87ControlToMemory { .. }
                 | Operation::StoreWord { .. }
@@ -230,8 +234,18 @@ impl Imports {
                 _ => {}
             }
         }
-        (read, store, read8, read16, store8, store16)
+        (read, store, read8, read16, store8, store16, exchange)
     }
+}
+
+pub(super) fn exchange_result(
+    code: &mut InstructionSink<'_>,
+    address: EffectiveAddress,
+    source: crate::cpu::x86::Register32,
+    imports: Imports,
+    exit_depth: u32,
+) {
+    exchange::exchange_result(code, address, source, imports, exit_depth);
 }
 
 pub(super) fn store_byte(

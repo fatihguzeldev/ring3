@@ -496,6 +496,10 @@ pub enum Operation {
         left: Register32,
         right: Register32,
     },
+    MemoryExchange {
+        address: EffectiveAddress,
+        source: Register32,
+    },
     ExchangeWord {
         left: Register32,
         right: Register32,

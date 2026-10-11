@@ -1217,6 +1217,11 @@ pub(super) fn instruction(
                 .local_set(register(left))
                 .local_set(register(right));
         }
+        Operation::MemoryExchange { address, source } => {
+            memory::exchange_result(code, address, source, imports, exit_depth);
+            code.local_get(RESULT).local_set(register(source));
+            store = true;
+        }
         Operation::ExchangeAdd {
             destination,
             source,

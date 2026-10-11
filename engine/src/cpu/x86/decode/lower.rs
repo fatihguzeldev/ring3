@@ -426,6 +426,12 @@ pub(super) fn lower(instruction: &Instruction, bytes: &[u8]) -> Result<Operation
                 right: word_register(instruction.op1_register())?,
             })
         }
+        Code::Xchg_rm32_r32 if instruction.op0_kind() == OpKind::Memory => {
+            Ok(Operation::MemoryExchange {
+                address: effective_address(instruction)?,
+                source: register(instruction.op1_register())?,
+            })
+        }
         Code::Xchg_rm32_r32 | Code::Xchg_r32_EAX => {
             if instruction.op0_kind() != OpKind::Register
                 || instruction.op1_kind() != OpKind::Register
