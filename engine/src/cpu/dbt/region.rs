@@ -312,20 +312,15 @@ fn supports_stack_values(operation: &Operation) -> bool {
 }
 
 fn supports_near_control(instruction: &DecodedInstruction) -> bool {
-    match instruction.operation() {
-        Operation::Call {
-            target: BranchTarget::Direct(_),
-        } => instruction.length() == 5,
-        Operation::Call {
-            target: BranchTarget::Indirect(_),
-        }
-        | Operation::CallRegisterWord { .. }
-        | Operation::ReadCallWord { .. } => true,
-        Operation::Return { .. } => matches!(instruction.length(), 1 | 3),
-        Operation::CallWord { .. } => instruction.length() == 4,
-        Operation::ReturnWord { .. } => matches!(instruction.length(), 2 | 4),
-        _ => false,
-    }
+    matches!(
+        instruction.operation(),
+        Operation::Call { .. }
+            | Operation::CallRegisterWord { .. }
+            | Operation::ReadCallWord { .. }
+            | Operation::Return { .. }
+            | Operation::CallWord { .. }
+            | Operation::ReturnWord { .. }
+    )
 }
 
 fn supports_stack(instruction: &DecodedInstruction) -> bool {

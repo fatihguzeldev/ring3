@@ -4,15 +4,16 @@ import {join} from 'node:path';
 import {createHash} from 'node:crypto';
 import {readEngine} from '../support/engine.mjs';
 
-const [enginePath,output,root]=process.argv.slice(2),engine=readEngine(enginePath);
+const [enginePath,output,root,mode='all']=process.argv.slice(2),engine=readEngine(enginePath);
+assert.ok(['all','prefix-boundaries'].includes(mode),'known integer fixture mode');
 const initial=readFileSync(join(output,'initial-arena.bin')),SIZE=initial.length,T=140,DATA=0x5010;
 const hash=b=>createHash('sha256').update(b).digest('hex'),hex=s=>Buffer.from(s,'hex');
 const contexts=[],modules=[],observations=[],helpers=[],diagnostics=[];
 const sourcePaths=['engine/src/cpu/x86/atomic.rs','engine/src/cpu/x86/decode/atomic.rs',
  'engine/src/cpu/x86/decode/flow.rs','engine/src/cpu/x86/decode/lower.rs','engine/src/cpu/x86/decode/profile.rs',
- 'engine/src/cpu/x86/ir.rs','engine/src/cpu/dbt/wasm/atomic.rs','engine/src/cpu/dbt/wasm/integer_system.rs',
+ 'engine/src/cpu/x86/ir.rs','engine/src/cpu/dbt/region.rs','engine/src/cpu/dbt/wasm/atomic.rs','engine/src/cpu/dbt/wasm/integer_system.rs',
  'engine/src/cpu/dbt/wasm/integer.rs','engine/src/process/cpu_integer.rs','engine/src/abi/cpu_helper.rs',
- 'engine/tests/cpu_integer_completion.rs','engine/tests/cpu_lock_exchange_prefixes.rs','engine/tests/cpu_integer_completion_wasm.rs',
+ 'engine/tests/cpu_integer_completion.rs','engine/tests/cpu_prefixed_moffs_near_control.rs','engine/tests/cpu_lock_exchange_prefixes.rs','engine/tests/cpu_integer_completion_wasm.rs',
  'engine/tests/fixtures/p2-integer-completion/run.mjs'];
 const pins=()=>Object.fromEntries(sourcePaths.map(p=>[p,hash(readFileSync(join(root,p)))])),beforePins=pins();
 function record(magic,size,fields,version=1){const b=Buffer.alloc(size);b.write(magic);b.writeUInt16LE(version,4);b.writeUInt16LE(1,6);b.writeUInt32LE(size,8);fields.forEach((v,i)=>b.writeUInt32LE(v>>>0,16+i*4));return b;}
@@ -99,8 +100,8 @@ function open(owner,entries,blocks){
  c.run=new WebAssembly.Instance(module,{env:{memory:c.memory},ring3}).exports.run;
  const file=`module-${c.id}.wasm`;writeFileSync(join(output,file),bytes);modules.push({context:c.id,file,sha256:hash(bytes),bytes:length,imports:WebAssembly.Module.imports(module)});contexts.push({context:c.id,owner,entries});return c;
 }
-function execute(c,label,s,{next=s,reason=1,retired=1,width,source,descriptor,cas=false,timestamp=false,fault,helperReturn=0,helperCount=width===undefined?0:1,budget=1,cancel=0,readByte,legacyPacket}={}){
- input(c,0,state(s));input(c,96,dwords([cancel]));const before=arena(c),start=helpers.length;
+function execute(c,label,s,{next=s,reason=1,retired=1,width,source,descriptor,cas=false,timestamp=false,fault,helperReturn=0,helperCount=width===undefined?0:1,budget=1,cancel=0,readByte,legacyPacket,seed=true}={}){
+ if(seed)input(c,0,state(s));else assert.deepEqual(arena(c).subarray(0,56),state(s),label+' resumes the observed CPU without upload');input(c,96,dwords([cancel]));const before=arena(c),start=helpers.length;
  const expected=Buffer.from(before);expected.set(state(next));expected.set(exit(reason,retired,...(fault??[0,0,0,0])),56);
  if(width!==undefined&&helperCount!==0){
   const payload=[source??before.readUInt32LE(T),s.flags,s.r[0],s.r[2],s.r[3],s.r[1]];
@@ -170,7 +171,55 @@ function caseRun(c,block,row){
   }
  }
 }
+function prefixBoundaryCases(owner,entries){
+ // address16 selects a two-byte absolute offset; FS/GS bases apply after that offset.
+ const forms=[
+  {name:'WORD address16 moffs load consumes disp16',pc:0x1000,code:'6667a11050',address:0x5010,load:true},
+  {name:'WORD address16 moffs store consumes disp16',pc:0x1020,code:'6667a31050',address:0x5010,load:false},
+  {name:'FS WORD address16 moffs load adds cached base',pc:0x1040,code:'646667a11000',address:0x5010,load:true},
+  {name:'GS WORD address16 moffs store adds cached base',pc:0x1060,code:'656667a31200',address:0x7012,load:false},
+ ];
+ const m=open(owner,entries,[...forms.map(row=>({pc:row.pc,bytes:Buffer.concat([hex(row.code),hex('ebfe')])})),{pc:0x1f00,bytes:hex('0f31ebfe')}]);
+ for(const row of forms){
+  const s=cpu(row.pc),next={...s,r:[...s.r],pc:row.pc+hex(row.code).length};
+  const original=Buffer.from(row.load?[0x11,0xef,0xbe,0x22]:[0x55,0x66,0x77,0x88]);upload(m,row.address-1,original);
+  if(row.load)next.r[0]=((s.r[0]&0xffff0000)|0xbeef)>>>0;
+  execute(m,row.name,s,{next,helperCount:1,legacyPacket:record('R3MH',40,[0,row.load?0xbeef:0,0,0,0,2],row.load?2:4)});
+  const call=helpers.at(-1);assert.equal(call.name,row.load?'read16':owner==='resident'?'store_resident16':'store16');
+  assert.deepEqual(call.args.slice(row.load?-1:-2),row.load?[row.address]:[row.address,0xc3d4],row.name+' exact selected address/source');
+  const expected=Buffer.from(original);if(!row.load)expected.set([0xd4,0xc3],1);
+  assert.deepEqual(read(m,row.address-1,4),expected,row.name+' word plus adjacent canaries');
+ }host(m,'close');
+ // segment and address prefixes are ignored for direct near control; SS.B32 still selects ESP.
+ const pairs=[
+  {name:'DWORD',pc:0x1000,target:0x1100,call:'6467e8f9000000',ret:'6567c20400',width:4,adjust:4},
+  {name:'WORD',pc:0x1200,target:0x1300,call:'646766e8fa00',ret:'656766c20600',width:2,adjust:6},
+ ];
+ const blocks=pairs.flatMap(row=>[{pc:row.pc,bytes:hex(row.call)},{pc:row.target,bytes:hex(row.ret)},
+  {pc:row.pc+hex(row.call).length,bytes:hex('ebfe')}]);blocks.push({pc:0x1f00,bytes:hex('0f31ebfe')});
+ const c=open(owner,entries,blocks);
+ for(const segment of[4,5])host(c,owner==='resident'?'segment_load_resident':'segment_load',[...c.binding,segment,0]);
+ assert.equal(arena(c).readUInt16LE(4524+24),0);assert.equal(arena(c).readUInt16LE(4524+26),0);
+ assert.equal(arena(c).readUInt32LE(4524+48),0x5000);assert.equal(arena(c).readUInt32LE(4524+52),0x7000);
+ for(const row of pairs){
+  const s=cpu(row.pc),returnPc=row.pc+hex(row.call).length,stack=0x7078,original=Buffer.from(Array.from({length:16},(_,i)=>0x90+i));
+  upload(c,stack,original);const afterCall={...s,r:[...s.r],pc:row.target};afterCall.r[4]-=row.width;
+  execute(c,`${row.name} prefixed direct CALL ignores null FS/base and address16`,s,{next:afterCall,helperCount:1,
+   legacyPacket:record('R3MH',40,[0,0,0,0,0,row.width===2?2:0],row.width===2?4:1)});
+  let call=helpers.at(-1);assert.equal(call.name,row.width===2?(owner==='resident'?'store_resident16':'store16'):(owner==='resident'?'store_resident32':'store32'));
+  assert.deepEqual(call.args.slice(-2),[afterCall.r[4],returnPc],'CALL writes the full consumed return PC at the SS stack address');
+  const pushed=Buffer.from(original);pushed.set(bytes(returnPc,row.width),afterCall.r[4]-stack);
+  assert.deepEqual(read(c,stack,16),pushed,'CALL changes exactly the operand-width return slot');
+  const afterReturn={...afterCall,r:[...afterCall.r],pc:returnPc};afterReturn.r[4]=s.r[4]+row.adjust;
+  execute(c,`${row.name} prefixed near RET resumes live stack and ignores null GS/base`,afterCall,{next:afterReturn,seed:false,helperCount:1,
+   legacyPacket:record('R3MH',40,[0,returnPc,0,0,0,row.width===2?2:0],row.width===2?2:1)});
+  call=helpers.at(-1);assert.equal(call.name,row.width===2?'read16':'read32');assert.deepEqual(call.args,[afterCall.r[4]],'RET reads the exact live SS stack slot');
+  assert.deepEqual(read(c,stack,16),pushed,'RET preserves the return slot and adjacent stack bytes');
+ }host(c,'close');
+}
 for(const owner of['replacement','resident'])for(const entries of[false,true]){
+ prefixBoundaryCases(owner,entries);
+ if(mode==='prefix-boundaries')continue;
  for(let start=0;start<rows.length;start+=7){
   const batch=rows.slice(start,start+7),blocks=batch.map((row,i)=>({pc:0x1000+i*32,bytes:Buffer.concat([hex(row.code),hex('ebfe')])}));
   // a dormant timestamp keeps the extended exit ABI uniform in pure system/XLAT batches.
@@ -201,7 +250,7 @@ for(const owner of['replacement','resident'])for(const entries of[false,true]){
  const before=arena(m),at=helpers.length;assert.notEqual(m.run(m.base,m.base+56,1,m.base+96),0);assert.deepEqual(arena(m),before,'stale owner is entirely neutral');assert.equal(helpers.length,at);host(m,'close');
 }
 assert.deepEqual(pins(),beforePins);
-const result={status:'PASS',engine:{path:enginePath,sha256:engine.sha256,bytes:engine.bytes.length},arena_bytes:SIZE,source_pins:beforePins,
+const result={status:'PASS',mode,engine:{path:enginePath,sha256:engine.sha256,bytes:engine.bytes.length},arena_bytes:SIZE,source_pins:beforePins,
  counts:{contexts:contexts.length,modules:modules.length,runs:observations.length,retired:observations.reduce((n,r)=>n+r.retired,0),helpers:helpers.length,diagnostics:diagnostics.length},contexts,modules,observations,helpers,diagnostics,
- claim:'Actual generated Wasm under four bound profiles: independently calculated width arithmetic/FLAGS, bit-string selected EA, aliases, explicit LOCK XCHG8/16/32 and both WORD CAS/XADD prefix orders, CMPXCHG8B match/mismatch, software CPUID, virtual RDTSC, CX control flow, segmented/address16 XLAT, live split-fault repair and mandatory identity executable-write currentness. Entire dynamic arena compared on every recorded run; selected RAM only. No hardware concurrency, physical timestamp, or complete ISA claim.'};
+ claim:'Actual generated Wasm under four bound profiles: independently calculated width arithmetic/FLAGS, bit-string selected EA, aliases, explicit LOCK XCHG8/16/32 and F0-before-66 WORD CAS/XADD, CMPXCHG8B match/mismatch, software CPUID, virtual RDTSC, CX control flow, segmented/address16 XLAT and WORD moffs, prefixed near CALL/RET with live SS stack continuation, live split-fault repair and mandatory identity executable-write currentness. Entire dynamic arena compared on every recorded run; selected RAM only. No hardware concurrency, physical timestamp, or complete ISA claim.'};
 writeFileSync(join(output,'result.json'),JSON.stringify(result,null,2)+'\n');console.log(JSON.stringify({status:'PASS',...result.counts,output}));
