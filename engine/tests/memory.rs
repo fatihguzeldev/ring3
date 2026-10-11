@@ -123,6 +123,67 @@ fn permissions_are_checked_separately_for_each_access_kind() {
 }
 
 #[test]
+fn single_page_reads_and_fetches_keep_distinct_permissions_and_denied_output() {
+    let mut space = AddressSpace::new(1).unwrap();
+    space
+        .map_zeroed(range(0x1000, 1), Permissions::ALL)
+        .unwrap();
+    space
+        .write(GuestAddress(0x1ffc), &[0x11, 0x22, 0x33, 0x44])
+        .unwrap();
+
+    space.protect(range(0x1000, 1), Permissions::READ).unwrap();
+    let mut output = [0x5a; 4];
+    space.read(GuestAddress(0x1ffc), &mut output).unwrap();
+    assert_eq!(output, [0x11, 0x22, 0x33, 0x44]);
+    output.fill(0xa5);
+    assert_fault(
+        space.fetch(GuestAddress(0x1ffc), &mut output),
+        0x1ffc,
+        Access::Execute,
+        FaultReason::Permission,
+    );
+    assert_eq!(output, [0xa5; 4]);
+
+    space
+        .protect(range(0x1000, 1), Permissions::EXECUTE)
+        .unwrap();
+    space.fetch(GuestAddress(0x1ffc), &mut output).unwrap();
+    assert_eq!(output, [0x11, 0x22, 0x33, 0x44]);
+    output.fill(0x5a);
+    assert_fault(
+        space.read(GuestAddress(0x1ffc), &mut output),
+        0x1ffc,
+        Access::Read,
+        FaultReason::Permission,
+    );
+    assert_eq!(output, [0x5a; 4]);
+}
+
+#[test]
+fn same_page_reads_and_fetches_accept_exact_page_and_final_address_widths() {
+    let mut space = AddressSpace::new(2).unwrap();
+    for (page, seed) in [(0x1000_u32, 17_u8), (0xffff_f000, 73)] {
+        space.map_zeroed(range(page, 1), Permissions::ALL).unwrap();
+        let bytes: Vec<u8> = (0..PAGE_SIZE)
+            .map(|index| (index as u8).wrapping_mul(29).wrapping_add(seed))
+            .collect();
+        space.write(GuestAddress(page), &bytes).unwrap();
+
+        for width in [1_usize, 2, 4, 15, PAGE_SIZE as usize] {
+            let offset = PAGE_SIZE as usize - width;
+            let address = GuestAddress(page + offset as u32);
+            let mut output = vec![0x5a; width];
+            space.read(address, &mut output).unwrap();
+            assert_eq!(output, bytes[offset..]);
+            output.fill(0xa5);
+            space.fetch(address, &mut output).unwrap();
+            assert_eq!(output, bytes[offset..]);
+        }
+    }
+}
+
+#[test]
 fn unmapped_access_reports_the_requested_address_and_preserves_output() {
     let mut space = AddressSpace::new(1).unwrap();
     let mut output = [0x5a; 3];
