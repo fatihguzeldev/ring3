@@ -120,14 +120,25 @@ pub(super) fn check_profile(instruction: &Instruction, bytes: &[u8]) -> Result<(
     if instruction.code() == Code::Aam_imm8 && !matches!(bytes, [0xd4, _]) {
         return Err(unsupported());
     }
+    // Memory XCHG already uses the atomic exchange helpers without LOCK. An explicit
+    // LOCK prefix has the same semantics; register XCHG with LOCK remains invalid.
+    let exact_locked_exchange = instruction.op0_kind() == OpKind::Memory
+        && matches!((instruction.code(), bytes),
+            (Code::Xchg_rm8_r8, [0xf0, 0x86, modrm, ..])
+            | (Code::Xchg_rm32_r32, [0xf0, 0x87, modrm, ..])
+            | (Code::Xchg_rm16_r16, [0x66, 0xf0, 0x87, modrm, ..])
+            | (Code::Xchg_rm16_r16, [0xf0, 0x66, 0x87, modrm, ..])
+            if *modrm & 0xc0 != 0xc0);
     if instruction.code() == Code::Xchg_rm32_r32
         && instruction.op0_kind() == OpKind::Memory
+        && !exact_locked_exchange
         && !matches!(bytes, [0x87, modrm, ..] if *modrm & 0xc0 != 0xc0)
     {
         return Err(unsupported());
     }
     if instruction.code() == Code::Xchg_rm8_r8
         && instruction.op0_kind() == OpKind::Memory
+        && !exact_locked_exchange
         && !matches!(bytes, [0x86, modrm, ..] if *modrm & 0xc0 != 0xc0)
     {
         return Err(unsupported());
@@ -140,7 +151,8 @@ pub(super) fn check_profile(instruction: &Instruction, bytes: &[u8]) -> Result<(
         && matches!(bytes, [0xf0, 0x0f, 0xb0, modrm, ..] if *modrm & 0xc0 != 0xc0);
     let exact_locked_cmpxchg16 = instruction.code() == Code::Cmpxchg_rm16_r16
         && instruction.op0_kind() == OpKind::Memory
-        && matches!(bytes, [0x66, 0xf0, 0x0f, 0xb1, modrm, ..] if *modrm & 0xc0 != 0xc0);
+        && matches!(bytes, [0x66, 0xf0, 0x0f, 0xb1, modrm, ..]
+            | [0xf0, 0x66, 0x0f, 0xb1, modrm, ..] if *modrm & 0xc0 != 0xc0);
     let exact_locked_xadd32 = instruction.code() == Code::Xadd_rm32_r32
         && instruction.op0_kind() == OpKind::Memory
         && matches!(bytes, [0xf0, 0x0f, 0xc1, modrm, ..] if *modrm & 0xc0 != 0xc0);
@@ -149,7 +161,8 @@ pub(super) fn check_profile(instruction: &Instruction, bytes: &[u8]) -> Result<(
         && matches!(bytes, [0xf0, 0x0f, 0xc0, modrm, ..] if *modrm & 0xc0 != 0xc0);
     let exact_locked_xadd16 = instruction.code() == Code::Xadd_rm16_r16
         && instruction.op0_kind() == OpKind::Memory
-        && matches!(bytes, [0x66, 0xf0, 0x0f, 0xc1, modrm, ..] if *modrm & 0xc0 != 0xc0);
+        && matches!(bytes, [0x66, 0xf0, 0x0f, 0xc1, modrm, ..]
+            | [0xf0, 0x66, 0x0f, 0xc1, modrm, ..] if *modrm & 0xc0 != 0xc0);
     let exact_locked_bts32 = instruction.code() == Code::Bts_rm32_r32
         && instruction.op0_kind() == OpKind::Memory
         && matches!(bytes, [0xf0, 0x0f, 0xab, modrm, ..] if *modrm & 0xc0 != 0xc0);
@@ -195,7 +208,13 @@ pub(super) fn check_profile(instruction: &Instruction, bytes: &[u8]) -> Result<(
         (Code::Cbw, [0x66, 0x98]) | (Code::Cwd, [0x66, 0x99])
     );
     let exact_word_exchange = match (instruction.code(), bytes) {
-        (Code::Xchg_rm16_r16, [0x66, 0x87, modrm, ..]) if *modrm & 0xc0 != 0xc0 => true,
+        (Code::Xchg_rm16_r16, [0x66, 0x87, modrm, ..])
+        | (Code::Xchg_rm16_r16, [0x66, 0xf0, 0x87, modrm, ..])
+        | (Code::Xchg_rm16_r16, [0xf0, 0x66, 0x87, modrm, ..])
+            if *modrm & 0xc0 != 0xc0 =>
+        {
+            true
+        }
         (Code::Xchg_rm16_r16, [0x66, 0x87, modrm]) => *modrm & 0xc0 == 0xc0,
         (Code::Xchg_r16_AX, [0x66, 0x91..=0x97]) | (Code::Nopw, [0x66, 0x90]) => true,
         _ => false,
@@ -595,7 +614,8 @@ pub(super) fn check_profile(instruction: &Instruction, bytes: &[u8]) -> Result<(
         )
     );
     if (instruction.has_lock_prefix()
-        && !(exact_locked_cmpxchg32
+        && !(exact_locked_exchange
+            || exact_locked_cmpxchg32
             || exact_locked_xadd32
             || exact_locked_cmpxchg8
             || exact_locked_xadd8
