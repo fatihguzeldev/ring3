@@ -48,12 +48,14 @@ pub(super) struct Imports {
     pub(super) exchange16: Option<StoreImport>,
     pub(super) compare_exchange32: Option<StoreImport>,
     pub(super) exchange_add32: Option<StoreImport>,
+    pub(super) compare_exchange8: Option<StoreImport>,
 }
 
 impl Imports {
     pub(super) fn needed(
         blocks: &[crate::cpu::dbt::region::CompiledBlock],
     ) -> (
+        bool,
         bool,
         bool,
         bool,
@@ -77,6 +79,7 @@ impl Imports {
         let mut exchange16 = false;
         let mut compare_exchange32 = false;
         let mut exchange_add32 = false;
+        let mut compare_exchange8 = false;
         for instruction in blocks.iter().flat_map(|block| &block.instructions) {
             match instruction.operation() {
                 Operation::MemoryExchange { .. } => exchange = true,
@@ -84,6 +87,7 @@ impl Imports {
                 Operation::MemoryExchangeWord { .. } => exchange16 = true,
                 Operation::LockedMemoryCompareExchange32 { .. } => compare_exchange32 = true,
                 Operation::LockedMemoryExchangeAdd32 { .. } => exchange_add32 = true,
+                Operation::LockedMemoryCompareExchangeByte { .. } => compare_exchange8 = true,
                 Operation::X87StatusToMemory { .. }
                 | Operation::X87ControlToMemory { .. }
                 | Operation::StoreWord { .. }
@@ -272,6 +276,7 @@ impl Imports {
             exchange16,
             compare_exchange32,
             exchange_add32,
+            compare_exchange8,
         )
     }
 }
@@ -313,6 +318,15 @@ pub(super) fn exchange_byte_result(
     exit_depth: u32,
 ) {
     byte_exchange::exchange_result(code, address, imports, exit_depth);
+}
+
+pub(super) fn compare_exchange_byte_result(
+    code: &mut InstructionSink<'_>,
+    address: EffectiveAddress,
+    imports: Imports,
+    exit_depth: u32,
+) {
+    byte_exchange::compare_exchange_result(code, address, imports, exit_depth);
 }
 
 pub(super) fn exchange_word_result(

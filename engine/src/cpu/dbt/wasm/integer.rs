@@ -1543,6 +1543,26 @@ pub(super) fn instruction(
             insert_byte(code, ByteRegister::Al);
             code.end();
         }
+        Operation::LockedMemoryCompareExchangeByte { address, source } => {
+            byte_value(code, ByteValue::Register(ByteRegister::Al));
+            byte_value(code, ByteValue::Register(source));
+            code.local_set(RESULT);
+            memory::compare_exchange_byte_result(code, address, imports, exit_depth);
+            code.local_set(LHS)
+                .local_get(RESULT)
+                .local_set(RHS)
+                .local_get(LHS)
+                .local_get(RHS)
+                .i32_sub()
+                .i32_const(0xff)
+                .i32_and()
+                .local_set(RESULT);
+            arithmetic_flags(code, BinaryKind::Cmp, CarryFlag::Calculate, 7);
+            code.local_get(RESULT).if_(BlockType::Empty).local_get(RHS);
+            insert_byte(code, ByteRegister::Al);
+            code.end();
+            store = true;
+        }
         Operation::MemoryCompareExchangeByte { address, source } => {
             memory::load_narrow_value(code, address, SmallWidth::Byte, imports, exit_depth);
             code.local_set(RHS);

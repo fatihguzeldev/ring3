@@ -560,6 +560,10 @@ pub enum Operation {
         address: EffectiveAddress,
         source: Register32,
     },
+    LockedMemoryCompareExchangeByte {
+        address: EffectiveAddress,
+        source: ByteRegister,
+    },
     CompareExchangeByte {
         destination: ByteRegister,
         source: ByteRegister,

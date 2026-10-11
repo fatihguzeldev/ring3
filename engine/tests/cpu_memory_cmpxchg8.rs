@@ -424,7 +424,11 @@ fn word_prefix_and_other_memory_exchange_refusals_keep_inputs_unchanged() {
         } else {
             opcode
         };
-        cases.push((vec![prefix, 0x0f, 0xb0, 0x03], expected));
+        let mut bytes = vec![prefix, 0x0f, 0xb0, 0x03];
+        if prefix == 0xf0 {
+            bytes.insert(0, 0xf0);
+        }
+        cases.push((bytes, expected));
     }
     assert_eq!(cases.len(), 14);
     let unique: std::collections::BTreeSet<_> =
