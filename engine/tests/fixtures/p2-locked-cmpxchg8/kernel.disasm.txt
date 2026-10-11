@@ -1,0 +1,21 @@
+
+kernel.obj:	file format coff-i386
+
+Disassembly of section .text:
+
+00000000 <_ring3_compare_exchange>:
+       0: 56                           	push	esi
+       1: 8b 54 24 0c                  	mov	edx, dword ptr [esp + 0xc]
+       5: 8a 64 24 10                  	mov	ah, byte ptr [esp + 0x10]
+       9: 8b 74 24 08                  	mov	esi, dword ptr [esp + 0x8]
+       d: 8a 02                        	mov	al, byte ptr [edx]
+       f: 31 c9                        	xor	ecx, ecx
+      11: f0                           	lock
+      12: 0f b0 26                     	cmpxchg	byte ptr [esi], ah
+      15: 0f 94 c4                     	sete	ah
+      18: 74 02                        	je	0x1c <_ring3_compare_exchange+0x1c>
+      1a: 88 02                        	mov	byte ptr [edx], al
+      1c: 88 e1                        	mov	cl, ah
+      1e: 89 c8                        	mov	eax, ecx
+      20: 5e                           	pop	esi
+      21: c3                           	ret
