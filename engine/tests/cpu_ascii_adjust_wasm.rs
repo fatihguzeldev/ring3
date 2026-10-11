@@ -165,6 +165,42 @@ fn actual_ascii_adjust_exhausts_inputs_and_consumes_live_flags_in_six_profiles()
         save_standalone(name, blocks, &memory);
     }
     save_standalone("aad-live", &aad_live, &memory);
+    let aam_banks: Vec<_> = aad_banks
+        .iter()
+        .enumerate()
+        .map(|(index, (_, blocks))| {
+            let (pc, bytes, instructions) = &blocks[0];
+            let mut bytes = bytes.clone();
+            for offset in (0..bytes.len() - 2).step_by(2) {
+                bytes[offset] = 0xd4;
+            }
+            (format!("aam-{index}"), vec![(*pc, bytes, *instructions)])
+        })
+        .collect();
+    let aam_live = [
+        (
+            0x1e00,
+            vec![
+                0xf6, 0xe3, 0xd4, 10, 0x0f, 0x94, 0xc2, 0x0f, 0x9a, 0xc6, 0x0f, 0x92, 0xc3, 0x0f,
+                0x90, 0xc7, 0x80, 0xd1, 0, 0xeb, 0,
+            ],
+            8,
+        ),
+        (0x1e40, vec![0x00, 0xd8, 0xd4, 0, 0xeb, 0], 3),
+    ];
+    // preserve every old standalone artifact before replacing code with aam banks.
+    for (_, blocks) in &aam_banks {
+        for (pc, bytes, _) in blocks {
+            memory.write(GuestAddress(*pc), bytes).unwrap();
+        }
+    }
+    for (pc, bytes, _) in &aam_live {
+        memory.write(GuestAddress(*pc), bytes).unwrap();
+    }
+    for (name, blocks) in &aam_banks {
+        save_standalone(name, blocks, &memory);
+    }
+    save_standalone("aam-live", &aam_live, &memory);
     let result = Command::new("node")
         .arg(root.join("engine/tests/fixtures/p2-ascii-adjust/run.mjs"))
         .arg(&engine)
