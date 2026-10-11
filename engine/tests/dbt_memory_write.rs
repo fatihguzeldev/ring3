@@ -512,6 +512,60 @@ fn narrow_prefix_and_declared_span_errors_remain_precise() {
                 bytes.push(0x66);
             }
             bytes.extend_from_slice(&encode(opcode, extension, &[0x03], immediate));
+            if prefix == 0xf0 && opcode == 0x83 && extension == 1 {
+                bytes.extend_from_slice(&[0xeb, 0]);
+                for entries in [false, true] {
+                    let mut instance = engine(&bytes);
+                    instance.protect(0x1000, 1, 4).unwrap();
+                    instance.arena_mut().unwrap().fill(0xa5);
+                    describe(&mut instance, 0x1000, bytes.len());
+                    let before = instance.arena().to_vec();
+                    let memory = instance.memory().unwrap();
+                    let snapshot = memory
+                        .snapshot_code(GuestAddress(0x1000), bytes.len())
+                        .unwrap();
+                    assert_eq!(
+                        decode_one(memory, GuestAddress(0x1001))
+                            .unwrap()
+                            .operation(),
+                        &Operation::LockedMemoryOr32 {
+                            address: EffectiveAddress {
+                                base: Some(Register32::Ebx),
+                                index: None,
+                                scale: 1,
+                                displacement: 0,
+                            },
+                            mask: 0xffff_ff80,
+                        }
+                    );
+                    assert_eq!(
+                        compile(&mut instance, entries),
+                        Ok(1),
+                        "LOCK OR entries={entries}"
+                    );
+                    assert_eq!(instance.arena(), before);
+                    assert_eq!(instance.guard(KEY, 1), Ok(()));
+                    let memory = instance.memory().unwrap();
+                    assert!(memory.is_code_current(&snapshot));
+                    assert_eq!(memory.mapped_pages(), 1);
+                    assert!(memory.resolve(GuestAddress(0x1000), Access::Read).is_err());
+                    assert!(
+                        memory
+                            .resolve(GuestAddress(0xa5a5_a5a5), Access::Read)
+                            .is_err()
+                    );
+                    let artifact = instance.artifact_bytes().unwrap();
+                    assert!(artifact.windows(13).any(|part| part == b"atomic_or_u32"));
+                    for excluded in [b"read32".as_slice(), b"store32"] {
+                        assert!(
+                            !artifact
+                                .windows(excluded.len())
+                                .any(|part| part == excluded)
+                        );
+                    }
+                }
+                continue;
+            }
             let cause = if prefix == 0x64 {
                 InstructionError::Decode(DecodeError::Unsupported(UnsupportedFeature::Segment))
             } else {
