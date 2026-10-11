@@ -581,7 +581,7 @@ fn parse(bytes: &[u8], profile: Profile) -> Result<ImagePlan, LoadError> {
         || read32(bytes, optional + 36)? != FILE_ALIGNMENT
         || read32(bytes, optional + 52)? != 0
         || !matches!(read16(bytes, optional + 68)?, 2 | 3)
-        || read16(bytes, optional + 70)? & !0x8100 != 0
+        || read16(bytes, optional + 70)? & !0x8140 != 0
         || read32(bytes, optional + 88)? != 0
         || read32(bytes, optional + 92)? != 16
     {
@@ -665,7 +665,7 @@ fn parse(bytes: &[u8], profile: Profile) -> Result<ImagePlan, LoadError> {
         let raw_size = read32(bytes, offset + 16)?;
         let raw_pointer = read32(bytes, offset + 20)?;
         let flags = read32(bytes, offset + 36)?;
-        if flags & !0xe000_00e0 != 0
+        if flags & !0xe200_00e0 != 0
             || bytes[offset + 24..offset + 36]
                 .iter()
                 .any(|byte| *byte != 0)

@@ -13,7 +13,7 @@ use ring3_engine::{
     process::{EngineInstance, HostError},
 };
 
-const ALLOWED: [u16; 4] = [0, 0x0100, 0x8000, 0x8100];
+const ALLOWED: [u16; 8] = [0, 0x0040, 0x0100, 0x0140, 0x8000, 0x8040, 0x8100, 0x8140];
 const ACTUAL: u32 = 0x0050_0000;
 const GATE: u32 = 0x7000_0000;
 const KEY: u64 = 0xfedc_ba98_7654_3210;
@@ -73,102 +73,107 @@ fn relocated_words(memory: &AddressSpace) {
 #[test]
 fn allowed_dll_characteristics_load_across_loader_profiles() {
     for flags in ALLOWED {
-        let mut fixed = pe::image();
-        pe::put16(&mut fixed, pe::OPTIONAL + 70, flags);
-        let original = fixed.clone();
-        let (memory, image) = loader::load_pe32(&fixed, 4).unwrap().into_parts();
-        assert_eq!(
-            (
-                image.image_base,
-                image.image_size,
-                image.entry_point,
-                image.mapped_pages
-            ),
-            (pe::BASE, 0x7000, pe::BASE + 0x1000, 4)
-        );
-        assert_eq!(read(&memory, pe::BASE, 512), original[..512]);
-        permissions(&memory, pe::BASE);
-        assert_eq!(fixed, original);
+        for discardable in [0, 0x0200_0000] {
+            let mut fixed = pe::image();
+            pe::put16(&mut fixed, pe::OPTIONAL + 70, flags);
+            pe::put32(&mut fixed, pe::section(1) + 36, pe::RW | discardable);
+            let original = fixed.clone();
+            let (memory, image) = loader::load_pe32(&fixed, 4).unwrap().into_parts();
+            assert_eq!(
+                (
+                    image.image_base,
+                    image.image_size,
+                    image.entry_point,
+                    image.mapped_pages
+                ),
+                (pe::BASE, 0x7000, pe::BASE + 0x1000, 4)
+            );
+            assert_eq!(read(&memory, pe::BASE, 512), original[..512]);
+            permissions(&memory, pe::BASE);
+            assert_eq!(fixed, original);
 
-        let mut relocated = reloc::full_image();
-        pe::put16(&mut relocated, pe::OPTIONAL + 70, flags);
-        let original = relocated.clone();
-        let (memory, image) = loader::load_pe32_at(&relocated, ACTUAL, 6)
-            .unwrap()
-            .into_parts();
-        assert_eq!(
-            (
-                image.image_base,
-                image.image_size,
-                image.entry_point,
-                image.mapped_pages
-            ),
-            (ACTUAL, 0x9000, ACTUAL + 0x1000, 6)
-        );
-        assert_eq!(read(&memory, ACTUAL, 512), original[..512]);
-        relocated_words(&memory);
-        permissions(&memory, ACTUAL);
-        assert_eq!(relocated, original);
+            let mut relocated = reloc::full_image();
+            pe::put16(&mut relocated, pe::OPTIONAL + 70, flags);
+            pe::put32(&mut relocated, pe::section(1) + 36, pe::RW | discardable);
+            let original = relocated.clone();
+            let (memory, image) = loader::load_pe32_at(&relocated, ACTUAL, 6)
+                .unwrap()
+                .into_parts();
+            assert_eq!(
+                (
+                    image.image_base,
+                    image.image_size,
+                    image.entry_point,
+                    image.mapped_pages
+                ),
+                (ACTUAL, 0x9000, ACTUAL + 0x1000, 6)
+            );
+            assert_eq!(read(&memory, ACTUAL, 512), original[..512]);
+            relocated_words(&memory);
+            permissions(&memory, ACTUAL);
+            assert_eq!(relocated, original);
 
-        let mut linked = linked_image();
-        pe::put16(&mut linked, pe::OPTIONAL + 70, flags);
-        let original = linked.clone();
-        let (memory, metadata) = loader::load_pe32_linked_v8_at(&linked, ACTUAL, GATE, 7)
-            .unwrap()
-            .into_parts();
-        assert_eq!(
-            (
-                metadata.image.image_base,
-                metadata.image.image_size,
-                metadata.image.entry_point,
-                metadata.image.mapped_pages
-            ),
-            (ACTUAL, 0x9000, ACTUAL + 0x1000, 7)
-        );
-        assert_eq!(metadata.gate_base, GATE);
-        assert_eq!(metadata.gate_count, 1);
-        assert_eq!(
-            metadata.gates[0],
-            GateSpec {
-                entry: GuestAddress(GATE + 128),
-                id: 0x10009
-            }
-        );
-        assert_eq!(
-            read(&memory, ACTUAL + 0x3180, 8),
-            [GATE + 128, 0]
-                .into_iter()
-                .flat_map(u32::to_le_bytes)
-                .collect::<Vec<_>>()
-        );
-        assert_eq!(read(&memory, GATE + 128, 2), [0x0f, 0x0b]);
-        assert_eq!(read(&memory, ACTUAL, 512), original[..512]);
-        relocated_words(&memory);
-        permissions(&memory, ACTUAL);
-        assert!(
-            memory
-                .resolve(GuestAddress(GATE + 128), Access::Execute)
-                .is_ok()
-        );
-        assert!(
-            memory
-                .resolve(GuestAddress(GATE + 128), Access::Write)
-                .is_err()
-        );
-        assert_eq!(linked, original);
+            let mut linked = linked_image();
+            pe::put16(&mut linked, pe::OPTIONAL + 70, flags);
+            pe::put32(&mut linked, pe::section(1) + 36, pe::RW | discardable);
+            let original = linked.clone();
+            let (memory, metadata) = loader::load_pe32_linked_v8_at(&linked, ACTUAL, GATE, 7)
+                .unwrap()
+                .into_parts();
+            assert_eq!(
+                (
+                    metadata.image.image_base,
+                    metadata.image.image_size,
+                    metadata.image.entry_point,
+                    metadata.image.mapped_pages
+                ),
+                (ACTUAL, 0x9000, ACTUAL + 0x1000, 7)
+            );
+            assert_eq!(metadata.gate_base, GATE);
+            assert_eq!(metadata.gate_count, 1);
+            assert_eq!(
+                metadata.gates[0],
+                GateSpec {
+                    entry: GuestAddress(GATE + 128),
+                    id: 0x10009
+                }
+            );
+            assert_eq!(
+                read(&memory, ACTUAL + 0x3180, 8),
+                [GATE + 128, 0]
+                    .into_iter()
+                    .flat_map(u32::to_le_bytes)
+                    .collect::<Vec<_>>()
+            );
+            assert_eq!(read(&memory, GATE + 128, 2), [0x0f, 0x0b]);
+            assert_eq!(read(&memory, ACTUAL, 512), original[..512]);
+            relocated_words(&memory);
+            permissions(&memory, ACTUAL);
+            assert!(
+                memory
+                    .resolve(GuestAddress(GATE + 128), Access::Execute)
+                    .is_ok()
+            );
+            assert!(
+                memory
+                    .resolve(GuestAddress(GATE + 128), Access::Write)
+                    .is_err()
+            );
+            assert_eq!(linked, original);
+        }
     }
 }
 
 fn unsupported_flags() -> impl Iterator<Item = u16> {
     (0..16)
-        .filter(|bit| *bit != 8 && *bit != 15)
+        .filter(|bit| ![6, 8, 15].contains(bit))
         .flat_map(|bit| ALLOWED.map(|allowed| allowed | (1_u16 << bit)))
 }
 
 #[test]
 fn every_other_dll_characteristics_bit_remains_unsupported_in_all_profiles() {
     let flags: Vec<_> = unsupported_flags().collect();
-    assert_eq!(flags.len(), 56);
+    assert_eq!(flags.len(), 104);
     for flags in flags {
         let mut fixed = pe::image();
         pe::put16(&mut fixed, pe::OPTIONAL + 70, flags);
@@ -199,6 +204,38 @@ fn every_other_dll_characteristics_bit_remains_unsupported_in_all_profiles() {
             "linked {flags:#06x}"
         );
         assert_eq!(linked, original);
+    }
+}
+
+#[test]
+fn every_other_section_characteristics_bit_remains_unsupported_in_all_profiles() {
+    for bit in (0..32).filter(|bit| ![5, 6, 7, 25, 29, 30, 31].contains(bit)) {
+        let mut fixed = pe::image();
+        let mut relocated = reloc::full_image();
+        let mut linked = linked_image();
+        for bytes in [&mut fixed, &mut relocated, &mut linked] {
+            pe::put16(bytes, pe::OPTIONAL + 70, 0x8140);
+            pe::put32(
+                bytes,
+                pe::section(1) + 36,
+                pe::RW | 0x0200_0000 | (1 << bit),
+            );
+        }
+        assert_eq!(
+            loader::load_pe32(&fixed, 4).err(),
+            Some(LoadError::Unsupported),
+            "fixed bit{bit}"
+        );
+        assert_eq!(
+            loader::load_pe32_at(&relocated, ACTUAL, 6).err(),
+            Some(LoadError::Unsupported),
+            "relocated bit{bit}"
+        );
+        assert_eq!(
+            loader::load_pe32_linked_v8_at(&linked, ACTUAL, GATE, 7).err(),
+            Some(LoadError::Unsupported),
+            "linked-v8 bit{bit}"
+        );
     }
 }
 

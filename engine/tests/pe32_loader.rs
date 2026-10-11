@@ -45,61 +45,78 @@ fn permissions(memory: &AddressSpace, address: u32, expected: [bool; 3]) {
 
 #[test]
 fn raw_padding_zero_fill_permissions_and_sparse_image_metadata_are_exact() {
-    let bytes = pe::image();
-    let (memory, info) = load_pe32(&bytes, 4).unwrap().into_parts();
-    metadata(info);
-    assert_eq!(memory.capacity_pages(), 4);
-    assert_eq!(memory.mapped_pages(), 4);
-    assert_eq!(read(&memory, pe::BASE, 512), bytes[..512]);
-    assert_eq!(read(&memory, pe::BASE + 512, 3584), vec![0; 3584]);
-    assert_eq!(
-        read(&memory, pe::BASE + 0x1000, 512),
-        bytes[pe::TEXT_RAW..pe::TEXT_RAW + 512]
-    );
-    assert_eq!(read(&memory, pe::BASE + 0x1200, 3584), vec![0; 3584]);
-    assert_eq!(
-        read(&memory, pe::BASE + 0x3000, 512),
-        bytes[pe::DATA_RAW..pe::DATA_RAW + 512]
-    );
-    assert_eq!(read(&memory, pe::BASE + 0x3200, 3584), vec![0; 3584]);
-    assert_eq!(read(&memory, pe::BASE + 0x5000, 4096), vec![0; 4096]);
-    permissions(&memory, pe::BASE, [true, false, false]);
-    permissions(&memory, pe::BASE + 0x1000, [true, false, true]);
-    permissions(&memory, pe::BASE + 0x3000, [true, true, false]);
-    permissions(&memory, pe::BASE + 0x5000, [true, true, false]);
-    for rva in [0x2000, 0x4000, 0x6000, pe::IMAGE_SIZE] {
-        for access in [Access::Read, Access::Write, Access::Execute] {
-            let address = GuestAddress(pe::BASE + rva);
-            assert_eq!(
-                memory.resolve(address, access),
-                Err(MemoryError::Fault(MemoryFault {
-                    address,
-                    access,
-                    reason: FaultReason::Unmapped,
-                }))
-            );
+    for discardable in [0, 0x0200_0000] {
+        let mut bytes = pe::image();
+        for (index, flags) in [pe::RX, pe::RW, 0xc000_0080].into_iter().enumerate() {
+            pe::put32(&mut bytes, pe::section(index) + 36, flags | discardable);
+        }
+        let (memory, info) = load_pe32(&bytes, 4).unwrap().into_parts();
+        metadata(info);
+        assert_eq!(memory.capacity_pages(), 4);
+        assert_eq!(memory.mapped_pages(), 4);
+        assert_eq!(read(&memory, pe::BASE, 512), bytes[..512]);
+        assert_eq!(read(&memory, pe::BASE + 512, 3584), vec![0; 3584]);
+        assert_eq!(
+            read(&memory, pe::BASE + 0x1000, 512),
+            bytes[pe::TEXT_RAW..pe::TEXT_RAW + 512]
+        );
+        assert_eq!(read(&memory, pe::BASE + 0x1200, 3584), vec![0; 3584]);
+        assert_eq!(
+            read(&memory, pe::BASE + 0x3000, 512),
+            bytes[pe::DATA_RAW..pe::DATA_RAW + 512]
+        );
+        assert_eq!(read(&memory, pe::BASE + 0x3200, 3584), vec![0; 3584]);
+        assert_eq!(read(&memory, pe::BASE + 0x5000, 4096), vec![0; 4096]);
+        permissions(&memory, pe::BASE, [true, false, false]);
+        permissions(&memory, pe::BASE + 0x1000, [true, false, true]);
+        permissions(&memory, pe::BASE + 0x3000, [true, true, false]);
+        permissions(&memory, pe::BASE + 0x5000, [true, true, false]);
+        for rva in [0x2000, 0x4000, 0x6000, pe::IMAGE_SIZE] {
+            for access in [Access::Read, Access::Write, Access::Execute] {
+                let address = GuestAddress(pe::BASE + rva);
+                assert_eq!(
+                    memory.resolve(address, access),
+                    Err(MemoryError::Fault(MemoryFault {
+                        address,
+                        access,
+                        reason: FaultReason::Unmapped,
+                    }))
+                );
+            }
         }
     }
 }
 
 #[test]
 fn section_permission_bits_are_independent_and_page_span_uses_larger_size() {
-    for bits in 0..8u32 {
+    for discardable in [0, 0x0200_0000] {
+        for bits in 0..8u32 {
+            let mut bytes = pe::image();
+            pe::put32(
+                &mut bytes,
+                pe::section(1) + 36,
+                0x40 | (bits << 29) | discardable,
+            );
+            let (memory, info) = load_pe32(&bytes, 4).unwrap().into_parts();
+            assert_eq!(info.mapped_pages, 4);
+            permissions(
+                &memory,
+                pe::BASE + 0x3000,
+                [bits & 2 != 0, bits & 4 != 0, bits & 1 != 0],
+            );
+        }
         let mut bytes = pe::image();
-        pe::put32(&mut bytes, pe::section(1) + 36, 0x40 | (bits << 29));
-        let (memory, _) = load_pe32(&bytes, 4).unwrap().into_parts();
-        permissions(
-            &memory,
-            pe::BASE + 0x3000,
-            [bits & 2 != 0, bits & 4 != 0, bits & 1 != 0],
-        );
+        pe::put32(&mut bytes, pe::section(1) + 8, 4097);
+        pe::put32(&mut bytes, pe::section(1) + 36, pe::RW | discardable);
+        assert_eq!(load_pe32(&bytes, 4).err(), Some(LoadError::Capacity));
+        let (memory, info) = load_pe32(&bytes, 5).unwrap().into_parts();
+        assert_eq!(info.mapped_pages, 5);
+        let mut expected = vec![0; 4096];
+        expected[..512].copy_from_slice(&bytes[pe::DATA_RAW..pe::DATA_RAW + 512]);
+        assert_eq!(read(&memory, pe::BASE + 0x3000, 4096), expected);
+        assert_eq!(read(&memory, pe::BASE + 0x4000, 4096), vec![0; 4096]);
+        permissions(&memory, pe::BASE + 0x4000, [true, true, false]);
     }
-    let mut bytes = pe::image();
-    pe::put32(&mut bytes, pe::section(1) + 8, 4097);
-    let (memory, info) = load_pe32(&bytes, 5).unwrap().into_parts();
-    assert_eq!(info.mapped_pages, 5);
-    assert_eq!(read(&memory, pe::BASE + 0x4000, 4096), vec![0; 4096]);
-    permissions(&memory, pe::BASE + 0x4000, [true, true, false]);
 }
 
 #[test]
@@ -222,7 +239,7 @@ fn unsupported_profiles_and_every_nonempty_directory_are_explicit_refusals() {
         ("missing 32bit flag", pe::COFF + 18, 3),
         ("PE32+", pe::OPTIONAL, 0x20b),
         ("native subsystem", pe::OPTIONAL + 68, 1),
-        ("dynamic base", pe::OPTIONAL + 70, 0x0140),
+        ("force integrity", pe::OPTIONAL + 70, 0x0180),
     ] {
         let mut bytes = pe::image();
         pe::put16(&mut bytes, offset, value);
@@ -241,9 +258,9 @@ fn unsupported_profiles_and_every_nonempty_directory_are_explicit_refusals() {
         ("section line numbers", pe::section(0) + 28, 512),
         ("section record counts", pe::section(0) + 32, 1),
         (
-            "discardable section",
+            "not-cached section",
             pe::section(1) + 36,
-            pe::RW | 0x0200_0000,
+            pe::RW | 0x0400_0000,
         ),
     ] {
         let mut bytes = pe::image();

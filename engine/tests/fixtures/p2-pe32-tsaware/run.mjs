@@ -21,11 +21,11 @@ for (const [file, pin] of Object.entries(producer.artifacts)) {
   const bytes = readFileSync(join(root, fixture, file)); assert.equal(bytes.length, pin.bytes); assert.equal(hash(bytes), pin.sha256);
 }
 assert.deepEqual(original.subarray(512, 522), text); assert.equal(original.readUInt16LE(214), 0x8100);
-const unsupported = Buffer.from(original); unsupported.writeUInt16LE(0x8140, 214);
+const unsupported = Buffer.from(original); unsupported.writeUInt16LE(0x8180, 214);
 assert.deepEqual([...unsupported.keys()].filter(i => unsupported[i] !== original[i]), [214]);
 const artifacts = {}, modules = [], contexts = [], observations = [], diagnostics = [];
 function save(file, bytes) {writeFileSync(join(output, file), bytes, {flag: 'wx'}); artifacts[file] = {bytes: bytes.length, sha256: hash(bytes)}; return file;}
-save('engine.wasm', engine.bytes); save('input-original.exe', original); save('input-unsupported-dynamic-base.exe', unsupported);
+save('engine.wasm', engine.bytes); save('input-original.exe', original); save('input-unsupported-force-integrity.exe', unsupported);
 const rustPaths = dir => readdirSync(join(root, dir), {withFileTypes: true}).flatMap(item => item.isDirectory()
   ? rustPaths(`${dir}/${item.name}`) : item.name.endsWith('.rs') ? [`${dir}/${item.name}`] : []);
 const paths = [...rustPaths('engine/src'), 'Cargo.toml', 'Cargo.lock', 'engine/Cargo.toml', 'rust-toolchain.toml',
@@ -104,7 +104,7 @@ for (const owner of ['replacement', 'resident']) {
   assert.equal(api.open(2, c.id, 0x54534157), 0); c.base = api.arena_ptr() >>> 0;
   assert.ok(c.base > 0 && c.base + SIZE <= memory.buffer.byteLength); input(c, 0, initial);
   input(c, TRANSFER, unsupported);
-  action(c, 'unsupported dynamic-base bit0040 rejects original-image copy neutrally', () => api.load_pe32(unsupported.length), 20); counts.rejected_loads++;
+  action(c, 'unsupported force-integrity bit0080 rejects original-image copy neutrally', () => api.load_pe32(unsupported.length), 20); counts.rejected_loads++;
   assert.equal(api.generation(), 0); assert.equal(api.module_len(), 0); read(c, 0x400000, 0, 1);
   input(c, TRANSFER, original);
   const receipt = words([0x45503352, 0x10001, 32, 0, 0x400000, 0x2000, 0x401000, 2]);
@@ -143,7 +143,7 @@ const result = {status: 'ok', engine_sha256: engine.sha256, source_pins: sourceP
     'one declared CPU input after load/compile; actual replacement/resident budget3 then7 without CPU/RAM reseeding; no startup, return or process-exit claim',
     'full4364 assertions preserve dirtyFP128, helper and all unrelated bytes; persisted before/after snapshots for each nondiagnostic action',
     'whole512B original headers and10B code checked before/after; selected padding/tail/unmapped-page diagnostics only, no wholeRAM claim',
-    'unsupported DYNAMIC_BASE0040 sidecopy rejects neutrally before same-instance original load; exact32B fixed receipt and read-only headers/read-execute text',
+    'unsupported FORCE_INTEGRITY0080 sidecopy rejects neutrally before same-instance original load; exact32B fixed receipt and read-only headers/read-execute text',
     'one capture/context, unchanged8blocks/64instructions/65536module/2mappedpages; guard-only imports mean no guest data-helper calls, not instrumented guard counts',
     'bounded privateflat32 PE declaration admission and budget-stopped execution; no terminalserver/thread/Windows compatibility/performance/SDK/browser/game claim']};
 writeFileSync(join(output, 'result.json'), JSON.stringify(result, null, 2) + '\n', {flag: 'wx'});
