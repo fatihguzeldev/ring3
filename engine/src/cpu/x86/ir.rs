@@ -288,6 +288,9 @@ pub enum Operation {
     AsciiAdjust {
         kind: AsciiAdjustKind,
     },
+    AsciiAdjustBeforeDivision {
+        base: u8,
+    },
     DecimalAdjust {
         kind: DecimalAdjustKind,
     },

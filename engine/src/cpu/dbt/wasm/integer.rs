@@ -106,6 +106,7 @@ pub(super) fn instruction(
         }
         Operation::DecimalAdjust { kind } => decimal_adjust(code, kind),
         Operation::AsciiAdjust { kind } => ascii_adjust(code, kind),
+        Operation::AsciiAdjustBeforeDivision { base } => ascii_adjust_before_division(code, base),
         Operation::Direction { set } => {
             code.local_get(FLAGS);
             if set {
@@ -2598,6 +2599,24 @@ fn indirect_target(
             memory::load_result(code, address, imports, exit_depth);
         }
     }
+}
+
+fn ascii_adjust_before_division(code: &mut InstructionSink<'_>, base: u8) {
+    byte_value(code, ByteValue::Register(ByteRegister::Al));
+    byte_value(code, ByteValue::Register(ByteRegister::Ah));
+    code.i32_const(i32::from(base))
+        .i32_mul()
+        .i32_add()
+        .i32_const(0xff)
+        .i32_and()
+        .local_set(RESULT);
+    logical_flags(code, 7);
+    code.local_get(register(Register32::Eax))
+        .i32_const(!0xffff)
+        .i32_and()
+        .local_get(RESULT)
+        .i32_or()
+        .local_set(register(Register32::Eax));
 }
 
 fn ascii_adjust(code: &mut InstructionSink<'_>, kind: AsciiAdjustKind) {

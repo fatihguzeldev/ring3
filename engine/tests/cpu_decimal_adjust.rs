@@ -22,6 +22,10 @@ const CODE: u32 = 0x1000;
 const KEY: u64 = 0x4445_4349_4d41_4c31;
 const BANK: [u8; 4] = [0x27, 0x2f, 0xeb, 0];
 const ASCII_BANK: [u8; 4] = [0x37, 0x3f, 0xeb, 0];
+const AAD_BANK: [u8; 20] = [
+    0xd5, 0, 0xd5, 0x0a, 0xd5, 0x80, 0xd5, 0xff, 0xd5, 0x66, 0xd5, 0x67, 0xd5, 0xf0, 0xd5, 0xf2,
+    0xd5, 0xf3, 0xeb, 0,
+];
 
 fn code(bytes: &[u8]) -> EngineInstance {
     code_with_permissions(bytes, true)
@@ -229,8 +233,8 @@ fn fetch_error(pc: u32, address: u32, length: u32, reason: FaultReason) -> Decod
 #[test]
 fn decimal_adjust_ordinary_fallthrough_and_fixed32_payload_adjacency_are_exact() {
     let bytes = [
-        0x48, 0x27, 0x2f, 0x37, 0x3f, 0xb8, 0x27, 0x2f, 0x66, 0x67, 0xb9, 0x37, 0x3f, 0x66, 0x67,
-        0x90,
+        0x48, 0x27, 0x2f, 0x37, 0x3f, 0xd5, 0xf0, 0xd5, 0xff, 0xb8, 0x27, 0x2f, 0x66, 0x67, 0xb9,
+        0x37, 0x3f, 0x66, 0x67, 0x90,
     ];
     let engine = code(&bytes);
     let memory = engine.memory().unwrap();
@@ -247,8 +251,10 @@ fn decimal_adjust_ordinary_fallthrough_and_fixed32_payload_adjacency_are_exact()
         (2, 1, operation(0x2f)),
         (3, 1, operation(0x37)),
         (4, 1, operation(0x3f)),
+        (5, 2, Operation::AsciiAdjustBeforeDivision { base: 0xf0 }),
+        (7, 2, Operation::AsciiAdjustBeforeDivision { base: 0xff }),
         (
-            5,
+            9,
             5,
             Operation::Move {
                 destination: Location32::Register(Register32::Eax),
@@ -256,14 +262,14 @@ fn decimal_adjust_ordinary_fallthrough_and_fixed32_payload_adjacency_are_exact()
             },
         ),
         (
-            10,
+            14,
             5,
             Operation::Move {
                 destination: Location32::Register(Register32::Ecx),
                 source: Value32::Immediate(0x6766_3f37),
             },
         ),
-        (15, 1, Operation::Nop),
+        (19, 1, Operation::Nop),
     ] {
         let decoded = decode_one(memory, GuestAddress(CODE + offset)).unwrap();
         assert_eq!(decoded.operation(), &expected);
@@ -272,9 +278,10 @@ fn decimal_adjust_ordinary_fallthrough_and_fixed32_payload_adjacency_are_exact()
             (length, GuestAddress(CODE + offset + u32::from(length)))
         );
     }
-    assert_standalone_admission(&[0x27, 0x2f, 0x37, 0x3f], 4, false);
+    let ordinary = [0x27, 0x2f, 0x37, 0x3f, 0xd5, 0xf0, 0xd5, 0xff];
+    assert_standalone_admission(&ordinary, 6, false);
     for resident in [false, true] {
-        assert_bound_admission(&[0x27, 0x2f, 0x37, 0x3f], resident, false);
+        assert_bound_admission(&ordinary, resident, false);
     }
 }
 
@@ -283,20 +290,32 @@ fn decimal_adjust_strict_prefixes_and_other_decimal_forms_keep_categories() {
     let opcode_error = DecodeError::Unsupported(UnsupportedFeature::Opcode);
     let segment_error = DecodeError::Unsupported(UnsupportedFeature::Segment);
     let mut cases = Vec::new();
-    for opcode in [0x27, 0x2f, 0x37, 0x3f] {
+    for form in [
+        &[0x27][..],
+        &[0x2f][..],
+        &[0x37][..],
+        &[0x3f][..],
+        &[0xd5, 0x0a][..],
+    ] {
         for prefix in [0x66, 0x67, 0xf2, 0xf3] {
-            cases.push((vec![prefix, opcode], opcode_error));
+            let mut bytes = vec![prefix];
+            bytes.extend_from_slice(form);
+            cases.push((bytes, opcode_error));
         }
         for prefix in [0x26, 0x2e, 0x36, 0x3e, 0x64, 0x65] {
-            cases.push((vec![prefix, opcode], segment_error));
+            let mut bytes = vec![prefix];
+            bytes.extend_from_slice(form);
+            cases.push((bytes, segment_error));
         }
-        cases.push((vec![0xf0, opcode], DecodeError::InvalidEncoding));
-        cases.push((vec![0x66, 0x64, opcode], segment_error));
+        let mut locked = vec![0xf0];
+        locked.extend_from_slice(form);
+        cases.push((locked, DecodeError::InvalidEncoding));
+        let mut segment = vec![0x66, 0x64];
+        segment.extend_from_slice(form);
+        cases.push((segment, segment_error));
     }
-    for bytes in [vec![0xd4, 0x0a], vec![0xd5, 0x0a]] {
-        cases.push((bytes, opcode_error));
-    }
-    assert_eq!(cases.len(), 50);
+    cases.push((vec![0xd4, 0x0a], opcode_error));
+    assert_eq!(cases.len(), 61);
     for (mut bytes, error) in cases {
         bytes.extend([0xeb, 0]);
         let mut engine = code(&bytes);
@@ -407,7 +426,7 @@ fn decimal_adjust_one_byte_fetch_execute_and_top_boundaries_do_not_wrap() {
 
 #[test]
 fn decimal_adjust_source_currentness_separates_data_writes_from_source_mutations() {
-    for bank in [&BANK, &ASCII_BANK] {
+    for bank in [BANK.as_slice(), ASCII_BANK.as_slice(), AAD_BANK.as_slice()] {
         for identity_write in [false, true] {
             let mut engine = code_with_permissions(bank, !identity_write);
             let decoded = decode_one(engine.memory().unwrap(), GuestAddress(CODE)).unwrap();
@@ -446,8 +465,9 @@ fn decimal_adjust_source_currentness_separates_data_writes_from_source_mutations
             engine.guard_resident(KEY, resident).unwrap();
 
             if identity_write {
-                engine.arena_mut().unwrap()[TRANSFER_OFFSET] = bank[0];
-                engine.upload(CODE, 1).unwrap();
+                let offset = usize::from(decoded.length() - 1);
+                engine.arena_mut().unwrap()[TRANSFER_OFFSET] = bank[offset];
+                engine.upload(CODE + offset as u32, 1).unwrap();
             } else {
                 engine.protect(CODE, 1, 4).unwrap();
             }
@@ -468,7 +488,14 @@ fn decimal_adjust_source_currentness_separates_data_writes_from_source_mutations
 
 #[test]
 fn decimal_adjust_mixed_unit_fits_exactly_64_instructions_in_all_six_profiles() {
-    let mut bytes = [0x27, 0x2f, 0x37, 0x3f].repeat(8);
+    let mut bytes = Vec::new();
+    for instruction in 0..32 {
+        if instruction % 5 == 4 {
+            bytes.extend([0xd5, 0xff]);
+        } else {
+            bytes.push([0x27, 0x2f, 0x37, 0x3f][instruction % 5]);
+        }
+    }
     bytes.extend(std::iter::repeat_n(0x90, 31));
     bytes.extend([0xeb, 0]);
     for entries in [false, true] {
@@ -481,7 +508,10 @@ fn decimal_adjust_mixed_unit_fits_exactly_64_instructions_in_all_six_profiles() 
 
 #[test]
 fn decimal_adjust_late_refusal_preserves_dirty_full_arena_and_both_owners() {
-    let mut bytes = vec![0x27, 0x2f, 0x37, 0x3f, 0x0f, 0x0b];
+    let mut bytes = vec![0x27, 0x2f, 0x37, 0x3f, 0xd5, 0xff];
+    let refusal_pc = CODE + bytes.len() as u32;
+    bytes.extend([0x0f, 0x0b]);
+    let refusal_length = bytes.len() as u32;
     bytes.resize(256, 0x90);
     bytes.extend([0xeb, 0]);
     let mut engine = code(&bytes);
@@ -493,7 +523,7 @@ fn decimal_adjust_late_refusal_preserves_dirty_full_arena_and_both_owners() {
     let resident_bytes = engine.resident_bytes(resident).unwrap().to_vec();
     let resident_pointer = engine.resident_bytes(resident).unwrap().as_ptr();
     let error = instruction_error(
-        CODE + 4,
+        refusal_pc,
         DecodeError::Unsupported(UnsupportedFeature::Opcode),
     );
     for is_resident in [false, true] {
@@ -501,7 +531,7 @@ fn decimal_adjust_late_refusal_preserves_dirty_full_arena_and_both_owners() {
             for (index, byte) in engine.arena_mut().unwrap().iter_mut().enumerate() {
                 *byte = (index.wrapping_mul(37).wrapping_add(11) & 0xff) as u8;
             }
-            describe(&mut engine, CODE, 6, entries);
+            describe(&mut engine, CODE, refusal_length, entries);
             let before = engine.arena().to_vec();
             assert_eq!(before.len(), 4364);
             assert_eq!(
@@ -567,4 +597,128 @@ fn ascii_adjust_compiles_resident_explicit() {
 #[test]
 fn ascii_adjust_compiles_resident_entry() {
     assert_bound_admission(&ASCII_BANK, true, true);
+}
+
+#[test]
+fn aad_decodes_exact_immediate_form() {
+    for base in 0..=u8::MAX {
+        let engine = code(&[0xd5, base]);
+        let before = engine.arena().to_vec();
+        let memory = engine.memory().unwrap();
+        let decoded =
+            decode_one(memory, GuestAddress(CODE)).expect("exact AAD immediate form must decode");
+        assert_eq!(
+            decoded.operation(),
+            &Operation::AsciiAdjustBeforeDivision { base }
+        );
+        assert_eq!(
+            (decoded.length(), decoded.next_pc()),
+            (2, GuestAddress(CODE + 2))
+        );
+        assert!(memory.is_code_current(decoded.code_snapshot()));
+        assert_eq!(engine.arena(), before);
+        assert_eq!(memory.mapped_pages(), 1);
+    }
+}
+
+#[test]
+fn aad_compiles_standalone_explicit() {
+    assert_standalone_admission(&AAD_BANK, 10, false);
+}
+
+#[test]
+fn aad_compiles_standalone_entry() {
+    assert_standalone_admission(&AAD_BANK, 10, true);
+}
+
+#[test]
+fn aad_compiles_replacement_explicit() {
+    assert_bound_admission(&AAD_BANK, false, false);
+}
+
+#[test]
+fn aad_compiles_replacement_entry() {
+    assert_bound_admission(&AAD_BANK, false, true);
+}
+
+#[test]
+fn aad_compiles_resident_explicit() {
+    assert_bound_admission(&AAD_BANK, true, false);
+}
+
+#[test]
+fn aad_compiles_resident_entry() {
+    assert_bound_admission(&AAD_BANK, true, true);
+}
+
+#[test]
+fn aad_two_byte_fetch_execute_and_top_boundaries_do_not_wrap() {
+    for base in [0, 0x0a, 0x66, 0x67, 0xf0, 0xf2, 0xf3, 0xff] {
+        for pc in [CODE, 0x1fff, u32::MAX - 1] {
+            let mut memory = code_space(pc, &[0xd5, base]);
+            if pc == u32::MAX - 1 {
+                let zero = PageRange::new(GuestAddress(0), 1).unwrap();
+                memory.map_zeroed(zero, Permissions::ALL).unwrap();
+                memory.write(GuestAddress(0), &[0x0f, 0x0b]).unwrap();
+                memory.protect(zero, Permissions::READ).unwrap();
+            }
+            let decoded = decode_one(&memory, GuestAddress(pc)).unwrap();
+            assert_eq!(
+                decoded.operation(),
+                &Operation::AsciiAdjustBeforeDivision { base }
+            );
+            assert_eq!(
+                (decoded.length(), decoded.next_pc()),
+                (2, GuestAddress(pc.wrapping_add(2)))
+            );
+            assert!(memory.is_code_current(decoded.code_snapshot()));
+        }
+
+        let mut denied_first = code_space(0x1fff, &[0xd5, base]);
+        denied_first
+            .protect(
+                PageRange::new(GuestAddress(CODE), 1).unwrap(),
+                Permissions::READ,
+            )
+            .unwrap();
+        assert_eq!(
+            decode_one(&denied_first, GuestAddress(0x1fff)).err(),
+            Some(fetch_error(0x1fff, 0x1fff, 1, FaultReason::Permission))
+        );
+
+        let mut denied_second = code_space(0x1fff, &[0xd5, base]);
+        denied_second
+            .protect(
+                PageRange::new(GuestAddress(0x2000), 1).unwrap(),
+                Permissions::READ,
+            )
+            .unwrap();
+        assert_eq!(
+            decode_one(&denied_second, GuestAddress(0x1fff)).err(),
+            Some(fetch_error(0x1fff, 0x2000, 2, FaultReason::Permission))
+        );
+
+        let mut incomplete_top = code_space(u32::MAX, &[0xd5]);
+        let zero = PageRange::new(GuestAddress(0), 1).unwrap();
+        incomplete_top.map_zeroed(zero, Permissions::ALL).unwrap();
+        incomplete_top
+            .write(GuestAddress(0), &[base, 0xeb, 0])
+            .unwrap();
+        incomplete_top.protect(zero, Permissions::EXECUTE).unwrap();
+        assert_eq!(
+            decode_one(&incomplete_top, GuestAddress(u32::MAX)).err(),
+            Some(fetch_error(
+                u32::MAX,
+                u32::MAX,
+                2,
+                FaultReason::AddressOverflow,
+            ))
+        );
+    }
+
+    let incomplete_page = code_space(0x1fff, &[0xd5]);
+    assert_eq!(
+        decode_one(&incomplete_page, GuestAddress(0x1fff)).err(),
+        Some(fetch_error(0x1fff, 0x2000, 2, FaultReason::Unmapped))
+    );
 }

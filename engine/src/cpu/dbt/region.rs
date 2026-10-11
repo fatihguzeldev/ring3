@@ -550,6 +550,7 @@ pub(super) fn supports(instruction: &DecodedInstruction, embedded: bool) -> bool
                 | Operation::Carry { .. }
                 | Operation::DecimalAdjust { .. }
                 | Operation::AsciiAdjust { .. }
+                | Operation::AsciiAdjustBeforeDivision { .. }
                 | Operation::Direction { .. }
                 | Operation::FlagsToAh
                 | Operation::AhToFlags
