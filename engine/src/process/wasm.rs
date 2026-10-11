@@ -1386,6 +1386,48 @@ pub(crate) fn exchange_resident32(
     })
 }
 
+pub(crate) fn compare_exchange32(address: u32, expected: u32, desired: u32) -> u32 {
+    REGISTRY.with(|registry| {
+        let Ok(mut registry) = registry.try_borrow_mut() else {
+            return 9;
+        };
+        let Some(instance) = registry.instance.as_mut() else {
+            return 5;
+        };
+        match instance.compare_exchange32(address, expected, desired) {
+            Ok(StoreCompletion::Complete) => 0,
+            Ok(StoreCompletion::CodeInvalidated) => 11,
+            Err(error) => status(error),
+        }
+    })
+}
+
+pub(crate) fn compare_exchange_resident32(
+    key_low: u32,
+    key_high: u32,
+    id_low: u32,
+    id_high: u32,
+    address: u32,
+    expected: u32,
+    desired: u32,
+) -> u32 {
+    REGISTRY.with(|registry| {
+        let Ok(mut registry) = registry.try_borrow_mut() else {
+            return 9;
+        };
+        let Some(instance) = registry.instance.as_mut() else {
+            return 5;
+        };
+        let key = u64::from(key_low) | (u64::from(key_high) << 32);
+        let id = u64::from(id_low) | (u64::from(id_high) << 32);
+        match instance.compare_exchange_resident32(key, id, address, expected, desired) {
+            Ok(StoreCompletion::Complete) => 0,
+            Ok(StoreCompletion::CodeInvalidated) => 11,
+            Err(error) => status(error),
+        }
+    })
+}
+
 fn inspect(operation: impl FnOnce(&EngineInstance) -> u32) -> u32 {
     REGISTRY.with(|registry| {
         let Ok(registry) = registry.try_borrow() else {
