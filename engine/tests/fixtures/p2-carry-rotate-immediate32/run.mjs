@@ -1447,7 +1447,7 @@ const result = {
     chains:
       "real CLC/STC/CMC then two consecutive budget1 C1 DWORD targets with separate complete frames; consumers only after second; second instruction immediate is independently decoded",
     raw_frames:
-      "all2358 generated calls save one physical before/after full4236B pair including targets/producers/consumers/preflight/stale/closed; target records reference those frames; full hash joins are not all-body independent semantic modelling",
+      "all2358 generated calls save one physical before/after full4612B pair including targets/producers/consumers/preflight/stale/closed; target records reference those frames; full hash joins are not all-body independent semantic modelling",
     temporal:
       "stale full live module callbacks and closed known retained-arena callbacks directly follow status assertion before post-call check/snapshot; saved files do not certify timing",
     code: "six authored banks/current code/tails and host inputs are physical files;12 managed4096B page rosters/images are map/upload models retired by close, no physical Read32 RAM dump",

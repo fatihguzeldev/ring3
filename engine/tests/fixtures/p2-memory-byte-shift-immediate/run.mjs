@@ -34,7 +34,7 @@ const plan = {
   host_uploads: 1362, host_uploaded_bytes: 1008864, operand_reads: 2280,
   host_read8: 2280, host_read32: 663552, host_requests: 1482, cancel_writes: 138,
   host_inputs: 4074, host_calls: 5106, pages: 648, page_bytes: 2654208,
-  raw_arenas: 11652, raw_arena_bytes: 49357872, files: 206,
+  raw_arenas: 11652, raw_arena_bytes: 11652 * SIZE, files: 206,
 };
 const counts = Object.fromEntries(Object.keys(plan).map(name => [name, 0]));
 const artifacts = [], contexts = [], modules = [], targets = [], runs = [], faults = [],
@@ -822,7 +822,7 @@ const result = {
   evidence_limits: {
     arithmetic: "unchanged widened arithmetic/literal byte-shift and ADD definitions from selected old fixtures; q0 retains validFLAGS, q>=8 selectedCF and undefinedAF/multiOF clear; independent raw checker owns separate bit-walk",
     origins: "all1104 targets use current actual-engine-compiled replacement/resident modules; no native-produced guest arithmetic or unbound memory backend claim",
-    arenas: "all4686 generated calls save full4236B before/after;2208 target pre/postRead8 frames plus72 pre-restriction frames yield11652 saved frames; known arena reconstruction is finite, not a generic certificate",
+    arenas: "all4686 generated calls save full4612B before/after;2208 target pre/postRead8 frames plus72 pre-restriction frames yield11652 saved frames; known arena reconstruction is finite, not a generic certificate",
     pages: "648 complete4096B physical pages with non-target neighbors; every successful target physically reads its old/stored byte;663552 hostRead32 page diagnostics and2280 hostRead8 observations are separate from guest imports",
     lifecycle: "72 true LEA/fault/retry/repair cases retain fullCPU and surviving mapped bytes;18 map-only repairs reread fresh zero,18 permission-only retain81,36 changed-byte repairs reread1; width1 ffffffff is valid, no operand overflow/cross-page fault claim",
     currency: "36 consumed MOV immediate stores include12 q0 same-value invalidations;42 stale4 calls compare complete retained live old allocation first synchronously before helpers/getters/new allocations;36 fresh16B four-instruction tails and6 count-mutation11B three-instruction tails resume currentCPU without head replay; after hashes are producer comparison receipts",

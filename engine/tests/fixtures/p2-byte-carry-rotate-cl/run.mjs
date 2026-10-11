@@ -365,7 +365,7 @@ const result = {status: 'ok', profile: 'finite D2 register-byte captured-CL carr
     owners: 'four standalone modules are native Rust wrapper output executed by Node in independent memory; only1406 managed targets are engine-Wasm compiled',
     flags: 'FLAGS2/3/cd6/cd7 finite samples; no128FLAGSdomain claim; r0 atq0/9/18/27 preserves all accepted flags by explicit Ring3 effective-zero policy; q1 definedOF; nonzero-r/q>1 OF0 is undefined-flag policy, not a hardware measurement',
     chains: 'each pair has two consecutive budget1 D2 target calls and separate full frames; SETB/SETO occur only after second',
-    raw_frames: 'all2106 target before/after full4236B plus30 selected currency frames saved; other run/control states are metadata and live assertions',
+    raw_frames: 'all2106 target before/after full4612B plus30 selected currency frames saved; other run/control states are metadata and live assertions',
     temporal: 'stale live module callbacks and closed retained-arena callbacks run directly after status assertion before post-call checks/snapshots; saved files cannot retrospectively prove timing',
     code: 'authored/current x86 and exact successful host upload inputs saved; explicit4096B managed page images/rosters are map/upload models retired by close, no physical Read32 RAM readback claim',
     host_schedule: '98 recorded map/upload/protect/compiler/guard/close calls;14 opens and getter groups covered by initialization checks; pure initialization separate',

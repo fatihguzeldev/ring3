@@ -82,7 +82,7 @@ const plan = {
   pages: 812,
   page_bytes: 3325952,
   raw_arenas: 8716,
-  raw_arena_bytes: 36920976,
+  raw_arena_bytes: 8716 * SIZE,
   files: 94,
 };
 const counts = Object.fromEntries(Object.keys(plan).map((name) => [name, 0]));
@@ -1456,7 +1456,7 @@ const result = {
     origins:
       "140 native-Rust bound replacement targets use independently matched actual key/generation+guard and current memory helpers;628 targets use actual-engine-compiled replacement/resident modules; native artifacts have no separate live engine-allocation proof",
     arenas:
-      "all3542 generated calls save full4236B before/after;768 targets save separate physical pre/post Read32 frames and96 pre-restriction operands save full frames;8716 physical frames join the declared full known arena model, not an independently certified generic arena model",
+      "all3542 generated calls save full4612B before/after;768 targets save separate physical pre/post Read32 frames and96 pre-restriction operands save full frames;8716 physical frames join the declared full known arena model, not an independently certified generic arena model",
     pages:
       "812 complete physical4096B pages, neighbors included; page expectations derive successful map/upload and scalar target model; every successful target physically reads its old and stored DWORD, including post-map repaired words;833120 host Read32 calls are diagnostics separate from guest Read4/Store4",
     lifecycle:

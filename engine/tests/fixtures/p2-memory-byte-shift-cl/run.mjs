@@ -33,7 +33,7 @@ const plan = {
   host_uploads: 420, host_uploaded_bytes: 516510, operand_reads: 630,
   host_read8: 630, host_read32: 350208, host_requests: 474, cancel_writes: 72,
   host_inputs: 1260, host_calls: 1782, pages: 342, page_bytes: 1400832,
-  raw_arenas: 3282, raw_arena_bytes: 13902552, files: 92,
+  raw_arenas: 3282, raw_arena_bytes: 3282 * SIZE, files: 92,
 };
 const counts = Object.fromEntries(Object.keys(plan).map(name => [name, 0]));
 const artifacts = [], contexts = [], modules = [], targets = [], runs = [], faults = [],

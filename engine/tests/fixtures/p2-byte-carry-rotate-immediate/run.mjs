@@ -374,7 +374,7 @@ const result = {status: 'ok', profile: 'finite C0 register-byte immediate carry 
     owners: '17 standalone modules are native Rust wrapper output executed by Node in three independent memory arenas;606 managed targets are compiled by frozen engine Wasm',
     flags: 'FLAGS2/3/cd6/cd7 finite seeds; no128FLAGSdomain claim; r0 at q0/9/18/27 preserves all accepted flags by explicit Ring3 policy; q1 definedOF; nonzero-r/q>1 OF0 is undefined-flag policy, not hardware measurement',
     chains: 'two consecutive budget1 C0 targets with separate complete frames; consumers only after second; second instruction immediate is independently decoded',
-    raw_frames: 'all906 target before/after full4236B plus30 currency frames saved; other run/control states are metadata and live assertions',
+    raw_frames: 'all906 target before/after full4612B plus30 currency frames saved; other run/control states are metadata and live assertions',
     temporal: 'stale full live module callbacks and closed known retained-arena callbacks directly follow status assertion before post-call check/snapshot; saved files do not certify timing',
     code: 'six authored banks/current code/tails and host inputs are physical files;12 managed4096B page rosters/images are map/upload models retired by close, no physical Read32 RAM dump',
     host_schedule: '112 recorded map/upload/protect/compiler/guard/close calls;12 opens and getter groups covered by initialization checks; three pure initializations separate',
