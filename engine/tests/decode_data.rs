@@ -517,7 +517,7 @@ fn unsupported_floating_point_simd_segment_string_and_privileged_are_explicit() 
         (&[0xf3, 0xa4][..], UnsupportedFeature::RepeatedString),
         (&[0xf4][..], UnsupportedFeature::Privileged),
         (&[0xf3, 0xc3][..], UnsupportedFeature::Opcode),
-        (&[0xf3, 0x90][..], UnsupportedFeature::Opcode),
+        (&[0xf3, 0xf3, 0x90][..], UnsupportedFeature::Opcode),
     ] {
         let space = code_space(0x1000, bytes, Permissions::EXECUTE);
         let error = decode_one(&space, GuestAddress(0x1000)).err().unwrap();

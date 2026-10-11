@@ -23,6 +23,7 @@ pub(super) fn lower(instruction: &Instruction, bytes: &[u8]) -> Result<Operation
         Code::Nopd => Ok(Operation::Nop),
         Code::Nopw => Ok(Operation::Nop),
         Code::Nop_rm16 => Ok(Operation::Nop),
+        Code::Pause => Ok(Operation::Nop),
         Code::Fninit => Ok(Operation::InitializeX87),
         Code::Fnclex => Ok(Operation::ClearX87Exceptions),
         Code::Fnstsw_AX => Ok(Operation::X87StatusToAx),

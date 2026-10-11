@@ -60,6 +60,9 @@ pub(super) fn check_profile(instruction: &Instruction, bytes: &[u8]) -> Result<(
     {
         return Err(DecodeError::Unsupported(UnsupportedFeature::Segment));
     }
+    if instruction.code() == Code::Pause && bytes != [0xf3, 0x90] {
+        return Err(unsupported());
+    }
     if matches!(instruction.code(), Code::Daa | Code::Das)
         && !matches!(
             (instruction.code(), bytes),
