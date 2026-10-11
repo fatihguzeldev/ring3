@@ -422,6 +422,9 @@ fn exclusions() -> Vec<(Vec<u8>, DecodeError)> {
                 if immediate { 0xba } else { register_opcode },
                 3 | ((if immediate { field } else { 2 }) << 3),
             ];
+            if kind == BitTestKind::Set && !immediate {
+                locked.insert(0, 0xf0);
+            }
             if immediate {
                 locked.push(255);
             }
