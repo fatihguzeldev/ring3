@@ -45,13 +45,13 @@ function fresh() {
   assert.equal(api.open(12, engine.low, engine.high), 0);
   engine.base = api.arena_ptr() >>> 0;
   refresh(engine);
-  assert.ok(engine.base > 0 && engine.base + 4236 <= engine.bytes.length);
+  assert.ok(engine.base > 0 && engine.base + 4612 <= engine.bytes.length);
   assert.equal(api.map(0x1000, 1, 7), 0);
   return engine;
 }
 
 function arena(engine) {
-  return refresh(engine).bytes.slice(engine.base, engine.base + 4236);
+  return refresh(engine).bytes.slice(engine.base, engine.base + 4612);
 }
 
 function upload(engine, address, bytes) {
