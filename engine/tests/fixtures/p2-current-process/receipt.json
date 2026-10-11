@@ -1,0 +1,382 @@
+{
+  "artifacts": {
+    "build.py": {
+      "bytes": 14415,
+      "file": "build.py",
+      "sha256": "ed60d5d6f8aec7676dbd2f43557b2874688fae1f2921f938cdaea4ef15d6dba3"
+    },
+    "check_coff.py": {
+      "bytes": 4182,
+      "file": "check_coff.py",
+      "sha256": "d2ccf50d751d766b48c8e4ef1596654c9b5d394f3880f54398b174a954eb880f"
+    },
+    "compiled-records-build.py": {
+      "bytes": 10227,
+      "file": "compiled-records-build.py",
+      "sha256": "fe426f202b48664a87357c766d39099b9d35b5d8217c2b114696164a0d468258"
+    },
+    "kernel.c": {
+      "bytes": 828,
+      "file": "kernel.c",
+      "sha256": "86e2c45c2cd7ac46ac1abe7d4f7ea3b662f9562132d6462d4f150168028842e8"
+    },
+    "kernel.disasm.txt": {
+      "bytes": 1627,
+      "file": "kernel.disasm.txt",
+      "sha256": "66b953da93394c45f9c2ebbfa90259b2776c188ab808224277d6bc1c340f56c8"
+    },
+    "kernel.obj": {
+      "bytes": 805,
+      "file": "kernel.obj",
+      "sha256": "7b4d5e9fa4a83d695741fa9431dcce922f84e0bbd746ff13205cc0bee591e10b"
+    },
+    "kernel.relocations.json": {
+      "bytes": 1457,
+      "file": "kernel.relocations.json",
+      "sha256": "b840ff1a75d39bb9c38385756d7236942aeef1266a0f61d766a8a1af06169d0a"
+    },
+    "kernel.text.bin": {
+      "bytes": 67,
+      "file": "kernel.text.bin",
+      "sha256": "372189564f9ae99ced2d328844f779200e2e2c7332d350372fc4e39571bda24d"
+    },
+    "kernel.text.raw.bin": {
+      "bytes": 67,
+      "file": "kernel.text.raw.bin",
+      "sha256": "957a7b5deafb448e973efd9b18f8235856f2c522ac0b7cb3da20aeb5278299c0"
+    }
+  },
+  "builder": {
+    "bytes": 14415,
+    "path": "/Users/fatihguzel/ring3/engine/tests/fixtures/p2-current-process/build.py",
+    "sha256": "ed60d5d6f8aec7676dbd2f43557b2874688fae1f2921f938cdaea4ef15d6dba3"
+  },
+  "checker": {
+    "bytes": 4182,
+    "path": "/Users/fatihguzel/ring3/engine/tests/fixtures/p2-current-process/check_coff.py",
+    "sha256": "d2ccf50d751d766b48c8e4ef1596654c9b5d394f3880f54398b174a954eb880f"
+  },
+  "coff": {
+    "characteristics": 0,
+    "discarded_metadata": [
+      "empty .data",
+      "empty .bss",
+      "nonloaded .debug$S"
+    ],
+    "function": {
+      "entry_offset": 0,
+      "extent_basis": "complete original text section",
+      "extent_end_offset": 67,
+      "symbol": "_ring3_current_process"
+    },
+    "imports": [
+      "GetCurrentProcess",
+      "SetLastError",
+      "FlushInstructionCache",
+      "GetLastError"
+    ],
+    "layout": {
+      "preferred_base": 4194304,
+      "text_rva": 8192
+    },
+    "machine": 332,
+    "relocations": [
+      {
+        "api": "GetCurrentProcess",
+        "iat_rva": 12672,
+        "linked_va": 4206976,
+        "pe_highlow_rva": 8196,
+        "pe_type": 3,
+        "raw_addend": 0,
+        "source_offset": 4,
+        "source_rva": 8196,
+        "source_section": ".text",
+        "target_symbol": "__imp__GetCurrentProcess@0",
+        "target_symbol_index": 10
+      },
+      {
+        "api": "SetLastError",
+        "iat_rva": 12676,
+        "linked_va": 4206980,
+        "pe_highlow_rva": 8209,
+        "pe_type": 3,
+        "raw_addend": 0,
+        "source_offset": 17,
+        "source_rva": 8209,
+        "source_section": ".text",
+        "target_symbol": "__imp__SetLastError@4",
+        "target_symbol_index": 11
+      },
+      {
+        "api": "FlushInstructionCache",
+        "iat_rva": 12680,
+        "linked_va": 4206984,
+        "pe_highlow_rva": 8220,
+        "pe_type": 3,
+        "raw_addend": 0,
+        "source_offset": 28,
+        "source_rva": 8220,
+        "source_section": ".text",
+        "target_symbol": "__imp__FlushInstructionCache@12",
+        "target_symbol_index": 12
+      },
+      {
+        "api": "GetLastError",
+        "iat_rva": 12684,
+        "linked_va": 4206988,
+        "pe_highlow_rva": 8228,
+        "pe_type": 3,
+        "raw_addend": 0,
+        "source_offset": 36,
+        "source_rva": 8228,
+        "source_section": ".text",
+        "target_symbol": "__imp__GetLastError@0",
+        "target_symbol_index": 13
+      }
+    ],
+    "sections": [
+      {
+        "bytes": 67,
+        "characteristics": 1615855648,
+        "index": 1,
+        "loaded": true,
+        "name": ".text",
+        "raw_offset": 180,
+        "raw_sha256": "957a7b5deafb448e973efd9b18f8235856f2c522ac0b7cb3da20aeb5278299c0",
+        "relocation_count": 4,
+        "relocations_offset": 247
+      },
+      {
+        "bytes": 0,
+        "characteristics": 3224371264,
+        "index": 2,
+        "loaded": false,
+        "name": ".data",
+        "raw_offset": 287,
+        "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "relocation_count": 0,
+        "relocations_offset": 0
+      },
+      {
+        "bytes": 0,
+        "characteristics": 3224371328,
+        "index": 3,
+        "loaded": false,
+        "name": ".bss",
+        "raw_offset": 0,
+        "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "relocation_count": 0,
+        "relocations_offset": 0
+      },
+      {
+        "bytes": 100,
+        "characteristics": 1110442048,
+        "index": 4,
+        "loaded": false,
+        "name": ".debug$S",
+        "raw_offset": 287,
+        "raw_sha256": "cbc96764a1bb8900d6496ab9f37b68cee67dcd235eb05bc27b8a19fae4277fe1",
+        "relocation_count": 0,
+        "relocations_offset": 0
+      }
+    ],
+    "specification": "https://learn.microsoft.com/en-us/windows/win32/debug/pe-format",
+    "symbol_count": 16,
+    "symbols": [
+      {
+        "auxiliaries": 1,
+        "index": 0,
+        "name": ".text",
+        "section": 1,
+        "storage": 3,
+        "type": 0,
+        "value": 0
+      },
+      {
+        "auxiliaries": 1,
+        "index": 2,
+        "name": ".data",
+        "section": 2,
+        "storage": 3,
+        "type": 0,
+        "value": 0
+      },
+      {
+        "auxiliaries": 1,
+        "index": 4,
+        "name": ".bss",
+        "section": 3,
+        "storage": 3,
+        "type": 0,
+        "value": 0
+      },
+      {
+        "auxiliaries": 1,
+        "index": 6,
+        "name": ".debug$S",
+        "section": 4,
+        "storage": 3,
+        "type": 0,
+        "value": 0
+      },
+      {
+        "auxiliaries": 0,
+        "index": 8,
+        "name": "@feat.00",
+        "section": -1,
+        "storage": 3,
+        "type": 0,
+        "value": 1
+      },
+      {
+        "auxiliaries": 0,
+        "index": 9,
+        "name": "_ring3_current_process",
+        "section": 1,
+        "storage": 2,
+        "type": 32,
+        "value": 0
+      },
+      {
+        "auxiliaries": 0,
+        "index": 10,
+        "name": "__imp__GetCurrentProcess@0",
+        "section": 0,
+        "storage": 2,
+        "type": 0,
+        "value": 0
+      },
+      {
+        "auxiliaries": 0,
+        "index": 11,
+        "name": "__imp__SetLastError@4",
+        "section": 0,
+        "storage": 2,
+        "type": 0,
+        "value": 0
+      },
+      {
+        "auxiliaries": 0,
+        "index": 12,
+        "name": "__imp__FlushInstructionCache@12",
+        "section": 0,
+        "storage": 2,
+        "type": 0,
+        "value": 0
+      },
+      {
+        "auxiliaries": 0,
+        "index": 13,
+        "name": "__imp__GetLastError@0",
+        "section": 0,
+        "storage": 2,
+        "type": 0,
+        "value": 0
+      },
+      {
+        "auxiliaries": 1,
+        "index": 14,
+        "name": ".file",
+        "section": -2,
+        "storage": 103,
+        "type": 0,
+        "value": 0
+      }
+    ],
+    "timestamp": 0
+  },
+  "command_cwd": "/Users/fatihguzel/ring3/target/engine-current-process-2026-10-11/linked-first",
+  "commands": {
+    "compile": [
+      "/Library/Developer/CommandLineTools/usr/bin/clang",
+      "--target=i686-pc-windows-msvc",
+      "-std=c11",
+      "-O2",
+      "-ffreestanding",
+      "-fno-builtin",
+      "-fno-stack-protector",
+      "-fno-vectorize",
+      "-fno-slp-vectorize",
+      "-fno-unroll-loops",
+      "-falign-loops=1",
+      "-mno-sse",
+      "-mno-sse2",
+      "-mno-mmx",
+      "-mno-incremental-linker-compatible",
+      "-fno-unwind-tables",
+      "-fno-asynchronous-unwind-tables",
+      "-fno-addrsig",
+      "-c",
+      "kernel.c",
+      "-o",
+      "kernel.obj"
+    ],
+    "compiler_version": [
+      "/Library/Developer/CommandLineTools/usr/bin/clang",
+      "--version"
+    ],
+    "disassemble": [
+      "/Library/Developer/CommandLineTools/usr/bin/llvm-objdump",
+      "-d",
+      "-r",
+      "kernel.obj"
+    ],
+    "objdump_version": [
+      "/Library/Developer/CommandLineTools/usr/bin/llvm-objdump",
+      "--version"
+    ]
+  },
+  "compiler": {
+    "path": "/Library/Developer/CommandLineTools/usr/bin/clang",
+    "resolved_path": "/Library/Developer/CommandLineTools/usr/bin/clang",
+    "sha256": "f30550eab15fdf5ab8c0dc54c52679711241e5d4b636b027e18c09fef531775d",
+    "version": "Apple clang version 21.0.0 (clang-2100.1.1.101)\nTarget: arm64-apple-darwin25.6.0\nThread model: posix\nInstalledDir: /Library/Developer/CommandLineTools/usr/bin\n"
+  },
+  "dependency": {
+    "bytes": 10227,
+    "path": "/Users/fatihguzel/ring3/engine/tests/fixtures/p2-compiled-records/build.py",
+    "sha256": "fe426f202b48664a87357c766d39099b9d35b5d8217c2b114696164a0d468258"
+  },
+  "environment": {
+    "LC_ALL": "C",
+    "PATH": "/usr/bin:/bin",
+    "SOURCE_DATE_EPOCH": "0",
+    "TZ": "UTC"
+  },
+  "flags": [
+    "--target=i686-pc-windows-msvc",
+    "-std=c11",
+    "-O2",
+    "-ffreestanding",
+    "-fno-builtin",
+    "-fno-stack-protector",
+    "-fno-vectorize",
+    "-fno-slp-vectorize",
+    "-fno-unroll-loops",
+    "-falign-loops=1",
+    "-mno-sse",
+    "-mno-sse2",
+    "-mno-mmx",
+    "-mno-incremental-linker-compatible",
+    "-fno-unwind-tables",
+    "-fno-asynchronous-unwind-tables",
+    "-fno-addrsig"
+  ],
+  "objdump": {
+    "path": "/Library/Developer/CommandLineTools/usr/bin/llvm-objdump",
+    "resolved_path": "/Library/Developer/CommandLineTools/usr/bin/llvm-objdump",
+    "sha256": "1dcc1432db4d828cf8cd71a84cb8d9bf63a7ca80b5eeec711a9e5f13a3f5f98e",
+    "version": "Apple LLVM version 21.0.0\n  Optimized build.\n\n\n  Registered Targets:\n    aarch64    - AArch64 (little endian)\n    aarch64_32 - AArch64 (little endian ILP32)\n    aarch64_be - AArch64 (big endian)\n    arm        - ARM\n    arm64      - ARM64 (little endian)\n    arm64_32   - ARM64 (little endian ILP32)\n    armeb      - ARM (big endian)\n    thumb      - Thumb\n    thumbeb    - Thumb (big endian)\n    x86        - 32-bit X86: Pentium-Pro and above\n    x86-64     - 64-bit X86: EM64T and AMD64\n"
+  },
+  "profile": {
+    "commands_sha256": "38537555404dc77b1f1ff0fedb469f6ba6c2eac65aafe68a6a2654a81848b261",
+    "environment_sha256": "3f63d7e3b0a21504805e0ab6dc9eb036b99a7f11d936a8101e2a18bd21f0eea9",
+    "flags_sha256": "a0a813000804f066540cab2fe1d439dbb61d3e6eff8ff180d027d79df2e98be1"
+  },
+  "schema": "ring3.compiled-current-process.v1",
+  "source": {
+    "bytes": 828,
+    "path": "/Users/fatihguzel/ring3/engine/tests/fixtures/p2-current-process/kernel.c",
+    "sha256": "86e2c45c2cd7ac46ac1abe7d4f7ea3b662f9562132d6462d4f150168028842e8"
+  }
+}

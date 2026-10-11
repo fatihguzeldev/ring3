@@ -1,0 +1,60 @@
+{
+  "layout": {
+    "preferred_base": 4194304,
+    "text_rva": 8192
+  },
+  "relocations": [
+    {
+      "api": "GetCurrentProcess",
+      "iat_rva": 12672,
+      "linked_va": 4206976,
+      "pe_highlow_rva": 8196,
+      "pe_type": 3,
+      "raw_addend": 0,
+      "source_offset": 4,
+      "source_rva": 8196,
+      "source_section": ".text",
+      "target_symbol": "__imp__GetCurrentProcess@0",
+      "target_symbol_index": 10
+    },
+    {
+      "api": "SetLastError",
+      "iat_rva": 12676,
+      "linked_va": 4206980,
+      "pe_highlow_rva": 8209,
+      "pe_type": 3,
+      "raw_addend": 0,
+      "source_offset": 17,
+      "source_rva": 8209,
+      "source_section": ".text",
+      "target_symbol": "__imp__SetLastError@4",
+      "target_symbol_index": 11
+    },
+    {
+      "api": "FlushInstructionCache",
+      "iat_rva": 12680,
+      "linked_va": 4206984,
+      "pe_highlow_rva": 8220,
+      "pe_type": 3,
+      "raw_addend": 0,
+      "source_offset": 28,
+      "source_rva": 8220,
+      "source_section": ".text",
+      "target_symbol": "__imp__FlushInstructionCache@12",
+      "target_symbol_index": 12
+    },
+    {
+      "api": "GetLastError",
+      "iat_rva": 12684,
+      "linked_va": 4206988,
+      "pe_highlow_rva": 8228,
+      "pe_type": 3,
+      "raw_addend": 0,
+      "source_offset": 36,
+      "source_rva": 8228,
+      "source_section": ".text",
+      "target_symbol": "__imp__GetLastError@0",
+      "target_symbol_index": 13
+    }
+  ]
+}

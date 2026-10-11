@@ -1,0 +1,33 @@
+
+kernel.obj:	file format coff-i386
+
+Disassembly of section .text:
+
+00000000 <_ring3_current_process>:
+       0: 57                           	pushl	%edi
+       1: 56                           	pushl	%esi
+       2: ff 15 00 00 00 00            	calll	*0x0
+			00000004:  IMAGE_REL_I386_DIR32	__imp__GetCurrentProcess@0
+       8: 89 c6                        	movl	%eax, %esi
+       a: 68 ef cd ab 89               	pushl	$0x89abcdef             # imm = 0x89ABCDEF
+       f: ff 15 00 00 00 00            	calll	*0x0
+			00000011:  IMAGE_REL_I386_DIR32	__imp__SetLastError@4
+      15: 6a ff                        	pushl	$-0x1
+      17: 6a 00                        	pushl	$0x0
+      19: 56                           	pushl	%esi
+      1a: ff 15 00 00 00 00            	calll	*0x0
+			0000001c:  IMAGE_REL_I386_DIR32	__imp__FlushInstructionCache@12
+      20: 89 c7                        	movl	%eax, %edi
+      22: ff 15 00 00 00 00            	calll	*0x0
+			00000024:  IMAGE_REL_I386_DIR32	__imp__GetLastError@0
+      28: f7 d6                        	notl	%esi
+      2a: 83 f7 01                     	xorl	$0x1, %edi
+      2d: 09 f7                        	orl	%esi, %edi
+      2f: 35 ef cd ab 89               	xorl	$0x89abcdef, %eax       # imm = 0x89ABCDEF
+      34: 31 c9                        	xorl	%ecx, %ecx
+      36: 09 f8                        	orl	%edi, %eax
+      38: b8 2a 00 00 00               	movl	$0x2a, %eax
+      3d: 0f 45 c1                     	cmovnel	%ecx, %eax
+      40: 5e                           	popl	%esi
+      41: 5f                           	popl	%edi
+      42: c3                           	retl
