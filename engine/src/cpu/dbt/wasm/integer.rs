@@ -1456,6 +1456,32 @@ pub(super) fn instruction(
                 .local_set(register(Register32::Eax))
                 .end();
         }
+        Operation::LockedMemoryCompareExchangeWord { address, source } => {
+            word_value(code, WordValue::Register(Register32::Eax));
+            word_value(code, WordValue::Register(source));
+            code.local_set(RESULT);
+            memory::compare_exchange_word_result(code, address, imports, exit_depth);
+            code.local_set(LHS)
+                .local_get(RESULT)
+                .local_set(RHS)
+                .local_get(LHS)
+                .local_get(RHS)
+                .i32_sub()
+                .i32_const(0xffff)
+                .i32_and()
+                .local_set(RESULT);
+            arithmetic_flags(code, BinaryKind::Cmp, CarryFlag::Calculate, 15);
+            code.local_get(RESULT)
+                .if_(BlockType::Empty)
+                .local_get(RHS)
+                .local_get(register(Register32::Eax))
+                .i32_const(!0xffff)
+                .i32_and()
+                .i32_or()
+                .local_set(register(Register32::Eax))
+                .end();
+            store = true;
+        }
         Operation::MemoryCompareExchangeWord { address, source } => {
             memory::load_narrow_value(code, address, SmallWidth::Word, imports, exit_depth);
             code.local_set(RHS);

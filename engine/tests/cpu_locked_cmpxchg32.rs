@@ -490,7 +490,11 @@ fn locked_cmpxchg32_strict_prefixes_widths_registers_and_neighbors_stay_closed()
             } else {
                 opcode
             };
-            cases.insert([vec![prefix], form.to_vec()].concat(), expected);
+            let mut prefixed = vec![prefix];
+            if prefix == 0x66 {
+                prefixed.push(0xf0);
+            }
+            cases.insert([prefixed, form.to_vec()].concat(), expected);
             cases.insert([vec![0xf0, prefix], form[1..].to_vec()].concat(), expected);
         }
     }

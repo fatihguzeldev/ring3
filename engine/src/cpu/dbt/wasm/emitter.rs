@@ -26,6 +26,7 @@ pub(in crate::cpu::dbt) fn emit(
         exchange_add32: needs_exchange_add32,
         compare_exchange8: needs_compare_exchange8,
         exchange_add8: needs_exchange_add8,
+        compare_exchange16: needs_compare_exchange16,
     } = memory::Imports::needed(blocks);
     let has_stores = needs_store
         || needs_store8
@@ -36,7 +37,11 @@ pub(in crate::cpu::dbt) fn emit(
         || needs_exchange_add32
         || needs_exchange_add8;
     let has_reads = needs_read || needs_read8 || needs_read16;
-    let has_memory = has_reads || has_stores || needs_compare_exchange32 || needs_compare_exchange8;
+    let has_memory = has_reads
+        || has_stores
+        || needs_compare_exchange32
+        || needs_compare_exchange8
+        || needs_compare_exchange16;
     let has_gates = blocks.iter().any(|block| block.gate.is_some());
     let has_arithmetic = blocks
         .iter()
@@ -92,7 +97,7 @@ pub(in crate::cpu::dbt) fn emit(
             [ValType::I32],
         );
     }
-    if needs_compare_exchange32 || needs_compare_exchange8 {
+    if needs_compare_exchange32 || needs_compare_exchange8 || needs_compare_exchange16 {
         let parameters = if matches!(binding, Some(EmbeddedBinding::Resident { .. })) {
             7
         } else {
@@ -332,6 +337,29 @@ pub(in crate::cpu::dbt) fn emit(
         };
         imports.import("ring3", name, EntityType::Function(type_index));
         helper_imports.exchange_add8 = Some(exchange);
+        function_index += 1;
+    }
+    if needs_compare_exchange16 {
+        let (name, exchange) = match binding {
+            Some(EmbeddedBinding::Resident { key, id }) => (
+                "compare_exchange_resident16",
+                memory::StoreImport::Resident {
+                    index: function_index,
+                    key,
+                    id,
+                },
+            ),
+            _ => (
+                "compare_exchange16",
+                memory::StoreImport::Replacement(function_index),
+            ),
+        };
+        imports.import(
+            "ring3",
+            name,
+            EntityType::Function(type_index + u32::from(has_stores)),
+        );
+        helper_imports.compare_exchange16 = Some(exchange);
         function_index += 1;
     }
     module.section(&imports);

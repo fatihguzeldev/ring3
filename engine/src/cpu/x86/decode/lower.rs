@@ -509,6 +509,12 @@ pub(super) fn lower(instruction: &Instruction, bytes: &[u8]) -> Result<Operation
                 _ => Err(unsupported()),
             }
         }
+        Code::Cmpxchg_rm16_r16 if instruction.has_lock_prefix() => {
+            Ok(Operation::LockedMemoryCompareExchangeWord {
+                address: effective_address(instruction)?,
+                source: word_register(instruction.op1_register())?,
+            })
+        }
         Code::Cmpxchg_rm16_r16 => {
             let source = word_register(instruction.op1_register())?;
             match instruction.op0_kind() {
