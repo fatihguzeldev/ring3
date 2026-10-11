@@ -409,7 +409,7 @@ fn canonical_memory(modrm: u8) -> Vec<u8> {
     let mode = modrm >> 6;
     assert!(mode < 3);
     let rm = modrm & 7;
-    let mut bytes = vec![0x66, 0x87, modrm];
+    let mut bytes = vec![0xf0, 0x66, 0x87, modrm];
     if rm == 4 {
         bytes.push(0x24);
     }

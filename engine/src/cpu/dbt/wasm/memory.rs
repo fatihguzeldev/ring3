@@ -11,6 +11,7 @@ mod byte_exchange;
 mod byte_store;
 mod exchange;
 mod narrow;
+mod word_exchange;
 mod word_store;
 
 #[derive(Clone, Copy)]
@@ -44,12 +45,13 @@ pub(super) struct Imports {
     pub(super) store16: Option<StoreImport>,
     pub(super) exchange: Option<StoreImport>,
     pub(super) exchange8: Option<StoreImport>,
+    pub(super) exchange16: Option<StoreImport>,
 }
 
 impl Imports {
     pub(super) fn needed(
         blocks: &[crate::cpu::dbt::region::CompiledBlock],
-    ) -> (bool, bool, bool, bool, bool, bool, bool, bool) {
+    ) -> (bool, bool, bool, bool, bool, bool, bool, bool, bool) {
         let mut read = false;
         let mut store = false;
         let mut read8 = false;
@@ -58,10 +60,12 @@ impl Imports {
         let mut store16 = false;
         let mut exchange = false;
         let mut exchange8 = false;
+        let mut exchange16 = false;
         for instruction in blocks.iter().flat_map(|block| &block.instructions) {
             match instruction.operation() {
                 Operation::MemoryExchange { .. } => exchange = true,
                 Operation::MemoryExchangeByte { .. } => exchange8 = true,
+                Operation::MemoryExchangeWord { .. } => exchange16 = true,
                 Operation::X87StatusToMemory { .. }
                 | Operation::X87ControlToMemory { .. }
                 | Operation::StoreWord { .. }
@@ -239,7 +243,7 @@ impl Imports {
             }
         }
         (
-            read, store, read8, read16, store8, store16, exchange, exchange8,
+            read, store, read8, read16, store8, store16, exchange, exchange8, exchange16,
         )
     }
 }
@@ -261,6 +265,15 @@ pub(super) fn exchange_byte_result(
     exit_depth: u32,
 ) {
     byte_exchange::exchange_result(code, address, imports, exit_depth);
+}
+
+pub(super) fn exchange_word_result(
+    code: &mut InstructionSink<'_>,
+    address: EffectiveAddress,
+    imports: Imports,
+    exit_depth: u32,
+) {
+    word_exchange::exchange_result(code, address, imports, exit_depth);
 }
 
 pub(super) fn store_byte(

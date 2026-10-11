@@ -288,7 +288,10 @@ fn word_register_exchange_prefixes_memory_lock_and_multibyte_nop_stay_precise() 
     ] {
         let mut bytes = vec![0x66, 0x87, tail[0] | 1 << 3];
         bytes.extend_from_slice(&tail[1..]);
-        for prefixed in [bytes.clone(), [vec![0xf0], bytes].concat()] {
+        for prefixed in [
+            [vec![0xf0], bytes[1..].to_vec()].concat(),
+            [vec![0xf0], bytes].concat(),
+        ] {
             assert_eq!(
                 decode_one(&code_space(CODE, &prefixed), GuestAddress(CODE)).err(),
                 Some(unsupported),

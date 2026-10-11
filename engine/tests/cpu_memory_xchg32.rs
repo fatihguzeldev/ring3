@@ -397,7 +397,7 @@ fn instruction_error(pc: u32, cause: InstructionError) -> CompileError {
 fn memory_xchg32_exact_prefix_width_and_lock_boundaries_preserve_categories() {
     let opcode = DecodeError::Unsupported(UnsupportedFeature::Opcode);
     let mut cases = vec![
-        (vec![0x66, 0x87, 0x03], opcode),
+        (vec![0xf0, 0x66, 0x87, 0x03], opcode),
         (vec![0x66, 0x66, 0x87, 0x0b], opcode),
         (vec![0xf0, 0x87, 0xc8], DecodeError::InvalidEncoding),
     ];
@@ -409,7 +409,18 @@ fn memory_xchg32_exact_prefix_width_and_lock_boundaries_preserve_categories() {
         } else {
             opcode
         };
-        cases.push(([vec![prefix], BASE.to_vec()].concat(), expected));
+        cases.push((
+            [
+                if prefix == 0x66 {
+                    vec![0xf0, prefix]
+                } else {
+                    vec![prefix]
+                },
+                BASE.to_vec(),
+            ]
+            .concat(),
+            expected,
+        ));
     }
     for (bytes, expected) in &cases {
         let mut program = bytes.clone();

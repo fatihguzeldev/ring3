@@ -1230,6 +1230,18 @@ pub(super) fn instruction(
             insert_byte(code, source);
             store = true;
         }
+        Operation::MemoryExchangeWord { address, source } => {
+            word_value(code, WordValue::Register(source));
+            code.local_set(RESULT);
+            memory::exchange_word_result(code, address, imports, exit_depth);
+            code.local_get(RESULT)
+                .local_get(register(source))
+                .i32_const(!0xffff)
+                .i32_and()
+                .i32_or()
+                .local_set(register(source));
+            store = true;
+        }
         Operation::ExchangeAdd {
             destination,
             source,

@@ -112,6 +112,7 @@ pub(super) fn check_profile(instruction: &Instruction, bytes: &[u8]) -> Result<(
         (Code::Cbw, [0x66, 0x98]) | (Code::Cwd, [0x66, 0x99])
     );
     let exact_word_exchange = match (instruction.code(), bytes) {
+        (Code::Xchg_rm16_r16, [0x66, 0x87, modrm, ..]) if *modrm & 0xc0 != 0xc0 => true,
         (Code::Xchg_rm16_r16, [0x66, 0x87, modrm]) => *modrm & 0xc0 == 0xc0,
         (Code::Xchg_r16_AX, [0x66, 0x91..=0x97]) | (Code::Nopw, [0x66, 0x90]) => true,
         _ => false,

@@ -21,9 +21,14 @@ pub(in crate::cpu::dbt) fn emit(
         needs_store16,
         needs_exchange,
         needs_exchange8,
+        needs_exchange16,
     ) = memory::Imports::needed(blocks);
-    let has_stores =
-        needs_store || needs_store8 || needs_store16 || needs_exchange || needs_exchange8;
+    let has_stores = needs_store
+        || needs_store8
+        || needs_store16
+        || needs_exchange
+        || needs_exchange8
+        || needs_exchange16;
     let has_reads = needs_read || needs_read8 || needs_read16;
     let has_memory = has_reads || has_stores;
     let has_gates = blocks.iter().any(|block| block.gate.is_some());
@@ -207,6 +212,25 @@ pub(in crate::cpu::dbt) fn emit(
         };
         imports.import("ring3", name, EntityType::Function(type_index));
         helper_imports.exchange8 = Some(exchange);
+        function_index += 1;
+    }
+    if needs_exchange16 {
+        let (name, exchange) = match binding {
+            Some(EmbeddedBinding::Resident { key, id }) => (
+                "exchange_resident16",
+                memory::StoreImport::Resident {
+                    index: function_index,
+                    key,
+                    id,
+                },
+            ),
+            _ => (
+                "exchange16",
+                memory::StoreImport::Replacement(function_index),
+            ),
+        };
+        imports.import("ring3", name, EntityType::Function(type_index));
+        helper_imports.exchange16 = Some(exchange);
         function_index += 1;
     }
     module.section(&imports);

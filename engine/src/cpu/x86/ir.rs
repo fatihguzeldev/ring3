@@ -504,6 +504,10 @@ pub enum Operation {
         address: EffectiveAddress,
         source: ByteRegister,
     },
+    MemoryExchangeWord {
+        address: EffectiveAddress,
+        source: Register32,
+    },
     ExchangeWord {
         left: Register32,
         right: Register32,
