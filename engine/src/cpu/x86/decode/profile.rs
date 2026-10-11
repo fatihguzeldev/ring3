@@ -45,7 +45,15 @@ pub(super) fn check_profile(instruction: &Instruction, bytes: &[u8]) -> Result<(
     {
         return Err(DecodeError::Unsupported(UnsupportedFeature::Simd));
     }
-    if instruction.segment_prefix() != Register::None
+    let exact_cs_alignment_nop = instruction.code() == Code::Nop_rm16
+        && bytes == [0x66, 0x2e, 0x0f, 0x1f, 0x84, 0, 0, 0, 0, 0];
+    let exact_alignment_nop = exact_cs_alignment_nop
+        || instruction.code() == Code::Nop_rm16
+            && matches!(
+                bytes,
+                [0x66, 0x0f, 0x1f, 0x44, 0, 0] | [0x66, 0x0f, 0x1f, 0x84, 0, 0, 0, 0, 0]
+            );
+    if (instruction.segment_prefix() != Register::None && !exact_cs_alignment_nop)
         || registers
             .clone()
             .any(|register| register.is_segment_register())
@@ -490,7 +498,8 @@ pub(super) fn check_profile(instruction: &Instruction, bytes: &[u8]) -> Result<(
     if instruction.has_lock_prefix()
         || instruction.has_rep_prefix()
         || instruction.has_repne_prefix()
-        || (!(exact_word_string
+        || (!(exact_alignment_nop
+            || exact_word_string
             || exact_word_accumulator_extend
             || exact_word_exchange
             || exact_word_byte_extend
