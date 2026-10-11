@@ -810,6 +810,33 @@ pub extern "C" fn exchange_add_resident16(
 }
 
 #[allow(unsafe_code)]
+#[unsafe(export_name = "ring3_abi_v1_bit_test_set32")]
+pub extern "C" fn bit_test_set32(address: u32, bit: u32) -> u32 {
+    {
+        #![forbid(unsafe_code)]
+        crate::process::wasm::bit_test_set32(address, bit)
+    }
+}
+
+#[allow(unsafe_code)]
+#[unsafe(export_name = "ring3_abi_v1_bit_test_set_resident32")]
+pub extern "C" fn bit_test_set_resident32(
+    key_low: u32,
+    key_high: u32,
+    id_low: u32,
+    id_high: u32,
+    address: u32,
+    bit: u32,
+) -> u32 {
+    {
+        #![forbid(unsafe_code)]
+        crate::process::wasm::bit_test_set_resident32(
+            key_low, key_high, id_low, id_high, address, bit,
+        )
+    }
+}
+
+#[allow(unsafe_code)]
 #[unsafe(export_name = "ring3_abi_v1_capture_call")]
 pub extern "C" fn capture_call(
     low: u32,
