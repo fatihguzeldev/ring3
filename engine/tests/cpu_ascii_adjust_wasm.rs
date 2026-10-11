@@ -82,7 +82,7 @@ fn actual_ascii_adjust_exhausts_inputs_and_consumes_live_flags_in_six_profiles()
             Permissions::READ,
         )
         .unwrap();
-    for (name, blocks) in [("main", &main[..]), ("live", &live[..])] {
+    let save_standalone = |name: &str, blocks: &[(u32, Vec<u8>, usize)], memory: &AddressSpace| {
         assert!(blocks.len() <= 8 && blocks.iter().map(|b| b.2).sum::<usize>() <= 64);
         let specs: Vec<_> = blocks
             .iter()
@@ -94,12 +94,12 @@ fn actual_ascii_adjust_exhausts_inputs_and_consumes_live_flags_in_six_profiles()
         for entries in [false, true] {
             let unit = if entries {
                 compile_entry_region(
-                    &memory,
+                    memory,
                     &specs.iter().map(|b| b.entry).collect::<Vec<_>>(),
                     CompileLimits::default(),
                 )
             } else {
-                compile_region(&memory, &specs, CompileLimits::default())
+                compile_region(memory, &specs, CompileLimits::default())
             }
             .unwrap();
             assert_eq!(unit.metadata().blocks, blocks.len());
@@ -112,11 +112,59 @@ fn actual_ascii_adjust_exhausts_inputs_and_consumes_live_flags_in_six_profiles()
                     "standalone-{}-{name}.wasm",
                     if entries { "entries" } else { "extent" }
                 )),
-                unit.wasm_bytes(&memory).unwrap(),
+                unit.wasm_bytes(memory).unwrap(),
             )
             .unwrap();
         }
+    };
+    for (name, blocks) in [("main", &main[..]), ("live", &live[..])] {
+        save_standalone(name, blocks, &memory);
     }
+    let mut aad_banks = Vec::new();
+    for index in 0..5_u32 {
+        let start = index * 63;
+        let end = (start + 63).min(256);
+        let mut bytes = Vec::new();
+        for base in start..end {
+            bytes.extend([0xd5, base as u8]);
+        }
+        bytes.extend([0xeb, 0]);
+        aad_banks.push((
+            format!("aad-{index}"),
+            vec![(0x1800 + index * 0x100, bytes, (end - start + 1) as usize)],
+        ));
+    }
+    let aad_live = [
+        (
+            0x1e00,
+            vec![
+                0xb4, 9, 0xb0, 9, 0xd5, 10, 0x0f, 0x94, 0xc2, 0x0f, 0x9a, 0xc6, 0x0f, 0x92, 0xc3,
+                0x0f, 0x90, 0xc7, 0x80, 0xd1, 0, 0xeb, 0,
+            ],
+            9,
+        ),
+        (
+            0x1e40,
+            vec![
+                0xb4, 1, 0xb0, 1, 0xd5, 0xff, 0x0f, 0x94, 0xc2, 0x0f, 0x9a, 0xc6, 0x0f, 0x92, 0xc3,
+                0x0f, 0x90, 0xc7, 0x80, 0xd1, 0, 0xeb, 0,
+            ],
+            9,
+        ),
+    ];
+    // old standalone modules are saved before additional code is uploaded.
+    for (_, blocks) in &aad_banks {
+        for (pc, bytes, _) in blocks {
+            memory.write(GuestAddress(*pc), bytes).unwrap();
+        }
+    }
+    for (pc, bytes, _) in &aad_live {
+        memory.write(GuestAddress(*pc), bytes).unwrap();
+    }
+    for (name, blocks) in &aad_banks {
+        save_standalone(name, blocks, &memory);
+    }
+    save_standalone("aad-live", &aad_live, &memory);
     let result = Command::new("node")
         .arg(root.join("engine/tests/fixtures/p2-ascii-adjust/run.mjs"))
         .arg(&engine)

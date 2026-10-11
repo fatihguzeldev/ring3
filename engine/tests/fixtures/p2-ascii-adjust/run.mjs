@@ -49,6 +49,26 @@ const main = [{kind: 'AAA', pc: 0x1000, bytes: Buffer.from([0x37, 0xeb, 0]), ins
   {kind: 'AAS', pc: 0x1020, bytes: Buffer.from([0x3f, 0xeb, 0]), instructions: 2}];
 const live = [{kind: 'AAA', pc: 0x1400, bytes: Buffer.from([0x00, 0xd8, 0x37, 0x0f, 0x92, 0xc2, 0x0f, 0x90, 0xc6, 0x80, 0xd1, 0, 0xeb, 0]), instructions: 6},
   {kind: 'AAS', pc: 0x1440, bytes: Buffer.from([0x28, 0xd8, 0x3f, 0x0f, 0x92, 0xc2, 0x0f, 0x90, 0xc6, 0x80, 0xd1, 0, 0xeb, 0]), instructions: 6}];
+function aadOracle(ax, base, f) {
+  const result = modulo(ax % 256 + Math.floor(ax / 256) * base, 256);
+  const ones = [...result.toString(2)].filter(bit => bit === '1').length;
+  return {result, flags: Math.floor(f / 1024) % 2 * 1024 + 2 + 4 * (ones % 2 === 0) + 64 * (result === 0) + 128 * (result >= 128)};
+}
+const aadLiterals = [[0, 0xff00, 0, 0x446], [0, 0xff80, 0x80, 0x482], [1, 0x0101, 2, 0x402],
+  [10, 0x0205, 0x19, 0x402], [10, 0xfffa, 0xf0, 0x486], [255, 0xff01, 2, 0x402], [255, 0x0101, 0, 0x446],
+  [128, 0x0101, 0x81, 0x486], [128, 0x8001, 1, 0x402], [0x66, 0x0101, 0x67, 0x402],
+  [0x67, 0x0101, 0x68, 0x402], [0xf0, 0x0101, 0xf1, 0x482], [0xf2, 0x0101, 0xf3, 0x486],
+  [0xf3, 0x0101, 0xf4, 0x482], [10, 0x0909, 0x63, 0x406], [16, 0x1000, 0, 0x446]];
+for (const [base, ax, result, f] of aadLiterals) assert.deepEqual(aadOracle(ax, base, 0xcd7), {result, flags: f}, 'literal AAD original-byte/base0/flags anchor');
+const aadBanks = Array.from({length: 5}, (_, index) => {
+  const first = index * 63, count = Math.min(63, 256 - first), pc = 0x1800 + index * 256;
+  const rows = Array.from({length: count}, (_, i) => ({base: first + i, pc: pc + i * 2}));
+  return {name: `aad-${index}`, rows, blocks: [{pc, bytes: Buffer.from([...rows.flatMap(r => [0xd5, r.base]), 0xeb, 0]), instructions: count + 1}]};
+});
+assert.equal(aadBanks.flatMap(b => b.rows).length, 256);
+const aadLive = [[0x1e00, 9, 10, 0x63, 0x406], [0x1e40, 1, 255, 0, 0x446]].map(([pc, byte, base, result, f]) =>
+  ({pc, byte, base, result, flags: f, instructions: 9, bytes: Buffer.from([0xb4, byte, 0xb0, byte, 0xd5, base,
+    0x0f, 0x94, 0xc2, 0x0f, 0x9a, 0xc6, 0x0f, 0x92, 0xc3, 0x0f, 0x90, 0xc7, 0x80, 0xd1, 0, 0xeb, 0])}));
 const words = values => {const b = Buffer.alloc(values.length * 4); values.forEach((v, i) => b.writeUInt32LE(v >>> 0, i * 4)); return b;};
 function record(magic, size, fields) {
   const b = Buffer.alloc(size); b.write(magic); b.writeUInt16LE(1, 4); b.writeUInt16LE(1, 6); b.writeUInt32LE(size, 8);
@@ -79,7 +99,11 @@ function adjusted(s, kind, nextPc) {
   const expected = oracle(kind, s.registers[0] % 65536, s.flags), r = [...s.registers];
   r[0] = setWord(r[0], expected.result); return {registers: r, pc: nextPc, flags: expected.flags};
 }
-function run(c, unit, budget, next, label, {reason = 1, retired = 1, status = 0, category = label} = {}) {
+function aadAdjusted(s, base, nextPc) {
+  const expected = aadOracle(s.registers[0] % 65536, base, s.flags), r = [...s.registers];
+  r[0] = setWord(r[0], expected.result); return {registers: r, pc: nextPc, flags: expected.flags};
+}
+function run(c, unit, budget, next, label, {reason = 1, retired = 1, status = 0, category = label, base = null} = {}) {
   const before = cpu(c), expected = arena(c);
   if (status === 0) {expected.set(state(next)); expected.set(exit(reason, retired), 56);}
   const observedStatus = unit.run(c.base, c.base + 56, budget, c.base + 96);
@@ -91,7 +115,7 @@ function run(c, unit, budget, next, label, {reason = 1, retired = 1, status = 0,
     observed_retired: accepted ? after.readUInt32LE(76) : null, expected_pc: status === 0 ? next.pc : null,
     observed_pc: accepted ? after.readUInt32LE(48) : null, expected_flags: status === 0 ? next.flags : null,
     observed_flags: accepted ? after.readUInt32LE(52) : null, expected_ax: status === 0 ? next.registers[0] % 65536 : null,
-    observed_ax: accepted ? after.readUInt32LE(16) % 65536 : null, helper_trace: []});
+    observed_ax: accepted ? after.readUInt32LE(16) % 65536 : null, helper_trace: [], ...(base === null ? {} : {base})});
   counts.runs++; if (accepted) counts.retired += after.readUInt32LE(76);
 }
 function compile(c, name, blocks) {
@@ -115,7 +139,7 @@ function compile(c, name, blocks) {
   modules.push({context: c.id, owner: c.owner, entries: c.entries, name, blocks: blocks.length, instructions, file, sha256: hash(bytes), imports, exit_version: 1, ...binding});
   return {run: new WebAssembly.Instance(module, {env: {memory: c.memory}, ...(c.api ? {ring3: c.api} : {})}).exports.run};
 }
-function open(owner, entries) {
+function open(owner, entries, code = [...main, ...live]) {
   const c = {id: ++counts.contexts, owner, entries, captures: 0};
   if (owner === 'standalone') {c.memory = new WebAssembly.Memory({initial: 1}); c.base = 128; input(c, 0, initial); return c;}
   const instance = new WebAssembly.Instance(engine.module, {}); c.memory = instance.exports.memory; c.api = {};
@@ -123,7 +147,7 @@ function open(owner, entries) {
     'compile_resident', 'compile_resident_entries', 'generation', 'module_ptr', 'module_len', 'guard', 'guard_resident']) c.api[name] = instance.exports['ring3_abi_v1_' + name];
   assert.equal(c.api.open(2, c.id, 0x41414153), 0); c.base = c.api.arena_ptr() >>> 0; input(c, 0, initial);
   for (const page of [0x1000, 0x7000]) host(c, 'map', [page, 1, 7]);
-  for (const b of [...main, ...live]) upload(c, b.pc, b.bytes);
+  for (const b of code) upload(c, b.pc, b.bytes);
   upload(c, 0x7010, Buffer.from([0x55, 0xa5, 0x5a, 0xaa])); host(c, 'protect', [0x7000, 1, 1]); return c;
 }
 for (const owner of ['standalone', 'replacement', 'resident']) for (const entries of [false, true]) {
@@ -180,17 +204,101 @@ for (const owner of ['standalone', 'replacement', 'resident']) for (const entrie
   }
   contexts.push({id: c.id, owner, entries, captures: c.captures, maximum_blocks: 2, maximum_instructions: 12, maximum_mapped_pages: c.api ? 2 : null});
 }
-assert.deepEqual(sources(), sourcePins);
 assert.deepEqual(counts, {contexts: 6, runs: 14098, retired: 14056, exhaustive: 12288, flag_inputs: 1536, anchors: 96,
   repeats: 24, current_inputs: 12, controls: 72, retained: 6, consumers: 60, invalidated: 4, helper_calls: 0}); assert.equal(modules.length, 12);
-const result = {status: 'ok', engine_sha256: engine.sha256, source_pins: sourcePins, counts, contexts, modules, observations,
-  literal_anchors: literals, limits: ['finite exact37/3F pure six-profile proof; exhaustiveAL256×AF2×AH00/FF per form/profile plus all128 admittedFLAGS at selected thresholds',
-    'independent original-AH and AL-correction carry/borrow oracle; literal fullAX carry/borrow/wrap and opposite incomingCF pairs distinguish operand capture and CF independence',
-    'CF=AF=adjustmentcondition; SF/ZF/PF/OF deterministic clear is Ring3 undefined-flag policy, including ALzero withZF0; DF/bit1 and EAX high16/allotherGPR/helper/dirtyFP128 retained',
-    'full4364 arena equality and selected bound readonly RAM canaries; no guest memory operand, generated helper, arbitrary-host rollback or wholeRAM snapshot claim',
-    'live real byteADD/SUB→adjust→SETB/SETO→ADC has no CPU reseeding; observed per-row status/reason/retirement/PC/FLAGS/AX are persisted and neutral3/4 observations are null',
-    'two blocks/four instructions main and two blocks/twelve instructions live, two captures/context; allcode/protections before captures; default8/64/65536/sixcapture unchanged',
-    'unbound saved modules have no runtime source guard; bound replacement generation3 and same-byte RWX source CodeInvalidated4 are neutral; empty guest-memory-helper trace is structural import absence, not guard-call telemetry',
-    'selected AH values rather than exhaustive wholeAX; no hardware completeness, prefixed aliases, performance, SDK/browser/game, dispatcher expansion or hostedCI claim']};
+const asciiCounts = {...counts}, aadCounts = {all_bases: 0, byte_inputs: 0, flag_inputs: 0, anchors: 0,
+  repeats: 0, current_inputs: 0, controls: 0, retained: 0, consumers: 0, invalidated: 0};
+for (const owner of ['standalone', 'replacement', 'resident']) for (const entries of [false, true]) {
+  const c = open(owner, entries, [...aadBanks.flatMap(b => b.blocks), ...aadLive]); let firstUnit;
+  for (const bank of aadBanks) {
+    const unit = compile(c, bank.name, bank.blocks); if (!firstUnit) firstUnit = unit;
+    for (const row of bank.rows) {
+      for (const ax of [0x0000, 0x0101, 0x80ff, 0xffff]) {
+        const r = parents(ax + row.base); r[0] = setWord(r[0], ax); seed(c, row.pc, 0xcd7, r);
+        run(c, unit, 1, aadAdjusted(cpu(c), row.base, row.pc + 2), 'all unsigned bases at selected AX', {category: 'aad-all-bases', base: row.base}); aadCounts.all_bases++;
+      }
+      for (const [ah, base] of [[255, 0], [0x7f, 10], [0x80, 128], [255, 255]].filter(pair => pair[1] === row.base)) {
+        for (let al = 0; al < 256; al++) {
+          const r = parents(al + ah); r[0] = setWord(r[0], ah * 256 + al); seed(c, row.pc, 0xcd7, r);
+          run(c, unit, 1, aadAdjusted(cpu(c), base, row.pc + 2), 'all AL at selected AH/base', {category: 'aad-byte-input', base}); aadCounts.byte_inputs++;
+        }
+      }
+      if (row.base === 10) for (const f of allFlags) {
+        const r = parents(0); r[0] = setWord(r[0], 0x1234); seed(c, row.pc, f, r);
+        run(c, unit, 1, aadAdjusted(cpu(c), row.base, row.pc + 2), 'all128 FLAGS with identical AX/base', {category: 'aad-all128FLAGS', base: row.base}); aadCounts.flag_inputs++;
+      }
+      for (const [base, ax, result, f] of aadLiterals.filter(a => a[0] === row.base)) {
+        const r = parents(ax); r[0] = setWord(r[0], ax); seed(c, row.pc, 0xcd7, r);
+        const next = cpu(c); next.pc += 2; next.registers[0] = setWord(next.registers[0], result); next.flags = f;
+        run(c, unit, 1, next, 'literal AAD original bytes/base/undefined flags', {category: 'aad-literal-anchor', base}); aadCounts.anchors++;
+      }
+      if (row.base === 10) {
+        const r = parents(37); r[0] = setWord(r[0], 0x1234); seed(c, row.pc, 0xcd7, r);
+        for (let i = 0; i < 2; i++) {
+          input(c, 0, state({...cpu(c), pc: row.pc}));
+          run(c, unit, 1, aadAdjusted(cpu(c), row.base, row.pc + 2), 'AAD repeat rewinds only PC; returned AH0 is current', {category: 'aad-repeat', base: row.base}); aadCounts.repeats++;
+        }
+      }
+      if (row.base === 255) {
+        const current = cpu(c); current.pc = row.pc; current.flags = 0x813; current.registers = parents(731); current.registers[0] = 0xc9008006;
+        input(c, 0, state(current)); run(c, unit, 1, aadAdjusted(cpu(c), row.base, row.pc + 2), 'AAD explicit current old bytes/high16/FLAGS', {category: 'aad-current-input', base: row.base}); aadCounts.current_inputs++;
+      }
+    }
+    if (bank === aadBanks[0]) {
+      const row = bank.rows.at(-1); seed(c, row.pc);
+      run(c, unit, 0, cpu(c), 'AAD zero budget neutral', {category: 'aad-control', retired: 0, base: row.base});
+      input(c, 96, words([1])); run(c, unit, 1, cpu(c), 'AAD cancel neutral', {category: 'aad-control', reason: 2, retired: 0, base: row.base});
+      run(c, unit, 0, cpu(c), 'AAD cancel before zero budget', {category: 'aad-control', reason: 2, retired: 0, base: row.base}); input(c, 96, words([0]));
+      run(c, unit, 3, aadAdjusted(cpu(c), row.base, row.pc + 4), 'last AAD and JMP retire before cold lookup', {category: 'aad-control', reason: 3, retired: 2, base: row.base});
+      run(c, unit, 1, cpu(c), 'AAD cold entry neutral', {category: 'aad-control', reason: 3, retired: 0});
+      run(c, unit, 0, cpu(c), 'AAD budget before cold lookup', {category: 'aad-control', retired: 0}); aadCounts.controls += 6;
+    }
+  }
+  const continuation = compile(c, 'aad-live', aadLive); seed(c, aadBanks[0].rows[0].pc);
+  if (owner === 'replacement') run(c, firstUnit, 1, cpu(c), 'AAD old replacement generation neutral InvalidArtifact3', {category: 'aad-retained', status: 3, retired: 0});
+  else run(c, firstUnit, 1, aadAdjusted(cpu(c), 0, aadBanks[0].rows[0].pc + 2), 'AAD older unit remains usable', {category: 'aad-retained', base: 0}); aadCounts.retained++;
+  for (const row of aadLive) {
+    const r = parents(0); r[1] = setByte(r[1], 0); seed(c, row.pc, 0xcd7, r);
+    let next = cpu(c); next.pc += 4; next.registers[0] = setWord(next.registers[0], row.byte * 257);
+    run(c, continuation, 2, next, 'live MOV AH/AL produces both AAD inputs', {category: 'aad-consumer', retired: 2});
+    next = cpu(c); next.pc += 2; next.registers[0] = setWord(next.registers[0], row.result); next.flags = row.flags;
+    run(c, continuation, 1, next, 'live AAD consumes original AH/AL and clears AH/CF/AF/OF', {category: 'aad-consumer', base: row.base});
+    next = cpu(c); next.pc += 12; next.registers[2] = setWord(next.registers[2], row.result === 0 ? 0x0101 : 0x0100); next.registers[3] = setWord(next.registers[3], 0);
+    run(c, continuation, 4, next, 'live SETZ/SETP/SETB/SETO consumes returned flags', {category: 'aad-consumer', retired: 4});
+    next = cpu(c); next.pc += 3; next.registers[1] = setByte(next.registers[1], 0); next.flags = 0x446;
+    run(c, continuation, 1, next, 'live ADC consumes cleared carry without CPU reseeding', {category: 'aad-consumer'});
+    run(c, continuation, 2, {...cpu(c), pc: row.pc + row.bytes.length}, 'live AAD cold tail preserves returned state', {category: 'aad-consumer', reason: 3}); aadCounts.consumers += 5;
+  }
+  if (c.api) {
+    for (const [i, value] of [0x55, 0xa5, 0x5a, 0xaa].entries()) {
+      const expected = arena(c), helper = record('R3MH', 40, [0, value, 0, 0, 0, 1]); helper.writeUInt16LE(2, 4); expected.set(helper, 100);
+      assert.equal(c.api.read8(0x7010 + i), 0); assert.deepEqual(arena(c), expected, 'AAD selected readonly RAM canaries unchanged');
+    }
+    upload(c, aadBanks[0].blocks[0].pc, Buffer.from([0xd5]));
+    run(c, continuation, 1, cpu(c), 'AAD same-byte RWX source mutation neutral CodeInvalidated4', {category: 'aad-invalidated', status: 4, retired: 0}); aadCounts.invalidated++;
+    assert.equal(c.api.close(), 0);
+  }
+  assert.equal(c.captures, 6);
+  contexts.push({id: c.id, owner, entries, purpose: 'AAD', captures: c.captures, maximum_blocks: 2, maximum_instructions: 64, maximum_mapped_pages: c.api ? 2 : null});
+}
+assert.deepEqual(aadCounts, {all_bases: 6144, byte_inputs: 6144, flag_inputs: 768, anchors: 96,
+  repeats: 12, current_inputs: 6, controls: 36, retained: 6, consumers: 60, invalidated: 4});
+aadCounts.contexts = counts.contexts - asciiCounts.contexts; aadCounts.runs = counts.runs - asciiCounts.runs;
+aadCounts.retired = counts.retired - asciiCounts.retired; aadCounts.modules = modules.length - 12; aadCounts.helper_calls = 0;
+assert.equal(aadCounts.contexts, 6); assert.equal(aadCounts.runs, 13276); assert.equal(aadCounts.retired, 13294); assert.equal(aadCounts.modules, 36);
+assert.equal(counts.contexts, 12); assert.equal(counts.runs, 27374); assert.equal(counts.retired, 27350); assert.equal(modules.length, 48);
+assert.deepEqual(sources(), sourcePins);
+const result = {status: 'ok', engine_sha256: engine.sha256, source_pins: sourcePins, counts, ascii_counts: asciiCounts, aad_counts: aadCounts, contexts, modules, observations,
+  literal_anchors: literals, aad_literal_anchors: aadLiterals, aad_banks: aadBanks.map(b => ({name: b.name, bases: b.rows.map(r => r.base), instructions: b.blocks[0].instructions})),
+  limits: ['finite exact37/3F/D5imm8 pure six-profile proof; original AAA/AAS checkpoint14098calls/14056retired/12captures and first uploads/order preserved',
+    'AAA/AAS exhaustiveAL256×AF2×AH00/FF plus all128 admittedFLAGS at selected thresholds; independent original-AH and AL-correction carry/borrow oracle and literal fullAX wrap',
+    'AAA/AAS CF=AF=adjustmentcondition and SF/ZF/PF/OF clear; AAD derivesSZP from lowbyte and clearsCF/AF/OF; undefined-flag clearing is Ring3 policy, DF/bit1 retained',
+    'AAD all256 bases at four selectedAX and exhaustiveAL at four selectedAH/base pairs, all128FLAGS with identicalAX/base; not exhaustivewholeAX×allbases',
+    'AAD unsigned u8 identity is native typedIR evidence: signed-vs-unsigned multiplication is congruent modulo256 and not discriminated by runtime results',
+    'full4364 arena equality preserves ownEAXhigh16/allotherGPR/helper/dirtyFP128; selected bound readonlyRAMcanaries, no guest-memoryoperand/arbitrary-hostrollback/wholeRAMsnapshot claim',
+    'live byteADD/SUB→AAA/AAS→SETB/SETO→ADC and MOVAH/AL→AAD→SETZ/SETP/SETB/SETO→ADC have no CPU reseeding; observed per-row status/reason/retirement/PC/FLAGS/AX persisted, neutral3/4 observations null',
+    'oldmain2blocks4instructions/live2blocks12instructions and2captures/context; AAD five1blockbanks64/64/64/64/5instructions plus2block18instructionlive, exactly6captures/context',
+    'allcode/protections before captures; default8/64/65536/sixcapture unchanged; unbound savedmodules lack runtime sourceguard; replacement generation3 and same-byteRWX source CodeInvalidated4 are neutral',
+    'empty guest-memory-helper trace is structural importabsence, not guard-calltelemetry; no hardwarecompleteness/prefixedaliases/performance/SDK/browser/game/dispatcherexpansion/hostedCI claim']};
 writeFileSync(join(output, 'result.json'), JSON.stringify(result, null, 2), {flag: 'wx'});
 console.log(JSON.stringify({status: 'ok', ...counts, modules: modules.length, output}));
