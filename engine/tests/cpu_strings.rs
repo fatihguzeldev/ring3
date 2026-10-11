@@ -1,4 +1,7 @@
+#[path = "support/string_prefix.rs"]
+mod string_prefix;
 use ring3_engine::process::EngineInstance;
+use string_prefix::check as check_string_prefix;
 
 const PC: u32 = 0x1000;
 
@@ -33,11 +36,10 @@ fn std_admits_in_bound_engine() {
 
 use ring3_engine::{
     cpu::{
-        UnsupportedFeature,
         dbt::{BlockSpec, CompileError, CompileLimits, InstructionError, compile_region},
         x86::{
             decode::{DecodeError, decode_one},
-            ir::Operation,
+            ir::{AddressSize, Operation, StringKind, StringWidth},
         },
     },
     memory::{AddressSpace, GuestAddress, PageRange, Permissions},
@@ -68,7 +70,15 @@ fn memory(bytes: &[u8]) -> AddressSpace {
 #[test]
 fn string_lane_decodes_exact_operations_without_data_mappings() {
     for (byte, operation) in [
-        (0xa4, Operation::MoveStringByte),
+        (
+            0xa4,
+            Operation::String {
+                kind: StringKind::Move,
+                width: StringWidth::Byte,
+                address_size: AddressSize::Bits32,
+                source_segment: None,
+            },
+        ),
         (0xfc, Operation::Direction { set: false }),
         (0xfd, Operation::Direction { set: true }),
     ] {
@@ -84,21 +94,17 @@ fn string_lane_decodes_exact_operations_without_data_mappings() {
 }
 
 #[test]
-fn repeated_prefixed_and_wider_strings_remain_excluded() {
-    for (bytes, feature) in [
-        (vec![0xf3, 0xa4], UnsupportedFeature::RepeatedString),
-        (vec![0xf2, 0xa4], UnsupportedFeature::RepeatedString),
-        (vec![0x64, 0xa4], UnsupportedFeature::Segment),
-        (vec![0x66, 0xa4], UnsupportedFeature::Opcode),
-        (vec![0x67, 0xa4], UnsupportedFeature::Opcode),
-        (vec![0x67, 0xa5], UnsupportedFeature::Opcode),
-        (vec![0x66, 0xaa], UnsupportedFeature::Opcode),
+fn string_prefixes_preserve_exact_repeat_width_address_and_segment_metadata() {
+    for bytes in [
+        vec![0xf3, 0xa4],
+        vec![0xf2, 0xa4],
+        vec![0x64, 0xa4],
+        vec![0x66, 0xa4],
+        vec![0x67, 0xa4],
+        vec![0x67, 0xa5],
+        vec![0x66, 0xaa],
     ] {
-        assert_eq!(
-            decode_one(&memory(&bytes), GuestAddress(PC)).unwrap_err(),
-            DecodeError::Unsupported(feature),
-            "{bytes:02x?}"
-        );
+        check_string_prefix(decode_one(&memory(&bytes), GuestAddress(PC)), &bytes);
     }
     assert_eq!(
         decode_one(&memory(&[0xf0, 0xa4]), GuestAddress(PC)).unwrap_err(),

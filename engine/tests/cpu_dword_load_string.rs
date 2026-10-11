@@ -1,4 +1,7 @@
+#[path = "support/string_prefix.rs"]
+mod string_prefix;
 use ring3_engine::{abi::arena::TRANSFER_OFFSET, process::EngineInstance};
+use string_prefix::check as check_string_prefix;
 
 const PC: u32 = 0x1000;
 
@@ -23,7 +26,7 @@ use std::{
 };
 
 #[test]
-fn existing_lodsb_module_remains_byte_stable() {
+fn existing_lodsb_module_retains_guard_and_read8_imports() {
     let mut engine = EngineInstance::new(1, 0x5152_5354_5556_5758).unwrap();
     engine.map(PC, 1, 7).unwrap();
     engine.arena_mut().unwrap()[TRANSFER_OFFSET..TRANSFER_OFFSET + 3]
@@ -77,7 +80,7 @@ use ring3_engine::{
         },
         x86::{
             decode::{DecodeError, decode_one},
-            ir::Operation,
+            ir::{AddressSize, Operation, StringKind, StringWidth},
         },
     },
     memory::{Access, FaultReason, GuestAddress, MemoryFault},
@@ -122,7 +125,15 @@ fn typed_single_byte_fetch_wrap_and_consumed_code_currency_are_exact() {
     for pc in [PC, 0x1fff, u32::MAX] {
         let mut engine = fixture(pc, &[0xad]);
         let instruction = decode_one(engine.memory().unwrap(), GuestAddress(pc)).unwrap();
-        assert_eq!(instruction.operation(), &Operation::LoadStringDword);
+        assert_eq!(
+            instruction.operation(),
+            &Operation::String {
+                kind: StringKind::Load,
+                width: StringWidth::Dword,
+                address_size: AddressSize::Bits32,
+                source_segment: None
+            }
+        );
         assert_eq!(
             (instruction.length(), instruction.next_pc()),
             (1, GuestAddress(pc.wrapping_add(1)))
@@ -172,28 +183,16 @@ fn typed_single_byte_fetch_wrap_and_consumed_code_currency_are_exact() {
 }
 
 #[test]
-fn strict_prefixes_and_both_standalone_profiles_stay_refused() {
-    for (prefix, feature) in [
-        (0xf2, UnsupportedFeature::RepeatedString),
-        (0xf3, UnsupportedFeature::RepeatedString),
-        (0x26, UnsupportedFeature::Segment),
-        (0x2e, UnsupportedFeature::Segment),
-        (0x36, UnsupportedFeature::Segment),
-        (0x3e, UnsupportedFeature::Segment),
-        (0x64, UnsupportedFeature::Segment),
-        (0x65, UnsupportedFeature::Segment),
-        (0x66, UnsupportedFeature::Opcode),
-        (0x67, UnsupportedFeature::Opcode),
-    ] {
-        assert_eq!(
+fn prefix_metadata_and_both_standalone_refusals_are_exact() {
+    for prefix in [0xf2, 0xf3, 0x26, 0x2e, 0x36, 0x3e, 0x64, 0x65, 0x66, 0x67] {
+        check_string_prefix(
             decode_one(
                 fixture(PC, &[prefix, if prefix == 0x66 { 0xac } else { 0xad }])
                     .memory()
                     .unwrap(),
-                GuestAddress(PC)
-            )
-            .err(),
-            Some(DecodeError::Unsupported(feature))
+                GuestAddress(PC),
+            ),
+            &[prefix, if prefix == 0x66 { 0xac } else { 0xad }],
         );
     }
     assert_eq!(
@@ -295,7 +294,7 @@ fn late_refusals_caps_and_data_currency_preserve_bound_publications() {
             let failures = [
                 (
                     PC,
-                    vec![0xad, 0x66, 0xac, 0xeb, 0],
+                    vec![0xad, 0x0f, 0x0b, 0xeb, 0],
                     5,
                     CompileError::Instruction {
                         pc: GuestAddress(PC + 1),

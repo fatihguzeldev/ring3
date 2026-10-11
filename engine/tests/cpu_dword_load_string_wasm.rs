@@ -59,7 +59,11 @@ fn actual_engine_lodsd_direction_faults_and_retained_ram_repair() {
         registers: std::array::from_fn(|i| std::array::from_fn(|j| ((i * 10 + j) * 29 + 17) as u8)),
         ..X87State::default()
     };
-    encode_x87(&fp, &mut initial[X87_OFFSET..]).unwrap();
+    encode_x87(
+        &fp,
+        &mut initial[X87_OFFSET..X87_OFFSET + ring3_engine::abi::x86::X87_SIZE],
+    )
+    .unwrap();
     fs::write(output.join("initial-arena.bin"), initial).unwrap();
     let result = Command::new("node")
         .arg(root.join("engine/tests/fixtures/p2-dword-load-string/run.mjs"))

@@ -1,4 +1,7 @@
+#[path = "support/string_prefix.rs"]
+mod string_prefix;
 use ring3_engine::process::EngineInstance;
+use string_prefix::check as check_string_prefix;
 
 const PC: u32 = 0x1000;
 
@@ -27,11 +30,10 @@ fn stosb_admits_in_bound_engine() {
 
 use ring3_engine::{
     cpu::{
-        UnsupportedFeature,
         dbt::{BlockSpec, CompileError, CompileLimits, InstructionError, compile_region},
         x86::{
             decode::{DecodeError, decode_one},
-            ir::Operation,
+            ir::{AddressSize, Operation, StringKind, StringWidth},
         },
     },
     memory::{AddressSpace, GuestAddress, PageRange, Permissions},
@@ -54,8 +56,24 @@ fn memory(pc: u32, bytes: &[u8]) -> AddressSpace {
 fn exact_operations_fetch_without_data_and_wrap_the_next_pc() {
     for pc in [PC, 0x1fff, u32::MAX] {
         for (opcode, operation) in [
-            (0xac, Operation::LoadStringByte),
-            (0xaa, Operation::StoreStringByte),
+            (
+                0xac,
+                Operation::String {
+                    kind: StringKind::Load,
+                    width: StringWidth::Byte,
+                    address_size: AddressSize::Bits32,
+                    source_segment: None,
+                },
+            ),
+            (
+                0xaa,
+                Operation::String {
+                    kind: StringKind::Store,
+                    width: StringWidth::Byte,
+                    address_size: AddressSize::Bits32,
+                    source_segment: None,
+                },
+            ),
         ] {
             let memory = memory(pc, &[opcode]);
             let instruction = decode_one(&memory, GuestAddress(pc)).unwrap();
@@ -68,18 +86,12 @@ fn exact_operations_fetch_without_data_and_wrap_the_next_pc() {
 }
 
 #[test]
-fn prefixes_wider_forms_and_standalone_memory_remain_excluded() {
+fn prefixes_preserve_string_metadata_and_standalone_memory_stays_refused() {
     for opcode in [0xac, 0xaa] {
-        for (prefix, feature) in [
-            (0xf2, UnsupportedFeature::RepeatedString),
-            (0xf3, UnsupportedFeature::RepeatedString),
-            (0x64, UnsupportedFeature::Segment),
-            (0x66, UnsupportedFeature::Opcode),
-            (0x67, UnsupportedFeature::Opcode),
-        ] {
-            assert_eq!(
-                decode_one(&memory(PC, &[prefix, opcode]), GuestAddress(PC)).unwrap_err(),
-                DecodeError::Unsupported(feature)
+        for prefix in [0xf2, 0xf3, 0x64, 0x66, 0x67] {
+            check_string_prefix(
+                decode_one(&memory(PC, &[prefix, opcode]), GuestAddress(PC)),
+                &[prefix, opcode],
             );
         }
         assert_eq!(
@@ -103,10 +115,7 @@ fn prefixes_wider_forms_and_standalone_memory_remain_excluded() {
         ));
     }
     for bytes in [&[0x66, 0xa6][..], &[0x66, 0xae]] {
-        assert_eq!(
-            decode_one(&memory(PC, bytes), GuestAddress(PC)).unwrap_err(),
-            DecodeError::Unsupported(UnsupportedFeature::Opcode)
-        );
+        check_string_prefix(decode_one(&memory(PC, bytes), GuestAddress(PC)), bytes);
     }
 }
 

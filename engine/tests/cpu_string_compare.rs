@@ -1,4 +1,7 @@
+#[path = "support/string_prefix.rs"]
+mod string_prefix;
 use ring3_engine::process::EngineInstance;
+use string_prefix::check as check_string_prefix;
 
 const PC: u32 = 0x1000;
 
@@ -27,11 +30,10 @@ fn scasb_admits_in_bound_engine() {
 
 use ring3_engine::{
     cpu::{
-        UnsupportedFeature,
         dbt::{BlockSpec, CompileError, CompileLimits, InstructionError, compile_region},
         x86::{
             decode::{DecodeError, decode_one},
-            ir::Operation,
+            ir::{AddressSize, Operation, StringKind, StringWidth},
         },
     },
     memory::{AddressSpace, GuestAddress, PageRange, Permissions},
@@ -51,10 +53,26 @@ fn memory(bytes: &[u8], pc: u32) -> AddressSpace {
 }
 
 #[test]
-fn decode_fetch_and_prefix_barriers_remain_byte_exact() {
+fn decode_fetch_and_prefix_metadata_remain_byte_exact() {
     for (opcode, operation) in [
-        (0xa6, Operation::CompareStringByte),
-        (0xae, Operation::ScanStringByte),
+        (
+            0xa6,
+            Operation::String {
+                kind: StringKind::Compare,
+                width: StringWidth::Byte,
+                address_size: AddressSize::Bits32,
+                source_segment: None,
+            },
+        ),
+        (
+            0xae,
+            Operation::String {
+                kind: StringKind::Scan,
+                width: StringWidth::Byte,
+                address_size: AddressSize::Bits32,
+                source_segment: None,
+            },
+        ),
     ] {
         for pc in [PC, 0x1fff, u32::MAX] {
             let memory = memory(&[opcode], pc);
@@ -66,17 +84,10 @@ fn decode_fetch_and_prefix_barriers_remain_byte_exact() {
             );
             assert!(memory.is_code_current(decoded.code_snapshot()));
         }
-        for (prefix, feature) in [
-            (0xf3, UnsupportedFeature::RepeatedString),
-            (0xf2, UnsupportedFeature::RepeatedString),
-            (0x64, UnsupportedFeature::Segment),
-            (0x26, UnsupportedFeature::Segment),
-            (0x66, UnsupportedFeature::Opcode),
-            (0x67, UnsupportedFeature::Opcode),
-        ] {
-            assert_eq!(
-                decode_one(&memory(&[prefix, opcode], PC), GuestAddress(PC)).unwrap_err(),
-                DecodeError::Unsupported(feature)
+        for prefix in [0xf3, 0xf2, 0x64, 0x26, 0x66, 0x67] {
+            check_string_prefix(
+                decode_one(&memory(&[prefix, opcode], PC), GuestAddress(PC)),
+                &[prefix, opcode],
             );
         }
         assert_eq!(
@@ -100,9 +111,9 @@ fn decode_fetch_and_prefix_barriers_remain_byte_exact() {
         ));
     }
     for opcode in [0xa6, 0xae] {
-        assert_eq!(
-            decode_one(&memory(&[0x66, opcode], PC), GuestAddress(PC)).unwrap_err(),
-            DecodeError::Unsupported(UnsupportedFeature::Opcode)
+        check_string_prefix(
+            decode_one(&memory(&[0x66, opcode], PC), GuestAddress(PC)),
+            &[0x66, opcode],
         );
     }
     assert!(matches!(
@@ -208,7 +219,7 @@ fn late_decode_failure_preserves_full_arena_and_current_owner() {
         let mut engine = EngineInstance::new(2, 0x5152_5354_5556_5758).unwrap();
         for (address, bytes) in [
             (PC, &[0x90, 0xeb, 0][..]),
-            (0x3000, &[0x90, 0xa6, 0x66, 0xae][..]),
+            (0x3000, &[0x90, 0xa6, 0x0f, 0x0b][..]),
         ] {
             engine.map(address, 1, 7).unwrap();
             engine.arena_mut().unwrap()[140..140 + bytes.len()].copy_from_slice(bytes);

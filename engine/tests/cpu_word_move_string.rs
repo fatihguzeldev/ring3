@@ -1,3 +1,5 @@
+#[path = "support/string_prefix.rs"]
+mod string_prefix;
 use ring3_engine::{abi::arena::TRANSFER_OFFSET, process::EngineInstance};
 use std::{
     fs::OpenOptions,
@@ -5,6 +7,7 @@ use std::{
     path::PathBuf,
     process::{Command, Stdio},
 };
+use string_prefix::check as check_string_prefix;
 
 fn compile_bound(bytes: &[u8]) -> Vec<u8> {
     let mut engine = EngineInstance::new(1, 0x5152_5354_5556_5758).unwrap();
@@ -79,7 +82,7 @@ use ring3_engine::{
         },
         x86::{
             decode::{DecodeError, decode_one},
-            ir::Operation,
+            ir::{AddressSize, Operation, StringKind, StringWidth},
         },
     },
     memory::{
@@ -126,7 +129,15 @@ fn exact_word_decode_fetch_snapshot_and_next_ip_wrap() {
     for pc in [PC, 0x1fff, 0xffff_fffe] {
         let memory = memory(pc, &[0x66, 0xa5]);
         let decoded = decode_one(&memory, GuestAddress(pc)).unwrap();
-        assert_eq!(decoded.operation(), &Operation::MoveStringWord);
+        assert_eq!(
+            decoded.operation(),
+            &Operation::String {
+                kind: StringKind::Move,
+                width: StringWidth::Word,
+                address_size: AddressSize::Bits32,
+                source_segment: None
+            }
+        );
         assert_eq!(decoded.pc(), GuestAddress(pc));
         assert_eq!(decoded.length(), 2);
         assert_eq!(decoded.next_pc(), GuestAddress(pc.wrapping_add(2)));
@@ -182,7 +193,7 @@ fn exact_word_decode_fetch_snapshot_and_next_ip_wrap() {
 }
 
 #[test]
-fn exact_prefix_neighbors_and_both_standalone_profiles_stay_refused() {
+fn exact_prefix_metadata_neighbors_and_standalone_refusals() {
     for bytes in [
         &[0x66, 0x66, 0xa5][..],
         &[0x66, 0x67, 0xa5],
@@ -192,24 +203,12 @@ fn exact_prefix_neighbors_and_both_standalone_profiles_stay_refused() {
         &[0x66, 0xaa],
         &[0x66, 0x66, 0x90],
     ] {
-        assert_eq!(
-            decode_one(&memory(PC, bytes), GuestAddress(PC)).unwrap_err(),
-            DecodeError::Unsupported(UnsupportedFeature::Opcode)
-        );
+        check_string_prefix(decode_one(&memory(PC, bytes), GuestAddress(PC)), bytes);
     }
-    for (prefix, feature) in [
-        (0xf2, UnsupportedFeature::RepeatedString),
-        (0xf3, UnsupportedFeature::RepeatedString),
-        (0x26, UnsupportedFeature::Segment),
-        (0x2e, UnsupportedFeature::Segment),
-        (0x36, UnsupportedFeature::Segment),
-        (0x3e, UnsupportedFeature::Segment),
-        (0x64, UnsupportedFeature::Segment),
-        (0x65, UnsupportedFeature::Segment),
-    ] {
-        assert_eq!(
-            decode_one(&memory(PC, &[prefix, 0x66, 0xa5]), GuestAddress(PC)).unwrap_err(),
-            DecodeError::Unsupported(feature)
+    for prefix in [0xf2, 0xf3, 0x26, 0x2e, 0x36, 0x3e, 0x64, 0x65] {
+        check_string_prefix(
+            decode_one(&memory(PC, &[prefix, 0x66, 0xa5]), GuestAddress(PC)),
+            &[prefix, 0x66, 0xa5],
         );
     }
     assert_eq!(
@@ -217,8 +216,24 @@ fn exact_prefix_neighbors_and_both_standalone_profiles_stay_refused() {
         DecodeError::InvalidEncoding
     );
     for (opcode, operation) in [
-        (0xa4, Operation::MoveStringByte),
-        (0xa5, Operation::MoveStringDword),
+        (
+            0xa4,
+            Operation::String {
+                kind: StringKind::Move,
+                width: StringWidth::Byte,
+                address_size: AddressSize::Bits32,
+                source_segment: None,
+            },
+        ),
+        (
+            0xa5,
+            Operation::String {
+                kind: StringKind::Move,
+                width: StringWidth::Dword,
+                address_size: AddressSize::Bits32,
+                source_segment: None,
+            },
+        ),
     ] {
         assert_eq!(
             decode_one(&memory(PC, &[opcode]), GuestAddress(PC))
@@ -327,7 +342,7 @@ fn caps_late_refusal_and_data_currency_preserve_bound_publications() {
             let mut engine = EngineInstance::new(3, KEY).unwrap();
             for (pc, bytes) in [
                 (PC, &[0x66, 0xa5, 0xeb, 0][..]),
-                (0x3000, &[0x90, 0x66, 0xaa, 0xeb, 0][..]),
+                (0x3000, &[0x90, 0x0f, 0x0b, 0xeb, 0][..]),
                 (0x4000, &[0x90, 0xeb, 0][..]),
             ] {
                 engine.map(pc, 1, 7).unwrap();

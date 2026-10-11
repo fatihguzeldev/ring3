@@ -1,5 +1,8 @@
+#[path = "support/string_prefix.rs"]
+mod string_prefix;
 use ring3_engine::{abi::arena::TRANSFER_OFFSET, process::EngineInstance};
 use std::io::Write;
+use string_prefix::check as check_string_prefix;
 
 #[test]
 fn stosw_admits_in_bound_engine() {
@@ -41,7 +44,7 @@ use ring3_engine::{
         },
         x86::{
             decode::{DecodeError, decode_one},
-            ir::Operation,
+            ir::{AddressSize, Operation, StringKind, StringWidth},
         },
     },
     memory::{
@@ -89,7 +92,15 @@ fn exact_word_decode_fetch_snapshot_and_instruction_wrap() {
     for pc in [PC, 0x1ffe, 0x1fff, 0xffff_fffe] {
         let mut memory = memory(pc, &[0x66, 0xab]);
         let decoded = decode_one(&memory, GuestAddress(pc)).unwrap();
-        assert_eq!(decoded.operation(), &Operation::StoreStringWord);
+        assert_eq!(
+            decoded.operation(),
+            &Operation::String {
+                kind: StringKind::Store,
+                width: StringWidth::Word,
+                address_size: AddressSize::Bits32,
+                source_segment: None
+            }
+        );
         assert_eq!(
             (decoded.length(), decoded.next_pc()),
             (2, GuestAddress(pc.wrapping_add(2)))
@@ -163,7 +174,7 @@ fn exact_word_decode_fetch_snapshot_and_instruction_wrap() {
 }
 
 #[test]
-fn byte_exact_prefix_whitelist_and_both_standalone_refusals() {
+fn byte_exact_prefix_metadata_and_both_standalone_refusals() {
     for bytes in [
         &[0x66, 0xaa][..],
         &[0x67, 0xa5],
@@ -174,25 +185,12 @@ fn byte_exact_prefix_whitelist_and_both_standalone_refusals() {
         &[0x66, 0x67, 0xab],
         &[0x67, 0x66, 0xab],
     ] {
-        assert_eq!(
-            decode_one(&memory(PC, bytes), GuestAddress(PC)).unwrap_err(),
-            DecodeError::Unsupported(UnsupportedFeature::Opcode),
-            "{bytes:02x?}"
-        );
+        check_string_prefix(decode_one(&memory(PC, bytes), GuestAddress(PC)), bytes);
     }
-    for (prefix, feature) in [
-        (0xf2, UnsupportedFeature::RepeatedString),
-        (0xf3, UnsupportedFeature::RepeatedString),
-        (0x26, UnsupportedFeature::Segment),
-        (0x2e, UnsupportedFeature::Segment),
-        (0x36, UnsupportedFeature::Segment),
-        (0x3e, UnsupportedFeature::Segment),
-        (0x64, UnsupportedFeature::Segment),
-        (0x65, UnsupportedFeature::Segment),
-    ] {
-        assert_eq!(
-            decode_one(&memory(PC, &[prefix, 0x66, 0xab]), GuestAddress(PC)).unwrap_err(),
-            DecodeError::Unsupported(feature)
+    for prefix in [0xf2, 0xf3, 0x26, 0x2e, 0x36, 0x3e, 0x64, 0x65] {
+        check_string_prefix(
+            decode_one(&memory(PC, &[prefix, 0x66, 0xab]), GuestAddress(PC)),
+            &[prefix, 0x66, 0xab],
         );
     }
     assert_eq!(
@@ -284,7 +282,7 @@ fn late_refusal_preserves_full_arena_and_both_prior_owners() {
             let mut engine = EngineInstance::new(3, KEY).unwrap();
             for (pc, bytes) in [
                 (PC, &[0x66, 0xab, 0xeb, 0][..]),
-                (0x3000, &[0x90, 0x66, 0xaa, 0xeb, 0][..]),
+                (0x3000, &[0x90, 0x0f, 0x0b, 0xeb, 0][..]),
                 (0x4000, &[0x90, 0xeb, 0][..]),
             ] {
                 engine.map(pc, 1, 7).unwrap();

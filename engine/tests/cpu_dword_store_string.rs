@@ -1,4 +1,7 @@
+#[path = "support/string_prefix.rs"]
+mod string_prefix;
 use ring3_engine::{abi::arena::TRANSFER_OFFSET, process::EngineInstance};
+use string_prefix::check as check_string_prefix;
 
 const PC: u32 = 0x1000;
 
@@ -38,7 +41,7 @@ use ring3_engine::{
         },
         x86::{
             decode::{DecodeError, decode_one},
-            ir::Operation,
+            ir::{AddressSize, Operation, StringKind, StringWidth},
         },
     },
     memory::{Access, AddressSpace, GuestAddress, PageRange, Permissions},
@@ -74,7 +77,15 @@ fn typed_single_byte_fetch_wrap_and_execute_permission_are_exact() {
     for pc in [PC, 0x1fff, u32::MAX] {
         let memory = memory(pc, &[0xab]);
         let decoded = decode_one(&memory, GuestAddress(pc)).unwrap();
-        assert_eq!(decoded.operation(), &Operation::StoreStringDword);
+        assert_eq!(
+            decoded.operation(),
+            &Operation::String {
+                kind: StringKind::Store,
+                width: StringWidth::Dword,
+                address_size: AddressSize::Bits32,
+                source_segment: None
+            }
+        );
         assert_eq!(
             (decoded.length(), decoded.next_pc()),
             (1, GuestAddress(pc.wrapping_add(1)))
@@ -121,21 +132,14 @@ fn typed_single_byte_fetch_wrap_and_execute_permission_are_exact() {
 }
 
 #[test]
-fn strict_prefixes_and_both_standalone_profiles_stay_refused() {
-    for (prefix, feature) in [
-        (0xf2, UnsupportedFeature::RepeatedString),
-        (0xf3, UnsupportedFeature::RepeatedString),
-        (0x64, UnsupportedFeature::Segment),
-        (0x66, UnsupportedFeature::Opcode),
-        (0x67, UnsupportedFeature::Opcode),
-    ] {
-        assert_eq!(
+fn prefix_metadata_and_both_standalone_refusals_are_exact() {
+    for prefix in [0xf2, 0xf3, 0x64, 0x66, 0x67] {
+        check_string_prefix(
             decode_one(
                 &memory(PC, &[prefix, if prefix == 0x66 { 0xaa } else { 0xab }]),
                 GuestAddress(PC),
-            )
-            .unwrap_err(),
-            DecodeError::Unsupported(feature)
+            ),
+            &[prefix, if prefix == 0x66 { 0xaa } else { 0xab }],
         );
     }
     assert_eq!(
@@ -163,9 +167,9 @@ fn strict_prefixes_and_both_standalone_profiles_stay_refused() {
             }
         );
     }
-    assert_eq!(
-        decode_one(&memory(PC, &[0x66, 0xa6]), GuestAddress(PC)).unwrap_err(),
-        DecodeError::Unsupported(UnsupportedFeature::Opcode)
+    check_string_prefix(
+        decode_one(&memory(PC, &[0x66, 0xa6]), GuestAddress(PC)),
+        &[0x66, 0xa6],
     );
 }
 
@@ -224,7 +228,7 @@ fn instruction_block_caps_and_late_refusal_preserve_prior_bound_owners() {
         let mut engine = EngineInstance::new(2, 7).unwrap();
         for (pc, bytes) in [
             (PC, &[0xab, 0xeb, 0][..]),
-            (0x3000, &[0x90, 0x66, 0xaa, 0xeb, 0][..]),
+            (0x3000, &[0x90, 0x0f, 0x0b, 0xeb, 0][..]),
         ] {
             engine.map(pc, 1, 7).unwrap();
             upload(&mut engine, pc, bytes);

@@ -1,4 +1,7 @@
+#[path = "support/string_prefix.rs"]
+mod string_prefix;
 use ring3_engine::process::EngineInstance;
+use string_prefix::check as check_string_prefix;
 
 const PC: u32 = 0x1000;
 
@@ -34,7 +37,7 @@ use ring3_engine::{
         },
         x86::{
             decode::{DecodeError, decode_one},
-            ir::Operation,
+            ir::{AddressSize, Operation, StringKind, StringWidth},
         },
     },
     memory::{AddressSpace, GuestAddress, PageRange, Permissions},
@@ -101,8 +104,24 @@ fn describe(engine: &mut EngineInstance, length: usize) {
 #[test]
 fn exact_dword_decode_fetch_prefix_and_standalone_boundaries() {
     for (opcode, operation) in [
-        (0xa7, Operation::CompareStringDword),
-        (0xaf, Operation::ScanStringDword),
+        (
+            0xa7,
+            Operation::String {
+                kind: StringKind::Compare,
+                width: StringWidth::Dword,
+                address_size: AddressSize::Bits32,
+                source_segment: None,
+            },
+        ),
+        (
+            0xaf,
+            Operation::String {
+                kind: StringKind::Scan,
+                width: StringWidth::Dword,
+                address_size: AddressSize::Bits32,
+                source_segment: None,
+            },
+        ),
     ] {
         for pc in [PC, 0x1fff, u32::MAX] {
             let memory = memory(&[opcode], pc);
@@ -114,24 +133,16 @@ fn exact_dword_decode_fetch_prefix_and_standalone_boundaries() {
             );
             assert!(memory.is_code_current(decoded.code_snapshot()));
         }
-        for (prefix, feature) in [
-            (0xf3, UnsupportedFeature::RepeatedString),
-            (0xf2, UnsupportedFeature::RepeatedString),
-            (0x26, UnsupportedFeature::Segment),
-            (0x64, UnsupportedFeature::Segment),
-            (0x66, UnsupportedFeature::Opcode),
-            (0x67, UnsupportedFeature::Opcode),
-        ] {
-            assert_eq!(
+        for prefix in [0xf3, 0xf2, 0x26, 0x64, 0x66, 0x67] {
+            check_string_prefix(
                 decode_one(
                     &memory(
                         &[prefix, if prefix == 0x66 { opcode - 1 } else { opcode }],
-                        PC
+                        PC,
                     ),
-                    GuestAddress(PC)
-                )
-                .unwrap_err(),
-                DecodeError::Unsupported(feature)
+                    GuestAddress(PC),
+                ),
+                &[prefix, if prefix == 0x66 { opcode - 1 } else { opcode }],
             );
         }
         assert_eq!(
@@ -241,7 +252,7 @@ fn late_refusal_retains_previous_owner_full_arena_and_source_currency() {
         describe(&mut engine, 3);
         let id = bound_compile(&mut engine, resident, false, 1).unwrap();
         let old = module(&engine, id);
-        let bytes = [0x90, 0xa7, 0x66, 0xae];
+        let bytes = [0x90, 0xa7, 0x0f, 0x0b];
         engine.map(0x3000, 1, 7).unwrap();
         engine.arena_mut().unwrap()[140..144].copy_from_slice(&bytes);
         engine.upload(0x3000, 4).unwrap();

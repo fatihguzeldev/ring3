@@ -1,4 +1,7 @@
+#[path = "support/string_prefix.rs"]
+mod string_prefix;
 use ring3_engine::{abi::arena::TRANSFER_OFFSET, process::EngineInstance};
+use string_prefix::check as check_string_prefix;
 
 const PC: u32 = 0x1000;
 const KEY: u64 = 0x5455_5657_5859_5a5b;
@@ -100,7 +103,7 @@ use ring3_engine::{
         },
         x86::{
             decode::{DecodeError, decode_one},
-            ir::Operation,
+            ir::{AddressSize, Operation, StringKind, StringWidth},
         },
     },
     memory::{Access, FaultReason, GuestAddress, MemoryFault},
@@ -153,8 +156,24 @@ fn bound(engine: &mut EngineInstance, resident: bool, entries: bool) -> Result<u
 #[test]
 fn typed_two_byte_fetch_faults_and_consumed_code_currency_are_exact() {
     for (opcode, operation) in [
-        (0xa7, Operation::CompareStringWord),
-        (0xaf, Operation::ScanStringWord),
+        (
+            0xa7,
+            Operation::String {
+                kind: StringKind::Compare,
+                width: StringWidth::Word,
+                address_size: AddressSize::Bits32,
+                source_segment: None,
+            },
+        ),
+        (
+            0xaf,
+            Operation::String {
+                kind: StringKind::Scan,
+                width: StringWidth::Word,
+                address_size: AddressSize::Bits32,
+                source_segment: None,
+            },
+        ),
     ] {
         for pc in [PC, 0x1ffe, 0x1fff, 0xffff_fffe] {
             let engine = fixture(pc, &[0x66, opcode]);
@@ -218,7 +237,7 @@ fn typed_two_byte_fetch_faults_and_consumed_code_currency_are_exact() {
 }
 
 #[test]
-fn strict_prefix_neighbors_and_both_standalone_profiles_stay_refused() {
+fn prefix_metadata_neighbors_and_both_standalone_refusals() {
     for opcode in [0xa7, 0xaf] {
         for bytes in [
             vec![0x66, 0x66, opcode],
@@ -226,29 +245,27 @@ fn strict_prefix_neighbors_and_both_standalone_profiles_stay_refused() {
             vec![0x67, 0x66, opcode],
             vec![0x67, opcode],
         ] {
-            assert_eq!(
-                decode_one(fixture(PC, &bytes).memory().unwrap(), GuestAddress(PC)).err(),
-                Some(DecodeError::Unsupported(UnsupportedFeature::Opcode))
+            check_string_prefix(
+                decode_one(fixture(PC, &bytes).memory().unwrap(), GuestAddress(PC)),
+                &bytes,
             );
         }
         for prefix in [0x26, 0x2e, 0x36, 0x3e, 0x64, 0x65] {
-            assert_eq!(
+            check_string_prefix(
                 decode_one(
                     fixture(PC, &[prefix, 0x66, opcode]).memory().unwrap(),
-                    GuestAddress(PC)
-                )
-                .err(),
-                Some(DecodeError::Unsupported(UnsupportedFeature::Segment))
+                    GuestAddress(PC),
+                ),
+                &[prefix, 0x66, opcode],
             );
         }
         for prefix in [0xf2, 0xf3] {
-            assert_eq!(
+            check_string_prefix(
                 decode_one(
                     fixture(PC, &[prefix, 0x66, opcode]).memory().unwrap(),
-                    GuestAddress(PC)
-                )
-                .err(),
-                Some(DecodeError::Unsupported(UnsupportedFeature::RepeatedString))
+                    GuestAddress(PC),
+                ),
+                &[prefix, 0x66, opcode],
             );
         }
         assert_eq!(
@@ -287,13 +304,12 @@ fn strict_prefix_neighbors_and_both_standalone_profiles_stay_refused() {
         );
     }
     for opcode in [0xa6, 0xae] {
-        assert_eq!(
+        check_string_prefix(
             decode_one(
                 fixture(PC, &[0x66, opcode]).memory().unwrap(),
-                GuestAddress(PC)
-            )
-            .err(),
-            Some(DecodeError::Unsupported(UnsupportedFeature::Opcode))
+                GuestAddress(PC),
+            ),
+            &[0x66, opcode],
         );
     }
 }
@@ -383,7 +399,7 @@ fn late_refusals_caps_and_data_currency_preserve_both_bound_owners() {
                 let failures = [
                     (
                         PC,
-                        vec![0x66, opcode, 0x66, 0xa6, 0xeb, 0],
+                        vec![0x66, opcode, 0x0f, 0x0b, 0xeb, 0],
                         6,
                         CompileError::Instruction {
                             pc: GuestAddress(PC + 2),
