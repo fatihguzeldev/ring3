@@ -3,14 +3,21 @@
 use super::{EngineInstance, HostError, callback::SuspendedRecord};
 use crate::{
     abi::{
-        arena::{CANCEL_OFFSET, EXIT_OFFSET, STATE_OFFSET, TRANSFER_OFFSET, X87_OFFSET},
+        arena::{
+            CANCEL_OFFSET, EXIT_OFFSET, SEGMENTS_OFFSET, SIMD_OFFSET, STATE_OFFSET,
+            TRANSFER_OFFSET, X87_OFFSET,
+        },
         call_frame::{CALL_FRAME_SIZE, CallRecord32, encode_call_frame},
         x86::{
-            EXIT_SIZE, STATE_SIZE, X87_SIZE, decode_exit, decode_state, decode_x87, encode_exit_v3,
-            encode_state,
+            EXIT_SIZE, SEGMENTS_SIZE, SIMD_SIZE, STATE_SIZE, X87_SIZE, decode_exit,
+            decode_segments, decode_simd, decode_state, decode_x87, encode_exit_v3,
+            encode_segments, encode_simd, encode_state, encode_x87,
         },
     },
-    cpu::{ExecutionExit, ExitReason, x86::State32},
+    cpu::{
+        ExecutionExit, ExitReason,
+        x86::{SegmentState, State32, X87State, simd::SimdState},
+    },
     memory::MemoryError,
     windows::{CallFrame32, CallingConvention32, FrameError, MAX_STACK_WORDS, WindowsApi32},
 };
@@ -34,13 +41,66 @@ pub(super) enum PendingOwner {
     ResidentCallback { unit_id: u64, callback_token: u32 },
 }
 
+/// The architectural state outside R3ST, captured as exact validated ABI bytes.
+/// Work accounting and helper/transfer records are runtime outputs, not CPU context.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) struct ExtendedCpuState {
+    pub(super) x87: [u8; X87_SIZE],
+    simd: [u8; SIMD_SIZE],
+    segments: [u8; SEGMENTS_SIZE],
+}
+
+impl ExtendedCpuState {
+    pub(super) fn capture(arena: &[u8]) -> Result<Self, HostError> {
+        let state = Self {
+            x87: arena[X87_OFFSET..X87_OFFSET + X87_SIZE].try_into().unwrap(),
+            simd: arena[SIMD_OFFSET..SIMD_OFFSET + SIMD_SIZE]
+                .try_into()
+                .unwrap(),
+            segments: arena[SEGMENTS_OFFSET..SEGMENTS_OFFSET + SEGMENTS_SIZE]
+                .try_into()
+                .unwrap(),
+        };
+        decode_x87(&state.x87).map_err(|_| HostError::Call(CallError::InvalidStop))?;
+        decode_simd(&state.simd).map_err(|_| HostError::Call(CallError::InvalidStop))?;
+        decode_segments(&state.segments).map_err(|_| HostError::Call(CallError::InvalidStop))?;
+        Ok(state)
+    }
+
+    pub(super) fn initial() -> Result<Self, HostError> {
+        let mut state = Self {
+            x87: [0; X87_SIZE],
+            simd: [0; SIMD_SIZE],
+            segments: [0; SEGMENTS_SIZE],
+        };
+        encode_x87(&X87State::default(), &mut state.x87).map_err(|_| HostError::Infrastructure)?;
+        encode_simd(&SimdState::default(), &mut state.simd)
+            .map_err(|_| HostError::Infrastructure)?;
+        encode_segments(&SegmentState::default(), &mut state.segments)
+            .map_err(|_| HostError::Infrastructure)?;
+        Ok(state)
+    }
+
+    pub(super) fn matches(&self, arena: &[u8]) -> bool {
+        arena[X87_OFFSET..X87_OFFSET + X87_SIZE] == self.x87
+            && arena[SIMD_OFFSET..SIMD_OFFSET + SIMD_SIZE] == self.simd
+            && arena[SEGMENTS_OFFSET..SEGMENTS_OFFSET + SEGMENTS_SIZE] == self.segments
+    }
+
+    pub(super) fn restore(&self, arena: &mut [u8]) {
+        arena[X87_OFFSET..X87_OFFSET + X87_SIZE].copy_from_slice(&self.x87);
+        arena[SIMD_OFFSET..SIMD_OFFSET + SIMD_SIZE].copy_from_slice(&self.simd);
+        arena[SEGMENTS_OFFSET..SEGMENTS_OFFSET + SEGMENTS_SIZE].copy_from_slice(&self.segments);
+    }
+}
+
 pub(super) struct PendingCall {
     pub(super) token: u32,
     pub(super) owner: PendingOwner,
     pub(super) frame: CallFrame32,
     pub(super) state: [u8; STATE_SIZE],
     pub(super) exit: [u8; EXIT_SIZE],
-    pub(super) x87: [u8; X87_SIZE],
+    pub(super) extended: ExtendedCpuState,
 }
 
 pub(super) struct PreparedCall32 {
@@ -285,10 +345,7 @@ impl EngineInstance {
         let exit_bytes: [u8; EXIT_SIZE] = self.arena()[EXIT_OFFSET..EXIT_OFFSET + EXIT_SIZE]
             .try_into()
             .unwrap();
-        let x87: [u8; X87_SIZE] = self.arena()[X87_OFFSET..X87_OFFSET + X87_SIZE]
-            .try_into()
-            .unwrap();
-        decode_x87(&x87).map_err(|_| HostError::Call(CallError::InvalidStop))?;
+        let extended = ExtendedCpuState::capture(self.arena())?;
         let state =
             decode_state(&state_bytes).map_err(|_| HostError::Call(CallError::InvalidStop))?;
         let exit = decode_exit(&exit_bytes).map_err(|_| HostError::Call(CallError::InvalidStop))?;
@@ -353,7 +410,7 @@ impl EngineInstance {
             frame,
             state: state_bytes,
             exit: exit_bytes,
-            x87,
+            extended,
         });
         self.call_token = token;
         self.arena.as_mut().get_mut()[TRANSFER_OFFSET..TRANSFER_OFFSET + CALL_FRAME_SIZE]
@@ -419,7 +476,7 @@ impl EngineInstance {
         }
         if self.arena()[STATE_OFFSET..STATE_OFFSET + STATE_SIZE] != pending.state
             || self.arena()[EXIT_OFFSET..EXIT_OFFSET + EXIT_SIZE] != pending.exit
-            || self.arena()[X87_OFFSET..X87_OFFSET + X87_SIZE] != pending.x87
+            || !pending.extended.matches(self.arena())
         {
             return Err(HostError::Call(CallError::StateChanged));
         }
@@ -497,6 +554,45 @@ impl EngineInstance {
 mod tests {
     use super::*;
     use crate::cpu::x86::State32;
+
+    #[test]
+    fn extended_cpu_snapshot_validates_every_record_and_restores_only_architectural_state() {
+        let mut engine = EngineInstance::new(1, 91).unwrap();
+        let initial = ExtendedCpuState::capture(engine.arena()).unwrap();
+        assert_eq!(initial, ExtendedCpuState::initial().unwrap());
+        let arena = engine.arena_mut().unwrap();
+        arena[SIMD_OFFSET + 32..SIMD_OFFSET + SIMD_SIZE].fill(0xa5);
+        arena[SIMD_OFFSET + 16..SIMD_OFFSET + 20].copy_from_slice(&0x5f80_u32.to_le_bytes());
+        arena[SEGMENTS_OFFSET + 48..SEGMENTS_OFFSET + 52]
+            .copy_from_slice(&0x7fff_0000_u32.to_le_bytes());
+        let saved = ExtendedCpuState::capture(engine.arena()).unwrap();
+        assert_ne!(saved, initial);
+        assert!(saved.matches(engine.arena()));
+        engine.arena_mut().unwrap()[SIMD_OFFSET + 47] ^= 1;
+        assert!(!saved.matches(engine.arena()));
+        engine.arena_mut().unwrap()[SEGMENTS_OFFSET + 48] ^= 1;
+        engine.arena_mut().unwrap()[TRANSFER_OFFSET] = 0x79;
+        saved.restore(engine.arena_mut().unwrap());
+        assert_eq!(ExtendedCpuState::capture(engine.arena()).unwrap(), saved);
+        assert_eq!(engine.arena()[TRANSFER_OFFSET], 0x79);
+        for offset in [
+            X87_OFFSET,
+            SIMD_OFFSET + 20,
+            SEGMENTS_OFFSET + 28,
+            SEGMENTS_OFFSET + 18,
+        ] {
+            let before = engine.arena().to_vec();
+            engine.arena_mut().unwrap()[offset] = 0;
+            if offset == SIMD_OFFSET + 20 || offset == SEGMENTS_OFFSET + 28 {
+                engine.arena_mut().unwrap()[offset] = 1;
+            }
+            assert_eq!(
+                ExtendedCpuState::capture(engine.arena()),
+                Err(HostError::Call(CallError::InvalidStop))
+            );
+            engine.arena_mut().unwrap().copy_from_slice(&before);
+        }
+    }
 
     #[test]
     fn last_call_token_is_issued_once_and_exhaustion_precedes_guest_reads() {

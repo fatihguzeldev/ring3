@@ -309,6 +309,31 @@ fn historical_private_call_tokens_reject_even_exact_initial_context() {
 }
 
 #[test]
+fn startup_requires_initial_simd_and_segment_context_before_stack_publication() {
+    for offset in [
+        crate::abi::arena::SIMD_OFFSET + 32,
+        crate::abi::arena::SIMD_OFFSET + 16,
+        crate::abi::arena::SEGMENTS_OFFSET + 48,
+    ] {
+        let mut engine = fixture(3);
+        engine.arena_mut().unwrap()[offset] ^= 1;
+        let arena = engine.arena().to_vec();
+        let identity = engine.memory().unwrap().identity();
+        assert_eq!(
+            engine.start_loaded_image(STACK, 1),
+            Err(HostError::InvalidRequest)
+        );
+        assert_eq!(engine.arena(), arena);
+        assert_eq!(engine.memory().unwrap().identity(), identity);
+        assert_eq!(engine.memory().unwrap().mapped_pages(), 2);
+        assert!(!engine.image_started);
+        engine.arena_mut().unwrap()[offset] ^= 1;
+        engine.start_loaded_image(STACK, 1).unwrap();
+        assert_eq!(engine.memory().unwrap().mapped_pages(), 3);
+    }
+}
+
+#[test]
 fn private_start_latch_survives_manual_restore_and_unmap_and_closed_still_wins() {
     let mut engine = fixture(3);
     let arena = engine.arena().to_vec();

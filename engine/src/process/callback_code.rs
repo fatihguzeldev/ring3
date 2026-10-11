@@ -2,17 +2,17 @@
 
 use super::{
     CallError, EngineInstance, HostError,
-    call::PendingOwner,
+    call::{ExtendedCpuState, PendingOwner},
     callback::{SuspendedCallback, SuspendedRecord},
     instance::DescriptorFormat,
 };
 use crate::{
     abi::{
-        arena::{EXIT_OFFSET, STATE_OFFSET, TRANSFER_OFFSET, X87_OFFSET},
+        arena::{EXIT_OFFSET, STATE_OFFSET, TRANSFER_OFFSET},
         callback::{CALLBACK_RECORD_SIZE, CallbackRecord32, encode_callback},
         x86::{
-            EXIT_SIZE, EXIT_VERSION_3, EXIT_VERSION_5, STATE_SIZE, X87_SIZE, decode_exit,
-            decode_state, decode_x87,
+            EXIT_SIZE, EXIT_VERSION_3, EXIT_VERSION_5, EXIT_VERSION_6, STATE_SIZE, decode_exit,
+            decode_state,
         },
     },
     cpu::{ExitReason, dbt::CompiledRegion},
@@ -25,7 +25,7 @@ struct PreparedCallbackCode {
     pc: u32,
     state: [u8; STATE_SIZE],
     exit: [u8; EXIT_SIZE],
-    x87: [u8; X87_SIZE],
+    extended: ExtendedCpuState,
     artifact: CompiledRegion,
     record: CallbackRecord32,
     output: [u8; CALLBACK_RECORD_SIZE],
@@ -99,14 +99,11 @@ impl EngineInstance {
         let exit: [u8; EXIT_SIZE] = self.arena()[EXIT_OFFSET..EXIT_OFFSET + EXIT_SIZE]
             .try_into()
             .unwrap();
-        let x87: [u8; X87_SIZE] = self.arena()[X87_OFFSET..X87_OFFSET + X87_SIZE]
-            .try_into()
-            .unwrap();
-        decode_x87(&x87).map_err(|_| HostError::Call(CallError::InvalidStop))?;
+        let extended = ExtendedCpuState::capture(self.arena())?;
         let stopped = decode_state(&state).map_err(|_| HostError::Call(CallError::InvalidStop))?;
         if !matches!(
             u16::from_le_bytes(exit[4..6].try_into().unwrap()),
-            EXIT_VERSION_3 | EXIT_VERSION_5
+            EXIT_VERSION_3 | EXIT_VERSION_5 | EXIT_VERSION_6
         ) || decode_exit(&exit)
             .map_err(|_| HostError::Call(CallError::InvalidStop))?
             .reason
@@ -138,7 +135,7 @@ impl EngineInstance {
             pc: stopped.eip,
             state,
             exit,
-            x87,
+            extended,
             artifact,
             record,
             output,
@@ -150,7 +147,7 @@ impl EngineInstance {
             self.callback_code_context(prepared.key, prepared.generation, prepared.token)?;
         if self.arena()[STATE_OFFSET..STATE_OFFSET + STATE_SIZE] != prepared.state
             || self.arena()[EXIT_OFFSET..EXIT_OFFSET + EXIT_SIZE] != prepared.exit
-            || self.arena()[X87_OFFSET..X87_OFFSET + X87_SIZE] != prepared.x87
+            || !prepared.extended.matches(self.arena())
         {
             return Err(HostError::Call(CallError::StateChanged));
         }

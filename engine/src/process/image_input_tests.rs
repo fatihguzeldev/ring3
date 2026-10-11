@@ -9,7 +9,7 @@ use crate::{
     memory::{AddressSpace, GuestAddress, MemoryError, PageRange, Permissions},
     process::{
         CallError,
-        call::{PendingCall, PendingOwner},
+        call::{ExtendedCpuState, PendingCall, PendingOwner},
         callback::{SuspendedCallback, SuspendedRecord},
     },
     windows::{CallFrame32, CallingConvention32, WindowsApi32, WindowsOutcome32},
@@ -99,7 +99,7 @@ fn input(engine: &EngineInstance) -> Option<Input> {
 fn call(call: &PendingCall) -> String {
     format!(
         "{:?}/{:?}/{:?}/{:?}/{:?}/{:?}",
-        call.token, call.owner, call.frame, call.state, call.exit, call.x87
+        call.token, call.owner, call.frame, call.state, call.exit, call.extended
     )
 }
 
@@ -111,7 +111,7 @@ fn pending() -> PendingCall {
         frame: frame(1),
         state: [0x51; 56],
         exit: [0x62; 40],
-        x87: [0x73; crate::abi::x86::X87_SIZE],
+        extended: ExtendedCpuState::initial().unwrap(),
     }
 }
 
@@ -590,7 +590,8 @@ fn dirty_input_arena(engine: &mut EngineInstance) {
     {
         *byte = (index as u8).wrapping_mul(29).wrapping_add(17);
     }
-    crate::abi::x86::decode_x87(&arena[X87_OFFSET..X87_OFFSET + crate::abi::x86::X87_SIZE]).unwrap();
+    crate::abi::x86::decode_x87(&arena[X87_OFFSET..X87_OFFSET + crate::abi::x86::X87_SIZE])
+        .unwrap();
 }
 
 #[test]

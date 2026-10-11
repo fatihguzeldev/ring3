@@ -395,7 +395,7 @@ struct PendingObservation {
     frame: CallFrame32,
     state: [u8; 56],
     exit: [u8; EXIT_SIZE],
-    x87: [u8; X87_SIZE],
+    extended: super::call::ExtendedCpuState,
 }
 
 fn observe_pending(pending: &PendingCall) -> PendingObservation {
@@ -405,7 +405,7 @@ fn observe_pending(pending: &PendingCall) -> PendingObservation {
         frame: pending.frame,
         state: pending.state,
         exit: pending.exit,
-        x87: pending.x87,
+        extended: pending.extended,
     }
 }
 

@@ -65,11 +65,13 @@ pub struct EngineInstance {
     pub(super) pending_call: Option<PendingCall>,
     pub(super) callback: Option<SuspendedCallback>,
     pub(super) call_token: u32,
+    pub(super) virtual_tsc: u64,
     pub(super) image: Option<crate::loader::ImageMetadata32>,
     pub(super) image_input: Option<super::image_input::ImageInput>,
     pub(super) image_started: bool,
     pub(super) exit_code: Option<u32>,
     pub(super) windows_thread: crate::windows::ThreadState32,
+    pub(super) segment_descriptors: crate::cpu::x86::SegmentDescriptorTable,
     pub(super) virtual_allocations: Vec<PageRange>,
 }
 
@@ -97,11 +99,13 @@ impl EngineInstance {
             pending_call: None,
             callback: None,
             call_token: 0,
+            virtual_tsc: 0,
             image: None,
             image_input: None,
             image_started: false,
             exit_code: None,
             windows_thread: crate::windows::ThreadState32::default(),
+            segment_descriptors: crate::cpu::x86::SegmentDescriptorTable::default(),
             virtual_allocations: Vec::new(),
         })
     }

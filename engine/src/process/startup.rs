@@ -1,17 +1,12 @@
 #![forbid(unsafe_code)]
 
-use super::{CallError, EngineInstance, HostError};
+use super::{CallError, EngineInstance, HostError, call::ExtendedCpuState};
 use crate::{
     abi::{
-        arena::{EXIT_OFFSET, STATE_OFFSET, X87_OFFSET},
-        x86::{
-            EXIT_SIZE, STATE_SIZE, X87_SIZE, encode_exit, encode_exit_v3, encode_state, encode_x87,
-        },
+        arena::{EXIT_OFFSET, STATE_OFFSET},
+        x86::{EXIT_SIZE, STATE_SIZE, encode_exit, encode_exit_v3, encode_state},
     },
-    cpu::{
-        ExecutionExit, ExitReason,
-        x86::{State32, X87State},
-    },
+    cpu::{ExecutionExit, ExitReason, x86::State32},
     memory::{GuestAddress, PAGE_SIZE, PageRange, Permissions},
 };
 
@@ -28,8 +23,7 @@ impl EngineInstance {
 
         let mut state_bytes = [0; STATE_SIZE];
         let mut exit_bytes = [0; EXIT_SIZE];
-        let mut x87_bytes = [0; X87_SIZE];
-        encode_x87(&X87State::default(), &mut x87_bytes).map_err(|_| HostError::Infrastructure)?;
+        let initial_extended = ExtendedCpuState::initial()?;
         encode_state(&State32::default(), &mut state_bytes)
             .map_err(|_| HostError::Infrastructure)?;
         encode_exit(
@@ -42,7 +36,7 @@ impl EngineInstance {
         .map_err(|_| HostError::Infrastructure)?;
         if self.arena()[STATE_OFFSET..STATE_OFFSET + STATE_SIZE] != state_bytes
             || self.arena()[EXIT_OFFSET..EXIT_OFFSET + EXIT_SIZE] != exit_bytes
-            || self.arena()[X87_OFFSET..X87_OFFSET + X87_SIZE] != x87_bytes
+            || !initial_extended.matches(self.arena())
         {
             return Err(HostError::InvalidRequest);
         }

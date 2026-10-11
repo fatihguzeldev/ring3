@@ -92,7 +92,13 @@ fn authority(engine: &EngineInstance) -> (u32, u32, PendingOwner, u32, u32) {
 
 #[test]
 fn final_install_rejects_changed_cpu_bytes_without_publication() {
-    for offset in [32, EXIT_OFFSET + 20] {
+    for offset in [
+        32,
+        EXIT_OFFSET + 20,
+        crate::abi::arena::X87_OFFSET + 40,
+        crate::abi::arena::SIMD_OFFSET + 32,
+        crate::abi::arena::SEGMENTS_OFFSET + 48,
+    ] {
         let (mut engine, generation, token) = fixture(0);
         let prepared = engine
             .prepare_callback_code(KEY, generation, token, 4, 3)
