@@ -492,9 +492,8 @@ fn span_poison_prefix_and_remaining_exclusions_preserve_arena_units_and_capacity
             bytes.extend_from_slice(instruction);
             bytes.extend_from_slice(&[0x0f, 0x06]);
             let locked_logical = prefix == 0xf0
-                && (instruction == [0x83, 0x0b, 0x80]
-                    || instruction == [0x83, 0x23, 0x80]
-                    || instruction == [0x83, 0x33, 0x80]);
+                && matches!(instruction[0], 0x81 | 0x83)
+                && matches!(kind, BinaryKind::Or | BinaryKind::And | BinaryKind::Xor);
             rejected(
                 &mut engine,
                 keep,

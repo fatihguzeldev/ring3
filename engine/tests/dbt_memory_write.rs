@@ -476,7 +476,7 @@ fn standalone_all_fifteen_memory_writes_remain_excluded_in_four_apis_before_late
 fn narrow_prefix_and_declared_span_errors_remain_precise() {
     let opcode_error =
         InstructionError::Decode(DecodeError::Unsupported(UnsupportedFeature::Opcode));
-    for (opcode, extension, kind, _, immediate) in FORMS {
+    for (opcode, extension, kind, value, immediate) in FORMS {
         if immediate.is_empty() {
             let mut bytes = vec![0x90];
             if matches!(
@@ -512,7 +512,10 @@ fn narrow_prefix_and_declared_span_errors_remain_precise() {
                 bytes.push(0x66);
             }
             bytes.extend_from_slice(&encode(opcode, extension, &[0x03], immediate));
-            if prefix == 0xf0 && opcode == 0x83 && matches!(extension, 1 | 4 | 6) {
+            if prefix == 0xf0 && matches!(opcode, 0x81 | 0x83) && matches!(extension, 1 | 4 | 6) {
+                let Value32::Immediate(mask) = value else {
+                    unreachable!();
+                };
                 bytes.extend_from_slice(&[0xeb, 0]);
                 for entries in [false, true] {
                     let mut instance = engine(&bytes);
@@ -536,7 +539,7 @@ fn narrow_prefix_and_declared_span_errors_remain_precise() {
                                     scale: 1,
                                     displacement: 0,
                                 },
-                                mask: 0xffff_ff80,
+                                mask,
                             }
                         } else if extension == 4 {
                             Operation::LockedMemoryAnd32 {
@@ -546,7 +549,7 @@ fn narrow_prefix_and_declared_span_errors_remain_precise() {
                                     scale: 1,
                                     displacement: 0,
                                 },
-                                mask: 0xffff_ff80,
+                                mask,
                             }
                         } else {
                             Operation::LockedMemoryXor32 {
@@ -556,7 +559,7 @@ fn narrow_prefix_and_declared_span_errors_remain_precise() {
                                     scale: 1,
                                     displacement: 0,
                                 },
-                                mask: 0xffff_ff80,
+                                mask,
                             }
                         }
                     );

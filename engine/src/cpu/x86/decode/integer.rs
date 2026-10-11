@@ -37,36 +37,52 @@ pub(super) fn lower(instruction: &Instruction) -> Option<Result<Operation, Decod
             })
         })());
     }
-    if instruction.code() == Code::Or_rm32_imm8
+    if matches!(instruction.code(), Code::Or_rm32_imm8 | Code::Or_rm32_imm32)
         && instruction.has_lock_prefix()
         && instruction.op0_kind() == OpKind::Memory
     {
         return Some((|| {
             Ok(Operation::LockedMemoryOr32 {
                 address: effective_address(instruction)?,
-                mask: instruction.immediate8to32() as u32,
+                mask: if instruction.code() == Code::Or_rm32_imm32 {
+                    instruction.immediate32()
+                } else {
+                    instruction.immediate8to32() as u32
+                },
             })
         })());
     }
-    if instruction.code() == Code::And_rm32_imm8
-        && instruction.has_lock_prefix()
+    if matches!(
+        instruction.code(),
+        Code::And_rm32_imm8 | Code::And_rm32_imm32
+    ) && instruction.has_lock_prefix()
         && instruction.op0_kind() == OpKind::Memory
     {
         return Some((|| {
             Ok(Operation::LockedMemoryAnd32 {
                 address: effective_address(instruction)?,
-                mask: instruction.immediate8to32() as u32,
+                mask: if instruction.code() == Code::And_rm32_imm32 {
+                    instruction.immediate32()
+                } else {
+                    instruction.immediate8to32() as u32
+                },
             })
         })());
     }
-    if instruction.code() == Code::Xor_rm32_imm8
-        && instruction.has_lock_prefix()
+    if matches!(
+        instruction.code(),
+        Code::Xor_rm32_imm8 | Code::Xor_rm32_imm32
+    ) && instruction.has_lock_prefix()
         && instruction.op0_kind() == OpKind::Memory
     {
         return Some((|| {
             Ok(Operation::LockedMemoryXor32 {
                 address: effective_address(instruction)?,
-                mask: instruction.immediate8to32() as u32,
+                mask: if instruction.code() == Code::Xor_rm32_imm32 {
+                    instruction.immediate32()
+                } else {
+                    instruction.immediate8to32() as u32
+                },
             })
         })());
     }
