@@ -1,0 +1,19 @@
+
+kernel.obj:	file format coff-i386
+
+Disassembly of section .text:
+
+00000000 <_ring3_update_flags>:
+       0: 8b 44 24 04                  	mov	eax, dword ptr [esp + 0x4]
+       4: f0                           	lock
+       5: 81 08 00 00 01 80            	or	dword ptr [eax], 0x80010000
+       b: 8b 08                        	mov	ecx, dword ptr [eax]
+       d: f0                           	lock
+       e: 81 20 bf ff fd ff            	and	dword ptr [eax], 0xfffdffbf
+      14: 8b 10                        	mov	edx, dword ptr [eax]
+      16: f0                           	lock
+      17: 81 30 00 08 40 00            	xor	dword ptr [eax], 0x400800
+      1d: 31 ca                        	xor	edx, ecx
+      1f: 8b 00                        	mov	eax, dword ptr [eax]
+      21: 31 d0                        	xor	eax, edx
+      23: c3                           	ret
