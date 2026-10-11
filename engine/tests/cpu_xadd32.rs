@@ -697,6 +697,8 @@ fn full_modrm_domain_strict_categories_and_supported_neighbors_are_exact() {
             let mut bytes = vec![prefix];
             if prefix == 0x66 {
                 bytes.push(0x66);
+            } else if prefix == 0xf0 {
+                bytes.push(0xf0);
             }
             bytes.extend(memory);
             strict.push((bytes, category));

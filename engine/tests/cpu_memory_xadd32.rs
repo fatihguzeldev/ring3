@@ -413,6 +413,8 @@ fn byte_word_and_prefix_refusals_keep_exact_categories_and_inputs() {
         let mut bytes = vec![prefix, 0x0f, 0xc1, 0x03];
         if prefix == 0x66 {
             bytes.insert(0, 0x66);
+        } else if prefix == 0xf0 {
+            bytes.insert(0, 0xf0);
         }
         cases.push((bytes, expected));
     }

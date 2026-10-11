@@ -47,12 +47,25 @@ pub(super) struct Imports {
     pub(super) exchange8: Option<StoreImport>,
     pub(super) exchange16: Option<StoreImport>,
     pub(super) compare_exchange32: Option<StoreImport>,
+    pub(super) exchange_add32: Option<StoreImport>,
 }
 
 impl Imports {
     pub(super) fn needed(
         blocks: &[crate::cpu::dbt::region::CompiledBlock],
-    ) -> (bool, bool, bool, bool, bool, bool, bool, bool, bool, bool) {
+    ) -> (
+        bool,
+        bool,
+        bool,
+        bool,
+        bool,
+        bool,
+        bool,
+        bool,
+        bool,
+        bool,
+        bool,
+    ) {
         let mut read = false;
         let mut store = false;
         let mut read8 = false;
@@ -63,12 +76,14 @@ impl Imports {
         let mut exchange8 = false;
         let mut exchange16 = false;
         let mut compare_exchange32 = false;
+        let mut exchange_add32 = false;
         for instruction in blocks.iter().flat_map(|block| &block.instructions) {
             match instruction.operation() {
                 Operation::MemoryExchange { .. } => exchange = true,
                 Operation::MemoryExchangeByte { .. } => exchange8 = true,
                 Operation::MemoryExchangeWord { .. } => exchange16 = true,
                 Operation::LockedMemoryCompareExchange32 { .. } => compare_exchange32 = true,
+                Operation::LockedMemoryExchangeAdd32 { .. } => exchange_add32 = true,
                 Operation::X87StatusToMemory { .. }
                 | Operation::X87ControlToMemory { .. }
                 | Operation::StoreWord { .. }
@@ -256,8 +271,19 @@ impl Imports {
             exchange8,
             exchange16,
             compare_exchange32,
+            exchange_add32,
         )
     }
+}
+
+pub(super) fn exchange_add_result(
+    code: &mut InstructionSink<'_>,
+    address: EffectiveAddress,
+    source: crate::cpu::x86::Register32,
+    imports: Imports,
+    exit_depth: u32,
+) {
+    exchange::exchange_add_result(code, address, source, imports, exit_depth);
 }
 
 pub(super) fn exchange_result(
