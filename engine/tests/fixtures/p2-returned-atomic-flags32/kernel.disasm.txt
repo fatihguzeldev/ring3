@@ -1,0 +1,41 @@
+
+kernel.obj:	file format coff-i386
+
+Disassembly of section .text:
+
+00000000 <_ring3_collect_flag_updates>:
+       0: 53                           	push	ebx
+       1: 57                           	push	edi
+       2: 56                           	push	esi
+       3: 8b 4c 24 1c                  	mov	ecx, dword ptr [esp + 0x1c]
+       7: 8b 74 24 18                  	mov	esi, dword ptr [esp + 0x18]
+       b: 8b 7c 24 14                  	mov	edi, dword ptr [esp + 0x14]
+       f: 8b 54 24 10                  	mov	edx, dword ptr [esp + 0x10]
+      13: 8b 02                        	mov	eax, dword ptr [edx]
+      15: 89 c3                        	mov	ebx, eax
+      17: 09 fb                        	or	ebx, edi
+      19: f0                           	lock
+      1a: 0f b1 1a                     	cmpxchg	dword ptr [edx], ebx
+      1d: 75 f6                        	jne	0x15 <_ring3_collect_flag_updates+0x15>
+      1f: 89 c7                        	mov	edi, eax
+      21: 8b 02                        	mov	eax, dword ptr [edx]
+      23: 89 c3                        	mov	ebx, eax
+      25: 21 f3                        	and	ebx, esi
+      27: f0                           	lock
+      28: 0f b1 1a                     	cmpxchg	dword ptr [edx], ebx
+      2b: 75 f6                        	jne	0x23 <_ring3_collect_flag_updates+0x23>
+      2d: 89 c6                        	mov	esi, eax
+      2f: 8b 02                        	mov	eax, dword ptr [edx]
+      31: 89 c3                        	mov	ebx, eax
+      33: 31 cb                        	xor	ebx, ecx
+      35: f0                           	lock
+      36: 0f b1 1a                     	cmpxchg	dword ptr [edx], ebx
+      39: 75 f6                        	jne	0x31 <_ring3_collect_flag_updates+0x31>
+      3b: 89 f1                        	mov	ecx, esi
+      3d: 01 f9                        	add	ecx, edi
+      3f: 01 c1                        	add	ecx, eax
+      41: 89 c8                        	mov	eax, ecx
+      43: 5e                           	pop	esi
+      44: 5f                           	pop	edi
+      45: 5b                           	pop	ebx
+      46: c3                           	ret
