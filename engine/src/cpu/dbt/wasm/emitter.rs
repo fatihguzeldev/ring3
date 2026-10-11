@@ -31,6 +31,7 @@ pub(in crate::cpu::dbt) fn emit(
         bit_test_set32: needs_bit_test_set32,
         bit_test_reset32: needs_bit_test_reset32,
         atomic_or_u32: needs_atomic_or_u32,
+        atomic_and_u32: needs_atomic_and_u32,
     } = memory::Imports::needed(blocks);
     let has_stores = needs_store
         || needs_store8
@@ -43,7 +44,8 @@ pub(in crate::cpu::dbt) fn emit(
         || needs_exchange_add16
         || needs_bit_test_set32
         || needs_bit_test_reset32
-        || needs_atomic_or_u32;
+        || needs_atomic_or_u32
+        || needs_atomic_and_u32;
     let has_reads = needs_read || needs_read8 || needs_read16;
     let has_memory = has_reads
         || has_stores
@@ -444,6 +446,25 @@ pub(in crate::cpu::dbt) fn emit(
         };
         imports.import("ring3", name, EntityType::Function(type_index));
         helper_imports.atomic_or_u32 = Some(atomic_or);
+        function_index += 1;
+    }
+    if needs_atomic_and_u32 {
+        let (name, atomic_and) = match binding {
+            Some(EmbeddedBinding::Resident { key, id }) => (
+                "atomic_and_resident_u32",
+                memory::StoreImport::Resident {
+                    index: function_index,
+                    key,
+                    id,
+                },
+            ),
+            _ => (
+                "atomic_and_u32",
+                memory::StoreImport::Replacement(function_index),
+            ),
+        };
+        imports.import("ring3", name, EntityType::Function(type_index));
+        helper_imports.atomic_and_u32 = Some(atomic_and);
         function_index += 1;
     }
     module.section(&imports);

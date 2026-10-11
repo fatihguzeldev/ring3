@@ -512,7 +512,7 @@ fn narrow_prefix_and_declared_span_errors_remain_precise() {
                 bytes.push(0x66);
             }
             bytes.extend_from_slice(&encode(opcode, extension, &[0x03], immediate));
-            if prefix == 0xf0 && opcode == 0x83 && extension == 1 {
+            if prefix == 0xf0 && opcode == 0x83 && matches!(extension, 1 | 4) {
                 bytes.extend_from_slice(&[0xeb, 0]);
                 for entries in [false, true] {
                     let mut instance = engine(&bytes);
@@ -528,20 +528,32 @@ fn narrow_prefix_and_declared_span_errors_remain_precise() {
                         decode_one(memory, GuestAddress(0x1001))
                             .unwrap()
                             .operation(),
-                        &Operation::LockedMemoryOr32 {
-                            address: EffectiveAddress {
-                                base: Some(Register32::Ebx),
-                                index: None,
-                                scale: 1,
-                                displacement: 0,
-                            },
-                            mask: 0xffff_ff80,
+                        &if extension == 1 {
+                            Operation::LockedMemoryOr32 {
+                                address: EffectiveAddress {
+                                    base: Some(Register32::Ebx),
+                                    index: None,
+                                    scale: 1,
+                                    displacement: 0,
+                                },
+                                mask: 0xffff_ff80,
+                            }
+                        } else {
+                            Operation::LockedMemoryAnd32 {
+                                address: EffectiveAddress {
+                                    base: Some(Register32::Ebx),
+                                    index: None,
+                                    scale: 1,
+                                    displacement: 0,
+                                },
+                                mask: 0xffff_ff80,
+                            }
                         }
                     );
                     assert_eq!(
                         compile(&mut instance, entries),
                         Ok(1),
-                        "LOCK OR entries={entries}"
+                        "LOCK logical extension={extension} entries={entries}"
                     );
                     assert_eq!(instance.arena(), before);
                     assert_eq!(instance.guard(KEY, 1), Ok(()));
@@ -555,7 +567,16 @@ fn narrow_prefix_and_declared_span_errors_remain_precise() {
                             .is_err()
                     );
                     let artifact = instance.artifact_bytes().unwrap();
-                    assert!(artifact.windows(13).any(|part| part == b"atomic_or_u32"));
+                    let required = if extension == 1 {
+                        b"atomic_or_u32".as_slice()
+                    } else {
+                        b"atomic_and_u32".as_slice()
+                    };
+                    assert!(
+                        artifact
+                            .windows(required.len())
+                            .any(|part| part == required)
+                    );
                     for excluded in [b"read32".as_slice(), b"store32"] {
                         assert!(
                             !artifact

@@ -491,18 +491,19 @@ fn span_poison_prefix_and_remaining_exclusions_preserve_arena_units_and_capacity
             }
             bytes.extend_from_slice(instruction);
             bytes.extend_from_slice(&[0x0f, 0x06]);
-            let locked_or = prefix == 0xf0 && instruction == [0x83, 0x0b, 0x80];
+            let locked_logical = prefix == 0xf0
+                && (instruction == [0x83, 0x0b, 0x80] || instruction == [0x83, 0x23, 0x80]);
             rejected(
                 &mut engine,
                 keep,
                 &bytes,
                 bytes.len(),
-                if locked_or {
+                if locked_logical {
                     CODE + 2 + instruction.len() as u32
                 } else {
                     CODE + 1
                 },
-                InstructionError::Decode(DecodeError::Unsupported(if locked_or {
+                InstructionError::Decode(DecodeError::Unsupported(if locked_logical {
                     UnsupportedFeature::Privileged
                 } else {
                     feature

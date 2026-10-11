@@ -124,6 +124,9 @@ pub(super) fn check_profile(instruction: &Instruction, bytes: &[u8]) -> Result<(
     let exact_locked_or32 = instruction.code() == Code::Or_rm32_imm8
         && instruction.op0_kind() == OpKind::Memory
         && matches!(bytes, [0xf0, 0x83, modrm, ..] if *modrm & 0xc0 != 0xc0 && *modrm & 0x38 == 0x08);
+    let exact_locked_and32 = instruction.code() == Code::And_rm32_imm8
+        && instruction.op0_kind() == OpKind::Memory
+        && matches!(bytes, [0xf0, 0x83, modrm, ..] if *modrm & 0xc0 != 0xc0 && *modrm & 0x38 == 0x20);
     if instruction.is_string_instruction()
         && (instruction.has_rep_prefix() || instruction.has_repne_prefix())
     {
@@ -547,7 +550,8 @@ pub(super) fn check_profile(instruction: &Instruction, bytes: &[u8]) -> Result<(
             || exact_locked_xadd16
             || exact_locked_bts32
             || exact_locked_btr32
-            || exact_locked_or32))
+            || exact_locked_or32
+            || exact_locked_and32))
         || instruction.has_rep_prefix()
         || instruction.has_repne_prefix()
         || (!(exact_alignment_nop

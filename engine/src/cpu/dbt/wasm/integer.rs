@@ -1941,6 +1941,15 @@ pub(super) fn instruction(
             logical_flags(code, 31);
             store = true;
         }
+        Operation::LockedMemoryAnd32 { address, mask } => {
+            memory::atomic_and_result(code, address, mask, imports, exit_depth);
+            code.local_get(RESULT)
+                .i32_const(mask as i32)
+                .i32_and()
+                .local_set(RESULT);
+            logical_flags(code, 31);
+            store = true;
+        }
         Operation::MemoryBitMutation {
             kind,
             address,
