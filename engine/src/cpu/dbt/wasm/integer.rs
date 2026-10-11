@@ -1917,6 +1917,21 @@ pub(super) fn instruction(
                 .local_set(FLAGS);
             store = true;
         }
+        Operation::LockedMemoryBitReset32 { address, index } => {
+            memory::bit_test_reset_result(code, address, index, imports, exit_depth);
+            code.local_set(RHS)
+                .local_get(FLAGS)
+                .i32_const(0x442)
+                .i32_and()
+                .local_get(RESULT)
+                .local_get(RHS)
+                .i32_shr_u()
+                .i32_const(1)
+                .i32_and()
+                .i32_or()
+                .local_set(FLAGS);
+            store = true;
+        }
         Operation::MemoryBitMutation {
             kind,
             address,

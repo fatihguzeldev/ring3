@@ -29,6 +29,7 @@ pub(in crate::cpu::dbt) fn emit(
         compare_exchange16: needs_compare_exchange16,
         exchange_add16: needs_exchange_add16,
         bit_test_set32: needs_bit_test_set32,
+        bit_test_reset32: needs_bit_test_reset32,
     } = memory::Imports::needed(blocks);
     let has_stores = needs_store
         || needs_store8
@@ -39,7 +40,8 @@ pub(in crate::cpu::dbt) fn emit(
         || needs_exchange_add32
         || needs_exchange_add8
         || needs_exchange_add16
-        || needs_bit_test_set32;
+        || needs_bit_test_set32
+        || needs_bit_test_reset32;
     let has_reads = needs_read || needs_read8 || needs_read16;
     let has_memory = has_reads
         || has_stores
@@ -402,6 +404,25 @@ pub(in crate::cpu::dbt) fn emit(
         };
         imports.import("ring3", name, EntityType::Function(type_index));
         helper_imports.bit_test_set32 = Some(bit_set);
+        function_index += 1;
+    }
+    if needs_bit_test_reset32 {
+        let (name, bit_reset) = match binding {
+            Some(EmbeddedBinding::Resident { key, id }) => (
+                "bit_test_reset_resident32",
+                memory::StoreImport::Resident {
+                    index: function_index,
+                    key,
+                    id,
+                },
+            ),
+            _ => (
+                "bit_test_reset32",
+                memory::StoreImport::Replacement(function_index),
+            ),
+        };
+        imports.import("ring3", name, EntityType::Function(type_index));
+        helper_imports.bit_test_reset32 = Some(bit_reset);
         function_index += 1;
     }
     module.section(&imports);

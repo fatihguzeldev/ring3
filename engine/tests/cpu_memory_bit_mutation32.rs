@@ -303,7 +303,7 @@ fn strict_neighbors_fetch_wrap_and_source_currency_are_exact() {
                 let mut bytes = if prefix == 0x66 {
                     vec![0x66, 0x66]
                 } else if prefix == 0xf0
-                    && kind == BitTestKind::Set
+                    && matches!(kind, BitTestKind::Set | BitTestKind::Reset)
                     && matches!(index, BitIndex::Register(_))
                 {
                     vec![0xf0, 0xf0]
