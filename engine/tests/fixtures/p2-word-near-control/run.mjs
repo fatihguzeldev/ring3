@@ -6,7 +6,7 @@ import {readEngine} from '../support/engine.mjs';
 
 const [enginePath, output, root] = process.argv.slice(2);
 assert.ok(enginePath && output && root);
-const engine = readEngine(enginePath), SIZE = 4364, PC = 0x1000, DATA = 0x5000, HIGH = 0xa53c5000;
+const engine = readEngine(enginePath), SIZE = 4612, PC = 0x1000, DATA = 0x5000, HIGH = 0xa53c5000;
 const initial = readFileSync(join(output, 'initial-arena.bin'));
 assert.equal(initial.length, SIZE);
 assert.deepEqual(WebAssembly.Module.imports(engine.module), []);
@@ -90,7 +90,7 @@ function run(c, module, budget, next, {label, reason = 1, retired = 1, fault, ev
   }
   c.trace = []; assert.equal(module.run(c.base, c.base + 56, budget, c.base + 96), status, label);
   assert.deepEqual(c.trace, events, 'exact canonical helper forwarding: ' + label);
-  assert.deepEqual(arena(c), expected, 'full4364 CPU/FLAGS/helper/FP effect: ' + label);
+  assert.deepEqual(arena(c), expected, 'full4612 CPU/FLAGS/helper/FP effect: ' + label);
   const after = arena(c);
   observations.push({context: c.id, label, status, expected_reason: status === 0 ? reason : null, expected_retired: retired,
     observed_reason: status === 0 ? after.readUInt32LE(72) : null,
@@ -401,7 +401,7 @@ const result = {status: 'ok', engine_sha256: engine.sha256, source_pins: sourceP
   'seven read/store fault classes with prior retirement/unchanged retry/honest map-protect-only repair, separate explicit current inputs; overflow observes top and wrapped RAM canaries after each failure',
   'live CALL/callee/RET/returned WORD+CF/OF consumers without CPU reseed; two installed resident units exercise unchanged product returning dispatcher',
   'changed and real identical own-opcode writes commit once before SMC6, neutral consumed-owner4, fresh pure suffix; replacement generation mismatch3 is separate',
-  'complete4364 arena/dirtyFP128/allGPR/FLAGS/helper/canaries, code uploaded before capture, sequential replacement capture/use; all8blocks/64instructions/65536bytes/max6captures checked before compile',
+  'complete4612 arena/dirtyFP128/allGPR/FLAGS/helper/canaries, code uploaded before capture, sequential replacement capture/use; all8blocks/64instructions/65536bytes/max6captures checked before compile',
   '38 physical modules includes two dispatcher modules; helper_calls is observed forwarding, rejected status rows have null observed reason/retired; no hardware/performance/PE/browser/SDK/game/hostedCI claim',
 ]};
 writeFileSync(join(output, 'result.json'), JSON.stringify(result, null, 2), {flag: 'wx'});

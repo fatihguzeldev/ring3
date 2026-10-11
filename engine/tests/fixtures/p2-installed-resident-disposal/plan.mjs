@@ -1,16 +1,17 @@
+import {createArena} from '../support/arena.mjs';
 import assert from 'node:assert/strict';
 import {mkdirSync, writeFileSync} from 'node:fs';
 import {resolve} from 'node:path';
 import {fileURLToPath} from 'node:url';
 
-export const SIZE = 4364, CODE = 0x1000;
+export const SIZE = 4612, CODE = 0x1000;
 function record(magic, length, fields = [], version = 1) {
   const bytes = Buffer.alloc(length); bytes.write(magic); bytes.writeUInt32LE(0x10000 + version, 4); bytes.writeUInt32LE(length, 8);
   fields.forEach((n, i) => bytes.writeUInt32LE(n >>> 0, 16 + 4 * i)); return bytes;
 }
 function word(n) {const b = Buffer.alloc(4); b.writeUInt32LE(n >>> 0); return b.toString('hex');}
 export function initialHex() {
-  const b = Buffer.alloc(SIZE);
+  const b = createArena(SIZE);
   record('R3ST', 56, [0, 0, 0, 0, 0, 0, 0, 0, 0, 2]).copy(b);
   record('R3EX', 40, [1, 0, 0, 0, 0, 0]).copy(b, 56);
   record('R3MH', 40, [0, 0, 0, 0, 0, 0]).copy(b, 100);
@@ -18,7 +19,7 @@ export function initialHex() {
   return b.toString('hex');
 }
 export function authoredHex() {
-  const b = Buffer.from(Array.from({length: SIZE}, (_, i) => (37 * i + 19) & 255));
+  const b = Buffer.from(Array.from({length: SIZE}, (_, i) => (37 * i + 19) & 255)); b.set(createArena(SIZE).subarray(4364), 4364);
   record('R3ST', 56, [0xfffffff0, 0x11112222, 0x33334444, 0x55556666, 0x77778888, 0x9999aaaa, 0xbbbbcccc, 0xddddeeee, CODE, 0xcd7]).copy(b);
   record('R3EX', 40, [3, 0, 0, 0, 0, 0], 3).copy(b, 56); b.writeUInt32LE(0, 96);
   record('R3MH', 40, [0, 0xdecafbad, 0, 0, 0, 0]).copy(b, 100);
@@ -58,7 +59,7 @@ export function makePlan() {
       table(binding, group, slot, `${binding} host install`);
       host('acknowledge_resident_installation', unitArgs(slot), {binding});
     }
-    add(c.id, 'open'); input(0, authoredHex(), 'declared full4364 input with nondefault FP');
+    add(c.id, 'open'); input(0, authoredHex(), 'declared full4612 input with nondefault FP');
     host('map', [CODE, 1, 7]); input(140, bank.hex, 'preloaded complete code page'); host('upload', [CODE, 4096]); host('protect', [CODE, 1, 4]);
     for (let i = 0; i < 8; i++) {
       const group = String.fromCharCode(65 + i), binding = `${group}0`;

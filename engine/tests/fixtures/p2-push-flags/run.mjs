@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { readEngine } from "../support/engine.mjs";
 const [enginePath, output, root] = process.argv.slice(2);
 assert.ok(enginePath && output && root); assert.match(process.env.RING3_ENGINE_SHA256 ?? "", /^[a-f0-9]{64}$/);
-const engine = readEngine(enginePath), SIZE = 4364, PC = 0x1000, RAM = 0x5000;
+const engine = readEngine(enginePath), SIZE = 4612, PC = 0x1000, RAM = 0x5000;
 const hash = b => createHash("sha256").update(b).digest("hex");
 const initial = readFileSync(join(output,"initial-arena.bin")); assert.equal(initial.length,SIZE);
 const bank = Buffer.alloc(64,0xcc); for(const [at,code]of [[0,[0x9c,0xeb,0]],[16,[0xbc,0x0c,0x70,0,0,0x9c,0xeb,0]],[32,[0xf9,0x9c,0x58,0xf8,0x9c,0x5a,0xeb,0]]])bank.set(code,at);
@@ -36,7 +36,7 @@ function seed(c,pc,flags,esp=RAM+0x100){const r=[0xa5812347,0x91b2c378,0x34560f1
 function diagnostic(c,address,value){host(c,"read32",[address],"declared current DWORD RAM");assert.deepEqual(arena(c).subarray(100,140),helper(value),"RAM diagnostic equals declared expected DWORD");}
 function run(c,budget,label,wanted,reason=1,count=1,f,raw=0,helperValue,params){const before=capture(c,"before generated "+label),expected=arena(c);
  if(raw===0){expected.set(state(wanted));expected.set(exit(reason,count,f),56);if(f||helperValue!==undefined)expected.set(helper(helperValue??0,f),100);}
- const args=params??[c.base,c.base+56,budget,c.base+96];assert.equal(c.run(...args),raw,label);assert.deepEqual(arena(c),expected,"full4364 "+label);
+ const args=params??[c.base,c.base+56,budget,c.base+96];assert.equal(c.run(...args),raw,label);assert.deepEqual(arena(c),expected,"full4612 "+label);
  generated++;if(raw===0)retired+=count;if(f)faults++;journal.push({context:c.ordinal,owner:c.owner,entries:c.entries,name:"run",label,budget,status:raw,args,before,after:capture(c,"after generated "+label)});}
 function push(c,label,reason=1){const old=cpu(c),next={registers:[...old.registers],pc:(old.pc+1)>>>0,flags:old.flags};next.registers[4]=(old.registers[4]-4)>>>0;
  run(c,1,label,next,reason,1,undefined,0,0);pushes++;if(reason===1)diagnostic(c,next.registers[4],old.flags&0x00fcffff);return next;}
@@ -82,7 +82,7 @@ const raw=Buffer.concat(frames);writeFileSync(join(output,"arenas.bin"),raw,{fla
 const result={status:"ok",engine:{bytes:engine.bytes.length,sha256:engine.sha256,caller_sha256:process.env.RING3_ENGINE_SHA256},source_pins:sourcePins,
  counts:{contexts,modules:modules.length,current_flags_literals:9,valid_destinations:5,successful_pushes:pushes,fault_calls:faults,generated_calls:generated,retired,raw_frames:frames.length,journal_records:journal.length,host_counts:hostCounts},
  modules,journal,raw:{file:"arenas.bin",bytes:raw.length,sha256:hash(raw)},limits:["bare flat32 PUSHFD finite current admitted FLAGS domain only; no POPFD/VM/CPL/word semantics",
- "saved complete4364 arenas and declared uploads plus selected DWORD RAM diagnostics; no whole guest RAM dump or generic Wasm-body certification",
+ "saved complete4612 arenas and declared uploads plus selected DWORD RAM diagnostics; no whole guest RAM dump or generic Wasm-body certification",
  "checked full4 store faults preserve current ESP/FLAGS/retire and observed RAM; sameCPU mapping/protection repair never reseeds CPU",
  "retained STC/PUSHFD/POP/CLC/PUSHFD/POP chain observes current FLAGS without host reseed; nonzero FP tail is opaque and unchanged",
  "close retains arena allocation; saved before/after close and closed generated rejection observe that retained allocation only"]};

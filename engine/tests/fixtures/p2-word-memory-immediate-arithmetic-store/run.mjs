@@ -6,7 +6,7 @@ import {readEngine} from '../support/engine.mjs';
 
 const [enginePath, output, root] = process.argv.slice(2);
 assert.ok(enginePath && output && root);
-const engine = readEngine(enginePath), SIZE = 4364, PC = 0x1000, DATA = 0x5000;
+const engine = readEngine(enginePath), SIZE = 4612, PC = 0x1000, DATA = 0x5000;
 const initial = readFileSync(join(output, 'initial-arena.bin'));
 assert.equal(initial.length, SIZE);
 assert.deepEqual(WebAssembly.Module.imports(engine.module), []);
@@ -66,7 +66,7 @@ function run(c, module, budget, next, {label, reason = 1, retired = 1, fault, he
     if (helperVersion !== null) expected.set(helper(helperVersion, helperValue, fault), 100);
   }
   assert.equal(module.run(c.base, c.base + 56, budget, c.base + 96), status, label);
-  assert.deepEqual(arena(c), expected, 'full4364 CPU/exit/helper/FP128 effect: ' + label);
+  assert.deepEqual(arena(c), expected, 'full4612 CPU/exit/helper/FP128 effect: ' + label);
   counts.runs++; if (status === 0) counts.retired += retired;
 }
 function checkRam(c, address, expected) {
@@ -293,7 +293,7 @@ assert.equal(counts.controls, 8); assert.equal(counts.self_code, 16); assert.equ
 const result = {status: 'ok', engine_sha256: engine.sha256, source_pins: sourcePins, counts, modules,
   limits: ['finite exact single66 WORD memory immediate ADD/ADC/SUB/SBB81/83 in four bound profiles',
     'real read16/store16 paths and selected RAM/canary checks; no arbitrary-host rollback claim',
-    'full4364 arena preserves FP128; decoded immediate remains fixed through own-code modification',
+    'full4612 arena preserves FP128; decoded immediate remains fixed through own-code modification',
     'no exhaustive ISA, hardware, throughput, browser or game claim']};
 writeFileSync(join(output, 'result.json'), JSON.stringify(result, null, 2) + '\n', {flag: 'wx'});
 console.log(JSON.stringify({status: result.status, ...counts, modules: modules.length, output}));

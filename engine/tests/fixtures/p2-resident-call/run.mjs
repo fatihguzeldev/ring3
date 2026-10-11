@@ -9,7 +9,7 @@ assert.ok(root);
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
 const engineBytes = readFileSync(enginePath), engineModule = new WebAssembly.Module(engineBytes);
 assert.deepEqual(WebAssembly.Module.imports(engineModule), []);
-const SIZE = 4236, TRANSFER = 140, STACK = 0xa100, marker = Buffer.from('0f0b', 'hex');
+const SIZE = 4612, TRANSFER = 140, STACK = 0xa100, marker = Buffer.from('0f0b', 'hex');
 const names = ['open', 'close', 'arena_ptr', 'map', 'protect', 'unmap', 'upload', 'compile', 'compile_with_gates', 'compile_resident', 'compile_resident_with_gates', 'resident_module', 'find_resident', 'generation', 'module_ptr', 'module_len', 'guard', 'guard_resident', 'read32', 'write32', 'store_resident32', 'capture_call', 'complete_call', 'capture_resident_call', 'complete_resident_call', 'abandon_call', 'begin_callback'];
 const stats = {engine_instances: 0, compiled_units: 0, legacy_modules: 0, canonical_runs: 0, rejected_runs: 0, full_arena_checks: 0, metadata_checks: 0, find_success: 0, find_failure: 0, initial_calls: 0, resumes: 0, resident_captures: 0, legacy_captures: 0, resident_completions: 0, legacy_completions: 0, abandonments: 0, capture_failures: 0, completion_failures: 0, rejected_operations: 0, guard_success: 0, guard_failure: 0, host_reads: 0, host_writes: 0, guest_store32: 0, bound_store_sites: 0, convention_cases: 0, capture_read_faults: 0, guest_store_faults: 0, repairs: 0, cancellation_cases: 0, currency_cases: 0};
 const artifacts = {}, authored = {}, units = [], metadata = [], captures = [], completions = [], sections = [], legacyControls = [];

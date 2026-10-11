@@ -5,7 +5,7 @@ import {join} from "node:path";
 import {readEngine} from "../support/engine.mjs";
 
 const [enginePath, output, root] = process.argv.slice(2);
-const SIZE = 4364, FP = 4236, PC = 0x1000;
+const SIZE = 4612, FP = 4236, PC = 0x1000;
 const rawCounts = [0, 1, 2, 15, 16, 17, 31, 32, 33, 255];
 const edges = [0, 1, 0x7fff, 0x8000, 0xffff];
 assert.ok(enginePath && output && root);
@@ -142,7 +142,7 @@ function run(ctx, budget, label, wanted, reason = 1, retired = 1, status = 0, cu
   }
   const args = customArgs ?? [ctx.base, ctx.base + 56, budget, ctx.base + 96];
   assert.equal(ctx.run(...args), status, label);
-  assert.deepEqual(arena(ctx), expected, `full4364 ${label}`);
+  assert.deepEqual(arena(ctx), expected, `full4612 ${label}`);
   journal.push({context: ctx.context, name: "run", label, budget, status, args,
     before, after: capture(ctx, `after generated ${label}`)});
   counts.generated_calls++;
@@ -330,7 +330,7 @@ const result = {status: "ok", engine: {bytes: engine.bytes.length, sha256: engin
   raw: {file: "arenas.bin", frames: frames.length, bytes: raw.length, sha256: hash(raw)},
   limits: ["finite exact register WORD SAR D1/C1/D3 across four bound profiles; six native compile profiles separate",
     "current low16/currentCL and coupled CX operand/count; q=raw&31, q0 fullFLAGS preservation; deterministic undefined AF/OF policy, not hardware equality",
-    "full4364 saved input/host/generated pairs plus preclose frames; first canonical state and opaque FP128 preserved, not x87 arithmetic or full RAM dumps",
+    "full4612 saved input/host/generated pairs plus preclose frames; first canonical state and opaque FP128 preserved, not x87 arithmetic or full RAM dumps",
     "code page remains RWX so stale witness has no earlier protect; same-byte consumed upload precedes stale4, closed5 is status-only with no postclose allocation dereference",
     "34-instruction ordinary module and18-instruction two-block retained module; two live resident units maximum, no release/expired pointer use",
     "open/getters and resident receipt allocation fields are bounded physical correspondence; module imports/export/hash do not prove arbitrary body or allocator history",

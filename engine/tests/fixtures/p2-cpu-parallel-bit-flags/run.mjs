@@ -1,3 +1,4 @@
+import {createArena} from '../support/arena.mjs';
 import assert from "node:assert/strict";
 import {createHash} from "node:crypto";
 import {readFileSync, writeFileSync} from "node:fs";
@@ -7,7 +8,7 @@ import {readEngine} from "../support/engine.mjs";
 const [enginePath, output, root] = process.argv.slice(2);
 assert.ok(enginePath && output && root);
 assert.match(process.env.RING3_ENGINE_SHA256 ?? "", /^[0-9a-f]{64}$/);
-const engine = readEngine(enginePath), SIZE = 4364, FP = 4236, PC = 0x1000, DATA = 0x5008, STACK = 0x8008;
+const engine = readEngine(enginePath), SIZE = 4612, FP = 4236, PC = 0x1000, DATA = 0x5008, STACK = 0x8008;
 assert.deepEqual(WebAssembly.Module.imports(engine.module), []);
 const program = Buffer.from("0fab0b9c580f92c20fbb0b9c5f0f92c20fba33209c5e0f92c2eb00", "hex");
 assert.equal(program.length, 27);
@@ -60,7 +61,7 @@ for (const [index, owner] of ["replacement", "resident"].entries()) {
   for (const name of ["open", "close", "arena_ptr", "map", "upload", "compile", "compile_resident", "generation", "module_ptr", "module_len", "guard", "guard_resident", "read8", "read32", "store32", "store_resident32"])
     ctx.api[name] = instance.exports["ring3_abi_v1_" + name];
   assert.equal(ctx.api.open(3, index + 1, 0x42464c47), 0); ctx.base = ctx.api.arena_ptr() >>> 0;
-  ctx.expected = Buffer.alloc(SIZE); ctx.expected.set(state(Array(8).fill(0), 0, 2));
+  ctx.expected = createArena(SIZE); ctx.expected.set(state(Array(8).fill(0), 0, 2));
   ctx.expected.set(exit(1, 0, 1), 56); ctx.expected.set(helper(0), 100); ctx.expected.set(fpu(), FP); check(ctx, "initialized full arena");
   for (const address of [PC, DATA & ~0xfff, STACK & ~0xfff]) host(ctx, "map", address, 1, address === PC ? 7 : 3);
   upload(ctx, PC, program); upload(ctx, DATA - 2, Buffer.from([0xb1, 0xb2, 5, 0, 0, 0, 0xc3, 0xc4]));
@@ -109,5 +110,5 @@ assert.equal(phases.reduce((sum, p) => sum + p.retired, 0), 26); assert.deepEqua
 const result = {status: "ok", engine: {file: "engine.wasm", bytes: engine.bytes.length, sha256: engine.sha256}, modules, phases, ram, inputs,
   raw: {file: "arenas.bin", frames: frames.length, bytes: raw.length, sha256: hash(raw)}, source_sha256: beforeSources,
   counts: {owners: 2, modules: 2, generated_calls: 20, retired: 26, bts: 2, btc: 2, btr: 2, pushfd: 6, pop: 6, setb: 6, jumps: 2, raw_frames: 40, live_ram_bytes: 96, physical_files: 6},
-  claim: "same CPU BTS/BTC/BTR→PUSHFD→POP three distinct full registers→SETB old/currentCF0 and1 witnesses, immediate high bits ignored; ten retained phases/owner without CPU reseeding; all40 physical full4364 arenas and opaqueFP unchanged; 96 selected target/stack/sentinel Read8 diagnostics remain live RAM evidence, not saved RAM pages or performance proof"};
+  claim: "same CPU BTS/BTC/BTR→PUSHFD→POP three distinct full registers→SETB old/currentCF0 and1 witnesses, immediate high bits ignored; ten retained phases/owner without CPU reseeding; all40 physical full4612 arenas and opaqueFP unchanged; 96 selected target/stack/sentinel Read8 diagnostics remain live RAM evidence, not saved RAM pages or performance proof"};
 writeFileSync(join(output, "result.json"), JSON.stringify(result, null, 2), {flag: "wx"}); console.log(JSON.stringify({status: result.status, counts: result.counts, output}));

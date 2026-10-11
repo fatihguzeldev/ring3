@@ -7,7 +7,7 @@ import {join} from 'node:path';
 const [enginePath, output, root] = process.argv.slice(2);
 assert.ok(root, 'expected copied actual engine, output directory and repository root');
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
-const SIZE = 4236, TRANSFER = 140, CODE = 0x1000, DATA = 0x4000, VICTIM = CODE + 0x10;
+const SIZE = 4612, TRANSFER = 140, CODE = 0x1000, DATA = 0x4000, VICTIM = CODE + 0x10;
 const KEY_LOW = 1, KEY_HIGH = 0xc3790000;
 const arities = {open:3, close:0, arena_ptr:0, map:3, protect:3, upload:2, read32:1, compile_resident_entries:2, resident_module:2, guard_resident:7, dispatcher_module:2, guard_dispatch_entry:5, find_installed_resident:3, acknowledge_resident_installation:5, retire_stale_resident:4, discard_unacknowledged_resident:4};
 const sourcePaths = [...execFileSync('rg', ['--files', 'engine/src'], {cwd:root, encoding:'utf8'}).trim().split('\n').sort(), 'Cargo.toml', 'Cargo.lock', 'engine/Cargo.toml', 'engine/tests/process_unacknowledged_disposal_wasm.rs', 'engine/tests/fixtures/p2-unacknowledged-disposal/run.mjs'];

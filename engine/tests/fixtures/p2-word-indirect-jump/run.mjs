@@ -6,7 +6,7 @@ import {readEngine} from '../support/engine.mjs';
 
 const [enginePath, output, root] = process.argv.slice(2);
 assert.ok(enginePath && output && root);
-const engine = readEngine(enginePath), SIZE = 4364, PC = 0x1000, DATA = 0x5000, HIGH = 0xa53c5000;
+const engine = readEngine(enginePath), SIZE = 4612, PC = 0x1000, DATA = 0x5000, HIGH = 0xa53c5000;
 const initial = readFileSync(join(output, 'initial-arena.bin'));
 assert.equal(initial.length, SIZE); assert.deepEqual(WebAssembly.Module.imports(engine.module), []);
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
@@ -76,7 +76,7 @@ function run(c, unit, budget, next, {label, reason = 1, retired = 1, fault, even
   }
   c.trace = []; const observedStatus = unit.run(c.base, c.base + 56, budget, c.base + 96);
   assert.equal(observedStatus, status, label); assert.deepEqual(c.trace, events, 'canonical read16 trace: ' + label);
-  assert.deepEqual(arena(c), expected, 'full4364 GPR/FLAGS/helper/dirtyFP effect: ' + label);
+  assert.deepEqual(arena(c), expected, 'full4612 GPR/FLAGS/helper/dirtyFP effect: ' + label);
   const after = arena(c);
   observations.push({context: c.id, label, expected_status: status, observed_status: observedStatus,
     expected_reason: status === 0 ? reason : null, observed_reason: status === 0 ? after.readUInt32LE(72) : null,

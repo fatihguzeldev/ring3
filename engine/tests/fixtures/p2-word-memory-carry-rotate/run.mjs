@@ -6,7 +6,7 @@ import {readEngine} from '../support/engine.mjs';
 
 const [enginePath, output, root] = process.argv.slice(2);
 assert.ok(enginePath && output && root);
-const engine = readEngine(enginePath), SIZE = 4364, PC = 0x1000, DATA = 0x5000;
+const engine = readEngine(enginePath), SIZE = 4612, PC = 0x1000, DATA = 0x5000;
 const initial = readFileSync(join(output, 'initial-arena.bin'));
 assert.equal(initial.length, SIZE);
 assert.deepEqual(WebAssembly.Module.imports(engine.module), []);
@@ -66,7 +66,7 @@ function run(c, module, budget, next, {label, reason = 1, retired = 1, fault, he
     if (helperVersion !== null) expected.set(helper(helperVersion, helperValue, fault), 100);
   }
   assert.equal(module.run(c.base, c.base + 56, budget, c.base + 96), status, label);
-  assert.deepEqual(arena(c), expected, 'full4364 CPU/exit/helper/FP128 effect: ' + label);
+  assert.deepEqual(arena(c), expected, 'full4612 CPU/exit/helper/FP128 effect: ' + label);
   counts.runs++; if (status === 0) counts.retired += retired;
 }
 function checkRam(c, address, expected) {
@@ -351,7 +351,7 @@ const result = {status: 'ok', engine_sha256: engine.sha256, source_pins: sourceP
     'q=raw&31 differs from distance=q%17; q0/q17 preserve complete FLAGS while retaining checked RMW',
     'nonzero distance preserves SF/ZF/AF/PF/DF; q1 defines OF, other effective counts explicitly clear OF under this profile, no hardware undefined-bit equality claim',
     'real read16/store16 paths and selected RAM/canary checks; no arbitrary-host rollback claim',
-    'full4364 arena preserves FP128; current CF/full17bit candidate/original count survive checked-store scratch and own-count writes',
+    'full4612 arena preserves FP128; current CF/full17bit candidate/original count survive checked-store scratch and own-count writes',
     'no exhaustive ISA, hardware, throughput, browser or game claim']};
 writeFileSync(join(output, 'result.json'), JSON.stringify(result, null, 2) + '\n', {flag: 'wx'});
 console.log(JSON.stringify({status: result.status, ...counts, modules: modules.length, output}));

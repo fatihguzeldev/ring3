@@ -1,3 +1,4 @@
+import {createArena} from '../support/arena.mjs';
 import assert from "node:assert/strict";
 import {createHash} from "node:crypto";
 import {readFileSync, writeFileSync} from "node:fs";
@@ -8,7 +9,7 @@ const [enginePath, output, root] = process.argv.slice(2);
 assert.ok(enginePath && output && root);
 assert.match(process.env.RING3_ENGINE_SHA256 ?? "", /^[0-9a-f]{64}$/);
 const engine = readEngine(enginePath);
-const SIZE = 4364, FP = 4236, PC = 0x1000;
+const SIZE = 4612, FP = 4236, PC = 0x1000;
 assert.deepEqual(WebAssembly.Module.imports(engine.module), []);
 const program = Buffer.from(
   "66b9210066d3c166d3c90f92c20f94c76683f801f966b9200066d3c40f92c60f90c3" +
@@ -109,7 +110,7 @@ for (const owner of ["replacement", "resident"]) {
     assert.equal(openStatus, 0);
     hosts.push({context, name: "open", args: openArgs, status: openStatus});
     ctx.base = ctx.api.arena_ptr() >>> 0;
-    ctx.expected = Buffer.alloc(SIZE);
+    ctx.expected = createArena(SIZE);
     ctx.expected.set(state(Array(8).fill(0), 0, 2));
     ctx.expected.set(exit(1, 0), 56);
     ctx.expected.set(record("R3MH", 40, [0, 0, 0, 0, 0, 0]), 100);
@@ -236,7 +237,7 @@ const result = {
     stc: 4, setcc: 32, conditional_jumps: 4, jumps: 4, generated_calls: 60, retired: 116,
     raw_frames: 120, arena_inputs: 16, uploads: 4, host_rows: 24, physical_files: 8,
     maximum_live_resident_units: 1},
-  claim: "retained currentCX/CL alias ROL21->42 then ROR42 with newCL42->8010, CF1 consumed by SETBDL and preserved initialZF consumed by SETZBH; CMP/STC dirty817 then currentCL32 masked0 ROLSP preserves fullFLAGS/SP for SETB/SETO. ROLSI8001,16 preserves value but clears dirtyOF and supplies CF1 to ADCDX; RORDI8001,16 changes oldCF0 to1 for SBBBP0->FFFF. Both directions compare value-equal distance1 q1/q17 but definedOF1 versus declared undefinedOF0, captured by SETcc/currentCX and JNO skipping UD2 before cold. Fifteen generated phases and29 retired instructions/context across four bound replacement/resident explicit/entry contexts, two declared blocks and one resident unit/context; no interphase host CPU/RAM input or diagnostics. Full4364 generated before/after images include high16, all parents, ordinarySP, opaqueFP128, helper and transfer. Ordered setup host records/live full-arena assertions are not saved host-frame journals or wholeRAM/module-body/allocator proof. Close has preclose assertion/API0 only, no postclose arena/module access or raw5. Literal producer anchors require independent reconstruction from physical before/input bytes. OF0 for nonzero multi-count is Ring3 deterministic undefined-bit policy, not hardware equivalence.",
+  claim: "retained currentCX/CL alias ROL21->42 then ROR42 with newCL42->8010, CF1 consumed by SETBDL and preserved initialZF consumed by SETZBH; CMP/STC dirty817 then currentCL32 masked0 ROLSP preserves fullFLAGS/SP for SETB/SETO. ROLSI8001,16 preserves value but clears dirtyOF and supplies CF1 to ADCDX; RORDI8001,16 changes oldCF0 to1 for SBBBP0->FFFF. Both directions compare value-equal distance1 q1/q17 but definedOF1 versus declared undefinedOF0, captured by SETcc/currentCX and JNO skipping UD2 before cold. Fifteen generated phases and29 retired instructions/context across four bound replacement/resident explicit/entry contexts, two declared blocks and one resident unit/context; no interphase host CPU/RAM input or diagnostics. Full4612 generated before/after images include high16, all parents, ordinarySP, opaqueFP128, helper and transfer. Ordered setup host records/live full-arena assertions are not saved host-frame journals or wholeRAM/module-body/allocator proof. Close has preclose assertion/API0 only, no postclose arena/module access or raw5. Literal producer anchors require independent reconstruction from physical before/input bytes. OF0 for nonzero multi-count is Ring3 deterministic undefined-bit policy, not hardware equivalence.",
 };
 writeFileSync(join(output, "result.json"), JSON.stringify(result, null, 2), {flag: "wx"});
 console.log(JSON.stringify({status: result.status, counts: result.counts, output}));

@@ -5,7 +5,7 @@ import {join} from 'node:path';
 import {readEngine} from '../support/engine.mjs';
 import {runPeProof} from './pe.mjs';
 
-const [enginePath, output, root] = process.argv.slice(2), SIZE = 4364;
+const [enginePath, output, root] = process.argv.slice(2), SIZE = 4612;
 assert.ok(enginePath && output && root);
 const engine = readEngine(enginePath), initial = readFileSync(join(output, 'initial-arena.bin'));
 assert.equal(initial.length, SIZE); assert.deepEqual(WebAssembly.Module.imports(engine.module), []);
@@ -106,7 +106,7 @@ const arena = c => Buffer.from(new Uint8Array(c.memory.buffer, c.base, SIZE));
 const cpu = c => {const b = arena(c); return {registers: Array.from({length: 8}, (_, i) => b.readUInt32LE(16 + i * 4)), pc: b.readUInt32LE(48), flags: b.readUInt32LE(52)};};
 function input(c, offset, bytes) {
   const expected = arena(c); expected.set(bytes, offset); new Uint8Array(c.memory.buffer).set(bytes, c.base + offset);
-  assert.deepEqual(arena(c), expected, 'explicit input preserves remaining full4364');
+  assert.deepEqual(arena(c), expected, 'explicit input preserves remaining full4612');
 }
 function host(c, name, args) {
   const expected = arena(c); assert.equal(c.api[name](...args), 0, name);
@@ -171,7 +171,7 @@ function run(c, unit, budget, next, label, {reason = 1, retired = 1, status = 0,
   const expected = arena(c), traceStart = helperTrace.length;
   if (!status) {expected.set(state(next)); expected.set(exit(reason, retired, unit.version, fault), 56); if (packet) expected.set(packet, 100);}
   c.runOrdinal++; const observed = unit.run(...(pointers ?? [c.base, c.base + 56, budget, c.base + 96]));
-  assert.equal(observed, status, label); assert.deepEqual(arena(c), expected, 'full4364 CPU/FLAGS/EIP/exit/helper/dirtyFP before diagnostics: ' + label);
+  assert.equal(observed, status, label); assert.deepEqual(arena(c), expected, 'full4612 CPU/FLAGS/EIP/exit/helper/dirtyFP before diagnostics: ' + label);
   const b = arena(c); observations.push({context: c.id, run: c.runOrdinal, module: unit.file, label, budget,
     expected_status: status, observed_status: observed, expected_pc: status ? null : next.pc, observed_pc: status ? null : b.readUInt32LE(48),
     expected_flags: status ? null : next.flags, observed_flags: status ? null : b.readUInt32LE(52),
@@ -356,7 +356,7 @@ const result = {status: 'ok', engine_sha256: engine.sha256, source_pins: sourceP
     oracle: {condition_anchors: anchors, irrelevant_seeds: irrelevantSeeds, canonical_flags: allFlags, ea_shapes: shapeDefinitions,
       batches: batches.map(b => ({index: b.index, pc: b.pc, group: b.group, forms: b.forms.length, instructions: b.forms.length + 1, hex: b.code.toString('hex')}))}}, pe,
   limits: ['existing engine memory SETcc; four bound replacement/resident explicit/entry profiles; exact13 Rust-authored micro payloads and copied PE input retained',
-    'full4364 arena asserted after each generated run before diagnostics, including dirtyFP128; saved rows are selected observations rather than raw full-arena dumps',
+    'full4612 arena asserted after each generated run before diagnostics, including dirtyFP128; saved rows are selected observations rather than raw full-arena dumps',
     '32-byte selected RAM range after each semantic row; whole declared pages only at group/live/SMC boundaries, not per-row whole guest memory',
     'actual forwarded guest memory helper chronology/status/packets is separate from public read8/read32 diagnostics; guards are canonical and not instrumented',
     'seven micro bank captures use resident7 of unchanged8slots; max8blocks/64instructions/65536Wasm unchanged; replacement banks compiled and exercised sequentially',

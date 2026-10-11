@@ -9,7 +9,7 @@ assert.ok(root);
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
 const engineBytes = readFileSync(enginePath), engineModule = new WebAssembly.Module(engineBytes);
 assert.deepEqual(WebAssembly.Module.imports(engineModule), []);
-const KEY = 0xa1345678c0000001n, SIZE = 4236, TRANSFER = 140;
+const KEY = 0xa1345678c0000001n, SIZE = 4612, TRANSFER = 140;
 const names = ['open', 'close', 'arena_ptr', 'map', 'upload', 'compile_with_gates', 'generation', 'module_ptr', 'module_len', 'guard', 'guard_dispatch_entry', 'compile_resident_with_gates', 'resident_module', 'guard_resident', 'acknowledge_resident_installation', 'read32', 'write32', 'capture_resident_call', 'capture_call', 'abandon_call', 'begin_callback', 'abort_callback'];
 const stats = {engine_instances: 0, preopen_guard_calls: 0, direct_guard_calls: 0, direct_guard_success: 0, direct_guard_rejections: 0, probe_calls: 0, probe_guard_success: 0, probe_guard_rejections: 0, probe_child_calls: 0, probe_child_canonical: 0, probe_child_rejections: 0, direct_resident_runs: 0, direct_legacy_runs: 0, resident_compiles: 0, resident_getters: 0, metadata24_checks: 0, installation32_checks: 0, resident_captures: 0, legacy_captures: 0, pending_abandons: 0, callback_begins: 0, callback_aborts: 0, host_reads: 0, host_writes: 0, callback_word_writes: 0, full_arena_checks: 0, ram_snapshots: 0, header_cases: 0, pointer_cases: 0, closed_engines: 0};
 const artifacts = {}, authored = {}, units = [], metadata = [], controls = [], sections = [];

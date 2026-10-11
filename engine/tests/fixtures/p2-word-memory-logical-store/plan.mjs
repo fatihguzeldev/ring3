@@ -1,9 +1,10 @@
+import {createArena} from '../support/arena.mjs';
 import assert from 'node:assert/strict';
 import {mkdirSync, writeFileSync} from 'node:fs';
 import {resolve} from 'node:path';
 import {fileURLToPath} from 'node:url';
 
-export const SIZE = 4364, CODE = 0x1000, DATA = 0x4000, TOP = 0xfffff000;
+export const SIZE = 4612, CODE = 0x1000, DATA = 0x4000, TOP = 0xfffff000;
 const LOW = [[0, 1, 0x7fff, 0xffff, 0x8000, 0x1234, 0xaaaa, 0x5555],
   [0x7fff, 0xffff, 0, 0x8000, 1, 0xaaaa, 0x5555, 0x1234],
   [0x8000, 0x7fff, 0xffff, 0x7fff, 0x1234, 1, 0x5555, 0xaaaa]];
@@ -20,7 +21,7 @@ export function seedHex(pc, flags = 2, pattern = 0, overrides = {}) {
   return b.toString('hex');
 }
 export function initialHex() {
-  const b = Buffer.from(Array.from({length: SIZE}, (_, i) => (37 * i + 19) & 255)); Buffer.from(seedHex(CODE), 'hex').copy(b);
+  const b = Buffer.from(Array.from({length: SIZE}, (_, i) => (37 * i + 19) & 255)); b.set(createArena(SIZE).subarray(4364), 4364); Buffer.from(seedHex(CODE), 'hex').copy(b);
   const fp = record('R3FP', 128);
   for (const [at, n] of [[16, 0x27f], [18, 0x2840], [20, 0xaaaa], [22, 0x345], [32, 0x33], [34, 0x2b]]) fp.writeUInt16LE(n, at);
   fp.writeUInt32LE(0x12345678, 24); fp.writeUInt32LE(0x9abcdef0, 28);

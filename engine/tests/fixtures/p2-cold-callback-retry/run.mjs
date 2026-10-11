@@ -7,7 +7,7 @@ import {dirname, join} from 'node:path';
 const [enginePath, output, root] = process.argv.slice(2);
 assert.ok(root, 'expected copied engine, unique output and repository root');
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
-const SIZE = 4236, TRANSFER = 140, LOW = 0xe0000000, HIGH = 0xd3456789;
+const SIZE = 4612, TRANSFER = 140, LOW = 0xe0000000, HIGH = 0xd3456789;
 const OUTER = 0x80000011, RETURN = 0x80000012, INNER = 0x80000013;
 const engineBytes = readFileSync(enginePath);
 assert.equal(engineBytes.length, 13500555);

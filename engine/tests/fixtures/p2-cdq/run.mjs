@@ -1,3 +1,4 @@
+import {createArena} from '../support/arena.mjs';
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
 import {readFileSync, writeFileSync} from 'node:fs';
@@ -8,7 +9,7 @@ assert.ok(root, 'expected actual engine wasm, output directory and repository ro
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
 const engineBytes = readFileSync(enginePath), engineModule = new WebAssembly.Module(engineBytes);
 assert.deepEqual(WebAssembly.Module.imports(engineModule), []);
-const SIZE = 4236, TRANSFER = 140, PC = 0x1000, PROGRAM = Buffer.from('9999eb000f0b', 'hex');
+const SIZE = 4612, TRANSFER = 140, PC = 0x1000, PROGRAM = Buffer.from('9999eb000f0b', 'hex');
 const REG = [0x1234807f, 0x23457f80, 0x34560f10, 0x4567ff00, 0x56789abc, 0x6789abcd, 0x789abcde, 0x89abcdef];
 const INPUTS = [0, 0x7fffffff, 0x80000000, 0xffffffff, 0x00008000, 0xffff7fff, 0x12345678, 0x89abcdef];
 const OUTPUTS = [0, 0, 0xffffffff, 0xffffffff, 0, 0xffffffff, 0, 0xffffffff], OLD_EDX = [0x13579bdf, 0x2468ace0];
@@ -36,7 +37,7 @@ function check(ctx, label) {assert.deepEqual(arena(ctx), ctx.expected, `${ctx.ow
 function pure(ctx, action, label, status = 0) {check(ctx, `before ${label}`); assert.equal(action(), status, label); check(ctx, label);}
 function request(ctx, bytes) {refresh(ctx).bytes.set(bytes, ctx.base + TRANSFER); ctx.expected.set(bytes, TRANSFER); check(ctx, 'host request');}
 function fresh(owner) {
-  const expected = Buffer.alloc(SIZE), ordinal = ++counts.contexts;
+  const expected = createArena(SIZE), ordinal = ++counts.contexts;
   expected.set(state(Array(8).fill(0), 0, 2)); expected.set(exit(1, 0), 56); expected.set(helper(0), 100);
   const ctx = {owner, expected, low: ordinal, high: 0xc8394000};
   if (owner === 'standalone') {

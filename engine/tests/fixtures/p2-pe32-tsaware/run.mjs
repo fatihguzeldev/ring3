@@ -4,7 +4,7 @@ import {readFileSync, readdirSync, writeFileSync} from 'node:fs';
 import {join} from 'node:path';
 import {readEngine} from '../support/engine.mjs';
 
-const [enginePath, output, root] = process.argv.slice(2), SIZE = 4364, TRANSFER = 140;
+const [enginePath, output, root] = process.argv.slice(2), SIZE = 4612, TRANSFER = 140;
 assert.ok(enginePath && output && root);
 const fixture = 'engine/tests/fixtures/p2-pe32-tsaware', hash = b => createHash('sha256').update(b).digest('hex');
 const engine = readEngine(enginePath), initial = readFileSync(join(output, 'initial-arena.bin'));
@@ -49,7 +49,7 @@ function input(c, offset, bytes) {
 function action(c, label, fn, status = 0, patches = [], persist = true) {
   const before = arena(c), expected = Buffer.from(before); for (const [offset, bytes] of patches) expected.set(bytes, offset);
   const observedStatus = fn(); assert.equal(observedStatus, status, label);
-  const after = arena(c); assert.deepEqual(after, expected, `full4364: ${label}`);
+  const after = arena(c); assert.deepEqual(after, expected, `full4612: ${label}`);
   if (persist) {
     const stem = `${c.owner}-${observations.length + 1}`;
     observations.push({context: c.id, owner: c.owner, label, expected_status: status, observed_status: observedStatus,
@@ -141,7 +141,7 @@ const result = {status: 'ok', engine_sha256: engine.sha256, source_pins: sourceP
   observations, diagnostics, helper_calls: 0, helper_trace: [], original_image_sha256: hash(original),
   limits: ['unmodified original1024B clang/coff/lld PE32 with defaultTSAWARE8100; complete10B program, two semantic blocks and three instructions',
     'one declared CPU input after load/compile; actual replacement/resident budget3 then7 without CPU/RAM reseeding; no startup, return or process-exit claim',
-    'full4364 assertions preserve dirtyFP128, helper and all unrelated bytes; persisted before/after snapshots for each nondiagnostic action',
+    'full4612 assertions preserve dirtyFP128, helper and all unrelated bytes; persisted before/after snapshots for each nondiagnostic action',
     'whole512B original headers and10B code checked before/after; selected padding/tail/unmapped-page diagnostics only, no wholeRAM claim',
     'unsupported FORCE_INTEGRITY0080 sidecopy rejects neutrally before same-instance original load; exact32B fixed receipt and read-only headers/read-execute text',
     'one capture/context, unchanged8blocks/64instructions/65536module/2mappedpages; guard-only imports mean no guest data-helper calls, not instrumented guard counts',

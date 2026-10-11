@@ -1,10 +1,11 @@
+import {createArena} from '../support/arena.mjs';
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
 import {existsSync, lstatSync, readFileSync, readdirSync, realpathSync} from 'node:fs';
 import {dirname, join, relative, resolve, sep} from 'node:path';
 import {fileURLToPath} from 'node:url';
 
-const SIZE = 4364;
+const SIZE = 4612;
 const TRANSFER = 140;
 const FP = 4236;
 const u32 = value => value >>> 0;
@@ -54,7 +55,7 @@ function validateFp(bytes) {
 }
 
 function defaultArena() {
-  const bytes = Buffer.alloc(SIZE);
+  const bytes = createArena(SIZE);
   header(bytes, 0, 'R3ST', 56);
   put(bytes, 52, 2);
   header(bytes, 56, 'R3EX', 40);
@@ -101,7 +102,7 @@ function seedBytes() {
 }
 
 function initialBytes() {
-  const bytes = Buffer.from(Array.from({length: SIZE}, (_, index) => (index * 37 + 19) & 255));
+  const bytes = Buffer.from(Array.from({length: SIZE}, (_, index) => (index * 37 + 19) & 255)); bytes.set(createArena(SIZE).subarray(4364), 4364);
   const seed = seedBytes();
   const oldRegisters = [0xfffff001, 0x12342222, 0x23453333, 0x34564444, 0x45675555, 0x56786666, 0x67897777, 0x789a8888];
   oldRegisters.forEach((value, index) => put(seed, 16 + index * 4, value)); put(seed, 52, 0xcd7); seed.copy(bytes);
@@ -634,7 +635,7 @@ export function checkCapsule(directory, campaign) {
           assert.equal(event.data_file, action.file); assert.equal(event.data_sha256, row.sha256);
           helper(wanted, [0, word(page.bytes, 4092), 0, 0, 0, 0]); counts.diagnostic_read32_calls += 1024; counts.data_events++;
         } else assert.fail(`unmodelled action ${action.kind}`);
-        sameBytes(after, wanted, `full 4364-byte arena ${context.id}/${action.id}`); validateState(after); validateFp(after); context.last = after;
+        sameBytes(after, wanted, `full 4612-byte arena ${context.id}/${action.id}`); validateState(after); validateFp(after); context.last = after;
         if (['call', 'guard', 'data', 'module', 'table'].includes(action.kind)
             || action.kind === 'host' && action.name === 'retire_stale_resident') references(event.reference_snapshot, context, event.memory_bytes_after);
       }

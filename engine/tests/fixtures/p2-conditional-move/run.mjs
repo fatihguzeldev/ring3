@@ -1,3 +1,4 @@
+import {createArena} from '../support/arena.mjs';
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
 import {readFileSync, readdirSync, writeFileSync} from 'node:fs';
@@ -10,7 +11,7 @@ const engineBytes = readFileSync(enginePath), engineModule = new WebAssembly.Mod
 assert.deepEqual(WebAssembly.Module.imports(engineModule), []);
 assert.equal(WebAssembly.Module.exports(engineModule).length, 72);
 assert.equal(WebAssembly.Module.exports(engineModule).filter(row => row.kind === 'function').length, 71);
-const SIZE = 4236, TRANSFER = 140, REG = [0x1234807f, 0x23457f80, 0x34560f10, 0x4567ff00, 0x56789abc, 0x6789abcd, 0x789abcde, 0x89abcdef];
+const SIZE = 4612, TRANSFER = 140, REG = [0x1234807f, 0x23457f80, 0x34560f10, 0x4567ff00, 0x56789abc, 0x6789abcd, 0x789abcde, 0x89abcdef];
 const MASKS = [0xffff0000, 0x0000ffff, 0xaaaaaaaa, 0x55555555, 0xf0f0f0f0, 0x0f0f0f0f, 0xfafafafa, 0x05050505, 0xff00ff00, 0x00ff00ff, 0xcccccccc, 0x33333333, 0x00ffff00, 0xff0000ff, 0xf0fffff0, 0x0f00000f];
 const LIVE = Buffer.from('39c80f42d30f43f70f92c47302eb000f0b', 'hex');
 function batch(alias) {return Buffer.from([...Array.from({length: 16}, (_, cc) => [0x0f, 0x40 + cc, 0xc0 | (cc % 8) << 3 | (alias ? cc % 8 : (cc + 3) % 8)]).flat(), 0xeb, 0, 0x0f, 0x0b]);}
@@ -44,7 +45,7 @@ function checkpoint(ctx, before, name) {const actual = arena(ctx); assert.deepEq
 function pure(ctx, action, name) {assert.deepEqual(arena(ctx), ctx.expected); assert.equal(action(), 0, name); assert.deepEqual(arena(ctx), ctx.expected, name);}
 function request(ctx, bytes) {assert.ok(bytes.length <= 4096); refresh(ctx).bytes.set(bytes, ctx.base + TRANSFER); ctx.expected.set(bytes, TRANSFER); assert.deepEqual(arena(ctx), ctx.expected);}
 function fresh(owner, kind) {
-  const ordinal = contexts.length + 1, expected = Buffer.alloc(SIZE); expected.set(state(Array(8).fill(0), 0, 2)); expected.set(exit(1, 0), 56); expected.set(helper(0), 100);
+  const ordinal = contexts.length + 1, expected = createArena(SIZE); expected.set(state(Array(8).fill(0), 0, 2)); expected.set(exit(1, 0), 56); expected.set(helper(0), 100);
   const ctx = {owner, kind, ordinal, expected, low: ordinal, high: 0xc8385000};
   if (owner === 'standalone') {ctx.memory = new WebAssembly.Memory({initial: 1}); ctx.base = 128; refresh(ctx).bytes.set(expected, ctx.base); ctx.dataAddress = 0x8000; ctx.bytes.set(pattern(), ctx.dataAddress);}
   else {const instance = new WebAssembly.Instance(engineModule, {}), arities = {open: 3, close: 0, arena_ptr: 0, map: 3, upload: 2, read32: 1, write8: 2, compile: 1, compile_entries: 2, compile_resident: 1, compile_resident_entries: 2, generation: 0, module_ptr: 0, module_len: 0, guard: 6, guard_resident: 7}; ctx.api = Object.fromEntries(Object.entries(arities).map(([name, count]) => {const fn = instance.exports[`ring3_abi_v1_${name}`]; assert.equal(typeof fn, 'function', name); assert.equal(fn.length, count, name); return [name, fn];})); ctx.memory = instance.exports.memory; assert.equal(ctx.api.open(3, ctx.low, ctx.high), 0); ctx.base = ctx.api.arena_ptr() >>> 0; refresh(ctx); assert.deepEqual(arena(ctx), expected, 'independently initialized bound arena'); ctx.dataAddress = 0x3000; pure(ctx, () => ctx.api.map(ctx.dataAddress, 1, 3), 'data map'); request(ctx, pattern()); pure(ctx, () => ctx.api.upload(ctx.dataAddress, 4096), 'data upload');}

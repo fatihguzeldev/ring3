@@ -1,9 +1,10 @@
+import {createArena} from '../support/arena.mjs';
 import assert from 'node:assert/strict';
 import {mkdirSync, writeFileSync} from 'node:fs';
 import {resolve} from 'node:path';
 import {fileURLToPath} from 'node:url';
 
-export const SIZE = 4364, CODE = 0x1000;
+export const SIZE = 4612, CODE = 0x1000;
 export const FLAGS = [2, 3, 0xcd6, 0xcd7];
 export const HIGH_RAW = [32, 33, 49, 50, 255, 0x66, 0x67, 0xf0, 0xf2, 0xf3];
 export const CX_RAW = [...Array.from({length: 32}, (_, i) => i), 32, 33, 49, 50, 255];
@@ -16,7 +17,7 @@ function record(magic, length, fields = [], version = 1) {
 }
 
 export function initialHex() {
-  const b = Buffer.from(Array.from({length: SIZE}, (_, i) => (i * 37 + 19) & 255));
+  const b = Buffer.from(Array.from({length: SIZE}, (_, i) => (i * 37 + 19) & 255)); b.set(createArena(SIZE).subarray(4364), 4364);
   const fp = record('R3FP', 128);
   for (const [at, n] of [[16, 0x27f], [18, 0x2840], [20, 0xaaaa], [22, 0x345], [32, 0x33], [34, 0x2b]]) fp.writeUInt16LE(n, at);
   fp.writeUInt32LE(0x12345678, 24); fp.writeUInt32LE(0x9abcdef0, 28);

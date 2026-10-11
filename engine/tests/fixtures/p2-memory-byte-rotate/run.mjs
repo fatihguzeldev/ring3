@@ -1,3 +1,4 @@
+import {createArena} from '../support/arena.mjs';
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
 import {readFileSync, readdirSync, writeFileSync} from 'node:fs';
@@ -9,7 +10,7 @@ assert.ok(root, 'expected current engine Wasm, output directory and repository r
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
 const {bytes: engineBytes, module: engineModule, sha256: engineSha256} = readEngine(enginePath);
 assert.deepEqual(WebAssembly.Module.imports(engineModule), []);
-const SIZE = 4236, TRANSFER = 140, PC = 0x1000, COLD = PC + 128, KEEP = 0x3000, DATA = 0x4000, NEXT = 0x5000, MISSING = 0x8000, TOP = 0xfffff000, BYTE = 0x4010;
+const SIZE = 4612, TRANSFER = 140, PC = 0x1000, COLD = PC + 128, KEEP = 0x3000, DATA = 0x4000, NEXT = 0x5000, MISSING = 0x8000, TOP = 0xfffff000, BYTE = 0x4010;
 const OWNERS = ['replacement', 'resident'], FLAGS = [2, 0xcd7], KINDS = ['rol', 'ror'];
 const RAW_A = [0, 1, 2, 7, 8, 9, 16], RAW_B = [17, 24, 31, 32, 33, 255], RAW = [...RAW_A, ...RAW_B], VALUES = [0x81, 0x80];
 const REG = [0x12345678, 0x87654321, 0x3456789a, 0x456789ab, 0x56789abc, 0x6789abcd, 0x789abcde, 0x89abcdef];
@@ -177,7 +178,7 @@ function fresh(owner, selected, label, writable = false, special = false) {
     compile_entries: 2, compile_resident: 1, generation: 0, module_ptr: 0, module_len: 0, guard: 6, guard_resident: 7, store8: 2, store_resident8: 6};
   for (const [name, arity] of Object.entries(arities)) {api[name] = instance.exports[`ring3_abi_v1_${name}`]; assert.equal(typeof api[name], 'function', name); assert.equal(api[name].length, arity, name);}
   const ctx = {owner, ordinal, selected, label, api, memory: instance.exports.memory, low: ordinal, high: 0x4d425238,
-    expected: Buffer.alloc(SIZE), pages: new Map(), permissions: new Map(), units: []};
+    expected: createArena(SIZE), pages: new Map(), permissions: new Map(), units: []};
   assert.ok(ctx.memory instanceof WebAssembly.Memory); assert.equal(api.open(special ? 4 : 3, ctx.low, ctx.high), 0); ctx.base = api.arena_ptr() >>> 0;
   refresh(ctx); assert.ok(ctx.base > 0 && ctx.base + SIZE <= ctx.bytes.length);
   ctx.expected.set(state(Array(8).fill(0), 0, 2)); ctx.expected.set(exit(1, 1, 0), 56); ctx.expected.set(wordHelper(0), 100); check(ctx, 'independently initialized arena'); noteHost(ctx, 'open/arena getter initialization', 0, null, {operation: 'open', page_limit: special ? 4 : 3, key: [ctx.low, ctx.high]});

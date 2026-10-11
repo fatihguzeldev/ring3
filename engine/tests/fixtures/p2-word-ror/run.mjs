@@ -5,7 +5,7 @@ import {join} from "node:path";
 import {readEngine} from "../support/engine.mjs";
 
 const [enginePath, output, root] = process.argv.slice(2);
-const SIZE = 4364, FP = 4236, PC = 0x1000;
+const SIZE = 4612, FP = 4236, PC = 0x1000;
 const rawCounts = [0, 1, 2, 15, 16, 17, 31, 32, 33, 255];
 const edges = [0, 1, 0x7fff, 0x8000, 0xffff];
 assert.ok(enginePath && output && root);
@@ -142,7 +142,7 @@ function run(ctx, budget, label, wanted, reason = 1, retired = 1, status = 0, cu
   }
   const args = customArgs ?? [ctx.base, ctx.base + 56, budget, ctx.base + 96];
   assert.equal(ctx.run(...args), status, label);
-  assert.deepEqual(arena(ctx), expected, `full4364 ${label}`);
+  assert.deepEqual(arena(ctx), expected, `full4612 ${label}`);
   journal.push({context: ctx.context, name: "run", label, budget, status, args,
     before, after: capture(ctx, `after generated ${label}`)});
   counts.generated_calls++;
@@ -341,7 +341,7 @@ const result = {status: "ok", engine: {bytes: engine.bytes.length, sha256: engin
     "224 core rotations: every typedshape twice plus eight literal AX count anchors per profile; no exhaustive value cross-product",
     "current low16/currentCL and coupled CX operand/count; q=raw&31 distinct from distance=q%16; q0 allFLAGS preserved and q16 updatesCF even at distance0",
     "SF/ZF/AF/PF/DF and parenthigh16 preserved; q1 definedOF versus q17 deterministic undefinedOF0, not hardware equality for undefinedOF",
-    "full4364 saved input/host/generated pairs plus preclose frames; canonical initial state and opaque FP128 preserved, not x87 arithmetic or fullRAM dumps",
+    "full4612 saved input/host/generated pairs plus preclose frames; canonical initial state and opaque FP128 preserved, not x87 arithmetic or fullRAM dumps",
     "code page remains RWX; stale witness has no earlier protect and same-byte consumed upload precedes stale4; closed5 status-only, no postclose allocation read",
     "33-instruction ordinary module and21-instruction two-block retained module; maximumtwo resident units, no release or expired artifact pointer read",
     "open/getters and resident receipt allocation fields are bounded physical correspondence; imports/export/hash do not prove arbitrary body or allocator history",

@@ -1,3 +1,4 @@
+import {createArena} from '../support/arena.mjs';
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
 import {readFileSync, writeFileSync} from 'node:fs';
@@ -8,7 +9,7 @@ assert.ok(root, 'expected actual engine wasm, output directory and repository ro
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
 const engineBytes = readFileSync(enginePath), engineModule = new WebAssembly.Module(engineBytes);
 assert.deepEqual(WebAssembly.Module.imports(engineModule), []);
-const SIZE = 4236, TRANSFER = 140, PC = 0x1000, DATA = 0x4000, ALIAS = 0x1100, FAULT = 0x1200;
+const SIZE = 4612, TRANSFER = 140, PC = 0x1000, DATA = 0x4000, ALIAS = 0x1100, FAULT = 0x1200;
 const REG = [0x1234807f, 0x23457f80, 0x34560f10, 0x4567ff00, 0x56789abc, 0x6789abcd, 0x789abcde, 0x89abcdef];
 const MASKS = [0xffff0000, 0x0000ffff, 0xaaaaaaaa, 0x55555555, 0xf0f0f0f0, 0x0f0f0f0f, 0xfafafafa, 0x05050505,
   0xff00ff00, 0x00ff00ff, 0xcccccccc, 0x33333333, 0x00ffff00, 0xff0000ff, 0xf0fffff0, 0x0f00000f];
@@ -57,7 +58,7 @@ function fresh(owner) {
   const api = Object.fromEntries(Object.entries(arities).map(([name, arity]) => {
     const fn = instance.exports[`ring3_abi_v1_${name}`]; assert.equal(typeof fn, 'function', name); assert.equal(fn.length, arity, name); return [name, fn];
   }));
-  const ctx = {owner, api, memory: instance.exports.memory, low: ordinal, high: 0xc8393000, expected: Buffer.alloc(SIZE)};
+  const ctx = {owner, api, memory: instance.exports.memory, low: ordinal, high: 0xc8393000, expected: createArena(SIZE)};
   assert.equal(api.open(6, ctx.low, ctx.high), 0); ctx.base = api.arena_ptr() >>> 0;
   ctx.expected.set(state(Array(8).fill(0), 0, 2)); ctx.expected.set(record('R3EX', 40, [1, 0, 0, 0, 0, 0]), 56); ctx.expected.set(helper(), 100);
   check(ctx, 'independently initialized arena');

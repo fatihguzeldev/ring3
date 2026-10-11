@@ -4,7 +4,7 @@ import {readFileSync, writeFileSync} from 'node:fs';
 import {join} from 'node:path';
 import {readEngine} from '../support/engine.mjs';
 
-const [enginePath, output, root] = process.argv.slice(2), SIZE = 4364;
+const [enginePath, output, root] = process.argv.slice(2), SIZE = 4612;
 assert.ok(enginePath && output && root);
 const engine = readEngine(enginePath), initial = readFileSync(join(output, 'initial-arena.bin'));
 assert.equal(initial.length, SIZE); assert.deepEqual(WebAssembly.Module.imports(engine.module), []);
@@ -128,7 +128,7 @@ function run(c, unit, budget, next, label, {reason = 1, retired = 1, status = 0,
   const before = cpu(c), expected = arena(c);
   if (status === 0) {expected.set(state(next)); expected.set(exit(reason, retired, unit.exitVersion), 56);}
   const observedStatus = unit.run(c.base, c.base + 56, budget, c.base + 96);
-  assert.equal(observedStatus, status, label); assert.deepEqual(arena(c), expected, 'full4364/GPR/AX-high16/FLAGS/helper/dirtyFP: ' + label);
+  assert.equal(observedStatus, status, label); assert.deepEqual(arena(c), expected, 'full4612/GPR/AX-high16/FLAGS/helper/dirtyFP: ' + label);
   const after = arena(c), accepted = observedStatus === 0;
   observations.push({context: c.id, category, label, input_pc: before.pc, input_ax: before.registers[0] % 65536, input_flags: before.flags,
     expected_status: status, observed_status: observedStatus, expected_reason: status === 0 ? reason : null,
@@ -415,7 +415,7 @@ const result = {status: 'ok', engine_sha256: engine.sha256, source_pins: sourceP
     'AAA/AAS CF=AF=adjustmentcondition and SF/ZF/PF/OF clear; AAD derivesSZP from lowbyte and clearsCF/AF/OF; undefined-flag clearing is Ring3 policy, DF/bit1 retained',
     'AAD all256 bases at four selectedAX and exhaustiveAL at four selectedAH/base pairs, all128FLAGS with identicalAX/base; not exhaustivewholeAX×allbases',
     'AAD unsigned u8 identity is native typedIR evidence: signed-vs-unsigned multiplication is congruent modulo256 and not discriminated by runtime results',
-    'full4364 arena equality preserves ownEAXhigh16/allotherGPR/helper/dirtyFP128; selected bound readonlyRAMcanaries, no guest-memoryoperand/arbitrary-hostrollback/wholeRAMsnapshot claim',
+    'full4612 arena equality preserves ownEAXhigh16/allotherGPR/helper/dirtyFP128; selected bound readonlyRAMcanaries, no guest-memoryoperand/arbitrary-hostrollback/wholeRAMsnapshot claim',
     'live byteADD/SUB→AAA/AAS→SETB/SETO→ADC and MOVAH/AL→AAD→SETZ/SETP/SETB/SETO→ADC have no CPU reseeding; observed per-row status/reason/retirement/PC/FLAGS/AX persisted, neutral3/4 observations null',
     'oldmain2blocks4instructions/live2blocks12instructions and2captures/context; AAD five1blockbanks64/64/64/64/5instructions plus2block18instructionlive, exactly6captures/context',
     'allcode/protections before captures; default8/64/65536/sixcapture unchanged; unbound savedmodules lack runtime sourceguard; replacement generation3 and same-byteRWX source CodeInvalidated4 are neutral',

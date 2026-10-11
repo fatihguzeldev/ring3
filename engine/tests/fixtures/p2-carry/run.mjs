@@ -13,7 +13,7 @@ const source = readFileSync(join(fixture, 'program.S'));
 assert.equal(hash(oracleBytes), '3e2caca609a1ba8f76f30d0f4e72b553d2a5876cfa93303e2894cf6510671b8b');
 assert.equal(hash(source), 'bc552951f3f242482b90e9267c93e1e2e19028c0ed7494ae816b1c71f2e9d846');
 const artifacts = {}, observations = [], identities = [];
-const size = 4236, transfer = 140, bytes = hex => new Uint8Array(Buffer.from(hex, 'hex'));
+const size = 4612, transfer = 140, bytes = hex => new Uint8Array(Buffer.from(hex, 'hex'));
 
 function authoredText(object) {
   const v = new DataView(object.buffer, object.byteOffset, object.byteLength);

@@ -14,7 +14,7 @@ assert.deepEqual(WebAssembly.Module.imports(engineModule), []);
 assert.deepEqual(WebAssembly.Module.imports(dispatcherModule), [{module: 'env', name: 'memory', kind: 'memory'}, {module: 'env', name: 'table', kind: 'table'}]);
 assert.deepEqual(WebAssembly.Module.exports(dispatcherModule), [{name: 'run', kind: 'function'}]);
 const names = ['open', 'close', 'arena_ptr', 'map', 'protect', 'unmap', 'upload', 'compile', 'compile_with_gates', 'generation', 'module_ptr', 'module_len', 'guard', 'read32', 'write32', 'capture_call', 'abandon_call', 'compile_resident', 'resident_module', 'guard_resident', 'find_resident'];
-const SIZE = 4236, TRANSFER = 140, READY = 4224, CALLS = 4228;
+const SIZE = 4612, TRANSFER = 140, READY = 4224, CALLS = 4228;
 const authored = {a: Buffer.from('40e9fa0f0000', 'hex'), b: Buffer.from('490f85f9efffff', 'hex'), gate: Buffer.from('0f0b', 'hex'), unsupported: Buffer.from('0f06', 'hex')};
 for (const [name, bytes] of Object.entries(authored)) writeFileSync(join(outputDir, `${name}.x86`), bytes);
 const artifacts = {'dispatcher.wasm': hash(dispatcherBytes)}, units = [], metadata = [];

@@ -10,7 +10,7 @@ const sha256 = bytes => createHash('sha256').update(bytes).digest('hex');
 const engineBytes = readFileSync(enginePath);
 const engineModule = new WebAssembly.Module(engineBytes);
 assert.deepEqual(WebAssembly.Module.imports(engineModule), []);
-const SIZE = 4236, TRANSFER = 140;
+const SIZE = 4612, TRANSFER = 140;
 const KEY = 0xd3456789e0000000n;
 const OUTER = 0x80000011, RETURN = 0x80000012, INNER = 0x80000033;
 const LEGACY = 0x80000077, LEGACY_RETURN = 0x80000078;

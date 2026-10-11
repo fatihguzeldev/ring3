@@ -6,7 +6,7 @@ import {readEngine} from '../support/engine.mjs';
 
 const [enginePath,output,root]=process.argv.slice(2);assert.ok(enginePath&&output&&root);
 assert.match(process.env.RING3_ENGINE_SHA256??'',/^[a-f0-9]{64}$/);
-const engine=readEngine(enginePath),SIZE=4364,FLAGS=[2,0xcd7],BASES=Array.from({length:11},(_,i)=>0x1000+i*0x2000);
+const engine=readEngine(enginePath),SIZE=4612,FLAGS=[2,0xcd7],BASES=Array.from({length:11},(_,i)=>0x1000+i*0x2000);
 const hash=b=>createHash('sha256').update(b).digest('hex'),initial=readFileSync(join(output,'initial-arena.bin'));
 assert.equal(initial.length,SIZE);
 const parents=[0xa53c8001,0xb64dffff,0xc75e7fff,0xd86f00ff,0xe9708000,0xfa810000,0x1b925555,0x2ca3aaaa],banks=[];
@@ -142,6 +142,6 @@ assert.deepEqual(pins(),sourcePins,'source epoch unchanged');assert.deepEqual(pi
 const raw=artifact('arenas.bin',Buffer.concat(frames)),result={status:'ok',engine:{bytes:engine.bytes.length,sha256:engine.sha256},counts,source_pins:sourcePins,source_support_dependency:support,
   banks:banks.map(b=>({name:b.name,pc:b.pc,body:b.body,file:b.name+'.x86',bytes:b.bytes.length,sha256:hash(b.bytes),instructions:b.instructions})),contexts,modules,targets,journal,lifecycle,raw_records:rawRecords,raw:{...raw,frames:frames.length},source_changes:sourceChanges,resident_releases:residentReleases,
   limits:['finite perkind32 register forms/32 immediate16/32 signed8/8 AX payload forms, six literal flag anchors/two admitted FLAGS and four bound profiles; no all-values/all-FLAGS/ISA claim','OR/XOR define width16 SF/ZF/PF and clear CF/OF; undefined AF deterministically clears by engine policy, admitted DF and required2 preserved',
-    'all full4364 arenas for declared inputs/hosts/generated calls; open after-only/close pre-only, closed raw5 unframed','no data helper/RAM effects/full-RAM dump; logic changes one low16 destination and logical FLAGS; every high16/other parent/opaque FP preserved; retained MOV/SETcc writes separately checked',
+    'all full4612 arenas for declared inputs/hosts/generated calls; open after-only/close pre-only, closed raw5 unframed','no data helper/RAM effects/full-RAM dump; logic changes one low16 destination and logical FLAGS; every high16/other parent/opaque FP preserved; retained MOV/SETcc writes separately checked',
     'typed module section/import/type/local checks do not prove arbitrary remaining body','resident binding and initial allocator receipts are bounded physical inputs; each next admission discards completed current or retires stale previous uninstalled unit after returned execution, live unit bound one; no released pointer/run use','live stale allocation equality before getter/compile/close/release is a producer receipt, not saved allocation proof','no performance/whole-suite/CI/graphics/Windows claim']};
 writeFileSync(join(output,'result.json'),JSON.stringify(result,null,2),{flag:'wx'});assert.equal(readdirSync(output).length,67);console.log(JSON.stringify({status:'ok',...counts,raw_frames:frames.length,output}));

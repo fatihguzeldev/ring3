@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { readEngine } from "../support/engine.mjs";
 const [enginePath, output, root] = process.argv.slice(2);
 assert.ok(enginePath && output && root); assert.match(process.env.RING3_ENGINE_SHA256 ?? "", /^[a-f0-9]{64}$/);
-const engine = readEngine(enginePath), SIZE = 4364, PC = 0x1000, SRC = 0x5008, DST = 0x9008;
+const engine = readEngine(enginePath), SIZE = 4612, PC = 0x1000, SRC = 0x5008, DST = 0x9008;
 assert.deepEqual(WebAssembly.Module.imports(engine.module), []);
 const hash = b => createHash("sha256").update(b).digest("hex"), initial = readFileSync(join(output,"initial-arena.bin")); assert.equal(initial.length,SIZE);
 const bank=Buffer.alloc(64,0xcc), blocks=[[0,[0x66,0xa7,0xeb,0]],[8,[0x66,0xaf,0xeb,0]],
@@ -40,7 +40,7 @@ function seed(c,pc,flags,source=SRC,destination=DST,eax=0xa5818001){const b=Buff
 function diagnostic(c,address,value){host(c,"read16",[address],"declared current WORD RAM");assert.deepEqual(arena(c).subarray(100,140),helper(value));}
 function run(c,budget,label,wanted,reason=1,n=1,f,status=0,value,params){const before=capture(c,"before generated "+label),expected=arena(c);
  if(status===0){expected.set(state(wanted));expected.set(exit(reason,n,f),56);if(f||value!==undefined)expected.set(helper(value??0,f),100);}
- const args=params??[c.base,c.base+56,budget,c.base+96];assert.equal(c.run(...args),status,label);assert.deepEqual(arena(c),expected,"full4364 "+label);
+ const args=params??[c.base,c.base+56,budget,c.base+96];assert.equal(c.run(...args),status,label);assert.deepEqual(arena(c),expected,"full4612 "+label);
  counts.generated_calls++;if(status===0)counts.retired+=n;if(f)counts.fault_calls++;
  journal.push({context:c.context,name:"run",label,budget,status,args,before,after:capture(c,"after generated "+label)});}
 function subtraction(left,right){const a=BigInt(left),b=BigInt(right),r=BigInt.asUintN(16,a-b);let flags=2;if(a<b)flags|=1;
@@ -105,6 +105,6 @@ assert.deepEqual(hostCounts,{map:64,unmap:44,protect:36,upload:596,read16:396,co
 assert.equal(journal.filter(row=>row.name==="input").length,864);assert.equal(journal.length,2416);assert.equal(frames.length,4820);
 const raw=Buffer.concat(frames);writeFileSync(join(output,"arenas.bin"),raw,{flag:"wx"});
 const result={status:"ok",engine:{bytes:engine.bytes.length,sha256:engine.sha256,caller_sha256:process.env.RING3_ENGINE_SHA256},source_pins:sourcePins,counts:{...counts,modules:modules.length,host_counts:hostCounts,host_inputs:journal.filter(row=>row.name==="input").length,journal_records:journal.length,raw_frames:frames.length},modules,journal,
- raw:{file:"arenas.bin",frames:frames.length,bytes:raw.length,sha256:hash(raw)},limits:["exact flat32 CMPSW/SCASW finite word literals/DF/read2/current AX only","full4364 saved input/host/generated pairs plus preclose frames and selected live Read16 diagnostics; no RAM dump or full module body proof",
+ raw:{file:"arenas.bin",frames:frames.length,bytes:raw.length,sha256:hash(raw)},limits:["exact flat32 CMPSW/SCASW finite word literals/DF/read2/current AX only","full4612 saved input/host/generated pairs plus preclose frames and selected live Read16 diagnostics; no RAM dump or full module body proof",
  "ESI-first dual-fault order is engine policy, not hardware precedence","same CPU fault repair uses current RAM and explicit EAX-only repair, not whole CPU reseeding","four representative bound profiles; closed calls raw-status only, no postclose arena/module pointer observation","no full ISA, performance or CI claim"]};
 writeFileSync(join(output,"result.json"),JSON.stringify(result,null,2),{flag:"wx"});console.log(JSON.stringify({status:result.status,...result.counts,output}));

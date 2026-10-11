@@ -8,7 +8,7 @@ import {readEngine} from "../support/engine.mjs";
 const directory = dirname(fileURLToPath(import.meta.url));
 const dataBytes = readFileSync(join(directory, "cases.json"));
 const data = JSON.parse(dataBytes);
-const SIZE = 4364;
+const SIZE = 4612;
 const sha = bytes => createHash("sha256").update(bytes).digest("hex");
 const u32 = value => value >>> 0;
 const bytes = hex => Buffer.from(hex, "hex");
@@ -275,7 +275,7 @@ if (process.argv[2] === "--plan") {
         }
         if (foreign) {row.foreign_helper = event.foreign_helper; row.foreign_trace = {calls: foreign.exports.calls(), address: foreign.exports.address() >>> 0, value: foreign.exports.value() >>> 0}; assert.equal(row.foreign_trace.calls, 1);}
       }
-      if (!c.closed) {row.after_frame = frame(c); assert.deepEqual(snapshot(c), expected, "full4364 " + event.label);}
+      if (!c.closed) {row.after_frame = frame(c); assert.deepEqual(snapshot(c), expected, "full4612 " + event.label);}
     }
     journal.push(row);
     } catch (error) {

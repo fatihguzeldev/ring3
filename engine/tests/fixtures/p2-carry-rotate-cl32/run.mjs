@@ -1,3 +1,4 @@
+import {createArena} from '../support/arena.mjs';
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { readFileSync, readdirSync, writeFileSync } from "node:fs";
@@ -10,7 +11,7 @@ assert.ok(enginePath && output && root, "expected current engine, output directo
 const hash = (bytes) => createHash("sha256").update(bytes).digest("hex");
 const { bytes: engineBytes, module: engineModule, sha256: engineSha256 } = readEngine(enginePath);
 assert.deepEqual(WebAssembly.Module.imports(engineModule), []);
-const SIZE = 4236,
+const SIZE = 4612,
   TRANSFER = 140,
   PC = 0x1000,
   MASTER_COLD = PC + 0xf00,
@@ -631,7 +632,7 @@ function fresh(owner, selected, label, writable = false) {
       label,
       low: ordinal,
       high: 0x4243494d,
-      expected: Buffer.alloc(SIZE),
+      expected: createArena(SIZE),
       code: Buffer.from(selected.bytes),
       units: [],
     };

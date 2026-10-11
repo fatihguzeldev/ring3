@@ -10,7 +10,7 @@ const engineBytes = readFileSync(enginePath), engineModule = new WebAssembly.Mod
 assert.deepEqual(WebAssembly.Module.imports(engineModule), []);
 assert.equal(WebAssembly.Module.exports(engineModule).length, 71);
 assert.equal(WebAssembly.Module.exports(engineModule).filter(row => row.kind === 'function').length, 70);
-const SIZE = 4236, TRANSFER = 140, MARKER = 0xc8c00006, EXIT = 0x8020, EXIT_ID = 0x10003;
+const SIZE = 4612, TRANSFER = 140, MARKER = 0xc8c00006, EXIT = 0x8020, EXIT_ID = 0x10003;
 const apiNames = ['open', 'close', 'arena_ptr', 'read32', 'store_resident32', 'compile_resident_entries', 'resident_module', 'guard_resident', 'dispatcher_module', 'guard_dispatch_entry', 'find_installed_resident', 'acknowledge_resident_installation', 'retire_stale_resident', 'begin_image_input', 'append_image_input', 'load_pe32_linked_v2_input_at', 'start_loaded_image', 'capture_resident_call', 'complete_resident_windows_call'];
 const modules = [], controls = [], paths = [];
 let ordinal = 0, retired = 0, retirements = 0, recompilations = 0, captures = 0, completions = 0;

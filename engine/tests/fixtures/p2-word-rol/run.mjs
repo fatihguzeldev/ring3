@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { readEngine } from "../support/engine.mjs";
 
 const [enginePath, output, root] = process.argv.slice(2);
-const SIZE = 4364;
+const SIZE = 4612;
 const PC = 0x1000;
 const RAW = [0, 1, 2, 15, 16, 17, 31, 32, 33, 255];
 const EDGES = [0, 1, 0x7fff, 0x8000, 0xffff];
@@ -171,7 +171,7 @@ function run(context, budget, label, wanted, reason = 1, retired = 1, status = 0
     }
     const params = args ?? [context.base, context.base + 56, budget, context.base + 96];
     assert.equal(context.run(...params), status, label);
-    assert.deepEqual(arena(context), expected, "full4364 " + label);
+    assert.deepEqual(arena(context), expected, "full4612 " + label);
     counts.generated_calls++;
     if (status === 0) counts.retired += retired;
     journal.push({ context: context.context, name: "run", label, budget, status, args: params,
@@ -362,7 +362,7 @@ const result = {
     modules, journal, raw: { file: "arenas.bin", frames: frames.length, bytes: raw.length, sha256: hash(raw) },
     limits: [
         "finite exact register WORD ROL families in four bound profiles; native standalone proof is separate",
-        "full4364 input/host/generated pairs and preclose frame; current low16/high16/other parents and unaffected FLAGS, no memory helper or stack effect",
+        "full4612 input/host/generated pairs and preclose frame; current low16/high16/other parents and unaffected FLAGS, no memory helper or stack effect",
         "two resident units/context, instruction banks33/11 both<=64, no expired pointer use; retained q0/q16/q17/SETcc/ADC/currentCXCL/JZ has no interphase host reseed",
         "stale4 follows combined Execute-only4 to RWX7 permission change and same-byte upload; this witness does not isolate upload invalidation",
         "initial Rust arena and first frames require canonical source-default joins; initialized opaque FP128 preserved, not arbitrary raw80 seeds",

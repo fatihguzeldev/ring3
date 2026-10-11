@@ -1,3 +1,4 @@
+import {createArena} from '../support/arena.mjs';
 import assert from 'node:assert/strict';
 import {execFileSync} from 'node:child_process';
 import {createHash} from 'node:crypto';
@@ -12,7 +13,7 @@ const oracleBytes = readFileSync(join(fixtureRoot, 'oracle.json')), oracle = JSO
 const programBytes = readFileSync(join(fixtureRoot, 'program.S'));
 assert.equal(hash(oracleBytes), '3de9f2bb6972f0ea80333ba674ea0b2add143732524cb1fbb9bdba9965c3d152');
 assert.equal(hash(programBytes), 'c88b0b76107dbb04b2f5c6a1ae8a7ba76ee61e3f48054c6ed3e11671e3160953');
-const size = 4236, transfer = 140, artifacts = {}, identities = [], operations = [], hostInputs = [], observations = [], ramChecks = [], stackChecks = [];
+const size = 4612, transfer = 140, artifacts = {}, identities = [], operations = [], hostInputs = [], observations = [], ramChecks = [], stackChecks = [];
 const fromHex = hex => new Uint8Array(Buffer.from(hex, 'hex'));
 function save(filename, bytes) { writeFileSync(join(outputDir, filename), bytes); artifacts[filename] = hash(bytes); return filename; }
 function words(fields) { const bytes = new Uint8Array(fields.length * 4), view = new DataView(bytes.buffer); fields.forEach((value, index) => view.setUint32(index * 4, value, true)); return bytes; }
@@ -106,7 +107,7 @@ function fresh(name, owner, pages = 8) {
   engine = {name,owner,ordinal,api,key,low:Number(key & 0xffffffffn),high:Number(key >> 32n),memory:instance.exports.memory,units:[]};
   assert.ok(engine.memory instanceof WebAssembly.Memory); assert.equal(api.open(pages,engine.low,engine.high),0); engine.base=api.arena_ptr()>>>0; refresh();
   assert.ok(engine.base>0 && engine.base+size<=engine.bytes.length);
-  const initial = new Uint8Array(size); initial.set(fromHex(oracle.records.initial_state_hex)); initial.set(fromHex(oracle.records.initial_exit_hex),56); initial.set(fromHex(oracle.records.helper_zero_hex),100); assert.deepEqual(arena(),initial);
+  const initial = new Uint8Array(createArena(size)); initial.set(fromHex(oracle.records.initial_state_hex)); initial.set(fromHex(oracle.records.initial_exit_hex),56); initial.set(fromHex(oracle.records.helper_zero_hex),100); assert.deepEqual(arena(),initial);
   save(`${name}-initial-arena.bin`,initial);
   hostInput('explicit diagnostic and Transfer sentinel; CPU untouched', () => refresh().bytes.fill(0xa5,engine.base+100,engine.base+size));
 }

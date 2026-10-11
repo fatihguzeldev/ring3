@@ -1,10 +1,11 @@
+import {createArena} from '../support/arena.mjs';
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
 import {lstatSync, readFileSync, readdirSync, realpathSync} from 'node:fs';
 import {dirname, isAbsolute, join, relative, resolve} from 'node:path';
 import {fileURLToPath} from 'node:url';
 
-const U32 = 2 ** 32, SIZE = 4364, CODE = 0x1000;
+const U32 = 2 ** 32, SIZE = 4612, CODE = 0x1000;
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
 function uint(n, max = U32 - 1) {assert.ok(Number.isInteger(n) && n >= 0 && n <= max); return n;}
 function parity(value) {let ones = 0; for (let i = 0; i < 8; i++) {ones += value % 2; value = Math.floor(value / 2);} return Number(ones % 2 === 0);}
@@ -82,7 +83,7 @@ function record(magic, size, fields = [], version = 1) {
   fields.forEach((n, i) => bytes.writeUInt32LE(uint(n), 16 + i * 4)); return bytes;
 }
 export function defaultArena() {
-  const arena = Buffer.alloc(SIZE); record('R3ST', 56, [0, 0, 0, 0, 0, 0, 0, 0, 0, 2]).copy(arena);
+  const arena = createArena(SIZE); record('R3ST', 56, [0, 0, 0, 0, 0, 0, 0, 0, 0, 2]).copy(arena);
   record('R3EX', 40, [1, 0, 0, 0, 0, 0]).copy(arena, 56); record('R3MH', 40, [0, 0, 0, 0, 0, 0]).copy(arena, 100);
   const fp = record('R3FP', 128); fp.writeUInt16LE(895, 16); fp.writeUInt16LE(65535, 20); fp.copy(arena, 4236); return arena;
 }
@@ -94,7 +95,7 @@ function seedBytes(pc, flags = 2, vector = 0, overrides = []) {
   record('R3EX', 40, [3, 0, 0, 0, 0, 0], 3).copy(bytes, 56); record('R3MH', 40, [0, 0xdecafbad, 0, 0, 0, 0]).copy(bytes, 100); return bytes;
 }
 export function authoredArena() {
-  const arena = Buffer.from(Array.from({length: SIZE}, (_, i) => (37 * i + 19) % 256)); seedBytes(CODE).copy(arena);
+  const arena = Buffer.from(Array.from({length: SIZE}, (_, i) => (37 * i + 19) % 256)); arena.set(createArena(SIZE).subarray(4364), 4364); seedBytes(CODE).copy(arena);
   const fp = record('R3FP', 128);
   for (const [at, n] of [[16, 639], [18, 10304], [20, 43690], [22, 837], [32, 51], [34, 43]]) fp.writeUInt16LE(n, at);
   fp.writeUInt32LE(0x12345678, 24); fp.writeUInt32LE(0x9abcdef0, 28);

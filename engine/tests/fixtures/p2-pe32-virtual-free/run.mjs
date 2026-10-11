@@ -1,3 +1,4 @@
+import {createArena} from '../support/arena.mjs';
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
 import {execFileSync} from 'node:child_process';
@@ -9,7 +10,7 @@ assert.ok(root, 'expected engine wasm, output directory and repository root');
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
 const save = (name, bytes) => writeFileSync(join(output, name), bytes, {flag: 'wx'});
 const BASE = 0x500000, ENTRY = BASE + 0x1000, GATE = 0x8000, STACK = 0x70000, TOP = 0x71000;
-const ALLOCATION = 0x10000000, FIRST = 0x13579bdf, SECOND = 0x2468ace0, ARENA = 4236, TRANSFER = 140;
+const ALLOCATION = 0x10000000, FIRST = 0x13579bdf, SECOND = 0x2468ace0, ARENA = 4612, TRANSFER = 140;
 const program = Buffer.from(
   '6a04680030000068011000006a00ff1554314000' +
   '89c7c707df9b57138b1fc78700100000e0ac68248baf0010000068008000006a0057ff1550314000' +
@@ -106,7 +107,7 @@ function fresh(owner, low) {
   const instance = new WebAssembly.Instance(engineModule, {}), api = Object.fromEntries(names.map(name => [name, instance.exports[`ring3_abi_v1_${name}`]]));
   for (const [name, fn] of Object.entries(api)) assert.equal(typeof fn, 'function', name);
   assert.equal(api.load_pe32_linked_v5_input_at.length, 2); assert.equal(api.start_loaded_image.length, 2);
-  const ctx = {owner, api, memory: instance.exports.memory, low, high: 0xa0050000, compileOrdinal: 0, expected: new Uint8Array(ARENA)};
+  const ctx = {owner, api, memory: instance.exports.memory, low, high: 0xa0050000, compileOrdinal: 0, expected: new Uint8Array(createArena(ARENA))};
   assert.equal(api.open(8, low, ctx.high), 0); ctx.base = api.arena_ptr() >>> 0;
   ctx.expected.set(state(Array(8).fill(0), 0)); ctx.expected.set(record('R3EX', 40, [1, 0, 0, 0, 0, 0]), 56); ctx.expected.set(helper(0), 100);
   observe(ctx, 'initial');

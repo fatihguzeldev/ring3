@@ -1,3 +1,4 @@
+import {createArena} from '../support/arena.mjs';
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
 import {readFileSync, writeFileSync} from 'node:fs';
@@ -8,7 +9,7 @@ assert.ok(root, 'expected actual engine wasm, output directory and repository ro
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
 const engineBytes = readFileSync(enginePath), engineModule = new WebAssembly.Module(engineBytes);
 assert.deepEqual(WebAssembly.Module.imports(engineModule), []);
-const SIZE = 4236, TRANSFER = 140, PC = 0x1000, COLD = 0x1080, DATA = 0x4000, SECOND = 0x5000, TOP = 0xfffff000;
+const SIZE = 4612, TRANSFER = 140, PC = 0x1000, COLD = 0x1080, DATA = 0x4000, SECOND = 0x5000, TOP = 0xfffff000;
 const REG = [0x1234807f, 0x23457f80, 0x34560f10, 0x4567ff00, 0x56789abc, 0x6789abcd, 0x789abcde, 0x89abcdef];
 const PAIRS = [[0, 0xffffffff], [1, 0xffffffff], [0xffffffff, 0xffffffff], [0x80000000, 0xffffffff], [0x7fffffff, 2],
   [0x80000000, 1], [0x80000000, 2], [0x10000, 0x10000], [0xfffffffe, 0x80000001], [0x12345678, 0x89abcdef]];
@@ -72,7 +73,7 @@ function fresh(owner, kind) {
   const api = Object.fromEntries(Object.entries(arities).map(([name, arity]) => {
     const fn = instance.exports[`ring3_abi_v1_${name}`]; assert.equal(typeof fn, 'function', name); assert.equal(fn.length, arity, name); return [name, fn];
   }));
-  const ctx = {owner, kind, api, memory: instance.exports.memory, low: ordinal, high: 0xc8397000, expected: Buffer.alloc(SIZE), pages: new Map()};
+  const ctx = {owner, kind, api, memory: instance.exports.memory, low: ordinal, high: 0xc8397000, expected: createArena(SIZE), pages: new Map()};
   assert.equal(api.open(6, ctx.low, ctx.high), 0); ctx.base = api.arena_ptr() >>> 0;
   ctx.expected.set(state(Array(8).fill(0), 0, 2)); ctx.expected.set(record('R3EX', 40, [1, 0, 0, 0, 0, 0]), 56); ctx.expected.set(helper(), 100); check(ctx, 'independently initialized arena');
   request(ctx, pattern); pure(ctx, () => api.map(PC, 1, 7), 'code map'); upload(ctx, PC, programs[kind]);

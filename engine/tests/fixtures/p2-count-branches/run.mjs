@@ -6,7 +6,7 @@ import {readEngine} from "../support/engine.mjs";
 
 const [enginePath,output,root]=process.argv.slice(2);
 assert.ok(enginePath&&output&&root);assert.match(process.env.RING3_ENGINE_SHA256??"",/^[a-f0-9]{64}$/);
-const engine=readEngine(enginePath),SIZE=4364,PC=0x1000,END=0x3000,TOP=0xfffffffe;
+const engine=readEngine(enginePath),SIZE=4612,PC=0x1000,END=0x3000,TOP=0xfffffffe;
 const hash=b=>createHash("sha256").update(b).digest("hex"),core=Buffer.alloc(64,0xcc),endpoints=Buffer.alloc(32,0xcc),wrap=Buffer.from([0xe2,0x80]);
 const coreSpecs=[],endSpecs=[];
 for(let i=0;i<4;i++){core.set([0xe0+i,4],i*8);core.set([0xe0+i,0xfe],32+i*8);coreSpecs.push([PC+i*8,2],[PC+32+i*8,2]);
@@ -88,6 +88,6 @@ assert.equal(targets.length,258);assert.equal(journal.filter(r=>r.type==="input"
 assert.deepEqual(sourcePins(),sources,"source epoch unchanged");const raw=Buffer.concat(frames);writeFileSync(join(output,"arenas.bin"),raw,{flag:"wx"});
 const result={status:"ok",engine:{bytes:engine.bytes.length,sha256:engine.sha256},counts,source_pins:sources,modules,targets,journal,
   raw:{file:"arenas.bin",frames:frames.length,bytes:raw.length,sha256:hash(raw)},limits:["finite four flat32 rel8 forms, no address16/prefix/segment/recursiveCFG extension",
-    "224core rows and bounded retained loops are qualified inputs, not exhaustive ECX/FLAGS","full4364 arena pairs; no RAM writes/reads or hardware/performance claim",
+    "224core rows and bounded retained loops are qualified inputs, not exhaustive ECX/FLAGS","full4612 arena pairs; no RAM writes/reads or hardware/performance claim",
     "actual bound execution; native six profiles only validate generated modules","stale live allocation compared before release/recompile; no closed-allocation proof","open/getter calls outside arena journal; all generated calls and declared host edits saved"]};
 writeFileSync(join(output,"result.json"),JSON.stringify(result,null,2),{flag:"wx"});console.log(JSON.stringify({status:result.status,...counts,raw_frames:frames.length,output}));

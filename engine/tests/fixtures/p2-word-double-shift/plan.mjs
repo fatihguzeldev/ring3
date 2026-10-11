@@ -1,9 +1,10 @@
+import {createArena} from '../support/arena.mjs';
 import assert from 'node:assert/strict';
 import {mkdirSync, writeFileSync} from 'node:fs';
 import {resolve} from 'node:path';
 import {fileURLToPath} from 'node:url';
 
-export const SIZE = 4364, CODE = 0x1000, BANK_BYTES = 8192;
+export const SIZE = 4612, CODE = 0x1000, BANK_BYTES = 8192;
 export const FLAGS = [2, 0xcd7], BOUNDARIES = [0, 1, 16, 17, 31];
 
 function record(magic, size, fields = [], version = 1) {
@@ -26,7 +27,7 @@ export function seedHex(pc, flags = 2, pattern = 0, destination = 0, source = 2,
   return bytes.toString('hex');
 }
 export function initialHex() {
-  const bytes = Buffer.from(Array.from({length: SIZE}, (_, i) => (i * 37 + 19) & 255));
+  const bytes = Buffer.from(Array.from({length: SIZE}, (_, i) => (i * 37 + 19) & 255)); bytes.set(createArena(SIZE).subarray(4364), 4364);
   bytes.set(Buffer.from(seedHex(CODE), 'hex'));
   const fp = record('R3FP', 128);
   for (const [at, value] of [[16, 0x27f], [18, 0x2840], [20, 0xaaaa], [22, 0x345], [32, 0x33], [34, 0x2b]]) fp.writeUInt16LE(value, at);

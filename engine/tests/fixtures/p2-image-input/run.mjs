@@ -12,7 +12,7 @@ const oracleBytes = readFileSync(join(fixtureRoot, 'oracle.json')), oracle = JSO
 assert.equal(hash(oracleBytes), '4f58091a158f97358117a48cde260be1ec9a02b38ad459995569d51d60631cc5');
 const programBytes = readFileSync(join(fixtureRoot, 'program.S'));
 assert.equal(hash(programBytes), '40e257bd9b6271283756a117167c1e215f2f81c0f2228b0e2b530bdfbd336d2a');
-const size = 4236, transfer = 140, artifacts = {}, observations = [], identities = [], operations = [], hostInputs = [];
+const size = 4612, transfer = 140, artifacts = {}, observations = [], identities = [], operations = [], hostInputs = [];
 
 function authoredText(object) {
   const view = new DataView(object.buffer, object.byteOffset, object.byteLength);

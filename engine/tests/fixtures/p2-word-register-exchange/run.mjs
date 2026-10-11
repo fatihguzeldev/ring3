@@ -6,7 +6,7 @@ import {readEngine} from '../support/engine.mjs';
 
 const [enginePath, output, root] = process.argv.slice(2);
 assert.ok(enginePath && output && root);
-const engine = readEngine(enginePath), SIZE = 4364, PC = 0x1000, DATA = 0x5000;
+const engine = readEngine(enginePath), SIZE = 4612, PC = 0x1000, DATA = 0x5000;
 const initial = readFileSync(join(output, 'initial-arena.bin'));
 assert.equal(initial.length, SIZE);
 assert.deepEqual(WebAssembly.Module.imports(engine.module), []);
@@ -60,7 +60,7 @@ function run(c, module, budget, next, {label, reason = 1, retired = 1, status = 
   const expected = arena(c);
   if (status === 0) {expected.set(state(next)); expected.set(exit(reason, retired, exitVersion), 56);}
   assert.equal(module.run(c.base, c.base + 56, budget, c.base + 96), status, label);
-  assert.deepEqual(arena(c), expected, 'full4364 CPU/exit/unchanged helper/FP128 effect: ' + label);
+  assert.deepEqual(arena(c), expected, 'full4612 CPU/exit/unchanged helper/FP128 effect: ' + label);
   counts.runs++; if (status === 0) counts.retired += retired;
 }
 function checkRam(c, address, expected) {
@@ -232,7 +232,7 @@ const result = {status: 'ok', engine_sha256: engine.sha256, source_pins: sourceP
     'finite exact single66 WORD register XCHG64 ModRM pairs and eight short encodings including NOP in four actual bound profiles; native six-profile coverage is separate',
     'independent arithmetic lowWORD/own-high oracle and eight literal anchors; both original lows captured, self aliases preserve whole parents',
     'all128 valid raw FLAGS per ModRM/short family through distinguishing selected pairs rather than a Cartesian bank',
-    'guard-only pure V1 units; entire helper/FP128 and remaining4364 arena preserved, no new helper/local/ABI/V5 change',
+    'guard-only pure V1 units; entire helper/FP128 and remaining4612 arena preserved, no new helper/local/ABI/V5 change',
     'maxsix units/context; fixed code/RX permissions before all captures, retained resident success versus neutral replacement generation mismatch3',
     'returned register/bitmap/sum/index/FLAGS consumers without CPU reseeding; declared current-parent witnesses are separate',
     'read-only RAM/RX code canaries; no memory XCHG/implicit locking/atomicity/fault/SMC, exhaustiveISA, speed, PE/browser/SDK/game or hostedCI claim',

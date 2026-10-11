@@ -1,10 +1,11 @@
+import {createArena} from '../support/arena.mjs';
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
 import {mkdirSync, writeFileSync} from 'node:fs';
 import {resolve} from 'node:path';
 import {fileURLToPath} from 'node:url';
 
-export const SIZE = 4364;
+export const SIZE = 4612;
 export const PAGES = 16;
 export const BUDGET = 8192;
 export const SHAPES = [1, 4, 8].flatMap(units => [1, 8].map(blocks => ({id: 0, units, blocks}))).map((s, id) => ({...s, id}));
@@ -27,7 +28,7 @@ export function seedHex(eax = 0xfffff001) {
 }
 
 export function initialHex() {
-  const b = Buffer.from(Array.from({length: SIZE}, (_, i) => (i * 37 + 19) & 255));
+  const b = Buffer.from(Array.from({length: SIZE}, (_, i) => (i * 37 + 19) & 255)); b.set(createArena(SIZE).subarray(4364), 4364);
   const fp = record('R3FP', 128, []);
   for (const [at, value] of [[16, 0x27f], [18, 0x2840], [20, 0xaaaa], [22, 0x345], [32, 0x33], [34, 0x2b]]) fp.writeUInt16LE(value, at);
   fp.writeUInt32LE(0x12345678, 24); fp.writeUInt32LE(0x9abcdef0, 28);

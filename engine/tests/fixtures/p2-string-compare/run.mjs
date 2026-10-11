@@ -6,7 +6,7 @@ import {readEngine} from "../support/engine.mjs";
 
 const [enginePath,output,root]=process.argv.slice(2);
 assert.ok(enginePath&&output&&root); assert.match(process.env.RING3_ENGINE_SHA256??"",/^[a-f0-9]{64}$/);
-const engine=readEngine(enginePath), SIZE=4364, PC=0x1000, SRC=0x5008, DST=0x6008;
+const engine=readEngine(enginePath), SIZE=4612, PC=0x1000, SRC=0x5008, DST=0x6008;
 const hash=bytes=>createHash("sha256").update(bytes).digest("hex"), bank=Buffer.alloc(64,0xcc);
 const blocks=[[0,[0xa6,0xeb,0]],[8,[0xae,0xeb,0]],[16,[0xac,0xae,0xac,0xae,0xeb,0]],
   [24,[0xa6,0xa6,0xeb,0]],[32,[0x90,0xa6,0xeb,0]],[40,[0x90,0xae,0xeb,0]]];
@@ -124,6 +124,6 @@ assert.deepEqual(sourcePins(),sources,"fixture sources unchanged");
 const raw=Buffer.concat(frames);writeFileSync(join(output,"arenas.bin"),raw,{flag:"wx"});
 const result={status:"ok",engine:{bytes:engine.bytes.length,sha256:engine.sha256},counts,source_pins:sources,modules,targets,journal,
   raw:{file:"arenas.bin",frames:frames.length,bytes:raw.length,sha256:hash(raw)},limits:["finite prefix-free CMPSB/SCASB; no REP/wider/address16/segment extension",
-    "all saved full4364 arena pairs; literal physical byte diagnostics are not a full RAM dump","native tests decode/validate modules; this fixture executes actual generated Wasm",
+    "all saved full4612 arena pairs; literal physical byte diagnostics are not a full RAM dump","native tests decode/validate modules; this fixture executes actual generated Wasm",
     "ESI-first read-fault priority is engine contract, not universal hardware claim","live stale allocation receipt only before close; no closed pointer lifetime or performance claim"]};
 writeFileSync(join(output,"result.json"),JSON.stringify(result,null,2),{flag:"wx"});console.log(JSON.stringify({status:result.status,...counts,raw_frames:frames.length,output}));

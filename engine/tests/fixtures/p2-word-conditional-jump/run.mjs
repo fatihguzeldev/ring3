@@ -4,7 +4,7 @@ import {readFileSync, writeFileSync} from 'node:fs';
 import {join} from 'node:path';
 import {readEngine} from '../support/engine.mjs';
 
-const [enginePath, output, root] = process.argv.slice(2), SIZE = 4364;
+const [enginePath, output, root] = process.argv.slice(2), SIZE = 4612;
 assert.ok(enginePath && output && root);
 const engine = readEngine(enginePath), initial = readFileSync(join(output, 'initial-arena.bin'));
 assert.equal(initial.length, SIZE); assert.deepEqual(WebAssembly.Module.imports(engine.module), []);
@@ -85,7 +85,7 @@ function seed(c, pc, f = 0xcd7, r = registers()) {
 function run(c, unit, budget, next, label, {reason = 1, retired = 1, status = 0} = {}) {
   const expected = arena(c); if (status === 0) {expected.set(state(next)); expected.set(exit(reason, retired), 56);}
   assert.equal(unit.run(c.base, c.base + 56, budget, c.base + 96), status, label);
-  assert.deepEqual(arena(c), expected, 'full4364 GPR/FLAGS/EIP/exit/helper/dirtyFP: ' + label);
+  assert.deepEqual(arena(c), expected, 'full4612 GPR/FLAGS/EIP/exit/helper/dirtyFP: ' + label);
   const after = arena(c); observations.push({context: c.id, label, status, expected_reason: status === 0 ? reason : null,
     expected_retired: status === 0 ? retired : null, observed_reason: status === 0 ? after.readUInt32LE(72) : null,
     observed_retired: status === 0 ? after.readUInt32LE(76) : null});
@@ -184,7 +184,7 @@ assert.deepEqual(counts, {contexts: 6, runs: 12460, retired: 12460, flag_inputs:
   controls: 36, consumers: 60, retained: 6, invalidated: 4}); assert.equal(modules.length, 18);
 const result = {status: 'ok', engine_sha256: engine.sha256, source_pins: sourcePins, counts, modules, observations,
   limits: ['finite16 exact66 nearJcc forms in six standalone/replacement/resident explicit/entry profiles; arithmetic predicate and signed-modulo oracles plus literal truth/target anchors',
-    'all16 conditions/all128 valid FLAGS, eight GPRs and full4364 arena including dirtyFP128/helper retained; pure memory-only standalone or guard-only bound imports, ExitV1',
+    'all16 conditions/all128 valid FLAGS, eight GPRs and full4612 arena including dirtyFP128/helper retained; pure memory-only standalone or guard-only bound imports, ExitV1',
     'taken low16 target versus false full32 wrapping nextPC; absent/readonly successors are not Execute fetched; live CMP/JZ/WORD-JMP/ADC/SETcc uses returned state without CPU repair',
     'two banks eight blocks/eight instructions each; third bank six blocks/twelve instructions; three captures/context, all code and permissions fixed before capture',
     'native standalone source currentness checks byte retrieval; saved unbound modules have no runtime source guard; bound generation3 and codeinvalidated4 are neutral',

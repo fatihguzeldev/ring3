@@ -13,7 +13,7 @@ const expectedFunctions = [...exportSource.matchAll(/export_name = "(ring3_abi_v
 assert.equal(new Set(expectedFunctions).size, expectedFunctions.length);
 assert.deepEqual(WebAssembly.Module.exports(engineModule).filter(row => row.kind === 'function').map(row => row.name).sort(), expectedFunctions);
 assert.deepEqual(WebAssembly.Module.exports(engineModule).filter(row => row.kind !== 'function'), [{name: 'memory', kind: 'memory'}]);
-const SIZE = 4236, TRANSFER = 140;
+const SIZE = 4612, TRANSFER = 140;
 const REG = [0x1234807f, 0x23457f80, 0x34560f10, 0x4567ff00, 0x56789abc, 0x6789abcd, 0x789abcde, 0x89abcdef];
 const LEAVE = Buffer.from('c9eb000f0b', 'hex'), RETRY = Buffer.from('47c989efeb000f0b', 'hex');
 const FRAME = Buffer.from('b82a000000e816000000a300300000eb000f0bcccccccccccccccccccccccccc5589e58d6424f0c745fc88776655b878563412c9c3', 'hex');

@@ -1,3 +1,4 @@
+import {createArena} from '../support/arena.mjs';
 import assert from "node:assert/strict";
 import {createHash} from "node:crypto";
 import {readFileSync, writeFileSync} from "node:fs";
@@ -7,7 +8,7 @@ import {readEngine} from "../support/engine.mjs";
 const [enginePath, output, root] = process.argv.slice(2);
 assert.ok(enginePath && output && root);
 assert.match(process.env.RING3_ENGINE_SHA256 ?? "", /^[0-9a-f]{64}$/);
-const engine = readEngine(enginePath), SIZE = 4364, FP = 4236, PC = 0x1000, TABLE = 0x4008;
+const engine = readEngine(enginePath), SIZE = 4612, FP = 4236, PC = 0x1000, TABLE = 0x4008;
 assert.deepEqual(WebAssembly.Module.imports(engine.module), []);
 const program = Buffer.from("66a566a70f90c166af0f92c2b800803ca566af0f94c3eb00", "hex");
 assert.equal(program.length, 24);
@@ -65,7 +66,7 @@ for (const owner of ["replacement", "resident"]) for (const direction of ["forwa
   for (const name of ["open", "close", "arena_ptr", "map", "protect", "upload", "compile", "compile_resident", "generation", "module_ptr", "module_len", "guard", "guard_resident", "read8", "read16", "store16", "store_resident16"])
     ctx.api[name] = instance.exports["ring3_abi_v1_" + name];
   assert.equal(ctx.api.open(2, context + 1, 0x574d4353), 0); ctx.base = ctx.api.arena_ptr() >>> 0;
-  ctx.expected = Buffer.alloc(SIZE); ctx.expected.set(state(Array(8).fill(0), 0, 2));
+  ctx.expected = createArena(SIZE); ctx.expected.set(state(Array(8).fill(0), 0, 2));
   ctx.expected.set(exit(1, 0, 1), 56); ctx.expected.set(freshHelper(), 100); ctx.expected.set(fpu(), FP); check(ctx, "initialized full arena");
   for (const address of [PC, TABLE & ~0xfff]) host(ctx, "map", address, 1, address === PC ? 7 : 3);
   upload(ctx, PC, program, "literal guest bank"); host(ctx, "protect", PC, 1, 4);
@@ -113,5 +114,5 @@ assert.equal(phases.reduce((sum, p) => sum + p.retired, 0), 36); assert.deepEqua
 const result = {status: "ok", engine: {file: "engine.wasm", bytes: engine.bytes.length, sha256: engine.sha256}, modules, initial_frames: initialFrames, inputs, hosts, phases, ram,
   raw: {file: "arenas.bin", frames: frames.length, bytes: raw.length, sha256: hash(raw)}, source_sha256: beforeSources,
   counts: {owners: 2, directions: 2, contexts: 4, modules: 4, movsw: 4, cmpsw: 4, scasw: 8, setcc: 12, mov_eax: 4, jumps: 4, generated_calls: 36, retired: 36, raw_frames: 72, arena_inputs: 20, uploads: 8, host_rows: 76, live_ram_bytes: 48, physical_files: 8},
-  claim: "retained MOVSW-written word->CMPSW/SETO->SCASW/SETB->guest currentAX MOV->SCASW/SETZ->cold; nine single-instruction phases/context; no interphase host CPU/RAM reseed/diagnostic; four explicit owner/direction contexts; every generated before/after image is complete4364 with opaqueFP preserved; end-only RAM/canaries are observed live Read8 helper diagnostics and ordered host records, not a physical RAM dump or full host-arena journal"};
+  claim: "retained MOVSW-written word->CMPSW/SETO->SCASW/SETB->guest currentAX MOV->SCASW/SETZ->cold; nine single-instruction phases/context; no interphase host CPU/RAM reseed/diagnostic; four explicit owner/direction contexts; every generated before/after image is complete4612 with opaqueFP preserved; end-only RAM/canaries are observed live Read8 helper diagnostics and ordered host records, not a physical RAM dump or full host-arena journal"};
 writeFileSync(join(output, "result.json"), JSON.stringify(result, null, 2), {flag: "wx"}); console.log(JSON.stringify({status: result.status, counts: result.counts, output}));

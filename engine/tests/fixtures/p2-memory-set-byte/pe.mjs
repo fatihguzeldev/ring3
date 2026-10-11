@@ -3,7 +3,7 @@ import {createHash} from 'node:crypto';
 import {readFileSync, writeFileSync} from 'node:fs';
 import {join} from 'node:path';
 
-const SIZE = 4364, TRANSFER = 140, FP = 4236, EXIT = 0x8020, EXIT_ID = 0x10003, MARKER = 0xc8c00015;
+const SIZE = 4612, TRANSFER = 140, FP = 4236, EXIT = 0x8020, EXIT_ID = 0x10003, MARKER = 0xc8c00015;
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
 const words = fields => {const b = Buffer.alloc(fields.length * 4); fields.forEach((v, i) => b.writeUInt32LE(v >>> 0, i * 4)); return b;};
 function record(magic, length, fields, version = 1) {
@@ -55,16 +55,16 @@ export function runPeProof({engine, output, initial}) {
   const arena = c => Buffer.from(new Uint8Array(c.memory.buffer, c.arena, SIZE));
   function input(c, offset, bytes) {
     const expected = arena(c); expected.set(bytes, offset); new Uint8Array(c.memory.buffer).set(bytes, c.arena + offset);
-    assert.deepEqual(arena(c), expected, 'declared PE host input retains remaining full4364 arena');
+    assert.deepEqual(arena(c), expected, 'declared PE host input retains remaining full4612 arena');
   }
   function pure(c, name, args) {
-    const before = arena(c); assert.equal(c.api[name](...args), 0, name); assert.deepEqual(arena(c), before, name + ' full4364 neutrality');
+    const before = arena(c); assert.equal(c.api[name](...args), 0, name); assert.deepEqual(arena(c), before, name + ' full4612 neutrality');
   }
   function read(c, address, length, expectedBytes) {
     const observed = Buffer.alloc(length);
     for (let offset = 0; offset < length; offset++) {
       const expected = arena(c), helper = record('R3MH', 40, [0, expectedBytes[offset], 0, 0, 0, 1], 2); expected.set(helper, 100);
-      assert.equal(c.api.read8(address + offset), 0); assert.deepEqual(arena(c), expected, 'PE selected byte diagnostic retains full4364 outside helper');
+      assert.equal(c.api.read8(address + offset), 0); assert.deepEqual(arena(c), expected, 'PE selected byte diagnostic retains full4612 outside helper');
       observed[offset] = arena(c).readUInt32LE(120); counts.diagnostic_reads++;
     }
     assert.deepEqual(observed, Buffer.from(expectedBytes)); return observed;
@@ -112,7 +112,7 @@ export function runPeProof({engine, output, initial}) {
     const expected = arena(c);
     if (status === 0) {expected.set(state(registers, pc, flags)); expected.set(exit(reason, retired, version, detail), 56); if (helper) expected.set(helper, 100);}
     const observedStatus = status === 0 ? unit.run(c.arena, c.arena + 56, 64, c.arena + 96) : unit.run(0xffffffff, 0xffffffff, 0, 0xffffffff);
-    assert.equal(observedStatus, status); assert.deepEqual(arena(c), expected, 'PE run full4364 CPU/FLAGS/helper/dirtyFP: ' + label);
+    assert.equal(observedStatus, status); assert.deepEqual(arena(c), expected, 'PE run full4612 CPU/FLAGS/helper/dirtyFP: ' + label);
     const after = arena(c); observations.push({context: c.id, module: unit.file, label, expected_status: status, observed_status: observedStatus,
       expected_reason: status === 0 ? reason : null, observed_reason: status === 0 ? after.readUInt32LE(72) : null,
       expected_retired: status === 0 ? retired : null, observed_retired: status === 0 ? after.readUInt32LE(76) : null,
@@ -182,5 +182,5 @@ export function runPeProof({engine, output, initial}) {
   counts.modules = modules.length; counts.helper_calls = helper_trace.length;
   assert.deepEqual(counts, {contexts: 8, modules: 12, runs: 20, retired: 256, helper_calls: 136, provider_completions: 8, terminal_rejects: 8, diagnostic_reads: 1368, protection_probes: 32});
   return {contexts, modules, observations, helper_trace, counts, image_sha256: hash(image), program_sha256: hash(text),
-    claim: 'same independently reconstructed5632-byte PE/150-byte program at preferred/relocated bases in allfourboundprofiles; genuine startup, no CPU reseed, dirtyFPafterstartup;32 guest retirements/path, named terminal ExitProcess, observed forward-only guest helpers; full4364 run assertions and selected32-byte destination/data/stack diagnostics, no fullRAM rollback claim'};
+    claim: 'same independently reconstructed5632-byte PE/150-byte program at preferred/relocated bases in allfourboundprofiles; genuine startup, no CPU reseed, dirtyFPafterstartup;32 guest retirements/path, named terminal ExitProcess, observed forward-only guest helpers; full4612 run assertions and selected32-byte destination/data/stack diagnostics, no fullRAM rollback claim'};
 }

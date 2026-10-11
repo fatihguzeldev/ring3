@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { readEngine } from "../support/engine.mjs";
 const [enginePath, output, root] = process.argv.slice(2);
 assert.ok(enginePath && output && root); assert.match(process.env.RING3_ENGINE_SHA256 ?? "", /^[a-f0-9]{64}$/);
-const engine = readEngine(enginePath), SIZE = 4364, PC = 0x1000, SRC = 0x5000;
+const engine = readEngine(enginePath), SIZE = 4612, PC = 0x1000, SRC = 0x5000;
 const hash = b => createHash("sha256").update(b).digest("hex");
 const initial = readFileSync(join(output, "initial-arena.bin")); assert.equal(initial.length, SIZE);
 const bank = Buffer.alloc(64, 0xcc); for (const [at, code] of [[0,[0xad,0xeb,0]], [16,[0xbe,8,0x70,0,0,0xad,0xeb,0]], [32,[0xad,0xad,0xeb,0]]]) bank.set(code,at);
@@ -38,7 +38,7 @@ function seed(c,pc,flags,source=SRC+8){const r=[0xa5812347,0x91b2c378,0x34560f10
 function diagnostic(c,address,value){host(c,"read32",[address],"declared current DWORD RAM");assert.deepEqual(arena(c).subarray(100,140),helper(value),"canonical diagnostic equals declared literal");}
 function run(c,budget,label,wanted,reason=1,count=1,f,raw=0,value,params){const before=capture(c,"before generated "+label),expected=arena(c);
  if(raw===0){expected.set(state(wanted));expected.set(exit(reason,count,f),56);if(f||value!==undefined)expected.set(helper(value??0,f),100);}
- const args=params??[c.base,c.base+56,budget,c.base+96];assert.equal(c.run(...args),raw,label);assert.deepEqual(arena(c),expected,"full4364 "+label);
+ const args=params??[c.base,c.base+56,budget,c.base+96];assert.equal(c.run(...args),raw,label);assert.deepEqual(arena(c),expected,"full4612 "+label);
  generated++;if(raw===0)retired+=count;if(f)faults++;if(value!==undefined)loads++;
  journal.push({context:c.ordinal,owner:c.owner,entries:c.entries,name:"run",label,budget,status:raw,args,before,after:capture(c,"after generated "+label)});}
 function load(c,label,value){const before=cpu(c),next={registers:[...before.registers],pc:(before.pc+1)>>>0,flags:before.flags};next.registers[0]=value>>>0;next.registers[6]=(before.registers[6]+(before.flags&0x400?-4:4))>>>0;run(c,1,label,next,1,1,undefined,0,value);}

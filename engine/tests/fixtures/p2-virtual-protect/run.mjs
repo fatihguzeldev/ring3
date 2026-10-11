@@ -7,7 +7,7 @@ import {readEngine} from '../support/engine.mjs';
 
 const [enginePath, output, root] = process.argv.slice(2);
 assert.ok(root && output);
-const engine = readEngine(enginePath), SIZE = 4364, TRANSFER = 140;
+const engine = readEngine(enginePath), SIZE = 4612, TRANSFER = 140;
 const BASE = 0x500000, ENTRY = BASE + 0x1000, GATE = 0x8000, STACK = 0x70000, TOP = STACK + 4096, ALLOC = 0x10000000;
 const initial = readFileSync(join(output, 'initial-arena.bin')); assert.equal(initial.length, SIZE);
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
@@ -233,6 +233,6 @@ const result = {
   contexts: contexts.map(e => ({owner: e.owner, captures: e.compilations, generated_runs: e.calls, retired: e.retired, provider_completions: e.tokens, diagnostic_reads: e.diagnostics, final: e.final})),
   modules, observations, helper_trace: helperTrace, provider_memory_writes: providerWrites, public_diagnostics: diagnostics,
   sources_before: sourcesBefore, sources_after: sourcesAfter, artifacts,
-  claim_ceiling: 'two authored relocated PE owner contexts; exact104-byte linkedV6; guest RW code stores, real named VirtualProtect RX, real CALL/RET42, provider old-protection DWORDs4/20/4 and guest RW mutation, then NOACCESS; full4364/dirtyFP and selected code/stack/output/canary RAM only. Source4 is causal before new captures in both owners; later replacement3 is generation rejection. No host mutation API for allocated pages; oldProtect effects are provider writes, separate from forwarded guest helpers. Six-mode/failure/atomicity/callback breadth is native evidence; no cache/DEP/CFG, general Windows, concurrency or performance claim.',
+  claim_ceiling: 'two authored relocated PE owner contexts; exact104-byte linkedV6; guest RW code stores, real named VirtualProtect RX, real CALL/RET42, provider old-protection DWORDs4/20/4 and guest RW mutation, then NOACCESS; full4612/dirtyFP and selected code/stack/output/canary RAM only. Source4 is causal before new captures in both owners; later replacement3 is generation rejection. No host mutation API for allocated pages; oldProtect effects are provider writes, separate from forwarded guest helpers. Six-mode/failure/atomicity/callback breadth is native evidence; no cache/DEP/CFG, general Windows, concurrency or performance claim.',
 };
 save('result.json', JSON.stringify(result, null, 2)); console.log(JSON.stringify({status: 'PASS', ...counts, output}));

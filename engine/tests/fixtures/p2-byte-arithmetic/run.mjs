@@ -11,7 +11,7 @@ const engineBytes = readFileSync(enginePath), engineModule = new WebAssembly.Mod
 assert.deepEqual(WebAssembly.Module.imports(engineModule), []);
 assert.equal(WebAssembly.Module.exports(engineModule).length, 71);
 assert.equal(WebAssembly.Module.exports(engineModule).filter(row => row.kind === 'function').length, 70);
-const SIZE = 4236, TRANSFER = 140, EXIT = 0x8020, EXIT_ID = 0x10003, MARKER = 0xc8c00008;
+const SIZE = 4612, TRANSFER = 140, EXIT = 0x8020, EXIT_ID = 0x10003, MARKER = 0xc8c00008;
 const initialRegisters = [0x1234807f, 0x23457f80, 0x34560f10, 0x4567ff00, 0x56789abc, 0x6789abcd, 0x789abcde, 0x89abcdef];
 const boundaries = [0, 1, 15, 16, 127, 128, 255];
 const apiNames = ['open', 'close', 'arena_ptr', 'map', 'upload', 'read32', 'write8', 'compile_entries', 'compile_resident_entries', 'generation', 'module_ptr', 'module_len', 'guard', 'guard_resident', 'store32', 'store_resident32', 'begin_image_input', 'append_image_input', 'load_pe32_linked_v2_input_at', 'start_loaded_image', 'capture_call', 'capture_resident_call', 'complete_windows_call', 'complete_resident_windows_call'];

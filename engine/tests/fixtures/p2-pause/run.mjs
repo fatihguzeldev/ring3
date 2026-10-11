@@ -4,7 +4,7 @@ import {readFileSync, writeFileSync} from 'node:fs';
 import {join} from 'node:path';
 import {readEngine} from '../support/engine.mjs';
 
-const [enginePath, output, root] = process.argv.slice(2), SIZE = 4364;
+const [enginePath, output, root] = process.argv.slice(2), SIZE = 4612;
 assert.ok(enginePath && output && root);
 const engine = readEngine(enginePath), initial = readFileSync(join(output, 'initial-arena.bin'));
 assert.equal(initial.length, SIZE);
@@ -100,7 +100,7 @@ function compile(c, name, blocks) {
 function run(c, unit, budget, next, label, {reason = 1, retired = 1, status = 0, value, transfer, version = unit.exitVersion} = {}) {
   const before = arena(c), expected = Buffer.from(before), beforeEvents = helperTrace.length;
   if (status === 0) {expected.set(state(next)); expected.set(exit(reason, retired, version), 56); if (value !== undefined) expected.set(helper(value), 100); if (transfer) expected.set(transfer, 140);}
-  const actual = unit.run(c.base, c.base + 56, budget, c.base + 96); assert.equal(actual, status, label); assert.deepEqual(arena(c), expected, 'full4364: ' + label);
+  const actual = unit.run(c.base, c.base + 56, budget, c.base + 96); assert.equal(actual, status, label); assert.deepEqual(arena(c), expected, 'full4612: ' + label);
   const b = arena(c), saved = {};
   if (c.purpose === 'poll') for (const [phase, bytes] of [['before', before], ['after', b]]) {
     const file = `arena-${c.id}-${counts.runs + 1}-${phase}.bin`; writeFileSync(join(output, file), bytes, {flag: 'wx'}); saved[phase] = {file, sha256: hash(bytes), bytes: bytes.length};
@@ -207,7 +207,7 @@ assert.deepEqual(counts, {contexts: 10, runs: 188, retired: 444, pure_flags: 48,
 assert.equal(modules.length, 18);
 const result = {status: 'ok', engine_sha256: engine.sha256, source_pins: sourcePins, counts, contexts, modules, observations, helper_trace: helperTrace,
   limits: ['exact F390 PAUSE architectural no-op only; selected FLAGS and live producer/ADC/SETcc in six profiles; all128 NOP FLAGS evidence reused',
-    'original unmodified40-byte compiler polling leaf, four bound profiles, finite limit0/3/5 and controlled ready values; full4364 including dirtyFP128 compared per call',
+    'original unmodified40-byte compiler polling leaf, four bound profiles, finite limit0/3/5 and controlled ready values; full4612 including dirtyFP128 compared per call',
     'canonical read32/store32 forwarding observed separately from selected RAM diagnostic reads; no arbitrary helper substitute or whole RAM dump',
     'two pure captures/context and one polling capture/context; poll7blocks20instructions, pure1block2 and live1block6; default8/64/65536 limits unchanged',
     'two resident polling contexts reuse one installed identity and returning dispatcher; cancellation/budget/host ready write resume returned CPU without reseed',

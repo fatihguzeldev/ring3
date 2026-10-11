@@ -5,7 +5,7 @@ import {fileURLToPath} from 'node:url';
 import {initialHex} from '../resident-phases/plan.mjs';
 import {sorted} from '../p2-pe32-sort/oracle.mjs';
 
-export const SIZE = 4364;
+export const SIZE = 4612;
 export const CODE = 0x1000;
 export const DATA = 0x3000;
 export const BUDGET = 1283;

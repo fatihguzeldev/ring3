@@ -1,10 +1,11 @@
+import {createArena} from '../support/arena.mjs';
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
 import {lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, writeFileSync} from 'node:fs';
 import {dirname, join, relative, resolve, sep} from 'node:path';
 import {fileURLToPath} from 'node:url';
 
-const SIZE = 4364, TRANSFER = 140, FP = 4236;
+const SIZE = 4612, TRANSFER = 140, FP = 4236;
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
 const word = (bytes, at) => bytes.readUInt32LE(at);
 const put = (bytes, at, value) => bytes.writeUInt32LE(value >>> 0, at);
@@ -24,7 +25,7 @@ function header(bytes, at, magic, length, version = 1) {
   for (const [offset, n] of [[4, 0x10000 | version], [8, length], [12, 0]]) put(bytes, at + offset, n);
 }
 function defaultArena() {
-  const bytes = Buffer.alloc(SIZE);
+  const bytes = createArena(SIZE);
   header(bytes, 0, 'R3ST', 56); put(bytes, 52, 2);
   header(bytes, 56, 'R3EX', 40); put(bytes, 72, 1);
   header(bytes, 100, 'R3MH', 40);
@@ -318,7 +319,7 @@ function callEffect(c, action, program) {
 }
 
 function authoredArena() {
-  const bytes = Buffer.from(Array.from({length: SIZE}, (_, i) => (37 * i + 19) & 255));
+  const bytes = Buffer.from(Array.from({length: SIZE}, (_, i) => (37 * i + 19) & 255)); bytes.set(createArena(SIZE).subarray(4364), 4364);
   bytes.fill(0, 0, 56); header(bytes, 0, 'R3ST', 56);
   [0xfffffff0, 0x11112222, 0x33334444, 0x55556666, 0x77778888, 0x9999aaaa, 0xbbbbcccc, 0xddddeeee, 0x1000, 0xcd7].forEach((n, i) => put(bytes, 16 + i * 4, n));
   exit(bytes, 3, 0, 3); put(bytes, 96, 0);

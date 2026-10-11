@@ -1,3 +1,4 @@
+import {createArena} from '../support/arena.mjs';
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { readFileSync, readdirSync, writeFileSync } from "node:fs";
@@ -10,7 +11,7 @@ assert.ok(root, "expected current engine, output directory and repository root")
 const hash = (bytes) => createHash("sha256").update(bytes).digest("hex");
 const { bytes: engineBytes, module: engineModule, sha256: engineSha256 } = readEngine(enginePath);
 assert.deepEqual(WebAssembly.Module.imports(engineModule), []);
-const SIZE = 4236,
+const SIZE = 4612,
   TRANSFER = 140,
   PC = 0x1000,
   COLD = 0x1f00,
@@ -416,7 +417,7 @@ function unmap(ctx, address) {
 }
 function fresh(owner, selected, role) {
   const ordinal = ++counts.contexts,
-    expected = Buffer.alloc(SIZE);
+    expected = createArena(SIZE);
   expected.set(state(Array(8).fill(0), 0, 2));
   expected.set(exit(1, 0, 0, 0, 0, 1), 56);
   expected.set(wordHelper(0), 100);

@@ -6,7 +6,7 @@ import {readEngine} from '../support/engine.mjs';
 
 const [enginePath, output, root] = process.argv.slice(2);
 assert.ok(enginePath && output && root);
-const engine = readEngine(enginePath), SIZE = 4364, PC = 0x1000, DATA = 0x5000;
+const engine = readEngine(enginePath), SIZE = 4612, PC = 0x1000, DATA = 0x5000;
 const initial = readFileSync(join(output, 'initial-arena.bin'));
 assert.equal(initial.length, SIZE);
 assert.deepEqual(WebAssembly.Module.imports(engine.module), []);
@@ -60,7 +60,7 @@ function run(c, module, budget, next, {label, reason = 1, retired = 1, status = 
   const expected = arena(c);
   if (status === 0) {expected.set(state(next)); expected.set(exit(reason, retired), 56);}
   assert.equal(module.run(c.base, c.base + 56, budget, c.base + 96), status, label);
-  assert.deepEqual(arena(c), expected, 'full4364 CPU/exit/unchanged helper/FP128 effect: ' + label);
+  assert.deepEqual(arena(c), expected, 'full4612 CPU/exit/unchanged helper/FP128 effect: ' + label);
   counts.runs++; if (status === 0) counts.retired += retired;
 }
 function checkRam(c, address, expected) {
@@ -249,7 +249,7 @@ const result = {status: 'ok', engine_sha256: engine.sha256, source_pins: sourceP
     'finite exact single66 WORD register BT/BTS/BTR/BTC register-index/imm8 in four actual bound profiles; native standalone six-profile coverage separate',
     'arithmetic bit-digit oracle and16 independent literal cases; original index modulo16, old selected CF, mutation low16 with all parent high16 retained',
     'existing Ring3 FLAGS policy retains ZF/DF/reserved2 and clears undefined arithmetic bits; no hardware undefined-bit equality claim',
-    'pure units import guard only and use exitV1; entire helper/FP128 and remaining4364 arena stay unchanged by generated calls',
+    'pure units import guard only and use exitV1; entire helper/FP128 and remaining4612 arena stay unchanged by generated calls',
     'all code uploaded before capture; older resident units remain valid, replacement generation mismatch returns neutral status3; explicit current inputs and live consumers are separate',
     'read-only RAM/RX code canaries, no memory operand fault/RMW/SMC, exhaustiveISA, speed, PE/browser/SDK/game or hostedCI claim',
   ]};

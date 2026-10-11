@@ -6,7 +6,7 @@ import {readEngine} from '../support/engine.mjs';
 
 const [enginePath,output,root]=process.argv.slice(2);assert.ok(enginePath&&output&&root);
 assert.match(process.env.RING3_ENGINE_SHA256??'',/^[a-f0-9]{64}$/);
-const engine=readEngine(enginePath),SIZE=4364,FLAGS=[2,0xcd7],BASES=[0x1000,0x3000,0x5000,0x7000];
+const engine=readEngine(enginePath),SIZE=4612,FLAGS=[2,0xcd7],BASES=[0x1000,0x3000,0x5000,0x7000];
 const hash=b=>createHash('sha256').update(b).digest('hex'),initial=readFileSync(join(output,'initial-arena.bin'));
 assert.equal(initial.length,SIZE);assert.deepEqual(readdirSync(output).sort(),['accumulator.x86','chain.x86','initial-arena.bin','modrm.x86','registers.x86']);
 const parents=[0xa53c8001,0xb64dffff,0xc75e7fff,0xd86f00ff,0xe9708000,0xfa810000,0x1b925555,0x2ca3aaaa],banks=[];
@@ -111,6 +111,6 @@ assert.deepEqual(pins(),sourcePins,'source epoch unchanged');assert.deepEqual(pi
 const raw=artifact('arenas.bin',Buffer.concat(frames)),result={status:'ok',engine:{bytes:engine.bytes.length,sha256:engine.sha256},counts,source_pins:sourcePins,source_support_dependency:support,
   banks:banks.map(b=>({name:b.name,pc:b.pc,body:b.body,file:b.name+'.x86',bytes:b.bytes.length,sha256:hash(b.bytes),instructions:b.instructions})),contexts,modules,targets,journal,lifecycle,raw_records:rawRecords,raw:{...raw,frames:frames.length},source_changes:sourceChanges,
   limits:['finite16 register pairs/32 F7 endpoints/8 AX immediates, two initial FLAGS, four bound profiles; no all-values/all-FLAGS/ISA claim','TEST undefined AF deterministically clears; not hardware AF equality',
-    'all full4364 arenas for declared inputs/hosts/generated calls; open after-only/close pre-only, closed raw5 unframed','no data helper/RAM effects/full-RAM dump; all eight full parents preserved by TEST; retained MOV/SETcc writes separately checked',
+    'all full4612 arenas for declared inputs/hosts/generated calls; open after-only/close pre-only, closed raw5 unframed','no data helper/RAM effects/full-RAM dump; all eight full parents preserved by TEST; retained MOV/SETcc writes separately checked',
     'typed module section/import/type/local checks do not prove arbitrary remaining body','resident binding and initial allocator receipts are bounded physical inputs','live stale allocation equality before getter/compile/close is a producer receipt, not saved allocation proof','no performance/whole-suite/CI/graphics/Windows claim']};
 writeFileSync(join(output,'result.json'),JSON.stringify(result,null,2),{flag:'wx'});assert.equal(readdirSync(output).length,28);console.log(JSON.stringify({status:'ok',...counts,raw_frames:frames.length,output}));

@@ -1,3 +1,4 @@
+import {createArena} from '../support/arena.mjs';
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
 import {readFileSync, writeFileSync} from 'node:fs';
@@ -8,7 +9,7 @@ assert.ok(root, 'expected actual engine Wasm, output directory and repository ro
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
 const engineBytes = readFileSync(enginePath), engineModule = new WebAssembly.Module(engineBytes);
 assert.deepEqual(WebAssembly.Module.imports(engineModule), []);
-const SIZE = 4236, TRANSFER = 140, PC = 0x1000, BASIS = [2, 0xcd7];
+const SIZE = 4612, TRANSFER = 140, PC = 0x1000, BASIS = [2, 0xcd7];
 const ALIASES = [['AL', 0, 3], ['CL', 1, 3], ['DL', 2, 3], ['BL', 3, 3], ['AH', 0, 2], ['CH', 1, 2], ['DH', 2, 2], ['BH', 3, 2]];
 const VECTORS = [
   [0x1234807f, 0x234501fe, 0x3456aa55, 0x456600ff, 0x56789abc, 0x6789abcd, 0x789abcde, 0x89abcdef],
@@ -70,7 +71,7 @@ function pure(ctx, action, label, status = 0) {check(ctx, `before ${label}`); as
 function request(ctx, bytes) {refresh(ctx).bytes.set(bytes, ctx.base + TRANSFER); ctx.expected.set(bytes, TRANSFER); check(ctx, 'explicit host request');}
 function upload(ctx, address, bytes) {request(ctx, bytes); pure(ctx, () => ctx.api.upload(address, bytes.length), 'explicit host upload'); counts.host_uploads++; counts.host_uploaded_bytes += bytes.length;}
 function fresh(owner, bank) {
-  const expected = Buffer.alloc(SIZE), ordinal = ++counts.contexts, codePage = Buffer.alloc(4096); codePage.set(banks[bank].bytes);
+  const expected = createArena(SIZE), ordinal = ++counts.contexts, codePage = Buffer.alloc(4096); codePage.set(banks[bank].bytes);
   assert.equal(hash(codePage), PAGE_HASHES[bank]); expected.set(state(Array(8).fill(0), 0, 2)); expected.set(exit(1, 0), 56); expected.set(helper(0), 100);
   const ctx = {owner, bank, cold: banks[bank].cold, expected, codePage, low: ordinal, high: 0xc8860000};
   if (owner === 'standalone') {

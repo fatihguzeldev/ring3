@@ -8,7 +8,7 @@ assert.ok(root, 'expected engine wasm, output directory and repository root');
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
 const engineBytes = readFileSync(enginePath), engineModule = new WebAssembly.Module(engineBytes);
 assert.deepEqual(WebAssembly.Module.imports(engineModule), []);
-const arenaSize = 4236, transfer = 140, controls = [], paths = [], modules = [];
+const arenaSize = 4612, transfer = 140, controls = [], paths = [], modules = [];
 const apiNames = ['open', 'close', 'arena_ptr', 'protect', 'upload', 'read32', 'store_resident32', 'compile_resident_entries', 'generation', 'guard_resident', 'acknowledge_resident_installation', 'begin_image_input', 'append_image_input', 'load_pe32_linked_v4_input_at', 'start_loaded_image', 'capture_resident_call', 'complete_resident_call', 'complete_resident_windows_call', 'begin_resident_callback', 'authorize_resident_callback', 'select_resident_callback_unit', 'finish_resident_callback', 'capture_active_resident_callback_call', 'complete_active_resident_callback_windows_call'];
 let ordinal = 0;
 let guestRetired = 0, captures = 0, providerCompletions = 0, finishes = 0;

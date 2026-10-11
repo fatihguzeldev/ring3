@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import { readFileSync, writeFileSync, readdirSync, lstatSync } from "node:fs";
 import { join } from "node:path";
 import { readEngine } from "../support/engine.mjs";
-const [enginePath, output, root] = process.argv.slice(2), SIZE=4364, PC=0x1000;
+const [enginePath, output, root] = process.argv.slice(2), SIZE=4612, PC=0x1000;
 assert.ok(enginePath && output && root);assert.match(process.env.RING3_ENGINE_SHA256??"",/^[a-f0-9]{64}$/);
 assert.deepEqual(readdirSync(output).sort(),["initial-arena.bin","word-register-move.x86"]);
 for(const name of readdirSync(output))assert.ok(lstatSync(join(output,name)).isFile()&&!lstatSync(join(output,name)).isSymbolicLink());
@@ -43,7 +43,7 @@ function seed(c,pc,salt,flags){const b=Buffer.alloc(100),r=Array.from({length:8}
  b.set(state({registers:r,pc,flags}));b.set(exit(3,0),56);input(c,0,b,"explicit CPU and exit seed");return cpu(c);}
 function run(c,budget,label,wanted,reason=1,n=1,status=0,args){const before=capture(c,"before generated "+label),expected=arena(c);
  if(status===0){expected.set(state(wanted));expected.set(exit(reason,n),56);}const params=args??[c.base,c.base+56,budget,c.base+96];
- assert.equal(c.run(...params),status,label);assert.deepEqual(arena(c),expected,"full4364 "+label);counts.generated_calls++;if(status===0)counts.retired+=n;
+ assert.equal(c.run(...params),status,label);assert.deepEqual(arena(c),expected,"full4612 "+label);counts.generated_calls++;if(status===0)counts.retired+=n;
  journal.push({context:c.context,name:"run",label,budget,status,args:params,before,after:capture(c,"after generated "+label)});}
 function move(c,opcode,destination,source,label,category){const old=cpu(c),next={registers:[...old.registers],pc:old.pc+3,flags:old.flags};
  next.registers[destination]=((old.registers[destination]&0xffff0000)|(old.registers[source]&0xffff))>>>0;
@@ -89,7 +89,7 @@ const raw=Buffer.concat(frames);writeFileSync(join(output,"arenas.bin"),raw,{fla
 const result={status:"ok",engine:{bytes:engine.bytes.length,sha256:engine.sha256,caller_sha256:process.env.RING3_ENGINE_SHA256},source_pins:sourcePins,
  counts:{...counts,modules:modules.length,host_counts:hostCounts,host_inputs:journal.filter(row=>row.name==="input").length,journal_records:journal.length,raw_frames:frames.length},modules,journal,
  raw:{file:"arenas.bin",frames:frames.length,bytes:raw.length,sha256:hash(raw)},limits:["finite register-only WORD MOV89/8B all64pairs each in four bound profiles; native standalone emission is separate",
- "full4364 saved input/host/generated pairs plus preclose frames; no guest RAM helper or data memory effect","opaque initialized FP128 preserved, not arbitrary raw80 seeds",
+ "full4612 saved input/host/generated pairs plus preclose frames; no guest RAM helper or data memory effect","opaque initialized FP128 preserved, not arbitrary raw80 seeds",
  "Module validation/imports/hash pin only; no full Wasm body or allocator history proof","open/getters and binding pointers are bounded physical correspondences; closed call raw status only",
  "no full ISA, exhaustive values, hardware, performance, CI, browser or game claim"]};
 writeFileSync(join(output,"result.json"),JSON.stringify(result,null,2),{flag:"wx"});console.log(JSON.stringify({status:result.status,...result.counts,output}));

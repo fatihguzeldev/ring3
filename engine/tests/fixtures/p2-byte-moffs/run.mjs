@@ -7,7 +7,7 @@ import {join} from 'node:path';
 const [enginePath, output, root] = process.argv.slice(2);
 assert.ok(root, 'expected actual engine, new output directory and repository root');
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
-const SIZE = 4236, TRANSFER = 140, EXIT = 0x8020, EXIT_ID = 0x10003, MARKER = 0xaa77ffc1;
+const SIZE = 4612, TRANSFER = 140, EXIT = 0x8020, EXIT_ID = 0x10003, MARKER = 0xaa77ffc1;
 const arities = {open:3, close:0, arena_ptr:0, map:3, protect:3, upload:2, read32:1, compile_entries:2, compile_resident_entries:2, generation:0, module_ptr:0, module_len:0, guard:6, guard_resident:7, read8:1, store8:2, store_resident8:6, store32:2, store_resident32:6, begin_image_input:1, append_image_input:2, load_pe32_linked_v2_input_at:2, start_loaded_image:2, capture_call:5, capture_resident_call:6, complete_windows_call:4, complete_resident_windows_call:5};
 const sourcePaths = [...execFileSync('rg', ['--files', 'engine/src'], {cwd:root, encoding:'utf8'}).trim().split('\n').sort(), 'Cargo.toml', 'Cargo.lock', 'engine/Cargo.toml', 'engine/tests/cpu_byte_moffs_wasm.rs', 'engine/tests/fixtures/p2-byte-moffs/run.mjs', 'engine/tests/fixtures/p2-byte-moffs/integer.S'];
 assert.equal(sourcePaths.length, 88); assert.equal(new Set(sourcePaths).size, 88);

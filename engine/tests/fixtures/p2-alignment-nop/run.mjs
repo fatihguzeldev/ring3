@@ -4,7 +4,7 @@ import {readFileSync, writeFileSync} from 'node:fs';
 import {join} from 'node:path';
 import {readEngine} from '../support/engine.mjs';
 
-const [enginePath, output, root] = process.argv.slice(2), SIZE = 4364;
+const [enginePath, output, root] = process.argv.slice(2), SIZE = 4612;
 assert.ok(enginePath && output && root);
 const engine = readEngine(enginePath), initial = readFileSync(join(output, 'initial-arena.bin'));
 assert.equal(initial.length, SIZE); assert.deepEqual(WebAssembly.Module.imports(engine.module), []);
@@ -68,7 +68,7 @@ function run(c, unit, budget, next, label, {reason = 1, retired = 1, status = 0}
   const expected = arena(c); if (status === 0) {expected.set(state(next)); expected.set(exit(reason, retired), 56);}
   const observedStatus = unit.run(c.base, c.base + 56, budget, c.base + 96);
   assert.equal(observedStatus, status, label);
-  assert.deepEqual(arena(c), expected, 'full4364 GPR/FLAGS/EIP/exit/helper/dirtyFP: ' + label);
+  assert.deepEqual(arena(c), expected, 'full4612 GPR/FLAGS/EIP/exit/helper/dirtyFP: ' + label);
   const after = arena(c); observations.push({context: c.id, label, expected_status: status, observed_status: observedStatus,
     expected_reason: status === 0 ? reason : null, observed_reason: status === 0 ? after.readUInt32LE(72) : null,
     expected_retired: status === 0 ? retired : null, observed_retired: status === 0 ? after.readUInt32LE(76) : null,
@@ -170,7 +170,7 @@ assert.equal(modules.length, 12);
 const result = {status: 'ok', engine_sha256: engine.sha256, source_pins: sourcePins, counts, contexts, modules, observations,
   helper_calls: 0, helper_trace: [],
   limits: ['exact canonical6/9/10-byte alignment NOPs in six standalone/replacement/resident explicit/entry profiles; finite selected inputs',
-    'all128 valid FLAGS for each encoding; full4364 expected images preserve all GPR parents, helper and dirtyFP128 except declared EIP/exit effects',
+    'all128 valid FLAGS for each encoding; full4612 expected images preserve all GPR parents, helper and dirtyFP128 except declared EIP/exit effects',
     'apparent addresses zero/denied/unmapped/high/top are not resolved; no guest data helper imports, so helper_calls0 is structural absence rather than instrumented guard counts',
     'two captures/context; NOP bank3blocks6instructions and live1block6instructions; source code and protections precede captures, unchanged8/64/65536 limits',
     'live byte ADD to ten-byte NOP to WORD ADC and SETcc consumes returned state without CPU reseeding; selected accessible/denied RAM canaries remain unchanged',

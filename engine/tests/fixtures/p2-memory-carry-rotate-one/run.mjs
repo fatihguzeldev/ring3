@@ -1,3 +1,4 @@
+import {createArena} from '../support/arena.mjs';
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
 import {readFileSync, writeFileSync} from 'node:fs';
@@ -8,7 +9,7 @@ assert.ok(root, 'expected actual engine Wasm, output directory and repository ro
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
 const engineBytes = readFileSync(enginePath), engineModule = new WebAssembly.Module(engineBytes);
 assert.deepEqual(WebAssembly.Module.imports(engineModule), []);
-const SIZE = 4236, TRANSFER = 140, PC = 0x1000, COLD = 0x1080, DATA = 0x4000, SECOND = 0x5000, WORD = 0x4010;
+const SIZE = 4612, TRANSFER = 140, PC = 0x1000, COLD = 0x1080, DATA = 0x4000, SECOND = 0x5000, WORD = 0x4010;
 const REG = [0x1234807f, 0x23457f80, 0x34560f10, 0x4567ff00, 0x56789abc, 0x6789abcd, 0x789abcde, 0x89abcdef];
 const INPUTS = [0, 1, 2, 0x100, 0x40000000, 0x80000000, 0x7fffffff, 0xffffffff, 0x80000001, 0x12345678, 0xaaaaaaaa, 0x55555555];
 const FLAGS = Array.from({length: 128}, (_, seed) => 2 + [1, 4, 0x10, 0x40, 0x80, 0x400, 0x800].reduce((flags, bit, index) => flags + (seed & 2 ** index ? bit : 0), 0));
@@ -86,7 +87,7 @@ function map(ctx, address, bytes = pattern) {
   if (bytes !== null) dataInput(ctx, address, bytes);
 }
 function fresh(owner, kind) {
-  const instance = new WebAssembly.Instance(engineModule, {}), api = {}, expected = Buffer.alloc(SIZE), ordinal = ++counts.contexts;
+  const instance = new WebAssembly.Instance(engineModule, {}), api = {}, expected = createArena(SIZE), ordinal = ++counts.contexts;
   const arities = {open: 3, close: 0, arena_ptr: 0, map: 3, unmap: 2, protect: 3, upload: 2, read32: 1,
     compile_entries: 2, compile_resident: 1, generation: 0, module_ptr: 0, module_len: 0, guard: 6, guard_resident: 7, store32: 2, store_resident32: 6};
   for (const [name, arity] of Object.entries(arities)) {api[name] = instance.exports[`ring3_abi_v1_${name}`]; assert.equal(typeof api[name], 'function', name); assert.equal(api[name].length, arity, name);}

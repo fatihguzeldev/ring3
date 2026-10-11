@@ -6,7 +6,7 @@ import {readEngine} from '../support/engine.mjs';
 
 const [enginePath,output,root]=process.argv.slice(2); assert.ok(enginePath&&output&&root);
 assert.match(process.env.RING3_ENGINE_SHA256??'',/^[a-f0-9]{64}$/);
-const engine=readEngine(enginePath),SIZE=4364,BASES=[0x1000,0x3000,0x5000],FLAGS=[2,0xcd7];
+const engine=readEngine(enginePath),SIZE=4612,BASES=[0x1000,0x3000,0x5000],FLAGS=[2,0xcd7];
 const hash=b=>createHash('sha256').update(b).digest('hex'),initial=readFileSync(join(output,'initial-arena.bin'));
 assert.equal(initial.length,SIZE); assert.deepEqual(readdirSync(output).sort(),['initial-arena.bin','modrm.x86','opcode.x86','payload.x86']);
 const parents=[0xa53c0001,0xb64d8001,0xc75e7fff,0xd86f00ff,0xe970f001,0xfa81abcd,0x1b926667,0x2ca3f0f3];
@@ -109,7 +109,7 @@ assert.equal(journal.length,748);assert.equal(frames.length,1504);assert.equal(l
 assert.deepEqual(pins(),sourcePins,'source epoch unchanged');assert.deepEqual(pin(support.path),support,'immutable readEngine support unchanged');
 const raw=artifact('arenas.bin',Buffer.concat(frames));const result={status:'ok',engine:{bytes:engine.bytes.length,sha256:engine.sha256},counts,source_pins:sourcePins,source_support_dependency:support,
   banks:bankList.map(b=>({name:b.name,pc:b.pc,body:b.body,file:b.name+'.x86',bytes:b.bytes.length,sha256:hash(b.bytes),instructions:b.instructions})),contexts,modules,targets,journal,lifecycle,raw_records:rawRecords,raw:{...raw,frames:frames.length},source_changes:sourceChanges,
-  limits:['512 finite core and32 selected prefix-payload targets; no all-values/all-FLAGS/full-ISA claim','all full4364 arenas for declared inputs/known host calls/generated calls; open after-only and close pre-only, closed raw5 unframed',
+  limits:['512 finite core and32 selected prefix-payload targets; no all-values/all-FLAGS/full-ISA claim','all full4612 arenas for declared inputs/known host calls/generated calls; open after-only and close pre-only, closed raw5 unframed',
     'no guest RAM helper/data-page effect or full-RAM dump; all parents includingSP are partial register writes','pure module section/import/type/local checks do not certify arbitrary remaining Wasm body','resident pointer/id receipt and initial allocator correspondence are bounded physical inputs',
     'source allocation equality is a live producer receipt before getter/compile/close, not a raw allocation certificate','no hardware/performance/whole-suite/CI/graphics/Windows claim']};
 writeFileSync(join(output,'result.json'),JSON.stringify(result,null,2),{flag:'wx'});assert.equal(readdirSync(output).length,23);console.log(JSON.stringify({status:'ok',...counts,raw_frames:frames.length,output}));

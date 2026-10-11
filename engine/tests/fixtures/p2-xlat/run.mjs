@@ -1,3 +1,4 @@
+import {createArena} from '../support/arena.mjs';
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
 import {readFileSync, writeFileSync} from 'node:fs';
@@ -7,7 +8,7 @@ import {readEngine} from '../support/engine.mjs';
 const [enginePath, output, root] = process.argv.slice(2);
 assert.ok(enginePath && output && root);
 assert.match(process.env.RING3_ENGINE_SHA256 ?? '', /^[a-f0-9]{64}$/);
-const engine = readEngine(enginePath), SIZE=4364, FP=4236, PC=0x1000, TABLE=0x5000;
+const engine = readEngine(enginePath), SIZE=4612, FP=4236, PC=0x1000, TABLE=0x5000;
 const bank=Buffer.alloc(32,0xcc);
 for(const [offset,bytes] of [[0,[0xd7,0xd7,0xeb,0]],[8,[0xd7,0xeb,0]],[16,[0x90,0xd7,0xeb,0]]])bank.set(bytes,offset);
 const table=Buffer.from(Array.from({length:256},(_,index)=>(index*73+29)&255));
@@ -25,7 +26,7 @@ const words=values=>Buffer.concat(values.map(v=>{const b=Buffer.alloc(4);b.write
 const state=cpu=>record('R3ST',56,[...cpu.registers,cpu.pc,cpu.flags]);
 const exit=(reason,retired,detail=0,address=0,access=0,length=0)=>record('R3EX',40,[reason,retired,detail,address,access,length],2);
 const helper=(value,detail=0,address=0)=>record('R3MH',40,detail?[1,0,detail,address,1,1]:[0,value,0,0,0,1],2);
-function initial(){const b=Buffer.alloc(SIZE);b.set(state({registers:Array(8).fill(0),pc:0,flags:2}));b.set(record('R3EX',40,[1,0,0,0,0,0]),56);b.set(record('R3MH',40),100);const fp=record('R3FP',128);fp.writeUInt16LE(0x37f,16);fp.writeUInt16LE(0xffff,20);b.set(fp,FP);return b;}
+function initial(){const b=createArena(SIZE);b.set(state({registers:Array(8).fill(0),pc:0,flags:2}));b.set(record('R3EX',40,[1,0,0,0,0,0]),56);b.set(record('R3MH',40),100);const fp=record('R3FP',128);fp.writeUInt16LE(0x37f,16);fp.writeUInt16LE(0xffff,20);b.set(fp,FP);return b;}
 function opaqueFpu(seed){const b=record('R3FP',128);b.writeUInt16LE(0x27f,16);b.writeUInt16LE(0x81a5,18);b.writeUInt16LE(0x55aa,20);b.writeUInt16LE(0x7ff,22);b.writeUInt32LE(0xf1234567,24);b.writeUInt32LE(0xfedcba98,28);b.writeUInt16LE(0xf135,32);b.writeUInt16LE(0xe246,34);b.set(Buffer.from(Array.from({length:80},(_,i)=>(i*73+seed*29+17)&255)),40);return b;}
 function observed(ctx){return Buffer.from(new Uint8Array(ctx.memory.buffer,ctx.base,SIZE));}
 function check(ctx,label){assert.deepEqual(observed(ctx),ctx.expected,`${ctx.owner}/${ctx.entries}/${label}`);}
@@ -108,5 +109,5 @@ for(let index=0;index<rows.length;index++){
   assert.deepEqual(after,expected,'saved opcode-selected full arena recomputation');counts.raw_pairs++;
 }
 assert.equal(counts.raw_pairs,1128);assert.deepEqual(sourcePins(),initialSources,'fixture sources unchanged');writeFileSync(join(output,'engine.wasm'),engine.bytes,{flag:'wx'});
-const result={status:'ok',engine:{bytes:engine.bytes.length,sha256:engine.sha256},counts,modules,source_sha256:initialSources,events,raw:{file:'arenas.bin',bytes:physical.length,sha256:hash(physical),rows},claim:'finite all256 unsigned oldAL values across four bound profiles, retained currentAL chains, modulo32 top/wrap endpoints, faulting-EIP/no-AL-publication and sameCPU changed-RAM repair; full4364 saved generated-call pairs preserve all unrelated bytes/FP128; RAM diagnostics are live observations, saved table and ordered uploads provide bounded RAM history; no standalone memory admission, FP execution, new ABI/helper or performance claim'};
+const result={status:'ok',engine:{bytes:engine.bytes.length,sha256:engine.sha256},counts,modules,source_sha256:initialSources,events,raw:{file:'arenas.bin',bytes:physical.length,sha256:hash(physical),rows},claim:'finite all256 unsigned oldAL values across four bound profiles, retained currentAL chains, modulo32 top/wrap endpoints, faulting-EIP/no-AL-publication and sameCPU changed-RAM repair; full4612 saved generated-call pairs preserve all unrelated bytes/FP128; RAM diagnostics are live observations, saved table and ordered uploads provide bounded RAM history; no standalone memory admission, FP execution, new ABI/helper or performance claim'};
 writeFileSync(join(output,'result.json'),JSON.stringify(result,null,2),{flag:'wx'});console.log(JSON.stringify({status:result.status,counts,output}));

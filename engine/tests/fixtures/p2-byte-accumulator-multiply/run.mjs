@@ -13,7 +13,7 @@ assert.deepEqual(readdirSync(output).sort(), ['chain-signed.x86', 'chain-unsigne
 const {bytes: engineBytes, module: engineModule, sha256: engineSha} = readEngine(enginePath, callerSha);
 assert.deepEqual(WebAssembly.Module.imports(engineModule), []);
 const SIZE = Number(arenaSize), TRANSFER = 140, PC = 0x1000, COLD = PC + 128;
-const initialArena = readFileSync(join(output, 'initial-arena.bin')); assert.equal(SIZE, 4364); assert.equal(initialArena.length, SIZE);
+const initialArena = readFileSync(join(output, 'initial-arena.bin')); assert.equal(SIZE, 4612); assert.equal(initialArena.length, SIZE);
 const OWNERS = ['replacement', 'resident'], KINDS = ['unsigned', 'signed'], FLAGS = [2, 0xcd7];
 const PAIRS = [[0, 0xff], [1, 0x7f], [1, 0x80], [0x7f, 1], [0x7f, 2], [0x80, 1], [0x80, 0xff], [0xff, 0xff], [0xff, 2], [0x40, 4]];
 const REG = [0xc9d45a00, 0x1234a567, 0x89abcdef, 0x76543210, 0x0a1b2c3d, 0x98badcfe, 0x13579bdf, 0x2468ace0];

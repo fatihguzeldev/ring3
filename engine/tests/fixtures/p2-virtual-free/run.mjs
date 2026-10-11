@@ -1,3 +1,4 @@
+import {createArena} from '../support/arena.mjs';
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
 import {execFileSync} from 'node:child_process';
@@ -16,7 +17,7 @@ assert.equal(declarations.filter(row => row.kind === 'function').length, 70);
 save('engine.wasm', engineBytes);
 
 const CODE = 0x1000, GATE = 0x2000, STACK = 0x8000, TOP = 0x9000, OBS = 0x9000;
-const ALLOCATION = 0x10000000, ARENA = 4236, TRANSFER = 140;
+const ALLOCATION = 0x10000000, ARENA = 4612, TRANSFER = 140;
 const FLAG = 0xcd7, FIRST = 0x13579bdf, SECOND = 0x2468ace0, CANARY = 0xfacecafe;
 const program = Uint8Array.from(Buffer.from(
   '6a5ae8f90f0000' +
@@ -90,7 +91,7 @@ function fresh(owner, ordinal) {
   for (const [name, fn] of Object.entries(api)) assert.equal(typeof fn, 'function', name);
   const ctx = {owner, api, memory: instance.exports.memory, low: ordinal, high: 0xa3810000, compileOrdinal: 0};
   assert.equal(api.open(6, ctx.low, ctx.high), 0); ctx.base = api.arena_ptr() >>> 0;
-  const expected = new Uint8Array(ARENA);
+  const expected = new Uint8Array(createArena(ARENA));
   expected.set(record('R3ST', 56, [...Array(8).fill(0), 0, 2]));
   expected.set(record('R3EX', 40, [1, 0, 0, 0, 0, 0]), 56);
   expected.set(record('R3MH', 40, [0, 0, 0, 0, 0, 0]), 100);

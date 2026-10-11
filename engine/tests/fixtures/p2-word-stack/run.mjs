@@ -6,7 +6,7 @@ import {readEngine} from '../support/engine.mjs';
 
 const [enginePath, output, root] = process.argv.slice(2);
 assert.ok(enginePath && output && root);
-const engine = readEngine(enginePath), SIZE = 4364, PC = 0x1000, DATA = 0x5000;
+const engine = readEngine(enginePath), SIZE = 4612, PC = 0x1000, DATA = 0x5000;
 const initial = readFileSync(join(output, 'initial-arena.bin'));
 assert.equal(initial.length, SIZE);
 assert.deepEqual(WebAssembly.Module.imports(engine.module), []);
@@ -67,7 +67,7 @@ function run(c, module, budget, next, {label, reason = 1, retired = 1, fault, he
     if (helperVersion !== null) expected.set(helper(helperVersion, helperValue, fault), 100);
   }
   assert.equal(module.run(c.base, c.base + 56, budget, c.base + 96), status, label);
-  assert.deepEqual(arena(c), expected, 'full4364 CPU/exit/helper/FP128 effect: ' + label);
+  assert.deepEqual(arena(c), expected, 'full4612 CPU/exit/helper/FP128 effect: ' + label);
   counts.runs++; if (status === 0) counts.retired += retired;
 }
 function checkRam(c, address, expected) {
@@ -376,7 +376,7 @@ const result = {status: 'ok', engine_sha256: engine.sha256, source_pins: sourceP
     'original SP/PUSH-memory EA versus pending POP-memory EA, pending-high POPSP carry/wrap, exact/partial overlap and real read16V2/store16V4 helper ordering',
     'seven shared span/access fault classes with prior retirement/unchanged retry/map-protect-only repair, literal read precedence when both addresses fail, separate explicit current inputs',
     'identity POP[ESP-2] still requires Write; changed/same code writes commit once before6 then stale4/freshV1suffix; RX POP reads and RO/RX canaries do not store',
-    'maxfive resident captures/context; aggregate24/24/27/2/9 and33/12 plus SMC2/1, all asserted<=64 and at most8 blocks before compilation; full4364/helper/dirtyFP preservation',
+    'maxfive resident captures/context; aggregate24/24/27/2/9 and33/12 plus SMC2/1, all asserted<=64 and at most8 blocks before compilation; full4612/helper/dirtyFP preservation',
     'anchor count is a boundary subset and eight memory current-input rows overlap retries; no hardware/16bit-stack/segmentation/atomic multiaccess rollback/performance/exhaustiveISA/PE/browser/SDK/game/hostedCI claim',
   ]};
 writeFileSync(join(output, 'result.json'), JSON.stringify(result, null, 2), {flag: 'wx'});

@@ -1,3 +1,4 @@
+import {createArena} from '../support/arena.mjs';
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { readFileSync, readdirSync, writeFileSync } from "node:fs";
@@ -9,7 +10,7 @@ assert.ok(enginePath && output && root, "expected current engine, output directo
 const hash = bytes => createHash("sha256").update(bytes).digest("hex");
 const { bytes: engineBytes, module: engineModule, sha256: engineSha256 } = readEngine(enginePath);
 assert.deepEqual(WebAssembly.Module.imports(engineModule), []);
-const SIZE = 4236, TRANSFER = 140, PC = 0x1000, COLD = 0x1f00,
+const SIZE = 4612, TRANSFER = 140, PC = 0x1000, COLD = 0x1f00,
   KEEP = 0x3000, DATA = 0x4000, SECOND = 0x5000, BYTE = 0x4010,
   TOP = 0xfffff000, HIGH = 0xc8442000;
 const RAW = [0, 1, 2, 7, 8, 9, 31, 32, 33, 255],
@@ -329,7 +330,7 @@ function protect(ctx, address, permissions) {
 function unmap(ctx, address) { host(ctx, "unmap", [address, 1]); ctx.pages.delete(address); ctx.permissions.delete(address); counts.unmaps++; }
 
 function fresh(owner, selected, role) {
-  const ordinal = ++counts.contexts, expected = Buffer.alloc(SIZE);
+  const ordinal = ++counts.contexts, expected = createArena(SIZE);
   expected.set(state(Array(8).fill(0), 0, 2)); expected.set(exit(1, 0, 0, 0, 0, 1), 56); expected.set(wordHelper(0), 100);
   const instance = new WebAssembly.Instance(engineModule, {}),
     ctx = { owner, ordinal, bank: selected, role, low: ordinal, high: HIGH, expected,

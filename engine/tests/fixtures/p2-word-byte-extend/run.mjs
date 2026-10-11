@@ -6,7 +6,7 @@ import {readEngine} from '../support/engine.mjs';
 
 const [enginePath, output, root] = process.argv.slice(2);
 assert.ok(enginePath && output && root);
-const engine = readEngine(enginePath), SIZE = 4364, PC = 0x1000, DATA = 0x5000;
+const engine = readEngine(enginePath), SIZE = 4612, PC = 0x1000, DATA = 0x5000;
 const initial = readFileSync(join(output, 'initial-arena.bin'));
 assert.equal(initial.length, SIZE);
 assert.deepEqual(WebAssembly.Module.imports(engine.module), []);
@@ -66,7 +66,7 @@ function run(c, module, budget, next, {label, reason = 1, retired = 1, fault, he
     if (helperVersion !== null) expected.set(helper(helperVersion, helperValue, fault), 100);
   }
   assert.equal(module.run(c.base, c.base + 56, budget, c.base + 96), status, label);
-  assert.deepEqual(arena(c), expected, 'full4364 CPU/exit/helper/FP128 effect: ' + label);
+  assert.deepEqual(arena(c), expected, 'full4612 CPU/exit/helper/FP128 effect: ' + label);
   counts.runs++; if (status === 0) counts.retired += retired;
 }
 function checkRam(c, address, expected) {
@@ -294,7 +294,7 @@ const result = {status: 'ok', engine_sha256: engine.sha256, source_pins: sourceP
     'finite exact single66 BYTE-to-WORD MOVZX/MOVSX register/memory in four actual bound profiles; native register six-profile coverage is separate',
     'arithmetic byte-digit/range/high-half oracle,128 typed pairs, all256 bytes per kind, eight literal anchors and all128 valid FLAGS per kind; flag-input count is a subset of byte-input rows',
     'original AL/CL/DL/BL/AH/CH/DH/BH capture and own destination.high16 preservation; full original EA captured before checked read8 and publication',
-    'pure V1, read8 V2 and existing mixed-division V5; no stores/new helper family/local/ABI/emitter change; full4364/helper/FP preservation asserted',
+    'pure V1, read8 V2 and existing mixed-division V5; no stores/new helper family/local/ABI/emitter change; full4612/helper/FP preservation asserted',
     'four byte-read fault classes, map/protect-only repair and separate explicit current BYTE/EA/high16/FLAGS witnesses; finalffffffff is valid without invented WORD overflow',
     'maxfive resident units/context; four pure register units each contain36instructions within unchanged64 limit; fixed code/RX inputs before captures, retained resident success versus replacement generation mismatch3, live factor/product/quotient/FLAGS without reseeding',
     'read-only RAM/RX own-opcode canaries; no SMC/atomicity, exhaustiveISA, throughput, PE/browser/SDK/game or hostedCI claim',

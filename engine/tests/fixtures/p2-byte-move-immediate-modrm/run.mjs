@@ -1,3 +1,4 @@
+import {createArena} from '../support/arena.mjs';
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
 import {readFileSync, writeFileSync} from 'node:fs';
@@ -8,7 +9,7 @@ assert.ok(root, 'expected actual engine Wasm, output directory and repository ro
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
 const engineBytes = readFileSync(enginePath), engineModule = new WebAssembly.Module(engineBytes);
 assert.deepEqual(WebAssembly.Module.imports(engineModule), []);
-const SIZE = 4236, TRANSFER = 140, PC = 0x1000, BODY = 162, COLD = PC + BODY, BASIS = [2, 0xcd7];
+const SIZE = 4612, TRANSFER = 140, PC = 0x1000, BODY = 162, COLD = PC + BODY, BASIS = [2, 0xcd7];
 const ALIASES = [['AL', 0, 3], ['CL', 1, 3], ['DL', 2, 3], ['BL', 3, 3], ['AH', 0, 2], ['CH', 1, 2], ['DH', 2, 2], ['BH', 3, 2]];
 const INITIAL = [0x1234807f, 0x234501fe, 0x3456aa55, 0x45665aff, 0x56789abc, 0x6789abcd, 0x789abcde, 0x89abcdef];
 const FINAL = [0x1234ff00, 0x2345ff00, 0x3456ff00, 0x4566ff00, ...INITIAL.slice(4)];
@@ -63,7 +64,7 @@ function upload(ctx, address, bytes) {
   hostInputs.push({kind: 'upload', owner: ctx.owner, address, length: bytes.length, sha256: hash(bytes)});
 }
 function fresh(owner) {
-  const expected = Buffer.alloc(SIZE), ordinal = ++counts.contexts, codePage = Buffer.alloc(4096); codePage.set(source); assert.equal(hash(codePage), PAGE_HASHES[0]);
+  const expected = createArena(SIZE), ordinal = ++counts.contexts, codePage = Buffer.alloc(4096); codePage.set(source); assert.equal(hash(codePage), PAGE_HASHES[0]);
   expected.set(state(Array(8).fill(0), 0, 2)); expected.set(exit(1, 0), 56); expected.set(helper(0), 100);
   const ctx = {owner, expected, codePage, low: ordinal, high: 0xc6000000};
   if (owner === 'standalone') {

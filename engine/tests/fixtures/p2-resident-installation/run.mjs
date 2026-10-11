@@ -9,7 +9,7 @@ assert.ok(root);
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
 const engineBytes = readFileSync(enginePath), engineModule = new WebAssembly.Module(engineBytes);
 assert.deepEqual(WebAssembly.Module.imports(engineModule), []);
-const SIZE = 4236, TRANSFER = 140, KEY = 0x91345678e0000000n;
+const SIZE = 4612, TRANSFER = 140, KEY = 0x91345678e0000000n;
 const names = ['open', 'close', 'arena_ptr', 'map', 'upload', 'compile_resident_with_gates', 'resident_module', 'find_resident', 'guard_resident', 'read32', 'write32', 'store_resident32', 'capture_resident_call', 'complete_resident_call', 'acknowledge_resident_installation', 'find_installed_resident'];
 const stats = {engine_instances: 0, compiled_units: 0, metadata24_checks: 0, installation32_checks: 0, ack_success: 0, ack_failure: 0, idempotent_acks: 0, installed_find_success: 0, installed_find_failure: 0, logical_find_success: 0, dispatcher_calls: 0, dispatcher_canonical: 0, dispatcher_rejections: 0, dispatcher_child_entries: 0, dispatcher_lookup_calls: 0, dispatcher_lookup_success: 0, dispatcher_lookup_failure: 0, direct_unit_calls: 0, direct_unit_canonical: 0, direct_unit_rejections: 0, direct_guard_calls: 0, full_arena_checks: 0, initial_calls: 0, resumes: 0, host_reads: 0, host_writes: 0, guest_store32: 0, resident_captures: 0, resident_completions: 0, host_module_failures: 0, host_instance_failures: 0, host_table_failures: 0, platform_traps: 0, zero_progress_stops: 0, closed_engines: 0};
 const artifacts = {}, authored = {}, units = [], metadata = [], installations = [], sections = [], algorithm = [], mismatches = [];

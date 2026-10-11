@@ -9,7 +9,7 @@ const hash = b => createHash('sha256').update(b).digest('hex');
 const engineBytes = readFileSync(enginePath), expectedHash = process.env.RING3_ENGINE_SHA256;
 assert.match(expectedHash ?? '', /^[a-f0-9]{64}$/); assert.equal(hash(engineBytes), expectedHash);
 const engineModule = new WebAssembly.Module(engineBytes); assert.deepEqual(WebAssembly.Module.imports(engineModule), []);
-const initial = readFileSync(join(output, 'initial-arena.bin')); assert.equal(SIZE, 4364); assert.equal(initial.length, SIZE);
+const initial = readFileSync(join(output, 'initial-arena.bin')); assert.equal(SIZE, 4612); assert.equal(initial.length, SIZE);
 const REG = [0xa53c0011, 0x23456789, 0x3456789a, DATA + 24, 0x9000, 0x56789abc, 0x6789abcd, 0x789abcde], FLAGS = [2, 0xcd7];
 const rows = [[0x11, 5], [0, 1], [0xffff, 1], [0x1ff, 2], [0x200, 2], [0x7f, 1], [0x80, 1], [0xff80, 1],
   [0xff7f, 1], [0xfff9, 3], [7, 0xfd], [0xfff9, 0xfd], [0x8000, 0xff], [0xfe, 0xfe], [0xfffb, 0xff], [0x1234, 0]];
@@ -147,5 +147,5 @@ assert.equal(stats.chains, 4); assert.equal(stats.preflight, 16); assert.equal(s
 const raw = Buffer.concat(frames); writeFileSync(join(output, 'arenas.bin'), raw, {flag: 'wx'});
 const result = {status: 'ok', stats, modules, observations, raw: {file: 'arenas.bin', frames: frames.length, bytes: raw.length, sha256: hash(raw)}, engine_sha256: hash(engineBytes), arena_bytes: SIZE,
   tools: {node: process.version, v8: process.versions.v8}, sources: Object.fromEntries(['engine/tests/cpu_memory_byte_division.rs', 'engine/tests/cpu_memory_byte_division_wasm.rs', 'engine/tests/fixtures/p2-memory-byte-division/run.mjs'].map(p => [p, hash(readFileSync(join(root, p)))])),
-  scope: 'Memory BYTE DIV/IDIV F6/6,/7 only; four bound extent/entry replacement/resident profiles, sixteen finite numeric rows/two FLAGS seeds, eight32EA witnesses including successful oldEAX/EDX, single-byte1FFF/FFFFFFFF endpoints, Read8-before-arithmetic faults, sameCPU/module RAM-only repairs/currentAX prefix chain. Full4364 arena pairs for every generated run/preflight/stale/closed attempt and four captured hostrepair pairs. Default opaque x87 tail preserved. No standalone/memoryBYTE multiply/word/x64/REP, arbitraryFPseed, directguard/rawRAMdump, hardware undefinedFLAGS, browser/game/performance/fullCI claim.'};
+  scope: 'Memory BYTE DIV/IDIV F6/6,/7 only; four bound extent/entry replacement/resident profiles, sixteen finite numeric rows/two FLAGS seeds, eight32EA witnesses including successful oldEAX/EDX, single-byte1FFF/FFFFFFFF endpoints, Read8-before-arithmetic faults, sameCPU/module RAM-only repairs/currentAX prefix chain. Full4612 arena pairs for every generated run/preflight/stale/closed attempt and four captured hostrepair pairs. Default opaque x87 tail preserved. No standalone/memoryBYTE multiply/word/x64/REP, arbitraryFPseed, directguard/rawRAMdump, hardware undefinedFLAGS, browser/game/performance/fullCI claim.'};
 writeFileSync(join(output, 'result.json'), JSON.stringify(result, null, 2), {flag: 'wx'}); console.log(JSON.stringify({status: result.status, stats, engine_sha256: result.engine_sha256, output}));

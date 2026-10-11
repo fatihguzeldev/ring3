@@ -4,7 +4,7 @@ import {readFileSync, readdirSync, writeFileSync} from 'node:fs';
 import {join} from 'node:path';
 import {readEngine} from '../support/engine.mjs';
 
-const [enginePath, output, root] = process.argv.slice(2), SIZE = 4364, TRANSFER = 140;
+const [enginePath, output, root] = process.argv.slice(2), SIZE = 4612, TRANSFER = 140;
 assert.ok(enginePath && output && root);
 const fixture = 'engine/tests/fixtures/p2-pe32-relocatable', hash = bytes => createHash('sha256').update(bytes).digest('hex');
 const engine = readEngine(enginePath), initial = readFileSync(join(output, 'initial-arena.bin'));
@@ -61,7 +61,7 @@ function input(c, offset, bytes) {
 function action(c, label, fn, status = 0, patches = [], persist = true) {
   const before = arena(c), expected = Buffer.from(before); for (const [offset, bytes] of patches) expected.set(bytes, offset);
   const observedStatus = fn(); assert.equal(observedStatus, status, label);
-  const after = arena(c); assert.deepEqual(after, expected, `full4364: ${label}`);
+  const after = arena(c); assert.deepEqual(after, expected, `full4612: ${label}`);
   if (persist) {
     const stem = `context-${c.id}-action-${observations.length + 1}`;
     observations.push({context: c.id, owner: c.owner, label, expected_status: status, observed_status: observedStatus,
@@ -203,7 +203,7 @@ const result = {status: 'ok', engine_sha256: engine.sha256, source_pins: sourceP
     'one initial CPU input after load/compile; natural CALL/RET and guest-consumed zero return use budgets1/2/2 without CPU/RAM reseeding',
     'complete loaded5page image checked before/after guest execution; only three loader HIGHLOW fixups differ from raw mapping, retained.reloc bytes unchanged',
     'whole128B authored stack frame and12B caller checked before/after; no wholeprocessRAM claim or process-start/ExitProcess claim',
-    'full4364 assertions preserve dirtyFP128 and all unrelated bytes; nondiagnostic actions persist before/after, public diagnostics assert fullarena but do not persist each arena',
+    'full4612 assertions preserve dirtyFP128 and all unrelated bytes; nondiagnostic actions persist before/after, public diagnostics assert fullarena but do not persist each arena',
     '18 actual forwarded canonical guest helpers are separate from61878 public read32 diagnostics and18 denied public write32 permission probes',
     'one capture/context with3blocks/5instructions/15sourcebytes; default8blocks/64instructions/65536module and7page capacity unchanged',
     'historical licenseStatus pending/Windows oracle not-run receipts retained; no automatic ASLR/discard lifecycle/PE32+/hardware/thread/performance/SDK/browser/game claim']};

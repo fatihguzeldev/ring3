@@ -6,7 +6,7 @@ import {readEngine} from "../support/engine.mjs";
 
 const [enginePath,output,root]=process.argv.slice(2);
 assert.ok(enginePath&&output&&root);assert.match(process.env.RING3_ENGINE_SHA256??"",/^[a-f0-9]{64}$/);
-const engine=readEngine(enginePath),SIZE=4364,PC=0x1000,SRC=0x5008,DST=0x6008;
+const engine=readEngine(enginePath),SIZE=4612,PC=0x1000,SRC=0x5008,DST=0x6008;
 assert.deepEqual(WebAssembly.Module.imports(engine.module),[]);
 const hash=b=>createHash("sha256").update(b).digest("hex"),bank=Buffer.alloc(64,0xcc);
 const blocks=[[0,[0xa7,0xeb,0]],[8,[0xaf,0xeb,0]],
@@ -64,5 +64,5 @@ assert.deepEqual(counts,{profiles:4,modules:4,cmpsd:316,scasd:300,mov32:16,jumps
 assert.equal(targets.length,616);assert.equal(journal.filter(r=>r.type==="input").length,2048);assert.equal(journal.filter(r=>r.type==="host").length,2188);assert.equal(journal.filter(r=>r.type==="run").length,1092);assert.equal(frames.length,10656);assert.equal(lifecycle.length,8);
 assert.deepEqual(sourcePins(),sources,"fixture sources unchanged");
 const raw=Buffer.concat(frames);writeFileSync(join(output,"arenas.bin"),raw,{flag:"wx"});
-const result={status:"ok",engine:{bytes:engine.bytes.length,sha256:engine.sha256},counts,source_pins:sources,modules,targets,journal,lifecycle,raw:{file:"arenas.bin",frames:frames.length,bytes:raw.length,sha256:hash(raw)},limits:["finite prefix-free DWORD CMPSD/SCASD; no REP/address16/segment/SIMD extension","full4364 saved input/host/1092 generated pairs and opaque FP128; live DWORD diagnostics are not a full RAM dump","ESI-first fault priority is engine contract, not universal hardware order","standalone refusal/unchanged helper adversarial corpus is native scope","only live original module allocation read; four closed calls assert raw status5 only, with no post-close arena observation/neutrality/lifetime claim","no performance/full-ISA claim"]};
+const result={status:"ok",engine:{bytes:engine.bytes.length,sha256:engine.sha256},counts,source_pins:sources,modules,targets,journal,lifecycle,raw:{file:"arenas.bin",frames:frames.length,bytes:raw.length,sha256:hash(raw)},limits:["finite prefix-free DWORD CMPSD/SCASD; no REP/address16/segment/SIMD extension","full4612 saved input/host/1092 generated pairs and opaque FP128; live DWORD diagnostics are not a full RAM dump","ESI-first fault priority is engine contract, not universal hardware order","standalone refusal/unchanged helper adversarial corpus is native scope","only live original module allocation read; four closed calls assert raw status5 only, with no post-close arena observation/neutrality/lifetime claim","no performance/full-ISA claim"]};
 writeFileSync(join(output,"result.json"),JSON.stringify(result,null,2),{flag:"wx"});console.log(JSON.stringify({status:result.status,...counts,raw_frames:frames.length,output}));

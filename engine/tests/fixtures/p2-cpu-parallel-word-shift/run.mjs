@@ -1,3 +1,4 @@
+import {createArena} from '../support/arena.mjs';
 import assert from "node:assert/strict";
 import {createHash} from "node:crypto";
 import {readFileSync, writeFileSync} from "node:fs";
@@ -8,7 +9,7 @@ const [enginePath, output, root] = process.argv.slice(2);
 assert.ok(enginePath && output && root);
 assert.match(process.env.RING3_ENGINE_SHA256 ?? "", /^[0-9a-f]{64}$/);
 const engine = readEngine(enginePath);
-const SIZE = 4364, FP = 4236, PC = 0x1000;
+const SIZE = 4612, FP = 4236, PC = 0x1000;
 assert.deepEqual(WebAssembly.Module.imports(engine.module), []);
 const program = Buffer.from(
   "66b9210066d3e166d3e16683f801f966b9200066d3e40f92c20f90c60f94c3" +
@@ -109,7 +110,7 @@ for (const owner of ["replacement", "resident"]) {
     assert.equal(openStatus, 0);
     hosts.push({context, name: "open", args: openArgs, status: openStatus});
     ctx.base = ctx.api.arena_ptr() >>> 0;
-    ctx.expected = Buffer.alloc(SIZE);
+    ctx.expected = createArena(SIZE);
     ctx.expected.set(state(Array(8).fill(0), 0, 2));
     ctx.expected.set(exit(1, 0), 56);
     ctx.expected.set(record("R3MH", 40, [0, 0, 0, 0, 0, 0]), 100);
@@ -220,7 +221,7 @@ const result = {
     word_sars: 12, word_movs: 8, word_cmps: 4, word_adcs: 4, word_sbbs: 4, stc: 4, setcc: 28,
     conditional_jumps: 4, jumps: 4, generated_calls: 60, retired: 96, raw_frames: 120,
     arena_inputs: 16, uploads: 4, host_rows: 24, physical_files: 8, maximum_live_resident_units: 1},
-  claim: "retained current-CX/CL alias shifts21->42->108; CMP/STC dirty817 then q0 SHL SP0 preserves flags consumed by SETcc; SAR DI8001,16 sign-fill/CF1 feeds ADC BPFFFF,0 wrap; SHR SIFFFF,16 declaredCF0 feeds SBB currentBX; SAR currentDX0101,1 carry feeds SETBCL then SHR CX1,CL1; SETZDL feeds SHLDX and its ZF0 feeds SETZBH then q0SARBP with newly-produced CL0; JNZ skips unseeded UD2 then cold. Fifteen generated phases and24 retired instructions/context across four bound replacement/resident explicit/entry contexts, two declared blocks, one resident unit/context and no interphase host CPU/RAM repair or diagnostics. Full4364 generated before/after images include current parents/high16/SP/opaqueFP128/helper/transfer. Guard-only imports/ExitV1. Ordered setup host records/live full-arena assertions are not saved host-frame journals, wholeRAM dumps, arbitrary module-body or allocator proof; close preclose assertion/API0 only, no postclose raw run. Literal expected anchors are producer correspondence only; independent model must reconstruct from physical before/input bytes. Declared undefined FLAGS policy is Ring3 deterministic behavior, not hardware equality.",
+  claim: "retained current-CX/CL alias shifts21->42->108; CMP/STC dirty817 then q0 SHL SP0 preserves flags consumed by SETcc; SAR DI8001,16 sign-fill/CF1 feeds ADC BPFFFF,0 wrap; SHR SIFFFF,16 declaredCF0 feeds SBB currentBX; SAR currentDX0101,1 carry feeds SETBCL then SHR CX1,CL1; SETZDL feeds SHLDX and its ZF0 feeds SETZBH then q0SARBP with newly-produced CL0; JNZ skips unseeded UD2 then cold. Fifteen generated phases and24 retired instructions/context across four bound replacement/resident explicit/entry contexts, two declared blocks, one resident unit/context and no interphase host CPU/RAM repair or diagnostics. Full4612 generated before/after images include current parents/high16/SP/opaqueFP128/helper/transfer. Guard-only imports/ExitV1. Ordered setup host records/live full-arena assertions are not saved host-frame journals, wholeRAM dumps, arbitrary module-body or allocator proof; close preclose assertion/API0 only, no postclose raw run. Literal expected anchors are producer correspondence only; independent model must reconstruct from physical before/input bytes. Declared undefined FLAGS policy is Ring3 deterministic behavior, not hardware equality.",
 };
 writeFileSync(join(output, "result.json"), JSON.stringify(result, null, 2), {flag: "wx"});
 console.log(JSON.stringify({status: result.status, counts: result.counts, output}));

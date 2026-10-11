@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { readEngine } from "../support/engine.mjs";
 
 const [enginePath, output, root] = process.argv.slice(2);
-const SIZE = 4364;
+const SIZE = 4612;
 const PC = 0x1000;
 const RAW = [0, 1, 2, 15, 16, 17, 31, 32, 33, 255];
 const EDGES = [0, 1, 0x7fff, 0x8000, 0xffff];
@@ -159,7 +159,7 @@ function run(context, budget, label, wanted, reason = 1, retired = 1, status = 0
     }
     const params = args ?? [context.base, context.base + 56, budget, context.base + 96];
     assert.equal(context.run(...params), status, label);
-    assert.deepEqual(arena(context), expected, "full4364 " + label);
+    assert.deepEqual(arena(context), expected, "full4612 " + label);
     counts.generated_calls++;
     if (status === 0) {
         counts.retired += retired;
@@ -349,7 +349,7 @@ const result = {
     modules, journal, raw: { file: "arenas.bin", frames: frames.length, bytes: raw.length, sha256: hash(raw) },
     limits: [
         "finite exact register WORD SHL/SHR families in four bound profiles; native standalone proof is separate",
-        "full4364 input/host/generated pairs and preclose frame; current low16/high16/other parents and count-dependent declared FLAGS, no memory helper or stack effect",
+        "full4612 input/host/generated pairs and preclose frame; current low16/high16/other parents and count-dependent declared FLAGS, no memory helper or stack effect",
         "four resident units/context, instruction banks17/33/17/7 all<=64, no released pointer use; retained current CXCL/q0/SETB/ADC has no interphase host reseed",
         "initial Rust arena and first frames require canonical source-default joins; opaque initialized FP128 preserved, not arbitrary raw80 seeds",
         "module validation/import/hash/binding receipt only, no full body/allocator history proof; open/getters bounded, closed-run raw status only",

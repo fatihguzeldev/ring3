@@ -1,3 +1,4 @@
+import {createArena} from '../support/arena.mjs';
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
 import {readFileSync, readdirSync, writeFileSync} from 'node:fs';
@@ -11,7 +12,7 @@ const {bytes: engineBytes, module: engineModule, sha256: engineSha256} = readEng
 assert.deepEqual(WebAssembly.Module.imports(engineModule), []);
 const tools = {node: process.version, v8: process.versions.v8};
 assert.deepEqual(tools, {node: 'v22.16.0', v8: '12.4.254.21-node.26'});
-const SIZE = 4236, TRANSFER = 140, PC = 0x1000, BODY = 112, COLD = PC + BODY, BASIS = [2, 0xcd7];
+const SIZE = 4612, TRANSFER = 140, PC = 0x1000, BODY = 112, COLD = PC + BODY, BASIS = [2, 0xcd7];
 const GPRS = ['EAX', 'ECX', 'EDX', 'EBX', 'ESP', 'EBP', 'ESI', 'EDI'];
 const VECTORS = [
   [0x1234807f, 0x234501fe, 0x3456aa55, 0x45665aff, 0x56789abc, 0x6789abcd, 0x789abcde, 0x89abcdef],
@@ -118,7 +119,7 @@ function upload(ctx, address, bytes, purpose) {
   hostInputs.push({kind: 'upload', ...tag(ctx), purpose, address, length: bytes.length, sha256: hash(bytes)});
 }
 function fresh(owner, bank) {
-  const expected = Buffer.alloc(SIZE), ordinal = ++counts.contexts, codePage = Buffer.alloc(4096); codePage.set(sources[bank]); assert.equal(hash(codePage), PAGE_HASHES[bank]);
+  const expected = createArena(SIZE), ordinal = ++counts.contexts, codePage = Buffer.alloc(4096); codePage.set(sources[bank]); assert.equal(hash(codePage), PAGE_HASHES[bank]);
   expected.set(state(Array(8).fill(0), 0, 2)); expected.set(exit(1, 0), 56); expected.set(helper(0), 100);
   const ctx = {owner, bank, expected, codePage, dataPage: Buffer.from(pattern), low: ordinal, high: 0xc11f0000};
   if (owner === 'standalone') {

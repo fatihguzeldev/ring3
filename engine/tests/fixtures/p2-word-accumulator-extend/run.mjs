@@ -6,7 +6,7 @@ import {readEngine} from '../support/engine.mjs';
 
 const [enginePath, output, root] = process.argv.slice(2);
 assert.ok(enginePath && output && root);
-const engine = readEngine(enginePath), SIZE = 4364, PC = 0x1000, DATA = 0x5000;
+const engine = readEngine(enginePath), SIZE = 4612, PC = 0x1000, DATA = 0x5000;
 const initial = readFileSync(join(output, 'initial-arena.bin'));
 assert.equal(initial.length, SIZE);
 assert.deepEqual(WebAssembly.Module.imports(engine.module), []);
@@ -60,7 +60,7 @@ function run(c, module, budget, next, {label, reason = 1, retired = 1, status = 
   const expected = arena(c);
   if (status === 0) {expected.set(state(next)); expected.set(exit(reason, retired, exitVersion), 56);}
   assert.equal(module.run(c.base, c.base + 56, budget, c.base + 96), status, label);
-  assert.deepEqual(arena(c), expected, 'full4364 CPU/exit/unchanged helper/FP128 effect: ' + label);
+  assert.deepEqual(arena(c), expected, 'full4612 CPU/exit/unchanged helper/FP128 effect: ' + label);
   counts.runs++; if (status === 0) counts.retired += retired;
 }
 function checkRam(c, address, expected) {
@@ -215,7 +215,7 @@ const result = {status: 'ok', engine_sha256: engine.sha256, source_pins: sourceP
     'finite exact single66 CBW/CWD in four actual bound profiles; six-profile native admission is separate',
     'arithmetic modulo/range oracle, all256 AL, poisoned AH, AX sign boundaries,16 literal anchors and all128 valid FLAGS for each form',
     'CBW merges AX into current EAX.high16; CWD merges DX into current EDX.high16 without changing EAX; other GPRs and full valid FLAGS unchanged',
-    'pure guard-only V1 units and existing mixed-division V5; entire helper/FP128 and remaining4364 arena preserved by generated calls',
+    'pure guard-only V1 units and existing mixed-division V5; entire helper/FP128 and remaining4612 arena preserved by generated calls',
     'two units/context, all code and permissions fixed before capture; replacement generation mismatch3 versus successful retained resident unit',
     'live signed dividend/quotient/remainder/full product/SETcc consumers use returned state without CPU reseeding; explicit host-input witnesses are separate',
     'read-only RAM/RX code canaries; no memory operand fault/SMC, exhaustiveISA, speed, PE/browser/SDK/game or hostedCI claim',

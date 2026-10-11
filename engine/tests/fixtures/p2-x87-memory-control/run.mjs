@@ -1,3 +1,4 @@
+import {createArena} from '../support/arena.mjs';
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
 import {readFileSync, writeFileSync} from 'node:fs';
@@ -7,7 +8,7 @@ import {readEngine} from '../support/engine.mjs';
 const [enginePath, output, root] = process.argv.slice(2);
 assert.ok(enginePath && output && root);
 assert.match(process.env.RING3_ENGINE_SHA256 ?? '', /^[a-f0-9]{64}$/);
-const engine = readEngine(enginePath), SIZE = 4364, FP = 4236, PC = 0x1000, DST = 0x5008;
+const engine = readEngine(enginePath), SIZE = 4612, FP = 4236, PC = 0x1000, DST = 0x5008;
 const bank = Buffer.alloc(64, 0xcc);
 for (const [offset, bytes] of [[0,[0xd9,0x3b,0xdb,0xe3,0xd9,0x7b,2,0xdd,0x7b,4,0xeb,0]], [32,[0xd9,0x3b,0xeb,0]], [40,[0x90,0xd9,0x3b,0xeb,0]]]) bank.set(bytes, offset);
 assert.deepEqual(bank, readFileSync(join(output, 'control-memory.x86')), 'independent Rust/JS bank');
@@ -34,7 +35,7 @@ function fpu(control,seed=0) {
   bytes.set(Buffer.from(Array.from({length:80},(_,index)=>(index*73+seed*29+17)&255)),40); return bytes;
 }
 function initial() {
-  const bytes=Buffer.alloc(SIZE); bytes.set(state({registers:Array(8).fill(0),pc:0,flags:2})); bytes.set(exit(1,0,0,0,0,0,1),56);
+  const bytes=createArena(SIZE); bytes.set(state({registers:Array(8).fill(0),pc:0,flags:2})); bytes.set(exit(1,0,0,0,0,0,1),56);
   bytes.set(helper(1,[0,0,0,0,0,0]),100); const fp=record('R3FP',128); fp.writeUInt16LE(0x37f,16); fp.writeUInt16LE(0xffff,20); bytes.set(fp,FP); return bytes;
 }
 function observed(ctx) {return Buffer.from(new Uint8Array(ctx.memory.buffer,ctx.base,SIZE));}

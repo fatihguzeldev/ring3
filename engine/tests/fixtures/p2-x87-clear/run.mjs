@@ -1,3 +1,4 @@
+import {createArena} from '../support/arena.mjs';
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
 import {readFileSync, writeFileSync} from 'node:fs';
@@ -9,7 +10,7 @@ assert.ok(root);
 assert.match(process.env.RING3_ENGINE_SHA256 ?? '', /^[a-f0-9]{64}$/);
 const engine = readEngine(enginePath);
 assert.deepEqual(WebAssembly.Module.imports(engine.module), []);
-const SIZE = 4364, FP = 4236, TRANSFER = 140, PC = 0x1000;
+const SIZE = 4612, FP = 4236, TRANSFER = 140, PC = 0x1000;
 const program = Buffer.from('dfe0dbe2dfe0eb00', 'hex');
 assert.deepEqual(readFileSync(join(output, 'chain.x86')), program);
 const REG = [0xa53c1234, 0x1234807f, 0x23457f80, 0x34560f10, 0x4567ff00, 0x56789abc, 0x6789abcd, 0x789abcde];
@@ -34,7 +35,7 @@ function fpu(status, seed = 0) {
   bytes.set(Buffer.from(Array.from({length: 80}, (_, index) => (index * 73 + seed * 29 + 17) & 255)), 40); return bytes;
 }
 function initial() {
-  const bytes = Buffer.alloc(SIZE); bytes.set(state(Array(8).fill(0), 0, 2)); bytes.set(exit(1, 0), 56);
+  const bytes = createArena(SIZE); bytes.set(state(Array(8).fill(0), 0, 2)); bytes.set(exit(1, 0), 56);
   bytes.set(record('R3MH', 40, [0, 0, 0, 0, 0, 0]), 100);
   const fp = record('R3FP', 128); fp.writeUInt16LE(0x037f, 16); fp.writeUInt16LE(0xffff, 20); bytes.set(fp, FP); return bytes;
 }
@@ -168,6 +169,6 @@ for (let index = 0; index < rawRows.length; index++) {
 }
 const result = {status: 'ok', engine_sha256: engine.sha256, counts, modules, raw: {file: 'fnclex-raw.bin', bytes: physical.length, sha256: hash(physical), rows: rawRows},
   source_sha256: Object.fromEntries(['engine/tests/cpu_x87_clear_wasm.rs', 'engine/tests/fixtures/p2-x87-clear/run.mjs'].map(path => [path, hash(readFileSync(join(root, path)))])),
-  claim: 'exact no-wait FNCLEX status cleanup and retained FNSTSW AX projection in all six compiler profiles; literal16-bit basis with explicit undefinedC preservation, full4364arena/raw128FPU and saved physical raw independent bit-basis oracle; no waited forms, stack, arithmetic, helper/ABI expansion or performance claim'};
+  claim: 'exact no-wait FNCLEX status cleanup and retained FNSTSW AX projection in all six compiler profiles; literal16-bit basis with explicit undefinedC preservation, full4612arena/raw128FPU and saved physical raw independent bit-basis oracle; no waited forms, stack, arithmetic, helper/ABI expansion or performance claim'};
 writeFileSync(join(output, 'result.json'), JSON.stringify(result, null, 2), {flag: 'wx'});
 console.log(JSON.stringify({status: result.status, engine_sha256: engine.sha256, counts, output}));

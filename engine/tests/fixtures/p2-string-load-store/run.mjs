@@ -8,7 +8,7 @@ const [enginePath, output, root] = process.argv.slice(2);
 assert.ok(enginePath && output && root);
 assert.match(process.env.RING3_ENGINE_SHA256 ?? "", /^[0-9a-f]{64}$/);
 const hash = bytes => createHash("sha256").update(bytes).digest("hex");
-const engine = readEngine(enginePath), SIZE = 4364, PC = 0x1000, SRC = 0x5000, DST = 0x6000;
+const engine = readEngine(enginePath), SIZE = 4612, PC = 0x1000, SRC = 0x5000, DST = 0x6000;
 const bank = Buffer.alloc(64, 0xcc);
 for (const [offset, bytes] of [[0,[0xac,0xeb,0]],[8,[0xaa,0xeb,0]],
   [16,[0xac,0xaa,0xac,0xaa,0xeb,0]],[32,[0x90,0xac,0xeb,0]],[40,[0x90,0xaa,0xeb,0]]]) bank.set(bytes, offset);

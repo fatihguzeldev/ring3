@@ -9,7 +9,7 @@ assert.ok(root, 'expected actual engine, output directory and repository root');
 const fixtureRoot = join(root, 'engine/tests/fixtures/p2-windows-provider');
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
 const oracleBytes = readFileSync(join(fixtureRoot, 'oracle.json')), oracle = JSON.parse(oracleBytes);
-const size = 4236, transfer = 140, budget = 64;
+const size = 4612, transfer = 140, budget = 64;
 const artifacts = {}, observations = [], identities = [];
 
 function elfSymbols(object) {

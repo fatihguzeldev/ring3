@@ -20,7 +20,7 @@ const recordMinima = expected.input.slice(1).filter((value, i) => value < Math.m
 const census = {inversions, record_minima: recordMinima, fill: 3332, checksum: 1284, sort: 2807 + 8 * inversions - 3 * recordMinima, main_cycle: 17};
 census.cycle = census.fill + census.checksum + census.sort + census.main_cycle;
 census.program = 10 * census.cycle + 2;
-const SIZE = 4236, TRANSFER = 140, BASE = spec.actual_base, TEXT = BASE + spec.text_rva;
+const SIZE = 4612, TRANSFER = 140, BASE = spec.actual_base, TEXT = BASE + spec.text_rva;
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
 const artifacts = {}, contexts = [];
 const save = (name, bytes) => { writeFileSync(join(output, name), bytes, {flag: 'wx'}); artifacts[name] = {bytes: Buffer.byteLength(bytes), sha256: hash(bytes)}; };

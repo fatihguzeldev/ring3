@@ -1,10 +1,11 @@
+import {createArena} from '../support/arena.mjs';
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
 import {lstatSync, readFileSync, readdirSync, realpathSync} from 'node:fs';
 import {dirname, isAbsolute, join, relative, resolve} from 'node:path';
 import {fileURLToPath} from 'node:url';
 
-const U32 = 2 ** 32, SIZE = 4364, CODE = 0x1000;
+const U32 = 2 ** 32, SIZE = 4612, CODE = 0x1000;
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
 
 function uint(value, maximum = U32 - 1) {
@@ -128,7 +129,7 @@ function record(magic, size, fields = [], version = 1) {
 }
 
 export function defaultArena() {
-  const arena = Buffer.alloc(SIZE);
+  const arena = createArena(SIZE);
   record('R3ST', 56, [0, 0, 0, 0, 0, 0, 0, 0, 0, 2]).copy(arena);
   record('R3EX', 40, [1, 0, 0, 0, 0, 0]).copy(arena, 56);
   record('R3MH', 40, [0, 0, 0, 0, 0, 0]).copy(arena, 100);
@@ -137,7 +138,7 @@ export function defaultArena() {
 }
 
 export function authoredArena() {
-  const arena = Buffer.from(Array.from({length: SIZE}, (_, index) => (37 * index + 19) % 256));
+  const arena = Buffer.from(Array.from({length: SIZE}, (_, index) => (37 * index + 19) % 256)); arena.set(createArena(SIZE).subarray(4364), 4364);
   record('R3ST', 56, [0xa1000000, 0xa101a500, 0xa1027fff, 0xa1038000,
     0xa104ffff, 0xa1058001, 0xa1064000, 0xa107aaaa, CODE, 2]).copy(arena);
   record('R3EX', 40, [3, 0, 0, 0, 0, 0], 3).copy(arena, 56);

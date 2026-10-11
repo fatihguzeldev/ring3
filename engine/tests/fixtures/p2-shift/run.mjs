@@ -12,7 +12,7 @@ const oracleBytes = readFileSync(join(fixture, 'oracle.json')), oracle = JSON.pa
 const source = readFileSync(join(fixture, 'program.S'));
 assert.equal(hash(oracleBytes), '4fd46b27eaec764a712444c95ccd4d7069b012a4d3e9b439be9ba1c3f6ed8f41');
 assert.equal(hash(source), 'ba80dae0d9305e4d8f7da32b3e8f7635e5391a1b9ba14ca9cca30ee3b3e7f230');
-const size = 4236, transfer = 140, bytes = hex => new Uint8Array(Buffer.from(hex, 'hex'));
+const size = 4612, transfer = 140, bytes = hex => new Uint8Array(Buffer.from(hex, 'hex'));
 const artifacts = {}, identities = [], observations = [];
 
 function authoredText(object) {

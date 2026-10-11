@@ -14,7 +14,7 @@ const programBytes = readFileSync(programPath), cpuOracleBytes = readFileSync(cp
 assert.equal(hash(programBytes), oracle.reused_program.sha256);
 assert.equal(hash(cpuOracleBytes), oracle.reused_cpu_oracle.sha256);
 const cpuOracle = JSON.parse(cpuOracleBytes), selected = cpuOracle.cases.find(item => item.name === 'selected');
-const size = 4236, transfer = 140;
+const size = 4612, transfer = 140;
 const artifacts = {}, observations = [], identities = [];
 
 function authoredCode(object) {

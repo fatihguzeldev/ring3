@@ -5,7 +5,7 @@ import {join} from "node:path";
 import {readEngine} from "../support/engine.mjs";
 const [enginePath, output, root] = process.argv.slice(2);
 assert.ok(enginePath && output && root); assert.match(process.env.RING3_ENGINE_SHA256 ?? "", /^[a-f0-9]{64}$/);
-const engine = readEngine(enginePath), SIZE = 4364, PC = 0x1000, DST = 0x5000;
+const engine = readEngine(enginePath), SIZE = 4612, PC = 0x1000, DST = 0x5000;
 assert.deepEqual(WebAssembly.Module.imports(engine.module), []);
 const initial = readFileSync(join(output, "initial-arena.bin")); assert.equal(initial.length, SIZE);
 const bank = Buffer.alloc(64, 0xcc); bank.set([0x66,0xab,0xeb,0]);
@@ -29,11 +29,11 @@ function host(c,name,args,label=name,literal) {
   const before=capture(c,"before "+label),old=arena(c);assert.equal(c.api[name](...args),0,label);
   if(name==="read8") {assert.notEqual(literal,undefined);old.set(record("R3MH",40,[0,literal,0,0,0,1],2),100);}
   else if(name==="compile_resident"||name==="compile_resident_entries") {const now=arena(c);assert.equal(now.readUInt32LE(140),1);assert.equal(now.readUInt32LE(144),24);old.set(now.subarray(140,164),140);}
-  assert.deepEqual(arena(c),old,"full4364 host "+label);
+  assert.deepEqual(arena(c),old,"full4612 host "+label);
   if(name==="map"||name==="unmap") {const [start,pages]=args;for(const address of c.known.keys())if(address>=start&&address<start+pages*4096)c.known.delete(address);}
   const row={context:c.ordinal,owner:c.owner,name,args,label,before,after:capture(c,"after "+label)};journal.push(row);return row;
 }
-function input(c,offset,b,label) {const before=capture(c,"before input "+label),expected=arena(c);expected.set(b,offset);new Uint8Array(c.memory.buffer).set(b,c.base+offset);assert.deepEqual(arena(c),expected,"full4364 input "+label);const row={context:c.ordinal,owner:c.owner,name:"input",offset,hex:b.toString("hex"),label,before,after:capture(c,"after input "+label)};journal.push(row);}
+function input(c,offset,b,label) {const before=capture(c,"before input "+label),expected=arena(c);expected.set(b,offset);new Uint8Array(c.memory.buffer).set(b,c.base+offset);assert.deepEqual(arena(c),expected,"full4612 input "+label);const row={context:c.ordinal,owner:c.owner,name:"input",offset,hex:b.toString("hex"),label,before,after:capture(c,"after input "+label)};journal.push(row);}
 function upload(c,address,b) {input(c,140,b,"declared RAM upload");host(c,"upload",[address,b.length]);for(let i=0;i<b.length;i++)c.known.set(address+i,b[i]);}
 function known(c,address,length) {return Buffer.from(Array.from({length},(_,i)=>c.known.get(address+i)??0));}
 function readRam(c,address,length,label) {
@@ -45,7 +45,7 @@ function seed(c,pc,flags,value,destination) {const registers=[value,0x91b2c378,0
 function run(c,budget,label,next,reason=1,count=1,f,status=0,memoryTarget=true,version=2,args) {
   const before=capture(c,"before generated "+label),expected=arena(c);
   if(status===0) {expected.set(state(next));expected.set(exit(reason,count,f,version),56);if(f||(memoryTarget&&count))expected.set(helper(f),100);}
-  assert.equal(c.run(...(args??[c.base,c.base+56,budget,c.base+96])),status,label);assert.deepEqual(arena(c),expected,"full4364 "+label);
+  assert.equal(c.run(...(args??[c.base,c.base+56,budget,c.base+96])),status,label);assert.deepEqual(arena(c),expected,"full4612 "+label);
   generated++;retired+=status===0?count:0;const row={context:c.ordinal,owner:c.owner,name:"run",label,budget,status,args:args??[c.base,c.base+56,budget,c.base+96],before,after:capture(c,"after generated "+label)};journal.push(row);return row;
 }
 function window(address) {return address===0?[0,3]:address===0xfffffffe?[0xfffffffd,3]:[address-1,4];}
@@ -117,5 +117,5 @@ assert.equal(journal.filter(row=>row.name==="input").length,276);assert.equal(jo
 const raw=Buffer.concat(frames);writeFileSync(join(output,"arenas.bin"),raw,{flag:"wx"});
 const result={status:"ok",engine:{bytes:engine.bytes.length,sha256:engine.sha256,caller_sha256:process.env.RING3_ENGINE_SHA256},source_pins:beforeSources,modules,stores,ram,journal,raw:{file:"arenas.bin",bytes:raw.length,sha256:hash(raw)},
   counts:{contexts,modules:modules.length,stores:stores.length,fault_calls:faults,generated_calls:generated,retired,raw_frames:frames.length,host_counts:hostCounts,host_inputs:journal.filter(row=>row.name==="input").length,journal_records:journal.length,physical_files:modules.length+5},
-  limits:["exact66AB only; four bound profiles execute finite64-core inputs, no general operand16/REP", "full4364 saved arenas and selected live RAM/canary diagnostics; no whole RAM dump/body/timing certificate", "faults retain current AX/EDI/FLAGS/EIP, map/protect/RAM repairs are declared host inputs without prefix replay", "consumed-code same/different word stores retire before stale4; fresh guard-only JMP tail uses ExitV1", "post-stale allocation equality is a producer receipt, not independently saved after bytes; no post-close module pointer dereference; retained closed arena full neutral5"]};
+  limits:["exact66AB only; four bound profiles execute finite64-core inputs, no general operand16/REP", "full4612 saved arenas and selected live RAM/canary diagnostics; no whole RAM dump/body/timing certificate", "faults retain current AX/EDI/FLAGS/EIP, map/protect/RAM repairs are declared host inputs without prefix replay", "consumed-code same/different word stores retire before stale4; fresh guard-only JMP tail uses ExitV1", "post-stale allocation equality is a producer receipt, not independently saved after bytes; no post-close module pointer dereference; retained closed arena full neutral5"]};
 writeFileSync(join(output,"result.json"),JSON.stringify(result,null,2),{flag:"wx"});console.log(JSON.stringify({status:result.status,...result.counts,output}));

@@ -1,10 +1,11 @@
+import {createArena} from '../support/arena.mjs';
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
 import {existsSync, lstatSync, readFileSync, readdirSync, realpathSync} from 'node:fs';
 import {dirname, join, relative, resolve, sep} from 'node:path';
 import {fileURLToPath} from 'node:url';
 
-const SIZE = 4364;
+const SIZE = 4612;
 const TRANSFER = 140;
 const FP = 4236;
 const u32 = value => value >>> 0;
@@ -49,7 +50,7 @@ function validateFp(bytes) {
 }
 
 function defaultArena() {
-  const bytes = Buffer.alloc(SIZE);
+  const bytes = createArena(SIZE);
   header(bytes, 0, 'R3ST', 56);
   put(bytes, 52, 2);
   header(bytes, 56, 'R3EX', 40);

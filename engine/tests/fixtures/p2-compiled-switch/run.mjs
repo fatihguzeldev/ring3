@@ -7,7 +7,7 @@ import {readEngine} from '../support/engine.mjs';
 
 const [enginePath, output, root] = process.argv.slice(2);
 assert.ok(enginePath && output && root);
-const engine = readEngine(enginePath), SIZE = 4364, TRANSFER = 140;
+const engine = readEngine(enginePath), SIZE = 4612, TRANSFER = 140;
 const initial = readFileSync(join(output, 'initial-arena.bin')), image = readFileSync(join(output, 'switch.exe'));
 const spec = JSON.parse(readFileSync(join(output, 'manifest.json'), 'utf8'));
 assert.equal(initial.length, SIZE);
@@ -127,7 +127,7 @@ function run(e, u, label, budget, next, retired, steps = [], reason = 1, fields 
   if (steps.length) {const last = steps.at(-1); expected.set(helperBytes(last[0] === 'read' ? last[2] : 0, last[3] ? last[1] : null), 100);}
   if (e.table && budget && !before.readUInt32LE(96)) expected.set(installBytes(u), TRANSFER);
   e.steps = [...steps]; const status = (e.table ? e.dispatcher : u.run)(e.base, e.base + 56, budget, e.base + 96); assert.equal(status, 0, label); assert.equal(e.steps.length, 0, label);
-  assert.deepEqual(arena(e), expected, `${e.label}/${label}: full4364`); e.runs++; e.retired += retired;
+  assert.deepEqual(arena(e), expected, `${e.label}/${label}: full4612`); e.runs++; e.retired += retired;
   const file = `${e.label}-${String(e.runs).padStart(2, '0')}-${label}.bin`; save(file, arena(e));
   observations.push({context: e.label, label, module: u.name, budget, expected: {status: 0, ...packet, pc: next.pc, flags: next.flags, registers: next.registers},
     observed: {status, ...stop(e), pc: cpu(e).pc, flags: cpu(e).flags, registers: cpu(e).registers}, arena: file, helper_calls: steps.length});
@@ -207,7 +207,7 @@ assert.deepEqual(counts, {contexts: 4, modules: 22, runs: 108, retired: 544, hel
 const result = {status: 'ok', engine_sha256: engine.sha256, source_pins: pins, counts, contexts: contexts.map(({label, owner, address, captures, runs, retired, reads, stores, diagnostics}) => ({label, owner, address, captures, runs, retired, reads, stores, diagnostics})), modules, observations, helper_trace: helperTrace, diagnostics, artifacts,
   limits: ['fixed compiler function and readonly table; original DIR32-linked bytes and all cases/defaults at two bases and both bound owners; no generic linker/compiler claim',
     'replacement selected-path captures use original bytes; native full8block kernel admission proves all four bound profiles; resident split captures expose real cold table-selected transfer',
-    'full4364 including dirtyFP compared per generated call; selected state/output/stack/table/canaries only, not whole RAM; forwarded canonical helpers separate from public diagnostics',
+    'full4612 including dirtyFP compared per generated call; selected state/output/stack/table/canaries only, not whole RAM; forwarded canonical helpers separate from public diagnostics',
     'image-table permissions are explicit host-only fault controls; protect-only repair retains CPU and captured code identity; fault neutrality applies to the stopped JMP, not the whole C function',
     'seven finite replacement compilations and three resident children plus dispatcher; unchanged8blocks/64instructions/65536bytes/8resident slots; no product/API/ABI/performance claim']};
 writeFileSync(join(output, 'result.json'), JSON.stringify(result, null, 2), {flag: 'wx'}); console.log(JSON.stringify({status: 'ok', ...counts, output}));

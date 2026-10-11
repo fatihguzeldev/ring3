@@ -14,7 +14,7 @@ const programBytes = readFileSync(programPath), codeOracleBytes = readFileSync(c
 assert.equal(hash(programBytes), oracle.reused_program.sha256);
 assert.equal(hash(codeOracleBytes), oracle.reused_code_oracle.sha256);
 const pinnedEncoding = JSON.parse(codeOracleBytes).code_hex;
-const size = 4236, transfer = 140;
+const size = 4612, transfer = 140;
 const artifacts = {}, observations = [], identities = [];
 
 function authoredCode(object) {

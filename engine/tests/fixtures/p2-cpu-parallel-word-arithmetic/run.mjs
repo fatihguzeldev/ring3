@@ -1,3 +1,4 @@
+import {createArena} from '../support/arena.mjs';
 import assert from "node:assert/strict";
 import {createHash} from "node:crypto";
 import {readFileSync, writeFileSync} from "node:fs";
@@ -7,7 +8,7 @@ import {readEngine} from "../support/engine.mjs";
 const [enginePath, output, root] = process.argv.slice(2);
 assert.ok(enginePath && output && root);
 assert.match(process.env.RING3_ENGINE_SHA256 ?? "", /^[0-9a-f]{64}$/);
-const engine = readEngine(enginePath), SIZE = 4364, FP = 4236, PC = 0x1000;
+const engine = readEngine(enginePath), SIZE = 4612, FP = 4236, PC = 0x1000;
 assert.deepEqual(WebAssembly.Module.imports(engine.module), []);
 const program = Buffer.from("6601c80f92c26629c86683f8ff74020f0b6683c6010f90c36683ec016683e9ff6603c96683f904eb00", "hex");
 assert.equal(program.length, 41);
@@ -57,7 +58,7 @@ for (const owner of ["replacement", "resident"]) for (const entries of [false, t
     ctx.api[name] = instance.exports["ring3_abi_v1_" + name];
   const openArgs = [1, ...key], openStatus = ctx.api.open(...openArgs); assert.equal(openStatus, 0);
   hosts.push({context, name: "open", args: openArgs, status: openStatus}); ctx.base = ctx.api.arena_ptr() >>> 0;
-  ctx.expected = Buffer.alloc(SIZE); ctx.expected.set(state(Array(8).fill(0), 0, 2));
+  ctx.expected = createArena(SIZE); ctx.expected.set(state(Array(8).fill(0), 0, 2));
   ctx.expected.set(exit(1, 0), 56); ctx.expected.set(record("R3MH", 40, [0, 0, 0, 0, 0, 0]), 100); ctx.expected.set(fpu(), FP); check(ctx, "initialized full arena");
   host(ctx, "map", PC, 1, 7);
   input(ctx, 140, program, "literal guest bank"); host(ctx, "upload", PC, program.length);
@@ -108,5 +109,5 @@ assert.equal(phases.reduce((sum, phase) => sum + phase.retired, 0), 48); assert.
 const result = {status: "ok", engine: {file: "engine.wasm", bytes: engine.bytes.length, sha256: engine.sha256}, modules, initial_frames: initialFrames, inputs, hosts, phases,
   raw: {file: "arenas.bin", frames: frames.length, bytes: raw.length, sha256: hash(raw)}, source_sha256: beforeSources,
   counts: {owners: 2, descriptor_modes: 2, contexts: 4, modules: 4, word_adds: 12, word_subs: 12, word_compares: 8, setcc: 8, conditional_jumps: 4, jumps: 4, generated_calls: 48, retired: 48, raw_frames: 96, arena_inputs: 16, uploads: 4, host_rows: 24, physical_files: 8},
-  claim: "retained ADD AX,CX FFFF+1 wrap/carry/AF/PF/ZF->SETB DL->SUB current AX,CX borrow/sign/AF/PF->CMP AX signed83 rawFF equality->JZ skips unseeded UD2; ADD SI1 7FFF->8000 sign15 overflow->SETO BL; SUB SP1 8000->7FFF overflow/ordinary upper16 parent; SUB CX rawFF 1->2 signed16 borrow/AF/odd parity->self ADD CX,CX current2->4->CMP CX4->cold; twelve single-instruction phases/context in four replacement/resident explicit/entry contexts with two declared blocks; every generated before/after image is complete4364 including high16/all other GPRs, opaqueFP/helper/transfer; one initial CPU/FP seed percontext, no interphase host CPU/RAM repair or diagnostics; pure guard-only imports and ExitV1 only; ordered host records/live full-arena assertions are not saved host-frame journals, guestRAM dumps or allocator/generated-body proof; close has preclose assertion/APIstatus0 only, no postclose raw run"};
+  claim: "retained ADD AX,CX FFFF+1 wrap/carry/AF/PF/ZF->SETB DL->SUB current AX,CX borrow/sign/AF/PF->CMP AX signed83 rawFF equality->JZ skips unseeded UD2; ADD SI1 7FFF->8000 sign15 overflow->SETO BL; SUB SP1 8000->7FFF overflow/ordinary upper16 parent; SUB CX rawFF 1->2 signed16 borrow/AF/odd parity->self ADD CX,CX current2->4->CMP CX4->cold; twelve single-instruction phases/context in four replacement/resident explicit/entry contexts with two declared blocks; every generated before/after image is complete4612 including high16/all other GPRs, opaqueFP/helper/transfer; one initial CPU/FP seed percontext, no interphase host CPU/RAM repair or diagnostics; pure guard-only imports and ExitV1 only; ordered host records/live full-arena assertions are not saved host-frame journals, guestRAM dumps or allocator/generated-body proof; close has preclose assertion/APIstatus0 only, no postclose raw run"};
 writeFileSync(join(output, "result.json"), JSON.stringify(result, null, 2), {flag: "wx"}); console.log(JSON.stringify({status: result.status, counts: result.counts, output}));

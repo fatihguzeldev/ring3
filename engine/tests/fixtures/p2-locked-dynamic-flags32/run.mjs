@@ -4,7 +4,7 @@ import {readFileSync,writeFileSync} from 'node:fs';
 import {join} from 'node:path';
 import {readEngine} from '../support/engine.mjs';
 
-const [enginePath,output,root]=process.argv.slice(2),SIZE=4364,DATA=0x5010;
+const [enginePath,output,root]=process.argv.slice(2),SIZE=4612,DATA=0x5010;
 assert.ok(enginePath&&output&&root);
 const engine=readEngine(enginePath),initial=readFileSync(join(output,'initial-arena.bin'));
 const hash=b=>createHash('sha256').update(b).digest('hex');
@@ -51,7 +51,7 @@ const arities={open:3,close:0,arena_ptr:0,map:3,protect:3,upload:2,read32:1,stor
 const arena=c=>Buffer.from(new Uint8Array(c.memory.buffer,c.base,SIZE));
 const cpu=c=>{const a=arena(c);return{registers:Array.from({length:8},(_,i)=>a.readUInt32LE(16+4*i)),pc:a.readUInt32LE(48),flags:a.readUInt32LE(52)};};
 function input(c,offset,bytes){const expected=arena(c);expected.set(bytes,offset);new Uint8Array(c.memory.buffer).set(bytes,c.base+offset);assert.deepEqual(arena(c),expected);}
-function host(c,name,args,span){const expected=arena(c);assert.equal(c.api[name](...args),0,name);if(span)expected.set(arena(c).subarray(...span),span[0]);assert.deepEqual(arena(c),expected,'host full4364 '+name);}
+function host(c,name,args,span){const expected=arena(c);assert.equal(c.api[name](...args),0,name);if(span)expected.set(arena(c).subarray(...span),span[0]);assert.deepEqual(arena(c),expected,'host full4612 '+name);}
 function upload(c,address,bytes){input(c,140,bytes);host(c,'upload',[address,bytes.length]);}
 function seed(c,pc,registers){const s={registers:[...registers],pc,flags:0xcd7};input(c,0,Buffer.concat([state(s),exit(1,0),word(0),helper(0xad)]));return s;}
 function name(c,kind){if(kind==='read32')return kind;if(kind==='store32')return c.owner==='resident'?'store_resident32':'store32';return 'atomic_'+kind+(c.owner==='resident'?'_resident_u32':'_u32');}
@@ -83,10 +83,10 @@ function compile(c,title,blocks,kinds){
 function run(c,unit,budget,s,label,{status=0,reason=1,retired=budget,packet,fault={}}={}){
   const expected=arena(c),at=helperTrace.length;
   if(status===0){expected.set(state(s));expected.set(exit(reason,retired,fault,unit.exitVersion),56);if(packet)expected.set(packet,100);}
-  const observed=unit.run(c.base,c.base+56,budget,c.base+96);assert.equal(observed,status,label);assert.deepEqual(arena(c),expected,'full4364 '+label);const a=arena(c);
+  const observed=unit.run(c.base,c.base+56,budget,c.base+96);assert.equal(observed,status,label);assert.deepEqual(arena(c),expected,'full4612 '+label);const a=arena(c);
   observations.push({context:c.id,module:unit.name,label,budget,observed_status:observed,observed_reason:status?null:a.readUInt32LE(72),observed_retired:status?null:a.readUInt32LE(76),observed_cpu:cpu(c),helper_calls:helperTrace.length-at,helper_hex:a.subarray(100,140).toString('hex')});counts.runs++;if(!status)counts.retired+=retired;
 }
-function checkRam(c,address,expected){for(let i=0;i<expected.length;i+=4){const a=arena(c),value=expected.readUInt32LE(i);assert.equal(c.api.read32(address+i),0);a.set(helper(value),100);assert.deepEqual(arena(c),a,'diagnostic full4364');diagnostics.push({context:c.id,address:address+i,value});}}
+function checkRam(c,address,expected){for(let i=0;i<expected.length;i+=4){const a=arena(c),value=expected.readUInt32LE(i);assert.equal(c.api.read32(address+i),0);a.set(helper(value),100);assert.deepEqual(arena(c),a,'diagnostic full4612');diagnostics.push({context:c.id,address:address+i,value});}}
 function next(s,pc,flags=s.flags,updates={}){const n={registers:[...s.registers],pc,flags};for(const[r,v]of Object.entries(updates))n.registers[Number(r)]=v>>>0;return n;}
 function probeProof(c,unit){for(const p of probes){const registers=parents();for(const[r,v]of Object.entries(p.set))registers[Number(r)]=v;const start=p.address-12,frame=Buffer.from(Array.from({length:32},(_,i)=>(i*17+23)&255));frame.writeUInt32LE(p.old,12);upload(c,start,frame);
   const s=seed(c,p.pc,registers);run(c,unit,1,next(s,p.pc+p.bytes.length,p.flags),`register-source-${p.kind}`,{packet:helper(p.old)});counts.probes++;frame.writeUInt32LE(p.value,12);checkRam(c,start,frame);
@@ -156,6 +156,6 @@ assert.deepEqual(counts,{contexts:4,modules:16,runs:68,retired:212,helper_calls:
 const result={engine:{path:enginePath,sha256:engine.sha256,bytes:engine.bytes.length},source_pins:sourcesBefore,initial_arena_sha256:hash(initial),counts,contexts,modules,observations,helper_trace:helperTrace,public_diagnostics:diagnostics,
   compiler:{text_hex:kernel.toString('hex'),text_sha256:hash(kernel),calls:8,combined_blocks:4,combined_instructions:31},
   limits:{blocks:8,instructions:64,module_bytes:65536,captures_per_context:6,mapped_pages:12},
-  verification_ceiling:'per-run full4364 asserted;4final plus16compiler milestone arenas persisted;selected32Bprobe/fault frames,64Bcompiler data,32Bstack and12B SMCcode only,no wholeRAM;one named fault/protect-onlyretry and changedSMC/footer risk added,priorcanonicalfault/MAX/malformed proof reused',
+  verification_ceiling:'per-run full4612 asserted;4final plus16compiler milestone arenas persisted;selected32Bprobe/fault frames,64Bcompiler data,32Bstack and12B SMCcode only,no wholeRAM;one named fault/protect-onlyretry and changedSMC/footer risk added,priorcanonicalfault/MAX/malformed proof reused',
   claim:'finite private flat32 synchronous unshared whole original38B C11consumer plus exact singleF0 09/21/31 DWORDmemory fullregistersources;no hardwareLOCK,C11concurrency,sharedordering,performance or generalcoverage claim'};
 assert.deepEqual(Object.keys(result.engine),['path','sha256','bytes']);writeFileSync(join(output,'result.json'),JSON.stringify(result,null,2)+'\n',{flag:'wx'});console.log(JSON.stringify({output,counts,result:join(output,'result.json')}));

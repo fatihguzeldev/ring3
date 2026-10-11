@@ -8,7 +8,7 @@ const [enginePath, outputDir, root] = process.argv.slice(2);
 assert.ok(root);
 const sha256 = bytes => createHash('sha256').update(bytes).digest('hex');
 const engineBytes = readFileSync(enginePath);
-const SIZE = 4236, TRANSFER = 140, KEY = 0xd3456789e0000000n;
+const SIZE = 4612, TRANSFER = 140, KEY = 0xd3456789e0000000n;
 const OUTER = 0x80000011, RETURN = 0x80000012, INNER = 0x80000013;
 const sourcePaths = [
   'Cargo.lock',

@@ -1,10 +1,11 @@
+import {createArena} from '../support/arena.mjs';
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
 import {lstatSync, readFileSync, readdirSync, realpathSync} from 'node:fs';
 import {dirname, isAbsolute, join, relative, resolve} from 'node:path';
 import {fileURLToPath} from 'node:url';
 
-const U32 = 2 ** 32, SIZE = 4364, CODE = 0x1000, DATA = 0x4000;
+const U32 = 2 ** 32, SIZE = 4612, CODE = 0x1000, DATA = 0x4000;
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
 function uint(n, max = U32 - 1) {assert.ok(Number.isInteger(n) && n >= 0 && n <= max); return n;}
 function record(magic, size, fields = [], version = 1) {
@@ -199,11 +200,11 @@ export function generated(c, action) {
   }
 }
 export function defaultArena() {
-  const arena = Buffer.alloc(SIZE); record('R3ST', 56, [0, 0, 0, 0, 0, 0, 0, 0, 0, 2]).copy(arena); record('R3EX', 40, [1, 0, 0, 0, 0, 0]).copy(arena, 56); record('R3MH', 40, [0, 0, 0, 0, 0, 0]).copy(arena, 100);
+  const arena = createArena(SIZE); record('R3ST', 56, [0, 0, 0, 0, 0, 0, 0, 0, 0, 2]).copy(arena); record('R3EX', 40, [1, 0, 0, 0, 0, 0]).copy(arena, 56); record('R3MH', 40, [0, 0, 0, 0, 0, 0]).copy(arena, 100);
   const fp = record('R3FP', 128); fp.writeUInt16LE(0x37f, 16); fp.writeUInt16LE(0xffff, 20); fp.copy(arena, 4236); return arena;
 }
 function authoredArena() {
-  const b = Buffer.from(Array.from({length: SIZE}, (_, i) => (37 * i + 19) % 256));
+  const b = Buffer.from(Array.from({length: SIZE}, (_, i) => (37 * i + 19) % 256)); b.set(createArena(SIZE).subarray(4364), 4364);
   const regs = [0xa1010000, 0xa2020001, 0xa3037fff, 0xa404ffff, 0xa5058000, 0xa6061234, 0xa707aaaa, 0xa8085555];
   record('R3ST', 56, [...regs, CODE, 2]).copy(b); record('R3EX', 40, [3, 0, 0, 0, 0, 0], 3).copy(b, 56); record('R3MH', 40, [0, 0xdecafbad, 0, 0, 0, 0]).copy(b, 100); b.fill(0,96,100);
   const fp = record('R3FP', 128); for (const [at, n] of [[16, 0x27f], [18, 0x2840], [20, 0xaaaa], [22, 0x345], [32, 0x33], [34, 0x2b]]) fp.writeUInt16LE(n, at);
@@ -632,7 +633,7 @@ export function checkCapsule(directory,freezePath){
   const contexts=new Map(),seenModules=new Set(),seenData=new Set(),wantedJournal=[],snapshots=new Map(),groups=new Map(literalGroups.map(g=>[g.id,g]));
   const counts={contexts:0,engine_instances:0,opened:0,closed:0,generated_calls:0,guard_calls:0,host_api_calls:0,inputs:0,tables:0,child_modules:0,dispatchers:0,events:0,frames:0,data_files:0,diagnostic_reads:0,foreign_helper_calls:0};
   const statuses={};let frameIndex=0,positive=0,retired=0;
-  function frame(e,side,c){const index=e[side];assert.equal(index,frameIndex);const row=result.frames[frameIndex++];assert.deepEqual({index:row.index,offset:row.offset,length:row.length,context:row.context,event:row.event,side:row.side},{index,offset:index*SIZE,length:SIZE,context:e.context,event:e.action_id,side});assert.ok(Number.isInteger(row.memory_bytes)&&row.memory_bytes%65536===0&&row.memory_bytes>=c.base+SIZE);assert.equal(row.memory_bytes,e[`memory_bytes_${side}`]);assert.ok(row.memory_bytes>=(c.memory_bytes??0));c.memory_bytes=row.memory_bytes;const b=raw.subarray(index*SIZE,(index+1)*SIZE);assert.equal(hash(b),row.sha256);assert.deepEqual(b,c.arena,`full 4364 arena ${e.action_id}/${side}`);counts.frames++;wantedJournal.push({kind:'frame',...row});}
+  function frame(e,side,c){const index=e[side];assert.equal(index,frameIndex);const row=result.frames[frameIndex++];assert.deepEqual({index:row.index,offset:row.offset,length:row.length,context:row.context,event:row.event,side:row.side},{index,offset:index*SIZE,length:SIZE,context:e.context,event:e.action_id,side});assert.ok(Number.isInteger(row.memory_bytes)&&row.memory_bytes%65536===0&&row.memory_bytes>=c.base+SIZE);assert.equal(row.memory_bytes,e[`memory_bytes_${side}`]);assert.ok(row.memory_bytes>=(c.memory_bytes??0));c.memory_bytes=row.memory_bytes;const b=raw.subarray(index*SIZE,(index+1)*SIZE);assert.equal(hash(b),row.sha256);assert.deepEqual(b,c.arena,`full 4612 arena ${e.action_id}/${side}`);counts.frames++;wantedJournal.push({kind:'frame',...row});}
   function refs(e,c,field='reference_snapshot'){const r=e[field];assert.ok(r);assert.equal(r.memory_same,true);assert.deepEqual(r.table_slots,c.owner==='resident'?Array.from({length:8},(_,slot)=>({slot,group:c.table[slot],reference_equal:true})):null);assert.deepEqual(r.live_module_bytes,[...c.live.values()].map(u=>({file:u.file,pointer:u.pointer,bytes_length:u.bytes_length,sha256:u.sha256})));}
   assert.equal(result.events.length,plan.actions.length);
   for(const[index,a]of plan.actions.entries()){

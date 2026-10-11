@@ -4,7 +4,7 @@ import {readFileSync, writeFileSync} from 'node:fs';
 import {join} from 'node:path';
 import {readEngine} from '../support/engine.mjs';
 
-const [enginePath, output, root] = process.argv.slice(2), SIZE = 4364, DATA = 0x5010, FAULT = 0x1705;
+const [enginePath, output, root] = process.argv.slice(2), SIZE = 4612, DATA = 0x5010, FAULT = 0x1705;
 assert.ok(enginePath && output && root);
 const engine = readEngine(enginePath), initial = readFileSync(join(output, 'initial-arena.bin'));
 assert.equal(initial.length, SIZE);
@@ -78,7 +78,7 @@ for (const [a,b,flags] of [[0,0,0x46],[0,1,0x97],[0x80000000,1,0x816],[0x7ffffff
 const arena = c => Buffer.from(new Uint8Array(c.memory.buffer, c.base, SIZE));
 const cpu = c => {const b = arena(c); return {registers: Array.from({length: 8}, (_, i) => b.readUInt32LE(16 + 4 * i)), pc: b.readUInt32LE(48), flags: b.readUInt32LE(52)};};
 function input(c, offset, bytes) {const expected = arena(c); expected.set(bytes, offset); new Uint8Array(c.memory.buffer).set(bytes, c.base + offset); assert.deepEqual(arena(c), expected);}
-function host(c, name, args, span) {const expected = arena(c); assert.equal(c.api[name](...args), 0, name); if (span) expected.set(arena(c).subarray(...span), span[0]); assert.deepEqual(arena(c), expected, 'host full4364 ' + name);}
+function host(c, name, args, span) {const expected = arena(c); assert.equal(c.api[name](...args), 0, name); if (span) expected.set(arena(c).subarray(...span), span[0]); assert.deepEqual(arena(c), expected, 'host full4612 ' + name);}
 function map(c, page, permission = 3) {host(c, 'map', [page, 1, permission]); c.pages.add(page); c.maxPages = Math.max(c.maxPages, c.pages.size); assert.ok(c.maxPages <= 12);}
 function protect(c, page, permission) {host(c, 'protect', [page, 1, permission]);}
 function unmap(c, page) {host(c, 'unmap', [page, 1]); c.pages.delete(page);}
@@ -126,7 +126,7 @@ function compile(c, name, blocks, helpers = ['compare']) {
 function run(c, unit, budget, next, label, {status = 0, reason = 1, retired = 1, packet, fault = {}, synthetic = false} = {}) {
   const before = arena(c), expected = Buffer.from(before), at = helperTrace.length;
   if (status === 0) {expected.set(state(next)); expected.set(exit(reason, retired, fault, unit.exitVersion), 56); if (packet) expected.set(packet, 100);}
-  const observed = unit.run(c.base, c.base + 56, budget, c.base + 96); assert.equal(observed, status, label); assert.deepEqual(arena(c), expected, 'full4364 ' + label);
+  const observed = unit.run(c.base, c.base + 56, budget, c.base + 96); assert.equal(observed, status, label); assert.deepEqual(arena(c), expected, 'full4612 ' + label);
   const after = arena(c); observations.push({context: c.id, module: unit.name, label, budget, synthetic, expected_status: status, observed_status: observed,
     expected_reason: status ? null : reason, observed_reason: status ? null : after.readUInt32LE(72), expected_retired: status ? null : retired, observed_retired: status ? null : after.readUInt32LE(76),
     expected_pc: status ? null : next.pc, observed_pc: status ? null : after.readUInt32LE(48), expected_flags: status ? null : next.flags, observed_flags: status ? null : after.readUInt32LE(52),
@@ -353,6 +353,6 @@ const result={engine:{path:enginePath,sha256:engine.sha256,bytes:engine.bytes.le
   compiler:{text_hex:kernel.toString('hex'),text_sha256:hash(kernel),calls:counts.compiler_calls,combined_blocks:6,combined_instructions:34},
   counts,contexts,modules,observations,helper_trace:helperTrace,public_diagnostics:diagnostics,controls,
   limits:{blocks:8,instructions:64,module_bytes:65536,captures_per_context:6,mapped_pages:12},
-  claim:'four bound profiles; full 4364-byte arena comparisons include dirty FP128. Selected 32-byte data frames, 64-byte compiler data, 32-byte compiler stack and 12-byte SMC code only; no whole-RAM claim. One forwarded canonical compare_exchange helper per real locked instruction, with old DWORD retained in success packet. Malformed synthetic helpers never forward or commit. Original failure-output store is separate from the CAS transaction. Private flat32 synchronous unshared execution only; no hardware lock, multithread C11, Windows/provider or performance claim.'};
+  claim:'four bound profiles; full 4612-byte arena comparisons include dirty FP128. Selected 32-byte data frames, 64-byte compiler data, 32-byte compiler stack and 12-byte SMC code only; no whole-RAM claim. One forwarded canonical compare_exchange helper per real locked instruction, with old DWORD retained in success packet. Malformed synthetic helpers never forward or commit. Original failure-output store is separate from the CAS transaction. Private flat32 synchronous unshared execution only; no hardware lock, multithread C11, Windows/provider or performance claim.'};
 writeFileSync(join(output,'result.json'),JSON.stringify(result,null,2)+'\n',{flag:'wx'});
 console.log(JSON.stringify({output,counts,result:join(output,'result.json')}));

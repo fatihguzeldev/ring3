@@ -1,3 +1,4 @@
+import {createArena} from '../support/arena.mjs';
 import assert from "node:assert/strict";
 import {createHash} from "node:crypto";
 import {readFileSync, writeFileSync} from "node:fs";
@@ -7,7 +8,7 @@ import {readEngine} from "../support/engine.mjs";
 const [enginePath, output, root] = process.argv.slice(2);
 assert.ok(enginePath && output && root);
 assert.match(process.env.RING3_ENGINE_SHA256 ?? "", /^[0-9a-f]{64}$/);
-const engine = readEngine(enginePath), SIZE = 4364, FP = 4236, PC = 0x1000;
+const engine = readEngine(enginePath), SIZE = 4612, FP = 4236, PC = 0x1000;
 assert.deepEqual(WebAssembly.Module.imports(engine.module), []);
 const program = Buffer.from("f966400f90c10f92c266f7d40f94c36683d500664e0f92c666f7df0f90c566f7dd0f92c40f94c774020f0beb00", "hex");
 assert.equal(program.length, 45);
@@ -57,7 +58,7 @@ for (const owner of ["replacement", "resident"]) for (const entries of [false, t
     ctx.api[name] = instance.exports["ring3_abi_v1_" + name];
   const openArgs = [1, ...key], openStatus = ctx.api.open(...openArgs); assert.equal(openStatus, 0);
   hosts.push({context, name: "open", args: openArgs, status: openStatus}); ctx.base = ctx.api.arena_ptr() >>> 0;
-  ctx.expected = Buffer.alloc(SIZE); ctx.expected.set(state(Array(8).fill(0), 0, 2));
+  ctx.expected = createArena(SIZE); ctx.expected.set(state(Array(8).fill(0), 0, 2));
   ctx.expected.set(exit(1, 0), 56); ctx.expected.set(record("R3MH", 40, [0, 0, 0, 0, 0, 0]), 100); ctx.expected.set(fpu(), FP); check(ctx, "initialized full arena");
   host(ctx, "map", PC, 1, 7);
   input(ctx, 140, program, "literal guest bank"); host(ctx, "upload", PC, program.length);
@@ -109,5 +110,5 @@ assert.equal(phases.reduce((sum, phase) => sum + phase.retired, 0), 64); assert.
 const result = {status: "ok", engine: {file: "engine.wasm", bytes: engine.bytes.length, sha256: engine.sha256}, modules, initial_frames: initialFrames, inputs, hosts, phases,
   raw: {file: "arenas.bin", frames: frames.length, bytes: raw.length, sha256: hash(raw)}, source_sha256: beforeSources,
   counts: {owners: 2, descriptor_modes: 2, contexts: 4, modules: 4, word_incs: 4, word_decs: 4, word_nots: 4, word_negs: 8, word_adcs: 4, stc: 4, setcc: 28, conditional_jumps: 4, jumps: 4, generated_calls: 52, retired: 64, raw_frames: 104, arena_inputs: 16, uploads: 4, host_rows: 24, physical_files: 8, maximum_live_resident_units: 1},
-  claim: "retained STC->INC AX7FFF=8000/897 preservingCF1->SETOCL1/SETBDL1->NOT SPFFFF=0 with dirtyCF/OF/AF and ZF0 preserved->SETZBL0->ADC BPFFFF,0/currentCF1=0/57->DEC SI0=FFFF/97 preservingCF1->SETBDH1->NEG DI8000=8000/887->SETOCH1->NEG currentBP0=0/46 clearingCF1->SETBAH0/SETZBH1->JZ skips unseeded UD2->cold. Thirteen generated phases and sixteen retired instructions/context across four bound replacement/resident explicit/entry contexts, two declared blocks, one resident unit/context and no interphase host CPU/RAM repair or diagnostics. Current flags/parents/SP/high16 poison and full4364 generated before/after images including opaqueFP128/helper/transfer. Pure guard-only imports/ExitV1. Ordered setup host records/live full-arena assertions are not saved host-frame journals, wholeRAM dumps, arbitrary module-body or allocator proof; close preclose assertion/API0 only, no postclose raw run. Literal expected anchors are producer correspondence only; independent model must reconstruct from physical before/input bytes"};
+  claim: "retained STC->INC AX7FFF=8000/897 preservingCF1->SETOCL1/SETBDL1->NOT SPFFFF=0 with dirtyCF/OF/AF and ZF0 preserved->SETZBL0->ADC BPFFFF,0/currentCF1=0/57->DEC SI0=FFFF/97 preservingCF1->SETBDH1->NEG DI8000=8000/887->SETOCH1->NEG currentBP0=0/46 clearingCF1->SETBAH0/SETZBH1->JZ skips unseeded UD2->cold. Thirteen generated phases and sixteen retired instructions/context across four bound replacement/resident explicit/entry contexts, two declared blocks, one resident unit/context and no interphase host CPU/RAM repair or diagnostics. Current flags/parents/SP/high16 poison and full4612 generated before/after images including opaqueFP128/helper/transfer. Pure guard-only imports/ExitV1. Ordered setup host records/live full-arena assertions are not saved host-frame journals, wholeRAM dumps, arbitrary module-body or allocator proof; close preclose assertion/API0 only, no postclose raw run. Literal expected anchors are producer correspondence only; independent model must reconstruct from physical before/input bytes"};
 writeFileSync(join(output, "result.json"), JSON.stringify(result, null, 2), {flag: "wx"}); console.log(JSON.stringify({status: result.status, counts: result.counts, output}));

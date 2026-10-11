@@ -7,7 +7,7 @@ import {readEngine} from '../support/engine.mjs';
 
 const [enginePath, output, root] = process.argv.slice(2);
 assert.ok(root && output);
-const engine = readEngine(enginePath), SIZE = 4364, TRANSFER = 140;
+const engine = readEngine(enginePath), SIZE = 4612, TRANSFER = 140;
 const initial = readFileSync(join(output, 'initial-arena.bin'));
 assert.equal(initial.length, SIZE);
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
@@ -274,6 +274,6 @@ const expectedCounts = {contexts: 7, modules: 28, runs: 1737, retired: 2650, gue
 assert.deepEqual(counts, expectedCounts);
 const sourcesAfter = sourceMap(); assert.deepEqual(sourcesAfter, sourcesBefore);
 for (const e of contexts) status(e, 'close engine', () => e.api.close());
-const result = {status: 'PASS', engine_sha256: engine.sha256, engine_bytes: engine.bytes.length, command: process.argv, tools: {node: process.version, v8: process.versions.v8, platform: process.platform, arch: process.arch}, counts, expected_counts: expectedCounts, oracle: Object.fromEntries([...fixtures].map(([count, f]) => [count, f.checksum])), observations, helper_trace: helperTrace, contexts: contexts.map(e => ({label: e.label, count: e.spec.count, mode: e.mode, pe_sha256: hash(e.fixture.image), allocation: e.allocation, retired: e.retired, runs: e.runs, captures: e.captures, completions: e.completions, diagnostic_reads: e.diagnosticReads, cdecl_entry: e.abiEntry, cdecl_return: e.abiReturn, controls: e.controls, units: e.units.map(({run, ...unit}) => unit), final: e.final})), sources_before: sourcesBefore, sources_after: sourcesAfter, artifacts, claim_ceiling: 'one compiler-produced scalar leaf in an authored relocated PE; seven finite actual contexts, selected source/record/stack/canary RAM, full4364 unaffected-byte and dirtyFP assertions; no CPU reseed after startup, arbitrary compiler/Windows/browser/game compatibility or performance claim'};
+const result = {status: 'PASS', engine_sha256: engine.sha256, engine_bytes: engine.bytes.length, command: process.argv, tools: {node: process.version, v8: process.versions.v8, platform: process.platform, arch: process.arch}, counts, expected_counts: expectedCounts, oracle: Object.fromEntries([...fixtures].map(([count, f]) => [count, f.checksum])), observations, helper_trace: helperTrace, contexts: contexts.map(e => ({label: e.label, count: e.spec.count, mode: e.mode, pe_sha256: hash(e.fixture.image), allocation: e.allocation, retired: e.retired, runs: e.runs, captures: e.captures, completions: e.completions, diagnostic_reads: e.diagnosticReads, cdecl_entry: e.abiEntry, cdecl_return: e.abiReturn, controls: e.controls, units: e.units.map(({run, ...unit}) => unit), final: e.final})), sources_before: sourcesBefore, sources_after: sourcesAfter, artifacts, claim_ceiling: 'one compiler-produced scalar leaf in an authored relocated PE; seven finite actual contexts, selected source/record/stack/canary RAM, full4612 unaffected-byte and dirtyFP assertions; no CPU reseed after startup, arbitrary compiler/Windows/browser/game compatibility or performance claim'};
 save('result.json', JSON.stringify(result, null, 2));
 console.log(JSON.stringify({status: result.status, ...result.counts, output}));

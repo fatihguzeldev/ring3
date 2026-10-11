@@ -1,3 +1,4 @@
+import {createArena} from '../support/arena.mjs';
 import assert from "node:assert/strict";
 import {createHash} from "node:crypto";
 import {readFileSync, writeFileSync} from "node:fs";
@@ -7,7 +8,7 @@ import {readEngine} from "../support/engine.mjs";
 const [enginePath, output, root] = process.argv.slice(2);
 assert.ok(enginePath && output && root);
 assert.match(process.env.RING3_ENGINE_SHA256 ?? "", /^[0-9a-f]{64}$/);
-const engine = readEngine(enginePath), SIZE = 4364, FP = 4236, PC = 0x1000, STATUS = 0x5008, DST = 0x6008;
+const engine = readEngine(enginePath), SIZE = 4612, FP = 4236, PC = 0x1000, STATUS = 0x5008, DST = 0x6008;
 const program = Buffer.from("dd3bf6f1aadbe2dd7b02acf6f1aadfe0eb00", "hex");
 assert.deepEqual(program, readFileSync(join(output, "parallel.x86")), "independent Rust/JS program bytes");
 assert.equal(17n / 5n, 3n); assert.equal(17n % 5n, 2n);
@@ -48,7 +49,7 @@ for (const [index, owner] of ["replacement", "resident"].entries()) {
   for (const name of ["open", "close", "arena_ptr", "map", "upload", "read32", "read8", "compile", "compile_resident", "generation", "module_ptr", "module_len", "guard", "guard_resident", "store8", "store_resident8", "store16", "store_resident16"])
     ctx.api[name] = instance.exports["ring3_abi_v1_" + name];
   assert.equal(ctx.api.open(3, index + 1, 0x51525354), 0); ctx.base = ctx.api.arena_ptr() >>> 0;
-  ctx.expected = Buffer.alloc(SIZE); ctx.expected.set(state(Array(8).fill(0), 0, 2));
+  ctx.expected = createArena(SIZE); ctx.expected.set(state(Array(8).fill(0), 0, 2));
   ctx.expected.set(exit(1, 0, 1), 56); ctx.expected.set(helper(1, 0, 0), 100); ctx.expected.set(fpu(true, 0, Buffer.alloc(80)), FP); check(ctx, "initialized full arena");
   for (const address of [PC, STATUS & ~0xfff, DST & ~0xfff]) host(ctx, "map", address, 1, address === PC ? 7 : 3);
   upload(ctx, PC, program); upload(ctx, STATUS - 1, Buffer.from([0x31, 0x52, 0x73, 0x94, 0xb5, 0xd6])); upload(ctx, DST, Buffer.from([0x55, 0x56]));
@@ -87,5 +88,5 @@ const result = {status: "ok", engine: {bytes: engine.bytes.length, sha256: engin
   raw: {file: "arenas.bin", frames: frames.length, bytes: raw.length, sha256: hash(raw)},
   source_sha256: Object.fromEntries(["engine/tests/cpu_parallel_word_wasm.rs", "engine/tests/fixtures/p2-cpu-parallel-word/run.mjs", "engine/tests/fixtures/support/engine.mjs"].map(path => [path, hash(readFileSync(join(root, path)))])),
   counts: {owners: 2, modules: 2, generated_calls: 8, retired: 20, byte_divisions: 4, word_status_stores: 4, byte_loads: 2, byte_stores: 4, fnclex: 2},
-  claim: "retained CPU across BYTE DIV, live FNSTSW m2byte, FNCLEX and byte strings; both Store8/Store16 imports, full4364-byte arena, literal status/destination bytes and sentinels; finite integration, no performance claim"};
+  claim: "retained CPU across BYTE DIV, live FNSTSW m2byte, FNCLEX and byte strings; both Store8/Store16 imports, full4612-byte arena, literal status/destination bytes and sentinels; finite integration, no performance claim"};
 writeFileSync(join(output, "result.json"), JSON.stringify(result, null, 2), {flag: "wx"}); console.log(JSON.stringify({status: result.status, counts: result.counts, output}));

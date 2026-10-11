@@ -6,7 +6,7 @@ import {readEngine} from '../support/engine.mjs';
 
 const [enginePath, output, root] = process.argv.slice(2);
 assert.ok(enginePath && output && root);
-const engine = readEngine(enginePath), SIZE = 4364, PC = 0x1000, DATA = 0x5000;
+const engine = readEngine(enginePath), SIZE = 4612, PC = 0x1000, DATA = 0x5000;
 const initial = readFileSync(join(output, 'initial-arena.bin'));
 assert.equal(initial.length, SIZE);
 assert.deepEqual(WebAssembly.Module.imports(engine.module), []);
@@ -67,7 +67,7 @@ function run(c, module, budget, next, {label, reason = 1, retired = 1, fault, he
     if (helperVersion !== null) expected.set(helper(helperVersion, helperValue, fault), 100);
   }
   assert.equal(module.run(c.base, c.base + 56, budget, c.base + 96), status, label);
-  assert.deepEqual(arena(c), expected, 'full4364 CPU/exit/helper/FP128 effect: ' + label);
+  assert.deepEqual(arena(c), expected, 'full4612 CPU/exit/helper/FP128 effect: ' + label);
   counts.runs++; if (status === 0) counts.retired += retired;
 }
 function checkRam(c, address, expected) {
@@ -361,7 +361,7 @@ const result = {status: 'ok', engine_sha256: engine.sha256, source_pins: sourceP
   limits: [
     'finite exact single66 WORD memory BT/BTS/BTR/BTC register-index and imm8 in four bound profiles; standalone memory remains closed',
     'arithmetic bit oracle and signed16 floor-address model; original full32 EA/index aliases, immediate low4 no offset, selected WORD span checks',
-    'real read16/store16 RAM and complete4364 CPU/FLAGS/exit/helper/FP checks; no arbitrary-host rollback claim',
+    'real read16/store16 RAM and complete4612 CPU/FLAGS/exit/helper/FP checks; no arbitrary-host rollback claim',
     'map/protect-only retry models zeroed remapped bytes; explicit new WORD/index/EA/FLAGS input witness is separate',
     'existing FLAGS clear policy is Ring3 policy; BT never writes, identity BTS/BTR still checked-store and SMC, consumed code status4 differs from generation status3',
     'own immediate BTC093f→0b3f keeps original bit9, fresh guard-only V1 suffix has no head replay; other memory units use existing V2 helpers/exits',

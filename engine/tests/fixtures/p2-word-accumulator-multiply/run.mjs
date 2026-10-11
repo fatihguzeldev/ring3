@@ -6,7 +6,7 @@ import {readEngine} from '../support/engine.mjs';
 
 const [enginePath, output, root] = process.argv.slice(2);
 assert.ok(enginePath && output && root);
-const engine = readEngine(enginePath), SIZE = 4364, PC = 0x1000, DATA = 0x5000;
+const engine = readEngine(enginePath), SIZE = 4612, PC = 0x1000, DATA = 0x5000;
 const initial = readFileSync(join(output, 'initial-arena.bin'));
 assert.equal(initial.length, SIZE);
 assert.deepEqual(WebAssembly.Module.imports(engine.module), []);
@@ -66,7 +66,7 @@ function run(c, module, budget, next, {label, reason = 1, retired = 1, fault, he
     if (helperVersion !== null) expected.set(helper(helperVersion, helperValue, fault), 100);
   }
   assert.equal(module.run(c.base, c.base + 56, budget, c.base + 96), status, label);
-  assert.deepEqual(arena(c), expected, 'full4364 CPU/exit/helper/FP128 effect: ' + label);
+  assert.deepEqual(arena(c), expected, 'full4612 CPU/exit/helper/FP128 effect: ' + label);
   counts.runs++; if (status === 0) counts.retired += retired;
 }
 function checkRam(c, address, expected) {
@@ -308,7 +308,7 @@ const result = {status: 'ok', engine_sha256: engine.sha256, source_pins: sourceP
     'CF/OF report nonzero unsigned high16 or signed16 fit; clearing PF/AF/ZF/SF follows Ring3 policy for undefined arithmetic flags',
     'memory modules import only guard/read16, including AX0; read-only data and RX own-code factors never store or cause SMC',
     'real read16 failures and selected RAM/canary checks; map/protect-only repair and declared current-input retry are separate witnesses',
-    'full4364 arena preserves FP128; live returned DX:AX and flag consumers avoid hidden CPU reseeding',
+    'full4612 arena preserves FP128; live returned DX:AX and flag consumers avoid hidden CPU reseeding',
     'no hardware undefined-bit equivalence, exhaustive ISA, throughput, PE/browser/SDK/game or CI claim']};
 writeFileSync(join(output, 'result.json'), JSON.stringify(result, null, 2) + '\n', {flag: 'wx'});
 console.log(JSON.stringify({status: result.status, ...counts, modules: modules.length, output}));

@@ -1,3 +1,4 @@
+import {createArena} from '../support/arena.mjs';
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
 import {readFileSync, readdirSync, writeFileSync} from 'node:fs';
@@ -9,7 +10,7 @@ assert.ok(root, 'expected current engine, output directory and repository root')
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
 const {bytes: engineBytes, module: engineModule, sha256: engineSha256} = readEngine(enginePath);
 assert.deepEqual(WebAssembly.Module.imports(engineModule), []);
-const SIZE = 4236, TRANSFER = 140, PC = 0x1000, MASTER_COLD = PC + 0xf00, LOCAL_COLD = PC + 128;
+const SIZE = 4612, TRANSFER = 140, PC = 0x1000, MASTER_COLD = PC + 0xf00, LOCAL_COLD = PC + 128;
 const OWNERS = ['standalone', 'replacement', 'resident'], KINDS = ['left', 'right'], FLAGS = [2, 0xcd7];
 const RAW = Array.from({length: 32}, (_, i) => i), EDGE_RAW = [32, 33, 255];
 const STYLE_RAW = [0, 1, 8, 9, 10, 18, 19, 27, 28, 31], STYLE_FLAGS = [3, 0xcd6], VALID_FLAGS = [...FLAGS, ...STYLE_FLAGS];
@@ -170,7 +171,7 @@ function upload(ctx, address, bytes, label) {request(ctx, bytes, label); pure(ct
   hostInput(ctx, 'upload', label, null, bytes, {address});}
 function fresh(owner, selected, label, writable = false) {
   const ordinal = ++counts.contexts, ctx = {owner, ordinal, selected, label, low: ordinal, high: 0x4243494d,
-    expected: Buffer.alloc(SIZE), code: Buffer.from(selected.bytes), units: []};
+    expected: createArena(SIZE), code: Buffer.from(selected.bytes), units: []};
   ctx.expected.set(state(Array(8).fill(0), 0, 2)); ctx.expected.set(exit(1, 0), 56); ctx.expected.set(record('R3MH', 40, [0, 0, 0, 0, 0, 0]), 100);
   if (owner === 'standalone') {ctx.memory = new WebAssembly.Memory({initial: 1}); ctx.base = 128; refresh(ctx).bytes.set(ctx.expected, ctx.base); check(ctx, 'independent standalone initialized arena');}
   else {
