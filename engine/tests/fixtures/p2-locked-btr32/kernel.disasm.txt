@@ -1,0 +1,13 @@
+
+kernel.obj:	file format coff-i386
+
+Disassembly of section .text:
+
+00000000 <_ring3_reset_bit>:
+       0: 8b 4c 24 04                  	mov	ecx, dword ptr [esp + 0x4]
+       4: ba 05 00 00 00               	mov	edx, 0x5
+       9: 31 c0                        	xor	eax, eax
+       b: f0                           	lock
+       c: 0f b3 11                     	btr	dword ptr [ecx], edx
+       f: 0f 92 c0                     	setb	al
+      12: c3                           	ret
