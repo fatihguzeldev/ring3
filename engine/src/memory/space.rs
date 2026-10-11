@@ -226,6 +226,15 @@ impl AddressSpace {
         self.copy_out(address, output, Access::Read)
     }
 
+    pub(crate) fn check_span(
+        &self,
+        address: GuestAddress,
+        length: usize,
+        access: Access,
+    ) -> Result<(), MemoryError> {
+        self.check_access(address, length, access)
+    }
+
     pub fn fetch(&self, address: GuestAddress, output: &mut [u8]) -> Result<(), MemoryError> {
         self.copy_out(address, output, Access::Execute)
     }
@@ -240,6 +249,33 @@ impl AddressSpace {
         Ok(())
     }
 
+    /// Commits a bounded stack instruction, including stacks wrapping across address zero.
+    pub(crate) fn write_stack(
+        &mut self,
+        addresses: &[u32],
+        values: &[u32],
+        width: usize,
+    ) -> Result<(), MemoryError> {
+        if addresses.len() != values.len() || addresses.len() > 32 || !matches!(width, 2 | 4) {
+            return Err(MemoryError::InvalidRange);
+        }
+        for &address in addresses {
+            self.check_access(GuestAddress(address), width, Access::Write)?;
+        }
+        if addresses.is_empty() {
+            return Ok(());
+        }
+        let version = self.advance_version()?;
+        for (&address, &value) in addresses.iter().zip(values) {
+            self.copy_in_validated(
+                GuestAddress(address),
+                &value.to_le_bytes()[..width],
+                version,
+            );
+        }
+        Ok(())
+    }
+
     pub fn exchange8(&mut self, address: GuestAddress, value: u8) -> Result<u8, MemoryError> {
         let mut old = [0; 1];
         self.read(address, &mut old)?;
@@ -247,6 +283,38 @@ impl AddressSpace {
         let version = self.advance_version()?;
         self.copy_in_validated(address, &[value], version);
         Ok(old[0])
+    }
+
+    /// preflights selected bytes only and commits them with one version; an empty mask has no effects.
+    pub fn write_masked(
+        &mut self,
+        address: GuestAddress,
+        input: &[u8],
+        mask: u32,
+    ) -> Result<(), MemoryError> {
+        if input.is_empty() || input.len() > 16 || mask >> input.len() != 0 {
+            return Err(MemoryError::InvalidRange);
+        }
+        if mask == 0 {
+            return Ok(());
+        }
+        for index in 0..input.len() {
+            if mask & (1 << index) != 0 && address.0.checked_add(index as u32).is_none() {
+                return Err(fault(address, Access::Write, FaultReason::AddressOverflow));
+            }
+        }
+        for index in 0..input.len() {
+            if mask & (1 << index) != 0 {
+                self.check_access(GuestAddress(address.0 + index as u32), 1, Access::Write)?;
+            }
+        }
+        let version = self.advance_version()?;
+        for (index, byte) in input.iter().enumerate() {
+            if mask & (1 << index) != 0 {
+                self.copy_in_validated(GuestAddress(address.0 + index as u32), &[*byte], version);
+            }
+        }
+        Ok(())
     }
 
     pub fn exchange16(&mut self, address: GuestAddress, value: u16) -> Result<u16, MemoryError> {
@@ -3424,5 +3492,151 @@ mod tests {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod masked_simd_tests {
+    use super::*;
+    fn range(address: u32) -> PageRange {
+        PageRange::new(GuestAddress(address), 1).unwrap()
+    }
+    #[test]
+    fn sparse_write_has_no_access_for_clear_mask_and_one_identity_commit() {
+        let mut memory = AddressSpace::new(2).unwrap();
+        memory
+            .map_zeroed(range(0xffff_f000), Permissions::ALL)
+            .unwrap();
+        memory.write(GuestAddress(0xffff_ffff), &[0x5a]).unwrap();
+        let snapshot = memory.snapshot_code(GuestAddress(0xffff_ffff), 1).unwrap();
+        let version = memory.version;
+        let epoch = memory.code_validation_version;
+        assert_eq!(
+            memory.write_masked(GuestAddress(0xffff_ffff), &[0x5a; 16], 0),
+            Ok(())
+        );
+        assert_eq!(
+            (memory.version, memory.code_validation_version),
+            (version, epoch)
+        );
+        assert!(memory.is_code_current(&snapshot));
+        assert_eq!(
+            memory.write_masked(GuestAddress(0xffff_ffff), &[0x5a; 16], 1),
+            Ok(())
+        );
+        assert_eq!(memory.version, version + 1);
+        assert!(!memory.is_code_current(&snapshot));
+        memory.version = u64::MAX;
+        assert_eq!(memory.write_masked(GuestAddress(0), &[7; 16], 0), Ok(()));
+        assert_eq!(
+            memory.write_masked(GuestAddress(0xffff_ffff), &[0x5a; 16], 1),
+            Err(MemoryError::VersionExhausted)
+        );
+        assert_eq!(
+            memory.write_masked(GuestAddress(0xffff_ffff), &[0x5a; 16], 2),
+            Err(fault(
+                GuestAddress(0xffff_ffff),
+                Access::Write,
+                FaultReason::AddressOverflow
+            ))
+        );
+    }
+    #[test]
+    fn selected_write_preflight_is_complete_and_never_requires_read() {
+        let mut memory = AddressSpace::new(2).unwrap();
+        memory
+            .map_zeroed(range(0x1000), Permissions::from_bits(2).unwrap())
+            .unwrap();
+        let version = memory.version;
+        let before = memory.backing.clone();
+        assert_eq!(
+            memory.write_masked(GuestAddress(0x1ff8), &[0xa5; 16], 0x101),
+            Err(fault(
+                GuestAddress(0x2000),
+                Access::Write,
+                FaultReason::Unmapped
+            ))
+        );
+        assert_eq!(memory.backing, before);
+        assert_eq!(memory.version, version);
+        assert_eq!(
+            memory.write_masked(GuestAddress(0x1ff8), &[0xa5; 16], 0xff),
+            Ok(())
+        );
+        assert_eq!(memory.version, version + 1);
+        memory.map_zeroed(range(0x2000), Permissions::READ).unwrap();
+        memory.version = u64::MAX;
+        assert_eq!(
+            memory.write_masked(GuestAddress(0x1ff8), &[0xa5; 16], 0x100),
+            Err(fault(
+                GuestAddress(0x2000),
+                Access::Write,
+                FaultReason::Permission
+            ))
+        );
+    }
+}
+
+#[cfg(test)]
+mod stack_commit_tests {
+    use super::*;
+    fn range(address: u32) -> PageRange {
+        PageRange::new(GuestAddress(address), 1).unwrap()
+    }
+    #[test]
+    fn wrapped_stack_slots_commit_once_and_max_failure_preserves_every_slot() {
+        let mut memory = AddressSpace::new(2).unwrap();
+        memory.map_zeroed(range(0), Permissions::ALL).unwrap();
+        memory
+            .map_zeroed(range(0xffff_f000), Permissions::ALL)
+            .unwrap();
+        let snapshot = memory.snapshot_code(GuestAddress(0), 2).unwrap();
+        let version = memory.version;
+        memory
+            .write_stack(&[0, 0xffff_fffe], &[0x1234, 0x5678], 2)
+            .unwrap();
+        assert_eq!(memory.version, version + 1);
+        assert!(!memory.is_code_current(&snapshot));
+        let mut bytes = [0; 2];
+        memory.read(GuestAddress(0), &mut bytes).unwrap();
+        assert_eq!(bytes, [0x34, 0x12]);
+        memory.read(GuestAddress(0xffff_fffe), &mut bytes).unwrap();
+        assert_eq!(bytes, [0x78, 0x56]);
+        memory.version = u64::MAX;
+        let before = memory.backing.clone();
+        assert_eq!(
+            memory.write_stack(&[0, 0xffff_fffe], &[0xaaaa, 0xbbbb], 2),
+            Err(MemoryError::VersionExhausted)
+        );
+        assert_eq!(memory.backing, before);
+        assert_eq!(memory.version, u64::MAX);
+    }
+    #[test]
+    fn late_stack_permission_or_overflow_preflight_has_no_earlier_write() {
+        let mut memory = AddressSpace::new(2).unwrap();
+        memory.map_zeroed(range(0x1000), Permissions::ALL).unwrap();
+        memory
+            .map_zeroed(range(0xffff_f000), Permissions::READ)
+            .unwrap();
+        let before = memory.backing.clone();
+        let version = memory.version;
+        assert_eq!(
+            memory.write_stack(&[0x1000, 0xffff_fffc], &[1, 2], 4),
+            Err(fault(
+                GuestAddress(0xffff_fffc),
+                Access::Write,
+                FaultReason::Permission
+            ))
+        );
+        assert_eq!(
+            memory.write_stack(&[0x1000, 0xffff_fffe], &[1, 2], 4),
+            Err(fault(
+                GuestAddress(0xffff_fffe),
+                Access::Write,
+                FaultReason::AddressOverflow
+            ))
+        );
+        assert_eq!(memory.backing, before);
+        assert_eq!(memory.version, version);
     }
 }
