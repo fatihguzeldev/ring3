@@ -1959,6 +1959,33 @@ pub(super) fn instruction(
             logical_flags(code, 31);
             store = true;
         }
+        Operation::LockedMemoryOrRegister32 { address, source } => {
+            memory::atomic_or_register_result(code, address, source, imports, exit_depth);
+            code.local_get(RESULT)
+                .local_get(register(source))
+                .i32_or()
+                .local_set(RESULT);
+            logical_flags(code, 31);
+            store = true;
+        }
+        Operation::LockedMemoryAndRegister32 { address, source } => {
+            memory::atomic_and_register_result(code, address, source, imports, exit_depth);
+            code.local_get(RESULT)
+                .local_get(register(source))
+                .i32_and()
+                .local_set(RESULT);
+            logical_flags(code, 31);
+            store = true;
+        }
+        Operation::LockedMemoryXorRegister32 { address, source } => {
+            memory::atomic_xor_register_result(code, address, source, imports, exit_depth);
+            code.local_get(RESULT)
+                .local_get(register(source))
+                .i32_xor()
+                .local_set(RESULT);
+            logical_flags(code, 31);
+            store = true;
+        }
         Operation::MemoryBitMutation {
             kind,
             address,

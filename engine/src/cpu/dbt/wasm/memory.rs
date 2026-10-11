@@ -117,9 +117,13 @@ impl Imports {
                 Operation::LockedMemoryExchangeAddWord { .. } => exchange_add16 = true,
                 Operation::LockedMemoryBitSet32 { .. } => bit_test_set32 = true,
                 Operation::LockedMemoryBitReset32 { .. } => bit_test_reset32 = true,
-                Operation::LockedMemoryOr32 { .. } => atomic_or_u32 = true,
-                Operation::LockedMemoryAnd32 { .. } => atomic_and_u32 = true,
-                Operation::LockedMemoryXor32 { .. } => atomic_xor_u32 = true,
+                Operation::LockedMemoryOr32 { .. } | Operation::LockedMemoryOrRegister32 { .. } => {
+                    atomic_or_u32 = true
+                }
+                Operation::LockedMemoryAnd32 { .. }
+                | Operation::LockedMemoryAndRegister32 { .. } => atomic_and_u32 = true,
+                Operation::LockedMemoryXor32 { .. }
+                | Operation::LockedMemoryXorRegister32 { .. } => atomic_xor_u32 = true,
                 Operation::X87StatusToMemory { .. }
                 | Operation::X87ControlToMemory { .. }
                 | Operation::StoreWord { .. }
@@ -369,6 +373,36 @@ pub(super) fn atomic_xor_result(
     exit_depth: u32,
 ) {
     exchange::atomic_xor_result(code, address, mask, imports, exit_depth);
+}
+
+pub(super) fn atomic_or_register_result(
+    code: &mut InstructionSink<'_>,
+    address: EffectiveAddress,
+    source: crate::cpu::x86::Register32,
+    imports: Imports,
+    exit_depth: u32,
+) {
+    exchange::atomic_or_register_result(code, address, source, imports, exit_depth);
+}
+
+pub(super) fn atomic_and_register_result(
+    code: &mut InstructionSink<'_>,
+    address: EffectiveAddress,
+    source: crate::cpu::x86::Register32,
+    imports: Imports,
+    exit_depth: u32,
+) {
+    exchange::atomic_and_register_result(code, address, source, imports, exit_depth);
+}
+
+pub(super) fn atomic_xor_register_result(
+    code: &mut InstructionSink<'_>,
+    address: EffectiveAddress,
+    source: crate::cpu::x86::Register32,
+    imports: Imports,
+    exit_depth: u32,
+) {
+    exchange::atomic_xor_register_result(code, address, source, imports, exit_depth);
 }
 
 pub(super) fn exchange_add_result(

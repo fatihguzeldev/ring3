@@ -512,9 +512,36 @@ fn narrow_prefix_and_declared_span_errors_remain_precise() {
                 bytes.push(0x66);
             }
             bytes.extend_from_slice(&encode(opcode, extension, &[0x03], immediate));
-            if prefix == 0xf0 && matches!(opcode, 0x81 | 0x83) && matches!(extension, 1 | 4 | 6) {
-                let Value32::Immediate(mask) = value else {
-                    unreachable!();
+            if prefix == 0xf0
+                && ((matches!(opcode, 0x81 | 0x83) && matches!(extension, 1 | 4 | 6))
+                    || matches!(opcode, 0x09 | 0x21 | 0x31))
+            {
+                let address = EffectiveAddress {
+                    base: Some(Register32::Ebx),
+                    index: None,
+                    scale: 1,
+                    displacement: 0,
+                };
+                let expected = match (kind, value) {
+                    (BinaryKind::Or, Value32::Immediate(mask)) => {
+                        Operation::LockedMemoryOr32 { address, mask }
+                    }
+                    (BinaryKind::And, Value32::Immediate(mask)) => {
+                        Operation::LockedMemoryAnd32 { address, mask }
+                    }
+                    (BinaryKind::Xor, Value32::Immediate(mask)) => {
+                        Operation::LockedMemoryXor32 { address, mask }
+                    }
+                    (BinaryKind::Or, Value32::Register(source)) => {
+                        Operation::LockedMemoryOrRegister32 { address, source }
+                    }
+                    (BinaryKind::And, Value32::Register(source)) => {
+                        Operation::LockedMemoryAndRegister32 { address, source }
+                    }
+                    (BinaryKind::Xor, Value32::Register(source)) => {
+                        Operation::LockedMemoryXorRegister32 { address, source }
+                    }
+                    _ => unreachable!(),
                 };
                 bytes.extend_from_slice(&[0xeb, 0]);
                 for entries in [false, true] {
@@ -531,37 +558,7 @@ fn narrow_prefix_and_declared_span_errors_remain_precise() {
                         decode_one(memory, GuestAddress(0x1001))
                             .unwrap()
                             .operation(),
-                        &if extension == 1 {
-                            Operation::LockedMemoryOr32 {
-                                address: EffectiveAddress {
-                                    base: Some(Register32::Ebx),
-                                    index: None,
-                                    scale: 1,
-                                    displacement: 0,
-                                },
-                                mask,
-                            }
-                        } else if extension == 4 {
-                            Operation::LockedMemoryAnd32 {
-                                address: EffectiveAddress {
-                                    base: Some(Register32::Ebx),
-                                    index: None,
-                                    scale: 1,
-                                    displacement: 0,
-                                },
-                                mask,
-                            }
-                        } else {
-                            Operation::LockedMemoryXor32 {
-                                address: EffectiveAddress {
-                                    base: Some(Register32::Ebx),
-                                    index: None,
-                                    scale: 1,
-                                    displacement: 0,
-                                },
-                                mask,
-                            }
-                        }
+                        &expected
                     );
                     assert_eq!(
                         compile(&mut instance, entries),
@@ -580,9 +577,9 @@ fn narrow_prefix_and_declared_span_errors_remain_precise() {
                             .is_err()
                     );
                     let artifact = instance.artifact_bytes().unwrap();
-                    let required = if extension == 1 {
+                    let required = if kind == BinaryKind::Or {
                         b"atomic_or_u32".as_slice()
-                    } else if extension == 4 {
+                    } else if kind == BinaryKind::And {
                         b"atomic_and_u32".as_slice()
                     } else {
                         b"atomic_xor_u32".as_slice()

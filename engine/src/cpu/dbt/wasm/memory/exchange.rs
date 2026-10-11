@@ -142,6 +142,72 @@ pub(super) fn atomic_xor_result(
     code.local_set(RESULT);
 }
 
+pub(super) fn atomic_or_register_result(
+    code: &mut InstructionSink<'_>,
+    address: EffectiveAddress,
+    source: Register32,
+    imports: Imports,
+    exit_depth: u32,
+) {
+    effective_address(code, address);
+    let index = imports
+        .atomic_or_u32
+        .expect("prepared locked register memory or has an import")
+        .emit_binding(code);
+    code.local_get(ADDRESS)
+        .local_get(register(source))
+        .call(index)
+        .local_set(HELPER_STATUS);
+    validate_result(code);
+    exit_if_failed(code, exit_depth);
+    helper_field(code, 20);
+    code.local_set(RESULT);
+}
+
+pub(super) fn atomic_and_register_result(
+    code: &mut InstructionSink<'_>,
+    address: EffectiveAddress,
+    source: Register32,
+    imports: Imports,
+    exit_depth: u32,
+) {
+    effective_address(code, address);
+    let index = imports
+        .atomic_and_u32
+        .expect("prepared locked register memory and has an import")
+        .emit_binding(code);
+    code.local_get(ADDRESS)
+        .local_get(register(source))
+        .call(index)
+        .local_set(HELPER_STATUS);
+    validate_result(code);
+    exit_if_failed(code, exit_depth);
+    helper_field(code, 20);
+    code.local_set(RESULT);
+}
+
+pub(super) fn atomic_xor_register_result(
+    code: &mut InstructionSink<'_>,
+    address: EffectiveAddress,
+    source: Register32,
+    imports: Imports,
+    exit_depth: u32,
+) {
+    effective_address(code, address);
+    let index = imports
+        .atomic_xor_u32
+        .expect("prepared locked register memory xor has an import")
+        .emit_binding(code);
+    code.local_get(ADDRESS)
+        .local_get(register(source))
+        .call(index)
+        .local_set(HELPER_STATUS);
+    validate_result(code);
+    exit_if_failed(code, exit_depth);
+    helper_field(code, 20);
+    code.local_set(RESULT);
+}
+
 pub(super) fn exchange_add_result(
     code: &mut InstructionSink<'_>,
     address: EffectiveAddress,

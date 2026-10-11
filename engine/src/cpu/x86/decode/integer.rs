@@ -86,6 +86,39 @@ pub(super) fn lower(instruction: &Instruction) -> Option<Result<Operation, Decod
             })
         })());
     }
+    if instruction.code() == Code::Or_rm32_r32
+        && instruction.has_lock_prefix()
+        && instruction.op0_kind() == OpKind::Memory
+    {
+        return Some((|| {
+            Ok(Operation::LockedMemoryOrRegister32 {
+                address: effective_address(instruction)?,
+                source: register(instruction.op1_register())?,
+            })
+        })());
+    }
+    if instruction.code() == Code::And_rm32_r32
+        && instruction.has_lock_prefix()
+        && instruction.op0_kind() == OpKind::Memory
+    {
+        return Some((|| {
+            Ok(Operation::LockedMemoryAndRegister32 {
+                address: effective_address(instruction)?,
+                source: register(instruction.op1_register())?,
+            })
+        })());
+    }
+    if instruction.code() == Code::Xor_rm32_r32
+        && instruction.has_lock_prefix()
+        && instruction.op0_kind() == OpKind::Memory
+    {
+        return Some((|| {
+            Ok(Operation::LockedMemoryXorRegister32 {
+                address: effective_address(instruction)?,
+                source: register(instruction.op1_register())?,
+            })
+        })());
+    }
     let memory_predicate = match instruction.code() {
         Code::Cmp_rm8_r8 | Code::Cmp_rm8_imm8 => Some(BytePredicateKind::Cmp),
         Code::Test_rm8_r8 | Code::Test_rm8_imm8 => Some(BytePredicateKind::Test),

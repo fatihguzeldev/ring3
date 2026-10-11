@@ -485,6 +485,9 @@ fn supports_memory_binary(operation: &Operation) -> bool {
             | Operation::LockedMemoryOr32 { .. }
             | Operation::LockedMemoryAnd32 { .. }
             | Operation::LockedMemoryXor32 { .. }
+            | Operation::LockedMemoryOrRegister32 { .. }
+            | Operation::LockedMemoryAndRegister32 { .. }
+            | Operation::LockedMemoryXorRegister32 { .. }
             | Operation::MemoryBitMutationWord { .. }
             | Operation::MemoryArithmeticByte { .. }
             | Operation::MemoryExchange { .. }

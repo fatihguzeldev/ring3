@@ -880,6 +880,18 @@ pub enum Operation {
         address: EffectiveAddress,
         mask: u32,
     },
+    LockedMemoryOrRegister32 {
+        address: EffectiveAddress,
+        source: Register32,
+    },
+    LockedMemoryAndRegister32 {
+        address: EffectiveAddress,
+        source: Register32,
+    },
+    LockedMemoryXorRegister32 {
+        address: EffectiveAddress,
+        source: Register32,
+    },
     MemoryBitMutationWord {
         kind: BitTestKind,
         address: EffectiveAddress,
