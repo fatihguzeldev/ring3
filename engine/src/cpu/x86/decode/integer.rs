@@ -329,6 +329,7 @@ pub(super) fn lower(instruction: &Instruction) -> Option<Result<Operation, Decod
                 .or_else(|| lower_byte_rotate_through_carry_immediate(instruction))
                 .or_else(|| lower_byte_rotate_through_carry_cl(instruction))
                 .or_else(|| lower_unary(instruction))
+                .or_else(|| lower_trailing_zero_count32(instruction))
                 .or_else(|| lower_bit_scan(instruction))
                 .or_else(|| lower_word_bit_scan(instruction))
                 .or_else(|| lower_bit_test(instruction))
@@ -961,6 +962,28 @@ fn lower_byte_rotate_through_carry_cl(
             .map(|address| Operation::MemoryByteRotateThroughCarryCl { kind, address }),
         _ => Err(unsupported()),
     })
+}
+
+fn lower_trailing_zero_count32(
+    instruction: &Instruction,
+) -> Option<Result<Operation, DecodeError>> {
+    if instruction.code() != Code::Tzcnt_r32_rm32 {
+        return None;
+    }
+    Some((|| {
+        let destination = register(instruction.op0_register())?;
+        match instruction.op1_kind() {
+            OpKind::Register => Ok(Operation::TrailingZeroCount32 {
+                destination,
+                source: register(instruction.op1_register())?,
+            }),
+            OpKind::Memory => Ok(Operation::ReadTrailingZeroCount32 {
+                destination,
+                address: effective_address(instruction)?,
+            }),
+            _ => Err(unsupported()),
+        }
+    })())
 }
 
 fn lower_bit_scan(instruction: &Instruction) -> Option<Result<Operation, DecodeError>> {

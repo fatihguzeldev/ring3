@@ -393,7 +393,10 @@ fn word_bit_scan_prefixes_and_admitted_neighbors_have_precise_boundaries() {
             }
         }
         for tail in [0xc3, 0x03] {
-            let bytes = [0xf3, 0x0f, opcode, tail];
+            let mut bytes = vec![0xf3, 0x0f, opcode, tail];
+            if opcode == 0xbc {
+                bytes.insert(0, 0xf3);
+            }
             assert_eq!(
                 decode_one(&code_space(CODE, &bytes), GuestAddress(CODE)).err(),
                 Some(unsupported)

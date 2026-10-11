@@ -45,6 +45,8 @@ pub(super) fn check_profile(instruction: &Instruction, bytes: &[u8]) -> Result<(
     {
         return Err(DecodeError::Unsupported(UnsupportedFeature::Simd));
     }
+    let exact_tzcnt32 =
+        instruction.code() == Code::Tzcnt_r32_rm32 && matches!(bytes, [0xf3, 0x0f, 0xbc, _, ..]);
     let exact_cs_alignment_nop = instruction.code() == Code::Nop_rm16
         && bytes == [0x66, 0x2e, 0x0f, 0x1f, 0x84, 0, 0, 0, 0, 0];
     let exact_alignment_nop = exact_cs_alignment_nop
@@ -59,6 +61,9 @@ pub(super) fn check_profile(instruction: &Instruction, bytes: &[u8]) -> Result<(
             .any(|register| register.is_segment_register())
     {
         return Err(DecodeError::Unsupported(UnsupportedFeature::Segment));
+    }
+    if instruction.code() == Code::Tzcnt_r32_rm32 && !exact_tzcnt32 {
+        return Err(unsupported());
     }
     if instruction.code() == Code::Pause && bytes != [0xf3, 0x90] {
         return Err(unsupported());
@@ -574,7 +579,7 @@ pub(super) fn check_profile(instruction: &Instruction, bytes: &[u8]) -> Result<(
             || exact_locked_or_register32
             || exact_locked_and_register32
             || exact_locked_xor_register32))
-        || instruction.has_rep_prefix()
+        || (instruction.has_rep_prefix() && !exact_tzcnt32)
         || instruction.has_repne_prefix()
         || (!(exact_alignment_nop
             || exact_word_string

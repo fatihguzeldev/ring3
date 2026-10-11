@@ -827,6 +827,10 @@ pub enum Operation {
         kind: DivideKind,
         address: EffectiveAddress,
     },
+    TrailingZeroCount32 {
+        destination: Register32,
+        source: Register32,
+    },
     BitScan {
         kind: BitScanKind,
         destination: Register32,
@@ -896,6 +900,10 @@ pub enum Operation {
         kind: BitTestKind,
         address: EffectiveAddress,
         index: BitIndex,
+    },
+    ReadTrailingZeroCount32 {
+        destination: Register32,
+        address: EffectiveAddress,
     },
     ReadBitScan {
         kind: BitScanKind,

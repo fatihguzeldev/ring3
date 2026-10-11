@@ -384,6 +384,7 @@ fn supports_memory_reads(operation: &Operation) -> bool {
             | Operation::ReadByteDivideAccumulator { .. }
             | Operation::ReadWordDivideAccumulator { .. }
             | Operation::ReadDivideAccumulator { .. }
+            | Operation::ReadTrailingZeroCount32 { .. }
             | Operation::ReadBitScan { .. }
             | Operation::ReadBitScanWord { .. }
             | Operation::ReadBitTest { .. }
@@ -615,6 +616,7 @@ pub(super) fn supports(instruction: &DecodedInstruction, embedded: bool) -> bool
                 | Operation::DivideAccumulator { .. }
                 | Operation::WordDivideAccumulator { .. }
                 | Operation::ByteDivideAccumulator { .. }
+                | Operation::TrailingZeroCount32 { .. }
                 | Operation::BitScan { .. }
                 | Operation::BitScanWord { .. }
                 | Operation::BitTest { .. }

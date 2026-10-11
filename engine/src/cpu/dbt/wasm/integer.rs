@@ -2232,6 +2232,19 @@ pub(super) fn instruction(
             memory::load_result(code, address, imports, exit_depth);
             accumulator_divide(code, kind, RESULT, exit_depth);
         }
+        Operation::TrailingZeroCount32 {
+            destination,
+            source,
+        } => {
+            trailing_zero_count32(code, destination, register(source));
+        }
+        Operation::ReadTrailingZeroCount32 {
+            destination,
+            address,
+        } => {
+            memory::load_result(code, address, imports, exit_depth);
+            trailing_zero_count32(code, destination, RESULT);
+        }
         Operation::BitScan {
             kind,
             destination,
@@ -5185,6 +5198,28 @@ fn rotate_through_carry_one_flags(code: &mut InstructionSink<'_>, kind: RotateKi
         .i32_shl()
         .i32_or()
         .local_set(FLAGS);
+}
+
+fn trailing_zero_count32(code: &mut InstructionSink<'_>, destination: Register32, source: u32) {
+    code.local_get(source)
+        .local_set(LHS)
+        .local_get(LHS)
+        .i32_ctz()
+        .local_set(RESULT)
+        .local_get(FLAGS)
+        .i32_const(0x402)
+        .i32_and()
+        .local_get(LHS)
+        .i32_eqz()
+        .i32_or()
+        .local_get(RESULT)
+        .i32_eqz()
+        .i32_const(6)
+        .i32_shl()
+        .i32_or()
+        .local_set(FLAGS)
+        .local_get(RESULT)
+        .local_set(register(destination));
 }
 
 fn bit_scan_word(

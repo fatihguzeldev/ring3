@@ -398,8 +398,11 @@ fn excluded_forms_and_exact_operand_fetch_preserve_fault_and_snapshot_boundaries
             assert!(engine.guard_resident(KEY, id).is_err());
         }
     }
-    for bytes in [[0xf3, 0x0f, 0xbc, 0x03], [0xf3, 0x0f, 0xbd, 0x03]] {
-        let engine = code(CODE, &bytes);
+    for bytes in [
+        &[0xf3, 0xf3, 0x0f, 0xbc, 0x03][..],
+        &[0xf3, 0x0f, 0xbd, 0x03],
+    ] {
+        let engine = code(CODE, bytes);
         assert_eq!(
             decode_one(engine.memory().unwrap(), GuestAddress(CODE)).err(),
             Some(opcode_error),

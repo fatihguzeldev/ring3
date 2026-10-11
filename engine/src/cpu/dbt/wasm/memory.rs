@@ -263,6 +263,7 @@ impl Imports {
                 | Operation::ReadMultiplyAccumulator { .. }
                 | Operation::ReadDivideAccumulator { .. }
                 | Operation::ReadBitScan { .. }
+                | Operation::ReadTrailingZeroCount32 { .. }
                 | Operation::ReadBitTest { .. }
                 | Operation::Move {
                     source: Value32::Memory(_),
