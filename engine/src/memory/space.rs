@@ -251,6 +251,17 @@ impl AddressSpace {
         output: &mut [u8],
         access: Access,
     ) -> Result<(), MemoryError> {
+        if output.is_empty() {
+            return Ok(());
+        }
+        let within = address.0 as usize % PAGE_SIZE as usize;
+        if output.len() <= PAGE_SIZE as usize - within {
+            let page = address.0 as usize / PAGE_SIZE as usize;
+            let slot = self.access_slot(page, address, access)?;
+            let offset = slot * PAGE_SIZE as usize + within;
+            output.copy_from_slice(&self.backing[offset..offset + output.len()]);
+            return Ok(());
+        }
         self.check_access(address, output.len(), access)?;
         let mut copied = 0;
         while copied < output.len() {
