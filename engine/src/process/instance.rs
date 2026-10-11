@@ -11,7 +11,8 @@ use crate::{
         arena::{self, ARENA_SIZE, HELPER_OFFSET, TRANSFER_OFFSET, TRANSFER_SIZE},
         memory_helper::{
             HELPER_SIZE, NarrowReadWidth, encode_byte_exchange_result, encode_byte_store_result,
-            encode_helper_result, encode_narrow_helper_result, encode_word_store_result,
+            encode_helper_result, encode_narrow_helper_result, encode_word_exchange_result,
+            encode_word_store_result,
         },
     },
     cpu::dbt::{
@@ -557,6 +558,54 @@ impl EngineInstance {
         }
     }
 
+    pub fn exchange16(&mut self, address: u32, value: u32) -> Result<StoreCompletion, HostError> {
+        self.guard(self.key, self.generation())?;
+        let memory = self.memory.as_mut().ok_or(HostError::Closed)?;
+        let code_version = memory.code_validation_version();
+        let result = memory
+            .exchange16(GuestAddress(address), value as u16)
+            .map(u32::from);
+        let code_changed = result.is_ok() && memory.code_validation_version() != code_version;
+        self.write_word_exchange_helper(address, result)?;
+        if code_changed {
+            match self.artifact_bytes() {
+                Ok(_) => Ok(StoreCompletion::Complete),
+                Err(HostError::CodeInvalidated) => Ok(StoreCompletion::CodeInvalidated),
+                Err(error) => Err(error),
+            }
+        } else {
+            Ok(StoreCompletion::Complete)
+        }
+    }
+
+    pub fn exchange_resident16(
+        &mut self,
+        key: u64,
+        id: u64,
+        address: u32,
+        value: u32,
+    ) -> Result<StoreCompletion, HostError> {
+        self.guard_resident(key, id)?;
+        let memory = self.memory.as_mut().ok_or(HostError::Closed)?;
+        let code_version = memory.code_validation_version();
+        let result = memory
+            .exchange16(GuestAddress(address), value as u16)
+            .map(u32::from);
+        let code_changed = result.is_ok() && memory.code_validation_version() != code_version;
+        self.write_word_exchange_helper(address, result)?;
+        if code_changed {
+            match self.resident_bytes(id) {
+                Ok(_) => Ok(StoreCompletion::Complete),
+                Err(HostError::Resident(RegistryError::CodeInvalidated)) => {
+                    Ok(StoreCompletion::CodeInvalidated)
+                }
+                Err(error) => Err(error),
+            }
+        } else {
+            Ok(StoreCompletion::Complete)
+        }
+    }
+
     pub fn exchange8(&mut self, address: u32, value: u32) -> Result<StoreCompletion, HostError> {
         self.guard(self.key, self.generation())?;
         let memory = self.memory.as_mut().ok_or(HostError::Closed)?;
@@ -659,6 +708,16 @@ impl EngineInstance {
         self.resident_installations = [None; RESIDENT_INSTALLATION_SLOTS];
         self.memory = None;
         self.virtual_allocations = Vec::new();
+    }
+
+    fn write_word_exchange_helper(
+        &mut self,
+        address: u32,
+        result: Result<u32, MemoryError>,
+    ) -> Result<(), HostError> {
+        let output = &mut self.arena.as_mut().get_mut()[HELPER_OFFSET..HELPER_OFFSET + HELPER_SIZE];
+        encode_word_exchange_result(GuestAddress(address), result, output)
+            .map_err(|_| HostError::Infrastructure)
     }
 
     fn write_byte_exchange_helper(
@@ -1647,5 +1706,211 @@ mod tests {
         );
         assert_eq!(engine.arena(), before);
         assert_eq!(byte_store_ram(&engine, 0x5000, 4), [0x11, 0x81, 0x33, 0x44]);
+    }
+
+    #[test]
+    fn word_exchange_exhaustion_preserves_ram_snapshots_and_all_published_owners() {
+        for resident in [false, true] {
+            let (mut engine, outer, home) = byte_store_fixture();
+            engine.unmap(0x8000, 1).unwrap();
+            engine.map(0xffff_f000, 1, 7).unwrap();
+            engine
+                .memory
+                .as_mut()
+                .unwrap()
+                .write(GuestAddress(u32::MAX - 1), &[0x5a, 0xa5])
+                .unwrap();
+            let bases = [0x1000, 0x3000, 0x5000, 0xffff_f000];
+            let ram = bases.map(|base| byte_store_ram(&engine, base, 4096));
+            let snapshots = bases.map(|base| {
+                engine
+                    .memory()
+                    .unwrap()
+                    .snapshot_code(GuestAddress(base), 4096)
+                    .unwrap()
+            });
+            let generation = engine.generation();
+            let modules = [
+                engine.artifact_bytes().unwrap(),
+                engine.resident_bytes(outer).unwrap(),
+                engine.resident_bytes(home).unwrap(),
+            ]
+            .map(|bytes| (bytes.to_vec(), bytes.as_ptr() as usize));
+            let epoch = engine.memory().unwrap().code_validation_version();
+            engine.memory.as_mut().unwrap().exhaust_versions_for_test();
+            for address in [0x1000, 0x5001, u32::MAX - 1] {
+                for _ in 0..2 {
+                    let before = engine.arena().to_vec();
+                    assert_eq!(
+                        if resident {
+                            engine.exchange_resident16(engine.key, home, address, u32::MAX)
+                        } else {
+                            engine.exchange16(address, u32::MAX)
+                        },
+                        Ok(StoreCompletion::Complete)
+                    );
+                    byte_store_helper_only(&engine, &before, 6, [2, 0, 1, 0, 0, 2]);
+                    assert_eq!(engine.memory().unwrap().code_validation_version(), epoch);
+                    assert_eq!(engine.generation(), generation);
+                    for (index, bytes) in [
+                        engine.artifact_bytes().unwrap(),
+                        engine.resident_bytes(outer).unwrap(),
+                        engine.resident_bytes(home).unwrap(),
+                    ]
+                    .into_iter()
+                    .enumerate()
+                    {
+                        assert_eq!(bytes, modules[index].0);
+                        assert_eq!(bytes.as_ptr() as usize, modules[index].1);
+                    }
+                    for (index, base) in bases.into_iter().enumerate() {
+                        assert_eq!(byte_store_ram(&engine, base, 4096), ram[index]);
+                        assert!(engine.memory().unwrap().is_code_current(&snapshots[index]));
+                    }
+                    engine.guard(engine.key, generation).unwrap();
+                    engine.guard_resident(engine.key, outer).unwrap();
+                    engine.guard_resident(engine.key, home).unwrap();
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn word_exchange_callback_requires_the_active_resident_and_current_outer_owner() {
+        use crate::process::callback::{SuspendedCallback, SuspendedRecord};
+        let (mut engine, outer_id, home_id) = byte_store_fixture();
+        byte_store_inject_gate(&mut engine);
+        engine
+            .capture_resident_call(
+                engine.key,
+                outer_id,
+                crate::windows::CallingConvention32::Cdecl,
+                1,
+            )
+            .unwrap();
+        let outer = engine.pending_call.take().unwrap();
+        let token = outer.token + 1;
+        engine.callback = Some(SuspendedCallback {
+            outer,
+            record: SuspendedRecord::Resident {
+                record: crate::abi::resident_callback::ResidentCallbackRecord32 {
+                    token,
+                    outer_token: token - 1,
+                    phase: 1,
+                    outcome: 0,
+                    entry_pc: 0x3000,
+                    entry_esp: 0x8000,
+                    return_pc: 0x1000,
+                    return_id: 8,
+                    stack_words: 0,
+                    result: 0,
+                    outer_unit_id: outer_id,
+                    callback_unit_id: home_id,
+                },
+                authorized: false,
+                active_unit_id: home_id,
+            },
+        });
+        let before = engine.arena().to_vec();
+        assert_eq!(
+            engine.exchange16(0x5001, 0x9081),
+            Err(HostError::Call(CallError::Busy))
+        );
+        assert_eq!(
+            engine.exchange_resident16(engine.key, home_id, 0x5001, 0x9081),
+            Err(HostError::Call(CallError::Busy))
+        );
+        assert_eq!(engine.arena(), before);
+        if let SuspendedRecord::Resident { authorized, .. } =
+            &mut engine.callback.as_mut().unwrap().record
+        {
+            *authorized = true;
+        }
+        assert_eq!(
+            engine.exchange_resident16(engine.key, outer_id, 0x5001, 0x9081),
+            Err(HostError::Call(CallError::Busy))
+        );
+        assert_eq!(
+            engine.exchange16(0x5001, 0x9081),
+            Err(HostError::Call(CallError::Busy))
+        );
+        assert_eq!(engine.arena(), before);
+        assert_eq!(
+            engine.exchange_resident16(engine.key, home_id, 0x5001, 0xffff_9081),
+            Ok(StoreCompletion::Complete)
+        );
+        byte_store_helper_only(&engine, &before, 6, [0, 0x3322, 0, 0, 0, 2]);
+        assert_eq!(byte_store_ram(&engine, 0x5000, 4), [0x11, 0x81, 0x90, 0x44]);
+        engine
+            .memory
+            .as_mut()
+            .unwrap()
+            .write(GuestAddress(0x1000), &[0x0f])
+            .unwrap();
+        let before = engine.arena().to_vec();
+        assert_eq!(
+            engine.exchange_resident16(engine.key, home_id, 0x5001, 0xff),
+            Err(HostError::Resident(RegistryError::CodeInvalidated))
+        );
+        assert_eq!(engine.arena(), before);
+        assert_eq!(byte_store_ram(&engine, 0x5000, 4), [0x11, 0x81, 0x90, 0x44]);
+    }
+
+    #[test]
+    fn word_exchange_busy_terminal_and_closed_guards_leave_helper_and_ram_untouched() {
+        for resident in [false, true] {
+            let (mut engine, outer, home) = byte_store_fixture();
+            byte_store_inject_gate(&mut engine);
+            if resident {
+                engine
+                    .capture_resident_call(
+                        engine.key,
+                        outer,
+                        crate::windows::CallingConvention32::Cdecl,
+                        1,
+                    )
+                    .unwrap();
+            } else {
+                engine
+                    .capture_call(
+                        engine.key,
+                        engine.generation(),
+                        crate::windows::CallingConvention32::Cdecl,
+                        1,
+                    )
+                    .unwrap();
+            }
+            let before = engine.arena().to_vec();
+            for address in [0x5001, u32::MAX] {
+                assert_eq!(
+                    engine.exchange16(address, u32::MAX),
+                    Err(HostError::Call(CallError::Busy))
+                );
+                assert_eq!(
+                    engine.exchange_resident16(engine.key, home, address, u32::MAX),
+                    Err(HostError::Call(CallError::Busy))
+                );
+                assert_eq!(engine.arena(), before);
+                assert_eq!(byte_store_ram(&engine, 0x5000, 4), [0x11, 0x22, 0x33, 0x44]);
+            }
+            engine.exit_code = Some(7);
+            assert_eq!(
+                engine.exchange16(0x5001, u32::MAX),
+                Err(HostError::ProcessExited)
+            );
+            assert_eq!(
+                engine.exchange_resident16(0, 0, 0x5001, u32::MAX),
+                Err(HostError::ProcessExited)
+            );
+            assert_eq!(engine.arena(), before);
+            assert_eq!(byte_store_ram(&engine, 0x5000, 4), [0x11, 0x22, 0x33, 0x44]);
+            engine.close();
+            assert_eq!(engine.exchange16(0x5001, u32::MAX), Err(HostError::Closed));
+            assert_eq!(
+                engine.exchange_resident16(0, 0, 0x5001, u32::MAX),
+                Err(HostError::Closed)
+            );
+            assert_eq!(engine.arena(), before);
+        }
     }
 }

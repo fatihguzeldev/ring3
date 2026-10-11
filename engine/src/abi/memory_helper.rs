@@ -8,6 +8,68 @@ pub const NARROW_HELPER_VERSION: u16 = 2;
 pub const BYTE_STORE_HELPER_VERSION: u16 = 3;
 pub const WORD_STORE_HELPER_VERSION: u16 = 4;
 pub const BYTE_EXCHANGE_HELPER_VERSION: u16 = 5;
+pub const WORD_EXCHANGE_HELPER_VERSION: u16 = 6;
+
+pub fn encode_word_exchange_result(
+    address: GuestAddress,
+    result: Result<u32, MemoryError>,
+    output: &mut [u8],
+) -> Result<(), AbiError> {
+    if output.len() != HELPER_SIZE {
+        return Err(AbiError::Length);
+    }
+    let start = u64::from(address.0);
+    let end = start + 2;
+    let overflows = end > 1 << 32;
+    let fields = match result {
+        Ok(value) => {
+            if overflows || value > 0xffff {
+                return Err(AbiError::MemoryHelper);
+            }
+            [0, value, 0, 0, 0, 2]
+        }
+        Err(MemoryError::Fault(fault)) => {
+            let access = match (fault.access, fault.reason) {
+                (
+                    Access::Read,
+                    FaultReason::Unmapped | FaultReason::Permission | FaultReason::AddressOverflow,
+                ) => 1,
+                (Access::Write, FaultReason::Permission) => 2,
+                _ => return Err(AbiError::MemoryHelper),
+            };
+            let at = u64::from(fault.address.0);
+            if overflows != (fault.reason == FaultReason::AddressOverflow)
+                || (overflows && fault.address != address)
+                || (!overflows && (at < start || at >= end || at > u64::from(u32::MAX - 1)))
+            {
+                return Err(AbiError::MemoryHelper);
+            }
+            let detail = match fault.reason {
+                FaultReason::Unmapped => 1,
+                FaultReason::Permission => 2,
+                FaultReason::AddressOverflow => 3,
+            };
+            [1, 0, detail, fault.address.0, access, 2]
+        }
+        Err(error) => [
+            2,
+            0,
+            if error == MemoryError::VersionExhausted {
+                1
+            } else {
+                2
+            },
+            0,
+            0,
+            2,
+        ],
+    };
+    header::write_version(output, *b"R3MH", WORD_EXCHANGE_HELPER_VERSION);
+    for (index, field) in fields.into_iter().enumerate() {
+        header::write_u32(output, 16 + index * 4, field);
+    }
+    Ok(())
+}
 
 pub fn encode_byte_exchange_result(
     address: GuestAddress,
