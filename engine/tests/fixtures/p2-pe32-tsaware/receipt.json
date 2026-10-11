@@ -1,0 +1,167 @@
+{
+  "schema": "ring3.pe32-tsaware.original.v1",
+  "inputs": {
+    "program.S": {
+      "bytes": 82,
+      "sha256": "c88d1a24fa115da3e92a50445f4d031298c22744f86277ded66faf1743dd3f51"
+    },
+    "build.py": {
+      "bytes": 6813,
+      "sha256": "7842a5a5ae4ea0f5d3188b2dbe1d4fa333322139481df5543d56e24ef61407da"
+    }
+  },
+  "tools": {
+    "clang": {
+      "path": "/usr/bin/clang",
+      "resolved_path": "/usr/bin/clang",
+      "bytes": 118640,
+      "sha256": "b8763cf250e607a778bb4603cecb5b90338814d0a3dfcba0d57b1de242f610e9",
+      "version": "Apple clang version 21.0.0 (clang-2100.1.1.101)\nTarget: arm64-apple-darwin25.6.0\nThread model: posix\nInstalledDir: /Library/Developer/CommandLineTools/usr/bin\n"
+    },
+    "clang_backend": {
+      "path": "/Library/Developer/CommandLineTools/usr/bin/clang",
+      "resolved_path": "/Library/Developer/CommandLineTools/usr/bin/clang",
+      "bytes": 290664032,
+      "sha256": "f30550eab15fdf5ab8c0dc54c52679711241e5d4b636b027e18c09fef531775d"
+    },
+    "lld": {
+      "path": "/Users/fatihguzel/.rustup/toolchains/1.97.1-aarch64-apple-darwin/lib/rustlib/aarch64-apple-darwin/bin/rust-lld",
+      "resolved_path": "/Users/fatihguzel/.rustup/toolchains/1.97.1-aarch64-apple-darwin/lib/rustlib/aarch64-apple-darwin/bin/rust-lld",
+      "bytes": 130977488,
+      "sha256": "8f5fe507df7232eac0a610c12a5d11f3202205235f710eb98c6c78df6d3f548d",
+      "version": "LLD 22.1.6 (https://github.com/rust-lang/llvm-project.git dcc3606807c989700e0ac1cac18c31741bcd40d9)\n"
+    },
+    "objdump": {
+      "path": "/Library/Developer/CommandLineTools/usr/bin/llvm-objdump",
+      "resolved_path": "/Library/Developer/CommandLineTools/usr/bin/llvm-objdump",
+      "bytes": 37016144,
+      "sha256": "1dcc1432db4d828cf8cd71a84cb8d9bf63a7ca80b5eeec711a9e5f13a3f5f98e",
+      "version": "Apple LLVM version 21.0.0\n  Optimized build.\n\n\n  Registered Targets:\n    aarch64    - AArch64 (little endian)\n    aarch64_32 - AArch64 (little endian ILP32)\n    aarch64_be - AArch64 (big endian)\n    arm        - ARM\n    arm64      - ARM64 (little endian)\n    arm64_32   - ARM64 (little endian ILP32)\n    armeb      - ARM (big endian)\n    thumb      - Thumb\n    thumbeb    - Thumb (big endian)\n    x86        - 32-bit X86: Pentium-Pro and above\n    x86-64     - 64-bit X86: EM64T and AMD64\n"
+    }
+  },
+  "commands": [
+    [
+      "/usr/bin/clang",
+      "--version"
+    ],
+    [
+      "/Users/fatihguzel/.rustup/toolchains/1.97.1-aarch64-apple-darwin/lib/rustlib/aarch64-apple-darwin/bin/rust-lld",
+      "-flavor",
+      "link",
+      "--version"
+    ],
+    [
+      "/Library/Developer/CommandLineTools/usr/bin/llvm-objdump",
+      "--version"
+    ],
+    [
+      "/usr/bin/clang",
+      "--target=i686-pc-windows-msvc",
+      "-c",
+      "-mno-incremental-linker-compatible",
+      "program.S",
+      "-o",
+      "program.obj"
+    ],
+    [
+      "/Users/fatihguzel/.rustup/toolchains/1.97.1-aarch64-apple-darwin/lib/rustlib/aarch64-apple-darwin/bin/rust-lld",
+      "-flavor",
+      "link",
+      "/entry:entry",
+      "/subsystem:console",
+      "/machine:x86",
+      "/nodefaultlib",
+      "/base:0x400000",
+      "/fixed",
+      "/dynamicbase:no",
+      "/nxcompat",
+      "/safeseh:no",
+      "/timestamp:0",
+      "/out:program.exe",
+      "program.obj"
+    ],
+    [
+      "/Library/Developer/CommandLineTools/usr/bin/llvm-objdump",
+      "--private-headers",
+      "--section-headers",
+      "--disassemble",
+      "--x86-asm-syntax=intel",
+      "program.exe"
+    ]
+  ],
+  "environment": {
+    "PATH": "/usr/bin:/bin",
+    "LC_ALL": "C",
+    "TZ": "UTC",
+    "SOURCE_DATE_EPOCH": "0"
+  },
+  "command_cwd": "/Users/fatihguzel/ring3/target/engine-pe32-tsaware-2026-10-11/original-first",
+  "coff": {
+    "machine": 332,
+    "timestamp": 0,
+    "relocations": 0,
+    "sections": [
+      {
+        "name": ".text",
+        "bytes": 10,
+        "pointer": 140,
+        "flags": 1613758496
+      },
+      {
+        "name": ".data",
+        "bytes": 0,
+        "pointer": 150,
+        "flags": 3224371264
+      },
+      {
+        "name": ".bss",
+        "bytes": 0,
+        "pointer": 0,
+        "flags": 3224371328
+      }
+    ]
+  },
+  "pe": {
+    "image_base": 4194304,
+    "image_size": 8192,
+    "entry_point": 4198400,
+    "mapped_pages": 2,
+    "dll_characteristics": 33024,
+    "dll_characteristics_offset": 214,
+    "text_rva": 4096,
+    "text_raw_offset": 512,
+    "text_virtual_bytes": 10,
+    "text_raw_bytes": 512,
+    "entry_offsets": [
+      0,
+      8
+    ]
+  },
+  "original_linker_bytes_unmodified": true,
+  "artifacts": {
+    "program.S": {
+      "bytes": 82,
+      "sha256": "c88d1a24fa115da3e92a50445f4d031298c22744f86277ded66faf1743dd3f51"
+    },
+    "build.py": {
+      "bytes": 6813,
+      "sha256": "7842a5a5ae4ea0f5d3188b2dbe1d4fa333322139481df5543d56e24ef61407da"
+    },
+    "program.obj": {
+      "bytes": 298,
+      "sha256": "d20f11dc1b10e7965778b6c2def4a506f5a9d4869e334402f358da95eceefa75"
+    },
+    "program.exe": {
+      "bytes": 1024,
+      "sha256": "24fba73c0dfc0c99c528575f983b07121a1e4f0d43daba5f5c1babff041f94ab"
+    },
+    "program.text.bin": {
+      "bytes": 10,
+      "sha256": "259ec9f31bf1bfdabba90b502f7b9e72949c003d91b4c2243ac7b49218f3b331"
+    },
+    "program.disasm.txt": {
+      "bytes": 2323,
+      "sha256": "da52af42edb71e3ffb2d39d0ea316991780ad62b97519e2c38dcd2cf70ccb2e7"
+    }
+  }
+}

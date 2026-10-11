@@ -1,0 +1,70 @@
+
+program.exe:	file format coff-i386
+Characteristics 0x103
+	relocations stripped
+	executable
+	32 bit words
+
+Time/Date               Thu Jan  1 00:00:00 1970
+Magic                   010b	(PE32)
+MajorLinkerVersion      14
+MinorLinkerVersion      0
+SizeOfCode              00000200
+SizeOfInitializedData   00000000
+SizeOfUninitializedData 00000000
+AddressOfEntryPoint     00001000
+BaseOfCode              00001000
+BaseOfData              00000000
+ImageBase               00400000
+SectionAlignment        00001000
+FileAlignment           00000200
+MajorOSystemVersion     6
+MinorOSystemVersion     0
+MajorImageVersion       0
+MinorImageVersion       0
+MajorSubsystemVersion   6
+MinorSubsystemVersion   0
+Win32Version            00000000
+SizeOfImage             00002000
+SizeOfHeaders           00000200
+CheckSum                00000000
+Subsystem               00000003	(Windows CUI)
+DllCharacteristics      00008100
+					NX_COMPAT
+					TERMINAL_SERVER_AWARE
+SizeOfStackReserve      00100000
+SizeOfStackCommit       00001000
+SizeOfHeapReserve       00100000
+SizeOfHeapCommit        00001000
+LoaderFlags             00000000
+NumberOfRvaAndSizes     00000010
+
+The Data Directory
+Entry 0 00000000 00000000 Export Directory [.edata (or where ever we found it)]
+Entry 1 00000000 00000000 Import Directory [parts of .idata]
+Entry 2 00000000 00000000 Resource Directory [.rsrc]
+Entry 3 00000000 00000000 Exception Directory [.pdata]
+Entry 4 00000000 00000000 Security Directory
+Entry 5 00000000 00000000 Base Relocation Directory [.reloc]
+Entry 6 00000000 00000000 Debug Directory
+Entry 7 00000000 00000000 Description Directory
+Entry 8 00000000 00000000 Special Directory
+Entry 9 00000000 00000000 Thread Storage Directory [.tls]
+Entry a 00000000 00000000 Load Configuration Directory
+Entry b 00000000 00000000 Bound Import Directory
+Entry c 00000000 00000000 Import Address Table Directory
+Entry d 00000000 00000000 Delay Import Directory
+Entry e 00000000 00000000 CLR Runtime Header
+Entry f 00000000 00000000 Reserved
+
+
+Sections:
+Idx Name          Size     VMA      Type
+  0 .text         0000000a 00401000 TEXT
+
+Disassembly of section .text:
+
+00401000 <.text>:
+  401000: b8 07 00 00 00               	mov	eax, 0x7
+  401005: 83 c0 23                     	add	eax, 0x23
+  401008: eb fe                        	jmp	0x401008 <.text+0x8>
