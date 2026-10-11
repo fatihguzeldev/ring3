@@ -15,6 +15,7 @@ pub enum WindowsApi32 {
     VirtualFree = 0x0001_0006,
     VirtualProtect = 0x0001_0007,
     FlushInstructionCache = 0x0001_0008,
+    GetCurrentProcess = 0x0001_0009,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -49,6 +50,7 @@ impl WindowsApi32 {
             "VirtualFree" => Some(Self::VirtualFree),
             "VirtualProtect" => Some(Self::VirtualProtect),
             "FlushInstructionCache" => Some(Self::FlushInstructionCache),
+            "GetCurrentProcess" => Some(Self::GetCurrentProcess),
             _ => None,
         }
     }
@@ -63,6 +65,7 @@ impl WindowsApi32 {
             0x0001_0006 => Some(Self::VirtualFree),
             0x0001_0007 => Some(Self::VirtualProtect),
             0x0001_0008 => Some(Self::FlushInstructionCache),
+            0x0001_0009 => Some(Self::GetCurrentProcess),
             _ => None,
         }
     }
@@ -77,7 +80,7 @@ impl WindowsApi32 {
 
     pub fn stack_words(self) -> u32 {
         match self {
-            Self::GetLastError => 0,
+            Self::GetLastError | Self::GetCurrentProcess => 0,
             Self::SetLastError | Self::ExitProcess | Self::GetModuleHandleA => 1,
             Self::VirtualAlloc | Self::VirtualProtect => 4,
             Self::VirtualFree | Self::FlushInstructionCache => 3,
@@ -122,6 +125,7 @@ impl ThreadState32 {
         }
         Ok(match api {
             WindowsApi32::GetLastError => (WindowsOutcome32::Return(self.last_error), self),
+            WindowsApi32::GetCurrentProcess => (WindowsOutcome32::Return(u32::MAX), self),
             WindowsApi32::SetLastError => (
                 WindowsOutcome32::Return(frame.state().registers[Register32::Eax.index()]),
                 Self {

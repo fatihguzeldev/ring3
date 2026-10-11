@@ -402,7 +402,7 @@ fn flush_instruction_cache_rejects_name_and_module_aliases() {
     ] {
         assert_eq!(WindowsApi32::resolve("kernel32.dll", name), None);
     }
-    for id in [0, 1, FLUSH + 1, 0x0001_ffff, u32::MAX] {
+    for id in [0, 1, 0x0002_0000, 0x0001_ffff, u32::MAX] {
         assert_eq!(WindowsApi32::from_id(id), None);
     }
 }

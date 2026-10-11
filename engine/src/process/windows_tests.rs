@@ -622,6 +622,115 @@ fn instruction_cache_completion_preserves_exhausted_versions_and_all_private_own
     }
 }
 
+#[test]
+fn current_process_completion_preserves_exhausted_versions_last_error_and_private_owners() {
+    const CURRENT: u32 = 0x0001_0009;
+    const CURRENT_ESP: u32 = STACK + 0x80;
+    for resident in [false, true] {
+        let mut f = module_fixture_with_api(CURRENT);
+        write(&mut f.engine, CURRENT_ESP, &(ENTRY + 15).to_le_bytes());
+        let state = State32 {
+            registers: [0x1357_9bdf, 1, 2, 3, CURRENT_ESP, 5, 6, 7],
+            eip: ENTRY,
+            eflags: 0xcd7,
+        };
+        let arena = f.engine.arena_mut().unwrap();
+        arena[crate::abi::arena::X87_OFFSET + 16..crate::abi::arena::X87_OFFSET + 18]
+            .copy_from_slice(&0x027f_u16.to_le_bytes());
+        arena[crate::abi::arena::X87_OFFSET + 18..crate::abi::arena::X87_OFFSET + 20]
+            .copy_from_slice(&0x81a5_u16.to_le_bytes());
+        for (i, byte) in arena
+            [crate::abi::arena::X87_OFFSET + 40..crate::abi::arena::X87_OFFSET + 120]
+            .iter_mut()
+            .enumerate()
+        {
+            *byte = (i as u8).wrapping_mul(29).wrapping_add(17);
+        }
+        encode_state(&state, &mut arena[..56]).unwrap();
+        encode_exit_v3(
+            &ExecutionExit {
+                retired: 7,
+                reason: ExitReason::Gate { id: CURRENT },
+            },
+            &mut arena[56..96],
+        )
+        .unwrap();
+        arena[96..100].fill(0);
+        let token = if resident {
+            f.engine
+                .capture_resident_call(KEY, f.current.get(), CallingConvention32::Stdcall, 0)
+        } else {
+            f.engine
+                .capture_call(KEY, f.engine.generation, CallingConvention32::Stdcall, 0)
+        }
+        .unwrap()
+        .token;
+        let current = f
+            .engine
+            .memory()
+            .unwrap()
+            .snapshot_code(GuestAddress(ENTRY), 2)
+            .unwrap();
+        let stale = f
+            .engine
+            .memory()
+            .unwrap()
+            .snapshot_code(GuestAddress(STALE), 1)
+            .unwrap();
+        write(&mut f.engine, STALE, &[0x90]);
+        f.engine
+            .memory
+            .as_mut()
+            .unwrap()
+            .exhaust_versions_for_test();
+        let before = owners(&f);
+        let epoch = f.engine.memory().unwrap().code_validation_version();
+        assert_eq!(before.last_error, LAST_ERROR);
+        assert_eq!(
+            before.stale,
+            Err(crate::cpu::dbt::RegistryError::CodeInvalidated)
+        );
+        let mut expected = f.engine.arena().to_vec();
+        let mut next = state;
+        next.registers[0] = u32::MAX;
+        next.registers[4] = CURRENT_ESP + 4;
+        next.eip = ENTRY + 15;
+        encode_state(&next, &mut expected[..56]).unwrap();
+        encode_exit_v3(
+            &ExecutionExit {
+                retired: 0,
+                reason: ExitReason::NeedCode,
+            },
+            &mut expected[56..96],
+        )
+        .unwrap();
+        assert_eq!(complete(&mut f, resident, token), Ok(()));
+        assert_eq!(f.engine.arena(), expected);
+        assert_eq!(owners(&f), before);
+        assert_eq!(f.engine.memory().unwrap().code_validation_version(), epoch);
+        assert!(f.engine.memory().unwrap().is_code_current(&current));
+        assert!(!f.engine.memory().unwrap().is_code_current(&stale));
+        assert!(f.engine.pending_call.is_none());
+        assert!(f.engine.callback.is_none());
+        assert_eq!(f.engine.exit_code, None);
+        assert_eq!(
+            complete(&mut f, resident, token),
+            Err(HostError::Call(CallError::InvalidToken))
+        );
+        assert_eq!(f.engine.arena(), expected);
+        assert_eq!(owners(&f), before);
+        assert_eq!(
+            f.engine
+                .memory
+                .as_mut()
+                .unwrap()
+                .write(GuestAddress(RAM), &[0]),
+            Err(crate::memory::MemoryError::VersionExhausted)
+        );
+        assert_eq!(owners(&f), before);
+    }
+}
+
 fn capture_module(f: &mut Fixture, resident: bool, argument: u32) -> u32 {
     write(&mut f.engine, ESP, &(ENTRY + 15).to_le_bytes());
     write(&mut f.engine, ESP + 4, &argument.to_le_bytes());
