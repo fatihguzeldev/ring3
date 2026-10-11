@@ -581,7 +581,7 @@ fn parse(bytes: &[u8], profile: Profile) -> Result<ImagePlan, LoadError> {
         || read32(bytes, optional + 36)? != FILE_ALIGNMENT
         || read32(bytes, optional + 52)? != 0
         || !matches!(read16(bytes, optional + 68)?, 2 | 3)
-        || read16(bytes, optional + 70)? & !0x0100 != 0
+        || read16(bytes, optional + 70)? & !0x8100 != 0
         || read32(bytes, optional + 88)? != 0
         || read32(bytes, optional + 92)? != 16
     {
