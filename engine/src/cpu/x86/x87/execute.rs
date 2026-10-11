@@ -748,6 +748,14 @@ impl X87Outcome {
             }
             X87Operation::Extract => {
                 let a = self.read(0)?;
+                if let Some(result) = Ext80::special(a, Ext80::ZERO) {
+                    let value = self.rounded(result);
+                    self.write(0, value)?;
+                    self.push(value);
+                    return Ok(());
+                }
+                self.state.status &= !C1;
+                self.state.status |= a.operand_exceptions();
                 match a.kind() {
                     Kind::Finite {
                         significand,

@@ -556,6 +556,9 @@ impl Ext80 {
                 let min = 1 - bias as i32;
                 let mut exponent = exponent;
                 let mut extended = u128::from(significand) << 3;
+                let (unbounded, _, _) =
+                    rounded_significand(extended, 66 - fraction_bits, self.negative(), mode);
+                let tiny = exponent + i32::from(unbounded >= 1_u128 << (fraction_bits + 1)) < min;
                 if exponent < min {
                     extended = shift_jam(extended, (min - exponent) as u32);
                     exponent = min;
@@ -581,7 +584,7 @@ impl Ext80 {
                     return (sign | bits, exceptions, infinity);
                 }
                 let normal = significand >= 1_u128 << fraction_bits;
-                if !normal && inexact {
+                if tiny && inexact {
                     exceptions |= UNDERFLOW;
                 }
                 let encoded_exponent = if normal {
@@ -706,12 +709,27 @@ impl Ext80 {
         if let Some(result) = Self::special(self, scale) {
             return result;
         }
+        let exceptions = self.operand_exceptions() | scale.operand_exceptions();
+        if matches!(scale.kind(), Kind::Infinity) {
+            return match (self.kind(), scale.negative()) {
+                (Kind::Infinity, true) | (Kind::Zero, false) => Rounded::invalid(),
+                (Kind::Zero | Kind::Infinity, _) => Rounded::exact(self, exceptions),
+                (Kind::Finite { .. }, true) => {
+                    Rounded::exact(Self::from_parts(self.negative(), 0, 0), exceptions)
+                }
+                (Kind::Finite { .. }, false) => Rounded::exact(
+                    Self::from_parts(self.negative(), 0x7fff, 1 << 63),
+                    exceptions,
+                ),
+                _ => Rounded::invalid(),
+            };
+        }
         let Kind::Finite {
             significand,
             exponent,
         } = self.kind()
         else {
-            return Rounded::exact(self, self.operand_exceptions() | scale.operand_exceptions());
+            return Rounded::exact(self, exceptions);
         };
         let (integer, flags, _) = scale.to_integer(32, X87Rounding::Zero);
         let delta = if flags & INVALID != 0 {
@@ -724,7 +742,7 @@ impl Ext80 {
             exponent + delta,
             u128::from(significand) << 3,
             control | 0x0300,
-            self.operand_exceptions() | scale.operand_exceptions(),
+            exceptions,
         )
     }
 }
@@ -842,7 +860,7 @@ pub(super) fn round(
         };
     }
     let normal = significand >= 1 << 63;
-    if !normal && inexact {
+    if range_exception == UNDERFLOW && inexact {
         exceptions |= UNDERFLOW;
     }
     Rounded {
