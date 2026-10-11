@@ -1,3 +1,6 @@
+#[path = "support/byte_prefix_admission.rs"]
+mod byte_prefix_admission;
+
 use ring3_engine::{
     cpu::{
         UnsupportedFeature,
@@ -310,6 +313,7 @@ fn excluded() -> Vec<(Vec<u8>, DecodeError)> {
 #[test]
 fn count_prefix_segment_lock_rotate_and_sal_neighbors_keep_exact_decode_refusals() {
     for (bytes, expected) in excluded() {
+        let (bytes, expected) = byte_prefix_admission::closed_fixture(&bytes, expected);
         let engine = code(CODE, &bytes, true);
         let memory = engine.memory().unwrap();
         assert_eq!(

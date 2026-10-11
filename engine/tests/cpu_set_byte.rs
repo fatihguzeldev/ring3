@@ -1,3 +1,6 @@
+#[path = "support/byte_prefix_admission.rs"]
+mod byte_prefix_admission;
+
 use ring3_engine::process::EngineInstance;
 
 #[test]
@@ -299,6 +302,8 @@ fn memory_targets_prefixes_and_adjacent_operations_fail_closed() {
         (&[0x66, 0x66, 0x0f, 0x44, 0x00][..], opcode),
         (&[0x66, 0x86, 0xc0][..], opcode),
     ] {
+        let (fixture, expected) = byte_prefix_admission::closed_fixture(bytes, expected);
+        let bytes = fixture.as_slice();
         upload(&mut engine, CODE, bytes);
         assert_eq!(
             decode_one(engine.memory().unwrap(), GuestAddress(CODE)).err(),
@@ -421,12 +426,12 @@ fn instruction_cap_and_failed_preparation_preserve_both_published_owners() {
                 ),
                 (
                     CODE,
-                    &[0x0f, 0x94, 0xc0, 0x64, 0x0f, 0x94, 0xc0][..],
+                    &[0x0f, 0x94, 0xc0, 0x0f, 0x0b, 0x90, 0x90][..],
                     compile_error(
                         owner,
                         CODE + 3,
                         InstructionError::Decode(DecodeError::Unsupported(
-                            UnsupportedFeature::Segment,
+                            UnsupportedFeature::Opcode,
                         )),
                     ),
                 ),

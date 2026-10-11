@@ -1,3 +1,6 @@
+#[path = "support/byte_prefix_admission.rs"]
+mod byte_prefix_admission;
+
 use ring3_engine::process::EngineInstance;
 
 #[test]
@@ -468,6 +471,8 @@ fn excluded_widths_alternatives_and_prefixes_keep_categories_and_old_publication
             DecodeError::Unsupported(UnsupportedFeature::Segment),
         ),
     ] {
+        let (fixture, expected) = byte_prefix_admission::closed_fixture(bytes, expected);
+        let bytes = fixture.as_slice();
         let engine = code(CODE, bytes, true);
         assert_eq!(
             decode_one(engine.memory().unwrap(), GuestAddress(CODE)).err(),

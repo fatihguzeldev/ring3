@@ -1,3 +1,6 @@
+#[path = "support/byte_prefix_admission.rs"]
+mod byte_prefix_admission;
+
 use ring3_engine::{
     abi::arena::TRANSFER_OFFSET,
     memory::{Access, GuestAddress},
@@ -763,6 +766,7 @@ fn exclusions() -> Vec<(Vec<u8>, DecodeError)> {
 fn strict_neighbors_and_interior_entries_preserve_prior_owner_publications() {
     let positive = instruction(0xc0, RotateKind::Left, &shapes()[3], 2);
     for (excluded, cause) in exclusions() {
+        let (excluded, cause) = byte_prefix_admission::closed_fixture(&excluded, cause);
         let mut bytes = positive.clone();
         bytes.extend_from_slice(&excluded);
         let failed_pc = CODE + positive.len() as u32;

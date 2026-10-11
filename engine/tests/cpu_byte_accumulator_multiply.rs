@@ -1,3 +1,6 @@
+#[path = "support/byte_prefix_admission.rs"]
+mod byte_prefix_admission;
+
 use ring3_engine::{abi::arena::TRANSFER_OFFSET, process::EngineInstance};
 
 fn admits_register_byte_accumulator_multiply(modrm: u8) {
@@ -456,6 +459,7 @@ fn strict_forms() -> Vec<(Vec<u8>, DecodeError)> {
 fn strict_neighbors_and_two_byte_fetch_keep_categories_and_boundaries() {
     let (mut direct, mut pure, mut bound) = (0, 0, 0);
     for (bytes, expected) in strict_forms() {
+        let (bytes, expected) = byte_prefix_admission::closed_fixture(&bytes, expected);
         let engine = fresh(CODE, &bytes, true);
         let memory = engine.memory().unwrap();
         assert_eq!(

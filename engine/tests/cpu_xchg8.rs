@@ -1,3 +1,8 @@
+#[path = "support/byte_prefix_admission.rs"]
+mod byte_prefix_admission;
+#[path = "support/prefix_admission.rs"]
+mod prefix_admission;
+
 use ring3_engine::{
     abi::arena::TRANSFER_OFFSET,
     cpu::{
@@ -267,6 +272,8 @@ fn six_failures(
 }
 
 fn rejected(bytes: &[u8], error: DecodeError) -> usize {
+    let (bytes, error) = byte_prefix_admission::closed_fixture(bytes, error);
+    let bytes = bytes.as_slice();
     let mut engine = code(CODE, bytes);
     unmapped_data(&engine);
     assert_eq!(
@@ -480,6 +487,7 @@ fn full_modrm_domain_strict_categories_and_supported_neighbors_are_exact() {
     ]);
     assert_eq!(strict.len(), 117);
     let mut categories = [0; 3];
+    let mut prefix_admissions = 0;
     for (bytes, error) in strict {
         assert!(negative_bytes.insert(bytes.clone()));
         categories[match error {
@@ -488,11 +496,15 @@ fn full_modrm_domain_strict_categories_and_supported_neighbors_are_exact() {
             DecodeError::Unsupported(UnsupportedFeature::Opcode) => 2,
             _ => panic!("unexpected strict category"),
         }] += 1;
+        if prefix_admission::admit_if_new_prefix(&bytes) {
+            prefix_admissions += 1;
+            continue;
+        }
         compiler_refusals += rejected(&bytes, error);
     }
     assert_eq!(categories, [8, 60, 49]);
     assert_eq!(negative_bytes.len(), 309);
-    assert_eq!(compiler_refusals, 1854);
+    assert_eq!(compiler_refusals, 1854 - prefix_admissions * 6);
 
     let mut neighbors = vec![(
         vec![0x87, 0xc8],

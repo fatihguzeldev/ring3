@@ -1,3 +1,6 @@
+#[path = "support/byte_prefix_admission.rs"]
+mod byte_prefix_admission;
+
 use ring3_engine::{
     abi::arena::TRANSFER_OFFSET,
     cpu::x86::decode::decode_one,
@@ -632,6 +635,7 @@ fn closed_profiles_and_late_failures_preserve_prior_publications_and_installatio
     let positive = instruction(0xc0, RotateKind::Left, &shapes()[3], 9);
     let mut failures = 0;
     for (excluded, cause) in exclusions() {
+        let (excluded, cause) = byte_prefix_admission::closed_fixture(&excluded, cause);
         let mut bytes = positive.clone();
         bytes.extend_from_slice(&excluded);
         let pc = CODE + positive.len() as u32;

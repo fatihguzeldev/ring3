@@ -1,3 +1,6 @@
+#[path = "support/byte_prefix_admission.rs"]
+mod byte_prefix_admission;
+
 use ring3_engine::{
     abi::arena::TRANSFER_OFFSET,
     cpu::{
@@ -186,6 +189,8 @@ fn fetch_error(pc: u32, address: u32, length: u32, reason: FaultReason) -> Decod
 }
 
 fn rejected(bytes: &[u8], expected: DecodeError) {
+    let (fixture, expected) = byte_prefix_admission::closed_fixture(bytes, expected);
+    let bytes = fixture.as_slice();
     let engine = code(CODE, bytes);
     let memory = engine.memory().unwrap();
     assert_eq!(

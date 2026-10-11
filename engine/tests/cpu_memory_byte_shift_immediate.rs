@@ -1,3 +1,6 @@
+#[path = "support/byte_prefix_admission.rs"]
+mod byte_prefix_admission;
+
 use ring3_engine::{
     abi::arena::TRANSFER_OFFSET,
     memory::{Access, GuestAddress},
@@ -551,6 +554,7 @@ fn strict_fetch_and_late_failures_keep_precise_categories_and_publications() {
     assert_eq!(strict.len(), 45);
     let mut bound_failures = 0;
     for (bytes, expected) in strict {
+        let (bytes, expected) = byte_prefix_admission::closed_fixture(&bytes, expected);
         let engine = fresh(CODE, &bytes, true);
         assert_eq!(
             decode_one(engine.memory().unwrap(), GuestAddress(CODE)).err(),

@@ -1,3 +1,6 @@
+#[path = "support/byte_prefix_admission.rs"]
+mod byte_prefix_admission;
+
 use ring3_engine::process::EngineInstance;
 
 #[test]
@@ -592,6 +595,7 @@ fn excluded() -> Vec<(Vec<u8>, DecodeError)> {
 #[test]
 fn excluded_width_prefix_lock_segment_and_adjacent_forms_keep_exact_categories() {
     for (bytes, expected) in excluded() {
+        let (bytes, expected) = byte_prefix_admission::closed_fixture(&bytes, expected);
         let engine = code(CODE, &bytes, true);
         assert_eq!(
             decode_one(engine.memory().unwrap(), GuestAddress(CODE)).err(),
@@ -849,6 +853,8 @@ fn failed_late_decode_fetch_extent_and_cap_preparation_preserves_both_published_
                 )
             });
             for (instruction, error) in excluded().into_iter().chain(word_prefixes) {
+                let (instruction, error) =
+                    byte_prefix_admission::closed_fixture(&instruction, error);
                 let mut bytes = vec![0x10, 0x06];
                 bytes.extend(instruction);
                 upload(&mut engine, CODE, &bytes);

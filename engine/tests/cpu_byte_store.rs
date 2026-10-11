@@ -1,3 +1,6 @@
+#[path = "support/byte_prefix_admission.rs"]
+mod byte_prefix_admission;
+
 use ring3_engine::{
     memory::{Access, GuestAddress},
     process::EngineInstance,
@@ -543,6 +546,9 @@ fn byte_destinations_adjacent_forms_and_excluded_prefixes_keep_existing_categori
         ),
     ];
     for &(bytes, expected) in cases {
+        let (fixture, expected) = byte_prefix_admission::closed_fixture(bytes, expected);
+        let bytes = fixture.as_slice();
+
         let engine = code(CODE, bytes, false);
         assert_eq!(
             decode_one(engine.memory().unwrap(), GuestAddress(CODE)).err(),

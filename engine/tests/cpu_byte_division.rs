@@ -1,3 +1,6 @@
+#[path = "support/byte_prefix_admission.rs"]
+mod byte_prefix_admission;
+
 use ring3_engine::{abi::arena::TRANSFER_OFFSET, process::EngineInstance};
 
 fn admission(modrm: u8) {
@@ -206,7 +209,9 @@ fn strict_memory_word_prefix_and_two_byte_fetch_boundaries_remain_closed() {
             (0x64, DecodeError::Unsupported(UnsupportedFeature::Segment)),
             (0xf0, DecodeError::InvalidEncoding),
         ] {
-            let engine = fresh(CODE, &[prefix, 0xf6, base | 4]);
+            let (bytes, expected) =
+                byte_prefix_admission::closed_fixture(&[prefix, 0xf6, base | 4], expected);
+            let engine = fresh(CODE, &bytes);
             assert_eq!(
                 decode_one(engine.memory().unwrap(), GuestAddress(CODE)).err(),
                 Some(expected)

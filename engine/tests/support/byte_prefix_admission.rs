@@ -1,0 +1,39 @@
+#[path = "prefix_admission.rs"]
+mod prefix_admission;
+
+use ring3_engine::cpu::{UnsupportedFeature, x86::decode::DecodeError};
+
+fn newly_admitted(bytes: &[u8]) -> bool {
+    match bytes {
+        [
+            0xf0,
+            0x00 | 0x08 | 0x10 | 0x18 | 0x20 | 0x28 | 0x30,
+            modrm,
+            ..,
+        ] => modrm & 0xc0 != 0xc0,
+        [0xf0, 0x80, modrm, ..] => modrm & 0xc0 != 0xc0 && (modrm >> 3) & 7 != 7,
+        [0xf0, 0xfe, modrm, ..] => modrm & 0xc0 != 0xc0 && (modrm >> 3) & 7 <= 1,
+        [0xf0, 0xf6, modrm, ..] => modrm & 0xc0 != 0xc0 && matches!((modrm >> 3) & 7, 2 | 3),
+        [0xf0, 0x66, 0x87, modrm, ..] => modrm & 0xc0 != 0xc0,
+        _ => false,
+    }
+}
+
+// the historical row first proves its newly admitted behavior. a same-length UD2
+// fixture then retains the original precise-failure and prior-owner assertions.
+pub fn closed_fixture(bytes: &[u8], expected: DecodeError) -> (Vec<u8>, DecodeError) {
+    let single_address_or_segment = matches!(bytes,
+        [0x26 | 0x2e | 0x36 | 0x3e | 0x64 | 0x65 | 0x67, opcode, ..]
+            if !matches!(opcode, 0x26 | 0x2e | 0x36 | 0x3e | 0x64 | 0x65 | 0x66 | 0x67 | 0xf0 | 0xf2 | 0xf3));
+    let prefixed = single_address_or_segment && prefix_admission::admit_if_new_prefix(bytes);
+    if prefixed || newly_admitted(bytes) {
+        if !prefixed {
+            prefix_admission::admitted(bytes);
+        }
+        let mut poison = vec![0x90; bytes.len()];
+        poison[..2].copy_from_slice(&[0x0f, 0x0b]);
+        (poison, DecodeError::Unsupported(UnsupportedFeature::Opcode))
+    } else {
+        (bytes.to_vec(), expected)
+    }
+}

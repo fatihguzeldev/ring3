@@ -1,3 +1,6 @@
+#[path = "support/byte_prefix_admission.rs"]
+mod byte_prefix_admission;
+
 use ring3_engine::{
     cpu::dbt::{BlockSpec, CompileLimits, compile_region},
     memory::{AddressSpace, GuestAddress, PageRange, Permissions},
@@ -555,6 +558,7 @@ fn retain_prior(engine: &mut EngineInstance, pc: u32, length: usize, failure: Co
 #[test]
 fn closed_neighbors_and_late_failures_keep_both_published_owners() {
     for (excluded, expected) in exclusions() {
+        let (excluded, expected) = byte_prefix_admission::closed_fixture(&excluded, expected);
         let mut bytes = instruction(0xc0, RotateKind::Left, 1, 2);
         bytes.extend_from_slice(&excluded);
         let failure = error(CODE + 3, expected);

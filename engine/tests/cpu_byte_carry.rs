@@ -1,3 +1,6 @@
+#[path = "support/byte_prefix_admission.rs"]
+mod byte_prefix_admission;
+
 use ring3_engine::process::EngineInstance;
 
 #[test]
@@ -324,6 +327,7 @@ fn canonical_batches_admit_standalone_and_four_bound_profiles_with_existing_caps
 #[test]
 fn memory_alternate_prefix_word_and_adjacent_forms_keep_exact_refusal_categories() {
     for (bytes, expected) in excluded() {
+        let (bytes, expected) = byte_prefix_admission::closed_fixture(&bytes, expected);
         let engine = code(CODE, &bytes, true);
         assert_eq!(
             decode_one(engine.memory().unwrap(), GuestAddress(CODE)).err(),
@@ -536,6 +540,8 @@ fn failed_late_decode_fetch_and_cap_preparation_preserves_both_published_owners(
         for entries in [false, true] {
             let (mut engine, keep) = prior_owners();
             for (instruction, error) in excluded() {
+                let (instruction, error) =
+                    byte_prefix_admission::closed_fixture(&instruction, error);
                 let mut bytes = vec![0x14, 0xff];
                 bytes.extend(instruction);
                 upload(&mut engine, CODE, &bytes);

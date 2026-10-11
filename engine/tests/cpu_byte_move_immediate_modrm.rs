@@ -1,3 +1,6 @@
+#[path = "support/byte_prefix_admission.rs"]
+mod byte_prefix_admission;
+
 use ring3_engine::{
     abi::arena::TRANSFER_OFFSET,
     cpu::{
@@ -435,6 +438,8 @@ fn six_failures(
 }
 
 fn rejected(bytes: &[u8], error: DecodeError) -> usize {
+    let (fixture, error) = byte_prefix_admission::closed_fixture(bytes, error);
+    let bytes = fixture.as_slice();
     let mut engine = code(CODE, bytes);
     unmapped_data(&engine);
     assert_eq!(

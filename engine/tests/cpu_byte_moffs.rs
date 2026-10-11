@@ -1,3 +1,6 @@
+#[path = "support/byte_prefix_admission.rs"]
+mod byte_prefix_admission;
+
 use ring3_engine::{
     cpu::{
         UnsupportedFeature,
@@ -269,12 +272,13 @@ fn five_byte_fetch_and_consumed_page_currency_keep_exact_boundaries() {
         for prefix in [0x66, 0x67, 0xf2, 0xf3, 0x64, 0xf0] {
             let mut excluded = vec![prefix];
             excluded.extend(&bytes[..5]);
-            let engine = code_at(CODE, &excluded);
             let expected = match prefix {
                 0x64 => DecodeError::Unsupported(UnsupportedFeature::Segment),
                 0xf0 => DecodeError::InvalidEncoding,
                 _ => DecodeError::Unsupported(UnsupportedFeature::Opcode),
             };
+            let (excluded, expected) = byte_prefix_admission::closed_fixture(&excluded, expected);
+            let engine = code_at(CODE, &excluded);
             assert_eq!(
                 decode_one(engine.memory().unwrap(), GuestAddress(CODE)).err(),
                 Some(expected)

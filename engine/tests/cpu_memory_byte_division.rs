@@ -1,3 +1,6 @@
+#[path = "support/byte_prefix_admission.rs"]
+mod byte_prefix_admission;
+
 use ring3_engine::{abi::arena::TRANSFER_OFFSET, process::EngineInstance};
 
 fn admission(modrm: u8) {
@@ -225,6 +228,7 @@ fn strict_neighbors_and_fetch_boundaries_keep_exact_categories() {
         ] {
             let mut bytes = vec![prefix];
             bytes.extend(encoded(kind, &[0x03]));
+            let (bytes, wanted) = byte_prefix_admission::closed_fixture(&bytes, wanted);
             let engine = fixture(CODE, &bytes);
             assert_eq!(
                 decode_one(engine.memory().unwrap(), GuestAddress(CODE)).err(),
