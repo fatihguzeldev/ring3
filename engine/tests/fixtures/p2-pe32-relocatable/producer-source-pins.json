@@ -1,0 +1,8 @@
+{
+  "tools/corpus/build-relocations.mjs": "e92260593fb577820592987d84a08d6a53ba915024af002e709bb6d4317f4c92",
+  "tools/corpus/shared.mjs": "60a277d6fe720efa3743e696fbea42aab59485a687b7ce3ff9847b90f8c26858",
+  "corpus/pe-base-relocations/i386.s": "de14453ed6b7f5326f51d67acbcd55050987b1b7c314a099d9ee17ba27959365",
+  "corpus/pe-base-relocations/amd64.s": "9712ae8f622a57bf34c04c3c23c3abd18a20eaffcd53c51c9d0e7e87596e54bd",
+  "corpus/pe-base-relocations/fixture.json": "f4cf08b1ab8b1f8bedf808174ea4bd9ce920230c624a013a90e5b49c12689200",
+  ".node-version": "177d20030d4dcc37eae9ef92865ec54dadce60e8f19e9a34a5d4f37502195a36"
+}

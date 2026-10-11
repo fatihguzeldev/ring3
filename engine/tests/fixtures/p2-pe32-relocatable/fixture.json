@@ -1,0 +1,99 @@
+{
+  "schemaVersion": 1,
+  "fixture": "pe-base-relocations",
+  "provenance": "self-authored",
+  "licenseStatus": "pending",
+  "windowsOracle": "not-run",
+  "executed": false,
+  "sources": {
+    "i386.s": {
+      "path": "corpus/pe-base-relocations/i386.s",
+      "sha256": "de14453ed6b7f5326f51d67acbcd55050987b1b7c314a099d9ee17ba27959365"
+    },
+    "amd64.s": {
+      "path": "corpus/pe-base-relocations/amd64.s",
+      "sha256": "9712ae8f622a57bf34c04c3c23c3abd18a20eaffcd53c51c9d0e7e87596e54bd"
+    }
+  },
+  "tools": {
+    "clang": {
+      "version": "Apple clang version 21.0.0 (clang-2100.1.1.101)",
+      "sha256": "f30550eab15fdf5ab8c0dc54c52679711241e5d4b636b027e18c09fef531775d"
+    },
+    "lld": {
+      "version": "LLD 22.1.6 (https://github.com/rust-lang/llvm-project.git dcc3606807c989700e0ac1cac18c31741bcd40d9)",
+      "sha256": "8f5fe507df7232eac0a610c12a5d11f3202205235f710eb98c6c78df6d3f548d"
+    },
+    "objdump": {
+      "version": "Apple LLVM version 21.0.0",
+      "sha256": "1dcc1432db4d828cf8cd71a84cb8d9bf63a7ca80b5eeec711a9e5f13a3f5f98e"
+    }
+  },
+  "architectures": {
+    "i386": {
+      "kind": "PE32",
+      "machine": 332,
+      "artifacts": {
+        "relocations.obj": {
+          "bytes": 4483,
+          "sha256": "19758a9c75c1c4f03d7c7f720225182af160d2545187bc5b71ff3c26022540b5"
+        },
+        "relocations.exe": {
+          "bytes": 6144,
+          "sha256": "ca36f32c699b3e3200da8cc6d23fe7465f14e5df9fdedd425e9da9fb2a395818"
+        }
+      },
+      "blocks": [
+        {
+          "blockRva": 16384,
+          "fileOffset": 5632,
+          "pageRva": 8192,
+          "blockSize": 12,
+          "rawEntriesHex": "08300c30"
+        },
+        {
+          "blockRva": 16396,
+          "fileOffset": 5644,
+          "pageRva": 12288,
+          "blockSize": 12,
+          "rawEntriesHex": "10300000"
+        }
+      ]
+    },
+    "amd64": {
+      "kind": "PE32+",
+      "machine": 34404,
+      "artifacts": {
+        "relocations.obj": {
+          "bytes": 4495,
+          "sha256": "6bd66c1860501ac7f89443f316d49824cce4fd963c428510b391e7de53946ae5"
+        },
+        "relocations.exe": {
+          "bytes": 6144,
+          "sha256": "9fa803763f86ace3317f2f98329928bb80f4afffc819f7af3c234badab55f428"
+        }
+      },
+      "blocks": [
+        {
+          "blockRva": 16384,
+          "fileOffset": 5632,
+          "pageRva": 8192,
+          "blockSize": 12,
+          "rawEntriesHex": "08a010a0"
+        },
+        {
+          "blockRva": 16396,
+          "fileOffset": 5644,
+          "pageRva": 12288,
+          "blockSize": 12,
+          "rawEntriesHex": "18a00000"
+        }
+      ]
+    }
+  },
+  "expectation": {
+    "directoryRva": 16384,
+    "directorySize": 24
+  },
+  "objectTimestamp": 0
+}
