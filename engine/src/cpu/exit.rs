@@ -29,6 +29,11 @@ pub enum ExitReason {
     Gate { id: u32 },
     ProcessExited { code: u32 },
     DivideError,
+    GeneralProtection { error_code: u32 },
+    FloatingPoint { status: u16 },
+    SimdFloatingPoint { mxcsr: u32 },
+    SegmentNotPresent { error_code: u32 },
+    StackSegment { error_code: u32 },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
