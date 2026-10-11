@@ -14,6 +14,7 @@ pub enum WindowsApi32 {
     VirtualAlloc = 0x0001_0005,
     VirtualFree = 0x0001_0006,
     VirtualProtect = 0x0001_0007,
+    FlushInstructionCache = 0x0001_0008,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -47,6 +48,7 @@ impl WindowsApi32 {
             "VirtualAlloc" => Some(Self::VirtualAlloc),
             "VirtualFree" => Some(Self::VirtualFree),
             "VirtualProtect" => Some(Self::VirtualProtect),
+            "FlushInstructionCache" => Some(Self::FlushInstructionCache),
             _ => None,
         }
     }
@@ -60,6 +62,7 @@ impl WindowsApi32 {
             0x0001_0005 => Some(Self::VirtualAlloc),
             0x0001_0006 => Some(Self::VirtualFree),
             0x0001_0007 => Some(Self::VirtualProtect),
+            0x0001_0008 => Some(Self::FlushInstructionCache),
             _ => None,
         }
     }
@@ -77,7 +80,7 @@ impl WindowsApi32 {
             Self::GetLastError => 0,
             Self::SetLastError | Self::ExitProcess | Self::GetModuleHandleA => 1,
             Self::VirtualAlloc | Self::VirtualProtect => 4,
-            Self::VirtualFree => 3,
+            Self::VirtualFree | Self::FlushInstructionCache => 3,
         }
     }
 }
@@ -204,6 +207,17 @@ impl ThreadState32 {
                     },
                     self,
                 )
+            }
+            WindowsApi32::FlushInstructionCache => {
+                let [process, address, size] = frame.arguments() else {
+                    return Err(FrameError::InvalidRequest);
+                };
+                if *process != u32::MAX
+                    || (*address != 0 && u64::from(*address) + u64::from(*size) > 1 << 32)
+                {
+                    return Err(FrameError::InvalidRequest);
+                }
+                (WindowsOutcome32::Return(1), self)
             }
         })
     }

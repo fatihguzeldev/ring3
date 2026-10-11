@@ -170,6 +170,7 @@ impl ImportPlan<'_> {
                     | ProviderProfile::VirtualAllocation
                     | ProviderProfile::VirtualMemory => return Err(LoadError::Unsupported),
                 },
+                WindowsApi32::FlushInstructionCache => return Err(LoadError::Unsupported),
             };
             used[gate_index] = true;
             resolved.slots[index] = gate_base + gate_index as u32 * 16;

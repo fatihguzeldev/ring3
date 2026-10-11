@@ -462,6 +462,10 @@ fn public_terminal_codec_cannot_set_private_exit_and_pure_outcome_preserves_thre
 const MODULE_HANDLE: u32 = 0x0001_0004;
 
 fn module_fixture() -> Fixture {
+    module_fixture_with_api(MODULE_HANDLE)
+}
+
+fn module_fixture_with_api(id: u32) -> Fixture {
     // private publication and saved-stop model; no executed call is claimed here.
     let mut engine = EngineInstance::new(5, KEY).unwrap();
     engine.map(BASE, 1, 1).unwrap();
@@ -487,7 +491,7 @@ fn module_fixture() -> Fixture {
         entry_point: ENTRY,
         mapped_pages: 2,
     });
-    for (index, word) in [ENTRY, 2, ENTRY, MODULE_HANDLE].into_iter().enumerate() {
+    for (index, word) in [ENTRY, 2, ENTRY, id].into_iter().enumerate() {
         let at = TRANSFER_OFFSET + index * 4;
         engine.arena_mut().unwrap()[at..at + 4].copy_from_slice(&word.to_le_bytes());
     }
@@ -507,6 +511,114 @@ fn module_fixture() -> Fixture {
         engine,
         current,
         stale,
+    }
+}
+
+#[test]
+fn instruction_cache_completion_preserves_exhausted_versions_and_all_private_owners() {
+    const FLUSH: u32 = 0x0001_0008;
+    const FLUSH_ESP: u32 = STACK + 0x80;
+    for resident in [false, true] {
+        let mut f = module_fixture_with_api(FLUSH);
+        for (index, value) in [ENTRY + 15, u32::MAX, 0, u32::MAX].into_iter().enumerate() {
+            write(
+                &mut f.engine,
+                FLUSH_ESP + index as u32 * 4,
+                &value.to_le_bytes(),
+            );
+        }
+        let arena = f.engine.arena_mut().unwrap();
+        arena[crate::abi::arena::X87_OFFSET + 16..crate::abi::arena::X87_OFFSET + 18]
+            .copy_from_slice(&0x027f_u16.to_le_bytes());
+        arena[crate::abi::arena::X87_OFFSET + 18..crate::abi::arena::X87_OFFSET + 20]
+            .copy_from_slice(&0x81a5_u16.to_le_bytes());
+        for (index, byte) in arena
+            [crate::abi::arena::X87_OFFSET + 40..crate::abi::arena::X87_OFFSET + 120]
+            .iter_mut()
+            .enumerate()
+        {
+            *byte = (index as u8).wrapping_mul(29).wrapping_add(17);
+        }
+        let state = State32 {
+            registers: [0x1357_9bdf, 1, 2, 3, FLUSH_ESP, 5, 6, 7],
+            eip: ENTRY,
+            eflags: 0xcd7,
+        };
+        encode_state(&state, &mut arena[..56]).unwrap();
+        encode_exit_v3(
+            &ExecutionExit {
+                retired: 7,
+                reason: ExitReason::Gate { id: FLUSH },
+            },
+            &mut arena[56..96],
+        )
+        .unwrap();
+        arena[96..100].fill(0);
+        let token = if resident {
+            f.engine
+                .capture_resident_call(KEY, f.current.get(), CallingConvention32::Stdcall, 3)
+        } else {
+            f.engine
+                .capture_call(KEY, f.engine.generation, CallingConvention32::Stdcall, 3)
+        }
+        .unwrap()
+        .token;
+        let current = f
+            .engine
+            .memory()
+            .unwrap()
+            .snapshot_code(GuestAddress(ENTRY), 2)
+            .unwrap();
+        let stale = f
+            .engine
+            .memory()
+            .unwrap()
+            .snapshot_code(GuestAddress(STALE), 1)
+            .unwrap();
+        write(&mut f.engine, STALE, &[0x90]);
+        f.engine
+            .memory
+            .as_mut()
+            .unwrap()
+            .exhaust_versions_for_test();
+        let before = owners(&f);
+        let epoch = f.engine.memory().unwrap().code_validation_version();
+        assert_eq!(
+            before.stale,
+            Err(crate::cpu::dbt::RegistryError::CodeInvalidated)
+        );
+        let mut expected = f.engine.arena().to_vec();
+        let mut returned = state;
+        returned.registers[0] = 1;
+        returned.registers[4] = FLUSH_ESP + 16;
+        returned.eip = ENTRY + 15;
+        encode_state(&returned, &mut expected[..56]).unwrap();
+        encode_exit_v3(
+            &ExecutionExit {
+                retired: 0,
+                reason: ExitReason::NeedCode,
+            },
+            &mut expected[56..96],
+        )
+        .unwrap();
+        assert_eq!(complete(&mut f, resident, token), Ok(()));
+        assert_eq!(f.engine.arena(), expected);
+        assert_eq!(owners(&f), before);
+        assert_eq!(f.engine.memory().unwrap().code_validation_version(), epoch);
+        assert!(f.engine.memory().unwrap().is_code_current(&current));
+        assert!(!f.engine.memory().unwrap().is_code_current(&stale));
+        assert!(f.engine.pending_call.is_none());
+        assert!(f.engine.callback.is_none());
+        assert_eq!(f.engine.exit_code, None);
+        assert_eq!(
+            f.engine
+                .memory
+                .as_mut()
+                .unwrap()
+                .write(GuestAddress(RAM), &[0]),
+            Err(crate::memory::MemoryError::VersionExhausted)
+        );
+        assert_eq!(owners(&f), before);
     }
 }
 
