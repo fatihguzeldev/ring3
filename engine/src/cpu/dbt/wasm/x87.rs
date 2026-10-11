@@ -14,9 +14,10 @@ use crate::{
 };
 
 use super::locals::{
-    ADDRESS, CANCEL_PTR, EXIT_PTR, FLAGS, HELPER_STATUS, MEMORY_BYTES, STATE_PTR, register,
+    ADDRESS, CANCEL_PTR, EXIT_PTR, FLAGS, HELPER_STATUS, MEMORY_BYTES, RESULT, STATE_PTR, register,
 };
 
+#[allow(clippy::too_many_arguments)]
 pub(super) fn operation(
     code: &mut InstructionSink<'_>,
     operation: crate::cpu::x86::X87Operation,
@@ -53,7 +54,32 @@ pub(super) fn operation(
         exit_depth,
     );
     super::cpu_result::value(code);
-    code.local_set(FLAGS);
+    let integer_flags = matches!(
+        operation,
+        crate::cpu::x86::X87Operation::Compare {
+            integer_flags: true,
+            ..
+        }
+    );
+    if integer_flags {
+        code.local_set(RESULT);
+        super::memory::reset_checks(code);
+        // a deferred unmasked comparison preserves flags; a completed one has one of four relations.
+        code.local_get(RESULT).local_get(FLAGS).i32_ne();
+        for relation in [0, 1, 0x40, 0x45] {
+            code.local_get(RESULT)
+                .i32_const(0x8d5)
+                .i32_and()
+                .i32_const(relation)
+                .i32_ne()
+                .i32_and();
+        }
+        super::memory::add_check(code);
+        super::memory::protocol_if_bad(code);
+        super::memory::exit_if_failed(code, exit_depth);
+        code.local_get(RESULT);
+    }
+    super::cpu_result::flags(code, if integer_flags { 0x8d5 } else { 0 }, exit_depth);
     if operation == crate::cpu::x86::X87Operation::StatusToAx {
         status_to_ax(code);
     }
@@ -61,7 +87,7 @@ pub(super) fn operation(
 
 fn control_word(address: Option<EffectiveAddress>, waiting: bool) -> u32 {
     let segment = address.map_or(0, |address| {
-        let segment = address.segment.unwrap_or_else(|| {
+        let segment = address.segment.unwrap_or({
             if matches!(address.base, Some(Register32::Esp | Register32::Ebp)) {
                 SegmentRegister::Ss
             } else {
