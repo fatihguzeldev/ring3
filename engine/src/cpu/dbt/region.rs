@@ -551,6 +551,7 @@ pub(super) fn supports(instruction: &DecodedInstruction, embedded: bool) -> bool
                 | Operation::DecimalAdjust { .. }
                 | Operation::AsciiAdjust { .. }
                 | Operation::AsciiAdjustBeforeDivision { .. }
+                | Operation::AsciiAdjustAfterMultiplication { .. }
                 | Operation::Direction { .. }
                 | Operation::FlagsToAh
                 | Operation::AhToFlags

@@ -71,6 +71,9 @@ pub(super) fn check_profile(instruction: &Instruction, bytes: &[u8]) -> Result<(
     if instruction.code() == Code::Aad_imm8 && !matches!(bytes, [0xd5, _]) {
         return Err(unsupported());
     }
+    if instruction.code() == Code::Aam_imm8 && !matches!(bytes, [0xd4, _]) {
+        return Err(unsupported());
+    }
     if instruction.is_string_instruction()
         && (instruction.has_rep_prefix() || instruction.has_repne_prefix())
     {

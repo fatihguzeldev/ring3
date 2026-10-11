@@ -25,6 +25,7 @@ pub(in crate::cpu::dbt) fn emit(
             matches!(
                 instruction.operation(),
                 Operation::DivideAccumulator { .. }
+                    | Operation::AsciiAdjustAfterMultiplication { .. }
                     | Operation::WordDivideAccumulator { .. }
                     | Operation::ReadWordDivideAccumulator { .. }
                     | Operation::ByteDivideAccumulator { .. }

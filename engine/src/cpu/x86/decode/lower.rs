@@ -55,6 +55,9 @@ pub(super) fn lower(instruction: &Instruction, bytes: &[u8]) -> Result<Operation
         Code::Aad_imm8 => Ok(Operation::AsciiAdjustBeforeDivision {
             base: instruction.immediate8(),
         }),
+        Code::Aam_imm8 => Ok(Operation::AsciiAdjustAfterMultiplication {
+            base: instruction.immediate8(),
+        }),
         Code::Cld => Ok(Operation::Direction { set: false }),
         Code::Std => Ok(Operation::Direction { set: true }),
         Code::Movsb_m8_m8 => Ok(Operation::MoveStringByte),

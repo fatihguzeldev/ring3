@@ -107,6 +107,9 @@ pub(super) fn instruction(
         Operation::DecimalAdjust { kind } => decimal_adjust(code, kind),
         Operation::AsciiAdjust { kind } => ascii_adjust(code, kind),
         Operation::AsciiAdjustBeforeDivision { base } => ascii_adjust_before_division(code, base),
+        Operation::AsciiAdjustAfterMultiplication { base } => {
+            ascii_adjust_after_multiplication(code, base, exit_depth);
+        }
         Operation::Direction { set } => {
             code.local_get(FLAGS);
             if set {
@@ -2599,6 +2602,34 @@ fn indirect_target(
             memory::load_result(code, address, imports, exit_depth);
         }
     }
+}
+
+fn ascii_adjust_after_multiplication(code: &mut InstructionSink<'_>, base: u8, exit_depth: u32) {
+    if base == 0 {
+        code.i32_const(1);
+        divide_error_if(code, exit_depth);
+        return;
+    }
+    byte_value(code, ByteValue::Register(ByteRegister::Al));
+    code.local_tee(LHS)
+        .i32_const(i32::from(base))
+        .i32_div_u()
+        .local_set(RHS)
+        .local_get(LHS)
+        .i32_const(i32::from(base))
+        .i32_rem_u()
+        .local_set(RESULT);
+    logical_flags(code, 7);
+    code.local_get(register(Register32::Eax))
+        .i32_const(!0xffff)
+        .i32_and()
+        .local_get(RHS)
+        .i32_const(8)
+        .i32_shl()
+        .i32_or()
+        .local_get(RESULT)
+        .i32_or()
+        .local_set(register(Register32::Eax));
 }
 
 fn ascii_adjust_before_division(code: &mut InstructionSink<'_>, base: u8) {

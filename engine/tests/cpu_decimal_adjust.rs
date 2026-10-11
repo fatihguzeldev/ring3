@@ -26,6 +26,10 @@ const AAD_BANK: [u8; 20] = [
     0xd5, 0, 0xd5, 0x0a, 0xd5, 0x80, 0xd5, 0xff, 0xd5, 0x66, 0xd5, 0x67, 0xd5, 0xf0, 0xd5, 0xf2,
     0xd5, 0xf3, 0xeb, 0,
 ];
+const AAM_BANK: [u8; 20] = [
+    0xd4, 0, 0xd4, 0x0a, 0xd4, 0x80, 0xd4, 0xff, 0xd4, 0x66, 0xd4, 0x67, 0xd4, 0xf0, 0xd4, 0xf2,
+    0xd4, 0xf3, 0xeb, 0,
+];
 
 fn code(bytes: &[u8]) -> EngineInstance {
     code_with_permissions(bytes, true)
@@ -195,6 +199,14 @@ fn operation(opcode: u8) -> Operation {
     }
 }
 
+fn immediate_adjust_operation(opcode: u8, base: u8) -> Operation {
+    match opcode {
+        0xd4 => Operation::AsciiAdjustAfterMultiplication { base },
+        0xd5 => Operation::AsciiAdjustBeforeDivision { base },
+        _ => unreachable!(),
+    }
+}
+
 fn assert_helper_free(module: &[u8]) {
     for name in [b"read".as_slice(), b"store", b"dispatch"] {
         assert!(!module.windows(name.len()).any(|bytes| bytes == name));
@@ -233,8 +245,8 @@ fn fetch_error(pc: u32, address: u32, length: u32, reason: FaultReason) -> Decod
 #[test]
 fn decimal_adjust_ordinary_fallthrough_and_fixed32_payload_adjacency_are_exact() {
     let bytes = [
-        0x48, 0x27, 0x2f, 0x37, 0x3f, 0xd5, 0xf0, 0xd5, 0xff, 0xb8, 0x27, 0x2f, 0x66, 0x67, 0xb9,
-        0x37, 0x3f, 0x66, 0x67, 0x90,
+        0x48, 0x27, 0x2f, 0x37, 0x3f, 0xd5, 0xf0, 0xd5, 0xff, 0xd4, 0, 0xd4, 0xff, 0xb8, 0x27,
+        0x2f, 0x66, 0x67, 0xb9, 0x37, 0x3f, 0x66, 0x67, 0x90,
     ];
     let engine = code(&bytes);
     let memory = engine.memory().unwrap();
@@ -253,8 +265,14 @@ fn decimal_adjust_ordinary_fallthrough_and_fixed32_payload_adjacency_are_exact()
         (4, 1, operation(0x3f)),
         (5, 2, Operation::AsciiAdjustBeforeDivision { base: 0xf0 }),
         (7, 2, Operation::AsciiAdjustBeforeDivision { base: 0xff }),
+        (9, 2, Operation::AsciiAdjustAfterMultiplication { base: 0 }),
         (
-            9,
+            11,
+            2,
+            Operation::AsciiAdjustAfterMultiplication { base: 0xff },
+        ),
+        (
+            13,
             5,
             Operation::Move {
                 destination: Location32::Register(Register32::Eax),
@@ -262,14 +280,14 @@ fn decimal_adjust_ordinary_fallthrough_and_fixed32_payload_adjacency_are_exact()
             },
         ),
         (
-            14,
+            18,
             5,
             Operation::Move {
                 destination: Location32::Register(Register32::Ecx),
                 source: Value32::Immediate(0x6766_3f37),
             },
         ),
-        (19, 1, Operation::Nop),
+        (23, 1, Operation::Nop),
     ] {
         let decoded = decode_one(memory, GuestAddress(CODE + offset)).unwrap();
         assert_eq!(decoded.operation(), &expected);
@@ -278,8 +296,10 @@ fn decimal_adjust_ordinary_fallthrough_and_fixed32_payload_adjacency_are_exact()
             (length, GuestAddress(CODE + offset + u32::from(length)))
         );
     }
-    let ordinary = [0x27, 0x2f, 0x37, 0x3f, 0xd5, 0xf0, 0xd5, 0xff];
-    assert_standalone_admission(&ordinary, 6, false);
+    let ordinary = [
+        0x27, 0x2f, 0x37, 0x3f, 0xd5, 0xf0, 0xd5, 0xff, 0xd4, 0, 0xd4, 0xff,
+    ];
+    assert_standalone_admission(&ordinary, 8, false);
     for resident in [false, true] {
         assert_bound_admission(&ordinary, resident, false);
     }
@@ -296,6 +316,7 @@ fn decimal_adjust_strict_prefixes_and_other_decimal_forms_keep_categories() {
         &[0x37][..],
         &[0x3f][..],
         &[0xd5, 0x0a][..],
+        &[0xd4, 0x0a][..],
     ] {
         for prefix in [0x66, 0x67, 0xf2, 0xf3] {
             let mut bytes = vec![prefix];
@@ -314,8 +335,7 @@ fn decimal_adjust_strict_prefixes_and_other_decimal_forms_keep_categories() {
         segment.extend_from_slice(form);
         cases.push((segment, segment_error));
     }
-    cases.push((vec![0xd4, 0x0a], opcode_error));
-    assert_eq!(cases.len(), 61);
+    assert_eq!(cases.len(), 72);
     for (mut bytes, error) in cases {
         bytes.extend([0xeb, 0]);
         let mut engine = code(&bytes);
@@ -426,7 +446,12 @@ fn decimal_adjust_one_byte_fetch_execute_and_top_boundaries_do_not_wrap() {
 
 #[test]
 fn decimal_adjust_source_currentness_separates_data_writes_from_source_mutations() {
-    for bank in [BANK.as_slice(), ASCII_BANK.as_slice(), AAD_BANK.as_slice()] {
+    for bank in [
+        BANK.as_slice(),
+        ASCII_BANK.as_slice(),
+        AAD_BANK.as_slice(),
+        AAM_BANK.as_slice(),
+    ] {
         for identity_write in [false, true] {
             let mut engine = code_with_permissions(bank, !identity_write);
             let decoded = decode_one(engine.memory().unwrap(), GuestAddress(CODE)).unwrap();
@@ -490,10 +515,10 @@ fn decimal_adjust_source_currentness_separates_data_writes_from_source_mutations
 fn decimal_adjust_mixed_unit_fits_exactly_64_instructions_in_all_six_profiles() {
     let mut bytes = Vec::new();
     for instruction in 0..32 {
-        if instruction % 5 == 4 {
-            bytes.extend([0xd5, 0xff]);
-        } else {
-            bytes.push([0x27, 0x2f, 0x37, 0x3f][instruction % 5]);
+        match instruction % 6 {
+            4 => bytes.extend([0xd5, 0xff]),
+            5 => bytes.extend([0xd4, 0xff]),
+            index => bytes.push([0x27, 0x2f, 0x37, 0x3f][index]),
         }
     }
     bytes.extend(std::iter::repeat_n(0x90, 31));
@@ -508,7 +533,7 @@ fn decimal_adjust_mixed_unit_fits_exactly_64_instructions_in_all_six_profiles() 
 
 #[test]
 fn decimal_adjust_late_refusal_preserves_dirty_full_arena_and_both_owners() {
-    let mut bytes = vec![0x27, 0x2f, 0x37, 0x3f, 0xd5, 0xff];
+    let mut bytes = vec![0x27, 0x2f, 0x37, 0x3f, 0xd5, 0xff, 0xd4, 0];
     let refusal_pc = CODE + bytes.len() as u32;
     bytes.extend([0x0f, 0x0b]);
     let refusal_length = bytes.len() as u32;
@@ -652,73 +677,127 @@ fn aad_compiles_resident_entry() {
 }
 
 #[test]
-fn aad_two_byte_fetch_execute_and_top_boundaries_do_not_wrap() {
-    for base in [0, 0x0a, 0x66, 0x67, 0xf0, 0xf2, 0xf3, 0xff] {
-        for pc in [CODE, 0x1fff, u32::MAX - 1] {
-            let mut memory = code_space(pc, &[0xd5, base]);
-            if pc == u32::MAX - 1 {
-                let zero = PageRange::new(GuestAddress(0), 1).unwrap();
-                memory.map_zeroed(zero, Permissions::ALL).unwrap();
-                memory.write(GuestAddress(0), &[0x0f, 0x0b]).unwrap();
-                memory.protect(zero, Permissions::READ).unwrap();
+fn immediate_adjust_two_byte_fetch_execute_and_top_boundaries_do_not_wrap() {
+    for opcode in [0xd4, 0xd5] {
+        for base in [0, 0x0a, 0x66, 0x67, 0xf0, 0xf2, 0xf3, 0xff] {
+            for pc in [CODE, 0x1fff, u32::MAX - 1] {
+                let mut memory = code_space(pc, &[opcode, base]);
+                if pc == u32::MAX - 1 {
+                    let zero = PageRange::new(GuestAddress(0), 1).unwrap();
+                    memory.map_zeroed(zero, Permissions::ALL).unwrap();
+                    memory.write(GuestAddress(0), &[0x0f, 0x0b]).unwrap();
+                    memory.protect(zero, Permissions::READ).unwrap();
+                }
+                let decoded = decode_one(&memory, GuestAddress(pc)).unwrap();
+                assert_eq!(
+                    decoded.operation(),
+                    &immediate_adjust_operation(opcode, base)
+                );
+                assert_eq!(
+                    (decoded.length(), decoded.next_pc()),
+                    (2, GuestAddress(pc.wrapping_add(2)))
+                );
+                assert!(memory.is_code_current(decoded.code_snapshot()));
             }
-            let decoded = decode_one(&memory, GuestAddress(pc)).unwrap();
+
+            let mut denied_first = code_space(0x1fff, &[opcode, base]);
+            denied_first
+                .protect(
+                    PageRange::new(GuestAddress(CODE), 1).unwrap(),
+                    Permissions::READ,
+                )
+                .unwrap();
             assert_eq!(
-                decoded.operation(),
-                &Operation::AsciiAdjustBeforeDivision { base }
+                decode_one(&denied_first, GuestAddress(0x1fff)).err(),
+                Some(fetch_error(0x1fff, 0x1fff, 1, FaultReason::Permission))
             );
+
+            let mut denied_second = code_space(0x1fff, &[opcode, base]);
+            denied_second
+                .protect(
+                    PageRange::new(GuestAddress(0x2000), 1).unwrap(),
+                    Permissions::READ,
+                )
+                .unwrap();
             assert_eq!(
-                (decoded.length(), decoded.next_pc()),
-                (2, GuestAddress(pc.wrapping_add(2)))
+                decode_one(&denied_second, GuestAddress(0x1fff)).err(),
+                Some(fetch_error(0x1fff, 0x2000, 2, FaultReason::Permission))
             );
-            assert!(memory.is_code_current(decoded.code_snapshot()));
+
+            let mut incomplete_top = code_space(u32::MAX, &[opcode]);
+            let zero = PageRange::new(GuestAddress(0), 1).unwrap();
+            incomplete_top.map_zeroed(zero, Permissions::ALL).unwrap();
+            incomplete_top
+                .write(GuestAddress(0), &[base, 0xeb, 0])
+                .unwrap();
+            incomplete_top.protect(zero, Permissions::EXECUTE).unwrap();
+            assert_eq!(
+                decode_one(&incomplete_top, GuestAddress(u32::MAX)).err(),
+                Some(fetch_error(
+                    u32::MAX,
+                    u32::MAX,
+                    2,
+                    FaultReason::AddressOverflow,
+                ))
+            );
         }
 
-        let mut denied_first = code_space(0x1fff, &[0xd5, base]);
-        denied_first
-            .protect(
-                PageRange::new(GuestAddress(CODE), 1).unwrap(),
-                Permissions::READ,
-            )
-            .unwrap();
+        let incomplete_page = code_space(0x1fff, &[opcode]);
         assert_eq!(
-            decode_one(&denied_first, GuestAddress(0x1fff)).err(),
-            Some(fetch_error(0x1fff, 0x1fff, 1, FaultReason::Permission))
-        );
-
-        let mut denied_second = code_space(0x1fff, &[0xd5, base]);
-        denied_second
-            .protect(
-                PageRange::new(GuestAddress(0x2000), 1).unwrap(),
-                Permissions::READ,
-            )
-            .unwrap();
-        assert_eq!(
-            decode_one(&denied_second, GuestAddress(0x1fff)).err(),
-            Some(fetch_error(0x1fff, 0x2000, 2, FaultReason::Permission))
-        );
-
-        let mut incomplete_top = code_space(u32::MAX, &[0xd5]);
-        let zero = PageRange::new(GuestAddress(0), 1).unwrap();
-        incomplete_top.map_zeroed(zero, Permissions::ALL).unwrap();
-        incomplete_top
-            .write(GuestAddress(0), &[base, 0xeb, 0])
-            .unwrap();
-        incomplete_top.protect(zero, Permissions::EXECUTE).unwrap();
-        assert_eq!(
-            decode_one(&incomplete_top, GuestAddress(u32::MAX)).err(),
-            Some(fetch_error(
-                u32::MAX,
-                u32::MAX,
-                2,
-                FaultReason::AddressOverflow,
-            ))
+            decode_one(&incomplete_page, GuestAddress(0x1fff)).err(),
+            Some(fetch_error(0x1fff, 0x2000, 2, FaultReason::Unmapped))
         );
     }
+}
 
-    let incomplete_page = code_space(0x1fff, &[0xd5]);
-    assert_eq!(
-        decode_one(&incomplete_page, GuestAddress(0x1fff)).err(),
-        Some(fetch_error(0x1fff, 0x2000, 2, FaultReason::Unmapped))
-    );
+#[test]
+fn aam_decodes_exact_immediate_form() {
+    for base in 0..=u8::MAX {
+        let engine = code(&[0xd4, base]);
+        let before = engine.arena().to_vec();
+        let memory = engine.memory().unwrap();
+        let decoded = decode_one(memory, GuestAddress(CODE))
+            .expect("exact AAM immediate form must decode, including base zero");
+        assert_eq!(
+            decoded.operation(),
+            &Operation::AsciiAdjustAfterMultiplication { base }
+        );
+        assert_eq!(
+            (decoded.length(), decoded.next_pc()),
+            (2, GuestAddress(CODE + 2))
+        );
+        assert!(memory.is_code_current(decoded.code_snapshot()));
+        assert_eq!(engine.arena(), before);
+        assert_eq!(memory.mapped_pages(), 1);
+    }
+}
+
+#[test]
+fn aam_compiles_standalone_explicit() {
+    assert_standalone_admission(&AAM_BANK, 10, false);
+}
+
+#[test]
+fn aam_compiles_standalone_entry() {
+    assert_standalone_admission(&AAM_BANK, 10, true);
+}
+
+#[test]
+fn aam_compiles_replacement_explicit() {
+    assert_bound_admission(&AAM_BANK, false, false);
+}
+
+#[test]
+fn aam_compiles_replacement_entry() {
+    assert_bound_admission(&AAM_BANK, false, true);
+}
+
+#[test]
+fn aam_compiles_resident_explicit() {
+    assert_bound_admission(&AAM_BANK, true, false);
+}
+
+#[test]
+fn aam_compiles_resident_entry() {
+    assert_bound_admission(&AAM_BANK, true, true);
 }
