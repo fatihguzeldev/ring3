@@ -1,50 +1,50 @@
 #[path = "../../support/cpu/prefix_admission.rs"]
 mod support_prefix_admission;
 
-#[path = "cases/native/process_entry_regions.rs"]
+#[path = "entries/native/replacement.rs"]
 mod process_entry_regions;
 
-#[path = "cases/native/process_installed_resident_disposal_inputs.rs"]
+#[path = "lifecycle/native/disposal_inputs.rs"]
 mod process_installed_resident_disposal_inputs;
 
-#[path = "cases/native/process_resident.rs"]
+#[path = "native/identity.rs"]
 mod process_resident;
 
-#[path = "cases/native/process_resident_binary.rs"]
+#[path = "admission/native/binary.rs"]
 mod process_resident_binary;
 
-#[path = "cases/native/process_resident_call.rs"]
+#[path = "native/calls.rs"]
 mod process_resident_call;
 
-#[path = "cases/native/process_resident_control.rs"]
+#[path = "admission/native/control.rs"]
 mod process_resident_control;
 
-#[path = "cases/native/process_resident_disposal.rs"]
+#[path = "lifecycle/native/disposal.rs"]
 mod process_resident_disposal;
 
-#[path = "cases/native/process_resident_entries.rs"]
+#[path = "entries/native/resident.rs"]
 mod process_resident_entries;
 
-#[path = "cases/native/process_resident_gate.rs"]
+#[path = "admission/native/gates.rs"]
 mod process_resident_gate;
 
-#[path = "cases/native/process_resident_indirect.rs"]
+#[path = "admission/native/indirect.rs"]
 mod process_resident_indirect;
 
-#[path = "cases/native/process_resident_installation.rs"]
+#[path = "lifecycle/native/installation.rs"]
 mod process_resident_installation;
 
-#[path = "cases/native/process_resident_memory.rs"]
+#[path = "admission/native/read.rs"]
 mod process_resident_memory;
 
-#[path = "cases/native/process_resident_retirement.rs"]
+#[path = "lifecycle/native/retirement.rs"]
 mod process_resident_retirement;
 
-#[path = "cases/native/process_resident_stack.rs"]
+#[path = "admission/native/stack.rs"]
 mod process_resident_stack;
 
-#[path = "cases/native/process_resident_store.rs"]
+#[path = "admission/native/store.rs"]
 mod process_resident_store;
 
-#[path = "cases/native/process_resident_unary.rs"]
+#[path = "admission/native/unary.rs"]
 mod process_resident_unary;

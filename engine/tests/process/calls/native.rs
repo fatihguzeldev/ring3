@@ -1,2 +1,2 @@
-#[path = "cases/native/process_call32.rs"]
+#[path = "native/integer.rs"]
 mod process_call32;

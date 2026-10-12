@@ -1,17 +1,17 @@
-#[path = "cases/native/code_memory.rs"]
+#[path = "native/snapshots.rs"]
 mod code_memory;
 
-#[path = "cases/native/memory.rs"]
+#[path = "native/space.rs"]
 mod memory;
 
-#[path = "cases/native/memory_allocation.rs"]
+#[path = "native/allocation.rs"]
 mod memory_allocation;
 
-#[path = "cases/native/memory_exchange32.rs"]
+#[path = "native/exchange.rs"]
 mod memory_exchange32;
 
-#[path = "cases/native/narrow_reads.rs"]
+#[path = "../process/memory/scalar/native/narrow.rs"]
 mod narrow_reads;
 
-#[path = "cases/native/word_store.rs"]
+#[path = "../process/memory/store/native/word.rs"]
 mod word_store;

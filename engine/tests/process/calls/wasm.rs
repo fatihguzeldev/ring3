@@ -1,5 +1,5 @@
 #[path = "../../support/wasm.rs"]
 mod support_wasm;
 
-#[path = "cases/wasm/process_call_wasm.rs"]
+#[path = "wasm/integer.rs"]
 mod process_call_wasm;

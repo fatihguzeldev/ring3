@@ -79,7 +79,7 @@ writeFileSync(join(outputDir, 'program.x86'), code); artifacts['program.x86'] = 
 writeFileSync(join(outputDir, 'program.S'), programBytes); writeFileSync(join(outputDir, 'terminal-oracle.json'), oracleBytes);
 writeFileSync(join(outputDir, 'runtime/run.mjs'), readFileSync(import.meta.filename));
 const productionPaths = execFileSync('rg', ['--files','engine/src'], {cwd: root, encoding: 'utf8'}).trim().split('\n').sort();
-const sourcePaths = [...productionPaths,'Cargo.toml','engine/Cargo.toml','Cargo.lock','engine/tests/process/images/cases/wasm/process_pe32_terminal_wasm.rs', 'engine/tests/process/images/wasm.rs', 'engine/tests/support/wasm.rs', 'engine/tests/process/images/wasm.rs', 'engine/tests/support/wasm.rs','engine/tests/process/images/fixtures/p2-pe32-terminal/program.S','engine/tests/process/images/fixtures/p2-pe32-terminal/oracle.json','engine/tests/process/images/fixtures/p2-pe32-terminal/runtime/run.mjs'];
+const sourcePaths = [...productionPaths,'Cargo.toml','engine/Cargo.toml','Cargo.lock','engine/tests/process/images/wasm/terminal.rs', 'engine/tests/process/images/wasm.rs', 'engine/tests/support/wasm.rs', 'engine/tests/process/images/wasm.rs', 'engine/tests/support/wasm.rs','engine/tests/process/images/fixtures/p2-pe32-terminal/program.S','engine/tests/process/images/fixtures/p2-pe32-terminal/oracle.json','engine/tests/process/images/fixtures/p2-pe32-terminal/runtime/run.mjs'];
 const sources = Object.fromEntries(sourcePaths.map(file => [file, hash(readFileSync(join(root, file)))]));
 writeFileSync(join(outputDir, 'source-sha256.json'), JSON.stringify(sources, null, 2));
 const engineBytes = readFileSync(enginePath); writeFileSync(join(outputDir, 'engine.wasm'), engineBytes);

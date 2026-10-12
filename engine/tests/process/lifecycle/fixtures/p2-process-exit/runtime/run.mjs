@@ -81,7 +81,7 @@ writeFileSync(join(outputDir, 'program.S'), programBytes);
 writeFileSync(join(outputDir, 'terminal-oracle.json'), oracleBytes);
 writeFileSync(join(outputDir, 'runtime/run.mjs'), readFileSync(import.meta.filename));
 const productionPaths = execFileSync('rg', ['--files', 'engine/src'], {cwd: root, encoding: 'utf8'}).trim().split('\n').sort();
-const sourcePaths = [...productionPaths, 'Cargo.toml', 'engine/Cargo.toml', 'Cargo.lock', 'engine/tests/process/lifecycle/cases/wasm/process_exit_wasm.rs', 'engine/tests/process/lifecycle/wasm.rs', 'engine/tests/support/wasm.rs', 'engine/tests/process/lifecycle/wasm.rs', 'engine/tests/support/wasm.rs', 'engine/tests/process/lifecycle/fixtures/p2-process-exit/program.S', 'engine/tests/process/lifecycle/fixtures/p2-process-exit/oracle.json', 'engine/tests/process/lifecycle/fixtures/p2-process-exit/runtime/run.mjs'];
+const sourcePaths = [...productionPaths, 'Cargo.toml', 'engine/Cargo.toml', 'Cargo.lock', 'engine/tests/process/lifecycle/wasm/exit.rs', 'engine/tests/process/lifecycle/wasm.rs', 'engine/tests/support/wasm.rs', 'engine/tests/process/lifecycle/wasm.rs', 'engine/tests/support/wasm.rs', 'engine/tests/process/lifecycle/fixtures/p2-process-exit/program.S', 'engine/tests/process/lifecycle/fixtures/p2-process-exit/oracle.json', 'engine/tests/process/lifecycle/fixtures/p2-process-exit/runtime/run.mjs'];
 const sources = Object.fromEntries(sourcePaths.map(file => [file, hash(readFileSync(join(root, file)))]));
 writeFileSync(join(outputDir, 'source-sha256.json'), JSON.stringify(sources, null, 2));
 const engineBytes = readFileSync(enginePath);

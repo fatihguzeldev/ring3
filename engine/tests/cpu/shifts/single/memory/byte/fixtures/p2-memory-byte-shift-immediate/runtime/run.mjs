@@ -71,7 +71,7 @@ const sourcePaths = [
   "engine/tests/cpu/dbt/regions/resident/native/registry.rs", "engine/tests/cpu/dbt/regions/native.rs", "engine/tests/cpu/dbt/regions/native.rs", "engine/tests/cpu/dbt/lowering/register/native/unary.rs", "engine/tests/cpu/dbt/lowering/native.rs", "engine/tests/support/cpu/prefix_admission.rs", "engine/tests/cpu/dbt/lowering/native.rs",
   "engine/tests/cpu/shifts/single/register/fixtures/p2-byte-shift/runtime/run.mjs",
   "engine/tests/cpu/shifts/single/memory/byte/fixtures/p2-memory-byte-shift-immediate-one/runtime/run.mjs",
-  "engine/tests/cpu/shifts/carry_rotate/memory/dword/fixtures/p2-memory-carry-rotate-cl32/runtime/run.mjs", "engine/tests/process/resident/cases/native/process_resident_control.rs", "engine/tests/process/resident/native.rs", "engine/tests/process/resident/native.rs",
+  "engine/tests/cpu/shifts/carry_rotate/memory/dword/fixtures/p2-memory-carry-rotate-cl32/runtime/run.mjs", "engine/tests/process/resident/admission/native/control.rs", "engine/tests/process/resident/native.rs", "engine/tests/process/resident/native.rs",
   "engine/tests/support/wasm/engine.mjs", "engine/tests/cpu/shifts/single/memory/byte/native/immediate.rs", "engine/tests/cpu/shifts/native.rs", "engine/tests/support/cpu/byte_prefix_admission.rs", "engine/tests/support/cpu/prefix_admission.rs", "engine/tests/cpu/shifts/native.rs",
   "engine/tests/cpu/shifts/single/memory/byte/wasm/immediate.rs", "engine/tests/cpu/shifts/wasm.rs", "engine/tests/support/wasm.rs", "engine/tests/cpu/shifts/wasm.rs", "engine/tests/support/wasm.rs",
   "engine/tests/cpu/shifts/single/memory/byte/fixtures/p2-memory-byte-shift-immediate/runtime/run.mjs",

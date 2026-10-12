@@ -1,5 +1,5 @@
-#[path = "cases/native/process_dispatch_entry.rs"]
+#[path = "native/entry.rs"]
 mod process_dispatch_entry;
 
-#[path = "cases/native/process_returning_dispatcher.rs"]
+#[path = "native/returning.rs"]
 mod process_returning_dispatcher;

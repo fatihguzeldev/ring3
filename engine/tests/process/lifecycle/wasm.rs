@@ -1,8 +1,8 @@
 #[path = "../../support/wasm.rs"]
 mod support_wasm;
 
-#[path = "cases/wasm/engine_wasm.rs"]
+#[path = "wasm/instance.rs"]
 mod engine_wasm;
 
-#[path = "cases/wasm/process_exit_wasm.rs"]
+#[path = "wasm/exit.rs"]
 mod process_exit_wasm;

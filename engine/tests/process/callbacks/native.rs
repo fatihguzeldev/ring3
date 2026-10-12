@@ -1,26 +1,26 @@
-#[path = "cases/native/callback_code_install.rs"]
+#[path = "replacement/native/code.rs"]
 mod callback_code_install;
 
-#[path = "cases/native/process_active_resident_callback_call.rs"]
+#[path = "resident/native/active_calls.rs"]
 mod process_active_resident_callback_call;
 
-#[path = "cases/native/process_callbacks.rs"]
+#[path = "replacement/native/admission.rs"]
 mod process_callbacks;
 
-#[path = "cases/native/process_resident_callback.rs"]
+#[path = "resident/native/admission.rs"]
 mod process_resident_callback;
 
-#[path = "cases/native/process_resident_callback_call.rs"]
+#[path = "resident/native/calls.rs"]
 mod process_resident_callback_call;
 
-#[path = "cases/native/process_resident_callback_execution.rs"]
+#[path = "resident/native/execution.rs"]
 mod process_resident_callback_execution;
 
-#[path = "cases/native/process_resident_callback_finish.rs"]
+#[path = "resident/native/finish.rs"]
 mod process_resident_callback_finish;
 
-#[path = "cases/native/process_resident_callback_installation.rs"]
+#[path = "resident/native/installation.rs"]
 mod process_resident_callback_installation;
 
-#[path = "cases/native/process_resident_callback_selection.rs"]
+#[path = "resident/native/selection.rs"]
 mod process_resident_callback_selection;

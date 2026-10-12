@@ -1,32 +1,32 @@
 #[path = "../../support/wasm.rs"]
 mod support_wasm;
 
-#[path = "cases/wasm/callback_code_wasm.rs"]
+#[path = "replacement/wasm/code.rs"]
 mod callback_code_wasm;
 
-#[path = "cases/wasm/callbacks_wasm.rs"]
+#[path = "replacement/wasm/admission.rs"]
 mod callbacks_wasm;
 
-#[path = "cases/wasm/process_active_resident_callback_call_wasm.rs"]
+#[path = "resident/wasm/active_calls.rs"]
 mod process_active_resident_callback_call_wasm;
 
-#[path = "cases/wasm/process_cold_callback_retry_wasm.rs"]
+#[path = "resident/wasm/retry.rs"]
 mod process_cold_callback_retry_wasm;
 
-#[path = "cases/wasm/process_resident_callback_call_wasm.rs"]
+#[path = "resident/wasm/calls.rs"]
 mod process_resident_callback_call_wasm;
 
-#[path = "cases/wasm/process_resident_callback_execution_wasm.rs"]
+#[path = "resident/wasm/execution.rs"]
 mod process_resident_callback_execution_wasm;
 
-#[path = "cases/wasm/process_resident_callback_finish_wasm.rs"]
+#[path = "resident/wasm/finish.rs"]
 mod process_resident_callback_finish_wasm;
 
-#[path = "cases/wasm/process_resident_callback_installation_wasm.rs"]
+#[path = "resident/wasm/installation.rs"]
 mod process_resident_callback_installation_wasm;
 
-#[path = "cases/wasm/process_resident_callback_selection_wasm.rs"]
+#[path = "resident/wasm/selection.rs"]
 mod process_resident_callback_selection_wasm;
 
-#[path = "cases/wasm/process_resident_callback_wasm.rs"]
+#[path = "resident/wasm/admission.rs"]
 mod process_resident_callback_wasm;
