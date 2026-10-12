@@ -1,4 +1,4 @@
-import {createArena} from '../../../../../../support/wasm/arena.mjs';
+import {createArena} from '../../../../../../../support/wasm/arena.mjs';
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
 import {lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, writeFileSync} from 'node:fs';
@@ -513,7 +513,7 @@ function authority(root, freezePath, actualDirectory) {
   for (const [path, p] of Object.entries(supervisedPins)) readPinned(root, path, p);
   const bank = dirname(supervisorPath), started = JSON.parse(readFileSync(join(bank, 'actual-first.started.json'))), actual = JSON.parse(readFileSync(join(bank, 'actual-first.result.json')));
   assert.deepEqual(actual.freeze, filePin(supervisedBytes)); assert.deepEqual(started.freeze, actual.freeze); assert.deepEqual(actual.command, supervised.command); assert.deepEqual(started.command, actual.command);
-  assert.deepEqual(actual.command, ['node', resolve(root, 'engine/tests/process/resident/lifecycle/fixtures/p2-installed-resident-disposal/runtime/run.mjs'), resolve(root, freeze.engine_path), resolve(actualDirectory), resolve(root), resolve(root, freeze.capture_path)]);
+  assert.deepEqual(actual.command, ['node', resolve(root, 'engine/tests/process/resident/lifecycle/disposal/fixtures/p2-installed-resident-disposal/runtime/run.mjs'), resolve(root, freeze.engine_path), resolve(actualDirectory), resolve(root), resolve(root, freeze.capture_path)]);
   assert.equal(actual.exit_code, 0); assert.equal(actual.timeout, false); assert.equal(actual.not_started, false); assert.equal(actual.error, null); assert.equal(actual.reaped, true);
   assert.deepEqual(actual.changed_pins, []); assert.deepEqual(actual.pin_errors, []); assert.equal(actual.deadline_seconds, 600); assert.equal(actual.cleanup_reserve_seconds, 5);
   assert(Number.isSafeInteger(actual.wall_ns) && actual.wall_ns > 0 && actual.wall_ns <= 600e9);

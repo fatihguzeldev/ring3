@@ -44,5 +44,5 @@ mod process_resident_unary_wasm;
 #[path = "wasm/identity.rs"]
 mod process_resident_wasm;
 
-#[path = "lifecycle/wasm/disposal.rs"]
+#[path = "lifecycle/disposal/wasm.rs"]
 mod process_unacknowledged_disposal_wasm;

@@ -4,7 +4,7 @@ mod support_prefix_admission;
 #[path = "entries/native/replacement.rs"]
 mod process_entry_regions;
 
-#[path = "lifecycle/native/disposal_inputs.rs"]
+#[path = "lifecycle/disposal/inputs/native.rs"]
 mod process_installed_resident_disposal_inputs;
 
 #[path = "native/identity.rs"]
@@ -19,7 +19,7 @@ mod process_resident_call;
 #[path = "admission/native/control.rs"]
 mod process_resident_control;
 
-#[path = "lifecycle/native/disposal.rs"]
+#[path = "lifecycle/disposal/native.rs"]
 mod process_resident_disposal;
 
 #[path = "entries/native/resident.rs"]

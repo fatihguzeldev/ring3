@@ -1,4 +1,4 @@
-import {createArena} from '../../../../../../support/wasm/arena.mjs';
+import {createArena} from '../../../../../../../support/wasm/arena.mjs';
 import assert from 'node:assert/strict';
 import {mkdirSync, writeFileSync} from 'node:fs';
 import {resolve} from 'node:path';
