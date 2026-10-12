@@ -1,3 +1,4 @@
+import {ARENA_SIZE} from '../../../../../../../../support/wasm/arena.mjs';
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { readFileSync, writeFileSync, readdirSync, lstatSync } from "node:fs";
@@ -5,7 +6,7 @@ import { join } from "node:path";
 import { readEngine } from "../../../../../../../../support/wasm/engine.mjs";
 
 const [enginePath, output, root] = process.argv.slice(2);
-const SIZE = 4612;
+const SIZE = ARENA_SIZE;
 const PC = 0x1000;
 const RAW = [0, 1, 2, 15, 16, 17, 31, 32, 33, 255];
 const EDGES = [0, 1, 0x7fff, 0x8000, 0xffff];

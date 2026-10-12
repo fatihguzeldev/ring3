@@ -1,9 +1,10 @@
 import assert from 'node:assert/strict';
+import {ARENA_SIZE} from '../../../../../../../support/wasm/arena.mjs';
 import {createHash} from 'node:crypto';
 import {readFileSync, writeFileSync} from 'node:fs';
 import {join} from 'node:path';
 
-const SIZE = 4612, TRANSFER = 140, FP = 4236, EXIT = 0x8020, EXIT_ID = 0x10003, MARKER = 0xc8c00015;
+const SIZE = ARENA_SIZE, TRANSFER = 140, FP = 4236, EXIT = 0x8020, EXIT_ID = 0x10003, MARKER = 0xc8c00015;
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
 const words = fields => {const b = Buffer.alloc(fields.length * 4); fields.forEach((v, i) => b.writeUInt32LE(v >>> 0, i * 4)); return b;};
 function record(magic, length, fields, version = 1) {

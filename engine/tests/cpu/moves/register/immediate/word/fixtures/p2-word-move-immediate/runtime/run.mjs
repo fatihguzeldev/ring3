@@ -1,3 +1,4 @@
+import {ARENA_SIZE} from '../../../../../../../../support/wasm/arena.mjs';
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
 import {readFileSync,readdirSync,writeFileSync} from 'node:fs';
@@ -6,7 +7,7 @@ import {readEngine} from '../../../../../../../../support/wasm/engine.mjs';
 
 const [enginePath,output,root]=process.argv.slice(2); assert.ok(enginePath&&output&&root);
 assert.match(process.env.RING3_ENGINE_SHA256??'',/^[a-f0-9]{64}$/);
-const engine=readEngine(enginePath),SIZE=4612,BASES=[0x1000,0x3000,0x5000],FLAGS=[2,0xcd7];
+const engine=readEngine(enginePath),SIZE=ARENA_SIZE,BASES=[0x1000,0x3000,0x5000],FLAGS=[2,0xcd7];
 const hash=b=>createHash('sha256').update(b).digest('hex'),initial=readFileSync(join(output,'initial-arena.bin'));
 assert.equal(initial.length,SIZE); assert.deepEqual(readdirSync(output).sort(),['initial-arena.bin','modrm.x86','opcode.x86','payload.x86']);
 const parents=[0xa53c0001,0xb64d8001,0xc75e7fff,0xd86f00ff,0xe970f001,0xfa81abcd,0x1b926667,0x2ca3f0f3];

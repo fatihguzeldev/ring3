@@ -1,9 +1,10 @@
+import {ARENA_SIZE} from '../../../../../../support/wasm/arena.mjs';
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { readFileSync, writeFileSync, readdirSync, lstatSync } from "node:fs";
 import { join } from "node:path";
 import { readEngine } from "../../../../../../support/wasm/engine.mjs";
-const [enginePath, output, root] = process.argv.slice(2), SIZE=4612, PC=0x1000;
+const [enginePath, output, root] = process.argv.slice(2), SIZE=ARENA_SIZE, PC=0x1000;
 assert.ok(enginePath && output && root);assert.match(process.env.RING3_ENGINE_SHA256??"",/^[a-f0-9]{64}$/);
 assert.deepEqual(readdirSync(output).sort(),["initial-arena.bin","word-register-move.x86"]);
 for(const name of readdirSync(output))assert.ok(lstatSync(join(output,name)).isFile()&&!lstatSync(join(output,name)).isSymbolicLink());

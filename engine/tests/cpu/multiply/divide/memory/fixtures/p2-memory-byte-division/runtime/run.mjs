@@ -9,7 +9,7 @@ const hash = b => createHash('sha256').update(b).digest('hex');
 const engineBytes = readFileSync(enginePath), expectedHash = process.env.RING3_ENGINE_SHA256;
 assert.match(expectedHash ?? '', /^[a-f0-9]{64}$/); assert.equal(hash(engineBytes), expectedHash);
 const engineModule = new WebAssembly.Module(engineBytes); assert.deepEqual(WebAssembly.Module.imports(engineModule), []);
-const initial = readFileSync(join(output, 'initial-arena.bin')); assert.equal(SIZE, 4612); assert.equal(initial.length, SIZE);
+const initial = readFileSync(join(output, 'initial-arena.bin'));  assert.equal(initial.length, SIZE);
 const REG = [0xa53c0011, 0x23456789, 0x3456789a, DATA + 24, 0x9000, 0x56789abc, 0x6789abcd, 0x789abcde], FLAGS = [2, 0xcd7];
 const rows = [[0x11, 5], [0, 1], [0xffff, 1], [0x1ff, 2], [0x200, 2], [0x7f, 1], [0x80, 1], [0xff80, 1],
   [0xff7f, 1], [0xfff9, 3], [7, 0xfd], [0xfff9, 0xfd], [0x8000, 0xff], [0xfe, 0xfe], [0xfffb, 0xff], [0x1234, 0]];

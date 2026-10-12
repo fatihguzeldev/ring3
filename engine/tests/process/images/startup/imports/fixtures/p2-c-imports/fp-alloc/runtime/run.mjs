@@ -1,3 +1,4 @@
+import {ARENA_SIZE} from '../../../../../../../../support/wasm/arena.mjs';
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
 import {readFileSync, writeFileSync} from 'node:fs';
@@ -7,7 +8,7 @@ import {readEngine} from '../../../../../../../../support/wasm/engine.mjs';
 const [enginePath, output, root] = process.argv.slice(2);
 assert.ok(enginePath && output && root, 'expected engine, output directory and repository root');
 const fixture = 'engine/tests/process/images/startup/imports/fixtures/p2-c-imports/fp-alloc';
-const SIZE = 4612, T = 140, FP = 4236, SV = 4364, SG = 4524;
+const SIZE = ARENA_SIZE, T = 140, FP = 4236, SV = 4364, SG = 4524;
 const STACK = 0x8000, STACK_TOP = 0x9000;
 const KEY_LOW = 0xf5790001, KEY_HIGH = 0x4650414c;
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');

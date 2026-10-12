@@ -1,10 +1,11 @@
+import {ARENA_SIZE} from '../../../../../../../support/wasm/arena.mjs';
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
 import {readFileSync, writeFileSync} from 'node:fs';
 import {join} from 'node:path';
 import {readEngine} from '../../../../../../../support/wasm/engine.mjs';
 
-const [enginePath, output, root] = process.argv.slice(2), SIZE = 4612;
+const [enginePath, output, root] = process.argv.slice(2), SIZE = ARENA_SIZE;
 assert.ok(enginePath && output && root);
 const engine = readEngine(enginePath), initial = readFileSync(join(output, 'initial-arena.bin'));
 assert.equal(initial.length, SIZE); assert.deepEqual(WebAssembly.Module.imports(engine.module), []);

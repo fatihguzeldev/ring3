@@ -1,3 +1,4 @@
+import {ARENA_SIZE} from '../../../../../../support/wasm/arena.mjs';
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
 import {readFileSync, writeFileSync} from 'node:fs';
@@ -7,7 +8,7 @@ import {readEngine} from '../../../../../../support/wasm/engine.mjs';
 const [enginePath, output, root] = process.argv.slice(2);
 assert.ok(enginePath && output && root, 'expected engine, output directory and repository root');
 const fixture = 'engine/tests/process/images/startup/fixtures/p2-sse2-pe-startup';
-const SIZE = 4612, T = 140, FP = 4236, SV = 4364;
+const SIZE = ARENA_SIZE, T = 140, FP = 4236, SV = 4364;
 const KEY_LOW = 0x53534532, KEY_HIGH = 0x50455354;
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
 const engine = readEngine(enginePath);

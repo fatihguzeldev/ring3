@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import {ARENA_SIZE} from '../../../../../support/wasm/arena.mjs';
 import {createHash} from 'node:crypto';
 import {execFileSync} from 'node:child_process';
 import {readFileSync, readdirSync, writeFileSync} from 'node:fs';
@@ -7,7 +8,7 @@ import {readEngine} from '../../../../../support/wasm/engine.mjs';
 
 const [enginePath, output, root] = process.argv.slice(2);
 assert.ok(enginePath && output && root);
-const engine = readEngine(enginePath), SIZE = 4612, TRANSFER = 140;
+const engine = readEngine(enginePath), SIZE = ARENA_SIZE, TRANSFER = 140;
 const initial = readFileSync(join(output, 'initial-arena.bin')), image = readFileSync(join(output, 'switch.exe'));
 const spec = JSON.parse(readFileSync(join(output, 'manifest.json'), 'utf8'));
 assert.equal(initial.length, SIZE);

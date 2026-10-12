@@ -1,3 +1,4 @@
+import {ARENA_SIZE} from '../../../../../support/wasm/arena.mjs';
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
 import {readFileSync,writeFileSync} from 'node:fs';
@@ -6,7 +7,7 @@ import {readEngine} from '../../../../../support/wasm/engine.mjs';
 
 const [enginePath,output,root]=process.argv.slice(2);
 assert.ok(enginePath&&output&&root);
-const SIZE=4612,T=140,FP=4236,SV=4364,ENTRY=0x2000,CALLER=0x3000;
+const SIZE=ARENA_SIZE,T=140,FP=4236,SV=4364,ENTRY=0x2000,CALLER=0x3000;
 const COEFF=0x5010,INPUT=0x6010,VECTOR=0x7010,SCALAR=0xa010,COUNT_OUT=0xa030,STACK=0x9020,ESP=0x9080;
 const engine=readEngine(enginePath),initial=readFileSync(join(output,'initial-arena.bin'));
 const hash=b=>createHash('sha256').update(b).digest('hex'),hex=s=>Buffer.from(s,'hex');

@@ -10,7 +10,7 @@ const engineBytes=readFileSync(enginePath),expectedHash=process.env.RING3_ENGINE
 assert.match(expectedHash??'',/^[a-f0-9]{64}$/);assert.equal(hash(engineBytes),expectedHash);
 const engineModule=new WebAssembly.Module(engineBytes);assert.deepEqual(WebAssembly.Module.imports(engineModule),[]);
 const initial=readFileSync(join(output,'initial-arena.bin')),opaque=readFileSync(join(output,'opaque-fp.bin'));
-assert.equal(SIZE,4612);assert.equal(initial.length,SIZE);assert.equal(opaque.length,128);
+assert.equal(initial.length,SIZE);assert.equal(opaque.length,128);
 const REG=[0xa53c0011,0,0x3456789a,BASE,0x9000,0x56789abc,0x6789abcd,0x789abcde],FLAGS=[2,0xcd7];
 const indexes=[0,31,32,33,-1,-32,-33,-2147483648,2147483647],immediates=[0,31,32,255];
 const forms=[[0x0f,0xa3,0x0b],[0x0f,0xa3,0x00],[0x0f,0xa3,0x4c,0x8a,0x80],

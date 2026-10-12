@@ -1,3 +1,4 @@
+import {ARENA_SIZE} from '../../../../../../../support/wasm/arena.mjs';
 import assert from "node:assert/strict";
 import {createHash} from "node:crypto";
 import {mkdirSync, readFileSync, writeFileSync} from "node:fs";
@@ -8,7 +9,7 @@ import {readEngine} from "../../../../../../../support/wasm/engine.mjs";
 const directory = join(dirname(fileURLToPath(import.meta.url)), "..");
 const dataBytes = readFileSync(join(directory, "cases.json"));
 const data = JSON.parse(dataBytes);
-const SIZE = 4612;
+const SIZE = ARENA_SIZE;
 const sha = bytes => createHash("sha256").update(bytes).digest("hex");
 const u32 = value => value >>> 0;
 const bytes = hex => Buffer.from(hex, "hex");

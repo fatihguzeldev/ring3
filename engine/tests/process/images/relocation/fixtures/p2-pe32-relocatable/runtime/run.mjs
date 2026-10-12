@@ -1,10 +1,11 @@
+import {ARENA_SIZE} from '../../../../../../support/wasm/arena.mjs';
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
 import {readFileSync, readdirSync, writeFileSync} from 'node:fs';
 import {join} from 'node:path';
 import {readEngine} from '../../../../../../support/wasm/engine.mjs';
 
-const [enginePath, output, root] = process.argv.slice(2), SIZE = 4612, TRANSFER = 140;
+const [enginePath, output, root] = process.argv.slice(2), SIZE = ARENA_SIZE, TRANSFER = 140;
 assert.ok(enginePath && output && root);
 const fixture = 'engine/tests/process/images/relocation/fixtures/p2-pe32-relocatable', hash = bytes => createHash('sha256').update(bytes).digest('hex');
 const engine = readEngine(enginePath), initial = readFileSync(join(output, 'initial-arena.bin'));
