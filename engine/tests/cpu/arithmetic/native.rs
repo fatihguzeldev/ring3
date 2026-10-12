@@ -31,32 +31,32 @@ mod cpu_register_memory_byte_arithmetic;
 #[path = "carry/read/native/byte.rs"]
 mod cpu_register_memory_byte_carry;
 
-#[path = "carry/register/native/adc_word.rs"]
+#[path = "carry/register/adc/word/native.rs"]
 mod cpu_word_adc;
 
-#[path = "binary/register/native/add_word.rs"]
+#[path = "binary/register/add/word/native.rs"]
 mod cpu_word_add;
 
 #[path = "binary/read/native/word.rs"]
 mod cpu_word_memory_arithmetic;
 
-#[path = "binary/modify/native/word_register.rs"]
+#[path = "binary/modify/register/word/native.rs"]
 mod cpu_word_memory_arithmetic_store;
 
-#[path = "binary/inputs/native/store_banks.rs"]
+#[path = "binary/inputs/native/store.rs"]
 mod cpu_word_memory_arithmetic_store_legacy;
 
 #[path = "carry/read/native/word.rs"]
 mod cpu_word_memory_carry;
 
-#[path = "carry/modify/native/word_register.rs"]
+#[path = "carry/modify/register/word/native.rs"]
 mod cpu_word_memory_carry_store;
 
-#[path = "binary/modify/native/word_immediate.rs"]
+#[path = "binary/modify/immediate/word/native.rs"]
 mod cpu_word_memory_immediate_arithmetic_store;
 
-#[path = "carry/register/native/sbb_word.rs"]
+#[path = "carry/register/sbb/word/native.rs"]
 mod cpu_word_sbb;
 
-#[path = "binary/register/native/sub_word.rs"]
+#[path = "binary/register/subtract/word/native.rs"]
 mod cpu_word_sub;

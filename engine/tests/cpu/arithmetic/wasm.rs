@@ -32,26 +32,26 @@ mod cpu_register_memory_byte_arithmetic_wasm;
 #[path = "carry/read/wasm/byte.rs"]
 mod cpu_register_memory_byte_carry_wasm;
 
-#[path = "carry/register/wasm/adc_word.rs"]
+#[path = "carry/register/adc/word/wasm.rs"]
 mod cpu_word_adc_wasm;
 
-#[path = "binary/register/wasm/add_word.rs"]
+#[path = "binary/register/add/word/wasm.rs"]
 mod cpu_word_add_wasm;
 
 #[path = "binary/read/wasm/word.rs"]
 mod cpu_word_memory_arithmetic_wasm;
 
-#[path = "carry/modify/wasm/word_register.rs"]
+#[path = "carry/modify/register/word/wasm.rs"]
 mod cpu_word_memory_carry_store_wasm;
 
 #[path = "carry/read/wasm/word.rs"]
 mod cpu_word_memory_carry_wasm;
 
-#[path = "binary/modify/wasm/word_immediate.rs"]
+#[path = "binary/modify/immediate/word/wasm.rs"]
 mod cpu_word_memory_immediate_arithmetic_store_wasm;
 
-#[path = "carry/register/wasm/sbb_word.rs"]
+#[path = "carry/register/sbb/word/wasm.rs"]
 mod cpu_word_sbb_wasm;
 
-#[path = "binary/register/wasm/sub_word.rs"]
+#[path = "binary/register/subtract/word/wasm.rs"]
 mod cpu_word_sub_wasm;
