@@ -1,3 +1,4 @@
+import {assertEngineExports} from '../../../../../../../support/wasm/exports.mjs';
 import assert from 'node:assert/strict';
 import {execFileSync} from 'node:child_process';
 import {createHash} from 'node:crypto';
@@ -65,7 +66,7 @@ function childLocals(module) {
       assert.equal(unsigned(),1);const bodyLength=unsigned(),bodyEnd=at+bodyLength;
       assert.equal(bodyEnd,end);const count=unsigned(),locals=[];
       for(let index=0;index<count;index++)locals.push([unsigned(),module[at++]]);
-      assert.deepEqual(locals,[[16,0x7f],[1,0x7e]]);
+      assert.deepEqual(locals, [[16,0x7f],[1,0x7e],[10,0x7f]]);
       return locals;
     }
     at=end;
@@ -78,18 +79,22 @@ execFileSync('clang',assemble,{stdio:['ignore','pipe','pipe']});
 writeFileSync(join(outputDir,'program.disassembly.txt'),execFileSync('xcrun',['llvm-objdump','-d','--x86-asm-syntax=intel',objectPath]));
 const text=authoredText(readFileSync(objectPath));
 writeFileSync(join(outputDir,'program.x86'),text);writeFileSync(join(outputDir,'program.S'),source);
-writeFileSync(join(outputDir,'authored-oracle.json'),oracleBytes);writeFileSync(join(outputDir,'runtime/run.mjs'),readFileSync(import.meta.filename));
+writeFileSync(join(outputDir,'authored-oracle.json'),oracleBytes);writeFileSync(join(outputDir,'run.mjs'),readFileSync(import.meta.filename));
 const production=execFileSync('rg',['--files','engine/src'],{cwd:root,encoding:'utf8'}).trim().split('\n').sort();
-const paths=[...production,'Cargo.toml','engine/Cargo.toml','Cargo.lock','engine/tests/cpu/multiply/signed/register/wasm/dword.rs', 'engine/tests/cpu/multiply/wasm.rs', 'engine/tests/support/wasm.rs', 'engine/tests/cpu/multiply/wasm.rs', 'engine/tests/support/wasm.rs',
+const engineBytes = readFileSync(enginePath), engineModule = new WebAssembly.Module(engineBytes);
+const engineExportContract = assertEngineExports(engineModule, root);
+const paths=[...production,'Cargo.toml','engine/Cargo.toml','Cargo.lock','engine/tests/cpu/multiply/signed/register/wasm/dword.rs', 'engine/tests/cpu/multiply/wasm.rs', 'engine/tests/support/wasm.rs',
   'engine/tests/cpu/multiply/signed/register/fixtures/p2-multiply/program.S','engine/tests/cpu/multiply/signed/register/fixtures/p2-multiply/oracle.json','engine/tests/cpu/multiply/signed/register/fixtures/p2-multiply/runtime/run.mjs'];
+paths.push(...engineExportContract.sourcePaths.filter(path => !paths.includes(path)));
+assert.equal(new Set(paths).size, paths.length);
 const sources=Object.fromEntries(paths.map(path=>[path,hash(readFileSync(join(root,path)))]));
 writeFileSync(join(outputDir,'source-sha256.json'),JSON.stringify(sources,null,2));
-const engineBytes=readFileSync(enginePath);writeFileSync(join(outputDir,'engine.wasm'),engineBytes);
-for(const file of ['program.o','program.disassembly.txt','program.x86','program.S','authored-oracle.json','runtime/run.mjs','source-sha256.json','engine.wasm'])
+writeFileSync(join(outputDir,'engine.wasm'),engineBytes);
+for(const file of ['program.o','program.disassembly.txt','program.x86','program.S','authored-oracle.json','run.mjs','source-sha256.json','engine.wasm'])
   artifacts[file]=hash(readFileSync(join(outputDir,file)));
 assert.ok(WebAssembly.validate(engineBytes));
-const engineModule=new WebAssembly.Module(engineBytes);assert.deepEqual(WebAssembly.Module.imports(engineModule),[]);
-assert.equal(WebAssembly.Module.exports(engineModule).filter(entry=>entry.kind==='function').length,62);
+assert.deepEqual(WebAssembly.Module.imports(engineModule),[]);
+
 const names=['open','close','arena_ptr','map','protect','upload','generation','module_ptr','module_len',
   'compile_entries','compile_resident_entries','guard','guard_resident','find_resident'];
 let engine,ordinal=0,moduleOrdinal=0;
