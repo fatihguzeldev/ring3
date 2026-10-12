@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
 import {readFileSync, writeFileSync} from 'node:fs';
 import {join} from 'node:path';
-import {readEngine} from '../../../../../../support/wasm/engine.mjs';
+import {readEngine} from '../../../../../../../../support/wasm/engine.mjs';
 
 const [enginePath, output, root] = process.argv.slice(2);
 assert.ok(enginePath && output && root);
@@ -18,8 +18,8 @@ const paths = [
   'engine/src/cpu/dbt/wasm/abi.rs', 'engine/src/cpu/dbt/wasm/emitter.rs', 'engine/src/memory/space.rs',
   'engine/src/process/instance.rs', 'engine/src/process/execution/compiled.rs', 'engine/src/process/execution/authority.rs', 'engine/src/process/memory/address_space.rs', 'engine/src/process/memory/scalar.rs', 'engine/src/process/memory/scalar_tests.rs', 'engine/src/process/execution/mod.rs', 'engine/src/process/memory/mod.rs', 'engine/src/process/mod.rs', 'engine/src/process/execution/resident.rs', 'engine/src/process/execution/authority.rs', 'engine/src/process/execution/mod.rs', 'engine/src/process/mod.rs', 'engine/src/process/wasm/mod.rs', 'engine/src/process/wasm/loading.rs', 'engine/src/process/wasm/execution.rs', 'engine/src/process/wasm/calls.rs', 'engine/src/process/wasm/memory.rs', 'engine/src/process/wasm/cpu.rs', 'engine/src/process/mod.rs',
   'engine/src/cpu/x86/stack.rs', 'engine/src/cpu/x86/decode/stack.rs', 'engine/src/cpu/dbt/wasm/stack.rs', 'engine/src/process/cpu/stack.rs', 'engine/src/process/cpu/mod.rs', 'engine/src/process/mod.rs', 'engine/src/abi/cpu_helper.rs',
-  'engine/tests/cpu/stack/frame/native/enter_zero.rs', 'engine/tests/cpu/stack/native.rs', 'engine/tests/cpu/stack/native.rs', 'engine/tests/cpu/stack/frame/wasm/enter_zero.rs', 'engine/tests/cpu/stack/wasm.rs', 'engine/tests/support/wasm.rs', 'engine/tests/cpu/stack/wasm.rs', 'engine/tests/support/wasm.rs',
-  'engine/tests/cpu/stack/frame/fixtures/p2-enter-zero/runtime/run.mjs', 'engine/tests/support/wasm/engine.mjs',
+  'engine/tests/cpu/stack/frame/enter/zero/native.rs', 'engine/tests/cpu/stack/native.rs', 'engine/tests/cpu/stack/native.rs', 'engine/tests/cpu/stack/frame/enter/zero/wasm.rs', 'engine/tests/cpu/stack/wasm.rs', 'engine/tests/support/wasm.rs', 'engine/tests/cpu/stack/wasm.rs', 'engine/tests/support/wasm.rs',
+  'engine/tests/cpu/stack/frame/enter/zero/fixtures/p2-enter-zero/runtime/run.mjs', 'engine/tests/support/wasm/engine.mjs',
 ];
 assert.equal(new Set(paths).size, paths.length);
 const sources = () => Object.fromEntries(paths.map(path => [path, hash(readFileSync(join(root, path)))]));

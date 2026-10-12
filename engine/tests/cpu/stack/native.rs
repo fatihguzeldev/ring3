@@ -4,7 +4,7 @@ mod support_prefix_admission;
 #[path = "../../support/cpu/word_prefix.rs"]
 mod support_word_prefix;
 
-#[path = "frame/native/enter_zero.rs"]
+#[path = "frame/enter/zero/native.rs"]
 mod cpu_enter_zero;
 
 #[path = "frame/native/leave.rs"]
@@ -19,7 +19,7 @@ mod cpu_push_flags;
 #[path = "frame/native/nesting.rs"]
 mod cpu_stack_frames;
 
-#[path = "integration/native/word_frame_flags.rs"]
+#[path = "integration/frame/native/word.rs"]
 mod cpu_word_frame_flags;
 
 #[path = "operands/native/word.rs"]

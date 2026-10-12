@@ -1,7 +1,7 @@
 #[path = "../../support/wasm.rs"]
 mod support_wasm;
 
-#[path = "frame/wasm/enter_zero.rs"]
+#[path = "frame/enter/zero/wasm.rs"]
 mod cpu_enter_zero_wasm;
 
 #[path = "frame/wasm/leave.rs"]
@@ -16,7 +16,7 @@ mod cpu_push_flags_wasm;
 #[path = "frame/wasm/nesting.rs"]
 mod cpu_stack_frames_wasm;
 
-#[path = "integration/wasm/word_frame_flags.rs"]
+#[path = "integration/frame/wasm/word.rs"]
 mod cpu_word_frame_flags_wasm;
 
 #[path = "operands/wasm/word.rs"]

@@ -41,7 +41,7 @@ fn actual_enter_zero_publishes_checked_frames_and_preserves_live_inputs() {
     fs::write(output.join("initial-arena.bin"), initial).unwrap();
     let result = wasm_support::run_node(
         root,
-        "engine/tests/cpu/stack/frame/fixtures/p2-enter-zero/runtime/run.mjs",
+        "engine/tests/cpu/stack/frame/enter/zero/fixtures/p2-enter-zero/runtime/run.mjs",
         &engine,
         &output,
         None,

@@ -41,7 +41,7 @@ fn actual_word_frame_flags_preserve_original_frame_and_live_saved_images() {
     fs::write(output.join("initial-arena.bin"), initial).unwrap();
     let result = wasm_support::run_node(
         root,
-        "engine/tests/cpu/stack/integration/fixtures/p2-word-frame-flags/runtime/run.mjs",
+        "engine/tests/cpu/stack/integration/frame/fixtures/p2-word-frame-flags/runtime/run.mjs",
         &engine,
         &output,
         None,
