@@ -300,6 +300,9 @@ fn terminal_v4_is_literal_full_u32_and_old_versions_refuse_without_partial_outpu
         encode_exit_v4(&exit, &mut bytes).unwrap();
         assert_eq!(bytes, expected);
         assert_eq!(decode_exit(&expected), Ok(exit));
+        let mut current = expected;
+        current[4..6].copy_from_slice(&8_u16.to_le_bytes());
+        assert_eq!(decode_exit(&current), Ok(exit));
         for encode in [encode_exit, encode_exit_v2, encode_exit_v3] {
             let mut old = [0xa5; 40];
             assert_eq!(encode(&exit, &mut old), Err(AbiError::Exit));
@@ -317,7 +320,7 @@ fn terminal_v4_is_literal_full_u32_and_old_versions_refuse_without_partial_outpu
         }
         for (offset, value, error) in [
             (0, 0, AbiError::Magic),
-            (4, 8, AbiError::Version),
+            (4, 9, AbiError::Version),
             (6, 2, AbiError::Profile),
             (8, 39, AbiError::Length),
         ] {

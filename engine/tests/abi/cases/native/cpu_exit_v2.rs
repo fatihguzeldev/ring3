@@ -178,7 +178,14 @@ fn malformed_version_two_headers_remain_checked() {
         };
         assert_eq!(decode_exit(&bytes), Err(error));
     }
-    for version in [0, 8, 255] {
+    assert_eq!(
+        decode_exit(&record(8, [1, 0, 0, 0, 0, 0])),
+        Ok(ExecutionExit {
+            retired: 0,
+            reason: ExitReason::Budget,
+        })
+    );
+    for version in [0, 9, 255] {
         assert_eq!(
             decode_exit(&record(version, [1, 0, 0, 0, 0, 0])),
             Err(AbiError::Version)
