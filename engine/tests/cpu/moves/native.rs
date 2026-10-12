@@ -16,7 +16,7 @@ mod cpu_byte_moffs;
 #[path = "register/native/byte.rs"]
 mod cpu_byte_move;
 
-#[path = "register/native/byte_immediate.rs"]
+#[path = "register/immediate/byte/native.rs"]
 mod cpu_byte_move_immediate_modrm;
 
 #[path = "memory/store/native/byte.rs"]
@@ -31,7 +31,7 @@ mod cpu_cwde;
 #[path = "extend/accumulator/native/word.rs"]
 mod cpu_word_accumulator_extend;
 
-#[path = "extend/source/native/byte_word.rs"]
+#[path = "extend/source/byte/word/native.rs"]
 mod cpu_word_byte_extend;
 
 #[path = "addressing/lea/native/word.rs"]
@@ -46,7 +46,7 @@ mod cpu_word_memory_move_bound;
 #[path = "addressing/moffs/native/word.rs"]
 mod cpu_word_moffs;
 
-#[path = "register/native/word_immediate.rs"]
+#[path = "register/immediate/word/native.rs"]
 mod cpu_word_move_immediate;
 
 #[path = "exchange/register/native/word.rs"]

@@ -76,7 +76,7 @@ fn actual_word_move_immediate_preserves_current_parent_and_flags() {
     save(&output.join("initial-arena.bin"), initial.arena());
     let result = wasm_support::run_node(
         root,
-        "engine/tests/cpu/moves/register/fixtures/p2-word-move-immediate/runtime/run.mjs",
+        "engine/tests/cpu/moves/register/immediate/word/fixtures/p2-word-move-immediate/runtime/run.mjs",
         &engine,
         &output,
         None,

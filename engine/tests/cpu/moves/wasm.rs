@@ -7,7 +7,7 @@ mod cpu_byte_load_wasm;
 #[path = "addressing/moffs/wasm/byte.rs"]
 mod cpu_byte_moffs_wasm;
 
-#[path = "register/wasm/byte_immediate.rs"]
+#[path = "register/immediate/byte/wasm.rs"]
 mod cpu_byte_move_immediate_modrm_wasm;
 
 #[path = "register/wasm/byte.rs"]
@@ -25,7 +25,7 @@ mod cpu_cwde_wasm;
 #[path = "extend/accumulator/wasm/word.rs"]
 mod cpu_word_accumulator_extend_wasm;
 
-#[path = "extend/source/wasm/byte_word.rs"]
+#[path = "extend/source/byte/word/wasm.rs"]
 mod cpu_word_byte_extend_wasm;
 
 #[path = "addressing/lea/wasm/word.rs"]
@@ -37,7 +37,7 @@ mod cpu_word_memory_move_wasm;
 #[path = "addressing/moffs/wasm/word.rs"]
 mod cpu_word_moffs_wasm;
 
-#[path = "register/wasm/word_immediate.rs"]
+#[path = "register/immediate/word/wasm.rs"]
 mod cpu_word_move_immediate_wasm;
 
 #[path = "exchange/register/wasm/word.rs"]

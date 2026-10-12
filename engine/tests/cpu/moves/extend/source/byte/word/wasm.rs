@@ -41,7 +41,7 @@ fn actual_byte_to_word_extensions_preserve_aliases_flags_faults_and_live_consume
     fs::write(output.join("initial-arena.bin"), initial).unwrap();
     let result = wasm_support::run_node(
         root,
-        "engine/tests/cpu/moves/extend/source/fixtures/p2-word-byte-extend/runtime/run.mjs",
+        "engine/tests/cpu/moves/extend/source/byte/word/fixtures/p2-word-byte-extend/runtime/run.mjs",
         &engine,
         &output,
         None,

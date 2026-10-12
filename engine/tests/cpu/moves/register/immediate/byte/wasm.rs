@@ -75,7 +75,7 @@ fn actual_wasm_moves_c6_bytes_and_resumes_current_owners_without_replay() {
     fs::write(output.join("standalone-initial-bank-0.wasm"), wasm).unwrap();
     let result = wasm_support::run_node(
         root,
-        "engine/tests/cpu/moves/register/fixtures/p2-byte-move-immediate-modrm/runtime/run.mjs",
+        "engine/tests/cpu/moves/register/immediate/byte/fixtures/p2-byte-move-immediate-modrm/runtime/run.mjs",
         &engine,
         &output,
         None,
