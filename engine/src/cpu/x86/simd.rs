@@ -958,8 +958,28 @@ pub fn execute(
     destination_gpr: u32,
     incoming_flags: u32,
 ) -> Result<SimdResult, SimdError> {
-    use SimdKind as K;
     validate_operation(op)?;
+    execute_validated(
+        op,
+        state,
+        mmx,
+        memory,
+        source_gpr,
+        destination_gpr,
+        incoming_flags,
+    )
+}
+
+fn execute_validated(
+    op: SimdOperation,
+    state: &mut SimdState,
+    mmx: &mut [[u8; 8]; 8],
+    memory: &mut [u8; 16],
+    source_gpr: u32,
+    destination_gpr: u32,
+    incoming_flags: u32,
+) -> Result<SimdResult, SimdError> {
+    use SimdKind as K;
     if state.mxcsr & !0xffff != 0 {
         return Err(SimdError::InvalidState);
     }
@@ -1133,7 +1153,7 @@ pub fn execute_descriptor(
     let mut memory: [u8; 16] = arena[TRANSFER_OFFSET..TRANSFER_OFFSET + 16]
         .try_into()
         .unwrap();
-    let result = execute(
+    let result = execute_validated(
         op,
         &mut state,
         &mut mmx,

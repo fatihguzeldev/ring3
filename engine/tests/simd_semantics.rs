@@ -331,9 +331,11 @@ fn conversion_invalid_indefinite_and_scalar_upper_preservation() {
 
 #[test]
 fn fxsave_preserves_software_tail_and_restores_physical_tags() {
-    let mut x87 = X87State::default();
-    x87.status = 3 << 11;
-    x87.tag = 0xffff;
+    let mut x87 = X87State {
+        status: 3 << 11,
+        tag: 0xffff,
+        ..X87State::default()
+    };
     for index in 0..8 {
         x87.registers[index][..8]
             .copy_from_slice(&(0x8000_0000_0000_0000u64 + index as u64).to_le_bytes());
@@ -416,6 +418,81 @@ fn descriptors_reject_bad_width_and_operands_before_state_mutation() {
         let before = state;
         assert_eq!(run(bad, &mut state), Err(SimdError::InvalidDescriptor));
         assert_eq!(state, before);
+    }
+}
+
+#[test]
+fn descriptor_errors_precede_invalid_mxcsr_without_arena_mutation() {
+    use ring3_engine::abi::{
+        arena::{ARENA_SIZE, SIMD_OFFSET, TRANSFER_OFFSET, X87_OFFSET},
+        x86::{SIMD_MXCSR_OFFSET, SIMD_SIZE, X87_SIZE, encode_simd, encode_x87},
+    };
+    let mut arena = vec![0; ARENA_SIZE];
+    encode_x87(
+        &X87State::default(),
+        &mut arena[X87_OFFSET..X87_OFFSET + X87_SIZE],
+    )
+    .unwrap();
+    encode_simd(
+        &SimdState {
+            xmm: std::array::from_fn(|index| [index as u8 + 0xa0; 16]),
+            ..SimdState::default()
+        },
+        &mut arena[SIMD_OFFSET..SIMD_OFFSET + SIMD_SIZE],
+    )
+    .unwrap();
+    arena[TRANSFER_OFFSET..TRANSFER_OFFSET + 16].fill(0x5a);
+    let mxcsr = SIMD_OFFSET + SIMD_MXCSR_OFFSET;
+    arena[mxcsr..mxcsr + 4].copy_from_slice(&0x0001_1f80u32.to_le_bytes());
+    let before = arena.clone();
+    assert_eq!(
+        operation(K::Packed(P::Add), 1).descriptor(),
+        (0x2404, 0x0908, 0)
+    );
+    for (descriptor, operands, immediate) in [
+        (0x8000_2404, 0x0908, 0),
+        (0x2404, 0x093f, 0),
+        (0x2404, 0x0908, 256),
+        (0x2404, 0x0908, 1),
+        (0x3c04, 0x0908, 0),
+        (0x3404, 0x0908, 0),
+    ] {
+        assert_eq!(
+            simd::execute_descriptor(&mut arena, descriptor, operands, immediate, 0, 0, 0xcd7),
+            Err(SimdError::InvalidDescriptor)
+        );
+        assert_eq!(arena, before);
+    }
+    assert_eq!(
+        simd::execute_descriptor(&mut arena, 0x2404, 0x0908, 0, 0, 0, 0xcd7),
+        Err(SimdError::InvalidState)
+    );
+    assert_eq!(arena, before);
+}
+
+#[test]
+fn typed_operation_errors_precede_invalid_mxcsr_without_output_mutation() {
+    let mut state = SimdState {
+        mxcsr: 0x0001_1f80,
+        xmm: [[0xa5; 16]; 8],
+    };
+    let mut mmx = [[0x3c; 8]; 8];
+    let mut memory = [0x5a; 16];
+    let before = (state, mmx, memory);
+    let valid = operation(K::Packed(P::Add), 1);
+    let invalid = SimdOperation {
+        source: O::Register(R::Xmm(8)),
+        ..valid
+    };
+    for (op, error) in [
+        (invalid, SimdError::InvalidDescriptor),
+        (valid, SimdError::InvalidState),
+    ] {
+        assert_eq!(
+            simd::execute(op, &mut state, &mut mmx, &mut memory, 0, 0, 0xcd7),
+            Err(error)
+        );
+        assert_eq!((state, mmx, memory), before);
     }
 }
 
