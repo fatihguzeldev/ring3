@@ -28,6 +28,27 @@ pub(super) fn packed(
     let count = immediate
         .map(u64::from)
         .unwrap_or_else(|| unsigned(&b, 0, 8));
+    if kind == P::MultipleSumAbsoluteByteDifferences {
+        let immediate = immediate.unwrap();
+        let source = usize::from(immediate & 3) * 4;
+        let destination = usize::from(immediate >> 2 & 1) * 4;
+        for lane in 0..8 {
+            let sum: u64 = (0..4)
+                .map(|byte| u64::from(a[destination + lane + byte].abs_diff(b[source + byte])))
+                .sum();
+            put(&mut out, lane * 2, 2, sum);
+        }
+        return out;
+    }
+    if kind == P::MinimumPositionUnsignedWord {
+        let (index, minimum) = (0..8)
+            .map(|index| (index, unsigned(&b, index * 2, 2)))
+            .min_by_key(|&(index, value)| (value, index))
+            .unwrap();
+        put(&mut out, 0, 2, minimum);
+        put(&mut out, 2, 2, index as u64);
+        return out;
+    }
     if matches!(
         kind,
         P::HorizontalAdd
@@ -173,7 +194,10 @@ pub(super) fn packed(
                 }
             }
             P::ShiftRightSigned => (sx >> count.min((bits - 1) as u64)) as u64,
-            P::MultiplyUnsignedDword
+            P::MultipleSumAbsoluteByteDifferences
+            | P::MinimumPositionUnsignedWord
+            | P::Test
+            | P::MultiplyUnsignedDword
             | P::MultiplySignedDword
             | P::MultiplyAddWords
             | P::SumAbsoluteByteDifferences

@@ -49,6 +49,9 @@ pub(super) fn accepts(op: SimdOperation) -> bool {
                 | P::MultiplyAddUnsignedSignedBytes
                 | P::MultiplyHighRoundSigned
                 | P::MultiplySignedDword
+                | P::MultipleSumAbsoluteByteDifferences
+                | P::MinimumPositionUnsignedWord
+                | P::Test
         ),
         SimdKind::Shuffle(S::PackSigned) => matches!(op.lane_bytes, 1 | 2),
         SimdKind::Shuffle(S::PackUnsigned) => matches!(op.lane_bytes, 1 | 2),
@@ -600,6 +603,83 @@ fn byte_shift(code: &mut InstructionSink<'_>, op: SimdOperation, kind: S) {
     code.v128_const(0).i8x16_shuffle(lanes);
 }
 
+fn multiple_sum_absolute_byte_differences(code: &mut InstructionSink<'_>, op: SimdOperation) {
+    let immediate = op.immediate.unwrap();
+    let source = immediate & 3;
+    let destination = immediate >> 2 & 1;
+    for byte in 0..4 {
+        for (operand, start, sliding) in [
+            (op.destination, destination * 4, true),
+            (op.source, source * 4, false),
+        ] {
+            load(code, operand, 16);
+            code.v128_const(0)
+                .i8x16_shuffle(std::array::from_fn(|lane| {
+                    if lane < 8 {
+                        start + byte + if sliding { lane as u8 } else { 0 }
+                    } else {
+                        16
+                    }
+                }))
+                .i16x8_extend_low_i8x16_u();
+        }
+        code.i16x8_sub().i16x8_abs();
+        if byte != 0 {
+            code.i16x8_add();
+        }
+    }
+}
+
+fn minimum_position_unsigned_word(code: &mut InstructionSink<'_>, op: SimdOperation) {
+    load(code, op.source, 16);
+    code.i16x8_extract_lane_u(0)
+        .local_set(RESULT)
+        .i32_const(0)
+        .local_set(RHS);
+    for lane in 1..8 {
+        load(code, op.source, 16);
+        code.i16x8_extract_lane_u(lane)
+            .local_tee(LHS)
+            .local_get(RESULT)
+            .i32_lt_u()
+            .if_(BlockType::Empty)
+            .local_get(LHS)
+            .local_set(RESULT)
+            .i32_const(i32::from(lane))
+            .local_set(RHS)
+            .end();
+    }
+    code.v128_const(0)
+        .local_get(RESULT)
+        .i16x8_replace_lane(0)
+        .local_get(RHS)
+        .i16x8_replace_lane(1);
+}
+
+fn packed_test(code: &mut InstructionSink<'_>, op: SimdOperation) {
+    load(code, op.destination, 16);
+    load(code, op.source, 16);
+    code.v128_and()
+        .v128_any_true()
+        .i32_eqz()
+        .i32_const(6)
+        .i32_shl()
+        .local_set(RESULT);
+    load(code, op.destination, 16);
+    code.v128_not();
+    load(code, op.source, 16);
+    code.v128_and()
+        .v128_any_true()
+        .i32_eqz()
+        .local_get(RESULT)
+        .i32_or()
+        .local_get(FLAGS)
+        .i32_const(!0x8d5)
+        .i32_and()
+        .i32_or()
+        .local_set(FLAGS);
+}
+
 fn insert_element(code: &mut InstructionSink<'_>, op: SimdOperation) {
     load(code, op.destination, op.vector_bytes);
     match op.source {
@@ -823,6 +903,10 @@ pub(super) fn instruction(
             .local_set(HELPER_STATUS);
         cpu_result::validate(code, u32::from(op.memory_bytes), 1, false, exit_depth);
     }
+    if op.kind == SimdKind::Packed(P::Test) {
+        packed_test(code, op);
+        return false;
+    }
     let scalar_gpr = matches!(op.destination, SimdOperand::Register(SimdRegister::Gpr(_)));
     if !scalar_gpr {
         code.local_get(STATE_PTR);
@@ -845,6 +929,12 @@ pub(super) fn instruction(
                     _ => unreachable!("scalar SIMD move width was decoded"),
                 }
             }
+        }
+        SimdKind::Packed(P::MultipleSumAbsoluteByteDifferences) => {
+            multiple_sum_absolute_byte_differences(code, op)
+        }
+        SimdKind::Packed(P::MinimumPositionUnsignedWord) => {
+            minimum_position_unsigned_word(code, op)
         }
         SimdKind::Packed(P::Absolute) => {
             load(code, op.source, op.vector_bytes);

@@ -183,6 +183,25 @@ pub(crate) fn binary(
     }
 }
 
+#[inline]
+pub(crate) fn round_to_integral(bits: u64, format: BinaryFormat, mode: Rounding) -> FloatResult {
+    let round = rounding(mode);
+    let (bits, status) = match format {
+        BinaryFormat::Binary32 => {
+            let result = Single::from_bits(bits as u128).round_to_integral(round);
+            (result.value.to_bits() as u64, result.status)
+        }
+        BinaryFormat::Binary64 => {
+            let result = Double::from_bits(bits as u128).round_to_integral(round);
+            (result.value.to_bits() as u64, result.status)
+        }
+    };
+    FloatResult {
+        bits,
+        exceptions: exceptions(status),
+    }
+}
+
 struct WideSingle;
 impl Semantics for WideSingle {
     const BITS: usize = 39;

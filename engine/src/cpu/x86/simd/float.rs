@@ -260,6 +260,87 @@ fn binary(
     (result, status | flags, None)
 }
 
+fn round_integral(op: SimdOperation, a: [u8; 16], b: [u8; 16], mxcsr: u32) -> ([u8; 16], u32) {
+    let immediate = op.immediate.unwrap();
+    let mode = if immediate & 4 != 0 {
+        rounding(mxcsr)
+    } else {
+        rounding(u32::from(immediate & 3) << 13)
+    };
+    let width = usize::from(op.lane_bytes);
+    let count = if op.scalar { 1 } else { 16 / width };
+    let mut out = a;
+    let mut exceptions = 0;
+    for lane in 0..count {
+        // round honors DAZ, but does not signal the denormal operand exception.
+        let (bits, _) = input(unsigned(&b, lane * width, width), width, mxcsr);
+        let result = ieee::round_to_integral(bits, ieee_format(width), mode);
+        let status =
+            u32::from(result.exceptions) & if immediate & 8 != 0 { !0x20 } else { u32::MAX };
+        exceptions |= status;
+        put(&mut out, lane * width, width, result.bits);
+    }
+    (out, instruction_exceptions(exceptions, mxcsr))
+}
+
+fn dot_stage(status: u32, mxcsr: u32, exceptions: &mut u32) -> bool {
+    let status = instruction_exceptions(status, mxcsr);
+    *exceptions |= status;
+    status & !(mxcsr >> 7) & 63 != 0
+}
+
+fn dot_product(op: SimdOperation, a: [u8; 16], b: [u8; 16], mxcsr: u32) -> ([u8; 16], u32) {
+    let width = usize::from(op.lane_bytes);
+    let count = 16 / width;
+    let immediate = op.immediate.unwrap();
+    let mut products = [0; 4];
+    let mut product_exceptions = 0;
+    for (lane, product) in products[..count].iter_mut().enumerate() {
+        if immediate & (1 << (lane + 4)) != 0 {
+            let (bits, status, _) = binary(
+                F::Multiply,
+                unsigned(&a, lane * width, width),
+                unsigned(&b, lane * width, width),
+                width,
+                mxcsr,
+                0,
+            );
+            *product = bits;
+            product_exceptions |= lane_exceptions(status, mxcsr);
+        }
+    }
+    // dot products deliver exceptions between the packed multiplication and
+    // each sequential addition. earlier completed stages retain sticky flags.
+    let mut exceptions = 0;
+    if dot_stage(product_exceptions, mxcsr, &mut exceptions) {
+        return (a, exceptions);
+    }
+    let (left, status, _) = binary(F::Add, products[0], products[1], width, mxcsr, 0);
+    if dot_stage(lane_exceptions(status, mxcsr), mxcsr, &mut exceptions) {
+        return (a, exceptions);
+    }
+    let sum = if count == 4 {
+        let (right, status, _) = binary(F::Add, products[2], products[3], width, mxcsr, 0);
+        if dot_stage(lane_exceptions(status, mxcsr), mxcsr, &mut exceptions) {
+            return (a, exceptions);
+        }
+        let (sum, status, _) = binary(F::Add, left, right, width, mxcsr, 0);
+        if dot_stage(lane_exceptions(status, mxcsr), mxcsr, &mut exceptions) {
+            return (a, exceptions);
+        }
+        sum
+    } else {
+        left
+    };
+    let mut out = [0; 16];
+    for lane in 0..count {
+        if immediate & (1 << lane) != 0 {
+            put(&mut out, lane * width, width, sum);
+        }
+    }
+    (out, exceptions)
+}
+
 pub(super) fn floating(
     op: SimdOperation,
     a: [u8; 16],
@@ -270,6 +351,14 @@ pub(super) fn floating(
     let super::SimdKind::Float(kind) = op.kind else {
         unreachable!()
     };
+    if matches!(kind, F::Round | F::DotProduct) {
+        let (out, exceptions) = if kind == F::Round {
+            round_integral(op, a, b, mxcsr)
+        } else {
+            dot_product(op, a, b, mxcsr)
+        };
+        return (out, exceptions, incoming_flags);
+    }
     let width = usize::from(op.lane_bytes);
     let count = if op.scalar {
         1

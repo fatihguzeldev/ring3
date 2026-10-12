@@ -77,6 +77,9 @@ pub enum PackedKind {
     MultiplyAddUnsignedSignedBytes,
     MultiplyHighRoundSigned,
     MultiplySignedDword,
+    MultipleSumAbsoluteByteDifferences,
+    MinimumPositionUnsignedWord,
+    Test,
 }
 
 #[repr(u8)]
@@ -152,6 +155,8 @@ pub enum FloatKind {
     AddSubtract,
     HorizontalAdd,
     HorizontalSubtract,
+    Round,
+    DotProduct,
 }
 
 #[repr(u8)]
@@ -387,6 +392,9 @@ pub fn decode_descriptor(
                 P::MultiplyAddUnsignedSignedBytes,
                 P::MultiplyHighRoundSigned,
                 P::MultiplySignedDword,
+                P::MultipleSumAbsoluteByteDifferences,
+                P::MinimumPositionUnsignedWord,
+                P::Test,
             ]
             .get(sub)
             .ok_or(SimdError::InvalidDescriptor)?,
@@ -450,6 +458,8 @@ pub fn decode_descriptor(
                 F::AddSubtract,
                 F::HorizontalAdd,
                 F::HorizontalSubtract,
+                F::Round,
+                F::DotProduct,
             ]
             .get(sub)
             .ok_or(SimdError::InvalidDescriptor)?,
@@ -801,6 +811,7 @@ fn validate_operation(op: SimdOperation) -> Result<(), SimdError> {
             }
         }
         K::Packed(kind) => {
+            let sad = kind == PackedKind::MultipleSumAbsoluteByteDifferences;
             let shift = matches!(
                 kind,
                 PackedKind::ShiftLeft | PackedKind::ShiftRight | PackedKind::ShiftRightSigned
@@ -809,7 +820,8 @@ fn validate_operation(op: SimdOperation) -> Result<(), SimdError> {
                 || !(same(op.destination, op.source)
                     || memory(op.source)
                     || shift && op.source == O::None && op.immediate.is_some())
-                || (!shift && op.immediate.is_some())
+                || (!shift && !sad && op.immediate.is_some())
+                || (sad && op.immediate.is_none())
                 || (shift && op.immediate.is_some() && op.source != O::None)
             {
                 return invalid();
@@ -845,6 +857,22 @@ fn validate_operation(op: SimdOperation) -> Result<(), SimdError> {
                 && (!matches!(op.lane_bytes, 2 | 4) || op.lane_bytes == 4 && op.vector_bytes != 16)
                 || kind == PackedKind::MultiplySignedDword
                     && (op.lane_bytes != 4 || op.vector_bytes != 16)
+            {
+                return invalid();
+            }
+            if matches!(
+                kind,
+                PackedKind::MultipleSumAbsoluteByteDifferences
+                    | PackedKind::MinimumPositionUnsignedWord
+                    | PackedKind::Test
+            ) && (op.vector_bytes != 16
+                || op.lane_bytes
+                    != match kind {
+                        PackedKind::MultipleSumAbsoluteByteDifferences => 1,
+                        PackedKind::MinimumPositionUnsignedWord => 2,
+                        PackedKind::Test => 8,
+                        _ => unreachable!(),
+                    })
             {
                 return invalid();
             }
@@ -1024,8 +1052,13 @@ fn validate_operation(op: SimdOperation) -> Result<(), SimdError> {
                     FloatKind::AddSubtract
                         | FloatKind::HorizontalAdd
                         | FloatKind::HorizontalSubtract
+                        | FloatKind::DotProduct
                 ) && op.scalar
-                || op.immediate.is_some() != (kind == FloatKind::Compare)
+                || op.immediate.is_some()
+                    != matches!(
+                        kind,
+                        FloatKind::Compare | FloatKind::Round | FloatKind::DotProduct
+                    )
                 || matches!(kind, FloatKind::CompareFlags | FloatKind::CompareFlagsQuiet)
                     && !op.scalar
                 || matches!(
@@ -1193,6 +1226,12 @@ fn execute_validated(
         gpr: destination_gpr,
         flags: incoming_flags,
     };
+    if op.kind == K::Packed(PackedKind::Test) {
+        let zero = a.iter().zip(b).all(|(a, b)| a & b == 0);
+        let carry = a.iter().zip(b).all(|(a, b)| !a & b == 0);
+        result.flags = (incoming_flags & !0x8d5) | (u32::from(zero) << 6) | u32::from(carry);
+        return Ok(result);
+    }
     let mut exception_flags = 0;
     let out = match op.kind {
         K::Move => {

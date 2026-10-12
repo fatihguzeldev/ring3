@@ -18,3 +18,6 @@ mod simd_sse4;
 
 #[path = "cases/native/simd_sse4_moves.rs"]
 mod simd_sse4_moves;
+
+#[path = "cases/native/simd_sse4_arithmetic.rs"]
+mod simd_sse4_arithmetic;
