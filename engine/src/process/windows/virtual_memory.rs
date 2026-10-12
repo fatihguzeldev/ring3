@@ -162,5 +162,5 @@ impl EngineInstance {
 }
 
 #[cfg(test)]
-#[path = "virtual_memory_tests.rs"]
+#[path = "virtual_memory/tests.rs"]
 mod tests;

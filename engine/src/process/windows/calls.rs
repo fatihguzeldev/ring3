@@ -110,13 +110,13 @@ impl EngineInstance {
 }
 
 #[cfg(test)]
-#[path = "calls_tests.rs"]
+#[path = "calls/tests/calls.rs"]
 mod windows_tests;
 
 #[cfg(test)]
-#[path = "allocation_tests.rs"]
+#[path = "calls/tests/allocation.rs"]
 mod windows_allocation_tests;
 
 #[cfg(test)]
-#[path = "callback_tests.rs"]
+#[path = "calls/tests/callback.rs"]
 mod windows_callback_tests;
