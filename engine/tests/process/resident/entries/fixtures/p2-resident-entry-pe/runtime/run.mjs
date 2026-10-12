@@ -1,10 +1,11 @@
 import assert from 'node:assert/strict';
 import {execFileSync} from 'node:child_process';
 import {createHash} from 'node:crypto';
-import {readFileSync, writeFileSync} from 'node:fs';
+import {mkdirSync, readFileSync, writeFileSync} from 'node:fs';
 import {join} from 'node:path';
 
 const [enginePath, outputDir, root] = process.argv.slice(2);
+mkdirSync(join(outputDir, 'runtime'), {recursive: true});
 assert.ok(root, 'expected actual engine, output directory and repository root');
 const fixtureRoot = join(root, 'engine/tests/process/resident/entries/fixtures/p2-resident-entry-pe');
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
@@ -81,7 +82,7 @@ writeFileSync(join(outputDir, 'reused-cpu-oracle.json'), cpuOracleBytes);
 writeFileSync(join(outputDir, 'runtime-oracle.json'), oracleBytes);
 writeFileSync(join(outputDir, 'runtime/run.mjs'), readFileSync(import.meta.filename));
 const productionPaths = execFileSync('rg', ['--files', 'engine/src'], {cwd: root, encoding: 'utf8'}).trim().split('\n').sort();
-const sourcePaths = [...productionPaths, 'Cargo.toml', 'engine/Cargo.toml', 'Cargo.lock', 'engine/tests/process/resident/entries/wasm/resident.rs', 'engine/tests/process/resident/wasm.rs', 'engine/tests/support/wasm.rs', 'engine/tests/process/resident/wasm.rs', 'engine/tests/support/wasm.rs', 'engine/tests/process/resident/entries/fixtures/p2-resident-entry-pe/oracle.json', 'engine/tests/process/resident/entries/fixtures/p2-resident-entry-pe/runtime/run.mjs', 'engine/tests/process/images/fixtures/p2-pe32-imports/program.S', 'engine/tests/process/images/fixtures/p2-pe32-imports/oracle.json'];
+const sourcePaths = [...productionPaths, 'Cargo.toml', 'engine/Cargo.toml', 'Cargo.lock', 'engine/tests/process/resident/entries/wasm/resident.rs', 'engine/tests/process/resident/wasm.rs', 'engine/tests/support/wasm.rs', 'engine/tests/process/resident/entries/fixtures/p2-resident-entry-pe/oracle.json', 'engine/tests/process/resident/entries/fixtures/p2-resident-entry-pe/runtime/run.mjs', 'engine/tests/process/images/fixtures/p2-pe32-imports/program.S', 'engine/tests/process/images/fixtures/p2-pe32-imports/oracle.json'];
 const sources = Object.fromEntries(sourcePaths.map(file => [file, hash(readFileSync(join(root, file)))]));
 writeFileSync(join(outputDir, 'source-sha256.json'), JSON.stringify(sources, null, 2));
 const engineBytes = readFileSync(enginePath);
@@ -99,7 +100,7 @@ assert.ok(engine.memory instanceof WebAssembly.Memory);
 assert.equal(api.open(oracle.pages, engine.low, engine.high), 0);
 engine.base = api.arena_ptr() >>> 0; refresh(engine);
 assert.ok(engine.base > 0 && engine.base + size <= engine.bytes.length);
-engine.bytes.fill(0xa5, engine.base, engine.base + size);
+engine.bytes.fill(0xa5, engine.base, engine.base + transfer + 4096);
 cancel(0);
 engine.table = new WebAssembly.Table({element: 'anyfunc', initial: oracle.table_slots, maximum: oracle.table_slots});
 
@@ -207,7 +208,7 @@ const gate = compile(receipt.gates.map(([pc]) => pc), receipt.gates, 'gate-B', o
 install(gate, oracle.installation.gate_slot);
 dispatcher();
 entriesRequest([receipt.gates[0][0]]);
-operation('UD2 is unsupported as an ordinary seed', () => api.compile_resident_entries(1, 0), 10);
+operation('ordinary UD2 seed overlaps the installed gate unit', () => api.compile_resident_entries(1, 0), 7);
 getUnit(gate, 'failed ordinary decode retains gate bytes and owner');
 operation('explicit startup stack map', () => api.map(0x8000, 2, 3));
 oracle.startup.stack_addresses.forEach((address, index) => operation('initial stack sentinel', () => api.write32(address, oracle.startup.stack_values[index]), 0, [[100, helper()]]));

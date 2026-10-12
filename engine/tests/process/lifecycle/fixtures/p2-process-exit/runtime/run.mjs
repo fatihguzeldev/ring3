@@ -1,10 +1,11 @@
 import assert from 'node:assert/strict';
 import {execFileSync} from 'node:child_process';
 import {createHash} from 'node:crypto';
-import {readFileSync, writeFileSync} from 'node:fs';
+import {mkdirSync, readFileSync, writeFileSync} from 'node:fs';
 import {join} from 'node:path';
 
 const [enginePath, outputDir, root] = process.argv.slice(2);
+mkdirSync(join(outputDir, 'runtime'), {recursive: true});
 assert.ok(root, 'expected actual engine, output directory and repository root');
 const fixtureRoot = join(root, 'engine/tests/process/lifecycle/fixtures/p2-process-exit');
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
@@ -81,7 +82,7 @@ writeFileSync(join(outputDir, 'program.S'), programBytes);
 writeFileSync(join(outputDir, 'terminal-oracle.json'), oracleBytes);
 writeFileSync(join(outputDir, 'runtime/run.mjs'), readFileSync(import.meta.filename));
 const productionPaths = execFileSync('rg', ['--files', 'engine/src'], {cwd: root, encoding: 'utf8'}).trim().split('\n').sort();
-const sourcePaths = [...productionPaths, 'Cargo.toml', 'engine/Cargo.toml', 'Cargo.lock', 'engine/tests/process/lifecycle/wasm/exit.rs', 'engine/tests/process/lifecycle/wasm.rs', 'engine/tests/support/wasm.rs', 'engine/tests/process/lifecycle/wasm.rs', 'engine/tests/support/wasm.rs', 'engine/tests/process/lifecycle/fixtures/p2-process-exit/program.S', 'engine/tests/process/lifecycle/fixtures/p2-process-exit/oracle.json', 'engine/tests/process/lifecycle/fixtures/p2-process-exit/runtime/run.mjs'];
+const sourcePaths = [...productionPaths, 'Cargo.toml', 'engine/Cargo.toml', 'Cargo.lock', 'engine/tests/process/lifecycle/wasm/exit.rs', 'engine/tests/process/lifecycle/wasm.rs', 'engine/tests/support/wasm.rs', 'engine/tests/process/lifecycle/fixtures/p2-process-exit/program.S', 'engine/tests/process/lifecycle/fixtures/p2-process-exit/oracle.json', 'engine/tests/process/lifecycle/fixtures/p2-process-exit/runtime/run.mjs'];
 const sources = Object.fromEntries(sourcePaths.map(file => [file, hash(readFileSync(join(root, file)))]));
 writeFileSync(join(outputDir, 'source-sha256.json'), JSON.stringify(sources, null, 2));
 const engineBytes = readFileSync(enginePath);
@@ -181,7 +182,7 @@ function setup(owner, name = owner) {
   const initialContext = arena().slice(0, 96);
   assert.deepEqual(initialContext.subarray(0, 56), cpu([0, 0, 0, 0, 0, 0, 0, 0], 0));
   assert.deepEqual(initialContext.subarray(56), exit(1, 0, 0, 1));
-  engine.bytes.fill(0xa5, engine.base + 100, engine.base + size);
+  engine.bytes.fill(0xa5, engine.base + 100, engine.base + transfer + 4096);
   refresh().bytes.set(image, engine.base + transfer);
   operation('fixed import-free Rust PE loader receipt', () => api.load_pe32(image.length), 0, [[transfer, record('R3PE', 32, [oracle.pe.preferred_base, oracle.pe.image_size, oracle.pe.entry_point, oracle.pe.mapped_pages])]]);
   const pe = new DataView(arena().buffer, transfer, 32);

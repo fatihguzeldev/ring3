@@ -375,7 +375,7 @@ for (const tag of [1, 2, 3]) for (const count of [0, 2, 16]) {
   fail(engine, () => engine.api.capture_call(engine.low, engine.high, child.generation, 0, 2), 7, 'bad convention tag');
   fail(engine, () => engine.api.capture_call(engine.low, engine.high, child.generation, 2, 17), 7, 'stack word count above sixteen');
   const saved = arena(engine).slice(0, 96);
-  refresh(engine).view.setUint16(engine.base + 4, 2, true);
+  refresh(engine).view.setUint16(engine.base + 4, 3, true);
   fail(engine, () => engine.api.capture_call(engine.low, engine.high, child.generation, 0, 99), 7, 'bad request precedes malformed state');
   fail(engine, () => engine.api.capture_call(engine.low, engine.high, child.generation, 2, 2), 13, 'malformed state is not a capturable stop');
   engine.bytes.set(saved, engine.base);

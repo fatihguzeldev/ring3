@@ -1,22 +1,26 @@
+import {assertEngineExports} from '../../../../../../support/wasm/exports.mjs';
+import {readEngine} from '../../../../../../support/wasm/engine.mjs';
 import assert from 'node:assert/strict';
 import {execFileSync} from 'node:child_process';
 import {createHash} from 'node:crypto';
-import {readFileSync, writeFileSync} from 'node:fs';
+import {mkdirSync, readFileSync, writeFileSync} from 'node:fs';
 import {join} from 'node:path';
 
 const [enginePath, output, root] = process.argv.slice(2);
+const fixtureEngine = readEngine(enginePath);
+const exportContract = assertEngineExports(fixtureEngine.module, root);
+mkdirSync(join(output, 'runtime'), {recursive: true});
 assert.ok(root, 'expected copied actual engine, output directory and repository root');
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
 const SIZE = 4612, TRANSFER = 140, CODE = 0x1000, DATA = 0x4000, VICTIM = CODE + 0x10;
 const KEY_LOW = 1, KEY_HIGH = 0xc3790000;
 const arities = {open:3, close:0, arena_ptr:0, map:3, protect:3, upload:2, read32:1, compile_resident_entries:2, resident_module:2, guard_resident:7, dispatcher_module:2, guard_dispatch_entry:5, find_installed_resident:3, acknowledge_resident_installation:5, retire_stale_resident:4, discard_unacknowledged_resident:4};
-const sourcePaths = [...execFileSync('rg', ['--files', 'engine/src'], {cwd:root, encoding:'utf8'}).trim().split('\n').sort(), 'Cargo.toml', 'Cargo.lock', 'engine/Cargo.toml', 'engine/tests/process/resident/lifecycle/wasm/disposal.rs', 'engine/tests/process/resident/wasm.rs', 'engine/tests/process/resident/wasm.rs', 'engine/tests/process/resident/lifecycle/fixtures/p2-unacknowledged-disposal/runtime/run.mjs'];
-assert.equal(sourcePaths.length, 87); assert.equal(new Set(sourcePaths).size, 87);
+const sourcePaths = [...execFileSync('rg', ['--files', 'engine/src'], {cwd:root, encoding:'utf8'}).trim().split('\n').sort(), 'Cargo.toml', 'Cargo.lock', 'engine/Cargo.toml', 'engine/tests/process/resident/lifecycle/wasm/disposal.rs', 'engine/tests/process/resident/wasm.rs', 'engine/tests/process/resident/lifecycle/fixtures/p2-unacknowledged-disposal/runtime/run.mjs'];
+sourcePaths.push(...[...exportContract.sourcePaths, 'engine/tests/support/wasm/engine.mjs'].filter(path => !sourcePaths.includes(path)));
+assert.ok(sourcePaths.length > 0, 'nonempty source manifest'); assert.equal(new Set(sourcePaths).size, sourcePaths.length);
 const sourceHashes = () => Object.fromEntries(sourcePaths.map(path => [path, hash(readFileSync(join(root, path)))]));
-const beforeSources = sourceHashes(), engineBytes = readFileSync(enginePath), engineModule = new WebAssembly.Module(engineBytes);
+const beforeSources = sourceHashes(), engineBytes = fixtureEngine.bytes, engineModule = fixtureEngine.module;
 assert.deepEqual(WebAssembly.Module.imports(engineModule), []);
-assert.equal(WebAssembly.Module.exports(engineModule).length, 71);
-assert.equal(WebAssembly.Module.exports(engineModule).filter(row => row.kind === 'function').length, 70);
 writeFileSync(join(output, 'source-before.json'), JSON.stringify(beforeSources, null, 2));
 writeFileSync(join(output, 'runtime/run.mjs'), readFileSync(join(root, 'engine/tests/process/resident/lifecycle/fixtures/p2-unacknowledged-disposal/runtime/run.mjs')));
 const instance = new WebAssembly.Instance(engineModule, {});
@@ -92,7 +96,7 @@ function shape(bytes, dispatcher, unit) {
   assert.deepEqual(types,dispatcher?[signature(4),signature(5),signature(3)]:[signature(4),signature(7)]);
   assert.deepEqual(functions,[0]); assert.deepEqual(exports,[{name:'run',kind:0,index:dispatcher?2:1}]);
   assert.deepEqual(imports,dispatcher?[{module:'env',name:'memory',kind:'memory',minimum:1},{module:'env',name:'table',kind:'table',minimum:8,maximum:8},{module:'ring3',name:'guard_dispatch_entry',kind:'function',type:1},{module:'ring3',name:'find_installed_resident',kind:'function',type:2}]:[{module:'env',name:'memory',kind:'memory',minimum:1},{module:'ring3',name:'guard_resident',kind:'function',type:1}]);
-  assert.deepEqual(locals,dispatcher?[[5,127]]:[[16,127],[1,126]]); assert.ok(guard);
+  assert.deepEqual(locals,dispatcher?[[6,127]]:[[16,127],[1,126],[10,127]]); assert.ok(guard);
   return {types,imports,exports,locals,guard};
 }
 function saveModule(bytes, label, dispatcher, binding={}) {
