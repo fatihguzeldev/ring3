@@ -309,21 +309,24 @@ fn dot_product(op: SimdOperation, a: [u8; 16], b: [u8; 16], mxcsr: u32) -> ([u8;
             product_exceptions |= lane_exceptions(status, mxcsr);
         }
     }
-    // dot products deliver exceptions between the packed multiplication and
-    // each sequential addition. earlier completed stages retain sticky flags.
+    // packed products, pair sums, and the final sum deliver exceptions as stages.
     let mut exceptions = 0;
     if dot_stage(product_exceptions, mxcsr, &mut exceptions) {
         return (a, exceptions);
     }
     let (left, status, _) = binary(F::Add, products[0], products[1], width, mxcsr, 0);
-    if dot_stage(lane_exceptions(status, mxcsr), mxcsr, &mut exceptions) {
+    let mut pair_exceptions = lane_exceptions(status, mxcsr);
+    let right = if count == 4 {
+        let (right, status, _) = binary(F::Add, products[2], products[3], width, mxcsr, 0);
+        pair_exceptions |= lane_exceptions(status, mxcsr);
+        right
+    } else {
+        0
+    };
+    if dot_stage(pair_exceptions, mxcsr, &mut exceptions) {
         return (a, exceptions);
     }
     let sum = if count == 4 {
-        let (right, status, _) = binary(F::Add, products[2], products[3], width, mxcsr, 0);
-        if dot_stage(lane_exceptions(status, mxcsr), mxcsr, &mut exceptions) {
-            return (a, exceptions);
-        }
         let (sum, status, _) = binary(F::Add, left, right, width, mxcsr, 0);
         if dot_stage(lane_exceptions(status, mxcsr), mxcsr, &mut exceptions) {
             return (a, exceptions);

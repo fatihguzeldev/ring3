@@ -226,35 +226,54 @@ fn sse4_dot_products_use_pairwise_rounding_and_suppress_masked_inputs() {
 }
 
 #[test]
-fn sse4_dot_product_delivers_first_unmasked_stage_before_later_invalid() {
-    let mut state = SimdState {
-        mxcsr: 0x0f00,
-        ..SimdState::default()
-    };
-    state.xmm[0] = dwords([0x4b80_0000, 0x3f80_0000, 0x7f80_0000, 0xff80_0000]);
-    state.xmm[1] = dwords([0x3f80_0000; 4]);
-    let destination = state.xmm[0];
-    assert_eq!(
-        run(decode(&[0x66, 0x0f, 0x3a, 0x40, 0xc1, 0xff]), &mut state),
-        Err(SimdError::FloatingPoint(0x0f20))
-    );
-    assert_eq!(state.xmm[0], destination);
+fn sse4_dot_product_aggregates_pair_add_exception_priority() {
+    for (mxcsr, expected_mxcsr) in [(0x0f00, 0x0f01), (0x1f00, 0x1f01)] {
+        let mut state = SimdState {
+            mxcsr,
+            ..SimdState::default()
+        };
+        state.xmm[0] = dwords([0x4b80_0000, 0x3f80_0000, 0x7f80_0000, 0xff80_0000]);
+        state.xmm[1] = dwords([0x3f80_0000; 4]);
+        let mut expected = state;
+        expected.mxcsr = expected_mxcsr;
+        assert_eq!(
+            run(decode(&[0x66, 0x0f, 0x3a, 0x40, 0xc1, 0xff]), &mut state),
+            Err(SimdError::FloatingPoint(expected_mxcsr))
+        );
+        assert_eq!(state, expected);
+    }
 }
 
 #[test]
-fn sse4_dot_product_preserves_completed_stage_sticky_flags() {
-    let mut state = SimdState {
-        mxcsr: 0x1f00,
-        ..SimdState::default()
-    };
-    state.xmm[0] = dwords([0x4b80_0000, 0x3f80_0000, 0x7f80_0000, 0xff80_0000]);
-    state.xmm[1] = dwords([0x3f80_0000; 4]);
-    let destination = state.xmm[0];
-    assert_eq!(
-        run(decode(&[0x66, 0x0f, 0x3a, 0x40, 0xc1, 0xff]), &mut state),
-        Err(SimdError::FloatingPoint(0x1f21))
-    );
-    assert_eq!(state.xmm[0], destination);
+fn sse4_dot_product_has_independent_pair_exception_controls() {
+    for (input, mxcsr, expected_mxcsr, output) in [
+        ([0x4b80_0000, 0x3f80_0000, 0, 0], 0x0f00, 0x0f20, None),
+        ([0, 0, 0x7f80_0000, 0xff80_0000], 0x1f00, 0x1f01, None),
+        ([0; 4], 0x0f00, 0x0f00, Some([0; 4])),
+        (
+            [0x4b80_0000, 0x3f80_0000, 0x7f80_0000, 0xff80_0000],
+            0x1f80,
+            0x1fa1,
+            Some([0xffc0_0000; 4]),
+        ),
+    ] {
+        let mut state = SimdState {
+            mxcsr,
+            ..SimdState::default()
+        };
+        state.xmm[0] = dwords(input);
+        state.xmm[1] = dwords([0x3f80_0000; 4]);
+        let mut expected = state;
+        expected.mxcsr = expected_mxcsr;
+        let result = run(decode(&[0x66, 0x0f, 0x3a, 0x40, 0xc1, 0xff]), &mut state);
+        if let Some(output) = output {
+            result.unwrap();
+            expected.xmm[0] = dwords(output);
+        } else {
+            assert_eq!(result, Err(SimdError::FloatingPoint(expected_mxcsr)));
+        }
+        assert_eq!(state, expected);
+    }
 }
 
 #[test]
