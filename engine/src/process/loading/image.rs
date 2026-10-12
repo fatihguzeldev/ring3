@@ -1,0 +1,354 @@
+use crate::loader::{
+    ImageMetadata32, LinkedImageMetadata32, LinkedImageMetadata32V2, LinkedImageMetadata32V3,
+    LinkedImageMetadata32V4, LinkedImageMetadata32V5, LinkedImageMetadata32V6,
+    LinkedImageMetadata32V7, LinkedImageMetadata32V8, LoadedLinkedPe32, LoadedLinkedPe32V2,
+    LoadedLinkedPe32V3, LoadedLinkedPe32V4, LoadedLinkedPe32V5, LoadedLinkedPe32V6,
+    LoadedLinkedPe32V7, LoadedLinkedPe32V8, LoadedPe32, load_pe32, load_pe32_at,
+    load_pe32_linked_at, load_pe32_linked_v2_at, load_pe32_linked_v3_at, load_pe32_linked_v4_at,
+    load_pe32_linked_v5_at, load_pe32_linked_v6_at, load_pe32_linked_v7_at, load_pe32_linked_v8_at,
+};
+use crate::process::{EngineInstance, HostError};
+
+impl EngineInstance {
+    pub fn load_pe32(&mut self, bytes: &[u8]) -> Result<ImageMetadata32, HostError> {
+        let pages = self.image_capacity()?;
+        let image = load_pe32(bytes, pages).map_err(HostError::Loader)?;
+        Ok(self.publish_image(image))
+    }
+
+    pub fn load_pe32_at(
+        &mut self,
+        bytes: &[u8],
+        actual_base: u32,
+    ) -> Result<ImageMetadata32, HostError> {
+        let pages = self.image_capacity()?;
+        let image = load_pe32_at(bytes, actual_base, pages).map_err(HostError::Loader)?;
+        Ok(self.publish_image(image))
+    }
+
+    pub fn load_pe32_linked_at(
+        &mut self,
+        bytes: &[u8],
+        actual_base: u32,
+        gate_base: u32,
+    ) -> Result<LinkedImageMetadata32, HostError> {
+        let pages = self.image_capacity()?;
+        let image =
+            load_pe32_linked_at(bytes, actual_base, gate_base, pages).map_err(HostError::Loader)?;
+        Ok(self.publish_linked_image(image))
+    }
+
+    pub fn load_pe32_linked_v2_at(
+        &mut self,
+        bytes: &[u8],
+        actual_base: u32,
+        gate_base: u32,
+    ) -> Result<LinkedImageMetadata32V2, HostError> {
+        let pages = self.image_capacity()?;
+        let image = load_pe32_linked_v2_at(bytes, actual_base, gate_base, pages)
+            .map_err(HostError::Loader)?;
+        Ok(self.publish_linked_image_v2(image))
+    }
+
+    pub fn load_pe32_linked_v3_at(
+        &mut self,
+        bytes: &[u8],
+        actual_base: u32,
+        gate_base: u32,
+    ) -> Result<LinkedImageMetadata32V3, HostError> {
+        let pages = self.image_capacity()?;
+        let loaded = load_pe32_linked_v3_at(bytes, actual_base, gate_base, pages)
+            .map_err(HostError::Loader)?;
+        Ok(self.publish_linked_image_v3(loaded))
+    }
+
+    pub(in crate::process) fn publish_linked_image_v3(
+        &mut self,
+        loaded: LoadedLinkedPe32V3,
+    ) -> LinkedImageMetadata32V3 {
+        let (memory, linked) = loaded.into_parts();
+        self.memory = Some(memory);
+        self.image = Some(linked.image);
+        linked
+    }
+
+    pub fn load_pe32_linked_v4_at(
+        &mut self,
+        bytes: &[u8],
+        actual_base: u32,
+        gate_base: u32,
+    ) -> Result<LinkedImageMetadata32V4, HostError> {
+        let pages = self.image_capacity()?;
+        let loaded = load_pe32_linked_v4_at(bytes, actual_base, gate_base, pages)
+            .map_err(HostError::Loader)?;
+        Ok(self.publish_linked_image_v4(loaded))
+    }
+
+    pub(in crate::process) fn publish_linked_image_v4(
+        &mut self,
+        loaded: LoadedLinkedPe32V4,
+    ) -> LinkedImageMetadata32V4 {
+        let (memory, linked) = loaded.into_parts();
+        self.memory = Some(memory);
+        self.image = Some(linked.image);
+        linked
+    }
+
+    pub fn load_pe32_linked_v5_at(
+        &mut self,
+        bytes: &[u8],
+        actual_base: u32,
+        gate_base: u32,
+    ) -> Result<LinkedImageMetadata32V5, HostError> {
+        let pages = self.image_capacity()?;
+        let loaded = load_pe32_linked_v5_at(bytes, actual_base, gate_base, pages)
+            .map_err(HostError::Loader)?;
+        Ok(self.publish_linked_image_v5(loaded))
+    }
+
+    pub(in crate::process) fn publish_linked_image_v5(
+        &mut self,
+        loaded: LoadedLinkedPe32V5,
+    ) -> LinkedImageMetadata32V5 {
+        let (memory, linked) = loaded.into_parts();
+        self.memory = Some(memory);
+        self.image = Some(linked.image);
+        linked
+    }
+
+    pub fn load_pe32_linked_v6_at(
+        &mut self,
+        bytes: &[u8],
+        actual_base: u32,
+        gate_base: u32,
+    ) -> Result<LinkedImageMetadata32V6, HostError> {
+        let pages = self.image_capacity()?;
+        let loaded = load_pe32_linked_v6_at(bytes, actual_base, gate_base, pages)
+            .map_err(HostError::Loader)?;
+        Ok(self.publish_linked_image_v6(loaded))
+    }
+
+    pub(in crate::process) fn publish_linked_image_v6(
+        &mut self,
+        loaded: LoadedLinkedPe32V6,
+    ) -> LinkedImageMetadata32V6 {
+        let (memory, linked) = loaded.into_parts();
+        self.memory = Some(memory);
+        self.image = Some(linked.image);
+        linked
+    }
+
+    pub fn load_pe32_linked_v7_at(
+        &mut self,
+        bytes: &[u8],
+        actual_base: u32,
+        gate_base: u32,
+    ) -> Result<LinkedImageMetadata32V7, HostError> {
+        let pages = self.image_capacity()?;
+        let loaded = load_pe32_linked_v7_at(bytes, actual_base, gate_base, pages)
+            .map_err(HostError::Loader)?;
+        Ok(self.publish_linked_image_v7(loaded))
+    }
+
+    pub(in crate::process) fn publish_linked_image_v7(
+        &mut self,
+        loaded: LoadedLinkedPe32V7,
+    ) -> LinkedImageMetadata32V7 {
+        let (memory, linked) = loaded.into_parts();
+        self.memory = Some(memory);
+        self.image = Some(linked.image);
+        linked
+    }
+
+    pub fn load_pe32_linked_v8_at(
+        &mut self,
+        bytes: &[u8],
+        actual_base: u32,
+        gate_base: u32,
+    ) -> Result<LinkedImageMetadata32V8, HostError> {
+        let pages = self.image_capacity()?;
+        let loaded = load_pe32_linked_v8_at(bytes, actual_base, gate_base, pages)
+            .map_err(HostError::Loader)?;
+        Ok(self.publish_linked_image_v8(loaded))
+    }
+
+    pub(in crate::process) fn publish_linked_image_v8(
+        &mut self,
+        loaded: LoadedLinkedPe32V8,
+    ) -> LinkedImageMetadata32V8 {
+        let (memory, linked) = loaded.into_parts();
+        self.memory = Some(memory);
+        self.image = Some(linked.image);
+        linked
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    pub(in crate::process) fn load_pe32_linked_transfer_at(
+        &mut self,
+        length: u32,
+        actual_base: u32,
+        gate_base: u32,
+    ) -> Result<LinkedImageMetadata32, HostError> {
+        use crate::abi::arena::{TRANSFER_OFFSET, TRANSFER_SIZE};
+
+        let pages = self.image_capacity()?;
+        if length as usize > TRANSFER_SIZE {
+            return Err(HostError::InvalidRequest);
+        }
+        let bytes = &self.arena()[TRANSFER_OFFSET..TRANSFER_OFFSET + length as usize];
+        let image =
+            load_pe32_linked_at(bytes, actual_base, gate_base, pages).map_err(HostError::Loader)?;
+        Ok(self.publish_linked_image(image))
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    pub(in crate::process) fn load_pe32_linked_v2_transfer_at(
+        &mut self,
+        length: u32,
+        actual_base: u32,
+        gate_base: u32,
+    ) -> Result<LinkedImageMetadata32V2, HostError> {
+        use crate::abi::arena::{TRANSFER_OFFSET, TRANSFER_SIZE};
+
+        let pages = self.image_capacity()?;
+        if length as usize > TRANSFER_SIZE {
+            return Err(HostError::InvalidRequest);
+        }
+        let bytes = &self.arena()[TRANSFER_OFFSET..TRANSFER_OFFSET + length as usize];
+        let image = load_pe32_linked_v2_at(bytes, actual_base, gate_base, pages)
+            .map_err(HostError::Loader)?;
+        Ok(self.publish_linked_image_v2(image))
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    pub(in crate::process) fn load_pe32_transfer(
+        &mut self,
+        length: u32,
+    ) -> Result<ImageMetadata32, HostError> {
+        self.load_image_transfer(length, None)
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    pub(in crate::process) fn load_pe32_transfer_at(
+        &mut self,
+        length: u32,
+        actual_base: u32,
+    ) -> Result<ImageMetadata32, HostError> {
+        self.load_image_transfer(length, Some(actual_base))
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    fn load_image_transfer(
+        &mut self,
+        length: u32,
+        actual_base: Option<u32>,
+    ) -> Result<ImageMetadata32, HostError> {
+        use crate::abi::arena::{TRANSFER_OFFSET, TRANSFER_SIZE};
+
+        let pages = self.image_capacity()?;
+        if length as usize > TRANSFER_SIZE {
+            return Err(HostError::InvalidRequest);
+        }
+        let bytes = &self.arena()[TRANSFER_OFFSET..TRANSFER_OFFSET + length as usize];
+        let image = match actual_base {
+            None => load_pe32(bytes, pages),
+            Some(base) => load_pe32_at(bytes, base, pages),
+        }
+        .map_err(HostError::Loader)?;
+        Ok(self.publish_image(image))
+    }
+
+    pub(in crate::process) fn image_capacity(&self) -> Result<u32, HostError> {
+        let memory = self.memory()?;
+        if memory.mapped_pages() != 0
+            || !self.virtual_allocations.is_empty()
+            || self.image.is_some()
+            || self.generation != 0
+            || self.artifact.is_some()
+            || self.resident.is_some()
+            || self.resident_installations.iter().any(Option::is_some)
+            || self.pending_call.is_some()
+            || self.callback.is_some()
+        {
+            return Err(HostError::InvalidRequest);
+        }
+        Ok(memory.capacity_pages())
+    }
+
+    pub(in crate::process) fn publish_image(&mut self, loaded: LoadedPe32) -> ImageMetadata32 {
+        let (memory, image) = loaded.into_parts();
+        self.memory = Some(memory);
+        self.image = Some(image);
+        image
+    }
+
+    fn publish_linked_image(&mut self, loaded: LoadedLinkedPe32) -> LinkedImageMetadata32 {
+        let (memory, linked) = loaded.into_parts();
+        self.memory = Some(memory);
+        self.image = Some(linked.image);
+        linked
+    }
+
+    pub(in crate::process) fn publish_linked_image_v2(
+        &mut self,
+        loaded: LoadedLinkedPe32V2,
+    ) -> LinkedImageMetadata32V2 {
+        let (memory, linked) = loaded.into_parts();
+        self.memory = Some(memory);
+        self.image = Some(linked.image);
+        linked
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{loader::LoadError, memory::MemoryError};
+
+    #[test]
+    fn failed_pristine_load_keeps_identity_and_exhausted_memory_version() {
+        let mut instance = EngineInstance::new(4, 7).unwrap();
+        let identity = instance.memory().unwrap().identity();
+        let arena = instance.arena().to_vec();
+        instance
+            .memory
+            .as_mut()
+            .unwrap()
+            .exhaust_versions_for_test();
+        assert_eq!(
+            instance.load_pe32(b"bad"),
+            Err(HostError::Loader(LoadError::Malformed))
+        );
+        assert_eq!(instance.memory().unwrap().identity(), identity);
+        assert_eq!(instance.arena(), arena);
+        assert!(instance.image.is_none());
+        assert_eq!(
+            instance.load_pe32_linked_at(b"bad", 0x0040_0000, 0x7000_0000),
+            Err(HostError::Loader(LoadError::Malformed))
+        );
+        assert_eq!(instance.memory().unwrap().identity(), identity);
+        assert_eq!(instance.arena(), arena);
+        assert!(instance.image.is_none());
+        assert_eq!(
+            instance.map(0x1000, 1, 3),
+            Err(HostError::Memory(MemoryError::VersionExhausted))
+        );
+        assert_eq!(instance.memory().unwrap().mapped_pages(), 0);
+    }
+
+    #[test]
+    fn retained_generation_blocks_loading_even_with_empty_ram() {
+        let mut instance = EngineInstance::new(1, 7).unwrap();
+        instance.generation = 1;
+        let identity = instance.memory().unwrap().identity();
+        let arena = instance.arena().to_vec();
+        assert_eq!(instance.load_pe32(b"bad"), Err(HostError::InvalidRequest));
+        assert_eq!(instance.memory().unwrap().identity(), identity);
+        assert_eq!(instance.arena(), arena);
+        assert_eq!(instance.generation, 1);
+    }
+}
+
+#[cfg(test)]
+#[path = "linked_v2_tests.rs"]
+mod linked_v2_tests;

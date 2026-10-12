@@ -1,0 +1,7 @@
+#![forbid(unsafe_code)]
+
+pub(super) mod integer;
+pub(super) mod segments;
+pub(super) mod simd;
+pub(super) mod stack;
+pub(super) mod x87;
