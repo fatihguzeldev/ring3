@@ -14,8 +14,8 @@ mod windows_callback_exit_wasm;
 #[path = "callbacks/wasm/provider.rs"]
 mod windows_callback_provider_wasm;
 
-#[path = "wasm/current_process.rs"]
+#[path = "process/current/wasm.rs"]
 mod windows_current_process_wasm;
 
-#[path = "wasm/module_handle.rs"]
+#[path = "modules/handle/wasm.rs"]
 mod windows_module_handle_wasm;

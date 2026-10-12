@@ -13,7 +13,7 @@ use std::{
 use super::support_pe32 as pe;
 
 fn image() -> Vec<u8> {
-    let kernel = include_bytes!("../fixtures/p2-current-process/kernel.text.bin");
+    let kernel = include_bytes!("fixtures/p2-current-process/kernel.text.bin");
     assert_eq!(kernel.len(), 67);
     let caller = [
         0xf9, 0xfd, 0xe8, 0xf9, 0x0f, 0, 0, 0x50, 0xff, 0x15, 0x90, 0x31, 0x40, 0, 0x0f, 0x0b,
@@ -111,7 +111,7 @@ fn compiled_current_process_handle_flows_into_named_flush_and_returns_42() {
     fs::write(output.join("current-process.exe"), image()).unwrap();
     let result = wasm_support::run_node(
         root,
-        "engine/tests/windows/provider/fixtures/p2-current-process/runtime/run.mjs",
+        "engine/tests/windows/provider/process/current/fixtures/p2-current-process/runtime/run.mjs",
         &engine,
         &output,
         None,

@@ -26,7 +26,7 @@ fn actual_engine_wasm_returns_private_main_image_handle_and_guest_reads_mz() {
     fs::create_dir_all(&output).unwrap();
     let result = wasm_support::run_node(
         root,
-        "engine/tests/windows/provider/fixtures/p2-module-handle/runtime/run.mjs",
+        "engine/tests/windows/provider/modules/handle/fixtures/p2-module-handle/runtime/run.mjs",
         &engine,
         &output,
         None,

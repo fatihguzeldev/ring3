@@ -11,10 +11,10 @@ mod windows_callback_frame;
 #[path = "callbacks/native/provider.rs"]
 mod windows_callback_provider;
 
-#[path = "native/current_process.rs"]
+#[path = "process/current/native.rs"]
 mod windows_current_process;
 
-#[path = "native/module_handle.rs"]
+#[path = "modules/handle/native.rs"]
 mod windows_module_handle;
 
 #[path = "native/core.rs"]

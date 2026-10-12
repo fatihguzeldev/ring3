@@ -11,8 +11,8 @@ Retained inputs/artifacts: [kernel.c](kernel.c), [kernel.disasm.txt](kernel.disa
 Reproduce from the repository root into a new output directory:
 
 ```sh
-python3 engine/tests/windows/provider/fixtures/p2-current-process/build.py target/p2-current-process-rebuild-new
-python3 engine/tests/windows/provider/fixtures/p2-current-process/check_coff.py target/p2-current-process-rebuild-new/kernel.obj
+python3 engine/tests/windows/provider/process/current/fixtures/p2-current-process/build.py target/p2-current-process-rebuild-new
+python3 engine/tests/windows/provider/process/current/fixtures/p2-current-process/check_coff.py target/p2-current-process-rebuild-new/kernel.obj
 ```
 
 Routine tests consume retained bytes without invoking a compiler. Receipt working directories and historical paths identify the original build; compare artifact hashes when reproducing elsewhere.

@@ -1,4 +1,4 @@
-import {createArena} from '../../../../../support/wasm/arena.mjs';
+import {createArena} from '../../../../../../../support/wasm/arena.mjs';
 import assert from 'node:assert/strict';
 import {execFileSync} from 'node:child_process';
 import {createHash} from 'node:crypto';
@@ -7,7 +7,7 @@ import {join} from 'node:path';
 
 const [enginePath, outputDir, root] = process.argv.slice(2);
 assert.ok(root, 'expected actual engine, output directory and repository root');
-const fixtureRoot = join(root, 'engine/tests/windows/provider/fixtures/p2-module-handle');
+const fixtureRoot = join(root, 'engine/tests/windows/provider/modules/handle/fixtures/p2-module-handle');
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
 const oracleBytes = readFileSync(join(fixtureRoot, 'oracle.json')), oracle = JSON.parse(oracleBytes);
 const programBytes = readFileSync(join(fixtureRoot, 'program.S'));
@@ -73,7 +73,7 @@ const code=authoredText(readFileSync(objectPath)), image=authoredPe(code); asser
 save('linked-module-handle.exe',image); oracle.pe.chunks.forEach((chunk,index)=>{const bytes=image.subarray(chunk.offset,chunk.offset+chunk.length);assert.equal(hash(bytes),chunk.sha256);save(`input-chunk${index}.bin`,bytes);});
 save('program.x86',code); save('program.S',programBytes); save('input-oracle.json',oracleBytes); save('runtime/run.mjs',readFileSync(import.meta.filename));
 const productionPaths=execFileSync('rg',['--files','engine/src'],{cwd:root,encoding:'utf8'}).trim().split('\n').sort();
-const sourcePaths=[...productionPaths,'Cargo.toml','engine/Cargo.toml','Cargo.lock','engine/tests/windows/provider/wasm/module_handle.rs', 'engine/tests/windows/provider/wasm.rs', 'engine/tests/support/wasm.rs', 'engine/tests/windows/provider/wasm.rs', 'engine/tests/support/wasm.rs','engine/tests/windows/provider/fixtures/p2-module-handle/program.S','engine/tests/windows/provider/fixtures/p2-module-handle/oracle.json','engine/tests/windows/provider/fixtures/p2-module-handle/runtime/run.mjs'];
+const sourcePaths=[...productionPaths,'Cargo.toml','engine/Cargo.toml','Cargo.lock','engine/tests/windows/provider/modules/handle/wasm.rs', 'engine/tests/windows/provider/wasm.rs', 'engine/tests/support/wasm.rs', 'engine/tests/windows/provider/wasm.rs', 'engine/tests/support/wasm.rs','engine/tests/windows/provider/modules/handle/fixtures/p2-module-handle/program.S','engine/tests/windows/provider/modules/handle/fixtures/p2-module-handle/oracle.json','engine/tests/windows/provider/modules/handle/fixtures/p2-module-handle/runtime/run.mjs'];
 assert.equal(sourcePaths.filter(file=>file!=='engine/src/process/windows/allocation_tests.rs', 'engine/src/process/windows/mod.rs', 'engine/src/process/mod.rs').length,oracle.transport.producer_sources); const sources=Object.fromEntries(sourcePaths.map(file=>[file,hash(readFileSync(join(root,file)))]));save('source-sha256.json',JSON.stringify(sources,null,2));
 const engineBytes=readFileSync(enginePath);save('engine.wasm',engineBytes);assert.ok(WebAssembly.validate(engineBytes));
 const engineModule=new WebAssembly.Module(engineBytes);assert.deepEqual(WebAssembly.Module.imports(engineModule),[]);

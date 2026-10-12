@@ -10,7 +10,7 @@ import struct
 import sys
 
 
-DEPENDENCY = Path(__file__).resolve().parents[6] / "engine/tests/programs/records/fixtures/p2-compiled-records/build.py"
+DEPENDENCY = Path(__file__).resolve().parents[8] / "engine/tests/programs/records/fixtures/p2-compiled-records/build.py"
 DEPENDENCY_SHA256 = "fe426f202b48664a87357c766d39099b9d35b5d8217c2b114696164a0d468258"
 PREFERRED_BASE = 0x400000
 TEXT_RVA = 0x2000

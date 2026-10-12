@@ -3,7 +3,7 @@ import {createHash} from 'node:crypto';
 import {execFileSync} from 'node:child_process';
 import {readFileSync, writeFileSync} from 'node:fs';
 import {join} from 'node:path';
-import {readEngine} from '../../../../../support/wasm/engine.mjs';
+import {readEngine} from '../../../../../../../support/wasm/engine.mjs';
 
 const [enginePath, output, root] = process.argv.slice(2); assert.ok(root && output);
 const engine = readEngine(enginePath), SIZE = 4612, TRANSFER = 140;
@@ -12,7 +12,7 @@ const initial = readFileSync(join(output, 'initial-arena.bin')); assert.equal(in
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
 const artifacts = {}, contexts = [], modules = [], observations = [], helperTrace = [], providers = [], lifecycle = [], diagnostics = [];
 function save(name, bytes) { writeFileSync(join(output, name), bytes, {flag: 'wx'}); artifacts[name] = {bytes: Buffer.byteLength(bytes), sha256: hash(bytes)}; }
-const fixture = join(root, 'engine/tests/windows/provider/fixtures/p2-current-process');
+const fixture = join(root, 'engine/tests/windows/provider/process/current/fixtures/p2-current-process');
 const kernel = readFileSync(join(fixture, 'kernel.text.bin')), raw = readFileSync(join(fixture, 'kernel.text.raw.bin'));
 const relocations = JSON.parse(readFileSync(join(fixture, 'kernel.relocations.json')));
 assert.equal(kernel.length, 67); assert.equal(raw.length, 67);
@@ -46,8 +46,8 @@ const image = readFileSync(join(output,'current-process.exe')); assert.deepEqual
 save('engine.wasm',engine.bytes); save('caller.bin',caller); save('kernel-linked.bin',kernel); save('kernel-original.bin',raw);
 const sourcePaths = [...execFileSync('rg',['--files','engine/src'],{cwd:root,encoding:'utf8'}).trim().split('\n'),
   'Cargo.toml','Cargo.lock','engine/Cargo.toml','rust-toolchain.toml','engine/tests/support/loader/pe32.rs',
-  'engine/tests/windows/provider/wasm/current_process.rs', 'engine/tests/windows/provider/wasm.rs', 'engine/tests/support/wasm.rs','engine/tests/loader/imports/native/v8.rs', 'engine/tests/loader/imports/native.rs','engine/tests/support/wasm/engine.mjs',
-  ...['kernel.c','build.py','check_coff.py','PROVENANCE.md','kernel.obj','kernel.text.bin','kernel.text.raw.bin','kernel.disasm.txt','kernel.relocations.json','receipt.json','runtime/run.mjs'].map(name => `engine/tests/windows/provider/fixtures/p2-current-process/${name}`)].sort();
+  'engine/tests/windows/provider/process/current/wasm.rs', 'engine/tests/windows/provider/wasm.rs', 'engine/tests/support/wasm.rs','engine/tests/loader/imports/native/v8.rs', 'engine/tests/loader/imports/native.rs','engine/tests/support/wasm/engine.mjs',
+  ...['kernel.c','build.py','check_coff.py','PROVENANCE.md','kernel.obj','kernel.text.bin','kernel.text.raw.bin','kernel.disasm.txt','kernel.relocations.json','receipt.json','runtime/run.mjs'].map(name => `engine/tests/windows/provider/process/current/fixtures/p2-current-process/${name}`)].sort();
 assert.equal(new Set(sourcePaths).size,sourcePaths.length);
 const sourceMap = () => Object.fromEntries(sourcePaths.map(path => { const bytes = readFileSync(join(root,path)); return [path,{bytes:bytes.length,sha256:hash(bytes)}]; }));
 const sourcesBefore = sourceMap();
