@@ -6,7 +6,7 @@ use crate::{
         memory_helper::HELPER_SIZE,
     },
     cpu::x86::atomic::{AtomicKind, evaluate},
-    memory::{Access, GuestAddress},
+    memory::GuestAddress,
 };
 
 impl EngineInstance {
@@ -65,7 +65,6 @@ impl EngineInstance {
         let mut old = [0u8; 8];
         let result = memory
             .read(GuestAddress(address), &mut old[..width as usize])
-            .and_then(|()| memory.check_span(GuestAddress(address), width as usize, Access::Write))
             .and_then(|()| {
                 let value = if compare {
                     let old = u64::from_le_bytes(old);
