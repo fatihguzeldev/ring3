@@ -153,7 +153,8 @@ impl Imports {
                     destination: Location32::Memory(_),
                     ..
                 } => cpu_integer = true,
-                Operation::VerifySegment { source, .. } => {
+                Operation::VerifySegment { source, .. }
+                | Operation::QuerySegment { source, .. } => {
                     cpu_integer = true;
                     read16 |= matches!(source, Value32::Memory(_));
                 }

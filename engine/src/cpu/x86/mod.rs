@@ -18,7 +18,7 @@ pub(crate) use environment::USER_MODE_ENVIRONMENT;
 pub use segments::{
     SegmentAccess, SegmentAccessError, SegmentCache, SegmentContext, SegmentDescriptor,
     SegmentDescriptorKind, SegmentDescriptorRecord, SegmentDescriptorTable, SegmentLoadError,
-    SegmentLoadFailure, SegmentRegister, SegmentState,
+    SegmentLoadFailure, SegmentQuery, SegmentRegister, SegmentState,
 };
 pub use stack::StackFrameKind;
 pub use state::{Register32, State32};

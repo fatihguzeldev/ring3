@@ -66,3 +66,6 @@ pub use descriptors::{
     SegmentDescriptor, SegmentDescriptorKind, SegmentDescriptorTable, SegmentLoadError,
     SegmentLoadFailure,
 };
+
+mod queries;
+pub use queries::SegmentQuery;

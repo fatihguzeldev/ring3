@@ -370,6 +370,12 @@ pub enum CarryKind {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Operation {
+    QuerySegment {
+        kind: super::SegmentQuery,
+        source: Value32,
+        destination: Register32,
+        word: bool,
+    },
     XState(super::xstate::XStateOperation),
     VerifySegment {
         source: Value32,

@@ -45,6 +45,14 @@ impl EngineInstance {
         if matches!(descriptor, 0x30001 | 0x30002) {
             return self.verify_segment(address, input, descriptor == 0x30002);
         }
+        if matches!(descriptor, 0x30003 | 0x30004) {
+            let kind = if descriptor == 0x30003 {
+                crate::cpu::x86::SegmentQuery::AccessRights
+            } else {
+                crate::cpu::x86::SegmentQuery::Limit
+            };
+            return self.query_segment(address, input, kind);
+        }
         if descriptor == 0x30000 {
             return self.adjust_privilege_memory(resident, address, input);
         }

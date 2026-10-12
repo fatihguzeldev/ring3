@@ -5,11 +5,17 @@ use super::{
     operands::{effective_address, register, unsupported, word_register},
 };
 use crate::cpu::x86::{
-    SegmentRegister,
+    SegmentQuery, SegmentRegister,
     ir::{Location32, Operation, Value32},
 };
 
 pub(super) fn lower(instruction: &Instruction) -> Option<Result<Operation, DecodeError>> {
+    if matches!(
+        instruction.code(),
+        Code::Lar_r16_rm16 | Code::Lar_r32_r32m16 | Code::Lsl_r16_rm16 | Code::Lsl_r32_r32m16
+    ) {
+        return Some(query(instruction));
+    }
     if matches!(
         instruction.code(),
         Code::Verr_rm16 | Code::Verr_r32m16 | Code::Verw_rm16 | Code::Verw_r32m16
@@ -78,4 +84,37 @@ fn verify(instruction: &Instruction) -> Result<Operation, DecodeError> {
 fn selector_register(value: Register) -> Result<crate::cpu::x86::Register32, DecodeError> {
     // iced models operand-size32 ARPL with parent register IDs; the architectural RPL update is identical.
     word_register(value).or_else(|_| register(value))
+}
+
+fn query(instruction: &Instruction) -> Result<Operation, DecodeError> {
+    if instruction.has_lock_prefix() {
+        return Err(DecodeError::InvalidEncoding);
+    }
+    if instruction.has_rep_prefix() || instruction.has_repne_prefix() {
+        return Err(unsupported());
+    }
+    let word = matches!(instruction.code(), Code::Lar_r16_rm16 | Code::Lsl_r16_rm16);
+    let destination = if word {
+        word_register(instruction.op0_register())?
+    } else {
+        register(instruction.op0_register())?
+    };
+    let source = match instruction.op1_kind() {
+        OpKind::Register => Value32::Register(selector_register(instruction.op1_register())?),
+        OpKind::Memory => Value32::Memory(effective_address(instruction)?),
+        _ => return Err(unsupported()),
+    };
+    Ok(Operation::QuerySegment {
+        kind: if matches!(
+            instruction.code(),
+            Code::Lar_r16_rm16 | Code::Lar_r32_r32m16
+        ) {
+            SegmentQuery::AccessRights
+        } else {
+            SegmentQuery::Limit
+        },
+        source,
+        destination,
+        word,
+    })
 }

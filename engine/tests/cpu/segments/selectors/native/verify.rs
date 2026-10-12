@@ -76,7 +76,7 @@ fn verification_memory_forms_preserve_address_and_segment_semantics() {
 }
 
 #[test]
-fn verification_lock_is_malformed_while_repeat_duplicate_and_unrepresented_queries_stay_refused() {
+fn verification_lock_is_malformed_while_repeat_and_duplicate_profiles_stay_refused() {
     for field in [0x20, 0x28] {
         for modrm in [field, 0xc0 | field] {
             assert_eq!(
@@ -89,12 +89,6 @@ fn verification_lock_is_malformed_while_repeat_duplicate_and_unrepresented_queri
                 assert!(matches!(decode(&bytes), Err(DecodeError::Unsupported(_))));
             }
         }
-    }
-    for opcode in [2, 3] {
-        assert!(matches!(
-            decode(&[0x0f, opcode, 0xc1]),
-            Err(DecodeError::Unsupported(_))
-        ));
     }
 }
 

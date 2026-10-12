@@ -49,6 +49,22 @@ pub(in crate::cpu::dbt::wasm) fn instruction(
     }
     let mut store = false;
     match *instruction.operation() {
+        Operation::QuerySegment {
+            kind,
+            source,
+            destination,
+            word,
+        } => {
+            super::super::segment_queries::query(
+                code,
+                kind,
+                source,
+                destination,
+                word,
+                imports,
+                exit_depth,
+            );
+        }
         Operation::VerifySegment { source, write } => {
             super::super::segment_queries::verify(code, source, write, imports, exit_depth);
         }

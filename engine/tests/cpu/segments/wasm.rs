@@ -18,3 +18,6 @@ mod cpu_arpl_wasm;
 
 #[path = "selectors/wasm/verify.rs"]
 mod cpu_segment_queries_wasm;
+
+#[path = "selectors/attributes/wasm.rs"]
+mod cpu_segment_rights_limit_wasm;

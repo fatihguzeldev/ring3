@@ -4,3 +4,6 @@ mod cpu_arpl;
 mod cpu_segment_queries;
 #[path = "cache/native/loads.rs"]
 mod cpu_segments;
+
+#[path = "selectors/attributes/native.rs"]
+mod cpu_segment_rights_limit;

@@ -158,7 +158,7 @@ for (const owner of ['replacement', 'resident']) for (const entries of [false, t
   fn = compile(c, [0x0f, 0x00, 0xe8], true); s = seed(c, {0: 0x43}); execute(c, fn, s, {success: false, selector: 0x43});
   assert.deepEqual(arena(c).subarray(SEG, SEG + 64), loaded); counts.controls++;
   fn = compile(c, [0x0f, 0x00, 0xe0], false); s = seed(c, {0: 0x43}); execute(c, fn, s, {success: true, selector: 0x43}); counts.controls++;
-  for (const [descriptor, selector, address] of [[0x30001, 0x23, 1], [0x30002, 0x10023, 0], [0x30003, 0x23, 0]]) {
+  for (const [descriptor, selector, address] of [[0x30001, 0x23, 1], [0x30002, 0x10023, 0], [0x30005, 0x23, 0]]) {
     input(c, 140, words([selector, 0x244cd7, 1, 2, 3, 4])); const before = arena(c);
     assert.notEqual(c.api[c.owner === 'resident' ? 'cpu_integer_resident' : 'cpu_integer'](...c.binding, descriptor, address), 0);
     assert.deepEqual(arena(c), before); counts.controls++;
@@ -168,5 +168,5 @@ for (const owner of ['replacement', 'resident']) for (const entries of [false, t
 assert.equal(counts.contexts, 4); assert.equal(counts.registers, 29248); assert.equal(counts.memory, 56); assert.equal(counts.faults, 20);
 assert.deepEqual(pins(), sourcePins, 'query sources stayed fixed');
 writeFileSync(join(output, 'result.json'), JSON.stringify({status: 'ok', engine_sha256: engine.sha256, source_pins: sourcePins, counts,
-  limits: ['configured software descriptor table, finite VERR/VERW proof; LAR/LSL remain unsupported pending raw descriptor attributes; AM0 environment; no guest-GDT memory or kernel execution claim']}, null, 2) + '\n');
+  limits: ['configured software descriptor table, finite VERR/VERW proof; AM0 environment; no guest-GDT memory or kernel execution claim']}, null, 2) + '\n');
 console.log(JSON.stringify({status: 'ok', ...counts, output}));

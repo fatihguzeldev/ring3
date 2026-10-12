@@ -6,7 +6,7 @@ use super::{
     memory,
 };
 use crate::cpu::x86::{
-    Register32,
+    Register32, SegmentQuery,
     ir::{Location32, SmallWidth, Value32},
 };
 
@@ -35,6 +35,54 @@ pub(super) fn verify(
     atomic::call(code, 0x30001 + u32::from(write), 0, imports, exit_depth);
     code.local_get(STATE_PTR).i32_load(atomic::transfer(4));
     super::cpu_result::flags(code, 0x40, exit_depth);
+}
+
+pub(super) fn query(
+    code: &mut InstructionSink<'_>,
+    kind: SegmentQuery,
+    source: Value32,
+    destination: Register32,
+    word: bool,
+    imports: memory::Imports,
+    exit_depth: u32,
+) {
+    match source {
+        Value32::Register(source) => {
+            code.local_get(register(source));
+        }
+        Value32::Memory(address) => {
+            memory::load_narrow_value(code, address, SmallWidth::Word, imports, exit_depth);
+        }
+        Value32::Immediate(_) => unreachable!("descriptor queries have a selector source"),
+    }
+    code.i32_const(0xffff).i32_and().local_set(RESULT);
+    atomic::payload(code);
+    code.local_get(STATE_PTR)
+        .local_get(RESULT)
+        .i32_store(atomic::transfer(0));
+    code.i32_const(0).local_set(ADDRESS);
+    let descriptor = match kind {
+        SegmentQuery::AccessRights => 0x30003,
+        SegmentQuery::Limit => 0x30004,
+    };
+    atomic::call(code, descriptor, 0, imports, exit_depth);
+    code.local_get(STATE_PTR).i32_load(atomic::transfer(4));
+    super::cpu_result::flags(code, 0x40, exit_depth);
+    // source and helper validation precede either architectural destination publication.
+    code.local_get(FLAGS)
+        .i32_const(0x40)
+        .i32_and()
+        .if_(BlockType::Empty);
+    if word {
+        code.local_get(register(destination))
+            .i32_const(!0xffff)
+            .i32_and();
+    }
+    code.local_get(STATE_PTR).i32_load(atomic::transfer(0));
+    if word {
+        code.i32_const(0xffff).i32_and().i32_or();
+    }
+    code.local_set(register(destination)).end();
 }
 
 pub(super) fn adjust_privilege(

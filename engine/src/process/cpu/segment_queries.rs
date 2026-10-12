@@ -1,6 +1,6 @@
 use crate::{
     abi::cpu_helper::CpuMemoryError,
-    cpu::x86::{SegmentAccess, SegmentRegister, USER_MODE_ENVIRONMENT},
+    cpu::x86::{SegmentAccess, SegmentQuery, SegmentRegister, USER_MODE_ENVIRONMENT},
     memory::{Access, GuestAddress},
     process::{EngineInstance, HostError, StoreCompletion},
 };
@@ -22,6 +22,29 @@ impl EngineInstance {
         );
         let mut output = input;
         output[1] = (input[1] & !0x40) | if success { 0x40 } else { 0 };
+        self.integer_publish(0, output, Ok(()))?;
+        Ok(StoreCompletion::Complete)
+    }
+
+    pub(super) fn query_segment(
+        &mut self,
+        address: u32,
+        input: [u32; 6],
+        kind: SegmentQuery,
+    ) -> Result<StoreCompletion, HostError> {
+        if address != 0 || input[0] > u16::MAX.into() {
+            return Err(HostError::InvalidRequest);
+        }
+        let value = self.segment_descriptors.query(
+            input[0] as u16,
+            USER_MODE_ENVIRONMENT.current_privilege(),
+            kind,
+        );
+        let mut output = input;
+        output[1] = (input[1] & !0x40) | if value.is_some() { 0x40 } else { 0 };
+        if let Some(value) = value {
+            output[0] = value;
+        }
         self.integer_publish(0, output, Ok(()))?;
         Ok(StoreCompletion::Complete)
     }
@@ -166,7 +189,7 @@ mod tests {
         for (query, selector, address) in [
             (0x30001, 0x23, 1),
             (0x30002, 0x1_0023, 0),
-            (0x30003, 0x23, 0),
+            (0x30005, 0x23, 0),
         ] {
             input(&mut engine, selector, 0, 0);
             let before = engine.arena().to_vec();
@@ -293,3 +316,7 @@ mod tests {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "segment_queries/attributes/tests.rs"]
+mod query_tests;
