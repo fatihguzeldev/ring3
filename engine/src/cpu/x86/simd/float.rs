@@ -281,14 +281,33 @@ pub(super) fn floating(
     let mut flags = incoming_flags;
     for lane in 0..count {
         let offset = lane * width;
-        let (value, status, compare) = binary(
-            kind,
-            unsigned(&a, offset, width),
-            unsigned(&b, offset, width),
-            width,
-            mxcsr,
-            op.immediate.unwrap_or(0),
-        );
+        let (kind, left, right) = match kind {
+            F::AddSubtract => (
+                if lane % 2 == 0 { F::Subtract } else { F::Add },
+                unsigned(&a, offset, width),
+                unsigned(&b, offset, width),
+            ),
+            F::HorizontalAdd | F::HorizontalSubtract => {
+                let input = if lane < count / 2 { &a } else { &b };
+                let offset = lane % (count / 2) * width * 2;
+                (
+                    if kind == F::HorizontalAdd {
+                        F::Add
+                    } else {
+                        F::Subtract
+                    },
+                    unsigned(input, offset, width),
+                    unsigned(input, offset + width, width),
+                )
+            }
+            _ => (
+                kind,
+                unsigned(&a, offset, width),
+                unsigned(&b, offset, width),
+            ),
+        };
+        let (value, status, compare) =
+            binary(kind, left, right, width, mxcsr, op.immediate.unwrap_or(0));
         exceptions |= lane_exceptions(status, mxcsr);
         if let Some(compare) = compare {
             flags = (incoming_flags & !0x8d5) | compare;

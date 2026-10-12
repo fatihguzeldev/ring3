@@ -72,6 +72,8 @@ pub(super) fn accepts(op: SimdOperation) -> bool {
                 | S::ExtractWord
                 | S::Bytes
                 | S::AlignRight
+                | S::DuplicateEven
+                | S::DuplicateOdd
         ),
         _ => false,
     }
@@ -552,7 +554,10 @@ fn shuffle(code: &mut InstructionSink<'_>, op: SimdOperation, kind: S) {
     let width = usize::from(op.lane_bytes);
     let size = usize::from(op.vector_bytes);
     let immediate = op.immediate.unwrap_or(0);
-    let source_only = matches!(kind, S::Dwords | S::Words | S::HighWords | S::LowWords);
+    let source_only = matches!(
+        kind,
+        S::Dwords | S::Words | S::HighWords | S::LowWords | S::DuplicateEven | S::DuplicateOdd
+    );
     load(
         code,
         if source_only {
@@ -565,6 +570,14 @@ fn shuffle(code: &mut InstructionSink<'_>, op: SimdOperation, kind: S) {
     load(code, op.source, op.vector_bytes);
     let mut lanes = std::array::from_fn(|i| i as u8);
     match kind {
+        S::DuplicateEven | S::DuplicateOdd => {
+            for lane in 0..size / width {
+                let source = (lane / 2 * 2 + usize::from(kind == S::DuplicateOdd)) * width;
+                for byte in 0..width {
+                    lanes[lane * width + byte] = (source + byte) as u8;
+                }
+            }
+        }
         S::Dwords | S::Words => {
             for i in 0..4 {
                 for j in 0..width {

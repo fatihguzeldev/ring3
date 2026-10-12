@@ -195,6 +195,12 @@ pub(super) fn shuffle(
 ) -> ([u8; 16], Option<u32>) {
     let mut out = a;
     match kind {
+        S::DuplicateEven | S::DuplicateOdd => {
+            for lane in 0..size / width {
+                let source = (lane / 2 * 2 + usize::from(kind == S::DuplicateOdd)) * width;
+                out[lane * width..(lane + 1) * width].copy_from_slice(&b[source..source + width]);
+            }
+        }
         S::Bytes => {
             for lane in 0..size {
                 out[lane] = if b[lane] & 0x80 != 0 {

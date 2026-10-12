@@ -102,6 +102,8 @@ pub enum ShuffleKind {
     MoveHighToLow,
     Bytes,
     AlignRight,
+    DuplicateEven,
+    DuplicateOdd,
 }
 
 #[repr(u8)]
@@ -119,6 +121,9 @@ pub enum FloatKind {
     CompareFlagsQuiet,
     Reciprocal,
     ReciprocalSquareRoot,
+    AddSubtract,
+    HorizontalAdd,
+    HorizontalSubtract,
 }
 
 #[repr(u8)]
@@ -380,6 +385,8 @@ pub fn decode_descriptor(
                 S::MoveHighToLow,
                 S::Bytes,
                 S::AlignRight,
+                S::DuplicateEven,
+                S::DuplicateOdd,
             ]
             .get(sub)
             .ok_or(SimdError::InvalidDescriptor)?,
@@ -398,6 +405,9 @@ pub fn decode_descriptor(
                 F::CompareFlagsQuiet,
                 F::Reciprocal,
                 F::ReciprocalSquareRoot,
+                F::AddSubtract,
+                F::HorizontalAdd,
+                F::HorizontalSubtract,
             ]
             .get(sub)
             .ok_or(SimdError::InvalidDescriptor)?,
@@ -638,6 +648,7 @@ fn validate_operation(op: SimdOperation) -> Result<(), SimdError> {
             K::MoveLow | K::MoveHigh => 8,
             K::Packed(_) => op.vector_bytes,
             K::Shuffle(ShuffleKind::InsertWord) => 2,
+            K::Shuffle(ShuffleKind::DuplicateEven) if op.lane_bytes == 8 => 8,
             K::Shuffle(
                 ShuffleKind::ExtractWord
                 | ShuffleKind::MaskBytes
@@ -843,6 +854,15 @@ fn validate_operation(op: SimdOperation) -> Result<(), SimdError> {
             if !operands {
                 return invalid();
             }
+            if matches!(kind, ShuffleKind::DuplicateEven | ShuffleKind::DuplicateOdd)
+                && (op.vector_bytes != 16
+                    || !xmm(op.destination)
+                    || !(xmm(op.source) || memory(op.source))
+                    || !matches!(op.lane_bytes, 4 | 8)
+                    || kind == ShuffleKind::DuplicateOdd && op.lane_bytes != 4)
+            {
+                return invalid();
+            }
             if matches!(kind, ShuffleKind::Bytes | ShuffleKind::AlignRight) && op.lane_bytes != 1 {
                 return invalid();
             }
@@ -889,6 +909,12 @@ fn validate_operation(op: SimdOperation) -> Result<(), SimdError> {
                 || op.vector_bytes != 16
                 || !xmm(op.destination)
                 || !(xmm(op.source) || memory(op.source))
+                || matches!(
+                    kind,
+                    FloatKind::AddSubtract
+                        | FloatKind::HorizontalAdd
+                        | FloatKind::HorizontalSubtract
+                ) && op.scalar
                 || op.immediate.is_some() != (kind == FloatKind::Compare)
                 || matches!(kind, FloatKind::CompareFlags | FloatKind::CompareFlagsQuiet)
                     && !op.scalar

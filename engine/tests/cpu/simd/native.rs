@@ -10,3 +10,5 @@ mod simd_semantics;
 #[path = "cases/native/simd_extensions.rs"]
 mod simd_extensions;
 
+#[path = "cases/native/simd_sse3.rs"]
+mod simd_sse3;

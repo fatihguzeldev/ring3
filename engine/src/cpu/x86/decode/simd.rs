@@ -46,13 +46,22 @@ pub(super) fn lower(instruction: &Instruction) -> Option<Result<SimdOperation, D
         Ldmxcsr => (K::LoadMxcsr, 4, false, false),
         Stmxcsr => (K::StoreMxcsr, 4, false, false),
         Movaps | Movapd | Movdqa => (K::Move, 16, false, true),
-        Movups | Movupd | Movdqu => (K::Move, 16, false, false),
+        Movups | Movupd | Movdqu | Lddqu => (K::Move, 16, false, false),
         Movq | Movdq2q | Movq2dq => (K::Move, 8, false, false),
         Movd => (K::Move, 4, false, false),
         Movss => (K::MoveScalar, 4, true, false),
         Movsd if instruction.op_count() == 2 => (K::MoveScalar, 8, true, false),
         Movlps | Movlpd => (K::MoveLow, 8, false, false),
         Movhps | Movhpd => (K::MoveHigh, 8, false, false),
+        Movddup => (K::Shuffle(S::DuplicateEven), 8, false, false),
+        Movsldup => (K::Shuffle(S::DuplicateEven), 4, false, false),
+        Movshdup => (K::Shuffle(S::DuplicateOdd), 4, false, false),
+        Addsubps => (K::Float(F::AddSubtract), 4, false, false),
+        Addsubpd => (K::Float(F::AddSubtract), 8, false, false),
+        Haddps => (K::Float(F::HorizontalAdd), 4, false, false),
+        Haddpd => (K::Float(F::HorizontalAdd), 8, false, false),
+        Hsubps => (K::Float(F::HorizontalSubtract), 4, false, false),
+        Hsubpd => (K::Float(F::HorizontalSubtract), 8, false, false),
         Movlhps => (K::Shuffle(S::MoveLowToHigh), 8, false, false),
         Movhlps => (K::Shuffle(S::MoveHighToLow), 8, false, false),
         Pabsb => (K::Packed(P::Absolute), 1, false, false),
@@ -479,7 +488,7 @@ pub(super) fn lower(instruction: &Instruction) -> Option<Result<SimdOperation, D
             || memory_bytes == 16
                 && !matches!(
                     instruction.mnemonic(),
-                    Movups | Movupd | Movdqu | Maskmovdqu | Maskmovq
+                    Movups | Movupd | Movdqu | Lddqu | Maskmovdqu | Maskmovq
                 );
         Ok(SimdOperation {
             kind,
