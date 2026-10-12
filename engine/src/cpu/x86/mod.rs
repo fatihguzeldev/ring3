@@ -1,5 +1,6 @@
 pub mod atomic;
 pub mod bits;
+pub(crate) mod capabilities;
 mod control;
 pub mod decode;
 mod environment;

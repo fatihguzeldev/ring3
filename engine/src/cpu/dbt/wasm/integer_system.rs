@@ -1,31 +1,8 @@
 use super::{atomic, locals::*, memory};
-use crate::cpu::x86::Register32::*;
+use crate::cpu::x86::{Register32::*, capabilities::CPU_ID_LEAVES};
 use wasm_encoder::{BlockType, InstructionSink};
 
 pub(super) fn cpuid(code: &mut InstructionSink<'_>) {
-    const LEAVES: [(u32, [u32; 4]); 5] = [
-        (
-            0,
-            [
-                7,
-                u32::from_le_bytes(*b"Ring"),
-                u32::from_le_bytes(*b"ine "),
-                u32::from_le_bytes(*b"3Eng"),
-            ],
-        ),
-        (
-            1,
-            [
-                0x600,
-                8 << 8,
-                1 | 1 << 1 | 1 << 9 | 1 << 19 | 1 << 20 | 1 << 22 | 1 << 23 | 1 << 25,
-                1 | 1 << 4 | 1 << 8 | 1 << 15 | 1 << 19 | 1 << 23 | 1 << 24 | 1 << 25 | 1 << 26,
-            ],
-        ),
-        (7, [0, 1 << 3 | 1 << 8, 0, 0]),
-        (0x8000_0000, [0x8000_0001, 0, 0, 0]),
-        (0x8000_0001, [0, 0, 1 << 5, 1 << 27]),
-    ];
     // capture both query inputs before publishing any output register.
     code.local_get(register(Eax))
         .local_set(RESULT)
@@ -35,13 +12,21 @@ pub(super) fn cpuid(code: &mut InstructionSink<'_>) {
         code.i32_const(0).local_set(register(r));
     }
     // unknown leaves and structured subleaves are zero by software profile policy.
-    for (leaf, values) in LEAVES {
-        code.local_get(RESULT).i32_const(leaf as i32).i32_eq();
-        if leaf == 7 {
-            code.local_get(RHS).i32_eqz().i32_and();
+    for leaf in CPU_ID_LEAVES {
+        code.local_get(RESULT)
+            .i32_const(leaf.function as i32)
+            .i32_eq();
+        if let Some(subfunction) = leaf.subfunction {
+            code.local_get(RHS);
+            if subfunction == 0 {
+                code.i32_eqz();
+            } else {
+                code.i32_const(subfunction as i32).i32_eq();
+            }
+            code.i32_and();
         }
         code.if_(BlockType::Empty);
-        for (r, value) in [Eax, Ebx, Ecx, Edx].into_iter().zip(values) {
+        for (r, value) in [Eax, Ebx, Ecx, Edx].into_iter().zip(leaf.registers) {
             code.i32_const(value as i32).local_set(register(r));
         }
         code.end();
