@@ -1,9 +1,19 @@
-# original locked dword compare-exchange consumer
+# p2-locked-cmpxchg32 provenance
 
-`kernel.c` is the unmodified header-free C11 source frozen before product implementation. The discovery compiler output is a relocation-free original 38-byte leaf with `lock cmpxchg dword ptr [edi],esi` at offset 19, a natural boolean return and an ordinary failure-only store to the caller's expected pointer. The complete compiler extent is retained; no instruction, prefix, branch or operand is rewritten.
+`kernel.c` is a self-authored C11 compare-exchange leaf with a natural Boolean return and a failure-only store to the caller-owned expected DWORD. The complete original 38-byte compiler function is retained.
 
-`build.py` reuses the pinned `p2-compiled-records/build.py` profile and strict COFF extractor; only the fixed function symbol changes to `ring3_compare_exchange`. It checks the original 283-byte source, 562-byte object and 38-byte text against discovery hashes. Empty data/bss and 100-byte debug metadata are the only discarded non-code sections. Undefined externals, relocations, directives and arbitrary data dependencies are not admitted. Two fresh builds are planned, with their original object/text/disassembly/receipt frozen before actual execution. Routine actual tests consume those files without invoking a compiler. Observed build and runtime results belong in the evidence bank and result JSON; this source document remains stable during execution.
+The fixed producer uses Apple clang/LLVM objdump with the freestanding scalar `i686-pc-windows-msvc` C11 profile. It imports the pinned profile from `engine/tests/programs/fixtures/p2-compiled-records/build.py`. Exact tool identities, flags, environment, input hashes and artifact hashes are in `receipt.json`.
 
-The actual consumer is designed to call the same original leaf twice: the first mismatch naturally updates expected and returns zero; the second consumes the updated expected and returns one. A separate authored caller consumes both returns without host CPU/RAM reseeding between calls. The ordinary expected-output store is outside the locked cell transaction and may fault after earlier instructions committed; the whole function has no rollback guarantee.
+The ordinary COFF extractor retains the complete function text and rejects relocations, unresolved externals and malformed layouts. Adapters change the fixed function-symbol check without rewriting compiler instructions.
 
-Scope is finite canonical synchronous execution over private flat32 memory and unshared Wasm. There is no hardware bus/cache-lock, concurrent linearizability, C11 interthread memory-order, general compiler/Windows, browser/SDK/game or performance claim. Tracked contract: [R3-544](https://linear.app/ring3-dev/issue/R3-544).
+Retained inputs/artifacts: [kernel.c](kernel.c), [kernel.disasm.txt](kernel.disasm.txt), [kernel.obj](kernel.obj), [kernel.text.bin](kernel.text.bin).
+
+Reproduce from the repository root into a new output directory:
+
+```sh
+python3 engine/tests/cpu/atomic/fixtures/p2-locked-cmpxchg32/build.py target/p2-locked-cmpxchg32-rebuild-new
+```
+
+Routine tests consume retained bytes without invoking a compiler. Receipt working directories and historical paths identify the original build; compare artifact hashes when reproducing elsewhere.
+
+The C atomic source is a compiler witness; it does not establish concurrent C11 ordering or hardware bus-lock behavior.

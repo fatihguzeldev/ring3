@@ -1,17 +1,19 @@
-# Original Windows bit-set consumer
+# p2-locked-bts32 provenance
 
-This self-authored header-free C function calls the Windows `_interlockedbittestandset` intrinsic with bit index 5 and returns its previous value as a `u32`. The declaration matches the installed clang `intrin.h`: `unsigned char _interlockedbittestandset(long volatile *, long)`. The Windows i686 target makes `long` 32 bits, checked by a source assertion. The source uses the intrinsic declaration and pragma; it contains no inline assembly.
+`kernel.c` is a self-authored, header-free C leaf using the Windows `_interlockedbittestandset` intrinsic at bit5. It returns the previous bit as u32, asserts a four-byte Windows i686 long, and uses an intrinsic declaration/pragma without inline assembly.
 
-The [Microsoft intrinsic contract](https://learn.microsoft.com/en-us/cpp/intrinsics/interlockedbittestandset-intrinsic-functions?view=msvc-170) describes the old-bit result and x86 LOCK BTS implementation. Its displayed syntax omits the volatile qualifier; the installed compiler declaration and Microsoft's common intrinsic table include it. The source retains the compiler-compatible declaration explicitly.
+The fixed producer uses Apple clang/LLVM objdump with the freestanding scalar `i686-pc-windows-msvc` C11 profile. It imports the pinned profile from `engine/tests/programs/fixtures/p2-compiled-records/build.py`. Exact tool identities, flags, environment, input hashes and artifact hashes are in `receipt.json`.
 
-The builder imports the unchanged scalar i686 profile and strict ordinary COFF extractor from `../p2-compiled-records/build.py`, SHA256 `fe426f202b48664a87357c766d39099b9d35b5d8217c2b114696164a0d468258`. Only the extractor's function symbol and diagnostic spelling change from `ring3_reduce` to `ring3_set_bit`. Flags, environment, tools and COFF constraints remain fixed. A fresh output directory, tool versions, argv, source/builder/tool hashes and post-build input stability are recorded. Routine tests consume the retained artifacts without invoking a compiler.
+The ordinary COFF extractor retains the complete function text and rejects relocations, unresolved externals and malformed layouts. Adapters change the fixed function-symbol check without rewriting compiler instructions.
 
-Two root-run discovery builds produced the identical whole original 19-byte text `8b4c2404ba0500000031c0f00fab110f92c0c3`, SHA256 `b197e56d9f334c69c7f1cf552f0c000c3f7c9c4339e9e3cec32983a685480326`. The original COFF is 534 bytes, SHA256 `2e5f6472b630a2e3b96558d3acc7b8090b1305bea9e53f931f5c9ac08158e8d1`. The only code section is `.text`; `.data` and `.bss` are empty, and `.debug$S` has 100 bytes of compiler metadata. There are no relocations or unresolved external symbols. A formal fixture build is required to reproduce the discovery C, object, text and disassembly before artifact publication.
+Retained inputs/artifacts: [kernel.c](kernel.c), [kernel.disasm.txt](kernel.disasm.txt), [kernel.obj](kernel.obj), [kernel.text.bin](kernel.text.bin).
 
-The complete six-instruction original function loads its pointer, sets EDX to 5, clears EAX, executes register-index LOCK BTS at offset 11, sets AL from CF and naturally returns. The original XOR makes both raw `u32` returns exactly 0 or 1. The separately authored guest caller will call this unchanged original twice on one live cell, pause before the first LOCK, consume the first and second returns into 2, and retain CPU/RAM between calls. The caller is distinct from the compiler-produced function.
+Reproduce from the repository root into a new output directory:
 
-The first C11 `fetch_or` scout emitted an already-supported LOCK CMPXCHG CAS loop. That falsified BTS hypothesis and its original artifact remain separate discovery evidence. This fixture follows the actual Windows intrinsic output rather than a compiler flag or instruction rewrite.
+```sh
+python3 engine/tests/cpu/atomic/fixtures/p2-locked-bts32/build.py target/p2-locked-bts32-rebuild-new
+```
 
-The product scope is exact `F0 0F AB /r` memory DWORD with a register bit index. The CPU selects the signed bit-string DWORD and normalized bit; one checked canonical helper returns the old full DWORD after complete Read4 and mandatory Write4 preflight. Already-set identity is still a write. Ring3's existing deterministic undefined-flag policy is `(incoming & 0x442) | oldbit`; it retains ZF/DF/fixed bit 1 and clears the other undefined arithmetic flags. This policy is separate from Intel's defined CF and unchanged ZF requirements.
+Routine tests consume retained bytes without invoking a compiler. Receipt working directories and historical paths identify the original build; compare artifact hashes when reproducing elsewhere.
 
-Actual evidence is planned in all four bound profiles with a valid dirty 4364-byte arena, canonical helper receipts, selected RAM/canaries, precise faults and repair, currentness, malformed nonforwarding packets and consumed-code identity writes. Observed counts and review results belong to the evidence bank and `result.json`; this provenance is stable before execution. The proof is finite private flat32 synchronous unshared execution. It makes no hardware locking, Windows concurrency, shared-memory ordering, full-RAM, compatibility or performance claim. The [R3-551 task](https://linear.app/ring3-dev/issue/R3-551) records the selected contract.
+The C atomic source is a compiler witness; it does not establish concurrent C11 ordering or hardware bus-lock behavior.

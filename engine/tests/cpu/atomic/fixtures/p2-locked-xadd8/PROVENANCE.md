@@ -1,13 +1,19 @@
-# original locked byte exchange-add consumer
+# p2-locked-xadd8 provenance
 
-`kernel.c` is the unchanged 200-byte header-free C11 source frozen before product implementation. Two fresh discovery builds reproduce a 531-byte relocation-free COFF object, the whole 14-byte function and its 392-byte Intel disassembly. The original four instructions load the cell pointer, load and zero-extend the byte increment, execute `lock xadd byte ptr [ecx],al` at offset 9, and naturally return. No instruction, prefix, operand or return is rewritten.
+`kernel.c` is a self-authored, header-free C11 fetch-add leaf. The complete original 14-byte compiler function zero-extends the byte increment, performs memory LOCK XADD and naturally returns the old byte.
 
-`build.py` reuses the pinned `p2-compiled-records/build.py` compiler profile and strict COFF extractor; only the fixed function symbol changes to `ring3_fetch_add`. It checks the original source, whole object and text against the discovery hashes. Empty data/bss and 100-byte debug metadata are the only discarded non-code sections. Undefined externals, relocations, directives and arbitrary data dependencies remain closed. One formal rebuild with the final fixture-relative builder is planned for comparison with both original discovery builds. Routine actual tests consume the frozen object/text/disassembly/receipt without invoking a compiler. Observed build and runtime results belong in the evidence bank and result JSON; this source document remains stable during execution.
+The fixed producer uses Apple clang/LLVM objdump with the freestanding scalar `i686-pc-windows-msvc` C11 profile. It imports the pinned profile from `engine/tests/programs/fixtures/p2-compiled-records/build.py`. Exact tool identities, flags, environment, input hashes and artifact hashes are in `receipt.json`.
 
-The actual consumer is designed to call the same complete original leaf twice. Starting from byte `ef`, increment `12` wraps to `01` and returns `ef`; the first returned byte becomes the second increment, producing `f0` and returning `01`. A separate authored caller explicitly zero-extends each returned `al`, saves the first old byte, and consumes the ordered pair as `0000ef01`, without a host CPU/RAM reseed between calls. The C byte-return ABI promises only `al`; the original compiler's earlier `movzx` also happens to leave its returned `eax` zero extended. Caller instructions are identified separately from the compiler original.
+The ordinary COFF extractor retains the complete function text and rejects relocations, unresolved externals and malformed layouts. Adapters change the fixed function-symbol check without rewriting compiler instructions.
 
-Each locked transaction performs complete Read1 admission, mandatory Write1 admission, one checked version advance and one byte copy. A zero source remains an identity write and invalidates consumed executable source. Failure stops before source-parent, flags, PC or retirement publication; instructions already retired before that failure remain committed. The whole original function and two-call caller are not transactional as a group. BYTE address `ffffffff` is valid and has no split-access or overflow case.
+Retained inputs/artifacts: [kernel.c](kernel.c), [kernel.disasm.txt](kernel.disasm.txt), [kernel.obj](kernel.obj), [kernel.text.bin](kernel.text.bin).
 
-The finite actual fixture is intended to cover all four bound compile profiles, all eight legacy byte source lanes and parent preservation, original effective-address aliases, wrapping ADD flags with live consumers, repair-only fault continuation, zero/changed SMC and strict nonforwarding V5 packet controls. Full 4364-byte arena assertions retain dirty FP; selected neighboring RAM and persisted milestone arenas bound the independent evidence. Routine tests do not require a compiler.
+Reproduce from the repository root into a new output directory:
 
-Scope is canonical synchronous execution over private flat32 memory and unshared Wasm. There is no hardware bus/cache-lock, concurrent linearizability, C11 interthread memory-order, whole-RAM, general compiler/Windows, browser/SDK/game or performance claim. This new LOCK-only admission does not revive rejected R3-542 unprefixed XADD fusion. Tracked contract: [R3-548](https://linear.app/ring3-dev/issue/R3-548).
+```sh
+python3 engine/tests/cpu/atomic/fixtures/p2-locked-xadd8/build.py target/p2-locked-xadd8-rebuild-new
+```
+
+Routine tests consume retained bytes without invoking a compiler. Receipt working directories and historical paths identify the original build; compare artifact hashes when reproducing elsewhere.
+
+The C atomic source is a compiler witness; it does not establish concurrent C11 ordering or hardware bus-lock behavior.

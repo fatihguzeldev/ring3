@@ -1,15 +1,19 @@
-# Original dynamic atomic flag consumer
+# p2-locked-dynamic-flags32 provenance
 
-This self-authored, header-free C11 function updates one atomic DWORD status word with three runtime mask arguments. It discards each fetch result, observes the live word after each sequentially consistent OR, AND and XOR, and returns the XOR checksum of those three observations.
+`kernel.c` is a self-authored, header-free C11 leaf applying sequentially consistent OR, AND and XOR with runtime masks to an atomic DWORD. It discards the fetch results, reads the live word after each update, and returns the XOR of those observations.
 
-Two fresh discovery builds with the unchanged i686 freestanding profile produced identical 577-byte C source, 566-byte ordinary i386 COFF object, complete 38-byte function and 1164-byte Intel disassembly. The original function contains LOCK OR [ESI],EDX at offset 17, AND [ESI],ECX at 22, and XOR [ESI],EAX at 27, each three bytes. Twelve ordinary instructions load the arguments, observe memory, compute the checksum, save and restore ESI, and return naturally. The whole text is `568b4424148b4c24108b54240c8b742408f009168b16f0210e8b0ef0310631d18b0631c85ec3`, SHA-256 `eef4b2124b1aae80ef7aacbefb7c4b4c9ff441789d1b73a91c274c04e78b717e`. It has no relocations, unresolved external function or nonempty data dependency; the only discarded nonempty section is original .debug$S metadata.
+The fixed producer uses Apple clang/LLVM objdump with the freestanding scalar `i686-pc-windows-msvc` C11 profile. It imports the pinned profile from `engine/tests/programs/fixtures/p2-compiled-records/build.py`. Exact tool identities, flags, environment, input hashes and artifact hashes are in `receipt.json`.
 
-The permanent build.py differs from the frozen discovery builder only in repository-root depth, parents[4] instead of parents[3]. It uses the unchanged p2-compiled-records/build.py profile, pinned to `fe426f202b48664a87357c766d39099b9d35b5d8217c2b114696164a0d468258`, and changes the ordinary COFF extractor only from ring3_reduce to ring3_update_dynamic_flags. Compiler flags, tools, environment and whole-function extraction are preserved. Root performs the formal reproduction and publishes its original artifacts. Routine integration consumes the retained bytes without compiling or rewriting them.
+The ordinary COFF extractor retains the complete function text and rejects relocations, unresolved externals and malformed layouts. Adapters change the fixed function-symbol check without rewriting compiler instructions.
 
-The planned actual proof uses a separate 63-byte authored four-argument cdecl caller. The first call on 00020050 uses masks 80010000/FFFDFFBF/00400800, leaves 80410810 and returns 80430850. Guest code preserves that actual return in EBP and PUSHes EAX as the second XOR mask, alongside set 80000000 and keep 0000FFFF. The second call leaves 80430040 and returns 00020040. Guest code adds both returns and stores 80450890. ESI is restored by each original PUSH/POP pair. There is one declared initial CPU/RAM input and no host reseed across the nine original phases or two natural returns.
+Retained inputs/artifacts: [kernel.c](kernel.c), [kernel.disasm.txt](kernel.disasm.txt), [kernel.obj](kernel.obj), [kernel.text.bin](kernel.text.bin).
 
-Four profiles combine replacement/resident and explicit/entry preparation. Three success probes distinguish register-source/base, index and ESP aliases. One XOR-ESP WritePermission failure is retried after protection repair alone. One changed XOR-register consumed-code write retires once, refuses the stale owner, then executes a fresh MOV/self-loop suffix without replaying XOR. The SMC source ends EBFE, matching the selected C008 self-loop. Existing helper, memory, ABI and strict V1 proof is reused; no new canonical fault, MAX or malformed-packet matrix is added.
+Reproduce from the repository root into a new output directory:
 
-The source-derived total is 68 runs, 212 retired instructions, 172 forwarded helpers and eight natural compiler RETs over four contexts and sixteen modules. Observed outcomes belong to result.json and the evidence bank. Per-run assertions cover exactly 4364 bytes with valid dirty FP input; only explicitly persisted milestones/finals support later whole-record reconstruction. RAM checks cover selected frames, compiler data, stack and SMC code rather than whole memory.
+```sh
+python3 engine/tests/cpu/atomic/fixtures/p2-locked-dynamic-flags32/build.py target/p2-locked-dynamic-flags32-rebuild-new
+```
 
-The claim is finite private flat32 synchronous unshared execution of this original consumer and the selected exact DWORD register-source LOCK encodings. It does not establish hardware locking, C11 concurrency, shared-memory ordering, performance, general compiler support or application compatibility.
+Routine tests consume retained bytes without invoking a compiler. Receipt working directories and historical paths identify the original build; compare artifact hashes when reproducing elsewhere.
+
+The C atomic source is a compiler witness; it does not establish concurrent C11 ordering or hardware bus-lock behavior.

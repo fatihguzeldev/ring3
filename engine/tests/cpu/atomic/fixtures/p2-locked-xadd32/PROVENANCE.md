@@ -1,9 +1,19 @@
-# original locked dword exchange-add consumer
+# p2-locked-xadd32 provenance
 
-`kernel.c` is the unmodified header-free C11 source frozen before product implementation. Its discovery compiler output is a relocation-free original 13-byte leaf with `lock xadd dword ptr [ecx],eax` at offset 8 and a natural old-value return. The complete four-instruction extent through `ret` is retained; no instruction, prefix, operand or return is rewritten.
+`kernel.c` is a self-authored, header-free C11 fetch-add leaf. Its complete original 13-byte compiler function includes memory LOCK XADD and naturally returns the old DWORD.
 
-`build.py` reuses the pinned `p2-compiled-records/build.py` profile and strict COFF extractor; only the fixed function symbol changes to `ring3_fetch_add`. It checks the original 206-byte source, 530-byte object and 13-byte text against discovery hashes. Empty data/bss and 100-byte debug metadata are the only discarded non-code sections. Undefined externals, relocations, directives and arbitrary data dependencies are not admitted. Two fresh formal builds are planned, with their original object/text/disassembly/receipt frozen before actual execution. Routine actual tests consume those files without invoking a compiler. Observed build and runtime results belong in the evidence bank and result JSON; this source document remains stable during execution.
+The fixed producer uses Apple clang/LLVM objdump with the freestanding scalar `i686-pc-windows-msvc` C11 profile. It imports the pinned profile from `engine/tests/programs/fixtures/p2-compiled-records/build.py`. Exact tool identities, flags, environment, input hashes and artifact hashes are in `receipt.json`.
 
-The actual consumer is designed to call the same original leaf twice. Starting from `7ffffffe`, increment four produces `80000002` and returns `7ffffffe`; the first return becomes the second increment, producing zero and returning `80000002`. A separate authored caller XORs the two old returns to `fffffffc`, without host CPU/RAM reseeding between calls. Each locked transaction completes before the remaining caller instructions; the whole function has no rollback guarantee. Zero increments still write and invalidate consumed executable source.
+The ordinary COFF extractor retains the complete function text and rejects relocations, unresolved externals and malformed layouts. Adapters change the fixed function-symbol check without rewriting compiler instructions.
 
-Scope is finite canonical synchronous execution over private flat32 memory and unshared Wasm. There is no hardware bus/cache-lock, concurrent linearizability, C11 interthread memory-order, general compiler/Windows, browser/SDK/game or performance claim. This new LOCK-only admission does not revive rejected R3-542 unprefixed XADD fusion. Tracked contract: [R3-545](https://linear.app/ring3-dev/issue/R3-545).
+Retained inputs/artifacts: [kernel.c](kernel.c), [kernel.disasm.txt](kernel.disasm.txt), [kernel.obj](kernel.obj), [kernel.text.bin](kernel.text.bin).
+
+Reproduce from the repository root into a new output directory:
+
+```sh
+python3 engine/tests/cpu/atomic/fixtures/p2-locked-xadd32/build.py target/p2-locked-xadd32-rebuild-new
+```
+
+Routine tests consume retained bytes without invoking a compiler. Receipt working directories and historical paths identify the original build; compare artifact hashes when reproducing elsewhere.
+
+The C atomic source is a compiler witness; it does not establish concurrent C11 ordering or hardware bus-lock behavior.
