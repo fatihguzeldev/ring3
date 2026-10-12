@@ -212,6 +212,22 @@ for (let bits = 0; bits < 128; bits++) {
     const expected = copyState(state);
     expected.eip = conditions[condition](flags) ? 0x1004 : 0x1002;
     execute(`jcc_${condition}`, state, expected, `condition ${condition}/flags${eflags}`);
+
+    const expectedSet = copyState(state);
+    expectedSet.registers[0] = ((state.registers[0] & 0xffffff00) | Number(conditions[condition](flags))) >>> 0;
+    expectedSet.eip = 0x1003;
+    execute(`setcc_${condition}`, state, expectedSet, `SETcc ${condition}/flags${eflags}`);
+
+    const moveState = copyState(state);
+    moveState.registers[1] = 0x76543210;
+    const expectedMove = copyState(moveState);
+    expectedMove.registers[0] = conditions[condition](flags) ? moveState.registers[1] : moveState.registers[0];
+    expectedMove.eip = 0x1003;
+    execute(`cmovcc_${condition}`, moveState, expectedMove, `CMOVcc ${condition}/flags${eflags}`);
+
+    const wordState = initial(0x12341000, eflags), expectedWord = copyState(wordState);
+    expectedWord.eip = conditions[condition](flags) ? 0x1005 : 0x12341005;
+    execute(`word_jcc_${condition}`, wordState, expectedWord, `rel16 Jcc ${condition}/flags${eflags}`);
   }
 }
 

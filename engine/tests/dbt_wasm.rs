@@ -251,6 +251,28 @@ fn generated_modules_execute_in_node_against_independent_oracles() {
             compiled.wasm_bytes(&memory).unwrap(),
         )
         .unwrap();
+        for (name, pc, bytes) in [
+            ("setcc", 0x1000, vec![0x0f, 0x90 + condition as u8, 0xc0]),
+            ("cmovcc", 0x1000, vec![0x0f, 0x40 + condition as u8, 0xc1]),
+            (
+                "word_jcc",
+                0x1234_1000,
+                vec![0x66, 0x0f, 0x80 + condition as u8, 0, 0],
+            ),
+        ] {
+            let memory = memory_with_code(pc, &bytes);
+            let compiled = compile_region(
+                &memory,
+                &[block(pc, bytes.len() as u32)],
+                CompileLimits::default(),
+            )
+            .unwrap();
+            fs::write(
+                output.join(format!("{name}_{condition}.wasm")),
+                compiled.wasm_bytes(&memory).unwrap(),
+            )
+            .unwrap();
+        }
     }
     let result = Command::new("node")
         .arg(root.join("engine/src/cpu/dbt/wasm/tests/run.mjs"))
