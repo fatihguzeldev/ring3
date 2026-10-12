@@ -41,7 +41,9 @@ fn actual_memory_division_reads_old_ea_and_retries_without_cpu_repair() {
     )
     .unwrap();
     let result = Command::new("node")
-        .arg(root.join("engine/tests/cpu/multiply/divide/memory/fixtures/p2-memory-division/runtime/run.mjs"))
+        .arg(root.join(
+            "engine/tests/cpu/multiply/divide/memory/fixtures/p2-memory-division/runtime/run.mjs",
+        ))
         .arg(&engine)
         .arg(&output)
         .arg(root)

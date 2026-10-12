@@ -39,7 +39,9 @@ fn run_fixture(script: &str) {
     fs::write(output.join("initial-arena.bin"), initial).unwrap();
     let result = wasm_support::run_node(
         root,
-        &format!("engine/tests/cpu/profile/integer/fixtures/p2-integer-completion/runtime/{script}"),
+        &format!(
+            "engine/tests/cpu/profile/integer/fixtures/p2-integer-completion/runtime/{script}"
+        ),
         &engine,
         &output,
         None,

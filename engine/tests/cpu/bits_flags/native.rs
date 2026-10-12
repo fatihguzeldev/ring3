@@ -31,10 +31,10 @@ mod cpu_word_bit_scan;
 #[path = "test/register/native/word.rs"]
 mod cpu_word_bit_test;
 
-#[path = "test/memory/native/word.rs"]
-mod cpu_word_memory_bit_test;
 #[path = "count/native/forms.rs"]
 mod cpu_bit_counts;
+#[path = "test/memory/native/word.rs"]
+mod cpu_word_memory_bit_test;
 
 #[path = "manipulation/native/bmi1.rs"]
 mod cpu_bmi1;

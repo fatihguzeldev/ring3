@@ -112,14 +112,17 @@ fn actual_engine_wasm_executes_guest_stack_values_and_cleanup() {
     fs::create_dir_all(&output).unwrap();
     let injector = output.join("helper-injector.wasm");
     fs::write(&injector, helper_injector()).unwrap();
-    let result = Command::new("node")
-        .arg(root.join("engine/tests/cpu/dbt/lowering/stack/fixtures/p2-stack-values/runtime/run.mjs"))
-        .arg(&engine)
-        .arg(&injector)
-        .arg(&output)
-        .arg(root)
-        .output()
-        .unwrap();
+    let result =
+        Command::new("node")
+            .arg(root.join(
+                "engine/tests/cpu/dbt/lowering/stack/fixtures/p2-stack-values/runtime/run.mjs",
+            ))
+            .arg(&engine)
+            .arg(&injector)
+            .arg(&output)
+            .arg(root)
+            .output()
+            .unwrap();
     assert!(
         result.status.success(),
         "actual engine stack values Node integration failed:\n{}\n{}",

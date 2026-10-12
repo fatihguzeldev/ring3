@@ -149,7 +149,9 @@ fn actual_engine_wasm_executes_guest_indirect_control() {
     let injector = output.join("helper-injector.wasm");
     fs::write(&injector, helper_injector()).unwrap();
     let result = Command::new("node")
-        .arg(root.join("engine/tests/cpu/dbt/lowering/control/fixtures/p2-indirect/runtime/run.mjs"))
+        .arg(
+            root.join("engine/tests/cpu/dbt/lowering/control/fixtures/p2-indirect/runtime/run.mjs"),
+        )
         .arg(&engine)
         .arg(&injector)
         .arg(&output)

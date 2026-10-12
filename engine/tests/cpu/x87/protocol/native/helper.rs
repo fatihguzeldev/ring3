@@ -79,12 +79,15 @@ fn actual_x87_success_packets_reject_illegal_integer_flags_before_publication() 
             .as_nanos()
     ));
     fs::create_dir_all(&output).unwrap();
-    let result = Command::new("node")
-        .arg(root.join("engine/tests/cpu/x87/protocol/fixtures/p2-x87-helper-protocol/runtime/run.mjs"))
-        .arg(engine)
-        .arg(&output)
-        .output()
-        .unwrap();
+    let result =
+        Command::new("node")
+            .arg(root.join(
+                "engine/tests/cpu/x87/protocol/fixtures/p2-x87-helper-protocol/runtime/run.mjs",
+            ))
+            .arg(engine)
+            .arg(&output)
+            .output()
+            .unwrap();
     fs::write(output.join("node.stdout.log"), &result.stdout).unwrap();
     fs::write(output.join("node.stderr.log"), &result.stderr).unwrap();
     assert!(

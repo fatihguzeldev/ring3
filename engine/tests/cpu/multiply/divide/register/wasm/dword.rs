@@ -109,15 +109,18 @@ fn actual_wasm_division_has_precise_faults_aliases_and_version_five_continuation
         unit.wasm_bytes(&memory).unwrap(),
     )
     .unwrap();
-    let result = Command::new("node")
-        .arg(root.join("engine/tests/cpu/multiply/divide/register/fixtures/p2-division/runtime/run.mjs"))
-        .arg(&engine)
-        .arg(&output)
-        .arg(root)
-        .arg(ARENA_SIZE.to_string())
-        .env("RING3_ENGINE_SHA256", expected)
-        .output()
-        .unwrap();
+    let result =
+        Command::new("node")
+            .arg(root.join(
+                "engine/tests/cpu/multiply/divide/register/fixtures/p2-division/runtime/run.mjs",
+            ))
+            .arg(&engine)
+            .arg(&output)
+            .arg(root)
+            .arg(ARENA_SIZE.to_string())
+            .env("RING3_ENGINE_SHA256", expected)
+            .output()
+            .unwrap();
     assert!(
         result.status.success(),
         "division integration failed:\n{}\n{}",

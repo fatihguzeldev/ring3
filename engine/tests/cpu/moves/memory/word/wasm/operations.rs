@@ -181,7 +181,9 @@ fn actual_engine_word_memory_moves_atomic_faults_current_ram_and_currency() {
     }
     write_new(&output.join("initial-arena.bin"), &initial);
     let result = Command::new("node")
-        .arg(root.join("engine/tests/cpu/moves/memory/word/fixtures/p2-word-memory-move/runtime/run.mjs"))
+        .arg(root.join(
+            "engine/tests/cpu/moves/memory/word/fixtures/p2-word-memory-move/runtime/run.mjs",
+        ))
         .arg(&engine)
         .arg(&injector)
         .arg(&output)

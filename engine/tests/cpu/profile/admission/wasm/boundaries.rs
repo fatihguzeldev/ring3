@@ -20,15 +20,14 @@ fn extended_records_refuse_malformed_and_aliased_inputs_before_publication() {
             .as_nanos()
     ));
     fs::create_dir_all(&output).unwrap();
-    let result =
-        Command::new("node")
-            .arg(root.join(
-                "engine/tests/cpu/profile/admission/fixtures/p2-cpu-profile-boundaries/runtime/run.mjs",
-            ))
-            .arg(engine)
-            .arg(&output)
-            .output()
-            .unwrap();
+    let result = Command::new("node")
+        .arg(root.join(
+            "engine/tests/cpu/profile/admission/fixtures/p2-cpu-profile-boundaries/runtime/run.mjs",
+        ))
+        .arg(engine)
+        .arg(&output)
+        .output()
+        .unwrap();
     fs::write(output.join("node.stdout.log"), &result.stdout).unwrap();
     fs::write(output.join("node.stderr.log"), &result.stderr).unwrap();
     assert!(

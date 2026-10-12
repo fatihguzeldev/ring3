@@ -114,7 +114,9 @@ fn actual_byte_division_captures_ax_aliases_and_has_precise_retained_faults() {
         ],
     );
     let result = Command::new("node")
-        .arg(root.join("engine/tests/cpu/multiply/divide/register/fixtures/p2-byte-division/runtime/run.mjs"))
+        .arg(root.join(
+            "engine/tests/cpu/multiply/divide/register/fixtures/p2-byte-division/runtime/run.mjs",
+        ))
         .arg(&engine)
         .arg(&output)
         .arg(root)

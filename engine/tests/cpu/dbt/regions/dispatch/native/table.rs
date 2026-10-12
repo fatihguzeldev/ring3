@@ -254,7 +254,9 @@ fn standalone_regions_share_a_wasm_table_without_warm_host_calls() {
     fs::write(output.join("dispatcher.wasm"), dispatcher()).unwrap();
     fs::write(output.join("wrong.wasm"), wrong_signature()).unwrap();
     let result = Command::new("node")
-        .arg(root.join("engine/tests/cpu/dbt/regions/dispatch/fixtures/p2-table-dispatch/runtime/run.mjs"))
+        .arg(root.join(
+            "engine/tests/cpu/dbt/regions/dispatch/fixtures/p2-table-dispatch/runtime/run.mjs",
+        ))
         .arg(&output)
         .arg(root)
         .output()

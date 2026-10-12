@@ -134,17 +134,16 @@ fn actual_engine_wasm_executes_exact_width_memory_extensions() {
     fs::create_dir_all(&output).unwrap();
     let injector = output.join("helper-injector.wasm");
     fs::write(&injector, helper_injector()).unwrap();
-    let result =
-        Command::new("node")
-            .arg(root.join(
-                "engine/tests/cpu/dbt/lowering/memory/fixtures/p2-memory-extensions/runtime/run.mjs",
-            ))
-            .arg(&engine)
-            .arg(&injector)
-            .arg(&output)
-            .arg(root)
-            .output()
-            .unwrap();
+    let result = Command::new("node")
+        .arg(root.join(
+            "engine/tests/cpu/dbt/lowering/memory/fixtures/p2-memory-extensions/runtime/run.mjs",
+        ))
+        .arg(&engine)
+        .arg(&injector)
+        .arg(&output)
+        .arg(root)
+        .output()
+        .unwrap();
     assert!(
         result.status.success(),
         "actual engine memory-extension Node integration failed:\n{}\n{}",

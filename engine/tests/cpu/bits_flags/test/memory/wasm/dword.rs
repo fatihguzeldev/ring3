@@ -75,7 +75,9 @@ fn actual_memory_bt_signed_index_immediate_mask_and_precise_retry() {
     }
     fs::write(output.join("bt.x86"), bytes).unwrap();
     let result = Command::new("node")
-        .arg(root.join("engine/tests/cpu/bits_flags/test/memory/fixtures/p2-memory-bit-test32/runtime/run.mjs"))
+        .arg(root.join(
+            "engine/tests/cpu/bits_flags/test/memory/fixtures/p2-memory-bit-test32/runtime/run.mjs",
+        ))
         .arg(&engine)
         .arg(&output)
         .arg(root)

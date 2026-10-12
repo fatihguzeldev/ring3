@@ -148,14 +148,17 @@ fn actual_engine_wasm_executes_ordered_guest_memory_stack_operands() {
     fs::create_dir_all(&output).unwrap();
     let injector = output.join("helper-injector.wasm");
     fs::write(&injector, helper_injector()).unwrap();
-    let result = Command::new("node")
-        .arg(root.join("engine/tests/cpu/dbt/lowering/memory/fixtures/p2-memory-stack/runtime/run.mjs"))
-        .arg(&engine)
-        .arg(&injector)
-        .arg(&output)
-        .arg(root)
-        .output()
-        .unwrap();
+    let result =
+        Command::new("node")
+            .arg(root.join(
+                "engine/tests/cpu/dbt/lowering/memory/fixtures/p2-memory-stack/runtime/run.mjs",
+            ))
+            .arg(&engine)
+            .arg(&injector)
+            .arg(&output)
+            .arg(root)
+            .output()
+            .unwrap();
     assert!(
         result.status.success(),
         "actual engine memory stack Node integration failed:\n{}\n{}",

@@ -55,7 +55,7 @@ mod cpu_word_register_exchange;
 #[path = "register/native/word.rs"]
 mod cpu_word_register_move;
 
-#[path = "addressing/lookup/native/xlat.rs"]
-mod cpu_xlat;
 #[path = "endian/native/movbe.rs"]
 mod cpu_movbe;
+#[path = "addressing/lookup/native/xlat.rs"]
+mod cpu_xlat;
