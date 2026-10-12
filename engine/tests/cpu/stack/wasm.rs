@@ -21,3 +21,9 @@ mod cpu_word_frame_flags_wasm;
 
 #[path = "operands/wasm/word.rs"]
 mod cpu_word_stack_wasm;
+
+#[path = "bulk/segments/wasm.rs"]
+mod cpu_bulk_segments_wasm;
+
+#[path = "frame/segments/wasm.rs"]
+mod cpu_frame_segments_wasm;

@@ -55,8 +55,8 @@ function record(magic, size, fields, version = 1) {
   fields.forEach((v, i) => b.writeUInt32LE(v >>> 0, 16 + i * 4)); return b;
 }
 const state = c => record('R3ST', 56, [...c.registers, c.pc, c.flags]);
-const exit = (reason, retired, f, version = 2) => record('R3EX', 40, [reason, retired, f?.detail ?? 0, f?.address ?? 0, f ? 1 : 0, f?.width ?? 0], version);
-const helper = (width, f) => record('R3MH', 40, [f ? 1 : 0, 0, f?.detail ?? 0, f?.address ?? 0, f ? 1 : 0, f ? width : 0], 7);
+const exit = (reason, retired, f, version = 2) => record('R3EX', 40, [reason, retired, f?.detail ?? 0, f?.address ?? 0, f?.segment ? 0 : f ? 1 : 0, f?.segment ? 0 : f?.width ?? 0], version);
+const helper = (width, f) => record('R3MH', 40, [f?.segment ? 7 : f ? 1 : 0, 0, f?.detail ?? 0, f?.address ?? 0, f?.segment ? 0 : f ? 1 : 0, f ? width : 0], 7);
 const arena = c => Buffer.from(new Uint8Array(c.memory.buffer, c.base, SIZE));
 function input(c, offset, bytes) {
   const expected = arena(c); expected.set(bytes, offset); new Uint8Array(c.memory.buffer).set(bytes, c.base + offset);
@@ -185,14 +185,14 @@ function faultSetup(c, row, slot, mode) {
     if (c.mapped.has(at - at % 4096)) upload(c, at, original.subarray(offset, offset + length)); offset += length;
   }
   if (mode.includes('deny')) host(c, 'protect', [0xa000, 1, 2]);
-  return {esp, known, fault: {width: row.width, detail: overflow ? 3 : mode.includes('deny') ? 2 : 1,
-    address: overflow ? 0xffffffff : 0xa000}, length: slots.indexOf(slot) + 1};
+  return {esp, known, fault: {segment: overflow, width: row.width, detail: overflow ? 0 : mode.includes('deny') ? 2 : 1,
+    address: overflow ? 0 : 0xa000}, length: overflow ? 0 : slots.indexOf(slot) + 1};
 }
 function stopped(c, module, row, failure, label) {
   const before = seed(c, row.pc + 0x40, failure.esp), held = {...before, registers: [...before.registers], pc: row.pc + 0x45}; held.registers[3] = 0x11223344;
   const target = {...row, pc: held.pc};
   for (const [budget, retired] of [[2, 1], [1, 0]]) {
-    run(c, module, budget, held, {label, reason: 5, retired, row: target, fault: failure.fault,
+    run(c, module, budget, held, {label, reason: failure.fault.segment ? 15 : 5, retired, row: target, fault: failure.fault,
       expectedReads: addresses(failure.esp, row.width, failure.length), stackInput: held.registers}); checkRam(c, 0x8000, canary); counts.faults++;
   }
   return target;

@@ -24,3 +24,12 @@ mod cpu_word_frame_flags;
 
 #[path = "operands/native/word.rs"]
 mod cpu_word_stack;
+
+#[path = "support/segments.rs"]
+mod segment_support;
+
+#[path = "bulk/segments/native.rs"]
+mod cpu_bulk_segments;
+
+#[path = "frame/segments/native.rs"]
+mod cpu_frame_segments;

@@ -5,7 +5,7 @@ use crate::{
         cpu_helper::{CpuMemoryError, encode_cpu_result},
         memory_helper::HELPER_SIZE,
     },
-    cpu::x86::StackFrameKind,
+    cpu::x86::{SegmentAccess, SegmentContext, SegmentRegister, StackFrameKind},
     memory::{Access, AddressSpace, GuestAddress, MemoryError},
 };
 
@@ -44,6 +44,62 @@ impl Prepared {
         }
         Ok(u32::from_le_bytes(bytes))
     }
+}
+
+// the synchronous batch profile checks all cached ss authority before probing ram.
+// this does not define a universal priority between independently faulting operands.
+fn check_segments(
+    context: &SegmentContext,
+    kind: StackFrameKind,
+    allocation: u16,
+    nesting: u8,
+    original: [u32; 8],
+) -> Result<(), CpuMemoryError> {
+    let width = kind.width();
+    let span = |offset, access| {
+        super::segments::check_cached_span(context, SegmentRegister::Ss, offset, width, access)
+    };
+    match kind {
+        StackFrameKind::PushAll32 | StackFrameKind::PushAll16 => {
+            for index in 1..=8 {
+                span(
+                    original[4].wrapping_sub(index * width),
+                    SegmentAccess::Write,
+                )?;
+            }
+        }
+        StackFrameKind::PopAll32 | StackFrameKind::PopAll16 => {
+            for slot in [0, 1, 2, 4, 5, 6, 7] {
+                span(original[4].wrapping_add(slot * width), SegmentAccess::Read)?;
+            }
+        }
+        StackFrameKind::Enter32 | StackFrameKind::Enter16 => {
+            span(original[4].wrapping_sub(width), SegmentAccess::Write)?;
+            for index in 1..u32::from(nesting) {
+                span(original[5].wrapping_sub(index * width), SegmentAccess::Read)?;
+                span(
+                    original[4].wrapping_sub((index + 1) * width),
+                    SegmentAccess::Write,
+                )?;
+            }
+            let count = if nesting == 0 {
+                1
+            } else {
+                u32::from(nesting) + 1
+            };
+            if nesting != 0 {
+                span(
+                    original[4].wrapping_sub(count * width),
+                    SegmentAccess::Write,
+                )?;
+            }
+            span(
+                original[4].wrapping_sub(count * width + u32::from(allocation)),
+                SegmentAccess::Write,
+            )?;
+        }
+    }
+    Ok(())
 }
 
 fn prepare(
@@ -133,16 +189,23 @@ impl EngineInstance {
         let original = std::array::from_fn(|index| {
             u32::from_le_bytes(input[index * 4..index * 4 + 4].try_into().unwrap())
         });
+        let context = self.segment_context()?;
         let memory = self.memory.as_mut().ok_or(HostError::Closed)?;
         let version = memory.code_validation_version();
-        let result = prepare(memory, kind, allocation, nesting, original).and_then(|prepared| {
-            memory.write_stack(
-                &prepared.addresses[..prepared.count],
-                &prepared.values[..prepared.count],
-                kind.width() as usize,
-            )?;
-            Ok(prepared.registers)
-        });
+        let result = check_segments(&context, kind, allocation, nesting, original)
+            .and_then(|()| {
+                prepare(memory, kind, allocation, nesting, original).map_err(CpuMemoryError::Memory)
+            })
+            .and_then(|prepared| {
+                memory
+                    .write_stack(
+                        &prepared.addresses[..prepared.count],
+                        &prepared.values[..prepared.count],
+                        kind.width() as usize,
+                    )
+                    .map_err(CpuMemoryError::Memory)?;
+                Ok(prepared.registers)
+            });
         let changed = result.is_ok() && version != memory.code_validation_version();
         let (length, packet) = match result {
             Ok(registers) => {
@@ -154,12 +217,15 @@ impl EngineInstance {
                 (0, Ok(()))
             }
             Err(error) => (
-                if matches!(error, MemoryError::Fault(_)) {
+                if matches!(
+                    error,
+                    CpuMemoryError::Memory(MemoryError::Fault(_)) | CpuMemoryError::StackSegment(_)
+                ) {
                     kind.width()
                 } else {
                     0
                 },
-                Err(CpuMemoryError::Memory(error)),
+                Err(error),
             ),
         };
         encode_cpu_result(

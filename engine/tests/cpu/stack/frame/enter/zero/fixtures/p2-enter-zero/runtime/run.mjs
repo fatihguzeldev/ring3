@@ -42,9 +42,9 @@ function record(magic, size, fields, version = 1) {
 }
 const state = c => record('R3ST', 56, [...c.registers, c.pc, c.flags]);
 const exit = (reason, retired, fault, version = 2) => record('R3EX', 40,
-  [reason, retired, fault?.detail ?? 0, fault?.address ?? 0, fault?.access ?? 0, fault?.width ?? 0], version);
+  [reason, retired, fault?.detail ?? 0, fault?.address ?? 0, fault?.access ?? 0, fault?.segment ? 0 : fault?.width ?? 0], version);
 function helper(event, fault) {
-  if (event.stack) return record('R3MH', 40, [fault ? 1 : 0, 0, fault?.detail ?? 0, fault?.address ?? 0, fault?.access ?? 0, fault ? event.width : 0], 7);
+  if (event.stack) return record('R3MH', 40, [fault?.segment ? 7 : fault ? 1 : 0, 0, fault?.detail ?? 0, fault?.address ?? 0, fault?.access ?? 0, fault ? event.width : 0], 7);
   const version = event.width === 4 ? 1 : event.access === 1 ? 2 : 4;
   return record('R3MH', 40, [fault ? 1 : 0, fault ? 0 : event.access === 1 ? event.value : 0,
     fault?.detail ?? 0, fault?.address ?? 0, fault?.access ?? 0, event.width === 2 || fault ? event.width : 0], version);
@@ -240,9 +240,10 @@ function repair(c, f) {
 }
 function stopped(c, unit, row, f, r, label) {
   const before = seed(c, row.pc - 5, r), next = {...before, registers: [...before.registers], pc: row.pc}; next.registers[3] = 0x11223344;
-  const effects = transition(next, row), fault = {detail: f.detail, address: f.faultAddress, access: 2, width: row.width};
-  run(c, unit, 2, next, {label: label + ' after prior MOV retirement', reason: 5, retired: 1, fault, events: [effects.event]}); failureRam(c, f);
-  run(c, unit, 1, next, {label: label + ' unchanged retry', reason: 5, retired: 0, fault, events: [effects.event]}); failureRam(c, f);
+  const effects = transition(next, row), segment = f.name === 'overflow', reason = segment ? 15 : 5;
+  const fault = {segment, detail: segment ? 0 : f.detail, address: segment ? 0 : f.faultAddress, access: segment ? 0 : 2, width: row.width};
+  run(c, unit, 2, next, {label: label + ' after prior MOV retirement', reason, retired: 1, fault, events: [effects.event]}); failureRam(c, f);
+  run(c, unit, 1, next, {label: label + ' unchanged retry', reason, retired: 0, fault, events: [effects.event]}); failureRam(c, f);
   counts.faults += 2; return next;
 }
 for (const owner of ['replacement', 'resident']) for (const entries of [false, true]) {
@@ -343,7 +344,7 @@ const result = {status: 'ok', engine_sha256: engine.sha256, source_pins: sourceP
     'this retained fixture covers C8 0000 00 and66 C8 0000 00 under four bound profiles; general allocation/nesting is covered by the dedicated stack-family fixture',
     'independent BigInt full32 stack subtraction, original pointer little-endian digits and own-high WORD merge;16 literal anchors include odd bit0/high disagreement/carry/wrap',
     'all128 admitted FLAGS/form/profile, original EBP never dereferenced, complete4612 GPR/helper/dirtyFP128 effects and selected real RAM/canaries',
-    'seven real checked-write faults/form with prior MOV retirement and unchanged retry; mapping/protection-only repair and separately declared current EBP/ESP/FLAGS inputs',
+    'six paging/write-permission faults and one cached-SS span overflow/form with prior MOV retirement and unchanged retry; Ring3 checks the full logical span before RAM; mapping/protection-only repair and separately declared current EBP/ESP/FLAGS inputs',
     'observed one canonical V7 stack transaction per ENTER plus unchanged read32/read16 LEAVE; exact staged input/result GPRs, live ENTER→LEAVE→ADC/SETcc and fullarena are checked',
     'identity/changed own-code writes commit frame/nextPC/one retirement before6; old owner4 neutral before fresh helper-free suffix, replacement generation remains3',
     'four core/two SMC captures; each unit1/2blocks and1/2/6/12instructions within asserted8/64/65536/sixcapture limits; mapped-page peak tracked within12',

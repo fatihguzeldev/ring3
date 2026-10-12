@@ -156,6 +156,26 @@ fn validate(
     helper_field(code, 16);
     code.local_set(RHS);
     code.local_get(REASON).i32_eqz().if_(BlockType::Empty);
+    code.local_get(RHS)
+        .i32_const(7)
+        .i32_eq()
+        .if_(BlockType::Empty);
+    reset_checks(code);
+    for offset in [24, 28, 32] {
+        expect_field(code, offset, 0);
+    }
+    expect_field(code, 36, kind.width());
+    code.local_get(HELPER_STATUS).i32_eqz().i32_eqz();
+    add_check(code);
+    code.local_get(LHS).if_(BlockType::Empty);
+    infrastructure(code, 2);
+    code.else_();
+    code.i32_const(15).local_set(REASON);
+    for local in [DETAIL, FAULT_ADDRESS, FAULT_ACCESS, FAULT_LENGTH] {
+        code.i32_const(0).local_set(local);
+    }
+    code.end();
+    code.else_();
     code.local_get(RHS).i32_eqz().if_(BlockType::Empty);
     reset_checks(code);
     for offset in [24, 28, 32, 36] {
@@ -218,7 +238,7 @@ fn validate(
     code.end().end();
     code.else_();
     infrastructure(code, 2);
-    code.end().end().end().end().end().end();
+    code.end().end().end().end().end().end().end();
     memory::exit_if_failed(code, exit_depth);
 }
 
