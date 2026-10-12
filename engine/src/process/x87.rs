@@ -5,10 +5,7 @@ use crate::{
         memory_helper::HELPER_SIZE,
         x86::{X87_SIZE, decode_x87, encode_x87},
     },
-    cpu::{
-        dbt::RegistryError,
-        x86::{SegmentRegister, X87Error, X87Operation},
-    },
+    cpu::x86::{SegmentRegister, X87Error, X87Operation},
     memory::{Access, GuestAddress},
 };
 
@@ -167,22 +164,6 @@ impl EngineInstance {
             &mut self.arena[HELPER_OFFSET..HELPER_OFFSET + HELPER_SIZE],
         )
         .map_err(|_| HostError::Infrastructure)?;
-        if !changed {
-            return Ok(StoreCompletion::Complete);
-        }
-        match resident {
-            Some(id) => match self.resident_bytes(id) {
-                Ok(_) => Ok(StoreCompletion::Complete),
-                Err(HostError::Resident(RegistryError::CodeInvalidated)) => {
-                    Ok(StoreCompletion::CodeInvalidated)
-                }
-                Err(error) => Err(error),
-            },
-            None => match self.artifact_bytes() {
-                Ok(_) => Ok(StoreCompletion::Complete),
-                Err(HostError::CodeInvalidated) => Ok(StoreCompletion::CodeInvalidated),
-                Err(error) => Err(error),
-            },
-        }
+        self.cpu_store_currentness(changed, resident)
     }
 }
