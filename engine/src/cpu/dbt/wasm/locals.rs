@@ -23,6 +23,11 @@ pub(super) const ORIGINAL_BUDGET: u32 = 27;
 pub(super) const SNAPSHOT_TF: u32 = 28;
 pub(super) const DEBUG_SHADOW: u32 = 29;
 pub(super) const SNAPSHOT_SHADOW: u32 = 30;
+pub(super) const SIMD_LHS_LOW: u32 = 31;
+pub(super) const SIMD_LHS_HIGH: u32 = 32;
+pub(super) const SIMD_RHS: u32 = 33;
+pub(super) const SIMD_RESULT_LOW: u32 = 34;
+pub(super) const SIMD_RESULT_HIGH: u32 = 35;
 
 pub(super) fn register(register: Register32) -> u32 {
     4 + register.index() as u32

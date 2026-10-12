@@ -683,7 +683,18 @@ pub(in crate::cpu::dbt) fn emit(
     let mut exports = ExportSection::new();
     exports.export("run", ExportKind::Func, function_index);
     module.section(&exports);
-    let declarations = vec![(16, ValType::I32), (1, ValType::I64), (10, ValType::I32)];
+    let mut declarations = vec![(16, ValType::I32), (1, ValType::I64), (10, ValType::I32)];
+    if blocks
+        .iter()
+        .flat_map(|block| &block.instructions)
+        .any(|instruction| {
+            matches!(instruction.operation(), Operation::Simd(operation)
+            if operation.kind == crate::cpu::x86::simd::SimdKind::Crypto(
+                crate::cpu::x86::simd::CryptoKind::CarrylessMultiply))
+        })
+    {
+        declarations.push((5, ValType::I64));
+    }
     let mut function = Function::new(declarations);
     let mut code = function.instructions();
     if let Some(binding) = binding {

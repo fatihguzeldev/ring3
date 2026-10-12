@@ -5,8 +5,8 @@ use super::{
     operands::{effective_address, register, unsupported},
 };
 use crate::cpu::x86::simd::{
-    ConvertKind as C, FloatKind as F, PackedKind as P, ShuffleKind as S, SimdKind as K,
-    SimdOperand as O, SimdOperation, SimdRegister as R,
+    ConvertKind as C, CryptoKind as A, FloatKind as F, PackedKind as P, ShuffleKind as S,
+    SimdKind as K, SimdOperand as O, SimdOperation, SimdRegister as R,
 };
 
 fn operand(instruction: &Instruction, index: u32) -> Result<O, DecodeError> {
@@ -34,6 +34,13 @@ pub(super) fn lower(instruction: &Instruction) -> Option<Result<SimdOperation, D
         return None;
     }
     let (kind, lane_bytes, scalar, aligned) = match instruction.mnemonic() {
+        Aesenc => (K::Crypto(A::EncryptRound), 1, false, false),
+        Aesenclast => (K::Crypto(A::EncryptLast), 1, false, false),
+        Aesdec => (K::Crypto(A::DecryptRound), 1, false, false),
+        Aesdeclast => (K::Crypto(A::DecryptLast), 1, false, false),
+        Aesimc => (K::Crypto(A::InverseMixColumns), 1, false, false),
+        Aeskeygenassist => (K::Crypto(A::KeyAssist), 1, false, false),
+        Pclmulqdq => (K::Crypto(A::CarrylessMultiply), 8, false, false),
         Maskmovq | Maskmovdqu => (K::MaskedStore, 1, false, false),
         Sfence | Lfence | Mfence => (K::Fence, 0, false, false),
         Prefetchnta | Prefetcht0 | Prefetcht1 | Prefetcht2 => (K::Prefetch, 0, false, false),

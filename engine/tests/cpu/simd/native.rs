@@ -24,3 +24,6 @@ mod simd_sse4_arithmetic;
 
 #[path = "cases/native/packed_strings.rs"]
 mod packed_strings;
+
+#[path = "cases/native/simd_crypto.rs"]
+mod simd_crypto;

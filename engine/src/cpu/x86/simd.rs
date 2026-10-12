@@ -177,6 +177,18 @@ pub enum ConvertKind {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(u8)]
+pub enum CryptoKind {
+    EncryptRound,
+    EncryptLast,
+    DecryptRound,
+    DecryptLast,
+    InverseMixColumns,
+    KeyAssist,
+    CarrylessMultiply,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SimdKind {
     Move,
     MoveScalar,
@@ -186,6 +198,7 @@ pub enum SimdKind {
     Shuffle(ShuffleKind),
     Float(FloatKind),
     Convert { kind: ConvertKind, truncate: bool },
+    Crypto(CryptoKind),
     LoadMxcsr,
     StoreMxcsr,
     EmptyMmx,
@@ -232,6 +245,7 @@ impl SimdOperation {
     }
 }
 
+mod crypto;
 mod float;
 mod packed;
 
@@ -295,6 +309,7 @@ impl SimdOperation {
             SimdKind::Shuffle(kind) => (5, kind as u32, false),
             SimdKind::Float(kind) => (6, kind as u32, false),
             SimdKind::Convert { kind, truncate } => (7, kind as u32, truncate),
+            SimdKind::Crypto(kind) => (16, kind as u32, false),
             SimdKind::LoadMxcsr => (8, 0, false),
             SimdKind::StoreMxcsr => (9, 0, false),
             SimdKind::EmptyMmx => (10, 0, false),
@@ -308,7 +323,8 @@ impl SimdOperation {
             .iter()
             .position(|width| *width == self.lane_bytes)
             .unwrap() as u32;
-        let descriptor = kind
+        let descriptor = (kind & 15)
+            | ((kind & 16) << 20)
             | (sub << 4)
             | (lane << 10)
             | (u32::from(self.vector_bytes == 16) << 13)
@@ -336,10 +352,11 @@ pub fn decode_descriptor(
     immediate: u32,
 ) -> Result<SimdOperation, SimdError> {
     use ConvertKind as C;
+    use CryptoKind as A;
     use FloatKind as F;
     use PackedKind as P;
     use ShuffleKind as S;
-    if descriptor & 0xff00_0000 != 0 || operands & !0x3f3f != 0 || immediate > 255 {
+    if descriptor & 0xfe00_0000 != 0 || operands & !0x3f3f != 0 || immediate > 255 {
         return Err(SimdError::InvalidDescriptor);
     }
     let sub = ((descriptor >> 4) & 63) as usize;
@@ -350,7 +367,7 @@ pub fn decode_descriptor(
             Err(SimdError::InvalidDescriptor)
         }
     };
-    let kind = match descriptor & 15 {
+    let kind = match (descriptor & 15) | ((descriptor >> 20) & 16) {
         0 => plain(SimdKind::Move)?,
         1 => plain(SimdKind::MoveScalar)?,
         2 => plain(SimdKind::MoveLow)?,
@@ -491,6 +508,19 @@ pub fn decode_descriptor(
         13 => plain(SimdKind::MaskedStore)?,
         14 => plain(SimdKind::Fence)?,
         15 => plain(SimdKind::Prefetch)?,
+        16 => SimdKind::Crypto(
+            *[
+                A::EncryptRound,
+                A::EncryptLast,
+                A::DecryptRound,
+                A::DecryptLast,
+                A::InverseMixColumns,
+                A::KeyAssist,
+                A::CarrylessMultiply,
+            ]
+            .get(sub)
+            .ok_or(SimdError::InvalidDescriptor)?,
+        ),
         _ => return Err(SimdError::InvalidDescriptor),
     };
     let lane_bytes = *[0, 1, 2, 4, 8, 16]
@@ -561,6 +591,26 @@ fn validate_operation(op: SimdOperation) -> Result<(), SimdError> {
     }
     if op.scalar && !matches!(op.kind, K::MoveScalar | K::Float(_) | K::Convert { .. }) {
         return invalid();
+    }
+    if let K::Crypto(kind) = op.kind {
+        return if op.vector_bytes == 16
+            && op.lane_bytes
+                == if kind == CryptoKind::CarrylessMultiply {
+                    8
+                } else {
+                    1
+                }
+            && xmm(op.destination)
+            && (xmm(op.source) || memory(op.source))
+            && op.memory_bytes == if memory(op.source) { 16 } else { 0 }
+            && op.aligned == memory(op.source)
+            && op.immediate.is_some()
+                == matches!(kind, CryptoKind::KeyAssist | CryptoKind::CarrylessMultiply)
+        {
+            Ok(())
+        } else {
+            invalid()
+        };
     }
     if matches!(op.kind, K::Fence | K::Prefetch) {
         return if op.destination == O::None
@@ -1265,6 +1315,7 @@ fn execute_validated(
             a
         }
         K::Packed(kind) => packed::packed(kind, a, b, size, width, op.immediate),
+        K::Crypto(kind) => crypto::execute(kind, a, b, op.immediate),
         K::Shuffle(kind) => {
             let mut immediate = op.immediate.unwrap_or(0);
             if kind == ShuffleKind::InsertSingle && op.reads_memory() {

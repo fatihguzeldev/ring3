@@ -1,8 +1,9 @@
+pub(crate) mod aes;
 pub(crate) mod extended;
 pub(crate) mod ieee;
 mod integer;
 
-pub(crate) use integer::sqrt_rem;
+pub(crate) use integer::{carryless_product, sqrt_rem};
 
 pub(crate) const INVALID: u16 = 1;
 pub(crate) const DENORMAL: u16 = 2;

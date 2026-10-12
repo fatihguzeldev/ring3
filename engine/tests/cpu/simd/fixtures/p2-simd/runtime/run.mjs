@@ -4,6 +4,7 @@ import {join} from 'node:path';
 import {createHash} from 'node:crypto';
 import {readEngine} from '../../../../../support/wasm/engine.mjs';
 import {packedStringCases} from './packed-strings.mjs';
+import {cryptoCases} from './crypto.mjs';
 const [enginePath,output,root]=process.argv.slice(2),engine=readEngine(enginePath),initial=readFileSync(join(output,'initial-arena.bin'));
 const SIZE=initial.length,SV=4364,FP=4236,SG=4524,T=140,DATA=0x5010;
 const hash=b=>createHash('sha256').update(b).digest('hex'),hex=s=>Buffer.from(s,'hex');
@@ -324,6 +325,8 @@ cases.push(
 );
 const sourcePaths=['engine/src/cpu/x86/simd.rs','engine/src/cpu/x86/simd/packed.rs','engine/src/cpu/x86/simd/float.rs', 'engine/src/math/mod.rs', 'engine/src/math/ieee.rs', 'engine/src/math/integer.rs', 'engine/src/lib.rs','engine/src/cpu/x86/decode/simd.rs','engine/src/cpu/dbt/wasm/simd.rs','engine/src/cpu/dbt/wasm/simd/direct.rs','engine/src/process/cpu/simd.rs', 'engine/src/process/cpu/mod.rs', 'engine/src/process/mod.rs','engine/src/process/memory/span.rs', 'engine/src/process/memory/mod.rs', 'engine/src/process/mod.rs','engine/src/abi/x86/simd.rs','engine/tests/cpu/simd/cases/native/simd_semantics.rs','engine/tests/cpu/simd/cases/native/simd_extensions.rs','engine/tests/cpu/simd/cases/native/simd_sse3.rs','engine/tests/cpu/simd/cases/native/simd_sse4.rs','engine/tests/cpu/simd/cases/native/simd_sse4_moves.rs','engine/tests/cpu/simd/cases/native/simd_sse4_arithmetic.rs', 'engine/tests/cpu/simd/native.rs', 'engine/tests/cpu/simd/native.rs','engine/tests/cpu/simd/cases/wasm/cpu_simd_wasm.rs', 'engine/tests/cpu/simd/wasm.rs', 'engine/tests/support/wasm.rs', 'engine/tests/cpu/simd/wasm.rs', 'engine/tests/support/wasm.rs','engine/tests/cpu/simd/fixtures/p2-simd/runtime/run.mjs'];
 cases.push(...packedStringCases);
+cases.push(...cryptoCases);
+sourcePaths.push('engine/Cargo.toml','Cargo.lock','engine/src/math/aes.rs','engine/src/cpu/x86/simd/crypto.rs','engine/src/cpu/dbt/wasm/locals.rs','engine/tests/cpu/simd/cases/native/simd_crypto.rs','engine/tests/cpu/simd/fixtures/p2-simd/runtime/crypto.mjs');
 sourcePaths.push('engine/src/cpu/x86/packed_strings.rs','engine/src/cpu/x86/decode/packed_strings.rs','engine/src/cpu/dbt/wasm/packed_strings.rs','engine/tests/cpu/simd/cases/native/packed_strings.rs','engine/tests/cpu/simd/fixtures/p2-simd/runtime/packed-strings.mjs','engine/src/cpu/x86/ir.rs','engine/src/cpu/x86/decode/lower.rs','engine/src/cpu/x86/decode/profile.rs','engine/src/cpu/dbt/region.rs','engine/src/cpu/dbt/wasm/emitter.rs','engine/src/cpu/dbt/wasm/integer/mod.rs');
 const sourceHashes=()=>Object.fromEntries(sourcePaths.map(p=>[p,hash(readFileSync(join(root,p)))])),beforePins=sourceHashes();
 const observations=[],helpers=[],modules=[],contexts=[],raw_protocol=[];let count=0;
@@ -378,7 +381,8 @@ function test(c,block,row){
  expected.writeUInt32LE(row.afterMxcsr??row.mxcsr??0x1f80,SV+16);
  const h=helpers.length,status=c.run(c.base,c.base+56,1,c.base+96);assert.equal(status,0,row.name);
  const events=helpers.slice(h),last=events.at(-1),directRegister=row.direct&&!row.memory&&!row.write&&reason===1;
- if(row.expectedHelpers!==undefined){assert.equal(events.length,row.expectedHelpers,row.name+' exact helper count');if(row.expectedHelpers===1)assert.equal(events[0].name,'cpu_read',row.name+' only the checked memory read crosses the host');}
+ if(row.expectedHelpers!==undefined){assert.equal(events.length,row.expectedHelpers,row.name+' exact helper count');if(row.expectedHelpers===1&&row.expectedExecutionHelpers!==1)assert.equal(events[0].name,'cpu_read',row.name+' only the checked memory read crosses the host');}
+ if(row.expectedExecutionHelpers!==undefined)assert.equal(events.filter(event=>event.name==='simd_execute'||event.name==='simd_execute_resident').length,row.expectedExecutionHelpers,row.name+' exact numeric helper count');
  if(directRegister||reason===12)assert.equal(events.length,0,row.name+' has no host execution helper');else assert.ok(last,row.name+' helper');
  // Scratch bytes are validated from the ordered canonical calls below; only those spans may differ.
  const actual=arena(c);
@@ -386,7 +390,7 @@ function test(c,block,row){
   assert.equal(events.length,1,row.name+' only the failed read crosses the host');
   assert.equal(events[0].name,'cpu_read');
   assert.deepEqual(events[0].args,[row.address,row.stagedTransfer.length,row.readAlignment??16]);
-  assert.equal(events[0].packet,packet(row.stagedTransfer.length,1,row.detail,row.fault,row.access).toString('hex'));
+  assert.equal(events[0].packet,packet(row.stagedTransfer.length,reason===11?3:1,row.detail,row.fault,row.access).toString('hex'));
   assert.deepEqual(actual.subarray(T,T+row.stagedTransfer.length),row.stagedTransfer,row.name+' failed read preserves every staged transfer byte');
  }
  expected.set(actual.subarray(100,140),100);expected.set(actual.subarray(T,T+512),T);expected.set(actual.subarray(T+512,T+520),T+512);

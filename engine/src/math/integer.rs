@@ -1,3 +1,14 @@
+pub(crate) fn carryless_product(left: u64, mut right: u64) -> u128 {
+    let mut left = u128::from(left);
+    let mut product = 0;
+    for _ in 0..64 {
+        product ^= left & 0u128.wrapping_sub(u128::from(right & 1));
+        left <<= 1;
+        right >>= 1;
+    }
+    product
+}
+
 pub(crate) fn sqrt_rem(mut value: u128) -> (u128, u128) {
     let mut result = 0;
     let mut bit = 1_u128 << 126;

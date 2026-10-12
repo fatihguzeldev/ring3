@@ -10,6 +10,7 @@ license = "Apache-2.0"
 crate-type = ["rlib", "cdylib"]
 
 [dependencies]
+aes = { version = "=0.9.3", default-features = false, features = ["hazmat"] }
 rustc_apfloat = "=0.2.3"
 astro-float-num = { version = "=0.3.7", default-features = false, features = ["std"] }
 iced-x86 = { version = "=1.21.0", default-features = false, features = ["std", "decoder", "instr_info"] }

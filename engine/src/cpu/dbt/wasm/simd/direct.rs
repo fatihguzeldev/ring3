@@ -5,13 +5,14 @@ use crate::{
         arena::{SIMD_OFFSET, TRANSFER_OFFSET, X87_OFFSET},
         x86::{SIMD_XMM_OFFSET, X87_REGISTERS_OFFSET},
     },
-    cpu::x86::simd::{PackedKind as P, ShuffleKind as S},
+    cpu::x86::simd::{CryptoKind, PackedKind as P, ShuffleKind as S},
 };
 use wasm_encoder::{BlockType, InstructionSink, MemArg, ValType};
 
 pub(super) fn accepts(op: SimdOperation) -> bool {
     match op.kind {
         SimdKind::Move | SimdKind::MoveScalar => true,
+        SimdKind::Crypto(CryptoKind::CarrylessMultiply) => true,
         SimdKind::Packed(kind) => matches!(
             kind,
             P::Add
@@ -102,6 +103,67 @@ fn arg(offset: usize) -> MemArg {
         align: 0,
         memory_index: 0,
     }
+}
+
+fn carryless_multiply(code: &mut InstructionSink<'_>, op: SimdOperation) {
+    let immediate = op.immediate.unwrap();
+    load(code, op.destination, 16);
+    code.i64x2_extract_lane(immediate & 1)
+        .local_set(SIMD_LHS_LOW);
+    load(code, op.source, 16);
+    code.i64x2_extract_lane(immediate >> 4 & 1)
+        .local_set(SIMD_RHS)
+        .i64_const(0)
+        .local_set(SIMD_LHS_HIGH)
+        .i64_const(0)
+        .local_set(SIMD_RESULT_LOW)
+        .i64_const(0)
+        .local_set(SIMD_RESULT_HIGH)
+        .i32_const(64)
+        .local_set(ADDRESS)
+        .loop_(BlockType::Empty);
+    for (result, left) in [
+        (SIMD_RESULT_LOW, SIMD_LHS_LOW),
+        (SIMD_RESULT_HIGH, SIMD_LHS_HIGH),
+    ] {
+        code.local_get(result)
+            .local_get(left)
+            .i64_const(0)
+            .local_get(SIMD_RHS)
+            .i64_const(1)
+            .i64_and()
+            .i64_sub()
+            .i64_and()
+            .i64_xor()
+            .local_set(result);
+    }
+    code.local_get(SIMD_LHS_HIGH)
+        .i64_const(1)
+        .i64_shl()
+        .local_get(SIMD_LHS_LOW)
+        .i64_const(63)
+        .i64_shr_u()
+        .i64_or()
+        .local_set(SIMD_LHS_HIGH)
+        .local_get(SIMD_LHS_LOW)
+        .i64_const(1)
+        .i64_shl()
+        .local_set(SIMD_LHS_LOW)
+        .local_get(SIMD_RHS)
+        .i64_const(1)
+        .i64_shr_u()
+        .local_set(SIMD_RHS)
+        .local_get(ADDRESS)
+        .i32_const(1)
+        .i32_sub()
+        .local_tee(ADDRESS)
+        .br_if(0)
+        .end()
+        .v128_const(0)
+        .local_get(SIMD_RESULT_LOW)
+        .i64x2_replace_lane(0)
+        .local_get(SIMD_RESULT_HIGH)
+        .i64x2_replace_lane(1);
 }
 fn load(code: &mut InstructionSink<'_>, operand: SimdOperand, width: u8) {
     if let SimdOperand::Register(SimdRegister::Gpr(gpr)) = operand {
@@ -912,6 +974,7 @@ pub(super) fn instruction(
         code.local_get(STATE_PTR);
     }
     match op.kind {
+        SimdKind::Crypto(CryptoKind::CarrylessMultiply) => carryless_multiply(code, op),
         SimdKind::Move => load(code, op.source, op.lane_bytes),
         SimdKind::MoveScalar => {
             if op.reads_memory() || op.writes_memory() {
