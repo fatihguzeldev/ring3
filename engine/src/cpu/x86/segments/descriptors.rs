@@ -1,4 +1,4 @@
-use super::{SegmentRegister, SegmentState};
+use super::{SegmentCache, SegmentContext, SegmentRegister, SegmentState};
 
 /// Configured flat 32-bit descriptor kinds used by the software execution profile.
 /// Limits, expand-down segments, call gates, and task switching are separate features.
@@ -40,9 +40,15 @@ pub struct SegmentLoadError {
 pub struct SegmentLoad {
     pub selector: u16,
     pub base: u32,
+    pub cache: SegmentCache,
 }
 
 impl SegmentLoad {
+    pub fn apply_context(self, context: &mut SegmentContext, register: SegmentRegister) {
+        self.apply(&mut context.state, register);
+        context.caches[register.index()] = self.cache;
+    }
+
     pub fn apply(self, state: &mut SegmentState, register: SegmentRegister) {
         state.selectors[register.index()] = self.selector;
         state.bases[register.index()] = self.base;
@@ -146,6 +152,7 @@ impl SegmentDescriptorTable {
             }
             return Ok(SegmentLoad {
                 selector,
+                cache: SegmentCache::UNUSABLE,
                 base: if matches!(target, SegmentRegister::Fs | SegmentRegister::Gs) {
                     current.bases[target.index()]
                 } else {
@@ -189,6 +196,19 @@ impl SegmentDescriptorTable {
         Ok(SegmentLoad {
             selector,
             base: descriptor.base,
+            cache: SegmentCache::flat(
+                match descriptor.kind {
+                    SegmentDescriptorKind::Data { writable } => u8::from(writable) * 2,
+                    SegmentDescriptorKind::Code {
+                        readable,
+                        conforming,
+                    } => 8 | (u8::from(readable) * 2) | (u8::from(conforming) * 4),
+                    SegmentDescriptorKind::System => {
+                        unreachable!("system descriptors cannot be loaded")
+                    }
+                },
+                descriptor.dpl,
+            ),
         })
     }
 }

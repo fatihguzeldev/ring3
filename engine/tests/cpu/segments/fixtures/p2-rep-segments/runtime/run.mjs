@@ -9,7 +9,7 @@ const initial=readFileSync(join(output,'initial-arena.bin')),SIZE=initial.length
 assert.ok(SIZE>=WORK+24);
 const hash=b=>createHash('sha256').update(b).digest('hex'),cases=[],modules=[],observations=[],helpers=[];
 const sourcePaths=['engine/src/cpu/x86/decode/strings.rs','engine/src/cpu/dbt/wasm/strings.rs',
- 'engine/src/cpu/x86/segments.rs','engine/src/abi/x86/segments.rs','engine/src/cpu/dbt/wasm/segments.rs',
+ 'engine/src/cpu/x86/segments.rs','engine/src/cpu/x86/segments/cache.rs','engine/src/abi/x86/segments.rs','engine/src/cpu/dbt/wasm/segments.rs',
  'engine/src/cpu/x86/ir.rs','engine/src/cpu/x86/decode/profile.rs','engine/src/cpu/x86/decode/lower.rs',
  'engine/src/cpu/x86/decode/operands.rs','engine/src/cpu/dbt/wasm/emitter.rs','engine/src/cpu/dbt/wasm/memory.rs',
  'engine/src/cpu/dbt/wasm/abi.rs','engine/src/cpu/dbt/wasm/dispatcher.rs','engine/src/abi/arena.rs',

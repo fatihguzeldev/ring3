@@ -3,7 +3,7 @@ use crate::{
     abi::{
         arena::{SEGMENTS_OFFSET, SIMD_OFFSET, STATE_OFFSET, X87_OFFSET},
         x86::{
-            SEGMENTS_SIZE, SIMD_SIZE, STATE_SIZE, StateMetadata, X87_SIZE, decode_segments,
+            SEGMENTS_SIZE, SIMD_SIZE, STATE_SIZE, StateMetadata, X87_SIZE, decode_segment_context,
             decode_simd, decode_state_metadata, decode_x87, encode_segments, encode_simd,
             encode_x87,
         },
@@ -36,7 +36,8 @@ impl ExtendedCpuState {
         };
         decode_x87(&state.x87).map_err(|_| HostError::Call(CallError::InvalidStop))?;
         decode_simd(&state.simd).map_err(|_| HostError::Call(CallError::InvalidStop))?;
-        decode_segments(&state.segments).map_err(|_| HostError::Call(CallError::InvalidStop))?;
+        decode_segment_context(&state.segments)
+            .map_err(|_| HostError::Call(CallError::InvalidStop))?;
         Ok(state)
     }
 
@@ -178,5 +179,41 @@ mod tests {
             ExtendedCpuState::capture(engine.arena()),
             Err(HostError::Call(CallError::InvalidStop))
         );
+    }
+
+    #[test]
+    fn cached_segment_record_is_captured_and_restored_without_loss() {
+        let mut engine = EngineInstance::new(1, 93).unwrap();
+        let at = SEGMENTS_OFFSET;
+        let bytes = &mut engine.arena_mut().unwrap()[at..at + SEGMENTS_SIZE];
+        bytes[4..6].copy_from_slice(&2_u16.to_le_bytes());
+        for (offset, cache) in [
+            (28, 0xf33f_ffff_u32),
+            (32, 0xf3bf_ffff),
+            (36, 0xf33f_ffff),
+            (40, 0xf33f_ffff),
+            (44, 0xf310_1234),
+            (56, 0),
+        ] {
+            bytes[offset..offset + 4].copy_from_slice(&cache.to_le_bytes());
+        }
+        let expected: [u8; SEGMENTS_SIZE] = bytes.try_into().unwrap();
+        let captured = ExtendedCpuState::capture(engine.arena()).unwrap();
+        encode_segments(
+            &SegmentState::default(),
+            &mut engine.arena_mut().unwrap()[at..at + SEGMENTS_SIZE],
+        )
+        .unwrap();
+        assert!(!captured.matches(engine.arena()));
+        captured.restore(engine.arena_mut().unwrap());
+        assert_eq!(&engine.arena()[at..at + SEGMENTS_SIZE], expected);
+        assert!(captured.matches(engine.arena()));
+        engine.arena_mut().unwrap()[at + 63] = 1;
+        let malformed = engine.arena().to_vec();
+        assert_eq!(
+            ExtendedCpuState::capture(engine.arena()),
+            Err(HostError::Call(CallError::InvalidStop))
+        );
+        assert_eq!(engine.arena(), malformed);
     }
 }

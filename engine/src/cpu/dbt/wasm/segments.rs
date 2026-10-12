@@ -12,7 +12,8 @@ use crate::{
         ABI_VERSION, X86_INTEGER_PROFILE,
         arena::SEGMENTS_OFFSET,
         x86::{
-            EXIT_SIZE, SEGMENTS_BASES_OFFSET, SEGMENTS_SELECTORS_OFFSET, SEGMENTS_SIZE, STATE_SIZE,
+            EXIT_SIZE, SEGMENTS_BASES_OFFSET, SEGMENTS_CACHE_OFFSETS, SEGMENTS_SELECTORS_OFFSET,
+            SEGMENTS_SIZE, SEGMENTS_VERSION_2, STATE_SIZE,
         },
     },
     cpu::x86::{
@@ -207,19 +208,9 @@ pub(super) fn preflight(code: &mut InstructionSink<'_>) {
     }
     for (offset, expected) in [
         (0, u32::from_le_bytes(*b"R3SG")),
-        (
-            4,
-            u32::from(ABI_VERSION) | (u32::from(X86_INTEGER_PROFILE) << 16),
-        ),
         (8, SEGMENTS_SIZE as u32),
         (12, 0),
-        (28, 0),
-        (56, 0),
         (60, 0),
-        (32, 0),
-        (36, 0),
-        (40, 0),
-        (44, 0),
     ] {
         code.local_get(STATE_PTR)
             .i32_load(memarg(offset, 2))
@@ -227,6 +218,26 @@ pub(super) fn preflight(code: &mut InstructionSink<'_>) {
             .i32_ne();
         fail_if(code, 2);
     }
+    let legacy_header = u32::from(ABI_VERSION) | (u32::from(X86_INTEGER_PROFILE) << 16);
+    code.local_get(STATE_PTR)
+        .i32_load(memarg(4, 2))
+        .i32_const(legacy_header as i32)
+        .i32_eq()
+        .if_(BlockType::Empty);
+    for offset in [28, 32, 36, 40, 44, 56] {
+        code.local_get(STATE_PTR).i32_load(memarg(offset, 2));
+        fail_if(code, 2);
+    }
+    code.else_();
+    code.local_get(STATE_PTR)
+        .i32_load(memarg(4, 2))
+        .i32_const((u32::from(SEGMENTS_VERSION_2) | (u32::from(X86_INTEGER_PROFILE) << 16)) as i32)
+        .i32_ne();
+    fail_if(code, 2);
+    for (index, offset) in SEGMENTS_CACHE_OFFSETS.into_iter().enumerate() {
+        cache_preflight(code, index, offset);
+    }
+    code.end();
     for segment in [SegmentRegister::Cs, SegmentRegister::Ss] {
         selector(code, segment);
         code.i32_const(0xfffc).i32_and().i32_eqz();
@@ -237,9 +248,73 @@ pub(super) fn preflight(code: &mut InstructionSink<'_>) {
     }
 }
 
+/// legacy segment bases are implied zero in both layouts; v2 reuses their storage for cache words.
 pub(super) fn base(code: &mut InstructionSink<'_>, segment: SegmentRegister) {
+    if matches!(segment, SegmentRegister::Fs | SegmentRegister::Gs) {
+        code.local_get(STATE_PTR)
+            .i32_load(memarg(SEGMENTS_BASES_OFFSET + segment.index() * 4, 2));
+    } else {
+        code.i32_const(0);
+    }
+}
+
+fn cache_preflight(code: &mut InstructionSink<'_>, index: usize, offset: usize) {
     code.local_get(STATE_PTR)
-        .i32_load(memarg(SEGMENTS_BASES_OFFSET + segment.index() * 4, 2));
+        .i32_load(memarg(offset, 2))
+        .local_set(RESULT);
+    code.local_get(STATE_PTR)
+        .i32_load16_u(memarg(SEGMENTS_SELECTORS_OFFSET + index * 2, 1))
+        .i32_const(0xfffc)
+        .i32_and()
+        .i32_eqz()
+        .if_(BlockType::Empty);
+    code.local_get(RESULT);
+    fail_if(code, 2);
+    code.else_();
+    // usable loaded caches are present code/data descriptors with L=0.
+    cache_mask(code, 0x9400_0000, 0x9000_0000);
+    match index {
+        1 => {
+            cache_mask(code, 0x0280_0000, 0x0280_0000);
+            code.local_get(RESULT)
+                .i32_const(0x0040_0000)
+                .i32_and()
+                .i32_eqz()
+                .if_(BlockType::Empty);
+            cache_mask(code, 0x6000_0000, 0x6000_0000);
+            code.end();
+        }
+        2 => {
+            cache_mask(code, 0x02a0_0000, 0x0220_0000);
+            cache_mask(code, 0x6000_0000, 0x6000_0000);
+        }
+        _ => {
+            code.local_get(RESULT)
+                .i32_const(0x00a0_0000)
+                .i32_and()
+                .i32_const(0x0080_0000)
+                .i32_eq();
+            fail_if(code, 2);
+            code.local_get(RESULT)
+                .i32_const(0x00c0_0000)
+                .i32_and()
+                .i32_const(0x00c0_0000)
+                .i32_ne()
+                .if_(BlockType::Empty);
+            cache_mask(code, 0x6000_0000, 0x6000_0000);
+            code.end();
+        }
+    }
+    code.end();
+}
+
+fn cache_mask(code: &mut InstructionSink<'_>, mask: u32, expected: u32) {
+    code.local_get(RESULT)
+        .i32_const(mask as i32)
+        .i32_and()
+        .i32_const(expected as i32)
+        .i32_ne();
+    fail_if(code, 2);
 }
 
 pub(super) fn selector(code: &mut InstructionSink<'_>, segment: SegmentRegister) {

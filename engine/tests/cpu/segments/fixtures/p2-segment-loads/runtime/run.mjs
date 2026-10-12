@@ -9,7 +9,7 @@ const SIZE=initial.length,SEGMENTS=4524,WORK=4588,hash=b=>createHash('sha256').u
 assert.ok(SIZE>=4612);assert.equal(engine.sha256,hash(engine.bytes));
 const modules=[],observations=[],helpers=[],cases=[],refusals=[];
 const sourcePaths=['engine/src/cpu/x86/decode/segments.rs','engine/src/cpu/dbt/wasm/segments.rs',
- 'engine/src/cpu/x86/segments.rs','engine/src/cpu/x86/segments/descriptors.rs','engine/src/process/cpu/segments.rs', 'engine/src/process/cpu/mod.rs', 'engine/src/process/mod.rs',
+ 'engine/src/cpu/x86/segments.rs','engine/src/cpu/x86/segments/cache.rs','engine/src/abi/x86/segments.rs','engine/src/cpu/x86/segments/descriptors.rs','engine/src/process/cpu/segments.rs', 'engine/src/process/cpu/mod.rs', 'engine/src/process/mod.rs',
  'engine/src/cpu/x86/decode/strings.rs','engine/src/cpu/dbt/wasm/strings.rs',
  'engine/src/cpu/x86/ir.rs','engine/src/cpu/x86/decode/profile.rs','engine/src/cpu/x86/decode/lower.rs',
  'engine/src/cpu/dbt/wasm/memory.rs','engine/src/cpu/dbt/wasm/emitter.rs','engine/src/abi/cpu_helper.rs',
@@ -51,12 +51,13 @@ function open(bytes,owner='replacement'){
  const file=`module-${modules.length+1}.wasm`;writeFileSync(join(output,file),wasm);modules.push({context:c.id,owner,file,bytes:length,sha256:hash(wasm),imports:WebAssembly.Module.imports(module)});
  cases.push({id:c.id,owner,code:Buffer.from(bytes).toString('hex')});return c;
 }
-function run(c,budget,expected,{retired=budget,reason=1,segments={},fault,label='segments'}={}){
+function run(c,budget,expected,{retired=budget,reason=1,segments={},segmentRecord,fault,label='segments'}={}){
  const before=arena(c),at=helpers.length,status=c.run(c.base,c.base+56,budget,c.base+96),after=arena(c);
  assert.equal(status,0,label);assert.deepEqual(cpu(c),expected,label+' CPU');assert.equal(after.readUInt32LE(72),reason,label+' reason');assert.equal(after.readUInt32LE(76),retired,label+' retire');
  if(fault)assert.deepEqual(Array.from({length:4},(_,i)=>after.readUInt32LE(80+i*4)),fault,label+' fault');
  const full=Buffer.from(before);full.set(state(expected));full.set(after.subarray(56,96),56);full.set(after.subarray(100,140),100);
  for(const[i,{selector,base}]of Object.entries(segments)){if(selector!==undefined)full.writeUInt16LE(selector,SEGMENTS+16+2*i);if(base!==undefined)full.writeUInt32LE(base>>>0,SEGMENTS+32+4*i);}
+ if(segmentRecord)full.set(segmentRecord,SEGMENTS);
  assert.equal(after.readUInt32LE(WORK+16),0,label+' ordinary work fallback');assert.deepEqual(after,full,label+' whole arena');
  const file=`arena-${observations.length+1}.bin`;writeFileSync(join(output,file),after);observations.push({context:c.id,label,budget,reason,retired,cpu:cpu(c),helpers:helpers.length-at,exit:after.subarray(56,96).toString('hex'),arena:{file,sha256:hash(after)}});
 }
@@ -104,6 +105,29 @@ for(const [word,selector]of[[false,0x43],[false,0x3b],[true,0x3b]]){
  else run(c,1,next(s,word?0x1003:0x1002,{4:0x6030+(word?2:4)}),{segments:{[word?5:4]:{selector:0x3b,base:0x5000}},label:'POP segment successful commit'});
  host(c,'close');
 }
+// cached access attributes are independent of mutable table entries and retain the 64-byte record.
+for(const owner of ['replacement','resident'])for(const prefix of [null,0x26,0x2e,0x36,0x3e]){
+ const c=open([...(prefix===null?[]:[prefix]),0x8b,0x03],owner);
+ host(c,'configure_segment_descriptor',[0x43,0x5000,3,1,0]);
+ host(c,owner==='resident'?'segment_load_resident':'segment_load',owner==='resident'?[...c.residentBinding,4,0x43]:[4,0x43]);
+ const cached=arena(c).subarray(SEGMENTS,SEGMENTS+64);
+ assert.equal(cached.readUInt16LE(4),2);assert.equal(cached.readUInt32LE(44),0xf31fffff);
+ const before=arena(c);host(c,'configure_segment_descriptor',[0x43,0x6000,3,1,1]);assert.deepEqual(arena(c),before);
+ const stable=Buffer.from(arena(c));put(c,0x5010,0xa1b2c3d4,4);const s=seed(c,{3:0x5010});
+ run(c,1,next(s,0x1000+(prefix===null?2:3),{0:0xa1b2c3d4}),{label:'v2 cached attributes with impliedzero legacy base '+prefix});
+ assert.deepEqual(arena(c).subarray(SEGMENTS,SEGMENTS+64),cached);
+ const valid=arena(c);
+ for(const[offset,bits]of [[28,1],[32,0xf1bfffff],[36,0xf13fffff],[40,0xf39fffff],[44,0x933fffff],[56,0xf33fffff],[60,1]]){
+  const malformed=Buffer.from(valid);malformed.writeUInt32LE(bits>>>0,SEGMENTS+offset);input(c,0,malformed);
+  const at=helpers.length;assert.equal(c.run(c.base,c.base+56,1,c.base+96),2);assert.deepEqual(arena(c),malformed);assert.equal(helpers.length,at);
+  refusals.push({context:c.id,offset,bits:bits>>>0,status:2});
+ }
+ input(c,0,valid);host(c,'set_segment_base',[4,0x7000]);
+ assert.equal(arena(c).readUInt32LE(SEGMENTS+44),0xf31fffff);assert.equal(arena(c).readUInt32LE(SEGMENTS+48),0x7000);
+ host(c,owner==='resident'?'segment_load_resident':'segment_load',owner==='resident'?[...c.residentBinding,4,0x43]:[4,0x43]);
+ assert.equal(arena(c).readUInt16LE(SEGMENTS+4),1);assert.equal(arena(c).readUInt32LE(SEGMENTS+48),0x7000);
+ host(c,'close');
+}
 // All plain string widths use the same precise element body without reading/decrementing CX.
 for(const[kind,opcode]of Object.entries({Move:0xa4,Store:0xaa,Load:0xac,Compare:0xa6,Scan:0xae}))for(const width of[1,2,4]){
  const bytes=[0x64,0x67,...(width===2?[0x66]:[]),opcode+(width===1?0:1)],c=open(bytes);host(c,'set_segment_base',[4,0x5000]);
@@ -114,5 +138,5 @@ for(const[kind,opcode]of Object.entries({Move:0xa4,Store:0xaa,Load:0xac,Compare:
  if(kind==='Move')assert.equal(get(c,0x6014,width),0x11);if(kind==='Store')assert.equal(get(c,0x6014,width),width===1?0x34:width===2?0x1234:0xabcd1234);host(c,'close');
 }
 assert.deepEqual(pins(),sourcePins);writeFileSync(join(output,'result.json'),JSON.stringify({engine:{path:enginePath,sha256:engine.sha256,bytes:engine.bytes.length},source_pins:sourcePins,arena_bytes:SIZE,cases,modules,observations,refusals,helper_trace:helpers,
- claim:'Configured flat32 descriptor loads with precise GP/NP/SS and checked far spans; FS/GS cached bases, selector reads, stack widths, and plain strings. Null data selector loads succeed but accesses fault before memory. No segment-limit, asynchronous interrupt, or descriptor-table instruction claim.'},null,2)+'\n');
+ claim:'Configured flat32 descriptor loads with precise GP/NP/SS and checked far spans; FS/GS cached bases, selector reads, stack widths, and plain strings. Null data selector loads succeed but accesses fault before memory. Loaded cache v1/v2 preservation, malformed cache neutral refusal and impliedzero legacy bases are covered; generic segment rights/limit enforcement, asynchronous interrupts and descriptor-table queries remain outside this fixture.'},null,2)+'\n');
 console.log(JSON.stringify({output,contexts:cases.length,modules:modules.length,runs:observations.length,helpers:helpers.length}));

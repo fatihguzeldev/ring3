@@ -3,10 +3,11 @@ use crate::{
         arena::{HELPER_OFFSET, SEGMENTS_OFFSET},
         cpu_helper::{CpuMemoryError, encode_cpu_result},
         memory_helper::HELPER_SIZE,
-        x86::{SEGMENTS_SIZE, decode_segments, encode_segments},
+        x86::{SEGMENTS_SIZE, decode_segment_context, encode_segment_context},
     },
     cpu::x86::{
-        SegmentDescriptor, SegmentLoadError, SegmentLoadFailure, SegmentRegister, SegmentState,
+        SegmentContext, SegmentDescriptor, SegmentLoadError, SegmentLoadFailure, SegmentRegister,
+        SegmentState,
     },
     memory::GuestAddress,
 };
@@ -15,8 +16,12 @@ use crate::process::{CallError, EngineInstance, HostError};
 
 impl EngineInstance {
     pub fn segment_state(&self) -> Result<SegmentState, HostError> {
+        self.segment_context().map(|context| context.state)
+    }
+
+    pub fn segment_context(&self) -> Result<SegmentContext, HostError> {
         self.memory()?;
-        decode_segments(&self.arena[SEGMENTS_OFFSET..SEGMENTS_OFFSET + SEGMENTS_SIZE])
+        decode_segment_context(&self.arena[SEGMENTS_OFFSET..SEGMENTS_OFFSET + SEGMENTS_SIZE])
             .map_err(|_| HostError::Infrastructure)
     }
 
@@ -38,11 +43,11 @@ impl EngineInstance {
         base: u32,
     ) -> Result<(), HostError> {
         self.segment_configuration_guard()?;
-        let mut state = self.segment_state()?;
-        if !state.set_base(segment, base) {
+        let mut context = self.segment_context()?;
+        if !context.state.set_base(segment, base) {
             return Err(HostError::InvalidRequest);
         }
-        let selector = state.selectors[segment.index()];
+        let selector = context.state.selectors[segment.index()];
         let descriptor = if selector & !3 != 0 {
             let mut descriptor = *self
                 .segment_descriptors
@@ -54,7 +59,7 @@ impl EngineInstance {
             None
         };
         let mut bytes = [0; SEGMENTS_SIZE];
-        encode_segments(&state, &mut bytes).map_err(|_| HostError::Infrastructure)?;
+        encode_segment_context(&context, &mut bytes).map_err(|_| HostError::Infrastructure)?;
         if let Some(descriptor) = descriptor {
             self.segment_descriptors
                 .configure(descriptor)
@@ -149,16 +154,17 @@ impl EngineInstance {
         value: u32,
     ) -> Result<(), HostError> {
         let target = register(target)?;
-        let mut state = self.segment_state()?;
-        let cpl = (state.selectors[SegmentRegister::Cs.index()] & 3) as u8;
+        let mut context = self.segment_context()?;
+        let cpl = (context.state.selectors[SegmentRegister::Cs.index()] & 3) as u8;
         match self
             .segment_descriptors
-            .resolve_load(target, selector as u16, cpl, &state)
+            .resolve_load(target, selector as u16, cpl, &context.state)
         {
             Ok(load) => {
-                load.apply(&mut state, target);
+                load.apply_context(&mut context, target);
                 let mut bytes = [0; SEGMENTS_SIZE];
-                encode_segments(&state, &mut bytes).map_err(|_| HostError::Infrastructure)?;
+                encode_segment_context(&context, &mut bytes)
+                    .map_err(|_| HostError::Infrastructure)?;
                 let result_value = if length == 0 { load.base } else { value };
                 self.segment_packet(length, result_value, Ok(()))?;
                 self.arena.as_mut().get_mut()[SEGMENTS_OFFSET..SEGMENTS_OFFSET + SEGMENTS_SIZE]
@@ -295,5 +301,51 @@ mod tests {
         engine.segment_load_far(5, 0x2ffc, 0).unwrap();
         assert_eq!(packet(&engine, 20), 0x1234_5678);
         assert_eq!(engine.segment_state().unwrap().bases[5], 0x6000);
+    }
+
+    #[test]
+    fn cached_readonly_descriptor_survives_table_replacement_until_reload() {
+        let mut engine = engine();
+        let mut readonly = descriptor(0x43, 0x5000, true);
+        readonly.kind = SegmentDescriptorKind::Data { writable: false };
+        engine.configure_segment_descriptor(readonly).unwrap();
+        engine.segment_load(4, 0x43).unwrap();
+        let cached = engine.arena()[SEGMENTS_OFFSET..SEGMENTS_OFFSET + SEGMENTS_SIZE].to_vec();
+        assert_eq!(&cached[4..6], &2_u16.to_le_bytes());
+        assert_eq!(
+            u32::from_le_bytes(cached[44..48].try_into().unwrap()),
+            0xf31f_ffff
+        );
+        engine
+            .configure_segment_descriptor(descriptor(0x43, 0x6000, true))
+            .unwrap();
+        assert_eq!(
+            &engine.arena()[SEGMENTS_OFFSET..SEGMENTS_OFFSET + SEGMENTS_SIZE],
+            cached
+        );
+        assert_eq!(engine.segment_state().unwrap().bases[4], 0x5000);
+        engine.segment_load(4, 0x43).unwrap();
+        assert_eq!(
+            &engine.arena()[SEGMENTS_OFFSET + 4..SEGMENTS_OFFSET + 6],
+            &1_u16.to_le_bytes()
+        );
+        assert_eq!(engine.segment_state().unwrap().bases[4], 0x6000);
+    }
+
+    #[test]
+    fn failed_load_preserves_the_full_cached_record() {
+        let mut engine = engine();
+        let mut readonly = descriptor(0x43, 0x5000, true);
+        readonly.kind = SegmentDescriptorKind::Data { writable: false };
+        engine.configure_segment_descriptor(readonly).unwrap();
+        engine.segment_load(4, 0x43).unwrap();
+        let before = engine.arena()[SEGMENTS_OFFSET..SEGMENTS_OFFSET + SEGMENTS_SIZE].to_vec();
+        assert_eq!(&before[4..6], &2_u16.to_le_bytes());
+        engine.segment_load(4, 0x4b).unwrap();
+        assert_eq!(
+            &engine.arena()[SEGMENTS_OFFSET..SEGMENTS_OFFSET + SEGMENTS_SIZE],
+            before
+        );
+        assert_eq!(packet(&engine, 16), 3);
     }
 }

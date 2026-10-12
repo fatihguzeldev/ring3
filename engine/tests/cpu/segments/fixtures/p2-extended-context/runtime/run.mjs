@@ -9,7 +9,7 @@ const initial=readFileSync(join(output,'initial-arena.bin')),SIZE=initial.length
 const hash=b=>createHash('sha256').update(b).digest('hex'),observations=[],modules=[],refusals=[];
 const paths=['engine/src/process/calls/call.rs', 'engine/src/process/calls/context.rs', 'engine/src/process/calls/mod.rs', 'engine/src/process/mod.rs','engine/src/process/calls/callback.rs', 'engine/src/process/calls/mod.rs', 'engine/src/process/mod.rs','engine/src/process/calls/code.rs', 'engine/src/process/calls/mod.rs', 'engine/src/process/mod.rs',
  'engine/src/process/calls/installation.rs', 'engine/src/process/calls/mod.rs', 'engine/src/process/mod.rs','engine/src/process/calls/resident_callback.rs', 'engine/src/process/calls/mod.rs', 'engine/src/process/mod.rs','engine/src/process/loading/startup.rs', 'engine/src/process/loading/mod.rs', 'engine/src/process/mod.rs',
- 'engine/src/abi/x86/segments.rs','engine/src/abi/x86/simd.rs','engine/tests/cpu/segments/cases/wasm/cpu_extended_context_wasm.rs', 'engine/tests/cpu/segments/wasm.rs', 'engine/tests/support/wasm.rs', 'engine/tests/cpu/segments/wasm.rs', 'engine/tests/support/wasm.rs',
+ 'engine/src/abi/x86/segments.rs','engine/src/cpu/x86/segments/cache.rs','engine/src/abi/x86/simd.rs','engine/tests/cpu/segments/cases/wasm/cpu_extended_context_wasm.rs', 'engine/tests/cpu/segments/wasm.rs', 'engine/tests/support/wasm.rs', 'engine/tests/cpu/segments/wasm.rs', 'engine/tests/support/wasm.rs',
  'engine/tests/cpu/segments/fixtures/p2-extended-context/runtime/run.mjs'];
 const pins=()=>Object.fromEntries(paths.map(p=>[p,hash(readFileSync(join(root,p)))])),beforePins=pins();
 assert.ok(SIZE>=4612);assert.equal(engine.sha256,hash(engine.bytes));
@@ -30,7 +30,9 @@ for(const finish of [true,false]){
  const body=Buffer.from([0xf3,0x0f,0x6f,0x05,0x10,0x50,0,0,0xb8,0x43,0,0,0,0x8e,0xe0,0x64,0x8b,0x0d,0x10,0,0,0,0xb8,0x78,0x56,0x34,0x12,0xc3]);
  upload(c,0x1000,Buffer.from([0x0f,0x0b]));upload(c,0x1100,body);upload(c,0x1200,Buffer.from([0x0f,0x0b]));host(c,'protect',[0x1000,1,5]);
  host(c,'set_segment_base',[4,0x5000]);host(c,'configure_segment_descriptor',[0x43,0x6000,3,1,1]);
- const extended=arena(c);extended.writeUInt32LE(0x5f80,SIMD+16);extended.fill(0xa5,SIMD+32,SIMD+160);extended.writeUInt16LE(0x027f,FP+16);input(c,FP,extended.subarray(FP,END));
+ const extended=arena(c);extended.writeUInt16LE(2,SEG+4);
+ for(const[offset,bits]of [[28,0xf33fffff],[32,0xf3bfffff],[36,0xf33fffff],[40,0xf33fffff],[44,0xf2101fff],[56,0]])extended.writeUInt32LE(bits>>>0,SEG+offset);
+ extended.writeUInt32LE(0x5f80,SIMD+16);extended.fill(0xa5,SIMD+32,SIMD+160);extended.writeUInt16LE(0x027f,FP+16);input(c,FP,extended.subarray(FP,END));
  const d=Buffer.alloc(40);[0x1000,2,0x1100,body.length,0x1200,2,0x1000,17,0x1200,18].forEach((v,i)=>d.writeUInt32LE(v,4*i));input(c,140,d);host(c,'compile_with_gates',[3,2]);const generation=c.api.generation()>>>0;
  const wasm=Buffer.from(new Uint8Array(c.memory.buffer,c.api.module_ptr()>>>0,c.api.module_len()>>>0)),module=new WebAssembly.Module(wasm),file=`module-${c.id}.wasm`;
  writeFileSync(join(output,file),wasm);modules.push({context:c.id,file,sha256:hash(wasm),imports:WebAssembly.Module.imports(module)});
@@ -41,7 +43,7 @@ for(const finish of [true,false]){
  refuses(c,'capture_call',[c.id,0x4358,generation,1,0],13,'invalid SIMD cannot capture');input(c,0,stopped);
  // Every additional architectural byte participates in pending-call identity, including valid changes.
  host(c,'capture_call',[c.id,0x4358,generation,1,0]);const token=arena(c).readUInt32LE(156);assert.equal(token,1);
- for(const offset of[SIMD+16,SIMD+47,SEG+48]){
+ for(const offset of[SIMD+16,SIMD+47,SEG+44,SEG+48]){
   const before=arena(c),changed=Buffer.from(before);changed[offset]^=1;input(c,0,changed);
   refuses(c,'begin_callback',[c.id,0x4358,generation,token,0x1100,0x1200,18,0],15,'changed extended pending context');input(c,0,before);
  }
@@ -62,5 +64,5 @@ for(const finish of [true,false]){
  host(c,'complete_call',[c.id,0x4358,generation,1,0x76543210]);const completed=save(c,'outer completion retains restored extended state');
  assert.equal(completed.readUInt32LE(16),0x76543210);assert.equal(completed.readUInt32LE(32),0x8044);assert.equal(completed.readUInt32LE(48),0x2000);assert.deepEqual(completed.subarray(FP,END),stopped.subarray(FP,END));host(c,'close');
 }
-assert.deepEqual(pins(),beforePins);writeFileSync(join(output,'result.json'),JSON.stringify({engine:{path:enginePath,sha256:engine.sha256,bytes:engine.bytes.length},source_pins:beforePins,modules,observations,refusals,claim:'Actual replacement callback changes SIMD and FS state, then finish/forced abort restores exact validated outer x87/SIMD/segments. Pending and invalid-record refusals preserve full arena. No resident guest callback or whole RAM claim.'},null,2)+'\n');
+assert.deepEqual(pins(),beforePins);writeFileSync(join(output,'result.json'),JSON.stringify({engine:{path:enginePath,sha256:engine.sha256,bytes:engine.bytes.length},source_pins:beforePins,modules,observations,refusals,claim:'Actual replacement callback changes SIMD and FS state, then finish/forced abort restores exact validated outer x87/SIMD/64-byte v2 segment cache. Pending and invalid-record refusals preserve full arena. No resident guest callback or whole RAM claim.'},null,2)+'\n');
 console.log(JSON.stringify({output,contexts:2,modules:modules.length,snapshots:observations.length,refusals:refusals.length}));

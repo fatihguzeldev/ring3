@@ -12,8 +12,8 @@ pub use exit::{
 };
 
 pub use segments::{
-    SEGMENTS_BASES_OFFSET, SEGMENTS_SELECTORS_OFFSET, SEGMENTS_SIZE, decode_segments,
-    encode_segments,
+    SEGMENTS_BASES_OFFSET, SEGMENTS_SELECTORS_OFFSET, SEGMENTS_SIZE, SEGMENTS_VERSION_2,
+    decode_segment_context, decode_segments, encode_segment_context, encode_segments,
 };
 pub use simd::{
     MXCSR_MASK, SIMD_MXCSR_OFFSET, SIMD_SIZE, SIMD_XMM_OFFSET, decode_simd, encode_simd,
@@ -29,3 +29,5 @@ pub use x87::{
     X87_DATA_SELECTOR_OFFSET, X87_INSTRUCTION_POINTER_OFFSET, X87_OPCODE_OFFSET,
     X87_REGISTERS_OFFSET, X87_SIZE, X87_STATUS_OFFSET, X87_TAG_OFFSET, decode_x87, encode_x87,
 };
+
+pub(crate) use segments::SEGMENTS_CACHE_OFFSETS;

@@ -12,8 +12,9 @@ mod x87;
 
 pub use control::{ControlOperation, USER_POP_FLAGS_MASK, USER_POP_FLAGS_WORD_MASK, pop_flags};
 pub use segments::{
-    SegmentDescriptor, SegmentDescriptorKind, SegmentDescriptorTable, SegmentLoadError,
-    SegmentLoadFailure, SegmentRegister, SegmentState,
+    SegmentAccess, SegmentAccessError, SegmentCache, SegmentContext, SegmentDescriptor,
+    SegmentDescriptorKind, SegmentDescriptorTable, SegmentLoadError, SegmentLoadFailure,
+    SegmentRegister, SegmentState,
 };
 pub use stack::StackFrameKind;
 pub use state::{Register32, State32};
