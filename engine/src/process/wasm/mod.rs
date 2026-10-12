@@ -186,9 +186,10 @@ pub(crate) use xstate::{cpu_xrstor, cpu_xrstor_resident, cpu_xsave, cpu_xsave_re
 
 mod cpu;
 pub(crate) use cpu::{
-    configure_segment_descriptor, cpu_fxsave, cpu_fxsave_resident, cpu_integer,
-    cpu_integer_resident, cpu_mask_write, cpu_mask_write_resident, cpu_read, cpu_write,
-    cpu_write_resident, segment_load, segment_load_far, segment_load_far_resident,
-    segment_load_resident, set_segment_base, simd_execute, simd_execute_resident, stack_execute,
-    stack_execute_resident, x87_op, x87_resident_op,
+    configure_segment_descriptor, configure_segment_descriptor_raw, cpu_fxsave,
+    cpu_fxsave_resident, cpu_integer, cpu_integer_resident, cpu_mask_write,
+    cpu_mask_write_resident, cpu_read, cpu_write, cpu_write_resident, segment_load,
+    segment_load_far, segment_load_far_resident, segment_load_resident, set_segment_base,
+    simd_execute, simd_execute_resident, stack_execute, stack_execute_resident, x87_op,
+    x87_resident_op,
 };

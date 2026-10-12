@@ -56,7 +56,9 @@ impl SegmentState {
     }
 }
 mod cache;
+mod descriptor_record;
 mod descriptors;
+pub use descriptor_record::SegmentDescriptorRecord;
 
 pub use cache::{SegmentAccess, SegmentAccessError, SegmentCache, SegmentContext};
 

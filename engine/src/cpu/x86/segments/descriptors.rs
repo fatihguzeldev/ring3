@@ -1,7 +1,7 @@
-use super::{SegmentCache, SegmentContext, SegmentRegister, SegmentState};
+use super::{SegmentCache, SegmentContext, SegmentDescriptorRecord, SegmentRegister, SegmentState};
 
-/// Configured flat 32-bit descriptor kinds used by the software execution profile.
-/// Limits, expand-down segments, call gates, and task switching are separate features.
+/// compatibility view for explicitly configured code/data or legacy system descriptors.
+/// raw records retain limits and every system/gate payload independently of this lossy view.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SegmentDescriptorKind {
     Data { writable: bool },
@@ -11,7 +11,7 @@ pub enum SegmentDescriptorKind {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct SegmentDescriptor {
-    /// Selector index plus TI; RPL is ignored when installing or looking up an entry.
+    /// selector index plus ti; rpl is ignored when installing or looking up an entry.
     pub selector: u16,
     pub base: u32,
     pub dpl: u8,
@@ -28,6 +28,8 @@ pub enum SegmentLoadFailure {
     Privilege,
     Type,
     NonFlatLegacy,
+    /// the descriptor is architectural code/data but needs an unimplemented execution profile.
+    UnsupportedProfile,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -55,41 +57,44 @@ impl SegmentLoad {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct DescriptorEntry {
+    selector: u16,
+    record: SegmentDescriptorRecord,
+    legacy: Option<SegmentDescriptor>,
+    legacy_constructed: bool,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SegmentDescriptorTable {
-    entries: Vec<SegmentDescriptor>,
+    entries: Vec<DescriptorEntry>,
 }
 
 impl Default for SegmentDescriptorTable {
     fn default() -> Self {
-        Self {
-            entries: vec![
-                SegmentDescriptor {
-                    selector: 0x18,
+        let mut table = Self::empty();
+        for (selector, kind) in [
+            (
+                0x18,
+                SegmentDescriptorKind::Code {
+                    readable: true,
+                    conforming: false,
+                },
+            ),
+            (0x20, SegmentDescriptorKind::Data { writable: true }),
+            (0x38, SegmentDescriptorKind::Data { writable: true }),
+        ] {
+            table
+                .configure(SegmentDescriptor {
+                    selector,
                     base: 0,
                     dpl: 3,
                     present: true,
-                    kind: SegmentDescriptorKind::Code {
-                        readable: true,
-                        conforming: false,
-                    },
-                },
-                SegmentDescriptor {
-                    selector: 0x20,
-                    base: 0,
-                    dpl: 3,
-                    present: true,
-                    kind: SegmentDescriptorKind::Data { writable: true },
-                },
-                SegmentDescriptor {
-                    selector: 0x38,
-                    base: 0,
-                    dpl: 3,
-                    present: true,
-                    kind: SegmentDescriptorKind::Data { writable: true },
-                },
-            ],
+                    kind,
+                })
+                .expect("default descriptors are valid legacy entries");
         }
+        table
     }
 }
 
@@ -100,55 +105,141 @@ impl SegmentDescriptorTable {
         }
     }
 
-    /// Configuration is explicit: unknown selectors are never synthesized from current state.
+    /// legacy construction preserves the old selector/base/type observations, including the system variant.
     pub fn configure(&mut self, mut descriptor: SegmentDescriptor) -> Result<(), SegmentLoadError> {
         descriptor.selector &= !3;
-        if descriptor.selector == 0 || descriptor.dpl > 3 {
-            return Err(SegmentLoadError {
+        let record = SegmentDescriptorRecord::from_legacy(descriptor)
+            .filter(|_| descriptor.selector != 0)
+            .ok_or(SegmentLoadError {
                 failure: SegmentLoadFailure::Type,
                 error_code: u32::from(descriptor.selector),
-            });
-        }
-        if let Some(entry) = self
-            .entries
-            .iter_mut()
-            .find(|entry| entry.selector == descriptor.selector)
-        {
-            *entry = descriptor;
-        } else {
-            self.entries.push(descriptor);
-        }
+            })?;
+        self.install(DescriptorEntry {
+            selector: descriptor.selector,
+            record,
+            legacy: Some(descriptor),
+            legacy_constructed: true,
+        });
         Ok(())
     }
 
-    pub fn descriptor(&self, selector: u16) -> Option<&SegmentDescriptor> {
+    /// table authority is lossless; configuration never rewrites a previously loaded cache.
+    pub fn configure_raw(
+        &mut self,
+        selector: u16,
+        record: SegmentDescriptorRecord,
+    ) -> Result<(), SegmentLoadError> {
+        let selector = selector & !3;
+        if selector == 0 {
+            return Err(SegmentLoadError {
+                failure: SegmentLoadFailure::Type,
+                error_code: 0,
+            });
+        }
+        self.install(DescriptorEntry {
+            selector,
+            record,
+            legacy: record.legacy_code_data(selector),
+            legacy_constructed: false,
+        });
+        Ok(())
+    }
+
+    fn install(&mut self, entry: DescriptorEntry) {
+        if let Some(current) = self
+            .entries
+            .iter_mut()
+            .find(|current| current.selector == entry.selector)
+        {
+            *current = entry;
+        } else {
+            self.entries.push(entry);
+        }
+    }
+
+    fn entry(&self, selector: u16) -> Option<&DescriptorEntry> {
         self.entries
             .iter()
             .find(|entry| entry.selector == selector & !3)
     }
 
-    /// query the configured table without loading a segment or checking its present bit.
+    /// raw system/gate descriptors have no invented base or legacy kind projection.
+    pub fn descriptor(&self, selector: u16) -> Option<&SegmentDescriptor> {
+        self.entry(selector)?.legacy.as_ref()
+    }
+
+    pub fn raw_descriptor(&self, selector: u16) -> Option<&SegmentDescriptorRecord> {
+        self.entry(selector).map(|entry| &entry.record)
+    }
+
+    /// legacy system base updates remain explicit constructor policy; raw gates are refused.
+    pub(crate) fn update_base(&mut self, selector: u16, base: u32) -> Result<(), SegmentLoadError> {
+        let entry = self
+            .entries
+            .iter_mut()
+            .find(|entry| entry.selector == selector & !3)
+            .ok_or(SegmentLoadError {
+                failure: SegmentLoadFailure::UnknownSelector,
+                error_code: u32::from(selector & !3),
+            })?;
+        let record = if let Some(record) = entry.record.with_code_data_base(base) {
+            record
+        } else if entry.legacy_constructed {
+            let mut legacy = entry
+                .legacy
+                .expect("legacy constructors retain their compatibility view");
+            legacy.base = base;
+            SegmentDescriptorRecord::from_legacy(legacy).expect("stored legacy dpl is valid")
+        } else {
+            return Err(SegmentLoadError {
+                failure: SegmentLoadFailure::Type,
+                error_code: u32::from(selector & !3),
+            });
+        };
+        entry.record = record;
+        if let Some(legacy) = &mut entry.legacy {
+            legacy.base = base;
+        }
+        Ok(())
+    }
+
+    /// commit only after all fallible load staging has succeeded; verification never calls this.
+    pub(crate) fn commit_accessed(&mut self, selector: u16) {
+        if let Some(entry) = self
+            .entries
+            .iter_mut()
+            .find(|entry| entry.selector == selector & !3)
+        {
+            if let Some(record) = entry.record.with_accessed() {
+                entry.record = record;
+            }
+        }
+    }
+
+    /// query raw type and visibility without loading a segment or testing its present bit.
     pub fn verify(&self, selector: u16, cpl: u8, write: bool) -> bool {
         if selector & !3 == 0 || cpl > 3 {
             return false;
         }
-        let Some(descriptor) = self.descriptor(selector) else {
+        let Some(record) = self.raw_descriptor(selector).copied() else {
             return false;
         };
-        let (permitted, conforming) = match descriptor.kind {
-            SegmentDescriptorKind::Data { writable } => (!write || writable, false),
-            SegmentDescriptorKind::Code {
-                readable,
-                conforming,
-            } => (!write && readable, conforming),
-            SegmentDescriptorKind::System => (false, false),
+        if !record.code_data() {
+            return false;
+        }
+        let kind = record.descriptor_type();
+        let code = kind & 8 != 0;
+        let permitted = if write {
+            !code && kind & 2 != 0
+        } else {
+            !code || kind & 2 != 0
         };
         permitted
-            && (conforming || (cpl <= descriptor.dpl && (selector & 3) as u8 <= descriptor.dpl))
+            && ((code && kind & 4 != 0)
+                || (cpl <= record.dpl() && (selector & 3) as u8 <= record.dpl()))
     }
 
-    /// Resolve all checks before either the selector or cached base is published.
-    /// The caller maps the typed failure to the execution profile's exception record.
+    /// resolve architecture and profile constraints without modifying the table or loaded state.
     pub fn resolve_load(
         &self,
         target: SegmentRegister,
@@ -180,55 +271,51 @@ impl SegmentDescriptorTable {
                 },
             });
         }
-        let descriptor = self
-            .descriptor(selector)
+        let entry = self
+            .entry(selector)
             .ok_or_else(|| fail(SegmentLoadFailure::UnknownSelector))?;
+        let record = entry.record;
+        if !record.code_data() {
+            return Err(fail(SegmentLoadFailure::Type));
+        }
+        let kind = record.descriptor_type();
+        let code = kind & 8 != 0;
         let rpl = (selector & 3) as u8;
         if target == SegmentRegister::Ss {
-            if !matches!(
-                descriptor.kind,
-                SegmentDescriptorKind::Data { writable: true }
-            ) {
+            if code || kind & 2 == 0 {
                 return Err(fail(SegmentLoadFailure::Type));
             }
-            if rpl != cpl || descriptor.dpl != cpl {
+            if rpl != cpl || record.dpl() != cpl {
                 return Err(fail(SegmentLoadFailure::Privilege));
             }
         } else {
-            let privilege_check = match descriptor.kind {
-                SegmentDescriptorKind::Data { .. } => true,
-                SegmentDescriptorKind::Code {
-                    readable: true,
-                    conforming,
-                } => !conforming,
-                _ => return Err(fail(SegmentLoadFailure::Type)),
-            };
-            if privilege_check && (rpl > descriptor.dpl || cpl > descriptor.dpl) {
+            if code && kind & 2 == 0 {
+                return Err(fail(SegmentLoadFailure::Type));
+            }
+            if !(code && kind & 4 != 0) && (rpl > record.dpl() || cpl > record.dpl()) {
                 return Err(fail(SegmentLoadFailure::Privilege));
             }
         }
-        if !descriptor.present {
+        if !record.present() {
             return Err(fail(SegmentLoadFailure::NotPresent));
         }
-        if !matches!(target, SegmentRegister::Fs | SegmentRegister::Gs) && descriptor.base != 0 {
-            return Err(fail(SegmentLoadFailure::NonFlatLegacy));
+        let base = record.code_data_base().expect("code/data checked above");
+        if !matches!(target, SegmentRegister::Fs | SegmentRegister::Gs) && base != 0 {
+            return Err(fail(if entry.legacy_constructed {
+                SegmentLoadFailure::NonFlatLegacy
+            } else {
+                SegmentLoadFailure::UnsupportedProfile
+            }));
+        }
+        if record.long_mode() || (target == SegmentRegister::Ss && !record.default32()) {
+            return Err(fail(SegmentLoadFailure::UnsupportedProfile));
         }
         Ok(SegmentLoad {
             selector,
-            base: descriptor.base,
-            cache: SegmentCache::flat(
-                match descriptor.kind {
-                    SegmentDescriptorKind::Data { writable } => u8::from(writable) * 2,
-                    SegmentDescriptorKind::Code {
-                        readable,
-                        conforming,
-                    } => 8 | (u8::from(readable) * 2) | (u8::from(conforming) * 4),
-                    SegmentDescriptorKind::System => {
-                        unreachable!("system descriptors cannot be loaded")
-                    }
-                },
-                descriptor.dpl,
-            ),
+            base,
+            cache: record
+                .loaded_cache()
+                .expect("present non-long code/data is cacheable"),
         })
     }
 }
@@ -481,3 +568,7 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+#[path = "descriptors/raw/tests.rs"]
+mod raw_tests;

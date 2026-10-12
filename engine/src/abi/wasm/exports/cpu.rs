@@ -15,6 +15,7 @@ export_process_calls! {
     segment_load_far_resident(key_low: u32, key_high: u32, id_low: u32, id_high: u32, target: u32, address: u32, word: u32);
     set_segment_base(segment: u32, base: u32);
     configure_segment_descriptor(selector: u32, base: u32, dpl: u32, present: u32, kind: u32);
+    configure_segment_descriptor_raw(selector: u32, low: u32, high: u32);
     simd_execute_resident(key_low: u32, key_high: u32, id_low: u32, id_high: u32, descriptor: u32, operands: u32, immediate: u32, source_gpr: u32, destination_gpr: u32, flags: u32);
     cpu_integer(descriptor: u32, address: u32);
     cpu_integer_resident(key_low: u32, key_high: u32, id_low: u32, id_high: u32, descriptor: u32, address: u32);

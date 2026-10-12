@@ -17,8 +17,8 @@ pub use control::{ControlOperation, USER_POP_FLAGS_MASK, USER_POP_FLAGS_WORD_MAS
 pub(crate) use environment::USER_MODE_ENVIRONMENT;
 pub use segments::{
     SegmentAccess, SegmentAccessError, SegmentCache, SegmentContext, SegmentDescriptor,
-    SegmentDescriptorKind, SegmentDescriptorTable, SegmentLoadError, SegmentLoadFailure,
-    SegmentRegister, SegmentState,
+    SegmentDescriptorKind, SegmentDescriptorRecord, SegmentDescriptorTable, SegmentLoadError,
+    SegmentLoadFailure, SegmentRegister, SegmentState,
 };
 pub use stack::StackFrameKind;
 pub use state::{Register32, State32};

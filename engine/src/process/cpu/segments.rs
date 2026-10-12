@@ -6,8 +6,8 @@ use crate::{
         x86::{SEGMENTS_SIZE, decode_segment_context, encode_segment_context},
     },
     cpu::x86::{
-        SegmentAccess, SegmentContext, SegmentDescriptor, SegmentLoadError, SegmentLoadFailure,
-        SegmentRegister, SegmentState,
+        SegmentAccess, SegmentContext, SegmentDescriptor, SegmentDescriptorRecord,
+        SegmentLoadError, SegmentLoadFailure, SegmentRegister, SegmentState,
     },
     memory::GuestAddress,
 };
@@ -53,6 +53,17 @@ impl EngineInstance {
             .map_err(|_| HostError::InvalidRequest)
     }
 
+    pub fn configure_segment_descriptor_raw(
+        &mut self,
+        selector: u16,
+        record: SegmentDescriptorRecord,
+    ) -> Result<(), HostError> {
+        self.segment_configuration_guard()?;
+        self.segment_descriptors
+            .configure_raw(selector, record)
+            .map_err(|_| HostError::InvalidRequest)
+    }
+
     /// host configuration updates both the visible cache and its known descriptor.
     /// it does not synthesize descriptors for arbitrary guest-supplied selectors.
     pub fn set_segment_base(
@@ -66,21 +77,22 @@ impl EngineInstance {
             return Err(HostError::InvalidRequest);
         }
         let selector = context.state.selectors[segment.index()];
-        let descriptor = if selector & !3 != 0 {
-            let mut descriptor = *self
+        let update_descriptor = selector & !3 != 0;
+        if update_descriptor {
+            let raw = self
                 .segment_descriptors
-                .descriptor(selector)
+                .raw_descriptor(selector)
                 .ok_or(HostError::InvalidRequest)?;
-            descriptor.base = base;
-            Some(descriptor)
-        } else {
-            None
-        };
+            // only explicit legacy system construction has an opaque compatibility base.
+            if !raw.code_data() && self.segment_descriptors.descriptor(selector).is_none() {
+                return Err(HostError::InvalidRequest);
+            }
+        }
         let mut bytes = [0; SEGMENTS_SIZE];
         encode_segment_context(&context, &mut bytes).map_err(|_| HostError::Infrastructure)?;
-        if let Some(descriptor) = descriptor {
+        if update_descriptor {
             self.segment_descriptors
-                .configure(descriptor)
+                .update_base(selector, base)
                 .map_err(|_| HostError::InvalidRequest)?;
         }
         self.arena.as_mut().get_mut()[SEGMENTS_OFFSET..SEGMENTS_OFFSET + SEGMENTS_SIZE]
@@ -185,9 +197,14 @@ impl EngineInstance {
                     .map_err(|_| HostError::Infrastructure)?;
                 let result_value = if length == 0 { load.base } else { value };
                 self.segment_packet(length, result_value, Ok(()))?;
+                self.segment_descriptors.commit_accessed(load.selector);
                 self.arena.as_mut().get_mut()[SEGMENTS_OFFSET..SEGMENTS_OFFSET + SEGMENTS_SIZE]
                     .copy_from_slice(&bytes);
                 Ok(())
+            }
+            Err(error) if error.failure == SegmentLoadFailure::UnsupportedProfile => {
+                // profile refusal stays a neutral host rejection, never an invented guest exception.
+                Err(HostError::InvalidRequest)
             }
             Err(error) => self.segment_packet(length, 0, Err(segment_error(target, error))),
         }
@@ -367,3 +384,7 @@ mod tests {
         assert_eq!(packet(&engine, 16), 3);
     }
 }
+
+#[cfg(test)]
+#[path = "segments/raw/tests.rs"]
+mod raw_tests;

@@ -225,6 +225,18 @@ pub(crate) fn configure_segment_descriptor(
     })
 }
 
+pub(crate) fn configure_segment_descriptor_raw(selector: u32, low: u32, high: u32) -> u32 {
+    mutate(|instance| {
+        if selector > u32::from(u16::MAX) {
+            return Err(HostError::InvalidRequest);
+        }
+        instance.configure_segment_descriptor_raw(
+            selector as u16,
+            crate::cpu::x86::SegmentDescriptorRecord::from_words(low, high),
+        )
+    })
+}
+
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn simd_execute_resident(
     key_low: u32,
