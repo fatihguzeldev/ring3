@@ -125,6 +125,7 @@ pub(crate) struct FloatResult {
     pub exceptions: u16,
 }
 
+#[inline]
 fn rounding(mode: Rounding) -> Round {
     match mode {
         Rounding::Nearest => Round::NearestTiesToEven,
@@ -134,14 +135,16 @@ fn rounding(mode: Rounding) -> Round {
     }
 }
 
+#[inline]
 fn exceptions(status: Status) -> u16 {
-    u16::from(status.contains(Status::INVALID_OP)) * INVALID
-        | u16::from(status.contains(Status::DIV_BY_ZERO)) * ZERO_DIVIDE
-        | u16::from(status.contains(Status::OVERFLOW)) * OVERFLOW
-        | u16::from(status.contains(Status::UNDERFLOW)) * UNDERFLOW
-        | u16::from(status.contains(Status::INEXACT)) * PRECISION
+    (u16::from(status.contains(Status::INVALID_OP)) * INVALID)
+        | (u16::from(status.contains(Status::DIV_BY_ZERO)) * ZERO_DIVIDE)
+        | (u16::from(status.contains(Status::OVERFLOW)) * OVERFLOW)
+        | (u16::from(status.contains(Status::UNDERFLOW)) * UNDERFLOW)
+        | (u16::from(status.contains(Status::INEXACT)) * PRECISION)
 }
 
+#[inline]
 pub(crate) fn binary(
     operation: BinaryOperation,
     format: BinaryFormat,
@@ -191,6 +194,7 @@ impl Semantics for WideDouble {
     const EXP_BITS: usize = 15;
 }
 
+#[inline]
 pub(crate) fn unbounded_tiny(
     operation: BinaryOperation,
     format: BinaryFormat,
@@ -236,6 +240,7 @@ pub(crate) fn unbounded_tiny(
     }
 }
 
+#[inline]
 pub(crate) fn from_signed32(value: i32, format: BinaryFormat, mode: Rounding) -> FloatResult {
     let round = rounding(mode);
     let result = match format {
@@ -254,6 +259,7 @@ pub(crate) fn from_signed32(value: i32, format: BinaryFormat, mode: Rounding) ->
     }
 }
 
+#[inline]
 pub(crate) fn to_signed32(bits: u64, format: BinaryFormat, mode: Rounding) -> FloatResult {
     let mut exact = false;
     let round = rounding(mode);
@@ -271,6 +277,7 @@ pub(crate) fn to_signed32(bits: u64, format: BinaryFormat, mode: Rounding) -> Fl
     }
 }
 
+#[inline]
 pub(crate) fn convert(bits: u64, source: BinaryFormat, mode: Rounding) -> FloatResult {
     let mut loses = false;
     let round = rounding(mode);
@@ -292,6 +299,7 @@ pub(crate) fn convert(bits: u64, source: BinaryFormat, mode: Rounding) -> FloatR
     }
 }
 
+#[inline]
 pub(crate) fn narrowing_tiny(bits: u64, mode: Rounding) -> bool {
     let mut loses = false;
     let unbounded: IeeeFloat<WideSingle> = Double::from_bits(bits as u128)
@@ -300,6 +308,7 @@ pub(crate) fn narrowing_tiny(bits: u64, mode: Rounding) -> bool {
     unbounded.is_finite_non_zero() && unbounded.ilogb() < -126
 }
 
+#[inline]
 pub(crate) fn square_root(bits: u64, format: BinaryFormat, mode: Rounding) -> FloatResult {
     let (sign, exponent_mask, fraction_mask, fraction_bits, bias) = format.parameters();
     if bits & exponent_mask == exponent_mask && bits & fraction_mask != 0 {
