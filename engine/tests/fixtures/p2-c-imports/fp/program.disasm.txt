@@ -1,0 +1,73 @@
+
+program.exe:	file format coff-i386
+
+Disassembly of section .text:
+
+00401000 <.text>:
+  401000: 68 10 30 40 00               	push	0x403010
+  401005: 6a 03                        	push	0x3
+  401007: 68 30 20 40 00               	push	0x402030
+  40100c: 68 00 20 40 00               	push	0x402000
+  401011: 68 20 30 40 00               	push	0x403020
+  401016: e8 55 00 00 00               	call	0x401070 <.text+0x70>
+  40101b: 83 c4 14                     	add	esp, 0x14
+  40101e: a3 50 30 40 00               	mov	dword ptr [0x403050], eax
+  401023: 68 67 45 23 f1               	push	0xf1234567
+  401028: ff 15 a8 20 40 00            	call	dword ptr [0x4020a8]
+  40102e: ff 15 a4 20 40 00            	call	dword ptr [0x4020a4]
+  401034: a3 54 30 40 00               	mov	dword ptr [0x403054], eax
+  401039: 83 e0 03                     	and	eax, 0x3
+  40103c: 68 60 30 40 00               	push	0x403060
+  401041: 50                           	push	eax
+  401042: 68 30 20 40 00               	push	0x402030
+  401047: 68 20 30 40 00               	push	0x403020
+  40104c: 68 70 30 40 00               	push	0x403070
+  401051: e8 1a 00 00 00               	call	0x401070 <.text+0x70>
+  401056: 83 c4 14                     	add	esp, 0x14
+  401059: a3 58 30 40 00               	mov	dword ptr [0x403058], eax
+  40105e: c7 05 5c 30 40 00 47 4e 49 52	mov	dword ptr [0x40305c], 0x52494e47
+  401068: eb fe                        	jmp	0x401068 <.text+0x68>
+  40106a: cc                           	int3
+  40106b: cc                           	int3
+  40106c: cc                           	int3
+  40106d: cc                           	int3
+  40106e: cc                           	int3
+  40106f: cc                           	int3
+  401070: 55                           	push	ebp
+  401071: 53                           	push	ebx
+  401072: 57                           	push	edi
+  401073: 56                           	push	esi
+  401074: 8b 4c 24 24                  	mov	ecx, dword ptr [esp + 0x24]
+  401078: 8b 44 24 20                  	mov	eax, dword ptr [esp + 0x20]
+  40107c: 8b 54 24 1c                  	mov	edx, dword ptr [esp + 0x1c]
+  401080: 66 0f 28 02                  	movapd	xmm0, xmmword ptr [edx]
+  401084: 85 c0                        	test	eax, eax
+  401086: 74 36                        	je	0x4010be <.text+0xbe>
+  401088: 8b 74 24 18                  	mov	esi, dword ptr [esp + 0x18]
+  40108c: 8b 7c 24 14                  	mov	edi, dword ptr [esp + 0x14]
+  401090: 66 0f 28 4a 10               	movapd	xmm1, xmmword ptr [edx + 0x10]
+  401095: 66 0f 28 52 20               	movapd	xmm2, xmmword ptr [edx + 0x20]
+  40109a: 31 db                        	xor	ebx, ebx
+  40109c: 89 c5                        	mov	ebp, eax
+  40109e: 66 0f 28 1c 1e               	movapd	xmm3, xmmword ptr [esi + ebx]
+  4010a3: 66 0f 59 d9                  	mulpd	xmm3, xmm1
+  4010a7: 66 0f 58 c3                  	addpd	xmm0, xmm3
+  4010ab: 66 0f 28 da                  	movapd	xmm3, xmm2
+  4010af: 66 0f 58 d8                  	addpd	xmm3, xmm0
+  4010b3: 66 0f 29 1c 1f               	movapd	xmmword ptr [edi + ebx], xmm3
+  4010b8: 83 c3 10                     	add	ebx, 0x10
+  4010bb: 4d                           	dec	ebp
+  4010bc: 75 e0                        	jne	0x40109e <.text+0x9e>
+  4010be: 66 0f 28 c8                  	movapd	xmm1, xmm0
+  4010c2: 66 0f 15 c8                  	unpckhpd	xmm1, xmm0              # xmm1 = xmm1[1],xmm0[1]
+  4010c6: f2 0f 58 c8                  	addsd	xmm1, xmm0
+  4010ca: 66 0f 28 42 30               	movapd	xmm0, xmmword ptr [edx + 0x30]
+  4010cf: f2 0f 59 c8                  	mulsd	xmm1, xmm0
+  4010d3: 66 0f 15 c0                  	unpckhpd	xmm0, xmm0              # xmm0 = xmm0[1,1]
+  4010d7: f2 0f 58 c1                  	addsd	xmm0, xmm1
+  4010db: f2 0f 11 01                  	movsd	qword ptr [ecx], xmm0
+  4010df: 5e                           	pop	esi
+  4010e0: 5f                           	pop	edi
+  4010e1: 5b                           	pop	ebx
+  4010e2: 5d                           	pop	ebp
+  4010e3: c3                           	ret

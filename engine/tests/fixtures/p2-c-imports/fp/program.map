@@ -1,0 +1,31 @@
+ program
+
+ Timestamp is 00000000 (Thu Jan  1 00:00:00 1970)
+
+ Preferred load address is 0000000000400000
+
+ Start         Length     Name                   Class
+ 0001:00000000 000000e4H .text                   CODE
+ 0002:00000000 00000070H .rdata                  DATA
+ 0003:00000000 00000000H .data                   DATA
+ 0003:00000000 000000a0H .bss                    DATA
+
+  Address         Publics by Value              Rva+Base               Lib:Object
+
+ 0001:00000000       _ring3_entry               0000000000401000     entry.obj
+ 0001:00000070       _ring3_reduce              0000000000401070     kernel.obj
+ 0002:00000000       _ring3_input               0000000000402000     entry.obj
+ 0002:00000030       _ring3_coefficients        0000000000402030     entry.obj
+ 0002:000000a4       __imp__GetLastError@0      00000000004020a4     kernel32:KERNEL32.dll
+ 0002:000000a8       __imp__SetLastError@4      00000000004020a8     kernel32:KERNEL32.dll
+ 0003:00000000       __fltused                  0000000000403000     entry.obj
+ 0003:00000010       _ring3_first_scalar        0000000000403010     entry.obj
+ 0003:00000020       _ring3_first_output        0000000000403020     entry.obj
+ 0003:00000050       _ring3_result              0000000000403050     entry.obj
+ 0003:00000060       _ring3_second_scalar       0000000000403060     entry.obj
+ 0003:00000070       _ring3_second_output       0000000000403070     entry.obj
+
+ entry point at         0001:00000000
+
+ Static symbols
+
