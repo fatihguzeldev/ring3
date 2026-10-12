@@ -66,6 +66,7 @@ const cases=[
  {name:'stmxcsr-exact-dword',code:'0fae18',address:DATA,mxcsr:0x5f80,write:dwords([0x5f80]),writeLength:4},
  {name:'fxsave-write-only-preserves-software-tail',code:'0fae00',address:DATA,a:fill(0x31),b:fill(0x42),seedMemory:Buffer.alloc(512,0x66),write:savedImage,writeLength:512,writeOnly:true},
  {name:'fxrstor-physical-tags-and-xmm',code:'0fae08',address:DATA,memory:restoredImage,afterX87:restoredX87,afterXmm:restoredImage.subarray(160,288),afterMxcsr:0x5f80},
+ {name:'mmx-psrlq-variable-count-nonzero',code:'0fd3c1',mmx:true,a:hex('1122334455667788'),b:qwords([8n,0n]),out:hex('2233445566778800')},
 ];
 const sourcePaths=['engine/src/cpu/x86/simd.rs','engine/src/cpu/x86/simd/packed.rs','engine/src/cpu/x86/simd/float.rs','engine/src/cpu/x86/decode/simd.rs','engine/src/cpu/dbt/wasm/simd.rs','engine/src/cpu/dbt/wasm/simd/direct.rs','engine/src/process/simd.rs','engine/src/abi/x86/simd.rs','engine/tests/simd_semantics.rs','engine/tests/cpu_simd_wasm.rs','engine/tests/fixtures/p2-simd/run.mjs'];
 const sourceHashes=()=>Object.fromEntries(sourcePaths.map(p=>[p,hash(readFileSync(join(root,p)))])),beforePins=sourceHashes();
