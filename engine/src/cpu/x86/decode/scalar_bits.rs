@@ -2,14 +2,46 @@ use iced_x86::{Code, Instruction, OpKind};
 
 use super::{
     DecodeError,
-    operands::{effective_address, register, unsupported, word_register},
+    operands::{byte_register, effective_address, register, unsupported, word_register},
 };
 use crate::cpu::x86::{
-    bits::{BitCountKind, ScalarWidth},
+    bits::{BitCountKind, Crc32Source, Crc32Width, ScalarWidth},
     ir::{Location32, Operation, Value32},
 };
 
 pub(super) fn lower(instruction: &Instruction) -> Option<Result<Operation, DecodeError>> {
+    if let Some(width) = match instruction.code() {
+        Code::Crc32_r32_rm8 => Some(Crc32Width::Byte),
+        Code::Crc32_r32_rm16 => Some(Crc32Width::Word),
+        Code::Crc32_r32_rm32 => Some(Crc32Width::Dword),
+        _ => None,
+    } {
+        return Some((|| {
+            let destination = register(instruction.op0_register())?;
+            let source = match instruction.op1_kind() {
+                OpKind::Memory => Crc32Source::Memory {
+                    width,
+                    address: effective_address(instruction)?,
+                },
+                OpKind::Register => match width {
+                    Crc32Width::Byte => {
+                        Crc32Source::ByteRegister(byte_register(instruction.op1_register())?)
+                    }
+                    Crc32Width::Word => {
+                        Crc32Source::WordRegister(word_register(instruction.op1_register())?)
+                    }
+                    Crc32Width::Dword => {
+                        Crc32Source::DwordRegister(register(instruction.op1_register())?)
+                    }
+                },
+                _ => return Err(unsupported()),
+            };
+            Ok(Operation::Crc32 {
+                destination,
+                source,
+            })
+        })());
+    }
     use BitCountKind::{LeadingZero, Population, TrailingZero};
     use ScalarWidth::{Dword, Word};
     let count = match instruction.code() {

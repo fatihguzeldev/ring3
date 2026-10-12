@@ -324,6 +324,10 @@ pub enum CarryKind {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Operation {
+    Crc32 {
+        destination: Register32,
+        source: super::bits::Crc32Source,
+    },
     MultiplyExtended {
         high: Register32,
         low: Register32,

@@ -361,6 +361,10 @@ pub(super) fn terminates(instruction: &DecodedInstruction, embedded: bool) -> bo
 fn supports_memory_reads(operation: &Operation) -> bool {
     matches!(
         operation,
+        Operation::Crc32 {
+            source: crate::cpu::x86::bits::Crc32Source::Memory { .. },
+            ..
+        } |
         Operation::MultiplyExtended {
             source: Value32::Memory(_),
             ..
@@ -568,6 +572,10 @@ fn supports_memory_shift_or_rotate(operation: &Operation) -> bool {
 pub(super) fn supports(instruction: &DecodedInstruction, embedded: bool) -> bool {
     let operation = instruction.operation();
     match operation {
+        Operation::Crc32 { source, .. } => {
+            return embedded
+                || !matches!(source, crate::cpu::x86::bits::Crc32Source::Memory { .. });
+        }
         Operation::BitManipulation { source, .. } | Operation::MultiplyExtended { source, .. } => {
             return embedded || !matches!(source, Value32::Memory(_));
         }

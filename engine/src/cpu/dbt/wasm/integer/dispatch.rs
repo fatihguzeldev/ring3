@@ -49,6 +49,12 @@ pub(in crate::cpu::dbt::wasm) fn instruction(
     }
     let mut store = false;
     match *instruction.operation() {
+        Operation::Crc32 {
+            destination,
+            source,
+        } => {
+            super::scalar_bits::crc32(code, destination, source, imports, exit_depth);
+        }
         Operation::MultiplyExtended { high, low, source } => {
             super::bit_manipulation::multiply_extended(
                 code, high, low, source, imports, exit_depth,

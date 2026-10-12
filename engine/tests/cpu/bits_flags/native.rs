@@ -41,3 +41,6 @@ mod cpu_bmi1;
 
 #[path = "cases/native/cpu_bmi2.rs"]
 mod cpu_bmi2;
+
+#[path = "cases/native/cpu_crc32.rs"]
+mod cpu_crc32;

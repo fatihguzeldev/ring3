@@ -1,3 +1,8 @@
+use super::{
+    Register32,
+    ir::{ByteRegister, EffectiveAddress},
+};
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ScalarWidth {
     Word,
@@ -10,7 +15,6 @@ pub enum BitCountKind {
     LeadingZero,
     Population,
 }
-use super::Register32;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum BitManipulationKind {
@@ -26,4 +30,21 @@ pub enum BitManipulationKind {
     ShiftLogicalRight { count: Register32 },
     ShiftArithmeticRight { count: Register32 },
     RotateRight { count: u8 },
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Crc32Width {
+    Byte,
+    Word,
+    Dword,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Crc32Source {
+    ByteRegister(ByteRegister),
+    WordRegister(Register32),
+    DwordRegister(Register32),
+    Memory {
+        width: Crc32Width,
+        address: EffectiveAddress,
+    },
 }
