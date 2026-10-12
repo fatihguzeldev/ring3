@@ -1,8 +1,14 @@
 use wasm_encoder::{BlockType, InstructionSink};
 
-use super::{cpu_result, locals::*, memory};
+use super::{cpu_result, locals::*, memory, segments};
 use crate::cpu::x86::{
-    Register32, decode::DecodedInstruction, ir::Operation, xstate::XStateOperation,
+    Register32, SegmentAccess, SegmentRegister,
+    decode::DecodedInstruction,
+    ir::{EffectiveAddress, Operation},
+    xstate::{
+        XStateOperation,
+        access::{MemorySpan, RESTORE_SPANS, SAVE_SPANS},
+    },
 };
 
 pub(super) fn instruction(
@@ -32,6 +38,7 @@ pub(super) fn instruction(
         XStateOperation::Save { address } => (address, true),
         XStateOperation::Restore { address } => (address, false),
     };
+    check_selected_spans(code, *address, save, imports, exit_depth);
     memory::effective_address(code, *address);
     let helper = if save {
         imports.cpu_xsave
@@ -48,6 +55,71 @@ pub(super) fn instruction(
     validate_context(code, save, exit_depth);
     cpu_result::validate(code, 576, if save { 3 } else { 1 }, save, exit_depth);
     save
+}
+
+/// segment authority precedes helper effects; selected init-state restores keep the same page reads.
+/// competing segment/header/alignment faults follow ring3's deterministic upfront authority policy.
+fn check_selected_spans(
+    code: &mut InstructionSink<'_>,
+    address: EffectiveAddress,
+    save: bool,
+    imports: memory::Imports,
+    exit_depth: u32,
+) {
+    let spans = if save { &SAVE_SPANS } else { &RESTORE_SPANS };
+    let access = if save {
+        SegmentAccess::Write
+    } else {
+        SegmentAccess::Read
+    };
+    memory::offset_value(code, address);
+    code.local_set(LHS);
+    for &MemorySpan {
+        offset,
+        width,
+        selection,
+    } in spans
+    {
+        if selection != 0 {
+            code.local_get(register(Register32::Eax))
+                .i32_const(selection as i32)
+                .i32_and()
+                .if_(BlockType::Empty);
+        }
+        let depth = exit_depth + u32::from(selection != 0);
+        code.local_get(LHS)
+            .i32_const(offset as i32)
+            .i32_add()
+            .local_set(ADDRESS);
+        if offset != 0 {
+            // address-size truncation applies to the initial effective offset, never to a field.
+            code.local_get(ADDRESS)
+                .local_get(LHS)
+                .i32_lt_u()
+                .if_(BlockType::Empty);
+            code.i32_const(if address.resolved_segment() == SegmentRegister::Ss {
+                15
+            } else {
+                11
+            })
+            .local_set(REASON);
+            for local in [DETAIL, FAULT_ADDRESS, FAULT_ACCESS, FAULT_LENGTH] {
+                code.i32_const(0).local_set(local);
+            }
+            code.br(depth + 1).end();
+        }
+        segments::check_span(
+            code,
+            address.resolved_segment(),
+            width,
+            access,
+            imports,
+            depth,
+        );
+        if selection != 0 {
+            code.end();
+        }
+    }
 }
 
 fn range(code: &mut InstructionSink<'_>, start: i32, end: i32) {

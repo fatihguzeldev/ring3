@@ -33,3 +33,6 @@ mod xstate;
 
 #[path = "state/legacy/native/segments.rs"]
 mod cpu_fx_segment_access;
+
+#[path = "state/segments/native.rs"]
+mod cpu_xstate_segment_access;

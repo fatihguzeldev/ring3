@@ -1,5 +1,6 @@
 use super::{X87State, ir::EffectiveAddress, simd::SimdState};
 
+pub(crate) mod access;
 pub(in crate::cpu::x86) mod legacy;
 
 pub const IMAGE_SIZE: usize = 576;

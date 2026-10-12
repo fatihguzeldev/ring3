@@ -121,7 +121,7 @@ for (const code of [saveCode, restoreCode]) {
     seeds: [[0x5e00, Buffer.alloc(512, 0x9b)]], unchanged: [[0x5e00, Buffer.alloc(512, 0x9b)]],
     reason: 5, status: 1, detail: 1, fault: 0x6000, access: 1});
   rows.push({name: `${code}-header-address-overflow`, code, address: 0xfffffe00,
-    reason: 5, status: 1, detail: 3, fault: 0xfffffe00, access: 1});
+    reason: 11, direct: true});
 }
 rows.push({name: 'save-late-readonly-header-write-preserves-earlier-component-bytes', code: saveCode,
   address: 0x5e00, extra: true, protects: [[0x6000, 1]],

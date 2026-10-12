@@ -12,3 +12,6 @@ mod cpu_xstate_wasm;
 
 #[path = "state/legacy/wasm/segments.rs"]
 mod cpu_fx_segment_access_wasm;
+
+#[path = "state/segments/wasm.rs"]
+mod cpu_xstate_segment_access_wasm;
