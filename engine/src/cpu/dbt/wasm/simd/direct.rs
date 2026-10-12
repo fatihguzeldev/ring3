@@ -37,6 +37,8 @@ pub(super) fn accepts(op: SimdOperation) -> bool {
                 | P::ShiftRight
                 | P::ShiftRightSigned
         ),
+        SimdKind::Shuffle(S::PackSigned) => matches!(op.lane_bytes, 1 | 2),
+        SimdKind::Shuffle(S::PackUnsigned) => op.lane_bytes == 1,
         SimdKind::Shuffle(kind) => matches!(
             kind,
             S::Dwords
@@ -255,6 +257,28 @@ fn packed_shift(code: &mut InstructionSink<'_>, op: SimdOperation, kind: P) {
     code.end();
 }
 
+fn saturating_pack(code: &mut InstructionSink<'_>, op: SimdOperation, kind: S) {
+    load(code, op.destination, op.vector_bytes);
+    load(code, op.source, op.vector_bytes);
+    if op.vector_bytes == 8 {
+        // combine both mmx halves before narrowing so padding follows the source lanes.
+        code.i8x16_shuffle([0, 1, 2, 3, 4, 5, 6, 7, 16, 17, 18, 19, 20, 21, 22, 23])
+            .v128_const(0);
+    }
+    match (kind, op.lane_bytes) {
+        (S::PackSigned, 1) => {
+            code.i8x16_narrow_i16x8_s();
+        }
+        (S::PackSigned, 2) => {
+            code.i16x8_narrow_i32x4_s();
+        }
+        (S::PackUnsigned, 1) => {
+            code.i8x16_narrow_i16x8_u();
+        }
+        _ => unreachable!("direct saturating pack kind and width were decoded"),
+    }
+}
+
 fn shuffle(code: &mut InstructionSink<'_>, op: SimdOperation, kind: S) {
     let width = usize::from(op.lane_bytes);
     let size = usize::from(op.vector_bytes);
@@ -390,6 +414,9 @@ pub(super) fn instruction(
             }
             load(code, op.source, op.vector_bytes);
             arithmetic(code, kind, op.lane_bytes);
+        }
+        SimdKind::Shuffle(kind) if matches!(kind, S::PackSigned | S::PackUnsigned) => {
+            saturating_pack(code, op, kind);
         }
         SimdKind::Shuffle(kind)
             if matches!(
