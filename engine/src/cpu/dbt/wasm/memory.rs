@@ -136,13 +136,14 @@ impl Imports {
         let mut atomic_xor_u32 = false;
         for instruction in blocks.iter().flat_map(|block| &block.instructions) {
             match instruction.operation() {
-                Operation::Crc32 { source, .. } => {
-                    if let crate::cpu::x86::bits::Crc32Source::Memory { width, .. } = source {
-                        match width {
-                            crate::cpu::x86::bits::Crc32Width::Byte => read8 = true,
-                            crate::cpu::x86::bits::Crc32Width::Word => read16 = true,
-                            crate::cpu::x86::bits::Crc32Width::Dword => read = true,
-                        }
+                Operation::Crc32 {
+                    source: crate::cpu::x86::bits::Crc32Source::Memory { width, .. },
+                    ..
+                } => {
+                    match width {
+                        crate::cpu::x86::bits::Crc32Width::Byte => read8 = true,
+                        crate::cpu::x86::bits::Crc32Width::Word => read16 = true,
+                        crate::cpu::x86::bits::Crc32Width::Dword => read = true,
                     }
                 }
                 Operation::BitManipulation { source, .. }
