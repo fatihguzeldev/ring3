@@ -38,3 +38,6 @@ mod cpu_bit_counts;
 
 #[path = "cases/native/cpu_bmi1.rs"]
 mod cpu_bmi1;
+
+#[path = "cases/native/cpu_bmi2.rs"]
+mod cpu_bmi2;

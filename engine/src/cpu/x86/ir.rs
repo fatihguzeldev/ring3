@@ -324,6 +324,11 @@ pub enum CarryKind {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Operation {
+    MultiplyExtended {
+        high: Register32,
+        low: Register32,
+        source: Value32,
+    },
     BitManipulation {
         kind: super::bits::BitManipulationKind,
         destination: Register32,

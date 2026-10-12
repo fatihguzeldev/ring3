@@ -49,6 +49,11 @@ pub(in crate::cpu::dbt::wasm) fn instruction(
     }
     let mut store = false;
     match *instruction.operation() {
+        Operation::MultiplyExtended { high, low, source } => {
+            super::bit_manipulation::multiply_extended(
+                code, high, low, source, imports, exit_depth,
+            );
+        }
         Operation::BitManipulation {
             kind,
             destination,

@@ -19,4 +19,11 @@ pub enum BitManipulationKind {
     IsolateLowest,
     MaskLowest,
     ResetLowest,
+    ZeroHigh { index: Register32 },
+    Deposit { value: Register32 },
+    ExtractMasked { value: Register32 },
+    ShiftLeft { count: Register32 },
+    ShiftLogicalRight { count: Register32 },
+    ShiftArithmeticRight { count: Register32 },
+    RotateRight { count: u8 },
 }

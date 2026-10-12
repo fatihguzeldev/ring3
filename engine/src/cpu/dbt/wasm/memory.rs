@@ -136,7 +136,8 @@ impl Imports {
         let mut atomic_xor_u32 = false;
         for instruction in blocks.iter().flat_map(|block| &block.instructions) {
             match instruction.operation() {
-                Operation::BitManipulation { source, .. } => {
+                Operation::BitManipulation { source, .. }
+                | Operation::MultiplyExtended { source, .. } => {
                     read |= matches!(source, Value32::Memory(_));
                 }
                 Operation::Control(operation) => match operation {

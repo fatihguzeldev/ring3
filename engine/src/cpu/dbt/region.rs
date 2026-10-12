@@ -361,7 +361,10 @@ pub(super) fn terminates(instruction: &DecodedInstruction, embedded: bool) -> bo
 fn supports_memory_reads(operation: &Operation) -> bool {
     matches!(
         operation,
-        Operation::BitManipulation {
+        Operation::MultiplyExtended {
+            source: Value32::Memory(_),
+            ..
+        } | Operation::BitManipulation {
             source: Value32::Memory(_),
             ..
         } | Operation::Control(
@@ -565,7 +568,7 @@ fn supports_memory_shift_or_rotate(operation: &Operation) -> bool {
 pub(super) fn supports(instruction: &DecodedInstruction, embedded: bool) -> bool {
     let operation = instruction.operation();
     match operation {
-        Operation::BitManipulation { source, .. } => {
+        Operation::BitManipulation { source, .. } | Operation::MultiplyExtended { source, .. } => {
             return embedded || !matches!(source, Value32::Memory(_));
         }
         Operation::Control(operation) => return embedded || !operation.reads_memory(),
