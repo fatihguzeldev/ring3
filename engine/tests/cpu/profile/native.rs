@@ -4,7 +4,7 @@ mod cpu_integer_completion;
 #[path = "prefixes/native/grammar.rs"]
 mod cpu_prefix_grammar;
 
-#[path = "environment/native/cache_timestamp.rs"]
+#[path = "environment/ordering/native.rs"]
 mod cpu_cache_timestamp;
 
 #[path = "environment/cpuid/native.rs"]

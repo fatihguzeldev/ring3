@@ -34,7 +34,7 @@ fn run_fixture(script: &str) {
     fs::write(output.join("initial-arena.bin"), initial).unwrap();
     let result = wasm_support::run_node(
         root,
-        "engine/tests/cpu/profile/environment/fixtures/p2-cache-timestamp/runtime/run.mjs",
+        "engine/tests/cpu/profile/environment/ordering/fixtures/p2-cache-timestamp/runtime/run.mjs",
         &engine,
         &output,
         None,
