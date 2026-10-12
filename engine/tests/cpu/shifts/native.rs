@@ -7,134 +7,134 @@ mod support_prefix_admission;
 #[path = "../../support/cpu/word_prefix.rs"]
 mod support_word_prefix;
 
-#[path = "cases/native/cpu_byte_carry_rotate_cl.rs"]
+#[path = "carry_rotate/register/byte/native/cl.rs"]
 mod cpu_byte_carry_rotate_cl;
 
-#[path = "cases/native/cpu_byte_carry_rotate_immediate.rs"]
+#[path = "carry_rotate/register/byte/native/immediate.rs"]
 mod cpu_byte_carry_rotate_immediate;
 
-#[path = "cases/native/cpu_byte_carry_rotate_immediate_one.rs"]
+#[path = "carry_rotate/register/byte/native/explicit_one.rs"]
 mod cpu_byte_carry_rotate_immediate_one;
 
-#[path = "cases/native/cpu_byte_carry_rotate_one.rs"]
+#[path = "carry_rotate/register/byte/native/implicit_one.rs"]
 mod cpu_byte_carry_rotate_one;
 
-#[path = "cases/native/cpu_byte_rotate_cl.rs"]
+#[path = "rotate/register/byte/native/cl.rs"]
 mod cpu_byte_rotate_cl;
 
-#[path = "cases/native/cpu_byte_rotate_immediate.rs"]
+#[path = "rotate/register/byte/native/immediate.rs"]
 mod cpu_byte_rotate_immediate;
 
-#[path = "cases/native/cpu_byte_rotate_immediate_one.rs"]
+#[path = "rotate/register/byte/native/explicit_one.rs"]
 mod cpu_byte_rotate_immediate_one;
 
-#[path = "cases/native/cpu_byte_rotate_one.rs"]
+#[path = "rotate/register/byte/native/implicit_one.rs"]
 mod cpu_byte_rotate_one;
 
-#[path = "cases/native/cpu_byte_shift.rs"]
+#[path = "single/register/native/byte.rs"]
 mod cpu_byte_shift;
 
-#[path = "cases/native/cpu_carry_rotate_cl32.rs"]
+#[path = "carry_rotate/register/dword/native/cl.rs"]
 mod cpu_carry_rotate_cl32;
 
-#[path = "cases/native/cpu_carry_rotate_immediate32.rs"]
+#[path = "carry_rotate/register/dword/native/immediate.rs"]
 mod cpu_carry_rotate_immediate32;
 
-#[path = "cases/native/cpu_carry_rotate_immediate_one.rs"]
+#[path = "carry_rotate/register/dword/native/explicit_one.rs"]
 mod cpu_carry_rotate_immediate_one;
 
-#[path = "cases/native/cpu_carry_rotate_one.rs"]
+#[path = "carry_rotate/register/dword/native/implicit_one.rs"]
 mod cpu_carry_rotate_one;
 
-#[path = "cases/native/cpu_double_shift32.rs"]
+#[path = "double/register/native/dword.rs"]
 mod cpu_double_shift32;
 
-#[path = "cases/native/cpu_memory_byte_carry_rotate_cl.rs"]
+#[path = "carry_rotate/memory/byte/native/cl.rs"]
 mod cpu_memory_byte_carry_rotate_cl;
 
-#[path = "cases/native/cpu_memory_byte_carry_rotate_immediate.rs"]
+#[path = "carry_rotate/memory/byte/native/immediate.rs"]
 mod cpu_memory_byte_carry_rotate_immediate;
 
-#[path = "cases/native/cpu_memory_byte_carry_rotate_one.rs"]
+#[path = "carry_rotate/memory/byte/native/implicit_one.rs"]
 mod cpu_memory_byte_carry_rotate_one;
 
-#[path = "cases/native/cpu_memory_byte_rotate.rs"]
+#[path = "rotate/memory/byte/native/counts.rs"]
 mod cpu_memory_byte_rotate;
 
-#[path = "cases/native/cpu_memory_byte_rotate_one.rs"]
+#[path = "rotate/memory/byte/native/implicit_one.rs"]
 mod cpu_memory_byte_rotate_one;
 
-#[path = "cases/native/cpu_memory_byte_shift.rs"]
+#[path = "single/memory/byte/native/implicit_one.rs"]
 mod cpu_memory_byte_shift;
 
-#[path = "cases/native/cpu_memory_byte_shift_cl.rs"]
+#[path = "single/memory/byte/native/cl.rs"]
 mod cpu_memory_byte_shift_cl;
 
-#[path = "cases/native/cpu_memory_byte_shift_immediate.rs"]
+#[path = "single/memory/byte/native/immediate.rs"]
 mod cpu_memory_byte_shift_immediate;
 
-#[path = "cases/native/cpu_memory_byte_shift_immediate_one.rs"]
+#[path = "single/memory/byte/native/explicit_one.rs"]
 mod cpu_memory_byte_shift_immediate_one;
 
-#[path = "cases/native/cpu_memory_carry_rotate_cl32.rs"]
+#[path = "carry_rotate/memory/dword/native/cl.rs"]
 mod cpu_memory_carry_rotate_cl32;
 
-#[path = "cases/native/cpu_memory_carry_rotate_immediate32.rs"]
+#[path = "carry_rotate/memory/dword/native/immediate.rs"]
 mod cpu_memory_carry_rotate_immediate32;
 
-#[path = "cases/native/cpu_memory_carry_rotate_one.rs"]
+#[path = "carry_rotate/memory/dword/native/implicit_one.rs"]
 mod cpu_memory_carry_rotate_one;
 
-#[path = "cases/native/cpu_memory_double_shift32.rs"]
+#[path = "double/memory/native/dword.rs"]
 mod cpu_memory_double_shift32;
 
-#[path = "cases/native/cpu_memory_rotate32.rs"]
+#[path = "rotate/memory/dword/native/counts.rs"]
 mod cpu_memory_rotate32;
 
-#[path = "cases/native/cpu_memory_rotate_one.rs"]
+#[path = "rotate/memory/dword/native/implicit_one.rs"]
 mod cpu_memory_rotate_one;
 
-#[path = "cases/native/cpu_memory_shift.rs"]
+#[path = "single/memory/native/dword.rs"]
 mod cpu_memory_shift;
 
-#[path = "cases/native/cpu_rotate32.rs"]
+#[path = "rotate/register/dword/native/counts.rs"]
 mod cpu_rotate32;
 
-#[path = "cases/native/cpu_rotate_immediate_one.rs"]
+#[path = "rotate/register/dword/native/explicit_one.rs"]
 mod cpu_rotate_immediate_one;
 
-#[path = "cases/native/cpu_rotate_one.rs"]
+#[path = "rotate/register/dword/native/implicit_one.rs"]
 mod cpu_rotate_one;
 
-#[path = "cases/native/cpu_shift.rs"]
+#[path = "single/register/native/dword.rs"]
 mod cpu_shift;
 
-#[path = "cases/native/cpu_word_carry_rotate.rs"]
+#[path = "carry_rotate/register/native/word.rs"]
 mod cpu_word_carry_rotate;
 
-#[path = "cases/native/cpu_word_double_shift.rs"]
+#[path = "double/register/native/word.rs"]
 mod cpu_word_double_shift;
 
-#[path = "cases/native/cpu_word_logical_shift.rs"]
+#[path = "single/register/native/logical_word.rs"]
 mod cpu_word_logical_shift;
 
-#[path = "cases/native/cpu_word_memory_carry_rotate.rs"]
+#[path = "carry_rotate/memory/native/word.rs"]
 mod cpu_word_memory_carry_rotate;
 
-#[path = "cases/native/cpu_word_memory_double_shift.rs"]
+#[path = "double/memory/native/word.rs"]
 mod cpu_word_memory_double_shift;
 
-#[path = "cases/native/cpu_word_memory_rotate.rs"]
+#[path = "rotate/memory/native/word.rs"]
 mod cpu_word_memory_rotate;
 
-#[path = "cases/native/cpu_word_memory_shift.rs"]
+#[path = "single/memory/native/word.rs"]
 mod cpu_word_memory_shift;
 
-#[path = "cases/native/cpu_word_rol.rs"]
+#[path = "rotate/register/native/rol_word.rs"]
 mod cpu_word_rol;
 
-#[path = "cases/native/cpu_word_ror.rs"]
+#[path = "rotate/register/native/ror_word.rs"]
 mod cpu_word_ror;
 
-#[path = "cases/native/cpu_word_sar.rs"]
+#[path = "single/register/native/arithmetic_word.rs"]
 mod cpu_word_sar;
