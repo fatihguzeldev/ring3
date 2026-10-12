@@ -10,7 +10,7 @@ mod abi_resident_callback;
 #[path = "callbacks/native/result.rs"]
 mod abi_resident_callback_result;
 
-#[path = "native/state.rs"]
+#[path = "state/native.rs"]
 mod abi_state;
 
 #[path = "helpers/exchange/native/byte.rs"]
@@ -19,7 +19,7 @@ mod byte_exchange_helper;
 #[path = "helpers/store/native/byte.rs"]
 mod byte_store_helper;
 
-#[path = "native/call_frame.rs"]
+#[path = "calls/frame/native.rs"]
 mod call_frame_abi;
 
 #[path = "exit/native/infrastructure.rs"]
@@ -28,7 +28,7 @@ mod cpu_exit_v2;
 #[path = "exit/native/gate.rs"]
 mod cpu_exit_v3;
 
-#[path = "native/arena_defaults.rs"]
+#[path = "arena/native.rs"]
 mod fixture_arena_defaults;
 
 #[path = "helpers/native/dword.rs"]
@@ -43,5 +43,5 @@ mod word_exchange_helper;
 #[path = "helpers/store/native/word.rs"]
 mod word_store_helper;
 
-#[path = "native/x87.rs"]
+#[path = "state/x87/native.rs"]
 mod x87_arena;
