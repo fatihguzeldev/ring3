@@ -160,7 +160,7 @@ pub(super) fn packed(
                     0
                 }
             }
-            P::Absolute => sy.abs() as u64,
+            P::Absolute => sy.unsigned_abs() as u64,
             P::Sign => {
                 if sy < 0 {
                     -sx as u64
