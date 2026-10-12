@@ -6,6 +6,7 @@ mod control_instructions;
 mod cpu_result;
 mod dispatcher;
 mod emitter;
+mod far;
 mod integer;
 mod integer_system;
 mod locals;

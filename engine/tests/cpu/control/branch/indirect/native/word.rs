@@ -403,13 +403,24 @@ fn word_indirect_jump_prefixes_lock_and_adjacent_ff_groups_remain_precise() {
         &[0x66, 0x66, 0xff, 0xd0][..],
         &[0x66, 0x66, 0xff, 0x13],
         &[0x66, 0xff, 0x1b],
-        &[0x66, 0xff, 0x2b],
     ] {
         assert_eq!(
             decode_one(&code_space(CODE, bytes), GuestAddress(CODE)).err(),
             Some(unsupported)
         );
     }
+    assert_operation(
+        &[0x66, 0xff, 0x2b],
+        Operation::FarJump {
+            width: ring3_engine::cpu::x86::FarWidth::Word,
+            target: ring3_engine::cpu::x86::ir::FarPointer::Memory(address(
+                Some(Register32::Ebx),
+                None,
+                1,
+                0,
+            )),
+        },
+    );
     for bytes in [
         &[0x66, 0xff, 0xe8][..],
         &[0x66, 0xff, 0xf8],

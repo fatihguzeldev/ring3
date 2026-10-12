@@ -49,6 +49,9 @@ pub(in crate::cpu::dbt::wasm) fn instruction(
     }
     let mut store = false;
     match *instruction.operation() {
+        Operation::FarJump { width, target } => {
+            super::super::far::jump(code, width, target, imports, exit_depth)
+        }
         Operation::QuerySegment {
             kind,
             source,
@@ -2485,7 +2488,8 @@ pub(in crate::cpu::dbt::wasm) fn instruction(
     }
     if !matches!(
         instruction.operation(),
-        Operation::Jump { .. }
+        Operation::FarJump { .. }
+            | Operation::Jump { .. }
             | Operation::JumpWord { .. }
             | Operation::ReadJumpWord { .. }
             | Operation::ConditionalJump { .. }

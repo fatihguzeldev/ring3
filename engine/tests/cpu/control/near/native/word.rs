@@ -303,6 +303,20 @@ fn word_return_adjustment_is_unsigned_and_prefix_looking_immediates_are_payload(
 
 #[test]
 fn word_near_control_strict_prefixes_indirect_far_and_other_word_branches_stay_closed() {
+    let far = [0x66, 0xea, 0, 0, 0, 0];
+    assert_eq!(
+        decode_one(&code_space(CODE, &far), GuestAddress(CODE))
+            .unwrap()
+            .operation(),
+        &Operation::FarJump {
+            width: ring3_engine::cpu::x86::FarWidth::Word,
+            target: ring3_engine::cpu::x86::ir::FarPointer::Immediate {
+                offset: 0,
+                selector: 0
+            },
+        },
+    );
+
     let opcode = DecodeError::Unsupported(UnsupportedFeature::Opcode);
     for form in FORMS {
         for prefix in [
@@ -340,7 +354,6 @@ fn word_near_control_strict_prefixes_indirect_far_and_other_word_branches_stay_c
         &[0x66, 0xcb],
         &[0x66, 0xca, 0, 0],
         &[0x66, 0x9a, 0, 0, 0, 0],
-        &[0x66, 0xea, 0, 0, 0, 0],
     ] {
         assert_eq!(
             decode_one(&code_space(CODE, bytes), GuestAddress(CODE)).err(),

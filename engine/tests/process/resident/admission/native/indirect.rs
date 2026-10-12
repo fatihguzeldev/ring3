@@ -329,9 +329,34 @@ fn jump_span_priority_and_adjacent_exclusions_preserve_previous_state() {
             InstructionError::InvalidBlockEnd,
         );
     }
+    {
+        let bytes = [0x90, 0xff, 0x2b];
+        let (mut far_engine, far_keep) = fixture(&bytes);
+        assert_eq!(
+            decode_one(far_engine.memory().unwrap(), GuestAddress(CODE + 1))
+                .unwrap()
+                .operation(),
+            &Operation::FarJump {
+                width: ring3_engine::cpu::x86::FarWidth::Dword,
+                target: ring3_engine::cpu::x86::ir::FarPointer::Memory(EffectiveAddress {
+                    base: Some(Register32::Ebx),
+                    ..Default::default()
+                }),
+            },
+        );
+        describe(&mut far_engine, CODE, bytes.len());
+        let before = saved(&far_engine, far_keep);
+        let far_id = far_engine
+            .compile_resident(1)
+            .expect("far JMP admits without operand or target mapping")
+            .get();
+        assert_eq!(saved(&far_engine, far_keep), before);
+        let generated = far_engine.resident_bytes(far_id).unwrap();
+        assert_unit(&far_engine, far_id, generated, generated.as_ptr() as usize);
+        assert_eq!(far_engine.memory().unwrap().mapped_pages(), 2);
+    }
     for (instruction, feature) in [
-        (&[0xff, 0x2b][..], UnsupportedFeature::Opcode),
-        (&[0x66, 0x66, 0xff, 0xe0], UnsupportedFeature::Opcode),
+        (&[0x66, 0x66, 0xff, 0xe0][..], UnsupportedFeature::Opcode),
         (&[0x67, 0xff, 0x23], UnsupportedFeature::Opcode),
         (&[0x64, 0xff, 0x23], UnsupportedFeature::Segment),
         (&[0xcd, 0x80], UnsupportedFeature::Opcode),

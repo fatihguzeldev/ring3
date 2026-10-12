@@ -239,6 +239,20 @@ fn word_jump_immediate_prefix_bytes_are_payload_and_old_jump_forms_stay_exact() 
 
 #[test]
 fn word_jump_prefix_aliases_and_other_word_jump_families_remain_closed() {
+    let far = [0x66, 0xea, 0, 0, 0, 0];
+    assert_eq!(
+        decode_one(&code_space(CODE, &far), GuestAddress(CODE))
+            .unwrap()
+            .operation(),
+        &Operation::FarJump {
+            width: ring3_engine::cpu::x86::FarWidth::Word,
+            target: ring3_engine::cpu::x86::ir::FarPointer::Immediate {
+                offset: 0,
+                selector: 0
+            },
+        },
+    );
+
     let opcode = DecodeError::Unsupported(UnsupportedFeature::Opcode);
     for prefix in [
         0x66, 0x67, 0xf0, 0xf2, 0xf3, 0x26, 0x2e, 0x36, 0x3e, 0x64, 0x65,
@@ -268,7 +282,6 @@ fn word_jump_prefix_aliases_and_other_word_jump_families_remain_closed() {
         &[0x66, 0x66, 0x0f, 0x84, 0, 0],
         &[0x66, 0x66, 0xff, 0xe0],
         &[0x66, 0x66, 0xff, 0x23],
-        &[0x66, 0xea, 0, 0, 0, 0],
     ] {
         assert_eq!(
             decode_one(&code_space(CODE, bytes), GuestAddress(CODE)).err(),

@@ -33,3 +33,6 @@ mod cpu_word_jump;
 
 #[path = "near/native/word.rs"]
 mod cpu_word_near_control;
+
+#[path = "far/jump/native.rs"]
+mod cpu_far_jump;

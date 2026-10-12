@@ -35,3 +35,6 @@ mod cpu_execution_faults_wasm;
 
 #[path = "exceptions/wasm/privileged.rs"]
 mod cpu_privileged_faults_wasm;
+
+#[path = "far/jump/wasm.rs"]
+mod cpu_far_jump_wasm;

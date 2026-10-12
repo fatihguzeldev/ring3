@@ -51,6 +51,7 @@ pub(super) struct Imports {
     pub(super) cpu_mask_write: Option<StoreImport>,
     pub(super) segment_load: Option<StoreImport>,
     pub(super) segment_load_far: Option<StoreImport>,
+    pub(super) far_jump: Option<StoreImport>,
     pub(super) read: Option<u32>,
     pub(super) store: Option<StoreImport>,
     pub(super) read8: Option<u32>,
@@ -86,6 +87,7 @@ pub(super) struct ImportNeeds {
     pub(super) cpu_mask_write: bool,
     pub(super) segment_load: bool,
     pub(super) segment_load_far: bool,
+    pub(super) far_jump: bool,
     pub(super) read: bool,
     pub(super) store: bool,
     pub(super) read8: bool,
@@ -122,6 +124,7 @@ impl Imports {
         let mut cpu_mask_write = false;
         let mut segment_load = false;
         let mut segment_load_far = false;
+        let mut far_jump = false;
         let mut read = false;
         let mut store = false;
         let mut read8 = false;
@@ -144,6 +147,10 @@ impl Imports {
         let mut atomic_xor_u32 = false;
         for instruction in blocks.iter().flat_map(|block| &block.instructions) {
             match instruction.operation() {
+                Operation::FarJump { target, .. } => {
+                    far_jump = true;
+                    cpu_read |= matches!(target, crate::cpu::x86::ir::FarPointer::Memory(_));
+                }
                 Operation::XState(operation) => match operation {
                     crate::cpu::x86::xstate::XStateOperation::Save { .. } => cpu_xsave = true,
                     crate::cpu::x86::xstate::XStateOperation::Restore { .. } => cpu_xrstor = true,
@@ -463,6 +470,7 @@ impl Imports {
             cpu_mask_write,
             segment_load,
             segment_load_far,
+            far_jump,
             read,
             store,
             read8,

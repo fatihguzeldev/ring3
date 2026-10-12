@@ -58,7 +58,9 @@ impl SegmentState {
 mod cache;
 mod descriptor_record;
 mod descriptors;
+mod transfers;
 pub use descriptor_record::SegmentDescriptorRecord;
+pub use transfers::{CodeTransfer, CodeTransferError, FarWidth};
 
 pub use cache::{SegmentAccess, SegmentAccessError, SegmentCache, SegmentContext};
 

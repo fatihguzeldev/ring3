@@ -1,4 +1,4 @@
-use super::{Register32, SegmentRegister};
+use super::{FarWidth, Register32, SegmentRegister};
 use crate::memory::GuestAddress;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -328,6 +328,12 @@ pub enum ShiftCount {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FarPointer {
+    Immediate { offset: u32, selector: u16 },
+    Memory(EffectiveAddress),
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum BranchTarget {
     Direct(GuestAddress),
     Indirect(Location32),
@@ -370,6 +376,10 @@ pub enum CarryKind {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Operation {
+    FarJump {
+        width: FarWidth,
+        target: FarPointer,
+    },
     QuerySegment {
         kind: super::SegmentQuery,
         source: Value32,

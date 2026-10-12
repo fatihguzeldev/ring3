@@ -16,9 +16,10 @@ pub mod xstate;
 pub use control::{ControlOperation, USER_POP_FLAGS_MASK, USER_POP_FLAGS_WORD_MASK, pop_flags};
 pub(crate) use environment::USER_MODE_ENVIRONMENT;
 pub use segments::{
-    SegmentAccess, SegmentAccessError, SegmentCache, SegmentContext, SegmentDescriptor,
-    SegmentDescriptorKind, SegmentDescriptorRecord, SegmentDescriptorTable, SegmentLoadError,
-    SegmentLoadFailure, SegmentQuery, SegmentRegister, SegmentState,
+    CodeTransfer, CodeTransferError, FarWidth, SegmentAccess, SegmentAccessError, SegmentCache,
+    SegmentContext, SegmentDescriptor, SegmentDescriptorKind, SegmentDescriptorRecord,
+    SegmentDescriptorTable, SegmentLoadError, SegmentLoadFailure, SegmentQuery, SegmentRegister,
+    SegmentState,
 };
 pub use stack::StackFrameKind;
 pub use state::{Register32, State32};

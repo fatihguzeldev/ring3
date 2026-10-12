@@ -4,6 +4,7 @@ mod cache_timestamp;
 mod control;
 mod decoder;
 mod execution_faults;
+mod far;
 mod flow;
 mod integer;
 mod lower;

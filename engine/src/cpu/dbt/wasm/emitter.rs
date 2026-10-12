@@ -25,6 +25,7 @@ pub(in crate::cpu::dbt) fn emit(
         cpu_mask_write: needs_cpu_mask_write,
         segment_load: needs_segment_load,
         segment_load_far: needs_segment_load_far,
+        far_jump: needs_far_jump,
         read: needs_read,
         store: needs_store,
         read8: needs_read8,
@@ -103,7 +104,8 @@ pub(in crate::cpu::dbt) fn emit(
         || needs_cpu_xrstor
         || needs_cpu_mask_write
         || needs_segment_load
-        || needs_segment_load_far;
+        || needs_segment_load_far
+        || needs_far_jump;
     let has_memory = has_cpu
         || has_reads
         || has_stores
@@ -164,6 +166,7 @@ pub(in crate::cpu::dbt) fn emit(
                         | Operation::LoadSegment { .. }
                         | Operation::PopSegment { .. }
                         | Operation::LoadFarPointer { .. }
+                        | Operation::FarJump { .. }
                 )
         });
     let has_segment_check = blocks
@@ -692,6 +695,13 @@ pub(in crate::cpu::dbt) fn emit(
             "segment_load_far_resident",
             7,
             &mut helper_imports.segment_load_far,
+        ),
+        (
+            needs_far_jump,
+            "far_jump",
+            "far_jump_resident",
+            7,
+            &mut helper_imports.far_jump,
         ),
     ] {
         if needed {
