@@ -81,8 +81,12 @@ impl EngineInstance {
         let result = if address & (alignment - 1) != 0 {
             Err(CpuMemoryError::GeneralProtection(0))
         } else {
-            memory
-                .check_span(GuestAddress(address), length as usize, Access::Write)
+            let preflight = if written == length {
+                Ok(())
+            } else {
+                memory.check_span(GuestAddress(address), length as usize, Access::Write)
+            };
+            preflight
                 .and_then(|()| memory.write(GuestAddress(address), input))
                 .map_err(CpuMemoryError::Memory)
         };
