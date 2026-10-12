@@ -530,3 +530,246 @@ fn pending_x87_fault_precedes_mmx_but_not_sse_publication() {
     let (d, o, i) = operation(K::Packed(P::Add), 1).descriptor();
     assert!(simd::execute_descriptor(&mut arena, d, o, i, 0, 0, 0xcd7).is_ok());
 }
+
+#[test]
+fn normal_power_of_two_products_preserve_literal_significands_and_scalar_upper_lanes() {
+    for (width, a, b, expected) in [
+        (4, 0x0080_0000u64, 0x3f80_0000u64, 0x0080_0000u64),
+        (4, 0x7f7f_ffff, 0x3f80_0000, 0x7f7f_ffff),
+        (4, 0x8100_0001, 0xbf00_0000, 0x0080_0001),
+        (4, 0x7eff_ffff, 0x4000_0000, 0x7f7f_ffff),
+        (4, 0x3f80_0001, 0xc000_0000, 0xc000_0001),
+        (
+            8,
+            0x0010_0000_0000_0000,
+            0x3ff0_0000_0000_0000,
+            0x0010_0000_0000_0000,
+        ),
+        (
+            8,
+            0x7fef_ffff_ffff_ffff,
+            0x3ff0_0000_0000_0000,
+            0x7fef_ffff_ffff_ffff,
+        ),
+        (
+            8,
+            0x8020_0000_0000_0001,
+            0xbfe0_0000_0000_0000,
+            0x0010_0000_0000_0001,
+        ),
+        (
+            8,
+            0x7fdf_ffff_ffff_ffff,
+            0x4000_0000_0000_0000,
+            0x7fef_ffff_ffff_ffff,
+        ),
+        (
+            8,
+            0x3ff0_0000_0000_0001,
+            0xc000_0000_0000_0000,
+            0xc000_0000_0000_0001,
+        ),
+    ] {
+        for (left, right) in [(a, b), (b, a)] {
+            let mut state = SimdState {
+                xmm: std::array::from_fn(|index| [0xa0 + index as u8; 16]),
+                ..SimdState::default()
+            };
+            let length = usize::from(width);
+            state.xmm[0][..length].copy_from_slice(&left.to_le_bytes()[..length]);
+            state.xmm[1][..length].copy_from_slice(&right.to_le_bytes()[..length]);
+            let mut wanted = state;
+            wanted.xmm[0][..length].copy_from_slice(&expected.to_le_bytes()[..length]);
+            let mut op = operation(K::Float(F::Multiply), width);
+            op.scalar = true;
+            assert_eq!(run(op, &mut state).unwrap().flags, 0xcd7);
+            assert_eq!(state, wanted);
+        }
+    }
+}
+
+#[test]
+fn exact_packed_products_ignore_rounding_masks_daz_ftz_and_keep_sticky_status() {
+    let qwords = |values: [u64; 2]| {
+        let mut bytes = [0; 16];
+        bytes[..8].copy_from_slice(&values[0].to_le_bytes());
+        bytes[8..].copy_from_slice(&values[1].to_le_bytes());
+        bytes
+    };
+    for (width, left, right, expected) in [
+        (
+            4,
+            dwords([0x0080_0000, 0x7f7f_ffff, 0x8100_0001, 0x3f80_0001]),
+            dwords([0x3f80_0000, 0x3f80_0000, 0xbf00_0000, 0xc000_0000]),
+            dwords([0x0080_0000, 0x7f7f_ffff, 0x0080_0001, 0xc000_0001]),
+        ),
+        (
+            8,
+            qwords([0x8020_0000_0000_0001, 0x7fdf_ffff_ffff_ffff]),
+            qwords([0xbfe0_0000_0000_0000, 0x4000_0000_0000_0000]),
+            qwords([0x0010_0000_0000_0001, 0x7fef_ffff_ffff_ffff]),
+        ),
+    ] {
+        for round in 0..4 {
+            for control in [0, 0x1f80, 0x0040, 0x8000, 0x9fff] {
+                let mut state = SimdState {
+                    mxcsr: control | (round << 13),
+                    xmm: [[0xa5; 16]; 8],
+                };
+                state.xmm[0] = left;
+                state.xmm[1] = right;
+                let mut wanted = state;
+                wanted.xmm[0] = expected;
+                let mut mmx = [[0x3c; 8]; 8];
+                let mut memory = [0x5a; 16];
+                let result = simd::execute(
+                    operation(K::Float(F::Multiply), width),
+                    &mut state,
+                    &mut mmx,
+                    &mut memory,
+                    0,
+                    0,
+                    0xcd7,
+                )
+                .unwrap();
+                assert_eq!(result.flags, 0xcd7);
+                assert_eq!(state, wanted);
+                assert_eq!(mmx, [[0x3c; 8]; 8]);
+                assert_eq!(memory, [0x5a; 16]);
+            }
+        }
+    }
+}
+
+#[test]
+fn product_guard_neighbors_keep_literal_fallback_results_and_packed_exception_atomicity() {
+    for (width, a, b, mxcsr, expected, status) in [
+        (4, 0x8000_0000u64, 0xc000_0000u64, 0x1f80, 0u64, 0),
+        (4, 0x007f_ffff, 0x4000_0000, 0x1f80, 0x00ff_fffe, 2),
+        (4, 0x007f_ffff, 0x4000_0000, 0x1fc0, 0, 0),
+        (4, 0x7f80_0000, 0x4000_0000, 0x1f80, 0x7f80_0000, 0),
+        (4, 0x7fc0_1234, 0x4000_0000, 0x1f80, 0x7fc0_1234, 0),
+        (4, 0x7f80_1234, 0x4000_0000, 0x1f80, 0x7fc0_1234, 1),
+        (4, 0x0080_0000, 0x3f00_0000, 0x1f80, 0x0040_0000, 0),
+        (4, 0x7f7f_ffff, 0x4000_0000, 0x1f80, 0x7f80_0000, 0x28),
+        (4, 0x3f80_0001, 0x3f80_0001, 0x1f80, 0x3f80_0002, 0x20),
+        (4, 0x3f80_0001, 0x3f80_0001, 0x5f80, 0x3f80_0003, 0x20),
+        (
+            8,
+            0x8000_0000_0000_0000,
+            0xc000_0000_0000_0000,
+            0x1f80,
+            0,
+            0,
+        ),
+        (
+            8,
+            0x000f_ffff_ffff_ffff,
+            0x4000_0000_0000_0000,
+            0x1f80,
+            0x001f_ffff_ffff_fffe,
+            2,
+        ),
+        (
+            8,
+            0x000f_ffff_ffff_ffff,
+            0x4000_0000_0000_0000,
+            0x1fc0,
+            0,
+            0,
+        ),
+        (
+            8,
+            0x7ff0_0000_0000_0000,
+            0x4000_0000_0000_0000,
+            0x1f80,
+            0x7ff0_0000_0000_0000,
+            0,
+        ),
+        (
+            8,
+            0x7ff8_0000_0000_1234,
+            0x4000_0000_0000_0000,
+            0x1f80,
+            0x7ff8_0000_0000_1234,
+            0,
+        ),
+        (
+            8,
+            0x7ff0_0000_0000_1234,
+            0x4000_0000_0000_0000,
+            0x1f80,
+            0x7ff8_0000_0000_1234,
+            1,
+        ),
+        (
+            8,
+            0x0010_0000_0000_0000,
+            0x3fe0_0000_0000_0000,
+            0x1f80,
+            0x0008_0000_0000_0000,
+            0,
+        ),
+        (
+            8,
+            0x7fef_ffff_ffff_ffff,
+            0x4000_0000_0000_0000,
+            0x1f80,
+            0x7ff0_0000_0000_0000,
+            0x28,
+        ),
+        (
+            8,
+            0x3ff0_0000_0000_0001,
+            0x3ff0_0000_0000_0001,
+            0x1f80,
+            0x3ff0_0000_0000_0002,
+            0x20,
+        ),
+        (
+            8,
+            0x3ff0_0000_0000_0001,
+            0x3ff0_0000_0000_0001,
+            0x5f80,
+            0x3ff0_0000_0000_0003,
+            0x20,
+        ),
+    ] {
+        let mut state = SimdState {
+            mxcsr,
+            xmm: [[0xa5; 16]; 8],
+        };
+        let length = usize::from(width);
+        state.xmm[0][..length].copy_from_slice(&a.to_le_bytes()[..length]);
+        state.xmm[1][..length].copy_from_slice(&b.to_le_bytes()[..length]);
+        let mut wanted = state;
+        wanted.xmm[0][..length].copy_from_slice(&expected.to_le_bytes()[..length]);
+        wanted.mxcsr |= status;
+        let mut op = operation(K::Float(F::Multiply), width);
+        op.scalar = true;
+        assert_eq!(run(op, &mut state).unwrap().flags, 0xcd7);
+        assert_eq!(state, wanted);
+    }
+    for width in [4, 8] {
+        let mut state = SimdState {
+            mxcsr: 0x1b80,
+            xmm: [[0xa5; 16]; 8],
+        };
+        if width == 4 {
+            state.xmm[0] = dwords([0x3f80_0001, 0x7f7f_ffff, 0x3f80_0000, 0xbf80_0000]);
+            state.xmm[1] = dwords([0x4000_0000; 4]);
+        } else {
+            state.xmm[0][..8].copy_from_slice(&0x3ff0_0000_0000_0001u64.to_le_bytes());
+            state.xmm[0][8..].copy_from_slice(&0x7fef_ffff_ffff_ffffu64.to_le_bytes());
+            state.xmm[1][..8].copy_from_slice(&0x4000_0000_0000_0000u64.to_le_bytes());
+            state.xmm[1][8..].copy_from_slice(&0x4000_0000_0000_0000u64.to_le_bytes());
+        }
+        let before = state.xmm;
+        assert_eq!(
+            run(operation(K::Float(F::Multiply), width), &mut state),
+            Err(SimdError::FloatingPoint(0x1b88))
+        );
+        assert_eq!(state.xmm, before);
+        assert_eq!(state.mxcsr, 0x1b88);
+    }
+}

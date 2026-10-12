@@ -46,6 +46,26 @@ fn format(width: usize) -> (u64, u64, u64, u32, i32) {
         )
     }
 }
+fn exact_normal_product(a: u64, b: u64, width: usize) -> Option<u64> {
+    let (sign, exponent_mask, fraction_mask, fraction_bits, bias) = format(width);
+    let a_exponent = ((a & exponent_mask) >> fraction_bits) as i32;
+    let b_exponent = ((b & exponent_mask) >> fraction_bits) as i32;
+    let maximum = (exponent_mask >> fraction_bits) as i32;
+    if a_exponent == 0
+        || a_exponent == maximum
+        || b_exponent == 0
+        || b_exponent == maximum
+        || (a & fraction_mask != 0 && b & fraction_mask != 0)
+    {
+        return None;
+    }
+    let exponent = a_exponent + b_exponent - bias;
+    if !(1..maximum).contains(&exponent) {
+        return None;
+    }
+    // normal power-of-two scaling changes only the exponent and sign, without rounding.
+    Some(((a ^ b) & sign) | ((exponent as u64) << fraction_bits) | ((a | b) & fraction_mask))
+}
 fn nan(bits: u64, width: usize) -> bool {
     let (_, e, f, _, _) = format(width);
     bits & e == e && bits & f != 0
@@ -291,6 +311,11 @@ fn binary(
         }
     } else if an || bn {
         return (quiet(if an { a } else { b }, width), u32::from(sn), None);
+    }
+    if kind == F::Multiply
+        && let Some(result) = exact_normal_product(a, b, width)
+    {
+        return (result, 0, None);
     }
     let round = rounding(mxcsr);
     let (mut result, mut status) = if kind == F::SquareRoot {
