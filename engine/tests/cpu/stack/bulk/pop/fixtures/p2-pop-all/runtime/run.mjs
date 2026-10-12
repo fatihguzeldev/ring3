@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
 import {readFileSync, writeFileSync} from 'node:fs';
 import {join} from 'node:path';
-import {readEngine} from '../../../../../../support/wasm/engine.mjs';
+import {readEngine} from '../../../../../../../support/wasm/engine.mjs';
 
 const [enginePath, output, root] = process.argv.slice(2);
 assert.ok(enginePath && output && root);
@@ -20,8 +20,8 @@ const paths = [
   'engine/src/cpu/dbt/wasm/abi.rs', 'engine/src/cpu/dbt/wasm/emitter.rs', 'engine/src/cpu/dbt/wasm/locals.rs',
   'engine/src/memory/space.rs', 'engine/src/process/instance.rs', 'engine/src/process/execution/compiled.rs', 'engine/src/process/execution/authority.rs', 'engine/src/process/memory/address_space.rs', 'engine/src/process/memory/scalar.rs', 'engine/src/process/memory/scalar/tests.rs', 'engine/src/process/execution/mod.rs', 'engine/src/process/memory/mod.rs', 'engine/src/process/mod.rs', 'engine/src/process/execution/resident.rs',    'engine/src/process/wasm/mod.rs', 'engine/src/process/wasm/loading.rs', 'engine/src/process/wasm/execution.rs', 'engine/src/process/wasm/calls.rs', 'engine/src/process/wasm/memory.rs', 'engine/src/process/wasm/cpu.rs',
   'engine/src/cpu/x86/stack.rs', 'engine/src/cpu/x86/decode/stack.rs', 'engine/src/cpu/dbt/wasm/stack.rs', 'engine/src/process/cpu/stack.rs', 'engine/src/process/cpu/mod.rs',  'engine/src/abi/cpu_helper.rs',
-  'engine/tests/cpu/stack/bulk/native/pop_all.rs', 'engine/tests/cpu/stack/native.rs',  'engine/tests/cpu/stack/bulk/wasm/pop_all.rs', 'engine/tests/cpu/stack/wasm.rs', 'engine/tests/support/wasm.rs',
-  'engine/tests/cpu/stack/bulk/fixtures/p2-pop-all/runtime/run.mjs', 'engine/tests/support/wasm/engine.mjs',
+  'engine/tests/cpu/stack/bulk/pop/native.rs', 'engine/tests/cpu/stack/native.rs',  'engine/tests/cpu/stack/bulk/pop/wasm.rs', 'engine/tests/cpu/stack/wasm.rs', 'engine/tests/support/wasm.rs',
+  'engine/tests/cpu/stack/bulk/pop/fixtures/p2-pop-all/runtime/run.mjs', 'engine/tests/support/wasm/engine.mjs',
 ];
 assert.equal(new Set(paths).size, paths.length);
 const sources = () => Object.fromEntries(paths.map(path => [path, hash(readFileSync(join(root, path)))]));

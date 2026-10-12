@@ -7,7 +7,7 @@ mod cpu_enter_zero_wasm;
 #[path = "frame/wasm/leave.rs"]
 mod cpu_leave_wasm;
 
-#[path = "bulk/wasm/pop_all.rs"]
+#[path = "bulk/pop/wasm.rs"]
 mod cpu_pop_all_wasm;
 
 #[path = "flags/wasm/dword.rs"]

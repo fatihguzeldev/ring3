@@ -10,7 +10,7 @@ mod cpu_enter_zero;
 #[path = "frame/native/leave.rs"]
 mod cpu_leave;
 
-#[path = "bulk/native/pop_all.rs"]
+#[path = "bulk/pop/native.rs"]
 mod cpu_pop_all;
 
 #[path = "flags/native/dword.rs"]

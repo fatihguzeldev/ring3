@@ -41,7 +41,7 @@ fn actual_pop_all_stages_seven_reads_and_retains_current_stack_inputs() {
     fs::write(output.join("initial-arena.bin"), initial).unwrap();
     let result = wasm_support::run_node(
         root,
-        "engine/tests/cpu/stack/bulk/fixtures/p2-pop-all/runtime/run.mjs",
+        "engine/tests/cpu/stack/bulk/pop/fixtures/p2-pop-all/runtime/run.mjs",
         &engine,
         &output,
         None,
