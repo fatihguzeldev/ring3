@@ -14,15 +14,15 @@ const hash = bytes => createHash('sha256').update(bytes).digest('hex');
 const paths = [
   'engine/src/abi/arena.rs', 'engine/src/abi/memory_helper.rs',
   'engine/src/cpu/x86/ir.rs', 'engine/src/cpu/x86/decode/lower.rs',
-  'engine/tests/cpu/moves/addressing/lea/native/word.rs', 'engine/tests/cpu/moves/native.rs', 'engine/tests/support/cpu/prefix_admission.rs', 'engine/tests/support/cpu/word_prefix.rs', 'engine/tests/cpu/moves/native.rs', 'engine/src/cpu/dbt/wasm/abi.rs',
+  'engine/tests/cpu/moves/addressing/lea/native/word.rs', 'engine/tests/cpu/moves/native.rs', 'engine/tests/support/cpu/prefix_admission.rs', 'engine/tests/support/cpu/word_prefix.rs', 'engine/src/cpu/dbt/wasm/abi.rs',
   'engine/src/cpu/x86/decode/profile.rs', 'engine/src/cpu/dbt/region.rs',
   'engine/src/cpu/dbt/wasm/integer/arithmetic.rs', 'engine/src/cpu/dbt/wasm/integer/bits.rs', 'engine/src/cpu/dbt/wasm/integer/carry_rotates.rs', 'engine/src/cpu/dbt/wasm/integer/decimal.rs', 'engine/src/cpu/dbt/wasm/integer/dispatch.rs', 'engine/src/cpu/dbt/wasm/integer/flags.rs', 'engine/src/cpu/dbt/wasm/integer/mod.rs', 'engine/src/cpu/dbt/wasm/integer/multiply_divide.rs', 'engine/src/cpu/dbt/wasm/integer/operands.rs', 'engine/src/cpu/dbt/wasm/integer/rotates.rs', 'engine/src/cpu/dbt/wasm/integer/shifts.rs', 'engine/src/cpu/dbt/wasm/memory.rs',
   'engine/src/cpu/dbt/wasm/control.rs',
   'engine/src/cpu/dbt/wasm/emitter.rs', 'engine/src/process/wasm/mod.rs', 'engine/src/process/wasm/loading.rs', 'engine/src/process/wasm/execution.rs', 'engine/src/process/wasm/calls.rs', 'engine/src/process/wasm/memory.rs', 'engine/src/process/wasm/cpu.rs', 'engine/src/process/mod.rs',
-  'engine/src/process/instance.rs', 'engine/src/process/execution/compiled.rs', 'engine/src/process/execution/authority.rs', 'engine/src/process/memory/address_space.rs', 'engine/src/process/memory/scalar.rs', 'engine/src/process/memory/scalar_tests.rs', 'engine/src/process/execution/mod.rs', 'engine/src/process/memory/mod.rs', 'engine/src/process/mod.rs', 'engine/src/process/execution/resident.rs', 'engine/src/process/execution/authority.rs', 'engine/src/process/execution/mod.rs', 'engine/src/process/mod.rs',
-  'engine/tests/cpu/moves/addressing/lea/wasm/word.rs', 'engine/tests/cpu/moves/wasm.rs', 'engine/tests/support/wasm.rs', 'engine/tests/cpu/moves/wasm.rs', 'engine/tests/support/wasm.rs',
-  'engine/tests/cpu/moves/addressing/lea/fixtures/p2-word-lea/runtime/run.mjs', 'engine/tests/support/wasm/engine.mjs',
-];
+  'engine/src/process/instance.rs', 'engine/src/process/execution/compiled.rs', 'engine/src/process/execution/authority.rs', 'engine/src/process/memory/address_space.rs', 'engine/src/process/memory/scalar.rs', 'engine/src/process/memory/scalar_tests.rs', 'engine/src/process/execution/mod.rs', 'engine/src/process/memory/mod.rs', 'engine/src/process/execution/resident.rs',
+  'engine/tests/cpu/moves/addressing/lea/wasm/word.rs', 'engine/tests/cpu/moves/wasm.rs', 'engine/tests/support/wasm.rs',
+  'engine/tests/cpu/moves/addressing/lea/fixtures/p2-word-lea/runtime/run.mjs', 'engine/tests/support/wasm/engine.mjs'];
+assert.equal(new Set(paths).size, paths.length);
 const sources = () => Object.fromEntries(paths.map(path => [path, hash(readFileSync(join(root, path)))]));
 const sourcePins = sources(), modules = [];
 const counts = {contexts: 0, runs: 0, retired: 0, address_rows: 0, flag_inputs: 0, anchors: 0, repeats: 0, current_inputs: 0, controls: 0, retained_units: 0, consumers: 0};

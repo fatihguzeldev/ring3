@@ -15,9 +15,10 @@ const table=Buffer.from(Array.from({length:256},(_,index)=>(index*73+29)&255));
 assert.deepEqual(bank,readFileSync(join(output,'xlat.x86')),'independent Rust/JS bank');
 assert.deepEqual(table,readFileSync(join(output,'table.bin')),'independent Rust/JS table');
 const hash=bytes=>createHash('sha256').update(bytes).digest('hex');
-const sourcePaths=['engine/tests/cpu/moves/addressing/lookup/wasm/xlat.rs', 'engine/tests/cpu/moves/wasm.rs', 'engine/tests/support/wasm.rs', 'engine/tests/cpu/moves/wasm.rs', 'engine/tests/support/wasm.rs','engine/tests/cpu/moves/addressing/lookup/fixtures/p2-xlat/runtime/run.mjs','engine/tests/support/wasm/engine.mjs',
+const sourcePaths=['engine/tests/cpu/moves/addressing/lookup/wasm/xlat.rs', 'engine/tests/cpu/moves/wasm.rs', 'engine/tests/support/wasm.rs','engine/tests/cpu/moves/addressing/lookup/fixtures/p2-xlat/runtime/run.mjs','engine/tests/support/wasm/engine.mjs',
   'engine/src/cpu/x86/ir.rs','engine/src/cpu/x86/decode/lower.rs','engine/src/cpu/dbt/region.rs',
   'engine/src/cpu/dbt/wasm/integer/arithmetic.rs', 'engine/src/cpu/dbt/wasm/integer/bits.rs', 'engine/src/cpu/dbt/wasm/integer/carry_rotates.rs', 'engine/src/cpu/dbt/wasm/integer/decimal.rs', 'engine/src/cpu/dbt/wasm/integer/dispatch.rs', 'engine/src/cpu/dbt/wasm/integer/flags.rs', 'engine/src/cpu/dbt/wasm/integer/mod.rs', 'engine/src/cpu/dbt/wasm/integer/multiply_divide.rs', 'engine/src/cpu/dbt/wasm/integer/operands.rs', 'engine/src/cpu/dbt/wasm/integer/rotates.rs', 'engine/src/cpu/dbt/wasm/integer/shifts.rs','engine/src/cpu/dbt/wasm/memory.rs','engine/src/cpu/dbt/wasm/memory/narrow.rs'];
+assert.equal(new Set(sourcePaths).size, sourcePaths.length);
 const sourcePins=()=>Object.fromEntries(sourcePaths.map(path=>[path,hash(readFileSync(join(root,path)))]));
 const initialSources=sourcePins(), modules=[], events=[], rows=[], frames=[];
 const counts={profiles:0,modules:0,translations:0,all_al:0,chained:0,boundaries:0,repairs:0,jumps:0,nops:0,fault_calls:0,controls:0,generated_calls:0,retired:0,raw_pairs:0};
