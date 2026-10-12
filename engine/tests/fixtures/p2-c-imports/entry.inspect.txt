@@ -1,0 +1,52 @@
+
+entry.obj:	file format coff-i386
+Characteristics 0x0
+
+Time/Date               Thu Jan  1 00:00:00 1970
+
+Sections:
+Idx Name          Size     VMA      Type
+  0 .text         00000033 00000000 TEXT
+  1 .data         00000000 00000000 DATA
+  2 .bss          0000000c 00000000 BSS
+  3 .debug$S      00000064 00000000 DATA, DEBUG
+
+SYMBOL TABLE:
+[ 0](sec  1)(fl 0x00)(ty   0)(scl   3) (nx 1) 0x00000000 .text
+AUX scnlen 0x33 nreloc 5 nlnno 0 checksum 0x31cb17d5 assoc 1 comdat 0
+[ 2](sec  2)(fl 0x00)(ty   0)(scl   3) (nx 1) 0x00000000 .data
+AUX scnlen 0x0 nreloc 0 nlnno 0 checksum 0x0 assoc 2 comdat 0
+[ 4](sec  3)(fl 0x00)(ty   0)(scl   3) (nx 1) 0x00000000 .bss
+AUX scnlen 0xc nreloc 0 nlnno 0 checksum 0x0 assoc 3 comdat 0
+[ 6](sec  4)(fl 0x00)(ty   0)(scl   3) (nx 1) 0x00000000 .debug$S
+AUX scnlen 0x64 nreloc 0 nlnno 0 checksum 0x5b2a19d assoc 4 comdat 0
+[ 8](sec -1)(fl 0x00)(ty   0)(scl   3) (nx 0) 0x00000001 @feat.00
+[ 9](sec  1)(fl 0x00)(ty  20)(scl   2) (nx 0) 0x00000000 _ring3_entry
+[10](sec  0)(fl 0x00)(ty   0)(scl   2) (nx 0) 0x00000000 __imp__SetLastError@4
+[11](sec  0)(fl 0x00)(ty   0)(scl   2) (nx 0) 0x00000000 __imp__GetLastError@0
+[12](sec  3)(fl 0x00)(ty   0)(scl   2) (nx 0) 0x00000000 _ring3_result
+[13](sec -2)(fl 0x00)(ty   0)(scl  67) (nx 1) 0x00000000 .file
+AUX entry.c
+
+RELOCATION RECORDS FOR [.text]:
+OFFSET   TYPE                     VALUE
+00000004 IMAGE_REL_I386_DIR32     __imp__SetLastError@4
+00000011 IMAGE_REL_I386_DIR32     __imp__GetLastError@0
+00000018 IMAGE_REL_I386_DIR32     _ring3_result
+00000023 IMAGE_REL_I386_DIR32     _ring3_result
+00000029 IMAGE_REL_I386_DIR32     _ring3_result
+Contents of section .text:
+ 0000 57568b35 00000000 68674523 f1ffd68b  WV.5....hgE#....
+ 0010 3d000000 00ffd7a3 00000000 6a00ffd6  =...........j...
+ 0020 ffd7a304 000000c7 05080000 00474e49  .............GNI
+ 0030 52ebfe                               R..
+Contents of section .bss:
+<skipping contents of bss section at [0000, 000c)>
+Contents of section .debug$S:
+ 0000 04000000 f1000000 58000000 0a000111  ........X.......
+ 0010 00000000 00000000 4a003c11 00000000  ........J.<.....
+ 0020 07001500 00000000 0000ffff 00000000  ................
+ 0030 00004170 706c6520 636c616e 67207665  ..Apple clang ve
+ 0040 7273696f 6e203231 2e302e30 2028636c  rsion 21.0.0 (cl
+ 0050 616e672d 32313030 2e312e31 2e313031  ang-2100.1.1.101
+ 0060 29000000                             )...

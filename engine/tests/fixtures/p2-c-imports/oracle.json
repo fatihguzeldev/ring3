@@ -1,0 +1,698 @@
+{
+  "schema": "ring3.c-imports.v1",
+  "claim_ceiling": "one original freestanding C import PE; two closed synchronous providers at preferred and rebased addresses on Node/V8",
+  "image": {
+    "bytes": 2560,
+    "sha256": "7c0451977a0818d5f4905a2b00f3a3bae63b9449ef22775ea003ebb0ca69c5d5",
+    "preferred_base": 4194304,
+    "size": 20480,
+    "entry_rva": 4096,
+    "headers_size": 1024,
+    "mapped_pages": 5
+  },
+  "original_text": {
+    "rva": 4096,
+    "file_offset": 1024,
+    "hex": "57568b353820400068674523f1ffd68b3d34204000ffd7a3003040006a00ffd6ffd7a304304000c70508304000474e4952ebfe",
+    "sha256": "747b49611f71ae0fd23588f8d7955f66ec02d73f20031ae2822f3bc9f2025af7",
+    "instructions": 14
+  },
+  "sections": [
+    {
+      "name": ".text",
+      "rva": 4096,
+      "virtual_size": 51,
+      "raw_offset": 1024,
+      "raw_size": 512,
+      "permissions": "rx"
+    },
+    {
+      "name": ".rdata",
+      "rva": 8192,
+      "virtual_size": 109,
+      "raw_offset": 1536,
+      "raw_size": 512,
+      "permissions": "r"
+    },
+    {
+      "name": ".data",
+      "rva": 12288,
+      "virtual_size": 12,
+      "raw_offset": 0,
+      "raw_size": 0,
+      "permissions": "rw"
+    },
+    {
+      "name": ".reloc",
+      "rva": 16384,
+      "virtual_size": 20,
+      "raw_offset": 2048,
+      "raw_size": 512,
+      "permissions": "r"
+    }
+  ],
+  "relocations": {
+    "rva": 16384,
+    "hex": "0010000014000000043011301830233029300000",
+    "highlow_rvas": [
+      4100,
+      4113,
+      4120,
+      4131,
+      4137
+    ],
+    "preferred_values": [
+      4202552,
+      4202548,
+      4206592,
+      4206596,
+      4206600
+    ]
+  },
+  "imports": {
+    "directory_rva": 8192,
+    "directory_size": 40,
+    "lookup_rva": 8232,
+    "iat_rva": 8244,
+    "iat_size": 12,
+    "hint_name_rvas": [
+      8256,
+      8272
+    ],
+    "dll_name_rva": 8288,
+    "dll": "KERNEL32.dll",
+    "names": [
+      "GetLastError",
+      "SetLastError"
+    ],
+    "original_rdata_hex": "2820000000000000000000006020000034200000000000000000000000000000000000000000000040200000502000000000000040200000502000000000000000004765744c6173744572726f72000000005365744c6173744572726f7200004b45524e454c33322e646c6c00"
+  },
+  "gates": [
+    {
+      "name": "GetLastError",
+      "pc": 1610612736,
+      "id": 65537,
+      "stack_words": 0
+    },
+    {
+      "name": "SetLastError",
+      "pc": 1610612752,
+      "id": 65538,
+      "stack_words": 1
+    }
+  ],
+  "startup": {
+    "capacity": 7,
+    "stack_base": 32768,
+    "stack_pages": 1,
+    "registers": [
+      0,
+      0,
+      0,
+      0,
+      36864,
+      0,
+      0,
+      0
+    ],
+    "flags": 2
+  },
+  "caller_entry_rvas": [
+    4096,
+    4111,
+    4119,
+    4128,
+    4130
+  ],
+  "stack_addresses": [
+    36844,
+    36848,
+    36852,
+    36856,
+    36860
+  ],
+  "expected_output_words": [
+    4045620583,
+    0,
+    1380535879
+  ],
+  "total_retired": 14,
+  "cases": [
+    {
+      "name": "preferred",
+      "actual_base": 4194304,
+      "stages": [
+        {
+          "api": "SetLastError",
+          "entry_pc": 4198400,
+          "return_pc": 4198415,
+          "gate_pc": 1610612752,
+          "id": 65538,
+          "args": [
+            4045620583
+          ],
+          "retired": 5,
+          "flags": 2,
+          "stop_registers": [
+            0,
+            0,
+            0,
+            0,
+            36848,
+            0,
+            1610612752,
+            0
+          ],
+          "returned_registers": [
+            0,
+            0,
+            0,
+            0,
+            36856,
+            0,
+            1610612752,
+            0
+          ],
+          "accesses": [
+            {
+              "kind": "store",
+              "address": 36860,
+              "value": 0
+            },
+            {
+              "kind": "store",
+              "address": 36856,
+              "value": 0
+            },
+            {
+              "kind": "read",
+              "address": 4202552,
+              "value": 1610612752
+            },
+            {
+              "kind": "store",
+              "address": 36852,
+              "value": 4045620583
+            },
+            {
+              "kind": "store",
+              "address": 36848,
+              "value": 4198415
+            }
+          ],
+          "stack_values": [
+            0,
+            4198415,
+            4045620583,
+            0,
+            0
+          ],
+          "data_words": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "api": "GetLastError",
+          "entry_pc": 4198415,
+          "return_pc": 4198423,
+          "gate_pc": 1610612736,
+          "id": 65537,
+          "args": [],
+          "retired": 2,
+          "flags": 2,
+          "stop_registers": [
+            0,
+            0,
+            0,
+            0,
+            36852,
+            0,
+            1610612752,
+            1610612736
+          ],
+          "returned_registers": [
+            4045620583,
+            0,
+            0,
+            0,
+            36856,
+            0,
+            1610612752,
+            1610612736
+          ],
+          "accesses": [
+            {
+              "kind": "read",
+              "address": 4202548,
+              "value": 1610612736
+            },
+            {
+              "kind": "store",
+              "address": 36852,
+              "value": 4198423
+            }
+          ],
+          "stack_values": [
+            0,
+            4198415,
+            4198423,
+            0,
+            0
+          ],
+          "data_words": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "api": "SetLastError",
+          "entry_pc": 4198423,
+          "return_pc": 4198432,
+          "gate_pc": 1610612752,
+          "id": 65538,
+          "args": [
+            0
+          ],
+          "retired": 3,
+          "flags": 2,
+          "stop_registers": [
+            4045620583,
+            0,
+            0,
+            0,
+            36848,
+            0,
+            1610612752,
+            1610612736
+          ],
+          "returned_registers": [
+            4045620583,
+            0,
+            0,
+            0,
+            36856,
+            0,
+            1610612752,
+            1610612736
+          ],
+          "accesses": [
+            {
+              "kind": "store",
+              "address": 4206592,
+              "value": 4045620583
+            },
+            {
+              "kind": "store",
+              "address": 36852,
+              "value": 0
+            },
+            {
+              "kind": "store",
+              "address": 36848,
+              "value": 4198432
+            }
+          ],
+          "stack_values": [
+            0,
+            4198432,
+            0,
+            0,
+            0
+          ],
+          "data_words": [
+            4045620583,
+            0,
+            0
+          ]
+        },
+        {
+          "api": "GetLastError",
+          "entry_pc": 4198432,
+          "return_pc": 4198434,
+          "gate_pc": 1610612736,
+          "id": 65537,
+          "args": [],
+          "retired": 1,
+          "flags": 2,
+          "stop_registers": [
+            4045620583,
+            0,
+            0,
+            0,
+            36852,
+            0,
+            1610612752,
+            1610612736
+          ],
+          "returned_registers": [
+            0,
+            0,
+            0,
+            0,
+            36856,
+            0,
+            1610612752,
+            1610612736
+          ],
+          "accesses": [
+            {
+              "kind": "store",
+              "address": 36852,
+              "value": 4198434
+            }
+          ],
+          "stack_values": [
+            0,
+            4198432,
+            4198434,
+            0,
+            0
+          ],
+          "data_words": [
+            4045620583,
+            0,
+            0
+          ]
+        }
+      ],
+      "final": {
+        "entry_pc": 4198434,
+        "pc": 4198449,
+        "registers": [
+          0,
+          0,
+          0,
+          0,
+          36856,
+          0,
+          1610612752,
+          1610612736
+        ],
+        "flags": 2,
+        "retired": 3,
+        "reason": 1,
+        "exit_version": 2,
+        "accesses": [
+          {
+            "kind": "store",
+            "address": 4206596,
+            "value": 0
+          },
+          {
+            "kind": "store",
+            "address": 4206600,
+            "value": 1380535879
+          }
+        ],
+        "stack_values": [
+          0,
+          4198432,
+          4198434,
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "name": "rebased",
+      "actual_base": 5242880,
+      "stages": [
+        {
+          "api": "SetLastError",
+          "entry_pc": 5246976,
+          "return_pc": 5246991,
+          "gate_pc": 1610612752,
+          "id": 65538,
+          "args": [
+            4045620583
+          ],
+          "retired": 5,
+          "flags": 2,
+          "stop_registers": [
+            0,
+            0,
+            0,
+            0,
+            36848,
+            0,
+            1610612752,
+            0
+          ],
+          "returned_registers": [
+            0,
+            0,
+            0,
+            0,
+            36856,
+            0,
+            1610612752,
+            0
+          ],
+          "accesses": [
+            {
+              "kind": "store",
+              "address": 36860,
+              "value": 0
+            },
+            {
+              "kind": "store",
+              "address": 36856,
+              "value": 0
+            },
+            {
+              "kind": "read",
+              "address": 5251128,
+              "value": 1610612752
+            },
+            {
+              "kind": "store",
+              "address": 36852,
+              "value": 4045620583
+            },
+            {
+              "kind": "store",
+              "address": 36848,
+              "value": 5246991
+            }
+          ],
+          "stack_values": [
+            0,
+            5246991,
+            4045620583,
+            0,
+            0
+          ],
+          "data_words": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "api": "GetLastError",
+          "entry_pc": 5246991,
+          "return_pc": 5246999,
+          "gate_pc": 1610612736,
+          "id": 65537,
+          "args": [],
+          "retired": 2,
+          "flags": 2,
+          "stop_registers": [
+            0,
+            0,
+            0,
+            0,
+            36852,
+            0,
+            1610612752,
+            1610612736
+          ],
+          "returned_registers": [
+            4045620583,
+            0,
+            0,
+            0,
+            36856,
+            0,
+            1610612752,
+            1610612736
+          ],
+          "accesses": [
+            {
+              "kind": "read",
+              "address": 5251124,
+              "value": 1610612736
+            },
+            {
+              "kind": "store",
+              "address": 36852,
+              "value": 5246999
+            }
+          ],
+          "stack_values": [
+            0,
+            5246991,
+            5246999,
+            0,
+            0
+          ],
+          "data_words": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "api": "SetLastError",
+          "entry_pc": 5246999,
+          "return_pc": 5247008,
+          "gate_pc": 1610612752,
+          "id": 65538,
+          "args": [
+            0
+          ],
+          "retired": 3,
+          "flags": 2,
+          "stop_registers": [
+            4045620583,
+            0,
+            0,
+            0,
+            36848,
+            0,
+            1610612752,
+            1610612736
+          ],
+          "returned_registers": [
+            4045620583,
+            0,
+            0,
+            0,
+            36856,
+            0,
+            1610612752,
+            1610612736
+          ],
+          "accesses": [
+            {
+              "kind": "store",
+              "address": 5255168,
+              "value": 4045620583
+            },
+            {
+              "kind": "store",
+              "address": 36852,
+              "value": 0
+            },
+            {
+              "kind": "store",
+              "address": 36848,
+              "value": 5247008
+            }
+          ],
+          "stack_values": [
+            0,
+            5247008,
+            0,
+            0,
+            0
+          ],
+          "data_words": [
+            4045620583,
+            0,
+            0
+          ]
+        },
+        {
+          "api": "GetLastError",
+          "entry_pc": 5247008,
+          "return_pc": 5247010,
+          "gate_pc": 1610612736,
+          "id": 65537,
+          "args": [],
+          "retired": 1,
+          "flags": 2,
+          "stop_registers": [
+            4045620583,
+            0,
+            0,
+            0,
+            36852,
+            0,
+            1610612752,
+            1610612736
+          ],
+          "returned_registers": [
+            0,
+            0,
+            0,
+            0,
+            36856,
+            0,
+            1610612752,
+            1610612736
+          ],
+          "accesses": [
+            {
+              "kind": "store",
+              "address": 36852,
+              "value": 5247010
+            }
+          ],
+          "stack_values": [
+            0,
+            5247008,
+            5247010,
+            0,
+            0
+          ],
+          "data_words": [
+            4045620583,
+            0,
+            0
+          ]
+        }
+      ],
+      "final": {
+        "entry_pc": 5247010,
+        "pc": 5247025,
+        "registers": [
+          0,
+          0,
+          0,
+          0,
+          36856,
+          0,
+          1610612752,
+          1610612736
+        ],
+        "flags": 2,
+        "retired": 3,
+        "reason": 1,
+        "exit_version": 2,
+        "accesses": [
+          {
+            "kind": "store",
+            "address": 5255172,
+            "value": 0
+          },
+          {
+            "kind": "store",
+            "address": 5255176,
+            "value": 1380535879
+          }
+        ],
+        "stack_values": [
+          0,
+          5247008,
+          5247010,
+          0,
+          0
+        ]
+      }
+    }
+  ]
+}

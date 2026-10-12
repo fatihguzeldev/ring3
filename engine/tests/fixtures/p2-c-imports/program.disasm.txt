@@ -1,0 +1,20 @@
+
+program.exe:	file format coff-i386
+
+Disassembly of section .text:
+
+00401000 <.text>:
+  401000: 57                           	push	edi
+  401001: 56                           	push	esi
+  401002: 8b 35 38 20 40 00            	mov	esi, dword ptr [0x402038]
+  401008: 68 67 45 23 f1               	push	0xf1234567
+  40100d: ff d6                        	call	esi
+  40100f: 8b 3d 34 20 40 00            	mov	edi, dword ptr [0x402034]
+  401015: ff d7                        	call	edi
+  401017: a3 00 30 40 00               	mov	dword ptr [0x403000], eax
+  40101c: 6a 00                        	push	0x0
+  40101e: ff d6                        	call	esi
+  401020: ff d7                        	call	edi
+  401022: a3 04 30 40 00               	mov	dword ptr [0x403004], eax
+  401027: c7 05 08 30 40 00 47 4e 49 52	mov	dword ptr [0x403008], 0x52494e47
+  401031: eb fe                        	jmp	0x401031 <.text+0x31>

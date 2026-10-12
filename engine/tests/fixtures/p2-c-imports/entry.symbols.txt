@@ -1,0 +1,2 @@
+         U __imp__GetLastError@0
+         U __imp__SetLastError@4
