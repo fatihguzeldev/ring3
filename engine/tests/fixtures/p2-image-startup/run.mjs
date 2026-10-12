@@ -14,7 +14,7 @@ const programBytes = readFileSync(programPath), codeOracleBytes = readFileSync(c
 assert.equal(hash(programBytes), oracle.reused_program.sha256);
 assert.equal(hash(codeOracleBytes), oracle.reused_code_oracle.sha256);
 const pinnedEncoding = JSON.parse(codeOracleBytes).code_hex;
-const size = 4612, transfer = 140;
+const size = 4612, transfer = 140, transferEnd = transfer + 4096;
 const artifacts = {}, observations = [], identities = [];
 
 function authoredCode(object) {
@@ -197,7 +197,8 @@ for (const [caseIndex, test] of oracle.cases.entries()) {
   const initial = arena();
   assert.deepEqual(initial.subarray(0, 56), cpu(oracle.startup.before_context.State_registers, oracle.startup.before_context.State_EIP));
   assert.deepEqual(initial.subarray(56, 96), exit(1, 0, 0, 1));
-  engine.bytes.fill(0xa5, engine.base + 100, engine.base + size);
+  engine.bytes.fill(0xa5, engine.base + 100, engine.base + transferEnd);
+  assert.deepEqual(arena().subarray(transferEnd), initial.subarray(transferEnd), 'setup preserves engine-owned extended state and work record');
   engine.table = new WebAssembly.Table({element: 'anyfunc', initial: oracle.table_slots, maximum: oracle.table_slots});
   refresh().bytes.set(image, engine.base + transfer);
   const linkedFields = [oracle.actual_base, 0x6000, oracle.entry_point, 6, oracle.gate_base, 2, 0, 0, 0x60000000, 0x10001, 0x60000010, 0x10002];
