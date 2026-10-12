@@ -1,0 +1,144 @@
+{
+  "schema": "ring3.fp-compiled.x87.cases.v1",
+  "symbol": "ring3_reduce",
+  "abi": {
+    "calling_convention": "cdecl",
+    "arguments": [
+      "values_pointer:u32",
+      "count:u32"
+    ],
+    "return": "ST0.ext80",
+    "element_bytes": 16,
+    "payload_bytes": 10,
+    "padding_hex": "a5a5a5a5a5a5",
+    "initial_control": 895,
+    "initial_status": 0,
+    "initial_tag": 65535,
+    "return_top": 7,
+    "after_caller_fstp_top": 0,
+    "after_caller_fstp_tag": 65535,
+    "callee_preserves": [
+      "EBP",
+      "EBX",
+      "ESI",
+      "EDI"
+    ],
+    "stack_contract": "entry ESP points to return address; [ESP+4] values pointer, [ESP+8] count; caller removes8 argument bytes; function restores its EBP and pre-RET ESP"
+  },
+  "oracle": "literal raw80 values derived from integer powers and exact rational arithmetic, with explicit precision64 round-to-nearest-even at each source addition; no Ring3 execution or host floating point used",
+  "cases": [
+    {
+      "name": "empty-no-data-access",
+      "count": 0,
+      "inputs": [],
+      "expected": {
+        "hex80": "00000000000000000000",
+        "value_fraction": "0",
+        "return_status": 14336,
+        "return_tag": 32767
+      },
+      "kernel_retired": 13,
+      "derivation": "count zero branches around the array read; the initialized positive zero is returned"
+    },
+    {
+      "name": "exact-binary-fractions",
+      "count": 3,
+      "inputs": [
+        {
+          "hex80": "00000000000000c0ff3f",
+          "value_fraction": "3/2"
+        },
+        {
+          "hex80": "0000000000000080fdbf",
+          "value_fraction": "-1/4"
+        },
+        {
+          "hex80": "00000000000000800040",
+          "value_fraction": "2"
+        }
+      ],
+      "expected": {
+        "hex80": "00000000000000d00040",
+        "value_fraction": "13/4",
+        "return_status": 14336,
+        "return_tag": 16383
+      },
+      "kernel_retired": 35,
+      "derivation": "3/2 - 1/4 + 2 = 13/4; every intermediate is exactly representable"
+    },
+    {
+      "name": "extended-precision-cancellation",
+      "count": 3,
+      "inputs": [
+        {
+          "hex80": "0000000000000080ff3f",
+          "value_fraction": "1"
+        },
+        {
+          "hex80": "0000000000000080c33f",
+          "value_fraction": "1/1152921504606846976"
+        },
+        {
+          "hex80": "0000000000000080ffbf",
+          "value_fraction": "-1"
+        }
+      ],
+      "expected": {
+        "hex80": "0000000000000080c33f",
+        "value_fraction": "1/1152921504606846976",
+        "return_status": 14336,
+        "return_tag": 16383
+      },
+      "kernel_retired": 35,
+      "derivation": "1 + 2^-60 has a nonzero extended80 significand bit at index3; subtracting1 returns2^-60, whereas per-step binary64 arithmetic would lose it"
+    },
+    {
+      "name": "halfway-round-to-even",
+      "count": 2,
+      "inputs": [
+        {
+          "hex80": "0000000000000080ff3f",
+          "value_fraction": "1"
+        },
+        {
+          "hex80": "0000000000000080bf3f",
+          "value_fraction": "1/18446744073709551616"
+        }
+      ],
+      "expected": {
+        "hex80": "0000000000000080ff3f",
+        "value_fraction": "1",
+        "return_status": 14368,
+        "return_tag": 16383
+      },
+      "kernel_retired": 28,
+      "derivation": "at1 the precision64 ulp is2^-63; adding2^-64 is halfway and rounds to the even significand1, setting precision exception"
+    },
+    {
+      "name": "finite-precision-large-cancellation",
+      "count": 3,
+      "inputs": [
+        {
+          "hex80": "00000000000000806340",
+          "value_fraction": "1267650600228229401496703205376"
+        },
+        {
+          "hex80": "0000000000000080ff3f",
+          "value_fraction": "1"
+        },
+        {
+          "hex80": "000000000000008063c0",
+          "value_fraction": "-1267650600228229401496703205376"
+        }
+      ],
+      "expected": {
+        "hex80": "00000000000000000000",
+        "value_fraction": "0",
+        "return_status": 14368,
+        "return_tag": 32767
+      },
+      "kernel_retired": 35,
+      "derivation": "at2^100 the precision64 ulp is2^37; adding1 rounds back to2^100 with precision exception, then exact cancellation returns positive zero"
+    }
+  ]
+}

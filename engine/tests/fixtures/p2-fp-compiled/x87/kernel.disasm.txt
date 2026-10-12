@@ -1,0 +1,27 @@
+
+kernel.obj:	file format coff-i386
+
+Disassembly of section .text:
+
+00000000 <_ring3_reduce>:
+       0: 55                           	push	ebp
+       1: 89 e5                        	mov	ebp, esp
+       3: 83 e4 f0                     	and	esp, -0x10
+       6: 83 ec 20                     	sub	esp, 0x20
+       9: 8b 45 0c                     	mov	eax, dword ptr [ebp + 0xc]
+       c: d9 ee                        	fldz
+       e: db 3c 24                     	fstp	tbyte ptr [esp]
+      11: 85 c0                        	test	eax, eax
+      13: 74 13                        	je	0x28 <_ring3_reduce+0x28>
+      15: 8b 4d 08                     	mov	ecx, dword ptr [ebp + 0x8]
+      18: db 2c 24                     	fld	tbyte ptr [esp]
+      1b: db 29                        	fld	tbyte ptr [ecx]
+      1d: de c1                        	faddp	st(1), st
+      1f: db 3c 24                     	fstp	tbyte ptr [esp]
+      22: 83 c1 10                     	add	ecx, 0x10
+      25: 48                           	dec	eax
+      26: 75 f0                        	jne	0x18 <_ring3_reduce+0x18>
+      28: db 2c 24                     	fld	tbyte ptr [esp]
+      2b: 89 ec                        	mov	esp, ebp
+      2d: 5d                           	pop	ebp
+      2e: c3                           	ret
