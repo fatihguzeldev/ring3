@@ -37,10 +37,8 @@ pub fn encode_x87(state: &X87State, output: &mut [u8]) -> Result<(), AbiError> {
         state.instruction_pointer,
     );
     write_u32(output, X87_DATA_POINTER_OFFSET, state.data_pointer);
-    for (index, value) in state.registers.iter().enumerate() {
-        let start = X87_REGISTERS_OFFSET + index * 10;
-        output[start..start + 10].copy_from_slice(value);
-    }
+    output[X87_REGISTERS_OFFSET..X87_REGISTERS_OFFSET + 80]
+        .copy_from_slice(state.registers.as_flattened());
     Ok(())
 }
 
@@ -63,10 +61,11 @@ pub fn decode_x87(input: &[u8]) -> Result<X87State, AbiError> {
         data_pointer: read_u32(input, X87_DATA_POINTER_OFFSET),
         code_selector: read_u16(input, X87_CODE_SELECTOR_OFFSET),
         data_selector: read_u16(input, X87_DATA_SELECTOR_OFFSET),
-        registers: std::array::from_fn(|index| {
-            let start = X87_REGISTERS_OFFSET + index * 10;
-            input[start..start + 10].try_into().unwrap()
-        }),
+        registers: input[X87_REGISTERS_OFFSET..X87_REGISTERS_OFFSET + 80]
+            .as_chunks::<10>()
+            .0
+            .try_into()
+            .unwrap(),
     })
 }
 
