@@ -1,11 +1,11 @@
-#[path = "cases/native/windows_flush_instruction_cache.rs"]
+#[path = "native/flush.rs"]
 mod windows_flush_instruction_cache;
 
-#[path = "cases/native/windows_virtual_alloc.rs"]
+#[path = "native/allocation.rs"]
 mod windows_virtual_alloc;
 
-#[path = "cases/native/windows_virtual_free.rs"]
+#[path = "release/native/core.rs"]
 mod windows_virtual_free;
 
-#[path = "cases/native/windows_virtual_protect.rs"]
+#[path = "native/protection.rs"]
 mod windows_virtual_protect;

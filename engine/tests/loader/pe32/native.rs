@@ -6,14 +6,14 @@ mod support_pe32;
 #[allow(dead_code)]
 mod support_pe32_relocation;
 
-#[path = "cases/native/pe32_declarations_admission.rs"]
+#[path = "native/declarations.rs"]
 mod pe32_declarations_admission;
 
-#[path = "cases/native/pe32_dll_characteristics.rs"]
+#[path = "native/characteristics.rs"]
 mod pe32_dll_characteristics;
 
-#[path = "cases/native/pe32_loader.rs"]
+#[path = "native/image.rs"]
 mod pe32_loader;
 
-#[path = "cases/native/pe32_relocation.rs"]
+#[path = "native/relocation.rs"]
 mod pe32_relocation;

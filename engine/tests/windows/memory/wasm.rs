@@ -5,20 +5,20 @@ mod support_pe32;
 #[path = "../../support/wasm.rs"]
 mod support_wasm;
 
-#[path = "cases/wasm/windows_allocation_protection_wasm.rs"]
+#[path = "wasm/executable.rs"]
 mod windows_allocation_protection_wasm;
 
-#[path = "cases/wasm/windows_flush_instruction_cache_wasm.rs"]
+#[path = "wasm/flush.rs"]
 mod windows_flush_instruction_cache_wasm;
 
-#[path = "cases/wasm/windows_virtual_alloc_wasm.rs"]
+#[path = "wasm/allocation.rs"]
 mod windows_virtual_alloc_wasm;
 
-#[path = "cases/wasm/windows_virtual_free_linked_wasm.rs"]
+#[path = "release/wasm/linked.rs"]
 mod windows_virtual_free_linked_wasm;
 
-#[path = "cases/wasm/windows_virtual_free_wasm.rs"]
+#[path = "release/wasm/manual.rs"]
 mod windows_virtual_free_wasm;
 
-#[path = "cases/wasm/windows_virtual_protect_wasm.rs"]
+#[path = "wasm/protection.rs"]
 mod windows_virtual_protect_wasm;

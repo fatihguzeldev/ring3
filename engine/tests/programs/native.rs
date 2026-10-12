@@ -18,20 +18,20 @@ mod support_pe32_mutable_records;
 #[allow(dead_code)]
 mod support_pe32_sort;
 
-#[path = "cases/native/bitmap_dispatch32_original.rs"]
+#[path = "dispatch/native/bitmap.rs"]
 mod bitmap_dispatch32_original;
 
-#[path = "cases/native/compiled_numeric_original.rs"]
+#[path = "numeric/native/compiled.rs"]
 mod compiled_numeric_original;
 
-#[path = "cases/native/compiled_switch.rs"]
+#[path = "dispatch/native/switch.rs"]
 mod compiled_switch;
 
-#[path = "cases/native/pe32_compiled_records.rs"]
+#[path = "records/native/compiled.rs"]
 mod pe32_compiled_records;
 
-#[path = "cases/native/pe32_mutable_records.rs"]
+#[path = "records/native/mutable.rs"]
 mod pe32_mutable_records;
 
-#[path = "cases/native/pe32_sort.rs"]
+#[path = "native/sort.rs"]
 mod pe32_sort;

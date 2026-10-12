@@ -56,7 +56,7 @@ writeFileSync(join(outputDir, 'authored-oracle.json'), oracleBytes);
 writeFileSync(join(outputDir, 'program.S'), readFileSync(assembly));
 writeFileSync(join(outputDir, 'runtime/run.mjs'), readFileSync(import.meta.filename));
 const productionPaths = execFileSync('rg', ['--files', 'engine/src'], {cwd: root, encoding: 'utf8'}).trim().split('\n').sort();
-const sourcePaths = [...productionPaths, 'Cargo.toml', 'engine/Cargo.toml', 'Cargo.lock', 'engine/tests/windows/provider/cases/wasm/process_windows_provider_wasm.rs', 'engine/tests/windows/provider/wasm.rs', 'engine/tests/support/wasm.rs', 'engine/tests/windows/provider/wasm.rs', 'engine/tests/support/wasm.rs', 'engine/tests/windows/provider/fixtures/p2-windows-provider/program.S', 'engine/tests/windows/provider/fixtures/p2-windows-provider/oracle.json', 'engine/tests/windows/provider/fixtures/p2-windows-provider/runtime/run.mjs'];
+const sourcePaths = [...productionPaths, 'Cargo.toml', 'engine/Cargo.toml', 'Cargo.lock', 'engine/tests/windows/provider/wasm/core.rs', 'engine/tests/windows/provider/wasm.rs', 'engine/tests/support/wasm.rs', 'engine/tests/windows/provider/wasm.rs', 'engine/tests/support/wasm.rs', 'engine/tests/windows/provider/fixtures/p2-windows-provider/program.S', 'engine/tests/windows/provider/fixtures/p2-windows-provider/oracle.json', 'engine/tests/windows/provider/fixtures/p2-windows-provider/runtime/run.mjs'];
 const sources = Object.fromEntries(sourcePaths.map(file => [file, hash(readFileSync(join(root, file)))]));
 writeFileSync(join(outputDir, 'source-sha256.json'), JSON.stringify(sources, null, 2));
 const engineBytes = readFileSync(enginePath);

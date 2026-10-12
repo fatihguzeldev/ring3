@@ -10,7 +10,7 @@ from pathlib import Path
 import sys
 
 ROOT = Path(__file__).resolve().parents[8]
-DEPENDENCY = ROOT / "engine/tests/programs/fixtures/p2-compiled-records/build.py"
+DEPENDENCY = ROOT / "engine/tests/programs/records/fixtures/p2-compiled-records/build.py"
 DEPENDENCY_SHA256 = "fe426f202b48664a87357c766d39099b9d35b5d8217c2b114696164a0d468258"
 SOURCE_SHA256 = "00f3dccd0838ffac2c01170d3878c7410fb6e35e017319991f4ad5777ccb2d3f"
 

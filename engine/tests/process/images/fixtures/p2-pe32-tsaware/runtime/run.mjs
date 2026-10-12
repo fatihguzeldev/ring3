@@ -29,7 +29,7 @@ save('engine.wasm', engine.bytes); save('input-original.exe', original); save('i
 const rustPaths = dir => readdirSync(join(root, dir), {withFileTypes: true}).flatMap(item => item.isDirectory()
   ? rustPaths(`${dir}/${item.name}`) : item.name.endsWith('.rs') ? [`${dir}/${item.name}`] : []);
 const paths = [...rustPaths('engine/src'), 'Cargo.toml', 'Cargo.lock', 'engine/Cargo.toml', 'rust-toolchain.toml',
-  'engine/tests/loader/pe32/cases/native/pe32_dll_characteristics.rs', 'engine/tests/loader/pe32/native.rs', 'engine/tests/support/loader/pe32.rs', 'engine/tests/support/loader/pe32_relocation.rs', 'engine/tests/loader/pe32/native.rs', 'engine/tests/process/images/wasm/tsaware.rs', 'engine/tests/process/images/wasm.rs', 'engine/tests/support/wasm.rs', 'engine/tests/process/images/wasm.rs', 'engine/tests/support/wasm.rs', 'engine/tests/support/wasm/engine.mjs',
+  'engine/tests/loader/pe32/native/characteristics.rs', 'engine/tests/loader/pe32/native.rs', 'engine/tests/support/loader/pe32.rs', 'engine/tests/support/loader/pe32_relocation.rs', 'engine/tests/loader/pe32/native.rs', 'engine/tests/process/images/wasm/tsaware.rs', 'engine/tests/process/images/wasm.rs', 'engine/tests/support/wasm.rs', 'engine/tests/process/images/wasm.rs', 'engine/tests/support/wasm.rs', 'engine/tests/support/wasm/engine.mjs',
   ...['program.S', 'build.py', 'PROVENANCE.md', 'runtime/run.mjs', 'program.exe', 'program.obj', 'program.text.bin', 'program.disasm.txt', 'receipt.json'].map(n => `${fixture}/${n}`)].sort();
 assert.equal(new Set(paths).size, paths.length);
 const sources = () => Object.fromEntries(paths.map(p => [p, hash(readFileSync(join(root, p)))]));

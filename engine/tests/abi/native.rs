@@ -1,47 +1,47 @@
-#[path = "cases/native/abi_callback.rs"]
+#[path = "callbacks/native/reentry.rs"]
 mod abi_callback;
 
-#[path = "cases/native/abi_exit.rs"]
+#[path = "exit/native/core.rs"]
 mod abi_exit;
 
-#[path = "cases/native/abi_resident_callback.rs"]
+#[path = "callbacks/native/resident.rs"]
 mod abi_resident_callback;
 
-#[path = "cases/native/abi_resident_callback_result.rs"]
+#[path = "callbacks/native/result.rs"]
 mod abi_resident_callback_result;
 
-#[path = "cases/native/abi_state.rs"]
+#[path = "native/state.rs"]
 mod abi_state;
 
-#[path = "cases/native/byte_exchange_helper.rs"]
+#[path = "helpers/exchange/native/byte.rs"]
 mod byte_exchange_helper;
 
-#[path = "cases/native/byte_store_helper.rs"]
+#[path = "helpers/store/native/byte.rs"]
 mod byte_store_helper;
 
-#[path = "cases/native/call_frame_abi.rs"]
+#[path = "native/call_frame.rs"]
 mod call_frame_abi;
 
-#[path = "cases/native/cpu_exit_v2.rs"]
+#[path = "exit/native/infrastructure.rs"]
 mod cpu_exit_v2;
 
-#[path = "cases/native/cpu_exit_v3.rs"]
+#[path = "exit/native/gate.rs"]
 mod cpu_exit_v3;
 
-#[path = "cases/native/fixture_arena_defaults.rs"]
+#[path = "native/arena_defaults.rs"]
 mod fixture_arena_defaults;
 
-#[path = "cases/native/memory_helper.rs"]
+#[path = "helpers/native/dword.rs"]
 mod memory_helper;
 
-#[path = "cases/native/narrow_memory_helper.rs"]
+#[path = "helpers/native/narrow.rs"]
 mod narrow_memory_helper;
 
-#[path = "cases/native/word_exchange_helper.rs"]
+#[path = "helpers/exchange/native/word.rs"]
 mod word_exchange_helper;
 
-#[path = "cases/native/word_store_helper.rs"]
+#[path = "helpers/store/native/word.rs"]
 mod word_store_helper;
 
-#[path = "cases/native/x87_arena.rs"]
+#[path = "native/x87.rs"]
 mod x87_arena;

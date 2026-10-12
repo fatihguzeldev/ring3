@@ -26,7 +26,7 @@ fn actual_engine_wasm_links_pe32_iat_to_owned_windows_providers() {
     fs::create_dir_all(&output).unwrap();
     let result = wasm_support::run_node(
         root,
-        "engine/tests/loader/imports/fixtures/p2-pe32-imports/runtime/run.mjs",
+        "engine/tests/process/images/fixtures/p2-pe32-imports/runtime/run.mjs",
         &engine,
         &output,
         None,

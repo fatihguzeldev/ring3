@@ -46,13 +46,13 @@ pub const MAIN_BLOCK_INSTRUCTIONS: [u32; 7] = [9, 8, 8, 8, 8, 8, 6];
 pub const KERNEL_BLOCK_LENGTHS: [u32; 8] = [20, 7, 5, 5, 6, 8, 2, 6];
 pub const KERNEL_BLOCK_INSTRUCTIONS: [u32; 8] = [7, 1, 2, 2, 3, 2, 1, 4];
 pub const KERNEL_RAW_TEXT: &[u8] =
-    include_bytes!("../../programs/fixtures/p2-compiled-switch/kernel.text.raw.bin");
+    include_bytes!("../../programs/dispatch/fixtures/p2-compiled-switch/kernel.text.raw.bin");
 pub const KERNEL_RAW_TABLE: &[u8] =
-    include_bytes!("../../programs/fixtures/p2-compiled-switch/kernel.rdata.raw.bin");
+    include_bytes!("../../programs/dispatch/fixtures/p2-compiled-switch/kernel.rdata.raw.bin");
 pub const KERNEL: &[u8] =
-    include_bytes!("../../programs/fixtures/p2-compiled-switch/kernel.text.bin");
+    include_bytes!("../../programs/dispatch/fixtures/p2-compiled-switch/kernel.text.bin");
 pub const TABLE: &[u8] =
-    include_bytes!("../../programs/fixtures/p2-compiled-switch/kernel.rdata.bin");
+    include_bytes!("../../programs/dispatch/fixtures/p2-compiled-switch/kernel.rdata.bin");
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Fixup {

@@ -5,17 +5,17 @@ mod support_pe32;
 #[path = "../../support/wasm.rs"]
 mod support_wasm;
 
-#[path = "cases/wasm/process_windows_provider_wasm.rs"]
+#[path = "wasm/core.rs"]
 mod process_windows_provider_wasm;
 
-#[path = "cases/wasm/windows_callback_exit_wasm.rs"]
+#[path = "callbacks/wasm/exit.rs"]
 mod windows_callback_exit_wasm;
 
-#[path = "cases/wasm/windows_callback_provider_wasm.rs"]
+#[path = "callbacks/wasm/provider.rs"]
 mod windows_callback_provider_wasm;
 
-#[path = "cases/wasm/windows_current_process_wasm.rs"]
+#[path = "wasm/current_process.rs"]
 mod windows_current_process_wasm;
 
-#[path = "cases/wasm/windows_module_handle_wasm.rs"]
+#[path = "wasm/module_handle.rs"]
 mod windows_module_handle_wasm;

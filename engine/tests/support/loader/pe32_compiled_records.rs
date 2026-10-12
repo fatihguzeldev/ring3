@@ -12,7 +12,7 @@ pub const RECORD_RVA: u32 = DATA_RVA + 0x20;
 pub const RECORD_BYTES: usize = 128;
 pub const KERNEL_OFFSET: u32 = 0x200;
 pub const KERNEL: &[u8] =
-    include_bytes!("../../programs/fixtures/p2-compiled-records/kernel.text.bin");
+    include_bytes!("../../programs/records/fixtures/p2-compiled-records/kernel.text.bin");
 pub const KERNEL_SHA256: &str = "8bb4f64cef988239a8042519e089027aa03cb938dcd8cc99de18124470cef5be";
 pub const RECORD_SHA256: &str = "71c5b89591bf15c6b81fae547ca83764e2f6d9968449142b791ddd088491199d";
 pub const MAIN_ENTRIES: [u32; 5] = [0, 20, 47, 60, 82];

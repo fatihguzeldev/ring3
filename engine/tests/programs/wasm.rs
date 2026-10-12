@@ -21,23 +21,23 @@ mod support_pe32_sort;
 #[path = "../support/wasm.rs"]
 mod support_wasm;
 
-#[path = "cases/wasm/compiled_switch_wasm.rs"]
+#[path = "dispatch/wasm/switch.rs"]
 mod compiled_switch_wasm;
 
-#[path = "cases/wasm/cpu_bitmap_dispatch32_wasm.rs"]
+#[path = "dispatch/wasm/bitmap.rs"]
 mod cpu_bitmap_dispatch32_wasm;
 
-#[path = "cases/wasm/cpu_returned_atomic_flags32_wasm.rs"]
+#[path = "wasm/returned_atomic_flags.rs"]
 mod cpu_returned_atomic_flags32_wasm;
 
-#[path = "cases/wasm/fp_compiled_wasm.rs"]
+#[path = "numeric/wasm/compiled.rs"]
 mod fp_compiled_wasm;
 
-#[path = "cases/wasm/pe32_compiled_records_wasm.rs"]
+#[path = "records/wasm/compiled.rs"]
 mod pe32_compiled_records_wasm;
 
-#[path = "cases/wasm/pe32_mutable_records_wasm.rs"]
+#[path = "records/wasm/mutable.rs"]
 mod pe32_mutable_records_wasm;
 
-#[path = "cases/wasm/pe32_sort_wasm.rs"]
+#[path = "wasm/sort.rs"]
 mod pe32_sort_wasm;

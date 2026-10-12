@@ -17,7 +17,7 @@ const sourcePaths = ['engine/src/memory/space.rs', 'engine/src/abi/memory_helper
   'engine/tests/process/memory/compare_exchange/native/byte.rs', 'engine/tests/process/memory/native.rs', 'engine/tests/process/memory/native.rs', 'engine/tests/cpu/atomic/compare_exchange/locked/native/byte.rs', 'engine/tests/cpu/atomic/native.rs', 'engine/tests/support/cpu/prefix_admission.rs', 'engine/tests/cpu/atomic/native.rs', 'engine/tests/cpu/atomic/compare_exchange/locked/wasm/byte.rs', 'engine/tests/cpu/atomic/wasm.rs', 'engine/tests/support/wasm.rs', 'engine/tests/cpu/atomic/wasm.rs', 'engine/tests/support/wasm.rs', 'engine/tests/cpu/atomic/compare_exchange/locked/compiler/native/byte.rs', 'engine/tests/cpu/atomic/native.rs', 'engine/tests/cpu/atomic/native.rs',
   ...['runtime/run.mjs', 'kernel.c', 'build.py', 'kernel.obj', 'kernel.text.bin', 'kernel.disasm.txt', 'receipt.json', 'PROVENANCE.md']
     .map(p => 'engine/tests/cpu/atomic/compare_exchange/locked/fixtures/p2-locked-cmpxchg8/' + p),
-  'engine/tests/programs/fixtures/p2-compiled-records/build.py', 'engine/tests/support/wasm/engine.mjs'];
+  'engine/tests/programs/records/fixtures/p2-compiled-records/build.py', 'engine/tests/support/wasm/engine.mjs'];
 const sourceHashes = () => Object.fromEntries(sourcePaths.map(p => [p, hash(readFileSync(join(root, p)))]));
 const sourcesBefore = sourceHashes(), contexts = [], modules = [], observations = [], helperTrace = [], diagnostics = [], controls = [];
 const counts = {contexts: 0, modules: 0, runs: 0, retired: 0, compares: 0, helper_calls: 0, read32: 0, read8: 0, store32: 0, store8: 0,

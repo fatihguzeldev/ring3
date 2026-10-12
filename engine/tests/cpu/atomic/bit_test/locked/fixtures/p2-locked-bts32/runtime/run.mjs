@@ -18,7 +18,7 @@ const sourcePaths = ['engine/src/memory/space.rs','engine/src/abi/memory_helper.
   'engine/src/cpu/dbt/wasm/memory.rs','engine/src/cpu/dbt/wasm/memory/exchange.rs','engine/src/cpu/dbt/wasm/locals.rs',
   'engine/tests/process/memory/bit_test/native/set.rs', 'engine/tests/process/memory/native.rs', 'engine/tests/process/memory/native.rs','engine/tests/cpu/atomic/bit_test/locked/native/set32.rs', 'engine/tests/cpu/atomic/native.rs', 'engine/tests/support/cpu/prefix_admission.rs', 'engine/tests/cpu/atomic/native.rs','engine/tests/cpu/atomic/bit_test/locked/compiler/native/set32.rs', 'engine/tests/cpu/atomic/native.rs', 'engine/tests/cpu/atomic/native.rs','engine/tests/cpu/atomic/bit_test/locked/wasm/set32.rs', 'engine/tests/cpu/atomic/wasm.rs', 'engine/tests/support/wasm.rs', 'engine/tests/cpu/atomic/wasm.rs', 'engine/tests/support/wasm.rs',
   ...['kernel.c','build.py','PROVENANCE.md','kernel.obj','kernel.text.bin','kernel.disasm.txt','receipt.json','runtime/run.mjs'].map(p=>'engine/tests/cpu/atomic/bit_test/locked/fixtures/p2-locked-bts32/'+p),
-  'engine/tests/programs/fixtures/p2-compiled-records/build.py','engine/tests/support/wasm/engine.mjs'];
+  'engine/tests/programs/records/fixtures/p2-compiled-records/build.py','engine/tests/support/wasm/engine.mjs'];
 const sourceHashes = () => Object.fromEntries(sourcePaths.map(p=>[p,hash(readFileSync(join(root,p)))]));
 const sourcesBefore=sourceHashes(),contexts=[],modules=[],observations=[],helperTrace=[],diagnostics=[],controls=[];
 const counts={contexts:0,modules:0,runs:0,retired:0,bit_sets:0,helper_calls:0,read32:0,store32:0,

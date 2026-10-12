@@ -41,8 +41,8 @@ function save(name, bytes) {
 const sourcePaths = [
   `${fixture}/runtime/run.mjs`, `${fixture}/oracle.json`, `${fixture}/entry.c`, `${fixture}/build.py`,
   `${fixture}/program.exe`, `${fixture}/entry.obj`, `${fixture}/receipt.json`,
-  'engine/tests/programs/fixtures/p2-fp-compiled/sse2/kernel.obj',
-  'engine/tests/programs/fixtures/p2-fp-compiled/sse2/kernel.text.bin',
+  'engine/tests/programs/numeric/fixtures/p2-fp-compiled/sse2/kernel.obj',
+  'engine/tests/programs/numeric/fixtures/p2-fp-compiled/sse2/kernel.text.bin',
   'engine/tests/process/images/startup/native/fp_imports.rs', 'engine/tests/process/images/native.rs', 'engine/tests/process/images/native.rs', 'engine/tests/process/images/startup/wasm/fp_imports.rs', 'engine/tests/process/images/wasm.rs', 'engine/tests/support/wasm.rs', 'engine/tests/process/images/wasm.rs', 'engine/tests/support/wasm.rs',
   'engine/tests/support/wasm/engine.mjs', 'engine/src/process/loading/input.rs', 'engine/src/process/loading/mod.rs', 'engine/src/process/mod.rs',
   'engine/src/process/loading/startup.rs', 'engine/src/process/loading/mod.rs', 'engine/src/process/mod.rs', 'engine/src/process/execution/resident.rs', 'engine/src/process/execution/authority.rs', 'engine/src/process/execution/mod.rs', 'engine/src/process/mod.rs', 'engine/src/process/execution/installation.rs', 'engine/src/process/execution/mod.rs', 'engine/src/process/mod.rs',

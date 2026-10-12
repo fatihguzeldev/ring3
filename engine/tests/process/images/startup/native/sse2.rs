@@ -23,7 +23,7 @@ use ring3_engine::{
 
 const PE: &[u8] = include_bytes!("../fixtures/p2-sse2-pe-startup/program.exe");
 const KERNEL: &[u8] =
-    include_bytes!("../../../../programs/fixtures/p2-fp-compiled/sse2/kernel.text.bin");
+    include_bytes!("../../../../programs/numeric/fixtures/p2-fp-compiled/sse2/kernel.text.bin");
 const KEY: u64 = 0x5353_4532_5045_0001;
 const PREFERRED: u32 = 0x0040_0000;
 const STACK: u32 = 0x8000;

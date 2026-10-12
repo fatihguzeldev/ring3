@@ -20,7 +20,7 @@ assert.equal(initial.length, SIZE);
 assert.equal(oracle.schema, 'ring3.sse2-pe-startup.v1');
 assert.equal(image.length, oracle.image.bytes);
 assert.equal(hash(image), oracle.image.sha256);
-const sourceCaseBytes = readFileSync(join(root, 'engine/tests/programs/fixtures/p2-fp-compiled/sse2/cases.json'));
+const sourceCaseBytes = readFileSync(join(root, 'engine/tests/programs/numeric/fixtures/p2-fp-compiled/sse2/cases.json'));
 assert.equal(hash(sourceCaseBytes), oracle.source_case.sha256);
 const sourceCase = JSON.parse(sourceCaseBytes).cases.find(row => row.name === oracle.source_case.name);
 assert.ok(sourceCase);
@@ -45,7 +45,7 @@ function save(name, bytes) {
 const sourcePaths = [
   `${fixture}/runtime/run.mjs`, `${fixture}/oracle.json`, `${fixture}/entry.c`, `${fixture}/build.py`,
   `${fixture}/program.exe`, `${fixture}/kernel.obj`, `${fixture}/kernel.text.bin`, `${fixture}/receipt.json`,
-  'engine/tests/programs/fixtures/p2-fp-compiled/sse2/cases.json',
+  'engine/tests/programs/numeric/fixtures/p2-fp-compiled/sse2/cases.json',
   'engine/tests/support/wasm/engine.mjs', 'engine/src/process/loading/input.rs', 'engine/src/process/loading/mod.rs', 'engine/src/process/mod.rs',
   'engine/src/process/loading/startup.rs', 'engine/src/process/loading/mod.rs', 'engine/src/process/mod.rs', 'engine/src/process/execution/installation.rs', 'engine/src/process/execution/mod.rs', 'engine/src/process/mod.rs',
   'engine/src/process/cpu/simd.rs', 'engine/src/process/cpu/mod.rs', 'engine/src/process/mod.rs', 'engine/src/process/memory/span.rs', 'engine/src/process/memory/mod.rs', 'engine/src/process/mod.rs',
