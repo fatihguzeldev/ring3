@@ -36,3 +36,6 @@ mod cpu_fx_segment_access;
 
 #[path = "state/segments/native.rs"]
 mod cpu_xstate_segment_access;
+
+#[path = "state/upper/native.rs"]
+mod ymm_upper;

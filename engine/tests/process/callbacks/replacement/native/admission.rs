@@ -1,5 +1,5 @@
 use ring3_engine::abi::{
-    arena::{SEGMENTS_OFFSET, TRANSFER_OFFSET, TRANSFER_SIZE, X87_OFFSET},
+    arena::{SEGMENTS_OFFSET, TRANSFER_OFFSET, TRANSFER_SIZE, X87_OFFSET, YMM_OFFSET},
     x86::{SEGMENTS_SIZE, decode_state, encode_exit_v3, encode_state},
 };
 use ring3_engine::cpu::x86::State32;
@@ -797,6 +797,7 @@ fn forced_abort_discards_inner_authority_and_restores_outer_even_with_stale_canc
     let (mut engine, state, outer) = parked(0x8010);
     let saved = engine.arena()[..96].to_vec();
     let saved_extended = engine.arena()[X87_OFFSET..SEGMENTS_OFFSET + SEGMENTS_SIZE].to_vec();
+    let saved_upper = engine.arena()[YMM_OFFSET..].to_vec();
     let callback = engine
         .begin_callback(KEY, 1, outer, ENTRY, RETURN, 18, &[0x11, 0x22])
         .unwrap();
@@ -822,6 +823,7 @@ fn forced_abort_discards_inner_authority_and_restores_outer_even_with_stale_canc
     let mut expected = before;
     expected[..96].copy_from_slice(&saved);
     expected[X87_OFFSET..SEGMENTS_OFFSET + SEGMENTS_SIZE].copy_from_slice(&saved_extended);
+    expected[YMM_OFFSET..].copy_from_slice(&saved_upper);
     assert_eq!(engine.arena(), expected);
     assert_eq!(bytes(&engine, 0x7ff0, 44), guest);
     unchanged(&mut engine, error(CallError::InvalidToken), |engine| {

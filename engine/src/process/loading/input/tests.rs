@@ -582,7 +582,7 @@ fn dirty_input_arena(engine: &mut EngineInstance) {
 
     let arena = engine.arena_mut().unwrap();
     assert_eq!(arena.len(), ARENA_SIZE);
-    assert_eq!(ARENA_SIZE, 4612);
+    assert_eq!(ARENA_SIZE, 4756);
     arena[TRANSFER_OFFSET..TRANSFER_OFFSET + TRANSFER_SIZE].fill(0xd3);
     put32(arena, CANCEL_OFFSET, 1);
     put16(arena, X87_OFFSET + 16, 0x027f);

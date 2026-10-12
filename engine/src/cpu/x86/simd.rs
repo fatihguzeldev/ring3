@@ -1,3 +1,5 @@
+pub mod ymm;
+
 use super::{Register32, ir::EffectiveAddress};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

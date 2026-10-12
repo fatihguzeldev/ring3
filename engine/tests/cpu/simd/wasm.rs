@@ -15,3 +15,6 @@ mod cpu_fx_segment_access_wasm;
 
 #[path = "state/segments/wasm.rs"]
 mod cpu_xstate_segment_access_wasm;
+
+#[path = "state/upper/wasm.rs"]
+mod ymm_upper;

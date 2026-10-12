@@ -16,7 +16,7 @@ use ring3_engine::{
 fn engine_initializes_an_append_only_exact_x87_record() {
     let engine = EngineInstance::new(1, 1).unwrap();
     let arena = engine.arena();
-    assert_eq!(arena.len(), 4612);
+    assert_eq!(arena.len(), 4756);
     let tail = &arena[X87_OFFSET..X87_OFFSET + X87_SIZE];
     assert_eq!(
         &tail[..16],

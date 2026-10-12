@@ -95,8 +95,8 @@ pub(super) fn load_state(sink: &mut InstructionSink<'_>) {
 }
 
 pub(super) fn work_preflight(sink: &mut InstructionSink<'_>) {
-    use crate::abi::arena::{ARENA_SIZE, WORK_OFFSET, WORK_SIZE};
-    range_end(sink, STATE_PTR, ARENA_SIZE as u64);
+    use crate::abi::arena::{WORK_OFFSET, WORK_SIZE};
+    range_end(sink, STATE_PTR, (WORK_OFFSET + WORK_SIZE) as u64);
     sink.local_get(MEMORY_BYTES).i64_gt_u();
     fail_if(sink, 1);
     for (pointer, size) in [(EXIT_PTR, EXIT_SIZE as u64), (CANCEL_PTR, 4)] {

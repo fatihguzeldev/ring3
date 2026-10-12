@@ -3,6 +3,7 @@ mod segments;
 mod simd;
 mod state;
 mod x87;
+mod ymm;
 
 pub use exit::{
     ACCESS_LENGTH_OFFSET, ACCESS_OFFSET, DETAIL_OFFSET, EXIT_SIZE, EXIT_VERSION_2, EXIT_VERSION_3,
@@ -31,3 +32,5 @@ pub use x87::{
 };
 
 pub(crate) use segments::SEGMENTS_CACHE_OFFSETS;
+
+pub use ymm::{YMM_REGISTERS_OFFSET, YMM_SIZE, decode_ymm, encode_ymm};

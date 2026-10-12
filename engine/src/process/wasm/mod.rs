@@ -59,6 +59,16 @@ pub(crate) fn arena_ptr() -> u32 {
     })
 }
 
+pub(crate) fn arena_len() -> u32 {
+    inspect(|instance| {
+        if instance.is_open() {
+            instance.arena().len() as u32
+        } else {
+            0
+        }
+    })
+}
+
 pub(super) fn inspect(operation: impl FnOnce(&EngineInstance) -> u32) -> u32 {
     REGISTRY.with(|registry| {
         let Ok(registry) = registry.try_borrow() else {
