@@ -1,7 +1,10 @@
 use iced_x86::{Decoder, DecoderError, DecoderOptions};
 
 use crate::{
-    cpu::{UnsupportedFeature, x86::ir::Operation},
+    cpu::{
+        UnsupportedFeature,
+        x86::{environment::USER_MODE_ENVIRONMENT, ir::Operation},
+    },
     memory::{AddressSpace, CodeSnapshot, GuestAddress, MemoryError, MemoryFault},
 };
 
@@ -108,7 +111,11 @@ fn decode(
             DecoderError::None => {
                 let consumed = instruction.len();
                 let fault = if policy == DecodePolicy::Execution {
-                    super::execution_faults::privileged(&instruction, &bytes[..consumed])
+                    super::execution_faults::privileged(
+                        &instruction,
+                        &bytes[..consumed],
+                        USER_MODE_ENVIRONMENT,
+                    )
                 } else {
                     None
                 };
@@ -292,8 +299,8 @@ mod tests {
     fn execution_decode_keeps_valid_unsupported_and_duplicate_profile_refusals() {
         for bytes in [
             &[0xcd, 0x80][..],
-            &[0xfa][..],
-            &[0xfb][..],
+            &[0xf2, 0xfa][..],
+            &[0xf3, 0xfb][..],
             &[0xf3, 0x0f, 0xa2][..],
             &[0x66, 0x66, 0x90][..],
             &[0x66, 0x66, 0xf4][..],

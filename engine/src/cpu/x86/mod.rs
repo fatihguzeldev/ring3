@@ -2,6 +2,7 @@ pub mod atomic;
 pub mod bits;
 mod control;
 pub mod decode;
+mod environment;
 pub mod ir;
 pub mod packed_strings;
 mod segments;

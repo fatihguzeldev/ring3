@@ -11,10 +11,19 @@ const legacy = [
   ['lmsw-memory', [0x0f, 0x01, 0x30]],
   ['invd', [0x0f, 0x08]],
   ['wbinvd', [0x0f, 0x09]],
+  ['cpl3-iopl0-pvi0-cli', [0xfa]],
+  ['cpl3-iopl0-pvi0-sti', [0xfb]],
 ];
 for (const opcode of [0x20, 0x22]) for (const control of [0, 2, 3, 4]) {
   legacy.push([`mov-${opcode.toString(16)}-cr${control}`, [0x0f, opcode, 0xc7 | control << 3]]);
   legacy.push([`mov-${opcode.toString(16)}-cr${control}-ignored-mod`, [0x0f, opcode, control << 3]]);
+}
+for (const opcode of [0x21, 0x23]) for (let debug = 0; debug < 8; debug++) {
+  const modes = debug === 4 || debug === 5 ? [0, 0x40, 0x80, 0xc0] : [0xc0];
+  for (const mode of modes) legacy.push([
+    `mov-${opcode.toString(16)}-dr${debug}-mod${mode.toString(16)}`,
+    [0x0f, opcode, mode | debug << 3 | (debug + 3) % 8],
+  ]);
 }
 const memory = legacy.filter(([name]) => /^(invlpg|lgdt|lidt)$|-memory$/.test(name));
 const rows = [...legacy, ...memory.flatMap(([name, bytes]) => [
@@ -38,12 +47,8 @@ for (const [name, bytes] of [
   ['unadvertised-rdmsr', [0x0f, 0x32]],
   ['unadvertised-wrmsr', [0x0f, 0x30]],
   ['distinct-wbnoinvd', [0xf3, 0x0f, 0x09]],
-  ['debug-environment-mov-dr0', [0x0f, 0x21, 0xc0]],
-  ['debug-environment-mov-dr4', [0x0f, 0x23, 0xe0]],
-  ['environment-dependent-cli', [0xfa]],
-  ['environment-dependent-sti', [0xfb]],
   ['environment-dependent-in', [0xe4, 0x80]],
   ['environment-dependent-out', [0xe6, 0x80]],
   ['valid-unsupported-int80', [0xcd, 0x80]],
 ]) negatives.push({name, bytes: Buffer.from(bytes)});
-export const claim = 'bounded CPL3 privileged GP0 whitelist; strict public preparation, invalidLOCK priority, reservedREP refusal and full CPU/arena preservation; MSR/debug/IO environments remain unsupported';
+export const claim = 'bounded CPL3 privileged GP0 whitelist and explicit IOPL0/PVI0/GD0/DE0 user environment; strict public preparation, invalidLOCK priority, reservedREP refusal and full CPU/arena preservation; MSR/IO availability remain unsupported';

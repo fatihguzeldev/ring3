@@ -11,11 +11,12 @@ const scenario = suite === 'privileged' ? await import('./privileged-cases.mjs')
 const PC = 0x1000, KEY_HIGH = 0x4641554c, observations = [], modules = []; let contexts = 0, runs = 0, refusals = 0;
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
 const paths = ['engine/src/cpu/x86/decode/decoder.rs', 'engine/src/cpu/x86/decode/execution_faults.rs',
-  'engine/src/cpu/x86/control.rs', 'engine/src/cpu/dbt/cold.rs', 'engine/src/cpu/dbt/artifact.rs',
+  'engine/src/cpu/x86/control.rs', 'engine/src/cpu/x86/environment.rs', 'engine/src/cpu/dbt/cold.rs', 'engine/src/cpu/dbt/artifact.rs',
   'engine/src/cpu/dbt/region.rs', 'engine/src/cpu/dbt/wasm/control_instructions.rs', 'engine/src/cpu/dbt/wasm/emitter.rs',
   'engine/src/process/execution/stopped.rs', 'engine/src/process/wasm/execution.rs', 'engine/src/abi/wasm/exports/execution.rs',
   'engine/tests/cpu/control/fixtures/p2-execution-faults/runtime/run.mjs'];
 if (scenario) paths.push('engine/src/cpu/x86/decode/execution_faults_tests.rs',
+  'engine/src/cpu/x86/decode/execution_environment_tests.rs',
   'engine/tests/cpu/control/fixtures/p2-execution-faults/runtime/privileged-cases.mjs',
   'engine/tests/cpu/control/fixtures/p2-execution-faults/runtime/privileged.mjs');
 const pins = () => Object.fromEntries(paths.map(path => [path, hash(readFileSync(join(root, path)))]));
@@ -102,6 +103,10 @@ for (const entries of [false, true]) for (const row of positive) {
   execute(c, fn, row);
   execute(c, fn, row, {flags: 0x102});
   execute(c, fn, row, {flags: 0x244cd7, shadow: 1});
+  if (/cpl3-iopl0-pvi0-(cli|sti)$/.test(row.name)) {
+    execute(c, fn, row, {flags: 0x202});
+    execute(c, fn, row, {flags: 0x302});
+  }
   execute(c, fn, row, {flags: 0x102, shadow: 1, budget: 0, reason: 1, retired: 0, pc: c.target});
   execute(c, fn, row, {flags: 0x102, shadow: 1, cancel: 1, reason: 2, retired: 0, pc: c.target});
   const before = c.arena(); before.writeUInt32LE(0, 96);
@@ -116,8 +121,8 @@ for (const entries of [false, true]) {
 }
 const negatives = scenario?.negatives ?? [
   {name: 'valid-unsupported-int80', bytes: Buffer.from([0xcd, 0x80])},
-  {name: 'environment-dependent-cli', bytes: Buffer.from([0xfa])},
-  {name: 'environment-dependent-sti', bytes: Buffer.from([0xfb])},
+  {name: 'reserved-repne-cli', bytes: Buffer.from([0xf2, 0xfa])},
+  {name: 'reserved-rep-sti', bytes: Buffer.from([0xf3, 0xfb])},
   {name: 'reserved-repne-hlt', bytes: Buffer.from([0xf2, 0xf4])},
   {name: 'reserved-rep-hlt', bytes: Buffer.from([0xf3, 0xf4])},
   {name: 'unspecified-repeated66', bytes: Buffer.from([0x66, 0x66, 0x90])},
