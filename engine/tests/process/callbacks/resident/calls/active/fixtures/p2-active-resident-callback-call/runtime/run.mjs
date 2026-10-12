@@ -29,7 +29,7 @@ const sourcePaths = [
   'engine/src/abi/x86/state.rs',
   'engine/src/cpu/dbt/artifact.rs',
   'engine/src/cpu/dbt/cold.rs',
-  'engine/src/cpu/dbt/cold_tests.rs',
+  'engine/src/cpu/dbt/cold/tests.rs',
   'engine/src/cpu/dbt/gate.rs',
   'engine/src/cpu/dbt/mod.rs',
   'engine/src/cpu/dbt/region.rs',

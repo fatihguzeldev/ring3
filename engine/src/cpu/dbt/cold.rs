@@ -150,5 +150,5 @@ fn prepare(
 }
 
 #[cfg(test)]
-#[path = "cold_tests.rs"]
+#[path = "cold/tests.rs"]
 mod tests;

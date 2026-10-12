@@ -335,11 +335,11 @@ impl ResidentRegistry {
 }
 
 #[cfg(test)]
-#[path = "resident_entries_tests.rs"]
+#[path = "resident/tests/entries.rs"]
 mod resident_entries_tests;
 
 #[cfg(test)]
-#[path = "resident_retirement_tests.rs"]
+#[path = "resident/tests/retirement.rs"]
 mod resident_retirement_tests;
 
 fn allocate_id(counter: &AtomicU64) -> Result<UnitId, RegistryError> {
