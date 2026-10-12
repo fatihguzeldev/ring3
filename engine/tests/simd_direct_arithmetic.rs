@@ -17,11 +17,11 @@ use ring3_engine::{
 };
 
 #[test]
-fn all_high_multiply_forms_validate_without_semantic_helper_imports() {
+fn selected_arithmetic_forms_validate_without_semantic_helper_imports() {
     let output = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()
         .unwrap()
-        .join("target/direct-multiply-high-fixtures")
+        .join("target/direct-arithmetic-fixtures")
         .join(format!(
             "native-{}-{}",
             std::process::id(),
@@ -32,9 +32,11 @@ fn all_high_multiply_forms_validate_without_semantic_helper_imports() {
         ));
     fs::create_dir_all(&output).unwrap();
     let mut modules = Vec::new();
-    for (kind, opcode) in [
-        (PackedKind::MultiplyHighSigned, 0xe5),
-        (PackedKind::MultiplyHighUnsigned, 0xe4),
+    for (kind, opcode, lane_bytes) in [
+        (PackedKind::MultiplyHighSigned, 0xe5, 2),
+        (PackedKind::MultiplyHighUnsigned, 0xe4, 2),
+        (PackedKind::MultiplyUnsignedDword, 0xf4, 4),
+        (PackedKind::SumAbsoluteByteDifferences, 0xf6, 1),
     ] {
         for vector_bytes in [8, 16] {
             let register = |index| {
@@ -76,12 +78,12 @@ fn all_high_multiply_forms_validate_without_semantic_helper_imports() {
                 assert_eq!(usize::from(decoded.length()), length);
                 assert_eq!(decoded.next_pc(), GuestAddress(0x2000 + length as u32));
                 let Operation::Simd(operation) = decoded.operation() else {
-                    panic!("expected a typed high-half multiply");
+                    panic!("expected a typed packed arithmetic operation");
                 };
                 assert_eq!(operation.kind, SimdKind::Packed(kind));
                 assert_eq!(operation.destination, SimdOperand::Register(register(6)));
                 assert_eq!(operation.source, source);
-                assert_eq!(operation.lane_bytes, 2);
+                assert_eq!(operation.lane_bytes, lane_bytes);
                 assert_eq!(operation.vector_bytes, vector_bytes);
                 assert_eq!(operation.memory_bytes, memory_bytes);
                 assert_eq!(operation.immediate, None);
@@ -104,7 +106,7 @@ fn all_high_multiply_forms_validate_without_semantic_helper_imports() {
                     engine.compile(1).unwrap();
                     engine.artifact_bytes().unwrap()
                 };
-                let name = format!("multiply-high-{}.wasm", modules.len());
+                let name = format!("arithmetic-{}.wasm", modules.len());
                 fs::write(output.join(&name), module).unwrap();
                 modules.push(format!("[\"{name}\",{memory_bytes}]"));
                 assert_eq!(engine.arena(), before);
@@ -116,7 +118,7 @@ fn all_high_multiply_forms_validate_without_semantic_helper_imports() {
             }
         }
     }
-    assert_eq!(modules.len(), 12);
+    assert_eq!(modules.len(), 24);
     fs::write(
         output.join("modules.json"),
         format!("[{}]", modules.join(",")),
@@ -137,7 +139,7 @@ for (const [name, memoryBytes] of cases) {
     if (imports.some(item => item.name.startsWith('simd_execute'))) helperBacked.push(name);
 }
 console.log(JSON.stringify({validated: cases.length, helperBacked}));
-assert.deepEqual(helperBacked, [], 'high-half multiplies must use the direct generated path');
+assert.deepEqual(helperBacked, [], 'selected packed arithmetic must use the direct generated path');
 "#,
         )
         .arg(&output)
@@ -145,7 +147,7 @@ assert.deepEqual(helperBacked, [], 'high-half multiplies must use the direct gen
         .unwrap();
     assert!(
         validation.status.success(),
-        "generated high-half multiplies failed validation or direct import assertions:\n{}\n{}",
+        "generated packed arithmetic failed validation or direct import assertions:\n{}\n{}",
         String::from_utf8_lossy(&validation.stdout),
         String::from_utf8_lossy(&validation.stderr)
     );

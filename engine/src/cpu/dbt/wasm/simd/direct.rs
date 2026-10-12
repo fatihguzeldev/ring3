@@ -29,12 +29,14 @@ pub(super) fn accepts(op: SimdOperation) -> bool {
                 | P::MultiplyLow
                 | P::MultiplyHighSigned
                 | P::MultiplyHighUnsigned
+                | P::MultiplyUnsignedDword
                 | P::MultiplyAddWords
                 | P::AverageUnsigned
                 | P::MinimumSigned
                 | P::MaximumSigned
                 | P::MinimumUnsigned
                 | P::MaximumUnsigned
+                | P::SumAbsoluteByteDifferences
                 | P::ShiftLeft
                 | P::ShiftRight
                 | P::ShiftRightSigned
@@ -228,6 +230,32 @@ fn arithmetic(code: &mut InstructionSink<'_>, kind: P, width: u8) {
         }
         _ => unreachable!("direct packed opcode and width were decoded"),
     }
+}
+
+fn multiply_unsigned_dword(code: &mut InstructionSink<'_>, op: SimdOperation) {
+    for operand in [op.destination, op.source] {
+        load(code, operand, op.vector_bytes);
+        code.v128_const(0)
+            .i8x16_shuffle([0, 1, 2, 3, 8, 9, 10, 11, 16, 17, 18, 19, 20, 21, 22, 23]);
+    }
+    code.i64x2_extmul_low_i32x4_u();
+}
+
+fn sum_absolute_byte_differences(code: &mut InstructionSink<'_>, op: SimdOperation) {
+    load(code, op.destination, op.vector_bytes);
+    load(code, op.source, op.vector_bytes);
+    code.i8x16_max_u();
+    load(code, op.destination, op.vector_bytes);
+    load(code, op.source, op.vector_bytes);
+    code.i8x16_min_u()
+        .i8x16_sub()
+        .i16x8_extadd_pairwise_i8x16_u()
+        .i32x4_extadd_pairwise_i16x8_u();
+    // four-byte sums are at most 1020, so narrowing preserves them.
+    code.v128_const(0)
+        .i16x8_narrow_i32x4_u()
+        .i32x4_extadd_pairwise_i16x8_u()
+        .i64x2_extend_low_i32x4_u();
 }
 
 fn multiply_high(code: &mut InstructionSink<'_>, op: SimdOperation, kind: P) {
@@ -441,6 +469,8 @@ pub(super) fn instruction(
                 }
             }
         }
+        SimdKind::Packed(P::MultiplyUnsignedDword) => multiply_unsigned_dword(code, op),
+        SimdKind::Packed(P::SumAbsoluteByteDifferences) => sum_absolute_byte_differences(code, op),
         SimdKind::Packed(kind)
             if matches!(kind, P::MultiplyHighSigned | P::MultiplyHighUnsigned) =>
         {
