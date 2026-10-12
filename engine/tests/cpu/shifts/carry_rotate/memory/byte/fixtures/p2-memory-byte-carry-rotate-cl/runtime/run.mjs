@@ -113,7 +113,7 @@ const sourcePaths = [
   "engine/src/cpu/dbt/wasm/memory.rs",
   "engine/src/cpu/dbt/wasm/memory/byte_store.rs",
   "engine/src/cpu/dbt/wasm/memory/narrow.rs",
-  "engine/src/process/instance.rs", "engine/src/process/execution/compiled.rs", "engine/src/process/execution/authority.rs", "engine/src/process/memory/address_space.rs", "engine/src/process/memory/scalar.rs", "engine/src/process/memory/scalar_tests.rs", "engine/src/process/execution/mod.rs", "engine/src/process/memory/mod.rs", "engine/src/process/mod.rs",
+  "engine/src/process/instance.rs", "engine/src/process/execution/compiled.rs", "engine/src/process/execution/authority.rs", "engine/src/process/memory/address_space.rs", "engine/src/process/memory/scalar.rs", "engine/src/process/memory/scalar/tests.rs", "engine/src/process/execution/mod.rs", "engine/src/process/memory/mod.rs", "engine/src/process/mod.rs",
   "engine/src/process/execution/resident.rs", "engine/src/abi/arena.rs",
   "engine/src/abi/memory_helper.rs",
   "engine/src/abi/x86/mod.rs",

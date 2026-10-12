@@ -649,5 +649,5 @@ impl EngineInstance {
 }
 
 #[cfg(test)]
-#[path = "scalar_tests.rs"]
+#[path = "scalar/tests.rs"]
 mod tests;
