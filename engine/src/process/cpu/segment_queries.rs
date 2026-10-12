@@ -1,11 +1,31 @@
 use crate::{
     abi::cpu_helper::CpuMemoryError,
-    cpu::x86::{SegmentAccess, SegmentRegister},
+    cpu::x86::{SegmentAccess, SegmentRegister, USER_MODE_ENVIRONMENT},
     memory::{Access, GuestAddress},
     process::{EngineInstance, HostError, StoreCompletion},
 };
 
 impl EngineInstance {
+    pub(super) fn verify_segment(
+        &mut self,
+        address: u32,
+        input: [u32; 6],
+        write: bool,
+    ) -> Result<StoreCompletion, HostError> {
+        if address != 0 || input[0] > u16::MAX.into() {
+            return Err(HostError::InvalidRequest);
+        }
+        let success = self.segment_descriptors.verify(
+            input[0] as u16,
+            USER_MODE_ENVIRONMENT.current_privilege(),
+            write,
+        );
+        let mut output = input;
+        output[1] = (input[1] & !0x40) | if success { 0x40 } else { 0 };
+        self.integer_publish(0, output, Ok(()))?;
+        Ok(StoreCompletion::Complete)
+    }
+
     pub(super) fn adjust_privilege_memory(
         &mut self,
         resident: Option<u64>,
@@ -102,6 +122,65 @@ mod tests {
 
     fn field(engine: &EngineInstance, at: usize) -> u32 {
         u32::from_le_bytes(engine.arena()[at..at + 4].try_into().unwrap())
+    }
+
+    #[test]
+    fn verification_reads_current_table_changes_only_zf_and_preserves_loaded_cache() {
+        let mut engine = engine();
+        let mut descriptor = SegmentDescriptor {
+            selector: 0x43,
+            base: 0,
+            dpl: 3,
+            present: true,
+            kind: SegmentDescriptorKind::Data { writable: true },
+        };
+        engine.configure_segment_descriptor(descriptor).unwrap();
+        engine.segment_load(3, 0x43).unwrap();
+        let loaded = engine.segment_context().unwrap();
+        descriptor.kind = SegmentDescriptorKind::Data { writable: false };
+        descriptor.present = false;
+        engine.configure_segment_descriptor(descriptor).unwrap();
+        for (query, success) in [(0x30001, true), (0x30002, false)] {
+            input(&mut engine, 0x43, 0xaabb_ccdd, 0x1122_3344);
+            let before = engine.arena().to_vec();
+            let version = engine.memory().unwrap().code_validation_version();
+            assert_eq!(engine.cpu_integer(query, 0), Ok(StoreCompletion::Complete));
+            let mut expected = before;
+            expected[TRANSFER_OFFSET + 4..TRANSFER_OFFSET + 8].copy_from_slice(
+                &((0x24_4ed7_u32 & !0x40) | if success { 0x40 } else { 0 }).to_le_bytes(),
+            );
+            expected[HELPER_OFFSET..HELPER_OFFSET + 40].fill(0);
+            expected[HELPER_OFFSET..HELPER_OFFSET + 4].copy_from_slice(b"R3MH");
+            expected[HELPER_OFFSET + 4..HELPER_OFFSET + 8]
+                .copy_from_slice(&0x10007_u32.to_le_bytes());
+            expected[HELPER_OFFSET + 8..HELPER_OFFSET + 12].copy_from_slice(&40_u32.to_le_bytes());
+            assert_eq!(engine.arena(), expected);
+            assert_eq!(engine.segment_context().unwrap(), loaded);
+            assert_eq!(engine.memory().unwrap().code_validation_version(), version);
+        }
+    }
+
+    #[test]
+    fn verification_invalid_protocol_unknown_kind_and_stale_binding_are_neutral() {
+        let mut engine = engine();
+        for (query, selector, address) in [
+            (0x30001, 0x23, 1),
+            (0x30002, 0x1_0023, 0),
+            (0x30003, 0x23, 0),
+        ] {
+            input(&mut engine, selector, 0, 0);
+            let before = engine.arena().to_vec();
+            assert_eq!(
+                engine.cpu_integer(query, address),
+                Err(HostError::InvalidRequest)
+            );
+            assert_eq!(engine.arena(), before);
+        }
+        input(&mut engine, 0x23, 0, 0);
+        engine.write32(0x1000, 0x9090_9090).unwrap();
+        let before = engine.arena().to_vec();
+        assert!(engine.cpu_integer(0x30001, 0).is_err());
+        assert_eq!(engine.arena(), before);
     }
 
     #[test]

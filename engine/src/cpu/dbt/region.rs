@@ -363,7 +363,9 @@ pub(super) fn terminates(instruction: &DecodedInstruction, embedded: bool) -> bo
 fn supports_cpu_state(operation: &Operation) -> bool {
     match operation {
         Operation::PackedStringCompare(operation) => operation.valid(),
-        Operation::VirtualTimestampAux | Operation::XState(_) => true,
+        Operation::VirtualTimestampAux | Operation::XState(_) | Operation::VerifySegment { .. } => {
+            true
+        }
         Operation::AdjustPrivilege { .. } => true,
         _ => false,
     }
@@ -591,7 +593,7 @@ fn supports_memory_shift_or_rotate(operation: &Operation) -> bool {
 pub(super) fn supports(instruction: &DecodedInstruction, embedded: bool) -> bool {
     let operation = instruction.operation();
     match operation {
-        Operation::XState(_) => {
+        Operation::XState(_) | Operation::VerifySegment { .. } => {
             return embedded;
         }
         Operation::AdjustPrivilege { destination, .. } => {

@@ -127,6 +127,26 @@ impl SegmentDescriptorTable {
             .find(|entry| entry.selector == selector & !3)
     }
 
+    /// query the configured table without loading a segment or checking its present bit.
+    pub fn verify(&self, selector: u16, cpl: u8, write: bool) -> bool {
+        if selector & !3 == 0 || cpl > 3 {
+            return false;
+        }
+        let Some(descriptor) = self.descriptor(selector) else {
+            return false;
+        };
+        let (permitted, conforming) = match descriptor.kind {
+            SegmentDescriptorKind::Data { writable } => (!write || writable, false),
+            SegmentDescriptorKind::Code {
+                readable,
+                conforming,
+            } => (!write && readable, conforming),
+            SegmentDescriptorKind::System => (false, false),
+        };
+        permitted
+            && (conforming || (cpl <= descriptor.dpl && (selector & 3) as u8 <= descriptor.dpl))
+    }
+
     /// Resolve all checks before either the selector or cached base is published.
     /// The caller maps the typed failure to the execution profile's exception record.
     pub fn resolve_load(
@@ -216,6 +236,110 @@ impl SegmentDescriptorTable {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn verification_queries_type_and_visibility_without_testing_presence_or_loading() {
+        let mut table = SegmentDescriptorTable::empty();
+        let rows = [
+            (
+                SegmentDescriptorKind::Data { writable: false },
+                true,
+                false,
+                false,
+            ),
+            (
+                SegmentDescriptorKind::Data { writable: true },
+                true,
+                true,
+                false,
+            ),
+            (
+                SegmentDescriptorKind::Code {
+                    readable: false,
+                    conforming: false,
+                },
+                false,
+                false,
+                false,
+            ),
+            (
+                SegmentDescriptorKind::Code {
+                    readable: true,
+                    conforming: false,
+                },
+                true,
+                false,
+                false,
+            ),
+            (
+                SegmentDescriptorKind::Code {
+                    readable: false,
+                    conforming: true,
+                },
+                false,
+                false,
+                true,
+            ),
+            (
+                SegmentDescriptorKind::Code {
+                    readable: true,
+                    conforming: true,
+                },
+                true,
+                false,
+                true,
+            ),
+            (SegmentDescriptorKind::System, false, false, false),
+        ];
+        for (kind, read, write, conforming) in rows {
+            for present in [false, true] {
+                for dpl in 0..4 {
+                    for selector in [0x40, 0x44] {
+                        table
+                            .configure(SegmentDescriptor {
+                                selector,
+                                base: 0x1234_0000,
+                                dpl,
+                                present,
+                                kind,
+                            })
+                            .unwrap();
+                        let before = table.clone();
+                        for cpl in 0..4 {
+                            for rpl in 0..4 {
+                                let visible = conforming || cpl.max(rpl) <= dpl;
+                                assert_eq!(
+                                    table.verify(selector | u16::from(rpl), cpl, false),
+                                    read && visible
+                                );
+                                assert_eq!(
+                                    table.verify(selector | u16::from(rpl), cpl, true),
+                                    write && visible
+                                );
+                            }
+                        }
+                        assert_eq!(table, before);
+                    }
+                }
+            }
+        }
+        for selector in [0, 1, 2, 3, 0x48, 0x4c] {
+            assert!(!table.verify(selector, 3, false));
+            assert!(!table.verify(selector, 3, true));
+        }
+        assert!(!table.verify(0x43, 4, false));
+        table
+            .configure(SegmentDescriptor {
+                selector: 0x44,
+                base: 0,
+                dpl: 3,
+                present: false,
+                kind: SegmentDescriptorKind::Data { writable: true },
+            })
+            .unwrap();
+        assert!(table.verify(0x47, 3, true));
+        assert!(!table.verify(7, 3, true));
+    }
 
     #[test]
     fn configured_tls_reload_and_null_cache_are_explicit() {

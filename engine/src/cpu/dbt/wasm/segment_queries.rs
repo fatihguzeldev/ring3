@@ -5,7 +5,37 @@ use super::{
     locals::{ADDRESS, FLAGS, LHS, RESULT, STATE_PTR, register},
     memory,
 };
-use crate::cpu::x86::{Register32, ir::Location32};
+use crate::cpu::x86::{
+    Register32,
+    ir::{Location32, SmallWidth, Value32},
+};
+
+pub(super) fn verify(
+    code: &mut InstructionSink<'_>,
+    source: Value32,
+    write: bool,
+    imports: memory::Imports,
+    exit_depth: u32,
+) {
+    match source {
+        Value32::Register(source) => {
+            code.local_get(register(source));
+        }
+        Value32::Memory(address) => {
+            memory::load_narrow_value(code, address, SmallWidth::Word, imports, exit_depth);
+        }
+        Value32::Immediate(_) => unreachable!("segment verification has a selector source"),
+    }
+    code.i32_const(0xffff).i32_and().local_set(RESULT);
+    atomic::payload(code);
+    code.local_get(STATE_PTR)
+        .local_get(RESULT)
+        .i32_store(atomic::transfer(0));
+    code.i32_const(0).local_set(ADDRESS);
+    atomic::call(code, 0x30001 + u32::from(write), 0, imports, exit_depth);
+    code.local_get(STATE_PTR).i32_load(atomic::transfer(4));
+    super::cpu_result::flags(code, 0x40, exit_depth);
+}
 
 pub(super) fn adjust_privilege(
     code: &mut InstructionSink<'_>,

@@ -153,6 +153,10 @@ impl Imports {
                     destination: Location32::Memory(_),
                     ..
                 } => cpu_integer = true,
+                Operation::VerifySegment { source, .. } => {
+                    cpu_integer = true;
+                    read16 |= matches!(source, Value32::Memory(_));
+                }
                 Operation::CacheFlush { .. } => read8 = true,
                 Operation::VirtualTimestampAux => cpu_integer = true,
                 Operation::PackedStringCompare(operation) => {

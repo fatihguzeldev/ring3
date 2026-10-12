@@ -12,3 +12,6 @@ mod cpu_segments_wasm;
 
 #[path = "selectors/wasm/adjust_privilege.rs"]
 mod cpu_arpl_wasm;
+
+#[path = "selectors/wasm/verify.rs"]
+mod cpu_segment_queries_wasm;

@@ -42,6 +42,9 @@ impl EngineInstance {
                     .unwrap(),
             )
         });
+        if matches!(descriptor, 0x30001 | 0x30002) {
+            return self.verify_segment(address, input, descriptor == 0x30002);
+        }
         if descriptor == 0x30000 {
             return self.adjust_privilege_memory(resident, address, input);
         }
