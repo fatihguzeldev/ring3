@@ -84,6 +84,7 @@ pub(crate) fn x87_op(
     cpu_store(|instance| instance.x87_op(operation, address, flags, pc, opcode, waiting))
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn x87_resident_op(
     key_low: u32,
     key_high: u32,
@@ -224,6 +225,7 @@ pub(crate) fn configure_segment_descriptor(
     })
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn simd_execute_resident(
     key_low: u32,
     key_high: u32,
