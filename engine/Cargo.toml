@@ -2,6 +2,7 @@
 name = "ring3-engine"
 version = "0.1.0"
 edition = "2024"
+autotests = false
 rust-version = "1.97"
 license = "Apache-2.0"
 
@@ -19,3 +20,243 @@ unsafe_code = "deny"
 
 [lints.clippy]
 all = "warn"
+
+[[test]]
+name = "abi"
+path = "tests/abi/native.rs"
+
+[[test]]
+name = "cpu_arithmetic"
+path = "tests/cpu/arithmetic/native.rs"
+
+[[test]]
+name = "cpu_arithmetic_wasm"
+path = "tests/cpu/arithmetic/wasm.rs"
+
+[[test]]
+name = "cpu_atomic"
+path = "tests/cpu/atomic/native.rs"
+
+[[test]]
+name = "cpu_atomic_wasm"
+path = "tests/cpu/atomic/wasm.rs"
+
+[[test]]
+name = "cpu_batches"
+path = "tests/cpu/batches/native.rs"
+
+[[test]]
+name = "cpu_batches_wasm"
+path = "tests/cpu/batches/wasm.rs"
+
+[[test]]
+name = "cpu_bits_flags"
+path = "tests/cpu/bits_flags/native.rs"
+
+[[test]]
+name = "cpu_bits_flags_wasm"
+path = "tests/cpu/bits_flags/wasm.rs"
+
+[[test]]
+name = "cpu_control"
+path = "tests/cpu/control/native.rs"
+
+[[test]]
+name = "cpu_control_wasm"
+path = "tests/cpu/control/wasm.rs"
+
+[[test]]
+name = "cpu_dbt_lowering"
+path = "tests/cpu/dbt/lowering/native.rs"
+
+[[test]]
+name = "cpu_dbt_lowering_wasm"
+path = "tests/cpu/dbt/lowering/wasm.rs"
+
+[[test]]
+name = "cpu_dbt_regions"
+path = "tests/cpu/dbt/regions/native.rs"
+
+[[test]]
+name = "cpu_dbt_regions_wasm"
+path = "tests/cpu/dbt/regions/wasm.rs"
+
+[[test]]
+name = "cpu_decode"
+path = "tests/cpu/decode/native.rs"
+
+[[test]]
+name = "cpu_logic"
+path = "tests/cpu/logic/native.rs"
+
+[[test]]
+name = "cpu_logic_wasm"
+path = "tests/cpu/logic/wasm.rs"
+
+[[test]]
+name = "cpu_moves"
+path = "tests/cpu/moves/native.rs"
+
+[[test]]
+name = "cpu_moves_wasm"
+path = "tests/cpu/moves/wasm.rs"
+
+[[test]]
+name = "cpu_multiply"
+path = "tests/cpu/multiply/native.rs"
+
+[[test]]
+name = "cpu_multiply_wasm"
+path = "tests/cpu/multiply/wasm.rs"
+
+[[test]]
+name = "cpu_predicates"
+path = "tests/cpu/predicates/native.rs"
+
+[[test]]
+name = "cpu_predicates_wasm"
+path = "tests/cpu/predicates/wasm.rs"
+
+[[test]]
+name = "cpu_profile"
+path = "tests/cpu/profile/native.rs"
+
+[[test]]
+name = "cpu_profile_wasm"
+path = "tests/cpu/profile/wasm.rs"
+
+[[test]]
+name = "cpu_segments"
+path = "tests/cpu/segments/native.rs"
+
+[[test]]
+name = "cpu_segments_wasm"
+path = "tests/cpu/segments/wasm.rs"
+
+[[test]]
+name = "cpu_shifts"
+path = "tests/cpu/shifts/native.rs"
+
+[[test]]
+name = "cpu_shifts_wasm"
+path = "tests/cpu/shifts/wasm.rs"
+
+[[test]]
+name = "cpu_simd"
+path = "tests/cpu/simd/native.rs"
+
+[[test]]
+name = "cpu_simd_wasm"
+path = "tests/cpu/simd/wasm.rs"
+
+[[test]]
+name = "cpu_stack"
+path = "tests/cpu/stack/native.rs"
+
+[[test]]
+name = "cpu_stack_wasm"
+path = "tests/cpu/stack/wasm.rs"
+
+[[test]]
+name = "cpu_strings"
+path = "tests/cpu/strings/native.rs"
+
+[[test]]
+name = "cpu_strings_wasm"
+path = "tests/cpu/strings/wasm.rs"
+
+[[test]]
+name = "cpu_x87"
+path = "tests/cpu/x87/native.rs"
+
+[[test]]
+name = "cpu_x87_wasm"
+path = "tests/cpu/x87/wasm.rs"
+
+[[test]]
+name = "loader_imports"
+path = "tests/loader/imports/native.rs"
+
+[[test]]
+name = "loader_pe32"
+path = "tests/loader/pe32/native.rs"
+
+[[test]]
+name = "memory"
+path = "tests/memory/native.rs"
+
+[[test]]
+name = "process_callbacks"
+path = "tests/process/callbacks/native.rs"
+
+[[test]]
+name = "process_callbacks_wasm"
+path = "tests/process/callbacks/wasm.rs"
+
+[[test]]
+name = "process_calls"
+path = "tests/process/calls/native.rs"
+
+[[test]]
+name = "process_calls_wasm"
+path = "tests/process/calls/wasm.rs"
+
+[[test]]
+name = "process_dispatch"
+path = "tests/process/dispatch/native.rs"
+
+[[test]]
+name = "process_dispatch_wasm"
+path = "tests/process/dispatch/wasm.rs"
+
+[[test]]
+name = "process_images"
+path = "tests/process/images/native.rs"
+
+[[test]]
+name = "process_images_wasm"
+path = "tests/process/images/wasm.rs"
+
+[[test]]
+name = "process_lifecycle"
+path = "tests/process/lifecycle/native.rs"
+
+[[test]]
+name = "process_lifecycle_wasm"
+path = "tests/process/lifecycle/wasm.rs"
+
+[[test]]
+name = "process_memory"
+path = "tests/process/memory/native.rs"
+
+[[test]]
+name = "process_resident"
+path = "tests/process/resident/native.rs"
+
+[[test]]
+name = "process_resident_wasm"
+path = "tests/process/resident/wasm.rs"
+
+[[test]]
+name = "programs"
+path = "tests/programs/native.rs"
+
+[[test]]
+name = "programs_wasm"
+path = "tests/programs/wasm.rs"
+
+[[test]]
+name = "windows_memory"
+path = "tests/windows/memory/native.rs"
+
+[[test]]
+name = "windows_memory_wasm"
+path = "tests/windows/memory/wasm.rs"
+
+[[test]]
+name = "windows_provider"
+path = "tests/windows/provider/native.rs"
+
+[[test]]
+name = "windows_provider_wasm"
+path = "tests/windows/provider/wasm.rs"
