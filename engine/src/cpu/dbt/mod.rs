@@ -5,6 +5,7 @@ mod region;
 mod resident;
 mod wasm;
 
+pub(crate) use artifact::compile_runtime_entry;
 pub(crate) use artifact::{compile_embedded_entry_region, compile_embedded_region};
 pub(crate) use wasm::emit_dispatcher;
 

@@ -3,6 +3,7 @@ export_process_calls! {
     generation();
     compile_with_gates(count: u32, gate_count: u32);
     compile_entries(count: u32, gate_count: u32);
+    compile_stopped_entry(key_low: u32, key_high: u32, generation: u32);
     compile_resident(count: u32);
     compile_resident_with_gates(count: u32, gate_count: u32);
     compile_resident_entries(count: u32, gate_count: u32);

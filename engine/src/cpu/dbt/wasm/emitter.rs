@@ -68,7 +68,18 @@ pub(in crate::cpu::dbt) fn emit(
                 Operation::Simd(_) | Operation::PackedStringCompare(_)
             )
         });
+    let has_control_fault =
+        blocks
+            .iter()
+            .flat_map(|block| &block.instructions)
+            .any(|instruction| {
+                matches!(
+                    instruction.operation(),
+                    Operation::Control(crate::cpu::x86::ControlOperation::GeneralProtectionZero)
+                )
+            });
     let has_cpu = has_simd
+        || has_control_fault
         || needs_stack_execute
         || needs_cpu_integer
         || needs_cpu_read

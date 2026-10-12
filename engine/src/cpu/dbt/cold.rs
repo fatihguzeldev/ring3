@@ -3,7 +3,7 @@ use super::{
     region::{self, CompiledBlock, GUEST_END, MAX_BLOCKS},
 };
 use crate::{
-    cpu::x86::decode::decode_one,
+    cpu::x86::decode::{decode_for_execution, decode_one},
     memory::{AddressSpace, GuestAddress},
 };
 
@@ -12,7 +12,7 @@ pub fn prepare_entry_region(
     entries: &[GuestAddress],
     limits: CompileLimits,
 ) -> Result<PreparedRegion, CompileError> {
-    prepare(memory, entries, limits, false, &[])
+    prepare(memory, entries, limits, false, &[], DecodePolicy::Strict)
 }
 
 pub(super) fn prepare_embedded_entry_region(
@@ -21,7 +21,7 @@ pub(super) fn prepare_embedded_entry_region(
     limits: CompileLimits,
     gates: &[GateSpec],
 ) -> Result<PreparedRegion, CompileError> {
-    prepare(memory, entries, limits, true, gates)
+    prepare(memory, entries, limits, true, gates, DecodePolicy::Strict)
 }
 
 pub(super) fn prepare_resident_entry_region(
@@ -33,12 +33,27 @@ pub(super) fn prepare_resident_entry_region(
     prepare_embedded_entry_region(memory, entries, limits, gates)
 }
 
+pub(super) fn prepare_runtime_entry(
+    memory: &AddressSpace,
+    entry: GuestAddress,
+    limits: CompileLimits,
+) -> Result<PreparedRegion, CompileError> {
+    prepare(memory, &[entry], limits, true, &[], DecodePolicy::Execution)
+}
+
+#[derive(Clone, Copy)]
+enum DecodePolicy {
+    Strict,
+    Execution,
+}
+
 fn prepare(
     memory: &AddressSpace,
     entries: &[GuestAddress],
     limits: CompileLimits,
     embedded: bool,
     gates: &[GateSpec],
+    decode_policy: DecodePolicy,
 ) -> Result<PreparedRegion, CompileError> {
     region::validate_limits(limits)?;
     if entries.is_empty() || entries.len() > limits.blocks {
@@ -93,8 +108,11 @@ fn prepare(
                 return Err(CompileError::InstructionLimit);
             }
             let pc = GuestAddress(cursor as u32);
-            let instruction = decode_one(memory, pc)
-                .map_err(|error| region::instruction_error(pc, InstructionError::Decode(error)))?;
+            let instruction = match decode_policy {
+                DecodePolicy::Strict => decode_one(memory, pc),
+                DecodePolicy::Execution => decode_for_execution(memory, pc),
+            }
+            .map_err(|error| region::instruction_error(pc, InstructionError::Decode(error)))?;
             let next = cursor + u64::from(instruction.length());
             if next > boundary {
                 return Err(CompileError::InvalidBlocks);

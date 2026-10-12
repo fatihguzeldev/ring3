@@ -151,10 +151,10 @@ mod execution;
 pub(crate) use execution::{
     acknowledge_resident_callback_installation, acknowledge_resident_installation, compile,
     compile_entries, compile_resident, compile_resident_callback_unit, compile_resident_entries,
-    compile_resident_with_gates, compile_with_gates, discard_installed_resident,
-    discard_unacknowledged_resident, dispatcher_module, find_installed_resident, find_resident,
-    generation, guard, guard_dispatch_entry, guard_resident, module_len, module_ptr,
-    resident_module, retire_stale_resident,
+    compile_resident_with_gates, compile_stopped_entry, compile_with_gates,
+    discard_installed_resident, discard_unacknowledged_resident, dispatcher_module,
+    find_installed_resident, find_resident, generation, guard, guard_dispatch_entry,
+    guard_resident, module_len, module_ptr, resident_module, retire_stale_resident,
 };
 
 mod calls;

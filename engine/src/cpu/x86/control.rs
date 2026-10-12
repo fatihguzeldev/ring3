@@ -9,6 +9,7 @@ pub enum ControlOperation {
         word: bool,
     },
     InvalidOpcode,
+    GeneralProtectionZero,
     Breakpoint,
     Overflow,
     Bound {

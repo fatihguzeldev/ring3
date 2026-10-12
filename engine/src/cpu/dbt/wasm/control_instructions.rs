@@ -26,6 +26,10 @@ pub(super) fn instruction(
             exit(code, 20, exit_depth);
             return;
         }
+        ControlOperation::GeneralProtectionZero => {
+            exit(code, 11, exit_depth);
+            return;
+        }
         ControlOperation::Breakpoint => {
             retire(code, instruction.next_pc().0);
             exit(code, 17, exit_depth);
@@ -145,9 +149,9 @@ fn retire(code: &mut InstructionSink<'_>, next_pc: u32) {
 }
 
 fn exit(code: &mut InstructionSink<'_>, reason: i32, exit_depth: u32) {
-    code.i32_const(reason)
-        .local_set(REASON)
-        .i32_const(0)
-        .local_set(DETAIL)
-        .br(exit_depth);
+    code.i32_const(reason).local_set(REASON);
+    for local in [DETAIL, FAULT_ADDRESS, FAULT_ACCESS, FAULT_LENGTH] {
+        code.i32_const(0).local_set(local);
+    }
+    code.br(exit_depth);
 }

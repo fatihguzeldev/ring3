@@ -3,6 +3,7 @@ mod bit_manipulation;
 mod cache_timestamp;
 mod control;
 mod decoder;
+mod execution_faults;
 mod flow;
 mod integer;
 mod lower;
@@ -16,4 +17,5 @@ mod stack;
 mod strings;
 mod x87;
 
+pub(crate) use decoder::decode_for_execution;
 pub use decoder::{DecodeError, DecodedInstruction, decode_one};

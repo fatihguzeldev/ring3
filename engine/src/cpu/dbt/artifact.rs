@@ -2,7 +2,7 @@ use super::{
     BlockSpec, CompileError, CompileLimits, GateSpec, PreparedRegion, prepare_region, wasm,
 };
 use super::{
-    cold::{prepare_embedded_entry_region, prepare_entry_region},
+    cold::{prepare_embedded_entry_region, prepare_entry_region, prepare_runtime_entry},
     region::prepare_embedded_region,
 };
 use crate::{
@@ -41,7 +41,7 @@ impl CompiledRegion {
         })
     }
 
-    pub(super) fn contains_executable(&self, pc: u32) -> bool {
+    pub(crate) fn contains_executable(&self, pc: u32) -> bool {
         self.executable_addresses().any(|entry| entry.0 == pc)
     }
 
@@ -116,6 +116,21 @@ pub(crate) fn compile_embedded_entry_region(
     gates: &[GateSpec],
 ) -> Result<CompiledRegion, CompileError> {
     let prepared = prepare_embedded_entry_region(memory, entries, limits, gates)?;
+    emit_prepared(
+        prepared,
+        limits,
+        Some(wasm::EmbeddedBinding::Replacement { key, generation }),
+    )
+}
+
+pub(crate) fn compile_runtime_entry(
+    memory: &AddressSpace,
+    entry: GuestAddress,
+    limits: CompileLimits,
+    key: u64,
+    generation: u32,
+) -> Result<CompiledRegion, CompileError> {
+    let prepared = prepare_runtime_entry(memory, entry, limits)?;
     emit_prepared(
         prepared,
         limits,

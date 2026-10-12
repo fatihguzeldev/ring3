@@ -88,3 +88,102 @@ fn terminal_snapshot_omits_unfetched_successor_page_and_still_guards_consumed_by
         Err(ArtifactError::CodeInvalidated)
     );
 }
+
+#[test]
+fn runtime_entry_fault_preparation_keeps_strict_public_refusals_and_terminal_bounds() {
+    use crate::cpu::x86::{ControlOperation, decode::DecodeError, ir::Operation};
+    for (bytes, operation) in [
+        (&[0xf0, 0x90][..], ControlOperation::InvalidOpcode),
+        (&[0xf0, 0xf4][..], ControlOperation::InvalidOpcode),
+        (&[0xf4][..], ControlOperation::GeneralProtectionZero),
+        (&[0x2e; 15][..], ControlOperation::GeneralProtectionZero),
+    ] {
+        let entry = GuestAddress(0x2000 - bytes.len() as u32);
+        let mut memory = AddressSpace::new(1).unwrap();
+        memory
+            .map_zeroed(
+                PageRange::new(GuestAddress(0x1000), 1).unwrap(),
+                Permissions::ALL,
+            )
+            .unwrap();
+        memory.write(entry, bytes).unwrap();
+        let limits = CompileLimits::default();
+        let strict = prepare_embedded_entry_region(&memory, &[entry], limits, &[]).unwrap_err();
+        assert!(matches!(
+            strict,
+            CompileError::Instruction {
+                cause: InstructionError::Decode(
+                    DecodeError::InvalidEncoding | DecodeError::Unsupported(_)
+                ),
+                ..
+            }
+        ));
+        let prepared = prepare_runtime_entry(&memory, entry, limits).unwrap();
+        assert_eq!(
+            (prepared.block_count(), prepared.instruction_count()),
+            (1, 1)
+        );
+        let instruction = &prepared.blocks[0].instructions[0];
+        assert_eq!(*instruction.operation(), Operation::Control(operation));
+        assert_eq!(usize::from(instruction.length()), bytes.len());
+        assert!(prepared.is_current(&memory));
+        let artifact =
+            super::super::artifact::compile_runtime_entry(&memory, entry, limits, 91, 7).unwrap();
+        assert!(artifact.contains_executable(entry.0));
+        assert!(artifact.wasm_bytes(&memory).is_ok());
+        memory.write(entry, &[0x90]).unwrap();
+        assert_eq!(
+            artifact.wasm_bytes(&memory),
+            Err(ArtifactError::CodeInvalidated)
+        );
+    }
+}
+
+#[test]
+fn runtime_entry_keeps_limits_fetch_and_valid_unsupported_errors_as_preparation_errors() {
+    let mut memory = AddressSpace::new(1).unwrap();
+    memory
+        .map_zeroed(
+            PageRange::new(GuestAddress(0x1000), 1).unwrap(),
+            Permissions::ALL,
+        )
+        .unwrap();
+    memory.write(GuestAddress(0x1000), &[0xcd, 0x80]).unwrap();
+    let limits = CompileLimits::default();
+    assert_eq!(
+        prepare_runtime_entry(&memory, GuestAddress(0x1000), limits).unwrap_err(),
+        prepare_embedded_entry_region(&memory, &[GuestAddress(0x1000)], limits, &[]).unwrap_err()
+    );
+    memory.write(GuestAddress(0x1fff), &[0x0f]).unwrap();
+    assert_eq!(
+        prepare_runtime_entry(&memory, GuestAddress(0x1fff), limits).unwrap_err(),
+        prepare_embedded_entry_region(&memory, &[GuestAddress(0x1fff)], limits, &[]).unwrap_err()
+    );
+    assert_eq!(
+        prepare_runtime_entry(
+            &memory,
+            GuestAddress(0x1000),
+            CompileLimits {
+                instructions: 0,
+                ..limits
+            }
+        )
+        .unwrap_err(),
+        CompileError::InvalidLimits
+    );
+    memory
+        .write(GuestAddress(0x1000), &[0x90, 0xf0, 0x90])
+        .unwrap();
+    assert_eq!(
+        prepare_runtime_entry(
+            &memory,
+            GuestAddress(0x1000),
+            CompileLimits {
+                instructions: 1,
+                ..limits
+            }
+        )
+        .unwrap_err(),
+        CompileError::InstructionLimit
+    );
+}

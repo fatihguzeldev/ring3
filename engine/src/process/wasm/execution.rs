@@ -16,6 +16,11 @@ pub(crate) fn compile_entries(count: u32, gate_count: u32) -> u32 {
     mutate(|instance| instance.compile_entries(count, gate_count).map(|_| ()))
 }
 
+pub(crate) fn compile_stopped_entry(key_low: u32, key_high: u32, generation: u32) -> u32 {
+    let key = u64::from(key_low) | (u64::from(key_high) << 32);
+    mutate(|instance| instance.compile_stopped_entry(key, generation).map(|_| ()))
+}
+
 pub(crate) fn compile_resident(count: u32) -> u32 {
     compile_resident_with_gates(count, 0)
 }

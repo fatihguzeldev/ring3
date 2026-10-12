@@ -333,6 +333,7 @@ pub(super) fn terminates(instruction: &DecodedInstruction, embedded: bool) -> bo
         instruction.operation(),
         Operation::Control(
             crate::cpu::x86::ControlOperation::InvalidOpcode
+                | crate::cpu::x86::ControlOperation::GeneralProtectionZero
                 | crate::cpu::x86::ControlOperation::Breakpoint
         )
     ) {
