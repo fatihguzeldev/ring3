@@ -1,3 +1,4 @@
+import {assertEngineExports} from '../../../../../../../support/wasm/exports.mjs';
 import {createArena} from '../../../../../../../support/wasm/arena.mjs';
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
@@ -9,8 +10,7 @@ assert.ok(root, 'expected engine wasm, output directory and repository root');
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
 const engineBytes = readFileSync(enginePath), engineModule = new WebAssembly.Module(engineBytes);
 assert.deepEqual(WebAssembly.Module.imports(engineModule), []);
-assert.equal(WebAssembly.Module.exports(engineModule).length, 72);
-assert.equal(WebAssembly.Module.exports(engineModule).filter(row => row.kind === 'function').length, 71);
+const {sourcePaths: engineExportPins} = assertEngineExports(engineModule, root);
 const SIZE = 4612, TRANSFER = 140, PC = 0x1000;
 const VECTORS = [
   [0x12345678, 0x23457f80, 0x34560f10, 0x4567ff00, 0x56789abc, 0x6789abcd, 0x789abcde, 0x89abcdef],
@@ -33,8 +33,9 @@ const BATCHES = MODRM.map((modrms, index) => {
 });
 assert.equal(new Set(VECTORS.flat()).size, 16); assert.ok(VECTORS.every(vector => new Set(vector).size === 8));
 function engineSources(directory) {return readdirSync(join(root, directory), {withFileTypes: true}).flatMap(row => row.isDirectory() ? engineSources(`${directory}/${row.name}`) : [`${directory}/${row.name}`]);}
-const sourcePaths = ['Cargo.toml', 'Cargo.lock', 'engine/Cargo.toml', 'rust-toolchain.toml', ...engineSources('engine/src').sort(), 'engine/tests/cpu/atomic/exchange/register/wasm/dword.rs', 'engine/tests/cpu/atomic/wasm.rs', 'engine/tests/support/wasm.rs', 'engine/tests/cpu/atomic/wasm.rs', 'engine/tests/support/wasm.rs', 'engine/tests/cpu/atomic/exchange/register/fixtures/p2-xchg32/runtime/run.mjs'];
-assert.equal(sourcePaths.length, 90); assert.equal(new Set(sourcePaths).size, 90);
+const sourcePaths = ['Cargo.toml', 'Cargo.lock', 'engine/Cargo.toml', 'rust-toolchain.toml', ...engineSources('engine/src').sort(), 'engine/tests/cpu/atomic/exchange/register/wasm/dword.rs', 'engine/tests/cpu/atomic/wasm.rs', 'engine/tests/support/wasm.rs', 'engine/tests/cpu/atomic/exchange/register/fixtures/p2-xchg32/runtime/run.mjs'];
+sourcePaths.push(...engineExportPins.filter(path => !sourcePaths.includes(path)));
+assert.equal(sourcePaths.length, engineSources('engine/src').sort().length + 9); assert.equal(new Set(sourcePaths).size, sourcePaths.length);
 const sourceHashes = Object.fromEntries(sourcePaths.map(path => [path, hash(readFileSync(join(root, path)))]));
 const contexts = [], modules = [], generatedRuns = [], cases = [], nops = [], continuations = [], controls = [], arenas = [], pages = [], rawFiles = [];
 function original(path, bytes) {const row = {path, length: bytes.length, sha256: hash(bytes)}; assert.ok(!rawFiles.some(old => old.path === path)); rawFiles.push(row); return row;}
@@ -77,7 +78,7 @@ function childShape(ctx, bytes, binding) {
     else if (section === 2) for (let count = unsigned(); count > 0; count--) {const module = name(), field = name(), kind = bytes[at++]; if (kind === 0) imports.push({module, name: field, kind: 'function', type: unsigned()}); else {assert.equal(kind, 2); assert.equal(unsigned(), 0); assert.equal(unsigned(), 1); imports.push({module, name: field, kind: 'memory'});}}
     else if (section === 3) for (let count = unsigned(); count > 0; count--) functions.push(unsigned());
     else if (section === 7) for (let count = unsigned(); count > 0; count--) exports.push({name: name(), kind: bytes[at++], index: unsigned()});
-    else if (section === 10) {assert.equal(unsigned(), 1); const bodyLength = unsigned(); assert.equal(at + bodyLength, end); locals = Array.from({length: unsigned()}, () => [unsigned(), bytes[at++]]); assert.deepEqual(locals, [[16, 0x7f], [1, 0x7e]]); if (ctx.owner !== 'standalone') {const constants = [ctx.low, ctx.high, ...(ctx.owner === 'replacement' ? [binding.generation] : [binding.low, binding.high])]; for (const value of constants) {assert.equal(bytes[at++], 0x41); assert.equal(signed(), value);} for (const index of [0, 1, 3]) {assert.equal(bytes[at++], 0x20); assert.equal(unsigned(), index);} assert.equal(bytes[at++], 0x10); assert.equal(unsigned(), 0); assert.deepEqual([...bytes.subarray(at, at + 8)], [0x22, 16, 4, 0x40, 0x20, 16, 0x0f, 0x0b]); guardPrefix = {constants, parameters: [0, 1, 3]};} at = end;}
+    else if (section === 10) {assert.equal(unsigned(), 1); const bodyLength = unsigned(); assert.equal(at + bodyLength, end); locals = Array.from({length: unsigned()}, () => [unsigned(), bytes[at++]]); assert.deepEqual(locals, [[16, 0x7f], [1, 0x7e], [10, 0x7f]]); if (ctx.owner !== 'standalone') {const constants = [ctx.low, ctx.high, ...(ctx.owner === 'replacement' ? [binding.generation] : [binding.low, binding.high])]; for (const value of constants) {assert.equal(bytes[at++], 0x41); assert.equal(signed(), value);} for (const index of [0, 1, 3]) {assert.equal(bytes[at++], 0x20); assert.equal(unsigned(), index);} assert.equal(bytes[at++], 0x10); assert.equal(unsigned(), 0); assert.deepEqual([...bytes.subarray(at, at + 8)], [0x22, 16, 4, 0x40, 0x20, 16, 0x0f, 0x0b]); guardPrefix = {constants, parameters: [0, 1, 3]};} at = end;}
     else assert.fail(`unexpected child section${section}`); assert.equal(at, end);
   }
   const names = ctx.owner === 'standalone' ? [] : [ctx.owner === 'replacement' ? 'guard' : 'guard_resident'];
