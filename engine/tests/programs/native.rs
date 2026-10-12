@@ -33,5 +33,5 @@ mod pe32_compiled_records;
 #[path = "records/native/mutable.rs"]
 mod pe32_mutable_records;
 
-#[path = "native/sort.rs"]
+#[path = "sort/native.rs"]
 mod pe32_sort;

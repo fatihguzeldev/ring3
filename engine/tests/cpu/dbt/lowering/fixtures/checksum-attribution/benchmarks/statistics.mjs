@@ -173,7 +173,7 @@ export function readCampaign(directory) {
   for (const name of ['checks/plan.mjs', 'runtime/run.mjs', 'checks/check.mjs', 'benchmarks/statistics.mjs', 'measure.py']) {
     assert.ok(paths.includes(`engine/tests/cpu/dbt/lowering/fixtures/checksum-attribution/${name}`), 'missing fixture source pin');
   }
-  for (const dependency of ['engine/tests/process/resident/fixtures/resident-phases/checks/plan.mjs', 'engine/tests/process/resident/fixtures/resident-phases/measure.py', 'engine/tests/programs/fixtures/p2-pe32-sort/runtime/oracle.mjs']) {
+  for (const dependency of ['engine/tests/process/resident/fixtures/resident-phases/checks/plan.mjs', 'engine/tests/process/resident/fixtures/resident-phases/measure.py', 'engine/tests/programs/sort/fixtures/p2-pe32-sort/runtime/oracle.mjs']) {
     assert.ok(paths.includes(dependency), 'missing shared dependency pin');
   }
   const expectedPins = paths.map(path => {

@@ -15,7 +15,7 @@ use ring3_engine::{
 const CODE: u32 = 0x2000;
 const KEY: u64 = 0x5245_5455_524e_4341;
 const ORIGINAL: &[u8; 71] = include_bytes!(
-    "../../../../../../../programs/fixtures/p2-returned-atomic-flags32/kernel.text.bin"
+    "../../../../../../../programs/atomic/flags/fixtures/p2-returned-atomic-flags32/kernel.text.bin"
 );
 const STARTS: [u32; 33] = [
     0, 1, 2, 3, 7, 11, 15, 19, 21, 23, 25, 29, 31, 33, 35, 37, 39, 43, 45, 47, 49, 51, 53, 57, 59,

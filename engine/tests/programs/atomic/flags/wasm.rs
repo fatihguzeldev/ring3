@@ -41,7 +41,7 @@ fn actual_returned_atomic_flags_cross_cold_units_without_reseeding() {
     fs::write(output.join("initial-arena.bin"), initial).unwrap();
     let result = wasm_support::run_node(
         root,
-        "engine/tests/programs/fixtures/p2-returned-atomic-flags32/runtime/run.mjs",
+        "engine/tests/programs/atomic/flags/fixtures/p2-returned-atomic-flags32/runtime/run.mjs",
         &engine,
         &output,
         None,

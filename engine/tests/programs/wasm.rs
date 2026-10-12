@@ -27,7 +27,7 @@ mod compiled_switch_wasm;
 #[path = "dispatch/wasm/bitmap.rs"]
 mod cpu_bitmap_dispatch32_wasm;
 
-#[path = "wasm/returned_atomic_flags.rs"]
+#[path = "atomic/flags/wasm.rs"]
 mod cpu_returned_atomic_flags32_wasm;
 
 #[path = "numeric/wasm/compiled.rs"]
@@ -39,5 +39,5 @@ mod pe32_compiled_records_wasm;
 #[path = "records/wasm/mutable.rs"]
 mod pe32_mutable_records_wasm;
 
-#[path = "wasm/sort.rs"]
+#[path = "sort/wasm.rs"]
 mod pe32_sort_wasm;

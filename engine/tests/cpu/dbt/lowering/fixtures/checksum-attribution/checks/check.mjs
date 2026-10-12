@@ -463,7 +463,7 @@ function sourcePins(result, campaign) {
     assert(expected.some(row => row.path === `engine/tests/cpu/dbt/lowering/fixtures/checksum-attribution/${name}`), 'complete fixture source authority');
   }
   for (const path of ['Cargo.toml', 'Cargo.lock', 'engine/Cargo.toml', 'engine/tests/support/loader/pe32_sort.rs',
-    'engine/tests/programs/fixtures/p2-pe32-sort/runtime/oracle.mjs', ...['checks/plan.mjs', 'runtime/run.mjs', 'checks/check.mjs', 'benchmarks/statistics.mjs', 'measure.py'].map(name => `engine/tests/process/resident/fixtures/resident-phases/${name}`)]) {
+    'engine/tests/programs/sort/fixtures/p2-pe32-sort/runtime/oracle.mjs', ...['checks/plan.mjs', 'runtime/run.mjs', 'checks/check.mjs', 'benchmarks/statistics.mjs', 'measure.py'].map(name => `engine/tests/process/resident/fixtures/resident-phases/${name}`)]) {
     assert(expected.some(row => row.path === path), 'product/build/dependency source authority');
   }
 }
@@ -722,7 +722,7 @@ function provenance(campaign) {
   const previous = JSON.parse(previousBytes); assert.equal(previous.status, 'complete'); assert.equal(previous.build.exit_code, 0);
   assert.deepEqual(previous.engine, campaign.engine, 'unchanged prior release');
   const added = ['checks/plan.mjs', 'runtime/run.mjs', 'checks/check.mjs', 'benchmarks/statistics.mjs', 'measure.py'].map(name => `engine/tests/cpu/dbt/lowering/fixtures/checksum-attribution/${name}`)
-    .concat(['engine/tests/programs/fixtures/p2-pe32-sort/runtime/oracle.mjs', 'engine/tests/support/loader/pe32_sort.rs']);
+    .concat(['engine/tests/programs/sort/fixtures/p2-pe32-sort/runtime/oracle.mjs', 'engine/tests/support/loader/pe32_sort.rs']);
   assert.equal(Object.keys(previous.source_pins).length, 91);
   assert.deepEqual(Object.keys(campaign.source_pins).sort(), [...Object.keys(previous.source_pins), ...added].sort(), 'exact prior91 plus seven task/provenance sources');
   for (const [path, pin] of Object.entries(previous.source_pins)) assert.deepEqual(campaign.source_pins[path], pin, `unchanged prior source ${path}`);

@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
 import {readFileSync,writeFileSync} from 'node:fs';
 import {join} from 'node:path';
-import {readEngine} from '../../../../support/wasm/engine.mjs';
+import {readEngine} from '../../../../../../support/wasm/engine.mjs';
 
 const [enginePath,output,root]=process.argv.slice(2),SIZE=4612,DATA=0x5010;
 assert.ok(enginePath&&output&&root);
@@ -14,8 +14,8 @@ const sourcePaths=['engine/src/cpu/x86/decode/profile.rs','engine/src/cpu/x86/de
   'engine/src/cpu/dbt/wasm/memory.rs','engine/src/cpu/dbt/wasm/memory/exchange.rs','engine/src/cpu/dbt/wasm/locals.rs',
   'engine/src/memory/space.rs','engine/src/process/instance.rs', 'engine/src/process/execution/compiled.rs', 'engine/src/process/execution/authority.rs', 'engine/src/process/memory/address_space.rs', 'engine/src/process/memory/scalar.rs', 'engine/src/process/memory/scalar_tests.rs', 'engine/src/process/execution/mod.rs', 'engine/src/process/memory/mod.rs', 'engine/src/process/mod.rs','engine/src/process/wasm/mod.rs', 'engine/src/process/wasm/loading.rs', 'engine/src/process/wasm/execution.rs', 'engine/src/process/wasm/calls.rs', 'engine/src/process/wasm/memory.rs', 'engine/src/process/wasm/cpu.rs','engine/src/process/execution/resident.rs',
   'engine/src/abi/memory_helper.rs','engine/src/abi/arena.rs','engine/src/abi/wasm/exports/calls.rs', 'engine/src/abi/wasm/exports/cpu.rs', 'engine/src/abi/wasm/exports/execution.rs', 'engine/src/abi/wasm/exports/image.rs', 'engine/src/abi/wasm/exports/instance.rs', 'engine/src/abi/wasm/exports/memory.rs', 'engine/src/abi/wasm/exports/mod.rs',
-  'engine/tests/cpu/atomic/logical/flags/returned/compiler/native/dword.rs', 'engine/tests/cpu/atomic/native.rs','engine/tests/programs/wasm/returned_atomic_flags.rs', 'engine/tests/programs/wasm.rs', 'engine/tests/support/wasm.rs',
-  ...['kernel.c','build.py','PROVENANCE.md','kernel.obj','kernel.text.bin','kernel.disasm.txt','receipt.json','runtime/run.mjs'].map(p=>'engine/tests/programs/fixtures/p2-returned-atomic-flags32/'+p),
+  'engine/tests/cpu/atomic/logical/flags/returned/compiler/native/dword.rs', 'engine/tests/cpu/atomic/native.rs','engine/tests/programs/atomic/flags/wasm.rs', 'engine/tests/programs/wasm.rs', 'engine/tests/support/wasm.rs',
+  ...['kernel.c','build.py','PROVENANCE.md','kernel.obj','kernel.text.bin','kernel.disasm.txt','receipt.json','runtime/run.mjs'].map(p=>'engine/tests/programs/atomic/flags/fixtures/p2-returned-atomic-flags32/'+p),
   'engine/tests/programs/records/fixtures/p2-compiled-records/build.py','engine/tests/support/wasm/engine.mjs'];
 const sourceHashes=()=>Object.fromEntries(sourcePaths.map(p=>[p,hash(readFileSync(join(root,p)))]));
 const sourcesBefore=sourceHashes(),contexts=[],modules=[],observations=[],helperTrace=[],diagnostics=[],lifecycle=[];
@@ -29,7 +29,7 @@ const parents=()=>Array.from({length:8},(_,i)=>(0xa100+i)*65536+0x1234+i);
 const parity=value=>{let n=value&255,ones=0;while(n){ones+=n&1;n>>>=1;}return ones%2===0?4:0;};
 function addFlags(a,b){const value=(a+b)>>>0;return 0x402|parity(value)|(value===0?0x40:0)|(value>=0x80000000?0x80:0)|(a+b>0xffffffff?1:0)|(((a^b^value)&16)?16:0)|((~(a^b)&(a^value)&0x80000000)?0x800:0);}
 assert.equal(addFlags(0x800500a0,0x80010010),0xc03);assert.equal(addFlags(0x00821020,0x810),0x406);assert.equal(addFlags(0x00821830,0x600b0),0x402);
-const kernel=readFileSync(join(root,'engine/tests/programs/fixtures/p2-returned-atomic-flags32/kernel.text.bin'));
+const kernel=readFileSync(join(root,'engine/tests/programs/atomic/flags/fixtures/p2-returned-atomic-flags32/kernel.text.bin'));
 assert.equal(kernel.toString('hex'),'5357568b4c241c8b7424188b7c24148b5424108b0289c309fbf00fb11a75f689c78b0289c321f3f00fb11a75f689c68b0289c331cbf00fb11a75f689f101f901c189c85e5f5bc3');
 assert.equal(kernel.length,71);assert.equal(hash(kernel),'f66eba0a42762e5d0453755753bd423fc2cfa992e5a890359e8b727266fe9b95');
 const leaders=[0,21,31,35,45,49,59],lengths=[21,10,4,10,4,10,12],instructionCounts=[8,4,2,4,2,4,8];

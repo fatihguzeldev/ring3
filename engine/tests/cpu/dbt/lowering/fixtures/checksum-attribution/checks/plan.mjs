@@ -3,7 +3,7 @@ import {mkdirSync, writeFileSync} from 'node:fs';
 import {resolve} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {initialHex} from '../../../../../../process/resident/fixtures/resident-phases/checks/plan.mjs';
-import {sorted} from '../../../../../../programs/fixtures/p2-pe32-sort/runtime/oracle.mjs';
+import {sorted} from '../../../../../../programs/sort/fixtures/p2-pe32-sort/runtime/oracle.mjs';
 
 export const SIZE = 4612;
 export const CODE = 0x1000;

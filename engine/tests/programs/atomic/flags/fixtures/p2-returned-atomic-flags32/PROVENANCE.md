@@ -11,7 +11,7 @@ Retained inputs/artifacts: [kernel.c](kernel.c), [kernel.disasm.txt](kernel.disa
 Reproduce from the repository root into a new output directory:
 
 ```sh
-python3 engine/tests/programs/fixtures/p2-returned-atomic-flags32/build.py target/p2-returned-atomic-flags32-rebuild-new
+python3 engine/tests/programs/atomic/flags/fixtures/p2-returned-atomic-flags32/build.py target/p2-returned-atomic-flags32-rebuild-new
 ```
 
 Routine tests consume retained bytes without invoking a compiler. Receipt working directories and historical paths identify the original build; compare artifact hashes when reproducing elsewhere.

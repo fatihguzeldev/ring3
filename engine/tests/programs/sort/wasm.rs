@@ -33,7 +33,7 @@ fn actual_resident_pe_sorts_and_checksums_without_host_cpu_reseed() {
         fs::write(output.join("sort.exe"), &fixture.image).unwrap();
         fs::write(output.join("manifest.json"), fixture.manifest_json()).unwrap();
         let result = Command::new("node")
-            .arg(root.join("engine/tests/programs/fixtures/p2-pe32-sort/runtime/run.mjs"))
+            .arg(root.join("engine/tests/programs/sort/fixtures/p2-pe32-sort/runtime/run.mjs"))
             .arg(&engine)
             .arg(&output)
             .arg(root)
