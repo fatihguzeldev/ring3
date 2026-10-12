@@ -150,8 +150,8 @@ function caseRun(c,block,row){
  }else if(row.cpuid!==undefined){
   s.r[0]=row.cpuid;next.r=[...s.r];for(const i of[0,1,2,3])next.r[i]=0;
   if(row.cpuid===0){next.r[0]=7;next.r[3]=0x676e6952;next.r[2]=0x676e4533;next.r[1]=0x20656e69;}
-  if(row.cpuid===1){next.r[0]=0x600;next.r[1]=0x00c00201;next.r[2]=0x07808111;}
-  if(row.cpuid===0x80000001){next.r[1]=0x20;}
+  if(row.cpuid===1){next.r[0]=0x600;next.r[1]=0x00d80201;next.r[2]=0x07888111;next.r[3]=0x800;}
+  if(row.cpuid===0x80000001){next.r[1]=0x20;next.r[2]=0x08000000;}
   execute(c,row.name,s,{next});
  }else if(row.timestamp){
   execute(c,'RDTSC budget-zero has no event',s,{next:s,width:0,helperCount:0,retired:0,budget:0});
