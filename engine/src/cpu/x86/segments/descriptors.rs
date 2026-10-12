@@ -209,10 +209,9 @@ impl SegmentDescriptorTable {
             .entries
             .iter_mut()
             .find(|entry| entry.selector == selector & !3)
+            && let Some(record) = entry.record.with_accessed()
         {
-            if let Some(record) = entry.record.with_accessed() {
-                entry.record = record;
-            }
+            entry.record = record;
         }
     }
 
