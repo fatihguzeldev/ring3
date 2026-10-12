@@ -55,5 +55,5 @@ impl EngineInstance {
 }
 
 #[cfg(test)]
-#[path = "stopped_tests.rs"]
+#[path = "stopped/tests.rs"]
 mod tests;

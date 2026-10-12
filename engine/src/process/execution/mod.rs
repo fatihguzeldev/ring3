@@ -7,4 +7,5 @@ pub(super) mod resident;
 mod stopped;
 
 #[cfg(test)]
+#[path = "installation/disposal/tests.rs"]
 mod installed_resident_disposal_tests;
