@@ -92,5 +92,5 @@ impl EngineInstance {
 }
 
 #[cfg(test)]
-#[path = "startup_tests.rs"]
+#[path = "startup/tests.rs"]
 mod startup_tests;

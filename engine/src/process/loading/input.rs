@@ -221,5 +221,5 @@ impl EngineInstance {
 }
 
 #[cfg(test)]
-#[path = "input_tests.rs"]
+#[path = "input/tests.rs"]
 mod tests;

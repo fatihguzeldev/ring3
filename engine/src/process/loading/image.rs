@@ -350,5 +350,5 @@ mod tests {
 }
 
 #[cfg(test)]
-#[path = "linked_v2_tests.rs"]
+#[path = "image/tests/linked.rs"]
 mod linked_v2_tests;
