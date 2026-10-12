@@ -54,9 +54,9 @@ const text = authoredText(readFileSync(objectPath));
 for (const file of ['program.o','program.disassembly.txt']) artifacts[file] = hash(readFileSync(join(outputDir,file)));
 writeFileSync(join(outputDir,'program.x86'),text); artifacts['program.x86'] = hash(text);
 writeFileSync(join(outputDir,'program.S'),source); writeFileSync(join(outputDir,'authored-oracle.json'),oracleBytes);
-writeFileSync(join(outputDir,'runtime/run.mjs'),readFileSync(import.meta.filename));
+writeFileSync(join(outputDir,'run.mjs'),readFileSync(import.meta.filename));
 const production = execFileSync('rg',['--files','engine/src'],{cwd:root,encoding:'utf8'}).trim().split('\n').sort();
-const sourcePaths = [...production,'Cargo.toml','engine/Cargo.toml','Cargo.lock','engine/tests/cpu/arithmetic/carry/register/wasm/dword.rs', 'engine/tests/cpu/arithmetic/wasm.rs', 'engine/tests/support/wasm.rs', 'engine/tests/cpu/arithmetic/wasm.rs', 'engine/tests/support/wasm.rs',
+const sourcePaths = [...production,'Cargo.toml','engine/Cargo.toml','Cargo.lock','engine/tests/cpu/arithmetic/carry/register/wasm/dword.rs', 'engine/tests/cpu/arithmetic/wasm.rs', 'engine/tests/support/wasm.rs',
   'engine/tests/cpu/arithmetic/carry/register/fixtures/p2-carry/program.S','engine/tests/cpu/arithmetic/carry/register/fixtures/p2-carry/oracle.json','engine/tests/cpu/arithmetic/carry/register/fixtures/p2-carry/runtime/run.mjs'];
 const sources = Object.fromEntries(sourcePaths.map(file => [file,hash(readFileSync(join(root,file)))]));
 writeFileSync(join(outputDir,'source-sha256.json'),JSON.stringify(sources,null,2));
@@ -108,7 +108,7 @@ function fresh(owner,label,{data=true,cross=false,codeWritable=false}={}) {
   engine={owner,name:owner+'/'+label,api,key,low:Number(key&0xffffffffn),high:Number(key>>32n),memory:instance.exports.memory,started:false,units:[]};
   assert.ok(engine.memory instanceof WebAssembly.Memory);assert.equal(api.open(8,engine.low,engine.high),0);
   engine.base=api.arena_ptr()>>>0;refresh();assert.ok(engine.base>0&&engine.base+size<=engine.bytes.length);
-  engine.bytes.fill(0xa5,engine.base+100,engine.base+size);
+  engine.bytes.fill(0xa5,engine.base+100,engine.base+4236);
   map(0x1000,7);upload(0x1000,text);if(!codeWritable)protect(0x1000,5);
   if(data)map(0x5000,3);if(cross)map(0x6000,3);
   return engine;
