@@ -108,7 +108,7 @@ impl EngineInstance {
                 resident,
             );
         }
-        if updates_pointer(operation) {
+        if operation.is_computation() {
             state.instruction_pointer = pc;
             state.opcode = opcode as u16;
             state.code_selector = segments.selectors[SegmentRegister::Cs.index()];
@@ -185,22 +185,4 @@ impl EngineInstance {
             },
         }
     }
-}
-
-fn updates_pointer(operation: X87Operation) -> bool {
-    !matches!(
-        operation,
-        X87Operation::Initialize
-            | X87Operation::ClearExceptions
-            | X87Operation::Wait
-            | X87Operation::NoOperation
-            | X87Operation::LoadControl
-            | X87Operation::StoreControl
-            | X87Operation::StoreStatus
-            | X87Operation::StatusToAx
-            | X87Operation::LoadEnvironment { .. }
-            | X87Operation::StoreEnvironment { .. }
-            | X87Operation::Restore { .. }
-            | X87Operation::Save { .. }
-    )
 }

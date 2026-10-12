@@ -394,6 +394,24 @@ impl X87Operation {
         }
     }
 
+    pub(crate) const fn is_computation(self) -> bool {
+        !matches!(
+            self,
+            Self::Initialize
+                | Self::ClearExceptions
+                | Self::Wait
+                | Self::NoOperation
+                | Self::LoadControl
+                | Self::StoreControl
+                | Self::StoreStatus
+                | Self::StatusToAx
+                | Self::LoadEnvironment { .. }
+                | Self::StoreEnvironment { .. }
+                | Self::Restore { .. }
+                | Self::Save { .. }
+        )
+    }
+
     pub const fn ignores_pending_exception(self) -> bool {
         matches!(
             self,
@@ -462,21 +480,7 @@ impl X87State {
             outcome.unmasked_exception = true;
             return Ok(outcome);
         }
-        let computation = !matches!(
-            operation,
-            X87Operation::Initialize
-                | X87Operation::ClearExceptions
-                | X87Operation::Wait
-                | X87Operation::NoOperation
-                | X87Operation::LoadControl
-                | X87Operation::StoreControl
-                | X87Operation::StoreStatus
-                | X87Operation::StatusToAx
-                | X87Operation::LoadEnvironment { .. }
-                | X87Operation::StoreEnvironment { .. }
-                | X87Operation::Restore { .. }
-                | X87Operation::Save { .. }
-        );
+        let computation = operation.is_computation();
         if computation {
             outcome.state.status &= !0x3f;
         }
