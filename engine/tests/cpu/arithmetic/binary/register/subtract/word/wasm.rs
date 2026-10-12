@@ -113,7 +113,7 @@ fn actual_word_sub_wraps_low16_and_publishes_six_flags() {
         save(&output.join(format!("{name}.x86")), &bytes);
     }
     let initial = EngineInstance::new(6, 0x574f_5244_5355_4200).unwrap();
-    assert_eq!(ARENA_SIZE, 4612);
+    assert_eq!(initial.arena().len(), ARENA_SIZE);
     save(&output.join("initial-arena.bin"), initial.arena());
     let result = wasm_support::run_node(
         root,

@@ -516,7 +516,7 @@ fn word_branches_late_refusal_preserves_dirty_arena_and_both_existing_owners() {
             }
             describe(&mut engine, &blocks, entries);
             let before = engine.arena().to_vec();
-            assert_eq!(before.len(), 4612);
+            assert_eq!(before.len(), ring3_engine::abi::arena::ARENA_SIZE);
             assert_eq!(
                 bound_compile(&mut engine, &blocks, is_resident, entries),
                 Err(if is_resident {

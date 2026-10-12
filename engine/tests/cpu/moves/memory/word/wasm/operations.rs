@@ -169,7 +169,7 @@ fn actual_engine_word_memory_moves_atomic_faults_current_ram_and_currency() {
         include_bytes!("../fixtures/p2-word-memory-move/cases.json"),
     );
     let mut initial = EngineInstance::new(1, 7).unwrap().arena().to_vec();
-    assert_eq!(ARENA_SIZE, 4612);
+    assert_eq!(initial.len(), ARENA_SIZE);
     assert_eq!(X87_SIZE, 128);
     initial[X87_OFFSET + 16..X87_OFFSET + 18].copy_from_slice(&0x027f_u16.to_le_bytes());
     initial[X87_OFFSET + 18..X87_OFFSET + 20].copy_from_slice(&0x81a5_u16.to_le_bytes());

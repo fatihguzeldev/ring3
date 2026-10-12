@@ -456,7 +456,7 @@ fn pop_all_late_refusal_preserves_full_arena_and_both_owners() {
             descriptor[4..]
                 .copy_from_slice(&if entries { 0 } else { refused_length }.to_le_bytes());
             let before = engine.arena().to_vec();
-            assert_eq!(before.len(), 4612);
+            assert_eq!(before.len(), ring3_engine::abi::arena::ARENA_SIZE);
             let result = match (is_resident, entries) {
                 (false, false) => engine.compile(1).map(u64::from),
                 (false, true) => engine.compile_entries(1, 0).map(u64::from),

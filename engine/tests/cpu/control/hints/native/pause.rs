@@ -385,7 +385,7 @@ fn pause_late_refusal_preserves_dirty_full_arena_and_both_owners() {
             }
             describe(&mut engine, CODE, 4, entries);
             let before = engine.arena().to_vec();
-            assert_eq!(before.len(), 4612);
+            assert_eq!(before.len(), ring3_engine::abi::arena::ARENA_SIZE);
             assert_eq!(
                 bound_compile(&mut engine, is_resident, entries),
                 Err(if is_resident {

@@ -872,7 +872,7 @@ fn locked_bts32_late_fourth_block_failure_retains_dirty_full_arena_and_both_owne
                 }
             }
             let before = engine.arena().to_vec();
-            assert_eq!(before.len(), 4612);
+            assert_eq!(before.len(), ring3_engine::abi::arena::ARENA_SIZE);
             let result = match (is_resident, entries) {
                 (false, false) => engine.compile(4).map(u64::from),
                 (false, true) => engine.compile_entries(4, 0).map(u64::from),

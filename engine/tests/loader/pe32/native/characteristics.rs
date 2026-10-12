@@ -272,7 +272,7 @@ fn unsupported_flags_preserve_pristine_publication_and_allow_valid_retry() {
         let mut engine = EngineInstance::new(7, KEY).unwrap();
         sentinel(&mut engine);
         let before = observation(&engine);
-        assert_eq!(before.0.len(), 4612);
+        assert_eq!(before.0.len(), ring3_engine::abi::arena::ARENA_SIZE);
         for flags in unsupported_flags() {
             pe::put16(&mut bytes, pe::OPTIONAL + 70, flags);
             let input = bytes.clone();

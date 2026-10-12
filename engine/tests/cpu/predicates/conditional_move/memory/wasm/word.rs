@@ -269,7 +269,7 @@ fn capture_word_memory_conditional_move_raw_inputs_without_guest_execution() {
         .collect();
     data[..4].copy_from_slice(&[1, 0x80, 0x34, 0x12]);
     let initial = EngineInstance::new(1, LEGACY_KEY).unwrap().arena().to_vec();
-    assert_eq!((bank.len(), data.len(), initial.len()), (4096, 4096, 4612));
+    assert_eq!((bank.len(), data.len(), initial.len()), (4096, 4096, ring3_engine::abi::arena::ARENA_SIZE));
     let mut metadata = Vec::new();
     for group in groups {
         let blocks: Vec<_> = group

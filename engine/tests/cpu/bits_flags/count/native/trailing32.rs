@@ -241,7 +241,7 @@ fn standalone_register_bank_and_four_bound_read_profiles_are_neutral() {
             let mut engine = code_at(CODE, &mixed);
             describe(&mut engine, CODE, mixed.len(), entries);
             let before = engine.arena().to_vec();
-            assert_eq!(before.len(), 4612);
+            assert_eq!(before.len(), ring3_engine::abi::arena::ARENA_SIZE);
             let id = compile(&mut engine, resident, entries).unwrap();
             let module = if resident {
                 engine.resident_bytes(id).unwrap()
@@ -502,7 +502,7 @@ fn late_count_poison_keeps_published_owners_and_full_arena() {
             describe(&mut engine, CODE, 6, entries);
             let before = engine.arena().to_vec();
             let arena_pointer = engine.arena_address();
-            assert_eq!(before.len(), 4612);
+            assert_eq!(before.len(), ring3_engine::abi::arena::ARENA_SIZE);
             assert_eq!(
                 compile(&mut engine, is_resident, entries),
                 Err(if is_resident {

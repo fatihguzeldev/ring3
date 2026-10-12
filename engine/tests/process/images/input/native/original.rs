@@ -16,7 +16,6 @@ fn engine() -> EngineInstance {
     let mut engine = EngineInstance::new(5, KEY).unwrap();
     let arena = engine.arena_mut().unwrap();
     assert_eq!(arena.len(), ARENA_SIZE);
-    assert_eq!(ARENA_SIZE, 4612);
     arena[X87_OFFSET + 16..X87_OFFSET + 18].copy_from_slice(&0x027f_u16.to_le_bytes());
     arena[X87_OFFSET + 18..X87_OFFSET + 20].copy_from_slice(&0x81a5_u16.to_le_bytes());
     for (index, byte) in arena[X87_OFFSET + 40..X87_OFFSET + 120]

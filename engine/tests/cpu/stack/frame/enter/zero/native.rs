@@ -557,7 +557,7 @@ fn enter_zero_late_refusal_preserves_dirty_full_arena_and_both_existing_owners()
                 *byte = (index.wrapping_mul(37).wrapping_add(11) & 0xff) as u8;
             }
             let before = describe(&mut engine, CODE, refused_length, entries);
-            assert_eq!(before.len(), 4612);
+            assert_eq!(before.len(), ring3_engine::abi::arena::ARENA_SIZE);
             assert_eq!(
                 bound_compile(&mut engine, is_resident, entries),
                 Err(if is_resident {

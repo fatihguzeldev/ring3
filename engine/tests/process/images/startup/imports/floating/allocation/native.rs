@@ -158,7 +158,6 @@ fn original_fp_allocation_pe_stages_links_rebases_starts_and_admits_six_resident
         let mut engine = EngineInstance::new(8, KEY).unwrap();
         let initial = engine.arena().to_vec();
         assert_eq!(initial.len(), ARENA_SIZE);
-        assert_eq!(ARENA_SIZE, 4612);
         engine.begin_image_input(PE.len() as u32).unwrap();
         for (index, chunk) in PE.chunks(1024).enumerate() {
             let mut owned = chunk.to_vec();

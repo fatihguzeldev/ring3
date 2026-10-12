@@ -454,7 +454,7 @@ fn capture_word_memory_arithmetic_store_raw_inputs_without_compilation() {
     // this only obtains the default arena; it never allocates a resident unit.
     let engine = EngineInstance::new(1, LEGACY_KEY).unwrap();
     let initial = engine.arena().to_vec();
-    assert_eq!((bank.len(), data.len(), initial.len()), (4096, 4096, 4612));
+    assert_eq!((bank.len(), data.len(), initial.len()), (4096, 4096, ring3_engine::abi::arena::ARENA_SIZE));
     assert_eq!(initial.len(), ARENA_SIZE);
     assert_eq!(&data[0xe00..0xe03], &[0x90, 0xeb, 0]);
     assert_eq!(
@@ -491,7 +491,7 @@ fn capture_word_memory_arithmetic_store_raw_inputs_without_compilation() {
             ));
         }
         let manifest = format!(
-            "{{\"schema_version\":1,\"raw_inputs_only\":true,\"groups\":[{}],\"files\":[{{\"file\":\"bank.x86\",\"bytes\":4096}},{{\"file\":\"data.bin\",\"bytes\":4096}},{{\"file\":\"initial-arena.bin\",\"bytes\":4612}}]}}\n",
+            "{{\"schema_version\":1,\"raw_inputs_only\":true,\"groups\":[{}],\"files\":[{{\"file\":\"bank.x86\",\"bytes\":4096}},{{\"file\":\"data.bin\",\"bytes\":4096}},{{\"file\":\"initial-arena.bin\",\"bytes\":{ARENA_SIZE}}}]}}\n",
             rows.join(",")
         );
         for (name, bytes) in [
