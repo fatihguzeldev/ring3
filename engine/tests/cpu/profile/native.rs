@@ -7,5 +7,5 @@ mod cpu_prefix_grammar;
 #[path = "environment/native/cache_timestamp.rs"]
 mod cpu_cache_timestamp;
 
-#[path = "environment/native/cpuid.rs"]
+#[path = "environment/cpuid/native.rs"]
 mod cpu_cpuid;

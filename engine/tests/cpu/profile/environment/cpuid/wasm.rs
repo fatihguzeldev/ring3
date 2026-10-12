@@ -23,7 +23,7 @@ fn actual_cpuid_profile_is_coherent_across_replacement_and_resident_entries() {
     fs::create_dir_all(&output).unwrap();
     let result = wasm_support::run_node(
         root,
-        "engine/tests/cpu/profile/environment/fixtures/p2-cpuid/runtime/run.mjs",
+        "engine/tests/cpu/profile/environment/cpuid/fixtures/p2-cpuid/runtime/run.mjs",
         &engine,
         &output,
         None,
