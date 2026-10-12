@@ -222,7 +222,7 @@ fn malformed_version_three_headers_keep_precise_field_errors() {
             reason: ExitReason::Gate { id: 1 },
         })
     );
-    for version in [0, 9, 255] {
+    for version in [0, 254, 255] {
         assert_eq!(
             decode_exit(&record(version, [8, 0, 1, 0, 0, 0])),
             Err(AbiError::Version)

@@ -185,7 +185,7 @@ fn malformed_version_two_headers_remain_checked() {
             reason: ExitReason::Budget,
         })
     );
-    for version in [0, 9, 255] {
+    for version in [0, 254, 255] {
         assert_eq!(
             decode_exit(&record(version, [1, 0, 0, 0, 0, 0])),
             Err(AbiError::Version)
