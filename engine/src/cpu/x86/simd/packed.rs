@@ -197,8 +197,26 @@ pub(super) fn shuffle(
     size: usize,
     width: usize,
     immediate: u8,
+    mask: [u8; 16],
 ) -> ([u8; 16], Option<u32>) {
     let mut out = a;
+    if let Some((from, sign_extend)) = kind.widening() {
+        let from = usize::from(from);
+        for lane in 0..size / width {
+            let value = unsigned(&b, lane * from, from);
+            put(
+                &mut out,
+                lane * width,
+                width,
+                if sign_extend {
+                    signed(value, from) as u64
+                } else {
+                    value
+                },
+            );
+        }
+        return (out, None);
+    }
     match kind {
         S::DuplicateEven | S::DuplicateOdd => {
             for lane in 0..size / width {
@@ -290,15 +308,37 @@ pub(super) fn shuffle(
                 out[..size - count].copy_from_slice(&a[count..size]);
             }
         }
-        S::InsertWord => {
-            let offset = usize::from(immediate) % (size / 2) * 2;
-            out[offset..offset + 2].copy_from_slice(&b[..2]);
+        S::InsertByte | S::InsertWord | S::InsertDword => {
+            let offset = usize::from(immediate) % (size / width) * width;
+            out[offset..offset + width].copy_from_slice(&b[..width]);
         }
-        S::ExtractWord => {
-            return (
-                out,
-                Some(unsigned(&b, usize::from(immediate) % (size / 2) * 2, 2) as u32),
-            );
+        S::InsertSingle => {
+            let source = usize::from(immediate >> 6) * 4;
+            let destination = usize::from(immediate >> 4 & 3) * 4;
+            out[destination..destination + 4].copy_from_slice(&b[source..source + 4]);
+            for lane in 0..4 {
+                if immediate & (1 << lane) != 0 {
+                    out[lane * 4..lane * 4 + 4].fill(0);
+                }
+            }
+        }
+        S::ExtractByte | S::ExtractWord | S::ExtractDword => {
+            let offset = usize::from(immediate) % (size / width) * width;
+            out[..width].copy_from_slice(&b[offset..offset + width]);
+            return (out, Some(unsigned(&b, offset, width) as u32));
+        }
+        S::BlendImmediate | S::BlendVariable => {
+            for lane in 0..size / width {
+                let select = if kind == S::BlendImmediate {
+                    immediate & (1 << lane) != 0
+                } else {
+                    mask[(lane + 1) * width - 1] & 0x80 != 0
+                };
+                if select {
+                    out[lane * width..(lane + 1) * width]
+                        .copy_from_slice(&b[lane * width..(lane + 1) * width]);
+                }
+            }
         }
         S::MaskBytes | S::MaskSingles | S::MaskDoubles => {
             let mut mask = 0;
@@ -307,6 +347,12 @@ pub(super) fn shuffle(
             }
             return (out, Some(mask));
         }
+        S::SignExtendBytes
+        | S::SignExtendWords
+        | S::SignExtendDwords
+        | S::ZeroExtendBytes
+        | S::ZeroExtendWords
+        | S::ZeroExtendDwords => unreachable!(),
         S::MoveLowToHigh => out[8..].copy_from_slice(&b[..8]),
         S::MoveHighToLow => out[..8].copy_from_slice(&b[8..]),
     }

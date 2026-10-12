@@ -105,6 +105,33 @@ pub enum ShuffleKind {
     AlignRight,
     DuplicateEven,
     DuplicateOdd,
+    SignExtendBytes,
+    SignExtendWords,
+    SignExtendDwords,
+    ZeroExtendBytes,
+    ZeroExtendWords,
+    ZeroExtendDwords,
+    BlendImmediate,
+    BlendVariable,
+    InsertByte,
+    InsertDword,
+    InsertSingle,
+    ExtractByte,
+    ExtractDword,
+}
+
+impl ShuffleKind {
+    pub(crate) fn widening(self) -> Option<(u8, bool)> {
+        match self {
+            Self::SignExtendBytes => Some((1, true)),
+            Self::SignExtendWords => Some((2, true)),
+            Self::SignExtendDwords => Some((4, true)),
+            Self::ZeroExtendBytes => Some((1, false)),
+            Self::ZeroExtendWords => Some((2, false)),
+            Self::ZeroExtendDwords => Some((4, false)),
+            _ => None,
+        }
+    }
 }
 
 #[repr(u8)]
@@ -389,6 +416,19 @@ pub fn decode_descriptor(
                 S::AlignRight,
                 S::DuplicateEven,
                 S::DuplicateOdd,
+                S::SignExtendBytes,
+                S::SignExtendWords,
+                S::SignExtendDwords,
+                S::ZeroExtendBytes,
+                S::ZeroExtendWords,
+                S::ZeroExtendDwords,
+                S::BlendImmediate,
+                S::BlendVariable,
+                S::InsertByte,
+                S::InsertDword,
+                S::InsertSingle,
+                S::ExtractByte,
+                S::ExtractDword,
             ]
             .get(sub)
             .ok_or(SimdError::InvalidDescriptor)?,
@@ -649,13 +689,21 @@ fn validate_operation(op: SimdOperation) -> Result<(), SimdError> {
             K::Move | K::MoveScalar => op.lane_bytes,
             K::MoveLow | K::MoveHigh => 8,
             K::Packed(_) => op.vector_bytes,
-            K::Shuffle(ShuffleKind::InsertWord) => 2,
+            K::Shuffle(kind) if kind.widening().is_some() => {
+                kind.widening().unwrap().0 * 16 / op.lane_bytes
+            }
+            K::Shuffle(
+                ShuffleKind::InsertByte
+                | ShuffleKind::InsertWord
+                | ShuffleKind::InsertDword
+                | ShuffleKind::InsertSingle
+                | ShuffleKind::ExtractByte
+                | ShuffleKind::ExtractWord
+                | ShuffleKind::ExtractDword,
+            ) => op.lane_bytes,
             K::Shuffle(ShuffleKind::DuplicateEven) if op.lane_bytes == 8 => 8,
             K::Shuffle(
-                ShuffleKind::ExtractWord
-                | ShuffleKind::MaskBytes
-                | ShuffleKind::MaskSingles
-                | ShuffleKind::MaskDoubles,
+                ShuffleKind::MaskBytes | ShuffleKind::MaskSingles | ShuffleKind::MaskDoubles,
             ) => return invalid(),
             K::Shuffle(_) => op.vector_bytes,
             K::Float(_) => {
@@ -694,7 +742,17 @@ fn validate_operation(op: SimdOperation) -> Result<(), SimdError> {
             return invalid();
         }
     }
-    if op.writes_memory() && !matches!(op.kind, K::Move | K::MoveScalar | K::MoveLow | K::MoveHigh)
+    if op.writes_memory()
+        && !matches!(
+            op.kind,
+            K::Move
+                | K::MoveScalar
+                | K::MoveLow
+                | K::MoveHigh
+                | K::Shuffle(
+                    ShuffleKind::ExtractByte | ShuffleKind::ExtractWord | ShuffleKind::ExtractDword
+                )
+        )
     {
         return invalid();
     }
@@ -840,19 +898,33 @@ fn validate_operation(op: SimdOperation) -> Result<(), SimdError> {
                     | ShuffleKind::InsertWord
                     | ShuffleKind::ExtractWord
                     | ShuffleKind::AlignRight
+                    | ShuffleKind::BlendImmediate
+                    | ShuffleKind::InsertByte
+                    | ShuffleKind::InsertDword
+                    | ShuffleKind::InsertSingle
+                    | ShuffleKind::ExtractByte
+                    | ShuffleKind::ExtractDword
             );
             if op.immediate.is_some() != immediate {
                 return invalid();
             }
             let operands = match kind {
-                ShuffleKind::ExtractWord | ShuffleKind::MaskBytes => {
+                ShuffleKind::ExtractWord => {
                     gpr(op.destination) && vector(op.source)
+                        || memory(op.destination) && xmm(op.source)
                 }
+                ShuffleKind::ExtractByte | ShuffleKind::ExtractDword => {
+                    (gpr(op.destination) || memory(op.destination)) && xmm(op.source)
+                }
+                ShuffleKind::MaskBytes => gpr(op.destination) && vector(op.source),
                 ShuffleKind::MaskSingles | ShuffleKind::MaskDoubles => {
                     gpr(op.destination) && xmm(op.source)
                 }
                 ShuffleKind::InsertWord => {
                     vector(op.destination) && (gpr(op.source) || memory(op.source))
+                }
+                ShuffleKind::InsertByte | ShuffleKind::InsertDword => {
+                    xmm(op.destination) && (gpr(op.source) || memory(op.source))
                 }
                 ShuffleKind::ShiftBytesLeft | ShuffleKind::ShiftBytesRight => {
                     xmm(op.destination) && op.source == O::None
@@ -862,6 +934,31 @@ fn validate_operation(op: SimdOperation) -> Result<(), SimdError> {
                 }
             };
             if !operands {
+                return invalid();
+            }
+            if let Some((from, _)) = kind.widening()
+                && (op.vector_bytes != 16 || op.lane_bytes <= from || op.lane_bytes > 8)
+            {
+                return invalid();
+            }
+            if matches!(
+                kind,
+                ShuffleKind::BlendImmediate | ShuffleKind::BlendVariable
+            ) && (op.vector_bytes != 16
+                || if kind == ShuffleKind::BlendImmediate {
+                    !matches!(op.lane_bytes, 2 | 4 | 8)
+                } else {
+                    !matches!(op.lane_bytes, 1 | 4 | 8)
+                })
+                || matches!(kind, ShuffleKind::InsertByte | ShuffleKind::ExtractByte)
+                    && (op.vector_bytes != 16 || op.lane_bytes != 1)
+                || matches!(
+                    kind,
+                    ShuffleKind::InsertDword
+                        | ShuffleKind::InsertSingle
+                        | ShuffleKind::ExtractDword
+                ) && (op.vector_bytes != 16 || op.lane_bytes != 4)
+            {
                 return invalid();
             }
             if matches!(kind, ShuffleKind::DuplicateEven | ShuffleKind::DuplicateOdd)
@@ -1130,8 +1227,14 @@ fn execute_validated(
         }
         K::Packed(kind) => packed::packed(kind, a, b, size, width, op.immediate),
         K::Shuffle(kind) => {
-            let (out, gpr) = packed::shuffle(kind, a, b, size, width, op.immediate.unwrap_or(0));
-            if let Some(gpr) = gpr {
+            let mut immediate = op.immediate.unwrap_or(0);
+            if kind == ShuffleKind::InsertSingle && op.reads_memory() {
+                immediate &= 0x3f;
+            }
+            let (out, gpr) = packed::shuffle(kind, a, b, size, width, immediate, state.xmm[0]);
+            if let Some(gpr) = gpr
+                && matches!(op.destination, SimdOperand::Register(SimdRegister::Gpr(_)))
+            {
                 result.gpr = gpr;
             }
             out

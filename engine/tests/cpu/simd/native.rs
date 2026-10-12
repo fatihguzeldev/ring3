@@ -15,3 +15,6 @@ mod simd_sse3;
 
 #[path = "cases/native/simd_sse4.rs"]
 mod simd_sse4;
+
+#[path = "cases/native/simd_sse4_moves.rs"]
+mod simd_sse4_moves;

@@ -75,6 +75,19 @@ pub(super) fn accepts(op: SimdOperation) -> bool {
                 | S::AlignRight
                 | S::DuplicateEven
                 | S::DuplicateOdd
+                | S::SignExtendBytes
+                | S::SignExtendWords
+                | S::SignExtendDwords
+                | S::ZeroExtendBytes
+                | S::ZeroExtendWords
+                | S::ZeroExtendDwords
+                | S::BlendImmediate
+                | S::BlendVariable
+                | S::InsertByte
+                | S::InsertDword
+                | S::InsertSingle
+                | S::ExtractByte
+                | S::ExtractDword
         ),
         _ => false,
     }
@@ -104,6 +117,16 @@ fn load(code: &mut InstructionSink<'_>, operand: SimdOperand, width: u8) {
         SimdOperand::Memory(_) => TRANSFER_OFFSET,
         _ => unreachable!("direct SIMD operands were decoded"),
     };
+    if matches!(width, 1 | 2) {
+        code.v128_const(0).local_get(STATE_PTR);
+        if width == 1 {
+            code.i32_load8_u(arg(offset));
+        } else {
+            code.i32_load16_u(arg(offset));
+        }
+        code.i32x4_replace_lane(0);
+        return;
+    }
     code.local_get(STATE_PTR);
     match width {
         4 => {
@@ -577,18 +600,107 @@ fn byte_shift(code: &mut InstructionSink<'_>, op: SimdOperation, kind: S) {
     code.v128_const(0).i8x16_shuffle(lanes);
 }
 
-fn insert_word(code: &mut InstructionSink<'_>, op: SimdOperation) {
+fn insert_element(code: &mut InstructionSink<'_>, op: SimdOperation) {
     load(code, op.destination, op.vector_bytes);
     match op.source {
         SimdOperand::Register(SimdRegister::Gpr(gpr)) => {
             code.local_get(register(gpr));
         }
         SimdOperand::Memory(_) => {
-            code.local_get(STATE_PTR).i32_load16_u(arg(TRANSFER_OFFSET));
+            code.local_get(STATE_PTR);
+            match op.lane_bytes {
+                1 => {
+                    code.i32_load8_u(arg(TRANSFER_OFFSET));
+                }
+                2 => {
+                    code.i32_load16_u(arg(TRANSFER_OFFSET));
+                }
+                4 => {
+                    code.i32_load(arg(TRANSFER_OFFSET));
+                }
+                _ => unreachable!("direct insertion width was decoded"),
+            }
         }
-        _ => unreachable!("direct word insertion operands were decoded"),
+        _ => unreachable!("direct insertion operands were decoded"),
     }
-    code.i16x8_replace_lane(op.immediate.unwrap() % (op.vector_bytes / 2));
+    let lane = op.immediate.unwrap() % (op.vector_bytes / op.lane_bytes);
+    match op.lane_bytes {
+        1 => {
+            code.i8x16_replace_lane(lane);
+        }
+        2 => {
+            code.i16x8_replace_lane(lane);
+        }
+        4 => {
+            code.i32x4_replace_lane(lane);
+        }
+        _ => unreachable!("direct insertion width was decoded"),
+    }
+}
+
+fn insert_single(code: &mut InstructionSink<'_>, op: SimdOperation) {
+    let immediate = op.immediate.unwrap();
+    load(code, op.destination, 16);
+    load(code, op.source, if op.reads_memory() { 4 } else { 16 });
+    code.i32x4_extract_lane(if op.reads_memory() { 0 } else { immediate >> 6 })
+        .i32x4_replace_lane(immediate >> 4 & 3);
+    let mask = std::array::from_fn(|byte| {
+        if immediate & (1 << (byte / 4)) != 0 {
+            0
+        } else {
+            0xff
+        }
+    });
+    code.v128_const(i128::from_le_bytes(mask)).v128_and();
+}
+
+fn widen(code: &mut InstructionSink<'_>, op: SimdOperation, kind: S) {
+    let (mut from, signed) = kind.widening().unwrap();
+    load(code, op.source, 16 / op.lane_bytes * from);
+    while from < op.lane_bytes {
+        match (from, signed) {
+            (1, true) => {
+                code.i16x8_extend_low_i8x16_s();
+            }
+            (1, false) => {
+                code.i16x8_extend_low_i8x16_u();
+            }
+            (2, true) => {
+                code.i32x4_extend_low_i16x8_s();
+            }
+            (2, false) => {
+                code.i32x4_extend_low_i16x8_u();
+            }
+            (4, true) => {
+                code.i64x2_extend_low_i32x4_s();
+            }
+            (4, false) => {
+                code.i64x2_extend_low_i32x4_u();
+            }
+            _ => unreachable!("direct widening source width was decoded"),
+        }
+        from *= 2;
+    }
+}
+
+fn blend_variable(code: &mut InstructionSink<'_>, op: SimdOperation) {
+    load(code, op.source, 16);
+    load(code, op.destination, 16);
+    load(code, SimdOperand::Register(SimdRegister::Xmm(0)), 16);
+    code.i32_const(i32::from(op.lane_bytes * 8 - 1));
+    match op.lane_bytes {
+        1 => {
+            code.i8x16_shr_s();
+        }
+        4 => {
+            code.i32x4_shr_s();
+        }
+        8 => {
+            code.i64x2_shr_s();
+        }
+        _ => unreachable!("direct variable blend width was decoded"),
+    }
+    code.v128_bitselect();
 }
 
 fn shuffle(code: &mut InstructionSink<'_>, op: SimdOperation, kind: S) {
@@ -616,6 +728,15 @@ fn shuffle(code: &mut InstructionSink<'_>, op: SimdOperation, kind: S) {
                 let source = (lane / 2 * 2 + usize::from(kind == S::DuplicateOdd)) * width;
                 for byte in 0..width {
                     lanes[lane * width + byte] = (source + byte) as u8;
+                }
+            }
+        }
+        S::BlendImmediate => {
+            for lane in 0..size / width {
+                for byte in 0..width {
+                    lanes[lane * width + byte] =
+                        (lane * width + byte + if immediate & (1 << lane) != 0 { 16 } else { 0 })
+                            as u8;
                 }
             }
         }
@@ -769,13 +890,21 @@ pub(super) fn instruction(
             load(code, op.source, op.vector_bytes);
             arithmetic(code, kind, op.lane_bytes);
         }
+        SimdKind::Shuffle(kind) if kind.widening().is_some() => widen(code, op, kind),
+        SimdKind::Shuffle(S::BlendVariable) => blend_variable(code, op),
+        SimdKind::Shuffle(S::InsertSingle) => insert_single(code, op),
         SimdKind::Shuffle(kind) if matches!(kind, S::PackSigned | S::PackUnsigned) => {
             saturating_pack(code, op, kind);
         }
         SimdKind::Shuffle(kind)
             if matches!(
                 kind,
-                S::MaskBytes | S::MaskSingles | S::MaskDoubles | S::ExtractWord
+                S::MaskBytes
+                    | S::MaskSingles
+                    | S::MaskDoubles
+                    | S::ExtractByte
+                    | S::ExtractWord
+                    | S::ExtractDword
             ) =>
         {
             load(code, op.source, op.vector_bytes);
@@ -789,8 +918,14 @@ pub(super) fn instruction(
                 S::MaskDoubles => {
                     code.i64x2_bitmask();
                 }
+                S::ExtractByte => {
+                    code.i8x16_extract_lane_u(op.immediate.unwrap() % 16);
+                }
                 S::ExtractWord => {
                     code.i16x8_extract_lane_u(op.immediate.unwrap() % (op.vector_bytes / 2));
+                }
+                S::ExtractDword => {
+                    code.i32x4_extract_lane(op.immediate.unwrap() % 4);
                 }
                 _ => unreachable!(),
             }
@@ -798,7 +933,9 @@ pub(super) fn instruction(
         SimdKind::Shuffle(kind) if matches!(kind, S::ShiftBytesLeft | S::ShiftBytesRight) => {
             byte_shift(code, op, kind);
         }
-        SimdKind::Shuffle(S::InsertWord) => insert_word(code, op),
+        SimdKind::Shuffle(S::InsertByte | S::InsertWord | S::InsertDword) => {
+            insert_element(code, op)
+        }
         SimdKind::Shuffle(kind) => shuffle(code, op, kind),
         _ => unreachable!(),
     }
@@ -821,6 +958,15 @@ pub(super) fn instruction(
         }
         SimdOperand::Memory(_) => {
             match (op.kind, op.lane_bytes) {
+                (SimdKind::Shuffle(S::ExtractByte), 1) => {
+                    code.i32_store8(arg(TRANSFER_OFFSET));
+                }
+                (SimdKind::Shuffle(S::ExtractWord), 2) => {
+                    code.i32_store16(arg(TRANSFER_OFFSET));
+                }
+                (SimdKind::Shuffle(S::ExtractDword), 4) => {
+                    code.i32_store(arg(TRANSFER_OFFSET));
+                }
                 (SimdKind::MoveScalar, 4) => {
                     code.v128_store32_lane(arg(TRANSFER_OFFSET), 0);
                 }
