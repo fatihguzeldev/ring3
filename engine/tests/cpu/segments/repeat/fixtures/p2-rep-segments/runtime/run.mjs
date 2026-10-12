@@ -13,7 +13,7 @@ const sourcePaths=['engine/src/cpu/x86/decode/strings.rs','engine/src/cpu/dbt/wa
  'engine/src/cpu/x86/ir.rs','engine/src/cpu/x86/decode/profile.rs','engine/src/cpu/x86/decode/lower.rs',
  'engine/src/cpu/x86/decode/operands.rs','engine/src/cpu/dbt/wasm/emitter.rs','engine/src/cpu/dbt/wasm/memory.rs',
  'engine/src/cpu/dbt/wasm/abi.rs','engine/src/cpu/dbt/wasm/dispatcher.rs','engine/src/abi/arena.rs',
- 'engine/tests/cpu/segments/repeat/wasm/overrides.rs', 'engine/tests/cpu/segments/wasm.rs', 'engine/tests/support/wasm.rs', 'engine/tests/cpu/segments/wasm.rs', 'engine/tests/support/wasm.rs','engine/tests/cpu/segments/repeat/fixtures/p2-rep-segments/runtime/run.mjs'];
+ 'engine/tests/cpu/segments/repeat/wasm/overrides.rs', 'engine/tests/cpu/segments/wasm.rs', 'engine/tests/support/wasm.rs', 'engine/tests/cpu/segments/repeat/fixtures/p2-rep-segments/runtime/run.mjs'];
 const pins=()=>Object.fromEntries(sourcePaths.map(p=>[p,hash(readFileSync(join(root,p)))])),beforePins=pins();
 function saveModule(c,bytes,label){const file=`module-${modules.length+1}.wasm`;writeFileSync(join(output,file),bytes);modules.push({context:c.id,owner:c.owner,entries:c.entries,label,file,bytes:bytes.length,sha256:hash(bytes),imports:WebAssembly.Module.imports(new WebAssembly.Module(bytes))});}
 function record(magic,size,fields,version=1){const b=Buffer.alloc(size);b.write(magic);b.writeUInt16LE(version,4);b.writeUInt16LE(1,6);b.writeUInt32LE(size,8);fields.forEach((v,i)=>b.writeUInt32LE(v>>>0,16+i*4));return b;}
@@ -141,7 +141,9 @@ for(const segment of [4,5]){
  host(c,'map',[0x7000,1,3]);run(c,1,moved(s,{count:0,source:0x5012,destination:0x7001,pc:0x1003}),{retired:1,label:'MOVSW cross-page repair'});assert.equal(get(c,0x6fff,2),0xabcd);host(c,'close');
 }
 {
- const c=open('replacement',[0xf3,0xad]);const s=seed(c,{count:1,source:0xffffffff});
+ const c=open('replacement',[0x64,0xf3,0xad]);
+ const a=arena(c);a.writeUInt32LE(0x1000,SEGMENTS+48);input(c,SEGMENTS,a.subarray(SEGMENTS,SEGMENTS+64));
+ const s=seed(c,{count:1,source:0xffffefff});
  run(c,1,s,{reason:5,work:0,fault:[3,0xffffffff,1,4],label:'LODSD source overflow before publication'});host(c,'close');
 }
 // ordinary explicit memory uses FS/GS; LEA and implicit SS stack addresses stay offsets/flat.
