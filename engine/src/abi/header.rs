@@ -10,6 +10,19 @@ pub(crate) fn validate_versions(
     size: usize,
     versions: &[u16],
 ) -> Result<u16, AbiError> {
+    let (version, metadata) = validate_versions_with_metadata(bytes, magic, size, versions)?;
+    if metadata != 0 {
+        return Err(AbiError::Reserved);
+    }
+    Ok(version)
+}
+
+pub(crate) fn validate_versions_with_metadata(
+    bytes: &[u8],
+    magic: [u8; 4],
+    size: usize,
+    versions: &[u16],
+) -> Result<(u16, u32), AbiError> {
     if bytes.len() != size {
         return Err(AbiError::Length);
     }
@@ -26,10 +39,7 @@ pub(crate) fn validate_versions(
     if read_u32(bytes, 8) != size as u32 {
         return Err(AbiError::Length);
     }
-    if read_u32(bytes, 12) != 0 {
-        return Err(AbiError::Reserved);
-    }
-    Ok(version)
+    Ok((version, read_u32(bytes, 12)))
 }
 
 pub(crate) fn write(bytes: &mut [u8], magic: [u8; 4]) {

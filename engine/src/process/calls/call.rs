@@ -6,7 +6,10 @@ use crate::{
     abi::{
         arena::{CANCEL_OFFSET, EXIT_OFFSET, STATE_OFFSET, TRANSFER_OFFSET},
         call_frame::{CALL_FRAME_SIZE, CallRecord32, encode_call_frame},
-        x86::{EXIT_SIZE, STATE_SIZE, decode_exit, decode_state, encode_exit_v3, encode_state},
+        x86::{
+            EXIT_SIZE, STATE_SIZE, decode_exit, decode_state, encode_exit_v3,
+            encode_state_current as encode_state,
+        },
     },
     cpu::{ExecutionExit, ExitReason, x86::State32},
     memory::MemoryError,
@@ -453,7 +456,10 @@ impl EngineInstance {
         })
     }
 
-    pub(in crate::process) fn publish_prepared_call(&mut self, prepared: PreparedCall32) {
+    pub(in crate::process) fn publish_prepared_call(&mut self, mut prepared: PreparedCall32) {
+        if let Some(pending) = &self.pending_call {
+            pending.extended.restore_state_metadata(&mut prepared.state);
+        }
         let arena = self.arena.as_mut().get_mut();
         arena[STATE_OFFSET..STATE_OFFSET + STATE_SIZE].copy_from_slice(&prepared.state);
         arena[EXIT_OFFSET..EXIT_OFFSET + EXIT_SIZE].copy_from_slice(&prepared.exit);

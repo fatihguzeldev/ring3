@@ -12,7 +12,10 @@ use crate::{
         arena::{EXIT_OFFSET, STATE_OFFSET, TRANSFER_OFFSET},
         callback::{CALLBACK_RECORD_SIZE, CallbackRecord32, encode_callback},
         resident_callback::ResidentCallbackRecord32,
-        x86::{EXIT_SIZE, STATE_SIZE, decode_exit, decode_state, encode_exit_v3, encode_state},
+        x86::{
+            EXIT_SIZE, STATE_SIZE, decode_exit, decode_state, encode_exit_v3,
+            encode_state_current as encode_state,
+        },
     },
     cpu::{ExecutionExit, ExitReason},
     windows::{CallbackFrame32, FrameError, MAX_STACK_WORDS},

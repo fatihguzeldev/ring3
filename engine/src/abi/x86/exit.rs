@@ -9,6 +9,7 @@ pub const EXIT_VERSION_3: u16 = 3;
 pub const EXIT_VERSION_4: u16 = 4;
 pub const EXIT_VERSION_5: u16 = 5;
 pub const EXIT_VERSION_6: u16 = 6;
+pub const EXIT_VERSION_7: u16 = 7;
 pub const REASON_OFFSET: usize = 16;
 pub const RETIRED_OFFSET: usize = 20;
 pub const DETAIL_OFFSET: usize = 24;
@@ -38,6 +39,10 @@ pub fn encode_exit_v5(exit: &ExecutionExit, output: &mut [u8]) -> Result<(), Abi
 
 pub fn encode_exit_v6(exit: &ExecutionExit, output: &mut [u8]) -> Result<(), AbiError> {
     encode(exit, output, EXIT_VERSION_6)
+}
+
+pub fn encode_exit_v7(exit: &ExecutionExit, output: &mut [u8]) -> Result<(), AbiError> {
+    encode(exit, output, EXIT_VERSION_7)
 }
 
 fn encode(exit: &ExecutionExit, output: &mut [u8], version: u16) -> Result<(), AbiError> {
@@ -72,10 +77,7 @@ fn encode(exit: &ExecutionExit, output: &mut [u8], version: u16) -> Result<(), A
         }
         ExitReason::CodeInvalidated => 6,
         ExitReason::Infrastructure(reason) => {
-            if !matches!(
-                version,
-                EXIT_VERSION_2 | EXIT_VERSION_3 | EXIT_VERSION_4 | EXIT_VERSION_5 | EXIT_VERSION_6
-            ) {
+            if version < EXIT_VERSION_2 {
                 return Err(AbiError::Exit);
             }
             fields[2] = match reason {
@@ -86,52 +88,48 @@ fn encode(exit: &ExecutionExit, output: &mut [u8], version: u16) -> Result<(), A
             7
         }
         ExitReason::Gate { id } => {
-            if !matches!(
-                version,
-                EXIT_VERSION_3 | EXIT_VERSION_4 | EXIT_VERSION_5 | EXIT_VERSION_6
-            ) || id == 0
-            {
+            if version < EXIT_VERSION_3 || id == 0 {
                 return Err(AbiError::Exit);
             }
             fields[2] = id;
             8
         }
         ExitReason::ProcessExited { code } => {
-            if !matches!(version, EXIT_VERSION_4 | EXIT_VERSION_5 | EXIT_VERSION_6) {
+            if version < EXIT_VERSION_4 {
                 return Err(AbiError::Exit);
             }
             fields[2] = code;
             9
         }
         ExitReason::DivideError => {
-            if !matches!(version, EXIT_VERSION_5 | EXIT_VERSION_6) {
+            if version < EXIT_VERSION_5 {
                 return Err(AbiError::Exit);
             }
             10
         }
         ExitReason::GeneralProtection { error_code } => {
-            if version != EXIT_VERSION_6 {
+            if version < EXIT_VERSION_6 {
                 return Err(AbiError::Exit);
             }
             fields[2] = error_code;
             11
         }
         ExitReason::FloatingPoint { status } => {
-            if version != EXIT_VERSION_6 {
+            if version < EXIT_VERSION_6 {
                 return Err(AbiError::Exit);
             }
             fields[2] = u32::from(status);
             12
         }
         ExitReason::SimdFloatingPoint { mxcsr } => {
-            if version != EXIT_VERSION_6 || mxcsr & !0xffff != 0 {
+            if version < EXIT_VERSION_6 || mxcsr & !0xffff != 0 {
                 return Err(AbiError::Exit);
             }
             fields[2] = mxcsr;
             13
         }
         ExitReason::SegmentNotPresent { error_code } | ExitReason::StackSegment { error_code } => {
-            if version != EXIT_VERSION_6 {
+            if version < EXIT_VERSION_6 {
                 return Err(AbiError::Exit);
             }
             fields[2] = error_code;
@@ -139,6 +137,23 @@ fn encode(exit: &ExecutionExit, output: &mut [u8], version: u16) -> Result<(), A
                 14
             } else {
                 15
+            }
+        }
+        ExitReason::DebugTrap
+        | ExitReason::Breakpoint
+        | ExitReason::Overflow
+        | ExitReason::BoundRange
+        | ExitReason::InvalidOpcode => {
+            if version < EXIT_VERSION_7 {
+                return Err(AbiError::Exit);
+            }
+            match exit.reason {
+                ExitReason::DebugTrap => 16,
+                ExitReason::Breakpoint => 17,
+                ExitReason::Overflow => 18,
+                ExitReason::BoundRange => 19,
+                ExitReason::InvalidOpcode => 20,
+                _ => unreachable!(),
             }
         }
     };
@@ -161,6 +176,7 @@ pub fn decode_exit(input: &[u8]) -> Result<ExecutionExit, AbiError> {
             EXIT_VERSION_4,
             EXIT_VERSION_5,
             EXIT_VERSION_6,
+            EXIT_VERSION_7,
         ],
     )?;
     let detail = read_u32(input, DETAIL_OFFSET);
@@ -200,38 +216,29 @@ pub fn decode_exit(input: &[u8]) -> Result<ExecutionExit, AbiError> {
             3 => ExitReason::NeedCode,
             4 => ExitReason::Unsupported(decode_feature(detail)?),
             6 => ExitReason::CodeInvalidated,
-            7 if matches!(
-                version,
-                EXIT_VERSION_2 | EXIT_VERSION_3 | EXIT_VERSION_4 | EXIT_VERSION_5 | EXIT_VERSION_6
-            ) =>
-            {
-                ExitReason::Infrastructure(match detail {
-                    1 => InfrastructureFailure::VersionExhausted,
-                    2 => InfrastructureFailure::HelperProtocol,
-                    3 => InfrastructureFailure::HelperRejected,
-                    _ => return Err(AbiError::Exit),
-                })
-            }
-            8 if matches!(
-                version,
-                EXIT_VERSION_3 | EXIT_VERSION_4 | EXIT_VERSION_5 | EXIT_VERSION_6
-            ) && detail != 0 =>
-            {
-                ExitReason::Gate { id: detail }
-            }
-            9 if matches!(version, EXIT_VERSION_4 | EXIT_VERSION_5 | EXIT_VERSION_6) => {
-                ExitReason::ProcessExited { code: detail }
-            }
-            10 if matches!(version, EXIT_VERSION_5 | EXIT_VERSION_6) => ExitReason::DivideError,
-            11 if version == EXIT_VERSION_6 => ExitReason::GeneralProtection { error_code: detail },
-            12 if version == EXIT_VERSION_6 && detail <= 0xffff => ExitReason::FloatingPoint {
+            7 if version >= EXIT_VERSION_2 => ExitReason::Infrastructure(match detail {
+                1 => InfrastructureFailure::VersionExhausted,
+                2 => InfrastructureFailure::HelperProtocol,
+                3 => InfrastructureFailure::HelperRejected,
+                _ => return Err(AbiError::Exit),
+            }),
+            8 if version >= EXIT_VERSION_3 && detail != 0 => ExitReason::Gate { id: detail },
+            9 if version >= EXIT_VERSION_4 => ExitReason::ProcessExited { code: detail },
+            10 if version >= EXIT_VERSION_5 => ExitReason::DivideError,
+            11 if version >= EXIT_VERSION_6 => ExitReason::GeneralProtection { error_code: detail },
+            12 if version >= EXIT_VERSION_6 && detail <= 0xffff => ExitReason::FloatingPoint {
                 status: detail as u16,
             },
-            13 if version == EXIT_VERSION_6 && detail <= 0xffff => {
+            13 if version >= EXIT_VERSION_6 && detail <= 0xffff => {
                 ExitReason::SimdFloatingPoint { mxcsr: detail }
             }
-            14 if version == EXIT_VERSION_6 => ExitReason::SegmentNotPresent { error_code: detail },
-            15 if version == EXIT_VERSION_6 => ExitReason::StackSegment { error_code: detail },
+            14 if version >= EXIT_VERSION_6 => ExitReason::SegmentNotPresent { error_code: detail },
+            15 if version >= EXIT_VERSION_6 => ExitReason::StackSegment { error_code: detail },
+            16 if version >= EXIT_VERSION_7 => ExitReason::DebugTrap,
+            17 if version >= EXIT_VERSION_7 => ExitReason::Breakpoint,
+            18 if version >= EXIT_VERSION_7 => ExitReason::Overflow,
+            19 if version >= EXIT_VERSION_7 => ExitReason::BoundRange,
+            20 if version >= EXIT_VERSION_7 => ExitReason::InvalidOpcode,
             _ => return Err(AbiError::Exit),
         }
     };
@@ -243,13 +250,13 @@ pub fn decode_exit(input: &[u8]) -> Result<ExecutionExit, AbiError> {
 
 fn validate_fault(fault: MemoryFault, length: u32, version: u16) -> Result<(), AbiError> {
     let valid_length = match fault.access {
-        Access::Read | Access::Write if version == EXIT_VERSION_6 => (1..=512).contains(&length),
+        Access::Read | Access::Write if version >= EXIT_VERSION_6 => (1..=512).contains(&length),
         Access::Read | Access::Write => matches!(length, 1 | 2 | 4),
         Access::Execute => (1..=15).contains(&length),
     };
     let overflows = u64::from(fault.address.0) + u64::from(length) > 1 << 32;
     if !valid_length
-        || ((version != EXIT_VERSION_6 || fault.reason == FaultReason::AddressOverflow)
+        || ((version < EXIT_VERSION_6 || fault.reason == FaultReason::AddressOverflow)
             && overflows != (fault.reason == FaultReason::AddressOverflow))
     {
         return Err(AbiError::Exit);
@@ -283,6 +290,25 @@ fn decode_feature(code: u32) -> Result<UnsupportedFeature, AbiError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn architectural_traps_require_version_seven_and_empty_details() {
+        for reason in [
+            ExitReason::DebugTrap,
+            ExitReason::Breakpoint,
+            ExitReason::Overflow,
+            ExitReason::BoundRange,
+            ExitReason::InvalidOpcode,
+        ] {
+            let exit = ExecutionExit { retired: 1, reason };
+            let mut bytes = [0; EXIT_SIZE];
+            assert_eq!(encode_exit_v6(&exit, &mut bytes), Err(AbiError::Exit));
+            encode_exit_v7(&exit, &mut bytes).unwrap();
+            assert_eq!(decode_exit(&bytes).unwrap(), exit);
+            bytes[DETAIL_OFFSET] = 1;
+            assert_eq!(decode_exit(&bytes), Err(AbiError::Exit));
+        }
+    }
     use crate::cpu::ExitReason;
 
     #[test]

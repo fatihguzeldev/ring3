@@ -4,7 +4,10 @@ use crate::process::{CallError, EngineInstance, HostError, calls::context::Exten
 use crate::{
     abi::{
         arena::{EXIT_OFFSET, STATE_OFFSET},
-        x86::{EXIT_SIZE, STATE_SIZE, encode_exit, encode_exit_v3, encode_state},
+        x86::{
+            EXIT_SIZE, STATE_SIZE, encode_exit, encode_exit_v3,
+            encode_state_current as encode_state,
+        },
     },
     cpu::{ExecutionExit, ExitReason, x86::State32},
     memory::{GuestAddress, PAGE_SIZE, PageRange, Permissions},

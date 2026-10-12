@@ -12,7 +12,10 @@ use crate::{
             RESIDENT_CALLBACK_RECORD_SIZE, RESIDENT_CALLBACK_RESULT_SIZE, ResidentCallbackRecord32,
             ResidentCallbackResult32, encode_resident_callback, encode_resident_callback_result,
         },
-        x86::{EXIT_SIZE, STATE_SIZE, decode_exit, decode_state, encode_exit_v3, encode_state},
+        x86::{
+            EXIT_SIZE, STATE_SIZE, decode_exit, decode_state, encode_exit_v3,
+            encode_state_current as encode_state,
+        },
     },
     cpu::{ExecutionExit, ExitReason, dbt::RegistryError},
     memory::GuestAddress,
