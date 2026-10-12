@@ -69,8 +69,9 @@ const cases=[
  {name:'mmx-psrlq-variable-count-nonzero',code:'0fd3c1',mmx:true,a:hex('1122334455667788'),b:qwords([8n,0n]),out:hex('2233445566778800')},
  {name:'addsd-exact-even-carry-preserves-controls-and-upper',code:'f20f58c1',a:qwords([0x3ff0000000000001n,0x0123456789abcdefn]),b:qwords([0x3ff0000000000001n,0x7ff0000000000001n]),out:qwords([0x4000000000000001n,0x0123456789abcdefn]),mxcsr:0xdfe5},
  {name:'subss-exact-negative-preserves-unmasked-controls-and-upper',code:'f30f5cc1',a:dwords([0x3f800000,0x7fc01234,0x87654321,0x12345678]),b:dwords([0x3fc00000,0x7f801234,0x11223344,0x55667788]),out:dwords([0xbf000000,0x7fc01234,0x87654321,0x12345678]),mxcsr:0x8040},
+ {name:'fxrstor-split-read-fault-preserves-staged-transfer',code:'0fae08',address:0x5f00,a:fill(0x31),b:fill(0x42),reason:5,retired:0,detail:1,fault:0x6000,access:1,length:512,stagedTransfer:Buffer.from(Array.from({length:512},(_,i)=>(i*29+0x63)%255+1))},
 ];
-const sourcePaths=['engine/src/cpu/x86/simd.rs','engine/src/cpu/x86/simd/packed.rs','engine/src/cpu/x86/simd/float.rs','engine/src/cpu/x86/decode/simd.rs','engine/src/cpu/dbt/wasm/simd.rs','engine/src/cpu/dbt/wasm/simd/direct.rs','engine/src/process/simd.rs','engine/src/abi/x86/simd.rs','engine/tests/simd_semantics.rs','engine/tests/cpu_simd_wasm.rs','engine/tests/fixtures/p2-simd/run.mjs'];
+const sourcePaths=['engine/src/cpu/x86/simd.rs','engine/src/cpu/x86/simd/packed.rs','engine/src/cpu/x86/simd/float.rs','engine/src/cpu/x86/decode/simd.rs','engine/src/cpu/dbt/wasm/simd.rs','engine/src/cpu/dbt/wasm/simd/direct.rs','engine/src/process/simd.rs','engine/src/process/cpu_memory.rs','engine/src/abi/x86/simd.rs','engine/tests/simd_semantics.rs','engine/tests/cpu_simd_wasm.rs','engine/tests/fixtures/p2-simd/run.mjs'];
 const sourceHashes=()=>Object.fromEntries(sourcePaths.map(p=>[p,hash(readFileSync(join(root,p)))])),beforePins=sourceHashes();
 const observations=[],helpers=[],modules=[],contexts=[],raw_protocol=[];let count=0;
 const arena=c=>Buffer.from(new Uint8Array(c.memory.buffer,c.base,SIZE));
@@ -107,6 +108,7 @@ function test(c,block,row){
  upload(c,0x5000,fill(0x66));upload(c,DATA,fill(0x66));upload(c,DATA+16,fill(0x66));if(row.memory)upload(c,row.address??DATA,row.memory);
  if(row.seedMemory)upload(c,row.address??DATA,row.seedMemory);
  if(row.writeOnly)host(c,'protect',[0x5000,1,2]);
+ if(row.stagedTransfer)input(c,T,row.stagedTransfer);
  const expected=arena(c),reason=row.reason??1,retired=row.retired??1;
  if(row.gpr!==undefined)r[0]=row.gpr;
  expected.set(state(r,retired?block.pc+hex(row.code).length:block.pc,row.flags??0xcd7));expected.set(exit(reason,retired,row.detail??0,row.fault??0,row.access??0,row.length??0),56);
@@ -121,7 +123,15 @@ function test(c,block,row){
  const events=helpers.slice(h),last=events.at(-1),directRegister=row.direct&&!row.memory&&!row.write&&reason===1;
  if(directRegister||reason===12)assert.equal(events.length,0,row.name+' has no host execution helper');else assert.ok(last,row.name+' helper');
  // Scratch bytes are validated from the ordered canonical calls below; only those spans may differ.
- const actual=arena(c);expected.set(actual.subarray(100,140),100);expected.set(actual.subarray(T,T+512),T);expected.set(actual.subarray(T+512,T+520),T+512);
+ const actual=arena(c);
+ if(row.stagedTransfer){
+  assert.equal(events.length,1,row.name+' only the failed read crosses the host');
+  assert.equal(events[0].name,'cpu_read');
+  assert.deepEqual(events[0].args,[row.address,512,16]);
+  assert.equal(events[0].packet,packet(512,1,row.detail,row.fault,row.access).toString('hex'));
+  assert.deepEqual(actual.subarray(T,T+512),row.stagedTransfer,row.name+' failed read preserves every staged transfer byte');
+ }
+ expected.set(actual.subarray(100,140),100);expected.set(actual.subarray(T,T+512),T);expected.set(actual.subarray(T+512,T+520),T+512);
  assert.deepEqual(actual,expected,row.name+' complete arena');
  if(reason===1&&last){assert.equal(last.packet,packet(row.write?row.writeLength??16:row.masked!==undefined?16:row.direct&&row.memory?row.memory.length:0).toString('hex'));if(!row.direct)assert.equal(actual.readUInt32LE(T+516),row.flags??0xcd7);}
  else if(last){const p=hex(last.packet);assert.equal(p.readUInt32LE(16),row.compiledGp?0:reason===13?5:reason===11?3:1);assert.equal(p.readUInt32LE(24),row.detail??0);}
