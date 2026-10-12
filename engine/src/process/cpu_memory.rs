@@ -13,18 +13,16 @@ impl EngineInstance {
     pub fn cpu_read(&mut self, address: u32, length: u32, alignment: u32) -> Result<(), HostError> {
         check_request(length, alignment)?;
         self.memory()?;
-        let mut bytes = [0; MAX_CPU_TRANSFER];
         let result = if address & (alignment - 1) != 0 {
             Err(CpuMemoryError::GeneralProtection(0))
         } else {
-            self.memory()?
-                .read(GuestAddress(address), &mut bytes[..length as usize])
+            let memory = self.memory.as_ref().ok_or(HostError::Closed)?;
+            let output = &mut self.arena.as_mut().get_mut()
+                [TRANSFER_OFFSET..TRANSFER_OFFSET + length as usize];
+            memory
+                .read(GuestAddress(address), output)
                 .map_err(CpuMemoryError::Memory)
         };
-        if result.is_ok() {
-            self.arena.as_mut().get_mut()[TRANSFER_OFFSET..TRANSFER_OFFSET + length as usize]
-                .copy_from_slice(&bytes[..length as usize]);
-        }
         self.cpu_memory_result(length, result)
     }
 
@@ -295,5 +293,34 @@ mod tests {
             .unwrap();
         assert_eq!(&saved[..464], &[0xa5; 464]);
         assert_eq!(&saved[464..], &[0x6b; 48]);
+    }
+
+    #[test]
+    fn maximum_split_read_and_smaller_prefix_preserve_all_other_arena_bytes() {
+        let mut engine = engine();
+        engine.map(0x3000, 1, 3).unwrap();
+        let bytes: [u8; 512] = std::array::from_fn(|i| (i as u8).wrapping_mul(29).wrapping_add(7));
+        engine.arena_mut().unwrap()[TRANSFER_OFFSET..TRANSFER_OFFSET + 512].copy_from_slice(&bytes);
+        engine.upload(0x2f00, 512).unwrap();
+        engine.arena_mut().unwrap()[TRANSFER_OFFSET..TRANSFER_OFFSET + 4096].fill(0xa5);
+        let mut expected = engine.arena().to_vec();
+        let version = engine.memory().unwrap().code_validation_version();
+        engine.cpu_read(0x2f00, 512, 16).unwrap();
+        expected[TRANSFER_OFFSET..TRANSFER_OFFSET + 512].copy_from_slice(&bytes);
+        expected[HELPER_OFFSET..HELPER_OFFSET + HELPER_SIZE].copy_from_slice(&[
+            0x52, 0x33, 0x4d, 0x48, 7, 0, 1, 0, 40, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0,
+        ]);
+        assert_eq!(engine.arena(), expected);
+        assert_eq!(engine.memory().unwrap().code_validation_version(), version);
+
+        engine.cpu_read(0x2ffd, 8, 1).unwrap();
+        expected[TRANSFER_OFFSET..TRANSFER_OFFSET + 8].copy_from_slice(&bytes[253..261]);
+        expected[HELPER_OFFSET..HELPER_OFFSET + HELPER_SIZE].copy_from_slice(&[
+            0x52, 0x33, 0x4d, 0x48, 7, 0, 1, 0, 40, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 8, 0, 0, 0,
+        ]);
+        assert_eq!(engine.arena(), expected);
+        assert_eq!(engine.memory().unwrap().code_validation_version(), version);
     }
 }
