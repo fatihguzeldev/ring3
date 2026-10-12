@@ -23,7 +23,7 @@ fn actual_verification_queries_current_descriptors_and_preserves_precise_word_fa
     fs::create_dir_all(&output).unwrap();
     let result = wasm_support::run_node(
         root,
-        "engine/tests/cpu/segments/selectors/fixtures/p2-segment-queries/runtime/run.mjs",
+        "engine/tests/cpu/segments/selectors/verify/fixtures/p2-segment-queries/runtime/run.mjs",
         &engine,
         &output,
         None,

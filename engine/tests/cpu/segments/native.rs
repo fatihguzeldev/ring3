@@ -1,6 +1,6 @@
 #[path = "selectors/privilege/native.rs"]
 mod cpu_arpl;
-#[path = "selectors/native/verify.rs"]
+#[path = "selectors/verify/native.rs"]
 mod cpu_segment_queries;
 #[path = "cache/native/loads.rs"]
 mod cpu_segments;

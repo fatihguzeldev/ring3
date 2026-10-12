@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
 import {readFileSync, writeFileSync} from 'node:fs';
 import {join} from 'node:path';
-import {readEngine} from '../../../../../../support/wasm/engine.mjs';
+import {readEngine} from '../../../../../../../support/wasm/engine.mjs';
 
 const [enginePath, output, root] = process.argv.slice(2), engine = readEngine(enginePath);
 const PC = 0x1000, SEG = 4524, SIZE = 4612, keyHigh = 0x565252;
@@ -12,7 +12,7 @@ const paths = [
   'engine/src/cpu/x86/ir.rs', 'engine/src/cpu/dbt/region.rs', 'engine/src/cpu/dbt/wasm/memory.rs', 'engine/src/cpu/dbt/wasm/memory/narrow.rs',
   'engine/src/cpu/dbt/wasm/segments.rs', 'engine/src/cpu/dbt/wasm/segment_queries.rs', 'engine/src/cpu/dbt/wasm/integer/dispatch.rs',
   'engine/src/process/cpu/integer.rs', 'engine/src/process/cpu/segment_queries.rs',
-  'engine/tests/cpu/segments/selectors/native/verify.rs', 'engine/tests/cpu/segments/selectors/wasm/verify.rs', 'engine/tests/cpu/segments/selectors/fixtures/p2-segment-queries/runtime/run.mjs',
+  'engine/tests/cpu/segments/selectors/verify/native.rs', 'engine/tests/cpu/segments/selectors/verify/wasm.rs', 'engine/tests/cpu/segments/selectors/verify/fixtures/p2-segment-queries/runtime/run.mjs',
 ];
 const pins = () => Object.fromEntries(paths.map(path => [path, createHash('sha256').update(readFileSync(join(root, path))).digest('hex')]));
 const sourcePins = pins(), words = values => {const b = Buffer.alloc(values.length * 4); values.forEach((v, i) => b.writeUInt32LE(v >>> 0, i * 4)); return b;};

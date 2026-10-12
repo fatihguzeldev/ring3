@@ -16,7 +16,7 @@ mod cpu_raw_descriptors_wasm;
 #[path = "selectors/privilege/wasm.rs"]
 mod cpu_arpl_wasm;
 
-#[path = "selectors/wasm/verify.rs"]
+#[path = "selectors/verify/wasm.rs"]
 mod cpu_segment_queries_wasm;
 
 #[path = "selectors/attributes/wasm.rs"]
