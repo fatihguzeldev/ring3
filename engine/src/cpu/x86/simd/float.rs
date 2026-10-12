@@ -66,6 +66,63 @@ fn exact_normal_product(a: u64, b: u64, width: usize) -> Option<u64> {
     // normal power-of-two scaling changes only the exponent and sign, without rounding.
     Some(((a ^ b) & sign) | ((exponent as u64) << fraction_bits) | ((a | b) & fraction_mask))
 }
+fn exact_normal_sum(a: u64, b: u64, width: usize, subtract: bool) -> Option<u64> {
+    let (sign, exponent_mask, fraction_mask, fraction_bits, _) = format(width);
+    let a_exponent = ((a & exponent_mask) >> fraction_bits) as i32;
+    let b_exponent = ((b & exponent_mask) >> fraction_bits) as i32;
+    let maximum = (exponent_mask >> fraction_bits) as i32;
+    if !(1..maximum).contains(&a_exponent) || !(1..maximum).contains(&b_exponent) {
+        return None;
+    }
+    let distance = (a_exponent - b_exponent).unsigned_abs();
+    if distance > fraction_bits {
+        return None;
+    }
+    let mut a_significand = (1u64 << fraction_bits) | (a & fraction_mask);
+    let mut b_significand = (1u64 << fraction_bits) | (b & fraction_mask);
+    let smaller = if a_exponent < b_exponent {
+        &mut a_significand
+    } else {
+        &mut b_significand
+    };
+    if *smaller & ((1u64 << distance) - 1) != 0 {
+        return None;
+    }
+    *smaller >>= distance;
+    let a_value = if a & sign != 0 {
+        -(a_significand as i64)
+    } else {
+        a_significand as i64
+    };
+    let b_value = if (b & sign != 0) ^ subtract {
+        -(b_significand as i64)
+    } else {
+        b_significand as i64
+    };
+    let sum = a_value + b_value;
+    if sum == 0 {
+        return None;
+    }
+    let mut magnitude = sum.unsigned_abs();
+    let mut exponent = a_exponent.max(b_exponent);
+    if magnitude >= 1u64 << (fraction_bits + 1) {
+        if magnitude & 1 != 0 {
+            return None;
+        }
+        magnitude >>= 1;
+        exponent += 1;
+    } else {
+        let shift = magnitude.leading_zeros() - (63 - fraction_bits);
+        magnitude <<= shift;
+        exponent -= shift as i32;
+    }
+    if !(1..maximum).contains(&exponent) {
+        return None;
+    }
+    // exact alignment and normalization leave no rounding or exception flags.
+    let result_sign = if sum < 0 { sign } else { 0 };
+    Some(result_sign | ((exponent as u64) << fraction_bits) | (magnitude & fraction_mask))
+}
 fn nan(bits: u64, width: usize) -> bool {
     let (_, e, f, _, _) = format(width);
     bits & e == e && bits & f != 0
@@ -311,6 +368,11 @@ fn binary(
         }
     } else if an || bn {
         return (quiet(if an { a } else { b }, width), u32::from(sn), None);
+    }
+    if matches!(kind, F::Add | F::Subtract)
+        && let Some(result) = exact_normal_sum(a, b, width, kind == F::Subtract)
+    {
+        return (result, 0, None);
     }
     if kind == F::Multiply
         && let Some(result) = exact_normal_product(a, b, width)

@@ -67,6 +67,8 @@ const cases=[
  {name:'fxsave-write-only-preserves-software-tail',code:'0fae00',address:DATA,a:fill(0x31),b:fill(0x42),seedMemory:Buffer.alloc(512,0x66),write:savedImage,writeLength:512,writeOnly:true},
  {name:'fxrstor-physical-tags-and-xmm',code:'0fae08',address:DATA,memory:restoredImage,afterX87:restoredX87,afterXmm:restoredImage.subarray(160,288),afterMxcsr:0x5f80},
  {name:'mmx-psrlq-variable-count-nonzero',code:'0fd3c1',mmx:true,a:hex('1122334455667788'),b:qwords([8n,0n]),out:hex('2233445566778800')},
+ {name:'addsd-exact-even-carry-preserves-controls-and-upper',code:'f20f58c1',a:qwords([0x3ff0000000000001n,0x0123456789abcdefn]),b:qwords([0x3ff0000000000001n,0x7ff0000000000001n]),out:qwords([0x4000000000000001n,0x0123456789abcdefn]),mxcsr:0xdfe5},
+ {name:'subss-exact-negative-preserves-unmasked-controls-and-upper',code:'f30f5cc1',a:dwords([0x3f800000,0x7fc01234,0x87654321,0x12345678]),b:dwords([0x3fc00000,0x7f801234,0x11223344,0x55667788]),out:dwords([0xbf000000,0x7fc01234,0x87654321,0x12345678]),mxcsr:0x8040},
 ];
 const sourcePaths=['engine/src/cpu/x86/simd.rs','engine/src/cpu/x86/simd/packed.rs','engine/src/cpu/x86/simd/float.rs','engine/src/cpu/x86/decode/simd.rs','engine/src/cpu/dbt/wasm/simd.rs','engine/src/cpu/dbt/wasm/simd/direct.rs','engine/src/process/simd.rs','engine/src/abi/x86/simd.rs','engine/tests/simd_semantics.rs','engine/tests/cpu_simd_wasm.rs','engine/tests/fixtures/p2-simd/run.mjs'];
 const sourceHashes=()=>Object.fromEntries(sourcePaths.map(p=>[p,hash(readFileSync(join(root,p)))])),beforePins=sourceHashes();

@@ -835,3 +835,437 @@ fn product_guard_neighbors_keep_literal_fallback_results_and_packed_exception_at
         assert_eq!(state.mxcsr, 0x1b88);
     }
 }
+
+#[test]
+fn exact_normal_sums_preserve_literal_results_controls_and_scalar_upper_lanes() {
+    for (width, kind, a, b, expected) in [
+        (4, F::Add, 0x3fc0_0000u64, 0x3f00_0000u64, 0x4000_0000u64),
+        (4, F::Add, 0x3f80_0001, 0x3f80_0001, 0x4000_0001),
+        (4, F::Subtract, 0x3fc0_0000, 0x3f80_0000, 0x3f00_0000),
+        (4, F::Subtract, 0x3f80_0000, 0x3fc0_0000, 0xbf00_0000),
+        (4, F::Subtract, 0xbf80_0000, 0xbfc0_0000, 0x3f00_0000),
+        (4, F::Add, 0xbfc0_0000, 0x3f00_0000, 0xbf80_0000),
+        (4, F::Add, 0x3f80_0000, 0x3400_0000, 0x3f80_0001),
+        (4, F::Add, 0x3400_0000, 0x3f80_0000, 0x3f80_0001),
+        (4, F::Subtract, 0x3f80_0001, 0x3f80_0000, 0x3400_0000),
+        (4, F::Subtract, 0x0100_0001, 0x0080_0002, 0x0080_0000),
+        (4, F::Add, 0x7f00_0000, 0x7eff_fffe, 0x7f7f_ffff),
+        (
+            8,
+            F::Add,
+            0x3ff8_0000_0000_0000,
+            0x3fe0_0000_0000_0000,
+            0x4000_0000_0000_0000,
+        ),
+        (
+            8,
+            F::Add,
+            0x3ff0_0000_0000_0001,
+            0x3ff0_0000_0000_0001,
+            0x4000_0000_0000_0001,
+        ),
+        (
+            8,
+            F::Subtract,
+            0x3ff8_0000_0000_0000,
+            0x3ff0_0000_0000_0000,
+            0x3fe0_0000_0000_0000,
+        ),
+        (
+            8,
+            F::Subtract,
+            0x3ff0_0000_0000_0000,
+            0x3ff8_0000_0000_0000,
+            0xbfe0_0000_0000_0000,
+        ),
+        (
+            8,
+            F::Subtract,
+            0xbff0_0000_0000_0000,
+            0xbff8_0000_0000_0000,
+            0x3fe0_0000_0000_0000,
+        ),
+        (
+            8,
+            F::Add,
+            0xbff8_0000_0000_0000,
+            0x3fe0_0000_0000_0000,
+            0xbff0_0000_0000_0000,
+        ),
+        (
+            8,
+            F::Add,
+            0x3ff0_0000_0000_0000,
+            0x3cb0_0000_0000_0000,
+            0x3ff0_0000_0000_0001,
+        ),
+        (
+            8,
+            F::Add,
+            0x3cb0_0000_0000_0000,
+            0x3ff0_0000_0000_0000,
+            0x3ff0_0000_0000_0001,
+        ),
+        (
+            8,
+            F::Subtract,
+            0x3ff0_0000_0000_0001,
+            0x3ff0_0000_0000_0000,
+            0x3cb0_0000_0000_0000,
+        ),
+        (
+            8,
+            F::Subtract,
+            0x0020_0000_0000_0001,
+            0x0010_0000_0000_0002,
+            0x0010_0000_0000_0000,
+        ),
+        (
+            8,
+            F::Add,
+            0x7fe0_0000_0000_0000,
+            0x7fdf_ffff_ffff_fffe,
+            0x7fef_ffff_ffff_ffff,
+        ),
+    ] {
+        for mxcsr in [0x8040, 0x3f80, 0x5fbf, 0xffc0] {
+            let mut state = SimdState {
+                mxcsr,
+                xmm: std::array::from_fn(|index| [0xa0 + index as u8; 16]),
+            };
+            let length = usize::from(width);
+            state.xmm[0][..length].copy_from_slice(&a.to_le_bytes()[..length]);
+            state.xmm[1][..length].copy_from_slice(&b.to_le_bytes()[..length]);
+            let mut wanted = state;
+            wanted.xmm[0][..length].copy_from_slice(&expected.to_le_bytes()[..length]);
+            let mut op = operation(K::Float(kind), width);
+            op.scalar = true;
+            assert_eq!(run(op, &mut state).unwrap().flags, 0xcd7);
+            assert_eq!(state, wanted);
+        }
+    }
+}
+
+#[test]
+fn sum_guard_neighbors_keep_literal_rounding_tininess_and_zero_signs() {
+    for (width, kind, a, b, mxcsr, expected, status, trap) in [
+        (
+            4,
+            F::Add,
+            0x3f80_0000u64,
+            0x3f80_0001u64,
+            0x1f80,
+            0x4000_0000u64,
+            0x20,
+            false,
+        ),
+        (
+            4,
+            F::Add,
+            0x3f80_0000,
+            0x3f80_0001,
+            0x5f80,
+            0x4000_0001,
+            0x20,
+            false,
+        ),
+        (
+            4,
+            F::Add,
+            0x3f80_0000,
+            0x0080_0000,
+            0x1f80,
+            0x3f80_0000,
+            0x20,
+            false,
+        ),
+        (
+            4,
+            F::Subtract,
+            0x3f80_0000,
+            0x3f7f_ffff,
+            0x1f80,
+            0x3380_0000,
+            0,
+            false,
+        ),
+        (
+            4,
+            F::Subtract,
+            0x0080_0000,
+            0x0080_0001,
+            0x1f80,
+            0x8000_0001,
+            0,
+            false,
+        ),
+        (
+            4,
+            F::Subtract,
+            0x0080_0000,
+            0x0080_0001,
+            0x1780,
+            0,
+            0x10,
+            true,
+        ),
+        (
+            4,
+            F::Subtract,
+            0x0080_0000,
+            0x0080_0001,
+            0x9f80,
+            0x8000_0000,
+            0x30,
+            false,
+        ),
+        (
+            4,
+            F::Add,
+            0x7f7f_ffff,
+            0x7f7f_ffff,
+            0x1f80,
+            0x7f80_0000,
+            0x28,
+            false,
+        ),
+        (4, F::Add, 0x0080_0000, 1, 0x1f80, 0x0080_0001, 2, false),
+        (4, F::Add, 0x0080_0000, 1, 0x1fc0, 0x0080_0000, 0, false),
+        (
+            8,
+            F::Add,
+            0x3ff0_0000_0000_0000,
+            0x3ff0_0000_0000_0001,
+            0x1f80,
+            0x4000_0000_0000_0000,
+            0x20,
+            false,
+        ),
+        (
+            8,
+            F::Add,
+            0x3ff0_0000_0000_0000,
+            0x3ff0_0000_0000_0001,
+            0x5f80,
+            0x4000_0000_0000_0001,
+            0x20,
+            false,
+        ),
+        (
+            8,
+            F::Add,
+            0x3ff0_0000_0000_0000,
+            0x0010_0000_0000_0000,
+            0x1f80,
+            0x3ff0_0000_0000_0000,
+            0x20,
+            false,
+        ),
+        (
+            8,
+            F::Subtract,
+            0x3ff0_0000_0000_0000,
+            0x3fef_ffff_ffff_ffff,
+            0x1f80,
+            0x3ca0_0000_0000_0000,
+            0,
+            false,
+        ),
+        (
+            8,
+            F::Subtract,
+            0x0010_0000_0000_0000,
+            0x0010_0000_0000_0001,
+            0x1f80,
+            0x8000_0000_0000_0001,
+            0,
+            false,
+        ),
+        (
+            8,
+            F::Subtract,
+            0x0010_0000_0000_0000,
+            0x0010_0000_0000_0001,
+            0x1780,
+            0,
+            0x10,
+            true,
+        ),
+        (
+            8,
+            F::Subtract,
+            0x0010_0000_0000_0000,
+            0x0010_0000_0000_0001,
+            0x9f80,
+            0x8000_0000_0000_0000,
+            0x30,
+            false,
+        ),
+        (
+            8,
+            F::Add,
+            0x7fef_ffff_ffff_ffff,
+            0x7fef_ffff_ffff_ffff,
+            0x1f80,
+            0x7ff0_0000_0000_0000,
+            0x28,
+            false,
+        ),
+        (
+            8,
+            F::Add,
+            0x0010_0000_0000_0000,
+            1,
+            0x1f80,
+            0x0010_0000_0000_0001,
+            2,
+            false,
+        ),
+        (
+            8,
+            F::Add,
+            0x0010_0000_0000_0000,
+            1,
+            0x1fc0,
+            0x0010_0000_0000_0000,
+            0,
+            false,
+        ),
+    ] {
+        let mut state = SimdState {
+            mxcsr,
+            xmm: [[0xa5; 16]; 8],
+        };
+        let length = usize::from(width);
+        state.xmm[0][..length].copy_from_slice(&a.to_le_bytes()[..length]);
+        state.xmm[1][..length].copy_from_slice(&b.to_le_bytes()[..length]);
+        let mut wanted = state;
+        wanted.mxcsr |= status;
+        if !trap {
+            wanted.xmm[0][..length].copy_from_slice(&expected.to_le_bytes()[..length]);
+        }
+        let mut op = operation(K::Float(kind), width);
+        op.scalar = true;
+        if trap {
+            assert_eq!(
+                run(op, &mut state),
+                Err(SimdError::FloatingPoint(wanted.mxcsr))
+            );
+        } else {
+            assert_eq!(run(op, &mut state).unwrap().flags, 0xcd7);
+        }
+        assert_eq!(state, wanted);
+    }
+    for (width, one, negative_one, negative_zero) in [
+        (4, 0x3f80_0000u64, 0xbf80_0000u64, 0x8000_0000u64),
+        (
+            8,
+            0x3ff0_0000_0000_0000,
+            0xbff0_0000_0000_0000,
+            0x8000_0000_0000_0000,
+        ),
+    ] {
+        for (round, expected) in [(0, 0), (1, negative_zero), (2, 0), (3, 0)] {
+            for (kind, right) in [(F::Add, negative_one), (F::Subtract, one)] {
+                let mut state = SimdState {
+                    mxcsr: 0x1f80 | (round << 13),
+                    xmm: [[0xa5; 16]; 8],
+                };
+                let length = usize::from(width);
+                state.xmm[0][..length].copy_from_slice(&one.to_le_bytes()[..length]);
+                state.xmm[1][..length].copy_from_slice(&right.to_le_bytes()[..length]);
+                let mut wanted = state;
+                wanted.xmm[0][..length].copy_from_slice(&expected.to_le_bytes()[..length]);
+                let mut op = operation(K::Float(kind), width);
+                op.scalar = true;
+                assert_eq!(run(op, &mut state).unwrap().flags, 0xcd7);
+                assert_eq!(state, wanted);
+            }
+        }
+    }
+}
+
+#[test]
+fn mixed_packed_sum_fallback_traps_before_any_lane_publication() {
+    for width in [4, 8] {
+        for (kind, mxcsr, expected_mxcsr) in
+            [(F::Add, 0x1b80, 0x1b88), (F::Subtract, 0x1780, 0x1790)]
+        {
+            let mut state = SimdState {
+                mxcsr,
+                xmm: [[0xa5; 16]; 8],
+            };
+            if width == 4 {
+                state.xmm[0] = dwords([
+                    0x3fc0_0000,
+                    if kind == F::Add {
+                        0x7f7f_ffff
+                    } else {
+                        0x0080_0000
+                    },
+                    0,
+                    0,
+                ]);
+                state.xmm[1] = dwords([
+                    if kind == F::Add {
+                        0x3f00_0000
+                    } else {
+                        0x3f80_0000
+                    },
+                    if kind == F::Add {
+                        0x7f7f_ffff
+                    } else {
+                        0x0080_0001
+                    },
+                    0,
+                    0,
+                ]);
+            } else {
+                state.xmm[0][..8].copy_from_slice(&0x3ff8_0000_0000_0000u64.to_le_bytes());
+                state.xmm[0][8..].copy_from_slice(
+                    &(if kind == F::Add {
+                        0x7fef_ffff_ffff_ffffu64
+                    } else {
+                        0x0010_0000_0000_0000
+                    })
+                    .to_le_bytes(),
+                );
+                state.xmm[1][..8].copy_from_slice(
+                    &(if kind == F::Add {
+                        0x3fe0_0000_0000_0000u64
+                    } else {
+                        0x3ff0_0000_0000_0000
+                    })
+                    .to_le_bytes(),
+                );
+                state.xmm[1][8..].copy_from_slice(
+                    &(if kind == F::Add {
+                        0x7fef_ffff_ffff_ffffu64
+                    } else {
+                        0x0010_0000_0000_0001
+                    })
+                    .to_le_bytes(),
+                );
+            }
+            let before = state;
+            let mut mmx = [[0x3c; 8]; 8];
+            let mut memory = [0x5a; 16];
+            assert_eq!(
+                simd::execute(
+                    operation(K::Float(kind), width),
+                    &mut state,
+                    &mut mmx,
+                    &mut memory,
+                    0,
+                    0,
+                    0xcd7
+                ),
+                Err(SimdError::FloatingPoint(expected_mxcsr))
+            );
+            assert_eq!(state.xmm, before.xmm);
+            assert_eq!(state.mxcsr, expected_mxcsr);
+            assert_eq!(mmx, [[0x3c; 8]; 8]);
+            assert_eq!(memory, [0x5a; 16]);
+        }
+    }
+}
