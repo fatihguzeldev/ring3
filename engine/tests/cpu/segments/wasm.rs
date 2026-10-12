@@ -9,3 +9,6 @@ mod cpu_rep_segments_wasm;
 
 #[path = "cache/wasm/loads.rs"]
 mod cpu_segments_wasm;
+
+#[path = "selectors/wasm/adjust_privilege.rs"]
+mod cpu_arpl_wasm;
