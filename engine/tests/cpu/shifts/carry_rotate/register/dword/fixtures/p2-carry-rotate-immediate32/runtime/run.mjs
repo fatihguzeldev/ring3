@@ -122,7 +122,7 @@ function makeBank(name, group, kind = null, currency = null) {
     cold = group === "master" ? MASTER_COLD : LOCAL_COLD;
   assert.equal(packed, group === "master" ? 882 : group === "chain" ? 120 : 16);
   assert.equal(instructions.length, group === "master" ? 252 : group === "chain" ? 42 : 5);
-  bytes.set([0x0f, 0x0b], cold - PC);
+  bytes.set([0xf0, 0x90], cold - PC);
   assert.deepEqual(
     bytes,
     readFileSync(join(output, `${name}.x86`)),
@@ -395,19 +395,12 @@ const sourcePaths = [
   "engine/src/cpu/dbt/wasm/locals.rs",
   "engine/src/cpu/dbt/wasm/memory.rs",
   "engine/Cargo.toml",
-  "engine/tests/cpu/shifts/carry_rotate/register/one/dword/native.rs", "engine/tests/cpu/shifts/native.rs", "engine/tests/support/cpu/prefix/admission.rs", "engine/tests/cpu/shifts/native.rs",
-  "engine/tests/cpu/shifts/carry_rotate/immediate/one/dword/native.rs", "engine/tests/cpu/shifts/native.rs", "engine/tests/support/cpu/prefix/admission.rs", "engine/tests/cpu/shifts/native.rs",
-  "engine/tests/cpu/shifts/rotate/register/dword/native/counts.rs", "engine/tests/cpu/shifts/native.rs", "engine/tests/support/cpu/prefix/admission.rs", "engine/tests/cpu/shifts/native.rs",
-  "engine/tests/cpu/shifts/rotate/memory/dword/native/counts.rs", "engine/tests/cpu/shifts/native.rs", "engine/tests/support/cpu/prefix/admission.rs", "engine/tests/cpu/shifts/native.rs",
-  "engine/tests/cpu/shifts/carry_rotate/immediate/one/dword/fixtures/p2-carry-rotate-immediate-one/runtime/run.mjs",
-  "engine/tests/cpu/shifts/carry_rotate/immediate/one/dword/wasm.rs", "engine/tests/cpu/shifts/wasm.rs", "engine/tests/support/wasm.rs", "engine/tests/cpu/shifts/wasm.rs", "engine/tests/support/wasm.rs",
-  "engine/tests/cpu/shifts/carry_rotate/register/dword/native/immediate.rs", "engine/tests/cpu/shifts/native.rs", "engine/tests/support/cpu/prefix/admission.rs", "engine/tests/cpu/shifts/native.rs",
-  "engine/tests/cpu/shifts/carry_rotate/register/dword/wasm/immediate.rs", "engine/tests/cpu/shifts/wasm.rs", "engine/tests/support/wasm.rs", "engine/tests/cpu/shifts/wasm.rs", "engine/tests/support/wasm.rs",
-  "engine/tests/cpu/shifts/carry_rotate/register/dword/fixtures/p2-carry-rotate-immediate32/runtime/run.mjs",
+  "engine/tests/cpu/shifts/carry_rotate/register/one/dword/native.rs", "engine/tests/cpu/shifts/native.rs", "engine/tests/support/cpu/prefix/admission.rs", "engine/tests/cpu/shifts/carry_rotate/immediate/one/dword/native.rs", "engine/tests/cpu/shifts/rotate/register/dword/native/counts.rs", "engine/tests/cpu/shifts/rotate/memory/dword/native/counts.rs", "engine/tests/cpu/shifts/carry_rotate/immediate/one/dword/fixtures/p2-carry-rotate-immediate-one/runtime/run.mjs",
+  "engine/tests/cpu/shifts/carry_rotate/immediate/one/dword/wasm.rs", "engine/tests/cpu/shifts/wasm.rs", "engine/tests/support/wasm.rs", "engine/tests/cpu/shifts/carry_rotate/register/dword/native/immediate.rs", "engine/tests/cpu/shifts/carry_rotate/register/dword/wasm/immediate.rs", "engine/tests/cpu/shifts/carry_rotate/register/dword/fixtures/p2-carry-rotate-immediate32/runtime/run.mjs",
   "engine/tests/cpu/shifts/carry_rotate/register/dword/fixtures/p2-carry-rotate-immediate32/runtime/oracle.mjs",
   "engine/tests/support/wasm/engine.mjs",
 ];
-assert.equal(new Set(sourcePaths).size, 21);
+assert.equal(new Set(sourcePaths).size, sourcePaths.length);
 const sourceIdentities = () =>
   Object.fromEntries(
     sourcePaths.map((path) => {
@@ -503,10 +496,7 @@ function profile(bytes, owner) {
   assert.equal(end, sections.get(10)[1]);
   const locals = [];
   for (let i = 0, n = uleb(); i < n; i++) locals.push([uleb(), bytes[at++]]);
-  assert.deepEqual(locals, [
-    [16, 0x7f],
-    [1, 0x7e],
-  ]);
+  assert.deepEqual(locals, [[16, 0x7f], [1, 0x7e], [10, 0x7f]]);
   assert.ok(at < end);
   assert.equal(bytes[end - 1], 0x0b);
   return { types, locals, body_bytes: bodyBytes, sections: [...sections.keys()] };

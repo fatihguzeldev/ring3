@@ -251,10 +251,10 @@ function ownerChecks(ctx, unit) {
 function rejectedCounts(ctx, unit) {
   protect(ctx, KEEP, 7);
   for (const immediate of [0, 2, 32, 255]) {
-    const bytes = Buffer.from([0x66, 0xc0, 5 | ctx.bank.extension, 0x10, 0x40, 0, 0, immediate, 0xeb, 0, 0x0f, 0x0b]);
+    const bytes = Buffer.from([0xf0, 0xc0, 5 | ctx.bank.extension, 0x10, 0x40, 0, 0, immediate, 0xeb, 0, 0x0f, 0x0b]);
     dataInput(ctx, KEEP, bytes); const published = [ctx.api.generation(), ctx.api.module_ptr(), ctx.api.module_len()];
     request(ctx, words(ctx.owner === 'replacement' ? [KEEP] : [KEEP, bytes.length - 2]));
-    pure(ctx, () => ctx.owner === 'replacement' ? ctx.api.compile_entries(1, 0) : ctx.api.compile_resident(1), 'strict operand-size prefix memory count refused', 10); counts.compiler_refusals++;
+    pure(ctx, () => ctx.owner === 'replacement' ? ctx.api.compile_entries(1, 0) : ctx.api.compile_resident(1), 'invalid LOCK prefix memory count refused', 10); counts.compiler_refusals++;
     assert.deepEqual([ctx.api.generation(), ctx.api.module_ptr(), ctx.api.module_len()], published, 'failed compiler preserves published metadata');
     assert.deepEqual(Buffer.from(refresh(ctx).bytes.subarray(unit.pointer, unit.pointer + unit.length)), unit.bytes, 'failed compiler preserves published module bytes');
     const registers = Array.from({length: 8}, (_, index) => ctx.expected.readUInt32LE(16 + index * 4)), pc = ctx.expected.readUInt32LE(48), flags = ctx.expected.readUInt32LE(52);

@@ -52,7 +52,7 @@ const programs = Object.fromEntries(['left', 'right'].map(kind => {
     if (kind === 'left') {specs.push([PC + entry, length]); scans.push({entry: PC + entry, rotate: PC + entry + prefix.length, destination});}
     offset += length;
   }
-  assert.equal(offset, 99); bytes.set([0x0f, 0x0b], 128); assert.deepEqual(readFileSync(join(output, `${kind}.x86`)), bytes); return [kind, bytes];
+  assert.equal(offset, 99); bytes.set([0xf0, 0x90], 128); assert.deepEqual(readFileSync(join(output, `${kind}.x86`)), bytes); return [kind, bytes];
 }));
 const counts = {contexts: 0, modules: 0, seeds: 0, rcl: 0, rcr: 0, first_rotates: 0, second_rotates: 0, setb: 0, seto: 0, jumps: 0,
   clc: 0, stc: 0, cmc: 0, generated_runs: 0, preflight_controls: 0, owner_controls: 0, pages: 0, arena_checks: 0};

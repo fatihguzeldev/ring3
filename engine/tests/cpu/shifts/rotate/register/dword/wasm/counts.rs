@@ -93,7 +93,7 @@ fn actual_wasm_register_rotates_preserve_old_count_flags_and_current_tail() {
             }
             bytes[96..98].copy_from_slice(&[0xd3, 0xc0 | extension | destination]);
             assert_eq!(98 + tail(&mut bytes, 98, false), 106);
-            bytes[128..].copy_from_slice(&[0x0f, 0x0b]);
+            bytes[128..].copy_from_slice(&[0xf0, 0x90]);
             save_bank(
                 &output,
                 &format!("base-{kind}-d{destination}"),
@@ -113,7 +113,7 @@ fn actual_wasm_register_rotates_preserve_old_count_flags_and_current_tail() {
             offset += length;
         }
         assert_eq!(offset, 88);
-        bytes[128..].copy_from_slice(&[0x0f, 0x0b]);
+        bytes[128..].copy_from_slice(&[0xf0, 0x90]);
         save_bank(
             &output,
             &format!("edge-{kind}-imm"),
@@ -134,7 +134,7 @@ fn actual_wasm_register_rotates_preserve_old_count_flags_and_current_tail() {
         bytes[5..5 + target.len()].copy_from_slice(target);
         let packed = 5 + target.len() + tail(&mut bytes, 5 + target.len(), true);
         assert_eq!(packed, if case == "immediate" { 21 } else { 20 });
-        bytes[128..].copy_from_slice(&[0x0f, 0x0b]);
+        bytes[128..].copy_from_slice(&[0xf0, 0x90]);
         save_bank(
             &output,
             &format!("currency-{case}"),

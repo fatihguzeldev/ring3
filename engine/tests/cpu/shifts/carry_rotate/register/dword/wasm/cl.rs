@@ -109,7 +109,7 @@ fn native_pure_and_actual_bound_dword_carry_rotates_by_cl() {
         groups.push(spans);
     }
     assert_eq!(at, 208);
-    bytes[0xf00..0xf02].copy_from_slice(&[0x0f, 0x0b]);
+    bytes[0xf00..0xf02].copy_from_slice(&[0xf0, 0x90]);
     fs::write(output.join("master.x86"), &bytes).unwrap();
     for (group, spans) in groups.iter().enumerate() {
         pure(&output, &format!("master-g{group}"), &bytes, spans, 32);
@@ -127,7 +127,7 @@ fn native_pure_and_actual_bound_dword_carry_rotates_by_cl() {
         }
     }
     assert_eq!(at, 108);
-    bytes[128..].copy_from_slice(&[0x0f, 0x0b]);
+    bytes[128..].copy_from_slice(&[0xf0, 0x90]);
     fs::write(output.join("chain.x86"), bytes).unwrap();
     pure(&output, "chain", &bytes, &spans, 42);
     for (name, operand) in [
@@ -138,7 +138,7 @@ fn native_pure_and_actual_bound_dword_carry_rotates_by_cl() {
         let mut bytes = [0xcc; 130];
         bytes[..2].copy_from_slice(&[0xd3, operand]);
         assert_eq!(2 + local_tail(&mut bytes, 2), 15);
-        bytes[128..].copy_from_slice(&[0x0f, 0x0b]);
+        bytes[128..].copy_from_slice(&[0xf0, 0x90]);
         fs::write(output.join(format!("currency-{name}.x86")), bytes).unwrap();
     }
     let result = wasm_support::run_node(

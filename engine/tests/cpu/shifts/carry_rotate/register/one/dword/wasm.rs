@@ -64,7 +64,7 @@ fn actual_wasm_rotates_registers_and_carry_once_with_live_flag_continuations() {
             })
             .collect();
         assert_eq!(offset, 99);
-        bytes[128..].copy_from_slice(&[0x0f, 0x0b]);
+        bytes[128..].copy_from_slice(&[0xf0, 0x90]);
         let mut memory = AddressSpace::new(1).unwrap();
         memory
             .map_zeroed(

@@ -1,10 +1,11 @@
 import assert from 'node:assert/strict';
 import {execFileSync} from 'node:child_process';
 import {createHash} from 'node:crypto';
-import {readFileSync, writeFileSync} from 'node:fs';
+import {mkdirSync, readFileSync, writeFileSync} from 'node:fs';
 import {join} from 'node:path';
 
 const [enginePath, outputDir, root] = process.argv.slice(2);
+mkdirSync(join(outputDir, 'runtime'), {recursive: true});
 assert.ok(root, 'expected actual engine, output directory and repository root');
 const fixture = join(root, 'engine/tests/cpu/shifts/single/register/fixtures/p2-shift');
 const hash = value => createHash('sha256').update(value).digest('hex');
@@ -65,7 +66,7 @@ function childLocals(module) {
       assert.equal(unsigned(),1);const bodyLength=unsigned(),bodyEnd=at+bodyLength;
       assert.equal(bodyEnd,end);const count=unsigned(),locals=[];
       for(let index=0;index<count;index++)locals.push([unsigned(),module[at++]]);
-      assert.deepEqual(locals,[[16,0x7f],[1,0x7e]]);
+      assert.deepEqual(locals,[[16, 0x7f], [1, 0x7e], [10, 0x7f]]);
       return locals;
     }
     at=end;
@@ -80,8 +81,7 @@ const text=authoredText(readFileSync(objectPath));
 writeFileSync(join(outputDir,'program.x86'),text);writeFileSync(join(outputDir,'program.S'),source);
 writeFileSync(join(outputDir,'authored-oracle.json'),oracleBytes);writeFileSync(join(outputDir,'runtime/run.mjs'),readFileSync(import.meta.filename));
 const production=execFileSync('rg',['--files','engine/src'],{cwd:root,encoding:'utf8'}).trim().split('\n').sort();
-const paths=[...production,'Cargo.toml','engine/Cargo.toml','Cargo.lock','engine/tests/cpu/shifts/single/register/wasm/dword.rs', 'engine/tests/cpu/shifts/wasm.rs', 'engine/tests/support/wasm.rs', 'engine/tests/cpu/shifts/wasm.rs', 'engine/tests/support/wasm.rs',
-  'engine/tests/cpu/shifts/single/register/fixtures/p2-shift/program.S','engine/tests/cpu/shifts/single/register/fixtures/p2-shift/oracle.json','engine/tests/cpu/shifts/single/register/fixtures/p2-shift/runtime/run.mjs'];
+const paths=[...production,'Cargo.toml','engine/Cargo.toml','Cargo.lock','engine/tests/cpu/shifts/single/register/wasm/dword.rs', 'engine/tests/cpu/shifts/wasm.rs', 'engine/tests/support/wasm.rs', 'engine/tests/cpu/shifts/single/register/fixtures/p2-shift/program.S','engine/tests/cpu/shifts/single/register/fixtures/p2-shift/oracle.json','engine/tests/cpu/shifts/single/register/fixtures/p2-shift/runtime/run.mjs'];
 const sources=Object.fromEntries(paths.map(path=>[path,hash(readFileSync(join(root,path)))]));
 writeFileSync(join(outputDir,'source-sha256.json'),JSON.stringify(sources,null,2));
 const engineBytes=readFileSync(enginePath);writeFileSync(join(outputDir,'engine.wasm'),engineBytes);
