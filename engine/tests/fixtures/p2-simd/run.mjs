@@ -27,7 +27,7 @@ const cases=[
  {name:'punpckhbw-source-alias',code:'660f68c0',direct:true,a:Buffer.from(Array.from({length:16},(_,i)=>i)),out:hex('080809090a0a0b0b0c0c0d0d0e0e0f0f')},
  {name:'pmovmskb-high-bit-order',code:'660fd7c0',direct:true,a:hex('80008000800080008000800080008000'),gpr:0x5555},
  {name:'pextrw-zero-extends',code:'660fc5c003',direct:true,a:hex('010203040506ffff090a0b0c0d0e0f10'),gpr:0xffff},
- {name:'psrlq-full64-count',code:'660fd3c1',a:fill(255),b:qwords([0x100000000n,0n]),out:zero},
+ {name:'psrlq-full64-count',code:'660fd3c1',direct:true,a:fill(255),b:qwords([0x100000000n,0n]),out:zero},
  {name:'addss-nearest-even',code:'f30f58c1',a:dwords([0x3f800000,1,2,3]),b:dwords([0x33800000,4,5,6]),out:dwords([0x3f800000,1,2,3]),mxcsr:0x1f80,afterMxcsr:0x1fa0},
  {name:'addss-round-up',code:'f30f58c1',a:dwords([0x3f800000,1,2,3]),b:dwords([0x33800000,4,5,6]),out:dwords([0x3f800001,1,2,3]),mxcsr:0x5f80,afterMxcsr:0x5fa0},
  {name:'addpd-two-exact-lanes',code:'660f58c1',a:qwords([0x3ff0000000000000n,0x4000000000000000n]),b:qwords([0x4000000000000000n,0x4008000000000000n]),out:qwords([0x4008000000000000n,0x4014000000000000n])},
@@ -66,10 +66,22 @@ const cases=[
  {name:'stmxcsr-exact-dword',code:'0fae18',address:DATA,mxcsr:0x5f80,write:dwords([0x5f80]),writeLength:4},
  {name:'fxsave-write-only-preserves-software-tail',code:'0fae00',address:DATA,a:fill(0x31),b:fill(0x42),seedMemory:Buffer.alloc(512,0x66),write:savedImage,writeLength:512,writeOnly:true},
  {name:'fxrstor-physical-tags-and-xmm',code:'0fae08',address:DATA,memory:restoredImage,afterX87:restoredX87,afterXmm:restoredImage.subarray(160,288),afterMxcsr:0x5f80},
- {name:'mmx-psrlq-variable-count-nonzero',code:'0fd3c1',mmx:true,a:hex('1122334455667788'),b:qwords([8n,0n]),out:hex('2233445566778800')},
+ {name:'mmx-psrlq-variable-count-nonzero',code:'0fd3c1',direct:true,mmx:true,a:hex('1122334455667788'),b:qwords([8n,0n]),out:hex('2233445566778800')},
  {name:'addsd-exact-even-carry-preserves-controls-and-upper',code:'f20f58c1',a:qwords([0x3ff0000000000001n,0x0123456789abcdefn]),b:qwords([0x3ff0000000000001n,0x7ff0000000000001n]),out:qwords([0x4000000000000001n,0x0123456789abcdefn]),mxcsr:0xdfe5},
  {name:'subss-exact-negative-preserves-unmasked-controls-and-upper',code:'f30f5cc1',a:dwords([0x3f800000,0x7fc01234,0x87654321,0x12345678]),b:dwords([0x3fc00000,0x7f801234,0x11223344,0x55667788]),out:dwords([0xbf000000,0x7fc01234,0x87654321,0x12345678]),mxcsr:0x8040},
  {name:'fxrstor-split-read-fault-preserves-staged-transfer',code:'0fae08',address:0x5f00,a:fill(0x31),b:fill(0x42),reason:5,retired:0,detail:1,fault:0x6000,access:1,length:512,stagedTransfer:Buffer.from(Array.from({length:512},(_,i)=>(i*29+0x63)%255+1))},
+ {name:'psllw-full-immediate-ff-zeroes',code:'660f71f0ff',direct:true,a:fill(0xa5),out:zero},
+ {name:'pslld-count-equal-width-zeroes',code:'660ff2c1',direct:true,a:dwords([1,0x80000000,0xffffffff,0x12345678]),b:qwords([32n,0n]),out:zero},
+ {name:'psllq-count-63-keeps-last-bit',code:'660ff3c1',direct:true,a:qwords([1n,3n]),b:qwords([63n,0n]),out:qwords([0x8000000000000000n,0x8000000000000000n])},
+ {name:'psrlw-unsigned-count-sign-bit-zeroes',code:'660fd1c1',direct:true,a:fill(255),b:qwords([0x8000000000000000n,0n]),out:zero},
+ {name:'psrld-immediate-ordinary-logical',code:'660f72d004',direct:true,a:dwords([0xf1234567,0x80000000,1,0xffffffff]),out:dwords([0x0f123456,0x08000000,0,0x0fffffff])},
+ {name:'psraw-oversized-count-clamps-per-lane-sign',code:'660fe1c1',direct:true,a:hex('0180ff7fffff010000800000feff0200'),b:qwords([33n,0n]),out:hex('ffff0000ffff0000ffff0000ffff0000')},
+ {name:'psrad-full-immediate-ff-clamps-per-lane-sign',code:'660f72e0ff',direct:true,a:dwords([0x80000001,0x7fffffff,0xffffffff,1]),out:dwords([0xffffffff,0,0xffffffff,0])},
+ {name:'pslld-count-destination-alias-ignores-upper64',code:'660ff2c0',direct:true,a:qwords([1n,0x80000000ffffffffn]),out:dwords([2,0,0xfffffffe,0])},
+ {name:'psraw-memory-count-ignores-upper64',code:'660fe100',direct:true,a:hex('0180ff7fffff010000800000feff0200'),memory:qwords([1n,0xffffffffffffffffn]),address:DATA,readAlignment:16,out:hex('00c0ff3fffff000000c00000ffff0100')},
+ {name:'psllq-memory-count-unmapped-preserves-destination',code:'660ff300',direct:true,a:qwords([0x1122334455667788n,0x8877665544332211n]),address:0x6000,reason:5,retired:0,detail:1,fault:0x6000,access:1,length:16,readAlignment:16,stagedTransfer:fill(0x97)},
+ {name:'mmx-psrlw-memory-count-reads-full8-before-oversized-shortcut',code:'0fd100',direct:true,mmx:true,a:hex('1122334455667788'),address:0x5ffc,seedMemory:dwords([64]),reason:5,retired:0,detail:1,fault:0x6000,access:1,length:8,readAlignment:1,stagedTransfer:Buffer.alloc(8,0xb3)},
+ {name:'pending-x87-stops-mmx-shift-before-count-read',code:'0ff300',direct:true,mmx:true,pendingX87:true,a:hex('1122334455667788'),address:0x5ffc,seedMemory:dwords([64]),reason:12,retired:0,detail:0x8081},
 ];
 const sourcePaths=['engine/src/cpu/x86/simd.rs','engine/src/cpu/x86/simd/packed.rs','engine/src/cpu/x86/simd/float.rs','engine/src/cpu/x86/decode/simd.rs','engine/src/cpu/dbt/wasm/simd.rs','engine/src/cpu/dbt/wasm/simd/direct.rs','engine/src/process/simd.rs','engine/src/process/cpu_memory.rs','engine/src/abi/x86/simd.rs','engine/tests/simd_semantics.rs','engine/tests/cpu_simd_wasm.rs','engine/tests/fixtures/p2-simd/run.mjs'];
 const sourceHashes=()=>Object.fromEntries(sourcePaths.map(p=>[p,hash(readFileSync(join(root,p)))])),beforePins=sourceHashes();
@@ -127,16 +139,16 @@ function test(c,block,row){
  if(row.stagedTransfer){
   assert.equal(events.length,1,row.name+' only the failed read crosses the host');
   assert.equal(events[0].name,'cpu_read');
-  assert.deepEqual(events[0].args,[row.address,512,16]);
-  assert.equal(events[0].packet,packet(512,1,row.detail,row.fault,row.access).toString('hex'));
-  assert.deepEqual(actual.subarray(T,T+512),row.stagedTransfer,row.name+' failed read preserves every staged transfer byte');
+  assert.deepEqual(events[0].args,[row.address,row.stagedTransfer.length,row.readAlignment??16]);
+  assert.equal(events[0].packet,packet(row.stagedTransfer.length,1,row.detail,row.fault,row.access).toString('hex'));
+  assert.deepEqual(actual.subarray(T,T+row.stagedTransfer.length),row.stagedTransfer,row.name+' failed read preserves every staged transfer byte');
  }
  expected.set(actual.subarray(100,140),100);expected.set(actual.subarray(T,T+512),T);expected.set(actual.subarray(T+512,T+520),T+512);
  assert.deepEqual(actual,expected,row.name+' complete arena');
  if(reason===1&&last){assert.equal(last.packet,packet(row.write?row.writeLength??16:row.masked!==undefined?16:row.direct&&row.memory?row.memory.length:0).toString('hex'));if(!row.direct)assert.equal(actual.readUInt32LE(T+516),row.flags??0xcd7);}
  else if(last){const p=hex(last.packet);assert.equal(p.readUInt32LE(16),row.compiledGp?0:reason===13?5:reason===11?3:1);assert.equal(p.readUInt32LE(24),row.detail??0);}
  if(row.masked!==undefined){assert.equal(events.at(-1).args.at(-1),row.masked);assert.equal(actual.readUInt32LE(T+512),row.masked);}
- if(row.memory&&reason!==11){assert.equal(events[0].name,'cpu_read');assert.deepEqual(actual.subarray(T,T+row.memory.length),row.memory);}
+ if(row.memory&&reason!==11){assert.equal(events[0].name,'cpu_read');if(row.readAlignment!==undefined)assert.deepEqual(events[0].args,[row.address,row.memory.length,row.readAlignment]);assert.deepEqual(actual.subarray(T,T+row.memory.length),row.memory);}
  if(row.writeOnly)host(c,'protect',[0x5000,1,3]);
  if(row.write||row.masked){const wanted=row.write??Buffer.from(fill(0x66).map((v,i)=>row.masked&(1<<i)?row.a[i]:v)),address=row.address??DATA;for(let i=0;i<wanted.length;i++){host(c,'read8',[address+i]);const p=arena(c);assert.equal(p.readUInt32LE(120),wanted[i],row.name+' memory byte'+i);}}
  if(row.unchangedMemory){for(let i=0;i<row.unchangedMemory.length;i++){host(c,'read8',[(row.address??DATA)+i]);assert.equal(arena(c).readUInt32LE(120),row.unchangedMemory[i],row.name+' preserved memory byte'+i);}}
