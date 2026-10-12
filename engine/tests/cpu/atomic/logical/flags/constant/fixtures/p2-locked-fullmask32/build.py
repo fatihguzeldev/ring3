@@ -9,7 +9,7 @@ import json
 from pathlib import Path
 import sys
 
-ROOT = Path(__file__).resolve().parents[8]
+ROOT = Path(__file__).resolve().parents[9]
 DEPENDENCY = ROOT / "engine/tests/programs/records/fixtures/p2-compiled-records/build.py"
 DEPENDENCY_SHA256 = "fe426f202b48664a87357c766d39099b9d35b5d8217c2b114696164a0d468258"
 SOURCE_SHA256 = "92b677aa168efc74d59f4c7ed4ff71c8917c3d9561886b711469461d3e38e2b8"

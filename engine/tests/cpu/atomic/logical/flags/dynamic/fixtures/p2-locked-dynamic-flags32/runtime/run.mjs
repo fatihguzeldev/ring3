@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
 import {readFileSync,writeFileSync} from 'node:fs';
 import {join} from 'node:path';
-import {readEngine} from '../../../../../../../support/wasm/engine.mjs';
+import {readEngine} from '../../../../../../../../support/wasm/engine.mjs';
 
 const [enginePath,output,root]=process.argv.slice(2),SIZE=4612,DATA=0x5010;
 assert.ok(enginePath&&output&&root);
@@ -14,8 +14,8 @@ const sourcePaths=['engine/src/cpu/x86/decode/profile.rs','engine/src/cpu/x86/de
   'engine/src/cpu/dbt/wasm/memory.rs','engine/src/cpu/dbt/wasm/memory/exchange.rs','engine/src/cpu/dbt/wasm/locals.rs',
   'engine/src/memory/space.rs','engine/src/process/instance.rs', 'engine/src/process/execution/compiled.rs', 'engine/src/process/execution/authority.rs', 'engine/src/process/memory/address_space.rs', 'engine/src/process/memory/scalar.rs', 'engine/src/process/memory/scalar_tests.rs', 'engine/src/process/execution/mod.rs', 'engine/src/process/memory/mod.rs', 'engine/src/process/mod.rs','engine/src/process/wasm/mod.rs', 'engine/src/process/wasm/loading.rs', 'engine/src/process/wasm/execution.rs', 'engine/src/process/wasm/calls.rs', 'engine/src/process/wasm/memory.rs', 'engine/src/process/wasm/cpu.rs', 'engine/src/process/mod.rs','engine/src/process/execution/resident.rs', 'engine/src/process/execution/authority.rs', 'engine/src/process/execution/mod.rs', 'engine/src/process/mod.rs',
   'engine/src/abi/memory_helper.rs','engine/src/abi/arena.rs','engine/src/abi/wasm/exports/calls.rs', 'engine/src/abi/wasm/exports/cpu.rs', 'engine/src/abi/wasm/exports/execution.rs', 'engine/src/abi/wasm/exports/image.rs', 'engine/src/abi/wasm/exports/instance.rs', 'engine/src/abi/wasm/exports/memory.rs', 'engine/src/abi/wasm/exports/mod.rs',
-  'engine/tests/cpu/atomic/logical/locked/native/register32.rs', 'engine/tests/cpu/atomic/native.rs', 'engine/tests/support/cpu/prefix_admission.rs', 'engine/tests/cpu/atomic/native.rs','engine/tests/cpu/atomic/logical/flags/compiler/native/dynamic32.rs', 'engine/tests/cpu/atomic/native.rs', 'engine/tests/cpu/atomic/native.rs','engine/tests/cpu/atomic/logical/flags/wasm/dynamic32.rs', 'engine/tests/cpu/atomic/wasm.rs', 'engine/tests/support/wasm.rs', 'engine/tests/cpu/atomic/wasm.rs', 'engine/tests/support/wasm.rs',
-  ...['kernel.c','build.py','PROVENANCE.md','kernel.obj','kernel.text.bin','kernel.disasm.txt','receipt.json','runtime/run.mjs'].map(p=>'engine/tests/cpu/atomic/logical/flags/fixtures/p2-locked-dynamic-flags32/'+p),
+  'engine/tests/cpu/atomic/logical/locked/native/register32.rs', 'engine/tests/cpu/atomic/native.rs', 'engine/tests/support/cpu/prefix_admission.rs', 'engine/tests/cpu/atomic/native.rs','engine/tests/cpu/atomic/logical/flags/dynamic/compiler/native/dword.rs', 'engine/tests/cpu/atomic/native.rs', 'engine/tests/cpu/atomic/native.rs','engine/tests/cpu/atomic/logical/flags/dynamic/wasm/dword.rs', 'engine/tests/cpu/atomic/wasm.rs', 'engine/tests/support/wasm.rs', 'engine/tests/cpu/atomic/wasm.rs', 'engine/tests/support/wasm.rs',
+  ...['kernel.c','build.py','PROVENANCE.md','kernel.obj','kernel.text.bin','kernel.disasm.txt','receipt.json','runtime/run.mjs'].map(p=>'engine/tests/cpu/atomic/logical/flags/dynamic/fixtures/p2-locked-dynamic-flags32/'+p),
   'engine/tests/programs/records/fixtures/p2-compiled-records/build.py','engine/tests/support/wasm/engine.mjs'];
 const sourceHashes=()=>Object.fromEntries(sourcePaths.map(p=>[p,hash(readFileSync(join(root,p)))]));
 const sourcesBefore=sourceHashes(),contexts=[],modules=[],observations=[],helperTrace=[],diagnostics=[];
@@ -29,7 +29,7 @@ const parents=()=>Array.from({length:8},(_,i)=>(0xa100+i)*65536+0x1234+i);
 const parity=value=>{let n=value&255,ones=0;while(n){ones+=n&1;n>>>=1;}return ones%2===0?4:0;};
 const logicalFlags=value=>0x402|parity(value)|(value===0?0x40:0)|(value>=0x80000000?0x80:0);
 assert.equal(logicalFlags(0x80030050),0x486);assert.equal(logicalFlags(0x80010010),0x482);assert.equal(logicalFlags(0x80430850),0x486);
-const kernel=readFileSync(join(root,'engine/tests/cpu/atomic/logical/flags/fixtures/p2-locked-dynamic-flags32/kernel.text.bin'));
+const kernel=readFileSync(join(root,'engine/tests/cpu/atomic/logical/flags/dynamic/fixtures/p2-locked-dynamic-flags32/kernel.text.bin'));
 assert.equal(kernel.toString('hex'),'568b4424148b4c24108b54240c8b742408f009168b16f0210e8b0ef0310631d18b0631c85ec3');
 assert.equal(hash(kernel),'eef4b2124b1aae80ef7aacbefb7c4b4c9ff441789d1b73a91c274c04e78b717e');
 const caller=[

@@ -41,7 +41,7 @@ fn actual_dynamic_flags_consumer_executes_two_original_checksum_calls() {
     fs::write(output.join("initial-arena.bin"), initial).unwrap();
     let result = wasm_support::run_node(
         root,
-        "engine/tests/cpu/atomic/logical/flags/fixtures/p2-locked-dynamic-flags32/runtime/run.mjs",
+        "engine/tests/cpu/atomic/logical/flags/dynamic/fixtures/p2-locked-dynamic-flags32/runtime/run.mjs",
         &engine,
         &output,
         None,
