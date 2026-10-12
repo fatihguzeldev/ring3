@@ -408,7 +408,7 @@ function sourceAuthority(freeze, root) {
     assert.deepEqual(pin(readFileSync(safeFile(root, path))), freeze.source_pins[path]);
     return {path, ...freeze.source_pins[path]};
   });
-  for (const path of ['checks/plan.mjs', 'runtime/run.mjs', 'checks/check.mjs']) assert.ok(rows.some(row => row.path === `engine/tests/cpu/shifts/fixtures/p2-word-double-shift/${path}`));
+  for (const path of ['checks/plan.mjs', 'runtime/run.mjs', 'checks/check.mjs']) assert.ok(rows.some(row => row.path === `engine/tests/cpu/shifts/double/register/fixtures/p2-word-double-shift/${path}`));
   assert.ok(rows.some(row => row.path === 'engine/tests/cpu/shifts/double/register/wasm/word.rs', 'engine/tests/cpu/shifts/wasm.rs', 'engine/tests/cpu/shifts/wasm.rs'));
   for (const path of ['engine/tests/cpu/shifts/double/register/native/word.rs', 'engine/tests/cpu/shifts/native.rs', 'engine/tests/support/cpu/prefix_admission.rs', 'engine/tests/support/cpu/word_prefix.rs', 'engine/tests/cpu/shifts/native.rs', 'target/word-double-shift-session/execute_actual.py', 'target/word-double-shift-session/independent-word-double-shift.py']) assert.ok(rows.some(row => row.path === path));
   assert.equal(freeze.reviews.length, 3);

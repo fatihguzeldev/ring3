@@ -410,7 +410,7 @@ function sourceAuthority(freeze, root) {
     assert.deepEqual(pin(readFileSync(safeFile(root, path))), freeze.source_pins[path]);
     return {path, ...freeze.source_pins[path]};
   });
-  for (const path of ['checks/plan.mjs', 'runtime/run.mjs', 'checks/check.mjs']) assert.ok(rows.some(row => row.path === `engine/tests/cpu/atomic/fixtures/p2-word-xadd/${path}`));
+  for (const path of ['checks/plan.mjs', 'runtime/run.mjs', 'checks/check.mjs']) assert.ok(rows.some(row => row.path === `engine/tests/cpu/atomic/fetch_add/register/fixtures/p2-word-xadd/${path}`));
   assert.ok(rows.some(row => row.path === 'engine/tests/cpu/atomic/fetch_add/register/wasm/word.rs', 'engine/tests/cpu/atomic/wasm.rs', 'engine/tests/cpu/atomic/wasm.rs'));
   for (const path of ['engine/tests/cpu/atomic/fetch_add/register/native/word.rs', 'engine/tests/cpu/atomic/native.rs', 'engine/tests/support/cpu/prefix_admission.rs', 'engine/tests/support/cpu/word_prefix.rs', 'engine/tests/cpu/atomic/native.rs', 'target/word-xadd-session/execute_actual.py', 'target/word-xadd-session/independent-word-xadd.py']) assert.ok(rows.some(row => row.path === path));
   assert.equal(freeze.reviews.length, 3);

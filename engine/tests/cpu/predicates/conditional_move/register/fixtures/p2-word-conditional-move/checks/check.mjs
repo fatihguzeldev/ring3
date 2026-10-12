@@ -363,7 +363,7 @@ function sourceAuthority(freeze, root) {
     assert.deepEqual(pin(readFileSync(safeFile(root, path))), freeze.source_pins[path]);
     return {path, ...freeze.source_pins[path]};
   });
-  for (const path of ['checks/plan.mjs', 'runtime/run.mjs', 'checks/check.mjs']) assert.ok(rows.some(row => row.path === `engine/tests/cpu/predicates/fixtures/p2-word-conditional-move/${path}`));
+  for (const path of ['checks/plan.mjs', 'runtime/run.mjs', 'checks/check.mjs']) assert.ok(rows.some(row => row.path === `engine/tests/cpu/predicates/conditional_move/register/fixtures/p2-word-conditional-move/${path}`));
   assert.ok(rows.some(row => row.path === 'engine/tests/cpu/predicates/conditional_move/register/wasm/word.rs', 'engine/tests/cpu/predicates/wasm.rs', 'engine/tests/cpu/predicates/wasm.rs'));
   return rows;
 }

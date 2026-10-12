@@ -370,7 +370,7 @@ function sourceAuthority(freeze,root){
   for(const name of ['engine_path','plan_path','capture_path'])assert.ok(isAbsolute(freeze[name]));
   assert.deepEqual(pin(readFileSync(regularFile(freeze.engine_path))),freeze.engine);assert.deepEqual(pin(readFileSync(regularFile(freeze.plan_path))),freeze.plan);
   const rows=Object.keys(freeze.source_pins).sort().map(path=>{assert.deepEqual(pin(readFileSync(safeFile(root,path))),freeze.source_pins[path]);return{path,...freeze.source_pins[path]};});
-  for(const name of ['checks/plan','runtime/run','checks/check'])assert.ok(rows.some(r=>r.path===`engine/tests/cpu/predicates/fixtures/p2-word-memory-conditional-move/${name}.mjs`));
+  for(const name of ['checks/plan','runtime/run','checks/check'])assert.ok(rows.some(r=>r.path===`engine/tests/cpu/predicates/conditional_move/memory/fixtures/p2-word-memory-conditional-move/${name}.mjs`));
   assert.ok(rows.some(r=>r.path==='engine/tests/cpu/predicates/conditional_move/memory/wasm/word.rs', 'engine/tests/cpu/predicates/wasm.rs', 'engine/tests/cpu/predicates/wasm.rs'));
   assert.equal(freeze.reviews.length,3);for(const r of freeze.reviews){assert.equal(r.ack,true);assert.deepEqual(pin(readFileSync(safeFile(root,r.index))),{bytes:r.bytes,sha256:r.sha256});}return rows;
 }
