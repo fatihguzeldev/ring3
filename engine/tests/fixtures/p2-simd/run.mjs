@@ -18,6 +18,7 @@ const restoredImage=Buffer.alloc(512);restoredImage.writeUInt16LE(0x37f);restore
 const restoredX87=record('R3FP',1,128,[]);restoredX87.writeUInt16LE(0x37f,16);restoredX87.writeUInt16LE(0x1800,18);restoredX87.writeUInt16LE(0xfd3f,20);
 for(let physical=0;physical<8;physical++){const raw=Buffer.alloc(10);if(physical!==4){raw.writeBigUInt64LE(0x8000000000000000n+BigInt(physical));raw.writeUInt16LE(0x3fff,8);}raw.copy(restoredX87,40+physical*10);raw.copy(restoredImage,32+((physical+5)&7)*16);restoredImage.fill(0x30+physical,160+physical*16,176+physical*16);}
 const cases=[
+ {name:'movlps-store-raw-bits-and-canaries',code:'0f1300',a:hex('341200000000f07f1122334455667788'),write:hex('341200000000f07f6666666666666666'),writeLength:8},
  {name:'paddb-wrap',code:'660ffcc1',direct:true,a:fill(255),b:fill(1),out:zero},
  {name:'paddsb-saturate',code:'660fecc1',direct:true,a:fill(127),b:fill(1),out:fill(127)},
  {name:'pmaddwd-overflow',code:'660ff5c1',direct:true,a:hex('00800080008000800080008000800080'),b:hex('00800080008000800080008000800080'),out:dwords([0x80000000,0x80000000,0x80000000,0x80000000])},
@@ -133,7 +134,7 @@ for(const owner of['replacement','resident'])for(const entries of[false,true])fo
 // independently challenge publication after a well-formed V7 success packet.
 const rawCases=[
  {name:'raw-reserved-bit-before-gpr',code:'f30f2cc1',flags:0xcd5},
- {name:'raw-preserved-df-before-memory-write',code:'f30f1100',flags:0x8d7},
+ {name:'raw-preserved-df-before-memory-write',code:'0f1300',flags:0x8d7},
  {name:'raw-high-reserved-before-gpr',code:'f30f2cc1',flags:0x1cd7},
  {name:'raw-nonzero-helper-value-before-gpr',code:'f30f2cc1',flags:0xcd7,value:1},
  {name:'raw-invalid-compare-relation',code:'0f2ec1',flags:0x443},

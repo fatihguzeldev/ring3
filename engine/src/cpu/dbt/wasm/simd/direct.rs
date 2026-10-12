@@ -11,7 +11,7 @@ use wasm_encoder::{InstructionSink, MemArg};
 
 pub(super) fn accepts(op: SimdOperation) -> bool {
     match op.kind {
-        SimdKind::Move => true,
+        SimdKind::Move | SimdKind::MoveScalar => true,
         SimdKind::Packed(kind) => matches!(
             kind,
             P::Add
@@ -305,6 +305,23 @@ pub(super) fn instruction(
     }
     match op.kind {
         SimdKind::Move => load(code, op.source, op.lane_bytes),
+        SimdKind::MoveScalar => {
+            if op.reads_memory() || op.writes_memory() {
+                load(code, op.source, op.lane_bytes);
+            } else {
+                load(code, op.destination, 16);
+                load(code, op.source, op.lane_bytes);
+                match op.lane_bytes {
+                    4 => {
+                        code.i32x4_extract_lane(0).i32x4_replace_lane(0);
+                    }
+                    8 => {
+                        code.i64x2_extract_lane(0).i64x2_replace_lane(0);
+                    }
+                    _ => unreachable!("scalar SIMD move width was decoded"),
+                }
+            }
+        }
         SimdKind::Packed(kind) => {
             load(code, op.destination, op.vector_bytes);
             if kind == P::AndNot {
@@ -357,7 +374,17 @@ pub(super) fn instruction(
             code.local_set(register(gpr));
         }
         SimdOperand::Memory(_) => {
-            code.v128_store(arg(TRANSFER_OFFSET));
+            match (op.kind, op.lane_bytes) {
+                (SimdKind::MoveScalar, 4) => {
+                    code.v128_store32_lane(arg(TRANSFER_OFFSET), 0);
+                }
+                (SimdKind::MoveScalar, 8) => {
+                    code.v128_store64_lane(arg(TRANSFER_OFFSET), 0);
+                }
+                _ => {
+                    code.v128_store(arg(TRANSFER_OFFSET));
+                }
+            }
             let import = imports.cpu_write.expect("direct SIMD write");
             let index = import.emit_binding(code);
             code.local_get(ADDRESS)
