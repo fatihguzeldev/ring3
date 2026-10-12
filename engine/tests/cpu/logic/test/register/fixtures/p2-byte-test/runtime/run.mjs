@@ -84,7 +84,7 @@ function seed(ctx, registers, pc, flags, cancel = 0) {
   refresh(ctx).bytes.set(record('R3ST', 56, [...registers, pc, flags]), ctx.base);
   ctx.bytes.set(record('R3EX', 40, [3, 0, 0, 0, 0, 0]), ctx.base + 56);
   ctx.view.setUint32(ctx.base + 96, cancel, true);
-  ctx.bytes.fill(0xa5, ctx.base + 100, ctx.base + arenaSize);
+  ctx.bytes.fill(0xa5, ctx.base + 100, ctx.base + 4236);
 }
 function byte(registers, index) {
   return Math.floor(registers[index % 4] / (index < 4 ? 1 : 256)) % 256;
@@ -204,7 +204,7 @@ for (const base of [0x400000, 0x500000]) for (const owner of ['replacement', 're
   const label = `pe-${owner}-${base.toString(16)}`, ctx = fresh(owner);
   assert.equal(ctx.api.begin_image_input(image.length), 0); request(ctx, image);
   assert.equal(ctx.api.append_image_input(0, image.length), 0);
-  refresh(ctx).bytes.fill(0xa5, ctx.base + transfer, ctx.base + arenaSize);
+  refresh(ctx).bytes.fill(0xa5, ctx.base + transfer, ctx.base + 4236);
   assert.equal(ctx.api.load_pe32_linked_v2_input_at(base, 0x8000), 0); refresh(ctx);
   const receipt = ctx.bytes.slice(ctx.base + transfer, ctx.base + transfer + 72), view = new DataView(receipt.buffer);
   assert.equal(Buffer.from(receipt.subarray(0, 4)).toString(), 'R3LI'); assert.equal(view.getUint32(16, true), base);
@@ -241,7 +241,8 @@ for (const base of [0x400000, 0x500000]) for (const owner of ['replacement', 're
   peRows.push({owner, base, guest_retired: 15, branch_result: 0xc8c00002, final_flags: 0x46, canary: 0, receipt_sha256: hash(receipt)});
   assert.equal(ctx.api.close(), 0);
 }
-const sourcePaths = ['Cargo.toml', 'Cargo.lock', 'engine/Cargo.toml', 'engine/src/cpu/x86/ir.rs', 'engine/src/cpu/x86/decode/integer.rs', 'engine/src/cpu/dbt/region.rs', 'engine/src/cpu/dbt/wasm/integer/arithmetic.rs', 'engine/src/cpu/dbt/wasm/integer/bits.rs', 'engine/src/cpu/dbt/wasm/integer/carry_rotates.rs', 'engine/src/cpu/dbt/wasm/integer/decimal.rs', 'engine/src/cpu/dbt/wasm/integer/dispatch.rs', 'engine/src/cpu/dbt/wasm/integer/flags.rs', 'engine/src/cpu/dbt/wasm/integer/mod.rs', 'engine/src/cpu/dbt/wasm/integer/multiply_divide.rs', 'engine/src/cpu/dbt/wasm/integer/operands.rs', 'engine/src/cpu/dbt/wasm/integer/rotates.rs', 'engine/src/cpu/dbt/wasm/integer/shifts.rs', 'engine/tests/cpu/logic/test/register/wasm/byte.rs', 'engine/tests/cpu/logic/wasm.rs', 'engine/tests/support/loader/pe32.rs', 'engine/tests/support/wasm.rs', 'engine/tests/cpu/logic/wasm.rs', 'engine/tests/support/wasm.rs', 'engine/tests/cpu/logic/test/register/fixtures/p2-byte-test/runtime/run.mjs', 'engine/tests/support/loader/pe32.rs'];
+const sourcePaths = ['Cargo.toml', 'Cargo.lock', 'engine/Cargo.toml', 'engine/src/cpu/x86/ir.rs', 'engine/src/cpu/x86/decode/integer.rs', 'engine/src/cpu/dbt/region.rs', 'engine/src/cpu/dbt/wasm/integer/arithmetic.rs', 'engine/src/cpu/dbt/wasm/integer/bits.rs', 'engine/src/cpu/dbt/wasm/integer/carry_rotates.rs', 'engine/src/cpu/dbt/wasm/integer/decimal.rs', 'engine/src/cpu/dbt/wasm/integer/dispatch.rs', 'engine/src/cpu/dbt/wasm/integer/flags.rs', 'engine/src/cpu/dbt/wasm/integer/mod.rs', 'engine/src/cpu/dbt/wasm/integer/multiply_divide.rs', 'engine/src/cpu/dbt/wasm/integer/operands.rs', 'engine/src/cpu/dbt/wasm/integer/rotates.rs', 'engine/src/cpu/dbt/wasm/integer/shifts.rs', 'engine/tests/cpu/logic/test/register/wasm/byte.rs', 'engine/tests/cpu/logic/wasm.rs', 'engine/tests/support/loader/pe32.rs', 'engine/tests/support/wasm.rs', 'engine/tests/cpu/logic/test/register/fixtures/p2-byte-test/runtime/run.mjs'];
+assert.equal(new Set(sourcePaths).size, sourcePaths.length);
 const result = {status: 'ok', engine_sha256: hash(engineBytes), pe_sha256: hash(image), source_sha256: Object.fromEntries(sourcePaths.map(path => [path, hash(readFileSync(join(root, path)))])), tools: {node: process.version, v8: process.versions.v8}, flag_policy: 'CF/OF clear; undefined AF deterministically clear; DF preserved; ZF/SF/PF from the 8-bit result', counts: {test_cases: rows.length, canonical_forms_per_mode: forms.length, boundary_pairs_per_mode: 49, finite_guest_retired: rows.length, pe_paths: peRows.length, pe_guest_retired: 60}, cases: rows, controls, pe: peRows, modules, claim: 'finite authored TEST8 in native-generated standalone Wasm and engine-Wasm-generated bound modules, plus four copied PE startup/branch/ExitProcess paths; no browser, SDK, general ISA, performance or playable game claim'};
 assert.equal(rows.length, 447); assert.equal(peRows.length, 4);
 writeFileSync(join(output, 'result.json'), JSON.stringify(result, null, 2));
