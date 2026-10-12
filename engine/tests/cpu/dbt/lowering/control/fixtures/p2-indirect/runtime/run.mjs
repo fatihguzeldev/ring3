@@ -326,7 +326,7 @@ for (const fixture of [
   run(engine, child, 2, expected, exit(3, 1, 0, 0, 0, 0, fixture.version), fixture.name, fixture.version === 1 ? arena(engine).slice(100, 140) : helperRecord(0, fixture.target));
 }
 
-const oracleSource = join(fixtureRoot, 'indirect_oracle.c'), oraclePath = join(outputDir, 'indirect_oracle');
+const oracleSource = join(fixtureRoot, 'oracle/native.c'), oraclePath = join(outputDir, 'indirect_oracle');
 const oracleCompile = ['-std=c11', '-O2', '-Wall', '-Wextra', '-Werror', oracleSource, '-o', oraclePath];
 execFileSync('clang', oracleCompile, {stdio: ['ignore', 'pipe', 'pipe']});
 const nativeInputs = [[0, 0, 0, 0, 0x446], [0, 0xffffffff, 1, 0, 0x457], [0, 0x7fffffff, 1, 0x80000000, 0xc96], [1, 0, 1, 0xffffffff, 0x497], [1, 0x80000000, 1, 0x7fffffff, 0xc16], [1, 0x7fffffff, 0xffffffff, 0x80000000, 0xc87]];

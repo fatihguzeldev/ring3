@@ -373,7 +373,7 @@ for (const op of ops) {
   assert.deepEqual(arena(engine), before, 'closed rejection preserves complete arena');
 }
 
-const oracleSource = join(fixtureRoot, 'binary_oracle.c'), oraclePath = join(outputDir, 'binary_oracle');
+const oracleSource = join(fixtureRoot, 'oracle/native.c'), oraclePath = join(outputDir, 'binary_oracle');
 const oracleCompile = ['-std=c11', '-O2', '-Wall', '-Wextra', '-Werror', oracleSource, '-o', oraclePath];
 execFileSync('clang', oracleCompile, {stdio: ['ignore', 'pipe', 'pipe']});
 const foldInputs = [
@@ -420,7 +420,7 @@ const provenance = {
   native_algorithm_cases: foldInputs.length, native_invalid_inputs: invalidOracleInputs.length,
   fold: {below_branches: belowBranches, above_branches: aboveBranches, retired: foldRetired},
   engine_sha256: hash(engineBytes), generated_set_sha256: hash(generatedHashes.join('\n')),
-  sources: Object.fromEntries(['integer.S', 'binary_oracle.c', 'runtime/run.mjs'].map(name => [name, hash(readFileSync(join(fixtureRoot, name)))]).concat([['dbt_memory_binary_wasm.rs', hash(readFileSync(join(root, 'engine/tests/cpu/dbt/lowering/memory/wasm/binary.rs')))]]).concat(['engine/tests/cpu/dbt/lowering/wasm.rs', 'engine/tests/support/wasm.rs'].map(path => [path, hash(readFileSync(join(root, path)))]))),
+  sources: Object.fromEntries(['integer.S', 'oracle/native.c', 'runtime/run.mjs'].map(name => [name, hash(readFileSync(join(fixtureRoot, name)))]).concat([['dbt_memory_binary_wasm.rs', hash(readFileSync(join(root, 'engine/tests/cpu/dbt/lowering/memory/wasm/binary.rs')))]]).concat(['engine/tests/cpu/dbt/lowering/wasm.rs', 'engine/tests/support/wasm.rs'].map(path => [path, hash(readFileSync(join(root, path)))]))),
   artifacts: {object_sha256: hash(object), native_binary_sha256: hash(readFileSync(oraclePath))},
   tools: {node: process.version, clang: execFileSync('clang', ['--version'], {encoding: 'utf8'}).trim(), llvm_objdump: execFileSync('xcrun', ['llvm-objdump', '--version'], {encoding: 'utf8'}).trim()},
   commands: {assemble: ['clang', ...assemble], disassemble: ['xcrun', ...disassemble], native_compile: ['clang', ...oracleCompile]},

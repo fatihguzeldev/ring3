@@ -428,7 +428,7 @@ for (const form of forms) {
   assert.deepEqual(arena(engine), before, 'closed rejection preserves complete arena');
 }
 
-const oracleSource = join(fixtureRoot, 'compare_oracle.c'), oraclePath = join(outputDir, 'compare_oracle');
+const oracleSource = join(fixtureRoot, 'oracle/native.c'), oraclePath = join(outputDir, 'compare_oracle');
 const oracleCompile = ['-std=c11', '-O2', '-Wall', '-Wextra', '-Werror', oracleSource, '-o', oraclePath];
 execFileSync('clang', oracleCompile, {stdio: ['ignore', 'pipe', 'pipe']});
 const scanInputs = [
@@ -478,7 +478,7 @@ const provenance = {
   native_algorithm_cases: scanInputs.length, native_invalid_inputs: invalidOracleInputs.length,
   predicate: {below_branches: belowBranches, zero_branches: zeroBranches, accepted_branches: acceptedBranches, retired: scanRetired},
   engine_sha256: hash(engineBytes), generated_set_sha256: hash(generatedHashes.join('\n')), generated_module_sha256: generatedHashes,
-  sources: Object.fromEntries(['integer.S', 'compare_oracle.c', 'runtime/run.mjs'].map(name => [name, hash(readFileSync(join(fixtureRoot, name)))]).concat([['dbt_memory_compare_wasm.rs', hash(readFileSync(join(root, 'engine/tests/cpu/dbt/lowering/memory/wasm/compare.rs')))]]).concat(['engine/tests/cpu/dbt/lowering/wasm.rs', 'engine/tests/support/wasm.rs'].map(path => [path, hash(readFileSync(join(root, path)))]))),
+  sources: Object.fromEntries(['integer.S', 'oracle/native.c', 'runtime/run.mjs'].map(name => [name, hash(readFileSync(join(fixtureRoot, name)))]).concat([['dbt_memory_compare_wasm.rs', hash(readFileSync(join(root, 'engine/tests/cpu/dbt/lowering/memory/wasm/compare.rs')))]]).concat(['engine/tests/cpu/dbt/lowering/wasm.rs', 'engine/tests/support/wasm.rs'].map(path => [path, hash(readFileSync(join(root, path)))]))),
   artifacts: {object_sha256: hash(object), native_binary_sha256: hash(readFileSync(oraclePath))},
   tools: {node: process.version, clang: execFileSync('clang', ['--version'], {encoding: 'utf8'}).trim(), llvm_objdump: execFileSync('xcrun', ['llvm-objdump', '--version'], {encoding: 'utf8'}).trim()},
   commands: {run: [process.execPath, process.argv[1], enginePath, outputDir, root], assemble: ['clang', ...assemble], disassemble: ['xcrun', ...disassemble], native_compile: ['clang', ...oracleCompile]},

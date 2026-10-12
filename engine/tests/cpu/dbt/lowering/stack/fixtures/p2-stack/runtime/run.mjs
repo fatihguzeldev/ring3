@@ -247,7 +247,7 @@ function guarded(engine, child, label) {
   assert.equal(guestValue(engine, 0x8ff8), 0x1013, 'inner call pushed its exact next EIP');
 }
 
-const oracleSource = join(fixtureRoot, 'stack_oracle.c'), oraclePath = join(outputDir, 'stack_oracle');
+const oracleSource = join(fixtureRoot, 'oracle/native.c'), oraclePath = join(outputDir, 'stack_oracle');
 const oracleCompile = ['-std=c11', '-O2', '-Wall', '-Wextra', '-Werror', oracleSource, '-o', oraclePath];
 execFileSync('clang', oracleCompile, {stdio: ['ignore', 'pipe', 'pipe']});
 const nativeInputs = [0, 1, 2, 31, 4097, 20000];

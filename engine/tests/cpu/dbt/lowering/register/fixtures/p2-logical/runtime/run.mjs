@@ -330,7 +330,7 @@ for (const name of ['mask_entry', 'mask_guard', 'mask_body', 'mask_done']) {
   upload(loop, 0x1000 + fixture.offset, fixture.bytes);
 }
 compile(loop, 'embedded_mask', [0x1200, 0x1202, 0x1206, 0x121d], [[0x121d, 304]]);
-const cSource = join(fixtureRoot, 'logical_oracle.c'), cBinary = join(outputDir, 'logical_oracle');
+const cSource = join(fixtureRoot, 'oracle/native.c'), cBinary = join(outputDir, 'logical_oracle');
 const nativeCommand = ['-std=c11', '-O2', '-Wall', '-Wextra', '-Werror', cSource, '-o', cBinary];
 execFileSync('clang', nativeCommand, {stdio: ['ignore', 'pipe', 'pipe']});
 const nativeInputs = [[0, 0], [1, 0], [2, 3], [10, 0xffffffff], [255, 0x80000000], [256, 0x80000103], [1000, 0x12345678]];
@@ -401,7 +401,7 @@ const provenance = {
   claim: 'Own baseline Wasm logical-register execution; native C is unsigned algorithm evidence, not hardware flags. No synthetic helpers, performance or full P2-V0 claim.',
   standalone_modules: generated.size - 2, embedded_modules: 2, standalone_runs: standaloneRuns, embedded_runs: embeddedRuns, resumes, native_cases: nativeInputs.length, synthetic_runs: 0,
   module_set_sha256: hash(aggregate), engine_sha256: hash(engineBytes),
-  sha256: Object.fromEntries(['integer.S', 'logical_oracle.c', 'runtime/run.mjs'].map(name => [name, hash(readFileSync(join(fixtureRoot, name)))]).concat([...['engine/tests/cpu/dbt/lowering/register/wasm/logical.rs', 'engine/tests/cpu/dbt/lowering/wasm.rs', 'engine/tests/support/wasm.rs'].map(path => [path, hash(readFileSync(join(root, path)))]), ['integer.o', hash(object)], ['logical_oracle', hash(readFileSync(cBinary))]])),
+  sha256: Object.fromEntries(['integer.S', 'oracle/native.c', 'runtime/run.mjs'].map(name => [name, hash(readFileSync(join(fixtureRoot, name)))]).concat([...['engine/tests/cpu/dbt/lowering/register/wasm/logical.rs', 'engine/tests/cpu/dbt/lowering/wasm.rs', 'engine/tests/support/wasm.rs'].map(path => [path, hash(readFileSync(join(root, path)))]), ['integer.o', hash(object)], ['logical_oracle', hash(readFileSync(cBinary))]])),
   versions: {clang: execFileSync('clang', ['--version'], {encoding: 'utf8'}).split('\n')[0], objdump: execFileSync('xcrun', ['llvm-objdump', '--version'], {encoding: 'utf8'}).split('\n')[0], node: process.version},
   commands: {assemble: ['clang', ...assemble], disassemble: ['xcrun', 'llvm-objdump', '-d', '--x86-asm-syntax=intel', objectPath], native: ['clang', ...nativeCommand]},
   llvm_symbols: llvm, generated_sha256: Object.fromEntries([...generated].sort(([a], [b]) => a.localeCompare(b))), native_inputs: nativeInputs,

@@ -290,7 +290,7 @@ for (const push of [true, false]) {
   assert.deepEqual(guestBytes(engine, address, 8), Uint8Array.from(push ? [1, 2, 3, 4, 3, 4, 5, 6] : [1, 2, 1, 2, 3, 4, 7, 8]));
 }
 
-const oracleSource = join(fixtureRoot, 'memory_stack_oracle.c'), oraclePath = join(outputDir, 'memory_stack_oracle');
+const oracleSource = join(fixtureRoot, 'oracle/native.c'), oraclePath = join(outputDir, 'memory_stack_oracle');
 const oracleCompile = ['-std=c11', '-O2', '-Wall', '-Wextra', '-Werror', oracleSource, '-o', oraclePath];
 execFileSync('clang', oracleCompile, {stdio: ['ignore', 'pipe', 'pipe']});
 const nativeInputs = [

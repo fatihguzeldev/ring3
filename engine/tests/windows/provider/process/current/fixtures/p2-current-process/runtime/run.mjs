@@ -47,7 +47,7 @@ save('engine.wasm',engine.bytes); save('caller.bin',caller); save('kernel-linked
 const sourcePaths = [...execFileSync('rg',['--files','engine/src'],{cwd:root,encoding:'utf8'}).trim().split('\n'),
   'Cargo.toml','Cargo.lock','engine/Cargo.toml','rust-toolchain.toml','engine/tests/support/loader/pe32/image.rs',
   'engine/tests/windows/provider/process/current/wasm.rs', 'engine/tests/windows/provider/wasm.rs', 'engine/tests/support/wasm.rs','engine/tests/loader/imports/native/v8.rs', 'engine/tests/loader/imports/native.rs','engine/tests/support/wasm/engine.mjs',
-  ...['kernel.c','build.py','check_coff.py','PROVENANCE.md','kernel.obj','kernel.text.bin','kernel.text.raw.bin','kernel.disasm.txt','kernel.relocations.json','receipt.json','runtime/run.mjs'].map(name => `engine/tests/windows/provider/process/current/fixtures/p2-current-process/${name}`)].sort();
+  ...['kernel.c','build.py','check/coff.py','PROVENANCE.md','kernel.obj','kernel.text.bin','kernel.text.raw.bin','kernel.disasm.txt','kernel.relocations.json','receipt.json','runtime/run.mjs'].map(name => `engine/tests/windows/provider/process/current/fixtures/p2-current-process/${name}`)].sort();
 assert.equal(new Set(sourcePaths).size,sourcePaths.length);
 const sourceMap = () => Object.fromEntries(sourcePaths.map(path => { const bytes = readFileSync(join(root,path)); return [path,{bytes:bytes.length,sha256:hash(bytes)}]; }));
 const sourcesBefore = sourceMap();

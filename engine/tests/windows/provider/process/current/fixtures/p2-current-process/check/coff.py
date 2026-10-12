@@ -13,11 +13,11 @@ sys.dont_write_bytecode = True
 
 def main():
     if len(sys.argv) != 2:
-        raise SystemExit("usage: check_coff.py BUILD_OUTPUT/kernel.obj")
+        raise SystemExit("usage: check/coff.py BUILD_OUTPUT/kernel.obj")
     original = Path(sys.argv[1]).read_bytes()
     if hashlib.sha256(original).hexdigest() != "7b4d5e9fa4a83d695741fa9431dcce922f84e0bbd746ff13205cc0bee591e10b":
         raise ValueError("expected the frozen original fixed-profile object")
-    extract = runpy.run_path(str(Path(__file__).with_name("build.py")))["extract_current_process"]
+    extract = runpy.run_path(str(Path(__file__).resolve().parent.parent / "build.py"))["extract_current_process"]
     text, coff = extract(original)
     assert len(text) == 67 and coff["function"]["entry_offset"] == 0
     assert [(row["source_offset"], row["target_symbol"], row["iat_rva"]) for row in coff["relocations"]] == [

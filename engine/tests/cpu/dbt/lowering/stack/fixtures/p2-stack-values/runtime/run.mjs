@@ -339,7 +339,7 @@ for (const push of [true, false]) {
   }
 }
 
-const oracleSource = join(fixtureRoot, 'stack_values_oracle.c'), oraclePath = join(outputDir, 'stack_values_oracle');
+const oracleSource = join(fixtureRoot, 'oracle/native.c'), oraclePath = join(outputDir, 'stack_values_oracle');
 const oracleCompile = ['-std=c11', '-O2', '-Wall', '-Wextra', '-Werror', oracleSource, '-o', oraclePath];
 execFileSync('clang', oracleCompile, {stdio: ['ignore', 'pipe', 'pipe']});
 const nativeInputs = [[0, 0, 0, 0x446], [0xffffffff, 1, 0, 0x457], [0x7fffffff, 1, 0x80000000, 0xc96], [0x80000000, 0x80000000, 0, 0xc47], [0x12345678, 0x87654321, 0x99999999, 0x486]];

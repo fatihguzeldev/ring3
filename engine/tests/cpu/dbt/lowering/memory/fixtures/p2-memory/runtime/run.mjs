@@ -330,7 +330,7 @@ for (const store of [false, true]) {
   run(engine, child, 20, expected, exit(5, 2, 1, 0x9000, access), `computed ADD flags survive ${store ? 'store' : 'load'} fault`, helperRecord(1, 0, 1, 0x9000, access));
 }
 
-const oracleSource = join(fixtureRoot, 'ram_oracle.c'), oraclePath = join(outputDir, 'ram_oracle');
+const oracleSource = join(fixtureRoot, 'oracle/native.c'), oraclePath = join(outputDir, 'ram_oracle');
 const oracleCompile = ['-std=c11', '-O2', '-Wall', '-Wextra', '-Werror', oracleSource, '-o', oraclePath];
 execFileSync('clang', oracleCompile, {stdio: ['ignore', 'pipe', 'pipe']});
 const nativeInputs = [[0, 0], [1, 0xffffffff], [2, 0x80000000], [7, 123], [31, 0x89abcdef], [128, 0x10203040]];

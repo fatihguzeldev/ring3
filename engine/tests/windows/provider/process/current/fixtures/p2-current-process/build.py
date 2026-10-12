@@ -202,12 +202,13 @@ def main():
     output = args.output_dir.resolve()
     output.mkdir(parents=True, exist_ok=False)
     snapshots = {"source": (source, "kernel.c"), "builder": (builder, "build.py"),
-                 "checker": (builder.with_name("check_coff.py"), "check_coff.py"),
+                 "checker": (builder.parent / "check/coff.py", "check/coff.py"),
                  "dependency": (DEPENDENCY, "compiled-records-build.py")}
     inputs = {}
     for name, (path, filename) in snapshots.items():
         data = path.read_bytes()
         inputs[name] = {"path": str(path), "bytes": len(data), "sha256": sha256(data)}
+        (output / filename).parent.mkdir(parents=True, exist_ok=True)
         (output / filename).write_bytes(data)
     if inputs["dependency"]["sha256"] != DEPENDENCY_SHA256:
         raise RuntimeError("compiler profile changed before snapshot")

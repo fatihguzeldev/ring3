@@ -12,12 +12,12 @@ sys.dont_write_bytecode = True
 
 def main():
     if len(sys.argv) != 2:
-        raise SystemExit("usage: check_coff.py BUILD_OUTPUT/kernel.obj")
+        raise SystemExit("usage: check/coff.py BUILD_OUTPUT/kernel.obj")
     original = Path(sys.argv[1]).read_bytes()
     expected = "c257d84de2faef79bec68e95a1fbfbbd05738b2ee7f2854fe3fcc4491f344d23"
     if hashlib.sha256(original).hexdigest() != expected:
         raise ValueError("expected the frozen fixed-profile original object")
-    adapter = runpy.run_path(str(Path(__file__).with_name("build.py")))
+    adapter = runpy.run_path(str(Path(__file__).resolve().parent.parent / "build.py"))
     extract = adapter["extract_switch"]
     text, table, _ = extract(original)
     assert len(text) == 59 and len(table) == 16
