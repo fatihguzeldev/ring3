@@ -136,6 +136,9 @@ impl Imports {
         let mut atomic_xor_u32 = false;
         for instruction in blocks.iter().flat_map(|block| &block.instructions) {
             match instruction.operation() {
+                Operation::BitManipulation { source, .. } => {
+                    read |= matches!(source, Value32::Memory(_));
+                }
                 Operation::Control(operation) => match operation {
                     crate::cpu::x86::ControlOperation::PopFlags { word: true } => read16 = true,
                     crate::cpu::x86::ControlOperation::PopFlags { word: false } => read = true,

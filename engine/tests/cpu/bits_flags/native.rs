@@ -35,3 +35,6 @@ mod cpu_word_bit_test;
 mod cpu_word_memory_bit_test;
 #[path = "cases/native/cpu_bit_counts.rs"]
 mod cpu_bit_counts;
+
+#[path = "cases/native/cpu_bmi1.rs"]
+mod cpu_bmi1;

@@ -51,6 +51,9 @@ pub(super) fn check_profile(instruction: &Instruction, bytes: &[u8]) -> Result<(
     if let Some(operation) = super::scalar_bits::lower(instruction) {
         return operation.map(|_| ());
     }
+    if let Some(operation) = super::bit_manipulation::lower(instruction) {
+        return operation.map(|_| ());
+    }
     let features = instruction.cpuid_features();
     let registers = (0..instruction.op_count())
         .filter(|&index| instruction.op_kind(index) == OpKind::Register)

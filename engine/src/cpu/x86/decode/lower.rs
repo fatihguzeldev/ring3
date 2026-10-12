@@ -19,6 +19,9 @@ use crate::cpu::x86::{
 
 pub(super) fn lower(instruction: &Instruction, bytes: &[u8]) -> Result<Operation, DecodeError> {
     check_profile(instruction, bytes)?;
+    if let Some(operation) = super::bit_manipulation::lower(instruction) {
+        return operation;
+    }
     if let Some(operation) = super::control::lower(instruction) {
         return operation;
     }

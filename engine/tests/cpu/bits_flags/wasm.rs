@@ -30,3 +30,6 @@ mod cpu_word_bit_test_wasm;
 
 #[path = "cases/wasm/cpu_word_memory_bit_test_wasm.rs"]
 mod cpu_word_memory_bit_test_wasm;
+
+#[path = "cases/wasm/cpu_bmi1_wasm.rs"]
+mod cpu_bmi1_wasm;

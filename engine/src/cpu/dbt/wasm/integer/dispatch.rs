@@ -49,6 +49,20 @@ pub(in crate::cpu::dbt::wasm) fn instruction(
     }
     let mut store = false;
     match *instruction.operation() {
+        Operation::BitManipulation {
+            kind,
+            destination,
+            source,
+        } => {
+            super::bit_manipulation::bit_manipulation(
+                code,
+                kind,
+                destination,
+                source,
+                imports,
+                exit_depth,
+            );
+        }
         Operation::Control(_) => {
             super::super::control_instructions::instruction(code, instruction, imports, exit_depth);
             return;

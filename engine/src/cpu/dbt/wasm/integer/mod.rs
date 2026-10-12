@@ -22,6 +22,7 @@ enum CarryFlag {
 }
 
 mod arithmetic;
+mod bit_manipulation;
 mod bits;
 mod carry_rotates;
 mod decimal;
