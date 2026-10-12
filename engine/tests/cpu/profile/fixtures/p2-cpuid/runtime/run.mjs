@@ -8,6 +8,7 @@ import {arena, checkContext, checkImports, input, PC, words} from './checks.mjs'
 const [enginePath, output, root] = process.argv.slice(2), engine = readEngine(enginePath);
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
 const paths = ['engine/src/cpu/dbt/wasm/integer_system.rs', 'engine/src/cpu/dbt/wasm/integer/dispatch.rs',
+  'engine/src/cpu/x86/capabilities.rs',
   'engine/src/cpu/x86/decode/profile.rs', 'engine/src/cpu/x86/decode/lower.rs',
   'engine/tests/cpu/profile/cases/native/cpu_cpuid.rs', 'engine/tests/cpu/profile/cases/wasm/cpu_cpuid_wasm.rs',
   ...['oracle.mjs', 'checks.mjs', 'native.mjs', 'run.mjs'].map(name => 'engine/tests/cpu/profile/fixtures/p2-cpuid/runtime/' + name)];

@@ -6,12 +6,12 @@ pub(crate) struct CpuIdLeaf {
     pub registers: [u32; 4],
 }
 
-pub(crate) const CPU_ID_LEAVES: [CpuIdLeaf; 5] = [
+pub(crate) const CPU_ID_LEAVES: [CpuIdLeaf; 7] = [
     CpuIdLeaf {
         function: 0,
         subfunction: None,
         registers: [
-            7,
+            13,
             u32::from_le_bytes(*b"Ring"),
             u32::from_le_bytes(*b"ine "),
             u32::from_le_bytes(*b"3Eng"),
@@ -23,7 +23,15 @@ pub(crate) const CPU_ID_LEAVES: [CpuIdLeaf; 5] = [
         registers: [
             0x600,
             8 << 8,
-            1 | 1 << 1 | 1 << 9 | 1 << 19 | 1 << 20 | 1 << 22 | 1 << 23 | 1 << 25,
+            1 | 1 << 1
+                | 1 << 9
+                | 1 << 19
+                | 1 << 20
+                | 1 << 22
+                | 1 << 23
+                | 1 << 25
+                | 1 << 26
+                | 1 << 27,
             1 | 1 << 4 | 1 << 8 | 1 << 15 | 1 << 19 | 1 << 23 | 1 << 24 | 1 << 25 | 1 << 26,
         ],
     },
@@ -31,6 +39,16 @@ pub(crate) const CPU_ID_LEAVES: [CpuIdLeaf; 5] = [
         function: 7,
         subfunction: Some(0),
         registers: [0, 1 << 3 | 1 << 8, 0, 0],
+    },
+    CpuIdLeaf {
+        function: 13,
+        subfunction: Some(0),
+        registers: [XCR0 as u32, 576, 576, (XCR0 >> 32) as u32],
+    },
+    CpuIdLeaf {
+        function: 13,
+        subfunction: Some(1),
+        registers: [0; 4],
     },
     CpuIdLeaf {
         function: 0x8000_0000,
