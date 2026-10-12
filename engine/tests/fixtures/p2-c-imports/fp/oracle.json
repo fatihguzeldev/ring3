@@ -1,0 +1,1708 @@
+{
+  "schema": "ring3.fp-imports.v1",
+  "claim_ceiling": "one original linked C PE composes two retained SSE2 kernel calls with genuine SetLastError/GetLastError suspension; nondefault computed SIMD and guest outputs are preserved, with no live-XMM-across-C-ABI or FP-spill claim",
+  "encoding": "raw64 strings are unsigned IEEE binary64 bit patterns; hex fields are guest bytes in increasing address order; all JSON numeric flags are decimal",
+  "image": {
+    "bytes": 2560,
+    "sha256": "80264af390585742707372d0bef99d78a754f36469fb60efd7134a638145f4a5",
+    "preferred_base": 4194304,
+    "size": 20480,
+    "entry_rva": 4096,
+    "headers_size": 1024,
+    "mapped_pages": 5,
+    "coff_characteristics": 258,
+    "dll_characteristics": 33088
+  },
+  "original_text": {
+    "rva": 4096,
+    "file_offset": 1024,
+    "hex": "68103040006a03683020400068002040006820304000e85500000083c414a35030400068674523f1ff15a8204000ff15a4204000a35430400083e003686030400050683020400068203040006870304000e81a00000083c414a358304000c7055c304000474e4952ebfe",
+    "sha256": "cb76f18fdbb69f342732da74ce8195251e1de531667e9a40dd12ac899aeb508e",
+    "instructions": 23,
+    "blocks": [
+      {
+        "rva": 4096,
+        "length": 27,
+        "instructions": 6
+      },
+      {
+        "rva": 4123,
+        "length": 19,
+        "instructions": 4
+      },
+      {
+        "rva": 4142,
+        "length": 6,
+        "instructions": 1
+      },
+      {
+        "rva": 4148,
+        "length": 34,
+        "instructions": 8
+      },
+      {
+        "rva": 4182,
+        "length": 20,
+        "instructions": 4
+      }
+    ],
+    "alignment_hex": "cccccccccccc"
+  },
+  "kernel": {
+    "rva": 4208,
+    "file_offset": 1136,
+    "bytes": 116,
+    "sha256": "08fad7ecb51ad9026481bf5dbe347b26ef413fc292d4b27599cc6f26a62b243d",
+    "hex": "555357568b4c24248b4424208b54241c660f280285c074368b7424188b7c2414660f284a10660f28522031db89c5660f281c1e660f59d9660f58c3660f28da660f58d8660f291c1f83c3104d75e0660f28c8660f15c8f20f58c8660f284230f20f59c8660f15c0f20f58c1f20f11015e5f5b5dc3",
+    "block_rvas": [
+      4208,
+      4232,
+      4254,
+      4286
+    ],
+    "blocks": [
+      {
+        "rva": 4208,
+        "length": 24,
+        "instructions": 10
+      },
+      {
+        "rva": 4232,
+        "length": 22,
+        "instructions": 6
+      },
+      {
+        "rva": 4254,
+        "length": 32,
+        "instructions": 9
+      },
+      {
+        "rva": 4286,
+        "length": 38,
+        "instructions": 13
+      }
+    ],
+    "instructions": 38,
+    "retired_per_call": 56,
+    "natural_ret_rva": 4323,
+    "relocations_in_extent": 0
+  },
+  "sections": [
+    {
+      "name": ".text",
+      "rva": 4096,
+      "virtual_size": 228,
+      "raw_offset": 1024,
+      "raw_size": 512,
+      "permissions": "rx"
+    },
+    {
+      "name": ".rdata",
+      "rva": 8192,
+      "virtual_size": 221,
+      "raw_offset": 1536,
+      "raw_size": 512,
+      "permissions": "r"
+    },
+    {
+      "name": ".data",
+      "rva": 12288,
+      "virtual_size": 160,
+      "raw_offset": 0,
+      "raw_size": 0,
+      "permissions": "rw"
+    },
+    {
+      "name": ".reloc",
+      "rva": 16384,
+      "virtual_size": 36,
+      "raw_offset": 2048,
+      "raw_size": 512,
+      "permissions": "r"
+    }
+  ],
+  "relocations": {
+    "rva": 16384,
+    "hex": "0010000024000000013008300d3012301f302a30303035303d30433048304d305a306030",
+    "highlow_rvas": [
+      4097,
+      4104,
+      4109,
+      4114,
+      4127,
+      4138,
+      4144,
+      4149,
+      4157,
+      4163,
+      4168,
+      4173,
+      4186,
+      4192
+    ],
+    "preferred_values": [
+      4206608,
+      4202544,
+      4202496,
+      4206624,
+      4206672,
+      4202664,
+      4202660,
+      4206676,
+      4206688,
+      4202544,
+      4206624,
+      4206704,
+      4206680,
+      4206684
+    ]
+  },
+  "imports": {
+    "directory_rva": 8304,
+    "directory_size": 40,
+    "lookup_rva": 8344,
+    "iat_rva": 8356,
+    "iat_size": 12,
+    "hint_name_rvas": [
+      8368,
+      8384
+    ],
+    "dll_name_rva": 8400,
+    "dll": "KERNEL32.dll",
+    "names": [
+      "GetLastError",
+      "SetLastError"
+    ],
+    "original_rdata_hex": "000000000000f03f0000000000001040000000000000e0bf00000000000000c00000000000000040000000000000f03f000000000000f03f00000000000000c00000000000000040000000000000e03f000000000000d03f000000000000d0bf0000000000000840000000000000e03f982000000000000000000000d0200000a42000000000000000000000000000000000000000000000b0200000c020000000000000b0200000c02000000000000000004765744c6173744572726f72000000005365744c6173744572726f7200004b45524e454c33322e646c6c00"
+  },
+  "gates": [
+    {
+      "name": "GetLastError",
+      "pc": 1610612736,
+      "id": 65537,
+      "stack_words": 0
+    },
+    {
+      "name": "SetLastError",
+      "pc": 1610612752,
+      "id": 65538,
+      "stack_words": 1
+    }
+  ],
+  "startup": {
+    "capacity": 7,
+    "stack_base": 32768,
+    "stack_pages": 1,
+    "registers": [
+      0,
+      0,
+      0,
+      0,
+      36864,
+      0,
+      0,
+      0
+    ],
+    "flags": 2
+  },
+  "selected_ram": [
+    {
+      "label": "read-only original input",
+      "rva": 8192,
+      "length": 48
+    },
+    {
+      "label": "read-only original coefficients",
+      "rva": 8240,
+      "length": 64
+    },
+    {
+      "label": "both FP results, scalar results, imports result and BSS canaries",
+      "rva": 12288,
+      "length": 160
+    }
+  ],
+  "selected_stack": {
+    "address": 36800,
+    "length": 64
+  },
+  "expected_output_words": [
+    3,
+    4045620583,
+    3,
+    1380535879
+  ],
+  "expected": {
+    "input_raw64": [
+      [
+        "3ff0000000000000",
+        "4010000000000000"
+      ],
+      [
+        "bfe0000000000000",
+        "c000000000000000"
+      ],
+      [
+        "4000000000000000",
+        "3ff0000000000000"
+      ]
+    ],
+    "coefficients_raw64": [
+      [
+        "3ff0000000000000",
+        "c000000000000000"
+      ],
+      [
+        "4000000000000000",
+        "3fe0000000000000"
+      ],
+      [
+        "3fd0000000000000",
+        "bfd0000000000000"
+      ],
+      [
+        "4008000000000000",
+        "3fe0000000000000"
+      ]
+    ],
+    "first_vectors_raw64": [
+      [
+        "400a000000000000",
+        "bfd0000000000000"
+      ],
+      [
+        "4002000000000000",
+        "bff4000000000000"
+      ],
+      [
+        "4019000000000000",
+        "bfe8000000000000"
+      ]
+    ],
+    "first_scalar_raw64": "4031000000000000",
+    "second_vectors_raw64": [
+      [
+        "401f000000000000",
+        "c003000000000000"
+      ],
+      [
+        "4028800000000000",
+        "c008000000000000"
+      ],
+      [
+        "4038c00000000000",
+        "c00b000000000000"
+      ]
+    ],
+    "second_scalar_raw64": "4050280000000000",
+    "first_simd_hex": "5233535601000100a000000000000000801f00000000000000000000000000000000000000003140000000000000e03f0000000000803040000000000000e0bf000000000000d03f000000000000d0bf0000000000001940000000000000e8bf00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+    "second_simd_hex": "5233535601000100a000000000000000801f00000000000000000000000000000000000000285040000000000000e03f000000000008504000000000000009c0000000000000d03f000000000000d0bf0000000000c038400000000000000bc000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+    "initial_simd_hex": "5233535601000100a000000000000000801f00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+    "mxcsr": 8064,
+    "derivation": "exact rational arithmetic, integer-only IEEE64 encoding; no engine output or host floating point oracle"
+  },
+  "total_retired": 135,
+  "cases": [
+    {
+      "name": "preferred",
+      "actual_base": 4194304,
+      "phases": [
+        {
+          "label": "first-call",
+          "unit": "caller-1",
+          "entry_pc": 4198400,
+          "budget": 135,
+          "retired": 6,
+          "reason": 3,
+          "exit_version": 3,
+          "registers": [
+            0,
+            0,
+            0,
+            0,
+            36840,
+            0,
+            0,
+            0
+          ],
+          "pc": 4198512,
+          "flags": 2,
+          "simd_hex": "5233535601000100a000000000000000801f00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+          "accesses": [
+            {
+              "kind": "store",
+              "address": 36860,
+              "value": 4206608
+            },
+            {
+              "kind": "store",
+              "address": 36856,
+              "value": 3
+            },
+            {
+              "kind": "store",
+              "address": 36852,
+              "value": 4202544
+            },
+            {
+              "kind": "store",
+              "address": 36848,
+              "value": 4202496
+            },
+            {
+              "kind": "store",
+              "address": 36844,
+              "value": 4206624
+            },
+            {
+              "kind": "store",
+              "address": 36840,
+              "value": 4198427
+            }
+          ],
+          "span_reads": [],
+          "span_writes": [],
+          "simd_flags": [],
+          "entries": [
+            4198400
+          ],
+          "slot": 1,
+          "imports": [
+            "store_resident32"
+          ]
+        },
+        {
+          "label": "first-kernel-return",
+          "unit": "kernel",
+          "entry_pc": 4198512,
+          "budget": 129,
+          "retired": 56,
+          "reason": 3,
+          "exit_version": 3,
+          "registers": [
+            3,
+            4206608,
+            4202544,
+            0,
+            36844,
+            0,
+            0,
+            0
+          ],
+          "pc": 4198427,
+          "flags": 70,
+          "simd_hex": "5233535601000100a000000000000000801f00000000000000000000000000000000000000003140000000000000e03f0000000000803040000000000000e0bf000000000000d03f000000000000d0bf0000000000001940000000000000e8bf00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+          "accesses": [
+            {
+              "kind": "store",
+              "address": 36836,
+              "value": 0
+            },
+            {
+              "kind": "store",
+              "address": 36832,
+              "value": 0
+            },
+            {
+              "kind": "store",
+              "address": 36828,
+              "value": 0
+            },
+            {
+              "kind": "store",
+              "address": 36824,
+              "value": 0
+            },
+            {
+              "kind": "read",
+              "address": 36860,
+              "value": 4206608
+            },
+            {
+              "kind": "read",
+              "address": 36856,
+              "value": 3
+            },
+            {
+              "kind": "read",
+              "address": 36852,
+              "value": 4202544
+            },
+            {
+              "kind": "read",
+              "address": 36848,
+              "value": 4202496
+            },
+            {
+              "kind": "read",
+              "address": 36844,
+              "value": 4206624
+            },
+            {
+              "kind": "read",
+              "address": 36824,
+              "value": 0
+            },
+            {
+              "kind": "read",
+              "address": 36828,
+              "value": 0
+            },
+            {
+              "kind": "read",
+              "address": 36832,
+              "value": 0
+            },
+            {
+              "kind": "read",
+              "address": 36836,
+              "value": 0
+            },
+            {
+              "kind": "read",
+              "address": 36840,
+              "value": 4198427
+            }
+          ],
+          "span_reads": [
+            {
+              "address": 4202544,
+              "hex": "000000000000f03f00000000000000c0",
+              "alignment": 16
+            },
+            {
+              "address": 4202560,
+              "hex": "0000000000000040000000000000e03f",
+              "alignment": 16
+            },
+            {
+              "address": 4202576,
+              "hex": "000000000000d03f000000000000d0bf",
+              "alignment": 16
+            },
+            {
+              "address": 4202496,
+              "hex": "000000000000f03f0000000000001040",
+              "alignment": 16
+            },
+            {
+              "address": 4202512,
+              "hex": "000000000000e0bf00000000000000c0",
+              "alignment": 16
+            },
+            {
+              "address": 4202528,
+              "hex": "0000000000000040000000000000f03f",
+              "alignment": 16
+            },
+            {
+              "address": 4202592,
+              "hex": "0000000000000840000000000000e03f",
+              "alignment": 16
+            }
+          ],
+          "span_writes": [
+            {
+              "address": 4206624,
+              "hex": "0000000000000a40000000000000d0bf",
+              "alignment": 16
+            },
+            {
+              "address": 4206640,
+              "hex": "0000000000000240000000000000f4bf",
+              "alignment": 16
+            },
+            {
+              "address": 4206656,
+              "hex": "0000000000001940000000000000e8bf",
+              "alignment": 16
+            },
+            {
+              "address": 4206608,
+              "hex": "0000000000003140",
+              "alignment": 1
+            }
+          ],
+          "simd_flags": [
+            70,
+            70,
+            70,
+            2,
+            2,
+            2,
+            2,
+            2,
+            2,
+            70,
+            70,
+            70
+          ],
+          "entries": [
+            4198512,
+            4198536,
+            4198558,
+            4198590
+          ],
+          "slot": 2,
+          "imports": [
+            "read32",
+            "store_resident32",
+            "cpu_read",
+            "simd_execute_resident",
+            "cpu_write_resident"
+          ]
+        },
+        {
+          "label": "set-last-error",
+          "unit": "caller-2",
+          "entry_pc": 4198427,
+          "budget": 73,
+          "retired": 4,
+          "reason": 8,
+          "exit_version": 3,
+          "registers": [
+            3,
+            4206608,
+            4202544,
+            0,
+            36856,
+            0,
+            0,
+            0
+          ],
+          "pc": 1610612752,
+          "flags": 22,
+          "simd_hex": "5233535601000100a000000000000000801f00000000000000000000000000000000000000003140000000000000e03f0000000000803040000000000000e0bf000000000000d03f000000000000d0bf0000000000001940000000000000e8bf00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+          "accesses": [
+            {
+              "kind": "store",
+              "address": 4206672,
+              "value": 3
+            },
+            {
+              "kind": "store",
+              "address": 36860,
+              "value": 4045620583
+            },
+            {
+              "kind": "read",
+              "address": 4202664,
+              "value": 1610612752
+            },
+            {
+              "kind": "store",
+              "address": 36856,
+              "value": 4198446
+            }
+          ],
+          "span_reads": [],
+          "span_writes": [],
+          "simd_flags": [],
+          "entries": [
+            4198427
+          ],
+          "slot": 3,
+          "imports": [
+            "read32",
+            "store_resident32"
+          ],
+          "detail": 65538,
+          "provider": {
+            "api": "SetLastError",
+            "id": 65538,
+            "args": [
+              4045620583
+            ],
+            "gate_pc": 1610612752,
+            "return_pc": 4198446,
+            "flags": 22,
+            "stop_registers": [
+              3,
+              4206608,
+              4202544,
+              0,
+              36856,
+              0,
+              0,
+              0
+            ],
+            "returned_registers": [
+              3,
+              4206608,
+              4202544,
+              0,
+              36864,
+              0,
+              0,
+              0
+            ]
+          }
+        },
+        {
+          "label": "get-last-error",
+          "unit": "caller-3",
+          "entry_pc": 4198446,
+          "budget": 69,
+          "retired": 1,
+          "reason": 8,
+          "exit_version": 3,
+          "registers": [
+            3,
+            4206608,
+            4202544,
+            0,
+            36860,
+            0,
+            0,
+            0
+          ],
+          "pc": 1610612736,
+          "flags": 22,
+          "simd_hex": "5233535601000100a000000000000000801f00000000000000000000000000000000000000003140000000000000e03f0000000000803040000000000000e0bf000000000000d03f000000000000d0bf0000000000001940000000000000e8bf00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+          "accesses": [
+            {
+              "kind": "read",
+              "address": 4202660,
+              "value": 1610612736
+            },
+            {
+              "kind": "store",
+              "address": 36860,
+              "value": 4198452
+            }
+          ],
+          "span_reads": [],
+          "span_writes": [],
+          "simd_flags": [],
+          "entries": [
+            4198446
+          ],
+          "slot": 4,
+          "imports": [
+            "read32",
+            "store_resident32"
+          ],
+          "detail": 65537,
+          "provider": {
+            "api": "GetLastError",
+            "id": 65537,
+            "args": [],
+            "gate_pc": 1610612736,
+            "return_pc": 4198452,
+            "flags": 22,
+            "stop_registers": [
+              3,
+              4206608,
+              4202544,
+              0,
+              36860,
+              0,
+              0,
+              0
+            ],
+            "returned_registers": [
+              4045620583,
+              4206608,
+              4202544,
+              0,
+              36864,
+              0,
+              0,
+              0
+            ]
+          }
+        },
+        {
+          "label": "second-call-from-import-result",
+          "unit": "caller-4",
+          "entry_pc": 4198452,
+          "budget": 8,
+          "retired": 8,
+          "reason": 1,
+          "exit_version": 2,
+          "registers": [
+            3,
+            4206608,
+            4202544,
+            0,
+            36840,
+            0,
+            0,
+            0
+          ],
+          "pc": 4198512,
+          "flags": 6,
+          "simd_hex": "5233535601000100a000000000000000801f00000000000000000000000000000000000000003140000000000000e03f0000000000803040000000000000e0bf000000000000d03f000000000000d0bf0000000000001940000000000000e8bf00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+          "accesses": [
+            {
+              "kind": "store",
+              "address": 4206676,
+              "value": 4045620583
+            },
+            {
+              "kind": "store",
+              "address": 36860,
+              "value": 4206688
+            },
+            {
+              "kind": "store",
+              "address": 36856,
+              "value": 3
+            },
+            {
+              "kind": "store",
+              "address": 36852,
+              "value": 4202544
+            },
+            {
+              "kind": "store",
+              "address": 36848,
+              "value": 4206624
+            },
+            {
+              "kind": "store",
+              "address": 36844,
+              "value": 4206704
+            },
+            {
+              "kind": "store",
+              "address": 36840,
+              "value": 4198486
+            }
+          ],
+          "span_reads": [],
+          "span_writes": [],
+          "simd_flags": [],
+          "entries": [
+            4198452
+          ],
+          "slot": 5,
+          "imports": [
+            "store_resident32"
+          ]
+        },
+        {
+          "label": "second-kernel-return",
+          "unit": "kernel",
+          "entry_pc": 4198512,
+          "budget": 60,
+          "retired": 56,
+          "reason": 3,
+          "exit_version": 3,
+          "registers": [
+            3,
+            4206688,
+            4202544,
+            0,
+            36844,
+            0,
+            0,
+            0
+          ],
+          "pc": 4198486,
+          "flags": 70,
+          "simd_hex": "5233535601000100a000000000000000801f00000000000000000000000000000000000000285040000000000000e03f000000000008504000000000000009c0000000000000d03f000000000000d0bf0000000000c038400000000000000bc000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+          "accesses": [
+            {
+              "kind": "store",
+              "address": 36836,
+              "value": 0
+            },
+            {
+              "kind": "store",
+              "address": 36832,
+              "value": 0
+            },
+            {
+              "kind": "store",
+              "address": 36828,
+              "value": 0
+            },
+            {
+              "kind": "store",
+              "address": 36824,
+              "value": 0
+            },
+            {
+              "kind": "read",
+              "address": 36860,
+              "value": 4206688
+            },
+            {
+              "kind": "read",
+              "address": 36856,
+              "value": 3
+            },
+            {
+              "kind": "read",
+              "address": 36852,
+              "value": 4202544
+            },
+            {
+              "kind": "read",
+              "address": 36848,
+              "value": 4206624
+            },
+            {
+              "kind": "read",
+              "address": 36844,
+              "value": 4206704
+            },
+            {
+              "kind": "read",
+              "address": 36824,
+              "value": 0
+            },
+            {
+              "kind": "read",
+              "address": 36828,
+              "value": 0
+            },
+            {
+              "kind": "read",
+              "address": 36832,
+              "value": 0
+            },
+            {
+              "kind": "read",
+              "address": 36836,
+              "value": 0
+            },
+            {
+              "kind": "read",
+              "address": 36840,
+              "value": 4198486
+            }
+          ],
+          "span_reads": [
+            {
+              "address": 4202544,
+              "hex": "000000000000f03f00000000000000c0",
+              "alignment": 16
+            },
+            {
+              "address": 4202560,
+              "hex": "0000000000000040000000000000e03f",
+              "alignment": 16
+            },
+            {
+              "address": 4202576,
+              "hex": "000000000000d03f000000000000d0bf",
+              "alignment": 16
+            },
+            {
+              "address": 4206624,
+              "hex": "0000000000000a40000000000000d0bf",
+              "alignment": 16
+            },
+            {
+              "address": 4206640,
+              "hex": "0000000000000240000000000000f4bf",
+              "alignment": 16
+            },
+            {
+              "address": 4206656,
+              "hex": "0000000000001940000000000000e8bf",
+              "alignment": 16
+            },
+            {
+              "address": 4202592,
+              "hex": "0000000000000840000000000000e03f",
+              "alignment": 16
+            }
+          ],
+          "span_writes": [
+            {
+              "address": 4206704,
+              "hex": "0000000000001f4000000000000003c0",
+              "alignment": 16
+            },
+            {
+              "address": 4206720,
+              "hex": "000000000080284000000000000008c0",
+              "alignment": 16
+            },
+            {
+              "address": 4206736,
+              "hex": "0000000000c038400000000000000bc0",
+              "alignment": 16
+            },
+            {
+              "address": 4206688,
+              "hex": "0000000000285040",
+              "alignment": 1
+            }
+          ],
+          "simd_flags": [
+            70,
+            70,
+            70,
+            2,
+            2,
+            2,
+            2,
+            2,
+            2,
+            70,
+            70,
+            70
+          ]
+        },
+        {
+          "label": "completed-marker-self-loop",
+          "unit": "caller-5",
+          "entry_pc": 4198486,
+          "budget": 4,
+          "retired": 4,
+          "reason": 1,
+          "exit_version": 2,
+          "registers": [
+            3,
+            4206688,
+            4202544,
+            0,
+            36864,
+            0,
+            0,
+            0
+          ],
+          "pc": 4198504,
+          "flags": 22,
+          "simd_hex": "5233535601000100a000000000000000801f00000000000000000000000000000000000000285040000000000000e03f000000000008504000000000000009c0000000000000d03f000000000000d0bf0000000000c038400000000000000bc000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+          "accesses": [
+            {
+              "kind": "store",
+              "address": 4206680,
+              "value": 3
+            },
+            {
+              "kind": "store",
+              "address": 4206684,
+              "value": 1380535879
+            }
+          ],
+          "span_reads": [],
+          "span_writes": [],
+          "simd_flags": [],
+          "entries": [
+            4198486
+          ],
+          "slot": 6,
+          "imports": [
+            "store_resident32"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "rebased",
+      "actual_base": 5242880,
+      "phases": [
+        {
+          "label": "first-call",
+          "unit": "caller-1",
+          "entry_pc": 5246976,
+          "budget": 135,
+          "retired": 6,
+          "reason": 3,
+          "exit_version": 3,
+          "registers": [
+            0,
+            0,
+            0,
+            0,
+            36840,
+            0,
+            0,
+            0
+          ],
+          "pc": 5247088,
+          "flags": 2,
+          "simd_hex": "5233535601000100a000000000000000801f00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+          "accesses": [
+            {
+              "kind": "store",
+              "address": 36860,
+              "value": 5255184
+            },
+            {
+              "kind": "store",
+              "address": 36856,
+              "value": 3
+            },
+            {
+              "kind": "store",
+              "address": 36852,
+              "value": 5251120
+            },
+            {
+              "kind": "store",
+              "address": 36848,
+              "value": 5251072
+            },
+            {
+              "kind": "store",
+              "address": 36844,
+              "value": 5255200
+            },
+            {
+              "kind": "store",
+              "address": 36840,
+              "value": 5247003
+            }
+          ],
+          "span_reads": [],
+          "span_writes": [],
+          "simd_flags": [],
+          "entries": [
+            5246976
+          ],
+          "slot": 1,
+          "imports": [
+            "store_resident32"
+          ]
+        },
+        {
+          "label": "first-kernel-return",
+          "unit": "kernel",
+          "entry_pc": 5247088,
+          "budget": 129,
+          "retired": 56,
+          "reason": 3,
+          "exit_version": 3,
+          "registers": [
+            3,
+            5255184,
+            5251120,
+            0,
+            36844,
+            0,
+            0,
+            0
+          ],
+          "pc": 5247003,
+          "flags": 70,
+          "simd_hex": "5233535601000100a000000000000000801f00000000000000000000000000000000000000003140000000000000e03f0000000000803040000000000000e0bf000000000000d03f000000000000d0bf0000000000001940000000000000e8bf00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+          "accesses": [
+            {
+              "kind": "store",
+              "address": 36836,
+              "value": 0
+            },
+            {
+              "kind": "store",
+              "address": 36832,
+              "value": 0
+            },
+            {
+              "kind": "store",
+              "address": 36828,
+              "value": 0
+            },
+            {
+              "kind": "store",
+              "address": 36824,
+              "value": 0
+            },
+            {
+              "kind": "read",
+              "address": 36860,
+              "value": 5255184
+            },
+            {
+              "kind": "read",
+              "address": 36856,
+              "value": 3
+            },
+            {
+              "kind": "read",
+              "address": 36852,
+              "value": 5251120
+            },
+            {
+              "kind": "read",
+              "address": 36848,
+              "value": 5251072
+            },
+            {
+              "kind": "read",
+              "address": 36844,
+              "value": 5255200
+            },
+            {
+              "kind": "read",
+              "address": 36824,
+              "value": 0
+            },
+            {
+              "kind": "read",
+              "address": 36828,
+              "value": 0
+            },
+            {
+              "kind": "read",
+              "address": 36832,
+              "value": 0
+            },
+            {
+              "kind": "read",
+              "address": 36836,
+              "value": 0
+            },
+            {
+              "kind": "read",
+              "address": 36840,
+              "value": 5247003
+            }
+          ],
+          "span_reads": [
+            {
+              "address": 5251120,
+              "hex": "000000000000f03f00000000000000c0",
+              "alignment": 16
+            },
+            {
+              "address": 5251136,
+              "hex": "0000000000000040000000000000e03f",
+              "alignment": 16
+            },
+            {
+              "address": 5251152,
+              "hex": "000000000000d03f000000000000d0bf",
+              "alignment": 16
+            },
+            {
+              "address": 5251072,
+              "hex": "000000000000f03f0000000000001040",
+              "alignment": 16
+            },
+            {
+              "address": 5251088,
+              "hex": "000000000000e0bf00000000000000c0",
+              "alignment": 16
+            },
+            {
+              "address": 5251104,
+              "hex": "0000000000000040000000000000f03f",
+              "alignment": 16
+            },
+            {
+              "address": 5251168,
+              "hex": "0000000000000840000000000000e03f",
+              "alignment": 16
+            }
+          ],
+          "span_writes": [
+            {
+              "address": 5255200,
+              "hex": "0000000000000a40000000000000d0bf",
+              "alignment": 16
+            },
+            {
+              "address": 5255216,
+              "hex": "0000000000000240000000000000f4bf",
+              "alignment": 16
+            },
+            {
+              "address": 5255232,
+              "hex": "0000000000001940000000000000e8bf",
+              "alignment": 16
+            },
+            {
+              "address": 5255184,
+              "hex": "0000000000003140",
+              "alignment": 1
+            }
+          ],
+          "simd_flags": [
+            70,
+            70,
+            70,
+            2,
+            2,
+            2,
+            2,
+            2,
+            2,
+            70,
+            70,
+            70
+          ],
+          "entries": [
+            5247088,
+            5247112,
+            5247134,
+            5247166
+          ],
+          "slot": 2,
+          "imports": [
+            "read32",
+            "store_resident32",
+            "cpu_read",
+            "simd_execute_resident",
+            "cpu_write_resident"
+          ]
+        },
+        {
+          "label": "set-last-error",
+          "unit": "caller-2",
+          "entry_pc": 5247003,
+          "budget": 73,
+          "retired": 4,
+          "reason": 8,
+          "exit_version": 3,
+          "registers": [
+            3,
+            5255184,
+            5251120,
+            0,
+            36856,
+            0,
+            0,
+            0
+          ],
+          "pc": 1610612752,
+          "flags": 22,
+          "simd_hex": "5233535601000100a000000000000000801f00000000000000000000000000000000000000003140000000000000e03f0000000000803040000000000000e0bf000000000000d03f000000000000d0bf0000000000001940000000000000e8bf00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+          "accesses": [
+            {
+              "kind": "store",
+              "address": 5255248,
+              "value": 3
+            },
+            {
+              "kind": "store",
+              "address": 36860,
+              "value": 4045620583
+            },
+            {
+              "kind": "read",
+              "address": 5251240,
+              "value": 1610612752
+            },
+            {
+              "kind": "store",
+              "address": 36856,
+              "value": 5247022
+            }
+          ],
+          "span_reads": [],
+          "span_writes": [],
+          "simd_flags": [],
+          "entries": [
+            5247003
+          ],
+          "slot": 3,
+          "imports": [
+            "read32",
+            "store_resident32"
+          ],
+          "detail": 65538,
+          "provider": {
+            "api": "SetLastError",
+            "id": 65538,
+            "args": [
+              4045620583
+            ],
+            "gate_pc": 1610612752,
+            "return_pc": 5247022,
+            "flags": 22,
+            "stop_registers": [
+              3,
+              5255184,
+              5251120,
+              0,
+              36856,
+              0,
+              0,
+              0
+            ],
+            "returned_registers": [
+              3,
+              5255184,
+              5251120,
+              0,
+              36864,
+              0,
+              0,
+              0
+            ]
+          }
+        },
+        {
+          "label": "get-last-error",
+          "unit": "caller-3",
+          "entry_pc": 5247022,
+          "budget": 69,
+          "retired": 1,
+          "reason": 8,
+          "exit_version": 3,
+          "registers": [
+            3,
+            5255184,
+            5251120,
+            0,
+            36860,
+            0,
+            0,
+            0
+          ],
+          "pc": 1610612736,
+          "flags": 22,
+          "simd_hex": "5233535601000100a000000000000000801f00000000000000000000000000000000000000003140000000000000e03f0000000000803040000000000000e0bf000000000000d03f000000000000d0bf0000000000001940000000000000e8bf00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+          "accesses": [
+            {
+              "kind": "read",
+              "address": 5251236,
+              "value": 1610612736
+            },
+            {
+              "kind": "store",
+              "address": 36860,
+              "value": 5247028
+            }
+          ],
+          "span_reads": [],
+          "span_writes": [],
+          "simd_flags": [],
+          "entries": [
+            5247022
+          ],
+          "slot": 4,
+          "imports": [
+            "read32",
+            "store_resident32"
+          ],
+          "detail": 65537,
+          "provider": {
+            "api": "GetLastError",
+            "id": 65537,
+            "args": [],
+            "gate_pc": 1610612736,
+            "return_pc": 5247028,
+            "flags": 22,
+            "stop_registers": [
+              3,
+              5255184,
+              5251120,
+              0,
+              36860,
+              0,
+              0,
+              0
+            ],
+            "returned_registers": [
+              4045620583,
+              5255184,
+              5251120,
+              0,
+              36864,
+              0,
+              0,
+              0
+            ]
+          }
+        },
+        {
+          "label": "second-call-from-import-result",
+          "unit": "caller-4",
+          "entry_pc": 5247028,
+          "budget": 8,
+          "retired": 8,
+          "reason": 1,
+          "exit_version": 2,
+          "registers": [
+            3,
+            5255184,
+            5251120,
+            0,
+            36840,
+            0,
+            0,
+            0
+          ],
+          "pc": 5247088,
+          "flags": 6,
+          "simd_hex": "5233535601000100a000000000000000801f00000000000000000000000000000000000000003140000000000000e03f0000000000803040000000000000e0bf000000000000d03f000000000000d0bf0000000000001940000000000000e8bf00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+          "accesses": [
+            {
+              "kind": "store",
+              "address": 5255252,
+              "value": 4045620583
+            },
+            {
+              "kind": "store",
+              "address": 36860,
+              "value": 5255264
+            },
+            {
+              "kind": "store",
+              "address": 36856,
+              "value": 3
+            },
+            {
+              "kind": "store",
+              "address": 36852,
+              "value": 5251120
+            },
+            {
+              "kind": "store",
+              "address": 36848,
+              "value": 5255200
+            },
+            {
+              "kind": "store",
+              "address": 36844,
+              "value": 5255280
+            },
+            {
+              "kind": "store",
+              "address": 36840,
+              "value": 5247062
+            }
+          ],
+          "span_reads": [],
+          "span_writes": [],
+          "simd_flags": [],
+          "entries": [
+            5247028
+          ],
+          "slot": 5,
+          "imports": [
+            "store_resident32"
+          ]
+        },
+        {
+          "label": "second-kernel-return",
+          "unit": "kernel",
+          "entry_pc": 5247088,
+          "budget": 60,
+          "retired": 56,
+          "reason": 3,
+          "exit_version": 3,
+          "registers": [
+            3,
+            5255264,
+            5251120,
+            0,
+            36844,
+            0,
+            0,
+            0
+          ],
+          "pc": 5247062,
+          "flags": 70,
+          "simd_hex": "5233535601000100a000000000000000801f00000000000000000000000000000000000000285040000000000000e03f000000000008504000000000000009c0000000000000d03f000000000000d0bf0000000000c038400000000000000bc000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+          "accesses": [
+            {
+              "kind": "store",
+              "address": 36836,
+              "value": 0
+            },
+            {
+              "kind": "store",
+              "address": 36832,
+              "value": 0
+            },
+            {
+              "kind": "store",
+              "address": 36828,
+              "value": 0
+            },
+            {
+              "kind": "store",
+              "address": 36824,
+              "value": 0
+            },
+            {
+              "kind": "read",
+              "address": 36860,
+              "value": 5255264
+            },
+            {
+              "kind": "read",
+              "address": 36856,
+              "value": 3
+            },
+            {
+              "kind": "read",
+              "address": 36852,
+              "value": 5251120
+            },
+            {
+              "kind": "read",
+              "address": 36848,
+              "value": 5255200
+            },
+            {
+              "kind": "read",
+              "address": 36844,
+              "value": 5255280
+            },
+            {
+              "kind": "read",
+              "address": 36824,
+              "value": 0
+            },
+            {
+              "kind": "read",
+              "address": 36828,
+              "value": 0
+            },
+            {
+              "kind": "read",
+              "address": 36832,
+              "value": 0
+            },
+            {
+              "kind": "read",
+              "address": 36836,
+              "value": 0
+            },
+            {
+              "kind": "read",
+              "address": 36840,
+              "value": 5247062
+            }
+          ],
+          "span_reads": [
+            {
+              "address": 5251120,
+              "hex": "000000000000f03f00000000000000c0",
+              "alignment": 16
+            },
+            {
+              "address": 5251136,
+              "hex": "0000000000000040000000000000e03f",
+              "alignment": 16
+            },
+            {
+              "address": 5251152,
+              "hex": "000000000000d03f000000000000d0bf",
+              "alignment": 16
+            },
+            {
+              "address": 5255200,
+              "hex": "0000000000000a40000000000000d0bf",
+              "alignment": 16
+            },
+            {
+              "address": 5255216,
+              "hex": "0000000000000240000000000000f4bf",
+              "alignment": 16
+            },
+            {
+              "address": 5255232,
+              "hex": "0000000000001940000000000000e8bf",
+              "alignment": 16
+            },
+            {
+              "address": 5251168,
+              "hex": "0000000000000840000000000000e03f",
+              "alignment": 16
+            }
+          ],
+          "span_writes": [
+            {
+              "address": 5255280,
+              "hex": "0000000000001f4000000000000003c0",
+              "alignment": 16
+            },
+            {
+              "address": 5255296,
+              "hex": "000000000080284000000000000008c0",
+              "alignment": 16
+            },
+            {
+              "address": 5255312,
+              "hex": "0000000000c038400000000000000bc0",
+              "alignment": 16
+            },
+            {
+              "address": 5255264,
+              "hex": "0000000000285040",
+              "alignment": 1
+            }
+          ],
+          "simd_flags": [
+            70,
+            70,
+            70,
+            2,
+            2,
+            2,
+            2,
+            2,
+            2,
+            70,
+            70,
+            70
+          ]
+        },
+        {
+          "label": "completed-marker-self-loop",
+          "unit": "caller-5",
+          "entry_pc": 5247062,
+          "budget": 4,
+          "retired": 4,
+          "reason": 1,
+          "exit_version": 2,
+          "registers": [
+            3,
+            5255264,
+            5251120,
+            0,
+            36864,
+            0,
+            0,
+            0
+          ],
+          "pc": 5247080,
+          "flags": 22,
+          "simd_hex": "5233535601000100a000000000000000801f00000000000000000000000000000000000000285040000000000000e03f000000000008504000000000000009c0000000000000d03f000000000000d0bf0000000000c038400000000000000bc000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+          "accesses": [
+            {
+              "kind": "store",
+              "address": 5255256,
+              "value": 3
+            },
+            {
+              "kind": "store",
+              "address": 5255260,
+              "value": 1380535879
+            }
+          ],
+          "span_reads": [],
+          "span_writes": [],
+          "simd_flags": [],
+          "entries": [
+            5247062
+          ],
+          "slot": 6,
+          "imports": [
+            "store_resident32"
+          ]
+        }
+      ]
+    }
+  ],
+  "total_counts": {
+    "contexts": 2,
+    "modules": 14,
+    "dispatcher_modules": 2,
+    "runs": 20,
+    "retired": 270,
+    "helper_calls": 190,
+    "read32": 44,
+    "store32": 54,
+    "cpu_read": 28,
+    "cpu_write": 16,
+    "simd_execute": 48,
+    "cold_exits": 12,
+    "captures": 4,
+    "provider_completions": 4,
+    "wrong_token_refusals": 2,
+    "replay_refusals": 2,
+    "diagnostic_words": 1312
+  }
+}
