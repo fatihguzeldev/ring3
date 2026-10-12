@@ -1,0 +1,44 @@
+
+kernel.obj:	file format coff-i386
+
+Disassembly of section .text:
+
+00000000 <_ring3_reduce>:
+       0: 55                           	push	ebp
+       1: 53                           	push	ebx
+       2: 57                           	push	edi
+       3: 56                           	push	esi
+       4: 8b 4c 24 24                  	mov	ecx, dword ptr [esp + 0x24]
+       8: 8b 44 24 20                  	mov	eax, dword ptr [esp + 0x20]
+       c: 8b 54 24 1c                  	mov	edx, dword ptr [esp + 0x1c]
+      10: 66 0f 28 02                  	movapd	xmm0, xmmword ptr [edx]
+      14: 85 c0                        	test	eax, eax
+      16: 74 36                        	je	0x4e <_ring3_reduce+0x4e>
+      18: 8b 74 24 18                  	mov	esi, dword ptr [esp + 0x18]
+      1c: 8b 7c 24 14                  	mov	edi, dword ptr [esp + 0x14]
+      20: 66 0f 28 4a 10               	movapd	xmm1, xmmword ptr [edx + 0x10]
+      25: 66 0f 28 52 20               	movapd	xmm2, xmmword ptr [edx + 0x20]
+      2a: 31 db                        	xor	ebx, ebx
+      2c: 89 c5                        	mov	ebp, eax
+      2e: 66 0f 28 1c 1e               	movapd	xmm3, xmmword ptr [esi + ebx]
+      33: 66 0f 59 d9                  	mulpd	xmm3, xmm1
+      37: 66 0f 58 c3                  	addpd	xmm0, xmm3
+      3b: 66 0f 28 da                  	movapd	xmm3, xmm2
+      3f: 66 0f 58 d8                  	addpd	xmm3, xmm0
+      43: 66 0f 29 1c 1f               	movapd	xmmword ptr [edi + ebx], xmm3
+      48: 83 c3 10                     	add	ebx, 0x10
+      4b: 4d                           	dec	ebp
+      4c: 75 e0                        	jne	0x2e <_ring3_reduce+0x2e>
+      4e: 66 0f 28 c8                  	movapd	xmm1, xmm0
+      52: 66 0f 15 c8                  	unpckhpd	xmm1, xmm0              # xmm1 = xmm1[1],xmm0[1]
+      56: f2 0f 58 c8                  	addsd	xmm1, xmm0
+      5a: 66 0f 28 42 30               	movapd	xmm0, xmmword ptr [edx + 0x30]
+      5f: f2 0f 59 c8                  	mulsd	xmm1, xmm0
+      63: 66 0f 15 c0                  	unpckhpd	xmm0, xmm0              # xmm0 = xmm0[1,1]
+      67: f2 0f 58 c1                  	addsd	xmm0, xmm1
+      6b: f2 0f 11 01                  	movsd	qword ptr [ecx], xmm0
+      6f: 5e                           	pop	esi
+      70: 5f                           	pop	edi
+      71: 5b                           	pop	ebx
+      72: 5d                           	pop	ebp
+      73: c3                           	ret

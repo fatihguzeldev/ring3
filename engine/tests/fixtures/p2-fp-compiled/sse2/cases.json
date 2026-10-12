@@ -1,0 +1,468 @@
+{
+  "schema": "ring3.fp-compiled.sse2-cases.v1",
+  "function": {
+    "symbol": "_ring3_reduce",
+    "calling_convention": "cdecl",
+    "return": "u32 count in EAX; no FP C return",
+    "arguments": [
+      "v2df *restrict output",
+      "const v2df *restrict input",
+      "const v2df *restrict coefficients",
+      "u32 count",
+      "double *restrict scalar_output"
+    ]
+  },
+  "encoding": "raw64 strings are unsigned IEEE754 binary64 bits, most-significant hex digit first; write each lane little endian to memory; v2df lane0 occupies lower8bytes",
+  "memory_contract": {
+    "vector_alignment": 16,
+    "scalar_output_alignment": 8,
+    "disjoint_ranges": true,
+    "vector_count": 3,
+    "coefficients_bytes": 64,
+    "input_capacity_bytes": 48,
+    "output_capacity_bytes": 48,
+    "scalar_output_bytes": 8,
+    "read_permissions": [
+      "input[0..count)",
+      "coefficients[0] and[3] always; coefficients[1] and[2] only if count!=0"
+    ],
+    "write_permissions": [
+      "output[0..count)",
+      "scalar_output"
+    ],
+    "selection": "initial input/coeff/output/scalar/stack regions must be disjoint and mapped; sentinel remaining output vectors and immediate canaries preserved"
+  },
+  "cpu_contract": {
+    "initial_flags": "00000cd7",
+    "return_flags": "00000446",
+    "callee_preserved_gprs": [
+      "EBX",
+      "EBP",
+      "ESI",
+      "EDI"
+    ],
+    "cdecl_stack": "on entry ESP points at returnPC; on return ESP=entryESP+4, five arguments retained for caller cleanup",
+    "return_eax": "count",
+    "return_ecx": "scalar_output pointer",
+    "return_edx": "coefficients pointer",
+    "x87": "entire state unchanged; no MMX/x87 operations",
+    "simd": "R3SV headers/reserved/MXCSR-mask unchanged; final XMM0..3 as cases specify, XMM4..7 unchanged; count0 also preserves XMM2/3",
+    "initial_xmm_bytes": [
+      "00112233445566778899aabbccddeeff",
+      "102132435465768798a9bacbdcedfe0f",
+      "2031425364758697a8b9cadbecfd0e1f",
+      "30415263748596a7b8c9daebfc0d1e2f",
+      "405162738495a6b7c8d9eafb0c1d2e3f",
+      "5061728394a5b6c7d8e9fa0b1c2d3e4f",
+      "60718293a4b5c6d7e8f90a1b2c3d4e5f",
+      "708192a3b4c5d6e7f8091a2b3c4d5e6f"
+    ]
+  },
+  "observed_original": {
+    "text_bytes": 116,
+    "instruction_count": 38,
+    "entry_offset": 0,
+    "natural_ret_offset": 115,
+    "blocks": [
+      {
+        "offset": 0,
+        "length": 24,
+        "instructions": 10
+      },
+      {
+        "offset": 24,
+        "length": 22,
+        "instructions": 6
+      },
+      {
+        "offset": 46,
+        "length": 32,
+        "instructions": 9
+      },
+      {
+        "offset": 78,
+        "length": 38,
+        "instructions": 13
+      }
+    ],
+    "compiler_profile_delta": {
+      "remove": [
+        "-mno-sse",
+        "-mno-sse2"
+      ],
+      "append": [
+        "-msse2"
+      ]
+    },
+    "original_object_note": "unresolved __fltused marker present; all relocation counts0. Root common builder must explicitly validate this marker rather than patch object bytes."
+  },
+  "cases": [
+    {
+      "name": "three-vector-exact-rationals",
+      "count": 3,
+      "mxcsr_before": "00001f80",
+      "mxcsr_after": "00001f80",
+      "coefficients_raw64": [
+        [
+          "3ff0000000000000",
+          "c000000000000000"
+        ],
+        [
+          "4000000000000000",
+          "3fe0000000000000"
+        ],
+        [
+          "3fd0000000000000",
+          "bfd0000000000000"
+        ],
+        [
+          "4008000000000000",
+          "3fe0000000000000"
+        ]
+      ],
+      "input_raw64": [
+        [
+          "3ff0000000000000",
+          "4010000000000000"
+        ],
+        [
+          "bfe0000000000000",
+          "c000000000000000"
+        ],
+        [
+          "4000000000000000",
+          "3ff0000000000000"
+        ]
+      ],
+      "output_raw64": [
+        [
+          "400a000000000000",
+          "bfd0000000000000"
+        ],
+        [
+          "4002000000000000",
+          "bff4000000000000"
+        ],
+        [
+          "4019000000000000",
+          "bfe8000000000000"
+        ]
+      ],
+      "scalar_output_raw64": "4031000000000000",
+      "final_xmm_raw64": {
+        "0": [
+          "4031000000000000",
+          "3fe0000000000000"
+        ],
+        "1": [
+          "4030800000000000",
+          "bfe0000000000000"
+        ],
+        "2": [
+          "3fd0000000000000",
+          "bfd0000000000000"
+        ],
+        "3": [
+          "4019000000000000",
+          "bfe8000000000000"
+        ]
+      },
+      "derivation": [
+        "accumulators (3,0), (2,-1), (6,-1/2)",
+        "outputs (13/4,-1/4), (9/4,-5/4), (25/4,-3/4)",
+        "scalar ((6-1/2)*3)+1/2=17; every intermediate exactly representable"
+      ]
+    },
+    {
+      "name": "zero-count-still-stores-scalar",
+      "count": 0,
+      "mxcsr_before": "00001f80",
+      "mxcsr_after": "00001f80",
+      "coefficients_raw64": [
+        [
+          "3ff8000000000000",
+          "bfe0000000000000"
+        ],
+        [
+          "3ff0000000000000",
+          "3ff0000000000000"
+        ],
+        [
+          "0000000000000000",
+          "0000000000000000"
+        ],
+        [
+          "3fe0000000000000",
+          "bfd0000000000000"
+        ]
+      ],
+      "input_raw64": [],
+      "output_raw64": [],
+      "output_buffer_unchanged": true,
+      "scalar_output_raw64": "3fd0000000000000",
+      "final_xmm_raw64": {
+        "0": [
+          "3fd0000000000000",
+          "bfd0000000000000"
+        ],
+        "1": [
+          "3fe0000000000000",
+          "bfe0000000000000"
+        ]
+      },
+      "additional_unchanged_xmm": [
+        2,
+        3
+      ],
+      "derivation": [
+        "count0 skips input/output loop and coeff[1]/coeff[2] loads",
+        "scalar ((3/2-1/2)*1/2)-1/4=1/4; all exact"
+      ]
+    },
+    {
+      "name": "nearest-even-half-ulp",
+      "count": 1,
+      "mxcsr_before": "00001f80",
+      "mxcsr_after": "00001fa0",
+      "coefficients_raw64": [
+        [
+          "3ff0000000000000",
+          "bff0000000000000"
+        ],
+        [
+          "3ca0000000000000",
+          "3ca0000000000000"
+        ],
+        [
+          "0000000000000000",
+          "0000000000000000"
+        ],
+        [
+          "3ff0000000000000",
+          "0000000000000000"
+        ]
+      ],
+      "input_raw64": [
+        [
+          "3ff0000000000000",
+          "bff0000000000000"
+        ]
+      ],
+      "output_raw64": [
+        [
+          "3ff0000000000000",
+          "bff0000000000000"
+        ]
+      ],
+      "scalar_output_raw64": "0000000000000000",
+      "final_xmm_raw64": {
+        "0": [
+          "0000000000000000",
+          "0000000000000000"
+        ],
+        "1": [
+          "0000000000000000",
+          "bff0000000000000"
+        ],
+        "2": [
+          "0000000000000000",
+          "0000000000000000"
+        ],
+        "3": [
+          "3ff0000000000000",
+          "bff0000000000000"
+        ]
+      },
+      "derivation": [
+        "input products are exactly +2^-53 and -2^-53",
+        "accumulator exact real values +1+2^-53 and -1-2^-53 are midpoint ties between binary64 values",
+        "RN chooses even significands; RD chooses lower real values; RU chooses higher; RZ chooses toward0",
+        "only precision sticky bit0020 is newly raised; scalar cancellation/difference and multiply1/add0 are exact"
+      ]
+    },
+    {
+      "name": "down-half-ulp",
+      "count": 1,
+      "mxcsr_before": "00003f80",
+      "mxcsr_after": "00003fa0",
+      "coefficients_raw64": [
+        [
+          "3ff0000000000000",
+          "bff0000000000000"
+        ],
+        [
+          "3ca0000000000000",
+          "3ca0000000000000"
+        ],
+        [
+          "0000000000000000",
+          "0000000000000000"
+        ],
+        [
+          "3ff0000000000000",
+          "0000000000000000"
+        ]
+      ],
+      "input_raw64": [
+        [
+          "3ff0000000000000",
+          "bff0000000000000"
+        ]
+      ],
+      "output_raw64": [
+        [
+          "3ff0000000000000",
+          "bff0000000000001"
+        ]
+      ],
+      "scalar_output_raw64": "bcb0000000000000",
+      "final_xmm_raw64": {
+        "0": [
+          "bcb0000000000000",
+          "0000000000000000"
+        ],
+        "1": [
+          "bcb0000000000000",
+          "bff0000000000001"
+        ],
+        "2": [
+          "0000000000000000",
+          "0000000000000000"
+        ],
+        "3": [
+          "3ff0000000000000",
+          "bff0000000000001"
+        ]
+      },
+      "derivation": [
+        "input products are exactly +2^-53 and -2^-53",
+        "accumulator exact real values +1+2^-53 and -1-2^-53 are midpoint ties between binary64 values",
+        "RN chooses even significands; RD chooses lower real values; RU chooses higher; RZ chooses toward0",
+        "only precision sticky bit0020 is newly raised; scalar cancellation/difference and multiply1/add0 are exact"
+      ]
+    },
+    {
+      "name": "up-half-ulp",
+      "count": 1,
+      "mxcsr_before": "00005f80",
+      "mxcsr_after": "00005fa0",
+      "coefficients_raw64": [
+        [
+          "3ff0000000000000",
+          "bff0000000000000"
+        ],
+        [
+          "3ca0000000000000",
+          "3ca0000000000000"
+        ],
+        [
+          "0000000000000000",
+          "0000000000000000"
+        ],
+        [
+          "3ff0000000000000",
+          "0000000000000000"
+        ]
+      ],
+      "input_raw64": [
+        [
+          "3ff0000000000000",
+          "bff0000000000000"
+        ]
+      ],
+      "output_raw64": [
+        [
+          "3ff0000000000001",
+          "bff0000000000000"
+        ]
+      ],
+      "scalar_output_raw64": "3cb0000000000000",
+      "final_xmm_raw64": {
+        "0": [
+          "3cb0000000000000",
+          "0000000000000000"
+        ],
+        "1": [
+          "3cb0000000000000",
+          "bff0000000000000"
+        ],
+        "2": [
+          "0000000000000000",
+          "0000000000000000"
+        ],
+        "3": [
+          "3ff0000000000001",
+          "bff0000000000000"
+        ]
+      },
+      "derivation": [
+        "input products are exactly +2^-53 and -2^-53",
+        "accumulator exact real values +1+2^-53 and -1-2^-53 are midpoint ties between binary64 values",
+        "RN chooses even significands; RD chooses lower real values; RU chooses higher; RZ chooses toward0",
+        "only precision sticky bit0020 is newly raised; scalar cancellation/difference and multiply1/add0 are exact"
+      ]
+    },
+    {
+      "name": "toward-zero-half-ulp",
+      "count": 1,
+      "mxcsr_before": "00007f80",
+      "mxcsr_after": "00007fa0",
+      "coefficients_raw64": [
+        [
+          "3ff0000000000000",
+          "bff0000000000000"
+        ],
+        [
+          "3ca0000000000000",
+          "3ca0000000000000"
+        ],
+        [
+          "0000000000000000",
+          "0000000000000000"
+        ],
+        [
+          "3ff0000000000000",
+          "0000000000000000"
+        ]
+      ],
+      "input_raw64": [
+        [
+          "3ff0000000000000",
+          "bff0000000000000"
+        ]
+      ],
+      "output_raw64": [
+        [
+          "3ff0000000000000",
+          "bff0000000000000"
+        ]
+      ],
+      "scalar_output_raw64": "0000000000000000",
+      "final_xmm_raw64": {
+        "0": [
+          "0000000000000000",
+          "0000000000000000"
+        ],
+        "1": [
+          "0000000000000000",
+          "bff0000000000000"
+        ],
+        "2": [
+          "0000000000000000",
+          "0000000000000000"
+        ],
+        "3": [
+          "3ff0000000000000",
+          "bff0000000000000"
+        ]
+      },
+      "derivation": [
+        "input products are exactly +2^-53 and -2^-53",
+        "accumulator exact real values +1+2^-53 and -1-2^-53 are midpoint ties between binary64 values",
+        "RN chooses even significands; RD chooses lower real values; RU chooses higher; RZ chooses toward0",
+        "only precision sticky bit0020 is newly raised; scalar cancellation/difference and multiply1/add0 are exact"
+      ]
+    }
+  ],
+  "proof_ceiling": "six whole original-function calls on finite normal/zero inputs and selected rounding ties; not exhaustive SSE2, NaN/exception-mask, aliasing, hardware timing, shared concurrency or arbitrary C-program compatibility proof"
+}
