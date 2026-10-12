@@ -9,7 +9,7 @@ assert.ok(root, 'expected actual engine, output directory and repository root');
 const fixtureRoot = join(root, 'engine/tests/fixtures/p2-windows-provider');
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
 const oracleBytes = readFileSync(join(fixtureRoot, 'oracle.json')), oracle = JSON.parse(oracleBytes);
-const size = 4612, transfer = 140, budget = 64;
+const size = 4612, transfer = 140, transferEnd = transfer + 4096, budget = 64;
 const artifacts = {}, observations = [], identities = [];
 
 function elfSymbols(object) {
@@ -108,7 +108,9 @@ function fresh(owner) {
   assert.equal(api.open(8, engine.low, engine.high), 0);
   engine.base = api.arena_ptr() >>> 0; refresh(engine);
   assert.ok(engine.base > 0 && engine.base + size <= engine.bytes.length);
-  engine.bytes.fill(0xa5, engine.base, engine.base + size);
+  const initial = arena(engine);
+  engine.bytes.fill(0xa5, engine.base, engine.base + transferEnd);
+  assert.deepEqual(arena(engine).subarray(transferEnd), initial.subarray(transferEnd), 'setup preserves engine-owned extended state and work record');
   return engine;
 }
 function read(engine, address, value, label) { operation(engine, label, () => engine.api.read32(address), 0, [[100, helper(value)]]); }
