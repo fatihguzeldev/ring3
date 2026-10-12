@@ -153,7 +153,7 @@ pub(crate) fn binary(
     mode: Rounding,
 ) -> FloatResult {
     let round = rounding(mode);
-    let result = match format {
+    let mut result = match format {
         BinaryFormat::Binary32 => {
             let x = Single::from_bits(a as u128);
             let y = Single::from_bits(b as u128);
@@ -177,6 +177,16 @@ pub(crate) fn binary(
             (r.value.to_bits() as u64, r.status)
         }
     };
+    // the numerical backend omits overflow for finite directed saturation.
+    let (sign, exponent, _, _, maximum) = format.parameters();
+    if result.0 & !sign == exponent - 1
+        && result.1.contains(Status::INEXACT)
+        && !result.1.contains(Status::OVERFLOW)
+        && unbounded_exponent(operation, format, a, b, mode)
+            .is_some_and(|exponent| exponent > maximum)
+    {
+        result.1 |= Status::OVERFLOW | Status::INEXACT;
+    }
     FloatResult {
         bits: result.0,
         exceptions: exceptions(result.1),
@@ -214,13 +224,13 @@ impl Semantics for WideDouble {
 }
 
 #[inline]
-pub(crate) fn unbounded_tiny(
+fn unbounded_exponent(
     operation: BinaryOperation,
     format: BinaryFormat,
     a: u64,
     b: u64,
     mode: Rounding,
-) -> bool {
+) -> Option<i32> {
     let round = rounding(mode);
     let mut loses = false;
     match format {
@@ -238,7 +248,7 @@ pub(crate) fn unbounded_tiny(
                 BinaryOperation::Divide => x.div_r(y, round),
             }
             .value;
-            value.is_finite_non_zero() && value.ilogb() < -126
+            value.is_finite_non_zero().then(|| value.ilogb())
         }
         BinaryFormat::Binary64 => {
             let x: IeeeFloat<WideDouble> = Double::from_bits(a as u128)
@@ -254,9 +264,25 @@ pub(crate) fn unbounded_tiny(
                 BinaryOperation::Divide => x.div_r(y, round),
             }
             .value;
-            value.is_finite_non_zero() && value.ilogb() < -1022
+            value.is_finite_non_zero().then(|| value.ilogb())
         }
     }
+}
+
+#[inline]
+pub(crate) fn unbounded_tiny(
+    operation: BinaryOperation,
+    format: BinaryFormat,
+    a: u64,
+    b: u64,
+    mode: Rounding,
+) -> bool {
+    let minimum = if format == BinaryFormat::Binary32 {
+        -126
+    } else {
+        -1022
+    };
+    unbounded_exponent(operation, format, a, b, mode).is_some_and(|exponent| exponent < minimum)
 }
 
 #[inline]
@@ -397,3 +423,7 @@ pub(crate) fn square_root(bits: u64, format: BinaryFormat, mode: Rounding) -> Fl
 #[cfg(test)]
 #[path = "ieee/conversion/native.rs"]
 mod conversion;
+
+#[cfg(test)]
+#[path = "ieee/arithmetic/native.rs"]
+mod arithmetic;
