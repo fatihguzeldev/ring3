@@ -7,7 +7,7 @@ use crate::{
     },
     cpu::x86::simd::{PackedKind as P, ShuffleKind as S},
 };
-use wasm_encoder::{InstructionSink, MemArg};
+use wasm_encoder::{BlockType, InstructionSink, MemArg, ValType};
 
 pub(super) fn accepts(op: SimdOperation) -> bool {
     match op.kind {
@@ -33,6 +33,9 @@ pub(super) fn accepts(op: SimdOperation) -> bool {
                 | P::MaximumSigned
                 | P::MinimumUnsigned
                 | P::MaximumUnsigned
+                | P::ShiftLeft
+                | P::ShiftRight
+                | P::ShiftRightSigned
         ),
         SimdKind::Shuffle(kind) => matches!(
             kind,
@@ -195,8 +198,61 @@ fn arithmetic(code: &mut InstructionSink<'_>, kind: P, width: u8) {
         (P::MaximumUnsigned, 1) => {
             code.i8x16_max_u();
         }
+        (P::ShiftLeft, 2) => {
+            code.i16x8_shl();
+        }
+        (P::ShiftLeft, 4) => {
+            code.i32x4_shl();
+        }
+        (P::ShiftLeft, 8) => {
+            code.i64x2_shl();
+        }
+        (P::ShiftRight, 2) => {
+            code.i16x8_shr_u();
+        }
+        (P::ShiftRight, 4) => {
+            code.i32x4_shr_u();
+        }
+        (P::ShiftRight, 8) => {
+            code.i64x2_shr_u();
+        }
+        (P::ShiftRightSigned, 2) => {
+            code.i16x8_shr_s();
+        }
+        (P::ShiftRightSigned, 4) => {
+            code.i32x4_shr_s();
+        }
         _ => unreachable!("direct packed opcode and width were decoded"),
     }
+}
+
+fn packed_shift(code: &mut InstructionSink<'_>, op: SimdOperation, kind: P) {
+    let count = |code: &mut InstructionSink<'_>| {
+        if let Some(immediate) = op.immediate {
+            code.i64_const(i64::from(immediate));
+        } else {
+            load(code, op.source, 8);
+            code.i64x2_extract_lane(0);
+        }
+    };
+    let bits = i32::from(op.lane_bytes) * 8;
+    count(code);
+    code.i64_const(i64::from(bits))
+        .i64_ge_u()
+        .if_(BlockType::Result(ValType::V128));
+    if kind == P::ShiftRightSigned {
+        load(code, op.destination, op.vector_bytes);
+        code.i32_const(bits - 1);
+        arithmetic(code, kind, op.lane_bytes);
+    } else {
+        code.v128_const(0);
+    }
+    code.else_();
+    load(code, op.destination, op.vector_bytes);
+    count(code);
+    code.i32_wrap_i64();
+    arithmetic(code, kind, op.lane_bytes);
+    code.end();
 }
 
 fn shuffle(code: &mut InstructionSink<'_>, op: SimdOperation, kind: S) {
@@ -321,6 +377,11 @@ pub(super) fn instruction(
                     _ => unreachable!("scalar SIMD move width was decoded"),
                 }
             }
+        }
+        SimdKind::Packed(kind)
+            if matches!(kind, P::ShiftLeft | P::ShiftRight | P::ShiftRightSigned) =>
+        {
+            packed_shift(code, op, kind);
         }
         SimdKind::Packed(kind) => {
             load(code, op.destination, op.vector_bytes);
