@@ -58,7 +58,7 @@ mod cpu_locked_xor32;
 #[path = "bit_test/memory/native/mutation32.rs"]
 mod cpu_memory_bit_mutation32;
 
-#[path = "integration/native/memory_stack.rs"]
+#[path = "../dbt/lowering/memory/native/bridge.rs"]
 mod cpu_memory_bit_mutation_bridge;
 
 #[path = "compare_exchange/memory/native/dword.rs"]

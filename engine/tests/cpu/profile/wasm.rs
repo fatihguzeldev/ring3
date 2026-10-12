@@ -9,3 +9,6 @@ mod cpu_profile_boundaries_wasm;
 
 #[path = "environment/wasm/cpuid.rs"]
 mod cpu_cpuid_wasm;
+
+#[path = "environment/wasm/cache_timestamp.rs"]
+mod cpu_cache_timestamp_wasm;

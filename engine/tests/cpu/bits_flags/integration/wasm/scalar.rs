@@ -32,7 +32,9 @@ fn run_fixture(script: &str) {
     fs::create_dir_all(&output).unwrap();
     let result = wasm_support::run_node(
         root,
-        &format!("engine/tests/cpu/bits_flags/count/fixtures/p2-scalar-bits/runtime/{script}"),
+        &format!(
+            "engine/tests/cpu/bits_flags/integration/fixtures/p2-scalar-bits/runtime/{script}"
+        ),
         &engine,
         &output,
         None,

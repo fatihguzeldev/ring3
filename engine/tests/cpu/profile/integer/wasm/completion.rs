@@ -12,11 +12,6 @@ fn actual_integer_completion_preserves_flags_aliases_faults_and_currentness() {
     run_fixture("run.mjs");
 }
 
-#[test]
-fn actual_cache_flush_and_rdtscp_preserve_faults_currentness_and_ordering() {
-    run_fixture("cache_timestamp.mjs");
-}
-
 fn run_fixture(script: &str) {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
     let engine = std::env::var_os("RING3_ENGINE_WASM")

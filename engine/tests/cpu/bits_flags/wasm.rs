@@ -1,7 +1,7 @@
 #[path = "../../support/wasm.rs"]
 mod support_wasm;
 
-#[path = "count/wasm/runtime.rs"]
+#[path = "integration/wasm/scalar.rs"]
 mod cpu_scalar_bits_wasm;
 
 #[path = "scan/register/wasm/dword.rs"]

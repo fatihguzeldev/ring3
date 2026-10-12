@@ -11,7 +11,7 @@ const sourcePaths = [
   'engine/src/cpu/x86/decode/profile.rs', 'engine/src/cpu/x86/decode/lower.rs', 'engine/src/cpu/x86/decode/mod.rs',
   'engine/src/cpu/dbt/wasm/integer/scalar_bits.rs', 'engine/src/cpu/dbt/wasm/integer/mod.rs', 'engine/src/cpu/dbt/wasm/integer/dispatch.rs',
   'engine/src/cpu/dbt/wasm/memory.rs', 'engine/src/cpu/dbt/wasm/memory/narrow.rs', 'engine/src/cpu/dbt/wasm/memory/word_store.rs', 'engine/src/cpu/dbt/region.rs',
-  'engine/tests/cpu/bits_flags/count/fixtures/p2-scalar-bits/runtime/run.mjs', 'engine/tests/cpu/bits_flags/count/wasm/runtime.rs',
+  'engine/tests/cpu/bits_flags/integration/fixtures/p2-scalar-bits/runtime/run.mjs', 'engine/tests/cpu/bits_flags/integration/wasm/scalar.rs',
 ];
 const sources = () => Object.fromEntries(sourcePaths.map(path => [path, createHash('sha256').update(readFileSync(join(root, path))).digest('hex')]));
 const sourcePins = sources();
