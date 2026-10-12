@@ -63,8 +63,10 @@ fn sse3_decodes_legacy_load_duplicate_and_horizontal_forms() {
 
 #[test]
 fn sse3_horizontal_rounding_and_unmasked_exception_are_transactional() {
-    let mut state = SimdState::default();
-    state.mxcsr = 0x5f80;
+    let mut state = SimdState {
+        mxcsr: 0x5f80,
+        ..SimdState::default()
+    };
     state.xmm[0] = dwords([0x3f800000, 0x33800000, 0x40000000, 0x40400000]);
     state.xmm[1] = dwords([0x40800000, 0x40a00000, 0x40c00000, 0x40e00000]);
     let result = run(decode(&[0xf2, 0x0f, 0x7c, 0xc1]), &mut state).unwrap();

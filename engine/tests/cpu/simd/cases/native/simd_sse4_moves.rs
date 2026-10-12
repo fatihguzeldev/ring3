@@ -95,8 +95,10 @@ fn sse4_widenings_extend_only_low_source_lanes() {
             .into_iter()
             .enumerate()
         {
-            let mut state = SimdState::default();
-            state.mxcsr = 0xdfe5;
+            let mut state = SimdState {
+                mxcsr: 0xdfe5,
+                ..SimdState::default()
+            };
             state.xmm[0] = [0xa5; 16];
             state.xmm[1] = source;
             let result = run(

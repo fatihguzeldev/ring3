@@ -116,8 +116,10 @@ fn sse4_round_uses_immediate_or_mxcsr_mode_and_preserves_scalar_upper_bits() {
             [0x4000_0000, 0xbf80_0000, 0x4040_0000, 0x8000_0000],
         ),
     ] {
-        let mut state = SimdState::default();
-        state.mxcsr = mxcsr;
+        let mut state = SimdState {
+            mxcsr,
+            ..SimdState::default()
+        };
         state.xmm[1] = source;
         assert_eq!(
             run(
@@ -150,8 +152,10 @@ fn sse4_round_uses_immediate_or_mxcsr_mode_and_preserves_scalar_upper_bits() {
 
 #[test]
 fn sse4_round_suppresses_precision_but_preserves_invalid_fault_atomicity() {
-    let mut state = SimdState::default();
-    state.mxcsr = 0x0f80;
+    let mut state = SimdState {
+        mxcsr: 0x0f80,
+        ..SimdState::default()
+    };
     state.xmm[0] = [0xa5; 16];
     state.xmm[1] = dwords([0x3fc0_0000; 4]);
     let destination = state.xmm[0];
@@ -223,8 +227,10 @@ fn sse4_dot_products_use_pairwise_rounding_and_suppress_masked_inputs() {
 
 #[test]
 fn sse4_dot_product_delivers_first_unmasked_stage_before_later_invalid() {
-    let mut state = SimdState::default();
-    state.mxcsr = 0x0f00;
+    let mut state = SimdState {
+        mxcsr: 0x0f00,
+        ..SimdState::default()
+    };
     state.xmm[0] = dwords([0x4b80_0000, 0x3f80_0000, 0x7f80_0000, 0xff80_0000]);
     state.xmm[1] = dwords([0x3f80_0000; 4]);
     let destination = state.xmm[0];
@@ -237,8 +243,10 @@ fn sse4_dot_product_delivers_first_unmasked_stage_before_later_invalid() {
 
 #[test]
 fn sse4_dot_product_preserves_completed_stage_sticky_flags() {
-    let mut state = SimdState::default();
-    state.mxcsr = 0x1f00;
+    let mut state = SimdState {
+        mxcsr: 0x1f00,
+        ..SimdState::default()
+    };
     state.xmm[0] = dwords([0x4b80_0000, 0x3f80_0000, 0x7f80_0000, 0xff80_0000]);
     state.xmm[1] = dwords([0x3f80_0000; 4]);
     let destination = state.xmm[0];
@@ -251,8 +259,10 @@ fn sse4_dot_product_preserves_completed_stage_sticky_flags() {
 
 #[test]
 fn sse4_double_dot_product_delivers_multiply_stage_before_invalid_sum() {
-    let mut state = SimdState::default();
-    state.mxcsr = 0x0f00;
+    let mut state = SimdState {
+        mxcsr: 0x0f00,
+        ..SimdState::default()
+    };
     state.xmm[0] = qwords([0x7fef_ffff_ffff_ffff, 0xfff0_0000_0000_0000]);
     state.xmm[1] = qwords([0x4000_0000_0000_0000, 0x3ff0_0000_0000_0000]);
     let destination = state.xmm[0];
@@ -269,8 +279,10 @@ fn sse4_dot_product_aggregates_masked_and_unmasked_precomputation_flags() {
         ([0x7f80_1234, 1, 2, 3], 0x1f03),
         ([0x7f80_1234, 0, 0, 0], 0x1f01),
     ] {
-        let mut state = SimdState::default();
-        state.mxcsr = 0x1f00;
+        let mut state = SimdState {
+            mxcsr: 0x1f00,
+            ..SimdState::default()
+        };
         state.xmm[0] = dwords(input);
         state.xmm[1] = dwords([0x3f80_0000, 0, 0, 0]);
         let destination = state.xmm[0];
@@ -311,8 +323,10 @@ fn sse4_ptest_sets_only_defined_arithmetic_flags_without_vector_writeback() {
         (0xff, 0xff, 0x403),
         (0x0f, 0x33, 0x402),
     ] {
-        let mut state = SimdState::default();
-        state.mxcsr = 0xdfe5;
+        let mut state = SimdState {
+            mxcsr: 0xdfe5,
+            ..SimdState::default()
+        };
         state.xmm[0] = [a; 16];
         state.xmm[1] = [b; 16];
         let before = state;

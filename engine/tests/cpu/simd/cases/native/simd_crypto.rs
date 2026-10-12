@@ -129,8 +129,10 @@ fn crypto_aes_rounds_match_aes128_intermediate_values_without_numeric_side_effec
             "00112233445566778899aabbccddeeff",
         ),
     ] {
-        let mut state = SimdState::default();
-        state.mxcsr = 0x003f;
+        let mut state = SimdState {
+            mxcsr: 0x003f,
+            ..SimdState::default()
+        };
         state.xmm[0] = hex(input);
         state.xmm[1] = hex(key);
         state.xmm[7] = [0xa5; 16];
@@ -160,8 +162,10 @@ fn crypto_key_assist_uses_only_odd_source_words_and_every_round_constant_bit() {
         expected[4] ^= immediate;
         expected[12] ^= immediate;
         for alias in [false, true] {
-            let mut state = SimdState::default();
-            state.mxcsr = 0xffff;
+            let mut state = SimdState {
+                mxcsr: 0xffff,
+                ..SimdState::default()
+            };
             state.xmm[0] = if alias { source } else { [0x7f; 16] };
             state.xmm[1] = source;
             run(
@@ -188,8 +192,10 @@ fn crypto_key_assist_uses_only_odd_source_words_and_every_round_constant_bit() {
 #[test]
 fn crypto_carryless_multiply_selects_halves_and_ignores_other_immediate_bits() {
     for immediate in 0..=255 {
-        let mut state = SimdState::default();
-        state.mxcsr = 0x003f;
+        let mut state = SimdState {
+            mxcsr: 0x003f,
+            ..SimdState::default()
+        };
         state.xmm[0] = qwords([1 << 63, 3]);
         state.xmm[1] = qwords([2, 0x8000_0000_0000_0001]);
         let expected = match immediate & 0x11 {
@@ -261,8 +267,10 @@ fn crypto_invalid_shapes_are_rejected_before_any_operand_state_changes() {
         bad.aligned = false;
         malformed.push(bad);
         for bad in malformed {
-            let mut state = SimdState::default();
-            state.xmm = [[0xa5; 16]; 8];
+            let mut state = SimdState {
+                xmm: [[0xa5; 16]; 8],
+                ..SimdState::default()
+            };
             let original = state;
             let mut mmx = [[0x5a; 8]; 8];
             let mut memory = [0xff; 16];
