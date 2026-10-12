@@ -25,7 +25,7 @@ mod simd_sse4_arithmetic;
 #[path = "strings/native/comparison.rs"]
 mod packed_strings;
 
-#[path = "crypto/native/aes_clmul.rs"]
+#[path = "crypto/native.rs"]
 mod simd_crypto;
 
 #[path = "state/native/xsave.rs"]
