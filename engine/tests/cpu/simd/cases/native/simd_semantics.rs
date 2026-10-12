@@ -381,9 +381,17 @@ fn descriptors_reject_bad_width_and_operands_before_state_mutation() {
         simd::decode_descriptor(d, o, 1),
         Err(SimdError::InvalidDescriptor)
     );
+    let qword_equal = operation(K::Packed(P::Equal), 8);
+    let (d, o, i) = qword_equal.descriptor();
+    assert_eq!(simd::decode_descriptor(d, o, i), Ok(qword_equal));
+    let mut state = SimdState::default();
+    state.xmm[0] = dwords([1, 2, 3, 4]);
+    state.xmm[1] = dwords([1, 2, 3, 5]);
+    assert_eq!(run(qword_equal, &mut state).unwrap().flags, 0xcd7);
+    assert_eq!(state.xmm[0], dwords([u32::MAX, u32::MAX, 0, 0]));
     for bad in [
         SimdOperation {
-            lane_bytes: 8,
+            lane_bytes: 16,
             ..operation(K::Packed(P::Equal), 1)
         },
         SimdOperation {

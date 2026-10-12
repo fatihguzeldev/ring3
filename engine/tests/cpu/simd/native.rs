@@ -12,3 +12,6 @@ mod simd_extensions;
 
 #[path = "cases/native/simd_sse3.rs"]
 mod simd_sse3;
+
+#[path = "cases/native/simd_sse4.rs"]
+mod simd_sse4;

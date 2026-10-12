@@ -75,13 +75,17 @@ pub(super) fn packed(
         }
         return out;
     }
-    if kind == P::MultiplyUnsignedDword {
+    if matches!(kind, P::MultiplyUnsignedDword | P::MultiplySignedDword) {
         for offset in (0..size).step_by(8) {
             put(
                 &mut out,
                 offset,
                 8,
-                unsigned(&a, offset, 4) * unsigned(&b, offset, 4),
+                if kind == P::MultiplySignedDword {
+                    (signed(unsigned(&a, offset, 4), 4) * signed(unsigned(&b, offset, 4), 4)) as u64
+                } else {
+                    unsigned(&a, offset, 4) * unsigned(&b, offset, 4)
+                },
             );
         }
         return out;
@@ -170,6 +174,7 @@ pub(super) fn packed(
             }
             P::ShiftRightSigned => (sx >> count.min((bits - 1) as u64)) as u64,
             P::MultiplyUnsignedDword
+            | P::MultiplySignedDword
             | P::MultiplyAddWords
             | P::SumAbsoluteByteDifferences
             | P::HorizontalAdd

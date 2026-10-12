@@ -48,9 +48,10 @@ pub(super) fn accepts(op: SimdOperation) -> bool {
                 | P::HorizontalSubtractSignedSaturate
                 | P::MultiplyAddUnsignedSignedBytes
                 | P::MultiplyHighRoundSigned
+                | P::MultiplySignedDword
         ),
         SimdKind::Shuffle(S::PackSigned) => matches!(op.lane_bytes, 1 | 2),
-        SimdKind::Shuffle(S::PackUnsigned) => op.lane_bytes == 1,
+        SimdKind::Shuffle(S::PackUnsigned) => matches!(op.lane_bytes, 1 | 2),
         SimdKind::Shuffle(kind) => matches!(
             kind,
             S::Dwords
@@ -186,6 +187,9 @@ fn arithmetic(code: &mut InstructionSink<'_>, kind: P, width: u8) {
         (P::Equal, 4) => {
             code.i32x4_eq();
         }
+        (P::Equal, 8) => {
+            code.i64x2_eq();
+        }
         (P::GreaterSigned, 1) => {
             code.i8x16_gt_s();
         }
@@ -195,8 +199,14 @@ fn arithmetic(code: &mut InstructionSink<'_>, kind: P, width: u8) {
         (P::GreaterSigned, 4) => {
             code.i32x4_gt_s();
         }
+        (P::GreaterSigned, 8) => {
+            code.i64x2_gt_s();
+        }
         (P::MultiplyLow, 2) => {
             code.i16x8_mul();
+        }
+        (P::MultiplyLow, 4) => {
+            code.i32x4_mul();
         }
         (P::MultiplyAddWords, 2) => {
             code.i32x4_dot_i16x8_s();
@@ -206,6 +216,30 @@ fn arithmetic(code: &mut InstructionSink<'_>, kind: P, width: u8) {
         }
         (P::AverageUnsigned, 2) => {
             code.i16x8_avgr_u();
+        }
+        (P::MinimumSigned, 1) => {
+            code.i8x16_min_s();
+        }
+        (P::MinimumSigned, 4) => {
+            code.i32x4_min_s();
+        }
+        (P::MaximumSigned, 1) => {
+            code.i8x16_max_s();
+        }
+        (P::MaximumSigned, 4) => {
+            code.i32x4_max_s();
+        }
+        (P::MinimumUnsigned, 2) => {
+            code.i16x8_min_u();
+        }
+        (P::MinimumUnsigned, 4) => {
+            code.i32x4_min_u();
+        }
+        (P::MaximumUnsigned, 2) => {
+            code.i16x8_max_u();
+        }
+        (P::MaximumUnsigned, 4) => {
+            code.i32x4_max_u();
         }
         (P::MinimumSigned, 2) => {
             code.i16x8_min_s();
@@ -247,13 +281,17 @@ fn arithmetic(code: &mut InstructionSink<'_>, kind: P, width: u8) {
     }
 }
 
-fn multiply_unsigned_dword(code: &mut InstructionSink<'_>, op: SimdOperation) {
+fn multiply_dword(code: &mut InstructionSink<'_>, op: SimdOperation) {
     for operand in [op.destination, op.source] {
         load(code, operand, op.vector_bytes);
         code.v128_const(0)
             .i8x16_shuffle([0, 1, 2, 3, 8, 9, 10, 11, 16, 17, 18, 19, 20, 21, 22, 23]);
     }
-    code.i64x2_extmul_low_i32x4_u();
+    if op.kind == SimdKind::Packed(P::MultiplySignedDword) {
+        code.i64x2_extmul_low_i32x4_s();
+    } else {
+        code.i64x2_extmul_low_i32x4_u();
+    }
 }
 
 fn sum_absolute_byte_differences(code: &mut InstructionSink<'_>, op: SimdOperation) {
@@ -517,6 +555,9 @@ fn saturating_pack(code: &mut InstructionSink<'_>, op: SimdOperation, kind: S) {
         (S::PackUnsigned, 1) => {
             code.i8x16_narrow_i16x8_u();
         }
+        (S::PackUnsigned, 2) => {
+            code.i16x8_narrow_i32x4_u();
+        }
         _ => unreachable!("direct saturating pack kind and width were decoded"),
     }
 }
@@ -706,7 +747,9 @@ pub(super) fn instruction(
         SimdKind::Packed(P::MultiplyHighRoundSigned) => multiply_high_round_signed(code, op),
         SimdKind::Shuffle(S::Bytes) => shuffle_bytes(code, op),
         SimdKind::Shuffle(S::AlignRight) => align_right(code, op),
-        SimdKind::Packed(P::MultiplyUnsignedDword) => multiply_unsigned_dword(code, op),
+        SimdKind::Packed(P::MultiplyUnsignedDword | P::MultiplySignedDword) => {
+            multiply_dword(code, op)
+        }
         SimdKind::Packed(P::SumAbsoluteByteDifferences) => sum_absolute_byte_differences(code, op),
         SimdKind::Packed(kind)
             if matches!(kind, P::MultiplyHighSigned | P::MultiplyHighUnsigned) =>

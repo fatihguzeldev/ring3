@@ -76,6 +76,7 @@ pub enum PackedKind {
     HorizontalSubtractSignedSaturate,
     MultiplyAddUnsignedSignedBytes,
     MultiplyHighRoundSigned,
+    MultiplySignedDword,
 }
 
 #[repr(u8)]
@@ -358,6 +359,7 @@ pub fn decode_descriptor(
                 P::HorizontalSubtractSignedSaturate,
                 P::MultiplyAddUnsignedSignedBytes,
                 P::MultiplyHighRoundSigned,
+                P::MultiplySignedDword,
             ]
             .get(sub)
             .ok_or(SimdError::InvalidDescriptor)?,
@@ -761,7 +763,6 @@ fn validate_operation(op: SimdOperation) -> Result<(), SimdError> {
                 kind,
                 PackedKind::MultiplyHighSigned
                     | PackedKind::MultiplyHighUnsigned
-                    | PackedKind::MultiplyLow
                     | PackedKind::MultiplyAddWords
             ) && op.lane_bytes != 2
             {
@@ -779,6 +780,13 @@ fn validate_operation(op: SimdOperation) -> Result<(), SimdError> {
                         | PackedKind::MultiplyHighRoundSigned
                 ) && op.lane_bytes != 2
                 || kind == PackedKind::MultiplyAddUnsignedSignedBytes && op.lane_bytes != 1
+            {
+                return invalid();
+            }
+            if kind == PackedKind::MultiplyLow
+                && (!matches!(op.lane_bytes, 2 | 4) || op.lane_bytes == 4 && op.vector_bytes != 16)
+                || kind == PackedKind::MultiplySignedDword
+                    && (op.lane_bytes != 4 || op.vector_bytes != 16)
             {
                 return invalid();
             }
@@ -801,15 +809,17 @@ fn validate_operation(op: SimdOperation) -> Result<(), SimdError> {
                 PackedKind::And | PackedKind::AndNot | PackedKind::Or | PackedKind::Xor
             ) && op.lane_bytes != 8
                 || matches!(kind, PackedKind::Equal | PackedKind::GreaterSigned)
-                    && op.lane_bytes > 4
+                    && op.lane_bytes == 8
+                    && op.vector_bytes != 16
                 || matches!(kind, PackedKind::MinimumSigned | PackedKind::MaximumSigned)
-                    && op.lane_bytes != 2
+                    && (!matches!(op.lane_bytes, 1 | 2 | 4)
+                        || op.lane_bytes != 2 && op.vector_bytes != 16)
                 || matches!(
                     kind,
-                    PackedKind::MinimumUnsigned
-                        | PackedKind::MaximumUnsigned
-                        | PackedKind::SumAbsoluteByteDifferences
-                ) && op.lane_bytes != 1
+                    PackedKind::MinimumUnsigned | PackedKind::MaximumUnsigned
+                ) && (!matches!(op.lane_bytes, 1 | 2 | 4)
+                    || op.lane_bytes != 1 && op.vector_bytes != 16)
+                || kind == PackedKind::SumAbsoluteByteDifferences && op.lane_bytes != 1
                 || shift && op.lane_bytes < 2
                 || kind == PackedKind::ShiftRightSigned && op.lane_bytes == 8
             {
@@ -867,7 +877,10 @@ fn validate_operation(op: SimdOperation) -> Result<(), SimdError> {
                 return invalid();
             }
             if matches!(kind, ShuffleKind::PackSigned | ShuffleKind::PackUnsigned)
-                && op.lane_bytes > 2
+                && (op.lane_bytes > 2
+                    || kind == ShuffleKind::PackUnsigned
+                        && op.lane_bytes == 2
+                        && op.vector_bytes != 16)
             {
                 return invalid();
             }
