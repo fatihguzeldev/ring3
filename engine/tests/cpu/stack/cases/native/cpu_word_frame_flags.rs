@@ -241,7 +241,7 @@ fn word_frame_flags_prefixes_lock_and_closed_stack_neighbors_stay_precise() {
             assert!(matches!(operation, Operation::StackFrame { .. }));
             continue;
         }
-        if !word_prefix::admit_if_new_prefix(&bytes) {
+        if !word_prefix::admit_if_new_prefix(bytes) {
             assert_eq!(
                 decode_one(&code_space(CODE, bytes), GuestAddress(CODE)).err(),
                 Some(DecodeError::Unsupported(UnsupportedFeature::Opcode)),

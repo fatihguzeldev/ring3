@@ -383,7 +383,7 @@ fn exact_word_neg_not_prefix_fetch_top_and_consumed_source_currency() {
         &[0x66, 0xf6, 0xd0][..],
         &[0x66, 0x66, 0xd1, 0xe0][..],
     ] {
-        if !word_prefix::admit_if_new_prefix(&bytes) {
+        if !word_prefix::admit_if_new_prefix(bytes) {
             assert_eq!(
                 decode_one(&memory(0x1000, bytes), GuestAddress(0x1000)).unwrap_err(),
                 DecodeError::Unsupported(UnsupportedFeature::Opcode)

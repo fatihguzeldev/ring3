@@ -402,7 +402,7 @@ fn word_division_prefixes_and_duplicate_division_neighbors_have_exact_categories
         &[0x66, 0xf7, 0xc8, 0x66, 0x67][..],
         &[0x66, 0xf7, 0x0b, 0x66, 0x67][..],
     ] {
-        if !word_prefix::admit_if_new_prefix(&bytes) {
+        if !word_prefix::admit_if_new_prefix(bytes) {
             assert_eq!(
                 decode_one(&code_space(CODE, bytes), GuestAddress(CODE)).err(),
                 Some(opcode)

@@ -282,7 +282,7 @@ fn strict_neighbors_and_fetch_boundaries_keep_exact_categories() {
         &[0x66, 0x66, 0xf7, 0x3b],
     ] {
         let engine = fixture(CODE, bytes);
-        if !prefix_admission::admit_if_new_prefix(&bytes) {
+        if !prefix_admission::admit_if_new_prefix(bytes) {
             assert_eq!(
                 decode_one(engine.memory().unwrap(), GuestAddress(CODE)).err(),
                 Some(opcode)

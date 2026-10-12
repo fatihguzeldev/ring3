@@ -405,7 +405,7 @@ fn word_stack_prefix_lock_and_closed_stack_neighbors_remain_precise() {
             continue;
         }
 
-        if !word_prefix::admit_if_new_prefix(&bytes) {
+        if !word_prefix::admit_if_new_prefix(bytes) {
             assert_eq!(
                 decode_one(&code_space(CODE, bytes), GuestAddress(CODE)).err(),
                 Some(unsupported),

@@ -279,7 +279,7 @@ fn strict_exclusions_and_two_byte_fetch_preserve_fault_and_wrap_boundaries() {
         &[0x66, 0x66, 0xf7, 0x3a],
     ] {
         let engine = code(CODE, bytes);
-        if !prefix_admission::admit_if_new_prefix(&bytes) {
+        if !prefix_admission::admit_if_new_prefix(bytes) {
             assert_eq!(
                 decode_one(engine.memory().unwrap(), GuestAddress(CODE)).err(),
                 Some(opcode),

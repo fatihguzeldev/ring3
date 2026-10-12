@@ -288,7 +288,7 @@ fn word_inc_dec_strict_forms_fetch_and_consumed_code_currency_stay_exact() {
         &[0x66, 0xfe, 0xc0],
         &[0x66, 0xfe, 0xc8],
     ] {
-        if !prefix_admission::admit_if_new_prefix(&bytes) {
+        if !prefix_admission::admit_if_new_prefix(bytes) {
             assert_eq!(
                 decode_one(fixture(PC, bytes).memory().unwrap(), GuestAddress(PC)).unwrap_err(),
                 opcode

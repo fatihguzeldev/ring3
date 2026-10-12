@@ -313,7 +313,7 @@ fn word_register_exchange_prefixes_memory_lock_and_multibyte_nop_stay_precise() 
         &[0x66, 0x0f, 0x1f, 0xc0],
         &[0x66, 0x0f, 0x1f, 0x44, 0x00, 1],
     ] {
-        if !word_prefix::admit_if_new_prefix(&bytes) {
+        if !word_prefix::admit_if_new_prefix(bytes) {
             assert_eq!(
                 decode_one(&code_space(CODE, bytes), GuestAddress(CODE)).err(),
                 Some(unsupported),
