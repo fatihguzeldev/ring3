@@ -48,7 +48,7 @@ fn actual_engine_lodsb_stosb_direction_faults_and_invalidation() {
     fs::write(output.join("string-load-store.x86"), bank()).unwrap();
     let result = wasm_support::run_node(
         root,
-        "engine/tests/cpu/strings/integration/fixtures/p2-string-load-store/runtime/run.mjs",
+        "engine/tests/cpu/strings/transfer/fixtures/p2-string-load-store/runtime/run.mjs",
         &engine,
         &output,
         None,

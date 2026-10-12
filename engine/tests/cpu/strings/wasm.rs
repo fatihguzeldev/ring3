@@ -16,7 +16,7 @@ mod cpu_dword_string_compare_wasm;
 #[path = "compare/wasm/byte.rs"]
 mod cpu_string_compare_wasm;
 
-#[path = "integration/wasm/load_store.rs"]
+#[path = "transfer/wasm/byte.rs"]
 mod cpu_string_load_store_wasm;
 
 #[path = "integration/wasm/byte.rs"]

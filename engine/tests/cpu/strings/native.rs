@@ -19,7 +19,7 @@ mod cpu_rep_strings;
 #[path = "compare/native/byte.rs"]
 mod cpu_string_compare;
 
-#[path = "integration/native/load_store.rs"]
+#[path = "transfer/native/byte.rs"]
 mod cpu_string_load_store;
 
 #[path = "integration/native/byte.rs"]
