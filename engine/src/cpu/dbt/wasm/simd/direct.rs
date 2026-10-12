@@ -53,6 +53,9 @@ pub(super) fn accepts(op: SimdOperation) -> bool {
                 | S::Doubles
                 | S::UnpackLow
                 | S::UnpackHigh
+                | S::ShiftBytesLeft
+                | S::ShiftBytesRight
+                | S::InsertWord
                 | S::MoveLowToHigh
                 | S::MoveHighToLow
                 | S::MaskBytes
@@ -346,6 +349,35 @@ fn saturating_pack(code: &mut InstructionSink<'_>, op: SimdOperation, kind: S) {
     }
 }
 
+fn byte_shift(code: &mut InstructionSink<'_>, op: SimdOperation, kind: S) {
+    let count = usize::from(op.immediate.unwrap()).min(16);
+    let lanes = std::array::from_fn(|i| {
+        if kind == S::ShiftBytesLeft {
+            if i >= count { (i - count) as u8 } else { 16 }
+        } else if i + count < 16 {
+            (i + count) as u8
+        } else {
+            16
+        }
+    });
+    load(code, op.destination, 16);
+    code.v128_const(0).i8x16_shuffle(lanes);
+}
+
+fn insert_word(code: &mut InstructionSink<'_>, op: SimdOperation) {
+    load(code, op.destination, op.vector_bytes);
+    match op.source {
+        SimdOperand::Register(SimdRegister::Gpr(gpr)) => {
+            code.local_get(register(gpr));
+        }
+        SimdOperand::Memory(_) => {
+            code.local_get(STATE_PTR).i32_load16_u(arg(TRANSFER_OFFSET));
+        }
+        _ => unreachable!("direct word insertion operands were decoded"),
+    }
+    code.i16x8_replace_lane(op.immediate.unwrap() % (op.vector_bytes / 2));
+}
+
 fn shuffle(code: &mut InstructionSink<'_>, op: SimdOperation, kind: S) {
     let width = usize::from(op.lane_bytes);
     let size = usize::from(op.vector_bytes);
@@ -515,6 +547,10 @@ pub(super) fn instruction(
                 _ => unreachable!(),
             }
         }
+        SimdKind::Shuffle(kind) if matches!(kind, S::ShiftBytesLeft | S::ShiftBytesRight) => {
+            byte_shift(code, op, kind);
+        }
+        SimdKind::Shuffle(S::InsertWord) => insert_word(code, op),
         SimdKind::Shuffle(kind) => shuffle(code, op, kind),
         _ => unreachable!(),
     }
