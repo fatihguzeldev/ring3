@@ -11,6 +11,7 @@ mod operands;
 mod packed_strings;
 mod profile;
 mod scalar_bits;
+mod segment_queries;
 mod segments;
 mod simd;
 mod stack;

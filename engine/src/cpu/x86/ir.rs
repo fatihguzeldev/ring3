@@ -324,6 +324,10 @@ pub enum CarryKind {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Operation {
+    AdjustPrivilege {
+        destination: Location32,
+        source: Register32,
+    },
     CacheFlush {
         address: EffectiveAddress,
     },

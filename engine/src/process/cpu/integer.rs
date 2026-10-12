@@ -42,6 +42,9 @@ impl EngineInstance {
                     .unwrap(),
             )
         });
+        if descriptor == 0x30000 {
+            return self.adjust_privilege_memory(resident, address, input);
+        }
         let mut output = input;
         if matches!(descriptor, 0x20000 | 0x20001) {
             self.virtual_tsc = self.virtual_tsc.wrapping_add(1);
@@ -103,7 +106,7 @@ impl EngineInstance {
         self.integer_publish(width, output, result)?;
         self.cpu_store_currentness(changed, resident)
     }
-    fn integer_publish(
+    pub(super) fn integer_publish(
         &mut self,
         length: u32,
         output: [u32; 6],

@@ -1,6 +1,7 @@
 #![forbid(unsafe_code)]
 
 pub(super) mod integer;
+pub(super) mod segment_queries;
 pub(super) mod segments;
 pub(super) mod simd;
 pub(super) mod stack;

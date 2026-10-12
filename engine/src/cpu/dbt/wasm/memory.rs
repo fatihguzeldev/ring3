@@ -136,6 +136,10 @@ impl Imports {
         let mut atomic_xor_u32 = false;
         for instruction in blocks.iter().flat_map(|block| &block.instructions) {
             match instruction.operation() {
+                Operation::AdjustPrivilege {
+                    destination: Location32::Memory(_),
+                    ..
+                } => cpu_integer = true,
                 Operation::CacheFlush { .. } => read8 = true,
                 Operation::VirtualTimestampAux => cpu_integer = true,
                 Operation::PackedStringCompare(operation) => {
@@ -147,13 +151,11 @@ impl Imports {
                 Operation::Crc32 {
                     source: crate::cpu::x86::bits::Crc32Source::Memory { width, .. },
                     ..
-                } => {
-                    match width {
-                        crate::cpu::x86::bits::Crc32Width::Byte => read8 = true,
-                        crate::cpu::x86::bits::Crc32Width::Word => read16 = true,
-                        crate::cpu::x86::bits::Crc32Width::Dword => read = true,
-                    }
-                }
+                } => match width {
+                    crate::cpu::x86::bits::Crc32Width::Byte => read8 = true,
+                    crate::cpu::x86::bits::Crc32Width::Word => read16 = true,
+                    crate::cpu::x86::bits::Crc32Width::Dword => read = true,
+                },
                 Operation::BitManipulation { source, .. }
                 | Operation::MultiplyExtended { source, .. } => {
                     read |= matches!(source, Value32::Memory(_));

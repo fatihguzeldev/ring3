@@ -11,6 +11,7 @@ mod integer_system;
 mod locals;
 mod memory;
 mod packed_strings;
+mod segment_queries;
 mod segments;
 mod simd;
 mod stack;

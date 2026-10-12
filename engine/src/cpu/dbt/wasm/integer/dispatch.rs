@@ -49,6 +49,18 @@ pub(in crate::cpu::dbt::wasm) fn instruction(
     }
     let mut store = false;
     match *instruction.operation() {
+        Operation::AdjustPrivilege {
+            destination,
+            source,
+        } => {
+            store = super::super::segment_queries::adjust_privilege(
+                code,
+                destination,
+                source,
+                imports,
+                exit_depth,
+            );
+        }
         Operation::CacheFlush { address } => {
             super::super::cache_flush::instruction(code, address, imports, exit_depth);
         }

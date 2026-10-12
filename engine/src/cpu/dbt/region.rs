@@ -364,6 +364,7 @@ fn supports_cpu_state(operation: &Operation) -> bool {
     match operation {
         Operation::PackedStringCompare(operation) => operation.valid(),
         Operation::VirtualTimestampAux => true,
+        Operation::AdjustPrivilege { .. } => true,
         _ => false,
     }
 }
@@ -371,7 +372,10 @@ fn supports_cpu_state(operation: &Operation) -> bool {
 fn supports_memory_reads(operation: &Operation) -> bool {
     matches!(
         operation,
-        Operation::CacheFlush { .. }
+        Operation::AdjustPrivilege {
+            destination: Location32::Memory(_),
+            ..
+        } | Operation::CacheFlush { .. }
             | Operation::Crc32 {
                 source: crate::cpu::x86::bits::Crc32Source::Memory { .. },
                 ..
@@ -587,6 +591,9 @@ fn supports_memory_shift_or_rotate(operation: &Operation) -> bool {
 pub(super) fn supports(instruction: &DecodedInstruction, embedded: bool) -> bool {
     let operation = instruction.operation();
     match operation {
+        Operation::AdjustPrivilege { destination, .. } => {
+            return embedded || matches!(destination, Location32::Register(_));
+        }
         Operation::CacheFlush { .. } | Operation::VirtualTimestampAux => {
             return embedded;
         }
