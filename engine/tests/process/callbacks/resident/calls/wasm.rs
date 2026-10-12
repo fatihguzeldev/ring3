@@ -28,7 +28,7 @@ fn actual_engine_wasm_captures_and_completes_callback_owned_inner_call() {
     fs::create_dir_all(&output).unwrap();
     let result = wasm_support::run_node(
         root,
-        "engine/tests/process/callbacks/resident/fixtures/p2-resident-callback-call/runtime/run.mjs",
+        "engine/tests/process/callbacks/resident/calls/fixtures/p2-resident-callback-call/runtime/run.mjs",
         &engine,
         &output,
         None,

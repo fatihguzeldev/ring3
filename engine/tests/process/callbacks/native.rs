@@ -1,7 +1,7 @@
 #[path = "replacement/native/code.rs"]
 mod callback_code_install;
 
-#[path = "resident/native/active_calls.rs"]
+#[path = "resident/calls/active/native.rs"]
 mod process_active_resident_callback_call;
 
 #[path = "replacement/native/admission.rs"]
@@ -10,7 +10,7 @@ mod process_callbacks;
 #[path = "resident/native/admission.rs"]
 mod process_resident_callback;
 
-#[path = "resident/native/calls.rs"]
+#[path = "resident/calls/native.rs"]
 mod process_resident_callback_call;
 
 #[path = "resident/native/execution.rs"]

@@ -7,13 +7,13 @@ mod callback_code_wasm;
 #[path = "replacement/wasm/admission.rs"]
 mod callbacks_wasm;
 
-#[path = "resident/wasm/active_calls.rs"]
+#[path = "resident/calls/active/wasm.rs"]
 mod process_active_resident_callback_call_wasm;
 
 #[path = "resident/wasm/retry.rs"]
 mod process_cold_callback_retry_wasm;
 
-#[path = "resident/wasm/calls.rs"]
+#[path = "resident/calls/wasm.rs"]
 mod process_resident_callback_call_wasm;
 
 #[path = "resident/wasm/execution.rs"]
