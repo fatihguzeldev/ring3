@@ -38,6 +38,7 @@ fn privileged_rows() -> Vec<Vec<u8>> {
         vec![0x0f, 0x01, 0xf0],
         vec![0x0f, 0x01, 0x30],
         vec![0x0f, 0x08],
+        vec![0x0f, 0x09],
     ];
     for opcode in [0x20, 0x22] {
         for control in [0, 2, 3, 4] {
@@ -97,7 +98,7 @@ fn privileged_lock_invalidity_precedes_cpl3_general_protection() {
 }
 
 #[test]
-fn privileged_reserved_repeat_and_duplicate_prefixes_keep_strict_refusals() {
+fn privileged_repeat_and_duplicate_prefixes_keep_strict_refusals() {
     for row in privileged_rows() {
         for prefix in [&[0xf2][..], &[0xf3], &[0x66, 0x66]] {
             let mut bytes = prefix.to_vec();
@@ -119,7 +120,6 @@ fn environment_dependent_or_unadvertised_families_keep_strict_refusals() {
     for bytes in [
         &[0x0f, 0x32][..],
         &[0x0f, 0x30],
-        &[0x0f, 0x09],
         &[0xf3, 0x0f, 0x09],
         &[0x0f, 0x21, 0xc0],
         &[0x0f, 0x23, 0xe0],

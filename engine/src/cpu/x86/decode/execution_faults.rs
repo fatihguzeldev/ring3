@@ -40,7 +40,8 @@ fn cpl3_general_protection(instruction: &Instruction) -> bool {
         | Code::Ltr_r32m16
         | Code::Lmsw_rm16
         | Code::Lmsw_r32m16
-        | Code::Invd => true,
+        | Code::Invd
+        | Code::Wbinvd => true,
         Code::Mov_r32_cr => control_register(instruction.op1_register()),
         Code::Mov_cr_r32 => control_register(instruction.op0_register()),
         _ => false,

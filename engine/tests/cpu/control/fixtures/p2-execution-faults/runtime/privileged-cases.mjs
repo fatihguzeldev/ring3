@@ -10,6 +10,7 @@ const legacy = [
   ['lmsw-register', [0x0f, 0x01, 0xf0]],
   ['lmsw-memory', [0x0f, 0x01, 0x30]],
   ['invd', [0x0f, 0x08]],
+  ['wbinvd', [0x0f, 0x09]],
 ];
 for (const opcode of [0x20, 0x22]) for (const control of [0, 2, 3, 4]) {
   legacy.push([`mov-${opcode.toString(16)}-cr${control}`, [0x0f, opcode, 0xc7 | control << 3]]);
@@ -21,18 +22,21 @@ const rows = [...legacy, ...memory.flatMap(([name, bytes]) => [
   [`${name}-address16`, [0x67, ...bytes]],
   [`${name}-fs`, [0x64, ...bytes]],
   [`${name}-ss`, [0x36, ...bytes]],
+]), ...[0x66, 0x67, 0x64, 0x36].map(prefix => [
+  `wbinvd-prefix-${prefix.toString(16)}`, [prefix, 0x0f, 0x09],
 ])];
 export const positive = rows.flatMap(([name, bytes]) => [
   {name, bytes: Buffer.from(bytes), reason: 11, baseVersion: 6},
   {name: `invalid-lock-${name}`, bytes: Buffer.from([0xf0, ...bytes]), reason: 20, baseVersion: 1},
 ]);
-export const negatives = legacy.flatMap(([name, bytes]) => [0xf2, 0xf3].map(prefix => ({
-  name: `reserved-repeat-${prefix.toString(16)}-${name}`, bytes: Buffer.from([prefix, ...bytes]),
-})));
+export const negatives = legacy.flatMap(([name, bytes]) => [0xf2, 0xf3]
+  .filter(prefix => name !== 'wbinvd' || prefix !== 0xf3)
+  .map(prefix => ({
+    name: `reserved-repeat-${prefix.toString(16)}-${name}`, bytes: Buffer.from([prefix, ...bytes]),
+  })));
 for (const [name, bytes] of [
   ['unadvertised-rdmsr', [0x0f, 0x32]],
   ['unadvertised-wrmsr', [0x0f, 0x30]],
-  ['unclassified-wbinvd', [0x0f, 0x09]],
   ['distinct-wbnoinvd', [0xf3, 0x0f, 0x09]],
   ['debug-environment-mov-dr0', [0x0f, 0x21, 0xc0]],
   ['debug-environment-mov-dr4', [0x0f, 0x23, 0xe0]],
