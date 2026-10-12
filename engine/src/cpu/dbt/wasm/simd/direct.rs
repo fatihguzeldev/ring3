@@ -27,6 +27,8 @@ pub(super) fn accepts(op: SimdOperation) -> bool {
                 | P::Equal
                 | P::GreaterSigned
                 | P::MultiplyLow
+                | P::MultiplyHighSigned
+                | P::MultiplyHighUnsigned
                 | P::MultiplyAddWords
                 | P::AverageUnsigned
                 | P::MinimumSigned
@@ -228,6 +230,43 @@ fn arithmetic(code: &mut InstructionSink<'_>, kind: P, width: u8) {
     }
 }
 
+fn multiply_high(code: &mut InstructionSink<'_>, op: SimdOperation, kind: P) {
+    let signed = kind == P::MultiplyHighSigned;
+    for high in [false, true] {
+        if high && op.vector_bytes == 8 {
+            code.v128_const(0);
+            continue;
+        }
+        load(code, op.destination, op.vector_bytes);
+        load(code, op.source, op.vector_bytes);
+        match (signed, high) {
+            (true, false) => {
+                code.i32x4_extmul_low_i16x8_s();
+            }
+            (true, true) => {
+                code.i32x4_extmul_high_i16x8_s();
+            }
+            (false, false) => {
+                code.i32x4_extmul_low_i16x8_u();
+            }
+            (false, true) => {
+                code.i32x4_extmul_high_i16x8_u();
+            }
+        }
+        code.i32_const(16);
+        if signed {
+            code.i32x4_shr_s();
+        } else {
+            code.i32x4_shr_u();
+        }
+    }
+    if signed {
+        code.i16x8_narrow_i32x4_s();
+    } else {
+        code.i16x8_narrow_i32x4_u();
+    }
+}
+
 fn packed_shift(code: &mut InstructionSink<'_>, op: SimdOperation, kind: P) {
     let count = |code: &mut InstructionSink<'_>| {
         if let Some(immediate) = op.immediate {
@@ -401,6 +440,11 @@ pub(super) fn instruction(
                     _ => unreachable!("scalar SIMD move width was decoded"),
                 }
             }
+        }
+        SimdKind::Packed(kind)
+            if matches!(kind, P::MultiplyHighSigned | P::MultiplyHighUnsigned) =>
+        {
+            multiply_high(code, op, kind);
         }
         SimdKind::Packed(kind)
             if matches!(kind, P::ShiftLeft | P::ShiftRight | P::ShiftRightSigned) =>
