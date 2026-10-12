@@ -324,6 +324,7 @@ pub enum CarryKind {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Operation {
+    PackedStringCompare(super::packed_strings::PackedStringCompare),
     Crc32 {
         destination: Register32,
         source: super::bits::Crc32Source,

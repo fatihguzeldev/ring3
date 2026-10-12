@@ -201,7 +201,8 @@ fn prepare(
             }
             if !(supports(&instruction, embedded)
                 || (resident
-                    && (supports_memory_reads(instruction.operation())
+                    && (supports_cpu_state(instruction.operation())
+                        || supports_memory_reads(instruction.operation())
                         || supports_indirect_jump(instruction.operation())
                         || supports_memory_move_store(instruction.operation())
                         || supports_narrow_store(instruction.operation())
@@ -356,6 +357,13 @@ pub(super) fn terminates(instruction: &DecodedInstruction, embedded: bool) -> bo
                 | Operation::Return { .. }
                 | Operation::ReturnWord { .. }
         ))
+}
+
+fn supports_cpu_state(operation: &Operation) -> bool {
+    match operation {
+        Operation::PackedStringCompare(operation) => operation.valid(),
+        _ => false,
+    }
 }
 
 fn supports_memory_reads(operation: &Operation) -> bool {
@@ -572,6 +580,7 @@ fn supports_memory_shift_or_rotate(operation: &Operation) -> bool {
 pub(super) fn supports(instruction: &DecodedInstruction, embedded: bool) -> bool {
     let operation = instruction.operation();
     match operation {
+        Operation::PackedStringCompare(operation) => return embedded && operation.valid(),
         Operation::Crc32 { source, .. } => {
             return embedded
                 || !matches!(source, crate::cpu::x86::bits::Crc32Source::Memory { .. });

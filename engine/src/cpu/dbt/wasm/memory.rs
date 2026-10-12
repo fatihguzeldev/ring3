@@ -136,6 +136,12 @@ impl Imports {
         let mut atomic_xor_u32 = false;
         for instruction in blocks.iter().flat_map(|block| &block.instructions) {
             match instruction.operation() {
+                Operation::PackedStringCompare(operation) => {
+                    cpu_read |= matches!(
+                        operation.right,
+                        crate::cpu::x86::packed_strings::PackedStringSource::Memory(_)
+                    );
+                }
                 Operation::Crc32 {
                     source: crate::cpu::x86::bits::Crc32Source::Memory { width, .. },
                     ..

@@ -3,6 +3,7 @@ import {readFileSync,writeFileSync} from 'node:fs';
 import {join} from 'node:path';
 import {createHash} from 'node:crypto';
 import {readEngine} from '../../../../../support/wasm/engine.mjs';
+import {packedStringCases} from './packed-strings.mjs';
 const [enginePath,output,root]=process.argv.slice(2),engine=readEngine(enginePath),initial=readFileSync(join(output,'initial-arena.bin'));
 const SIZE=initial.length,SV=4364,FP=4236,SG=4524,T=140,DATA=0x5010;
 const hash=b=>createHash('sha256').update(b).digest('hex'),hex=s=>Buffer.from(s,'hex');
@@ -322,6 +323,8 @@ cases.push(
  {name:'sse4-dpps-zero-input-output-masks-still-read-full-source',code:'660f3a400000',a:fill(0x19),address:0x6000,reason:5,retired:0,detail:1,fault:0x6000,access:1,length:16,readAlignment:16,stagedTransfer:fill(0x97),expectedHelpers:1},
 );
 const sourcePaths=['engine/src/cpu/x86/simd.rs','engine/src/cpu/x86/simd/packed.rs','engine/src/cpu/x86/simd/float.rs', 'engine/src/math/mod.rs', 'engine/src/math/ieee.rs', 'engine/src/math/integer.rs', 'engine/src/lib.rs','engine/src/cpu/x86/decode/simd.rs','engine/src/cpu/dbt/wasm/simd.rs','engine/src/cpu/dbt/wasm/simd/direct.rs','engine/src/process/cpu/simd.rs', 'engine/src/process/cpu/mod.rs', 'engine/src/process/mod.rs','engine/src/process/memory/span.rs', 'engine/src/process/memory/mod.rs', 'engine/src/process/mod.rs','engine/src/abi/x86/simd.rs','engine/tests/cpu/simd/cases/native/simd_semantics.rs','engine/tests/cpu/simd/cases/native/simd_extensions.rs','engine/tests/cpu/simd/cases/native/simd_sse3.rs','engine/tests/cpu/simd/cases/native/simd_sse4.rs','engine/tests/cpu/simd/cases/native/simd_sse4_moves.rs','engine/tests/cpu/simd/cases/native/simd_sse4_arithmetic.rs', 'engine/tests/cpu/simd/native.rs', 'engine/tests/cpu/simd/native.rs','engine/tests/cpu/simd/cases/wasm/cpu_simd_wasm.rs', 'engine/tests/cpu/simd/wasm.rs', 'engine/tests/support/wasm.rs', 'engine/tests/cpu/simd/wasm.rs', 'engine/tests/support/wasm.rs','engine/tests/cpu/simd/fixtures/p2-simd/runtime/run.mjs'];
+cases.push(...packedStringCases);
+sourcePaths.push('engine/src/cpu/x86/packed_strings.rs','engine/src/cpu/x86/decode/packed_strings.rs','engine/src/cpu/dbt/wasm/packed_strings.rs','engine/tests/cpu/simd/cases/native/packed_strings.rs','engine/tests/cpu/simd/fixtures/p2-simd/runtime/packed-strings.mjs','engine/src/cpu/x86/ir.rs','engine/src/cpu/x86/decode/lower.rs','engine/src/cpu/x86/decode/profile.rs','engine/src/cpu/dbt/region.rs','engine/src/cpu/dbt/wasm/emitter.rs','engine/src/cpu/dbt/wasm/integer/mod.rs');
 const sourceHashes=()=>Object.fromEntries(sourcePaths.map(p=>[p,hash(readFileSync(join(root,p)))])),beforePins=sourceHashes();
 const observations=[],helpers=[],modules=[],contexts=[],raw_protocol=[];let count=0;
 const arena=c=>Buffer.from(new Uint8Array(c.memory.buffer,c.base,SIZE));
@@ -335,7 +338,9 @@ function open(owner,entries,batch){
  for(const[page,bits]of[[0x1000,7],[0x5000,3],[0x7000,3]])host(c,'map',[page,1,bits]);
  const blocks=batch.map((row,i)=>({pc:0x1000+i*32,bytes:Buffer.concat([hex(row.code),hex('ebfe')])}));for(const b of blocks)upload(c,b.pc,b.bytes);
  host(c,'protect',[0x1000,1,5]);input(c,T,dwords(blocks.flatMap(b=>entries?[b.pc]:[b.pc,b.bytes.length])));
- host(c,owner==='resident'?(entries?'compile_resident_entries':'compile_resident'):(entries?'compile_entries':'compile'),entries?[blocks.length,0]:[blocks.length]);
+ const compile=owner==='resident'?(entries?'compile_resident_entries':'compile_resident'):(entries?'compile_entries':'compile');
+ const compiled=c.api[compile](...(entries?[blocks.length,0]:[blocks.length]));
+ assert.equal(compiled,0,`${compile} ${batch.map(row=>`${row.name}:${row.code}`).join(', ')}`);
  const a=arena(c),binding=owner==='resident'?{lo:a.readUInt32LE(T+8),hi:a.readUInt32LE(T+12),pointer:a.readUInt32LE(T+16),length:a.readUInt32LE(T+20)}:{pointer:c.api.module_ptr()>>>0,length:c.api.module_len()>>>0};
  const bytes=Buffer.from(new Uint8Array(c.memory.buffer,binding.pointer,binding.length)),module=new WebAssembly.Module(bytes),ring3={};
  for(const im of WebAssembly.Module.imports(module)){if(im.kind!=='function')continue;ring3[im.name]=(...args)=>{
@@ -350,7 +355,7 @@ function open(owner,entries,batch){
  writeFileSync(join(output,`module-${c.id}.wasm`),bytes);modules.push({context:c.id,owner,entries,sha256:hash(bytes),bytes:bytes.length,imports:WebAssembly.Module.imports(module)});contexts.push({context:c.id,owner,entries});return[c,blocks];
 }
 function test(c,block,row){
- input(c,0,initial);const r=parents();r[0]=row.address??DATA;r[7]=row.address??DATA;input(c,0,state(r,block.pc,0xcd7));input(c,56,exit(1,0));
+ input(c,0,initial);const r=parents();r[0]=row.address??DATA;r[7]=row.address??DATA;if(row.registers)for(const[index,value]of Object.entries(row.registers))r[Number(index)]=value>>>0;input(c,0,state(r,block.pc,0xcd7));input(c,56,exit(1,0));
  input(c,SV+16,dwords([row.mxcsr??0x1f80]));
  if(row.pendingX87){input(c,FP+16,hex('7e030100'));}
  if(row.nullDs){input(c,SG+22,hex('0000'));}
@@ -362,6 +367,7 @@ function test(c,block,row){
  if(row.stagedTransfer)input(c,T,row.stagedTransfer);
  const expected=arena(c),reason=row.reason??1,retired=row.retired??1;
  if(row.gpr!==undefined)r[0]=row.gpr;
+ if(row.afterRegisters)for(const[index,value]of Object.entries(row.afterRegisters))r[Number(index)]=value>>>0;
  expected.set(state(r,retired?block.pc+hex(row.code).length:block.pc,row.flags??0xcd7));expected.set(exit(reason,retired,row.detail??0,row.fault??0,row.access??0,row.length??0),56);
  if(row.out){if(row.mmx){expected.set(row.out.subarray(0,8),FP+40);expected.fill(255,FP+48,FP+50);}else expected.set(row.out,SV+32);}
  if(row.mmx&&retired){expected.writeUInt16LE(0,FP+20);expected.writeUInt16LE(expected.readUInt16LE(FP+18)&~0x3800,FP+18);}

@@ -21,3 +21,6 @@ mod simd_sse4_moves;
 
 #[path = "cases/native/simd_sse4_arithmetic.rs"]
 mod simd_sse4_arithmetic;
+
+#[path = "cases/native/packed_strings.rs"]
+mod packed_strings;

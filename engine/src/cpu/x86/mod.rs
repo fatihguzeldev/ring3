@@ -3,6 +3,7 @@ pub mod bits;
 mod control;
 pub mod decode;
 pub mod ir;
+pub mod packed_strings;
 mod segments;
 pub mod simd;
 mod stack;

@@ -62,7 +62,12 @@ pub(in crate::cpu::dbt) fn emit(
     let has_simd = blocks
         .iter()
         .flat_map(|block| &block.instructions)
-        .any(|instruction| matches!(instruction.operation(), Operation::Simd(_)));
+        .any(|instruction| {
+            matches!(
+                instruction.operation(),
+                Operation::Simd(_) | Operation::PackedStringCompare(_)
+            )
+        });
     let has_cpu = has_simd
         || needs_stack_execute
         || needs_cpu_integer

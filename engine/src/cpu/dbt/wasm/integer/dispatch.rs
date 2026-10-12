@@ -49,6 +49,9 @@ pub(in crate::cpu::dbt::wasm) fn instruction(
     }
     let mut store = false;
     match *instruction.operation() {
+        Operation::PackedStringCompare(operation) => {
+            store = super::super::packed_strings::instruction(code, operation, imports, exit_depth);
+        }
         Operation::Crc32 {
             destination,
             source,

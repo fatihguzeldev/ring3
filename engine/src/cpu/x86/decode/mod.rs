@@ -6,6 +6,7 @@ mod flow;
 mod integer;
 mod lower;
 mod operands;
+mod packed_strings;
 mod profile;
 mod scalar_bits;
 mod segments;
