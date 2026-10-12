@@ -307,9 +307,20 @@ pub(crate) fn convert(bits: u64, source: BinaryFormat, mode: Rounding) -> FloatR
             (r.value.to_bits() as u64, r.status)
         }
         BinaryFormat::Binary64 => {
-            let r: rustc_apfloat::StatusAnd<Single> =
-                Double::from_bits(bits as u128).convert_r(round, &mut loses);
-            (r.value.to_bits() as u64, r.status)
+            let source = Double::from_bits(bits as u128);
+            let r: rustc_apfloat::StatusAnd<Single> = source.convert_r(round, &mut loses);
+            let mut status = r.status;
+            if r.value.to_bits() & 0x7fff_ffff == 0x7f7f_ffff
+                && status.contains(Status::INEXACT)
+                && !status.contains(Status::OVERFLOW)
+            {
+                // finite saturation can omit vendor overflow metadata; detect it before exponent clamping.
+                let unbounded: IeeeFloat<WideSingle> = source.convert_r(round, &mut loses).value;
+                if unbounded.is_finite_non_zero() && unbounded.ilogb() > 127 {
+                    status |= Status::OVERFLOW | Status::INEXACT;
+                }
+            }
+            (r.value.to_bits() as u64, status)
         }
     };
     FloatResult {
@@ -382,3 +393,7 @@ pub(crate) fn square_root(bits: u64, format: BinaryFormat, mode: Rounding) -> Fl
         exceptions: if inexact { PRECISION } else { 0 },
     }
 }
+
+#[cfg(test)]
+#[path = "ieee/conversion/native.rs"]
+mod conversion;
