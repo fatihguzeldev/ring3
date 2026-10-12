@@ -1,0 +1,207 @@
+{
+  "schema": "ring3.simd-compiled.cases.v1",
+  "symbol": "ring3_reduce",
+  "source_sha256": "50f01f8ea13f0a1d2e1593f4c619f9e50559c30d87c38c637fa217dc3d952ace",
+  "endianness": "little",
+  "abi": {
+    "calling_convention": "cdecl",
+    "args": [
+      "output",
+      "input",
+      "coefficients",
+      "count"
+    ],
+    "vector_bytes": 16,
+    "return": "EAX.u32-checksum"
+  },
+  "memory": {
+    "input_bytes": 272,
+    "output_bytes": 272,
+    "coefficients_bytes": 32,
+    "alignment": 16,
+    "restrict_ranges_disjoint": true,
+    "input_and_coefficients_read_only": true,
+    "surrounding_canary_bytes": 16
+  },
+  "seed_u32": [
+    324508639,
+    610839776,
+    2147483649,
+    4294967295
+  ],
+  "scale_u32": [
+    4294967295,
+    2147483649,
+    65539,
+    1
+  ],
+  "coefficients_hex": "df9b5713e0ac682401000080ffffffffffffffff010000800300010001000000",
+  "input_u32": [
+    [
+      4294967295,
+      2147483648,
+      4294967295,
+      0
+    ],
+    [
+      2147483648,
+      4294967295,
+      2147483648,
+      1
+    ],
+    [
+      0,
+      0,
+      0,
+      4294967295
+    ],
+    [
+      1,
+      1,
+      1,
+      2147483648
+    ],
+    [
+      2147483647,
+      2147483647,
+      2147483647,
+      2147483647
+    ],
+    [
+      65537,
+      65535,
+      65536,
+      2
+    ],
+    [
+      19088743,
+      2309737967,
+      4275878552,
+      324508639
+    ],
+    [
+      2863311530,
+      1431655765,
+      2,
+      610839776
+    ],
+    [
+      3735928559,
+      2,
+      65535,
+      2147483649
+    ],
+    [
+      4294967295,
+      65536,
+      65537,
+      0
+    ],
+    [
+      2,
+      2147483649,
+      2147483646,
+      4294967295
+    ],
+    [
+      1073741824,
+      1073741825,
+      3,
+      65537
+    ],
+    [
+      0,
+      4294967295,
+      2147483649,
+      2863311530
+    ],
+    [
+      2147483649,
+      1,
+      4294967295,
+      1431655765
+    ],
+    [
+      65535,
+      65539,
+      305419896,
+      4294967294
+    ],
+    [
+      4275878552,
+      19088743,
+      2309737967,
+      3735928559
+    ],
+    [
+      1,
+      0,
+      2,
+      3
+    ]
+  ],
+  "input_hex": "ffffffff00000080ffffffff0000000000000080ffffffff0000008001000000000000000000000000000000ffffffff01000000010000000100000000000080ffffff7fffffff7fffffff7fffffff7f01000100ffff0000000001000200000067452301efcdab8998badcfedf9b5713aaaaaaaa5555555502000000e0ac6824efbeadde02000000ffff000001000080ffffffff0000010001000100000000000200000001000080feffff7fffffffff0000004001000040030000000100010000000000ffffffff01000080aaaaaaaa0100008001000000ffffffff55555555ffff00000300010078563412feffffff98badcfe67452301efcdab89efbeadde01000000000000000200000003000000",
+  "output_fill_hex": "a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5",
+  "cases": [
+    {
+      "name": "zero-count-preserves-output",
+      "count": 0,
+      "expected_output_hex": "a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5",
+      "expected_accumulator_u32": [
+        324508639,
+        610839776,
+        2147483649,
+        4294967295
+      ],
+      "expected_eax_u32": 1220593857
+    },
+    {
+      "name": "one-vector-boundary-products",
+      "count": 1,
+      "expected_output_hex": "e09b5713e0ac68a4fefffe7fffffffffa5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5",
+      "expected_accumulator_u32": [
+        324508640,
+        2758323424,
+        2147418110,
+        4294967295
+      ],
+      "expected_eax_u32": 926824193
+    },
+    {
+      "name": "seventeen-vector-wraparound",
+      "count": 17,
+      "expected_output_hex": "e09b5713e0ac68a4fefffe7fffffffffe09b5793dfac6824fefffeff00000000e09b5793dfac6824fefffeffffffffffdf9b5793e0ac68a401000000ffffff7fe09b5713dfac68a4fefffe7ffeffffffdf9b5613deac6924feff01800000000078563312cd7a152ec62f3037df9b5713ceab886722d06a03cc2f3237bf48c037dfecda8824d06a03c92f3437c048c0b7e0ecda8824d06b03cc2f3837c048c0b7deecda8825d06b03c62f36b7bf48c0b7deecda4826d06bc3cf2f39b7c048c1b7deecda4825d06b43d22f3a376af36b62ddecdac826d06bc3cf2f3937bf48c1b7deecd9c829d06c4337334ec4bd48c1b74632fdc9901590c4049d402fac076f964532fdc9901590c40a9d422faf076f96",
+      "expected_accumulator_u32": [
+        3388813893,
+        3297777040,
+        792894730,
+        2523858863
+      ],
+      "expected_eax_u32": 3024141680
+    }
+  ],
+  "derivation": {
+    "lane_rule": "A[i,j] = (seed[j] + scale[j] * sum(input[k,j], k=0..i)) mod 2^32; output[i] is A[i,0..3]. Unsigned C addition and multiplication wrap modulo 2^32.",
+    "checksum_rule": "EAX is the bitwise XOR of the four final accumulator words; count0 uses seed and writes no output bytes.",
+    "first_output_u32_hex": [
+      "13579be0",
+      "a468ace0",
+      "7ffefffe",
+      "ffffffff"
+    ],
+    "sum17_input_mod32_hex": [
+      "495a699a",
+      "a02768b0",
+      "9abfdf03",
+      "966f07b0"
+    ],
+    "final17_u32_hex": [
+      "c9fd3245",
+      "c4901590",
+      "2f429d0a",
+      "966f07af"
+    ],
+    "byte_rule": "Each u32 is serialized low byte first; four words retain vector lane0..3 order. Every expected output is the complete272B buffer, with the unwritten suffix retaining A5.",
+    "proof_scope": "Literal integer results and disjoint aligned input/output bounds. Emitted instructions, block budgets, callee preservation, final XMM write set and actual execution require the original compiler artifacts and separate native/Wasm checks."
+  }
+}

@@ -1,0 +1,170 @@
+{
+  "artifact_policy": "complete original object and whole unmodified .text; no opcode rewriting or linking; only a declared unreferenced __fltused COFF marker is admitted",
+  "artifacts": {
+    "kernel.c": {
+      "bytes": 529,
+      "file": "kernel.c",
+      "sha256": "50f01f8ea13f0a1d2e1593f4c619f9e50559c30d87c38c637fa217dc3d952ace"
+    },
+    "kernel.disasm.txt": {
+      "bytes": 2334,
+      "file": "kernel.disasm.txt",
+      "sha256": "64e102f255fa540a75d8174cd4f3a9d39b71e17959dd26117681ba5f413cab38"
+    },
+    "kernel.obj": {
+      "bytes": 631,
+      "file": "kernel.obj",
+      "sha256": "c67abdba3d382081dd90981171f41315470e6e6ccd06ef727984cbafe09682a5"
+    },
+    "kernel.text.bin": {
+      "bytes": 117,
+      "file": "kernel.text.bin",
+      "sha256": "b29856c68e7bc4609fb8a307512ce1d6ed823978a400945b76c502e353e8a1ad"
+    }
+  },
+  "claim_ceiling": "producer provenance only; whole-function execution, cdecl state, numeric results and fault retry require the separate native and actual Wasm checks",
+  "coff": {
+    "characteristics": 0,
+    "external_symbols": [
+      "_ring3_reduce"
+    ],
+    "function": {
+      "entry_offset": 0,
+      "extent_basis": "sole function through original .text section end",
+      "extent_end_offset": 117,
+      "symbol": "_ring3_reduce"
+    },
+    "machine": 332,
+    "marker_policy": "only one optional undefined external __fltused with zero value/type/aux; all sections have zero relocations; no linking or byte rewriting",
+    "relocations": 0,
+    "sections": [
+      {
+        "bytes": 117,
+        "characteristics": 1615855648,
+        "index": 1,
+        "name": ".text",
+        "raw_offset": 180
+      },
+      {
+        "bytes": 0,
+        "characteristics": 3224371264,
+        "index": 2,
+        "name": ".data",
+        "raw_offset": 297
+      },
+      {
+        "bytes": 0,
+        "characteristics": 3224371328,
+        "index": 3,
+        "name": ".bss",
+        "raw_offset": 0
+      },
+      {
+        "bytes": 100,
+        "characteristics": 1110442048,
+        "index": 4,
+        "name": ".debug$S",
+        "raw_offset": 297
+      }
+    ],
+    "symbol_count": 12,
+    "timestamp": 0,
+    "undefined_external_symbols": []
+  },
+  "command_cwd": "/Users/fatihguzel/ring3/target/compiled-integer-simd-2026-10-12/producer-integer",
+  "commands": {
+    "compile": [
+      "/Library/Developer/CommandLineTools/usr/bin/clang",
+      "--target=i686-pc-windows-msvc",
+      "-std=c11",
+      "-O2",
+      "-ffreestanding",
+      "-fno-builtin",
+      "-fno-stack-protector",
+      "-fno-vectorize",
+      "-fno-slp-vectorize",
+      "-fno-unroll-loops",
+      "-falign-loops=1",
+      "-mno-mmx",
+      "-mno-incremental-linker-compatible",
+      "-fno-unwind-tables",
+      "-fno-asynchronous-unwind-tables",
+      "-fno-addrsig",
+      "-msse2",
+      "-c",
+      "kernel.c",
+      "-o",
+      "kernel.obj"
+    ],
+    "compiler_version": [
+      "/Library/Developer/CommandLineTools/usr/bin/clang",
+      "--version"
+    ],
+    "disassemble": [
+      "/Library/Developer/CommandLineTools/usr/bin/llvm-objdump",
+      "--disassemble",
+      "--section=.text",
+      "--x86-asm-syntax=intel",
+      "kernel.obj"
+    ],
+    "objdump_version": [
+      "/Library/Developer/CommandLineTools/usr/bin/llvm-objdump",
+      "--version"
+    ]
+  },
+  "compiler": {
+    "path": "/Library/Developer/CommandLineTools/usr/bin/clang",
+    "resolved_path": "/Library/Developer/CommandLineTools/usr/bin/clang",
+    "sha256": "f30550eab15fdf5ab8c0dc54c52679711241e5d4b636b027e18c09fef531775d",
+    "version": "Apple clang version 21.0.0 (clang-2100.1.1.101)\nTarget: arm64-apple-darwin25.6.0\nThread model: posix\nInstalledDir: /Library/Developer/CommandLineTools/usr/bin\n"
+  },
+  "environment": {
+    "LC_ALL": "C",
+    "PATH": "/usr/bin:/bin",
+    "SOURCE_DATE_EPOCH": "0",
+    "TZ": "UTC"
+  },
+  "inputs": [
+    {
+      "bytes": 529,
+      "file": "kernel.c",
+      "path": "/Users/fatihguzel/ring3/engine/tests/fixtures/p2-simd-compiled/kernel.c",
+      "sha256": "50f01f8ea13f0a1d2e1593f4c619f9e50559c30d87c38c637fa217dc3d952ace"
+    },
+    {
+      "bytes": 4258,
+      "file": "build.py",
+      "path": "/Users/fatihguzel/ring3/engine/tests/fixtures/p2-fp-compiled/build.py",
+      "sha256": "d37dac2ca7936bb69f8b83bd8a34eace1100a1f1d4a54721644edb4d7a73f3a0"
+    },
+    {
+      "bytes": 9358,
+      "file": "coff.py",
+      "path": "/Users/fatihguzel/ring3/engine/tests/fixtures/p2-fp-compiled/coff.py",
+      "sha256": "479a0815fd39de6eaea9455dade6b4382575fb7034b48c028c12818cd8b5502c"
+    },
+    {
+      "bytes": 10227,
+      "file": "build.py",
+      "path": "/Users/fatihguzel/ring3/engine/tests/fixtures/p2-compiled-records/build.py",
+      "sha256": "fe426f202b48664a87357c766d39099b9d35b5d8217c2b114696164a0d468258"
+    }
+  ],
+  "kernel": "simd-integer",
+  "objdump": {
+    "path": "/Library/Developer/CommandLineTools/usr/bin/llvm-objdump",
+    "resolved_path": "/Library/Developer/CommandLineTools/usr/bin/llvm-objdump",
+    "sha256": "1dcc1432db4d828cf8cd71a84cb8d9bf63a7ca80b5eeec711a9e5f13a3f5f98e",
+    "version": "Apple LLVM version 21.0.0\n  Optimized build.\n\n\n  Registered Targets:\n    aarch64    - AArch64 (little endian)\n    aarch64_32 - AArch64 (little endian ILP32)\n    aarch64_be - AArch64 (big endian)\n    arm        - ARM\n    arm64      - ARM64 (little endian)\n    arm64_32   - ARM64 (little endian ILP32)\n    armeb      - ARM (big endian)\n    thumb      - Thumb\n    thumbeb    - Thumb (big endian)\n    x86        - 32-bit X86: Pentium-Pro and above\n    x86-64     - 64-bit X86: EM64T and AMD64\n"
+  },
+  "profile_delta": {
+    "append": [
+      "-msse2"
+    ],
+    "remove": [
+      "-mno-sse",
+      "-mno-sse2"
+    ]
+  },
+  "schema": "ring3.integer-simd-compiled.v1"
+}

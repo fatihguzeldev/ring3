@@ -1,0 +1,38 @@
+
+kernel.obj:	file format coff-i386
+
+Disassembly of section .text:
+
+00000000 <_ring3_reduce>:
+       0: 56                           	push	esi
+       1: 8b 44 24 14                  	mov	eax, dword ptr [esp + 0x14]
+       5: 8b 74 24 10                  	mov	esi, dword ptr [esp + 0x10]
+       9: 66 0f 6f 06                  	movdqa	xmm0, xmmword ptr [esi]
+       d: 85 c0                        	test	eax, eax
+       f: 74 43                        	je	0x54 <_ring3_reduce+0x54>
+      11: 8b 4c 24 0c                  	mov	ecx, dword ptr [esp + 0xc]
+      15: 8b 54 24 08                  	mov	edx, dword ptr [esp + 0x8]
+      19: 66 0f 6f 4e 10               	movdqa	xmm1, xmmword ptr [esi + 0x10]
+      1e: 31 f6                        	xor	esi, esi
+      20: 66 0f 70 d1 f5               	pshufd	xmm2, xmm1, 0xf5        # xmm2 = xmm1[1,1,3,3]
+      25: 66 0f 6f 1c 31               	movdqa	xmm3, xmmword ptr [ecx + esi]
+      2a: 66 0f 70 e3 f5               	pshufd	xmm4, xmm3, 0xf5        # xmm4 = xmm3[1,1,3,3]
+      2f: 66 0f f4 d9                  	pmuludq	xmm3, xmm1
+      33: 66 0f 70 db e8               	pshufd	xmm3, xmm3, 0xe8        # xmm3 = xmm3[0,2,2,3]
+      38: 66 0f f4 e2                  	pmuludq	xmm4, xmm2
+      3c: 66 0f 70 e4 e8               	pshufd	xmm4, xmm4, 0xe8        # xmm4 = xmm4[0,2,2,3]
+      41: 66 0f 62 dc                  	punpckldq	xmm3, xmm4      # xmm3 = xmm3[0],xmm4[0],xmm3[1],xmm4[1]
+      45: 66 0f fe c3                  	paddd	xmm0, xmm3
+      49: 66 0f 7f 04 32               	movdqa	xmmword ptr [edx + esi], xmm0
+      4e: 83 c6 10                     	add	esi, 0x10
+      51: 48                           	dec	eax
+      52: 75 d1                        	jne	0x25 <_ring3_reduce+0x25>
+      54: 66 0f 70 c8 55               	pshufd	xmm1, xmm0, 0x55        # xmm1 = xmm0[1,1,1,1]
+      59: 66 0f 70 d0 ee               	pshufd	xmm2, xmm0, 0xee        # xmm2 = xmm0[2,3,2,3]
+      5e: 66 0f ef d1                  	pxor	xmm2, xmm1
+      62: 66 0f 70 c8 ff               	pshufd	xmm1, xmm0, 0xff        # xmm1 = xmm0[3,3,3,3]
+      67: 66 0f ef c8                  	pxor	xmm1, xmm0
+      6b: 66 0f ef ca                  	pxor	xmm1, xmm2
+      6f: 66 0f 7e c8                  	movd	eax, xmm1
+      73: 5e                           	pop	esi
+      74: c3                           	ret

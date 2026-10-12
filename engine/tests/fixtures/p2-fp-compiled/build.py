@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""freeze two original freestanding i686 floating point functions."""
+"""freeze original freestanding i686 numeric functions."""
 
 import argparse
 import hashlib
@@ -18,7 +18,7 @@ PROFILE_SHA256 = "fe426f202b48664a87357c766d39099b9d35b5d8217c2b114696164a0d4682
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("kernel", choices=("x87", "sse2"))
+    parser.add_argument("kernel", choices=("x87", "sse2", "simd-integer"))
     parser.add_argument("output_dir", type=Path)
     args = parser.parse_args()
     if hashlib.sha256(PROFILE.read_bytes()).hexdigest() != PROFILE_SHA256:
@@ -29,7 +29,9 @@ def main():
     removed = [] if args.kernel == "x87" else ["-mno-sse", "-mno-sse2"]
     appended = ["-mfpmath=387", "-mlong-double-80"] if args.kernel == "x87" else ["-msse2"]
     flags = [flag for flag in profile.FLAGS if flag not in removed] + appended
-    inputs = [HERE / args.kernel / "kernel.c", Path(__file__).resolve(),
+    source = (HERE.parent / "p2-simd-compiled" / "kernel.c" if args.kernel == "simd-integer"
+              else HERE / args.kernel / "kernel.c")
+    inputs = [source, Path(__file__).resolve(),
               HERE / "coff.py", PROFILE]
     before = {path: path.read_bytes() for path in inputs}
     tool_hashes = {path: profile.sha256(path.read_bytes())
@@ -59,7 +61,8 @@ def main():
             raise RuntimeError(f"compiler tool changed: {path}")
 
     receipt = {
-        "schema": "ring3.fp-compiled.v1",
+        "schema": ("ring3.integer-simd-compiled.v1" if args.kernel == "simd-integer"
+                   else "ring3.fp-compiled.v1"),
         "kernel": args.kernel,
         "inputs": [{"path": str(path), **profile.file_record(path)} for path in inputs],
         "compiler": profile.tool_record(profile.CLANG, versions["compiler_version"]),

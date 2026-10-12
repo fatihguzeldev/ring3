@@ -23,6 +23,14 @@ fn whole_original_sse2_function_admits_all_bound_profiles_without_operand_access
     );
 }
 
+#[test]
+fn whole_original_integer_simd_function_admits_all_bound_profiles_without_operand_access() {
+    admit(
+        include_bytes!("fixtures/p2-simd-compiled/kernel.text.bin"),
+        &[(0, 17, 6), (17, 20, 5), (37, 47, 12), (84, 33, 9)],
+    );
+}
+
 fn admit(original: &[u8], blocks: &[(u32, u32, usize)]) {
     let limits = CompileLimits::default();
     assert_eq!(
