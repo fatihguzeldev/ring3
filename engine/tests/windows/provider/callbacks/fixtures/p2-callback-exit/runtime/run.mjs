@@ -8,6 +8,29 @@ assert.ok(root, 'expected engine wasm, unique output directory and repository ro
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
 const artifacts = {}, paths = [], trace = [], controls = [], modules = [];
 const sourcePaths = ['Cargo.lock', 'engine/Cargo.toml', 'engine/src/process/windows/calls.rs', 'engine/src/process/windows/mod.rs', 'engine/src/process/mod.rs', 'engine/src/process/calls/call.rs', 'engine/src/process/calls/context.rs', 'engine/src/process/calls/mod.rs', 'engine/src/process/mod.rs', 'engine/src/process/calls/callback.rs', 'engine/src/process/calls/mod.rs', 'engine/src/process/mod.rs', 'engine/src/process/calls/resident_callback.rs', 'engine/src/process/calls/mod.rs', 'engine/src/process/mod.rs', 'engine/src/process/execution/resident.rs', 'engine/src/process/execution/authority.rs', 'engine/src/process/execution/mod.rs', 'engine/src/process/mod.rs', 'engine/src/process/execution/installation.rs', 'engine/src/process/execution/mod.rs', 'engine/src/process/mod.rs', 'engine/src/process/instance.rs', 'engine/src/process/execution/compiled.rs', 'engine/src/process/execution/authority.rs', 'engine/src/process/memory/address_space.rs', 'engine/src/process/memory/scalar.rs', 'engine/src/process/memory/scalar_tests.rs', 'engine/src/process/execution/mod.rs', 'engine/src/process/memory/mod.rs', 'engine/src/process/mod.rs', 'engine/src/process/loading/startup.rs', 'engine/src/process/loading/mod.rs', 'engine/src/process/mod.rs', 'engine/src/process/wasm/mod.rs', 'engine/src/process/wasm/loading.rs', 'engine/src/process/wasm/execution.rs', 'engine/src/process/wasm/calls.rs', 'engine/src/process/wasm/memory.rs', 'engine/src/process/wasm/cpu.rs', 'engine/src/process/mod.rs', 'engine/src/abi/wasm/exports/calls.rs', 'engine/src/abi/wasm/exports/cpu.rs', 'engine/src/abi/wasm/exports/execution.rs', 'engine/src/abi/wasm/exports/image.rs', 'engine/src/abi/wasm/exports/instance.rs', 'engine/src/abi/wasm/exports/memory.rs', 'engine/src/abi/wasm/exports/mod.rs', 'engine/src/windows/provider.rs', 'engine/src/windows/callback_frame.rs', 'engine/src/loader/imports.rs', 'engine/src/loader/relocation.rs', 'engine/src/loader/pe32.rs', 'engine/src/cpu/dbt/region.rs', 'engine/src/cpu/dbt/wasm/integer/arithmetic.rs', 'engine/src/cpu/dbt/wasm/integer/bits.rs', 'engine/src/cpu/dbt/wasm/integer/carry_rotates.rs', 'engine/src/cpu/dbt/wasm/integer/decimal.rs', 'engine/src/cpu/dbt/wasm/integer/dispatch.rs', 'engine/src/cpu/dbt/wasm/integer/flags.rs', 'engine/src/cpu/dbt/wasm/integer/mod.rs', 'engine/src/cpu/dbt/wasm/integer/multiply_divide.rs', 'engine/src/cpu/dbt/wasm/integer/operands.rs', 'engine/src/cpu/dbt/wasm/integer/rotates.rs', 'engine/src/cpu/dbt/wasm/integer/shifts.rs', 'engine/src/cpu/dbt/wasm/emitter.rs', 'engine/src/cpu/dbt/wasm/dispatcher.rs', 'engine/src/cpu/dbt/wasm/memory.rs', 'engine/src/cpu/dbt/wasm/abi.rs', 'engine/tests/support/loader/pe32.rs', 'engine/tests/windows/provider/callbacks/wasm/exit.rs', 'engine/tests/windows/provider/wasm.rs', 'engine/tests/support/loader/pe32.rs', 'engine/tests/support/wasm.rs', 'engine/tests/windows/provider/wasm.rs', 'engine/tests/support/wasm.rs', 'engine/tests/windows/provider/callbacks/fixtures/p2-callback-exit/runtime/run.mjs'];
+const exportModuleText = readFileSync(join(root, 'engine/src/abi/wasm/exports/mod.rs'), 'utf8');
+const exportModuleList = exportModuleText.match(/\n\}\s*\n((?:mod [a-z0-9_]+;\s*\n)+)$/)?.[1];
+assert.ok(exportModuleList, 'closed ABI export owner list');
+const exportOwnerPaths = [...exportModuleList.matchAll(/^mod (\w+);$/gm)].map(match => `engine/src/abi/wasm/exports/${match[1]}.rs`);
+sourcePaths.push(...exportOwnerPaths);
+function declaredEngineFunctions() {
+  const functions = exportOwnerPaths.flatMap(path => {
+    const text = readFileSync(join(root, path), 'utf8');
+    const body = text.match(/^export_process_calls! \{\s*([\s\S]*?)\s*\}\s*$/)?.[1];
+    assert.notEqual(body, undefined, `${path}: closed ABI declaration table`);
+    const pattern = /([a-z0-9_]+)\(([^()]*)\);/g;
+    const declarations = [...body.matchAll(pattern)];
+    assert.equal(body.replace(pattern, '').trim(), '', `${path}: every declaration parsed`);
+    assert.ok(declarations.length > 0, `${path}: nonempty export owner`);
+    return declarations.map(([, name, argumentsText]) => {
+      const argumentsList = argumentsText.split(',').map(argument => argument.trim()).filter(Boolean);
+      for (const argument of argumentsList) assert.match(argument, /^[a-z0-9_]+:\s*u32$/, `${path}/${name}: ABI parameter`);
+      return {name: `ring3_abi_v1_${name}`, kind: 'function'};
+    });
+  });
+  assert.equal(new Set(functions.map(row => row.name)).size, functions.length, 'unique declared engine exports');
+  return functions;
+}
 const sourceMap = () => Object.fromEntries(sourcePaths.map(path => {
   const absolute = realpathSync(join(root, path)), bytes = readFileSync(absolute);
   return [path, {absolute, bytes: bytes.length, sha256: hash(bytes)}];
@@ -23,7 +46,9 @@ save('producer-wrapper.rs', readFileSync(join(root, 'engine/tests/windows/provid
 const engineBytes = new Uint8Array(readFileSync(enginePath)); save('engine.wasm', engineBytes);
 const engineModule = new WebAssembly.Module(engineBytes), exports = WebAssembly.Module.exports(engineModule);
 assert.deepEqual(WebAssembly.Module.imports(engineModule), []);
-assert.equal(exports.length, 71); assert.equal(exports.filter(row => row.kind === 'function').length, 70);
+const engineFunctions = declaredEngineFunctions();
+const byName = (left, right) => left.name < right.name ? -1 : left.name > right.name ? 1 : 0;
+assert.deepEqual([...exports].sort(byName), [{name: 'memory', kind: 'memory'}, ...engineFunctions.map(({name, kind}) => ({name, kind}))].sort(byName));
 const apiArities = {open: 3, close: 0, arena_ptr: 0, begin_image_input: 1, append_image_input: 2, load_pe32_linked_v4_input_at: 2, start_loaded_image: 2, read32: 1, compile_resident_entries: 2, acknowledge_resident_installation: 5, dispatcher_module: 2, guard_dispatch_entry: 5, find_installed_resident: 3, guard_resident: 7, capture_resident_call: 6, complete_resident_windows_call: 5, begin_resident_callback: 11, authorize_resident_callback: 5, select_resident_callback_unit: 7, capture_active_resident_callback_call: 7, complete_active_resident_callback_windows_call: 6, complete_active_resident_callback_call: 7, finish_resident_callback: 5, abort_callback: 3, complete_resident_call: 6, generation: 0, module_ptr: 0, module_len: 0, resident_module: 2, store_resident32: 6};
 const SIZE = 4612, TRANSFER = 140, OUTER = 0x80000011, RETURN = 0x80000012, ERROR = 0xf1234567, CODE = 0xffffffff;
 const outerHex = '68674523f1ff1564314000e8f0000000c7050030400011111111ebfe';
@@ -176,6 +201,6 @@ for (const base of [0x400000, 0x500000]) for (const mode of ['home', 'selected']
 }
 assert.equal(paths.length, 4); assert.equal(trace.length, 34); assert.equal(trace.reduce((sum, row) => sum + row.retired, 0), 30); assert.equal(modules.length, 18); assert.equal(controls.length, 170);
 const sourceAfter = sourceMap(); assert.deepEqual(sourceAfter, sourceBefore); save('source-after.json', Buffer.from(JSON.stringify(sourceAfter, null, 2)));
-const result = {status: 'ok', argv: process.argv, engine_input: {path: realpathSync(enginePath), bytes: engineBytes.length, sha256: hash(engineBytes)}, source_before: sourceBefore, source_after: sourceAfter, counts: {paths: paths.length, generated_positive_runs: trace.length, guest_retired: 30, generated_modules: modules.length, control_probes: controls.length}, paths, trace, controls, modules, artifacts, tools: {node: process.version, v8: process.versions.v8}, claim: 'four newly authored copied PE paths; Rust loader/import/relocation/startup authority, outer named SetLastError and generic CALL, callback named GetLastError/ExitProcess, no positive CPU/stack patch, captured ExitProcess terminal0 with exact state/whole4236 arena and complete data/stack pages; inner/outer/retained dispatcher canaries inert through public restore and close. Generic host trigger is not provider-driven Win32 callback evidence; no thread/DLL cleanup, general Win32/ISA, browser/SDK/performance/game/P2 completion.'};
+const result = {status: 'ok', argv: process.argv, engine_input: {path: realpathSync(enginePath), bytes: engineBytes.length, sha256: hash(engineBytes)}, source_before: sourceBefore, source_after: sourceAfter, counts: {paths: paths.length, generated_positive_runs: trace.length, guest_retired: 30, generated_modules: modules.length, control_probes: controls.length}, paths, trace, controls, modules, artifacts, tools: {node: process.version, v8: process.versions.v8}, claim: 'four newly authored copied PE paths; Rust loader/import/relocation/startup authority, outer named SetLastError and generic CALL, callback named GetLastError/ExitProcess, no positive CPU/stack patch, captured ExitProcess terminal0 with exact state/whole4612 arena and complete data/stack pages; inner/outer/retained dispatcher canaries inert through public restore and close. Generic host trigger is not provider-driven Win32 callback evidence; no thread/DLL cleanup, general Win32/ISA, browser/SDK/performance/game/P2 completion.'};
 writeFileSync(join(output, 'result.json'), JSON.stringify(result, null, 2));
 console.log(JSON.stringify({status: result.status, counts: result.counts, engine_sha256: hash(engineBytes), output}));
