@@ -136,6 +136,32 @@ impl Imports {
         let mut atomic_xor_u32 = false;
         for instruction in blocks.iter().flat_map(|block| &block.instructions) {
             match instruction.operation() {
+                Operation::BitCount { width, source, .. } => {
+                    if matches!(source, Value32::Memory(_)) {
+                        match width {
+                            crate::cpu::x86::bits::ScalarWidth::Word => read16 = true,
+                            crate::cpu::x86::bits::ScalarWidth::Dword => read = true,
+                        }
+                    }
+                }
+                Operation::MoveByteSwap {
+                    width,
+                    destination,
+                    source,
+                } => {
+                    let reads = matches!(source, Value32::Memory(_));
+                    let writes = matches!(destination, Location32::Memory(_));
+                    match width {
+                        crate::cpu::x86::bits::ScalarWidth::Word => {
+                            read16 |= reads;
+                            store16 |= writes;
+                        }
+                        crate::cpu::x86::bits::ScalarWidth::Dword => {
+                            read |= reads;
+                            store |= writes;
+                        }
+                    }
+                }
                 Operation::StackFrame { .. }
                 | Operation::PopAll
                 | Operation::PopAllWord

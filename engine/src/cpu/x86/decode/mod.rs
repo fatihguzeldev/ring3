@@ -5,6 +5,7 @@ mod integer;
 mod lower;
 mod operands;
 mod profile;
+mod scalar_bits;
 mod segments;
 mod simd;
 mod stack;

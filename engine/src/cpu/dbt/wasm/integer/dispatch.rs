@@ -49,6 +49,36 @@ pub(in crate::cpu::dbt::wasm) fn instruction(
     }
     let mut store = false;
     match *instruction.operation() {
+        Operation::BitCount {
+            kind,
+            width,
+            destination,
+            source,
+        } => {
+            super::scalar_bits::bit_count(
+                code,
+                kind,
+                width,
+                destination,
+                source,
+                imports,
+                exit_depth,
+            );
+        }
+        Operation::MoveByteSwap {
+            width,
+            destination,
+            source,
+        } => {
+            store = super::scalar_bits::move_byte_swap(
+                code,
+                width,
+                destination,
+                source,
+                imports,
+                exit_depth,
+            );
+        }
         Operation::StackFrame { .. }
         | Operation::PopAll
         | Operation::PopAllWord

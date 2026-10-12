@@ -57,3 +57,5 @@ mod cpu_word_register_move;
 
 #[path = "cases/native/cpu_xlat.rs"]
 mod cpu_xlat;
+#[path = "cases/native/cpu_movbe.rs"]
+mod cpu_movbe;

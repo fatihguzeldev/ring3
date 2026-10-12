@@ -1,4 +1,5 @@
 pub mod atomic;
+pub mod bits;
 pub mod decode;
 pub mod ir;
 mod segments;

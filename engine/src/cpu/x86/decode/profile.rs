@@ -24,6 +24,29 @@ pub(super) fn check_profile(instruction: &Instruction, bytes: &[u8]) -> Result<(
     if instruction.is_privileged() {
         return Err(DecodeError::Unsupported(UnsupportedFeature::Privileged));
     }
+    if let Some(operation) = super::scalar_bits::lower(instruction) {
+        let mut groups = [0_u8; 3];
+        for &byte in bytes.iter().take_while(|byte| is_prefix(**byte)) {
+            match byte {
+                0x66 => groups[0] += 1,
+                0xf0 => groups[1] += 1,
+                0xf2 | 0xf3 => groups[2] += 1,
+                _ => {}
+            }
+        }
+        if groups.iter().any(|count| *count > 1)
+            || matches!(
+                instruction.code(),
+                Code::Movbe_r16_m16
+                    | Code::Movbe_r32_m32
+                    | Code::Movbe_m16_r16
+                    | Code::Movbe_m32_r32
+            ) && groups[2] != 0
+        {
+            return Err(unsupported());
+        }
+        return operation.map(|_| ());
+    }
     if let Some(operation) = super::stack::lower(instruction) {
         return operation.map(|_| ());
     }

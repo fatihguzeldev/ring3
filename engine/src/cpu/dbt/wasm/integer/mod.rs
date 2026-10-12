@@ -30,6 +30,7 @@ mod flags;
 mod multiply_divide;
 mod operands;
 mod rotates;
+mod scalar_bits;
 mod shifts;
 
 use arithmetic::{

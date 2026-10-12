@@ -352,7 +352,11 @@ pub(super) fn terminates(instruction: &DecodedInstruction, embedded: bool) -> bo
 fn supports_memory_reads(operation: &Operation) -> bool {
     matches!(
         operation,
-        Operation::StackFrame { .. }
+        Operation::BitCount {
+            source: Value32::Memory(_),
+            ..
+        } | Operation::MoveByteSwap { .. }
+            | Operation::StackFrame { .. }
             | Operation::AtomicMemory { .. }
             | Operation::CompareExchange8B { .. }
             | Operation::VirtualTimestamp
@@ -545,6 +549,13 @@ fn supports_memory_shift_or_rotate(operation: &Operation) -> bool {
 
 pub(super) fn supports(instruction: &DecodedInstruction, embedded: bool) -> bool {
     let operation = instruction.operation();
+    match operation {
+        Operation::BitCount { source, .. } => {
+            return embedded || !matches!(source, Value32::Memory(_));
+        }
+        Operation::MoveByteSwap { .. } => return embedded,
+        _ => {}
+    }
     (embedded
         && (supports_memory_reads(operation)
             || supports_memory_move_store(operation)

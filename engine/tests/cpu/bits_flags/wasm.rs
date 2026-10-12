@@ -1,6 +1,9 @@
 #[path = "../../support/wasm.rs"]
 mod support_wasm;
 
+#[path = "cases/wasm/cpu_scalar_bits_wasm.rs"]
+mod cpu_scalar_bits_wasm;
+
 #[path = "cases/wasm/cpu_bit_scan_wasm.rs"]
 mod cpu_bit_scan_wasm;
 

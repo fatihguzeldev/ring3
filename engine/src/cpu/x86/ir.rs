@@ -324,6 +324,17 @@ pub enum CarryKind {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Operation {
+    BitCount {
+        kind: super::bits::BitCountKind,
+        width: super::bits::ScalarWidth,
+        destination: Register32,
+        source: Value32,
+    },
+    MoveByteSwap {
+        width: super::bits::ScalarWidth,
+        destination: Location32,
+        source: Value32,
+    },
     X87 {
         operation: super::X87Operation,
         address: Option<EffectiveAddress>,
