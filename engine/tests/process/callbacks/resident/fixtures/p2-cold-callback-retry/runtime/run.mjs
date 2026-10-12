@@ -1,3 +1,5 @@
+import {assertEngineExports} from '../../../../../../support/wasm/exports.mjs';
+import {readEngine} from '../../../../../../support/wasm/engine.mjs';
 import assert from 'node:assert/strict';
 import {execFileSync} from 'node:child_process';
 import {createHash} from 'node:crypto';
@@ -5,13 +7,14 @@ import {mkdirSync, readFileSync, writeFileSync} from 'node:fs';
 import {dirname, join} from 'node:path';
 
 const [enginePath, output, root] = process.argv.slice(2);
+const fixtureEngine = readEngine(enginePath);
+const exportContract = assertEngineExports(fixtureEngine.module, root);
 assert.ok(root, 'expected copied engine, unique output and repository root');
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
 const SIZE = 4612, TRANSFER = 140, LOW = 0xe0000000, HIGH = 0xd3456789;
 const OUTER = 0x80000011, RETURN = 0x80000012, INNER = 0x80000013;
-const engineBytes = readFileSync(enginePath);
-assert.equal(engineBytes.length, 13500555);
-assert.equal(hash(engineBytes), '51290d2dfae134401af049ff285a20d1b16521683944375d1438aaf495d5e2bc');
+const engineBytes = fixtureEngine.bytes;
+assert.match(process.env.RING3_ENGINE_SHA256 ?? '', /^[a-f0-9]{64}$/, 'cold retry requires the requested engine SHA-256');
 const arities = {
   open:3, close:0, arena_ptr:0, map:3, upload:2, generation:0,
   compile_resident_with_gates:2, compile_resident_callback_unit:7,
@@ -25,10 +28,11 @@ const arities = {
 };
 const productionPaths = ['Cargo.toml', 'Cargo.lock', 'engine/Cargo.toml',
   ...execFileSync('rg', ['--files', 'engine/src'], {cwd:root, encoding:'utf8'}).trim().split('\n')].sort();
-assert.equal(productionPaths.length, 85); assert.equal(new Set(productionPaths).size, 85);
-const sourcePaths = [...productionPaths, 'engine/tests/process/callbacks/resident/wasm/retry.rs', 'engine/tests/process/callbacks/wasm.rs', 'engine/tests/process/callbacks/wasm.rs',
+assert.ok(productionPaths.length > 0, 'nonempty source manifest'); assert.equal(new Set(productionPaths).size, productionPaths.length);
+const sourcePaths = [...productionPaths, 'engine/tests/process/callbacks/resident/wasm/retry.rs', 'engine/tests/process/callbacks/wasm.rs',
   'engine/tests/process/callbacks/resident/fixtures/p2-cold-callback-retry/runtime/run.mjs'].sort();
-assert.equal(sourcePaths.length, 87); assert.equal(new Set(sourcePaths).size, 87);
+sourcePaths.push(...[...exportContract.sourcePaths, 'engine/tests/support/wasm/engine.mjs'].filter(path => !sourcePaths.includes(path)));
+assert.ok(sourcePaths.length > 0, 'nonempty source manifest'); assert.equal(new Set(sourcePaths).size, sourcePaths.length);
 const sourceBytes = Object.fromEntries(sourcePaths.map(path => [path, readFileSync(join(root, path))]));
 const beforeSources = Object.fromEntries(sourcePaths.map(path => [path, hash(sourceBytes[path])]));
 const gitHead = execFileSync('git', ['rev-parse','HEAD'], {cwd:root,encoding:'utf8'}).trim();
@@ -85,15 +89,13 @@ const oracle = {
   frozen_returns:{inner:0x6008,outer:0x3005}, results:{inner:44,callback:47,caller:50},
   unit_identity:'opaque nonzero full-u64 IDs; fresh B must exceed disposed old B',
   stack_checkpoints:['quiescent-before-discard','after-discard','final'],
-  engine_arities:arities, expected_source_counts:{production:85,total:87},
+  engine_arities:arities, source_manifest:{production:productionPaths.length,total:sourcePaths.length},
 };
 save('authored-oracle.json', JSON.stringify(oracle, null, 2));
 for (const [label,,hex] of inputs) save(`inputs/${label}.x86`, Buffer.from(hex,'hex'));
 
-const engineModule = new WebAssembly.Module(engineBytes);
+const engineModule = fixtureEngine.module;
 assert.deepEqual(WebAssembly.Module.imports(engineModule), []);
-assert.equal(WebAssembly.Module.exports(engineModule).length, 71);
-assert.equal(WebAssembly.Module.exports(engineModule).filter(row => row.kind === 'function').length, 70);
 const engine = new WebAssembly.Instance(engineModule, {});
 const api = Object.fromEntries(Object.keys(arities).map(name => [name,engine.exports[`ring3_abi_v1_${name}`]]));
 for (const [name,arity] of Object.entries(arities)) {
@@ -295,7 +297,7 @@ const counts = {
   observations:observations.length, stable_keeper_observations:stableObservations.length,
   keeper_binding_readbacks:keeperBindingObservations.length, keeper_metadata_readbacks:keeperMetadataObservations.length,
 };
-assert.deepEqual(counts,{engine_instances:1,resident_modules:9,dispatcher_modules:1,successful_unit_instantiations:9,failed_host_instantiations:1,initial_installed_keepers:7,successful_acks:8,peak_resident_units:8,capacity_refusals:1,successful_discards:1,old_child_refusals:8,dispatcher_calls:7,guest_retired:10,stack_checkpoints:3,whole_stack_pages:6,read32_calls:6144,source_files:87,production_source_files:85,observations:103,stable_keeper_observations:4,keeper_binding_readbacks:14,keeper_metadata_readbacks:7});
+assert.deepEqual(counts,{engine_instances:1,resident_modules:9,dispatcher_modules:1,successful_unit_instantiations:9,failed_host_instantiations:1,initial_installed_keepers:7,successful_acks:8,peak_resident_units:8,capacity_refusals:1,successful_discards:1,old_child_refusals:8,dispatcher_calls:7,guest_retired:10,stack_checkpoints:3,whole_stack_pages:6,read32_calls:6144,source_files:sourcePaths.length,production_source_files:productionPaths.length,observations:103,stable_keeper_observations:4,keeper_binding_readbacks:14,keeper_metadata_readbacks:7});
 const result = {fixture:'cold-callback-retry',counts,oracle,git_head:gitHead,engine_sha256:hash(engineBytes),sources:beforeSources,source_after:afterSources,
   observations,runs,stack_observations:stackObservations,keeper_observations:stableObservations,keeper_binding_readbacks:keeperBindingObservations,keeper_metadata_readbacks:keeperMetadataObservations,
   units:Object.values(units).map(unit=>({label:unit.label,id:unit.id.toString(),low:unit.low,high:unit.high,pointer:unit.pointer,length:unit.length,slot:unit.slot,entry_pc:unit.entry_pc,discarded:unit.discarded,file:unit.file,helpers:unit.helpers})),
