@@ -17,7 +17,7 @@ const sourcePaths = ["engine/src/abi/arena.rs", "engine/src/cpu/x86/ir.rs", "eng
   "engine/src/cpu/x86/decode/profile.rs", "engine/src/cpu/dbt/region.rs",
   "engine/src/cpu/dbt/wasm/integer/arithmetic.rs", "engine/src/cpu/dbt/wasm/integer/bits.rs", "engine/src/cpu/dbt/wasm/integer/carry_rotates.rs", "engine/src/cpu/dbt/wasm/integer/decimal.rs", "engine/src/cpu/dbt/wasm/integer/dispatch.rs", "engine/src/cpu/dbt/wasm/integer/flags.rs", "engine/src/cpu/dbt/wasm/integer/mod.rs", "engine/src/cpu/dbt/wasm/integer/multiply_divide.rs", "engine/src/cpu/dbt/wasm/integer/operands.rs", "engine/src/cpu/dbt/wasm/integer/rotates.rs", "engine/src/cpu/dbt/wasm/integer/shifts.rs", "engine/src/cpu/dbt/wasm/memory.rs",
   "engine/src/cpu/dbt/wasm/memory/narrow.rs", "engine/src/cpu/dbt/wasm/memory/byte_store.rs",
-  "engine/tests/cpu/strings/integration/wasm/byte.rs", "engine/tests/cpu/strings/wasm.rs", "engine/tests/support/wasm.rs", "engine/tests/cpu/strings/wasm.rs", "engine/tests/support/wasm.rs", "engine/tests/cpu/strings/integration/fixtures/p2-strings/runtime/run.mjs",
+  "engine/tests/cpu/strings/integration/wasm/byte.rs", "engine/tests/cpu/strings/wasm.rs", "engine/tests/support/wasm.rs", "engine/tests/cpu/strings/integration/fixtures/p2-strings/runtime/run.mjs",
   "engine/tests/support/wasm/engine.mjs"];
 const sourcePins = () => Object.fromEntries(sourcePaths.map(path => {
   const bytes = readFileSync(join(root, path)); return [path, { bytes: bytes.length, sha256: hash(bytes) }];
