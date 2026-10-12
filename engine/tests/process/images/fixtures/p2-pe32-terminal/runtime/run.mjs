@@ -1,10 +1,11 @@
 import assert from 'node:assert/strict';
 import {execFileSync} from 'node:child_process';
 import {createHash} from 'node:crypto';
-import {readFileSync, writeFileSync} from 'node:fs';
+import {mkdirSync, readFileSync, writeFileSync} from 'node:fs';
 import {join} from 'node:path';
 
 const [enginePath, outputDir, root] = process.argv.slice(2);
+mkdirSync(join(outputDir, 'runtime'), {recursive: true});
 assert.ok(root, 'expected actual engine, output directory and repository root');
 const fixtureRoot = join(root, 'engine/tests/process/images/fixtures/p2-pe32-terminal');
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
@@ -79,7 +80,7 @@ writeFileSync(join(outputDir, 'program.x86'), code); artifacts['program.x86'] = 
 writeFileSync(join(outputDir, 'program.S'), programBytes); writeFileSync(join(outputDir, 'terminal-oracle.json'), oracleBytes);
 writeFileSync(join(outputDir, 'runtime/run.mjs'), readFileSync(import.meta.filename));
 const productionPaths = execFileSync('rg', ['--files','engine/src'], {cwd: root, encoding: 'utf8'}).trim().split('\n').sort();
-const sourcePaths = [...productionPaths,'Cargo.toml','engine/Cargo.toml','Cargo.lock','engine/tests/process/images/wasm/terminal.rs', 'engine/tests/process/images/wasm.rs', 'engine/tests/support/wasm.rs', 'engine/tests/process/images/wasm.rs', 'engine/tests/support/wasm.rs','engine/tests/process/images/fixtures/p2-pe32-terminal/program.S','engine/tests/process/images/fixtures/p2-pe32-terminal/oracle.json','engine/tests/process/images/fixtures/p2-pe32-terminal/runtime/run.mjs'];
+const sourcePaths = [...productionPaths,'Cargo.toml','engine/Cargo.toml','Cargo.lock','engine/tests/process/images/wasm/terminal.rs', 'engine/tests/process/images/wasm.rs', 'engine/tests/support/wasm.rs','engine/tests/process/images/fixtures/p2-pe32-terminal/program.S','engine/tests/process/images/fixtures/p2-pe32-terminal/oracle.json','engine/tests/process/images/fixtures/p2-pe32-terminal/runtime/run.mjs'];
 const sources = Object.fromEntries(sourcePaths.map(file => [file, hash(readFileSync(join(root, file)))]));
 writeFileSync(join(outputDir, 'source-sha256.json'), JSON.stringify(sources, null, 2));
 const engineBytes = readFileSync(enginePath); writeFileSync(join(outputDir, 'engine.wasm'), engineBytes);
@@ -120,7 +121,7 @@ function fresh(name, pages = oracle.runtime.pages) {
   engine.base = api.arena_ptr() >>> 0; refresh(); assert.ok(engine.base > 0 && engine.base + size <= engine.bytes.length);
   assert.deepEqual(arena().subarray(0,56), cpu([0,0,0,0,0,0,0,0], 0));
   assert.deepEqual(arena().subarray(56,96), record('R3EX', 40, [1,0,0,0,0,0]));
-  engine.bytes.fill(0xa5, engine.base + 100, engine.base + size);
+  engine.bytes.fill(0xa5, engine.base + 100, engine.base + transfer + 4096);
   return engine;
 }
 function load(example) {
@@ -129,7 +130,7 @@ function load(example) {
   engine.receipt = {image_base:view.getUint32(16,true),image_size:view.getUint32(20,true),entry:view.getUint32(24,true),mapped_pages:view.getUint32(28,true),gate_base:view.getUint32(32,true),gate_count:view.getUint32(36,true),gates:Array.from({length:view.getUint32(36,true)},(_,index)=>[view.getUint32(48+index*8,true),view.getUint32(52+index*8,true)])};
   assert.deepEqual(engine.receipt.gates, oracle.runtime.gates);
   const filename = `${engine.name}-linked-receipt.bin`; writeFileSync(join(outputDir, filename), bytes); artifacts[filename] = hash(bytes);
-  refresh().bytes.fill(0xa5, engine.base + transfer, engine.base + size);
+  refresh().bytes.fill(0xa5, engine.base + transfer, engine.base + transfer + 4096);
 }
 function entriesRequest(entries, gates = []) {
   const view = refresh().view;

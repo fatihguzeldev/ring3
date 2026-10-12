@@ -1,10 +1,15 @@
+import {assertEngineExports} from '../../../../../../support/wasm/exports.mjs';
+import {readEngine} from '../../../../../../support/wasm/engine.mjs';
 import assert from 'node:assert/strict';
 import {execFileSync} from 'node:child_process';
 import {createHash} from 'node:crypto';
-import {readFileSync, readdirSync, writeFileSync} from 'node:fs';
+import {mkdirSync, readFileSync, readdirSync, writeFileSync} from 'node:fs';
 import {join} from 'node:path';
 
 const [enginePath, outputDir, root] = process.argv.slice(2);
+const fixtureEngine = readEngine(enginePath);
+const exportContract = assertEngineExports(fixtureEngine.module, root);
+mkdirSync(join(outputDir, 'runtime'), {recursive: true});
 assert.ok(root, 'expected actual engine, output directory and repository root');
 const fixtureRoot = join(root, 'engine/tests/process/images/input/fixtures/p2-image-input');
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
@@ -80,12 +85,13 @@ writeFileSync(join(outputDir, 'program.x86'), code); artifacts['program.x86'] = 
 writeFileSync(join(outputDir, 'program.S'), programBytes); writeFileSync(join(outputDir, 'input-oracle.json'), oracleBytes);
 writeFileSync(join(outputDir, 'runtime/run.mjs'), readFileSync(import.meta.filename));
 const productionPaths = execFileSync('rg', ['--files','engine/src'], {cwd: root, encoding: 'utf8'}).trim().split('\n').sort();
-const sourcePaths = [...productionPaths,'Cargo.toml','engine/Cargo.toml','Cargo.lock','engine/tests/process/images/input/wasm/copied.rs', 'engine/tests/process/images/wasm.rs', 'engine/tests/support/wasm.rs', 'engine/tests/process/images/wasm.rs', 'engine/tests/support/wasm.rs','engine/tests/process/images/input/fixtures/p2-image-input/program.S','engine/tests/process/images/input/fixtures/p2-image-input/oracle.json','engine/tests/process/images/input/fixtures/p2-image-input/runtime/run.mjs'];
+const sourcePaths = [...productionPaths,'Cargo.toml','engine/Cargo.toml','Cargo.lock','engine/tests/process/images/input/wasm/copied.rs', 'engine/tests/process/images/wasm.rs', 'engine/tests/support/wasm.rs','engine/tests/process/images/input/fixtures/p2-image-input/program.S','engine/tests/process/images/input/fixtures/p2-image-input/oracle.json','engine/tests/process/images/input/fixtures/p2-image-input/runtime/run.mjs'];
+sourcePaths.push(...[...exportContract.sourcePaths, 'engine/tests/support/wasm/engine.mjs'].filter(path => !sourcePaths.includes(path)));
 const sources = Object.fromEntries(sourcePaths.map(file => [file, hash(readFileSync(join(root, file)))]));
 writeFileSync(join(outputDir, 'source-sha256.json'), JSON.stringify(sources, null, 2));
-const engineBytes = readFileSync(enginePath); writeFileSync(join(outputDir, 'engine.wasm'), engineBytes);
+const engineBytes = fixtureEngine.bytes; writeFileSync(join(outputDir, 'engine.wasm'), engineBytes);
 assert.ok(WebAssembly.validate(engineBytes));
-const engineModule = new WebAssembly.Module(engineBytes); assert.deepEqual(WebAssembly.Module.imports(engineModule), []);
+const engineModule = fixtureEngine.module; assert.deepEqual(WebAssembly.Module.imports(engineModule), []);
 const names = ['open','close','arena_ptr','load_pe32','load_pe32_at','load_pe32_linked_at','load_pe32_linked_v2_at','start_loaded_image','begin_image_input','append_image_input','abort_image_input','load_pe32_linked_v2_input_at','map','compile_entries','compile_resident_entries','generation','module_ptr','module_len','resident_module','find_resident','acknowledge_resident_installation','find_installed_resident','dispatcher_module','guard','guard_dispatch_entry','guard_resident','read32','write32','store32','store_resident32','capture_call','capture_resident_call','complete_call','complete_resident_call','complete_windows_call','complete_resident_windows_call'];
 let engine, nextInstance = 0;
 const fromHex = hex => new Uint8Array(Buffer.from(hex, 'hex'));
@@ -118,7 +124,7 @@ function hostInput(label, action) {
 }
 function cancel(value) { hostInput(`explicit host Cancel=${value}`,()=>refresh().view.setUint32(engine.base + 96, value, true)); }
 function request(bytes, label = 'explicit host Transfer input') { assert.ok(bytes.length <= 4096); hostInput(label,()=>refresh().bytes.set(bytes,engine.base+transfer)); }
-function scribble() { hostInput('explicit host overwrites submitted Transfer prefix',()=>refresh().bytes.fill(0xa5,engine.base+transfer,engine.base+size)); }
+function scribble() { hostInput('explicit host overwrites submitted Transfer prefix',()=>refresh().bytes.fill(0xa5,engine.base+transfer,engine.base+transfer+4096)); }
 function read(address, value, label) { operation(label, () => engine.api.read32(address), 0, [[100,helper(value)]]); return refresh().view.getUint32(engine.base + 120, true); }
 function fault(address, access, detail, label) { operation(label, () => access === 1 ? engine.api.read32(address) : engine.api.write32(address, 0xdeadbeef), 0, [[100,record('R3MH', 40, [1,0,detail,address,access,4])]]); }
 function stack(values, label) { return oracle.runtime.stack_addresses.map((address, index) => read(address, values[index], `${label}/word${index}`)); }
@@ -127,7 +133,6 @@ function fresh(name, pages = oracle.runtime.pages) {
   const api = Object.fromEntries(names.map(name => { const fn = instance.exports[`ring3_abi_v1_${name}`]; assert.equal(typeof fn, 'function', name); return [name,fn]; }));
   assert.equal(api.load_pe32_linked_v2_at.length, 3); assert.equal(api.load_pe32_linked_at.length, 3);
   for (const [name,arity] of Object.entries(oracle.input.new_export_arities)) assert.equal(api[name].length,arity,name);
-  assert.equal(WebAssembly.Module.exports(engineModule).length,oracle.input.engine_total_exports);
   assert.equal(api.complete_windows_call.length, 4); assert.equal(api.complete_resident_windows_call.length, 5);
   const ordinal = ++nextInstance, key = 0xa349cdef00000000n + BigInt(ordinal);
   engine = {name,ordinal,api,key,low:Number(key & 0xffffffffn),high:Number(key >> 32n),memory:instance.exports.memory,units:[]};
@@ -135,7 +140,7 @@ function fresh(name, pages = oracle.runtime.pages) {
   engine.base = api.arena_ptr() >>> 0; refresh(); assert.ok(engine.base > 0 && engine.base + size <= engine.bytes.length);
   assert.deepEqual(arena().subarray(0,56), cpu([0,0,0,0,0,0,0,0], 0));
   assert.deepEqual(arena().subarray(56,96), record('R3EX', 40, [1,0,0,0,0,0]));
-  hostInput('explicit host diagnostic/Transfer sentinel',()=>engine.bytes.fill(0xa5, engine.base + 100, engine.base + size));
+  hostInput('explicit host diagnostic/Transfer sentinel',()=>engine.bytes.fill(0xa5, engine.base + 100, engine.base + transfer + 4096));
   return engine;
 }
 function stageInput(bytes = image, controls = false) {
@@ -331,7 +336,11 @@ fresh('close-releases-active-input');operation('begin before explicit close rele
 operation('close drops active prefix and preserves arena',()=>engine.api.close());operation('repeated close remains inert',()=>engine.api.close());
 for(const [name,args] of [['begin_image_input',[0]],['append_image_input',[0,4097]],['abort_image_input',[]],['load_pe32_linked_v2_input_at',[0,0]]]) operation(`Closed before ${name} shape`,()=>engine.api[name](...args),5);
 
-for(const filename of readdirSync(outputDir)) artifacts[filename]=hash(readFileSync(join(outputDir,filename)));
+const artifactPaths = directory => readdirSync(join(outputDir, directory), {withFileTypes: true}).flatMap(entry => {
+  const path = join(directory, entry.name);
+  return entry.isDirectory() ? artifactPaths(path) : [path];
+});
+for(const filename of artifactPaths('')) artifacts[filename]=hash(readFileSync(join(outputDir,filename)));
 const provenance={
   engine_sha256:hash(engineBytes),oracle_sha256:hash(oracleBytes),program_sha256:hash(programBytes),text_sha256:hash(code),pe_sha256:hash(image),artifacts,sources,identities,observations,operations,host_inputs:hostInputs,
   command:[process.execPath,process.argv[1],enginePath,outputDir,root],assembly_command:['clang',...assemble],

@@ -1,10 +1,11 @@
 import assert from 'node:assert/strict';
 import {execFileSync} from 'node:child_process';
 import {createHash} from 'node:crypto';
-import {readFileSync, writeFileSync} from 'node:fs';
+import {mkdirSync, readFileSync, writeFileSync} from 'node:fs';
 import {join} from 'node:path';
 
 const [enginePath, outputDir, root] = process.argv.slice(2);
+mkdirSync(join(outputDir, 'runtime'), {recursive: true});
 assert.ok(root, 'expected actual engine, output directory and repository root');
 const fixtureRoot = join(root, 'engine/tests/process/images/fixtures/p2-pe32-relocation');
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
@@ -77,7 +78,7 @@ writeFileSync(join(outputDir, 'authored-oracle.json'), oracleBytes);
 writeFileSync(join(outputDir, 'program.S'), readFileSync(assembly));
 writeFileSync(join(outputDir, 'runtime/run.mjs'), readFileSync(import.meta.filename));
 const productionPaths = execFileSync('rg', ['--files', 'engine/src'], {cwd: root, encoding: 'utf8'}).trim().split('\n').sort();
-const sourcePaths = [...productionPaths, 'Cargo.toml', 'engine/Cargo.toml', 'Cargo.lock', 'engine/tests/process/images/wasm/relocation.rs', 'engine/tests/process/images/wasm.rs', 'engine/tests/support/wasm.rs', 'engine/tests/process/images/wasm.rs', 'engine/tests/support/wasm.rs', 'engine/tests/process/images/fixtures/p2-pe32-relocation/program.S', 'engine/tests/process/images/fixtures/p2-pe32-relocation/oracle.json', 'engine/tests/process/images/fixtures/p2-pe32-relocation/runtime/run.mjs'];
+const sourcePaths = [...productionPaths, 'Cargo.toml', 'engine/Cargo.toml', 'Cargo.lock', 'engine/tests/process/images/wasm/relocation.rs', 'engine/tests/process/images/wasm.rs', 'engine/tests/support/wasm.rs', 'engine/tests/process/images/fixtures/p2-pe32-relocation/program.S', 'engine/tests/process/images/fixtures/p2-pe32-relocation/oracle.json', 'engine/tests/process/images/fixtures/p2-pe32-relocation/runtime/run.mjs'];
 const sources = Object.fromEntries(sourcePaths.map(file => [file, hash(readFileSync(join(root, file)))]));
 writeFileSync(join(outputDir, 'source-sha256.json'), JSON.stringify(sources, null, 2));
 const engineBytes = readFileSync(enginePath);
@@ -108,7 +109,7 @@ function fresh(pages = 8) {
   assert.equal(api.open(pages, Number(key & 0xffffffffn), Number(key >> 32n)), 0);
   const engine = refresh({api, memory, base: api.arena_ptr() >>> 0});
   assert.ok(engine.base > 0 && engine.base + size <= engine.bytes.length);
-  engine.bytes.fill(0xa5, engine.base, engine.base + size);
+  engine.bytes.fill(0xa5, engine.base, engine.base + transfer + 4096);
   return engine;
 }
 function arena(engine) { return refresh(engine).bytes.slice(engine.base, engine.base + size); }

@@ -1,10 +1,11 @@
 import assert from 'node:assert/strict';
 import {execFileSync} from 'node:child_process';
 import {createHash} from 'node:crypto';
-import {readFileSync, writeFileSync} from 'node:fs';
+import {mkdirSync, readFileSync, writeFileSync} from 'node:fs';
 import {join} from 'node:path';
 
 const [enginePath, outputDir, root] = process.argv.slice(2);
+mkdirSync(join(outputDir, 'runtime'), {recursive: true});
 assert.ok(root, 'expected actual engine, output directory and repository root');
 const fixtureRoot = join(root, 'engine/tests/process/images/startup/fixtures/p2-image-startup');
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
@@ -81,7 +82,7 @@ writeFileSync(join(outputDir, 'reused-code-oracle.json'), codeOracleBytes);
 writeFileSync(join(outputDir, 'startup-oracle.json'), oracleBytes);
 writeFileSync(join(outputDir, 'runtime/run.mjs'), readFileSync(import.meta.filename));
 const productionPaths = execFileSync('rg', ['--files', 'engine/src'], {cwd: root, encoding: 'utf8'}).trim().split('\n').sort();
-const sourcePaths = [...productionPaths, 'Cargo.toml', 'engine/Cargo.toml', 'Cargo.lock', 'engine/tests/process/images/startup/wasm/entry.rs', 'engine/tests/process/images/wasm.rs', 'engine/tests/support/wasm.rs', 'engine/tests/process/images/wasm.rs', 'engine/tests/support/wasm.rs', 'engine/tests/process/images/startup/fixtures/p2-image-startup/oracle.json', 'engine/tests/process/images/startup/fixtures/p2-image-startup/runtime/run.mjs', 'engine/tests/process/images/fixtures/p2-pe32-imports/program.S', 'engine/tests/process/images/fixtures/p2-pe32-imports/oracle.json'];
+const sourcePaths = [...productionPaths, 'Cargo.toml', 'engine/Cargo.toml', 'Cargo.lock', 'engine/tests/process/images/startup/wasm/entry.rs', 'engine/tests/process/images/wasm.rs', 'engine/tests/support/wasm.rs', 'engine/tests/process/images/startup/fixtures/p2-image-startup/oracle.json', 'engine/tests/process/images/startup/fixtures/p2-image-startup/runtime/run.mjs', 'engine/tests/process/images/fixtures/p2-pe32-imports/program.S', 'engine/tests/process/images/fixtures/p2-pe32-imports/oracle.json'];
 const sources = Object.fromEntries(sourcePaths.map(file => [file, hash(readFileSync(join(root, file)))]));
 writeFileSync(join(outputDir, 'source-sha256.json'), JSON.stringify(sources, null, 2));
 const engineBytes = readFileSync(enginePath);
