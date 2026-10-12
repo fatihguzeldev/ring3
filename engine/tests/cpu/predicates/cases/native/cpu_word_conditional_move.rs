@@ -473,9 +473,10 @@ fn pure_module_interface(wasm: &[u8], resident: Option<bool>) {
     let length = bodies.unsigned() as usize;
     let mut body = Reader(bodies.take(length));
     bodies.end();
-    assert_eq!(body.unsigned(), 2);
+    assert_eq!(body.unsigned(), 3);
     assert_eq!((body.unsigned(), body.byte()), (16, 0x7f));
     assert_eq!((body.unsigned(), body.byte()), (1, 0x7e));
+    assert_eq!((body.unsigned(), body.byte()), (10, 0x7f));
 }
 
 #[test]
@@ -601,9 +602,9 @@ fn late_word_cmov_decode_fetch_and_cap_failures_preserve_both_previous_owners() 
     let mut cases = vec![
         (
             CODE,
-            vec![0x66, 0x0f, 0x44, 0xc1, 0x0f, 0x0b],
+            vec![0x66, 0x0f, 0x44, 0xc1, 0xf0, 0x90],
             6,
-            instruction_error(CODE + 4, opcode),
+            instruction_error(CODE + 4, DecodeError::InvalidEncoding),
         ),
         (
             CODE,
@@ -613,9 +614,9 @@ fn late_word_cmov_decode_fetch_and_cap_failures_preserve_both_previous_owners() 
         ),
         (
             CODE,
-            vec![0x66, 0x0f, 0x44, 0xc1, 0x0f, 0x0b, 0x90, 0x90],
+            vec![0x66, 0x0f, 0x44, 0xc1, 0xf0, 0x90, 0x90, 0x90],
             8,
-            instruction_error(CODE + 4, opcode),
+            instruction_error(CODE + 4, DecodeError::InvalidEncoding),
         ),
         (
             0x1ff9,
@@ -628,7 +629,7 @@ fn late_word_cmov_decode_fetch_and_cap_failures_preserve_both_previous_owners() 
         ),
     ];
     let mut capped = encoding(4, 0, 1).repeat(64);
-    capped.extend([0x0f, 0x0b]);
+    capped.extend([0xf0, 0x90]);
     cases.push((
         CODE,
         capped.clone(),

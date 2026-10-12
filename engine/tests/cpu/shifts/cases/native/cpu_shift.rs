@@ -1,3 +1,5 @@
+use super::support_prefix_admission as prefix_admission;
+
 use ring3_engine::{
     cpu::{
         UnsupportedFeature,
@@ -302,12 +304,14 @@ fn shifts_admit_segment_and_address_size_while_retaining_unsupported_prefix_cate
             vec![0x66, 0x66, 0xd1, 0xc0 | extension << 3],
             vec![0xf3, 0xd1, 0xc0 | extension << 3],
         ] {
-            let memory = code(CODE, &bytes);
-            assert_eq!(
-                decode_one(&memory, GuestAddress(CODE)).err(),
-                Some(DecodeError::Unsupported(UnsupportedFeature::Opcode)),
-                "{bytes:02x?}"
-            );
+            if !prefix_admission::admit_if_new_prefix(&bytes) {
+                let memory = code(CODE, &bytes);
+                assert_eq!(
+                    decode_one(&memory, GuestAddress(CODE)).err(),
+                    Some(DecodeError::Unsupported(UnsupportedFeature::Opcode)),
+                    "{bytes:02x?}"
+                );
+            }
         }
         for (prefix, address) in [
             (
@@ -445,7 +449,7 @@ fn all_register_profiles_match_standalone_explicit_and_entry_artifacts() {
     for register in 0..8 {
         let mut bytes = register_block(register);
         let length = bytes.len();
-        bytes.extend_from_slice(&[0x0f, 0x0b]);
+        bytes.extend_from_slice(&[0xf0, 0x90]);
         let mut memory = code(CODE, &bytes);
         memory
             .protect(
@@ -584,7 +588,7 @@ fn all_gprs_and_count_forms_admit_in_bound_profiles_without_stack_or_helpers() {
 fn every_memory_form_including_zero_refuses_all_standalone_backends_before_poison() {
     for instruction in memory_forms() {
         let mut bytes = instruction;
-        bytes.extend_from_slice(&[0x0f, 0x0b]);
+        bytes.extend_from_slice(&[0xf0, 0x90]);
         let memory = code(CODE, &bytes);
         assert!(memory.resolve(GuestAddress(0x5010), Access::Read).is_err());
         let expected = instruction_error(CODE, InstructionError::BackendUnsupported);
@@ -667,13 +671,13 @@ fn admitted_prefix_and_each_memory_then_decode_refusal_preserves_both_old_owners
             for instruction in memory_forms() {
                 let mut bytes = vec![0xd1, 0xe0];
                 bytes.extend_from_slice(&instruction);
-                bytes.extend_from_slice(&[0x0f, 0x0b]);
+                bytes.extend_from_slice(&[0xf0, 0x90]);
                 upload(&mut engine, CODE, &bytes);
                 describe(&mut engine, CODE, bytes.len(), entries);
                 let before = saved(&engine, keep);
                 let error = instruction_error(
                     CODE + 2 + instruction.len() as u32,
-                    InstructionError::Decode(DecodeError::Unsupported(UnsupportedFeature::Opcode)),
+                    InstructionError::Decode(DecodeError::InvalidEncoding),
                 );
                 let expected = match owner {
                     Owner::Replacement => HostError::Compile(error),
@@ -726,7 +730,7 @@ fn register_shifts_charge_instruction_and_wasm_caps_before_later_poison() {
             64
         );
         let mut bytes = instruction.repeat(64);
-        bytes.extend_from_slice(&[0x0f, 0x0b]);
+        bytes.extend_from_slice(&[0xf0, 0x90]);
         let memory = code(CODE, &bytes);
         assert_eq!(
             prepare_region(

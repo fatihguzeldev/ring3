@@ -348,7 +348,7 @@ fn extra_prefixes_reverse_destinations_and_register_destinations_remain_closed()
 #[test]
 fn standalone_paths_remain_closed_before_later_poison() {
     for opcode in OPCODES {
-        let bytes = [vec![0x90], instruction(opcode, 4), vec![0x0f, 0x0b]].concat();
+        let bytes = [vec![0x90], instruction(opcode, 4), vec![0xf0, 0x90]].concat();
         let engine = code_at(CODE, &bytes);
         let before = engine.arena().to_vec();
         let memory = engine.memory().unwrap();
@@ -416,7 +416,7 @@ fn mixed_register_forms_keep_the_existing_instruction_limit() {
 #[test]
 fn late_poison_after_register_mask_preserves_published_owners_and_full_arena() {
     let mut bytes = vec![0x90; 130];
-    bytes[..6].copy_from_slice(&[vec![0x90], instruction(0x31, 4), vec![0x0f, 0x0b]].concat());
+    bytes[..6].copy_from_slice(&[vec![0x90], instruction(0x31, 4), vec![0xf0, 0x90]].concat());
     bytes[128..].copy_from_slice(&[0xeb, 0]);
     let mut engine = code_at(CODE, &bytes);
     describe(&mut engine, CODE + 128, 2, false);
@@ -428,7 +428,7 @@ fn late_poison_after_register_mask_preserves_published_owners_and_full_arena() {
     let resident_pointer = engine.resident_bytes(resident).unwrap().as_ptr();
     let cause = CompileError::Instruction {
         pc: GuestAddress(CODE + 4),
-        cause: InstructionError::Decode(DecodeError::Unsupported(UnsupportedFeature::Opcode)),
+        cause: InstructionError::Decode(DecodeError::InvalidEncoding),
     };
     for is_resident in [false, true] {
         for entries in [false, true] {

@@ -1,3 +1,6 @@
+#[path = "../../support/cpu/prefix_admission.rs"]
+mod support_prefix_admission;
+
 #[path = "cases/native/decode_data.rs"]
 mod decode_data;
 

@@ -1,3 +1,5 @@
+use super::support_prefix_admission as prefix_admission;
+
 use super::support_byte_prefix_admission as byte_prefix_admission;
 
 use ring3_engine::{
@@ -692,14 +694,15 @@ fn late_immediate_byte_shift_failures_preserve_both_publications() {
         let modrm = field(kind) << 3 | 3;
         for (bytes, expected) in [
             (
-                vec![0xc0, modrm, 33, 0x0f, 0x0b],
-                instruction_error(CODE + 3, opcode),
+                vec![0xc0, modrm, 33, 0xf0, 0x90],
+                instruction_error(CODE + 3, DecodeError::InvalidEncoding),
             ),
             (
                 vec![0xc0, modrm, 33, 0x66, 0xc0, modrm, 2],
                 instruction_error(CODE + 3, opcode),
             ),
         ] {
+            let (bytes, expected) = prefix_admission::compile_refusal(&bytes, 3, expected);
             let pc = CODE;
             let declared = bytes.len() as u32;
             for resident in [false, true] {

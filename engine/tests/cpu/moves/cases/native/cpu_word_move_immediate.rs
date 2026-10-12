@@ -233,9 +233,10 @@ for (;;) {
   assert.equal(types.at, types.bytes.length);
   const code = {bytes: sections.get(10), at: 0}; assert.equal(u(code), 1);
   const size = u(code); assert.equal(code.at + size, code.bytes.length);
-  const body = {bytes: code.bytes.subarray(code.at), at: 0}; assert.equal(u(body), 2);
+  const body = {bytes: code.bytes.subarray(code.at), at: 0}; assert.equal(u(body), 3);
   assert.equal(u(body), 16); assert.equal(one(body), 0x7f);
   assert.equal(u(body), 1); assert.equal(one(body), 0x7e);
+  assert.equal(u(body), 10); assert.equal(one(body), 0x7f);
   assert.ok(body.at < body.bytes.length); modules++;
 }
 assert.equal(modules, 6); assert.equal(at, input.length);
@@ -439,7 +440,9 @@ fn exact_immediate_prefix_fetch_and_consumed_currency_boundaries() {
         vec![0x66, 0xb0, 1],
         vec![0x66, 0xc6, 0xc0, 1],
     ] {
-        assert!(decode_one(&memory(PC, &bytes), GuestAddress(PC)).is_err());
+        if !word_prefix::admit_if_new_prefix(&bytes) {
+            assert!(decode_one(&memory(PC, &bytes), GuestAddress(PC)).is_err());
+        }
     }
 }
 
@@ -501,7 +504,7 @@ fn instruction_block_caps_and_late_owner_failures_keep_complete_arena() {
                 (0x3000, row.clone()),
                 (
                     0x5000,
-                    [row[..4].to_vec(), vec![0x90, 0x0f, 0x0b, 0xeb, 0]].concat(),
+                    [row[..4].to_vec(), vec![0x90, 0xf0, 0x90, 0xeb, 0]].concat(),
                 ),
             ] {
                 engine.map(pc, 1, 7).unwrap();
@@ -518,9 +521,7 @@ fn instruction_block_caps_and_late_owner_failures_keep_complete_arena() {
             let before = engine.arena().to_vec();
             let error = CompileError::Instruction {
                 pc: GuestAddress(0x5005),
-                cause: InstructionError::Decode(DecodeError::Unsupported(
-                    UnsupportedFeature::Opcode,
-                )),
+                cause: InstructionError::Decode(DecodeError::InvalidEncoding),
             };
             let expected = if resident {
                 HostError::Resident(RegistryError::Compile(error))

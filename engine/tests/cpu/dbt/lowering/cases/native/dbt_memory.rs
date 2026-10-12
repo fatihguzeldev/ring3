@@ -1,3 +1,5 @@
+use super::support_prefix_admission as prefix_admission;
+
 use ring3_engine::cpu::UnsupportedFeature;
 use ring3_engine::cpu::dbt::{
     BlockSpec, CompileError, CompileLimits, InstructionError, compile_region, prepare_region,
@@ -171,14 +173,18 @@ fn decoder_exclusions_after_a_memory_prefix_remain_rejected_at_their_pc() {
     ] {
         let mut engine = EngineInstance::new(1, KEY).unwrap();
         engine.map(0x1000, 1, 7).unwrap();
+        let (instruction, cause) = prefix_admission::refusal_after_prefix_admission(
+            instruction.to_vec(),
+            DecodeError::Unsupported(feature),
+        );
         let mut bytes = vec![0x90, 0x8b, 0x03];
-        bytes.extend_from_slice(instruction);
+        bytes.extend_from_slice(&instruction);
         upload(&mut engine, 0x1000, &bytes);
         assert_eq!(
             compile(&mut engine, 0x1000, bytes.len() as u32),
             Err(HostError::Compile(CompileError::Instruction {
                 pc: GuestAddress(0x1003),
-                cause: InstructionError::Decode(DecodeError::Unsupported(feature)),
+                cause: InstructionError::Decode(cause),
             }))
         );
         assert_eq!(engine.generation(), 0);

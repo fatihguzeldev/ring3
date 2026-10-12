@@ -400,7 +400,7 @@ fn assert_rmw_module(engine: &EngineInstance, owner: Owner, id: u64) {
     let mut body = take(&mut bodies, length);
     assert!(bodies.is_empty());
     assert_eq!(unsigned(&mut body), 3);
-    for expected in [(16, 0x7f), (1, 0x7e), (6, 0x7f)] {
+    for expected in [(16, 0x7f), (1, 0x7e), (10, 0x7f)] {
         assert_eq!((unsigned(&mut body), byte(&mut body)), expected);
     }
     let mut constants = vec![KEY as u32, (KEY >> 32) as u32, id as u32];
@@ -1019,7 +1019,7 @@ fn instruction_caps_and_pure_tiny_wasm_fail_without_replacing_owners() {
         admitted.extend([0xeb, 0]);
         let mut rejected = vec![0x90; 63];
         rejected.extend_from_slice(&target);
-        rejected.extend([0x0f, 0x0b]);
+        rejected.extend([0xf0, 0x90]);
         for owner in [Owner::Replacement, Owner::Resident] {
             for entries in [false, true] {
                 let (mut engine, keep) = prior_owners();

@@ -282,7 +282,7 @@ fn strict_prefixes_fetch_wrap_and_fixed32_adjacency_keep_exact_categories() {
             .is_code_current(second.code_snapshot())
     );
     for (pc, bytes, next) in [
-        (CODE, &[0x0f, 0xc8, 0x0f, 0x0b][..], CODE + 2),
+        (CODE, &[0x0f, 0xc8, 0xf0, 0x90][..], CODE + 2),
         (0x1ffe, &[0x0f, 0xc8][..], 0x2000),
         (0x1fff, &[0x0f, 0xc8][..], 0x2001),
         (u32::MAX - 1, &[0x0f, 0xc8][..], 0),
@@ -423,17 +423,17 @@ fn late_decode_failures_preserve_both_publications_and_all_mapped_pages() {
     for (pc, bytes, length, error_pc, error) in [
         (
             CODE,
-            &[0x0f, 0xc8, 0x0f, 0x0b][..],
+            &[0x0f, 0xc8, 0xf0, 0x90][..],
             4,
             CODE + 2,
-            DecodeError::Unsupported(UnsupportedFeature::Opcode),
+            DecodeError::InvalidEncoding,
         ),
         (
             CODE,
-            &[0x0f, 0xc8, 0x0f, 0x0b, 0x90][..],
+            &[0x0f, 0xc8, 0xf0, 0x90, 0x90][..],
             5,
             CODE + 2,
-            DecodeError::Unsupported(UnsupportedFeature::Opcode),
+            DecodeError::InvalidEncoding,
         ),
         (
             0x1ffd,

@@ -267,6 +267,8 @@ fn instruction_error(cause: InstructionError) -> CompileError {
 }
 
 fn standalone_rejected(bytes: &[u8], expected: CompileError) {
+    let (bytes, expected) = prefix_admission::compile_refusal(bytes, 1, expected);
+    let bytes = bytes.as_slice();
     let mut memory = AddressSpace::new(1).unwrap();
     memory
         .map_zeroed(
@@ -302,6 +304,8 @@ fn standalone_rejected(bytes: &[u8], expected: CompileError) {
 }
 
 fn embedded_rejected(bytes: &[u8], expected: CompileError) {
+    let (bytes, expected) = prefix_admission::compile_refusal(bytes, 1, expected);
+    let bytes = bytes.as_slice();
     for entries in [false, true] {
         let mut instance = engine(bytes);
         describe(&mut instance, 0x1000, bytes.len());

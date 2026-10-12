@@ -296,8 +296,8 @@ while(offset<input.length) {
   } types.end();
   const functions=cursor(sections.get(3)); assert.equal(functions.u(),1); assert.equal(functions.u(),0); functions.end();
   const bodies=cursor(sections.get(10)); assert.equal(bodies.u(),1);
-  const body=cursor(bodies.take(bodies.u())); bodies.end(); assert.equal(body.u(),2);
-  for(const [number,type] of [[16,0x7f],[1,0x7e]]) {assert.equal(body.u(),number); assert.equal(body.byte(),type);}
+  const body=cursor(bodies.take(bodies.u())); bodies.end(); assert.equal(body.u(),3);
+  for(const [number,type] of [[16,0x7f],[1,0x7e],[10,0x7f]]) {assert.equal(body.u(),number); assert.equal(body.byte(),type);}
   count++;
 }
 assert.equal(offset,input.length); assert.equal(count,6); process.stdout.write(String(count));
@@ -567,14 +567,14 @@ fn late_byte_accumulator_decode_and_fetch_refusals_preserve_publications() {
         for (pc, bytes, declared, expected) in [
             (
                 CODE,
-                vec![0xf6, modrm, 0x0f, 0x0b],
+                vec![0xf6, modrm, 0xf0, 0x90],
                 4,
-                error(CODE + 2, opcode),
+                error(CODE + 2, DecodeError::InvalidEncoding),
             ),
             (
                 CODE,
-                vec![0xf6, modrm, 0x66, 0xf6, modrm ^ 8],
-                5,
+                vec![0xf6, modrm, 0x66, 0x66, 0xf6, modrm ^ 8],
+                6,
                 error(CODE + 2, opcode),
             ),
             (

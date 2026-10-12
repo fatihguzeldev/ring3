@@ -273,7 +273,7 @@ while (offset < input.length) {
     } else if (id === 10) {
       assert.equal(u(), 1); const bodyLength = u(), bodyEnd = at + bodyLength, locals = [];
       for (let n = u(); n > 0; n--) locals.push([u(), bytes[at++]]);
-      assert.deepEqual(locals, [[16,0x7f],[1,0x7e]]);
+      assert.deepEqual(locals, [[16,0x7f],[1,0x7e],[10,0x7f]]);
       assert.equal(bodyEnd, end); at = bodyEnd;
     } else at = end;
     assert.equal(at, end);
@@ -541,8 +541,8 @@ fn strict_and_late_failures_keep_both_published_owners() {
     ] {
         let (excluded, expected) = if prefix_admission::admit_if_new_prefix(&excluded) {
             let mut poison = vec![0x90; excluded.len()];
-            poison[..2].copy_from_slice(&[0x0f, 0x0b]);
-            (poison, DecodeError::Unsupported(UnsupportedFeature::Opcode))
+            poison[..2].copy_from_slice(&[0xf0, 0x90]);
+            (poison, DecodeError::InvalidEncoding)
         } else {
             (excluded, expected)
         };
@@ -555,12 +555,12 @@ fn strict_and_late_failures_keep_both_published_owners() {
     for kind in KINDS {
         let target = instruction(kind, Register32::Eax, 2);
         let mut unsupported = target.to_vec();
-        unsupported.extend([0x0f, 0x0b]);
+        unsupported.extend([0xf0, 0x90]);
         late += failed_compile_profiles(
             CODE,
             &unsupported,
             unsupported.len(),
-            error(CODE + 3, opcode),
+            error(CODE + 3, DecodeError::InvalidEncoding),
         );
         let mut prefixed = target.to_vec();
         prefixed.extend([0x66, 0x66]);
@@ -781,7 +781,7 @@ fn default_instruction_block_and_tight_wasm_caps_retain_prior_owners() {
         }
         let mut bytes = vec![0x90; 63];
         bytes.extend(target);
-        bytes.extend([0x0f, 0x0b]);
+        bytes.extend([0xf0, 0x90]);
         let engine = code(CODE, &bytes, true);
         let memory = engine.memory().unwrap();
         assert_eq!(

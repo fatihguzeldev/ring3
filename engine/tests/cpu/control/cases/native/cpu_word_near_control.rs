@@ -356,7 +356,7 @@ fn word_near_control_is_backend_unsupported_in_both_standalone_profiles() {
         for trailing in [false, true] {
             let mut bytes = [vec![0x90], form.to_vec()].concat();
             if trailing {
-                bytes.extend([0x0f, 0x0b]);
+                bytes.extend([0xf0, 0x90]);
             }
             let memory = code_space(CODE, &bytes);
             let specs = [BlockSpec {
@@ -392,7 +392,7 @@ fn word_near_control_is_backend_unsupported_in_both_standalone_profiles() {
 #[test]
 fn word_near_control_terminates_bound_blocks_before_any_trailing_decode() {
     for form in FORMS {
-        let bytes = [vec![0x90], form.to_vec(), vec![0x0f, 0x0b]].concat();
+        let bytes = [vec![0x90], form.to_vec(), vec![0xf0, 0x90]].concat();
         for resident in [false, true] {
             let mut engine = code(&bytes);
             describe(&mut engine, &[(CODE, bytes.len() as u32)], false);
@@ -528,7 +528,7 @@ fn word_near_control_late_block_refusal_preserves_dirty_full_arena_and_both_owne
     for (index, form) in FORMS.into_iter().enumerate() {
         bytes[index * 16..index * 16 + form.len()].copy_from_slice(form);
     }
-    bytes[49..51].copy_from_slice(&[0x0f, 0x0b]);
+    bytes[49..51].copy_from_slice(&[0xf0, 0x90]);
     bytes[256..258].copy_from_slice(&[0xeb, 0]);
     let mut engine = code(&bytes);
     let replacement = compile(&mut engine, &[(CODE + 256, 2)], false, false).unwrap() as u32;
@@ -540,7 +540,7 @@ fn word_near_control_late_block_refusal_preserves_dirty_full_arena_and_both_owne
     let blocks = [(CODE, 4), (CODE + 16, 2), (CODE + 32, 4), (CODE + 48, 3)];
     let error = CompileError::Instruction {
         pc: GuestAddress(CODE + 49),
-        cause: InstructionError::Decode(DecodeError::Unsupported(UnsupportedFeature::Opcode)),
+        cause: InstructionError::Decode(DecodeError::InvalidEncoding),
     };
     for is_resident in [false, true] {
         for entries in [false, true] {

@@ -332,7 +332,7 @@ while (offset<input.length) {
   assert.equal(functions.u(),0); functions.end();
   const bodies=cursor(sections.get(10)); assert.equal(bodies.u(),1);
   const body=cursor(bodies.take(bodies.u())); bodies.end(); assert.equal(body.u(),3);
-  for (const [number,type] of [[16,0x7f],[1,0x7e],[6,0x7f]]) {
+  for (const [number,type] of [[16,0x7f],[1,0x7e],[10,0x7f]]) {
     assert.equal(body.u(),number); assert.equal(body.byte(),type);
   }
   count++;
@@ -898,7 +898,7 @@ fn unchanged_default_limits_preserve_both_owner_publications_on_failure() {
         admitted.extend([0xeb, 0]);
         let mut rejected = vec![0x90; 63];
         rejected.extend(&target);
-        rejected.extend([0x0f, 0x0b]);
+        rejected.extend([0xf0, 0x90]);
         for owner in [Owner::Replacement, Owner::Resident] {
             for entries in [false, true] {
                 let (mut engine, keep) = prior_owners();

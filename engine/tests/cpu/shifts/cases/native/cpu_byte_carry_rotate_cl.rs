@@ -217,7 +217,7 @@ while (offset < input.length) {
     } else if (id === 10) {
       assert.equal(u(), 1); const bodyLength = u(), bodyEnd = at + bodyLength, locals = [];
       for (let n = u(); n > 0; n--) locals.push([u(), bytes[at++]]);
-      assert.deepEqual(locals, [[16,0x7f],[1,0x7e]]);
+      assert.deepEqual(locals, [[16,0x7f],[1,0x7e],[10,0x7f]]);
       assert.equal(bodyEnd, end); at = bodyEnd;
     } else at = end;
     assert.equal(at, end);
@@ -546,7 +546,7 @@ fn closed_profiles_and_late_failures_preserve_both_prior_publications() {
             )
         } else {
             let mut bytes = vec![0x90; 63];
-            bytes.extend([0xd2, 0xd9, 0x0f, 0x0b]);
+            bytes.extend([0xd2, 0xd9, 0xf0, 0x90]);
             let length = bytes.len();
             (CODE, bytes, length, CompileError::InstructionLimit)
         };
@@ -767,7 +767,7 @@ fn consumed_opcode_and_alias_currency_are_distinct_from_unconsumed_tail() {
     }
     for entries in [false, true] {
         let pc = 0x1ffc;
-        let mut engine = code(pc, &[0xd2, 0xd0, 0xeb, 0, 0x0f, 0x0b], false);
+        let mut engine = code(pc, &[0xd2, 0xd0, 0xeb, 0, 0xf0, 0x90], false);
         let memory = engine.memory().unwrap();
         let artifacts = [
             compile_region(memory, &[spec(pc, 4)], CompileLimits::default()).unwrap(),
@@ -844,7 +844,7 @@ fn default_caps_and_observed_module_size_remain_closed() {
         }
         let mut bytes = vec![0x90; 63];
         bytes.extend_from_slice(&atom);
-        bytes.extend([0x0f, 0x0b]);
+        bytes.extend([0xf0, 0x90]);
         let engine = code(CODE, &bytes, true);
         let memory = engine.memory().unwrap();
         assert_eq!(

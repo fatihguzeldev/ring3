@@ -601,9 +601,10 @@ fn pure_module_interface(wasm: &[u8], resident: Option<bool>) {
     let length = bodies.unsigned() as usize;
     let mut body = Reader(bodies.take(length));
     bodies.end();
-    assert_eq!(body.unsigned(), 2);
+    assert_eq!(body.unsigned(), 3);
     assert_eq!((body.unsigned(), body.byte()), (16, 0x7f));
     assert_eq!((body.unsigned(), body.byte()), (1, 0x7e));
+    assert_eq!((body.unsigned(), body.byte()), (10, 0x7f));
 }
 
 #[test]
@@ -729,9 +730,9 @@ fn late_word_double_shift_failures_and_caps_preserve_both_previous_owners() {
     let first = encoding(DoubleShiftKind::Left, false, 1, 1, 17);
     let mut cases = Vec::new();
     for (tail, error) in [
-        (vec![0x0f, 0x0b], opcode),
+        (vec![0xf0, 0x90], DecodeError::InvalidEncoding),
         (vec![0x66, 0x66, 0x0f, 0xad, 0xc9], opcode),
-        (vec![0x0f, 0x0b, 0x90, 0x90], opcode),
+        (vec![0xf0, 0x90, 0x90, 0x90], DecodeError::InvalidEncoding),
     ] {
         let mut bytes = first.clone();
         bytes.extend(tail);
@@ -754,7 +755,7 @@ fn late_word_double_shift_failures_and_caps_preserve_both_previous_owners() {
         ),
     ));
     let mut capped = first.repeat(64);
-    capped.extend([0x0f, 0x0b]);
+    capped.extend([0xf0, 0x90]);
     cases.push((
         CODE,
         capped.clone(),

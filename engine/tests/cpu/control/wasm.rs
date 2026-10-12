@@ -27,3 +27,5 @@ mod cpu_word_jump_wasm;
 
 #[path = "cases/wasm/cpu_word_near_control_wasm.rs"]
 mod cpu_word_near_control_wasm;
+#[path = "cases/wasm/cpu_flags_exceptions_wasm.rs"]
+mod cpu_flags_exceptions_wasm;

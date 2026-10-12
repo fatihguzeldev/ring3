@@ -461,7 +461,7 @@ fn word_indirect_call_standalone_refusals_precede_trailing_decode() {
             let mut bytes = vec![0x90];
             bytes.extend(form);
             if trailing {
-                bytes.extend([0x0f, 0x0b]);
+                bytes.extend([0xf0, 0x90]);
             }
             let memory = code_space(CODE, &bytes);
             let snapshot = memory
@@ -497,7 +497,7 @@ fn word_indirect_call_bound_entries_stop_before_trailing_invalid_code_and_spans_
     for form in FORMS {
         let mut bytes = vec![0x90];
         bytes.extend(form);
-        bytes.extend([0x0f, 0x0b]);
+        bytes.extend([0xf0, 0x90]);
         let consumed = form.len() as u32 + 1;
         for resident in [false, true] {
             let mut engine = code(&bytes);
@@ -655,7 +655,7 @@ fn word_indirect_call_late_refusal_preserves_dirty_full_arena_and_both_existing_
     let mut bytes = vec![0x90; 258];
     bytes[..3].copy_from_slice(FORMS[0]);
     bytes[16..20].copy_from_slice(FORMS[1]);
-    bytes[33..35].copy_from_slice(&[0x0f, 0x0b]);
+    bytes[33..35].copy_from_slice(&[0xf0, 0x90]);
     bytes[256..258].copy_from_slice(&[0xeb, 0]);
     let mut engine = code(&bytes);
     let replacement = bound_compile(&mut engine, &[(CODE + 256, 2)], false, false).unwrap() as u32;
@@ -667,7 +667,7 @@ fn word_indirect_call_late_refusal_preserves_dirty_full_arena_and_both_existing_
     let blocks = [(CODE, 3), (CODE + 16, 4), (CODE + 32, 3)];
     let error = instruction_error(
         CODE + 33,
-        InstructionError::Decode(DecodeError::Unsupported(UnsupportedFeature::Opcode)),
+        InstructionError::Decode(DecodeError::InvalidEncoding),
     );
     for is_resident in [false, true] {
         for entries in [false, true] {

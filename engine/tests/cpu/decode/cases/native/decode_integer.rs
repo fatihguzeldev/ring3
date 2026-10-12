@@ -1,3 +1,5 @@
+use super::support_prefix_admission as prefix_admission;
+
 use ring3_engine::{
     cpu::{
         UnsupportedFeature,
@@ -327,6 +329,9 @@ fn adjacent_unsupported_integer_instructions_remain_rejected() {
     ];
     let mut memory = executable_memory();
     for (name, bytes) in cases {
+        if prefix_admission::admit_if_new_prefix(bytes) {
+            continue;
+        }
         memory.write(PC, bytes).unwrap();
         assert!(
             matches!(

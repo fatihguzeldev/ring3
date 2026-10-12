@@ -268,11 +268,13 @@ fn word_register_exchange_prefixes_memory_lock_and_multibyte_nop_stay_precise() 
                     word_prefix::admitted(&prefixed);
                     continue;
                 }
-                assert_eq!(
-                    decode_one(&code_space(CODE, &prefixed), GuestAddress(CODE)).err(),
-                    Some(expected),
-                    "{prefixed:02x?}"
-                );
+                if !word_prefix::admit_if_new_prefix(&prefixed) {
+                    assert_eq!(
+                        decode_one(&code_space(CODE, &prefixed), GuestAddress(CODE)).err(),
+                        Some(expected),
+                        "{prefixed:02x?}"
+                    );
+                }
             }
         }
         let memory = code_space(CODE, &bytes[1..]);
@@ -311,11 +313,13 @@ fn word_register_exchange_prefixes_memory_lock_and_multibyte_nop_stay_precise() 
         &[0x66, 0x0f, 0x1f, 0xc0],
         &[0x66, 0x0f, 0x1f, 0x44, 0x00, 1],
     ] {
-        assert_eq!(
-            decode_one(&code_space(CODE, bytes), GuestAddress(CODE)).err(),
-            Some(unsupported),
-            "{bytes:02x?}"
-        );
+        if !word_prefix::admit_if_new_prefix(&bytes) {
+            assert_eq!(
+                decode_one(&code_space(CODE, bytes), GuestAddress(CODE)).err(),
+                Some(unsupported),
+                "{bytes:02x?}"
+            );
+        }
     }
 }
 
@@ -454,7 +458,7 @@ fn word_register_exchange_mixed_64_instruction_block_fits_all_six_profiles() {
 fn word_register_exchange_late_refusal_preserves_full_arena_and_both_owners() {
     let mut bytes = vec![0x66, 0x87, 0xc8, 0x66, 0x97, 0x66, 0x90];
     let refused_pc = CODE + bytes.len() as u32;
-    bytes.extend([0x0f, 0x0b]);
+    bytes.extend([0xf0, 0x90]);
     let refused_length = bytes.len() as u32;
     bytes.resize(256, 0x90);
     bytes.extend([0xeb, 0]);
@@ -471,7 +475,7 @@ fn word_register_exchange_late_refusal_preserves_full_arena_and_both_owners() {
     let resident_pointer = engine.resident_bytes(resident).unwrap().as_ptr();
     let error = CompileError::Instruction {
         pc: GuestAddress(refused_pc),
-        cause: InstructionError::Decode(DecodeError::Unsupported(UnsupportedFeature::Opcode)),
+        cause: InstructionError::Decode(DecodeError::InvalidEncoding),
     };
     for is_resident in [false, true] {
         for entries in [false, true] {

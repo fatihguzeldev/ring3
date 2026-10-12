@@ -201,7 +201,7 @@ while (offset < input.length) {
     } else if (id === 10) {
       assert.equal(u(), 1); const bodyLength = u(), bodyEnd = at + bodyLength, locals = [];
       for (let n = u(); n > 0; n--) locals.push([u(), bytes[at++]]);
-      assert.deepEqual(locals, [[16,0x7f],[1,0x7e]]);
+      assert.deepEqual(locals, [[16,0x7f],[1,0x7e],[10,0x7f]]);
       assert.equal(bodyEnd, end); at = bodyEnd;
     } else at = end;
     assert.equal(at, end);
@@ -430,8 +430,8 @@ fn excluded_profiles_and_late_refusals_preserve_both_existing_owners() {
     for (excluded, expected) in exclusions() {
         let (excluded, expected) = if prefix_admission::admit_if_new_prefix(&excluded) {
             let mut poison = vec![0x90; excluded.len()];
-            poison[..2].copy_from_slice(&[0x0f, 0x0b]);
-            (poison, DecodeError::Unsupported(UnsupportedFeature::Opcode))
+            poison[..2].copy_from_slice(&[0xf0, 0x90]);
+            (poison, DecodeError::InvalidEncoding)
         } else {
             (excluded, expected)
         };
@@ -647,7 +647,7 @@ fn double_shifts_keep_default_instruction_and_wasm_limits() {
             }
         }
         let mut bytes = instruction.repeat(64);
-        bytes.extend([0x0f, 0x0b]);
+        bytes.extend([0xf0, 0x90]);
         let engine = code(CODE, &bytes, true);
         let memory = engine.memory().unwrap();
         assert_eq!(

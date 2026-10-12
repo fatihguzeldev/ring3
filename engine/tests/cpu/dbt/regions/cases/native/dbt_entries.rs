@@ -316,7 +316,7 @@ fn invalid_and_unsupported_decoder_errors_remain_distinct_from_backend_rejection
     for (bytes, cause) in [
         (&[0x8d, 0xc0][..], DecodeError::InvalidEncoding),
         (
-            &[0x0f, 0x0b][..],
+            &[0xcd, 0x80][..],
             DecodeError::Unsupported(UnsupportedFeature::Opcode),
         ),
     ] {

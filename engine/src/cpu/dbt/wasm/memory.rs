@@ -136,6 +136,12 @@ impl Imports {
         let mut atomic_xor_u32 = false;
         for instruction in blocks.iter().flat_map(|block| &block.instructions) {
             match instruction.operation() {
+                Operation::Control(operation) => match operation {
+                    crate::cpu::x86::ControlOperation::PopFlags { word: true } => read16 = true,
+                    crate::cpu::x86::ControlOperation::PopFlags { word: false } => read = true,
+                    crate::cpu::x86::ControlOperation::Bound { .. } => cpu_read = true,
+                    _ => {}
+                },
                 Operation::BitCount { width, source, .. } => {
                     if matches!(source, Value32::Memory(_)) {
                         match width {
@@ -942,6 +948,7 @@ pub(super) fn pop_return(
 }
 
 pub(super) fn exit_if_invalidated(code: &mut InstructionSink<'_>, exit_depth: u32) {
+    super::abi::debug_after_retirement(code, exit_depth);
     code.local_get(HELPER_STATUS)
         .i32_const(11)
         .i32_eq()
@@ -952,7 +959,7 @@ pub(super) fn exit_if_invalidated(code: &mut InstructionSink<'_>, exit_depth: u3
         .end();
 }
 
-fn effective_address(code: &mut InstructionSink<'_>, address: EffectiveAddress) {
+pub(super) fn effective_address(code: &mut InstructionSink<'_>, address: EffectiveAddress) {
     address_value(code, address);
     code.local_set(ADDRESS);
 }

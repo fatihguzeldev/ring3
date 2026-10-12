@@ -1,3 +1,5 @@
+use super::support_prefix_admission as prefix_admission;
+
 use super::support_byte_prefix_admission as byte_prefix_admission;
 
 use ring3_engine::{
@@ -1133,9 +1135,9 @@ fn late_byte_carry_immediate_failures_preserve_both_publications_and_installatio
         for (pc, bytes, declared, expected) in [
             (
                 CODE,
-                vec![0xc0, memory, 33, 0x0f, 0x0b],
+                vec![0xc0, memory, 33, 0xf0, 0x90],
                 5,
-                instruction_error(CODE + 3, opcode),
+                instruction_error(CODE + 3, DecodeError::InvalidEncoding),
             ),
             (
                 CODE,
@@ -1153,6 +1155,7 @@ fn late_byte_carry_immediate_failures_preserve_both_publications_and_installatio
                 ),
             ),
         ] {
+            let (bytes, expected) = prefix_admission::compile_refusal(&bytes, 3, expected);
             for resident in [false, true] {
                 for entries in [false, true] {
                     let mut engine = code(pc, &bytes);

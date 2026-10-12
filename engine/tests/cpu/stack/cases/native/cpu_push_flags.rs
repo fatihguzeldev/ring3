@@ -218,8 +218,10 @@ fn strict_prefixes_popfd_and_both_standalone_profiles_stay_refused() {
         Some(DecodeError::InvalidEncoding)
     );
     assert_eq!(
-        decode_one(fixture(PC, &[0x9d]).memory().unwrap(), GuestAddress(PC)).err(),
-        Some(DecodeError::Unsupported(UnsupportedFeature::Opcode))
+        decode_one(fixture(PC, &[0x9d]).memory().unwrap(), GuestAddress(PC))
+            .unwrap()
+            .operation(),
+        &Operation::Control(ring3_engine::cpu::x86::ControlOperation::PopFlags { word: false })
     );
     let engine = fixture(PC, &[0x90, 0x9c, 0xeb, 0]);
     for error in [

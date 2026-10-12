@@ -498,6 +498,17 @@ fn segment_bulk_stack_and_address16_loops_are_typed() {
         );
     }
     for bytes in [&[0x66, 0x66, 0x9c][..], &[0x9d]] {
+        if bytes == [0x9d] {
+            assert_decodes(
+                0x1000,
+                bytes,
+                Operation::Control(ring3_engine::cpu::x86::ControlOperation::PopFlags {
+                    word: false,
+                }),
+            );
+            continue;
+        }
+
         let space = code_space(0x1000, bytes);
         assert!(matches!(
             decode_one(&space, GuestAddress(0x1000)),

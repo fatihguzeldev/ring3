@@ -200,15 +200,18 @@ fn alignment_nop_exact_grammar_keeps_prefix_segment_and_payload_neighbors_closed
             0x66, 0x67, 0xf0, 0xf2, 0xf3, 0x26, 0x2e, 0x36, 0x3e, 0x64, 0x65,
         ] {
             let prefixed = [vec![prefix], bytes.to_vec()].concat();
-            if matches!(prefix, 0x26 | 0x2e | 0x36 | 0x3e | 0x64 | 0x65) {
-                prefix_admission::admitted(&prefixed);
-                continue;
-            }
             let expected = if prefix == 0xf0 {
                 DecodeError::InvalidEncoding
             } else {
                 opcode
             };
+            let (prefixed, expected) =
+                if matches!(prefix, 0x67 | 0x26 | 0x2e | 0x36 | 0x3e | 0x64 | 0x65) {
+                    assert_eq!(prefix_admission::admitted(&prefixed).0, Operation::Nop);
+                    prefix_admission::malformed_fixture(prefixed.len())
+                } else {
+                    (prefixed, expected)
+                };
             assert_eq!(
                 decode_one(&code_space(CODE, &prefixed), GuestAddress(CODE)).err(),
                 Some(expected),
@@ -222,8 +225,13 @@ fn alignment_nop_exact_grammar_keeps_prefix_segment_and_payload_neighbors_closed
             let mut neighbor = bytes.to_vec();
             neighbor[changed] = 1;
             assert_eq!(
+                prefix_admission::admitted(&neighbor),
+                (Operation::Nop, neighbor.len())
+            );
+            let (neighbor, expected) = prefix_admission::malformed_fixture(neighbor.len());
+            assert_eq!(
                 decode_one(&code_space(CODE, &neighbor), GuestAddress(CODE)).err(),
-                Some(opcode),
+                Some(expected),
                 "{neighbor:02x?}"
             );
         }
@@ -235,13 +243,11 @@ fn alignment_nop_exact_grammar_keeps_prefix_segment_and_payload_neighbors_closed
         &[0x2e, 0x8b, 0],
         &[0x66, 0x2e, 0x8b, 0],
     ] {
-        if bytes.first() == Some(&0x2e) || bytes == [0x66, 0x2e, 0x8b, 0] {
-            prefix_admission::admitted(bytes);
-            continue;
-        }
+        prefix_admission::admitted(bytes);
+        let (bytes, expected) = prefix_admission::malformed_fixture(bytes.len());
         assert_eq!(
-            decode_one(&code_space(CODE, bytes), GuestAddress(CODE)).err(),
-            Some(opcode),
+            decode_one(&code_space(CODE, &bytes), GuestAddress(CODE)).err(),
+            Some(expected),
             "{bytes:02x?}"
         );
     }
@@ -442,7 +448,7 @@ fn alignment_nop_exact_64_instruction_unit_fits_all_six_profiles() {
 fn alignment_nop_late_refusal_preserves_dirty_full_arena_and_both_owners() {
     let mut bytes = NOPS.concat();
     let refused_pc = CODE + bytes.len() as u32;
-    bytes.extend([0x0f, 0x0b]);
+    bytes.extend([0xf0, 0x90]);
     let refused_length = bytes.len() as u32;
     bytes.resize(256, 0x90);
     bytes.extend([0xeb, 0]);
@@ -456,7 +462,7 @@ fn alignment_nop_late_refusal_preserves_dirty_full_arena_and_both_owners() {
     let resident_pointer = engine.resident_bytes(resident).unwrap().as_ptr();
     let error = CompileError::Instruction {
         pc: GuestAddress(refused_pc),
-        cause: InstructionError::Decode(DecodeError::Unsupported(UnsupportedFeature::Opcode)),
+        cause: InstructionError::Decode(DecodeError::InvalidEncoding),
     };
     for is_resident in [false, true] {
         for entries in [false, true] {

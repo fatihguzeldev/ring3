@@ -351,8 +351,8 @@ fn word_memory_logical_input_bank() -> (Vec<u8>, Vec<LogicalInputGroup>) {
         ];
         bank[offset + 12..offset + 32].copy_from_slice(&body);
         bank[offset + 32..offset + 43].copy_from_slice(&[
-            0x0f,
-            0x0b,
+            0xf0,
+            0x90,
             0x66,
             0x83,
             if path == 1 { 0xdf } else { 0xd7 },
@@ -382,13 +382,13 @@ fn word_memory_logical_input_bank() -> (Vec<u8>, Vec<LogicalInputGroup>) {
         ]);
         assert_eq!(bytes.len(), 19);
         bank[offset..offset + 19].copy_from_slice(&bytes);
-        bank[offset + 19..offset + 23].copy_from_slice(&[0x0f, 0x0b, 0xeb, 0]);
+        bank[offset + 19..offset + 23].copy_from_slice(&[0xf0, 0x90, 0xeb, 0]);
         next_blocks.extend([
             (0x1000 + offset as u32, 19),
             (0x1000 + offset as u32 + 21, 2),
         ]);
     }
-    bank[0xf00..0xf02].copy_from_slice(&[0x0f, 0x0b]);
+    bank[0xf00..0xf02].copy_from_slice(&[0xf0, 0x90]);
     let mut control_a = vec![(0x1600, 14)];
     control_a.extend(consumer_blocks);
     let groups = vec![

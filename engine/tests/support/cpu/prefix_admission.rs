@@ -1,10 +1,23 @@
 #![allow(dead_code)]
+use iced_x86::{Code, Decoder, DecoderOptions};
 use ring3_engine::{
     abi::arena::TRANSFER_OFFSET,
     cpu::x86::{decode::decode_one, ir::Operation},
     memory::GuestAddress,
     process::EngineInstance,
 };
+
+pub const MALFORMED_BYTES: [u8; 2] = [0xf0, 0x90];
+pub const MALFORMED_ERROR: ring3_engine::cpu::x86::decode::DecodeError =
+    ring3_engine::cpu::x86::decode::DecodeError::InvalidEncoding;
+
+// LOCK NOP is malformed independently of which valid instructions are implemented.
+pub fn malformed_fixture(length: usize) -> (Vec<u8>, ring3_engine::cpu::x86::decode::DecodeError) {
+    assert!(length >= MALFORMED_BYTES.len());
+    let mut bytes = vec![0x90; length];
+    bytes[..MALFORMED_BYTES.len()].copy_from_slice(&MALFORMED_BYTES);
+    (bytes, MALFORMED_ERROR)
+}
 
 // legacy prefix rows validate the instruction actually consumed in address16 mode.
 pub fn admitted(instruction: &[u8]) -> (Operation, usize) {
@@ -128,12 +141,136 @@ pub fn admit_if_new_prefix(bytes: &[u8]) -> bool {
     let locked_exchange = counts[1] == 1
         && counts[2] + counts[3] == 0
         && match op {
-            [0x86, modrm, ..] => counts[0] == 0 && modrm >> 6 != 3,
+            [0x86, modrm, ..] => modrm >> 6 != 3,
+            [0x0f, 0xb0 | 0xc0, modrm, ..] => modrm >> 6 != 3,
             [0x87, modrm, ..] => modrm >> 6 != 3,
             [0x0f, 0xb1 | 0xc1, modrm, ..] => counts[0] == 1 && modrm >> 6 != 3,
             _ => false,
         };
-    if !changed && !atomic_memory && !locked_exchange {
+    let instruction = Decoder::with_ip(32, bytes, 0x1000, DecoderOptions::NONE).decode();
+    let scalar_count = matches!(
+        instruction.code(),
+        Code::Tzcnt_r16_rm16
+            | Code::Lzcnt_r16_rm16
+            | Code::Lzcnt_r32_rm32
+            | Code::Popcnt_r16_rm16
+            | Code::Popcnt_r32_rm32
+    );
+    let ignored_byte_width = counts[0] == 1
+        && counts[1] + counts[2] + counts[3] == 0
+        && matches!(
+            instruction.code(),
+            Code::Mov_rm8_r8
+                | Code::Mov_r8_rm8
+                | Code::Mov_r8_imm8
+                | Code::Mov_rm8_imm8
+                | Code::Mov_AL_moffs8
+                | Code::Mov_moffs8_AL
+                | Code::Add_rm8_r8
+                | Code::Add_r8_rm8
+                | Code::Add_AL_imm8
+                | Code::Add_rm8_imm8
+                | Code::Adc_rm8_r8
+                | Code::Adc_r8_rm8
+                | Code::Adc_AL_imm8
+                | Code::Adc_rm8_imm8
+                | Code::Sub_rm8_r8
+                | Code::Sub_r8_rm8
+                | Code::Sub_AL_imm8
+                | Code::Sub_rm8_imm8
+                | Code::Sbb_rm8_r8
+                | Code::Sbb_r8_rm8
+                | Code::Sbb_AL_imm8
+                | Code::Sbb_rm8_imm8
+                | Code::And_rm8_r8
+                | Code::And_r8_rm8
+                | Code::And_AL_imm8
+                | Code::And_rm8_imm8
+                | Code::Or_rm8_r8
+                | Code::Or_r8_rm8
+                | Code::Or_AL_imm8
+                | Code::Or_rm8_imm8
+                | Code::Xor_rm8_r8
+                | Code::Xor_r8_rm8
+                | Code::Xor_AL_imm8
+                | Code::Xor_rm8_imm8
+                | Code::Cmp_rm8_r8
+                | Code::Cmp_r8_rm8
+                | Code::Cmp_AL_imm8
+                | Code::Cmp_rm8_imm8
+                | Code::Test_rm8_r8
+                | Code::Test_AL_imm8
+                | Code::Test_rm8_imm8
+                | Code::Inc_rm8
+                | Code::Dec_rm8
+                | Code::Neg_rm8
+                | Code::Not_rm8
+                | Code::Shl_rm8_1
+                | Code::Shl_rm8_CL
+                | Code::Shl_rm8_imm8
+                | Code::Shr_rm8_1
+                | Code::Shr_rm8_CL
+                | Code::Shr_rm8_imm8
+                | Code::Sar_rm8_1
+                | Code::Sar_rm8_CL
+                | Code::Sar_rm8_imm8
+                | Code::Rol_rm8_1
+                | Code::Rol_rm8_CL
+                | Code::Rol_rm8_imm8
+                | Code::Ror_rm8_1
+                | Code::Ror_rm8_CL
+                | Code::Ror_rm8_imm8
+                | Code::Rcl_rm8_1
+                | Code::Rcl_rm8_CL
+                | Code::Rcl_rm8_imm8
+                | Code::Rcr_rm8_1
+                | Code::Rcr_rm8_CL
+                | Code::Rcr_rm8_imm8
+                | Code::Seto_rm8
+                | Code::Setno_rm8
+                | Code::Setb_rm8
+                | Code::Setae_rm8
+                | Code::Sete_rm8
+                | Code::Setne_rm8
+                | Code::Setbe_rm8
+                | Code::Seta_rm8
+                | Code::Sets_rm8
+                | Code::Setns_rm8
+                | Code::Setp_rm8
+                | Code::Setnp_rm8
+                | Code::Setl_rm8
+                | Code::Setge_rm8
+                | Code::Setle_rm8
+                | Code::Setg_rm8
+                | Code::Xchg_rm8_r8
+                | Code::Cmpxchg_rm8_r8
+                | Code::Xadd_rm8_r8
+                | Code::Mul_rm8
+                | Code::Imul_rm8
+                | Code::Div_rm8
+                | Code::Idiv_rm8
+                | Code::Nop_rm16
+                | Code::Aam_imm8
+                | Code::Aad_imm8
+                | Code::Aaa
+                | Code::Aas
+                | Code::Daa
+                | Code::Das
+                | Code::Lahf
+                | Code::Sahf
+                | Code::Clc
+                | Code::Stc
+                | Code::Cmc
+                | Code::Xlat_m8
+        );
+    let ignored_pause_width = counts == [1, 0, 0, 1] && instruction.code() == Code::Pause;
+    if !changed
+        && !atomic_memory
+        && !locked_exchange
+        && !scalar_count
+        && !ignored_byte_width
+        && !ignored_pause_width
+    {
         return false;
     }
     admitted(bytes);
@@ -148,13 +285,35 @@ pub fn refusal_after_prefix_admission(
     if !admit_if_new_prefix(&bytes) {
         return (bytes, cause);
     }
-    assert!(bytes.len() >= 2);
-    let mut poison = vec![0x90; bytes.len()];
-    poison[..2].copy_from_slice(&[0x0f, 0x0b]);
-    (
-        poison,
-        ring3_engine::cpu::x86::decode::DecodeError::Unsupported(
-            ring3_engine::cpu::UnsupportedFeature::Opcode,
-        ),
-    )
+    malformed_fixture(bytes.len())
+}
+
+// prove the newly admitted form before retaining the original refusal checks.
+pub fn instruction_refusal(
+    bytes: &[u8],
+    cause: ring3_engine::cpu::dbt::InstructionError,
+) -> (Vec<u8>, ring3_engine::cpu::dbt::InstructionError) {
+    use ring3_engine::cpu::dbt::InstructionError;
+    if let InstructionError::Decode(error) = cause {
+        let (bytes, error) = refusal_after_prefix_admission(bytes.to_vec(), error);
+        (bytes, InstructionError::Decode(error))
+    } else {
+        (bytes.to_vec(), cause)
+    }
+}
+
+pub fn compile_refusal(
+    bytes: &[u8],
+    offset: usize,
+    expected: ring3_engine::cpu::dbt::CompileError,
+) -> (Vec<u8>, ring3_engine::cpu::dbt::CompileError) {
+    use ring3_engine::cpu::dbt::CompileError;
+    if let CompileError::Instruction { pc, cause } = expected {
+        let (tail, cause) = instruction_refusal(&bytes[offset..], cause);
+        let mut bytes = bytes[..offset].to_vec();
+        bytes.extend(tail);
+        (bytes, CompileError::Instruction { pc, cause })
+    } else {
+        (bytes.to_vec(), expected)
+    }
 }

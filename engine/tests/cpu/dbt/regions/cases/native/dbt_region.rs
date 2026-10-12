@@ -309,7 +309,7 @@ fn operations_outside_backend_profile_are_rejected_at_their_own_pc() {
 fn invalid_and_unsupported_decodings_are_wrapped_with_original_instruction_pc() {
     for (bytes, unsupported) in [
         (&[0x90, 0x8d, 0xc0][..], false),
-        (&[0x90, 0x0f, 0x0b][..], true),
+        (&[0x90, 0xcd, 0x80][..], true),
     ] {
         let memory = code_memory(0x1000, bytes);
         let error = prepare_region(

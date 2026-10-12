@@ -339,7 +339,7 @@ fn late_refusal_and_missing_next_instruction_preserve_both_published_owners() {
     prefix_admission::admitted(&[0xc8, 1, 0, 0]);
     for (pc, bytes) in [
         (CODE, &[0xc9, 0x66, 0x66, 0xc9][..]),
-        (CODE, &[0xc9, 0x0f, 0x0b, 0x90, 0x90][..]),
+        (CODE, &[0xc9, 0xf0, 0x90, 0x90, 0x90][..]),
         (0x1fff, &[0xc9][..]),
     ] {
         for owner in [Owner::Replacement, Owner::Resident] {
@@ -381,9 +381,11 @@ fn late_refusal_and_missing_next_instruction_preserve_both_published_owners() {
                 } else {
                     instruction_error(
                         CODE + 1,
-                        InstructionError::Decode(DecodeError::Unsupported(
-                            UnsupportedFeature::Opcode,
-                        )),
+                        InstructionError::Decode(if bytes[1] == 0xf0 {
+                            DecodeError::InvalidEncoding
+                        } else {
+                            DecodeError::Unsupported(UnsupportedFeature::Opcode)
+                        }),
                     )
                 };
                 assert_eq!(

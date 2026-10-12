@@ -271,7 +271,7 @@ fn waiting_stack_memory_arithmetic_and_ignored_prefixes_admit_with_exact_operati
         vec![0xdb, 0xe4],
         vec![0xd9, 0xd1],
         vec![0x0f, 0x20, 0xc0],
-        vec![0x0f, 0x0b],
+        vec![0xf0, 0x90],
     ] {
         let engine = code(0x1000, &bytes);
         assert!(
@@ -288,7 +288,7 @@ fn late_refusal_preserves_both_existing_publications_and_fpu_state() {
     let generation = engine.compile(1).unwrap();
     let id = engine.compile_resident(1).unwrap().get();
     engine.map(0x3000, 1, 7).unwrap();
-    let bytes = [0xdb, 0xe3, 0xdf, 0xe0, 0x0f, 0x0b];
+    let bytes = [0xdb, 0xe3, 0xdf, 0xe0, 0xf0, 0x90];
     engine.arena_mut().unwrap()[TRANSFER_OFFSET..TRANSFER_OFFSET + bytes.len()]
         .copy_from_slice(&bytes);
     engine.upload(0x3000, bytes.len() as u32).unwrap();

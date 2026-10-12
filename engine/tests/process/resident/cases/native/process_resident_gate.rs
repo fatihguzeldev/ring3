@@ -218,14 +218,14 @@ fn descriptors_markers_fetch_and_profiles_preserve_arena_legacy_and_retained_uni
             |engine| engine.compile_resident_with_gates(1, 1),
         );
     }
-    for marker in [&[0x0f, 0x0b][..], &[0x66, 0x0f, 0x0b][..]] {
+    for marker in [&[0xcd, 0x80][..], &[0x66, 0xcd, 0x80][..]] {
         upload(&mut engine, CODE, marker);
         describe(&mut engine, &[(CODE, marker.len() as u32)], &[]);
         reject(&mut engine, &[keep], opcode_error(CODE), |engine| {
             engine.compile_resident_with_gates(1, 0)
         });
     }
-    upload(&mut engine, CODE, &[0x0f, 0x0b]);
+    upload(&mut engine, CODE, &[0xcd, 0x80]);
     let spec = [BlockSpec {
         entry: GuestAddress(CODE),
         byte_length: 2,
@@ -259,6 +259,7 @@ fn descriptors_markers_fetch_and_profiles_preserve_arena_legacy_and_retained_uni
     );
     assert_eq!(unbound.usage().units, 0);
     assert_eq!(unbound.usage().wasm_bytes, 0);
+    upload(&mut engine, CODE, &[0x0f, 0x0b]);
     let gate = compile(&mut engine, &[(CODE, 2)], &[(CODE, 7)]);
     describe(&mut engine, &[(CODE, 2)], &[(CODE, 7)]);
     let before = saved(&engine, &[keep, gate], &[CODE, KEEP]);
@@ -431,6 +432,7 @@ fn eight_descriptors_crosspage_markers_and_gate_instruction_charges_keep_exact_b
 fn executable_starts_collide_exactly_and_marker_inside_immediate_keeps_both_orders_valid() {
     let (mut engine, keep) = fixture();
     upload(&mut engine, OTHER, &[0x0f, 0x0b]);
+    upload(&mut engine, CODE, &[0x0f, 0x0b]);
     let gate = compile(&mut engine, &[(CODE, 2)], &[(CODE, 7)]);
     for id in [7, 8, u32::MAX] {
         describe(&mut engine, &[(CODE, 2)], &[(CODE, id)]);
@@ -510,6 +512,7 @@ fn executable_starts_collide_exactly_and_marker_inside_immediate_keeps_both_orde
     }
 
     let (mut engine, keep) = fixture();
+    upload(&mut engine, CODE, &[0x0f, 0x0b]);
     let gate = compile(&mut engine, &[(CODE, 2)], &[(CODE, 7)]);
     upload(&mut engine, CODE, &[0x90, 0xeb, 0]);
     let ordinary = compile(&mut engine, &[(CODE, 3)], &[]);
@@ -670,6 +673,7 @@ fn legacy_capture_ceiling_and_pending_callback_busy_keep_new_gate_ingress_atomic
         &[(LEGACY, 17), (RETURN, 18)],
     );
     assert_eq!(engine.compile_with_gates(3, 2), Ok(2));
+    upload(&mut engine, CODE, &[0x0f, 0x0b]);
     let gate = compile(&mut engine, &[(CODE, 2)], &[(CODE, 7)]);
     stop_input(&mut engine, CODE, 7, u32::MAX);
     reject(

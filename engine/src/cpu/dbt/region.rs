@@ -328,6 +328,15 @@ fn supports_stack(instruction: &DecodedInstruction) -> bool {
 }
 
 pub(super) fn terminates(instruction: &DecodedInstruction, embedded: bool) -> bool {
+    if matches!(
+        instruction.operation(),
+        Operation::Control(
+            crate::cpu::x86::ControlOperation::InvalidOpcode
+                | crate::cpu::x86::ControlOperation::Breakpoint
+        )
+    ) {
+        return true;
+    }
     matches!(
         instruction.operation(),
         Operation::Jump { .. }
@@ -352,7 +361,10 @@ pub(super) fn terminates(instruction: &DecodedInstruction, embedded: bool) -> bo
 fn supports_memory_reads(operation: &Operation) -> bool {
     matches!(
         operation,
-        Operation::BitCount {
+        Operation::Control(
+            crate::cpu::x86::ControlOperation::PopFlags { .. }
+                | crate::cpu::x86::ControlOperation::Bound { .. }
+        ) | Operation::BitCount {
             source: Value32::Memory(_),
             ..
         } | Operation::MoveByteSwap { .. }
@@ -550,6 +562,7 @@ fn supports_memory_shift_or_rotate(operation: &Operation) -> bool {
 pub(super) fn supports(instruction: &DecodedInstruction, embedded: bool) -> bool {
     let operation = instruction.operation();
     match operation {
+        Operation::Control(operation) => return embedded || !operation.reads_memory(),
         Operation::BitCount { source, .. } => {
             return embedded || !matches!(source, Value32::Memory(_));
         }

@@ -170,10 +170,8 @@ fn pause_exact_grammar_keeps_prefix_and_instruction_neighbors_closed() {
         } else {
             DecodeError::Unsupported(UnsupportedFeature::Opcode)
         };
-        if matches!(prefix, 0x26 | 0x2e | 0x36 | 0x3e | 0x64 | 0x65 | 0x67) {
-            prefix_admission::admitted(&bytes);
-            continue;
-        }
+        let (bytes, expected) =
+            prefix_admission::refusal_after_prefix_admission(bytes.to_vec(), expected);
         assert_eq!(
             decode_one(&code_space(CODE, &bytes), GuestAddress(CODE)).err(),
             Some(expected),
@@ -187,12 +185,13 @@ fn pause_exact_grammar_keeps_prefix_and_instruction_neighbors_closed() {
         &[0xf2, 0x90],
         &[0xf3, 0xc3],
     ] {
-        if prefix_admission::admit_if_new_prefix(bytes) {
-            continue;
-        }
+        let (bytes, expected) = prefix_admission::refusal_after_prefix_admission(
+            bytes.to_vec(),
+            DecodeError::Unsupported(UnsupportedFeature::Opcode),
+        );
         assert_eq!(
-            decode_one(&code_space(CODE, bytes), GuestAddress(CODE)).err(),
-            Some(DecodeError::Unsupported(UnsupportedFeature::Opcode)),
+            decode_one(&code_space(CODE, &bytes), GuestAddress(CODE)).err(),
+            Some(expected),
             "{bytes:02x?}"
         );
     }
@@ -364,7 +363,7 @@ fn pause_mixed_64_instruction_unit_fits_all_six_profiles() {
 
 #[test]
 fn pause_late_refusal_preserves_dirty_full_arena_and_both_owners() {
-    let mut bytes = vec![0xf3, 0x90, 0x0f, 0x0b];
+    let mut bytes = vec![0xf3, 0x90, 0xf0, 0x90];
     bytes.resize(256, 0x90);
     bytes.extend([0xeb, 0]);
     let mut engine = code(&bytes);
@@ -377,7 +376,7 @@ fn pause_late_refusal_preserves_dirty_full_arena_and_both_owners() {
     let resident_pointer = engine.resident_bytes(resident).unwrap().as_ptr();
     let error = CompileError::Instruction {
         pc: GuestAddress(CODE + 2),
-        cause: InstructionError::Decode(DecodeError::Unsupported(UnsupportedFeature::Opcode)),
+        cause: InstructionError::Decode(DecodeError::InvalidEncoding),
     };
     for is_resident in [false, true] {
         for entries in [false, true] {

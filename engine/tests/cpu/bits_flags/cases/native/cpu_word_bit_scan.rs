@@ -1,4 +1,4 @@
-use super::support_word_prefix as word_prefix;
+use super::{support_prefix_admission as prefix_admission, support_word_prefix as word_prefix};
 use ring3_engine::{
     abi::arena::TRANSFER_OFFSET,
     cpu::{
@@ -354,6 +354,9 @@ fn word_bit_scan_prefixes_and_admitted_neighbors_have_precise_boundaries() {
                 let bytes = encoding(opcode, destination, tail);
                 for prefix in [0x66, 0x67, 0xf0, 0xf2, 0xf3] {
                     let prefixed = [vec![prefix], bytes.clone()].concat();
+                    if prefix_admission::admit_if_new_prefix(&prefixed) {
+                        continue;
+                    }
                     if matches!(prefix, 0x67) {
                         word_prefix::admitted(&prefixed);
                         continue;
@@ -374,6 +377,9 @@ fn word_bit_scan_prefixes_and_admitted_neighbors_have_precise_boundaries() {
                 }
                 for rep in [0xf2, 0xf3] {
                     let prefixed = [vec![0x66, rep], bytes[1..].to_vec()].concat();
+                    if prefix_admission::admit_if_new_prefix(&prefixed) {
+                        continue;
+                    }
                     assert_eq!(
                         decode_one(&code_space(CODE, &prefixed), GuestAddress(CODE)).err(),
                         Some(unsupported)
@@ -402,6 +408,9 @@ fn word_bit_scan_prefixes_and_admitted_neighbors_have_precise_boundaries() {
             let mut bytes = vec![0xf3, 0x0f, opcode, tail];
             if opcode == 0xbc {
                 bytes.insert(0, 0xf3);
+            }
+            if prefix_admission::admit_if_new_prefix(&bytes) {
+                continue;
             }
             assert_eq!(
                 decode_one(&code_space(CODE, &bytes), GuestAddress(CODE)).err(),
@@ -590,7 +599,7 @@ fn word_bit_scan_late_refusal_preserves_full_arena_and_both_owners() {
         bytes.extend(encoding(opcode, 1, &[0x04, 0x09]));
     }
     let refused_pc = CODE + bytes.len() as u32;
-    bytes.extend([0x0f, 0x0b]);
+    bytes.extend([0xf0, 0x90]);
     let refused_length = bytes.len() as u32;
     bytes.resize(256, 0x90);
     bytes.extend([0xeb, 0]);
@@ -606,7 +615,7 @@ fn word_bit_scan_late_refusal_preserves_full_arena_and_both_owners() {
     let resident_pointer = engine.resident_bytes(resident).unwrap().as_ptr();
     let error = CompileError::Instruction {
         pc: GuestAddress(refused_pc),
-        cause: InstructionError::Decode(DecodeError::Unsupported(UnsupportedFeature::Opcode)),
+        cause: InstructionError::Decode(DecodeError::InvalidEncoding),
     };
     for is_resident in [false, true] {
         for entries in [false, true] {

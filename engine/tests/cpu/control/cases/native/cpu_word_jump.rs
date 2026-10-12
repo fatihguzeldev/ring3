@@ -281,7 +281,7 @@ fn word_jump_prefix_aliases_and_other_word_jump_families_remain_closed() {
 #[test]
 fn word_branches_terminate_all_six_profiles_before_trailing_decode() {
     for form in BRANCH_FORMS {
-        let bytes = [vec![0x90], form.to_vec(), vec![0x0f, 0x0b]].concat();
+        let bytes = [vec![0x90], form.to_vec(), vec![0xf0, 0x90]].concat();
         let consumed = form.len() as u32 + 1;
         let memory = code_space(CODE, &bytes);
         let error = CompileError::Instruction {
@@ -440,7 +440,7 @@ fn word_branches_currentness_tracks_consumed_code_and_ignores_target_permissions
         memory
             .map_zeroed(range(0x8000, 1), Permissions::ALL)
             .unwrap();
-        memory.write(GuestAddress(0x8000), &[0x0f, 0x0b]).unwrap();
+        memory.write(GuestAddress(0x8000), &[0xf0, 0x90]).unwrap();
         for permission in [Permissions::READ, Permissions::NONE] {
             memory.protect(range(0x8000, 1), permission).unwrap();
             assert!(prepared.is_current(&memory));
@@ -482,7 +482,7 @@ fn word_branches_late_refusal_preserves_dirty_arena_and_both_existing_owners() {
         bytes[offset..offset + 4].copy_from_slice(&[0x66, 0xe9, 0, 0]);
     }
     bytes[16..21].copy_from_slice(&[0x66, 0x0f, 0x84, 0, 0]);
-    bytes[49..51].copy_from_slice(&[0x0f, 0x0b]);
+    bytes[49..51].copy_from_slice(&[0xf0, 0x90]);
     bytes[256..258].copy_from_slice(&[0xeb, 0]);
     let mut engine = code(&bytes);
     let replacement = bound_compile(&mut engine, &[(CODE + 256, 2)], false, false).unwrap() as u32;
@@ -494,7 +494,7 @@ fn word_branches_late_refusal_preserves_dirty_arena_and_both_existing_owners() {
     let blocks = [(CODE, 4), (CODE + 16, 5), (CODE + 32, 4), (CODE + 48, 3)];
     let error = CompileError::Instruction {
         pc: GuestAddress(CODE + 49),
-        cause: InstructionError::Decode(DecodeError::Unsupported(UnsupportedFeature::Opcode)),
+        cause: InstructionError::Decode(DecodeError::InvalidEncoding),
     };
     for is_resident in [false, true] {
         for entries in [false, true] {

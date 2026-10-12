@@ -695,7 +695,7 @@ fn checked_word_read_interface(wasm: &[u8], resident: bool) {
     let mut body = Reader(bodies.take(length));
     bodies.end();
     assert_eq!(body.unsigned(), 3);
-    for expected in [(16, 0x7f), (1, 0x7e), (6, 0x7f)] {
+    for expected in [(16, 0x7f), (1, 0x7e), (10, 0x7f)] {
         assert_eq!((body.unsigned(), body.byte()), expected);
     }
 }
@@ -826,9 +826,9 @@ fn late_word_memory_predicate_failures_preserve_prior_publication_and_installed_
     let mut cases = vec![
         (
             CODE,
-            vec![0x66, 0x39, 0x03, 0x0f, 0x0b],
+            vec![0x66, 0x39, 0x03, 0xf0, 0x90],
             5,
-            instruction_error(CODE + 3, opcode),
+            instruction_error(CODE + 3, DecodeError::InvalidEncoding),
         ),
         (
             CODE,
@@ -838,9 +838,9 @@ fn late_word_memory_predicate_failures_preserve_prior_publication_and_installed_
         ),
         (
             CODE,
-            vec![0x66, 0x39, 0x03, 0x0f, 0x0b, 0x90],
+            vec![0x66, 0x39, 0x03, 0xf0, 0x90, 0x90],
             6,
-            instruction_error(CODE + 3, opcode),
+            instruction_error(CODE + 3, DecodeError::InvalidEncoding),
         ),
         (
             0x1ffa,
@@ -853,7 +853,7 @@ fn late_word_memory_predicate_failures_preserve_prior_publication_and_installed_
         ),
     ];
     let mut capped = encoding(4, 0, &[0x03], 0).repeat(64);
-    capped.extend([0x0f, 0x0b]);
+    capped.extend([0xf0, 0x90]);
     cases.push((
         CODE,
         capped.clone(),

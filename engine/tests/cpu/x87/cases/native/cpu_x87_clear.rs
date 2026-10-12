@@ -216,7 +216,7 @@ fn late_refusal_preserves_existing_publications_and_full_arena() {
     let generation = engine.compile(1).unwrap();
     let id = engine.compile_resident(1).unwrap().get();
     engine.map(0x3000, 1, 7).unwrap();
-    let bytes = [0xdb, 0xe2, 0xdf, 0xe0, 0x0f, 0x0b];
+    let bytes = [0xdb, 0xe2, 0xdf, 0xe0, 0xf0, 0x90];
     engine.arena_mut().unwrap()[TRANSFER_OFFSET..TRANSFER_OFFSET + bytes.len()]
         .copy_from_slice(&bytes);
     engine.upload(0x3000, bytes.len() as u32).unwrap();

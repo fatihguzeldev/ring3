@@ -115,20 +115,17 @@ fn prefixes_refuse_and_single_byte_fetch_preserves_boundaries() {
             );
         }
         for prefix in [0x66, 0x67, 0xf2, 0xf3, 0x64, 0xf0] {
-            let engine = code(0x1000, &[prefix, opcode]);
-            let result = decode_one(engine.memory().unwrap(), GuestAddress(0x1000));
-            if matches!(prefix, 0x26 | 0x2e | 0x36 | 0x3e | 0x64 | 0x65 | 0x67) {
-                prefix_admission::admitted(&[prefix, opcode]);
-                continue;
-            }
+            let (bytes, expected) = prefix_admission::refusal_after_prefix_admission(
+                vec![prefix, opcode],
+                if prefix == 0xf0 {
+                    DecodeError::InvalidEncoding
+                } else {
+                    DecodeError::Unsupported(UnsupportedFeature::Opcode)
+                },
+            );
+            let engine = code(0x1000, &bytes);
             assert!(
-                matches!(
-                    result,
-                    Err(DecodeError::InvalidEncoding
-                        | DecodeError::Unsupported(
-                            UnsupportedFeature::Opcode | UnsupportedFeature::Segment
-                        ))
-                ),
+                decode_one(engine.memory().unwrap(), GuestAddress(0x1000)).err() == Some(expected),
                 "prefix {prefix:02x} opcode {opcode:02x}"
             );
         }
@@ -148,7 +145,7 @@ fn late_refusal_preserves_replacement_and_resident_publications() {
     engine.compile(1).unwrap();
     let keep = engine.compile_resident(1).unwrap().get();
     engine.map(0x3000, 1, 7).unwrap();
-    upload(&mut engine, 0x3000, &[0xf8, 0xf9, 0xf5, 0x0f, 0x0b]);
+    upload(&mut engine, 0x3000, &[0xf8, 0xf9, 0xf5, 0xf0, 0x90]);
     for resident in [false, true] {
         for entries in [false, true] {
             describe(&mut engine, 0x3000, 5, entries);

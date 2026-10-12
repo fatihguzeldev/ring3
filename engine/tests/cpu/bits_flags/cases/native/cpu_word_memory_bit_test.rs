@@ -539,7 +539,7 @@ fn word_memory_bit_test_late_refusal_preserves_full_arena_and_both_owners() {
     let admitted = bank();
     let mut bytes = admitted[..admitted.len() - 2].to_vec();
     let refused_pc = CODE + bytes.len() as u32;
-    bytes.extend([0x0f, 0x0b]);
+    bytes.extend([0xf0, 0x90]);
     let refused_length = bytes.len() as u32;
     bytes.resize(256, 0x90);
     bytes.extend([0xeb, 0]);
@@ -555,7 +555,7 @@ fn word_memory_bit_test_late_refusal_preserves_full_arena_and_both_owners() {
     let resident_pointer = engine.resident_bytes(resident).unwrap().as_ptr();
     let error = CompileError::Instruction {
         pc: GuestAddress(refused_pc),
-        cause: InstructionError::Decode(DecodeError::Unsupported(UnsupportedFeature::Opcode)),
+        cause: InstructionError::Decode(DecodeError::InvalidEncoding),
     };
     for is_resident in [false, true] {
         for entries in [false, true] {

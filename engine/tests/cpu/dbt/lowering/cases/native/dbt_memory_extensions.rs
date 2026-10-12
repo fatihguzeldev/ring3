@@ -393,8 +393,9 @@ fn embedded_small_width_prefix_and_adjacent_errors_remain_precise() {
             prefix_admission::admitted(instruction);
             continue;
         }
+        let (instruction, cause) = prefix_admission::instruction_refusal(instruction, cause);
         let mut bytes = vec![0x90];
-        bytes.extend_from_slice(instruction);
+        bytes.extend_from_slice(&instruction);
         for entry_format in [false, true] {
             let mut instance = engine(&bytes);
             instance.arena_mut().unwrap()[140..148].copy_from_slice(&[

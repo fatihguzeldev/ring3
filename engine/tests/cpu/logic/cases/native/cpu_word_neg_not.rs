@@ -259,7 +259,7 @@ for(let i=0;i<6;i++) {const mode=b[at++],n=b.readUInt32LE(at);at+=4;
   assert.deepEqual(WebAssembly.Module.exports(m),[{name:'run',kind:'function'}]);
   let p=8;function leb(){let v=0,s=1;for(let j=0;j<5;j++){assert.ok(p<bytes.length);const x=bytes[p++];v+=(x&127)*s;if(!(x&128))return v;s*=128;}assert.fail('bounded LEB');}
   let found=false;while(p<bytes.length){const id=bytes[p++],size=leb(),end=p+size;assert.ok(end<=bytes.length);
-    if(id===10){assert.equal(leb(),1);const body=leb();assert.equal(p+body,end);assert.equal(leb(),2);assert.equal(leb(),16);assert.equal(bytes[p++],127);assert.equal(leb(),1);assert.equal(bytes[p++],126);found=true;}
+    if(id===10){assert.equal(leb(),1);const body=leb();assert.equal(p+body,end);assert.equal(leb(),3);assert.equal(leb(),16);assert.equal(bytes[p++],127);assert.equal(leb(),1);assert.equal(bytes[p++],126);assert.equal(leb(),10);assert.equal(bytes[p++],127);found=true;}
     p=end;}assert.ok(found);
 }assert.equal(at,b.length);
 "#]).stdin(Stdio::piped()).stderr(Stdio::piped()).spawn().unwrap();
@@ -383,10 +383,12 @@ fn exact_word_neg_not_prefix_fetch_top_and_consumed_source_currency() {
         &[0x66, 0xf6, 0xd0][..],
         &[0x66, 0x66, 0xd1, 0xe0][..],
     ] {
-        assert_eq!(
-            decode_one(&memory(0x1000, bytes), GuestAddress(0x1000)).unwrap_err(),
-            DecodeError::Unsupported(UnsupportedFeature::Opcode)
-        );
+        if !word_prefix::admit_if_new_prefix(&bytes) {
+            assert_eq!(
+                decode_one(&memory(0x1000, bytes), GuestAddress(0x1000)).unwrap_err(),
+                DecodeError::Unsupported(UnsupportedFeature::Opcode)
+            );
+        }
     }
     for bytes in [&[0x66][..], &[0x66, 0xf7][..]] {
         let pc = u32::MAX - bytes.len() as u32 + 1;
@@ -456,7 +458,7 @@ fn caps_and_late_word_neg_not_refusals_preserve_complete_arena_and_both_owners()
             let mut engine = prepare_engine(0x1000, &row);
             for (pc, bytes) in [
                 (0x3000, row.to_vec()),
-                (0x5000, vec![0x66, 0xf7, 0xdc, 0x90, 0x0f, 0x0b, 0xeb, 0]),
+                (0x5000, vec![0x66, 0xf7, 0xdc, 0x90, 0xf0, 0x90, 0xeb, 0]),
             ] {
                 engine.map(pc, 1, 7).unwrap();
                 upload(&mut engine, pc, &bytes);
@@ -472,9 +474,7 @@ fn caps_and_late_word_neg_not_refusals_preserve_complete_arena_and_both_owners()
             let before = engine.arena().to_vec();
             let error = CompileError::Instruction {
                 pc: GuestAddress(0x5004),
-                cause: InstructionError::Decode(DecodeError::Unsupported(
-                    UnsupportedFeature::Opcode,
-                )),
+                cause: InstructionError::Decode(DecodeError::InvalidEncoding),
             };
             let expected = if resident {
                 HostError::Resident(RegistryError::Compile(error))

@@ -218,7 +218,7 @@ fn late_decode_failure_preserves_full_arena_and_current_owner() {
         let mut engine = EngineInstance::new(2, 0x5152_5354_5556_5758).unwrap();
         for (address, bytes) in [
             (PC, &[0x90, 0xeb, 0][..]),
-            (0x3000, &[0x90, 0xa6, 0x0f, 0x0b][..]),
+            (0x3000, &[0x90, 0xa6, 0xf0, 0x90][..]),
         ] {
             engine.map(address, 1, 7).unwrap();
             engine.arena_mut().unwrap()[140..140 + bytes.len()].copy_from_slice(bytes);
@@ -235,7 +235,7 @@ fn late_decode_failure_preserves_full_arena_and_current_owner() {
         let error = bound_compile(&mut engine, resident, false, 1).unwrap_err();
         let error = format!("{error:?}");
         assert!(
-            error.contains("GuestAddress(12290)") && error.contains("Unsupported(Opcode)"),
+            error.contains("GuestAddress(12290)") && error.contains("InvalidEncoding"),
             "{error}"
         );
         assert_eq!(engine.arena(), before);

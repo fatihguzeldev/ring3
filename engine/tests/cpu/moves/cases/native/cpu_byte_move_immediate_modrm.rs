@@ -316,12 +316,9 @@ fn assert_module(wasm: &[u8], owner: Option<Owner>, id: u64, store: bool) {
     let length = unsigned(&mut bodies) as usize;
     let mut body = take(&mut bodies, length);
     assert!(bodies.is_empty());
-    assert_eq!(unsigned(&mut body), if store { 3 } else { 2 });
-    for expected in [(16, 0x7f), (1, 0x7e)] {
+    assert_eq!(unsigned(&mut body), 3);
+    for expected in [(16, 0x7f), (1, 0x7e), (10, 0x7f)] {
         assert_eq!((unsigned(&mut body), byte(&mut body)), expected);
-    }
-    if store {
-        assert_eq!((unsigned(&mut body), byte(&mut body)), (6, 0x7f));
     }
     if owner.is_some() {
         let mut constants = vec![KEY as u32, (KEY >> 32) as u32, id as u32];
@@ -1234,7 +1231,7 @@ fn every_three_byte_fetch_placement_cut_permission_and_top_extent_is_exact() {
         );
         opcode_controls += 1;
     }
-    let mut poisoned = code(CODE, &[0xc6, 0xc4, 0x81, 0x0f, 0x0b]);
+    let mut poisoned = code(CODE, &[0xc6, 0xc4, 0x81, 0xf0, 0x90]);
     assert_decode(&poisoned, CODE, 3, CODE + 3, move_byte(4, 0x81));
     let consumed_span_admissions = three_admissions(&mut poisoned, CODE, 3, false, &[CODE]);
     assert_eq!(
@@ -1490,12 +1487,12 @@ fn ninety_six_late_failures_preserve_complete_publication_and_installation() {
     let mut prior_compiles = 0;
     for alias in 0_u8..8 {
         let destination = 0xc0 | alias;
-        for (pc, bytes, length, expected) in [
+        for (pc, mut bytes, length, mut expected) in [
             (
                 CODE,
-                vec![0xc6, destination, 0x81, 0x0f, 0x0b],
+                vec![0xc6, destination, 0x81, 0xf0, 0x90],
                 5,
-                instruction_error(CODE + 3, opcode),
+                instruction_error(CODE + 3, DecodeError::InvalidEncoding),
             ),
             (
                 CODE,
@@ -1513,6 +1510,15 @@ fn ninety_six_late_failures_preserve_complete_publication_and_installation() {
                 ),
             ),
         ] {
+            if bytes.get(3) == Some(&0x66) {
+                let (operation, consumed) = super::support_prefix_admission::admitted(&bytes[3..]);
+                assert_eq!(operation, move_byte(usize::from(alias), 0x81));
+                assert_eq!(consumed, 4);
+                let (malformed, error) =
+                    super::support_prefix_admission::malformed_fixture(bytes.len() - 3);
+                bytes[3..].copy_from_slice(&malformed);
+                expected = instruction_error(CODE + 3, error);
+            }
             for owner in [Owner::Replacement, Owner::Resident] {
                 for entries in [false, true] {
                     let (mut engine, resident) = prior_owners(code(pc, &bytes));

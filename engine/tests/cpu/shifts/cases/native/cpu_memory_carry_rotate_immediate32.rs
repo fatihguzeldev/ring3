@@ -323,7 +323,7 @@ while (offset<input.length) {
   assert.equal(functions.u(),0); functions.end();
   const bodies=cursor(sections.get(10)); assert.equal(bodies.u(),1);
   const body=cursor(bodies.take(bodies.u())); bodies.end(); assert.equal(body.u(),3);
-  for (const [number,type] of [[16,0x7f],[1,0x7e],[6,0x7f]]) {
+  for (const [number,type] of [[16,0x7f],[1,0x7e],[10,0x7f]]) {
     assert.equal(body.u(),number); assert.equal(body.byte(),type);
   }
   count++;
@@ -734,11 +734,11 @@ fn strict_neighbors_and_late_failures_preserve_both_publications() {
         for (pc, tail, declared, failure) in [
             (
                 CODE,
-                vec![0x0f, 0x0b],
+                vec![0xf0, 0x90],
                 positive.len() + 2,
                 error(
                     CODE + positive.len() as u32,
-                    InstructionError::Decode(opcode),
+                    InstructionError::Decode(DecodeError::InvalidEncoding),
                 ),
             ),
             (

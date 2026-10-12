@@ -1,6 +1,6 @@
 use super::support_prefix_admission as prefix_admission;
 
-use ring3_engine::cpu::{UnsupportedFeature, x86::decode::DecodeError};
+use ring3_engine::cpu::x86::decode::DecodeError;
 
 fn newly_admitted(bytes: &[u8]) -> bool {
     match bytes {
@@ -18,20 +18,15 @@ fn newly_admitted(bytes: &[u8]) -> bool {
     }
 }
 
-// the historical row first proves its newly admitted behavior. a same-length UD2
+// the historical row first proves its newly admitted behavior. a same-length malformed
 // fixture then retains the original precise-failure and prior-owner assertions.
 pub fn closed_fixture(bytes: &[u8], expected: DecodeError) -> (Vec<u8>, DecodeError) {
-    let single_address_or_segment = matches!(bytes,
-        [0x26 | 0x2e | 0x36 | 0x3e | 0x64 | 0x65 | 0x67, opcode, ..]
-            if !matches!(opcode, 0x26 | 0x2e | 0x36 | 0x3e | 0x64 | 0x65 | 0x66 | 0x67 | 0xf0 | 0xf2 | 0xf3));
-    let prefixed = single_address_or_segment && prefix_admission::admit_if_new_prefix(bytes);
+    let prefixed = prefix_admission::admit_if_new_prefix(bytes);
     if prefixed || newly_admitted(bytes) {
         if !prefixed {
             prefix_admission::admitted(bytes);
         }
-        let mut poison = vec![0x90; bytes.len()];
-        poison[..2].copy_from_slice(&[0x0f, 0x0b]);
-        (poison, DecodeError::Unsupported(UnsupportedFeature::Opcode))
+        prefix_admission::malformed_fixture(bytes.len())
     } else {
         (bytes.to_vec(), expected)
     }

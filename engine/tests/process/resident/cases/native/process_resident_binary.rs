@@ -485,12 +485,7 @@ fn span_poison_prefix_and_remaining_exclusions_preserve_arena_units_and_capacity
             (0x64, UnsupportedFeature::Segment),
         ] {
             let mut bytes = vec![0x90, prefix];
-            if prefix == 0x66
-                && matches!(
-                    instruction[0],
-                    0x01 | 0x29 | 0x21 | 0x09 | 0x31 | 0x81 | 0x83
-                )
-            {
+            if prefix == 0x66 {
                 bytes.push(0x66);
             }
             bytes.extend_from_slice(instruction);
@@ -518,7 +513,7 @@ fn span_poison_prefix_and_remaining_exclusions_preserve_arena_units_and_capacity
             kind,
             BinaryKind::Add | BinaryKind::Sub | BinaryKind::And | BinaryKind::Or | BinaryKind::Xor
         ) {
-            bytes.push(0x66);
+            bytes.extend_from_slice(&[0x66, 0x66]);
         }
         if matches!(instruction[0], 0x81 | 0x83) {
             bytes.extend_from_slice(&[0x80, instruction[1], 0x80]);

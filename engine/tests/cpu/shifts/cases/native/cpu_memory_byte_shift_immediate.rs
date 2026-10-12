@@ -341,7 +341,7 @@ while (offset<input.length) {
   const functions=cursor(sections.get(3)); assert.equal(functions.u(),1); assert.equal(functions.u(),0); functions.end();
   const bodies=cursor(sections.get(10)); assert.equal(bodies.u(),1);
   const body=cursor(bodies.take(bodies.u())); bodies.end(); assert.equal(body.u(),3);
-  for (const [number,type] of [[16,0x7f],[1,0x7e],[6,0x7f]]) {assert.equal(body.u(),number); assert.equal(body.byte(),type);}
+  for (const [number,type] of [[16,0x7f],[1,0x7e],[10,0x7f]]) {assert.equal(body.u(),number); assert.equal(body.byte(),type);}
   count++;
 }
 assert.equal(offset,input.length); assert.equal(count,360); process.stdout.write(String(count));
@@ -694,7 +694,13 @@ fn strict_fetch_and_late_failures_keep_precise_categories_and_publications() {
     let mut late = 0;
     for (_, field) in KINDS {
         let first = program(field, &shapes()[0], 2);
-        for second in [vec![0x66, 0xc0, 3 | field << 3, 8], vec![0x0f, 0x0b]] {
+        for second in [vec![0x66, 0xc0, 3 | field << 3, 8], vec![0xf0, 0x90]] {
+            let cause = if second == [0xf0, 0x90] {
+                DecodeError::InvalidEncoding
+            } else {
+                unsupported
+            };
+            let (second, cause) = byte_prefix_admission::closed_fixture(&second, cause);
             let mut bytes = first.clone();
             bytes.extend(&second);
             let next = CODE + first.len() as u32;
@@ -712,7 +718,7 @@ fn strict_fetch_and_late_failures_keep_precise_categories_and_publications() {
                         compile(&mut engine, owner, entries, 2),
                         Err(host_error(
                             owner,
-                            error(next, InstructionError::Decode(unsupported))
+                            error(next, InstructionError::Decode(cause))
                         ))
                     );
                     retained(&engine, keep, &before);

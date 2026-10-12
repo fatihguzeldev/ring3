@@ -481,7 +481,7 @@ fn full_modrm_domain_strict_categories_and_supported_neighbors_are_exact() {
         (vec![0x66, 0x0f, 0xc0, 0x03], opcode),
         (vec![0x66, 0x0f, 0xb0, 0xc8], opcode),
         (vec![0x66, 0x0f, 0xb0, 0x03], opcode),
-        (vec![0x0f, 0x0b], opcode),
+        (vec![0xf0, 0x90], DecodeError::InvalidEncoding),
     ]);
     assert_eq!(strict.len(), 117);
     let mut categories = [0; 3];
@@ -500,7 +500,7 @@ fn full_modrm_domain_strict_categories_and_supported_neighbors_are_exact() {
         }
         compiler_refusals += rejected(&bytes, error);
     }
-    assert_eq!(categories, [8, 60, 49]);
+    assert_eq!(categories, [9, 60, 48]);
     assert_eq!(negative_bytes.len(), 309);
     assert_eq!(compiler_refusals, 1854 - prefix_admissions * 6);
 
@@ -769,7 +769,7 @@ fn exact_two_byte_fetch_cuts_permissions_and_top_extent_are_preserved() {
         );
         opcode_controls += 1;
     }
-    let mut poisoned = code(CODE, &[0x86, 0xe0, 0x0f, 0x0b]);
+    let mut poisoned = code(CODE, &[0x86, 0xe0, 0xf0, 0x90]);
     assert_decode(&poisoned, CODE, 2, CODE + 2, exchange(0xe0));
     let consumed_span_admissions = three_admissions(&mut poisoned, CODE, 2, false, &[CODE]);
     assert_eq!(
@@ -987,9 +987,9 @@ fn twenty_four_late_failures_preserve_complete_two_owner_publication_and_install
         for (pc, bytes, length, expected) in [
             (
                 CODE,
-                vec![0x86, pair, 0x0f, 0x0b],
+                vec![0x86, pair, 0xf0, 0x90],
                 4,
-                instruction_error(CODE + 2, opcode),
+                instruction_error(CODE + 2, DecodeError::InvalidEncoding),
             ),
             (
                 CODE,
@@ -1007,6 +1007,7 @@ fn twenty_four_late_failures_preserve_complete_two_owner_publication_and_install
                 ),
             ),
         ] {
+            let (bytes, expected) = prefix_admission::compile_refusal(&bytes, 2, expected);
             for owner in [Owner::Replacement, Owner::Resident] {
                 for entries in [false, true] {
                     let mut engine = code(pc, &bytes);

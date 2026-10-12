@@ -243,7 +243,7 @@ fn strict_prefixes_adjacent_forms_and_one_byte_fetch_boundaries_keep_categories(
     }
     assert_eq!(refusals, 12);
     for (pc, bytes, next) in [
-        (CODE, &[0x98, 0x0f, 0x0b][..], CODE + 1),
+        (CODE, &[0x98, 0xf0, 0x90][..], CODE + 1),
         (0x1fff, &[0x98][..], 0x2000),
         (u32::MAX, &[0x98][..], 0),
     ] {
@@ -354,17 +354,17 @@ fn late_decode_failures_preserve_both_publications_and_all_mapped_pages() {
     for (pc, bytes, length, error_pc, error) in [
         (
             CODE,
-            &[0x98, 0x0f, 0x0b][..],
+            &[0x98, 0xf0, 0x90][..],
             3,
             CODE + 1,
-            DecodeError::Unsupported(UnsupportedFeature::Opcode),
+            DecodeError::InvalidEncoding,
         ),
         (
             CODE,
-            &[0x98, 0x0f, 0x0b][..],
+            &[0x98, 0xf0, 0x90][..],
             3,
             CODE + 1,
-            DecodeError::Unsupported(UnsupportedFeature::Opcode),
+            DecodeError::InvalidEncoding,
         ),
         (
             0x1ffe,

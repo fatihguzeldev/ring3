@@ -1,13 +1,12 @@
 use ring3_engine::{
     abi::arena::TRANSFER_OFFSET,
     cpu::{
-        UnsupportedFeature,
         dbt::{
             BlockSpec, CompileError, CompileLimits, InstructionError, RegistryError,
             compile_entry_region, compile_region, prepare_entry_region, prepare_region,
         },
         x86::{
-            Register32, StackFrameKind,
+            ControlOperation, Register32, StackFrameKind,
             decode::{DecodeError, decode_one},
             ir::{Location32, Operation, UnaryKind, Value32},
         },
@@ -298,9 +297,10 @@ fn enter_prefixes_allocation_and_five_bit_nesting_are_exact() {
             &code_space(CODE, &[0x66, 0x66, 0xc8, 0, 0, 0]),
             GuestAddress(CODE)
         )
-        .unwrap()
-        .operation(),
-        &Operation::EnterZeroWord
+        .err(),
+        Some(DecodeError::Unsupported(
+            ring3_engine::cpu::UnsupportedFeature::Opcode
+        ))
     );
     for (bytes, expected) in [
         (
@@ -329,10 +329,12 @@ fn enter_prefixes_allocation_and_five_bit_nesting_are_exact() {
             &expected
         );
     }
-    for bytes in [&[0x9d][..], &[0x66, 0x9d]] {
+    for (bytes, word) in [(&[0x9d][..], false), (&[0x66, 0x9d][..], true)] {
         assert_eq!(
-            decode_one(&code_space(CODE, bytes), GuestAddress(CODE)).err(),
-            Some(DecodeError::Unsupported(UnsupportedFeature::Opcode))
+            decode_one(&code_space(CODE, bytes), GuestAddress(CODE))
+                .unwrap()
+                .operation(),
+            &Operation::Control(ControlOperation::PopFlags { word })
         );
     }
 }
@@ -347,7 +349,7 @@ fn instruction_error(pc: u32, cause: InstructionError) -> CompileError {
 #[test]
 fn enter_zero_standalone_backend_refusal_precedes_trailing_decode() {
     for form in FORMS {
-        for tail in [&[][..], &[0x0f, 0x0b][..]] {
+        for tail in [&[][..], &[0xf0, 0x90][..]] {
             let bytes = [vec![0x90], form.to_vec(), tail.to_vec()].concat();
             let memory = code_space(CODE, &bytes);
             let specs = [BlockSpec {
@@ -533,7 +535,7 @@ fn enter_zero_mixed_unit_fits_exactly_64_instructions() {
 
 #[test]
 fn enter_zero_late_refusal_preserves_dirty_full_arena_and_both_existing_owners() {
-    let mut bytes = [FORMS[0], FORMS[1], &[0x0f, 0x0b]].concat();
+    let mut bytes = [FORMS[0], FORMS[1], &[0xf0, 0x90]].concat();
     let refused_length = bytes.len() as u32;
     bytes.resize(256, 0x90);
     bytes.extend([0xeb, 0]);
@@ -547,7 +549,7 @@ fn enter_zero_late_refusal_preserves_dirty_full_arena_and_both_existing_owners()
     let resident_pointer = engine.resident_bytes(resident).unwrap().as_ptr();
     let error = instruction_error(
         CODE + 9,
-        InstructionError::Decode(DecodeError::Unsupported(UnsupportedFeature::Opcode)),
+        InstructionError::Decode(DecodeError::InvalidEncoding),
     );
     for is_resident in [false, true] {
         for entries in [false, true] {

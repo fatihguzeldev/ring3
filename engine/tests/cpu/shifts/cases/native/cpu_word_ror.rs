@@ -317,11 +317,13 @@ for (let profile = 0; profile < 6; profile++) {
       assert.equal(leb(), 1);
       const body = leb();
       assert.equal(cursor + body, end);
-      assert.equal(leb(), 2);
+      assert.equal(leb(), 3);
       assert.equal(leb(), 16);
       assert.equal(bytes[cursor++], 127);
       assert.equal(leb(), 1);
       assert.equal(bytes[cursor++], 126);
+      assert.equal(leb(), 10);
+      assert.equal(bytes[cursor++], 127);
       found = true;
     }
     cursor = end;
@@ -433,10 +435,12 @@ fn exact_ror_prefix_fetch_top_and_consumed_source_boundaries() {
                 word_prefix::admitted(&refused);
                 continue;
             }
-            assert_eq!(
-                decode_one(&memory(0x1000, &refused), GuestAddress(0x1000)).unwrap_err(),
-                DecodeError::Unsupported(UnsupportedFeature::Opcode)
-            );
+            if !word_prefix::admit_if_new_prefix(&refused) {
+                assert_eq!(
+                    decode_one(&memory(0x1000, &refused), GuestAddress(0x1000)).unwrap_err(),
+                    DecodeError::Unsupported(UnsupportedFeature::Opcode)
+                );
+            }
         }
         let locked = [vec![0xf0], bytes.clone()].concat();
         assert_eq!(
@@ -455,10 +459,12 @@ fn exact_ror_prefix_fetch_top_and_consumed_source_boundaries() {
             if matches!(modrm, 0x08 | 0xd0 | 0xd8) {
                 refused.insert(0, 0x66);
             }
-            assert_eq!(
-                decode_one(&memory(0x1000, &refused), GuestAddress(0x1000)).unwrap_err(),
-                DecodeError::Unsupported(UnsupportedFeature::Opcode)
-            );
+            if !word_prefix::admit_if_new_prefix(&refused) {
+                assert_eq!(
+                    decode_one(&memory(0x1000, &refused), GuestAddress(0x1000)).unwrap_err(),
+                    DecodeError::Unsupported(UnsupportedFeature::Opcode)
+                );
+            }
         }
     }
     for refused in [
@@ -470,10 +476,12 @@ fn exact_ror_prefix_fetch_top_and_consumed_source_boundaries() {
         vec![0x66, 0x66, 0x0f, 0xac, 0xc8, 1],
         vec![0x66, 0x66, 0x0f, 0xad, 0xc8],
     ] {
-        assert_eq!(
-            decode_one(&memory(0x1000, &refused), GuestAddress(0x1000)).unwrap_err(),
-            DecodeError::Unsupported(UnsupportedFeature::Opcode)
-        );
+        if !word_prefix::admit_if_new_prefix(&refused) {
+            assert_eq!(
+                decode_one(&memory(0x1000, &refused), GuestAddress(0x1000)).unwrap_err(),
+                DecodeError::Unsupported(UnsupportedFeature::Opcode)
+            );
+        }
     }
     let bytes = [0x66, 0xc1, 0xc8, 0xff, 0xeb, 0];
     let mut code = memory(0x1000, &bytes);
@@ -558,7 +566,7 @@ fn caps_and_late_ror_refusals_preserve_full_arena_and_prior_owners() {
             let mut engine = prepare(0x1000, &row);
             for (pc, bytes) in [
                 (0x3000, row.to_vec()),
-                (0x5000, vec![0x66, 0xd1, 0xcc, 0x90, 0x0f, 0x0b, 0xeb, 0]),
+                (0x5000, vec![0x66, 0xd1, 0xcc, 0x90, 0xf0, 0x90, 0xeb, 0]),
             ] {
                 engine.map(pc, 1, 7).unwrap();
                 upload(&mut engine, pc, &bytes);
@@ -576,9 +584,7 @@ fn caps_and_late_ror_refusals_preserve_full_arena_and_prior_owners() {
             let before = engine.arena().to_vec();
             let error = CompileError::Instruction {
                 pc: GuestAddress(0x5004),
-                cause: InstructionError::Decode(DecodeError::Unsupported(
-                    UnsupportedFeature::Opcode,
-                )),
+                cause: InstructionError::Decode(DecodeError::InvalidEncoding),
             };
             let expected = if resident {
                 HostError::Resident(RegistryError::Compile(error))

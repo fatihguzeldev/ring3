@@ -545,7 +545,7 @@ fn memory_xchg8_standalone_compile_and_prepare_keep_backend_refusal_priority() {
         for trailing in [false, true] {
             let mut bytes = vec![0x90];
             bytes.extend_from_slice(form);
-            bytes.extend(if trailing { [0x0f, 0x0b] } else { [0xeb, 0] });
+            bytes.extend(if trailing { [0xf0, 0x90] } else { [0xeb, 0] });
             let engine = code(&bytes);
             let before = engine.arena().to_vec();
             let memory = engine.memory().unwrap();
@@ -724,7 +724,7 @@ fn memory_xchg8_mixed_sixty_four_instructions_and_existing_limits_are_exact() {
 #[test]
 fn memory_xchg8_late_refusal_keeps_dirty_full_arena_and_both_existing_owners() {
     let mut bytes = BANK[..6].to_vec();
-    bytes.extend([0x0f, 0x0b]);
+    bytes.extend([0xf0, 0x90]);
     bytes.resize(256, 0x90);
     bytes.extend([0xeb, 0]);
     let mut engine = code(&bytes);
@@ -744,7 +744,7 @@ fn memory_xchg8_late_refusal_keeps_dirty_full_arena_and_both_existing_owners() {
         .unwrap();
     let error = instruction_error(
         CODE + 6,
-        InstructionError::Decode(DecodeError::Unsupported(UnsupportedFeature::Opcode)),
+        InstructionError::Decode(DecodeError::InvalidEncoding),
     );
     for is_resident in [false, true] {
         for entries in [false, true] {

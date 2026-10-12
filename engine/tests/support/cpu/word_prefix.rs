@@ -218,12 +218,12 @@ pub fn admit_if_new_prefix(bytes: &[u8]) -> bool {
         match byte {
             0x26 | 0x2e | 0x36 | 0x3e | 0x64 | 0x65 | 0x67 => changed = true,
             0x66 => word_prefixes += 1,
-            0xf0 | 0xf2 | 0xf3 => return false,
+            0xf0 | 0xf2 | 0xf3 => return prefix_admission::admit_if_new_prefix(bytes),
             _ => break,
         }
     }
     if !changed || word_prefixes > 1 {
-        return false;
+        return prefix_admission::admit_if_new_prefix(bytes);
     }
     admitted(bytes);
     true

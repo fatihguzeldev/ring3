@@ -1,6 +1,7 @@
 mod abi;
 mod atomic;
 mod control;
+mod control_instructions;
 mod cpu_result;
 mod dispatcher;
 mod emitter;

@@ -234,6 +234,18 @@ fn pop_all_ignored_address_segment_prefixes_and_family_neighbors_are_exact() {
         }
     }
     for bytes in [&[0x66, 0x66, 0x61][..], &[0x9d], &[0x66, 0x9d]] {
+        if matches!(bytes, [0x9d] | [0x66, 0x9d]) {
+            assert_eq!(
+                decode_one(&code_space(CODE, bytes), GuestAddress(CODE))
+                    .unwrap()
+                    .operation(),
+                &Operation::Control(ring3_engine::cpu::x86::ControlOperation::PopFlags {
+                    word: bytes.contains(&0x66),
+                })
+            );
+            continue;
+        }
+
         assert_eq!(
             decode_one(&code_space(CODE, bytes), GuestAddress(CODE)).err(),
             Some(opcode),
@@ -416,7 +428,7 @@ fn pop_all_mixed_64_instruction_block_fits_four_bound_profiles() {
 fn pop_all_late_refusal_preserves_full_arena_and_both_owners() {
     let mut bytes = vec![0x61, 0x66, 0x61];
     let refused_pc = CODE + bytes.len() as u32;
-    bytes.extend([0x0f, 0x0b]);
+    bytes.extend([0xf0, 0x90]);
     let refused_length = bytes.len() as u32;
     bytes.resize(256, 0x90);
     bytes.extend([0xeb, 0]);
@@ -432,7 +444,7 @@ fn pop_all_late_refusal_preserves_full_arena_and_both_owners() {
     let resident_pointer = engine.resident_bytes(resident).unwrap().as_ptr();
     let error = CompileError::Instruction {
         pc: GuestAddress(refused_pc),
-        cause: InstructionError::Decode(DecodeError::Unsupported(UnsupportedFeature::Opcode)),
+        cause: InstructionError::Decode(DecodeError::InvalidEncoding),
     };
     for is_resident in [false, true] {
         for entries in [false, true] {

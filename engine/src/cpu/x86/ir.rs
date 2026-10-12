@@ -324,6 +324,7 @@ pub enum CarryKind {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Operation {
+    Control(super::ControlOperation),
     BitCount {
         kind: super::bits::BitCountKind,
         width: super::bits::ScalarWidth,

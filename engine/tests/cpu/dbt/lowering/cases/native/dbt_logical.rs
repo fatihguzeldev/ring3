@@ -190,6 +190,8 @@ fn embedded_explicit_and_entry_emission_agree_without_state_or_guest_data_access
 }
 
 fn rejected(instruction: &[u8], cause: InstructionError) {
+    let (instruction, cause) = prefix_admission::instruction_refusal(instruction, cause);
+    let instruction = instruction.as_slice();
     let mut bytes = vec![0x90];
     bytes.extend_from_slice(instruction);
     let expected = CompileError::Instruction {

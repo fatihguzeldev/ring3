@@ -686,7 +686,7 @@ fn checked_word_rmw_interface(wasm: &[u8], resident: bool) {
     let mut body = Reader(bodies.take(length));
     bodies.end();
     assert_eq!(body.unsigned(), 3);
-    for expected in [(16, 0x7f), (1, 0x7e), (6, 0x7f)] {
+    for expected in [(16, 0x7f), (1, 0x7e), (10, 0x7f)] {
         assert_eq!((body.unsigned(), body.byte()), expected);
     }
 }
@@ -777,7 +777,7 @@ fn fit_bank() -> (Vec<u8>, Vec<FitGroup>) {
             0x66, opcode, 3, 0x66, 0x8b, 0x0b, 0x0f, 0x92, 0xc3, 0x0f, 0x90, 0xc2, 0x0f, 0x94,
             0xc4, 0x75, 2,
         ]);
-        raw.extend([0x0f, 0x0b, 0x66, 0x83, 0xd7, 0, 0x0f, 0x92, 0xc7, 0xeb, 0]);
+        raw.extend([0xf0, 0x90, 0x66, 0x83, 0xd7, 0, 0x0f, 0x92, 0xc7, 0xeb, 0]);
         assert_eq!(raw.len(), 40);
         bank[offset..offset + raw.len()].copy_from_slice(&raw);
         control.extend([
@@ -830,7 +830,7 @@ fn fit_bank() -> (Vec<u8>, Vec<FitGroup>) {
         });
     }
     bank[0xe00..0xe03].copy_from_slice(&[0x90, 0xeb, 0]);
-    bank[0xf00..0xf02].copy_from_slice(&[0x0f, 0x0b]);
+    bank[0xf00..0xf02].copy_from_slice(&[0xf0, 0x90]);
     groups.push(FitGroup {
         name: "other-code",
         blocks: vec![block(CODE + 0xe00, 3)],
@@ -994,9 +994,9 @@ fn late_word_memory_arithmetic_store_failures_preserve_prior_publication_and_ins
     let mut cases = vec![
         (
             CODE,
-            vec![0x66, 0x01, 0x03, 0x0f, 0x0b],
+            vec![0x66, 0x01, 0x03, 0xf0, 0x90],
             5,
-            instruction_error(CODE + 3, opcode),
+            instruction_error(CODE + 3, DecodeError::InvalidEncoding),
         ),
         (
             CODE,
@@ -1006,9 +1006,9 @@ fn late_word_memory_arithmetic_store_failures_preserve_prior_publication_and_ins
         ),
         (
             CODE,
-            vec![0x66, 0x01, 0x03, 0x0f, 0x0b, 0x90],
+            vec![0x66, 0x01, 0x03, 0xf0, 0x90, 0x90],
             6,
-            instruction_error(CODE + 3, opcode),
+            instruction_error(CODE + 3, DecodeError::InvalidEncoding),
         ),
         (
             0x1ffb,
@@ -1021,7 +1021,7 @@ fn late_word_memory_arithmetic_store_failures_preserve_prior_publication_and_ins
         ),
     ];
     let mut capped = encoding(0, 0, &[0x03]).repeat(64);
-    capped.extend([0x0f, 0x0b]);
+    capped.extend([0xf0, 0x90]);
     cases.push((
         CODE,
         capped.clone(),

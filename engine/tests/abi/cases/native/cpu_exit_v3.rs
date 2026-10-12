@@ -215,7 +215,7 @@ fn malformed_version_three_headers_keep_precise_field_errors() {
         };
         assert_eq!(decode_exit(&malformed), Err(expected));
     }
-    for version in [0, 7, 255] {
+    for version in [0, 8, 255] {
         assert_eq!(
             decode_exit(&record(version, [8, 0, 1, 0, 0, 0])),
             Err(AbiError::Version)

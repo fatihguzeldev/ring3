@@ -247,10 +247,10 @@ fn word_cmpxchg_complete_memory_and_prefix_neighbors_keep_exact_error_categories
         vec![0x66, 0x67, 0x0f, 0xb1, 0xc8],
         vec![0x66, 0x0f, 0xb0, 0xc8],
         vec![0x66, 0x66, 0x0f, 0xbc, 0xc8],
-        vec![0x0f, 0x0b],
     ] {
         cases.push((bytes, opcode));
     }
+    cases.push((vec![0xf0, 0x90], DecodeError::InvalidEncoding));
     let mut rows = 0;
     for (mut bytes, error) in cases {
         if matches!(bytes.as_slice(), [0x66, 0x0f, 0xb1, raw, ..] if raw & 0xc0 != 0xc0) {
@@ -476,9 +476,10 @@ fn pure_module_interface(wasm: &[u8], resident: Option<bool>) {
     let length = bodies.unsigned() as usize;
     let mut body = Reader(bodies.take(length));
     bodies.end();
-    assert_eq!(body.unsigned(), 2);
+    assert_eq!(body.unsigned(), 3);
     assert_eq!((body.unsigned(), body.byte()), (16, 0x7f));
     assert_eq!((body.unsigned(), body.byte()), (1, 0x7e));
+    assert_eq!((body.unsigned(), body.byte()), (10, 0x7f));
 }
 
 #[test]
@@ -698,9 +699,12 @@ fn late_word_cmpxchg_refusals_and_caps_preserve_full_two_owner_publication() {
     let first = encoding(1, 1);
     let mut cases = Vec::new();
     for (tail, error) in [
-        (vec![0x0f, 0x0b], opcode),
+        (vec![0xf0, 0x90], DecodeError::InvalidEncoding),
         (vec![0x66, 0x66, 0x0f, 0xb1, 0xc8], opcode),
-        (vec![0x0f, 0x0b, 0x90, 0x90, 0x90], opcode),
+        (
+            vec![0xf0, 0x90, 0x90, 0x90, 0x90],
+            DecodeError::InvalidEncoding,
+        ),
     ] {
         let bytes = [first.clone(), tail].concat();
         cases.push((
@@ -720,7 +724,7 @@ fn late_word_cmpxchg_refusals_and_caps_preserve_full_two_owner_publication() {
             fetch_error(0x1ffd, 0x2000, FaultReason::Unmapped, 4),
         ),
     ));
-    let capped = [first.repeat(64), vec![0x0f, 0x0b]].concat();
+    let capped = [first.repeat(64), vec![0xf0, 0x90]].concat();
     cases.push((
         CODE,
         capped.clone(),

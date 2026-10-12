@@ -1,3 +1,5 @@
+use super::support_prefix_admission as prefix_admission;
+
 use super::support_byte_prefix_admission as byte_prefix_admission;
 
 use ring3_engine::{abi::arena::TRANSFER_OFFSET, process::EngineInstance};
@@ -221,10 +223,12 @@ fn strict_memory_word_prefix_and_two_byte_fetch_boundaries_remain_closed() {
             vec![0x66, 0x66, 0xf7, base],
         ] {
             let engine = fresh(CODE, &bytes);
-            assert_eq!(
-                decode_one(engine.memory().unwrap(), GuestAddress(CODE)).err(),
-                Some(opcode)
-            );
+            if !prefix_admission::admit_if_new_prefix(&bytes) {
+                assert_eq!(
+                    decode_one(engine.memory().unwrap(), GuestAddress(CODE)).err(),
+                    Some(opcode)
+                );
+            }
         }
         for pc in [0x1ffe, 0x1fff, 0xffff_fffe] {
             let engine = fresh(pc, &[0xf6, base | 4]);
@@ -290,19 +294,17 @@ fn late_refusals_and_instruction_caps_preserve_both_published_owners() {
             );
             let mut cases = Vec::new();
             for modrm in [0xf4, 0xfc] {
-                for tail in [vec![0x0f, 0x0b], vec![0x66, 0xf6, modrm]] {
+                for tail in [vec![0xf0, 0x90], vec![0x66, 0xf6, modrm]] {
+                    let cause = if tail == [0xf0, 0x90] {
+                        DecodeError::InvalidEncoding
+                    } else {
+                        DecodeError::Unsupported(UnsupportedFeature::Opcode)
+                    };
+                    let (tail, cause) = byte_prefix_admission::closed_fixture(&tail, cause);
                     let mut bytes = vec![0xf6, modrm];
                     bytes.extend(tail);
                     let length = bytes.len();
-                    cases.push((
-                        CODE,
-                        bytes,
-                        length,
-                        instruction_error(
-                            CODE + 2,
-                            DecodeError::Unsupported(UnsupportedFeature::Opcode),
-                        ),
-                    ));
+                    cases.push((CODE, bytes, length, instruction_error(CODE + 2, cause)));
                 }
             }
             cases.push((

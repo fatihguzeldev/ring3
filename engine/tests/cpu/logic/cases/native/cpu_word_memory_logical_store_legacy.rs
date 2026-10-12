@@ -342,7 +342,7 @@ fn word_memory_logical_store_input_bank() -> (Vec<u8>, Vec<LogicalStoreInputGrou
         bank[offset..offset + 12].copy_from_slice(&prefix);
         bank[offset + 12..offset + 29].copy_from_slice(&body);
         bank[offset + 29..offset + 40]
-            .copy_from_slice(&[0x0f, 0x0b, 0x66, 0x83, 0xd7, 0, 0x0f, 0x92, 0xc7, 0xeb, 0]);
+            .copy_from_slice(&[0xf0, 0x90, 0x66, 0x83, 0xd7, 0, 0x0f, 0x92, 0xc7, 0xeb, 0]);
         control.extend([
             (0x1000 + offset as u32, 29),
             (0x1000 + offset as u32 + 31, 9),
@@ -380,7 +380,7 @@ fn word_memory_logical_store_input_bank() -> (Vec<u8>, Vec<LogicalStoreInputGrou
         bank[offset..offset + bytes.len()].copy_from_slice(&bytes);
     }
     bank[0xe00..0xe03].copy_from_slice(&[0x90, 0xeb, 0]);
-    bank[0xf00..0xf02].copy_from_slice(&[0x0f, 0x0b]);
+    bank[0xf00..0xf02].copy_from_slice(&[0xf0, 0x90]);
     let groups = vec![
         LogicalStoreInputGroup {
             id: "main",

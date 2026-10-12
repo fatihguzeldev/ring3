@@ -238,11 +238,13 @@ fn word_moffs_prefixes_lock_and_ignored_byte_width_neighbors_stay_precise() {
             }
         }
         let bytes = encoding(opcode - 1, 0xf3f0_6766);
-        assert_eq!(
-            decode_one(&code_space(CODE, &bytes), GuestAddress(CODE)).err(),
-            Some(DecodeError::Unsupported(UnsupportedFeature::Opcode)),
-            "{bytes:02x?}"
-        );
+        if !word_prefix::admit_if_new_prefix(&bytes) {
+            assert_eq!(
+                decode_one(&code_space(CODE, &bytes), GuestAddress(CODE)).err(),
+                Some(DecodeError::Unsupported(UnsupportedFeature::Opcode)),
+                "{bytes:02x?}"
+            );
+        }
     }
 }
 
@@ -463,7 +465,7 @@ fn word_moffs_late_refusal_preserves_full_arena_and_both_owners() {
     let mut bytes = encoding(0xa1, 0xf3f0_6766);
     bytes.extend(encoding(0xa3, u32::MAX));
     let refused_pc = CODE + bytes.len() as u32;
-    bytes.extend([0x0f, 0x0b]);
+    bytes.extend([0xf0, 0x90]);
     let refused_length = bytes.len() as u32;
     bytes.resize(256, 0x90);
     bytes.extend([0xeb, 0]);
@@ -479,7 +481,7 @@ fn word_moffs_late_refusal_preserves_full_arena_and_both_owners() {
     let resident_pointer = engine.resident_bytes(resident).unwrap().as_ptr();
     let error = CompileError::Instruction {
         pc: GuestAddress(refused_pc),
-        cause: InstructionError::Decode(DecodeError::Unsupported(UnsupportedFeature::Opcode)),
+        cause: InstructionError::Decode(DecodeError::InvalidEncoding),
     };
     for is_resident in [false, true] {
         for entries in [false, true] {

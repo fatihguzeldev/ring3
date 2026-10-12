@@ -339,13 +339,7 @@ fn decimal_adjust_strict_prefixes_and_other_decimal_forms_keep_categories() {
     }
     assert_eq!(cases.len(), 72);
     for (mut bytes, error) in cases {
-        // operand-size prefixes remain closed for these byte accumulator forms.
-        let error = if bytes.starts_with(&[0x66, 0x64]) {
-            opcode_error
-        } else {
-            error
-        };
-        if !bytes.starts_with(&[0x66, 0x64]) && prefix_admission::admit_if_new_prefix(&bytes) {
+        if prefix_admission::admit_if_new_prefix(&bytes) {
             continue;
         }
         bytes.extend([0xeb, 0]);
@@ -546,7 +540,7 @@ fn decimal_adjust_mixed_unit_fits_exactly_64_instructions_in_all_six_profiles() 
 fn decimal_adjust_late_refusal_preserves_dirty_full_arena_and_both_owners() {
     let mut bytes = vec![0x27, 0x2f, 0x37, 0x3f, 0xd5, 0xff, 0xd4, 0];
     let refusal_pc = CODE + bytes.len() as u32;
-    bytes.extend([0x0f, 0x0b]);
+    bytes.extend([0xf0, 0x90]);
     let refusal_length = bytes.len() as u32;
     bytes.resize(256, 0x90);
     bytes.extend([0xeb, 0]);
@@ -558,10 +552,7 @@ fn decimal_adjust_late_refusal_preserves_dirty_full_arena_and_both_owners() {
     let replacement_pointer = engine.artifact_bytes().unwrap().as_ptr();
     let resident_bytes = engine.resident_bytes(resident).unwrap().to_vec();
     let resident_pointer = engine.resident_bytes(resident).unwrap().as_ptr();
-    let error = instruction_error(
-        refusal_pc,
-        DecodeError::Unsupported(UnsupportedFeature::Opcode),
-    );
+    let error = instruction_error(refusal_pc, DecodeError::InvalidEncoding);
     for is_resident in [false, true] {
         for entries in [false, true] {
             for (index, byte) in engine.arena_mut().unwrap().iter_mut().enumerate() {

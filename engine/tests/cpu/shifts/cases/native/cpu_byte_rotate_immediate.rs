@@ -215,7 +215,7 @@ while (offset < input.length) {
     } else if (id === 10) {
       assert.equal(u(), 1); const bodyLength = u(), bodyEnd = at + bodyLength, locals = [];
       for (let n = u(); n > 0; n--) locals.push([u(), bytes[at++]]);
-      assert.deepEqual(locals, [[16,0x7f],[1,0x7e]]); assert.equal(bodyEnd, end); at = bodyEnd;
+      assert.deepEqual(locals, [[16,0x7f],[1,0x7e],[10,0x7f]]); assert.equal(bodyEnd, end); at = bodyEnd;
     } else at = end;
     assert.equal(at, end);
   }
@@ -771,7 +771,7 @@ fn each_consumed_byte_versions_same_and_changed_uploads_without_data_currency() 
     assert_eq!(invalidations, 72);
     for entries in [false, true] {
         let pc = 0x1ffb;
-        let mut engine = code(pc, &[0xc0, 0xc0, 2, 0xeb, 0, 0x0f, 0x0b], false);
+        let mut engine = code(pc, &[0xc0, 0xc0, 2, 0xeb, 0, 0xf0, 0x90], false);
         let memory = engine.memory().unwrap();
         let artifacts = [
             compile_region(memory, &[spec(pc, 5)], CompileLimits::default()).unwrap(),
@@ -846,7 +846,7 @@ fn default_caps_and_observed_module_byte_limits_remain_closed() {
             }
         }
         let mut bytes = atom.repeat(64);
-        bytes.extend([0x0f, 0x0b]);
+        bytes.extend([0xf0, 0x90]);
         let engine = code(CODE, &bytes, true);
         let memory = engine.memory().unwrap();
         assert_eq!(

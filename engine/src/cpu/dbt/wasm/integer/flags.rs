@@ -8,9 +8,9 @@ pub(super) fn arithmetic_flags(
 ) {
     code.local_get(FLAGS)
         .i32_const(if matches!(carry, CarryFlag::Preserve) {
-            0x401
+            !0x8d6
         } else {
-            0x400
+            !0x8d7
         })
         .i32_and()
         .i32_const(2)
@@ -61,7 +61,7 @@ pub(super) fn arithmetic_flags(
 pub(super) fn logical_flags(code: &mut InstructionSink<'_>, sign_bit: i32) {
     // af is undefined on x86; this profile deterministically clears it with cf/of.
     code.local_get(FLAGS)
-        .i32_const(0x400)
+        .i32_const(!0x8d7)
         .i32_and()
         .i32_const(2)
         .i32_or();

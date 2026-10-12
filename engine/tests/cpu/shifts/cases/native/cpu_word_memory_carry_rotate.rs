@@ -302,15 +302,17 @@ fn word_memory_carry_rotate_prefixes_sal_and_admitted_neighbors_keep_precise_bou
                     word_prefix::admitted(&prefixed);
                     continue;
                 }
-                assert_eq!(
-                    decode_one(&code_space(CODE, &prefixed), GuestAddress(CODE)).err(),
-                    Some(if prefix == 0xf0 {
-                        DecodeError::InvalidEncoding
-                    } else {
-                        unsupported
-                    }),
-                    "{prefixed:02x?}"
-                );
+                if !word_prefix::admit_if_new_prefix(&prefixed) {
+                    assert_eq!(
+                        decode_one(&code_space(CODE, &prefixed), GuestAddress(CODE)).err(),
+                        Some(if prefix == 0xf0 {
+                            DecodeError::InvalidEncoding
+                        } else {
+                            unsupported
+                        }),
+                        "{prefixed:02x?}"
+                    );
+                }
             }
             for prefix in [0x26, 0x2e, 0x36, 0x3e, 0x64, 0x65] {
                 let prefixed = [vec![prefix], bytes.clone()].concat();
@@ -318,11 +320,13 @@ fn word_memory_carry_rotate_prefixes_sal_and_admitted_neighbors_keep_precise_bou
             }
             let mut byte_form = bytes.clone();
             byte_form[1] -= 1;
-            assert_eq!(
-                decode_one(&code_space(CODE, &byte_form), GuestAddress(CODE)).err(),
-                Some(unsupported),
-                "{byte_form:02x?}"
-            );
+            if !word_prefix::admit_if_new_prefix(&byte_form) {
+                assert_eq!(
+                    decode_one(&code_space(CODE, &byte_form), GuestAddress(CODE)).err(),
+                    Some(unsupported),
+                    "{byte_form:02x?}"
+                );
+            }
             let register_form = instruction(opcode, extension, &[0xc1], 33);
             assert!(matches!(
                 decode_one(&code_space(CODE, &register_form), GuestAddress(CODE))
@@ -509,7 +513,7 @@ fn word_memory_carry_rotate_late_refusal_preserves_arena_and_both_owners() {
         }
     }
     let refused_pc = CODE + bytes.len() as u32;
-    bytes.extend([0x0f, 0x0b]);
+    bytes.extend([0xf0, 0x90]);
     let refused_length = bytes.len() as u32;
     bytes.resize(256, 0x90);
     bytes.extend([0xeb, 0]);
@@ -525,7 +529,7 @@ fn word_memory_carry_rotate_late_refusal_preserves_arena_and_both_owners() {
     let resident_pointer = engine.resident_bytes(resident).unwrap().as_ptr();
     let error = CompileError::Instruction {
         pc: GuestAddress(refused_pc),
-        cause: InstructionError::Decode(DecodeError::Unsupported(UnsupportedFeature::Opcode)),
+        cause: InstructionError::Decode(DecodeError::InvalidEncoding),
     };
     for is_resident in [false, true] {
         for entries in [false, true] {

@@ -322,11 +322,13 @@ for (let profile = 0; profile < 6; profile++) {
       assert.equal(leb(), 1);
       const body = leb();
       assert.equal(cursor + body, end);
-      assert.equal(leb(), 2);
+      assert.equal(leb(), 3);
       assert.equal(leb(), 16);
       assert.equal(bytes[cursor++], 127);
       assert.equal(leb(), 1);
       assert.equal(bytes[cursor++], 126);
+      assert.equal(leb(), 10);
+      assert.equal(bytes[cursor++], 127);
       found = true;
     }
     cursor = end;
@@ -554,7 +556,7 @@ fn caps_and_late_sar_refusals_preserve_full_arena_and_prior_owners() {
             let mut engine = prepare(0x1000, &row);
             for (pc, bytes) in [
                 (0x3000, row.to_vec()),
-                (0x5000, vec![0x66, 0xd1, 0xfc, 0x90, 0x0f, 0x0b, 0xeb, 0]),
+                (0x5000, vec![0x66, 0xd1, 0xfc, 0x90, 0xf0, 0x90, 0xeb, 0]),
             ] {
                 engine.map(pc, 1, 7).unwrap();
                 upload(&mut engine, pc, &bytes);
@@ -572,9 +574,7 @@ fn caps_and_late_sar_refusals_preserve_full_arena_and_prior_owners() {
             let before = engine.arena().to_vec();
             let error = CompileError::Instruction {
                 pc: GuestAddress(0x5004),
-                cause: InstructionError::Decode(DecodeError::Unsupported(
-                    UnsupportedFeature::Opcode,
-                )),
+                cause: InstructionError::Decode(DecodeError::InvalidEncoding),
             };
             let expected = if resident {
                 HostError::Resident(RegistryError::Compile(error))

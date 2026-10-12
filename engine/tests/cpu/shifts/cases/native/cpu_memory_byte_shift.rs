@@ -1,3 +1,5 @@
+use super::support_prefix_admission as prefix_admission;
+
 use super::support_byte_prefix_admission as byte_prefix_admission;
 
 use ring3_engine::{
@@ -377,11 +379,12 @@ fn invalid_second_memory_instruction_preserves_both_published_owners_and_install
     for (_, field) in KINDS {
         for owner in [Owner::Replacement, Owner::Resident] {
             for entries in [false, true] {
-                let mut engine = code(
-                    CODE,
-                    &[0xd0, field << 3 | 3, 0x66, 0xc0, field << 3 | 3, 2],
-                    false,
+                let (tail, cause) = prefix_admission::refusal_after_prefix_admission(
+                    vec![0x66, 0xc0, field << 3 | 3, 2],
+                    DecodeError::Unsupported(UnsupportedFeature::Opcode),
                 );
+                let bytes = [vec![0xd0, field << 3 | 3], tail].concat();
+                let mut engine = code(CODE, &bytes, false);
                 engine.map(KEEP, 1, 7).unwrap();
                 upload(&mut engine, KEEP, &[0x90, 0xeb, 0]);
                 engine.map(DATA, 1, 3).unwrap();
@@ -399,10 +402,7 @@ fn invalid_second_memory_instruction_preserves_both_published_owners_and_install
                     .snapshot_code(GuestAddress(CODE), 4096)
                     .unwrap();
                 let before = publication(&engine, keep);
-                let error = instruction_error(
-                    CODE + 2,
-                    InstructionError::Decode(DecodeError::Unsupported(UnsupportedFeature::Opcode)),
-                );
+                let error = instruction_error(CODE + 2, InstructionError::Decode(cause));
                 let expected = match owner {
                     Owner::Replacement => HostError::Compile(error),
                     Owner::Resident => HostError::Resident(RegistryError::Compile(error)),

@@ -13,6 +13,9 @@ mod cpu_carry_control;
 #[path = "cases/native/cpu_count_branches.rs"]
 mod cpu_count_branches;
 
+#[path = "cases/native/cpu_flags_exceptions.rs"]
+mod cpu_flags_exceptions;
+
 #[path = "cases/native/cpu_pause.rs"]
 mod cpu_pause;
 

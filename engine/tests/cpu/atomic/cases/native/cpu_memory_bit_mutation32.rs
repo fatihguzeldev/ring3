@@ -280,7 +280,7 @@ a.ok(WebAssembly.validate(b.subarray(at,end)));const m=new WebAssembly.Module(b.
 a.deepEqual(WebAssembly.Module.imports(m),[{module:'env',name:'memory',kind:'memory'},
 ...[resident?'guard_resident':'guard','read32',resident?'store_resident32':'store32'].map(name=>({module:'ring3',name,kind:'function'}))]);
 a.deepEqual(WebAssembly.Module.exports(m),[{name:'run',kind:'function'}]);
-const p={i:at+8};let found=false;while(p.i<end){const id=b[p.i++],stop=u(p)+p.i;if(id===10){a.equal(u(p),1);u(p);const c=u(p),locals=[];for(let i=0;i<c;i++)locals.push([u(p),b[p.i++]]);a.deepEqual(locals,[[16,127],[1,126],[6,127]]);found=true;}p.i=stop;}
+const p={i:at+8};let found=false;while(p.i<end){const id=b[p.i++],stop=u(p)+p.i;if(id===10){a.equal(u(p),1);u(p);const c=u(p),locals=[];for(let i=0;i<c;i++)locals.push([u(p),b[p.i++]]);a.deepEqual(locals,[[16,127],[1,126],[10,127]]);found=true;}p.i=stop;}
 a.ok(found);at=end;n++;}a.equal(n,12);
 "#]).stdin(Stdio::piped()).stderr(Stdio::piped()).spawn().unwrap();
     child.stdin.take().unwrap().write_all(&modules).unwrap();

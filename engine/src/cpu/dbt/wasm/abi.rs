@@ -5,13 +5,13 @@ use crate::abi::{
     x86::{
         ACCESS_LENGTH_OFFSET, ACCESS_OFFSET, DETAIL_OFFSET, EFLAGS_OFFSET, EIP_OFFSET, EXIT_SIZE,
         EXIT_VERSION_5, FAULT_ADDRESS_OFFSET, REASON_OFFSET, REGISTERS_OFFSET, RETIRED_OFFSET,
-        STATE_SIZE,
+        STATE_METADATA_OFFSET, STATE_SIZE,
     },
 };
 
 use super::locals::{
-    BUDGET, CANCEL_PTR, DETAIL, EIP, EXIT_PTR, FAULT_ACCESS, FAULT_ADDRESS, FAULT_LENGTH, FLAGS,
-    MEMORY_BYTES, REASON, RETIRED, STATE_PTR,
+    BUDGET, CANCEL_PTR, DEBUG_SHADOW, DETAIL, EIP, EXIT_PTR, FAULT_ACCESS, FAULT_ADDRESS,
+    FAULT_LENGTH, FLAGS, MEMORY_BYTES, REASON, RETIRED, SNAPSHOT_SHADOW, SNAPSHOT_TF, STATE_PTR,
 };
 
 pub(super) fn preflight(sink: &mut InstructionSink<'_>) {
@@ -43,24 +43,39 @@ pub(super) fn preflight(sink: &mut InstructionSink<'_>) {
         }
     }
 
-    for (offset, expected) in [
-        (0, u32::from_le_bytes(*b"R3ST")),
-        (4, header_version()),
-        (8, STATE_SIZE as u32),
-        (12, 0),
-    ] {
+    for (offset, expected) in [(0, u32::from_le_bytes(*b"R3ST")), (8, STATE_SIZE as u32)] {
         load(sink, STATE_PTR, offset);
         sink.i32_const(expected as i32).i32_ne();
         fail_if(sink, 2);
     }
+    load(sink, STATE_PTR, 4);
+    sink.i32_const(header_version() as i32).i32_ne();
+    load(sink, STATE_PTR, 4);
+    sink.i32_const(2 | (i32::from(X86_INTEGER_PROFILE) << 16))
+        .i32_ne()
+        .i32_and();
+    fail_if(sink, 2);
+    load(sink, STATE_PTR, STATE_METADATA_OFFSET);
+    load(sink, STATE_PTR, 4);
+    sink.i32_const(2 | (i32::from(X86_INTEGER_PROFILE) << 16))
+        .i32_eq()
+        .i32_gt_u();
+    fail_if(sink, 2);
     load(sink, STATE_PTR, EFLAGS_OFFSET);
     sink.local_set(FLAGS)
         .local_get(FLAGS)
         .i32_const(2)
         .i32_and()
         .i32_eqz()
-        .local_get(FLAGS)
-        .i32_const(!0xcd7)
+        .local_get(FLAGS);
+    load(sink, STATE_PTR, 4);
+    sink.i32_const(header_version() as i32)
+        .i32_eq()
+        .if_(BlockType::Result(wasm_encoder::ValType::I32))
+        .i32_const(!crate::abi::x86::LEGACY_FLAGS_MASK as i32)
+        .else_()
+        .i32_const(!crate::abi::x86::USER_FLAGS_MASK as i32)
+        .end()
         .i32_and()
         .i32_or();
     fail_if(sink, 2);
@@ -75,6 +90,8 @@ pub(super) fn load_state(sink: &mut InstructionSink<'_>) {
     sink.local_set(EIP);
     load(sink, STATE_PTR, EFLAGS_OFFSET);
     sink.local_set(FLAGS);
+    load(sink, STATE_PTR, STATE_METADATA_OFFSET);
+    sink.local_set(DEBUG_SHADOW);
 }
 
 pub(super) fn work_preflight(sink: &mut InstructionSink<'_>) {
@@ -121,6 +138,17 @@ pub(super) fn flush(
     }
     store_local(sink, STATE_PTR, EIP_OFFSET, EIP);
     store_local(sink, STATE_PTR, EFLAGS_OFFSET, FLAGS);
+    store_local(sink, STATE_PTR, STATE_METADATA_OFFSET, DEBUG_SHADOW);
+    sink.local_get(FLAGS)
+        .i32_const(!crate::abi::x86::LEGACY_FLAGS_MASK as i32)
+        .i32_and()
+        .local_get(DEBUG_SHADOW)
+        .i32_or()
+        .if_(BlockType::Empty)
+        .local_get(STATE_PTR)
+        .i32_const(2 | (i32::from(X86_INTEGER_PROFILE) << 16))
+        .i32_store(memarg(4))
+        .end();
 
     let detail_fields = [
         (DETAIL_OFFSET, DETAIL),
@@ -175,6 +203,53 @@ pub(super) fn flush(
             store_local(sink, EXIT_PTR, offset, local);
         }
     }
+    sink.local_get(REASON)
+        .i32_const(16)
+        .i32_ge_u()
+        .if_(BlockType::Empty)
+        .local_get(EXIT_PTR)
+        .i32_const(7 | (i32::from(X86_INTEGER_PROFILE) << 16))
+        .i32_store(memarg(4));
+    if !(memory || gates || cpu) {
+        for (offset, local) in detail_fields {
+            store_local(sink, EXIT_PTR, offset, local);
+        }
+    }
+    sink.end();
+}
+
+pub(super) fn begin_instruction(sink: &mut InstructionSink<'_>) {
+    sink.local_get(FLAGS)
+        .i32_const(0x100)
+        .i32_and()
+        .local_set(SNAPSHOT_TF)
+        .local_get(DEBUG_SHADOW)
+        .local_set(SNAPSHOT_SHADOW)
+        .i32_const(0)
+        .local_set(DEBUG_SHADOW);
+}
+
+pub(super) fn inhibit_debug_after_ss_load(sink: &mut InstructionSink<'_>) {
+    // consecutive ss loads do not extend the first instruction's inhibition.
+    sink.local_get(SNAPSHOT_SHADOW)
+        .i32_eqz()
+        .if_(BlockType::Empty)
+        .i32_const(1)
+        .local_set(DEBUG_SHADOW)
+        .i32_const(0)
+        .local_set(SNAPSHOT_TF)
+        .end();
+}
+
+pub(super) fn debug_after_retirement(sink: &mut InstructionSink<'_>, exit_depth: u32) {
+    sink.local_get(SNAPSHOT_TF)
+        .if_(BlockType::Empty)
+        .i32_const(16)
+        .local_set(REASON);
+    for local in [DETAIL, FAULT_ADDRESS, FAULT_ACCESS, FAULT_LENGTH] {
+        sink.i32_const(0).local_set(local);
+    }
+    sink.br(exit_depth + 1).end();
 }
 
 pub(super) fn safepoint(sink: &mut InstructionSink<'_>, exit_depth: u32) {

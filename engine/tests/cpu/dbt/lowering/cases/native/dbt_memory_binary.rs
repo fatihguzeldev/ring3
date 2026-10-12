@@ -346,6 +346,8 @@ fn standalone_code(bytes: &[u8]) -> AddressSpace {
 }
 
 fn standalone_rejected(bytes: &[u8], expected: CompileError) {
+    let (bytes, expected) = prefix_admission::compile_refusal(bytes, 1, expected);
+    let bytes = bytes.as_slice();
     let memory = standalone_code(bytes);
     let specs = [BlockSpec {
         entry: GuestAddress(0x1000),
@@ -381,6 +383,8 @@ fn instruction_error(cause: InstructionError) -> CompileError {
 }
 
 fn embedded_rejected(bytes: &[u8], expected: CompileError) {
+    let (bytes, expected) = prefix_admission::compile_refusal(bytes, 1, expected);
+    let bytes = bytes.as_slice();
     for entries in [false, true] {
         let mut instance = engine(bytes);
         describe(&mut instance, 0x1000, bytes.len());

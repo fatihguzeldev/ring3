@@ -361,7 +361,7 @@ fn store_only_declarations(bytes: &[u8], owner: Owner) {
     let length = unsigned(section, &mut cursor);
     assert_eq!(cursor + length, section.len());
     assert_eq!(unsigned(section, &mut cursor), 3);
-    for (count, kind) in [(16, 0x7f), (1, 0x7e), (6, 0x7f)] {
+    for (count, kind) in [(16, 0x7f), (1, 0x7e), (10, 0x7f)] {
         assert_eq!(unsigned(section, &mut cursor), count);
         assert_eq!(section[cursor], kind);
         cursor += 1;

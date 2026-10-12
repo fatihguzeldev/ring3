@@ -174,12 +174,13 @@ while(at<b.length){const resident=b[at++],n=b.readUInt32LE(at);at+=4;
 }
 
 #[test]
-fn late_prefix_failure_preserves_previous_owner_and_complete_arena() {
+fn late_malformed_failure_preserves_previous_owner_and_complete_arena() {
+    prefix_admission::admitted(&[0x66, 0xd7]);
     for resident in [false, true] {
         let mut engine = EngineInstance::new(2, 0x5152_5354_5556_5758).unwrap();
         for (pc, bytes) in [
             (PC, &[0x90, 0xeb, 0][..]),
-            (0x3000, &[0x90, 0xd7, 0x66, 0xd7][..]),
+            (0x3000, &[0x90, 0xd7, 0xf0, 0x90][..]),
         ] {
             engine.map(pc, 1, 7).unwrap();
             engine.arena_mut().unwrap()[140..140 + bytes.len()].copy_from_slice(bytes);
@@ -194,6 +195,7 @@ fn late_prefix_failure_preserves_previous_owner_and_complete_arena() {
         let before = engine.arena().to_vec();
         let error = compile(&mut engine, resident, false, 1).unwrap_err();
         assert!(format!("{error:?}").contains("GuestAddress(12290)"));
+        assert!(format!("{error:?}").contains("InvalidEncoding"));
         assert_eq!(engine.arena(), before);
         assert_eq!(module(&engine, id), old);
     }

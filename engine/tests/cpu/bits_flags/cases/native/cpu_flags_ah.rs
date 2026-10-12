@@ -143,7 +143,10 @@ fn strict_prefixes_and_single_byte_fetch_preserve_fault_and_wrap_boundaries() {
                 }
                 _ => DecodeError::Unsupported(UnsupportedFeature::Opcode),
             };
-            if matches!(prefix, 0x26 | 0x2e | 0x36 | 0x3e | 0x64 | 0x65 | 0x67) {
+            if matches!(
+                prefix,
+                0x66 | 0x26 | 0x2e | 0x36 | 0x3e | 0x64 | 0x65 | 0x67
+            ) {
                 prefix_admission::admitted(&[prefix, opcode]);
                 continue;
             }
@@ -207,22 +210,22 @@ fn strict_prefixes_and_single_byte_fetch_preserve_fault_and_wrap_boundaries() {
 
 #[test]
 fn late_status_byte_failures_preserve_both_publications() {
-    let opcode = DecodeError::Unsupported(UnsupportedFeature::Opcode);
+    let malformed = DecodeError::InvalidEncoding;
     let mut refusals = 0;
     for first in [0x9f, 0x9e] {
         let other = if first == 0x9f { 0x9e } else { 0x9f };
-        for (pc, bytes, declared, expected) in [
+        for (pc, mut bytes, declared, expected) in [
             (
                 CODE,
-                vec![first, 0x0f, 0x0b],
+                vec![first, 0xf0, 0x90],
                 3,
-                instruction_error(CODE + 1, opcode),
+                instruction_error(CODE + 1, malformed),
             ),
             (
                 CODE,
                 vec![first, 0x66, other],
                 3,
-                instruction_error(CODE + 1, opcode),
+                instruction_error(CODE + 1, malformed),
             ),
             (
                 0x1ffe,
@@ -234,6 +237,10 @@ fn late_status_byte_failures_preserve_both_publications() {
                 ),
             ),
         ] {
+            if bytes.get(1) == Some(&0x66) {
+                prefix_admission::admitted(&bytes[1..]);
+                bytes[1..].copy_from_slice(&prefix_admission::MALFORMED_BYTES);
+            }
             for resident in [false, true] {
                 for entries in [false, true] {
                     let mut engine = code(pc, &bytes);

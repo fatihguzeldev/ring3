@@ -667,13 +667,7 @@ pub(in crate::cpu::dbt) fn emit(
     let mut exports = ExportSection::new();
     exports.export("run", ExportKind::Func, function_index);
     module.section(&exports);
-    let mut declarations = vec![(16, ValType::I32), (1, ValType::I64)];
-    if has_memory || has_gates {
-        declarations.push((6, ValType::I32));
-    }
-    if has_repeat {
-        declarations.push((1, ValType::I32));
-    }
+    let declarations = vec![(16, ValType::I32), (1, ValType::I64), (10, ValType::I32)];
     let mut function = Function::new(declarations);
     let mut code = function.instructions();
     if let Some(binding) = binding {
@@ -786,7 +780,9 @@ fn emit_block(code: &mut InstructionSink<'_>, block: &CompiledBlock, imports: me
         code.end();
         let remaining = count - index as u32 - 1;
         abi::safepoint(code, remaining + 2);
+        abi::begin_instruction(code);
         integer::instruction(code, instruction, imports, remaining + 2);
+        abi::debug_after_retirement(code, remaining + 2);
     }
     code.br(1).end();
 }

@@ -477,7 +477,7 @@ fn standalone_register_forms_match_explicit_and_cold_artifacts() {
             vec![0x83, 0xc0 | extension << 3, 0xff],
         ] {
             let mut bytes = instruction;
-            bytes.extend_from_slice(&[0xeb, 0, 0x0f, 0x0b]);
+            bytes.extend_from_slice(&[0xeb, 0, 0xf0, 0x90]);
             let memory = code(CODE, &bytes);
             let specs = [spec(CODE, bytes.len() - 2)];
             let explicit = compile_region(&memory, &specs, CompileLimits::default()).unwrap();
@@ -508,7 +508,7 @@ fn standalone_memory_stays_excluded_in_all_four_apis_before_poison() {
             continue;
         }
         let mut bytes = instruction.to_vec();
-        bytes.extend_from_slice(&[0x0f, 0x0b]);
+        bytes.extend_from_slice(&[0xf0, 0x90]);
         let memory = code(CODE, &bytes);
         let expected = Some(instruction_error(
             CODE,
@@ -579,7 +579,7 @@ fn contains(bytes: &[u8], name: &[u8]) -> bool {
 fn bound_explicit_and_entry_forms_admit_without_data_and_preserve_arena() {
     for (_, instruction, destination, source) in FORMS {
         let mut bytes = instruction.to_vec();
-        bytes.extend_from_slice(&[0xeb, 0, 0x0f, 0x0b]);
+        bytes.extend_from_slice(&[0xeb, 0, 0xf0, 0x90]);
         let length = bytes.len() - 2;
         for owner in [Owner::Replacement, Owner::Resident] {
             for entries in [false, true] {
@@ -680,14 +680,15 @@ fn carry_prefix_then_unsupported_width_refusal_preserves_prior_owners_and_public
                 engine.compile(1).unwrap();
                 describe(&mut engine, KEEP, 3, false);
                 let keep = engine.compile_resident(1).unwrap().get();
-                let bytes = [rm, 0xd0, 0x66, rm - 1, 0xd0];
+                let (tail, cause) = prefix_admission::refusal_after_prefix_admission(
+                    vec![0x66, rm - 1, 0xd0],
+                    DecodeError::Unsupported(UnsupportedFeature::Opcode),
+                );
+                let bytes = [vec![rm, 0xd0], tail].concat();
                 upload(&mut engine, CODE, &bytes);
                 describe(&mut engine, CODE, bytes.len(), entries);
                 let before = saved(&engine, keep);
-                let expected = instruction_error(
-                    CODE + 2,
-                    InstructionError::Decode(DecodeError::Unsupported(UnsupportedFeature::Opcode)),
-                );
+                let expected = instruction_error(CODE + 2, InstructionError::Decode(cause));
                 let error = match owner {
                     Owner::Replacement => HostError::Compile(expected),
                     Owner::Resident => HostError::Resident(RegistryError::Compile(expected)),
@@ -725,7 +726,7 @@ fn carry_instructions_charge_caps_before_later_poison() {
             64
         );
         let mut bytes = [rm, 0xd0].repeat(64);
-        bytes.extend_from_slice(&[0x0f, 0x0b]);
+        bytes.extend_from_slice(&[0xf0, 0x90]);
         let memory = code(CODE, &bytes);
         assert_eq!(
             prepare_region(

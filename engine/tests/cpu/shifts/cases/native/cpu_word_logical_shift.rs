@@ -1,3 +1,5 @@
+use super::support_prefix_admission as prefix_admission;
+
 use ring3_engine::{abi::arena::TRANSFER_OFFSET, process::EngineInstance};
 use std::{
     fs::OpenOptions,
@@ -299,10 +301,12 @@ fn word_logical_shift_strict_fetch_top_and_consumed_currency_stay_exact() {
         );
         let mut byte = instruction.to_vec();
         byte[1] -= 1;
-        assert_eq!(
-            decode_one(fixture(PC, &byte).memory().unwrap(), GuestAddress(PC)).unwrap_err(),
-            unsupported
-        );
+        if !prefix_admission::admit_if_new_prefix(&byte) {
+            assert_eq!(
+                decode_one(fixture(PC, &byte).memory().unwrap(), GuestAddress(PC)).unwrap_err(),
+                unsupported
+            );
+        }
         for cut in 1..instruction.len() {
             let pc = 0x2000 - cut as u32;
             assert_eq!(
@@ -356,11 +360,14 @@ fn word_logical_shift_strict_fetch_top_and_consumed_currency_stay_exact() {
             if extension < 4 {
                 bytes.insert(0, 0x66);
             }
-            assert_eq!(
-                decode_one(fixture(PC, &bytes).memory().unwrap(), GuestAddress(PC)).unwrap_err(),
-                unsupported,
-                "{bytes:02x?}"
-            );
+            if !prefix_admission::admit_if_new_prefix(&bytes) {
+                assert_eq!(
+                    decode_one(fixture(PC, &bytes).memory().unwrap(), GuestAddress(PC))
+                        .unwrap_err(),
+                    unsupported,
+                    "{bytes:02x?}"
+                );
+            }
         }
     }
 }
@@ -402,8 +409,8 @@ while (at < bytes.length) {
         assert.equal(leb(), 1);
         const body = leb();
         assert.equal(at + body, end);
-        assert.equal(leb(), 2);
-        assert.deepEqual([leb(), bytes[at++], leb(), bytes[at++]], [16, 127, 1, 126]);
+        assert.equal(leb(), 3);
+        assert.deepEqual([leb(), bytes[at++], leb(), bytes[at++], leb(), bytes[at++]], [16, 127, 1, 126, 10, 127]);
     }
     at = end;
 }

@@ -361,8 +361,8 @@ const m=new WebAssembly.Module(b); assert.deepEqual(WebAssembly.Module.imports(m
 assert.deepEqual(WebAssembly.Module.exports(m),[{name:'run',kind:'function'}]);
 let at=8;const leb=()=>{let n=0,s=1;for(let i=0;i<5;i++){assert.ok(at<b.length);const v=b[at++];n+=(v&127)*s;if(!(v&128))return n;s*=128;}assert.fail('leb');};
 while(at<b.length){const tag=b[at++],size=leb(),end=at+size;assert.ok(end<=b.length);
- if(tag===10){assert.equal(leb(),1);const body=leb();assert.equal(at+body,end);assert.equal(leb(),2);
-  assert.deepEqual([leb(),b[at++],leb(),b[at++]],[16,127,1,126]);}at=end;}
+ if(tag===10){assert.equal(leb(),1);const body=leb();assert.equal(at+body,end);assert.equal(leb(),3);
+  assert.deepEqual([leb(),b[at++],leb(),b[at++],leb(),b[at++]],[16,127,1,126,10,127]);}at=end;}
 assert.equal(at,b.length);
 "#, guard]).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped()).spawn().unwrap();
     child.stdin.take().unwrap().write_all(bytes).unwrap();

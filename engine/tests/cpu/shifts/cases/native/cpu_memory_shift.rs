@@ -249,7 +249,7 @@ fn assert_rmw_module(engine: &EngineInstance, owner: Owner, id: u64) {
     let mut body = take(&mut bodies, length);
     assert!(bodies.is_empty());
     assert_eq!(unsigned(&mut body), 3);
-    for expected in [(16, 0x7f), (1, 0x7e), (6, 0x7f)] {
+    for expected in [(16, 0x7f), (1, 0x7e), (10, 0x7f)] {
         assert_eq!((unsigned(&mut body), byte(&mut body)), expected);
     }
     let mut constants = vec![KEY as u32, (KEY >> 32) as u32];
@@ -602,7 +602,7 @@ fn operand_splitting_extents_or_seeds_fail_before_replacing_either_prior_owner()
 
 #[test]
 fn adjacent_memory_entries_keep_exact_instruction_and_terminal_jump_boundaries() {
-    let bytes = [0xd1, 0x23, 0xc1, 0x7c, 0x24, 8, 0, 0xeb, 0, 0x0f, 0x0b];
+    let bytes = [0xd1, 0x23, 0xc1, 0x7c, 0x24, 8, 0, 0xeb, 0, 0xf0, 0x90];
     for owner in [Owner::Replacement, Owner::Resident] {
         for entries in [false, true] {
             let mut engine = code(CODE, &bytes, true);
@@ -636,7 +636,7 @@ fn memory_shift_charges_default_sixty_four_limit_before_poison_atomically() {
         admitted.extend([0xeb, 0]);
         let mut excessive = vec![0x90; 63];
         excessive.extend_from_slice(instruction);
-        excessive.extend([0x0f, 0x0b]);
+        excessive.extend([0xf0, 0x90]);
         for owner in [Owner::Replacement, Owner::Resident] {
             for entries in [false, true] {
                 let (mut engine, keep) = prior_owners();

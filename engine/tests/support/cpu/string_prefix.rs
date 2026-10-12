@@ -10,6 +10,21 @@ use ring3_engine::cpu::{
 // literal opcode/prefix oracle for the formerly refused string test rows.
 // non-string neighbors retain their old opcode-refusal assertion.
 pub fn check(decoded: Result<DecodedInstruction, DecodeError>, bytes: &[u8]) {
+    let prefixes = &bytes[..bytes.len() - 1];
+    for group in [&[0x66][..], &[0xf0][..], &[0xf2, 0xf3][..]] {
+        if prefixes
+            .iter()
+            .filter(|prefix| group.contains(prefix))
+            .count()
+            > 1
+        {
+            assert_eq!(
+                decoded.unwrap_err(),
+                DecodeError::Unsupported(UnsupportedFeature::Opcode)
+            );
+            return;
+        }
+    }
     let opcode = *bytes.last().unwrap();
     let kind = match opcode {
         0xa4 | 0xa5 => StringKind::Move,

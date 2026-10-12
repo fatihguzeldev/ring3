@@ -347,15 +347,17 @@ fn word_division_prefixes_and_duplicate_division_neighbors_have_exact_categories
                     word_prefix::admitted(&prefixed);
                     continue;
                 }
-                assert_eq!(
-                    decode_one(&code_space(CODE, &prefixed), GuestAddress(CODE)).err(),
-                    Some(if prefix == 0xf0 {
-                        DecodeError::InvalidEncoding
-                    } else {
-                        opcode
-                    }),
-                    "{prefixed:02x?}"
-                );
+                if !word_prefix::admit_if_new_prefix(&prefixed) {
+                    assert_eq!(
+                        decode_one(&code_space(CODE, &prefixed), GuestAddress(CODE)).err(),
+                        Some(if prefix == 0xf0 {
+                            DecodeError::InvalidEncoding
+                        } else {
+                            opcode
+                        }),
+                        "{prefixed:02x?}"
+                    );
+                }
             }
             for prefix in [0x26, 0x2e, 0x36, 0x3e, 0x64, 0x65] {
                 let prefixed = [vec![prefix], bytes.clone()].concat();
@@ -376,30 +378,36 @@ fn word_division_prefixes_and_duplicate_division_neighbors_have_exact_categories
         for tail in [&[0xc0][..], &[0xc2][..], &[0x03][..], &[0x04, 0x8b][..]] {
             let mut bytes = instruction(extension, tail);
             bytes.insert(0, 0x66);
-            assert_eq!(
-                decode_one(&code_space(CODE, &bytes), GuestAddress(CODE)).err(),
-                Some(opcode),
-                "{bytes:02x?}"
-            );
+            if !word_prefix::admit_if_new_prefix(&bytes) {
+                assert_eq!(
+                    decode_one(&code_space(CODE, &bytes), GuestAddress(CODE)).err(),
+                    Some(opcode),
+                    "{bytes:02x?}"
+                );
+            }
         }
     }
     for extension in [6, 7] {
         for modrm in [0xc0, 0x03] {
             let bytes = [0x66, 0xf6, modrm | extension << 3];
-            assert_eq!(
-                decode_one(&code_space(CODE, &bytes), GuestAddress(CODE)).err(),
-                Some(opcode)
-            );
+            if !word_prefix::admit_if_new_prefix(&bytes) {
+                assert_eq!(
+                    decode_one(&code_space(CODE, &bytes), GuestAddress(CODE)).err(),
+                    Some(opcode)
+                );
+            }
         }
     }
     for bytes in [
         &[0x66, 0xf7, 0xc8, 0x66, 0x67][..],
         &[0x66, 0xf7, 0x0b, 0x66, 0x67][..],
     ] {
-        assert_eq!(
-            decode_one(&code_space(CODE, bytes), GuestAddress(CODE)).err(),
-            Some(opcode)
-        );
+        if !word_prefix::admit_if_new_prefix(&bytes) {
+            assert_eq!(
+                decode_one(&code_space(CODE, bytes), GuestAddress(CODE)).err(),
+                Some(opcode)
+            );
+        }
     }
     for extension in [4, 5] {
         for tail in [&[0xc0][..], &[0xc2][..], &[0x03][..]] {
@@ -575,7 +583,7 @@ fn word_division_late_refusal_preserves_full_arena_and_both_owners() {
         bytes.extend(instruction(extension, &[0x04, 0x10]));
     }
     let refused_pc = CODE + bytes.len() as u32;
-    bytes.extend([0x0f, 0x0b]);
+    bytes.extend([0xf0, 0x90]);
     let refused_length = bytes.len() as u32;
     bytes.resize(256, 0x90);
     bytes.extend([0xeb, 0]);
@@ -591,7 +599,7 @@ fn word_division_late_refusal_preserves_full_arena_and_both_owners() {
     let resident_pointer = engine.resident_bytes(resident).unwrap().as_ptr();
     let error = CompileError::Instruction {
         pc: GuestAddress(refused_pc),
-        cause: InstructionError::Decode(DecodeError::Unsupported(UnsupportedFeature::Opcode)),
+        cause: InstructionError::Decode(DecodeError::InvalidEncoding),
     };
     for is_resident in [false, true] {
         for entries in [false, true] {

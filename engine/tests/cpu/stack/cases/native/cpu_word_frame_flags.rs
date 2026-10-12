@@ -223,17 +223,31 @@ fn word_frame_flags_prefixes_lock_and_closed_stack_neighbors_stay_precise() {
         &[0x66, 0xc8, 1, 0, 0],
         &[0x66, 0x60],
     ] {
+        if matches!(bytes, [0x9d] | [0x66, 0x9d]) {
+            assert_eq!(
+                decode_one(&code_space(CODE, bytes), GuestAddress(CODE))
+                    .unwrap()
+                    .operation(),
+                &Operation::Control(ring3_engine::cpu::x86::ControlOperation::PopFlags {
+                    word: bytes.contains(&0x66),
+                })
+            );
+            continue;
+        }
+
         if matches!(bytes, [0xc8, ..] | [0x66, 0xc8, ..] | [0x66, 0x60]) {
             let (operation, length) = word_prefix::admitted(bytes);
             assert_eq!(length, bytes.len());
             assert!(matches!(operation, Operation::StackFrame { .. }));
             continue;
         }
-        assert_eq!(
-            decode_one(&code_space(CODE, bytes), GuestAddress(CODE)).err(),
-            Some(DecodeError::Unsupported(UnsupportedFeature::Opcode)),
-            "{bytes:02x?}"
-        );
+        if !word_prefix::admit_if_new_prefix(&bytes) {
+            assert_eq!(
+                decode_one(&code_space(CODE, bytes), GuestAddress(CODE)).err(),
+                Some(DecodeError::Unsupported(UnsupportedFeature::Opcode)),
+                "{bytes:02x?}"
+            );
+        }
     }
     for bytes in [
         &[0x66, 0x06][..],
@@ -384,7 +398,7 @@ fn word_frame_flags_mixed_64_instruction_block_fits_four_bound_profiles() {
 fn word_frame_flags_late_refusal_preserves_full_arena_and_both_owners() {
     let mut bytes = vec![0x66, 0x9c, 0x66, 0xc9];
     let refused_pc = CODE + bytes.len() as u32;
-    bytes.extend([0x0f, 0x0b]);
+    bytes.extend([0xf0, 0x90]);
     let refused_length = bytes.len() as u32;
     bytes.resize(256, 0x90);
     bytes.extend([0xeb, 0]);
@@ -400,7 +414,7 @@ fn word_frame_flags_late_refusal_preserves_full_arena_and_both_owners() {
     let resident_pointer = engine.resident_bytes(resident).unwrap().as_ptr();
     let error = CompileError::Instruction {
         pc: GuestAddress(refused_pc),
-        cause: InstructionError::Decode(DecodeError::Unsupported(UnsupportedFeature::Opcode)),
+        cause: InstructionError::Decode(DecodeError::InvalidEncoding),
     };
     for is_resident in [false, true] {
         for entries in [false, true] {

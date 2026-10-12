@@ -1,3 +1,5 @@
+use super::support_prefix_admission as prefix_admission;
+
 use super::support_byte_prefix_admission as byte_prefix_admission;
 
 use ring3_engine::process::EngineInstance;
@@ -333,6 +335,10 @@ fn failed_test_preparation_preserves_both_published_owners() {
                 &[0x90, 0x66, 0xf6, 0x03, 0xff],
                 &[0x90, 0xf6, 0xc8, 0xff],
             ] {
+                let (tail, opcode) =
+                    prefix_admission::refusal_after_prefix_admission(bytes[1..].to_vec(), opcode);
+                let owned = [vec![0x90], tail].concat();
+                let bytes = owned.as_slice();
                 let (mut engine, keep) = prior_owners();
                 upload(&mut engine, CODE, bytes);
                 describe(&mut engine, CODE, bytes.len(), entries);

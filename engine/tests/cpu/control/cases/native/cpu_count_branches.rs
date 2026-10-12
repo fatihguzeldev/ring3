@@ -200,7 +200,7 @@ fn typed_rel8_targets_prefixes_and_fetch_boundaries_are_exact() {
 fn six_profiles_validate_modules_and_entry_scan_stops_at_branch() {
     let mut modules = Vec::new();
     for (opcode, _) in FORMS {
-        let memory = code(&[opcode, 0, 0x0f, 0x0b], PC);
+        let memory = code(&[opcode, 0, 0xf0, 0x90], PC);
         let spec = BlockSpec {
             entry: GuestAddress(PC),
             byte_length: 2,
@@ -233,7 +233,7 @@ fn six_profiles_validate_modules_and_entry_scan_stops_at_branch() {
             for entries in [false, true] {
                 let mut engine = EngineInstance::new(1, 0x6162_6364_6566_6768).unwrap();
                 engine.map(PC, 1, 7).unwrap();
-                upload(&mut engine, PC, &[opcode, 0, 0x0f, 0x0b]);
+                upload(&mut engine, PC, &[opcode, 0, 0xf0, 0x90]);
                 engine.protect(PC, 1, 4).unwrap();
                 descriptors(&mut engine, &[(PC, 2)]);
                 let id = bound(&mut engine, resident, entries, 1).unwrap();
@@ -276,7 +276,7 @@ fn late_refusal_keeps_arena_owner_and_source_currency() {
         let mut engine = EngineInstance::new(2, 0x6162_6364_6566_6768).unwrap();
         for (pc, code) in [
             (PC, &[0xe2, 0][..]),
-            (0x3000, &[0x90, 0x0f, 0x0b, 0x90][..]),
+            (0x3000, &[0x90, 0xf0, 0x90, 0x90][..]),
         ] {
             engine.map(pc, 1, 7).unwrap();
             upload(&mut engine, pc, code);
@@ -289,7 +289,7 @@ fn late_refusal_keeps_arena_owner_and_source_currency() {
         let before = engine.arena().to_vec();
         let error = format!("{:?}", bound(&mut engine, resident, false, 1).unwrap_err());
         assert!(
-            error.contains("GuestAddress(12289)") && error.contains("Unsupported(Opcode)"),
+            error.contains("GuestAddress(12289)") && error.contains("InvalidEncoding"),
             "{error}"
         );
         assert_eq!(engine.arena(), before);

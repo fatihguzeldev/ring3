@@ -23,7 +23,7 @@ pub(super) fn word_accumulator_multiply(
         .i32_mul()
         .local_set(RESULT)
         .local_get(FLAGS)
-        .i32_const(0x402)
+        .i32_const(!0x8d5)
         .i32_and()
         .local_get(RESULT);
     match kind {
@@ -88,7 +88,7 @@ pub(super) fn byte_accumulator_multiply_value(code: &mut InstructionSink<'_>, ki
         .i32_or()
         .local_set(register(Register32::Eax))
         .local_get(FLAGS)
-        .i32_const(0x402)
+        .i32_const(!0x8d5)
         .i32_and()
         .local_get(RESULT);
     match kind {
@@ -134,7 +134,7 @@ pub(super) fn accumulator_multiply(
         .i32_wrap_i64()
         .local_set(register(Register32::Edx))
         .local_get(FLAGS)
-        .i32_const(0x402)
+        .i32_const(!0x8d5)
         .i32_and()
         .local_get(register(Register32::Edx));
     match kind {
@@ -449,7 +449,7 @@ pub(super) fn signed_multiply_word(
         .local_set(RESULT);
     // signed16 products fit signed32; overflow means truncation changes the signed value.
     code.local_get(FLAGS)
-        .i32_const(0x402)
+        .i32_const(!0x8d5)
         .i32_and()
         .local_get(RESULT)
         .local_get(RESULT)
@@ -508,7 +508,7 @@ pub(super) fn signed_multiply(
         .local_set(RESULT);
     // PF/AF/ZF/SF are undefined; this profile clears them.
     code.local_get(FLAGS)
-        .i32_const(0x402)
+        .i32_const(!0x8d5)
         .i32_and()
         .local_get(LHS)
         .i64_extend_i32_s()

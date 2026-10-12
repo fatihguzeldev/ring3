@@ -606,7 +606,7 @@ fn locked_xadd32_unprefixed_memory_and_all_register_widths_keep_existing_ir() {
 #[test]
 fn locked_xadd32_standalone_refusal_precedes_a_later_invalid_opcode() {
     for form in [BASE.as_slice(), SIB.as_slice()] {
-        for end in [[0xeb, 0], [0x0f, 0x0b]] {
+        for end in [[0xeb, 0], [0xf0, 0x90]] {
             let bytes = [vec![0x90], form.to_vec(), end.to_vec()].concat();
             let engine = code(&bytes);
             let before = engine.arena().to_vec();
@@ -792,7 +792,7 @@ fn locked_xadd32_late_fourth_block_failure_retains_dirty_full_arena_and_both_own
         bytes[offset..offset + 6].copy_from_slice(&[0xf0, 0x0f, 0xc1, 0x37, 0xeb, 0]);
     }
     bytes[96..108].copy_from_slice(&[
-        0xf0, 0x0f, 0xc1, 0x37, 0xf0, 0x0f, 0xc1, 0x44, 0x87, 0xf0, 0x0f, 0x0b,
+        0xf0, 0x0f, 0xc1, 0x37, 0xf0, 0x0f, 0xc1, 0x44, 0x87, 0xf0, 0xf0, 0x90,
     ]);
     bytes[512..].copy_from_slice(&[0xeb, 0]);
     let mut engine = code(&bytes);
@@ -812,7 +812,7 @@ fn locked_xadd32_late_fourth_block_failure_retains_dirty_full_arena_and_both_own
         .unwrap();
     let error = instruction_error(
         CODE + 106,
-        InstructionError::Decode(DecodeError::Unsupported(UnsupportedFeature::Opcode)),
+        InstructionError::Decode(DecodeError::InvalidEncoding),
     );
     for is_resident in [false, true] {
         for entries in [false, true] {

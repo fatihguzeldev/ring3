@@ -337,7 +337,7 @@ fn late_refusal_preserves_existing_owners_and_entire_arena() {
     let id = engine.compile_resident(1).unwrap().get();
     engine.map(0x3000, 1, 7).unwrap();
     engine.arena_mut().unwrap()[TRANSFER_OFFSET..TRANSFER_OFFSET + 4]
-        .copy_from_slice(&[0xd9, 0x38, 0x0f, 0x0b]);
+        .copy_from_slice(&[0xd9, 0x38, 0xf0, 0x90]);
     engine.upload(0x3000, 4).unwrap();
     for resident in [false, true] {
         for entries in [false, true] {

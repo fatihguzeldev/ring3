@@ -269,7 +269,7 @@ for(let i=1;i<process.argv.length;i+=2){
  const p={i:8};let found=false;while(p.i<b.length){const id=b[p.i++],end=u(b,p)+p.i;
   if(id===10){a.equal(u(b,p),1);u(b,p);const n=u(b,p),locals=[];
    for(let j=0;j<n;j++)locals.push([u(b,p),b[p.i++]]);
-   a.deepEqual(locals,[[16,0x7f],[1,0x7e],[6,0x7f]]);found=true;}
+   a.deepEqual(locals,[[16,0x7f],[1,0x7e],[10,0x7f]]);found=true;}
   p.i=end;}a.ok(found);
 }
 "#;
@@ -452,11 +452,17 @@ fn data_currency_late_refusals_and_caps_preserve_all_publications() {
                 BitIndex::Immediate(255),
             ] {
                 let form = encoded(index, &[0x03]);
-                for tail in [vec![0x0f, 0x0b], {
-                    let mut t = vec![0x66, 0x66];
-                    t.extend_from_slice(&form);
-                    t
-                }] {
+                for (tail, error) in [
+                    (vec![0xf0, 0x90], DecodeError::InvalidEncoding),
+                    (
+                        {
+                            let mut t = vec![0x66, 0x66];
+                            t.extend_from_slice(&form);
+                            t
+                        },
+                        DecodeError::Unsupported(UnsupportedFeature::Opcode),
+                    ),
+                ] {
                     let mut bytes = form.clone();
                     let late = CODE + bytes.len() as u32;
                     bytes.extend(tail);
@@ -467,9 +473,7 @@ fn data_currency_late_refusals_and_caps_preserve_all_publications() {
                         length,
                         CompileError::Instruction {
                             pc: GuestAddress(late),
-                            cause: InstructionError::Decode(DecodeError::Unsupported(
-                                UnsupportedFeature::Opcode,
-                            )),
+                            cause: InstructionError::Decode(error),
                         },
                     ));
                 }

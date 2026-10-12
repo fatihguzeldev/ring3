@@ -445,7 +445,7 @@ fn invalid_counts_seeds_gates_and_unsupported_profile_are_failure_atomic() {
     );
     for (code, feature) in [
         (&[0x0f, 0x06][..], UnsupportedFeature::Privileged),
-        (&[0x0f, 0x0b][..], UnsupportedFeature::Opcode),
+        (&[0xcd, 0x80][..], UnsupportedFeature::Opcode),
     ] {
         upload(&mut engine, A, code);
         entries(&mut engine, &[A], &[]);

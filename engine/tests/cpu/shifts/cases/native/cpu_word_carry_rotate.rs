@@ -496,9 +496,10 @@ fn pure_module_interface(wasm: &[u8], resident: Option<bool>) {
     let length = bodies.unsigned() as usize;
     let mut body = Reader(bodies.take(length));
     bodies.end();
-    assert_eq!(body.unsigned(), 2);
+    assert_eq!(body.unsigned(), 3);
     assert_eq!((body.unsigned(), body.byte()), (16, 0x7f));
     assert_eq!((body.unsigned(), body.byte()), (1, 0x7e));
+    assert_eq!((body.unsigned(), body.byte()), (10, 0x7f));
 }
 
 #[test]

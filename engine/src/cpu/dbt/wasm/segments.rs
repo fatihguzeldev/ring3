@@ -88,6 +88,9 @@ pub(super) fn instruction(
                 Value32::Immediate(_) => unreachable!("segment loads have no immediate encoding"),
             }
             load_selector(code, segment, imports, exit_depth);
+            if segment == SegmentRegister::Ss {
+                super::abi::inhibit_debug_after_ss_load(code);
+            }
             false
         }
         Operation::PopSegment { segment, word } => {
@@ -106,6 +109,9 @@ pub(super) fn instruction(
                 .i32_const(if word { 2 } else { 4 })
                 .i32_add()
                 .local_set(register(Register32::Esp));
+            if segment == SegmentRegister::Ss {
+                super::abi::inhibit_debug_after_ss_load(code);
+            }
             false
         }
         Operation::LoadFarPointer {

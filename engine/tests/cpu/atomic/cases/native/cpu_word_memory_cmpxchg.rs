@@ -229,11 +229,13 @@ fn word_memory_cmpxchg_prefixes_payloads_and_neighbors_keep_precise_boundaries()
                 word_prefix::admitted(&prefixed);
                 continue;
             }
-            assert_eq!(
-                decode_one(&code_space(CODE, &prefixed), GuestAddress(CODE)).err(),
-                Some(unsupported),
-                "{prefixed:02x?}"
-            );
+            if !word_prefix::admit_if_new_prefix(&prefixed) {
+                assert_eq!(
+                    decode_one(&code_space(CODE, &prefixed), GuestAddress(CODE)).err(),
+                    Some(unsupported),
+                    "{prefixed:02x?}"
+                );
+            }
         }
         for prefix in [0x26, 0x2e, 0x36, 0x3e, 0x64, 0x65] {
             let prefixed = [vec![prefix], bytes.clone()].concat();
@@ -241,11 +243,13 @@ fn word_memory_cmpxchg_prefixes_payloads_and_neighbors_keep_precise_boundaries()
         }
         for opcode in [0xc0, 0xb0] {
             let closed = [0x66, 0x0f, opcode, 0x03 | source << 3];
-            assert_eq!(
-                decode_one(&code_space(CODE, &closed), GuestAddress(CODE)).err(),
-                Some(unsupported),
-                "{closed:02x?}"
-            );
+            if !word_prefix::admit_if_new_prefix(&closed) {
+                assert_eq!(
+                    decode_one(&code_space(CODE, &closed), GuestAddress(CODE)).err(),
+                    Some(unsupported),
+                    "{closed:02x?}"
+                );
+            }
         }
         let xadd = [0x66, 0x0f, 0xc1, 0x03 | source << 3];
         assert_eq!(
@@ -440,7 +444,7 @@ fn word_memory_cmpxchg_late_refusal_preserves_arena_and_both_owners() {
         bytes.extend(encoding(source));
     }
     let refused_pc = CODE + bytes.len() as u32;
-    bytes.extend([0x0f, 0x0b]);
+    bytes.extend([0xf0, 0x90]);
     let refused_length = bytes.len() as u32;
     bytes.resize(256, 0x90);
     bytes.extend([0xeb, 0]);
@@ -456,7 +460,7 @@ fn word_memory_cmpxchg_late_refusal_preserves_arena_and_both_owners() {
     let resident_pointer = engine.resident_bytes(resident).unwrap().as_ptr();
     let error = CompileError::Instruction {
         pc: GuestAddress(refused_pc),
-        cause: InstructionError::Decode(DecodeError::Unsupported(UnsupportedFeature::Opcode)),
+        cause: InstructionError::Decode(DecodeError::InvalidEncoding),
     };
     for is_resident in [false, true] {
         for entries in [false, true] {

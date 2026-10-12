@@ -77,6 +77,7 @@ pub(super) fn instruction(
     // the zero-count instruction completes without touching either guest address.
     charge(code);
     complete(code, instruction);
+    abi::debug_after_retirement(code, exit_depth + 3);
     code.br(2).end();
     abi::safepoint(code, exit_depth + 2);
     element(
@@ -113,7 +114,10 @@ pub(super) fn instruction(
     }
     code.if_(BlockType::Empty);
     complete(code, instruction);
+    abi::debug_after_retirement(code, exit_depth + 3);
     code.br(2).end();
+    // single-step an unfinished repetition with EIP still at the string instruction.
+    abi::debug_after_retirement(code, exit_depth + 2);
     if stores {
         // a committed executable write stops repetition at the following element.
         memory::exit_if_invalidated(code, exit_depth + 2);
@@ -336,7 +340,7 @@ fn compare_flags(code: &mut InstructionSink<'_>, width: StringWidth) {
     }
     code.local_set(RESULT);
     code.local_get(FLAGS)
-        .i32_const(0x400)
+        .i32_const(!0x8d7)
         .i32_and()
         .i32_const(2)
         .i32_or()

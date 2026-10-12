@@ -429,23 +429,23 @@ fn late_refusals_preserve_both_publications_and_all_pages() {
     let (operation, length) = prefix_admission::admitted(&[0x64, 0x0f, 0x44, 0xc1]);
     assert_eq!(length, 4);
     assert!(matches!(operation, Operation::ConditionalMove { .. }));
-    let opcode = DecodeError::Unsupported(UnsupportedFeature::Opcode);
+    let invalid = DecodeError::InvalidEncoding;
 
     let mut refusals = 0;
     for (pc, bytes, declared_length, error_pc, expected) in [
         (
             CODE,
-            &[0x0f, 0x44, 0x03, 0x0f, 0x0b][..],
+            &[0x0f, 0x44, 0x03, 0xf0, 0x90][..],
             5,
             CODE + 3,
-            opcode,
+            invalid,
         ),
         (
             CODE,
-            &[0x0f, 0x44, 0xc1, 0x0f, 0x0b, 0x90, 0x90][..],
+            &[0x0f, 0x44, 0xc1, 0xf0, 0x90, 0x90, 0x90][..],
             7,
             CODE + 3,
-            opcode,
+            invalid,
         ),
         (
             0x1ffb,

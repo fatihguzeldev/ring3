@@ -501,7 +501,7 @@ fn stopped_entry_and_compile_failures_do_not_publish_or_consume_capacity() {
                 .compile_resident_callback_unit(KEY, f.home, f.token, count, gates)
         });
     }
-    f.engine.write32(COLD, 0x9090_0b0f).unwrap();
+    f.engine.write32(COLD, 0x9090_90f0).unwrap();
     descriptors(&mut f.engine, &[(COLD, 2)]);
     let before = observe(&f, &[]);
     assert!(matches!(

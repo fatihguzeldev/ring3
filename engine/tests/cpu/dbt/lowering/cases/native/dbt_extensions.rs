@@ -248,6 +248,8 @@ fn embedded_explicit_and_entry_forms_preserve_execute_only_code_and_full_arena()
 }
 
 fn rejected(instruction: &[u8], cause: InstructionError) {
+    let (instruction, cause) = prefix_admission::instruction_refusal(instruction, cause);
+    let instruction = instruction.as_slice();
     let mut bytes = vec![0x90];
     bytes.extend_from_slice(instruction);
     let expected = CompileError::Instruction {

@@ -385,7 +385,7 @@ fn arithmetic_store_input_bank() -> Vec<u8> {
             ],
         );
         assert_eq!(at - start, 29);
-        put(&mut bank, &mut at, &[0x0f, 0x0b]);
+        put(&mut bank, &mut at, &[0xf0, 0x90]);
         put(
             &mut bank,
             &mut at,
@@ -416,7 +416,7 @@ fn arithmetic_store_input_bank() -> Vec<u8> {
         assert_eq!(at - offset, 10);
     }
     bank[0xe00..0xe03].copy_from_slice(&[0x90, 0xeb, 0]);
-    bank[0xf00..0xf02].copy_from_slice(&[0x0f, 0x0b]);
+    bank[0xf00..0xf02].copy_from_slice(&[0xf0, 0x90]);
     bank
 }
 

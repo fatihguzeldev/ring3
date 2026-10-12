@@ -29,7 +29,6 @@ fn scasd_admits_in_bound_engine() {
 
 use ring3_engine::{
     cpu::{
-        UnsupportedFeature,
         dbt::{
             BlockSpec, CompileError, CompileLimits, InstructionError, RegistryError,
             compile_entry_region, compile_region,
@@ -231,7 +230,7 @@ while(at<input.length) {
   assert.deepEqual(WebAssembly.Module.imports(m),[{module:'env',name:'memory',kind:'memory'},
     ...[resident?'guard_resident':'guard','read32'].map(name=>({module:'ring3',name,kind:'function'}))]);
   assert.deepEqual(WebAssembly.Module.exports(m),[{name:'run',kind:'function'}]);
-  assert.deepEqual(locals(b),[[16,127],[1,126],[6,127]]);count++;
+  assert.deepEqual(locals(b),[[16,127],[1,126],[10,127]]);count++;
 }
 assert.equal(count,8);assert.equal(at,input.length);
 "#]).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped()).spawn().unwrap();
@@ -251,7 +250,7 @@ fn late_refusal_retains_previous_owner_full_arena_and_source_currency() {
         describe(&mut engine, 3);
         let id = bound_compile(&mut engine, resident, false, 1).unwrap();
         let old = module(&engine, id);
-        let bytes = [0x90, 0xa7, 0x0f, 0x0b];
+        let bytes = [0x90, 0xa7, 0xf0, 0x90];
         engine.map(0x3000, 1, 7).unwrap();
         engine.arena_mut().unwrap()[140..144].copy_from_slice(&bytes);
         engine.upload(0x3000, 4).unwrap();
@@ -262,7 +261,7 @@ fn late_refusal_retains_previous_owner_full_arena_and_source_currency() {
         let error = bound_compile(&mut engine, resident, false, 1).unwrap_err();
         let expected = CompileError::Instruction {
             pc: GuestAddress(0x3002),
-            cause: InstructionError::Decode(DecodeError::Unsupported(UnsupportedFeature::Opcode)),
+            cause: InstructionError::Decode(DecodeError::InvalidEncoding),
         };
         assert_eq!(
             error,

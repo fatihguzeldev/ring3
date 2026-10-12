@@ -312,7 +312,7 @@ fn longer_immediates_keep_exact_prefix_and_standalone_boundaries() {
         let bytes = [
             vec![0x90],
             instruction(group, 0x810f_66f0),
-            vec![0x0f, 0x0b],
+            vec![0xf0, 0x90],
         ]
         .concat();
         let engine = code_at(CODE, &bytes);
@@ -397,7 +397,7 @@ fn full_immediates_share_existing_sixty_four_instruction_bound_profile_limit() {
 fn late_poison_after_full_immediate_preserves_both_published_owners_and_dirty_arena() {
     let mut bytes = vec![0x90; 130];
     bytes[..10]
-        .copy_from_slice(&[vec![0x90], instruction(0x30, 0x810f_66f0), vec![0x0f, 0x0b]].concat());
+        .copy_from_slice(&[vec![0x90], instruction(0x30, 0x810f_66f0), vec![0xf0, 0x90]].concat());
     bytes[128..].copy_from_slice(&[0xeb, 0]);
     let mut engine = code_at(CODE, &bytes);
     describe(&mut engine, CODE + 128, 2, false);
@@ -409,7 +409,7 @@ fn late_poison_after_full_immediate_preserves_both_published_owners_and_dirty_ar
     let resident_pointer = engine.resident_bytes(resident).unwrap().as_ptr();
     let cause = CompileError::Instruction {
         pc: GuestAddress(CODE + 8),
-        cause: InstructionError::Decode(DecodeError::Unsupported(UnsupportedFeature::Opcode)),
+        cause: InstructionError::Decode(DecodeError::InvalidEncoding),
     };
     for is_resident in [false, true] {
         for entries in [false, true] {

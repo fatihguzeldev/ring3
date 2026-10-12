@@ -76,7 +76,6 @@ assert.deepEqual(WebAssembly.Module.exports(module), [{name:'run',kind:'function
 
 use ring3_engine::{
     cpu::{
-        UnsupportedFeature,
         dbt::{
             BlockSpec, CompileError, CompileLimits, InstructionError, RegistryError,
             compile_entry_region, compile_region,
@@ -368,13 +367,11 @@ fn late_refusals_caps_and_data_currency_preserve_bound_publications() {
             let failures = [
                 (
                     PC,
-                    vec![0x66, 0xad, 0x0f, 0x0b, 0xeb, 0],
+                    vec![0x66, 0xad, 0xf0, 0x90, 0xeb, 0],
                     6,
                     CompileError::Instruction {
                         pc: GuestAddress(PC + 2),
-                        cause: InstructionError::Decode(DecodeError::Unsupported(
-                            UnsupportedFeature::Opcode,
-                        )),
+                        cause: InstructionError::Decode(DecodeError::InvalidEncoding),
                     },
                 ),
                 (

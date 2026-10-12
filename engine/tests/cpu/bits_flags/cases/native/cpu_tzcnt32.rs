@@ -280,7 +280,7 @@ fn standalone_register_bank_and_four_bound_read_profiles_are_neutral() {
 
 #[test]
 fn standalone_memory_rejection_precedes_later_poison() {
-    let bytes = [0x90, 0xf3, 0x0f, 0xbc, 0x00, 0x0f, 0x0b];
+    let bytes = [0x90, 0xf3, 0x0f, 0xbc, 0x00, 0xf0, 0x90];
     let engine = code_at(CODE, &bytes);
     let before = engine.arena().to_vec();
     let memory = engine.memory().unwrap();
@@ -483,7 +483,7 @@ fn count_forms_keep_the_default_instruction_limit() {
 #[test]
 fn late_count_poison_keeps_published_owners_and_full_arena() {
     let mut bytes = vec![0x90; 130];
-    bytes[..6].copy_from_slice(&[0xf3, 0x0f, 0xbc, 0x00, 0x0f, 0x0b]);
+    bytes[..6].copy_from_slice(&[0xf3, 0x0f, 0xbc, 0x00, 0xf0, 0x90]);
     bytes[128..].copy_from_slice(&[0xeb, 0]);
     let mut engine = code_at(CODE, &bytes);
     describe(&mut engine, CODE + 128, 2, false);
@@ -495,7 +495,7 @@ fn late_count_poison_keeps_published_owners_and_full_arena() {
     let resident_pointer = engine.resident_bytes(resident).unwrap().as_ptr();
     let cause = CompileError::Instruction {
         pc: GuestAddress(CODE + 4),
-        cause: InstructionError::Decode(DecodeError::Unsupported(UnsupportedFeature::Opcode)),
+        cause: InstructionError::Decode(DecodeError::InvalidEncoding),
     };
     for is_resident in [false, true] {
         for entries in [false, true] {

@@ -474,7 +474,7 @@ fn installation_requires_canonical_state_and_literal_v3_need_code() {
         });
         engine.arena_mut().unwrap()[..96].copy_from_slice(&stopped);
     }
-    for (offset, value) in [(0, 0), (4, 2), (52, 0), (56, 0), (64, 39), (68, 1), (80, 1)] {
+    for (offset, value) in [(0, 0), (4, 3), (52, 0), (56, 0), (64, 39), (68, 1), (80, 1)] {
         engine.arena_mut().unwrap()[offset] = value;
         unchanged(&mut engine, error(CallError::InvalidStop), |engine| {
             engine.resume_callback_code(KEY, 1, 2, 4, 2)

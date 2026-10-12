@@ -376,8 +376,8 @@ fn assert_module(wasm: &[u8], owner: Option<Owner>, id: u64) {
     let mut body = take(&mut bodies, length);
     assert!(bodies.is_empty());
     assert_eq!(body.last(), Some(&0x0b));
-    assert_eq!(unsigned(&mut body), 2);
-    for expected in [(16, 0x7f), (1, 0x7e)] {
+    assert_eq!(unsigned(&mut body), 3);
+    for expected in [(16, 0x7f), (1, 0x7e), (10, 0x7f)] {
         assert_eq!((unsigned(&mut body), byte(&mut body)), expected);
     }
     if owner.is_some() {
@@ -760,7 +760,7 @@ fn full_modrm_domain_strict_categories_and_supported_neighbors_are_exact() {
         (vec![0x66, 0x66, 0x0f, 0xb1, 0xc8], opcode),
         (vec![0x66, 0x66, 0x0f, 0xb1, 0x03], opcode),
         (vec![0x66, 0x66, 0x87, 0xc8], opcode),
-        (vec![0x0f, 0x0b], opcode),
+        (vec![0xf0, 0x90], DecodeError::InvalidEncoding),
     ]);
     assert_eq!(strict.len(), 148);
     for (bytes, error) in strict {
@@ -773,7 +773,7 @@ fn full_modrm_domain_strict_categories_and_supported_neighbors_are_exact() {
         }] += 1;
         rejected(&bytes, error, &mut census);
     }
-    assert_eq!((negatives.len(), categories), (340, [10, 72, 258]));
+    assert_eq!((negatives.len(), categories), (340, [11, 72, 257]));
     assert_eq!(domain[3] + negatives.len(), 404);
     assert_census(&census, (0, 0, 680, 1360));
     let mut observations = 0;
@@ -1264,7 +1264,7 @@ fn exact_three_byte_fetch_cuts_permissions_top_and_consumed_span_are_preserved()
         );
         opcode_controls += 1;
     }
-    let mut poisoned = code(CODE, &[0x0f, 0xc0, 0xc4, 0x0f, 0x0b]);
+    let mut poisoned = code(CODE, &[0x0f, 0xc0, 0xc4, 0xf0, 0x90]);
     assert_decode(&poisoned, CODE, 3, CODE + 3, xadd(0xc4));
     three_admissions(&mut poisoned, CODE, false, &[CODE], &mut census);
     assert_eq!(
@@ -1534,9 +1534,9 @@ fn thirty_six_late_failures_preserve_complete_two_owner_publication_and_installa
         for (pc, bytes, length, expected) in [
             (
                 CODE,
-                vec![0x0f, 0xc0, raw, 0x0f, 0x0b],
+                vec![0x0f, 0xc0, raw, 0xf0, 0x90],
                 5,
-                instruction_error(CODE + 3, opcode),
+                instruction_error(CODE + 3, DecodeError::InvalidEncoding),
             ),
             (
                 CODE,
@@ -1554,6 +1554,7 @@ fn thirty_six_late_failures_preserve_complete_two_owner_publication_and_installa
                 ),
             ),
         ] {
+            let (bytes, expected) = prefix_admission::compile_refusal(&bytes, 3, expected);
             for owner in [Owner::Replacement, Owner::Resident] {
                 for entries in [false, true] {
                     let mut engine = code(pc, &bytes);

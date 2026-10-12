@@ -228,9 +228,9 @@ fn late_cdq_failures_preserve_replacement_and_resident_publications() {
     for (pc, bytes, declared, expected) in [
         (
             CODE,
-            &[0x99, 0x0f, 0x0b][..],
+            &[0x99, 0xf0, 0x90][..],
             3,
-            instruction_error(CODE + 1, opcode),
+            instruction_error(CODE + 1, DecodeError::InvalidEncoding),
         ),
         (
             CODE,

@@ -178,6 +178,8 @@ fn embedded_esp_operations_preserve_arena_and_code_without_stack_mapping() {
 }
 
 fn rejected(instruction: &[u8], cause: InstructionError) {
+    let (instruction, cause) = prefix_admission::instruction_refusal(instruction, cause);
+    let instruction = instruction.as_slice();
     let mut bytes = vec![0x90];
     bytes.extend_from_slice(instruction);
     let expected = CompileError::Instruction {

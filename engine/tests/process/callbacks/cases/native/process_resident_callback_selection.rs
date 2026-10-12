@@ -523,7 +523,7 @@ fn restored_by_abort(f: &mut Fixture) {
 #[test]
 fn selector_priorities_canonical_versions_acknowledgement_and_idempotence() {
     // typed stop inputs cover all exit versions and diagnostic retirement, not guest history.
-    for version in [1, 2, 3, 4, 5, 6] {
+    for version in [1, 2, 3, 4, 5, 6, 7] {
         for retired in [0, u32::MAX] {
             let mut f = fixture(false, true, false);
             admit(&mut f, false, true);
@@ -581,12 +581,12 @@ fn selector_priorities_canonical_versions_acknowledgement_and_idempotence() {
     }
     for (offset, value) in [
         (0, 0),
-        (4, 0x10002),
+        (4, 0x10003),
         (8, 55),
         (12, 1),
         (52, u32::MAX),
         (56, 0),
-        (60, 0x10007),
+        (60, 0x10008),
         (64, 39),
         (68, 1),
         (72, 1),

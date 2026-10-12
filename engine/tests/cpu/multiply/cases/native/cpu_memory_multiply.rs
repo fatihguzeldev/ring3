@@ -1,6 +1,5 @@
 use ring3_engine::{
     cpu::{
-        UnsupportedFeature,
         dbt::{CompileError, InstructionError, RegistryError},
         x86::{
             Register32,
@@ -214,7 +213,7 @@ fn assert_read_only_imports(engine: &EngineInstance, owner: Owner, id: u64) {
 fn three_memory_forms_and_both_zero_immediates_admit_without_reading_data() {
     for instruction in FORMS {
         let mut bytes = instruction.to_vec();
-        bytes.extend([0xeb, 0, 0x0f, 0x0b]);
+        bytes.extend([0xeb, 0, 0xf0, 0x90]);
         let length = instruction.len() + 2;
         for owner in [Owner::Replacement, Owner::Resident] {
             for entries in [false, true] {
@@ -501,7 +500,7 @@ fn seeds_and_explicit_extents_cannot_split_a_memory_operand() {
 #[test]
 fn adjacent_memory_seeds_preserve_both_consumed_instruction_entries() {
     let bytes = [
-        0x0f, 0xaf, 0x03, 0x69, 0x3f, 0, 0, 0, 0, 0xeb, 0, 0x0f, 0x0b,
+        0x0f, 0xaf, 0x03, 0x69, 0x3f, 0, 0, 0, 0, 0xeb, 0, 0xf0, 0x90,
     ];
     for owner in [Owner::Replacement, Owner::Resident] {
         for entries in [false, true] {
@@ -566,7 +565,7 @@ fn public_default_limit_accepts_sixty_four_and_precedes_later_poison() {
         let mut valid = instruction.repeat(63);
         valid.extend([0xeb, 0]);
         let mut invalid = instruction.repeat(64);
-        invalid.extend([0x0f, 0x0b]);
+        invalid.extend([0xf0, 0x90]);
         for owner in [Owner::Replacement, Owner::Resident] {
             for entries in [false, true] {
                 let mut engine = EngineInstance::new(2, KEY).unwrap();
@@ -651,7 +650,7 @@ fn data_changes_preserve_code_but_consumed_operand_bytes_invalidate_owner() {
 }
 
 #[test]
-fn admitted_memory_prefix_then_ud2_preserves_prior_owners_and_publication() {
+fn admitted_memory_prefix_then_malformed_tail_preserves_prior_owners_and_publication() {
     for owner in [Owner::Replacement, Owner::Resident] {
         for entries in [false, true] {
             let (mut engine, keep) = prior_owners(&[0x90, 0xeb, 0]);
@@ -663,7 +662,7 @@ fn admitted_memory_prefix_then_ud2_preserves_prior_owners_and_publication() {
             for instruction in FORMS {
                 let mut bytes = vec![0x0f, 0xaf, 0x03];
                 bytes.extend_from_slice(instruction);
-                bytes.extend([0x0f, 0x0b]);
+                bytes.extend([0xf0, 0x90]);
                 upload(&mut engine, CODE, &bytes);
                 let candidate_snapshot = engine
                     .memory()
@@ -674,7 +673,7 @@ fn admitted_memory_prefix_then_ud2_preserves_prior_owners_and_publication() {
                 let before = saved(&engine, keep);
                 let error = instruction_error(
                     CODE + 3 + instruction.len() as u32,
-                    InstructionError::Decode(DecodeError::Unsupported(UnsupportedFeature::Opcode)),
+                    InstructionError::Decode(DecodeError::InvalidEncoding),
                 );
                 assert_eq!(
                     compile(&mut engine, owner, entries, 1),

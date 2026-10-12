@@ -488,7 +488,7 @@ fn late_decode_fetch_and_instruction_cap_failures_preserve_arena_and_prior_owner
                         }
                         _ => {
                             bytes.extend([0x90; 63]);
-                            bytes.extend([0x0f, 0x0b]);
+                            bytes.extend([0xf0, 0x90]);
                             (CODE, bytes.len(), CompileError::InstructionLimit)
                         }
                     };

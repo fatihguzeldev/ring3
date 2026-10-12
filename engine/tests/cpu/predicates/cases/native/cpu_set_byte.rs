@@ -279,10 +279,11 @@ fn memory_targets_prefixes_and_adjacent_operations_fail_closed() {
     let mut engine = code(CODE, &[0x90], false);
     for condition in 0..16 {
         let bytes = [0x66, 0x0f, 0x90 + condition, 0x03];
+        let (bytes, expected) = byte_prefix_admission::closed_fixture(&bytes, opcode);
         upload(&mut engine, CODE, &bytes);
         assert_eq!(
             decode_one(engine.memory().unwrap(), GuestAddress(CODE)).err(),
-            Some(opcode),
+            Some(expected),
             "{bytes:02x?}"
         );
     }
@@ -414,7 +415,7 @@ fn instruction_cap_and_failed_preparation_preserve_both_published_owners() {
             for (pc, bytes, error) in [
                 (
                     CODE,
-                    &[0x0f, 0x94, 0xc0, 0x66, 0x0f, 0x94, 0x03][..],
+                    &[0x0f, 0x94, 0xc0, 0x66, 0x66, 0x0f, 0x94, 0x03][..],
                     compile_error(
                         owner,
                         CODE + 3,
@@ -425,13 +426,11 @@ fn instruction_cap_and_failed_preparation_preserve_both_published_owners() {
                 ),
                 (
                     CODE,
-                    &[0x0f, 0x94, 0xc0, 0x0f, 0x0b, 0x90, 0x90][..],
+                    &[0x0f, 0x94, 0xc0, 0xf0, 0x90, 0x90, 0x90][..],
                     compile_error(
                         owner,
                         CODE + 3,
-                        InstructionError::Decode(DecodeError::Unsupported(
-                            UnsupportedFeature::Opcode,
-                        )),
+                        InstructionError::Decode(DecodeError::InvalidEncoding),
                     ),
                 ),
                 (

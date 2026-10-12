@@ -1,5 +1,6 @@
 pub mod atomic;
 pub mod bits;
+mod control;
 pub mod decode;
 pub mod ir;
 mod segments;
@@ -8,6 +9,7 @@ mod stack;
 mod state;
 mod x87;
 
+pub use control::{ControlOperation, USER_POP_FLAGS_MASK, USER_POP_FLAGS_WORD_MASK, pop_flags};
 pub use segments::{
     SegmentDescriptor, SegmentDescriptorKind, SegmentDescriptorTable, SegmentLoadError,
     SegmentLoadFailure, SegmentRegister, SegmentState,

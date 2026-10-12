@@ -49,6 +49,10 @@ pub(in crate::cpu::dbt::wasm) fn instruction(
     }
     let mut store = false;
     match *instruction.operation() {
+        Operation::Control(_) => {
+            super::super::control_instructions::instruction(code, instruction, imports, exit_depth);
+            return;
+        }
         Operation::BitCount {
             kind,
             width,
@@ -1634,7 +1638,7 @@ pub(in crate::cpu::dbt::wasm) fn instruction(
             memory::bit_test_set_result(code, address, index, imports, exit_depth);
             code.local_set(RHS)
                 .local_get(FLAGS)
-                .i32_const(0x442)
+                .i32_const(!0x895)
                 .i32_and()
                 .local_get(RESULT)
                 .local_get(RHS)
@@ -1649,7 +1653,7 @@ pub(in crate::cpu::dbt::wasm) fn instruction(
             memory::bit_test_reset_result(code, address, index, imports, exit_depth);
             code.local_set(RHS)
                 .local_get(FLAGS)
-                .i32_const(0x442)
+                .i32_const(!0x895)
                 .i32_and()
                 .local_get(RESULT)
                 .local_get(RHS)
@@ -1745,7 +1749,7 @@ pub(in crate::cpu::dbt::wasm) fn instruction(
             memory::load_result_at_address(code, imports, exit_depth);
             code.local_set(RHS)
                 .local_get(FLAGS)
-                .i32_const(0x442)
+                .i32_const(!0x895)
                 .i32_and()
                 .local_get(RESULT)
                 .local_get(RHS)

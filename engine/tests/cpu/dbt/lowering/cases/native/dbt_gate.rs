@@ -1,6 +1,9 @@
-use ring3_engine::cpu::UnsupportedFeature;
 use ring3_engine::cpu::dbt::{CompileError, InstructionError, RegistryError};
-use ring3_engine::cpu::x86::decode::DecodeError;
+use ring3_engine::cpu::x86::{
+    ControlOperation,
+    decode::{DecodeError, decode_one},
+    ir::Operation,
+};
 use ring3_engine::memory::{Access, FaultReason, GuestAddress, MemoryFault};
 use ring3_engine::process::{EngineInstance, HostError};
 
@@ -163,19 +166,22 @@ fn wrong_registered_markers_report_invalid_gate_at_the_original_pc() {
 }
 
 #[test]
-fn unregistered_and_prefixed_ud2_keep_the_ordinary_decoder_rejection() {
+fn unregistered_and_prefixed_ud2_compile_as_ordinary_invalid_opcode_faults() {
     for instruction in [&[0x0f, 0x0b][..], &[0x66, 0x0f, 0x0b][..]] {
         let mut bytes = vec![0x90];
         bytes.extend_from_slice(instruction);
         let mut engine = with_code(0x1000, &bytes);
+        let decoded = decode_one(engine.memory().unwrap(), GuestAddress(0x1001)).unwrap();
+        assert_eq!(usize::from(decoded.length()), instruction.len());
+        assert_eq!(
+            decoded.operation(),
+            &Operation::Control(ControlOperation::InvalidOpcode)
+        );
         assert_eq!(
             compile(&mut engine, &[(0x1000, bytes.len() as u32)], &[]),
-            Err(instruction_error(
-                0x1001,
-                InstructionError::Decode(DecodeError::Unsupported(UnsupportedFeature::Opcode))
-            ))
+            Ok(1)
         );
-        assert_eq!(engine.generation(), 0);
+        engine.guard(KEY, 1).unwrap();
     }
 }
 

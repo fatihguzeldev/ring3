@@ -241,13 +241,13 @@ fn excluded_operations_and_poison_keep_original_pc_and_block_end_priority() {
     rejected(
         &mut engine,
         keep,
-        &[0x90, 0x0f, 0x0b],
-        InstructionError::Decode(DecodeError::Unsupported(UnsupportedFeature::Opcode)),
+        &[0x90, 0xf0, 0x90],
+        InstructionError::Decode(DecodeError::InvalidEncoding),
     );
     for instruction in [
         &[0x66, 0x66, 0x8b, 0x03][..],
         &[0x67, 0x8b, 0x03],
-        &[0x66, 0x10, 0xd0],
+        &[0x66, 0x66, 0x10, 0xd0],
         &[0xf0, 0x01, 0x03],
     ] {
         if matches!(

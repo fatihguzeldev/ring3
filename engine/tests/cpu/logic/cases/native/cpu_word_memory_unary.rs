@@ -261,21 +261,25 @@ fn word_memory_unary_prefixes_and_group_neighbors_keep_precise_closure() {
                 word_prefix::admitted(&prefixed);
                 continue;
             }
-            assert_eq!(
-                decode_one(&code_space(CODE, &prefixed), GuestAddress(CODE)).err(),
-                Some(unsupported),
-                "{prefixed:02x?}"
-            );
+            if !word_prefix::admit_if_new_prefix(&prefixed) {
+                assert_eq!(
+                    decode_one(&code_space(CODE, &prefixed), GuestAddress(CODE)).err(),
+                    Some(unsupported),
+                    "{prefixed:02x?}"
+                );
+            }
         }
         for prefix in [0x26, 0x2e, 0x36, 0x3e, 0x64, 0x65] {
             let prefixed = [vec![prefix], bytes.clone()].concat();
             word_prefix::admitted(&prefixed);
         }
         let byte_form = [0x66, opcode - 1, 0x03 | extension << 3];
-        assert_eq!(
-            decode_one(&code_space(CODE, &byte_form), GuestAddress(CODE)).err(),
-            Some(unsupported)
-        );
+        if !word_prefix::admit_if_new_prefix(&byte_form) {
+            assert_eq!(
+                decode_one(&code_space(CODE, &byte_form), GuestAddress(CODE)).err(),
+                Some(unsupported)
+            );
+        }
         let register_form = [0x66, opcode, 0xc0 | extension << 3];
         assert!(matches!(
             decode_one(&code_space(CODE, &register_form), GuestAddress(CODE))
@@ -294,15 +298,17 @@ fn word_memory_unary_prefixes_and_group_neighbors_keep_precise_closure() {
         if matches!(extension, 2 | 4 | 6) {
             bytes.insert(0, 0x66);
         }
-        assert_eq!(
-            decode_one(&code_space(CODE, &bytes), GuestAddress(CODE)).err(),
-            Some(if extension == 7 {
-                DecodeError::InvalidEncoding
-            } else {
-                unsupported
-            }),
-            "{bytes:02x?}"
-        );
+        if !word_prefix::admit_if_new_prefix(&bytes) {
+            assert_eq!(
+                decode_one(&code_space(CODE, &bytes), GuestAddress(CODE)).err(),
+                Some(if extension == 7 {
+                    DecodeError::InvalidEncoding
+                } else {
+                    unsupported
+                }),
+                "{bytes:02x?}"
+            );
+        }
     }
     for extension in [0, 1, 4, 5, 6, 7] {
         let mut bytes = instruction(0xf7, extension, &[0x03]);
@@ -432,7 +438,7 @@ fn word_memory_unary_late_refusal_preserves_arena_and_both_owners() {
         bytes.extend(encoding(opcode, extension));
     }
     let refused_pc = CODE + bytes.len() as u32;
-    bytes.extend([0x0f, 0x0b]);
+    bytes.extend([0xf0, 0x90]);
     let refused_length = bytes.len() as u32;
     bytes.resize(256, 0x90);
     bytes.extend([0xeb, 0]);
@@ -448,7 +454,7 @@ fn word_memory_unary_late_refusal_preserves_arena_and_both_owners() {
     let resident_pointer = engine.resident_bytes(resident).unwrap().as_ptr();
     let error = CompileError::Instruction {
         pc: GuestAddress(refused_pc),
-        cause: InstructionError::Decode(DecodeError::Unsupported(UnsupportedFeature::Opcode)),
+        cause: InstructionError::Decode(DecodeError::InvalidEncoding),
     };
     for is_resident in [false, true] {
         for entries in [false, true] {

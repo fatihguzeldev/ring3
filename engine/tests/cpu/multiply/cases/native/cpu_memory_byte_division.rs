@@ -1,3 +1,5 @@
+use super::support_prefix_admission as prefix_admission;
+
 use super::support_byte_prefix_admission as byte_prefix_admission;
 
 use ring3_engine::{abi::arena::TRANSFER_OFFSET, process::EngineInstance};
@@ -280,10 +282,12 @@ fn strict_neighbors_and_fetch_boundaries_keep_exact_categories() {
         &[0x66, 0x66, 0xf7, 0x3b],
     ] {
         let engine = fixture(CODE, bytes);
-        assert_eq!(
-            decode_one(engine.memory().unwrap(), GuestAddress(CODE)).err(),
-            Some(opcode)
-        );
+        if !prefix_admission::admit_if_new_prefix(&bytes) {
+            assert_eq!(
+                decode_one(engine.memory().unwrap(), GuestAddress(CODE)).err(),
+                Some(opcode)
+            );
+        }
     }
     for (pc, address, reason) in [
         (0x1fff, 0x2000, FaultReason::Unmapped),
@@ -335,7 +339,13 @@ fn data_currency_late_refusals_and_caps_preserve_all_publications() {
             engine.guard_resident(KEY, keep).unwrap();
             let mut failures = Vec::new();
             for modrm in [0x33, 0x3b] {
-                for tail in [vec![0x0f, 0x0b], vec![0x66, 0xf6, modrm]] {
+                for tail in [vec![0xf0, 0x90], vec![0x66, 0xf6, modrm]] {
+                    let cause = if tail == [0xf0, 0x90] {
+                        DecodeError::InvalidEncoding
+                    } else {
+                        DecodeError::Unsupported(UnsupportedFeature::Opcode)
+                    };
+                    let (tail, cause) = byte_prefix_admission::closed_fixture(&tail, cause);
                     let mut bytes = vec![0xf6, modrm];
                     bytes.extend(tail);
                     let length = bytes.len();
@@ -345,9 +355,7 @@ fn data_currency_late_refusals_and_caps_preserve_all_publications() {
                         length,
                         CompileError::Instruction {
                             pc: GuestAddress(CODE + 2),
-                            cause: InstructionError::Decode(DecodeError::Unsupported(
-                                UnsupportedFeature::Opcode,
-                            )),
+                            cause: InstructionError::Decode(cause),
                         },
                     ));
                 }

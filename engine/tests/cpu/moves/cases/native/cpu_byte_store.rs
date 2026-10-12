@@ -327,7 +327,7 @@ fn assert_module(engine: &EngineInstance, owner: Owner, id: u64, mixed: bool) {
     let mut body = take(&mut bodies, length);
     assert!(bodies.is_empty());
     assert_eq!(unsigned(&mut body), 3);
-    for expected in [(16, 0x7f), (1, 0x7e), (6, 0x7f)] {
+    for expected in [(16, 0x7f), (1, 0x7e), (10, 0x7f)] {
         assert_eq!((unsigned(&mut body), byte(&mut body)), expected);
     }
     let mut constants = vec![KEY as u32, (KEY >> 32) as u32, id as u32];
@@ -640,7 +640,7 @@ fn fetch_end_missing_immediate_and_split_seeds_preserve_prior_publication() {
 
 #[test]
 fn adjacent_byte_seeds_and_instruction_limit_keep_canonical_boundaries() {
-    let adjacent = [0x88, 0x23, 0xc6, 0x43, 8, 0x80, 0xeb, 0, 0x0f, 0x0b];
+    let adjacent = [0x88, 0x23, 0xc6, 0x43, 8, 0x80, 0xeb, 0, 0xf0, 0x90];
     for owner in [Owner::Replacement, Owner::Resident] {
         for entries in [false, true] {
             let mut engine = code(CODE, &adjacent, false);
@@ -660,7 +660,7 @@ fn adjacent_byte_seeds_and_instruction_limit_keep_canonical_boundaries() {
             compile(&mut engine, owner, entries, 1).unwrap();
             let (mut engine, keep) = prior_owners();
             let mut bytes = vec![0x90; 63];
-            bytes.extend([0x88, 0x03, 0x0f, 0x0b]);
+            bytes.extend([0x88, 0x03, 0xf0, 0x90]);
             upload(&mut engine, CODE, &bytes);
             describe(&mut engine, &[(CODE, bytes.len())], entries);
             let before = saved(&engine, keep);

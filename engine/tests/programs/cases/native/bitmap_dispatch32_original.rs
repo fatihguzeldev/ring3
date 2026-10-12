@@ -176,8 +176,18 @@ fn original_bitmap_dispatch_admits_observed_count_and_complete_function_in_four_
     for bytes in [
         &[0x66, 0xf3, 0x0f, 0xbc, 0xc6][..],
         &[0xf3, 0x66, 0x0f, 0xbc, 0xc6],
-        &[0xf2, 0x0f, 0xbc, 0xc6],
         &[0xf3, 0x0f, 0xbd, 0xc6],
+    ] {
+        let engine = source(KEY + 20, bytes);
+        let before = engine.arena().to_vec();
+        let decoded = decode_one(engine.memory().unwrap(), GuestAddress(CODE)).unwrap();
+        assert!(matches!(decoded.operation(), Operation::BitCount { .. }));
+        assert_eq!(usize::from(decoded.length()), bytes.len());
+        assert_eq!(engine.arena(), before);
+    }
+    for bytes in [
+        &[0x66, 0x66, 0xf3, 0x0f, 0xbc, 0xc6][..],
+        &[0xf2, 0x0f, 0xbc, 0xc6],
     ] {
         let engine = source(KEY + 20, bytes);
         let before = engine.arena().to_vec();

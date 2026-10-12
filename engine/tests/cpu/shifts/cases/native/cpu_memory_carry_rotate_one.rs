@@ -182,6 +182,9 @@ fn fetch_error(pc: u32, address: u32, length: u32, reason: FaultReason) -> Decod
 }
 
 fn rejected(bytes: &[u8], expected: DecodeError) {
+    let (bytes, expected) =
+        prefix_admission::refusal_after_prefix_admission(bytes.to_vec(), expected);
+    let bytes = bytes.as_slice();
     let engine = code(CODE, bytes);
     let memory = engine.memory().unwrap();
     assert_eq!(
@@ -546,9 +549,9 @@ fn late_memory_carry_rotate_failures_preserve_both_publications() {
         for (pc, bytes, declared, expected) in [
             (
                 CODE,
-                vec![0xd1, first, 0x0f, 0x0b],
+                vec![0xd1, first, 0xf0, 0x90],
                 4,
-                instruction_error(CODE + 2, opcode),
+                instruction_error(CODE + 2, DecodeError::InvalidEncoding),
             ),
             (
                 CODE,

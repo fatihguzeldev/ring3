@@ -260,7 +260,7 @@ fn assert_module(wasm: &[u8], resident: bool, opcode: u8) {
     assert_eq!(unsigned(&mut bodies), 1);
     let length = unsigned(&mut bodies) as usize;
     assert_eq!(bodies.len(), length);
-    assert_eq!(&bodies[..7], &[3, 16, 0x7f, 1, 0x7e, 6, 0x7f]);
+    assert_eq!(&bodies[..7], &[3, 16, 0x7f, 1, 0x7e, 10, 0x7f]);
     assert!(wasm.len() <= 65_536);
 }
 

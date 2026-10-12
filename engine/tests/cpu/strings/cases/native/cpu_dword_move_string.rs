@@ -20,7 +20,6 @@ fn movsd_admits_in_bound_engine() {
 
 use ring3_engine::{
     cpu::{
-        UnsupportedFeature,
         dbt::{
             BlockSpec, CompileError, CompileLimits, InstructionError, RegistryError,
             compile_entry_region, compile_region,
@@ -213,7 +212,7 @@ fn instruction_block_caps_and_late_refusal_preserve_prior_bound_owners() {
         let mut engine = EngineInstance::new(2, 7).unwrap();
         for (pc, bytes) in [
             (PC, &[0xa5, 0xeb, 0][..]),
-            (0x3000, &[0x90, 0x0f, 0x0b, 0xeb, 0][..]),
+            (0x3000, &[0x90, 0xf0, 0x90, 0xeb, 0][..]),
         ] {
             engine.map(pc, 1, 7).unwrap();
             upload(&mut engine, pc, bytes);
@@ -234,7 +233,7 @@ fn instruction_block_caps_and_late_refusal_preserve_prior_bound_owners() {
         let before = engine.arena().to_vec();
         let expected = CompileError::Instruction {
             pc: GuestAddress(0x3001),
-            cause: InstructionError::Decode(DecodeError::Unsupported(UnsupportedFeature::Opcode)),
+            cause: InstructionError::Decode(DecodeError::InvalidEncoding),
         };
         let error = if resident {
             engine.compile_resident(1).unwrap_err()

@@ -330,7 +330,7 @@ fn assert_module(engine: &EngineInstance, owner: Owner, id: u64, mixed: bool) {
     let mut body = take(&mut bodies, length);
     assert!(bodies.is_empty());
     assert_eq!(unsigned(&mut body), 3);
-    for expected in [(16, 0x7f), (1, 0x7e), (6, 0x7f)] {
+    for expected in [(16, 0x7f), (1, 0x7e), (10, 0x7f)] {
         assert_eq!((unsigned(&mut body), byte(&mut body)), expected);
     }
     let mut constants = vec![KEY as u32, (KEY >> 32) as u32, id as u32];
@@ -684,7 +684,7 @@ fn fetch_end_missing_operands_and_poison_fail_atomically_with_exact_priority() {
 
 #[test]
 fn adjacent_seeds_instruction_and_entry_caps_keep_exact_boundaries_and_old_owners() {
-    let adjacent = [0x8a, 0x23, 0x8a, 0x43, 0xff, 0xeb, 0, 0x0f, 0x0b];
+    let adjacent = [0x8a, 0x23, 0x8a, 0x43, 0xff, 0xeb, 0, 0xf0, 0x90];
     for owner in [Owner::Replacement, Owner::Resident] {
         for entries in [false, true] {
             let mut engine = code(CODE, &adjacent, true);
@@ -704,7 +704,7 @@ fn adjacent_seeds_instruction_and_entry_caps_keep_exact_boundaries_and_old_owner
             compile(&mut engine, owner, entries, 1).unwrap();
             let (mut engine, keep) = prior_owners();
             let mut bytes = vec![0x90; 63];
-            bytes.extend([0x8a, 0x03, 0x0f, 0x0b]);
+            bytes.extend([0x8a, 0x03, 0xf0, 0x90]);
             upload(&mut engine, CODE, &bytes);
             describe(&mut engine, &[(CODE, bytes.len())], entries);
             let before = saved(&engine, keep);

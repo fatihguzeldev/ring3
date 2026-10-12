@@ -312,12 +312,9 @@ fn assert_module(wasm: &[u8], owner: Option<Owner>, id: u64, mixed: bool) {
     let length = unsigned(&mut bodies) as usize;
     let mut body = take(&mut bodies, length);
     assert!(bodies.is_empty());
-    assert_eq!(unsigned(&mut body), if mixed { 3 } else { 2 });
-    for expected in [(16, 0x7f), (1, 0x7e)] {
+    assert_eq!(unsigned(&mut body), 3);
+    for expected in [(16, 0x7f), (1, 0x7e), (10, 0x7f)] {
         assert_eq!((unsigned(&mut body), byte(&mut body)), expected);
-    }
-    if mixed {
-        assert_eq!((unsigned(&mut body), byte(&mut body)), (6, 0x7f));
     }
     if owner.is_some() {
         let mut constants = vec![KEY as u32, (KEY >> 32) as u32, id as u32];
@@ -478,17 +475,24 @@ fn excluded_widths_alternatives_and_prefixes_keep_categories_and_old_publication
             Some(expected)
         );
     }
+    assert_eq!(
+        super::support_prefix_admission::admitted(&[0x66, 0x10, 0xd0]).1,
+        3
+    );
     for owner in [Owner::Replacement, Owner::Resident] {
         for entries in [false, true] {
             let (mut engine, keep) = prior_owners();
-            upload(&mut engine, CODE, &[0x90, 0x66, 0x10, 0xd0]);
+            upload(&mut engine, CODE, &[0x90, 0xf0, 0x90, 0x90]);
             describe(&mut engine, &[(CODE, 4)], entries);
             let before = saved(&engine, keep);
             assert_eq!(
                 compile(&mut engine, owner, entries, 1),
                 Err(compile_error(
                     owner,
-                    instruction_error(CODE + 1, InstructionError::Decode(opcode))
+                    instruction_error(
+                        CODE + 1,
+                        InstructionError::Decode(DecodeError::InvalidEncoding)
+                    )
                 ))
             );
             assert_retained(&engine, keep, &before);
@@ -630,7 +634,7 @@ fn consumed_fetch_spans_truncation_and_cut_errors_preserve_prior_owners() {
 
 #[test]
 fn cold_seeds_poison_instruction_and_module_caps_keep_exact_publication() {
-    let adjacent = [0xb4, 0xff, 0x88, 0xe0, 0xeb, 0, 0x0f, 0x0b];
+    let adjacent = [0xb4, 0xff, 0x88, 0xe0, 0xeb, 0, 0xf0, 0x90];
     for owner in [Owner::Replacement, Owner::Resident] {
         for entries in [false, true] {
             let mut engine = code(CODE, &adjacent, true);
@@ -651,7 +655,7 @@ fn cold_seeds_poison_instruction_and_module_caps_keep_exact_publication() {
             compile(&mut engine, owner, entries, 1).unwrap();
             let (mut engine, keep) = prior_owners();
             let mut bytes = [0xb4, 0xff].repeat(64);
-            bytes.extend([0x0f, 0x0b]);
+            bytes.extend([0xf0, 0x90]);
             upload(&mut engine, CODE, &bytes);
             describe(&mut engine, &[(CODE, bytes.len())], entries);
             let before = saved(&engine, keep);

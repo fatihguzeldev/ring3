@@ -400,7 +400,7 @@ fn all_register_pairs_and_forms_admit_in_explicit_cold_and_bound_profiles() {
     for destination in 0..8 {
         let mut bytes = register_block(destination);
         let length = bytes.len();
-        bytes.extend_from_slice(&[0x0f, 0x0b]);
+        bytes.extend_from_slice(&[0xf0, 0x90]);
         let mut memory = code(CODE, &bytes);
         memory
             .protect(
@@ -490,7 +490,7 @@ fn all_register_pairs_and_forms_admit_in_explicit_cold_and_bound_profiles() {
 fn every_memory_form_and_some_zero_refuse_all_standalone_backends_before_poison() {
     for instruction in memory_forms() {
         let mut bytes = instruction;
-        bytes.extend_from_slice(&[0x0f, 0x0b]);
+        bytes.extend_from_slice(&[0xf0, 0x90]);
         let memory = code(CODE, &bytes);
         assert!(memory.resolve(GuestAddress(0x5010), Access::Read).is_err());
         let expected = instruction_error(CODE, InstructionError::BackendUnsupported);
@@ -573,13 +573,13 @@ fn admitted_prefix_and_memory_then_decode_refusal_preserves_prior_owners_and_pub
             for instruction in memory_forms() {
                 let mut bytes = vec![0x0f, 0xaf, 0xc2];
                 bytes.extend_from_slice(&instruction);
-                bytes.extend_from_slice(&[0x0f, 0x0b]);
+                bytes.extend_from_slice(&[0xf0, 0x90]);
                 upload(&mut engine, CODE, &bytes);
                 describe(&mut engine, CODE, bytes.len(), entries);
                 let before = saved(&engine, keep);
                 let error = instruction_error(
                     CODE + 3 + instruction.len() as u32,
-                    InstructionError::Decode(DecodeError::Unsupported(UnsupportedFeature::Opcode)),
+                    InstructionError::Decode(DecodeError::InvalidEncoding),
                 );
                 let expected = match owner {
                     Owner::Replacement => HostError::Compile(error),
@@ -632,7 +632,7 @@ fn multiplies_charge_instruction_and_wasm_caps_before_later_poison() {
             64
         );
         let mut bytes = instruction.repeat(64);
-        bytes.extend_from_slice(&[0x0f, 0x0b]);
+        bytes.extend_from_slice(&[0xf0, 0x90]);
         let memory = code(CODE, &bytes);
         assert_eq!(
             prepare_region(

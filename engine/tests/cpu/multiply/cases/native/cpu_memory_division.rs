@@ -239,10 +239,12 @@ fn strict_neighbors_and_operand_fetch_keep_categories_and_exact_faults() {
     }
     for bytes in [&[0x66, 0xf6, 0x33][..], &[0x66, 0xf6, 0x3b]] {
         let engine = fixture(CODE, bytes);
-        assert_eq!(
-            decode_one(engine.memory().unwrap(), GuestAddress(CODE)).err(),
-            Some(DecodeError::Unsupported(UnsupportedFeature::Opcode))
-        );
+        if !prefix_admission::admit_if_new_prefix(&bytes) {
+            assert_eq!(
+                decode_one(engine.memory().unwrap(), GuestAddress(CODE)).err(),
+                Some(DecodeError::Unsupported(UnsupportedFeature::Opcode))
+            );
+        }
     }
 }
 
@@ -268,7 +270,7 @@ fn data_repairs_keep_code_current_and_late_refusals_preserve_publication() {
         for resident in [false, true] {
             for entries in [false, true] {
                 let mut bad = encoded(kind, &[0x03]);
-                bad.extend([0x0f, 0x0b]);
+                bad.extend([0xf0, 0x90]);
                 engine.arena_mut().unwrap()[TRANSFER_OFFSET..TRANSFER_OFFSET + bad.len()]
                     .copy_from_slice(&bad);
                 engine.upload(0x3000, bad.len() as u32).unwrap();
@@ -281,9 +283,7 @@ fn data_repairs_keep_code_current_and_late_refusals_preserve_publication() {
                 );
                 let failure = CompileError::Instruction {
                     pc: GuestAddress(0x3002),
-                    cause: InstructionError::Decode(DecodeError::Unsupported(
-                        UnsupportedFeature::Opcode,
-                    )),
+                    cause: InstructionError::Decode(DecodeError::InvalidEncoding),
                 };
                 let wanted = if resident {
                     HostError::Resident(RegistryError::Compile(failure))

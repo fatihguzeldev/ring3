@@ -351,6 +351,10 @@ fn excluded_forms_and_three_byte_fetch_preserve_fault_and_snapshot_boundaries() 
         &[0xf3, 0xf3, 0x0f, 0xbc, 0xc3][..],
         &[0xf3, 0x0f, 0xbd, 0xc3],
     ] {
+        if prefix_admission::admit_if_new_prefix(bytes) {
+            exclusions += 1;
+            continue;
+        }
         let engine = code(CODE, bytes);
         assert_eq!(
             decode_one(engine.memory().unwrap(), GuestAddress(CODE)).err(),
@@ -370,9 +374,9 @@ fn late_bit_scan_failures_preserve_both_publications() {
         for (pc, bytes, declared, expected) in [
             (
                 CODE,
-                vec![0x0f, first, 0xc3, 0x0f, 0x0b],
+                vec![0x0f, first, 0xc3, 0xf0, 0x90],
                 5,
-                instruction_error(CODE + 3, opcode_error),
+                instruction_error(CODE + 3, DecodeError::InvalidEncoding),
             ),
             (
                 CODE,

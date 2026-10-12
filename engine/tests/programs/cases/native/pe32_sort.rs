@@ -5,14 +5,13 @@ use std::collections::BTreeSet;
 use ring3_engine::{
     abi::{arena::TRANSFER_OFFSET, x86::decode_state},
     cpu::{
-        UnsupportedFeature,
         dbt::{
-            BlockSpec, CompileError, CompileLimits, InstructionError, RegistryError,
-            compile_entry_region, compile_region,
+            BlockSpec, CompileError, CompileLimits, InstructionError, compile_entry_region,
+            compile_region,
         },
         x86::{
             Register32,
-            decode::{DecodeError, DecodedInstruction, decode_one},
+            decode::{DecodedInstruction, decode_one},
             ir::{
                 BinaryKind, BranchTarget, Condition, EffectiveAddress, Location32, Operation,
                 RotateKind, ShiftCount, Value32,
@@ -461,17 +460,18 @@ fn grouped_bound_compilation_admits_five_units_without_accessing_unmapped_array(
         .iter()
         .map(|id| engine.resident_bytes(*id).unwrap().to_vec())
         .collect::<Vec<_>>();
+    let trap = decode_one(
+        engine.memory().unwrap(),
+        GuestAddress(pe::ACTUAL_BASE + pe::TEXT_RVA + 96),
+    )
+    .unwrap();
     assert_eq!(
-        engine.compile_resident_entries(1, 0),
-        Err(HostError::Resident(RegistryError::Compile(
-            CompileError::Instruction {
-                pc: GuestAddress(pe::ACTUAL_BASE + pe::TEXT_RVA + 96),
-                cause: InstructionError::Decode(DecodeError::Unsupported(
-                    UnsupportedFeature::Opcode
-                ))
-            }
-        )))
+        trap.operation(),
+        &Operation::Control(ring3_engine::cpu::x86::ControlOperation::InvalidOpcode)
     );
+    let trap_unit = engine.compile_resident_entries(1, 0).unwrap().get();
+    assert!(!ids.contains(&trap_unit));
+    engine.guard_resident(KEY, trap_unit).unwrap();
     assert_eq!(engine.arena(), before);
     for (id, bytes) in ids.iter().zip(retained) {
         assert_eq!(engine.resident_bytes(*id).unwrap(), bytes);

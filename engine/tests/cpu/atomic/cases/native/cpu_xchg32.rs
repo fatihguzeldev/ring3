@@ -301,6 +301,19 @@ fn strict_categories_fetch_wrap_and_fixed32_adjacency_remain_exact() {
         (&[0xf0, 0x87, 0x08][..], opcode),
     ] {
         category_rows += 1;
+        if instruction == [0x66, 0x86, 0xc8] {
+            let (operation, length) = prefix_admission::admitted(instruction);
+            let canonical = code(CODE, &[0x86, 0xc8], true);
+            assert_eq!(
+                &operation,
+                decode_one(canonical.memory().unwrap(), GuestAddress(CODE))
+                    .unwrap()
+                    .operation()
+            );
+            assert_eq!(length, instruction.len());
+            admissions += 1;
+            continue;
+        }
         if matches!(
             instruction[0],
             0x67 | 0x26 | 0x2e | 0x36 | 0x3e | 0x64 | 0x65
@@ -367,7 +380,7 @@ fn strict_categories_fetch_wrap_and_fixed32_adjacency_remain_exact() {
         );
         refusals += 2;
     }
-    assert_eq!((category_rows, admissions), (16, 10));
+    assert_eq!((category_rows, admissions), (16, 11));
     assert_eq!(refusals, (category_rows - admissions) * 2);
     let adjacent = code(CODE, &[0x48, 0x87, 0xc8], true);
     assert_decode(
@@ -395,7 +408,7 @@ fn strict_categories_fetch_wrap_and_fixed32_adjacency_remain_exact() {
     for (pc, bytes, length, next, left, right) in [
         (
             CODE,
-            &[0x87, 0xc8, 0x0f, 0x0b][..],
+            &[0x87, 0xc8, 0xf0, 0x90][..],
             2,
             CODE + 2,
             Register32::Eax,
@@ -590,17 +603,17 @@ fn late_decode_failures_preserve_both_publications_and_all_mapped_pages() {
     for (pc, bytes, length, error_pc, error) in [
         (
             CODE,
-            &[0x87, 0xc8, 0x0f, 0x0b][..],
+            &[0x87, 0xc8, 0xf0, 0x90][..],
             4,
             CODE + 2,
-            DecodeError::Unsupported(UnsupportedFeature::Opcode),
+            DecodeError::InvalidEncoding,
         ),
         (
             CODE,
-            &[0x87, 0xc8, 0x0f, 0x0b, 0x90][..],
+            &[0x87, 0xc8, 0xf0, 0x90, 0x90][..],
             5,
             CODE + 2,
-            DecodeError::Unsupported(UnsupportedFeature::Opcode),
+            DecodeError::InvalidEncoding,
         ),
         (
             0x1ffd,
