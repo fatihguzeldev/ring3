@@ -1,24 +1,33 @@
 use super::packed::{put, unsigned};
 use super::{ConvertKind as C, FloatKind as F, SimdOperation};
-use rustc_apfloat::{
-    Float, FloatConvert, Round, Status,
-    ieee::{Double, IeeeFloat, Semantics, Single},
+use crate::math::{
+    Rounding,
+    ieee::{self, BinaryFormat, BinaryOperation},
 };
 
-fn rounding(mxcsr: u32) -> Round {
+fn rounding(mxcsr: u32) -> Rounding {
     match (mxcsr >> 13) & 3 {
-        0 => Round::NearestTiesToEven,
-        1 => Round::TowardNegative,
-        2 => Round::TowardPositive,
-        _ => Round::TowardZero,
+        0 => Rounding::Nearest,
+        1 => Rounding::Down,
+        2 => Rounding::Up,
+        _ => Rounding::Zero,
     }
 }
-fn exceptions(status: Status) -> u32 {
-    u32::from(status.contains(Status::INVALID_OP))
-        | (u32::from(status.contains(Status::DIV_BY_ZERO)) << 2)
-        | (u32::from(status.contains(Status::OVERFLOW)) << 3)
-        | (u32::from(status.contains(Status::UNDERFLOW)) << 4)
-        | (u32::from(status.contains(Status::INEXACT)) << 5)
+fn ieee_format(width: usize) -> BinaryFormat {
+    if width == 4 {
+        BinaryFormat::Binary32
+    } else {
+        BinaryFormat::Binary64
+    }
+}
+fn ieee_operation(kind: F) -> BinaryOperation {
+    match kind {
+        F::Add => BinaryOperation::Add,
+        F::Subtract => BinaryOperation::Subtract,
+        F::Multiply => BinaryOperation::Multiply,
+        F::Divide => BinaryOperation::Divide,
+        _ => unreachable!(),
+    }
 }
 fn lane_exceptions(mut flags: u32, mxcsr: u32) -> u32 {
     if flags & !(mxcsr >> 7) & 0x18 != 0 {
@@ -34,94 +43,7 @@ fn instruction_exceptions(flags: u32, mxcsr: u32) -> u32 {
     }
 }
 fn format(width: usize) -> (u64, u64, u64, u32, i32) {
-    if width == 4 {
-        (0x8000_0000, 0x7f80_0000, 0x007f_ffff, 23, 127)
-    } else {
-        (
-            0x8000_0000_0000_0000,
-            0x7ff0_0000_0000_0000,
-            0x000f_ffff_ffff_ffff,
-            52,
-            1023,
-        )
-    }
-}
-fn exact_normal_product(a: u64, b: u64, width: usize) -> Option<u64> {
-    let (sign, exponent_mask, fraction_mask, fraction_bits, bias) = format(width);
-    let a_exponent = ((a & exponent_mask) >> fraction_bits) as i32;
-    let b_exponent = ((b & exponent_mask) >> fraction_bits) as i32;
-    let maximum = (exponent_mask >> fraction_bits) as i32;
-    if a_exponent == 0
-        || a_exponent == maximum
-        || b_exponent == 0
-        || b_exponent == maximum
-        || (a & fraction_mask != 0 && b & fraction_mask != 0)
-    {
-        return None;
-    }
-    let exponent = a_exponent + b_exponent - bias;
-    if !(1..maximum).contains(&exponent) {
-        return None;
-    }
-    // normal power-of-two scaling changes only the exponent and sign, without rounding.
-    Some(((a ^ b) & sign) | ((exponent as u64) << fraction_bits) | ((a | b) & fraction_mask))
-}
-fn exact_normal_sum(a: u64, b: u64, width: usize, subtract: bool) -> Option<u64> {
-    let (sign, exponent_mask, fraction_mask, fraction_bits, _) = format(width);
-    let a_exponent = ((a & exponent_mask) >> fraction_bits) as i32;
-    let b_exponent = ((b & exponent_mask) >> fraction_bits) as i32;
-    let maximum = (exponent_mask >> fraction_bits) as i32;
-    if !(1..maximum).contains(&a_exponent) || !(1..maximum).contains(&b_exponent) {
-        return None;
-    }
-    let distance = (a_exponent - b_exponent).unsigned_abs();
-    if distance > fraction_bits {
-        return None;
-    }
-    let mut a_significand = (1u64 << fraction_bits) | (a & fraction_mask);
-    let mut b_significand = (1u64 << fraction_bits) | (b & fraction_mask);
-    let smaller = if a_exponent < b_exponent {
-        &mut a_significand
-    } else {
-        &mut b_significand
-    };
-    if *smaller & ((1u64 << distance) - 1) != 0 {
-        return None;
-    }
-    *smaller >>= distance;
-    let a_value = if a & sign != 0 {
-        -(a_significand as i64)
-    } else {
-        a_significand as i64
-    };
-    let b_value = if (b & sign != 0) ^ subtract {
-        -(b_significand as i64)
-    } else {
-        b_significand as i64
-    };
-    let sum = a_value + b_value;
-    if sum == 0 {
-        return None;
-    }
-    let mut magnitude = sum.unsigned_abs();
-    let mut exponent = a_exponent.max(b_exponent);
-    if magnitude >= 1u64 << (fraction_bits + 1) {
-        if magnitude & 1 != 0 {
-            return None;
-        }
-        magnitude >>= 1;
-        exponent += 1;
-    } else {
-        let shift = magnitude.leading_zeros() - (63 - fraction_bits);
-        magnitude <<= shift;
-        exponent -= shift as i32;
-    }
-    if !(1..maximum).contains(&exponent) {
-        return None;
-    }
-    // exact alignment and normalization leave no rounding or exception flags.
-    let result_sign = if sum < 0 { sign } else { 0 };
-    Some(result_sign | ((exponent as u64) << fraction_bits) | (magnitude & fraction_mask))
+    ieee_format(width).parameters()
 }
 fn nan(bits: u64, width: usize) -> bool {
     let (_, e, f, _, _) = format(width);
@@ -166,120 +88,14 @@ fn less(a: u64, b: u64, width: usize) -> bool {
 fn equal(a: u64, b: u64, width: usize) -> bool {
     a == b || (a | b) & !format(width).0 == 0
 }
-fn root(mut n: u128) -> (u128, u128) {
-    let mut result = 0;
-    let mut bit = 1u128 << 126;
-    while bit > n {
-        bit >>= 2;
-    }
-    while bit != 0 {
-        if n >= result + bit {
-            n -= result + bit;
-            result = (result >> 1) + bit;
-        } else {
-            result >>= 1;
-        }
-        bit >>= 2;
-    }
-    (result, n)
+fn unbounded_tiny(kind: F, a: u64, b: u64, width: usize, round: Rounding) -> bool {
+    matches!(kind, F::Add | F::Subtract | F::Multiply | F::Divide)
+        && ieee::unbounded_tiny(ieee_operation(kind), ieee_format(width), a, b, round)
 }
 
-struct WideSingle;
-impl Semantics for WideSingle {
-    const BITS: usize = 39;
-    const EXP_BITS: usize = 15;
-}
-struct WideDouble;
-impl Semantics for WideDouble {
-    const BITS: usize = 68;
-    const EXP_BITS: usize = 15;
-}
-
-fn unbounded_tiny(kind: F, a: u64, b: u64, width: usize, round: Round) -> bool {
-    if !matches!(kind, F::Add | F::Subtract | F::Multiply | F::Divide) {
-        return false;
-    }
-    let mut loses = false;
-    if width == 4 {
-        let x: IeeeFloat<WideSingle> = Single::from_bits(a as u128)
-            .convert_r(round, &mut loses)
-            .value;
-        let y: IeeeFloat<WideSingle> = Single::from_bits(b as u128)
-            .convert_r(round, &mut loses)
-            .value;
-        let value = match kind {
-            F::Add => x.add_r(y, round),
-            F::Subtract => x.sub_r(y, round),
-            F::Multiply => x.mul_r(y, round),
-            F::Divide => x.div_r(y, round),
-            _ => unreachable!(),
-        }
-        .value;
-        value.is_finite_non_zero() && value.ilogb() < -126
-    } else {
-        let x: IeeeFloat<WideDouble> = Double::from_bits(a as u128)
-            .convert_r(round, &mut loses)
-            .value;
-        let y: IeeeFloat<WideDouble> = Double::from_bits(b as u128)
-            .convert_r(round, &mut loses)
-            .value;
-        let value = match kind {
-            F::Add => x.add_r(y, round),
-            F::Subtract => x.sub_r(y, round),
-            F::Multiply => x.mul_r(y, round),
-            F::Divide => x.div_r(y, round),
-            _ => unreachable!(),
-        }
-        .value;
-        value.is_finite_non_zero() && value.ilogb() < -1022
-    }
-}
-
-// integer radical rounding retains the exact remainder; no host floating point is used.
-fn square_root(bits: u64, width: usize, round: Round) -> (u64, u32) {
-    let (sign, exponent_mask, fraction_mask, fraction_bits, bias) = format(width);
-    if nan(bits, width) {
-        return (quiet(bits, width), u32::from(signaling(bits, width)));
-    }
-    if bits & !sign == 0 || bits == exponent_mask {
-        return (bits, 0);
-    }
-    if bits & sign != 0 {
-        return (indefinite(width), 1);
-    }
-    let mut exponent = ((bits & exponent_mask) >> fraction_bits) as i32 - bias;
-    let mut significand = bits & fraction_mask;
-    if bits & exponent_mask != 0 {
-        significand |= 1 << fraction_bits;
-    } else {
-        exponent = 1 - bias;
-        while significand & (1 << fraction_bits) == 0 {
-            significand <<= 1;
-            exponent -= 1;
-        }
-    }
-    if exponent & 1 != 0 {
-        significand <<= 1;
-        exponent -= 1;
-    }
-    let radicand = u128::from(significand) << fraction_bits;
-    let (mut result, remainder) = root(radicand);
-    let inexact = remainder != 0;
-    let increment = match round {
-        Round::NearestTiesToEven | Round::NearestTiesToAway => remainder > result,
-        Round::TowardPositive => inexact,
-        Round::TowardNegative | Round::TowardZero => false,
-    };
-    result += u128::from(increment);
-    exponent /= 2;
-    if result >= 1u128 << (fraction_bits + 1) {
-        result >>= 1;
-        exponent += 1;
-    }
-    (
-        ((exponent + bias) as u64) << fraction_bits | (result as u64 & fraction_mask),
-        u32::from(inexact) << 5,
-    )
+fn square_root(bits: u64, width: usize, round: Rounding) -> (u64, u32) {
+    let result = ieee::square_root(bits, ieee_format(width), round);
+    (result.bits, u32::from(result.exceptions))
 }
 
 fn binary(
@@ -370,12 +186,12 @@ fn binary(
         return (quiet(if an { a } else { b }, width), u32::from(sn), None);
     }
     if matches!(kind, F::Add | F::Subtract)
-        && let Some(result) = exact_normal_sum(a, b, width, kind == F::Subtract)
+        && let Some(result) = ieee::exact_normal_sum(a, b, ieee_format(width), kind == F::Subtract)
     {
         return (result, 0, None);
     }
     if kind == F::Multiply
-        && let Some(result) = exact_normal_product(a, b, width)
+        && let Some(result) = ieee::exact_normal_product(a, b, ieee_format(width))
     {
         return (result, 0, None);
     }
@@ -390,16 +206,19 @@ fn binary(
             b
         };
         let denominator = if kind == F::ReciprocalSquareRoot {
-            square_root(b, width, Round::NearestTiesToEven).0
+            square_root(b, width, Rounding::Nearest).0
         } else {
             b
         };
-        let (value, _) = if width == 4 {
-            let r = Single::from_bits(0x3f80_0000).div_r(
-                Single::from_bits(denominator as u128),
-                Round::NearestTiesToEven,
-            );
-            (r.value.to_bits() as u64, exceptions(r.status))
+        let value = if width == 4 {
+            ieee::binary(
+                BinaryOperation::Divide,
+                BinaryFormat::Binary32,
+                0x3f80_0000,
+                denominator,
+                Rounding::Nearest,
+            )
+            .bits
         } else {
             unreachable!()
         };
@@ -412,28 +231,9 @@ fn binary(
             0,
             None,
         );
-    } else if width == 4 {
-        let x = Single::from_bits(a as u128);
-        let y = Single::from_bits(b as u128);
-        let r = match kind {
-            F::Add => x.add_r(y, round),
-            F::Subtract => x.sub_r(y, round),
-            F::Multiply => x.mul_r(y, round),
-            F::Divide => x.div_r(y, round),
-            _ => unreachable!(),
-        };
-        (r.value.to_bits() as u64, exceptions(r.status))
     } else {
-        let x = Double::from_bits(a as u128);
-        let y = Double::from_bits(b as u128);
-        let r = match kind {
-            F::Add => x.add_r(y, round),
-            F::Subtract => x.sub_r(y, round),
-            F::Multiply => x.mul_r(y, round),
-            F::Divide => x.div_r(y, round),
-            _ => unreachable!(),
-        };
-        (r.value.to_bits() as u64, exceptions(r.status))
+        let result = ieee::binary(ieee_operation(kind), ieee_format(width), a, b, round);
+        (result.bits, u32::from(result.exceptions))
     };
     if status & 1 != 0 {
         result = indefinite(width);
@@ -509,7 +309,7 @@ pub(super) fn convert(
         unreachable!()
     };
     let round = if truncate {
-        Round::TowardZero
+        Rounding::Zero
     } else {
         rounding(mxcsr)
     };
@@ -572,48 +372,26 @@ pub(super) fn convert(
                 | C::SignedDwordToDouble
         );
         let (value, status) = if from_integer {
-            if destination_width == 4 {
-                let r = Single::from_i128_r(raw as u32 as i32 as i128, round);
-                (r.value.to_bits() as u64, exceptions(r.status))
-            } else {
-                let r = Double::from_i128_r(raw as u32 as i32 as i128, round);
-                (r.value.to_bits() as u64, exceptions(r.status))
-            }
+            let result =
+                ieee::from_signed32(raw as u32 as i32, ieee_format(destination_width), round);
+            (result.bits, u32::from(result.exceptions))
         } else {
             let (raw, denormal_flag) = input(raw, source_width, mxcsr);
             if to_integer {
-                let mut exact = false;
-                let r = if source_width == 4 {
-                    Single::from_bits(raw as u128).to_i128_r(32, round, &mut exact)
-                } else {
-                    Double::from_bits(raw as u128).to_i128_r(32, round, &mut exact)
-                };
-                (
-                    if r.status.contains(Status::INVALID_OP) {
-                        0x8000_0000
-                    } else {
-                        r.value as u64
-                    },
-                    exceptions(r.status),
-                )
+                let result = ieee::to_signed32(raw, ieee_format(source_width), round);
+                (result.bits, u32::from(result.exceptions))
             } else if source_width == 4 {
-                let mut loses = false;
-                let r: rustc_apfloat::StatusAnd<Double> =
-                    Single::from_bits(raw as u128).convert_r(round, &mut loses);
+                let result = ieee::convert(raw, BinaryFormat::Binary32, round);
                 (
-                    r.value.to_bits() as u64,
-                    exceptions(r.status) | if nan(raw, 4) { 0 } else { denormal_flag },
+                    result.bits,
+                    u32::from(result.exceptions) | if nan(raw, 4) { 0 } else { denormal_flag },
                 )
             } else {
-                let mut loses = false;
-                let r: rustc_apfloat::StatusAnd<Single> =
-                    Double::from_bits(raw as u128).convert_r(round, &mut loses);
-                let mut value = r.value.to_bits() as u64;
-                let mut status = exceptions(r.status) | if nan(raw, 8) { 0 } else { denormal_flag };
-                let unbounded: IeeeFloat<WideSingle> = Double::from_bits(raw as u128)
-                    .convert_r(round, &mut loses)
-                    .value;
-                let tiny = unbounded.is_finite_non_zero() && unbounded.ilogb() < -126;
+                let result = ieee::convert(raw, BinaryFormat::Binary64, round);
+                let mut value = result.bits;
+                let mut status =
+                    u32::from(result.exceptions) | if nan(raw, 8) { 0 } else { denormal_flag };
+                let tiny = ieee::narrowing_tiny(raw, round);
                 if tiny {
                     if mxcsr & 0x800 == 0 || status & 0x20 != 0 {
                         status |= 0x10;
@@ -640,19 +418,16 @@ mod tests {
     #[test]
     fn radical_has_exact_rounding_and_signed_zero() {
         assert_eq!(
-            square_root(0x4080_0000, 4, Round::NearestTiesToEven),
+            square_root(0x4080_0000, 4, Rounding::Nearest),
             (0x4000_0000, 0)
         );
         assert_eq!(
-            square_root(0x4000_0000, 4, Round::NearestTiesToEven),
+            square_root(0x4000_0000, 4, Rounding::Nearest),
             (0x3fb5_04f3, 32)
         );
+        assert_eq!(square_root(0x8000_0000, 4, Rounding::Up), (0x8000_0000, 0));
         assert_eq!(
-            square_root(0x8000_0000, 4, Round::TowardPositive),
-            (0x8000_0000, 0)
-        );
-        assert_eq!(
-            square_root(0x3ff0_0000_0000_0000, 8, Round::TowardZero),
+            square_root(0x3ff0_0000_0000_0000, 8, Rounding::Zero),
             (0x3ff0_0000_0000_0000, 0)
         );
     }
