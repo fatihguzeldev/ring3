@@ -105,9 +105,9 @@ fn duplicate_profile_prefix(bytes: &[u8]) -> bool {
 }
 
 #[cfg(test)]
-#[path = "execution_faults_tests.rs"]
+#[path = "execution_faults/tests/faults.rs"]
 mod tests;
 
 #[cfg(test)]
-#[path = "execution_environment_tests.rs"]
+#[path = "execution_faults/tests/environment.rs"]
 mod environment_tests;

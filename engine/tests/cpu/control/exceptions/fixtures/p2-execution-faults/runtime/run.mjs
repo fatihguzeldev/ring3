@@ -15,8 +15,8 @@ const paths = ['engine/src/cpu/x86/decode/decoder.rs', 'engine/src/cpu/x86/decod
   'engine/src/cpu/dbt/region.rs', 'engine/src/cpu/dbt/wasm/control_instructions.rs', 'engine/src/cpu/dbt/wasm/emitter.rs',
   'engine/src/process/execution/stopped.rs', 'engine/src/process/wasm/execution.rs', 'engine/src/abi/wasm/exports/execution.rs',
   'engine/tests/cpu/control/exceptions/fixtures/p2-execution-faults/runtime/run.mjs'];
-if (scenario) paths.push('engine/src/cpu/x86/decode/execution_faults_tests.rs',
-  'engine/src/cpu/x86/decode/execution_environment_tests.rs',
+if (scenario) paths.push('engine/src/cpu/x86/decode/execution_faults/tests/faults.rs',
+  'engine/src/cpu/x86/decode/execution_faults/tests/environment.rs',
   'engine/tests/cpu/control/exceptions/fixtures/p2-execution-faults/runtime/privileged-cases.mjs',
   'engine/tests/cpu/control/exceptions/fixtures/p2-execution-faults/runtime/privileged.mjs');
 const pins = () => Object.fromEntries(paths.map(path => [path, hash(readFileSync(join(root, path)))]));
