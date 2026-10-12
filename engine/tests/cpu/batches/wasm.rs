@@ -1,22 +1,22 @@
 #[path = "../../support/wasm.rs"]
 mod support_wasm;
 
-#[path = "integration/wasm/accumulator_string.rs"]
+#[path = "strings/accumulator/wasm/dword.rs"]
 mod cpu_parallel_accumulator_string_wasm;
 
-#[path = "integration/wasm/bit_flags.rs"]
+#[path = "flags/stack/wasm/dword.rs"]
 mod cpu_parallel_bit_flags_wasm;
 
-#[path = "integration/wasm/bit_string.rs"]
+#[path = "strings/bits/wasm/dword.rs"]
 mod cpu_parallel_bit_string_wasm;
 
 #[path = "integration/wasm/memory.rs"]
 mod cpu_parallel_memory_wasm;
 
-#[path = "integration/wasm/multiply_count_xlat.rs"]
+#[path = "lookup/wasm/products.rs"]
 mod cpu_parallel_multiply_count_xlat_wasm;
 
-#[path = "integration/wasm/reads_control.rs"]
+#[path = "integration/control/wasm/reads.rs"]
 mod cpu_parallel_reads_control_wasm;
 
 #[path = "integration/wasm/core.rs"]
@@ -34,7 +34,7 @@ mod cpu_parallel_word_carry_wasm;
 #[path = "word/wasm/logical.rs"]
 mod cpu_parallel_word_logical_wasm;
 
-#[path = "word/wasm/move_compare.rs"]
+#[path = "strings/compare/wasm/word.rs"]
 mod cpu_parallel_word_move_compare_wasm;
 
 #[path = "word/wasm/predicate.rs"]
