@@ -433,15 +433,7 @@ impl EngineInstance {
         let result = memory.write(GuestAddress(address), &[value as u8]);
         let code_changed = result.is_ok() && memory.code_validation_version() != code_version;
         self.write_byte_store_helper(address, result)?;
-        if code_changed {
-            match self.artifact_bytes() {
-                Ok(_) => Ok(StoreCompletion::Complete),
-                Err(HostError::CodeInvalidated) => Ok(StoreCompletion::CodeInvalidated),
-                Err(error) => Err(error),
-            }
-        } else {
-            Ok(StoreCompletion::Complete)
-        }
+        self.cpu_store_currentness(code_changed, None)
     }
 
     pub fn store_resident8(
@@ -457,17 +449,7 @@ impl EngineInstance {
         let result = memory.write(GuestAddress(address), &[value as u8]);
         let code_changed = result.is_ok() && memory.code_validation_version() != code_version;
         self.write_byte_store_helper(address, result)?;
-        if code_changed {
-            match self.resident_bytes(id) {
-                Ok(_) => Ok(StoreCompletion::Complete),
-                Err(HostError::Resident(RegistryError::CodeInvalidated)) => {
-                    Ok(StoreCompletion::CodeInvalidated)
-                }
-                Err(error) => Err(error),
-            }
-        } else {
-            Ok(StoreCompletion::Complete)
-        }
+        self.cpu_store_currentness(code_changed, Some(id))
     }
 
     pub fn store16(&mut self, address: u32, value: u32) -> Result<StoreCompletion, HostError> {
@@ -477,15 +459,7 @@ impl EngineInstance {
         let result = memory.write(GuestAddress(address), &(value as u16).to_le_bytes());
         let code_changed = result.is_ok() && memory.code_validation_version() != code_version;
         self.write_word_store_helper(address, result)?;
-        if code_changed {
-            match self.artifact_bytes() {
-                Ok(_) => Ok(StoreCompletion::Complete),
-                Err(HostError::CodeInvalidated) => Ok(StoreCompletion::CodeInvalidated),
-                Err(error) => Err(error),
-            }
-        } else {
-            Ok(StoreCompletion::Complete)
-        }
+        self.cpu_store_currentness(code_changed, None)
     }
 
     pub fn store_resident16(
@@ -501,17 +475,7 @@ impl EngineInstance {
         let result = memory.write(GuestAddress(address), &(value as u16).to_le_bytes());
         let code_changed = result.is_ok() && memory.code_validation_version() != code_version;
         self.write_word_store_helper(address, result)?;
-        if code_changed {
-            match self.resident_bytes(id) {
-                Ok(_) => Ok(StoreCompletion::Complete),
-                Err(HostError::Resident(RegistryError::CodeInvalidated)) => {
-                    Ok(StoreCompletion::CodeInvalidated)
-                }
-                Err(error) => Err(error),
-            }
-        } else {
-            Ok(StoreCompletion::Complete)
-        }
+        self.cpu_store_currentness(code_changed, Some(id))
     }
 
     pub fn store32(&mut self, address: u32, value: u32) -> Result<StoreCompletion, HostError> {
@@ -523,15 +487,7 @@ impl EngineInstance {
             .map(|()| 0);
         let code_changed = result.is_ok() && memory.code_validation_version() != code_version;
         self.write_helper(result)?;
-        if code_changed {
-            match self.artifact_bytes() {
-                Ok(_) => Ok(StoreCompletion::Complete),
-                Err(HostError::CodeInvalidated) => Ok(StoreCompletion::CodeInvalidated),
-                Err(error) => Err(error),
-            }
-        } else {
-            Ok(StoreCompletion::Complete)
-        }
+        self.cpu_store_currentness(code_changed, None)
     }
 
     pub fn store_resident32(
@@ -549,17 +505,7 @@ impl EngineInstance {
             .map(|()| 0);
         let code_changed = result.is_ok() && memory.code_validation_version() != code_version;
         self.write_helper(result)?;
-        if code_changed {
-            match self.resident_bytes(id) {
-                Ok(_) => Ok(StoreCompletion::Complete),
-                Err(HostError::Resident(RegistryError::CodeInvalidated)) => {
-                    Ok(StoreCompletion::CodeInvalidated)
-                }
-                Err(error) => Err(error),
-            }
-        } else {
-            Ok(StoreCompletion::Complete)
-        }
+        self.cpu_store_currentness(code_changed, Some(id))
     }
 
     pub fn exchange16(&mut self, address: u32, value: u32) -> Result<StoreCompletion, HostError> {
@@ -571,15 +517,7 @@ impl EngineInstance {
             .map(u32::from);
         let code_changed = result.is_ok() && memory.code_validation_version() != code_version;
         self.write_word_exchange_helper(address, result)?;
-        if code_changed {
-            match self.artifact_bytes() {
-                Ok(_) => Ok(StoreCompletion::Complete),
-                Err(HostError::CodeInvalidated) => Ok(StoreCompletion::CodeInvalidated),
-                Err(error) => Err(error),
-            }
-        } else {
-            Ok(StoreCompletion::Complete)
-        }
+        self.cpu_store_currentness(code_changed, None)
     }
 
     pub fn exchange_resident16(
@@ -597,17 +535,7 @@ impl EngineInstance {
             .map(u32::from);
         let code_changed = result.is_ok() && memory.code_validation_version() != code_version;
         self.write_word_exchange_helper(address, result)?;
-        if code_changed {
-            match self.resident_bytes(id) {
-                Ok(_) => Ok(StoreCompletion::Complete),
-                Err(HostError::Resident(RegistryError::CodeInvalidated)) => {
-                    Ok(StoreCompletion::CodeInvalidated)
-                }
-                Err(error) => Err(error),
-            }
-        } else {
-            Ok(StoreCompletion::Complete)
-        }
+        self.cpu_store_currentness(code_changed, Some(id))
     }
 
     pub fn exchange8(&mut self, address: u32, value: u32) -> Result<StoreCompletion, HostError> {
@@ -619,15 +547,7 @@ impl EngineInstance {
             .map(u32::from);
         let code_changed = result.is_ok() && memory.code_validation_version() != code_version;
         self.write_byte_exchange_helper(address, result)?;
-        if code_changed {
-            match self.artifact_bytes() {
-                Ok(_) => Ok(StoreCompletion::Complete),
-                Err(HostError::CodeInvalidated) => Ok(StoreCompletion::CodeInvalidated),
-                Err(error) => Err(error),
-            }
-        } else {
-            Ok(StoreCompletion::Complete)
-        }
+        self.cpu_store_currentness(code_changed, None)
     }
 
     pub fn exchange_resident8(
@@ -645,17 +565,7 @@ impl EngineInstance {
             .map(u32::from);
         let code_changed = result.is_ok() && memory.code_validation_version() != code_version;
         self.write_byte_exchange_helper(address, result)?;
-        if code_changed {
-            match self.resident_bytes(id) {
-                Ok(_) => Ok(StoreCompletion::Complete),
-                Err(HostError::Resident(RegistryError::CodeInvalidated)) => {
-                    Ok(StoreCompletion::CodeInvalidated)
-                }
-                Err(error) => Err(error),
-            }
-        } else {
-            Ok(StoreCompletion::Complete)
-        }
+        self.cpu_store_currentness(code_changed, Some(id))
     }
 
     pub fn exchange32(&mut self, address: u32, value: u32) -> Result<StoreCompletion, HostError> {
@@ -665,15 +575,7 @@ impl EngineInstance {
         let result = memory.exchange32(GuestAddress(address), value);
         let code_changed = result.is_ok() && memory.code_validation_version() != code_version;
         self.write_helper(result)?;
-        if code_changed {
-            match self.artifact_bytes() {
-                Ok(_) => Ok(StoreCompletion::Complete),
-                Err(HostError::CodeInvalidated) => Ok(StoreCompletion::CodeInvalidated),
-                Err(error) => Err(error),
-            }
-        } else {
-            Ok(StoreCompletion::Complete)
-        }
+        self.cpu_store_currentness(code_changed, None)
     }
 
     pub fn exchange_resident32(
@@ -689,17 +591,7 @@ impl EngineInstance {
         let result = memory.exchange32(GuestAddress(address), value);
         let code_changed = result.is_ok() && memory.code_validation_version() != code_version;
         self.write_helper(result)?;
-        if code_changed {
-            match self.resident_bytes(id) {
-                Ok(_) => Ok(StoreCompletion::Complete),
-                Err(HostError::Resident(RegistryError::CodeInvalidated)) => {
-                    Ok(StoreCompletion::CodeInvalidated)
-                }
-                Err(error) => Err(error),
-            }
-        } else {
-            Ok(StoreCompletion::Complete)
-        }
+        self.cpu_store_currentness(code_changed, Some(id))
     }
 
     pub fn compare_exchange8(
@@ -716,15 +608,7 @@ impl EngineInstance {
             .map(u32::from);
         let code_changed = result.is_ok() && memory.code_validation_version() != code_version;
         self.write_byte_exchange_helper(address, result)?;
-        if code_changed {
-            match self.artifact_bytes() {
-                Ok(_) => Ok(StoreCompletion::Complete),
-                Err(HostError::CodeInvalidated) => Ok(StoreCompletion::CodeInvalidated),
-                Err(error) => Err(error),
-            }
-        } else {
-            Ok(StoreCompletion::Complete)
-        }
+        self.cpu_store_currentness(code_changed, None)
     }
 
     pub fn compare_exchange_resident8(
@@ -743,17 +627,7 @@ impl EngineInstance {
             .map(u32::from);
         let code_changed = result.is_ok() && memory.code_validation_version() != code_version;
         self.write_byte_exchange_helper(address, result)?;
-        if code_changed {
-            match self.resident_bytes(id) {
-                Ok(_) => Ok(StoreCompletion::Complete),
-                Err(HostError::Resident(RegistryError::CodeInvalidated)) => {
-                    Ok(StoreCompletion::CodeInvalidated)
-                }
-                Err(error) => Err(error),
-            }
-        } else {
-            Ok(StoreCompletion::Complete)
-        }
+        self.cpu_store_currentness(code_changed, Some(id))
     }
 
     pub fn compare_exchange16(
@@ -770,15 +644,7 @@ impl EngineInstance {
             .map(u32::from);
         let code_changed = result.is_ok() && memory.code_validation_version() != code_version;
         self.write_word_exchange_helper(address, result)?;
-        if code_changed {
-            match self.artifact_bytes() {
-                Ok(_) => Ok(StoreCompletion::Complete),
-                Err(HostError::CodeInvalidated) => Ok(StoreCompletion::CodeInvalidated),
-                Err(error) => Err(error),
-            }
-        } else {
-            Ok(StoreCompletion::Complete)
-        }
+        self.cpu_store_currentness(code_changed, None)
     }
 
     pub fn compare_exchange_resident16(
@@ -797,17 +663,7 @@ impl EngineInstance {
             .map(u32::from);
         let code_changed = result.is_ok() && memory.code_validation_version() != code_version;
         self.write_word_exchange_helper(address, result)?;
-        if code_changed {
-            match self.resident_bytes(id) {
-                Ok(_) => Ok(StoreCompletion::Complete),
-                Err(HostError::Resident(RegistryError::CodeInvalidated)) => {
-                    Ok(StoreCompletion::CodeInvalidated)
-                }
-                Err(error) => Err(error),
-            }
-        } else {
-            Ok(StoreCompletion::Complete)
-        }
+        self.cpu_store_currentness(code_changed, Some(id))
     }
 
     pub fn compare_exchange32(
@@ -822,15 +678,7 @@ impl EngineInstance {
         let result = memory.compare_exchange32(GuestAddress(address), expected, desired);
         let code_changed = result.is_ok() && memory.code_validation_version() != code_version;
         self.write_helper(result)?;
-        if code_changed {
-            match self.artifact_bytes() {
-                Ok(_) => Ok(StoreCompletion::Complete),
-                Err(HostError::CodeInvalidated) => Ok(StoreCompletion::CodeInvalidated),
-                Err(error) => Err(error),
-            }
-        } else {
-            Ok(StoreCompletion::Complete)
-        }
+        self.cpu_store_currentness(code_changed, None)
     }
 
     pub fn compare_exchange_resident32(
@@ -847,17 +695,7 @@ impl EngineInstance {
         let result = memory.compare_exchange32(GuestAddress(address), expected, desired);
         let code_changed = result.is_ok() && memory.code_validation_version() != code_version;
         self.write_helper(result)?;
-        if code_changed {
-            match self.resident_bytes(id) {
-                Ok(_) => Ok(StoreCompletion::Complete),
-                Err(HostError::Resident(RegistryError::CodeInvalidated)) => {
-                    Ok(StoreCompletion::CodeInvalidated)
-                }
-                Err(error) => Err(error),
-            }
-        } else {
-            Ok(StoreCompletion::Complete)
-        }
+        self.cpu_store_currentness(code_changed, Some(id))
     }
 
     pub fn exchange_add32(
@@ -871,15 +709,7 @@ impl EngineInstance {
         let result = memory.exchange_add32(GuestAddress(address), source);
         let code_changed = result.is_ok() && memory.code_validation_version() != code_version;
         self.write_helper(result)?;
-        if code_changed {
-            match self.artifact_bytes() {
-                Ok(_) => Ok(StoreCompletion::Complete),
-                Err(HostError::CodeInvalidated) => Ok(StoreCompletion::CodeInvalidated),
-                Err(error) => Err(error),
-            }
-        } else {
-            Ok(StoreCompletion::Complete)
-        }
+        self.cpu_store_currentness(code_changed, None)
     }
 
     pub fn exchange_add_resident32(
@@ -895,17 +725,7 @@ impl EngineInstance {
         let result = memory.exchange_add32(GuestAddress(address), source);
         let code_changed = result.is_ok() && memory.code_validation_version() != code_version;
         self.write_helper(result)?;
-        if code_changed {
-            match self.resident_bytes(id) {
-                Ok(_) => Ok(StoreCompletion::Complete),
-                Err(HostError::Resident(RegistryError::CodeInvalidated)) => {
-                    Ok(StoreCompletion::CodeInvalidated)
-                }
-                Err(error) => Err(error),
-            }
-        } else {
-            Ok(StoreCompletion::Complete)
-        }
+        self.cpu_store_currentness(code_changed, Some(id))
     }
 
     pub fn exchange_add8(
@@ -921,15 +741,7 @@ impl EngineInstance {
             .map(u32::from);
         let code_changed = result.is_ok() && memory.code_validation_version() != code_version;
         self.write_byte_exchange_helper(address, result)?;
-        if code_changed {
-            match self.artifact_bytes() {
-                Ok(_) => Ok(StoreCompletion::Complete),
-                Err(HostError::CodeInvalidated) => Ok(StoreCompletion::CodeInvalidated),
-                Err(error) => Err(error),
-            }
-        } else {
-            Ok(StoreCompletion::Complete)
-        }
+        self.cpu_store_currentness(code_changed, None)
     }
 
     pub fn exchange_add_resident8(
@@ -947,17 +759,7 @@ impl EngineInstance {
             .map(u32::from);
         let code_changed = result.is_ok() && memory.code_validation_version() != code_version;
         self.write_byte_exchange_helper(address, result)?;
-        if code_changed {
-            match self.resident_bytes(id) {
-                Ok(_) => Ok(StoreCompletion::Complete),
-                Err(HostError::Resident(RegistryError::CodeInvalidated)) => {
-                    Ok(StoreCompletion::CodeInvalidated)
-                }
-                Err(error) => Err(error),
-            }
-        } else {
-            Ok(StoreCompletion::Complete)
-        }
+        self.cpu_store_currentness(code_changed, Some(id))
     }
 
     pub fn exchange_add16(
@@ -973,15 +775,7 @@ impl EngineInstance {
             .map(u32::from);
         let code_changed = result.is_ok() && memory.code_validation_version() != code_version;
         self.write_word_exchange_helper(address, result)?;
-        if code_changed {
-            match self.artifact_bytes() {
-                Ok(_) => Ok(StoreCompletion::Complete),
-                Err(HostError::CodeInvalidated) => Ok(StoreCompletion::CodeInvalidated),
-                Err(error) => Err(error),
-            }
-        } else {
-            Ok(StoreCompletion::Complete)
-        }
+        self.cpu_store_currentness(code_changed, None)
     }
 
     pub fn exchange_add_resident16(
@@ -999,17 +793,7 @@ impl EngineInstance {
             .map(u32::from);
         let code_changed = result.is_ok() && memory.code_validation_version() != code_version;
         self.write_word_exchange_helper(address, result)?;
-        if code_changed {
-            match self.resident_bytes(id) {
-                Ok(_) => Ok(StoreCompletion::Complete),
-                Err(HostError::Resident(RegistryError::CodeInvalidated)) => {
-                    Ok(StoreCompletion::CodeInvalidated)
-                }
-                Err(error) => Err(error),
-            }
-        } else {
-            Ok(StoreCompletion::Complete)
-        }
+        self.cpu_store_currentness(code_changed, Some(id))
     }
 
     pub fn bit_test_set32(&mut self, address: u32, bit: u32) -> Result<StoreCompletion, HostError> {
@@ -1019,15 +803,7 @@ impl EngineInstance {
         let result = memory.bit_test_set32(GuestAddress(address), bit);
         let code_changed = result.is_ok() && memory.code_validation_version() != code_version;
         self.write_helper(result)?;
-        if code_changed {
-            match self.artifact_bytes() {
-                Ok(_) => Ok(StoreCompletion::Complete),
-                Err(HostError::CodeInvalidated) => Ok(StoreCompletion::CodeInvalidated),
-                Err(error) => Err(error),
-            }
-        } else {
-            Ok(StoreCompletion::Complete)
-        }
+        self.cpu_store_currentness(code_changed, None)
     }
 
     pub fn bit_test_set_resident32(
@@ -1043,17 +819,7 @@ impl EngineInstance {
         let result = memory.bit_test_set32(GuestAddress(address), bit);
         let code_changed = result.is_ok() && memory.code_validation_version() != code_version;
         self.write_helper(result)?;
-        if code_changed {
-            match self.resident_bytes(id) {
-                Ok(_) => Ok(StoreCompletion::Complete),
-                Err(HostError::Resident(RegistryError::CodeInvalidated)) => {
-                    Ok(StoreCompletion::CodeInvalidated)
-                }
-                Err(error) => Err(error),
-            }
-        } else {
-            Ok(StoreCompletion::Complete)
-        }
+        self.cpu_store_currentness(code_changed, Some(id))
     }
 
     pub fn bit_test_reset32(
@@ -1067,15 +833,7 @@ impl EngineInstance {
         let result = memory.bit_test_reset32(GuestAddress(address), bit);
         let code_changed = result.is_ok() && memory.code_validation_version() != code_version;
         self.write_helper(result)?;
-        if code_changed {
-            match self.artifact_bytes() {
-                Ok(_) => Ok(StoreCompletion::Complete),
-                Err(HostError::CodeInvalidated) => Ok(StoreCompletion::CodeInvalidated),
-                Err(error) => Err(error),
-            }
-        } else {
-            Ok(StoreCompletion::Complete)
-        }
+        self.cpu_store_currentness(code_changed, None)
     }
 
     pub fn bit_test_reset_resident32(
@@ -1091,17 +849,7 @@ impl EngineInstance {
         let result = memory.bit_test_reset32(GuestAddress(address), bit);
         let code_changed = result.is_ok() && memory.code_validation_version() != code_version;
         self.write_helper(result)?;
-        if code_changed {
-            match self.resident_bytes(id) {
-                Ok(_) => Ok(StoreCompletion::Complete),
-                Err(HostError::Resident(RegistryError::CodeInvalidated)) => {
-                    Ok(StoreCompletion::CodeInvalidated)
-                }
-                Err(error) => Err(error),
-            }
-        } else {
-            Ok(StoreCompletion::Complete)
-        }
+        self.cpu_store_currentness(code_changed, Some(id))
     }
 
     pub fn atomic_or_u32(&mut self, address: u32, mask: u32) -> Result<StoreCompletion, HostError> {
@@ -1111,15 +859,7 @@ impl EngineInstance {
         let result = memory.atomic_or_u32(GuestAddress(address), mask);
         let code_changed = result.is_ok() && memory.code_validation_version() != code_version;
         self.write_helper(result)?;
-        if code_changed {
-            match self.artifact_bytes() {
-                Ok(_) => Ok(StoreCompletion::Complete),
-                Err(HostError::CodeInvalidated) => Ok(StoreCompletion::CodeInvalidated),
-                Err(error) => Err(error),
-            }
-        } else {
-            Ok(StoreCompletion::Complete)
-        }
+        self.cpu_store_currentness(code_changed, None)
     }
 
     pub fn atomic_or_resident_u32(
@@ -1135,17 +875,7 @@ impl EngineInstance {
         let result = memory.atomic_or_u32(GuestAddress(address), mask);
         let code_changed = result.is_ok() && memory.code_validation_version() != code_version;
         self.write_helper(result)?;
-        if code_changed {
-            match self.resident_bytes(id) {
-                Ok(_) => Ok(StoreCompletion::Complete),
-                Err(HostError::Resident(RegistryError::CodeInvalidated)) => {
-                    Ok(StoreCompletion::CodeInvalidated)
-                }
-                Err(error) => Err(error),
-            }
-        } else {
-            Ok(StoreCompletion::Complete)
-        }
+        self.cpu_store_currentness(code_changed, Some(id))
     }
 
     pub fn atomic_and_u32(
@@ -1159,15 +889,7 @@ impl EngineInstance {
         let result = memory.atomic_and_u32(GuestAddress(address), mask);
         let code_changed = result.is_ok() && memory.code_validation_version() != code_version;
         self.write_helper(result)?;
-        if code_changed {
-            match self.artifact_bytes() {
-                Ok(_) => Ok(StoreCompletion::Complete),
-                Err(HostError::CodeInvalidated) => Ok(StoreCompletion::CodeInvalidated),
-                Err(error) => Err(error),
-            }
-        } else {
-            Ok(StoreCompletion::Complete)
-        }
+        self.cpu_store_currentness(code_changed, None)
     }
 
     pub fn atomic_and_resident_u32(
@@ -1183,17 +905,7 @@ impl EngineInstance {
         let result = memory.atomic_and_u32(GuestAddress(address), mask);
         let code_changed = result.is_ok() && memory.code_validation_version() != code_version;
         self.write_helper(result)?;
-        if code_changed {
-            match self.resident_bytes(id) {
-                Ok(_) => Ok(StoreCompletion::Complete),
-                Err(HostError::Resident(RegistryError::CodeInvalidated)) => {
-                    Ok(StoreCompletion::CodeInvalidated)
-                }
-                Err(error) => Err(error),
-            }
-        } else {
-            Ok(StoreCompletion::Complete)
-        }
+        self.cpu_store_currentness(code_changed, Some(id))
     }
 
     pub fn atomic_xor_u32(
@@ -1207,15 +919,7 @@ impl EngineInstance {
         let result = memory.atomic_xor_u32(GuestAddress(address), mask);
         let code_changed = result.is_ok() && memory.code_validation_version() != code_version;
         self.write_helper(result)?;
-        if code_changed {
-            match self.artifact_bytes() {
-                Ok(_) => Ok(StoreCompletion::Complete),
-                Err(HostError::CodeInvalidated) => Ok(StoreCompletion::CodeInvalidated),
-                Err(error) => Err(error),
-            }
-        } else {
-            Ok(StoreCompletion::Complete)
-        }
+        self.cpu_store_currentness(code_changed, None)
     }
 
     pub fn atomic_xor_resident_u32(
@@ -1231,17 +935,7 @@ impl EngineInstance {
         let result = memory.atomic_xor_u32(GuestAddress(address), mask);
         let code_changed = result.is_ok() && memory.code_validation_version() != code_version;
         self.write_helper(result)?;
-        if code_changed {
-            match self.resident_bytes(id) {
-                Ok(_) => Ok(StoreCompletion::Complete),
-                Err(HostError::Resident(RegistryError::CodeInvalidated)) => {
-                    Ok(StoreCompletion::CodeInvalidated)
-                }
-                Err(error) => Err(error),
-            }
-        } else {
-            Ok(StoreCompletion::Complete)
-        }
+        self.cpu_store_currentness(code_changed, Some(id))
     }
 
     pub fn close(&mut self) {
