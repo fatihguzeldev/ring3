@@ -1,0 +1,112 @@
+
+program.exe:	file format coff-i386
+Characteristics 0x102
+	executable
+	32 bit words
+
+Time/Date               Thu Jan  1 00:00:00 1970
+Magic                   010b	(PE32)
+MajorLinkerVersion      14
+MinorLinkerVersion      0
+SizeOfCode              00000200
+SizeOfInitializedData   00000400
+SizeOfUninitializedData 00000000
+AddressOfEntryPoint     00001000
+BaseOfCode              00001000
+BaseOfData              00000000
+ImageBase               00400000
+SectionAlignment        00001000
+FileAlignment           00000200
+MajorOSystemVersion     6
+MinorOSystemVersion     0
+MajorImageVersion       0
+MinorImageVersion       0
+MajorSubsystemVersion   6
+MinorSubsystemVersion   0
+Win32Version            00000000
+SizeOfImage             00005000
+SizeOfHeaders           00000400
+CheckSum                00000000
+Subsystem               00000003	(Windows CUI)
+DllCharacteristics      00008140
+					DYNAMIC_BASE
+					NX_COMPAT
+					TERMINAL_SERVER_AWARE
+SizeOfStackReserve      00100000
+SizeOfStackCommit       00001000
+SizeOfHeapReserve       00100000
+SizeOfHeapCommit        00001000
+LoaderFlags             00000000
+NumberOfRvaAndSizes     00000010
+
+The Data Directory
+Entry 0 00000000 00000000 Export Directory [.edata (or where ever we found it)]
+Entry 1 00002080 00000028 Import Directory [parts of .idata]
+Entry 2 00000000 00000000 Resource Directory [.rsrc]
+Entry 3 00000000 00000000 Exception Directory [.pdata]
+Entry 4 00000000 00000000 Security Directory
+Entry 5 00004000 00000024 Base Relocation Directory [.reloc]
+Entry 6 00000000 00000000 Debug Directory
+Entry 7 00000000 00000000 Description Directory
+Entry 8 00000000 00000000 Special Directory
+Entry 9 00000000 00000000 Thread Storage Directory [.tls]
+Entry a 00000000 00000000 Load Configuration Directory
+Entry b 00000000 00000000 Bound Import Directory
+Entry c 000020b4 0000000c Import Address Table Directory
+Entry d 00000000 00000000 Delay Import Directory
+Entry e 00000000 00000000 CLR Runtime Header
+Entry f 00000000 00000000 Reserved
+
+The Import Tables:
+  lookup 000020a8 time 00000000 fwd 00000000 name 000020de addr 000020b4
+
+    DLL Name: KERNEL32.dll
+    Hint/Ord  Name
+           0  VirtualAlloc
+           0  VirtualFree
+
+
+Sections:
+Idx Name          Size     VMA      Type
+  0 .text         00000104 00401000 TEXT
+  1 .rdata        000000eb 00402000 DATA
+  2 .data         00000000 00403000 DATA
+  3 .reloc        00000024 00404000 DATA
+Contents of section .text:
+ 401000 5683ec10 0f280570 2040000f 110424ff  V....(.p @....$.
+ 401010 15b42040 0089c683 c0308935 04304000  .. @.....0.5.0@.
+ 401020 506a0368 30204000 68002040 0056e85d  Pj.h0 @.h. @.V.]
+ 401030 00000083 c414a308 3040000f 28060f29  ........0@..(..)
+ 401040 05203040 000f2846 100f2905 30304000  . 0@..(F..).00@.
+ 401050 0f284620 0f290540 304000f2 0f104630  .(F .).@0@....F0
+ 401060 f20f1105 50304000 68008000 006a0056  ....P0@.h....j.V
+ 401070 ff15b820 4000a30c 304000c7 05103040  ... @...0@....0@
+ 401080 00474e49 52ebfecc cccccccc cccccccc  .GNIR...........
+ 401090 55535756 8b4c2424 8b442420 8b54241c  USWV.L$$.D$ .T$.
+ 4010a0 660f2802 85c07436 8b742418 8b7c2414  f.(...t6.t$..|$.
+ 4010b0 660f284a 10660f28 522031db 89c5660f  f.(J.f.(R 1...f.
+ 4010c0 281c1e66 0f59d966 0f58c366 0f28da66  (..f.Y.f.X.f.(.f
+ 4010d0 0f58d866 0f291c1f 83c3104d 75e0660f  .X.f.).....Mu.f.
+ 4010e0 28c8660f 15c8f20f 58c8660f 284230f2  (.f.....X.f.(B0.
+ 4010f0 0f59c866 0f15c0f2 0f58c1f2 0f11015e  .Y.f.....X.....^
+ 401100 5f5b5dc3                             _[].
+Contents of section .rdata:
+ 402000 00000000 0000f03f 00000000 00001040  .......?.......@
+ 402010 00000000 0000e0bf 00000000 000000c0  ................
+ 402020 00000000 00000040 00000000 0000f03f  .......@.......?
+ 402030 00000000 0000f03f 00000000 000000c0  .......?........
+ 402040 00000000 00000040 00000000 0000e03f  .......@.......?
+ 402050 00000000 0000d03f 00000000 0000d0bf  .......?........
+ 402060 00000000 00000840 00000000 0000e03f  .......@.......?
+ 402070 00000000 00100000 00300000 04000000  .........0......
+ 402080 a8200000 00000000 00000000 de200000  . ........... ..
+ 402090 b4200000 00000000 00000000 00000000  . ..............
+ 4020a0 00000000 00000000 c0200000 d0200000  ......... ... ..
+ 4020b0 00000000 c0200000 d0200000 00000000  ..... ... ......
+ 4020c0 00005669 72747561 6c416c6c 6f630000  ..VirtualAlloc..
+ 4020d0 00005669 72747561 6c467265 65004b45  ..VirtualFree.KE
+ 4020e0 524e454c 33322e64 6c6c00             RNEL32.dll.
+Contents of section .reloc:
+ 404000 00100000 24000000 07301130 1c302430  ....$....0.0.0$0
+ 404010 29303730 41304c30 57306430 72307730  )070A0L0W0d0r0w0
+ 404020 7d300000                             }0..

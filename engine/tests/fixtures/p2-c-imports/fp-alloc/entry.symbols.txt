@@ -1,0 +1,3 @@
+         U __imp__VirtualAlloc@16
+         U __imp__VirtualFree@12
+         U _ring3_reduce

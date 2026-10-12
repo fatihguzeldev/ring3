@@ -1,0 +1,13 @@
+kernel32.lib:KERNEL32.dll: 00000000 i .idata$2
+kernel32.lib:KERNEL32.dll: 00000000 ? .idata$4
+kernel32.lib:KERNEL32.dll: 00000000 ? .idata$5
+kernel32.lib:KERNEL32.dll: 00000000 i .idata$6
+kernel32.lib:KERNEL32.dll: 00000000 I __IMPORT_DESCRIPTOR_KERNEL32
+kernel32.lib:KERNEL32.dll:          U __NULL_IMPORT_DESCRIPTOR
+kernel32.lib:KERNEL32.dll:          U KERNEL32_NULL_THUNK_DATA
+kernel32.lib:KERNEL32.dll: 00000000 I __NULL_IMPORT_DESCRIPTOR
+kernel32.lib:KERNEL32.dll: 00000000 I KERNEL32_NULL_THUNK_DATA
+kernel32.lib:KERNEL32.dll: 00000000 T _VirtualAlloc@16
+kernel32.lib:KERNEL32.dll: 00000000 T __imp__VirtualAlloc@16
+kernel32.lib:KERNEL32.dll: 00000000 T _VirtualFree@12
+kernel32.lib:KERNEL32.dll: 00000000 T __imp__VirtualFree@12

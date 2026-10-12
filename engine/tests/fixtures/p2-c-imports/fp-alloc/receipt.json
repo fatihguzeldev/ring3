@@ -1,0 +1,248 @@
+{
+  "artifact_policy": "original clang C entry plus unchanged retained SSE2 kernel linked by lld; self-authored DEF/import library uses EXPORTAS for undecorated DLL names and decorated stdcall COFF symbols; no source/object/library/image byte rewriting; __fltused is defined by entry.c",
+  "artifacts": {
+    "entry.c": {
+      "bytes": 1479,
+      "file": "entry.c",
+      "sha256": "734f827f4d94b75b6bd0ba63bdfde6c10013c380c3ce4a4723214bbac438804c"
+    },
+    "entry.inspect.txt": {
+      "bytes": 4575,
+      "file": "entry.inspect.txt",
+      "sha256": "59ad8267366bcfaa99de5d6a2c659cd48954dd969a075027120565eebe735305"
+    },
+    "entry.obj": {
+      "bytes": 1431,
+      "file": "entry.obj",
+      "sha256": "239f804afac572895e86b0a52e5b1be1526996816a196e6b6a25fc75ba110774"
+    },
+    "entry.symbols.txt": {
+      "bytes": 92,
+      "file": "entry.symbols.txt",
+      "sha256": "677c374516933a157b00f5d0add4d839ce68ba5ac65ed2a7247203cc49298263"
+    },
+    "kernel.obj": {
+      "bytes": 658,
+      "file": "kernel.obj",
+      "sha256": "b072459ef7d463c448abb4ca90066e3957cf8c44b3011138d1c186d66dee23f5"
+    },
+    "kernel.text.bin": {
+      "bytes": 116,
+      "file": "kernel.text.bin",
+      "sha256": "08fad7ecb51ad9026481bf5dbe347b26ef413fc292d4b27599cc6f26a62b243d"
+    },
+    "kernel32.def": {
+      "bytes": 109,
+      "file": "kernel32.def",
+      "sha256": "bb77631d1b3afaffeab5c4c4e8cd5e41608477f2aebdc2653ee719e18253c67b"
+    },
+    "kernel32.lib": {
+      "bytes": 1602,
+      "file": "kernel32.lib",
+      "sha256": "4d4a9c301a5ef959b92f20c816a2898e816d31f77592bfaa1a1408de70d222c7"
+    },
+    "kernel32.symbols.txt": {
+      "bytes": 739,
+      "file": "kernel32.symbols.txt",
+      "sha256": "5a443d7059f1e213f8c70d4b59bbeffcfcbadd23442cb0a9918b0386c5ebd9e9"
+    },
+    "program.disasm.txt": {
+      "bytes": 4822,
+      "file": "program.disasm.txt",
+      "sha256": "e25fbc38602dc8054209bbb40dc9a56ab76a19829fc3b934eb466541353bb5ab"
+    },
+    "program.exe": {
+      "bytes": 2560,
+      "file": "program.exe",
+      "sha256": "a986e298e0626d9c4c42ad02092a676fd772b4f9c6a63868dc88036185640d2d"
+    },
+    "program.inspect.txt": {
+      "bytes": 4637,
+      "file": "program.inspect.txt",
+      "sha256": "b12a20d0b7bce6543802b57c8564c62c90bda24fc50828daf19f48015e1218b4"
+    },
+    "program.map": {
+      "bytes": 1424,
+      "file": "program.map",
+      "sha256": "97dd5830e340c40b350e8d390e92a2c7e18cf465f315abaae5b502d9854c6fdb"
+    }
+  },
+  "claim_ceiling": "one original linked PE with allocation, dynamic SSE2 output, explicit guest copies and release; loading, rebasing, suspension, provider completion and generated-Wasm lifetime checks require separate evidence",
+  "command_cwd": "/Users/fatihguzel/ring3/target/fp-allocated-output-2026-10-12/formal-first",
+  "commands": {
+    "compile": [
+      "/Library/Developer/CommandLineTools/usr/bin/clang",
+      "--target=i686-pc-windows-msvc",
+      "-std=c11",
+      "-O2",
+      "-ffreestanding",
+      "-fno-builtin",
+      "-fno-stack-protector",
+      "-fno-vectorize",
+      "-fno-slp-vectorize",
+      "-fno-unroll-loops",
+      "-falign-loops=1",
+      "-mno-mmx",
+      "-mno-incremental-linker-compatible",
+      "-fno-unwind-tables",
+      "-fno-asynchronous-unwind-tables",
+      "-fno-addrsig",
+      "-msse2",
+      "-c",
+      "entry.c",
+      "-o",
+      "entry.obj"
+    ],
+    "compiler_version": [
+      "/Library/Developer/CommandLineTools/usr/bin/clang",
+      "--version"
+    ],
+    "disassemble": [
+      "/Library/Developer/CommandLineTools/usr/bin/llvm-objdump",
+      "--disassemble",
+      "--x86-asm-syntax=intel",
+      "program.exe"
+    ],
+    "entry_inspect": [
+      "/Library/Developer/CommandLineTools/usr/bin/llvm-objdump",
+      "--private-headers",
+      "--section-headers",
+      "--reloc",
+      "--syms",
+      "--full-contents",
+      "entry.obj"
+    ],
+    "entry_symbols": [
+      "/Library/Developer/CommandLineTools/usr/bin/llvm-nm",
+      "--undefined-only",
+      "entry.obj"
+    ],
+    "import_library": [
+      "/Users/fatihguzel/.rustup/toolchains/1.97.1-aarch64-apple-darwin/lib/rustlib/aarch64-apple-darwin/bin/rust-lld",
+      "-flavor",
+      "link",
+      "/lib",
+      "/machine:x86",
+      "/def:kernel32.def",
+      "/out:kernel32.lib"
+    ],
+    "inspect": [
+      "/Library/Developer/CommandLineTools/usr/bin/llvm-objdump",
+      "--private-headers",
+      "--section-headers",
+      "--full-contents",
+      "program.exe"
+    ],
+    "library_symbols": [
+      "/Library/Developer/CommandLineTools/usr/bin/llvm-nm",
+      "--print-file-name",
+      "kernel32.lib"
+    ],
+    "link": [
+      "/Users/fatihguzel/.rustup/toolchains/1.97.1-aarch64-apple-darwin/lib/rustlib/aarch64-apple-darwin/bin/rust-lld",
+      "-flavor",
+      "link",
+      "/machine:x86",
+      "/nodefaultlib",
+      "/timestamp:0",
+      "/fixed:no",
+      "/dynamicbase",
+      "/nxcompat",
+      "/base:0x400000",
+      "/entry:ring3_entry",
+      "/subsystem:console",
+      "/safeseh:no",
+      "/out:program.exe",
+      "/map:program.map",
+      "entry.obj",
+      "kernel.obj",
+      "kernel32.lib"
+    ],
+    "linker_version": [
+      "/Users/fatihguzel/.rustup/toolchains/1.97.1-aarch64-apple-darwin/lib/rustlib/aarch64-apple-darwin/bin/rust-lld",
+      "-flavor",
+      "link",
+      "--version"
+    ],
+    "nm_version": [
+      "/Library/Developer/CommandLineTools/usr/bin/llvm-nm",
+      "--version"
+    ],
+    "objdump_version": [
+      "/Library/Developer/CommandLineTools/usr/bin/llvm-objdump",
+      "--version"
+    ]
+  },
+  "compiler": {
+    "path": "/Library/Developer/CommandLineTools/usr/bin/clang",
+    "resolved_path": "/Library/Developer/CommandLineTools/usr/bin/clang",
+    "sha256": "f30550eab15fdf5ab8c0dc54c52679711241e5d4b636b027e18c09fef531775d",
+    "version": "Apple clang version 21.0.0 (clang-2100.1.1.101)\nTarget: arm64-apple-darwin25.6.0\nThread model: posix\nInstalledDir: /Library/Developer/CommandLineTools/usr/bin\n"
+  },
+  "compiler_profile_delta": {
+    "append": [
+      "-msse2"
+    ],
+    "remove": [
+      "-mno-sse",
+      "-mno-sse2"
+    ]
+  },
+  "environment": {
+    "LC_ALL": "C",
+    "PATH": "/usr/bin:/bin",
+    "SOURCE_DATE_EPOCH": "0",
+    "TZ": "UTC"
+  },
+  "inputs": [
+    {
+      "bytes": 10227,
+      "path": "/Users/fatihguzel/ring3/engine/tests/fixtures/p2-compiled-records/build.py",
+      "sha256": "fe426f202b48664a87357c766d39099b9d35b5d8217c2b114696164a0d468258"
+    },
+    {
+      "bytes": 658,
+      "path": "/Users/fatihguzel/ring3/engine/tests/fixtures/p2-fp-compiled/sse2/kernel.obj",
+      "sha256": "b072459ef7d463c448abb4ca90066e3957cf8c44b3011138d1c186d66dee23f5"
+    },
+    {
+      "bytes": 116,
+      "path": "/Users/fatihguzel/ring3/engine/tests/fixtures/p2-fp-compiled/sse2/kernel.text.bin",
+      "sha256": "08fad7ecb51ad9026481bf5dbe347b26ef413fc292d4b27599cc6f26a62b243d"
+    },
+    {
+      "bytes": 1479,
+      "path": "/Users/fatihguzel/ring3/engine/tests/fixtures/p2-c-imports/fp-alloc/entry.c",
+      "sha256": "734f827f4d94b75b6bd0ba63bdfde6c10013c380c3ce4a4723214bbac438804c"
+    },
+    {
+      "bytes": 109,
+      "path": "/Users/fatihguzel/ring3/engine/tests/fixtures/p2-c-imports/fp-alloc/kernel32.def",
+      "sha256": "bb77631d1b3afaffeab5c4c4e8cd5e41608477f2aebdc2653ee719e18253c67b"
+    },
+    {
+      "bytes": 7431,
+      "path": "/Users/fatihguzel/ring3/engine/tests/fixtures/p2-c-imports/fp-alloc/build.py",
+      "sha256": "dd4018df8ebe7d86f2c15348c8e2d66c5b0305d6a6f9d4da33408f66b60abe72"
+    }
+  ],
+  "linker": {
+    "path": "/Users/fatihguzel/.rustup/toolchains/1.97.1-aarch64-apple-darwin/lib/rustlib/aarch64-apple-darwin/bin/rust-lld",
+    "resolved_path": "/Users/fatihguzel/.rustup/toolchains/1.97.1-aarch64-apple-darwin/lib/rustlib/aarch64-apple-darwin/bin/rust-lld",
+    "sha256": "8f5fe507df7232eac0a610c12a5d11f3202205235f710eb98c6c78df6d3f548d",
+    "version": "LLD 22.1.6 (https://github.com/rust-lang/llvm-project.git dcc3606807c989700e0ac1cac18c31741bcd40d9)\n"
+  },
+  "nm": {
+    "path": "/Library/Developer/CommandLineTools/usr/bin/llvm-nm",
+    "resolved_path": "/Library/Developer/CommandLineTools/usr/bin/llvm-nm",
+    "sha256": "9097f9662024989b801a1448eea2a71a4e916537a595cbaf34d4d051480236f6",
+    "version": "llvm-nm, compatible with GNU nm\nApple LLVM version 21.0.0\n  Optimized build.\n"
+  },
+  "objdump": {
+    "path": "/Library/Developer/CommandLineTools/usr/bin/llvm-objdump",
+    "resolved_path": "/Library/Developer/CommandLineTools/usr/bin/llvm-objdump",
+    "sha256": "1dcc1432db4d828cf8cd71a84cb8d9bf63a7ca80b5eeec711a9e5f13a3f5f98e",
+    "version": "Apple LLVM version 21.0.0\n  Optimized build.\n\n\n  Registered Targets:\n    aarch64    - AArch64 (little endian)\n    aarch64_32 - AArch64 (little endian ILP32)\n    aarch64_be - AArch64 (big endian)\n    arm        - ARM\n    arm64      - ARM64 (little endian)\n    arm64_32   - ARM64 (little endian ILP32)\n    armeb      - ARM (big endian)\n    thumb      - Thumb\n    thumbeb    - Thumb (big endian)\n    x86        - 32-bit X86: Pentium-Pro and above\n    x86-64     - 64-bit X86: EM64T and AMD64\n"
+  },
+  "schema": "ring3.fp-allocated-output.producer.v1"
+}
