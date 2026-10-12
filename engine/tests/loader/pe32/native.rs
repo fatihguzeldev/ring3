@@ -1,8 +1,8 @@
-#[path = "../../support/loader/pe32.rs"]
+#[path = "../../support/loader/pe32/image.rs"]
 #[allow(dead_code)]
 mod support_pe32;
 
-#[path = "../../support/loader/pe32_relocation.rs"]
+#[path = "../../support/loader/pe32/relocation.rs"]
 #[allow(dead_code)]
 mod support_pe32_relocation;
 

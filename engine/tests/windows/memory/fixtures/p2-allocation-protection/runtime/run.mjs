@@ -46,7 +46,7 @@ function authoredPe() {
 }
 const image = readFileSync(join(output, 'allocation.exe')); assert.deepEqual(image, authoredPe());
 save('program.bin', program); save('guest-function.bin', functionBytes); save('engine.wasm', engine.bytes);
-const sourcePaths = [...execFileSync('rg', ['--files', 'engine/src'], {cwd: root, encoding: 'utf8'}).trim().split('\n'), 'Cargo.toml', 'Cargo.lock', 'engine/Cargo.toml', 'rust-toolchain.toml', 'engine/tests/support/loader/pe32.rs', 'engine/tests/windows/memory/wasm/executable.rs', 'engine/tests/windows/memory/wasm.rs', 'engine/tests/support/wasm.rs', 'engine/tests/windows/memory/fixtures/p2-allocation-protection/runtime/run.mjs', 'engine/tests/support/wasm/engine.mjs'].sort();
+const sourcePaths = [...execFileSync('rg', ['--files', 'engine/src'], {cwd: root, encoding: 'utf8'}).trim().split('\n'), 'Cargo.toml', 'Cargo.lock', 'engine/Cargo.toml', 'rust-toolchain.toml', 'engine/tests/support/loader/pe32/image.rs', 'engine/tests/windows/memory/wasm/executable.rs', 'engine/tests/windows/memory/wasm.rs', 'engine/tests/support/wasm.rs', 'engine/tests/windows/memory/fixtures/p2-allocation-protection/runtime/run.mjs', 'engine/tests/support/wasm/engine.mjs'].sort();
 const sourceMap = () => Object.fromEntries(sourcePaths.map(path => { const bytes = readFileSync(join(root, path)); return [path, {bytes: bytes.length, sha256: hash(bytes)}]; }));
 const sourcesBefore = sourceMap();
 function words(values) { const bytes = Buffer.alloc(values.length * 4); values.forEach((value, i) => bytes.writeUInt32LE(value >>> 0, i * 4)); return bytes; }

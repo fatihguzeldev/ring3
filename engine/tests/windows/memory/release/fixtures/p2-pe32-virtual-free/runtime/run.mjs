@@ -73,7 +73,7 @@ save('engine.wasm', engineBytes);
 function sourceMap() {
   const physical = execFileSync('rg', ['--files', 'engine/src'], {cwd: root, encoding: 'utf8'}).trim().split('\n').sort();
   assert.ok(physical.length > 0, 'nonempty production source manifest');
-  const paths = ['Cargo.toml', 'Cargo.lock', 'engine/Cargo.toml', 'rust-toolchain.toml', ...physical, 'engine/tests/support/loader/pe32.rs', 'engine/tests/windows/memory/release/wasm/linked.rs', 'engine/tests/windows/memory/wasm.rs',  'engine/tests/support/wasm.rs',   'engine/tests/windows/memory/release/fixtures/p2-pe32-virtual-free/runtime/run.mjs'];
+  const paths = ['Cargo.toml', 'Cargo.lock', 'engine/Cargo.toml', 'rust-toolchain.toml', ...physical, 'engine/tests/support/loader/pe32/image.rs', 'engine/tests/windows/memory/release/wasm/linked.rs', 'engine/tests/windows/memory/wasm.rs',  'engine/tests/support/wasm.rs',   'engine/tests/windows/memory/release/fixtures/p2-pe32-virtual-free/runtime/run.mjs'];
   paths.push(...[...exportContract.sourcePaths, 'engine/tests/support/wasm/engine.mjs'].filter(path => !paths.includes(path)));
   assert.equal(new Set(paths).size, paths.length);
   return Object.fromEntries(paths.map(path => { const bytes = readFileSync(join(root, path)); return [path, {bytes: bytes.length, sha256: hash(bytes)}]; }));

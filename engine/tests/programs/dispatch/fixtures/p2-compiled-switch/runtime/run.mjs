@@ -16,8 +16,8 @@ const artifacts = {}, contexts = [], modules = [], observations = [], helperTrac
 function save(name, bytes) { writeFileSync(join(output, name), bytes, {flag: 'wx'}); artifacts[name] = {bytes: bytes.length, sha256: hash(bytes)}; }
 const dir = 'engine/tests/programs/dispatch/fixtures/p2-compiled-switch';
 const paths = [...execFileSync('rg', ['--files', 'engine/src'], {cwd: root, encoding: 'utf8'}).trim().split('\n'),
-  'Cargo.toml', 'Cargo.lock', 'engine/Cargo.toml', 'rust-toolchain.toml', 'engine/tests/support/loader/pe32.rs',
-  'engine/tests/support/loader/compiled_switch.rs', 'engine/tests/programs/dispatch/native/switch.rs', 'engine/tests/programs/native.rs', 'engine/tests/support/loader/compiled_switch.rs', 'engine/tests/support/loader/pe32.rs', 'engine/tests/programs/native.rs', 'engine/tests/programs/dispatch/wasm/switch.rs', 'engine/tests/programs/wasm.rs', 'engine/tests/support/loader/compiled_switch.rs', 'engine/tests/support/loader/pe32.rs', 'engine/tests/support/wasm.rs', 'engine/tests/programs/wasm.rs', 'engine/tests/support/wasm.rs',
+  'Cargo.toml', 'Cargo.lock', 'engine/Cargo.toml', 'rust-toolchain.toml', 'engine/tests/support/loader/pe32/image.rs',
+  'engine/tests/programs/dispatch/support/switch.rs', 'engine/tests/programs/dispatch/native/switch.rs', 'engine/tests/programs/native.rs', 'engine/tests/programs/dispatch/support/switch.rs', 'engine/tests/support/loader/pe32/image.rs', 'engine/tests/programs/native.rs', 'engine/tests/programs/dispatch/wasm/switch.rs', 'engine/tests/programs/wasm.rs', 'engine/tests/programs/dispatch/support/switch.rs', 'engine/tests/support/loader/pe32/image.rs', 'engine/tests/support/wasm.rs', 'engine/tests/programs/wasm.rs', 'engine/tests/support/wasm.rs',
   'engine/tests/support/wasm/engine.mjs', ...readdirSync(join(root, dir), {withFileTypes: true}).filter(x => x.isFile()).map(x => `${dir}/${x.name}`)].sort();
 const sources = () => Object.fromEntries(paths.map(path => { const bytes = readFileSync(join(root, path)); return [path, {bytes: bytes.length, sha256: hash(bytes)}]; }));
 const pins = sources(); save('engine.wasm', engine.bytes);

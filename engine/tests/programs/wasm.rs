@@ -1,20 +1,20 @@
-#[path = "../support/loader/compiled_switch.rs"]
+#[path = "dispatch/support/switch.rs"]
 #[allow(dead_code)]
 mod support_compiled_switch;
 
-#[path = "../support/loader/pe32.rs"]
+#[path = "../support/loader/pe32/image.rs"]
 #[allow(dead_code)]
 mod support_pe32;
 
-#[path = "../support/loader/pe32_compiled_records.rs"]
+#[path = "records/support/compiled.rs"]
 #[allow(dead_code)]
 mod support_pe32_compiled_records;
 
-#[path = "../support/loader/pe32_mutable_records.rs"]
+#[path = "records/support/mutable.rs"]
 #[allow(dead_code)]
 mod support_pe32_mutable_records;
 
-#[path = "../support/loader/pe32_sort.rs"]
+#[path = "sort/support/pe32.rs"]
 #[allow(dead_code)]
 mod support_pe32_sort;
 
