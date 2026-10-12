@@ -82,6 +82,20 @@ const cases=[
  {name:'psllq-memory-count-unmapped-preserves-destination',code:'660ff300',direct:true,a:qwords([0x1122334455667788n,0x8877665544332211n]),address:0x6000,reason:5,retired:0,detail:1,fault:0x6000,access:1,length:16,readAlignment:16,stagedTransfer:fill(0x97)},
  {name:'mmx-psrlw-memory-count-reads-full8-before-oversized-shortcut',code:'0fd100',direct:true,mmx:true,a:hex('1122334455667788'),address:0x5ffc,seedMemory:dwords([64]),reason:5,retired:0,detail:1,fault:0x6000,access:1,length:8,readAlignment:1,stagedTransfer:Buffer.alloc(8,0xb3)},
  {name:'pending-x87-stops-mmx-shift-before-count-read',code:'0ff300',direct:true,mmx:true,pendingX87:true,a:hex('1122334455667788'),address:0x5ffc,seedMemory:dwords([64]),reason:12,retired:0,detail:0x8081},
+ {name:'packsswb-xmm-signed-endpoints-and-source-order',code:'660f63c1',direct:true,a:hex('00807fff80ffffff000001007f008000'),b:hex('ff7fff000001018081ff7e00feff0200'),out:hex('808080ff00017f7f7f7f7f80817efe02'),mxcsr:0xdfe5},
+ {name:'packsswb-mmx-signed-endpoints-and-source-order',code:'0f63c1',direct:true,mmx:true,a:hex('00807fff80ff7f00'),b:hex('8000ffff0000ff7f'),out:hex('8080807f7fff007f')},
+ {name:'packssdw-xmm-signed-endpoints-and-source-order',code:'660f6bc1',direct:true,a:dwords([0x80000000,0xffff7fff,0xffff8000,0xffffffff]),b:dwords([0,0x7fff,0x8000,0x7fffffff]),out:hex('008000800080ffff0000ff7fff7fff7f')},
+ {name:'packssdw-mmx-signed-endpoints-and-source-order',code:'0f6bc1',direct:true,mmx:true,a:dwords([0xffff7fff,0x7fff]),b:dwords([0xffff8000,0x8000]),out:hex('0080ff7f0080ff7f')},
+ {name:'packuswb-xmm-signed-input-endpoints-and-source-order',code:'660f67c1',direct:true,a:hex('0080ffff00000100fe00ff000001ff7f'),b:hex('fffe00ff7fff80ff02007f0080000101'),out:hex('00000001feffffff00000000027f80ff')},
+ {name:'packuswb-mmx-signed-input-endpoints-and-source-order',code:'0f67c1',direct:true,mmx:true,a:hex('ffff0000ff000001'),b:hex('00800100fe00ff7f'),out:hex('0000ffff0001feff'),mxcsr:0x8040},
+ {name:'packsswb-xmm-self-alias-captures-original-lanes',code:'660f63c0',direct:true,a:hex('00807fff80ffffff000001007f008000'),out:hex('808080ff00017f7f808080ff00017f7f')},
+ {name:'packssdw-mmx-self-alias-keeps-both-halves',code:'0f6bc0',direct:true,mmx:true,a:dwords([0xffff7fff,0x7fff]),out:hex('0080ff7f0080ff7f')},
+ {name:'packssdw-xmm-aligned-memory-reads-full16',code:'660f6b00',direct:true,a:dwords([0x80000000,0xffff7fff,0xffff8000,0xffffffff]),memory:dwords([0,0x7fff,0x8000,0x7fffffff]),address:DATA,readAlignment:16,expectedHelpers:1,out:hex('008000800080ffff0000ff7fff7fff7f')},
+ {name:'packuswb-mmx-unaligned-memory-reads-full8',code:'0f6700',direct:true,mmx:true,a:hex('ffff0000ff000001'),memory:hex('00800100fe00ff7f'),address:DATA+1,readAlignment:1,expectedHelpers:1,out:hex('0000ffff0001feff')},
+ {name:'packsswb-xmm-alignment-precedes-unmapped-memory',code:'660f6300',direct:true,a:hex('00807fff80ffffff000001007f008000'),address:0x6001,reason:11,retired:0,detail:0,expectedHelpers:1},
+ {name:'packssdw-xmm-unmapped-full16-preserves-destination',code:'660f6b00',direct:true,a:dwords([0x80000000,0xffff7fff,0xffff8000,0xffffffff]),address:0x6000,reason:5,retired:0,detail:1,fault:0x6000,access:1,length:16,readAlignment:16,expectedHelpers:1,stagedTransfer:fill(0x97)},
+ {name:'packsswb-mmx-split-full8-preserves-destination-and-transfer',code:'0f6300',direct:true,mmx:true,a:hex('00807fff80ff7f00'),address:0x5ffc,seedMemory:dwords([0x12345678]),reason:5,retired:0,detail:1,fault:0x6000,access:1,length:8,readAlignment:1,expectedHelpers:1,stagedTransfer:Buffer.alloc(8,0xb3)},
+ {name:'pending-x87-stops-mmx-pack-before-memory-read',code:'0f6700',direct:true,mmx:true,pendingX87:true,a:hex('ffff0000ff000001'),address:0x5ffc,seedMemory:dwords([0x12345678]),reason:12,retired:0,detail:0x8081,expectedHelpers:0},
 ];
 const sourcePaths=['engine/src/cpu/x86/simd.rs','engine/src/cpu/x86/simd/packed.rs','engine/src/cpu/x86/simd/float.rs','engine/src/cpu/x86/decode/simd.rs','engine/src/cpu/dbt/wasm/simd.rs','engine/src/cpu/dbt/wasm/simd/direct.rs','engine/src/process/simd.rs','engine/src/process/cpu_memory.rs','engine/src/abi/x86/simd.rs','engine/tests/simd_semantics.rs','engine/tests/cpu_simd_wasm.rs','engine/tests/fixtures/p2-simd/run.mjs'];
 const sourceHashes=()=>Object.fromEntries(sourcePaths.map(p=>[p,hash(readFileSync(join(root,p)))])),beforePins=sourceHashes();
@@ -133,6 +147,7 @@ function test(c,block,row){
  expected.writeUInt32LE(row.afterMxcsr??row.mxcsr??0x1f80,SV+16);
  const h=helpers.length,status=c.run(c.base,c.base+56,1,c.base+96);assert.equal(status,0,row.name);
  const events=helpers.slice(h),last=events.at(-1),directRegister=row.direct&&!row.memory&&!row.write&&reason===1;
+ if(row.expectedHelpers!==undefined){assert.equal(events.length,row.expectedHelpers,row.name+' exact helper count');if(row.expectedHelpers===1)assert.equal(events[0].name,'cpu_read',row.name+' only the checked memory read crosses the host');}
  if(directRegister||reason===12)assert.equal(events.length,0,row.name+' has no host execution helper');else assert.ok(last,row.name+' helper');
  // Scratch bytes are validated from the ordered canonical calls below; only those spans may differ.
  const actual=arena(c);
