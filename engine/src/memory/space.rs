@@ -668,7 +668,7 @@ fn fault(address: GuestAddress, access: Access, reason: FaultReason) -> MemoryEr
 }
 
 #[cfg(test)]
-#[path = "protection_transaction_tests.rs"]
+#[path = "space/protection/tests.rs"]
 mod protection_transaction_tests;
 
 #[cfg(test)]
