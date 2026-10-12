@@ -1,4 +1,4 @@
-#[path = "selectors/native/adjust_privilege.rs"]
+#[path = "selectors/privilege/native.rs"]
 mod cpu_arpl;
 #[path = "selectors/native/verify.rs"]
 mod cpu_segment_queries;

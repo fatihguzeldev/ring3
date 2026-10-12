@@ -13,7 +13,7 @@ mod cpu_segments_wasm;
 #[path = "cache/raw/wasm.rs"]
 mod cpu_raw_descriptors_wasm;
 
-#[path = "selectors/wasm/adjust_privilege.rs"]
+#[path = "selectors/privilege/wasm.rs"]
 mod cpu_arpl_wasm;
 
 #[path = "selectors/wasm/verify.rs"]

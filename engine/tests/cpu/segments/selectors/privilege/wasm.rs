@@ -23,7 +23,7 @@ fn actual_arpl_preserves_aliases_cached_write_authority_and_precise_fault_retire
     fs::create_dir_all(&output).unwrap();
     let result = wasm_support::run_node(
         root,
-        "engine/tests/cpu/segments/selectors/fixtures/p2-arpl/runtime/run.mjs",
+        "engine/tests/cpu/segments/selectors/privilege/fixtures/p2-arpl/runtime/run.mjs",
         &engine,
         &output,
         None,
