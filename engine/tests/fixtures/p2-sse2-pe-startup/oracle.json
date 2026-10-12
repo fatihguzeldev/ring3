@@ -1,0 +1,490 @@
+{
+  "schema": "ring3.sse2-pe-startup.v1",
+  "encoding": "raw64 strings are IEEE binary64 unsigned bit patterns with most-significant hex digit first; *_hex strings are guest bytes in increasing address order; each lane is little endian",
+  "image": {
+    "file": "program.exe",
+    "bytes": 2560,
+    "sha256": "5598e22ba00a83ca377aec59187dd67853f1e57698b08fac87114a27f31455a8",
+    "preferred_base": 4194304,
+    "actual_bases": [
+      4194304,
+      5242880
+    ],
+    "entry_rva": 4096,
+    "image_size": 20480,
+    "header_size": 1024,
+    "mapped_pages": 5,
+    "coff_characteristics": "0102",
+    "dll_characteristics": "8140",
+    "sections": [
+      {
+        "name": ".text",
+        "virtual_size": 164,
+        "rva": 4096,
+        "raw_size": 512,
+        "raw_pointer": 1024,
+        "characteristics": "60000020",
+        "permissions": {
+          "read": true,
+          "write": false,
+          "execute": true
+        },
+        "mapped_pages": 1
+      },
+      {
+        "name": ".rdata",
+        "virtual_size": 112,
+        "rva": 8192,
+        "raw_size": 512,
+        "raw_pointer": 1536,
+        "characteristics": "40000040",
+        "permissions": {
+          "read": true,
+          "write": false,
+          "execute": false
+        },
+        "mapped_pages": 1
+      },
+      {
+        "name": ".data",
+        "virtual_size": 72,
+        "rva": 12288,
+        "raw_size": 0,
+        "raw_pointer": 0,
+        "characteristics": "c0000040",
+        "permissions": {
+          "read": true,
+          "write": true,
+          "execute": false
+        },
+        "mapped_pages": 1
+      },
+      {
+        "name": ".reloc",
+        "virtual_size": 20,
+        "rva": 16384,
+        "raw_size": 512,
+        "raw_pointer": 2048,
+        "characteristics": "42000040",
+        "permissions": {
+          "read": true,
+          "write": false,
+          "execute": false
+        },
+        "mapped_pages": 1
+      }
+    ],
+    "nonzero_directories": [
+      {
+        "index": 5,
+        "rva": 16384,
+        "size": 20
+      }
+    ]
+  },
+  "original_kernel": {
+    "object_file": "kernel.obj",
+    "object_bytes": 658,
+    "object_sha256": "b072459ef7d463c448abb4ca90066e3957cf8c44b3011138d1c186d66dee23f5",
+    "text_file": "kernel.text.bin",
+    "text_bytes": 116,
+    "text_sha256": "08fad7ecb51ad9026481bf5dbe347b26ef413fc292d4b27599cc6f26a62b243d",
+    "rva": 4144,
+    "static_instructions": 38,
+    "natural_ret_rva": 4259,
+    "byte_exact_linked_extent": true,
+    "relocations_in_extent": 0
+  },
+  "source_case": {
+    "path": "engine/tests/fixtures/p2-fp-compiled/sse2/cases.json",
+    "sha256": "f05cbe2bcf59bf36c7bae022e944cbe84a23b73581ae7921595421b10f09bf13",
+    "name": "three-vector-exact-rationals",
+    "policy": "reuse independent exact rational/raw-bit oracle; engine output does not generate expected values"
+  },
+  "rvas": {
+    "entry": 4096,
+    "call": 4118,
+    "caller_return": 4123,
+    "stable_loop": 4141,
+    "kernel": 4144,
+    "input": 8192,
+    "coefficients": 8240,
+    "fltused": 12288,
+    "scalar_output": 12296,
+    "vector_output": 12304,
+    "completion": 12352,
+    "relocations": 16384
+  },
+  "blocks": {
+    "entry": {
+      "rva": 4096,
+      "length": 27,
+      "instructions": 6
+    },
+    "kernel": [
+      {
+        "rva": 4144,
+        "length": 24,
+        "instructions": 10
+      },
+      {
+        "rva": 4168,
+        "length": 22,
+        "instructions": 6
+      },
+      {
+        "rva": 4190,
+        "length": 32,
+        "instructions": 9
+      },
+      {
+        "rva": 4222,
+        "length": 38,
+        "instructions": 13
+      }
+    ],
+    "continuation": {
+      "rva": 4123,
+      "length": 20,
+      "instructions": 4
+    },
+    "total_blocks": 6,
+    "total_static_instructions": 48,
+    "alignment_int3_rva": 4143,
+    "alignment_int3_not_executed": true
+  },
+  "captures": [
+    {
+      "name": "entry",
+      "blocks": [
+        {
+          "rva": 4096,
+          "length": 27,
+          "instructions": 6
+        }
+      ],
+      "budget": 6,
+      "retired": 6
+    },
+    {
+      "name": "kernel",
+      "blocks": [
+        {
+          "rva": 4144,
+          "length": 24,
+          "instructions": 10
+        },
+        {
+          "rva": 4168,
+          "length": 22,
+          "instructions": 6
+        },
+        {
+          "rva": 4190,
+          "length": 32,
+          "instructions": 9
+        },
+        {
+          "rva": 4222,
+          "length": 38,
+          "instructions": 13
+        }
+      ],
+      "budget": 56,
+      "retired": 56
+    },
+    {
+      "name": "continuation",
+      "blocks": [
+        {
+          "rva": 4123,
+          "length": 20,
+          "instructions": 4
+        }
+      ],
+      "budget": 4,
+      "retired": 4
+    }
+  ],
+  "startup": {
+    "stack_base": 32768,
+    "stack_pages": 1,
+    "initial_esp": 36864,
+    "initial_registers": [
+      0,
+      0,
+      0,
+      0,
+      36864,
+      0,
+      0,
+      0
+    ],
+    "initial_eflags": 2,
+    "initial_xmm_hex": [
+      "00000000000000000000000000000000",
+      "00000000000000000000000000000000",
+      "00000000000000000000000000000000",
+      "00000000000000000000000000000000",
+      "00000000000000000000000000000000",
+      "00000000000000000000000000000000",
+      "00000000000000000000000000000000",
+      "00000000000000000000000000000000"
+    ],
+    "initial_mxcsr": 8064,
+    "initial_x87": {
+      "control": 895,
+      "status": 0,
+      "tag": 65535,
+      "registers_hex": [
+        "00000000000000000000",
+        "00000000000000000000",
+        "00000000000000000000",
+        "00000000000000000000",
+        "00000000000000000000",
+        "00000000000000000000",
+        "00000000000000000000",
+        "00000000000000000000"
+      ]
+    },
+    "memory_policy": "loader maps the complete image and zero-fill; start_loaded_image maps an empty RW stack and owns initial CPU/extended state; no host CPU/data seed after startup"
+  },
+  "stops": [
+    {
+      "phase": "entry-call",
+      "eip_rva": 4144,
+      "esp": 36840,
+      "eflags": 2,
+      "eax": 0,
+      "ecx": 0,
+      "edx": 0
+    },
+    {
+      "phase": "kernel-natural-return",
+      "eip_rva": 4123,
+      "esp": 36844,
+      "eflags": 70,
+      "eax": 3,
+      "ecx_rva": 12296,
+      "edx_rva": 8240
+    },
+    {
+      "phase": "completion-loop",
+      "eip_rva": 4141,
+      "esp": 36864,
+      "eflags": 22,
+      "eax": 3,
+      "ecx_rva": 12296,
+      "edx_rva": 8240
+    }
+  ],
+  "expected": {
+    "count": 3,
+    "input_raw64": [
+      [
+        "3ff0000000000000",
+        "4010000000000000"
+      ],
+      [
+        "bfe0000000000000",
+        "c000000000000000"
+      ],
+      [
+        "4000000000000000",
+        "3ff0000000000000"
+      ]
+    ],
+    "input_hex": "000000000000f03f0000000000001040000000000000e0bf00000000000000c00000000000000040000000000000f03f",
+    "coefficients_raw64": [
+      [
+        "3ff0000000000000",
+        "c000000000000000"
+      ],
+      [
+        "4000000000000000",
+        "3fe0000000000000"
+      ],
+      [
+        "3fd0000000000000",
+        "bfd0000000000000"
+      ],
+      [
+        "4008000000000000",
+        "3fe0000000000000"
+      ]
+    ],
+    "coefficients_hex": "000000000000f03f00000000000000c00000000000000040000000000000e03f000000000000d03f000000000000d0bf0000000000000840000000000000e03f",
+    "rdata_hex": "000000000000f03f0000000000001040000000000000e0bf00000000000000c00000000000000040000000000000f03f000000000000f03f00000000000000c00000000000000040000000000000e03f000000000000d03f000000000000d0bf0000000000000840000000000000e03f",
+    "vector_output_raw64": [
+      [
+        "400a000000000000",
+        "bfd0000000000000"
+      ],
+      [
+        "4002000000000000",
+        "bff4000000000000"
+      ],
+      [
+        "4019000000000000",
+        "bfe8000000000000"
+      ]
+    ],
+    "vector_output_hex": "0000000000000a40000000000000d0bf0000000000000240000000000000f4bf0000000000001940000000000000e8bf",
+    "scalar_output_raw64": "4031000000000000",
+    "scalar_output_hex": "0000000000003140",
+    "completion_words": [
+      3,
+      1380535879
+    ],
+    "completion_hex": "03000000474e4952",
+    "final_xmm_raw64": [
+      [
+        "4031000000000000",
+        "3fe0000000000000"
+      ],
+      [
+        "4030800000000000",
+        "bfe0000000000000"
+      ],
+      [
+        "3fd0000000000000",
+        "bfd0000000000000"
+      ],
+      [
+        "4019000000000000",
+        "bfe8000000000000"
+      ]
+    ],
+    "final_xmm_hex": [
+      "0000000000003140000000000000e03f",
+      "0000000000803040000000000000e0bf",
+      "000000000000d03f000000000000d0bf",
+      "0000000000001940000000000000e8bf",
+      "00000000000000000000000000000000",
+      "00000000000000000000000000000000",
+      "00000000000000000000000000000000",
+      "00000000000000000000000000000000"
+    ],
+    "final_mxcsr": 8064,
+    "x87_unchanged_from_startup": true,
+    "segments_unchanged_from_startup": true,
+    "callee_preserved_gprs": [
+      "EBX",
+      "EBP",
+      "ESI",
+      "EDI"
+    ],
+    "callee_preserved_values": [
+      0,
+      0,
+      0,
+      0
+    ],
+    "initial_data_zero_bytes": 72,
+    "data_gaps_zero_rvas": [
+      [
+        12288,
+        8
+      ]
+    ],
+    "final_stack_words": [
+      {
+        "address": 36824,
+        "value": 0
+      },
+      {
+        "address": 36828,
+        "value": 0
+      },
+      {
+        "address": 36832,
+        "value": 0
+      },
+      {
+        "address": 36836,
+        "value": 0
+      },
+      {
+        "address": 36840,
+        "value_rva": 4123
+      },
+      {
+        "address": 36844,
+        "value_rva": 12304
+      },
+      {
+        "address": 36848,
+        "value_rva": 8192
+      },
+      {
+        "address": 36852,
+        "value_rva": 8240
+      },
+      {
+        "address": 36856,
+        "value": 3
+      },
+      {
+        "address": 36860,
+        "value_rva": 12296
+      }
+    ],
+    "derivation": [
+      "accumulators (3,0), (2,-1), (6,-1/2); outputs (13/4,-1/4), (9/4,-5/4), (25/4,-3/4)",
+      "scalar ((6-1/2)*3)+1/2=17; all intermediates are exact binary rationals",
+      "startup FLAGS2/zero GPRs; final DEC EBP gives46; caller ADD ESP,14h at8FECh gives16 (AF/PF/fixed2), with no DF"
+    ]
+  },
+  "relocations": [
+    {
+      "rva": 4097,
+      "type": "IMAGE_REL_BASED_HIGHLOW",
+      "preferred_value": "00403008",
+      "rebased_00500000_value": "00503008"
+    },
+    {
+      "rva": 4104,
+      "type": "IMAGE_REL_BASED_HIGHLOW",
+      "preferred_value": "00402030",
+      "rebased_00500000_value": "00502030"
+    },
+    {
+      "rva": 4109,
+      "type": "IMAGE_REL_BASED_HIGHLOW",
+      "preferred_value": "00402000",
+      "rebased_00500000_value": "00502000"
+    },
+    {
+      "rva": 4114,
+      "type": "IMAGE_REL_BASED_HIGHLOW",
+      "preferred_value": "00403010",
+      "rebased_00500000_value": "00503010"
+    },
+    {
+      "rva": 4127,
+      "type": "IMAGE_REL_BASED_HIGHLOW",
+      "preferred_value": "00403040",
+      "rebased_00500000_value": "00503040"
+    },
+    {
+      "rva": 4133,
+      "type": "IMAGE_REL_BASED_HIGHLOW",
+      "preferred_value": "00403044",
+      "rebased_00500000_value": "00503044"
+    }
+  ],
+  "census_per_base": {
+    "captures": 3,
+    "modules": 3,
+    "runs": 3,
+    "retired": 66,
+    "natural_kernel_returns": 1,
+    "helper_calls_excluding_guards": 45,
+    "read32": 10,
+    "store32": 12,
+    "cpu_read": 7,
+    "cpu_write": 4,
+    "simd_execute": 12
+  },
+  "claim_ceiling": "one source-authored freestanding entry and unchanged original SSE2 function, one exact count3 case at preferred/rebased bases; no CRT/import/TLS/Windows launch, general PE compatibility, hardware FP identity or performance claim"
+}

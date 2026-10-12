@@ -1,0 +1,55 @@
+
+program.exe:	file format coff-i386
+
+Disassembly of section .text:
+
+00401000 <.text>:
+  401000: 68 08 30 40 00               	push	0x403008
+  401005: 6a 03                        	push	0x3
+  401007: 68 30 20 40 00               	push	0x402030
+  40100c: 68 00 20 40 00               	push	0x402000
+  401011: 68 10 30 40 00               	push	0x403010
+  401016: e8 15 00 00 00               	call	0x401030 <.text+0x30>
+  40101b: 83 c4 14                     	add	esp, 0x14
+  40101e: a3 40 30 40 00               	mov	dword ptr [0x403040], eax
+  401023: c7 05 44 30 40 00 47 4e 49 52	mov	dword ptr [0x403044], 0x52494e47
+  40102d: eb fe                        	jmp	0x40102d <.text+0x2d>
+  40102f: cc                           	int3
+  401030: 55                           	push	ebp
+  401031: 53                           	push	ebx
+  401032: 57                           	push	edi
+  401033: 56                           	push	esi
+  401034: 8b 4c 24 24                  	mov	ecx, dword ptr [esp + 0x24]
+  401038: 8b 44 24 20                  	mov	eax, dword ptr [esp + 0x20]
+  40103c: 8b 54 24 1c                  	mov	edx, dword ptr [esp + 0x1c]
+  401040: 66 0f 28 02                  	movapd	xmm0, xmmword ptr [edx]
+  401044: 85 c0                        	test	eax, eax
+  401046: 74 36                        	je	0x40107e <.text+0x7e>
+  401048: 8b 74 24 18                  	mov	esi, dword ptr [esp + 0x18]
+  40104c: 8b 7c 24 14                  	mov	edi, dword ptr [esp + 0x14]
+  401050: 66 0f 28 4a 10               	movapd	xmm1, xmmword ptr [edx + 0x10]
+  401055: 66 0f 28 52 20               	movapd	xmm2, xmmword ptr [edx + 0x20]
+  40105a: 31 db                        	xor	ebx, ebx
+  40105c: 89 c5                        	mov	ebp, eax
+  40105e: 66 0f 28 1c 1e               	movapd	xmm3, xmmword ptr [esi + ebx]
+  401063: 66 0f 59 d9                  	mulpd	xmm3, xmm1
+  401067: 66 0f 58 c3                  	addpd	xmm0, xmm3
+  40106b: 66 0f 28 da                  	movapd	xmm3, xmm2
+  40106f: 66 0f 58 d8                  	addpd	xmm3, xmm0
+  401073: 66 0f 29 1c 1f               	movapd	xmmword ptr [edi + ebx], xmm3
+  401078: 83 c3 10                     	add	ebx, 0x10
+  40107b: 4d                           	dec	ebp
+  40107c: 75 e0                        	jne	0x40105e <.text+0x5e>
+  40107e: 66 0f 28 c8                  	movapd	xmm1, xmm0
+  401082: 66 0f 15 c8                  	unpckhpd	xmm1, xmm0              # xmm1 = xmm1[1],xmm0[1]
+  401086: f2 0f 58 c8                  	addsd	xmm1, xmm0
+  40108a: 66 0f 28 42 30               	movapd	xmm0, xmmword ptr [edx + 0x30]
+  40108f: f2 0f 59 c8                  	mulsd	xmm1, xmm0
+  401093: 66 0f 15 c0                  	unpckhpd	xmm0, xmm0              # xmm0 = xmm0[1,1]
+  401097: f2 0f 58 c1                  	addsd	xmm0, xmm1
+  40109b: f2 0f 11 01                  	movsd	qword ptr [ecx], xmm0
+  40109f: 5e                           	pop	esi
+  4010a0: 5f                           	pop	edi
+  4010a1: 5b                           	pop	ebx
+  4010a2: 5d                           	pop	ebp
+  4010a3: c3                           	ret
