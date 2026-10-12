@@ -1,6 +1,6 @@
 // result order follows the x86 state record: eax, ecx, edx, ebx.
 const vendor = [7, 0x20656e69, 0x676e4533, 0x676e6952];
-const features = [0x600, 0x00d80201, 0x07888111, 0x800];
+const features = [0x600, 0x02d80203, 0x07888111, 0x800];
 const structured = [0, 0, 0, 0x108];
 const extendedLimit = [0x80000001, 0, 0, 0];
 const extendedFeatures = [0, 0x20, 0x08000000, 0];
