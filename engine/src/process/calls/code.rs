@@ -222,5 +222,5 @@ fn replacement_admission(
 }
 
 #[cfg(test)]
-#[path = "code_tests.rs"]
+#[path = "code/tests.rs"]
 mod tests;

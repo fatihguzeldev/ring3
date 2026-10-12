@@ -96,7 +96,7 @@ const sourcePaths = [
   'engine/src/process/calls/call.rs', 'engine/src/process/calls/context.rs', 'engine/src/process/calls/mod.rs', 'engine/src/process/mod.rs',
   'engine/src/process/calls/callback.rs',
   'engine/src/process/calls/code.rs',
-  'engine/src/process/calls/code_tests.rs',
+  'engine/src/process/calls/code/tests.rs',
   'engine/src/process/execution/installation.rs', 'engine/src/process/execution/mod.rs',
   'engine/src/process/instance.rs', 'engine/src/process/execution/compiled.rs', 'engine/src/process/execution/authority.rs', 'engine/src/process/memory/address_space.rs', 'engine/src/process/memory/scalar.rs', 'engine/src/process/memory/scalar_tests.rs', 'engine/src/process/memory/mod.rs',
   'engine/src/process/execution/resident.rs',
