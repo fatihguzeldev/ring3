@@ -5,7 +5,9 @@ import {join} from 'node:path';
 import {readEngine} from '../../../../../support/wasm/engine.mjs';
 import {createArena, ARENA_SIZE} from '../../../../../support/wasm/arena.mjs';
 
-const [enginePath, output, root] = process.argv.slice(2), engine = readEngine(enginePath);
+const [enginePath, output, root, suite = 'basic'] = process.argv.slice(2), engine = readEngine(enginePath);
+assert.ok(['basic', 'privileged'].includes(suite));
+const scenario = suite === 'privileged' ? await import('./privileged-cases.mjs') : undefined;
 const PC = 0x1000, KEY_HIGH = 0x4641554c, observations = [], modules = []; let contexts = 0, runs = 0, refusals = 0;
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
 const paths = ['engine/src/cpu/x86/decode/decoder.rs', 'engine/src/cpu/x86/decode/execution_faults.rs',
@@ -13,6 +15,9 @@ const paths = ['engine/src/cpu/x86/decode/decoder.rs', 'engine/src/cpu/x86/decod
   'engine/src/cpu/dbt/region.rs', 'engine/src/cpu/dbt/wasm/control_instructions.rs', 'engine/src/cpu/dbt/wasm/emitter.rs',
   'engine/src/process/execution/stopped.rs', 'engine/src/process/wasm/execution.rs', 'engine/src/abi/wasm/exports/execution.rs',
   'engine/tests/cpu/control/fixtures/p2-execution-faults/runtime/run.mjs'];
+if (scenario) paths.push('engine/src/cpu/x86/decode/execution_faults_tests.rs',
+  'engine/tests/cpu/control/fixtures/p2-execution-faults/runtime/privileged-cases.mjs',
+  'engine/tests/cpu/control/fixtures/p2-execution-faults/runtime/privileged.mjs');
 const pins = () => Object.fromEntries(paths.map(path => [path, hash(readFileSync(join(root, path)))]));
 const sourcePins = pins();
 const words = values => {const bytes = Buffer.alloc(values.length * 4); values.forEach((value, i) => bytes.writeUInt32LE(value >>> 0, i * 4)); return bytes;};
@@ -84,7 +89,7 @@ function execute(c, fn, row, {flags = 2, shadow = 0, budget = 8, cancel = 0, rea
   assert.equal(c.helpers(), calls, 'no guest operand/helper effect before synthetic fault');
   observations.push({label: c.label, flags, shadow, budget, cancel, reason, retired, pc}); runs++;
 }
-const positive = [
+const positive = scenario?.positive ?? [
   {name: 'lock-nop-invalid-opcode', bytes: Buffer.from([0xf0, 0x90]), reason: 20, baseVersion: 1},
   {name: 'lock-hlt-invalid-before-privilege', bytes: Buffer.from([0xf0, 0xf4]), reason: 20, baseVersion: 1},
   {name: 'reserved-opcode', bytes: Buffer.from([0x0f, 0x0a]), reason: 20, baseVersion: 1},
@@ -109,7 +114,7 @@ for (const entries of [false, true]) {
   const row = {name: 'completed-nop-before-invalid-fault', bytes: Buffer.from([0x90, 0xf0, 0x90]), reason: 20, baseVersion: 1, retired: 1, offset: 1};
   const c = open(row, entries), fn = prepare(c, row); execute(c, fn, row);
 }
-const negatives = [
+const negatives = scenario?.negatives ?? [
   {name: 'valid-unsupported-int80', bytes: Buffer.from([0xcd, 0x80])},
   {name: 'environment-dependent-cli', bytes: Buffer.from([0xfa])},
   {name: 'environment-dependent-sti', bytes: Buffer.from([0xfb])},
@@ -130,7 +135,7 @@ for (const entries of [false, true]) for (const row of negatives) {
   }
 }
 assert.deepEqual(pins(), sourcePins, 'execution fault proof sources remain frozen');
-const result = {schema: 1, engineSha256: engine.sha256, sourcePins, contexts, runs, refusals, modules, observations,
-  claim: 'bounded execution-only invalid<15,15legacy-prefix and CPL3HLT faults; strict APIs, other privileged instructions, ambiguous15, fetch and host failures retain errors'};
+const result = {schema: 1, suite, engineSha256: engine.sha256, sourcePins, contexts, runs, refusals, modules, observations,
+  claim: scenario?.claim ?? 'bounded execution-only invalid<15,15legacy-prefix and CPL3HLT faults; strict APIs, other privileged instructions, ambiguous15, fetch and host failures retain errors'};
 writeFileSync(join(output, 'result.json'), JSON.stringify(result, null, 2));
 console.log(JSON.stringify({contexts, runs, refusals, engineSha256: engine.sha256}));

@@ -1,4 +1,4 @@
-use iced_x86::{Code, Instruction};
+use iced_x86::{Code, Instruction, Register};
 
 use crate::cpu::x86::ControlOperation;
 
@@ -14,7 +14,7 @@ pub(super) fn invalid(bytes: &[u8]) -> Option<ControlOperation> {
 }
 
 pub(super) fn privileged(instruction: &Instruction, bytes: &[u8]) -> Option<ControlOperation> {
-    if instruction.code() == Code::Hlt
+    if cpl3_general_protection(instruction)
         && !instruction.has_rep_prefix()
         && !instruction.has_repne_prefix()
         && !duplicate_profile_prefix(bytes)
@@ -23,6 +23,35 @@ pub(super) fn privileged(instruction: &Instruction, bytes: &[u8]) -> Option<Cont
     } else {
         None
     }
+}
+
+fn cpl3_general_protection(instruction: &Instruction) -> bool {
+    match instruction.code() {
+        Code::Hlt
+        | Code::Clts
+        | Code::Invlpg_m
+        | Code::Lgdt_m1632_16
+        | Code::Lgdt_m1632
+        | Code::Lidt_m1632_16
+        | Code::Lidt_m1632
+        | Code::Lldt_rm16
+        | Code::Lldt_r32m16
+        | Code::Ltr_rm16
+        | Code::Ltr_r32m16
+        | Code::Lmsw_rm16
+        | Code::Lmsw_r32m16
+        | Code::Invd => true,
+        Code::Mov_r32_cr => control_register(instruction.op1_register()),
+        Code::Mov_cr_r32 => control_register(instruction.op0_register()),
+        _ => false,
+    }
+}
+
+fn control_register(register: Register) -> bool {
+    matches!(
+        register,
+        Register::CR0 | Register::CR2 | Register::CR3 | Register::CR4
+    )
 }
 
 fn legacy_prefix(byte: u8) -> bool {
@@ -44,3 +73,7 @@ fn duplicate_profile_prefix(bytes: &[u8]) -> bool {
     }
     groups.iter().any(|count| *count > 1)
 }
+
+#[cfg(test)]
+#[path = "execution_faults_tests.rs"]
+mod tests;
