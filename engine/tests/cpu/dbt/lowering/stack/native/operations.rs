@@ -226,6 +226,12 @@ fn embedded_indirect_control_compiles_only_at_the_declared_block_end() {
 
 #[test]
 fn far_prefixed_and_sixteen_bit_stack_forms_keep_decoder_rejection_at_their_pc() {
+    use ring3_engine::cpu::x86::{
+        FarWidth, Register32,
+        decode::decode_one,
+        ir::{EffectiveAddress, FarPointer, Operation},
+    };
+
     for instruction in [
         &[0x9a, 0x78, 0x56, 0x34, 0x12, 8, 0][..],
         &[0xea, 0x78, 0x56, 0x34, 0x12, 8, 0][..],
@@ -242,6 +248,67 @@ fn far_prefixed_and_sixteen_bit_stack_forms_keep_decoder_rejection_at_their_pc()
         let mut bytes = vec![0x90];
         bytes.extend_from_slice(instruction);
         let mut engine = with_code(0x1000, &bytes);
+        let far = match instruction {
+            [0x9a, 0x78, 0x56, 0x34, 0x12, 8, 0] => Some(Operation::FarCall {
+                width: FarWidth::Dword,
+                target: FarPointer::Immediate {
+                    offset: 0x1234_5678,
+                    selector: 8,
+                },
+            }),
+            [0xea, 0x78, 0x56, 0x34, 0x12, 8, 0] => Some(Operation::FarJump {
+                width: FarWidth::Dword,
+                target: FarPointer::Immediate {
+                    offset: 0x1234_5678,
+                    selector: 8,
+                },
+            }),
+            [0xff, 0x1b] => Some(Operation::FarCall {
+                width: FarWidth::Dword,
+                target: FarPointer::Memory(EffectiveAddress {
+                    base: Some(Register32::Ebx),
+                    ..Default::default()
+                }),
+            }),
+            [0xff, 0x2b] => Some(Operation::FarJump {
+                width: FarWidth::Dword,
+                target: FarPointer::Memory(EffectiveAddress {
+                    base: Some(Register32::Ebx),
+                    ..Default::default()
+                }),
+            }),
+            [0xcb] => Some(Operation::FarReturn {
+                width: FarWidth::Dword,
+                stack_adjust: 0,
+            }),
+            [0xca, 0, 0] => Some(Operation::FarReturn {
+                width: FarWidth::Dword,
+                stack_adjust: 0,
+            }),
+            _ => None,
+        };
+        if let Some(expected) = far {
+            let before = engine.arena().to_vec();
+            let decoded = decode_one(engine.memory().unwrap(), GuestAddress(0x1001)).unwrap();
+            assert_eq!(decoded.operation(), &expected);
+            assert_eq!(decoded.length() as usize, instruction.len());
+            assert_eq!(
+                decoded.next_pc(),
+                GuestAddress(0x1001 + instruction.len() as u32)
+            );
+            assert!(
+                engine
+                    .memory()
+                    .unwrap()
+                    .is_code_current(decoded.code_snapshot())
+            );
+            assert_eq!(engine.arena(), before);
+            assert_eq!(engine.memory().unwrap().mapped_pages(), 1);
+            assert_eq!(compile(&mut engine, &[(0x1000, bytes.len() as u32)]), Ok(1));
+            assert_eq!(engine.generation(), 1);
+            engine.guard(KEY, 1).unwrap();
+            continue;
+        }
         assert_eq!(
             compile(&mut engine, &[(0x1000, bytes.len() as u32)]),
             Err(HostError::Compile(instruction_error(

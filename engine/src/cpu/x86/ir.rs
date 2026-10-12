@@ -380,6 +380,14 @@ pub enum Operation {
         width: FarWidth,
         target: FarPointer,
     },
+    FarCall {
+        width: FarWidth,
+        target: FarPointer,
+    },
+    FarReturn {
+        width: FarWidth,
+        stack_adjust: u16,
+    },
     QuerySegment {
         kind: super::SegmentQuery,
         source: Value32,

@@ -302,7 +302,7 @@ fn word_return_adjustment_is_unsigned_and_prefix_looking_immediates_are_payload(
 }
 
 #[test]
-fn word_near_control_strict_prefixes_indirect_far_and_other_word_branches_stay_closed() {
+fn word_near_control_keeps_prefix_refusals_and_typed_far_boundaries() {
     let far = [0x66, 0xea, 0, 0, 0, 0];
     assert_eq!(
         decode_one(&code_space(CODE, &far), GuestAddress(CODE))
@@ -316,6 +316,50 @@ fn word_near_control_strict_prefixes_indirect_far_and_other_word_branches_stay_c
             },
         },
     );
+
+    for (bytes, expected) in [
+        (
+            &[0x66, 0xcb][..],
+            Operation::FarReturn {
+                width: ring3_engine::cpu::x86::FarWidth::Word,
+                stack_adjust: 0,
+            },
+        ),
+        (
+            &[0x66, 0xca, 0, 0][..],
+            Operation::FarReturn {
+                width: ring3_engine::cpu::x86::FarWidth::Word,
+                stack_adjust: 0,
+            },
+        ),
+        (
+            &[0x66, 0x9a, 0, 0, 0, 0][..],
+            Operation::FarCall {
+                width: ring3_engine::cpu::x86::FarWidth::Word,
+                target: ring3_engine::cpu::x86::ir::FarPointer::Immediate {
+                    offset: 0,
+                    selector: 0,
+                },
+            },
+        ),
+    ] {
+        let engine = code(bytes);
+        let before = engine.arena().to_vec();
+        let decoded = decode_one(engine.memory().unwrap(), GuestAddress(CODE)).unwrap();
+        assert_eq!(decoded.operation(), &expected);
+        assert_eq!(
+            (decoded.length() as usize, decoded.next_pc()),
+            (bytes.len(), GuestAddress(CODE + bytes.len() as u32))
+        );
+        assert!(
+            engine
+                .memory()
+                .unwrap()
+                .is_code_current(decoded.code_snapshot())
+        );
+        assert_eq!(engine.arena(), before);
+        assert_eq!(engine.memory().unwrap().mapped_pages(), 1);
+    }
 
     let opcode = DecodeError::Unsupported(UnsupportedFeature::Opcode);
     for form in FORMS {
@@ -351,9 +395,6 @@ fn word_near_control_strict_prefixes_indirect_far_and_other_word_branches_stay_c
         &[0x66, 0x66, 0xff, 0xe0],
         &[0x66, 0x66, 0xe9, 0, 0],
         &[0x66, 0x66, 0x0f, 0x84, 0, 0],
-        &[0x66, 0xcb],
-        &[0x66, 0xca, 0, 0],
-        &[0x66, 0x9a, 0, 0, 0, 0],
     ] {
         assert_eq!(
             decode_one(&code_space(CODE, bytes), GuestAddress(CODE)).err(),

@@ -12,6 +12,29 @@ pub(super) fn jump(
     imports: memory::Imports,
     exit_depth: u32,
 ) {
+    capture_target(code, width, target, imports, exit_depth);
+    let index = imports
+        .far_jump
+        .expect("far jump has a helper")
+        .emit_binding(code);
+    code.local_get(RESULT)
+        .local_get(ADDRESS)
+        .i32_const(i32::from(width == FarWidth::Word))
+        .call(index)
+        .local_set(HELPER_STATUS);
+    descriptor_result(code, exit_depth);
+    cpu_result::validate(code, 0, 0, false, exit_depth);
+    target_echo(code, exit_depth);
+    code.local_get(RESULT).local_set(EIP);
+}
+
+fn capture_target(
+    code: &mut InstructionSink<'_>,
+    width: FarWidth,
+    target: FarPointer,
+    imports: memory::Imports,
+    exit_depth: u32,
+) {
     match target {
         FarPointer::Immediate { offset, selector } => {
             code.i32_const(offset as i32)
@@ -50,17 +73,9 @@ pub(super) fn jump(
                 .local_set(ADDRESS);
         }
     }
-    let index = imports
-        .far_jump
-        .expect("far jump has a helper")
-        .emit_binding(code);
-    code.local_get(RESULT)
-        .local_get(ADDRESS)
-        .i32_const(i32::from(width == FarWidth::Word))
-        .call(index)
-        .local_set(HELPER_STATUS);
-    descriptor_result(code, exit_depth);
-    cpu_result::validate(code, 0, 0, false, exit_depth);
+}
+
+fn target_echo(code: &mut InstructionSink<'_>, exit_depth: u32) {
     // length-zero successful validation preserves the captured offset in RESULT.
     // enforce an exact target echo before publishing architectural EIP.
     memory::reset_checks(code);
@@ -69,7 +84,6 @@ pub(super) fn jump(
     memory::add_check(code);
     memory::protocol_if_bad(code);
     memory::exit_if_failed(code, exit_depth);
-    code.local_get(RESULT).local_set(EIP);
 }
 
 fn transfer(offset: u32) -> MemArg {
@@ -134,3 +148,9 @@ fn descriptor_result(code: &mut InstructionSink<'_>, exit_depth: u32) {
     code.end();
     memory::exit_if_failed(code, exit_depth);
 }
+
+mod call;
+#[path = "far/return.rs"]
+mod return_;
+pub(super) use call::call;
+pub(super) use return_::return_;

@@ -52,6 +52,8 @@ pub(super) struct Imports {
     pub(super) segment_load: Option<StoreImport>,
     pub(super) segment_load_far: Option<StoreImport>,
     pub(super) far_jump: Option<StoreImport>,
+    pub(super) far_call: Option<StoreImport>,
+    pub(super) far_return: Option<StoreImport>,
     pub(super) read: Option<u32>,
     pub(super) store: Option<StoreImport>,
     pub(super) read8: Option<u32>,
@@ -88,6 +90,8 @@ pub(super) struct ImportNeeds {
     pub(super) segment_load: bool,
     pub(super) segment_load_far: bool,
     pub(super) far_jump: bool,
+    pub(super) far_call: bool,
+    pub(super) far_return: bool,
     pub(super) read: bool,
     pub(super) store: bool,
     pub(super) read8: bool,
@@ -125,6 +129,8 @@ impl Imports {
         let mut segment_load = false;
         let mut segment_load_far = false;
         let mut far_jump = false;
+        let mut far_call = false;
+        let mut far_return = false;
         let mut read = false;
         let mut store = false;
         let mut read8 = false;
@@ -150,6 +156,14 @@ impl Imports {
                 Operation::FarJump { target, .. } => {
                     far_jump = true;
                     cpu_read |= matches!(target, crate::cpu::x86::ir::FarPointer::Memory(_));
+                }
+                Operation::FarCall { target, .. } => {
+                    far_call = true;
+                    cpu_read |= matches!(target, crate::cpu::x86::ir::FarPointer::Memory(_));
+                }
+                Operation::FarReturn { .. } => {
+                    far_return = true;
+                    cpu_read = true;
                 }
                 Operation::XState(operation) => match operation {
                     crate::cpu::x86::xstate::XStateOperation::Save { .. } => cpu_xsave = true,
@@ -471,6 +485,8 @@ impl Imports {
             segment_load,
             segment_load_far,
             far_jump,
+            far_call,
+            far_return,
             read,
             store,
             read8,

@@ -131,6 +131,60 @@ pub(crate) fn simd_execute(
     })
 }
 
+pub(crate) fn far_call(offset: u32, selector: u32, word: u32, return_eip: u32, esp: u32) -> u32 {
+    cpu_store(|instance| instance.far_call(offset, selector, word, return_eip, esp))
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn far_call_resident(
+    key_low: u32,
+    key_high: u32,
+    id_low: u32,
+    id_high: u32,
+    offset: u32,
+    selector: u32,
+    word: u32,
+    return_eip: u32,
+    esp: u32,
+) -> u32 {
+    cpu_store(|instance| {
+        instance.far_call_resident(
+            u64::from(key_low) | (u64::from(key_high) << 32),
+            u64::from(id_low) | (u64::from(id_high) << 32),
+            offset,
+            selector,
+            word,
+            return_eip,
+            esp,
+        )
+    })
+}
+
+pub(crate) fn far_return(offset: u32, selector: u32, word: u32) -> u32 {
+    mutate(|instance| instance.far_return(offset, selector, word))
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn far_return_resident(
+    key_low: u32,
+    key_high: u32,
+    id_low: u32,
+    id_high: u32,
+    offset: u32,
+    selector: u32,
+    word: u32,
+) -> u32 {
+    mutate(|instance| {
+        instance.far_return_resident(
+            u64::from(key_low) | (u64::from(key_high) << 32),
+            u64::from(id_low) | (u64::from(id_high) << 32),
+            offset,
+            selector,
+            word,
+        )
+    })
+}
+
 pub(crate) fn far_jump(offset: u32, selector: u32, word: u32) -> u32 {
     mutate(|instance| instance.far_jump(offset, selector, word))
 }

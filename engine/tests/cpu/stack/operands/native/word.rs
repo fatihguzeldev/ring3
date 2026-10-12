@@ -405,6 +405,27 @@ fn word_stack_prefix_lock_and_closed_stack_neighbors_remain_precise() {
             continue;
         }
 
+        if matches!(bytes, [0x66, 0xff, 0x1b] | [0x66, 0xff, 0x2b]) {
+            use ring3_engine::cpu::x86::{FarWidth, ir::FarPointer};
+            let target = FarPointer::Memory(EffectiveAddress {
+                base: Some(Register32::Ebx),
+                ..Default::default()
+            });
+            let expected = if bytes[2] == 0x1b {
+                Operation::FarCall {
+                    width: FarWidth::Word,
+                    target,
+                }
+            } else {
+                Operation::FarJump {
+                    width: FarWidth::Word,
+                    target,
+                }
+            };
+            assert_operation(bytes, expected);
+            continue;
+        }
+
         if !word_prefix::admit_if_new_prefix(bytes) {
             assert_eq!(
                 decode_one(&code_space(CODE, bytes), GuestAddress(CODE)).err(),

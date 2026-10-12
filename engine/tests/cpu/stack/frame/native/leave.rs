@@ -335,6 +335,27 @@ fn standalone_and_prefixed_or_adjacent_forms_keep_explicit_refusals() {
             continue;
         }
         let engine = code(CODE, &bytes, true);
+        if matches!(bytes.as_slice(), [0xcb] | [0xca, 0, 0]) {
+            let before = engine.arena().to_vec();
+            let decoded = decode_one(engine.memory().unwrap(), GuestAddress(CODE)).unwrap();
+            assert_eq!(
+                decoded.operation(),
+                &Operation::FarReturn {
+                    width: ring3_engine::cpu::x86::FarWidth::Dword,
+                    stack_adjust: 0
+                }
+            );
+            assert_eq!(decoded.length() as usize, bytes.len());
+            assert_eq!(decoded.next_pc(), GuestAddress(CODE + bytes.len() as u32));
+            assert!(
+                engine
+                    .memory()
+                    .unwrap()
+                    .is_code_current(decoded.code_snapshot())
+            );
+            assert_eq!(engine.arena(), before);
+            continue;
+        }
         assert_eq!(
             decode_one(engine.memory().unwrap(), GuestAddress(CODE)).err(),
             Some(expected),

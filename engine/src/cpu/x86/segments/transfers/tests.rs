@@ -203,3 +203,89 @@ fn known_invalid_system_metadata_is_distinct_from_unresolved_task_and_gate_paylo
         assert_eq!(table, before);
     }
 }
+
+#[test]
+fn call_descriptor_phase_defers_target_limit_until_after_stack_capacity() {
+    let mut table = SegmentDescriptorTable::empty();
+    let bounded = record(0x1a, 3, true, 0xffff, false, true, 0);
+    table.configure_raw(0x40, bounded).unwrap();
+    let destination = table.resolve_far_call(0x43, 3).unwrap();
+    assert_eq!(
+        destination.target(0x10000, FarWidth::Dword),
+        Err(CodeTransferError::GeneralProtection(0))
+    );
+    assert_eq!(
+        destination.target(0x1234, FarWidth::Word),
+        Err(CodeTransferError::UnsupportedProfile)
+    );
+    assert_eq!(*table.raw_descriptor(0x43).unwrap(), bounded);
+}
+
+#[test]
+fn return_checks_selector_rpl_even_for_conforming_code_before_presence() {
+    let mut table = SegmentDescriptorTable::empty();
+    for (kind, dpl, present, rpl, expected) in [
+        (
+            0x1e,
+            0,
+            true,
+            0,
+            Err(CodeTransferError::GeneralProtection(0x40)),
+        ),
+        (
+            0x1e,
+            0,
+            false,
+            2,
+            Err(CodeTransferError::GeneralProtection(0x40)),
+        ),
+        (0x1e, 0, true, 3, Ok(())),
+        (0x1a, 3, true, 3, Ok(())),
+        (
+            0x1a,
+            2,
+            true,
+            3,
+            Err(CodeTransferError::GeneralProtection(0x40)),
+        ),
+        (0x1e, 3, false, 3, Err(CodeTransferError::NotPresent(0x40))),
+        (
+            0x12,
+            3,
+            true,
+            3,
+            Err(CodeTransferError::GeneralProtection(0x40)),
+        ),
+        (
+            12,
+            3,
+            true,
+            3,
+            Err(CodeTransferError::GeneralProtection(0x40)),
+        ),
+    ] {
+        let raw = record(kind, dpl, present, 0xfffff, true, true, 0);
+        table.configure_raw(0x40, raw).unwrap();
+        let before = table.clone();
+        assert_eq!(
+            table
+                .resolve_far_return(0x40 | rpl, 0xffff1234, FarWidth::Word, 3)
+                .map(|v| {
+                    assert_eq!(v.offset, 0x1234);
+                    assert_eq!(v.selector(), 0x43);
+                }),
+            expected
+        );
+        assert_eq!(table, before);
+    }
+    for selector in [0, 1, 2, 3] {
+        assert_eq!(
+            table.resolve_far_return(selector, 0, FarWidth::Dword, 3),
+            Err(CodeTransferError::GeneralProtection(0))
+        );
+    }
+    assert_eq!(
+        table.resolve_far_return(0x4b, 0, FarWidth::Dword, 3),
+        Err(CodeTransferError::GeneralProtection(0x48))
+    );
+}

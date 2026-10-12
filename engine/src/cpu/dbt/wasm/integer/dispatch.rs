@@ -37,7 +37,10 @@ pub(in crate::cpu::dbt::wasm) fn instruction(
 ) {
     if !matches!(
         instruction.operation(),
-        Operation::String { .. } | Operation::RepeatString { .. } | Operation::X87 { .. }
+        Operation::String { .. }
+            | Operation::RepeatString { .. }
+            | Operation::X87 { .. }
+            | Operation::FarCall { .. }
     ) && !matches!(instruction.operation(), Operation::Simd(operation) if operation.kind == crate::cpu::x86::simd::SimdKind::MaskedStore)
     {
         use crate::cpu::x86::SegmentRegister::*;
@@ -49,6 +52,23 @@ pub(in crate::cpu::dbt::wasm) fn instruction(
     }
     let mut store = false;
     match *instruction.operation() {
+        Operation::FarCall { width, target } => {
+            super::super::far::call(
+                code,
+                width,
+                target,
+                instruction.next_pc().0,
+                imports,
+                exit_depth,
+            );
+            store = true;
+        }
+        Operation::FarReturn {
+            width,
+            stack_adjust,
+        } => {
+            super::super::far::return_(code, width, stack_adjust, imports, exit_depth);
+        }
         Operation::FarJump { width, target } => {
             super::super::far::jump(code, width, target, imports, exit_depth)
         }
@@ -2489,6 +2509,8 @@ pub(in crate::cpu::dbt::wasm) fn instruction(
     if !matches!(
         instruction.operation(),
         Operation::FarJump { .. }
+            | Operation::FarCall { .. }
+            | Operation::FarReturn { .. }
             | Operation::Jump { .. }
             | Operation::JumpWord { .. }
             | Operation::ReadJumpWord { .. }

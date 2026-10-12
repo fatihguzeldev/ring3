@@ -36,3 +36,12 @@ mod cpu_word_near_control;
 
 #[path = "far/jump/native.rs"]
 mod cpu_far_jump;
+
+#[path = "far/call/native.rs"]
+mod cpu_far_call;
+
+#[path = "far/return/native.rs"]
+mod cpu_far_return;
+
+#[path = "far/support.rs"]
+mod far_support;

@@ -298,6 +298,41 @@ fn word_memory_unary_prefixes_and_group_neighbors_keep_precise_closure() {
         if matches!(extension, 2 | 4 | 6) {
             bytes.insert(0, 0x66);
         }
+        if matches!(extension, 3 | 5) {
+            use ring3_engine::cpu::x86::{FarWidth, ir::FarPointer};
+            let expected = if extension == 3 {
+                Operation::FarCall {
+                    width: FarWidth::Word,
+                    target: FarPointer::Memory(EffectiveAddress {
+                        base: Some(Register32::Ebx),
+                        ..Default::default()
+                    }),
+                }
+            } else {
+                Operation::FarJump {
+                    width: FarWidth::Word,
+                    target: FarPointer::Memory(EffectiveAddress {
+                        base: Some(Register32::Ebx),
+                        ..Default::default()
+                    }),
+                }
+            };
+            let engine = code(&bytes);
+            let before = engine.arena().to_vec();
+            let decoded = decode_one(engine.memory().unwrap(), GuestAddress(CODE)).unwrap();
+            assert_eq!(decoded.operation(), &expected);
+            assert_eq!(decoded.length() as usize, bytes.len());
+            assert_eq!(decoded.next_pc(), GuestAddress(CODE + bytes.len() as u32));
+            assert!(
+                engine
+                    .memory()
+                    .unwrap()
+                    .is_code_current(decoded.code_snapshot())
+            );
+            assert_eq!(engine.arena(), before);
+            assert_eq!(engine.memory().unwrap().mapped_pages(), 1);
+            continue;
+        }
         if !word_prefix::admit_if_new_prefix(&bytes) {
             assert_eq!(
                 decode_one(&code_space(CODE, &bytes), GuestAddress(CODE)).err(),

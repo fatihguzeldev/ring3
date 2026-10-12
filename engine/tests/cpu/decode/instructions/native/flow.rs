@@ -407,20 +407,79 @@ fn final_address_return_decodes_without_reading_stack_or_wrapping_fetch() {
 }
 
 #[test]
-fn far_control_transfers_are_rejected_as_unsupported() {
-    for bytes in [
-        &[0x9a, 0x78, 0x56, 0x34, 0x12, 8, 0][..],
-        &[0xea, 0x78, 0x56, 0x34, 0x12, 8, 0][..],
-        &[0xff, 0x1b][..],
-        &[0xff, 0x2b][..],
-        &[0xcb][..],
-        &[0xca, 12, 0][..],
+fn far_control_transfers_preserve_typed_targets_and_return_adjustment() {
+    use ring3_engine::cpu::x86::{
+        FarWidth, Register32,
+        decode::decode_one,
+        ir::{EffectiveAddress, FarPointer, Operation},
+    };
+    for (bytes, expected) in [
+        (
+            &[0x9a, 0x78, 0x56, 0x34, 0x12, 8, 0][..],
+            Operation::FarCall {
+                width: FarWidth::Dword,
+                target: FarPointer::Immediate {
+                    offset: 0x1234_5678,
+                    selector: 8,
+                },
+            },
+        ),
+        (
+            &[0xea, 0x78, 0x56, 0x34, 0x12, 8, 0][..],
+            Operation::FarJump {
+                width: FarWidth::Dword,
+                target: FarPointer::Immediate {
+                    offset: 0x1234_5678,
+                    selector: 8,
+                },
+            },
+        ),
+        (
+            &[0xff, 0x1b][..],
+            Operation::FarCall {
+                width: FarWidth::Dword,
+                target: FarPointer::Memory(EffectiveAddress {
+                    base: Some(Register32::Ebx),
+                    ..Default::default()
+                }),
+            },
+        ),
+        (
+            &[0xff, 0x2b][..],
+            Operation::FarJump {
+                width: FarWidth::Dword,
+                target: FarPointer::Memory(EffectiveAddress {
+                    base: Some(Register32::Ebx),
+                    ..Default::default()
+                }),
+            },
+        ),
+        (
+            &[0xcb][..],
+            Operation::FarReturn {
+                width: FarWidth::Dword,
+                stack_adjust: 0,
+            },
+        ),
+        (
+            &[0xca, 12, 0][..],
+            Operation::FarReturn {
+                width: FarWidth::Dword,
+                stack_adjust: 12,
+            },
+        ),
     ] {
         let space = code_space(0x1000, bytes);
-        assert!(matches!(
-            decode_one(&space, GuestAddress(0x1000)),
-            Err(DecodeError::Unsupported(_))
-        ));
+        let before = space
+            .snapshot_code(GuestAddress(0x1000), bytes.len())
+            .unwrap();
+        let decoded = decode_one(&space, GuestAddress(0x1000)).unwrap();
+        assert_eq!(decoded.operation(), &expected, "{bytes:02x?}");
+        assert_eq!(decoded.length() as usize, bytes.len());
+        assert_eq!(decoded.next_pc(), GuestAddress(0x1000 + bytes.len() as u32));
+        assert!(space.is_code_current(decoded.code_snapshot()));
+        assert!(space.is_code_current(&before));
+        assert_eq!(space.mapped_pages(), 1);
     }
 }
 

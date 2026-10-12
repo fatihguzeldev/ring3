@@ -548,11 +548,11 @@ fn span_poison_prefix_and_control_exclusions_preserve_arena_units_and_capacity()
             } else {
                 CODE + 1
             },
-            InstructionError::Decode(DecodeError::Unsupported(if instruction == [0x60] {
-                UnsupportedFeature::Privileged
+            if instruction == [0x60] {
+                InstructionError::Decode(DecodeError::Unsupported(UnsupportedFeature::Privileged))
             } else {
-                UnsupportedFeature::Opcode
-            })),
+                InstructionError::InvalidBlockEnd
+            },
         );
     }
     describe(&mut engine, &[(CODE, 3)]);

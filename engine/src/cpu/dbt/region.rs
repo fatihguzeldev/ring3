@@ -342,6 +342,8 @@ pub(super) fn terminates(instruction: &DecodedInstruction, embedded: bool) -> bo
     matches!(
         instruction.operation(),
         Operation::FarJump { .. }
+            | Operation::FarCall { .. }
+            | Operation::FarReturn { .. }
             | Operation::Jump { .. }
             | Operation::JumpWord { .. }
             | Operation::ReadJumpWord { .. }
@@ -366,6 +368,8 @@ fn supports_cpu_state(operation: &Operation) -> bool {
         Operation::PackedStringCompare(operation) => operation.valid(),
         Operation::VirtualTimestampAux
         | Operation::FarJump { .. }
+        | Operation::FarCall { .. }
+        | Operation::FarReturn { .. }
         | Operation::XState(_)
         | Operation::VerifySegment { .. }
         | Operation::QuerySegment { .. } => true,
@@ -597,6 +601,8 @@ pub(super) fn supports(instruction: &DecodedInstruction, embedded: bool) -> bool
     let operation = instruction.operation();
     match operation {
         Operation::FarJump { .. }
+        | Operation::FarCall { .. }
+        | Operation::FarReturn { .. }
         | Operation::XState(_)
         | Operation::VerifySegment { .. }
         | Operation::QuerySegment { .. } => {

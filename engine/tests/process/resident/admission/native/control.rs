@@ -476,7 +476,11 @@ fn near_control_end_prefix_and_decode_errors_preserve_arena_units_and_capacity()
             &bytes,
             bytes.len(),
             CODE + 1,
-            InstructionError::Decode(cause),
+            if matches!(instruction, [0xff, 0x1b] | [0xcb] | [0xca, 8, 0]) {
+                InstructionError::InvalidBlockEnd
+            } else {
+                InstructionError::Decode(cause)
+            },
         );
     }
     describe(&mut engine, &[(CODE, 3)]);

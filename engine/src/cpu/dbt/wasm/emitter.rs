@@ -26,6 +26,8 @@ pub(in crate::cpu::dbt) fn emit(
         segment_load: needs_segment_load,
         segment_load_far: needs_segment_load_far,
         far_jump: needs_far_jump,
+        far_call: needs_far_call,
+        far_return: needs_far_return,
         read: needs_read,
         store: needs_store,
         read8: needs_read8,
@@ -105,7 +107,9 @@ pub(in crate::cpu::dbt) fn emit(
         || needs_cpu_mask_write
         || needs_segment_load
         || needs_segment_load_far
-        || needs_far_jump;
+        || needs_far_jump
+        || needs_far_call
+        || needs_far_return;
     let has_memory = has_cpu
         || has_reads
         || has_stores
@@ -167,6 +171,8 @@ pub(in crate::cpu::dbt) fn emit(
                         | Operation::PopSegment { .. }
                         | Operation::LoadFarPointer { .. }
                         | Operation::FarJump { .. }
+                        | Operation::FarCall { .. }
+                        | Operation::FarReturn { .. }
                 )
         });
     let has_segment_check = blocks
@@ -241,7 +247,19 @@ pub(in crate::cpu::dbt) fn emit(
             );
         }
     }
-    let segment_check_type = cpu_type_base + if has_cpu { 10 } else { 0 };
+    if needs_far_call {
+        let parameters = if matches!(binding, Some(EmbeddedBinding::Resident { .. })) {
+            9
+        } else {
+            5
+        };
+        types.ty().function(
+            std::iter::repeat_n(ValType::I32, parameters),
+            [ValType::I32],
+        );
+    }
+    let segment_check_type =
+        cpu_type_base + if has_cpu { 10 } else { 0 } + u32::from(needs_far_call);
     if has_segment_check {
         types.ty().function([ValType::I32; 6], [ValType::I32]);
     }
@@ -695,6 +713,20 @@ pub(in crate::cpu::dbt) fn emit(
             "segment_load_far_resident",
             7,
             &mut helper_imports.segment_load_far,
+        ),
+        (
+            needs_far_call,
+            "far_call",
+            "far_call_resident",
+            10,
+            &mut helper_imports.far_call,
+        ),
+        (
+            needs_far_return,
+            "far_return",
+            "far_return_resident",
+            7,
+            &mut helper_imports.far_return,
         ),
         (
             needs_far_jump,

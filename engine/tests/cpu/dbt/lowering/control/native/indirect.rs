@@ -281,6 +281,12 @@ fn declared_spans_cannot_cut_indirect_target_encodings() {
 
 #[test]
 fn far_prefixed_and_other_unimplemented_forms_keep_their_precise_errors() {
+    use ring3_engine::cpu::x86::{
+        FarWidth, Register32,
+        decode::decode_one,
+        ir::{EffectiveAddress, FarPointer, Operation},
+    };
+
     for (instruction, cause) in [
         (
             &[0xff, 0x1b][..],
@@ -329,6 +335,45 @@ fn far_prefixed_and_other_unimplemented_forms_keep_their_precise_errors() {
         let mut bytes = vec![0x90];
         bytes.extend_from_slice(instruction);
         let mut engine = with_code(&bytes);
+        let far = match instruction {
+            [0xff, 0x1b] => Some(Operation::FarCall {
+                width: FarWidth::Dword,
+                target: FarPointer::Memory(EffectiveAddress {
+                    base: Some(Register32::Ebx),
+                    ..Default::default()
+                }),
+            }),
+            [0xff, 0x2b] => Some(Operation::FarJump {
+                width: FarWidth::Dword,
+                target: FarPointer::Memory(EffectiveAddress {
+                    base: Some(Register32::Ebx),
+                    ..Default::default()
+                }),
+            }),
+            _ => None,
+        };
+        if let Some(expected) = far {
+            let before = engine.arena().to_vec();
+            let decoded = decode_one(engine.memory().unwrap(), GuestAddress(0x1001)).unwrap();
+            assert_eq!(decoded.operation(), &expected);
+            assert_eq!(decoded.length() as usize, instruction.len());
+            assert_eq!(
+                decoded.next_pc(),
+                GuestAddress(0x1001 + instruction.len() as u32)
+            );
+            assert!(
+                engine
+                    .memory()
+                    .unwrap()
+                    .is_code_current(decoded.code_snapshot())
+            );
+            assert_eq!(engine.arena(), before);
+            assert_eq!(engine.memory().unwrap().mapped_pages(), 1);
+            assert_eq!(compile(&mut engine, 0x1000, bytes.len() as u32), Ok(1));
+            assert_eq!(engine.generation(), 1);
+            engine.guard(KEY, 1).unwrap();
+            continue;
+        }
         assert_eq!(
             compile(&mut engine, 0x1000, bytes.len() as u32),
             Err(HostError::Compile(instruction_error(0x1001, cause)))

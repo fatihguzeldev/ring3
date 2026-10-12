@@ -38,3 +38,9 @@ mod cpu_privileged_faults_wasm;
 
 #[path = "far/jump/wasm.rs"]
 mod cpu_far_jump_wasm;
+
+#[path = "far/call/wasm.rs"]
+mod cpu_far_call;
+
+#[path = "far/return/wasm.rs"]
+mod cpu_far_return;

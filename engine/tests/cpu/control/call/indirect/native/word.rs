@@ -412,10 +412,34 @@ fn word_indirect_call_prefixes_lock_and_adjacent_ff_groups_remain_precise() {
             }
         }
     }
+    let bytes = [0x66, 0xff, 0x1b];
+    let engine = code(&bytes);
+    let before = engine.arena().to_vec();
+    let decoded = decode_one(engine.memory().unwrap(), GuestAddress(CODE)).unwrap();
     assert_eq!(
-        decode_one(&code_space(CODE, &[0x66, 0xff, 0x1b]), GuestAddress(CODE)).err(),
-        Some(unsupported),
+        decoded.operation(),
+        &Operation::FarCall {
+            width: ring3_engine::cpu::x86::FarWidth::Word,
+            target: ring3_engine::cpu::x86::ir::FarPointer::Memory(address(
+                Some(Register32::Ebx),
+                None,
+                1,
+                0,
+            )),
+        },
     );
+    assert_eq!(
+        (decoded.length(), decoded.next_pc()),
+        (3, GuestAddress(CODE + 3))
+    );
+    assert!(
+        engine
+            .memory()
+            .unwrap()
+            .is_code_current(decoded.code_snapshot())
+    );
+    assert_eq!(engine.arena(), before);
+    assert_eq!(engine.memory().unwrap().mapped_pages(), 1);
     assert_operation(
         &[0x66, 0xff, 0x2b],
         Operation::FarJump {
