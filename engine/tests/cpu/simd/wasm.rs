@@ -18,3 +18,6 @@ mod cpu_xstate_segment_access_wasm;
 
 #[path = "state/upper/wasm.rs"]
 mod ymm_upper;
+
+#[path = "state/xsave/upper/wasm.rs"]
+mod xstate_upper;

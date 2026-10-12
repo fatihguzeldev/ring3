@@ -192,7 +192,10 @@ pub(crate) use memory::{
 };
 
 mod xstate;
-pub(crate) use xstate::{cpu_xrstor, cpu_xrstor_resident, cpu_xsave, cpu_xsave_resident};
+pub(crate) use xstate::{
+    cpu_xrstor, cpu_xrstor_avx, cpu_xrstor_avx_resident, cpu_xrstor_resident, cpu_xsave,
+    cpu_xsave_avx, cpu_xsave_avx_resident, cpu_xsave_resident,
+};
 
 mod cpu;
 pub(crate) use cpu::{

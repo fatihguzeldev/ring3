@@ -14,6 +14,8 @@ use crate::{
     process::{EngineInstance, HostError, StoreCompletion},
 };
 
+mod upper;
+
 impl EngineInstance {
     pub fn cpu_xsave(
         &mut self,

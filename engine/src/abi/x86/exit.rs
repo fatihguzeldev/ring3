@@ -11,6 +11,7 @@ pub const EXIT_VERSION_5: u16 = 5;
 pub const EXIT_VERSION_6: u16 = 6;
 pub const EXIT_VERSION_7: u16 = 7;
 pub const EXIT_VERSION_8: u16 = 8;
+pub const EXIT_VERSION_9: u16 = 9;
 pub const REASON_OFFSET: usize = 16;
 pub const RETIRED_OFFSET: usize = 20;
 pub const DETAIL_OFFSET: usize = 24;
@@ -48,6 +49,10 @@ pub fn encode_exit_v7(exit: &ExecutionExit, output: &mut [u8]) -> Result<(), Abi
 
 pub fn encode_exit_v8(exit: &ExecutionExit, output: &mut [u8]) -> Result<(), AbiError> {
     encode(exit, output, EXIT_VERSION_8)
+}
+
+pub fn encode_exit_v9(exit: &ExecutionExit, output: &mut [u8]) -> Result<(), AbiError> {
+    encode(exit, output, EXIT_VERSION_9)
 }
 
 fn encode(exit: &ExecutionExit, output: &mut [u8], version: u16) -> Result<(), AbiError> {
@@ -183,6 +188,7 @@ pub fn decode_exit(input: &[u8]) -> Result<ExecutionExit, AbiError> {
             EXIT_VERSION_6,
             EXIT_VERSION_7,
             EXIT_VERSION_8,
+            EXIT_VERSION_9,
         ],
     )?;
     let detail = read_u32(input, DETAIL_OFFSET);
@@ -256,6 +262,7 @@ pub fn decode_exit(input: &[u8]) -> Result<ExecutionExit, AbiError> {
 
 fn validate_fault(fault: MemoryFault, length: u32, version: u16) -> Result<(), AbiError> {
     let valid_length = match fault.access {
+        Access::Read | Access::Write if version >= EXIT_VERSION_9 => (1..=832).contains(&length),
         Access::Read | Access::Write if version >= EXIT_VERSION_8 => (1..=576).contains(&length),
         Access::Read | Access::Write if version >= EXIT_VERSION_6 => (1..=512).contains(&length),
         Access::Read | Access::Write => matches!(length, 1 | 2 | 4),

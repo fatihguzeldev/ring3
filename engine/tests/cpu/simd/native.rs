@@ -39,3 +39,6 @@ mod cpu_xstate_segment_access;
 
 #[path = "state/upper/native.rs"]
 mod ymm_upper;
+
+#[path = "state/xsave/upper/native.rs"]
+mod xstate_upper;

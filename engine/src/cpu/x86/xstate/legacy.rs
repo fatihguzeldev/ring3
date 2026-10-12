@@ -21,11 +21,15 @@ pub(in crate::cpu::x86) fn save_x87(x87: &X87State, output: &mut [u8]) {
 }
 
 pub(in crate::cpu::x86) fn save_simd(simd: &SimdState, output: &mut [u8]) {
-    output[24..28].copy_from_slice(&simd.mxcsr.to_le_bytes());
-    output[28..32].copy_from_slice(&0xffffu32.to_le_bytes());
+    save_mxcsr(simd, output);
     for index in 0..8 {
         output[160 + index * 16..176 + index * 16].copy_from_slice(&simd.xmm[index]);
     }
+}
+
+pub(in crate::cpu::x86) fn save_mxcsr(simd: &SimdState, output: &mut [u8]) {
+    output[24..28].copy_from_slice(&simd.mxcsr.to_le_bytes());
+    output[28..32].copy_from_slice(&0xffffu32.to_le_bytes());
 }
 
 pub(in crate::cpu::x86) fn restore_x87(input: &[u8]) -> X87State {

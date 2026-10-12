@@ -586,7 +586,7 @@ fn selector_priorities_canonical_versions_acknowledgement_and_idempotence() {
         (12, 1),
         (52, u32::MAX),
         (56, 0),
-        (60, 0x10009),
+        (60, 0x1ffff),
         (64, 39),
         (68, 1),
         (72, 1),

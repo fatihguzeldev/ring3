@@ -2,6 +2,8 @@ use super::{AbiError, header, memory_helper::HELPER_SIZE};
 use crate::memory::{Access, FaultReason, MemoryError};
 
 pub const CPU_HELPER_VERSION: u16 = 7;
+pub const CPU_HELPER_VERSION_8: u16 = 8;
+pub const MAX_XSTATE_SPAN: usize = 832;
 pub const MAX_CPU_TRANSFER: usize = 512;
 pub const MAX_CPU_SPAN: usize = 576;
 
@@ -21,7 +23,41 @@ pub fn encode_cpu_result(
     result: Result<(), CpuMemoryError>,
     output: &mut [u8],
 ) -> Result<(), AbiError> {
-    if output.len() != HELPER_SIZE || length as usize > MAX_CPU_SPAN {
+    encode(
+        length,
+        value,
+        result,
+        output,
+        CPU_HELPER_VERSION,
+        MAX_CPU_SPAN,
+    )
+}
+
+pub fn encode_cpu_result_v8(
+    length: u32,
+    value: u32,
+    result: Result<(), CpuMemoryError>,
+    output: &mut [u8],
+) -> Result<(), AbiError> {
+    encode(
+        length,
+        value,
+        result,
+        output,
+        CPU_HELPER_VERSION_8,
+        MAX_XSTATE_SPAN,
+    )
+}
+
+fn encode(
+    length: u32,
+    value: u32,
+    result: Result<(), CpuMemoryError>,
+    output: &mut [u8],
+    version: u16,
+    max_span: usize,
+) -> Result<(), AbiError> {
+    if output.len() != HELPER_SIZE || length as usize > max_span {
         return Err(AbiError::Length);
     }
     let fields = match result {
@@ -60,7 +96,7 @@ pub fn encode_cpu_result(
             length,
         ],
     };
-    header::write_version(output, *b"R3MH", CPU_HELPER_VERSION);
+    header::write_version(output, *b"R3MH", version);
     for (index, value) in fields.into_iter().enumerate() {
         header::write_u32(output, 16 + index * 4, value);
     }
