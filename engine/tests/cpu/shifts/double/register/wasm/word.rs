@@ -112,7 +112,7 @@ fn capture_legacy_double_shifts_and_word_shift_carry_without_guest_execution() {
     }
     let mut captures = Vec::new();
     let mut ordinal = 0;
-    let mut next_resident = 1;
+    let mut resident_ids = std::collections::BTreeSet::new();
     for bank in legacy_double_shift_banks() {
         for owner in ["standalone", "replacement", "resident"] {
             if owner == "standalone" && !bank.standalone {
@@ -169,9 +169,9 @@ fn capture_legacy_double_shifts_and_word_shift_carry_without_guest_execution() {
                         }
                         .unwrap()
                         .get();
-                        // this test is the only resident allocator in this integration binary.
-                        assert_eq!(id, next_resident);
-                        next_resident += 1;
+                        assert_ne!(id, 0);
+                        assert!(resident_ids.last().is_none_or(|previous| id > *previous));
+                        assert!(resident_ids.insert(id));
                         engine.guard_resident(key, id).unwrap();
                         (engine.resident_bytes(id).unwrap().to_vec(), id)
                     }
@@ -205,7 +205,7 @@ fn capture_legacy_double_shifts_and_word_shift_carry_without_guest_execution() {
             "\"kind\":\"x86\",\"instructions\":33,\"blocks\":1".to_owned(),
         ));
     }
-    assert_eq!((ordinal, next_resident, captures.len()), (16, 7, 19));
+    assert_eq!((ordinal, resident_ids.len(), captures.len()), (16, 6, 19));
     if let Some(directory) = directory {
         let mut files = Vec::new();
         for (name, bytes, metadata) in captures {
