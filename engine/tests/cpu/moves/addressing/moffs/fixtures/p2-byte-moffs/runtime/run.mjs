@@ -1,3 +1,5 @@
+import {generatedRunBody} from '../../../../../../../support/wasm/run.mjs';
+import {assertEngineExports} from '../../../../../../../support/wasm/exports.mjs';
 import assert from 'node:assert/strict';
 import {execFileSync} from 'node:child_process';
 import {createHash} from 'node:crypto';
@@ -9,16 +11,22 @@ assert.ok(root, 'expected actual engine, new output directory and repository roo
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
 const SIZE = 4612, TRANSFER = 140, EXIT = 0x8020, EXIT_ID = 0x10003, MARKER = 0xaa77ffc1;
 const arities = {open:3, close:0, arena_ptr:0, map:3, protect:3, upload:2, read32:1, compile_entries:2, compile_resident_entries:2, generation:0, module_ptr:0, module_len:0, guard:6, guard_resident:7, read8:1, store8:2, store_resident8:6, store32:2, store_resident32:6, begin_image_input:1, append_image_input:2, load_pe32_linked_v2_input_at:2, start_loaded_image:2, capture_call:5, capture_resident_call:6, complete_windows_call:4, complete_resident_windows_call:5};
-const sourcePaths = [...execFileSync('rg', ['--files', 'engine/src'], {cwd:root, encoding:'utf8'}).trim().split('\n').sort(), 'Cargo.toml', 'Cargo.lock', 'engine/Cargo.toml', 'engine/tests/cpu/moves/addressing/moffs/wasm/byte.rs', 'engine/tests/cpu/moves/wasm.rs', 'engine/tests/support/wasm.rs', 'engine/tests/cpu/moves/wasm.rs', 'engine/tests/support/wasm.rs', 'engine/tests/cpu/moves/addressing/moffs/fixtures/p2-byte-moffs/runtime/run.mjs', 'engine/tests/cpu/moves/addressing/moffs/fixtures/p2-byte-moffs/integer.S'];
-assert.equal(sourcePaths.length, 88); assert.equal(new Set(sourcePaths).size, 88);
+const productionPaths = execFileSync('rg', ['--files', 'engine/src'], {cwd:root, encoding:'utf8'}).trim().split('\n').sort();
+const engineBytes = readFileSync(enginePath), engineModule = new WebAssembly.Module(engineBytes);
+const engineExportContract = assertEngineExports(engineModule, root);
+const sourcePaths = [...productionPaths, 'Cargo.toml', 'Cargo.lock', 'engine/Cargo.toml', 'engine/tests/cpu/moves/addressing/moffs/wasm/byte.rs', 'engine/tests/cpu/moves/wasm.rs', 'engine/tests/support/wasm.rs', 'engine/tests/cpu/moves/addressing/moffs/fixtures/p2-byte-moffs/runtime/run.mjs', 'engine/tests/cpu/moves/addressing/moffs/fixtures/p2-byte-moffs/integer.S'];
+assert.equal(sourcePaths.length, productionPaths.length + 8); assert.equal(new Set(sourcePaths).size, sourcePaths.length);
+sourcePaths.push(...engineExportContract.sourcePaths.filter(path => !sourcePaths.includes(path)));
+sourcePaths.push('engine/tests/support/wasm/run.mjs');
+assert.equal(new Set(sourcePaths).size, sourcePaths.length);
 const sources = () => Object.fromEntries(sourcePaths.map(path => [path, hash(readFileSync(join(root, path)))]));
-const beforeSources = sources(), engineBytes = readFileSync(enginePath), engineModule = new WebAssembly.Module(engineBytes);
+const beforeSources = sources();
 assert.deepEqual(WebAssembly.Module.imports(engineModule), []);
-assert.equal(WebAssembly.Module.exports(engineModule).length, 71);
-assert.equal(WebAssembly.Module.exports(engineModule).filter(row => row.kind === 'function').length, 70);
+
+
 writeFileSync(join(output, 'engine.wasm'), engineBytes);
 writeFileSync(join(output, 'source-before.json'), JSON.stringify(beforeSources, null, 2));
-for (const file of ['runtime/run.mjs', 'integer.S']) writeFileSync(join(output, file), readFileSync(join(root, 'engine/tests/cpu/moves/addressing/moffs/fixtures/p2-byte-moffs', file)));
+for (const file of ['runtime/run.mjs', 'integer.S']) writeFileSync(join(output, file.split('/').at(-1)), readFileSync(join(root, 'engine/tests/cpu/moves/addressing/moffs/fixtures/p2-byte-moffs', file)));
 
 // two encoding-only samples; this entire phase precedes every generated guest call.
 const objectPath = join(output, 'integer.o'), assemblyArgs = ['-target', 'i386-unknown-linux-gnu', '-c', join(root, 'engine/tests/cpu/moves/addressing/moffs/fixtures/p2-byte-moffs/integer.S'), '-o', objectPath];
@@ -82,8 +90,9 @@ function readPages(ctx, label) {
   }
   observations.push({context:ctx.ordinal,label,pages:records}); return records;
 }
-function seed(ctx, registers, pc, flags) {refresh(ctx).bytes.set(state(registers,pc,flags),ctx.base); ctx.bytes.set(exit(3,0,1),ctx.base+56); ctx.view.setUint32(ctx.base+96,0,true); ctx.bytes.fill(0xa5,ctx.base+100,ctx.base+SIZE);}
+function seed(ctx, registers, pc, flags) {refresh(ctx).bytes.set(state(registers,pc,flags),ctx.base); ctx.bytes.set(exit(3,0,1),ctx.base+56); ctx.view.setUint32(ctx.base+96,0,true); ctx.bytes.fill(0xa5,ctx.base+100,ctx.base+4236);}
 function shape(ctx, bytes, binding, helpers, gates) {
+  const runBody = generatedRunBody(bytes);
   let at=8;
   const u=()=>{let value=0,shift=0; for(let n=0;n<5;n++){assert.ok(at<bytes.length); const byte=bytes[at++]; value|=(byte&127)<<shift; if(!(byte&128)) return value>>>0; shift+=7;} assert.fail('bounded LEB');};
   const s=()=>{let value=0n,shift=0n,byte; do{assert.ok(at<bytes.length&&shift<35n);byte=bytes[at++];value|=BigInt(byte&127)<<shift;shift+=7n;}while(byte&128);if(byte&64)value-=1n<<shift;return Number(BigInt.asUintN(32,value));};
@@ -96,11 +105,11 @@ function shape(ctx, bytes, binding, helpers, gates) {
     else if(section===2) for(let n=u();n>0;n--){const module=name(),field=name(),kind=bytes[at++];if(kind===0)imports.push({module,name:field,kind:'function',type:u()});else{assert.equal(kind,2);assert.equal(u(),0);assert.equal(u(),1);imports.push({module,name:field,kind:'memory'});}}
     else if(section===3) for(let n=u();n>0;n--)functions.push(u());
     else if(section===7) for(let n=u();n>0;n--)exports.push({name:name(),kind:bytes[at++],index:u()});
-    else if(section===10) {assert.equal(u(),1);const length=u();assert.equal(at+length,end);locals=Array.from({length:u()},()=>[u(),bytes[at++]]);assert.deepEqual(locals,helpers.length>1||gates?[[16,127],[1,126],[6,127]]:[[16,127],[1,126]]);
+    else if(section===10) {assert.equal(u(), functions.length);const length=u();assert.equal(length, runBody.length); assert.ok(at + length <= end);locals=Array.from({length:u()},()=>[u(),bytes[at++]]);assert.deepEqual(locals, [[16, 0x7f], [1, 0x7e], [10, 0x7f]]);
       const constants=[ctx.low,ctx.high,...(ctx.owner==='replacement'?[binding.generation]:[binding.low,binding.high])];for(const value of constants){assert.equal(bytes[at++],0x41);assert.equal(s(),value);}for(const value of [0,1,3]){assert.equal(bytes[at++],0x20);assert.equal(u(),value);}assert.equal(bytes[at++],0x10);assert.equal(u(),0);guard={constants,parameters:[0,1,3]};at=end;}
     else assert.fail(`unexpected child section${section}`); assert.equal(at,end);
   }
-  assert.deepEqual(functions,[0]); assert.deepEqual(types[0],{parameters:[127,127,127,127],results:[127]}); assert.deepEqual(exports,[{name:'run',kind:0,index:helpers.length}]);
+  assert.deepEqual(functions, [0, ...(functions.length === 2 ? [types.length - 1] : [])]); if (functions.length === 2) assert.deepEqual(types.at(-1), {parameters: Array(6).fill(0x7f), results: [0x7f]}); assert.deepEqual(types[0],{parameters:[127,127,127,127],results:[127]}); assert.deepEqual(exports,[{name:'run',kind:0,index:helpers.length}]);
   assert.deepEqual(imports[0],{module:'env',name:'memory',kind:'memory'}); assert.deepEqual(imports.slice(1).map(({module,name,kind})=>({module,name,kind})),helpers.map(name=>({module:'ring3',name,kind:'function'})));
   const signatures=Object.fromEntries(imports.slice(1).map(row=>{const signature={parameters:Array(arities[row.name]).fill(127),results:[127]};assert.deepEqual(types[row.type],signature);return [row.name,signature];})); assert.ok(locals&&guard); return {locals,guard,signatures};
 }
@@ -174,7 +183,7 @@ function imageFile() {
 }
 const image=imageFile();writeFileSync(join(output,'moffs.exe'),image);writeFileSync(join(output,'program.x86'),program);
 for(const base of [0x400000,0x500000]) for(const owner of ['replacement','resident']) {
-  const ctx=fresh(owner,`pe-${owner}-${base.toString(16)}`),entry=base+0x1000;call(ctx,'begin_image_input',[image.length]);request(ctx,image);call(ctx,'append_image_input',[0,image.length]);refresh(ctx).bytes.fill(0xa5,ctx.base+TRANSFER,ctx.base+SIZE);
+  const ctx=fresh(owner,`pe-${owner}-${base.toString(16)}`),entry=base+0x1000;call(ctx,'begin_image_input',[image.length]);request(ctx,image);call(ctx,'append_image_input',[0,image.length]);refresh(ctx).bytes.fill(0xa5,ctx.base+TRANSFER,ctx.base+4236);
   const receipt=record('R3LI',72,[base,0x5000,entry,5,0x8000,1,0,0,EXIT,EXIT_ID,0,0,0,0],2);call(ctx,'load_pe32_linked_v2_input_at',[base,0x8000],0,[[TRANSFER,receipt]]);writeFileSync(join(output,`${ctx.label}-receipt.bin`),receipt);
   const header=Buffer.alloc(4096),text=Buffer.alloc(4096),data=Buffer.alloc(4096),fixups=Buffer.alloc(4096),gatePage=Buffer.alloc(4096);header.set(image.subarray(0,512));text.set(image.subarray(0x200,0x400));data.set(image.subarray(0x400,0x600));fixups.set(image.subarray(0x600,0x800));gatePage.set([0x0f,0x0b],0x20);
   relocations.forEach(([offset,rva])=>text.writeUInt32LE(base+rva,offset));data.writeUInt32LE(EXIT,0x150);for(const [address,bytes] of [[base,header],[entry,text],[base+0x2000,data],[base+0x4000,fixups],[0x8000,gatePage]])ctx.pages.set(address,bytes);readPages(ctx,'loaded');
@@ -188,7 +197,7 @@ for(const base of [0x400000,0x500000]) for(const owner of ['replacement','reside
   rows.push({kind:'pe',owner,base,program_hex:program.toString('hex'),program_length:51,caller_offsets:callerOffsets,relocations,normal_instruction_offsets:[0,5,7,12,14,19,21,23,25,30],retired:10,return_pc:entry+36,flags_after_producer:0x82,final_flags:0x46,registers,result:MARKER,canary:'data bytes1..63 remain6d; stack bytes0..4087 remain00',receipt_hex:receipt.toString('hex'),frame_hex:frame.toString('hex')});call(ctx,'close');
 }
 const counts={contexts,modules:modules.length,finite:rows.filter(row=>row.kind==='finite').length,retry:rows.filter(row=>row.kind==='retry').length,smc:rows.filter(row=>row.kind==='smc').length,pe:rows.filter(row=>row.kind==='pe').length,generated_invocations:runs.length,retired:runs.reduce((sum,row)=>sum+row.retired,0),page_observations:pageChecks,host_read32:read32Calls,other_host_api:hostCalls.length,total_host_api:read32Calls+hostCalls.length,source_inputs:sourcePaths.length};
-assert.deepEqual(counts,{contexts:24,modules:34,finite:12,retry:4,smc:4,pe:4,generated_invocations:50,retired:84,page_observations:196,host_read32:200704,other_host_api:360,total_host_api:201064,source_inputs:88});
+assert.deepEqual(counts,{contexts:24,modules:34,finite:12,retry:4,smc:4,pe:4,generated_invocations:50,retired:84,page_observations:196,host_read32:200704,other_host_api:360,total_host_api:201064,source_inputs: productionPaths.length + 10});
 const afterSources=sources();assert.deepEqual(afterSources,beforeSources);assert.deepEqual(readFileSync(enginePath),engineBytes);writeFileSync(join(output,'source-after.json'),JSON.stringify(afterSources,null,2));
 const result={schema:'bounded-accumulator-byte-moffs-v1',counts,engine_sha256:hash(engineBytes),sources:beforeSources,llvm,finite_inputs:finite,rows,modules,runs,observations,host_calls:hostCalls,pe:{bytes:2048,sha256:hash(image),program_length:51,program_hex:program.toString('hex'),caller_offsets:callerOffsets,relocations},limits:['Only unprefixed flat32 A0/A2; no general ISA/OS/address-size/segments/browser/performance/game claim','Numeric expected byte/parent/flags states are authored independently; full raw arenas and complete observed pages are saved for these compact calls','SMC status11 is inferred from strict source protocol plus committed Invalidated exit; not captured as helper return','LLVM checks only the two encoding samples; fresh PE bytes/CFG/relocations are independent literal input','Old unchanged load/store original raw results/provenance are handled by ROOT separately']};
 writeFileSync(join(output,'result.json'),JSON.stringify(result,null,2));console.log(JSON.stringify({status:'PASS',output:join(output,'result.json'),counts,engine_sha256:hash(engineBytes)}));

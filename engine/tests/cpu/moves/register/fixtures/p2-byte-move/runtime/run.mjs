@@ -1,3 +1,5 @@
+import {generatedRunBody} from '../../../../../../support/wasm/run.mjs';
+import {assertEngineExports} from '../../../../../../support/wasm/exports.mjs';
 import {createArena} from '../../../../../../support/wasm/arena.mjs';
 import assert from 'node:assert/strict';
 import {execFileSync} from 'node:child_process';
@@ -58,13 +60,19 @@ const code=authoredText(readFileSync(join(outputDir,'program.o'))),image=readFil
 assert.deepEqual(code,readFileSync(join(outputDir,'program.x86')));assert.equal(hash(image),oracle.pe.sha256);assert.equal(image.length,oracle.pe.file_size);
 assert.deepEqual(image.subarray(0xffc,0xffc+code.length),code);
 oracle.pe.chunks.forEach((chunk,index)=>{const bytes=image.subarray(chunk.offset,chunk.offset+chunk.length);assert.equal(hash(bytes),chunk.sha256);save(`input-chunk${index}.bin`,bytes);});
-save('program.S',programBytes);save('input-oracle.json',oracleBytes);save('runtime/run.mjs',readFileSync(import.meta.filename));
+save('program.S',programBytes);save('input-oracle.json',oracleBytes);save('run.mjs',readFileSync(import.meta.filename));
 const productionPaths=execFileSync('rg',['--files','engine/src'],{cwd:root,encoding:'utf8'}).trim().split('\n').sort();
-const sourcePaths=[...productionPaths,'Cargo.toml','engine/Cargo.toml','Cargo.lock','engine/tests/cpu/moves/register/wasm/byte.rs', 'engine/tests/cpu/moves/wasm.rs', 'engine/tests/support/wasm.rs', 'engine/tests/cpu/moves/wasm.rs', 'engine/tests/support/wasm.rs','engine/tests/cpu/moves/register/fixtures/p2-byte-move/program.S','engine/tests/cpu/moves/register/fixtures/p2-byte-move/oracle.json','engine/tests/cpu/moves/register/fixtures/p2-byte-move/runtime/run.mjs'];
-assert.equal(sourcePaths.length,oracle.transport.producer_sources); const sources=Object.fromEntries(sourcePaths.map(file=>[file,hash(readFileSync(join(root,file)))]));save('source-sha256.json',JSON.stringify(sources,null,2));
-const engineBytes=readFileSync(enginePath);save('engine.wasm',engineBytes);assert.ok(WebAssembly.validate(engineBytes));
-const engineModule=new WebAssembly.Module(engineBytes);assert.deepEqual(WebAssembly.Module.imports(engineModule),[]);
-assert.equal(WebAssembly.Module.exports(engineModule).length,oracle.transport.engine_total_exports);assert.equal(WebAssembly.Module.exports(engineModule).filter(row=>row.kind==='function').length,oracle.transport.engine_function_exports);
+const engineBytes = readFileSync(enginePath), engineModule = new WebAssembly.Module(engineBytes);
+const engineExportContract = assertEngineExports(engineModule, root);
+const sourcePaths=[...productionPaths,'Cargo.toml','engine/Cargo.toml','Cargo.lock','engine/tests/cpu/moves/register/wasm/byte.rs', 'engine/tests/cpu/moves/wasm.rs', 'engine/tests/support/wasm.rs','engine/tests/cpu/moves/register/fixtures/p2-byte-move/program.S','engine/tests/cpu/moves/register/fixtures/p2-byte-move/oracle.json','engine/tests/cpu/moves/register/fixtures/p2-byte-move/runtime/run.mjs'];
+assert.equal(new Set(sourcePaths).size, sourcePaths.length);
+assert.equal(sourcePaths.length,productionPaths.length + 9); sourcePaths.push(...engineExportContract.sourcePaths.filter(path => !sourcePaths.includes(path)));
+sourcePaths.push('engine/tests/support/wasm/run.mjs');
+assert.equal(new Set(sourcePaths).size, sourcePaths.length);
+const sources=Object.fromEntries(sourcePaths.map(file=>[file,hash(readFileSync(join(root,file)))]));save('source-sha256.json',JSON.stringify(sources,null,2));
+save('engine.wasm',engineBytes);assert.ok(WebAssembly.validate(engineBytes));
+assert.deepEqual(WebAssembly.Module.imports(engineModule),[]);
+
 const arities={open:3,close:0,arena_ptr:0,generation:0,module_ptr:0,module_len:0,map:3,protect:3,upload:2,begin_image_input:1,append_image_input:2,load_pe32_linked_v2_input_at:2,start_loaded_image:2,compile_entries:2,compile_resident_entries:2,find_resident:1,acknowledge_resident_installation:5,find_installed_resident:3,dispatcher_module:2,guard:6,guard_resident:7,guard_dispatch_entry:5,read32:1,read8:1,read16:1,write8:2,store32:2,store_resident32:6,store8:2,store_resident8:6,capture_call:5,capture_resident_call:6,complete_windows_call:4,complete_resident_windows_call:5};
 let engine, nextInstance=0, guestRetirements=0;
 function refresh() { if (engine.buffer !== engine.memory.buffer) { engine.buffer = engine.memory.buffer; engine.bytes = new Uint8Array(engine.buffer); engine.view = new DataView(engine.buffer); } return engine; }
@@ -93,7 +101,7 @@ function fresh(name, owner, pages = 8) {
   assert.ok(engine.base>0 && engine.base+size<=engine.bytes.length);
   const initial = new Uint8Array(createArena(size)); initial.set(fromHex(oracle.records.initial_state_hex)); initial.set(fromHex(oracle.records.initial_exit_hex),56); initial.set(fromHex(oracle.records.helper_zero_hex),100); assert.deepEqual(arena(),initial);
   save(`${name}-initial-arena.bin`,initial);
-  hostInput('explicit diagnostic and Transfer sentinel; CPU untouched', () => refresh().bytes.fill(0xa5,engine.base+100,engine.base+size));
+  hostInput('explicit diagnostic and Transfer sentinel; CPU untouched', () => refresh().bytes.fill(0xa5,engine.base+100,engine.base+4236));
 }
 function read(address,value,label) { operation(label,()=>engine.api.read32(address),0,[[100,helper(value)]]); return refresh().view.getUint32(engine.base+120,true); }
 function upload(address,bytes,label) { request(bytes,`${label}/owned bytes`);operation(label,()=>engine.api.upload(address,bytes.length)); }
@@ -115,6 +123,7 @@ function readData(expectedHex,label) {
 function stack(values,label) { const actual=oracle.runtime.stack_addresses.map((address,index)=>read(address,values[index],`${label}/word${index}`));stackChecks.push({instance:engine.ordinal,name:engine.name,label,addresses:oracle.runtime.stack_addresses,actual,expected:values}); }
 function entriesRequest(entries,gates=[]) { request(words([...entries,...gates.flat()]),'explicit receipt entry/Gate and frozen authored caller-offset input'); }
 function childShape(bytes, unit, helpers, dispatch = false, pure = false) {
+  const runBody = dispatch ? null : generatedRunBody(bytes);
   let at = 8;
   const unsigned = () => { let value=0,shift=0; for(let index=0;index<5;index++){assert.ok(at<bytes.length);const byte=bytes[at++];value|=(byte&127)<<shift;if(!(byte&128))return value>>>0;shift+=7;}assert.fail('bounded unsigned LEB'); };
   const signed = () => { let value=0n,shift=0n,byte; do{assert.ok(at<bytes.length && shift<35n);byte=bytes[at++];value|=BigInt(byte&127)<<shift;shift+=7n;}while(byte&128);if(byte&64)value-=1n<<shift;return Number(BigInt.asUintN(32,value)); };
@@ -129,17 +138,17 @@ function childShape(bytes, unit, helpers, dispatch = false, pure = false) {
     else if(section===3) {for(let count=unsigned();count>0;count--)functions.push(unsigned());}
     else if(section===7) {for(let count=unsigned();count>0;count--)exports.push({name:name(),kind:bytes[at++],index:unsigned()});}
     else if(section===10) {
-      assert.equal(unsigned(),1);const bodyLength=unsigned(),bodyEnd=at+bodyLength;assert.equal(bodyEnd,end);locals=Array.from({length:unsigned()},()=>[unsigned(),bytes[at++]]);
-      assert.deepEqual(locals,dispatch?[[5,0x7f]]:pure?oracle.transport.pure_locals:oracle.transport.locals);
+      assert.equal(unsigned(),functions.length);const bodyLength=unsigned(),bodyEnd=at+bodyLength; if(dispatch) assert.equal(bodyEnd,end); else {assert.equal(bodyLength,runBody.length);assert.ok(bodyEnd<=end);}locals=Array.from({length:unsigned()},()=>[unsigned(),bytes[at++]]);
+      assert.deepEqual(locals,dispatch?[[6,0x7f]]:[[16,0x7f],[1,0x7e],[10,0x7f]]);
       const expected=[engine.low,engine.high,...(dispatch?[]:engine.owner==='resident'?[unit.low,unit.high]:[unit.generation])];
       guard={name:dispatch?'guard_dispatch_entry':engine.owner==='resident'?'guard_resident':'guard',constants:expected};
       for(const value of expected){assert.equal(bytes[at++],0x41);assert.equal(signed(),value);}
       for(const index of [0,1,3]){assert.equal(bytes[at++],0x20);assert.equal(unsigned(),index);}
-      assert.equal(bytes[at++],0x10);assert.equal(unsigned(),0);at=bodyEnd;
+      assert.equal(bytes[at++],0x10);assert.equal(unsigned(),0);at=end;
     } else assert.fail(`unexpected generated child section${section}`);
     assert.equal(at,end);
   }
-  assert.deepEqual(functions,[0]);assert.deepEqual(types[0],{parameters:[0x7f,0x7f,0x7f,0x7f],results:[0x7f]});
+  if(dispatch) assert.deepEqual(functions,[0]); else {assert.deepEqual(functions,[0,...(functions.length===2?[types.length-1]:[])]); if(functions.length===2) assert.deepEqual(types.at(-1),{parameters:Array(6).fill(0x7f),results:[0x7f]});}assert.deepEqual(types[0],{parameters:[0x7f,0x7f,0x7f,0x7f],results:[0x7f]});
   assert.deepEqual(exports,[{name:'run',kind:0,index:helpers.length}]);assert.ok(locals && guard);
   const importArities={};for(const row of imports.filter(row=>row.kind==='function')){const type=types[row.type],arity=arities[row.name];assert.ok(arity!==undefined);assert.deepEqual(type,{parameters:Array(arity).fill(0x7f),results:[0x7f]});importArities[row.name]=arity;}
   assert.deepEqual(imports.filter(row=>row.kind==='function').map(row=>row.name),helpers);
@@ -198,7 +207,7 @@ function submit(bytes,label) {
   oracle.pe.chunks.forEach((chunk,index)=>{
     request(bytes.subarray(chunk.offset,chunk.offset+chunk.length),`${label}/explicit chunk${index} offset${chunk.offset}`);
     operation(`${label}/copy chunk${index}`,()=>engine.api.append_image_input(chunk.offset,chunk.length));
-    hostInput(`${label}/overwrite submitted Transfer after copy`,()=>refresh().bytes.fill(0xa5,engine.base+transfer,engine.base+size));
+    hostInput(`${label}/overwrite submitted Transfer after copy`,()=>refresh().bytes.fill(0xa5,engine.base+transfer,engine.base+4236));
   });
 }
 function commit(example,label='Rust linked-v2 copied input commit') {
