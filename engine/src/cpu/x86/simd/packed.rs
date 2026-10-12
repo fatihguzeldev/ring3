@@ -28,6 +28,53 @@ pub(super) fn packed(
     let count = immediate
         .map(u64::from)
         .unwrap_or_else(|| unsigned(&b, 0, 8));
+    if matches!(
+        kind,
+        P::HorizontalAdd
+            | P::HorizontalSubtract
+            | P::HorizontalAddSignedSaturate
+            | P::HorizontalSubtractSignedSaturate
+    ) {
+        let subtract = matches!(
+            kind,
+            P::HorizontalSubtract | P::HorizontalSubtractSignedSaturate
+        );
+        let saturate = matches!(
+            kind,
+            P::HorizontalAddSignedSaturate | P::HorizontalSubtractSignedSaturate
+        );
+        for lane in 0..size / width {
+            let input = if lane < size / width / 2 { &a } else { &b };
+            let offset = lane % (size / width / 2) * width * 2;
+            let x = signed(unsigned(input, offset, width), width);
+            let y = signed(unsigned(input, offset + width, width), width);
+            let value = if subtract { x - y } else { x + y };
+            put(
+                &mut out,
+                lane * width,
+                width,
+                if saturate {
+                    value.clamp(i16::MIN as i64, i16::MAX as i64)
+                } else {
+                    value
+                } as u64,
+            );
+        }
+        return out;
+    }
+    if kind == P::MultiplyAddUnsignedSignedBytes {
+        for offset in (0..size).step_by(2) {
+            let x = i32::from(a[offset]) * i32::from(b[offset] as i8);
+            let y = i32::from(a[offset + 1]) * i32::from(b[offset + 1] as i8);
+            put(
+                &mut out,
+                offset,
+                2,
+                (x + y).clamp(i16::MIN as i32, i16::MAX as i32) as u64,
+            );
+        }
+        return out;
+    }
     if kind == P::MultiplyUnsignedDword {
         for offset in (0..size).step_by(8) {
             put(
@@ -88,6 +135,17 @@ pub(super) fn packed(
                     0
                 }
             }
+            P::Absolute => sy.abs() as u64,
+            P::Sign => {
+                if sy < 0 {
+                    -sx as u64
+                } else if sy == 0 {
+                    0
+                } else {
+                    x
+                }
+            }
+            P::MultiplyHighRoundSigned => ((sx * sy + 0x4000) >> 15) as u64,
             P::MultiplyLow => x.wrapping_mul(y),
             P::MultiplyHighSigned => ((sx * sy) >> bits) as u64,
             P::MultiplyHighUnsigned => ((u128::from(x) * u128::from(y)) >> bits) as u64,
@@ -111,7 +169,14 @@ pub(super) fn packed(
                 }
             }
             P::ShiftRightSigned => (sx >> count.min((bits - 1) as u64)) as u64,
-            P::MultiplyUnsignedDword | P::MultiplyAddWords | P::SumAbsoluteByteDifferences => {
+            P::MultiplyUnsignedDword
+            | P::MultiplyAddWords
+            | P::SumAbsoluteByteDifferences
+            | P::HorizontalAdd
+            | P::HorizontalSubtract
+            | P::HorizontalAddSignedSaturate
+            | P::HorizontalSubtractSignedSaturate
+            | P::MultiplyAddUnsignedSignedBytes => {
                 unreachable!()
             }
         };
@@ -130,6 +195,28 @@ pub(super) fn shuffle(
 ) -> ([u8; 16], Option<u32>) {
     let mut out = a;
     match kind {
+        S::Bytes => {
+            for lane in 0..size {
+                out[lane] = if b[lane] & 0x80 != 0 {
+                    0
+                } else {
+                    a[usize::from(b[lane]) & (size - 1)]
+                };
+            }
+        }
+        S::AlignRight => {
+            out = [0; 16];
+            for (lane, byte) in out[..size].iter_mut().enumerate() {
+                let index = lane + usize::from(immediate);
+                *byte = if index < size {
+                    b[index]
+                } else if index < size * 2 {
+                    a[index - size]
+                } else {
+                    0
+                };
+            }
+        }
         S::Dwords | S::Words => {
             for i in 0..4 {
                 let source = usize::from((immediate >> (i * 2)) & 3) * width;

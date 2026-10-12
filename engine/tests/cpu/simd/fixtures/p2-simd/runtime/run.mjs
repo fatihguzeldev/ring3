@@ -7,6 +7,7 @@ const [enginePath,output,root]=process.argv.slice(2),engine=readEngine(enginePat
 const SIZE=initial.length,SV=4364,FP=4236,SG=4524,T=140,DATA=0x5010;
 const hash=b=>createHash('sha256').update(b).digest('hex'),hex=s=>Buffer.from(s,'hex');
 const dwords=v=>{const b=Buffer.alloc(v.length*4);v.forEach((n,i)=>b.writeUInt32LE(n>>>0,i*4));return b;};
+const words=v=>{const b=Buffer.alloc(v.length*2);v.forEach((n,i)=>b.writeUInt16LE(n&0xffff,i*2));return b;};
 const qwords=v=>{const b=Buffer.alloc(v.length*8);v.forEach((n,i)=>b.writeBigUInt64LE(n,i*8));return b;};
 const fill=n=>Buffer.alloc(16,n),zero=fill(0),parents=()=>[0x10203040,0x21314151,0x32425262,0x43536373,0x7080,0x65758595,0x768696a6,0x8797a7b7];
 const record=(magic,version,size,values)=>{const b=Buffer.alloc(size);b.write(magic);b.writeUInt16LE(version,4);b.writeUInt16LE(1,6);b.writeUInt32LE(size,8);values.forEach((n,i)=>b.writeUInt32LE(n>>>0,16+i*4));return b;};
@@ -134,6 +135,36 @@ const cases=[
  {name:'pinsrw-xmm-split-word-preserves-destination-and-transfer',code:'660fc400ff',direct:true,a:hex('0102030405060708090a0b0c0d0e0f10'),address:0x5fff,seedMemory:hex('ef'),reason:5,retired:0,detail:1,fault:0x6000,access:1,length:2,readAlignment:1,stagedTransfer:hex('a7b3'),expectedHelpers:1},
  {name:'pending-x87-stops-mmx-insert-before-word-read',code:'0fc400ff',direct:true,mmx:true,pendingX87:true,a:hex('0102030405060708'),address:0x5fff,seedMemory:hex('ef'),reason:12,retired:0,detail:0x8081,expectedHelpers:0},
 ];
+const ssse3Cases=[
+ {name:'pshufb-control-high-bits-and-zero',code:'660f3800c1',a:hex('000102030405060708090a0b0c0d0e0f'),b:hex('0f0e8d0c1b2a39485766758493a2b1c0'),out:hex('0f0e000c0b0a09080706050000000000')},
+ {name:'phaddw-wrap',code:'660f3801c1',a:words([32767,1,-32768,-1,10,20,-10,-20]),b:words([30000,30000,-30000,-30000,1,2,3,4]),out:words([-32768,32767,30,-30,-5536,5536,3,7])},
+ {name:'phaddd-wrap',code:'660f3802c1',a:dwords([0x7fffffff,1,0xffffffff,2]),b:dwords([0x80000000,0x80000000,10,20]),out:dwords([0x80000000,1,0,30])},
+ {name:'phaddsw-saturate',code:'660f3803c1',a:words([32767,1,-32768,-1,10,20,-10,-20]),b:words([30000,30000,-30000,-30000,1,2,3,4]),out:words([32767,-32768,30,-30,32767,-32768,3,7])},
+ {name:'pmaddubsw-mixed-signedness-saturate',code:'660f3804c1',a:hex('ffffffffffffffff0102030405060708'),b:hex('7f7f808001ff7f800102fd0405fa0708'),out:words([32767,-32768,0,-255,5,7,-11,113])},
+ {name:'phsubw-wrap',code:'660f3805c1',a:words([-32768,1,32767,-1,10,20,-10,-20]),b:words([30000,-30000,-30000,30000,1,2,3,4]),out:words([32767,-32768,-10,10,-5536,5536,-1,-1])},
+ {name:'phsubd-wrap',code:'660f3806c1',a:dwords([0x80000000,1,0x7fffffff,0xffffffff]),b:dwords([0x80000000,0x80000000,10,20]),out:dwords([0x7fffffff,0x80000000,0,0xfffffff6])},
+ {name:'phsubsw-saturate',code:'660f3807c1',a:words([-32768,1,32767,-1,10,20,-10,-20]),b:words([30000,-30000,-30000,30000,1,2,3,4]),out:words([-32768,32767,-10,10,32767,-32768,-1,-1])},
+ {name:'psignb-zero-and-minimum',code:'660f3808c1',a:hex('80017fff1122334480017fff11223344'),b:hex('ff00017fff00017fff00017fff00017f'),out:hex('80007fffef00334480007fffef003344')},
+ {name:'psignw-zero-and-minimum',code:'660f3809c1',a:words([-32768,1,32767,-1,11,22,33,44]),b:words([-1,0,1,32767,-32768,0,1,-1]),out:words([-32768,0,32767,-1,-11,0,33,-44])},
+ {name:'psignd-zero-and-minimum',code:'660f380ac1',a:dwords([0x80000000,1,0x7fffffff,0xffffffff]),b:dwords([0xffffffff,0,1,0x80000000]),out:dwords([0x80000000,0,0x7fffffff,1])},
+ {name:'pmulhrsw-round-without-saturation',code:'660f380bc1',a:words([-32768,16384,-16384,1,-1,32767,3,-3]),b:words([-32768,16384,16384,16384,16384,32767,16384,16384]),out:words([-32768,8192,-8192,1,0,32766,2,-1])},
+ {name:'pabsb-minimum-wrap',code:'660f381cc1',a:fill(0x55),b:hex('80ff007f817e827d837c847b857a8679'),out:hex('8001007f7f7e7e7d7d7c7c7b7b7a7a79')},
+ {name:'pabsw-minimum-wrap',code:'660f381dc1',a:fill(0x55),b:words([-32768,-1,0,32767,-2,2,-30000,30000]),out:words([-32768,1,0,32767,2,2,30000,30000])},
+ {name:'pabsd-minimum-wrap',code:'660f381ec1',a:fill(0x55),b:dwords([0x80000000,0xffffffff,0,0x7fffffff]),out:dwords([0x80000000,1,0,0x7fffffff])},
+];
+for(const row of ssse3Cases){cases.push({...row,direct:true});if(!row.name.startsWith('phadd')&&!row.name.startsWith('phsub')&&!row.name.startsWith('pshufb'))cases.push({...row,name:'mmx-'+row.name,code:row.code.slice(2),direct:true,mmx:true});}
+for(const size of[8,16])for(const count of[0,7,8,15,16,31,32,255]){
+ const a=hex('000102030405060708090a0b0c0d0e0f'),b=hex('101112131415161718191a1b1c1d1e1f'),out=Buffer.alloc(16);
+ Buffer.concat([b.subarray(0,size),a.subarray(0,size)]).subarray(count,count+size).copy(out);
+ cases.push({name:`palignr-${size}-count-${count}`,code:(size===16?'66':'')+'0f3a0fc1'+count.toString(16).padStart(2,'0'),direct:true,mmx:size===8,a,b,out});
+}
+cases.push(
+ {name:'mmx-pshufb-control-low3',code:'0f3800c1',direct:true,mmx:true,a:hex('0001020304050607'),b:hex('0f0e8d0c1b2a3948'),out:hex('0706000403020100')},
+ {name:'mmx-phaddw-half-concatenation',code:'0f3801c1',direct:true,mmx:true,a:words([1,2,3,4]),b:words([10,20,30,40]),out:words([3,7,30,70])},
+ {name:'pshufb-aligned-memory-control',code:'660f380000',direct:true,a:hex('000102030405060708090a0b0c0d0e0f'),memory:hex('0f0e0d0c0b0a09080706050403020100'),out:hex('0f0e0d0c0b0a09080706050403020100'),expectedHelpers:1},
+ {name:'ssse3-unaligned-memory-gp',code:'660f380100',direct:true,a:fill(0x55),address:DATA+1,reason:11,retired:0,expectedHelpers:1},
+ {name:'ssse3-mmx-split-memory-fault',code:'0f380800',direct:true,mmx:true,a:fill(0x55),address:0x5ffc,seedMemory:hex('01020304'),stagedTransfer:hex('a7b3c4d5e6f70819'),reason:5,retired:0,detail:1,fault:0x6000,access:1,length:8,readAlignment:1,expectedHelpers:1},
+);
 const sourcePaths=['engine/src/cpu/x86/simd.rs','engine/src/cpu/x86/simd/packed.rs','engine/src/cpu/x86/simd/float.rs', 'engine/src/math/mod.rs', 'engine/src/math/ieee.rs', 'engine/src/math/integer.rs', 'engine/src/lib.rs','engine/src/cpu/x86/decode/simd.rs','engine/src/cpu/dbt/wasm/simd.rs','engine/src/cpu/dbt/wasm/simd/direct.rs','engine/src/process/cpu/simd.rs', 'engine/src/process/cpu/mod.rs', 'engine/src/process/mod.rs','engine/src/process/memory/span.rs', 'engine/src/process/memory/mod.rs', 'engine/src/process/mod.rs','engine/src/abi/x86/simd.rs','engine/tests/cpu/simd/cases/native/simd_semantics.rs', 'engine/tests/cpu/simd/native.rs', 'engine/tests/cpu/simd/native.rs','engine/tests/cpu/simd/cases/wasm/cpu_simd_wasm.rs', 'engine/tests/cpu/simd/wasm.rs', 'engine/tests/support/wasm.rs', 'engine/tests/cpu/simd/wasm.rs', 'engine/tests/support/wasm.rs','engine/tests/cpu/simd/fixtures/p2-simd/runtime/run.mjs'];
 const sourceHashes=()=>Object.fromEntries(sourcePaths.map(p=>[p,hash(readFileSync(join(root,p)))])),beforePins=sourceHashes();
 const observations=[],helpers=[],modules=[],contexts=[],raw_protocol=[];let count=0;

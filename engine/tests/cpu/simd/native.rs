@@ -6,3 +6,7 @@ mod simd_direct_integer;
 
 #[path = "cases/native/simd_semantics.rs"]
 mod simd_semantics;
+
+#[path = "cases/native/simd_extensions.rs"]
+mod simd_extensions;
+

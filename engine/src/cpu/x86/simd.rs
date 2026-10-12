@@ -68,6 +68,14 @@ pub enum PackedKind {
     ShiftLeft,
     ShiftRight,
     ShiftRightSigned,
+    Absolute,
+    Sign,
+    HorizontalAdd,
+    HorizontalSubtract,
+    HorizontalAddSignedSaturate,
+    HorizontalSubtractSignedSaturate,
+    MultiplyAddUnsignedSignedBytes,
+    MultiplyHighRoundSigned,
 }
 
 #[repr(u8)]
@@ -92,6 +100,8 @@ pub enum ShuffleKind {
     MaskDoubles,
     MoveLowToHigh,
     MoveHighToLow,
+    Bytes,
+    AlignRight,
 }
 
 #[repr(u8)]
@@ -335,6 +345,14 @@ pub fn decode_descriptor(
                 P::ShiftLeft,
                 P::ShiftRight,
                 P::ShiftRightSigned,
+                P::Absolute,
+                P::Sign,
+                P::HorizontalAdd,
+                P::HorizontalSubtract,
+                P::HorizontalAddSignedSaturate,
+                P::HorizontalSubtractSignedSaturate,
+                P::MultiplyAddUnsignedSignedBytes,
+                P::MultiplyHighRoundSigned,
             ]
             .get(sub)
             .ok_or(SimdError::InvalidDescriptor)?,
@@ -360,6 +378,8 @@ pub fn decode_descriptor(
                 S::MaskDoubles,
                 S::MoveLowToHigh,
                 S::MoveHighToLow,
+                S::Bytes,
+                S::AlignRight,
             ]
             .get(sub)
             .ok_or(SimdError::InvalidDescriptor)?,
@@ -736,6 +756,21 @@ fn validate_operation(op: SimdOperation) -> Result<(), SimdError> {
             {
                 return invalid();
             }
+            if matches!(kind, PackedKind::Absolute | PackedKind::Sign) && op.lane_bytes > 4
+                || matches!(
+                    kind,
+                    PackedKind::HorizontalAdd | PackedKind::HorizontalSubtract
+                ) && !matches!(op.lane_bytes, 2 | 4)
+                || matches!(
+                    kind,
+                    PackedKind::HorizontalAddSignedSaturate
+                        | PackedKind::HorizontalSubtractSignedSaturate
+                        | PackedKind::MultiplyHighRoundSigned
+                ) && op.lane_bytes != 2
+                || kind == PackedKind::MultiplyAddUnsignedSignedBytes && op.lane_bytes != 1
+            {
+                return invalid();
+            }
             if matches!(kind, PackedKind::MultiplyUnsignedDword) && op.lane_bytes != 4 {
                 return invalid();
             }
@@ -783,6 +818,7 @@ fn validate_operation(op: SimdOperation) -> Result<(), SimdError> {
                     | ShuffleKind::ShiftBytesRight
                     | ShuffleKind::InsertWord
                     | ShuffleKind::ExtractWord
+                    | ShuffleKind::AlignRight
             );
             if op.immediate.is_some() != immediate {
                 return invalid();
@@ -805,6 +841,9 @@ fn validate_operation(op: SimdOperation) -> Result<(), SimdError> {
                 }
             };
             if !operands {
+                return invalid();
+            }
+            if matches!(kind, ShuffleKind::Bytes | ShuffleKind::AlignRight) && op.lane_bytes != 1 {
                 return invalid();
             }
             if matches!(kind, ShuffleKind::PackSigned | ShuffleKind::PackUnsigned)

@@ -40,6 +40,14 @@ pub(super) fn accepts(op: SimdOperation) -> bool {
                 | P::ShiftLeft
                 | P::ShiftRight
                 | P::ShiftRightSigned
+                | P::Absolute
+                | P::Sign
+                | P::HorizontalAdd
+                | P::HorizontalSubtract
+                | P::HorizontalAddSignedSaturate
+                | P::HorizontalSubtractSignedSaturate
+                | P::MultiplyAddUnsignedSignedBytes
+                | P::MultiplyHighRoundSigned
         ),
         SimdKind::Shuffle(S::PackSigned) => matches!(op.lane_bytes, 1 | 2),
         SimdKind::Shuffle(S::PackUnsigned) => op.lane_bytes == 1,
@@ -62,6 +70,8 @@ pub(super) fn accepts(op: SimdOperation) -> bool {
                 | S::MaskSingles
                 | S::MaskDoubles
                 | S::ExtractWord
+                | S::Bytes
+                | S::AlignRight
         ),
         _ => false,
     }
@@ -298,6 +308,166 @@ fn multiply_high(code: &mut InstructionSink<'_>, op: SimdOperation, kind: P) {
     }
 }
 
+fn absolute(code: &mut InstructionSink<'_>, width: u8) {
+    match width {
+        1 => {
+            code.i8x16_abs();
+        }
+        2 => {
+            code.i16x8_abs();
+        }
+        4 => {
+            code.i32x4_abs();
+        }
+        _ => unreachable!(),
+    }
+}
+
+fn sign(code: &mut InstructionSink<'_>, op: SimdOperation) {
+    load(code, op.destination, op.vector_bytes);
+    match op.lane_bytes {
+        1 => {
+            code.i8x16_neg();
+        }
+        2 => {
+            code.i16x8_neg();
+        }
+        4 => {
+            code.i32x4_neg();
+        }
+        _ => unreachable!(),
+    }
+    load(code, op.destination, op.vector_bytes);
+    load(code, op.source, op.vector_bytes);
+    code.v128_const(0);
+    match op.lane_bytes {
+        1 => {
+            code.i8x16_lt_s();
+        }
+        2 => {
+            code.i16x8_lt_s();
+        }
+        4 => {
+            code.i32x4_lt_s();
+        }
+        _ => unreachable!(),
+    }
+    code.v128_bitselect();
+    load(code, op.source, op.vector_bytes);
+    code.v128_const(0);
+    arithmetic(code, P::Equal, op.lane_bytes);
+    code.v128_not().v128_and();
+}
+
+fn horizontal(code: &mut InstructionSink<'_>, op: SimdOperation, kind: P) {
+    let size = usize::from(op.vector_bytes);
+    let width = usize::from(op.lane_bytes);
+    for odd in [false, true] {
+        load(code, op.destination, op.vector_bytes);
+        load(code, op.source, op.vector_bytes);
+        let lanes = std::array::from_fn(|byte| {
+            if byte >= size {
+                return 15;
+            }
+            let lane = byte / width;
+            let source = if lane < size / width / 2 { 0 } else { 16 };
+            (source + (lane % (size / width / 2) * 2 + usize::from(odd)) * width + byte % width)
+                as u8
+        });
+        code.i8x16_shuffle(lanes);
+    }
+    arithmetic(
+        code,
+        match kind {
+            P::HorizontalAdd => P::Add,
+            P::HorizontalSubtract => P::Subtract,
+            P::HorizontalAddSignedSaturate => P::AddSignedSaturate,
+            P::HorizontalSubtractSignedSaturate => P::SubtractSignedSaturate,
+            _ => unreachable!(),
+        },
+        op.lane_bytes,
+    );
+}
+
+fn multiply_add_unsigned_signed_bytes(code: &mut InstructionSink<'_>, op: SimdOperation) {
+    for high in [false, true] {
+        load(code, op.destination, op.vector_bytes);
+        if high {
+            code.i16x8_extend_high_i8x16_u();
+        } else {
+            code.i16x8_extend_low_i8x16_u();
+        }
+        load(code, op.source, op.vector_bytes);
+        if high {
+            code.i16x8_extend_high_i8x16_s();
+        } else {
+            code.i16x8_extend_low_i8x16_s();
+        }
+        code.i16x8_mul().i32x4_extadd_pairwise_i16x8_s();
+    }
+    code.i16x8_narrow_i32x4_s();
+}
+
+fn multiply_high_round_signed(code: &mut InstructionSink<'_>, op: SimdOperation) {
+    for high in [false, true] {
+        load(code, op.destination, op.vector_bytes);
+        load(code, op.source, op.vector_bytes);
+        if high {
+            code.i32x4_extmul_high_i16x8_s();
+        } else {
+            code.i32x4_extmul_low_i16x8_s();
+        }
+        code.i32_const(0x4000)
+            .i32x4_splat()
+            .i32x4_add()
+            .i32_const(15)
+            .i32x4_shr_s();
+    }
+    // x86 wraps +32768; wasm's saturating q15 multiply would return +32767.
+    code.i8x16_shuffle([0, 1, 4, 5, 8, 9, 12, 13, 16, 17, 20, 21, 24, 25, 28, 29]);
+}
+
+fn shuffle_bytes(code: &mut InstructionSink<'_>, op: SimdOperation) {
+    load(code, op.destination, op.vector_bytes);
+    load(code, op.source, op.vector_bytes);
+    code.i32_const(i32::from(op.vector_bytes) - 1)
+        .i8x16_splat()
+        .v128_and()
+        .i8x16_swizzle();
+    load(code, op.source, op.vector_bytes);
+    code.i32_const(0).i8x16_splat().i8x16_ge_s().v128_and();
+}
+
+fn align_right(code: &mut InstructionSink<'_>, op: SimdOperation) {
+    let size = usize::from(op.vector_bytes);
+    let count = usize::from(op.immediate.unwrap());
+    if count >= size * 2 {
+        code.v128_const(0);
+        return;
+    }
+    load(code, op.source, op.vector_bytes);
+    load(code, op.destination, op.vector_bytes);
+    let lanes = std::array::from_fn(|byte| {
+        let index = count + byte;
+        if index < size {
+            index as u8
+        } else if index < size * 2 {
+            (16 + index - size) as u8
+        } else {
+            0
+        }
+    });
+    code.i8x16_shuffle(lanes);
+    let mask = std::array::from_fn::<_, 16, _>(|byte| {
+        if byte < size && count + byte < size * 2 {
+            255u8
+        } else {
+            0
+        }
+    });
+    code.v128_const(i128::from_le_bytes(mask)).v128_and();
+}
+
 fn packed_shift(code: &mut InstructionSink<'_>, op: SimdOperation, kind: P) {
     let count = |code: &mut InstructionSink<'_>| {
         if let Some(immediate) = op.immediate {
@@ -501,6 +671,28 @@ pub(super) fn instruction(
                 }
             }
         }
+        SimdKind::Packed(P::Absolute) => {
+            load(code, op.source, op.vector_bytes);
+            absolute(code, op.lane_bytes);
+        }
+        SimdKind::Packed(P::Sign) => sign(code, op),
+        SimdKind::Packed(kind)
+            if matches!(
+                kind,
+                P::HorizontalAdd
+                    | P::HorizontalSubtract
+                    | P::HorizontalAddSignedSaturate
+                    | P::HorizontalSubtractSignedSaturate
+            ) =>
+        {
+            horizontal(code, op, kind)
+        }
+        SimdKind::Packed(P::MultiplyAddUnsignedSignedBytes) => {
+            multiply_add_unsigned_signed_bytes(code, op)
+        }
+        SimdKind::Packed(P::MultiplyHighRoundSigned) => multiply_high_round_signed(code, op),
+        SimdKind::Shuffle(S::Bytes) => shuffle_bytes(code, op),
+        SimdKind::Shuffle(S::AlignRight) => align_right(code, op),
         SimdKind::Packed(P::MultiplyUnsignedDword) => multiply_unsigned_dword(code, op),
         SimdKind::Packed(P::SumAbsoluteByteDifferences) => sum_absolute_byte_differences(code, op),
         SimdKind::Packed(kind)
