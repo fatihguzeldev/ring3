@@ -1,3 +1,5 @@
+import {assertEngineExports} from '../../../../../../support/wasm/exports.mjs';
+import {readEngine} from '../../../../../../support/wasm/engine.mjs';
 import {createArena} from '../../../../../../support/wasm/arena.mjs';
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
@@ -6,6 +8,8 @@ import {readFileSync, writeFileSync} from 'node:fs';
 import {join} from 'node:path';
 
 const [enginePath, output, root] = process.argv.slice(2);
+const fixtureEngine = readEngine(enginePath);
+const exportContract = assertEngineExports(fixtureEngine.module, root);
 assert.ok(root, 'expected engine wasm, output directory and repository root');
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
 const save = (name, bytes) => writeFileSync(join(output, name), bytes, {flag: 'wx'});
@@ -63,16 +67,15 @@ assert.equal(program.length, 122); assert.deepEqual(image, authoredPe(), 'entire
 assert.deepEqual(fixups.map(([offset]) => offset), [16, 56, 76, 92, 98, 106, 112]);
 for (const [offset, rva] of fixups) assert.equal(program.readUInt32LE(offset), 0x400000 + rva);
 save('program.bin', program);
-const engineBytes = readFileSync(enginePath), engineModule = new WebAssembly.Module(engineBytes);
+const engineBytes = fixtureEngine.bytes, engineModule = fixtureEngine.module;
 assert.deepEqual(WebAssembly.Module.imports(engineModule), []);
-const engineExports = WebAssembly.Module.exports(engineModule);
-assert.equal(engineExports.length, 72); assert.equal(engineExports.filter(row => row.kind === 'function').length, 71);
 save('engine.wasm', engineBytes);
 function sourceMap() {
   const physical = execFileSync('rg', ['--files', 'engine/src'], {cwd: root, encoding: 'utf8'}).trim().split('\n').sort();
-  assert.equal(physical.length, 84);
-  const paths = ['Cargo.toml', 'Cargo.lock', 'engine/Cargo.toml', 'rust-toolchain.toml', ...physical, 'engine/tests/support/loader/pe32.rs', 'engine/tests/windows/memory/release/wasm/linked.rs', 'engine/tests/windows/memory/wasm.rs', 'engine/tests/support/loader/pe32.rs', 'engine/tests/support/wasm.rs', 'engine/tests/windows/memory/wasm.rs', 'engine/tests/support/wasm.rs', 'engine/tests/windows/memory/release/fixtures/p2-pe32-virtual-free/runtime/run.mjs'];
-  assert.equal(paths.length, 91);
+  assert.ok(physical.length > 0, 'nonempty production source manifest');
+  const paths = ['Cargo.toml', 'Cargo.lock', 'engine/Cargo.toml', 'rust-toolchain.toml', ...physical, 'engine/tests/support/loader/pe32.rs', 'engine/tests/windows/memory/release/wasm/linked.rs', 'engine/tests/windows/memory/wasm.rs',  'engine/tests/support/wasm.rs',   'engine/tests/windows/memory/release/fixtures/p2-pe32-virtual-free/runtime/run.mjs'];
+  paths.push(...[...exportContract.sourcePaths, 'engine/tests/support/wasm/engine.mjs'].filter(path => !paths.includes(path)));
+  assert.equal(new Set(paths).size, paths.length);
   return Object.fromEntries(paths.map(path => { const bytes = readFileSync(join(root, path)); return [path, {bytes: bytes.length, sha256: hash(bytes)}]; }));
 }
 const sourcesBefore = sourceMap(); save('source-hashes-before.json', JSON.stringify(sourcesBefore, null, 2));

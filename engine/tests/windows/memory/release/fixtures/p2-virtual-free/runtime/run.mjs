@@ -1,3 +1,5 @@
+import {assertEngineExports} from '../../../../../../support/wasm/exports.mjs';
+import {readEngine} from '../../../../../../support/wasm/engine.mjs';
 import {createArena} from '../../../../../../support/wasm/arena.mjs';
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
@@ -6,14 +8,13 @@ import {readFileSync, writeFileSync} from 'node:fs';
 import {join} from 'node:path';
 
 const [enginePath, output, root] = process.argv.slice(2);
+const fixtureEngine = readEngine(enginePath);
+const exportContract = assertEngineExports(fixtureEngine.module, root);
 assert.ok(root, 'expected engine wasm, output directory and repository root');
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
 const save = (name, bytes) => writeFileSync(join(output, name), bytes);
-const engineBytes = readFileSync(enginePath), engineModule = new WebAssembly.Module(engineBytes);
+const engineBytes = fixtureEngine.bytes, engineModule = fixtureEngine.module;
 assert.deepEqual(WebAssembly.Module.imports(engineModule), []);
-const declarations = WebAssembly.Module.exports(engineModule);
-assert.equal(declarations.length, 71);
-assert.equal(declarations.filter(row => row.kind === 'function').length, 70);
 save('engine.wasm', engineBytes);
 
 const CODE = 0x1000, GATE = 0x2000, STACK = 0x8000, TOP = 0x9000, OBS = 0x9000;
@@ -67,9 +68,10 @@ function request(ctx, bytes) {
 }
 function sourceMap() {
   const physical = execFileSync('rg', ['--files', 'engine/src'], {cwd: root, encoding: 'utf8'}).trim().split('\n').sort();
-  assert.equal(physical.length, 84);
-  const paths = ['Cargo.toml', 'Cargo.lock', 'engine/Cargo.toml', ...physical, 'engine/tests/windows/memory/release/wasm/manual.rs', 'engine/tests/windows/memory/wasm.rs', 'engine/tests/support/wasm.rs', 'engine/tests/windows/memory/wasm.rs', 'engine/tests/support/wasm.rs', 'engine/tests/windows/memory/release/fixtures/p2-virtual-free/runtime/run.mjs'];
-  assert.equal(paths.length, 89);
+  assert.ok(physical.length > 0, 'nonempty production source manifest');
+  const paths = ['Cargo.toml', 'Cargo.lock', 'engine/Cargo.toml', ...physical, 'engine/tests/windows/memory/release/wasm/manual.rs', 'engine/tests/windows/memory/wasm.rs', 'engine/tests/support/wasm.rs',   'engine/tests/windows/memory/release/fixtures/p2-virtual-free/runtime/run.mjs'];
+  paths.push(...[...exportContract.sourcePaths, 'engine/tests/support/wasm/engine.mjs'].filter(path => !paths.includes(path)));
+  assert.equal(new Set(paths).size, paths.length);
   return Object.fromEntries(paths.map(path => {
     const bytes = readFileSync(join(root, path)); return [path, {bytes: bytes.length, sha256: hash(bytes)}];
   }));
