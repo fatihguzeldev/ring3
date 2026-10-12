@@ -55,7 +55,7 @@ fn validate_span(
     mask: Option<u32>,
     exit_depth: u32,
 ) {
-    assert!(length <= 512);
+    assert!(length <= crate::abi::cpu_helper::MAX_CPU_SPAN as u32);
     assert!(access_mask <= 3);
     code.local_get(HELPER_STATUS);
     if allow_smc {

@@ -11,8 +11,8 @@ use crate::{
         arena::{EXIT_OFFSET, STATE_OFFSET, TRANSFER_OFFSET},
         callback::{CALLBACK_RECORD_SIZE, CallbackRecord32, encode_callback},
         x86::{
-            EXIT_SIZE, EXIT_VERSION_3, EXIT_VERSION_5, EXIT_VERSION_6, EXIT_VERSION_7, STATE_SIZE,
-            decode_exit, decode_state,
+            EXIT_SIZE, EXIT_VERSION_3, EXIT_VERSION_5, EXIT_VERSION_6, EXIT_VERSION_7,
+            EXIT_VERSION_8, STATE_SIZE, decode_exit, decode_state,
         },
     },
     cpu::{ExitReason, dbt::CompiledRegion},
@@ -103,7 +103,7 @@ impl EngineInstance {
         let stopped = decode_state(&state).map_err(|_| HostError::Call(CallError::InvalidStop))?;
         if !matches!(
             u16::from_le_bytes(exit[4..6].try_into().unwrap()),
-            EXIT_VERSION_3 | EXIT_VERSION_5 | EXIT_VERSION_6 | EXIT_VERSION_7
+            EXIT_VERSION_3 | EXIT_VERSION_5 | EXIT_VERSION_6 | EXIT_VERSION_7 | EXIT_VERSION_8
         ) || decode_exit(&exit)
             .map_err(|_| HostError::Call(CallError::InvalidStop))?
             .reason

@@ -6,3 +6,4 @@ pub(super) mod segments;
 pub(super) mod simd;
 pub(super) mod stack;
 pub(super) mod x87;
+pub(super) mod xstate;

@@ -17,6 +17,7 @@ mod simd;
 mod stack;
 mod strings;
 mod x87;
+mod xstate;
 
 pub(crate) use decoder::decode_for_execution;
 pub use decoder::{DecodeError, DecodedInstruction, decode_one};

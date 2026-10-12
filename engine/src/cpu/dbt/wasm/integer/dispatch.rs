@@ -49,6 +49,9 @@ pub(in crate::cpu::dbt::wasm) fn instruction(
     }
     let mut store = false;
     match *instruction.operation() {
+        Operation::XState(_) => {
+            store = super::super::xstate::instruction(code, instruction, imports, exit_depth);
+        }
         Operation::AdjustPrivilege {
             destination,
             source,

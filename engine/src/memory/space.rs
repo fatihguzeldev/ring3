@@ -249,6 +249,27 @@ impl AddressSpace {
         Ok(())
     }
 
+    /// preflights a bounded scatter transaction and publishes all spans with one version.
+    pub(crate) fn write_spans(
+        &mut self,
+        spans: &[(GuestAddress, &[u8])],
+    ) -> Result<(), MemoryError> {
+        if spans.len() > 5 {
+            return Err(MemoryError::InvalidRange);
+        }
+        for &(address, bytes) in spans {
+            self.check_access(address, bytes.len(), Access::Write)?;
+        }
+        if spans.iter().all(|(_, bytes)| bytes.is_empty()) {
+            return Ok(());
+        }
+        let version = self.advance_version()?;
+        for &(address, bytes) in spans {
+            self.copy_in_validated(address, bytes, version);
+        }
+        Ok(())
+    }
+
     /// Commits a bounded stack instruction, including stacks wrapping across address zero.
     pub(crate) fn write_stack(
         &mut self,
@@ -3638,5 +3659,53 @@ mod stack_commit_tests {
         );
         assert_eq!(memory.backing, before);
         assert_eq!(memory.version, version);
+    }
+    #[test]
+    fn bounded_scatter_uses_one_version_and_preflights_every_span() {
+        let mut memory = AddressSpace::new(2).unwrap();
+        memory.map_zeroed(range(0x1000), Permissions::ALL).unwrap();
+        memory.map_zeroed(range(0x2000), Permissions::ALL).unwrap();
+        let snapshot = memory.snapshot_code(GuestAddress(0x1000), 8).unwrap();
+        let version = memory.version;
+        memory
+            .write_spans(&[
+                (GuestAddress(0x1000), &[1, 2]),
+                (GuestAddress(0x2000), &[3, 4]),
+            ])
+            .unwrap();
+        assert_eq!(memory.version, version + 1);
+        assert!(!memory.is_code_current(&snapshot));
+        let mut bytes = [0; 2];
+        memory.read(GuestAddress(0x1000), &mut bytes).unwrap();
+        assert_eq!(bytes, [1, 2]);
+        memory.read(GuestAddress(0x2000), &mut bytes).unwrap();
+        assert_eq!(bytes, [3, 4]);
+        memory.protect(range(0x2000), Permissions::READ).unwrap();
+        let before = memory.backing.clone();
+        let version = memory.version;
+        assert_eq!(
+            memory.write_spans(&[
+                (GuestAddress(0x1000), &[5, 6]),
+                (GuestAddress(0x2000), &[7, 8])
+            ]),
+            Err(fault(
+                GuestAddress(0x2000),
+                Access::Write,
+                FaultReason::Permission
+            ))
+        );
+        assert_eq!(memory.backing, before);
+        assert_eq!(memory.version, version);
+        memory.version = u64::MAX;
+        assert_eq!(
+            memory.write_spans(&[(GuestAddress(0x1000), &[5, 6])]),
+            Err(MemoryError::VersionExhausted)
+        );
+        assert_eq!(memory.backing, before);
+        assert_eq!(
+            memory.write_spans(&[(GuestAddress(0), &[] as &[u8]); 6]),
+            Err(MemoryError::InvalidRange)
+        );
+        assert_eq!(memory.write_spans(&[]), Ok(()));
     }
 }

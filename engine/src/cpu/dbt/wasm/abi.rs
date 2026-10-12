@@ -127,6 +127,7 @@ pub(super) fn flush(
     gates: bool,
     arithmetic: bool,
     cpu: bool,
+    xstate: bool,
 ) {
     for index in 0..8 {
         store_local(
@@ -160,7 +161,9 @@ pub(super) fn flush(
         (0, u32::from_le_bytes(*b"R3EX")),
         (
             4,
-            if cpu {
+            if xstate {
+                8 | (u32::from(X86_INTEGER_PROFILE) << 16)
+            } else if cpu {
                 6 | (u32::from(X86_INTEGER_PROFILE) << 16)
             } else if arithmetic {
                 u32::from(EXIT_VERSION_5) | (u32::from(X86_INTEGER_PROFILE) << 16)
@@ -202,6 +205,9 @@ pub(super) fn flush(
         for (offset, local) in detail_fields {
             store_local(sink, EXIT_PTR, offset, local);
         }
+    }
+    if xstate {
+        return;
     }
     sink.local_get(REASON)
         .i32_const(16)

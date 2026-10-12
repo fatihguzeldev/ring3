@@ -27,3 +27,6 @@ mod packed_strings;
 
 #[path = "cases/native/simd_crypto.rs"]
 mod simd_crypto;
+
+#[path = "cases/native/xstate.rs"]
+mod xstate;

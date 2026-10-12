@@ -181,6 +181,9 @@ pub(crate) use memory::{
     store32, unmap, upload, write_words32, write8, write32,
 };
 
+mod xstate;
+pub(crate) use xstate::{cpu_xrstor, cpu_xrstor_resident, cpu_xsave, cpu_xsave_resident};
+
 mod cpu;
 pub(crate) use cpu::{
     configure_segment_descriptor, cpu_fxsave, cpu_fxsave_resident, cpu_integer,

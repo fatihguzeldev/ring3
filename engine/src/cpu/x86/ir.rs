@@ -324,6 +324,7 @@ pub enum CarryKind {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Operation {
+    XState(super::xstate::XStateOperation),
     AdjustPrivilege {
         destination: Location32,
         source: Register32,

@@ -3,6 +3,7 @@ use crate::memory::{Access, FaultReason, MemoryError};
 
 pub const CPU_HELPER_VERSION: u16 = 7;
 pub const MAX_CPU_TRANSFER: usize = 512;
+pub const MAX_CPU_SPAN: usize = 576;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CpuMemoryError {
@@ -20,7 +21,7 @@ pub fn encode_cpu_result(
     result: Result<(), CpuMemoryError>,
     output: &mut [u8],
 ) -> Result<(), AbiError> {
-    if output.len() != HELPER_SIZE || length as usize > MAX_CPU_TRANSFER {
+    if output.len() != HELPER_SIZE || length as usize > MAX_CPU_SPAN {
         return Err(AbiError::Length);
     }
     let fields = match result {

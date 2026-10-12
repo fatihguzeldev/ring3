@@ -17,6 +17,7 @@ mod simd;
 mod stack;
 mod strings;
 mod x87;
+mod xstate;
 
 #[derive(Clone, Copy)]
 pub(super) enum EmbeddedBinding {

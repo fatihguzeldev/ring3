@@ -20,6 +20,8 @@ pub(in crate::cpu::dbt) fn emit(
         x87_op: needs_x87_op,
         simd_execute: needs_simd_execute,
         cpu_fxsave: needs_cpu_fxsave,
+        cpu_xsave: needs_cpu_xsave,
+        cpu_xrstor: needs_cpu_xrstor,
         cpu_mask_write: needs_cpu_mask_write,
         segment_load: needs_segment_load,
         segment_load_far: needs_segment_load_far,
@@ -65,9 +67,18 @@ pub(in crate::cpu::dbt) fn emit(
         .any(|instruction| {
             matches!(
                 instruction.operation(),
-                Operation::Simd(_) | Operation::PackedStringCompare(_)
+                Operation::Simd(_)
+                    | Operation::PackedStringCompare(_)
+                    | Operation::XState(
+                        crate::cpu::x86::xstate::XStateOperation::Save { .. }
+                            | crate::cpu::x86::xstate::XStateOperation::Restore { .. }
+                    )
             )
         });
+    let has_xstate = blocks
+        .iter()
+        .flat_map(|block| &block.instructions)
+        .any(|instruction| matches!(instruction.operation(), Operation::XState(_)));
     let has_control_fault =
         blocks
             .iter()
@@ -76,6 +87,7 @@ pub(in crate::cpu::dbt) fn emit(
                 matches!(
                     instruction.operation(),
                     Operation::Control(crate::cpu::x86::ControlOperation::GeneralProtectionZero)
+                        | Operation::XState(_)
                 )
             });
     let has_cpu = has_simd
@@ -87,6 +99,8 @@ pub(in crate::cpu::dbt) fn emit(
         || needs_x87_op
         || needs_simd_execute
         || needs_cpu_fxsave
+        || needs_cpu_xsave
+        || needs_cpu_xrstor
         || needs_cpu_mask_write
         || needs_segment_load
         || needs_segment_load_far;
@@ -116,7 +130,10 @@ pub(in crate::cpu::dbt) fn emit(
         block.instructions.iter().any(|instruction| {
             matches!(
                 instruction.operation(),
-                Operation::X87 { .. }
+                Operation::XState(
+                    crate::cpu::x86::xstate::XStateOperation::Save { .. }
+                        | crate::cpu::x86::xstate::XStateOperation::Restore { .. }
+                ) | Operation::X87 { .. }
                     | Operation::InitializeX87
                     | Operation::ClearX87Exceptions
                     | Operation::X87StatusToAx
@@ -634,6 +651,20 @@ pub(in crate::cpu::dbt) fn emit(
             &mut helper_imports.cpu_fxsave,
         ),
         (
+            needs_cpu_xsave,
+            "cpu_xsave",
+            "cpu_xsave_resident",
+            1,
+            &mut helper_imports.cpu_xsave,
+        ),
+        (
+            needs_cpu_xrstor,
+            "cpu_xrstor",
+            "cpu_xrstor_resident",
+            1,
+            &mut helper_imports.cpu_xrstor,
+        ),
+        (
             needs_cpu_mask_write,
             "cpu_mask_write",
             "cpu_mask_write_resident",
@@ -759,6 +790,7 @@ pub(in crate::cpu::dbt) fn emit(
         has_gates,
         has_arithmetic,
         has_cpu || has_simd,
+        has_xstate,
     );
     code.i32_const(0).end();
     let mut bodies = CodeSection::new();

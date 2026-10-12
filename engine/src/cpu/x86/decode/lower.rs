@@ -19,6 +19,9 @@ use crate::cpu::x86::{
 
 pub(super) fn lower(instruction: &Instruction, bytes: &[u8]) -> Result<Operation, DecodeError> {
     check_profile(instruction, bytes)?;
+    if let Some(operation) = super::xstate::lower(instruction) {
+        return operation.map(Operation::XState);
+    }
     if let Some(operation) = super::segment_queries::lower(instruction) {
         return operation;
     }

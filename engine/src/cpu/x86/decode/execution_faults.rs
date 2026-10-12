@@ -45,7 +45,8 @@ fn general_protection(instruction: &Instruction, environment: UserModeEnvironmen
         | Code::Lmsw_rm16
         | Code::Lmsw_r32m16
         | Code::Invd
-        | Code::Wbinvd => true,
+        | Code::Wbinvd
+        | Code::Xsetbv => true,
         Code::Mov_r32_cr => control_register(instruction.op1_register()),
         Code::Mov_cr_r32 => control_register(instruction.op0_register()),
         Code::Cli | Code::Sti => {

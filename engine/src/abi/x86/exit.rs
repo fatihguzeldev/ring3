@@ -10,6 +10,7 @@ pub const EXIT_VERSION_4: u16 = 4;
 pub const EXIT_VERSION_5: u16 = 5;
 pub const EXIT_VERSION_6: u16 = 6;
 pub const EXIT_VERSION_7: u16 = 7;
+pub const EXIT_VERSION_8: u16 = 8;
 pub const REASON_OFFSET: usize = 16;
 pub const RETIRED_OFFSET: usize = 20;
 pub const DETAIL_OFFSET: usize = 24;
@@ -43,6 +44,10 @@ pub fn encode_exit_v6(exit: &ExecutionExit, output: &mut [u8]) -> Result<(), Abi
 
 pub fn encode_exit_v7(exit: &ExecutionExit, output: &mut [u8]) -> Result<(), AbiError> {
     encode(exit, output, EXIT_VERSION_7)
+}
+
+pub fn encode_exit_v8(exit: &ExecutionExit, output: &mut [u8]) -> Result<(), AbiError> {
+    encode(exit, output, EXIT_VERSION_8)
 }
 
 fn encode(exit: &ExecutionExit, output: &mut [u8], version: u16) -> Result<(), AbiError> {
@@ -177,6 +182,7 @@ pub fn decode_exit(input: &[u8]) -> Result<ExecutionExit, AbiError> {
             EXIT_VERSION_5,
             EXIT_VERSION_6,
             EXIT_VERSION_7,
+            EXIT_VERSION_8,
         ],
     )?;
     let detail = read_u32(input, DETAIL_OFFSET);
@@ -250,6 +256,7 @@ pub fn decode_exit(input: &[u8]) -> Result<ExecutionExit, AbiError> {
 
 fn validate_fault(fault: MemoryFault, length: u32, version: u16) -> Result<(), AbiError> {
     let valid_length = match fault.access {
+        Access::Read | Access::Write if version >= EXIT_VERSION_8 => (1..=576).contains(&length),
         Access::Read | Access::Write if version >= EXIT_VERSION_6 => (1..=512).contains(&length),
         Access::Read | Access::Write => matches!(length, 1 | 2 | 4),
         Access::Execute => (1..=15).contains(&length),
@@ -361,5 +368,41 @@ mod tests {
         assert_eq!(decode_exit(&bytes), Err(AbiError::Exit));
         write_u32(&mut bytes, ACCESS_LENGTH_OFFSET, 0);
         assert_eq!(decode_exit(&bytes), Err(AbiError::Exit));
+    }
+
+    #[test]
+    fn version8_expands_data_faults_without_changing_prior_versions_or_fetch_limits() {
+        for access in [Access::Read, Access::Write] {
+            let exit = ExecutionExit {
+                retired: 0,
+                reason: ExitReason::MemoryFault {
+                    fault: MemoryFault {
+                        address: GuestAddress(0x3000),
+                        access,
+                        reason: FaultReason::Unmapped,
+                    },
+                    length: 576,
+                },
+            };
+            let mut bytes = [0; EXIT_SIZE];
+            assert_eq!(encode_exit_v6(&exit, &mut bytes), Err(AbiError::Exit));
+            assert_eq!(encode_exit_v7(&exit, &mut bytes), Err(AbiError::Exit));
+            encode_exit_v8(&exit, &mut bytes).unwrap();
+            assert_eq!(decode_exit(&bytes), Ok(exit));
+            for version in [6_u16, 7] {
+                bytes[4..6].copy_from_slice(&version.to_le_bytes());
+                assert_eq!(decode_exit(&bytes), Err(AbiError::Exit));
+            }
+            bytes[4..6].copy_from_slice(&EXIT_VERSION_8.to_le_bytes());
+            for length in [0, 577] {
+                write_u32(&mut bytes, ACCESS_LENGTH_OFFSET, length);
+                assert_eq!(decode_exit(&bytes), Err(AbiError::Exit));
+            }
+            write_u32(&mut bytes, ACCESS_OFFSET, 3);
+            write_u32(&mut bytes, ACCESS_LENGTH_OFFSET, 15);
+            assert!(decode_exit(&bytes).is_ok());
+            write_u32(&mut bytes, ACCESS_LENGTH_OFFSET, 16);
+            assert_eq!(decode_exit(&bytes), Err(AbiError::Exit));
+        }
     }
 }

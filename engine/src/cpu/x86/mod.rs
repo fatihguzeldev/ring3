@@ -11,6 +11,7 @@ pub mod simd;
 mod stack;
 mod state;
 mod x87;
+pub mod xstate;
 
 pub use control::{ControlOperation, USER_POP_FLAGS_MASK, USER_POP_FLAGS_WORD_MASK, pop_flags};
 pub use segments::{

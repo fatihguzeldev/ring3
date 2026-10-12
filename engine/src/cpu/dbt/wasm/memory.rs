@@ -44,6 +44,8 @@ pub(super) struct Imports {
     pub(super) x87_op: Option<StoreImport>,
     pub(super) simd_execute: Option<StoreImport>,
     pub(super) cpu_fxsave: Option<StoreImport>,
+    pub(super) cpu_xsave: Option<StoreImport>,
+    pub(super) cpu_xrstor: Option<StoreImport>,
     pub(super) cpu_mask_write: Option<StoreImport>,
     pub(super) segment_load: Option<StoreImport>,
     pub(super) segment_load_far: Option<StoreImport>,
@@ -77,6 +79,8 @@ pub(super) struct ImportNeeds {
     pub(super) x87_op: bool,
     pub(super) simd_execute: bool,
     pub(super) cpu_fxsave: bool,
+    pub(super) cpu_xsave: bool,
+    pub(super) cpu_xrstor: bool,
     pub(super) cpu_mask_write: bool,
     pub(super) segment_load: bool,
     pub(super) segment_load_far: bool,
@@ -111,6 +115,8 @@ impl Imports {
         let mut x87_op = false;
         let mut simd_execute = false;
         let mut cpu_fxsave = false;
+        let mut cpu_xsave = false;
+        let mut cpu_xrstor = false;
         let mut cpu_mask_write = false;
         let mut segment_load = false;
         let mut segment_load_far = false;
@@ -136,6 +142,11 @@ impl Imports {
         let mut atomic_xor_u32 = false;
         for instruction in blocks.iter().flat_map(|block| &block.instructions) {
             match instruction.operation() {
+                Operation::XState(operation) => match operation {
+                    crate::cpu::x86::xstate::XStateOperation::Save { .. } => cpu_xsave = true,
+                    crate::cpu::x86::xstate::XStateOperation::Restore { .. } => cpu_xrstor = true,
+                    crate::cpu::x86::xstate::XStateOperation::ReadControl => {}
+                },
                 Operation::AdjustPrivilege {
                     destination: Location32::Memory(_),
                     ..
@@ -440,6 +451,8 @@ impl Imports {
             x87_op,
             simd_execute,
             cpu_fxsave,
+            cpu_xsave,
+            cpu_xrstor,
             cpu_mask_write,
             segment_load,
             segment_load_far,

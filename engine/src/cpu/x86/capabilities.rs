@@ -1,3 +1,5 @@
+pub(crate) const XCR0: u64 = 3;
+
 pub(crate) struct CpuIdLeaf {
     pub function: u32,
     pub subfunction: Option<u32>,
