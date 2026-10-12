@@ -1432,10 +1432,12 @@ mod tests {
 
     #[test]
     fn environment_save_restore_round_trips_physical_stack_and_raw80() {
-        let mut state = X87State::default();
-        state.instruction_pointer = 0x12345678;
-        state.data_pointer = 0x87654321;
-        state.opcode = 0x345;
+        let mut state = X87State {
+            instruction_pointer: 0x12345678,
+            data_pointer: 0x87654321,
+            opcode: 0x345,
+            ..X87State::default()
+        };
         execute(
             &mut state,
             X87Operation::Load(X87Format::Integer64),

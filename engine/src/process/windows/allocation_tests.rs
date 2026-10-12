@@ -53,19 +53,20 @@ fn fixture(resident: bool) -> (EngineInstance, PendingOwner, u64) {
             .write(GuestAddress(STACK + index as u32 * 4), &value.to_le_bytes())
             .unwrap();
     }
-    let mut state = State32::default();
-    state.eip = CODE;
-    state.eflags = 0xcd7;
-    state.registers = [
-        0x1234_5678,
-        0x2345_6789,
-        0x3456_789a,
-        0x4567_89ab,
-        STACK,
-        0x5678_9abc,
-        0x6789_abcd,
-        0x789a_bcde,
-    ];
+    let state = State32 {
+        eip: CODE,
+        eflags: 0xcd7,
+        registers: [
+            0x1234_5678,
+            0x2345_6789,
+            0x3456_789a,
+            0x4567_89ab,
+            STACK,
+            0x5678_9abc,
+            0x6789_abcd,
+            0x789a_bcde,
+        ],
+    };
     encode_state(
         &state,
         &mut engine.arena_mut().unwrap()[STATE_OFFSET..STATE_OFFSET + STATE_SIZE],

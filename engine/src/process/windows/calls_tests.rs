@@ -363,9 +363,11 @@ fn private_exit_latch_survives_raw_cpu_exit_cancel_restore_and_close_releases_ow
     let token = capture(&mut f, true, 0);
     complete(&mut f, true, token).unwrap();
     let before = owners(&f);
-    let mut state = State32::default();
-    state.eip = ENTRY;
-    state.registers[4] = ESP;
+    let state = State32 {
+        eip: ENTRY,
+        registers: [0, 0, 0, 0, ESP, 0, 0, 0],
+        ..State32::default()
+    };
     let arena = f.engine.arena.as_mut().get_mut();
     encode_state(&state, &mut arena[..56]).unwrap();
     encode_exit_v3(

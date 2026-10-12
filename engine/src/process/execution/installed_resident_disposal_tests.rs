@@ -198,12 +198,14 @@ fn fixture(entries: bool) -> Fixture {
     }
 }
 
+type CodeSnapshot = (u64, usize, Vec<(u64, u64)>);
+
 #[derive(Debug, PartialEq, Eq)]
 struct PageObservation {
     address: u32,
     bytes: Vec<u8>,
     access: [Result<BackingOffset, MemoryError>; 3],
-    code: Option<(u64, usize, Vec<(u64, u64)>)>,
+    code: Option<CodeSnapshot>,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -420,6 +422,8 @@ enum CallbackObservation {
     },
 }
 
+type ReplacementSnapshot = (String, Option<(Vec<u8>, usize)>);
+
 #[derive(Debug, PartialEq, Eq)]
 struct StableOwners {
     arena: Vec<u8>,
@@ -436,7 +440,7 @@ struct StableOwners {
     last_error: u32,
     virtual_allocations: Vec<PageRange>,
     memory: Option<(u64, u32, u32)>,
-    replacement: Option<(String, Option<(Vec<u8>, usize)>)>,
+    replacement: Option<ReplacementSnapshot>,
     dispatcher: Option<(Vec<u8>, usize)>,
     pages: Vec<PageObservation>,
 }

@@ -122,19 +122,20 @@ fn fixture_for_api(
         .unwrap()
         .write(GuestAddress(0x8ffc), &0x9000_u32.to_le_bytes())
         .unwrap();
-    let mut state = State32::default();
-    state.eip = 0x4000;
-    state.eflags = 0xcd7;
-    state.registers = [
-        0x1234_5678,
-        0x2345_6789,
-        0x3456_789a,
-        0x4567_89ab,
-        0x8ffc,
-        0x5678_9abc,
-        0x6789_abcd,
-        0x789a_bcde,
-    ];
+    let state = State32 {
+        eip: 0x4000,
+        eflags: 0xcd7,
+        registers: [
+            0x1234_5678,
+            0x2345_6789,
+            0x3456_789a,
+            0x4567_89ab,
+            0x8ffc,
+            0x5678_9abc,
+            0x6789_abcd,
+            0x789a_bcde,
+        ],
+    };
     stop(&mut engine, state, ExitReason::Gate { id: 17 });
     let outer = engine
         .capture_resident_call(KEY, ids[0], CallingConvention32::Cdecl, 0)

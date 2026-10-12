@@ -102,30 +102,6 @@ fn memory_error(error: MemoryError, pc: GuestAddress, length: usize) -> DecodeEr
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::memory::{PageRange, Permissions};
-
-    #[test]
-    fn decodes_immediate_move() {
-        let mut memory = AddressSpace::new(1).unwrap();
-        memory
-            .map_zeroed(
-                PageRange::new(GuestAddress(0), 1).unwrap(),
-                Permissions::ALL,
-            )
-            .unwrap();
-        memory
-            .write(GuestAddress(0), &[0xb8, 0x78, 0x56, 0x34, 0x12])
-            .unwrap();
-        let decoded = decode_one(&memory, GuestAddress(0)).unwrap();
-        assert_eq!(decoded.length(), 5);
-        assert_eq!(decoded.next_pc(), GuestAddress(5));
-        assert!(memory.is_code_current(decoded.code_snapshot()));
-    }
-}
-
 fn segment_accesses(instruction: &iced_x86::Instruction) -> u8 {
     use iced_x86::{InstructionInfoFactory, Mnemonic, Register};
     if matches!(
@@ -154,4 +130,28 @@ fn segment_accesses(instruction: &iced_x86::Instruction) -> u8 {
                 _ => 0,
             }
         })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::memory::{PageRange, Permissions};
+
+    #[test]
+    fn decodes_immediate_move() {
+        let mut memory = AddressSpace::new(1).unwrap();
+        memory
+            .map_zeroed(
+                PageRange::new(GuestAddress(0), 1).unwrap(),
+                Permissions::ALL,
+            )
+            .unwrap();
+        memory
+            .write(GuestAddress(0), &[0xb8, 0x78, 0x56, 0x34, 0x12])
+            .unwrap();
+        let decoded = decode_one(&memory, GuestAddress(0)).unwrap();
+        assert_eq!(decoded.length(), 5);
+        assert_eq!(decoded.next_pc(), GuestAddress(5));
+        assert!(memory.is_code_current(decoded.code_snapshot()));
+    }
 }
