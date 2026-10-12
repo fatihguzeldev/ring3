@@ -306,7 +306,7 @@ for (const [stateOffset, exitOffset, cancelOffset] of [[1, 56, 96], [0, 57, 96],
   calls++;
   assert.deepEqual(arena(engine), before, 'wrong pointers cannot mutate arena');
 }
-for (const [offset, width, value] of [[0, 1, 0], [4, 2, 2], [6, 2, 2], [8, 4, 55], [12, 4, 1], [52, 4, 0], [52, 4, 0xa], [52, 4, 0x80000002]]) {
+for (const [offset, width, value] of [[0, 1, 0], [4, 2, 3], [6, 2, 2], [8, 4, 55], [12, 4, 1], [52, 4, 0], [52, 4, 0xa], [52, 4, 0x80000002]]) {
   writeState(engine, state(3));
   refresh(engine);
   if (width === 1) engine.view.setUint8(engine.base + offset, value);
