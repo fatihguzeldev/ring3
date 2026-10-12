@@ -17,7 +17,7 @@ const forms=[[0x0f,0xa3,0x0b],[0x0f,0xa3,0x00],[0x0f,0xa3,0x4c,0x8a,0x80],
   ...immediates.map(n=>[0x0f,0xba,0x23,n]),[0xb9,32,0,0,0,0x0f,0xa3,0x0b]];
 const stats={contexts:0,numeric:0,aliases:0,boundaries:0,read_faults:0,repairs:0,chains:0,runs:0,preflight:0,controls:0};
 const observations=[],modules=[],frames=[],events=[];
-const sources=['engine/tests/cpu/bits_flags/test/memory/native/dword.rs', 'engine/tests/cpu/bits_flags/native.rs', 'engine/tests/support/cpu/prefix_admission.rs', 'engine/tests/cpu/bits_flags/native.rs','engine/tests/cpu/bits_flags/test/memory/wasm/dword.rs', 'engine/tests/cpu/bits_flags/wasm.rs', 'engine/tests/cpu/bits_flags/wasm.rs','engine/tests/cpu/bits_flags/test/memory/fixtures/p2-memory-bit-test32/runtime/run.mjs'];
+const sources=['engine/tests/cpu/bits_flags/test/memory/native/dword.rs', 'engine/tests/cpu/bits_flags/native.rs', 'engine/tests/support/cpu/prefix/admission.rs', 'engine/tests/cpu/bits_flags/native.rs','engine/tests/cpu/bits_flags/test/memory/wasm/dword.rs', 'engine/tests/cpu/bits_flags/wasm.rs', 'engine/tests/cpu/bits_flags/wasm.rs','engine/tests/cpu/bits_flags/test/memory/fixtures/p2-memory-bit-test32/runtime/run.mjs'];
 const sourcePins=()=>Object.fromEntries(sources.map(p=>[p,hash(readFileSync(join(root,p)))])),initialSources=sourcePins();
 function record(magic,size,fields,version=1){const b=Buffer.alloc(size);b.write(magic);b.writeUInt16LE(version,4);b.writeUInt16LE(1,6);b.writeUInt32LE(size,8);fields.forEach((v,i)=>b.writeUInt32LE(v>>>0,16+i*4));return b;}
 const state=(r,pc,f)=>record('R3ST',56,[...r,pc,f]);

@@ -19,7 +19,7 @@ const paths = [
   'engine/src/cpu/dbt/wasm/memory/narrow.rs', 'engine/src/cpu/dbt/wasm/abi.rs',
   'engine/src/cpu/dbt/wasm/emitter.rs', 'engine/src/process/wasm/mod.rs', 'engine/src/process/wasm/loading.rs', 'engine/src/process/wasm/execution.rs', 'engine/src/process/wasm/calls.rs', 'engine/src/process/wasm/memory.rs', 'engine/src/process/wasm/cpu.rs', 'engine/src/process/mod.rs',
   'engine/src/process/instance.rs', 'engine/src/process/execution/compiled.rs', 'engine/src/process/execution/authority.rs', 'engine/src/process/memory/address_space.rs', 'engine/src/process/memory/scalar.rs', 'engine/src/process/memory/scalar_tests.rs', 'engine/src/process/execution/mod.rs', 'engine/src/process/memory/mod.rs', 'engine/src/process/execution/resident.rs',
-  'engine/tests/cpu/moves/extend/source/byte/word/native.rs', 'engine/tests/cpu/moves/native.rs', 'engine/tests/support/cpu/prefix_admission.rs', 'engine/tests/support/cpu/word_prefix.rs', 'engine/tests/cpu/moves/extend/source/byte/word/wasm.rs', 'engine/tests/cpu/moves/wasm.rs', 'engine/tests/support/wasm.rs',
+  'engine/tests/cpu/moves/extend/source/byte/word/native.rs', 'engine/tests/cpu/moves/native.rs', 'engine/tests/support/cpu/prefix/admission.rs', 'engine/tests/support/cpu/prefix/word.rs', 'engine/tests/cpu/moves/extend/source/byte/word/wasm.rs', 'engine/tests/cpu/moves/wasm.rs', 'engine/tests/support/wasm.rs',
   'engine/tests/cpu/moves/extend/source/byte/word/fixtures/p2-word-byte-extend/runtime/run.mjs', 'engine/tests/support/wasm/engine.mjs'];
 assert.equal(new Set(paths).size, paths.length);
 const sources = () => Object.fromEntries(paths.map(path => [path, hash(readFileSync(join(root, path)))]));

@@ -1,4 +1,4 @@
-#[path = "../../support/cpu/string_prefix.rs"]
+#[path = "../../support/cpu/prefix/strings.rs"]
 mod support_string_prefix;
 
 #[path = "load/native/dword.rs"]

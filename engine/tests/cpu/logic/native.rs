@@ -1,10 +1,10 @@
-#[path = "../../support/cpu/byte_prefix_admission.rs"]
+#[path = "../../support/cpu/prefix/byte.rs"]
 mod support_byte_prefix_admission;
 
-#[path = "../../support/cpu/prefix_admission.rs"]
+#[path = "../../support/cpu/prefix/admission.rs"]
 mod support_prefix_admission;
 
-#[path = "../../support/cpu/word_prefix.rs"]
+#[path = "../../support/cpu/prefix/word.rs"]
 mod support_word_prefix;
 
 #[path = "compare/register/native/byte.rs"]

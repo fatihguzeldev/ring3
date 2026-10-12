@@ -14,7 +14,7 @@ const hash = bytes => createHash('sha256').update(bytes).digest('hex');
 const paths = [
   'engine/src/abi/arena.rs', 'engine/src/abi/memory_helper.rs',
   'engine/src/cpu/x86/ir.rs', 'engine/src/cpu/x86/decode/lower.rs',
-  'engine/tests/cpu/moves/extend/accumulator/native/word.rs', 'engine/tests/cpu/moves/native.rs', 'engine/tests/support/cpu/prefix_admission.rs', 'engine/tests/support/cpu/word_prefix.rs', 'engine/src/cpu/dbt/wasm/abi.rs',
+  'engine/tests/cpu/moves/extend/accumulator/native/word.rs', 'engine/tests/cpu/moves/native.rs', 'engine/tests/support/cpu/prefix/admission.rs', 'engine/tests/support/cpu/prefix/word.rs', 'engine/src/cpu/dbt/wasm/abi.rs',
   'engine/src/cpu/x86/decode/profile.rs', 'engine/src/cpu/dbt/region.rs',
   'engine/src/cpu/dbt/wasm/integer/arithmetic.rs', 'engine/src/cpu/dbt/wasm/integer/bits.rs', 'engine/src/cpu/dbt/wasm/integer/carry_rotates.rs', 'engine/src/cpu/dbt/wasm/integer/decimal.rs', 'engine/src/cpu/dbt/wasm/integer/dispatch.rs', 'engine/src/cpu/dbt/wasm/integer/flags.rs', 'engine/src/cpu/dbt/wasm/integer/mod.rs', 'engine/src/cpu/dbt/wasm/integer/multiply_divide.rs', 'engine/src/cpu/dbt/wasm/integer/operands.rs', 'engine/src/cpu/dbt/wasm/integer/rotates.rs', 'engine/src/cpu/dbt/wasm/integer/shifts.rs', 'engine/src/cpu/dbt/wasm/control.rs',
   'engine/src/cpu/dbt/wasm/emitter.rs', 'engine/src/process/wasm/mod.rs', 'engine/src/process/wasm/loading.rs', 'engine/src/process/wasm/execution.rs', 'engine/src/process/wasm/calls.rs', 'engine/src/process/wasm/memory.rs', 'engine/src/process/wasm/cpu.rs', 'engine/src/process/mod.rs',

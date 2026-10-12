@@ -1,4 +1,4 @@
-#[path = "../../../support/cpu/prefix_admission.rs"]
+#[path = "../../../support/cpu/prefix/admission.rs"]
 mod support_prefix_admission;
 
 #[path = "entries/native/admission.rs"]

@@ -1,7 +1,7 @@
-#[path = "../../support/cpu/prefix_admission.rs"]
+#[path = "../../support/cpu/prefix/admission.rs"]
 mod support_prefix_admission;
 
-#[path = "../../support/cpu/word_prefix.rs"]
+#[path = "../../support/cpu/prefix/word.rs"]
 mod support_word_prefix;
 
 #[path = "scan/register/native/dword.rs"]

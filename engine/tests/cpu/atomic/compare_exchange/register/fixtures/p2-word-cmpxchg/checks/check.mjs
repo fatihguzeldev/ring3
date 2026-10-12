@@ -439,7 +439,7 @@ function sourceAuthority(freeze, root) {
   });
   for (const path of ['checks/plan.mjs', 'runtime/run.mjs', 'checks/check.mjs']) assert.ok(rows.some(row => row.path === `engine/tests/cpu/atomic/compare_exchange/register/fixtures/p2-word-cmpxchg/${path}`));
   assert.ok(rows.some(row => row.path === 'engine/tests/cpu/atomic/compare_exchange/register/wasm/word.rs', 'engine/tests/cpu/atomic/wasm.rs', 'engine/tests/cpu/atomic/wasm.rs'));
-  for (const path of ['engine/tests/cpu/atomic/compare_exchange/register/native/word.rs', 'engine/tests/cpu/atomic/native.rs', 'engine/tests/support/cpu/prefix_admission.rs', 'engine/tests/support/cpu/word_prefix.rs', 'engine/tests/cpu/atomic/native.rs', 'target/word-cmpxchg-session/execute_actual.py', 'target/word-cmpxchg-session/independent-word-cmpxchg.py']) assert.ok(rows.some(row => row.path === path));
+  for (const path of ['engine/tests/cpu/atomic/compare_exchange/register/native/word.rs', 'engine/tests/cpu/atomic/native.rs', 'engine/tests/support/cpu/prefix/admission.rs', 'engine/tests/support/cpu/prefix/word.rs', 'engine/tests/cpu/atomic/native.rs', 'target/word-cmpxchg-session/execute_actual.py', 'target/word-cmpxchg-session/independent-word-cmpxchg.py']) assert.ok(rows.some(row => row.path === path));
   assert.equal(freeze.reviews.length, 3);
   for (const review of freeze.reviews) {
     assert.equal(review.ack, true); const bytes = readFileSync(safeFile(root, review.index)); assert.deepEqual(pin(bytes), {bytes: review.bytes, sha256: review.sha256});
