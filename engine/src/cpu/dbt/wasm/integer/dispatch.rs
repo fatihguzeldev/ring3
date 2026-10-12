@@ -37,7 +37,7 @@ pub(in crate::cpu::dbt::wasm) fn instruction(
 ) {
     if !matches!(
         instruction.operation(),
-        Operation::String { .. } | Operation::RepeatString { .. }
+        Operation::String { .. } | Operation::RepeatString { .. } | Operation::X87 { .. }
     ) && !matches!(instruction.operation(), Operation::Simd(operation) if operation.kind == crate::cpu::x86::simd::SimdKind::MaskedStore)
     {
         use crate::cpu::x86::SegmentRegister::*;

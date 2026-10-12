@@ -15,3 +15,6 @@ mod cpu_x87_memory_control_wasm;
 
 #[path = "status/wasm/memory.rs"]
 mod cpu_x87_memory_status_wasm;
+
+#[path = "segment_access/wasm/cached.rs"]
+mod cpu_x87_segment_access;

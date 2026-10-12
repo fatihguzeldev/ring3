@@ -6,13 +6,31 @@ use crate::{
         x86::{SEGMENTS_SIZE, decode_segment_context, encode_segment_context},
     },
     cpu::x86::{
-        SegmentContext, SegmentDescriptor, SegmentLoadError, SegmentLoadFailure, SegmentRegister,
-        SegmentState,
+        SegmentAccess, SegmentContext, SegmentDescriptor, SegmentLoadError, SegmentLoadFailure,
+        SegmentRegister, SegmentState,
     },
     memory::GuestAddress,
 };
 
 use crate::process::{CallError, EngineInstance, HostError};
+
+pub(super) fn check_cached_span(
+    context: &SegmentContext,
+    segment: SegmentRegister,
+    offset: u32,
+    width: u32,
+    access: SegmentAccess,
+) -> Result<(), CpuMemoryError> {
+    context.caches[segment.index()]
+        .check_span(offset, width, access)
+        .map_err(|_| {
+            if segment == SegmentRegister::Ss {
+                CpuMemoryError::StackSegment(0)
+            } else {
+                CpuMemoryError::GeneralProtection(0)
+            }
+        })
+}
 
 impl EngineInstance {
     pub fn segment_state(&self) -> Result<SegmentState, HostError> {

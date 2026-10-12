@@ -10,7 +10,7 @@ use crate::{
             X87_STATUS_OFFSET, X87_TAG_OFFSET,
         },
     },
-    cpu::x86::{Register32, SegmentRegister, X87State, ir::EffectiveAddress},
+    cpu::x86::{Register32, X87State, ir::EffectiveAddress},
 };
 
 use super::locals::{
@@ -87,13 +87,7 @@ pub(super) fn operation(
 
 fn control_word(address: Option<EffectiveAddress>, waiting: bool) -> u32 {
     let segment = address.map_or(0, |address| {
-        let segment = address.segment.unwrap_or({
-            if matches!(address.base, Some(Register32::Esp | Register32::Ebp)) {
-                SegmentRegister::Ss
-            } else {
-                SegmentRegister::Ds
-            }
-        });
+        let segment = address.resolved_segment();
         (segment.index() as u32 + 1) << 8
     });
     segment | u32::from(waiting)
@@ -252,6 +246,7 @@ fn memarg(offset: usize, align: u32) -> MemArg {
 #[cfg(test)]
 mod pointer_control_tests {
     use super::*;
+    use crate::cpu::x86::SegmentRegister;
 
     #[test]
     fn memory_control_carries_selected_segment_without_changing_waiting_bit() {
