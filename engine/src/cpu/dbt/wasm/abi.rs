@@ -122,6 +122,12 @@ pub(super) fn flush(
     store_local(sink, STATE_PTR, EIP_OFFSET, EIP);
     store_local(sink, STATE_PTR, EFLAGS_OFFSET, FLAGS);
 
+    let detail_fields = [
+        (DETAIL_OFFSET, DETAIL),
+        (FAULT_ADDRESS_OFFSET, FAULT_ADDRESS),
+        (ACCESS_OFFSET, FAULT_ACCESS),
+        (ACCESS_LENGTH_OFFSET, FAULT_LENGTH),
+    ];
     for (offset, value) in [
         (0, u32::from_le_bytes(*b"R3EX")),
         (
@@ -140,14 +146,17 @@ pub(super) fn flush(
         ),
         (8, EXIT_SIZE as u32),
         (12, 0),
-        (DETAIL_OFFSET, 0),
-        (FAULT_ADDRESS_OFFSET, 0),
-        (ACCESS_OFFSET, 0),
-        (ACCESS_LENGTH_OFFSET, 0),
     ] {
         sink.local_get(EXIT_PTR)
             .i32_const(value as i32)
             .i32_store(memarg(offset));
+    }
+    if !(memory || gates || cpu) {
+        for (offset, _) in detail_fields {
+            sink.local_get(EXIT_PTR)
+                .i32_const(0)
+                .i32_store(memarg(offset));
+        }
     }
     if !cpu && memory {
         sink.local_get(REASON)
@@ -162,12 +171,7 @@ pub(super) fn flush(
     store_local(sink, EXIT_PTR, REASON_OFFSET, REASON);
     store_local(sink, EXIT_PTR, RETIRED_OFFSET, RETIRED);
     if memory || gates || cpu {
-        for (offset, local) in [
-            (DETAIL_OFFSET, DETAIL),
-            (FAULT_ADDRESS_OFFSET, FAULT_ADDRESS),
-            (ACCESS_OFFSET, FAULT_ACCESS),
-            (ACCESS_LENGTH_OFFSET, FAULT_LENGTH),
-        ] {
+        for (offset, local) in detail_fields {
             store_local(sink, EXIT_PTR, offset, local);
         }
     }
