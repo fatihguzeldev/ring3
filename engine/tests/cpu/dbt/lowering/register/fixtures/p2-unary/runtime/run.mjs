@@ -375,7 +375,7 @@ const provenance = {
   claim: 'Own baseline Wasm register-unary32 execution with defined Intel flags; independent BigInt/literal and counter mathematics, no synthetic helper, hardware flags, native C, performance or full P2-V0 claim.',
   standalone_modules: generated.size - 3, embedded_modules: 3, standalone_runs: standaloneRuns, embedded_runs: embeddedRuns, continuation_calls: resumes, synthetic_runs: 0,
   counter_inputs: counterInputs, module_set_sha256: hash(aggregate), engine_sha256: hash(engineBytes),
-  sha256: Object.fromEntries(['integer.S', 'runtime/run.mjs'].map(name => [name, hash(readFileSync(join(fixtureRoot, name)))]).concat([['dbt_unary_wasm.rs', hash(readFileSync(join(root, 'engine/tests/cpu/dbt/lowering/register/wasm/unary.rs', 'engine/tests/cpu/dbt/lowering/wasm.rs', 'engine/tests/support/wasm.rs', 'engine/tests/cpu/dbt/lowering/wasm.rs', 'engine/tests/support/wasm.rs')))], ['integer.o', hash(object)]])),
+  sha256: Object.fromEntries(['integer.S', 'runtime/run.mjs'].map(name => [name, hash(readFileSync(join(fixtureRoot, name)))]).concat([...['engine/tests/cpu/dbt/lowering/register/wasm/unary.rs', 'engine/tests/cpu/dbt/lowering/wasm.rs', 'engine/tests/support/wasm.rs'].map(path => [path, hash(readFileSync(join(root, path)))]), ['integer.o', hash(object)]])),
   versions: {clang: execFileSync('clang', ['--version'], {encoding: 'utf8'}).split('\n')[0], objdump: execFileSync('xcrun', ['llvm-objdump', '--version'], {encoding: 'utf8'}).split('\n')[0], node: process.version},
   commands: {assemble: ['clang', ...assemble], disassemble: ['xcrun', 'llvm-objdump', '-d', '--x86-asm-syntax=intel', objectPath]},
   llvm_symbols: llvm, generated_sha256: Object.fromEntries([...generated].sort(([a], [b]) => a.localeCompare(b))),

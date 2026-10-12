@@ -217,7 +217,7 @@ for (const [from, to, index, budget] of [[0, 1, 0, 1], [1, 2, 0, 1], [2, 4, 1, 2
 assert.equal(stats.probe_calls, stats.probe_successes + stats.probe_traps);
 assert.equal(stats.dispatcher_calls, stats.controlled_misses + stats.cancelled_calls + stats.budget_exits + stats.done_pc_exits);
 const productionPaths = execFileSync('git', ['ls-files', 'engine/src'], {cwd: root, encoding: 'utf8'}).trim().split('\n').sort();
-const sourcePaths = ['engine/tests/cpu/dbt/regions/dispatch/native/table.rs', 'engine/tests/cpu/dbt/regions/native.rs', 'engine/tests/cpu/dbt/regions/native.rs', 'engine/tests/cpu/dbt/regions/dispatch/fixtures/p2-table-dispatch/runtime/run.mjs', 'engine/Cargo.toml', 'Cargo.lock', ...productionPaths];
+const sourcePaths = ['engine/tests/cpu/dbt/regions/dispatch/native/table.rs', 'engine/tests/cpu/dbt/regions/native.rs', 'engine/tests/cpu/dbt/regions/dispatch/fixtures/p2-table-dispatch/runtime/run.mjs', 'engine/Cargo.toml', 'Cargo.lock', ...productionPaths];
 const artifactHashes = Object.fromEntries(['a.wasm', 'b.wasm', 'dispatcher.wasm', 'wrong.wasm', 'a.x86', 'b.x86'].map(name => [name, hash(readFileSync(join(outputDir, name)))]));
 const provenance = {
   stats, generated_modules: Object.keys(modules).length, actual_child_calls: stats.dispatcher_child_calls_observed + stats.probe_successes, artifact_sha256: artifactHashes,

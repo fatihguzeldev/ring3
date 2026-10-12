@@ -295,6 +295,7 @@ let rejectedCompiles = 0;
   const engine = fresh();
   for (const entry of [0x1000, 0x1010]) upload(engine, entry, Uint8Array.from(marker));
   upload(engine, 0x1020, Uint8Array.from([0x90, 0x90]));
+  upload(engine, 0x1030, Uint8Array.from([0xf0, 0x90]));
   const child = compile(engine, [[0x1000, 2]], [[0x1000, 99]]);
   const pointer = engine.api.module_ptr(), length = engine.api.module_len();
   const encoded = refresh(engine).bytes.slice(pointer, pointer + length);
@@ -309,7 +310,7 @@ let rejectedCompiles = 0;
     {name: 'gate missing declared block', blocks: [[0x1000, 2]], gates: [[0x1010, 1]], status: 10},
     {name: 'gate wrong declared length', blocks: [[0x1000, 1]], gates: [[0x1000, 1]], status: 10},
     {name: 'gate wrong fetched marker', blocks: [[0x1020, 2]], gates: [[0x1020, 1]], status: 10},
-    {name: 'unregistered UD2 remains unsupported', blocks: [[0x1000, 2]], gates: [], status: 10},
+    {name: 'invalid LOCK NOP is refused without a registered gate', blocks: [[0x1030, 2]], gates: [], status: 10},
   ];
   for (const fixture of cases) {
     descriptors(engine, fixture.blocks, fixture.gates);
