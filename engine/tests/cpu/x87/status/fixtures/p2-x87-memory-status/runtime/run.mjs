@@ -16,7 +16,7 @@ const STATUS = [[0,0,0],[0xffff,0xff,0xff],[0x81a5,0xa5,0x81],
   [1,1,0],[2,2,0],[4,4,0],[8,8,0],[0x10,0x10,0],[0x20,0x20,0],[0x40,0x40,0],[0x80,0x80,0],
   [0x100,0,1],[0x200,0,2],[0x400,0,4],[0x800,0,8],[0x1000,0,0x10],[0x2000,0,0x20],[0x4000,0,0x40],[0x8000,0,0x80]];
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
-const sourcePaths = ['engine/tests/cpu/x87/status/wasm/memory.rs', 'engine/tests/cpu/x87/wasm.rs', 'engine/tests/support/wasm.rs', 'engine/tests/cpu/x87/wasm.rs', 'engine/tests/support/wasm.rs','engine/tests/cpu/x87/status/fixtures/p2-x87-memory-status/runtime/run.mjs','engine/tests/support/wasm/engine.mjs'];
+const sourcePaths = ['engine/tests/cpu/x87/status/wasm/memory.rs', 'engine/tests/cpu/x87/wasm.rs', 'engine/tests/support/wasm.rs', 'engine/tests/cpu/x87/status/fixtures/p2-x87-memory-status/runtime/run.mjs','engine/tests/support/wasm/engine.mjs'];
 const sourcePins = () => Object.fromEntries(sourcePaths.map(path => [path, hash(readFileSync(join(root,path)))]));
 const initialSources = sourcePins(), modules = [], rawRows = [], rawFrames = [];
 const counts = {profiles:0,modules:0,words:0,clears:0,ax_reads:0,jumps:0,fault_calls:0,controls:0,preflight:0,generated_calls:0,retired:0,raw_pairs:0};
@@ -78,9 +78,10 @@ function seed(ctx,pc,address,status,flags=2,ordinal=0) {
   input(ctx,0,state(cpu)); input(ctx,56,exit(3,0)); input(ctx,96,words([0])); input(ctx,FP,fpu(status,ordinal)); ctx.cpu=cpu;
 }
 function run(ctx,unit,budget,next,reason=1,retired=1,nextHelper,nextFpu,status=0,fault) {
+  if (fault?.detail === 3) {reason = 11; fault = undefined; nextHelper = undefined;}
   check(ctx,'before generated'); const before=observed(ctx);
   if(status===0) {
-    ctx.expected.set(state(next)); ctx.expected.set(exit(reason,retired,fault?.detail,fault?.address,fault?.access,fault?2:0),56);
+    ctx.expected.set(state(next)); ctx.expected.set(exit(reason,retired,fault?.detail,fault?.address,fault?.access,fault?2:0,reason===11?6:2),56);
     if(nextHelper)ctx.expected.set(nextHelper,100); if(nextFpu)ctx.expected.set(nextFpu,FP);
   }
   assert.equal(unit.run(ctx.base,ctx.base+56,budget,ctx.base+96),status); check(ctx,'after generated');

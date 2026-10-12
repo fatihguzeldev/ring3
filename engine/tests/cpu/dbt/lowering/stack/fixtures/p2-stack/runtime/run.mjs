@@ -155,7 +155,7 @@ function readState(engine) {
 
 function exit(reason, retired, detail = 0, address = 0, access = 0, length = reason === 5 ? 4 : 0) {
   const bytes = new Uint8Array(40), view = new DataView(bytes.buffer);
-  header(bytes, view, 0, 'R3EX', 40, 2);
+  header(bytes, view, 0, 'R3EX', 40, reason === 11 || reason === 15 ? 6 : 2);
   [reason, retired, detail, address, access, length].forEach((field, index) => view.setUint32(16 + index * 4, field, true));
   return bytes;
 }
@@ -392,7 +392,7 @@ for (const fault of faultCases) {
   expected.eip = 0x1008;
   writeState(engine, start);
   const access = fault.call ? 2 : 1;
-  run(engine, child, 20, expected, exit(5, 2, fault.detail, fault.fault, access), `${fault.name}: failed frame preserves ESP and computed flags`, helperRecord(1, 0, fault.detail, fault.fault, access));
+  run(engine, child, 20, expected, fault.detail === 3 ? exit(15, 2) : exit(5, 2, fault.detail, fault.fault, access), `${fault.name}: failed frame preserves ESP and computed flags`, fault.detail === 3 ? arena(engine).slice(100, 140) : helperRecord(1, 0, fault.detail, fault.fault, access));
   if (fault.call && fault.map) {
     assert.equal(guestValue(engine, 0x4000), 0x11223344, 'failed CALL preserves attempted writable/readable word');
     assert.equal(guestValue(engine, 0x4ffc), 0xa1b2c3d4, 'failed CALL preserves first-page tail');

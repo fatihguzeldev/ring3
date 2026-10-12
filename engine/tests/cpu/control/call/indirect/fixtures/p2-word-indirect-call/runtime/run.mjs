@@ -16,9 +16,7 @@ const paths = [
   'engine/src/cpu/x86/decode/flow.rs', 'engine/src/cpu/x86/decode/profile.rs', 'engine/src/cpu/dbt/region.rs',
   'engine/src/cpu/dbt/wasm/integer/arithmetic.rs', 'engine/src/cpu/dbt/wasm/integer/bits.rs', 'engine/src/cpu/dbt/wasm/integer/carry_rotates.rs', 'engine/src/cpu/dbt/wasm/integer/decimal.rs', 'engine/src/cpu/dbt/wasm/integer/dispatch.rs', 'engine/src/cpu/dbt/wasm/integer/flags.rs', 'engine/src/cpu/dbt/wasm/integer/mod.rs', 'engine/src/cpu/dbt/wasm/integer/multiply_divide.rs', 'engine/src/cpu/dbt/wasm/integer/operands.rs', 'engine/src/cpu/dbt/wasm/integer/rotates.rs', 'engine/src/cpu/dbt/wasm/integer/shifts.rs', 'engine/src/cpu/dbt/wasm/memory.rs', 'engine/src/cpu/dbt/wasm/memory/narrow.rs',
   'engine/src/cpu/dbt/wasm/memory/word_store.rs', 'engine/src/cpu/dbt/wasm/abi.rs', 'engine/src/cpu/dbt/wasm/emitter.rs', 'engine/src/cpu/dbt/wasm/locals.rs',
-  'engine/src/memory/space.rs', 'engine/src/process/instance.rs', 'engine/src/process/execution/compiled.rs', 'engine/src/process/execution/authority.rs', 'engine/src/process/memory/address_space.rs', 'engine/src/process/memory/scalar.rs', 'engine/src/process/memory/scalar_tests.rs', 'engine/src/process/execution/mod.rs', 'engine/src/process/memory/mod.rs', 'engine/src/process/mod.rs', 'engine/src/process/execution/resident.rs', 'engine/src/process/execution/authority.rs', 'engine/src/process/execution/mod.rs', 'engine/src/process/mod.rs', 'engine/src/process/wasm/mod.rs', 'engine/src/process/wasm/loading.rs', 'engine/src/process/wasm/execution.rs', 'engine/src/process/wasm/calls.rs', 'engine/src/process/wasm/memory.rs', 'engine/src/process/wasm/cpu.rs', 'engine/src/process/mod.rs',
-  'engine/tests/cpu/control/call/indirect/native/word.rs', 'engine/tests/cpu/control/native.rs', 'engine/tests/support/cpu/prefix/admission.rs', 'engine/tests/support/cpu/prefix/word.rs', 'engine/tests/cpu/control/native.rs', 'engine/tests/cpu/control/call/indirect/wasm/word.rs', 'engine/tests/cpu/control/wasm.rs', 'engine/tests/support/wasm.rs', 'engine/tests/cpu/control/wasm.rs', 'engine/tests/support/wasm.rs',
-  'engine/tests/cpu/control/call/indirect/fixtures/p2-word-indirect-call/runtime/run.mjs', 'engine/tests/support/wasm/engine.mjs',
+  'engine/src/memory/space.rs', 'engine/src/process/instance.rs', 'engine/src/process/execution/compiled.rs', 'engine/src/process/execution/authority.rs', 'engine/src/process/memory/address_space.rs', 'engine/src/process/memory/scalar.rs', 'engine/src/process/memory/scalar_tests.rs', 'engine/src/process/execution/mod.rs', 'engine/src/process/memory/mod.rs', 'engine/src/process/mod.rs', 'engine/src/process/execution/resident.rs', 'engine/src/process/wasm/mod.rs', 'engine/src/process/wasm/loading.rs', 'engine/src/process/wasm/execution.rs', 'engine/src/process/wasm/calls.rs', 'engine/src/process/wasm/memory.rs', 'engine/src/process/wasm/cpu.rs', 'engine/tests/cpu/control/call/indirect/native/word.rs', 'engine/tests/cpu/control/native.rs', 'engine/tests/support/cpu/prefix/admission.rs', 'engine/tests/support/cpu/prefix/word.rs', 'engine/tests/cpu/control/call/indirect/wasm/word.rs', 'engine/tests/cpu/control/wasm.rs', 'engine/tests/support/wasm.rs', 'engine/tests/cpu/control/call/indirect/fixtures/p2-word-indirect-call/runtime/run.mjs', 'engine/tests/support/wasm/engine.mjs',
 ];
 assert.equal(new Set(paths).size, paths.length);
 const sources = () => Object.fromEntries(paths.map(path => [path, hash(readFileSync(join(root, path)))]));
@@ -73,9 +71,10 @@ function seed(c, pc, r = registers(), flag = 0xcd7) {
   b.set(record('R3MH', 40, [0, 0xdecafbad, 0, 0, 0, 0]), 100); input(c, 0, b); return cpu(c);
 }
 function run(c, unit, budget, next, {label, reason = 1, retired = 1, fault, events = [], value = 0, status = 0} = {}) {
+  if (fault?.detail === 3) {reason = fault.access === 2 || label.startsWith('RET') ? 15 : 11; fault = undefined; events = [];}
   const expected = arena(c);
   if (status === 0) {
-    expected.set(state(next)); expected.set(exit(reason, retired, fault, unit.exitVersion), 56);
+    expected.set(state(next)); expected.set(exit(reason, retired, fault, reason === 11 || reason === 15 ? 6 : unit.exitVersion), 56);
     if (events.length) expected.set(helper(events.at(-1).access, fault ? 0 : value, fault), 100);
   }
   c.trace = []; const observedStatus = unit.run(c.base, c.base + 56, budget, c.base + 96);
@@ -388,7 +387,7 @@ assert.deepEqual(sources(), sourcePins, 'selected source pins stayed fixed durin
 assert.deepEqual(counts, {contexts: 16, runs: 2028, retired: 1906, register_inputs: 312, memory_inputs: 312, flag_inputs: 1024,
   boundaries: 20, code_reads: 16, faults: 128, repairs: 48, current_inputs: 4, repeats: 16, controls: 24,
   cold: 8, consumers: 8, retained: 4, currentness: 4, overlap: 8, relative: 32, self_code: 36,
-  deferred_store_faults: 24, helper_calls: 2990, read_calls: 1084, store_calls: 1906}, 'finite source ledger and observed canonical chronology');
+  deferred_store_faults: 24, helper_calls: 2990 - 4 * 2 * 4, read_calls: 1084 - 4 * 2 * 2, store_calls: 1906 - 4 * 2 * 2}, 'finite source ledger and observed canonical chronology');
 assert.equal(modules.length, 40);
 writeFileSync(join(output, 'result.json'), JSON.stringify({status: 'ok', engine_sha256: engine.sha256, source_pins: sourcePins,
   counts, contexts, modules, observations, limits: [

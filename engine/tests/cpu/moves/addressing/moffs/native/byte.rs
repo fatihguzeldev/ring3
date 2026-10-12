@@ -220,7 +220,7 @@ fn assert_module(wasm: &[u8], resident: bool, opcode: u8) {
     } else {
         "store8"
     };
-    let mut types = vec![3];
+    let mut types = vec![4];
     for arity in [
         4,
         if resident { 7 } else { 6 },
@@ -231,6 +231,7 @@ fn assert_module(wasm: &[u8], resident: bool, opcode: u8) {
         } else {
             2
         },
+        6,
     ] {
         types.extend([0x60, arity]);
         types.extend(std::iter::repeat_n(0x7f, arity as usize));
@@ -254,13 +255,20 @@ fn assert_module(wasm: &[u8], resident: bool, opcode: u8) {
         imports.extend(tail);
     }
     assert_eq!(section(wasm, 2), imports);
-    assert_eq!(section(wasm, 3), [1, 0]);
+    assert_eq!(section(wasm, 3), [2, 0, 3]);
     assert_eq!(section(wasm, 7), [1, 3, b'r', b'u', b'n', 0, 2]);
     let mut bodies = section(wasm, 10);
-    assert_eq!(unsigned(&mut bodies), 1);
+    assert_eq!(unsigned(&mut bodies), 2);
+    let length = unsigned(&mut bodies) as usize;
+    let (body, remaining) = bodies.split_at(length);
+    assert_eq!(&body[..7], &[3, 16, 0x7f, 1, 0x7e, 10, 0x7f]);
+    assert_eq!(body.last(), Some(&0x0b));
+    bodies = remaining;
     let length = unsigned(&mut bodies) as usize;
     assert_eq!(bodies.len(), length);
-    assert_eq!(&bodies[..7], &[3, 16, 0x7f, 1, 0x7e, 10, 0x7f]);
+    assert_eq!(&bodies[..3], &[1, 3, 0x7f]);
+    assert_eq!(bodies.last(), Some(&0x0b));
+    assert!(bodies.len() > 3);
     assert!(wasm.len() <= 65_536);
 }
 

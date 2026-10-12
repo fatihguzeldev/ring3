@@ -83,8 +83,27 @@ pub(super) fn instruction(
     } else {
         operation.destination
     } {
-        memory::address_value(code, address);
-        code.local_set(ADDRESS);
+        if matches!(
+            operation.kind,
+            SimdKind::SaveExtended | SimdKind::RestoreExtended
+        ) {
+            // state images retain their selected-span helper policy until that boundary is integrated.
+            memory::address_value(code, address);
+            code.local_set(ADDRESS);
+        } else {
+            memory::checked_address(
+                code,
+                address,
+                u32::from(operation.memory_bytes),
+                if operation.writes_memory() {
+                    crate::cpu::x86::SegmentAccess::Write
+                } else {
+                    crate::cpu::x86::SegmentAccess::Read
+                },
+                imports,
+                exit_depth,
+            );
+        }
     }
     if operation.reads_memory() {
         code.local_get(ADDRESS)

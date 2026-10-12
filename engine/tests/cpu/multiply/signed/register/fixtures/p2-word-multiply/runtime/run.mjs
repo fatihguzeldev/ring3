@@ -244,9 +244,9 @@ for (const owner of ['replacement', 'resident']) for (const entries of [false, t
     if (overflow) upload(c, 0xfffffffe, Buffer.from([0x55, 1]));
     const r = registers(); r[0] = lowWord(r[0], a); r[7] = address;
     const before = seed(c, PC, r), stopped = {...before, registers: [...before.registers], pc: before.pc + 5}; stopped.registers[3] = 0x11223344;
-    const fault = {detail: overflow ? 3 : missing ? 1 : 2, address: overflow ? address : crossing ? 0x8000 : address, access: 1};
-    run(c, module, 2, stopped, {label: kind + ' read failure retains zero/nonzero destination and dirty FLAGS after MOV', reason: 5, retired: 1, fault, helperVersion: 2});
-    run(c, module, 1, stopped, {label: kind + ' unchanged read retry', reason: 5, retired: 0, fault, helperVersion: 2}); counts.faults += 2;
+    const fault = overflow ? undefined : {detail: missing ? 1 : 2, address: crossing ? 0x8000 : address, access: 1};
+    run(c, module, 2, stopped, {label: kind + ' read failure retains zero/nonzero destination and dirty FLAGS after MOV', reason: overflow ? 11 : 5, retired: 1, fault, helperVersion: overflow ? null : 2, exitVersion: overflow ? 6 : 2});
+    run(c, module, 1, stopped, {label: kind + ' unchanged read retry', reason: overflow ? 11 : 5, retired: 0, fault, helperVersion: overflow ? null : 2, exitVersion: overflow ? 6 : 2}); counts.faults += 2;
     if (crossing && missing) checkRam(c, 0x7ffe, unchanged);
     if (overflow) checkRam(c, 0xfffffffe, Buffer.from([0x55, 1]));
     if (!overflow) {

@@ -20,7 +20,7 @@ const stats={contexts:0,numeric_cases:0,ea_cases:0,boundaries:0,read_faults:0,di
 const observations=[], modules=[];
 function record(magic,size,fields,version=1){const b=Buffer.alloc(size);b.write(magic);b.writeUInt16LE(version,4);b.writeUInt16LE(1,6);b.writeUInt32LE(size,8);fields.forEach((v,i)=>b.writeUInt32LE(v>>>0,16+i*4));return b;}
 const state=(r,pc,f)=>record('R3ST',56,[...r,pc,f]);
-const exit=(reason,retired,detail=0,address=0)=>record('R3EX',40,[reason,retired,detail,address,reason===5?1:0,reason===5?4:0],5);
+const exit=(reason,retired,detail=0,address=0)=>record('R3EX',40,[reason,retired,detail,address,reason===5?1:0,reason===5?4:0],reason===11?6:5);
 const helper=(value=0,detail=0,address=0)=>record('R3MH',40,[detail?1:0,detail?0:value,detail,address,detail?1:0,detail?4:0]);
 const words=a=>{const b=Buffer.alloc(a.length*4);a.forEach((v,i)=>b.writeUInt32LE(v>>>0,i*4));return b;};
 function refresh(c){c.bytes=new Uint8Array(c.memory.buffer);c.view=new DataView(c.memory.buffer);return c;}
@@ -85,7 +85,8 @@ for(const owner of ['replacement','resident'])for(const kind of ['unsigned','sig
     if(shape.map===SECOND)unmap(c,SECOND);if(shape.permission)protect(c,shape.permission,2);
     const r=[...REG];r[3]=shape.address;seed(c,r,PC,0xcd7);
     run(c,u,0,r,PC,0xcd7,1,0);refresh(c).view.setUint32(c.base+96,1,true);run(c,u,1,r,PC,0xcd7,2,0);refresh(c).view.setUint32(c.base+96,0,true);
-    run(c,u,1,r,PC,0xcd7,5,0,undefined,shape.detail,shape.fault);run(c,u,1,r,PC,0xcd7,5,0,undefined,shape.detail,shape.fault);stats.read_faults++;
+    const reason=shape.detail===3?11:5,detail=reason===11?0:shape.detail,fault=reason===11?0:shape.fault;
+    run(c,u,1,r,PC,0xcd7,reason,0,undefined,detail,fault);run(c,u,1,r,PC,0xcd7,reason,0,undefined,detail,fault);stats.read_faults++;
     if(shape.detail!==3){if(shape.map)map(c,shape.map);if(shape.permission)protect(c,shape.permission,3);put(c,shape.address,5);const result=divide(kind,r,5);assert.ok(result);run(c,u,1,result,PC+2,0xcd7,1,1,5);stats.retained_retries++;}
   }
   for(const [edx,bad,repair] of [[0,0,5],[1,1,0xffffffff]]){

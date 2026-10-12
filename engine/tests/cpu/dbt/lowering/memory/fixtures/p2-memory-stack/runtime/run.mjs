@@ -155,7 +155,7 @@ function readState(engine) {
 
 function exit(reason, retired, detail = 0, address = 0, access = 0, length = reason === 5 ? 4 : 0) {
   const bytes = new Uint8Array(40), view = new DataView(bytes.buffer);
-  header(bytes, view, 0, 'R3EX', 40, 2);
+  header(bytes, view, 0, 'R3EX', 40, reason === 11 || reason === 15 ? 6 : 2);
   [reason, retired, detail, address, access, length].forEach((field, index) => view.setUint32(16 + index * 4, field, true));
   return bytes;
 }
@@ -362,7 +362,7 @@ for (const fixture of faultCases) {
   expected.eflags = 0x457;
   expected.eip = 0x1008;
   writeState(engine, start);
-  run(engine, child, 20, expected, exit(5, 2, fixture.detail, fixture.fault, fixture.access), fixture.name, helperRecord(1, 0, fixture.detail, fixture.fault, fixture.access));
+  run(engine, child, 20, expected, fixture.detail === 3 ? exit(fixture.push && fixture.access === 2 ? 15 : 11, 2) : exit(5, 2, fixture.detail, fixture.fault, fixture.access), fixture.name, fixture.detail === 3 ? arena(engine).slice(100, 140) : helperRecord(1, 0, fixture.detail, fixture.fault, fixture.access));
   for (const [address, data] of fixture.observe ?? fixture.words ?? []) assert.equal(guestValue(engine, address), data, 'failed memory stack instruction preserves readable source/destination bytes');
   guarded(engine, child, 'failed read or second store preserves code stamps');
 }

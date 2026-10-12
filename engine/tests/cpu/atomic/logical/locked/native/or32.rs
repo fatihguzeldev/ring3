@@ -116,6 +116,8 @@ fn assert_imports(wasm: &[u8], expected: &[(&str, usize)], type_parameters: &[us
     let mut types = Vec::new();
     let mut imported = Vec::new();
     let mut exported = false;
+    let mut internal_functions = false;
+    let mut code_bodies = false;
     while !sections.is_empty() {
         let kind = take(&mut sections, 1)[0];
         let length = unsigned(&mut sections) as usize;
@@ -154,6 +156,26 @@ fn assert_imports(wasm: &[u8], expected: &[(&str, usize)], type_parameters: &[us
                     imported.push(expected_name);
                 }
             }
+            3 => {
+                assert_eq!(unsigned(&mut section), 2);
+                assert_eq!(unsigned(&mut section), 0);
+                assert_eq!(unsigned(&mut section) as usize, type_parameters.len());
+                internal_functions = true;
+            }
+            10 => {
+                assert_eq!(unsigned(&mut section), 2);
+                for declarations in [&[(16, 0x7f), (1, 0x7e), (10, 0x7f)][..], &[(3, 0x7f)][..]] {
+                    let length = unsigned(&mut section) as usize;
+                    let mut body = take(&mut section, length);
+                    assert_eq!(body.last(), Some(&0x0b));
+                    assert_eq!(unsigned(&mut body) as usize, declarations.len());
+                    for &(count, kind) in declarations {
+                        assert_eq!((unsigned(&mut body), take(&mut body, 1)[0]), (count, kind));
+                    }
+                    assert!(!body.is_empty());
+                }
+                code_bodies = true;
+            }
             7 => {
                 assert_eq!(unsigned(&mut section), 1);
                 assert_eq!(name(&mut section), "run");
@@ -165,9 +187,13 @@ fn assert_imports(wasm: &[u8], expected: &[(&str, usize)], type_parameters: &[us
         }
         assert!(section.is_empty());
     }
-    assert_eq!(types, type_parameters);
+    let mut complete_types = type_parameters.to_vec();
+    complete_types.push(6);
+    assert_eq!(types, complete_types);
     assert_eq!(imported.len(), expected.len());
     assert!(exported);
+    assert!(internal_functions);
+    assert!(code_bodies);
 }
 
 fn instruction_error(pc: u32, cause: InstructionError) -> CompileError {

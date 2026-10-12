@@ -339,16 +339,19 @@ while (offset<input.length) {
   const sections=new Map(), file=cursor(bytes.subarray(8));
   while (file.more()) {const id=file.byte(), size=file.u(); sections.set(id,file.take(size));}
   file.end();
-  const types=cursor(sections.get(1)); assert.equal(types.u(),4);
-  for (const arity of [4,resident?7:6,1,resident?6:2]) {
+  const types=cursor(sections.get(1)); assert.equal(types.u(),5);
+  for (const arity of [4,resident?7:6,1,resident?6:2,6]) {
     assert.equal(types.byte(),0x60); assert.equal(types.u(),arity);
     assert.deepEqual([...types.take(arity)],Array(arity).fill(0x7f));
     assert.equal(types.u(),1); assert.equal(types.byte(),0x7f);
   } types.end();
-  const functions=cursor(sections.get(3)); assert.equal(functions.u(),1);
-  assert.equal(functions.u(),0); functions.end();
-  const bodies=cursor(sections.get(10)); assert.equal(bodies.u(),1);
-  const body=cursor(bodies.take(bodies.u())); bodies.end(); assert.equal(body.u(),3);
+  const functions=cursor(sections.get(3)); assert.equal(functions.u(),2);
+  assert.equal(functions.u(),0); assert.equal(functions.u(),4); functions.end();
+  const bodies=cursor(sections.get(10)); assert.equal(bodies.u(),2);
+  const body=cursor(bodies.take(bodies.u()));
+  const segment=cursor(bodies.take(bodies.u())); bodies.end();
+  assert.equal(segment.u(),1); assert.equal(segment.u(),3); assert.equal(segment.byte(),0x7f);
+  assert.equal(body.u(),3);
   for (const [number,type] of [[16,0x7f],[1,0x7e],[10,0x7f]]) {
     assert.equal(body.u(),number); assert.equal(body.byte(),type);
   }

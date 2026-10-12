@@ -276,13 +276,14 @@ pub(in crate::cpu::dbt::wasm) fn instruction(
             if address.address_size == crate::cpu::x86::ir::AddressSize::Bits16 {
                 code.i32_const(65535).i32_and();
             }
-            segments::base(
+            memory::checked_offset(
                 code,
-                address
-                    .segment
-                    .unwrap_or(crate::cpu::x86::SegmentRegister::Ds),
+                address.resolved_segment(),
+                1,
+                crate::cpu::x86::SegmentAccess::Read,
+                imports,
+                exit_depth,
             );
-            code.i32_add().local_set(ADDRESS);
             memory::load_narrow_at_address(code, SmallWidth::Byte, imports, exit_depth);
             insert_byte(code, ByteRegister::Al);
         }
@@ -306,8 +307,15 @@ pub(in crate::cpu::dbt::wasm) fn instruction(
                 .local_get(register(Register32::Eax))
                 .i32_const(0xff)
                 .i32_and()
-                .i32_add()
-                .local_set(ADDRESS);
+                .i32_add();
+            memory::checked_offset(
+                code,
+                crate::cpu::x86::SegmentRegister::Ds,
+                1,
+                crate::cpu::x86::SegmentAccess::Read,
+                imports,
+                exit_depth,
+            );
             memory::load_narrow_at_address(code, SmallWidth::Byte, imports, exit_depth);
             insert_byte(code, ByteRegister::Al);
         }
@@ -441,7 +449,7 @@ pub(in crate::cpu::dbt::wasm) fn instruction(
             address,
             source,
         } => {
-            memory::load_narrow_value(code, address, SmallWidth::Word, imports, exit_depth);
+            memory::load_narrow_for_modify(code, address, SmallWidth::Word, imports, exit_depth);
             word_value(code, source);
             let binary = match kind {
                 WordMemoryArithmeticKind::Add => {
@@ -470,7 +478,8 @@ pub(in crate::cpu::dbt::wasm) fn instruction(
                 }
             }
             code.i32_const(0xffff).i32_and().local_set(RESULT);
-            memory::store_word_result(code, address, imports, exit_depth);
+            // the modify read retains ADDRESS; the source cannot access memory.
+            memory::store_word_result_at_address(code, imports, exit_depth);
             // store validation uses operand scratch; recover the original word after success.
             word_value(code, source);
             code.local_set(RHS).local_get(RESULT).local_get(RHS);
@@ -499,7 +508,7 @@ pub(in crate::cpu::dbt::wasm) fn instruction(
             address,
             source,
         } => {
-            memory::load_narrow_value(code, address, SmallWidth::Word, imports, exit_depth);
+            memory::load_narrow_for_modify(code, address, SmallWidth::Word, imports, exit_depth);
             // helper validation uses operand scratch; capture the source after success.
             word_value(code, source);
             match kind {
@@ -508,7 +517,8 @@ pub(in crate::cpu::dbt::wasm) fn instruction(
                 WordLogicalKind::Xor => code.i32_xor(),
             };
             code.local_set(RESULT);
-            memory::store_word_result(code, address, imports, exit_depth);
+            // the modify read retains ADDRESS; the source cannot access memory.
+            memory::store_word_result_at_address(code, imports, exit_depth);
             logical_flags(code, 15);
             store = true;
         }
@@ -1070,7 +1080,7 @@ pub(in crate::cpu::dbt::wasm) fn instruction(
                 .local_set(register(destination));
         }
         Operation::MemoryExchangeAddWord { address, source } => {
-            memory::load_narrow_value(code, address, SmallWidth::Word, imports, exit_depth);
+            memory::load_narrow_for_modify(code, address, SmallWidth::Word, imports, exit_depth);
             code.local_set(LHS);
             word_value(code, WordValue::Register(source));
             code.local_set(RHS)
@@ -1094,7 +1104,7 @@ pub(in crate::cpu::dbt::wasm) fn instruction(
             store = true;
         }
         Operation::MemoryExchangeAdd { address, source } => {
-            memory::load_result(code, address, imports, exit_depth);
+            memory::load_modify_result(code, address, imports, exit_depth);
             code.local_get(RESULT)
                 .local_set(LHS)
                 .local_get(register(source))
@@ -1186,7 +1196,7 @@ pub(in crate::cpu::dbt::wasm) fn instruction(
             store = true;
         }
         Operation::MemoryExchangeAddByte { address, source } => {
-            memory::load_narrow_value(code, address, SmallWidth::Byte, imports, exit_depth);
+            memory::load_narrow_for_modify(code, address, SmallWidth::Byte, imports, exit_depth);
             code.local_set(LHS);
             byte_value(code, ByteValue::Register(source));
             code.local_set(RHS)
@@ -1286,7 +1296,7 @@ pub(in crate::cpu::dbt::wasm) fn instruction(
             store = true;
         }
         Operation::MemoryCompareExchangeWord { address, source } => {
-            memory::load_narrow_value(code, address, SmallWidth::Word, imports, exit_depth);
+            memory::load_narrow_for_modify(code, address, SmallWidth::Word, imports, exit_depth);
             code.local_set(RHS);
             word_value(code, WordValue::Register(Register32::Eax));
             code.local_set(LHS);
@@ -1339,7 +1349,7 @@ pub(in crate::cpu::dbt::wasm) fn instruction(
             store = true;
         }
         Operation::MemoryCompareExchange { address, source } => {
-            memory::load_result(code, address, imports, exit_depth);
+            memory::load_modify_result(code, address, imports, exit_depth);
             code.local_get(register(Register32::Eax))
                 .local_set(LHS)
                 .local_get(RESULT)
@@ -1411,7 +1421,7 @@ pub(in crate::cpu::dbt::wasm) fn instruction(
             store = true;
         }
         Operation::MemoryCompareExchangeByte { address, source } => {
-            memory::load_narrow_value(code, address, SmallWidth::Byte, imports, exit_depth);
+            memory::load_narrow_for_modify(code, address, SmallWidth::Byte, imports, exit_depth);
             code.local_set(RHS);
             byte_value(code, ByteValue::Register(ByteRegister::Al));
             code.local_set(LHS);
@@ -1486,7 +1496,11 @@ pub(in crate::cpu::dbt::wasm) fn instruction(
                     }
                 }
                 Location32::Memory(address) => {
-                    memory::load_result(code, address, imports, exit_depth);
+                    if matches!(kind, BinaryKind::Cmp | BinaryKind::Test) {
+                        memory::load_result(code, address, imports, exit_depth);
+                    } else {
+                        memory::load_modify_result(code, address, imports, exit_depth);
+                    }
                     code.local_get(RESULT).local_set(LHS);
                     value(code, source);
                     code.local_set(RHS);
@@ -1776,7 +1790,7 @@ pub(in crate::cpu::dbt::wasm) fn instruction(
             store = true;
         }
         Operation::ReadBitTest { address, index } => {
-            memory::address_value(code, address);
+            memory::offset_value(code, address);
             if let BitIndex::Register(source) = index {
                 code.local_get(register(source))
                     .i32_const(5)
@@ -1785,7 +1799,17 @@ pub(in crate::cpu::dbt::wasm) fn instruction(
                     .i32_shl()
                     .i32_add();
             }
-            code.local_set(ADDRESS);
+            if address.address_size == crate::cpu::x86::ir::AddressSize::Bits16 {
+                code.i32_const(0xffff).i32_and();
+            }
+            memory::checked_offset(
+                code,
+                address.resolved_segment(),
+                4,
+                crate::cpu::x86::SegmentAccess::Read,
+                imports,
+                exit_depth,
+            );
             match index {
                 BitIndex::Register(source) => {
                     code.local_get(register(source));
@@ -1827,7 +1851,7 @@ pub(in crate::cpu::dbt::wasm) fn instruction(
             byte_rotate_through_carry_cl(code, kind, destination);
         }
         Operation::MemoryByteRotateThroughCarryOne { kind, address } => {
-            memory::load_narrow_value(code, address, SmallWidth::Byte, imports, exit_depth);
+            memory::load_narrow_for_modify(code, address, SmallWidth::Byte, imports, exit_depth);
             code.local_set(LHS)
                 .local_get(FLAGS)
                 .i32_const(1)
@@ -1855,7 +1879,7 @@ pub(in crate::cpu::dbt::wasm) fn instruction(
             store = true;
         }
         Operation::MemoryByteRotateOne { kind, address } => {
-            memory::load_narrow_value(code, address, SmallWidth::Byte, imports, exit_depth);
+            memory::load_narrow_for_modify(code, address, SmallWidth::Byte, imports, exit_depth);
             code.local_set(RESULT);
             byte_rotate_one_value(code, kind);
             memory::store_byte_result(code, address, imports, exit_depth);
@@ -1896,7 +1920,7 @@ pub(in crate::cpu::dbt::wasm) fn instruction(
             rotate_through_carry_cl(code, kind, destination);
         }
         Operation::MemoryRotateThroughCarryOne { kind, address } => {
-            memory::load_result(code, address, imports, exit_depth);
+            memory::load_modify_result(code, address, imports, exit_depth);
             code.local_get(RESULT)
                 .local_set(LHS)
                 .local_get(FLAGS)
@@ -1923,7 +1947,7 @@ pub(in crate::cpu::dbt::wasm) fn instruction(
             store = true;
         }
         Operation::MemoryRotateOne { kind, address } => {
-            memory::load_result(code, address, imports, exit_depth);
+            memory::load_modify_result(code, address, imports, exit_depth);
             rotate_one_value(code, kind);
             memory::store_result(code, address, imports, exit_depth);
             rotate_one_flags(code, kind);
@@ -2177,6 +2201,26 @@ pub(in crate::cpu::dbt::wasm) fn instruction(
             store = true;
         }
         Operation::ReadCallWord { address } => {
+            memory::checked_address(
+                code,
+                address,
+                2,
+                crate::cpu::x86::SegmentAccess::Read,
+                imports,
+                exit_depth,
+            );
+            memory::checked_address(
+                code,
+                EffectiveAddress {
+                    base: Some(Register32::Esp),
+                    displacement: (-2_i32) as u32,
+                    ..Default::default()
+                },
+                2,
+                crate::cpu::x86::SegmentAccess::Write,
+                imports,
+                exit_depth,
+            );
             memory::load_narrow_value(code, address, SmallWidth::Word, imports, exit_depth);
             code.i32_const((instruction.next_pc().0 & 0xffff) as i32)
                 .local_set(RESULT);
@@ -2209,6 +2253,28 @@ pub(in crate::cpu::dbt::wasm) fn instruction(
         Operation::Call {
             target: BranchTarget::Indirect(target),
         } => {
+            if let Location32::Memory(address) = target {
+                memory::checked_address(
+                    code,
+                    address,
+                    4,
+                    crate::cpu::x86::SegmentAccess::Read,
+                    imports,
+                    exit_depth,
+                );
+                memory::checked_address(
+                    code,
+                    EffectiveAddress {
+                        base: Some(Register32::Esp),
+                        displacement: (-4_i32) as u32,
+                        ..Default::default()
+                    },
+                    4,
+                    crate::cpu::x86::SegmentAccess::Write,
+                    imports,
+                    exit_depth,
+                );
+            }
             indirect_target(code, target, imports, exit_depth);
             memory::store(
                 code,
@@ -2259,6 +2325,26 @@ pub(in crate::cpu::dbt::wasm) fn instruction(
             store = true;
         }
         Operation::PushMemoryWord { source } => {
+            memory::checked_address(
+                code,
+                source,
+                2,
+                crate::cpu::x86::SegmentAccess::Read,
+                imports,
+                exit_depth,
+            );
+            memory::checked_address(
+                code,
+                EffectiveAddress {
+                    base: Some(Register32::Esp),
+                    displacement: (-2_i32) as u32,
+                    ..Default::default()
+                },
+                2,
+                crate::cpu::x86::SegmentAccess::Write,
+                imports,
+                exit_depth,
+            );
             memory::load_narrow_value(code, source, SmallWidth::Word, imports, exit_depth);
             code.local_set(RESULT);
             memory::push_word_result(code, imports, exit_depth);

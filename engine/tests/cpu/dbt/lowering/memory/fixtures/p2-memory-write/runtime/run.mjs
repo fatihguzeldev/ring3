@@ -156,7 +156,7 @@ function readState(engine) {
 
 function exit(reason, retired, detail = 0, address = 0, access = 0, length = reason === 5 ? 4 : 0) {
   const bytes = new Uint8Array(40), view = new DataView(bytes.buffer);
-  header(bytes, view, 0, 'R3EX', 40, 2);
+  header(bytes, view, 0, 'R3EX', 40, reason === 11 || reason === 15 ? 6 : 2);
   [reason, retired, detail, address, access, length].forEach((field, index) => view.setUint32(16 + index * 4, field, true));
   return bytes;
 }
@@ -383,7 +383,7 @@ for (const fixture of faultCases) {
   const stopped = copyState(start); stopped.registers[2] = 0; stopped.eflags = 0x457; stopped.eip = 0x1008;
   if (fixture.sameByte) assert.equal(result(stopped, fixture.form, 0xa1b2c3d4).value, 0xa1b2c3d4, 'identity operation still requires Store4 permission');
   writeState(engine, start);
-  run(engine, child, 20, stopped, exit(5, 2, fixture.detail, fixture.fault, fixture.access), `${fixture.form.name}/${fixture.label} preserves prefix flags`, helperRecord(1, 0, fixture.detail, fixture.fault, fixture.access));
+  run(engine, child, 20, stopped, fixture.detail === 3 ? exit(11, 2) : exit(5, 2, fixture.detail, fixture.fault, fixture.access), `${fixture.form.name}/${fixture.label} preserves prefix flags`, fixture.detail === 3 ? arena(engine).slice(100, 140) : helperRecord(1, 0, fixture.detail, fixture.fault, fixture.access));
   assert.deepEqual(sampleRam(engine, sampledAddresses.concat([0x1000])), sampled, 'failed access preserves readable RAM/code, including rejected cross-page Store4');
   guarded(engine, child); if (fixture.access === 1) counts.read_faults++; else counts.store_faults++;
   if (fixture.sameByte) counts.explicit_same_byte_permission_faults++;
@@ -502,7 +502,7 @@ const provenance = {
   counts, generated_modules: modules, actual_generated_run_calls: actualRuns, snapshot_guard_calls: snapshotGuards, ram_words_observed: ramWords,
   array: {cases: arrayCases.length, rows: zeroBranches + nonzeroBranches, zero_branches: zeroBranches, nonzero_branches: nonzeroBranches, retired: arrayRetired},
   engine_sha256: hash(engineBytes), generated_set_sha256: hash(generatedHashes.join('\n')), generated_module_sha256: generatedHashes,
-  sources: Object.fromEntries(['integer.S', 'runtime/run.mjs', 'oracle.c'].map(name => [name, hash(readFileSync(join(fixtureRoot, name)))]).concat([['dbt_memory_write_wasm.rs', hash(readFileSync(join(root, 'engine/tests/cpu/dbt/lowering/memory/wasm/write.rs', 'engine/tests/cpu/dbt/lowering/wasm.rs', 'engine/tests/support/wasm.rs', 'engine/tests/cpu/dbt/lowering/wasm.rs', 'engine/tests/support/wasm.rs')))]])),
+  sources: Object.fromEntries(['integer.S', 'runtime/run.mjs', 'oracle.c'].map(name => [name, hash(readFileSync(join(fixtureRoot, name)))]).concat([['dbt_memory_write_wasm.rs', hash(readFileSync(join(root, 'engine/tests/cpu/dbt/lowering/memory/wasm/write.rs')))]]).concat(['engine/tests/cpu/dbt/lowering/wasm.rs', 'engine/tests/support/wasm.rs'].map(path => [path, hash(readFileSync(join(root, path)))]))),
   artifacts: {object_sha256: hash(object), native_oracle_sha256: hash(readFileSync(oraclePath))},
   tools: {node: process.version, clang: execFileSync('clang', ['--version'], {encoding: 'utf8'}).trim(), llvm_objdump: execFileSync('xcrun', ['llvm-objdump', '--version'], {encoding: 'utf8'}).trim()},
   commands: {run: [process.execPath, process.argv[1], enginePath, outputDir, root], assemble: ['clang', ...assemble], disassemble: ['xcrun', ...disassemble], compile_oracle: ['clang', ...compileOracle]},

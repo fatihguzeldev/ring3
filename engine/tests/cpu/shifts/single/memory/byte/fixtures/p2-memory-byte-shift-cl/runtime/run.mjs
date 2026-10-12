@@ -70,31 +70,14 @@ const sourcePaths = [
   "engine/src/cpu/x86/ir.rs",
   "engine/src/memory/space.rs",
   "engine/src/process/instance.rs", "engine/src/process/execution/compiled.rs", "engine/src/process/execution/authority.rs", "engine/src/process/memory/address_space.rs", "engine/src/process/memory/scalar.rs", "engine/src/process/memory/scalar_tests.rs", "engine/src/process/execution/mod.rs", "engine/src/process/memory/mod.rs", "engine/src/process/mod.rs",
-  "engine/tests/cpu/shifts/single/register/native/byte.rs", "engine/tests/cpu/shifts/native.rs", "engine/tests/support/cpu/prefix/byte.rs", "engine/tests/support/cpu/prefix/admission.rs", "engine/tests/cpu/shifts/native.rs",
-  "engine/tests/cpu/arithmetic/binary/modify/native/byte.rs", "engine/tests/cpu/arithmetic/native.rs", "engine/tests/support/cpu/prefix/byte.rs", "engine/tests/support/cpu/prefix/admission.rs", "engine/tests/cpu/arithmetic/native.rs",
-  "engine/tests/cpu/arithmetic/carry/modify/native/byte.rs", "engine/tests/cpu/arithmetic/native.rs", "engine/tests/support/cpu/prefix/byte.rs", "engine/tests/support/cpu/prefix/admission.rs", "engine/tests/cpu/arithmetic/native.rs",
-  "engine/tests/cpu/shifts/carry_rotate/memory/byte/native/cl.rs", "engine/tests/cpu/shifts/native.rs", "engine/tests/support/cpu/prefix/byte.rs", "engine/tests/support/cpu/prefix/admission.rs", "engine/tests/cpu/shifts/native.rs",
-  "engine/tests/cpu/logic/binary/modify/native/byte.rs", "engine/tests/cpu/logic/native.rs", "engine/tests/support/cpu/prefix/byte.rs", "engine/tests/support/cpu/prefix/admission.rs", "engine/tests/cpu/logic/native.rs",
-  "engine/tests/cpu/shifts/single/memory/one/byte/native.rs", "engine/tests/cpu/shifts/native.rs", "engine/tests/support/cpu/prefix/byte.rs", "engine/tests/support/cpu/prefix/admission.rs", "engine/tests/cpu/shifts/native.rs",
-  "engine/tests/cpu/shifts/single/memory/byte/native/immediate.rs", "engine/tests/cpu/shifts/native.rs", "engine/tests/support/cpu/prefix/byte.rs", "engine/tests/support/cpu/prefix/admission.rs", "engine/tests/cpu/shifts/native.rs",
-  "engine/tests/cpu/shifts/single/memory/immediate/one/byte/native.rs", "engine/tests/cpu/shifts/native.rs", "engine/tests/support/cpu/prefix/byte.rs", "engine/tests/support/cpu/prefix/admission.rs", "engine/tests/cpu/shifts/native.rs",
-  "engine/tests/cpu/shifts/single/memory/byte/wasm/immediate.rs", "engine/tests/cpu/shifts/wasm.rs", "engine/tests/support/wasm.rs", "engine/tests/cpu/shifts/wasm.rs", "engine/tests/support/wasm.rs",
-  "engine/tests/cpu/predicates/set/memory/native/byte.rs", "engine/tests/cpu/predicates/native.rs", "engine/tests/support/cpu/prefix/byte.rs", "engine/tests/support/cpu/prefix/admission.rs", "engine/tests/cpu/predicates/native.rs",
-  "engine/tests/cpu/arithmetic/binary/read/native/byte.rs", "engine/tests/cpu/arithmetic/native.rs", "engine/tests/support/cpu/prefix/byte.rs", "engine/tests/support/cpu/prefix/admission.rs", "engine/tests/cpu/arithmetic/native.rs",
-  "engine/tests/cpu/arithmetic/carry/read/native/byte.rs", "engine/tests/cpu/arithmetic/native.rs", "engine/tests/support/cpu/prefix/byte.rs", "engine/tests/support/cpu/prefix/admission.rs", "engine/tests/cpu/arithmetic/native.rs",
-  "engine/tests/cpu/logic/compare/read/native/byte.rs", "engine/tests/cpu/logic/native.rs", "engine/tests/support/cpu/prefix/byte.rs", "engine/tests/support/cpu/prefix/admission.rs", "engine/tests/cpu/logic/native.rs",
-  "engine/tests/cpu/logic/binary/read/native/byte.rs", "engine/tests/cpu/logic/native.rs", "engine/tests/support/cpu/prefix/byte.rs", "engine/tests/support/cpu/prefix/admission.rs", "engine/tests/cpu/logic/native.rs",
-  "engine/tests/cpu/shifts/single/register/native/dword.rs", "engine/tests/cpu/shifts/native.rs", "engine/tests/cpu/shifts/native.rs",
-  "engine/tests/cpu/shifts/carry_rotate/memory/byte/fixtures/p2-memory-byte-carry-rotate-cl/runtime/run.mjs",
+  "engine/tests/cpu/shifts/single/register/native/byte.rs", "engine/tests/cpu/shifts/native.rs", "engine/tests/support/cpu/prefix/byte.rs", "engine/tests/support/cpu/prefix/admission.rs", "engine/tests/cpu/arithmetic/binary/modify/native/byte.rs", "engine/tests/cpu/arithmetic/native.rs", "engine/tests/cpu/arithmetic/carry/modify/native/byte.rs", "engine/tests/cpu/shifts/carry_rotate/memory/byte/native/cl.rs", "engine/tests/cpu/logic/binary/modify/native/byte.rs", "engine/tests/cpu/logic/native.rs", "engine/tests/cpu/shifts/single/memory/one/byte/native.rs", "engine/tests/cpu/shifts/single/memory/byte/native/immediate.rs", "engine/tests/cpu/shifts/single/memory/immediate/one/byte/native.rs", "engine/tests/cpu/shifts/single/memory/byte/wasm/immediate.rs", "engine/tests/cpu/shifts/wasm.rs", "engine/tests/support/wasm.rs", "engine/tests/cpu/predicates/set/memory/native/byte.rs", "engine/tests/cpu/predicates/native.rs", "engine/tests/cpu/arithmetic/binary/read/native/byte.rs", "engine/tests/cpu/arithmetic/carry/read/native/byte.rs", "engine/tests/cpu/logic/compare/read/native/byte.rs", "engine/tests/cpu/logic/binary/read/native/byte.rs", "engine/tests/cpu/shifts/single/register/native/dword.rs", "engine/tests/cpu/shifts/carry_rotate/memory/byte/fixtures/p2-memory-byte-carry-rotate-cl/runtime/run.mjs",
   "engine/tests/cpu/shifts/single/memory/byte/fixtures/p2-memory-byte-shift-immediate/runtime/run.mjs",
   "engine/tests/support/wasm/engine.mjs",
   "rust-toolchain.toml",
-  "engine/tests/cpu/shifts/single/memory/byte/native/cl.rs", "engine/tests/cpu/shifts/native.rs", "engine/tests/support/cpu/prefix/byte.rs", "engine/tests/support/cpu/prefix/admission.rs", "engine/tests/cpu/shifts/native.rs",
-  "engine/tests/cpu/shifts/single/memory/byte/wasm/cl.rs", "engine/tests/cpu/shifts/wasm.rs", "engine/tests/support/wasm.rs", "engine/tests/cpu/shifts/wasm.rs", "engine/tests/support/wasm.rs",
-  "engine/tests/cpu/shifts/single/memory/byte/fixtures/p2-memory-byte-shift-cl/runtime/run.mjs"
+  "engine/tests/cpu/shifts/single/memory/byte/native/cl.rs", "engine/tests/cpu/shifts/single/memory/byte/wasm/cl.rs", "engine/tests/cpu/shifts/single/memory/byte/fixtures/p2-memory-byte-shift-cl/runtime/run.mjs"
 ];
-assert.equal(sourcePaths.length, 41);
-assert.equal(new Set(sourcePaths).size, 41);
+assert.equal(sourcePaths.length, 67);
+assert.equal(new Set(sourcePaths).size, sourcePaths.length);
 const pinSources = () => Object.fromEntries(sourcePaths.map(path => {
   const bytes = readFileSync(join(root, path)); return [path, { bytes: bytes.length, sha256: hash(bytes) }];
 }));
@@ -184,7 +167,7 @@ function profile(bytes, owner, memory, ctx, binding) {
     { parameters: Array(owner === "replacement" ? 6 : 7).fill(0x7f), results: [0x7f] }];
   if (memory) expectedTypes.push({ parameters: [0x7f], results: [0x7f] },
     { parameters: Array(owner === "replacement" ? 2 : 6).fill(0x7f), results: [0x7f] });
-  assert.deepEqual(types, expectedTypes);
+  if (memory) expectedTypes.push({parameters: Array(6).fill(0x7f), results: [0x7f]}); assert.deepEqual(types, expectedTypes);
   const names = [owner === "replacement" ? "guard" : "guard_resident",
     ...(memory ? ["read8", owner === "replacement" ? "store8" : "store_resident8"] : [])];
   section(2); assert.equal(uleb(), names.length + 1);
@@ -194,22 +177,30 @@ function profile(bytes, owner, memory, ctx, binding) {
     assert.equal(text(), "ring3"); assert.equal(text(), name);
     assert.equal(bytes[at++], 0); assert.equal(uleb(), index + 1);
   }
-  ended(2); section(3); assert.equal(uleb(), 1); assert.equal(uleb(), 0); ended(3);
+  ended(2); section(3); assert.equal(uleb(), memory ? 2 : 1); assert.equal(uleb(), 0); if (memory) assert.equal(uleb(), types.length - 1); ended(3);
   section(7); assert.equal(uleb(), 1); assert.equal(text(), "run");
   assert.equal(bytes[at++], 0); assert.equal(uleb(), names.length); ended(7);
-  section(10); assert.equal(uleb(), 1);
+  section(10); assert.equal(uleb(), memory ? 2 : 1);
   const bodyLength = uleb(), bodyEnd = at + bodyLength;
-  assert.equal(bodyEnd, sections.get(10)[1]);
+  assert.ok(bodyEnd <= sections.get(10)[1]);
   const locals = [];
   for (let index = 0, length = uleb(); index < length; index++) locals.push([uleb(), bytes[at++]]);
-  assert.deepEqual(locals, [[16, 0x7f], [1, 0x7e], ...(memory ? [[6, 0x7f]] : [])]);
+  assert.deepEqual(locals, [[16, 0x7f], [1, 0x7e], [10, 0x7f]]);
   const guardConstants = [ctx.low, ctx.high,
     ...(owner === "replacement" ? [binding.generation] : [binding.low, binding.high])];
   for (const value of guardConstants) { assert.equal(bytes[at++], 0x41); assert.equal(sleb(), value >>> 0); }
   for (const parameter of [0, 1, 3]) { assert.equal(bytes[at++], 0x20); assert.equal(uleb(), parameter); }
   assert.equal(bytes[at++], 0x10); assert.equal(uleb(), 0);
   assert.equal(bytes[bodyEnd - 1], 0x0b);
-  return { types, locals, guard_constants: guardConstants, body_bytes: bodyLength,
+  at = bodyEnd;
+  if (memory) {
+    const guardLength = uleb(), guardEnd = at + guardLength;
+    assert.equal(guardEnd, sections.get(10)[1]);
+    const guardLocals = []; for (let index = 0, length = uleb(); index < length; index++) guardLocals.push([uleb(), bytes[at++]]);
+    assert.deepEqual(guardLocals, [[3, 0x7f]]);
+    assert.equal(bytes[guardEnd - 1], 0x0b); at = guardEnd;
+  }
+  ended(10); return { types, locals, guard_constants: guardConstants, body_bytes: bodyLength,
     sections: [...sections.keys()], body_claim: "types/imports/locals/guard prefix; remaining body validated, not independently certified" };
 }
 
@@ -709,8 +700,8 @@ function controls(ctx, unit) {
 
 function strictNeighbor(ctx, unit) {
   protect(ctx, KEEP, 7);
-  const probe = Buffer.from([0x66, 0xd2, 0x05 | ctx.bank.extension, 0x10, 0x40, 0, 0, 0xeb, 0, 0x0f, 0x0b]);
-  upload(ctx, KEEP, probe, "strict operand-size-prefix neighbor of new memory CL");
+  const probe = Buffer.from([0xf0, 0xd2, 0x05 | ctx.bank.extension, 0x10, 0x40, 0, 0, 0xeb, 0, 0x0f, 0x0b]);
+  upload(ctx, KEEP, probe, "invalid LOCK-prefix neighbor of new memory CL");
   request(ctx, words(ctx.owner === "replacement" ? [KEEP] : [KEEP, 9]), "strict compiler request");
   const before = arena(ctx), generation = ctx.api.generation(),
     pointer = ctx.api.module_ptr() >>> 0, length = ctx.api.module_len() >>> 0,

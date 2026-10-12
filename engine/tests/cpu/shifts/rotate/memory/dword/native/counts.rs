@@ -340,12 +340,13 @@ fn assert_rmw_module(engine: &EngineInstance, owner: Owner, id: u64) {
     let wasm = module(engine, owner, id);
     let resident = owner == Owner::Resident;
     let mut types = section(wasm, 1);
-    assert_eq!(unsigned(&mut types), 4);
+    assert_eq!(unsigned(&mut types), 5);
     for arity in [
         4,
         if resident { 7 } else { 6 },
         1,
         if resident { 6 } else { 2 },
+        6,
     ] {
         assert_eq!(byte(&mut types), 0x60);
         assert_eq!(unsigned(&mut types), arity);
@@ -387,7 +388,8 @@ fn assert_rmw_module(engine: &EngineInstance, owner: Owner, id: u64) {
     }
     assert!(imports.is_empty());
     let mut functions = section(wasm, 3);
-    assert_eq!((unsigned(&mut functions), unsigned(&mut functions)), (1, 0));
+    assert_eq!((unsigned(&mut functions), unsigned(&mut functions)), (2, 0));
+    assert_eq!(unsigned(&mut functions), 4);
     assert!(functions.is_empty());
     let mut exports = section(wasm, 7);
     assert_eq!(unsigned(&mut exports), 1);
@@ -395,10 +397,14 @@ fn assert_rmw_module(engine: &EngineInstance, owner: Owner, id: u64) {
     assert_eq!((byte(&mut exports), unsigned(&mut exports)), (0, 3));
     assert!(exports.is_empty());
     let mut bodies = section(wasm, 10);
-    assert_eq!(unsigned(&mut bodies), 1);
+    assert_eq!(unsigned(&mut bodies), 2);
     let length = unsigned(&mut bodies) as usize;
     let mut body = take(&mut bodies, length);
+    let segment_length = unsigned(&mut bodies) as usize;
+    let mut segment = take(&mut bodies, segment_length);
     assert!(bodies.is_empty());
+    assert_eq!(unsigned(&mut segment), 1);
+    assert_eq!((unsigned(&mut segment), byte(&mut segment)), (3, 0x7f));
     assert_eq!(unsigned(&mut body), 3);
     for expected in [(16, 0x7f), (1, 0x7e), (10, 0x7f)] {
         assert_eq!((unsigned(&mut body), byte(&mut body)), expected);

@@ -40,7 +40,7 @@ pub(super) fn rotate_through_carry_memory_word(
     imports: memory::Imports,
     exit_depth: u32,
 ) {
-    memory::load_narrow_value(code, address, SmallWidth::Word, imports, exit_depth);
+    memory::load_narrow_for_modify(code, address, SmallWidth::Word, imports, exit_depth);
     code.local_set(RESULT);
     shift_count(code, count);
     code.local_tee(RHS).i32_const(17).i32_rem_u().local_set(LHS);
@@ -215,7 +215,7 @@ pub(super) fn byte_rotate_through_carry_memory_immediate(
 ) {
     // masked-one instructions use the existing One path with its defined OF.
     let distance = i32::from((count & 31) % 9);
-    memory::load_narrow_value(code, address, SmallWidth::Byte, imports, exit_depth);
+    memory::load_narrow_for_modify(code, address, SmallWidth::Byte, imports, exit_depth);
     code.local_set(RESULT);
     if distance == 0 {
         // a zero rotation still performs the checked same-value destination write.
@@ -272,7 +272,7 @@ pub(super) fn byte_rotate_through_carry_memory_cl(
     imports: memory::Imports,
     exit_depth: u32,
 ) {
-    memory::load_narrow_value(code, address, SmallWidth::Byte, imports, exit_depth);
+    memory::load_narrow_for_modify(code, address, SmallWidth::Byte, imports, exit_depth);
     code.local_set(RESULT)
         .local_get(register(Register32::Ecx))
         .i32_const(31)
@@ -487,7 +487,7 @@ pub(super) fn memory_rotate_through_carry_immediate(
     exit_depth: u32,
 ) {
     let count = i32::from(raw & 31);
-    memory::load_result(code, address, imports, exit_depth);
+    memory::load_modify_result(code, address, imports, exit_depth);
     if count == 0 {
         memory::store_result(code, address, imports, exit_depth);
         return;
@@ -555,7 +555,7 @@ pub(super) fn memory_rotate_through_carry_cl(
     imports: memory::Imports,
     exit_depth: u32,
 ) {
-    memory::load_result(code, address, imports, exit_depth);
+    memory::load_modify_result(code, address, imports, exit_depth);
     code.local_get(RESULT).local_set(LHS);
     shift_count(code, ShiftCount::Cl);
     code.local_tee(RHS)

@@ -6,7 +6,7 @@ use crate::cpu::x86::{
 };
 
 use super::{
-    Imports, add_check, effective_address, exit_if_failed, expect_field, helper_field,
+    Imports, add_check, checked_address, exit_if_failed, expect_field, helper_field,
     infrastructure, protocol_if_bad, reset_checks,
 };
 use crate::cpu::dbt::wasm::locals::*;
@@ -18,7 +18,14 @@ pub(super) fn store(
     imports: Imports,
     exit_depth: u32,
 ) {
-    effective_address(code, address);
+    checked_address(
+        code,
+        address,
+        1,
+        crate::cpu::x86::SegmentAccess::Write,
+        imports,
+        exit_depth,
+    );
     let index = imports
         .store8
         .expect("prepared byte store has an import")
@@ -57,7 +64,22 @@ pub(super) fn store_result(
     imports: Imports,
     exit_depth: u32,
 ) {
-    effective_address(code, address);
+    checked_address(
+        code,
+        address,
+        1,
+        crate::cpu::x86::SegmentAccess::Write,
+        imports,
+        exit_depth,
+    );
+    store_result_at_address(code, imports, exit_depth);
+}
+
+pub(super) fn store_result_at_address(
+    code: &mut InstructionSink<'_>,
+    imports: Imports,
+    exit_depth: u32,
+) {
     let index = imports
         .store8
         .expect("prepared byte result store has an import")

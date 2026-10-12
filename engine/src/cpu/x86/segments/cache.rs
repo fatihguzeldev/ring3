@@ -10,6 +10,8 @@ pub enum SegmentAccess {
     Read,
     Write,
     Execute,
+    /// CLFLUSH accepts execute-only code segments as well as data segments.
+    CacheFlush,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -95,6 +97,7 @@ impl SegmentCache {
             SegmentAccess::Read => self.readable(),
             SegmentAccess::Write => self.writable(),
             SegmentAccess::Execute => self.code(),
+            SegmentAccess::CacheFlush => true,
         };
         if !permitted {
             return Err(SegmentAccessError::Permission);
@@ -261,6 +264,10 @@ mod tests {
         assert_eq!(
             execute_only.check_span(0, 1, SegmentAccess::Read),
             Err(SegmentAccessError::Permission)
+        );
+        assert_eq!(
+            execute_only.check_span(0, 1, SegmentAccess::CacheFlush),
+            Ok(())
         );
         assert_eq!(
             SegmentCache::UNUSABLE.check_span(0, 1, SegmentAccess::Read),

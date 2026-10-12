@@ -240,6 +240,8 @@ fn assert_imports(wasm: &[u8], owner: Owner, helpers: &[&str]) {
     if has_store {
         arities.push(if resident { 6 } else { 2 });
     }
+    let segment_type = arities.len() as u32;
+    arities.push(6);
     let mut types = section(wasm, 1);
     assert_eq!(types.unsigned() as usize, arities.len());
     for arity in arities {
@@ -281,13 +283,27 @@ fn assert_imports(wasm: &[u8], owner: Owner, helpers: &[&str]) {
     }
     imports.end();
     let mut functions = section(wasm, 3);
-    assert_eq!((functions.unsigned(), functions.unsigned()), (1, 0));
+    assert_eq!((functions.unsigned(), functions.unsigned()), (2, 0));
+    assert_eq!(functions.unsigned(), segment_type);
     functions.end();
     let mut exports = section(wasm, 7);
     assert_eq!(exports.unsigned(), 1);
     assert_eq!((exports.name(), exports.byte()), ("run", 0));
     assert_eq!(exports.unsigned() as usize, helpers.len() + 1);
     exports.end();
+    let mut bodies = section(wasm, 10);
+    assert_eq!(bodies.unsigned(), 2);
+    for declarations in [&[(16, 0x7f), (1, 0x7e), (10, 0x7f)][..], &[(3, 0x7f)][..]] {
+        let length = bodies.unsigned() as usize;
+        let mut body = Reader(bodies.take(length));
+        assert_eq!(body.0.last(), Some(&0x0b));
+        assert_eq!(body.unsigned() as usize, declarations.len());
+        for &(count, kind) in declarations {
+            assert_eq!((body.unsigned(), body.byte()), (count, kind));
+        }
+        assert!(!body.0.is_empty());
+    }
+    bodies.end();
 }
 
 #[test]

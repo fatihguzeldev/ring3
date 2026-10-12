@@ -200,7 +200,10 @@ for(const owner of oracle.owners) {
     for(const [key,value] of Object.entries(control.initial_ram_words))word(Number.parseInt(key,16),value);
     if(crossed)protect(0x6000,1);if(readOnly)protect(0x5000,1);
     const unit=compile(control.entry_seeds,needs(control.symbol),control.name);seed(control.initial);
-    run(unit,control.budget,control.fault,'fault after real ADD prefix preserves incoming CF');
+    const fault = control.name.endsWith('_overflowing_read')
+      ? {...control.fault, reason: 11, exit_hex: Buffer.from(record('R3EX',6,[11,control.fault.fresh_retired,0,0,0,0],40)).toString('hex'), helper_hex: 'preserve'}
+      : control.fault;
+    run(unit,control.budget,fault,'fault after real ADD prefix preserves incoming CF');
     if(control.resume) {
       if(control.name.endsWith('_read_fault'))map(0x5000,3);
       else protect(crossed?0x6000:0x5000,3);

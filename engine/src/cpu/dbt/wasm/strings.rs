@@ -141,13 +141,21 @@ fn element(
     imports: memory::Imports,
     exit_depth: u32,
 ) {
+    let bytes = match width {
+        StringWidth::Byte => 1,
+        StringWidth::Word => 2,
+        StringWidth::Dword => 4,
+    };
     if matches!(
         kind,
         StringKind::Move | StringKind::Load | StringKind::Compare
     ) {
-        super::segments::access(
+        memory::checked_address(
             code,
-            source.segment.unwrap_or(SegmentRegister::Ds),
+            source,
+            bytes,
+            crate::cpu::x86::SegmentAccess::Read,
+            imports,
             exit_depth,
         );
     }
@@ -155,7 +163,18 @@ fn element(
         kind,
         StringKind::Move | StringKind::Store | StringKind::Compare | StringKind::Scan
     ) {
-        super::segments::access(code, SegmentRegister::Es, exit_depth);
+        memory::checked_address(
+            code,
+            destination,
+            bytes,
+            if matches!(kind, StringKind::Move | StringKind::Store) {
+                crate::cpu::x86::SegmentAccess::Write
+            } else {
+                crate::cpu::x86::SegmentAccess::Read
+            },
+            imports,
+            exit_depth,
+        );
     }
     match kind {
         StringKind::Move => {
@@ -285,15 +304,17 @@ fn read(
     imports: memory::Imports,
     exit_depth: u32,
 ) {
+    // element() already checked both segment spans before the first page access.
+    memory::effective_address(code, address);
     match width {
         StringWidth::Byte => {
-            memory::load_narrow_value(code, address, SmallWidth::Byte, imports, exit_depth)
+            memory::load_narrow_at_address(code, SmallWidth::Byte, imports, exit_depth)
         }
         StringWidth::Word => {
-            memory::load_narrow_value(code, address, SmallWidth::Word, imports, exit_depth)
+            memory::load_narrow_at_address(code, SmallWidth::Word, imports, exit_depth)
         }
         StringWidth::Dword => {
-            memory::load_result(code, address, imports, exit_depth);
+            memory::load_result_at_address(code, imports, exit_depth);
             code.local_get(RESULT);
         }
     }
@@ -306,10 +327,11 @@ fn write(
     imports: memory::Imports,
     exit_depth: u32,
 ) {
+    memory::effective_address(code, address);
     match width {
-        StringWidth::Byte => memory::store_byte_result(code, address, imports, exit_depth),
-        StringWidth::Word => memory::store_word_result(code, address, imports, exit_depth),
-        StringWidth::Dword => memory::store_result(code, address, imports, exit_depth),
+        StringWidth::Byte => memory::store_byte_result_at_address(code, imports, exit_depth),
+        StringWidth::Word => memory::store_word_result_at_address(code, imports, exit_depth),
+        StringWidth::Dword => memory::store_result_at_address(code, imports, exit_depth),
     }
 }
 

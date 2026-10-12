@@ -214,12 +214,18 @@ fn all_four_profiles_have_only_guard_read32_and_unchanged_locals_and_arena() {
     }
     let mut child = Command::new("node").args(["-e", r#"
 const assert=require('node:assert/strict'),input=require('node:fs').readFileSync(0);
-function locals(b) {
-  let at=8;
+function shape(b,resident) {
+  let at=8,seenTypes=false,seenFunctions=false;
   function u(){let v=0;for(let i=0;i<5;i++){assert.ok(at<b.length);const x=b[at++];v|=(x&127)<<(i*7);if(!(x&128))return v>>>0;}throw Error('varuint');}
   while(at<b.length){const id=b[at++],n=u(),end=at+n;assert.ok(end<=b.length);
-    if(id===10){assert.equal(u(),1);const body=u(),bodyEnd=at+body;assert.equal(bodyEnd,end);const count=u(),groups=[];
-      for(let i=0;i<count;i++)groups.push([u(),b[at++]]);return groups;}
+    if(id===1){assert.equal(u(),4);for(const arity of [4,resident?7:6,1,6]){
+      assert.equal(b[at++],0x60);assert.equal(u(),arity);assert.deepEqual([...b.subarray(at,at+arity)],Array(arity).fill(127));at+=arity;
+      assert.equal(u(),1);assert.equal(b[at++],127);}assert.equal(at,end);seenTypes=true;}
+    if(id===3){assert.deepEqual([u(),u(),u()],[2,0,3]);assert.equal(at,end);seenFunctions=true;}
+    if(id===10){assert.ok(seenTypes&&seenFunctions);assert.equal(u(),2);const groups=[];
+      for(let functionIndex=0;functionIndex<2;functionIndex++){const body=u(),bodyEnd=at+body,count=u(),locals=[];
+        for(let i=0;i<count;i++)locals.push([u(),b[at++]]);groups.push(locals);assert.ok(at<=bodyEnd);at=bodyEnd;}
+      assert.equal(at,end);return groups;}
     at=end;
   }throw Error('missing code');
 }
@@ -230,7 +236,7 @@ while(at<input.length) {
   assert.deepEqual(WebAssembly.Module.imports(m),[{module:'env',name:'memory',kind:'memory'},
     ...[resident?'guard_resident':'guard','read32'].map(name=>({module:'ring3',name,kind:'function'}))]);
   assert.deepEqual(WebAssembly.Module.exports(m),[{name:'run',kind:'function'}]);
-  assert.deepEqual(locals(b),[[16,127],[1,126],[10,127]]);count++;
+  assert.deepEqual(shape(b,resident),[[[16,127],[1,126],[10,127]],[[3,127]]]);count++;
 }
 assert.equal(count,8);assert.equal(at,input.length);
 "#]).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped()).spawn().unwrap();

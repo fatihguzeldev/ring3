@@ -297,8 +297,8 @@ fn store_only_declarations(bytes: &[u8], owner: Owner) {
     };
     let section = sections[1].unwrap();
     let mut cursor = 0;
-    assert_eq!(unsigned(section, &mut cursor), 3);
-    for parameters in [4, guard_parameters, store_parameters] {
+    assert_eq!(unsigned(section, &mut cursor), 4);
+    for parameters in [4, guard_parameters, store_parameters, 6] {
         assert_eq!(section[cursor], 0x60);
         cursor += 1;
         assert_eq!(unsigned(section, &mut cursor), parameters);
@@ -343,8 +343,9 @@ fn store_only_declarations(bytes: &[u8], owner: Owner) {
     assert_eq!(cursor, section.len());
     let section = sections[3].unwrap();
     let mut cursor = 0;
-    assert_eq!(unsigned(section, &mut cursor), 1);
+    assert_eq!(unsigned(section, &mut cursor), 2);
     assert_eq!(unsigned(section, &mut cursor), 0);
+    assert_eq!(unsigned(section, &mut cursor), 3);
     assert_eq!(cursor, section.len());
     assert!(sections[4].is_none() && sections[5].is_none() && sections[6].is_none());
     let section = sections[7].unwrap();
@@ -357,15 +358,22 @@ fn store_only_declarations(bytes: &[u8], owner: Owner) {
     assert_eq!(cursor, section.len());
     let section = sections[10].unwrap();
     let mut cursor = 0;
-    assert_eq!(unsigned(section, &mut cursor), 1);
+    assert_eq!(unsigned(section, &mut cursor), 2);
     let length = unsigned(section, &mut cursor);
-    assert_eq!(cursor + length, section.len());
+    let run_end = cursor + length;
     assert_eq!(unsigned(section, &mut cursor), 3);
     for (count, kind) in [(16, 0x7f), (1, 0x7e), (10, 0x7f)] {
         assert_eq!(unsigned(section, &mut cursor), count);
         assert_eq!(section[cursor], kind);
         cursor += 1;
     }
+    assert_eq!(section[run_end - 1], 0x0b);
+    cursor = run_end;
+    let length = unsigned(section, &mut cursor);
+    assert_eq!(cursor + length, section.len());
+    assert_eq!(unsigned(section, &mut cursor), 1);
+    assert_eq!(unsigned(section, &mut cursor), 3);
+    assert_eq!(section[cursor], 0x7f);
     assert_eq!(section.last(), Some(&0x0b));
     assert!(
         sections[8].is_none()

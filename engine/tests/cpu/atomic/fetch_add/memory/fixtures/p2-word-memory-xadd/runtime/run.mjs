@@ -33,7 +33,7 @@ function record(magic, size, fields, version = 1) {
 }
 const state = c => record('R3ST', 56, [...c.registers, c.pc, c.flags]);
 const exit = (reason, n, f, version = 2) => record('R3EX', 40,
-  [reason, n, f?.detail ?? 0, f?.address ?? 0, f?.access ?? 0, f ? 2 : 0], version);
+  [reason, n, f?.detail ?? 0, f?.address ?? 0, f?.access ?? 0, f ? 2 : 0], reason === 11 ? 6 : version);
 const helper = (version, value = 0, f) => record('R3MH', 40,
   [f ? 1 : 0, value, f?.detail ?? 0, f?.address ?? 0, f?.access ?? 0, 2], version);
 const arena = c => Buffer.from(new Uint8Array(c.memory.buffer, c.base, SIZE));
@@ -210,10 +210,11 @@ for (const owner of ['replacement', 'resident']) for (const entries of [false, t
     if (overflow) upload(c, 0xfffffffe, Buffer.from([0x55, 15]));
     const r = registers(); r[0] = lowWord(r[0], 1); r[7] = address;
     const before = seed(c, PC, r), stopped = {...before, registers: [...before.registers], pc: PC + mov.length}; stopped.registers[3] = 0x11223344;
-    const fault = {detail: overflow ? 3 : missing ? 1 : 2, address: overflow ? address : crossing ? 0x8000 : address, access: writeDenied ? 2 : 1};
-    const helperVersion = writeDenied ? 4 : 2;
-    run(c, module, 2, stopped, {label: kind + ' after MOV; source and all FLAGS uncommitted', reason: 5, retired: 1, fault, helperVersion});
-    run(c, module, 1, stopped, {label: kind + ' unchanged XADD retry', reason: 5, retired: 0, fault, helperVersion}); counts.faults += 2;
+    // Ring3 rejects the overflowing logical WORD span before RAM access.
+    const fault = overflow ? undefined : {detail: missing ? 1 : 2, address: crossing ? 0x8000 : address, access: writeDenied ? 2 : 1};
+    const helperVersion = overflow ? null : writeDenied ? 4 : 2;
+    run(c, module, 2, stopped, {label: kind + ' after MOV; source and all FLAGS uncommitted', reason: overflow ? 11 : 5, retired: 1, fault, helperVersion});
+    run(c, module, 1, stopped, {label: kind + ' unchanged XADD retry', reason: overflow ? 11 : 5, retired: 0, fault, helperVersion}); counts.faults += 2;
     if (!readDenied && mapped) checkRam(c, crossing ? 0x7ffe : 0x7007, unchanged);
     if (overflow) checkRam(c, 0xfffffffe, Buffer.from([0x55, 15]));
     if (!overflow) {

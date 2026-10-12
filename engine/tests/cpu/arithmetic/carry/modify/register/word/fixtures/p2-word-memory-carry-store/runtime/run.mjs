@@ -194,10 +194,10 @@ for (const owner of ['replacement', 'resident']) for (const entries of [false, t
     if (overflow) upload(c, 0xfffffffe, Buffer.from([0x55, 0x0f]));
     const r = registers(); r[0] = 0xbeef0000; r[7] = address;
     const before = seed(c, faultBlocks[opIndex].pc, r), stopped = {...before, registers: [...before.registers], pc: before.pc + 5}; stopped.registers[3] = 0x11223344;
-    const fault = {detail: overflow ? 3 : missing ? 1 : 2, address: overflow ? address : crossing ? 0x8000 : address, access: writeDenied ? 2 : 1};
-    const helperVersion = writeDenied ? 4 : 2;
-    run(c, faultModule, 2, stopped, {label: kind + ' after one MOV', reason: 5, retired: 1, fault, helperVersion});
-    run(c, faultModule, 1, stopped, {label: kind + ' unchanged CPU retry', reason: 5, retired: 0, fault, helperVersion}); counts.faults += 2;
+    const fault = overflow ? undefined : {detail: missing ? 1 : 2, address: crossing ? 0x8000 : address, access: writeDenied ? 2 : 1};
+    const helperVersion = overflow ? null : writeDenied ? 4 : 2;
+    run(c, faultModule, 2, stopped, {label: kind + ' after one MOV', reason: overflow ? 11 : 5, retired: 1, fault, helperVersion, exitVersion: overflow ? 6 : 2});
+    run(c, faultModule, 1, stopped, {label: kind + ' unchanged CPU retry', reason: overflow ? 11 : 5, retired: 0, fault, helperVersion, exitVersion: overflow ? 6 : 2}); counts.faults += 2;
     if (!readDenied && mapped) checkRam(c, crossing ? 0x7ffe : 0x7007, Buffer.from(crossing && missing ? [0x55, 0x0f] : [0x55, 0x0f, 0x80, 0xaa]));
     if (overflow) checkRam(c, 0xfffffffe, Buffer.from([0x55, 0x0f]));
     if (!overflow) {

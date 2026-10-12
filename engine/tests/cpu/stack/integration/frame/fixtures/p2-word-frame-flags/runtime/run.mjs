@@ -12,14 +12,15 @@ assert.equal(initial.length, SIZE);
 assert.deepEqual(WebAssembly.Module.imports(engine.module), []);
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
 const paths = [
+  'engine/src/cpu/dbt/wasm/segments/access.rs', 'engine/src/cpu/x86/segments/cache.rs',
   'engine/src/abi/arena.rs', 'engine/src/abi/memory_helper.rs',
   'engine/src/cpu/x86/ir.rs', 'engine/src/cpu/x86/decode/lower.rs',
   'engine/src/cpu/x86/decode/operands.rs', 'engine/src/cpu/x86/decode/flow.rs', 'engine/src/cpu/x86/decode/profile.rs', 'engine/src/cpu/dbt/region.rs',
   'engine/src/cpu/dbt/wasm/integer/arithmetic.rs', 'engine/src/cpu/dbt/wasm/integer/bits.rs', 'engine/src/cpu/dbt/wasm/integer/carry_rotates.rs', 'engine/src/cpu/dbt/wasm/integer/decimal.rs', 'engine/src/cpu/dbt/wasm/integer/dispatch.rs', 'engine/src/cpu/dbt/wasm/integer/flags.rs', 'engine/src/cpu/dbt/wasm/integer/mod.rs', 'engine/src/cpu/dbt/wasm/integer/multiply_divide.rs', 'engine/src/cpu/dbt/wasm/integer/operands.rs', 'engine/src/cpu/dbt/wasm/integer/rotates.rs', 'engine/src/cpu/dbt/wasm/integer/shifts.rs', 'engine/src/cpu/dbt/wasm/memory.rs', 'engine/src/cpu/dbt/wasm/memory/word_store.rs',
   'engine/src/cpu/dbt/wasm/memory/narrow.rs', 'engine/src/memory/space.rs',
   'engine/src/cpu/dbt/wasm/abi.rs', 'engine/src/cpu/dbt/wasm/emitter.rs', 'engine/src/process/wasm/mod.rs', 'engine/src/process/wasm/loading.rs', 'engine/src/process/wasm/execution.rs', 'engine/src/process/wasm/calls.rs', 'engine/src/process/wasm/memory.rs', 'engine/src/process/wasm/cpu.rs', 'engine/src/process/mod.rs',
-  'engine/src/process/instance.rs', 'engine/src/process/execution/compiled.rs', 'engine/src/process/execution/authority.rs', 'engine/src/process/memory/address_space.rs', 'engine/src/process/memory/scalar.rs', 'engine/src/process/memory/scalar_tests.rs', 'engine/src/process/execution/mod.rs', 'engine/src/process/memory/mod.rs', 'engine/src/process/mod.rs', 'engine/src/process/execution/resident.rs', 'engine/src/process/execution/authority.rs', 'engine/src/process/execution/mod.rs', 'engine/src/process/mod.rs', 'engine/tests/cpu/stack/integration/frame/native/word.rs', 'engine/tests/cpu/stack/native.rs', 'engine/tests/support/cpu/prefix/admission.rs', 'engine/tests/support/cpu/prefix/word.rs', 'engine/tests/cpu/stack/native.rs',
-  'engine/tests/cpu/stack/integration/frame/wasm/word.rs', 'engine/tests/cpu/stack/wasm.rs', 'engine/tests/support/wasm.rs', 'engine/tests/cpu/stack/wasm.rs', 'engine/tests/support/wasm.rs',
+  'engine/src/process/instance.rs', 'engine/src/process/execution/compiled.rs', 'engine/src/process/execution/authority.rs', 'engine/src/process/memory/address_space.rs', 'engine/src/process/memory/scalar.rs', 'engine/src/process/memory/scalar_tests.rs', 'engine/src/process/execution/mod.rs', 'engine/src/process/memory/mod.rs',  'engine/src/process/execution/resident.rs',    'engine/tests/cpu/stack/integration/frame/native/word.rs', 'engine/tests/cpu/stack/native.rs', 'engine/tests/support/cpu/prefix/admission.rs', 'engine/tests/support/cpu/prefix/word.rs',
+  'engine/tests/cpu/stack/integration/frame/wasm/word.rs', 'engine/tests/cpu/stack/wasm.rs', 'engine/tests/support/wasm.rs',
   'engine/tests/cpu/stack/integration/frame/fixtures/p2-word-frame-flags/runtime/run.mjs', 'engine/tests/support/wasm/engine.mjs',
 ];
 const sources = () => Object.fromEntries(paths.map(path => [path, hash(readFileSync(join(root, path)))]));
@@ -179,9 +180,9 @@ function repair(c, failure) {
 }
 function stoppedFault(c, module, row, r, fault, label) {
   const before = seed(c, row.pc - 5, r), stopped = {...before, registers: [...before.registers], pc: row.pc}; stopped.registers[3] = 0x11223344;
-  const helperVersion = row.op === 'push' ? 4 : 2;
-  run(c, module, 2, stopped, {label: label + ' after prior MOV retirement', reason: 5, retired: 1, fault, helperVersion});
-  run(c, module, 1, stopped, {label: label + ' unchanged retry', reason: 5, retired: 0, fault, helperVersion}); counts.faults += 2; return stopped;
+  const segment = fault.detail === 3, helperVersion = segment ? null : row.op === 'push' ? 4 : 2, reason = segment ? 15 : 5, exitVersion = segment ? 6 : 2;
+  run(c, module, 2, stopped, {label: label + ' after prior MOV retirement', reason, retired: 1, fault: segment ? undefined : fault, helperVersion, exitVersion});
+  run(c, module, 1, stopped, {label: label + ' unchanged retry', reason, retired: 0, fault: segment ? undefined : fault, helperVersion, exitVersion}); counts.faults += 2; return stopped;
 }
 const mov = Buffer.from([0xbb, 0x44, 0x33, 0x22, 0x11]);
 const live = Buffer.from([

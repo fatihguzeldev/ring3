@@ -3,7 +3,7 @@ use wasm_encoder::{BlockType, InstructionSink, ValType};
 use crate::cpu::x86::ir::{EffectiveAddress, SmallWidth};
 
 use super::{
-    Imports, add_check, effective_address, exit_if_failed, expect_field, helper_field,
+    Imports, add_check, checked_address, exit_if_failed, expect_field, helper_field,
     infrastructure, protocol_if_bad, reset_checks,
 };
 use crate::cpu::dbt::wasm::locals::*;
@@ -15,7 +15,17 @@ pub(super) fn load_value(
     imports: Imports,
     exit_depth: u32,
 ) {
-    effective_address(code, address);
+    checked_address(
+        code,
+        address,
+        match width {
+            SmallWidth::Byte => 1,
+            SmallWidth::Word => 2,
+        },
+        crate::cpu::x86::SegmentAccess::Read,
+        imports,
+        exit_depth,
+    );
     load_at_address(code, width, imports, exit_depth);
 }
 

@@ -12,7 +12,7 @@ pub(super) fn unary_memory_byte(
     imports: memory::Imports,
     exit_depth: u32,
 ) {
-    memory::load_narrow_value(code, address, SmallWidth::Byte, imports, exit_depth);
+    memory::load_narrow_for_modify(code, address, SmallWidth::Byte, imports, exit_depth);
     code.local_set(RESULT);
     match kind {
         UnaryKind::Inc => {
@@ -77,7 +77,7 @@ pub(super) fn unary_memory_word(
     imports: memory::Imports,
     exit_depth: u32,
 ) {
-    memory::load_narrow_value(code, address, SmallWidth::Word, imports, exit_depth);
+    memory::load_narrow_for_modify(code, address, SmallWidth::Word, imports, exit_depth);
     code.local_set(RESULT);
     match kind {
         UnaryKind::Inc => {
@@ -137,7 +137,7 @@ pub(super) fn logical_memory_byte(
     imports: memory::Imports,
     exit_depth: u32,
 ) {
-    memory::load_narrow_value(code, address, SmallWidth::Byte, imports, exit_depth);
+    memory::load_narrow_for_modify(code, address, SmallWidth::Byte, imports, exit_depth);
     byte_value(code, source);
     match kind {
         ByteLogicalKind::And => {
@@ -163,7 +163,7 @@ pub(super) fn arithmetic_memory_byte(
     imports: memory::Imports,
     exit_depth: u32,
 ) {
-    memory::load_narrow_value(code, address, SmallWidth::Byte, imports, exit_depth);
+    memory::load_narrow_for_modify(code, address, SmallWidth::Byte, imports, exit_depth);
     byte_value(code, source);
     let binary = match kind {
         MemoryByteArithmeticKind::Add => {
@@ -256,7 +256,7 @@ pub(super) fn unary_memory(
     imports: memory::Imports,
     exit_depth: u32,
 ) {
-    memory::load_result(code, address, imports, exit_depth);
+    memory::load_modify_result(code, address, imports, exit_depth);
     match kind {
         UnaryKind::Inc => {
             code.local_get(RESULT).i32_const(1).i32_add();

@@ -12,14 +12,15 @@ assert.equal(initial.length, SIZE);
 assert.deepEqual(WebAssembly.Module.imports(engine.module), []);
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
 const paths = [
+  'engine/src/cpu/dbt/wasm/segments/access.rs', 'engine/src/cpu/x86/segments/cache.rs',
   'engine/src/abi/arena.rs', 'engine/src/abi/memory_helper.rs',
   'engine/src/cpu/x86/ir.rs', 'engine/src/cpu/x86/decode/lower.rs',
   'engine/src/cpu/x86/decode/operands.rs', 'engine/src/cpu/x86/decode/flow.rs', 'engine/src/cpu/x86/decode/profile.rs', 'engine/src/cpu/dbt/region.rs',
   'engine/src/cpu/dbt/wasm/integer/arithmetic.rs', 'engine/src/cpu/dbt/wasm/integer/bits.rs', 'engine/src/cpu/dbt/wasm/integer/carry_rotates.rs', 'engine/src/cpu/dbt/wasm/integer/decimal.rs', 'engine/src/cpu/dbt/wasm/integer/dispatch.rs', 'engine/src/cpu/dbt/wasm/integer/flags.rs', 'engine/src/cpu/dbt/wasm/integer/mod.rs', 'engine/src/cpu/dbt/wasm/integer/multiply_divide.rs', 'engine/src/cpu/dbt/wasm/integer/operands.rs', 'engine/src/cpu/dbt/wasm/integer/rotates.rs', 'engine/src/cpu/dbt/wasm/integer/shifts.rs', 'engine/src/cpu/dbt/wasm/memory.rs', 'engine/src/cpu/dbt/wasm/memory/word_store.rs',
   'engine/src/cpu/dbt/wasm/memory/narrow.rs', 'engine/src/memory/space.rs',
   'engine/src/cpu/dbt/wasm/abi.rs', 'engine/src/cpu/dbt/wasm/emitter.rs', 'engine/src/process/wasm/mod.rs', 'engine/src/process/wasm/loading.rs', 'engine/src/process/wasm/execution.rs', 'engine/src/process/wasm/calls.rs', 'engine/src/process/wasm/memory.rs', 'engine/src/process/wasm/cpu.rs', 'engine/src/process/mod.rs',
-  'engine/src/process/instance.rs', 'engine/src/process/execution/compiled.rs', 'engine/src/process/execution/authority.rs', 'engine/src/process/memory/address_space.rs', 'engine/src/process/memory/scalar.rs', 'engine/src/process/memory/scalar_tests.rs', 'engine/src/process/execution/mod.rs', 'engine/src/process/memory/mod.rs', 'engine/src/process/mod.rs', 'engine/src/process/execution/resident.rs', 'engine/src/process/execution/authority.rs', 'engine/src/process/execution/mod.rs', 'engine/src/process/mod.rs', 'engine/tests/cpu/stack/operands/native/word.rs', 'engine/tests/cpu/stack/native.rs', 'engine/tests/support/cpu/prefix/admission.rs', 'engine/tests/support/cpu/prefix/word.rs', 'engine/tests/cpu/stack/native.rs',
-  'engine/tests/cpu/stack/operands/wasm/word.rs', 'engine/tests/cpu/stack/wasm.rs', 'engine/tests/support/wasm.rs', 'engine/tests/cpu/stack/wasm.rs', 'engine/tests/support/wasm.rs',
+  'engine/src/process/instance.rs', 'engine/src/process/execution/compiled.rs', 'engine/src/process/execution/authority.rs', 'engine/src/process/memory/address_space.rs', 'engine/src/process/memory/scalar.rs', 'engine/src/process/memory/scalar_tests.rs', 'engine/src/process/execution/mod.rs', 'engine/src/process/memory/mod.rs',  'engine/src/process/execution/resident.rs',    'engine/tests/cpu/stack/operands/native/word.rs', 'engine/tests/cpu/stack/native.rs', 'engine/tests/support/cpu/prefix/admission.rs', 'engine/tests/support/cpu/prefix/word.rs',
+  'engine/tests/cpu/stack/operands/wasm/word.rs', 'engine/tests/cpu/stack/wasm.rs', 'engine/tests/support/wasm.rs',
   'engine/tests/cpu/stack/operands/fixtures/p2-word-stack/runtime/run.mjs', 'engine/tests/support/wasm/engine.mjs',
 ];
 const sources = () => Object.fromEntries(paths.map(path => [path, hash(readFileSync(join(root, path)))]));
@@ -217,8 +218,8 @@ for (const owner of ['replacement', 'resident']) for (const entries of [false, t
       upload(c, a.address, word(a.value)); seed(c, row.pc, r); const effects = operation(c, module, row, a.value, 'literal fullESP wrap/crosspage/oldSP/POP-SP pending-high discriminator');
       assert.equal(effects.next.registers[4], a.next); assert.equal(effects.value, a.value); counts.boundaries++; counts.anchors++;
     }
-    const r = registers(); r[4] = selected.op === 'push' ? 1 : 0xffffffff; seed(c, selected.pc, r); const fault = {detail: 3, address: 0xffffffff, access: selected.op === 'push' ? 2 : 1};
-    run(c, module, 1, cpu(c), {label: 'full two-byte span atFFFFFFFF fails before any publication', reason: 5, retired: 0, fault, helperVersion: selected.op === 'push' ? 4 : 2}); counts.boundaries++;
+    const r = registers(); r[4] = selected.op === 'push' ? 1 : 0xffffffff; seed(c, selected.pc, r);
+    run(c, module, 1, cpu(c), {label: 'full two-byte span atFFFFFFFF fails before any publication', reason: 15, retired: 0, helperVersion: null, exitVersion: 6}); counts.boundaries++;
     const repeated = selected.op === 'push' ? selected : rows.find(row => row.register === 4 && row.bytes.length === 2), original = registers(); original[4] = DATA + 0x10; original[0] = 0xcafe1234;
     upload(c, DATA + 0xb, Buffer.alloc(0x28, 0x55)); if (repeated.op === 'pop') {upload(c, DATA + 0x10, word(DATA + 0x20)); upload(c, DATA + 0x20, word(DATA + 0x30));}
     seed(c, repeated.pc, original); operation(c, module, repeated, DATA + 0x20, 'first stack transfer'); input(c, 48, words([repeated.pc])); operation(c, module, repeated, DATA + 0x30, 'only PC rewound; current returned ESP is consumed'); counts.repeats += 2;
@@ -284,10 +285,10 @@ function repair(c, failure) {
   else host(c, 'protect', [failure.name === 'cross-denied' ? 0xa000 : 0x9000, 1, 3]);
 }
 const mov = Buffer.from([0xbb, 0x44, 0x33, 0x22, 0x11]);
-function stoppedFault(c, module, row, r, fault, helperVersion, label) {
+function stoppedFault(c, module, row, r, fault, helperVersion, label, segmentReason) {
   const before = seed(c, row.pc - 5, r), stopped = {...before, registers: [...before.registers], pc: row.pc}; stopped.registers[3] = 0x11223344;
-  run(c, module, 2, stopped, {label: label + ' after prior MOV retirement', reason: 5, retired: 1, fault, helperVersion});
-  run(c, module, 1, stopped, {label: label + ' unchanged retry', reason: 5, retired: 0, fault, helperVersion}); counts.faults += 2; return stopped;
+  run(c, module, 2, stopped, {label: label + ' after prior MOV retirement', reason: segmentReason ?? 5, retired: 1, fault: segmentReason ? undefined : fault, helperVersion: segmentReason ? null : helperVersion, exitVersion: segmentReason ? 6 : 2});
+  run(c, module, 1, stopped, {label: label + ' unchanged retry', reason: segmentReason ?? 5, retired: 0, fault: segmentReason ? undefined : fault, helperVersion: segmentReason ? null : helperVersion, exitVersion: segmentReason ? 6 : 2}); counts.faults += 2; return stopped;
 }
 for (const owner of ['replacement', 'resident']) for (const entries of [false, true]) {
   const c = open(owner, entries), forms = memoryForms(), rows = [];
@@ -324,7 +325,7 @@ for (const owner of ['replacement', 'resident']) for (const entries of [false, t
       const failure = failureSetup(c, name, access), r = registers(); r[0] = 0xcafebeef; r[7] = failure.address;
       r[4] = index === 0 ? wrap(BigInt(failure.address) + 2n) : index === 1 ? failure.address : DATA + (index === 2 ? 0x102 : 0x100);
       framed(c, DATA + 0x100, 0xbeef);
-      const fault = {detail: failure.detail, address: failure.faultAddress, access}, stopped = stoppedFault(c, faults, row, r, fault, helperVersion, name + ' ordered stage');
+      const fault = {detail: failure.detail, address: failure.faultAddress, access}, stopped = stoppedFault(c, faults, row, r, fault, helperVersion, name + ' ordered stage', name === 'overflow' ? index < 2 ? 15 : 11 : undefined);
       if (name !== 'overflow') {
         repair(c, failure); assert.deepEqual(cpu(c), stopped, 'map/protect-only repair retains stopped CPU/FLAGS');
         checkRam(c, failure.address, word(failure.original)); checkRam(c, DATA + 0x100, word(0xbeef));

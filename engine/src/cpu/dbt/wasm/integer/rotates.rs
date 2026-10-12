@@ -33,7 +33,7 @@ pub(super) fn rotate_memory_word(
     imports: memory::Imports,
     exit_depth: u32,
 ) {
-    memory::load_narrow_value(code, address, SmallWidth::Word, imports, exit_depth);
+    memory::load_narrow_for_modify(code, address, SmallWidth::Word, imports, exit_depth);
     code.local_set(RESULT);
     shift_count(code, count);
     code.local_set(RHS);
@@ -273,7 +273,7 @@ pub(super) fn byte_rotate_memory(
     imports: memory::Imports,
     exit_depth: u32,
 ) {
-    memory::load_narrow_value(code, address, SmallWidth::Byte, imports, exit_depth);
+    memory::load_narrow_for_modify(code, address, SmallWidth::Byte, imports, exit_depth);
     code.local_set(RESULT);
     shift_count(code, count);
     code.local_tee(RHS)
@@ -346,7 +346,7 @@ pub(super) fn rotate_memory(
     imports: memory::Imports,
     exit_depth: u32,
 ) {
-    memory::load_result(code, address, imports, exit_depth);
+    memory::load_modify_result(code, address, imports, exit_depth);
     shift_count(code, count);
     code.local_tee(RHS).if_(BlockType::Empty);
     rotate_value(code, kind);

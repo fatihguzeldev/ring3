@@ -77,7 +77,7 @@ planned.raw_bytes = planned.raw_arenas * SIZE; planned.diagnostic_read32_calls =
 planned.files = planned.pages + planned.modules + banks.length + formulas.smc_targets * 2 + 4;
 assert.deepEqual([planned.targets, planned.regular_targets, planned.overflow_cases, planned.contexts, planned.modules, planned.seeds, planned.generated_calls,
   planned.retired, planned.raw_arenas, planned.raw_bytes, planned.pages, planned.source_spans, planned.diagnostic_read32_calls, planned.files],
-  [316, 312, 8, 12, 16, 324, 1376, 1312, 756, 3202416, 528, 92, 540988, 560]);
+  [316, 312, 8, 12, 16, 324, 1376, 1312, 756, 756 * SIZE, 528, 92, 540988, 560]);
 const counts = {contexts: 0, modules: 0, seeds: 0, targets: 0, normal_targets: 0, alias_targets: 0, range_targets: 0, repaired_targets: 0, smc_targets: 0,
   rol_targets: 0, ror_targets: 0, imm_targets: 0, cl_targets: 0, zero_targets: 0, count_one_targets: 0, multiple_count_targets: 0,
   generated_calls: 0, retired: 0, raw_arenas: 0, arena_checks: 0, pages: 0, diagnostic_read32_calls: 0, target_read32_calls: 0, maps: 0, unmaps: 0,
@@ -100,11 +100,9 @@ const fullTextLines = readFileSync(join(root, source.full_text_path), 'utf8').sp
 const chapter = Buffer.from(fullTextLines.slice(source.chapter_lines[0] - 1, source.chapter_lines[1]).join('\n') + '\n');
 assert.equal(chapter.length, source.chapter_bytes); assert.equal(hash(chapter), source.chapter_sha256); source.saved_chapter = artifact('intel-memory-rotate.txt', chapter);
 const sourcePaths = ['engine/src/cpu/x86/ir.rs', 'engine/src/cpu/x86/decode/integer.rs', 'engine/src/cpu/dbt/region.rs', 'engine/src/cpu/dbt/wasm/memory.rs',
-  'engine/src/cpu/dbt/wasm/integer/arithmetic.rs', 'engine/src/cpu/dbt/wasm/integer/bits.rs', 'engine/src/cpu/dbt/wasm/integer/carry_rotates.rs', 'engine/src/cpu/dbt/wasm/integer/decimal.rs', 'engine/src/cpu/dbt/wasm/integer/dispatch.rs', 'engine/src/cpu/dbt/wasm/integer/flags.rs', 'engine/src/cpu/dbt/wasm/integer/mod.rs', 'engine/src/cpu/dbt/wasm/integer/multiply_divide.rs', 'engine/src/cpu/dbt/wasm/integer/operands.rs', 'engine/src/cpu/dbt/wasm/integer/rotates.rs', 'engine/src/cpu/dbt/wasm/integer/shifts.rs', 'engine/tests/cpu/shifts/rotate/memory/one/dword/native.rs', 'engine/tests/cpu/shifts/native.rs', 'engine/tests/support/cpu/prefix/admission.rs', 'engine/tests/cpu/shifts/native.rs', 'engine/tests/cpu/shifts/rotate/immediate/one/dword/native.rs', 'engine/tests/cpu/shifts/native.rs', 'engine/tests/support/cpu/prefix/admission.rs', 'engine/tests/cpu/shifts/native.rs', 'engine/tests/cpu/shifts/rotate/register/dword/native/counts.rs', 'engine/tests/cpu/shifts/native.rs', 'engine/tests/support/cpu/prefix/admission.rs', 'engine/tests/cpu/shifts/native.rs',
-  'engine/tests/cpu/shifts/rotate/immediate/one/dword/fixtures/p2-rotate-immediate-one/runtime/run.mjs', 'engine/tests/cpu/shifts/rotate/memory/dword/native/counts.rs', 'engine/tests/cpu/shifts/native.rs', 'engine/tests/support/cpu/prefix/admission.rs', 'engine/tests/cpu/shifts/native.rs', 'engine/tests/cpu/shifts/rotate/memory/dword/wasm/counts.rs', 'engine/tests/cpu/shifts/wasm.rs', 'engine/tests/support/wasm.rs', 'engine/tests/cpu/shifts/wasm.rs', 'engine/tests/support/wasm.rs',
-  'engine/tests/cpu/shifts/rotate/memory/dword/fixtures/p2-memory-rotate32/runtime/run.mjs', 'engine/tests/cpu/shifts/rotate/register/dword/wasm/counts.rs', 'engine/tests/cpu/shifts/wasm.rs', 'engine/tests/support/wasm.rs', 'engine/tests/cpu/shifts/wasm.rs', 'engine/tests/support/wasm.rs', 'engine/tests/cpu/shifts/rotate/register/dword/fixtures/p2-rotate32/runtime/run.mjs',
-  'engine/tests/cpu/shifts/rotate/immediate/one/dword/wasm.rs', 'engine/tests/cpu/shifts/wasm.rs', 'engine/tests/support/wasm.rs', 'engine/tests/cpu/shifts/wasm.rs', 'engine/tests/support/wasm.rs', 'engine/tests/support/wasm/engine.mjs'];
-assert.equal(new Set(sourcePaths).size, 16);
+  'engine/src/cpu/dbt/wasm/integer/arithmetic.rs', 'engine/src/cpu/dbt/wasm/integer/bits.rs', 'engine/src/cpu/dbt/wasm/integer/carry_rotates.rs', 'engine/src/cpu/dbt/wasm/integer/decimal.rs', 'engine/src/cpu/dbt/wasm/integer/dispatch.rs', 'engine/src/cpu/dbt/wasm/integer/flags.rs', 'engine/src/cpu/dbt/wasm/integer/mod.rs', 'engine/src/cpu/dbt/wasm/integer/multiply_divide.rs', 'engine/src/cpu/dbt/wasm/integer/operands.rs', 'engine/src/cpu/dbt/wasm/integer/rotates.rs', 'engine/src/cpu/dbt/wasm/integer/shifts.rs', 'engine/tests/cpu/shifts/rotate/memory/one/dword/native.rs', 'engine/tests/cpu/shifts/native.rs', 'engine/tests/support/cpu/prefix/admission.rs', 'engine/tests/cpu/shifts/rotate/immediate/one/dword/native.rs', 'engine/tests/cpu/shifts/rotate/register/dword/native/counts.rs', 'engine/tests/cpu/shifts/rotate/immediate/one/dword/fixtures/p2-rotate-immediate-one/runtime/run.mjs', 'engine/tests/cpu/shifts/rotate/memory/dword/native/counts.rs', 'engine/tests/cpu/shifts/rotate/memory/dword/wasm/counts.rs', 'engine/tests/cpu/shifts/wasm.rs', 'engine/tests/support/wasm.rs', 'engine/tests/cpu/shifts/rotate/memory/dword/fixtures/p2-memory-rotate32/runtime/run.mjs', 'engine/tests/cpu/shifts/rotate/register/dword/wasm/counts.rs', 'engine/tests/cpu/shifts/rotate/register/dword/fixtures/p2-rotate32/runtime/run.mjs',
+  'engine/tests/cpu/shifts/rotate/immediate/one/dword/wasm.rs', 'engine/tests/support/wasm/engine.mjs'];
+assert.equal(new Set(sourcePaths).size, sourcePaths.length);
 const sourceIdentities = () => Object.fromEntries(sourcePaths.map(path => {const bytes = readFileSync(join(root, path)); return [path, {bytes: bytes.length, sha256: hash(bytes)}];}));
 const sourcePins = sourceIdentities();
 
@@ -122,18 +120,26 @@ function profile(bytes, owner, memory, ctx, binding) {
   section(1); const types = []; for (let index = 0, length = uleb(); index < length; index++) {assert.equal(bytes[at++], 0x60); const parameters = [];
     for (let index = 0, length = uleb(); index < length; index++) parameters.push(bytes[at++]); const results = []; for (let index = 0, length = uleb(); index < length; index++) results.push(bytes[at++]); types.push({parameters, results});} ended(1);
   const expectedTypes = [{parameters: Array(4).fill(0x7f), results: [0x7f]}, {parameters: Array(owner === 'replacement' ? 6 : 7).fill(0x7f), results: [0x7f]}];
-  if (memory) expectedTypes.push({parameters: [0x7f], results: [0x7f]}, {parameters: Array(owner === 'replacement' ? 2 : 6).fill(0x7f), results: [0x7f]}); assert.deepEqual(types, expectedTypes);
+  if (memory) expectedTypes.push({parameters: [0x7f], results: [0x7f]}, {parameters: Array(owner === 'replacement' ? 2 : 6).fill(0x7f), results: [0x7f]}); if (memory) expectedTypes.push({parameters: Array(6).fill(0x7f), results: [0x7f]}); assert.deepEqual(types, expectedTypes);
   const names = [owner === 'replacement' ? 'guard' : 'guard_resident', ...(memory ? ['read32', owner === 'replacement' ? 'store32' : 'store_resident32'] : [])];
   section(2); assert.equal(uleb(), names.length + 1); assert.equal(text(), 'env'); assert.equal(text(), 'memory'); assert.equal(bytes[at++], 2); assert.equal(uleb(), 0); assert.equal(uleb(), 1);
   for (const [index, name] of names.entries()) {assert.equal(text(), 'ring3'); assert.equal(text(), name); assert.equal(bytes[at++], 0); assert.equal(uleb(), index + 1);} ended(2);
-  section(3); assert.equal(uleb(), 1); assert.equal(uleb(), 0); ended(3);
+  section(3); assert.equal(uleb(), memory ? 2 : 1); assert.equal(uleb(), 0); if (memory) assert.equal(uleb(), types.length - 1); ended(3);
   section(7); assert.equal(uleb(), 1); assert.equal(text(), 'run'); assert.equal(bytes[at++], 0); assert.equal(uleb(), names.length); ended(7);
-  section(10); assert.equal(uleb(), 1); const bodyLength = uleb(), bodyEnd = at + bodyLength; assert.equal(bodyEnd, sections.get(10)[1]);
-  const locals = []; for (let index = 0, length = uleb(); index < length; index++) locals.push([uleb(), bytes[at++]]); assert.deepEqual(locals, [[16, 0x7f], [1, 0x7e], ...(memory ? [[6, 0x7f]] : [])]);
+  section(10); assert.equal(uleb(), memory ? 2 : 1); const bodyLength = uleb(), bodyEnd = at + bodyLength; assert.ok(bodyEnd <= sections.get(10)[1]);
+  const locals = []; for (let index = 0, length = uleb(); index < length; index++) locals.push([uleb(), bytes[at++]]); assert.deepEqual(locals, [[16, 0x7f], [1, 0x7e], [10, 0x7f]]);
   const guardConstants = [ctx.low, ctx.high, ...(owner === 'replacement' ? [binding.generation] : [binding.low, binding.high])];
   for (const value of guardConstants) {assert.equal(bytes[at++], 0x41); assert.equal(sleb(), value >>> 0);}
   for (const parameter of [0, 1, 3]) {assert.equal(bytes[at++], 0x20); assert.equal(uleb(), parameter);} assert.equal(bytes[at++], 0x10); assert.equal(uleb(), 0);
-  assert.equal(bytes[bodyEnd - 1], 0x0b); return {types, locals, guard_constants: guardConstants, body_bytes: bodyLength, sections: [...sections.keys()], body_claim: 'guard prefix/types/locals only; remaining body not independently certified'};
+  assert.equal(bytes[bodyEnd - 1], 0x0b); at = bodyEnd;
+  if (memory) {
+    const guardLength = uleb(), guardEnd = at + guardLength;
+    assert.equal(guardEnd, sections.get(10)[1]);
+    const guardLocals = []; for (let index = 0, length = uleb(); index < length; index++) guardLocals.push([uleb(), bytes[at++]]);
+    assert.deepEqual(guardLocals, [[3, 0x7f]]);
+    assert.equal(bytes[guardEnd - 1], 0x0b); at = guardEnd;
+  }
+  ended(10); return {types, locals, guard_constants: guardConstants, body_bytes: bodyLength, sections: [...sections.keys()], body_claim: 'guard prefix/types/locals only; remaining body not independently certified'};
 }
 
 function record(magic, version, size, fields) {
@@ -214,9 +220,10 @@ function seed(ctx, registers, pc, flags, purpose) {
 }
 function cancel(ctx, value) {hostWrite(ctx, 96, words([value]), 'explicit cancellation field', 'cancel');}
 function run(ctx, unit, budget, label, outcome = {}, status = 0, malformed = false, retention) {
+  if (outcome.detail === 3 && outcome.access && outcome.fault > 0xfffffffc) outcome = {...outcome, reason: 11, detail: 0, fault: 0, access: 0, helperBytes: undefined};
   check(ctx, `before ${label}`); const before = snapshot(ctx), current = cpu(ctx), {registers = current.registers, pc = current.pc, flags = current.flags,
     reason = 1, retired = 0, detail = 0, fault = 0, access = 0, helperBytes} = outcome;
-  if (status === 0) {ctx.expected.set(state(registers, pc, flags)); ctx.expected.set(exit(unit.version, reason, retired, detail, fault, access), 56); if (helperBytes !== undefined) ctx.expected.set(helperBytes, 100);}
+  if (status === 0) {ctx.expected.set(state(registers, pc, flags)); ctx.expected.set(exit(reason === 11 ? 6 : unit.version, reason, retired, detail, fault, access), 56); if (helperBytes !== undefined) ctx.expected.set(helperBytes, 100);}
   assert.equal(unit.run(malformed ? 1 : ctx.base, ctx.base + 56, budget, ctx.base + 96), status, label); retention?.(); check(ctx, label);
   counts.generated_calls++; counts.retired += status ? 0 : retired;
   const row = {ordinal: counts.generated_calls, context: ctx.ordinal, module: unit.file, label, budget, status, malformed_state_pointer: malformed ? 1 : null,

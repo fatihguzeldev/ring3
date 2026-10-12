@@ -150,7 +150,7 @@ function readState(engine) {
 
 function exit(reason, retired, detail = 0, address = 0, access = 0, length = reason === 5 ? 4 : 0) {
   const bytes = new Uint8Array(40), view = new DataView(bytes.buffer);
-  header(bytes, view, 0, 'R3EX', 40, 2);
+  header(bytes, view, 0, 'R3EX', 40, reason === 11 || reason === 15 ? 6 : 2);
   [reason, retired, detail, address, access, length].forEach((field, index) => view.setUint32(16 + index * 4, field, true));
   return bytes;
 }
@@ -333,7 +333,7 @@ for (const op of ops) for (const fixture of faults) {
   const start = state(); start.registers[6] = fixture.address;
   const stopped = copyState(start); stopped.registers[2] = 0; stopped.eflags = 0x457; stopped.eip = 0x1008;
   writeState(engine, start);
-  run(engine, child, 20, stopped, exit(5, 2, fixture.detail, fixture.fault, 1), `${op} committed prefix then ${fixture.label}`, helperRecord(1, 0, fixture.detail, fixture.fault, 1));
+  run(engine, child, 20, stopped, fixture.detail === 3 ? exit(11, 2) : exit(5, 2, fixture.detail, fixture.fault, 1), `${op} committed prefix then ${fixture.label}`, fixture.detail === 3 ? arena(engine).slice(100, 140) : helperRecord(1, 0, fixture.detail, fixture.fault, 1));
   guarded(engine, child); counts.read_faults++;
 }
 
@@ -420,7 +420,7 @@ const provenance = {
   native_algorithm_cases: foldInputs.length, native_invalid_inputs: invalidOracleInputs.length,
   fold: {below_branches: belowBranches, above_branches: aboveBranches, retired: foldRetired},
   engine_sha256: hash(engineBytes), generated_set_sha256: hash(generatedHashes.join('\n')),
-  sources: Object.fromEntries(['integer.S', 'binary_oracle.c', 'runtime/run.mjs'].map(name => [name, hash(readFileSync(join(fixtureRoot, name)))]).concat([['dbt_memory_binary_wasm.rs', hash(readFileSync(join(root, 'engine/tests/cpu/dbt/lowering/memory/wasm/binary.rs', 'engine/tests/cpu/dbt/lowering/wasm.rs', 'engine/tests/support/wasm.rs', 'engine/tests/cpu/dbt/lowering/wasm.rs', 'engine/tests/support/wasm.rs')))]])),
+  sources: Object.fromEntries(['integer.S', 'binary_oracle.c', 'runtime/run.mjs'].map(name => [name, hash(readFileSync(join(fixtureRoot, name)))]).concat([['dbt_memory_binary_wasm.rs', hash(readFileSync(join(root, 'engine/tests/cpu/dbt/lowering/memory/wasm/binary.rs')))]]).concat(['engine/tests/cpu/dbt/lowering/wasm.rs', 'engine/tests/support/wasm.rs'].map(path => [path, hash(readFileSync(join(root, path)))]))),
   artifacts: {object_sha256: hash(object), native_binary_sha256: hash(readFileSync(oraclePath))},
   tools: {node: process.version, clang: execFileSync('clang', ['--version'], {encoding: 'utf8'}).trim(), llvm_objdump: execFileSync('xcrun', ['llvm-objdump', '--version'], {encoding: 'utf8'}).trim()},
   commands: {assemble: ['clang', ...assemble], disassemble: ['xcrun', ...disassemble], native_compile: ['clang', ...oracleCompile]},

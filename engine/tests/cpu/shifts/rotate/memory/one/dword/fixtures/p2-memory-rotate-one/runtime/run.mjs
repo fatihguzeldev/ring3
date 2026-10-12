@@ -60,7 +60,7 @@ function record(magic, size, fields, version = 1) {
   fields.forEach((value, index) => bytes.writeUInt32LE(value >>> 0, 16 + index * 4)); return bytes;
 }
 const state = (registers, pc, flags) => record('R3ST', 56, [...registers, pc, flags]);
-const exit = (reason, retired, detail = 0, address = 0, access = 0) => record('R3EX', 40, [reason, retired, detail, address, access, access ? 4 : 0], 2);
+const exit = (reason, retired, detail = 0, address = 0, access = 0) => record('R3EX', 40, [reason, retired, detail, address, access, access ? 4 : 0], reason === 11 ? 6 : 2);
 const helper = (value = 0, detail = 0, address = 0, access = 0) => record('R3MH', 40, [access ? 1 : 0, value, detail, address, access, access ? 4 : 0]);
 const words = values => {const bytes = Buffer.alloc(values.length * 4); values.forEach((value, index) => bytes.writeUInt32LE(value >>> 0, index * 4)); return bytes;};
 const pattern = Buffer.from(Array.from({length: 4096}, (_, index) => index % 251 + 1));
@@ -116,6 +116,7 @@ function seed(ctx, registers, pc, flags) {
 }
 function cancel(ctx, value) {ctx.expected.writeUInt32LE(value, 96); refresh(ctx).view.setUint32(ctx.base + 96, value, true);}
 function run(ctx, unit, budget, label, registers, pc, flags, reason = 1, retired = 1, helperBytes, detail = 0, fault = 0, access = 0) {
+  if (detail === 3 && access && fault > 0xfffffffc) {reason = 11; helperBytes = undefined; detail = 0; fault = 0; access = 0;}
   check(ctx, `before ${label}`); ctx.expected.set(state(registers, pc, flags)); ctx.expected.set(exit(reason, retired, detail, fault, access), 56);
   if (helperBytes !== undefined) ctx.expected.set(helperBytes, 100);
   assert.equal(unit.run(ctx.base, ctx.base + 56, budget, ctx.base + 96), 0, label); check(ctx, label); counts.generated_calls++;

@@ -131,20 +131,8 @@ const sourcePaths = [
   "engine/src/cpu/dbt/region.rs",
   "engine/src/cpu/dbt/wasm/integer/arithmetic.rs", "engine/src/cpu/dbt/wasm/integer/bits.rs", "engine/src/cpu/dbt/wasm/integer/carry_rotates.rs", "engine/src/cpu/dbt/wasm/integer/decimal.rs", "engine/src/cpu/dbt/wasm/integer/dispatch.rs", "engine/src/cpu/dbt/wasm/integer/flags.rs", "engine/src/cpu/dbt/wasm/integer/mod.rs", "engine/src/cpu/dbt/wasm/integer/multiply_divide.rs", "engine/src/cpu/dbt/wasm/integer/operands.rs", "engine/src/cpu/dbt/wasm/integer/rotates.rs", "engine/src/cpu/dbt/wasm/integer/shifts.rs",
   "engine/src/cpu/dbt/wasm/memory.rs",
-  "engine/tests/cpu/shifts/carry_rotate/immediate/one/dword/native.rs", "engine/tests/cpu/shifts/native.rs", "engine/tests/support/cpu/prefix/admission.rs", "engine/tests/cpu/shifts/native.rs",
-  "engine/tests/cpu/shifts/carry_rotate/memory/one/dword/native.rs", "engine/tests/cpu/shifts/native.rs", "engine/tests/support/cpu/prefix/admission.rs", "engine/tests/cpu/shifts/native.rs",
-  "engine/tests/cpu/shifts/carry_rotate/memory/byte/native/immediate.rs", "engine/tests/cpu/shifts/native.rs", "engine/tests/support/cpu/prefix/byte.rs", "engine/tests/support/cpu/prefix/admission.rs", "engine/tests/cpu/shifts/native.rs",
-  "engine/tests/cpu/shifts/carry_rotate/memory/byte/native/cl.rs", "engine/tests/cpu/shifts/native.rs", "engine/tests/support/cpu/prefix/byte.rs", "engine/tests/support/cpu/prefix/admission.rs", "engine/tests/cpu/shifts/native.rs",
-  "engine/tests/cpu/shifts/carry_rotate/register/dword/native/immediate.rs", "engine/tests/cpu/shifts/native.rs", "engine/tests/support/cpu/prefix/admission.rs", "engine/tests/cpu/shifts/native.rs",
-  "engine/tests/cpu/shifts/carry_rotate/register/dword/native/cl.rs", "engine/tests/cpu/shifts/native.rs", "engine/tests/support/cpu/prefix/admission.rs", "engine/tests/cpu/shifts/native.rs",
-  "engine/tests/cpu/shifts/rotate/register/dword/native/counts.rs", "engine/tests/cpu/shifts/native.rs", "engine/tests/support/cpu/prefix/admission.rs", "engine/tests/cpu/shifts/native.rs",
-  "engine/tests/cpu/shifts/rotate/memory/dword/native/counts.rs", "engine/tests/cpu/shifts/native.rs", "engine/tests/support/cpu/prefix/admission.rs", "engine/tests/cpu/shifts/native.rs",
-  "engine/tests/cpu/shifts/carry_rotate/memory/dword/native/immediate.rs", "engine/tests/cpu/shifts/native.rs", "engine/tests/support/cpu/prefix/admission.rs", "engine/tests/cpu/shifts/native.rs",
-  "engine/tests/cpu/shifts/carry_rotate/memory/dword/native/cl.rs", "engine/tests/cpu/shifts/native.rs", "engine/tests/support/cpu/prefix/admission.rs", "engine/tests/cpu/shifts/native.rs",
-  "engine/tests/cpu/shifts/carry_rotate/memory/dword/wasm/cl.rs", "engine/tests/cpu/shifts/wasm.rs", "engine/tests/cpu/shifts/wasm.rs",
-  "engine/tests/cpu/shifts/carry_rotate/memory/dword/fixtures/p2-memory-carry-rotate-cl32/runtime/run.mjs",
-  "engine/tests/cpu/shifts/carry_rotate/memory/dword/wasm/immediate.rs", "engine/tests/cpu/shifts/wasm.rs", "engine/tests/cpu/shifts/wasm.rs",
-  "engine/tests/cpu/shifts/carry_rotate/memory/dword/fixtures/p2-memory-carry-rotate-immediate32/runtime/run.mjs",
+  "engine/tests/cpu/shifts/carry_rotate/immediate/one/dword/native.rs", "engine/tests/cpu/shifts/native.rs", "engine/tests/support/cpu/prefix/admission.rs", "engine/tests/cpu/shifts/carry_rotate/memory/one/dword/native.rs", "engine/tests/cpu/shifts/carry_rotate/memory/byte/native/immediate.rs", "engine/tests/support/cpu/prefix/byte.rs", "engine/tests/cpu/shifts/carry_rotate/memory/byte/native/cl.rs", "engine/tests/cpu/shifts/carry_rotate/register/dword/native/immediate.rs", "engine/tests/cpu/shifts/carry_rotate/register/dword/native/cl.rs", "engine/tests/cpu/shifts/rotate/register/dword/native/counts.rs", "engine/tests/cpu/shifts/rotate/memory/dword/native/counts.rs", "engine/tests/cpu/shifts/carry_rotate/memory/dword/native/immediate.rs", "engine/tests/cpu/shifts/carry_rotate/memory/dword/native/cl.rs", "engine/tests/cpu/shifts/carry_rotate/memory/dword/wasm/cl.rs", "engine/tests/cpu/shifts/wasm.rs", "engine/tests/cpu/shifts/carry_rotate/memory/dword/fixtures/p2-memory-carry-rotate-cl32/runtime/run.mjs",
+  "engine/tests/cpu/shifts/carry_rotate/memory/dword/wasm/immediate.rs", "engine/tests/cpu/shifts/carry_rotate/memory/dword/fixtures/p2-memory-carry-rotate-immediate32/runtime/run.mjs",
   "engine/tests/cpu/shifts/carry_rotate/register/dword/fixtures/p2-carry-rotate-cl32/runtime/run.mjs",
   "engine/tests/cpu/shifts/carry_rotate/register/dword/fixtures/p2-carry-rotate-immediate32/runtime/oracle.mjs",
   "engine/tests/support/wasm/engine.mjs",
@@ -153,14 +141,13 @@ const sourcePaths = [
   "engine/src/cpu/dbt/wasm/locals.rs",
   "engine/src/memory/space.rs",
   "engine/src/process/instance.rs", "engine/src/process/execution/compiled.rs", "engine/src/process/execution/authority.rs", "engine/src/process/memory/address_space.rs", "engine/src/process/memory/scalar.rs", "engine/src/process/memory/scalar_tests.rs", "engine/src/process/execution/mod.rs", "engine/src/process/memory/mod.rs", "engine/src/process/mod.rs",
-  "engine/src/process/execution/resident.rs", "engine/src/process/execution/authority.rs", "engine/src/process/execution/mod.rs", "engine/src/process/mod.rs",
-  "engine/src/abi/arena.rs",
+  "engine/src/process/execution/resident.rs", "engine/src/abi/arena.rs",
   "engine/src/abi/memory_helper.rs",
   "engine/src/abi/x86/state.rs",
   "engine/src/abi/x86/exit.rs",
   "engine/src/abi/wasm/exports/calls.rs", "engine/src/abi/wasm/exports/cpu.rs", "engine/src/abi/wasm/exports/execution.rs", "engine/src/abi/wasm/exports/image.rs", "engine/src/abi/wasm/exports/instance.rs", "engine/src/abi/wasm/exports/memory.rs", "engine/src/abi/wasm/exports/mod.rs",
 ];
-assert.equal(sourcePaths.length, 33);
+assert.equal(sourcePaths.length, 61);
 assert.equal(new Set(sourcePaths).size, sourcePaths.length);
 const pinSources = () =>
   Object.fromEntries(
@@ -240,7 +227,7 @@ function profile(bytes, owner, memory, ctx, binding) {
     { parameters: Array(owner === "replacement" ? 6 : 7).fill(0x7f), results: [0x7f] }];
   if (memory) expectedTypes.push({ parameters: [0x7f], results: [0x7f] },
     { parameters: Array(owner === "replacement" ? 2 : 6).fill(0x7f), results: [0x7f] });
-  assert.deepEqual(types, expectedTypes);
+  if (memory) expectedTypes.push({parameters: Array(6).fill(0x7f), results: [0x7f]}); assert.deepEqual(types, expectedTypes);
   const names = [owner === "replacement" ? "guard" : "guard_resident",
     ...(memory ? ["read32", owner === "replacement" ? "store32" : "store_resident32"] : [])];
   section(2);
@@ -252,22 +239,30 @@ function profile(bytes, owner, memory, ctx, binding) {
     assert.equal(bytes[at++], 0); assert.equal(uleb(), index + 1);
   }
   ended(2);
-  section(3); assert.equal(uleb(), 1); assert.equal(uleb(), 0); ended(3);
+  section(3); assert.equal(uleb(), memory ? 2 : 1); assert.equal(uleb(), 0); if (memory) assert.equal(uleb(), types.length - 1); ended(3);
   section(7); assert.equal(uleb(), 1); assert.equal(text(), "run");
   assert.equal(bytes[at++], 0); assert.equal(uleb(), names.length); ended(7);
-  section(10); assert.equal(uleb(), 1);
+  section(10); assert.equal(uleb(), memory ? 2 : 1);
   const bodyLength = uleb(), bodyEnd = at + bodyLength;
-  assert.equal(bodyEnd, sections.get(10)[1]);
+  assert.ok(bodyEnd <= sections.get(10)[1]);
   const locals = [];
   for (let index = 0, length = uleb(); index < length; index++) locals.push([uleb(), bytes[at++]]);
-  assert.deepEqual(locals, [[16, 0x7f], [1, 0x7e], ...(memory ? [[6, 0x7f]] : [])]);
+  assert.deepEqual(locals, [[16, 0x7f], [1, 0x7e], [10, 0x7f]]);
   const guardConstants = [ctx.low, ctx.high,
     ...(owner === "replacement" ? [binding.generation] : [binding.low, binding.high])];
   for (const value of guardConstants) { assert.equal(bytes[at++], 0x41); assert.equal(sleb(), value >>> 0); }
   for (const parameter of [0, 1, 3]) { assert.equal(bytes[at++], 0x20); assert.equal(uleb(), parameter); }
   assert.equal(bytes[at++], 0x10); assert.equal(uleb(), 0);
   assert.equal(bytes[bodyEnd - 1], 0x0b);
-  return { types, locals, guard_constants: guardConstants, body_bytes: bodyLength,
+  at = bodyEnd;
+  if (memory) {
+    const guardLength = uleb(), guardEnd = at + guardLength;
+    assert.equal(guardEnd, sections.get(10)[1]);
+    const guardLocals = []; for (let index = 0, length = uleb(); index < length; index++) guardLocals.push([uleb(), bytes[at++]]);
+    assert.deepEqual(guardLocals, [[3, 0x7f]]);
+    assert.equal(bytes[guardEnd - 1], 0x0b); at = guardEnd;
+  }
+  ended(10); return { types, locals, guard_constants: guardConstants, body_bytes: bodyLength,
     sections: [...sections.keys()], body_claim: "guard prefix, types and locals; remaining body not independently certified" };
 }
 
@@ -833,6 +828,7 @@ function run(
   fault = 0,
   access = 0,
 ) {
+  if (detail === 3 && access && fault > 0xfffffffc) {reason = 11; helperBytes = undefined; detail = 0; fault = 0; access = 0;}
   const frames = generated(
     ctx,
     unit,
@@ -841,7 +837,7 @@ function run(
     0,
     () => {
       ctx.expected.set(state(registers, pc, flags));
-      ctx.expected.set(exit(reason, retired, detail, fault, access, unit.exitVersion), 56);
+      ctx.expected.set(exit(reason, retired, detail, fault, access, reason === 11 ? 6 : unit.exitVersion), 56);
       if (helperBytes !== undefined) ctx.expected.set(helperBytes, 100);
     },
   );

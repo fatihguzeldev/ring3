@@ -41,7 +41,7 @@ function record(magic, size, fields, version = 1) {
   fields.forEach((value, index) => bytes.writeUInt32LE(value >>> 0, 16 + index * 4)); return bytes;
 }
 const state = (registers, pc, flags) => record('R3ST', 56, [...registers, pc, flags]);
-const exit = (reason, retired, detail = 0, address = 0) => record('R3EX', 40, [reason, retired, detail, address, reason === 5 ? 1 : 0, reason === 5 ? 4 : 0], 2);
+const exit = (reason, retired, detail = 0, address = 0) => record('R3EX', 40, [reason, retired, detail, address, reason === 5 ? 1 : 0, reason === 5 ? 4 : 0], reason === 11 ? 6 : 2);
 const helper = (value = 0, detail = 0, address = 0) => record('R3MH', 40, [detail ? 1 : 0, detail ? 0 : value, detail, address, detail ? 1 : 0, detail ? 4 : 0]);
 function refresh(ctx) {ctx.bytes = new Uint8Array(ctx.memory.buffer); ctx.view = new DataView(ctx.memory.buffer); return ctx;}
 function arena(ctx) {return Buffer.from(refresh(ctx).bytes.subarray(ctx.base, ctx.base + SIZE));}
@@ -151,9 +151,9 @@ function faultMatrix(ctx, unit) {
       if (shape.permissionRepair !== undefined) protect(ctx, shape.permissionRepair, 2);
       const flags = FLAGS.find(value => !truth(cc, value)), registers = [...REG], entry = FAULT + cc * 8;
       registers[3] = shape.address; seed(ctx, registers, entry, flags); registers[7] = 0xaabbcc00 + cc;
-      run(ctx, unit, 20, `${shape.name}/false-cc-${cc}/prefix-then-fault`, registers, entry + 5, flags, 5, 1, undefined, shape.detail, shape.fault);
+      run(ctx, unit, 20, `${shape.name}/false-cc-${cc}/prefix-then-fault`, registers, entry + 5, flags, shape.detail === 3 ? 11 : 5, 1, undefined, shape.detail === 3 ? 0 : shape.detail, shape.detail === 3 ? 0 : shape.fault);
       counts.fault_calls++; counts.prefix_retired++;
-      run(ctx, unit, 1, 'unrepaired retry preserves fault PC and prefix', registers, entry + 5, flags, 5, 0, undefined, shape.detail, shape.fault); counts.fault_calls++;
+      run(ctx, unit, 1, 'unrepaired retry preserves fault PC and prefix', registers, entry + 5, flags, shape.detail === 3 ? 11 : 5, 0, undefined, shape.detail === 3 ? 0 : shape.detail, shape.detail === 3 ? 0 : shape.fault); counts.fault_calls++;
       preflight(ctx, unit, registers, entry + 5, flags);
       if (shape.mapRepair !== undefined || shape.permissionRepair !== undefined) {
         if (shape.mapRepair !== undefined) {map(ctx, shape.mapRepair); protect(ctx, shape.mapRepair, 1);}

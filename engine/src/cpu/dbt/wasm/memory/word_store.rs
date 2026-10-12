@@ -3,7 +3,7 @@ use wasm_encoder::{BlockType, InstructionSink, ValType};
 use crate::cpu::x86::ir::EffectiveAddress;
 
 use super::{
-    Imports, add_check, effective_address, exit_if_failed, expect_field, helper_field,
+    Imports, add_check, checked_address, exit_if_failed, expect_field, helper_field,
     infrastructure, protocol_if_bad, reset_checks,
 };
 use crate::cpu::dbt::wasm::locals::*;
@@ -14,7 +14,14 @@ pub(super) fn store_result(
     imports: Imports,
     exit_depth: u32,
 ) {
-    effective_address(code, address);
+    checked_address(
+        code,
+        address,
+        2,
+        crate::cpu::x86::SegmentAccess::Write,
+        imports,
+        exit_depth,
+    );
     store_result_at_address(code, imports, exit_depth);
 }
 

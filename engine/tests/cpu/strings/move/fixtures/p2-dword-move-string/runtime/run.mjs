@@ -12,11 +12,12 @@ const engine = readEngine(enginePath), SIZE = 4612, PC = 0x1000, SRC = 0x5000, D
 const initial = readFileSync(join(output, "initial-arena.bin")); assert.equal(initial.length, SIZE);
 const bank = Buffer.alloc(32, 0xcc); bank.set([0xa5,0xeb,0]); bank.set([0xb8,0xdf,0x9b,0x57,0x13,0xa5,0xeb,0],16);
 assert.deepEqual(bank,readFileSync(join(output,"movsd.x86")),"independent Rust/JS literal bank");
-const sourcePaths = ["engine/src/abi/arena.rs","engine/src/abi/memory_helper.rs","engine/src/abi/x86/x87.rs",
+const sourcePaths = [
+  'engine/src/cpu/dbt/wasm/segments/access.rs', 'engine/src/cpu/x86/segments/cache.rs', "engine/src/abi/arena.rs","engine/src/abi/memory_helper.rs","engine/src/abi/x86/x87.rs",
   "engine/src/cpu/x86/ir.rs","engine/src/cpu/x86/decode/lower.rs","engine/src/cpu/x86/decode/profile.rs",
   "engine/src/cpu/dbt/region.rs","engine/src/cpu/dbt/wasm/integer/arithmetic.rs", "engine/src/cpu/dbt/wasm/integer/bits.rs", "engine/src/cpu/dbt/wasm/integer/carry_rotates.rs", "engine/src/cpu/dbt/wasm/integer/decimal.rs", "engine/src/cpu/dbt/wasm/integer/dispatch.rs", "engine/src/cpu/dbt/wasm/integer/flags.rs", "engine/src/cpu/dbt/wasm/integer/mod.rs", "engine/src/cpu/dbt/wasm/integer/multiply_divide.rs", "engine/src/cpu/dbt/wasm/integer/operands.rs", "engine/src/cpu/dbt/wasm/integer/rotates.rs", "engine/src/cpu/dbt/wasm/integer/shifts.rs","engine/src/cpu/dbt/wasm/memory.rs",
   "engine/src/cpu/dbt/wasm/emitter.rs","engine/src/cpu/dbt/wasm/locals.rs","engine/src/memory/space.rs",
-  "engine/src/process/instance.rs", "engine/src/process/execution/compiled.rs", "engine/src/process/execution/authority.rs", "engine/src/process/memory/address_space.rs", "engine/src/process/memory/scalar.rs", "engine/src/process/memory/scalar_tests.rs", "engine/src/process/execution/mod.rs", "engine/src/process/memory/mod.rs", "engine/src/process/mod.rs","engine/src/process/execution/resident.rs", "engine/src/process/execution/authority.rs", "engine/src/process/execution/mod.rs", "engine/src/process/mod.rs","engine/tests/cpu/strings/move/wasm/dword.rs", "engine/tests/cpu/strings/wasm.rs", "engine/tests/support/wasm.rs", "engine/tests/cpu/strings/wasm.rs", "engine/tests/support/wasm.rs",
+  "engine/src/process/instance.rs", "engine/src/process/execution/compiled.rs", "engine/src/process/execution/authority.rs", "engine/src/process/memory/address_space.rs", "engine/src/process/memory/scalar.rs", "engine/src/process/memory/scalar_tests.rs", "engine/src/process/execution/mod.rs", "engine/src/process/memory/mod.rs", "engine/src/process/mod.rs","engine/src/process/execution/resident.rs",   "engine/tests/cpu/strings/move/wasm/dword.rs", "engine/tests/cpu/strings/wasm.rs", "engine/tests/support/wasm.rs",
   "engine/tests/cpu/strings/move/fixtures/p2-dword-move-string/runtime/run.mjs","engine/tests/support/wasm/engine.mjs"];
 const sourcePins = () => Object.fromEntries(sourcePaths.map(path=>{const bytes=readFileSync(join(root,path));
   return [path,{bytes:bytes.length,sha256:hash(bytes)}];}));
@@ -110,8 +111,8 @@ for(const [ordinal,owner]of ["replacement","resident"].entries()){
     if(f.deny)host(c,"protect",[f.deny,1,1]);
     if(ramWindow)readRam(c,...ramWindow,"declared failed-store sentinel before");
     const before=seed(c,PC+16,0xcd7,f.source,f.destination),afterPrefix={registers:[...before.registers],pc:PC+21,flags:before.flags};afterPrefix.registers[0]=0x13579bdf;
-    run(c,2,"retired prefix then width4 fault",afterPrefix,5,1,f);faults++;if(ramWindow)readRam(c,...ramWindow,"sentinels after first failure");
-    run(c,1,"same CPU repeat fault",afterPrefix,5,0,f);faults++;if(ramWindow)readRam(c,...ramWindow,"sentinels after retained retry");
+    run(c,2,"retired prefix then width4 fault",afterPrefix,f.detail===3?11:5,1,f.detail===3?undefined:f,0,f.detail!==3,f.detail===3?6:2);faults++;if(ramWindow)readRam(c,...ramWindow,"sentinels after first failure");
+    run(c,1,"same CPU repeat fault",afterPrefix,f.detail===3?11:5,0,f.detail===3?undefined:f,0,f.detail!==3,f.detail===3?6:2);faults++;if(ramWindow)readRam(c,...ramWindow,"sentinels after retained retry");
     if(index<6){if(f.detail===2)host(c,"protect",[f.address&~0xfff,1,3]);else host(c,"map",[f.address&~0xfff,1,3]);
       upload(c,f.source,words([0x8172a691]));if(!ramWindow){const [start,length]=window(f.destination);upload(c,start,Buffer.alloc(length,0x55));}
       assert.deepEqual(cpu(c),afterPrefix,"RAM repair never reseeds CPU");copy(c,"repaired target rereads current source",0x8172a691);}

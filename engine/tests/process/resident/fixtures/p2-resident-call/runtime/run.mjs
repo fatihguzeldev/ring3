@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import {generatedRunBody} from '../../../../../support/wasm/run.mjs';
 import {execFileSync} from 'node:child_process';
 import {createHash} from 'node:crypto';
 import {readFileSync, writeFileSync} from 'node:fs';
@@ -40,7 +41,7 @@ function binding(bytes, e, id, returns) {
     const section = bytes[c.i++], n = uleb(bytes, c), end = c.i + n;
     if (section === 1) for (let i = 0, count = uleb(bytes, c); i < count; i++) { assert.equal(bytes[c.i++], 0x60); const argc = uleb(bytes, c), args = [...bytes.subarray(c.i, c.i + argc)]; c.i += argc; const retc = uleb(bytes, c), result = [...bytes.subarray(c.i, c.i + retc)]; c.i += retc; types.push({args, result}); }
     else if (section === 2) for (let i = 0, count = uleb(bytes, c); i < count; i++) { string(); const name = string(), kind = bytes[c.i++]; if (kind === 0) imports.set(name, uleb(bytes, c)); else { assert.equal(kind, 2); const flags = uleb(bytes, c); uleb(bytes, c); if (flags & 1) uleb(bytes, c); } }
-    else if (section === 10) { assert.equal(uleb(bytes, c), 1); const length = uleb(bytes, c); body = bytes.subarray(c.i, c.i + length); }
+    else if (section === 10) { body = generatedRunBody(bytes); }
     c.i = end;
   }
   assert.ok(body); assert.deepEqual(types[0], {args: Array(4).fill(0x7f), result: [0x7f]}); assert.deepEqual(types[imports.get('guard_resident')], {args: Array(7).fill(0x7f), result: [0x7f]});
@@ -188,7 +189,7 @@ for (const kind of ['return-read', 'argument-read', 'cross-return', 'wrapped-fra
   if (kind === 'wrapped-frame') { assert.equal(e.api.map(0xfffff000, 1, 3), 0); assert.equal(e.api.map(0, 1, 3), 0); }
   const args = [kind === 'wrapped-frame' ? 0xfffffffe : 1], words = kind === 'guest-overflow' ? [] : frameWords(e, esp, args), start = state(0x3000, esp); reset(e, start);
   if (kind === 'guest-overflow') {
-    run(e, a, 8, start, exit(5, 0, 3, 0xfffffffe, 2, 4, 2), 'CALL wrapping EA with overflowing Store4 fails before Gate', 'initial', helper(0, 3, 0xfffffffe, 2), 1); stats.guest_store_faults++;
+    run(e, a, 8, start, exit(15, 0, 0, 0, 0, 0, 6), 'CALL wrapping EA with overflowing Store4 fails before Gate', 'initial'); stats.guest_store_faults++;
     failure(e, () => e.api.capture_resident_call(e.low, e.high, b.low, b.high, 1, 0), 13, 'memory fault exit is not Gate', 'capture'); close(e); continue;
   }
   const stopped = entered(e, a, b, form, start); let currentArgs = args, returnPC = 0x3005;
@@ -258,13 +259,14 @@ before = {...stats};
 close(main.e);
 section('corrupt cancellation-independent abandon and closed owner', before);
 
-const expectedStats = {engine_instances: 17, compiled_units: 42, legacy_modules: 1, canonical_runs: 86, rejected_runs: 17, full_arena_checks: 544, metadata_checks: 118, find_success: 75, find_failure: 9, initial_calls: 25, resumes: 61, resident_captures: 30, legacy_captures: 1, resident_completions: 20, legacy_completions: 1, abandonments: 9, capture_failures: 25, completion_failures: 28, rejected_operations: 68, guard_success: 7, guard_failure: 28, host_reads: 141, host_writes: 134, guest_store32: 25, bound_store_sites: 19, convention_cases: 6, capture_read_faults: 3, guest_store_faults: 1, repairs: 3, cancellation_cases: 1, currency_cases: 7};
+const expectedStats = {engine_instances: 17, compiled_units: 42, legacy_modules: 1, canonical_runs: 86, rejected_runs: 17, full_arena_checks: 544, metadata_checks: 118, find_success: 75, find_failure: 9, initial_calls: 25, resumes: 61, resident_captures: 30, legacy_captures: 1, resident_completions: 20, legacy_completions: 1, abandonments: 9, capture_failures: 25, completion_failures: 28, rejected_operations: 68, guard_success: 7, guard_failure: 28, host_reads: 141, host_writes: 134, guest_store32: 24, bound_store_sites: 19, convention_cases: 6, capture_read_faults: 3, guest_store_faults: 1, repairs: 3, cancellation_cases: 1, currency_cases: 7};
 assert.deepEqual(stats, expectedStats, 'independently precomputed authored-path counts');
 assert.deepEqual(sections.map(s => [s.stats.canonical_runs, s.stats.full_arena_checks, s.stats.metadata_checks, s.stats.resident_captures, s.stats.resident_completions, s.stats.host_reads, s.stats.host_writes]), [[19, 119, 20, 6, 6, 66, 66], [3, 42, 6, 1, 1, 5, 8], [8, 41, 10, 2, 1, 9, 9], [13, 70, 23, 4, 4, 16, 21], [6, 20, 3, 2, 1, 3, 3], [33, 224, 48, 13, 7, 39, 21], [4, 28, 8, 2, 0, 3, 6]], 'manual seven-section derivation');
 const productionPaths = execFileSync('rg', ['--files', 'engine/src'], {cwd: root, encoding: 'utf8'}).trim().split('\n').sort();
 const oldFamilies = ["engine/tests/process/calls/fixtures/p2-process-call", "engine/tests/process/callbacks/replacement/fixtures/p2-callbacks", "engine/tests/process/callbacks/replacement/fixtures/p2-callback-code"];
-const sourcePaths = ['engine/tests/process/resident/wasm/calls.rs', 'engine/tests/process/resident/wasm.rs', 'engine/tests/support/wasm.rs', 'engine/tests/process/resident/wasm.rs', 'engine/tests/support/wasm.rs', 'engine/tests/process/resident/fixtures/p2-resident-call/runtime/run.mjs', 'engine/tests/process/resident/native/calls.rs', 'engine/tests/process/resident/native.rs', 'engine/tests/process/resident/native.rs', 'engine/tests/process/calls/native/integer.rs', 'engine/tests/process/calls/native.rs', 'engine/tests/process/calls/native.rs', 'engine/tests/process/callbacks/replacement/native/admission.rs', 'engine/tests/process/callbacks/native.rs', 'engine/tests/process/callbacks/native.rs', 'engine/tests/process/callbacks/replacement/native/code.rs', 'engine/tests/process/callbacks/native.rs', 'engine/tests/process/callbacks/native.rs', 'engine/tests/process/calls/wasm/integer.rs', 'engine/tests/process/calls/wasm.rs', 'engine/tests/support/wasm.rs', 'engine/tests/process/calls/wasm.rs', 'engine/tests/support/wasm.rs', 'engine/tests/process/callbacks/replacement/wasm/admission.rs', 'engine/tests/process/callbacks/wasm.rs', 'engine/tests/support/wasm.rs', 'engine/tests/process/callbacks/wasm.rs', 'engine/tests/support/wasm.rs', 'engine/tests/process/callbacks/replacement/wasm/code.rs', 'engine/tests/process/callbacks/wasm.rs', 'engine/tests/support/wasm.rs', 'engine/tests/process/callbacks/wasm.rs', 'engine/tests/support/wasm.rs', ...oldFamilies.flatMap(name => [`${name}/runtime/run.mjs`, `${name}/integer.S`]), 'Cargo.toml', 'engine/Cargo.toml', 'Cargo.lock', ...productionPaths];
-assert.equal(new Set(sourcePaths).size, sourcePaths.length); assert.equal(sourcePaths.length, 77);
+const sourcePaths = [
+  'engine/tests/support/wasm/run.mjs', 'engine/tests/process/resident/wasm/calls.rs', 'engine/tests/process/resident/wasm.rs', 'engine/tests/support/wasm.rs',   'engine/tests/process/resident/fixtures/p2-resident-call/runtime/run.mjs', 'engine/tests/process/resident/native/calls.rs', 'engine/tests/process/resident/native.rs',  'engine/tests/process/calls/native/integer.rs', 'engine/tests/process/calls/native.rs',  'engine/tests/process/callbacks/replacement/native/admission.rs', 'engine/tests/process/callbacks/native.rs',  'engine/tests/process/callbacks/replacement/native/code.rs',   'engine/tests/process/calls/wasm/integer.rs', 'engine/tests/process/calls/wasm.rs',    'engine/tests/process/callbacks/replacement/wasm/admission.rs', 'engine/tests/process/callbacks/wasm.rs',    'engine/tests/process/callbacks/replacement/wasm/code.rs',     ...oldFamilies.flatMap(name => [`${name}/runtime/run.mjs`, `${name}/integer.S`]), 'Cargo.toml', 'engine/Cargo.toml', 'Cargo.lock', ...productionPaths];
+assert.equal(new Set(sourcePaths).size, sourcePaths.length); assert.equal(sourcePaths.length, productionPaths.length + 26);
 const provenance = {
   stats, section_derivation: sections, actual_resident_runs: stats.canonical_runs + stats.rejected_runs, actual_resident_guard_entries: stats.canonical_runs + stats.rejected_runs + stats.guard_success + stats.guard_failure, bound_store_identity_checks: stats.guest_store32, actual_guest_helper_calls_from_authored_execution: stats.guest_store32,
   engine_sha256: hash(engineBytes), artifact_sha256: artifacts, module_set_sha256: hash(Object.keys(artifacts).filter(name => name.endsWith('.wasm')).sort().map(name => `${name}:${artifacts[name]}`).join('\n')),

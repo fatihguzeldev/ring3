@@ -350,17 +350,18 @@ fn memory_xchg16_mixed_dword_byte_word_imports_share_the_existing_store_type() {
                 engine.artifact_bytes().unwrap()
             };
             let mut sections = &module[8..];
-            let mut seen = [false; 2];
+            let mut seen = [false; 4];
             while !sections.is_empty() {
                 let kind = take(&mut sections, 1)[0];
                 let length = unsigned(&mut sections) as usize;
                 let mut section = take(&mut sections, length);
                 if kind == 1 {
-                    assert_eq!(unsigned(&mut section), 3);
+                    assert_eq!(unsigned(&mut section), 4);
                     for parameters in [
                         4,
                         if resident { 7 } else { 6 },
                         if resident { 6 } else { 2 },
+                        6,
                     ] {
                         assert_eq!(take(&mut section, 1), &[0x60]);
                         assert_eq!(unsigned(&mut section), parameters);
@@ -414,9 +415,30 @@ fn memory_xchg16_mixed_dword_byte_word_imports_share_the_existing_store_type() {
                     }
                     assert!(section.is_empty());
                     seen[1] = true;
+                } else if kind == 3 {
+                    assert_eq!(unsigned(&mut section), 2);
+                    assert_eq!(unsigned(&mut section), 0);
+                    assert_eq!(unsigned(&mut section), 3);
+                    assert!(section.is_empty());
+                    seen[2] = true;
+                } else if kind == 10 {
+                    assert_eq!(unsigned(&mut section), 2);
+                    for declarations in [&[(16, 0x7f), (1, 0x7e), (10, 0x7f)][..], &[(3, 0x7f)][..]]
+                    {
+                        let length = unsigned(&mut section) as usize;
+                        let mut body = take(&mut section, length);
+                        assert_eq!(body.last(), Some(&0x0b));
+                        assert_eq!(unsigned(&mut body) as usize, declarations.len());
+                        for &(count, kind) in declarations {
+                            assert_eq!((unsigned(&mut body), take(&mut body, 1)[0]), (count, kind));
+                        }
+                        assert!(!body.is_empty());
+                    }
+                    assert!(section.is_empty());
+                    seen[3] = true;
                 }
             }
-            assert_eq!(seen, [true, true]);
+            assert_eq!(seen, [true; 4]);
             assert_eq!(engine.arena(), before);
         }
     }

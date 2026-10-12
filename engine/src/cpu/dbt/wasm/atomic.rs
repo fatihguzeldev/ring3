@@ -115,11 +115,14 @@ pub(super) fn operation(
             code.i32_const(65535).i32_and();
         }
     }
-    if let Some(segment) = address.segment {
-        super::segments::base(code, segment);
-        code.i32_add();
-    }
-    code.local_set(ADDRESS);
+    memory::checked_offset(
+        code,
+        address.resolved_segment(),
+        u32::from(width),
+        crate::cpu::x86::SegmentAccess::Write,
+        imports,
+        exit_depth,
+    );
     payload(code);
     code.local_get(STATE_PTR)
         .local_get(RESULT)
@@ -148,8 +151,14 @@ pub(super) fn compare8(
     imports: memory::Imports,
     exit_depth: u32,
 ) {
-    memory::address_value(code, address);
-    code.local_set(ADDRESS);
+    memory::checked_address(
+        code,
+        address,
+        8,
+        crate::cpu::x86::SegmentAccess::Write,
+        imports,
+        exit_depth,
+    );
     payload(code);
     call(code, 0x10000, 8, imports, exit_depth);
     flags(code, 0x40, exit_depth);

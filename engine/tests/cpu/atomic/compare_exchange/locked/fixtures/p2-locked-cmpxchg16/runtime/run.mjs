@@ -32,7 +32,7 @@ function record(magic, version, size, fields) {
   fields.forEach((v, i) => b.writeUInt32LE(v >>> 0, 16 + i * 4)); return b;
 }
 const state = s => record('R3ST', 1, 56, [...s.registers, s.pc, s.flags]);
-const exit = (reason, retired, {detail = 0, address = 0, access = 0} = {}, version = 2) => record('R3EX', version, 40, [reason, retired, detail, address, access, access ? 2 : 0]);
+const exit = (reason, retired, {detail = 0, address = 0, access = 0} = {}, version = 2) => record('R3EX', reason === 11 ? 6 : version, 40, [reason, retired, detail, address, access, access ? 2 : 0]);
 const helper = (value = 0, {detail = 0, address = 0, access = 0} = {}) => record('R3MH', 6, 40, [access ? 1 : 0, value, detail, address, access, 2]);
 const helper32 = value => record('R3MH', 1, 40, [0, value, 0, 0, 0, 0]);
 const helper16 = value => record('R3MH', 2, 40, [0, value, 0, 0, 0, 2]);
@@ -176,7 +176,7 @@ function close(c) {
 function stopped(c, unit, registers, flags, fault, label, prior = true) {
   const start = prior ? seed(c, 0x1700, flags, registers) : cpu(c), next = {...start, registers: [...start.registers], pc: FAULT};
   if (prior) next.registers[3] = 0xcafebabe;
-  run(c, unit, 2, next, label, {reason: 5, retired: prior ? 1 : 0, fault, packet: helper(0, fault)}); counts.faults++; return next;
+  run(c, unit, 2, next, label, {reason: fault.detail === 3 ? 11 : 5, retired: prior ? 1 : 0, fault: fault.detail === 3 ? {} : fault, packet: fault.detail === 3 ? undefined : helper(0, fault)}); counts.faults++; return next;
 }
 function core(owner, entries) {
   const c = open(owner, entries, 'core'), a = compile(c, 'all-eight-word-sources', normal);
@@ -272,7 +272,7 @@ function synthetic(c, unit) {
     {name: 'success-length-dword', edit: b => b.writeUInt32LE(4, 36)}, {name: 'overflow-success', address: 0xffffffff},
     {name: 'fault-value', packet: helper(1, {detail: 2, address: DATA, access: 1})},
     {name: 'write-unmapped', packet: helper(0, {detail: 1, address: DATA, access: 2})},
-    {name: 'write-overflow', address: 0xffffffff, packet: helper(0, {detail: 3, address: 0xffffffff, access: 2})},
+    {name: 'write-overflow', address:0xfffffffe, packet: helper(0, {detail: 3, address: 0xffffffff, access: 2})},
     {name: 'invalidated-fault', status: 11, packet: helper(0, {detail: 2, address: DATA, access: 1})},
     {name: 'invalidated-infrastructure', status: 11, packet: record('R3MH', 6, 40, [2, 0, 1, 0, 0, 2])},
     {name: 'fault-outside-word', packet: helper(0, {detail: 2, address: DATA + 2, access: 1})},
@@ -293,7 +293,7 @@ function synthetic(c, unit) {
   assert.equal(malformed.length, 29);
   for (const row of malformed) {
     const address = row.address ?? DATA, r = parents(); r[6] = address; r[0] = 0x89abcdef; r[1] = 0x12345678;
-    const f = frame(c, Math.min(address, 0xfffffffe), 0x1122), zero = address === 0xffffffff ? frame(c, 0, 0x3344) : null;
+    const f = frame(c, Math.min(address, 0xfffffffe), 0x1122), zero = address === 0xffffffff || row.name === 'write-overflow' ? frame(c, 0, 0x3344) : null;
     const packet = Buffer.from(row.packet ?? helper(0x1122)); row.edit?.(packet);
     let calls = 0; const ring3 = {...unit.ring3}, name = c.owner === 'resident' ? 'compare_exchange_resident16' : 'compare_exchange16';
     ring3[name] = (...args) => {
@@ -302,8 +302,10 @@ function synthetic(c, unit) {
     };
     const fake = {...unit, name: unit.name + '-synthetic', run: new WebAssembly.Instance(unit.module, {env: {memory: c.memory}, ring3}).exports.run};
     const start = seed(c, FAULT, 0xcd7, r);
-    run(c, fake, 1, start, 'nonforwarding-' + row.name, {reason: 7, retired: 0, fault: {detail: row.detail ?? 2}, packet, synthetic: true});
-    assert.equal(calls, 1); checkRam(c, f.address, f.bytes); if (zero) checkRam(c, zero.address, zero.bytes); counts.synthetic++;
+    // flat-4GiB logical span overflow is stopped before any injected helper packet.
+    const segmentOverflow = address > 0xfffffffe;
+    run(c, fake, 1, start, 'nonforwarding-' + row.name, segmentOverflow ? {reason: 11, retired: 0, synthetic: true} : {reason: 7, retired: 0, fault: {detail: row.detail ?? 2}, packet, synthetic: true});
+    assert.equal(calls, segmentOverflow ? 0 : 1); checkRam(c, f.address, f.bytes); if (zero) checkRam(c, zero.address, zero.bytes); counts.synthetic++;
   }
 }
 function liveProof(c,unit) {
@@ -375,7 +377,7 @@ function smc(owner,entries,identity) {
 }
 for(const owner of ['replacement','resident'])for(const entries of [false,true]){core(owner,entries);for(const identity of [false,true])smc(owner,entries,identity);}
 assert.deepEqual(sourceHashes(),sourcesBefore);
-assert.deepEqual(counts,{contexts:12,modules:32,runs:1076,retired:1018,compares:886,helper_calls:982,read32:32,read16:16,store32:44,store16:4,
+assert.deepEqual(counts,{contexts:12,modules:32,runs:1076,retired:1018,compares:878,helper_calls:974,read32:32,read16:16,store32:44,store16:4,
   sources:64,flag_rows:512,aliases:104,boundary:48,faults:96,repair_only:36,current_inputs:4,synthetic:116,smc:8,compiler_calls:8});
 const result={engine:{path:enginePath,sha256:engine.sha256,bytes:engine.bytes.length},source_pins:sourcesBefore,initial_arena_sha256:hash(initial),
   compiler:{text_hex:kernel.toString('hex'),text_sha256:hash(kernel),calls:counts.compiler_calls,combined_blocks:6,combined_instructions:29},

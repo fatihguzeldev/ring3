@@ -153,7 +153,7 @@ function readState(engine) {
   };
 }
 
-function exit(reason, retired, detail = 0, address = 0, access = 0, length = reason === 5 ? 4 : 0, version = 2) {
+function exit(reason, retired, detail = 0, address = 0, access = 0, length = reason === 5 ? 4 : 0, version = reason === 11 || reason === 15 ? 6 : 2) {
   const bytes = new Uint8Array(40), view = new DataView(bytes.buffer);
   header(bytes, view, 0, 'R3EX', 40, version);
   [reason, retired, detail, address, access, length].forEach((field, index) => view.setUint32(16 + index * 4, field, true));
@@ -425,7 +425,7 @@ for (const fixture of faultCases) {
   expected.eflags = 0x457;
   expected.eip = 0x1008;
   writeState(engine, start);
-  run(engine, child, 20, expected, exit(5, 2, fixture.detail, fixture.fault, fixture.access), fixture.name, helperRecord(1, 0, fixture.detail, fixture.fault, fixture.access));
+  run(engine, child, 20, expected, fixture.detail === 3 ? exit(fixture.access === 2 ? 15 : 11, 2) : exit(5, 2, fixture.detail, fixture.fault, fixture.access), fixture.name, fixture.detail === 3 ? arena(engine).slice(100, 140) : helperRecord(1, 0, fixture.detail, fixture.fault, fixture.access));
   for (const [address, value] of fixture.observe ?? fixture.words ?? []) assert.equal(guestValue(engine, address), value, 'failed indirect transfer preserves readable target/stack bytes');
   guarded(engine, child, 'failed indirect transfer leaves code current');
 }

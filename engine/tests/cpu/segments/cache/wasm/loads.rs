@@ -56,3 +56,36 @@ fn actual_segment_reads_descriptor_loads_and_plain_strings_preserve_precise_stat
     );
     println!("{}", String::from_utf8_lossy(&result.stdout).trim());
 }
+
+#[test]
+fn actual_normal_memory_enforces_cached_segment_intent_and_entire_spans() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
+    let engine = std::env::var_os("RING3_ENGINE_WASM")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| root.join("target/wasm32-unknown-unknown/debug/ring3_engine.wasm"));
+    let output = root.join("target/p2-segment-loads-fixtures").join(format!(
+        "access-{}-{}",
+        std::process::id(),
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    fs::create_dir_all(&output).unwrap();
+    let result = wasm_support::run_node(
+        root,
+        "engine/tests/cpu/segments/cache/fixtures/p2-segment-loads/runtime/access.mjs",
+        &engine,
+        &output,
+        None,
+    );
+    fs::write(output.join("node.stdout.log"), &result.stdout).unwrap();
+    fs::write(output.join("node.stderr.log"), &result.stderr).unwrap();
+    assert!(
+        result.status.success(),
+        "segment access integration failed:\n{}\n{}",
+        String::from_utf8_lossy(&result.stdout),
+        String::from_utf8_lossy(&result.stderr)
+    );
+    println!("{}", String::from_utf8_lossy(&result.stdout).trim());
+}

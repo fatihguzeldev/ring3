@@ -26,7 +26,7 @@ const counts={contexts:0,modules:0,runs:0,retired:0,bit_sets:0,helper_calls:0,re
 const word=n=>{const b=Buffer.alloc(4);b.writeUInt32LE(n>>>0);return b;}, words=v=>Buffer.concat(v.map(word));
 function record(magic,version,size,fields){const b=Buffer.alloc(size);b.write(magic);b.writeUInt16LE(version,4);b.writeUInt16LE(1,6);b.writeUInt32LE(size,8);fields.forEach((v,i)=>b.writeUInt32LE(v>>>0,16+i*4));return b;}
 const state=s=>record('R3ST',1,56,[...s.registers,s.pc,s.flags]);
-const exit=(reason,retired,{detail=0,address=0,access=0}={},version=2)=>record('R3EX',version,40,[reason,retired,detail,address,access,access?4:0]);
+const exit=(reason,retired,{detail=0,address=0,access=0}={},version=2)=>record('R3EX',reason===11?6:version,40,[reason,retired,detail,address,access,access?4:0]);
 const helper=(value=0,{detail=0,address=0,access=0}={})=>record('R3MH',1,40,[access?1:0,value,detail,address,access,access?4:0]);
 const helper32=value=>helper(value);
 const parents=()=>Array.from({length:8},(_,i)=>(0xa100+i)*65536+0x1234+i);
@@ -133,7 +133,7 @@ function btsCase(c,unit,row,address,old,registers,incoming,label,f=frame(c,addre
 function stopped(c,unit,registers,incoming,fault,label,prior=true){
   const start=prior?seed(c,0x1700,incoming,registers):cpu(c),next={...start,registers:[...start.registers],pc:FAULT};
   if(prior)next.registers[3]=0xcafebabe;
-  run(c,unit,2,next,label,{reason:5,retired:prior?1:0,fault,packet:helper(0,fault)});counts.faults++;return next;
+  run(c,unit,2,next,label,{reason:fault.detail===3?11:5,retired:prior?1:0,fault:fault.detail===3?{}:fault,packet:fault.detail===3?undefined:helper(0,fault)});counts.faults++;return next;
 }
 function guardProbe(c,unit,kind,status,{badKey=false,badId=false,badPointer=false}={}){
   const before=arena(c),p=[badPointer?0:c.base,c.base+56,c.base+96],low=badKey?c.id+1:c.id;
@@ -230,7 +230,7 @@ function synthetic(c,unit){
     {name:'invalidated-fault',status:11,packet:helper(0,{detail:2,address:DATA,access:1})},
     {name:'invalidated-infrastructure',status:11,packet:infra()},
     {name:'write-unmapped',packet:helper(0,{detail:1,address:DATA,access:2})},
-    {name:'write-overflow',address:0xfffffffd,packet:helper(0,{detail:3,address:0xfffffffd,access:2})},
+    {name:'write-overflow',address:0xfffffffc,packet:helper(0,{detail:3,address:0xfffffffd,access:2})},
     {name:'top-nonoverflow-fault',address:0xfffffffc,packet:helper(0,{detail:2,address:0xfffffffd,access:1})},
     {name:'overflow-success',address:0xfffffffd},
     {name:'infrastructure-value',packet:infra(1)},
@@ -241,13 +241,15 @@ function synthetic(c,unit){
   assert.equal(rows.length,12);
   for(const row of rows){
     const address=row.address??DATA,r=parents();r[1]=5;r[6]=address;
-    const f=frame(c,Math.min(address,0xfffffffc),0x1234567a),zero=address>0xfffffffc?frame(c,0,0x33445566):null;
+    const f=frame(c,Math.min(address,0xfffffffc),0x1234567a),zero=(address>0xfffffffc||row.name==='write-overflow')?frame(c,0,0x33445566):null;
     const packet=Buffer.from(row.packet??helper(0x1234567a));row.edit?.(packet);let calls=0;
     const ring3={...unit.ring3},name=c.owner==='resident'?'bit_test_set_resident32':'bit_test_set32';
     ring3[name]=(...args)=>{assert.deepEqual(args.slice(name.includes('resident')?4:0).map(v=>v>>>0),[address,5]);input(c,100,packet);calls++;return row.status??0;};
     const fake={...unit,name:unit.name+'-synthetic',run:new WebAssembly.Instance(unit.module,{env:{memory:c.memory},ring3}).exports.run},start=seed(c,FAULT,0xcd7,r);
-    run(c,fake,1,start,'nonforwarding-'+row.name,{reason:7,retired:0,fault:{detail:row.detail??2},packet,synthetic:true});
-    assert.equal(calls,1);checkRam(c,f.address,f.bytes);if(zero)checkRam(c,zero.address,zero.bytes);counts.synthetic++;
+    // flat-4GiB logical span overflow is stopped before any injected helper packet.
+    const segmentOverflow=address>0xfffffffc;
+    run(c,fake,1,start,'nonforwarding-'+row.name,segmentOverflow?{reason:11,retired:0,synthetic:true}:{reason:7,retired:0,fault:{detail:row.detail??2},packet,synthetic:true});
+    assert.equal(calls,segmentOverflow?0:1);checkRam(c,f.address,f.bytes);if(zero)checkRam(c,zero.address,zero.bytes);counts.synthetic++;
   }
 }
 function liveProof(c,unit){
@@ -304,7 +306,7 @@ function smc(owner,identity){
 for(const owner of ['replacement','resident']){for(const entries of [false,true])core(owner,entries);for(const identity of [false,true])smc(owner,identity);}
 assert.deepEqual(sourceHashes(),sourcesBefore);
 // final source-derived census is frozen before root execution.
-const expectedCounts = {contexts:8,modules:24,runs:532,retired:478,bit_sets:414,helper_calls:450,read32:16,store32:20,
+const expectedCounts = {contexts:8,modules:24,runs:532,retired:478,bit_sets:406,helper_calls:442,read32:16,store32:20,
   sources:64,flag_rows:64,indices:88,aliases:40,boundary:40,faults:72,repair_only:24,current_inputs:4,synthetic:48,smc:4,compiler_calls:8};
 assert.deepEqual(counts,expectedCounts);assert.equal(diagnostics.length,3932);
 const result={engine:{path:enginePath,sha256:engine.sha256,bytes:engine.bytes.length},source_pins:sourcesBefore,initial_arena_sha256:hash(initial),

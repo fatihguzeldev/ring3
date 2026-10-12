@@ -577,8 +577,8 @@ fn section(wasm: &[u8], requested: u8) -> Reader<'_> {
 
 fn checked_word_read_interface(wasm: &[u8], resident: bool) {
     let mut types = section(wasm, 1);
-    assert_eq!(types.unsigned(), 3);
-    for arity in [4, if resident { 7 } else { 6 }, 1] {
+    assert_eq!(types.unsigned(), 4);
+    for arity in [4, if resident { 7 } else { 6 }, 1, 6] {
         assert_eq!(types.byte(), 0x60);
         assert_eq!(types.unsigned(), arity);
         assert!(types.take(arity as usize).iter().all(|byte| *byte == 0x7f));
@@ -608,7 +608,8 @@ fn checked_word_read_interface(wasm: &[u8], resident: bool) {
     }
     imports.end();
     let mut functions = section(wasm, 3);
-    assert_eq!((functions.unsigned(), functions.unsigned()), (1, 0));
+    assert_eq!((functions.unsigned(), functions.unsigned()), (2, 0));
+    assert_eq!(functions.unsigned(), 3);
     functions.end();
     let mut exports = section(wasm, 7);
     assert_eq!(
@@ -622,14 +623,22 @@ fn checked_word_read_interface(wasm: &[u8], resident: bool) {
     );
     exports.end();
     let mut bodies = section(wasm, 10);
-    assert_eq!(bodies.unsigned(), 1);
+    assert_eq!(bodies.unsigned(), 2);
     let length = bodies.unsigned() as usize;
     let mut body = Reader(bodies.take(length));
-    bodies.end();
     assert_eq!(body.unsigned(), 3);
     for expected in [(16, 0x7f), (1, 0x7e), (10, 0x7f)] {
         assert_eq!((body.unsigned(), body.byte()), expected);
     }
+    assert_eq!(body.0.last(), Some(&0x0b));
+    let length = bodies.unsigned() as usize;
+    let mut guard = Reader(bodies.take(length));
+    assert_eq!(
+        (guard.unsigned(), guard.unsigned(), guard.byte()),
+        (1, 3, 0x7f)
+    );
+    assert_eq!(guard.0.last(), Some(&0x0b));
+    bodies.end();
 }
 
 #[test]

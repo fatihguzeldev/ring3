@@ -76,7 +76,7 @@ function record(magic, size, fields, version = 1) {
   fields.forEach((value, index) => bytes.writeUInt32LE(value >>> 0, 16 + index * 4)); return bytes;
 }
 const state = (registers, pc, flags) => record('R3ST', 56, [...registers, pc, flags]);
-const exit = (reason, retired, detail = 0, address = 0, access = 0, version = 2) => record('R3EX', 40, [reason, retired, detail, address, access, access ? 4 : 0], version);
+const exit = (reason, retired, detail = 0, address = 0, access = 0, version = 2) => record('R3EX', 40, [reason, retired, detail, address, access, access ? 4 : 0], reason === 11 ? 6 : version);
 const helper = (value = 0, detail = 0, address = 0, access = 0) => record('R3MH', 40, [access ? 1 : 0, value, detail, address, access, access ? 4 : 0]);
 const words = values => {const bytes = Buffer.alloc(values.length * 4); values.forEach((value, index) => bytes.writeUInt32LE(value >>> 0, index * 4)); return bytes;};
 const pattern = Buffer.from(Array.from({length: 4096}, (_, index) => index % 251 + 1));
@@ -148,6 +148,7 @@ function seed(ctx, registers, pc, flags) {
 }
 function cancel(ctx, value) {ctx.expected.writeUInt32LE(value, 96); refresh(ctx).view.setUint32(ctx.base + 96, value, true);}
 function run(ctx, unit, budget, label, registers, pc, flags, reason = 1, retired = 1, helperBytes, detail = 0, fault = 0, access = 0) {
+  if (detail === 3 && access && fault > 0xfffffffc) {reason = 11; helperBytes = undefined; detail = 0; fault = 0; access = 0;}
   check(ctx, `before ${label}`); ctx.expected.set(state(registers, pc, flags)); ctx.expected.set(exit(reason, retired, detail, fault, access, unit.exitVersion), 56);
   if (helperBytes !== undefined) ctx.expected.set(helperBytes, 100);
   assert.equal(unit.run(ctx.base, ctx.base + 56, budget, ctx.base + 96), 0, label); check(ctx, label); counts.generated_calls++;
@@ -290,8 +291,8 @@ function ownerChecks(ctx, unit) {
 function rejectedCounts(ctx, unit) {
   protect(ctx, KEEP, 7);
   for (const immediate of [0, 2, 32, 255]) {
-    const extension = ctx.kind === 'left' ? 0 : 8, bytes = ctx.bank.location === 'register' ? Buffer.from([0x66, 0x66, 0xc1, 0xc0 | extension, immediate, 0xeb, 0, 0x0f, 0x0b])
-      : Buffer.from([0x66, 0xc1, 5 | extension, 0x10, 0x40, 0, 0, immediate, 0xeb, 0, 0x0f, 0x0b]);
+    const extension = ctx.kind === 'left' ? 0 : 8, bytes = ctx.bank.location === 'register' ? Buffer.from([0xf0, 0xf0, 0xc1, 0xc0 | extension, immediate, 0xeb, 0, 0x0f, 0x0b])
+      : Buffer.from([0xf0, 0xc1, 5 | extension, 0x10, 0x40, 0, 0, immediate, 0xeb, 0, 0x0f, 0x0b]);
     dataInput(ctx, KEEP, bytes); const published = [ctx.api.generation(), ctx.api.module_ptr(), ctx.api.module_len()];
     request(ctx, words(ctx.owner === 'replacement' ? [KEEP] : [KEEP, bytes.length - 2]));
     pure(ctx, () => ctx.owner === 'replacement' ? ctx.api.compile_entries(1, 0) : ctx.api.compile_resident(1), ctx.bank.location === 'register' ? 'duplicate word-prefixed register count refused' : 'word-prefixed memory count refused', 10); counts.compiler_refusals++;
@@ -299,7 +300,7 @@ function rejectedCounts(ctx, unit) {
     assert.deepEqual(Buffer.from(refresh(ctx).bytes.subarray(unit.pointer, unit.pointer + unit.length)), unit.bytes, 'failed compiler preserves published module bytes');
     const registers = Array.from({length: 8}, (_, index) => ctx.expected.readUInt32LE(16 + index * 4)), pc = ctx.expected.readUInt32LE(48), flags = ctx.expected.readUInt32LE(52);
     run(ctx, unit, 0, 'published owner remains valid after refusal', registers, pc, flags, 1, 0); counts.rejection_survivals++;
-    refusalRows.push({owner: ctx.owner, bank: ctx.bank.id, immediate, prefix: 0x66, prefixes: ctx.bank.location === 'register' ? [0x66, 0x66] : [0x66], status: 10, published_module_sha256: hash(unit.bytes)});
+    refusalRows.push({owner: ctx.owner, bank: ctx.bank.id, immediate, prefix: 0xf0, prefixes: ctx.bank.location === 'register' ? [0xf0, 0x66] : [0x66], status: 10, published_module_sha256: hash(unit.bytes)});
   }
   dataInput(ctx, KEEP, pattern.subarray(0, ctx.bank.location === 'register' ? 9 : 12)); protect(ctx, KEEP, 3); pages(ctx, 'restored patterned compiler-rejection page', [KEEP]);
 }

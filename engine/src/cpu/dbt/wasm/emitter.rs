@@ -3,7 +3,7 @@ use wasm_encoder::{
     ImportSection, InstructionSink, MemoryType, Module, TypeSection, ValType,
 };
 
-use super::{EmbeddedBinding, abi, integer, locals::*, memory, x87};
+use super::{EmbeddedBinding, abi, integer, locals::*, memory, segments, x87};
 use crate::cpu::dbt::region::CompiledBlock;
 use crate::cpu::x86::ir::Operation;
 
@@ -166,6 +166,10 @@ pub(in crate::cpu::dbt) fn emit(
                         | Operation::LoadFarPointer { .. }
                 )
         });
+    let has_segment_check = blocks
+        .iter()
+        .flat_map(|block| &block.instructions)
+        .any(|instruction| instruction.segment_accesses() != 0);
     let mut types = TypeSection::new();
     types.ty().function([ValType::I32; 4], [ValType::I32]);
     if let Some(binding) = binding {
@@ -233,6 +237,10 @@ pub(in crate::cpu::dbt) fn emit(
                 [ValType::I32],
             );
         }
+    }
+    let segment_check_type = cpu_type_base + if has_cpu { 10 } else { 0 };
+    if has_segment_check {
+        types.ty().function([ValType::I32; 6], [ValType::I32]);
     }
     module.section(&types);
     let mut imports = ImportSection::new();
@@ -710,6 +718,10 @@ pub(in crate::cpu::dbt) fn emit(
     module.section(&imports);
     let mut functions = FunctionSection::new();
     functions.function(0);
+    if has_segment_check {
+        helper_imports.segment_check = Some(function_index + 1);
+        functions.function(segment_check_type);
+    }
     module.section(&functions);
     let mut exports = ExportSection::new();
     exports.export("run", ExportKind::Func, function_index);
@@ -795,6 +807,9 @@ pub(in crate::cpu::dbt) fn emit(
     code.i32_const(0).end();
     let mut bodies = CodeSection::new();
     bodies.function(&function);
+    if has_segment_check {
+        bodies.function(&segments::build_function());
+    }
     module.section(&bodies);
     module.finish()
 }

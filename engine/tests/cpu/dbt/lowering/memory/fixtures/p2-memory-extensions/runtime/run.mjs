@@ -145,7 +145,7 @@ function readState(engine) {
   };
 }
 
-function exit(reason, retired, detail = 0, address = 0, access = 0, length = 0, version = 2) {
+function exit(reason, retired, detail = 0, address = 0, access = 0, length = 0, version = reason === 11 || reason === 15 ? 6 : 2) {
   const bytes = new Uint8Array(40), view = new DataView(bytes.buffer);
   header(bytes, view, 0, 'R3EX', 40, version);
   [reason, retired, detail, address, access, length].forEach((field, index) => view.setUint32(16 + index * 4, field, true));
@@ -295,7 +295,7 @@ for (const fixture of generic) {
 const crossing = boundary.get('sx_word');
 for (const [address, detail, denied] of [[0x4fff, 1, 0x5000], [0xffffffff, 3, 0xffffffff]]) {
   const start = state(); start.registers[6] = address; writeState(crossing.engine, start);
-  run(crossing.engine, crossing.child, 10, start, exit(5, 0, detail, denied, 1, 2), `actual narrow fault ${address}`, narrow(2, 1, 0, detail, denied, 1));
+  run(crossing.engine, crossing.child, 10, start, detail === 3 ? exit(11, 0) : exit(5, 0, detail, denied, 1, 2), `actual narrow fault ${address}`, detail === 3 ? arena(crossing.engine).slice(100, 140) : narrow(2, 1, 0, detail, denied, 1));
 }
 assert.equal(crossing.engine.api.map(0x5000, 1, 2), 0);
 upload(crossing.engine, 0x5000, Uint8Array.from([1]));
@@ -416,7 +416,8 @@ function scriptedCases(width) {
     {label: 'overflowing request cannot report unmapped', address: 0xffffffff, record: narrow(2, 1, 0, 1, 0xffffffff, 1)},
     {label: 'overflow fault byte must equal original request', address: 0xffffffff, record: narrow(2, 1, 0, 3, 0xfffffffe, 1)},
   );
-  return cases.map(test => ({status: 0, address: 0x9000, expected: protocol, ...test}));
+  return cases.map(test => ({status: 0, address: 0x9000, expected: protocol, ...test,
+    ...(test.address === 0xffffffff && width === 2 ? {segmentFault: true, expected: exit(11, 1)} : {})}));
 }
 
 const scriptedEvidence = [];
@@ -433,10 +434,10 @@ for (const width of [1, 2]) {
     writeState(engine, start);
     engine.bytes.set(test.record, engine.base + 140);
     injector.exports.configure(engine.base + 100, engine.base + 140, test.status);
-    const copied = test.status === 0 || test.status === 11;
+    const copied = !test.segmentFault && (test.status === 0 || test.status === 11);
     run(engine, child, test.success ? 2 : 20, expected, test.success ? exit(1, 2) : test.expected, `pure-Wasm scripted read${width * 8}: ${test.label}`, copied ? test.record : undefined, true);
-    assert.equal(injector.exports.calls(), 1, 'scripted helper receives one request');
-    assert.equal(injector.exports.address() >>> 0, test.address, 'scripted helper receives old effective address');
+    assert.equal(injector.exports.calls(), test.segmentFault ? 0 : 1, 'overflowing logical span is rejected before scripted helper');
+    assert.equal(injector.exports.address() >>> 0, test.segmentFault ? 0 : test.address, 'scripted helper receives only a segment-authorized address');
     assert.equal(engine.api.guard(engine.low, engine.high, actual.generation, engine.base, engine.base + 56, engine.base + 96), 0, 'scripted helper does not change actual artifact snapshot');
     scriptedEvidence.push({width, label: test.label, status: test.status, address: test.address});
   }
@@ -454,7 +455,7 @@ const provenance = {
   generated_modules: modules, actual_engine_cpu_calls: actualRuns, actual_engine_direct_helper_calls: helperProbes, continuation_calls: continuations, pure_wasm_scripted_cpu_calls: injectedRuns,
   llvm_symbols: llvm, scripted_cases: scriptedEvidence,
   engine_sha256: hash(engineBytes), helper_injector_sha256: hash(injectorBytes), module_set_sha256: hash(generatedHashes.join('\n')),
-  sha256: Object.fromEntries(['integer.S', 'runtime/run.mjs'].map(name => [name, hash(readFileSync(join(fixtureRoot, name)))]).concat([['dbt_memory_extensions_wasm.rs', hash(readFileSync(join(root, 'engine/tests/cpu/dbt/lowering/memory/wasm/extensions.rs', 'engine/tests/cpu/dbt/lowering/wasm.rs', 'engine/tests/cpu/dbt/lowering/wasm.rs')))], ['integer.o', hash(object)]])),
+  sha256: Object.fromEntries(['integer.S', 'runtime/run.mjs'].map(name => [name, hash(readFileSync(join(fixtureRoot, name)))]).concat([['dbt_memory_extensions_wasm.rs', hash(readFileSync(join(root, 'engine/tests/cpu/dbt/lowering/memory/wasm/extensions.rs')))], ['integer.o', hash(object)]]).concat(['engine/tests/cpu/dbt/lowering/wasm.rs'].map(path => [path, hash(readFileSync(join(root, path)))]))),
   versions: {clang: execFileSync('clang', ['--version'], {encoding: 'utf8'}).split('\n')[0], objdump: execFileSync('xcrun', ['llvm-objdump', '--version'], {encoding: 'utf8'}).split('\n')[0], node: process.version},
   commands: {assemble: ['clang', ...assemble], disassemble: ['xcrun', 'llvm-objdump', '-d', '--x86-asm-syntax=intel', objectPath]},
   generated_sha256: generatedHashes,

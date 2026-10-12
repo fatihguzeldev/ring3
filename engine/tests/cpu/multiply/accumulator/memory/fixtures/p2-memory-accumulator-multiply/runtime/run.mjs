@@ -49,7 +49,7 @@ function record(magic, size, fields, version = 1) {
   fields.forEach((value, index) => bytes.writeUInt32LE(value >>> 0, 16 + index * 4)); return bytes;
 }
 const state = (registers, pc, flags) => record('R3ST', 56, [...registers, pc, flags]);
-const exit = (reason, retired, detail = 0, address = 0) => record('R3EX', 40, [reason, retired, detail, address, reason === 5 ? 1 : 0, reason === 5 ? 4 : 0], 2);
+const exit = (reason, retired, detail = 0, address = 0) => record('R3EX', 40, [reason, retired, detail, address, reason === 5 ? 1 : 0, reason === 5 ? 4 : 0], reason === 11 ? 6 : 2);
 const helper = (value = 0, detail = 0, address = 0) => record('R3MH', 40, [detail ? 1 : 0, detail ? 0 : value, detail, address, detail ? 1 : 0, detail ? 4 : 0]);
 const words = values => {const bytes = Buffer.alloc(values.length * 4); values.forEach((value, index) => bytes.writeUInt32LE(value >>> 0, index * 4)); return bytes;};
 function refresh(ctx) {ctx.bytes = new Uint8Array(ctx.memory.buffer); ctx.view = new DataView(ctx.memory.buffer); return ctx;}
@@ -168,13 +168,15 @@ const faultShapes = [
 ];
 function faultMatrix(ctx, unit) {
   for (const shape of faultShapes) {
+    const reason = shape.name === 'overflow' ? 11 : 5;
+    const detail = reason === 11 ? 0 : shape.detail, fault = reason === 11 ? 0 : shape.fault;
     if (shape.name === 'cross-page-unmapped') unmap(ctx, SECOND);
     if (shape.name === 'cross-page-write-only') {map(ctx, SECOND); protect(ctx, SECOND, 1);}
     for (const eax of [0, 0x89abcdef]) for (const flags of [2, 0xcd7]) {
       if (shape.permissionRepair !== undefined) protect(ctx, shape.permissionRepair, 2);
       const registers = [...REG]; registers[0] = eax; registers[3] = shape.address; seed(ctx, registers, PC + 0x70, flags); registers[1]++;
-      run(ctx, unit, 20, `${shape.name}/eax-${eax}/prefix-then-fault`, registers, PC + 0x73, flags, 5, 1, undefined, shape.detail, shape.fault); counts.prefixes++; counts.fault_calls++;
-      run(ctx, unit, 1, 'unrepaired retry preserves EAX/EDX/FLAGS and prefix', registers, PC + 0x73, flags, 5, 0, undefined, shape.detail, shape.fault); counts.fault_calls++;
+      run(ctx, unit, 20, `${shape.name}/eax-${eax}/prefix-then-fault`, registers, PC + 0x73, flags, reason, 1, undefined, detail, fault); counts.prefixes++; counts.fault_calls++;
+      run(ctx, unit, 1, 'unrepaired retry preserves EAX/EDX/FLAGS and prefix', registers, PC + 0x73, flags, reason, 0, undefined, detail, fault); counts.fault_calls++;
       if (eax === 0) counts.zero_eax_fault_calls += 2;
       preflight(ctx, unit, registers, PC + 0x73, flags);
       if (shape.mapRepair !== undefined || shape.permissionRepair !== undefined) {
@@ -183,7 +185,7 @@ function faultMatrix(ctx, unit) {
         branch(ctx, unit, registers, PC + 0x77, result);
         if (shape.mapRepair !== undefined) unmap(ctx, shape.mapRepair);
       }
-      faultRows.push({owner: ctx.owner, kind: ctx.kind, shape: shape.name, eax, flags, request: shape.address, fault: shape.fault, detail: shape.detail, repaired: shape.name !== 'overflow'});
+      faultRows.push({owner: ctx.owner, kind: ctx.kind, shape: shape.name, eax, flags, request: shape.address, reason, fault, detail, repaired: shape.name !== 'overflow'});
     }
   }
 }

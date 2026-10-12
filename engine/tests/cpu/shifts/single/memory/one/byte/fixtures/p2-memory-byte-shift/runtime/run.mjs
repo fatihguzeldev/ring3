@@ -1,3 +1,4 @@
+import {assertEngineExports} from '../../../../../../../../../support/wasm/exports.mjs';
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
 import {readFileSync, readdirSync, writeFileSync} from 'node:fs';
@@ -8,16 +9,16 @@ assert.ok(root, 'expected engine wasm, output directory and repository root');
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
 const engineBytes = readFileSync(enginePath), engineModule = new WebAssembly.Module(engineBytes);
 assert.deepEqual(WebAssembly.Module.imports(engineModule), []);
-assert.equal(WebAssembly.Module.exports(engineModule).length, 72);
-assert.equal(WebAssembly.Module.exports(engineModule).filter(row => row.kind === 'function').length, 71);
+const {sourcePaths: engineExportPins} = assertEngineExports(engineModule, root);
 const SIZE = 4612, TRANSFER = 140, EXIT = 0x8020, EXIT_ID = 0x10003;
 const values = [0, 1, 15, 16, 127, 128, 255], seeds = [2, 0xcd7], kinds = [['shl', 4], ['shr', 5], ['sar', 7]];
 const initialRegisters = [0x1234807f, 0x23457f80, 0x34560f10, 0x4567ff00, 0x56789abc, 0x6789abcd, 0x789abcde, 0x89abcdef];
 const arities = {open: 3, close: 0, arena_ptr: 0, map: 3, protect: 3, upload: 2, read8: 1, read32: 1, write8: 2, compile_entries: 2, compile_resident_entries: 2, generation: 0, module_ptr: 0, module_len: 0, guard: 6, guard_resident: 7, store32: 2, store_resident32: 6, store8: 2, store_resident8: 6, begin_image_input: 1, append_image_input: 2, load_pe32_linked_v2_input_at: 2, start_loaded_image: 2, capture_call: 5, capture_resident_call: 6, complete_windows_call: 4, complete_resident_windows_call: 5};
 function engineSources(directory) {return readdirSync(join(root, directory), {withFileTypes: true}).flatMap(row => row.isDirectory() ? engineSources(`${directory}/${row.name}`) : [`${directory}/${row.name}`]);}
-const sourcePaths = ['Cargo.toml', 'Cargo.lock', 'engine/Cargo.toml', 'rust-toolchain.toml', ...engineSources('engine/src').sort(), 'engine/tests/support/loader/pe32/image.rs', 'engine/tests/cpu/shifts/single/memory/one/byte/wasm.rs', 'engine/tests/cpu/shifts/wasm.rs', 'engine/tests/support/loader/pe32/image.rs', 'engine/tests/support/wasm.rs', 'engine/tests/cpu/shifts/wasm.rs', 'engine/tests/support/wasm.rs', 'engine/tests/cpu/shifts/single/memory/one/byte/fixtures/p2-memory-byte-shift/runtime/run.mjs'];
+const sourcePaths = ['Cargo.toml', 'Cargo.lock', 'engine/Cargo.toml', 'rust-toolchain.toml', ...engineSources('engine/src').sort(), 'engine/tests/support/loader/pe32/image.rs', 'engine/tests/cpu/shifts/single/memory/one/byte/wasm.rs', 'engine/tests/cpu/shifts/wasm.rs', 'engine/tests/support/wasm.rs', 'engine/tests/cpu/shifts/single/memory/one/byte/fixtures/p2-memory-byte-shift/runtime/run.mjs'];
+sourcePaths.push(...engineExportPins.filter(path => !sourcePaths.includes(path)));
 assert.equal(new Set(sourcePaths).size, sourcePaths.length);
-assert.equal(sourcePaths.length, 91);
+assert.equal(sourcePaths.length, engineSources('engine/src').sort().length + 10);
 const sourceHashes = Object.fromEntries(sourcePaths.map(path => [path, hash(readFileSync(join(root, path)))]));
 const rows = [], controls = [], live = [], smc = [], pe = [], protocol = [], modules = [], generatedRuns = [], arenas = [], pages = [], rawFiles = [];
 let ordinal = 0, residentPeak = 0;
@@ -45,16 +46,25 @@ function childShape(ctx, bytes, binding, helpers, hasGates) {
   const signed = () => {let value = 0n, shift = 0n, next; do {assert.ok(at < bytes.length && shift < 35n); next = bytes[at++]; value |= BigInt(next & 127) << shift; shift += 7n;} while (next & 128); if (next & 64) value -= 1n << shift; return Number(BigInt.asUintN(32, value));};
   const name = () => {const length = unsigned(), end = at + length; assert.ok(end <= bytes.length); const value = bytes.subarray(at, end).toString(); at = end; return value;};
   const types = [], imports = [], functions = [], exports = []; let locals, guard;
+  const hasSegment = helpers.some(name => /^(read|store)/.test(name));
   assert.deepEqual([...bytes.subarray(0, 8)], [0, 97, 115, 109, 1, 0, 0, 0]);
   while (at < bytes.length) {const section = bytes[at++], length = unsigned(), end = at + length; assert.ok(end <= bytes.length);
     if (section === 1) for (let count = unsigned(); count > 0; count--) {assert.equal(bytes[at++], 0x60); types.push({parameters: Array.from({length: unsigned()}, () => bytes[at++]), results: Array.from({length: unsigned()}, () => bytes[at++])});}
     else if (section === 2) for (let count = unsigned(); count > 0; count--) {const module = name(), field = name(), kind = bytes[at++]; if (kind === 0) imports.push({module, name: field, kind: 'function', type: unsigned()}); else {assert.equal(kind, 2); assert.equal(unsigned(), 0); assert.equal(unsigned(), 1); imports.push({module, name: field, kind: 'memory'});}}
     else if (section === 3) for (let count = unsigned(); count > 0; count--) functions.push(unsigned());
     else if (section === 7) for (let count = unsigned(); count > 0; count--) exports.push({name: name(), kind: bytes[at++], index: unsigned()});
-    else if (section === 10) {assert.equal(unsigned(), 1); const bodyLength = unsigned(); assert.equal(at + bodyLength, end); locals = Array.from({length: unsigned()}, () => [unsigned(), bytes[at++]]); assert.deepEqual(locals, helpers.length > 1 || hasGates ? [[16, 0x7f], [1, 0x7e], [6, 0x7f]] : [[16, 0x7f], [1, 0x7e]]); const constants = [ctx.low, ctx.high, ...(ctx.owner === 'replacement' ? [binding.generation] : [binding.low, binding.high])]; for (const value of constants) {assert.equal(bytes[at++], 0x41); assert.equal(signed(), value);} for (const index of [0, 1, 3]) {assert.equal(bytes[at++], 0x20); assert.equal(unsigned(), index);} assert.equal(bytes[at++], 0x10); assert.equal(unsigned(), 0); guard = {name: helpers[0], constants, parameters: [0, 1, 3]}; at = end;}
+    else if (section === 10) {assert.equal(unsigned(), hasSegment ? 2 : 1); const bodyLength = unsigned(), bodyEnd = at + bodyLength; assert.ok(bodyEnd <= end); locals = Array.from({length: unsigned()}, () => [unsigned(), bytes[at++]]); assert.deepEqual(locals, [[16, 0x7f], [1, 0x7e], [10, 0x7f]]); const constants = [ctx.low, ctx.high, ...(ctx.owner === 'replacement' ? [binding.generation] : [binding.low, binding.high])]; for (const value of constants) {assert.equal(bytes[at++], 0x41); assert.equal(signed(), value);} for (const index of [0, 1, 3]) {assert.equal(bytes[at++], 0x20); assert.equal(unsigned(), index);} assert.equal(bytes[at++], 0x10); assert.equal(unsigned(), 0); guard = {name: helpers[0], constants, parameters: [0, 1, 3]};
+      assert.equal(bytes[bodyEnd - 1], 0x0b); at = bodyEnd;
+      if (hasSegment) {
+        const helperLength = unsigned(), helperEnd = at + helperLength;
+        assert.equal(helperEnd, end);
+        const helperLocals = Array.from({length: unsigned()}, () => [unsigned(), bytes[at++]]);
+        assert.deepEqual(helperLocals, [[3, 0x7f]]); assert.equal(bytes[helperEnd - 1], 0x0b); at = helperEnd;
+      }}
     else assert.fail(`unexpected child section${section}`); assert.equal(at, end);
   }
-  assert.deepEqual(functions, [0]); assert.deepEqual(types[0], {parameters: Array(4).fill(0x7f), results: [0x7f]}); assert.deepEqual(imports[0], {module: 'env', name: 'memory', kind: 'memory'}); assert.deepEqual(imports.slice(1).map(({module, name, kind}) => ({module, name, kind})), helpers.map(name => ({module: 'ring3', name, kind: 'function'}))); assert.deepEqual(exports, [{name: 'run', kind: 0, index: helpers.length}]); assert.ok(locals && guard);
+  assert.deepEqual(functions, hasSegment ? [0, types.length - 1] : [0]);
+  if (hasSegment) assert.deepEqual(types.at(-1), {parameters: Array(6).fill(0x7f), results: [0x7f]}); assert.deepEqual(types[0], {parameters: Array(4).fill(0x7f), results: [0x7f]}); assert.deepEqual(imports[0], {module: 'env', name: 'memory', kind: 'memory'}); assert.deepEqual(imports.slice(1).map(({module, name, kind}) => ({module, name, kind})), helpers.map(name => ({module: 'ring3', name, kind: 'function'}))); assert.deepEqual(exports, [{name: 'run', kind: 0, index: helpers.length}]); assert.ok(locals && guard);
   const import_signatures = Object.fromEntries(imports.slice(1).map(row => {const expected = {parameters: Array(arities[row.name]).fill(0x7f), results: [0x7f]}; assert.deepEqual(types[row.type], expected); return [row.name, expected];})); return {locals, guard, import_signatures, run_signature: types[0]};
 }
 function compile(ctx, entries, gates, label, extra = ['read8', ctx.owner === 'replacement' ? 'store8' : 'store_resident8']) {
@@ -126,7 +136,7 @@ const image = readFileSync(join(output, 'shift.exe')); assert.deepEqual(image, l
 function readWord(ctx, address, value) {const expected = arena(ctx); expected.set(record('R3MH', 40, [0, value, 0, 0, 0, 0]), 100); assert.equal(ctx.api.read32(address), 0); assert.deepEqual(arena(ctx), expected, 'diagnostic word read');}
 for (const owner of ['replacement', 'resident']) {
   const ctx = fresh(owner), base = 0x500000, entry = base + 0x1000, label = `pe-${owner}`; pure(ctx, () => ctx.api.begin_image_input(image.length), 0, 'begin copied PE');
-  for (const [offset, length] of [[0, 4096], [4096, 1536]]) {request(ctx, image.subarray(offset, offset + length)); pure(ctx, () => ctx.api.append_image_input(offset, length), 0, 'copied PE chunk'); refresh(ctx).bytes.fill(0xa5, ctx.base + TRANSFER, ctx.base + SIZE);}
+  for (const [offset, length] of [[0, 4096], [4096, 1536]]) {request(ctx, image.subarray(offset, offset + length)); pure(ctx, () => ctx.api.append_image_input(offset, length), 0, 'copied PE chunk'); refresh(ctx).bytes.fill(0xa5, ctx.base + TRANSFER, ctx.base + TRANSFER + 4096);}
   const receipt = record('R3LI', 72, [base, 0x6000, entry, 5, 0x8000, 1, 0, 0, EXIT, EXIT_ID, 0, 0, 0, 0], 2), expectedLoad = arena(ctx); expectedLoad.set(receipt, TRANSFER); assert.equal(ctx.api.load_pe32_linked_v2_input_at(base, 0x8000), 0); const load_arena = snapshot(ctx, expectedLoad, `${label}:linked-v2 exact receipt`); const receipt_artifact = artifact(`${label}-receipt.bin`, receipt);
   readWord(ctx, base + 0xb4, 0x400000); relocationOffsets.forEach((offset, index) => readWord(ctx, entry + offset, base + relocationRvas[index])); readWord(ctx, base + 0x3150, EXIT); readWord(ctx, base + 0x3154, 0);
   const entries = callerOffsets.map(offset => entry + offset), gates = [[EXIT, EXIT_ID]]; if (owner === 'replacement') entries.push(EXIT); const caller = compile(ctx, entries, owner === 'replacement' ? gates : [], `${label}-caller`, ['read32', owner === 'replacement' ? 'store32' : 'store_resident32', 'read8', owner === 'replacement' ? 'store8' : 'store_resident8']); const gate = owner === 'replacement' ? caller : compile(ctx, [EXIT], gates, `${label}-gate`, []);
@@ -138,7 +148,7 @@ for (const owner of ['replacement', 'resident']) {
   pe.push({owner, context: ctx.ordinal, base, guest_retired: 17, marker: 42, initial_registers: [0, 0, 0, 0, 0x71000, 0, 0, 0], initial_pc: entry, initial_flags: 2, final_registers: registers, final_flags: 0x87, initial_operands: [0x80, 0x80, 0x81], final_operands: [0, 0x40, 0xc0], return_address: entry + 55, stack_pointer: 0x70ff8, output_word: 42, canary_word: 0x22222222, receipt_artifact, frame_artifact, load_arena, startup_arena, caller_arena, gate_arena, capture_arena, completion_arena, initial_data_page, initial_stack_page, final_data_page, final_stack_page}); pure(ctx, () => ctx.api.close(), 0, 'close PE');
 }
 const counts = {contexts: ordinal, arithmetic_rows: rows.filter(row => row.group === 'arithmetic').length, address_rows: rows.filter(row => row.group === 'address').length, positive_rows: rows.length, live_paths: live.length, live_runs: live.reduce((sum, row) => sum + row.slices.length, 0), live_faults: live.reduce((sum, row) => sum + row.slices.filter(slice => slice.fault).length, 0), live_retired: live.reduce((sum, row) => sum + row.guest_retired, 0), repair_phases: live.reduce((sum, row) => sum + row.repairs.length, 0), repair_calls: live.reduce((sum, row) => sum + row.repairs.reduce((subtotal, phase) => subtotal + phase.actions.length, 0), 0), protocol_cases: protocol.length, smc_paths: smc.length, smc_idempotent: smc.filter(row => row.idempotent).length, smc_retired: smc.reduce((sum, row) => sum + row.writer_retired + row.successor_retired, 0), pe_paths: pe.length, pe_retired: pe.reduce((sum, row) => sum + row.guest_retired, 0), total_retired: rows.length + 30 + 24 + 34, modules: modules.length, generated_runs: generatedRuns.length, controls: controls.length, resident_peak: residentPeak, arenas: arenas.length, pages: pages.length, runtime_sources: sourcePaths.length};
-assert.deepEqual(counts, {contexts: 22, arithmetic_rows: 84, address_rows: 48, positive_rows: 132, live_paths: 6, live_runs: 60, live_faults: 12, live_retired: 30, repair_phases: 12, repair_calls: 30, protocol_cases: 8, smc_paths: 12, smc_idempotent: 6, smc_retired: 24, pe_paths: 2, pe_retired: 34, total_retired: 220, modules: 37, generated_runs: 279, controls: 86, resident_peak: 2, arenas: 297, pages: 204, runtime_sources: 91});
+assert.deepEqual(counts, {contexts: 22, arithmetic_rows: 84, address_rows: 48, positive_rows: 132, live_paths: 6, live_runs: 60, live_faults: 12, live_retired: 30, repair_phases: 12, repair_calls: 30, protocol_cases: 8, smc_paths: 12, smc_idempotent: 6, smc_retired: 24, pe_paths: 2, pe_retired: 34, total_retired: 220, modules: 37, generated_runs: 279, controls: 86, resident_peak: 2, arenas: 297, pages: 204, runtime_sources: sourcePaths.length});
 assert.equal(rawFiles.length, 1055, 'complete producer raw roster before final result');
 for (const owner of ['replacement', 'resident']) {const owned = rows.filter(row => row.owner === owner); assert.equal(owned.length, 66); assert.equal(owned.filter(row => row.group === 'arithmetic').length, 42); assert.equal(owned.filter(row => row.group === 'address').length, 24); for (const [kind] of kinds) assert.equal(owned.filter(row => row.kind === kind).length, 22);}
 assert.deepEqual(Object.fromEntries(sourcePaths.map(path => [path, hash(readFileSync(join(root, path)))])), sourceHashes, 'full source closure unchanged'); assert.equal(hash(readFileSync(enginePath)), hash(engineBytes), 'engine unchanged');

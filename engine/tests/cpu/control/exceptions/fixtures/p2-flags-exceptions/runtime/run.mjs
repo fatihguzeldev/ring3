@@ -171,8 +171,8 @@ execute([0x62, 0x03], {label: 'BOUND upper memory fault precedes lower compariso
 execute([0x66, 0x62, 0x03], {label: 'BOUND16 upper memory fault preserves state', index: -1,
   address: 0x5ffe, data: words([0], true)},
   {reason: 5, retired: 0, pc: PC, detail: 1, address: 0x6000, access: 1, length: 4});
-execute([0x62, 0x03], {label: 'BOUND overflow is a memory fault', address: 0xfffffffc},
-  {reason: 5, retired: 0, pc: PC, detail: 3, address: 0xfffffffc, access: 1, length: 8});
+execute([0x62, 0x03], {label: 'BOUND logical span overflow precedes RAM access', address: 0xfffffffc},
+  {reason: 11, retired: 0, pc: PC, noHelper: true});
 
 execute([0x9d], {label: 'POPFD applies user flags and ignores privileged and reserved bits',
   data: words([0xfffffeff])}, {flags: 0x244cd7, stack: 0x5004});

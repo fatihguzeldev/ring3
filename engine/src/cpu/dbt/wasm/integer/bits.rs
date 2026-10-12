@@ -1,5 +1,5 @@
 use super::{
-    ADDRESS, BitIndex, BitScanKind, BitTestKind, BlockType, EffectiveAddress, ExtensionKind, FLAGS,
+    BitIndex, BitScanKind, BitTestKind, BlockType, EffectiveAddress, ExtensionKind, FLAGS,
     InstructionSink, LHS, RESULT, RHS, Register32, SmallWidth, extend_value, memory, register,
 };
 
@@ -97,7 +97,7 @@ pub(super) fn memory_bit_test_word(
     imports: memory::Imports,
     exit_depth: u32,
 ) {
-    memory::address_value(code, address);
+    memory::offset_value(code, address);
     if let BitIndex::Register(source) = index {
         code.local_get(register(source));
         extend_value(code, ExtensionKind::Sign, SmallWidth::Word);
@@ -107,7 +107,21 @@ pub(super) fn memory_bit_test_word(
             .i32_shl()
             .i32_add();
     }
-    code.local_set(ADDRESS);
+    if address.address_size == crate::cpu::x86::ir::AddressSize::Bits16 {
+        code.i32_const(0xffff).i32_and();
+    }
+    memory::checked_offset(
+        code,
+        address.resolved_segment(),
+        2,
+        if kind == BitTestKind::Test {
+            crate::cpu::x86::SegmentAccess::Read
+        } else {
+            crate::cpu::x86::SegmentAccess::Write
+        },
+        imports,
+        exit_depth,
+    );
     match index {
         BitIndex::Register(source) => {
             code.local_get(register(source));
@@ -157,7 +171,7 @@ pub(super) fn memory_bit_mutation(
     imports: memory::Imports,
     exit_depth: u32,
 ) {
-    memory::address_value(code, address);
+    memory::offset_value(code, address);
     if let BitIndex::Register(source) = index {
         code.local_get(register(source))
             .i32_const(5)
@@ -166,7 +180,17 @@ pub(super) fn memory_bit_mutation(
             .i32_shl()
             .i32_add();
     }
-    code.local_set(ADDRESS);
+    if address.address_size == crate::cpu::x86::ir::AddressSize::Bits16 {
+        code.i32_const(0xffff).i32_and();
+    }
+    memory::checked_offset(
+        code,
+        address.resolved_segment(),
+        4,
+        crate::cpu::x86::SegmentAccess::Write,
+        imports,
+        exit_depth,
+    );
     match index {
         BitIndex::Register(source) => {
             code.local_get(register(source));

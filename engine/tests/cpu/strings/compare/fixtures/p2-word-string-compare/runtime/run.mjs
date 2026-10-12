@@ -12,10 +12,11 @@ const bank=Buffer.alloc(64,0xcc), blocks=[[0,[0x66,0xa7,0xeb,0]],[8,[0x66,0xaf,0
  [16,[0xb8,0xff,0x7f,0x81,0xa5,0x66,0xaf,0xb8,0,0x80,0x81,0xa5,0x66,0xaf,0xeb,6]],
  [32,[0x66,0xa7,0x66,0xa7,0xeb,0]],[40,[0x90,0x66,0xa7,0xeb,0]],[48,[0x90,0x66,0xaf,0xeb,0]]];
 for(const [at,code]of blocks)bank.set(code,at);assert.deepEqual(bank,readFileSync(join(output,"word-string-compare.x86")),"independent Rust/JS literal bank");
-const paths=["engine/src/abi/arena.rs","engine/src/abi/memory_helper.rs","engine/src/abi/header.rs","engine/src/abi/x86/state.rs","engine/src/abi/x86/exit.rs","engine/src/abi/x86/x87.rs",
+const paths=[
+  'engine/src/cpu/dbt/wasm/segments/access.rs', 'engine/src/cpu/x86/segments/cache.rs', "engine/src/abi/arena.rs","engine/src/abi/memory_helper.rs","engine/src/abi/header.rs","engine/src/abi/x86/state.rs","engine/src/abi/x86/exit.rs","engine/src/abi/x86/x87.rs",
  "engine/src/cpu/x86/ir.rs","engine/src/cpu/x86/decode/decoder.rs","engine/src/cpu/x86/decode/lower.rs","engine/src/cpu/x86/decode/profile.rs","engine/src/cpu/dbt/region.rs",
  "engine/src/cpu/dbt/wasm/integer/arithmetic.rs", "engine/src/cpu/dbt/wasm/integer/bits.rs", "engine/src/cpu/dbt/wasm/integer/carry_rotates.rs", "engine/src/cpu/dbt/wasm/integer/decimal.rs", "engine/src/cpu/dbt/wasm/integer/dispatch.rs", "engine/src/cpu/dbt/wasm/integer/flags.rs", "engine/src/cpu/dbt/wasm/integer/mod.rs", "engine/src/cpu/dbt/wasm/integer/multiply_divide.rs", "engine/src/cpu/dbt/wasm/integer/operands.rs", "engine/src/cpu/dbt/wasm/integer/rotates.rs", "engine/src/cpu/dbt/wasm/integer/shifts.rs","engine/src/cpu/dbt/wasm/memory.rs","engine/src/cpu/dbt/wasm/memory/narrow.rs","engine/src/cpu/dbt/wasm/emitter.rs","engine/src/cpu/dbt/wasm/locals.rs",
- "engine/src/memory/space.rs","engine/src/process/instance.rs", "engine/src/process/execution/compiled.rs", "engine/src/process/execution/authority.rs", "engine/src/process/memory/address_space.rs", "engine/src/process/memory/scalar.rs", "engine/src/process/memory/scalar_tests.rs", "engine/src/process/execution/mod.rs", "engine/src/process/memory/mod.rs", "engine/src/process/mod.rs","engine/src/process/execution/resident.rs", "engine/src/process/execution/authority.rs", "engine/src/process/execution/mod.rs", "engine/src/process/mod.rs","engine/src/process/wasm/mod.rs", "engine/src/process/wasm/loading.rs", "engine/src/process/wasm/execution.rs", "engine/src/process/wasm/calls.rs", "engine/src/process/wasm/memory.rs", "engine/src/process/wasm/cpu.rs", "engine/src/process/mod.rs","engine/tests/cpu/strings/compare/wasm/word.rs", "engine/tests/cpu/strings/wasm.rs", "engine/tests/support/wasm.rs", "engine/tests/cpu/strings/wasm.rs", "engine/tests/support/wasm.rs",
+ "engine/src/memory/space.rs","engine/src/process/instance.rs", "engine/src/process/execution/compiled.rs", "engine/src/process/execution/authority.rs", "engine/src/process/memory/address_space.rs", "engine/src/process/memory/scalar.rs", "engine/src/process/memory/scalar_tests.rs", "engine/src/process/execution/mod.rs", "engine/src/process/memory/mod.rs", "engine/src/process/mod.rs","engine/src/process/execution/resident.rs",   "engine/src/process/wasm/mod.rs", "engine/src/process/wasm/loading.rs", "engine/src/process/wasm/execution.rs", "engine/src/process/wasm/calls.rs", "engine/src/process/wasm/memory.rs", "engine/src/process/wasm/cpu.rs", "engine/tests/cpu/strings/compare/wasm/word.rs", "engine/tests/cpu/strings/wasm.rs", "engine/tests/support/wasm.rs",
  "engine/tests/cpu/strings/compare/fixtures/p2-word-string-compare/runtime/run.mjs","engine/tests/support/wasm/engine.mjs"];
 const pins=()=>Object.fromEntries(paths.map(path=>{const b=readFileSync(join(root,path));return[path,{bytes:b.length,sha256:hash(b)}];})),sourcePins=pins(),frames=[],journal=[],modules=[];
 const counts={contexts:0,targets:0,cmpsw:0,scasw:0,fault_calls:0,generated_calls:0,retired:0,mov_eax:0,jumps:0,prefix_nops:0,controls:0};
@@ -23,7 +24,7 @@ writeFileSync(join(output,"engine.wasm"),engine.bytes,{flag:"wx"});
 function record(magic,size,fields,version=1){const b=Buffer.alloc(size);b.write(magic);b.writeUInt16LE(version,4);b.writeUInt16LE(1,6);b.writeUInt32LE(size,8);fields.forEach((v,i)=>b.writeUInt32LE(v>>>0,16+i*4));return b;}
 const words=values=>Buffer.concat(values.map(v=>{const b=Buffer.alloc(4);b.writeUInt32LE(v>>>0);return b;}));
 const word=value=>Buffer.from([value&255,(value>>>8)&255]),state=c=>record("R3ST",56,[...c.registers,c.pc,c.flags]);
-const exit=(reason,n,f)=>record("R3EX",40,[reason,n,f?.detail??0,f?.address??0,f?1:0,f?2:0],2);
+const exit=(reason,n,f,version=2)=>record("R3EX",40,[reason,n,f?.detail??0,f?.address??0,f?1:0,f?2:0],version);
 const helper=(value=0,f)=>record("R3MH",40,[f?1:0,f?0:value,f?.detail??0,f?.address??0,f?1:0,2],2);
 const arena=c=>Buffer.from(new Uint8Array(c.memory.buffer,c.base,SIZE));
 function capture(c,label){const b=arena(c),row={context:c.context,label,offset:frames.length*SIZE,bytes:SIZE,sha256:hash(b)};frames.push(b);return row;}
@@ -38,10 +39,10 @@ function cpu(c){const b=arena(c);return{registers:Array.from({length:8},(_,i)=>b
 function seed(c,pc,flags,source=SRC,destination=DST,eax=0xa5818001){const b=Buffer.alloc(140),r=[eax>>>0,0x91b2c378,0x34560f10,0x4567ff00,0x56789abc,0x6789abcd,source,destination];
  b.set(state({registers:r,pc,flags}));b.set(exit(3,0),56);b.set(helper(0xbad5),100);input(c,0,b,"explicit initial CPU seed");return cpu(c);}
 function diagnostic(c,address,value){host(c,"read16",[address],"declared current WORD RAM");assert.deepEqual(arena(c).subarray(100,140),helper(value));}
-function run(c,budget,label,wanted,reason=1,n=1,f,status=0,value,params){const before=capture(c,"before generated "+label),expected=arena(c);
- if(status===0){expected.set(state(wanted));expected.set(exit(reason,n,f),56);if(f||value!==undefined)expected.set(helper(value??0,f),100);}
+function run(c,budget,label,wanted,reason=1,n=1,f,status=0,value,params,exitVersion=2){const before=capture(c,"before generated "+label),expected=arena(c);
+ if(status===0){expected.set(state(wanted));expected.set(exit(reason,n,f,exitVersion),56);if(f||value!==undefined)expected.set(helper(value??0,f),100);}
  const args=params??[c.base,c.base+56,budget,c.base+96];assert.equal(c.run(...args),status,label);assert.deepEqual(arena(c),expected,"full4612 "+label);
- counts.generated_calls++;if(status===0)counts.retired+=n;if(f)counts.fault_calls++;
+ counts.generated_calls++;if(status===0)counts.retired+=n;if(f||reason===11)counts.fault_calls++;
  journal.push({context:c.context,name:"run",label,budget,status,args,before,after:capture(c,"after generated "+label)});}
 function subtraction(left,right){const a=BigInt(left),b=BigInt(right),r=BigInt.asUintN(16,a-b);let flags=2;if(a<b)flags|=1;
  let ones=0;for(let bit=0;bit<8;bit++)ones+=Number((r>>BigInt(bit))&1n);if(!(ones&1))flags|=4;if((a^b^r)&16n)flags|=16;if(!r)flags|=64;if(r&0x8000n)flags|=128;if((a^b)&(a^r)&0x8000n)flags|=2048;return flags;}
@@ -89,8 +90,8 @@ for(const owner of ["replacement","resident"])for(const entries of [false,true])
  host(c,"map",[0x7000,1,3]);upload(c,0x7008,word(0x7fff));for(let n=0;n<2;n++)run(c,1,"second read fault cannot publish first operand",held,5,0,{detail:1,address:0xb008});
  host(c,"map",[0xb000,1,3]);upload(c,0xb008,word(0xffff));assert.deepEqual(cpu(c),held);compare(c,"cmpsw",0x7fff,0xffff,"dual-fault ordered repair");host(c,"unmap",[0x7000,1]);host(c,"unmap",[0xb000,1]);
  for(const [kind,side]of [["cmpsw","source"],["cmpsw","destination"],["scasw","destination"]]){upload(c,SRC,word(0x8001));upload(c,DST,word(1));
- const entry=PC+(kind==="cmpsw"?40:48),old=seed(c,entry,0xcd7,side==="source"?0xffffffff:SRC,side==="destination"?0xffffffff:DST),held={...old,pc:entry+1},fault={detail:3,address:0xffffffff};
- run(c,2,"width2 overflow retains prefix",held,5,1,fault);counts.prefix_nops++;run(c,1,"retained overflow without wrapped read",held,5,0,fault);}
+ const entry=PC+(kind==="cmpsw"?40:48),old=seed(c,entry,0xcd7,side==="source"?0xffffffff:SRC,side==="destination"?0xffffffff:DST),held={...old,pc:entry+1};
+ run(c,2,"width2 overflow retains prefix",held,11,1,undefined,0,undefined,undefined,6);counts.prefix_nops++;run(c,1,"retained overflow without wrapped read",held,11,0,undefined,0,undefined,undefined,6);}
  for(const flags of [2,0xcd7]){const delta=flags&0x400?-2:2;for(const [address,value]of [[SRC,0x8000],[SRC+delta,0x1111],[DST,1],[DST+delta,0x2222]])upload(c,address,word(value));
  seed(c,PC+32,flags);compare(c,"cmpsw",0x8000,1,"first retained CMPSW");const held=cpu(c);upload(c,SRC+delta,word(0x7fff));upload(c,DST+delta,word(0xffff));diagnostic(c,SRC+delta,0x7fff);diagnostic(c,DST+delta,0xffff);assert.deepEqual(cpu(c),held);compare(c,"cmpsw",0x7fff,0xffff,"second retained CMPSW current RAM");jump(c,PC+38);
  upload(c,DST,word(0xffff));upload(c,DST+delta,word(1));seed(c,PC+16,flags);mov(c,0xa5817fff);compare(c,"scasw",0x7fff,0xffff,"SCASW current AX after guest MOV");mov(c,0xa5818000);compare(c,"scasw",0x8000,1,"second SCASW current AX without reseed");jump(c,PC+38);}

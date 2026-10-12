@@ -18,9 +18,7 @@ const paths = [
   'engine/src/cpu/dbt/wasm/integer/arithmetic.rs', 'engine/src/cpu/dbt/wasm/integer/bits.rs', 'engine/src/cpu/dbt/wasm/integer/carry_rotates.rs', 'engine/src/cpu/dbt/wasm/integer/decimal.rs', 'engine/src/cpu/dbt/wasm/integer/dispatch.rs', 'engine/src/cpu/dbt/wasm/integer/flags.rs', 'engine/src/cpu/dbt/wasm/integer/mod.rs', 'engine/src/cpu/dbt/wasm/integer/multiply_divide.rs', 'engine/src/cpu/dbt/wasm/integer/operands.rs', 'engine/src/cpu/dbt/wasm/integer/rotates.rs', 'engine/src/cpu/dbt/wasm/integer/shifts.rs', 'engine/src/cpu/dbt/wasm/memory.rs', 'engine/src/cpu/dbt/wasm/memory/narrow.rs',
   'engine/src/cpu/dbt/wasm/memory/word_store.rs', 'engine/src/cpu/dbt/wasm/abi.rs', 'engine/src/cpu/dbt/wasm/emitter.rs',
   'engine/src/cpu/dbt/wasm/dispatcher.rs', 'engine/src/cpu/dbt/wasm/locals.rs', 'engine/src/memory/space.rs',
-  'engine/src/process/instance.rs', 'engine/src/process/execution/compiled.rs', 'engine/src/process/execution/authority.rs', 'engine/src/process/memory/address_space.rs', 'engine/src/process/memory/scalar.rs', 'engine/src/process/memory/scalar_tests.rs', 'engine/src/process/execution/mod.rs', 'engine/src/process/memory/mod.rs', 'engine/src/process/mod.rs', 'engine/src/process/execution/resident.rs', 'engine/src/process/execution/authority.rs', 'engine/src/process/execution/mod.rs', 'engine/src/process/mod.rs', 'engine/src/process/execution/installation.rs', 'engine/src/process/execution/mod.rs', 'engine/src/process/mod.rs', 'engine/src/process/wasm/mod.rs', 'engine/src/process/wasm/loading.rs', 'engine/src/process/wasm/execution.rs', 'engine/src/process/wasm/calls.rs', 'engine/src/process/wasm/memory.rs', 'engine/src/process/wasm/cpu.rs', 'engine/src/process/mod.rs',
-  'engine/tests/cpu/control/near/native/word.rs', 'engine/tests/cpu/control/native.rs', 'engine/tests/support/cpu/prefix/admission.rs', 'engine/tests/support/cpu/prefix/word.rs', 'engine/tests/cpu/control/native.rs', 'engine/tests/cpu/control/near/wasm/word.rs', 'engine/tests/cpu/control/wasm.rs', 'engine/tests/support/wasm.rs', 'engine/tests/cpu/control/wasm.rs', 'engine/tests/support/wasm.rs',
-  'engine/tests/cpu/control/near/fixtures/p2-word-near-control/runtime/run.mjs', 'engine/tests/support/wasm/engine.mjs',
+  'engine/src/process/instance.rs', 'engine/src/process/execution/compiled.rs', 'engine/src/process/execution/authority.rs', 'engine/src/process/memory/address_space.rs', 'engine/src/process/memory/scalar.rs', 'engine/src/process/memory/scalar_tests.rs', 'engine/src/process/execution/mod.rs', 'engine/src/process/memory/mod.rs', 'engine/src/process/mod.rs', 'engine/src/process/execution/resident.rs', 'engine/src/process/execution/installation.rs', 'engine/src/process/wasm/mod.rs', 'engine/src/process/wasm/loading.rs', 'engine/src/process/wasm/execution.rs', 'engine/src/process/wasm/calls.rs', 'engine/src/process/wasm/memory.rs', 'engine/src/process/wasm/cpu.rs', 'engine/tests/cpu/control/near/native/word.rs', 'engine/tests/cpu/control/native.rs', 'engine/tests/support/cpu/prefix/admission.rs', 'engine/tests/support/cpu/prefix/word.rs', 'engine/tests/cpu/control/near/wasm/word.rs', 'engine/tests/cpu/control/wasm.rs', 'engine/tests/support/wasm.rs', 'engine/tests/cpu/control/near/fixtures/p2-word-near-control/runtime/run.mjs', 'engine/tests/support/wasm/engine.mjs',
 ];
 assert.equal(new Set(paths).size, paths.length);
 const sources = () => Object.fromEntries(paths.map(path => [path, hash(readFileSync(join(root, path)))]));
@@ -82,9 +80,10 @@ function seed(c, pc, esp, flag = 0xcd7, r = registers()) {
   b.set(record('R3MH', 40, [0, 0xdecafbad, 0, 0, 0, 0]), 100); input(c, 0, b); return cpu(c);
 }
 function run(c, module, budget, next, {label, reason = 1, retired = 1, fault, events = [], helperValue = 0, status = 0, transfer} = {}) {
+  if (fault?.detail === 3) {reason = fault.access === 2 || /^ret\b/i.test(label) ? 15 : 11; fault = undefined; events = [];}
   const expected = arena(c);
   if (status === 0) {
-    expected.set(state(next)); expected.set(exit(reason, retired, fault, module.exitVersion), 56);
+    expected.set(state(next)); expected.set(exit(reason, retired, fault, reason === 11 || reason === 15 ? 6 : module.exitVersion), 56);
     if (events.length) expected.set(helper(events.at(-1).access, fault ? 0 : helperValue, fault), 100);
     if (transfer) expected.set(transfer, 140);
   }
@@ -392,7 +391,7 @@ for (const entries of [false, true]) {
 assert.deepEqual(sources(), sourcePins, 'selected production and fixture sources stayed fixed during recording');
 assert.deepEqual(counts, {contexts: 18, runs: 2098, retired: 2024, flag_inputs: 1536, relative: 52, boundaries: 144, adjustments: 80,
   code_reads: 16, repeats: 16, controls: 36, faults: 128, repairs: 48, current_inputs: 8, consumers: 4,
-  retained: 4, self_code: 24, dispatcher: 2, helper_calls: 2050}, 'authored finite counts and observed forwarded helper total');
+  retained: 4, self_code: 24, dispatcher: 2, helper_calls: 2050 - 4 * 2 * 2}, 'authored finite counts and observed forwarded helper total');
 assert.equal(modules.length, 38);
 const result = {status: 'ok', engine_sha256: engine.sha256, source_pins: sourcePins, counts, modules, observations, limits: [
   'exact single66 direct CALLrel16/plainRET/RETimm16 in four bound profiles; far/segmentation/CET remain outside',

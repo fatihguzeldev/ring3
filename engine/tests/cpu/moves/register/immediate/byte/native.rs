@@ -279,6 +279,10 @@ fn assert_module(wasm: &[u8], owner: Option<Owner>, id: u64, store: bool) {
         ));
     }
     let mut types = section(wasm, 1);
+    let segment_type = arities.len() as u32;
+    if store {
+        arities.push(6);
+    }
     assert_eq!(unsigned(&mut types) as usize, arities.len());
     for arity in arities {
         assert_eq!(byte(&mut types), 0x60);
@@ -301,7 +305,13 @@ fn assert_module(wasm: &[u8], owner: Option<Owner>, id: u64, store: bool) {
     }
     assert!(imports.is_empty());
     let mut functions = section(wasm, 3);
-    assert_eq!((unsigned(&mut functions), unsigned(&mut functions)), (1, 0));
+    assert_eq!(
+        (unsigned(&mut functions), unsigned(&mut functions)),
+        (1 + u32::from(store), 0)
+    );
+    if store {
+        assert_eq!(unsigned(&mut functions), segment_type);
+    }
     assert!(functions.is_empty());
     let mut exports = section(wasm, 7);
     assert_eq!(unsigned(&mut exports), 1);
@@ -312,9 +322,18 @@ fn assert_module(wasm: &[u8], owner: Option<Owner>, id: u64, store: bool) {
     );
     assert!(exports.is_empty());
     let mut bodies = section(wasm, 10);
-    assert_eq!(unsigned(&mut bodies), 1);
+    assert_eq!(unsigned(&mut bodies), 1 + u32::from(store));
     let length = unsigned(&mut bodies) as usize;
     let mut body = take(&mut bodies, length);
+    assert_eq!(body.last(), Some(&0x0b));
+    if store {
+        let length = unsigned(&mut bodies) as usize;
+        let mut guard = take(&mut bodies, length);
+        assert_eq!(guard.last(), Some(&0x0b));
+        assert_eq!(unsigned(&mut guard), 1);
+        assert_eq!((unsigned(&mut guard), byte(&mut guard)), (3, 0x7f));
+        assert!(!guard.is_empty());
+    }
     assert!(bodies.is_empty());
     assert_eq!(unsigned(&mut body), 3);
     for expected in [(16, 0x7f), (1, 0x7e), (10, 0x7f)] {

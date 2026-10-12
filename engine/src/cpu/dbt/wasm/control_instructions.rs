@@ -99,8 +99,15 @@ fn bound(
     imports: memory::Imports,
     exit_depth: u32,
 ) {
-    memory::effective_address(code, address);
     let width = if word { 2 } else { 4 };
+    memory::checked_address(
+        code,
+        address,
+        (width * 2) as u32,
+        crate::cpu::x86::SegmentAccess::Read,
+        imports,
+        exit_depth,
+    );
     code.local_get(ADDRESS)
         .i32_const(width * 2)
         .i32_const(1)

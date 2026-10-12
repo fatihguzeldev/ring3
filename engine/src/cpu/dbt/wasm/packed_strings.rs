@@ -304,9 +304,15 @@ pub(super) fn instruction(
     exit_depth: u32,
 ) -> bool {
     if let PackedStringSource::Memory(address) = op.right {
-        memory::address_value(code, address);
-        code.local_set(ADDRESS)
-            .local_get(ADDRESS)
+        memory::checked_address(
+            code,
+            address,
+            16,
+            crate::cpu::x86::SegmentAccess::Read,
+            imports,
+            exit_depth,
+        );
+        code.local_get(ADDRESS)
             .i32_const(16)
             .i32_const(1)
             .call(imports.cpu_read.expect("packed-string read import"))

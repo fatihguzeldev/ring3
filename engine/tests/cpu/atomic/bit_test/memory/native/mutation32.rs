@@ -280,8 +280,11 @@ a.ok(WebAssembly.validate(b.subarray(at,end)));const m=new WebAssembly.Module(b.
 a.deepEqual(WebAssembly.Module.imports(m),[{module:'env',name:'memory',kind:'memory'},
 ...[resident?'guard_resident':'guard','read32',resident?'store_resident32':'store32'].map(name=>({module:'ring3',name,kind:'function'}))]);
 a.deepEqual(WebAssembly.Module.exports(m),[{name:'run',kind:'function'}]);
-const p={i:at+8};let found=false;while(p.i<end){const id=b[p.i++],stop=u(p)+p.i;if(id===10){a.equal(u(p),1);u(p);const c=u(p),locals=[];for(let i=0;i<c;i++)locals.push([u(p),b[p.i++]]);a.deepEqual(locals,[[16,127],[1,126],[10,127]]);found=true;}p.i=stop;}
-a.ok(found);at=end;n++;}a.equal(n,12);
+const p={i:at+8};let found=0;while(p.i<end){const id=b[p.i++],stop=u(p)+p.i;
+if(id===1){const arities=[4,resident?7:6,1,resident?6:2,6];a.equal(u(p),arities.length);for(const arity of arities){a.equal(b[p.i++],96);a.equal(u(p),arity);for(let i=0;i<arity;i++)a.equal(b[p.i++],127);a.equal(u(p),1);a.equal(b[p.i++],127);}a.equal(p.i,stop);found|=1;}
+if(id===3){a.equal(u(p),2);a.equal(u(p),0);a.equal(u(p),4);a.equal(p.i,stop);found|=2;}
+if(id===10){a.equal(u(p),2);for(const expected of [[[16,127],[1,126],[10,127]],[[3,127]]]){const length=u(p),bodyEnd=p.i+length,c=u(p),locals=[];for(let i=0;i<c;i++)locals.push([u(p),b[p.i++]]);a.deepEqual(locals,expected);a.equal(b[bodyEnd-1],11);a.ok(p.i<bodyEnd);p.i=bodyEnd;}a.equal(p.i,stop);found|=4;}p.i=stop;}
+a.equal(found,7);at=end;n++;}a.equal(n,12);
 "#]).stdin(Stdio::piped()).stderr(Stdio::piped()).spawn().unwrap();
     child.stdin.take().unwrap().write_all(&modules).unwrap();
     let output = child.wait_with_output().unwrap();

@@ -253,7 +253,11 @@ for (const spec of oracle.controls) {
   const unit=spec.owner==='replacement'?replacement([0x8000],[],oracle.transport.micro_replacement_imports):resident([0x8000],[],'direct-micro',oracle.transport.micro_resident_imports);
   hostInput('one initial literal CPU/Exit/opaque helper seed for direct control',()=>{refresh().bytes.set(fromHex(spec.initial_state_hex),engine.base);engine.bytes.set(fromHex(spec.initial_exit_hex),engine.base+56);engine.bytes.set(fromHex(spec.initial_helper_hex),engine.base+100);});
   if (spec.detail) {
-    run(unit,64,'retired LEA prefix then precise full Read4 fault',[[0,fromHex(spec.fault_state_hex)],[56,fromHex(spec.fault_exit_hex)],[100,fromHex(spec.fault_helper_hex)]]); observe('fault',{state_hex:spec.fault_state_hex,exit_hex:spec.fault_exit_hex,helper_hex:spec.fault_helper_hex});
+    const overflow = spec.condition === 'M3-overflow';
+    const faultExit = overflow ? Buffer.from(record('R3EX',40,[15,1,0,0,0,0],6)).toString('hex') : spec.fault_exit_hex;
+    const faultHelper = overflow ? spec.initial_helper_hex : spec.fault_helper_hex;
+    run(unit,64,'retired LEA prefix then precise full Read4 fault',[[0,fromHex(spec.fault_state_hex)],[56,fromHex(faultExit)],...(overflow?[]:[[100,fromHex(faultHelper)]])]);
+    observe('fault',{state_hex:spec.fault_state_hex,exit_hex:faultExit,helper_hex:faultHelper});
     if (spec.condition==='M1') {
       cancel(1); run(unit,0,'cancel before zero budget and retry read',[[56,fromHex(spec.pause_cancel_exit_hex)]]); observe('cancel-pause',{state_hex:spec.fault_state_hex,exit_hex:spec.pause_cancel_exit_hex,helper_hex:spec.fault_helper_hex}); cancel(0);
       run(unit,0,'zero budget before retry read',[[56,fromHex(spec.pause_budget_exit_hex)]]); observe('budget-pause',{state_hex:spec.fault_state_hex,exit_hex:spec.pause_budget_exit_hex,helper_hex:spec.fault_helper_hex});

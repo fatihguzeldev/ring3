@@ -356,9 +356,13 @@ while(at<input.length){const resident=input[at++],size=input.readUInt32LE(at);at
  const sections=new Map();while(p<bytes.length){const id=bytes[p++],n=leb();sections.set(id,[p,p+n]);p+=n;}
  assert.deepEqual([...sections.keys()],[1,2,3,7,10]);p=sections.get(1)[0];const types=[];
  for(let i=leb();i>0;i--){assert.equal(bytes[p++],0x60);const n=leb(),params=[...bytes.subarray(p,p+n)];p+=n;const m=leb(),returns=[...bytes.subarray(p,p+m)];p+=m;types.push([params,returns]);}
- assert.deepEqual(types,[[Array(4).fill(127),[127]],[Array(resident?7:6).fill(127),[127]],[[127],[127]]]);
- p=sections.get(10)[0];assert.equal(leb(),1);const end=leb()+p,locals=[];for(let n=leb();n>0;n--)locals.push([leb(),bytes[p++]]);
- assert.deepEqual(locals,[[16,127],[1,126],[10,127]]);assert.equal(end,sections.get(10)[1]);count++;}
+ assert.deepEqual(types,[[Array(4).fill(127),[127]],[Array(resident?7:6).fill(127),[127]],[[127],[127]],[Array(6).fill(127),[127]]]);
+ assert.equal(p,sections.get(1)[1]);
+ p=sections.get(3)[0];assert.deepEqual([leb(),leb(),leb()],[2,0,3]);assert.equal(p,sections.get(3)[1]);
+ p=sections.get(10)[0];assert.equal(leb(),2);const end=leb()+p,locals=[];for(let n=leb();n>0;n--)locals.push([leb(),bytes[p++]]);
+ assert.deepEqual(locals,[[16,127],[1,126],[10,127]]);p=end;const segmentEnd=leb()+p,segmentLocals=[];
+ for(let n=leb();n>0;n--)segmentLocals.push([leb(),bytes[p++]]);
+ assert.deepEqual(segmentLocals,[[3,127]]);assert.equal(segmentEnd,sections.get(10)[1]);count++;}
 assert.equal(at,input.length);assert.equal(count,8);
 "#]).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped()).spawn().unwrap();
     child.stdin.take().unwrap().write_all(&input).unwrap();

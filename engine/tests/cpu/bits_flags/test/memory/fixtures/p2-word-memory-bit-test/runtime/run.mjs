@@ -34,7 +34,7 @@ function record(magic, size, fields, version = 1) {
 }
 const state = c => record('R3ST', 56, [...c.registers, c.pc, c.flags]);
 const exit = (reason, n, f, version = 2) => record('R3EX', 40,
-  [reason, n, f?.detail ?? 0, f?.address ?? 0, f?.access ?? 0, f ? 2 : 0], version);
+  [reason, n, f?.detail ?? 0, f?.address ?? 0, f?.access ?? 0, f ? 2 : 0], reason === 11 ? 6 : version);
 const helper = (version, value = 0, f) => record('R3MH', 40,
   [f ? 1 : 0, value, f?.detail ?? 0, f?.address ?? 0, f?.access ?? 0, 2], version);
 const arena = c => Buffer.from(new Uint8Array(c.memory.buffer, c.base, SIZE));
@@ -270,9 +270,11 @@ for (const owner of ['replacement', 'resident']) for (const entries of [false, t
       const raw = f.raw ?? 15, r = registers(), offset = 2 * Math.floor((raw >= 32768 ? raw - 65536 : raw) / 16);
       r[1] = 0xcafe0000 + raw; r[7] = (f.address - offset) >>> 0;
       const stopped = {...seed(c, PC, r, flagsFor(a, raw, 0)), registers: [...r], pc: PC + 5}; stopped.registers[3] = 0x11223344;
-      const fault = {detail: f.detail, address: f.address === 0x8fff ? 0x9000 : f.address, access: f.write ? 2 : 1};
-      run(c, module, 9, stopped, {label: f.name + ' after MOV prefix retirement', reason: 5, retired: 1, fault, helperVersion: f.write ? 4 : 2});
-      run(c, module, 9, stopped, {label: f.name + ' unchanged stopped retry', reason: 5, retired: 0, fault, helperVersion: f.write ? 4 : 2}); counts.faults += 2;
+      // Ring3 rejects the overflowing logical WORD span before RAM access.
+      const segmentOverflow = f.detail === 3;
+      const fault = segmentOverflow ? undefined : {detail: f.detail, address: f.address === 0x8fff ? 0x9000 : f.address, access: f.write ? 2 : 1};
+      run(c, module, 9, stopped, {label: f.name + ' after MOV prefix retirement', reason: segmentOverflow ? 11 : 5, retired: 1, fault, helperVersion: segmentOverflow ? null : f.write ? 4 : 2});
+      run(c, module, 9, stopped, {label: f.name + ' unchanged stopped retry', reason: segmentOverflow ? 11 : 5, retired: 0, fault, helperVersion: segmentOverflow ? null : f.write ? 4 : 2}); counts.faults += 2;
       checkRam(c, f.detail === 3 ? 0xfffffffe : f.address - 1, Buffer.from([0x55]));
       if (f.detail !== 3) {
         host(c, f.detail === 1 ? 'map' : 'protect', [f.page, 1, 3]);

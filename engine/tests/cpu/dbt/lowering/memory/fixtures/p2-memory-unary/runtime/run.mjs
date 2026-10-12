@@ -156,7 +156,7 @@ function readState(engine) {
 
 function exit(reason, retired, detail = 0, address = 0, access = 0, length = reason === 5 ? 4 : 0) {
   const bytes = new Uint8Array(40), view = new DataView(bytes.buffer);
-  header(bytes, view, 0, 'R3EX', 40, 2);
+  header(bytes, view, 0, 'R3EX', 40, reason === 11 || reason === 15 ? 6 : 2);
   [reason, retired, detail, address, access, length].forEach((field, index) => view.setUint32(16 + index * 4, field, true));
   return bytes;
 }
@@ -369,7 +369,7 @@ for (const fixture of faultCases) {
   const start = state(); start.registers[6] = fixture.address;
   const stopped = copyState(start); stopped.registers[2] = 0; stopped.eflags = 0x457; stopped.eip = 0x1008;
   writeState(engine, start);
-  run(engine, child, 20, stopped, exit(5, 2, fixture.detail, fixture.fault, fixture.access), `prefix/${fixture.op}/${fixture.label} preserves prefix flags on either failure`, helperRecord(1, 0, fixture.detail, fixture.fault, fixture.access));
+  run(engine, child, 20, stopped, fixture.detail === 3 ? exit(11, 2) : exit(5, 2, fixture.detail, fixture.fault, fixture.access), `prefix/${fixture.op}/${fixture.label} preserves prefix flags on either failure`, fixture.detail === 3 ? arena(engine).slice(100, 140) : helperRecord(1, 0, fixture.detail, fixture.fault, fixture.access));
   assert.deepEqual(sampleRam(engine, sampledAddresses.concat([0x1000])), sampled, 'failed read or Store4 preserves every readable destination word and code');
   guarded(engine, child); if (fixture.access === 1) counts.read_faults++; else counts.store_faults++;
   if (fixture.sameByte) counts.same_byte_permission_faults++;
@@ -472,7 +472,7 @@ const provenance = {
   counts, generated_modules: modules, actual_generated_run_calls: actualRuns, snapshot_guard_calls: snapshotGuards, ram_words_observed: ramWords,
   counter: {cases: counterValues.length, taken_branches: takenBranches, completed_branches: completedBranches, retired: counterRetired},
   engine_sha256: hash(engineBytes), generated_set_sha256: hash(generatedHashes.join('\n')), generated_module_sha256: generatedHashes,
-  sources: Object.fromEntries(['integer.S', 'runtime/run.mjs'].map(name => [name, hash(readFileSync(join(fixtureRoot, name)))]).concat([['dbt_memory_unary_wasm.rs', hash(readFileSync(join(root, 'engine/tests/cpu/dbt/lowering/memory/wasm/unary.rs', 'engine/tests/cpu/dbt/lowering/wasm.rs', 'engine/tests/support/wasm.rs', 'engine/tests/cpu/dbt/lowering/wasm.rs', 'engine/tests/support/wasm.rs')))]])),
+  sources: Object.fromEntries(['integer.S', 'runtime/run.mjs'].map(name => [name, hash(readFileSync(join(fixtureRoot, name)))]).concat([['dbt_memory_unary_wasm.rs', hash(readFileSync(join(root, 'engine/tests/cpu/dbt/lowering/memory/wasm/unary.rs')))]]).concat(['engine/tests/cpu/dbt/lowering/wasm.rs', 'engine/tests/support/wasm.rs'].map(path => [path, hash(readFileSync(join(root, path)))]))),
   artifacts: {object_sha256: hash(object)},
   tools: {node: process.version, clang: execFileSync('clang', ['--version'], {encoding: 'utf8'}).trim(), llvm_objdump: execFileSync('xcrun', ['llvm-objdump', '--version'], {encoding: 'utf8'}).trim()},
   commands: {run: [process.execPath, process.argv[1], enginePath, outputDir, root], assemble: ['clang', ...assemble], disassemble: ['xcrun', ...disassemble]},

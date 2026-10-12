@@ -29,7 +29,7 @@ function record(magic, version, size, fields) {
   fields.forEach((v, i) => b.writeUInt32LE(v >>> 0, 16 + i * 4)); return b;
 }
 const state = s => record('R3ST', 1, 56, [...s.registers, s.pc, s.flags]);
-const exit = (reason, retired, {detail = 0, address = 0, access = 0} = {}, version = 2) => record('R3EX', version, 40, [reason, retired, detail, address, access, access ? 4 : 0]);
+const exit = (reason, retired, {detail = 0, address = 0, access = 0} = {}, version = 2) => record('R3EX', reason === 11 ? 6 : version, 40, [reason, retired, detail, address, access, access ? 4 : 0]);
 const helper = (value = 0, {detail = 0, address = 0, access = 0} = {}) => record('R3MH', 1, 40, [access ? 1 : 0, value, detail, address, access, access ? 4 : 0]);
 const parents = () => Array.from({length: 8}, (_, i) => (0xa100 + i) * 65536 + 0x1234 + i);
 const FLAGS = Array.from({length: 128}, (_, n) => [0, 2, 4, 6, 7, 10, 11].reduce((f, bit, i) => f + ((n >>> i & 1) * 2 ** bit), 2));
@@ -149,7 +149,7 @@ function close(c) {
 function stopped(c, unit, registers, flags, fault, label, prior = true) {
   const start = prior ? seed(c, 0x1700, flags, registers) : cpu(c), stopped = {...start, registers: [...start.registers], pc: FAULT};
   if (prior) stopped.registers[2] = 0x12345678;
-  run(c, unit, 2, stopped, label, {reason: 5, retired: prior ? 1 : 0, fault, packet: helper(0, fault)}); counts.faults++;
+  run(c, unit, 2, stopped, label, {reason: fault.detail === 3 ? 11 : 5, retired: prior ? 1 : 0, fault: fault.detail === 3 ? {} : fault, packet: fault.detail === 3 ? undefined : helper(0, fault)}); counts.faults++;
   return stopped;
 }
 function core(owner, entries) {
@@ -260,7 +260,7 @@ function synthetic(c, unit) {
     {name: 'overflow-success', address: 0xffffffff},
     {name: 'fault-value', packet: helper(1, {detail: 2, address: DATA, access: 1})},
     {name: 'write-unmapped', packet: helper(0, {detail: 1, address: DATA, access: 2})},
-    {name: 'write-overflow', address: 0xffffffff, packet: helper(0, {detail: 3, address: 0xffffffff, access: 2})},
+    {name: 'write-overflow', address:0xfffffffc, packet: helper(0, {detail: 3, address: 0xffffffff, access: 2})},
     {name: 'invalidated-fault', status: 11, packet: helper(0, {detail: 2, address: DATA, access: 1})},
     {name: 'fault-outside-span', packet: helper(0, {detail: 2, address: DATA + 4, access: 1})},
     {name: 'fault-width', packet: helper(0, {detail: 2, address: DATA, access: 1}), edit: b => b.writeUInt32LE(2, 36)},
@@ -277,8 +277,10 @@ function synthetic(c, unit) {
     };
     const fake = {...unit, name: unit.name + '-synthetic', run: new WebAssembly.Instance(unit.module, {env: {memory: c.memory}, ring3}).exports.run};
     const start = seed(c, FAULT, 0xcd7, r);
-    run(c, fake, 1, start, 'nonforwarding-' + row.name, {reason: 7, retired: 0, fault: {detail: row.detail ?? 2}, packet, synthetic: true});
-    assert.equal(calls, 1); checkRam(c, f.address, f.bytes); counts.synthetic++;
+    // flat-4GiB logical span overflow is stopped before any injected helper packet.
+    const segmentOverflow = address > 0xfffffffc;
+    run(c, fake, 1, start, 'nonforwarding-' + row.name, segmentOverflow ? {reason: 11, retired: 0, synthetic: true} : {reason: 7, retired: 0, fault: {detail: row.detail ?? 2}, packet, synthetic: true});
+    assert.equal(calls, segmentOverflow ? 0 : 1); checkRam(c, f.address, f.bytes); counts.synthetic++;
   }
 }
 function liveProof(c, unit) {
@@ -347,7 +349,7 @@ for (const owner of ['replacement', 'resident']) for (const entries of [false, t
   core(owner, entries); for (const identity of [false, true]) smc(owner, entries, identity);
 }
 assert.deepEqual(sourceHashes(), sourcesBefore);
-assert.deepEqual(counts, {contexts: 12, modules: 32, runs: 1256, retired: 1138, exchanges: 1098, helper_calls: 1146, read32: 24, store32: 24,
+assert.deepEqual(counts, {contexts: 12, modules: 32, runs: 1256, retired: 1138, exchanges: 1090, helper_calls: 1138, read32: 24, store32: 24,
   matrix: 256, flag_rows: 512, aliases: 104, boundary: 40, faults: 112, repair_only: 44, current_inputs: 4, synthetic: 76, smc: 8, compiler_calls: 8});
 const result = {engine: {path: enginePath, sha256: engine.sha256, bytes: engine.bytes.length}, source_pins: sourcesBefore,
   initial_arena_sha256: hash(initial), compiler: {text_hex: kernel.toString('hex'), text_sha256: hash(kernel), calls: counts.compiler_calls},

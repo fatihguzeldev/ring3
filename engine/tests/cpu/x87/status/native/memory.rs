@@ -381,8 +381,8 @@ fn late_refusal_preserves_existing_owners_and_entire_arena() {
 fn generated_word_store_rejects_noncanonical_packets_before_cpu_publication() {
     let mut input = Vec::new();
     for resident in [false, true] {
-        let mut engine = code_at(PC, &[0xdd, 0x38, 0xeb, 0]);
-        request(&mut engine, 4, false);
+        let mut engine = code_at(PC, &[0x64, 0xdd, 0x38, 0xeb, 0]);
+        request(&mut engine, 5, false);
         let module = if resident {
             let id = engine.compile_resident(1).unwrap().get();
             engine.resident_bytes(id).unwrap().to_vec()
@@ -439,7 +439,8 @@ while(at<input.length) {
   const module=new WebAssembly.Module(input.subarray(at,at+size)); at+=size; modules++;
   for(const row of rows) {
     const memory=new WebAssembly.Memory({initial:1}), bytes=new Uint8Array(memory.buffer), base=128;
-    const regs=[row.ea,0x12345678,0x23456789,0x3456789a,0x456789ab,0x56789abc,0x6789abcd,0x789abcde];
+    // a valid logical FS span can still overflow its linear address, reaching the packet validator.
+    const regs=[(row.ea-0x1000)>>>0,0x12345678,0x23456789,0x3456789a,0x456789ab,0x56789abc,0x6789abcd,0x789abcde];
     bytes.set(record('R3ST',56,[...regs,0x1000,0xcd7]),base);
     bytes.set(record('R3EX',40,[3,0,0,0,0,0]),base+56);
     const fp=record('R3FP',128); fp.writeUInt16LE(0x81a5,18); fp.writeUInt16LE(0x55aa,20); fp.writeUInt16LE(0x7ff,22);
@@ -447,13 +448,14 @@ while(at<input.length) {
     fp.set(Buffer.from(Array.from({length:80},(_,i)=>(i*73+29)&255)),40); bytes.set(fp,base+4236);
     const segments=record('R3SG',64);
     [0x23,0x1b,0x23,0x23,0x3b,0].forEach((selector,i)=>segments.writeUInt16LE(selector,16+i*2));
+    segments.writeUInt32LE(0x1000,48);
     bytes.set(segments,base+4524);
     const before=Buffer.from(bytes), expected=Buffer.from(before); let calls=0;
     const store=(...args)=>{calls++; const [address,value]=args.slice(resident?4:0); assert.equal(address>>>0,row.ea); assert.equal(value,0x81a5); bytes.set(row.packet,base+100); return row.status;};
     const run=new WebAssembly.Instance(module,{env:{memory},ring3:resident?{guard_resident:()=>0,store_resident16:store}:{guard:()=>0,store16:store}}).exports.run;
-    expected.set(row.packet,base+100); expected.writeUInt32LE(row.retired?0x1002:0x1000,base+48);
+    expected.set(row.packet,base+100); expected.writeUInt32LE(row.retired?0x1003:0x1000,base+48);
     expected.set(record('R3EX',40,[row.reason,row.retired,row.detail,row.address,row.access,row.length],2),base+56);
-    assert.equal(run(base,base+56,1,base+96),0,row.label); assert.equal(calls,1);
+    assert.equal(run(base,base+56,1,base+96),0,row.label); assert.equal(calls,1,row.label);
     assert.deepEqual(Buffer.from(bytes),expected,`${resident}/${row.label}: exact memory/CPU/FPU publication`); checks++;
   }
 }

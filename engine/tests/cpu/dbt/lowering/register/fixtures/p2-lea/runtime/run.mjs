@@ -320,8 +320,8 @@ initialize(fault, faultStart);
 const faultExpected = copyState(faultStart);
 faultExpected.registers[0] = 0xffffffff;
 faultExpected.eip = 0x1304;
-call(fault, 10, faultExpected, exit(5, 1, 2, 3, 0xffffffff, 1, 4), 'LEA accepts full address then MOV fails precisely', helper(1, 0, 3, 0xffffffff, 1, 4));
-call(fault, 10, faultExpected, exit(5, 0, 2, 3, 0xffffffff, 1, 4), 'MOV fault resume preserves committed LEA and every flag', helper(1, 0, 3, 0xffffffff, 1, 4));
+call(fault, 10, faultExpected, exit(11, 1, 6), 'LEA accepts full address then MOV logical span overflows before RAM');
+call(fault, 10, faultExpected, exit(11, 0, 6), 'MOV logical span retry preserves committed LEA, every flag and the helper');
 resumes++;
 
 const aggregate = [...generated].sort(([a], [b]) => a.localeCompare(b)).map(([name, digest]) => `${name}:${digest}`).join('\n');
@@ -329,7 +329,7 @@ const provenance = {
   claim: 'Own baseline Wasm LEA32 modulo-address execution with full flags preservation; no dereference, synthetic helpers, native C, performance or full P2-V0 claim.',
   standalone_modules: generated.size - 2, embedded_modules: 2, standalone_runs: standaloneRuns, embedded_runs: embeddedRuns, continuation_calls: resumes, synthetic_runs: 0,
   module_set_sha256: hash(aggregate), engine_sha256: hash(engineBytes),
-  sha256: Object.fromEntries(['integer.S', 'runtime/run.mjs'].map(name => [name, hash(readFileSync(join(fixtureRoot, name)))]).concat([['dbt_lea_wasm.rs', hash(readFileSync(join(root, 'engine/tests/cpu/dbt/lowering/register/wasm/lea.rs', 'engine/tests/cpu/dbt/lowering/wasm.rs', 'engine/tests/support/wasm.rs', 'engine/tests/cpu/dbt/lowering/wasm.rs', 'engine/tests/support/wasm.rs')))], ['integer.o', hash(object)]])),
+  sha256: Object.fromEntries(['integer.S', 'runtime/run.mjs'].map(name => [name, hash(readFileSync(join(fixtureRoot, name)))]).concat([...['engine/tests/cpu/dbt/lowering/register/wasm/lea.rs', 'engine/tests/cpu/dbt/lowering/wasm.rs', 'engine/tests/support/wasm.rs'].map(path => [path, hash(readFileSync(join(root, path)))]), ['integer.o', hash(object)]])),
   versions: {clang: execFileSync('clang', ['--version'], {encoding: 'utf8'}).split('\n')[0], objdump: execFileSync('xcrun', ['llvm-objdump', '--version'], {encoding: 'utf8'}).split('\n')[0], node: process.version},
   commands: {assemble: ['clang', ...assemble], disassemble: ['xcrun', 'llvm-objdump', '-d', '--x86-asm-syntax=intel', objectPath]},
   llvm_symbols: llvm, generated_sha256: Object.fromEntries([...generated].sort(([a], [b]) => a.localeCompare(b))),

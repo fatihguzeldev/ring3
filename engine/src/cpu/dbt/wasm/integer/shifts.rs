@@ -33,7 +33,7 @@ pub(super) fn shift_memory_word(
     imports: memory::Imports,
     exit_depth: u32,
 ) {
-    memory::load_narrow_value(code, address, SmallWidth::Word, imports, exit_depth);
+    memory::load_narrow_for_modify(code, address, SmallWidth::Word, imports, exit_depth);
     code.local_set(LHS);
     shift_count(code, count);
     code.local_set(RHS);
@@ -143,7 +143,7 @@ pub(super) fn shift_memory_byte(
     imports: memory::Imports,
     exit_depth: u32,
 ) {
-    memory::load_narrow_value(code, address, SmallWidth::Byte, imports, exit_depth);
+    memory::load_narrow_for_modify(code, address, SmallWidth::Byte, imports, exit_depth);
     code.local_set(LHS).i32_const(1).local_set(RHS);
     shift_byte_value(code, kind);
     // checked store clobbers operand scratch; preserve the lossy original byte.
@@ -162,7 +162,7 @@ pub(super) fn shift_memory_byte_immediate(
     exit_depth: u32,
 ) {
     let count = i32::from(count & 31);
-    memory::load_narrow_value(code, address, SmallWidth::Byte, imports, exit_depth);
+    memory::load_narrow_for_modify(code, address, SmallWidth::Byte, imports, exit_depth);
     code.local_set(LHS);
     if count == 0 {
         code.local_get(LHS).local_set(RESULT);
@@ -186,7 +186,7 @@ pub(super) fn shift_memory_byte_cl(
     imports: memory::Imports,
     exit_depth: u32,
 ) {
-    memory::load_narrow_value(code, address, SmallWidth::Byte, imports, exit_depth);
+    memory::load_narrow_for_modify(code, address, SmallWidth::Byte, imports, exit_depth);
     code.local_set(LHS);
     shift_count(code, ShiftCount::Cl);
     code.local_set(RHS);
@@ -472,7 +472,7 @@ pub(super) fn double_shift_memory_word(
     imports: memory::Imports,
     exit_depth: u32,
 ) {
-    memory::load_narrow_value(code, address, SmallWidth::Word, imports, exit_depth);
+    memory::load_narrow_for_modify(code, address, SmallWidth::Word, imports, exit_depth);
     code.local_tee(LHS).local_set(RESULT);
     shift_count(code, count);
     code.local_tee(RHS)
@@ -519,7 +519,7 @@ pub(super) fn double_shift_memory(
     imports: memory::Imports,
     exit_depth: u32,
 ) {
-    memory::load_result(code, address, imports, exit_depth);
+    memory::load_modify_result(code, address, imports, exit_depth);
     code.local_get(RESULT).local_set(LHS);
     shift_count(code, count);
     code.local_tee(RHS)
@@ -547,7 +547,7 @@ pub(super) fn shift_memory(
     imports: memory::Imports,
     exit_depth: u32,
 ) {
-    memory::load_result(code, address, imports, exit_depth);
+    memory::load_modify_result(code, address, imports, exit_depth);
     code.local_get(RESULT).local_set(LHS);
     shift_count(code, count);
     code.local_set(RHS);

@@ -110,6 +110,7 @@ fn declarations(owner: Owner) -> Vec<u8> {
         [ValType::I32],
     );
     types.ty().function([ValType::I32], [ValType::I32]);
+    types.ty().function([ValType::I32; 6], [ValType::I32]);
     module.section(&types);
     let mut imports = ImportSection::new();
     imports.import(
@@ -132,12 +133,55 @@ fn declarations(owner: Owner) -> Vec<u8> {
     module.section(&imports);
     let mut functions = FunctionSection::new();
     functions.function(0);
+    functions.function(3);
     module.section(&functions);
     let mut exports = ExportSection::new();
     exports.export("run", ExportKind::Func, 2);
     module.section(&exports);
     // this prefix proves exact guard/read32 declarations, not instruction bodies.
     module.finish()
+}
+
+fn body_locals(wasm: &[u8]) {
+    fn unsigned(bytes: &[u8], cursor: &mut usize) -> usize {
+        let mut value = 0;
+        for shift in (0..35).step_by(7) {
+            let byte = bytes[*cursor];
+            *cursor += 1;
+            assert!(shift < 28 || byte & 0xf0 == 0);
+            value |= usize::from(byte & 0x7f) << shift;
+            if byte & 0x80 == 0 {
+                return value;
+            }
+        }
+        panic!("unterminated u32 LEB128")
+    }
+    let mut cursor = 8;
+    while cursor < wasm.len() {
+        let id = wasm[cursor];
+        cursor += 1;
+        let length = unsigned(wasm, &mut cursor);
+        let end = cursor + length;
+        if id == 10 {
+            assert_eq!(unsigned(wasm, &mut cursor), 2);
+            for expected in [&[(16, 0x7f), (1, 0x7e), (10, 0x7f)][..], &[(3, 0x7f)][..]] {
+                let length = unsigned(wasm, &mut cursor);
+                let body_end = cursor + length;
+                assert_eq!(unsigned(wasm, &mut cursor), expected.len());
+                for &(count, kind) in expected {
+                    assert_eq!(unsigned(wasm, &mut cursor), count);
+                    assert_eq!(wasm[cursor], kind);
+                    cursor += 1;
+                }
+                assert_eq!(wasm[body_end - 1], 0x0b);
+                cursor = body_end;
+            }
+            assert_eq!(cursor, end);
+            return;
+        }
+        cursor = end;
+    }
+    panic!("missing code section")
 }
 
 #[test]
@@ -238,6 +282,7 @@ fn four_bound_profiles_keep_leave_sequential_and_require_only_checked_read32() {
                     }
                 };
                 assert!(artifact.starts_with(&declarations(owner)));
+                body_locals(artifact);
             }
         }
     }

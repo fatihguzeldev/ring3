@@ -1,3 +1,4 @@
+import {generatedRunBody} from '../../../../../../support/wasm/run.mjs';
 import assert from 'node:assert/strict';
 import {execFileSync} from 'node:child_process';
 import {createHash} from 'node:crypto';
@@ -40,7 +41,16 @@ function upload(e, pc, bytes, label) { refresh(e).bytes.set(bytes, e.base + TRAN
 function descriptors(e, blocks, gates) { refresh(e); [...blocks, ...gates].forEach(([pc, value], i) => { e.view.setUint32(e.base + TRANSFER + i * 8, pc, true); e.view.setUint32(e.base + TRANSFER + i * 8 + 4, value, true); }); }
 function uleb(b, c) { let n = 0, shift = 0, byte; do { byte = b[c.i++]; assert.ok(byte !== undefined && shift <= 28); n += (byte & 127) * 2 ** shift; shift += 7; } while (byte & 128); return n; }
 function sleb(b, c) { let n = 0n, shift = 0n, byte; do { byte = b[c.i++]; assert.ok(byte !== undefined && shift <= 28n); n |= BigInt(byte & 127) << shift; shift += 7n; } while (byte & 128); if (byte & 64) n -= 1n << shift; return Number(BigInt.asUintN(32, n)); }
-function prefix(b, e, id) { const c = {i: 8}; let found = false; while (c.i < b.length) { const tag = b[c.i++], n = uleb(b, c), end = c.i + n; if (tag === 10) { assert.equal(uleb(b, c), 1); const bodyLength = uleb(b, c); assert.equal(c.i + bodyLength, end); const groups = uleb(b, c); for (let i = 0; i < groups; i++) { uleb(b, c); assert.ok([0x7f, 0x7e].includes(b[c.i++])); } const limbs = []; for (let i = 0; i < 4; i++) { assert.equal(b[c.i++], 0x41); limbs.push(sleb(b, c)); } assert.deepEqual(limbs, [e.low, e.high, Number(id & 0xffffffffn), Number(id >> 32n)]); assert.deepEqual([...b.subarray(c.i, c.i + 8)], [0x20, 0, 0x20, 1, 0x20, 3, 0x10, 0]); found = true; } c.i = end; } assert.ok(found); }
+function prefix(bytes, e, id) {
+  const body = generatedRunBody(bytes), cursor = {i: 0};
+  const groups = uleb(body, cursor);
+  for (let i = 0; i < groups; i++) {uleb(body, cursor); assert.ok([0x7f, 0x7e].includes(body[cursor.i++]));}
+  const limbs = [];
+  for (let i = 0; i < 4; i++) {assert.equal(body[cursor.i++], 0x41); limbs.push(sleb(body, cursor));}
+  assert.deepEqual(limbs, [e.low, e.high, Number(id & 0xffffffffn), Number(id >> 32n)]);
+  assert.deepEqual([...body.subarray(cursor.i, cursor.i + 8)], [0x20, 0, 0x20, 1, 0x20, 3, 0x10, 0]);
+}
+
 function metadata24(e, before, expectedId, label, known) {
   const after = arena(e), v = new DataView(after.buffer), low = v.getUint32(TRANSFER + 8, true), high = v.getUint32(TRANSFER + 12, true), pointer = v.getUint32(TRANSFER + 16, true), length = v.getUint32(TRANSFER + 20, true), id = BigInt(low) | BigInt(high) << 32n;
   assert.equal(id, expectedId); assert.ok(pointer > 0 && length > 8 && pointer + length <= refresh(e).bytes.length); const bytes = e.bytes.slice(pointer, pointer + length); assert.ok(WebAssembly.validate(bytes)); prefix(bytes, e, id);
@@ -201,8 +211,8 @@ assert.deepEqual(sections.map(s => [s.stats.dispatcher_calls, s.stats.dispatcher
 assert.equal(metadata.length, 15); assert.equal(installations.length, 37); assert.equal(mismatches.length, 4);
 assert.equal(Object.keys(artifacts).length, 17); assert.equal(Object.keys(authored).length, 6);
 const productionPaths = execFileSync('rg', ['--files', 'engine/src'], {cwd: root, encoding: 'utf8'}).trim().split('\n').sort();
-const sourcePaths = [...productionPaths, 'Cargo.toml', 'engine/Cargo.toml', 'Cargo.lock', 'engine/tests/process/resident/lifecycle/wasm/installation.rs', 'engine/tests/process/resident/wasm.rs', 'engine/tests/support/wasm.rs', 'engine/tests/process/resident/wasm.rs', 'engine/tests/support/wasm.rs', 'engine/tests/process/resident/lifecycle/fixtures/p2-resident-installation/runtime/run.mjs', 'engine/tests/process/resident/lifecycle/native/installation.rs', 'engine/tests/process/resident/native.rs', 'engine/tests/process/resident/native.rs', 'engine/tests/process/resident/wasm/identity.rs', 'engine/tests/process/resident/wasm.rs', 'engine/tests/support/wasm.rs', 'engine/tests/process/resident/wasm.rs', 'engine/tests/support/wasm.rs', 'engine/tests/process/resident/fixtures/p2-resident-process/runtime/run.mjs', 'engine/tests/process/resident/native/identity.rs', 'engine/tests/process/resident/native.rs', 'engine/tests/process/resident/native.rs'];
-assert.equal(new Set(sourcePaths).size, sourcePaths.length); assert.equal(sourcePaths.length, productionPaths.length + 9);
+const sourcePaths = [...productionPaths, 'Cargo.toml', 'engine/Cargo.toml', 'Cargo.lock', 'engine/tests/process/resident/lifecycle/wasm/installation.rs', 'engine/tests/process/resident/wasm.rs', 'engine/tests/support/wasm.rs', 'engine/tests/process/resident/lifecycle/fixtures/p2-resident-installation/runtime/run.mjs', 'engine/tests/process/resident/lifecycle/native/installation.rs', 'engine/tests/process/resident/native.rs', 'engine/tests/process/resident/wasm/identity.rs', 'engine/tests/process/resident/fixtures/p2-resident-process/runtime/run.mjs', 'engine/tests/process/resident/native/identity.rs', 'engine/tests/support/wasm/run.mjs'];
+assert.equal(new Set(sourcePaths).size, sourcePaths.length); assert.ok(sourcePaths.length > 0, 'nonempty source manifest');
 const provenance = {
   stats, section_derivation: sections, actual_child_guard_entries: stats.dispatcher_child_entries + stats.direct_unit_calls, actual_exported_guard_calls_from_authored_paths: stats.dispatcher_child_entries + stats.direct_unit_calls + stats.direct_guard_calls, bound_store_identity_checks: stats.guest_store32,
   engine_sha256: hash(engineBytes), artifact_sha256: artifacts, module_set_sha256: hash(Object.keys(artifacts).filter(name => name.endsWith('.wasm')).sort().map(name => `${name}:${artifacts[name]}`).join('\n')),

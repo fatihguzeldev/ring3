@@ -155,6 +155,7 @@ fn declarations(owner: Owner) -> Vec<u8> {
         std::iter::repeat_n(ValType::I32, if resident { 6 } else { 2 }),
         [ValType::I32],
     );
+    types.ty().function([ValType::I32; 6], [ValType::I32]);
     module.section(&types);
     let mut imports = ImportSection::new();
     imports.import(
@@ -186,6 +187,7 @@ fn declarations(owner: Owner) -> Vec<u8> {
     module.section(&imports);
     let mut functions = FunctionSection::new();
     functions.function(0);
+    functions.function(4);
     module.section(&functions);
     let mut exports = ExportSection::new();
     exports.export("run", ExportKind::Func, 3);

@@ -3,7 +3,7 @@ use wasm_encoder::{BlockType, InstructionSink, ValType};
 use crate::cpu::x86::{Register32, ir::EffectiveAddress};
 
 use super::{
-    Imports, add_check, effective_address, exit_if_failed, expect_field, helper_field,
+    Imports, add_check, checked_address, exit_if_failed, expect_field, helper_field,
     infrastructure, protocol_if_bad, reset_checks, validate_infrastructure, zero_fault_fields,
 };
 use crate::cpu::dbt::wasm::locals::*;
@@ -15,14 +15,24 @@ pub(super) fn bit_test_set_result(
     imports: Imports,
     exit_depth: u32,
 ) {
-    super::address_value(code, address);
+    super::offset_value(code, address);
     code.local_get(register(source))
         .i32_const(5)
         .i32_shr_s()
         .i32_const(2)
         .i32_shl()
-        .i32_add()
-        .local_set(ADDRESS);
+        .i32_add();
+    if address.address_size == crate::cpu::x86::ir::AddressSize::Bits16 {
+        code.i32_const(0xffff).i32_and();
+    }
+    super::checked_offset(
+        code,
+        address.resolved_segment(),
+        4,
+        crate::cpu::x86::SegmentAccess::Write,
+        imports,
+        exit_depth,
+    );
     // retain the original selected bit beneath the checked helper's scratch operands.
     code.local_get(register(source))
         .i32_const(31)
@@ -49,14 +59,24 @@ pub(super) fn bit_test_reset_result(
     imports: Imports,
     exit_depth: u32,
 ) {
-    super::address_value(code, address);
+    super::offset_value(code, address);
     code.local_get(register(source))
         .i32_const(5)
         .i32_shr_s()
         .i32_const(2)
         .i32_shl()
-        .i32_add()
-        .local_set(ADDRESS);
+        .i32_add();
+    if address.address_size == crate::cpu::x86::ir::AddressSize::Bits16 {
+        code.i32_const(0xffff).i32_and();
+    }
+    super::checked_offset(
+        code,
+        address.resolved_segment(),
+        4,
+        crate::cpu::x86::SegmentAccess::Write,
+        imports,
+        exit_depth,
+    );
     // retain the original selected bit beneath the checked helper's scratch operands.
     code.local_get(register(source))
         .i32_const(31)
@@ -83,7 +103,14 @@ pub(super) fn atomic_or_result(
     imports: Imports,
     exit_depth: u32,
 ) {
-    effective_address(code, address);
+    checked_address(
+        code,
+        address,
+        4,
+        crate::cpu::x86::SegmentAccess::Write,
+        imports,
+        exit_depth,
+    );
     let index = imports
         .atomic_or_u32
         .expect("prepared locked memory or has an import")
@@ -105,7 +132,14 @@ pub(super) fn atomic_and_result(
     imports: Imports,
     exit_depth: u32,
 ) {
-    effective_address(code, address);
+    checked_address(
+        code,
+        address,
+        4,
+        crate::cpu::x86::SegmentAccess::Write,
+        imports,
+        exit_depth,
+    );
     let index = imports
         .atomic_and_u32
         .expect("prepared locked memory and has an import")
@@ -127,7 +161,14 @@ pub(super) fn atomic_xor_result(
     imports: Imports,
     exit_depth: u32,
 ) {
-    effective_address(code, address);
+    checked_address(
+        code,
+        address,
+        4,
+        crate::cpu::x86::SegmentAccess::Write,
+        imports,
+        exit_depth,
+    );
     let index = imports
         .atomic_xor_u32
         .expect("prepared locked memory xor has an import")
@@ -149,7 +190,14 @@ pub(super) fn atomic_or_register_result(
     imports: Imports,
     exit_depth: u32,
 ) {
-    effective_address(code, address);
+    checked_address(
+        code,
+        address,
+        4,
+        crate::cpu::x86::SegmentAccess::Write,
+        imports,
+        exit_depth,
+    );
     let index = imports
         .atomic_or_u32
         .expect("prepared locked register memory or has an import")
@@ -171,7 +219,14 @@ pub(super) fn atomic_and_register_result(
     imports: Imports,
     exit_depth: u32,
 ) {
-    effective_address(code, address);
+    checked_address(
+        code,
+        address,
+        4,
+        crate::cpu::x86::SegmentAccess::Write,
+        imports,
+        exit_depth,
+    );
     let index = imports
         .atomic_and_u32
         .expect("prepared locked register memory and has an import")
@@ -193,7 +248,14 @@ pub(super) fn atomic_xor_register_result(
     imports: Imports,
     exit_depth: u32,
 ) {
-    effective_address(code, address);
+    checked_address(
+        code,
+        address,
+        4,
+        crate::cpu::x86::SegmentAccess::Write,
+        imports,
+        exit_depth,
+    );
     let index = imports
         .atomic_xor_u32
         .expect("prepared locked register memory xor has an import")
@@ -215,7 +277,14 @@ pub(super) fn exchange_add_result(
     imports: Imports,
     exit_depth: u32,
 ) {
-    effective_address(code, address);
+    checked_address(
+        code,
+        address,
+        4,
+        crate::cpu::x86::SegmentAccess::Write,
+        imports,
+        exit_depth,
+    );
     let index = imports
         .exchange_add32
         .expect("prepared locked memory exchange add has an import")
@@ -237,7 +306,14 @@ pub(super) fn exchange_result(
     imports: Imports,
     exit_depth: u32,
 ) {
-    effective_address(code, address);
+    checked_address(
+        code,
+        address,
+        4,
+        crate::cpu::x86::SegmentAccess::Write,
+        imports,
+        exit_depth,
+    );
     let index = imports
         .exchange
         .expect("prepared memory exchange has an import")
@@ -259,7 +335,14 @@ pub(super) fn compare_exchange_result(
     imports: Imports,
     exit_depth: u32,
 ) {
-    effective_address(code, address);
+    checked_address(
+        code,
+        address,
+        4,
+        crate::cpu::x86::SegmentAccess::Write,
+        imports,
+        exit_depth,
+    );
     let index = imports
         .compare_exchange32
         .expect("prepared locked memory compare exchange has an import")

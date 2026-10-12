@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import {generatedRunBody} from '../../../../../../support/wasm/run.mjs';
 import {execFileSync} from 'node:child_process';
 import {createHash} from 'node:crypto';
 import {readFileSync, writeFileSync} from 'node:fs';
@@ -49,19 +50,11 @@ function sleb32(bytes, cursor) {
 
 function bakedPrefix(bytes, engine, id) {
   assert.deepEqual([...bytes.subarray(0, 8)], [0, 97, 115, 109, 1, 0, 0, 0]);
-  const cursor = {i: 8}; let found = false;
-  while (cursor.i < bytes.length) {
-    const section = bytes[cursor.i++], length = uleb(bytes, cursor), end = cursor.i + length;
-    if (section === 10) {
-      assert.equal(uleb(bytes, cursor), 1); const bodyLength = uleb(bytes, cursor), bodyEnd = cursor.i + bodyLength; assert.equal(bodyEnd, end);
-      const groups = uleb(bytes, cursor); for (let i = 0; i < groups; i++) { uleb(bytes, cursor); assert.ok([0x7f, 0x7e].includes(bytes[cursor.i++])); }
-      const constants = []; for (let i = 0; i < 4; i++) { assert.equal(bytes[cursor.i++], 0x41); constants.push(sleb32(bytes, cursor)); }
-      assert.deepEqual(constants, [engine.low, engine.high, Number(id & 0xffffffffn), Number(id >> 32n)], 'immutable four-limb binding independently decoded from actual function start');
-      assert.deepEqual([...bytes.subarray(cursor.i, cursor.i + 8)], [0x20, 0, 0x20, 1, 0x20, 3, 0x10, 0], 'direct guard call precedes CPU preflight'); found = true;
-    }
-    cursor.i = end;
-  }
-  assert.ok(found);
+  const body = generatedRunBody(bytes), cursor = {i: 0};
+  const groups = uleb(body, cursor); for (let i = 0; i < groups; i++) { uleb(body, cursor); assert.ok([0x7f, 0x7e].includes(body[cursor.i++])); }
+  const constants = []; for (let i = 0; i < 4; i++) { assert.equal(body[cursor.i++], 0x41); constants.push(sleb32(body, cursor)); }
+  assert.deepEqual(constants, [engine.low, engine.high, Number(id & 0xffffffffn), Number(id >> 32n)], 'immutable four-limb binding independently decoded from actual function start');
+  assert.deepEqual([...body.subarray(cursor.i, cursor.i + 8)], [0x20, 0, 0x20, 1, 0x20, 3, 0x10, 0], 'direct guard call precedes CPU preflight');
 }
 
 function noLegacy(engine) { assert.equal(engine.api.generation(), 0); assert.equal(engine.api.module_ptr(), 0); assert.equal(engine.api.module_len(), 0); }
@@ -160,7 +153,7 @@ function boundStores(bytes, engine, id, count, index) {
       const n = uleb(bytes, cursor); for (let i = 0; i < n; i++) { assert.equal(bytes[cursor.i++], 0x60); const parameters = uleb(bytes, cursor), args = [...bytes.subarray(cursor.i, cursor.i + parameters)]; cursor.i += parameters; const results = uleb(bytes, cursor), returns = [...bytes.subarray(cursor.i, cursor.i + results)]; cursor.i += results; signatures.push({args, returns}); }
     } else if (section === 2) {
       const n = uleb(bytes, cursor); for (let i = 0; i < n; i++) { string(); const name = string(), kind = bytes[cursor.i++]; if (kind === 0) importTypes.set(name, uleb(bytes, cursor)); else { assert.equal(kind, 2); const flags = uleb(bytes, cursor); uleb(bytes, cursor); if (flags & 1) uleb(bytes, cursor); } }
-    } else if (section === 10) { assert.equal(uleb(bytes, cursor), 1); const n = uleb(bytes, cursor); body = bytes.subarray(cursor.i, cursor.i + n); }
+    } else if (section === 10) { body = generatedRunBody(bytes); }
     cursor.i = end;
   }
   assert.ok(body); assert.deepEqual(signatures[importTypes.get('guard_resident')], {args: Array(7).fill(0x7f), returns: [0x7f]});
@@ -236,7 +229,7 @@ for (const access of [1, 2]) {
   run(engine, a, 8, applied(stopped, 'dec', 0x80000000, 0x2000), exit(3, 2), storeHelper(), 'cross-page retry reads repaired current operand', 'resume', 1, 1); observe(engine, 0xbffc, 4, 0xff223344); observe(engine, 0xc000, 4, 0x557fffff); stats.repairs++;
 }
 const overflow = startFor(forms[1], false); overflow.registers[3] = 0xffffffff; reset(engine, overflow); const overflowStopped = prefixed(overflow);
-run(engine, a, 8, overflowStopped, exit(5, 1, 3, 0xffffffff, 4, 2, 1), helper(4, 0, 3, 0xffffffff), 'Read4 overflow suppresses Store4', 'initial', 0, 1); run(engine, a, 8, overflowStopped, exit(5, 0, 3, 0xffffffff, 4, 2, 1), helper(4, 0, 3, 0xffffffff), 'overflow retry never retires unary', 'resume', 0, 1); stats.faults += 2; stats.read_faults += 2;
+run(engine, a, 8, overflowStopped, exit(11, 1, 0, 0, 0, 6), undefined, 'segment overflow suppresses Read4/Store4', 'initial'); run(engine, a, 8, overflowStopped, exit(11, 0, 0, 0, 0, 6), undefined, 'overflow retry never retires unary', 'resume'); stats.faults += 2; stats.read_faults += 2;
 assert.equal(engine.api.map(0xfffff000, 1, 3), 0); word(engine, 0xfffffff8, 0x11223344); word(engine, 0xfffffffc, 0x80000000); const top = startFor(forms[1], false); top.registers[3] = 0xfffffffc; reset(engine, top);
 run(engine, a, 8, applied(prefixed(top), 'dec', 0x80000000, 0x2000), exit(3, 3), storeHelper(), 'last valid Read4/Store4 address', 'initial', 1, 1); observe(engine, 0xfffffff8, 4, 0x11223344); observe(engine, 0xfffffffc, 4, 0x7fffffff);
 
@@ -295,7 +288,8 @@ for (const fixture of smcCases) {
 }
 assert.equal(stats.form_cases, 56); assert.equal(stats.alias_cases, 4); assert.equal(stats.same_byte_permission_faults, 2); assert.equal(stats.smc_cases, 9); assert.equal(stats.same_byte_code_writes, 2); assert.equal(stats.algorithm_cases, 3); assert.equal(stats.algorithm_retired, 18);
 const productionPaths = execFileSync('rg', ['--files', 'engine/src'], {cwd: root, encoding: 'utf8'}).trim().split('\n').sort();
-const sourcePaths = ['engine/tests/process/resident/admission/wasm/unary.rs', 'engine/tests/process/resident/wasm.rs', 'engine/tests/support/wasm.rs', 'engine/tests/process/resident/wasm.rs', 'engine/tests/support/wasm.rs', 'engine/tests/process/resident/admission/fixtures/p2-resident-unary/runtime/run.mjs', 'engine/tests/process/resident/admission/native/unary.rs', 'engine/tests/process/resident/native.rs', 'engine/tests/process/resident/native.rs', 'engine/tests/process/resident/admission/wasm/store.rs', 'engine/tests/process/resident/wasm.rs', 'engine/tests/support/wasm.rs', 'engine/tests/process/resident/wasm.rs', 'engine/tests/support/wasm.rs', 'engine/tests/process/resident/admission/fixtures/p2-resident-store/runtime/run.mjs', 'engine/tests/process/resident/admission/native/store.rs', 'engine/tests/process/resident/native.rs', 'engine/tests/support/cpu/prefix/admission.rs', 'engine/tests/process/resident/native.rs', 'engine/tests/process/resident/admission/native/read.rs', 'engine/tests/process/resident/native.rs', 'engine/tests/support/cpu/prefix/admission.rs', 'engine/tests/process/resident/native.rs', 'Cargo.toml', 'engine/Cargo.toml', 'Cargo.lock', ...productionPaths];
+const sourcePaths = [
+  'engine/tests/support/wasm/run.mjs', 'engine/tests/process/resident/admission/wasm/unary.rs', 'engine/tests/process/resident/wasm.rs', 'engine/tests/support/wasm.rs',   'engine/tests/process/resident/admission/fixtures/p2-resident-unary/runtime/run.mjs', 'engine/tests/process/resident/admission/native/unary.rs', 'engine/tests/process/resident/native.rs',  'engine/tests/process/resident/admission/wasm/store.rs',     'engine/tests/process/resident/admission/fixtures/p2-resident-store/runtime/run.mjs', 'engine/tests/process/resident/admission/native/store.rs',  'engine/tests/support/cpu/prefix/admission.rs',  'engine/tests/process/resident/admission/native/read.rs',    'Cargo.toml', 'engine/Cargo.toml', 'Cargo.lock', ...productionPaths];
 const provenance = {
   stats, actual_resident_runs: stats.canonical_runs + stats.rejected_runs, actual_resident_guard_entries: stats.canonical_runs + stats.rejected_runs + stats.successful_guards + stats.failed_guards, bound_store_identity_checks: stats.guest_store32,
   guest_helper_calls_from_authored_execution: stats.guest_store32 + stats.guest_read32, host_observation_reads: stats.host_reads,

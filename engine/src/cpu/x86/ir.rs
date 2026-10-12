@@ -41,6 +41,52 @@ pub struct EffectiveAddress {
     pub address_size: AddressSize,
 }
 
+impl EffectiveAddress {
+    /// sib indexes do not select ss; only the architectural base register does.
+    pub const fn resolved_segment(self) -> SegmentRegister {
+        match self.segment {
+            Some(segment) => segment,
+            None if matches!(self.base, Some(Register32::Ebp | Register32::Esp)) => {
+                SegmentRegister::Ss
+            }
+            None => SegmentRegister::Ds,
+        }
+    }
+}
+
+#[cfg(test)]
+mod effective_address_tests {
+    use super::*;
+
+    #[test]
+    fn default_segment_follows_the_base_and_explicit_overrides_win() {
+        for address_size in [AddressSize::Bits16, AddressSize::Bits32] {
+            let data = EffectiveAddress {
+                base: Some(Register32::Ebx),
+                index: Some(Register32::Ebp),
+                address_size,
+                ..Default::default()
+            };
+            assert_eq!(data.resolved_segment(), SegmentRegister::Ds);
+            let stack = EffectiveAddress {
+                base: Some(Register32::Ebp),
+                index: Some(Register32::Esi),
+                address_size,
+                ..Default::default()
+            };
+            assert_eq!(stack.resolved_segment(), SegmentRegister::Ss);
+            assert_eq!(
+                EffectiveAddress {
+                    segment: Some(SegmentRegister::Fs),
+                    ..stack
+                }
+                .resolved_segment(),
+                SegmentRegister::Fs
+            );
+        }
+    }
+}
+
 impl Default for EffectiveAddress {
     fn default() -> Self {
         Self {

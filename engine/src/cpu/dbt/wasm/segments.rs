@@ -1,5 +1,8 @@
 use wasm_encoder::{BlockType, InstructionSink, MemArg};
 
+mod access;
+pub(super) use access::{build_function, check_span};
+
 use super::{
     locals::{
         ADDRESS, BUDGET, CANCEL_PTR, DETAIL, EIP, EXIT_PTR, FAULT_ACCESS, FAULT_ADDRESS,
@@ -121,8 +124,14 @@ pub(super) fn instruction(
             address,
             word,
         } => {
-            memory::address_value(code, address);
-            code.local_set(ADDRESS);
+            memory::checked_address(
+                code,
+                address,
+                if word { 4 } else { 6 },
+                crate::cpu::x86::SegmentAccess::Read,
+                imports,
+                exit_depth,
+            );
             let index = imports
                 .segment_load_far
                 .expect("far pointer operation has a helper")

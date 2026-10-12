@@ -12,6 +12,7 @@ const sourcePaths = [
   'engine/src/cpu/dbt/wasm/integer/scalar_bits.rs', 'engine/src/cpu/dbt/wasm/integer/mod.rs', 'engine/src/cpu/dbt/wasm/integer/dispatch.rs',
   'engine/src/cpu/dbt/wasm/integer/operands.rs', 'engine/src/cpu/dbt/wasm/abi.rs', 'engine/src/abi/x86/state.rs',
   'engine/src/cpu/dbt/wasm/memory.rs', 'engine/src/cpu/dbt/wasm/memory/narrow.rs', 'engine/src/cpu/dbt/wasm/memory/word_store.rs', 'engine/src/cpu/dbt/region.rs',
+  'engine/src/cpu/dbt/wasm/segments.rs', 'engine/src/cpu/dbt/wasm/segments/access.rs', 'engine/src/cpu/x86/segments/cache.rs',
   'engine/tests/cpu/bits_flags/integration/fixtures/p2-scalar-bits/runtime/crc32.mjs', 'engine/tests/cpu/bits_flags/integration/wasm/scalar.rs',
 ];
 const sources = () => Object.fromEntries(sourcePaths.map(path => [path, createHash('sha256').update(readFileSync(join(root, path))).digest('hex')]));
@@ -60,9 +61,9 @@ function compile(c, instruction, memoryName) {
   run.exitVersion = memoryName ? 2 : 1;
   return run;
 }
-function run(c, fn, state, {budget = 1, reason = 1, retired = 1, helper, fault} = {}) {
+function run(c, fn, state, {budget = 1, reason = 1, retired = 1, helper, fault, exitVersion = fn.exitVersion} = {}) {
   const expected = arena(c); expected.set(cpuRecord(state));
-  expected.set(record('R3EX', 40, [reason, retired, fault?.detail ?? 0, fault?.address ?? 0, fault?.access ?? 0, fault?.length ?? 0], fn.exitVersion), 56);
+  expected.set(record('R3EX', 40, [reason, retired, fault?.detail ?? 0, fault?.address ?? 0, fault?.access ?? 0, fault?.length ?? 0], exitVersion), 56);
   if (helper) expected.set(record('R3MH', 40, helper.fields, helper.version), 100);
   assert.equal(fn(c.base, c.base + 56, budget, c.base + 96), 0);
   assert.deepEqual(arena(c), expected, 'complete CPU, exit, helper and unrelated numeric-state preservation'); counts.runs++;
@@ -177,7 +178,8 @@ for (const owner of ['replacement', 'resident']) for (const entries of [false, t
       run(c, fn, expected(protectedBefore, width, destination, 7, instruction.length, allBits), {helper: helper(width, allBits)}); counts.repairs++;
       if (width !== 8) {
         const wrapped = initial(c, width, destination, 7, 0, 0x12345678, 0xcd7, 0xffffffff);
-        run(c, fn, wrapped, {reason: 5, retired: 0, fault: {detail: 3, address: 0xffffffff, access: 1, length: width / 8}, helper: helper(width, 0, 3, 0xffffffff)}); counts.faults++;
+        // this profile rejects an overflowing logical segment span before calling the ram helper.
+        run(c, fn, wrapped, {reason: 11, retired: 0, exitVersion: 6}); counts.faults++;
       }
       stopped(c, fn);
     }

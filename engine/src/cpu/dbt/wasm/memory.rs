@@ -4,6 +4,7 @@ use crate::cpu::x86::ir::{
     BinaryKind, BranchTarget, EffectiveAddress, Location32, Operation, SmallSource, SmallWidth,
     UnaryKind, Value32,
 };
+use crate::cpu::x86::{SegmentAccess, SegmentRegister};
 
 use super::locals::*;
 
@@ -37,6 +38,7 @@ impl StoreImport {
 
 #[derive(Clone, Copy, Default)]
 pub(super) struct Imports {
+    pub(super) segment_check: Option<u32>,
     pub(super) stack_execute: Option<StoreImport>,
     pub(super) cpu_integer: Option<StoreImport>,
     pub(super) cpu_read: Option<u32>,
@@ -672,6 +674,14 @@ pub(super) fn store_word_result(
     word_store::store_result(code, address, imports, exit_depth);
 }
 
+pub(super) fn store_byte_result_at_address(
+    code: &mut InstructionSink<'_>,
+    imports: Imports,
+    exit_depth: u32,
+) {
+    byte_store::store_result_at_address(code, imports, exit_depth);
+}
+
 pub(super) fn store_word_result_at_address(
     code: &mut InstructionSink<'_>,
     imports: Imports,
@@ -706,7 +716,7 @@ pub(super) fn load(
     imports: Imports,
     exit_depth: u32,
 ) {
-    effective_address(code, address);
+    checked_address(code, address, 4, SegmentAccess::Read, imports, exit_depth);
     code.local_get(ADDRESS)
         .call(imports.read.expect("prepared memory load has an import"))
         .local_set(HELPER_STATUS);
@@ -723,7 +733,7 @@ pub(super) fn store(
     imports: Imports,
     exit_depth: u32,
 ) {
-    effective_address(code, address);
+    checked_address(code, address, 4, SegmentAccess::Write, imports, exit_depth);
     let index = imports
         .store
         .expect("prepared memory store has an import")
@@ -749,6 +759,19 @@ pub(super) fn push_memory(
     imports: Imports,
     exit_depth: u32,
 ) {
+    checked_address(code, source, 4, SegmentAccess::Read, imports, exit_depth);
+    checked_address(
+        code,
+        EffectiveAddress {
+            base: Some(crate::cpu::x86::Register32::Esp),
+            displacement: (-4_i32) as u32,
+            ..Default::default()
+        },
+        4,
+        SegmentAccess::Write,
+        imports,
+        exit_depth,
+    );
     load_result(code, source, imports, exit_depth);
     store_result(
         code,
@@ -773,6 +796,28 @@ pub(super) fn pop_memory(
     exit_depth: u32,
 ) {
     let esp = crate::cpu::x86::Register32::Esp;
+    if destination.base == Some(esp) {
+        destination.displacement = destination.displacement.wrapping_add(4);
+    }
+    checked_address(
+        code,
+        EffectiveAddress {
+            base: Some(esp),
+            ..Default::default()
+        },
+        4,
+        SegmentAccess::Read,
+        imports,
+        exit_depth,
+    );
+    checked_address(
+        code,
+        destination,
+        4,
+        SegmentAccess::Write,
+        imports,
+        exit_depth,
+    );
     load_result(
         code,
         EffectiveAddress {
@@ -785,9 +830,6 @@ pub(super) fn pop_memory(
         imports,
         exit_depth,
     );
-    if destination.base == Some(esp) {
-        destination.displacement = destination.displacement.wrapping_add(4);
-    }
     store_result(code, destination, imports, exit_depth);
     code.local_get(register(esp))
         .i32_const(4)
@@ -855,6 +897,28 @@ pub(super) fn pop_word_memory(
     exit_depth: u32,
 ) {
     let esp = crate::cpu::x86::Register32::Esp;
+    if destination.base == Some(esp) {
+        destination.displacement = destination.displacement.wrapping_add(2);
+    }
+    checked_address(
+        code,
+        EffectiveAddress {
+            base: Some(esp),
+            ..Default::default()
+        },
+        2,
+        SegmentAccess::Read,
+        imports,
+        exit_depth,
+    );
+    checked_address(
+        code,
+        destination,
+        2,
+        SegmentAccess::Write,
+        imports,
+        exit_depth,
+    );
     load_narrow_value(
         code,
         EffectiveAddress {
@@ -869,9 +933,6 @@ pub(super) fn pop_word_memory(
         exit_depth,
     );
     code.local_set(RESULT);
-    if destination.base == Some(esp) {
-        destination.displacement = destination.displacement.wrapping_add(2);
-    }
     store_word_result(code, destination, imports, exit_depth);
     code.local_get(register(esp))
         .i32_const(2)
@@ -885,8 +946,40 @@ pub(super) fn load_result(
     imports: Imports,
     exit_depth: u32,
 ) {
-    effective_address(code, source);
+    checked_address(code, source, 4, SegmentAccess::Read, imports, exit_depth);
     load_result_at_address(code, imports, exit_depth);
+}
+
+pub(super) fn load_modify_result(
+    code: &mut InstructionSink<'_>,
+    source: EffectiveAddress,
+    imports: Imports,
+    exit_depth: u32,
+) {
+    checked_address(code, source, 4, SegmentAccess::Write, imports, exit_depth);
+    load_result_at_address(code, imports, exit_depth);
+}
+
+pub(super) fn load_narrow_for_modify(
+    code: &mut InstructionSink<'_>,
+    source: EffectiveAddress,
+    width: SmallWidth,
+    imports: Imports,
+    exit_depth: u32,
+) {
+    let length = match width {
+        SmallWidth::Byte => 1,
+        SmallWidth::Word => 2,
+    };
+    checked_address(
+        code,
+        source,
+        length,
+        SegmentAccess::Write,
+        imports,
+        exit_depth,
+    );
+    load_narrow_at_address(code, width, imports, exit_depth);
 }
 
 pub(super) fn load_result_at_address(
@@ -913,7 +1006,14 @@ pub(super) fn store_result(
     imports: Imports,
     exit_depth: u32,
 ) {
-    effective_address(code, destination);
+    checked_address(
+        code,
+        destination,
+        4,
+        SegmentAccess::Write,
+        imports,
+        exit_depth,
+    );
     store_result_at_address(code, imports, exit_depth);
 }
 
@@ -969,9 +1069,18 @@ pub(super) fn pop_return(
     exit_depth: u32,
 ) {
     let esp = register(crate::cpu::x86::Register32::Esp);
-    code.local_get(esp)
-        .local_set(ADDRESS)
-        .local_get(ADDRESS)
+    checked_address(
+        code,
+        EffectiveAddress {
+            base: Some(crate::cpu::x86::Register32::Esp),
+            ..Default::default()
+        },
+        4,
+        SegmentAccess::Read,
+        imports,
+        exit_depth,
+    );
+    code.local_get(ADDRESS)
         .call(imports.read.expect("prepared return has a read import"))
         .local_set(HELPER_STATUS);
     validate_result(code, false);
@@ -999,6 +1108,41 @@ pub(super) fn exit_if_invalidated(code: &mut InstructionSink<'_>, exit_depth: u3
 pub(super) fn effective_address(code: &mut InstructionSink<'_>, address: EffectiveAddress) {
     address_value(code, address);
     code.local_set(ADDRESS);
+}
+
+pub(super) fn checked_address(
+    code: &mut InstructionSink<'_>,
+    address: EffectiveAddress,
+    width: u32,
+    access: SegmentAccess,
+    imports: Imports,
+    exit_depth: u32,
+) {
+    offset_value(code, address);
+    checked_offset(
+        code,
+        address.resolved_segment(),
+        width,
+        access,
+        imports,
+        exit_depth,
+    );
+}
+
+/// consumes a logical offset, including any instruction-specific bit-index displacement.
+pub(super) fn checked_offset(
+    code: &mut InstructionSink<'_>,
+    segment: SegmentRegister,
+    width: u32,
+    access: SegmentAccess,
+    imports: Imports,
+    exit_depth: u32,
+) {
+    code.local_set(ADDRESS);
+    super::segments::check_span(code, segment, width, access, imports, exit_depth);
+    code.local_get(ADDRESS);
+    super::segments::base(code, segment);
+    code.i32_add().local_set(ADDRESS);
 }
 
 pub(super) fn address_value(code: &mut InstructionSink<'_>, address: EffectiveAddress) {

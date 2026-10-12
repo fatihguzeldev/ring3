@@ -266,11 +266,21 @@ for(let i=1;i<process.argv.length;i+=2){
  a.deepEqual(WebAssembly.Module.imports(m),[{module:'env',name:'memory',kind:'memory'},
   {module:'ring3',name:process.argv[i+1],kind:'function'},{module:'ring3',name:'read32',kind:'function'}]);
  a.deepEqual(WebAssembly.Module.exports(m),[{name:'run',kind:'function'}]);
- const p={i:8};let found=false;while(p.i<b.length){const id=b[p.i++],end=u(b,p)+p.i;
-  if(id===10){a.equal(u(b,p),1);u(b,p);const n=u(b,p),locals=[];
-   for(let j=0;j<n;j++)locals.push([u(b,p),b[p.i++]]);
-   a.deepEqual(locals,[[16,0x7f],[1,0x7e],[10,0x7f]]);found=true;}
-  p.i=end;}a.ok(found);
+ const p={i:8};let found=0;while(p.i<b.length){const id=b[p.i++],end=u(b,p)+p.i;
+  if(id===1){a.equal(u(b,p),4);
+   for(const arity of [4,process.argv[i+1]==='guard_resident'?7:6,1,6]){
+    a.equal(b[p.i++],0x60);a.equal(u(b,p),arity);
+    a.deepEqual([...b.subarray(p.i,p.i+arity)],Array(arity).fill(0x7f));p.i+=arity;
+    a.equal(u(b,p),1);a.equal(b[p.i++],0x7f);
+   }a.equal(p.i,end);found|=1;}
+  if(id===3){a.equal(u(b,p),2);a.equal(u(b,p),0);a.equal(u(b,p),3);a.equal(p.i,end);found|=2;}
+  if(id===10){a.equal(u(b,p),2);
+   for(const expected of [[[16,0x7f],[1,0x7e],[10,0x7f]],[[3,0x7f]]]){
+    const bodyEnd=u(b,p)+p.i,n=u(b,p),locals=[];
+    for(let j=0;j<n;j++)locals.push([u(b,p),b[p.i++]]);
+    a.deepEqual(locals,expected);a.equal(b[bodyEnd-1],0x0b);p.i=bodyEnd;
+   }a.equal(p.i,end);found|=4;}
+  p.i=end;}a.equal(found,7);
 }
 "#;
     let mut command = Command::new("node");

@@ -1,7 +1,10 @@
 use wasm_encoder::InstructionSink;
 
 use super::memory;
-use crate::cpu::x86::ir::{EffectiveAddress, SmallWidth};
+use crate::cpu::x86::{
+    SegmentAccess,
+    ir::{EffectiveAddress, SmallWidth},
+};
 
 pub(super) fn instruction(
     code: &mut InstructionSink<'_>,
@@ -10,6 +13,14 @@ pub(super) fn instruction(
     exit_depth: u32,
 ) {
     // coherent RAM and synchronous executable-write invalidation need only the checked byte access.
-    memory::load_narrow_value(code, address, SmallWidth::Byte, imports, exit_depth);
+    memory::checked_address(
+        code,
+        address,
+        1,
+        SegmentAccess::CacheFlush,
+        imports,
+        exit_depth,
+    );
+    memory::load_narrow_at_address(code, SmallWidth::Byte, imports, exit_depth);
     code.drop();
 }

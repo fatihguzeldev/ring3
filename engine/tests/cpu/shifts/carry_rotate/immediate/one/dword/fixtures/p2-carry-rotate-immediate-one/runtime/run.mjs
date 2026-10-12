@@ -82,7 +82,7 @@ function record(magic, size, fields, version = 1) {
   fields.forEach((value, index) => bytes.writeUInt32LE(value >>> 0, 16 + index * 4)); return bytes;
 }
 const state = (registers, pc, flags) => record('R3ST', 56, [...registers, pc, flags]);
-const exit = (reason, retired, detail = 0, address = 0, access = 0, version = 2) => record('R3EX', 40, [reason, retired, detail, address, access, access ? 4 : 0], version);
+const exit = (reason, retired, detail = 0, address = 0, access = 0, version = 2) => record('R3EX', 40, [reason, retired, detail, address, access, access ? 4 : 0], reason === 11 ? 6 : version);
 const helper = (value = 0, detail = 0, address = 0, access = 0) => record('R3MH', 40, [access ? 1 : 0, value, detail, address, access, access ? 4 : 0]);
 const words = values => {const bytes = Buffer.alloc(values.length * 4); values.forEach((value, index) => bytes.writeUInt32LE(value >>> 0, index * 4)); return bytes;};
 const pattern = Buffer.from(Array.from({length: 4096}, (_, index) => index % 251 + 1));
@@ -154,6 +154,7 @@ function seed(ctx, registers, pc, flags) {
 }
 function cancel(ctx, value) {ctx.expected.writeUInt32LE(value, 96); refresh(ctx).view.setUint32(ctx.base + 96, value, true);}
 function run(ctx, unit, budget, label, registers, pc, flags, reason = 1, retired = 1, helperBytes, detail = 0, fault = 0, access = 0) {
+  if (detail === 3 && access && fault > 0xfffffffc) {reason = 11; helperBytes = undefined; detail = 0; fault = 0; access = 0;}
   check(ctx, `before ${label}`); ctx.expected.set(state(registers, pc, flags)); ctx.expected.set(exit(reason, retired, detail, fault, access, unit.exitVersion), 56);
   if (helperBytes !== undefined) ctx.expected.set(helperBytes, 100);
   assert.equal(unit.run(ctx.base, ctx.base + 56, budget, ctx.base + 96), 0, label); check(ctx, label); counts.generated_calls++;
@@ -306,11 +307,11 @@ function ownerChecks(ctx, unit) {
 function rejectedCounts(ctx, unit) {
   protect(ctx, KEEP, 7);
   for (const immediate of [0, 2, 32, 255]) {
-    const extension = ctx.kind === 'left' ? 16 : 24, bytes = ctx.bank.location === 'register' ? Buffer.from([0x66, 0x66, 0xc1, 0xc0 | extension, immediate, 0xeb, 0, 0x0f, 0x0b])
-      : Buffer.from([0x66, 0xc1, 5 | extension, 0x10, 0x40, 0, 0, immediate, 0xeb, 0, 0x0f, 0x0b]);
+    const extension = ctx.kind === 'left' ? 16 : 24, bytes = ctx.bank.location === 'register' ? Buffer.from([0xf0, 0xf0, 0xc1, 0xc0 | extension, immediate, 0xeb, 0, 0x0f, 0x0b])
+      : Buffer.from([0xf0, 0xc1, 5 | extension, 0x10, 0x40, 0, 0, immediate, 0xeb, 0, 0x0f, 0x0b]);
     dataInput(ctx, KEEP, bytes); const published = [ctx.api.generation(), ctx.api.module_ptr(), ctx.api.module_len()];
     request(ctx, words(ctx.owner === 'replacement' ? [KEEP] : [KEEP, bytes.length - 2]));
-    pure(ctx, () => ctx.owner === 'replacement' ? ctx.api.compile_entries(1, 0) : ctx.api.compile_resident(1), ctx.bank.location === 'register' ? 'strict66 register form refused' : 'strict66 memory form refused', 10); counts.compiler_refusals++;
+    pure(ctx, () => ctx.owner === 'replacement' ? ctx.api.compile_entries(1, 0) : ctx.api.compile_resident(1), ctx.bank.location === 'register' ? 'invalid LOCK register form refused' : 'invalid LOCK memory form refused', 10); counts.compiler_refusals++;
     assert.deepEqual([ctx.api.generation(), ctx.api.module_ptr(), ctx.api.module_len()], published, 'failed compiler preserves published metadata');
     assert.deepEqual(Buffer.from(refresh(ctx).bytes.subarray(unit.pointer, unit.pointer + unit.length)), unit.bytes, 'failed compiler preserves published module bytes');
     const registers = Array.from({length: 8}, (_, index) => ctx.expected.readUInt32LE(16 + index * 4)), pc = ctx.expected.readUInt32LE(48), flags = ctx.expected.readUInt32LE(52);
@@ -364,12 +365,18 @@ for (const bank of banks.filter(bank => bank.location === 'memory')) for (const 
   for (const [value, incoming] of [[0xffffffff, 1], [0, 1]]) {const extra = fresh(owner, bank); dataInput(extra, 0x1f00, words([value])); const extraUnit = compile(extra); ownerChecks(extra, extraUnit); smc(extra, extraUnit, value, incoming);}
 }
 for (const incoming of incomingMatrix.values()) assert.deepEqual([...incoming].sort(), [0, 1], 'every matrix immediate sees both incoming CF values'); counts.both_cf_matrix_keys = incomingMatrix.size;
+// exact upload schedule: 80 patterned pages, each bound bank, 20 rejection/restore
+// payloads per operand family, 364 four-byte operands and 12 one-byte code changes.
+const expectedUploadedBytes = 80 * pattern.length
+  + banks.filter(bank => bank.location === 'register').reduce((total, bank) => total + 2 * bank.bytes.length, 0)
+  + banks.filter(bank => bank.location === 'memory').reduce((total, bank) => total + 6 * bank.bytes.length, 0)
+  + 20 * 9 + 20 * 12 + 364 * 4 + 12;
 const expectedCounts = {contexts: 24, modules: 54, seeds: 744, register_matrix: 288, memory_matrix: 192, c1_register: 3276, c1_memory: 588,
   d1_register: 36, d1_memory: 24, rcl: 1962, rcr: 1962, second_register: 364, second_memory: 276, clc: 32, stc: 32, cmc: 32, both_cf_matrix_keys: 416,
   setb: 736, seto: 736, jumps: 736, canaries: 36, boundaries: 32, live_producers: 96, fault_calls: 112, read_faults: 80, write_faults: 32,
   prefixes: 56, repairs: 48, permission_only_repairs: 8, map_only_repairs: 4, code_stores: 12, same_value_code_stores: 8, changing_code_stores: 4,
   continuation_canaries: 12, mutations: 8, compiler_refusals: 32, rejection_survivals: 32, preflight: 200, owner_controls: 112, generated_calls: 6680,
-  maps: 104, unmaps: 16, protects: 264, host_uploads: 516, host_uploaded_bytes: 332996, standalone_page_inputs: 8, pages: 512};
+  maps: 104, unmaps: 16, protects: 264, host_uploads: 516, host_uploaded_bytes: expectedUploadedBytes, standalone_page_inputs: 8, pages: 512};
 for (const [name, expected] of Object.entries(expectedCounts)) assert.equal(counts[name], expected, `exact observed ${name} census`);
 assert.deepEqual([...observedCl].sort((a, b) => a - b), [0, 1, 31, 32, 255]);
 const result = {status: 'ok', engine_sha256: hash(engineBytes), tools: {node: process.version, v8: process.versions.v8}, counts, modules, faults: faultRows, code_stores: smcRows, mutations: mutationRows, compiler_refusals: refusalRows, pages: pageRows,
