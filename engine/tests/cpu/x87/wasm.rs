@@ -1,17 +1,17 @@
 #[path = "../../support/wasm.rs"]
 mod support_wasm;
 
-#[path = "cases/wasm/cpu_x87_clear_wasm.rs"]
+#[path = "exceptions/wasm/clear.rs"]
 mod cpu_x87_clear_wasm;
 
-#[path = "cases/wasm/cpu_x87_control_wasm.rs"]
+#[path = "control/wasm/register.rs"]
 mod cpu_x87_control_wasm;
 
-#[path = "cases/wasm/cpu_x87_extended_wasm.rs"]
+#[path = "numeric/wasm/extended.rs"]
 mod cpu_x87_extended_wasm;
 
-#[path = "cases/wasm/cpu_x87_memory_control_wasm.rs"]
+#[path = "control/wasm/memory.rs"]
 mod cpu_x87_memory_control_wasm;
 
-#[path = "cases/wasm/cpu_x87_memory_status_wasm.rs"]
+#[path = "status/wasm/memory.rs"]
 mod cpu_x87_memory_status_wasm;

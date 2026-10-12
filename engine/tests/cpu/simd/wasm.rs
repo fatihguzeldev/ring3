@@ -1,11 +1,11 @@
 #[path = "../../support/wasm.rs"]
 mod support_wasm;
 
-#[path = "cases/wasm/cpu_simd_scalar_move_wasm.rs"]
+#[path = "moves/wasm/scalar.rs"]
 mod cpu_simd_scalar_move_wasm;
 
-#[path = "cases/wasm/cpu_simd_wasm.rs"]
+#[path = "integration/wasm/families.rs"]
 mod cpu_simd_wasm;
 
-#[path = "cases/wasm/cpu_xstate_wasm.rs"]
+#[path = "state/wasm/xsave.rs"]
 mod cpu_xstate_wasm;

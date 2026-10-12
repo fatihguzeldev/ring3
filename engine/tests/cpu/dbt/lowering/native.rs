@@ -1,50 +1,50 @@
 #[path = "../../../support/cpu/prefix_admission.rs"]
 mod support_prefix_admission;
 
-#[path = "cases/native/dbt_extensions.rs"]
+#[path = "register/native/extensions.rs"]
 mod dbt_extensions;
 
-#[path = "cases/native/dbt_gate.rs"]
+#[path = "control/native/gate.rs"]
 mod dbt_gate;
 
-#[path = "cases/native/dbt_indirect.rs"]
+#[path = "control/native/indirect.rs"]
 mod dbt_indirect;
 
-#[path = "cases/native/dbt_lea.rs"]
+#[path = "register/native/lea.rs"]
 mod dbt_lea;
 
-#[path = "cases/native/dbt_logical.rs"]
+#[path = "register/native/logical.rs"]
 mod dbt_logical;
 
-#[path = "cases/native/dbt_memory.rs"]
+#[path = "memory/native/read.rs"]
 mod dbt_memory;
 
-#[path = "cases/native/dbt_memory_binary.rs"]
+#[path = "memory/native/binary.rs"]
 mod dbt_memory_binary;
 
-#[path = "cases/native/dbt_memory_compare.rs"]
+#[path = "memory/native/compare.rs"]
 mod dbt_memory_compare;
 
-#[path = "cases/native/dbt_memory_extensions.rs"]
+#[path = "memory/native/extensions.rs"]
 mod dbt_memory_extensions;
 
-#[path = "cases/native/dbt_memory_not.rs"]
+#[path = "memory/native/not.rs"]
 mod dbt_memory_not;
 
-#[path = "cases/native/dbt_memory_stack.rs"]
+#[path = "memory/native/stack.rs"]
 mod dbt_memory_stack;
 
-#[path = "cases/native/dbt_memory_unary.rs"]
+#[path = "memory/native/unary.rs"]
 mod dbt_memory_unary;
 
-#[path = "cases/native/dbt_memory_write.rs"]
+#[path = "memory/native/write.rs"]
 mod dbt_memory_write;
 
-#[path = "cases/native/dbt_stack.rs"]
+#[path = "stack/native/operations.rs"]
 mod dbt_stack;
 
-#[path = "cases/native/dbt_stack_values.rs"]
+#[path = "stack/native/values.rs"]
 mod dbt_stack_values;
 
-#[path = "cases/native/dbt_unary.rs"]
+#[path = "register/native/unary.rs"]
 mod dbt_unary;

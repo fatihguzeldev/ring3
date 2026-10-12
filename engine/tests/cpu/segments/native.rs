@@ -1,4 +1,4 @@
-#[path = "cases/native/cpu_arpl.rs"]
+#[path = "selectors/native/adjust_privilege.rs"]
 mod cpu_arpl;
-#[path = "cases/native/cpu_segments.rs"]
+#[path = "cache/native/loads.rs"]
 mod cpu_segments;

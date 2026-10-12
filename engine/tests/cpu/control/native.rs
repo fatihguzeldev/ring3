@@ -4,32 +4,32 @@ mod support_prefix_admission;
 #[path = "../../support/cpu/word_prefix.rs"]
 mod support_word_prefix;
 
-#[path = "cases/native/cpu_alignment_nop.rs"]
+#[path = "hints/native/nop.rs"]
 mod cpu_alignment_nop;
 
-#[path = "cases/native/cpu_carry_control.rs"]
+#[path = "flags/native/carry.rs"]
 mod cpu_carry_control;
 
-#[path = "cases/native/cpu_count_branches.rs"]
+#[path = "branch/count/native/dword.rs"]
 mod cpu_count_branches;
 
-#[path = "cases/native/cpu_flags_exceptions.rs"]
+#[path = "exceptions/native/flags.rs"]
 mod cpu_flags_exceptions;
 
-#[path = "cases/native/cpu_pause.rs"]
+#[path = "hints/native/pause.rs"]
 mod cpu_pause;
 
-#[path = "cases/native/cpu_prefixed_moffs_near_control.rs"]
+#[path = "integration/native/prefixes.rs"]
 mod cpu_prefixed_moffs_near_control;
 
-#[path = "cases/native/cpu_word_indirect_call.rs"]
+#[path = "call/indirect/native/word.rs"]
 mod cpu_word_indirect_call;
 
-#[path = "cases/native/cpu_word_indirect_jump.rs"]
+#[path = "branch/indirect/native/word.rs"]
 mod cpu_word_indirect_jump;
 
-#[path = "cases/native/cpu_word_jump.rs"]
+#[path = "branch/direct/native/word.rs"]
 mod cpu_word_jump;
 
-#[path = "cases/native/cpu_word_near_control.rs"]
+#[path = "near/native/word.rs"]
 mod cpu_word_near_control;

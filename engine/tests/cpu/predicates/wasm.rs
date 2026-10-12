@@ -5,26 +5,26 @@ mod support_pe32;
 #[path = "../../support/wasm.rs"]
 mod support_wasm;
 
-#[path = "cases/wasm/cpu_conditional_move_wasm.rs"]
+#[path = "conditional_move/register/wasm/dword.rs"]
 mod cpu_conditional_move_wasm;
 
-#[path = "cases/wasm/cpu_memory_byte_predicate_wasm.rs"]
+#[path = "compare_test/memory/wasm/byte.rs"]
 mod cpu_memory_byte_predicate_wasm;
 
-#[path = "cases/wasm/cpu_memory_conditional_move_wasm.rs"]
+#[path = "conditional_move/memory/wasm/dword.rs"]
 mod cpu_memory_conditional_move_wasm;
 
-#[path = "cases/wasm/cpu_memory_set_byte_wasm.rs"]
+#[path = "set/memory/wasm/byte.rs"]
 mod cpu_memory_set_byte_wasm;
 
-#[path = "cases/wasm/cpu_set_byte_wasm.rs"]
+#[path = "set/register/wasm/byte.rs"]
 mod cpu_set_byte_wasm;
 
-#[path = "cases/wasm/cpu_word_conditional_move_wasm.rs"]
+#[path = "conditional_move/register/wasm/word.rs"]
 mod cpu_word_conditional_move_wasm;
 
-#[path = "cases/wasm/cpu_word_memory_conditional_move_wasm.rs"]
+#[path = "conditional_move/memory/wasm/word.rs"]
 mod cpu_word_memory_conditional_move_wasm;
 
-#[path = "cases/wasm/cpu_word_memory_predicate_wasm.rs"]
+#[path = "compare_test/memory/wasm/word.rs"]
 mod cpu_word_memory_predicate_wasm;

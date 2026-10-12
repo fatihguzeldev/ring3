@@ -1,37 +1,37 @@
 #[path = "../../support/wasm.rs"]
 mod support_wasm;
 
-#[path = "cases/wasm/cpu_alignment_nop_wasm.rs"]
+#[path = "hints/wasm/nop.rs"]
 mod cpu_alignment_nop_wasm;
 
-#[path = "cases/wasm/cpu_carry_control_wasm.rs"]
+#[path = "flags/wasm/carry.rs"]
 mod cpu_carry_control_wasm;
 
-#[path = "cases/wasm/cpu_count_branches_wasm.rs"]
+#[path = "branch/count/wasm/dword.rs"]
 mod cpu_count_branches_wasm;
 
-#[path = "cases/wasm/cpu_pause_wasm.rs"]
+#[path = "hints/wasm/pause.rs"]
 mod cpu_pause_wasm;
 
-#[path = "cases/wasm/cpu_word_conditional_jump_wasm.rs"]
+#[path = "branch/conditional/wasm/word.rs"]
 mod cpu_word_conditional_jump_wasm;
 
-#[path = "cases/wasm/cpu_word_indirect_call_wasm.rs"]
+#[path = "call/indirect/wasm/word.rs"]
 mod cpu_word_indirect_call_wasm;
 
-#[path = "cases/wasm/cpu_word_indirect_jump_wasm.rs"]
+#[path = "branch/indirect/wasm/word.rs"]
 mod cpu_word_indirect_jump_wasm;
 
-#[path = "cases/wasm/cpu_word_jump_wasm.rs"]
+#[path = "branch/direct/wasm/word.rs"]
 mod cpu_word_jump_wasm;
 
-#[path = "cases/wasm/cpu_flags_exceptions_wasm.rs"]
+#[path = "exceptions/wasm/flags.rs"]
 mod cpu_flags_exceptions_wasm;
-#[path = "cases/wasm/cpu_word_near_control_wasm.rs"]
+#[path = "near/wasm/word.rs"]
 mod cpu_word_near_control_wasm;
 
-#[path = "cases/wasm/cpu_execution_faults_wasm.rs"]
+#[path = "exceptions/wasm/execution.rs"]
 mod cpu_execution_faults_wasm;
 
-#[path = "cases/wasm/cpu_privileged_faults_wasm.rs"]
+#[path = "exceptions/wasm/privileged.rs"]
 mod cpu_privileged_faults_wasm;

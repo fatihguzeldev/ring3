@@ -7,56 +7,56 @@ mod support_prefix_admission;
 #[path = "../../support/cpu/word_prefix.rs"]
 mod support_word_prefix;
 
-#[path = "cases/native/cpu_byte_arithmetic.rs"]
+#[path = "binary/register/native/byte.rs"]
 mod cpu_byte_arithmetic;
 
-#[path = "cases/native/cpu_byte_carry.rs"]
+#[path = "carry/register/native/byte.rs"]
 mod cpu_byte_carry;
 
-#[path = "cases/native/cpu_carry.rs"]
+#[path = "carry/register/native/dword.rs"]
 mod cpu_carry;
 
-#[path = "cases/native/cpu_decimal_adjust.rs"]
+#[path = "adjustment/native/decimal.rs"]
 mod cpu_decimal_adjust;
 
-#[path = "cases/native/cpu_memory_byte_arithmetic.rs"]
+#[path = "binary/modify/native/byte.rs"]
 mod cpu_memory_byte_arithmetic;
 
-#[path = "cases/native/cpu_memory_byte_carry.rs"]
+#[path = "carry/modify/native/byte.rs"]
 mod cpu_memory_byte_carry;
 
-#[path = "cases/native/cpu_register_memory_byte_arithmetic.rs"]
+#[path = "binary/read/native/byte.rs"]
 mod cpu_register_memory_byte_arithmetic;
 
-#[path = "cases/native/cpu_register_memory_byte_carry.rs"]
+#[path = "carry/read/native/byte.rs"]
 mod cpu_register_memory_byte_carry;
 
-#[path = "cases/native/cpu_word_adc.rs"]
+#[path = "carry/register/native/adc_word.rs"]
 mod cpu_word_adc;
 
-#[path = "cases/native/cpu_word_add.rs"]
+#[path = "binary/register/native/add_word.rs"]
 mod cpu_word_add;
 
-#[path = "cases/native/cpu_word_memory_arithmetic.rs"]
+#[path = "binary/read/native/word.rs"]
 mod cpu_word_memory_arithmetic;
 
-#[path = "cases/native/cpu_word_memory_arithmetic_store.rs"]
+#[path = "binary/modify/native/word_register.rs"]
 mod cpu_word_memory_arithmetic_store;
 
-#[path = "cases/native/cpu_word_memory_arithmetic_store_legacy.rs"]
+#[path = "binary/inputs/native/store_banks.rs"]
 mod cpu_word_memory_arithmetic_store_legacy;
 
-#[path = "cases/native/cpu_word_memory_carry.rs"]
+#[path = "carry/read/native/word.rs"]
 mod cpu_word_memory_carry;
 
-#[path = "cases/native/cpu_word_memory_carry_store.rs"]
+#[path = "carry/modify/native/word_register.rs"]
 mod cpu_word_memory_carry_store;
 
-#[path = "cases/native/cpu_word_memory_immediate_arithmetic_store.rs"]
+#[path = "binary/modify/native/word_immediate.rs"]
 mod cpu_word_memory_immediate_arithmetic_store;
 
-#[path = "cases/native/cpu_word_sbb.rs"]
+#[path = "carry/register/native/sbb_word.rs"]
 mod cpu_word_sbb;
 
-#[path = "cases/native/cpu_word_sub.rs"]
+#[path = "binary/register/native/sub_word.rs"]
 mod cpu_word_sub;

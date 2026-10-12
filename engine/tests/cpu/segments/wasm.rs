@@ -1,11 +1,11 @@
 #[path = "../../support/wasm.rs"]
 mod support_wasm;
 
-#[path = "cases/wasm/cpu_extended_context_wasm.rs"]
+#[path = "context/wasm/roundtrip.rs"]
 mod cpu_extended_context_wasm;
 
-#[path = "cases/wasm/cpu_rep_segments_wasm.rs"]
+#[path = "repeat/wasm/overrides.rs"]
 mod cpu_rep_segments_wasm;
 
-#[path = "cases/wasm/cpu_segments_wasm.rs"]
+#[path = "cache/wasm/loads.rs"]
 mod cpu_segments_wasm;

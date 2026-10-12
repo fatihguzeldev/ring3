@@ -5,50 +5,50 @@ mod support_pe32;
 #[path = "../../support/wasm.rs"]
 mod support_wasm;
 
-#[path = "cases/wasm/cpu_byte_compare_wasm.rs"]
+#[path = "compare/register/wasm/byte.rs"]
 mod cpu_byte_compare_wasm;
 
-#[path = "cases/wasm/cpu_byte_logical_wasm.rs"]
+#[path = "binary/register/wasm/byte.rs"]
 mod cpu_byte_logical_wasm;
 
-#[path = "cases/wasm/cpu_byte_test_wasm.rs"]
+#[path = "test/register/wasm/byte.rs"]
 mod cpu_byte_test_wasm;
 
-#[path = "cases/wasm/cpu_byte_unary_wasm.rs"]
+#[path = "unary/register/wasm/byte.rs"]
 mod cpu_byte_unary_wasm;
 
-#[path = "cases/wasm/cpu_memory_byte_logical_wasm.rs"]
+#[path = "binary/modify/wasm/byte.rs"]
 mod cpu_memory_byte_logical_wasm;
 
-#[path = "cases/wasm/cpu_memory_byte_unary_wasm.rs"]
+#[path = "unary/memory/wasm/byte.rs"]
 mod cpu_memory_byte_unary_wasm;
 
-#[path = "cases/wasm/cpu_register_memory_byte_compare_wasm.rs"]
+#[path = "compare/read/wasm/byte.rs"]
 mod cpu_register_memory_byte_compare_wasm;
 
-#[path = "cases/wasm/cpu_register_memory_byte_logical_wasm.rs"]
+#[path = "binary/read/wasm/byte.rs"]
 mod cpu_register_memory_byte_logical_wasm;
 
-#[path = "cases/wasm/cpu_word_and_wasm.rs"]
+#[path = "binary/register/wasm/and_word.rs"]
 mod cpu_word_and_wasm;
 
-#[path = "cases/wasm/cpu_word_compare_wasm.rs"]
+#[path = "compare/register/wasm/word.rs"]
 mod cpu_word_compare_wasm;
 
-#[path = "cases/wasm/cpu_word_inc_dec_wasm.rs"]
+#[path = "unary/register/wasm/inc_dec_word.rs"]
 mod cpu_word_inc_dec_wasm;
 
-#[path = "cases/wasm/cpu_word_memory_immediate_logical_store_wasm.rs"]
+#[path = "binary/modify/wasm/word_immediate.rs"]
 mod cpu_word_memory_immediate_logical_store_wasm;
 
-#[path = "cases/wasm/cpu_word_memory_unary_wasm.rs"]
+#[path = "unary/memory/wasm/word.rs"]
 mod cpu_word_memory_unary_wasm;
 
-#[path = "cases/wasm/cpu_word_neg_not_wasm.rs"]
+#[path = "unary/register/wasm/neg_not_word.rs"]
 mod cpu_word_neg_not_wasm;
 
-#[path = "cases/wasm/cpu_word_or_xor_wasm.rs"]
+#[path = "binary/register/wasm/or_xor_word.rs"]
 mod cpu_word_or_xor_wasm;
 
-#[path = "cases/wasm/cpu_word_test_wasm.rs"]
+#[path = "test/register/wasm/word.rs"]
 mod cpu_word_test_wasm;

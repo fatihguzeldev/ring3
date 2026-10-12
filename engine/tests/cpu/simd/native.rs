@@ -1,32 +1,32 @@
-#[path = "cases/native/cpu_simd_scalar_move.rs"]
+#[path = "moves/native/scalar.rs"]
 mod cpu_simd_scalar_move;
 
-#[path = "cases/native/simd_direct_integer.rs"]
+#[path = "integer/native/direct.rs"]
 mod simd_direct_integer;
 
-#[path = "cases/native/simd_semantics.rs"]
+#[path = "integration/native/families.rs"]
 mod simd_semantics;
 
-#[path = "cases/native/simd_extensions.rs"]
+#[path = "integer/native/ssse3.rs"]
 mod simd_extensions;
 
-#[path = "cases/native/simd_sse3.rs"]
+#[path = "arithmetic/native/sse3.rs"]
 mod simd_sse3;
 
-#[path = "cases/native/simd_sse4.rs"]
+#[path = "integer/native/sse4.rs"]
 mod simd_sse4;
 
-#[path = "cases/native/simd_sse4_moves.rs"]
+#[path = "moves/native/sse4.rs"]
 mod simd_sse4_moves;
 
-#[path = "cases/native/simd_sse4_arithmetic.rs"]
+#[path = "arithmetic/native/sse4.rs"]
 mod simd_sse4_arithmetic;
 
-#[path = "cases/native/packed_strings.rs"]
+#[path = "strings/native/comparison.rs"]
 mod packed_strings;
 
-#[path = "cases/native/simd_crypto.rs"]
+#[path = "crypto/native/aes_clmul.rs"]
 mod simd_crypto;
 
-#[path = "cases/native/xstate.rs"]
+#[path = "state/native/xsave.rs"]
 mod xstate;

@@ -1,53 +1,53 @@
 #[path = "../../../support/wasm.rs"]
 mod support_wasm;
 
-#[path = "cases/wasm/dbt_extensions_wasm.rs"]
+#[path = "register/wasm/extensions.rs"]
 mod dbt_extensions_wasm;
 
-#[path = "cases/wasm/dbt_gate_wasm.rs"]
+#[path = "control/wasm/gate.rs"]
 mod dbt_gate_wasm;
 
-#[path = "cases/wasm/dbt_indirect_wasm.rs"]
+#[path = "control/wasm/indirect.rs"]
 mod dbt_indirect_wasm;
 
-#[path = "cases/wasm/dbt_lea_wasm.rs"]
+#[path = "register/wasm/lea.rs"]
 mod dbt_lea_wasm;
 
-#[path = "cases/wasm/dbt_logical_wasm.rs"]
+#[path = "register/wasm/logical.rs"]
 mod dbt_logical_wasm;
 
-#[path = "cases/wasm/dbt_memory_binary_wasm.rs"]
+#[path = "memory/wasm/binary.rs"]
 mod dbt_memory_binary_wasm;
 
-#[path = "cases/wasm/dbt_memory_compare_wasm.rs"]
+#[path = "memory/wasm/compare.rs"]
 mod dbt_memory_compare_wasm;
 
-#[path = "cases/wasm/dbt_memory_extensions_wasm.rs"]
+#[path = "memory/wasm/extensions.rs"]
 mod dbt_memory_extensions_wasm;
 
-#[path = "cases/wasm/dbt_memory_not_wasm.rs"]
+#[path = "memory/wasm/not.rs"]
 mod dbt_memory_not_wasm;
 
-#[path = "cases/wasm/dbt_memory_stack_wasm.rs"]
+#[path = "memory/wasm/stack.rs"]
 mod dbt_memory_stack_wasm;
 
-#[path = "cases/wasm/dbt_memory_unary_wasm.rs"]
+#[path = "memory/wasm/unary.rs"]
 mod dbt_memory_unary_wasm;
 
-#[path = "cases/wasm/dbt_memory_wasm.rs"]
+#[path = "memory/wasm/read.rs"]
 mod dbt_memory_wasm;
 
-#[path = "cases/wasm/dbt_memory_write_wasm.rs"]
+#[path = "memory/wasm/write.rs"]
 mod dbt_memory_write_wasm;
 
-#[path = "cases/wasm/dbt_stack_values_wasm.rs"]
+#[path = "stack/wasm/values.rs"]
 mod dbt_stack_values_wasm;
 
-#[path = "cases/wasm/dbt_stack_wasm.rs"]
+#[path = "stack/wasm/operations.rs"]
 mod dbt_stack_wasm;
 
-#[path = "cases/wasm/dbt_unary_wasm.rs"]
+#[path = "register/wasm/unary.rs"]
 mod dbt_unary_wasm;
 
-#[path = "cases/wasm/dbt_wasm.rs"]
+#[path = "integration/wasm/core.rs"]
 mod dbt_wasm;

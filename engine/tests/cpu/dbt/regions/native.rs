@@ -1,14 +1,14 @@
 #[path = "../../../support/cpu/prefix_admission.rs"]
 mod support_prefix_admission;
 
-#[path = "cases/native/dbt_entries.rs"]
+#[path = "entries/native/admission.rs"]
 mod dbt_entries;
 
-#[path = "cases/native/dbt_region.rs"]
+#[path = "bounded/native/admission.rs"]
 mod dbt_region;
 
-#[path = "cases/native/dbt_resident.rs"]
+#[path = "resident/native/registry.rs"]
 mod dbt_resident;
 
-#[path = "cases/native/dbt_table_dispatch.rs"]
+#[path = "dispatch/native/table.rs"]
 mod dbt_table_dispatch;

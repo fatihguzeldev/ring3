@@ -1,14 +1,14 @@
 #[path = "../../support/cpu/prefix_admission.rs"]
 mod support_prefix_admission;
 
-#[path = "cases/native/decode_data.rs"]
+#[path = "instructions/native/data.rs"]
 mod decode_data;
 
-#[path = "cases/native/decode_flow.rs"]
+#[path = "instructions/native/flow.rs"]
 mod decode_flow;
 
-#[path = "cases/native/decode_integer.rs"]
+#[path = "instructions/native/integer.rs"]
 mod decode_integer;
 
-#[path = "cases/native/decode_progressive_fetch.rs"]
+#[path = "instructions/native/progressive_fetch.rs"]
 mod decode_progressive_fetch;

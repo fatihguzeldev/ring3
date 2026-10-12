@@ -4,43 +4,43 @@ mod support_prefix_admission;
 #[path = "../../support/cpu/word_prefix.rs"]
 mod support_word_prefix;
 
-#[path = "cases/native/cpu_bit_scan.rs"]
+#[path = "scan/register/native/dword.rs"]
 mod cpu_bit_scan;
 
-#[path = "cases/native/cpu_bit_test32.rs"]
+#[path = "test/register/native/dword.rs"]
 mod cpu_bit_test32;
 
-#[path = "cases/native/cpu_bswap32.rs"]
+#[path = "byte_order/native/dword.rs"]
 mod cpu_bswap32;
 
-#[path = "cases/native/cpu_flags_ah.rs"]
+#[path = "flags/native/ah.rs"]
 mod cpu_flags_ah;
 
-#[path = "cases/native/cpu_memory_bit_scan.rs"]
+#[path = "scan/memory/native/dword.rs"]
 mod cpu_memory_bit_scan;
 
-#[path = "cases/native/cpu_memory_bit_test32.rs"]
+#[path = "test/memory/native/dword.rs"]
 mod cpu_memory_bit_test32;
 
-#[path = "cases/native/cpu_tzcnt32.rs"]
+#[path = "count/native/trailing32.rs"]
 mod cpu_tzcnt32;
 
-#[path = "cases/native/cpu_word_bit_scan.rs"]
+#[path = "scan/register/native/word.rs"]
 mod cpu_word_bit_scan;
 
-#[path = "cases/native/cpu_word_bit_test.rs"]
+#[path = "test/register/native/word.rs"]
 mod cpu_word_bit_test;
 
-#[path = "cases/native/cpu_word_memory_bit_test.rs"]
+#[path = "test/memory/native/word.rs"]
 mod cpu_word_memory_bit_test;
-#[path = "cases/native/cpu_bit_counts.rs"]
+#[path = "count/native/forms.rs"]
 mod cpu_bit_counts;
 
-#[path = "cases/native/cpu_bmi1.rs"]
+#[path = "manipulation/native/bmi1.rs"]
 mod cpu_bmi1;
 
-#[path = "cases/native/cpu_bmi2.rs"]
+#[path = "manipulation/native/bmi2.rs"]
 mod cpu_bmi2;
 
-#[path = "cases/native/cpu_crc32.rs"]
+#[path = "checksum/native/crc32.rs"]
 mod cpu_crc32;

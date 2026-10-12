@@ -1,35 +1,35 @@
 #[path = "../../support/wasm.rs"]
 mod support_wasm;
 
-#[path = "cases/wasm/cpu_dword_load_string_wasm.rs"]
+#[path = "load/wasm/dword.rs"]
 mod cpu_dword_load_string_wasm;
 
-#[path = "cases/wasm/cpu_dword_move_string_wasm.rs"]
+#[path = "move/wasm/dword.rs"]
 mod cpu_dword_move_string_wasm;
 
-#[path = "cases/wasm/cpu_dword_store_string_wasm.rs"]
+#[path = "store/wasm/dword.rs"]
 mod cpu_dword_store_string_wasm;
 
-#[path = "cases/wasm/cpu_dword_string_compare_wasm.rs"]
+#[path = "compare/wasm/dword.rs"]
 mod cpu_dword_string_compare_wasm;
 
-#[path = "cases/wasm/cpu_string_compare_wasm.rs"]
+#[path = "compare/wasm/byte.rs"]
 mod cpu_string_compare_wasm;
 
-#[path = "cases/wasm/cpu_string_load_store_wasm.rs"]
+#[path = "integration/wasm/load_store.rs"]
 mod cpu_string_load_store_wasm;
 
-#[path = "cases/wasm/cpu_strings_wasm.rs"]
+#[path = "integration/wasm/byte.rs"]
 mod cpu_strings_wasm;
 
-#[path = "cases/wasm/cpu_word_load_string_wasm.rs"]
+#[path = "load/wasm/word.rs"]
 mod cpu_word_load_string_wasm;
 
-#[path = "cases/wasm/cpu_word_move_string_wasm.rs"]
+#[path = "move/wasm/word.rs"]
 mod cpu_word_move_string_wasm;
 
-#[path = "cases/wasm/cpu_word_store_string_wasm.rs"]
+#[path = "store/wasm/word.rs"]
 mod cpu_word_store_string_wasm;
 
-#[path = "cases/wasm/cpu_word_string_compare_wasm.rs"]
+#[path = "compare/wasm/word.rs"]
 mod cpu_word_string_compare_wasm;

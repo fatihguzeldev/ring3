@@ -7,62 +7,62 @@ mod support_prefix_admission;
 #[path = "../../support/cpu/word_prefix.rs"]
 mod support_word_prefix;
 
-#[path = "cases/native/cpu_byte_compare.rs"]
+#[path = "compare/register/native/byte.rs"]
 mod cpu_byte_compare;
 
-#[path = "cases/native/cpu_byte_logical.rs"]
+#[path = "binary/register/native/byte.rs"]
 mod cpu_byte_logical;
 
-#[path = "cases/native/cpu_byte_test.rs"]
+#[path = "test/register/native/byte.rs"]
 mod cpu_byte_test;
 
-#[path = "cases/native/cpu_byte_unary.rs"]
+#[path = "unary/register/native/byte.rs"]
 mod cpu_byte_unary;
 
-#[path = "cases/native/cpu_memory_byte_logical.rs"]
+#[path = "binary/modify/native/byte.rs"]
 mod cpu_memory_byte_logical;
 
-#[path = "cases/native/cpu_memory_byte_unary.rs"]
+#[path = "unary/memory/native/byte.rs"]
 mod cpu_memory_byte_unary;
 
-#[path = "cases/native/cpu_register_memory_byte_compare.rs"]
+#[path = "compare/read/native/byte.rs"]
 mod cpu_register_memory_byte_compare;
 
-#[path = "cases/native/cpu_register_memory_byte_logical.rs"]
+#[path = "binary/read/native/byte.rs"]
 mod cpu_register_memory_byte_logical;
 
-#[path = "cases/native/cpu_word_and.rs"]
+#[path = "binary/register/native/and_word.rs"]
 mod cpu_word_and;
 
-#[path = "cases/native/cpu_word_compare.rs"]
+#[path = "compare/register/native/word.rs"]
 mod cpu_word_compare;
 
-#[path = "cases/native/cpu_word_inc_dec.rs"]
+#[path = "unary/register/native/inc_dec_word.rs"]
 mod cpu_word_inc_dec;
 
-#[path = "cases/native/cpu_word_memory_immediate_logical_store.rs"]
+#[path = "binary/modify/native/word_immediate.rs"]
 mod cpu_word_memory_immediate_logical_store;
 
-#[path = "cases/native/cpu_word_memory_logical.rs"]
+#[path = "binary/read/native/word.rs"]
 mod cpu_word_memory_logical;
 
-#[path = "cases/native/cpu_word_memory_logical_legacy.rs"]
+#[path = "binary/inputs/native/read_banks.rs"]
 mod cpu_word_memory_logical_legacy;
 
-#[path = "cases/native/cpu_word_memory_logical_store.rs"]
+#[path = "binary/modify/native/word_register.rs"]
 mod cpu_word_memory_logical_store;
 
-#[path = "cases/native/cpu_word_memory_logical_store_legacy.rs"]
+#[path = "binary/inputs/native/store_banks.rs"]
 mod cpu_word_memory_logical_store_legacy;
 
-#[path = "cases/native/cpu_word_memory_unary.rs"]
+#[path = "unary/memory/native/word.rs"]
 mod cpu_word_memory_unary;
 
-#[path = "cases/native/cpu_word_neg_not.rs"]
+#[path = "unary/register/native/neg_not_word.rs"]
 mod cpu_word_neg_not;
 
-#[path = "cases/native/cpu_word_or_xor.rs"]
+#[path = "binary/register/native/or_xor_word.rs"]
 mod cpu_word_or_xor;
 
-#[path = "cases/native/cpu_word_test.rs"]
+#[path = "test/register/native/word.rs"]
 mod cpu_word_test;

@@ -7,55 +7,55 @@ mod support_prefix_admission;
 #[path = "../../support/cpu/word_prefix.rs"]
 mod support_word_prefix;
 
-#[path = "cases/native/cpu_byte_load.rs"]
+#[path = "memory/load/native/byte.rs"]
 mod cpu_byte_load;
 
-#[path = "cases/native/cpu_byte_moffs.rs"]
+#[path = "addressing/moffs/native/byte.rs"]
 mod cpu_byte_moffs;
 
-#[path = "cases/native/cpu_byte_move.rs"]
+#[path = "register/native/byte.rs"]
 mod cpu_byte_move;
 
-#[path = "cases/native/cpu_byte_move_immediate_modrm.rs"]
+#[path = "register/native/byte_immediate.rs"]
 mod cpu_byte_move_immediate_modrm;
 
-#[path = "cases/native/cpu_byte_store.rs"]
+#[path = "memory/store/native/byte.rs"]
 mod cpu_byte_store;
 
-#[path = "cases/native/cpu_cdq.rs"]
+#[path = "extend/accumulator/native/cdq.rs"]
 mod cpu_cdq;
 
-#[path = "cases/native/cpu_cwde.rs"]
+#[path = "extend/accumulator/native/cwde.rs"]
 mod cpu_cwde;
 
-#[path = "cases/native/cpu_word_accumulator_extend.rs"]
+#[path = "extend/accumulator/native/word.rs"]
 mod cpu_word_accumulator_extend;
 
-#[path = "cases/native/cpu_word_byte_extend.rs"]
+#[path = "extend/source/native/byte_word.rs"]
 mod cpu_word_byte_extend;
 
-#[path = "cases/native/cpu_word_lea.rs"]
+#[path = "addressing/lea/native/word.rs"]
 mod cpu_word_lea;
 
-#[path = "cases/native/cpu_word_memory_move.rs"]
+#[path = "memory/word/native/operations.rs"]
 mod cpu_word_memory_move;
 
-#[path = "cases/native/cpu_word_memory_move_bound.rs"]
+#[path = "memory/word/native/admission.rs"]
 mod cpu_word_memory_move_bound;
 
-#[path = "cases/native/cpu_word_moffs.rs"]
+#[path = "addressing/moffs/native/word.rs"]
 mod cpu_word_moffs;
 
-#[path = "cases/native/cpu_word_move_immediate.rs"]
+#[path = "register/native/word_immediate.rs"]
 mod cpu_word_move_immediate;
 
-#[path = "cases/native/cpu_word_register_exchange.rs"]
+#[path = "exchange/register/native/word.rs"]
 mod cpu_word_register_exchange;
 
-#[path = "cases/native/cpu_word_register_move.rs"]
+#[path = "register/native/word.rs"]
 mod cpu_word_register_move;
 
-#[path = "cases/native/cpu_xlat.rs"]
+#[path = "addressing/lookup/native/xlat.rs"]
 mod cpu_xlat;
-#[path = "cases/native/cpu_movbe.rs"]
+#[path = "endian/native/movbe.rs"]
 mod cpu_movbe;

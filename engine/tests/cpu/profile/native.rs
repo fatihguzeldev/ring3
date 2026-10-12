@@ -1,11 +1,11 @@
-#[path = "cases/native/cpu_integer_completion.rs"]
+#[path = "integer/native/completion.rs"]
 mod cpu_integer_completion;
 
-#[path = "cases/native/cpu_prefix_grammar.rs"]
+#[path = "prefixes/native/grammar.rs"]
 mod cpu_prefix_grammar;
 
-#[path = "cases/native/cpu_cache_timestamp.rs"]
+#[path = "environment/native/cache_timestamp.rs"]
 mod cpu_cache_timestamp;
 
-#[path = "cases/native/cpu_cpuid.rs"]
+#[path = "environment/native/cpuid.rs"]
 mod cpu_cpuid;

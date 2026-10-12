@@ -1,59 +1,59 @@
 #[path = "../../support/wasm.rs"]
 mod support_wasm;
 
-#[path = "cases/wasm/cpu_parallel_accumulator_string_wasm.rs"]
+#[path = "integration/wasm/accumulator_string.rs"]
 mod cpu_parallel_accumulator_string_wasm;
 
-#[path = "cases/wasm/cpu_parallel_bit_flags_wasm.rs"]
+#[path = "integration/wasm/bit_flags.rs"]
 mod cpu_parallel_bit_flags_wasm;
 
-#[path = "cases/wasm/cpu_parallel_bit_string_wasm.rs"]
+#[path = "integration/wasm/bit_string.rs"]
 mod cpu_parallel_bit_string_wasm;
 
-#[path = "cases/wasm/cpu_parallel_memory_wasm.rs"]
+#[path = "integration/wasm/memory.rs"]
 mod cpu_parallel_memory_wasm;
 
-#[path = "cases/wasm/cpu_parallel_multiply_count_xlat_wasm.rs"]
+#[path = "integration/wasm/multiply_count_xlat.rs"]
 mod cpu_parallel_multiply_count_xlat_wasm;
 
-#[path = "cases/wasm/cpu_parallel_reads_control_wasm.rs"]
+#[path = "integration/wasm/reads_control.rs"]
 mod cpu_parallel_reads_control_wasm;
 
-#[path = "cases/wasm/cpu_parallel_wasm.rs"]
+#[path = "integration/wasm/core.rs"]
 mod cpu_parallel_wasm;
 
-#[path = "cases/wasm/cpu_parallel_word_accumulator_wasm.rs"]
+#[path = "word/wasm/accumulator.rs"]
 mod cpu_parallel_word_accumulator_wasm;
 
-#[path = "cases/wasm/cpu_parallel_word_arithmetic_wasm.rs"]
+#[path = "word/wasm/arithmetic.rs"]
 mod cpu_parallel_word_arithmetic_wasm;
 
-#[path = "cases/wasm/cpu_parallel_word_carry_wasm.rs"]
+#[path = "word/wasm/carry.rs"]
 mod cpu_parallel_word_carry_wasm;
 
-#[path = "cases/wasm/cpu_parallel_word_logical_wasm.rs"]
+#[path = "word/wasm/logical.rs"]
 mod cpu_parallel_word_logical_wasm;
 
-#[path = "cases/wasm/cpu_parallel_word_move_compare_wasm.rs"]
+#[path = "word/wasm/move_compare.rs"]
 mod cpu_parallel_word_move_compare_wasm;
 
-#[path = "cases/wasm/cpu_parallel_word_predicate_wasm.rs"]
+#[path = "word/wasm/predicate.rs"]
 mod cpu_parallel_word_predicate_wasm;
 
-#[path = "cases/wasm/cpu_parallel_word_register_wasm.rs"]
+#[path = "word/wasm/register.rs"]
 mod cpu_parallel_word_register_wasm;
 
-#[path = "cases/wasm/cpu_parallel_word_rotate_wasm.rs"]
+#[path = "word/wasm/rotate.rs"]
 mod cpu_parallel_word_rotate_wasm;
 
-#[path = "cases/wasm/cpu_parallel_word_shift_wasm.rs"]
+#[path = "word/wasm/shift.rs"]
 mod cpu_parallel_word_shift_wasm;
 
-#[path = "cases/wasm/cpu_parallel_word_unary_wasm.rs"]
+#[path = "word/wasm/unary.rs"]
 mod cpu_parallel_word_unary_wasm;
 
-#[path = "cases/wasm/cpu_parallel_word_wasm.rs"]
+#[path = "integration/wasm/word.rs"]
 mod cpu_parallel_word_wasm;
 
-#[path = "cases/wasm/word_batches_wasm.rs"]
+#[path = "word/wasm/admission.rs"]
 mod word_batches_wasm;

@@ -1,2 +1,2 @@
-#[path = "cases/native/word_batches.rs"]
+#[path = "word/native/admission.rs"]
 mod word_batches;

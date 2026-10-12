@@ -1,38 +1,38 @@
 #[path = "../../support/cpu/string_prefix.rs"]
 mod support_string_prefix;
 
-#[path = "cases/native/cpu_dword_load_string.rs"]
+#[path = "load/native/dword.rs"]
 mod cpu_dword_load_string;
 
-#[path = "cases/native/cpu_dword_move_string.rs"]
+#[path = "move/native/dword.rs"]
 mod cpu_dword_move_string;
 
-#[path = "cases/native/cpu_dword_store_string.rs"]
+#[path = "store/native/dword.rs"]
 mod cpu_dword_store_string;
 
-#[path = "cases/native/cpu_dword_string_compare.rs"]
+#[path = "compare/native/dword.rs"]
 mod cpu_dword_string_compare;
 
-#[path = "cases/native/cpu_rep_strings.rs"]
+#[path = "repeat/native/admission.rs"]
 mod cpu_rep_strings;
 
-#[path = "cases/native/cpu_string_compare.rs"]
+#[path = "compare/native/byte.rs"]
 mod cpu_string_compare;
 
-#[path = "cases/native/cpu_string_load_store.rs"]
+#[path = "integration/native/load_store.rs"]
 mod cpu_string_load_store;
 
-#[path = "cases/native/cpu_strings.rs"]
+#[path = "integration/native/byte.rs"]
 mod cpu_strings;
 
-#[path = "cases/native/cpu_word_load_string.rs"]
+#[path = "load/native/word.rs"]
 mod cpu_word_load_string;
 
-#[path = "cases/native/cpu_word_move_string.rs"]
+#[path = "move/native/word.rs"]
 mod cpu_word_move_string;
 
-#[path = "cases/native/cpu_word_store_string.rs"]
+#[path = "store/native/word.rs"]
 mod cpu_word_store_string;
 
-#[path = "cases/native/cpu_word_string_compare.rs"]
+#[path = "compare/native/word.rs"]
 mod cpu_word_string_compare;
