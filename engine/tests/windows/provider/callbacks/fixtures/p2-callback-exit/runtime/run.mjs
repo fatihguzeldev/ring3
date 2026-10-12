@@ -19,7 +19,7 @@ function save(name, bytes) {
 const sourceBefore = sourceMap();
 save('source-before.json', Buffer.from(JSON.stringify(sourceBefore, null, 2)));
 save('producer-run.mjs', readFileSync(join(root, 'engine/tests/windows/provider/callbacks/fixtures/p2-callback-exit/runtime/run.mjs')));
-save('producer-wrapper.rs', readFileSync(join(root, 'engine/tests/windows/provider/callbacks/wasm/exit.rs', 'engine/tests/windows/provider/wasm.rs', 'engine/tests/support/loader/pe32.rs', 'engine/tests/support/wasm.rs', 'engine/tests/windows/provider/wasm.rs', 'engine/tests/support/wasm.rs')));
+save('producer-wrapper.rs', readFileSync(join(root, 'engine/tests/windows/provider/callbacks/wasm/exit.rs')));
 const engineBytes = new Uint8Array(readFileSync(enginePath)); save('engine.wasm', engineBytes);
 const engineModule = new WebAssembly.Module(engineBytes), exports = WebAssembly.Module.exports(engineModule);
 assert.deepEqual(WebAssembly.Module.imports(engineModule), []);
