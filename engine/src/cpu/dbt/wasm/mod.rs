@@ -1,5 +1,6 @@
 mod abi;
 mod atomic;
+mod cache_flush;
 mod control;
 mod control_instructions;
 mod cpu_result;

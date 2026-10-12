@@ -47,13 +47,23 @@ pub(super) fn cpuid(code: &mut InstructionSink<'_>) {
         code.end();
     }
 }
-pub(super) fn timestamp(code: &mut InstructionSink<'_>, imports: memory::Imports, exit_depth: u32) {
+pub(super) fn timestamp(
+    code: &mut InstructionSink<'_>,
+    auxiliary: bool,
+    imports: memory::Imports,
+    exit_depth: u32,
+) {
     atomic::payload(code);
     code.i32_const(0).local_set(ADDRESS);
-    atomic::call(code, 0x20000, 0, imports, exit_depth);
+    atomic::call(code, 0x20000 | u32::from(auxiliary), 0, imports, exit_depth);
     for (offset, r) in [(8, Eax), (12, Edx)] {
         code.local_get(STATE_PTR)
             .i32_load(atomic::transfer(offset))
             .local_set(register(r));
+    }
+    if auxiliary {
+        code.local_get(STATE_PTR)
+            .i32_load(atomic::transfer(20))
+            .local_set(register(Ecx));
     }
 }

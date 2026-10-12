@@ -362,6 +362,7 @@ pub(super) fn terminates(instruction: &DecodedInstruction, embedded: bool) -> bo
 fn supports_cpu_state(operation: &Operation) -> bool {
     match operation {
         Operation::PackedStringCompare(operation) => operation.valid(),
+        Operation::VirtualTimestampAux => true,
         _ => false,
     }
 }
@@ -369,23 +370,28 @@ fn supports_cpu_state(operation: &Operation) -> bool {
 fn supports_memory_reads(operation: &Operation) -> bool {
     matches!(
         operation,
-        Operation::Crc32 {
-            source: crate::cpu::x86::bits::Crc32Source::Memory { .. },
-            ..
-        } |
-        Operation::MultiplyExtended {
-            source: Value32::Memory(_),
-            ..
-        } | Operation::BitManipulation {
-            source: Value32::Memory(_),
-            ..
-        } | Operation::Control(
-            crate::cpu::x86::ControlOperation::PopFlags { .. }
-                | crate::cpu::x86::ControlOperation::Bound { .. }
-        ) | Operation::BitCount {
-            source: Value32::Memory(_),
-            ..
-        } | Operation::MoveByteSwap { .. }
+        Operation::CacheFlush { .. }
+            | Operation::Crc32 {
+                source: crate::cpu::x86::bits::Crc32Source::Memory { .. },
+                ..
+            }
+            | Operation::MultiplyExtended {
+                source: Value32::Memory(_),
+                ..
+            }
+            | Operation::BitManipulation {
+                source: Value32::Memory(_),
+                ..
+            }
+            | Operation::Control(
+                crate::cpu::x86::ControlOperation::PopFlags { .. }
+                    | crate::cpu::x86::ControlOperation::Bound { .. }
+            )
+            | Operation::BitCount {
+                source: Value32::Memory(_),
+                ..
+            }
+            | Operation::MoveByteSwap { .. }
             | Operation::StackFrame { .. }
             | Operation::AtomicMemory { .. }
             | Operation::CompareExchange8B { .. }
@@ -580,7 +586,12 @@ fn supports_memory_shift_or_rotate(operation: &Operation) -> bool {
 pub(super) fn supports(instruction: &DecodedInstruction, embedded: bool) -> bool {
     let operation = instruction.operation();
     match operation {
-        Operation::PackedStringCompare(operation) => return embedded && operation.valid(),
+        Operation::CacheFlush { .. } | Operation::VirtualTimestampAux => {
+            return embedded;
+        }
+        Operation::PackedStringCompare(operation) => {
+            return embedded && operation.valid();
+        }
         Operation::Crc32 { source, .. } => {
             return embedded
                 || !matches!(source, crate::cpu::x86::bits::Crc32Source::Memory { .. });

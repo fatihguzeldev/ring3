@@ -136,6 +136,8 @@ impl Imports {
         let mut atomic_xor_u32 = false;
         for instruction in blocks.iter().flat_map(|block| &block.instructions) {
             match instruction.operation() {
+                Operation::CacheFlush { .. } => read8 = true,
+                Operation::VirtualTimestampAux => cpu_integer = true,
                 Operation::PackedStringCompare(operation) => {
                     cpu_read |= matches!(
                         operation.right,

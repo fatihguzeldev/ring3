@@ -20,6 +20,9 @@ pub(super) fn check_profile(instruction: &Instruction, bytes: &[u8]) -> Result<(
     if groups.iter().any(|count| *count > 1) {
         return Err(unsupported());
     }
+    if let Some(operation) = super::cache_timestamp::lower(instruction) {
+        return operation.map(|_| ());
+    }
     if let Some(operation) = super::packed_strings::lower(instruction) {
         return operation.map(|_| ());
     }

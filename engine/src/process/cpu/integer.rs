@@ -43,10 +43,14 @@ impl EngineInstance {
             )
         });
         let mut output = input;
-        if descriptor == 0x20000 {
+        if matches!(descriptor, 0x20000 | 0x20001) {
             self.virtual_tsc = self.virtual_tsc.wrapping_add(1);
             output[2] = self.virtual_tsc as u32;
             output[3] = (self.virtual_tsc >> 32) as u32;
+            if descriptor == 0x20001 {
+                // all guest threads share the current single virtual processor.
+                output[5] = 0;
+            }
             self.integer_publish(0, output, Ok(()))?;
             return Ok(StoreCompletion::Complete);
         }
@@ -120,5 +124,72 @@ impl EngineInstance {
             }
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn engine() -> EngineInstance {
+        let mut engine = EngineInstance::new(1, 0x43545343).unwrap();
+        engine.map(0x1000, 1, 7).unwrap();
+        engine.arena_mut().unwrap()[TRANSFER_OFFSET..TRANSFER_OFFSET + 4]
+            .copy_from_slice(&[0x0f, 0x31, 0xeb, 0]);
+        engine.upload(0x1000, 4).unwrap();
+        engine.arena_mut().unwrap()[TRANSFER_OFFSET..TRANSFER_OFFSET + 8]
+            .copy_from_slice(&[0, 0x10, 0, 0, 4, 0, 0, 0]);
+        engine.compile(1).unwrap();
+        engine
+    }
+
+    fn transfer(engine: &EngineInstance, index: usize) -> u32 {
+        u32::from_le_bytes(
+            engine.arena()[TRANSFER_OFFSET + index * 4..TRANSFER_OFFSET + index * 4 + 4]
+                .try_into()
+                .unwrap(),
+        )
+    }
+
+    #[test]
+    fn timestamp_high_word_rollover_and_aux_share_one_counter() {
+        let mut engine = engine();
+        engine.virtual_tsc = u64::from(u32::MAX);
+        engine.arena_mut().unwrap()[TRANSFER_OFFSET + 20..TRANSFER_OFFSET + 24]
+            .copy_from_slice(&u32::MAX.to_le_bytes());
+        engine.cpu_integer(0x20001, 0).unwrap();
+        assert_eq!(engine.virtual_tsc, 1 << 32);
+        assert_eq!(
+            (
+                transfer(&engine, 2),
+                transfer(&engine, 3),
+                transfer(&engine, 5)
+            ),
+            (0, 1, 0)
+        );
+        engine.virtual_tsc = u64::MAX;
+        engine.cpu_integer(0x20000, 0).unwrap();
+        assert_eq!(engine.virtual_tsc, 0);
+        assert_eq!((transfer(&engine, 2), transfer(&engine, 3)), (0, 0));
+    }
+
+    #[test]
+    fn rejected_timestamp_requests_do_not_publish_or_consume_events() {
+        let mut engine = engine();
+        engine.virtual_tsc = 17;
+        for descriptor in [0x20002, 0x20003, 0x40020001, u32::MAX] {
+            let before = engine.arena().to_vec();
+            assert_eq!(
+                engine.cpu_integer(descriptor, 0),
+                Err(HostError::InvalidRequest)
+            );
+            assert_eq!(engine.virtual_tsc, 17);
+            assert_eq!(engine.arena(), before);
+        }
+        engine.close();
+        let before = engine.arena().to_vec();
+        assert_eq!(engine.cpu_integer(0x20001, 0), Err(HostError::Closed));
+        assert_eq!(engine.virtual_tsc, 17);
+        assert_eq!(engine.arena(), before);
     }
 }

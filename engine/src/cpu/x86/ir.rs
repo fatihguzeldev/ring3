@@ -324,6 +324,10 @@ pub enum CarryKind {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Operation {
+    CacheFlush {
+        address: EffectiveAddress,
+    },
+    VirtualTimestampAux,
     PackedStringCompare(super::packed_strings::PackedStringCompare),
     Crc32 {
         destination: Register32,

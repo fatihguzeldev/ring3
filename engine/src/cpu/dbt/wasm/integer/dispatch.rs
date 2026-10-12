@@ -49,6 +49,12 @@ pub(in crate::cpu::dbt::wasm) fn instruction(
     }
     let mut store = false;
     match *instruction.operation() {
+        Operation::CacheFlush { address } => {
+            super::super::cache_flush::instruction(code, address, imports, exit_depth);
+        }
+        Operation::VirtualTimestampAux => {
+            super::super::integer_system::timestamp(code, true, imports, exit_depth);
+        }
         Operation::PackedStringCompare(operation) => {
             store = super::super::packed_strings::instruction(code, operation, imports, exit_depth);
         }
@@ -266,7 +272,7 @@ pub(in crate::cpu::dbt::wasm) fn instruction(
             insert_byte(code, ByteRegister::Al);
         }
         Operation::CpuId => integer_system::cpuid(code),
-        Operation::VirtualTimestamp => integer_system::timestamp(code, imports, exit_depth),
+        Operation::VirtualTimestamp => integer_system::timestamp(code, false, imports, exit_depth),
         Operation::AtomicMemory {
             kind,
             width,
