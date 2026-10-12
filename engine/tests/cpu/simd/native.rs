@@ -30,3 +30,6 @@ mod simd_crypto;
 
 #[path = "state/native/xsave.rs"]
 mod xstate;
+
+#[path = "state/legacy/native/segments.rs"]
+mod cpu_fx_segment_access;

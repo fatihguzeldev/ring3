@@ -9,3 +9,6 @@ mod cpu_simd_wasm;
 
 #[path = "state/wasm/xsave.rs"]
 mod cpu_xstate_wasm;
+
+#[path = "state/legacy/wasm/segments.rs"]
+mod cpu_fx_segment_access_wasm;
