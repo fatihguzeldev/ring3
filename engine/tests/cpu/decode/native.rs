@@ -10,5 +10,5 @@ mod decode_flow;
 #[path = "instructions/native/integer.rs"]
 mod decode_integer;
 
-#[path = "instructions/native/progressive_fetch.rs"]
+#[path = "fetch/native/progressive.rs"]
 mod decode_progressive_fetch;
