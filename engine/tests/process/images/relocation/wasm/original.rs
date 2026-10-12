@@ -41,7 +41,7 @@ fn original_relocatable_pe32_returns_to_guest_caller_at_three_explicit_bases() {
     fs::write(output.join("initial-arena.bin"), initial).unwrap();
     let result = wasm_support::run_node(
         root,
-        "engine/tests/process/images/fixtures/p2-pe32-relocatable/runtime/run.mjs",
+        "engine/tests/process/images/relocation/fixtures/p2-pe32-relocatable/runtime/run.mjs",
         &engine,
         &output,
         None,

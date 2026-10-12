@@ -2,11 +2,11 @@ import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
 import {readFileSync, writeFileSync} from 'node:fs';
 import {join} from 'node:path';
-import {readEngine} from '../../../../../../../support/wasm/engine.mjs';
+import {readEngine} from '../../../../../../../../support/wasm/engine.mjs';
 
 const [enginePath, output, root] = process.argv.slice(2);
 assert.ok(enginePath && output && root, 'expected engine, output directory and repository root');
-const fixture = 'engine/tests/process/images/startup/fixtures/p2-c-imports/fp';
+const fixture = 'engine/tests/process/images/startup/imports/fixtures/p2-c-imports/fp';
 const SIZE = 4612, T = 140, FP = 4236, SV = 4364, SG = 4524;
 const STACK = 0x8000, STACK_TOP = 0x9000;
 const KEY_LOW = 0xf5750001, KEY_HIGH = 0x4650494d;
@@ -43,7 +43,7 @@ const sourcePaths = [
   `${fixture}/program.exe`, `${fixture}/entry.obj`, `${fixture}/receipt.json`,
   'engine/tests/programs/numeric/fixtures/p2-fp-compiled/sse2/kernel.obj',
   'engine/tests/programs/numeric/fixtures/p2-fp-compiled/sse2/kernel.text.bin',
-  'engine/tests/process/images/startup/native/fp_imports.rs', 'engine/tests/process/images/native.rs', 'engine/tests/process/images/startup/wasm/fp_imports.rs', 'engine/tests/process/images/wasm.rs', 'engine/tests/support/wasm.rs',
+  'engine/tests/process/images/startup/imports/floating/native.rs', 'engine/tests/process/images/native.rs', 'engine/tests/process/images/startup/imports/floating/wasm.rs', 'engine/tests/process/images/wasm.rs', 'engine/tests/support/wasm.rs',
   'engine/tests/support/wasm/engine.mjs', 'engine/src/process/loading/input.rs', 'engine/src/process/loading/mod.rs', 'engine/src/process/mod.rs',
   'engine/src/process/loading/startup.rs', 'engine/src/process/execution/resident.rs', 'engine/src/process/execution/authority.rs', 'engine/src/process/execution/mod.rs', 'engine/src/process/execution/installation.rs',
   'engine/src/process/calls/call.rs', 'engine/src/process/calls/context.rs', 'engine/src/process/calls/mod.rs', 'engine/src/process/windows/calls.rs', 'engine/src/process/windows/mod.rs', 'engine/src/windows/provider.rs',

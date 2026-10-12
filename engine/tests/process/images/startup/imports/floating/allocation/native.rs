@@ -16,68 +16,68 @@ use ring3_engine::{
             simd::SimdState,
         },
     },
-    loader::{ImageMetadata32, LinkedImageMetadata32V2},
+    loader::{ImageMetadata32, LinkedImageMetadata32V5},
     memory::{Access, GuestAddress},
     process::EngineInstance,
 };
 
-const PE: &[u8] = include_bytes!("../fixtures/p2-c-imports/fp/program.exe");
+const PE: &[u8] = include_bytes!("../../fixtures/p2-c-imports/fp-alloc/program.exe");
 const KERNEL: &[u8] =
-    include_bytes!("../../../../programs/numeric/fixtures/p2-fp-compiled/sse2/kernel.text.bin");
-const ENTRY: [u8; 106] = [
-    0x68, 0x10, 0x30, 0x40, 0x00, 0x6a, 0x03, 0x68, 0x30, 0x20, 0x40, 0x00, 0x68, 0x00, 0x20, 0x40,
-    0x00, 0x68, 0x20, 0x30, 0x40, 0x00, 0xe8, 0x55, 0x00, 0x00, 0x00, 0x83, 0xc4, 0x14, 0xa3, 0x50,
-    0x30, 0x40, 0x00, 0x68, 0x67, 0x45, 0x23, 0xf1, 0xff, 0x15, 0xa8, 0x20, 0x40, 0x00, 0xff, 0x15,
-    0xa4, 0x20, 0x40, 0x00, 0xa3, 0x54, 0x30, 0x40, 0x00, 0x83, 0xe0, 0x03, 0x68, 0x60, 0x30, 0x40,
-    0x00, 0x50, 0x68, 0x30, 0x20, 0x40, 0x00, 0x68, 0x20, 0x30, 0x40, 0x00, 0x68, 0x70, 0x30, 0x40,
-    0x00, 0xe8, 0x1a, 0x00, 0x00, 0x00, 0x83, 0xc4, 0x14, 0xa3, 0x58, 0x30, 0x40, 0x00, 0xc7, 0x05,
-    0x5c, 0x30, 0x40, 0x00, 0x47, 0x4e, 0x49, 0x52, 0xeb, 0xfe,
+    include_bytes!("../../../../../../programs/numeric/fixtures/p2-fp-compiled/sse2/kernel.text.bin");
+const ENTRY: [u8; 135] = [
+    0x56, 0x83, 0xec, 0x10, 0x0f, 0x28, 0x05, 0x70, 0x20, 0x40, 0x00, 0x0f, 0x11, 0x04, 0x24, 0xff,
+    0x15, 0xb4, 0x20, 0x40, 0x00, 0x89, 0xc6, 0x83, 0xc0, 0x30, 0x89, 0x35, 0x04, 0x30, 0x40, 0x00,
+    0x50, 0x6a, 0x03, 0x68, 0x30, 0x20, 0x40, 0x00, 0x68, 0x00, 0x20, 0x40, 0x00, 0x56, 0xe8, 0x5d,
+    0x00, 0x00, 0x00, 0x83, 0xc4, 0x14, 0xa3, 0x08, 0x30, 0x40, 0x00, 0x0f, 0x28, 0x06, 0x0f, 0x29,
+    0x05, 0x20, 0x30, 0x40, 0x00, 0x0f, 0x28, 0x46, 0x10, 0x0f, 0x29, 0x05, 0x30, 0x30, 0x40, 0x00,
+    0x0f, 0x28, 0x46, 0x20, 0x0f, 0x29, 0x05, 0x40, 0x30, 0x40, 0x00, 0xf2, 0x0f, 0x10, 0x46, 0x30,
+    0xf2, 0x0f, 0x11, 0x05, 0x50, 0x30, 0x40, 0x00, 0x68, 0x00, 0x80, 0x00, 0x00, 0x6a, 0x00, 0x56,
+    0xff, 0x15, 0xb8, 0x20, 0x40, 0x00, 0xa3, 0x0c, 0x30, 0x40, 0x00, 0xc7, 0x05, 0x10, 0x30, 0x40,
+    0x00, 0x47, 0x4e, 0x49, 0x52, 0xeb, 0xfe,
 ];
-const KEY: u64 = 0x4650_494d_5045_0001;
+const KEY: u64 = 0x4650_414c_5045_0001;
 const PREFERRED: u32 = 0x0040_0000;
 const GATE: u32 = 0x6000_0000;
 const STACK: u32 = 0x8000;
 const GATES: [GateSpec; 2] = [
     GateSpec {
-        entry: GuestAddress(GATE),
-        id: 0x0001_0001,
+        entry: GuestAddress(GATE + 64),
+        id: 0x0001_0005,
     },
     GateSpec {
-        entry: GuestAddress(GATE + 16),
-        id: 0x0001_0002,
+        entry: GuestAddress(GATE + 80),
+        id: 0x0001_0006,
     },
 ];
-const GROUPS: [&[(u32, u32, usize)]; 6] = [
-    &[(0x1000, 27, 6)],
+const GROUPS: [&[(u32, u32, usize)]; 5] = [
+    &[(0x1000, 21, 5)],
+    &[(0x1015, 30, 9)],
     &[
-        (0x1070, 24, 10),
-        (0x1088, 22, 6),
-        (0x109e, 32, 9),
-        (0x10be, 38, 13),
+        (0x1090, 24, 10),
+        (0x10a8, 22, 6),
+        (0x10be, 32, 9),
+        (0x10de, 38, 13),
     ],
-    &[(0x101b, 19, 4)],
-    &[(0x102e, 6, 1)],
-    &[(0x1034, 34, 8)],
-    &[(0x1056, 20, 4)],
+    &[(0x1033, 67, 14)],
+    &[(0x1076, 17, 3)],
 ];
-const FIXUPS: [(usize, u32); 14] = [
-    (1, 0x3010),
-    (8, 0x2030),
-    (13, 0x2000),
-    (18, 0x3020),
-    (31, 0x3050),
-    (42, 0x20a8),
-    (48, 0x20a4),
-    (53, 0x3054),
-    (61, 0x3060),
-    (67, 0x2030),
-    (72, 0x3020),
-    (77, 0x3070),
-    (90, 0x3058),
-    (96, 0x305c),
+const FIXUPS: [(usize, u32); 13] = [
+    (0x07, 0x2070),
+    (0x11, 0x20b4),
+    (0x1c, 0x3004),
+    (0x24, 0x2030),
+    (0x29, 0x2000),
+    (0x37, 0x3008),
+    (0x41, 0x3020),
+    (0x4c, 0x3030),
+    (0x57, 0x3040),
+    (0x64, 0x3050),
+    (0x72, 0x20b8),
+    (0x77, 0x300c),
+    (0x7d, 0x3010),
 ];
-const CALLER_LENGTHS: [u8; 23] = [
-    5, 2, 5, 5, 5, 5, 3, 5, 5, 6, 6, 5, 3, 5, 1, 5, 5, 5, 5, 3, 5, 10, 2,
+const CALLER_LENGTHS: [u8; 31] = [
+    1, 3, 7, 4, 6, 2, 3, 6, 1, 2, 5, 5, 1, 5, 3, 5, 3, 7, 4, 7, 4, 7, 5, 8, 5, 2, 1, 6, 5, 10, 2,
 ];
 
 fn read(engine: &EngineInstance, address: u32, length: usize) -> Vec<u8> {
@@ -107,50 +107,55 @@ fn permissions(engine: &EngineInstance, address: u32, expected: [bool; 3]) {
 }
 
 #[test]
-fn original_fp_import_pe_stages_links_rebases_starts_and_admits_seven_resident_owners() {
+fn original_fp_allocation_pe_stages_links_rebases_starts_and_admits_six_resident_owners() {
     assert_eq!(PE.len(), 2560);
     assert_eq!(KERNEL.len(), 116);
-    assert_eq!(&PE[0x400..0x46a], ENTRY);
-    assert_eq!(&PE[0x470..0x4e4], KERNEL);
-    assert_eq!(&PE[0x46a..0x470], &[0xcc; 6]);
+    assert_eq!(&PE[0x400..0x487], ENTRY);
+    assert_eq!(&PE[0x490..0x504], KERNEL);
+    assert_eq!(&PE[0x487..0x490], &[0xcc; 9]);
     assert_eq!(
         &PE[0x800..0x824],
         &[
-            0, 0x10, 0, 0, 0x24, 0, 0, 0, 1, 0x30, 8, 0x30, 0x0d, 0x30, 0x12, 0x30, 0x1f, 0x30,
-            0x2a, 0x30, 0x30, 0x30, 0x35, 0x30, 0x3d, 0x30, 0x43, 0x30, 0x48, 0x30, 0x4d, 0x30,
-            0x5a, 0x30, 0x60, 0x30,
+            0x00, 0x10, 0x00, 0x00, 0x24, 0x00, 0x00, 0x00, 0x07, 0x30, 0x11, 0x30, 0x1c, 0x30,
+            0x24, 0x30, 0x29, 0x30, 0x37, 0x30, 0x41, 0x30, 0x4c, 0x30, 0x57, 0x30, 0x64, 0x30,
+            0x72, 0x30, 0x77, 0x30, 0x7d, 0x30, 0x00, 0x00,
         ]
     );
     assert_eq!(
-        &PE[0x670..0x698],
+        &PE[0x680..0x6a8],
         &[
-            0x98, 0x20, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0xd0, 0x20, 0, 0, 0xa4, 0x20, 0, 0, 0, 0, 0,
-            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+            0xa8, 0x20, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xde, 0x20,
+            0x00, 0x00, 0xb4, 0x20, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
         ]
     );
-    let thunks = [0xb0, 0x20, 0, 0, 0xc0, 0x20, 0, 0, 0, 0, 0, 0];
-    assert_eq!(&PE[0x698..0x6a4], thunks);
-    assert_eq!(&PE[0x6a4..0x6b0], thunks);
-    assert_eq!(&PE[0x6b0..0x6bf], b"\0\0GetLastError\0");
-    assert_eq!(&PE[0x6c0..0x6cf], b"\0\0SetLastError\0");
-    assert_eq!(&PE[0x6d0..0x6dd], b"KERNEL32.dll\0");
+    let thunks = [0xc0, 0x20, 0, 0, 0xd0, 0x20, 0, 0, 0, 0, 0, 0];
+    assert_eq!(&PE[0x6a8..0x6b4], thunks);
+    assert_eq!(&PE[0x6b4..0x6c0], thunks);
+    assert_eq!(&PE[0x6c0..0x6cf], b"\0\0VirtualAlloc\0");
+    assert_eq!(&PE[0x6d0..0x6de], b"\0\0VirtualFree\0");
+    assert_eq!(&PE[0x6de..0x6eb], b"KERNEL32.dll\0");
+    assert_eq!(
+        &PE[0x670..0x680],
+        &[0, 0, 0, 0, 0, 0x10, 0, 0, 0, 0x30, 0, 0, 4, 0, 0, 0,]
+    );
     let limits = CompileLimits::default();
     assert_eq!(
         (limits.blocks, limits.instructions, limits.wasm_bytes),
         (8, 64, 65536)
     );
-    assert_eq!(GROUPS.iter().map(|group| group.len()).sum::<usize>(), 9);
+    assert_eq!(GROUPS.iter().map(|group| group.len()).sum::<usize>(), 8);
     assert_eq!(
         GROUPS
             .iter()
             .flat_map(|group| group.iter())
             .map(|block| block.2)
             .sum::<usize>(),
-        61
+        69
     );
 
     for base in [PREFERRED, 0x0050_0000] {
-        let mut engine = EngineInstance::new(7, KEY).unwrap();
+        let mut engine = EngineInstance::new(8, KEY).unwrap();
         let initial = engine.arena().to_vec();
         assert_eq!(initial.len(), ARENA_SIZE);
         assert_eq!(ARENA_SIZE, 4612);
@@ -164,8 +169,8 @@ fn original_fp_import_pe_stages_links_rebases_starts_and_admits_seven_resident_o
             assert_eq!(engine.arena(), initial);
         }
         assert_eq!(
-            engine.load_pe32_linked_v2_input_at(base, GATE).unwrap(),
-            LinkedImageMetadata32V2 {
+            engine.load_pe32_linked_v5_input_at(base, GATE).unwrap(),
+            LinkedImageMetadata32V5 {
                 image: ImageMetadata32 {
                     image_base: base,
                     image_size: 0x5000,
@@ -180,7 +185,19 @@ fn original_fp_import_pe_stages_links_rebases_starts_and_admits_seven_resident_o
                     GateSpec {
                         entry: GuestAddress(0),
                         id: 0
-                    }
+                    },
+                    GateSpec {
+                        entry: GuestAddress(0),
+                        id: 0
+                    },
+                    GateSpec {
+                        entry: GuestAddress(0),
+                        id: 0
+                    },
+                    GateSpec {
+                        entry: GuestAddress(0),
+                        id: 0
+                    },
                 ],
             }
         );
@@ -196,20 +213,20 @@ fn original_fp_import_pe_stages_links_rebases_starts_and_admits_seven_resident_o
             expected_text[offset..offset + 4].copy_from_slice(&(base + target).to_le_bytes());
         }
         assert_eq!(read(&engine, base + 0x1000, 4096), expected_text);
-        assert_eq!(read(&engine, base + 0x1070, 116), KERNEL);
+        assert_eq!(read(&engine, base + 0x1090, 116), KERNEL);
         for (rva, file_offset, length) in [(0, 0, 1024), (0x2000, 0x600, 512), (0x4000, 0x800, 512)]
         {
             let mut expected = vec![0; 4096];
             expected[..length].copy_from_slice(&PE[file_offset..file_offset + length]);
             if rva == 0x2000 {
-                expected[0xa4..0xa8].copy_from_slice(&GATE.to_le_bytes());
-                expected[0xa8..0xac].copy_from_slice(&(GATE + 16).to_le_bytes());
+                expected[0xb4..0xb8].copy_from_slice(&(GATE + 64).to_le_bytes());
+                expected[0xb8..0xbc].copy_from_slice(&(GATE + 80).to_le_bytes());
             }
             assert_eq!(read(&engine, base + rva, 4096), expected);
         }
         let mut expected_gates = vec![0; 4096];
-        expected_gates[..2].copy_from_slice(&[0x0f, 0x0b]);
-        expected_gates[16..18].copy_from_slice(&[0x0f, 0x0b]);
+        expected_gates[64..66].copy_from_slice(&[0x0f, 0x0b]);
+        expected_gates[80..82].copy_from_slice(&[0x0f, 0x0b]);
         assert_eq!(read(&engine, GATE, 4096), expected_gates);
         assert_eq!(read(&engine, base + 0x3000, 4096), vec![0; 4096]);
         for (address, expected) in [
@@ -261,15 +278,13 @@ fn original_fp_import_pe_stages_links_rebases_starts_and_admits_seven_resident_o
                 .unwrap()
                 .operation()
         };
-        for rva in [0x1016, 0x1051] {
-            assert_eq!(
-                operation(rva),
-                Operation::Call {
-                    target: BranchTarget::Direct(GuestAddress(base + 0x1070))
-                }
-            );
-        }
-        for (rva, target) in [(0x1028, 0x20a8), (0x102e, 0x20a4)] {
+        assert_eq!(
+            operation(0x102e),
+            Operation::Call {
+                target: BranchTarget::Direct(GuestAddress(base + 0x1090)),
+            }
+        );
+        for (rva, target) in [(0x100f, 0x20b4), (0x1070, 0x20b8)] {
             let Operation::Call {
                 target: BranchTarget::Indirect(Location32::Memory(address)),
             } = operation(rva)
@@ -287,21 +302,35 @@ fn original_fp_import_pe_stages_links_rebases_starts_and_admits_seven_resident_o
             );
         }
         for (rva, source) in [
-            (0x1005, Value32::Immediate(3)),
-            (0x1023, Value32::Immediate(0xf123_4567)),
-            (0x1041, Value32::Register(Register32::Eax)),
-            (0x1070, Value32::Register(Register32::Ebp)),
-            (0x1071, Value32::Register(Register32::Ebx)),
-            (0x1072, Value32::Register(Register32::Edi)),
-            (0x1073, Value32::Register(Register32::Esi)),
+            (0x1000, Value32::Register(Register32::Esi)),
+            (0x1020, Value32::Register(Register32::Eax)),
+            (0x1021, Value32::Immediate(3)),
+            (0x102d, Value32::Register(Register32::Esi)),
+            (0x1068, Value32::Immediate(0x8000)),
+            (0x106d, Value32::Immediate(0)),
+            (0x106f, Value32::Register(Register32::Esi)),
         ] {
             assert_eq!(operation(rva), Operation::Push { source });
         }
-        assert_eq!(operation(0x10e3), Operation::Return { stack_adjust: 0 });
+        for (rva, bytes, aligned) in [
+            (0x1004, 16, true),
+            (0x100b, 16, false),
+            (0x105b, 8, false),
+            (0x1060, 8, false),
+        ] {
+            let Operation::Simd(operation) = operation(rva) else {
+                panic!("original allocation argument or scalar move");
+            };
+            assert_eq!(
+                (operation.memory_bytes, operation.aligned),
+                (bytes, aligned)
+            );
+        }
+        assert_eq!(operation(0x1103), Operation::Return { stack_adjust: 0 });
         assert_eq!(
-            operation(0x1068),
+            operation(0x1085),
             Operation::Jump {
-                target: BranchTarget::Direct(GuestAddress(base + 0x1068))
+                target: BranchTarget::Direct(GuestAddress(base + 0x1085)),
             }
         );
         let mut pc = base + 0x1000;
@@ -310,11 +339,18 @@ fn original_fp_import_pe_stages_links_rebases_starts_and_admits_seven_resident_o
             assert_eq!(decoded.length(), length);
             pc = decoded.next_pc().0;
         }
-        assert_eq!(pc, base + 0x106a);
+        assert_eq!(pc, base + 0x1087);
 
+        assert!(
+            engine
+                .memory()
+                .unwrap()
+                .resolve(GuestAddress(0x1000_0000), Access::Read)
+                .is_err()
+        );
         let mut retained = Vec::new();
         let mut all_pcs = Vec::new();
-        for slot in 0..7 {
+        for slot in 0..6 {
             let group = if slot == 0 { &[][..] } else { GROUPS[slot - 1] };
             let before_decode = engine.arena().to_vec();
             let mut pcs = Vec::new();
@@ -373,7 +409,7 @@ fn original_fp_import_pe_stages_links_rebases_starts_and_admits_seven_resident_o
             all_pcs.extend(pcs);
             retained.push((id, wasm));
         }
-        assert_eq!(all_pcs.len(), 61);
+        assert_eq!(all_pcs.len(), 69);
         for (id, wasm) in retained {
             engine.guard_resident(KEY, id).unwrap();
             assert_eq!(engine.resident_bytes(id).unwrap(), wasm);

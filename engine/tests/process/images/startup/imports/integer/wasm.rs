@@ -28,7 +28,7 @@ fn actual_original_c_import_pe_runs_from_engine_owned_startup() {
     fs::write(output.join("initial-arena.bin"), initial.arena()).unwrap();
     let result = wasm_support::run_node(
         root,
-        "engine/tests/process/images/startup/fixtures/p2-c-imports/runtime/run.mjs",
+        "engine/tests/process/images/startup/imports/fixtures/p2-c-imports/runtime/run.mjs",
         &engine,
         &output,
         None,

@@ -26,7 +26,7 @@ fn actual_engine_wasm_relocates_rx_code_and_data_then_runs_returned_entry() {
     fs::create_dir_all(&output).unwrap();
     let result = wasm_support::run_node(
         root,
-        "engine/tests/process/images/fixtures/p2-pe32-relocation/runtime/run.mjs",
+        "engine/tests/process/images/relocation/fixtures/p2-pe32-relocation/runtime/run.mjs",
         &engine,
         &output,
         None,

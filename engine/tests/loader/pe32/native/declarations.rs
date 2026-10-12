@@ -8,7 +8,7 @@ use ring3_engine::{
 };
 
 const ORIGINAL: &[u8] =
-    include_bytes!("../../../process/images/fixtures/p2-pe32-relocatable/relocations.exe");
+    include_bytes!("../../../process/images/relocation/fixtures/p2-pe32-relocatable/relocations.exe");
 const ACTUAL: u32 = 0x0050_0000;
 const GATE: u32 = 0x7000_0000;
 

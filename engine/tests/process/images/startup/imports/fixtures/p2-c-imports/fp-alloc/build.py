@@ -11,11 +11,11 @@ import sys
 sys.dont_write_bytecode = True
 HERE = Path(__file__).resolve().parent
 FIXTURES = HERE.parent.parent
-PROFILE = Path(__file__).resolve().parents[8] / "engine/tests/programs/records/fixtures/p2-compiled-records/build.py"
+PROFILE = Path(__file__).resolve().parents[9] / "engine/tests/programs/records/fixtures/p2-compiled-records/build.py"
 PROFILE_SHA256 = "fe426f202b48664a87357c766d39099b9d35b5d8217c2b114696164a0d468258"
-KERNEL = Path(__file__).resolve().parents[8] / "engine/tests/programs/numeric/fixtures/p2-fp-compiled/sse2/kernel.obj"
+KERNEL = Path(__file__).resolve().parents[9] / "engine/tests/programs/numeric/fixtures/p2-fp-compiled/sse2/kernel.obj"
 KERNEL_SHA256 = "b072459ef7d463c448abb4ca90066e3957cf8c44b3011138d1c186d66dee23f5"
-KERNEL_TEXT = Path(__file__).resolve().parents[8] / "engine/tests/programs/numeric/fixtures/p2-fp-compiled/sse2/kernel.text.bin"
+KERNEL_TEXT = Path(__file__).resolve().parents[9] / "engine/tests/programs/numeric/fixtures/p2-fp-compiled/sse2/kernel.text.bin"
 KERNEL_TEXT_SHA256 = "08fad7ecb51ad9026481bf5dbe347b26ef413fc292d4b27599cc6f26a62b243d"
 SOURCE_SHA256 = "734f827f4d94b75b6bd0ba63bdfde6c10013c380c3ce4a4723214bbac438804c"
 DEFINITION_SHA256 = "bb77631d1b3afaffeab5c4c4e8cd5e41608477f2aebdc2653ee719e18253c67b"

@@ -1,10 +1,10 @@
-#[path = "startup/native/c_imports.rs"]
+#[path = "startup/imports/integer/native.rs"]
 mod pe32_c_imports;
 
-#[path = "startup/native/fp_allocation.rs"]
+#[path = "startup/imports/floating/allocation/native.rs"]
 mod pe32_fp_alloc;
 
-#[path = "startup/native/fp_imports.rs"]
+#[path = "startup/imports/floating/native.rs"]
 mod pe32_fp_imports;
 
 #[path = "startup/native/sse2.rs"]

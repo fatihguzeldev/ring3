@@ -10,7 +10,7 @@ import sys
 
 sys.dont_write_bytecode = True
 HERE = Path(__file__).resolve().parent
-PROFILE = Path(__file__).resolve().parents[7] / "engine/tests/programs/records/fixtures/p2-compiled-records/build.py"
+PROFILE = Path(__file__).resolve().parents[8] / "engine/tests/programs/records/fixtures/p2-compiled-records/build.py"
 PROFILE_SHA256 = "fe426f202b48664a87357c766d39099b9d35b5d8217c2b114696164a0d468258"
 SOURCE_SHA256 = "421b66212c3b8542694e6bdf2f3d5636378510557cea17f74642a30f1fa8ddb3"
 DEFINITION_SHA256 = "514fd9eca2367fdbd6b21d54d530c185db32865d9ce60326091cc829d3b1c655"

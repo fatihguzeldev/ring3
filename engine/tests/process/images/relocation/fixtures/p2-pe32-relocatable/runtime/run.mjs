@@ -2,11 +2,11 @@ import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
 import {readFileSync, readdirSync, writeFileSync} from 'node:fs';
 import {join} from 'node:path';
-import {readEngine} from '../../../../../support/wasm/engine.mjs';
+import {readEngine} from '../../../../../../support/wasm/engine.mjs';
 
 const [enginePath, output, root] = process.argv.slice(2), SIZE = 4612, TRANSFER = 140;
 assert.ok(enginePath && output && root);
-const fixture = 'engine/tests/process/images/fixtures/p2-pe32-relocatable', hash = bytes => createHash('sha256').update(bytes).digest('hex');
+const fixture = 'engine/tests/process/images/relocation/fixtures/p2-pe32-relocatable', hash = bytes => createHash('sha256').update(bytes).digest('hex');
 const engine = readEngine(enginePath), initial = readFileSync(join(output, 'initial-arena.bin'));
 assert.equal(initial.length, SIZE); assert.deepEqual(WebAssembly.Module.imports(engine.module), []);
 const original = readFileSync(join(root, fixture, 'relocations.exe'));
@@ -36,7 +36,7 @@ save('engine.wasm', engine.bytes); save('input-original.exe', original); save('i
 const rustPaths = dir => readdirSync(join(root, dir), {withFileTypes: true}).flatMap(item => item.isDirectory()
   ? rustPaths(`${dir}/${item.name}`) : item.name.endsWith('.rs') ? [`${dir}/${item.name}`] : []);
 const paths = [...rustPaths('engine/src'), 'Cargo.toml', 'Cargo.lock', 'engine/Cargo.toml', 'rust-toolchain.toml',
-  'engine/tests/loader/pe32/native/declarations.rs', 'engine/tests/loader/pe32/native.rs', 'engine/tests/support/loader/pe32.rs', 'engine/tests/support/loader/pe32_relocation.rs', 'engine/tests/process/images/input/native/original.rs', 'engine/tests/process/images/native.rs', 'engine/tests/process/images/wasm/relocatable.rs', 'engine/tests/process/images/wasm.rs', 'engine/tests/support/wasm.rs',
+  'engine/tests/loader/pe32/native/declarations.rs', 'engine/tests/loader/pe32/native.rs', 'engine/tests/support/loader/pe32.rs', 'engine/tests/support/loader/pe32_relocation.rs', 'engine/tests/process/images/input/native/original.rs', 'engine/tests/process/images/native.rs', 'engine/tests/process/images/relocation/wasm/original.rs', 'engine/tests/process/images/wasm.rs', 'engine/tests/support/wasm.rs',
   'engine/tests/support/wasm/engine.mjs', ...['i386.s', 'relocations.obj', 'relocations.exe', 'inspection.txt',
     'fixture.json', 'evidence.json', 'producer-source-pins.json', 'PROVENANCE.md', 'runtime/run.mjs'].map(n => `${fixture}/${n}`)].sort();
 assert.equal(new Set(paths).size, paths.length);
