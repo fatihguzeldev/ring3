@@ -1,0 +1,45 @@
+use super::support_wasm as wasm_support;
+use ring3_engine::process::EngineInstance;
+use std::{
+    fs,
+    path::{Path, PathBuf},
+    time::{SystemTime, UNIX_EPOCH},
+};
+
+#[test]
+fn actual_same_cpl_call_gates_preserve_selected_width_fault_order_and_key_authority() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
+    let engine = std::env::var_os("RING3_ENGINE_WASM")
+        .map(PathBuf::from)
+        .expect("set RING3_ENGINE_WASM to the selected integrated engine artifact");
+    assert!(engine.is_file(), "selected engine artifact must exist");
+    let expected = std::env::var("RING3_ENGINE_SHA256").expect("select its explicit SHA-256");
+    let output = root.join("target/p2-call-gate-fixtures").join(format!(
+        "gates-{}-{}",
+        std::process::id(),
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    fs::create_dir_all(&output).unwrap();
+    let initial = EngineInstance::new(1, 0x47415445).unwrap().arena().to_vec();
+    assert_eq!(initial.len(), 4796);
+    fs::write(output.join("initial-arena.bin"), initial).unwrap();
+    let result = wasm_support::run_node(
+        root,
+        "engine/tests/cpu/control/far/gates/fixtures/p2-call-gates/runtime/run.mjs",
+        &engine,
+        &output,
+        Some(&expected),
+    );
+    fs::write(output.join("node.stdout.log"), &result.stdout).unwrap();
+    fs::write(output.join("node.stderr.log"), &result.stderr).unwrap();
+    assert!(
+        result.status.success(),
+        "call gate integration failed:\n{}\n{}",
+        String::from_utf8_lossy(&result.stdout),
+        String::from_utf8_lossy(&result.stderr)
+    );
+    println!("{}", String::from_utf8_lossy(&result.stdout).trim());
+}

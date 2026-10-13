@@ -71,3 +71,6 @@ mod interrupt_return;
 
 #[path = "near/segments/wasm.rs"]
 mod cpu_near_segments;
+
+#[path = "far/gates/wasm.rs"]
+mod cpu_call_gates_wasm;
