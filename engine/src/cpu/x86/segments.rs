@@ -46,7 +46,8 @@ impl SegmentState {
     }
 
     pub fn is_valid(&self) -> bool {
-        self.bases[..4].iter().all(|base| *base == 0)
+        self.bases[SegmentRegister::Cs.index()] == 0
+            && self.bases[SegmentRegister::Ss.index()] == 0
             && [SegmentRegister::Cs, SegmentRegister::Ss]
                 .into_iter()
                 .all(|segment| {

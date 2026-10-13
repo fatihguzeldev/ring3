@@ -161,7 +161,8 @@ impl SegmentContext {
     }
 
     pub fn is_legacy(&self) -> bool {
-        self.caches == Self::legacy(self.state).caches
+        self.state.bases[..4].iter().all(|base| *base == 0)
+            && self.caches == Self::legacy(self.state).caches
     }
 
     pub fn is_valid(&self) -> bool {
@@ -304,5 +305,37 @@ mod tests {
         conforming.caches[1] = cache(0xf, 0xfffff, true, true);
         conforming.caches[4] = SegmentCache::from_bits(0x93ff_ffff).unwrap();
         assert!(conforming.is_valid() && !conforming.is_legacy());
+    }
+    #[test]
+    fn current_context_accepts_data_bases_but_keeps_code_and_stack_profile() {
+        let mut context = SegmentContext::default();
+        for segment in [
+            SegmentRegister::Es,
+            SegmentRegister::Ds,
+            SegmentRegister::Fs,
+            SegmentRegister::Gs,
+        ] {
+            context.state.bases[segment.index()] = 0x1234_0000;
+        }
+        assert!(context.is_valid());
+        assert!(!context.is_legacy());
+        for segment in [SegmentRegister::Cs, SegmentRegister::Ss] {
+            assert!(!context.state.set_base(segment, 1));
+            let mut invalid = context;
+            invalid.state.bases[segment.index()] = 1;
+            assert!(!invalid.is_valid());
+            invalid = context;
+            invalid.caches[segment.index()] = cache(
+                if segment == SegmentRegister::Cs {
+                    0xb
+                } else {
+                    3
+                },
+                0xfffff,
+                true,
+                false,
+            );
+            assert!(!invalid.is_valid());
+        }
     }
 }

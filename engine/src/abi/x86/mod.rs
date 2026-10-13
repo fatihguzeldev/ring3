@@ -15,8 +15,9 @@ pub use exit::{
 };
 
 pub use segments::{
-    SEGMENTS_BASES_OFFSET, SEGMENTS_SELECTORS_OFFSET, SEGMENTS_SIZE, SEGMENTS_VERSION_2,
-    decode_segment_context, decode_segments, encode_segment_context, encode_segments,
+    SEGMENT_BASES_RECORD_SIZE, SEGMENTS_BASES_OFFSET, SEGMENTS_SELECTORS_OFFSET, SEGMENTS_SIZE,
+    SEGMENTS_VERSION_2, SEGMENTS_VERSION_3, decode_current_segment_context, decode_segment_context,
+    decode_segments, encode_current_segment_context, encode_segment_context, encode_segments,
 };
 pub use simd::{
     MXCSR_MASK, SIMD_MXCSR_OFFSET, SIMD_SIZE, SIMD_XMM_OFFSET, decode_simd, encode_simd,
