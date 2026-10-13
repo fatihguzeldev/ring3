@@ -19,6 +19,9 @@ mod cpu_word_short_control;
 #[path = "exceptions/native/flags.rs"]
 mod cpu_flags_exceptions;
 
+#[path = "exceptions/debug/native.rs"]
+mod cpu_debug;
+
 #[path = "hints/native/pause.rs"]
 mod cpu_pause;
 

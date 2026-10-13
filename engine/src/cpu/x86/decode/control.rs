@@ -16,6 +16,7 @@ pub(super) fn lower(instruction: &Instruction) -> Option<Result<Operation, Decod
         | Code::Ud1_r32_rm32
         | Code::Ud2 => ControlOperation::InvalidOpcode,
         Code::Int3 => ControlOperation::Breakpoint,
+        Code::Int1 => ControlOperation::DebugTrap,
         Code::Into => ControlOperation::Overflow,
         Code::Bound_r16_m1616 | Code::Bound_r32_m3232 => {
             if instruction.has_lock_prefix() {

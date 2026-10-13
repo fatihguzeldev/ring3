@@ -49,6 +49,11 @@ pub(super) fn instruction(
             exit(code, 17, exit_depth);
             return;
         }
+        ControlOperation::DebugTrap => {
+            retire(code, instruction.next_pc().0);
+            exit(code, 16, exit_depth);
+            return;
+        }
         ControlOperation::Overflow => {
             code.local_get(FLAGS)
                 .i32_const(0x800)

@@ -18,6 +18,7 @@ pub enum ControlOperation {
         repeat_count: Option<AddressSize>,
     },
     Breakpoint,
+    DebugTrap,
     Overflow,
     Bound {
         index: Register32,

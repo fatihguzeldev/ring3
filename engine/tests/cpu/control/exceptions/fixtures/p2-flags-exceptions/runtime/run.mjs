@@ -14,6 +14,9 @@ const sources = [
   'engine/src/cpu/x86/control.rs',
   'engine/src/cpu/x86/decode/control.rs',
   'engine/src/cpu/dbt/wasm/control_instructions.rs',
+  'engine/src/cpu/dbt/region.rs',
+  'engine/tests/cpu/control/exceptions/debug/native.rs',
+  'engine/tests/cpu/control/native.rs',
   'engine/src/cpu/dbt/wasm/emitter.rs',
   'engine/src/cpu/dbt/wasm/abi.rs',
   'engine/src/cpu/dbt/wasm/strings.rs',
@@ -60,7 +63,7 @@ function open(program, resident, gated = false) {
   };
   assert.equal(api.map(PC, 1, 7), 0);
   assert.equal(api.map(0x5000, 1, 3), 0);
-  const terminal = program.at(-1) === 0xcc ||
+  const terminal = program.at(-1) === 0xcc || program.at(-1) === 0xf1 ||
     (program.at(-2) === 0x0f && program.at(-1) === 0x0b);
   const code = Buffer.from(terminal ? program : [...program, 0xeb, 0xfe]);
   upload(PC, code);
@@ -103,8 +106,17 @@ function execute(program, options, expected) {
     seed.writeUInt32LE((options.address ?? 0x5000) >>> 0, 28);
     seed.writeUInt32LE((options.stack ?? 0x5000) >>> 0, 32);
     seed.writeUInt32LE((options.flags ?? 2) >>> 0, 52);
+    if (options.shadow !== undefined) seed.writeUInt32LE(options.shadow, 12);
+    if (options.cancel !== undefined) seed.writeUInt32LE(options.cancel, 96);
+    if (options.dirtyNumeric) {
+      for (let index = 0; index < 80; index++) seed[4276 + index] = (index * 29 + 17) & 255;
+      for (let index = 0; index < 128; index++) {
+        seed[4396 + index] = (index * 31 + 19) & 255;
+        seed[4628 + index] = (index * 37 + 23) & 255;
+      }
+    }
     for (const [index, value] of options.registers ?? []) seed.writeUInt32LE(value >>> 0, 16 + index * 4);
-    if (((options.flags ?? 2) & ~0xcd7) !== 0) seed.writeUInt16LE(2, 4);
+    if (((options.flags ?? 2) & ~0xcd7) !== 0 || options.shadow) seed.writeUInt16LE(2, 4);
     if (expected.noHelper && (expected.reason ?? 1) >= 16) {
       for (const offset of [80, 84, 88, 92]) seed.writeUInt32LE(0xdeadbeef, offset);
     }
@@ -121,6 +133,14 @@ function execute(program, options, expected) {
     if (expected.stack !== undefined) expectedState.writeUInt32LE(expected.stack >>> 0, 32);
     for (const [index, value] of expected.registers ?? []) expectedState.writeUInt32LE(value >>> 0, 16 + index * 4);
     assert.deepEqual(after.subarray(0, 56), expectedState, `${options.label}: complete CPU state`);
+    if (expected.exitVersion !== undefined) {
+      assert.equal(after.toString('ascii', 56, 60), 'R3EX', options.label);
+      assert.equal(after.readUInt16LE(60), expected.exitVersion, options.label);
+      assert.equal(after.readUInt16LE(62), 1, options.label);
+      assert.equal(after.readUInt32LE(64), 40, options.label);
+      assert.equal(after.readUInt32LE(68), 0, options.label);
+      assert.equal(after.readUInt32LE(96), before.readUInt32LE(96), options.label);
+    }
     assert.equal(after.readUInt32LE(72), expected.reason ?? 1, options.label);
     assert.equal(after.readUInt32LE(76), expected.retired ?? 1, options.label);
     for (const [offset, value] of [[80, expected.detail ?? 0], [84, expected.address ?? 0],
@@ -143,6 +163,23 @@ function execute(program, options, expected) {
     if (options.after) options.after(c);
     assert.equal(c.api.close(), 0);
   }
+}
+
+for (const [program, options, expected] of [
+  [[0xf1], {label: 'INT1 is an explicit retired debug trap'}, {}],
+  [[0x66, 0xf1], {label: 'INT1 ignores operand width'}, {}],
+  [[0xf1], {label: 'INT1 with TF retires exactly once', flags: 0x102}, {}],
+  [[0xf1], {label: 'INT1 is integral despite SS shadow', flags: 0x102, shadow: 1}, {}],
+  [[0xf1], {label: 'budget precedes INT1', flags: 0x102, shadow: 1, budget: 0},
+    {reason: 1, retired: 0, pc: PC, shadow: 1, exitVersion: 1}],
+  [[0xf1], {label: 'cancellation precedes INT1', flags: 0x102, shadow: 1, cancel: 1},
+    {reason: 2, retired: 0, pc: PC, shadow: 1, exitVersion: 1}],
+  [[0x90, 0xf1], {label: 'NOP then INT1 retires two instructions', budget: 8}, {retired: 2}],
+  [[0x90, 0xf1], {label: 'TF stops before the following INT1', flags: 0x102, budget: 8}, {pc: PC + 1}],
+  [[0x90, 0xf1], {label: 'budget boundary stops before INT1', budget: 1}, {reason: 1, pc: PC + 1, exitVersion: 1}],
+]) {
+  execute(program, {...options, dirtyNumeric: true},
+    {reason: 16, noHelper: true, exitVersion: 7, ...expected});
 }
 
 execute([0x0f, 0x0b], {label: 'UD2 is an unretired invalid-opcode fault'},
