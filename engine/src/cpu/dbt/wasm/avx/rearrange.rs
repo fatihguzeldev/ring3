@@ -25,11 +25,12 @@ fn load(
     bytes: u8,
     layout: VectorLayout,
     locals: RearrangeLocals,
+    upper: bool,
 ) {
     match source {
         MoveSource::Register(r) => {
             code.local_get(locals.state)
-                .v128_load(vector(layout, r, false));
+                .v128_load(vector(layout, r, upper));
         }
         MoveSource::Memory => {
             code.local_get(locals.operand);
@@ -49,6 +50,9 @@ fn load(
                 16 => {
                     code.v128_load(arg(0));
                 }
+                32 => {
+                    code.v128_load(arg(if upper { 16 } else { 0 }));
+                }
                 _ => unreachable!("validated rearrange width"),
             }
         }
@@ -64,7 +68,7 @@ pub(super) fn emit(
 ) {
     let [first, second, mask] = locals.sources;
     if let Some(r) = instruction.first() {
-        load(code, MoveSource::Register(r), 16, layout, locals);
+        load(code, MoveSource::Register(r), 16, layout, locals, false);
         code.local_set(first);
     }
     load(
@@ -73,22 +77,37 @@ pub(super) fn emit(
         instruction.source_bytes(),
         layout,
         locals,
+        false,
     );
     code.local_set(second);
     if let Some(r) = instruction.mask() {
-        load(code, MoveSource::Register(r), 16, layout, locals);
+        load(code, MoveSource::Register(r), 16, layout, locals, false);
         code.local_set(mask);
     }
     code.local_get(locals.state);
     super::super::simd::rearrange_value(code, instruction.operation(), locals.sources);
     if instruction.width() == VectorWidth::Ymm {
-        // keep the lower result on the stack while widening the next low-xmm window.
-        let offset = instruction.source_bytes() / 2;
-        code.local_get(second)
-            .v128_const(0)
-            .i8x16_shuffle(std::array::from_fn(|byte| offset + byte as u8))
-            .local_set(second)
-            .local_get(locals.state);
+        if instruction.operation().kind().widening().is_some() {
+            // widening consumes the next window in the captured low-xmm source.
+            let offset = instruction.source_bytes() / 2;
+            code.local_get(second)
+                .v128_const(0)
+                .i8x16_shuffle(std::array::from_fn(|byte| offset + byte as u8))
+                .local_set(second);
+        } else {
+            // the lower result stays on the stack until all upper sources are captured.
+            if let Some(r) = instruction.first() {
+                load(code, MoveSource::Register(r), 16, layout, locals, true);
+                code.local_set(first);
+            }
+            load(code, instruction.second(), 32, layout, locals, true);
+            code.local_set(second);
+            if let Some(r) = instruction.mask() {
+                load(code, MoveSource::Register(r), 16, layout, locals, true);
+                code.local_set(mask);
+            }
+        }
+        code.local_get(locals.state);
         super::super::simd::rearrange_value(code, instruction.operation(), locals.sources);
         code.v128_store(vector(layout, instruction.destination(), true));
         code.v128_store(vector(layout, instruction.destination(), false));

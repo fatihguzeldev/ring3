@@ -81,3 +81,6 @@ mod variable_shift_capability;
 
 #[path = "avx/broadcast/capability/native.rs"]
 mod broadcast_capability;
+
+#[path = "avx/rearrange/lanes/capability/native.rs"]
+mod lane_capability;

@@ -1,5 +1,8 @@
 use super::{MemoryRequirement, MoveSource, VectorRegister, VectorState, VectorWidth};
-use crate::{cpu::x86::simd::RearrangeOperation, memory::Access};
+use crate::{
+    cpu::x86::simd::{RearrangeOperation, ShuffleKind},
+    memory::Access,
+};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct RearrangeInstruction {
@@ -40,7 +43,23 @@ impl RearrangeInstruction {
         self.operation
     }
     pub(crate) fn with_width(mut self, width: VectorWidth) -> Option<Self> {
-        if width == VectorWidth::Ymm && self.operation.kind().widening().is_none() {
+        if width == VectorWidth::Ymm
+            && self.operation.kind().widening().is_none()
+            && !matches!(
+                self.operation.kind(),
+                ShuffleKind::UnpackLow
+                    | ShuffleKind::UnpackHigh
+                    | ShuffleKind::PackSigned
+                    | ShuffleKind::PackUnsigned
+                    | ShuffleKind::Dwords
+                    | ShuffleKind::HighWords
+                    | ShuffleKind::LowWords
+                    | ShuffleKind::Bytes
+                    | ShuffleKind::AlignRight
+                    | ShuffleKind::BlendImmediate
+                    | ShuffleKind::BlendVariable
+            )
+        {
             return None;
         }
         self.width = width;
@@ -86,27 +105,36 @@ impl VectorState {
         if self.simd.mxcsr & !0xffff != 0 {
             return Err(RearrangeError::InvalidState);
         }
-        let first = instruction
-            .first
-            .map_or([0; 16], |r| self.simd.xmm[r.index()]);
+        let first = instruction.first.map_or([0; 32], |r| self.read(r));
         let second = match instruction.second {
-            MoveSource::Register(r) => self.simd.xmm[r.index()],
+            MoveSource::Register(r) => self.read(r),
             MoveSource::Memory => {
-                let mut value = [0; 16];
+                let mut value = [0; 32];
                 value[..bytes].copy_from_slice(operand);
                 value
             }
         };
-        let mask = instruction
-            .mask
-            .map_or([0; 16], |r| self.simd.xmm[r.index()]);
+        let mask = instruction.mask.map_or([0; 32], |r| self.read(r));
         let mut value = [0; 32];
-        value[..16].copy_from_slice(&instruction.operation.evaluate(first, second, mask));
+        value[..16].copy_from_slice(&instruction.operation.evaluate(
+            first[..16].try_into().unwrap(),
+            second[..16].try_into().unwrap(),
+            mask[..16].try_into().unwrap(),
+        ));
         if instruction.width == VectorWidth::Ymm {
-            let offset = usize::from(instruction.source_bytes() / 2);
-            let mut next = [0; 16];
-            next[..16 - offset].copy_from_slice(&second[offset..]);
-            value[16..].copy_from_slice(&instruction.operation.evaluate(first, next, mask));
+            let upper = if instruction.operation.kind().widening().is_some() {
+                let offset = usize::from(instruction.source_bytes() / 2);
+                let mut next = [0; 16];
+                next[..16 - offset].copy_from_slice(&second[offset..16]);
+                instruction.operation.evaluate([0; 16], next, [0; 16])
+            } else {
+                instruction.operation.evaluate(
+                    first[16..].try_into().unwrap(),
+                    second[16..].try_into().unwrap(),
+                    mask[16..].try_into().unwrap(),
+                )
+            };
+            value[16..].copy_from_slice(&upper);
         }
         self.publish(instruction.destination, value);
         Ok(())
@@ -120,3 +148,7 @@ mod tests;
 #[cfg(test)]
 #[path = "rearrange/widen/native.rs"]
 mod widen_tests;
+
+#[cfg(test)]
+#[path = "rearrange/lanes/native.rs"]
+mod lane_tests;

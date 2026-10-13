@@ -336,6 +336,70 @@ pub(super) fn lower(
                 };
                 (0x01000680 | kind, operands, 0)
             }
+            Code::VEX_Vpunpcklbw_ymm_ymm_ymmm256
+            | Code::VEX_Vpunpcklwd_ymm_ymm_ymmm256
+            | Code::VEX_Vpunpckldq_ymm_ymm_ymmm256
+            | Code::VEX_Vpacksswb_ymm_ymm_ymmm256
+            | Code::VEX_Vpackuswb_ymm_ymm_ymmm256
+            | Code::VEX_Vpunpckhbw_ymm_ymm_ymmm256
+            | Code::VEX_Vpunpckhwd_ymm_ymm_ymmm256
+            | Code::VEX_Vpunpckhdq_ymm_ymm_ymmm256
+            | Code::VEX_Vpackssdw_ymm_ymm_ymmm256
+            | Code::VEX_Vpunpcklqdq_ymm_ymm_ymmm256
+            | Code::VEX_Vpunpckhqdq_ymm_ymm_ymmm256
+            | Code::VEX_Vpshufd_ymm_ymmm256_imm8
+            | Code::VEX_Vpshufhw_ymm_ymmm256_imm8
+            | Code::VEX_Vpshuflw_ymm_ymmm256_imm8
+            | Code::VEX_Vpshufb_ymm_ymm_ymmm256
+            | Code::VEX_Vpackusdw_ymm_ymm_ymmm256
+            | Code::VEX_Vpblendw_ymm_ymm_ymmm256_imm8
+            | Code::VEX_Vpalignr_ymm_ymm_ymmm256_imm8
+            | Code::VEX_Vpblendvb_ymm_ymm_ymmm256_ymm => {
+                let (kind, unary, mask, has_immediate) = match instruction.code() {
+                    Code::VEX_Vpunpcklbw_ymm_ymm_ymmm256 => (1, false, false, false),
+                    Code::VEX_Vpunpcklwd_ymm_ymm_ymmm256 => (2, false, false, false),
+                    Code::VEX_Vpunpckldq_ymm_ymm_ymmm256 => (3, false, false, false),
+                    Code::VEX_Vpacksswb_ymm_ymm_ymmm256 => (4, false, false, false),
+                    Code::VEX_Vpackuswb_ymm_ymm_ymmm256 => (5, false, false, false),
+                    Code::VEX_Vpunpckhbw_ymm_ymm_ymmm256 => (6, false, false, false),
+                    Code::VEX_Vpunpckhwd_ymm_ymm_ymmm256 => (7, false, false, false),
+                    Code::VEX_Vpunpckhdq_ymm_ymm_ymmm256 => (8, false, false, false),
+                    Code::VEX_Vpackssdw_ymm_ymm_ymmm256 => (9, false, false, false),
+                    Code::VEX_Vpunpcklqdq_ymm_ymm_ymmm256 => (10, false, false, false),
+                    Code::VEX_Vpunpckhqdq_ymm_ymm_ymmm256 => (11, false, false, false),
+                    Code::VEX_Vpshufd_ymm_ymmm256_imm8 => (12, true, false, true),
+                    Code::VEX_Vpshufhw_ymm_ymmm256_imm8 => (13, true, false, true),
+                    Code::VEX_Vpshuflw_ymm_ymmm256_imm8 => (14, true, false, true),
+                    Code::VEX_Vpshufb_ymm_ymm_ymmm256 => (15, false, false, false),
+                    Code::VEX_Vpackusdw_ymm_ymm_ymmm256 => (22, false, false, false),
+                    Code::VEX_Vpblendw_ymm_ymm_ymmm256_imm8 => (29, false, false, true),
+                    Code::VEX_Vpalignr_ymm_ymm_ymmm256_imm8 => (30, false, false, true),
+                    Code::VEX_Vpblendvb_ymm_ymm_ymmm256_ymm => (31, false, true, false),
+                    _ => unreachable!("validated lane-local Code"),
+                };
+                encoding.validate(mask, 1, unary)?;
+                let mut operands = index(instruction, 0, false, false)?;
+                let source = if unary { 1 } else { 2 };
+                if !unary {
+                    operands |= index(instruction, 1, false, false)? << 3;
+                }
+                operands |= index(instruction, source, false, true)? << 6;
+                if instruction.op_kind(source) == OpKind::Memory {
+                    operands |= 1 << 12;
+                }
+                if mask {
+                    operands |= index(instruction, 3, false, false)? << 9;
+                }
+                (
+                    0x01000680 | kind,
+                    operands,
+                    if has_immediate {
+                        u32::from(instruction.immediate8())
+                    } else {
+                        0
+                    },
+                )
+            }
             _ => return Ok(None),
         };
         let instruction_value = AvxInstruction::decode_descriptor(descriptor, operands, immediate)

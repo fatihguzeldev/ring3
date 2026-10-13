@@ -56,7 +56,11 @@ fn widths_are_closed_to_widening_and_report_exact_low_xmm_source_bytes() {
             None,
         )
         .unwrap();
-        assert!(narrow.with_width(VectorWidth::Ymm).is_none());
+        let wide = narrow.with_width(VectorWidth::Ymm).unwrap();
+        assert_eq!(wide.operation(), operation);
+        assert_eq!(wide.width(), VectorWidth::Ymm);
+        assert_eq!(wide.source_bytes(), 32);
+        assert_eq!(wide.with_width(VectorWidth::Xmm), Some(narrow));
     }
 }
 
