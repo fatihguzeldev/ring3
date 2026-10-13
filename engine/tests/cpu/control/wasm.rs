@@ -47,3 +47,6 @@ mod cpu_far_return;
 
 #[path = "exceptions/undefined/wasm.rs"]
 mod cpu_undefined;
+
+#[path = "exceptions/privileged/msr/wasm.rs"]
+mod cpu_msr;

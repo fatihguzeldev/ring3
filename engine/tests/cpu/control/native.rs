@@ -48,3 +48,6 @@ mod far_support;
 
 #[path = "exceptions/undefined/native.rs"]
 mod cpu_undefined;
+
+#[path = "exceptions/privileged/msr/native.rs"]
+mod cpu_msr;

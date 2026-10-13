@@ -11,6 +11,8 @@ const legacy = [
   ['lmsw-memory', [0x0f, 0x01, 0x30]],
   ['invd', [0x0f, 0x08]],
   ['wbinvd', [0x0f, 0x09]],
+  ['rdmsr', [0x0f, 0x32]],
+  ['wrmsr', [0x0f, 0x30]],
   ['cpl3-iopl0-pvi0-cli', [0xfa]],
   ['cpl3-iopl0-pvi0-sti', [0xfb]],
 ];
@@ -44,11 +46,9 @@ export const negatives = legacy.flatMap(([name, bytes]) => [0xf2, 0xf3]
     name: `reserved-repeat-${prefix.toString(16)}-${name}`, bytes: Buffer.from([prefix, ...bytes]),
   })));
 for (const [name, bytes] of [
-  ['unadvertised-rdmsr', [0x0f, 0x32]],
-  ['unadvertised-wrmsr', [0x0f, 0x30]],
   ['distinct-wbnoinvd', [0xf3, 0x0f, 0x09]],
   ['environment-dependent-in', [0xe4, 0x80]],
   ['environment-dependent-out', [0xe6, 0x80]],
   ['valid-unsupported-int80', [0xcd, 0x80]],
 ]) negatives.push({name, bytes: Buffer.from(bytes)});
-export const claim = 'bounded CPL3 privileged GP0 whitelist and explicit IOPL0/PVI0/GD0/DE0 user environment; strict public preparation, invalidLOCK priority, reservedREP refusal and full CPU/arena preservation; MSR/IO availability remain unsupported';
+export const claim = 'bounded CPL3 privileged GP0 whitelist and explicit IOPL0/PVI0/GD0/DE0 user environment; strict public preparation, invalidLOCK priority, reservedREP refusal and full CPU/arena preservation; present MSR instructions fault at CPL3; RDPMC/IO environment remains unsupported';

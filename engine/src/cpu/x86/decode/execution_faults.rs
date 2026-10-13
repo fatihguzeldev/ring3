@@ -1,6 +1,8 @@
 use iced_x86::{Code, Instruction, Register};
 
-use crate::cpu::x86::{ControlOperation, environment::UserModeEnvironment};
+use crate::cpu::x86::{
+    ControlOperation, capabilities::MSR_ENABLED, environment::UserModeEnvironment,
+};
 
 pub(super) fn invalid(bytes: &[u8]) -> Option<ControlOperation> {
     match bytes.len() {
@@ -47,6 +49,7 @@ fn general_protection(instruction: &Instruction, environment: UserModeEnvironmen
         | Code::Invd
         | Code::Wbinvd
         | Code::Xsetbv => true,
+        Code::Rdmsr | Code::Wrmsr => MSR_ENABLED && environment.current_privilege() != 0,
         Code::Mov_r32_cr => control_register(instruction.op1_register()),
         Code::Mov_cr_r32 => control_register(instruction.op0_register()),
         Code::Cli | Code::Sti => {

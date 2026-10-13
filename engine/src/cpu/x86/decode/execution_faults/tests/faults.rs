@@ -39,6 +39,8 @@ fn privileged_rows() -> Vec<Vec<u8>> {
         vec![0x0f, 0x01, 0x30],
         vec![0x0f, 0x08],
         vec![0x0f, 0x09],
+        vec![0x0f, 0x32],
+        vec![0x0f, 0x30],
     ];
     for opcode in [0x20, 0x22] {
         for control in [0, 2, 3, 4] {
@@ -118,8 +120,7 @@ fn privileged_repeat_and_duplicate_prefixes_keep_strict_refusals() {
 #[test]
 fn environment_dependent_or_unadvertised_families_keep_strict_refusals() {
     for bytes in [
-        &[0x0f, 0x32][..],
-        &[0x0f, 0x30],
+        &[0x0f, 0x33][..],
         &[0xf3, 0x0f, 0x09],
         &[0xe4, 0x80],
         &[0xe6, 0x80],

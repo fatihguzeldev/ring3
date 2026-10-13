@@ -26,3 +26,8 @@ fn extensions_without_complete_execution_support_remain_unadvertised() {
     assert_eq!(structured, [0, 1 << 3 | 1 << 8, 0, 0]); // bmi1/2 only; no avx2/avx512.
     assert_eq!(leaf(0, None)[0], 13);
 }
+
+#[test]
+fn msr_instructions_are_present_under_fixed_user_privilege() {
+    assert_eq!(leaf(1, None)[3] & (1 << 5), 1 << 5);
+}
