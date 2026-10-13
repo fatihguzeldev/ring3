@@ -56,3 +56,6 @@ mod logical_capability;
 
 #[path = "avx/integer/wrapping/capability/native.rs"]
 mod wrapping_capability;
+
+#[path = "avx/blocks/capability/native.rs"]
+mod blocks_capability;
