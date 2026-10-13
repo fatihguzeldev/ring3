@@ -305,6 +305,21 @@ pub(super) fn lower(
                 }
                 (0x0100041e, operands, 0)
             }
+            Code::VEX_Vpblendd_xmm_xmm_xmmm128_imm8 | Code::VEX_Vpblendd_ymm_ymm_ymmm256_imm8 => {
+                let wide = instruction.code() == Code::VEX_Vpblendd_ymm_ymm_ymmm256_imm8;
+                encoding.validate(true, u8::from(wide), false)?;
+                let mut operands = index(instruction, 0, false, false)?;
+                operands |= index(instruction, 1, false, false)? << 3;
+                operands |= index(instruction, 2, false, true)? << 6;
+                if instruction.op_kind(2) == OpKind::Memory {
+                    operands |= 1 << 12;
+                }
+                (
+                    if wide { 0x01000416 } else { 0x01000415 },
+                    operands,
+                    u32::from(instruction.immediate8()),
+                )
+            }
             Code::VEX_Vpermps_ymm_ymm_ymmm256 | Code::VEX_Vpermd_ymm_ymm_ymmm256 => {
                 encoding.validate_w(false)?;
                 encoding.validate(false, 1, false)?;
@@ -334,7 +349,14 @@ pub(super) fn lower(
         let AvxSemantic::Permute(value) = instruction_value.semantic() else {
             unreachable!("permute decoder constructs only permutations")
         };
-        if value.requires_avx2() && !crate::cpu::x86::capabilities::AVX2_ENABLED {
+        if !crate::cpu::x86::capabilities::AVX2_ENABLED
+            && (value.requires_avx2()
+                || matches!(
+                    instruction.code(),
+                    Code::VEX_Vpblendd_xmm_xmm_xmmm128_imm8
+                        | Code::VEX_Vpblendd_ymm_ymm_ymmm256_imm8
+                ))
+        {
             return Err(unsupported());
         }
         Ok(Some(operation))

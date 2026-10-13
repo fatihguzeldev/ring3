@@ -90,3 +90,6 @@ mod multiply_capability;
 
 #[path = "avx/permute/whole/capability/native.rs"]
 mod whole_permute_capability;
+
+#[path = "avx/permute/blend/capability/native.rs"]
+mod blend_capability;
