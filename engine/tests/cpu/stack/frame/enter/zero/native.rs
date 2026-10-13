@@ -91,15 +91,15 @@ fn assert_bound_admission(bytes: &[u8], resident: bool, entries: bool) {
     };
     assert!(contains(module, helper));
     for legacy in [
-        b"read32".as_slice(),
-        b"read16",
-        b"read8",
-        b"store32",
-        b"store16",
-        b"store8",
-        b"store_resident32",
-        b"store_resident16",
-        b"store_resident8",
+        b"cpu_read32".as_slice(),
+        b"cpu_read16",
+        b"cpu_read8",
+        b"cpu_store32",
+        b"cpu_store16",
+        b"cpu_store8",
+        b"cpu_store_resident32",
+        b"cpu_store_resident16",
+        b"cpu_store_resident8",
     ] {
         assert!(!contains(module, legacy));
     }

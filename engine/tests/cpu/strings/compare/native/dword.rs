@@ -234,7 +234,7 @@ while(at<input.length) {
   const resident=input[at++],n=input.readUInt32LE(at);at+=4;const b=input.subarray(at,at+n);at+=n;
   const m=new WebAssembly.Module(b);
   assert.deepEqual(WebAssembly.Module.imports(m),[{module:'env',name:'memory',kind:'memory'},
-    ...[resident?'guard_resident':'guard','read32'].map(name=>({module:'ring3',name,kind:'function'}))]);
+    ...[resident?'guard_resident':'guard','cpu_read32'].map(name=>({module:'ring3',name,kind:'function'}))]);
   assert.deepEqual(WebAssembly.Module.exports(m),[{name:'run',kind:'function'}]);
   assert.deepEqual(shape(b,resident),[[[16,127],[1,126],[10,127]],[[3,127]]]);count++;
 }

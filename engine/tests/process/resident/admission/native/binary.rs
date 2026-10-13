@@ -279,13 +279,21 @@ fn admitted(instruction: &[u8], kind: BinaryKind, source: Value32, address: Effe
         }))
     );
     let module = engine.resident_bytes(id).unwrap();
-    assert!(module.windows(6).any(|window| window == b"read32"));
     assert!(
         module
-            .windows(16)
-            .any(|window| window == b"store_resident32")
+            .windows(b"cpu_read32".len())
+            .any(|window| window == b"cpu_read32")
     );
-    assert!(!module.windows(7).any(|window| window == b"store32"));
+    assert!(
+        module
+            .windows(b"cpu_store_resident32".len())
+            .any(|window| window == b"cpu_store_resident32")
+    );
+    assert!(
+        !module
+            .windows(b"cpu_store32".len())
+            .any(|window| window == b"cpu_store32")
+    );
     let mut actual = vec![0; bytes.len()];
     let memory = engine.memory().unwrap();
     memory.fetch(GuestAddress(CODE), &mut actual).unwrap();

@@ -258,14 +258,23 @@ fn admitted(instruction: &[u8], operation: Operation) {
             }
     );
     let module = engine.resident_bytes(id).unwrap();
-    assert_eq!(module.windows(6).any(|window| window == b"read32"), reads);
     assert_eq!(
         module
-            .windows(16)
-            .any(|window| window == b"store_resident32"),
+            .windows(b"cpu_read32".len())
+            .any(|window| window == b"cpu_read32"),
+        reads
+    );
+    assert_eq!(
+        module
+            .windows(b"cpu_store_resident32".len())
+            .any(|window| window == b"cpu_store_resident32"),
         stores
     );
-    assert!(!module.windows(7).any(|window| window == b"store32"));
+    assert!(
+        !module
+            .windows(b"cpu_store32".len())
+            .any(|window| window == b"cpu_store32")
+    );
     let mut actual = vec![0; bytes.len()];
     let memory = engine.memory().unwrap();
     memory.fetch(GuestAddress(CODE), &mut actual).unwrap();

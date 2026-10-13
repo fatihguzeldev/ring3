@@ -334,8 +334,8 @@ while (offset<input.length) {
   assert.deepEqual(WebAssembly.Module.imports(module), [
     {module:'env',name:'memory',kind:'memory'},
     {module:'ring3',name:resident?'guard_resident':'guard',kind:'function'},
-    {module:'ring3',name:'read32',kind:'function'},
-    {module:'ring3',name:resident?'store_resident32':'store32',kind:'function'}]);
+    {module:'ring3',name:'cpu_read32',kind:'function'},
+    {module:'ring3',name:resident?'cpu_store_resident32':'cpu_store32',kind:'function'}]);
   assert.deepEqual(WebAssembly.Module.exports(module),[{name:'run',kind:'function'}]);
   const sections=new Map(), file=cursor(bytes.subarray(8));
   while (file.more()) {const id=file.byte(), size=file.u(); sections.set(id,file.take(size));}

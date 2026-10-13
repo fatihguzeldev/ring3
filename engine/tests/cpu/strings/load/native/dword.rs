@@ -44,7 +44,7 @@ const assert = require('node:assert/strict'), bytes = require('node:fs').readFil
 assert.ok(WebAssembly.validate(bytes));
 const module = new WebAssembly.Module(bytes);
 assert.deepEqual(WebAssembly.Module.imports(module), [{module:'env',name:'memory',kind:'memory'},
-  ...['guard','read8'].map(name=>({module:'ring3',name,kind:'function'}))]);
+  ...['guard','cpu_read8'].map(name=>({module:'ring3',name,kind:'function'}))]);
 "#,
         ])
         .stdin(Stdio::piped())
@@ -254,7 +254,7 @@ while(at<input.length){const resident=input[at++],size=input.readUInt32LE(at);at
 const bytes=input.subarray(at,at+size);at+=size;assert.ok(WebAssembly.validate(bytes));
 const module=new WebAssembly.Module(bytes);
 assert.deepEqual(WebAssembly.Module.imports(module),[{module:'env',name:'memory',kind:'memory'},
-... [resident?'guard_resident':'guard','read32'].map(name=>({module:'ring3',name,kind:'function'}))]);count++;}
+... [resident?'guard_resident':'guard','cpu_read32'].map(name=>({module:'ring3',name,kind:'function'}))]);count++;}
 assert.equal(at,input.length);assert.equal(count,4);
 "#]).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped()).spawn().unwrap();
     child.stdin.take().unwrap().write_all(&input).unwrap();

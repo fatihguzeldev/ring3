@@ -130,7 +130,7 @@ fn declarations(owner: Owner) -> Vec<u8> {
         if resident { "guard_resident" } else { "guard" },
         EntityType::Function(1),
     );
-    imports.import("ring3", "read32", EntityType::Function(2));
+    imports.import("ring3", "cpu_read32", EntityType::Function(2));
     module.section(&imports);
     let mut functions = FunctionSection::new();
     functions.function(0);

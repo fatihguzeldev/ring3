@@ -188,7 +188,7 @@ fn memory_byte_ea_identities_need_read8_in_four_bound_profiles() {
         ));
     fs::create_dir_all(&output).unwrap();
     let mut command = Command::new("node");
-    command.arg("-e").arg("const f=require('node:fs'),a=require('node:assert/strict');for(let i=1;i<process.argv.length;i+=2){const m=new WebAssembly.Module(f.readFileSync(process.argv[i]));a.deepEqual(WebAssembly.Module.imports(m),[{module:'env',name:'memory',kind:'memory'},{module:'ring3',name:process.argv[i+1],kind:'function'},{module:'ring3',name:'read8',kind:'function'}]);a.deepEqual(WebAssembly.Module.exports(m),[{name:'run',kind:'function'}]);}");
+    command.arg("-e").arg("const f=require('node:fs'),a=require('node:assert/strict');for(let i=1;i<process.argv.length;i+=2){const m=new WebAssembly.Module(f.readFileSync(process.argv[i]));a.deepEqual(WebAssembly.Module.imports(m),[{module:'env',name:'memory',kind:'memory'},{module:'ring3',name:process.argv[i+1],kind:'function'},{module:'ring3',name:'cpu_read8',kind:'function'}]);a.deepEqual(WebAssembly.Module.exports(m),[{name:'run',kind:'function'}]);}");
     for resident in [false, true] {
         for entries in [false, true] {
             let mut engine = fixture(CODE, &bytes);

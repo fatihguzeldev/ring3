@@ -367,36 +367,36 @@ fn locked_or32_pure_and_mixed_helpers_share_existing_types_and_keep_import_order
                 let mut types = vec![4, guard];
                 if is_mixed {
                     imports.extend([
-                        ("read32", 1),
+                        ("cpu_read32", 1),
                         (
                             if resident {
-                                "store_resident32"
+                                "cpu_store_resident32"
                             } else {
-                                "store32"
+                                "cpu_store32"
                             },
                             store,
                         ),
                         (
                             if resident {
-                                "compare_exchange_resident32"
+                                "cpu_compare_exchange_resident32"
                             } else {
-                                "compare_exchange32"
+                                "cpu_compare_exchange32"
                             },
                             cas,
                         ),
                         (
                             if resident {
-                                "bit_test_set_resident32"
+                                "cpu_bit_test_set_resident32"
                             } else {
-                                "bit_test_set32"
+                                "cpu_bit_test_set32"
                             },
                             store,
                         ),
                         (
                             if resident {
-                                "bit_test_reset_resident32"
+                                "cpu_bit_test_reset_resident32"
                             } else {
-                                "bit_test_reset32"
+                                "cpu_bit_test_reset32"
                             },
                             store,
                         ),
@@ -407,9 +407,9 @@ fn locked_or32_pure_and_mixed_helpers_share_existing_types_and_keep_import_order
                 }
                 imports.push((
                     if resident {
-                        "atomic_or_resident_u32"
+                        "cpu_atomic_or_resident_u32"
                     } else {
-                        "atomic_or_u32"
+                        "cpu_atomic_or_u32"
                     },
                     store,
                 ));

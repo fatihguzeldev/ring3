@@ -411,9 +411,9 @@ fn locked_xadd32_only_its_two_or_six_word_helper_is_imported() {
                     ),
                     (
                         if resident {
-                            "exchange_add_resident32"
+                            "cpu_exchange_add_resident32"
                         } else {
-                            "exchange_add32"
+                            "cpu_exchange_add32"
                         },
                         if resident { 6 } else { 2 },
                     ),
@@ -455,36 +455,36 @@ fn locked_xadd32_mixed_old_two_or_six_types_and_cas_three_or_seven_remain_distin
                 let mut types = vec![4, guard];
                 if with_old {
                     expected.extend([
-                        ("read32", 1),
+                        ("cpu_read32", 1),
                         (
                             if resident {
-                                "store_resident32"
+                                "cpu_store_resident32"
                             } else {
-                                "store32"
+                                "cpu_store32"
                             },
                             store,
                         ),
                         (
                             if resident {
-                                "exchange_resident32"
+                                "cpu_exchange_resident32"
                             } else {
-                                "exchange32"
+                                "cpu_exchange32"
                             },
                             store,
                         ),
                         (
                             if resident {
-                                "exchange_resident8"
+                                "cpu_exchange_resident8"
                             } else {
-                                "exchange8"
+                                "cpu_exchange8"
                             },
                             store,
                         ),
                         (
                             if resident {
-                                "exchange_resident16"
+                                "cpu_exchange_resident16"
                             } else {
-                                "exchange16"
+                                "cpu_exchange16"
                             },
                             store,
                         ),
@@ -494,17 +494,17 @@ fn locked_xadd32_mixed_old_two_or_six_types_and_cas_three_or_seven_remain_distin
                 expected.extend([
                     (
                         if resident {
-                            "compare_exchange_resident32"
+                            "cpu_compare_exchange_resident32"
                         } else {
-                            "compare_exchange32"
+                            "cpu_compare_exchange32"
                         },
                         compare,
                     ),
                     (
                         if resident {
-                            "exchange_add_resident32"
+                            "cpu_exchange_add_resident32"
                         } else {
-                            "exchange_add32"
+                            "cpu_exchange_add32"
                         },
                         store,
                     ),

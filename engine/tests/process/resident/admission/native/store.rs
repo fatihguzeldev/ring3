@@ -207,11 +207,19 @@ fn admitted(instruction: &[u8], destination: EffectiveAddress, source: Value32) 
     );
     assert!(
         bytes
-            .windows(16)
-            .any(|window| window == b"store_resident32")
+            .windows(b"cpu_store_resident32".len())
+            .any(|window| window == b"cpu_store_resident32")
     );
-    assert!(!bytes.windows(7).any(|window| window == b"store32"));
-    assert!(!bytes.windows(6).any(|window| window == b"read32"));
+    assert!(
+        !bytes
+            .windows(b"cpu_store32".len())
+            .any(|window| window == b"cpu_store32")
+    );
+    assert!(
+        !bytes
+            .windows(b"cpu_read32".len())
+            .any(|window| window == b"cpu_read32")
+    );
     let memory = engine.memory().unwrap();
     for address in [0, DATA, 0x8000, u32::MAX] {
         assert!(memory.resolve(GuestAddress(address), Access::Read).is_err());

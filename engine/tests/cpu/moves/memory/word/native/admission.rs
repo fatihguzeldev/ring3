@@ -310,25 +310,32 @@ fn assert_imports(wasm: &[u8], owner: Owner, helpers: &[&str]) {
 fn four_bound_profiles_select_exact_narrow_and_mixed_imports_without_data_access() {
     let mut cases: Vec<(Vec<u8>, &[&str])> = Vec::new();
     for register in 0..8 {
-        cases.push((vec![0x66, 0x8b, 0x03 | register << 3], &["read16"]));
-        cases.push((vec![0x66, 0x89, 0x03 | register << 3], &["store16"]));
+        cases.push((vec![0x66, 0x8b, 0x03 | register << 3], &["cpu_read16"]));
+        cases.push((vec![0x66, 0x89, 0x03 | register << 3], &["cpu_store16"]));
     }
-    cases.push((vec![0x66, 0xc7, 0x03, 0x34, 0x12], &["store16"]));
+    cases.push((vec![0x66, 0xc7, 0x03, 0x34, 0x12], &["cpu_store16"]));
     cases.push((
         vec![0x66, 0x89, 0x03, 0x66, 0xc7, 0x03, 0x34, 0x12],
-        &["store16"],
+        &["cpu_store16"],
     ));
     cases.push((
         vec![
             0x66, 0x8b, 0x03, 0x66, 0x89, 0x03, 0x66, 0xc7, 0x03, 0x34, 0x12,
         ],
-        &["read16", "store16"],
+        &["cpu_read16", "cpu_store16"],
     ));
     cases.push((
         vec![
             0x8b, 0x03, 0x89, 0x03, 0x8a, 0x03, 0x88, 0x03, 0x66, 0x8b, 0x03, 0x66, 0x89, 0x03,
         ],
-        &["read32", "store32", "read8", "read16", "store8", "store16"],
+        &[
+            "cpu_read32",
+            "cpu_store32",
+            "cpu_read8",
+            "cpu_read16",
+            "cpu_store8",
+            "cpu_store16",
+        ],
     ));
     for (mut bytes, helpers) in cases {
         bytes.extend([0xeb, 0]);

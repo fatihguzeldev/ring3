@@ -224,11 +224,11 @@ fn assert_rmw_module(engine: &EngineInstance, owner: Owner, id: u64) {
     assert_eq!((unsigned(&mut imports), unsigned(&mut imports)), (0, 1));
     let names = [
         if resident { "guard_resident" } else { "guard" },
-        "read32",
+        "cpu_read32",
         if resident {
-            "store_resident32"
+            "cpu_store_resident32"
         } else {
-            "store32"
+            "cpu_store32"
         },
     ];
     for (index, expected) in names.into_iter().enumerate() {

@@ -646,12 +646,12 @@ fn checked_word_rmw_interface(wasm: &[u8], resident: bool) {
     assert_eq!((imports.unsigned(), imports.unsigned()), (0, 1));
     for (name, index) in [
         (if resident { "guard_resident" } else { "guard" }, 1),
-        ("read16", 2),
+        ("cpu_read16", 2),
         (
             if resident {
-                "store_resident16"
+                "cpu_store_resident16"
             } else {
-                "store16"
+                "cpu_store16"
             },
             3,
         ),

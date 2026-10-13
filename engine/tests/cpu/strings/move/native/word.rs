@@ -52,7 +52,7 @@ fn existing_movsb_movsd_modules_capture_without_guest_execution() {
 const assert = require('node:assert/strict');
 const input = require('node:fs').readFileSync(0);
 let at = 0, count = 0;
-for (const names of [['guard', 'read8', 'store8'], ['guard', 'read32', 'store32']]) {
+for (const names of [['guard', 'cpu_read8', 'cpu_store8'], ['guard', 'cpu_read32', 'cpu_store32']]) {
   const size = input.readUInt32LE(at); at += 4;
   assert.ok(size > 0 && at + size <= input.length);
   const module = new WebAssembly.Module(input.subarray(at, at + size)); at += size;
@@ -305,7 +305,7 @@ while(at<input.length){const resident=input[at++],size=input.readUInt32LE(at);at
  const bytes=input.subarray(at,at+size);at+=size;assert.ok(WebAssembly.validate(bytes));
  const module=new WebAssembly.Module(bytes);
  assert.deepEqual(WebAssembly.Module.imports(module),[{module:'env',name:'memory',kind:'memory'},
- ...[resident?'guard_resident':'guard','read16',resident?'store_resident16':'store16'].map(name=>({module:'ring3',name,kind:'function'}))]);
+ ...[resident?'guard_resident':'guard','cpu_read16',resident?'cpu_store_resident16':'cpu_store16'].map(name=>({module:'ring3',name,kind:'function'}))]);
  assert.deepEqual(WebAssembly.Module.exports(module),[{name:'run',kind:'function'}]);
  let p=8;const leb=()=>{let n=0,s=0,b;do{b=bytes[p++];n|=(b&127)<<s;s+=7;}while(b&128);return n>>>0;};
  const sections=new Map();while(p<bytes.length){const id=bytes[p++],n=leb();sections.set(id,[p,p+n]);p+=n;}

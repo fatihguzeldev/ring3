@@ -206,7 +206,7 @@ fn assert_read_only_imports(engine: &EngineInstance, owner: Owner, id: u64) {
         vec![
             ("env".to_owned(), "memory".to_owned()),
             ("ring3".to_owned(), guard.to_owned()),
-            ("ring3".to_owned(), "read32".to_owned()),
+            ("ring3".to_owned(), "cpu_read32".to_owned()),
         ]
     );
 }

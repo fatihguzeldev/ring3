@@ -40,10 +40,10 @@ use std::{
 #[test]
 fn existing_byte_and_dword_compare_scan_modules_validate_without_guest_execution() {
     for (opcode, name, helper) in [
-        (0xa6, "cmpsb", "read8"),
-        (0xae, "scasb", "read8"),
-        (0xa7, "cmpsd", "read32"),
-        (0xaf, "scasd", "read32"),
+        (0xa6, "cmpsb", "cpu_read8"),
+        (0xae, "scasb", "cpu_read8"),
+        (0xa7, "cmpsd", "cpu_read32"),
+        (0xaf, "scasd", "cpu_read32"),
     ] {
         let mut engine = EngineInstance::new(1, KEY).unwrap();
         engine.map(PC, 1, 7).unwrap();
@@ -350,7 +350,7 @@ while(at<input.length){const resident=input[at++],size=input.readUInt32LE(at);at
  const bytes=input.subarray(at,at+size);at+=size;assert.ok(WebAssembly.validate(bytes));
  const module=new WebAssembly.Module(bytes);
  assert.deepEqual(WebAssembly.Module.imports(module),[{module:'env',name:'memory',kind:'memory'},
- ...[resident?'guard_resident':'guard','read16'].map(name=>({module:'ring3',name,kind:'function'}))]);
+ ...[resident?'guard_resident':'guard','cpu_read16'].map(name=>({module:'ring3',name,kind:'function'}))]);
  assert.deepEqual(WebAssembly.Module.exports(module),[{name:'run',kind:'function'}]);
  let p=8;const leb=()=>{let n=0,s=0,b;do{b=bytes[p++];n|=(b&127)<<s;s+=7;}while(b&128);return n>>>0;};
  const sections=new Map();while(p<bytes.length){const id=bytes[p++],n=leb();sections.set(id,[p,p+n]);p+=n;}

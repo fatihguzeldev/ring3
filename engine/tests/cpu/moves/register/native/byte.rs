@@ -267,22 +267,22 @@ fn assert_module(wasm: &[u8], owner: Option<Owner>, id: u64, mixed: bool) {
     }
     if mixed {
         helpers.extend([
-            ("read32", 2),
+            ("cpu_read32", 2),
             (
                 if resident {
-                    "store_resident32"
+                    "cpu_store_resident32"
                 } else {
-                    "store32"
+                    "cpu_store32"
                 },
                 3,
             ),
-            ("read8", 2),
-            ("read16", 2),
+            ("cpu_read8", 2),
+            ("cpu_read16", 2),
             (
                 if resident {
-                    "store_resident8"
+                    "cpu_store_resident8"
                 } else {
-                    "store8"
+                    "cpu_store8"
                 },
                 3,
             ),

@@ -215,14 +215,14 @@ fn admit(bytes: &[u8]) {
             .unwrap();
         assert_eq!(output, bytes);
         let artifact = instance.artifact_bytes().unwrap();
-        for required in [b"read32".as_slice(), b"store32"] {
+        for required in [b"cpu_read32".as_slice(), b"cpu_store32"] {
             assert!(
                 artifact
                     .windows(required.len())
                     .any(|part| part == required)
             );
         }
-        for excluded in [b"read8".as_slice(), b"read16"] {
+        for excluded in [b"cpu_read8".as_slice(), b"cpu_read16"] {
             assert!(
                 !artifact
                     .windows(excluded.len())
@@ -600,18 +600,18 @@ fn narrow_prefix_and_declared_span_errors_remain_precise() {
                     );
                     let artifact = instance.artifact_bytes().unwrap();
                     let required = if kind == BinaryKind::Or {
-                        b"atomic_or_u32".as_slice()
+                        b"cpu_atomic_or_u32".as_slice()
                     } else if kind == BinaryKind::And {
-                        b"atomic_and_u32".as_slice()
+                        b"cpu_atomic_and_u32".as_slice()
                     } else {
-                        b"atomic_xor_u32".as_slice()
+                        b"cpu_atomic_xor_u32".as_slice()
                     };
                     assert!(
                         artifact
                             .windows(required.len())
                             .any(|part| part == required)
                     );
-                    for excluded in [b"read32".as_slice(), b"store32"] {
+                    for excluded in [b"cpu_read32".as_slice(), b"cpu_store32"] {
                         assert!(
                             !artifact
                                 .windows(excluded.len())

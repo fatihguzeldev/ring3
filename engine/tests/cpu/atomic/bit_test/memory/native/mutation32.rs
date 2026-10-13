@@ -278,7 +278,7 @@ function u(p){let x=0,s=0,v;do{v=b[p.i++];x|=(v&127)<<s;s+=7;}while(v&128);retur
 while(at<b.length){const resident=b[at++],size=b.readUInt32LE(at);at+=4;const end=at+size;
 a.ok(WebAssembly.validate(b.subarray(at,end)));const m=new WebAssembly.Module(b.subarray(at,end));
 a.deepEqual(WebAssembly.Module.imports(m),[{module:'env',name:'memory',kind:'memory'},
-...[resident?'guard_resident':'guard','read32',resident?'store_resident32':'store32'].map(name=>({module:'ring3',name,kind:'function'}))]);
+...[resident?'guard_resident':'guard','cpu_read32',resident?'cpu_store_resident32':'cpu_store32'].map(name=>({module:'ring3',name,kind:'function'}))]);
 a.deepEqual(WebAssembly.Module.exports(m),[{name:'run',kind:'function'}]);
 const p={i:at+8};let found=0;while(p.i<end){const id=b[p.i++],stop=u(p)+p.i;
 if(id===1){const arities=[4,resident?7:6,1,resident?6:2,6];a.equal(u(p),arities.length);for(const arity of arities){a.equal(b[p.i++],96);a.equal(u(p),arity);for(let i=0;i<arity;i++)a.equal(b[p.i++],127);a.equal(u(p),1);a.equal(b[p.i++],127);}a.equal(p.i,stop);found|=1;}

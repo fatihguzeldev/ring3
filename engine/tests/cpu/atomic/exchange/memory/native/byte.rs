@@ -279,9 +279,9 @@ fn assert_exchange_imports(wasm: &[u8], resident: bool) {
         for (index, expected) in [
             if resident { "guard_resident" } else { "guard" },
             if resident {
-                "exchange_resident8"
+                "cpu_exchange_resident8"
             } else {
-                "exchange8"
+                "cpu_exchange8"
             },
         ]
         .into_iter()
@@ -383,17 +383,17 @@ fn memory_xchg8_mixed_dword_byte_imports_share_the_existing_store_type() {
                         (if resident { "guard_resident" } else { "guard" }, 1),
                         (
                             if resident {
-                                "exchange_resident32"
+                                "cpu_exchange_resident32"
                             } else {
-                                "exchange32"
+                                "cpu_exchange32"
                             },
                             2,
                         ),
                         (
                             if resident {
-                                "exchange_resident8"
+                                "cpu_exchange_resident8"
                             } else {
-                                "exchange8"
+                                "cpu_exchange8"
                             },
                             2,
                         ),

@@ -107,8 +107,12 @@ fn admit(bytes: &[u8]) {
             .unwrap();
         assert_eq!(output, bytes);
         let artifact = instance.artifact_bytes().unwrap();
-        assert!(artifact.windows(6).any(|part| part == b"read32"));
-        for excluded in [b"store32".as_slice(), b"read8", b"read16"] {
+        assert!(
+            artifact
+                .windows(b"cpu_read32".len())
+                .any(|part| part == b"cpu_read32")
+        );
+        for excluded in [b"cpu_store32".as_slice(), b"cpu_read8", b"cpu_read16"] {
             assert!(
                 !artifact
                     .windows(excluded.len())

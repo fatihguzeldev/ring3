@@ -215,11 +215,11 @@ fn section(wasm: &[u8], kind: u8) -> &[u8] {
 }
 fn assert_module(wasm: &[u8], resident: bool, opcode: u8) {
     let helper = if opcode == 0xa0 {
-        "read8"
+        "cpu_read8"
     } else if resident {
-        "store_resident8"
+        "cpu_store_resident8"
     } else {
-        "store8"
+        "cpu_store8"
     };
     let mut types = vec![4];
     for arity in [

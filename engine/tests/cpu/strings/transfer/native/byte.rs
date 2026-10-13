@@ -165,7 +165,7 @@ while (at < input.length) {
   const bytes = input.subarray(at, at + length); at += length;
   assert.ok(WebAssembly.validate(bytes));
   const module = new WebAssembly.Module(bytes);
-  const helper = opcode === 0xac ? 'read8' : resident ? 'store_resident8' : 'store8';
+  const helper = opcode === 0xac ? 'cpu_read8' : resident ? 'cpu_store_resident8' : 'cpu_store8';
   assert.deepEqual(WebAssembly.Module.imports(module), [{module:'env',name:'memory',kind:'memory'},
     ...[resident ? 'guard_resident' : 'guard', helper].map(name => ({module:'ring3',name,kind:'function'}))]);
   count++;

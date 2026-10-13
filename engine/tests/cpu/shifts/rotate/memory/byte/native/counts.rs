@@ -387,11 +387,11 @@ fn assert_rmw_module(engine: &EngineInstance, owner: Owner, id: u64) {
     );
     for (index, expected) in [
         if resident { "guard_resident" } else { "guard" },
-        "read8",
+        "cpu_read8",
         if resident {
-            "store_resident8"
+            "cpu_store_resident8"
         } else {
-            "store8"
+            "cpu_store8"
         },
     ]
     .into_iter()
@@ -466,8 +466,8 @@ while (at < input.length) {
   assert.deepEqual(WebAssembly.Module.imports(module), [
     {module:'env', name:'memory', kind:'memory'},
     {module:'ring3', name:owner === 1 ? 'guard' : 'guard_resident', kind:'function'},
-    {module:'ring3', name:'read8', kind:'function'},
-    {module:'ring3', name:owner === 1 ? 'store8' : 'store_resident8', kind:'function'}]);
+    {module:'ring3', name:'cpu_read8', kind:'function'},
+    {module:'ring3', name:owner === 1 ? 'cpu_store8' : 'cpu_store_resident8', kind:'function'}]);
   assert.deepEqual(WebAssembly.Module.exports(module), [{name:'run', kind:'function'}]);
   count++;
 }

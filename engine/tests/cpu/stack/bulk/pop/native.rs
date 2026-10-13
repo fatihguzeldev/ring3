@@ -100,12 +100,12 @@ fn assert_bound_admission(bytes: &[u8], resident: bool, entries: bool) {
     };
     assert!(module.windows(helper.len()).any(|bytes| bytes == helper));
     for legacy in [
-        b"read32".as_slice(),
-        b"read16",
-        b"store32",
-        b"store16",
-        b"store_resident32",
-        b"store_resident16",
+        b"cpu_read32".as_slice(),
+        b"cpu_read16",
+        b"cpu_store32",
+        b"cpu_store16",
+        b"cpu_store_resident32",
+        b"cpu_store_resident16",
     ] {
         assert!(!module.windows(legacy.len()).any(|bytes| bytes == legacy));
     }

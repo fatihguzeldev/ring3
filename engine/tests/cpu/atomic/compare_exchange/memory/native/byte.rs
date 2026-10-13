@@ -200,11 +200,11 @@ fn assert_imports(wasm: &[u8], resident: bool) {
         assert_eq!((unsigned(&mut section), unsigned(&mut section)), (0, 1));
         for (index, expected) in [
             if resident { "guard_resident" } else { "guard" },
-            "read8",
+            "cpu_read8",
             if resident {
-                "store_resident8"
+                "cpu_store_resident8"
             } else {
-                "store8"
+                "cpu_store8"
             },
         ]
         .into_iter()

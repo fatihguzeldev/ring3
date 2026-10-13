@@ -229,7 +229,11 @@ fn mixed_register_and_immediate_operations_use_only_the_existing_atomic_helpers(
                     "{required}"
                 );
             }
-            for excluded in [b"read32".as_slice(), b"store32", b"compare_exchange32"] {
+            for excluded in [
+                b"cpu_read32".as_slice(),
+                b"cpu_store32",
+                b"cpu_compare_exchange32",
+            ] {
                 assert!(!module.windows(excluded.len()).any(|part| part == excluded));
             }
             assert!(module.len() <= 65_536);

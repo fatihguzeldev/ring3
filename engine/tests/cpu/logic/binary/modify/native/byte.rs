@@ -378,15 +378,15 @@ fn admit(forms: &[(Vec<u8>, Operation)]) {
             assert_eq!(&artifact[..8], b"\0asm\x01\0\0\0");
             assert!(artifact.len() <= CompileLimits::default().wasm_bytes);
             let (guard_name, store_name) = match owner {
-                Owner::Replacement => ("guard", "store8"),
-                Owner::Resident => ("guard_resident", "store_resident8"),
+                Owner::Replacement => ("guard", "cpu_store8"),
+                Owner::Resident => ("guard_resident", "cpu_store_resident8"),
             };
             assert_eq!(
                 imported_names(artifact),
                 vec![
                     ("env".to_owned(), "memory".to_owned()),
                     ("ring3".to_owned(), guard_name.to_owned()),
-                    ("ring3".to_owned(), "read8".to_owned()),
+                    ("ring3".to_owned(), "cpu_read8".to_owned()),
                     ("ring3".to_owned(), store_name.to_owned()),
                 ]
             );

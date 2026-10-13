@@ -366,7 +366,7 @@ fn eight_descriptors_crosspage_markers_and_gate_instruction_charges_keep_exact_b
             .windows(b"guard_resident".len())
             .any(|part| part == b"guard_resident")
     );
-    for absent in [b"read32".as_slice(), b"store_resident32".as_slice()] {
+    for absent in [b"cpu_read32".as_slice(), b"cpu_store_resident32".as_slice()] {
         assert!(!bytes.windows(absent.len()).any(|part| part == absent));
     }
     assert_eq!(engine.guard_resident(KEY, keep), Ok(()));

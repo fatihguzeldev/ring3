@@ -82,7 +82,7 @@ fn existing_immediate_and_word_string_modules_validate_and_optionally_capture() 
 const assert = require('node:assert/strict');
 const input = require('node:fs').readFileSync(0);
 let at = 0, count = 0;
-for (const names of [[], [], [], [], ['read16'], ['store16']]) {
+for (const names of [[], [], [], [], ['cpu_read16'], ['cpu_store16']]) {
   const size = input.readUInt32LE(at); at += 4;
   assert.ok(size > 8 && at + size <= input.length);
   const module = new WebAssembly.Module(input.subarray(at, at + size)); at += size;

@@ -316,15 +316,15 @@ fn admit(forms: &[(Vec<u8>, Operation)]) {
                 Owner::Replacement => b"guard".as_slice(),
                 Owner::Resident => b"guard_resident".as_slice(),
             };
-            for name in [b"read8".as_slice(), guard_name] {
+            for name in [b"cpu_read8".as_slice(), guard_name] {
                 assert!(artifact.windows(name.len()).any(|part| part == name));
             }
             for name in [
-                b"read16".as_slice(),
-                b"read32",
-                b"store8",
-                b"store16",
-                b"store32",
+                b"cpu_read16".as_slice(),
+                b"cpu_read32",
+                b"cpu_store8",
+                b"cpu_store16",
+                b"cpu_store32",
             ] {
                 assert!(!artifact.windows(name.len()).any(|part| part == name));
             }

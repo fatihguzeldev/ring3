@@ -46,7 +46,7 @@ const module = new WebAssembly.Module(bytes);
 assert.deepEqual(WebAssembly.Module.imports(module), [
   {module:'env',name:'memory',kind:'memory'},
   {module:'ring3',name:'guard',kind:'function'},
-  {module:'ring3',name:'read32',kind:'function'},
+  {module:'ring3',name:'cpu_read32',kind:'function'},
 ]);
 assert.deepEqual(WebAssembly.Module.exports(module), [{name:'run',kind:'function'}]);
 "#;
@@ -264,7 +264,7 @@ function u(b,p){let v=0,s=0,x;do{x=b[p.i++];v|=(x&127)<<s;s+=7;}while(x&128);ret
 for(let i=1;i<process.argv.length;i+=2){
  const b=f.readFileSync(process.argv[i]);a.ok(WebAssembly.validate(b));const m=new WebAssembly.Module(b);
  a.deepEqual(WebAssembly.Module.imports(m),[{module:'env',name:'memory',kind:'memory'},
-  {module:'ring3',name:process.argv[i+1],kind:'function'},{module:'ring3',name:'read32',kind:'function'}]);
+  {module:'ring3',name:process.argv[i+1],kind:'function'},{module:'ring3',name:'cpu_read32',kind:'function'}]);
  a.deepEqual(WebAssembly.Module.exports(m),[{name:'run',kind:'function'}]);
  const p={i:8};let found=0;while(p.i<b.length){const id=b[p.i++],end=u(b,p)+p.i;
   if(id===1){a.equal(u(b,p),4);

@@ -411,9 +411,9 @@ fn locked_cmpxchg32_only_its_three_or_seven_word_helper_is_imported() {
                     ),
                     (
                         if resident {
-                            "compare_exchange_resident32"
+                            "cpu_compare_exchange_resident32"
                         } else {
-                            "compare_exchange32"
+                            "cpu_compare_exchange32"
                         },
                         if resident { 7 } else { 3 },
                     ),
@@ -450,44 +450,44 @@ fn locked_cmpxchg32_mixed_old_memory_imports_keep_their_arity_and_new_type() {
                 module,
                 &[
                     (if resident { "guard_resident" } else { "guard" }, guard),
-                    ("read32", 1),
+                    ("cpu_read32", 1),
                     (
                         if resident {
-                            "store_resident32"
+                            "cpu_store_resident32"
                         } else {
-                            "store32"
+                            "cpu_store32"
                         },
                         store,
                     ),
                     (
                         if resident {
-                            "exchange_resident32"
+                            "cpu_exchange_resident32"
                         } else {
-                            "exchange32"
+                            "cpu_exchange32"
                         },
                         store,
                     ),
                     (
                         if resident {
-                            "exchange_resident8"
+                            "cpu_exchange_resident8"
                         } else {
-                            "exchange8"
+                            "cpu_exchange8"
                         },
                         store,
                     ),
                     (
                         if resident {
-                            "exchange_resident16"
+                            "cpu_exchange_resident16"
                         } else {
-                            "exchange16"
+                            "cpu_exchange16"
                         },
                         store,
                     ),
                     (
                         if resident {
-                            "compare_exchange_resident32"
+                            "cpu_compare_exchange_resident32"
                         } else {
-                            "compare_exchange32"
+                            "cpu_compare_exchange32"
                         },
                         compare,
                     ),

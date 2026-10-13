@@ -157,10 +157,10 @@ const assert=require('node:assert/strict'), b=require('node:fs').readFileSync(0)
 while(at<b.length){const resident=b[at++],n=b.readUInt32LE(at);at+=4;
  const module=new WebAssembly.Module(b.subarray(at,at+n));at+=n;
  assert.deepEqual(WebAssembly.Module.imports(module),[{module:'env',name:'memory',kind:'memory'},
- ...[resident?'guard_resident':'guard','read8'].map(name=>({module:'ring3',name,kind:'function'}))]);
+ ...[resident?'guard_resident':'guard','cpu_read8'].map(name=>({module:'ring3',name,kind:'function'}))]);
  assert.deepEqual(WebAssembly.Module.exports(module),[{name:'run',kind:'function'}]);
  const run=new WebAssembly.Instance(module,{env:{memory:new WebAssembly.Memory({initial:1})},
- ring3:{guard(){return 0;},guard_resident(){return 0;},read8(){return 0;}}}).exports.run;
+ ring3:{guard(){return 0;},guard_resident(){return 0;},cpu_read8(){return 0;}}}).exports.run;
  assert.equal(run.length,4);count++;
 }assert.equal(count,4);
 "#]).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped()).spawn().unwrap();

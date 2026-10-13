@@ -165,7 +165,7 @@ while (at < input.length) {
   const module = new WebAssembly.Module(bytes);
   assert.deepEqual(WebAssembly.Module.imports(module), [
     {module:'env',name:'memory',kind:'memory'},
-    ...[resident ? 'guard_resident' : 'guard', 'read8', resident ? 'store_resident8' : 'store8']
+    ...[resident ? 'guard_resident' : 'guard', 'cpu_read8', resident ? 'cpu_store_resident8' : 'cpu_store8']
       .map(name => ({module:'ring3',name,kind:'function'}))]);
   count++;
 }

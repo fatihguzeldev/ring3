@@ -175,13 +175,13 @@ fn declarations(owner: Owner) -> Vec<u8> {
         if resident { "guard_resident" } else { "guard" },
         EntityType::Function(1),
     );
-    imports.import("ring3", "read8", EntityType::Function(2));
+    imports.import("ring3", "cpu_read8", EntityType::Function(2));
     imports.import(
         "ring3",
         if resident {
-            "store_resident8"
+            "cpu_store_resident8"
         } else {
-            "store8"
+            "cpu_store8"
         },
         EntityType::Function(3),
     );

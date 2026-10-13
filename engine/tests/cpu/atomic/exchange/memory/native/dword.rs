@@ -279,9 +279,9 @@ fn assert_exchange_imports(wasm: &[u8], resident: bool) {
         for (index, expected) in [
             if resident { "guard_resident" } else { "guard" },
             if resident {
-                "exchange_resident32"
+                "cpu_exchange_resident32"
             } else {
-                "exchange32"
+                "cpu_exchange32"
             },
         ]
         .into_iter()

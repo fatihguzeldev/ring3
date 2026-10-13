@@ -359,7 +359,7 @@ fn admit(forms: &[(Vec<u8>, Operation)]) {
                 vec![
                     ("env".to_owned(), "memory".to_owned()),
                     ("ring3".to_owned(), guard_name.to_owned()),
-                    ("ring3".to_owned(), "read8".to_owned()),
+                    ("ring3".to_owned(), "cpu_read8".to_owned()),
                 ]
             );
             modules.push((id, artifact.to_vec()));

@@ -279,24 +279,24 @@ fn assert_module(engine: &EngineInstance, owner: Owner, id: u64, mixed: bool) {
     }
     assert!(types.is_empty());
     let store_name = if resident {
-        "store_resident8"
+        "cpu_store_resident8"
     } else {
-        "store8"
+        "cpu_store8"
     };
     let mut functions = vec![(if resident { "guard_resident" } else { "guard" }, 1)];
     if mixed {
         functions.extend([
-            ("read32", 2),
+            ("cpu_read32", 2),
             (
                 if resident {
-                    "store_resident32"
+                    "cpu_store_resident32"
                 } else {
-                    "store32"
+                    "cpu_store32"
                 },
                 3,
             ),
-            ("read8", 2),
-            ("read16", 2),
+            ("cpu_read8", 2),
+            ("cpu_read16", 2),
         ]);
     }
     functions.push((store_name, if mixed { 3 } else { 2 }));

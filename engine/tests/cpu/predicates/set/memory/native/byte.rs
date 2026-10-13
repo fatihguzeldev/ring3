@@ -328,8 +328,8 @@ fn store_only_declarations(bytes: &[u8], owner: Owner) {
         Owner::Resident => "guard_resident",
     };
     let store_name = match owner {
-        Owner::Replacement => "store8",
-        Owner::Resident => "store_resident8",
+        Owner::Replacement => "cpu_store8",
+        Owner::Resident => "cpu_store_resident8",
     };
     for (expected_name, type_index) in [(guard_name, 1), (store_name, 2)] {
         assert_eq!(

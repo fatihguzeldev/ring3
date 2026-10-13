@@ -58,7 +58,7 @@ fn old_predicates_and_word_paths_validate_and_optionally_capture_without_guest_e
         ("byte-cmp", &[0x38, 0xe0], ""),
         ("dword-cmp", &[0x39, 0xc3], ""),
         ("word-mov", &[0x66, 0x89, 0xc3], ""),
-        ("cmpsw", &[0x66, 0xa7], "read16"),
+        ("cmpsw", &[0x66, 0xa7], "cpu_read16"),
     ];
     if let Some(directory) = &directory {
         assert!(directory.is_dir() && !directory.is_symlink());

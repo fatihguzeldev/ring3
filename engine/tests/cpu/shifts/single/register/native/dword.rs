@@ -563,11 +563,11 @@ fn all_gprs_and_count_forms_admit_in_bound_profiles_without_stack_or_helpers() {
                 let bytes = module(&engine, owner, id);
                 assert!(contains(bytes, b"guard"));
                 for excluded in [
-                    b"read8".as_slice(),
-                    b"read16",
-                    b"read32",
-                    b"store32",
-                    b"store_resident32",
+                    b"cpu_read8".as_slice(),
+                    b"cpu_read16",
+                    b"cpu_read32",
+                    b"cpu_store32",
+                    b"cpu_store_resident32",
                 ] {
                     assert!(!contains(bytes, excluded), "{owner:?}: {excluded:?}");
                 }

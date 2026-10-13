@@ -165,11 +165,15 @@ fn all_seventeen_reads_admit_without_data_and_preserve_legacy_and_retained_units
         );
         assert_eq!(engine.guard_resident(KEY, id.get()), Ok(()));
         let bytes = engine.resident_bytes(id.get()).unwrap();
-        assert!(!bytes.windows(7).any(|window| window == b"store32"));
+        assert!(
+            !bytes
+                .windows(b"cpu_store32".len())
+                .any(|window| window == b"cpu_store32")
+        );
         let read = match name {
-            "movzx8" | "movsx8" => &b"read8"[..],
-            "movzx16" | "movsx16" => &b"read16"[..],
-            _ => &b"read32"[..],
+            "movzx8" | "movsx8" => &b"cpu_read8"[..],
+            "movzx16" | "movsx16" => &b"cpu_read16"[..],
+            _ => &b"cpu_read32"[..],
         };
         assert!(
             bytes.windows(read.len()).any(|window| window == read),

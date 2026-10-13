@@ -662,7 +662,7 @@ fn checked_word_read_interface(wasm: &[u8], resident: bool) {
     assert_eq!((imports.unsigned(), imports.unsigned()), (0, 1));
     for (name, index) in [
         (if resident { "guard_resident" } else { "guard" }, 1),
-        ("read16", 2),
+        ("cpu_read16", 2),
     ] {
         assert_eq!(
             (

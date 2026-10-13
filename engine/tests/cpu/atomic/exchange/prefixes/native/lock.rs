@@ -215,11 +215,11 @@ fn every_bound_capture_reuses_existing_atomic_helpers_without_reading_operands()
                 }
             };
             for (normal, bound) in [
-                ("exchange8", "exchange_resident8"),
-                ("exchange16", "exchange_resident16"),
-                ("exchange32", "exchange_resident32"),
-                ("compare_exchange16", "compare_exchange_resident16"),
-                ("exchange_add16", "exchange_add_resident16"),
+                ("cpu_exchange8", "cpu_exchange_resident8"),
+                ("cpu_exchange16", "cpu_exchange_resident16"),
+                ("cpu_exchange32", "cpu_exchange_resident32"),
+                ("cpu_compare_exchange16", "cpu_compare_exchange_resident16"),
+                ("cpu_exchange_add16", "cpu_exchange_add_resident16"),
             ] {
                 let name = if resident { bound } else { normal };
                 assert!(

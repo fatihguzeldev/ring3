@@ -614,18 +614,18 @@ fn bound_explicit_and_entry_forms_admit_without_data_and_preserve_arena() {
                 let writes = matches!(destination, Location32::Memory(_));
                 let bytes = module(&engine, owner, id);
                 assert!(contains(bytes, b"guard"));
-                assert_eq!(contains(bytes, b"read32"), has_memory);
+                assert_eq!(contains(bytes, b"cpu_read32"), has_memory);
                 assert_eq!(
                     contains(
                         bytes,
                         match owner {
-                            Owner::Replacement => b"store32".as_slice(),
-                            Owner::Resident => b"store_resident32".as_slice(),
+                            Owner::Replacement => b"cpu_store32".as_slice(),
+                            Owner::Resident => b"cpu_store_resident32".as_slice(),
                         }
                     ),
                     writes
                 );
-                for excluded in [b"read8".as_slice(), b"read16"] {
+                for excluded in [b"cpu_read8".as_slice(), b"cpu_read16"] {
                     assert!(!contains(bytes, excluded));
                 }
                 match owner {
@@ -810,7 +810,7 @@ fn bound_cold_carry_and_terminal_jump_do_not_fetch_unmapped_successor_or_data() 
             let id = compile(&mut engine, owner, true).unwrap();
             assert_eq!(engine.arena(), before);
             assert_eq!(engine.memory().unwrap().mapped_pages(), 1);
-            assert!(contains(module(&engine, owner, id), b"read32"));
+            assert!(contains(module(&engine, owner, id), b"cpu_read32"));
             assert!(
                 engine
                     .memory()

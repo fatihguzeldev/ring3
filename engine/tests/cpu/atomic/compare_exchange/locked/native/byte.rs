@@ -350,9 +350,9 @@ fn locked_cmpxchg8_only_its_three_or_seven_argument_helper_is_imported() {
                     ),
                     (
                         if resident {
-                            "compare_exchange_resident8"
+                            "cpu_compare_exchange_resident8"
                         } else {
-                            "compare_exchange8"
+                            "cpu_compare_exchange8"
                         },
                         if resident { 7 } else { 3 },
                     ),
@@ -390,60 +390,60 @@ fn locked_cmpxchg8_mixed_helpers_share_the_existing_cas_type_and_keep_old_order(
                 module,
                 &[
                     (if resident { "guard_resident" } else { "guard" }, guard),
-                    ("read8", 1),
+                    ("cpu_read8", 1),
                     (
                         if resident {
-                            "store_resident8"
+                            "cpu_store_resident8"
                         } else {
-                            "store8"
+                            "cpu_store8"
                         },
                         store,
                     ),
                     (
                         if resident {
-                            "exchange_resident32"
+                            "cpu_exchange_resident32"
                         } else {
-                            "exchange32"
+                            "cpu_exchange32"
                         },
                         store,
                     ),
                     (
                         if resident {
-                            "exchange_resident8"
+                            "cpu_exchange_resident8"
                         } else {
-                            "exchange8"
+                            "cpu_exchange8"
                         },
                         store,
                     ),
                     (
                         if resident {
-                            "exchange_resident16"
+                            "cpu_exchange_resident16"
                         } else {
-                            "exchange16"
+                            "cpu_exchange16"
                         },
                         store,
                     ),
                     (
                         if resident {
-                            "compare_exchange_resident32"
+                            "cpu_compare_exchange_resident32"
                         } else {
-                            "compare_exchange32"
+                            "cpu_compare_exchange32"
                         },
                         compare,
                     ),
                     (
                         if resident {
-                            "exchange_add_resident32"
+                            "cpu_exchange_add_resident32"
                         } else {
-                            "exchange_add32"
+                            "cpu_exchange_add32"
                         },
                         store,
                     ),
                     (
                         if resident {
-                            "compare_exchange_resident8"
+                            "cpu_compare_exchange_resident8"
                         } else {
-                            "compare_exchange8"
+                            "cpu_compare_exchange8"
                         },
                         compare,
                     ),

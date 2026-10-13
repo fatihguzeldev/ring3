@@ -342,9 +342,9 @@ fn locked_bts32_only_its_two_or_six_argument_helper_is_imported() {
                     (if resident { "guard_resident" } else { "guard" }, guard),
                     (
                         if resident {
-                            "bit_test_set_resident32"
+                            "cpu_bit_test_set_resident32"
                         } else {
-                            "bit_test_set32"
+                            "cpu_bit_test_set32"
                         },
                         store,
                     ),
@@ -380,36 +380,36 @@ fn locked_bts32_mixed_imports_keep_old_order_and_share_store_type() {
                 module,
                 &[
                     (if resident { "guard_resident" } else { "guard" }, guard),
-                    ("read32", 1),
+                    ("cpu_read32", 1),
                     (
                         if resident {
-                            "store_resident32"
+                            "cpu_store_resident32"
                         } else {
-                            "store32"
+                            "cpu_store32"
                         },
                         store,
                     ),
                     (
                         if resident {
-                            "compare_exchange_resident32"
+                            "cpu_compare_exchange_resident32"
                         } else {
-                            "compare_exchange32"
+                            "cpu_compare_exchange32"
                         },
                         cas,
                     ),
                     (
                         if resident {
-                            "exchange_add_resident16"
+                            "cpu_exchange_add_resident16"
                         } else {
-                            "exchange_add16"
+                            "cpu_exchange_add16"
                         },
                         store,
                     ),
                     (
                         if resident {
-                            "bit_test_set_resident32"
+                            "cpu_bit_test_set_resident32"
                         } else {
-                            "bit_test_set32"
+                            "cpu_bit_test_set32"
                         },
                         store,
                     ),

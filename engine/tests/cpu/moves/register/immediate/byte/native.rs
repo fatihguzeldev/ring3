@@ -272,9 +272,9 @@ fn assert_module(wasm: &[u8], owner: Option<Owner>, id: u64, store: bool) {
         arities.push(if resident { 6 } else { 2 });
         helpers.push((
             if resident {
-                "store_resident8"
+                "cpu_store_resident8"
             } else {
-                "store8"
+                "cpu_store8"
             },
             2,
         ));

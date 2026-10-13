@@ -26,7 +26,7 @@ use std::{
 
 #[test]
 fn existing_lodsb_and_lodsd_modules_validate_without_guest_execution() {
-    for (opcode, name, helper) in [(0xac, "lodsb", "read8"), (0xad, "lodsd", "read32")] {
+    for (opcode, name, helper) in [(0xac, "lodsb", "cpu_read8"), (0xad, "lodsd", "cpu_read32")] {
         let mut engine = EngineInstance::new(1, 0x5354_5556_5758_595a).unwrap();
         engine.map(PC, 1, 7).unwrap();
         engine.arena_mut().unwrap()[TRANSFER_OFFSET..TRANSFER_OFFSET + 3]
@@ -328,7 +328,7 @@ while(at<input.length){const resident=input[at++],size=input.readUInt32LE(at);at
 const bytes=input.subarray(at,at+size);at+=size;assert.ok(WebAssembly.validate(bytes));
 const module=new WebAssembly.Module(bytes);
 assert.deepEqual(WebAssembly.Module.imports(module),[{module:'env',name:'memory',kind:'memory'},
-...[resident?'guard_resident':'guard','read16'].map(name=>({module:'ring3',name,kind:'function'}))]);
+...[resident?'guard_resident':'guard','cpu_read16'].map(name=>({module:'ring3',name,kind:'function'}))]);
 assert.deepEqual(WebAssembly.Module.exports(module),[{name:'run',kind:'function'}]);count++;}
 assert.equal(at,input.length);assert.equal(count,4);
 "#]).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped()).spawn().unwrap();
