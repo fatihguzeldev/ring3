@@ -1,0 +1,32 @@
+{
+  "schema": "ring3-private-numeric-contract",
+  "version": 1,
+  "words": 96,
+  "layout": {
+    "general": [0, 8],
+    "eip": 8,
+    "eflags": 9,
+    "mxcsr": 10,
+    "reserved": [11, 12],
+    "xmm": [12, 44],
+    "ymmUpper": [44, 76],
+    "capturedOperand": [76, 84],
+    "sentinels": [84, 96]
+  },
+  "exports": {
+    "ring3_avx_probe_read": 1,
+    "ring3_avx_probe_run": 4,
+    "ring3_avx_probe_write": 2
+  },
+  "runArguments": ["operation", "registers", "immediate", "operandLength"],
+  "registerFields": {"destination": [0, 8], "first": [8, 16], "second": [16, 24], "sourceMemoryBit": 24},
+  "operations": {"compound": [38, 58], "foundation": [113, 180]},
+  "status": {"success": 0, "invalidRequest": 1, "invalidState": 2, "floatingPoint": 3},
+  "publication": {
+    "success": "shared CPU dispatch result; operand and sentinel words unchanged",
+    "invalidRequest": "all words unchanged",
+    "invalidState": "all words unchanged",
+    "floatingPoint": "only MXCSR sticky exceptions published"
+  },
+  "scope": "private captured-operand numeric tests; no guest memory authority or production engine compatibility claim"
+}

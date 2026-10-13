@@ -1,8 +1,9 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
+import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { verifyNumericReceipt } from "../../../../../../../tests/support/numeric/receipt.mjs";
 
 const binaryPath = resolve(process.argv[2] ?? process.env.RING3_AVX_NUMERIC_WASM ?? "");
 assert(binaryPath.endsWith(".wasm"), "supply the isolated real Rust numeric backend .wasm");
@@ -21,40 +22,7 @@ assert(backendReceiptArgument.length > 0, "supply the matching backend receipt")
 const backendReceiptPath = resolve(backendReceiptArgument);
 const backendReceiptBytes = readFileSync(backendReceiptPath);
 const backendReceipt = JSON.parse(backendReceiptBytes);
-assert.match(backendReceipt.backendSha256, /^[a-f0-9]{64}$/);
-assert.equal(sha256(binary), backendReceipt.backendSha256, "backend differs from its receipt");
-assert(Array.isArray(backendReceipt.sourcePaths) && backendReceipt.sourcePaths.length > 0);
-const requiredBackendSources = [
-  "src/abi/wasm/avx_proof.rs",
-  "src/cpu/x86/avx/mod.rs",
-  "src/cpu/x86/avx/compound/mod.rs",
-  "src/cpu/x86/avx/compound/fixtures/runtime/run.mjs",
-  "src/cpu/x86/simd.rs",
-  "src/cpu/x86/simd/float.rs",
-  "src/cpu/x86/simd/packed.rs",
-  "src/math/ieee.rs",
-];
-const backendSources = backendReceipt.sourcePaths.map((entry) => {
-  assert(Array.isArray(entry) && entry.length === 2, "expected a source path and SHA-256");
-  const [path, expected] = entry;
-  assert.equal(typeof path, "string");
-  assert(path.length > 0 && !isAbsolute(path), "backend source path must be relative");
-  assert.match(expected, /^[a-f0-9]{64}$/);
-  const sourcePath = resolve(backendSourceRoot, path);
-  const fromRoot = relative(backendSourceRoot, sourcePath);
-  assert(
-    fromRoot !== ".." && !fromRoot.startsWith(`..${sep}`) && !isAbsolute(fromRoot),
-    "backend source path escapes its root",
-  );
-  assert.equal(sha256(readFileSync(sourcePath)), expected, `backend source differs: ${path}`);
-  return [path, expected];
-});
-assert.equal(new Set(backendSources.map(([path]) => path)).size, backendSources.length);
-assert.deepEqual(
-  backendSources.map(([path]) => path).sort(),
-  requiredBackendSources.toSorted(),
-  "backend receipt must retain every required source owner",
-);
+const backendSources = verifyNumericReceipt(binary, backendSourceRoot, backendReceipt, "compound");
 const module = new WebAssembly.Module(binary);
 const declarations = WebAssembly.Module.exports(module);
 const probeNames = ["ring3_avx_probe_read", "ring3_avx_probe_run", "ring3_avx_probe_write"];
@@ -712,6 +680,8 @@ for (const [op, regs, imm, len] of [
 }
 const sourceRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../../../../../../..");
 const runnerSources = [
+  "tests/support/numeric/receipt.mjs",
+  "tests/support/numeric/contract.json",
   "src/cpu/x86/avx/compound/fixtures/runtime/run.mjs",
   "src/cpu/x86/avx/compound/wasm.rs",
 ].map((path) => [path, sha256(readFileSync(resolve(sourceRoot, path)))]);
