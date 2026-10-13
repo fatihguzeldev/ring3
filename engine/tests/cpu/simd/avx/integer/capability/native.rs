@@ -1,11 +1,8 @@
 use ring3_engine::{
-    abi::arena::TRANSFER_OFFSET,
-    cpu::{
-        UnsupportedFeature,
-        x86::decode::{DecodeError, decode_one},
-    },
+    abi::arena::{HELPER_OFFSET, TRANSFER_OFFSET},
+    cpu::x86::decode::{DecodeError, decode_one},
     memory::{AddressSpace, GuestAddress, PageRange, Permissions},
-    process::{EngineInstance, HostError},
+    process::{EngineInstance, HostError, StoreCompletion},
 };
 
 const FORMS: &[(u8, u8, u32, bool)] = &[
@@ -62,17 +59,43 @@ fn encoding(map: u8, opcode: u8, unary: bool, wide: bool, w: bool, memory: bool)
     ]
 }
 
+fn admitted(bytes: &[u8]) -> ring3_engine::cpu::x86::ir::Operation {
+    let memory = code(bytes);
+    let instruction = decode_one(&memory, GuestAddress(0x1000)).unwrap();
+    assert!(
+        matches!(
+            instruction.operation(),
+            ring3_engine::cpu::x86::ir::Operation::Avx(_)
+        ),
+        "{bytes:02x?}"
+    );
+    assert_eq!(instruction.pc(), GuestAddress(0x1000));
+    assert_eq!(instruction.length() as usize, bytes.len());
+    assert_eq!(
+        instruction.next_pc(),
+        GuestAddress(0x1000 + bytes.len() as u32)
+    );
+    assert!(memory.is_code_current(instruction.code_snapshot()));
+    *instruction.operation()
+}
+
+fn zero_register_result(before: &[u8]) -> Vec<u8> {
+    let mut expected = before.to_vec();
+    let mut packet = [0; 40];
+    packet[..12].copy_from_slice(&[b'R', b'3', b'M', b'H', 7, 0, 1, 0, 40, 0, 0, 0]);
+    expected[HELPER_OFFSET..HELPER_OFFSET + 40].copy_from_slice(&packet);
+    expected[TRANSFER_OFFSET + 512..TRANSFER_OFFSET + 544].fill(0);
+    expected[TRANSFER_OFFSET + 516..TRANSFER_OFFSET + 520].copy_from_slice(&2_u32.to_le_bytes());
+    expected
+}
+
 #[test]
-fn remaining_wide_integer_encodings_stay_private() {
+fn wide_integer_encodings_bind_both_wig_values_and_memory_forms() {
     for &(map, opcode, _, unary) in FORMS {
         for w in [false, true] {
             for memory in [false, true] {
                 let bytes = encoding(map, opcode, unary, true, w, memory);
-                assert_eq!(
-                    decode_one(&code(&bytes), GuestAddress(0x1000)).unwrap_err(),
-                    DecodeError::Unsupported(UnsupportedFeature::Simd),
-                    "{bytes:02x?}"
-                );
+                admitted(&bytes);
                 let xmm = encoding(map, opcode, unary, false, w, memory);
                 assert!(
                     decode_one(&code(&xmm), GuestAddress(0x1000)).is_ok(),
@@ -106,7 +129,7 @@ fn malformed_prefixes_and_unary_vvvv_are_rejected_before_the_gate() {
 }
 
 #[test]
-fn canonical_wide_descriptors_refuse_without_arena_or_ram_publication() {
+fn canonical_integer_register_success_and_bad_metadata_are_distinct() {
     let mut engine = EngineInstance::new(1, 91).unwrap();
     engine.map(0x1000, 1, 7).unwrap();
     engine.arena_mut().unwrap()[TRANSFER_OFFSET..TRANSFER_OFFSET + 2]
@@ -123,23 +146,34 @@ fn canonical_wide_descriptors_refuse_without_arena_or_ram_publication() {
         .unwrap();
     for &(_, _, kind, unary) in FORMS {
         let first = if unary { 0 } else { 2 << 3 };
-        for operands in [1 | first | 3 << 6, 1 | first | 1 << 12] {
-            // capability refusal must precede stale memory metadata or page access.
+        for operands in [1 | first | (3 << 6), 1 | first | (1 << 12)] {
+            let descriptor = 0x01000580 | kind;
+            let immediate = 0;
+            let flags = 2;
+            let valid_register = operands & (1 << 12) == 0;
             engine.arena_mut().unwrap()[TRANSFER_OFFSET + 544..TRANSFER_OFFSET + 568].fill(0xff);
             let before = engine.arena().to_vec();
-            assert_eq!(
-                engine.avx_execute(0x01000580 | kind, operands, 0, 0, 0, 2),
-                Err(HostError::InvalidRequest)
-            );
-            assert_eq!(engine.arena(), before);
-            let mut after_ram = vec![0; 4096];
+            let result = engine.avx_execute(descriptor, operands, immediate, 0, 0, flags);
+            if valid_register {
+                assert_eq!(result, Ok(StoreCompletion::Complete));
+                assert_eq!(engine.arena(), zero_register_result(&before));
+            } else {
+                assert_eq!(result, Err(HostError::InvalidRequest));
+                assert_eq!(engine.arena(), before);
+            }
+
+            let mut after_ram = [0; 4096];
             engine
                 .memory()
                 .unwrap()
                 .read(GuestAddress(0x1000), &mut after_ram)
                 .unwrap();
-            assert_eq!(after_ram, before_ram);
-            assert_eq!(engine.arena(), before);
+            assert_eq!(&after_ram[..], &before_ram[..]);
+            if valid_register {
+                assert_eq!(engine.arena(), zero_register_result(&before));
+            } else {
+                assert_eq!(engine.arena(), before);
+            }
         }
     }
 }

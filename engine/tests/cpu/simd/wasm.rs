@@ -35,3 +35,9 @@ mod cpu_avx_protocol_wasm;
 mod f16c;
 #[path = "avx/fma/wasm.rs"]
 mod fma;
+
+#[path = "avx/integer/wrapping/wasm.rs"]
+mod avx2_wrapping;
+
+#[path = "avx/gather/wasm.rs"]
+mod avx2_gather;

@@ -1,7 +1,7 @@
 // result order follows the x86 state record: eax, ecx, edx, ebx.
 const vendor = [0x0d, 0x20656e69, 0x676e4533, 0x676e6952];
 const features = [0x600, 0x3ed81203, 0x07888131, 0x800];
-const structured = [0, 0x400000, 0, 0x108];
+const structured = [0, 0x400000, 0, 0x128];
 // x87, sse and avx are enabled; standard-format extent includes the full avx component.
 const xstate = [7, 832, 0, 832];
 const upper = [256, 0, 0, 576];

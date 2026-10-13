@@ -3,12 +3,9 @@ use ring3_engine::{
         arena::{HELPER_OFFSET, SIMD_OFFSET, TRANSFER_OFFSET, YMM_OFFSET},
         x86::{SIMD_XMM_OFFSET, YMM_REGISTERS_OFFSET},
     },
-    cpu::{
-        UnsupportedFeature,
-        x86::{
-            decode::{DecodeError, decode_one},
-            ir::Operation,
-        },
+    cpu::x86::{
+        decode::{DecodeError, decode_one},
+        ir::Operation,
     },
     memory::{AddressSpace, GuestAddress, PageRange, Permissions},
     process::{EngineInstance, StoreCompletion},
@@ -29,8 +26,8 @@ fn code(bytes: &[u8]) -> AddressSpace {
 }
 
 #[test]
-fn avx2_integer_encodings_remain_outside_the_public_profile() {
-    for (integer, _) in OPCODES {
+fn avx2_integer_encodings_bind_to_the_existing_floating_semantics() {
+    for (integer, floating) in OPCODES {
         for w in [0, 0x80] {
             for operand in [0xcb, 0x08] {
                 let bytes = [0xc4, 0xe1, 0x6d | w, integer, operand];
@@ -38,11 +35,17 @@ fn avx2_integer_encodings_remain_outside_the_public_profile() {
                 let before = memory
                     .snapshot_code(GuestAddress(0x1000), bytes.len())
                     .unwrap();
-                assert_eq!(
-                    decode_one(&memory, GuestAddress(0x1000)).unwrap_err(),
-                    DecodeError::Unsupported(UnsupportedFeature::Simd),
-                    "{bytes:02x?}"
-                );
+                let decoded = decode_one(&memory, GuestAddress(0x1000)).unwrap();
+                let alias = decode_one(
+                    &code(&[0xc4, 0xe1, 0x6c | w, floating, operand]),
+                    GuestAddress(0x1000),
+                )
+                .unwrap();
+                assert!(matches!(decoded.operation(), Operation::Avx(_)));
+                assert_eq!(decoded.operation(), alias.operation(), "{bytes:02x?}");
+                assert_eq!(usize::from(decoded.length()), bytes.len());
+                assert_eq!(decoded.next_pc(), GuestAddress(0x1000 + bytes.len() as u32));
+                assert!(memory.is_code_current(decoded.code_snapshot()));
                 assert!(memory.is_code_current(&before));
             }
         }
@@ -68,11 +71,8 @@ fn avx1_integer_xmm_and_floating_ymm_aliases_remain_admitted() {
     for (integer, floating) in OPCODES {
         let integer =
             decode_one(&code(&[0xc5, 0xe9, integer, 0xcb]), GuestAddress(0x1000)).unwrap();
-        let floating_xmm = decode_one(
-            &code(&[0xc5, 0xe8, floating, 0xcb]),
-            GuestAddress(0x1000),
-        )
-        .unwrap();
+        let floating_xmm =
+            decode_one(&code(&[0xc5, 0xe8, floating, 0xcb]), GuestAddress(0x1000)).unwrap();
         assert_eq!(integer.operation(), floating_xmm.operation());
         assert!(matches!(integer.operation(), Operation::Avx(_)));
         for w in [0, 0x80] {
@@ -96,6 +96,12 @@ fn shared_ymm_descriptors_remain_available_to_avx1_helpers() {
     engine.arena_mut().unwrap()[TRANSFER_OFFSET..TRANSFER_OFFSET + 8]
         .copy_from_slice(&[0, 0x10, 0, 0, 2, 0, 0, 0]);
     engine.compile(1).unwrap();
+    let mut before_ram = vec![0; 4096];
+    engine
+        .memory()
+        .unwrap()
+        .read(GuestAddress(0x1000), &mut before_ram)
+        .unwrap();
     for (kind, lower, upper) in [
         (2, 0x30, 0x0a),
         (4, 0x03, 0x05),
@@ -112,8 +118,7 @@ fn shared_ymm_descriptors_remain_available_to_avx1_helpers() {
                 .fill(high);
         }
         let mut expected = engine.arena().to_vec();
-        expected[SIMD_OFFSET + SIMD_XMM_OFFSET..SIMD_OFFSET + SIMD_XMM_OFFSET + 16]
-            .fill(lower);
+        expected[SIMD_OFFSET + SIMD_XMM_OFFSET..SIMD_OFFSET + SIMD_XMM_OFFSET + 16].fill(lower);
         expected[YMM_OFFSET + YMM_REGISTERS_OFFSET..YMM_OFFSET + YMM_REGISTERS_OFFSET + 16]
             .fill(upper);
         expected[HELPER_OFFSET..HELPER_OFFSET + 40].fill(0);
@@ -127,5 +132,17 @@ fn shared_ymm_descriptors_remain_available_to_avx1_helpers() {
             Ok(StoreCompletion::Complete)
         );
         assert_eq!(engine.arena(), expected, "shared descriptor kind {kind}");
+        let mut after_ram = vec![0; before_ram.len()];
+        engine
+            .memory()
+            .unwrap()
+            .read(GuestAddress(0x1000), &mut after_ram)
+            .unwrap();
+        assert_eq!(after_ram, before_ram);
+        assert_eq!(
+            engine.arena(),
+            expected,
+            "RAM observation preserves full frame"
+        );
     }
 }

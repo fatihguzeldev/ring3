@@ -1,4 +1,20 @@
 import assert from 'node:assert/strict';
+import {logicalRows} from '../../../../logical/fixtures/p2-avx2-logical/runtime/cases.mjs';
+import {comparisonRows} from '../../../../integer/compare/fixtures/p2-avx2-comparison/runtime/cases.mjs';
+import {integerRows} from '../../../../integer/fixtures/p2-avx2-integer/runtime/cases.mjs';
+import {blocksRows} from '../../../../blocks/fixtures/p2-avx2-blocks/runtime/cases.mjs';
+import {broadcastRows} from '../../../../broadcast/fixtures/p2-avx2-broadcast/runtime/cases.mjs';
+import {maskedRows} from '../../../../masked/fixtures/p2-avx2-masked/runtime/cases.mjs';
+import {uniformRows} from '../../../../shift/uniform/fixtures/p2-avx2-shift/runtime/cases.mjs';
+import {variableRows} from '../../../../shift/variable/fixtures/p2-avx2-variable/runtime/cases.mjs';
+import {widenRows} from '../../../../rearrange/widen/fixtures/p2-avx2-widen/runtime/cases.mjs';
+import {laneRows} from '../../../../rearrange/lanes/fixtures/p2-avx2-lanes/runtime/cases.mjs';
+import {multiplyRows} from '../../../../multiply/fixtures/p2-avx2-multiply/runtime/cases.mjs';
+import {wholeRows} from '../../../../permute/whole/fixtures/p2-avx2-permute/runtime/cases.mjs';
+import {blendRows} from '../../../../permute/blend/fixtures/p2-avx2-blend/runtime/cases.mjs';
+import {movemaskRows} from '../../../../scalar/mask/fixtures/p2-avx2-movemask/runtime/cases.mjs';
+import {streamRows} from '../../../../moves/stream/fixtures/p2-avx2-stream/runtime/cases.mjs';
+import {sadRows} from '../../../../multiply/sad/fixtures/p2-avx2-sad/runtime/cases.mjs';
 import {createHash} from 'node:crypto';
 import {readFileSync, writeFileSync} from 'node:fs';
 import {join} from 'node:path';
@@ -9,16 +25,119 @@ const [enginePath, output, root] = process.argv.slice(2), engine = readEngine(en
 const {sourcePaths: exportsSources} = assertEngineExports(engine.module, root);
 const PC = 0x1000, T = 140, SV = 4364, YU = 4612, SIZE = 4756, keyHigh = 0x415658;
 const counts = {contexts: 0, modules: 0, runs: 0, controls: 0, faults: 0, fullRamPairs: 0};
-const sourcePaths = [...exportsSources, 'engine/tests/support/wasm/engine.mjs',
-  'engine/src/cpu/x86/avx/operation.rs', 'engine/src/cpu/x86/decode/avx/mod.rs', 'engine/src/cpu/x86/capabilities.rs',
-  'engine/src/cpu/dbt/wasm/avx/mod.rs', 'engine/src/cpu/dbt/wasm/avx/direct.rs', 'engine/src/cpu/dbt/wasm/avx/execute.rs',
-  'engine/src/cpu/dbt/wasm/avx/preflight.rs', 'engine/src/cpu/dbt/wasm/avx/locals.rs', 'engine/src/cpu/dbt/wasm/emitter.rs',
-  ...['moves', 'logical', 'permute', 'integer', 'rearrange', 'shift', 'multiply', 'scalar'].map(name => `engine/src/cpu/dbt/wasm/avx/${name}.rs`),
-  'engine/src/cpu/dbt/wasm/avx/cross_lane/mod.rs', 'engine/src/cpu/dbt/wasm/simd.rs', 'engine/src/cpu/dbt/wasm/simd/direct.rs',
-  ...['rearrange', 'shift', 'multiply', 'scalar'].map(name => `engine/src/cpu/dbt/wasm/simd/direct/${name}.rs`),
-  'engine/src/cpu/dbt/wasm/memory.rs', 'engine/src/cpu/dbt/wasm/cpu_result.rs', 'engine/src/process/memory/span.rs',
-  'engine/src/abi/arena.rs', 'engine/src/abi/x86/ymm.rs', 'engine/src/process/cpu/avx.rs',
-  'engine/tests/cpu/simd/avx/execution/wasm.rs', 'engine/tests/cpu/simd/avx/execution/fixtures/p2-avx-execution/runtime/run.mjs'];
+const sourcePaths = [...exportsSources,
+  'engine/tests/support/wasm/engine.mjs',
+  'engine/src/cpu/x86/avx/operation.rs',
+  'engine/src/cpu/x86/decode/avx/mod.rs',
+  'engine/src/cpu/x86/capabilities.rs',
+  'engine/src/cpu/dbt/wasm/avx/mod.rs',
+  'engine/src/cpu/dbt/wasm/avx/direct.rs',
+  'engine/src/cpu/dbt/wasm/avx/execute.rs',
+  'engine/src/cpu/dbt/wasm/avx/preflight.rs',
+  'engine/src/cpu/dbt/wasm/avx/locals.rs',
+  'engine/src/cpu/dbt/wasm/emitter.rs',
+  'engine/src/cpu/dbt/wasm/avx/moves.rs',
+  'engine/src/cpu/dbt/wasm/avx/logical.rs',
+  'engine/src/cpu/dbt/wasm/avx/permute.rs',
+  'engine/src/cpu/dbt/wasm/avx/integer.rs',
+  'engine/src/cpu/dbt/wasm/avx/rearrange.rs',
+  'engine/src/cpu/dbt/wasm/avx/shift.rs',
+  'engine/src/cpu/dbt/wasm/avx/multiply.rs',
+  'engine/src/cpu/dbt/wasm/avx/scalar.rs',
+  'engine/src/cpu/dbt/wasm/avx/cross_lane/mod.rs',
+  'engine/src/cpu/dbt/wasm/simd.rs',
+  'engine/src/cpu/dbt/wasm/simd/direct.rs',
+  'engine/src/cpu/dbt/wasm/simd/direct/rearrange.rs',
+  'engine/src/cpu/dbt/wasm/simd/direct/shift.rs',
+  'engine/src/cpu/dbt/wasm/simd/direct/multiply.rs',
+  'engine/src/cpu/dbt/wasm/simd/direct/scalar.rs',
+  'engine/src/cpu/dbt/wasm/memory.rs',
+  'engine/src/cpu/dbt/wasm/cpu_result.rs',
+  'engine/src/process/memory/span.rs',
+  'engine/src/abi/arena.rs',
+  'engine/src/abi/x86/ymm.rs',
+  'engine/src/process/cpu/avx.rs',
+  'engine/src/process/execution/resident.rs',
+  'engine/src/cpu/dbt/resident.rs',
+  'engine/src/process/wasm/execution.rs',
+  'engine/tests/cpu/simd/avx/execution/wasm.rs',
+  'engine/tests/cpu/simd/avx/execution/fixtures/p2-avx-execution/runtime/run.mjs',
+  'engine/src/cpu/x86/decode/avx/logical.rs',
+  'engine/src/cpu/x86/avx/operation/factory/logical.rs',
+  'engine/tests/cpu/simd/avx/logical/fixtures/p2-avx2-logical/runtime/cases.mjs',
+  'engine/src/cpu/x86/decode/avx/integer.rs',
+  'engine/src/cpu/x86/avx/operation/factory/integer.rs',
+  'engine/src/cpu/x86/avx/integer.rs',
+  'engine/tests/cpu/simd/avx/integer/compare/fixtures/p2-avx2-comparison/runtime/cases.mjs',
+  'engine/tests/cpu/simd/avx/integer/support/native.rs',
+  'engine/tests/cpu/simd/avx/integer/support/fixtures/runtime/cases.mjs',
+  'engine/tests/cpu/simd/avx/integer/saturating/native.rs',
+  'engine/tests/cpu/simd/avx/integer/saturating/fixtures/p2-avx2-saturating/runtime/cases.mjs',
+  'engine/tests/cpu/simd/avx/integer/minmax/native.rs',
+  'engine/tests/cpu/simd/avx/integer/minmax/fixtures/p2-avx2-minmax/runtime/cases.mjs',
+  'engine/tests/cpu/simd/avx/integer/average/native.rs',
+  'engine/tests/cpu/simd/avx/integer/average/fixtures/p2-avx2-average/runtime/cases.mjs',
+  'engine/tests/cpu/simd/avx/integer/absolute/native.rs',
+  'engine/tests/cpu/simd/avx/integer/absolute/fixtures/p2-avx2-absolute/runtime/cases.mjs',
+  'engine/tests/cpu/simd/avx/integer/sign/native.rs',
+  'engine/tests/cpu/simd/avx/integer/sign/fixtures/p2-avx2-sign/runtime/cases.mjs',
+  'engine/tests/cpu/simd/avx/integer/fixtures/p2-avx2-integer/runtime/cases.mjs',
+  'engine/src/cpu/x86/decode/avx/cross_lane.rs',
+  'engine/src/cpu/x86/avx/operation/factory/cross_lane.rs',
+  'engine/src/cpu/x86/avx/cross_lane/mod.rs',
+  'engine/tests/cpu/simd/avx/blocks/fixtures/p2-avx2-blocks/runtime/cases.mjs',
+  'engine/src/abi/x86/segments.rs',
+  'engine/src/cpu/dbt/wasm/segments/access.rs',
+  'engine/tests/cpu/simd/avx/broadcast/fixtures/p2-avx2-broadcast/runtime/cases.mjs',
+  'engine/src/cpu/x86/decode/avx/masked.rs',
+  'engine/src/cpu/x86/avx/operation/factory/masked.rs',
+  'engine/src/cpu/x86/avx/masked.rs',
+  'engine/src/abi/x86/avx.rs',
+  'engine/src/cpu/x86/segments/cache.rs',
+  'engine/src/memory/space.rs',
+  'engine/tests/cpu/simd/avx/masked/fixtures/p2-avx2-masked/runtime/cases.mjs',
+  'engine/src/cpu/x86/avx/shift.rs',
+  'engine/src/cpu/x86/avx/operation/factory/shift.rs',
+  'engine/src/cpu/x86/decode/avx/shift.rs',
+  'engine/src/cpu/x86/simd/shift.rs',
+  'engine/src/cpu/x86/simd/packed.rs',
+  'engine/tests/cpu/simd/avx/shift/uniform/native.rs',
+  'engine/tests/cpu/simd/avx/shift/uniform/fixtures/p2-avx2-shift/runtime/cases.mjs',
+  'engine/tests/cpu/simd/avx/shift/variable/native.rs',
+  'engine/tests/cpu/simd/avx/shift/variable/fixtures/p2-avx2-variable/runtime/cases.mjs',
+  'engine/src/cpu/x86/avx/rearrange.rs',
+  'engine/src/cpu/x86/avx/operation/factory/rearrange.rs',
+  'engine/src/cpu/x86/decode/avx/rearrange.rs',
+  'engine/src/cpu/x86/simd/rearrange.rs',
+  'engine/tests/cpu/simd/avx/rearrange/widen/fixtures/p2-avx2-widen/runtime/cases.mjs',
+  'engine/tests/cpu/simd/avx/rearrange/lanes/native.rs',
+  'engine/tests/cpu/simd/avx/rearrange/lanes/fixtures/p2-avx2-lanes/runtime/cases.mjs',
+  'engine/src/cpu/x86/avx/multiply.rs',
+  'engine/src/cpu/x86/avx/operation/factory/multiply.rs',
+  'engine/src/cpu/x86/decode/avx/multiply.rs',
+  'engine/src/cpu/x86/simd/multiply.rs',
+  'engine/tests/cpu/simd/avx/multiply/fixtures/p2-avx2-multiply/runtime/cases.mjs',
+  'engine/src/cpu/x86/avx/permute.rs',
+  'engine/src/cpu/x86/avx/operation/factory/permute.rs',
+  'engine/src/cpu/x86/decode/avx/permute.rs',
+  'engine/tests/cpu/simd/avx/permute/whole/native.rs',
+  'engine/tests/cpu/simd/avx/permute/whole/fixtures/p2-avx2-permute/runtime/cases.mjs',
+  'engine/tests/cpu/simd/avx/permute/blend/native.rs',
+  'engine/tests/cpu/simd/avx/permute/blend/fixtures/p2-avx2-blend/runtime/cases.mjs',
+  'engine/src/cpu/x86/avx/scalar.rs',
+  'engine/src/cpu/x86/avx/operation/factory/scalar.rs',
+  'engine/src/cpu/x86/decode/avx/scalar.rs',
+  'engine/src/cpu/x86/simd/scalar.rs',
+  'engine/tests/cpu/simd/avx/scalar/mask/native.rs',
+  'engine/tests/cpu/simd/avx/scalar/mask/fixtures/p2-avx2-movemask/runtime/cases.mjs',
+  'engine/src/cpu/x86/decode/avx/moves.rs',
+  'engine/src/cpu/x86/avx/moves.rs',
+  'engine/src/cpu/x86/avx/operation/factory/moves.rs',
+  'engine/tests/cpu/simd/avx/moves/stream/native.rs',
+  'engine/tests/cpu/simd/avx/moves/stream/fixtures/p2-avx2-stream/runtime/cases.mjs',
+  'engine/tests/cpu/simd/avx/multiply/sad/native.rs',
+  'engine/tests/cpu/simd/avx/multiply/sad/fixtures/p2-avx2-sad/runtime/cases.mjs',
+];
 assert.equal(new Set(sourcePaths).size, sourcePaths.length);
 const hash = b => createHash('sha256').update(b).digest('hex');
 const pins = () => Object.fromEntries(sourcePaths.map(path => [path, hash(readFileSync(join(root, path)))]));
@@ -39,7 +158,7 @@ function open(owner, entries) {
   const instance = new WebAssembly.Instance(engine.module, {}), c = {owner, entries, memory: instance.exports.memory, api: {}, calls: []};
   for (const [name, value] of Object.entries(instance.exports)) if (name.startsWith('ring3_abi_v1_') && typeof value === 'function') c.api[name.slice(13)] = value;
   for (const [name, arity] of Object.entries({open: 3, map: 3, upload: 2, compile: 1, compile_entries: 2, compile_resident: 1,
-    compile_resident_entries: 2, cpu_read: 3, cpu_write: 3, cpu_write_resident: 7, avx_execute: 6, avx_execute_resident: 10})) assert.equal(c.api[name]?.length, arity, name);
+    compile_resident_entries: 2, cpu_read: 3, cpu_write: 3, cpu_write_resident: 7, avx_execute: 6, avx_execute_resident: 10, retire_stale_resident: 4})) assert.equal(c.api[name]?.length, arity, name);
   c.key = ++counts.contexts; host(c, 'open', [8, c.key, keyHigh]); c.base = c.api.arena_ptr() >>> 0;
   assert.equal(c.api.arena_len(), SIZE, 'canonical upper-vector arena');
   for (const args of [[PC, 1, 7], [0x5000, 1, 3]]) host(c, 'map', args);
@@ -58,6 +177,7 @@ function compile(c, row) {
   const binary = Buffer.from(new Uint8Array(c.memory.buffer, pointer, length)), module = new WebAssembly.Module(binary);
   const actual = WebAssembly.Module.imports(module).map(i => `${i.module}:${i.name}:${i.kind}`).sort();
   const expected = ['env:memory:memory', `ring3:${c.owner === 'resident' ? 'guard_resident' : 'guard'}:function`,
+    ...(row.selected ? [`ring3:${c.owner === 'resident' ? 'avx_execute_resident' : 'avx_execute'}:function`] : []),
     ...(row.read ? ['ring3:cpu_read:function'] : []), ...(row.write ? [`ring3:${c.owner === 'resident' ? 'cpu_write_resident' : 'cpu_write'}:function`] : [])].sort();
   assert.deepEqual(actual, expected, `${row.name}: exact direct-path imports`);
   assert.deepEqual(WebAssembly.Module.exports(module), [{name: 'run', kind: 'function'}]);
@@ -66,6 +186,16 @@ function compile(c, row) {
   for (const helper of ['cpu_read', 'cpu_write', 'cpu_write_resident']) ring3[helper] = (...args) => {
     const status = c.api[helper](...args); c.calls.push({helper, status, args: args.map(v => v >>> 0)}); return status;
   };
+  if (row.selected) {
+    const helper = c.owner === 'resident' ? 'avx_execute_resident' : 'avx_execute';
+    ring3[helper] = (...args) => {
+      const metadata = record('R3AM', 24, [row.selected.segment, row.selected.offset]);
+      assert.deepEqual(arena(c).subarray(T + 544, T + 568), metadata, `${row.name}: captured address metadata`);
+      const status = c.api[helper](...args);
+      c.calls.push({helper, status, args: args.map(value => value >>> 0)});
+      return status;
+    };
+  }
   return {run: new WebAssembly.Instance(module, {env: {memory: c.memory}, ring3}).exports.run, codeLength: code.length};
 }
 function seed(c, row) {
@@ -74,9 +204,17 @@ function seed(c, row) {
   if (row.r) for (const [index, value] of Object.entries(row.r)) r[+index] = value >>> 0;
   const flags = 0x244cd7;
   input(c, 0, state(r, PC, flags));
+  if (row.segmentRecord) {assert.equal(row.segmentRecord.length, 64); input(c, SV + 160, row.segmentRecord);}
+  if (!row.selected && row.mxcsr !== undefined) input(c, SV + 16, words([row.mxcsr]));
   for (let i = 0; i < 8; i++) {input(c, SV + 32 + i * 16, fill(0x21 + i)); input(c, YU + 16 + i * 16, fill(0x91 + i));}
   for (const [index, value] of Object.entries(row.lower ?? {})) input(c, SV + 32 + +index * 16, value);
   for (const [index, value] of Object.entries(row.upper ?? {})) input(c, YU + 16 + +index * 16, value);
+  if (row.segments && !row.selected) {assert.equal(row.segments.length, 64); input(c, SV + 160, row.segments);}
+  if (row.selected) {
+    input(c, 4524, row.segments);
+    input(c, SV + 16, words([row.mxcsr]));
+    input(c, T + 512, fill(0xa5, 32));
+  }
   return {r, flags};
 }
 function ram(c) {
@@ -92,7 +230,7 @@ function execute(c, fn, row, {budget = row.retired ?? 1, cancel = false} = {}) {
   const s = seed(c, row); if (cancel) input(c, 96, words([1]));
   const before = arena(c), expected = Buffer.from(before), beforeRam = ram(c), first = c.calls.length;
   const retired = budget === 0 || cancel ? 0 : row.retired ?? (row.reason ? 0 : 1);
-  const reason = cancel ? 2 : budget === 0 ? 1 : row.reason ?? 1;
+  const reason = cancel ? 2 : budget === 0 ? 1 : row.reason ?? row.selected?.exitReason ?? 1;
   const changed = retired > 0;
   const r = [...s.r]; if (changed) for (const [index, value] of Object.entries(row.outR ?? {})) r[+index] = value >>> 0;
   expected.set(state(r, changed ? PC + fn.codeLength : PC, s.flags));
@@ -103,8 +241,18 @@ function execute(c, fn, row, {budget = row.retired ?? 1, cancel = false} = {}) {
     for (const [index, value] of Object.entries(row.outLower ?? {})) expected.set(value, SV + 32 + +index * 16);
     for (const [index, value] of Object.entries(row.outUpper ?? {})) expected.set(value, YU + 16 + +index * 16);
   }
-  const helpers = budget === 0 || cancel ? 0 : row.helpers ?? Number(Boolean(row.read || row.write));
-  if (helpers) {
+  const helpers = budget === 0 || cancel ? 0 : row.helpers ?? Number(Boolean(row.read || row.write || row.selected));
+  if (helpers && row.selected) {
+    const status = row.reason === 5 ? 1 : row.reason === 11 ? 3 : row.reason === 15 ? 7 : 0;
+    expected.set(record('R3AM', 24, [row.selected.segment, row.selected.offset]), T + 544);
+    expected.set(record('R3MH', 40, [status, 0, status === 1 ? row.detail : 0,
+      status === 1 ? row.fault : 0, status === 1 ? row.access : 0, row.selected.length], 7), 100);
+    if (!row.reason) {
+      expected.fill(0, T + 512, T + 544);
+      expected.set(words([0, s.flags]), T + 512);
+    }
+  }
+  if (helpers && !row.selected) {
     const fault = row.reason === 5;
     expected.set(record('R3MH', 40, [fault ? 1 : 0, 0, fault ? row.detail : 0, fault ? row.fault : 0, fault ? row.access : 0, row.length ?? row.read ?? row.write], 7), 100);
     if (!row.reason && row.read) expected.set(row.memory, T);
@@ -114,10 +262,29 @@ function execute(c, fn, row, {budget = row.retired ?? 1, cancel = false} = {}) {
   assert.deepEqual(arena(c), expected, `${row.name}: complete canonical arena budget=${budget} cancel=${cancel}`);
   assert.equal(c.calls.length - first, helpers, `${row.name}: exact helper count`);
   for (const call of c.calls.slice(first)) {
-    assert.equal(call.status, 0, `${row.name}: helper transport`);
+    if (row.selected?.invalidates) {
+      assert.equal(call.status, 11, `${row.name}: committed helper invalidation`);
+    } else {
+      assert.equal(call.status, 0, `${row.name}: helper transport`);
+    }
+    if (row.selected) {
+      assert.deepEqual(call.args.slice(-6), [row.selected.descriptor, row.selected.operands, 0, 0, 0, s.flags]);
+      if (c.owner === 'resident') {
+        assert.deepEqual(call.args.slice(0, 4), [c.key, keyHigh, ...c.resident]);
+      }
+      continue;
+    }
     assert.deepEqual(call.args.slice(-3), [row.address ?? s.r[0], row.read ?? row.write, row.alignment === 32 ? 1 : row.alignment ?? 1]);
   }
   const expectedRam = Buffer.from(beforeRam);
+  if (row.selected?.access === 2 && changed) {
+    for (const {at, value} of row.selected.stores) {
+      const address = row.address + at;
+      const page = row.selected.invalidates ? PC : 0x5000;
+      assert.ok(address >= page && address + value.length <= page + 4096);
+      value.copy(expectedRam, (page === PC ? 0 : 4096) + address - page);
+    }
+  }
   if (row.write && changed) {
     assert.ok(row.checkRam, `${row.name}: literal committed store oracle`);
     assert.ok(row.address >= 0x5000 && row.address + row.checkRam.length <= 0x6000);
@@ -157,18 +324,47 @@ const rows = [
   {name: 'broadcast-exact-final-dword', code: 'c4e27d1800', address: 0x5ffc, read: 4, memory: words([0x7f800001]), outLower: {0: words([0x7f800001, 0x7f800001, 0x7f800001, 0x7f800001])}, outUpper: {0: words([0x7f800001, 0x7f800001, 0x7f800001, 0x7f800001])}},
 ];
 for (const store of [false, true]) for (const address of [0x5010, 0x6001]) rows.push({name: `alignment32-before-${address === 0x5010 ? 'mapped' : 'unmapped'}-${store ? 'write' : 'read'}`, code: store ? 'c5fc2900' : 'c5fc2800', address, alignment: 32, ...(store ? {write: 32, staged: Buffer.concat([a, b])} : {read: 32}), helpers: 0, reason: 11});
+rows.push(...logicalRows);
+rows.push(...comparisonRows);
+rows.push(...integerRows);
+rows.push(...blocksRows);
+rows.push(...broadcastRows);
+rows.push(...maskedRows);
+rows.push(...uniformRows);
+rows.push(...variableRows);
+rows.push(...widenRows);
+rows.push(...laneRows);
+rows.push(...multiplyRows);
+rows.push(...wholeRows);
+rows.push(...blendRows);
+rows.push(...movemaskRows);
+rows.push(...streamRows);
+rows.push(...sadRows);
 for (const owner of ['replacement', 'resident']) for (const entries of [false, true]) {
   const c = open(owner, entries);
   for (const row of rows) {
     const fn = compile(c, row);
     if (row.memory) upload(c, row.address, row.memory);
     if (row.write && !row.memory && row.address < 0x6000) upload(c, row.address, fill(0x66, row.write));
+    if (row.selected?.invalidates) {
+      execute(c, fn, row, {budget: 0});
+      execute(c, fn, row, {budget: row.retired ?? 1, cancel: true});
+      execute(c, fn, row);
+      if (c.resident) {
+        const after = arena(c), afterRam = ram(c);
+        host(c, 'retire_stale_resident', [c.key, keyHigh, ...c.resident]);
+        assert.deepEqual(arena(c), after, `${row.name}: stale retirement preserves complete arena`);
+        assert.deepEqual(ram(c), afterRam, `${row.name}: stale retirement preserves complete RAM`);
+        c.resident = null;
+      }
+      continue;
+    }
     execute(c, fn, row);
     execute(c, fn, row, {budget: 0}); execute(c, fn, row, {budget: row.retired ?? 1, cancel: true});
   }
   host(c, 'close');
 }
-assert.deepEqual(counts, {contexts: 4, modules: 100, runs: 300, controls: 200, faults: 24, fullRamPairs: 300});
+assert.deepEqual(counts, {contexts: 4, modules: 21184, runs: 63552, controls: 42368, faults: 2308, fullRamPairs: 63552});
 assert.deepEqual(pins(), sourcePins, 'pinned sources unchanged during proof');
 writeFileSync(join(output, 'result.json'), JSON.stringify({scope: 'real generated AVX direct integration with full canonical arena; finite literal vectors', engineSha256: engine.sha256, counts, sourcePins}, null, 2) + '\n');
 console.log(JSON.stringify({status: 'PASS', ...counts}));

@@ -1,10 +1,7 @@
 use ring3_engine::{
-    cpu::{
-        UnsupportedFeature,
-        x86::{
-            decode::{DecodeError, decode_one},
-            ir::Operation,
-        },
+    cpu::x86::{
+        decode::{DecodeError, decode_one},
+        ir::Operation,
     },
     memory::{AddressSpace, GuestAddress, PageRange, Permissions},
 };
@@ -22,14 +19,22 @@ fn code(bytes: &[u8]) -> AddressSpace {
 }
 
 #[test]
-fn ymm_stream_encoding_refuses_without_gating_the_shared_avx1_aligned_load() {
+fn ymm_stream_encoding_binds_to_the_shared_avx1_aligned_load() {
     for destination in 0..8 {
         for w in [0, 0x80] {
             let bytes = [0xc4, 0xe2, 0x7d | w, 0x2a, destination << 3];
-            assert_eq!(
-                decode_one(&code(&bytes), GuestAddress(0x1000)).unwrap_err(),
-                DecodeError::Unsupported(UnsupportedFeature::Simd)
-            );
+            let memory = code(&bytes);
+            let stream = decode_one(&memory, GuestAddress(0x1000)).unwrap();
+            let aligned = decode_one(
+                &code(&[0xc4, 0xe1, 0x7d | w, 0x6f, destination << 3]),
+                GuestAddress(0x1000),
+            )
+            .unwrap();
+            assert!(matches!(stream.operation(), Operation::Avx(_)));
+            assert_eq!(stream.operation(), aligned.operation());
+            assert_eq!(stream.length(), 5);
+            assert_eq!(stream.next_pc(), GuestAddress(0x1005));
+            assert!(memory.is_code_current(stream.code_snapshot()));
             for operand in [destination << 3, 0xc0 | destination << 3 | 3] {
                 let avx1 = [0xc4, 0xe1, 0x7d | w, 0x6f, operand];
                 let decoded = decode_one(&code(&avx1), GuestAddress(0x1000)).unwrap();

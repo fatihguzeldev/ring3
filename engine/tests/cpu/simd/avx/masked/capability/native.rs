@@ -1,7 +1,7 @@
 use ring3_engine::{
-    cpu::{
-        UnsupportedFeature,
-        x86::decode::{DecodeError, decode_one},
+    cpu::x86::{
+        decode::{DecodeError, decode_one},
+        ir::Operation,
     },
     memory::{AddressSpace, GuestAddress, PageRange, Permissions},
 };
@@ -16,7 +16,7 @@ fn code(bytes: &[u8]) -> AddressSpace {
 }
 
 #[test]
-fn integer_masked_encodings_remain_outside_the_public_profile() {
+fn integer_masked_encodings_bind_to_the_existing_floating_semantics() {
     for opcode in [0x8c, 0x8e] {
         for control in [0x69, 0x6d, 0xe9, 0xed] {
             for modrm in [0x08, 0x18, 0x38] {
@@ -29,11 +29,23 @@ fn integer_masked_encodings_remain_outside_the_public_profile() {
                     let before = memory
                         .snapshot_code(GuestAddress(0x1000), bytes.len())
                         .unwrap();
-                    assert_eq!(
-                        decode_one(&memory, GuestAddress(0x1000)).unwrap_err(),
-                        DecodeError::Unsupported(UnsupportedFeature::Simd),
-                        "{bytes:02x?}"
-                    );
+                    let decoded = decode_one(&memory, GuestAddress(0x1000)).unwrap();
+                    let mut floating = bytes.clone();
+                    let start = usize::from(prefix.is_some());
+                    floating[start + 2] &= !0x80;
+                    floating[start + 3] = match (opcode, control & 0x80 != 0) {
+                        (0x8c, false) => 0x2c,
+                        (0x8c, true) => 0x2d,
+                        (0x8e, false) => 0x2e,
+                        (0x8e, true) => 0x2f,
+                        _ => unreachable!(),
+                    };
+                    let alias = decode_one(&code(&floating), GuestAddress(0x1000)).unwrap();
+                    assert!(matches!(decoded.operation(), Operation::Avx(_)));
+                    assert_eq!(decoded.operation(), alias.operation(), "{bytes:02x?}");
+                    assert_eq!(usize::from(decoded.length()), bytes.len());
+                    assert_eq!(decoded.next_pc(), GuestAddress(0x1000 + bytes.len() as u32));
+                    assert!(memory.is_code_current(decoded.code_snapshot()));
                     assert!(memory.is_code_current(&before));
                 }
             }

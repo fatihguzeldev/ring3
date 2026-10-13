@@ -76,6 +76,7 @@ fn stopped_entry_publishes_only_current_entry_and_preserves_cpu_records() {
         &[0xf4][..],
         &[0x90, 0xeb, 0][..],
         &[0xc5, 0xf8, 0x58, 0xc1, 0xeb, 0xfe][..],
+        &[0xc4, 0xe1, 0x6d, 0xfe, 0xcb, 0xeb, 0xfe][..],
     ] {
         if bytes[0] == 0xc5 && !crate::cpu::x86::capabilities::AVX_ENABLED {
             continue;
@@ -145,8 +146,8 @@ fn stopped_entry_keeps_strict_admission_and_failed_preparation_atomic() {
     assert_eq!(engine.generation(), 1);
     assert_eq!(engine.arena(), before);
 
-    // avx2 remains a valid unsupported extension after f16c activation.
-    upload(&mut engine, ENTRY, &[0xc4, 0xe1, 0x6d, 0xfe, 0xcb]);
+    // valid evex remains unsupported; the decoder test pins its exact iced code.
+    upload(&mut engine, ENTRY, &[0x62, 0xf1, 0x7c, 0x48, 0x58, 0xc1]);
     let before = engine.arena().to_vec();
     let old = engine.artifact_bytes().unwrap().to_vec();
     assert!(matches!(

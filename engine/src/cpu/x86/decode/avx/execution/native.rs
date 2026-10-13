@@ -83,16 +83,44 @@ fn forbidden_prefixes_and_reserved_vvvv_keep_strict_and_execution_distinct() {
 }
 
 #[test]
-fn valid_modern_extensions_and_unpredictable_l_remain_profile_refusals() {
+fn integer_extensions_are_admitted_while_evex_and_unpredictable_l_remain_refused() {
     for bytes in [
-        &[0xc4, 0xe1, 0x6d, 0xfe, 0xcb][..], // avx2 vpaddd ymm
-        &[0xc4, 0xe2, 0x6d, 0x40, 0xcb],     // avx2 vpmulld ymm
-        &[0xc4, 0xe1, 0x6e, 0x58, 0xcb],     // vaddss with unpredictable L=1
+        &[0xc4, 0xe1, 0x6d, 0xfe, 0xcb][..], // vpaddd ymm
+        &[0xc4, 0xe2, 0x6d, 0x40, 0xcb],     // vpmulld ymm
+    ] {
+        let mut decoder = Decoder::new(32, bytes, DecoderOptions::NONE);
+        let instruction = decoder.decode();
+        assert_eq!(decoder.last_error(), DecoderError::None);
+        assert_eq!(instruction.encoding(), EncodingKind::VEX);
+        let memory = code(bytes, 0x1000);
+        for decoded in [
+            decode_one(&memory, GuestAddress(0x1000)).unwrap(),
+            decode_for_execution(&memory, GuestAddress(0x1000)).unwrap(),
+        ] {
+            assert!(matches!(decoded.operation(), Operation::Avx(_)));
+            assert_eq!(decoded.pc(), GuestAddress(0x1000));
+            assert_eq!(decoded.length(), bytes.len() as u8);
+            assert_eq!(decoded.next_pc(), GuestAddress(0x1000 + bytes.len() as u32));
+            assert!(memory.is_code_current(decoded.code_snapshot()));
+        }
+    }
+    for (bytes, encoding) in [
+        (
+            &[0x62, 0xf1, 0x7c, 0x48, 0x58, 0xc1][..],
+            EncodingKind::EVEX,
+        ), // vaddps zmm0,zmm0,zmm1
+        (&[0xc4, 0xe1, 0x6e, 0x58, 0xcb][..], EncodingKind::VEX), // vaddss with unpredictable l=1
     ] {
         let mut decoder = Decoder::new(32, bytes, DecoderOptions::NONE);
         let instruction = decoder.decode();
         assert_eq!(decoder.last_error(), DecoderError::None, "{bytes:02x?}");
-        assert_eq!(instruction.encoding(), EncodingKind::VEX);
+        assert_eq!(instruction.encoding(), encoding);
+        if encoding == EncodingKind::EVEX {
+            assert_eq!(
+                instruction.code(),
+                iced_x86::Code::EVEX_Vaddps_zmm_k1z_zmm_zmmm512b32_er
+            );
+        }
         let memory = code(bytes, 0x1000);
         let strict = decode_one(&memory, GuestAddress(0x1000)).unwrap_err();
         assert_eq!(strict, DecodeError::Unsupported(UnsupportedFeature::Simd));
@@ -102,7 +130,6 @@ fn valid_modern_extensions_and_unpredictable_l_remain_profile_refusals() {
         );
     }
 }
-
 #[test]
 fn canonical_gate_does_not_intercept_scalar_vex_or_legacy_les_lds() {
     // these scalar VEX families retain their existing typed owner and profile.

@@ -11,8 +11,8 @@ pub(crate) const XCR0: u64 = 7;
 /// baseline avx is admitted only with its complete architectural state enabled.
 pub(crate) const AVX_ENABLED: bool = XCR0 & 7 == 7;
 
-// individual avx2 encodings remain private until the complete feature is verified.
-pub(crate) const AVX2_ENABLED: bool = false;
+// avx2 shares the complete xmm/ymm state contract with baseline avx.
+pub(crate) const AVX2_ENABLED: bool = AVX_ENABLED;
 
 // activation follows complete guest-path verification independently of baseline avx.
 pub(crate) const F16C_ENABLED: bool = AVX_ENABLED;
@@ -68,7 +68,12 @@ pub(crate) const CPU_ID_LEAVES: [CpuIdLeaf; 8] = [
     CpuIdLeaf {
         function: 7,
         subfunction: Some(0),
-        registers: [0, 1 << 3 | 1 << 8, (RDPID_ENABLED as u32) << 22, 0],
+        registers: [
+            0,
+            1 << 3 | ((AVX2_ENABLED as u32) << 5) | 1 << 8,
+            (RDPID_ENABLED as u32) << 22,
+            0,
+        ],
     },
     CpuIdLeaf {
         function: 13,

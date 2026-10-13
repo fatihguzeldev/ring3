@@ -3,12 +3,10 @@ use ring3_engine::{
         arena::{HELPER_OFFSET, SIMD_OFFSET, TRANSFER_OFFSET, YMM_OFFSET},
         x86::{SIMD_SIZE, YMM_SIZE, encode_simd, encode_ymm},
     },
-    cpu::{
-        UnsupportedFeature,
-        x86::{
-            decode::{DecodeError, decode_one},
-            simd::{SimdState, ymm::YmmUpperState},
-        },
+    cpu::x86::{
+        decode::{DecodeError, decode_one},
+        ir::Operation,
+        simd::{SimdState, ymm::YmmUpperState},
     },
     memory::{AddressSpace, GuestAddress, PageRange, Permissions},
     process::{EngineInstance, StoreCompletion},
@@ -25,17 +23,20 @@ fn code(bytes: &[u8]) -> AddressSpace {
     memory
 }
 #[test]
-fn only_integer_alias_encodings_remain_private_after_strict_encoding_checks() {
+fn integer_alias_bindings_match_floating_after_strict_encoding_checks() {
     for control in [0x69, 0x6d] {
         for operand in [0xcb, 0x08] {
             let bytes = [0xc4, 0xe3, control, 2, operand, 0xaa];
-            assert_eq!(
-                decode_one(&code(&bytes), GuestAddress(0x1000)).unwrap_err(),
-                DecodeError::Unsupported(UnsupportedFeature::Simd)
-            );
+            let memory = code(&bytes);
+            let integer = decode_one(&memory, GuestAddress(0x1000)).unwrap();
+            assert!(matches!(integer.operation(), Operation::Avx(_)));
+            assert_eq!(usize::from(integer.length()), bytes.len());
+            assert_eq!(integer.next_pc(), GuestAddress(0x1000 + bytes.len() as u32));
+            assert!(memory.is_code_current(integer.code_snapshot()));
             let mut floating = bytes;
             floating[3] = 0x0c;
-            assert!(decode_one(&code(&floating), GuestAddress(0x1000)).is_ok());
+            let alias = decode_one(&code(&floating), GuestAddress(0x1000)).unwrap();
+            assert_eq!(integer.operation(), alias.operation());
             let mut invalid = bytes;
             invalid[2] |= 0x80;
             assert_eq!(

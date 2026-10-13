@@ -50,9 +50,9 @@ fn module(instruction: IntegerInstruction) -> Vec<u8> {
         .i32_const(4)
         .return_()
         .end();
-    if instruction.memory().is_some() {
+    if let Some(requirement) = instruction.memory() {
         code.local_get(1)
-            .i32_const(65520)
+            .i32_const(65536 - i32::from(requirement.bytes))
             .i32_gt_u()
             .if_(BlockType::Empty)
             .i32_const(3)
@@ -88,7 +88,27 @@ fn case(
     address: u32,
     invalid: bool,
 ) -> String {
-    let instruction = IntegerInstruction::new(
+    wide_case(
+        VectorWidth::Xmm,
+        operation,
+        (d, a, b),
+        seed,
+        address,
+        invalid,
+    )
+}
+
+fn wide_case(
+    vector_width: VectorWidth,
+    operation: IntegerLaneOperation,
+    aliases: (u8, u8, Option<u8>),
+    seed: u8,
+    address: u32,
+    invalid: bool,
+) -> String {
+    let (d, a, b) = aliases;
+    let instruction = IntegerInstruction::with_width(
+        vector_width,
         operation,
         register(d),
         (!operation.unary()).then_some(register(a)),
@@ -100,9 +120,10 @@ fn case(
         .map(|byte| format!("{byte:02x}"))
         .collect::<String>();
     format!(
-        "{{\"kind\":\"{:?}\",\"width\":{},\"destination\":{d},\"first\":{a},\"second\":{},\"seed\":{seed},\"address\":{address},\"invalidState\":{invalid},\"memoryBytes\":{},\"module\":\"{module}\"}}",
+        "{{\"kind\":\"{:?}\",\"width\":{},\"vectorBytes\":{},\"destination\":{d},\"first\":{a},\"second\":{},\"seed\":{seed},\"address\":{address},\"invalidState\":{invalid},\"memoryBytes\":{},\"module\":\"{module}\"}}",
         operation.kind(),
         operation.lane_bytes(),
+        vector_width.bytes(),
         b.map_or_else(|| "\"memory\"".to_owned(), |register| register.to_string()),
         instruction.memory().map_or(0, |r| r.bytes)
     )
@@ -165,8 +186,12 @@ fn direct_integer_lanes_match_independent_full_memory_oracle() {
         0,
         true,
     ));
+    assert_eq!(cases.len(), 1057);
+    run(cases);
+}
+
+fn run(cases: Vec<String>) {
     let count = cases.len();
-    assert_eq!(count, 1057);
     let mut child = Command::new("node")
         .args([
             "--input-type=module",
@@ -194,4 +219,56 @@ fn direct_integer_lanes_match_independent_full_memory_oracle() {
         String::from_utf8(output.stdout).unwrap().trim(),
         format!("{count} actual integer modules passed")
     );
+}
+
+#[test]
+fn direct_wide_wrapping_lanes_match_independent_full_memory_oracle() {
+    let mut cases = Vec::new();
+    for kind in [P::Add, P::Subtract] {
+        for width in [1, 2, 4, 8] {
+            let operation = IntegerLaneOperation::new(kind, width).unwrap();
+            for seed in [0, 3, 6] {
+                for destination in 0..8 {
+                    let next = (destination + 1) % 8;
+                    let third = (destination + 2) % 8;
+                    for (first, second) in [
+                        (next, third),
+                        (destination, next),
+                        (next, destination),
+                        (next, next),
+                        (destination, destination),
+                    ] {
+                        cases.push(wide_case(
+                            VectorWidth::Ymm,
+                            operation,
+                            (destination, first, Some(second)),
+                            seed,
+                            0,
+                            false,
+                        ));
+                    }
+                }
+                for address in [0x8003, 65504, 65505] {
+                    cases.push(wide_case(
+                        VectorWidth::Ymm,
+                        operation,
+                        (0, 0, None),
+                        seed,
+                        address,
+                        false,
+                    ));
+                }
+            }
+        }
+    }
+    cases.push(wide_case(
+        VectorWidth::Ymm,
+        IntegerLaneOperation::new(P::Add, 4).unwrap(),
+        (0, 0, Some(0)),
+        0,
+        0,
+        true,
+    ));
+    assert_eq!(cases.len(), 1033);
+    run(cases);
 }

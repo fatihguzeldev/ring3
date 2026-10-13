@@ -102,3 +102,51 @@ mod stream_capability;
 
 #[path = "avx/gather/capability/native.rs"]
 mod gather_capability;
+
+#[path = "avx/logical/native.rs"]
+mod avx2_logical;
+
+#[path = "avx/integer/native.rs"]
+mod avx2_integer;
+
+#[path = "avx/blocks/native.rs"]
+mod avx2_blocks;
+
+#[path = "avx/broadcast/native.rs"]
+mod avx2_broadcast;
+
+#[path = "avx/masked/native.rs"]
+mod avx2_masked;
+
+#[path = "avx/shift/uniform/native.rs"]
+mod avx2_shift_uniform;
+
+#[path = "avx/shift/variable/native.rs"]
+mod avx2_shift_variable;
+
+#[path = "avx/rearrange/widen/native.rs"]
+mod avx2_rearrange_widen;
+
+#[path = "avx/rearrange/lanes/native.rs"]
+mod avx2_rearrange_lanes;
+
+#[path = "avx/multiply/native.rs"]
+mod avx2_multiply;
+
+#[path = "avx/multiply/sad/native.rs"]
+mod avx2_sad;
+
+#[path = "avx/permute/whole/native.rs"]
+mod avx2_whole;
+
+#[path = "avx/permute/blend/native.rs"]
+mod avx2_blend;
+
+#[path = "avx/scalar/mask/native.rs"]
+mod avx2_movemask;
+
+#[path = "avx/moves/stream/native.rs"]
+mod avx2_stream;
+
+#[path = "avx/gather/native.rs"]
+mod avx2_gather;

@@ -1,9 +1,6 @@
 use ring3_engine::{
     abi::arena::{HELPER_OFFSET, SIMD_OFFSET, TRANSFER_OFFSET, YMM_OFFSET},
-    cpu::{
-        UnsupportedFeature,
-        x86::decode::{DecodeError, decode_one},
-    },
+    cpu::x86::decode::{DecodeError, decode_one},
     memory::{AddressSpace, GuestAddress, PageRange, Permissions},
     process::{EngineInstance, HostError, StoreCompletion},
 };
@@ -44,15 +41,32 @@ fn ram(engine: &EngineInstance) -> [u8; 4096] {
     result
 }
 
+fn admitted(bytes: &[u8]) -> ring3_engine::cpu::x86::ir::Operation {
+    let memory = code(bytes);
+    let instruction = decode_one(&memory, GuestAddress(0x1000)).unwrap();
+    assert!(
+        matches!(
+            instruction.operation(),
+            ring3_engine::cpu::x86::ir::Operation::Avx(_)
+        ),
+        "{bytes:02x?}"
+    );
+    assert_eq!(instruction.pc(), GuestAddress(0x1000));
+    assert_eq!(instruction.length() as usize, bytes.len());
+    assert_eq!(
+        instruction.next_pc(),
+        GuestAddress(0x1000 + bytes.len() as u32)
+    );
+    assert!(memory.is_code_current(instruction.code_snapshot()));
+    *instruction.operation()
+}
+
 #[test]
-fn every_gather_code_refuses_while_existing_avx_loads_remain_available() {
+fn every_gather_code_binds_while_existing_avx_loads_remain_available() {
     for control in [0x61, 0x65, 0xe1, 0xe5] {
         for opcode in 0x90..=0x93 {
             let bytes = [0xc4, 0xe2, control, opcode, 0x0c, 0x10];
-            assert_eq!(
-                decode_one(&code(&bytes), GuestAddress(0x1000)).unwrap_err(),
-                DecodeError::Unsupported(UnsupportedFeature::Simd)
-            );
+            admitted(&bytes);
         }
     }
     for bytes in [&[0xc5, 0xf8, 0x10, 0x08][..], &[0xc5, 0xfe, 0x6f, 0x08]] {
@@ -68,7 +82,7 @@ fn every_gather_code_refuses_while_existing_avx_loads_remain_available() {
 }
 
 #[test]
-fn gather_helper_gate_precedes_malformed_state_request_and_staged_output() {
+fn gather_state_request_errors_and_zero_selection_have_distinct_staged_results() {
     let mut engine = engine();
     let before_ram = ram(&engine);
     let arena = engine.arena_mut().unwrap();
@@ -76,13 +90,46 @@ fn gather_helper_gate_precedes_malformed_state_request_and_staged_output() {
     arena[TRANSFER_OFFSET + 544..TRANSFER_OFFSET + 568].fill(0xff);
     arena[YMM_OFFSET + 12] = 1;
     arena[SIMD_OFFSET + 12] = 1;
-    let before = arena.to_vec();
+    let malformed_state = arena.to_vec();
     for id in 1..=8 {
+        engine
+            .arena_mut()
+            .unwrap()
+            .copy_from_slice(&malformed_state);
+        assert_eq!(
+            engine.avx_execute(0x01001400 | id, OPERANDS, 0, 0, 0, 2),
+            Err(HostError::Infrastructure)
+        );
+        assert_eq!(engine.arena(), malformed_state);
+        assert_eq!(ram(&engine), before_ram);
+        let arena = engine.arena_mut().unwrap();
+        arena[YMM_OFFSET + 12] = 0;
+        arena[SIMD_OFFSET + 12] = 0;
+        let malformed_request = arena.to_vec();
         assert_eq!(
             engine.avx_execute(0x01001400 | id, OPERANDS, 0, 0, 0, 2),
             Err(HostError::InvalidRequest)
         );
-        assert_eq!(engine.arena(), before);
+        assert_eq!(engine.arena(), malformed_request);
+        assert_eq!(ram(&engine), before_ram);
+        let request =
+            &mut engine.arena_mut().unwrap()[TRANSFER_OFFSET + 544..TRANSFER_OFFSET + 568];
+        request.fill(0);
+        request[..12].copy_from_slice(&[b'R', b'3', b'G', b'A', 1, 0, 1, 0, 24, 0, 0, 0]);
+        request[16..20].copy_from_slice(&3_u32.to_le_bytes());
+        request[20..24].copy_from_slice(&u32::MAX.to_le_bytes());
+        let before = engine.arena().to_vec();
+        let mut expected = before.clone();
+        expected[TRANSFER_OFFSET..TRANSFER_OFFSET + 64].fill(0);
+        let packet = &mut expected[HELPER_OFFSET..HELPER_OFFSET + 40];
+        packet.fill(0);
+        packet[..12].copy_from_slice(&[b'R', b'3', b'G', b'H', 1, 0, 1, 0, 40, 0, 0, 0]);
+        packet[36..40].copy_from_slice(&u32::MAX.to_le_bytes());
+        assert_eq!(
+            engine.avx_execute(0x01001400 | id, OPERANDS, 0, 0, 0, 2),
+            Ok(StoreCompletion::Complete)
+        );
+        assert_eq!(engine.arena(), expected);
         assert_eq!(ram(&engine), before_ram);
     }
 }
