@@ -1,5 +1,8 @@
 use super::{Element, MemoryRequirement, VectorRegister, VectorState, VectorWidth};
-use crate::{cpu::x86::{Register32, State32}, memory::Access};
+use crate::{
+    cpu::x86::{Register32, State32},
+    memory::Access,
+};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum MoveSource {
@@ -20,31 +23,97 @@ pub(crate) enum WordTarget {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum Half { Low, High }
+pub(crate) enum Half {
+    Low,
+    High,
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum HalfMerge { HighToLow, LowToHigh }
+pub(crate) enum HalfMerge {
+    HighToLow,
+    LowToHigh,
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum DuplicateKind { SingleLow, SingleHigh, DoubleLow }
+pub(crate) enum DuplicateKind {
+    SingleLow,
+    SingleHigh,
+    DoubleLow,
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum MoveInstruction {
-    Copy { width: VectorWidth, destination: VectorRegister, source: VectorRegister },
-    Load { width: VectorWidth, destination: VectorRegister, aligned: bool },
-    Store { width: VectorWidth, source: VectorRegister, aligned: bool },
-    Scalar { element: Element, destination: VectorRegister, merge: VectorRegister, source: VectorRegister },
-    LoadScalar { element: Element, destination: VectorRegister },
-    StoreScalar { element: Element, source: VectorRegister },
-    LoadHalf { half: Half, destination: VectorRegister, merge: VectorRegister },
-    StoreHalf { half: Half, source: VectorRegister },
-    MergeHalf { kind: HalfMerge, destination: VectorRegister, merge: VectorRegister, source: VectorRegister },
-    Duplicate { kind: DuplicateKind, width: VectorWidth, destination: VectorRegister, source: MoveSource },
-    DwordLoad { destination: VectorRegister, source: WordSource },
-    DwordStore { source: VectorRegister, destination: WordTarget },
-    QwordLoad { destination: VectorRegister, source: MoveSource },
-    QwordStore { source: VectorRegister },
-    Mask { element: Element, width: VectorWidth, destination: Register32, source: VectorRegister },
+    Copy {
+        width: VectorWidth,
+        destination: VectorRegister,
+        source: VectorRegister,
+    },
+    Load {
+        width: VectorWidth,
+        destination: VectorRegister,
+        aligned: bool,
+    },
+    Store {
+        width: VectorWidth,
+        source: VectorRegister,
+        aligned: bool,
+    },
+    Scalar {
+        element: Element,
+        destination: VectorRegister,
+        merge: VectorRegister,
+        source: VectorRegister,
+    },
+    LoadScalar {
+        element: Element,
+        destination: VectorRegister,
+    },
+    StoreScalar {
+        element: Element,
+        source: VectorRegister,
+    },
+    LoadHalf {
+        half: Half,
+        destination: VectorRegister,
+        merge: VectorRegister,
+    },
+    StoreHalf {
+        half: Half,
+        source: VectorRegister,
+    },
+    MergeHalf {
+        kind: HalfMerge,
+        destination: VectorRegister,
+        merge: VectorRegister,
+        source: VectorRegister,
+    },
+    Duplicate {
+        kind: DuplicateKind,
+        width: VectorWidth,
+        destination: VectorRegister,
+        source: MoveSource,
+    },
+    DwordLoad {
+        destination: VectorRegister,
+        source: WordSource,
+    },
+    DwordStore {
+        source: VectorRegister,
+        destination: WordTarget,
+    },
+    QwordLoad {
+        destination: VectorRegister,
+        source: MoveSource,
+    },
+    QwordStore {
+        source: VectorRegister,
+    },
+    Mask {
+        element: Element,
+        width: VectorWidth,
+        destination: Register32,
+        source: VectorRegister,
+    },
     LoadControl,
     StoreControl,
     ZeroUpper,
@@ -67,17 +136,42 @@ impl MoveInstruction {
             Store { width, aligned, .. } => (Access::Write, width.bytes(), aligned),
             LoadScalar { element, .. } => (Access::Read, element.bytes(), false),
             StoreScalar { element, .. } => (Access::Write, element.bytes(), false),
-            LoadHalf { .. } | QwordLoad { source: MoveSource::Memory, .. } => (Access::Read, 8, false),
+            LoadHalf { .. }
+            | QwordLoad {
+                source: MoveSource::Memory,
+                ..
+            } => (Access::Read, 8, false),
             StoreHalf { .. } | QwordStore { .. } => (Access::Write, 8, false),
-            Duplicate { kind, width, source: MoveSource::Memory, .. } => {
-                let bytes = if kind == DuplicateKind::DoubleLow && width == VectorWidth::Xmm { 8 } else { width.bytes() };
+            Duplicate {
+                kind,
+                width,
+                source: MoveSource::Memory,
+                ..
+            } => {
+                let bytes = if kind == DuplicateKind::DoubleLow && width == VectorWidth::Xmm {
+                    8
+                } else {
+                    width.bytes()
+                };
                 (Access::Read, bytes, false)
             }
-            DwordLoad { source: WordSource::Memory, .. } | LoadControl => (Access::Read, 4, false),
-            DwordStore { destination: WordTarget::Memory, .. } | StoreControl => (Access::Write, 4, false),
+            DwordLoad {
+                source: WordSource::Memory,
+                ..
+            }
+            | LoadControl => (Access::Read, 4, false),
+            DwordStore {
+                destination: WordTarget::Memory,
+                ..
+            }
+            | StoreControl => (Access::Write, 4, false),
             _ => return None,
         };
-        Some(MemoryRequirement { access, bytes: bytes as u8, alignment: if aligned { bytes as u8 } else { 1 } })
+        Some(MemoryRequirement {
+            access,
+            bytes: bytes as u8,
+            alignment: if aligned { bytes as u8 } else { 1 },
+        })
     }
 }
 
@@ -104,7 +198,11 @@ impl VectorState {
         use MoveInstruction::*;
         let mut value = [0; 32];
         let destination = match operation {
-            Copy { width, destination, source } => {
+            Copy {
+                width,
+                destination,
+                source,
+            } => {
                 value[..width.bytes()].copy_from_slice(&self.read(source)[..width.bytes()]);
                 Some(destination)
             }
@@ -116,12 +214,21 @@ impl VectorState {
                 operand.copy_from_slice(&self.read(source)[..operand.len()]);
                 None
             }
-            Scalar { element, destination, merge, source } => {
+            Scalar {
+                element,
+                destination,
+                merge,
+                source,
+            } => {
                 value[..16].copy_from_slice(&self.read(merge)[..16]);
                 value[..element.bytes()].copy_from_slice(&self.read(source)[..element.bytes()]);
                 Some(destination)
             }
-            LoadHalf { half, destination, merge } => {
+            LoadHalf {
+                half,
+                destination,
+                merge,
+            } => {
                 value[..16].copy_from_slice(&self.read(merge)[..16]);
                 let offset = if half == Half::Low { 0 } else { 8 };
                 value[offset..offset + 8].copy_from_slice(operand);
@@ -132,7 +239,12 @@ impl VectorState {
                 operand.copy_from_slice(&self.read(source)[offset..offset + 8]);
                 None
             }
-            MergeHalf { kind, destination, merge, source } => {
+            MergeHalf {
+                kind,
+                destination,
+                merge,
+                source,
+            } => {
                 let first = self.read(merge);
                 let second = self.read(source);
                 match kind {
@@ -147,7 +259,12 @@ impl VectorState {
                 }
                 Some(destination)
             }
-            Duplicate { kind, width, destination, source } => {
+            Duplicate {
+                kind,
+                width,
+                destination,
+                source,
+            } => {
                 let input = match source {
                     MoveSource::Register(register) => self.read(register),
                     MoveSource::Memory => {
@@ -165,27 +282,42 @@ impl VectorState {
                     for (lane, &source_lane) in lanes.iter().enumerate() {
                         let destination = half + lane * element;
                         let source = half + source_lane * element;
-                        value[destination..destination + element].copy_from_slice(&input[source..source + element]);
+                        value[destination..destination + element]
+                            .copy_from_slice(&input[source..source + element]);
                     }
                 }
                 Some(destination)
             }
-            DwordLoad { destination, source } => {
+            DwordLoad {
+                destination,
+                source,
+            } => {
                 value[..4].copy_from_slice(&match source {
-                    WordSource::Register(register) => general.registers[register.index()].to_le_bytes(),
+                    WordSource::Register(register) => {
+                        general.registers[register.index()].to_le_bytes()
+                    }
                     WordSource::Memory => operand[..4].try_into().unwrap(),
                 });
                 Some(destination)
             }
-            DwordStore { source, destination } => {
+            DwordStore {
+                source,
+                destination,
+            } => {
                 let input = self.read(source);
                 match destination {
-                    WordTarget::Register(register) => general.registers[register.index()] = u32::from_le_bytes(input[..4].try_into().unwrap()),
+                    WordTarget::Register(register) => {
+                        general.registers[register.index()] =
+                            u32::from_le_bytes(input[..4].try_into().unwrap())
+                    }
                     WordTarget::Memory => operand.copy_from_slice(&input[..4]),
                 }
                 None
             }
-            QwordLoad { destination, source } => {
+            QwordLoad {
+                destination,
+                source,
+            } => {
                 let input = match source {
                     MoveSource::Register(register) => self.read(register),
                     MoveSource::Memory => {
@@ -197,7 +329,12 @@ impl VectorState {
                 value[..8].copy_from_slice(&input[..8]);
                 Some(destination)
             }
-            Mask { element, width, destination, source } => {
+            Mask {
+                element,
+                width,
+                destination,
+                source,
+            } => {
                 let input = self.read(source);
                 let mut mask = 0;
                 for lane in 0..width.bytes() / element.bytes() {
@@ -208,15 +345,29 @@ impl VectorState {
             }
             LoadControl => {
                 let control = u32::from_le_bytes(operand[..4].try_into().unwrap());
-                if control & !0xffff != 0 { return Err(MoveError::InvalidControl); }
+                if control & !0xffff != 0 {
+                    return Err(MoveError::InvalidControl);
+                }
                 self.simd.mxcsr = control;
                 None
             }
-            StoreControl => { operand.copy_from_slice(&self.simd.mxcsr.to_le_bytes()); None }
-            ZeroUpper => { self.upper = [[0; 16]; 8]; None }
-            ZeroAll => { self.upper = [[0; 16]; 8]; self.simd.xmm = [[0; 16]; 8]; None }
+            StoreControl => {
+                operand.copy_from_slice(&self.simd.mxcsr.to_le_bytes());
+                None
+            }
+            ZeroUpper => {
+                self.upper = [[0; 16]; 8];
+                None
+            }
+            ZeroAll => {
+                self.upper = [[0; 16]; 8];
+                self.simd.xmm = [[0; 16]; 8];
+                None
+            }
         };
-        if let Some(destination) = destination { self.publish(destination, value); }
+        if let Some(destination) = destination {
+            self.publish(destination, value);
+        }
         Ok(())
     }
 }
