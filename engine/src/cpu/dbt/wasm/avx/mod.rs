@@ -1,5 +1,6 @@
 mod logical;
 mod moves;
+mod permute;
 
 #[derive(Clone, Copy)]
 pub(super) struct VectorLayout {

@@ -1,4 +1,4 @@
-use super::{Element, VectorRegister, VectorState, VectorWidth};
+use super::{Element, MemoryRequirement, VectorRegister, VectorState, VectorWidth};
 use crate::{cpu::x86::{Register32, State32}, memory::Access};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -49,13 +49,6 @@ pub(crate) enum MoveInstruction {
     StoreControl,
     ZeroUpper,
     ZeroAll,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) struct MemoryRequirement {
-    pub access: Access,
-    pub bytes: u8,
-    pub alignment: u8,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

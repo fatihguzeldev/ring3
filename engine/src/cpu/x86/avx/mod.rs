@@ -1,9 +1,11 @@
 mod arithmetic;
 mod moves;
+mod permute;
 
 pub(crate) use moves::{
     DuplicateKind, Half, HalfMerge, MoveInstruction, MoveSource, WordSource, WordTarget,
 };
+pub(crate) use permute::PermuteInstruction;
 
 use super::simd::SimdState;
 
@@ -37,6 +39,13 @@ impl VectorWidth {
             Self::Ymm => 32,
         }
     }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct MemoryRequirement {
+    pub access: crate::memory::Access,
+    pub bytes: u8,
+    pub alignment: u8,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
