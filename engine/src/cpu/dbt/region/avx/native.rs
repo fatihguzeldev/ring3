@@ -63,7 +63,7 @@ fn embedded_admits_typed_avx_without_relaxing_explicit_block_ends() {
             byte_length: length as u32 + 2,
         };
         prepared(
-            prepare_embedded_region(&memory, &[spec], limits, &[]),
+            prepare_embedded_region(&memory, &[spec], limits, &[], None),
             &memory,
         );
         assert_eq!(
@@ -75,6 +75,7 @@ fn embedded_admits_typed_avx_without_relaxing_explicit_block_ends() {
                 }],
                 limits,
                 &[],
+                None,
             )
             .unwrap_err(),
             instruction_error(InstructionError::InvalidBlockEnd)
@@ -88,6 +89,7 @@ fn embedded_admits_typed_avx_without_relaxing_explicit_block_ends() {
                 }],
                 limits,
                 &[],
+                None,
             )
             .unwrap_err(),
             CompileError::Instruction {
@@ -115,7 +117,7 @@ fn resident_admits_typed_avx_and_preserves_instruction_limits() {
             byte_length: length as u32 + 2,
         };
         prepared(
-            prepare_resident_region(&memory, &[spec], CompileLimits::default(), &[]),
+            prepare_resident_region(&memory, &[spec], CompileLimits::default(), &[], None),
             &memory,
         );
         assert_eq!(
@@ -127,6 +129,7 @@ fn resident_admits_typed_avx_and_preserves_instruction_limits() {
                     ..CompileLimits::default()
                 },
                 &[],
+                None,
             )
             .unwrap_err(),
             CompileError::InstructionLimit
@@ -140,6 +143,7 @@ fn resident_admits_typed_avx_and_preserves_instruction_limits() {
                 }],
                 CompileLimits::default(),
                 &[],
+                None,
             )
             .unwrap_err(),
             instruction_error(InstructionError::InvalidBlockEnd)
@@ -157,14 +161,17 @@ fn entry_paths_admit_typed_avx_only_with_cpu_state_authority() {
         }
         let limits = CompileLimits::default();
         prepared(
-            cold::prepare_embedded_entry_region(&memory, &[PC], limits, &[]),
+            cold::prepare_embedded_entry_region(&memory, &[PC], limits, &[], None),
             &memory,
         );
         prepared(
-            cold::prepare_resident_entry_region(&memory, &[PC], limits, &[]),
+            cold::prepare_resident_entry_region(&memory, &[PC], limits, &[], None),
             &memory,
         );
-        prepared(cold::prepare_runtime_entry(&memory, PC, limits), &memory);
+        prepared(
+            cold::prepare_runtime_entry(&memory, PC, limits, None),
+            &memory,
+        );
         assert_eq!(
             cold::prepare_entry_region(&memory, &[PC], limits).unwrap_err(),
             instruction_error(InstructionError::BackendUnsupported)
@@ -175,6 +182,7 @@ fn entry_paths_admit_typed_avx_only_with_cpu_state_authority() {
                 &[PC, GuestAddress(PC.0 + length as u32 - 1)],
                 limits,
                 &[],
+                None,
             )
             .unwrap_err(),
             CompileError::InvalidBlocks

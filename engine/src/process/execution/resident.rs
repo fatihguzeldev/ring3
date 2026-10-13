@@ -163,18 +163,33 @@ impl EngineInstance {
                 id: u32::from_le_bytes(transfer[offset + 4..offset + 8].try_into().unwrap()),
             };
         }
+        let cs = self.code_fetch_context()?;
         let memory = self.memory.as_ref().ok_or(HostError::Closed)?;
         let entries = &entries[..count as usize];
         let gates = &gates[..gate_count as usize];
         if let Some(registry) = self.resident.as_mut() {
             registry
-                .compile_entries_bound(memory, entries, gates, CompileLimits::default(), self.key)
+                .compile_entries_bound(
+                    memory,
+                    entries,
+                    gates,
+                    CompileLimits::default(),
+                    self.key,
+                    Some(cs),
+                )
                 .map_err(HostError::Resident)
         } else {
             let mut registry = ResidentRegistry::new(memory, RegistryLimits::default())
                 .map_err(HostError::Resident)?;
             let id = registry
-                .compile_entries_bound(memory, entries, gates, CompileLimits::default(), self.key)
+                .compile_entries_bound(
+                    memory,
+                    entries,
+                    gates,
+                    CompileLimits::default(),
+                    self.key,
+                    Some(cs),
+                )
                 .map_err(HostError::Resident)?;
             self.resident = Some(registry);
             Ok(id)
@@ -217,6 +232,7 @@ impl EngineInstance {
                 id: u32::from_le_bytes(transfer[offset + 4..offset + 8].try_into().unwrap()),
             };
         }
+        let cs = self.code_fetch_context()?;
         let memory = self.memory.as_ref().ok_or(HostError::Closed)?;
         let specs = &specs[..count as usize];
         let gates = &gates[..gate_count as usize];
@@ -227,13 +243,27 @@ impl EngineInstance {
         }
         if let Some(registry) = self.resident.as_mut() {
             registry
-                .compile_bound(memory, specs, gates, CompileLimits::default(), self.key)
+                .compile_bound(
+                    memory,
+                    specs,
+                    gates,
+                    CompileLimits::default(),
+                    self.key,
+                    Some(cs),
+                )
                 .map_err(HostError::Resident)
         } else {
             let mut registry = ResidentRegistry::new(memory, RegistryLimits::default())
                 .map_err(HostError::Resident)?;
             let id = registry
-                .compile_bound(memory, specs, gates, CompileLimits::default(), self.key)
+                .compile_bound(
+                    memory,
+                    specs,
+                    gates,
+                    CompileLimits::default(),
+                    self.key,
+                    Some(cs),
+                )
                 .map_err(HostError::Resident)?;
             self.resident = Some(registry);
             Ok(id)
@@ -243,10 +273,11 @@ impl EngineInstance {
     pub fn lookup_resident(&self, pc: u32) -> Result<UnitId, HostError> {
         let memory = self.memory()?;
         let pc = GuestAddress(pc);
+        let cs = self.code_fetch_context()?;
         self.resident
             .as_ref()
             .ok_or(HostError::Resident(RegistryError::NotFound { pc }))?
-            .lookup(memory, pc)
+            .lookup_bound(memory, pc, cs)
             .map_err(HostError::Resident)
     }
 

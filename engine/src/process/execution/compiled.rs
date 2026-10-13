@@ -75,6 +75,7 @@ impl EngineInstance {
     ) -> Result<CompiledRegion, HostError> {
         Self::check_region_counts(count, gate_count)?;
         let memory = self.memory()?;
+        let cs = self.code_fetch_context()?;
         let transfer = &self.arena()[TRANSFER_OFFSET..TRANSFER_OFFSET + TRANSFER_SIZE];
         let stride = match format {
             DescriptorFormat::BlockSpecs => 8,
@@ -121,6 +122,7 @@ impl EngineInstance {
                 self.key,
                 generation,
                 &gates[..gate_count as usize],
+                cs,
             ),
             DescriptorFormat::Entries => compile_embedded_entry_region(
                 memory,
@@ -129,6 +131,7 @@ impl EngineInstance {
                 self.key,
                 generation,
                 &gates[..gate_count as usize],
+                cs,
             ),
         }
         .map_err(HostError::Compile)

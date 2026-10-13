@@ -194,7 +194,7 @@ pub(super) fn flush(
                 .i32_store(memarg(offset));
         }
     }
-    if !cpu && memory {
+    if !cpu {
         sink.local_get(REASON)
             .i32_const(11)
             .i32_ge_u()

@@ -1,5 +1,5 @@
 use crate::{
-    cpu::x86::decode::DecodeError,
+    cpu::x86::decode::{CodeFetchContext, DecodeError},
     memory::{AddressSpace, CodeSnapshot, GuestAddress, MemoryError},
 };
 
@@ -43,11 +43,26 @@ pub(super) fn validate(blocks: &[BlockSpec], gates: &[GateSpec]) -> Result<(), C
     Ok(())
 }
 
-pub(super) fn prepare(memory: &AddressSpace, gate: GateSpec) -> Result<PreparedGate, CompileError> {
+pub(super) fn prepare(
+    memory: &AddressSpace,
+    gate: GateSpec,
+    cs: Option<CodeFetchContext>,
+) -> Result<PreparedGate, CompileError> {
     let mut bytes = [0; 2];
-    memory
-        .fetch(gate.entry, &mut bytes)
-        .map_err(|error| memory_error(gate.entry, error))?;
+    for length in 1..=bytes.len() {
+        if cs.is_some_and(|cs| !cs.permits(gate.entry, length as u8)) {
+            return Err(CompileError::Instruction {
+                pc: gate.entry,
+                cause: InstructionError::Decode(DecodeError::CodeSegment {
+                    pc: gate.entry,
+                    attempted_length: length as u8,
+                }),
+            });
+        }
+        memory
+            .fetch(gate.entry, &mut bytes[..length])
+            .map_err(|error| memory_error(gate.entry, error))?;
+    }
     if bytes != [0x0f, 0x0b] {
         return Err(CompileError::Instruction {
             pc: gate.entry,

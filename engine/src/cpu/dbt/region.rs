@@ -2,7 +2,10 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::{
     cpu::x86::{
-        decode::{DecodeError, DecodedInstruction, decode_one},
+        decode::{
+            BoundDecode, CapturedCodeFault, CodeFetchContext, DecodeError, DecodePolicy,
+            DecodedInstruction, decode_bound, decode_one,
+        },
         ir::{BinaryKind, BranchTarget, Location32, Operation, SmallSource, UnaryKind, Value32},
     },
     memory::{AddressSpace, CodeSnapshot, GuestAddress, MemoryError},
@@ -77,8 +80,34 @@ enum PreparationProfile {
 #[derive(Debug)]
 pub(super) struct CompiledBlock {
     pub(super) instructions: Vec<DecodedInstruction>,
-    pub(super) gate: Option<PreparedGate>,
-    pub(super) code_snapshot: Option<CodeSnapshot>,
+    pub(super) source: BlockSource,
+}
+
+#[derive(Debug)]
+pub(super) enum BlockSource {
+    Instructions(CodeSnapshot),
+    Gate(PreparedGate),
+    ContextFault {
+        fault: CapturedCodeFault,
+        consumed: Option<CodeSnapshot>,
+    },
+}
+
+impl CompiledBlock {
+    pub(super) fn gate(&self) -> Option<&PreparedGate> {
+        if let BlockSource::Gate(gate) = &self.source {
+            Some(gate)
+        } else {
+            None
+        }
+    }
+    pub(super) fn context_fault(&self) -> Option<&CapturedCodeFault> {
+        if let BlockSource::ContextFault { fault, .. } = &self.source {
+            Some(fault)
+        } else {
+            None
+        }
+    }
 }
 
 impl PreparedRegion {
@@ -99,12 +128,12 @@ impl PreparedRegion {
         if self.validated_version.load(Ordering::Relaxed) == version {
             return true;
         }
-        let current = self.blocks.iter().all(|block| match &block.gate {
-            Some(gate) => gate.is_current(memory),
-            None => block
-                .code_snapshot
+        let current = self.blocks.iter().all(|block| match &block.source {
+            BlockSource::Gate(gate) => gate.is_current(memory),
+            BlockSource::Instructions(snapshot) => memory.is_code_current(snapshot),
+            BlockSource::ContextFault { consumed, .. } => consumed
                 .as_ref()
-                .is_some_and(|snapshot| memory.is_code_current(snapshot)),
+                .is_none_or(|snapshot| memory.is_code_current(snapshot)),
         });
         if current {
             self.validated_version.store(version, Ordering::Relaxed);
@@ -119,7 +148,11 @@ impl PreparedRegion {
     pub fn instruction_count(&self) -> usize {
         self.blocks
             .iter()
-            .map(|block| block.instructions.len() + usize::from(block.gate.is_some()))
+            .map(|block| {
+                block.instructions.len()
+                    + usize::from(block.gate().is_some())
+                    + usize::from(block.context_fault().is_some())
+            })
             .sum()
     }
 }
@@ -129,7 +162,14 @@ pub fn prepare_region(
     specs: &[BlockSpec],
     limits: CompileLimits,
 ) -> Result<PreparedRegion, CompileError> {
-    prepare(memory, specs, limits, PreparationProfile::Standalone, &[])
+    prepare(
+        memory,
+        specs,
+        limits,
+        PreparationProfile::Standalone,
+        &[],
+        None,
+    )
 }
 
 pub(super) fn prepare_resident_region(
@@ -137,8 +177,16 @@ pub(super) fn prepare_resident_region(
     specs: &[BlockSpec],
     limits: CompileLimits,
     gates: &[GateSpec],
+    cs: Option<CodeFetchContext>,
 ) -> Result<PreparedRegion, CompileError> {
-    prepare(memory, specs, limits, PreparationProfile::Resident, gates)
+    prepare(
+        memory,
+        specs,
+        limits,
+        PreparationProfile::Resident,
+        gates,
+        cs,
+    )
 }
 
 pub(super) fn prepare_embedded_region(
@@ -146,8 +194,16 @@ pub(super) fn prepare_embedded_region(
     specs: &[BlockSpec],
     limits: CompileLimits,
     gates: &[GateSpec],
+    cs: Option<CodeFetchContext>,
 ) -> Result<PreparedRegion, CompileError> {
-    prepare(memory, specs, limits, PreparationProfile::Embedded, gates)
+    prepare(
+        memory,
+        specs,
+        limits,
+        PreparationProfile::Embedded,
+        gates,
+        cs,
+    )
 }
 
 fn prepare(
@@ -156,6 +212,7 @@ fn prepare(
     limits: CompileLimits,
     profile: PreparationProfile,
     gates: &[GateSpec],
+    cs: Option<CodeFetchContext>,
 ) -> Result<PreparedRegion, CompileError> {
     validate_limits(limits)?;
     validate_blocks(specs, limits.blocks)?;
@@ -174,11 +231,10 @@ fn prepare(
             if instruction_count == limits.instructions {
                 return Err(CompileError::InstructionLimit);
             }
-            let gate = gate::prepare(memory, *gate)?;
+            let gate = gate::prepare(memory, *gate, cs)?;
             blocks.push(CompiledBlock {
                 instructions: Vec::new(),
-                gate: Some(gate),
-                code_snapshot: None,
+                source: BlockSource::Gate(gate),
             });
             instruction_count += 1;
             continue;
@@ -191,7 +247,7 @@ fn prepare(
                 return Err(CompileError::InstructionLimit);
             }
             let pc = GuestAddress(cursor as u32);
-            let instruction = decode_one(memory, pc)
+            let instruction = strict_instruction(memory, pc, cs)
                 .map_err(|error| instruction_error(pc, InstructionError::Decode(error)))?;
             let next = cursor + u64::from(instruction.length());
             let terminates = terminates(&instruction, embedded)
@@ -222,17 +278,31 @@ fn prepare(
             cursor = next;
         }
         blocks.push(CompiledBlock {
-            code_snapshot: Some(prepare_block_snapshot(
+            source: BlockSource::Instructions(prepare_block_snapshot(
                 memory,
                 spec.entry,
                 (cursor - u64::from(spec.entry.0)) as usize,
             )?),
             instructions,
-            gate: None,
         });
     }
 
     Ok(PreparedRegion::new(memory, blocks))
+}
+
+pub(super) fn strict_instruction(
+    memory: &AddressSpace,
+    pc: GuestAddress,
+    cs: Option<CodeFetchContext>,
+) -> Result<DecodedInstruction, DecodeError> {
+    if let Some(cs) = cs {
+        match decode_bound(memory, pc, cs, DecodePolicy::Strict)? {
+            BoundDecode::Instruction(instruction) => Ok(instruction),
+            BoundDecode::CodeFault(_) => unreachable!("strict decoding returns a typed error"),
+        }
+    } else {
+        decode_one(memory, pc)
+    }
 }
 
 pub(super) fn validate_limits(limits: CompileLimits) -> Result<(), CompileError> {

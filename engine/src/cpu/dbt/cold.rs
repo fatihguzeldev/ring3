@@ -1,9 +1,11 @@
 use super::{
     BlockSpec, CompileError, CompileLimits, GateSpec, InstructionError, PreparedRegion, gate,
-    region::{self, CompiledBlock, GUEST_END, MAX_BLOCKS},
+    region::{self, BlockSource, CompiledBlock, GUEST_END, MAX_BLOCKS},
 };
 use crate::{
-    cpu::x86::decode::{decode_for_execution, decode_one},
+    cpu::x86::decode::{
+        BoundDecode, CodeFetchContext, DecodePolicy, decode_bound, decode_for_execution,
+    },
     memory::{AddressSpace, GuestAddress},
 };
 
@@ -12,7 +14,15 @@ pub fn prepare_entry_region(
     entries: &[GuestAddress],
     limits: CompileLimits,
 ) -> Result<PreparedRegion, CompileError> {
-    prepare(memory, entries, limits, false, &[], DecodePolicy::Strict)
+    prepare(
+        memory,
+        entries,
+        limits,
+        false,
+        &[],
+        DecodePolicy::Strict,
+        None,
+    )
 }
 
 pub(super) fn prepare_embedded_entry_region(
@@ -20,8 +30,17 @@ pub(super) fn prepare_embedded_entry_region(
     entries: &[GuestAddress],
     limits: CompileLimits,
     gates: &[GateSpec],
+    cs: Option<CodeFetchContext>,
 ) -> Result<PreparedRegion, CompileError> {
-    prepare(memory, entries, limits, true, gates, DecodePolicy::Strict)
+    prepare(
+        memory,
+        entries,
+        limits,
+        true,
+        gates,
+        DecodePolicy::Strict,
+        cs,
+    )
 }
 
 pub(super) fn prepare_resident_entry_region(
@@ -29,22 +48,26 @@ pub(super) fn prepare_resident_entry_region(
     entries: &[GuestAddress],
     limits: CompileLimits,
     gates: &[GateSpec],
+    cs: Option<CodeFetchContext>,
 ) -> Result<PreparedRegion, CompileError> {
-    prepare_embedded_entry_region(memory, entries, limits, gates)
+    prepare_embedded_entry_region(memory, entries, limits, gates, cs)
 }
 
 pub(super) fn prepare_runtime_entry(
     memory: &AddressSpace,
     entry: GuestAddress,
     limits: CompileLimits,
+    cs: Option<CodeFetchContext>,
 ) -> Result<PreparedRegion, CompileError> {
-    prepare(memory, &[entry], limits, true, &[], DecodePolicy::Execution)
-}
-
-#[derive(Clone, Copy)]
-enum DecodePolicy {
-    Strict,
-    Execution,
+    prepare(
+        memory,
+        &[entry],
+        limits,
+        true,
+        &[],
+        DecodePolicy::Execution,
+        cs,
+    )
 }
 
 fn prepare(
@@ -54,6 +77,7 @@ fn prepare(
     embedded: bool,
     gates: &[GateSpec],
     decode_policy: DecodePolicy,
+    cs: Option<CodeFetchContext>,
 ) -> Result<PreparedRegion, CompileError> {
     region::validate_limits(limits)?;
     if entries.is_empty() || entries.len() > limits.blocks {
@@ -73,7 +97,7 @@ fn prepare(
             },
         };
     }
-    let specs = &mut specs[..entries.len()];
+    let specs = &specs[..entries.len()];
     region::validate_blocks(specs, limits.blocks)?;
     gate::validate(specs, gates)?;
     let mut blocks = Vec::new();
@@ -81,15 +105,14 @@ fn prepare(
         .try_reserve_exact(entries.len())
         .map_err(|_| CompileError::Allocation)?;
     let mut instruction_count = 0;
-    for (index, entry) in entries.iter().enumerate() {
+    for entry in entries {
         if let Some(gate) = gates.iter().find(|gate| gate.entry == *entry) {
             if instruction_count == limits.instructions {
                 return Err(CompileError::InstructionLimit);
             }
             blocks.push(CompiledBlock {
                 instructions: Vec::new(),
-                gate: Some(gate::prepare(memory, *gate)?),
-                code_snapshot: None,
+                source: BlockSource::Gate(gate::prepare(memory, *gate, cs)?),
             });
             instruction_count += 1;
             continue;
@@ -103,16 +126,45 @@ fn prepare(
             .unwrap_or(GUEST_END);
         let mut cursor = start;
         let mut instructions = Vec::new();
+        let mut terminal = None;
         while cursor < boundary {
             if instruction_count == limits.instructions {
                 return Err(CompileError::InstructionLimit);
             }
             let pc = GuestAddress(cursor as u32);
-            let instruction = match decode_policy {
-                DecodePolicy::Strict => decode_one(memory, pc),
-                DecodePolicy::Execution => decode_for_execution(memory, pc),
+            let decoded = if let Some(cs) = cs {
+                decode_bound(memory, pc, cs, decode_policy)
+            } else {
+                match decode_policy {
+                    DecodePolicy::Strict => region::strict_instruction(memory, pc, None),
+                    DecodePolicy::Execution => decode_for_execution(memory, pc),
+                }
+                .map(BoundDecode::Instruction)
             }
             .map_err(|error| region::instruction_error(pc, InstructionError::Decode(error)))?;
+            let instruction = match decoded {
+                BoundDecode::Instruction(instruction) => instruction,
+                BoundDecode::CodeFault(mut fault) => {
+                    let consumed_length =
+                        (cursor - start) as usize + usize::from(fault.consumed_prefix_length);
+                    if start + consumed_length as u64 > boundary {
+                        return Err(CompileError::InvalidBlocks);
+                    }
+                    let consumed = if instructions.is_empty() {
+                        fault.prefix.take()
+                    } else {
+                        fault.prefix = None;
+                        Some(region::prepare_block_snapshot(
+                            memory,
+                            *entry,
+                            consumed_length,
+                        )?)
+                    };
+                    terminal = Some(BlockSource::ContextFault { fault, consumed });
+                    instruction_count += 1;
+                    break;
+                }
+            };
             let next = cursor + u64::from(instruction.length());
             if next > boundary {
                 return Err(CompileError::InvalidBlocks);
@@ -134,18 +186,20 @@ fn prepare(
                 break;
             }
         }
-        specs[index].byte_length = (cursor - start) as u32;
-        blocks.push(CompiledBlock {
-            code_snapshot: Some(region::prepare_block_snapshot(
+        let source = match terminal {
+            Some(source) => source,
+            None => BlockSource::Instructions(region::prepare_block_snapshot(
                 memory,
                 *entry,
                 (cursor - start) as usize,
             )?),
+        };
+        blocks.push(CompiledBlock {
+            source,
             instructions,
-            gate: None,
         });
     }
-    region::validate_blocks(specs, limits.blocks)?;
+
     Ok(PreparedRegion::new(memory, blocks))
 }
 

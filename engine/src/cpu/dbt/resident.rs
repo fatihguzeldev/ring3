@@ -1,6 +1,9 @@
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use crate::memory::{AddressSpace, GuestAddress};
+use crate::{
+    cpu::x86::decode::CodeFetchContext,
+    memory::{AddressSpace, GuestAddress},
+};
 
 use super::{
     ArtifactError, BlockSpec, CompileError, CompileLimits, CompiledRegion, GateSpec,
@@ -102,7 +105,7 @@ impl ResidentRegistry {
             return Err(RegistryError::UnitCapacity);
         }
         let region = compile_region(memory, specs, limits).map_err(RegistryError::Compile)?;
-        let wasm_bytes = self.admit(memory, &region)?;
+        let wasm_bytes = self.admit(memory, &region, None)?;
         let id = allocate_id(&NEXT_UNIT_ID)?;
         self.publish(id, region, wasm_bytes);
         Ok(id)
@@ -115,8 +118,9 @@ impl ResidentRegistry {
         gates: &[GateSpec],
         limits: CompileLimits,
         key: u64,
+        cs: Option<CodeFetchContext>,
     ) -> Result<UnitId, RegistryError> {
-        self.compile_bound_with_counter(memory, specs, gates, limits, key, &NEXT_UNIT_ID)
+        self.compile_bound_with_counter(memory, specs, gates, limits, key, cs, &NEXT_UNIT_ID)
     }
 
     pub(crate) fn compile_entries_bound(
@@ -126,10 +130,20 @@ impl ResidentRegistry {
         gates: &[GateSpec],
         limits: CompileLimits,
         key: u64,
+        cs: Option<CodeFetchContext>,
     ) -> Result<UnitId, RegistryError> {
-        self.compile_entries_bound_with_counter(memory, entries, gates, limits, key, &NEXT_UNIT_ID)
+        self.compile_entries_bound_with_counter(
+            memory,
+            entries,
+            gates,
+            limits,
+            key,
+            cs,
+            &NEXT_UNIT_ID,
+        )
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn compile_bound_with_counter(
         &mut self,
         memory: &AddressSpace,
@@ -137,17 +151,19 @@ impl ResidentRegistry {
         gates: &[GateSpec],
         limits: CompileLimits,
         key: u64,
+        cs: Option<CodeFetchContext>,
         counter: &AtomicU64,
     ) -> Result<UnitId, RegistryError> {
         self.check_memory(memory)?;
         if self.entries.len() == self.limits.units {
             return Err(RegistryError::UnitCapacity);
         }
-        let prepared = prepare_resident_region(memory, specs, limits, gates)
+        let prepared = prepare_resident_region(memory, specs, limits, gates, cs)
             .map_err(RegistryError::Compile)?;
-        self.compile_prepared_bound(memory, prepared, limits, key, counter)
+        self.compile_prepared_bound(memory, prepared, limits, key, cs, counter)
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn compile_entries_bound_with_counter(
         &mut self,
         memory: &AddressSpace,
@@ -155,15 +171,33 @@ impl ResidentRegistry {
         gates: &[GateSpec],
         limits: CompileLimits,
         key: u64,
+        cs: Option<CodeFetchContext>,
         counter: &AtomicU64,
     ) -> Result<UnitId, RegistryError> {
         self.check_memory(memory)?;
         if self.entries.len() == self.limits.units {
             return Err(RegistryError::UnitCapacity);
         }
-        let prepared = prepare_resident_entry_region(memory, entries, limits, gates)
+        let prepared = prepare_resident_entry_region(memory, entries, limits, gates, cs)
             .map_err(RegistryError::Compile)?;
-        self.compile_prepared_bound(memory, prepared, limits, key, counter)
+        self.compile_prepared_bound(memory, prepared, limits, key, cs, counter)
+    }
+
+    pub(crate) fn compile_runtime_bound(
+        &mut self,
+        memory: &AddressSpace,
+        entry: GuestAddress,
+        limits: CompileLimits,
+        key: u64,
+        cs: CodeFetchContext,
+    ) -> Result<UnitId, RegistryError> {
+        self.check_memory(memory)?;
+        if self.entries.len() == self.limits.units {
+            return Err(RegistryError::UnitCapacity);
+        }
+        let prepared = super::cold::prepare_runtime_entry(memory, entry, limits, Some(cs))
+            .map_err(RegistryError::Compile)?;
+        self.compile_prepared_bound(memory, prepared, limits, key, Some(cs), &NEXT_UNIT_ID)
     }
 
     fn compile_prepared_bound(
@@ -172,6 +206,7 @@ impl ResidentRegistry {
         prepared: PreparedRegion,
         limits: CompileLimits,
         key: u64,
+        cs: Option<CodeFetchContext>,
         counter: &AtomicU64,
     ) -> Result<UnitId, RegistryError> {
         // final emission can fail after reservation; unpublished ids are never reused.
@@ -182,7 +217,7 @@ impl ResidentRegistry {
             Some(EmbeddedBinding::Resident { key, id: id.get() }),
         )
         .map_err(RegistryError::Compile)?;
-        let wasm_bytes = self.admit(memory, &region)?;
+        let wasm_bytes = self.admit(memory, &region, cs)?;
         self.publish(id, region, wasm_bytes);
         Ok(id)
     }
@@ -191,6 +226,7 @@ impl ResidentRegistry {
         &self,
         memory: &AddressSpace,
         region: &CompiledRegion,
+        cs: Option<CodeFetchContext>,
     ) -> Result<usize, RegistryError> {
         let bytes = region
             .wasm_bytes(memory)
@@ -203,7 +239,13 @@ impl ResidentRegistry {
             .ok_or(RegistryError::ByteCapacity)?;
         for pc in region.executable_addresses() {
             if self.entries.iter().any(|unit| {
-                unit.region.contains_executable(pc.0) && unit.region.wasm_bytes(memory).is_ok()
+                unit.region.contains_executable(pc.0)
+                    && unit.region.wasm_bytes(memory).is_ok()
+                    && (unit.region.contains_material(pc.0)
+                        || !region.contains_material(pc.0)
+                        || unit.region.context_fault(pc.0).is_none_or(|fault| {
+                            cs.is_none_or(|cs| !cs.permits(fault.pc, fault.attempted_length))
+                        }))
             }) {
                 return Err(RegistryError::InstructionOverlap { pc });
             }
@@ -246,6 +288,44 @@ impl ResidentRegistry {
                 match unit.region.wasm_bytes(memory) {
                     Ok(_) => return Ok(unit.id),
                     Err(ArtifactError::CodeInvalidated) => stale = true,
+                }
+            }
+        }
+        Err(if stale {
+            RegistryError::CodeInvalidated
+        } else {
+            RegistryError::NotFound { pc }
+        })
+    }
+
+    pub(crate) fn lookup_bound(
+        &self,
+        memory: &AddressSpace,
+        pc: GuestAddress,
+        cs: CodeFetchContext,
+    ) -> Result<UnitId, RegistryError> {
+        self.check_memory(memory)?;
+        let mut stale = false;
+        for material in [true, false] {
+            for unit in &self.entries {
+                let matches = if material {
+                    unit.region.contains_material(pc.0)
+                } else {
+                    unit.region.context_fault(pc.0).is_some()
+                };
+                if matches {
+                    match unit.region.wasm_bytes(memory) {
+                        Ok(_)
+                            if material
+                                || unit.region.context_fault(pc.0).is_some_and(|fault| {
+                                    !cs.permits(fault.pc, fault.attempted_length)
+                                }) =>
+                        {
+                            return Ok(unit.id);
+                        }
+                        Ok(_) => {}
+                        Err(ArtifactError::CodeInvalidated) => stale = true,
+                    }
                 }
             }
         }
@@ -387,6 +467,7 @@ mod tests {
                 &[],
                 CompileLimits::default(),
                 7,
+                None,
                 &counter,
             )
             .unwrap();
@@ -414,6 +495,7 @@ mod tests {
                     ..CompileLimits::default()
                 },
                 7,
+                None,
                 &counter
             ),
             Err(RegistryError::Compile(CompileError::WasmLimit))
@@ -426,6 +508,7 @@ mod tests {
                 &[],
                 CompileLimits::default(),
                 7,
+                None,
                 &counter
             ),
             Err(RegistryError::InstructionOverlap {
@@ -464,6 +547,7 @@ mod tests {
                 &[],
                 CompileLimits::default(),
                 7,
+                None,
                 &counter,
             )
             .unwrap();
@@ -485,6 +569,7 @@ mod tests {
                 &[],
                 CompileLimits::default(),
                 7,
+                None,
                 &counter,
             )
             .unwrap();
@@ -496,6 +581,7 @@ mod tests {
                 &[],
                 CompileLimits::default(),
                 7,
+                None,
                 &counter
             ),
             Err(RegistryError::ByteCapacity)
@@ -524,6 +610,7 @@ mod tests {
                     ..CompileLimits::default()
                 },
                 7,
+                None,
                 &counter
             ),
             Err(RegistryError::Compile(CompileError::InvalidLimits))

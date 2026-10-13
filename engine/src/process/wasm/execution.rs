@@ -21,6 +21,14 @@ pub(crate) fn compile_stopped_entry(key_low: u32, key_high: u32, generation: u32
     mutate(|instance| instance.compile_stopped_entry(key, generation).map(|_| ()))
 }
 
+pub(crate) fn compile_stopped_resident_entry(key_low: u32, key_high: u32) -> u32 {
+    let key = u64::from(key_low) | (u64::from(key_high) << 32);
+    mutate(|instance| {
+        let id = instance.compile_stopped_resident_entry(key)?;
+        resident_record(instance, id.get())
+    })
+}
+
 pub(crate) fn compile_resident(count: u32) -> u32 {
     compile_resident_with_gates(count, 0)
 }
@@ -256,7 +264,9 @@ pub(crate) fn guard_dispatch_entry(
         {
             return 1;
         }
-        if decode_state(&instance.arena()[STATE_OFFSET..STATE_OFFSET + STATE_SIZE]).is_err() {
+        if decode_state(&instance.arena()[STATE_OFFSET..STATE_OFFSET + STATE_SIZE]).is_err()
+            || instance.segment_context().is_err()
+        {
             return 2;
         }
         0

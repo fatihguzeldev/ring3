@@ -1,3 +1,4 @@
+use super::{BoundDecode, CapturedCodeFault, CodeFetchContext};
 use iced_x86::{Decoder, DecoderError, DecoderOptions};
 
 use crate::{
@@ -14,6 +15,10 @@ pub enum DecodeError {
         pc: GuestAddress,
         fault: MemoryFault,
         length: u32,
+    },
+    CodeSegment {
+        pc: GuestAddress,
+        attempted_length: u8,
     },
     InvalidEncoding,
     Unsupported(UnsupportedFeature),
@@ -59,7 +64,7 @@ impl DecodedInstruction {
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
-enum DecodePolicy {
+pub(crate) enum DecodePolicy {
     Strict,
     Execution,
 }
@@ -68,23 +73,64 @@ pub fn decode_one(
     memory: &AddressSpace,
     pc: GuestAddress,
 ) -> Result<DecodedInstruction, DecodeError> {
-    decode(memory, pc, DecodePolicy::Strict)
+    unbound(decode(memory, pc, DecodePolicy::Strict, None)?)
 }
 
 pub(crate) fn decode_for_execution(
     memory: &AddressSpace,
     pc: GuestAddress,
 ) -> Result<DecodedInstruction, DecodeError> {
-    decode(memory, pc, DecodePolicy::Execution)
+    unbound(decode(memory, pc, DecodePolicy::Execution, None)?)
+}
+
+fn unbound(decoded: BoundDecode) -> Result<DecodedInstruction, DecodeError> {
+    match decoded {
+        BoundDecode::Instruction(instruction) => Ok(instruction),
+        BoundDecode::CodeFault(_) => unreachable!("unbound decoding has no CS authority"),
+    }
+}
+
+pub(crate) fn decode_bound(
+    memory: &AddressSpace,
+    pc: GuestAddress,
+    cs: CodeFetchContext,
+    policy: DecodePolicy,
+) -> Result<BoundDecode, DecodeError> {
+    decode(memory, pc, policy, Some(cs))
 }
 
 fn decode(
     memory: &AddressSpace,
     pc: GuestAddress,
     policy: DecodePolicy,
-) -> Result<DecodedInstruction, DecodeError> {
+    cs: Option<CodeFetchContext>,
+) -> Result<BoundDecode, DecodeError> {
     let mut bytes = [0; 15];
     for length in 1..=bytes.len() {
+        if cs.is_some_and(|cs| !cs.permits(pc, length as u8)) {
+            if policy == DecodePolicy::Strict {
+                return Err(DecodeError::CodeSegment {
+                    pc,
+                    attempted_length: length as u8,
+                });
+            }
+            let consumed = length - 1;
+            let prefix = if consumed == 0 {
+                None
+            } else {
+                Some(
+                    memory
+                        .snapshot_code(pc, consumed)
+                        .map_err(|error| memory_error(error, pc, consumed))?,
+                )
+            };
+            return Ok(BoundDecode::CodeFault(CapturedCodeFault {
+                pc,
+                attempted_length: length as u8,
+                consumed_prefix_length: consumed as u8,
+                prefix,
+            }));
+        }
         memory
             .fetch(pc, &mut bytes[..length])
             .map_err(|error| memory_error(error, pc, length))?;
@@ -104,7 +150,8 @@ fn decode(
                         GuestAddress(pc.0.wrapping_add(length as u32)),
                         Operation::Control(operation),
                         0,
-                    );
+                    )
+                    .map(BoundDecode::Instruction);
                 }
                 return Err(DecodeError::InvalidEncoding);
             }
@@ -145,7 +192,8 @@ fn decode(
                     GuestAddress(instruction.next_ip32()),
                     operation,
                     segments,
-                );
+                )
+                .map(BoundDecode::Instruction);
             }
             _ => return Err(DecodeError::InvalidEncoding),
         }

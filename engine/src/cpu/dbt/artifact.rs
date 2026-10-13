@@ -7,6 +7,7 @@ use super::{
 };
 use crate::{
     abi::{ABI_VERSION, X86_INTEGER_PROFILE},
+    cpu::x86::decode::{CapturedCodeFault, CodeFetchContext},
     memory::{AddressSpace, GuestAddress},
 };
 
@@ -37,7 +38,8 @@ impl CompiledRegion {
                 .instructions
                 .iter()
                 .map(|instruction| instruction.pc())
-                .chain(block.gate.iter().map(|gate| gate.entry))
+                .chain(block.gate().into_iter().map(|gate| gate.entry))
+                .chain(block.context_fault().into_iter().map(|fault| fault.pc))
         })
     }
 
@@ -57,10 +59,27 @@ impl CompiledRegion {
     pub(crate) fn matches_gate(&self, entry: u32, id: u32) -> bool {
         self.prepared.blocks.iter().any(|block| {
             block
-                .gate
-                .as_ref()
+                .gate()
                 .is_some_and(|gate| gate.entry.0 == entry && gate.id == id)
         })
+    }
+
+    pub(crate) fn contains_material(&self, pc: u32) -> bool {
+        self.prepared.blocks.iter().any(|block| {
+            block
+                .instructions
+                .iter()
+                .any(|instruction| instruction.pc().0 == pc)
+                || block.gate().is_some_and(|gate| gate.entry.0 == pc)
+        })
+    }
+
+    pub(crate) fn context_fault(&self, pc: u32) -> Option<&CapturedCodeFault> {
+        self.prepared
+            .blocks
+            .iter()
+            .filter_map(|block| block.context_fault())
+            .find(|fault| fault.pc.0 == pc)
     }
 
     pub fn wasm_bytes(&self, memory: &AddressSpace) -> Result<&[u8], ArtifactError> {
@@ -95,7 +114,7 @@ pub fn compile_region(
     specs: &[BlockSpec],
     limits: CompileLimits,
 ) -> Result<CompiledRegion, CompileError> {
-    compile(memory, specs, limits, None, &[])
+    compile(memory, specs, limits, None, &[], None)
 }
 
 pub fn compile_entry_region(
@@ -114,8 +133,9 @@ pub(crate) fn compile_embedded_entry_region(
     key: u64,
     generation: u32,
     gates: &[GateSpec],
+    cs: CodeFetchContext,
 ) -> Result<CompiledRegion, CompileError> {
-    let prepared = prepare_embedded_entry_region(memory, entries, limits, gates)?;
+    let prepared = prepare_embedded_entry_region(memory, entries, limits, gates, Some(cs))?;
     emit_prepared(
         prepared,
         limits,
@@ -129,8 +149,9 @@ pub(crate) fn compile_runtime_entry(
     limits: CompileLimits,
     key: u64,
     generation: u32,
+    cs: CodeFetchContext,
 ) -> Result<CompiledRegion, CompileError> {
-    let prepared = prepare_runtime_entry(memory, entry, limits)?;
+    let prepared = prepare_runtime_entry(memory, entry, limits, Some(cs))?;
     emit_prepared(
         prepared,
         limits,
@@ -145,6 +166,7 @@ pub(crate) fn compile_embedded_region(
     key: u64,
     generation: u32,
     gates: &[GateSpec],
+    cs: CodeFetchContext,
 ) -> Result<CompiledRegion, CompileError> {
     compile(
         memory,
@@ -152,6 +174,7 @@ pub(crate) fn compile_embedded_region(
         limits,
         Some(wasm::EmbeddedBinding::Replacement { key, generation }),
         gates,
+        Some(cs),
     )
 }
 
@@ -161,9 +184,10 @@ fn compile(
     limits: CompileLimits,
     binding: Option<wasm::EmbeddedBinding>,
     gates: &[GateSpec],
+    cs: Option<CodeFetchContext>,
 ) -> Result<CompiledRegion, CompileError> {
     let prepared = if binding.is_some() {
-        prepare_embedded_region(memory, specs, limits, gates)?
+        prepare_embedded_region(memory, specs, limits, gates, cs)?
     } else {
         prepare_region(memory, specs, limits)?
     };

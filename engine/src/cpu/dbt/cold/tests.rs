@@ -38,12 +38,12 @@ fn embedded_seeds_keep_order_and_match_explicit_gate_memory_stack_emission() {
             byte_length: length,
         });
     let limits = CompileLimits::default();
-    let prepared = prepare_embedded_entry_region(&memory, &entries, limits, &gates).unwrap();
+    let prepared = prepare_embedded_entry_region(&memory, &entries, limits, &gates, None).unwrap();
     assert_eq!(
         (prepared.block_count(), prepared.instruction_count()),
         (4, 6)
     );
-    assert_eq!(prepared.blocks[0].gate.as_ref().unwrap().entry, entries[0]);
+    assert_eq!(prepared.blocks[0].gate().unwrap().entry, entries[0]);
     assert_eq!(
         prepared.blocks[1]
             .instructions
@@ -53,12 +53,35 @@ fn embedded_seeds_keep_order_and_match_explicit_gate_memory_stack_emission() {
         [0x1400, 0x1404, 0x1405]
     );
     assert_eq!(prepared.blocks[2].instructions[0].pc(), entries[2]);
-    assert_eq!(prepared.blocks[3].gate.as_ref().unwrap().entry, entries[3]);
+    assert_eq!(prepared.blocks[3].gate().unwrap().entry, entries[3]);
     assert!(prepared.is_current(&memory));
     // no stack or indirect-source data page exists; preparation uses Execute bytes only.
-    let discovered =
-        compile_embedded_entry_region(&memory, &entries, limits, 91, 7, &gates).unwrap();
-    let explicit = compile_embedded_region(&memory, &specs, limits, 91, 7, &gates).unwrap();
+    let discovered = compile_embedded_entry_region(
+        &memory,
+        &entries,
+        limits,
+        91,
+        7,
+        &gates,
+        crate::cpu::x86::decode::CodeFetchContext::from_segments(
+            &crate::cpu::x86::SegmentContext::default(),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    let explicit = compile_embedded_region(
+        &memory,
+        &specs,
+        limits,
+        91,
+        7,
+        &gates,
+        crate::cpu::x86::decode::CodeFetchContext::from_segments(
+            &crate::cpu::x86::SegmentContext::default(),
+        )
+        .unwrap(),
+    )
+    .unwrap();
     assert_eq!(discovered.metadata(), explicit.metadata());
     assert_eq!(
         discovered.wasm_bytes(&memory).unwrap(),
@@ -108,7 +131,8 @@ fn runtime_entry_fault_preparation_keeps_strict_public_refusals_and_terminal_bou
             .unwrap();
         memory.write(entry, bytes).unwrap();
         let limits = CompileLimits::default();
-        let strict = prepare_embedded_entry_region(&memory, &[entry], limits, &[]).unwrap_err();
+        let strict =
+            prepare_embedded_entry_region(&memory, &[entry], limits, &[], None).unwrap_err();
         assert!(matches!(
             strict,
             CompileError::Instruction {
@@ -118,7 +142,7 @@ fn runtime_entry_fault_preparation_keeps_strict_public_refusals_and_terminal_bou
                 ..
             }
         ));
-        let prepared = prepare_runtime_entry(&memory, entry, limits).unwrap();
+        let prepared = prepare_runtime_entry(&memory, entry, limits, None).unwrap();
         assert_eq!(
             (prepared.block_count(), prepared.instruction_count()),
             (1, 1)
@@ -127,8 +151,18 @@ fn runtime_entry_fault_preparation_keeps_strict_public_refusals_and_terminal_bou
         assert_eq!(*instruction.operation(), Operation::Control(operation));
         assert_eq!(usize::from(instruction.length()), bytes.len());
         assert!(prepared.is_current(&memory));
-        let artifact =
-            super::super::artifact::compile_runtime_entry(&memory, entry, limits, 91, 7).unwrap();
+        let artifact = super::super::artifact::compile_runtime_entry(
+            &memory,
+            entry,
+            limits,
+            91,
+            7,
+            crate::cpu::x86::decode::CodeFetchContext::from_segments(
+                &crate::cpu::x86::SegmentContext::default(),
+            )
+            .unwrap(),
+        )
+        .unwrap();
         assert!(artifact.contains_executable(entry.0));
         assert!(artifact.wasm_bytes(&memory).is_ok());
         memory.write(entry, &[0x90]).unwrap();
@@ -151,13 +185,15 @@ fn runtime_entry_keeps_limits_fetch_and_valid_unsupported_errors_as_preparation_
     memory.write(GuestAddress(0x1000), &[0xcd, 0x80]).unwrap();
     let limits = CompileLimits::default();
     assert_eq!(
-        prepare_runtime_entry(&memory, GuestAddress(0x1000), limits).unwrap_err(),
-        prepare_embedded_entry_region(&memory, &[GuestAddress(0x1000)], limits, &[]).unwrap_err()
+        prepare_runtime_entry(&memory, GuestAddress(0x1000), limits, None).unwrap_err(),
+        prepare_embedded_entry_region(&memory, &[GuestAddress(0x1000)], limits, &[], None)
+            .unwrap_err()
     );
     memory.write(GuestAddress(0x1fff), &[0x0f]).unwrap();
     assert_eq!(
-        prepare_runtime_entry(&memory, GuestAddress(0x1fff), limits).unwrap_err(),
-        prepare_embedded_entry_region(&memory, &[GuestAddress(0x1fff)], limits, &[]).unwrap_err()
+        prepare_runtime_entry(&memory, GuestAddress(0x1fff), limits, None).unwrap_err(),
+        prepare_embedded_entry_region(&memory, &[GuestAddress(0x1fff)], limits, &[], None)
+            .unwrap_err()
     );
     assert_eq!(
         prepare_runtime_entry(
@@ -166,7 +202,8 @@ fn runtime_entry_keeps_limits_fetch_and_valid_unsupported_errors_as_preparation_
             CompileLimits {
                 instructions: 0,
                 ..limits
-            }
+            },
+            None
         )
         .unwrap_err(),
         CompileError::InvalidLimits
@@ -181,7 +218,8 @@ fn runtime_entry_keeps_limits_fetch_and_valid_unsupported_errors_as_preparation_
             CompileLimits {
                 instructions: 1,
                 ..limits
-            }
+            },
+            None
         )
         .unwrap_err(),
         CompileError::InstructionLimit

@@ -39,6 +39,7 @@ impl StoreImport {
 #[derive(Clone, Copy, Default)]
 pub(super) struct Imports {
     pub(super) segment_check: Option<u32>,
+    pub(super) code_fetch_limit: Option<u32>,
     pub(super) stack_execute: Option<StoreImport>,
     pub(super) cpu_integer: Option<StoreImport>,
     pub(super) cpu_read: Option<u32>,

@@ -36,6 +36,13 @@ pub(super) fn check_cached_span(
 }
 
 impl EngineInstance {
+    pub(in crate::process) fn code_fetch_context(
+        &self,
+    ) -> Result<crate::cpu::x86::decode::CodeFetchContext, HostError> {
+        crate::cpu::x86::decode::CodeFetchContext::from_segments(&self.segment_context()?)
+            .ok_or(HostError::Infrastructure)
+    }
+
     pub fn segment_state(&self) -> Result<SegmentState, HostError> {
         self.segment_context().map(|context| context.state)
     }

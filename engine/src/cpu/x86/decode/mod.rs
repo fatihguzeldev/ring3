@@ -6,6 +6,7 @@ mod control;
 mod decoder;
 mod execution_faults;
 mod far;
+mod fetch;
 mod flow;
 mod integer;
 mod lower;
@@ -21,5 +22,6 @@ mod strings;
 mod x87;
 mod xstate;
 
-pub(crate) use decoder::decode_for_execution;
 pub use decoder::{DecodeError, DecodedInstruction, decode_one};
+pub(crate) use decoder::{DecodePolicy, decode_bound, decode_for_execution};
+pub(crate) use fetch::{BoundDecode, CapturedCodeFault, CodeFetchContext};

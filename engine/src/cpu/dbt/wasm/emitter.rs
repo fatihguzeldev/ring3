@@ -3,7 +3,7 @@ use wasm_encoder::{
     ImportSection, InstructionSink, MemoryType, Module, TypeSection, ValType,
 };
 
-use super::{EmbeddedBinding, abi, integer, locals::*, memory, segments, x87};
+use super::{EmbeddedBinding, abi, code_fetch, integer, locals::*, memory, segments, x87};
 use crate::cpu::dbt::region::CompiledBlock;
 use crate::cpu::x86::ir::Operation;
 
@@ -125,7 +125,7 @@ pub(in crate::cpu::dbt) fn emit(
         || needs_compare_exchange32
         || needs_compare_exchange8
         || needs_compare_exchange16;
-    let has_gates = blocks.iter().any(|block| block.gate.is_some());
+    let has_gates = blocks.iter().any(|block| block.gate().is_some());
     let has_arithmetic = blocks
         .iter()
         .flat_map(|block| &block.instructions)
@@ -170,28 +170,29 @@ pub(in crate::cpu::dbt) fn emit(
                     })
             )
         });
-    let has_segments = blocks
-        .iter()
-        .flat_map(|block| &block.instructions)
-        .any(|instruction| {
-            instruction.uses_segments()
-                || matches!(
-                    instruction.operation(),
-                    Operation::StackFrame { .. }
-                        | Operation::PopAll
-                        | Operation::PopAllWord
-                        | Operation::EnterZero
-                        | Operation::EnterZeroWord
-                        | Operation::ReadSegment { .. }
-                        | Operation::PushSegment { .. }
-                        | Operation::LoadSegment { .. }
-                        | Operation::PopSegment { .. }
-                        | Operation::LoadFarPointer { .. }
-                        | Operation::FarJump { .. }
-                        | Operation::FarCall { .. }
-                        | Operation::FarReturn { .. }
-                )
-        });
+    let has_segments = binding.is_some()
+        || blocks
+            .iter()
+            .flat_map(|block| &block.instructions)
+            .any(|instruction| {
+                instruction.uses_segments()
+                    || matches!(
+                        instruction.operation(),
+                        Operation::StackFrame { .. }
+                            | Operation::PopAll
+                            | Operation::PopAllWord
+                            | Operation::EnterZero
+                            | Operation::EnterZeroWord
+                            | Operation::ReadSegment { .. }
+                            | Operation::PushSegment { .. }
+                            | Operation::LoadSegment { .. }
+                            | Operation::PopSegment { .. }
+                            | Operation::LoadFarPointer { .. }
+                            | Operation::FarJump { .. }
+                            | Operation::FarCall { .. }
+                            | Operation::FarReturn { .. }
+                    )
+            });
     let has_segment_check = blocks
         .iter()
         .flat_map(|block| &block.instructions)
@@ -836,6 +837,11 @@ pub(in crate::cpu::dbt) fn emit(
     {
         declarations.push((5, ValType::I64));
     }
+    if binding.is_some() {
+        let first = 4 + declarations.iter().map(|(count, _)| count).sum::<u32>();
+        helper_imports.code_fetch_limit = Some(first);
+        declarations.push((1, ValType::I32));
+    }
     if has_avx {
         let first = 4 + declarations.iter().map(|(count, _)| count).sum::<u32>();
         helper_imports.avx_locals = Some(super::avx::AvxLocals::new(first));
@@ -886,6 +892,9 @@ pub(in crate::cpu::dbt) fn emit(
         super::avx::preflight(&mut code);
     }
     abi::load_state(&mut code);
+    if let Some(limit) = helper_imports.code_fetch_limit {
+        code_fetch::refresh(&mut code, limit);
+    }
     if let Some(locals) = helper_imports.avx_locals {
         super::avx::initialize(&mut code, locals);
     }
@@ -893,6 +902,9 @@ pub(in crate::cpu::dbt) fn emit(
     abi::safepoint(&mut code, 1);
     for block in blocks {
         emit_block(&mut code, block, helper_imports);
+    }
+    if let Some(limit) = helper_imports.code_fetch_limit {
+        code_fetch::check_pc(&mut code, limit, 1);
     }
     code.i32_const(3).local_set(REASON).br(1).end().end();
     if has_repeat {
@@ -925,12 +937,15 @@ pub(in crate::cpu::dbt) fn emit(
 }
 
 fn emit_block(code: &mut InstructionSink<'_>, block: &CompiledBlock, imports: memory::Imports) {
-    if let Some(gate) = &block.gate {
+    if let Some(gate) = block.gate() {
         code.local_get(EIP)
             .i32_const(gate.entry.0 as i32)
             .i32_eq()
-            .if_(BlockType::Empty)
-            .i32_const(gate.id as i32)
+            .if_(BlockType::Empty);
+        if let Some(limit) = imports.code_fetch_limit {
+            code_fetch::check_span(code, gate.entry.0, 2, limit, 2);
+        }
+        code.i32_const(gate.id as i32)
             .local_set(DETAIL)
             .i32_const(8)
             .local_set(REASON)
@@ -938,35 +953,63 @@ fn emit_block(code: &mut InstructionSink<'_>, block: &CompiledBlock, imports: me
             .end();
         return;
     }
-    code.i32_const(-1).local_set(RESUME).block(BlockType::Empty);
-    for (index, instruction) in block.instructions.iter().enumerate() {
+    if !block.instructions.is_empty() {
+        code.i32_const(-1).local_set(RESUME).block(BlockType::Empty);
+        for (index, instruction) in block.instructions.iter().enumerate() {
+            code.local_get(EIP)
+                .i32_const(instruction.pc().0 as i32)
+                .i32_eq()
+                .if_(BlockType::Empty)
+                .i32_const(index as i32)
+                .local_set(RESUME)
+                .br(1)
+                .end();
+        }
+        code.end()
+            .local_get(RESUME)
+            .i32_const(-1)
+            .i32_ne()
+            .if_(BlockType::Empty);
+        let count = block.instructions.len() as u32;
+        for _ in 0..count {
+            code.block(BlockType::Empty);
+        }
+        code.local_get(RESUME).br_table(0..count, count);
+        for (index, instruction) in block.instructions.iter().enumerate() {
+            code.end();
+            let remaining = count - index as u32 - 1;
+            abi::safepoint(code, remaining + 2);
+            if let Some(limit) = imports.code_fetch_limit {
+                code_fetch::check_instruction(code, instruction, limit, remaining + 2);
+            }
+            abi::begin_instruction(code);
+            integer::instruction(code, instruction, imports, remaining + 2);
+            if matches!(
+                instruction.operation(),
+                Operation::FarJump { .. } | Operation::FarCall { .. } | Operation::FarReturn { .. }
+            ) && let Some(limit) = imports.code_fetch_limit
+            {
+                code_fetch::refresh(code, limit);
+            }
+            abi::debug_after_retirement(code, remaining + 2);
+        }
+        code.br(1).end();
+    }
+    if let Some(fault) = block.context_fault() {
         code.local_get(EIP)
-            .i32_const(instruction.pc().0 as i32)
+            .i32_const(fault.pc.0 as i32)
             .i32_eq()
-            .if_(BlockType::Empty)
-            .i32_const(index as i32)
-            .local_set(RESUME)
-            .br(1)
-            .end();
+            .if_(BlockType::Empty);
+        abi::safepoint(code, 2);
+        code_fetch::check_span(
+            code,
+            fault.pc.0,
+            fault.attempted_length,
+            imports
+                .code_fetch_limit
+                .expect("context fault requires a bound module"),
+            2,
+        );
+        code.i32_const(3).local_set(REASON).br(2).end();
     }
-    code.end()
-        .local_get(RESUME)
-        .i32_const(-1)
-        .i32_ne()
-        .if_(BlockType::Empty);
-    let count = block.instructions.len() as u32;
-    for _ in 0..count {
-        code.block(BlockType::Empty);
-    }
-    // nested labels resume inside a block, then execution falls through its remaining instructions.
-    code.local_get(RESUME).br_table(0..count, count);
-    for (index, instruction) in block.instructions.iter().enumerate() {
-        code.end();
-        let remaining = count - index as u32 - 1;
-        abi::safepoint(code, remaining + 2);
-        abi::begin_instruction(code);
-        integer::instruction(code, instruction, imports, remaining + 2);
-        abi::debug_after_retirement(code, remaining + 2);
-    }
-    code.br(1).end();
 }
