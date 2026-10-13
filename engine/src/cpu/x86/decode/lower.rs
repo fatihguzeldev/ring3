@@ -104,6 +104,7 @@ pub(super) fn lower(instruction: &Instruction, bytes: &[u8]) -> Result<Operation
         Code::Nopw => Ok(Operation::Nop),
         Code::Nop_rm16 => Ok(Operation::Nop),
         Code::Pause => Ok(Operation::Nop),
+        Code::Endbr32 | Code::Endbr64 => Ok(Operation::Nop),
         Code::Fneni | Code::Fndisi | Code::Fnsetpm => Ok(Operation::Nop),
         Code::Fninit => Ok(Operation::InitializeX87),
         Code::Fnclex => Ok(Operation::ClearX87Exceptions),

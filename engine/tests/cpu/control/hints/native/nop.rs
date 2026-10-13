@@ -496,3 +496,92 @@ fn alignment_nop_late_refusal_preserves_dirty_full_arena_and_both_owners() {
         }
     }
 }
+
+#[test]
+fn endbranch_forms_are_four_byte_nops_without_cet() {
+    use iced_x86::{Code, Decoder, DecoderOptions};
+
+    for (bytes, expected) in [
+        ([0xf3, 0x0f, 0x1e, 0xfb], Code::Endbr32),
+        ([0xf3, 0x0f, 0x1e, 0xfa], Code::Endbr64),
+    ] {
+        let decoded = Decoder::with_ip(32, &bytes, u64::from(CODE), DecoderOptions::NONE).decode();
+        assert_eq!(decoded.code(), expected);
+        assert_eq!(decoded.len(), 4);
+        assert_eq!(decoded.op_count(), 0);
+        decode_admission(&bytes);
+    }
+}
+
+#[test]
+fn endbranch_nops_compile_without_operand_helpers_in_all_six_profiles() {
+    let bytes = [0xf3, 0x0f, 0x1e, 0xfb, 0xf3, 0x0f, 0x1e, 0xfa, 0xeb, 0];
+    for entries in [false, true] {
+        assert_standalone(&bytes, 3, entries);
+        for resident in [false, true] {
+            assert_bound(&bytes, resident, entries);
+        }
+    }
+}
+
+#[test]
+fn endbranch_identity_requires_f3_and_lock_remains_invalid() {
+    use iced_x86::{Code, Decoder, DecoderOptions};
+
+    for final_byte in [0xfb, 0xfa] {
+        for prefix in [&[][..], &[0xf2]] {
+            let mut bytes = prefix.to_vec();
+            bytes.extend([0x0f, 0x1e, final_byte]);
+            let decoded =
+                Decoder::with_ip(32, &bytes, u64::from(CODE), DecoderOptions::NONE).decode();
+            assert!(!matches!(decoded.code(), Code::Endbr32 | Code::Endbr64));
+        }
+        let repeated = [0xf3, 0xf3, 0x0f, 0x1e, final_byte];
+        assert_eq!(
+            decode_one(&code_space(CODE, &repeated), GuestAddress(CODE)).err(),
+            Some(DecodeError::Unsupported(UnsupportedFeature::Opcode))
+        );
+        let locked = [0xf0, 0xf3, 0x0f, 0x1e, final_byte];
+        assert_eq!(
+            decode_one(&code_space(CODE, &locked), GuestAddress(CODE)).err(),
+            Some(DecodeError::InvalidEncoding)
+        );
+    }
+}
+
+#[test]
+fn endbranch_fetch_requires_the_final_opcode_byte_before_nop_admission() {
+    for bytes in [[0xf3, 0x0f, 0x1e, 0xfb], [0xf3, 0x0f, 0x1e, 0xfa]] {
+        for pc in [0x1ffc, 0xffff_fffc] {
+            let memory = code_space(pc, &bytes);
+            let decoded = decode_one(&memory, GuestAddress(pc)).unwrap();
+            assert_eq!(decoded.operation(), &Operation::Nop);
+            assert_eq!(decoded.length(), 4);
+            assert_eq!(decoded.next_pc(), GuestAddress(pc.wrapping_add(4)));
+            assert!(memory.is_code_current(decoded.code_snapshot()));
+        }
+
+        let pc = 0x1ffd;
+        let mut memory = code_space(pc, &bytes[..3]);
+        assert_eq!(
+            decode_one(&memory, GuestAddress(pc)).err(),
+            Some(fetch_error(pc, 0x2000, 4, FaultReason::Unmapped))
+        );
+        let second = PageRange::new(GuestAddress(0x2000), 1).unwrap();
+        memory.map_zeroed(second, Permissions::ALL).unwrap();
+        memory.write(GuestAddress(0x2000), &bytes[3..]).unwrap();
+        memory.protect(second, Permissions::READ).unwrap();
+        assert_eq!(
+            decode_one(&memory, GuestAddress(pc)).err(),
+            Some(fetch_error(pc, 0x2000, 4, FaultReason::Permission))
+        );
+        memory.protect(second, Permissions::EXECUTE).unwrap();
+        let decoded = decode_one(&memory, GuestAddress(pc)).unwrap();
+        assert_eq!(decoded.operation(), &Operation::Nop);
+        assert_eq!(
+            (decoded.length(), decoded.next_pc()),
+            (4, GuestAddress(0x2001))
+        );
+        assert!(memory.is_code_current(decoded.code_snapshot()));
+    }
+}

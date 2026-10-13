@@ -62,6 +62,10 @@ fn actual_canonical_alignment_nops_preserve_state_in_six_profiles() {
             0xc3, 0x0f, 0x90, 0xc7, 0xeb, 0,
         ],
     )];
+    let endbr = vec![
+        (0x1500, vec![0xf3, 0x0f, 0x1e, 0xfb, 0xeb, 0]),
+        (0x1520, vec![0xf3, 0x0f, 0x1e, 0xfa, 0xeb, 0]),
+    ];
     let mut memory = AddressSpace::new(1).unwrap();
     memory
         .map_zeroed(
@@ -69,7 +73,7 @@ fn actual_canonical_alignment_nops_preserve_state_in_six_profiles() {
             Permissions::ALL,
         )
         .unwrap();
-    for (name, bank) in [("nops", &blocks), ("live", &live)] {
+    for (name, bank) in [("nops", &blocks), ("live", &live), ("endbr", &endbr)] {
         assert!(bank.len() <= 8);
         for (index, (pc, bytes)) in bank.iter().enumerate() {
             memory.write(GuestAddress(*pc), bytes).unwrap();
@@ -91,7 +95,11 @@ fn actual_canonical_alignment_nops_preserve_state_in_six_profiles() {
         )
         .unwrap();
     let mut units = Vec::new();
-    for (name, bank) in [("nops", &blocks), ("live", &live)] {
+    for (name, bank, instructions) in [
+        ("nops", &blocks, 6),
+        ("live", &live, 6),
+        ("endbr", &endbr, 4),
+    ] {
         let specs: Vec<_> = bank
             .iter()
             .map(|(pc, bytes)| BlockSpec {
@@ -111,7 +119,7 @@ fn actual_canonical_alignment_nops_preserve_state_in_six_profiles() {
             }
             .unwrap();
             assert_eq!(unit.metadata().blocks, bank.len());
-            assert_eq!(unit.metadata().instructions, 6);
+            assert_eq!(unit.metadata().instructions, instructions);
             assert!(unit.metadata().instructions <= 64);
             fs::write(
                 output.join(format!(
@@ -121,7 +129,9 @@ fn actual_canonical_alignment_nops_preserve_state_in_six_profiles() {
                 unit.wasm_bytes(&memory).unwrap(),
             )
             .unwrap();
-            units.push(unit);
+            if name != "endbr" {
+                units.push(unit);
+            }
         }
     }
     memory

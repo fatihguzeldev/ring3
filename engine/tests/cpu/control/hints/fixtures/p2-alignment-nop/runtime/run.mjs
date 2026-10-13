@@ -14,6 +14,8 @@ const paths = ['engine/src/abi/arena.rs', 'engine/src/cpu/x86/decode/profile.rs'
   'engine/src/cpu/x86/decode/decoder.rs', 'engine/src/cpu/dbt/region.rs', 'engine/src/cpu/dbt/cold.rs',
   'engine/src/cpu/dbt/artifact.rs', 'engine/src/cpu/dbt/wasm/abi.rs', 'engine/src/cpu/dbt/wasm/integer/arithmetic.rs', 'engine/src/cpu/dbt/wasm/integer/bits.rs', 'engine/src/cpu/dbt/wasm/integer/carry_rotates.rs', 'engine/src/cpu/dbt/wasm/integer/decimal.rs', 'engine/src/cpu/dbt/wasm/integer/dispatch.rs', 'engine/src/cpu/dbt/wasm/integer/flags.rs', 'engine/src/cpu/dbt/wasm/integer/mod.rs', 'engine/src/cpu/dbt/wasm/integer/multiply_divide.rs', 'engine/src/cpu/dbt/wasm/integer/operands.rs', 'engine/src/cpu/dbt/wasm/integer/rotates.rs', 'engine/src/cpu/dbt/wasm/integer/shifts.rs',
   'engine/src/cpu/dbt/wasm/emitter.rs', 'engine/src/process/instance.rs', 'engine/src/process/execution/compiled.rs', 'engine/src/process/execution/authority.rs', 'engine/src/process/memory/address_space.rs', 'engine/src/process/memory/scalar.rs', 'engine/src/process/memory/scalar/tests.rs', 'engine/src/process/execution/mod.rs', 'engine/src/process/memory/mod.rs', 'engine/src/process/mod.rs', 'engine/src/process/execution/resident.rs', 'engine/src/process/wasm/mod.rs', 'engine/src/process/wasm/loading.rs', 'engine/src/process/wasm/execution.rs', 'engine/src/process/wasm/calls.rs', 'engine/src/process/wasm/memory.rs', 'engine/src/process/wasm/cpu.rs', 'engine/src/memory/space.rs', 'engine/tests/cpu/control/hints/native/nop.rs', 'engine/tests/cpu/control/native.rs', 'engine/tests/support/cpu/prefix/admission.rs', 'engine/tests/cpu/control/hints/wasm/nop.rs', 'engine/tests/cpu/control/wasm.rs', 'engine/tests/support/wasm.rs', 'engine/tests/cpu/control/hints/fixtures/p2-alignment-nop/runtime/run.mjs', 'engine/tests/support/wasm/engine.mjs'];
+paths.push('engine/tests/support/wasm/arena.mjs', 'engine/src/cpu/x86/environment.rs',
+  'engine/src/cpu/x86/capabilities.rs');
 assert.equal(new Set(paths).size, paths.length);
 const sources = () => Object.fromEntries(paths.map(p => [p, hash(readFileSync(join(root, p)))]));
 const sourcePins = sources(), modules = [], observations = [], contexts = [];
@@ -31,6 +33,14 @@ const nops = [[0x1000, [0x66, 0x0f, 0x1f, 0x44, 0, 0]],
   return {pc, bytes, length: literal.length, instructions: 2};
 });
 const live = [{pc: 0x1400, bytes: readFileSync(join(output, 'live-0.x86')), instructions: 6}];
+const endbr = [
+  [0x1500, [0xf3, 0x0f, 0x1e, 0xfb]],
+  [0x1520, [0xf3, 0x0f, 0x1e, 0xfa]],
+].map(([pc, literal], index) => {
+  const bytes = readFileSync(join(output, `endbr-${index}.x86`));
+  assert.deepEqual(bytes, Buffer.from([...literal, 0xeb, 0]));
+  return { pc, bytes, length: 4, instructions: 2 };
+});
 assert.deepEqual(live[0].bytes, Buffer.from([0x04, 1, 0x66, 0x2e, 0x0f, 0x1f, 0x84, 0, 0, 0, 0, 0,
   0x66, 0x11, 0xd0, 0x0f, 0x92, 0xc3, 0x0f, 0x90, 0xc7, 0xeb, 0]));
 assert.deepEqual(JSON.parse(readFileSync(join(output, 'standalone-currentness.json'))),
@@ -166,7 +176,62 @@ assert.deepEqual(sources(), sourcePins);
 assert.deepEqual(counts, {contexts: 6, runs: 2494, retired: 2470, flag_inputs: 2304, apparent_addresses: 90,
   repeats: 12, current_inputs: 6, controls: 36, data_currentness: 6, retained: 6, consumers: 30, invalidated: 4});
 assert.equal(modules.length, 12);
+const alignmentCounts = { ...counts };
+const endbrCounts = { contexts: 0, runs: 0, retired: 0, flags: 0, controls: 0 };
+for (const owner of ['standalone', 'replacement', 'resident'])
+  for (const entries of [false, true]) {
+    const c = open(owner, entries);
+    if (c.api) for (const row of endbr) upload(c, row.pc, row.bytes);
+    for (const offset of [4396, 4628]) {
+      input(
+        c,
+        offset,
+        Buffer.from(Array.from({ length: 128 }, (_, index) => (index * 29 + offset) & 255)),
+      );
+    }
+    const unit = compile(c, 'endbr', endbr);
+    for (const row of endbr) {
+      for (const f of [2, 0xcd7]) {
+        seed(c, row.pc, f);
+        run(
+          c,
+          unit,
+          1,
+          { ...cpu(c), pc: row.pc + 4 },
+          'CET-disabled ENDBR preserves flags and dirty FP/XMM/YMM',
+        );
+        endbrCounts.flags++;
+        endbrCounts.runs++;
+        endbrCounts.retired++;
+      }
+      seed(c, row.pc);
+      run(c, unit, 0, cpu(c), 'budget precedes ENDBR', { retired: 0 });
+      input(c, 96, words([1]));
+      run(c, unit, 1, cpu(c), 'cancel precedes ENDBR', { reason: 2, retired: 0 });
+      run(c, unit, 0, cpu(c), 'cancel precedes ENDBR zero budget', { reason: 2, retired: 0 });
+      input(c, 96, words([0]));
+      run(c, unit, 1, { ...cpu(c), pc: row.pc + 4 }, 'same ENDBR resumes and retires once');
+      endbrCounts.controls += 4;
+      endbrCounts.runs += 4;
+      endbrCounts.retired++;
+    }
+    if (c.api) assert.equal(c.api.close(), 0);
+    contexts.push({
+      id: c.id,
+      owner,
+      entries,
+      purpose: 'endbr',
+      captures: c.captures,
+      mapped_pages: c.api ? 3 : null,
+    });
+    endbrCounts.contexts++;
+  }
+assert.deepEqual(endbrCounts, { contexts: 6, runs: 72, retired: 36, flags: 24, controls: 48 });
+assert.deepEqual(counts, { ...alignmentCounts, contexts: 12, runs: 2566, retired: 2506 });
+assert.equal(modules.length, 18);
+assert.deepEqual(sources(), sourcePins);
 const result = {status: 'ok', engine_sha256: engine.sha256, source_pins: sourcePins, counts, contexts, modules, observations,
+  alignment_counts: alignmentCounts, endbr_counts: endbrCounts,
   helper_calls: 0, helper_trace: [],
   limits: ['exact canonical6/9/10-byte alignment NOPs in six standalone/replacement/resident explicit/entry profiles; finite selected inputs',
     'all128 valid FLAGS for each encoding; full4612 expected images preserve all GPR parents, helper and dirtyFP128 except declared EIP/exit effects',
@@ -174,6 +239,8 @@ const result = {status: 'ok', engine_sha256: engine.sha256, source_pins: sourceP
     'two captures/context; NOP bank3blocks6instructions and live1block6instructions; source code and protections precede captures, unchanged8/64/65536 limits',
     'live byte ADD to ten-byte NOP to WORD ADC and SETcc consumes returned state without CPU reseeding; selected accessible/denied RAM canaries remain unchanged',
     'native standalone source currentness guards byte retrieval; saved unbound modules have no runtime source guard; bound generation3 and source CodeInvalidated4 reject neutrally',
-    'same-byte final displacement write alone invalidates preexisting RWX source; no general prefixes/segments/compiler/ISA/performance/browser/SDK/game/hostedCI claim']};
+    'same-byte final displacement write alone invalidates preexisting RWX source; no general prefixes/segments/compiler/ISA/performance/browser/SDK/game/hostedCI claim',
+    'ENDBR32 and ENDBR64 are four-byte integer NOP aliases in the fixed CET-disabled protected32 profile; separate2block bank in sixprofiles adds72calls and preserves complete4756-byte frames including dirtyFP/XMM/YMM',
+    'shared OperationNop TF/SS-shadow behavior reuses existing native/control proofs; this extra bank claims no CET tracking, shadow stack, IBT enforcement or additional debug policy']};
 writeFileSync(join(output, 'result.json'), JSON.stringify(result, null, 2), {flag: 'wx'});
 console.log(JSON.stringify({status: 'ok', ...counts, modules: modules.length, output}));
