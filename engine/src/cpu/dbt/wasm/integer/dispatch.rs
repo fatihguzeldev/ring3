@@ -42,6 +42,10 @@ pub(in crate::cpu::dbt::wasm) fn instruction(
             | Operation::X87 { .. }
             | Operation::FarCall { .. }
             | Operation::InterruptReturn { .. }
+            | Operation::Call { .. }
+            | Operation::CallWord { .. }
+            | Operation::CallRegisterWord { .. }
+            | Operation::ReadCallWord { .. }
     ) && !matches!(instruction.operation(), Operation::Simd(operation) if operation.kind == crate::cpu::x86::simd::SimdKind::MaskedStore)
         && !matches!(instruction.operation(), Operation::Avx(_))
         && !(crate::cpu::x86::capabilities::AVX_ENABLED
@@ -2139,28 +2143,35 @@ pub(in crate::cpu::dbt::wasm) fn instruction(
         Operation::Jump {
             target: BranchTarget::Direct(target),
         } => {
+            check_near_target(code, target.0, imports, exit_depth);
             code.i32_const(target.0 as i32).local_set(EIP);
         }
         Operation::Jump {
             target: BranchTarget::Indirect(target),
         } => {
             indirect_target(code, target, imports, exit_depth);
+            check_near_value(code, RESULT, imports, exit_depth);
             code.local_get(RESULT).local_set(EIP);
         }
         Operation::JumpWord { source } => {
             code.local_get(register(source))
                 .i32_const(0xffff)
                 .i32_and()
-                .local_set(EIP);
+                .local_set(RESULT);
+            check_near_value(code, RESULT, imports, exit_depth);
+            code.local_get(RESULT).local_set(EIP);
         }
         Operation::ReadJumpWord { address } => {
             memory::load_narrow_value(code, address, SmallWidth::Word, imports, exit_depth);
-            code.local_set(EIP);
+            code.local_set(RESULT);
+            check_near_value(code, RESULT, imports, exit_depth);
+            code.local_get(RESULT).local_set(EIP);
         }
         Operation::ConditionalJump { condition, target } => {
             control::condition(code, condition);
-            code.if_(BlockType::Result(ValType::I32))
-                .i32_const(target.0 as i32)
+            code.if_(BlockType::Result(ValType::I32));
+            check_near_target(code, target.0, imports, exit_depth + 1);
+            code.i32_const(target.0 as i32)
                 .else_()
                 .i32_const(instruction.next_pc().0 as i32)
                 .end()
@@ -2180,7 +2191,7 @@ pub(in crate::cpu::dbt::wasm) fn instruction(
                     .i32_const(65535)
                     .i32_and()
                     .i32_or()
-                    .local_tee(ecx)
+                    .local_tee(LHS)
                     .i32_const(65535)
                     .i32_and()
                     .i32_eqz()
@@ -2200,12 +2211,16 @@ pub(in crate::cpu::dbt::wasm) fn instruction(
                     code.i32_and();
                 }
             }
-            code.if_(BlockType::Result(ValType::I32))
-                .i32_const(target.0 as i32)
+            code.if_(BlockType::Result(ValType::I32));
+            check_near_target(code, target.0, imports, exit_depth + 1);
+            code.i32_const(target.0 as i32)
                 .else_()
                 .i32_const(instruction.next_pc().0 as i32)
                 .end()
                 .local_set(EIP);
+            if kind != CountBranchKind::EcxZero {
+                code.local_get(LHS).local_set(ecx);
+            }
         }
         Operation::CountBranch { kind, target } => {
             let ecx = register(Register32::Ecx);
@@ -2215,7 +2230,7 @@ pub(in crate::cpu::dbt::wasm) fn instruction(
                 code.local_get(ecx)
                     .i32_const(1)
                     .i32_sub()
-                    .local_tee(ecx)
+                    .local_tee(LHS)
                     .i32_const(0)
                     .i32_ne();
                 match kind {
@@ -2233,14 +2248,19 @@ pub(in crate::cpu::dbt::wasm) fn instruction(
                     _ => {}
                 }
             }
-            code.if_(BlockType::Result(ValType::I32))
-                .i32_const(target.0 as i32)
+            code.if_(BlockType::Result(ValType::I32));
+            check_near_target(code, target.0, imports, exit_depth + 1);
+            code.i32_const(target.0 as i32)
                 .else_()
                 .i32_const(instruction.next_pc().0 as i32)
                 .end()
                 .local_set(EIP);
+            if kind != CountBranchKind::EcxZero {
+                code.local_get(LHS).local_set(ecx);
+            }
         }
         Operation::CallWord { target } => {
+            check_near_target(code, target.0, imports, exit_depth);
             code.i32_const((instruction.next_pc().0 & 0xffff) as i32)
                 .local_set(RESULT);
             memory::push_word_result(code, imports, exit_depth);
@@ -2249,6 +2269,8 @@ pub(in crate::cpu::dbt::wasm) fn instruction(
         }
         Operation::CallRegisterWord { source } => {
             word_value(code, WordValue::Register(source));
+            code.local_tee(RESULT);
+            check_near_value(code, RESULT, imports, exit_depth);
             code.i32_const((instruction.next_pc().0 & 0xffff) as i32)
                 .local_set(RESULT);
             memory::push_word_result(code, imports, exit_depth);
@@ -2256,27 +2278,9 @@ pub(in crate::cpu::dbt::wasm) fn instruction(
             store = true;
         }
         Operation::ReadCallWord { address } => {
-            memory::checked_address(
-                code,
-                address,
-                2,
-                crate::cpu::x86::SegmentAccess::Read,
-                imports,
-                exit_depth,
-            );
-            memory::checked_address(
-                code,
-                EffectiveAddress {
-                    base: Some(Register32::Esp),
-                    displacement: (-2_i32) as u32,
-                    ..Default::default()
-                },
-                2,
-                crate::cpu::x86::SegmentAccess::Write,
-                imports,
-                exit_depth,
-            );
             memory::load_narrow_value(code, address, SmallWidth::Word, imports, exit_depth);
+            code.local_tee(RESULT);
+            check_near_value(code, RESULT, imports, exit_depth);
             code.i32_const((instruction.next_pc().0 & 0xffff) as i32)
                 .local_set(RESULT);
             memory::push_word_result(code, imports, exit_depth);
@@ -2286,6 +2290,7 @@ pub(in crate::cpu::dbt::wasm) fn instruction(
         Operation::Call {
             target: BranchTarget::Direct(target),
         } => {
+            check_near_target(code, target.0, imports, exit_depth);
             memory::store(
                 code,
                 EffectiveAddress {
@@ -2308,29 +2313,8 @@ pub(in crate::cpu::dbt::wasm) fn instruction(
         Operation::Call {
             target: BranchTarget::Indirect(target),
         } => {
-            if let Location32::Memory(address) = target {
-                memory::checked_address(
-                    code,
-                    address,
-                    4,
-                    crate::cpu::x86::SegmentAccess::Read,
-                    imports,
-                    exit_depth,
-                );
-                memory::checked_address(
-                    code,
-                    EffectiveAddress {
-                        base: Some(Register32::Esp),
-                        displacement: (-4_i32) as u32,
-                        ..Default::default()
-                    },
-                    4,
-                    crate::cpu::x86::SegmentAccess::Write,
-                    imports,
-                    exit_depth,
-                );
-            }
             indirect_target(code, target, imports, exit_depth);
+            check_near_value(code, RESULT, imports, exit_depth);
             memory::store(
                 code,
                 EffectiveAddress {
@@ -2512,7 +2496,10 @@ pub(in crate::cpu::dbt::wasm) fn instruction(
                 imports,
                 exit_depth,
             );
-            code.local_set(EIP)
+            code.local_set(RESULT);
+            check_near_value(code, RESULT, imports, exit_depth);
+            code.local_get(RESULT)
+                .local_set(EIP)
                 .local_get(register(Register32::Esp))
                 .i32_const(2 + i32::from(stack_adjust))
                 .i32_add()
@@ -2551,5 +2538,27 @@ pub(in crate::cpu::dbt::wasm) fn instruction(
         .local_set(RETIRED);
     if store {
         memory::exit_if_invalidated(code, exit_depth);
+    }
+}
+
+fn check_near_target(
+    code: &mut InstructionSink<'_>,
+    target: u32,
+    imports: memory::Imports,
+    exit_depth: u32,
+) {
+    if let Some(limit) = imports.code_fetch_limit {
+        super::super::code_fetch::check_span(code, target, 1, limit, exit_depth);
+    }
+}
+
+fn check_near_value(
+    code: &mut InstructionSink<'_>,
+    target: u32,
+    imports: memory::Imports,
+    exit_depth: u32,
+) {
+    if let Some(limit) = imports.code_fetch_limit {
+        super::super::code_fetch::check_value(code, target, limit, exit_depth);
     }
 }

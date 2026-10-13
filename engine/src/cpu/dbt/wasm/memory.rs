@@ -1134,7 +1134,12 @@ pub(super) fn pop_return(
     validate_result(code, false);
     exit_if_failed(code, exit_depth);
     helper_field(code, 20);
-    code.local_set(EIP)
+    code.local_set(RESULT);
+    if let Some(limit) = imports.code_fetch_limit {
+        super::code_fetch::check_value(code, RESULT, limit, exit_depth);
+    }
+    code.local_get(RESULT)
+        .local_set(EIP)
         .local_get(esp)
         .i32_const(4 + i32::from(stack_adjust))
         .i32_add()

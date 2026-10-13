@@ -57,7 +57,11 @@ pub(super) fn check_span(
 }
 
 pub(super) fn check_pc(code: &mut InstructionSink<'_>, limit: u32, depth: u32) {
-    code.local_get(EIP).local_get(limit).i32_gt_u();
+    check_value(code, EIP, limit, depth);
+}
+
+pub(super) fn check_value(code: &mut InstructionSink<'_>, value: u32, limit: u32, depth: u32) {
+    code.local_get(value).local_get(limit).i32_gt_u();
     fault_if(code, depth);
 }
 
