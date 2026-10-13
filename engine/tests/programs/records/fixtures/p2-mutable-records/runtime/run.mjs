@@ -70,8 +70,8 @@ const fixtures = new Map([0, 1, 2, 15, 16].map(count => {
   return [count, {spec, image, bytes, passes}];
 }));
 
-const names = ['open', 'close', 'arena_ptr', 'begin_image_input', 'append_image_input', 'load_pe32_linked_v5_input_at', 'start_loaded_image', 'dispatcher_module', 'guard_dispatch_entry', 'find_installed_resident', 'compile_resident_entries', 'acknowledge_resident_installation', 'guard_resident', 'read8', 'read16', 'read32', 'store_resident8', 'store_resident16', 'store_resident32', 'capture_resident_call', 'complete_resident_windows_call', 'protect'];
-const helperKinds = {read8: [2, 1], read16: [2, 2], read32: [1, 0], store_resident8: [3, 1], store_resident16: [4, 2], store_resident32: [1, 0]};
+const names = ['open', 'close', 'arena_ptr', 'begin_image_input', 'append_image_input', 'load_pe32_linked_v5_input_at', 'start_loaded_image', 'dispatcher_module', 'guard_dispatch_entry', 'find_installed_resident', 'compile_resident_entries', 'acknowledge_resident_installation', 'guard_resident', 'read8', 'read16', 'read32', 'store_resident8', 'store_resident16', 'store_resident32', 'capture_resident_call', 'complete_resident_windows_call', 'protect', 'cpu_read16', 'cpu_read32', 'cpu_read8', 'cpu_store_resident16', 'cpu_store_resident32', 'cpu_store_resident8'];
+const helperKinds = {cpu_read8: [10, 1], cpu_read16: [10, 2], cpu_read32: [10, 4], cpu_store_resident8: [10, 1], cpu_store_resident16: [10, 2], cpu_store_resident32: [10, 4]};
 function arena(e) { return Buffer.from(e.memory.buffer, e.base, SIZE).map(x => x); }
 function view(e) { return new DataView(e.memory.buffer); }
 function cpu(e) { const v = view(e); return {registers: Array.from({length: 8}, (_, i) => v.getUint32(e.base + 16 + i * 4, true)), pc: v.getUint32(e.base + 48, true), flags: v.getUint32(e.base + 52, true)}; }
@@ -138,14 +138,14 @@ function compile(e, group, pc) {
       unchanged(before, after, [[100, 140]], `forwarded ${imported.name}`);
       const [version, width] = helperKinds[imported.name], fields = Array.from({length: 6}, (_, i) => after.readUInt32LE(116 + 4 * i));
       assert.deepEqual(after.subarray(100, 140), packet('R3MH', version, fields)); assert.equal(fields[5], width);
-      const address = args[imported.name.startsWith('store_') ? 4 : 0] >>> 0;
-      if (fields[0] === 0) { assert.deepEqual(fields.slice(2), [0, 0, 0, width]); if (imported.name.startsWith('store_')) assert.equal(fields[1], 0); else if (width) assert.ok(fields[1] < 2 ** (width * 8)); }
-      else { assert.equal(imported.name, 'store_resident16'); assert.deepEqual(fields, [1, 0, 2, e.allocation + 28, 2, 2]); assert.equal(e.mode, 'fault'); }
+      const address = args[imported.name.startsWith('cpu_store_') ? 4 : 0] >>> 0;
+      if (fields[0] === 0) { assert.deepEqual(fields.slice(2), [0, 0, 0, width]); if (imported.name.startsWith('cpu_store_')) assert.equal(fields[1], 0); else if (width) assert.ok(fields[1] < 2 ** (width * 8)); }
+      else { assert.equal(imported.name, 'cpu_store_resident16'); assert.deepEqual(fields, [1, 0, 2, e.allocation + 28, 2, 2]); assert.equal(e.mode, 'fault'); }
       helperTrace.push({context: e.label, index: helperTrace.filter(row => row.context === e.label).length + 1, unit: unit.name, pc: state.pc, pass: e.entries.length, name: imported.name, address, args: args.map(x => x >>> 0), status: result, helper_hex: after.subarray(100, 140).toString('hex')});
       return result;
     };
   }
-  if (group.name === 'kernel') for (const name of ['read8', 'read16', 'read32', 'store_resident8', 'store_resident16', 'store_resident32']) assert.ok(imports.some(imported => imported.name === name), `actual compiler leaf imports ${name}`);
+  if (group.name === 'kernel') for (const name of ['cpu_read8', 'cpu_read16', 'cpu_read32', 'cpu_store_resident8', 'cpu_store_resident16', 'cpu_store_resident32']) assert.ok(imports.some(imported => imported.name === name), `actual compiler leaf imports ${name}`);
   unit.run = new WebAssembly.Instance(module, {env: {memory: e.memory}, ring3}).exports.run; assert.equal(unit.run.length, 4); e.table.set(unit.slot, unit.run);
   status(e, 'acknowledge installed group', () => e.api.acknowledge_resident_installation(e.low, e.high, unit.low, unit.high, unit.slot), [[TRANSFER, TRANSFER + 32]]);
   const receipt = arena(e).subarray(TRANSFER, TRANSFER + 32);
@@ -207,14 +207,14 @@ function faultRepair(e) {
   assert.equal(hash(partial), '6089d05a9cf2de5cacf254642e09f5888d045042a934fb0bdd2d990f0e457a8b'); assert.equal(partial.subarray(24, 32).toString('hex'), '019e0080313b04a0');
   assert.deepEqual(stopped, {registers: [3293479044, 16, 16, 158, e.spec.stack_base + 4096 - 32, e.allocation, 3, 65407], pc: e.text + e.spec.fault_store.offset, flags: 0x82});
   assert.equal(step.rotated, stopped.registers[0]); assert.equal(step.tag, stopped.registers[3]); assert.equal(step.weight, stopped.registers[7]); checkRecords(e, partial);
-  const successfulStores = helperTrace.filter(row => row.context === e.label && ['store_resident8', 'store_resident16'].includes(row.name));
+  const successfulStores = helperTrace.filter(row => row.context === e.label && ['cpu_store_resident8', 'cpu_store_resident16'].includes(row.name));
   assert.equal(successfulStores.length, 39); assert.equal(successfulStores.filter(row => row.pass === 2).length, 7);
-  assert.equal(successfulStores.at(-1).name, 'store_resident8'); assert.equal(successfulStores.at(-1).address, e.allocation + 25);
+  assert.equal(successfulStores.at(-1).name, 'cpu_store_resident8'); assert.equal(successfulStores.at(-1).address, e.allocation + 25);
   const installed = e.units.map(({low, high, slot, sha256}) => ({low, high, slot, sha256}));
   status(e, 'make live record allocation read-only', () => e.api.protect(e.allocation, 1, 1)); assert.deepEqual(cpu(e), stopped);
   const before = arena(e), expected = Buffer.from(before), address = e.allocation + 28;
-  packet('R3EX', 2, [5, 0, 2, address, 2, 2]).copy(expected, 56); packet('R3MH', 4, [1, 0, 2, address, 2, 2]).copy(expected, 100);
-  const first = dispatch(e, 1); assert.deepEqual(first, {version: 2, reason: 5, retired: 0, detail: 2, address, access: 2, length: 2});
+  packet('R3EX', 6, [5, 0, 2, address, 2, 2]).copy(expected, 56); packet('R3MH', 10, [1, 0, 2, address, 2, 2]).copy(expected, 100);
+  const first = dispatch(e, 1); assert.deepEqual(first, {version: 6, reason: 5, retired: 0, detail: 2, address, access: 2, length: 2});
   assert.deepEqual(arena(e), expected, 'failed word instruction only publishes its canonical exit/helper'); assert.deepEqual(cpu(e), stopped);
   save(`${e.label}-word-fault-first-arena.bin`, arena(e)); assert.deepEqual(readBytes(e, e.allocation, 128), partial);
   const retry = dispatch(e, 1); assert.deepEqual(retry, first); assert.deepEqual(arena(e), expected, 'unchanged word fault retry is neutral'); assert.deepEqual(cpu(e), stopped);
@@ -267,7 +267,7 @@ split.controls.push({name: 'copy-loop-only-split-budget', zero, cancelled, chunk
 assert.equal(split.splitIndex, 76); assert.equal(split.runs, 971); assert.deepEqual(split.final.cpu, normal.final.cpu); assert.deepEqual(split.final.exit, normal.final.exit);
 const repaired = runProgram(fresh('fault-16', 16, 'fault')); assert.deepEqual(repaired.final.cpu, normal.final.cpu); assert.deepEqual(repaired.final.exit, normal.final.exit);
 for (const e of [split, repaired]) assert.deepEqual(e.returns.map(row => [row.checksum, row.records_sha256, row.cpu]), normal.returns.map(row => [row.checksum, row.records_sha256, row.cpu]));
-const helperCounts = Object.fromEntries(Object.keys(helperKinds).map(name => [name, helperTrace.filter(row => row.name === name).length]));
+const helperCounts = Object.fromEntries(Object.keys(helperKinds).map(name => [name.slice(4), helperTrace.filter(row => row.name === name).length]));
 assert.deepEqual(helperCounts, {read8: 264, read16: 264, read32: 482, store_resident8: 132, store_resident16: 134, store_resident32: 427});
 const counts = {contexts: contexts.length, modules: contexts.reduce((sum, e) => sum + e.units.length + 1, 0), runs: observations.length, retired: contexts.reduce((sum, e) => sum + e.retired, 0), guest_helper_calls: helperTrace.length, natural_leaf_returns: contexts.reduce((sum, e) => sum + e.returns.length, 0), write_faults: observations.filter(row => row.reason === 5).length};
 const expectedCounts = {contexts: 7, modules: 28, runs: 5089, retired: 5159, guest_helper_calls: 1703, natural_leaf_returns: 14, write_faults: 2}; assert.deepEqual(counts, expectedCounts);

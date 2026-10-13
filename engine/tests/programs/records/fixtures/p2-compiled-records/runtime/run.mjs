@@ -56,7 +56,7 @@ const fixtures = new Map([0, 1, 2, 15, 16].map(count => {
   return [count, {spec, image, bytes, rows, checksum}];
 }));
 
-const names = ['open', 'close', 'arena_ptr', 'begin_image_input', 'append_image_input', 'load_pe32_linked_v5_input_at', 'start_loaded_image', 'dispatcher_module', 'guard_dispatch_entry', 'find_installed_resident', 'compile_resident_entries', 'acknowledge_resident_installation', 'guard_resident', 'read8', 'read16', 'read32', 'store_resident32', 'capture_resident_call', 'complete_resident_windows_call', 'protect'];
+const names = ['open', 'close', 'arena_ptr', 'begin_image_input', 'append_image_input', 'load_pe32_linked_v5_input_at', 'start_loaded_image', 'dispatcher_module', 'guard_dispatch_entry', 'find_installed_resident', 'compile_resident_entries', 'acknowledge_resident_installation', 'guard_resident', 'read8', 'read16', 'read32', 'store_resident32', 'capture_resident_call', 'complete_resident_windows_call', 'protect', 'cpu_read16', 'cpu_read32', 'cpu_read8', 'cpu_store_resident32'];
 function arena(e) { return Buffer.from(e.memory.buffer, e.base, SIZE).map(x => x); }
 function view(e) { return new DataView(e.memory.buffer); }
 function cpu(e) { const v = view(e); return {registers: Array.from({length: 8}, (_, i) => v.getUint32(e.base + 16 + i * 4, true)), pc: v.getUint32(e.base + 48, true), flags: v.getUint32(e.base + 52, true)}; }
@@ -122,7 +122,7 @@ function compile(e, group, pc) {
   for (const imported of imports) {
     if (imported.module === 'env') { assert.deepEqual(imported, {module: 'env', name: 'memory', kind: 'memory'}); continue; }
     assert.equal(imported.module, 'ring3'); assert.equal(imported.kind, 'function');
-    assert.ok(['guard_resident', 'read8', 'read16', 'read32', 'store_resident32'].includes(imported.name), imported.name);
+    assert.ok(['guard_resident', 'cpu_read8', 'cpu_read16', 'cpu_read32', 'cpu_store_resident32'].includes(imported.name), imported.name);
     ring3[imported.name] = imported.name === 'guard_resident' ? e.api.guard_resident : (...args) => {
       const before = arena(e), result = e.api[imported.name](...args), after = arena(e);
       unchanged(before, after, [[100, 140]], `forwarded ${imported.name}`);
@@ -189,11 +189,11 @@ function complete(e, frame, terminal = false) {
 
 function faultRepair(e, first) {
   assert.equal(e.mode, 'fault'); assert.ok(!e.faulted); e.faulted = true;
-  assert.deepEqual(first, {version: 2, reason: 5, retired: 11, detail: 2, address: e.allocation, access: 1, length: 1});
+  assert.deepEqual(first, {version: 6, reason: 5, retired: 11, detail: 2, address: e.allocation, access: 1, length: 1});
   assert.equal(e.retired, 216); const stopped = cpu(e);
   assert.equal(stopped.pc, e.text + e.spec.kernel_offset + 0x19);
   const before = arena(e), helper = before.subarray(100, 140);
-  assert.equal(helper.readUInt32LE(4), 0x10002);
+  assert.equal(helper.readUInt32LE(4), 0x1000a);
   assert.deepEqual(Array.from({length: 6}, (_, i) => helper.readUInt32LE(16 + 4 * i)), [1, 0, 2, e.allocation, 1, 1]);
   const retry = dispatch(e, 65536), wanted = Buffer.from(before); wanted.writeUInt32LE(0, 76);
   assert.deepEqual(retry, {...first, retired: 0}); assert.deepEqual(arena(e), wanted, 'unchanged fault retry only clears retired'); assert.deepEqual(cpu(e), stopped);
@@ -265,10 +265,10 @@ assert.equal(split.retired, normal.retired); assert.deepEqual(split.final.cpu, n
 const repaired = runProgram(fresh('fault-16', 16, 'fault'));
 assert.deepEqual(repaired.final.cpu, normal.final.cpu); assert.deepEqual(repaired.final.exit, normal.final.exit);
 assert.equal(contexts.length, 7); assert.equal(contexts.reduce((sum, e) => sum + e.retired, 0), 2650);
-assert.equal(helperTrace.filter(row => row.name === 'store_resident32').length, 364);
-assert.equal(helperTrace.filter(row => row.name === 'read32').length, 307);
-assert.equal(helperTrace.filter(row => row.name === 'read8').length, 134);
-assert.equal(helperTrace.filter(row => row.name === 'read16').length, 132);
+assert.equal(helperTrace.filter(row => row.name === 'cpu_store_resident32').length, 364);
+assert.equal(helperTrace.filter(row => row.name === 'cpu_read32').length, 307);
+assert.equal(helperTrace.filter(row => row.name === 'cpu_read8').length, 134);
+assert.equal(helperTrace.filter(row => row.name === 'cpu_read16').length, 132);
 assert.equal(helperTrace.length, 937);
 const counts = {contexts: contexts.length, modules: contexts.reduce((sum, e) => sum + e.units.length + 1, 0), runs: contexts.reduce((sum, e) => sum + e.runs, 0), retired: contexts.reduce((sum, e) => sum + e.retired, 0), guest_helper_calls: helperTrace.length};
 const expectedCounts = {contexts: 7, modules: 28, runs: 1737, retired: 2650, guest_helper_calls: 937};

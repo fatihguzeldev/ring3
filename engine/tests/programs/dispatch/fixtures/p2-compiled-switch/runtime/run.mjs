@@ -58,6 +58,7 @@ function record(magic, length, fields, version = 1) { const b = Buffer.alloc(len
 const stateBytes = s => record('R3ST', 56, [...s.registers, s.pc, s.flags]);
 const exitBytes = s => record('R3EX', 40, [s.reason, s.retired, s.detail ?? 0, s.address ?? 0, s.access ?? 0, s.length ?? 0], s.version);
 const helperBytes = (value = 0, address = null) => record('R3MH', 40, address === null ? [0, value, 0, 0, 0, 0] : [1, 0, 2, address, 1, 4]);
+const cpuHelperBytes = (value = 0, address = null) => record('R3MH', 40, address === null ? [0, value, 0, 0, 0, 4] : [1, 0, 2, address, 1, 4], 10);
 const installBytes = u => record('R3IN', 32, [u.low, u.high, u.slot, 0]);
 function arena(e) { return Buffer.from(new Uint8Array(e.memory.buffer, e.base, SIZE)); }
 function cpu(e) { const b = arena(e); return {registers: Array.from({length: 8}, (_, i) => b.readUInt32LE(16 + i * 4)), pc: b.readUInt32LE(48), flags: b.readUInt32LE(52)}; }
@@ -69,7 +70,7 @@ const arities = {open: 3, close: 0, arena_ptr: 0, begin_image_input: 1, append_i
   start_loaded_image: 2, compile_entries: 2, compile_resident_entries: 2, generation: 0, module_ptr: 0, module_len: 0,
   guard: 6, guard_resident: 7, read32: 1, store32: 2, store_resident32: 6, protect: 3,
   capture_call: 5, capture_resident_call: 6, complete_windows_call: 4, complete_resident_windows_call: 5,
-  acknowledge_resident_installation: 5, dispatcher_module: 2, guard_dispatch_entry: 5, find_installed_resident: 3};
+  acknowledge_resident_installation: 5, dispatcher_module: 2, guard_dispatch_entry: 5, find_installed_resident: 3, cpu_read32: 1, cpu_store32: 2, cpu_store_resident32: 6};
 function fresh(owner, address) {
   const instance = new WebAssembly.Instance(engine.module, {}), functions = Object.fromEntries(Object.entries(arities).map(([name, arity]) => {
     const fn = instance.exports['ring3_abi_v1_' + name]; assert.equal(fn?.length, arity, name); return [name, fn];
@@ -100,22 +101,22 @@ function fresh(owner, address) {
 function compile(e, name, pcs, gates, instructions) {
   assert.ok(pcs.length > 0 && pcs.length <= 8 && instructions + gates.length <= 64); assert.ok(++e.captures <= (e.table ? 3 : 7));
   transfer(e, words([...pcs, ...gates.flat()])); api(e, e.table ? 'compile_resident_entries' : 'compile_entries', [pcs.length, gates.length], e.table ? [[TRANSFER, TRANSFER + 24]] : []);
-  const r = arena(e).subarray(TRANSFER, TRANSFER + 24), u = {name, slot: e.units.length, pcs, instructions, version: gates.length ? 3 : 2};
+  const r = arena(e).subarray(TRANSFER, TRANSFER + 24), u = {name, slot: e.units.length, pcs, instructions, version: 6};
   if (e.table) {assert.equal(r.readUInt32LE(0), 1); assert.equal(r.readUInt32LE(4), 24); [u.low, u.high, u.pointer, u.length] = [8, 12, 16, 20].map(at => r.readUInt32LE(at));}
   else {u.generation = e.api.generation(); u.pointer = e.api.module_ptr() >>> 0; u.length = e.api.module_len() >>> 0; assert.equal(u.generation, e.captures);}
   assert.ok(u.length > 8 && u.length <= 65536); const bytes = Buffer.from(new Uint8Array(e.memory.buffer, u.pointer, u.length)), module = new WebAssembly.Module(bytes);
-  const guard = e.table ? 'guard_resident' : 'guard', store = e.table ? 'store_resident32' : 'store32', imports = WebAssembly.Module.imports(module);
-  assert.deepEqual(imports, [{module: 'env', name: 'memory', kind: 'memory'}, ...[guard, 'read32', store].map(name => ({module: 'ring3', name, kind: 'function'}))]);
+  const guard = e.table ? 'guard_resident' : 'guard', store = e.table ? 'cpu_store_resident32' : 'cpu_store32', imports = WebAssembly.Module.imports(module);
+  assert.deepEqual(imports, [{module: 'env', name: 'memory', kind: 'memory'}, ...[guard, 'cpu_read32', store].map(name => ({module: 'ring3', name, kind: 'function'}))]);
   const ring3 = {[guard]: e.api[guard]};
-  for (const name of ['read32', store]) ring3[name] = (...args) => {
-    const step = e.steps.shift(); assert.ok(step, `unexpected ${name}`); assert.equal(name === 'read32' ? 'read' : 'store', step[0]);
-    assert.equal(args[name === 'store_resident32' ? 4 : 0] >>> 0, step[1]);
-    if (name !== 'read32') assert.equal(args.at(-1) >>> 0, step[2]);
-    if (name === 'store_resident32') assert.deepEqual(args.slice(0, 4).map(x => x >>> 0), [e.low, e.high, u.low, u.high]);
+  for (const name of ['cpu_read32', store]) ring3[name] = (...args) => {
+    const step = e.steps.shift(); assert.ok(step, `unexpected ${name}`); assert.equal(name === 'cpu_read32' ? 'read' : 'store', step[0]);
+    assert.equal(args[name === 'cpu_store_resident32' ? 4 : 0] >>> 0, step[1]);
+    if (name !== 'cpu_read32') assert.equal(args.at(-1) >>> 0, step[2]);
+    if (name === 'cpu_store_resident32') assert.deepEqual(args.slice(0, 4).map(x => x >>> 0), [e.low, e.high, u.low, u.high]);
     const before = arena(e), status = e.api[name](...args), after = arena(e); assert.equal(status, 0); unchanged(before, after, [[100, 140]], 'canonical helper');
-    assert.deepEqual(after.subarray(100, 140), helperBytes(name === 'read32' ? step[2] : 0, step[3] ? step[1] : null));
+    assert.deepEqual(after.subarray(100, 140), cpuHelperBytes(name === 'cpu_read32' ? step[2] : 0, step[3] ? step[1] : null));
     helperTrace.push({context: e.label, call: e.runs + 1, unit: name, module: u.name, address: step[1], value: step[2], fault: !!step[3], status, helper_hex: after.subarray(100, 140).toString('hex')});
-    if (name === 'read32') e.reads++; else e.stores++; return status;
+    if (name === 'cpu_read32') e.reads++; else e.stores++; return status;
   };
   u.run = new WebAssembly.Instance(module, {env: {memory: e.memory}, ring3}).exports.run; assert.equal(u.run.length, 4);
   if (e.table) {assert.ok(u.slot < 8); assert.equal(e.table.get(u.slot), null); e.table.set(u.slot, u.run); api(e, 'acknowledge_resident_installation', [e.low, e.high, u.low, u.high, u.slot], [[TRANSFER, TRANSFER + 32]]); assert.deepEqual(arena(e).subarray(TRANSFER, TRANSFER + 32), installBytes(u));}
@@ -125,7 +126,7 @@ function compile(e, name, pcs, gates, instructions) {
 function run(e, u, label, budget, next, retired, steps = [], reason = 1, fields = {}) {
   const before = arena(e), expected = Buffer.from(before), packet = {version: u.version, reason, retired, ...fields};
   expected.set(stateBytes(next)); expected.set(exitBytes(packet), 56);
-  if (steps.length) {const last = steps.at(-1); expected.set(helperBytes(last[0] === 'read' ? last[2] : 0, last[3] ? last[1] : null), 100);}
+  if (steps.length) {const last = steps.at(-1); expected.set(cpuHelperBytes(last[0] === 'read' ? last[2] : 0, last[3] ? last[1] : null), 100);}
   if (e.table && budget && !before.readUInt32LE(96)) expected.set(installBytes(u), TRANSFER);
   e.steps = [...steps]; const status = (e.table ? e.dispatcher : u.run)(e.base, e.base + 56, budget, e.base + 96); assert.equal(status, 0, label); assert.equal(e.steps.length, 0, label);
   assert.deepEqual(arena(e), expected, `${e.label}/${label}: full4612`); e.runs++; e.retired += retired;
