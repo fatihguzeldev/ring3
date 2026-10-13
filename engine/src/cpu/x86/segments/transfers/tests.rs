@@ -103,12 +103,6 @@ fn normalized_offset_limit_and_execution_profile_refusals_are_distinct() {
             CodeTransferError::GeneralProtection(0),
         ),
         (
-            record(0x1a, 3, true, 0xfffff, true, false, 0),
-            FarWidth::Dword,
-            1,
-            CodeTransferError::UnsupportedProfile,
-        ),
-        (
             SegmentDescriptorRecord::from_words(0xffff, 0x00effa00),
             FarWidth::Dword,
             1,
@@ -302,4 +296,26 @@ fn nonflat_d32_destination_publishes_loaded_base_with_logical_offset() {
         0xffff_f000
     );
     assert!(context.caches[SegmentRegister::Cs.index()].default32());
+}
+
+#[test]
+fn destination_default_size_is_independent_from_far_offset_width() {
+    for default32 in [false, true] {
+        let mut table = SegmentDescriptorTable::empty();
+        table
+            .configure_raw(
+                0x40,
+                record(0x1a, 3, true, 0xfffff, true, default32, 0x4000),
+            )
+            .unwrap();
+        for (width, expected_offset) in [(FarWidth::Word, 0x2345), (FarWidth::Dword, 0x12345)] {
+            let transfer = table.resolve_far_jump(0x43, 0x12345, width, 3).unwrap();
+            let mut context = SegmentContext::default();
+            transfer.apply(&mut context);
+            assert_eq!(transfer.offset, expected_offset);
+            assert_eq!(context.state.bases[1], 0x4000);
+            assert_eq!(context.caches[1].default32(), default32);
+            assert!(context.is_valid());
+        }
+    }
 }

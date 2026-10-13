@@ -162,7 +162,6 @@ function malformedControls(c) {
   const mutations = [
     ['segment-profile', SEG + 6, 2, 2], ['segment-size', SEG + 8, 63, 4], ['segment-reserved', SEG + 12, 1, 4],
     ['segment-FS-reserved', SEG + 48, 1, 4], ['segment-GS-reserved', SEG + 52, 1, 4], ['segment-tail-reserved', SEG + 60, 1, 4],
-    ['CS-D32-required', SEG + 32, 0xf1bfffff, 4],
     ['companion-magic', BASES, 0, 4], ['companion-version', BASES + 4, 2, 2],
     ['companion-profile', BASES + 6, 2, 2], ['companion-size', BASES + 8, 39, 4],
     ['companion-reserved', BASES + 12, 1, 4],
@@ -257,12 +256,12 @@ for (const owner of ['replacement', 'resident']) for (const entries of [false, t
   input(c, 96, words([1])); run(c, 'cancel precedes v3 logical and page access', s, {budget: 1, retired: 0, reason: 2}); input(c, 96, words([0]));
   malformedControls(c); host(c, 'close');
 }
-assert.equal(contexts.length, 36); assert.equal(modules.length, 36); assert.equal(observations.length, 44); assert.equal(refusals.length, 60);
+assert.equal(contexts.length, 36); assert.equal(modules.length, 36); assert.equal(observations.length, 44); assert.equal(refusals.length, 56);
 assert.deepEqual(pins(), sourcePins, 'actual segment base source and literal oracles stayed fixed');
 writeFileSync(join(output, 'result.json'), JSON.stringify({status: 'ok', engine: {path: enginePath, sha256: engine.sha256, bytes: engine.bytes.length},
   source_pins: sourcePins, arena_bytes: SIZE, mapped_ram_pages: pages, contexts, modules, observations, refusals, helper_trace: helperTrace,
   limits: ['finite authored x86 data-segment integration in Node WebAssembly, four replacement/resident extent/entry profiles',
-    'loaded CS.D32 remains required; SS.B16 is admitted; this data-base fixture does not establish code/stack modes or broader compatibility',
+    'this data-base fixture admits current CS.D16 and SS.B16; separate defaults and stack fixtures own mode execution evidence',
     'legacy v1/v2 ignore malformed and missing companion bytes; v3 tail absence is a neutral ABI range refusal, not an old-engine semantic RED',
     'detached missing-tail controls reuse the actual emitted module with a neutral guard stub to reach range preflight independently of canonical engine pointer admission'],
 }, null, 2) + '\n');

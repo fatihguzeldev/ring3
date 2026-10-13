@@ -59,7 +59,7 @@ export function encodeSegments(context) {
   const bases = contextBases(context), bytes = packet('R3SG', 64, [], 1);
   context.selectors.forEach((value, i) => bytes.writeUInt16LE(value, 16 + i * 2));
   const legacy = context.selectors.map((selector, i) => (selector & 0xfffc) === 0 ? 0 : i === 1 ? 0xf3bfffff : 0xf33fffff);
-  const nonflat = bases.slice(0, 4).some(value => value !== 0);
+  const nonflat = bases.slice(0, 4).some(value => value !== 0) || (context.caches[1] & 0x02000000) === 0;
   if (nonflat || !context.caches.every((value, i) => value === legacy[i])) {
     bytes.writeUInt16LE(nonflat ? 3 : 2, 4);
     context.caches.forEach((value, i) => bytes.writeUInt32LE(value, cacheOffsets[i]));

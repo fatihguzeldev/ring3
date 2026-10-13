@@ -182,11 +182,7 @@ impl SegmentContext {
                     return false;
                 }
                 match index {
-                    1 => {
-                        cache.code()
-                            && cache.default32()
-                            && (cache.conforming() || cache.dpl() == 3)
-                    }
+                    1 => cache.code() && (cache.conforming() || cache.dpl() == 3),
                     2 => cache.writable() && cache.dpl() == 3,
                     _ => cache.readable() && (cache.conforming() || cache.dpl() == 3),
                 }
@@ -281,7 +277,6 @@ mod tests {
         let valid = SegmentContext::default();
         assert!(valid.is_valid() && valid.is_legacy());
         for (index, bits) in [
-            (1, 0xf1bf_ffff),
             (1, 0xf33f_ffff),
             (2, 0xf31f_ffff),
             (3, 0xf39f_ffff),
@@ -306,7 +301,7 @@ mod tests {
         assert!(conforming.is_valid() && !conforming.is_legacy());
     }
     #[test]
-    fn current_context_accepts_all_bases_and_b16_but_keeps_code_d32() {
+    fn current_context_accepts_all_bases_and_independent_code_stack_defaults() {
         let mut context = SegmentContext::default();
         for segment in [
             SegmentRegister::Es,
@@ -320,12 +315,20 @@ mod tests {
         }
         assert!(context.is_valid());
         assert!(!context.is_legacy());
-        let mut narrow_stack = context;
-        narrow_stack.caches[2] = cache(3, 0xfffff, true, false);
-        assert!(narrow_stack.is_valid());
-        assert!(!narrow_stack.is_legacy());
-        let mut invalid = context;
-        invalid.caches[SegmentRegister::Cs.index()] = cache(0xb, 0xfffff, true, false);
-        assert!(!invalid.is_valid());
+        for segment in [SegmentRegister::Cs, SegmentRegister::Ss] {
+            let mut narrow = context;
+            narrow.caches[segment.index()] = cache(
+                if segment == SegmentRegister::Cs {
+                    0xb
+                } else {
+                    3
+                },
+                0xfffff,
+                true,
+                false,
+            );
+            assert!(narrow.is_valid());
+            assert!(!narrow.is_legacy());
+        }
     }
 }

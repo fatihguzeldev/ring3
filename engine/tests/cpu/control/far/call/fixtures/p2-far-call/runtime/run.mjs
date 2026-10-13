@@ -107,7 +107,7 @@ for(const resident of [false,true])for(const entries of [false,true])for(const w
   ['target-limit-is-GP',descriptor({limit:0x1fff,pages:false}),{status:3,detail:0}],
   ['bounded-valid-target-commits',descriptor({limit:0x2000,pages:false}),{status:0}],
   ['nonflat-d32-commits-logical-target',descriptor({base:0x1000}),{status:0}],
-  ['D16-refuses',descriptor({d32:false}),{host:true}],
+  ['D16-destination-publishes-current-v3',descriptor({d32:false}),{status:0}],
   ['L1-refuses',descriptor({long:true}),{host:true}],
   ['busy-TSS-is-GP',descriptor({type:11,codeData:false}),{status:3,detail:0x40}],
   ['outer-call-gate-refuses',descriptor({type:12,codeData:false}),{host:true}],
@@ -217,4 +217,4 @@ for(const resident of [false,true])for(const entries of [false,true]){
 }
 
 assert.deepEqual(pins(root,sources),sourcePins,'source bytes frozen');
-finish(output,engine,sourcePins,['IA32 protected32 CPL3, same-CPL direct CALL four forms, logical D32 CS targets with current v3 base publication, and B32 SS','batch cached SS spans precede page probes as deterministic Ring3 policy; no universal multioperand fault priority claimed','zero high16 padding in CALL32 CS slot is a deterministic padding choice','native tests separately read raw descriptor A bit and exercise version exhaustion; actual proof validates whole arena/RAM, helper width/order, TF/SMC and malformed phase replies','gate/task payloads, D16 CS, privilege switches, INT/IRET remain outside this slice']);
+finish(output,engine,sourcePins,['IA32 protected32 CPL3, same-CPL direct CALL four forms, logical D16/D32 CS targets with current v3 base/mode publication, and B32 SS','batch cached SS spans precede page probes as deterministic Ring3 policy; no universal multioperand fault priority claimed','zero high16 padding in CALL32 CS slot is a deterministic padding choice','native tests separately read raw descriptor A bit and exercise version exhaustion; actual proof validates whole arena/RAM, helper width/order, TF/SMC and malformed phase replies','gate/task payloads, privilege switches and INT/IRET remain outside this slice; D16 execution is established by the separate defaults fixture']);

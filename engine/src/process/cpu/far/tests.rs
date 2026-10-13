@@ -101,11 +101,7 @@ fn architectural_faults_never_publish_cs_or_accessed() {
 #[test]
 fn unsupported_profiles_refuse_neutrally_and_bounded_source_transfers() {
     let mut engine = engine();
-    for (low, high) in [
-        (0xffff, 0x008ffa00),
-        (0xffff, 0x00effa00),
-        (0xdeadbeef, 0x89abec76),
-    ] {
+    for (low, high) in [(0xffff, 0x00effa00), (0xdeadbeef, 0x89abec76)] {
         engine
             .configure_segment_descriptor_raw(0x43, SegmentDescriptorRecord::from_words(low, high))
             .unwrap();

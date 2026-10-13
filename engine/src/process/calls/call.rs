@@ -58,6 +58,7 @@ impl EngineInstance {
         ]
         .into_iter()
         .any(|segment| context.state.bases[segment.index()] != 0)
+            || !context.caches[crate::cpu::x86::SegmentRegister::Cs.index()].default32()
             || !context.caches[crate::cpu::x86::SegmentRegister::Ss.index()].default32()
         {
             return Err(HostError::Call(CallError::InvalidRequest));
@@ -826,3 +827,7 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+#[path = "call/modes.rs"]
+mod modes;

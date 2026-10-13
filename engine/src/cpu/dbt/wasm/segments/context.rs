@@ -128,7 +128,14 @@ fn cache_preflight(code: &mut InstructionSink<'_>, index: usize, offset: usize) 
     cache_mask(code, 0x9400_0000, 0x9000_0000);
     match index {
         1 => {
-            cache_mask(code, 0x0280_0000, 0x0280_0000);
+            cache_mask(code, 0x0080_0000, 0x0080_0000);
+            code.local_get(STATE_PTR)
+                .i32_load16_u(memarg(4, 1))
+                .i32_const(i32::from(SEGMENTS_VERSION_3))
+                .i32_ne()
+                .if_(BlockType::Empty);
+            cache_mask(code, 0x0200_0000, 0x0200_0000);
+            code.end();
             code.local_get(RESULT)
                 .i32_const(0x0040_0000)
                 .i32_and()

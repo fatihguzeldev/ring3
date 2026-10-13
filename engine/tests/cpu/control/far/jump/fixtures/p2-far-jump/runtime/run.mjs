@@ -91,7 +91,7 @@ function encodeSegments(context) {
   const bases = contextBases(context), bytes = packet('R3SG', 64, [], 1);
   context.selectors.forEach((value, i) => bytes.writeUInt16LE(value, 16 + i * 2));
   const legacy = context.selectors.map((selector, i) => (selector & 0xfffc) === 0 ? 0 : i === 1 ? 0xf3bfffff : 0xf33fffff);
-  const nonflat = bases.slice(0, 4).some(value => value !== 0);
+  const nonflat = bases.slice(0, 4).some(value => value !== 0) || (context.caches[1] & 0x02000000) === 0;
   if (nonflat || !context.caches.every((value, i) => value === legacy[i])) {
     bytes.writeUInt16LE(nonflat ? 3 : 2, 4);
     context.caches.forEach((value, i) => bytes.writeUInt32LE(value, cacheOffsets[i]));
@@ -117,7 +117,7 @@ function oracle(selector, raw, offset, word) {
   if (!raw.present) return {reason: 14, status: 6, detail: code};
   const limit = raw.pages ? raw.limit * 4096 + 4095 : raw.limit;
   if (target > limit) return {reason: 11, status: 3, detail: 0};
-  if (!raw.d32 || raw.long) return {reason: 7, host: 7, detail: 3};
+  if (raw.long) return {reason: 7, host: 7, detail: 3};
   return {reason: 1, status: 0, target, selector: code | 3, cache: cache(raw), base: raw.base};
 }
 function pointer(word, offset, selector) {const bytes = Buffer.alloc(word ? 4 : 6); if (word) bytes.writeUInt16LE(offset & 0xffff); else bytes.writeUInt32LE(offset >>> 0); bytes.writeUInt16LE(selector, bytes.length - 2); return bytes;}
@@ -371,6 +371,6 @@ if (mode !== 'protocol') {
 
 assert.deepEqual(pins(), sourcePins, 'all pinned source bytes remain frozen');
 writeFileSync(join(output, 'result.json'), JSON.stringify({status: 'ok', engine_sha256: engine.sha256, source_pins: sourcePins, counts,
-  limits: ['fixed protected32 CPL3, D32/L0 CS with logical target and current v3 base publication; all four direct far JMP encodings only', 'known outer system descriptor faults are architectural; outer-admissible gate/task payloads remain unresolved neutral host profile refusals; D16/L1 direct CS stays refused; nonflat D32 CS commits logical targets and a v3 companion', 'CALL/RETF/INTn/IRET and generic CS fetch-limit enforcement remain separate', 'native process tests own raw A-bit readback; actual proof owns cache publication, retained capture, flags, exact pointer reads and helper currentness']}, null, 2) + '\n');
+  limits: ['fixed protected32 CPL3, D16/D32 L0 CS destinations with logical target and current v3 base/mode publication; all four direct far JMP encodings only', 'known outer system descriptor faults are architectural; outer-admissible gate/task payloads remain unresolved neutral host profile refusals; L1 direct CS stays refused; nonflat and D16 CS publish current v3 records; D16 instruction execution is owned by the defaults fixture', 'CALL/RETF/INTn/IRET and generic CS fetch-limit enforcement remain separate', 'native process tests own raw A-bit readback; actual proof owns cache publication, retained capture, flags, exact pointer reads and helper currentness']}, null, 2) + '\n');
 writeFileSync(join(output, 'observations.json'), JSON.stringify(observations, null, 2) + '\n');
 console.log(JSON.stringify({status: 'ok', ...counts, output}));

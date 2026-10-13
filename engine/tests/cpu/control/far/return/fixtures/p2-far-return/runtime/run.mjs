@@ -96,7 +96,7 @@ for(const resident of [false,true])for(const entries of [false,true])for(const w
   ['data-is-GP',descriptor({type:2}),{status:3,detail:0x40}],['privilege-before-P',descriptor({dpl:2,present:false}),{status:3,detail:0x40}],
   ['absent-code-is-NP',descriptor({present:false}),{status:6,detail:0x40}],['target-limit-is-GP',descriptor({limit:0x2344,pages:false}),{status:3,detail:0}],
   ['bounded-valid-target-commits',descriptor({limit:0x2345,pages:false}),{status:0}],['nonflat-d32-commits-logical-target',descriptor({base:0x1000}),{status:0}],
-  ['D16-refuses',descriptor({d32:false}),{host:true}],['L1-refuses',descriptor({long:true}),{host:true}],['call-gate-is-GP',descriptor({type:12,codeData:false}),{status:3,detail:0x40}],
+  ['D16-destination-publishes-current-v3',descriptor({d32:false}),{status:0}],['L1-refuses',descriptor({long:true}),{host:true}],['call-gate-is-GP',descriptor({type:12,codeData:false}),{status:3,detail:0x40}],
  ];
  for(const [label,raw,expect]of rows){configure(c,0x43,raw);proof(c,label,{raw,expect,target:0x2345});}
  const raw=descriptor({type:12,dpl:0});configure(c,0x43,raw);
@@ -146,4 +146,4 @@ for(const resident of [false,true])for(const entries of [false,true]){
 }
 
 assert.deepEqual(pins(root,sources),sourcePins,'source bytes frozen');
-finish(output,engine,sourcePins,['IA32 protected32 CPL3, RETF16/32 with optional unsigned imm16; direct D32 code with logical targets/current v3 base publication, B32 SS','RPL>=CPL is checked even for conforming code; high16 of popped 32-bit CS slot discarded','two cached SS spans precede RAM probes as deterministic Ring3 batch policy; argument-release bytes are not probed','no gate/task return, CPL change, D16 code, CET/FRED or INT/IRET completion claim']);
+finish(output,engine,sourcePins,['IA32 protected32 CPL3, RETF16/32 with optional unsigned imm16; direct D16/D32 destinations with logical targets/current v3 base/mode publication, B32 SS','RPL>=CPL is checked even for conforming code; high16 of popped 32-bit CS slot discarded','two cached SS spans precede RAM probes as deterministic Ring3 batch policy; argument-release bytes are not probed','no gate/task return, CPL change, CET/FRED or INT/IRET completion claim; D16 execution is established by the separate defaults fixture']);

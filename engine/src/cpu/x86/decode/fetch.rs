@@ -105,9 +105,8 @@ mod tests {
         assert_ne!(word.decode_key(), based.decode_key());
         assert_eq!(word.decoder_bitness(), 16);
         segments.caches[1] = word.cs;
-        assert!(
-            CodeFetchContext::from_segments(&segments).is_none(),
-            "D16 remains outside this admitted cut"
-        );
+        let current_word = CodeFetchContext::from_segments(&segments).unwrap();
+        assert_eq!(current_word.decode_key(), word.decode_key());
+        assert_eq!(current_word.decoder_bitness(), 16);
     }
 }

@@ -70,10 +70,6 @@ impl EngineInstance {
         mut context: SegmentContext,
         transfer: CodeTransfer,
     ) -> Result<PreparedTransfer, HostError> {
-        let cs = SegmentRegister::Cs.index();
-        if !context.caches[cs].default32() {
-            return Err(HostError::InvalidRequest);
-        }
         transfer.apply(&mut context);
         let mut segments = [0; SEGMENTS_SIZE];
         let mut bases = [0; SEGMENT_BASES_RECORD_SIZE];

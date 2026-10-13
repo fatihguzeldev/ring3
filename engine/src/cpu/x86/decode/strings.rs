@@ -1,4 +1,4 @@
-use iced_x86::{Code, Instruction, Register};
+use iced_x86::{Code, Instruction, OpKind, Register};
 
 use super::{DecodeError, operands::unsupported};
 use crate::cpu::x86::{
@@ -8,7 +8,7 @@ use crate::cpu::x86::{
 
 pub(super) fn lower(
     instruction: &Instruction,
-    bytes: &[u8],
+    _bytes: &[u8],
 ) -> Option<Result<Operation, DecodeError>> {
     let (kind, width) = match instruction.code() {
         Code::Movsb_m8_m8 => (StringKind::Move, StringWidth::Byte),
@@ -48,19 +48,14 @@ pub(super) fn lower(
         Register::GS => Some(SegmentRegister::Gs),
         _ => return Some(Err(unsupported())),
     };
-    let address_size = if bytes
-        .iter()
-        .take_while(|byte| {
-            matches!(
-                **byte,
-                0xf2 | 0xf3 | 0x66 | 0x67 | 0x26 | 0x2e | 0x36 | 0x3e | 0x64 | 0x65
-            )
-        })
-        .any(|byte| *byte == 0x67)
-    {
-        AddressSize::Bits16
-    } else {
-        AddressSize::Bits32
+    let Some(address_size) = instruction.op_kinds().find_map(|operand| match operand {
+        OpKind::MemorySegSI | OpKind::MemorySegDI | OpKind::MemoryESDI => Some(AddressSize::Bits16),
+        OpKind::MemorySegESI | OpKind::MemorySegEDI | OpKind::MemoryESEDI => {
+            Some(AddressSize::Bits32)
+        }
+        _ => None,
+    }) else {
+        return Some(Err(unsupported()));
     };
     if !instruction.has_rep_prefix() && !instruction.has_repne_prefix() {
         return Some(Ok(Operation::String {
@@ -78,3 +73,7 @@ pub(super) fn lower(
         source_segment,
     }))
 }
+
+#[cfg(test)]
+#[path = "strings/defaults.rs"]
+mod defaults;

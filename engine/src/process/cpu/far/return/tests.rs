@@ -38,7 +38,7 @@ fn return_profile_and_stale_authority_refusals_leave_full_state_untouched() {
     engine
         .configure_segment_descriptor_raw(
             0x43,
-            SegmentDescriptorRecord::from_words(0xffff, 0x008ffa00),
+            SegmentDescriptorRecord::from_words(0xffff, 0x00affa00),
         )
         .unwrap();
     let before = engine.arena().to_vec();

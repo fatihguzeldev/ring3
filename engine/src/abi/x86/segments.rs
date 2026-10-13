@@ -84,6 +84,7 @@ pub fn encode_segment_context(context: &SegmentContext, output: &mut [u8]) -> Re
     }
     if !context.is_valid()
         || context.state.bases[..4].iter().any(|base| *base != 0)
+        || !context.caches[1].default32()
         || !context.caches[2].default32()
     {
         return Err(AbiError::Reserved);
@@ -132,7 +133,7 @@ fn decode_legacy_context(input: &[u8], version: u16) -> Result<SegmentContext, A
         *base = read_u32(input, SEGMENTS_BASES_OFFSET + index * 4);
     }
     let context = decode_cached_context(input, bases)?;
-    if !context.caches[2].default32() {
+    if !context.caches[1].default32() || !context.caches[2].default32() {
         return Err(AbiError::Reserved);
     }
     Ok(context)
@@ -174,7 +175,10 @@ pub fn encode_current_segment_context(
     let mut staged_segments = [0; SEGMENTS_SIZE];
     let mut staged_bases = [0; SEGMENT_BASES_RECORD_SIZE];
     header::write(&mut staged_bases, *b"R3SB");
-    if context.state.bases[..4].iter().any(|base| *base != 0) || !context.caches[2].default32() {
+    if context.state.bases[..4].iter().any(|base| *base != 0)
+        || !context.caches[1].default32()
+        || !context.caches[2].default32()
+    {
         encode_cached_context(context, SEGMENTS_VERSION_3, &mut staged_segments);
         for (index, base) in context.state.bases.into_iter().enumerate() {
             write_u32(&mut staged_bases, 16 + index * 4, base);
@@ -472,7 +476,7 @@ mod code_base_tests {
     use super::*;
 
     #[test]
-    fn current_codec_owns_code_base_in_v3_while_legacy_and_d16_remain_strict() {
+    fn current_codec_owns_code_base_and_default_size_in_v3_while_legacy_remains_strict() {
         for base in [1, 0x4000, u32::MAX] {
             let mut context = SegmentContext::default();
             context.state.bases[1] = base;
@@ -498,9 +502,12 @@ mod code_base_tests {
             assert_eq!(rejected, [0xa5; SEGMENTS_SIZE]);
             let mut word = segments;
             write_u32(&mut word, 32, context.caches[1].bits() & !(1 << 25));
+            let mut word_context = context;
+            word_context.caches[1] =
+                SegmentCache::from_bits(context.caches[1].bits() & !(1 << 25)).unwrap();
             assert_eq!(
                 decode_current_segment_context(&word, Some(&bases)),
-                Err(AbiError::Reserved)
+                Ok(word_context)
             );
         }
     }
@@ -556,3 +563,7 @@ mod code_base_tests {
         );
     }
 }
+
+#[cfg(test)]
+#[path = "segments/modes.rs"]
+mod modes;

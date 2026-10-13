@@ -74,7 +74,7 @@ impl CodeDestination {
             return Err(CodeTransferError::GeneralProtection(0));
         }
         // decoded code retains logical offsets under its loaded CS base and D key.
-        if !record.default32() || record.long_mode() {
+        if record.long_mode() {
             return Err(CodeTransferError::UnsupportedProfile);
         }
         Ok(CodeTransfer {
