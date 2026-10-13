@@ -1,3 +1,4 @@
+import {ARENA_SIZE} from '../../../../../../support/wasm/arena.mjs';
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
 import {readFileSync, writeFileSync} from 'node:fs';
@@ -9,7 +10,7 @@ const engineBytes = readFileSync(enginePath);
 assert.ok(WebAssembly.validate(engineBytes), 'actual engine validates');
 const engineModule = new WebAssembly.Module(engineBytes);
 assert.deepEqual(WebAssembly.Module.imports(engineModule), [], 'engine has no JS imports');
-const names = ['open', 'close', 'arena_ptr', 'map', 'protect', 'unmap', 'upload', 'compile', 'compile_with_gates', 'capture_call', 'complete_call', 'abandon_call', 'generation', 'module_ptr', 'module_len', 'guard', 'read32', 'write32', 'store32', 'write_words32'];
+const names = ['open', 'close', 'arena_ptr', 'map', 'protect', 'unmap', 'upload', 'compile', 'compile_with_gates', 'capture_call', 'complete_call', 'abandon_call', 'generation', 'module_ptr', 'module_len', 'guard', 'read32', 'write32', 'store32', 'cpu_read32', 'cpu_store32', 'write_words32'];
 let keys = 0n, modules = 0, actualRuns = 0;
 const generatedHashes = [];
 
@@ -44,13 +45,13 @@ function fresh() {
   assert.equal(api.open(12, engine.low, engine.high), 0);
   engine.base = api.arena_ptr() >>> 0;
   refresh(engine);
-  assert.ok(engine.base > 0 && engine.base + 4236 <= engine.bytes.length);
+  assert.ok(engine.base > 0 && engine.base + ARENA_SIZE <= engine.bytes.length);
   assert.equal(api.map(0x1000, 1, 7), 0);
   return engine;
 }
 
 function arena(engine) {
-  return refresh(engine).bytes.slice(engine.base, engine.base + 4236);
+  return refresh(engine).bytes.slice(engine.base, engine.base + ARENA_SIZE);
 }
 
 function upload(engine, address, bytes) {
@@ -73,6 +74,11 @@ function helperRecord(tag, value = 0, detail = 0, address = 0, access = 0, lengt
   header(bytes, view, 0, 'R3MH', 40);
   [tag, value, detail, address, access, length].forEach((field, index) => view.setUint32(16 + index * 4, field, true));
   return bytes;
+}
+
+function cpuHelperRecord() {
+  const bytes = helperRecord(0), view = new DataView(bytes.buffer);
+  view.setUint16(4, 10, true); view.setUint32(36, 4, true); return bytes;
 }
 
 function guestValue(engine, address) {
@@ -112,7 +118,7 @@ function compile(engine, blocks, gates, expectedHelpers = []) {
   assert.deepEqual(sortedImports(module), expected, 'only actual memory/guard/instruction helpers; no hot gate import');
   const instance = new WebAssembly.Instance(module, {
     env: {memory: engine.memory},
-    ring3: {guard: engine.api.guard, read32: engine.api.read32, store32: engine.api.store32},
+    ring3: {guard: engine.api.guard, cpu_read32: engine.api.cpu_read32, cpu_store32: engine.api.cpu_store32},
   });
   modules++;
   generatedHashes.push(hash(encoded));
@@ -270,7 +276,7 @@ const caller = Uint8Array.from([0x6a, 0xff, 0x6a, 0, 0xff, 0x13, 0x90]);
   word(parked, 0x4000, 0x1100);
   upload(parked, 0x1000, caller);
   upload(parked, 0x1100, Uint8Array.from([0x0f, 0x0b]));
-  const child = compile(parked, [[0x1000, 6], [0x1006, 1], [0x1100, 2]], [[0x1100, gateId]], ['read32', 'store32']);
+  const child = compile(parked, [[0x1000, 6], [0x1006, 1], [0x1100, 2]], [[0x1100, gateId]], ['cpu_read32', 'cpu_store32']);
   const start = state();
   start.registers[3] = 0x4000;
   start.registers[4] = 0x9000;
@@ -278,7 +284,7 @@ const caller = Uint8Array.from([0x6a, 0xff, 0x6a, 0, 0xff, 0x13, 0x90]);
   called.registers[4] = 0x8ff4;
   called.eip = 0x1100;
   writeState(parked, start);
-  run(parked, child, 4, called, exit(8, 3, gateId), 'actual authored two-argument CALL reaches Gate', helperRecord(0));
+  run(parked, child, 4, called, exit(8, 3, gateId, 0, 0, 0, 6), 'actual authored two-argument CALL reaches Gate', cpuHelperRecord());
   const beforeCapture = arena(parked);
   assert.equal(parked.api.capture_call(parked.low, parked.high, child.generation, 2, 2), 0);
   captures++;
@@ -307,12 +313,14 @@ const caller = Uint8Array.from([0x6a, 0xff, 0x6a, 0, 0xff, 0x13, 0x90]);
   assert.deepEqual(arena(parked).slice(96), beforeComplete.slice(96), 'completion preserves batch descriptors/helper/cancel');
   const resumed = copyState(completed);
   resumed.eip = 0x1007;
-  run(parked, child, 2, resumed, exit(3, 1), 'actual caller NOP resumes once after batch and completion', arena(parked).slice(100, 140));
+  run(parked, child, 2, resumed, exit(3, 1, 0, 0, 0, 0, 6), 'actual caller NOP resumes once after batch and completion', arena(parked).slice(100, 140));
   for (const [address, value] of changedWords) assert.equal(guestValue(parked, address), value, 'completion/caller do not replay stack writes');
 }
 
 const reusedAssembly = join(root, 'engine/tests/process/calls/fixtures/p2-process-call/integer.S');
+const cpuSourcePaths=['engine/src/abi/memory_helper/cpu.rs', 'engine/src/cpu/dbt/wasm/memory/cpu_scalar.rs', 'engine/src/cpu/dbt/wasm/emitter.rs', 'engine/src/cpu/dbt/wasm/code_fetch.rs', 'engine/src/process/memory/cpu_scalar.rs', 'engine/src/process/memory/scalar/cpu_write.rs', 'engine/src/process/wasm/memory/cpu_write.rs', 'engine/src/abi/wasm/exports/memory/cpu_write.rs'];
 const provenance = {
+  cpu_source_sha256: Object.fromEntries(cpuSourcePaths.map(path => [path, hash(readFileSync(join(root, path)))])),
   engine_sha256: hash(engineBytes), generated_modules: modules, actual_engine_runs: actualRuns,
   batch_calls: batchCalls, successful_nonempty_batches: nonemptyBatches, successful_empty_batches: emptyBatches,
   rejected_batches: rejectedBatches, current_guard_checks: currentGuards, generated_guard_rejections: guardRejections,

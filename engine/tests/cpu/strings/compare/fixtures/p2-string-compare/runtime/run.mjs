@@ -16,6 +16,7 @@ const paths=["engine/src/abi/arena.rs","engine/src/cpu/x86/ir.rs","engine/src/cp
   "engine/src/cpu/x86/decode/profile.rs","engine/src/cpu/dbt/region.rs","engine/src/cpu/dbt/wasm/integer/arithmetic.rs", "engine/src/cpu/dbt/wasm/integer/bits.rs", "engine/src/cpu/dbt/wasm/integer/carry_rotates.rs", "engine/src/cpu/dbt/wasm/integer/decimal.rs", "engine/src/cpu/dbt/wasm/integer/dispatch.rs", "engine/src/cpu/dbt/wasm/integer/flags.rs", "engine/src/cpu/dbt/wasm/integer/mod.rs", "engine/src/cpu/dbt/wasm/integer/multiply_divide.rs", "engine/src/cpu/dbt/wasm/integer/operands.rs", "engine/src/cpu/dbt/wasm/integer/rotates.rs", "engine/src/cpu/dbt/wasm/integer/shifts.rs",
   "engine/src/cpu/dbt/wasm/memory.rs","engine/src/cpu/dbt/wasm/memory/narrow.rs",
   "engine/tests/cpu/strings/compare/wasm/byte.rs", "engine/tests/cpu/strings/wasm.rs", "engine/tests/support/wasm.rs", "engine/tests/cpu/strings/wasm.rs", "engine/tests/support/wasm.rs","engine/tests/cpu/strings/compare/fixtures/p2-string-compare/runtime/run.mjs","engine/tests/support/wasm/engine.mjs"];
+paths.push(...["engine/src/abi/memory_helper/cpu.rs", "engine/src/cpu/dbt/wasm/memory/cpu_scalar.rs", "engine/src/cpu/dbt/wasm/emitter.rs", "engine/src/cpu/dbt/wasm/code_fetch.rs", "engine/src/process/memory/cpu_scalar.rs", "engine/src/process/memory/scalar/cpu_write.rs", "engine/src/process/wasm/memory/cpu_write.rs", "engine/src/abi/wasm/exports/memory/cpu_write.rs"].filter(path=>!paths.includes(path)));
 const sourcePins=()=>Object.fromEntries(paths.map(path=>{const b=readFileSync(join(root,path));return [path,{bytes:b.length,sha256:hash(b)}];}));
 const sources=sourcePins(), frames=[],journal=[],modules=[],targets=[];
 const counts={profiles:0,modules:0,cmpsb:0,scasb:0,lodsb:0,jumps:0,fault_calls:0,controls:0,generated_calls:0,retired:0};
@@ -25,8 +26,9 @@ function record(magic,size,fields,version=1) {
   fields.forEach((v,i)=>b.writeUInt32LE(v>>>0,16+i*4));return b;
 }
 const state=c=>record("R3ST",56,[...c.registers,c.pc,c.flags]);
-const exit=(reason,n,detail=0,address=0)=>record("R3EX",40,[reason,n,detail,address,detail?1:0,detail?1:0],2);
+const exit=(reason,n,detail=0,address=0,version=2)=>record("R3EX",40,[reason,n,detail,address,detail?1:0,detail?1:0],version);
 const helper=(value,detail=0,address=0)=>record("R3MH",40,[detail?1:0,detail?0:value,detail,detail?address:0,detail?1:0,1],2);
+const cpuHelper=(value,detail=0,address=0)=>record("R3MH",40,[detail?1:0,detail?0:value,detail,detail?address:0,detail?1:0,1],10);
 const words=values=>Buffer.concat(values.map(v=>{const b=Buffer.alloc(4);b.writeUInt32LE(v>>>0);return b;}));
 function arena(ctx){return Buffer.from(new Uint8Array(ctx.memory.buffer,ctx.base,SIZE));}
 function capture(ctx,label){const b=arena(ctx),row={profile:ctx.profile,label,offset:frames.length*SIZE,sha256:hash(b)};frames.push(b);return row;}
@@ -41,21 +43,22 @@ function read(ctx,address,value){host(ctx,"read8",[address],helper(value));asser
 function seed(ctx,pc,flags,source=SRC,destination=DST,al=0x5a){const c={registers:[(0xa1b2c300|al)>>>0,0xb1c2d378,0x34560f10,0x4567ff00,0x56789abc,0x6789abcd,source,destination],pc,flags};
   const b=Buffer.alloc(140);b.set(state(c));b.set(exit(3,0),56);b.set(record("R3MH",40,[0,0xdecafbad,0,0,0,0]),100);input(ctx,0,b,"explicit initial CPU");return c;}
 function run(ctx,budget,label,next,reason=1,n=1,nextHelper,fault,status=0){const beforeBytes=arena(ctx),before=capture(ctx,"before generated "+label),expected=Buffer.from(beforeBytes);
-  if(status===0){expected.set(state(next));expected.set(exit(reason,n,fault?.detail,fault?.address),56);if(nextHelper)expected.set(nextHelper,100);}
+  if(status===0){expected.set(state(next));expected.set(exit(reason,n,fault?.detail,fault?.address,6),56);if(nextHelper)expected.set(nextHelper,100);}
   assert.equal(ctx.run(ctx.base,ctx.base+56,budget,ctx.base+96),status,label);assert.deepEqual(arena(ctx),expected,"full generated arena "+ctx.profile+"/"+label);
   counts.generated_calls++;counts.retired+=status===0?n:0;const row={profile:ctx.profile,type:"run",label,budget,status,reason,n,before,after:capture(ctx,"after generated "+label)};journal.push(row);return row;}
 function compare(ctx,kind,left,right,flags,label){const before=cpu(ctx),next={registers:[...before.registers],pc:(before.pc+1)>>>0,flags:flags|(before.flags&0x400)};
   const delta=before.flags&0x400?-1:1;if(kind==="cmpsb")next.registers[6]=(next.registers[6]+delta)>>>0;
   else assert.equal(before.registers[0]&255,left,"current AL is the declared left operand");next.registers[7]=(next.registers[7]+delta)>>>0;
-  const row=run(ctx,1,label,next,1,1,helper(right));counts[kind]++;targets.push({profile:ctx.profile,kind,label,left,right,expected_flags:next.flags,before:row.before,after:row.after});return next;}
+  const row=run(ctx,1,label,next,1,1,cpuHelper(right));counts[kind]++;targets.push({profile:ctx.profile,kind,label,left,right,expected_flags:next.flags,before:row.before,after:row.after});return next;}
 function load(ctx,value){const before=cpu(ctx),next={...before,registers:[...before.registers],pc:before.pc+1};
   next.registers[0]=((before.registers[0]&0xffffff00)|value)>>>0;next.registers[6]=(before.registers[6]+(before.flags&0x400?-1:1))>>>0;
-  run(ctx,1,"real LODSB supplies current AL",next,1,1,helper(value));counts.lodsb++;}
+  run(ctx,1,"real LODSB supplies current AL",next,1,1,cpuHelper(value));counts.lodsb++;}
 function jump(ctx,next){run(ctx,2,"JMP with spare budget then cold continuation",{...cpu(ctx),pc:next},3,1);counts.jumps++;}
 function open(owner,entries){const instance=new WebAssembly.Instance(engine.module,{}),ctx={owner,entries,profile:owner+"/"+(entries?"entry":"explicit"),memory:instance.exports.memory,api:{}};
   for(const name of ["open","close","arena_ptr","map","unmap","protect","upload","read8","compile","compile_entries",
     "compile_resident","compile_resident_entries","generation","module_ptr","module_len","guard","guard_resident"]){ctx.api[name]=instance.exports["ring3_abi_v1_"+name];assert.equal(typeof ctx.api[name],"function",name);}
-  assert.equal(ctx.api.open(8,1,0x51525354),0);ctx.base=ctx.api.arena_ptr()>>>0;
+  for(const name of ["read8"]) {ctx.api["cpu_"+name]=instance.exports["ring3_abi_v1_cpu_"+name];assert.equal(ctx.api["cpu_"+name]?.length,name.startsWith("read")?1:name.includes("resident")?6:2,"cpu_"+name);}
+ assert.equal(ctx.api.open(8,1,0x51525354),0);ctx.base=ctx.api.arena_ptr()>>>0;
   for(const address of [PC,0x5000,0x6000,0xfffff000,0])host(ctx,"map",[address,1,address===PC?7:3]);upload(ctx,PC,bank);
   input(ctx,140,words(entries?blocks.map(([o])=>PC+o):blocks.flatMap(([o,b])=>[PC+o,b.length])),"six compiler entries/descriptors");
   let binding;if(owner==="replacement") {host(ctx,entries?"compile_entries":"compile",entries?[6,0]:[6]);binding={generation:ctx.api.generation(),pointer:ctx.api.module_ptr()>>>0,length:ctx.api.module_len()>>>0};}
@@ -63,7 +66,7 @@ function open(owner,entries){const instance=new WebAssembly.Instance(engine.modu
     const b=arena(ctx);assert.equal(b.readUInt32LE(140),1);assert.equal(b.readUInt32LE(144),24);
     binding=Object.fromEntries(["low","high","pointer","length"].map((name,i)=>[name,b.readUInt32LE(148+i*4)]));assert.ok(binding.low&&binding.length);
     old.set(b.subarray(140,164),140);assert.deepEqual(b,old,"only declared resident receipt changes");journal.push({profile:ctx.profile,type:"host",name:"compile_resident",before,after:capture(ctx,"after resident compile")});}
-  const bytes=Buffer.from(new Uint8Array(ctx.memory.buffer,binding.pointer,binding.length)),module=new WebAssembly.Module(bytes),names=[owner==="resident"?"guard_resident":"guard","read8"];
+  const bytes=Buffer.from(new Uint8Array(ctx.memory.buffer,binding.pointer,binding.length)),module=new WebAssembly.Module(bytes),names=[owner==="resident"?"guard_resident":"guard","cpu_read8"];
   assert.deepEqual(WebAssembly.Module.imports(module),[{module:"env",name:"memory",kind:"memory"},...names.map(name=>({module:"ring3",name,kind:"function"}))]);
   assert.deepEqual(WebAssembly.Module.exports(module),[{name:"run",kind:"function"}]);ctx.run=new WebAssembly.Instance(module,{env:{memory:ctx.memory},ring3:ctx.api}).exports.run;assert.equal(ctx.run.length,4);ctx.binding=binding;
   const file="module-"+modules.length+".wasm";writeFileSync(join(output,file),bytes,{flag:"wx"});modules.push({profile:ctx.profile,file,bytes:bytes.length,sha256:hash(bytes),imports:names,...binding});counts.profiles++;counts.modules++;return ctx;}
@@ -95,7 +98,7 @@ for(const owner of ["replacement","resident"])for(const entries of [false,true])
     upload(ctx,SRC,Buffer.from([0x81]));upload(ctx,DST,Buffer.from([1]));
     if(fault.detail===2){host(ctx,"map",[page,1,3]);upload(ctx,fault.address,Buffer.from([fault.side==="source"?0x81:1]));host(ctx,"protect",[page,1,2]);}
     const entry=PC+(fault.kind==="cmpsb"?32:40),initial=seed(ctx,entry,0xcd7,source,destination,0x81),target={...initial,pc:entry+1};
-    for(let attempt=0;attempt<2;attempt++){run(ctx,attempt?1:2,"faulting read retains indices/FLAGS after NOP prefix",target,5,attempt?0:1,helper(0,fault.detail,fault.address),fault);counts.fault_calls++;}
+    for(let attempt=0;attempt<2;attempt++){run(ctx,attempt?1:2,"faulting read retains indices/FLAGS after NOP prefix",target,5,attempt?0:1,cpuHelper(0,fault.detail,fault.address),fault);counts.fault_calls++;}
     if(fault.side==="source")read(ctx,DST,1);else read(ctx,SRC,0x81);
     host(ctx,fault.detail===2?"protect":"map",[page,1,3]);upload(ctx,fault.address,Buffer.from([fault.side==="source"?0x81:1]));
     let left=0x81,right=1,expectedFlags=0x82;
@@ -104,9 +107,9 @@ for(const owner of ["replacement","resident"])for(const entries of [false,true])
     read(ctx,source,left);read(ctx,destination,right);host(ctx,"unmap",[page,1]);
   }
   const initial=seed(ctx,PC,0xcd7,0x7008,0x8008),first={detail:1,address:0x7008},second={detail:1,address:0x8008};
-  for(let attempt=0;attempt<2;attempt++){run(ctx,1,"both unmapped: explicit engine ESI-first read order",initial,5,0,helper(0,1,0x7008),first);counts.fault_calls++;}
+  for(let attempt=0;attempt<2;attempt++){run(ctx,1,"both unmapped: explicit engine ESI-first read order",initial,5,0,cpuHelper(0,1,0x7008),first);counts.fault_calls++;}
   host(ctx,"map",[0x7000,1,3]);upload(ctx,0x7008,Buffer.from([0x81]));
-  for(let attempt=0;attempt<2;attempt++){run(ctx,1,"second read fault cannot commit first byte or flags",initial,5,0,helper(0,1,0x8008),second);counts.fault_calls++;}
+  for(let attempt=0;attempt<2;attempt++){run(ctx,1,"second read fault cannot commit first byte or flags",initial,5,0,cpuHelper(0,1,0x8008),second);counts.fault_calls++;}
   host(ctx,"map",[0x8000,1,3]);upload(ctx,0x8008,Buffer.from([1]));assert.deepEqual(cpu(ctx),initial);
   compare(ctx,"cmpsb",0x81,1,0x82,"priority repair reuses current owner and EIP");host(ctx,"unmap",[0x7000,1]);host(ctx,"unmap",[0x8000,1]);
   for(const entry of [PC,PC+8]){seed(ctx,entry,2,0x9008,0xa008);run(ctx,0,"budget0 avoids reads",cpu(ctx),1,0);counts.controls++;

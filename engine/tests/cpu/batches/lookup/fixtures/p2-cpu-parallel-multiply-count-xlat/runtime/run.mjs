@@ -1,4 +1,4 @@
-import {createArena} from '../../../../../../support/wasm/arena.mjs';
+import {ARENA_SIZE, createArena} from '../../../../../../support/wasm/arena.mjs';
 import assert from "node:assert/strict";
 import {createHash} from "node:crypto";
 import {readFileSync, writeFileSync} from "node:fs";
@@ -8,7 +8,7 @@ import {readEngine} from "../../../../../../support/wasm/engine.mjs";
 const [enginePath, output, root] = process.argv.slice(2);
 assert.ok(enginePath && output && root);
 assert.match(process.env.RING3_ENGINE_SHA256 ?? "", /^[0-9a-f]{64}$/);
-const engine = readEngine(enginePath), SIZE = 4612, FP = 4236, PC = 0x1000, TABLE = 0x5000, SOURCE = 0x5100, DESTINATION = 0x6008;
+const engine = readEngine(enginePath), SIZE = ARENA_SIZE, FP = 4236, PC = 0x1000, TABLE = 0x5000, SOURCE = 0x5100, DESTINATION = 0x6008;
 assert.deepEqual(WebAssembly.Module.imports(engine.module), []);
 const program = Buffer.from("b903000000d7f626e2fbe3020f0baee1020f0beb00", "hex");
 assert.deepEqual(program, readFileSync(join(output, "parallel.x86")), "independent Rust/JS program bytes");
@@ -38,8 +38,8 @@ function host(ctx, name, ...args) {check(ctx, `before ${name}`); assert.equal(ct
 function upload(ctx, address, bytes) {input(ctx, 140, bytes); host(ctx, "upload", address, bytes.length);}
 function phase(ctx, budget, registers, pc, flags, reason, retired, readValue) {
   check(ctx, "before mixed phase"); const beforeFrame = frames.length; frames.push(arena(ctx));
-  ctx.expected.set(state(registers, pc, flags)); ctx.expected.set(exit(reason, retired), 56);
-  if (readValue !== undefined) ctx.expected.set(helper(2, readValue, 1), 100);
+  ctx.expected.set(state(registers, pc, flags)); ctx.expected.set(exit(reason, retired, 6), 56);
+  if (readValue !== undefined) ctx.expected.set(helper(10, readValue, 1), 100);
   assert.equal(ctx.run(ctx.base, ctx.base + 56, budget, ctx.base + 96), 0); check(ctx, "after mixed phase");
   frames.push(arena(ctx)); phases.push({owner: ctx.owner, budget, pc, reason, retired, before_frame: beforeFrame, after_frame: beforeFrame + 1});
 }
@@ -48,7 +48,8 @@ for (const [index, owner] of ["replacement", "resident"].entries()) {
   const instance = new WebAssembly.Instance(engine.module, {}), ctx = {owner, memory: instance.exports.memory, api: {}};
   for (const name of ["open", "close", "arena_ptr", "map", "upload", "compile", "compile_resident", "generation", "module_ptr", "module_len", "guard", "guard_resident", "read8"])
     ctx.api[name] = instance.exports["ring3_abi_v1_" + name];
-  assert.equal(ctx.api.open(3, index + 1, 0x584c4154), 0); ctx.base = ctx.api.arena_ptr() >>> 0;
+  for(const name of ["read8"]) {ctx.api["cpu_"+name]=instance.exports["ring3_abi_v1_cpu_"+name];assert.equal(ctx.api["cpu_"+name]?.length,name.startsWith("read")?1:name.includes("resident")?6:2,"cpu_"+name);}
+ assert.equal(ctx.api.open(3, index + 1, 0x584c4154), 0); ctx.base = ctx.api.arena_ptr() >>> 0;
   ctx.expected = createArena(SIZE); ctx.expected.set(state(Array(8).fill(0), 0, 2));
   ctx.expected.set(exit(1, 0, 1), 56); ctx.expected.set(helper(1, 0, 0), 100); ctx.expected.set(fpu(), FP); check(ctx, "initialized full arena");
   for (const address of [PC, TABLE, DESTINATION & ~0xfff]) host(ctx, "map", address, 1, address === PC ? 7 : 3);
@@ -64,7 +65,7 @@ for (const [index, owner] of ["replacement", "resident"].entries()) {
   }
   const bytes = Buffer.from(new Uint8Array(ctx.memory.buffer, binding.pointer, binding.length)), module = new WebAssembly.Module(bytes);
   const guard = owner === "replacement" ? "guard" : "guard_resident";
-  assert.deepEqual(WebAssembly.Module.imports(module), [{module: "env", name: "memory", kind: "memory"}, ...[guard, "read8"].map(name => ({module: "ring3", name, kind: "function"}))]);
+  assert.deepEqual(WebAssembly.Module.imports(module), [{module: "env", name: "memory", kind: "memory"}, ...[guard, "cpu_read8"].map(name => ({module: "ring3", name, kind: "function"}))]);
   ctx.run = new WebAssembly.Instance(module, {env: {memory: ctx.memory}, ring3: ctx.api}).exports.run;
   writeFileSync(join(output, `${owner}.wasm`), bytes, {flag: "wx"}); modules.push({owner, ...binding, bytes: bytes.length, sha256: hash(bytes)});
   const registers = [0xa53cab01, 0xdeadbeef, 0x23457f80, TABLE, 0x4567ff00, 0x56789abc, SOURCE, DESTINATION];
@@ -82,7 +83,8 @@ for (const [index, owner] of ["replacement", "resident"].entries()) {
 }
 const raw = Buffer.concat(frames); writeFileSync(join(output, "arenas.bin"), raw, {flag: "wx"});
 assert.equal(frames.length, 36); assert.equal(phases.reduce((sum, p) => sum + p.retired, 0), 28);
-const result = {status: "ok", engine: {bytes: engine.bytes.length, sha256: engine.sha256}, modules, phases,
+const cpuSourcePins = Object.fromEntries(["engine/src/abi/memory_helper/cpu.rs", "engine/src/cpu/dbt/wasm/memory/cpu_scalar.rs", "engine/src/cpu/dbt/wasm/emitter.rs", "engine/src/cpu/dbt/wasm/code_fetch.rs", "engine/src/process/memory/cpu_scalar.rs", "engine/src/process/memory/scalar/cpu_write.rs", "engine/src/process/wasm/memory/cpu_write.rs", "engine/src/abi/wasm/exports/memory/cpu_write.rs", "engine/tests/support/wasm/arena.mjs"].map(path=>[path,hash(readFileSync(join(root,path)))]));
+const result = {cpu_source_sha256: cpuSourcePins, status: "ok", engine: {bytes: engine.bytes.length, sha256: engine.sha256}, modules, phases,
   raw: {file: "arenas.bin", frames: frames.length, bytes: raw.length, sha256: hash(raw)},
   source_sha256: Object.fromEntries(["engine/tests/cpu/batches/lookup/wasm/products.rs", "engine/tests/cpu/batches/wasm.rs", "engine/tests/support/wasm.rs", "engine/tests/cpu/batches/wasm.rs", "engine/tests/support/wasm.rs", "engine/tests/cpu/batches/lookup/fixtures/p2-cpu-parallel-multiply-count-xlat/runtime/run.mjs", "engine/tests/support/wasm/engine.mjs"].map(path => [path, hash(readFileSync(join(root, path)))])),
   counts: {owners: 2, modules: 2, generated_calls: 18, retired: 28, xlatb: 6, byte_products: 6, loop: 6, jecxz: 2, scasb: 2, loope: 2, jumps: 2, moves: 2},

@@ -1,4 +1,4 @@
-import {createArena} from '../../../../../../support/wasm/arena.mjs';
+import {ARENA_SIZE, createArena} from '../../../../../../support/wasm/arena.mjs';
 import assert from "node:assert/strict";
 import {createHash} from "node:crypto";
 import {readFileSync, writeFileSync} from "node:fs";
@@ -8,7 +8,7 @@ import {readEngine} from "../../../../../../support/wasm/engine.mjs";
 const [enginePath, output, root] = process.argv.slice(2);
 assert.ok(enginePath && output && root);
 assert.match(process.env.RING3_ENGINE_SHA256 ?? "", /^[0-9a-f]{64}$/);
-const engine = readEngine(enginePath), SIZE = 4612, FP = 4236, PC = 0x1000, SOURCE = 0x3008, DESTINATION = 0x4008, WITNESS = 0x5008;
+const engine = readEngine(enginePath), SIZE = ARENA_SIZE, FP = 4236, PC = 0x1000, SOURCE = 0x3008, DESTINATION = 0x4008, WITNESS = 0x5008;
 assert.deepEqual(WebAssembly.Module.imports(engine.module), []);
 const program = Buffer.from("66ad66ab66ad66ab8903eb00", "hex");
 assert.equal(program.length, 12);
@@ -16,6 +16,7 @@ assert.deepEqual(program, readFileSync(join(output, "word-accumulator.x86")), "i
 writeFileSync(join(output, "engine.wasm"), engine.bytes, {flag: "wx"});
 const hash = bytes => createHash("sha256").update(bytes).digest("hex"), frames = [], phases = [], modules = [], ram = [], inputs = [], initialFrames = [];
 const paths = ["engine/tests/cpu/batches/word/wasm/accumulator.rs", "engine/tests/cpu/batches/wasm.rs", "engine/tests/support/wasm.rs", "engine/tests/cpu/batches/wasm.rs", "engine/tests/support/wasm.rs", "engine/tests/cpu/batches/word/fixtures/p2-cpu-parallel-word-accumulator/runtime/run.mjs", "engine/tests/support/wasm/engine.mjs"];
+paths.push(...["engine/src/abi/memory_helper/cpu.rs", "engine/src/cpu/dbt/wasm/memory/cpu_scalar.rs", "engine/src/cpu/dbt/wasm/emitter.rs", "engine/src/cpu/dbt/wasm/code_fetch.rs", "engine/src/process/memory/cpu_scalar.rs", "engine/src/process/memory/scalar/cpu_write.rs", "engine/src/process/wasm/memory/cpu_write.rs", "engine/src/abi/wasm/exports/memory/cpu_write.rs", "engine/tests/support/wasm/arena.mjs"].filter(path=>!paths.includes(path)));
 const sourcePins = () => Object.fromEntries(paths.map(path => [path, hash(readFileSync(join(root, path)))])), beforeSources = sourcePins();
 function record(magic, size, fields = [], version = 1) {
   const bytes = Buffer.alloc(size); bytes.write(magic); bytes.writeUInt16LE(version, 4);
@@ -26,8 +27,11 @@ const state = (registers, pc, flags) => record("R3ST", 56, [...registers, pc, fl
 const exit = (reason, retired, version = 2) => record("R3EX", 40, [reason, retired, 0, 0, 0, 0], version);
 const words32 = values => {const bytes = Buffer.alloc(values.length * 4); values.forEach((v, i) => bytes.writeUInt32LE(v >>> 0, i * 4)); return bytes;};
 const narrow = value => record("R3MH", 40, [0, value, 0, 0, 0, 2], 2);
+const cpuNarrow = value => record("R3MH", 40, [0, value, 0, 0, 0, 2], 10);
 const wordStore = () => record("R3MH", 40, [0, 0, 0, 0, 0, 2], 4);
+const cpuWordStore = () => record("R3MH", 40, [0, 0, 0, 0, 0, 2], 10);
 const dwordStore = () => record("R3MH", 40, [0, 0, 0, 0, 0, 0]);
+const cpuDwordStore = () => record("R3MH", 40, [0, 0, 0, 0, 0, 4], 10);
 function fpu(opaque = false) {
   const bytes = record("R3FP", 128); bytes.writeUInt16LE(opaque ? 0x27f : 0x37f, 16);
   bytes.writeUInt16LE(opaque ? 0x81a5 : 0, 18); bytes.writeUInt16LE(opaque ? 0x55aa : 0xffff, 20);
@@ -51,7 +55,7 @@ function upload(ctx, address, bytes, label) {
 }
 function phase(ctx, label, budget, registers, pc, flags, reason, retired, helper) {
   check(ctx, `before ${label}`); const beforeFrame = frames.length; frames.push(arena(ctx));
-  ctx.expected.set(state(registers, pc, flags)); ctx.expected.set(exit(reason, retired), 56);
+  ctx.expected.set(state(registers, pc, flags)); ctx.expected.set(exit(reason, retired, 6), 56);
   if (helper !== undefined) ctx.expected.set(helper, 100);
   assert.equal(ctx.run(ctx.base, ctx.base + 56, budget, ctx.base + 96), 0); check(ctx, `after ${label}`);
   frames.push(arena(ctx)); phases.push({context: ctx.context, owner: ctx.owner, direction: ctx.direction, label, budget, before_frame: beforeFrame, after_frame: beforeFrame + 1, retired, reason});
@@ -62,7 +66,8 @@ for (const owner of ["replacement", "resident"]) for (const direction of ["forwa
   const instance = new WebAssembly.Instance(engine.module, {}), ctx = {owner, direction, context, memory: instance.exports.memory, api: {}, started: false};
   for (const name of ["open", "close", "arena_ptr", "map", "protect", "upload", "compile", "compile_resident", "generation", "module_ptr", "module_len", "guard", "guard_resident", "read8", "read16", "store16", "store_resident16", "store32", "store_resident32"])
     ctx.api[name] = instance.exports["ring3_abi_v1_" + name];
-  assert.equal(ctx.api.open(4, context + 1, 0x574f5244), 0); ctx.base = ctx.api.arena_ptr() >>> 0;
+  for(const name of ["read16", "read8", "store16", "store32", "store_resident16", "store_resident32"]) {ctx.api["cpu_"+name]=instance.exports["ring3_abi_v1_cpu_"+name];assert.equal(ctx.api["cpu_"+name]?.length,name.startsWith("read")?1:name.includes("resident")?6:2,"cpu_"+name);}
+ assert.equal(ctx.api.open(4, context + 1, 0x574f5244), 0); ctx.base = ctx.api.arena_ptr() >>> 0;
   ctx.expected = createArena(SIZE); ctx.expected.set(state(Array(8).fill(0), 0, 2));
   ctx.expected.set(exit(1, 0, 1), 56); ctx.expected.set(dwordStore(), 100); ctx.expected.set(fpu(), FP); check(ctx, "initialized full arena");
   for (const address of [PC, SOURCE & ~0xfff, DESTINATION & ~0xfff, WITNESS & ~0xfff]) host(ctx, "map", address, 1, address === PC ? 7 : 3);
@@ -80,18 +85,18 @@ for (const owner of ["replacement", "resident"]) for (const direction of ["forwa
     ctx.expected.set(words32([1, 24, binding.low, binding.high, binding.pointer, binding.length]), 140); check(ctx, "resident receipt only");
   }
   const bytes = Buffer.from(new Uint8Array(ctx.memory.buffer, binding.pointer, binding.length)), module = new WebAssembly.Module(bytes);
-  const guard = owner === "replacement" ? "guard" : "guard_resident", store32 = owner === "replacement" ? "store32" : "store_resident32", store16 = owner === "replacement" ? "store16" : "store_resident16";
-  assert.deepEqual(WebAssembly.Module.imports(module), [{module: "env", name: "memory", kind: "memory"}, ...[guard, store32, "read16", store16].map(name => ({module: "ring3", name, kind: "function"}))]);
+  const guard = owner === "replacement" ? "guard" : "guard_resident", store32 = owner === "replacement" ? "cpu_store32" : "cpu_store_resident32", store16 = owner === "replacement" ? "cpu_store16" : "cpu_store_resident16";
+  assert.deepEqual(WebAssembly.Module.imports(module), [{module: "env", name: "memory", kind: "memory"}, ...[guard, store32, "cpu_read16", store16].map(name => ({module: "ring3", name, kind: "function"}))]);
   ctx.run = new WebAssembly.Instance(module, {env: {memory: ctx.memory}, ring3: ctx.api}).exports.run;
   const file = `${owner}-${direction}.wasm`; writeFileSync(join(output, file), bytes, {flag: "wx"}); modules.push({context, owner, direction, file, ...binding, bytes: bytes.length, sha256: hash(bytes)});
   const registers = [0xa53c5678, 0x91b2c378, 0x34560f10, WITNESS, 0x4567ff00, 0x56789abc, source, pointer], flags = reverse ? 0xcd7 : 0x8d7;
   input(ctx, 0, state(registers, PC, flags), "single initial CPU seed"); input(ctx, FP, fpu(true), "opaque FP128 seed");
   initialFrames.push({context, frame: frames.length}); ctx.started = true; const inputCount = inputs.length;
-  registers[0] = 0xa53c00ff; registers[6] += step; phase(ctx, "first LODSW", 1, registers, PC + 2, flags, 1, 1, narrow(0x00ff));
-  registers[7] += step; phase(ctx, "first STOSW consumes loaded AX", 1, registers, PC + 4, flags, 1, 1, wordStore());
-  registers[0] = 0xa53c8001; registers[6] += step; phase(ctx, "second current LODSW", 1, registers, PC + 6, flags, 1, 1, narrow(0x8001));
-  registers[7] += step; phase(ctx, "second STOSW consumes current AX", 1, registers, PC + 8, flags, 1, 1, wordStore());
-  phase(ctx, "DWORD witness consumes full preserved EAX", 1, registers, PC + 10, flags, 1, 1, dwordStore());
+  registers[0] = 0xa53c00ff; registers[6] += step; phase(ctx, "first LODSW", 1, registers, PC + 2, flags, 1, 1, cpuNarrow(0x00ff));
+  registers[7] += step; phase(ctx, "first STOSW consumes loaded AX", 1, registers, PC + 4, flags, 1, 1, cpuWordStore());
+  registers[0] = 0xa53c8001; registers[6] += step; phase(ctx, "second current LODSW", 1, registers, PC + 6, flags, 1, 1, cpuNarrow(0x8001));
+  registers[7] += step; phase(ctx, "second STOSW consumes current AX", 1, registers, PC + 8, flags, 1, 1, cpuWordStore());
+  phase(ctx, "DWORD witness consumes full preserved EAX", 1, registers, PC + 10, flags, 1, 1, cpuDwordStore());
   phase(ctx, "cold JMP", 2, registers, PC + 12, flags, 3, 1);
   assert.equal(inputs.length, inputCount, "retained phases have no host CPU/RAM input");
   const destination = Buffer.from(reverse ? [0x31, 0x01, 0x80, 0xff, 0x00, 0xd7] : [0x31, 0xff, 0x00, 0x01, 0x80, 0xd7]);

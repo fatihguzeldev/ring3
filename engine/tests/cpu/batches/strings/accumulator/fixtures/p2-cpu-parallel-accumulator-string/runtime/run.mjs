@@ -1,4 +1,4 @@
-import {createArena} from '../../../../../../../support/wasm/arena.mjs';
+import {ARENA_SIZE, createArena} from '../../../../../../../support/wasm/arena.mjs';
 import assert from "node:assert/strict";
 import {createHash} from "node:crypto";
 import {readFileSync, writeFileSync} from "node:fs";
@@ -8,10 +8,11 @@ import {readEngine} from "../../../../../../../support/wasm/engine.mjs";
 const [enginePath, output, root] = process.argv.slice(2);
 assert.ok(enginePath && output && root);
 assert.match(process.env.RING3_ENGINE_SHA256 ?? "", /^[0-9a-f]{64}$/);
-const engine = readEngine(enginePath), SIZE = 4612, FP = 4236, PC = 0x1000, SOURCE = 0x3008, DESTINATION = 0x4008;
+const engine = readEngine(enginePath), SIZE = ARENA_SIZE, FP = 4236, PC = 0x1000, SOURCE = 0x3008, DESTINATION = 0x4008;
 assert.deepEqual(WebAssembly.Module.imports(engine.module), []);
 const hash = bytes => createHash("sha256").update(bytes).digest("hex"), frames = [], phases = [], modules = [], ram = [];
 const paths = ["engine/tests/cpu/batches/strings/accumulator/wasm/dword.rs", "engine/tests/cpu/batches/wasm.rs", "engine/tests/support/wasm.rs", "engine/tests/cpu/batches/wasm.rs", "engine/tests/support/wasm.rs", "engine/tests/cpu/batches/strings/accumulator/fixtures/p2-cpu-parallel-accumulator-string/runtime/run.mjs", "engine/tests/support/wasm/engine.mjs"];
+paths.push(...["engine/src/abi/memory_helper/cpu.rs", "engine/src/cpu/dbt/wasm/memory/cpu_scalar.rs", "engine/src/cpu/dbt/wasm/emitter.rs", "engine/src/cpu/dbt/wasm/code_fetch.rs", "engine/src/process/memory/cpu_scalar.rs", "engine/src/process/memory/scalar/cpu_write.rs", "engine/src/process/wasm/memory/cpu_write.rs", "engine/src/abi/wasm/exports/memory/cpu_write.rs", "engine/tests/support/wasm/arena.mjs"].filter(path=>!paths.includes(path)));
 const sourcePins = () => Object.fromEntries(paths.map(path => [path, hash(readFileSync(join(root, path)))])), beforeSources = sourcePins();
 function record(magic, size, fields = [], version = 1) {
   const bytes = Buffer.alloc(size); bytes.write(magic); bytes.writeUInt16LE(version, 4);
@@ -21,6 +22,7 @@ function record(magic, size, fields = [], version = 1) {
 const state = (registers, pc, flags) => record("R3ST", 56, [...registers, pc, flags]);
 const exit = (reason, retired, version = 2) => record("R3EX", 40, [reason, retired, 0, 0, 0, 0], version);
 const helper = value => record("R3MH", 40, [0, value, 0, 0, 0, 0]);
+const cpuHelper = value => record("R3MH", 40, [0, value, 0, 0, 0, 4], 10);
 const words = values => {const bytes = Buffer.alloc(values.length * 4); values.forEach((v, i) => bytes.writeUInt32LE(v >>> 0, i * 4)); return bytes;};
 function fpu(opaque = false) {
   const bytes = record("R3FP", 128); bytes.writeUInt16LE(opaque ? 0x27f : 0x37f, 16);
@@ -38,8 +40,8 @@ function host(ctx, name, ...args) {check(ctx, `before ${name}`); assert.equal(ct
 function upload(ctx, address, bytes) {input(ctx, 140, bytes); host(ctx, "upload", address, bytes.length);}
 function phase(ctx, budget, registers, pc, flags, reason, retired, readValue) {
   check(ctx, "before phase"); const beforeFrame = frames.length; frames.push(arena(ctx));
-  ctx.expected.set(state(registers, pc, flags)); ctx.expected.set(exit(reason, retired), 56);
-  if (readValue !== undefined) ctx.expected.set(helper(readValue), 100);
+  ctx.expected.set(state(registers, pc, flags)); ctx.expected.set(exit(reason, retired, 6), 56);
+  if (readValue !== undefined) ctx.expected.set(cpuHelper(readValue), 100);
   assert.equal(ctx.run(ctx.base, ctx.base + 56, budget, ctx.base + 96), 0); check(ctx, "after phase");
   frames.push(arena(ctx)); phases.push({context: ctx.context, owner: ctx.owner, direction: ctx.direction, budget, pc, flags, reason, retired, before_frame: beforeFrame, after_frame: beforeFrame + 1});
 }
@@ -51,7 +53,8 @@ for (const owner of ["replacement", "resident"]) for (const direction of ["forwa
   const instance = new WebAssembly.Instance(engine.module, {}), ctx = {owner, direction, context, memory: instance.exports.memory, api: {}};
   for (const name of ["open", "close", "arena_ptr", "map", "upload", "compile", "compile_resident", "generation", "module_ptr", "module_len", "guard", "guard_resident", "read8", "read32", "store32", "store_resident32"])
     ctx.api[name] = instance.exports["ring3_abi_v1_" + name];
-  assert.equal(ctx.api.open(3, context + 1, 0x41434353), 0); ctx.base = ctx.api.arena_ptr() >>> 0;
+  for(const name of ["read32", "read8", "store32", "store_resident32"]) {ctx.api["cpu_"+name]=instance.exports["ring3_abi_v1_cpu_"+name];assert.equal(ctx.api["cpu_"+name]?.length,name.startsWith("read")?1:name.includes("resident")?6:2,"cpu_"+name);}
+ assert.equal(ctx.api.open(3, context + 1, 0x41434353), 0); ctx.base = ctx.api.arena_ptr() >>> 0;
   ctx.expected = createArena(SIZE); ctx.expected.set(state(Array(8).fill(0), 0, 2));
   ctx.expected.set(exit(1, 0, 1), 56); ctx.expected.set(helper(0), 100); ctx.expected.set(fpu(), FP); check(ctx, "initialized full arena");
   for (const address of [PC, SOURCE & ~0xfff, DESTINATION & ~0xfff]) host(ctx, "map", address, 1, address === PC ? 7 : 3);
@@ -69,8 +72,8 @@ for (const owner of ["replacement", "resident"]) for (const direction of ["forwa
     ctx.expected.set(words([1, 24, binding.low, binding.high, binding.pointer, binding.length]), 140); check(ctx, "resident receipt only");
   }
   const bytes = Buffer.from(new Uint8Array(ctx.memory.buffer, binding.pointer, binding.length)), module = new WebAssembly.Module(bytes);
-  const guard = owner === "replacement" ? "guard" : "guard_resident", store = owner === "replacement" ? "store32" : "store_resident32";
-  assert.deepEqual(WebAssembly.Module.imports(module), [{module: "env", name: "memory", kind: "memory"}, ...[guard, "read32", store].map(name => ({module: "ring3", name, kind: "function"}))]);
+  const guard = owner === "replacement" ? "guard" : "guard_resident", store = owner === "replacement" ? "cpu_store32" : "cpu_store_resident32";
+  assert.deepEqual(WebAssembly.Module.imports(module), [{module: "env", name: "memory", kind: "memory"}, ...[guard, "cpu_read32", store].map(name => ({module: "ring3", name, kind: "function"}))]);
   ctx.run = new WebAssembly.Instance(module, {env: {memory: ctx.memory}, ring3: ctx.api}).exports.run;
   const file = `${owner}-${direction}.wasm`; writeFileSync(join(output, file), bytes, {flag: "wx"}); modules.push({context, owner, direction, file, ...binding, bytes: bytes.length, sha256: hash(bytes)});
   const registers = [0xa53c0011, 31, 0xa53cabcd, 0x3456789a, 0x4567ff00, 0x56789abc, source, pointer], initialFlags = reverse ? 0xcd7 : 0x8d7, comparisonFlags = reverse ? 0x446 : 0x46;

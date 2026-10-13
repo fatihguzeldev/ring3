@@ -1,4 +1,4 @@
-import {createArena} from '../../../../../../../support/wasm/arena.mjs';
+import {ARENA_SIZE, createArena} from '../../../../../../../support/wasm/arena.mjs';
 import assert from "node:assert/strict";
 import {createHash} from "node:crypto";
 import {readFileSync, writeFileSync} from "node:fs";
@@ -8,7 +8,7 @@ import {readEngine} from "../../../../../../../support/wasm/engine.mjs";
 const [enginePath, output, root] = process.argv.slice(2);
 assert.ok(enginePath && output && root);
 assert.match(process.env.RING3_ENGINE_SHA256 ?? "", /^[0-9a-f]{64}$/);
-const engine = readEngine(enginePath), SIZE = 4612, FP = 4236, PC = 0x1000, TABLE = 0x4008;
+const engine = readEngine(enginePath), SIZE = ARENA_SIZE, FP = 4236, PC = 0x1000, TABLE = 0x4008;
 assert.deepEqual(WebAssembly.Module.imports(engine.module), []);
 const program = Buffer.from("66a566a70f90c166af0f92c2b800803ca566af0f94c3eb00", "hex");
 assert.equal(program.length, 24);
@@ -16,6 +16,7 @@ assert.deepEqual(program, readFileSync(join(output, "word-move-compare.x86")), "
 writeFileSync(join(output, "engine.wasm"), engine.bytes, {flag: "wx"});
 const hash = bytes => createHash("sha256").update(bytes).digest("hex"), frames = [], phases = [], modules = [], ram = [], inputs = [], hosts = [], initialFrames = [];
 const paths = ["engine/tests/cpu/batches/strings/compare/wasm/word.rs", "engine/tests/cpu/batches/wasm.rs", "engine/tests/support/wasm.rs", "engine/tests/cpu/batches/wasm.rs", "engine/tests/support/wasm.rs", "engine/tests/cpu/batches/strings/compare/fixtures/p2-cpu-parallel-word-move-compare/runtime/run.mjs", "engine/tests/support/wasm/engine.mjs"];
+paths.push(...["engine/src/abi/memory_helper/cpu.rs", "engine/src/cpu/dbt/wasm/memory/cpu_scalar.rs", "engine/src/cpu/dbt/wasm/emitter.rs", "engine/src/cpu/dbt/wasm/code_fetch.rs", "engine/src/process/memory/cpu_scalar.rs", "engine/src/process/memory/scalar/cpu_write.rs", "engine/src/process/wasm/memory/cpu_write.rs", "engine/src/abi/wasm/exports/memory/cpu_write.rs", "engine/tests/support/wasm/arena.mjs"].filter(path=>!paths.includes(path)));
 const sourcePins = () => Object.fromEntries(paths.map(path => [path, hash(readFileSync(join(root, path)))])), beforeSources = sourcePins();
 function record(magic, size, fields = [], version = 1) {
   const bytes = Buffer.alloc(size); bytes.write(magic); bytes.writeUInt16LE(version, 4);
@@ -26,7 +27,9 @@ const state = (registers, pc, flags) => record("R3ST", 56, [...registers, pc, fl
 const exit = (reason, retired, version = 2) => record("R3EX", 40, [reason, retired, 0, 0, 0, 0], version);
 const words32 = values => {const bytes = Buffer.alloc(values.length * 4); values.forEach((v, i) => bytes.writeUInt32LE(v >>> 0, i * 4)); return bytes;};
 const narrow = (value, width = 2) => record("R3MH", 40, [0, value, 0, 0, 0, width], 2);
+const cpuNarrow = (value, width = 2) => record("R3MH", 40, [0, value, 0, 0, 0, width], 10);
 const wordStore = () => record("R3MH", 40, [0, 0, 0, 0, 0, 2], 4);
+const cpuWordStore = () => record("R3MH", 40, [0, 0, 0, 0, 0, 2], 10);
 const freshHelper = () => record("R3MH", 40, [0, 0, 0, 0, 0, 0]);
 function fpu(opaque = false) {
   const bytes = record("R3FP", 128); bytes.writeUInt16LE(opaque ? 0x27f : 0x37f, 16);
@@ -54,7 +57,7 @@ function upload(ctx, address, bytes, label) {
 }
 function phase(ctx, label, budget, registers, pc, flags, reason, retired, helper) {
   check(ctx, `before ${label}`); const beforeFrame = frames.length; frames.push(arena(ctx));
-  ctx.expected.set(state(registers, pc, flags)); ctx.expected.set(exit(reason, retired), 56);
+  ctx.expected.set(state(registers, pc, flags)); ctx.expected.set(exit(reason, retired, 6), 56);
   if (helper !== undefined) ctx.expected.set(helper, 100);
   const args = [ctx.base, ctx.base + 56, budget, ctx.base + 96], status = ctx.run(...args); assert.equal(status, 0); check(ctx, `after ${label}`);
   frames.push(arena(ctx)); phases.push({context: ctx.context, owner: ctx.owner, direction: ctx.direction, label, args, status, budget, before_frame: beforeFrame, after_frame: beforeFrame + 1, retired, reason});
@@ -65,7 +68,8 @@ for (const owner of ["replacement", "resident"]) for (const direction of ["forwa
   const instance = new WebAssembly.Instance(engine.module, {}), ctx = {owner, direction, context, memory: instance.exports.memory, api: {}, started: false};
   for (const name of ["open", "close", "arena_ptr", "map", "protect", "upload", "compile", "compile_resident", "generation", "module_ptr", "module_len", "guard", "guard_resident", "read8", "read16", "store16", "store_resident16"])
     ctx.api[name] = instance.exports["ring3_abi_v1_" + name];
-  assert.equal(ctx.api.open(2, context + 1, 0x574d4353), 0); ctx.base = ctx.api.arena_ptr() >>> 0;
+  for(const name of ["read16", "read8", "store16", "store_resident16"]) {ctx.api["cpu_"+name]=instance.exports["ring3_abi_v1_cpu_"+name];assert.equal(ctx.api["cpu_"+name]?.length,name.startsWith("read")?1:name.includes("resident")?6:2,"cpu_"+name);}
+ assert.equal(ctx.api.open(2, context + 1, 0x574d4353), 0); ctx.base = ctx.api.arena_ptr() >>> 0;
   ctx.expected = createArena(SIZE); ctx.expected.set(state(Array(8).fill(0), 0, 2));
   ctx.expected.set(exit(1, 0, 1), 56); ctx.expected.set(freshHelper(), 100); ctx.expected.set(fpu(), FP); check(ctx, "initialized full arena");
   for (const address of [PC, TABLE & ~0xfff]) host(ctx, "map", address, 1, address === PC ? 7 : 3);
@@ -82,20 +86,20 @@ for (const owner of ["replacement", "resident"]) for (const direction of ["forwa
     ctx.expected.set(words32([1, 24, binding.low, binding.high, binding.pointer, binding.length]), 140); check(ctx, "resident receipt only");
   }
   const bytes = Buffer.from(new Uint8Array(ctx.memory.buffer, binding.pointer, binding.length)), module = new WebAssembly.Module(bytes);
-  const guard = owner === "replacement" ? "guard" : "guard_resident", store16 = owner === "replacement" ? "store16" : "store_resident16";
-  assert.deepEqual(WebAssembly.Module.imports(module), [{module: "env", name: "memory", kind: "memory"}, ...[guard, "read16", store16].map(name => ({module: "ring3", name, kind: "function"}))]);
+  const guard = owner === "replacement" ? "guard" : "guard_resident", store16 = owner === "replacement" ? "cpu_store16" : "cpu_store_resident16";
+  assert.deepEqual(WebAssembly.Module.imports(module), [{module: "env", name: "memory", kind: "memory"}, ...[guard, "cpu_read16", store16].map(name => ({module: "ring3", name, kind: "function"}))]);
   ctx.run = new WebAssembly.Instance(module, {env: {memory: ctx.memory}, ring3: ctx.api}).exports.run;
   const file = `${owner}-${direction}.wasm`; writeFileSync(join(output, file), bytes, {flag: "wx"}); modules.push({context, owner, direction, arena_base: ctx.base, key_low: context + 1, key_high: 0x574d4353, file, ...binding, bytes: bytes.length, sha256: hash(bytes)});
   const registers = [0xa53c7fff, 0x91b2c378, 0x34560f10, 0x82345678, 0x4567ff00, 0x56789abc, source, pointer], df = reverse ? 0x400 : 0;
   input(ctx, 0, state(registers, PC, 0x8d7 | df), "single initial CPU seed"); input(ctx, FP, fpu(true), "opaque FP128 seed");
   initialFrames.push({context, frame: frames.length}); ctx.started = true; const inputCount = inputs.length, hostCount = hosts.length;
-  registers[6] += step; registers[7] += step; phase(ctx, "MOVSW current RAM transfer", 1, registers, PC + 2, 0x8d7 | df, 1, 1, wordStore());
-  registers[6] += step; registers[7] += step; phase(ctx, "CMPSW consumes MOVSW-written 8000 minus 0001", 1, registers, PC + 4, 0x816 | df, 1, 1, narrow(1));
+  registers[6] += step; registers[7] += step; phase(ctx, "MOVSW current RAM transfer", 1, registers, PC + 2, 0x8d7 | df, 1, 1, cpuWordStore());
+  registers[6] += step; registers[7] += step; phase(ctx, "CMPSW consumes MOVSW-written 8000 minus 0001", 1, registers, PC + 4, 0x816 | df, 1, 1, cpuNarrow(1));
   registers[1] = 0x91b2c301; phase(ctx, "SETO CL consumes word overflow", 1, registers, PC + 7, 0x816 | df, 1, 1);
-  registers[7] += step; phase(ctx, "SCASW 7fff minus 8000", 1, registers, PC + 9, 0x887 | df, 1, 1, narrow(0x8000));
+  registers[7] += step; phase(ctx, "SCASW 7fff minus 8000", 1, registers, PC + 9, 0x887 | df, 1, 1, cpuNarrow(0x8000));
   registers[2] = 0x34560f01; phase(ctx, "SETB DL consumes word borrow", 1, registers, PC + 12, 0x887 | df, 1, 1);
   registers[0] = 0xa53c8000; phase(ctx, "guest MOV EAX changes current AX", 1, registers, PC + 17, 0x887 | df, 1, 1);
-  registers[7] += step; phase(ctx, "SCASW current AX equality", 1, registers, PC + 19, 0x46 | df, 1, 1, narrow(0x8000));
+  registers[7] += step; phase(ctx, "SCASW current AX equality", 1, registers, PC + 19, 0x46 | df, 1, 1, cpuNarrow(0x8000));
   registers[3] = 0x82345601; phase(ctx, "SETZ BL consumes word equality", 1, registers, PC + 22, 0x46 | df, 1, 1);
   phase(ctx, "cold JMP", 2, registers, PC + 24, 0x46 | df, 3, 1);
   assert.equal(inputs.length, inputCount, "retained phases have no host CPU/RAM input"); assert.equal(hosts.length, hostCount, "no interphase host diagnostics");

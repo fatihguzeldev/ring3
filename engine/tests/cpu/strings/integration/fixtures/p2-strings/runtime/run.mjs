@@ -19,6 +19,7 @@ const sourcePaths = ["engine/src/abi/arena.rs", "engine/src/cpu/x86/ir.rs", "eng
   "engine/src/cpu/dbt/wasm/memory/narrow.rs", "engine/src/cpu/dbt/wasm/memory/byte_store.rs",
   "engine/tests/cpu/strings/integration/wasm/byte.rs", "engine/tests/cpu/strings/wasm.rs", "engine/tests/support/wasm.rs", "engine/tests/cpu/strings/integration/fixtures/p2-strings/runtime/run.mjs",
   "engine/tests/support/wasm/engine.mjs"];
+sourcePaths.push(...["engine/src/abi/memory_helper/cpu.rs", "engine/src/cpu/dbt/wasm/memory/cpu_scalar.rs", "engine/src/cpu/dbt/wasm/emitter.rs", "engine/src/cpu/dbt/wasm/code_fetch.rs", "engine/src/process/memory/cpu_scalar.rs", "engine/src/process/memory/scalar/cpu_write.rs", "engine/src/process/wasm/memory/cpu_write.rs", "engine/src/abi/wasm/exports/memory/cpu_write.rs"].filter(path=>!sourcePaths.includes(path)));
 const sourcePins = () => Object.fromEntries(sourcePaths.map(path => {
   const bytes = readFileSync(join(root, path)); return [path, { bytes: bytes.length, sha256: hash(bytes) }];
 }));
@@ -31,9 +32,11 @@ function record(magic, size, fields, version = 1) {
   fields.forEach((value, index) => bytes.writeUInt32LE(value >>> 0, 16 + index * 4)); return bytes;
 }
 const state = cpu => record("R3ST", 56, [...cpu.registers, cpu.pc, cpu.flags]);
-const exit = (reason, count, detail = 0, address = 0, access = 0) =>
-  record("R3EX", 40, [reason, count, detail, address, access, access ? 1 : 0], 2);
+const exit = (reason, count, detail = 0, address = 0, access = 0, version = 2) =>
+  record("R3EX", 40, [reason, count, detail, address, access, access ? 1 : 0], version);
 const helper = (version, value = 0, detail = 0, address = 0, access = 0) =>
+  record("R3MH", 40, [detail ? 1 : 0, detail ? 0 : value, detail, detail ? address : 0, access, 1], version);
+const cpuHelper = (version, value = 0, detail = 0, address = 0, access = 0) =>
   record("R3MH", 40, [detail ? 1 : 0, detail ? 0 : value, detail, detail ? address : 0, access, 1], version);
 const words = values => Buffer.concat(values.map(value => { const bytes = Buffer.alloc(4); bytes.writeUInt32LE(value >>> 0); return bytes; }));
 function arena(ctx) { return Buffer.from(new Uint8Array(ctx.memory.buffer, ctx.base, SIZE)); }
@@ -70,7 +73,7 @@ function run(ctx, budget, label, expectedCPU, reason = 1, count = 1, expectedHel
   const beforeBytes = arena(ctx), before = capture(ctx, "before generated " + label);
   const expected = Buffer.from(beforeBytes);
   if (status === 0) {
-    expected.set(state(expectedCPU)); expected.set(exit(reason,count, fault?.detail, fault?.address, fault?.access),56);
+    expected.set(state(expectedCPU)); expected.set(exit(reason,count, fault?.detail, fault?.address, fault?.access,6),56);
     if (expectedHelper) expected.set(expectedHelper,100);
   }
   assert.equal(ctx.run(ctx.base,ctx.base+56,budget,ctx.base+96),status,label);
@@ -87,7 +90,7 @@ function copy(ctx, label, value, reason = 1) {
   assert.equal(read(ctx,before.registers[6]),value,"source byte matches declared upload input");
   const next = {registers:[...before.registers],pc:(before.pc+1)>>>0,flags:before.flags};
   next.registers[6] = (next.registers[6] + delta)>>>0; next.registers[7] = (next.registers[7] + delta)>>>0;
-  const row = run(ctx,1,label,next,reason,1,helper(3)); copies++;
+  const row = run(ctx,1,label,next,reason,1,cpuHelper(10)); copies++;
   assert.equal(read(ctx,before.registers[7]),value,"physical destination byte");
   cases.push({owner:ctx.owner,label,before,next,value,run:row}); return next;
 }
@@ -96,7 +99,8 @@ function open(owner, ordinal) {
   for (const name of ["open","close","arena_ptr","map","unmap","protect","upload","read8","compile",
     "compile_resident","generation","module_ptr","module_len","guard","guard_resident","store8","store_resident8"])
     ctx.api[name] = instance.exports["ring3_abi_v1_"+name];
-  assert.equal(ctx.api.open(8,ordinal,0x51525354),0); ctx.base = ctx.api.arena_ptr()>>>0;
+  for(const name of ["read8", "store8", "store_resident8"]) {ctx.api["cpu_"+name]=instance.exports["ring3_abi_v1_cpu_"+name];assert.equal(ctx.api["cpu_"+name]?.length,name.startsWith("read")?1:name.includes("resident")?6:2,"cpu_"+name);}
+ assert.equal(ctx.api.open(8,ordinal,0x51525354),0); ctx.base = ctx.api.arena_ptr()>>>0;
   for (const address of [PC,SRC,DST,0xfffff000,0]) host(ctx,"map",[address,1,address === PC ? 7 : 3]);
   upload(ctx,PC,bank);
   input(ctx,140,words([PC,3,PC+16,3,PC+32,3,PC+48,6]),"four compiler block descriptors");
@@ -108,8 +112,8 @@ function open(owner, ordinal) {
     binding = Object.fromEntries(["low","high","pointer","length"].map((name,i)=>[name,receipt.readUInt32LE(148+i*4)]));
   }
   const bytes = Buffer.from(new Uint8Array(ctx.memory.buffer,binding.pointer,binding.length));
-  const module = new WebAssembly.Module(bytes), names = owner === "replacement" ? ["guard","read8","store8"]
-    : ["guard_resident","read8","store_resident8"];
+  const module = new WebAssembly.Module(bytes), names = owner === "replacement" ? ["guard","cpu_read8","cpu_store8"]
+    : ["guard_resident","cpu_read8","cpu_store_resident8"];
   assert.deepEqual(WebAssembly.Module.imports(module),[{module:"env",name:"memory",kind:"memory"},
     ...names.map(name=>({module:"ring3",name,kind:"function"}))]);
   ctx.run = new WebAssembly.Instance(module,{env:{memory:ctx.memory},ring3:ctx.api}).exports.run;
@@ -150,7 +154,7 @@ for (const [index,owner] of ["replacement","resident"].entries()) {
     if (fault.access === 1 && fault.destination === DST+8) upload(ctx,DST+8,Buffer.from([0x5a]));
     const before = seed(ctx,PC,0xcd7,fault.source,fault.destination);
     for (let attempt = 0; attempt < 2; attempt++) run(ctx,1,"fault then retained CPU retry",before,5,0,
-      helper(fault.access === 1 ? 2 : 3,0,fault.detail,fault.address,fault.access),fault);
+      cpuHelper(10,0,fault.detail,fault.address,fault.access),fault);
     if (fault.access === 1 && fault.destination === DST+8)
       assert.equal(read(ctx,DST+8),0x5a,"both failed source reads leave mapped destination sentinel unchanged");
     if (fault.permission) host(ctx,"protect",[fault.address&~0xfff,1,3]);

@@ -1,4 +1,4 @@
-import {createArena} from '../../../../../../support/wasm/arena.mjs';
+import {ARENA_SIZE, createArena} from '../../../../../../support/wasm/arena.mjs';
 import assert from "node:assert/strict";
 import {createHash} from "node:crypto";
 import {readFileSync, writeFileSync} from "node:fs";
@@ -8,7 +8,7 @@ import {readEngine} from "../../../../../../support/wasm/engine.mjs";
 const [enginePath, output, root] = process.argv.slice(2);
 assert.ok(enginePath && output && root);
 assert.match(process.env.RING3_ENGINE_SHA256 ?? "", /^[0-9a-f]{64}$/);
-const engine = readEngine(enginePath), SIZE = 4612, FP = 4236, PC = 0x1000, SRC = 0x5008, DST = 0x6008;
+const engine = readEngine(enginePath), SIZE = ARENA_SIZE, FP = 4236, PC = 0x1000, SRC = 0x5008, DST = 0x6008;
 const program = Buffer.from("dfe0b905000000ba00000000f7f1fda4fcdbe3dfe0eb00", "hex");
 assert.deepEqual(program, readFileSync(join(output, "parallel.x86")), "independent Rust/JS program bytes");
 const hash = bytes => createHash("sha256").update(bytes).digest("hex"), frames = [], phases = [], modules = [];
@@ -37,7 +37,7 @@ function host(ctx, name, ...args) {check(ctx, `before ${name}`); assert.equal(ct
 function upload(ctx, address, bytes) {input(ctx, 140, bytes); host(ctx, "upload", address, bytes.length);}
 function phase(ctx, budget, registers, pc, reason, retired, nextFP, nextHelper) {
   check(ctx, "before mixed phase"); const beforeFrame = frames.length; frames.push(arena(ctx));
-  ctx.expected.set(state(registers, pc, 2)); ctx.expected.set(exit(reason, retired), 56);
+  ctx.expected.set(state(registers, pc, 2)); ctx.expected.set(exit(reason, retired, 6), 56);
   if (nextFP) ctx.expected.set(nextFP, FP); if (nextHelper) ctx.expected.set(nextHelper, 100);
   assert.equal(ctx.run(ctx.base, ctx.base + 56, budget, ctx.base + 96), 0); check(ctx, "after mixed phase");
   frames.push(arena(ctx)); phases.push({owner: ctx.owner, budget, pc, reason, retired, before_frame: beforeFrame, after_frame: beforeFrame + 1});
@@ -46,7 +46,8 @@ for (const [index, owner] of ["replacement", "resident"].entries()) {
   const instance = new WebAssembly.Instance(engine.module, {}), ctx = {owner, memory: instance.exports.memory, api: {}};
   for (const name of ["open", "close", "arena_ptr", "map", "upload", "read8", "compile", "compile_resident", "generation", "module_ptr", "module_len", "guard", "guard_resident", "store8", "store_resident8"])
     ctx.api[name] = instance.exports["ring3_abi_v1_" + name];
-  assert.equal(ctx.api.open(3, index + 1, 0x51525354), 0); ctx.base = ctx.api.arena_ptr() >>> 0;
+  for(const name of ["read8", "store8", "store_resident8"]) {ctx.api["cpu_"+name]=instance.exports["ring3_abi_v1_cpu_"+name];assert.equal(ctx.api["cpu_"+name]?.length,name.startsWith("read")?1:name.includes("resident")?6:2,"cpu_"+name);}
+ assert.equal(ctx.api.open(3, index + 1, 0x51525354), 0); ctx.base = ctx.api.arena_ptr() >>> 0;
   ctx.expected = createArena(SIZE); ctx.expected.set(state(Array(8).fill(0), 0, 2));
   ctx.expected.set(exit(1, 0, 1), 56); ctx.expected.set(helper(1, 0, 0), 100); ctx.expected.set(fpu(true, Buffer.alloc(80)), FP); check(ctx, "initialized full arena");
   for (const address of [PC, SRC & ~0xfff, DST & ~0xfff]) host(ctx, "map", address, 1, address === PC ? 7 : 3);
@@ -61,7 +62,7 @@ for (const [index, owner] of ["replacement", "resident"].entries()) {
     ctx.expected.set(words([1, 24, binding.low, binding.high, binding.pointer, binding.length]), 140); check(ctx, "resident receipt only");
   }
   const bytes = Buffer.from(new Uint8Array(ctx.memory.buffer, binding.pointer, binding.length)), module = new WebAssembly.Module(bytes);
-  const names = owner === "replacement" ? ["guard", "read8", "store8"] : ["guard_resident", "read8", "store_resident8"];
+  const names = owner === "replacement" ? ["guard", "cpu_read8", "cpu_store8"] : ["guard_resident", "cpu_read8", "cpu_store_resident8"];
   assert.deepEqual(WebAssembly.Module.imports(module), [{module: "env", name: "memory", kind: "memory"}, ...names.map(name => ({module: "ring3", name, kind: "function"}))]);
   ctx.run = new WebAssembly.Instance(module, {env: {memory: ctx.memory}, ring3: ctx.api}).exports.run;
   writeFileSync(join(output, `${owner}.wasm`), bytes, {flag: "wx"}); modules.push({owner, ...binding, bytes: bytes.length, sha256: hash(bytes)});
@@ -70,14 +71,15 @@ for (const [index, owner] of ["replacement", "resident"].entries()) {
   registers[0] = 3; registers[1] = 5; registers[2] = 2;
   phase(ctx, 4, registers, PC + 14, 1, 4);
   registers[6]--; registers[7]--;
-  phase(ctx, 3, registers, PC + 17, 1, 3, undefined, helper(3, 0, 1));
+  phase(ctx, 3, registers, PC + 17, 1, 3, undefined, helper(10, 0, 1));
   registers[0] = 0;
   phase(ctx, 4, registers, PC + 23, 3, 3, fpu(true));
   check(ctx, "before destination diagnostic"); assert.equal(ctx.api.read8(DST), 0);
   ctx.expected.set(helper(2, 0x81, 1), 100); check(ctx, "declared destination byte 81"); host(ctx, "close");
 }
 const raw = Buffer.concat(frames); writeFileSync(join(output, "arenas.bin"), raw, {flag: "wx"});
-const result = {status: "ok", engine: {bytes: engine.bytes.length, sha256: engine.sha256}, modules, phases,
+const cpuSourcePins = Object.fromEntries(["engine/src/abi/memory_helper/cpu.rs", "engine/src/cpu/dbt/wasm/memory/cpu_scalar.rs", "engine/src/cpu/dbt/wasm/emitter.rs", "engine/src/cpu/dbt/wasm/code_fetch.rs", "engine/src/process/memory/cpu_scalar.rs", "engine/src/process/memory/scalar/cpu_write.rs", "engine/src/process/wasm/memory/cpu_write.rs", "engine/src/abi/wasm/exports/memory/cpu_write.rs", "engine/tests/support/wasm/arena.mjs"].map(path=>[path,hash(readFileSync(join(root,path)))]));
+const result = {cpu_source_sha256: cpuSourcePins, status: "ok", engine: {bytes: engine.bytes.length, sha256: engine.sha256}, modules, phases,
   raw: {file: "arenas.bin", frames: frames.length, bytes: raw.length, sha256: hash(raw)},
   source_sha256: Object.fromEntries(["engine/tests/cpu/batches/integration/wasm/core.rs", "engine/tests/cpu/batches/wasm.rs", "engine/tests/support/wasm.rs", "engine/tests/cpu/batches/wasm.rs", "engine/tests/support/wasm.rs", "engine/tests/cpu/batches/integration/fixtures/p2-cpu-parallel/runtime/run.mjs", "engine/tests/support/wasm/engine.mjs"].map(path => [path, hash(readFileSync(join(root, path)))])),
   counts: {owners: 2, modules: 2, generated_calls: 6, retired: 20, copies: 2},
