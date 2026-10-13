@@ -314,7 +314,7 @@ while(at<input.length) {
   const mixed=input[at++], resident=input[at++], length=input.readUInt32LE(at); at+=4;
   const bytes=input.subarray(at,at+length); at+=length;
   assert.ok(WebAssembly.validate(bytes)); const module=new WebAssembly.Module(bytes);
-  const names=[resident?'guard_resident':'guard',...(mixed?['read8','read16',resident?'store_resident8':'store8']:[]),resident?'store_resident16':'store16'];
+  const names=[resident?'guard_resident':'guard',...(mixed?['cpu_read8','cpu_read16',resident?'cpu_store_resident8':'cpu_store8']:[]),resident?'cpu_store_resident16':'cpu_store16'];
   assert.deepEqual(WebAssembly.Module.imports(module),[{module:'env',name:'memory',kind:'memory'},...names.map(name=>({module:'ring3',name,kind:'function'}))]);
   assert.deepEqual(WebAssembly.Module.exports(module),[{name:'run',kind:'function'}]); count++;
 }

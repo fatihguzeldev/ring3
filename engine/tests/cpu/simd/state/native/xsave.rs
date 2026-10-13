@@ -362,7 +362,8 @@ fn xstate_alignment_header_read_and_late_write_faults_are_atomic() {
     engine.cpu_xsave(0x2e00, 0, 0).unwrap();
     assert_packet(&engine, 1, 2, 0x3000, 1);
     engine.cpu_xsave(0xffff_fe00, 0, 0).unwrap();
-    assert_packet(&engine, 1, 3, 0xffff_fe00, 1);
+    // the selected header starts at (FFFFFE00 + 512) mod2^32 = 0.
+    assert_packet(&engine, 1, 1, 0, 1);
 }
 
 #[test]

@@ -6,8 +6,8 @@ fn current_arena_appends_a_strict_zero_upper_record_without_moving_legacy_state(
     let arena = engine.arena();
     assert_eq!(
         arena.len(),
-        4756,
-        "current arena includes complete upper state"
+        4796,
+        "current arena includes complete upper state and segment base companion"
     );
     assert_eq!(&arena[4364..4368], b"R3SV");
     assert_eq!(&arena[4524..4528], b"R3SG");
@@ -16,6 +16,10 @@ fn current_arena_appends_a_strict_zero_upper_record_without_moving_legacy_state(
     assert_eq!(&arena[4616..4620], &[1, 0, 1, 0]);
     assert_eq!(&arena[4620..4624], &144_u32.to_le_bytes());
     assert!(arena[4624..4756].iter().all(|byte| *byte == 0));
+    assert_eq!(&arena[4756..4760], b"R3SB");
+    assert_eq!(&arena[4760..4764], &[1, 0, 1, 0]);
+    assert_eq!(&arena[4764..4768], &40_u32.to_le_bytes());
+    assert!(arena[4768..4796].iter().all(|byte| *byte == 0));
 }
 
 #[test]

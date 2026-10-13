@@ -314,7 +314,7 @@ while(at<input.length) {
   const mixed=input[at++], resident=input[at++], length=input.readUInt32LE(at); at+=4;
   const bytes=input.subarray(at,at+length); at+=length;
   assert.ok(WebAssembly.validate(bytes)); const module=new WebAssembly.Module(bytes);
-  const names=[resident?'guard_resident':'guard',...(mixed?['read8','read16',resident?'store_resident8':'store8']:[]),resident?'store_resident16':'store16'];
+  const names=[resident?'guard_resident':'guard',...(mixed?['cpu_read8','cpu_read16',resident?'cpu_store_resident8':'cpu_store8']:[]),resident?'cpu_store_resident16':'cpu_store16'];
   assert.deepEqual(WebAssembly.Module.imports(module),[{module:'env',name:'memory',kind:'memory'},...names.map(name=>({module:'ring3',name,kind:'function'}))]);
   assert.deepEqual(WebAssembly.Module.exports(module),[{name:'run',kind:'function'}]); count++;
 }
@@ -403,7 +403,7 @@ function record(magic,size,fields=[],version=1) {
 const success=[0,0,0,0,0,2], fault=[1,0,1,0x5008,2,2], infra=[2,0,1,0,0,2];
 const rows=[];
 function add(label,fields,reason,detail=0,address=0,access=0,length=0,status=0,ea=0x5008,retired=0,change) {
-  const packet=record('R3MH',40,fields,4); if(change)change(packet);
+  const packet=record('R3MH',40,fields,10); if(change)change(packet);
   rows.push({label,packet,reason,detail,address,access,length,status,ea,retired});
 }
 add('success',success,1,0,0,0,0,0,0x5008,1);
@@ -412,11 +412,11 @@ add('top valid two-byte success',success,1,0,0,0,0,0,0xfffffffe,1);
 add('first-byte fault',fault,5,1,0x5008,2,2);
 add('second-byte permission fault',[1,0,2,0x5009,2,2],5,2,0x5009,2,2);
 add('top nonoverflow second-byte fault',[1,0,2,0xffffffff,2,2],5,2,0xffffffff,2,2,0,0xfffffffe);
-add('overflow fault',[1,0,3,0xffffffff,2,2],5,3,0xffffffff,2,2,0,0xffffffff);
+add('AddressOverflow is invalid CPU reply',[1,0,3,0xffffffff,2,2],7,2,0,0,0,0,0xffffffff);
 add('version exhaustion',infra,7,1);
 add('helper rejected',[2,0,2,0,0,2],7,3);
 for(const [label,offset,value,width] of [
-  ['magic',0,0,4],['old version3',4,3,2],['profile',6,2,2],['size',8,39,4],['reserved',12,1,4],
+  ['magic',0,0,4],['old version3',4,3,2],['old word version4',4,4,2],['profile',6,2,2],['size',8,39,4],['reserved',12,1,4],
   ['value',20,1,4],['width1',36,1,4],['width4',36,4,4],['success detail',24,1,4],
   ['success address',28,0x5008,4],['success access',32,2,4],['unknown result',16,3,4]
 ])add(label,success,7,2,0,0,0,0,0x5008,0,b=>width===2?b.writeUInt16LE(value,offset):b.writeUInt32LE(value,offset));
@@ -424,22 +424,24 @@ for(const [label,fields,status,ea] of [
   ['detail0',[1,0,0,0x5008,2,2],0,0x5008],['detail4',[1,0,4,0x5008,2,2],0,0x5008],
   ['read access',[1,0,1,0x5008,1,2],0,0x5008],['before span',[1,0,1,0x5007,2,2],0,0x5008],
   ['after span',[1,0,1,0x500a,2,2],0,0x5008],['wrapped zero near top',[1,0,1,0,2,2],0,0xfffffffe],
-  ['nonoverflow claim at overflowing start',[1,0,1,0xffffffff,2,2],0,0xffffffff],
   ['overflow claim at valid start',[1,0,3,0xfffffffe,2,2],0,0xfffffffe],
   ['overflow wrong point',[1,0,3,0,2,2],0,0xffffffff],['status11 fault',fault,11,0x5008],
   ['status11 infra',infra,11,0x5008],['infra address',[2,0,1,0x5008,0,2],0,0x5008],
   ['infra access',[2,0,1,0,2,2],0,0x5008],['infra detail0',[2,0,0,0,0,2],0,0x5008],
-  ['infra detail3',[2,0,3,0,0,2],0,0x5008],['forged success overflows',success,0,0xffffffff]
+  ['infra detail3',[2,0,3,0,0,2],0,0x5008]
 ])add(label,fields,7,2,0,0,0,status,ea);
+add('nonoverflow fault at translated wrapping start',[1,0,1,0xffffffff,2,2],5,1,0xffffffff,2,2,0,0xffffffff);
+add('translated linear wrap success',success,1,0,0,0,0,0,0xffffffff,1);
+add('translated low-leg fault',[1,0,1,0,2,2],5,1,0,2,2,0,0xffffffff);
 add('host status9',success,7,3,0,0,0,9);
-assert.equal(rows.length,38);
+assert.equal(rows.length,40);
 let at=0, modules=0, checks=0;
 while(at<input.length) {
   const resident=input[at++], size=input.readUInt32LE(at); at+=4;
   const module=new WebAssembly.Module(input.subarray(at,at+size)); at+=size; modules++;
   for(const row of rows) {
     const memory=new WebAssembly.Memory({initial:1}), bytes=new Uint8Array(memory.buffer), base=128;
-    // a valid logical FS span can still overflow its linear address, reaching the packet validator.
+    // a valid logical FS span may cross linear 4GiB; only CPU v10 modular replies apply.
     const regs=[(row.ea-0x1000)>>>0,0x12345678,0x23456789,0x3456789a,0x456789ab,0x56789abc,0x6789abcd,0x789abcde];
     bytes.set(record('R3ST',56,[...regs,0x1000,0xcd7]),base);
     bytes.set(record('R3EX',40,[3,0,0,0,0,0]),base+56);
@@ -452,14 +454,14 @@ while(at<input.length) {
     bytes.set(segments,base+4524);
     const before=Buffer.from(bytes), expected=Buffer.from(before); let calls=0;
     const store=(...args)=>{calls++; const [address,value]=args.slice(resident?4:0); assert.equal(address>>>0,row.ea); assert.equal(value,0x81a5); bytes.set(row.packet,base+100); return row.status;};
-    const run=new WebAssembly.Instance(module,{env:{memory},ring3:resident?{guard_resident:()=>0,store_resident16:store}:{guard:()=>0,store16:store}}).exports.run;
+    const run=new WebAssembly.Instance(module,{env:{memory},ring3:resident?{guard_resident:()=>0,cpu_store_resident16:store}:{guard:()=>0,cpu_store16:store}}).exports.run;
     expected.set(row.packet,base+100); expected.writeUInt32LE(row.retired?0x1003:0x1000,base+48);
-    expected.set(record('R3EX',40,[row.reason,row.retired,row.detail,row.address,row.access,row.length],2),base+56);
+    expected.set(record('R3EX',40,[row.reason,row.retired,row.detail,row.address,row.access,row.length],6),base+56);
     assert.equal(run(base,base+56,1,base+96),0,row.label); assert.equal(calls,1,row.label);
     assert.deepEqual(Buffer.from(bytes),expected,`${resident}/${row.label}: exact memory/CPU/FPU publication`); checks++;
   }
 }
-assert.equal(modules,2); assert.equal(checks,76);
+assert.equal(modules,2); assert.equal(checks,80);
 "#]).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped()).spawn().unwrap();
     child.stdin.take().unwrap().write_all(&input).unwrap();
     let result = child.wait_with_output().unwrap();
