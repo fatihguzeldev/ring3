@@ -1,3 +1,4 @@
+import {ARENA_SIZE, createArena} from '../../../../../../../support/wasm/arena.mjs';
 import assert from 'node:assert/strict';
 import {execFileSync} from 'node:child_process';
 import {createHash} from 'node:crypto';
@@ -13,7 +14,7 @@ const oracleBytes = readFileSync(join(fixture, 'oracle.json')), oracle = JSON.pa
 const source = readFileSync(join(fixture, 'program.S'));
 assert.equal(hash(oracleBytes), '4fd46b27eaec764a712444c95ccd4d7069b012a4d3e9b439be9ba1c3f6ed8f41');
 assert.equal(hash(source), 'ba80dae0d9305e4d8f7da32b3e8f7635e5391a1b9ba14ca9cca30ee3b3e7f230');
-const size = 4612, transfer = 140, bytes = hex => new Uint8Array(Buffer.from(hex, 'hex'));
+const size = ARENA_SIZE, transfer = 140, bytes = hex => new Uint8Array(Buffer.from(hex, 'hex'));
 const artifacts = {}, identities = [], observations = [];
 
 function authoredText(object) {
@@ -49,7 +50,7 @@ function authoredText(object) {
   return text;
 }
 function childLocals(module) {
-  let at=8;
+  let at=8, keyGlobals=false;
   const unsigned=()=>{
     let value=0,shift=0;
     for(let index=0;index<5;index++) {
@@ -62,11 +63,15 @@ function childLocals(module) {
   while(at<module.length) {
     const id=module[at++],length=unsigned(),end=at+length;
     assert.ok(end<=module.length);
+    if(id===6) {
+      assert.deepEqual([...module.subarray(at,end)], [3,0x7f,0,0x41,1,0x0b,0x7f,0,0x41,0,0x0b,0x7f,0,0x41,1,0x0b], 'exact immutable flat bound decode key'); keyGlobals=true;
+    }
     if(id===10) {
+      assert.equal(keyGlobals,true,'bound child retains exact key globals before code');
       assert.equal(unsigned(),1);const bodyLength=unsigned(),bodyEnd=at+bodyLength;
       assert.equal(bodyEnd,end);const count=unsigned(),locals=[];
       for(let index=0;index<count;index++)locals.push([unsigned(),module[at++]]);
-      assert.deepEqual(locals,[[16, 0x7f], [1, 0x7e], [10, 0x7f]]);
+      assert.deepEqual(locals,[[16, 0x7f], [1, 0x7e], [10, 0x7f], [1, 0x7f]]);
       return locals;
     }
     at=end;
@@ -82,6 +87,7 @@ writeFileSync(join(outputDir,'program.x86'),text);writeFileSync(join(outputDir,'
 writeFileSync(join(outputDir,'authored-oracle.json'),oracleBytes);writeFileSync(join(outputDir,'runtime/run.mjs'),readFileSync(import.meta.filename));
 const production=execFileSync('rg',['--files','engine/src'],{cwd:root,encoding:'utf8'}).trim().split('\n').sort();
 const paths=[...production,'Cargo.toml','engine/Cargo.toml','Cargo.lock','engine/tests/cpu/shifts/single/register/wasm/dword.rs', 'engine/tests/cpu/shifts/wasm.rs', 'engine/tests/support/wasm.rs', 'engine/tests/cpu/shifts/single/register/fixtures/p2-shift/program.S','engine/tests/cpu/shifts/single/register/fixtures/p2-shift/oracle.json','engine/tests/cpu/shifts/single/register/fixtures/p2-shift/runtime/run.mjs'];
+paths.push('engine/tests/support/wasm/arena.mjs');
 const sources=Object.fromEntries(paths.map(path=>[path,hash(readFileSync(join(root,path)))]));
 writeFileSync(join(outputDir,'source-sha256.json'),JSON.stringify(sources,null,2));
 const engineBytes=readFileSync(enginePath);writeFileSync(join(outputDir,'engine.wasm'),engineBytes);
@@ -102,7 +108,7 @@ function arena() {return refresh().bytes.slice(engine.base,engine.base+size);}
 function operation(label,action,status=0,patches=[]) {
   const expected=arena();for(const [offset,value] of patches)expected.set(value,offset);
   assert.equal(action(),status,engine.name+'/'+label+': status');
-  assert.deepEqual(arena(),expected,engine.name+'/'+label+': whole4236');
+  assert.deepEqual(arena(),expected,engine.name+'/'+label+': whole4796');
 }
 function cancel(value) {refresh().view.setUint32(engine.base+96,value,true);}
 function fresh(owner,label) {
@@ -116,6 +122,10 @@ function fresh(owner,label) {
   assert.ok(engine.memory instanceof WebAssembly.Memory);assert.equal(api.open(1,engine.low,engine.high),0);
   engine.base=api.arena_ptr()>>>0;refresh();assert.ok(engine.base>0&&engine.base+size<=engine.bytes.length);
   engine.bytes.fill(0xa5,engine.base+100,engine.base+size);
+  // Explicit valid flat input for bound code preparation; opaque FP/helper/TRANSFER sentinels stay declared.
+  const flat=createArena(ARENA_SIZE);
+  engine.bytes.set(flat.subarray(4524,4588),engine.base+4524);
+  engine.bytes.set(flat.subarray(4756,4796),engine.base+4756);
   operation('map authored instruction page',()=>api.map(0x1000,1,7));
   refresh().bytes.set(text,engine.base+transfer);operation('upload authored646 bytes',()=>api.upload(0x1000,text.length));
   operation('protect RX',()=>api.protect(0x1000,1,5));
@@ -205,7 +215,7 @@ const provenance={engine_sha256:hash(engineBytes),oracle_sha256:hash(oracleBytes
   engine_exports:WebAssembly.Module.exports(engineModule),artifacts,sources,identities,observations,
   command:[process.execPath,process.argv[1],enginePath,outputDir,root],assembly_command:['clang',...assemble],
   tools:{node:process.version,v8:process.versions.v8,clang:execFileSync('clang',['--version'],{encoding:'utf8'}).split('\n')[0]},
-  claim:'independent authored646-byte register-only32 shift corpus; replacement and resident direct guard-only children retain16i32+1i64 locals. Two different guest chains retire11/13, real ADD flags survive three masked-zero shifts and CF/OF Jcc skips wrong canaries; six alias-chain shifts expose one-bit flags/original lowCL and signedfloor. Thirty finite cases×DFboth prove all9canonical forms/all8GPR destinations/count0,1,2,31,32,33,255/raw33OF1/fullzero flags and distinct untouched GPRsentinels. Full4236 raw output and exact literal State/Exit/opaquehelper publication at all split/budget/cancel/NeedCode stops. One explicit initial context per fresh case; no positive resumed CPU/CL/flags/EIP patch, JS arithmetic/interpreter/helper interception or RAMhelper. Only deliberate negative permission change tests retained snapshot4 and terminalclose5; no fresh replacement-generation confusion. Actual fullu64 receipts/key and dynamictransfer bytes preserved. NonzeroAF0 and OF0/k>1 are declared Ring3 choices, not portablehardware guarantees. No memoryshift/lowwidth/rotate/LOCK/optimize/browser/performance/PE/provider/SDK/game/fullP2-V0 claim.'};
+  claim:'independent authored646-byte register-only32 shift corpus; replacement and resident direct guard-only children retain16i32+1i64+10i32+1i32 localgroups and three immutableflatkeyglobals. Two different guest chains retire11/13, real ADD flags survive three masked-zero shifts and CF/OF Jcc skips wrong canaries; six alias-chain shifts expose one-bit flags/original lowCL and signedfloor. Thirty finite cases×DFboth prove all9canonical forms/all8GPR destinations/count0,1,2,31,32,33,255/raw33OF1/fullzero flags and distinct untouched GPRsentinels. Full4796 raw output and exact literal State/Exit/opaquehelper publication at all split/budget/cancel/NeedCode stops. One explicit initial context per fresh case; no positive resumed CPU/CL/flags/EIP patch, JS arithmetic/interpreter/helper interception or RAMhelper. Only deliberate negative permission change tests retained snapshot4 and terminalclose5; no fresh replacement-generation confusion. Actual fullu64 receipts/key and dynamictransfer bytes preserved. NonzeroAF0 and OF0/k>1 are declared Ring3 choices, not portablehardware guarantees. No memoryshift/lowwidth/rotate/LOCK/optimize/browser/performance/PE/provider/SDK/game/fullP2-V0 claim.'};
 writeFileSync(join(outputDir,'provenance.json'),JSON.stringify(provenance,null,2));
 console.log(JSON.stringify({status:'ok',engine_sha256:provenance.engine_sha256,oracle_sha256:provenance.oracle_sha256,
   owners:oracle.owners,programmes:4,finite_cases:30,finite_DF_variants:60,generated_children:identities.length,observations:observations.length,

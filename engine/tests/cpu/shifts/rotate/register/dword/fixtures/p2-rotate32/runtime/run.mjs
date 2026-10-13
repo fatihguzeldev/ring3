@@ -1,4 +1,4 @@
-import {createArena} from '../../../../../../../../support/wasm/arena.mjs';
+import {ARENA_SIZE, createArena} from '../../../../../../../../support/wasm/arena.mjs';
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
 import {readFileSync, readdirSync, writeFileSync} from 'node:fs';
@@ -10,7 +10,7 @@ assert.ok(root, 'expected actual engine Wasm, output directory and repository ro
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
 const {bytes: engineBytes, module: engineModule, sha256: engineSha256} = readEngine(enginePath);
 assert.deepEqual(WebAssembly.Module.imports(engineModule), []);
-const SIZE = 4612, TRANSFER = 140, PC = 0x1000, COLD = PC + 128;
+const SIZE = ARENA_SIZE, TRANSFER = 140, PC = 0x1000, COLD = PC + 128;
 const OWNERS = ['standalone', 'replacement', 'resident'], FLAGS = [2, 0xcd7], KINDS = ['left', 'right'];
 const REG = [0x12345678, 0x23456789, 0x3456789a, 0x456789ab, 0x56789abc, 0x6789abcd, 0x789abcde, 0x89abcdef];
 const VALUES = [0x80000001, 0x12345600, 0, 0xffffffff, 0xaaaaaaaa, 0x55555555, 0x80000000, 1];
@@ -118,6 +118,7 @@ assert.equal(chapter.length, source.chapter_bytes); assert.equal(hash(chapter), 
 const sourcePaths = ['engine/src/cpu/x86/ir.rs', 'engine/src/cpu/x86/decode/integer.rs', 'engine/src/cpu/dbt/region.rs', 'engine/src/cpu/dbt/wasm/integer/arithmetic.rs', 'engine/src/cpu/dbt/wasm/integer/bits.rs', 'engine/src/cpu/dbt/wasm/integer/carry_rotates.rs', 'engine/src/cpu/dbt/wasm/integer/decimal.rs', 'engine/src/cpu/dbt/wasm/integer/dispatch.rs', 'engine/src/cpu/dbt/wasm/integer/flags.rs', 'engine/src/cpu/dbt/wasm/integer/mod.rs', 'engine/src/cpu/dbt/wasm/integer/multiply_divide.rs', 'engine/src/cpu/dbt/wasm/integer/operands.rs', 'engine/src/cpu/dbt/wasm/integer/rotates.rs', 'engine/src/cpu/dbt/wasm/integer/shifts.rs',
   'engine/tests/cpu/shifts/rotate/register/one/dword/native.rs', 'engine/tests/cpu/shifts/native.rs', 'engine/tests/support/cpu/prefix/admission.rs', 'engine/tests/cpu/shifts/rotate/immediate/one/dword/native.rs', 'engine/tests/cpu/shifts/rotate/immediate/one/dword/fixtures/p2-rotate-immediate-one/runtime/run.mjs',
   'engine/tests/cpu/shifts/rotate/register/dword/native/counts.rs', 'engine/tests/cpu/shifts/rotate/register/dword/wasm/counts.rs', 'engine/tests/cpu/shifts/wasm.rs', 'engine/tests/support/wasm.rs', 'engine/tests/cpu/shifts/rotate/register/dword/fixtures/p2-rotate32/runtime/run.mjs', 'engine/tests/support/wasm/engine.mjs'];
+sourcePaths.push(...['engine/src/cpu/dbt/wasm/emitter.rs', 'engine/src/cpu/dbt/wasm/code_fetch.rs', 'engine/tests/support/wasm/arena.mjs'].filter(path => !sourcePaths.includes(path)));
 assert.equal(new Set(sourcePaths).size, sourcePaths.length);
 const sourceIdentities = () => Object.fromEntries(sourcePaths.map(path => {const bytes = readFileSync(join(root, path)); return [path, {bytes: bytes.length, sha256: hash(bytes)}];}));
 const sourcePins = sourceIdentities();
@@ -127,7 +128,7 @@ function profile(bytes, owner) {
     if (!(byte & 128)) {assert.ok(value <= 0xffffffff); return value;} scale *= 128;} assert.fail('invalid bounded unsigned LEB');};
   const text = () => {const n = uleb(); assert.ok(at + n <= bytes.length); const value = bytes.subarray(at, at + n).toString('utf8'); at += n; return value;};
   const sections = new Map(); while (at < bytes.length) {const id = bytes[at++], n = uleb(); assert.ok(at + n <= bytes.length && !sections.has(id)); sections.set(id, [at, at + n]); at += n;}
-  assert.deepEqual([...sections.keys()], [1, 2, 3, 7, 10]); const section = id => {at = sections.get(id)[0];}, ended = id => assert.equal(at, sections.get(id)[1]);
+  assert.deepEqual([...sections.keys()], [1, 2, 3, 6, 7, 10]); const section = id => {at = sections.get(id)[0];}, ended = id => assert.equal(at, sections.get(id)[1]);
   section(1); const types = []; for (let i = 0, n = uleb(); i < n; i++) {assert.equal(bytes[at++], 0x60); const parameters = [], results = [];
     for (let j = 0, n = uleb(); j < n; j++) parameters.push(bytes[at++]); for (let j = 0, n = uleb(); j < n; j++) results.push(bytes[at++]); types.push({parameters, results});} ended(1);
   const standalone = owner === 'standalone'; assert.deepEqual(types, [{parameters: Array(4).fill(0x7f), results: [0x7f]},
@@ -135,9 +136,14 @@ function profile(bytes, owner) {
   section(2); assert.equal(uleb(), standalone ? 1 : 2); assert.equal(text(), 'env'); assert.equal(text(), 'memory'); assert.equal(bytes[at++], 2); assert.equal(uleb(), 0); assert.equal(uleb(), 1);
   if (!standalone) {assert.equal(text(), 'ring3'); assert.equal(text(), owner === 'replacement' ? 'guard' : 'guard_resident'); assert.equal(bytes[at++], 0); assert.equal(uleb(), 1);} ended(2);
   section(3); assert.equal(uleb(), 1); assert.equal(uleb(), 0); ended(3);
+  section(6);
+  assert.deepEqual([...bytes.subarray(at, sections.get(6)[1])],
+    [3, 0x7f, 0, 0x41, owner === 'standalone' ? 0 : 1, 0x0b, 0x7f, 0, 0x41, 0, 0x0b, 0x7f, 0, 0x41, 1, 0x0b],
+    'exact immutable flat decode key: bound, CS.base0, default32');
+  at = sections.get(6)[1]; ended(6);
   section(7); assert.equal(uleb(), 1); assert.equal(text(), 'run'); assert.equal(bytes[at++], 0); assert.equal(uleb(), standalone ? 0 : 1); ended(7);
   section(10); assert.equal(uleb(), 1); const bodyBytes = uleb(), end = at + bodyBytes; assert.equal(end, sections.get(10)[1]); const locals = [];
-  for (let i = 0, n = uleb(); i < n; i++) locals.push([uleb(), bytes[at++]]); assert.deepEqual(locals, [[16, 0x7f], [1, 0x7e], [10, 0x7f]]); assert.ok(at < end); assert.equal(bytes[end - 1], 0x0b);
+  for (let i = 0, n = uleb(); i < n; i++) locals.push([uleb(), bytes[at++]]); assert.deepEqual(locals, owner === 'standalone' ? [[16, 0x7f], [1, 0x7e], [10, 0x7f]] : [[16, 0x7f], [1, 0x7e], [10, 0x7f], [1, 0x7f]]); assert.ok(at < end); assert.equal(bytes[end - 1], 0x0b);
   return {types, locals, body_bytes: bodyBytes, sections: [...sections.keys()]};
 }
 function record(magic, size, fields) {const bytes = Buffer.alloc(size); bytes.write(magic); bytes.writeUInt16LE(1, 4); bytes.writeUInt16LE(1, 6); bytes.writeUInt32LE(size, 8);

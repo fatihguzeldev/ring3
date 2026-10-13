@@ -1,4 +1,4 @@
-import {createArena} from '../../../../../../../support/wasm/arena.mjs';
+import {ARENA_SIZE, createArena} from '../../../../../../../support/wasm/arena.mjs';
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
 import {readFileSync, readdirSync, writeFileSync} from 'node:fs';
@@ -10,7 +10,7 @@ assert.ok(root, 'expected actual engine Wasm, output directory and repository ro
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
 const {bytes: engineBytes, module: engineModule, sha256: engineSha256} = readEngine(enginePath);
 assert.deepEqual(WebAssembly.Module.imports(engineModule), []);
-const SIZE = 4612, TRANSFER = 140, PC = 0x1000, COLD = PC + 128;
+const SIZE = ARENA_SIZE, TRANSFER = 140, PC = 0x1000, COLD = PC + 128;
 const OWNERS = ['replacement', 'resident'], FLAGS = [2, 0xcd7], VALID_SEEDS = [...FLAGS, 0x42, 0x402];
 const IMMEDIATE_EDGES = [0, 1, 31, 32, 33, 64, 128, 255];
 const REGISTER_EDGES = [...IMMEDIATE_EDGES, 0xffffffff, 0x8000001f], ALIAS_INPUTS = [0, 1, 2, 3, 4, 0x8000001f];
@@ -133,6 +133,7 @@ const chapter = chapterBytes(...source.chapter_lines); assert.equal(chapter.leng
 source.saved_chapter = artifact('intel-bit-test.txt', chapter);
 const sourcePaths = ['engine/tests/cpu/bits_flags/test/register/native/dword.rs', 'engine/tests/cpu/bits_flags/native.rs', 'engine/tests/support/cpu/prefix/admission.rs', 'engine/tests/cpu/bits_flags/test/register/wasm/dword.rs', 'engine/tests/cpu/bits_flags/wasm.rs', 'engine/tests/support/wasm.rs', 'engine/tests/cpu/bits_flags/test/register/fixtures/p2-bit-test32/runtime/run.mjs',
   'engine/tests/support/wasm/engine.mjs', 'engine/src/cpu/x86/ir.rs', 'engine/src/cpu/x86/decode/integer.rs', 'engine/src/cpu/dbt/region.rs', 'engine/src/cpu/dbt/wasm/integer/arithmetic.rs', 'engine/src/cpu/dbt/wasm/integer/bits.rs', 'engine/src/cpu/dbt/wasm/integer/carry_rotates.rs', 'engine/src/cpu/dbt/wasm/integer/decimal.rs', 'engine/src/cpu/dbt/wasm/integer/dispatch.rs', 'engine/src/cpu/dbt/wasm/integer/flags.rs', 'engine/src/cpu/dbt/wasm/integer/mod.rs', 'engine/src/cpu/dbt/wasm/integer/multiply_divide.rs', 'engine/src/cpu/dbt/wasm/integer/operands.rs', 'engine/src/cpu/dbt/wasm/integer/rotates.rs', 'engine/src/cpu/dbt/wasm/integer/shifts.rs'];
+sourcePaths.push(...['engine/src/cpu/dbt/wasm/emitter.rs', 'engine/src/cpu/dbt/wasm/code_fetch.rs', 'engine/tests/support/wasm/arena.mjs'].filter(path => !sourcePaths.includes(path)));
 assert.equal(new Set(sourcePaths).size, sourcePaths.length);
 const sourceIdentities = () => Object.fromEntries(sourcePaths.map(path => {const bytes = readFileSync(join(root, path)); return [path, {bytes: bytes.length, sha256: hash(bytes)}];}));
 const sourcePins = sourceIdentities();
@@ -144,7 +145,7 @@ function profile(bytes, owner) {
   const text = () => {const length = uleb(); assert.ok(at + length <= bytes.length); const value = bytes.subarray(at, at + length).toString('utf8'); at += length; return value;};
   const sections = new Map();
   while (at < bytes.length) {const id = bytes[at++], length = uleb(), start = at; assert.ok(start + length <= bytes.length); assert.ok(!sections.has(id)); sections.set(id, [start, start + length]); at += length;}
-  assert.deepEqual([...sections.keys()], [1, 2, 3, 7, 10]);
+  assert.deepEqual([...sections.keys()], [1, 2, 3, 6, 7, 10]);
   const section = id => {at = sections.get(id)[0];}; const ended = id => assert.equal(at, sections.get(id)[1]);
   section(1); const types = []; for (let i = 0, n = uleb(); i < n; i++) {assert.equal(bytes[at++], 0x60); const parameters = [];
     for (let j = 0, n = uleb(); j < n; j++) parameters.push(bytes[at++]); const results = []; for (let j = 0, n = uleb(); j < n; j++) results.push(bytes[at++]); types.push({parameters, results});} ended(1);
@@ -152,9 +153,14 @@ function profile(bytes, owner) {
   section(2); assert.equal(uleb(), 2); assert.equal(text(), 'env'); assert.equal(text(), 'memory'); assert.equal(bytes[at++], 2); assert.equal(uleb(), 0); assert.equal(uleb(), 1);
   assert.equal(text(), 'ring3'); assert.equal(text(), owner === 'replacement' ? 'guard' : 'guard_resident'); assert.equal(bytes[at++], 0); assert.equal(uleb(), 1); ended(2);
   section(3); assert.equal(uleb(), 1); assert.equal(uleb(), 0); ended(3);
+  section(6);
+  assert.deepEqual([...bytes.subarray(at, sections.get(6)[1])],
+    [3, 0x7f, 0, 0x41, owner === 'standalone' ? 0 : 1, 0x0b, 0x7f, 0, 0x41, 0, 0x0b, 0x7f, 0, 0x41, 1, 0x0b],
+    'exact immutable flat decode key: bound, CS.base0, default32');
+  at = sections.get(6)[1]; ended(6);
   section(7); assert.equal(uleb(), 1); assert.equal(text(), 'run'); assert.equal(bytes[at++], 0); assert.equal(uleb(), 1); ended(7);
   section(10); assert.equal(uleb(), 1); const bodyLength = uleb(), bodyEnd = at + bodyLength; assert.equal(bodyEnd, sections.get(10)[1]);
-  const locals = []; for (let i = 0, n = uleb(); i < n; i++) locals.push([uleb(), bytes[at++]]); assert.deepEqual(locals, [[16, 0x7f], [1, 0x7e], [10, 0x7f]]);
+  const locals = []; for (let i = 0, n = uleb(); i < n; i++) locals.push([uleb(), bytes[at++]]); assert.deepEqual(locals, owner === 'standalone' ? [[16, 0x7f], [1, 0x7e], [10, 0x7f]] : [[16, 0x7f], [1, 0x7e], [10, 0x7f], [1, 0x7f]]);
   assert.ok(at < bodyEnd); assert.equal(bytes[bodyEnd - 1], 0x0b); return {types, locals, body_bytes: bodyLength, sections: [...sections.keys()]};
 }
 function record(magic, version, size, fields) {

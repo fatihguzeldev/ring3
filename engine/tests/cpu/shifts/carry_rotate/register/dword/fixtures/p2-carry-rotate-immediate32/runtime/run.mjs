@@ -1,4 +1,4 @@
-import {createArena} from '../../../../../../../../support/wasm/arena.mjs';
+import {ARENA_SIZE, createArena} from '../../../../../../../../support/wasm/arena.mjs';
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { readFileSync, readdirSync, writeFileSync } from "node:fs";
@@ -11,7 +11,7 @@ assert.ok(root, "expected current engine, output directory and repository root")
 const hash = (bytes) => createHash("sha256").update(bytes).digest("hex");
 const { bytes: engineBytes, module: engineModule, sha256: engineSha256 } = readEngine(enginePath);
 assert.deepEqual(WebAssembly.Module.imports(engineModule), []);
-const SIZE = 4612,
+const SIZE = ARENA_SIZE,
   TRANSFER = 140,
   PC = 0x1000,
   MASTER_COLD = PC + 0xf00,
@@ -400,6 +400,7 @@ const sourcePaths = [
   "engine/tests/cpu/shifts/carry_rotate/register/dword/fixtures/p2-carry-rotate-immediate32/runtime/oracle.mjs",
   "engine/tests/support/wasm/engine.mjs",
 ];
+sourcePaths.push(...['engine/src/cpu/dbt/wasm/emitter.rs', 'engine/src/cpu/dbt/wasm/code_fetch.rs', 'engine/tests/support/wasm/arena.mjs'].filter(path => !sourcePaths.includes(path)));
 assert.equal(new Set(sourcePaths).size, sourcePaths.length);
 const sourceIdentities = () =>
   Object.fromEntries(
@@ -442,7 +443,7 @@ function profile(bytes, owner) {
     sections.set(id, [at, at + n]);
     at += n;
   }
-  assert.deepEqual([...sections.keys()], [1, 2, 3, 7, 10]);
+  assert.deepEqual([...sections.keys()], [1, 2, 3, 6, 7, 10]);
   const section = (id) => {
       at = sections.get(id)[0];
     },
@@ -483,6 +484,11 @@ function profile(bytes, owner) {
   assert.equal(uleb(), 1);
   assert.equal(uleb(), 0);
   ended(3);
+  section(6);
+  assert.deepEqual([...bytes.subarray(at, sections.get(6)[1])],
+    [3, 0x7f, 0, 0x41, owner === 'standalone' ? 0 : 1, 0x0b, 0x7f, 0, 0x41, 0, 0x0b, 0x7f, 0, 0x41, 1, 0x0b],
+    'exact immutable flat decode key: bound, CS.base0, default32');
+  at = sections.get(6)[1]; ended(6);
   section(7);
   assert.equal(uleb(), 1);
   assert.equal(text(), "run");
@@ -496,7 +502,7 @@ function profile(bytes, owner) {
   assert.equal(end, sections.get(10)[1]);
   const locals = [];
   for (let i = 0, n = uleb(); i < n; i++) locals.push([uleb(), bytes[at++]]);
-  assert.deepEqual(locals, [[16, 0x7f], [1, 0x7e], [10, 0x7f]]);
+  assert.deepEqual(locals, owner === 'standalone' ? [[16, 0x7f], [1, 0x7e], [10, 0x7f]] : [[16, 0x7f], [1, 0x7e], [10, 0x7f], [1, 0x7f]]);
   assert.ok(at < end);
   assert.equal(bytes[end - 1], 0x0b);
   return { types, locals, body_bytes: bodyBytes, sections: [...sections.keys()] };
@@ -1437,7 +1443,7 @@ const result = {
     chains:
       "real CLC/STC/CMC then two consecutive budget1 C1 DWORD targets with separate complete frames; consumers only after second; second instruction immediate is independently decoded",
     raw_frames:
-      "all2358 generated calls save one physical before/after full4612B pair including targets/producers/consumers/preflight/stale/closed; target records reference those frames; full hash joins are not all-body independent semantic modelling",
+      "all2358 generated calls save one physical before/after full4796B pair including targets/producers/consumers/preflight/stale/closed; target records reference those frames; full hash joins are not all-body independent semantic modelling",
     temporal:
       "stale full live module callbacks and closed known retained-arena callbacks directly follow status assertion before post-call check/snapshot; saved files do not certify timing",
     code: "six authored banks/current code/tails and host inputs are physical files;12 managed4096B page rosters/images are map/upload models retired by close, no physical Read32 RAM dump",
