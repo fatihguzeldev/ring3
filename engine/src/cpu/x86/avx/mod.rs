@@ -256,3 +256,7 @@ impl VectorState {
         Ok(())
     }
 }
+
+#[cfg(test)]
+#[path = "integration/wasm.rs"]
+mod integration;

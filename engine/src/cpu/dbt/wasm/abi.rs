@@ -162,7 +162,12 @@ pub(super) fn flush(
         (
             4,
             if xstate {
-                8 | (u32::from(X86_INTEGER_PROFILE) << 16)
+                let version = if crate::cpu::x86::capabilities::AVX_ENABLED {
+                    9
+                } else {
+                    8
+                };
+                version | (u32::from(X86_INTEGER_PROFILE) << 16)
             } else if cpu {
                 6 | (u32::from(X86_INTEGER_PROFILE) << 16)
             } else if arithmetic {

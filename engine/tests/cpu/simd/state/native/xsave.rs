@@ -106,7 +106,6 @@ fn xstate_keeps_optimized_supervisor_and_invalid_encodings_explicitly_unsupporte
         &[0xf0, 0x0f, 0xae, 0x28][..],
         &[0xf0, 0x0f, 0x01, 0xd0][..],
         &[0x0f, 0xae, 0xe0][..],
-        &[0xc5, 0xf8, 0x77][..],
     ] {
         assert!(
             decode_one(&memory(bytes), GuestAddress(0x1000)).is_err(),
@@ -175,7 +174,7 @@ fn xstate_save_preserves_unrequested_legacy_reserved_and_software_bytes() {
         }
     }
     assert_eq!(xstate::requested(0xffff_ffff, 0xffff_ffff), 3);
-    assert_eq!(xstate::read_control(0), Ok(3));
+    assert_eq!(xstate::read_control(0), Ok(7));
     assert!(xstate::read_control(1).is_err());
     assert!(xstate::read_control(u32::MAX).is_err());
 }

@@ -265,8 +265,24 @@ pub(in crate::cpu::dbt) fn emit(
             [ValType::I32],
         );
     }
-    let segment_check_type =
-        cpu_type_base + if has_cpu { 10 } else { 0 } + u32::from(needs_far_call);
+    let upper_xstate =
+        crate::cpu::x86::capabilities::AVX_ENABLED && (needs_cpu_xsave || needs_cpu_xrstor);
+    let xstate_type_offset = 10 + u32::from(needs_far_call);
+    if upper_xstate {
+        let parameters = if matches!(binding, Some(EmbeddedBinding::Resident { .. })) {
+            8
+        } else {
+            4
+        };
+        types.ty().function(
+            std::iter::repeat_n(ValType::I32, parameters),
+            [ValType::I32],
+        );
+    }
+    let segment_check_type = cpu_type_base
+        + if has_cpu { 10 } else { 0 }
+        + u32::from(needs_far_call)
+        + u32::from(upper_xstate);
     if has_segment_check {
         types.ty().function([ValType::I32; 6], [ValType::I32]);
     }
@@ -695,16 +711,32 @@ pub(in crate::cpu::dbt) fn emit(
         ),
         (
             needs_cpu_xsave,
-            "cpu_xsave",
-            "cpu_xsave_resident",
-            1,
+            if upper_xstate {
+                "cpu_xsave_avx"
+            } else {
+                "cpu_xsave"
+            },
+            if upper_xstate {
+                "cpu_xsave_avx_resident"
+            } else {
+                "cpu_xsave_resident"
+            },
+            if upper_xstate { xstate_type_offset } else { 1 },
             &mut helper_imports.cpu_xsave,
         ),
         (
             needs_cpu_xrstor,
-            "cpu_xrstor",
-            "cpu_xrstor_resident",
-            1,
+            if upper_xstate {
+                "cpu_xrstor_avx"
+            } else {
+                "cpu_xrstor"
+            },
+            if upper_xstate {
+                "cpu_xrstor_avx_resident"
+            } else {
+                "cpu_xrstor_resident"
+            },
+            if upper_xstate { xstate_type_offset } else { 1 },
             &mut helper_imports.cpu_xrstor,
         ),
         (
@@ -840,7 +872,7 @@ pub(in crate::cpu::dbt) fn emit(
     if has_simd {
         super::simd::preflight(&mut code);
     }
-    if has_avx {
+    if has_avx || upper_xstate {
         super::avx::preflight(&mut code);
     }
     abi::load_state(&mut code);

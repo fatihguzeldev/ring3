@@ -1,0 +1,27 @@
+use super::{AVX_ENABLED, CPU_ID_LEAVES, XCR0};
+
+fn leaf(function: u32, subfunction: Option<u32>) -> [u32; 4] {
+    CPU_ID_LEAVES
+        .iter()
+        .find(|leaf| leaf.function == function && leaf.subfunction == subfunction)
+        .expect("declared cpuid leaf")
+        .registers
+}
+
+#[test]
+fn avx_capability_matches_enabled_components_and_standard_image_extent() {
+    assert_eq!(AVX_ENABLED, leaf(1, None)[2] & (1 << 28) != 0);
+    assert_eq!(XCR0, 7);
+    assert_eq!(leaf(1, None)[2] & (7 << 26), 7 << 26);
+    assert_eq!(leaf(13, Some(0)), [7, 832, 832, 0]);
+    assert_eq!(leaf(13, Some(1)), [0; 4]);
+    assert_eq!(leaf(13, Some(2)), [256, 576, 0, 0]);
+}
+
+#[test]
+fn extensions_without_complete_execution_support_remain_unadvertised() {
+    assert_eq!(leaf(1, None)[2] & (1 << 12 | 1 << 29), 0); // fma and f16c.
+    let structured = leaf(7, Some(0));
+    assert_eq!(structured, [0, 1 << 3 | 1 << 8, 0, 0]); // bmi1/2 only; no avx2/avx512.
+    assert_eq!(leaf(0, None)[0], 13);
+}

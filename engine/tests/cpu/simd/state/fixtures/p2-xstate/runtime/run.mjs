@@ -26,9 +26,9 @@ const record = (magic, version, size, values) => {
 };
 const state = (registers, pc) => record('R3ST', 1, 56, [...registers, pc, 0xcd7]);
 const exit = (reason, retired, detail = 0, address = 0, access = 0, length = 0) =>
-  record('R3EX', 8, 40, [reason, retired, detail, address, access, length]);
+  record('R3EX', 9, 40, [reason, retired, detail, address, access, length]);
 const packet = (status = 0, detail = 0, address = 0, access = 0, value = 0) =>
-  record('R3MH', 7, 40, [status, value, detail, address, access, 576]);
+  record('R3MH', 8, 40, [status, value, detail, address, access, 832]);
 const parents = () => [3, 0x11223344, 0, 0x44556677, 0x7080, 0x66778899, 0x778899aa, BASE];
 
 // fixed physical tags: valid, zero, special, empty, valid, special, valid, empty.
@@ -103,7 +103,7 @@ for (let mask = 0; mask < 4; mask++) for (let present = 0; present < 4; present+
 }
 for (const offset of [512, 520, 527, 528, 535]) {
   const image = Buffer.from(restoredLegacy);
-  image[offset] = offset === 512 ? 4 : 1;
+  image[offset] = offset === 512 ? 8 : 1;
   rows.push({name: `restore-rejects-header-byte-${offset}-even-empty-request`, code: restoreCode,
     mask: 0, image, reason: 11, status: 3});
 }
@@ -121,7 +121,7 @@ for (const code of [saveCode, restoreCode]) {
     seeds: [[0x5e00, Buffer.alloc(512, 0x9b)]], unchanged: [[0x5e00, Buffer.alloc(512, 0x9b)]],
     reason: 5, status: 1, detail: 1, fault: 0x6000, access: 1});
   rows.push({name: `${code}-header-address-overflow`, code, address: 0xfffffe00,
-    reason: 11, direct: true});
+    reason: 11, status: 3});
 }
 rows.push({name: 'save-late-readonly-header-write-preserves-earlier-component-bytes', code: saveCode,
   address: 0x5e00, extra: true, protects: [[0x6000, 1]],
@@ -132,7 +132,7 @@ rows.push({name: 'save-writeonly-header-still-requires-read-before-write', code:
   image: Buffer.alloc(576, 0x9b), protects: [[BASE, 2]],
   reason: 5, status: 1, detail: 2, fault: BASE + 512, access: 1});
 const header = Buffer.alloc(24);
-const badHeader = Buffer.from(header); badHeader[0] = 4;
+const badHeader = Buffer.from(header); badHeader[0] = 8;
 rows.push({name: 'restore-invalid-header-precedes-unmapped-mxcsr', code: restoreCode, address: 0x4e00,
   seeds: [[BASE, badHeader]], reason: 11, status: 3});
 rows.push({name: 'restore-empty-request-only-needs-header', code: restoreCode, address: 0x4e00,
@@ -141,14 +141,16 @@ rows.push({name: 'restore-absent-x87-initializes-without-payload-access', code: 
   mask: 1, seeds: [[BASE, header]], afterFP: initial.subarray(FP, FP + 128)});
 rows.push({name: 'restore-absent-sse-still-reads-mxcsr', code: restoreCode, address: 0x4e00,
   mask: 2, seeds: [[BASE, header]], reason: 5, status: 1, detail: 1, fault: 0x4e18, access: 1});
-rows.push({name: 'xgetbv-zero-direct-preserves-flags', code: '0f01d0', control: 0, direct: true, result: [3, 0]});
+rows.push({name: 'xgetbv-zero-direct-preserves-flags', code: '0f01d0', control: 0, direct: true, result: [7, 0]});
 rows.push({name: 'xgetbv-one-gp-without-publication', code: '0f01d0', control: 1, direct: true, reason: 11});
 rows.push({name: 'xgetbv-high-index-gp-without-publication', code: '0f01d0', control: 0xffffffff, direct: true, reason: 11});
 
 const sourcePaths = [
   'engine/src/cpu/x86/xstate.rs', 'engine/src/cpu/x86/xstate/legacy.rs',
   'engine/src/cpu/x86/decode/xstate.rs', 'engine/src/cpu/dbt/wasm/xstate.rs',
-  'engine/src/process/cpu/xstate.rs', 'engine/tests/cpu/simd/state/native/xsave.rs',
+  'engine/src/process/cpu/xstate.rs', 'engine/src/process/cpu/xstate/upper.rs',
+  'engine/src/cpu/x86/capabilities.rs', 'engine/src/cpu/x86/xstate/upper.rs',
+  'engine/src/cpu/x86/xstate/upper/access.rs', 'engine/src/cpu/dbt/wasm/xstate/upper.rs', 'engine/tests/cpu/simd/state/native/xsave.rs',
   'engine/tests/cpu/simd/state/wasm/xsave.rs',
   'engine/tests/cpu/simd/state/fixtures/p2-xstate/runtime/run.mjs',
 ];
@@ -223,7 +225,7 @@ function test(context, block, row) {
   const expected = arena(context), reason = row.reason ?? 1, retired = reason === 1 ? 1 : 0;
   if (row.result) {registers[0] = row.result[0]; registers[2] = row.result[1];}
   expected.set(state(registers, block.pc + (retired ? hex(row.code).length : 0)), 0);
-  expected.set(exit(reason, retired, row.detail ?? 0, row.fault ?? 0, row.access ?? 0, reason === 5 ? 576 : 0), 56);
+  expected.set(exit(reason, retired, row.detail ?? 0, row.fault ?? 0, row.access ?? 0, reason === 5 ? 832 : 0), 56);
   if (!row.direct) expected.set(packet(row.status ?? 0, row.detail ?? 0, row.fault ?? 0, row.access ?? 0), 100);
   if (row.afterFP) expected.set(row.afterFP, FP);
   if (row.afterXmm) expected.set(row.afterXmm, SV + 32);
@@ -234,8 +236,8 @@ function test(context, block, row) {
   assert.equal(events.length, row.direct ? 0 : 1, row.name + ' exact helper count');
   if (!row.direct) {
     const event = events[0];
-    assert.equal(event.name, `cpu_${row.code === saveCode ? 'xsave' : 'xrstor'}${context.owner === 'resident' ? '_resident' : ''}`);
-    assert.deepEqual(event.args.slice(-3), [row.address ?? BASE, row.mask ?? 3, row.high ?? 0]);
+    assert.equal(event.name, `cpu_${row.code === saveCode ? 'xsave' : 'xrstor'}_avx${context.owner === 'resident' ? '_resident' : ''}`);
+    assert.deepEqual(event.args.slice(-4), [3, row.address ?? BASE, row.mask ?? 3, row.high ?? 0]);
     assert.equal(event.packet, expected.subarray(100, 140).toString('hex'));
   }
   assert.deepEqual(actual, expected, row.name + ' complete arena');
@@ -275,6 +277,10 @@ for (const owner of ['replacement', 'resident']) for (const entries of [false, t
 
 const rawRows = [
   {name: 'success-value-must-be-zero', packet: packet(0, 0, 0, 0, 1)},
+  {name: 'legacy-packet-version7-is-rejected-by-active-generated-path', packet: record('R3MH', 7, 40, [0, 0, 0, 0, 0, 576])},
+  {name: 'unrequested-upper-payload-fault-is-rejected', packet: packet(1, 1, BASE + 576, 1)},
+  {name: 'selected-upper-payload-read-fault-is-canonical', mask: 4, packet: packet(1, 1, BASE + 576, 1), reason: 5, detail: 1, fault: BASE + 576, access: 1, upper: true},
+  {name: 'upper-reserved-tail-fault-is-rejected', mask: 4, packet: packet(1, 1, BASE + 704, 1)},
   {name: 'floating-exception-is-not-xstate-status', packet: packet(5, 0x1f81)},
   {name: 'gp-error-code-must-be-zero', packet: packet(3, 1)},
   {name: 'fault-in-reserved-gap-is-rejected', packet: packet(1, 1, BASE + 300, 1)},
@@ -285,12 +291,13 @@ const rawRows = [
 ];
 for (const owner of ['replacement', 'resident']) for (const entries of [false, true]) for (const code of [saveCode, restoreCode]) {
   const [context, blocks] = open(owner, entries, [{code}]);
-  for (const row of rawRows) {
+  for (const original of rawRows) {
+    const row = original.upper && code === saveCode ? {...original, packet: packet(1, 1, BASE + 576, 2), access: 2} : original;
     input(context, 0, initial);
     const registers = parents(); registers[0] = row.mask ?? 3; registers[7] = row.address ?? BASE;
     input(context, 0, state(registers, blocks[0].pc)); input(context, 56, exit(1, 0));
     const expected = arena(context), reason = row.reason ?? 7;
-    expected.set(exit(reason, 0, row.detail ?? (reason === 7 ? 2 : 0), row.fault ?? 0, row.access ?? 0, reason === 5 ? 576 : 0), 56);
+    expected.set(exit(reason, 0, row.detail ?? (reason === 7 ? 2 : 0), row.fault ?? 0, row.access ?? 0, reason === 5 ? 832 : 0), 56);
     expected.set(row.packet, 100);
     const start = helpers.length; context.raw = row;
     assert.equal(context.run(context.base, context.base + 56, 1, context.base + 96), 0, row.name);
@@ -308,6 +315,6 @@ writeFileSync(join(output, 'exit-records.bin'), Buffer.concat(exitRecords));
 const result = {status: 'PASS', engine: {path: enginePath, sha256: engine.sha256, bytes: engine.bytes.length},
   arena_bytes: SIZE, counts: {contexts: contexts.length, modules: modules.length, runs: observations.length, helpers: helpers.length},
   contexts, modules, observations, helpers, source_sha256: sourcePins,
-  scope: 'standard xstate components0/1 under four bound profiles; exact whole arena and selected guest bytes, native decode of every actual exit, no AVX or performance claim'};
+  scope: 'standard xstate components0/1 regression through active segmented helper8/832 and exit9 under four bound profiles; exact whole arena and selected guest bytes, strict upper selected-packet controls, native decode of every actual exit; legacy576 helpers remain covered separately, no performance claim'};
 writeFileSync(join(output, 'result.json'), JSON.stringify(result, null, 2));
 console.log(JSON.stringify({status: 'PASS', ...result.counts, output}));

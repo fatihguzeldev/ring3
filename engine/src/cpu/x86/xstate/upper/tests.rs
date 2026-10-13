@@ -134,7 +134,7 @@ fn header_is_unconditional_but_mxcsr_validation_follows_either_vector_request() 
     }
     assert_eq!(requested(u32::MAX, u32::MAX), 7);
     assert_eq!(super::super::requested(u32::MAX, u32::MAX), 3);
-    assert_eq!(super::super::read_control(0), Ok(3));
+    assert_eq!(super::super::read_control(0), Ok(7));
     let mut header = [0; 24];
     header[..8].copy_from_slice(&4_u64.to_le_bytes());
     assert_eq!(validate_header(&header), Ok(4));

@@ -21,3 +21,12 @@ mod ymm_upper;
 
 #[path = "state/xsave/upper/wasm.rs"]
 mod xstate_upper;
+
+#[path = "avx/helper/wasm.rs"]
+mod avx_helper;
+
+#[path = "avx/execution/wasm.rs"]
+mod cpu_avx_execution_wasm;
+
+#[path = "avx/protocol/wasm.rs"]
+mod cpu_avx_protocol_wasm;

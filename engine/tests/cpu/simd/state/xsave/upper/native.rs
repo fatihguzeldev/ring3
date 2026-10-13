@@ -68,7 +68,7 @@ fn explicit_xstate_protocol_versions_do_not_widen_legacy_codecs() {
         bytes[36..40].copy_from_slice(&16_u32.to_le_bytes());
         assert_eq!(decode_exit(&bytes), Err(AbiError::Exit));
     }
-    assert_eq!(xstate::read_control(0), Ok(3));
+    assert_eq!(xstate::read_control(0), Ok(7));
     assert_eq!(xstate::requested(u32::MAX, u32::MAX), 3);
     assert_eq!(xstate::upper::requested(u32::MAX, u32::MAX), 7);
 }

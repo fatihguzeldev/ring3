@@ -43,6 +43,8 @@ pub(in crate::cpu::dbt::wasm) fn instruction(
             | Operation::FarCall { .. }
     ) && !matches!(instruction.operation(), Operation::Simd(operation) if operation.kind == crate::cpu::x86::simd::SimdKind::MaskedStore)
         && !matches!(instruction.operation(), Operation::Avx(_))
+        && !(crate::cpu::x86::capabilities::AVX_ENABLED
+            && matches!(instruction.operation(), Operation::XState(_)))
     {
         use crate::cpu::x86::SegmentRegister::*;
         for segment in [Es, Cs, Ss, Ds, Fs, Gs] {

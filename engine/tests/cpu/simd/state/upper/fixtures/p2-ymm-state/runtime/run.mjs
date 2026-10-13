@@ -160,14 +160,14 @@ for (const seed of [0, 1, 2, 3]) {
   run(c, 'legacyMOVAPSkeepsUpper', fn, registers, 3, 6, expected => expected.copy(expected, SV + 32, SV + 48, SV + 64));
   input(c, UPPER + 4, words([0x10002])); registers = seedState(c);
   run(c, 'legacyMOVAPSdoesNotConsumeUpperHeader', fn, registers, 3, 6, expected => expected.copy(expected, SV + 32, SV + 48, SV + 64));
-  input(c, UPPER, upper(seed)); fn = compile(c, '0f01d0'); registers = seedState(c); registers[0] = 3; registers[2] = 0;
-  run(c, 'XGETBVremainsLegacyMask3', fn, registers, 3, 8);
+  input(c, UPPER, upper(seed)); fn = compile(c, '0f01d0'); registers = seedState(c); registers[0] = 7; registers[2] = 0;
+  run(c, 'XGETBVactiveMask7PreservesUpper', fn, registers, 3, 9);
   legacyFx(c); callback(c, false); callback(c, true);
   const closed = arena(c); assert.equal(c.api.close(), 0); assert.equal(c.api.arena_len(), 0); assert.equal(c.api.arena_ptr(), 0);
   assert.deepEqual(arena(c), closed, 'close retains current allocation bytes');
 }
 assert.deepEqual(pinSources(), sources, 'all owner pins stable');
 writeFileSync(join(output, 'arenas.bin'), Buffer.concat(frames), {flag: 'wx'});
-const result = {status: 'PASS', engine: {path: enginePath, sha256: engine.sha256}, counts: {contexts: contextCount, generated, modules: modules.length, full_frame_pairs: rows.length, frame_bytes: SIZE}, sources, modules, rows, limits: ['upper transport and legacy preservation only; no guestAVX admission or capability activation', 'callback stops are explicit lifecycle inputs; no new VEX execution or general callback coverage claim', 'all observed input/output frames are4756 bytes; the legacy4612 prefix stays byteidentical at initialization']};
+const result = {status: 'PASS', engine: {path: enginePath, sha256: engine.sha256}, counts: {contexts: contextCount, generated, modules: modules.length, full_frame_pairs: rows.length, frame_bytes: SIZE}, sources, modules, rows, limits: ['upper transport and legacy preservation; XGETBV follows the active CPU mask, guest AVX execution is covered separately', 'callback stops are explicit lifecycle inputs; no new VEX execution or general callback coverage claim', 'all observed input/output frames are4756 bytes; the legacy4612 prefix stays byteidentical at initialization']};
 writeFileSync(join(output, 'result.json'), JSON.stringify(result, null, 2), {flag: 'wx'});
 console.log(JSON.stringify({status: result.status, ...result.counts, output}));

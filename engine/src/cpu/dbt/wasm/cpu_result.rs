@@ -34,7 +34,15 @@ pub(super) fn validate(
     allow_smc: bool,
     exit_depth: u32,
 ) {
-    validate_span(code, length, access_mask, allow_smc, None, None, exit_depth);
+    validate_span(
+        code,
+        length,
+        access_mask,
+        allow_smc,
+        None,
+        Validation::Ordinary,
+        exit_depth,
+    );
 }
 
 pub(super) fn validate_masked(
@@ -44,7 +52,15 @@ pub(super) fn validate_masked(
     exit_depth: u32,
 ) {
     assert!((1..=16).contains(&length));
-    validate_span(code, length, 2, true, Some(mask_local), None, exit_depth);
+    validate_span(
+        code,
+        length,
+        2,
+        true,
+        Some(mask_local),
+        Validation::Ordinary,
+        exit_depth,
+    );
 }
 
 #[derive(Clone, Copy)]
@@ -73,9 +89,29 @@ pub(super) fn validate_avx(
         access_mask,
         allow_smc,
         validation.selected_mask,
-        Some(validation),
+        Validation::Avx(validation),
         exit_depth,
     );
+}
+
+/// selected xstate spans are checked by their owner before this common status/publication path.
+pub(super) fn validate_xstate(code: &mut InstructionSink<'_>, save: bool, exit_depth: u32) {
+    validate_span(
+        code,
+        832,
+        if save { 3 } else { 1 },
+        save,
+        None,
+        Validation::XState,
+        exit_depth,
+    );
+}
+
+#[derive(Clone, Copy)]
+enum Validation {
+    Ordinary,
+    Avx(AvxValidation),
+    XState,
 }
 
 fn validate_span(
@@ -84,10 +120,20 @@ fn validate_span(
     access_mask: u32,
     allow_smc: bool,
     mask: Option<u32>,
-    avx: Option<AvxValidation>,
+    validation: Validation,
     exit_depth: u32,
 ) {
-    assert!(length <= crate::abi::cpu_helper::MAX_CPU_SPAN as u32);
+    let xstate = matches!(validation, Validation::XState);
+    let avx = if let Validation::Avx(value) = validation {
+        Some(value)
+    } else {
+        None
+    };
+    assert!(if xstate {
+        length == 832
+    } else {
+        length <= crate::abi::cpu_helper::MAX_CPU_SPAN as u32
+    });
     assert!(access_mask <= 3);
     code.local_get(HELPER_STATUS);
     if allow_smc {
@@ -104,7 +150,7 @@ fn validate_span(
     reset_checks(code);
     for (offset, expected) in [
         (0, u32::from_le_bytes(*b"R3MH")),
-        (4, 0x10007),
+        (4, if xstate { 0x10008 } else { 0x10007 }),
         (8, 40),
         (12, 0),
         (36, length),
@@ -117,7 +163,7 @@ fn validate_span(
     helper_field(code, 16);
     code.local_set(RHS);
     code.local_get(RHS).i32_eqz().if_(BlockType::Empty);
-    success(code, length, mask);
+    success(code, if xstate { 0 } else { length }, mask);
     code.else_();
     code.local_get(HELPER_STATUS)
         .i32_const(11)
@@ -129,7 +175,7 @@ fn validate_span(
         .i32_const(1)
         .i32_eq()
         .if_(BlockType::Empty);
-    fault(code, length, access_mask, mask);
+    fault(code, length, access_mask, mask, xstate);
     code.else_()
         .local_get(RHS)
         .i32_const(2)
@@ -182,7 +228,13 @@ fn success(code: &mut InstructionSink<'_>, length: u32, mask: Option<u32>) {
     protocol_if_bad(code);
 }
 
-fn fault(code: &mut InstructionSink<'_>, length: u32, access_mask: u32, mask: Option<u32>) {
+fn fault(
+    code: &mut InstructionSink<'_>,
+    length: u32,
+    access_mask: u32,
+    mask: Option<u32>,
+    xstate: bool,
+) {
     if length == 0 || access_mask == 0 {
         infrastructure(code, 2);
         return;
@@ -200,50 +252,52 @@ fn fault(code: &mut InstructionSink<'_>, length: u32, access_mask: u32, mask: Op
     helper_field(code, 24);
     code.i32_const(1).i32_sub().i32_const(2).i32_gt_u();
     add_check(code);
-    helper_field(code, 24);
-    code.i32_const(3)
-        .i32_eq()
-        .if_(BlockType::Result(ValType::I32));
-    if let Some(mask_local) = mask {
-        masked_overflow(code, length, mask_local);
-        code.i32_eqz();
-    } else {
-        code.local_get(ADDRESS)
-            .i32_const(-(length as i32))
-            .i32_le_u();
-    }
-    helper_field(code, 28);
-    code.local_get(ADDRESS).i32_ne().i32_or();
-    code.else_();
-    if let Some(mask_local) = mask {
-        masked_overflow(code, length, mask_local);
+    if !xstate {
+        helper_field(code, 24);
+        code.i32_const(3)
+            .i32_eq()
+            .if_(BlockType::Result(ValType::I32));
+        if let Some(mask_local) = mask {
+            masked_overflow(code, length, mask_local);
+            code.i32_eqz();
+        } else {
+            code.local_get(ADDRESS)
+                .i32_const(-(length as i32))
+                .i32_le_u();
+        }
         helper_field(code, 28);
-        code.local_get(ADDRESS)
-            .i32_sub()
-            .local_tee(RESULT)
-            .i32_const(length as i32 - 1)
-            .i32_gt_u()
-            .i32_or();
-        code.local_get(mask_local)
-            .local_get(RESULT)
-            .i32_shr_u()
-            .i32_const(1)
-            .i32_and()
-            .i32_eqz()
-            .i32_or();
-    } else {
-        code.local_get(ADDRESS)
-            .i32_const(-(length as i32))
-            .i32_gt_u();
-        helper_field(code, 28);
-        code.local_get(ADDRESS)
-            .i32_sub()
-            .i32_const(length as i32 - 1)
-            .i32_gt_u()
-            .i32_or();
+        code.local_get(ADDRESS).i32_ne().i32_or();
+        code.else_();
+        if let Some(mask_local) = mask {
+            masked_overflow(code, length, mask_local);
+            helper_field(code, 28);
+            code.local_get(ADDRESS)
+                .i32_sub()
+                .local_tee(RESULT)
+                .i32_const(length as i32 - 1)
+                .i32_gt_u()
+                .i32_or();
+            code.local_get(mask_local)
+                .local_get(RESULT)
+                .i32_shr_u()
+                .i32_const(1)
+                .i32_and()
+                .i32_eqz()
+                .i32_or();
+        } else {
+            code.local_get(ADDRESS)
+                .i32_const(-(length as i32))
+                .i32_gt_u();
+            helper_field(code, 28);
+            code.local_get(ADDRESS)
+                .i32_sub()
+                .i32_const(length as i32 - 1)
+                .i32_gt_u()
+                .i32_or();
+        }
+        code.end();
+        add_check(code);
     }
-    code.end();
-    add_check(code);
     if let Some(mask_local) = mask
         && length < 32
     {

@@ -38,6 +38,10 @@ pub(super) fn instruction(
         XStateOperation::Save { address } => (address, true),
         XStateOperation::Restore { address } => (address, false),
     };
+    if crate::cpu::x86::capabilities::AVX_ENABLED {
+        upper_instruction(code, *address, save, imports, exit_depth);
+        return save;
+    }
     check_selected_spans(code, *address, save, imports, exit_depth);
     memory::effective_address(code, *address);
     let helper = if save {
@@ -187,3 +191,32 @@ fn validate_context(code: &mut InstructionSink<'_>, save: bool, exit_depth: u32)
     memory::protocol_if_bad(code);
     memory::exit_if_failed(code, exit_depth);
 }
+
+/// the extended helper owns selected cached spans and page transactions as one operation.
+fn upper_instruction(
+    code: &mut InstructionSink<'_>,
+    address: EffectiveAddress,
+    save: bool,
+    imports: memory::Imports,
+    exit_depth: u32,
+) {
+    let helper = if save {
+        imports.cpu_xsave
+    } else {
+        imports.cpu_xrstor
+    }
+    .expect("extended xstate helper import");
+    let index = helper.emit_binding(code);
+    code.i32_const(address.resolved_segment().index() as i32);
+    memory::offset_value(code, address);
+    code.local_get(register(Register32::Eax))
+        .local_get(register(Register32::Edx))
+        .call(index)
+        .local_set(HELPER_STATUS);
+    // reconstruct the linear base only for response validation, after the helper's authority checks.
+    memory::effective_address(code, address);
+    upper::validate_context(code, save, address.resolved_segment(), exit_depth);
+    cpu_result::validate_xstate(code, save, exit_depth);
+}
+
+mod upper;

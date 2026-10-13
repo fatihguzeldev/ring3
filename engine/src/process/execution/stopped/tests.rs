@@ -3,7 +3,11 @@ use crate::{
         arena::{CANCEL_OFFSET, EXIT_OFFSET, SIMD_OFFSET, TRANSFER_OFFSET},
         x86::{EXIT_SIZE, STATE_SIZE, encode_exit, encode_state_v2},
     },
-    cpu::{ExecutionExit, ExitReason, x86::State32},
+    cpu::{
+        ExecutionExit, ExitReason, UnsupportedFeature,
+        dbt::{CompileError, InstructionError},
+        x86::{State32, decode::DecodeError},
+    },
     process::{CallError, EngineInstance, HostError},
 };
 
@@ -67,7 +71,15 @@ fn rejected_without_publication(
 
 #[test]
 fn stopped_entry_publishes_only_current_entry_and_preserves_cpu_records() {
-    for bytes in [&[0xf0, 0x90][..], &[0xf4][..], &[0x90, 0xeb, 0][..]] {
+    for bytes in [
+        &[0xf0, 0x90][..],
+        &[0xf4][..],
+        &[0x90, 0xeb, 0][..],
+        &[0xc5, 0xf8, 0x58, 0xc1, 0xeb, 0xfe][..],
+    ] {
+        if bytes[0] == 0xc5 && !crate::cpu::x86::capabilities::AVX_ENABLED {
+            continue;
+        }
         let mut engine = stopped(bytes);
         let before = engine.arena().to_vec();
         assert_eq!(engine.compile_stopped_entry(KEY, 1), Ok(2));
@@ -133,13 +145,16 @@ fn stopped_entry_keeps_strict_admission_and_failed_preparation_atomic() {
     assert_eq!(engine.generation(), 1);
     assert_eq!(engine.arena(), before);
 
-    // avx is valid but unsupported; runtime entry must retain that distinction.
-    upload(&mut engine, ENTRY, &[0xc5, 0xf8, 0x58, 0xc1]);
+    // f16c remains a valid unsupported extension after baseline avx activation.
+    upload(&mut engine, ENTRY, &[0xc4, 0xe2, 0x79, 0x13, 0xcb]);
     let before = engine.arena().to_vec();
     let old = engine.artifact_bytes().unwrap().to_vec();
     assert!(matches!(
         engine.compile_stopped_entry(KEY, 1),
-        Err(HostError::Compile(_))
+        Err(HostError::Compile(CompileError::Instruction {
+            pc: crate::memory::GuestAddress(ENTRY),
+            cause: InstructionError::Decode(DecodeError::Unsupported(UnsupportedFeature::Simd)),
+        }))
     ));
     assert_eq!(engine.generation(), 1);
     assert_eq!(engine.artifact_bytes().unwrap(), old);

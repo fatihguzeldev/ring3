@@ -6,6 +6,9 @@ pub mod upper;
 
 pub const IMAGE_SIZE: usize = 576;
 
+/// the original helper protocol owns only x87 and xmm components, even when xcr0 grows.
+const COMPONENTS: u64 = 3;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum XStateOperation {
     Save { address: EffectiveAddress },
@@ -25,12 +28,12 @@ pub fn read_control(index: u32) -> Result<u64, XStateError> {
 }
 
 pub fn requested(low: u32, high: u32) -> u64 {
-    (u64::from(low) | u64::from(high) << 32) & super::capabilities::XCR0
+    (u64::from(low) | u64::from(high) << 32) & COMPONENTS
 }
 
 pub fn validate_header(header: &[u8; 24]) -> Result<u64, XStateError> {
     let present = u64::from_le_bytes(header[..8].try_into().unwrap());
-    if present & !super::capabilities::XCR0 != 0 || header[8..24].iter().any(|byte| *byte != 0) {
+    if present & !COMPONENTS != 0 || header[8..24].iter().any(|byte| *byte != 0) {
         return Err(XStateError);
     }
     Ok(present)
@@ -46,7 +49,7 @@ pub fn validate_mxcsr(mxcsr: u32) -> Result<(), XStateError> {
 
 /// standard-format component codecs preserve every unrequested byte.
 pub fn save(request: u64, x87: &X87State, simd: &SimdState, image: &mut [u8; IMAGE_SIZE]) {
-    let request = request & super::capabilities::XCR0;
+    let request = request & COMPONENTS;
     if request & 1 != 0 {
         legacy::save_x87(x87, image);
     }
@@ -64,7 +67,7 @@ pub fn restore(
     current_simd: &SimdState,
     image: &[u8; IMAGE_SIZE],
 ) -> Result<(X87State, SimdState), XStateError> {
-    let request = request & super::capabilities::XCR0;
+    let request = request & COMPONENTS;
     let present = validate_header(image[512..536].try_into().unwrap())?;
     let mut x87 = *current_x87;
     let mut simd = *current_simd;
@@ -86,3 +89,7 @@ pub fn restore(
     }
     Ok((x87, simd))
 }
+
+#[cfg(test)]
+#[path = "xstate/native.rs"]
+mod native;

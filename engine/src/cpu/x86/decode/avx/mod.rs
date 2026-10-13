@@ -161,3 +161,7 @@ pub(crate) fn lower(
 
 #[cfg(test)]
 mod native;
+
+#[cfg(test)]
+#[path = "execution/native.rs"]
+mod execution_tests;

@@ -31,7 +31,7 @@ const record = (magic, version, size, fields = []) => {
 };
 const words = values => {const b = Buffer.alloc(values.length * 4); values.forEach((v, i) => b.writeUInt32LE(v >>> 0, i * 4)); return b;};
 const packet = (fields = [0, 0, 0, 0, 0, 832], version = 8) => record('R3MH', version, 40, fields);
-const exit = (reason, detail = 0) => record('R3EX', 8, 40, [reason, 0, detail, 0, 0, 0]);
+const exit = (reason, detail = 0) => record('R3EX', 9, 40, [reason, 0, detail, 0, 0, 0]);
 const arena = c => Buffer.from(new Uint8Array(c.memory.buffer, c.base, SIZE));
 const input = (c, at, bytes) => new Uint8Array(c.memory.buffer, c.base + at, bytes.length).set(bytes);
 const host = (c, name, args) => assert.equal(c.api[name](...args), 0, name);
@@ -78,16 +78,27 @@ function fresh(owner, entries) {
   host(c, 'open', [4, c.id, 0x58555050]); c.base = c.api.arena_ptr() >>> 0; assert.equal(c.api.arena_len(), SIZE); assert.deepEqual(arena(c), initial);
   host(c, 'map', [0x1000, 1, 7]); host(c, 'map', [BASE, 2, 3]);
   upload(c, 0x1000, Buffer.from('0fae27ebfe', 'hex')); upload(c, 0x1100, Buffer.from('0f01d0ebfe', 'hex'));
-  input(c, T, words(entries ? [0x1000, 0x1100] : [0x1000, 5, 0x1100, 5]));
+  upload(c, 0x1200, Buffer.from('0fae2febfe', 'hex'));
+  input(c, T, words(entries ? [0x1000, 0x1100, 0x1200] : [0x1000, 5, 0x1100, 5, 0x1200, 5]));
   const compile = owner === 'resident' ? (entries ? 'compile_resident_entries' : 'compile_resident') : (entries ? 'compile_entries' : 'compile');
-  host(c, compile, entries ? [2, 0] : [2]);
+  host(c, compile, entries ? [3, 0] : [3]);
   const after = arena(c); c.unit = owner === 'resident' ? [after.readUInt32LE(T + 8), after.readUInt32LE(T + 12)] : [];
   const pointer = owner === 'resident' ? after.readUInt32LE(T + 16) : c.api.module_ptr(), length = owner === 'resident' ? after.readUInt32LE(T + 20) : c.api.module_len();
   const bytes = Buffer.from(new Uint8Array(c.memory.buffer, pointer >>> 0, length >>> 0)), module = new WebAssembly.Module(bytes), imports = {};
   for (const imported of WebAssembly.Module.imports(module)) if (imported.kind === 'function') {
     assert.equal(imported.module, 'ring3'); assert.equal(typeof c.api[imported.name], 'function');
-    imports[imported.name] = (...args) => {if (c.synthetic && imported.name.startsWith('cpu_xsave')) {input(c, 100, packet()); return 0;} return c.api[imported.name](...args);};
+    imports[imported.name] = (...args) => {
+      if (imported.name.startsWith('cpu_x')) {
+        assert.deepEqual(args.slice(-4).map(value => value >>> 0), c.request, 'generated segment/logicaloffset/live mask inputs');
+        c.calls++;
+      }
+      if (c.synthetic && imported.name.startsWith('cpu_xsave')) {input(c, 100, packet([0, 0, 0, 0, 0, 576], 7)); return 0;}
+      return c.api[imported.name](...args);
+    };
   }
+  assert.deepEqual(WebAssembly.Module.imports(module).map(value => `${value.module}:${value.name}:${value.kind}`).sort(),
+    ['env:memory:memory', `ring3:${owner === 'resident' ? 'guard_resident' : 'guard'}:function`,
+      ...['xsave', 'xrstor'].map(name => `ring3:cpu_${name}_avx${owner === 'resident' ? '_resident' : ''}:function`)].sort());
   assert.deepEqual(WebAssembly.Module.exports(module), [{name: 'run', kind: 'function'}]);
   c.run = new WebAssembly.Instance(module, {env: {memory: c.memory}, ring3: imports}).exports.run;
   modules.push({context: c.id, sha256: hash(bytes), bytes: bytes.length, imports: WebAssembly.Module.imports(module)}); writeFileSync(join(output, `module-${c.id}.wasm`), bytes); return c;
@@ -159,12 +170,36 @@ for (const owner of ['replacement', 'resident']) for (const entries of [false, t
   execute(c, {name: 'save-readonly-cache-empty-still-needs-write', operation: 'xsave', mask: 0, context: segments({3: 0xf31fffff}), fields: [3, 0, 0, 0, 0, 832]});
   execute(c, {name: 'restore-execute-only-CS', operation: 'xrstor', segment: 1, context: segments({1: 0xf39fffff}), fields: [3, 0, 0, 0, 0, 832]});
   seed(c); const registers = [0, 0, 0, 0, 0x7000, 0, 0, BASE]; input(c, 0, record('R3ST', 1, 56, [...registers, 0x1000, 0xcd7]));
-  let before = arena(c), expected = Buffer.from(before); expected.set(packet(), 100); expected.set(exit(7, 2), 56); c.synthetic = true;
-  assert.equal(c.run(c.base, c.base + 56, 1, c.base + 96), 0); assert.deepEqual(arena(c), expected, 'legacy captured module rejects new packet8');
-  frames.push(before, arena(c)); rows.push({context: c.id, name: 'legacy-generated-rejects-new-packet', frame_sha256: hash(arena(c))}); c.synthetic = false;
-  seed(c); input(c, 0, record('R3ST', 1, 56, [...registers, 0x1100, 0xcd7])); before = arena(c); expected = Buffer.from(before); registers[0] = 3; registers[2] = 0;
-  expected.set(record('R3ST', 1, 56, [...registers, 0x1103, 0xcd7]), 0); expected.set(record('R3EX', 8, 40, [1, 1, 0, 0, 0, 0]), 56);
-  assert.equal(c.run(c.base, c.base + 56, 1, c.base + 96), 0); assert.deepEqual(arena(c), expected, 'public XCR0 remains3'); frames.push(before, arena(c)); rows.push({context: c.id, name: 'XGETBV-remains-mask3', frame_sha256: hash(arena(c))});
+  let before = arena(c), expected = Buffer.from(before); expected.set(packet([0, 0, 0, 0, 0, 576], 7), 100); expected.set(exit(7, 2), 56); c.synthetic = true; c.request = [3, BASE, 0, 0]; c.calls = 0;
+  assert.equal(c.run(c.base, c.base + 56, 1, c.base + 96), 0); assert.deepEqual(arena(c), expected, 'active generated module rejects legacy packet7'); assert.equal(c.calls, 1);
+  frames.push(before, arena(c)); rows.push({context: c.id, name: 'active-generated-rejects-legacy-packet', frame_sha256: hash(arena(c))}); c.synthetic = false;
+  seed(c); input(c, 0, record('R3ST', 1, 56, [...registers, 0x1100, 0xcd7])); before = arena(c); expected = Buffer.from(before); registers[0] = 7; registers[2] = 0;
+  expected.set(record('R3ST', 1, 56, [...registers, 0x1103, 0xcd7]), 0); expected.set(record('R3EX', 9, 40, [1, 1, 0, 0, 0, 0]), 56);
+  c.calls = 0; assert.equal(c.run(c.base, c.base + 56, 1, c.base + 96), 0); assert.deepEqual(arena(c), expected, 'public XCR0 is7'); assert.equal(c.calls, 0, 'XGETBV has no helper transition'); frames.push(before, arena(c)); rows.push({context: c.id, name: 'XGETBV-enabled-mask7', frame_sha256: hash(arena(c))});
+  for (const operation of ['xsave', 'xrstor']) for (let mask = 0; mask < 8; mask++) {
+    const image = operation === 'xsave' ? Buffer.alloc(832, 0x9b) : fullImage(7);
+    if (operation === 'xsave') image.writeBigUInt64LE(0x8000000000000040n, 512);
+    const ram = Buffer.alloc(8192, 0xa5); image.copy(ram); upload(c, BASE, ram);
+    seed(c); const pc = operation === 'xsave' ? 0x1000 : 0x1200;
+    const gprs = [mask, 0, 0xffffffff, 0, 0x7000, 0, 0, BASE];
+    input(c, 0, record('R3ST', 1, 56, [...gprs, pc, 0xcd7]));
+    const before = arena(c), expected = Buffer.from(before), expectedRam = Buffer.from(ram);
+    expected.set(record('R3ST', 1, 56, [...gprs, pc + 3, 0xcd7]), 0);
+    expected.set(record('R3EX', 9, 40, [1, 1, 0, 0, 0, 0]), 56); expected.set(packet(), 100);
+    if (operation === 'xsave') saveExpected(image, mask).copy(expectedRam);
+    else {
+      if (mask & 1) expected.set(restoredFp, FP);
+      if (mask & 6) expected.writeUInt32LE(0x5f80, SV + 16);
+      if (mask & 2) expected.set(restoredXmm, SV + 32);
+      if (mask & 4) expected.set(restoredUpper, YU + 16);
+    }
+    c.request = [3, BASE, mask, 0xffffffff]; c.calls = 0;
+    assert.equal(c.run(c.base, c.base + 56, 1, c.base + 96), 0);
+    const after = arena(c); assert.deepEqual(after, expected, `generated-${operation}-mask${mask}: full arena`); assert.equal(c.calls, 1);
+    frames.push(before, after); rows.push({context: c.id, name: `generated-${operation}-mask${mask}`, packet: after.subarray(100, 140).toString('hex'), frame_sha256: hash(after)});
+    assert.deepEqual(readRam(c, BASE, 8192), expectedRam, `generated-${operation}-mask${mask}: full RAM including reserved704..831`);
+  }
+
   seed(c); before = arena(c); expected = Buffer.from(before); expected.set(packet(), 100);
   const codeBefore = readRam(c, 0x1000, 4096); input(c, 0, before); const codeExpected = Buffer.from(codeBefore); saveExpected(codeBefore.subarray(0, 832), 7).copy(codeExpected);
   const call = invoke(c, {operation: 'xsave', offset: 0x1000, mask: 7}); assert.equal(call.run(), 11); assert.deepEqual(arena(c), expected, 'SMC after complete save');
@@ -172,5 +207,5 @@ for (const owner of ['replacement', 'resident']) for (const entries of [false, t
   before = arena(c); assert.equal(invoke(c, {operation: 'xsave', mask: 4}).run(), 4); assert.deepEqual(arena(c), before, 'stale authority neutral'); rows.push({context: c.id, name: 'stale-authority-neutral'}); host(c, 'close', []);
 }
 assert.deepEqual(pins(), sources, 'all source pins stable'); writeFileSync(join(output, 'arenas.bin'), Buffer.concat(frames), {flag: 'wx'});
-const result = {status: 'PASS', engine: {path: enginePath, sha256: engine.sha256}, counts: {contexts: identities, modules: modules.length, cases: rows.length, full_frame_pairs: frames.length / 2, frame_bytes: SIZE}, sources, modules, rows, limits: ['explicit XSAVE2 dependency; guest AVX activation remains deferred', 'IA32 exact128B payload with reserved704..831 preserved/ignored under permitted Ring3 policy', 'segment-before-page is deterministic Ring3 policy', 'old generated XSAVE remains version7; old modules reject packet8', 'native tests separately prove memory-version exhaustion, pending/callback guards and single-version save']};
+const result = {status: 'PASS', engine: {path: enginePath, sha256: engine.sha256}, counts: {contexts: identities, modules: modules.length, cases: rows.length, full_frame_pairs: frames.length / 2, frame_bytes: SIZE}, sources, modules, rows, limits: ['active guest XSAVE/XRSTOR use version8 segmented helpers and exit9; direct legacy576 helpers remain version7', 'IA32 exact128B payload with reserved704..831 preserved/ignored under permitted Ring3 policy', 'segment-before-page is deterministic Ring3 policy', 'active generated modules reject legacy packet7; frozen pre-activation proof retains old-module packet8 rejection', 'native tests separately prove memory-version exhaustion, pending/callback guards and single-version save']};
 writeFileSync(join(output, 'result.json'), JSON.stringify(result, null, 2), {flag: 'wx'}); console.log(JSON.stringify({status: result.status, ...result.counts, output}));
