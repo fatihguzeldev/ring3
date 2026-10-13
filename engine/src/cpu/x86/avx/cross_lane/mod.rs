@@ -10,13 +10,31 @@ pub(crate) enum BlockTarget {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum BroadcastElement {
+    Byte,
+    Word,
+    Dword,
+    Qword,
+}
+
+impl BroadcastElement {
+    pub(crate) fn bytes(self) -> u8 {
+        match self {
+            Self::Byte => 1,
+            Self::Word => 2,
+            Self::Dword => 4,
+            Self::Qword => 8,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum CrossLaneInstruction {
-    BroadcastSingle {
+    Broadcast {
+        element: BroadcastElement,
         width: VectorWidth,
         destination: VectorRegister,
-    },
-    BroadcastDouble {
-        destination: VectorRegister,
+        source: MoveSource,
     },
     BroadcastBlock {
         destination: VectorRegister,
@@ -41,10 +59,30 @@ pub(crate) enum CrossLaneInstruction {
 }
 
 impl CrossLaneInstruction {
+    pub(crate) fn requires_avx2(self) -> bool {
+        matches!(
+            self,
+            Self::Broadcast {
+                source: MoveSource::Register(_),
+                ..
+            } | Self::Broadcast {
+                element: BroadcastElement::Byte | BroadcastElement::Word,
+                ..
+            } | Self::Broadcast {
+                element: BroadcastElement::Qword,
+                width: VectorWidth::Xmm,
+                ..
+            }
+        )
+    }
+
     pub(crate) fn memory(self) -> Option<MemoryRequirement> {
         let (access, bytes) = match self {
-            Self::BroadcastSingle { .. } => (Access::Read, 4),
-            Self::BroadcastDouble { .. } => (Access::Read, 8),
+            Self::Broadcast {
+                element,
+                source: MoveSource::Memory,
+                ..
+            } => (Access::Read, element.bytes()),
             Self::BroadcastBlock { .. }
             | Self::Insert {
                 second: MoveSource::Memory,
@@ -82,16 +120,16 @@ impl VectorState {
         }
         let mut result = [0; 32];
         let (destination, first, second, immediate) = match operation {
-            CrossLaneInstruction::BroadcastSingle { width, destination } => {
-                for lane in result[..width.bytes()].chunks_exact_mut(4) {
-                    lane.copy_from_slice(operand);
-                }
-                self.publish(destination, result);
-                return Ok(());
-            }
-            CrossLaneInstruction::BroadcastDouble { destination } => {
-                for lane in result.chunks_exact_mut(8) {
-                    lane.copy_from_slice(operand);
+            CrossLaneInstruction::Broadcast {
+                element,
+                width,
+                destination,
+                source,
+            } => {
+                let source = self.capture_source(source, operand);
+                let bytes = usize::from(element.bytes());
+                for lane in result[..width.bytes()].chunks_exact_mut(bytes) {
+                    lane.copy_from_slice(&source[..bytes]);
                 }
                 self.publish(destination, result);
                 return Ok(());

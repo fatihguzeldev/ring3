@@ -1,6 +1,6 @@
 use super::VectorLayout;
 use crate::cpu::x86::avx::{
-    BlockTarget, CrossLaneInstruction, MoveSource, VectorRegister, VectorWidth,
+    BlockTarget, BroadcastElement, CrossLaneInstruction, MoveSource, VectorRegister, VectorWidth,
 };
 use wasm_encoder::{InstructionSink, MemArg};
 
@@ -83,23 +83,67 @@ pub(super) fn emit(
         return;
     }
     let (destination, width) = match operation {
-        BroadcastSingle { destination, width } => {
-            code.local_get(locals.operand)
-                .i32_load(arg(0))
-                .i32x4_splat()
-                .local_set(locals.result[0]);
+        Broadcast {
+            element,
+            width,
+            destination,
+            source,
+        } => {
+            match source {
+                MoveSource::Memory => {
+                    code.local_get(locals.operand);
+                    match element {
+                        BroadcastElement::Byte => {
+                            code.i32_load8_u(arg(0));
+                        }
+                        BroadcastElement::Word => {
+                            code.i32_load16_u(arg(0));
+                        }
+                        BroadcastElement::Dword => {
+                            code.i32_load(arg(0));
+                        }
+                        BroadcastElement::Qword => {
+                            code.i64_load(arg(0));
+                        }
+                    }
+                }
+                MoveSource::Register(_) => {
+                    load(code, layout, locals, source, 0);
+                    match element {
+                        BroadcastElement::Byte => {
+                            code.i8x16_extract_lane_u(0);
+                        }
+                        BroadcastElement::Word => {
+                            code.i16x8_extract_lane_u(0);
+                        }
+                        BroadcastElement::Dword => {
+                            code.i32x4_extract_lane(0);
+                        }
+                        BroadcastElement::Qword => {
+                            code.i64x2_extract_lane(0);
+                        }
+                    }
+                }
+            }
+            match element {
+                BroadcastElement::Byte => {
+                    code.i8x16_splat();
+                }
+                BroadcastElement::Word => {
+                    code.i16x8_splat();
+                }
+                BroadcastElement::Dword => {
+                    code.i32x4_splat();
+                }
+                BroadcastElement::Qword => {
+                    code.i64x2_splat();
+                }
+            }
+            code.local_set(locals.result[0]);
             if width == VectorWidth::Ymm {
                 code.local_get(locals.result[0]).local_set(locals.result[1]);
             }
             (destination, width)
-        }
-        BroadcastDouble { destination } => {
-            code.local_get(locals.operand)
-                .i64_load(arg(0))
-                .i64x2_splat()
-                .local_set(locals.result[0]);
-            code.local_get(locals.result[0]).local_set(locals.result[1]);
-            (destination, VectorWidth::Ymm)
         }
         BroadcastBlock { destination } => {
             code.local_get(locals.operand)

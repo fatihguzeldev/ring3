@@ -27,7 +27,9 @@ fn broadcasts_copy_raw_patterns_with_exact_source_width_and_upper_zeroing() {
     for destination in 0..8 {
         for (operation, bytes, width) in [
             (
-                CrossLaneInstruction::BroadcastSingle {
+                CrossLaneInstruction::Broadcast {
+                    element: BroadcastElement::Dword,
+                    source: MoveSource::Memory,
                     width: VectorWidth::Xmm,
                     destination: register(destination),
                 },
@@ -35,7 +37,9 @@ fn broadcasts_copy_raw_patterns_with_exact_source_width_and_upper_zeroing() {
                 16,
             ),
             (
-                CrossLaneInstruction::BroadcastSingle {
+                CrossLaneInstruction::Broadcast {
+                    element: BroadcastElement::Dword,
+                    source: MoveSource::Memory,
                     width: VectorWidth::Ymm,
                     destination: register(destination),
                 },
@@ -43,7 +47,10 @@ fn broadcasts_copy_raw_patterns_with_exact_source_width_and_upper_zeroing() {
                 32,
             ),
             (
-                CrossLaneInstruction::BroadcastDouble {
+                CrossLaneInstruction::Broadcast {
+                    element: BroadcastElement::Qword,
+                    width: VectorWidth::Ymm,
+                    source: MoveSource::Memory,
                     destination: register(destination),
                 },
                 8,
@@ -218,15 +225,22 @@ fn insert_extract_preserve_other_blocks_ignore_high_immediate_bits_and_snapshot_
 #[test]
 fn operand_and_host_state_refusals_precede_vector_or_store_publication() {
     let operations = [
-        CrossLaneInstruction::BroadcastSingle {
+        CrossLaneInstruction::Broadcast {
+            element: BroadcastElement::Dword,
+            source: MoveSource::Memory,
             width: VectorWidth::Xmm,
             destination: register(0),
         },
-        CrossLaneInstruction::BroadcastSingle {
+        CrossLaneInstruction::Broadcast {
+            element: BroadcastElement::Dword,
+            source: MoveSource::Memory,
             width: VectorWidth::Ymm,
             destination: register(0),
         },
-        CrossLaneInstruction::BroadcastDouble {
+        CrossLaneInstruction::Broadcast {
+            element: BroadcastElement::Qword,
+            width: VectorWidth::Ymm,
+            source: MoveSource::Memory,
             destination: register(0),
         },
         CrossLaneInstruction::BroadcastBlock {

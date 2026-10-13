@@ -9,7 +9,9 @@ pub(super) fn decode(kind: u8, s: Slots, immediate: u8) -> Result<AvxSemantic, A
                 false,
                 immediate,
             )?;
-            AvxSemantic::CrossLane(CrossLaneInstruction::BroadcastSingle {
+            AvxSemantic::CrossLane(CrossLaneInstruction::Broadcast {
+                element: BroadcastElement::Dword,
+                source: MoveSource::Memory,
                 width: VectorWidth::Xmm,
                 destination: s.vector(0),
             })
@@ -22,7 +24,9 @@ pub(super) fn decode(kind: u8, s: Slots, immediate: u8) -> Result<AvxSemantic, A
                 false,
                 immediate,
             )?;
-            AvxSemantic::CrossLane(CrossLaneInstruction::BroadcastSingle {
+            AvxSemantic::CrossLane(CrossLaneInstruction::Broadcast {
+                element: BroadcastElement::Dword,
+                source: MoveSource::Memory,
                 width: VectorWidth::Ymm,
                 destination: s.vector(0),
             })
@@ -35,7 +39,10 @@ pub(super) fn decode(kind: u8, s: Slots, immediate: u8) -> Result<AvxSemantic, A
                 false,
                 immediate,
             )?;
-            AvxSemantic::CrossLane(CrossLaneInstruction::BroadcastDouble {
+            AvxSemantic::CrossLane(CrossLaneInstruction::Broadcast {
+                element: BroadcastElement::Qword,
+                width: VectorWidth::Ymm,
+                source: MoveSource::Memory,
                 destination: s.vector(0),
             })
         }
@@ -95,7 +102,33 @@ pub(super) fn decode(kind: u8, s: Slots, immediate: u8) -> Result<AvxSemantic, A
                 immediate,
             })
         }
+        8..=15 => {
+            use BroadcastElement::*;
+            use VectorWidth::*;
+            let (element, width, source) = match kind {
+                8 => (Byte, Xmm, MemoryPolicy::Optional),
+                9 => (Byte, Ymm, MemoryPolicy::Optional),
+                10 => (Word, Xmm, MemoryPolicy::Optional),
+                11 => (Word, Ymm, MemoryPolicy::Optional),
+                12 => (Qword, Xmm, MemoryPolicy::Optional),
+                13 => (Dword, Xmm, MemoryPolicy::Forbidden),
+                14 => (Dword, Ymm, MemoryPolicy::Forbidden),
+                15 => (Qword, Ymm, MemoryPolicy::Forbidden),
+                _ => unreachable!("closed scalar broadcast templates"),
+            };
+            s.validate(D | B, source, MemoryPolicy::Forbidden, false, immediate)?;
+            AvxSemantic::CrossLane(CrossLaneInstruction::Broadcast {
+                element,
+                width,
+                destination: s.vector(0),
+                source: s.source(),
+            })
+        }
         _ => return Err(AvxDecodeError::Family),
     };
     Ok(semantic)
 }
+
+#[cfg(test)]
+#[path = "cross_lane/broadcast/native.rs"]
+mod broadcast;

@@ -28,7 +28,7 @@ pub(crate) use super::simd::BitTestKind;
 pub(crate) use compare::{CompareInstruction, CompareShape};
 pub(crate) use compound::CompoundInstruction;
 pub(crate) use convert::{ConvertInstruction, PackedConversion};
-pub(crate) use cross_lane::{BlockTarget, CrossLaneInstruction};
+pub(crate) use cross_lane::{BlockTarget, BroadcastElement, CrossLaneInstruction};
 pub(crate) use crypto::CryptoInstruction;
 pub(crate) use f16c::{F16cInstruction, F16cTarget};
 pub(crate) use fma::{FmaInstruction, FmaKind, FmaOrder, FmaShape};
