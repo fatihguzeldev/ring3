@@ -89,6 +89,16 @@ pub(super) fn operation(
         .i32_const(control_word(address, waiting) as i32)
         .call(index)
         .local_set(HELPER_STATUS);
+    if matches!(
+        operation,
+        crate::cpu::x86::X87Operation::Wait | crate::cpu::x86::X87Operation::NoOperation
+    ) {
+        code.local_get(HELPER_STATUS).i32_eqz();
+        super::memory::helper_field(code, 16);
+        code.i32_eqz().i32_and().if_(BlockType::Empty);
+        super::code_fetch::check_context(code, exit_depth + 1);
+        code.end();
+    }
     let length = operation.read_size().max(operation.write_size()) as u32;
     let access =
         u32::from(operation.read_size() != 0) | (u32::from(operation.write_size() != 0) << 1);

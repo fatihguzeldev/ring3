@@ -72,6 +72,12 @@ pub(super) fn instruction(
         }
     }
     code.local_get(FLAGS).call(execute).local_set(HELPER_STATUS);
+    if matches!(instruction.semantic(), AvxSemantic::Test(_))
+        || matches!(instruction.semantic(), AvxSemantic::String(value)
+            if value.output() == crate::cpu::x86::packed_strings::PackedStringOutput::Index)
+    {
+        super::super::code_fetch::check_context(code, exit_depth);
+    }
     let floating = matches!(
         instruction.semantic(),
         AvxSemantic::Floating(_)

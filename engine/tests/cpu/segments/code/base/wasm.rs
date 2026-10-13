@@ -21,6 +21,16 @@ fn segment_query_staging_stops_before_consuming_a_changed_code_context() {
     run("queries.mjs", "queries");
 }
 
+#[test]
+fn numeric_staging_stops_before_consuming_a_changed_code_context() {
+    run("numeric.mjs", "numeric");
+}
+
+#[test]
+fn gather_staging_stops_before_publishing_a_changed_code_context() {
+    run("gather.mjs", "gather");
+}
+
 fn run(script: &str, label: &str) {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
     let engine = std::env::var_os("RING3_ENGINE_WASM")

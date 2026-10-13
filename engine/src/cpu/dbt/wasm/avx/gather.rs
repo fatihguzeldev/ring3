@@ -53,6 +53,7 @@ pub(super) fn instruction(
         .local_get(FLAGS)
         .call(execute)
         .local_set(HELPER_STATUS);
+    super::super::code_fetch::check_context(code, exit_depth);
 
     // host failures never authorize staged vector publication.
     code.local_get(HELPER_STATUS).if_(BlockType::Empty);
