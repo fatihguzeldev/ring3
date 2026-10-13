@@ -1,6 +1,7 @@
 mod cross_lane;
 mod direct;
 mod execute;
+mod gather;
 mod integer;
 mod locals;
 mod logical;
@@ -35,6 +36,13 @@ pub(super) fn instruction(
     exit_depth: u32,
 ) -> bool {
     let locals = imports.avx_locals.expect("avx block local allocation");
+    if matches!(
+        operation.instruction().semantic(),
+        crate::cpu::x86::avx::AvxSemantic::Gather(_)
+    ) {
+        gather::instruction(code, operation, imports, locals, exit_depth);
+        return false;
+    }
     if direct_hotpath(operation.instruction()) {
         direct::instruction(code, operation, imports, locals, exit_depth)
     } else {

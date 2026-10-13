@@ -80,7 +80,7 @@ pub(crate) fn execute(
                 super::f16c::F16cError::FloatingPoint(mxcsr) => DispatchError::FloatingPoint(mxcsr),
                 _ => DispatchError::InvalidState,
             }),
-        // selected memory has one authority/transaction owner in process.
-        Masked(_) => Err(DispatchError::InvalidState),
+        // specialized memory has one authority owner in process.
+        Masked(_) | Gather(_) => Err(DispatchError::InvalidState),
     }
 }

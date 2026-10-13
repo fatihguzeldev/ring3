@@ -34,6 +34,7 @@ pub(super) fn instruction(
 ) -> bool {
     let instruction = operation.instruction();
     let (length, access, selected) = match instruction.memory() {
+        MemoryEffect::Gather(_) => unreachable!("gather has a dedicated staged helper route"),
         MemoryEffect::None => (0, 0, None),
         MemoryEffect::Full(requirement) => (
             u32::from(requirement.bytes),

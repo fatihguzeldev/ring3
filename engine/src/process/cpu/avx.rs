@@ -22,6 +22,8 @@ use crate::{
     process::{EngineInstance, HostError, StoreCompletion},
 };
 
+mod gather;
+
 struct Publication {
     simd: [u8; SIMD_SIZE],
     upper: [u8; YMM_SIZE],
@@ -143,6 +145,8 @@ impl EngineInstance {
                     ..
                 })
             ) && !crate::cpu::x86::capabilities::AVX2_ENABLED)
+            || (matches!(instruction.semantic(), AvxSemantic::Gather(_))
+                && !crate::cpu::x86::capabilities::AVX2_ENABLED)
         {
             return Err(HostError::InvalidRequest);
         }
@@ -164,6 +168,9 @@ impl EngineInstance {
                 .map_err(|_| HostError::Infrastructure)?
                 .registers,
         };
+        if let AvxSemantic::Gather(gather) = instruction.semantic() {
+            return self.avx_gather_apply(gather, &vectors);
+        }
         let mut general = State32 {
             eflags: flags,
             ..State32::default()
@@ -178,6 +185,7 @@ impl EngineInstance {
             MemoryEffect::None => 0,
             MemoryEffect::Full(requirement) => u32::from(requirement.bytes),
             MemoryEffect::Selected(masked) => masked.width().bytes() as u32,
+            MemoryEffect::Gather(_) => unreachable!("gather uses its staged memory route"),
         };
         let address = if effect == MemoryEffect::None {
             None

@@ -99,3 +99,6 @@ mod movemask_capability;
 
 #[path = "avx/moves/stream/capability/native.rs"]
 mod stream_capability;
+
+#[path = "avx/gather/capability/native.rs"]
+mod gather_capability;

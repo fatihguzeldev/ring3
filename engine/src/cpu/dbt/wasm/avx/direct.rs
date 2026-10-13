@@ -45,7 +45,9 @@ pub(super) fn instruction(
     let requirement = match instruction.memory() {
         MemoryEffect::None => None,
         MemoryEffect::Full(requirement) => Some(requirement),
-        MemoryEffect::Selected(_) => unreachable!("selected accesses belong to the avx helper"),
+        MemoryEffect::Selected(_) | MemoryEffect::Gather(_) => {
+            unreachable!("specialized accesses belong to the avx helper")
+        }
     };
     if let Some(requirement) = requirement {
         memory::checked_address(

@@ -24,6 +24,7 @@ pub(crate) enum AvxSemantic {
     Crypto(CryptoInstruction),
     String(StringInstruction),
     F16c(F16cInstruction),
+    Gather(GatherInstruction),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -31,6 +32,7 @@ pub(crate) enum MemoryEffect {
     None,
     Full(MemoryRequirement),
     Selected(MaskedInstruction),
+    Gather(GatherInstruction),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -56,7 +58,13 @@ pub(crate) struct AvxInstruction {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct AvxOperation {
     instruction: AvxInstruction,
-    address: Option<EffectiveAddress>,
+    address: Option<AvxAddress>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum AvxAddress {
+    Scalar(EffectiveAddress),
+    Gather(GatherAddress),
 }
 
 impl AvxOperation {
@@ -64,19 +72,42 @@ impl AvxOperation {
         instruction: AvxInstruction,
         address: Option<EffectiveAddress>,
     ) -> Result<Self, AvxDecodeError> {
-        if (instruction.memory() != MemoryEffect::None) != address.is_some() {
+        if matches!(instruction.memory(), MemoryEffect::Gather(_))
+            || (instruction.memory() != MemoryEffect::None) != address.is_some()
+        {
             return Err(AvxDecodeError::Address);
         }
         Ok(Self {
             instruction,
-            address,
+            address: address.map(AvxAddress::Scalar),
+        })
+    }
+    pub(crate) fn new_gather(
+        instruction: AvxInstruction,
+        address: GatherAddress,
+    ) -> Result<Self, AvxDecodeError> {
+        if !matches!(instruction.memory(), MemoryEffect::Gather(_)) {
+            return Err(AvxDecodeError::Address);
+        }
+        Ok(Self {
+            instruction,
+            address: Some(AvxAddress::Gather(address)),
         })
     }
     pub(crate) fn instruction(self) -> AvxInstruction {
         self.instruction
     }
     pub(crate) fn address(self) -> Option<EffectiveAddress> {
-        self.address
+        match self.address {
+            Some(AvxAddress::Scalar(address)) => Some(address),
+            _ => None,
+        }
+    }
+    pub(crate) fn gather_address(self) -> Option<GatherAddress> {
+        match self.address {
+            Some(AvxAddress::Gather(address)) => Some(address),
+            _ => None,
+        }
     }
 }
 
@@ -131,6 +162,7 @@ impl AvxInstruction {
             String(value) => value.memory(),
             F16c(value) => value.memory(),
             Masked(value) => return MemoryEffect::Selected(value),
+            Gather(value) => return MemoryEffect::Gather(value),
         };
         requirement.map_or(MemoryEffect::None, MemoryEffect::Full)
     }

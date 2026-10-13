@@ -21,6 +21,7 @@ mod crypto;
 mod f16c;
 mod floating;
 mod fma;
+mod gather;
 mod integer;
 mod logical;
 mod masked;
@@ -107,6 +108,9 @@ pub(crate) fn lower(
         Ok(value) => value,
         Err(error) => return Some(Err(error)),
     };
+    if let Some(value) = gather::lower(instruction, encoding) {
+        return Some(value);
+    }
     if let Some(value) = moves::lower(instruction, encoding) {
         return Some(value);
     }

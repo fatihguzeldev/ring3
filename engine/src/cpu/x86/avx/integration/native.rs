@@ -177,6 +177,7 @@ fn reference(name: &str, original: Vec<u8>, instruction: AvxInstruction) -> Case
     let mut expected_ram = ram.clone();
     let mut operand = [0; 32];
     let (length, access, alignment, selected) = match memory {
+        MemoryEffect::Gather(_) => panic!("gather uses its dedicated partial-fault harness"),
         MemoryEffect::None => (0, 0, 1, 0),
         MemoryEffect::Full(value) => {
             let length = usize::from(value.bytes);

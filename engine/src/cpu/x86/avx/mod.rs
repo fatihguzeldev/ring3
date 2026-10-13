@@ -11,6 +11,7 @@ mod convert;
 mod cross_lane;
 mod crypto;
 mod f16c;
+mod gather;
 mod integer;
 #[cfg(test)]
 mod logical;
@@ -32,6 +33,9 @@ pub(crate) use cross_lane::{BlockTarget, BroadcastElement, CrossLaneInstruction}
 pub(crate) use crypto::CryptoInstruction;
 pub(crate) use f16c::{F16cInstruction, F16cTarget};
 pub(crate) use fma::{FmaInstruction, FmaKind, FmaOrder, FmaShape};
+pub(crate) use gather::{
+    GatherAddress, GatherFaultCause, GatherGeometry, GatherInstruction, GatherScale,
+};
 pub(crate) use integer::IntegerInstruction;
 pub(crate) use masked::{MaskedError, MaskedInstruction};
 pub(crate) use moves::{
