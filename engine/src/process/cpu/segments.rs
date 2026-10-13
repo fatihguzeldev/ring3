@@ -36,6 +36,20 @@ pub(super) fn check_cached_span(
 }
 
 impl EngineInstance {
+    pub(in crate::process) fn code_decode_key(
+        &self,
+    ) -> Result<crate::cpu::x86::decode::CodeDecodeKey, HostError> {
+        self.memory()?;
+        crate::abi::x86::decode_current_code_key(
+            &self.arena()[SEGMENTS_OFFSET..SEGMENTS_OFFSET + SEGMENTS_SIZE],
+            Some(
+                &self.arena()[SEGMENT_BASES_RECORD_OFFSET
+                    ..SEGMENT_BASES_RECORD_OFFSET + SEGMENT_BASES_RECORD_SIZE],
+            ),
+        )
+        .map_err(|_| HostError::Infrastructure)
+    }
+
     pub(in crate::process) fn code_fetch_context(
         &self,
     ) -> Result<crate::cpu::x86::decode::CodeFetchContext, HostError> {
@@ -129,7 +143,7 @@ impl EngineInstance {
     }
 
     pub fn segment_load(&mut self, target: u32, selector: u32) -> Result<(), HostError> {
-        self.guard(self.key, self.generation())?;
+        self.guard_material(self.key, self.generation())?;
         self.segment_load_bound(target, selector, 0, 0)
     }
 
@@ -140,7 +154,7 @@ impl EngineInstance {
         target: u32,
         selector: u32,
     ) -> Result<(), HostError> {
-        self.guard_resident(key, id)?;
+        self.guard_material_resident(key, id)?;
         self.segment_load_bound(target, selector, 0, 0)
     }
 
@@ -150,7 +164,7 @@ impl EngineInstance {
         address: u32,
         word: u32,
     ) -> Result<(), HostError> {
-        self.guard(self.key, self.generation())?;
+        self.guard_material(self.key, self.generation())?;
         self.segment_load_far_bound(target, address, word)
     }
 
@@ -162,7 +176,7 @@ impl EngineInstance {
         address: u32,
         word: u32,
     ) -> Result<(), HostError> {
-        self.guard_resident(key, id)?;
+        self.guard_material_resident(key, id)?;
         self.segment_load_far_bound(target, address, word)
     }
 

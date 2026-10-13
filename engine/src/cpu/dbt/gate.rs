@@ -59,8 +59,19 @@ pub(super) fn prepare(
                 }),
             });
         }
+        let linear = if let Some(cs) = cs {
+            cs.linear_span(gate.entry, length)
+                .ok_or(CompileError::Instruction {
+                    pc: gate.entry,
+                    cause: InstructionError::Decode(DecodeError::Unsupported(
+                        crate::cpu::UnsupportedFeature::Segment,
+                    )),
+                })?
+        } else {
+            gate.entry
+        };
         memory
-            .fetch(gate.entry, &mut bytes[..length])
+            .fetch(linear, &mut bytes[..length])
             .map_err(|error| memory_error(gate.entry, error))?;
     }
     if bytes != [0x0f, 0x0b] {
@@ -70,7 +81,10 @@ pub(super) fn prepare(
         });
     }
     let snapshot = memory
-        .snapshot_code(gate.entry, bytes.len())
+        .snapshot_code(
+            cs.map_or(gate.entry, |cs| cs.linear_address(gate.entry)),
+            bytes.len(),
+        )
         .map_err(|error| memory_error(gate.entry, error))?;
     Ok(PreparedGate {
         entry: gate.entry,

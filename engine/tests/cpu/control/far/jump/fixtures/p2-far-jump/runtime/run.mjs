@@ -77,16 +77,32 @@ const cache = raw => (raw.limit + (raw.type | 1) * 0x100000 + Number(raw.pages) 
 const cacheOffsets = [28, 32, 36, 40, 44, 56];
 function decodeSegments(bytes) {
   const selectors = Array.from({length: 6}, (_, i) => bytes.readUInt16LE(16 + i * 2));
-  const caches = bytes.readUInt16LE(4) === 1 ? selectors.map((selector, i) => (selector & 0xfffc) === 0 ? 0 : i === 1 ? 0xf3bfffff : 0xf33fffff) : cacheOffsets.map(at => bytes.readUInt32LE(at));
-  return {selectors, caches, fs: bytes.readUInt32LE(48), gs: bytes.readUInt32LE(52)};
+  const version = bytes.readUInt16LE(4);
+  const caches = version === 1 ? selectors.map((selector, i) => (selector & 0xfffc) === 0 ? 0 : i === 1 ? 0xf3bfffff : 0xf33fffff) : cacheOffsets.map(at => bytes.readUInt32LE(at));
+  const bases = version === 3 ? Array.from({length: 6}, (_, i) => bytes.readUInt32LE(4756 - SEG + 16 + i * 4)) : [0, 0, 0, 0, bytes.readUInt32LE(48), bytes.readUInt32LE(52)];
+  return {selectors, caches, bases, fs: bases[4], gs: bases[5]};
+}
+function contextBases(context) {
+  const bases = [...(context.bases ?? [0, 0, 0, 0, 0, 0])];
+  bases[4] = context.fs ?? bases[4]; bases[5] = context.gs ?? bases[5];
+  return bases;
 }
 function encodeSegments(context) {
-  const bytes = packet('R3SG', 64, [], 1);
+  const bases = contextBases(context), bytes = packet('R3SG', 64, [], 1);
   context.selectors.forEach((value, i) => bytes.writeUInt16LE(value, 16 + i * 2));
-  bytes.writeUInt32LE(context.fs, 48); bytes.writeUInt32LE(context.gs, 52);
   const legacy = context.selectors.map((selector, i) => (selector & 0xfffc) === 0 ? 0 : i === 1 ? 0xf3bfffff : 0xf33fffff);
-  if (!context.caches.every((value, i) => value === legacy[i])) {bytes.writeUInt16LE(2, 4); context.caches.forEach((value, i) => bytes.writeUInt32LE(value, cacheOffsets[i]));}
+  const nonflat = bases.slice(0, 4).some(value => value !== 0);
+  if (nonflat || !context.caches.every((value, i) => value === legacy[i])) {
+    bytes.writeUInt16LE(nonflat ? 3 : 2, 4);
+    context.caches.forEach((value, i) => bytes.writeUInt32LE(value, cacheOffsets[i]));
+  }
+  if (!nonflat) {bytes.writeUInt32LE(bases[4], 48); bytes.writeUInt32LE(bases[5], 52);}
   return bytes;
+}
+function publishSegments(bytes, context) {
+  const segments = encodeSegments(context), companion = packet('R3SB', 40, [], 1);
+  if (segments.readUInt16LE(4) === 3) contextBases(context).forEach((value, i) => companion.writeUInt32LE(value >>> 0, 16 + i * 4));
+  bytes.set(segments, SEG); bytes.set(companion, 4756);
 }
 function oracle(selector, raw, offset, word) {
   const code = selector & 0xfffc, target = word ? offset & 0xffff : offset >>> 0;
@@ -101,8 +117,8 @@ function oracle(selector, raw, offset, word) {
   if (!raw.present) return {reason: 14, status: 6, detail: code};
   const limit = raw.pages ? raw.limit * 4096 + 4095 : raw.limit;
   if (target > limit) return {reason: 11, status: 3, detail: 0};
-  if (raw.base !== 0 || !raw.d32 || raw.long) return {reason: 7, host: 7, detail: 3};
-  return {reason: 1, status: 0, target, selector: code | 3, cache: cache(raw)};
+  if (!raw.d32 || raw.long) return {reason: 7, host: 7, detail: 3};
+  return {reason: 1, status: 0, target, selector: code | 3, cache: cache(raw), base: raw.base};
 }
 function pointer(word, offset, selector) {const bytes = Buffer.alloc(word ? 4 : 6); if (word) bytes.writeUInt16LE(offset & 0xffff); else bytes.writeUInt32LE(offset >>> 0); bytes.writeUInt16LE(selector, bytes.length - 2); return bytes;}
 function open(resident, entries, word, source) {
@@ -175,22 +191,22 @@ function execute(c, label, expected, {address = POINTER, sourceSegment, logical 
   const seed = createArena(); seed.writeUInt16LE(2, 4); seed.writeUInt32LE(flags, 52); seed.writeUInt32LE(pc, 48);
   const registers = [0x12345678, 0x23456789, 0x3456789a, 0x456789ab, 0x6040, logical, 0x56789abc, logical];
   registers.forEach((value, i) => seed.writeUInt32LE(value >>> 0, 16 + i * 4)); seed.writeUInt32LE(cancel, 96);
-  if (preserveSegments) seed.set(arena(c).subarray(SEG, SEG + 64), SEG);
-  if (context) seed.set(encodeSegments(context), SEG);
+  if (preserveSegments) {seed.set(arena(c).subarray(SEG, SEG + 64), SEG); seed.set(arena(c).subarray(4756, 4796), 4756);}
+  if (context) publishSegments(seed, context);
   if (sourceSegment) {
     const state = decodeSegments(seed.subarray(SEG)); state.selectors[sourceSegment.index] = sourceSegment.selector ?? state.selectors[sourceSegment.index]; state.caches[sourceSegment.index] = sourceSegment.cache;
     if (sourceSegment.index === 4) state.fs = sourceSegment.base ?? state.fs;
     if (sourceSegment.index === 5) state.gs = sourceSegment.base ?? state.gs;
-    seed.set(encodeSegments(state), SEG);
+    publishSegments(seed, state);
   }
   put(c, 0, seed); const want = Buffer.from(seed), success = expected.status === 0 && !faultRead && (helper || pc === TARGET) && budget > 0 && !cancel;
   let reason = expected.reason, retired = Number(success), detail = expected.detail ?? 0, at = 0, access = 0, length = 0;
   if (cancel || budget === 0) {reason = cancel ? 2 : 1; retired = 0; detail = 0; helper = false;}
   if (success) {
     want.writeUInt32LE(expected.target, 48);
-    const state = decodeSegments(want.subarray(SEG)); state.selectors[1] = expected.selector; state.caches[1] = expected.cache; want.set(encodeSegments(state), SEG);
+    const state = decodeSegments(want.subarray(SEG)); state.selectors[1] = expected.selector; state.caches[1] = expected.cache; state.bases[1] = expected.base; publishSegments(want, state);
     if (flags & 0x100) reason = 16;
-    else if (budget > 1) {reason = c.twoBlocks ? 1 : 3; retired = c.twoBlocks ? 2 : 1;}
+    else if (budget > 1) {reason = c.twoBlocks && !expected.base ? 1 : 3; retired = c.twoBlocks && !expected.base ? 2 : 1;}
   }
   if (faultRead) {reason = 5; retired = 0; detail = faultRead.detail; at = faultRead.address; access = 1; length = c.word ? 4 : 6;}
   want.set(packet('R3EX', 40, [reason, retired, detail, at, access, length], reason >= 16 ? 7 : 6), 56);
@@ -355,6 +371,6 @@ if (mode !== 'protocol') {
 
 assert.deepEqual(pins(), sourcePins, 'all pinned source bytes remain frozen');
 writeFileSync(join(output, 'result.json'), JSON.stringify({status: 'ok', engine_sha256: engine.sha256, source_pins: sourcePins, counts,
-  limits: ['fixed protected32 CPL3, base-zero bounded D32/L0 source and target CS; all four direct far JMP encodings only', 'known outer system descriptor faults are architectural; outer-admissible gate/task payloads remain unresolved neutral host profile refusals; nonflat/D16/L1 direct CS stays refused', 'CALL/RETF/INTn/IRET remain separate; bound CS fetch checks own post-transfer denial', 'native process tests own raw A-bit readback; actual proof owns cache publication, retained capture, flags, exact pointer reads and helper currentness']}, null, 2) + '\n');
+  limits: ['fixed protected32 CPL3, D32/L0 CS with logical target and current v3 base publication; all four direct far JMP encodings only', 'known outer system descriptor faults are architectural; outer-admissible gate/task payloads remain unresolved neutral host profile refusals; D16/L1 direct CS stays refused; nonflat D32 CS commits logical targets and a v3 companion', 'CALL/RETF/INTn/IRET and generic CS fetch-limit enforcement remain separate', 'native process tests own raw A-bit readback; actual proof owns cache publication, retained capture, flags, exact pointer reads and helper currentness']}, null, 2) + '\n');
 writeFileSync(join(output, 'observations.json'), JSON.stringify(observations, null, 2) + '\n');
 console.log(JSON.stringify({status: 'ok', ...counts, output}));

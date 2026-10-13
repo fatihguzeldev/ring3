@@ -29,7 +29,7 @@ fn width(word: u32) -> Result<FarWidth, HostError> {
 
 impl EngineInstance {
     pub fn far_jump(&mut self, offset: u32, selector: u32, word: u32) -> Result<(), HostError> {
-        self.guard(self.key, self.generation())?;
+        self.guard_material(self.key, self.generation())?;
         self.far_jump_bound(offset, selector, word)
     }
 
@@ -41,7 +41,7 @@ impl EngineInstance {
         selector: u32,
         word: u32,
     ) -> Result<(), HostError> {
-        self.guard_resident(key, id)?;
+        self.guard_material_resident(key, id)?;
         self.far_jump_bound(offset, selector, word)
     }
 
@@ -71,7 +71,7 @@ impl EngineInstance {
         transfer: CodeTransfer,
     ) -> Result<PreparedTransfer, HostError> {
         let cs = SegmentRegister::Cs.index();
-        if context.state.bases[cs] != 0 || !context.caches[cs].default32() {
+        if !context.caches[cs].default32() {
             return Err(HostError::InvalidRequest);
         }
         transfer.apply(&mut context);

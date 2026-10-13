@@ -1,6 +1,7 @@
 use wasm_encoder::{
-    BlockType, CodeSection, EntityType, ExportKind, ExportSection, Function, FunctionSection,
-    ImportSection, InstructionSink, MemoryType, Module, TypeSection, ValType,
+    BlockType, CodeSection, ConstExpr, EntityType, ExportKind, ExportSection, Function,
+    FunctionSection, GlobalSection, GlobalType, ImportSection, InstructionSink, MemoryType, Module,
+    TypeSection, ValType,
 };
 
 use super::{EmbeddedBinding, abi, code_fetch, integer, locals::*, memory, segments, x87};
@@ -10,6 +11,7 @@ use crate::cpu::x86::ir::Operation;
 pub(in crate::cpu::dbt) fn emit(
     blocks: &[CompiledBlock],
     binding: Option<EmbeddedBinding>,
+    decode_key: Option<crate::cpu::x86::decode::CodeDecodeKey>,
 ) -> Vec<u8> {
     let mut module = Module::new();
     let memory::ImportNeeds {
@@ -827,6 +829,23 @@ pub(in crate::cpu::dbt) fn emit(
         functions.function(segment_check_type);
     }
     module.section(&functions);
+    let key = decode_key.unwrap_or(crate::cpu::x86::decode::CodeDecodeKey::FLAT);
+    let mut globals = GlobalSection::new();
+    for value in [
+        i32::from(binding.is_some()),
+        key.cs_base as i32,
+        i32::from(key.default32),
+    ] {
+        globals.global(
+            GlobalType {
+                val_type: ValType::I32,
+                mutable: false,
+                shared: false,
+            },
+            &ConstExpr::i32_const(value),
+        );
+    }
+    module.section(&globals);
     let mut exports = ExportSection::new();
     exports.export("run", ExportKind::Func, function_index);
     module.section(&exports);
@@ -915,6 +934,9 @@ pub(in crate::cpu::dbt) fn emit(
     }
     code.block(BlockType::Empty).loop_(BlockType::Empty);
     abi::safepoint(&mut code, 1);
+    if binding.is_some() {
+        code_fetch::check_context(&mut code, 1);
+    }
     for block in blocks {
         emit_block(&mut code, block, helper_imports);
     }
@@ -958,6 +980,8 @@ fn emit_block(code: &mut InstructionSink<'_>, block: &CompiledBlock, imports: me
             .i32_eq()
             .if_(BlockType::Empty);
         if let Some(limit) = imports.code_fetch_limit {
+            code_fetch::check_context(code, 2);
+            code_fetch::refresh(code, limit);
             code_fetch::check_span(code, gate.entry.0, 2, limit, 2);
         }
         code.i32_const(gate.id as i32)
@@ -995,6 +1019,8 @@ fn emit_block(code: &mut InstructionSink<'_>, block: &CompiledBlock, imports: me
             let remaining = count - index as u32 - 1;
             abi::safepoint(code, remaining + 2);
             if let Some(limit) = imports.code_fetch_limit {
+                code_fetch::check_context(code, remaining + 2);
+                code_fetch::refresh(code, limit);
                 code_fetch::check_instruction(code, instruction, limit, remaining + 2);
             }
             if matches!(instruction.operation(), Operation::InterruptReturn { .. }) {
@@ -1020,6 +1046,13 @@ fn emit_block(code: &mut InstructionSink<'_>, block: &CompiledBlock, imports: me
             .i32_eq()
             .if_(BlockType::Empty);
         abi::safepoint(code, 2);
+        code_fetch::check_context(code, 2);
+        code_fetch::refresh(
+            code,
+            imports
+                .code_fetch_limit
+                .expect("context fault requires a bound module"),
+        );
         code_fetch::check_span(
             code,
             fault.pc.0,

@@ -36,6 +36,7 @@ pub(in crate::cpu::dbt::wasm) fn return_(
             .i32_const(1)
             .call(imports.cpu_read.expect("far return stack read"))
             .local_set(HELPER_STATUS);
+        crate::cpu::dbt::wasm::code_fetch::check_context(code, exit_depth);
         cpu_result::validate(code, slot, 1, false, exit_depth);
         code.local_get(STATE_PTR);
         if offset == 0 {

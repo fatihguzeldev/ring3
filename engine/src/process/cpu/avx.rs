@@ -81,7 +81,7 @@ impl EngineInstance {
         live1: u32,
         flags: u32,
     ) -> Result<StoreCompletion, HostError> {
-        self.guard(self.key, self.generation())?;
+        self.guard_material(self.key, self.generation())?;
         self.avx_apply(None, descriptor, operands, immediate, [live0, live1], flags)
     }
 
@@ -97,7 +97,7 @@ impl EngineInstance {
         live1: u32,
         flags: u32,
     ) -> Result<StoreCompletion, HostError> {
-        self.guard_resident(key, id)?;
+        self.guard_material_resident(key, id)?;
         self.avx_apply(
             Some(id),
             descriptor,

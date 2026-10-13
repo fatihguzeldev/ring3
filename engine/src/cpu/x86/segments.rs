@@ -38,21 +38,17 @@ impl Default for SegmentState {
 
 impl SegmentState {
     pub fn set_base(&mut self, register: SegmentRegister, base: u32) -> bool {
-        if register == SegmentRegister::Cs && base != 0 {
-            return false;
-        }
         self.bases[register.index()] = base;
         true
     }
 
     pub fn is_valid(&self) -> bool {
-        self.bases[SegmentRegister::Cs.index()] == 0
-            && [SegmentRegister::Cs, SegmentRegister::Ss]
-                .into_iter()
-                .all(|segment| {
-                    let selector = self.selectors[segment.index()];
-                    selector & !3 != 0 && selector & 3 == 3
-                })
+        [SegmentRegister::Cs, SegmentRegister::Ss]
+            .into_iter()
+            .all(|segment| {
+                let selector = self.selectors[segment.index()];
+                selector & !3 != 0 && selector & 3 == 3
+            })
     }
 }
 mod cache;

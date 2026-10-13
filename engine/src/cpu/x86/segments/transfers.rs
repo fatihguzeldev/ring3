@@ -73,15 +73,15 @@ impl CodeDestination {
         if offset > limit {
             return Err(CodeTransferError::GeneralProtection(0));
         }
-        // base-zero D32 keeps logical EIP equal to the captured linear address.
-        if record.code_data_base() != Some(0) || !record.default32() || record.long_mode() {
+        // decoded code retains logical offsets under its loaded CS base and D key.
+        if !record.default32() || record.long_mode() {
             return Err(CodeTransferError::UnsupportedProfile);
         }
         Ok(CodeTransfer {
             offset,
             load: SegmentLoad {
                 selector: self.selector,
-                base: 0,
+                base: record.code_data_base().expect("code descriptor has a base"),
                 cache: record
                     .loaded_cache()
                     .expect("present non-long code is cacheable"),

@@ -10,7 +10,7 @@ impl EngineInstance {
         return_eip: u32,
         esp: u32,
     ) -> Result<StoreCompletion, HostError> {
-        self.guard(self.key, self.generation())?;
+        self.guard_material(self.key, self.generation())?;
         self.far_call_bound(None, offset, selector, word, return_eip, esp)
     }
 
@@ -25,7 +25,7 @@ impl EngineInstance {
         return_eip: u32,
         esp: u32,
     ) -> Result<StoreCompletion, HostError> {
-        self.guard_resident(key, id)?;
+        self.guard_material_resident(key, id)?;
         self.far_call_bound(Some(id), offset, selector, word, return_eip, esp)
     }
 

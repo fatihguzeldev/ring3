@@ -158,6 +158,7 @@ fn prepare(
                             memory,
                             *entry,
                             consumed_length,
+                            cs,
                         )?)
                     };
                     terminal = Some(BlockSource::ContextFault { fault, consumed });
@@ -192,6 +193,7 @@ fn prepare(
                 memory,
                 *entry,
                 (cursor - start) as usize,
+                cs,
             )?),
         };
         blocks.push(CompiledBlock {
@@ -200,7 +202,7 @@ fn prepare(
         });
     }
 
-    Ok(PreparedRegion::new(memory, blocks))
+    Ok(PreparedRegion::new(memory, blocks, cs))
 }
 
 #[cfg(test)]

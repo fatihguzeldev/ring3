@@ -103,12 +103,6 @@ fn normalized_offset_limit_and_execution_profile_refusals_are_distinct() {
             CodeTransferError::GeneralProtection(0),
         ),
         (
-            record(0x1a, 3, true, 0xfffff, true, true, 0x1000),
-            FarWidth::Dword,
-            1,
-            CodeTransferError::UnsupportedProfile,
-        ),
-        (
             record(0x1a, 3, true, 0xfffff, true, false, 0),
             FarWidth::Dword,
             1,
@@ -286,4 +280,26 @@ fn return_checks_selector_rpl_even_for_conforming_code_before_presence() {
         table.resolve_far_return(0x4b, 0, FarWidth::Dword, 3),
         Err(CodeTransferError::GeneralProtection(0x48))
     );
+}
+
+#[test]
+fn nonflat_d32_destination_publishes_loaded_base_with_logical_offset() {
+    let mut table = SegmentDescriptorTable::empty();
+    table
+        .configure_raw(
+            0x40,
+            record(0x1a, 3, true, 0xfffff, true, true, 0xffff_f000),
+        )
+        .unwrap();
+    let transfer = table
+        .resolve_far_jump(0x43, 0x2010, FarWidth::Dword, 3)
+        .unwrap();
+    let mut context = SegmentContext::default();
+    transfer.apply(&mut context);
+    assert_eq!(transfer.offset, 0x2010);
+    assert_eq!(
+        context.state.bases[SegmentRegister::Cs.index()],
+        0xffff_f000
+    );
+    assert!(context.caches[SegmentRegister::Cs.index()].default32());
 }

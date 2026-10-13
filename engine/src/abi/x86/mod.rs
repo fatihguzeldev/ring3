@@ -35,7 +35,7 @@ pub use x87::{
     X87_REGISTERS_OFFSET, X87_SIZE, X87_STATUS_OFFSET, X87_TAG_OFFSET, decode_x87, encode_x87,
 };
 
-pub(crate) use segments::SEGMENTS_CACHE_OFFSETS;
+pub(crate) use segments::{SEGMENTS_CACHE_OFFSETS, decode_current_code_key};
 
 pub use ymm::{YMM_REGISTERS_OFFSET, YMM_SIZE, decode_ymm, encode_ymm};
 

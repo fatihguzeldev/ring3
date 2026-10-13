@@ -103,7 +103,6 @@ fn unsupported_profiles_refuse_neutrally_and_bounded_source_transfers() {
     let mut engine = engine();
     for (low, high) in [
         (0xffff, 0x008ffa00),
-        (0x1000ffff, 0x00cffa00),
         (0xffff, 0x00effa00),
         (0xdeadbeef, 0x89abec76),
     ] {
@@ -243,4 +242,23 @@ fn far_jump_keeps_nonflat_data_bases_and_companion_caches() {
     }
     assert_eq!(after.state.selectors[SegmentRegister::Cs.index()], 0x43);
     assert_eq!(support::field(&engine, 16), 0);
+}
+
+#[test]
+fn far_jump_commits_nonzero_code_base_and_keeps_logical_result() {
+    let mut engine = engine();
+    engine
+        .configure_segment_descriptor_raw(
+            0x43,
+            SegmentDescriptorRecord::from_words(0x1000ffff, 0x00cffa00),
+        )
+        .unwrap();
+    engine.far_jump(0x2345, 0x43, 0).unwrap();
+    assert_eq!(engine.segment_context().unwrap().state.bases[1], 0x1000);
+    assert_eq!(value(&engine, 20), 0x2345);
+    assert_eq!(engine.guard(engine.key, engine.generation()), Ok(()));
+    assert_eq!(
+        engine.guard_material(engine.key, engine.generation()),
+        Err(HostError::InvalidArtifact)
+    );
 }

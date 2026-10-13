@@ -29,12 +29,16 @@ impl EngineInstance {
         let exit = decode_exit(&arena[EXIT_OFFSET..EXIT_OFFSET + EXIT_SIZE])
             .map_err(|_| HostError::Call(CallError::InvalidStop))?;
         if exit.reason != ExitReason::NeedCode
-            || self.artifact.as_ref().unwrap().contains_material(state.eip)
             || self
                 .artifact
                 .as_ref()
                 .unwrap()
-                .context_fault(state.eip)
+                .contains_material_in(state.eip, cs.decode_key())
+            || self
+                .artifact
+                .as_ref()
+                .unwrap()
+                .context_fault_in(state.eip, cs.decode_key())
                 .is_some_and(|fault| !cs.permits(fault.pc, fault.attempted_length))
         {
             return Err(HostError::Call(CallError::InvalidStop));

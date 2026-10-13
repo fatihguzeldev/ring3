@@ -768,6 +768,7 @@ pub(super) fn load(
     code.local_get(ADDRESS)
         .call(imports.read.expect("prepared memory load has an import"))
         .local_set(HELPER_STATUS);
+    super::code_fetch::check_context(code, exit_depth);
     validate_result(code, false);
     exit_if_failed(code, exit_depth);
     helper_field(code, 20);
@@ -1047,6 +1048,7 @@ pub(super) fn load_result_at_address(
                 .expect("prepared memory operand has a read import"),
         )
         .local_set(HELPER_STATUS);
+    super::code_fetch::check_context(code, exit_depth);
     validate_result(code, false);
     exit_if_failed(code, exit_depth);
     helper_field(code, 20);
@@ -1136,6 +1138,7 @@ pub(super) fn pop_return(
     code.local_get(ADDRESS)
         .call(imports.read.expect("prepared return has a read import"))
         .local_set(HELPER_STATUS);
+    super::code_fetch::check_context(code, exit_depth);
     validate_result(code, false);
     exit_if_failed(code, exit_depth);
     helper_field(code, 20);
@@ -1364,6 +1367,7 @@ pub(super) fn protocol_if_bad(code: &mut InstructionSink<'_>) {
 }
 
 pub(super) fn exit_if_failed(code: &mut InstructionSink<'_>, exit_depth: u32) {
+    super::code_fetch::check_rejected(code, exit_depth);
     code.local_get(REASON)
         .if_(BlockType::Empty)
         .br(exit_depth + 1)

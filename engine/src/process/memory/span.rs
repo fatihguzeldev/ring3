@@ -32,7 +32,7 @@ impl EngineInstance {
         length: u32,
         alignment: u32,
     ) -> Result<StoreCompletion, HostError> {
-        self.guard(self.key, self.generation())?;
+        self.guard_material(self.key, self.generation())?;
         self.cpu_write_bound(None, address, length, alignment, length)
     }
 
@@ -44,12 +44,12 @@ impl EngineInstance {
         length: u32,
         alignment: u32,
     ) -> Result<StoreCompletion, HostError> {
-        self.guard_resident(key, id)?;
+        self.guard_material_resident(key, id)?;
         self.cpu_write_bound(Some(id), address, length, alignment, length)
     }
 
     pub fn cpu_fxsave(&mut self, address: u32) -> Result<StoreCompletion, HostError> {
-        self.guard(self.key, self.generation())?;
+        self.guard_material(self.key, self.generation())?;
         self.cpu_write_bound(None, address, 512, 16, 464)
     }
 
@@ -59,7 +59,7 @@ impl EngineInstance {
         id: u64,
         address: u32,
     ) -> Result<StoreCompletion, HostError> {
-        self.guard_resident(key, id)?;
+        self.guard_material_resident(key, id)?;
         self.cpu_write_bound(Some(id), address, 512, 16, 464)
     }
 
@@ -99,7 +99,7 @@ impl EngineInstance {
         length: u32,
         mask: u32,
     ) -> Result<StoreCompletion, HostError> {
-        self.guard(self.key, self.generation())?;
+        self.guard_material(self.key, self.generation())?;
         self.cpu_mask_write_bound(None, address, length, mask)
     }
 
@@ -111,7 +111,7 @@ impl EngineInstance {
         length: u32,
         mask: u32,
     ) -> Result<StoreCompletion, HostError> {
-        self.guard_resident(key, id)?;
+        self.guard_material_resident(key, id)?;
         self.cpu_mask_write_bound(Some(id), address, length, mask)
     }
 

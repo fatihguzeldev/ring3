@@ -23,7 +23,7 @@ impl EngineInstance {
         low: u32,
         high: u32,
     ) -> Result<StoreCompletion, HostError> {
-        self.guard(self.key, self.generation())?;
+        self.guard_material(self.key, self.generation())?;
         self.xsave_bound(None, address, low, high)
     }
 
@@ -35,12 +35,12 @@ impl EngineInstance {
         low: u32,
         high: u32,
     ) -> Result<StoreCompletion, HostError> {
-        self.guard_resident(key, id)?;
+        self.guard_material_resident(key, id)?;
         self.xsave_bound(Some(id), address, low, high)
     }
 
     pub fn cpu_xrstor(&mut self, address: u32, low: u32, high: u32) -> Result<(), HostError> {
-        self.guard(self.key, self.generation())?;
+        self.guard_material(self.key, self.generation())?;
         self.xrstor_bound(address, low, high)
     }
 
@@ -52,7 +52,7 @@ impl EngineInstance {
         low: u32,
         high: u32,
     ) -> Result<(), HostError> {
-        self.guard_resident(key, id)?;
+        self.guard_material_resident(key, id)?;
         self.xrstor_bound(address, low, high)
     }
 

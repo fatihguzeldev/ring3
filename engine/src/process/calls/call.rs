@@ -308,17 +308,19 @@ impl EngineInstance {
         let ExitReason::Gate { id } = exit.reason else {
             return Err(HostError::Call(CallError::InvalidStop));
         };
+        let decode_key = self.code_fetch_context()?.decode_key();
         let matches_gate = match owner {
-            PendingOwner::Replacement(_) => self
-                .artifact
-                .as_ref()
-                .is_some_and(|artifact| artifact.matches_gate(state.eip, id)),
-            PendingOwner::Resident(unit) => self
-                .guard_resident_unit(self.key, unit)?
-                .matches_gate(state.eip, id),
-            PendingOwner::ResidentCallback { unit_id, .. } => self
-                .guard_resident_unit(self.key, unit_id)?
-                .matches_gate(state.eip, id),
+            PendingOwner::Replacement(_) => self.artifact.as_ref().is_some_and(|artifact| {
+                artifact.matches_decode_key(decode_key) && artifact.matches_gate(state.eip, id)
+            }),
+            PendingOwner::Resident(unit) => {
+                let artifact = self.guard_resident_unit(self.key, unit)?;
+                artifact.matches_decode_key(decode_key) && artifact.matches_gate(state.eip, id)
+            }
+            PendingOwner::ResidentCallback { unit_id, .. } => {
+                let artifact = self.guard_resident_unit(self.key, unit_id)?;
+                artifact.matches_decode_key(decode_key) && artifact.matches_gate(state.eip, id)
+            }
         };
         if !matches_gate {
             return Err(HostError::Call(CallError::InvalidStop));

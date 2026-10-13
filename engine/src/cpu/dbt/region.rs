@@ -3,8 +3,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use crate::{
     cpu::x86::{
         decode::{
-            BoundDecode, CapturedCodeFault, CodeFetchContext, DecodeError, DecodePolicy,
-            DecodedInstruction, decode_bound, decode_one,
+            BoundDecode, CapturedCodeFault, CodeDecodeKey, CodeFetchContext, DecodeError,
+            DecodePolicy, DecodedInstruction, decode_bound, decode_one,
         },
         ir::{BinaryKind, BranchTarget, Location32, Operation, SmallSource, UnaryKind, Value32},
     },
@@ -67,6 +67,7 @@ pub enum InstructionError {
 pub struct PreparedRegion {
     pub(super) blocks: Vec<CompiledBlock>,
     memory_identity: u64,
+    pub(super) decode_key: Option<CodeDecodeKey>,
     validated_version: AtomicU64,
 }
 
@@ -111,10 +112,15 @@ impl CompiledBlock {
 }
 
 impl PreparedRegion {
-    pub(super) fn new(memory: &AddressSpace, blocks: Vec<CompiledBlock>) -> Self {
+    pub(super) fn new(
+        memory: &AddressSpace,
+        blocks: Vec<CompiledBlock>,
+        cs: Option<CodeFetchContext>,
+    ) -> Self {
         Self {
             blocks,
             memory_identity: memory.identity(),
+            decode_key: cs.map(CodeFetchContext::decode_key),
             validated_version: AtomicU64::new(0),
         }
     }
@@ -282,12 +288,13 @@ fn prepare(
                 memory,
                 spec.entry,
                 (cursor - u64::from(spec.entry.0)) as usize,
+                cs,
             )?),
             instructions,
         });
     }
 
-    Ok(PreparedRegion::new(memory, blocks))
+    Ok(PreparedRegion::new(memory, blocks, cs))
 }
 
 pub(super) fn strict_instruction(
@@ -347,8 +354,21 @@ pub(super) fn prepare_block_snapshot(
     memory: &AddressSpace,
     entry: GuestAddress,
     length: usize,
+    cs: Option<CodeFetchContext>,
 ) -> Result<CodeSnapshot, CompileError> {
-    memory.snapshot_code(entry, length).map_err(|error| {
+    let linear = if let Some(cs) = cs {
+        cs.linear_span(entry, length).ok_or_else(|| {
+            instruction_error(
+                entry,
+                InstructionError::Decode(DecodeError::Unsupported(
+                    crate::cpu::UnsupportedFeature::Segment,
+                )),
+            )
+        })?
+    } else {
+        entry
+    };
+    memory.snapshot_code(linear, length).map_err(|error| {
         let error = match error {
             MemoryError::Allocation => return CompileError::Allocation,
             MemoryError::Fault(fault) => DecodeError::MemoryFault {

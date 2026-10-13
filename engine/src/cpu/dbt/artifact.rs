@@ -7,7 +7,7 @@ use super::{
 };
 use crate::{
     abi::{ABI_VERSION, X86_INTEGER_PROFILE},
-    cpu::x86::decode::{CapturedCodeFault, CodeFetchContext},
+    cpu::x86::decode::{CapturedCodeFault, CodeDecodeKey, CodeFetchContext},
     memory::{AddressSpace, GuestAddress},
 };
 
@@ -32,6 +32,28 @@ pub struct CompiledRegion {
 }
 
 impl CompiledRegion {
+    pub(crate) fn decode_key(&self) -> CodeDecodeKey {
+        self.prepared.decode_key.unwrap_or(CodeDecodeKey::FLAT)
+    }
+
+    pub(crate) fn matches_decode_key(&self, key: CodeDecodeKey) -> bool {
+        self.decode_key() == key
+    }
+
+    pub(crate) fn contains_material_in(&self, pc: u32, key: CodeDecodeKey) -> bool {
+        self.matches_decode_key(key) && self.contains_material(pc)
+    }
+
+    pub(crate) fn context_fault_in(
+        &self,
+        pc: u32,
+        key: CodeDecodeKey,
+    ) -> Option<&CapturedCodeFault> {
+        self.matches_decode_key(key)
+            .then(|| self.context_fault(pc))
+            .flatten()
+    }
+
     pub(super) fn executable_addresses(&self) -> impl Iterator<Item = GuestAddress> + '_ {
         self.prepared.blocks.iter().flat_map(|block| {
             block
@@ -199,7 +221,7 @@ pub(super) fn emit_prepared(
     limits: CompileLimits,
     binding: Option<wasm::EmbeddedBinding>,
 ) -> Result<CompiledRegion, CompileError> {
-    let bytes = wasm::emit(&prepared.blocks, binding);
+    let bytes = wasm::emit(&prepared.blocks, binding, prepared.decode_key);
     if bytes.len() > limits.wasm_bytes {
         return Err(CompileError::WasmLimit);
     }

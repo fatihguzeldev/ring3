@@ -317,6 +317,7 @@ pub(super) fn instruction(
             .i32_const(1)
             .call(imports.cpu_read.expect("packed-string read import"))
             .local_set(HELPER_STATUS);
+        crate::cpu::dbt::wasm::code_fetch::check_context(code, exit_depth);
         cpu_result::validate(code, 16, 1, false, exit_depth);
     }
     let words = op.control & 1 != 0;

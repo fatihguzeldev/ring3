@@ -3,7 +3,7 @@ use super::*;
 impl EngineInstance {
     /// stack reads belong to the generated cpu_read phase; this helper publishes only code state.
     pub fn far_return(&mut self, offset: u32, selector: u32, word: u32) -> Result<(), HostError> {
-        self.guard(self.key, self.generation())?;
+        self.guard_material(self.key, self.generation())?;
         self.far_return_bound(offset, selector, word)
     }
 
@@ -15,7 +15,7 @@ impl EngineInstance {
         selector: u32,
         word: u32,
     ) -> Result<(), HostError> {
-        self.guard_resident(key, id)?;
+        self.guard_material_resident(key, id)?;
         self.far_return_bound(offset, selector, word)
     }
 

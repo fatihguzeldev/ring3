@@ -57,6 +57,7 @@ fn capture_target(
                 .i32_const(1)
                 .call(imports.cpu_read.expect("far pointer read import"))
                 .local_set(HELPER_STATUS);
+            crate::cpu::dbt::wasm::code_fetch::check_context(code, exit_depth);
             cpu_result::validate(code, length, 1, false, exit_depth);
             code.local_get(STATE_PTR);
             match width {

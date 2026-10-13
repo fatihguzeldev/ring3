@@ -45,16 +45,32 @@ export const cache = raw => (raw.limit + (raw.type | 1) * 0x100000 + Number(raw.
 const cacheOffsets = [28, 32, 36, 40, 44, 56];
 export function decodeSegments(bytes) {
   const selectors = Array.from({length: 6}, (_, i) => bytes.readUInt16LE(16 + i * 2));
-  const caches = bytes.readUInt16LE(4) === 1 ? selectors.map((selector, i) => (selector & 0xfffc) === 0 ? 0 : i === 1 ? 0xf3bfffff : 0xf33fffff) : cacheOffsets.map(at => bytes.readUInt32LE(at));
-  return {selectors, caches, fs: bytes.readUInt32LE(48), gs: bytes.readUInt32LE(52)};
+  const version = bytes.readUInt16LE(4);
+  const caches = version === 1 ? selectors.map((selector, i) => (selector & 0xfffc) === 0 ? 0 : i === 1 ? 0xf3bfffff : 0xf33fffff) : cacheOffsets.map(at => bytes.readUInt32LE(at));
+  const bases = version === 3 ? Array.from({length: 6}, (_, i) => bytes.readUInt32LE(4756 - SEG + 16 + i * 4)) : [0, 0, 0, 0, bytes.readUInt32LE(48), bytes.readUInt32LE(52)];
+  return {selectors, caches, bases, fs: bases[4], gs: bases[5]};
+}
+function contextBases(context) {
+  const bases = [...(context.bases ?? [0, 0, 0, 0, 0, 0])];
+  bases[4] = context.fs ?? bases[4]; bases[5] = context.gs ?? bases[5];
+  return bases;
 }
 export function encodeSegments(context) {
-  const bytes = packet('R3SG', 64, [], 1);
+  const bases = contextBases(context), bytes = packet('R3SG', 64, [], 1);
   context.selectors.forEach((value, i) => bytes.writeUInt16LE(value, 16 + i * 2));
-  bytes.writeUInt32LE(context.fs, 48); bytes.writeUInt32LE(context.gs, 52);
   const legacy = context.selectors.map((selector, i) => (selector & 0xfffc) === 0 ? 0 : i === 1 ? 0xf3bfffff : 0xf33fffff);
-  if (!context.caches.every((value, i) => value === legacy[i])) {bytes.writeUInt16LE(2, 4); context.caches.forEach((value, i) => bytes.writeUInt32LE(value, cacheOffsets[i]));}
+  const nonflat = bases.slice(0, 4).some(value => value !== 0);
+  if (nonflat || !context.caches.every((value, i) => value === legacy[i])) {
+    bytes.writeUInt16LE(nonflat ? 3 : 2, 4);
+    context.caches.forEach((value, i) => bytes.writeUInt32LE(value, cacheOffsets[i]));
+  }
+  if (!nonflat) {bytes.writeUInt32LE(bases[4], 48); bytes.writeUInt32LE(bases[5], 52);}
   return bytes;
+}
+function publishSegments(bytes, context) {
+  const segments = encodeSegments(context), companion = packet('R3SB', 40, [], 1);
+  if (segments.readUInt16LE(4) === 3) contextBases(context).forEach((value, i) => companion.writeUInt32LE(value >>> 0, 16 + i * 4));
+  bytes.set(segments, SEG); bytes.set(companion, 4756);
 }
 function validateModule(bytes, expectedImports, hasGuard, arities) {
   const module = new WebAssembly.Module(bytes);
@@ -115,7 +131,7 @@ export function compile(c,bytes,{kind,read=false,guard=true,returnBytes,targetBy
 export function seed({esp=STACK,logical=POINTER,flags=0x244cd7,cancel=0,context}={}){
  const bytes=createArena();bytes.writeUInt16LE(2,4);bytes.writeUInt32LE(flags,52);bytes.writeUInt32LE(PC,48);
  [0x12345678,0x23456789,0x3456789a,0x456789ab,esp,logical,0x56789abc,logical].forEach((value,i)=>bytes.writeUInt32LE(value>>>0,16+i*4));bytes.writeUInt32LE(cancel,96);
- if(context)bytes.set(encodeSegments(context),SEG);return bytes;
+ if(context)publishSegments(bytes,context);return bytes;
 }
 export function run(c,label,input,want,ram,{budget=1,helpers,argumentsList}={}){
  put(c,0,input);c.calls=[];assert.equal(c.run(c.base,c.base+56,budget,c.base+96),0,label);
@@ -128,6 +144,6 @@ export function run(c,label,input,want,ram,{budget=1,helpers,argumentsList}={}){
  observations.push({label,reason,retired,helpers});
 }
 export function exit(want,reason,retired=0,detail=0,address=0,access=0,length=0){want.set(packet('R3EX',40,[reason,retired,detail,address,access,length],reason>=16?7:6),56);}
-export function publishCode(want,raw,selector,target){const state=decodeSegments(want.subarray(SEG));state.selectors[1]=(selector&0xfffc)|3;state.caches[1]=cache(raw);want.set(encodeSegments(state),SEG);want.writeUInt32LE(target>>>0,48);}
+export function publishCode(want,raw,selector,target){const state=decodeSegments(want.subarray(SEG));state.selectors[1]=(selector&0xfffc)|3;state.caches[1]=cache(raw);state.bases[1]=raw.base;publishSegments(want,state);want.writeUInt32LE(target>>>0,48);}
 export function pins(root,paths){assert.equal(new Set(paths).size,paths.length,'no duplicate literal source pins');return Object.fromEntries(paths.map(path=>[path,createHash('sha256').update(readFileSync(join(root,path))).digest('hex')]));}
 export function finish(output,engine,sourcePins,limits){writeFileSync(join(output,'result.json'),JSON.stringify({status:'ok',engine_sha256:engine.sha256,source_pins:sourcePins,counts,limits},null,2)+'\n');writeFileSync(join(output,'observations.json'),JSON.stringify(observations,null,2)+'\n');console.log(JSON.stringify({status:'ok',...counts,output}));}

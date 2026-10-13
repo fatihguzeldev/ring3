@@ -746,6 +746,7 @@ pub(super) fn instruction(
             .i32_const(alignment)
             .call(imports.cpu_read.expect("direct SIMD read"))
             .local_set(HELPER_STATUS);
+        crate::cpu::dbt::wasm::code_fetch::check_context(code, exit_depth);
         cpu_result::validate(code, u32::from(op.memory_bytes), 1, false, exit_depth);
     }
     if op.kind == SimdKind::Packed(P::Test) {

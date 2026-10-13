@@ -105,6 +105,8 @@ fn decode(
     policy: DecodePolicy,
     cs: Option<CodeFetchContext>,
 ) -> Result<BoundDecode, DecodeError> {
+    let linear = cs.map_or(pc, |cs| cs.linear_address(pc));
+    let bitness = cs.map_or(32, CodeFetchContext::decoder_bitness);
     let mut bytes = [0; 15];
     for length in 1..=bytes.len() {
         if cs.is_some_and(|cs| !cs.permits(pc, length as u8)) {
@@ -120,7 +122,7 @@ fn decode(
             } else {
                 Some(
                     memory
-                        .snapshot_code(pc, consumed)
+                        .snapshot_code(linear, consumed)
                         .map_err(|error| memory_error(error, pc, consumed))?,
                 )
             };
@@ -131,11 +133,18 @@ fn decode(
                 prefix,
             }));
         }
+        if cs.is_some_and(|cs| cs.linear_span(pc, length).is_none()) {
+            return Err(DecodeError::Unsupported(UnsupportedFeature::Segment));
+        }
         memory
-            .fetch(pc, &mut bytes[..length])
+            .fetch(linear, &mut bytes[..length])
             .map_err(|error| memory_error(error, pc, length))?;
-        let mut decoder =
-            Decoder::with_ip(32, &bytes[..length], u64::from(pc.0), DecoderOptions::NONE);
+        let mut decoder = Decoder::with_ip(
+            bitness,
+            &bytes[..length],
+            u64::from(pc.0),
+            DecoderOptions::NONE,
+        );
         let instruction = decoder.decode();
         match decoder.last_error() {
             DecoderError::NoMoreBytes => continue,
@@ -146,6 +155,7 @@ fn decode(
                     return finish(
                         memory,
                         pc,
+                        linear,
                         length,
                         GuestAddress(pc.0.wrapping_add(length as u32)),
                         Operation::Control(operation),
@@ -188,6 +198,7 @@ fn decode(
                 return finish(
                     memory,
                     pc,
+                    linear,
                     consumed,
                     GuestAddress(instruction.next_ip32()),
                     operation,
@@ -204,13 +215,14 @@ fn decode(
 fn finish(
     memory: &AddressSpace,
     pc: GuestAddress,
+    linear: GuestAddress,
     length: usize,
     next_pc: GuestAddress,
     operation: Operation,
     segment_accesses: u8,
 ) -> Result<DecodedInstruction, DecodeError> {
     let code_snapshot = memory
-        .snapshot_code(pc, length)
+        .snapshot_code(linear, length)
         .map_err(|error| memory_error(error, pc, length))?;
     Ok(DecodedInstruction {
         pc,
@@ -430,5 +442,102 @@ mod tests {
                 strict
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod based_tests {
+    use super::*;
+    use crate::{
+        cpu::x86::SegmentContext,
+        memory::{PageRange, Permissions},
+    };
+
+    #[test]
+    fn based_decode_keeps_logical_pc_and_owns_only_linear_instruction_bytes() {
+        let mut memory = AddressSpace::new(2).unwrap();
+        for page in [0x1000, 0x5000] {
+            memory
+                .map_zeroed(
+                    PageRange::new(GuestAddress(page), 1).unwrap(),
+                    Permissions::ALL,
+                )
+                .unwrap();
+        }
+        memory.write(GuestAddress(0x1010), &[0x40; 5]).unwrap();
+        memory
+            .write(GuestAddress(0x5010), &[0xb8, 0x78, 0x56, 0x34, 0x12])
+            .unwrap();
+        let mut segments = SegmentContext::default();
+        segments.state.bases[1] = 0x4000;
+        let cs = CodeFetchContext::from_segments(&segments).unwrap();
+        let BoundDecode::Instruction(decoded) =
+            decode_bound(&memory, GuestAddress(0x1010), cs, DecodePolicy::Strict).unwrap()
+        else {
+            panic!("instruction expected")
+        };
+        assert_eq!(
+            (decoded.pc(), decoded.next_pc(), decoded.length()),
+            (GuestAddress(0x1010), GuestAddress(0x1015), 5)
+        );
+        memory.write(GuestAddress(0x1010), &[0x48]).unwrap();
+        assert!(
+            memory.is_code_current(decoded.code_snapshot()),
+            "logical decoy page is not captured"
+        );
+        memory.write(GuestAddress(0x5010), &[0x48]).unwrap();
+        assert!(!memory.is_code_current(decoded.code_snapshot()));
+    }
+
+    #[test]
+    fn based_fetch_accepts_wrapped_base_addition_but_refuses_a_split_linear_instruction() {
+        let mut memory = AddressSpace::new(2).unwrap();
+        for page in [0x1000, 0xffff_f000] {
+            memory
+                .map_zeroed(
+                    PageRange::new(GuestAddress(page), 1).unwrap(),
+                    Permissions::ALL,
+                )
+                .unwrap();
+        }
+        memory
+            .write(GuestAddress(0x1010), &[0xb8, 1, 2, 3, 4])
+            .unwrap();
+        memory.write(GuestAddress(u32::MAX), &[0x0f]).unwrap();
+        let mut segments = SegmentContext::default();
+        segments.state.bases[1] = 0xffff_f000;
+        let cs = CodeFetchContext::from_segments(&segments).unwrap();
+        let BoundDecode::Instruction(decoded) =
+            decode_bound(&memory, GuestAddress(0x2010), cs, DecodePolicy::Strict).unwrap()
+        else {
+            panic!("instruction expected")
+        };
+        assert_eq!(decoded.next_pc(), GuestAddress(0x2015));
+        assert!(memory.is_code_current(decoded.code_snapshot()));
+        for policy in [DecodePolicy::Strict, DecodePolicy::Execution] {
+            assert!(matches!(
+                decode_bound(&memory, GuestAddress(0xfff), cs, policy),
+                Err(DecodeError::Unsupported(UnsupportedFeature::Segment))
+            ));
+        }
+    }
+
+    #[test]
+    fn based_page_fault_reports_linear_address_and_logical_faulting_pc() {
+        let memory = AddressSpace::new(1).unwrap();
+        let mut segments = SegmentContext::default();
+        segments.state.bases[1] = 0x4000;
+        let cs = CodeFetchContext::from_segments(&segments).unwrap();
+        assert!(matches!(
+            decode_bound(&memory, GuestAddress(0x1000), cs, DecodePolicy::Strict),
+            Err(DecodeError::MemoryFault {
+                pc: GuestAddress(0x1000),
+                fault: MemoryFault {
+                    address: GuestAddress(0x5000),
+                    ..
+                },
+                length: 1
+            })
+        ));
     }
 }

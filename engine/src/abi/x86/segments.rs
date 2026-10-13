@@ -10,6 +10,31 @@ pub const SEGMENTS_VERSION_3: u16 = 3;
 pub const SEGMENT_BASES_RECORD_SIZE: usize = 40;
 pub(crate) const SEGMENTS_CACHE_OFFSETS: [usize; 6] = [28, 32, 36, 40, 44, 56];
 
+/// read code interpretation identity without validating unused segment authority.
+pub(crate) fn decode_current_code_key(
+    segments: &[u8],
+    bases: Option<&[u8]>,
+) -> Result<crate::cpu::x86::decode::CodeDecodeKey, AbiError> {
+    let (version, _) = header::validate_versions_with_metadata(
+        segments,
+        *b"R3SG",
+        SEGMENTS_SIZE,
+        &[1, SEGMENTS_VERSION_2, SEGMENTS_VERSION_3],
+    )?;
+    let cs_base = if version == SEGMENTS_VERSION_3 {
+        let bases = bases.ok_or(AbiError::Length)?;
+        header::validate_versions_with_metadata(bases, *b"R3SB", SEGMENT_BASES_RECORD_SIZE, &[1])?;
+        read_u32(bases, 20)
+    } else {
+        0
+    };
+    let default32 = version == 1
+        || SegmentCache::from_bits(read_u32(segments, 32))
+            .ok_or(AbiError::Reserved)?
+            .default32();
+    Ok(crate::cpu::x86::decode::CodeDecodeKey { cs_base, default32 })
+}
+
 pub fn encode_segments(state: &SegmentState, output: &mut [u8]) -> Result<(), AbiError> {
     if output.len() != SEGMENTS_SIZE {
         return Err(AbiError::Length);
@@ -391,7 +416,6 @@ mod tests {
             (6, AbiError::Profile),
             (8, AbiError::Length),
             (12, AbiError::Reserved),
-            (20, AbiError::Reserved),
         ] {
             let mut malformed = bases;
             malformed[offset] ^= 0x80;
@@ -433,5 +457,95 @@ mod tests {
         );
         assert_eq!(untouched_segments, [0xa5; SEGMENTS_SIZE]);
         assert_eq!(untouched_bases, [0x5a; SEGMENT_BASES_RECORD_SIZE]);
+    }
+}
+
+#[cfg(test)]
+mod code_base_tests {
+    use super::*;
+
+    #[test]
+    fn current_codec_owns_code_base_in_v3_while_legacy_and_d16_remain_strict() {
+        for base in [1, 0x4000, u32::MAX] {
+            let mut context = SegmentContext::default();
+            context.state.bases[1] = base;
+            let mut segments = [0; SEGMENTS_SIZE];
+            let mut bases = [0; SEGMENT_BASES_RECORD_SIZE];
+            encode_current_segment_context(&context, &mut segments, &mut bases).unwrap();
+            assert_eq!(u16::from_le_bytes(segments[4..6].try_into().unwrap()), 3);
+            assert_eq!(read_u32(&bases, 20), base);
+            assert_eq!(
+                decode_current_segment_context(&segments, Some(&bases)),
+                Ok(context)
+            );
+            let mut rejected = [0xa5; SEGMENTS_SIZE];
+            assert_eq!(
+                encode_segment_context(&context, &mut rejected),
+                Err(AbiError::Reserved)
+            );
+            assert_eq!(rejected, [0xa5; SEGMENTS_SIZE]);
+            assert_eq!(
+                encode_segments(&context.state, &mut rejected),
+                Err(AbiError::Reserved)
+            );
+            assert_eq!(rejected, [0xa5; SEGMENTS_SIZE]);
+            let mut word = segments;
+            write_u32(&mut word, 32, context.caches[1].bits() & !(1 << 25));
+            assert_eq!(
+                decode_current_segment_context(&word, Some(&bases)),
+                Err(AbiError::Reserved)
+            );
+        }
+    }
+
+    #[test]
+    fn code_key_ignores_unused_authority_but_tracks_cs_base_and_default_size() {
+        use crate::cpu::x86::decode::CodeDecodeKey;
+        let mut context = SegmentContext::default();
+        context.state.bases[1] = 0x4000;
+        let mut segments = [0; SEGMENTS_SIZE];
+        let mut bases = [0; SEGMENT_BASES_RECORD_SIZE];
+        encode_current_segment_context(&context, &mut segments, &mut bases).unwrap();
+        write_u32(&mut segments, 12, 1);
+        write_u32(&mut segments, 40, u32::MAX);
+        write_u32(&mut bases, 24, 0xdeadbeef);
+        assert!(decode_current_segment_context(&segments, Some(&bases)).is_err());
+        assert_eq!(
+            decode_current_code_key(&segments, Some(&bases)),
+            Ok(CodeDecodeKey {
+                cs_base: 0x4000,
+                default32: true
+            })
+        );
+        write_u32(&mut bases, 20, 0x5000);
+        write_u32(&mut segments, 32, 0xf1bfffff);
+        assert_eq!(
+            decode_current_code_key(&segments, Some(&bases)),
+            Ok(CodeDecodeKey {
+                cs_base: 0x5000,
+                default32: false
+            })
+        );
+    }
+
+    #[test]
+    fn legacy_code_key_ignores_companion_and_keeps_header_shape_checks() {
+        use crate::cpu::x86::decode::CodeDecodeKey;
+        let mut segments = [0; SEGMENTS_SIZE];
+        encode_segments(&SegmentState::default(), &mut segments).unwrap();
+        write_u32(&mut segments, 12, 1);
+        assert_eq!(
+            decode_current_code_key(&segments, Some(&[0xa5; 40])),
+            Ok(CodeDecodeKey::FLAT)
+        );
+        assert_eq!(
+            decode_current_code_key(&segments[..63], None),
+            Err(AbiError::Length)
+        );
+        segments[4] = 4;
+        assert_eq!(
+            decode_current_code_key(&segments, None),
+            Err(AbiError::Version)
+        );
     }
 }

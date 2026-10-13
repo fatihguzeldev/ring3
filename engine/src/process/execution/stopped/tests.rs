@@ -212,3 +212,70 @@ fn stopped_entry_cannot_replace_code_owned_by_a_pending_call() {
     rejected_without_publication(&mut engine, KEY, 1, HostError::Call(CallError::Busy));
     assert_eq!(engine.pending_call.as_ref().unwrap().token, 1);
 }
+
+#[test]
+fn changed_code_key_allows_same_logical_stopped_entry_repair_and_keeps_physical_guards() {
+    use crate::cpu::x86::SegmentRegister;
+    let mut engine = EngineInstance::new(2, KEY).unwrap();
+    for address in [0x1000, 0x5000] {
+        engine.map(address, 1, 7).unwrap();
+        upload(&mut engine, address, &[0xeb, 0xfe]);
+    }
+    let transfer = &mut engine.arena_mut().unwrap()[TRANSFER_OFFSET..TRANSFER_OFFSET + 8];
+    transfer[..4].copy_from_slice(&0x1000_u32.to_le_bytes());
+    transfer[4..].copy_from_slice(&2_u32.to_le_bytes());
+    engine.compile(1).unwrap();
+    engine
+        .set_segment_base(SegmentRegister::Cs, 0x4000)
+        .unwrap();
+    set_stop(&mut engine, 0x1000, ExitReason::NeedCode);
+    let before = engine.arena().to_vec();
+    assert_eq!(
+        engine.guard(KEY, 1),
+        Ok(()),
+        "run guard remains about physical ownership"
+    );
+    assert_eq!(
+        engine.guard_material(KEY, 1),
+        Err(HostError::InvalidArtifact)
+    );
+    assert_eq!(engine.compile_stopped_entry(KEY, 1), Ok(2));
+    assert_eq!(engine.arena(), before);
+    assert_eq!(engine.guard_material(KEY, 2), Ok(()));
+    assert!(
+        engine
+            .artifact
+            .as_ref()
+            .unwrap()
+            .contains_material_in(0x1000, engine.code_fetch_context().unwrap().decode_key())
+    );
+}
+
+#[test]
+fn resident_stopped_repair_keeps_old_key_unit_and_routes_same_pc_to_new_key() {
+    use crate::cpu::x86::SegmentRegister;
+    let mut engine = EngineInstance::new(2, KEY).unwrap();
+    for address in [0x1000, 0x5000] {
+        engine.map(address, 1, 7).unwrap();
+        upload(&mut engine, address, &[0xeb, 0xfe]);
+    }
+    engine.arena_mut().unwrap()[TRANSFER_OFFSET..TRANSFER_OFFSET + 8]
+        .copy_from_slice(&[0, 0x10, 0, 0, 2, 0, 0, 0]);
+    let old = engine.compile_resident(1).unwrap();
+    engine
+        .set_segment_base(SegmentRegister::Cs, 0x4000)
+        .unwrap();
+    set_stop(&mut engine, 0x1000, ExitReason::NeedCode);
+    let before = engine.arena().to_vec();
+    assert_eq!(engine.guard_resident(KEY, old.get()), Ok(()));
+    assert_eq!(
+        engine.guard_material_resident(KEY, old.get()),
+        Err(HostError::InvalidArtifact)
+    );
+    let new = engine.compile_stopped_resident_entry(KEY).unwrap();
+    assert_ne!(old, new);
+    assert_eq!(engine.arena(), before);
+    assert_eq!(engine.lookup_resident(0x1000), Ok(new));
+    assert_eq!(engine.resident.as_ref().unwrap().usage().units, 2);
+    assert_eq!(engine.guard_material_resident(KEY, new.get()), Ok(()));
+}

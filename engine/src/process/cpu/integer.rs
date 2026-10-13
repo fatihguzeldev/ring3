@@ -15,7 +15,7 @@ impl EngineInstance {
         descriptor: u32,
         address: u32,
     ) -> Result<StoreCompletion, HostError> {
-        self.guard(self.key, self.generation())?;
+        self.guard_material(self.key, self.generation())?;
         self.cpu_integer_bound(None, descriptor, address)
     }
     pub fn cpu_integer_resident(
@@ -25,7 +25,7 @@ impl EngineInstance {
         descriptor: u32,
         address: u32,
     ) -> Result<StoreCompletion, HostError> {
-        self.guard_resident(key, id)?;
+        self.guard_material_resident(key, id)?;
         self.cpu_integer_bound(Some(id), descriptor, address)
     }
     fn cpu_integer_bound(

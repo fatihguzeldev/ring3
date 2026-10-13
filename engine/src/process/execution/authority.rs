@@ -64,6 +64,34 @@ impl EngineInstance {
         Ok(())
     }
 
+    pub(in crate::process) fn check_decode_key(
+        &self,
+        artifact: &CompiledRegion,
+    ) -> Result<(), HostError> {
+        if !artifact.matches_decode_key(self.code_decode_key()?) {
+            return Err(HostError::InvalidArtifact);
+        }
+        Ok(())
+    }
+
+    pub(in crate::process) fn guard_material(
+        &self,
+        key: u64,
+        generation: u32,
+    ) -> Result<(), HostError> {
+        self.guard(key, generation)?;
+        self.check_decode_key(self.artifact.as_ref().unwrap())
+    }
+
+    pub(in crate::process) fn guard_material_resident(
+        &self,
+        key: u64,
+        id: u64,
+    ) -> Result<(), HostError> {
+        self.guard_resident(key, id)?;
+        self.check_decode_key(self.guard_resident_unit(key, id)?)
+    }
+
     pub(in crate::process) fn guard_resident_unit(
         &self,
         key: u64,
@@ -78,5 +106,45 @@ impl EngineInstance {
             .ok_or(HostError::Resident(RegistryError::InvalidUnit))?
             .get_raw(memory, id)
             .map_err(HostError::Resident)
+    }
+}
+
+#[cfg(test)]
+mod decode_key_tests {
+    use super::*;
+    use crate::{abi::arena::TRANSFER_OFFSET, cpu::x86::SegmentRegister};
+
+    #[test]
+    fn wrong_key_store_is_refused_without_conflating_physical_artifact_currentness() {
+        let key = 0x4353;
+        let mut engine = EngineInstance::new(3, key).unwrap();
+        for page in [0x1000, 0x5000, 0x7000] {
+            engine.map(page, 1, 7).unwrap();
+        }
+        engine.arena_mut().unwrap()[TRANSFER_OFFSET..TRANSFER_OFFSET + 2]
+            .copy_from_slice(&[0xeb, 0xfe]);
+        engine.upload(0x1000, 2).unwrap();
+        engine.arena_mut().unwrap()[TRANSFER_OFFSET..TRANSFER_OFFSET + 8]
+            .copy_from_slice(&[0, 0x10, 0, 0, 2, 0, 0, 0]);
+        engine.compile(1).unwrap();
+        engine
+            .set_segment_base(SegmentRegister::Cs, 0x4000)
+            .unwrap();
+        let before = engine.arena().to_vec();
+        assert_eq!(engine.guard(key, 1), Ok(()));
+        assert_eq!(
+            engine.guard_material(key, 1),
+            Err(HostError::InvalidArtifact)
+        );
+        assert_eq!(
+            engine.store32(0x7000, 0x1234_5678),
+            Err(HostError::InvalidArtifact)
+        );
+        assert_eq!(engine.arena(), before);
+        engine.read32(0x7000).unwrap();
+        assert_eq!(
+            u32::from_le_bytes(engine.arena()[120..124].try_into().unwrap()),
+            0
+        );
     }
 }

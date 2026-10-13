@@ -18,7 +18,7 @@ impl EngineInstance {
         destination_gpr: u32,
         flags: u32,
     ) -> Result<(), HostError> {
-        self.guard(self.key, self.generation())?;
+        self.guard_material(self.key, self.generation())?;
         self.simd_apply(
             descriptor,
             operands,
@@ -41,7 +41,7 @@ impl EngineInstance {
         destination_gpr: u32,
         flags: u32,
     ) -> Result<(), HostError> {
-        self.guard_resident(key, id)?;
+        self.guard_material_resident(key, id)?;
         self.simd_apply(
             descriptor,
             operands,

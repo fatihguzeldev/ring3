@@ -26,7 +26,7 @@ impl EngineInstance {
         low: u32,
         high: u32,
     ) -> Result<StoreCompletion, HostError> {
-        self.guard(self.key, self.generation())?;
+        self.guard_material(self.key, self.generation())?;
         self.xsave_avx_bound(None, segment, offset, low, high)
     }
     pub fn cpu_xsave_avx_resident(
@@ -38,7 +38,7 @@ impl EngineInstance {
         low: u32,
         high: u32,
     ) -> Result<StoreCompletion, HostError> {
-        self.guard_resident(key, id)?;
+        self.guard_material_resident(key, id)?;
         self.xsave_avx_bound(Some(id), segment, offset, low, high)
     }
     pub fn cpu_xrstor_avx(
@@ -48,7 +48,7 @@ impl EngineInstance {
         low: u32,
         high: u32,
     ) -> Result<(), HostError> {
-        self.guard(self.key, self.generation())?;
+        self.guard_material(self.key, self.generation())?;
         self.xrstor_avx_bound(segment, offset, low, high)
     }
     pub fn cpu_xrstor_avx_resident(
@@ -60,7 +60,7 @@ impl EngineInstance {
         low: u32,
         high: u32,
     ) -> Result<(), HostError> {
-        self.guard_resident(key, id)?;
+        self.guard_material_resident(key, id)?;
         self.xrstor_avx_bound(segment, offset, low, high)
     }
     fn upper_current(&self) -> Result<(X87State, SimdState, YmmUpperState), HostError> {

@@ -169,7 +169,7 @@ fn prepare(
 
 impl EngineInstance {
     pub fn stack_execute(&mut self, control: u32) -> Result<StoreCompletion, HostError> {
-        self.guard(self.key, self.generation())?;
+        self.guard_material(self.key, self.generation())?;
         self.stack_execute_bound(None, control)
     }
 
@@ -179,7 +179,7 @@ impl EngineInstance {
         id: u64,
         control: u32,
     ) -> Result<StoreCompletion, HostError> {
-        self.guard_resident(key, id)?;
+        self.guard_material_resident(key, id)?;
         self.stack_execute_bound(Some(id), control)
     }
 

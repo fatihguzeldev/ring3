@@ -71,10 +71,6 @@ pub(in crate::cpu::dbt::wasm) fn preflight(code: &mut InstructionSink<'_>) {
 }
 
 pub(in crate::cpu::dbt::wasm) fn base(code: &mut InstructionSink<'_>, segment: SegmentRegister) {
-    if segment == SegmentRegister::Cs {
-        code.i32_const(0);
-        return;
-    }
     code.local_get(STATE_PTR)
         .i32_load16_u(memarg(4, 1))
         .i32_const(i32::from(SEGMENTS_VERSION_3))
@@ -106,7 +102,6 @@ fn bases_preflight(code: &mut InstructionSink<'_>) {
         ),
         (8, SEGMENT_BASES_RECORD_SIZE as u32),
         (12, 0),
-        (16 + 4 * SegmentRegister::Cs.index(), 0),
     ] {
         code.local_get(STATE_PTR)
             .i32_load(arg(SEGMENT_BASES_RECORD_OFFSET + offset))

@@ -1,7 +1,7 @@
 use ring3_engine::{
     abi::x86::{SEGMENTS_SIZE, encode_segments},
     cpu::x86::{SegmentDescriptorRecord, SegmentDescriptorTable, SegmentRegister, SegmentState},
-    process::{EngineInstance, HostError},
+    process::EngineInstance,
 };
 
 fn descriptor(base: u32) -> SegmentDescriptorRecord {
@@ -56,15 +56,15 @@ fn legacy_segment_codec_remains_strict_for_nonflat_data() {
 }
 
 #[test]
-fn nonflat_code_remains_a_neutral_profile_refusal() {
-    let mut engine = EngineInstance::new(1, 0x5342).unwrap();
-    let before = engine.arena().to_vec();
-    assert_eq!(
-        engine.set_segment_base(SegmentRegister::Cs, 1),
-        Err(HostError::InvalidRequest)
-    );
-    assert_eq!(engine.arena(), before);
-    for segment in [SegmentRegister::Fs, SegmentRegister::Gs] {
+fn current_context_accepts_every_segment_base() {
+    for segment in [
+        SegmentRegister::Es,
+        SegmentRegister::Cs,
+        SegmentRegister::Ss,
+        SegmentRegister::Ds,
+        SegmentRegister::Fs,
+        SegmentRegister::Gs,
+    ] {
         let mut engine = EngineInstance::new(1, 0x5342).unwrap();
         engine.set_segment_base(segment, 0x5000).unwrap();
         assert_eq!(
@@ -227,4 +227,17 @@ fn nonflat_bound_load_faults_preserve_loaded_context_and_clear_accessed_bit() {
             assert_eq!(engine.segment_context().unwrap(), loaded);
         }
     }
+}
+
+#[test]
+fn code_base_is_current_context_only_and_legacy_codec_refuses_it_atomically() {
+    let mut engine = EngineInstance::new(1, 0x4353).unwrap();
+    engine
+        .set_segment_base(SegmentRegister::Cs, 0x4000)
+        .unwrap();
+    let context = engine.segment_context().unwrap();
+    assert_eq!(context.state.bases[SegmentRegister::Cs.index()], 0x4000);
+    let mut legacy = [0xa5; SEGMENTS_SIZE];
+    assert!(encode_segments(&context.state, &mut legacy).is_err());
+    assert_eq!(legacy, [0xa5; SEGMENTS_SIZE]);
 }

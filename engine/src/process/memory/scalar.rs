@@ -80,7 +80,7 @@ impl EngineInstance {
     }
 
     pub fn store8(&mut self, address: u32, value: u32) -> Result<StoreCompletion, HostError> {
-        self.guard(self.key, self.generation())?;
+        self.guard_material(self.key, self.generation())?;
         let memory = self.memory.as_mut().ok_or(HostError::Closed)?;
         let code_version = memory.code_validation_version();
         let result = memory.write(GuestAddress(address), &[value as u8]);
@@ -96,7 +96,7 @@ impl EngineInstance {
         address: u32,
         value: u32,
     ) -> Result<StoreCompletion, HostError> {
-        self.guard_resident(key, id)?;
+        self.guard_material_resident(key, id)?;
         let memory = self.memory.as_mut().ok_or(HostError::Closed)?;
         let code_version = memory.code_validation_version();
         let result = memory.write(GuestAddress(address), &[value as u8]);
@@ -106,7 +106,7 @@ impl EngineInstance {
     }
 
     pub fn store16(&mut self, address: u32, value: u32) -> Result<StoreCompletion, HostError> {
-        self.guard(self.key, self.generation())?;
+        self.guard_material(self.key, self.generation())?;
         let memory = self.memory.as_mut().ok_or(HostError::Closed)?;
         let code_version = memory.code_validation_version();
         let result = memory.write(GuestAddress(address), &(value as u16).to_le_bytes());
@@ -122,7 +122,7 @@ impl EngineInstance {
         address: u32,
         value: u32,
     ) -> Result<StoreCompletion, HostError> {
-        self.guard_resident(key, id)?;
+        self.guard_material_resident(key, id)?;
         let memory = self.memory.as_mut().ok_or(HostError::Closed)?;
         let code_version = memory.code_validation_version();
         let result = memory.write(GuestAddress(address), &(value as u16).to_le_bytes());
@@ -132,7 +132,9 @@ impl EngineInstance {
     }
 
     pub fn store32(&mut self, address: u32, value: u32) -> Result<StoreCompletion, HostError> {
+        // the legacy word store keeps pending-call admission while checking interpretation.
         self.artifact_bytes()?;
+        self.check_decode_key(self.artifact.as_ref().unwrap())?;
         let memory = self.memory.as_mut().ok_or(HostError::Closed)?;
         let code_version = memory.code_validation_version();
         let result = memory
@@ -150,7 +152,7 @@ impl EngineInstance {
         address: u32,
         value: u32,
     ) -> Result<StoreCompletion, HostError> {
-        self.guard_resident(key, id)?;
+        self.guard_material_resident(key, id)?;
         let memory = self.memory.as_mut().ok_or(HostError::Closed)?;
         let code_version = memory.code_validation_version();
         let result = memory
@@ -162,7 +164,7 @@ impl EngineInstance {
     }
 
     pub fn exchange16(&mut self, address: u32, value: u32) -> Result<StoreCompletion, HostError> {
-        self.guard(self.key, self.generation())?;
+        self.guard_material(self.key, self.generation())?;
         let memory = self.memory.as_mut().ok_or(HostError::Closed)?;
         let code_version = memory.code_validation_version();
         let result = memory
@@ -180,7 +182,7 @@ impl EngineInstance {
         address: u32,
         value: u32,
     ) -> Result<StoreCompletion, HostError> {
-        self.guard_resident(key, id)?;
+        self.guard_material_resident(key, id)?;
         let memory = self.memory.as_mut().ok_or(HostError::Closed)?;
         let code_version = memory.code_validation_version();
         let result = memory
@@ -192,7 +194,7 @@ impl EngineInstance {
     }
 
     pub fn exchange8(&mut self, address: u32, value: u32) -> Result<StoreCompletion, HostError> {
-        self.guard(self.key, self.generation())?;
+        self.guard_material(self.key, self.generation())?;
         let memory = self.memory.as_mut().ok_or(HostError::Closed)?;
         let code_version = memory.code_validation_version();
         let result = memory
@@ -210,7 +212,7 @@ impl EngineInstance {
         address: u32,
         value: u32,
     ) -> Result<StoreCompletion, HostError> {
-        self.guard_resident(key, id)?;
+        self.guard_material_resident(key, id)?;
         let memory = self.memory.as_mut().ok_or(HostError::Closed)?;
         let code_version = memory.code_validation_version();
         let result = memory
@@ -222,7 +224,7 @@ impl EngineInstance {
     }
 
     pub fn exchange32(&mut self, address: u32, value: u32) -> Result<StoreCompletion, HostError> {
-        self.guard(self.key, self.generation())?;
+        self.guard_material(self.key, self.generation())?;
         let memory = self.memory.as_mut().ok_or(HostError::Closed)?;
         let code_version = memory.code_validation_version();
         let result = memory.exchange32(GuestAddress(address), value);
@@ -238,7 +240,7 @@ impl EngineInstance {
         address: u32,
         value: u32,
     ) -> Result<StoreCompletion, HostError> {
-        self.guard_resident(key, id)?;
+        self.guard_material_resident(key, id)?;
         let memory = self.memory.as_mut().ok_or(HostError::Closed)?;
         let code_version = memory.code_validation_version();
         let result = memory.exchange32(GuestAddress(address), value);
@@ -253,7 +255,7 @@ impl EngineInstance {
         expected: u32,
         desired: u32,
     ) -> Result<StoreCompletion, HostError> {
-        self.guard(self.key, self.generation())?;
+        self.guard_material(self.key, self.generation())?;
         let memory = self.memory.as_mut().ok_or(HostError::Closed)?;
         let code_version = memory.code_validation_version();
         let result = memory
@@ -272,7 +274,7 @@ impl EngineInstance {
         expected: u32,
         desired: u32,
     ) -> Result<StoreCompletion, HostError> {
-        self.guard_resident(key, id)?;
+        self.guard_material_resident(key, id)?;
         let memory = self.memory.as_mut().ok_or(HostError::Closed)?;
         let code_version = memory.code_validation_version();
         let result = memory
@@ -289,7 +291,7 @@ impl EngineInstance {
         expected: u32,
         desired: u32,
     ) -> Result<StoreCompletion, HostError> {
-        self.guard(self.key, self.generation())?;
+        self.guard_material(self.key, self.generation())?;
         let memory = self.memory.as_mut().ok_or(HostError::Closed)?;
         let code_version = memory.code_validation_version();
         let result = memory
@@ -308,7 +310,7 @@ impl EngineInstance {
         expected: u32,
         desired: u32,
     ) -> Result<StoreCompletion, HostError> {
-        self.guard_resident(key, id)?;
+        self.guard_material_resident(key, id)?;
         let memory = self.memory.as_mut().ok_or(HostError::Closed)?;
         let code_version = memory.code_validation_version();
         let result = memory
@@ -325,7 +327,7 @@ impl EngineInstance {
         expected: u32,
         desired: u32,
     ) -> Result<StoreCompletion, HostError> {
-        self.guard(self.key, self.generation())?;
+        self.guard_material(self.key, self.generation())?;
         let memory = self.memory.as_mut().ok_or(HostError::Closed)?;
         let code_version = memory.code_validation_version();
         let result = memory.compare_exchange32(GuestAddress(address), expected, desired);
@@ -342,7 +344,7 @@ impl EngineInstance {
         expected: u32,
         desired: u32,
     ) -> Result<StoreCompletion, HostError> {
-        self.guard_resident(key, id)?;
+        self.guard_material_resident(key, id)?;
         let memory = self.memory.as_mut().ok_or(HostError::Closed)?;
         let code_version = memory.code_validation_version();
         let result = memory.compare_exchange32(GuestAddress(address), expected, desired);
@@ -356,7 +358,7 @@ impl EngineInstance {
         address: u32,
         source: u32,
     ) -> Result<StoreCompletion, HostError> {
-        self.guard(self.key, self.generation())?;
+        self.guard_material(self.key, self.generation())?;
         let memory = self.memory.as_mut().ok_or(HostError::Closed)?;
         let code_version = memory.code_validation_version();
         let result = memory.exchange_add32(GuestAddress(address), source);
@@ -372,7 +374,7 @@ impl EngineInstance {
         address: u32,
         source: u32,
     ) -> Result<StoreCompletion, HostError> {
-        self.guard_resident(key, id)?;
+        self.guard_material_resident(key, id)?;
         let memory = self.memory.as_mut().ok_or(HostError::Closed)?;
         let code_version = memory.code_validation_version();
         let result = memory.exchange_add32(GuestAddress(address), source);
@@ -386,7 +388,7 @@ impl EngineInstance {
         address: u32,
         source: u32,
     ) -> Result<StoreCompletion, HostError> {
-        self.guard(self.key, self.generation())?;
+        self.guard_material(self.key, self.generation())?;
         let memory = self.memory.as_mut().ok_or(HostError::Closed)?;
         let code_version = memory.code_validation_version();
         let result = memory
@@ -404,7 +406,7 @@ impl EngineInstance {
         address: u32,
         source: u32,
     ) -> Result<StoreCompletion, HostError> {
-        self.guard_resident(key, id)?;
+        self.guard_material_resident(key, id)?;
         let memory = self.memory.as_mut().ok_or(HostError::Closed)?;
         let code_version = memory.code_validation_version();
         let result = memory
@@ -420,7 +422,7 @@ impl EngineInstance {
         address: u32,
         source: u32,
     ) -> Result<StoreCompletion, HostError> {
-        self.guard(self.key, self.generation())?;
+        self.guard_material(self.key, self.generation())?;
         let memory = self.memory.as_mut().ok_or(HostError::Closed)?;
         let code_version = memory.code_validation_version();
         let result = memory
@@ -438,7 +440,7 @@ impl EngineInstance {
         address: u32,
         source: u32,
     ) -> Result<StoreCompletion, HostError> {
-        self.guard_resident(key, id)?;
+        self.guard_material_resident(key, id)?;
         let memory = self.memory.as_mut().ok_or(HostError::Closed)?;
         let code_version = memory.code_validation_version();
         let result = memory
@@ -450,7 +452,7 @@ impl EngineInstance {
     }
 
     pub fn bit_test_set32(&mut self, address: u32, bit: u32) -> Result<StoreCompletion, HostError> {
-        self.guard(self.key, self.generation())?;
+        self.guard_material(self.key, self.generation())?;
         let memory = self.memory.as_mut().ok_or(HostError::Closed)?;
         let code_version = memory.code_validation_version();
         let result = memory.bit_test_set32(GuestAddress(address), bit);
@@ -466,7 +468,7 @@ impl EngineInstance {
         address: u32,
         bit: u32,
     ) -> Result<StoreCompletion, HostError> {
-        self.guard_resident(key, id)?;
+        self.guard_material_resident(key, id)?;
         let memory = self.memory.as_mut().ok_or(HostError::Closed)?;
         let code_version = memory.code_validation_version();
         let result = memory.bit_test_set32(GuestAddress(address), bit);
@@ -480,7 +482,7 @@ impl EngineInstance {
         address: u32,
         bit: u32,
     ) -> Result<StoreCompletion, HostError> {
-        self.guard(self.key, self.generation())?;
+        self.guard_material(self.key, self.generation())?;
         let memory = self.memory.as_mut().ok_or(HostError::Closed)?;
         let code_version = memory.code_validation_version();
         let result = memory.bit_test_reset32(GuestAddress(address), bit);
@@ -496,7 +498,7 @@ impl EngineInstance {
         address: u32,
         bit: u32,
     ) -> Result<StoreCompletion, HostError> {
-        self.guard_resident(key, id)?;
+        self.guard_material_resident(key, id)?;
         let memory = self.memory.as_mut().ok_or(HostError::Closed)?;
         let code_version = memory.code_validation_version();
         let result = memory.bit_test_reset32(GuestAddress(address), bit);
@@ -506,7 +508,7 @@ impl EngineInstance {
     }
 
     pub fn atomic_or_u32(&mut self, address: u32, mask: u32) -> Result<StoreCompletion, HostError> {
-        self.guard(self.key, self.generation())?;
+        self.guard_material(self.key, self.generation())?;
         let memory = self.memory.as_mut().ok_or(HostError::Closed)?;
         let code_version = memory.code_validation_version();
         let result = memory.atomic_or_u32(GuestAddress(address), mask);
@@ -522,7 +524,7 @@ impl EngineInstance {
         address: u32,
         mask: u32,
     ) -> Result<StoreCompletion, HostError> {
-        self.guard_resident(key, id)?;
+        self.guard_material_resident(key, id)?;
         let memory = self.memory.as_mut().ok_or(HostError::Closed)?;
         let code_version = memory.code_validation_version();
         let result = memory.atomic_or_u32(GuestAddress(address), mask);
@@ -536,7 +538,7 @@ impl EngineInstance {
         address: u32,
         mask: u32,
     ) -> Result<StoreCompletion, HostError> {
-        self.guard(self.key, self.generation())?;
+        self.guard_material(self.key, self.generation())?;
         let memory = self.memory.as_mut().ok_or(HostError::Closed)?;
         let code_version = memory.code_validation_version();
         let result = memory.atomic_and_u32(GuestAddress(address), mask);
@@ -552,7 +554,7 @@ impl EngineInstance {
         address: u32,
         mask: u32,
     ) -> Result<StoreCompletion, HostError> {
-        self.guard_resident(key, id)?;
+        self.guard_material_resident(key, id)?;
         let memory = self.memory.as_mut().ok_or(HostError::Closed)?;
         let code_version = memory.code_validation_version();
         let result = memory.atomic_and_u32(GuestAddress(address), mask);
@@ -566,7 +568,7 @@ impl EngineInstance {
         address: u32,
         mask: u32,
     ) -> Result<StoreCompletion, HostError> {
-        self.guard(self.key, self.generation())?;
+        self.guard_material(self.key, self.generation())?;
         let memory = self.memory.as_mut().ok_or(HostError::Closed)?;
         let code_version = memory.code_validation_version();
         let result = memory.atomic_xor_u32(GuestAddress(address), mask);
@@ -582,7 +584,7 @@ impl EngineInstance {
         address: u32,
         mask: u32,
     ) -> Result<StoreCompletion, HostError> {
-        self.guard_resident(key, id)?;
+        self.guard_material_resident(key, id)?;
         let memory = self.memory.as_mut().ok_or(HostError::Closed)?;
         let code_version = memory.code_validation_version();
         let result = memory.atomic_xor_u32(GuestAddress(address), mask);

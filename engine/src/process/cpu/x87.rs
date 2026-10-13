@@ -21,7 +21,7 @@ impl EngineInstance {
         opcode: u32,
         waiting: u32,
     ) -> Result<StoreCompletion, HostError> {
-        self.guard(self.key, self.generation())?;
+        self.guard_material(self.key, self.generation())?;
         self.x87_apply(None, operation, address, flags, pc, opcode, waiting)
     }
 
@@ -37,7 +37,7 @@ impl EngineInstance {
         opcode: u32,
         waiting: u32,
     ) -> Result<StoreCompletion, HostError> {
-        self.guard_resident(key, id)?;
+        self.guard_material_resident(key, id)?;
         self.x87_apply(Some(id), operation, address, flags, pc, opcode, waiting)
     }
 

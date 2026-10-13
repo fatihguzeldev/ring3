@@ -24,4 +24,4 @@ mod xstate;
 
 pub use decoder::{DecodeError, DecodedInstruction, decode_one};
 pub(crate) use decoder::{DecodePolicy, decode_bound, decode_for_execution};
-pub(crate) use fetch::{BoundDecode, CapturedCodeFault, CodeFetchContext};
+pub(crate) use fetch::{BoundDecode, CapturedCodeFault, CodeDecodeKey, CodeFetchContext};

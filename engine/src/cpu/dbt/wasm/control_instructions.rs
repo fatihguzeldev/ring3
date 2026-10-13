@@ -132,6 +132,7 @@ fn bound(
         .i32_const(1)
         .call(imports.cpu_read.expect("BOUND memory read import"))
         .local_set(HELPER_STATUS);
+    crate::cpu::dbt::wasm::code_fetch::check_context(code, exit_depth);
     cpu_result::validate(code, (width * 2) as u32, 1, false, exit_depth);
     code.local_get(register(index));
     if word {

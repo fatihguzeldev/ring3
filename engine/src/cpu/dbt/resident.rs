@@ -239,7 +239,8 @@ impl ResidentRegistry {
             .ok_or(RegistryError::ByteCapacity)?;
         for pc in region.executable_addresses() {
             if self.entries.iter().any(|unit| {
-                unit.region.contains_executable(pc.0)
+                unit.region.matches_decode_key(region.decode_key())
+                    && unit.region.contains_executable(pc.0)
                     && unit.region.wasm_bytes(memory).is_ok()
                     && (unit.region.contains_material(pc.0)
                         || !region.contains_material(pc.0)
@@ -284,7 +285,11 @@ impl ResidentRegistry {
         self.check_memory(memory)?;
         let mut stale = false;
         for unit in &self.entries {
-            if unit.region.contains_executable(pc.0) {
+            if unit
+                .region
+                .matches_decode_key(crate::cpu::x86::decode::CodeDecodeKey::FLAT)
+                && unit.region.contains_executable(pc.0)
+            {
                 match unit.region.wasm_bytes(memory) {
                     Ok(_) => return Ok(unit.id),
                     Err(ArtifactError::CodeInvalidated) => stale = true,
@@ -308,6 +313,9 @@ impl ResidentRegistry {
         let mut stale = false;
         for material in [true, false] {
             for unit in &self.entries {
+                if !unit.region.matches_decode_key(cs.decode_key()) {
+                    continue;
+                }
                 let matches = if material {
                     unit.region.contains_material(pc.0)
                 } else {
@@ -638,5 +646,156 @@ mod tests {
         let zero = AtomicU64::new(0);
         assert_eq!(allocate_id(&zero), Err(RegistryError::IdentityExhausted));
         assert_eq!(zero.load(Ordering::Relaxed), 0);
+    }
+}
+
+#[cfg(test)]
+mod decode_key_tests {
+    use super::*;
+    use crate::{
+        cpu::x86::SegmentContext,
+        memory::{PageRange, Permissions},
+    };
+
+    fn context(base: u32) -> CodeFetchContext {
+        let mut segments = SegmentContext::default();
+        segments.state.bases[1] = base;
+        CodeFetchContext::from_segments(&segments).unwrap()
+    }
+
+    #[test]
+    fn same_logical_entry_can_retain_distinct_keys_without_wrong_key_stale_routing() {
+        let mut memory = AddressSpace::new(2).unwrap();
+        for page in [0x1000, 0x5000] {
+            memory
+                .map_zeroed(
+                    PageRange::new(GuestAddress(page), 1).unwrap(),
+                    Permissions::ALL,
+                )
+                .unwrap();
+            memory.write(GuestAddress(page), &[0xeb, 0xfe]).unwrap();
+        }
+        let pc = GuestAddress(0x1000);
+        let specs = [BlockSpec {
+            entry: pc,
+            byte_length: 2,
+        }];
+        let mut registry = ResidentRegistry::new(
+            &memory,
+            RegistryLimits {
+                units: 2,
+                wasm_bytes: MAX_BYTES,
+            },
+        )
+        .unwrap();
+        let flat = registry
+            .compile_bound(
+                &memory,
+                &specs,
+                &[],
+                CompileLimits::default(),
+                7,
+                Some(context(0)),
+            )
+            .unwrap();
+        let based = registry
+            .compile_bound(
+                &memory,
+                &specs,
+                &[],
+                CompileLimits::default(),
+                7,
+                Some(context(0x4000)),
+            )
+            .unwrap();
+        assert_ne!(flat, based);
+        assert_eq!(registry.lookup_bound(&memory, pc, context(0)), Ok(flat));
+        assert_eq!(
+            registry.lookup_bound(&memory, pc, context(0x4000)),
+            Ok(based)
+        );
+        memory.write(pc, &[0x90]).unwrap();
+        assert_eq!(
+            registry.lookup_bound(&memory, pc, context(0)),
+            Err(RegistryError::CodeInvalidated)
+        );
+        assert_eq!(
+            registry.lookup_bound(&memory, pc, context(0x4000)),
+            Ok(based)
+        );
+        assert_eq!(
+            registry.lookup_bound(&memory, pc, context(0x8000)),
+            Err(RegistryError::NotFound { pc })
+        );
+        assert_eq!(
+            registry.compile_bound(
+                &memory,
+                &specs,
+                &[],
+                CompileLimits::default(),
+                7,
+                Some(context(0x8000))
+            ),
+            Err(RegistryError::UnitCapacity)
+        );
+        assert_eq!(registry.usage().units, 2);
+    }
+}
+
+#[cfg(test)]
+mod synthetic_key_tests {
+    use super::*;
+    use crate::{
+        cpu::x86::{SegmentCache, SegmentContext},
+        memory::{PageRange, Permissions},
+    };
+
+    fn context(base: u32) -> CodeFetchContext {
+        let mut segments = SegmentContext::default();
+        segments.state.bases[1] = base;
+        segments.caches[1] = SegmentCache::from_bits(0xf2b0_1000).unwrap();
+        CodeFetchContext::from_segments(&segments).unwrap()
+    }
+
+    #[test]
+    fn old_key_prefix_fault_does_not_own_new_keys_short_instruction_at_same_pc() {
+        let mut memory = AddressSpace::new(2).unwrap();
+        for page in [0x1000, 0x5000] {
+            memory
+                .map_zeroed(
+                    PageRange::new(GuestAddress(page), 1).unwrap(),
+                    Permissions::ALL,
+                )
+                .unwrap();
+        }
+        memory.write(GuestAddress(0x1000), &[0x0f]).unwrap();
+        memory.write(GuestAddress(0x5000), &[0xcc]).unwrap();
+        let pc = GuestAddress(0x1000);
+        let mut registry = ResidentRegistry::new(&memory, RegistryLimits::default()).unwrap();
+        let old = registry
+            .compile_runtime_bound(&memory, pc, CompileLimits::default(), 7, context(0))
+            .unwrap();
+        let fault = registry
+            .get(&memory, old)
+            .unwrap()
+            .context_fault(pc.0)
+            .unwrap();
+        assert_eq!(
+            (fault.attempted_length, fault.consumed_prefix_length),
+            (2, 1)
+        );
+        assert!(!context(0x4000).permits(pc, fault.attempted_length));
+        assert_eq!(
+            registry.lookup_bound(&memory, pc, context(0x4000)),
+            Err(RegistryError::NotFound { pc })
+        );
+        let new = registry
+            .compile_runtime_bound(&memory, pc, CompileLimits::default(), 7, context(0x4000))
+            .unwrap();
+        assert_ne!(old, new);
+        assert_eq!(registry.lookup_bound(&memory, pc, context(0)), Ok(old));
+        assert_eq!(registry.lookup_bound(&memory, pc, context(0x4000)), Ok(new));
+        memory.write(GuestAddress(0x1000), &[0x90]).unwrap();
+        assert_eq!(registry.lookup_bound(&memory, pc, context(0x4000)), Ok(new));
     }
 }
