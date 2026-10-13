@@ -65,3 +65,6 @@ mod comparison_capability;
 
 #[path = "avx/integer/capability/native.rs"]
 mod integer_capability;
+
+#[path = "avx/masked/capability/native.rs"]
+mod masked_capability;

@@ -20,7 +20,7 @@ pub(super) fn lower(
                 }
                 (0x01000d01, operands, 0)
             }
-            Code::VEX_Vmaskmovps_xmm_xmm_m128 => {
+            Code::VEX_Vmaskmovps_xmm_xmm_m128 | Code::VEX_Vpmaskmovd_xmm_xmm_m128 => {
                 encoding.validate(true, 0, false)?;
                 if instruction.op_kind(2) != OpKind::Memory {
                     return Err(invalid());
@@ -32,7 +32,7 @@ pub(super) fn lower(
                 }
                 (0x01000d02, operands, 0)
             }
-            Code::VEX_Vmaskmovps_ymm_ymm_m256 => {
+            Code::VEX_Vmaskmovps_ymm_ymm_m256 | Code::VEX_Vpmaskmovd_ymm_ymm_m256 => {
                 encoding.validate(true, 1, false)?;
                 if instruction.op_kind(2) != OpKind::Memory {
                     return Err(invalid());
@@ -44,8 +44,12 @@ pub(super) fn lower(
                 }
                 (0x01000d03, operands, 0)
             }
-            Code::VEX_Vmaskmovpd_xmm_xmm_m128 => {
-                encoding.validate(true, 0, false)?;
+            Code::VEX_Vmaskmovpd_xmm_xmm_m128 | Code::VEX_Vpmaskmovq_xmm_xmm_m128 => {
+                encoding.validate(false, 0, false)?;
+                encoding.validate_w(matches!(
+                    instruction.code(),
+                    Code::VEX_Vpmaskmovq_xmm_xmm_m128
+                ))?;
                 if instruction.op_kind(2) != OpKind::Memory {
                     return Err(invalid());
                 }
@@ -56,8 +60,12 @@ pub(super) fn lower(
                 }
                 (0x01000d04, operands, 0)
             }
-            Code::VEX_Vmaskmovpd_ymm_ymm_m256 => {
-                encoding.validate(true, 1, false)?;
+            Code::VEX_Vmaskmovpd_ymm_ymm_m256 | Code::VEX_Vpmaskmovq_ymm_ymm_m256 => {
+                encoding.validate(false, 1, false)?;
+                encoding.validate_w(matches!(
+                    instruction.code(),
+                    Code::VEX_Vpmaskmovq_ymm_ymm_m256
+                ))?;
                 if instruction.op_kind(2) != OpKind::Memory {
                     return Err(invalid());
                 }
@@ -68,7 +76,7 @@ pub(super) fn lower(
                 }
                 (0x01000d05, operands, 0)
             }
-            Code::VEX_Vmaskmovps_m128_xmm_xmm => {
+            Code::VEX_Vmaskmovps_m128_xmm_xmm | Code::VEX_Vpmaskmovd_m128_xmm_xmm => {
                 encoding.validate(true, 0, false)?;
                 if instruction.op_kind(0) != OpKind::Memory {
                     return Err(invalid());
@@ -80,7 +88,7 @@ pub(super) fn lower(
                 }
                 (0x01000d06, operands, 0)
             }
-            Code::VEX_Vmaskmovps_m256_ymm_ymm => {
+            Code::VEX_Vmaskmovps_m256_ymm_ymm | Code::VEX_Vpmaskmovd_m256_ymm_ymm => {
                 encoding.validate(true, 1, false)?;
                 if instruction.op_kind(0) != OpKind::Memory {
                     return Err(invalid());
@@ -92,8 +100,12 @@ pub(super) fn lower(
                 }
                 (0x01000d07, operands, 0)
             }
-            Code::VEX_Vmaskmovpd_m128_xmm_xmm => {
-                encoding.validate(true, 0, false)?;
+            Code::VEX_Vmaskmovpd_m128_xmm_xmm | Code::VEX_Vpmaskmovq_m128_xmm_xmm => {
+                encoding.validate(false, 0, false)?;
+                encoding.validate_w(matches!(
+                    instruction.code(),
+                    Code::VEX_Vpmaskmovq_m128_xmm_xmm
+                ))?;
                 if instruction.op_kind(0) != OpKind::Memory {
                     return Err(invalid());
                 }
@@ -104,8 +116,12 @@ pub(super) fn lower(
                 }
                 (0x01000d08, operands, 0)
             }
-            Code::VEX_Vmaskmovpd_m256_ymm_ymm => {
-                encoding.validate(true, 1, false)?;
+            Code::VEX_Vmaskmovpd_m256_ymm_ymm | Code::VEX_Vpmaskmovq_m256_ymm_ymm => {
+                encoding.validate(false, 1, false)?;
+                encoding.validate_w(matches!(
+                    instruction.code(),
+                    Code::VEX_Vpmaskmovq_m256_ymm_ymm
+                ))?;
                 if instruction.op_kind(0) != OpKind::Memory {
                     return Err(invalid());
                 }
@@ -120,7 +136,23 @@ pub(super) fn lower(
         };
         let instruction_value = AvxInstruction::decode_descriptor(descriptor, operands, immediate)
             .map_err(|_| invalid())?;
-        bind_address(instruction, instruction_value).map(Some)
+        let operation = bind_address(instruction, instruction_value)?;
+        if !crate::cpu::x86::capabilities::AVX2_ENABLED
+            && matches!(
+                instruction.code(),
+                Code::VEX_Vpmaskmovd_xmm_xmm_m128
+                    | Code::VEX_Vpmaskmovd_ymm_ymm_m256
+                    | Code::VEX_Vpmaskmovq_xmm_xmm_m128
+                    | Code::VEX_Vpmaskmovq_ymm_ymm_m256
+                    | Code::VEX_Vpmaskmovd_m128_xmm_xmm
+                    | Code::VEX_Vpmaskmovd_m256_ymm_ymm
+                    | Code::VEX_Vpmaskmovq_m128_xmm_xmm
+                    | Code::VEX_Vpmaskmovq_m256_ymm_ymm
+            )
+        {
+            return Err(unsupported());
+        }
+        Ok(Some(operation))
     })();
     result.transpose()
 }
