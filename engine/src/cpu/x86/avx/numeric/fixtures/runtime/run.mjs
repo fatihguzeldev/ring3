@@ -535,7 +535,7 @@ for (const [op, length] of [
   run("invalid-state", `${op}`, op, registers(0, 1, 0, true), 0, length, invalid, invalid, 2);
 }
 for (const [op, regs, imm, len] of [
-  [38, 0, 0, 0],
+  [0xffffffff, 0, 0, 0],
   [23, 8, 0, 0],
   [23, 8 << 8, 0, 0],
   [23, 8 << 16, 0, 0],

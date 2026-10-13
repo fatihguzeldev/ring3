@@ -262,6 +262,9 @@ pub(crate) use integer::IntegerLaneOperation;
 #[cfg(test)]
 pub(crate) use float::{CompareMode, compare_lanes, conversion_lanes};
 
+#[cfg(test)]
+pub(crate) use float::{PairwiseKind, dot_product_lanes, pairwise_lanes, round_lanes};
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SimdError {
     InvalidDescriptor,

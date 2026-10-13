@@ -409,16 +409,20 @@ pub(crate) fn elementwise<const N: usize>(
     (result, instruction_exceptions(exceptions, mxcsr))
 }
 
-fn round_integral(op: SimdOperation, a: [u8; 16], b: [u8; 16], mxcsr: u32) -> ([u8; 16], u32) {
-    let immediate = op.immediate.unwrap();
+pub(crate) fn round_lanes<const N: usize>(
+    width: usize,
+    count: usize,
+    mut out: [u8; N],
+    b: [u8; N],
+    mxcsr: u32,
+    immediate: u8,
+) -> ([u8; N], u32) {
+    assert!(matches!(width, 4 | 8) && count <= N / width);
     let mode = if immediate & 4 != 0 {
         rounding(mxcsr)
     } else {
         rounding(u32::from(immediate & 3) << 13)
     };
-    let width = usize::from(op.lane_bytes);
-    let count = if op.scalar { 1 } else { 16 / width };
-    let mut out = a;
     let mut exceptions = 0;
     for lane in 0..count {
         // round honors DAZ, but does not signal the denormal operand exception.
@@ -432,20 +436,39 @@ fn round_integral(op: SimdOperation, a: [u8; 16], b: [u8; 16], mxcsr: u32) -> ([
     (out, instruction_exceptions(exceptions, mxcsr))
 }
 
+fn round_integral(op: SimdOperation, a: [u8; 16], b: [u8; 16], mxcsr: u32) -> ([u8; 16], u32) {
+    let width = usize::from(op.lane_bytes);
+    round_lanes(
+        width,
+        if op.scalar { 1 } else { 16 / width },
+        a,
+        b,
+        mxcsr,
+        op.immediate.unwrap(),
+    )
+}
+
 fn dot_stage(status: u32, mxcsr: u32, exceptions: &mut u32) -> bool {
     let status = instruction_exceptions(status, mxcsr);
     *exceptions |= status;
     status & !(mxcsr >> 7) & 63 != 0
 }
 
-fn dot_product(op: SimdOperation, a: [u8; 16], b: [u8; 16], mxcsr: u32) -> ([u8; 16], u32) {
-    let width = usize::from(op.lane_bytes);
-    let count = 16 / width;
-    let immediate = op.immediate.unwrap();
-    let mut products = [0; 4];
+pub(crate) fn dot_product_lanes<const N: usize>(
+    bytes: usize,
+    width: usize,
+    immediate: u8,
+    a: [u8; N],
+    b: [u8; N],
+    mxcsr: u32,
+) -> ([u8; N], u32) {
+    assert!(bytes <= N && (width == 4 && matches!(bytes, 16 | 32) || width == 8 && bytes == 16));
+    let block_lanes = 16 / width;
+    let blocks = bytes / 16;
+    let mut products = [0; 8];
     let mut product_exceptions = 0;
-    for (lane, product) in products[..count].iter_mut().enumerate() {
-        if immediate & (1 << (lane + 4)) != 0 {
+    for (lane, product) in products[..bytes / width].iter_mut().enumerate() {
+        if immediate & (1 << (lane % block_lanes + 4)) != 0 {
             let (bits, status, _) = binary(
                 F::Multiply,
                 unsigned(&a, lane * width, width),
@@ -458,39 +481,130 @@ fn dot_product(op: SimdOperation, a: [u8; 16], b: [u8; 16], mxcsr: u32) -> ([u8;
             product_exceptions |= lane_exceptions(status, mxcsr);
         }
     }
-    // packed products, pair sums, and the final sum deliver exceptions as stages.
     let mut exceptions = 0;
     if dot_stage(product_exceptions, mxcsr, &mut exceptions) {
         return (a, exceptions);
     }
-    let (left, status, _) = binary(F::Add, products[0], products[1], width, mxcsr, 0);
-    let mut pair_exceptions = lane_exceptions(status, mxcsr);
-    let right = if count == 4 {
-        let (right, status, _) = binary(F::Add, products[2], products[3], width, mxcsr, 0);
-        pair_exceptions |= lane_exceptions(status, mxcsr);
-        right
-    } else {
-        0
-    };
-    if dot_stage(pair_exceptions, mxcsr, &mut exceptions) {
+    let mut left = [0; 2];
+    let mut right = [0; 2];
+    let mut status = 0;
+    for block in 0..blocks {
+        let offset = block * block_lanes;
+        let (bits, flags, _) = binary(
+            F::Add,
+            products[offset],
+            products[offset + 1],
+            width,
+            mxcsr,
+            0,
+        );
+        left[block] = bits;
+        status |= lane_exceptions(flags, mxcsr);
+        if width == 4 {
+            let (bits, flags, _) = binary(
+                F::Add,
+                products[offset + 2],
+                products[offset + 3],
+                width,
+                mxcsr,
+                0,
+            );
+            right[block] = bits;
+            status |= lane_exceptions(flags, mxcsr);
+        }
+    }
+    if dot_stage(status, mxcsr, &mut exceptions) {
         return (a, exceptions);
     }
-    let sum = if count == 4 {
-        let (sum, status, _) = binary(F::Add, left, right, width, mxcsr, 0);
-        if dot_stage(lane_exceptions(status, mxcsr), mxcsr, &mut exceptions) {
+    if width == 4 {
+        let mut status = 0;
+        for block in 0..blocks {
+            let (bits, flags, _) = binary(F::Add, left[block], right[block], width, mxcsr, 0);
+            left[block] = bits;
+            status |= lane_exceptions(flags, mxcsr);
+        }
+        if dot_stage(status, mxcsr, &mut exceptions) {
             return (a, exceptions);
         }
-        sum
-    } else {
-        left
-    };
-    let mut out = [0; 16];
-    for lane in 0..count {
-        if immediate & (1 << lane) != 0 {
-            put(&mut out, lane * width, width, sum);
+    }
+    let mut out = [0; N];
+    for lane in 0..bytes / width {
+        if immediate & (1 << (lane % block_lanes)) != 0 {
+            put(&mut out, lane * width, width, left[lane / block_lanes]);
         }
     }
     (out, exceptions)
+}
+
+pub(crate) fn dot_product(
+    width: usize,
+    immediate: u8,
+    a: [u8; 16],
+    b: [u8; 16],
+    mxcsr: u32,
+) -> ([u8; 16], u32) {
+    dot_product_lanes(16, width, immediate, a, b, mxcsr)
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum PairwiseKind {
+    AddSubtract,
+    HorizontalAdd,
+    HorizontalSubtract,
+}
+
+impl PairwiseKind {
+    fn from_legacy(kind: F) -> Option<Self> {
+        Some(match kind {
+            F::AddSubtract => Self::AddSubtract,
+            F::HorizontalAdd => Self::HorizontalAdd,
+            F::HorizontalSubtract => Self::HorizontalSubtract,
+            _ => return None,
+        })
+    }
+}
+
+pub(crate) fn pairwise_lanes<const N: usize>(
+    kind: PairwiseKind,
+    width: usize,
+    bytes: usize,
+    a: [u8; N],
+    b: [u8; N],
+    mxcsr: u32,
+) -> ([u8; N], u32) {
+    assert!(matches!(width, 4 | 8) && bytes <= N && bytes % 16 == 0);
+    let count = bytes / width;
+    let block_lanes = 16 / width;
+    let mut out = a;
+    let mut exceptions = 0;
+    for lane in 0..count {
+        let offset = lane * width;
+        let (operation, left, right) = match kind {
+            PairwiseKind::AddSubtract => (
+                if lane % 2 == 0 { F::Subtract } else { F::Add },
+                unsigned(&a, offset, width),
+                unsigned(&b, offset, width),
+            ),
+            PairwiseKind::HorizontalAdd | PairwiseKind::HorizontalSubtract => {
+                let within = lane % block_lanes;
+                let source = if within < block_lanes / 2 { &a } else { &b };
+                let offset = lane / block_lanes * 16 + within % (block_lanes / 2) * width * 2;
+                (
+                    if kind == PairwiseKind::HorizontalAdd {
+                        F::Add
+                    } else {
+                        F::Subtract
+                    },
+                    unsigned(source, offset, width),
+                    unsigned(source, offset + width, width),
+                )
+            }
+        };
+        let (value, status, _) = binary(operation, left, right, width, mxcsr, 0);
+        exceptions |= lane_exceptions(status, mxcsr);
+        put(&mut out, offset, width, value);
+    }
+    (out, instruction_exceptions(exceptions, mxcsr))
 }
 
 pub(super) fn floating(
@@ -507,7 +621,13 @@ pub(super) fn floating(
         let (out, exceptions) = if kind == F::Round {
             round_integral(op, a, b, mxcsr)
         } else {
-            dot_product(op, a, b, mxcsr)
+            dot_product(
+                usize::from(op.lane_bytes),
+                op.immediate.unwrap(),
+                a,
+                b,
+                mxcsr,
+            )
         };
         return (out, exceptions, incoming_flags);
     }
@@ -521,36 +641,18 @@ pub(super) fn floating(
         let (out, exceptions) = elementwise(kind, width, count, a, b, mxcsr);
         return (out, exceptions, incoming_flags);
     }
+    if let Some(kind) = PairwiseKind::from_legacy(kind) {
+        let (out, exceptions) =
+            pairwise_lanes(kind, width, usize::from(op.vector_bytes), a, b, mxcsr);
+        return (out, exceptions, incoming_flags);
+    }
     let mut out = a;
     let mut exceptions = 0;
     let mut flags = incoming_flags;
     for lane in 0..count {
         let offset = lane * width;
-        let (kind, left, right) = match kind {
-            F::AddSubtract => (
-                if lane % 2 == 0 { F::Subtract } else { F::Add },
-                unsigned(&a, offset, width),
-                unsigned(&b, offset, width),
-            ),
-            F::HorizontalAdd | F::HorizontalSubtract => {
-                let input = if lane < count / 2 { &a } else { &b };
-                let offset = lane % (count / 2) * width * 2;
-                (
-                    if kind == F::HorizontalAdd {
-                        F::Add
-                    } else {
-                        F::Subtract
-                    },
-                    unsigned(input, offset, width),
-                    unsigned(input, offset + width, width),
-                )
-            }
-            _ => (
-                kind,
-                unsigned(&a, offset, width),
-                unsigned(&b, offset, width),
-            ),
-        };
+        let left = unsigned(&a, offset, width);
+        let right = unsigned(&b, offset, width);
         let (value, status, compare) =
             binary(kind, left, right, width, mxcsr, op.immediate.unwrap_or(0));
         exceptions |= lane_exceptions(status, mxcsr);
