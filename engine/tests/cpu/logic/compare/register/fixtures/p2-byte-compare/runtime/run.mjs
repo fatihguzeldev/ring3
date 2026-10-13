@@ -1,3 +1,4 @@
+import {ARENA_SIZE} from '../../../../../../../support/wasm/arena.mjs';
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
 import {readFileSync, writeFileSync} from 'node:fs';
@@ -8,10 +9,10 @@ assert.ok(root, 'expected engine wasm, output directory and repository root');
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
 const engineBytes = readFileSync(enginePath), engineModule = new WebAssembly.Module(engineBytes);
 assert.deepEqual(WebAssembly.Module.imports(engineModule), []);
-const arenaSize = 4612, transfer = 140, rows = [], controls = [], peRows = [], modules = [];
+const arenaSize = ARENA_SIZE, transfer = 140, rows = [], controls = [], peRows = [], modules = [];
 const initialRegisters = [0x1234807f, 0x23457f80, 0x34560f10, 0x4567ff00, 0x56789abc, 0x6789abcd, 0x789abcde, 0x89abcdef];
 const boundaries = [0, 1, 15, 16, 127, 128, 255];
-const apiNames = ['open', 'close', 'arena_ptr', 'map', 'upload', 'read32', 'write8', 'compile_entries', 'compile_resident_entries', 'generation', 'module_ptr', 'module_len', 'guard', 'guard_resident', 'store32', 'store_resident32', 'begin_image_input', 'append_image_input', 'load_pe32_linked_v2_input_at', 'start_loaded_image', 'capture_call', 'capture_resident_call', 'complete_windows_call', 'complete_resident_windows_call'];
+const apiNames = ['open', 'close', 'arena_ptr', 'map', 'upload', 'read32', 'write8', 'compile_entries', 'compile_resident_entries', 'generation', 'module_ptr', 'module_len', 'guard', 'guard_resident', 'store32', 'store_resident32', 'cpu_read32', 'cpu_store32', 'cpu_store_resident32', 'begin_image_input', 'append_image_input', 'load_pe32_linked_v2_input_at', 'start_loaded_image', 'capture_call', 'capture_resident_call', 'complete_windows_call', 'complete_resident_windows_call'];
 let ordinal = 0;
 
 function record(magic, length, fields, version = 1) {
@@ -225,10 +226,10 @@ for (const base of [0x400000, 0x500000]) for (const owner of ['replacement', 're
   const expectedState = {registers: [0x1234807f, 0x23457f80, 0xc8c00001, 0, 0x70ff8, 0, 0, 0], pc: 0x8020, flags: 0x46};
   assert.deepEqual(state(ctx), expectedState, `${label}: real byte branches preserve original parents`);
   if (owner === 'resident') {
-    assert.deepEqual(snapshot(ctx).subarray(56, 96), record('R3EX', 40, [3, 15, 0, 0, 0, 0], 2));
+    assert.deepEqual(snapshot(ctx).subarray(56, 96), record('R3EX', 40, [3, 15, 0, 0, 0, 0], 6));
     assert.equal(gate.run(ctx.base, ctx.base + 56, 1, ctx.base + 96), 0);
   }
-  assert.deepEqual(snapshot(ctx).subarray(56, 96), record('R3EX', 40, [8, owner === 'resident' ? 0 : 15, 0x10003, 0, 0, 0], 3));
+  assert.deepEqual(snapshot(ctx).subarray(56, 96), record('R3EX', 40, [8, owner === 'resident' ? 0 : 15, 0x10003, 0, 0, 0], owner === 'resident' ? 3 : 6));
   const capture = owner === 'replacement' ? ctx.api.capture_call(ctx.low, ctx.high, gate.generation, 2, 1) : ctx.api.capture_resident_call(ctx.low, ctx.high, gate.low, gate.high, 2, 1);
   assert.equal(capture, 0);
   assert.equal(owner === 'replacement' ? ctx.api.complete_windows_call(ctx.low, ctx.high, gate.generation, 1) : ctx.api.complete_resident_windows_call(ctx.low, ctx.high, gate.low, gate.high, 1), 0);
@@ -242,6 +243,7 @@ for (const base of [0x400000, 0x500000]) for (const owner of ['replacement', 're
 }
 const sourcePaths = ['Cargo.toml', 'Cargo.lock', 'engine/Cargo.toml', 'engine/src/cpu/x86/ir.rs', 'engine/src/cpu/x86/decode/integer.rs', 'engine/src/cpu/dbt/region.rs', 'engine/src/cpu/dbt/wasm/integer/arithmetic.rs', 'engine/src/cpu/dbt/wasm/integer/bits.rs', 'engine/src/cpu/dbt/wasm/integer/carry_rotates.rs', 'engine/src/cpu/dbt/wasm/integer/decimal.rs', 'engine/src/cpu/dbt/wasm/integer/dispatch.rs', 'engine/src/cpu/dbt/wasm/integer/flags.rs', 'engine/src/cpu/dbt/wasm/integer/mod.rs', 'engine/src/cpu/dbt/wasm/integer/multiply_divide.rs', 'engine/src/cpu/dbt/wasm/integer/operands.rs', 'engine/src/cpu/dbt/wasm/integer/rotates.rs', 'engine/src/cpu/dbt/wasm/integer/shifts.rs', 'engine/tests/cpu/logic/compare/register/wasm/byte.rs', 'engine/tests/cpu/logic/wasm.rs', 'engine/tests/support/loader/pe32/image.rs', 'engine/tests/support/wasm.rs', 'engine/tests/cpu/logic/compare/register/fixtures/p2-byte-compare/runtime/run.mjs'];
 assert.equal(new Set(sourcePaths).size, sourcePaths.length);
+sourcePaths.push(...["engine/src/abi/memory_helper/cpu.rs", "engine/src/cpu/dbt/wasm/memory/cpu_scalar.rs", "engine/src/cpu/dbt/wasm/emitter.rs", "engine/src/cpu/dbt/wasm/code_fetch.rs", "engine/src/process/memory/cpu_scalar.rs", "engine/src/process/memory/scalar/cpu_write.rs", "engine/src/process/wasm/memory/cpu_write.rs", "engine/src/abi/wasm/exports/memory/cpu_write.rs", "engine/tests/support/wasm/arena.mjs"].filter(path=>!sourcePaths.includes(path)));
 const result = {status: 'ok', engine_sha256: hash(engineBytes), pe_sha256: hash(image), source_sha256: Object.fromEntries(sourcePaths.map(path => [path, hash(readFileSync(join(root, path)))])), tools: {node: process.version, v8: process.versions.v8}, counts: {compare_cases: rows.length, canonical_forms_per_mode: forms.length, boundary_pairs_per_mode: 98, finite_guest_retired: rows.length, pe_paths: peRows.length, pe_guest_retired: 60}, cases: rows, controls, pe: peRows, modules, claim: 'finite authored CMP8 in native-generated standalone Wasm and engine-Wasm-generated bound modules, plus four copied PE startup/branch/ExitProcess paths; no browser, SDK, general ISA, performance or playable game claim'};
 assert.equal(rows.length, 786); assert.equal(peRows.length, 4);
 writeFileSync(join(output, 'result.json'), JSON.stringify(result, null, 2));

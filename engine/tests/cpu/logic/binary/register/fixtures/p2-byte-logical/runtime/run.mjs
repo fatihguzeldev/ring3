@@ -1,3 +1,4 @@
+import {ARENA_SIZE, createArena} from '../../../../../../../support/wasm/arena.mjs';
 import {assertEngineExports} from '../../../../../../../support/wasm/exports.mjs';
 import assert from 'node:assert/strict';
 import {execFileSync} from 'node:child_process';
@@ -13,14 +14,15 @@ const engineExportContract = assertEngineExports(engineModule, root);
 assert.deepEqual(WebAssembly.Module.imports(engineModule), []);
 
 
-const SIZE = 4612, TRANSFER = 140, EXIT = 0x8020, EXIT_ID = 0x10003, MARKER = 0xc8c00007;
+const SIZE = ARENA_SIZE, TRANSFER = 140, EXIT = 0x8020, EXIT_ID = 0x10003, MARKER = 0xc8c00007;
 const initialRegisters = [0x1234807f, 0x23457f80, 0x34560f10, 0x4567ff00, 0x56789abc, 0x6789abcd, 0x789abcde, 0x89abcdef];
 const boundaries = [0, 1, 15, 16, 127, 128, 255];
-const apiNames = ['open', 'close', 'arena_ptr', 'map', 'upload', 'read32', 'write8', 'compile_entries', 'compile_resident_entries', 'generation', 'module_ptr', 'module_len', 'guard', 'guard_resident', 'store32', 'store_resident32', 'begin_image_input', 'append_image_input', 'load_pe32_linked_v2_input_at', 'start_loaded_image', 'capture_call', 'capture_resident_call', 'complete_windows_call', 'complete_resident_windows_call'];
+const apiNames = ['open', 'close', 'arena_ptr', 'map', 'upload', 'read32', 'write8', 'compile_entries', 'compile_resident_entries', 'generation', 'module_ptr', 'module_len', 'guard', 'guard_resident', 'store32', 'store_resident32', 'cpu_read32', 'cpu_store32', 'cpu_store_resident32', 'begin_image_input', 'append_image_input', 'load_pe32_linked_v2_input_at', 'start_loaded_image', 'capture_call', 'capture_resident_call', 'complete_windows_call', 'complete_resident_windows_call'];
 const sourcePaths = ['Cargo.toml', 'Cargo.lock', 'engine/Cargo.toml', 'engine/src/cpu/x86/ir.rs', 'engine/src/cpu/x86/decode/decoder.rs', 'engine/src/cpu/x86/decode/integer.rs', 'engine/src/cpu/x86/decode/operands.rs', 'engine/src/cpu/x86/decode/flow.rs', 'engine/src/cpu/dbt/region.rs', 'engine/src/cpu/dbt/wasm/integer/arithmetic.rs', 'engine/src/cpu/dbt/wasm/integer/bits.rs', 'engine/src/cpu/dbt/wasm/integer/carry_rotates.rs', 'engine/src/cpu/dbt/wasm/integer/decimal.rs', 'engine/src/cpu/dbt/wasm/integer/dispatch.rs', 'engine/src/cpu/dbt/wasm/integer/flags.rs', 'engine/src/cpu/dbt/wasm/integer/mod.rs', 'engine/src/cpu/dbt/wasm/integer/multiply_divide.rs', 'engine/src/cpu/dbt/wasm/integer/operands.rs', 'engine/src/cpu/dbt/wasm/integer/rotates.rs', 'engine/src/cpu/dbt/wasm/integer/shifts.rs', 'engine/src/cpu/dbt/wasm/control.rs', 'engine/src/cpu/dbt/wasm/memory.rs', 'engine/src/process/instance.rs', 'engine/src/process/execution/compiled.rs', 'engine/src/process/execution/authority.rs', 'engine/src/process/memory/address_space.rs', 'engine/src/process/memory/scalar.rs', 'engine/src/process/memory/scalar/tests.rs', 'engine/src/process/execution/mod.rs', 'engine/src/process/memory/mod.rs', 'engine/src/process/mod.rs', 'engine/src/process/wasm/mod.rs', 'engine/src/process/wasm/loading.rs', 'engine/src/process/wasm/execution.rs', 'engine/src/process/wasm/calls.rs', 'engine/src/process/wasm/memory.rs', 'engine/src/process/wasm/cpu.rs', 'engine/src/process/calls/call.rs', 'engine/src/process/calls/context.rs', 'engine/src/process/calls/mod.rs', 'engine/src/process/windows/calls.rs', 'engine/src/process/windows/mod.rs', 'engine/src/abi/wasm/exports/calls.rs', 'engine/src/abi/wasm/exports/cpu.rs', 'engine/src/abi/wasm/exports/execution.rs', 'engine/src/abi/wasm/exports/image.rs', 'engine/src/abi/wasm/exports/instance.rs', 'engine/src/abi/wasm/exports/memory.rs', 'engine/src/abi/wasm/exports/mod.rs', 'engine/src/loader/mod.rs', 'engine/src/loader/imports.rs', 'engine/src/loader/relocation.rs', 'engine/tests/support/loader/pe32/image.rs', 'engine/tests/cpu/logic/binary/register/wasm/byte.rs', 'engine/tests/cpu/logic/wasm.rs', 'engine/tests/support/wasm.rs', 'engine/tests/cpu/logic/binary/register/fixtures/p2-byte-logical/runtime/run.mjs', 'engine/tests/cpu/logic/binary/register/fixtures/p2-byte-logical/integer.S'];
 assert.equal(new Set(sourcePaths).size, sourcePaths.length);
 sourcePaths.push(...engineExportContract.sourcePaths.filter(path => !sourcePaths.includes(path)));
 assert.equal(new Set(sourcePaths).size, sourcePaths.length);
+sourcePaths.push(...["engine/src/abi/memory_helper/cpu.rs", "engine/src/cpu/dbt/wasm/memory/cpu_scalar.rs", "engine/src/cpu/dbt/wasm/emitter.rs", "engine/src/cpu/dbt/wasm/code_fetch.rs", "engine/src/process/memory/cpu_scalar.rs", "engine/src/process/memory/scalar/cpu_write.rs", "engine/src/process/wasm/memory/cpu_write.rs", "engine/src/abi/wasm/exports/memory/cpu_write.rs", "engine/tests/support/wasm/arena.mjs"].filter(path=>!sourcePaths.includes(path)));
 const sourceHashes = Object.fromEntries(sourcePaths.map(path => [path, hash(readFileSync(join(root, path)))]));
 writeFileSync(join(output, 'source-hashes.json'), JSON.stringify({engine_sha256: hash(engineBytes), sources: sourceHashes}, null, 2));
 const rows = [], controls = [], peRows = [], modules = [];
@@ -85,6 +87,12 @@ function compile(ctx, entries, gates, label, extraHelpers = []) {
 function seed(ctx, registers, pc, flags, cancel = 0) {
   refresh(ctx).bytes.set(stateRecord(registers, pc, flags), ctx.base); ctx.bytes.set(exitRecord(3, 0), ctx.base + 56);
   ctx.view.setUint32(ctx.base + 96, cancel, true); ctx.bytes.fill(0xa5, ctx.base + 100, ctx.base + SIZE);
+  if (ctx.owner !== 'standalone') {
+    // code-key admission needs the declared flat context; opaque numeric/TRANSFER inputs stay dirty.
+    const flat = createArena(ARENA_SIZE);
+    ctx.bytes.set(flat.subarray(4524, 4588), ctx.base + 4524);
+    ctx.bytes.set(flat.subarray(4756, 4796), ctx.base + 4756);
+  }
 }
 function byte(registers, index) { return Math.floor(registers[index % 4] / (index < 4 ? 1 : 256)) % 256; }
 function replaceByte(registers, index, value) {
@@ -253,14 +261,14 @@ for (const base of [0x400000, 0x500000]) for (const owner of ['replacement', 're
   const dataBefore = readWords(ctx, base + 0x3000, 8); assert.deepEqual(dataBefore, Array(8).fill(0));
   const callerEntries = callerOffsets.map(offset => entry + offset), gates = [[EXIT, EXIT_ID]];
   if (owner === 'replacement') callerEntries.push(EXIT);
-  const caller = compile(ctx, callerEntries, owner === 'replacement' ? gates : [], `${label}-caller`, ['read32', owner === 'replacement' ? 'store32' : 'store_resident32']);
+  const caller = compile(ctx, callerEntries, owner === 'replacement' ? gates : [], `${label}-caller`, ['cpu_read32', owner === 'replacement' ? 'cpu_store32' : 'cpu_store_resident32']);
   const gate = owner === 'replacement' ? caller : compile(ctx, [EXIT], gates, `${label}-gate`);
   assert.equal(ctx.api.start_loaded_image(0x70000, 1), 0);
   assert.deepEqual(arena(ctx).subarray(0, 56), stateRecord([0, 0, 0, 0, 0x71000, 0, 0, 0], entry, 2));
   assert.deepEqual(readWords(ctx, 0x70fe0, 8), Array(8).fill(0));
   const beforeRun = arena(ctx), expectedRun = beforeRun.slice(), finalRegisters = [0x1234ffff, 0x23450080, MARKER, 1, 0x70ff8, 0, 0, 0];
-  expectedRun.set(stateRecord(finalRegisters, EXIT, 0x46)); expectedRun.set(exitRecord(owner === 'resident' ? 3 : 8, 20, owner === 'resident' ? 2 : 3, owner === 'resident' ? 0 : EXIT_ID), 56);
-  expectedRun.set(record('R3MH', 40, [0, 0, 0, 0, 0, 0]), 100);
+  expectedRun.set(stateRecord(finalRegisters, EXIT, 0x46)); expectedRun.set(exitRecord(owner === 'resident' ? 3 : 8, 20, 6, owner === 'resident' ? 0 : EXIT_ID), 56);
+  expectedRun.set(record('R3MH', 40, [0, 0, 0, 0, 0, 4], 10), 100);
   assert.equal(caller.run(ctx.base, ctx.base + 56, 64, ctx.base + 96), 0); assert.deepEqual(arena(ctx), expectedRun, `${label}:20 genuine guest instructions and full arena`);
   if (owner === 'resident') {
     const expectedGate = arena(ctx); expectedGate.set(exitRecord(8, 0, 3, EXIT_ID), 56);

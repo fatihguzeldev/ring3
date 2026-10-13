@@ -22,6 +22,7 @@ const paths = [
   'engine/tests/cpu/logic/binary/modify/immediate/word/wasm.rs', 'engine/tests/cpu/logic/wasm.rs', 'engine/tests/support/wasm.rs',
   'engine/tests/cpu/logic/binary/modify/immediate/word/fixtures/p2-word-memory-immediate-logical-store/runtime/run.mjs'];
 assert.equal(new Set(paths).size, paths.length);
+paths.push('engine/src/abi/memory_helper/cpu.rs','engine/src/cpu/dbt/wasm/memory/cpu_scalar.rs','engine/src/cpu/dbt/wasm/emitter.rs','engine/src/cpu/dbt/wasm/code_fetch.rs','engine/src/process/memory/cpu_scalar.rs','engine/src/process/memory/scalar/cpu_write.rs','engine/src/process/wasm/memory/cpu_write.rs','engine/src/abi/wasm/exports/memory/cpu_write.rs');
 const sources = () => Object.fromEntries(paths.map(path => [path, hash(readFileSync(join(root, path)))]));
 const sourcePins = sources(), modules = [];
 const counts = {contexts: 0, runs: 0, retired: 0, matrix: 0, anchors: 0, payloads: 0, registers: 0, boundaries: 0, faults: 0, retries: 0, consumer_steps: 0, consumers: 0, controls: 0, self_code: 0};
@@ -60,7 +61,7 @@ function seed(c, pc, r = registers(), flags = 0xcd7) {
   const b = Buffer.alloc(140); b.set(state({registers: r, pc, flags})); b.set(exit(3, 0), 56);
   b.set(record('R3MH', 40, [0, 0xdecafbad, 0, 0, 0, 0]), 100); input(c, 0, b); return cpu(c);
 }
-function run(c, module, budget, next, {label, reason = 1, retired = 1, fault, helperVersion = 4, helperValue = 0, status = 0, exitVersion = 2} = {}) {
+function run(c, module, budget, next, {label, reason = 1, retired = 1, fault, helperVersion = 10, helperValue = 0, status = 0, exitVersion = 6} = {}) {
   const expected = arena(c);
   if (status === 0) {
     expected.set(state(next)); expected.set(exit(reason, retired, fault, exitVersion), 56);
@@ -124,7 +125,7 @@ function compile(c, blocks) {
   const bytes = Buffer.from(new Uint8Array(c.memory.buffer, binding.pointer, binding.length));
   const module = new WebAssembly.Module(bytes), imports = WebAssembly.Module.imports(module);
   const memoryOps = blocks.some(b => b.memory !== false);
-  const names = [c.owner === 'resident' ? 'guard_resident' : 'guard', ...(memoryOps ? ['read16', c.owner === 'resident' ? 'store_resident16' : 'store16'] : [])];
+  const names = [c.owner === 'resident' ? 'guard_resident' : 'guard', ...(memoryOps ? ['cpu_read16', c.owner === 'resident' ? 'cpu_store_resident16' : 'cpu_store16'] : [])];
   assert.deepEqual(imports, [{module: 'env', name: 'memory', kind: 'memory'}, ...names.map(name => ({module: 'ring3', name, kind: 'function'}))]);
   assert.deepEqual(WebAssembly.Module.exports(module), [{name: 'run', kind: 'function'}]);
   const file = `module-${modules.length + 1}.wasm`; writeFileSync(join(output, file), bytes, {flag: 'wx'});
@@ -135,7 +136,7 @@ const block = (pc, instruction) => ({pc, bytes: Buffer.concat([instruction, Buff
 function open(owner, entries) {
   const instance = new WebAssembly.Instance(engine.module, {});
   const c = {id: ++counts.contexts, owner, entries, memory: instance.exports.memory, api: {}};
-  for (const name of ['open', 'close', 'arena_ptr', 'map', 'unmap', 'protect', 'upload', 'read8', 'read16', 'store16', 'store_resident16',
+  for (const name of ['open', 'close', 'arena_ptr', 'map', 'unmap', 'protect', 'upload', 'read8', 'read16', 'store16', 'store_resident16', 'cpu_read16', 'cpu_store16', 'cpu_store_resident16',
     'compile', 'compile_entries', 'compile_resident', 'compile_resident_entries', 'generation', 'module_ptr', 'module_len', 'guard', 'guard_resident'])
     c.api[name] = instance.exports['ring3_abi_v1_' + name];
   assert.equal(c.api.open(8, c.id, 0x57434152), 0); c.base = c.api.arena_ptr() >>> 0; input(c, 0, initial);
@@ -224,9 +225,9 @@ for (const owner of ['replacement', 'resident']) for (const entries of [false, t
     const r = registers(); r[7] = address;
     const before = seed(c, faultBlocks[index].pc, r), stopped = {...before, registers: [...before.registers], pc: before.pc + 5}; stopped.registers[3] = 0x11223344;
     const fault = overflow ? undefined : {detail: missing ? 1 : 2, address: crossing ? 0x8000 : address, access: writeDenied ? 2 : 1};
-    const helperVersion = overflow ? null : writeDenied ? 4 : 2;
-    run(c, faultModule, 2, stopped, {label: kind + ' after one MOV; flags uncommitted', reason: overflow ? 11 : 5, retired: 1, fault, helperVersion, exitVersion: overflow ? 6 : 2});
-    run(c, faultModule, 1, stopped, {label: kind + ' unchanged retry', reason: overflow ? 11 : 5, retired: 0, fault, helperVersion, exitVersion: overflow ? 6 : 2}); counts.faults += 2;
+    const helperVersion = overflow ? null : 10;
+    run(c, faultModule, 2, stopped, {label: kind + ' after one MOV; flags uncommitted', reason: overflow ? 11 : 5, retired: 1, fault, helperVersion, exitVersion: 6});
+    run(c, faultModule, 1, stopped, {label: kind + ' unchanged retry', reason: overflow ? 11 : 5, retired: 0, fault, helperVersion, exitVersion: 6}); counts.faults += 2;
     if (!readDenied && mapped) checkRam(c, crossing ? 0x7ffe : 0x7007, Buffer.from(crossing && missing ? [0x55, 15] : [0x55, 15, 0x80, 0xaa]));
     if (overflow) checkRam(c, 0xfffffffe, Buffer.from([0x55, 15]));
     if (!overflow) {
