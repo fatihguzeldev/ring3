@@ -1,15 +1,19 @@
 use crate::process::{CallError, HostError};
 use crate::{
     abi::{
-        arena::{SEGMENTS_OFFSET, SIMD_OFFSET, STATE_OFFSET, X87_OFFSET, YMM_OFFSET},
+        arena::{
+            SEGMENT_BASES_RECORD_OFFSET, SEGMENTS_OFFSET, SIMD_OFFSET, STATE_OFFSET, X87_OFFSET,
+            YMM_OFFSET,
+        },
         x86::{
-            SEGMENTS_SIZE, SIMD_SIZE, STATE_SIZE, StateMetadata, X87_SIZE, YMM_SIZE,
-            decode_segment_context, decode_simd, decode_state_metadata, decode_x87, decode_ymm,
-            encode_segments, encode_simd, encode_x87, encode_ymm,
+            SEGMENT_BASES_RECORD_SIZE, SEGMENTS_SIZE, SEGMENTS_VERSION_3, SIMD_SIZE, STATE_SIZE,
+            StateMetadata, X87_SIZE, YMM_SIZE, decode_current_segment_context, decode_simd,
+            decode_state_metadata, decode_x87, decode_ymm, encode_current_segment_context,
+            encode_simd, encode_x87, encode_ymm,
         },
     },
     cpu::x86::{
-        SegmentState, X87State,
+        SegmentContext, X87State,
         simd::{SimdState, ymm::YmmUpperState},
     },
 };
@@ -21,6 +25,7 @@ pub(in crate::process) struct ExtendedCpuState {
     pub(in crate::process) x87: [u8; X87_SIZE],
     simd: [u8; SIMD_SIZE],
     segments: [u8; SEGMENTS_SIZE],
+    segment_bases: Option<[u8; SEGMENT_BASES_RECORD_SIZE]>,
     upper: [u8; YMM_SIZE],
     metadata: StateMetadata,
 }
@@ -40,6 +45,12 @@ impl ExtendedCpuState {
             simd: arena[SIMD_OFFSET..SIMD_OFFSET + SIMD_SIZE]
                 .try_into()
                 .unwrap(),
+            segment_bases: arena
+                .get(
+                    SEGMENT_BASES_RECORD_OFFSET
+                        ..SEGMENT_BASES_RECORD_OFFSET + SEGMENT_BASES_RECORD_SIZE,
+                )
+                .map(|bases| bases.try_into().unwrap()),
             segments: arena[SEGMENTS_OFFSET..SEGMENTS_OFFSET + SEGMENTS_SIZE]
                 .try_into()
                 .unwrap(),
@@ -47,8 +58,11 @@ impl ExtendedCpuState {
         decode_ymm(&state.upper).map_err(|_| HostError::Call(CallError::InvalidStop))?;
         decode_x87(&state.x87).map_err(|_| HostError::Call(CallError::InvalidStop))?;
         decode_simd(&state.simd).map_err(|_| HostError::Call(CallError::InvalidStop))?;
-        decode_segment_context(&state.segments)
-            .map_err(|_| HostError::Call(CallError::InvalidStop))?;
+        decode_current_segment_context(
+            &state.segments,
+            state.segment_bases.as_ref().map(|bases| bases.as_slice()),
+        )
+        .map_err(|_| HostError::Call(CallError::InvalidStop))?;
         Ok(state)
     }
 
@@ -58,6 +72,7 @@ impl ExtendedCpuState {
             x87: [0; X87_SIZE],
             simd: [0; SIMD_SIZE],
             segments: [0; SEGMENTS_SIZE],
+            segment_bases: Some([0; SEGMENT_BASES_RECORD_SIZE]),
             upper: [0; YMM_SIZE],
         };
         encode_ymm(&YmmUpperState::default(), &mut state.upper)
@@ -65,8 +80,12 @@ impl ExtendedCpuState {
         encode_x87(&X87State::default(), &mut state.x87).map_err(|_| HostError::Infrastructure)?;
         encode_simd(&SimdState::default(), &mut state.simd)
             .map_err(|_| HostError::Infrastructure)?;
-        encode_segments(&SegmentState::default(), &mut state.segments)
-            .map_err(|_| HostError::Infrastructure)?;
+        encode_current_segment_context(
+            &SegmentContext::default(),
+            &mut state.segments,
+            state.segment_bases.as_mut().unwrap(),
+        )
+        .map_err(|_| HostError::Infrastructure)?;
         Ok(state)
     }
 
@@ -75,6 +94,11 @@ impl ExtendedCpuState {
             && arena[X87_OFFSET..X87_OFFSET + X87_SIZE] == self.x87
             && arena[SIMD_OFFSET..SIMD_OFFSET + SIMD_SIZE] == self.simd
             && arena[SEGMENTS_OFFSET..SEGMENTS_OFFSET + SEGMENTS_SIZE] == self.segments
+            && (self.segments[4..6] != SEGMENTS_VERSION_3.to_le_bytes()
+                || arena.get(
+                    SEGMENT_BASES_RECORD_OFFSET
+                        ..SEGMENT_BASES_RECORD_OFFSET + SEGMENT_BASES_RECORD_SIZE,
+                ) == self.segment_bases.as_ref().map(|bases| bases.as_slice()))
             && decode_state_metadata(&arena[STATE_OFFSET..STATE_OFFSET + STATE_SIZE])
                 == Ok(self.metadata)
     }
@@ -84,6 +108,14 @@ impl ExtendedCpuState {
         arena[X87_OFFSET..X87_OFFSET + X87_SIZE].copy_from_slice(&self.x87);
         arena[SIMD_OFFSET..SIMD_OFFSET + SIMD_SIZE].copy_from_slice(&self.simd);
         arena[SEGMENTS_OFFSET..SEGMENTS_OFFSET + SEGMENTS_SIZE].copy_from_slice(&self.segments);
+        if let Some(bases) = &self.segment_bases
+            && let Some(output) = arena.get_mut(
+                SEGMENT_BASES_RECORD_OFFSET
+                    ..SEGMENT_BASES_RECORD_OFFSET + SEGMENT_BASES_RECORD_SIZE,
+            )
+        {
+            output.copy_from_slice(bases);
+        }
         self.restore_state_metadata(
             (&mut arena[STATE_OFFSET..STATE_OFFSET + STATE_SIZE])
                 .try_into()
@@ -103,9 +135,9 @@ mod tests {
         abi::{
             arena::EXIT_OFFSET,
             callback::CallbackRecord32,
-            x86::{EXIT_SIZE, decode_state},
+            x86::{EXIT_SIZE, decode_state, encode_segments},
         },
-        cpu::x86::State32,
+        cpu::x86::{SegmentState, State32},
         process::{
             EngineInstance,
             calls::{
@@ -117,7 +149,7 @@ mod tests {
     };
 
     #[test]
-    fn ss_shadow_survives_call_completion_and_suspended_callback_restore() {
+    fn ss_shadow_and_nonflat_segments_survive_call_completion_and_callback_abort() {
         let mut engine = EngineInstance::new(1, 91).unwrap();
         engine.map(0x8000, 1, 3).unwrap();
         engine.write32(0x8010, 0x1000).unwrap();
@@ -133,6 +165,9 @@ mod tests {
                 .try_into()
                 .unwrap(),
         );
+        engine
+            .set_segment_base(crate::cpu::x86::SegmentRegister::Ds, 0x5000)
+            .unwrap();
         let extended = ExtendedCpuState::capture(engine.arena()).unwrap();
         let frame = CallFrame32::capture(
             engine.memory().unwrap(),
@@ -173,6 +208,7 @@ mod tests {
             &mut engine.arena_mut().unwrap()[..STATE_SIZE],
         )
         .unwrap();
+        engine.arena_mut().unwrap()[SEGMENT_BASES_RECORD_OFFSET + 28] ^= 1;
         assert!(!extended.matches(engine.arena()));
         engine.abort_callback(91, 2).unwrap();
         assert_eq!(&engine.arena()[..STATE_SIZE], expected);
@@ -190,6 +226,8 @@ mod tests {
             }
         );
         assert!(engine.pending_call.is_none());
+        assert!(extended.matches(engine.arena()));
+        assert_eq!(engine.segment_state().unwrap().bases[3], 0x5000);
         engine.arena_mut().unwrap()[12] = 2;
         assert_eq!(
             ExtendedCpuState::capture(engine.arena()),
@@ -231,6 +269,50 @@ mod tests {
             Err(HostError::Call(CallError::InvalidStop))
         );
         assert_eq!(engine.arena(), malformed);
+    }
+    #[test]
+    fn nonflat_segment_companion_is_validated_matched_and_restored() {
+        let mut engine = EngineInstance::new(1, 94).unwrap();
+        engine
+            .set_segment_base(crate::cpu::x86::SegmentRegister::Ds, 0x5000)
+            .unwrap();
+        let captured = ExtendedCpuState::capture(engine.arena()).unwrap();
+        let expected = engine.segment_context().unwrap();
+        engine.arena_mut().unwrap()[SEGMENT_BASES_RECORD_OFFSET + 28] ^= 1;
+        assert!(!captured.matches(engine.arena()));
+        captured.restore(engine.arena_mut().unwrap());
+        assert_eq!(engine.segment_context().unwrap(), expected);
+        assert!(captured.matches(engine.arena()));
+        engine.arena_mut().unwrap()[SEGMENT_BASES_RECORD_OFFSET + 12] = 1;
+        assert_eq!(
+            ExtendedCpuState::capture(engine.arena()),
+            Err(HostError::Call(CallError::InvalidStop))
+        );
+        assert_eq!(
+            ExtendedCpuState::capture(&engine.arena()[..SEGMENT_BASES_RECORD_OFFSET]),
+            Err(HostError::Call(CallError::InvalidStop))
+        );
+    }
+
+    #[test]
+    fn legacy_context_ignores_companion_and_initial_state_resets_it() {
+        let mut engine = EngineInstance::new(1, 95).unwrap();
+        let captured = ExtendedCpuState::capture(engine.arena()).unwrap();
+        engine.arena_mut().unwrap()
+            [SEGMENT_BASES_RECORD_OFFSET..SEGMENT_BASES_RECORD_OFFSET + SEGMENT_BASES_RECORD_SIZE]
+            .fill(0xa5);
+        assert!(captured.matches(engine.arena()));
+        assert!(ExtendedCpuState::capture(engine.arena()).is_ok());
+        assert!(ExtendedCpuState::capture(&engine.arena()[..SEGMENT_BASES_RECORD_OFFSET]).is_ok());
+        ExtendedCpuState::initial()
+            .unwrap()
+            .restore(engine.arena_mut().unwrap());
+        let bases = &engine.arena()
+            [SEGMENT_BASES_RECORD_OFFSET..SEGMENT_BASES_RECORD_OFFSET + SEGMENT_BASES_RECORD_SIZE];
+        assert_eq!(&bases[..4], b"R3SB");
+        assert_eq!(&bases[4..8], &[1, 0, 1, 0]);
+        assert_eq!(&bases[8..16], &[40, 0, 0, 0, 0, 0, 0, 0]);
+        assert!(bases[16..].iter().all(|byte| *byte == 0));
     }
 }
 

@@ -1,9 +1,12 @@
 use crate::{
     abi::{
-        arena::{HELPER_OFFSET, SEGMENTS_OFFSET},
+        arena::{HELPER_OFFSET, SEGMENT_BASES_RECORD_OFFSET, SEGMENTS_OFFSET},
         cpu_helper::{CpuMemoryError, encode_cpu_result},
         memory_helper::HELPER_SIZE,
-        x86::{SEGMENTS_SIZE, decode_segment_context, encode_segment_context},
+        x86::{
+            SEGMENT_BASES_RECORD_SIZE, SEGMENTS_SIZE, decode_current_segment_context,
+            encode_current_segment_context,
+        },
     },
     cpu::x86::{
         SegmentAccess, SegmentContext, SegmentDescriptor, SegmentDescriptorRecord,
@@ -39,8 +42,25 @@ impl EngineInstance {
 
     pub fn segment_context(&self) -> Result<SegmentContext, HostError> {
         self.memory()?;
-        decode_segment_context(&self.arena[SEGMENTS_OFFSET..SEGMENTS_OFFSET + SEGMENTS_SIZE])
-            .map_err(|_| HostError::Infrastructure)
+        decode_current_segment_context(
+            &self.arena[SEGMENTS_OFFSET..SEGMENTS_OFFSET + SEGMENTS_SIZE],
+            self.arena.get(
+                SEGMENT_BASES_RECORD_OFFSET
+                    ..SEGMENT_BASES_RECORD_OFFSET + SEGMENT_BASES_RECORD_SIZE,
+            ),
+        )
+        .map_err(|_| HostError::Infrastructure)
+    }
+
+    pub(super) fn publish_segment_context(
+        &mut self,
+        segments: &[u8; SEGMENTS_SIZE],
+        bases: &[u8; SEGMENT_BASES_RECORD_SIZE],
+    ) {
+        let arena = self.arena.as_mut().get_mut();
+        arena[SEGMENTS_OFFSET..SEGMENTS_OFFSET + SEGMENTS_SIZE].copy_from_slice(segments);
+        arena[SEGMENT_BASES_RECORD_OFFSET..SEGMENT_BASES_RECORD_OFFSET + SEGMENT_BASES_RECORD_SIZE]
+            .copy_from_slice(bases);
     }
 
     pub fn configure_segment_descriptor(
@@ -89,14 +109,15 @@ impl EngineInstance {
             }
         }
         let mut bytes = [0; SEGMENTS_SIZE];
-        encode_segment_context(&context, &mut bytes).map_err(|_| HostError::Infrastructure)?;
+        let mut bases = [0; SEGMENT_BASES_RECORD_SIZE];
+        encode_current_segment_context(&context, &mut bytes, &mut bases)
+            .map_err(|_| HostError::Infrastructure)?;
         if update_descriptor {
             self.segment_descriptors
                 .update_base(selector, base)
                 .map_err(|_| HostError::InvalidRequest)?;
         }
-        self.arena.as_mut().get_mut()[SEGMENTS_OFFSET..SEGMENTS_OFFSET + SEGMENTS_SIZE]
-            .copy_from_slice(&bytes);
+        self.publish_segment_context(&bytes, &bases);
         Ok(())
     }
 
@@ -193,13 +214,17 @@ impl EngineInstance {
             Ok(load) => {
                 load.apply_context(&mut context, target);
                 let mut bytes = [0; SEGMENTS_SIZE];
-                encode_segment_context(&context, &mut bytes)
+                let mut bases = [0; SEGMENT_BASES_RECORD_SIZE];
+                encode_current_segment_context(&context, &mut bytes, &mut bases)
                     .map_err(|_| HostError::Infrastructure)?;
                 let result_value = if length == 0 { load.base } else { value };
-                self.segment_packet(length, result_value, Ok(()))?;
+                let mut packet = [0; HELPER_SIZE];
+                encode_cpu_result(length, result_value, Ok(()), &mut packet)
+                    .map_err(|_| HostError::Infrastructure)?;
+                self.publish_segment_context(&bytes, &bases);
                 self.segment_descriptors.commit_accessed(load.selector);
-                self.arena.as_mut().get_mut()[SEGMENTS_OFFSET..SEGMENTS_OFFSET + SEGMENTS_SIZE]
-                    .copy_from_slice(&bytes);
+                self.arena.as_mut().get_mut()[HELPER_OFFSET..HELPER_OFFSET + HELPER_SIZE]
+                    .copy_from_slice(&packet);
                 Ok(())
             }
             Err(error) if error.failure == SegmentLoadFailure::UnsupportedProfile => {

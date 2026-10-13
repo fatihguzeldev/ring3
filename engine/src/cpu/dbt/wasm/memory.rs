@@ -1193,10 +1193,8 @@ pub(super) fn checked_offset(
 
 pub(super) fn address_value(code: &mut InstructionSink<'_>, address: EffectiveAddress) {
     offset_value(code, address);
-    if let Some(segment) = address.segment {
-        super::segments::base(code, segment);
-        code.i32_add();
-    }
+    super::segments::base(code, address.resolved_segment());
+    code.i32_add();
 }
 
 pub(super) fn offset_value(code: &mut InstructionSink<'_>, address: EffectiveAddress) {

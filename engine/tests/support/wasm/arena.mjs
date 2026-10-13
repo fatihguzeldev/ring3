@@ -1,11 +1,12 @@
 import assert from 'node:assert/strict';
 
 export const LEGACY_ARENA_SIZE = 4612;
-export const ARENA_SIZE = 4756;
+export const SEGMENT_BASES_RECORD_OFFSET = 4756;
+export const ARENA_SIZE = 4796;
 
 // input/expected arena only; observed bytes are never normalized.
 export function createArena(size = ARENA_SIZE) {
-  assert.ok(size === ARENA_SIZE || size === LEGACY_ARENA_SIZE,
+  assert.ok(size === ARENA_SIZE || size === SEGMENT_BASES_RECORD_OFFSET || size === LEGACY_ARENA_SIZE,
     'fixture uses the current complete ABI arena or its retained legacy prefix');
   const arena = Buffer.alloc(size);
   const header = (offset, magic, length) => {
@@ -28,6 +29,7 @@ export function createArena(size = ARENA_SIZE) {
   [0x23, 0x1b, 0x23, 0x23, 0x3b, 0].forEach((selector, index) =>
     arena.writeUInt16LE(selector, 4540 + index * 2));
   header(4588, 'R3WK', 24);
-  if (size === ARENA_SIZE) header(LEGACY_ARENA_SIZE, 'R3YU', 144);
+  if (size >= SEGMENT_BASES_RECORD_OFFSET) header(LEGACY_ARENA_SIZE, 'R3YU', 144);
+  if (size === ARENA_SIZE) header(SEGMENT_BASES_RECORD_OFFSET, 'R3SB', 40);
   return arena;
 }

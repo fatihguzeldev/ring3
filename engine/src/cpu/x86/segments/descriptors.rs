@@ -299,7 +299,7 @@ impl SegmentDescriptorTable {
             return Err(fail(SegmentLoadFailure::NotPresent));
         }
         let base = record.code_data_base().expect("code/data checked above");
-        if !matches!(target, SegmentRegister::Fs | SegmentRegister::Gs) && base != 0 {
+        if target == SegmentRegister::Ss && base != 0 {
             return Err(fail(if entry.legacy_constructed {
                 SegmentLoadFailure::NonFlatLegacy
             } else {
@@ -553,7 +553,7 @@ mod tests {
         );
         assert_eq!(
             table
-                .resolve_load(SegmentRegister::Ds, 7, 3, &state)
+                .resolve_load(SegmentRegister::Ss, 7, 3, &state)
                 .unwrap_err()
                 .failure,
             SegmentLoadFailure::NonFlatLegacy

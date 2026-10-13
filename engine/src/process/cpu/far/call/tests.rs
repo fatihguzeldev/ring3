@@ -1,7 +1,7 @@
 use super::super::support::{engine, field, only_packet_changed};
 use super::*;
 use crate::{
-    abi::x86::encode_segment_context,
+    abi::{arena::SEGMENTS_OFFSET, x86::encode_segment_context},
     cpu::x86::{SegmentCache, SegmentDescriptorRecord},
     memory::GuestAddress,
 };

@@ -38,7 +38,7 @@ impl Default for SegmentState {
 
 impl SegmentState {
     pub fn set_base(&mut self, register: SegmentRegister, base: u32) -> bool {
-        if !matches!(register, SegmentRegister::Fs | SegmentRegister::Gs) && base != 0 {
+        if matches!(register, SegmentRegister::Cs | SegmentRegister::Ss) && base != 0 {
             return false;
         }
         self.bases[register.index()] = base;

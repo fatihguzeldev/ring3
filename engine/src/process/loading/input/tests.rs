@@ -578,12 +578,13 @@ fn unlinked_image() -> Vec<u8> {
 }
 
 fn dirty_input_arena(engine: &mut EngineInstance) {
-    use crate::abi::arena::{ARENA_SIZE, X87_OFFSET};
+    use crate::abi::arena::{ARENA_SIZE, SEGMENT_BASES_RECORD_OFFSET, X87_OFFSET};
 
     let arena = engine.arena_mut().unwrap();
     assert_eq!(arena.len(), ARENA_SIZE);
-    assert_eq!(ARENA_SIZE, 4756);
+    assert_eq!(ARENA_SIZE, 4796);
     arena[TRANSFER_OFFSET..TRANSFER_OFFSET + TRANSFER_SIZE].fill(0xd3);
+    arena[SEGMENT_BASES_RECORD_OFFSET + 16..ARENA_SIZE].fill(0x9b);
     put32(arena, CANCEL_OFFSET, 1);
     put16(arena, X87_OFFSET + 16, 0x027f);
     put16(arena, X87_OFFSET + 18, 0x81a5);

@@ -207,7 +207,7 @@ fn unsupported_raw_profiles_are_neutral_host_refusals_before_any_publication() {
     for (target, low, high) in [
         (2, 0xffff, 0x0000_f200),
         (4, 0xffff, 0x0060_f200),
-        (3, 0x0010_ffff, 0x0040_f200),
+        (2, 0x0010_ffff, 0x0040_f200),
     ] {
         engine
             .configure_segment_descriptor_raw(0x43, raw(low, high))

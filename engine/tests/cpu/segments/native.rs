@@ -7,3 +7,6 @@ mod cpu_segments;
 
 #[path = "selectors/attributes/native.rs"]
 mod cpu_segment_rights_limit;
+
+#[path = "base/native.rs"]
+mod cpu_segment_base;

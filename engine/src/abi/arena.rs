@@ -4,14 +4,15 @@ use super::{
     AbiError,
     memory_helper::{HELPER_SIZE, encode_helper_result},
     x86::{
-        EXIT_SIZE, SEGMENTS_SIZE, SIMD_SIZE, STATE_SIZE, X87_SIZE, YMM_SIZE, encode_exit,
-        encode_segments, encode_simd, encode_state, encode_x87, encode_ymm,
+        EXIT_SIZE, SEGMENT_BASES_RECORD_SIZE, SEGMENTS_SIZE, SIMD_SIZE, STATE_SIZE, X87_SIZE,
+        YMM_SIZE, encode_current_segment_context, encode_exit, encode_simd, encode_state,
+        encode_x87, encode_ymm,
     },
 };
 use crate::cpu::{
     ExecutionExit, ExitReason,
     x86::{
-        SegmentState, State32, X87State,
+        SegmentContext, State32, X87State,
         simd::{SimdState, ymm::YmmUpperState},
     },
 };
@@ -30,7 +31,8 @@ pub const WORK_SIZE: usize = 24;
 pub const WORK_CONSUMED_OFFSET: usize = WORK_OFFSET + 16;
 pub const LEGACY_ARENA_SIZE: usize = WORK_OFFSET + WORK_SIZE;
 pub const YMM_OFFSET: usize = LEGACY_ARENA_SIZE;
-pub const ARENA_SIZE: usize = YMM_OFFSET + YMM_SIZE;
+pub const SEGMENT_BASES_RECORD_OFFSET: usize = YMM_OFFSET + YMM_SIZE;
+pub const ARENA_SIZE: usize = SEGMENT_BASES_RECORD_OFFSET + SEGMENT_BASES_RECORD_SIZE;
 
 pub(crate) fn initialize(output: &mut [u8]) -> Result<(), AbiError> {
     if output.len() != ARENA_SIZE {
@@ -60,9 +62,11 @@ pub(crate) fn initialize(output: &mut [u8]) -> Result<(), AbiError> {
         &SimdState::default(),
         &mut output[SIMD_OFFSET..SIMD_OFFSET + SIMD_SIZE],
     )?;
-    encode_segments(
-        &SegmentState::default(),
-        &mut output[SEGMENTS_OFFSET..SEGMENTS_OFFSET + SEGMENTS_SIZE],
+    let (records, bases) = output.split_at_mut(SEGMENT_BASES_RECORD_OFFSET);
+    encode_current_segment_context(
+        &SegmentContext::default(),
+        &mut records[SEGMENTS_OFFSET..SEGMENTS_OFFSET + SEGMENTS_SIZE],
+        &mut bases[..SEGMENT_BASES_RECORD_SIZE],
     )?;
     super::header::write(&mut output[WORK_OFFSET..WORK_OFFSET + WORK_SIZE], *b"R3WK");
     encode_ymm(

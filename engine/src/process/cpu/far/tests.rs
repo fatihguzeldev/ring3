@@ -1,7 +1,7 @@
 use super::*;
 use crate::{
     abi::{
-        arena::TRANSFER_OFFSET,
+        arena::{SEGMENTS_OFFSET, TRANSFER_OFFSET},
         x86::{decode_segment_context, encode_segment_context},
     },
     cpu::x86::{SegmentCache, SegmentDescriptorRecord},
@@ -198,4 +198,40 @@ fn outer_system_descriptor_faults_publish_only_the_exact_fault_packet() {
         assert_eq!(engine.arena(), expected);
         assert_eq!(engine.segment_descriptors, table);
     }
+}
+
+#[test]
+fn far_jump_keeps_nonflat_data_bases_and_companion_caches() {
+    let mut engine = support::engine();
+    engine
+        .set_segment_base(SegmentRegister::Ds, 0x5000)
+        .unwrap();
+    engine
+        .set_segment_base(SegmentRegister::Es, 0x6000)
+        .unwrap();
+    let before = engine.segment_context().unwrap();
+    engine.far_jump(0x1000, 0x43, 0).unwrap();
+    let after = engine.segment_context().unwrap();
+    for segment in [
+        SegmentRegister::Es,
+        SegmentRegister::Ss,
+        SegmentRegister::Ds,
+        SegmentRegister::Fs,
+        SegmentRegister::Gs,
+    ] {
+        assert_eq!(
+            after.state.bases[segment.index()],
+            before.state.bases[segment.index()]
+        );
+        assert_eq!(
+            after.state.selectors[segment.index()],
+            before.state.selectors[segment.index()]
+        );
+        assert_eq!(
+            after.caches[segment.index()],
+            before.caches[segment.index()]
+        );
+    }
+    assert_eq!(after.state.selectors[SegmentRegister::Cs.index()], 0x43);
+    assert_eq!(support::field(&engine, 16), 0);
 }

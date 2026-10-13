@@ -185,7 +185,7 @@ fn unsupported_profiles_remain_distinct_from_architectural_load_failures() {
     for (target, low, high) in [
         (SegmentRegister::Ss, 0x0000_ffff, 0x0000_f200),
         (SegmentRegister::Fs, 0x0000_ffff, 0x0060_f200),
-        (SegmentRegister::Ds, 0x0010_ffff, 0x0040_f200),
+        (SegmentRegister::Ss, 0x0010_ffff, 0x0040_f200),
     ] {
         table.configure_raw(0x43, record(low, high)).unwrap();
         let before = table.clone();
@@ -203,7 +203,7 @@ fn unsupported_profiles_remain_distinct_from_architectural_load_failures() {
     table.configure(old).unwrap();
     assert_eq!(
         table
-            .resolve_load(SegmentRegister::Ds, 0x43, 3, &state)
+            .resolve_load(SegmentRegister::Ss, 0x43, 3, &state)
             .unwrap_err()
             .failure,
         SegmentLoadFailure::NonFlatLegacy

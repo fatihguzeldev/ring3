@@ -8,7 +8,7 @@ const [enginePath,output,root]=process.argv.slice(2),engine=readEngine(enginePat
 const SIZE=initial.length,SEGMENTS=4524,WORK=4588,hash=b=>createHash('sha256').update(b).digest('hex');
 assert.ok(SIZE>=4612);assert.equal(engine.sha256,hash(engine.bytes));
 const modules=[],observations=[],helpers=[],cases=[],refusals=[];
-const sourcePaths=['engine/src/cpu/x86/decode/segments.rs','engine/src/cpu/dbt/wasm/segments.rs',
+const sourcePaths=['engine/src/cpu/x86/decode/segments.rs','engine/src/cpu/dbt/wasm/segments.rs', 'engine/src/cpu/dbt/wasm/segments/context.rs',
  'engine/src/cpu/x86/segments.rs','engine/src/cpu/x86/segments/cache.rs','engine/src/abi/x86/segments.rs','engine/src/cpu/x86/segments/descriptors.rs','engine/src/process/cpu/segments.rs', 'engine/src/process/cpu/mod.rs', 'engine/src/process/mod.rs',
  'engine/src/cpu/x86/decode/strings.rs','engine/src/cpu/dbt/wasm/strings.rs',
  'engine/src/cpu/x86/ir.rs','engine/src/cpu/x86/decode/profile.rs','engine/src/cpu/x86/decode/lower.rs',
@@ -87,7 +87,7 @@ for(const owner of ['replacement','resident']){
 }
 for(const [target,selector,dpl,present,kind,reason,description]of[
  [4,0x43,3,1,null,11,'unknown'],[4,0x43,3,0,1,14,'not present FS'],[2,0x43,3,0,1,15,'not present SS'],
- [4,0x43,0,1,1,11,'privilege'],[5,0x43,3,1,2,11,'execute only code'],[3,0x43,3,1,1,11,'nonflat legacy']]){
+ [4,0x43,0,1,1,11,'privilege'],[5,0x43,3,1,2,11,'execute only code'],[2,0x43,3,1,1,11,'nonflat legacy']]){
  const c=open([0x8e,0xc0+(target<<3)]);if(kind!==null)host(c,'configure_segment_descriptor',[selector,description==='nonflat legacy'?0x5000:0,dpl,present,kind]);const s=seed(c,{0:selector});
  run(c,1,s,{retired:0,reason,fault:[selector&~3,0,0,0],label:'descriptor refusal '+description});host(c,'close');
 }

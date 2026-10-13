@@ -13,7 +13,7 @@ const counts = {contexts: 0, modules: 0, runs: 0, loads: 0, queries: 0, controls
 const sourcePaths = [...new Set([...exportSources, 'engine/tests/support/wasm/engine.mjs',
   'engine/src/cpu/x86/segments/descriptor_record.rs', 'engine/src/cpu/x86/segments/descriptors.rs',
   'engine/src/cpu/x86/segments/cache.rs', 'engine/src/abi/x86/segments.rs', 'engine/src/process/cpu/segments.rs',
-  'engine/src/process/wasm/cpu.rs', 'engine/src/process/wasm/mod.rs', 'engine/src/cpu/dbt/wasm/segments.rs',
+  'engine/src/process/wasm/cpu.rs', 'engine/src/process/wasm/mod.rs', 'engine/src/cpu/dbt/wasm/segments.rs', 'engine/src/cpu/dbt/wasm/segments/context.rs',
   'engine/src/process/cpu/segment_queries.rs', 'engine/src/process/cpu/integer.rs',
   'engine/src/cpu/dbt/wasm/segment_queries.rs',
   'engine/tests/cpu/segments/cache/raw/wasm.rs', 'engine/tests/cpu/segments/wasm.rs', 'engine/tests/support/wasm.rs',
@@ -90,7 +90,7 @@ for (const owner of ['replacement', 'resident']) for (const entries of [false, t
   fn = compile(c, [0x8e, 0xd0], 'segment_load'); configure(c, 0xffff, 0x00407200);
   const s = seed(c, 0x43), expected = arena(c); expected.set(record('R3EX', 40, [15, 0, 0x40, 0, 0, 0], 6), 56); expected.set(packet([7, 0, 0x40, 0, 0, 0]), 100);
   assert.equal(fn.run(c.base, c.base + 56, 1, c.base + 96), 0); assert.deepEqual(arena(c), expected); counts.runs++; counts.loads++;
-  for (const [target, low, high] of [[2, 0xffff, 0x0000f200], [4, 0xffff, 0x0060f200], [3, 0x0010ffff, 0x0040f200]]) {
+  for (const [target, low, high] of [[2, 0xffff, 0x0000f200], [4, 0xffff, 0x0060f200], [2, 0x0010ffff, 0x0040f200]]) {
     configure(c, low, high); const before = arena(c);
     assert.notEqual(c.api[c.id ? 'segment_load_resident' : 'segment_load'](...c.binding, target, 0x43), 0);
     assert.deepEqual(arena(c), before, 'unsupported execution profiles are neutral host refusals'); counts.controls++;

@@ -35,7 +35,13 @@ fn segment_record_has_flat_defaults_and_explicit_fs_gs_bases() {
     assert_eq!(state.selectors, [0x23, 0x1b, 0x23, 0x23, 0x3b, 0]);
     assert!(state.set_base(SegmentRegister::Fs, 0x1234_5678));
     assert!(state.set_base(SegmentRegister::Gs, 0xfedc_ba98));
-    assert!(!state.set_base(SegmentRegister::Ds, 1));
+    assert!(!state.set_base(SegmentRegister::Cs, 1));
+    assert!(!state.set_base(SegmentRegister::Ss, 1));
+    let mut nonflat = state;
+    nonflat.bases[SegmentRegister::Ds.index()] = 1;
+    let mut rejected = [0xa5; SEGMENTS_SIZE];
+    assert!(encode_segments(&nonflat, &mut rejected).is_err());
+    assert_eq!(rejected, [0xa5; SEGMENTS_SIZE]);
     let mut bytes = [0; SEGMENTS_SIZE];
     encode_segments(&state, &mut bytes).unwrap();
     assert_eq!(decode_segments(&bytes).unwrap(), state);

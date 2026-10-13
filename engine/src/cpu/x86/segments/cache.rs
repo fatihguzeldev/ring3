@@ -315,7 +315,7 @@ mod tests {
             SegmentRegister::Fs,
             SegmentRegister::Gs,
         ] {
-            context.state.bases[segment.index()] = 0x1234_0000;
+            assert!(context.state.set_base(segment, 0x1234_0000));
         }
         assert!(context.is_valid());
         assert!(!context.is_legacy());

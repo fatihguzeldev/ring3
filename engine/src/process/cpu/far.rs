@@ -1,9 +1,9 @@
 use crate::{
     abi::{
-        arena::{HELPER_OFFSET, SEGMENTS_OFFSET},
+        arena::HELPER_OFFSET,
         cpu_helper::{CpuMemoryError, encode_cpu_result},
         memory_helper::HELPER_SIZE,
-        x86::{SEGMENTS_SIZE, encode_segment_context},
+        x86::{SEGMENT_BASES_RECORD_SIZE, SEGMENTS_SIZE, encode_current_segment_context},
     },
     cpu::x86::{
         CodeTransfer, CodeTransferError, FarWidth, SegmentContext, SegmentRegister,
@@ -14,6 +14,7 @@ use crate::{
 
 struct PreparedTransfer {
     segments: [u8; SEGMENTS_SIZE],
+    bases: [u8; SEGMENT_BASES_RECORD_SIZE],
     packet: [u8; HELPER_SIZE],
     selector: u16,
 }
@@ -78,12 +79,15 @@ impl EngineInstance {
         }
         transfer.apply(&mut context);
         let mut segments = [0; SEGMENTS_SIZE];
-        encode_segment_context(&context, &mut segments).map_err(|_| HostError::Infrastructure)?;
+        let mut bases = [0; SEGMENT_BASES_RECORD_SIZE];
+        encode_current_segment_context(&context, &mut segments, &mut bases)
+            .map_err(|_| HostError::Infrastructure)?;
         let mut packet = [0; HELPER_SIZE];
         encode_cpu_result(0, transfer.offset, Ok(()), &mut packet)
             .map_err(|_| HostError::Infrastructure)?;
         Ok(PreparedTransfer {
             segments,
+            bases,
             packet,
             selector: transfer.selector(),
         })
@@ -91,9 +95,8 @@ impl EngineInstance {
 
     // no host call or fallible operation may separate a successful stack batch from this commit.
     fn commit_code_transfer(&mut self, prepared: PreparedTransfer) {
+        self.publish_segment_context(&prepared.segments, &prepared.bases);
         self.segment_descriptors.commit_accessed(prepared.selector);
-        self.arena.as_mut().get_mut()[SEGMENTS_OFFSET..SEGMENTS_OFFSET + SEGMENTS_SIZE]
-            .copy_from_slice(&prepared.segments);
         self.arena.as_mut().get_mut()[HELPER_OFFSET..HELPER_OFFSET + HELPER_SIZE]
             .copy_from_slice(&prepared.packet);
     }

@@ -52,7 +52,7 @@ pub(in crate::cpu::dbt::wasm) fn build_function() -> Function {
     code.local_get(CONTEXT)
         .i32_load16_u(arg(4, 1))
         .i32_const(i32::from(SEGMENTS_VERSION_2))
-        .i32_eq()
+        .i32_ge_u()
         .if_(BlockType::Result(ValType::I32));
     code.local_get(CONTEXT)
         .local_get(CACHE_OFFSET)
