@@ -1,3 +1,4 @@
+import {ARENA_SIZE} from '../../../../../../../support/wasm/arena.mjs';
 import assert from 'node:assert/strict';
 import {execFileSync} from 'node:child_process';
 import {createHash} from 'node:crypto';
@@ -13,7 +14,7 @@ const source = readFileSync(join(fixture, 'program.S'));
 assert.equal(hash(oracleBytes), '3e2caca609a1ba8f76f30d0f4e72b553d2a5876cfa93303e2894cf6510671b8b');
 assert.equal(hash(source), 'bc552951f3f242482b90e9267c93e1e2e19028c0ed7494ae816b1c71f2e9d846');
 const artifacts = {}, observations = [], identities = [];
-const size = 4612, transfer = 140, bytes = hex => new Uint8Array(Buffer.from(hex, 'hex'));
+const size = ARENA_SIZE, transfer = 140, bytes = hex => new Uint8Array(Buffer.from(hex, 'hex'));
 
 function authoredText(object) {
   const v = new DataView(object.buffer, object.byteOffset, object.byteLength);
@@ -64,7 +65,7 @@ const engineBytes = readFileSync(enginePath); writeFileSync(join(outputDir,'engi
 assert.ok(WebAssembly.validate(engineBytes));
 const engineModule = new WebAssembly.Module(engineBytes); assert.deepEqual(WebAssembly.Module.imports(engineModule),[]);
 const names = ['open','close','arena_ptr','map','protect','upload','generation','module_ptr','module_len','compile_entries','compile_resident_entries',
-  'guard','guard_resident','read32','write32','store32','store_resident32','find_resident'];
+  'guard','guard_resident','read32','write32','store32','store_resident32','cpu_read32','cpu_store32','cpu_store_resident32','find_resident'];
 let engine, ordinal = 0, moduleOrdinal = 0;
 function refresh() {
   if (engine.buffer !== engine.memory.buffer) { engine.buffer=engine.memory.buffer; engine.bytes=new Uint8Array(engine.buffer); engine.view=new DataView(engine.buffer); }
@@ -73,7 +74,7 @@ function refresh() {
 function arena() { return refresh().bytes.slice(engine.base,engine.base+size); }
 function operation(label,action,status=0,patches=[]) {
   const expected=arena();for(const [offset,value] of patches) expected.set(value,offset);
-  assert.equal(action(),status,engine.name+'/'+label+': status');assert.deepEqual(arena(),expected,engine.name+'/'+label+': whole4236');
+  assert.equal(action(),status,engine.name+'/'+label+': status');assert.deepEqual(arena(),expected,engine.name+'/'+label+': whole current arena');
 }
 function record(magic,version,fields,length) {
   const out=new Uint8Array(length),v=new DataView(out.buffer);out.set(Buffer.from(magic));v.setUint16(4,version,true);v.setUint16(6,1,true);v.setUint32(8,length,true);
@@ -139,7 +140,8 @@ function compile(seeds,access,label) {
   refresh();assert.ok(unit.pointer>0&&unit.length>8&&unit.pointer+unit.length<=engine.bytes.length);
   unit.bytes=engine.bytes.slice(unit.pointer,unit.pointer+unit.length);const module=new WebAssembly.Module(unit.bytes);
   const guard=engine.owner==='resident'?'guard_resident':'guard';
-  const helpers=[guard,...(access.read?['read32']:[]),...(access.store?[engine.owner==='resident'?'store_resident32':'store32']:[])];
+  const helpers=[guard,...(access.read?['cpu_read32']:[]),...(access.store?[engine.owner==='resident'?'cpu_store_resident32':'cpu_store32']:[])];
+  unit.memory=access.read||access.store;
   assert.deepEqual(WebAssembly.Module.imports(module),[{module:'env',name:'memory',kind:'memory'},...helpers.map(name=>({module:'ring3',name,kind:'function'}))]);
   assert.deepEqual(WebAssembly.Module.exports(module),[{name:'run',kind:'function'}]);
   const instance=new WebAssembly.Instance(module,{env:{memory:engine.memory},ring3:Object.fromEntries(helpers.map(name=>[name,engine.api[name]]))});
@@ -154,7 +156,23 @@ function seed(initial) {
   refresh().bytes.set(bytes(initial.state_hex),engine.base);engine.bytes.set(bytes(oracle.program.initial_exit_hex),engine.base+56);
   engine.bytes.set(bytes(oracle.program.initial_helper_hex),engine.base+100);cancel(0);
 }
+// the independently authored original oracle remains byte-for-byte frozen above.
+// this named wire revision changes only declared scalar output headers/width, never CPU/RAM/flags math.
+function currentWireExpected(expected, memory) {
+  if (!expected || !memory) return expected;
+  const exit=bytes(expected.exit_hex), exitView=new DataView(exit.buffer);
+  assert.equal(exit.length,40); assert.equal(Buffer.from(exit.subarray(0,4)).toString(),'R3EX');
+  exitView.setUint16(4,6,true);
+  let helper=expected.helper_hex;
+  if (helper!=='preserve') {
+    const current=bytes(helper), view=new DataView(current.buffer);
+    assert.equal(current.length,40); assert.equal(Buffer.from(current.subarray(0,4)).toString(),'R3MH');
+    view.setUint16(4,10,true); view.setUint32(36,4,true); helper=Buffer.from(current).toString('hex');
+  }
+  return {...expected,exit_hex:Buffer.from(exit).toString('hex'),helper_hex:helper};
+}
 function run(unit,budget,expected,label,status=0) {
+  expected=currentWireExpected(expected,unit.memory);
   engine.started=true;
   const patches=expected?[[0,bytes(expected.state_hex)],[56,bytes(expected.exit_hex)]]:[];
   if(expected&&expected.helper_hex!=='preserve')patches.push([100,bytes(expected.helper_hex)]);
@@ -225,10 +243,11 @@ for(const owner of oracle.owners) {
     run(unit,branch.budget,branch.expected,'actual Jcc consumes produced CF or OF');close(unit);
   }
 }
-const provenance={engine_sha256:hash(engineBytes),oracle_sha256:hash(oracleBytes),program_sha256:hash(source),text_sha256:hash(text),artifacts,sources,identities,observations,
+const cpuSourcePaths=['engine/src/abi/memory_helper/cpu.rs', 'engine/src/cpu/dbt/wasm/memory/cpu_scalar.rs', 'engine/src/cpu/dbt/wasm/emitter.rs', 'engine/src/cpu/dbt/wasm/code_fetch.rs', 'engine/src/process/memory/cpu_scalar.rs', 'engine/src/process/memory/scalar/cpu_write.rs', 'engine/src/process/wasm/memory/cpu_write.rs', 'engine/src/abi/wasm/exports/memory/cpu_write.rs'];
+const provenance={cpu_source_sha256:Object.fromEntries(cpuSourcePaths.map(path=>[path,hash(readFileSync(join(root,path)))])),original_oracle_sha256:hash(oracleBytes),current_wire_revision:'Scalar memory outputs only: R3MHv10 width4 and R3EXv6; original literal oracle/math/program/input hash preserved.',engine_sha256:hash(engineBytes),oracle_sha256:hash(oracleBytes),program_sha256:hash(source),text_sha256:hash(text),artifacts,sources,identities,observations,
   command:[process.execPath,process.argv[1],enginePath,outputDir,root],assembly_command:['clang',...assemble],
   tools:{node:process.version,v8:process.versions.v8,clang:execFileSync('clang',['--version'],{encoding:'utf8'}).split('\n')[0]},
-  claim:'independent authored32-bit ADC/SBB register8/memory11 DF0/1 chains,44 finite form/alias rows, real carry/borrow budget continuation and CF/OF Jcc execute emitted replacement/resident children with direct actual helpers. Literal wide arithmetic oracles predate product. One explicit initial CPU/CF/Exit/helper context per fresh case; continuations never patch CPU/CF. Real ADD seeds CF before read/cross-page/read-only/overflow faults, exact prefix state and distinct first-half RAM bytes survive; only permission/map repair, no prefix replay. Both executable RMW writes commit once then invalidate, including ADC same-byte, retained stale4 and fresh memory-free successor. Existing owner imports/key/full-u64 receipts trusted host Memory and direct functions; no JS guest arithmetic/interpreter/helper interception. Full4236 publication checks preserve cancel/Transfer/reserved bytes. Only bounded memory words observed; native owns wider parser/owner matrix. Existing Exitv1 register and Exitv2 memory remain, successorv1 intentionally has no memory imports. No LOCK/thread/bus atomicity, low widths/shifts/generalISA, new API/helper/local/export, PE/provider/startup duplication, SDK/browser/performance/game/full P2-V0 claim.'};
+  claim:'independent authored32-bit ADC/SBB register8/memory11 DF0/1 chains,44 finite form/alias rows, real carry/borrow budget continuation and CF/OF Jcc execute emitted replacement/resident children with direct actual helpers. Literal wide arithmetic oracles predate product. One explicit initial CPU/CF/Exit/helper context per fresh case; continuations never patch CPU/CF. Real ADD seeds CF before read/cross-page/read-only/overflow faults, exact prefix state and distinct first-half RAM bytes survive; only permission/map repair, no prefix replay. Both executable RMW writes commit once then invalidate, including ADC same-byte, retained stale4 and fresh memory-free successor. Existing owner imports/key/full-u64 receipts trusted host Memory and direct functions; no JS guest arithmetic/interpreter/helper interception. Full4796 publication checks preserve cancel/Transfer/reserved bytes. Only bounded memory words observed; native owns wider parser/owner matrix. Original oracle keeps legacy packet literals; current wire revision expects Exitv6 and helperv10 width4 for memory modules. Register/successorv1 intentionally has no memory imports. No LOCK/thread/bus atomicity, low widths/shifts/generalISA, new API/helper/local/export, PE/provider/startup duplication, SDK/browser/performance/game/full P2-V0 claim.'};
 writeFileSync(join(outputDir,'provenance.json'),JSON.stringify(provenance,null,2));
 console.log(JSON.stringify({status:'ok',engine_sha256:provenance.engine_sha256,oracle_sha256:provenance.oracle_sha256,
   owners:oracle.owners,register_retired:8,memory_retired:11,form_alias_vectors_each:44,fault_controls_each:7,SMC_controls_each:2,Jcc_controls_each:2,output:outputDir}));
