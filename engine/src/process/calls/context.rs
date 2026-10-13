@@ -149,14 +149,18 @@ mod tests {
     };
 
     #[test]
-    fn ss_shadow_and_nonflat_segments_survive_call_completion_and_callback_abort() {
+    fn rf_ss_shadow_and_nonflat_segments_survive_call_completion_and_callback_abort() {
         let mut engine = EngineInstance::new(1, 91).unwrap();
         engine.map(0x8000, 1, 3).unwrap();
         engine.write32(0x8010, 0x1000).unwrap();
         let mut state = State32::default();
         state.registers[4] = 0x8010;
-        crate::abi::x86::encode_state(&state, &mut engine.arena_mut().unwrap()[..STATE_SIZE])
-            .unwrap();
+        state.eflags = 0x10002;
+        crate::abi::x86::encode_state_current(
+            &state,
+            &mut engine.arena_mut().unwrap()[..STATE_SIZE],
+        )
+        .unwrap();
         StateMetadata {
             ss_debug_shadow: true,
         }
@@ -212,6 +216,11 @@ mod tests {
         assert!(!extended.matches(engine.arena()));
         engine.abort_callback(91, 2).unwrap();
         assert_eq!(&engine.arena()[..STATE_SIZE], expected);
+        assert_eq!(&engine.arena()[4..6], &3_u16.to_le_bytes());
+        assert_eq!(
+            decode_state(&engine.arena()[..STATE_SIZE]).unwrap().eflags,
+            0x10002
+        );
         assert!(extended.matches(engine.arena()));
         let completed = frame.complete(42);
         engine.publish_completed_call(completed).unwrap();
@@ -226,6 +235,11 @@ mod tests {
             }
         );
         assert!(engine.pending_call.is_none());
+        assert_eq!(&engine.arena()[4..6], &3_u16.to_le_bytes());
+        assert_eq!(
+            decode_state(&engine.arena()[..STATE_SIZE]).unwrap().eflags,
+            0x10002
+        );
         assert!(extended.matches(engine.arena()));
         assert_eq!(engine.segment_state().unwrap().bases[3], 0x5000);
         engine.arena_mut().unwrap()[12] = 2;

@@ -190,6 +190,7 @@ impl EngineInstance {
         let mut state = [0; STATE_SIZE];
         let mut exit = [0; EXIT_SIZE];
         encode_state(&initial, &mut state).map_err(|_| HostError::Infrastructure)?;
+        callback.outer.extended.restore_state_metadata(&mut state);
         encode_exit_v3(
             &ExecutionExit {
                 retired: 0,
@@ -337,6 +338,7 @@ impl EngineInstance {
         let mut exit = [0; EXIT_SIZE];
         let mut output = [0; RESIDENT_CALLBACK_RECORD_SIZE];
         encode_state(frame.state(), &mut state).map_err(|_| HostError::Infrastructure)?;
+        outer.extended.restore_state_metadata(&mut state);
         encode_exit_v3(
             &ExecutionExit {
                 retired: 0,
@@ -437,7 +439,16 @@ mod tests {
             ..State32::default()
         };
         outer.registers[4] = 0x8010;
+        outer.eflags = 0x10002;
         encode_state(&outer, &mut engine.arena_mut().unwrap()[..STATE_SIZE]).unwrap();
+        crate::abi::x86::StateMetadata {
+            ss_debug_shadow: true,
+        }
+        .write(
+            (&mut engine.arena_mut().unwrap()[..STATE_SIZE])
+                .try_into()
+                .unwrap(),
+        );
         encode_exit_v3(
             &ExecutionExit {
                 retired: 7,
@@ -456,9 +467,19 @@ mod tests {
             .begin_resident_callback(91, outer_id, callback_id, 1, 0x1100, 0x1200, 18, &[])
             .unwrap();
         assert_eq!(admitted.token, u32::MAX);
+        assert_eq!(engine.arena()[12], 1);
+        assert_eq!(
+            decode_state(&engine.arena()[..STATE_SIZE]).unwrap().eflags,
+            0x10002
+        );
         engine
             .authorize_resident_callback(91, callback_id, u32::MAX)
             .unwrap();
+        assert_eq!(engine.arena()[12], 1);
+        assert_eq!(
+            decode_state(&engine.arena()[..STATE_SIZE]).unwrap().eflags,
+            0x10002
+        );
         let mut returned = outer;
         returned.eip = 0x1200;
         returned.registers[0] = u32::MAX;
@@ -485,6 +506,12 @@ mod tests {
             PendingOwner::Resident(outer_id)
         );
         assert_eq!(&engine.arena()[..EXIT_OFFSET + EXIT_SIZE], frozen);
+        assert_eq!(
+            decode_state(&engine.arena()[..STATE_SIZE]).unwrap().eflags,
+            0x10002
+        );
+        assert_eq!(&engine.arena()[4..6], &3_u16.to_le_bytes());
+        assert_eq!(&engine.arena()[12..16], &1_u32.to_le_bytes());
         assert_eq!(
             &engine.arena()[EXIT_OFFSET + EXIT_SIZE..TRANSFER_OFFSET],
             &before[EXIT_OFFSET + EXIT_SIZE..TRANSFER_OFFSET]
@@ -518,6 +545,12 @@ mod tests {
             .unwrap();
         assert_eq!(engine.call_token, u32::MAX);
         assert!(engine.pending_call.is_none());
+        assert_eq!(
+            decode_state(&engine.arena()[..STATE_SIZE]).unwrap().eflags,
+            0x10002
+        );
+        assert_eq!(&engine.arena()[4..6], &3_u16.to_le_bytes());
+        assert_eq!(&engine.arena()[12..16], &1_u32.to_le_bytes());
         assert_eq!(
             decode_state(&engine.arena()[..STATE_SIZE])
                 .unwrap()

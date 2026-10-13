@@ -54,12 +54,14 @@ pub(super) fn preflight(sink: &mut InstructionSink<'_>) {
     sink.i32_const(2 | (i32::from(X86_INTEGER_PROFILE) << 16))
         .i32_ne()
         .i32_and();
+    load(sink, STATE_PTR, 4);
+    sink.i32_const(3 | (i32::from(X86_INTEGER_PROFILE) << 16))
+        .i32_ne()
+        .i32_and();
     fail_if(sink, 2);
     load(sink, STATE_PTR, STATE_METADATA_OFFSET);
     load(sink, STATE_PTR, 4);
-    sink.i32_const(2 | (i32::from(X86_INTEGER_PROFILE) << 16))
-        .i32_eq()
-        .i32_gt_u();
+    sink.i32_const(header_version() as i32).i32_ne().i32_gt_u();
     fail_if(sink, 2);
     load(sink, STATE_PTR, EFLAGS_OFFSET);
     sink.local_set(FLAGS)
@@ -73,8 +75,15 @@ pub(super) fn preflight(sink: &mut InstructionSink<'_>) {
         .i32_eq()
         .if_(BlockType::Result(wasm_encoder::ValType::I32))
         .i32_const(!crate::abi::x86::LEGACY_FLAGS_MASK as i32)
-        .else_()
+        .else_();
+    load(sink, STATE_PTR, 4);
+    sink.i32_const(2 | (i32::from(X86_INTEGER_PROFILE) << 16))
+        .i32_eq()
+        .if_(BlockType::Result(wasm_encoder::ValType::I32))
         .i32_const(!crate::abi::x86::USER_FLAGS_MASK as i32)
+        .else_()
+        .i32_const(!crate::abi::x86::USER_FLAGS_MASK_V3 as i32)
+        .end()
         .end()
         .i32_and()
         .i32_or();
@@ -140,6 +149,18 @@ pub(super) fn flush(
     store_local(sink, STATE_PTR, EIP_OFFSET, EIP);
     store_local(sink, STATE_PTR, EFLAGS_OFFSET, FLAGS);
     store_local(sink, STATE_PTR, STATE_METADATA_OFFSET, DEBUG_SHADOW);
+    load(sink, STATE_PTR, 4);
+    sink.i32_const(3 | (i32::from(X86_INTEGER_PROFILE) << 16))
+        .i32_eq()
+        .local_get(FLAGS)
+        .i32_const(0x10000)
+        .i32_and()
+        .i32_or()
+        .if_(BlockType::Empty)
+        .local_get(STATE_PTR)
+        .i32_const(3 | (i32::from(X86_INTEGER_PROFILE) << 16))
+        .i32_store(memarg(4))
+        .else_();
     sink.local_get(FLAGS)
         .i32_const(!crate::abi::x86::LEGACY_FLAGS_MASK as i32)
         .i32_and()
@@ -149,6 +170,7 @@ pub(super) fn flush(
         .local_get(STATE_PTR)
         .i32_const(2 | (i32::from(X86_INTEGER_PROFILE) << 16))
         .i32_store(memarg(4))
+        .end()
         .end();
 
     let detail_fields = [
@@ -229,6 +251,22 @@ pub(super) fn flush(
     sink.end();
 }
 
+pub(super) fn interrupt_return_precheck(sink: &mut InstructionSink<'_>, exit_depth: u32) {
+    // task return requires trusted tss linkage, outside the same-CPL return owner.
+    sink.local_get(FLAGS)
+        .i32_const(0x4000)
+        .i32_and()
+        .if_(BlockType::Empty)
+        .i32_const(4)
+        .local_set(REASON)
+        .i32_const(4)
+        .local_set(DETAIL);
+    for local in [FAULT_ADDRESS, FAULT_ACCESS, FAULT_LENGTH] {
+        sink.i32_const(0).local_set(local);
+    }
+    sink.br(exit_depth + 1).end();
+}
+
 pub(super) fn begin_instruction(sink: &mut InstructionSink<'_>) {
     sink.local_get(FLAGS)
         .i32_const(0x100)
@@ -237,7 +275,11 @@ pub(super) fn begin_instruction(sink: &mut InstructionSink<'_>) {
         .local_get(DEBUG_SHADOW)
         .local_set(SNAPSHOT_SHADOW)
         .i32_const(0)
-        .local_set(DEBUG_SHADOW);
+        .local_set(DEBUG_SHADOW)
+        .local_get(FLAGS)
+        .i32_const(!0x10000)
+        .i32_and()
+        .local_set(FLAGS);
 }
 
 pub(super) fn inhibit_debug_after_ss_load(sink: &mut InstructionSink<'_>) {

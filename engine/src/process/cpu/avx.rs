@@ -5,7 +5,7 @@ use crate::{
         memory_helper::HELPER_SIZE,
         x86::{
             AVX_ADDRESS_SIZE, AVX_ADDRESS_TRANSFER, AVX_OUTPUT_SIZE, AVX_OUTPUT_TRANSFER,
-            SIMD_MXCSR_OFFSET, SIMD_SIZE, USER_FLAGS_MASK, YMM_SIZE, decode_avx_address,
+            SIMD_MXCSR_OFFSET, SIMD_SIZE, USER_FLAGS_MASK_V3, YMM_SIZE, decode_avx_address,
             decode_simd, decode_ymm, encode_simd, encode_ymm,
         },
     },
@@ -151,7 +151,7 @@ impl EngineInstance {
             return Err(HostError::InvalidRequest);
         }
         if flags & 2 == 0
-            || flags & !USER_FLAGS_MASK != 0
+            || flags & !USER_FLAGS_MASK_V3 != 0
             || instruction
                 .inputs()
                 .into_iter()

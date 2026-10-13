@@ -416,6 +416,7 @@ pub(super) fn terminates(instruction: &DecodedInstruction, embedded: bool) -> bo
         Operation::FarJump { .. }
             | Operation::FarCall { .. }
             | Operation::FarReturn { .. }
+            | Operation::InterruptReturn { .. }
             | Operation::Jump { .. }
             | Operation::JumpWord { .. }
             | Operation::ReadJumpWord { .. }
@@ -442,6 +443,7 @@ fn supports_cpu_state(operation: &Operation) -> bool {
         | Operation::FarJump { .. }
         | Operation::FarCall { .. }
         | Operation::FarReturn { .. }
+        | Operation::InterruptReturn { .. }
         | Operation::XState(_)
         | Operation::Avx(_)
         | Operation::VerifySegment { .. }
@@ -676,6 +678,7 @@ pub(super) fn supports(instruction: &DecodedInstruction, embedded: bool) -> bool
         Operation::FarJump { .. }
         | Operation::FarCall { .. }
         | Operation::FarReturn { .. }
+        | Operation::InterruptReturn { .. }
         | Operation::XState(_)
         | Operation::Avx(_)
         | Operation::VerifySegment { .. }

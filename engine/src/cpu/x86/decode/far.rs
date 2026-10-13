@@ -15,13 +15,15 @@ pub(super) fn lower(instruction: &Instruction) -> Option<Result<Operation, Decod
         | Code::Call_ptr1616
         | Code::Call_m1616
         | Code::Retfw
-        | Code::Retfw_imm16 => FarWidth::Word,
+        | Code::Retfw_imm16
+        | Code::Iretw => FarWidth::Word,
         Code::Jmp_ptr1632
         | Code::Jmp_m1632
         | Code::Call_ptr1632
         | Code::Call_m1632
         | Code::Retfd
-        | Code::Retfd_imm16 => FarWidth::Dword,
+        | Code::Retfd_imm16
+        | Code::Iretd => FarWidth::Dword,
         _ => return None,
     };
     if instruction.has_lock_prefix()
@@ -31,6 +33,9 @@ pub(super) fn lower(instruction: &Instruction) -> Option<Result<Operation, Decod
         return Some(Err(unsupported()));
     }
     Some((|| {
+        if matches!(instruction.code(), Code::Iretw | Code::Iretd) {
+            return Ok(Operation::InterruptReturn { width });
+        }
         if matches!(
             instruction.code(),
             Code::Retfw | Code::Retfd | Code::Retfw_imm16 | Code::Retfd_imm16

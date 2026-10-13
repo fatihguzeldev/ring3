@@ -191,12 +191,17 @@ pub(in crate::cpu::dbt) fn emit(
                             | Operation::FarJump { .. }
                             | Operation::FarCall { .. }
                             | Operation::FarReturn { .. }
+                            | Operation::InterruptReturn { .. }
                     )
             });
-    let has_segment_check = blocks
-        .iter()
-        .flat_map(|block| &block.instructions)
-        .any(|instruction| instruction.segment_accesses() != 0);
+    let has_segment_check =
+        blocks
+            .iter()
+            .flat_map(|block| &block.instructions)
+            .any(|instruction| {
+                instruction.segment_accesses() != 0
+                    || matches!(instruction.operation(), Operation::InterruptReturn { .. })
+            });
     let mut types = TypeSection::new();
     types.ty().function([ValType::I32; 4], [ValType::I32]);
     if let Some(binding) = binding {
@@ -842,6 +847,16 @@ pub(in crate::cpu::dbt) fn emit(
         helper_imports.code_fetch_limit = Some(first);
         declarations.push((1, ValType::I32));
     }
+    if blocks
+        .iter()
+        .flat_map(|block| &block.instructions)
+        .any(|instruction| matches!(instruction.operation(), Operation::InterruptReturn { .. }))
+    {
+        let first = 4 + declarations.iter().map(|(count, _)| count).sum::<u32>();
+        helper_imports.interrupt_return_locals =
+            Some(super::far::InterruptReturnLocals::new(first));
+        declarations.push((3, ValType::I32));
+    }
     if has_avx {
         let first = 4 + declarations.iter().map(|(count, _)| count).sum::<u32>();
         helper_imports.avx_locals = Some(super::avx::AvxLocals::new(first));
@@ -982,6 +997,10 @@ fn emit_block(code: &mut InstructionSink<'_>, block: &CompiledBlock, imports: me
             if let Some(limit) = imports.code_fetch_limit {
                 code_fetch::check_instruction(code, instruction, limit, remaining + 2);
             }
+            if matches!(instruction.operation(), Operation::InterruptReturn { .. }) {
+                abi::interrupt_return_precheck(code, remaining + 2);
+            }
+            x87::precheck_instruction(code, instruction, imports, remaining + 2);
             abi::begin_instruction(code);
             integer::instruction(code, instruction, imports, remaining + 2);
             if matches!(

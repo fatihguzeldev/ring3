@@ -41,6 +41,7 @@ pub(in crate::cpu::dbt::wasm) fn instruction(
             | Operation::RepeatString { .. }
             | Operation::X87 { .. }
             | Operation::FarCall { .. }
+            | Operation::InterruptReturn { .. }
     ) && !matches!(instruction.operation(), Operation::Simd(operation) if operation.kind == crate::cpu::x86::simd::SimdKind::MaskedStore)
         && !matches!(instruction.operation(), Operation::Avx(_))
         && !(crate::cpu::x86::capabilities::AVX_ENABLED
@@ -71,6 +72,9 @@ pub(in crate::cpu::dbt::wasm) fn instruction(
             stack_adjust,
         } => {
             super::super::far::return_(code, width, stack_adjust, imports, exit_depth);
+        }
+        Operation::InterruptReturn { width } => {
+            super::super::far::interrupt_return(code, width, imports, exit_depth);
         }
         Operation::FarJump { width, target } => {
             super::super::far::jump(code, width, target, imports, exit_depth)
@@ -2520,6 +2524,7 @@ pub(in crate::cpu::dbt::wasm) fn instruction(
         Operation::FarJump { .. }
             | Operation::FarCall { .. }
             | Operation::FarReturn { .. }
+            | Operation::InterruptReturn { .. }
             | Operation::Jump { .. }
             | Operation::JumpWord { .. }
             | Operation::ReadJumpWord { .. }

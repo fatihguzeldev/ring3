@@ -511,3 +511,39 @@ fn f16c_helper_uses_the_same_canonical_gate_as_guest_admission() {
         }
     }
 }
+
+#[test]
+fn current_resume_flag_input_survives_register_helpers_in_both_owners() {
+    for resident in [false, true] {
+        let (mut engine, id) = engine();
+        let vectors = seed(&mut engine);
+        crate::abi::x86::encode_state_v3(
+            &crate::cpu::x86::State32 {
+                eflags: 0x10002,
+                ..Default::default()
+            },
+            &mut engine.arena_mut().unwrap()[STATE_OFFSET..STATE_OFFSET + 56],
+        )
+        .unwrap();
+        let state = engine.arena()[STATE_OFFSET..STATE_OFFSET + 56].to_vec();
+        let completion = if resident {
+            engine.avx_execute_resident(91, id, descriptor(3, 2), 1 | 2 << 6, 0, 0, 0, 0x10002)
+        } else {
+            engine.avx_execute(descriptor(3, 2), 1 | 2 << 6, 0, 0, 0, 0x10002)
+        };
+        assert_eq!(completion, Ok(StoreCompletion::Complete));
+        assert_eq!(&engine.arena()[STATE_OFFSET..STATE_OFFSET + 56], state);
+        let result = decode_simd(&engine.arena()[SIMD_OFFSET..SIMD_OFFSET + SIMD_SIZE]).unwrap();
+        assert_eq!(result.xmm[1], vectors.simd.xmm[2]);
+        assert_eq!(
+            u32::from_le_bytes(
+                engine.arena()[TRANSFER_OFFSET + AVX_OUTPUT_TRANSFER + 4
+                    ..TRANSFER_OFFSET + AVX_OUTPUT_TRANSFER + 8]
+                    .try_into()
+                    .unwrap()
+            ),
+            0x10002
+        );
+        assert_eq!(packet(&engine, 16), 0);
+    }
+}

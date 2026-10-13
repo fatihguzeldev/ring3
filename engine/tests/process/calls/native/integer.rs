@@ -249,7 +249,7 @@ fn capture_requires_canonical_state_exit_and_the_current_exact_gate_binding() {
         let arena = engine.arena_mut().unwrap();
         match change {
             0 => arena[0] = 0,
-            1 => arena[4] = 3,
+            1 => arena[4] = 4,
             2 => arena[52..56].copy_from_slice(&0u32.to_le_bytes()),
             3 => arena[56] = 0,
             4 => arena[60] = 2,
@@ -584,4 +584,24 @@ fn equal_token_and_generation_in_another_instance_do_not_authorize_completion() 
     first.complete_call(KEY, 1, a.token, 8).unwrap();
     assert_eq!(decode_state(&first.arena()[..56]).unwrap().registers[0], 8);
     assert_eq!(decode_state(&second.arena()[..56]).unwrap().registers[0], 7);
+}
+
+#[test]
+fn capture_accepts_literal_state_v3_rf_and_preserves_cpu_metadata() {
+    let (mut engine, _) = ready(KEY);
+    inject_gate_stop(&mut engine, 0x8000);
+    let arena = engine.arena_mut().unwrap();
+    arena[4..6].copy_from_slice(&3_u16.to_le_bytes());
+    arena[12..16].copy_from_slice(&1_u32.to_le_bytes());
+    let flags = u32::from_le_bytes(arena[52..56].try_into().unwrap()) | 0x10000;
+    arena[52..56].copy_from_slice(&flags.to_le_bytes());
+    let state = engine.arena()[..56].to_vec();
+    assert_eq!(
+        engine
+            .capture_call(KEY, 1, CallingConvention32::Cdecl, 2)
+            .unwrap()
+            .token,
+        1
+    );
+    assert_eq!(&engine.arena()[..56], state);
 }

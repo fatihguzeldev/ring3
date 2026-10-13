@@ -17,6 +17,52 @@ use super::locals::{
     ADDRESS, CANCEL_PTR, EXIT_PTR, FLAGS, HELPER_STATUS, MEMORY_BYTES, RESULT, STATE_PTR, register,
 };
 
+pub(super) fn precheck_instruction(
+    code: &mut InstructionSink<'_>,
+    instruction: &crate::cpu::x86::decode::DecodedInstruction,
+    imports: super::memory::Imports,
+    exit_depth: u32,
+) {
+    use crate::cpu::x86::{ir::Operation, simd::SimdKind};
+    match *instruction.operation() {
+        Operation::X87 {
+            operation: value,
+            address,
+            waiting: true,
+            opcode,
+        } => {
+            status_value(code);
+            code.local_set(super::locals::LHS);
+            control_value(code);
+            code.i32_const(-1)
+                .i32_xor()
+                .local_get(super::locals::LHS)
+                .i32_and()
+                .i32_const(0x3f)
+                .i32_and()
+                .if_(BlockType::Empty);
+            operation(
+                code,
+                value,
+                address,
+                true,
+                instruction.pc().0,
+                opcode,
+                imports.x87_op.expect("waiting x87 helper"),
+                exit_depth + 1,
+            );
+            // a pending check cannot complete an ordinary x87 operation successfully.
+            super::memory::infrastructure(code, 2);
+            super::memory::exit_if_failed(code, exit_depth + 1);
+            code.end();
+        }
+        Operation::Simd(value) if value.uses_mmx() || value.kind == SimdKind::EmptyMmx => {
+            pending(code, exit_depth);
+        }
+        _ => {}
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 pub(super) fn operation(
     code: &mut InstructionSink<'_>,

@@ -154,3 +154,6 @@ mod call;
 mod return_;
 pub(super) use call::call;
 pub(super) use return_::return_;
+
+mod interrupt;
+pub(super) use interrupt::{InterruptReturnLocals, interrupt_return};

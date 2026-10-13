@@ -101,9 +101,6 @@ pub(super) fn instruction(
     imports: Imports,
     exit_depth: u32,
 ) -> bool {
-    if operation.uses_mmx() || operation.kind == SimdKind::EmptyMmx {
-        super::x87::pending(code, exit_depth);
-    }
     if matches!(operation.kind, SimdKind::Fence | SimdKind::Prefetch) {
         return false;
     }

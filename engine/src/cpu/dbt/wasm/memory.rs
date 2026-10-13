@@ -57,6 +57,7 @@ pub(super) struct Imports {
     pub(super) far_jump: Option<StoreImport>,
     pub(super) far_call: Option<StoreImport>,
     pub(super) far_return: Option<StoreImport>,
+    pub(super) interrupt_return_locals: Option<super::far::InterruptReturnLocals>,
     pub(super) read: Option<u32>,
     pub(super) store: Option<StoreImport>,
     pub(super) read8: Option<u32>,
@@ -178,7 +179,7 @@ impl Imports {
                     far_call = true;
                     cpu_read |= matches!(target, crate::cpu::x86::ir::FarPointer::Memory(_));
                 }
-                Operation::FarReturn { .. } => {
+                Operation::FarReturn { .. } | Operation::InterruptReturn { .. } => {
                     far_return = true;
                     cpu_read = true;
                 }

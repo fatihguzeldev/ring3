@@ -15,7 +15,10 @@ mod x87;
 pub mod xstate;
 
 pub use avx::AvxOperation;
-pub use control::{ControlOperation, USER_POP_FLAGS_MASK, USER_POP_FLAGS_WORD_MASK, pop_flags};
+pub use control::{
+    ControlOperation, USER_IRET_FLAGS_MASK, USER_IRET_FLAGS_WORD_MASK, USER_POP_FLAGS_MASK,
+    USER_POP_FLAGS_WORD_MASK, interrupt_return_flags, pop_flags,
+};
 pub(crate) use environment::USER_MODE_ENVIRONMENT;
 pub use segments::{
     CodeDestination, CodeTransfer, CodeTransferError, FarWidth, SegmentAccess, SegmentAccessError,

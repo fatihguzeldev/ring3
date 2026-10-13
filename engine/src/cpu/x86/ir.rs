@@ -388,6 +388,9 @@ pub enum Operation {
         width: FarWidth,
         stack_adjust: u16,
     },
+    InterruptReturn {
+        width: FarWidth,
+    },
     QuerySegment {
         kind: super::SegmentQuery,
         source: Value32,

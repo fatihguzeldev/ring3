@@ -190,6 +190,7 @@ impl EngineInstance {
         let mut exit = [0; EXIT_SIZE];
         let mut output = [0; CALLBACK_RECORD_SIZE];
         encode_state(frame.state(), &mut state).map_err(|_| HostError::Infrastructure)?;
+        outer.extended.restore_state_metadata(&mut state);
         encode_exit_v3(
             &ExecutionExit {
                 retired: 0,
@@ -348,7 +349,16 @@ mod tests {
             ..State32::default()
         };
         state.registers[4] = 0x8010;
+        state.eflags = 0x10002;
         encode_state(&state, &mut engine.arena_mut().unwrap()[..STATE_SIZE]).unwrap();
+        crate::abi::x86::StateMetadata {
+            ss_debug_shadow: true,
+        }
+        .write(
+            (&mut engine.arena_mut().unwrap()[..STATE_SIZE])
+                .try_into()
+                .unwrap(),
+        );
         encode_exit_v3(
             &ExecutionExit {
                 retired: 1,
@@ -367,8 +377,19 @@ mod tests {
             .unwrap();
         assert_eq!(callback.token, u32::MAX);
         assert_eq!(engine.call_token, u32::MAX);
+        assert_eq!(engine.arena()[12], 1);
+        assert_eq!(
+            decode_state(&engine.arena()[..STATE_SIZE]).unwrap().eflags,
+            0x10002
+        );
         engine.unmap(0x8000, 1).unwrap();
         engine.abort_callback(91, callback.token).unwrap();
+        assert_eq!(
+            decode_state(&engine.arena()[..STATE_SIZE]).unwrap().eflags,
+            0x10002
+        );
+        assert_eq!(&engine.arena()[4..6], &3_u16.to_le_bytes());
+        assert_eq!(&engine.arena()[12..16], &1_u32.to_le_bytes());
         let arena = engine.arena().to_vec();
         assert_eq!(
             engine.begin_callback(91, generation, outer.token, 0x1100, 0x1200, 18, &[]),
@@ -386,5 +407,11 @@ mod tests {
             .complete_call(91, generation, outer.token, 55)
             .unwrap();
         assert_eq!(engine.call_token, u32::MAX);
+        assert_eq!(
+            decode_state(&engine.arena()[..STATE_SIZE]).unwrap().eflags,
+            0x10002
+        );
+        assert_eq!(&engine.arena()[4..6], &3_u16.to_le_bytes());
+        assert_eq!(&engine.arena()[12..16], &1_u32.to_le_bytes());
     }
 }
