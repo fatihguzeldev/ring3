@@ -134,7 +134,7 @@ fn stopped_entry_refuses_cancelled_or_malformed_cpu_context_atomically() {
 }
 
 #[test]
-fn stopped_entry_keeps_strict_admission_and_failed_preparation_atomic() {
+fn stopped_entry_distinguishes_strict_refusal_from_execution_fault_capture() {
     let mut engine = stopped(&[0xf0, 0x90]);
     engine.arena_mut().unwrap()[TRANSFER_OFFSET..TRANSFER_OFFSET + 4]
         .copy_from_slice(&ENTRY.to_le_bytes());
@@ -146,12 +146,13 @@ fn stopped_entry_keeps_strict_admission_and_failed_preparation_atomic() {
     assert_eq!(engine.generation(), 1);
     assert_eq!(engine.arena(), before);
 
-    // valid evex remains unsupported; the decoder test pins its exact iced code.
     upload(&mut engine, ENTRY, &[0x62, 0xf1, 0x7c, 0x48, 0x58, 0xc1]);
+    engine.arena_mut().unwrap()[TRANSFER_OFFSET..TRANSFER_OFFSET + 4]
+        .copy_from_slice(&ENTRY.to_le_bytes());
     let before = engine.arena().to_vec();
     let old = engine.artifact_bytes().unwrap().to_vec();
     assert!(matches!(
-        engine.compile_stopped_entry(KEY, 1),
+        engine.compile_entries(1, 0),
         Err(HostError::Compile(CompileError::Instruction {
             pc: crate::memory::GuestAddress(ENTRY),
             cause: InstructionError::Decode(DecodeError::Unsupported(UnsupportedFeature::Simd)),
@@ -159,6 +160,11 @@ fn stopped_entry_keeps_strict_admission_and_failed_preparation_atomic() {
     ));
     assert_eq!(engine.generation(), 1);
     assert_eq!(engine.artifact_bytes().unwrap(), old);
+    assert_eq!(engine.arena(), before);
+    assert_eq!(engine.compile_stopped_entry(KEY, 1), Ok(2));
+    assert_eq!(engine.generation(), 2);
+    assert_ne!(engine.artifact_bytes().unwrap(), old);
+    assert_eq!(engine.artifact.as_ref().unwrap().metadata().instructions, 1);
     assert_eq!(engine.arena(), before);
 }
 
