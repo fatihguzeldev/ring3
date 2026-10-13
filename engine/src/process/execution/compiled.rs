@@ -151,3 +151,7 @@ impl EngineInstance {
             .map_err(|_| HostError::CodeInvalidated)
     }
 }
+
+#[cfg(test)]
+#[path = "compiled/identity/tests.rs"]
+mod identity;
