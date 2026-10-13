@@ -93,3 +93,6 @@ mod whole_permute_capability;
 
 #[path = "avx/permute/blend/capability/native.rs"]
 mod blend_capability;
+
+#[path = "avx/scalar/mask/capability/native.rs"]
+mod movemask_capability;

@@ -21,11 +21,12 @@ pub(super) fn lower(
                 operands |= index(instruction, 1, false, false)? << 6;
                 (0x01000902, operands, u32::from(instruction.immediate8()))
             }
-            Code::VEX_Vpmovmskb_r32_xmm => {
-                encoding.validate(false, 0, true)?;
+            Code::VEX_Vpmovmskb_r32_xmm | Code::VEX_Vpmovmskb_r32_ymm => {
+                let wide = instruction.code() == Code::VEX_Vpmovmskb_r32_ymm;
+                encoding.validate(false, u8::from(wide), true)?;
                 let mut operands = index(instruction, 0, true, false)?;
                 operands |= index(instruction, 1, false, false)? << 6;
-                (0x01000903, operands, 0)
+                (if wide { 0x01000983 } else { 0x01000903 }, operands, 0)
             }
             Code::VEX_Vpextrb_r32m8_xmm_imm8 => {
                 encoding.validate(false, 0, true)?;
@@ -78,7 +79,13 @@ pub(super) fn lower(
         };
         let instruction_value = AvxInstruction::decode_descriptor(descriptor, operands, immediate)
             .map_err(|_| invalid())?;
-        bind_address(instruction, instruction_value).map(Some)
+        let operation = bind_address(instruction, instruction_value)?;
+        if instruction.code() == Code::VEX_Vpmovmskb_r32_ymm
+            && !crate::cpu::x86::capabilities::AVX2_ENABLED
+        {
+            return Err(unsupported());
+        }
+        Ok(Some(operation))
     })();
     result.transpose()
 }

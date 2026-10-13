@@ -1,7 +1,7 @@
 use super::VectorLayout;
 use crate::cpu::x86::{
     Register32,
-    avx::{ScalarInstruction, VectorRegister, WordSource, WordTarget},
+    avx::{ScalarInstruction, VectorRegister, VectorWidth, WordSource, WordTarget},
     simd::{ScalarOperation, ScalarWidth},
 };
 use wasm_encoder::{InstructionSink, MemArg};
@@ -117,12 +117,19 @@ pub(super) fn emit(
             }
         }
         ScalarInstruction::Mask {
+            width,
             source,
             destination,
         } => {
             code.local_get(locals.state)
                 .v128_load(vector(layout, source, false));
             super::super::simd::scalar_value(code, ScalarOperation::MaskBytes);
+            if width == VectorWidth::Ymm {
+                code.local_get(locals.state)
+                    .v128_load(vector(layout, source, true));
+                super::super::simd::scalar_value(code, ScalarOperation::MaskBytes);
+                code.i32_const(16).i32_shl().i32_or();
+            }
             code.local_set(locals.scalar);
             code.local_get(locals.state)
                 .local_get(locals.scalar)

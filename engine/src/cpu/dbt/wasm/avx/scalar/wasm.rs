@@ -122,6 +122,7 @@ fn case(
             immediate: imm,
         },
         "mask" => ScalarInstruction::Mask {
+            width: VectorWidth::Xmm,
             source: r(a),
             destination: g(scalar),
         },

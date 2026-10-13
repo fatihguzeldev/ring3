@@ -32,7 +32,7 @@ pub(super) fn decode(kind: u8, s: Slots, immediate: u8) -> Result<AvxSemantic, A
                 immediate,
             })
         }
-        3 => {
+        3 | 0x83 => {
             s.validate(
                 D | B,
                 MemoryPolicy::Forbidden,
@@ -41,6 +41,11 @@ pub(super) fn decode(kind: u8, s: Slots, immediate: u8) -> Result<AvxSemantic, A
                 immediate,
             )?;
             AvxSemantic::Scalar(ScalarInstruction::Mask {
+                width: if kind == 0x83 {
+                    VectorWidth::Ymm
+                } else {
+                    VectorWidth::Xmm
+                },
                 source: s.vector(2),
                 destination: s.general(0),
             })
@@ -126,3 +131,7 @@ pub(super) fn decode(kind: u8, s: Slots, immediate: u8) -> Result<AvxSemantic, A
     };
     Ok(semantic)
 }
+
+#[cfg(test)]
+#[path = "scalar/mask/native.rs"]
+mod mask_tests;

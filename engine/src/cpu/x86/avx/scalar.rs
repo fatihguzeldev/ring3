@@ -1,4 +1,4 @@
-use super::{MemoryRequirement, VectorRegister, VectorState, WordSource, WordTarget};
+use super::{MemoryRequirement, VectorRegister, VectorState, VectorWidth, WordSource, WordTarget};
 use crate::{
     cpu::x86::{
         Register32, State32,
@@ -22,6 +22,7 @@ pub(crate) enum ScalarInstruction {
         immediate: u8,
     },
     Mask {
+        width: VectorWidth,
         source: VectorRegister,
         destination: Register32,
     },
@@ -108,13 +109,24 @@ impl VectorState {
                 }
             }
             ScalarInstruction::Mask {
+                width,
                 source,
                 destination,
             } => {
-                general.registers[destination.index()] = ScalarOperation::MaskBytes
+                let lower = ScalarOperation::MaskBytes
                     .evaluate([0; 16], self.simd.xmm[source.index()])
                     .1
-                    .unwrap()
+                    .unwrap();
+                let value = if width == VectorWidth::Ymm {
+                    let upper = ScalarOperation::MaskBytes
+                        .evaluate([0; 16], self.upper[source.index()])
+                        .1
+                        .unwrap();
+                    lower | upper << 16
+                } else {
+                    lower
+                };
+                general.registers[destination.index()] = value;
             }
         }
         Ok(())
@@ -123,3 +135,7 @@ impl VectorState {
 #[cfg(test)]
 #[path = "scalar/native.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "scalar/mask/native.rs"]
+mod mask_tests;

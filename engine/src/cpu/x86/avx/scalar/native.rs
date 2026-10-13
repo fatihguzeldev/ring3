@@ -85,6 +85,7 @@ fn extract_zero_extends_full_gpr_and_mask_preserves_every_vector() {
     expected.registers[7] = 0xd555;
     s.execute_scalar(
         ScalarInstruction::Mask {
+            width: VectorWidth::Xmm,
             source: r(1),
             destination: Register32::Edi,
         },
