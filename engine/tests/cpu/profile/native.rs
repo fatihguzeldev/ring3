@@ -9,3 +9,6 @@ mod cpu_cache_timestamp;
 
 #[path = "environment/cpuid/native.rs"]
 mod cpu_cpuid;
+
+#[path = "environment/identity/native.rs"]
+mod cpu_identity;

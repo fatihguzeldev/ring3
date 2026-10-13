@@ -3,6 +3,9 @@ pub(crate) const MSR_ENABLED: bool = true;
 // user-mode counter reads remain subject to the immutable cr4.pce policy.
 pub(crate) const RDPMC_ENABLED: bool = true;
 
+// processor identity reads share the fixed virtual auxiliary identity with rdtscp.
+pub(crate) const RDPID_ENABLED: bool = true;
+
 pub(crate) const XCR0: u64 = 7;
 
 /// baseline avx is admitted only with its complete architectural state enabled.
@@ -65,7 +68,7 @@ pub(crate) const CPU_ID_LEAVES: [CpuIdLeaf; 8] = [
     CpuIdLeaf {
         function: 7,
         subfunction: Some(0),
-        registers: [0, 1 << 3 | 1 << 8, 0, 0],
+        registers: [0, 1 << 3 | 1 << 8, (RDPID_ENABLED as u32) << 22, 0],
     },
     CpuIdLeaf {
         function: 13,

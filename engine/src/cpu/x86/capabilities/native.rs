@@ -1,4 +1,4 @@
-use super::{AVX_ENABLED, CPU_ID_LEAVES, F16C_ENABLED, FMA_ENABLED, XCR0};
+use super::{AVX_ENABLED, CPU_ID_LEAVES, F16C_ENABLED, FMA_ENABLED, RDPID_ENABLED, XCR0};
 
 fn leaf(function: u32, subfunction: Option<u32>) -> [u32; 4] {
     CPU_ID_LEAVES
@@ -23,7 +23,9 @@ fn extensions_without_complete_execution_support_remain_unadvertised() {
     assert_eq!(leaf(1, None)[2] & (1 << 12) != 0, FMA_ENABLED);
     assert_eq!(leaf(1, None)[2] & (1 << 29) != 0, F16C_ENABLED);
     let structured = leaf(7, Some(0));
-    assert_eq!(structured, [0, 1 << 3 | 1 << 8, 0, 0]); // bmi1/2 only; no avx2/avx512.
+    // bmi1/2 and processor identity are present; avx2/avx512 remain unadvertised.
+    assert_eq!(structured, [0, 1 << 3 | 1 << 8, 1 << 22, 0]);
+    assert_eq!(structured[2] & (1 << 22) != 0, RDPID_ENABLED);
     assert_eq!(leaf(0, None)[0], 13);
 }
 

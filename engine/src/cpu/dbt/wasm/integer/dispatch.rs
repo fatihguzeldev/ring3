@@ -336,6 +336,9 @@ pub(in crate::cpu::dbt::wasm) fn instruction(
             insert_byte(code, ByteRegister::Al);
         }
         Operation::CpuId => integer_system::cpuid(code),
+        Operation::ReadProcessorId { destination } => {
+            integer_system::processor_id(code, destination);
+        }
         Operation::VirtualTimestamp => integer_system::timestamp(code, false, imports, exit_depth),
         Operation::AtomicMemory {
             kind,

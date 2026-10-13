@@ -511,6 +511,9 @@ pub enum Operation {
         address: EffectiveAddress,
     },
     CpuId,
+    ReadProcessorId {
+        destination: Register32,
+    },
     VirtualTimestamp,
     StackFrame {
         kind: super::StackFrameKind,

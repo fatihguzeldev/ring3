@@ -63,7 +63,7 @@ impl EngineInstance {
             output[3] = (self.virtual_tsc >> 32) as u32;
             if descriptor == 0x20001 {
                 // all guest threads share the current single virtual processor.
-                output[5] = 0;
+                output[5] = crate::cpu::x86::USER_MODE_ENVIRONMENT.tsc_aux();
             }
             self.integer_publish(0, output, Ok(()))?;
             return Ok(StoreCompletion::Complete);

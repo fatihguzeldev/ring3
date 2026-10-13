@@ -646,6 +646,7 @@ pub(super) fn supports(instruction: &DecodedInstruction, embedded: bool) -> bool
         || matches!(
             operation,
             Operation::CpuId
+                | Operation::ReadProcessorId { .. }
                 | Operation::Nop
                 | Operation::InitializeX87
                 | Operation::ClearX87Exceptions

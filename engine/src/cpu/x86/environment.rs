@@ -13,6 +13,7 @@ pub(crate) struct UserModeEnvironment {
     io_privilege: u8,
     user_port_permissions: UserPortPermissions,
     performance_counter_access: bool,
+    tsc_aux: u32,
     protected_virtual_interrupts: bool,
     debug_general_detect: bool,
     debug_extensions_enabled: bool,
@@ -23,6 +24,7 @@ pub(crate) const USER_MODE_ENVIRONMENT: UserModeEnvironment = UserModeEnvironmen
     io_privilege: 0,
     user_port_permissions: UserPortPermissions::DenyAll,
     performance_counter_access: false,
+    tsc_aux: 0,
     protected_virtual_interrupts: false,
     debug_general_detect: false,
     debug_extensions_enabled: false,
@@ -44,6 +46,11 @@ impl UserModeEnvironment {
     /// cr4.pce permits performance-counter reads outside privilege level zero.
     pub(crate) const fn performance_counter_access(self) -> bool {
         self.performance_counter_access
+    }
+
+    /// identity of the single virtual processor, independent of timestamp sampling.
+    pub(crate) const fn tsc_aux(self) -> u32 {
+        self.tsc_aux
     }
 
     pub(crate) const fn protected_virtual_interrupts(self) -> bool {
@@ -72,6 +79,7 @@ mod tests {
             UserPortPermissions::DenyAll,
         );
         assert!(!USER_MODE_ENVIRONMENT.performance_counter_access());
+        assert_eq!(USER_MODE_ENVIRONMENT.tsc_aux(), 0);
         assert!(!USER_MODE_ENVIRONMENT.protected_virtual_interrupts());
         assert!(!USER_MODE_ENVIRONMENT.debug_general_detect());
         assert!(!USER_MODE_ENVIRONMENT.debug_extensions_enabled());

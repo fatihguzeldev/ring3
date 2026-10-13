@@ -1,5 +1,7 @@
 use super::{atomic, locals::*, memory};
-use crate::cpu::x86::{Register32::*, capabilities::CPU_ID_LEAVES};
+use crate::cpu::x86::{
+    Register32, Register32::*, USER_MODE_ENVIRONMENT, capabilities::CPU_ID_LEAVES,
+};
 use wasm_encoder::{BlockType, InstructionSink};
 
 pub(super) fn cpuid(code: &mut InstructionSink<'_>) {
@@ -32,6 +34,12 @@ pub(super) fn cpuid(code: &mut InstructionSink<'_>) {
         code.end();
     }
 }
+
+pub(super) fn processor_id(code: &mut InstructionSink<'_>, destination: Register32) {
+    code.i32_const(USER_MODE_ENVIRONMENT.tsc_aux() as i32)
+        .local_set(register(destination));
+}
+
 pub(super) fn timestamp(
     code: &mut InstructionSink<'_>,
     auxiliary: bool,
