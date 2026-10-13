@@ -301,11 +301,50 @@ pub(super) fn lower(
                 }
                 (0x0100061f, operands, 0)
             }
+            Code::VEX_Vpmovsxbw_ymm_xmmm128
+            | Code::VEX_Vpmovsxbd_ymm_xmmm64
+            | Code::VEX_Vpmovsxbq_ymm_xmmm32
+            | Code::VEX_Vpmovsxwd_ymm_xmmm128
+            | Code::VEX_Vpmovsxwq_ymm_xmmm64
+            | Code::VEX_Vpmovsxdq_ymm_xmmm128
+            | Code::VEX_Vpmovzxbw_ymm_xmmm128
+            | Code::VEX_Vpmovzxbd_ymm_xmmm64
+            | Code::VEX_Vpmovzxbq_ymm_xmmm32
+            | Code::VEX_Vpmovzxwd_ymm_xmmm128
+            | Code::VEX_Vpmovzxwq_ymm_xmmm64
+            | Code::VEX_Vpmovzxdq_ymm_xmmm128 => {
+                encoding.validate(false, 1, true)?;
+                let mut operands = index(instruction, 0, false, false)?;
+                operands |= index(instruction, 1, false, true)? << 6;
+                if instruction.op_kind(1) == OpKind::Memory {
+                    operands |= 1 << 12;
+                }
+                let kind = match instruction.code() {
+                    Code::VEX_Vpmovsxbw_ymm_xmmm128 => 16,
+                    Code::VEX_Vpmovsxbd_ymm_xmmm64 => 17,
+                    Code::VEX_Vpmovsxbq_ymm_xmmm32 => 18,
+                    Code::VEX_Vpmovsxwd_ymm_xmmm128 => 19,
+                    Code::VEX_Vpmovsxwq_ymm_xmmm64 => 20,
+                    Code::VEX_Vpmovsxdq_ymm_xmmm128 => 21,
+                    Code::VEX_Vpmovzxbw_ymm_xmmm128 => 23,
+                    Code::VEX_Vpmovzxbd_ymm_xmmm64 => 24,
+                    Code::VEX_Vpmovzxbq_ymm_xmmm32 => 25,
+                    Code::VEX_Vpmovzxwd_ymm_xmmm128 => 26,
+                    Code::VEX_Vpmovzxwq_ymm_xmmm64 => 27,
+                    Code::VEX_Vpmovzxdq_ymm_xmmm128 => 28,
+                    _ => unreachable!("validated widening Code"),
+                };
+                (0x01000680 | kind, operands, 0)
+            }
             _ => return Ok(None),
         };
         let instruction_value = AvxInstruction::decode_descriptor(descriptor, operands, immediate)
             .map_err(|_| invalid())?;
-        bind_address(instruction, instruction_value).map(Some)
+        let operation = bind_address(instruction, instruction_value)?;
+        if descriptor & 0x80 != 0 && !crate::cpu::x86::capabilities::AVX2_ENABLED {
+            return Err(DecodeError::Unsupported(UnsupportedFeature::Simd));
+        }
+        Ok(Some(operation))
     })();
     result.transpose()
 }

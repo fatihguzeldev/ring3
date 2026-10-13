@@ -1,5 +1,5 @@
 use super::VectorLayout;
-use crate::cpu::x86::avx::{MoveSource, RearrangeInstruction, VectorRegister};
+use crate::cpu::x86::avx::{MoveSource, RearrangeInstruction, VectorRegister, VectorWidth};
 use wasm_encoder::{InstructionSink, MemArg};
 
 #[derive(Clone, Copy)]
@@ -70,7 +70,7 @@ pub(super) fn emit(
     load(
         code,
         instruction.second(),
-        instruction.operation().memory_bytes(),
+        instruction.source_bytes(),
         layout,
         locals,
     );
@@ -81,6 +81,19 @@ pub(super) fn emit(
     }
     code.local_get(locals.state);
     super::super::simd::rearrange_value(code, instruction.operation(), locals.sources);
+    if instruction.width() == VectorWidth::Ymm {
+        // keep the lower result on the stack while widening the next low-xmm window.
+        let offset = instruction.source_bytes() / 2;
+        code.local_get(second)
+            .v128_const(0)
+            .i8x16_shuffle(std::array::from_fn(|byte| offset + byte as u8))
+            .local_set(second)
+            .local_get(locals.state);
+        super::super::simd::rearrange_value(code, instruction.operation(), locals.sources);
+        code.v128_store(vector(layout, instruction.destination(), true));
+        code.v128_store(vector(layout, instruction.destination(), false));
+        return;
+    }
     code.v128_store(vector(layout, instruction.destination(), false));
     code.local_get(locals.state)
         .v128_const(0)

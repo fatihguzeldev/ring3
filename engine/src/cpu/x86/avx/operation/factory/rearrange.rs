@@ -1,5 +1,14 @@
 use super::*;
 pub(super) fn decode(kind: u8, s: Slots, immediate: u8) -> Result<AvxSemantic, AvxDecodeError> {
+    let width = if kind & 0x80 != 0 {
+        if !matches!(kind & 0x7f, 16..=21 | 23..=28) {
+            return Err(AvxDecodeError::Family);
+        }
+        VectorWidth::Ymm
+    } else {
+        VectorWidth::Xmm
+    };
+    let kind = kind & 0x7f;
     let semantic = match kind {
         1 => {
             s.validate(
@@ -623,5 +632,14 @@ pub(super) fn decode(kind: u8, s: Slots, immediate: u8) -> Result<AvxSemantic, A
         }
         _ => return Err(AvxDecodeError::Family),
     };
-    Ok(semantic)
+    match semantic {
+        AvxSemantic::Rearrange(value) => Ok(AvxSemantic::Rearrange(
+            value.with_width(width).ok_or(AvxDecodeError::Family)?,
+        )),
+        _ => unreachable!("rearrange factory constructs only rearrange instructions"),
+    }
 }
+
+#[cfg(test)]
+#[path = "rearrange/widen/native.rs"]
+mod widen_tests;

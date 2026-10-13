@@ -71,3 +71,6 @@ mod masked_capability;
 
 #[path = "avx/shift/uniform/capability/native.rs"]
 mod uniform_shift_capability;
+
+#[path = "avx/rearrange/widen/capability/native.rs"]
+mod avx2_widen_capability;
