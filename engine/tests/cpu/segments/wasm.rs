@@ -39,3 +39,6 @@ mod cpu_ss_b16_wasm;
 
 #[path = "code/defaults/wasm.rs"]
 mod cpu_code_defaults_wasm;
+
+#[path = "code/wrap/wasm.rs"]
+mod cpu_code_linear_wrap_wasm;
