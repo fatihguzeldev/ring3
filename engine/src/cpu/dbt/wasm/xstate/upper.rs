@@ -1,4 +1,4 @@
-use wasm_encoder::{BlockType, InstructionSink, ValType};
+use wasm_encoder::{BlockType, InstructionSink};
 
 use super::super::{locals::*, memory};
 use crate::cpu::x86::{
@@ -41,10 +41,6 @@ pub(super) fn validate_context(
     memory::expect_field(code, 24, 0);
     code.end();
     memory::helper_field(code, 16);
-    code.i32_eqz().if_(BlockType::Empty);
-    success(code, save);
-    code.end();
-    memory::helper_field(code, 16);
     code.i32_const(1).i32_eq().if_(BlockType::Empty);
     fault(code, save);
     code.end();
@@ -64,30 +60,6 @@ fn selected(code: &mut InstructionSink<'_>, selection: u32) {
     }
 }
 
-fn fits(code: &mut InstructionSink<'_>, end: u32) {
-    code.local_get(ADDRESS).i32_const(-(end as i32)).i32_le_u();
-}
-
-fn success(code: &mut InstructionSink<'_>, save: bool) {
-    fits(code, if save { 520 } else { 536 });
-    code.i32_eqz();
-    memory::add_check(code);
-    if save {
-        for span in SAVE_SPANS {
-            selected(code, span.selection);
-            fits(code, span.offset + span.width);
-            code.i32_eqz().i32_and();
-            memory::add_check(code);
-        }
-    } else {
-        // absent selected components initialize without touching their payload; mxcsr is always read.
-        selected(code, 6);
-        fits(code, 28);
-        code.i32_eqz().i32_and();
-        memory::add_check(code);
-    }
-}
-
 fn fault(code: &mut InstructionSink<'_>, save: bool) {
     memory::helper_field(code, 28);
     code.local_get(ADDRESS).i32_sub().local_set(RHS);
@@ -96,63 +68,28 @@ fn fault(code: &mut InstructionSink<'_>, save: bool) {
         offset: 512,
         width: if save { 8 } else { 24 },
     };
-    memory::helper_field(code, 24);
-    code.i32_const(3)
-        .i32_eq()
-        .if_(BlockType::Result(ValType::I32));
-    span_fault(code, header, 1, true);
-    // a payload overflow can occur after a valid header because ymm data follows the header.
-    fits(code, header.offset + header.width);
     code.i32_const(0);
-    for span in if save { SAVE_SPANS } else { RESTORE_SPANS } {
-        span_fault(code, span, if save { 2 } else { 1 }, true);
-        code.i32_or();
-    }
-    code.i32_and().i32_or();
-    code.else_();
-    code.i32_const(0);
-    span_fault(code, header, 1, false);
+    span_fault(code, header, 1);
     code.i32_or();
     for span in if save { SAVE_SPANS } else { RESTORE_SPANS } {
-        span_fault(code, span, if save { 2 } else { 1 }, false);
+        span_fault(code, span, if save { 2 } else { 1 });
         code.i32_or();
     }
-    fits(code, header.offset + header.width);
-    code.i32_and();
-    code.end().i32_eqz();
+    code.i32_eqz();
     memory::add_check(code);
 }
 
-/// address-overflow packets identify either the base (field addition) or field start (span end).
-fn span_fault(code: &mut InstructionSink<'_>, span: MemorySpan, access: i32, overflow: bool) {
+/// the modulo difference identifies a byte in an actually selected xstate span.
+fn span_fault(code: &mut InstructionSink<'_>, span: MemorySpan, access: i32) {
     selected(code, span.selection);
     memory::helper_field(code, 32);
     code.i32_const(access).i32_eq().i32_and();
-    if overflow {
-        fits(code, span.offset + span.width);
-        code.i32_eqz().i32_and();
-        memory::helper_field(code, 28);
-        if span.offset != 0 {
-            fits(code, span.offset + 1);
-            code.if_(BlockType::Result(ValType::I32));
-            code.local_get(ADDRESS)
-                .i32_const(span.offset as i32)
-                .i32_add();
-            code.else_().local_get(ADDRESS).end();
-        } else {
-            code.local_get(ADDRESS);
-        }
-        code.i32_eq().i32_and();
-    } else {
-        fits(code, span.offset + span.width);
-        code.i32_and();
-        code.local_get(RHS)
-            .i32_const(span.offset as i32)
-            .i32_ge_u()
-            .local_get(RHS)
-            .i32_const((span.offset + span.width) as i32)
-            .i32_lt_u()
-            .i32_and()
-            .i32_and();
-    }
+    code.local_get(RHS)
+        .i32_const(span.offset as i32)
+        .i32_ge_u()
+        .local_get(RHS)
+        .i32_const((span.offset + span.width) as i32)
+        .i32_lt_u()
+        .i32_and()
+        .i32_and();
 }

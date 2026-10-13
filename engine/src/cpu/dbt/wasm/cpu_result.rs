@@ -1,4 +1,4 @@
-use wasm_encoder::{BlockType, InstructionSink, ValType};
+use wasm_encoder::{BlockType, InstructionSink};
 
 use super::{
     locals::*,
@@ -246,8 +246,6 @@ fn success(code: &mut InstructionSink<'_>, length: u32, mask: Option<u32>) {
         expect_field(code, offset, 0);
     }
     if let Some(mask_local) = mask {
-        masked_overflow(code, length, mask_local);
-        add_check(code);
         if length < 32 {
             code.local_get(mask_local)
                 .i32_const(!((1u32 << length) - 1) as i32)
@@ -260,11 +258,6 @@ fn success(code: &mut InstructionSink<'_>, length: u32, mask: Option<u32>) {
             .local_get(mask_local)
             .i32_eqz()
             .i32_and();
-        add_check(code);
-    } else if length != 0 {
-        code.local_get(ADDRESS)
-            .i32_const(-(length as i32))
-            .i32_gt_u();
         add_check(code);
     }
     protocol_if_bad(code);
@@ -292,53 +285,25 @@ fn fault(
     code.i32_ne();
     add_check(code);
     helper_field(code, 24);
-    code.i32_const(1).i32_sub().i32_const(2).i32_gt_u();
+    code.i32_const(1).i32_sub().i32_const(1).i32_gt_u();
     add_check(code);
     if !xstate {
-        helper_field(code, 24);
-        code.i32_const(3)
-            .i32_eq()
-            .if_(BlockType::Result(ValType::I32));
-        if let Some(mask_local) = mask {
-            masked_overflow(code, length, mask_local);
-            code.i32_eqz();
-        } else {
-            code.local_get(ADDRESS)
-                .i32_const(-(length as i32))
-                .i32_le_u();
-        }
         helper_field(code, 28);
-        code.local_get(ADDRESS).i32_ne().i32_or();
-        code.else_();
+        code.local_get(ADDRESS)
+            .i32_sub()
+            .local_tee(RESULT)
+            .i32_const(length as i32 - 1)
+            .i32_gt_u();
+        add_check(code);
         if let Some(mask_local) = mask {
-            masked_overflow(code, length, mask_local);
-            helper_field(code, 28);
-            code.local_get(ADDRESS)
-                .i32_sub()
-                .local_tee(RESULT)
-                .i32_const(length as i32 - 1)
-                .i32_gt_u()
-                .i32_or();
             code.local_get(mask_local)
                 .local_get(RESULT)
                 .i32_shr_u()
                 .i32_const(1)
                 .i32_and()
-                .i32_eqz()
-                .i32_or();
-        } else {
-            code.local_get(ADDRESS)
-                .i32_const(-(length as i32))
-                .i32_gt_u();
-            helper_field(code, 28);
-            code.local_get(ADDRESS)
-                .i32_sub()
-                .i32_const(length as i32 - 1)
-                .i32_gt_u()
-                .i32_or();
+                .i32_eqz();
+            add_check(code);
         }
-        code.end();
-        add_check(code);
     }
     if let Some(mask_local) = mask
         && length < 32
@@ -520,20 +485,4 @@ fn exception(code: &mut InstructionSink<'_>, length: u32, avx: Option<AvxValidat
     helper_field(code, 24);
     code.local_set(DETAIL);
     code.end();
-}
-
-fn masked_overflow(code: &mut InstructionSink<'_>, length: u32, mask_local: u32) {
-    code.i32_const(0);
-    for offset in 1..length {
-        code.local_get(mask_local)
-            .i32_const((1u32 << offset) as i32)
-            .i32_and()
-            .i32_eqz()
-            .i32_eqz();
-        code.local_get(ADDRESS)
-            .i32_const(-(offset as i32) - 1)
-            .i32_gt_u()
-            .i32_and()
-            .i32_or();
-    }
 }

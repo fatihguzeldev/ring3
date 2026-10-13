@@ -266,23 +266,8 @@ fn validate_fault_span(
     segments::base(code, address.resolved_segment());
     code.i32_add().local_set(RESULT);
     let width = geometry.data_bytes() as u32;
-    code.local_get(RESULT)
-        .i32_const((u32::MAX - (width - 1)) as i32)
-        .i32_gt_u()
-        .if_(BlockType::Empty);
-    memory::expect_field(code, GATHER_DETAIL_OFFSET as u64, 3);
-    field(code, GATHER_FAULT_ADDRESS_OFFSET);
-    code.local_get(RESULT).i32_ne();
-    memory::add_check(code);
-    code.else_();
     field(code, GATHER_DETAIL_OFFSET);
-    code.i32_const(1).i32_lt_u();
-    memory::add_check(code);
-    field(code, GATHER_DETAIL_OFFSET);
-    code.i32_const(2).i32_gt_u();
-    memory::add_check(code);
-    field(code, GATHER_FAULT_ADDRESS_OFFSET);
-    code.local_get(RESULT).i32_lt_u();
+    code.i32_const(1).i32_sub().i32_const(1).i32_gt_u();
     memory::add_check(code);
     field(code, GATHER_FAULT_ADDRESS_OFFSET);
     code.local_get(RESULT)
@@ -290,7 +275,6 @@ fn validate_fault_span(
         .i32_const(width as i32)
         .i32_ge_u();
     memory::add_check(code);
-    code.end();
 }
 
 fn validate_outputs(

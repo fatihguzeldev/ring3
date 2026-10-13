@@ -10,6 +10,7 @@ use super::locals::*;
 
 mod byte_exchange;
 mod byte_store;
+mod cpu_scalar;
 mod exchange;
 mod narrow;
 mod word_exchange;
@@ -770,7 +771,7 @@ pub(super) fn load(
         .call(imports.read.expect("prepared memory load has an import"))
         .local_set(HELPER_STATUS);
     super::code_fetch::check_context(code, exit_depth);
-    validate_result(code, false);
+    cpu_scalar::validate(code, 4, crate::abi::memory_helper::CpuScalarOperation::Read);
     exit_if_failed(code, exit_depth);
     helper_field(code, 20);
     code.local_set(register(destination));
@@ -799,7 +800,11 @@ pub(super) fn store(
         Value32::Memory(_) => unreachable!("prepared move cannot have two memory operands"),
     }
     code.call(index).local_set(HELPER_STATUS);
-    validate_result(code, true);
+    cpu_scalar::validate(
+        code,
+        4,
+        crate::abi::memory_helper::CpuScalarOperation::Store,
+    );
     exit_if_failed(code, exit_depth);
 }
 
@@ -994,7 +999,7 @@ pub(super) fn load_result_at_address(
         )
         .local_set(HELPER_STATUS);
     super::code_fetch::check_context(code, exit_depth);
-    validate_result(code, false);
+    cpu_scalar::validate(code, 4, crate::abi::memory_helper::CpuScalarOperation::Read);
     exit_if_failed(code, exit_depth);
     helper_field(code, 20);
     code.local_set(RESULT);
@@ -1030,7 +1035,11 @@ pub(super) fn store_result_at_address(
         .local_get(RESULT)
         .call(index)
         .local_set(HELPER_STATUS);
-    validate_result(code, true);
+    cpu_scalar::validate(
+        code,
+        4,
+        crate::abi::memory_helper::CpuScalarOperation::Store,
+    );
     exit_if_failed(code, exit_depth);
 }
 
@@ -1132,131 +1141,6 @@ pub(super) fn offset_value(code: &mut InstructionSink<'_>, address: EffectiveAdd
     }
     if address.address_size == crate::cpu::x86::ir::AddressSize::Bits16 {
         code.i32_const(0xffff).i32_and();
-    }
-}
-
-fn validate_result(code: &mut InstructionSink<'_>, store: bool) {
-    code.local_get(HELPER_STATUS).i32_eqz();
-    if store {
-        code.local_get(HELPER_STATUS)
-            .i32_const(11)
-            .i32_eq()
-            .i32_or();
-    }
-    code.i32_eqz().if_(BlockType::Empty);
-    infrastructure(code, 3);
-    code.else_();
-    reset_checks(code);
-    for (offset, expected) in [
-        (0, u32::from_le_bytes(*b"R3MH")),
-        (4, 0x0001_0001),
-        (8, 40),
-        (12, 0),
-    ] {
-        expect_field(code, offset, expected);
-    }
-    code.local_get(LHS).if_(BlockType::Empty);
-    infrastructure(code, 2);
-    code.else_();
-    helper_field(code, 16);
-    code.local_set(RHS)
-        .local_get(RHS)
-        .i32_eqz()
-        .if_(BlockType::Empty);
-    reset_checks(code);
-    if store {
-        expect_field(code, 20, 0);
-    }
-    zero_fault_fields(code);
-    protocol_if_bad(code);
-    code.else_()
-        .local_get(RHS)
-        .i32_const(1)
-        .i32_eq()
-        .if_(BlockType::Empty);
-    validate_fault(code, store);
-    code.else_()
-        .local_get(RHS)
-        .i32_const(2)
-        .i32_eq()
-        .if_(BlockType::Empty);
-    validate_infrastructure(code, store);
-    code.else_();
-    infrastructure(code, 2);
-    code.end().end().end().end().end();
-}
-
-fn validate_fault(code: &mut InstructionSink<'_>, store: bool) {
-    reset_checks(code);
-    expect_field(code, 20, 0);
-    expect_field(code, 32, if store { 2 } else { 1 });
-    expect_field(code, 36, 4);
-    if store {
-        code.local_get(HELPER_STATUS).i32_const(11).i32_eq();
-        add_check(code);
-    }
-    helper_field(code, 24);
-    code.i32_const(1).i32_sub().i32_const(2).i32_gt_u();
-    add_check(code);
-    helper_field(code, 24);
-    code.i32_const(3)
-        .i32_eq()
-        .if_(BlockType::Result(wasm_encoder::ValType::I32));
-    code.local_get(ADDRESS).i32_const(-4).i32_le_u();
-    helper_field(code, 28);
-    code.local_get(ADDRESS).i32_ne().i32_or().else_();
-    code.local_get(ADDRESS).i32_const(-4).i32_gt_u();
-    helper_field(code, 28);
-    code.i32_const(-4).i32_gt_u().i32_or();
-    helper_field(code, 28);
-    code.local_get(ADDRESS)
-        .i32_sub()
-        .i32_const(3)
-        .i32_gt_u()
-        .i32_or()
-        .end();
-    add_check(code);
-    code.local_get(LHS).if_(BlockType::Empty);
-    infrastructure(code, 2);
-    code.else_().i32_const(5).local_set(REASON);
-    for (offset, local) in [
-        (24, DETAIL),
-        (28, FAULT_ADDRESS),
-        (32, FAULT_ACCESS),
-        (36, FAULT_LENGTH),
-    ] {
-        helper_field(code, offset);
-        code.local_set(local);
-    }
-    code.end();
-}
-
-fn validate_infrastructure(code: &mut InstructionSink<'_>, store: bool) {
-    reset_checks(code);
-    for offset in [20, 28, 32, 36] {
-        expect_field(code, offset, 0);
-    }
-    if store {
-        code.local_get(HELPER_STATUS).i32_const(11).i32_eq();
-        add_check(code);
-    }
-    helper_field(code, 24);
-    code.i32_const(1).i32_sub().i32_const(1).i32_gt_u();
-    add_check(code);
-    code.local_get(LHS).if_(BlockType::Empty);
-    infrastructure(code, 2);
-    code.else_();
-    helper_field(code, 24);
-    code.i32_const(1).i32_eq().if_(BlockType::Empty);
-    infrastructure(code, 1);
-    code.else_();
-    infrastructure(code, 3);
-    code.end().end();
-}
-
-fn zero_fault_fields(code: &mut InstructionSink<'_>) {
-    for offset in [24, 28, 32, 36] {
-        expect_field(code, offset, 0);
     }
 }
 

@@ -190,7 +190,7 @@ fn validate(
     reset_checks(code);
     expect_field(code, 36, kind.width());
     helper_field(code, 24);
-    code.i32_const(1).i32_sub().i32_const(2).i32_gt_u();
+    code.i32_const(1).i32_sub().i32_const(1).i32_gt_u();
     add_check(code);
     membership(code, kind, allocation, nesting);
     code.local_get(RESUME).i32_eqz();
@@ -303,26 +303,11 @@ fn candidate(
     super::segments::base(code, crate::cpu::x86::SegmentRegister::Ss);
     code.i32_add().local_set(ADDRESS);
     code.local_get(RESUME);
-    helper_field(code, 24);
-    code.i32_const(3)
-        .i32_eq()
-        .if_(BlockType::Result(wasm_encoder::ValType::I32));
-    code.local_get(ADDRESS)
-        .i32_const(-(width as i32))
-        .i32_gt_u();
-    helper_field(code, 28);
-    code.local_get(ADDRESS).i32_eq().i32_and();
-    code.else_();
-    code.local_get(ADDRESS)
-        .i32_const(-(width as i32))
-        .i32_le_u();
     helper_field(code, 28);
     code.local_get(ADDRESS)
         .i32_sub()
         .i32_const(width as i32)
-        .i32_lt_u()
-        .i32_and();
-    code.end();
+        .i32_lt_u();
     helper_field(code, 32);
     code.i32_const(access as i32)
         .i32_eq()

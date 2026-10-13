@@ -162,11 +162,6 @@ fn validate_context(code: &mut InstructionSink<'_>, save: bool, exit_depth: u32)
     code.end();
     memory::helper_field(code, 16);
     code.i32_const(1).i32_eq().if_(BlockType::Empty);
-    memory::helper_field(code, 24);
-    code.i32_const(3).i32_eq().if_(BlockType::Empty);
-    // an overflowing header address faults before any selected payload access.
-    memory::expect_field(code, 32, 1);
-    code.else_();
     memory::helper_field(code, 28);
     code.local_get(ADDRESS).i32_sub().local_set(RHS);
     range(code, 512, if save { 520 } else { 536 });
@@ -187,7 +182,7 @@ fn validate_context(code: &mut InstructionSink<'_>, save: bool, exit_depth: u32)
     }
     code.i32_or().i32_eqz();
     memory::add_check(code);
-    code.end().end();
+    code.end();
     memory::protocol_if_bad(code);
     memory::exit_if_failed(code, exit_depth);
 }

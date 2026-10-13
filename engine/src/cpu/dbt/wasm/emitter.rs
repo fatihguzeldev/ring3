@@ -329,7 +329,7 @@ pub(in crate::cpu::dbt) fn emit(
     let mut type_index = 1 + u32::from(binding.is_some());
     let read_type_index = type_index;
     if needs_read {
-        imports.import("ring3", "read32", EntityType::Function(type_index));
+        imports.import("ring3", "cpu_read32", EntityType::Function(type_index));
         helper_imports.read = Some(function_index);
         function_index += 1;
         type_index += 1;
@@ -339,40 +339,46 @@ pub(in crate::cpu::dbt) fn emit(
     if needs_store {
         let (name, store) = match binding {
             Some(EmbeddedBinding::Resident { key, id }) => (
-                "store_resident32",
+                "cpu_store_resident32",
                 memory::StoreImport::Resident {
                     index: function_index,
                     key,
                     id,
                 },
             ),
-            _ => ("store32", memory::StoreImport::Replacement(function_index)),
+            _ => (
+                "cpu_store32",
+                memory::StoreImport::Replacement(function_index),
+            ),
         };
         imports.import("ring3", name, EntityType::Function(type_index));
         helper_imports.store = Some(store);
         function_index += 1;
     }
     if needs_read8 {
-        imports.import("ring3", "read8", EntityType::Function(read_type_index));
+        imports.import("ring3", "cpu_read8", EntityType::Function(read_type_index));
         helper_imports.read8 = Some(function_index);
         function_index += 1;
     }
     if needs_read16 {
-        imports.import("ring3", "read16", EntityType::Function(read_type_index));
+        imports.import("ring3", "cpu_read16", EntityType::Function(read_type_index));
         helper_imports.read16 = Some(function_index);
         function_index += 1;
     }
     if needs_store8 {
         let (name, store) = match binding {
             Some(EmbeddedBinding::Resident { key, id }) => (
-                "store_resident8",
+                "cpu_store_resident8",
                 memory::StoreImport::Resident {
                     index: function_index,
                     key,
                     id,
                 },
             ),
-            _ => ("store8", memory::StoreImport::Replacement(function_index)),
+            _ => (
+                "cpu_store8",
+                memory::StoreImport::Replacement(function_index),
+            ),
         };
         imports.import("ring3", name, EntityType::Function(type_index));
         helper_imports.store8 = Some(store);
@@ -381,14 +387,17 @@ pub(in crate::cpu::dbt) fn emit(
     if needs_store16 {
         let (name, store) = match binding {
             Some(EmbeddedBinding::Resident { key, id }) => (
-                "store_resident16",
+                "cpu_store_resident16",
                 memory::StoreImport::Resident {
                     index: function_index,
                     key,
                     id,
                 },
             ),
-            _ => ("store16", memory::StoreImport::Replacement(function_index)),
+            _ => (
+                "cpu_store16",
+                memory::StoreImport::Replacement(function_index),
+            ),
         };
         imports.import("ring3", name, EntityType::Function(type_index));
         helper_imports.store16 = Some(store);
@@ -397,7 +406,7 @@ pub(in crate::cpu::dbt) fn emit(
     if needs_exchange {
         let (name, exchange) = match binding {
             Some(EmbeddedBinding::Resident { key, id }) => (
-                "exchange_resident32",
+                "cpu_exchange_resident32",
                 memory::StoreImport::Resident {
                     index: function_index,
                     key,
@@ -405,7 +414,7 @@ pub(in crate::cpu::dbt) fn emit(
                 },
             ),
             _ => (
-                "exchange32",
+                "cpu_exchange32",
                 memory::StoreImport::Replacement(function_index),
             ),
         };
@@ -416,7 +425,7 @@ pub(in crate::cpu::dbt) fn emit(
     if needs_exchange8 {
         let (name, exchange) = match binding {
             Some(EmbeddedBinding::Resident { key, id }) => (
-                "exchange_resident8",
+                "cpu_exchange_resident8",
                 memory::StoreImport::Resident {
                     index: function_index,
                     key,
@@ -424,7 +433,7 @@ pub(in crate::cpu::dbt) fn emit(
                 },
             ),
             _ => (
-                "exchange8",
+                "cpu_exchange8",
                 memory::StoreImport::Replacement(function_index),
             ),
         };
@@ -435,7 +444,7 @@ pub(in crate::cpu::dbt) fn emit(
     if needs_exchange16 {
         let (name, exchange) = match binding {
             Some(EmbeddedBinding::Resident { key, id }) => (
-                "exchange_resident16",
+                "cpu_exchange_resident16",
                 memory::StoreImport::Resident {
                     index: function_index,
                     key,
@@ -443,7 +452,7 @@ pub(in crate::cpu::dbt) fn emit(
                 },
             ),
             _ => (
-                "exchange16",
+                "cpu_exchange16",
                 memory::StoreImport::Replacement(function_index),
             ),
         };
@@ -454,7 +463,7 @@ pub(in crate::cpu::dbt) fn emit(
     if needs_compare_exchange32 {
         let (name, exchange) = match binding {
             Some(EmbeddedBinding::Resident { key, id }) => (
-                "compare_exchange_resident32",
+                "cpu_compare_exchange_resident32",
                 memory::StoreImport::Resident {
                     index: function_index,
                     key,
@@ -462,7 +471,7 @@ pub(in crate::cpu::dbt) fn emit(
                 },
             ),
             _ => (
-                "compare_exchange32",
+                "cpu_compare_exchange32",
                 memory::StoreImport::Replacement(function_index),
             ),
         };
@@ -477,7 +486,7 @@ pub(in crate::cpu::dbt) fn emit(
     if needs_exchange_add32 {
         let (name, exchange) = match binding {
             Some(EmbeddedBinding::Resident { key, id }) => (
-                "exchange_add_resident32",
+                "cpu_exchange_add_resident32",
                 memory::StoreImport::Resident {
                     index: function_index,
                     key,
@@ -485,7 +494,7 @@ pub(in crate::cpu::dbt) fn emit(
                 },
             ),
             _ => (
-                "exchange_add32",
+                "cpu_exchange_add32",
                 memory::StoreImport::Replacement(function_index),
             ),
         };
@@ -496,7 +505,7 @@ pub(in crate::cpu::dbt) fn emit(
     if needs_compare_exchange8 {
         let (name, exchange) = match binding {
             Some(EmbeddedBinding::Resident { key, id }) => (
-                "compare_exchange_resident8",
+                "cpu_compare_exchange_resident8",
                 memory::StoreImport::Resident {
                     index: function_index,
                     key,
@@ -504,7 +513,7 @@ pub(in crate::cpu::dbt) fn emit(
                 },
             ),
             _ => (
-                "compare_exchange8",
+                "cpu_compare_exchange8",
                 memory::StoreImport::Replacement(function_index),
             ),
         };
@@ -519,7 +528,7 @@ pub(in crate::cpu::dbt) fn emit(
     if needs_exchange_add8 {
         let (name, exchange) = match binding {
             Some(EmbeddedBinding::Resident { key, id }) => (
-                "exchange_add_resident8",
+                "cpu_exchange_add_resident8",
                 memory::StoreImport::Resident {
                     index: function_index,
                     key,
@@ -527,7 +536,7 @@ pub(in crate::cpu::dbt) fn emit(
                 },
             ),
             _ => (
-                "exchange_add8",
+                "cpu_exchange_add8",
                 memory::StoreImport::Replacement(function_index),
             ),
         };
@@ -538,7 +547,7 @@ pub(in crate::cpu::dbt) fn emit(
     if needs_compare_exchange16 {
         let (name, exchange) = match binding {
             Some(EmbeddedBinding::Resident { key, id }) => (
-                "compare_exchange_resident16",
+                "cpu_compare_exchange_resident16",
                 memory::StoreImport::Resident {
                     index: function_index,
                     key,
@@ -546,7 +555,7 @@ pub(in crate::cpu::dbt) fn emit(
                 },
             ),
             _ => (
-                "compare_exchange16",
+                "cpu_compare_exchange16",
                 memory::StoreImport::Replacement(function_index),
             ),
         };
@@ -561,7 +570,7 @@ pub(in crate::cpu::dbt) fn emit(
     if needs_exchange_add16 {
         let (name, exchange) = match binding {
             Some(EmbeddedBinding::Resident { key, id }) => (
-                "exchange_add_resident16",
+                "cpu_exchange_add_resident16",
                 memory::StoreImport::Resident {
                     index: function_index,
                     key,
@@ -569,7 +578,7 @@ pub(in crate::cpu::dbt) fn emit(
                 },
             ),
             _ => (
-                "exchange_add16",
+                "cpu_exchange_add16",
                 memory::StoreImport::Replacement(function_index),
             ),
         };
@@ -580,7 +589,7 @@ pub(in crate::cpu::dbt) fn emit(
     if needs_bit_test_set32 {
         let (name, bit_set) = match binding {
             Some(EmbeddedBinding::Resident { key, id }) => (
-                "bit_test_set_resident32",
+                "cpu_bit_test_set_resident32",
                 memory::StoreImport::Resident {
                     index: function_index,
                     key,
@@ -588,7 +597,7 @@ pub(in crate::cpu::dbt) fn emit(
                 },
             ),
             _ => (
-                "bit_test_set32",
+                "cpu_bit_test_set32",
                 memory::StoreImport::Replacement(function_index),
             ),
         };
@@ -599,7 +608,7 @@ pub(in crate::cpu::dbt) fn emit(
     if needs_bit_test_reset32 {
         let (name, bit_reset) = match binding {
             Some(EmbeddedBinding::Resident { key, id }) => (
-                "bit_test_reset_resident32",
+                "cpu_bit_test_reset_resident32",
                 memory::StoreImport::Resident {
                     index: function_index,
                     key,
@@ -607,7 +616,7 @@ pub(in crate::cpu::dbt) fn emit(
                 },
             ),
             _ => (
-                "bit_test_reset32",
+                "cpu_bit_test_reset32",
                 memory::StoreImport::Replacement(function_index),
             ),
         };
@@ -618,7 +627,7 @@ pub(in crate::cpu::dbt) fn emit(
     if needs_atomic_or_u32 {
         let (name, atomic_or) = match binding {
             Some(EmbeddedBinding::Resident { key, id }) => (
-                "atomic_or_resident_u32",
+                "cpu_atomic_or_resident_u32",
                 memory::StoreImport::Resident {
                     index: function_index,
                     key,
@@ -626,7 +635,7 @@ pub(in crate::cpu::dbt) fn emit(
                 },
             ),
             _ => (
-                "atomic_or_u32",
+                "cpu_atomic_or_u32",
                 memory::StoreImport::Replacement(function_index),
             ),
         };
@@ -637,7 +646,7 @@ pub(in crate::cpu::dbt) fn emit(
     if needs_atomic_and_u32 {
         let (name, atomic_and) = match binding {
             Some(EmbeddedBinding::Resident { key, id }) => (
-                "atomic_and_resident_u32",
+                "cpu_atomic_and_resident_u32",
                 memory::StoreImport::Resident {
                     index: function_index,
                     key,
@@ -645,7 +654,7 @@ pub(in crate::cpu::dbt) fn emit(
                 },
             ),
             _ => (
-                "atomic_and_u32",
+                "cpu_atomic_and_u32",
                 memory::StoreImport::Replacement(function_index),
             ),
         };
@@ -656,7 +665,7 @@ pub(in crate::cpu::dbt) fn emit(
     if needs_atomic_xor_u32 {
         let (name, atomic_xor) = match binding {
             Some(EmbeddedBinding::Resident { key, id }) => (
-                "atomic_xor_resident_u32",
+                "cpu_atomic_xor_resident_u32",
                 memory::StoreImport::Resident {
                     index: function_index,
                     key,
@@ -664,7 +673,7 @@ pub(in crate::cpu::dbt) fn emit(
                 },
             ),
             _ => (
-                "atomic_xor_u32",
+                "cpu_atomic_xor_u32",
                 memory::StoreImport::Replacement(function_index),
             ),
         };
@@ -960,7 +969,13 @@ pub(in crate::cpu::dbt) fn emit(
         has_memory,
         has_gates,
         has_arithmetic,
-        has_cpu || has_simd,
+        has_cpu
+            || has_simd
+            || has_reads
+            || has_stores
+            || needs_compare_exchange32
+            || needs_compare_exchange8
+            || needs_compare_exchange16,
         has_xstate,
     );
     code.i32_const(0).end();
