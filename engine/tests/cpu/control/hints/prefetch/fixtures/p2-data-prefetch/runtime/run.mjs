@@ -55,7 +55,7 @@ function seed(pc, {flags = FLAGS | RF, cancel = 0, shadow = 0, regs = poison, cs
     input.fill(0x30 + i, 4396 + i * 16, 4412 + i * 16);
     input.fill(0x70 + i, 4628 + i * 16, 4644 + i * 16);
   }
-  // Null DS/FS and a short SS make an accidental operand-authority check observable.
+  // null ds/fs and a short ss make an accidental operand-authority check observable.
   const current = csBase !== 0 || d16, sg = record('R3SG', 64, [], current ? 3 : 2);
   [0x23, 0x1b, 0x23, 0, 0, 0].forEach((value, i) => sg.writeUInt16LE(value, 16 + i * 2));
   const code = csLimit === undefined ? d16 ? 0xf1bfffff : 0xf3bfffff : 0xf2b00000 | csLimit;

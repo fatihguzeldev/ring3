@@ -1,11 +1,11 @@
-// Literal finite cases; no production availability predicate supplies an oracle.
+// literal finite cases; no production availability predicate supplies an oracle.
 export const tsxUnavailable = [
   {code: 'Xsusldtrk', hex: 'f20f01e8'},
   {code: 'Xresldtrk', hex: 'f20f01e9'},
 ];
 
-// Iced NONE exposes these canonical disabled-MPX encodings as reserved NOP Codes.
-// Architectural BND operands are named here only to identify the original bytes.
+// iced DecoderOptions::NONE exposes these canonical disabled-mpx encodings as reserved nop Codes.
+// architectural bnd operands are named here only to identify the original bytes.
 export const mpxNops = [
   {code: 'Reservednop_rm16_r16_0F1A', hex: '660f1ac0', variant: 'BND0 <- BND0'},
   {code: 'Reservednop_rm16_r16_0F1A', hex: '660f1ac1', variant: 'BND0 <- BND1', schedules: true},

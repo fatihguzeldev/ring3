@@ -188,8 +188,8 @@ for (const resident of [false, true]) for (const entries of [false, true]) {
     queries('after'); h.host(c, 'close');
   }
 }
-// The original 1016-row group above is unchanged. This additive group owns only
-// TSXLDTRK absence and the finite canonical D32 MPX register compatibility cut.
+// the original 1016-row group above is unchanged; this additive group owns only
+// tsxldtrk absence and the finite canonical D32 mpx register compatibility cut.
 assert.equal(tsxUnavailable.length, 2);
 assert.equal(new Set(tsxUnavailable.map(row => row.code)).size, 2);
 assert.equal(mpxNops.length, 32);
@@ -200,7 +200,7 @@ function boundedFetch(c, material, target, length) {
   for (const [label, limit] of [['first byte', target - 1], ['last consumed byte', target + length - 2]]) {
     const input = seed(target, {shadow: 1});
     input.writeUInt32LE((0xf2b00000 | limit) >>> 0, SEG + 32);
-    // CS authority fails before begin_instruction: RF and pending SS shadow survive.
+    // cs authority fails before begin_instruction: RF and pending ss shadow survive.
     invoke(c, `${label} outside live CS limit precedes classification and RF consumption`, material,
       input, exit(Buffer.from(input), 11, 0, 6), {budget: 2, kind: 'logical-fetch-authority'});
   }
@@ -217,7 +217,7 @@ for (const resident of [false, true]) for (const entries of [false, true]) {
       input, expected(input, 20, 0), {budget: 2});
     scheduleStops(c, material, target, row.code);
     boundedFetch(c, material, target, code.length);
-    // Both encodings have the same absent-UD result; currentness must still notice.
+    // both encodings have the same absent-ud result; currentness must still notice.
     h.upload(c, target + 3, bytes(row.code === 'Xsusldtrk' ? 'e9' : 'e8'));
     invoke(c, 'changed TSXLDTRK opcode rejects held material before RF/fault publication', material,
       input, input, {status: 4, kind: 'physical-currentness'});

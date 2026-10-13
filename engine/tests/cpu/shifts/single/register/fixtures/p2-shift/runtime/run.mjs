@@ -122,7 +122,7 @@ function fresh(owner,label) {
   assert.ok(engine.memory instanceof WebAssembly.Memory);assert.equal(api.open(1,engine.low,engine.high),0);
   engine.base=api.arena_ptr()>>>0;refresh();assert.ok(engine.base>0&&engine.base+size<=engine.bytes.length);
   engine.bytes.fill(0xa5,engine.base+100,engine.base+size);
-  // Explicit valid flat input for bound code preparation; opaque FP/helper/TRANSFER sentinels stay declared.
+  // explicit valid flat input for bound code preparation; opaque fp/helper/TRANSFER sentinels stay declared.
   const flat=createArena(ARENA_SIZE);
   engine.bytes.set(flat.subarray(4524,4588),engine.base+4524);
   engine.bytes.set(flat.subarray(4756,4796),engine.base+4756);
