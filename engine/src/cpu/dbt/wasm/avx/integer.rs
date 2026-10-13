@@ -1,5 +1,5 @@
 use super::VectorLayout;
-use crate::cpu::x86::avx::{IntegerInstruction, MoveSource, VectorRegister};
+use crate::cpu::x86::avx::{IntegerInstruction, MoveSource, VectorRegister, VectorWidth};
 use wasm_encoder::{InstructionSink, MemArg};
 
 #[derive(Clone, Copy)]
@@ -26,14 +26,16 @@ fn load(
     source: MoveSource,
     layout: VectorLayout,
     locals: IntegerLocals,
+    upper: bool,
 ) {
     match source {
         MoveSource::Register(register) => {
             code.local_get(locals.state)
-                .v128_load(vector_arg(layout, register, false));
+                .v128_load(vector_arg(layout, register, upper));
         }
         MoveSource::Memory => {
-            code.local_get(locals.operand).v128_load(arg(0));
+            code.local_get(locals.operand)
+                .v128_load(arg(if upper { 16 } else { 0 }));
         }
     }
 }
@@ -47,14 +49,27 @@ pub(super) fn emit(
 ) {
     code.local_get(locals.state);
     if let Some(first) = instruction.first() {
-        load(code, MoveSource::Register(first), layout, locals);
+        load(code, MoveSource::Register(first), layout, locals, false);
     }
-    load(code, instruction.second(), layout, locals);
+    load(code, instruction.second(), layout, locals, false);
     super::super::simd::integer_lanes(code, instruction.operation(), locals.scratch);
-    code.v128_store(vector_arg(layout, instruction.destination(), false));
-    code.local_get(locals.state)
-        .v128_const(0)
-        .v128_store(vector_arg(layout, instruction.destination(), true));
+    if instruction.width() == VectorWidth::Ymm {
+        // retain the lower result on the operand stack until both source halves
+        // have been read, including when either source aliases the destination.
+        code.local_get(locals.state);
+        if let Some(first) = instruction.first() {
+            load(code, MoveSource::Register(first), layout, locals, true);
+        }
+        load(code, instruction.second(), layout, locals, true);
+        super::super::simd::integer_lanes(code, instruction.operation(), locals.scratch);
+        code.v128_store(vector_arg(layout, instruction.destination(), true));
+        code.v128_store(vector_arg(layout, instruction.destination(), false));
+    } else {
+        code.v128_store(vector_arg(layout, instruction.destination(), false));
+        code.local_get(locals.state)
+            .v128_const(0)
+            .v128_store(vector_arg(layout, instruction.destination(), true));
+    }
 }
 
 #[cfg(test)]

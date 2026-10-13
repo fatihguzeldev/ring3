@@ -148,7 +148,9 @@ fn every_immediate_preserves_operand_error_priority_for_all_legacy_kinds() {
 
 #[test]
 fn unknown_integer_kinds_preserve_family_error_priority() {
-    for kind in (0..=255).filter(|kind| !(1..=44).contains(kind)) {
+    for kind in
+        (0..=255).filter(|kind| !(1..=44).contains(kind) && !matches!(kind, 0x87 | 0x96..=0x9c))
+    {
         for operands in [0, 1 << 9, 1 << 12, 1 << 13, 0x3fff] {
             for immediate in [0, 1, 255] {
                 assert_eq!(
@@ -156,6 +158,59 @@ fn unknown_integer_kinds_preserve_family_error_priority() {
                     Err(AvxDecodeError::Family),
                 );
             }
+        }
+    }
+}
+
+#[test]
+fn wide_kind_bit_admits_only_wrapping_lanes_with_exact_source_width() {
+    for kind in [7, 22, 23, 24, 25, 26, 27, 28] {
+        for destination in 0..8 {
+            for first in 0..8 {
+                for second in 0..8 {
+                    let operands = destination | first << 3 | second << 6;
+                    let descriptor = 0x0100_0580 | kind;
+                    let value = AvxInstruction::decode_descriptor(descriptor, operands, 0).unwrap();
+                    assert_eq!(value.encode(), (descriptor, operands, 0));
+                    let AvxSemantic::Integer(integer) = value.semantic() else {
+                        panic!("integer family");
+                    };
+                    assert_eq!(integer.width(), VectorWidth::Ymm);
+                    assert_eq!(integer.destination().index(), destination as usize);
+                    assert_eq!(integer.first(), Some(VectorRegister(first as u8)));
+                    assert_eq!(
+                        integer.second(),
+                        MoveSource::Register(VectorRegister(second as u8))
+                    );
+                    assert_eq!(value.memory(), MemoryEffect::None);
+                }
+                let operands = destination | first << 3 | 1 << 12;
+                let value =
+                    AvxInstruction::decode_descriptor(0x0100_0580 | kind, operands, 0).unwrap();
+                assert_eq!(
+                    value.memory(),
+                    MemoryEffect::Full(MemoryRequirement {
+                        access: Access::Read,
+                        bytes: 32,
+                        alignment: 1,
+                    })
+                );
+                assert_eq!(value.inputs(), [None, None]);
+                assert_eq!(value.output(), None);
+                assert!(!value.writes_flags());
+            }
+        }
+        for operands in [1 << 9, 1 << 13, 1 << 12 | 1 << 6] {
+            assert_eq!(
+                AvxInstruction::decode_descriptor(0x0100_0580 | kind, operands, 0),
+                Err(AvxDecodeError::Operands)
+            );
+        }
+        for immediate in [1, 255] {
+            assert_eq!(
+                AvxInstruction::decode_descriptor(0x0100_0580 | kind, 0, immediate),
+                Err(AvxDecodeError::Immediate)
+            );
         }
     }
 }

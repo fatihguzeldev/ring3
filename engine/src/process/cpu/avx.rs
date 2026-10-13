@@ -12,7 +12,7 @@ use crate::{
     cpu::x86::{
         SegmentAccess, SegmentContext, SegmentRegister, State32,
         avx::{
-            AvxInstruction, AvxSemantic, MaskedError, MemoryEffect, VectorState,
+            AvxInstruction, AvxSemantic, MaskedError, MemoryEffect, VectorState, VectorWidth,
             dispatch::{self, DispatchError},
         },
         simd::ymm::YmmUpperState,
@@ -121,6 +121,9 @@ impl EngineInstance {
             && !crate::cpu::x86::capabilities::F16C_ENABLED)
             || (matches!(instruction.semantic(), AvxSemantic::Fma(_))
                 && !crate::cpu::x86::capabilities::FMA_ENABLED)
+            || (matches!(instruction.semantic(), AvxSemantic::Integer(value)
+                if value.width() == VectorWidth::Ymm)
+                && !crate::cpu::x86::capabilities::AVX2_ENABLED)
         {
             return Err(HostError::InvalidRequest);
         }

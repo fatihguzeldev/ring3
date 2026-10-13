@@ -442,11 +442,35 @@ pub(super) fn lower(
                 }
                 (0x0100052c, operands, 0)
             }
-            _ => return Ok(None),
+            _ => {
+                let descriptor = match instruction.code() {
+                    Code::VEX_Vpaddq_ymm_ymm_ymmm256 => 0x01000587,
+                    Code::VEX_Vpsubb_ymm_ymm_ymmm256 => 0x01000596,
+                    Code::VEX_Vpsubw_ymm_ymm_ymmm256 => 0x01000597,
+                    Code::VEX_Vpsubd_ymm_ymm_ymmm256 => 0x01000598,
+                    Code::VEX_Vpsubq_ymm_ymm_ymmm256 => 0x01000599,
+                    Code::VEX_Vpaddb_ymm_ymm_ymmm256 => 0x0100059a,
+                    Code::VEX_Vpaddw_ymm_ymm_ymmm256 => 0x0100059b,
+                    Code::VEX_Vpaddd_ymm_ymm_ymmm256 => 0x0100059c,
+                    _ => return Ok(None),
+                };
+                encoding.validate(false, 1, false)?;
+                let mut operands = index(instruction, 0, false, false)?;
+                operands |= index(instruction, 1, false, false)? << 3;
+                operands |= index(instruction, 2, false, true)? << 6;
+                if instruction.op_kind(2) == OpKind::Memory {
+                    operands |= 1 << 12;
+                }
+                (descriptor, operands, 0)
+            }
         };
         let instruction_value = AvxInstruction::decode_descriptor(descriptor, operands, immediate)
             .map_err(|_| invalid())?;
-        bind_address(instruction, instruction_value).map(Some)
+        let operation = bind_address(instruction, instruction_value)?;
+        if !crate::cpu::x86::capabilities::AVX2_ENABLED && descriptor & 0x80 != 0 {
+            return Err(unsupported());
+        }
+        Ok(Some(operation))
     })();
     result.transpose()
 }

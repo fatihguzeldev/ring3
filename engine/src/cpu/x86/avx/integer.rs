@@ -1,8 +1,12 @@
-use super::{MemoryRequirement, MoveSource, VectorRegister, VectorState};
-use crate::{cpu::x86::simd::IntegerLaneOperation, memory::Access};
+use super::{MemoryRequirement, MoveSource, VectorRegister, VectorState, VectorWidth};
+use crate::{
+    cpu::x86::simd::{IntegerLaneOperation, PackedKind},
+    memory::Access,
+};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct IntegerInstruction {
+    width: VectorWidth,
     operation: IntegerLaneOperation,
     destination: VectorRegister,
     first: Option<VectorRegister>,
@@ -16,18 +20,36 @@ pub(crate) enum IntegerError {
 }
 
 impl IntegerInstruction {
+    #[cfg(test)]
     pub(crate) fn new(
         operation: IntegerLaneOperation,
         destination: VectorRegister,
         first: Option<VectorRegister>,
         second: MoveSource,
     ) -> Option<Self> {
-        (operation.unary() == first.is_none()).then_some(Self {
+        Self::with_width(VectorWidth::Xmm, operation, destination, first, second)
+    }
+
+    pub(crate) fn with_width(
+        width: VectorWidth,
+        operation: IntegerLaneOperation,
+        destination: VectorRegister,
+        first: Option<VectorRegister>,
+        second: MoveSource,
+    ) -> Option<Self> {
+        let supported_width = width == VectorWidth::Xmm
+            || matches!(operation.kind(), PackedKind::Add | PackedKind::Subtract);
+        (supported_width && operation.unary() == first.is_none()).then_some(Self {
+            width,
             operation,
             destination,
             first,
             second,
         })
+    }
+
+    pub(crate) fn width(self) -> VectorWidth {
+        self.width
     }
 
     pub(crate) fn operation(self) -> IntegerLaneOperation {
@@ -49,14 +71,13 @@ impl IntegerInstruction {
     pub(crate) fn memory(self) -> Option<MemoryRequirement> {
         (self.second == MoveSource::Memory).then_some(MemoryRequirement {
             access: Access::Read,
-            bytes: 16,
+            bytes: self.width.bytes() as u8,
             alignment: 1,
         })
     }
 }
 
 impl VectorState {
-    // these are avx xmm integer forms; ymm integer lanes require avx2.
     pub(crate) fn execute_integer(
         &mut self,
         instruction: IntegerInstruction,
@@ -69,15 +90,25 @@ impl VectorState {
         if self.simd.mxcsr & !0xffff != 0 {
             return Err(IntegerError::InvalidState);
         }
+        let width = instruction.width.bytes();
         let first = instruction
             .first
-            .map_or([0; 16], |r| self.simd.xmm[r.index()]);
+            .map_or([0; 32], |register| self.read(register));
         let second = match instruction.second {
-            MoveSource::Register(register) => self.simd.xmm[register.index()],
-            MoveSource::Memory => operand.try_into().unwrap(),
+            MoveSource::Register(register) => self.read(register),
+            MoveSource::Memory => {
+                let mut value = [0; 32];
+                value[..width].copy_from_slice(operand);
+                value
+            }
         };
         let mut value = [0; 32];
-        value[..16].copy_from_slice(&instruction.operation.evaluate(first, second));
+        for offset in (0..width).step_by(16) {
+            let first = first[offset..offset + 16].try_into().unwrap();
+            let second = second[offset..offset + 16].try_into().unwrap();
+            value[offset..offset + 16]
+                .copy_from_slice(&instruction.operation.evaluate(first, second));
+        }
         self.publish(instruction.destination, value);
         Ok(())
     }
@@ -86,3 +117,7 @@ impl VectorState {
 #[cfg(test)]
 #[path = "integer/native.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "integer/wrapping/native.rs"]
+mod wrapping;

@@ -1,7 +1,15 @@
 use super::*;
 
 pub(super) fn decode(kind: u8, slots: Slots, immediate: u8) -> Result<AvxSemantic, AvxDecodeError> {
-    let (kind, lane_bytes) = match kind {
+    let width = if kind & 0x80 != 0 {
+        if !matches!(kind & 0x7f, 7 | 22..=28) {
+            return Err(AvxDecodeError::Family);
+        }
+        VectorWidth::Ymm
+    } else {
+        VectorWidth::Xmm
+    };
+    let (kind, lane_bytes) = match kind & 0x7f {
         1 => (PackedKind::GreaterSigned, 1),
         2 => (PackedKind::GreaterSigned, 2),
         3 => (PackedKind::GreaterSigned, 4),
@@ -58,8 +66,9 @@ pub(super) fn decode(kind: u8, slots: Slots, immediate: u8) -> Result<AvxSemanti
         immediate,
     )?;
     let first = if unary { None } else { Some(slots.vector(1)) };
-    let instruction = IntegerInstruction::new(operation, slots.vector(0), first, slots.source())
-        .ok_or(AvxDecodeError::Operands)?;
+    let instruction =
+        IntegerInstruction::with_width(width, operation, slots.vector(0), first, slots.source())
+            .ok_or(AvxDecodeError::Operands)?;
     Ok(AvxSemantic::Integer(instruction))
 }
 

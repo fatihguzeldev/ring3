@@ -53,3 +53,6 @@ mod fma;
 
 #[path = "avx/logical/capability/native.rs"]
 mod logical_capability;
+
+#[path = "avx/integer/wrapping/capability/native.rs"]
+mod wrapping_capability;
