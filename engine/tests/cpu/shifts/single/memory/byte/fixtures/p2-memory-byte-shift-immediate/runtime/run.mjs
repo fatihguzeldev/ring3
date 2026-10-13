@@ -1,4 +1,4 @@
-import {createArena} from '../../../../../../../../support/wasm/arena.mjs';
+import {ARENA_SIZE, createArena} from '../../../../../../../../support/wasm/arena.mjs';
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { readFileSync, readdirSync, writeFileSync } from "node:fs";
@@ -10,7 +10,7 @@ assert.ok(enginePath && output && root, "expected current engine, output directo
 const hash = bytes => createHash("sha256").update(bytes).digest("hex");
 const { bytes: engineBytes, module: engineModule, sha256: engineSha256 } = readEngine(enginePath);
 assert.deepEqual(WebAssembly.Module.imports(engineModule), []);
-const SIZE = 4612, TRANSFER = 140, PC = 0x1000, COLD = 0x1f00,
+const SIZE = ARENA_SIZE, TRANSFER = 140, PC = 0x1000, COLD = 0x1f00,
   KEEP = 0x3000, DATA = 0x4000, SECOND = 0x5000, BYTE = 0x4010,
   TOP = 0xfffff000, HIGH = 0xc8442000;
 const RAW = [0, 1, 2, 7, 8, 9, 31, 32, 33, 255],
@@ -147,7 +147,7 @@ function profile(bytes, owner, memory, ctx, binding) {
     assert.ok(start + length <= bytes.length && !sections.has(id));
     sections.set(id, [start, start + length]); at += length;
   }
-  assert.deepEqual([...sections.keys()], [1, 2, 3, 7, 10]);
+  assert.deepEqual([...sections.keys()], [1, 2, 3, 6, 7, 10]);
   const section = id => { at = sections.get(id)[0]; }, ended = id => assert.equal(at, sections.get(id)[1]);
   section(1);
   const types = [];
@@ -165,7 +165,7 @@ function profile(bytes, owner, memory, ctx, binding) {
     { parameters: Array(owner === "replacement" ? 2 : 6).fill(0x7f), results: [0x7f] });
   if (memory) expectedTypes.push({parameters: Array(6).fill(0x7f), results: [0x7f]}); assert.deepEqual(types, expectedTypes);
   const names = [owner === "replacement" ? "guard" : "guard_resident",
-    ...(memory ? ["read8", owner === "replacement" ? "store8" : "store_resident8"] : [])];
+    ...(memory ? ["cpu_read8", owner === "replacement" ? "cpu_store8" : "cpu_store_resident8"] : [])];
   section(2); assert.equal(uleb(), names.length + 1);
   assert.equal(text(), "env"); assert.equal(text(), "memory");
   assert.equal(bytes[at++], 2); assert.equal(uleb(), 0); assert.equal(uleb(), 1);
@@ -173,7 +173,7 @@ function profile(bytes, owner, memory, ctx, binding) {
     assert.equal(text(), "ring3"); assert.equal(text(), name);
     assert.equal(bytes[at++], 0); assert.equal(uleb(), index + 1);
   }
-  ended(2); section(3); assert.equal(uleb(), memory ? 2 : 1); assert.equal(uleb(), 0); if (memory) assert.equal(uleb(), types.length - 1); ended(3);
+  ended(2); section(3); assert.equal(uleb(), memory ? 2 : 1); assert.equal(uleb(), 0); if (memory) assert.equal(uleb(), types.length - 1); ended(3); section(6); assert.deepEqual([...bytes.subarray(at,sections.get(6)[1])],[3,0x7f,0,0x41,1,0x0b,0x7f,0,0x41,0,0x0b,0x7f,0,0x41,1,0x0b]); at=sections.get(6)[1]; ended(6);
   section(7); assert.equal(uleb(), 1); assert.equal(text(), "run");
   assert.equal(bytes[at++], 0); assert.equal(uleb(), names.length); ended(7);
   section(10); assert.equal(uleb(), memory ? 2 : 1);
@@ -181,7 +181,7 @@ function profile(bytes, owner, memory, ctx, binding) {
   assert.ok(bodyEnd <= sections.get(10)[1]);
   const locals = [];
   for (let index = 0, length = uleb(); index < length; index++) locals.push([uleb(), bytes[at++]]);
-  assert.deepEqual(locals, [[16, 0x7f], [1, 0x7e], [10, 0x7f]]);
+  assert.deepEqual(locals, [[16, 0x7f], [1, 0x7e], [10, 0x7f], [1, 0x7f]]);
   const guardConstants = [ctx.low, ctx.high,
     ...(owner === "replacement" ? [binding.generation] : [binding.low, binding.high])];
   for (const value of guardConstants) { assert.equal(bytes[at++], 0x41); assert.equal(sleb(), value >>> 0); }
@@ -278,8 +278,12 @@ const exit = (reason, retired, detail = 0, address = 0, access = 0, version = 2)
 const wordHelper = (value = 0) => record("R3MH", 40, [0, value, 0, 0, 0, 0]);
 const readHelper = (value, detail = 0, address = 0) =>
   record("R3MH", 40, [detail ? 1 : 0, detail ? 0 : value, detail, detail ? address : 0, detail ? 1 : 0, 1], 2);
+const cpuReadHelper = (value, detail = 0, address = 0) =>
+  record("R3MH", 40, [detail ? 1 : 0, detail ? 0 : value, detail, detail ? address : 0, detail ? 1 : 0, 1], 10);
 const storeHelper = (detail = 0, address = 0) =>
   record("R3MH", 40, [detail ? 1 : 0, 0, detail, detail ? address : 0, detail ? 2 : 0, 1], 3);
+const cpuStoreHelper = (detail = 0, address = 0) =>
+  record("R3MH", 40, [detail ? 1 : 0, 0, detail, detail ? address : 0, detail ? 2 : 0, 1], 10);
 const words = values => { const bytes = Buffer.alloc(values.length * 4);
   values.forEach((value, index) => bytes.writeUInt32LE(value >>> 0, index * 4)); return bytes; };
 function refresh(ctx) { ctx.bytes = new Uint8Array(ctx.memory.buffer); ctx.view = new DataView(ctx.memory.buffer); return ctx; }
@@ -338,6 +342,7 @@ function fresh(owner, selected, role) {
     ctx.api[name] = instance.exports[`ring3_abi_v1_${name}`];
     assert.equal(typeof ctx.api[name], "function", name); assert.equal(ctx.api[name].length, arity, name);
   }
+  for (const [name,arity] of [["cpu_read8",1],["cpu_store8",2],["cpu_store_resident8",6]]) {ctx.api[name]=instance.exports["ring3_abi_v1_"+name];assert.equal(ctx.api[name]?.length,arity,name);}
   assert.equal(ctx.api.open(7, ctx.low, ctx.high), 0); ctx.base = ctx.api.arena_ptr() >>> 0;
   refresh(ctx); assert.ok(ctx.base > 0 && ctx.base + SIZE <= ctx.bytes.length); check(ctx, "independent initialized arena");
   hostCalls.push({ event: ++events, context: ordinal, name: "open", args: [7, ctx.low, ctx.high], status: 0,
@@ -353,8 +358,8 @@ function fresh(owner, selected, role) {
 function instantiate(ctx, bytes, file, binding, scans, pureTail = false) {
   assert.ok(bytes.length > 8 && bytes.length <= 65536);
   const module = new WebAssembly.Module(bytes),
-    imports = (pureTail ? ["guard"] : ["guard", "read8", "store8"]).map(name =>
-      ctx.owner === "replacement" ? name : name === "guard" ? "guard_resident" : name === "store8" ? "store_resident8" : name);
+    imports = (pureTail ? ["guard"] : ["guard", "cpu_read8", "cpu_store8"]).map(name =>
+      ctx.owner === "replacement" ? name : name === "guard" ? "guard_resident" : name === "cpu_store8" ? "cpu_store_resident8" : name);
   assert.deepEqual(WebAssembly.Module.imports(module), [{ module: "env", name: "memory", kind: "memory" },
     ...imports.map(name => ({ module: "ring3", name, kind: "function" }))]);
   assert.deepEqual(WebAssembly.Module.exports(module), [{ name: "run", kind: "function" }]);
@@ -365,7 +370,7 @@ function instantiate(ctx, bytes, file, binding, scans, pureTail = false) {
   const unit = { ...binding, run: child.exports.run, bytes, file, scans, profile: abi,
     source_spans: scans.map(({ spec: [entry, length] }) => ({ entry, bytes: length,
       hex: ctx.pages.get(PC).subarray(entry - PC, entry - PC + length).toString("hex") })),
-    origin: "actual-engine", exitVersion: pureTail ? 1 : 2 };
+    origin: "actual-engine", exitVersion: pureTail ? 1 : 6 };
   ctx.units.push(unit); counts.modules++; counts.actual_modules++;
   const sourceInstructions = scans.reduce((sum, scan) => sum + scan.instructions, 0);
   counts.source_instructions += sourceInstructions;
@@ -519,7 +524,7 @@ function target(ctx, unit, registers, scan, address, flags, purpose, reason = 1)
       cf: arithmetic.flags & 1, of: arithmetic.flags >>> 11 & 1 };
   patch(ctx, address, Buffer.from([result.value]));
   const frames = run(ctx, unit, 1, "checked byte shift Store8 commits before consumers", registers,
-    scan.next, result.flags, reason, 1, storeHelper());
+    scan.next, result.flags, reason, 1, cpuStoreHelper());
   const afterDiagnostic = observeByte(ctx, unit, address, "physical post-target Read8 operand");
   assert.equal(afterDiagnostic.observed_value, result.value);
   counts.targets++; counts[result.q === 0 ? "q0_targets" : result.q === 1 ? "q1_targets" : "multi_targets"]++;
@@ -644,7 +649,7 @@ function faultCases(ctx, unit) {
     if (shape.access === 1) unmap(ctx, shape.page); else protect(ctx, shape.page, 1);
     const registers = addressRegisters(8, shape.address, scan.raw);
     seed(ctx, registers, scan.entry, flags); registers[3] = registers[3] + 1 >>> 0;
-    const helper = shape.access === 1 ? readHelper(0, shape.detail, shape.fault) : storeHelper(shape.detail, shape.fault);
+    const helper = shape.access === 1 ? cpuReadHelper(0, shape.detail, shape.fault) : cpuStoreHelper(shape.detail, shape.fault);
     const first = run(ctx, unit, 2, "retired LEA then precise byte fault without early FLAGS publication",
       registers, scan.target, flags, 5, 1, helper, shape.detail, shape.fault, shape.access);
     counts.prefixes++;
@@ -670,7 +675,7 @@ function faultCases(ctx, unit) {
     consumers(ctx, unit, registers, scan, result.flags); counts.repairs++;
     pages(ctx, "repaired complete byte operand page and neighbors", [shape.page]);
     faults.push({ context: ctx.ordinal, kind: ctx.bank.kind, owner: ctx.owner, raw: scan.raw, flags, shape,
-      helper_version: shape.access === 1 ? 2 : 3, width: 1, physical_fault_target: decoded,
+      helper_version: 10, width: 1, physical_fault_target: decoded,
       pre_restriction: preRestriction, rejected_candidate: arithmetic, first, retry,
       repair_mode: repairMode, repaired_input_byte: repairByte, repair_target: targets.length - 1,
       repair_expected: result, cpu_writes_after_first_fault: 0, prefix_replays: 0,
@@ -776,7 +781,7 @@ function smc(ctx, selected) {
     mov_head_replay_counterfactual_al: committedByte, actual_retained_al_before_tail: committedCPU.registers[0] % 256,
     idempotence_ceiling: "q0/q8/same-zero cases use exact current entry/import/body/retirement/retained CPU; scalar repeated byte alone cannot distinguish replay",
     saved_current: savedCurrent, saved_tail: savedTail, continuation_module: current.file, continuation,
-    continuation_bytes: 16, continuation_instructions: 4, helper_width: 1, helper_version: 3,
+    continuation_bytes: 16, continuation_instructions: 4, helper_width: 1, helper_version: 10,
     cpu_writes_during_continuation: 0, replayed_memory_instructions: 0,
     allocation_ceiling: "after hash is producer first-synchronous live comparison receipt, not separately saved full after bytes" });
   close(ctx);
@@ -794,7 +799,8 @@ counts.host_inputs = hostInputs.length; counts.host_calls = hostCalls.length; co
 for (const [name, expected] of Object.entries(plan)) assert.equal(counts[name], expected, `frozen prospective ${name} census`);
 assert.deepEqual(pinSources(), sourcePins, "selected source bytes stable during execution");
 assert.equal(hash(readFileSync(enginePath)), engineSha256);
-const result = {
+const cpuSourcePins = Object.fromEntries(["engine/src/abi/memory_helper/cpu.rs", "engine/src/cpu/dbt/wasm/memory/cpu_scalar.rs", "engine/src/cpu/dbt/wasm/emitter.rs", "engine/src/cpu/dbt/wasm/code_fetch.rs", "engine/src/process/memory/cpu_scalar.rs", "engine/src/process/memory/scalar/cpu_write.rs", "engine/src/process/wasm/memory/cpu_write.rs", "engine/src/abi/wasm/exports/memory/cpu_write.rs", "engine/tests/support/wasm/arena.mjs"].map(path=>[path,hash(readFileSync(join(root,path)))]));
+const result = {cpu_source_sha256: cpuSourcePins,
   status: "ok", profile: "finite flat32 C0 /4,/5,/7 BYTE memory shift by physical encoded immediate",
   command: [process.execPath, process.argv[1], enginePath, output, root],
   environment: { node: process.version, v8: process.versions.v8, platform: process.platform, arch: process.arch },

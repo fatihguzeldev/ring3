@@ -1,4 +1,4 @@
-import {createArena} from '../../../../../../../../support/wasm/arena.mjs';
+import {ARENA_SIZE, createArena} from '../../../../../../../../support/wasm/arena.mjs';
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { readFileSync, readdirSync, writeFileSync } from "node:fs";
@@ -11,7 +11,7 @@ assert.ok(root, "expected current engine, output directory and repository root")
 const hash = (bytes) => createHash("sha256").update(bytes).digest("hex");
 const { bytes: engineBytes, module: engineModule, sha256: engineSha256 } = readEngine(enginePath);
 assert.deepEqual(WebAssembly.Module.imports(engineModule), []);
-const SIZE = 4612,
+const SIZE = ARENA_SIZE,
   TRANSFER = 140,
   PC = 0x1000,
   COLD = 0x1f00,
@@ -309,8 +309,16 @@ const readHelper = (value, detail = 0, address = 0) =>
     [detail ? 1 : 0, detail ? 0 : value, detail, detail ? address : 0, detail ? 1 : 0, 1],
     2,
   );
+const cpuReadHelper = (value, detail = 0, address = 0) =>
+  record(
+    "R3MH",
+    40,
+    [detail ? 1 : 0, detail ? 0 : value, detail, detail ? address : 0, detail ? 1 : 0, 1], 10,
+  );
 const storeHelper = (detail = 0, address = 0) =>
   record("R3MH", 40, [detail ? 1 : 0, 0, detail, detail ? address : 0, detail ? 2 : 0, 1], 3);
+const cpuStoreHelper = (detail = 0, address = 0) =>
+  record("R3MH", 40, [detail ? 1 : 0, 0, detail, detail ? address : 0, detail ? 2 : 0, 1], 10);
 const words = (values) => {
   const bytes = Buffer.alloc(values.length * 4);
   values.forEach((value, index) => bytes.writeUInt32LE(value >>> 0, index * 4));
@@ -454,6 +462,7 @@ function fresh(owner, selected, role) {
     assert.equal(typeof ctx.api[name], "function", name);
     assert.equal(ctx.api[name].length, arity, name);
   }
+  for (const [name,arity] of [["cpu_read8",1],["cpu_store8",2],["cpu_store_resident8",6]]) {ctx.api[name]=instance.exports["ring3_abi_v1_"+name];assert.equal(ctx.api[name]?.length,arity,name);}
   assert.equal(ctx.api.open(7, ctx.low, ctx.high), 0);
   ctx.base = ctx.api.arena_ptr() >>> 0;
   lastContext = ctx;
@@ -477,13 +486,13 @@ function fresh(owner, selected, role) {
 }
 function instantiate(ctx, bytes, file, binding, scans, pureTail = false, origin = "actual-engine") {
   const module = new WebAssembly.Module(bytes),
-    imports = (pureTail ? ["guard"] : ["guard", "read8", "store8"]).map((name) =>
+    imports = (pureTail ? ["guard"] : ["guard", "cpu_read8", "cpu_store8"]).map((name) =>
       ctx.owner === "replacement"
         ? name
         : name === "guard"
           ? "guard_resident"
-          : name === "store8"
-            ? "store_resident8"
+          : name === "cpu_store8"
+            ? "cpu_store_resident8"
             : name,
     );
   assert.deepEqual(WebAssembly.Module.imports(module), [
@@ -500,7 +509,7 @@ function instantiate(ctx, bytes, file, binding, scans, pureTail = false, origin 
     file,
     scans,
     origin,
-    exitVersion: pureTail ? 1 : 2,
+    exitVersion: pureTail ? 1 : 6,
   };
   ctx.units.push(unit);
   counts.modules++;
@@ -805,7 +814,7 @@ function target(ctx, unit, registers, scan, address, flags, purpose, reason = 1)
     result.flags,
     reason,
     1,
-    storeHelper(),
+    cpuStoreHelper(),
   );
   check(ctx, "before separate post-target Read8");
   activeCall = { ctx, unit, args: [address], label: "post-target diagnostic Read8" };
@@ -976,8 +985,8 @@ function faultCases(ctx, unit) {
         registers[3]++;
         const helper =
           shape.access === 1
-            ? readHelper(0, shape.detail, shape.address)
-            : storeHelper(shape.detail, shape.address);
+            ? cpuReadHelper(0, shape.detail, shape.address)
+            : cpuStoreHelper(shape.detail, shape.address);
         const first = run(
           ctx,
           unit,
@@ -1035,7 +1044,7 @@ function faultCases(ctx, unit) {
           raw: scan.raw,
           flags,
           shape,
-          helper_version: shape.access === 1 ? 2 : 3,
+          helper_version: 10,
           width: 1,
           first,
           retry,
@@ -1179,7 +1188,7 @@ function smc(ctx, raw, field) {
     continuation_bytes: 16,
     continuation_instructions: 4,
     helper_width: 1,
-    helper_version: 3,
+    helper_version: 10,
     cpu_writes_during_continuation: 0,
     replayed_memory_instructions: 0,
   });
@@ -1205,7 +1214,8 @@ for (const [name, expected] of Object.entries(plan))
   assert.equal(counts[name], expected, `frozen prospective ${name} census`);
 assert.deepEqual(pinSources(), sourcePins, "selected sources byte-stable during execution");
 assert.equal(hash(readFileSync(enginePath)), engineSha256);
-const result = {
+const cpuSourcePins = Object.fromEntries(["engine/src/abi/memory_helper/cpu.rs", "engine/src/cpu/dbt/wasm/memory/cpu_scalar.rs", "engine/src/cpu/dbt/wasm/emitter.rs", "engine/src/cpu/dbt/wasm/code_fetch.rs", "engine/src/process/memory/cpu_scalar.rs", "engine/src/process/memory/scalar/cpu_write.rs", "engine/src/process/wasm/memory/cpu_write.rs", "engine/src/abi/wasm/exports/memory/cpu_write.rs", "engine/tests/support/wasm/arena.mjs"].map(path=>[path,hash(readFileSync(join(root,path)))]));
+const result = {cpu_source_sha256: cpuSourcePins,
   status: "ok",
   profile: "finite flat32 D2 /2,/3 memory-byte old-CL carry rotate",
   command: [process.execPath, process.argv[1], enginePath, output, root],

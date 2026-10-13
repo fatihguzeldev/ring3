@@ -1,4 +1,4 @@
-import {createArena} from '../../../../../../../../../../support/wasm/arena.mjs';
+import {ARENA_SIZE, createArena} from '../../../../../../../../../../support/wasm/arena.mjs';
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
 import {readFileSync, writeFileSync} from 'node:fs';
@@ -9,7 +9,7 @@ assert.ok(root, 'expected actual engine Wasm, output directory and repository ro
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
 const engineBytes = readFileSync(enginePath), engineModule = new WebAssembly.Module(engineBytes);
 assert.deepEqual(WebAssembly.Module.imports(engineModule), []);
-const SIZE = 4612, TRANSFER = 140, PC = 0x1000, KEEP = 0x3000, DATA = 0x4000, SECOND = 0x5000, BYTE = 0x4010;
+const SIZE = ARENA_SIZE, TRANSFER = 140, PC = 0x1000, KEEP = 0x3000, DATA = 0x4000, SECOND = 0x5000, BYTE = 0x4010;
 const REG = [0x1234807f, 0x23457f80, 0x34560f10, 0x4567ff00, 0x56789abc, 0x6789abcd, 0x789abcde, 0x89abcdef];
 const INPUTS = [0, 0x81, 0xff], FLAGS = [2, 0xcd7], IMMEDIATES = [1, 33, 65, 97, 129, 161, 193, 225];
 const ECX = [0xa1b2c300, 0xa1b2c301, 0xa1b2c31f, 0xa1b2c320, 0xa1b2c3ff];
@@ -64,7 +64,9 @@ const state = (registers, pc, flags) => record('R3ST', 56, [...registers, pc, fl
 const exit = (reason, retired, detail = 0, address = 0, access = 0, version = 2) => record('R3EX', 40, [reason, retired, detail, address, access, access ? 1 : 0], version);
 const wordHelper = value => record('R3MH', 40, [0, value, 0, 0, 0, 0]);
 const readHelper = (value, detail = 0, address = 0) => record('R3MH', 40, [detail ? 1 : 0, detail ? 0 : value, detail, detail ? address : 0, detail ? 1 : 0, 1], 2);
+const cpuReadHelper = (value, detail = 0, address = 0) => record('R3MH', 40, [detail ? 1 : 0, detail ? 0 : value, detail, detail ? address : 0, detail ? 1 : 0, 1], 10);
 const storeHelper = (detail = 0, address = 0) => record('R3MH', 40, [detail ? 1 : 0, 0, detail, detail ? address : 0, detail ? 2 : 0, 1], 3);
+const cpuStoreHelper = (detail = 0, address = 0) => record('R3MH', 40, [detail ? 1 : 0, 0, detail, detail ? address : 0, detail ? 2 : 0, 1], 10);
 const words = values => {const bytes = Buffer.alloc(values.length * 4); values.forEach((value, index) => bytes.writeUInt32LE(value >>> 0, index * 4)); return bytes;};
 const pattern = Buffer.from(Array.from({length: 4096}, (_, index) => index % 251 + 1));
 function refresh(ctx) {ctx.bytes = new Uint8Array(ctx.memory.buffer); ctx.view = new DataView(ctx.memory.buffer); return ctx;}
@@ -92,7 +94,8 @@ function fresh(owner, bank) {
   const arities = {open: 3, close: 0, arena_ptr: 0, map: 3, unmap: 2, protect: 3, upload: 2, read8: 1, read32: 1,
     compile_entries: 2, compile_resident: 1, generation: 0, module_ptr: 0, module_len: 0, guard: 6, guard_resident: 7, store8: 2, store_resident8: 6};
   for (const [name, arity] of Object.entries(arities)) {api[name] = instance.exports[`ring3_abi_v1_${name}`]; assert.equal(typeof api[name], 'function', name); assert.equal(api[name].length, arity, name);}
-  ctx.api = api; ctx.memory = instance.exports.memory; assert.equal(api.open(7, ctx.low, ctx.high), 0);
+  ctx.api = api; ctx.memory = instance.exports.memory; for (const [name,arity] of [["cpu_read8",1],["cpu_store8",2],["cpu_store_resident8",6]]) {api[name]=instance.exports["ring3_abi_v1_"+name];assert.equal(api[name]?.length,arity,name);}
+  assert.equal(api.open(7, ctx.low, ctx.high), 0);
   ctx.base = api.arena_ptr() >>> 0; check(ctx, 'independently initialized arena'); pure(ctx, () => api.map(PC, 1, 7), 'code map');
   ctx.pages.set(PC, Buffer.alloc(4096)); ctx.permissions.set(PC, 7); counts.maps++; dataInput(ctx, PC, bank.bytes);
   for (const address of [KEEP, DATA, SECOND, 0xfffff000]) map(ctx, address);
@@ -110,13 +113,13 @@ function compile(ctx, specs = ctx.bank.specs, continuation = false, role = 'c0')
   }
   refresh(ctx); assert.ok(binding.pointer > 0 && binding.length > 8 && binding.length <= 65536 && binding.pointer + binding.length <= ctx.bytes.length);
   const bytes = Buffer.from(ctx.bytes.subarray(binding.pointer, binding.pointer + binding.length));
-  const imports = (continuation ? ['guard'] : ['guard', 'read8', 'store8']).map(name => ctx.owner === 'replacement' ? name : name === 'guard' ? 'guard_resident' : name === 'store8' ? 'store_resident8' : name);
+  const imports = (continuation ? ['guard'] : ['guard', 'cpu_read8', 'cpu_store8']).map(name => ctx.owner === 'replacement' ? name : name === 'guard' ? 'guard_resident' : name === 'cpu_store8' ? 'cpu_store_resident8' : name);
   writeFileSync(join(output, `${ctx.owner}-${ctx.bank.id}-${ctx.low}-${counts.modules + 1}.wasm`), bytes, {flag: 'wx'});
   const module = new WebAssembly.Module(bytes);
   assert.deepEqual(WebAssembly.Module.imports(module), [{module: 'env', name: 'memory', kind: 'memory'}, ...imports.map(name => ({module: 'ring3', name, kind: 'function'}))]);
   assert.deepEqual(WebAssembly.Module.exports(module), [{name: 'run', kind: 'function'}]);
   const child = new WebAssembly.Instance(module, {env: {memory: ctx.memory}, ring3: ctx.api}); assert.equal(child.exports.run.length, 4);
-  const unit = {...binding, bytes, run: child.exports.run, exitVersion: continuation ? 1 : 2}; counts.modules++; ctx.units.push(unit);
+  const unit = {...binding, bytes, run: child.exports.run, exitVersion: continuation ? 1 : 6}; counts.modules++; ctx.units.push(unit);
   modules.push({owner: ctx.owner, bank: ctx.bank.id, role, sha256: hash(bytes), length: bytes.length, imports, specs, exit_version: unit.exitVersion, code_page_sha256: hash(ctx.pages.get(PC)), ...binding}); return unit;
 }
 function seed(ctx, registers, pc, flags) {
@@ -157,7 +160,7 @@ function consumers(ctx, unit, registers, scan, flags) {
 }
 function memoryShift(ctx, unit, registers, scan, address, flags, encoding = 'c0', reason = 1) {
   const result = shifted(ctx.kind, guestByte(ctx, address), flags); patch(ctx, address, Buffer.from([result.value]));
-  run(ctx, unit, 1, 'complete checked byte shift before partial consumers', registers, scan.next, result.flags, reason, 1, storeHelper()); counts[encoding]++; counts[ctx.kind]++;
+  run(ctx, unit, 1, 'complete checked byte shift before partial consumers', registers, scan.next, result.flags, reason, 1, cpuStoreHelper()); counts[encoding]++; counts[ctx.kind]++;
   observeByte(ctx, address, result.value); return result.flags;
 }
 function shiftAndConsume(ctx, unit, registers, scan, address, flags, encoding = 'c0') {
@@ -214,7 +217,7 @@ function faults(ctx, unit) {
     if (setupValue !== null) dataInput(ctx, shape.address, Buffer.from([setupValue]));
     if (shape.denied !== undefined) protect(ctx, shape.denied, shape.permissions);
     const registers = addressRegisters(6, shape.address, ECX[4]); seed(ctx, registers, scan.entry, flags); registers[3]++;
-    const faultHelper = shape.access === 1 ? readHelper(0, shape.detail, shape.fault) : storeHelper(shape.detail, shape.fault);
+    const faultHelper = shape.access === 1 ? cpuReadHelper(0, shape.detail, shape.fault) : cpuStoreHelper(shape.detail, shape.fault);
     run(ctx, unit, 2, 'retired LEA then precise width-one RMW fault', registers, scan.shift, flags, 5, 1, faultHelper, shape.detail, shape.fault, shape.access); counts.prefixes++;
     pages(ctx, `${shape.name} first fault keeps operand and neighbors`, [DATA]);
     if (flags === 2) preflight(ctx, unit, registers, scan.shift, flags);
@@ -228,7 +231,7 @@ function faults(ctx, unit) {
     if (mapOnly) counts.map_only_repairs++; else if (permissionOnly) counts.permission_only_repairs++; else {dataInput(ctx, shape.address, Buffer.from([repairValue])); counts.changed_value_repairs++;}
     assert.equal(guestByte(ctx, shape.address), repairValue); shiftAndConsume(ctx, unit, registers, scan, shape.address, flags); counts.repairs++;
     if (shape.missing === 0x8000) {pages(ctx, 'complete repaired mapped page', [0x8000]); unmap(ctx, 0x8000);}
-    faultRows.push({owner: ctx.owner, kind: ctx.kind, ...shape, flags, setup_value: setupValue, helper_version: shape.access === 1 ? 2 : 3, width: 1, retired_prefix: 1, unrepaired_retired: 0, repair_value: repairValue, repair_mode: repairMode});
+    faultRows.push({owner: ctx.owner, kind: ctx.kind, ...shape, flags, setup_value: setupValue, helper_version: 10, width: 1, retired_prefix: 1, unrepaired_retired: 0, repair_value: repairValue, repair_mode: repairMode});
   }
   protect(ctx, DATA, 3); pages(ctx, 'complete post-fault pages');
 }
@@ -279,9 +282,9 @@ function close(ctx) {
 function smc(ctx, unit, value) {
   const address = 0x1f00, scan = ctx.bank.scans[7], registers = addressRegisters(7, address, ECX[4]); seed(ctx, registers, scan.shift, 0xcd7);
   const result = shifted(ctx.kind, value, 0xcd7); assert.equal(guestByte(ctx, address), value); patch(ctx, address, Buffer.from([result.value]));
-  run(ctx, unit, 1, 'Store8 v3 commits helper/flags/EIP/retirement before code exit', registers, scan.next, result.flags, 6, 1, storeHelper()); counts.c0++; counts[ctx.kind]++; counts.code_stores++;
+  run(ctx, unit, 1, 'Store8 v3 commits helper/flags/EIP/retirement before code exit', registers, scan.next, result.flags, 6, 1, cpuStoreHelper()); counts.c0++; counts[ctx.kind]++; counts.code_stores++;
   counts[value === result.value ? 'same_value_code_stores' : 'changing_code_stores']++; observeByte(ctx, address, result.value); pages(ctx, 'complete committed width-one code-store pages');
-  smcRows.push({owner: ctx.owner, kind: ctx.kind, immediate: 225, before: value, after: result.value, address, width: 1, helper_version: 3, pc: scan.next, flags: result.flags, retired: 1, canary_before: registers[3]});
+  smcRows.push({owner: ctx.owner, kind: ctx.kind, immediate: 225, before: value, after: result.value, address, width: 1, helper_version: 10, pc: scan.next, flags: result.flags, retired: 1, canary_before: registers[3]});
   cancel(ctx, 1); pure(ctx, () => unit.run(0xffffffff, 0xffffffff, 0, 0xffffffff), 'stale after successful code store', 4); counts.owner_controls++; counts.generated_calls++; cancel(ctx, 0);
   const current = compile(ctx, [[scan.next, 13]], true, 'current-code-tail'); consumers(ctx, current, registers, scan, result.flags); counts.continuation_canaries++;
   observeByte(ctx, address, result.value); pages(ctx, 'fresh pure consumers/canary/JMP keep committed pages'); close(ctx);
@@ -300,11 +303,12 @@ const expectedCounts = {contexts: 14, modules: 40, seeds: 428, memory_matrix: 28
   maps: 88, unmaps: 18, protects: 150, host_uploads: 558, host_uploaded_bytes: 281350, pages: 350, arena_checks: 724642};
 for (const [name, expected] of Object.entries(expectedCounts)) assert.equal(counts[name], expected, `exact observed ${name} census`);
 assert.deepEqual([...observedCl].sort((a, b) => a - b), [0, 1, 3, 31, 32, 255], 'literal count one despite CL and indexed ECX values');
-const result = {status: 'ok', engine_sha256: hash(engineBytes), tools: {node: process.version, v8: process.versions.v8}, counts, modules, faults: faultRows, code_stores: smcRows, mutations: mutationRows, compiler_refusals: refusalRows, pages: pageRows,
+const cpuSourcePins = Object.fromEntries(["engine/src/abi/memory_helper/cpu.rs", "engine/src/cpu/dbt/wasm/memory/cpu_scalar.rs", "engine/src/cpu/dbt/wasm/emitter.rs", "engine/src/cpu/dbt/wasm/code_fetch.rs", "engine/src/process/memory/cpu_scalar.rs", "engine/src/process/memory/scalar/cpu_write.rs", "engine/src/process/wasm/memory/cpu_write.rs", "engine/src/abi/wasm/exports/memory/cpu_write.rs", "engine/tests/support/wasm/arena.mjs"].map(path=>[path,hash(readFileSync(join(root,path)))]));
+const result = {status: 'ok', cpu_source_sha256: cpuSourcePins, engine_sha256: hash(engineBytes), tools: {node: process.version, v8: process.versions.v8}, counts, modules, faults: faultRows, code_stores: smcRows, mutations: mutationRows, compiler_refusals: refusalRows, pages: pageRows,
   source: {url: 'https://cdrdv2-public.intel.com/929354/253667-093-sdm-vol-2b.pdf', order: '253667-093US', edition: 'September 2026', pdf_sha256: 'a261998ace8e07f624bf3e2486bb6cfe950fb8be8d0dc9631bcecb4c5ec953e4', extract_sha256: '3502ce0d3e56c5f716cd576336f5c7ad58a04eb707b997f137ae12a33ee9951f', pages: [611, 612, 613, 614]},
   oracle: {sources: INPUTS, flag_seeds: FLAGS, immediate_bytes: IMMEDIATES, literal_anchors: ANCHORS, live_add_anchors: PRODUCERS, registers: REG, ecx_seeds: ECX, observed_cl: [...observedCl].sort((a, b) => a - b),
     fault_shapes: faultShapes, repair_modes: ['map-only', 'permission-only', 'map+value', 'permission+value'], arena_bytes: SIZE, patterned_page: KEEP, pattern_sha256: hash(pattern),
-    endpoints: [0x4fff, 0x5000, 0xffffffff], helper_read_version: 2, helper_store_version: 3, helper_width: 1, memory_exit_version: 2, pure_exit_version: 1,
+    endpoints: [0x4fff, 0x5000, 0xffffffff], helper_read_version: 10, helper_store_version: 10, helper_width: 1, memory_exit_version: 6, pure_exit_version: 1,
     banks: banks.map(bank => ({id: bank.id, specs: bank.specs, scans: bank.scans, d0: bank.d0, instructions: bank.instructions, sha256: hash(bank.bytes), hex: bank.bytes.toString('hex')})),
     flag_policy: 'defined count-one CF/OF/SF/ZF/PF, existing undefined-AF clear policy, retain DF/fixed bit 1; flags publish only after successful Store8'},
   artifact_census: {x86_banks: 3, generated_modules: 40, result_files: 1, total: 44},

@@ -1,5 +1,5 @@
 import {assertEngineExports} from '../../../../../../../support/wasm/exports.mjs';
-import {createArena} from '../../../../../../../support/wasm/arena.mjs';
+import {ARENA_SIZE, createArena} from '../../../../../../../support/wasm/arena.mjs';
 import assert from 'node:assert/strict';
 import {execFileSync} from 'node:child_process';
 import {createHash} from 'node:crypto';
@@ -11,11 +11,11 @@ mkdirSync(join(outputDir, 'runtime'), {recursive: true});
 assert.ok(root, 'expected actual engine, output directory and repository root');
 const fixtureRoot = join(root, 'engine/tests/cpu/shifts/single/memory/fixtures/p2-memory-shift');
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
-const oracleBytes = readFileSync(join(fixtureRoot, 'oracle.json')), oracle = JSON.parse(oracleBytes);
+const oracleBytes = readFileSync(join(fixtureRoot, 'oracle.json')), oracle = currentWireOracle(JSON.parse(oracleBytes));
 const programBytes = readFileSync(join(fixtureRoot, 'program.S'));
 assert.equal(hash(oracleBytes), '72d176eb372a1f4963bca72e5eded887c1b1092378b1bb1df88c57d1d9a53627');
 assert.equal(hash(programBytes), 'fc5272493d64f4e2cd04167e2a3088ada5747c862636ef7c56e564f9d22e90c3');
-const size = 4612, transfer = 140, artifacts = {}, identities = [], operations = [], hostInputs = [], observations = [], ramChecks = [], stackChecks = [];
+const size = ARENA_SIZE, transfer = 140, artifacts = {}, identities = [], operations = [], hostInputs = [], observations = [], ramChecks = [], stackChecks = [];
 const fromHex = hex => new Uint8Array(Buffer.from(hex, 'hex'));
 function save(filename, bytes) { writeFileSync(join(outputDir, filename), bytes); artifacts[filename] = hash(bytes); return filename; }
 function words(fields) { const bytes = new Uint8Array(fields.length * 4), view = new DataView(bytes.buffer); fields.forEach((value, index) => view.setUint32(index * 4, value, true)); return bytes; }
@@ -25,6 +25,36 @@ function record(magic, length, fields, version = 1) {
   fields.forEach((value, index) => view.setUint32(16 + index * 4, value, true)); return bytes;
 }
 function helper(value = 0) { return record('R3MH', 40, [0, value, 0, 0, 0, 0]); }
+// preserve the original authored oracle hash and math; only scalar wire metadata is revised here.
+function currentWireOracle(original) {
+  const current=structuredClone(original);
+  function version(hex,value) {
+    const bytes=Buffer.from(hex,'hex'); assert.equal(bytes.length,40);
+    bytes.writeUInt16LE(value,4); return bytes.toString('hex');
+  }
+  function scalarHelper(hex) {
+    const bytes=Buffer.from(version(hex,10),'hex'); assert.equal(bytes.subarray(0,4).toString(),'R3MH');
+    bytes.writeUInt32LE(4,36); return bytes.toString('hex');
+  }
+  for(const item of current.cases) {
+    for(const key of ['after_jc','after_jo']) {
+      if(item.owner==='replacement')item[key].exit_hex=version(item[key].exit_hex,6);
+      item[key].helper_hex=scalarHelper(item[key].helper_hex);
+    }
+    item.api.helper_hex=scalarHelper(item.api.helper_hex);
+    if(item.owner==='replacement')item.api.exit_hex=version(item.api.exit_hex,6);
+  }
+  for(const item of [...current.finite,...current.controls,...current.smc]) {
+    for(const key of ['success_exit_hex','fault_exit_hex','pause_cancel_exit_hex','pause_budget_exit_hex'])
+      if(key in item)item[key]=version(item[key],6);
+    for(const key of ['success_helper_hex','fault_helper_hex'])if(key in item)item[key]=scalarHelper(item[key]);
+  }
+  for(const [key,values] of Object.entries(current.transport))
+    if(key.endsWith('_imports')&&Array.isArray(values))current.transport[key]=values.map(name=>/^(read|store)/.test(name)?'cpu_'+name:name);
+  current.transport.arena_bytes=4796; current.transport.locals=[[16,127],[1,126],[10,127],[1,127]];
+  return current;
+}
+
 function residentRecord(unit) { return words([1, 24, unit.low, unit.high, unit.pointer, unit.length]); }
 function installation(unit, slot) { return record('R3IN', 32, [unit.low, unit.high, slot, 0]); }
 function authoredText(object) {
@@ -87,7 +117,7 @@ sourcePaths.push(...engineExportPins.filter(path => !sourcePaths.includes(path))
 assert.equal(sourcePaths.length, productionPaths.length + 10);
 const sources = Object.fromEntries(sourcePaths.map(file => [file, hash(readFileSync(join(root,file)))])); save('source-sha256.json', JSON.stringify(sources,null,2));
 
-const arities = {open:3,close:0,arena_ptr:0,map:3,protect:3,upload:2,begin_image_input:1,append_image_input:2,load_pe32_linked_v2_input_at:2,start_loaded_image:2,compile_entries:2,compile_resident_entries:2,generation:0,module_ptr:0,module_len:0,find_resident:1,acknowledge_resident_installation:5,find_installed_resident:3,dispatcher_module:2,guard:6,guard_resident:7,guard_dispatch_entry:5,read32:1,store32:2,store_resident32:6,capture_call:5,capture_resident_call:6,complete_windows_call:4,complete_resident_windows_call:5};
+const arities = {cpu_read32:1,cpu_store32:2,cpu_store_resident32:6,open:3,close:0,arena_ptr:0,map:3,protect:3,upload:2,begin_image_input:1,append_image_input:2,load_pe32_linked_v2_input_at:2,start_loaded_image:2,compile_entries:2,compile_resident_entries:2,generation:0,module_ptr:0,module_len:0,find_resident:1,acknowledge_resident_installation:5,find_installed_resident:3,dispatcher_module:2,guard:6,guard_resident:7,guard_dispatch_entry:5,read32:1,store32:2,store_resident32:6,capture_call:5,capture_resident_call:6,complete_windows_call:4,complete_resident_windows_call:5};
 let engine, nextInstance = 0, guestRetirements = 0;
 function refresh() { if (engine.buffer !== engine.memory.buffer) { engine.buffer = engine.memory.buffer; engine.bytes = new Uint8Array(engine.buffer); engine.view = new DataView(engine.buffer); } return engine; }
 function arena() { return refresh().bytes.slice(engine.base, engine.base + size); }
@@ -131,7 +161,7 @@ function ramWords(values, label) {
 }
 function entriesRequest(entries, gates = []) { request(words([...entries,...gates.flat()]),'explicit authored/canonical entry and receipt Gate compiler input'); }
 function childShape(bytes, unit, helpers, dispatch = false) {
-  let at = 8; const hasSegment = !dispatch && helpers.some(name => /^(read|store)/.test(name));
+  let at = 8; const hasSegment = !dispatch && helpers.some(name => /^(cpu_read|cpu_store)/.test(name));
   const unsigned = () => { let value=0,shift=0; for(let index=0;index<5;index++){assert.ok(at<bytes.length);const byte=bytes[at++];value|=(byte&127)<<shift;if(!(byte&128))return value>>>0;shift+=7;}assert.fail('bounded unsigned LEB'); };
   const signed = () => { let value=0n,shift=0n,byte; do{assert.ok(at<bytes.length && shift<35n);byte=bytes[at++];value|=BigInt(byte&127)<<shift;shift+=7n;}while(byte&128);if(byte&64)value-=1n<<shift;return Number(BigInt.asUintN(32,value)); };
   const name = () => {const length=unsigned(),end=at+length;assert.ok(end<=bytes.length);const value=Buffer.from(bytes.subarray(at,end)).toString('utf8');at=end;return value;};
@@ -143,10 +173,11 @@ function childShape(bytes, unit, helpers, dispatch = false) {
     if(section===1) {for(let count=unsigned();count>0;count--){assert.equal(bytes[at++],0x60);const parameters=Array.from({length:unsigned()},()=>bytes[at++]),results=Array.from({length:unsigned()},()=>bytes[at++]);types.push({parameters,results});}}
     else if(section===2) {for(let count=unsigned();count>0;count--){const module=name(),field=name(),kind=bytes[at++];if(kind===0)imports.push({module,name:field,kind:'function',type:unsigned()});else if(kind===2){assert.deepEqual(limits(),{minimum:1,maximum:null});imports.push({module,name:field,kind:'memory'});}else if(kind===1){assert.equal(bytes[at++],0x70);assert.deepEqual(limits(),{minimum:8,maximum:8});imports.push({module,name:field,kind:'table'});}else assert.fail('unexpected child import kind');}}
     else if(section===3) {for(let count=unsigned();count>0;count--)functions.push(unsigned());}
+    else if(section===6) {assert.equal(dispatch,false);assert.equal(unsigned(),3);for(const value of [1,0,1]){assert.equal(bytes[at++],0x7f);assert.equal(bytes[at++],0);assert.equal(bytes[at++],0x41);assert.equal(signed(),value);assert.equal(bytes[at++],0x0b);}}
     else if(section===7) {for(let count=unsigned();count>0;count--)exports.push({name:name(),kind:bytes[at++],index:unsigned()});}
     else if(section===10) {
       assert.equal(unsigned(),hasSegment?2:1);const bodyLength=unsigned(),bodyEnd=at+bodyLength;assert.ok(bodyEnd<=end);locals=Array.from({length:unsigned()},()=>[unsigned(),bytes[at++]]);
-      assert.deepEqual(locals,dispatch?[[6,0x7f]]:[[16,0x7f],[1,0x7e],[10,0x7f]]);
+      assert.deepEqual(locals,dispatch?[[7,0x7f]]:[[16,0x7f],[1,0x7e],[10,0x7f],[1,0x7f]]);
       const expected=[engine.low,engine.high,...(dispatch?[]:engine.owner==='resident'?[unit.low,unit.high]:[unit.generation])];
       guard={name:dispatch?'guard_dispatch_entry':engine.owner==='resident'?'guard_resident':'guard',constants:expected};
       for(const value of expected){assert.equal(bytes[at++],0x41);assert.equal(signed(),value);}
@@ -335,6 +366,6 @@ assert.equal(operations.length,886); assert.equal(hostInputs.length,252); assert
 function outputFiles(directory = '') {return readdirSync(join(outputDir, directory), {withFileTypes: true}).flatMap(row => row.isDirectory() ? outputFiles(join(directory, row.name)) : [join(directory, row.name)]);}
 for (const filename of outputFiles()) artifacts[filename]=hash(readFileSync(join(outputDir,filename)));
 assert.equal(Object.keys(artifacts).length,3338);
-const provenance={engine_sha256:hash(engineBytes),oracle_sha256:hash(oracleBytes),program_sha256:hash(programBytes),text_sha256:hash(code),pe_sha256:Object.fromEntries(oracle.pe.images.map(item=>[item.name,hash(images[item.name])])),artifacts,sources,identities,observations,operations,host_inputs:hostInputs,ram_checks:ramChecks,stack_checks:stackChecks,guest_retirements:guestRetirements,command:[process.execPath,process.argv[1],enginePath,outputDir,root],assembly_command:['clang',...assemblyArgs],tools:{node:process.version,v8:process.versions.v8,clang:execFileSync('clang',['--version'],{encoding:'utf8'}).split('\n')[0]},claim:oracle.claim};
+const provenance={original_oracle_sha256:hash(oracleBytes),current_wire_revision:'Named source-only scalar packet v10/width4, exitv6, imports and current bound shape; original program/math/inputs preserved.',engine_sha256:hash(engineBytes),oracle_sha256:hash(oracleBytes),program_sha256:hash(programBytes),text_sha256:hash(code),pe_sha256:Object.fromEntries(oracle.pe.images.map(item=>[item.name,hash(images[item.name])])),artifacts,sources,identities,observations,operations,host_inputs:hostInputs,ram_checks:ramChecks,stack_checks:stackChecks,guest_retirements:guestRetirements,command:[process.execPath,process.argv[1],enginePath,outputDir,root],assembly_command:['clang',...assemblyArgs],tools:{node:process.version,v8:process.versions.v8,clang:execFileSync('clang',['--version'],{encoding:'utf8'}).split('\n')[0]},claim:oracle.claim};
 writeFileSync(join(outputDir,'provenance.json'),JSON.stringify(provenance,null,2));
 console.log(JSON.stringify({status:'ok',engine_sha256:provenance.engine_sha256,oracle_sha256:provenance.oracle_sha256,output:outputDir,instances:nextInstance,children:identities.length,observations:observations.length,operations:operations.length,host_inputs:hostInputs.length,positive_cases:4,finite_contexts:18,fault_contexts:10,smc_contexts:4,positive_guest_retired:15,total_guest_retired:guestRetirements}));

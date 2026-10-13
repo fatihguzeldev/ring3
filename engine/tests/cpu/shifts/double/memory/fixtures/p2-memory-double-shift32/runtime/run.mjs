@@ -1,4 +1,4 @@
-import {createArena} from '../../../../../../../support/wasm/arena.mjs';
+import {ARENA_SIZE, createArena} from '../../../../../../../support/wasm/arena.mjs';
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
 import {readFileSync, readdirSync, writeFileSync} from 'node:fs';
@@ -10,7 +10,7 @@ assert.ok(root, 'expected actual engine Wasm, output directory and repository ro
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
 const {bytes: engineBytes, module: engineModule, sha256: engineSha256} = readEngine(enginePath);
 assert.deepEqual(WebAssembly.Module.imports(engineModule), []);
-const SIZE = 4612, TRANSFER = 140, PC = 0x1000, COLD = PC + 128, KEEP = 0x3000, DATA = 0x4000, SECOND = 0x5000, TOP = 0xfffff000, WORD = 0x4010;
+const SIZE = ARENA_SIZE, TRANSFER = 140, PC = 0x1000, COLD = PC + 128, KEEP = 0x3000, DATA = 0x4000, SECOND = 0x5000, TOP = 0xfffff000, WORD = 0x4010;
 const OWNERS = ['replacement', 'resident'], FLAGS = [2, 0xcd7], KINDS = ['shld', 'shrd'], MODES = ['imm', 'cl'];
 const REG = [0x12345678, 0x80000021, 0x3456789a, 0x456789ab, 0x56789abc, 0x6789abcd, 0x789abcde, 0x89abcdef];
 const EDGE = [0, 32, 64, 128, 2, 31, 33, 255];
@@ -144,19 +144,19 @@ function profile(bytes, owner, memory, ctx, binding) {
   const text = () => {const length = uleb(); assert.ok(at + length <= bytes.length); const value = bytes.subarray(at, at + length).toString('utf8'); at += length; return value;};
   const sections = new Map();
   while (at < bytes.length) {const id = bytes[at++], length = uleb(), start = at; assert.ok(start + length <= bytes.length && !sections.has(id)); sections.set(id, [start, start + length]); at += length;}
-  assert.deepEqual([...sections.keys()], [1, 2, 3, 7, 10]);
+  assert.deepEqual([...sections.keys()], [1, 2, 3, 6, 7, 10]);
   const section = id => {at = sections.get(id)[0];}, ended = id => assert.equal(at, sections.get(id)[1]);
   section(1); const types = []; for (let index = 0, length = uleb(); index < length; index++) {assert.equal(bytes[at++], 0x60); const parameters = [];
     for (let index = 0, length = uleb(); index < length; index++) parameters.push(bytes[at++]); const results = []; for (let index = 0, length = uleb(); index < length; index++) results.push(bytes[at++]); types.push({parameters, results});} ended(1);
   const expectedTypes = [{parameters: Array(4).fill(0x7f), results: [0x7f]}, {parameters: Array(owner === 'replacement' ? 6 : 7).fill(0x7f), results: [0x7f]}];
   if (memory) expectedTypes.push({parameters: [0x7f], results: [0x7f]}, {parameters: Array(owner === 'replacement' ? 2 : 6).fill(0x7f), results: [0x7f]}); if (memory) expectedTypes.push({parameters: Array(6).fill(0x7f), results: [0x7f]}); assert.deepEqual(types, expectedTypes);
-  const names = [owner === 'replacement' ? 'guard' : 'guard_resident', ...(memory ? ['read32', owner === 'replacement' ? 'store32' : 'store_resident32'] : [])];
+  const names = [owner === 'replacement' ? 'guard' : 'guard_resident', ...(memory ? ['cpu_read32', owner === 'replacement' ? 'cpu_store32' : 'cpu_store_resident32'] : [])];
   section(2); assert.equal(uleb(), names.length + 1); assert.equal(text(), 'env'); assert.equal(text(), 'memory'); assert.equal(bytes[at++], 2); assert.equal(uleb(), 0); assert.equal(uleb(), 1);
   for (const [index, name] of names.entries()) {assert.equal(text(), 'ring3'); assert.equal(text(), name); assert.equal(bytes[at++], 0); assert.equal(uleb(), index + 1);} ended(2);
-  section(3); assert.equal(uleb(), memory ? 2 : 1); assert.equal(uleb(), 0); if (memory) assert.equal(uleb(), types.length - 1); ended(3);
+  section(3); assert.equal(uleb(), memory ? 2 : 1); assert.equal(uleb(), 0); if (memory) assert.equal(uleb(), types.length - 1); ended(3); section(6); assert.deepEqual([...bytes.subarray(at,sections.get(6)[1])],[3,0x7f,0,0x41,1,0x0b,0x7f,0,0x41,0,0x0b,0x7f,0,0x41,1,0x0b]); at=sections.get(6)[1]; ended(6);
   section(7); assert.equal(uleb(), 1); assert.equal(text(), 'run'); assert.equal(bytes[at++], 0); assert.equal(uleb(), names.length); ended(7);
   section(10); assert.equal(uleb(), memory ? 2 : 1); const bodyLength = uleb(), bodyEnd = at + bodyLength; assert.ok(bodyEnd <= sections.get(10)[1]);
-  const locals = []; for (let index = 0, length = uleb(); index < length; index++) locals.push([uleb(), bytes[at++]]); assert.deepEqual(locals, [[16, 0x7f], [1, 0x7e], [10, 0x7f]]);
+  const locals = []; for (let index = 0, length = uleb(); index < length; index++) locals.push([uleb(), bytes[at++]]); assert.deepEqual(locals, [[16, 0x7f], [1, 0x7e], [10, 0x7f], [1, 0x7f]]);
   const guardConstants = [ctx.low, ctx.high, ...(owner === 'replacement' ? [binding.generation] : [binding.low, binding.high])];
   for (const value of guardConstants) {assert.equal(bytes[at++], 0x41); assert.equal(sleb(), value >>> 0);}
   for (const parameter of [0, 1, 3]) {assert.equal(bytes[at++], 0x20); assert.equal(uleb(), parameter);} assert.equal(bytes[at++], 0x10); assert.equal(uleb(), 0);
@@ -178,6 +178,7 @@ function record(magic, version, size, fields) {
 const state = (registers, pc, flags) => record('R3ST', 1, 56, [...registers, pc, flags]);
 const exit = (version, reason, retired, detail = 0, address = 0, access = 0) => record('R3EX', version, 40, [reason, retired, detail, address, access, access ? 4 : 0]);
 const helper = (value = 0, detail = 0, address = 0, access = 0) => record('R3MH', 1, 40, [access ? 1 : 0, value, detail, address, access, access ? 4 : 0]);
+const cpuHelper = (value = 0, detail = 0, address = 0, access = 0) => record('R3MH', 10, 40, [access ? 1 : 0, value, detail, address, access, 4]);
 const pattern = Buffer.from(Array.from({length: 4096}, (_, index) => index % 251 + 1));
 function refresh(ctx) {ctx.bytes = new Uint8Array(ctx.memory.buffer); ctx.view = new DataView(ctx.memory.buffer); return ctx;}
 function arena(ctx) {return Buffer.from(refresh(ctx).bytes.subarray(ctx.base, ctx.base + SIZE));}
@@ -210,7 +211,8 @@ function fresh(owner, selected, label, writable = false) {
   for (const [name, arity] of Object.entries(arities)) {api[name] = instance.exports[`ring3_abi_v1_${name}`]; assert.equal(typeof api[name], 'function', name); assert.equal(api[name].length, arity, name);}
   const ctx = {owner, ordinal, selected, label, api, memory: instance.exports.memory, low: ordinal, high: 0x4d445332,
     expected: createArena(SIZE), pages: new Map(), permissions: new Map(), units: []};
-  assert.ok(ctx.memory instanceof WebAssembly.Memory); assert.equal(api.open(4, ctx.low, ctx.high), 0); ctx.base = api.arena_ptr() >>> 0;
+  assert.ok(ctx.memory instanceof WebAssembly.Memory); for (const [name,arity] of [["cpu_read32",1],["cpu_store32",2],["cpu_store_resident32",6]]) {api[name]=instance.exports["ring3_abi_v1_"+name];assert.equal(api[name]?.length,arity,name);}
+  assert.equal(api.open(4, ctx.low, ctx.high), 0); ctx.base = api.arena_ptr() >>> 0;
   refresh(ctx); assert.ok(ctx.base > 0 && ctx.base + SIZE <= ctx.bytes.length);
   ctx.expected.set(state(Array(8).fill(0), 0, 2)); ctx.expected.set(exit(1, 1, 0), 56); ctx.expected.set(helper(), 100); check(ctx, 'independently initialized arena');
   const codePage = Buffer.alloc(4096); codePage.set(selected.bytes); map(ctx, PC, codePage, 7); if (!writable) protect(ctx, PC, 5);
@@ -231,12 +233,12 @@ function compile(ctx, phase = 'initial', tail) {
   check(ctx, 'compiler publication/getter group'); refresh(ctx); assert.ok(binding.pointer > 0 && binding.length > 8 && binding.length <= 65536 && binding.pointer + binding.length <= ctx.bytes.length);
   const bytes = Buffer.from(ctx.bytes.subarray(binding.pointer, binding.pointer + binding.length)); assert.ok(WebAssembly.validate(bytes));
   const module = new WebAssembly.Module(bytes), guardName = ctx.owner === 'replacement' ? 'guard' : 'guard_resident';
-  const names = [guardName, ...(memory ? ['read32', ctx.owner === 'replacement' ? 'store32' : 'store_resident32'] : [])];
+  const names = [guardName, ...(memory ? ['cpu_read32', ctx.owner === 'replacement' ? 'cpu_store32' : 'cpu_store_resident32'] : [])];
   const imports = [{module: 'env', name: 'memory', kind: 'memory'}, ...names.map(name => ({module: 'ring3', name, kind: 'function'}))];
   assert.deepEqual(WebAssembly.Module.imports(module), imports); assert.deepEqual(WebAssembly.Module.exports(module), [{name: 'run', kind: 'function'}]);
   const abi = profile(bytes, ctx.owner, memory, ctx, binding), child = new WebAssembly.Instance(module, {env: {memory: ctx.memory}, ring3: Object.fromEntries(names.map(name => [name, ctx.api[name]]))});
   assert.equal(child.exports.run.length, 4); check(ctx, 'child linking preserves arena');
-  const file = `${ctx.owner}-${ctx.ordinal}-${phase}.wasm`, saved = artifact(file, bytes), unit = {...binding, bytes, file, run: child.exports.run, version: memory ? 2 : 1};
+  const file = `${ctx.owner}-${ctx.ordinal}-${phase}.wasm`, saved = artifact(file, bytes), unit = {...binding, bytes, file, run: child.exports.run, version: memory ? 6 : 1};
   ctx.units.push(unit); counts.modules++; modules.push({owner: ctx.owner, context: ctx.ordinal, phase, bank: ctx.selected.name, specs, instructions: tail ? 4 : ctx.selected.instructions,
     ...binding, exit_version: unit.version, identity: identity(ctx, unit), imports, exports: [{name: 'run', kind: 'function'}], run_arity: 4, profile: abi, artifact: saved,
     declared_code_page_sha256: hash(ctx.pages.get(PC)), code_page_authority: 'host/model at compile; physical typed page snapshots saved at declared checkpoints',
@@ -281,7 +283,7 @@ function addressFor(scan, registers) {
 function target(ctx, unit, scan, group, label, reason = 1) {
   const original = cpu(ctx), address = addressFor(scan, original.registers), raw = scan.mode === 'imm' ? scan.raw : original.registers[1] % 256;
   assert.equal(original.pc, scan.target); const oldDestination = wordAt(ctx, address), oldSource = original.registers[scan.source], expected = doubleShift(scan.kind, oldDestination, oldSource, raw, original.flags);
-  patch(ctx, address, words([expected.value])); const call = run(ctx, unit, 1, label, {pc: scan.next, flags: expected.flags, reason, retired: 1, helperBytes: helper()});
+  patch(ctx, address, words([expected.value])); const call = run(ctx, unit, 1, label, {pc: scan.next, flags: expected.flags, reason, retired: 1, helperBytes: cpuHelper()});
   const saved = saveArena(ctx, `${label}-target`, unit); counts.targets++; counts[group]++; counts[`${scan.kind}_targets`]++; counts[`${scan.mode}_targets`]++;
   counts[expected.count === 0 ? 'zero_targets' : expected.count === 1 ? 'count_one_targets' : 'multiple_count_targets']++;
   const row = {ordinal: counts.targets, context: ctx.ordinal, module: unit.file, group, label, scan, address, old_destination: oldDestination, old_source: oldSource,
@@ -343,7 +345,7 @@ function edge(owner, selected) {
 }
 function faultFrame(ctx, unit, scan, shape, registers, prefixFlags, first, label) {
   const failure = {registers, pc: scan.target, flags: prefixFlags, reason: 5, retired: Number(first), detail: shape.detail, fault: shape.fault,
-    access: shape.access, helperBytes: helper(0, shape.detail, shape.fault, shape.access)};
+    access: shape.access, helperBytes: cpuHelper(0, shape.detail, shape.fault, shape.access)};
   const call = run(ctx, unit, first ? 2 : 1, label, failure); counts.fault_calls++; if (first) counts.retired_add_prefixes++;
   const raw = saveArena(ctx, label, unit); pages(ctx, label); return {call, raw};
 }
@@ -428,7 +430,7 @@ function smc(owner, selected) {
   const tail = run(ctx, current, 5, 'pure current tail without head/target replay', {registers: tailRegisters, pc: COLD, reason: 3, retired: 4});
   counts.setb++; counts.seto++; counts.canaries++; counts.jumps++; const tailArena = saveArena(ctx, 'smc-current-tail', current);
   assert.equal(cpu(ctx).registers[6], changing ? 1 : 0x12345678); assert.equal(cpu(ctx).registers[1], changing ? 1 : 0x87654321);
-  assert.deepEqual(Buffer.from(snapshot(ctx).helper_hex, 'hex'), helper(), 'Store4 success helper retained through guard-only continuation');
+  assert.deepEqual(Buffer.from(snapshot(ctx).helper_hex, 'hex'), cpuHelper(), 'Store4 success helper retained through guard-only continuation');
   targetRam(ctx, row); pages(ctx, 'after-current-tail');
   const beforeTail = physical(ctx, current), sameByte = ctx.pages.get(PC)[scan.next - PC]; assert.equal(sameByte, 0x0f);
   upload(ctx, scan.next, Buffer.from([sameByte]), 'same consumed-tail byte'); cancel(ctx, 1);
@@ -465,7 +467,8 @@ assert.equal(runs.reduce((total, row) => total + row.retired, 0), planned.retire
 const raw = Buffer.concat(rawFrames); assert.equal(raw.length, planned.raw_bytes); const rawArtifact = artifact('arena-snapshots.bin', raw);
 assert.deepEqual(sourceIdentities(), sourcePins, 'selected ten sources unchanged before/after actual calls'); assert.equal(hash(readFileSync(enginePath)), engineSha256, 'actual engine input unchanged');
 const names = [...artifacts.map(row => row.path), 'result.json']; assert.equal(new Set(names).size, names.length); assert.equal(names.length, planned.files);
-const result = {status: 'ok', engine_sha256: engineSha256, engine_bytes: engineBytes.length,
+const cpuSourcePins = Object.fromEntries(["engine/src/abi/memory_helper/cpu.rs", "engine/src/cpu/dbt/wasm/memory/cpu_scalar.rs", "engine/src/cpu/dbt/wasm/emitter.rs", "engine/src/cpu/dbt/wasm/code_fetch.rs", "engine/src/process/memory/cpu_scalar.rs", "engine/src/process/memory/scalar/cpu_write.rs", "engine/src/process/wasm/memory/cpu_write.rs", "engine/src/abi/wasm/exports/memory/cpu_write.rs", "engine/tests/support/wasm/arena.mjs"].map(path=>[path,hash(readFileSync(join(root,path)))]));
+const result = {status: 'ok', cpu_source_sha256: cpuSourcePins, engine_sha256: engineSha256, engine_bytes: engineBytes.length,
   engine_input_policy: 'readEngine reads current bytes once; optional caller RING3_ENGINE_SHA256 is verified; saved bytes and before/after current input are pinned', tools: {node: process.version, v8: process.versions.v8},
   counts, formulas, planned, contexts, modules, targets, faults, code_stores: codeStores, pages: pagesRead, generated_runs: runs, host_inputs: hostInputs,
   raw_arena_records: rawRecords, raw_arena_artifact: rawArtifact, source, source_pins_before: sourcePins, source_pins_after: sourceIdentities(),

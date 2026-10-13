@@ -1,4 +1,4 @@
-import {createArena} from '../../../../../../../../../support/wasm/arena.mjs';
+import {ARENA_SIZE, createArena} from '../../../../../../../../../support/wasm/arena.mjs';
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
 import {readFileSync, writeFileSync} from 'node:fs';
@@ -9,7 +9,7 @@ assert.ok(root, 'expected actual engine Wasm, output directory and repository ro
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
 const engineBytes = readFileSync(enginePath), engineModule = new WebAssembly.Module(engineBytes);
 assert.deepEqual(WebAssembly.Module.imports(engineModule), []);
-const SIZE = 4612, TRANSFER = 140, PC = 0x1000, COLD = 0x1080, DATA = 0x4000, SECOND = 0x5000, WORD = 0x4010;
+const SIZE = ARENA_SIZE, TRANSFER = 140, PC = 0x1000, COLD = 0x1080, DATA = 0x4000, SECOND = 0x5000, WORD = 0x4010;
 const REG = [0x1234807f, 0x23457f80, 0x34560f10, 0x4567ff00, 0x56789abc, 0x6789abcd, 0x789abcde, 0x89abcdef];
 const INPUTS = [0, 1, 2, 0x100, 0x40000000, 0x80000000, 0x7fffffff, 0xffffffff, 0x80000001, 0x12345678, 0xaaaaaaaa, 0x55555555];
 const FLAGS = Array.from({length: 128}, (_, seed) => 2 + [1, 4, 0x10, 0x40, 0x80, 0x400, 0x800].reduce((flags, bit, index) => flags + (seed & 2 ** index ? bit : 0), 0));
@@ -67,6 +67,7 @@ function record(magic, size, fields, version = 1) {
 const state = (registers, pc, flags) => record('R3ST', 56, [...registers, pc, flags]);
 const exit = (reason, retired, detail = 0, address = 0, access = 0, version = 2) => record('R3EX', 40, [reason, retired, detail, address, access, access ? 4 : 0], reason === 11 ? 6 : version);
 const helper = (value = 0, detail = 0, address = 0, access = 0) => record('R3MH', 40, [access ? 1 : 0, value, detail, address, access, access ? 4 : 0]);
+const cpuHelper = (value = 0, detail = 0, address = 0, access = 0) => record('R3MH', 40, [access ? 1 : 0, value, detail, address, access, 4],10);
 const words = values => {const bytes = Buffer.alloc(values.length * 4); values.forEach((value, index) => bytes.writeUInt32LE(value >>> 0, index * 4)); return bytes;};
 const pattern = Buffer.from(Array.from({length: 4096}, (_, index) => index % 251 + 1));
 function refresh(ctx) {ctx.bytes = new Uint8Array(ctx.memory.buffer); ctx.view = new DataView(ctx.memory.buffer); return ctx;}
@@ -92,6 +93,7 @@ function fresh(owner, kind) {
     compile_entries: 2, compile_resident: 1, generation: 0, module_ptr: 0, module_len: 0, guard: 6, guard_resident: 7, store32: 2, store_resident32: 6};
   for (const [name, arity] of Object.entries(arities)) {api[name] = instance.exports[`ring3_abi_v1_${name}`]; assert.equal(typeof api[name], 'function', name); assert.equal(api[name].length, arity, name);}
   const ctx = {owner, kind, api, memory: instance.exports.memory, low: ordinal, high: 0xc8403000, expected, pages: new Map(), permissions: new Map()};
+  for (const [name,arity] of [["cpu_read32",1],["cpu_store32",2],["cpu_store_resident32",6]]) {api[name]=instance.exports["ring3_abi_v1_"+name];assert.equal(api[name]?.length,arity,name);}
   assert.equal(api.open(7, ctx.low, ctx.high), 0); ctx.base = api.arena_ptr() >>> 0;
   expected.set(state(Array(8).fill(0), 0, 2)); expected.set(record('R3EX', 40, [1, 0, 0, 0, 0, 0]), 56); expected.set(helper(), 100); check(ctx, 'independently initialized arena');
   pure(ctx, () => api.map(PC, 1, 7), 'code map'); const codePage = Buffer.alloc(4096); ctx.pages.set(PC, codePage); ctx.permissions.set(PC, 7); counts.maps++;
@@ -109,11 +111,11 @@ function compile(ctx, specs = banks[ctx.kind].specs, continuation = false) {
   }
   refresh(ctx); assert.ok(binding.pointer > 0 && binding.length > 8 && binding.pointer + binding.length <= ctx.bytes.length);
   const bytes = Buffer.from(ctx.bytes.subarray(binding.pointer, binding.pointer + binding.length)), module = new WebAssembly.Module(bytes);
-  const imports = (continuation ? ['guard'] : ['guard', 'read32', 'store32']).map(name => ctx.owner === 'replacement' ? name : name === 'guard' ? 'guard_resident' : name === 'store32' ? 'store_resident32' : name);
+  const imports = (continuation ? ['guard'] : ['guard', 'cpu_read32', 'cpu_store32']).map(name => ctx.owner === 'replacement' ? name : name === 'guard' ? 'guard_resident' : name === 'cpu_store32' ? 'cpu_store_resident32' : name);
   assert.deepEqual(WebAssembly.Module.imports(module), [{module: 'env', name: 'memory', kind: 'memory'}, ...imports.map(name => ({module: 'ring3', name, kind: 'function'}))]);
   assert.deepEqual(WebAssembly.Module.exports(module), [{name: 'run', kind: 'function'}]); const child = new WebAssembly.Instance(module, {env: {memory: ctx.memory}, ring3: ctx.api}); assert.equal(child.exports.run.length, 4);
   writeFileSync(join(output, `${ctx.owner}-${ctx.kind}-${counts.contexts}-${counts.modules + 1}.wasm`), bytes, {flag: 'wx'}); counts.modules++;
-  const exitVersion = continuation ? 1 : 2;
+  const exitVersion = continuation ? 1 : 6;
   modules.push({owner: ctx.owner, kind: ctx.kind, sha256: hash(bytes), length: bytes.length, imports, continuation, specs, exit_version: exitVersion, ...binding});
   return {...binding, run: child.exports.run, exitVersion};
 }
@@ -148,14 +150,14 @@ function pages(ctx, label, addresses = [...ctx.pages.keys()]) {
 }
 function rotateAndConsume(ctx, unit, registers, scan, address, flags, label) {
   const first = rotate(ctx.kind, guestWord(ctx, address), flags % 2), firstFlags = rotateFlags(flags, first); patch(ctx, address, words([first.value]));
-  run(ctx, unit, 1, label, registers, scan.next, firstFlags, 1, 1, helper()); counts.first_rotates++; counts[ctx.kind === 'left' ? 'rcl' : 'rcr']++;
+  run(ctx, unit, 1, label, registers, scan.next, firstFlags, 1, 1, cpuHelper()); counts.first_rotates++; counts[ctx.kind === 'left' ? 'rcl' : 'rcr']++;
   observeWord(ctx, address, first.value);
   registers[0] = registers[0] - registers[0] % 256 + first.cf; run(ctx, unit, 1, 'SETB observes live CF', registers, scan.next + 3, firstFlags); counts.setb++;
   registers[2] = registers[2] - registers[2] % 256 + first.of; run(ctx, unit, 1, 'SETO observes live OF', registers, scan.next + 6, firstFlags); counts.seto++;
   let afterFlags = firstFlags;
   if (scan.second !== null) {
     const second = rotate(ctx.kind, guestWord(ctx, WORD), first.cf); afterFlags = rotateFlags(firstFlags, second); patch(ctx, WORD, words([second.value]));
-    run(ctx, unit, 1, 'second absolute carry RMW consumes outgoing CF', registers, scan.second + 6, afterFlags, 1, 1, helper()); counts.second_rotates++; counts[ctx.kind === 'left' ? 'rcl' : 'rcr']++;
+    run(ctx, unit, 1, 'second absolute carry RMW consumes outgoing CF', registers, scan.second + 6, afterFlags, 1, 1, cpuHelper()); counts.second_rotates++; counts[ctx.kind === 'left' ? 'rcl' : 'rcr']++;
     observeWord(ctx, WORD, second.value);
   }
   run(ctx, unit, 1, 'following jump', registers, COLD, afterFlags); counts.jumps++;
@@ -205,7 +207,7 @@ function faults(ctx, unit) {
     if (shape.missing !== undefined && ctx.pages.has(shape.missing)) unmap(ctx, shape.missing);
     if (shape.denied !== undefined) protect(ctx, shape.denied, shape.permissions);
     const registers = [...REG]; registers[7] = shape.address; seed(ctx, registers, scan.entry, flags); registers[3]++;
-    const faultHelper = helper(0, shape.detail, shape.fault, shape.access);
+    const faultHelper = cpuHelper(0, shape.detail, shape.fault, shape.access);
     run(ctx, unit, 2, 'retired LEA then precise RMW fault', registers, scan.rotate, flags, 5, 1, faultHelper, shape.detail, shape.fault, shape.access); counts.prefixes++;
     const touched = [...new Set([Math.floor(shape.address / 4096) * 4096, Math.floor((shape.address + 3) / 4096) * 4096])].filter(address => ctx.pages.has(address));
     const faultPages = touched.length ? touched : [DATA, SECOND]; pages(ctx, `${shape.name} first fault atomicity`, faultPages);
@@ -247,7 +249,7 @@ function smc(ctx, unit, value, incoming) {
   const address = 0x1f00, scan = banks[ctx.kind].scans[7], registers = [...REG]; registers[7] = address;
   const beforeFlags = 0xcd6 + incoming, result = rotate(ctx.kind, value, incoming), flags = rotateFlags(beforeFlags, result);
   seed(ctx, registers, scan.rotate, beforeFlags); patch(ctx, address, words([result.value]));
-  run(ctx, unit, 1, 'code-page Store4 commits before budget/canary', registers, scan.next, flags, 6, 1, helper()); counts[ctx.kind === 'left' ? 'rcl' : 'rcr']++; counts.code_stores++;
+  run(ctx, unit, 1, 'code-page Store4 commits before budget/canary', registers, scan.next, flags, 6, 1, cpuHelper()); counts[ctx.kind === 'left' ? 'rcl' : 'rcr']++; counts.code_stores++;
   counts[value === result.value ? 'same_value_code_stores' : 'changing_code_stores']++; observeWord(ctx, address, result.value); pages(ctx, 'committed code-alias store');
   smcRows.push({owner: ctx.owner, kind: ctx.kind, before: value, incoming_cf: incoming, after: result.value, address, pc: scan.next, flags, retired: 1, canary_before: registers[3]});
   cancel(ctx, 1); pure(ctx, () => unit.run(0xffffffff, 0xffffffff, 0, 0xffffffff), 'stale before cancel/budget/pointers', 4); counts.owner_controls++; counts.generated_calls++; cancel(ctx, 0);
@@ -275,7 +277,8 @@ assert.equal(counts.continuation_canaries, 12); assert.equal(counts.continuation
 assert.equal(counts.preflight, 92); assert.equal(counts.owner_controls, 60); assert.equal(counts.generated_calls, 32052); assert.equal(counts.pages, 400);
 assert.equal(counts.maps, 88); assert.equal(counts.unmaps, 16); assert.equal(counts.protects, 248); assert.equal(counts.host_uploads, 6508); assert.equal(counts.host_uploaded_bytes, 322168);
 assert.deepEqual([...observedCl].sort((a, b) => a - b), [0, 1, 31, 32, 255]);
-const result = {status: 'ok', engine_sha256: hash(engineBytes), tools: {node: process.version, v8: process.versions.v8}, counts, modules, faults: faultRows, code_stores: smcRows, pages: pageRows,
+const cpuSourcePins = Object.fromEntries(["engine/src/abi/memory_helper/cpu.rs", "engine/src/cpu/dbt/wasm/memory/cpu_scalar.rs", "engine/src/cpu/dbt/wasm/emitter.rs", "engine/src/cpu/dbt/wasm/code_fetch.rs", "engine/src/process/memory/cpu_scalar.rs", "engine/src/process/memory/scalar/cpu_write.rs", "engine/src/process/wasm/memory/cpu_write.rs", "engine/src/abi/wasm/exports/memory/cpu_write.rs", "engine/tests/support/wasm/arena.mjs"].map(path=>[path,hash(readFileSync(join(root,path)))]));
+const result = {status: 'ok', cpu_source_sha256: cpuSourcePins, engine_sha256: hash(engineBytes), tools: {node: process.version, v8: process.versions.v8}, counts, modules, faults: faultRows, code_stores: smcRows, pages: pageRows,
   source: {url: 'https://cdrdv2-public.intel.com/929354/253667-093-sdm-vol-2b.pdf', order: '253667-093US', edition: 'September 2026',
     pdf_sha256: 'a261998ace8e07f624bf3e2486bb6cfe950fb8be8d0dc9631bcecb4c5ec953e4', extract_sha256: '7a0e03302580204f99e8283af389f84ec082701807f1a9615a028af4d6f849d0', pages: [541, 542, 543, 544, 545]},
   oracle: {sources: INPUTS, flag_seeds: FLAGS, literal_anchors: ANCHORS, live_cf_producers: PRODUCERS, registers: REG, ecx_seeds: ECX,

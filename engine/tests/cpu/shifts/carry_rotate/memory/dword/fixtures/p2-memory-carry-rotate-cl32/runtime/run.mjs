@@ -1,4 +1,4 @@
-import {createArena} from '../../../../../../../../support/wasm/arena.mjs';
+import {ARENA_SIZE, createArena} from '../../../../../../../../support/wasm/arena.mjs';
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { readFileSync, readdirSync, writeFileSync } from "node:fs";
@@ -11,7 +11,7 @@ assert.ok(enginePath && output && root, "expected current engine, output directo
 const hash = (bytes) => createHash("sha256").update(bytes).digest("hex");
 const { bytes: engineBytes, module: engineModule, sha256: engineSha256 } = readEngine(enginePath);
 assert.deepEqual(WebAssembly.Module.imports(engineModule), []);
-const SIZE = 4612,
+const SIZE = ARENA_SIZE,
   TRANSFER = 140,
   PC = 0x1000,
   COLD = 0x1f00,
@@ -210,7 +210,7 @@ function profile(bytes, owner, memory, ctx, binding) {
     sections.set(id, [start, start + length]);
     at += length;
   }
-  assert.deepEqual([...sections.keys()], [1, 2, 3, 7, 10]);
+  assert.deepEqual([...sections.keys()], [1, 2, 3, 6, 7, 10]);
   const section = (id) => { at = sections.get(id)[0]; },
     ended = (id) => assert.equal(at, sections.get(id)[1]);
   section(1);
@@ -229,7 +229,7 @@ function profile(bytes, owner, memory, ctx, binding) {
     { parameters: Array(owner === "replacement" ? 2 : 6).fill(0x7f), results: [0x7f] });
   if (memory) expectedTypes.push({parameters: Array(6).fill(0x7f), results: [0x7f]}); assert.deepEqual(types, expectedTypes);
   const names = [owner === "replacement" ? "guard" : "guard_resident",
-    ...(memory ? ["read32", owner === "replacement" ? "store32" : "store_resident32"] : [])];
+    ...(memory ? ["cpu_read32", owner === "replacement" ? "cpu_store32" : "cpu_store_resident32"] : [])];
   section(2);
   assert.equal(uleb(), names.length + 1);
   assert.equal(text(), "env"); assert.equal(text(), "memory");
@@ -239,7 +239,7 @@ function profile(bytes, owner, memory, ctx, binding) {
     assert.equal(bytes[at++], 0); assert.equal(uleb(), index + 1);
   }
   ended(2);
-  section(3); assert.equal(uleb(), memory ? 2 : 1); assert.equal(uleb(), 0); if (memory) assert.equal(uleb(), types.length - 1); ended(3);
+  section(3); assert.equal(uleb(), memory ? 2 : 1); assert.equal(uleb(), 0); if (memory) assert.equal(uleb(), types.length - 1); ended(3); section(6); assert.deepEqual([...bytes.subarray(at,sections.get(6)[1])],[3,0x7f,0,0x41,1,0x0b,0x7f,0,0x41,0,0x0b,0x7f,0,0x41,1,0x0b]); at=sections.get(6)[1]; ended(6);
   section(7); assert.equal(uleb(), 1); assert.equal(text(), "run");
   assert.equal(bytes[at++], 0); assert.equal(uleb(), names.length); ended(7);
   section(10); assert.equal(uleb(), memory ? 2 : 1);
@@ -247,7 +247,7 @@ function profile(bytes, owner, memory, ctx, binding) {
   assert.ok(bodyEnd <= sections.get(10)[1]);
   const locals = [];
   for (let index = 0, length = uleb(); index < length; index++) locals.push([uleb(), bytes[at++]]);
-  assert.deepEqual(locals, [[16, 0x7f], [1, 0x7e], [10, 0x7f]]);
+  assert.deepEqual(locals, [[16, 0x7f], [1, 0x7e], [10, 0x7f], [1, 0x7f]]);
   const guardConstants = [ctx.low, ctx.high,
     ...(owner === "replacement" ? [binding.generation] : [binding.low, binding.high])];
   for (const value of guardConstants) { assert.equal(bytes[at++], 0x41); assert.equal(sleb(), value >>> 0); }
@@ -427,6 +427,8 @@ const exit = (reason, retired, detail = 0, address = 0, access = 0, version = 2)
   record("R3EX", 40, [reason, retired, detail, address, access, access ? 4 : 0], version);
 const wordHelper = (value = 0, detail = 0, address = 0, access = 0) =>
   record("R3MH", 40, [access ? 1 : 0, value, detail, address, access, access ? 4 : 0]);
+const cpuHelper = (value = 0, detail = 0, address = 0, access = 0) =>
+  record("R3MH", 40, [access ? 1 : 0, value, detail, address, access, 4],10);
 const words = (values) => {
   const bytes = Buffer.alloc(values.length * 4);
   values.forEach((value, index) => bytes.writeUInt32LE(value >>> 0, index * 4));
@@ -576,6 +578,7 @@ function fresh(owner, selected, role) {
     assert.equal(typeof ctx.api[name], "function", name);
     assert.equal(ctx.api[name].length, arity, name);
   }
+  for (const [name,arity] of [["cpu_read32",1],["cpu_store32",2],["cpu_store_resident32",6]]) {ctx.api[name]=instance.exports["ring3_abi_v1_"+name];assert.equal(ctx.api[name]?.length,arity,name);}
   assert.equal(ctx.api.open(7, ctx.low, ctx.high), 0);
   ctx.base = ctx.api.arena_ptr() >>> 0;
   refresh(ctx);
@@ -606,13 +609,13 @@ function fresh(owner, selected, role) {
 function instantiate(ctx, bytes, file, binding, scans, pureTail = false, origin = "actual-engine") {
   assert.ok(bytes.length > 8 && bytes.length <= 65536);
   const module = new WebAssembly.Module(bytes),
-    imports = (pureTail ? ["guard"] : ["guard", "read32", "store32"]).map((name) =>
+    imports = (pureTail ? ["guard"] : ["guard", "cpu_read32", "cpu_store32"]).map((name) =>
       ctx.owner === "replacement"
         ? name
         : name === "guard"
           ? "guard_resident"
-          : name === "store32"
-            ? "store_resident32"
+          : name === "cpu_store32"
+            ? "cpu_store_resident32"
             : name,
     );
   assert.deepEqual(WebAssembly.Module.imports(module), [
@@ -634,7 +637,7 @@ function instantiate(ctx, bytes, file, binding, scans, pureTail = false, origin 
     source_spans: scans.map(({ spec: [entry, length] }) => ({ entry, bytes: length,
       hex: ctx.pages.get(PC).subarray(entry - PC, entry - PC + length).toString("hex") })),
     origin,
-    exitVersion: pureTail ? 1 : 2,
+    exitVersion: pureTail ? 1 : 6,
   };
   ctx.units.push(unit);
   counts.modules++;
@@ -977,7 +980,7 @@ function target(ctx, unit, registers, scan, address, flags, purpose, reason = 1)
     result.flags,
     reason,
     1,
-    wordHelper(),
+    cpuHelper(),
   );
   const afterDiagnostic = observeWord(ctx, unit, address, "physical post-target Read32 operand");
   assert.equal(afterDiagnostic.observed_value, result.value);
@@ -1138,7 +1141,7 @@ function faultCases(ctx, unit) {
         const registers = addressRegisters(8, shape.address, raw);
         seed(ctx, registers, scan.entry, flags);
         registers[3] = (registers[3] + 1) >>> 0;
-        const helper = wordHelper(0, shape.detail, shape.fault, shape.access),
+        const helper = cpuHelper(0, shape.detail, shape.fault, shape.access),
           touched = shape.missing === undefined ? [DATA, SECOND] : [DATA];
         const first = run(
           ctx,
@@ -1216,7 +1219,7 @@ function faultCases(ctx, unit) {
       for (const flags of FLAGS) {
         const scan = { ...ctx.bank.fault[0], raw },
           registers = addressRegisters(8, address, raw),
-          helper = wordHelper(0, 3, address, 1);
+          helper = cpuHelper(0, 3, address, 1);
         seed(ctx, registers, scan.entry, flags);
         registers[3] = (registers[3] + 1) >>> 0;
         const first = run(ctx, unit, 2, "LEA then DWORD address overflow before RAM access", registers,
@@ -1426,7 +1429,8 @@ for (const [name, expected] of Object.entries(plan))
   assert.equal(counts[name], expected, `frozen prospective ${name} census`);
 assert.deepEqual(pinSources(), sourcePins, "selected sources byte-stable during execution");
 assert.equal(hash(readFileSync(enginePath)), engineSha256);
-const result = {
+const cpuSourcePins = Object.fromEntries(["engine/src/abi/memory_helper/cpu.rs", "engine/src/cpu/dbt/wasm/memory/cpu_scalar.rs", "engine/src/cpu/dbt/wasm/emitter.rs", "engine/src/cpu/dbt/wasm/code_fetch.rs", "engine/src/process/memory/cpu_scalar.rs", "engine/src/process/memory/scalar/cpu_write.rs", "engine/src/process/wasm/memory/cpu_write.rs", "engine/src/abi/wasm/exports/memory/cpu_write.rs", "engine/tests/support/wasm/arena.mjs"].map(path=>[path,hash(readFileSync(join(root,path)))]));
+const result = {cpu_source_sha256: cpuSourcePins,
   status: "ok",
   profile: "finite flat32 D3 /2,/3 DWORD memory carry rotate by physical old ECX low8",
   command: [process.execPath, process.argv[1], enginePath, output, root],

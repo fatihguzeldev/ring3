@@ -1,4 +1,4 @@
-import {createArena} from '../../../../../../../../../support/wasm/arena.mjs';
+import {ARENA_SIZE, createArena} from '../../../../../../../../../support/wasm/arena.mjs';
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
 import {readFileSync, writeFileSync} from 'node:fs';
@@ -9,7 +9,7 @@ assert.ok(root, 'expected actual engine Wasm, output directory and repository ro
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
 const engineBytes = readFileSync(enginePath), engineModule = new WebAssembly.Module(engineBytes);
 assert.deepEqual(WebAssembly.Module.imports(engineModule), []);
-const SIZE = 4612, TRANSFER = 140, PC = 0x1000, KEEP = 0x3000, DATA = 0x4000, SECOND = 0x5000, WORD = 0x4010;
+const SIZE = ARENA_SIZE, TRANSFER = 140, PC = 0x1000, KEEP = 0x3000, DATA = 0x4000, SECOND = 0x5000, WORD = 0x4010;
 const REG = [0x1234807f, 0x23457f80, 0x34560f10, 0x4567ff00, 0x56789abc, 0x6789abcd, 0x789abcde, 0x89abcdef];
 const INPUTS = [0x80000001, 0x12345678, 0xffffffff], FLAGS = [2, 0xcd7], IMMEDIATES = [1, 33, 65, 97, 129, 161, 193, 225];
 const ECX = [0xa1b2c300, 0xa1b2c301, 0xa1b2c31f, 0xa1b2c320, 0xa1b2c3ff];
@@ -107,7 +107,7 @@ function fresh(owner, bank) {
     ctx.pages.get(PC).set(bank.bytes); ctx.bytes.set(ctx.pages.get(PC), 0x6000); ctx.bytes.set(pattern, 0x8000); counts.standalone_page_inputs += 2;
   } else {
     const instance = new WebAssembly.Instance(engineModule, {}), api = {};
-    const arities = {open: 3, close: 0, arena_ptr: 0, map: 3, unmap: 2, protect: 3, upload: 2, read32: 1,
+    const arities = {cpu_read32: 1, cpu_store32: 2, cpu_store_resident32: 6, open: 3, close: 0, arena_ptr: 0, map: 3, unmap: 2, protect: 3, upload: 2, read32: 1,
       compile_entries: 2, compile_resident: 1, generation: 0, module_ptr: 0, module_len: 0, guard: 6, guard_resident: 7, store32: 2, store_resident32: 6};
     for (const [name, arity] of Object.entries(arities)) {api[name] = instance.exports[`ring3_abi_v1_${name}`]; assert.equal(typeof api[name], 'function', name); assert.equal(api[name].length, arity, name);}
     ctx.api = api; ctx.memory = instance.exports.memory; assert.equal(api.open(bank.location === 'memory' ? 7 : 3, ctx.low, ctx.high), 0);
@@ -132,14 +132,14 @@ function compile(ctx, specs = ctx.bank.specs, continuation = false, role = 'c1')
     }
     refresh(ctx); assert.ok(binding.pointer > 0 && binding.length > 8 && binding.pointer + binding.length <= ctx.bytes.length);
     bytes = Buffer.from(ctx.bytes.subarray(binding.pointer, binding.pointer + binding.length));
-    imports = (pureModule ? ['guard'] : ['guard', 'read32', 'store32']).map(name => ctx.owner === 'replacement' ? name : name === 'guard' ? 'guard_resident' : name === 'store32' ? 'store_resident32' : name);
+    imports = (pureModule ? ['guard'] : ['guard', 'cpu_read32', 'cpu_store32']).map(name => ctx.owner === 'replacement' ? name : name === 'guard' ? 'guard_resident' : name === 'cpu_store32' ? 'cpu_store_resident32' : name);
     writeFileSync(join(output, `${ctx.owner}-${ctx.bank.id}-${ctx.low}-${counts.modules + 1}.wasm`), bytes, {flag: 'wx'});
   }
   const module = new WebAssembly.Module(bytes);
   assert.deepEqual(WebAssembly.Module.imports(module), [{module: 'env', name: 'memory', kind: 'memory'}, ...imports.map(name => ({module: 'ring3', name, kind: 'function'}))]);
   assert.deepEqual(WebAssembly.Module.exports(module), [{name: 'run', kind: 'function'}]);
   const child = new WebAssembly.Instance(module, {env: {memory: ctx.memory}, ...(ctx.api ? {ring3: ctx.api} : {})}); assert.equal(child.exports.run.length, 4);
-  const unit = {...binding, bytes, run: child.exports.run, exitVersion: pureModule ? 1 : 2}; counts.modules++; ctx.units.push(unit);
+  const unit = {...binding, bytes, run: child.exports.run, exitVersion: pureModule ? 1 : 6}; counts.modules++; ctx.units.push(unit);
   modules.push({owner: ctx.owner, bank: ctx.bank.id, role, sha256: hash(bytes), length: bytes.length, imports, specs, exit_version: unit.exitVersion, code_page_sha256: hash(ctx.pages.get(PC)), ...binding}); return unit;
 }
 function seed(ctx, registers, pc, flags) {
@@ -150,7 +150,15 @@ function cancel(ctx, value) {ctx.expected.writeUInt32LE(value, 96); refresh(ctx)
 function run(ctx, unit, budget, label, registers, pc, flags, reason = 1, retired = 1, helperBytes, detail = 0, fault = 0, access = 0) {
   if (detail === 3 && access && fault > 0xfffffffc) {reason = 11; helperBytes = undefined; detail = 0; fault = 0; access = 0;}
   check(ctx, `before ${label}`); ctx.expected.set(state(registers, pc, flags)); ctx.expected.set(exit(reason, retired, detail, fault, access, unit.exitVersion), 56);
-  if (helperBytes !== undefined) ctx.expected.set(helperBytes, 100);
+  if (helperBytes !== undefined) {
+    if (unit.exitVersion === 6) {
+      // generated scalar output only; host seeds and diagnostic replies retain their original codecs.
+      helperBytes = Buffer.from(helperBytes); assert.equal(helperBytes.length, 40);
+      assert.equal(helperBytes.subarray(0, 4).toString(), 'R3MH');
+      helperBytes.writeUInt16LE(10, 4); helperBytes.writeUInt32LE(4, 36);
+    }
+    ctx.expected.set(helperBytes, 100);
+  }
   assert.equal(unit.run(ctx.base, ctx.base + 56, budget, ctx.base + 96), 0, label); check(ctx, label); counts.generated_calls++;
 }
 function preflight(ctx, unit, registers, pc, flags) {
@@ -356,13 +364,14 @@ const expectedCounts = {contexts: 24, modules: 54, seeds: 650, register_matrix: 
   standalone_page_inputs: 8, pages: 512};
 for (const [name, expected] of Object.entries(expectedCounts)) assert.equal(counts[name], expected, `exact observed ${name} census`);
 assert.deepEqual([...observedCl].sort((a, b) => a - b), [0, 1, 31, 32, 255]);
-const result = {status: 'ok', engine_sha256: hash(engineBytes), tools: {node: process.version, v8: process.versions.v8}, counts, modules, faults: faultRows, code_stores: smcRows, mutations: mutationRows, compiler_refusals: refusalRows, pages: pageRows,
+const cpuSourcePaths=['engine/src/abi/memory_helper/cpu.rs', 'engine/src/cpu/dbt/wasm/memory/cpu_scalar.rs', 'engine/src/cpu/dbt/wasm/emitter.rs', 'engine/src/cpu/dbt/wasm/code_fetch.rs', 'engine/src/process/memory/cpu_scalar.rs', 'engine/src/process/memory/scalar/cpu_write.rs', 'engine/src/process/wasm/memory/cpu_write.rs', 'engine/src/abi/wasm/exports/memory/cpu_write.rs'];
+const result = {cpu_source_sha256: Object.fromEntries(cpuSourcePaths.map(path => [path, hash(readFileSync(join(root, path)))])), status: 'ok', engine_sha256: hash(engineBytes), tools: {node: process.version, v8: process.versions.v8}, counts, modules, faults: faultRows, code_stores: smcRows, mutations: mutationRows, compiler_refusals: refusalRows, pages: pageRows,
   source: {url: 'https://cdrdv2-public.intel.com/929354/253667-093-sdm-vol-2b.pdf', order: '253667-093US', edition: 'September 2026', pdf_sha256: 'a261998ace8e07f624bf3e2486bb6cfe950fb8be8d0dc9631bcecb4c5ec953e4', extract_sha256: '7a0e03302580204f99e8283af389f84ec082701807f1a9615a028af4d6f849d0', pages: [541, 542, 543, 544, 545]},
   oracle: {sources: INPUTS, flag_seeds: FLAGS, immediate_bytes: IMMEDIATES, literal_anchors: ANCHORS, live_add_anchors: PRODUCERS, d1_rows: D1_ROWS, registers: REG, ecx_seeds: ECX,
     fault_shapes: faultShapes, repair_modes: ['map-only', 'permission-only', 'map+value', 'permission+value'], arena_bytes: SIZE, patterned_page: KEEP, pattern_sha256: hash(pattern),
     banks: banks.map(bank => ({id: bank.id, specs: bank.specs, scans: bank.scans, d1: bank.d1, instructions: bank.instructions, sha256: hash(bank.bytes), hex: bank.bytes.toString('hex')})),
     flag_policy: 'CF/OF from effective count-one rotation; preserve SF/ZF/AF/PF/DF/fixed bit 1; memory flags publish only after successful Store4'},
   test_sha256: Object.fromEntries(['engine/tests/cpu/shifts/rotate/immediate/one/dword/wasm.rs', 'engine/tests/cpu/shifts/wasm.rs', 'engine/tests/support/wasm.rs', 'engine/tests/cpu/shifts/wasm.rs', 'engine/tests/support/wasm.rs', 'engine/tests/cpu/shifts/rotate/immediate/one/dword/fixtures/p2-rotate-immediate-one/runtime/run.mjs'].map(path => [path, hash(readFileSync(join(root, path)))])),
-  claim: 'finite flat32 C1 ROL/ROR encodings for masked-one immediate bytes 1/33/65/97/129/161/193/225: all eight register destinations through actual standalone/replacement/resident modules, eight declared memory EA/immediate forms through actual replacement/resident modules; three initial sources and two FLAGS seeds plus declared evolved intermediates, independent binary-string/literal rotation and widened/literal ADD oracle, complete producer and rotate CPU before live partial consumers without CPU repair; compact D1 controls; exact existing imports and 4236-byte arena/current declared pages; precise Read4/Write4 faults and atomic failure, retired LEA, zero-retirement retry, permission-only/map-only/changed-value data repairs without CPU/module reset, overflow separately unrepairable; unchanged and changing code stores reason 6 then stale 4, fresh current consumers/canary/JMP without CPU writes, closed 5; one-byte consumed immediate 1 to 33 uploads invalidate despite equal semantics and fresh compiled banks resume same CPU/EIP; actual compiler refusals use duplicate word-prefixed register and word-prefixed memory forms with raw counts 0/2/32/255, preserving published modules; KEEP restores cover all nine register or twelve memory uploaded bytes; this fixture purpose remains finite masked-one arithmetic, with prior unchanged R400/R401 full FLAGS math evidence retained rather than rerun'};
+  claim: 'finite flat32 C1 ROL/ROR encodings for masked-one immediate bytes 1/33/65/97/129/161/193/225: all eight register destinations through actual standalone/replacement/resident modules, eight declared memory EA/immediate forms through actual replacement/resident modules; three initial sources and two FLAGS seeds plus declared evolved intermediates, independent binary-string/literal rotation and widened/literal ADD oracle, complete producer and rotate CPU before live partial consumers without CPU repair; compact D1 controls; exact existing imports and 4796-byte arena/current declared pages; precise Read4/Write4 faults and atomic failure, retired LEA, zero-retirement retry, permission-only/map-only/changed-value data repairs without CPU/module reset, overflow separately unrepairable; unchanged and changing code stores reason 6 then stale 4, fresh current consumers/canary/JMP without CPU writes, closed 5; one-byte consumed immediate 1 to 33 uploads invalidate despite equal semantics and fresh compiled banks resume same CPU/EIP; actual compiler refusals use duplicate word-prefixed register and word-prefixed memory forms with raw counts 0/2/32/255, preserving published modules; KEEP restores cover all nine register or twelve memory uploaded bytes; this fixture purpose remains finite masked-one arithmetic, with prior unchanged R400/R401 full FLAGS math evidence retained rather than rerun'};
 const resultBytes = Buffer.from(JSON.stringify(result, null, 2)); writeFileSync(join(output, 'result.json'), resultBytes, {flag: 'wx'});
 console.log(JSON.stringify({status: result.status, engine_sha256: result.engine_sha256, result_sha256: hash(resultBytes), counts, output}));
