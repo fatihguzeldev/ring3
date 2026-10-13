@@ -45,7 +45,10 @@ pub(super) fn for_instruction(
         && !instruction.has_repne_prefix()
         && !duplicate_profile_prefix(bytes)
     {
-        if unavailable(instruction) || user_privilege_invalid(instruction, environment) {
+        if optional::unavailable(instruction)
+            || unavailable(instruction)
+            || user_privilege_invalid(instruction, environment)
+        {
             return Some(ControlOperation::InvalidOpcode);
         }
         if general_protection(instruction, environment) {
@@ -281,3 +284,5 @@ mod syscall;
 #[cfg(test)]
 #[path = "execution_faults/tests/sep.rs"]
 mod sep;
+
+mod optional;

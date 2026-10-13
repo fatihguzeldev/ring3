@@ -265,6 +265,7 @@ fn segment_accesses(instruction: &iced_x86::Instruction) -> u8 {
             | Mnemonic::Prefetcht0
             | Mnemonic::Prefetcht1
             | Mnemonic::Prefetcht2
+            | Mnemonic::Cldemote
     ) {
         return 0;
     }
