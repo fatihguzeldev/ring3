@@ -85,15 +85,15 @@ impl EngineInstance {
         let version = memory.code_validation_version();
         let mut bytes = [0; 2];
         let result = memory
-            .check_span(GuestAddress(address), 2, Access::Write)
-            .and_then(|()| memory.read(GuestAddress(address), &mut bytes))
+            .cpu_check_span(GuestAddress(address), 2, Access::Write)
+            .and_then(|()| memory.cpu_read(GuestAddress(address), &mut bytes))
             .and_then(|()| {
                 let old = u16::from_le_bytes(bytes);
                 let source_rpl = (input[0] & 3) as u16;
                 let adjusted = old & 3 < source_rpl;
                 output[1] = (input[1] & !0x40) | if adjusted { 0x40 } else { 0 };
                 if adjusted {
-                    memory.write(
+                    memory.cpu_write(
                         GuestAddress(address),
                         &((old & !3) | source_rpl).to_le_bytes(),
                     )

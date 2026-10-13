@@ -110,7 +110,7 @@ impl EngineInstance {
         let addresses = offsets.map(|offset| ss_base.wrapping_add(offset));
         let memory = self.memory.as_mut().ok_or(HostError::Closed)?;
         let version = memory.code_validation_version();
-        if let Err(error) = memory.write_stack(&addresses, &values, slot as usize) {
+        if let Err(error) = memory.cpu_write_stack(&addresses, &values, slot as usize) {
             let length = if matches!(error, MemoryError::Fault(_)) {
                 slot
             } else {

@@ -22,7 +22,7 @@ impl Prepared {
     fn push(&mut self, memory: &AddressSpace, width: u32, value: u32) -> Result<(), MemoryError> {
         let advanced = self.pointer.advance(self.registers[4], -(width as i32));
         let address = self.ss_base.wrapping_add(self.pointer.offset(advanced));
-        memory.check_span(GuestAddress(address), width as usize, Access::Write)?;
+        memory.cpu_check_span(GuestAddress(address), width as usize, Access::Write)?;
         self.addresses[self.count] = address;
         self.values[self.count] = value;
         self.count += 1;
@@ -33,7 +33,7 @@ impl Prepared {
     fn read(&self, memory: &AddressSpace, offset: u32, width: u32) -> Result<u32, MemoryError> {
         let address = self.ss_base.wrapping_add(self.pointer.offset(offset));
         let mut bytes = [0; 4];
-        memory.read(GuestAddress(address), &mut bytes[..width as usize])?;
+        memory.cpu_read(GuestAddress(address), &mut bytes[..width as usize])?;
         // ENTER's ordered reads must observe a preceding push when frames overlap.
         for index in 0..self.count {
             let stored = self.values[index].to_le_bytes();
@@ -167,7 +167,7 @@ fn prepare(
             result.registers[4] = pointer.advance(result.registers[4], -i32::from(allocation));
             // intel ENTER requires a writeability check at the final stack pointer,
             // including local storage which is allocated without being initialized.
-            memory.check_span(
+            memory.cpu_check_span(
                 GuestAddress(ss_base.wrapping_add(pointer.offset(result.registers[4]))),
                 width as usize,
                 Access::Write,
@@ -224,7 +224,7 @@ impl EngineInstance {
             })
             .and_then(|prepared| {
                 memory
-                    .write_stack(
+                    .cpu_write_stack(
                         &prepared.addresses[..prepared.count],
                         &prepared.values[..prepared.count],
                         kind.width() as usize,
@@ -567,3 +567,7 @@ mod tests {
         assert_eq!(engine.memory().unwrap().code_validation_version(), version);
     }
 }
+
+#[cfg(test)]
+#[path = "stack/linear_wrap.rs"]
+mod linear_wrap;

@@ -1,5 +1,8 @@
 #![forbid(unsafe_code)]
 
+mod cpu;
+pub use cpu::{CPU_SCALAR_HELPER_VERSION, CpuScalarOperation, encode_cpu_scalar_result};
+
 use super::{AbiError, header};
 use crate::memory::{Access, FaultReason, GuestAddress, MemoryError};
 

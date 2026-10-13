@@ -202,7 +202,7 @@ impl EngineInstance {
         let mut bytes = [0; 6];
         if let Err(error) = self
             .memory()?
-            .read(GuestAddress(address), &mut bytes[..length])
+            .cpu_read(GuestAddress(address), &mut bytes[..length])
         {
             return self.segment_packet(length as u32, 0, Err(CpuMemoryError::Memory(error)));
         }

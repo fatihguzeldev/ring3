@@ -1,0 +1,36 @@
+export_process_calls! {
+    cpu_store8(address: u32, value: u32);
+    cpu_store_resident8(key_low: u32, key_high: u32, id_low: u32, id_high: u32, address: u32, value: u32);
+    cpu_store16(address: u32, value: u32);
+    cpu_store_resident16(key_low: u32, key_high: u32, id_low: u32, id_high: u32, address: u32, value: u32);
+    cpu_store32(address: u32, value: u32);
+    cpu_store_resident32(key_low: u32, key_high: u32, id_low: u32, id_high: u32, address: u32, value: u32);
+    cpu_exchange8(address: u32, value: u32);
+    cpu_exchange_resident8(key_low: u32, key_high: u32, id_low: u32, id_high: u32, address: u32, value: u32);
+    cpu_exchange16(address: u32, value: u32);
+    cpu_exchange_resident16(key_low: u32, key_high: u32, id_low: u32, id_high: u32, address: u32, value: u32);
+    cpu_exchange32(address: u32, value: u32);
+    cpu_exchange_resident32(key_low: u32, key_high: u32, id_low: u32, id_high: u32, address: u32, value: u32);
+    cpu_compare_exchange8(address: u32, expected: u32, desired: u32);
+    cpu_compare_exchange_resident8(key_low: u32, key_high: u32, id_low: u32, id_high: u32, address: u32, expected: u32, desired: u32);
+    cpu_compare_exchange16(address: u32, expected: u32, desired: u32);
+    cpu_compare_exchange_resident16(key_low: u32, key_high: u32, id_low: u32, id_high: u32, address: u32, expected: u32, desired: u32);
+    cpu_compare_exchange32(address: u32, expected: u32, desired: u32);
+    cpu_compare_exchange_resident32(key_low: u32, key_high: u32, id_low: u32, id_high: u32, address: u32, expected: u32, desired: u32);
+    cpu_exchange_add8(address: u32, source: u32);
+    cpu_exchange_add_resident8(key_low: u32, key_high: u32, id_low: u32, id_high: u32, address: u32, source: u32);
+    cpu_exchange_add16(address: u32, source: u32);
+    cpu_exchange_add_resident16(key_low: u32, key_high: u32, id_low: u32, id_high: u32, address: u32, source: u32);
+    cpu_exchange_add32(address: u32, source: u32);
+    cpu_exchange_add_resident32(key_low: u32, key_high: u32, id_low: u32, id_high: u32, address: u32, source: u32);
+    cpu_bit_test_set32(address: u32, bit: u32);
+    cpu_bit_test_set_resident32(key_low: u32, key_high: u32, id_low: u32, id_high: u32, address: u32, bit: u32);
+    cpu_bit_test_reset32(address: u32, bit: u32);
+    cpu_bit_test_reset_resident32(key_low: u32, key_high: u32, id_low: u32, id_high: u32, address: u32, bit: u32);
+    cpu_atomic_or_u32(address: u32, mask: u32);
+    cpu_atomic_or_resident_u32(key_low: u32, key_high: u32, id_low: u32, id_high: u32, address: u32, mask: u32);
+    cpu_atomic_and_u32(address: u32, mask: u32);
+    cpu_atomic_and_resident_u32(key_low: u32, key_high: u32, id_low: u32, id_high: u32, address: u32, mask: u32);
+    cpu_atomic_xor_u32(address: u32, mask: u32);
+    cpu_atomic_xor_resident_u32(key_low: u32, key_high: u32, id_low: u32, id_high: u32, address: u32, mask: u32);
+}

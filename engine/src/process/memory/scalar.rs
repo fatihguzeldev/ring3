@@ -1,3 +1,5 @@
+mod cpu_write;
+
 use crate::process::{EngineInstance, HostError, StoreCompletion};
 use crate::{
     abi::{

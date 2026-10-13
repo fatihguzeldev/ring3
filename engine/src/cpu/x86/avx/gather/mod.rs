@@ -158,7 +158,7 @@ impl GatherInstruction {
             }
             let address = GuestAddress(segments.state.bases[segment.index()].wrapping_add(offset));
             let mut value = [0; 8];
-            match memory.read(address, &mut value[..bytes]) {
+            match memory.cpu_read(address, &mut value[..bytes]) {
                 Ok(()) => {}
                 Err(MemoryError::Fault(fault)) => {
                     outcome.fault = Some(GatherFault {

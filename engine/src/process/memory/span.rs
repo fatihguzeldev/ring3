@@ -20,7 +20,7 @@ impl EngineInstance {
             let output = &mut self.arena.as_mut().get_mut()
                 [TRANSFER_OFFSET..TRANSFER_OFFSET + length as usize];
             memory
-                .read(GuestAddress(address), output)
+                .cpu_read(GuestAddress(address), output)
                 .map_err(CpuMemoryError::Memory)
         };
         self.cpu_memory_result(length, result)
@@ -82,10 +82,10 @@ impl EngineInstance {
             let preflight = if written == length {
                 Ok(())
             } else {
-                memory.check_span(GuestAddress(address), length as usize, Access::Write)
+                memory.cpu_check_span(GuestAddress(address), length as usize, Access::Write)
             };
             preflight
-                .and_then(|()| memory.write(GuestAddress(address), input))
+                .and_then(|()| memory.cpu_write(GuestAddress(address), input))
                 .map_err(CpuMemoryError::Memory)
         };
         let changed = result.is_ok() && version != memory.code_validation_version();
@@ -130,7 +130,7 @@ impl EngineInstance {
         let memory = self.memory.as_mut().ok_or(HostError::Closed)?;
         let version = memory.code_validation_version();
         let result = memory
-            .write_masked(GuestAddress(address), input, mask)
+            .cpu_write_masked(GuestAddress(address), input, mask)
             .map_err(CpuMemoryError::Memory);
         let changed = result.is_ok() && version != memory.code_validation_version();
         self.cpu_memory_result(length, result)?;

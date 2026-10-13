@@ -82,7 +82,7 @@ impl EngineInstance {
         let version = memory.code_validation_version();
         let mut old = [0u8; 8];
         let result = memory
-            .read(GuestAddress(address), &mut old[..width as usize])
+            .cpu_read(GuestAddress(address), &mut old[..width as usize])
             .and_then(|()| {
                 let value = if compare {
                     let old = u64::from_le_bytes(old);
@@ -107,7 +107,7 @@ impl EngineInstance {
                     output[1] = result.flags;
                     u64::from(result.value)
                 };
-                memory.write(
+                memory.cpu_write(
                     GuestAddress(address),
                     &value.to_le_bytes()[..width as usize],
                 )

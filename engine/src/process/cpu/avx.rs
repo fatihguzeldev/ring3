@@ -276,7 +276,7 @@ impl EngineInstance {
             {
                 let memory = self.memory.as_ref().ok_or(HostError::Closed)?;
                 if let Err(error) =
-                    memory.check_span(GuestAddress(linear), length as usize, Access::Write)
+                    memory.cpu_check_span(GuestAddress(linear), length as usize, Access::Write)
                 {
                     return self.avx_fault(length, CpuMemoryError::Memory(error));
                 }
@@ -284,7 +284,7 @@ impl EngineInstance {
             if requirement.access == Access::Read {
                 let memory = self.memory.as_ref().ok_or(HostError::Closed)?;
                 if let Err(error) =
-                    memory.read(GuestAddress(linear), &mut payload[..length as usize])
+                    memory.cpu_read(GuestAddress(linear), &mut payload[..length as usize])
                 {
                     return self.avx_fault(length, CpuMemoryError::Memory(error));
                 }
@@ -325,7 +325,8 @@ impl EngineInstance {
         {
             let memory = self.memory.as_mut().ok_or(HostError::Closed)?;
             let version = memory.code_validation_version();
-            if let Err(error) = memory.write(GuestAddress(linear), &payload[..length as usize]) {
+            if let Err(error) = memory.cpu_write(GuestAddress(linear), &payload[..length as usize])
+            {
                 return self.avx_fault(length, CpuMemoryError::Memory(error));
             }
             changed = version != memory.code_validation_version();

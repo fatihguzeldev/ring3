@@ -1,3 +1,6 @@
+mod cpu_write;
+pub(crate) use cpu_write::*;
+
 use super::{cpu_store, mutate};
 
 pub(crate) fn map(address: u32, pages: u32, permissions: u32) -> u32 {

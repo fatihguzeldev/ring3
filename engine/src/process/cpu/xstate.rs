@@ -10,7 +10,7 @@ use crate::{
         simd::SimdState,
         xstate::{self, IMAGE_SIZE},
     },
-    memory::{Access, AddressSpace, FaultReason, GuestAddress, MemoryError, MemoryFault},
+    memory::{AddressSpace, GuestAddress},
     process::{EngineInstance, HostError, StoreCompletion},
 };
 
@@ -122,14 +122,8 @@ impl EngineInstance {
     }
 }
 
-fn part_address(base: u32, offset: u32, access: Access) -> Result<GuestAddress, CpuMemoryError> {
-    base.checked_add(offset)
-        .map(GuestAddress)
-        .ok_or(CpuMemoryError::Memory(MemoryError::Fault(MemoryFault {
-            address: GuestAddress(base),
-            access,
-            reason: FaultReason::AddressOverflow,
-        })))
+fn part_address(base: u32, offset: u32) -> GuestAddress {
+    GuestAddress(base.wrapping_add(offset))
 }
 
 fn read_part(
@@ -139,7 +133,7 @@ fn read_part(
     bytes: &mut [u8],
 ) -> Result<(), CpuMemoryError> {
     memory
-        .read(part_address(base, offset, Access::Read)?, bytes)
+        .cpu_read(part_address(base, offset), bytes)
         .map_err(CpuMemoryError::Memory)
 }
 
@@ -164,15 +158,12 @@ fn save(
         (true, 512, 520),
     ] {
         if selected {
-            spans[count] = (
-                part_address(address, start as u32, Access::Write)?,
-                &image[start..end],
-            );
+            spans[count] = (part_address(address, start as u32), &image[start..end]);
             count += 1;
         }
     }
     memory
-        .write_spans(&spans[..count])
+        .cpu_write_spans(&spans[..count])
         .map_err(CpuMemoryError::Memory)
 }
 

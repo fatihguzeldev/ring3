@@ -1,3 +1,5 @@
+mod cpu_write;
+
 export_process_calls! {
     map(address: u32, pages: u32, permissions: u32);
     protect(address: u32, pages: u32, permissions: u32);

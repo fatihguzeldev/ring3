@@ -109,7 +109,7 @@ impl EngineInstance {
         let memory = self.memory.as_mut().ok_or(HostError::Closed)?;
         if operation.read_size() != 0
             && let Err(error) =
-                memory.read(GuestAddress(address), &mut input[..operation.read_size()])
+                memory.cpu_read(GuestAddress(address), &mut input[..operation.read_size()])
         {
             return self.x87_packet(
                 length,
@@ -121,7 +121,7 @@ impl EngineInstance {
         }
         if operation.write_size() != 0
             && let Err(error) =
-                memory.check_span(GuestAddress(address), operation.write_size(), Access::Write)
+                memory.cpu_check_span(GuestAddress(address), operation.write_size(), Access::Write)
         {
             return self.x87_packet(
                 length,
@@ -154,7 +154,7 @@ impl EngineInstance {
         let version = memory.code_validation_version();
         if outcome.memory_len != 0
             && let Err(error) =
-                memory.write(GuestAddress(address), &outcome.memory[..outcome.memory_len])
+                memory.cpu_write(GuestAddress(address), &outcome.memory[..outcome.memory_len])
         {
             return self.x87_packet(
                 length,

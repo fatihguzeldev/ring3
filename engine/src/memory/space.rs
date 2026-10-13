@@ -1,4 +1,5 @@
 mod code_fetch;
+mod cpu;
 
 use super::address::{ADDRESS_LIMIT, GUEST_PAGES};
 use super::code::{PageVersion, new_identity};

@@ -14,7 +14,7 @@ use crate::{
             upper::{self, IMAGE_SIZE},
         },
     },
-    memory::{Access, AddressSpace},
+    memory::AddressSpace,
     process::{EngineInstance, HostError, StoreCompletion, cpu::segments::check_cached_span},
 };
 
@@ -224,13 +224,10 @@ fn save(
     let (ranges, count) = upper::access::save_ranges(request);
     let mut spans = [(crate::memory::GuestAddress(0), &[][..]); 4];
     for (index, (start, end)) in ranges[..count].iter().copied().enumerate() {
-        spans[index] = (
-            part_address(address, start as u32, Access::Write)?,
-            &image[start..end],
-        );
+        spans[index] = (part_address(address, start as u32), &image[start..end]);
     }
     memory
-        .write_spans(&spans[..count])
+        .cpu_write_spans(&spans[..count])
         .map_err(CpuMemoryError::Memory)
 }
 fn restore(

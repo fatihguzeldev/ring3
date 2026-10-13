@@ -1,6 +1,18 @@
 use super::{cpu_store, mutate};
 use crate::process::HostError;
 
+pub(crate) fn cpu_read8(address: u32) -> u32 {
+    mutate(|instance| instance.cpu_read8(address))
+}
+
+pub(crate) fn cpu_read16(address: u32) -> u32 {
+    mutate(|instance| instance.cpu_read16(address))
+}
+
+pub(crate) fn cpu_read32(address: u32) -> u32 {
+    mutate(|instance| instance.cpu_read32(address))
+}
+
 pub(crate) fn cpu_read(address: u32, length: u32, alignment: u32) -> u32 {
     mutate(|instance| instance.cpu_read(address, length, alignment))
 }

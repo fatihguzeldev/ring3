@@ -122,12 +122,12 @@ impl VectorState {
             MaskedInstruction::Load { destination, .. } => {
                 let mut value = [0; 32];
                 memory
-                    .read_masked(address, &mut value[..instruction.width().bytes()], selected)
+                    .cpu_read_masked(address, &mut value[..instruction.width().bytes()], selected)
                     .map_err(MaskedError::Memory)?;
                 self.publish(destination, value);
             }
             _ => memory
-                .write_masked(address, &data[..instruction.width().bytes()], selected)
+                .cpu_write_masked(address, &data[..instruction.width().bytes()], selected)
                 .map_err(MaskedError::Memory)?,
         }
         Ok(())

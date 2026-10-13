@@ -181,6 +181,19 @@ pub(crate) use calls::{
 
 mod memory;
 pub(crate) use memory::{
+    cpu_atomic_and_resident_u32, cpu_atomic_and_u32, cpu_atomic_or_resident_u32, cpu_atomic_or_u32,
+    cpu_atomic_xor_resident_u32, cpu_atomic_xor_u32, cpu_bit_test_reset_resident32,
+    cpu_bit_test_reset32, cpu_bit_test_set_resident32, cpu_bit_test_set32,
+    cpu_compare_exchange_resident8, cpu_compare_exchange_resident16,
+    cpu_compare_exchange_resident32, cpu_compare_exchange8, cpu_compare_exchange16,
+    cpu_compare_exchange32, cpu_exchange_add_resident8, cpu_exchange_add_resident16,
+    cpu_exchange_add_resident32, cpu_exchange_add8, cpu_exchange_add16, cpu_exchange_add32,
+    cpu_exchange_resident8, cpu_exchange_resident16, cpu_exchange_resident32, cpu_exchange8,
+    cpu_exchange16, cpu_exchange32, cpu_store_resident8, cpu_store_resident16,
+    cpu_store_resident32, cpu_store8, cpu_store16, cpu_store32,
+};
+
+pub(crate) use memory::{
     atomic_and_resident_u32, atomic_and_u32, atomic_or_resident_u32, atomic_or_u32,
     atomic_xor_resident_u32, atomic_xor_u32, bit_test_reset_resident32, bit_test_reset32,
     bit_test_set_resident32, bit_test_set32, compare_exchange_resident8,
@@ -202,10 +215,11 @@ mod cpu;
 pub(crate) use cpu::{
     configure_segment_descriptor, configure_segment_descriptor_raw, configure_system_register_bank,
     cpu_fxsave, cpu_fxsave_resident, cpu_integer, cpu_integer_resident, cpu_mask_write,
-    cpu_mask_write_resident, cpu_read, cpu_write, cpu_write_resident, far_call, far_call_resident,
-    far_jump, far_jump_resident, far_return, far_return_resident, segment_load, segment_load_far,
-    segment_load_far_resident, segment_load_resident, set_segment_base, simd_execute,
-    simd_execute_resident, stack_execute, stack_execute_resident, x87_op, x87_resident_op,
+    cpu_mask_write_resident, cpu_read, cpu_read8, cpu_read16, cpu_read32, cpu_write,
+    cpu_write_resident, far_call, far_call_resident, far_jump, far_jump_resident, far_return,
+    far_return_resident, segment_load, segment_load_far, segment_load_far_resident,
+    segment_load_resident, set_segment_base, simd_execute, simd_execute_resident, stack_execute,
+    stack_execute_resident, x87_op, x87_resident_op,
 };
 
 mod avx;
