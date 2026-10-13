@@ -103,12 +103,6 @@ fn normalized_offset_limit_and_execution_profile_refusals_are_distinct() {
             CodeTransferError::GeneralProtection(0),
         ),
         (
-            record(0x1a, 3, true, 0xffff, false, true, 0),
-            FarWidth::Word,
-            0xffff1234,
-            CodeTransferError::UnsupportedProfile,
-        ),
-        (
             record(0x1a, 3, true, 0xfffff, true, true, 0x1000),
             FarWidth::Dword,
             1,
@@ -135,12 +129,16 @@ fn normalized_offset_limit_and_execution_profile_refusals_are_distinct() {
         assert_eq!(*table.raw_descriptor(0x43).unwrap(), raw);
     }
     table
-        .configure_raw(0x40, record(0x1a, 3, true, 0xfffff, true, true, 0))
+        .configure_raw(0x40, record(0x1a, 3, true, 0xffff, false, true, 0))
         .unwrap();
     let transfer = table
         .resolve_far_jump(0x40, 0xffff1234, FarWidth::Word, 3)
         .unwrap();
     assert_eq!((transfer.offset, transfer.selector()), (0x1234, 0x43));
+    let mut context = SegmentContext::default();
+    transfer.apply(&mut context);
+    assert_eq!(context.caches[1].limit(), 0xffff);
+    assert!(context.is_valid());
     for selector in [0, 1, 2, 3] {
         assert_eq!(
             table.resolve_far_jump(selector, 0, FarWidth::Dword, 3),
@@ -215,8 +213,8 @@ fn call_descriptor_phase_defers_target_limit_until_after_stack_capacity() {
         Err(CodeTransferError::GeneralProtection(0))
     );
     assert_eq!(
-        destination.target(0x1234, FarWidth::Word),
-        Err(CodeTransferError::UnsupportedProfile)
+        destination.target(0x1234, FarWidth::Word).unwrap().offset,
+        0x1234
     );
     assert_eq!(*table.raw_descriptor(0x43).unwrap(), bounded);
 }

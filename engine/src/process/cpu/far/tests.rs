@@ -99,10 +99,9 @@ fn architectural_faults_never_publish_cs_or_accessed() {
 }
 
 #[test]
-fn valid_unsupported_profiles_and_malformed_requests_are_neutral_host_refusals() {
+fn unsupported_profiles_refuse_neutrally_and_bounded_source_transfers() {
     let mut engine = engine();
     for (low, high) in [
-        (0xffff, 0x0040fa00),
         (0xffff, 0x008ffa00),
         (0x1000ffff, 0x00cffa00),
         (0xffff, 0x00effa00),
@@ -135,8 +134,18 @@ fn valid_unsupported_profiles_and_malformed_requests_are_neutral_host_refusals()
     engine.arena_mut().unwrap()[SEGMENTS_OFFSET..SEGMENTS_OFFSET + SEGMENTS_SIZE]
         .copy_from_slice(&bytes);
     let before = engine.arena().to_vec();
-    assert_eq!(engine.far_jump(0, 0x43, 0), Err(HostError::InvalidRequest));
-    assert_eq!(engine.arena(), before);
+    engine.far_jump(0, 0x43, 0).unwrap();
+    assert_eq!((value(&engine, 16), value(&engine, 20)), (0, 0));
+    let mut expected = before;
+    expected[HELPER_OFFSET..HELPER_OFFSET + HELPER_SIZE]
+        .copy_from_slice(&engine.arena()[HELPER_OFFSET..HELPER_OFFSET + HELPER_SIZE]);
+    expected[SEGMENTS_OFFSET..SEGMENTS_OFFSET + SEGMENTS_SIZE]
+        .copy_from_slice(&engine.arena()[SEGMENTS_OFFSET..SEGMENTS_OFFSET + SEGMENTS_SIZE]);
+    assert_eq!(engine.arena(), expected);
+    assert_eq!(
+        engine.segment_context().unwrap().caches[1].limit(),
+        u32::MAX
+    );
     assert!(decode_segment_context(&bytes).is_ok());
 }
 

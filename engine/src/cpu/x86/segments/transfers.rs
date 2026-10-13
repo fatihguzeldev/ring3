@@ -73,12 +73,8 @@ impl CodeDestination {
         if offset > limit {
             return Err(CodeTransferError::GeneralProtection(0));
         }
-        // captured code uses linear EIP and the fixed 32-bit decoder.
-        if record.code_data_base() != Some(0)
-            || !record.default32()
-            || record.long_mode()
-            || limit != u32::MAX
-        {
+        // base-zero D32 keeps logical EIP equal to the captured linear address.
+        if record.code_data_base() != Some(0) || !record.default32() || record.long_mode() {
             return Err(CodeTransferError::UnsupportedProfile);
         }
         Ok(CodeTransfer {

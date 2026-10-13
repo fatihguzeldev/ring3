@@ -71,10 +71,7 @@ impl EngineInstance {
         transfer: CodeTransfer,
     ) -> Result<PreparedTransfer, HostError> {
         let cs = SegmentRegister::Cs.index();
-        if context.state.bases[cs] != 0
-            || !context.caches[cs].default32()
-            || context.caches[cs].limit() != u32::MAX
-        {
+        if context.state.bases[cs] != 0 || !context.caches[cs].default32() {
             return Err(HostError::InvalidRequest);
         }
         transfer.apply(&mut context);
