@@ -74,3 +74,6 @@ mod cpu_near_segments;
 
 #[path = "far/gates/wasm.rs"]
 mod cpu_call_gates_wasm;
+
+#[path = "exceptions/availability/optional/wasm.rs"]
+mod cpu_optional_availability;
