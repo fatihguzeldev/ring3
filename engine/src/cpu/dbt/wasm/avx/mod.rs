@@ -5,6 +5,7 @@ mod moves;
 mod multiply;
 mod permute;
 mod rearrange;
+mod scalar;
 mod shift;
 
 #[derive(Clone, Copy)]

@@ -52,6 +52,14 @@ pub(super) fn multiply_value(
     direct::multiply_value(code, operation, sources, scratch);
 }
 
+#[cfg(test)]
+pub(super) fn scalar_value(
+    code: &mut InstructionSink<'_>,
+    operation: crate::cpu::x86::simd::ScalarOperation,
+) {
+    direct::scalar_value(code, operation);
+}
+
 pub(super) fn direct_hotpath(operation: SimdOperation) -> bool {
     direct::accepts(operation)
 }

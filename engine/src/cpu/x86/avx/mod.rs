@@ -9,6 +9,7 @@ mod moves;
 mod multiply;
 mod permute;
 mod rearrange;
+mod scalar;
 mod shift;
 
 pub(crate) use compare::{CompareInstruction, CompareShape};
@@ -23,6 +24,7 @@ pub(crate) use moves::{
 pub(crate) use multiply::MultiplyInstruction;
 pub(crate) use permute::PermuteInstruction;
 pub(crate) use rearrange::RearrangeInstruction;
+pub(crate) use scalar::ScalarInstruction;
 pub(crate) use shift::{ShiftCount, ShiftInstruction};
 
 use super::simd::SimdState;

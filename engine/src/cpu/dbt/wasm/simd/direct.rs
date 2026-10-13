@@ -1,5 +1,6 @@
 mod multiply;
 mod rearrange;
+mod scalar;
 mod shift;
 
 use super::super::{cpu_result, locals::*};
@@ -655,19 +656,7 @@ fn insert_element(code: &mut InstructionSink<'_>, op: SimdOperation) {
         }
         _ => unreachable!("direct insertion operands were decoded"),
     }
-    let lane = op.immediate.unwrap() % (op.vector_bytes / op.lane_bytes);
-    match op.lane_bytes {
-        1 => {
-            code.i8x16_replace_lane(lane);
-        }
-        2 => {
-            code.i16x8_replace_lane(lane);
-        }
-        4 => {
-            code.i32x4_replace_lane(lane);
-        }
-        _ => unreachable!("direct insertion width was decoded"),
-    }
+    scalar::insert(code, op.lane_bytes, op.immediate.unwrap(), op.vector_bytes);
 }
 
 fn insert_single(code: &mut InstructionSink<'_>, op: SimdOperation) {
@@ -858,7 +847,7 @@ pub(super) fn instruction(
             load(code, op.source, op.vector_bytes);
             match kind {
                 S::MaskBytes => {
-                    code.i8x16_bitmask();
+                    scalar::mask_bytes(code);
                 }
                 S::MaskSingles => {
                     code.i32x4_bitmask();
@@ -866,14 +855,8 @@ pub(super) fn instruction(
                 S::MaskDoubles => {
                     code.i64x2_bitmask();
                 }
-                S::ExtractByte => {
-                    code.i8x16_extract_lane_u(op.immediate.unwrap() % 16);
-                }
-                S::ExtractWord => {
-                    code.i16x8_extract_lane_u(op.immediate.unwrap() % (op.vector_bytes / 2));
-                }
-                S::ExtractDword => {
-                    code.i32x4_extract_lane(op.immediate.unwrap() % 4);
+                S::ExtractByte | S::ExtractWord | S::ExtractDword => {
+                    scalar::extract(code, op.lane_bytes, op.immediate.unwrap(), op.vector_bytes);
                 }
                 _ => unreachable!(),
             }
@@ -1069,5 +1052,22 @@ pub(super) fn multiply_value(
             })
         }
         _ => unreachable!("validated multiply operation"),
+    }
+}
+
+#[cfg(test)]
+pub(super) fn scalar_value(
+    code: &mut InstructionSink<'_>,
+    operation: crate::cpu::x86::simd::ScalarOperation,
+) {
+    use crate::cpu::x86::simd::ScalarOperation;
+    match operation {
+        ScalarOperation::Insert { width, immediate } => {
+            scalar::insert(code, width.bytes(), immediate, 16)
+        }
+        ScalarOperation::Extract { width, immediate } => {
+            scalar::extract(code, width.bytes(), immediate, 16)
+        }
+        ScalarOperation::MaskBytes => scalar::mask_bytes(code),
     }
 }

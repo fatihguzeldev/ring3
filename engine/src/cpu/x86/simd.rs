@@ -280,6 +280,11 @@ mod multiply;
 #[cfg(test)]
 pub(crate) use multiply::MultiplyOperation;
 
+#[cfg(test)]
+mod scalar;
+#[cfg(test)]
+pub(crate) use scalar::{ScalarOperation, ScalarWidth};
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SimdError {
     InvalidDescriptor,
