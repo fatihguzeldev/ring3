@@ -62,3 +62,6 @@ mod blocks_capability;
 
 #[path = "avx/integer/compare/capability/native.rs"]
 mod comparison_capability;
+
+#[path = "avx/integer/capability/native.rs"]
+mod integer_capability;

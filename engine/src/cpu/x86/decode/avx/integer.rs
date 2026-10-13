@@ -460,13 +460,50 @@ pub(super) fn lower(
                     Code::VEX_Vpaddb_ymm_ymm_ymmm256 => 0x0100059a,
                     Code::VEX_Vpaddw_ymm_ymm_ymmm256 => 0x0100059b,
                     Code::VEX_Vpaddd_ymm_ymm_ymmm256 => 0x0100059c,
+                    Code::VEX_Vpsubusb_ymm_ymm_ymmm256 => 0x01000588,
+                    Code::VEX_Vpsubusw_ymm_ymm_ymmm256 => 0x01000589,
+                    Code::VEX_Vpminub_ymm_ymm_ymmm256 => 0x0100058a,
+                    Code::VEX_Vpaddusb_ymm_ymm_ymmm256 => 0x0100058b,
+                    Code::VEX_Vpaddusw_ymm_ymm_ymmm256 => 0x0100058c,
+                    Code::VEX_Vpmaxub_ymm_ymm_ymmm256 => 0x0100058d,
+                    Code::VEX_Vpavgb_ymm_ymm_ymmm256 => 0x0100058e,
+                    Code::VEX_Vpavgw_ymm_ymm_ymmm256 => 0x0100058f,
+                    Code::VEX_Vpsubsb_ymm_ymm_ymmm256 => 0x01000590,
+                    Code::VEX_Vpsubsw_ymm_ymm_ymmm256 => 0x01000591,
+                    Code::VEX_Vpminsw_ymm_ymm_ymmm256 => 0x01000592,
+                    Code::VEX_Vpaddsb_ymm_ymm_ymmm256 => 0x01000593,
+                    Code::VEX_Vpaddsw_ymm_ymm_ymmm256 => 0x01000594,
+                    Code::VEX_Vpmaxsw_ymm_ymm_ymmm256 => 0x01000595,
+                    Code::VEX_Vpsignb_ymm_ymm_ymmm256 => 0x0100059d,
+                    Code::VEX_Vpsignw_ymm_ymm_ymmm256 => 0x0100059e,
+                    Code::VEX_Vpsignd_ymm_ymm_ymmm256 => 0x0100059f,
+                    Code::VEX_Vpabsb_ymm_ymmm256 => 0x010005a0,
+                    Code::VEX_Vpabsw_ymm_ymmm256 => 0x010005a1,
+                    Code::VEX_Vpabsd_ymm_ymmm256 => 0x010005a2,
+                    Code::VEX_Vpminsb_ymm_ymm_ymmm256 => 0x010005a5,
+                    Code::VEX_Vpminsd_ymm_ymm_ymmm256 => 0x010005a6,
+                    Code::VEX_Vpminuw_ymm_ymm_ymmm256 => 0x010005a7,
+                    Code::VEX_Vpminud_ymm_ymm_ymmm256 => 0x010005a8,
+                    Code::VEX_Vpmaxsb_ymm_ymm_ymmm256 => 0x010005a9,
+                    Code::VEX_Vpmaxsd_ymm_ymm_ymmm256 => 0x010005aa,
+                    Code::VEX_Vpmaxuw_ymm_ymm_ymmm256 => 0x010005ab,
+                    Code::VEX_Vpmaxud_ymm_ymm_ymmm256 => 0x010005ac,
                     _ => return Ok(None),
                 };
-                encoding.validate(false, 1, false)?;
+                let unary = matches!(
+                    instruction.code(),
+                    Code::VEX_Vpabsb_ymm_ymmm256
+                        | Code::VEX_Vpabsw_ymm_ymmm256
+                        | Code::VEX_Vpabsd_ymm_ymmm256
+                );
+                encoding.validate(false, 1, unary)?;
                 let mut operands = index(instruction, 0, false, false)?;
-                operands |= index(instruction, 1, false, false)? << 3;
-                operands |= index(instruction, 2, false, true)? << 6;
-                if instruction.op_kind(2) == OpKind::Memory {
+                if !unary {
+                    operands |= index(instruction, 1, false, false)? << 3;
+                }
+                let source = if unary { 1 } else { 2 };
+                operands |= index(instruction, source, false, true)? << 6;
+                if instruction.op_kind(source) == OpKind::Memory {
                     operands |= 1 << 12;
                 }
                 (descriptor, operands, 0)

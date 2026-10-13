@@ -1,8 +1,5 @@
 use super::{MemoryRequirement, MoveSource, VectorRegister, VectorState, VectorWidth};
-use crate::{
-    cpu::x86::simd::{IntegerLaneOperation, PackedKind},
-    memory::Access,
-};
+use crate::{cpu::x86::simd::IntegerLaneOperation, memory::Access};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct IntegerInstruction {
@@ -37,15 +34,7 @@ impl IntegerInstruction {
         first: Option<VectorRegister>,
         second: MoveSource,
     ) -> Option<Self> {
-        let supported_width = width == VectorWidth::Xmm
-            || matches!(
-                operation.kind(),
-                PackedKind::Add
-                    | PackedKind::Subtract
-                    | PackedKind::Equal
-                    | PackedKind::GreaterSigned
-            );
-        (supported_width && operation.unary() == first.is_none()).then_some(Self {
+        (operation.unary() == first.is_none()).then_some(Self {
             width,
             operation,
             destination,

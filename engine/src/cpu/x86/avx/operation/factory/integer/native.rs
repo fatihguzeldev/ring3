@@ -148,9 +148,7 @@ fn every_immediate_preserves_operand_error_priority_for_all_legacy_kinds() {
 
 #[test]
 fn unknown_integer_kinds_preserve_family_error_priority() {
-    for kind in (0..=255).filter(|kind| {
-        !(1..=44).contains(kind) && !matches!(kind, 0x81..=0x87 | 0x96..=0x9c | 0xa3 | 0xa4)
-    }) {
+    for kind in (0..=255).filter(|kind| !(1..=44).contains(kind) && !(0x81..=0xac).contains(kind)) {
         for operands in [0, 1 << 9, 1 << 12, 1 << 13, 0x3fff] {
             for immediate in [0, 1, 255] {
                 assert_eq!(
@@ -163,7 +161,7 @@ fn unknown_integer_kinds_preserve_family_error_priority() {
 }
 
 #[test]
-fn wide_kind_bit_admits_only_wrapping_lanes_with_exact_source_width() {
+fn wrapping_width_descriptors_preserve_roles_and_exact_source_width() {
     for kind in [7, 22, 23, 24, 25, 26, 27, 28] {
         for destination in 0..8 {
             for first in 0..8 {

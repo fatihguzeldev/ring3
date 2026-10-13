@@ -53,10 +53,7 @@ fn explicit_width_matches_the_delivered_integer_forms() {
                 first,
                 source,
             );
-            assert_eq!(
-                ymm.is_some(),
-                matches!(kind, P::Add | P::Subtract | P::Equal | P::GreaterSigned)
-            );
+            assert!(ymm.is_some());
             wide += usize::from(ymm.is_some());
             assert!(
                 IntegerInstruction::with_width(
@@ -70,5 +67,5 @@ fn explicit_width_matches_the_delivered_integer_forms() {
             );
         }
     }
-    assert_eq!((narrow, wide), (44, 16));
+    assert_eq!((narrow, wide), (44, 44));
 }
