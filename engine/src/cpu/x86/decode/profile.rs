@@ -146,7 +146,11 @@ pub(super) fn check_profile(instruction: &Instruction, bytes: &[u8]) -> Result<(
         return Err(unsupported());
     }
     let mandatory_repeat = matches!(instruction.code(), Code::Tzcnt_r32_rm32 | Code::Pause);
-    if instruction.has_repne_prefix() || instruction.has_rep_prefix() && !mandatory_repeat {
+    // hle is absent, so eligible hints retain the ordinary locked or store operation.
+    let hle_hint = instruction.has_xacquire_prefix() || instruction.has_xrelease_prefix();
+    if !hle_hint
+        && (instruction.has_repne_prefix() || instruction.has_rep_prefix() && !mandatory_repeat)
+    {
         return Err(unsupported());
     }
     // decoded operand width owns 66 semantics, including byte operations that ignore it.
@@ -159,3 +163,7 @@ fn is_prefix(byte: u8) -> bool {
         0xf0 | 0xf2 | 0xf3 | 0x66 | 0x67 | 0x26 | 0x2e | 0x36 | 0x3e | 0x64 | 0x65
     )
 }
+
+#[cfg(test)]
+#[path = "profile/tests/hle.rs"]
+mod hle;
