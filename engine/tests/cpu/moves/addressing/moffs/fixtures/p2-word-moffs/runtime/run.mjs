@@ -23,6 +23,7 @@ const paths = [
   'engine/tests/cpu/moves/addressing/moffs/wasm/word.rs', 'engine/tests/cpu/moves/wasm.rs', 'engine/tests/support/wasm.rs',
   'engine/tests/cpu/moves/addressing/moffs/fixtures/p2-word-moffs/runtime/run.mjs', 'engine/tests/support/wasm/engine.mjs'];
 assert.equal(new Set(paths).size, paths.length);
+paths.push(...["engine/src/abi/memory_helper/cpu.rs", "engine/src/cpu/dbt/wasm/memory/cpu_scalar.rs", "engine/src/cpu/dbt/wasm/emitter.rs", "engine/src/cpu/dbt/wasm/code_fetch.rs", "engine/src/process/memory/cpu_scalar.rs", "engine/src/process/memory/scalar/cpu_write.rs", "engine/src/process/wasm/memory/cpu_write.rs", "engine/src/abi/wasm/exports/memory/cpu_write.rs"].filter(path=>!paths.includes(path)));
 const sources = () => Object.fromEntries(paths.map(path => [path, hash(readFileSync(join(root, path)))]));
 const sourcePins = sources(), modules = [];
 const counts = {contexts: 0, runs: 0, retired: 0, matrix: 0, flag_inputs: 0, repeats: 0, faults: 0, retries: 0, current_inputs: 0, consumers: 0, controls: 0, retained_units: 0, code_reads: 0, self_code: 0};
@@ -61,7 +62,7 @@ function seed(c, pc, r = registers(), flags = 0xcd7) {
   const b = Buffer.alloc(140); b.set(state({registers: r, pc, flags})); b.set(exit(3, 0), 56);
   b.set(record('R3MH', 40, [0, 0xdecafbad, 0, 0, 0, 0]), 100); input(c, 0, b); return cpu(c);
 }
-function run(c, module, budget, next, {label, reason = 1, retired = 1, fault, helperVersion = 4, helperValue = 0, status = 0, exitVersion = 2} = {}) {
+function run(c, module, budget, next, {label, reason = 1, retired = 1, fault, helperVersion = 10, helperValue = 0, status = 0, exitVersion = 6} = {}) {
   const expected = arena(c);
   if (status === 0) {
     expected.set(state(next)); expected.set(exit(reason, retired, fault, exitVersion), 56);
@@ -93,7 +94,7 @@ function compile(c, blocks) {
   const bytes = Buffer.from(new Uint8Array(c.memory.buffer, binding.pointer, binding.length));
   const module = new WebAssembly.Module(bytes), imports = WebAssembly.Module.imports(module);
   const reads = blocks.some(b => b.read), stores = blocks.some(b => b.store);
-  const names = [c.owner === 'resident' ? 'guard_resident' : 'guard', ...(reads ? ['read16'] : []), ...(stores ? [c.owner === 'resident' ? 'store_resident16' : 'store16'] : [])];
+  const names = [c.owner === 'resident' ? 'guard_resident' : 'guard', ...(reads ? ['cpu_read16'] : []), ...(stores ? [c.owner === 'resident' ? 'cpu_store_resident16' : 'cpu_store16'] : [])];
   assert.deepEqual(imports, [{module: 'env', name: 'memory', kind: 'memory'}, ...names.map(name => ({module: 'ring3', name, kind: 'function'}))]);
   assert.deepEqual(WebAssembly.Module.exports(module), [{name: 'run', kind: 'function'}]);
   const file = `module-${modules.length + 1}.wasm`; writeFileSync(join(output, file), bytes, {flag: 'wx'});
@@ -110,7 +111,8 @@ function open(owner, entries) {
   for (const name of ['open', 'close', 'arena_ptr', 'map', 'unmap', 'protect', 'upload', 'read8', 'read16', 'store16', 'store_resident16',
     'compile', 'compile_entries', 'compile_resident', 'compile_resident_entries', 'generation', 'module_ptr', 'module_len', 'guard', 'guard_resident'])
     c.api[name] = instance.exports['ring3_abi_v1_' + name];
-  assert.equal(c.api.open(12, c.id, 0x574d4f46), 0); c.base = c.api.arena_ptr() >>> 0; input(c, 0, initial);
+  for(const name of ["read16", "read8", "store16", "store_resident16"]) {c.api["cpu_"+name]=instance.exports["ring3_abi_v1_cpu_"+name];assert.equal(c.api["cpu_"+name]?.length,name.startsWith("read")?1:name.includes("resident")?6:2,"cpu_"+name);}
+ assert.equal(c.api.open(12, c.id, 0x574d4f46), 0); c.base = c.api.arena_ptr() >>> 0; input(c, 0, initial);
   for (const args of [[PC, 1, 7], [DATA, 2, 3], [0xa53c5000, 1, 3], [0xfffff000, 1, 3], [0, 1, 3], [0x8000, 1, 3], [0x7ffff000, 1, 3], [0x80000000, 1, 3], [0xf3f06000, 1, 3]]) map(c, ...args);
   upload(c, 0x8000, canary); host(c, 'protect', [0x8000, 1, 1]);
   return c;
@@ -128,7 +130,7 @@ function transition(before, instruction, saved) {
   const value = instruction.op === 'load' ? saved : before.registers[0] % 65536;
   assert.ok(Number.isInteger(value) && value >= 0 && value <= 65535);
   if (instruction.op === 'load') next.registers[0] = lowWord(before.registers[0], value);
-  return {next, value, address: instruction.address, helperVersion: instruction.op === 'load' ? 2 : 4};
+  return {next, value, address: instruction.address, helperVersion: 10};
 }
 function operation(c, module, instruction, saved, label, reason = 1) {
   const effects = transition(cpu(c), instruction, saved);
@@ -163,8 +165,8 @@ function repair(c, failure) {
 function stoppedFault(c, module, instruction, r, fault, label, afterFault) {
   const before = seed(c, instruction.pc - 5, r), stopped = {...before, registers: [...before.registers], pc: instruction.pc}; stopped.registers[3] = 0x11223344;
   const overflow = instruction.name === 'overflow';
-  const helperVersion = overflow ? null : instruction.op === 'load' ? 2 : 4;
-  const reason = overflow ? 11 : 5, exitVersion = overflow ? 6 : 2;
+  const helperVersion = overflow ? null : 10;
+  const reason = overflow ? 11 : 5, exitVersion = 6;
   if (overflow) fault = undefined;
   run(c, module, 2, stopped, {label: label + ' after prior MOV retirement', reason, retired: 1, fault, helperVersion, exitVersion});
   afterFault?.();

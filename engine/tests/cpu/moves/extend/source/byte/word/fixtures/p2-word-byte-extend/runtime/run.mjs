@@ -23,6 +23,7 @@ const paths = [
   'engine/tests/cpu/moves/extend/source/byte/word/native.rs', 'engine/tests/cpu/moves/native.rs', 'engine/tests/support/cpu/prefix/admission.rs', 'engine/tests/support/cpu/prefix/word.rs', 'engine/tests/cpu/moves/extend/source/byte/word/wasm.rs', 'engine/tests/cpu/moves/wasm.rs', 'engine/tests/support/wasm.rs',
   'engine/tests/cpu/moves/extend/source/byte/word/fixtures/p2-word-byte-extend/runtime/run.mjs', 'engine/tests/support/wasm/engine.mjs'];
 assert.equal(new Set(paths).size, paths.length);
+paths.push(...["engine/src/abi/memory_helper/cpu.rs", "engine/src/cpu/dbt/wasm/memory/cpu_scalar.rs", "engine/src/cpu/dbt/wasm/emitter.rs", "engine/src/cpu/dbt/wasm/code_fetch.rs", "engine/src/process/memory/cpu_scalar.rs", "engine/src/process/memory/scalar/cpu_write.rs", "engine/src/process/wasm/memory/cpu_write.rs", "engine/src/abi/wasm/exports/memory/cpu_write.rs"].filter(path=>!paths.includes(path)));
 const sources = () => Object.fromEntries(paths.map(path => [path, hash(readFileSync(join(root, path)))]));
 const sourcePins = sources(), modules = [];
 const counts = {contexts: 0, runs: 0, retired: 0, register_pairs: 0, byte_inputs: 0, flag_inputs: 0, anchors: 0, memory_destinations: 0, addresses: 0, boundaries: 0, faults: 0, retries: 0, current_inputs: 0, repeats: 0, controls: 0, retained_units: 0, code_reads: 0, consumers: 0};
@@ -60,7 +61,7 @@ function seed(c, pc, r = registers(), flags = 0xcd7) {
   const b = Buffer.alloc(140); b.set(state({registers: r, pc, flags})); b.set(exit(3, 0), 56);
   b.set(record('R3MH', 40, [0, 0xdecafbad, 0, 0, 0, 0]), 100); input(c, 0, b); return cpu(c);
 }
-function run(c, module, budget, next, {label, reason = 1, retired = 1, fault, helperVersion = null, helperValue = 0, status = 0, exitVersion = module.memoryOps ? 2 : 1} = {}) {
+function run(c, module, budget, next, {label, reason = 1, retired = 1, fault, helperVersion = null, helperValue = 0, status = 0, exitVersion = module.memoryOps ? 6 : 1} = {}) {
   const expected = arena(c);
   if (status === 0) {
     expected.set(state(next)); expected.set(exit(reason, retired, fault, exitVersion), 56);
@@ -88,7 +89,7 @@ function compile(c, blocks) {
   const bytes = Buffer.from(new Uint8Array(c.memory.buffer, binding.pointer, binding.length));
   const module = new WebAssembly.Module(bytes), imports = WebAssembly.Module.imports(module);
   const memoryOps = blocks.some(b => b.memory !== false);
-  const names = [c.owner === 'resident' ? 'guard_resident' : 'guard', ...(memoryOps ? ['read8'] : [])];
+  const names = [c.owner === 'resident' ? 'guard_resident' : 'guard', ...(memoryOps ? ['cpu_read8'] : [])];
   assert.deepEqual(imports, [{module: 'env', name: 'memory', kind: 'memory'}, ...names.map(name => ({module: 'ring3', name, kind: 'function'}))]);
   assert.deepEqual(WebAssembly.Module.exports(module), [{name: 'run', kind: 'function'}]);
   const file = `module-${modules.length + 1}.wasm`; writeFileSync(join(output, file), bytes, {flag: 'wx'});
@@ -102,7 +103,8 @@ function open(owner, entries) {
   for (const name of ['open', 'close', 'arena_ptr', 'map', 'unmap', 'protect', 'upload', 'read8',
     'compile', 'compile_entries', 'compile_resident', 'compile_resident_entries', 'generation', 'module_ptr', 'module_len', 'guard', 'guard_resident'])
     c.api[name] = instance.exports['ring3_abi_v1_' + name];
-  assert.equal(c.api.open(8, c.id, 0x57425854), 0); c.base = c.api.arena_ptr() >>> 0; input(c, 0, initial);
+  for(const name of ["read8"]) {c.api["cpu_"+name]=instance.exports["ring3_abi_v1_cpu_"+name];assert.equal(c.api["cpu_"+name]?.length,name.startsWith("read")?1:name.includes("resident")?6:2,"cpu_"+name);}
+ assert.equal(c.api.open(8, c.id, 0x57425854), 0); c.base = c.api.arena_ptr() >>> 0; input(c, 0, initial);
   for (const args of [[PC, 1, 7], [DATA, 1, 3], [0xa53c5000, 1, 3], [0xfffff000, 1, 3]]) host(c, 'map', args);
   return c;
 }
@@ -125,12 +127,12 @@ for (const kind of kinds) for (const [i, value] of anchorBytes.entries()) assert
 const registerSpec = (kind, destination, source, pc) => ({kind, destination, source, pc, memory: false, bytes: Buffer.from([0x66, 0x0f, opcode(kind), 0xc0 | destination << 3 | source])});
 const memorySpec = (kind, destination, tail, pc) => ({kind, destination, pc, memory: true, bytes: Buffer.from([0x66, 0x0f, opcode(kind), tail[0] | destination << 3, ...tail.slice(1)])});
 const absolute = (kind, destination, address, pc) => ({...memorySpec(kind, destination, [5, ...words([address])], pc), address});
-function operation(c, module, row, value, label, exitVersion = module.memoryOps ? 2 : 1) {
+function operation(c, module, row, value, label, exitVersion = module.memoryOps ? 6 : 1) {
   const before = cpu(c), actualByte = row.memory ? value : sourceByte(before.registers, row.source);
   if (value !== undefined) assert.equal(actualByte, value, 'authored source byte matches independent original-parent extraction');
   const next = {...before, registers: [...before.registers], pc: before.pc + row.bytes.length};
   next.registers[row.destination] = lowWord(before.registers[row.destination], extended(row.kind, actualByte));
-  run(c, module, 1, next, {label, helperVersion: row.memory ? 2 : null, helperValue: actualByte, exitVersion}); return next;
+  run(c, module, 1, next, {label, helperVersion: row.memory ? 10 : null, helperValue: actualByte, exitVersion}); return next;
 }
 const canary = Buffer.from([0x55, 0xa5, 0x66, 0x67, 0xf0, 0xf2, 0xf3, 0xaa]);
 const live = Buffer.from([
@@ -182,16 +184,16 @@ for (const owner of ['replacement', 'resident']) for (const entries of [false, t
   if (owner === 'resident') operation(c, firstModule, oldest, undefined, 'older pure resident remains current after later captures');
   else run(c, firstModule, 1, cpu(c), {label: 'replacement generation mismatch3 is full-arena neutral', status: 3, retired: 0}); counts.retained_units++;
   const r = registers(); r[0] = 0xcafe80f9; r[1] = 0xbeef1234; r[2] = 0xface5678; r[6] = DATA + 0x80; seed(c, livePc, r);
-  const memoryRow = {...memorySpec('sign', 1, [6], livePc), address: DATA + 0x80}; operation(c, mixed, memoryRow, 0xfd, 'live signed byte becomes current CX divisor', 5);
-  operation(c, mixed, registerSpec('zero', 0, 4, livePc + 4), 0x80, 'live original AH becomes AX128 without modifying CX or FLAGS', 5);
+  const memoryRow = {...memorySpec('sign', 1, [6], livePc), address: DATA + 0x80}; operation(c, mixed, memoryRow, 0xfd, 'live signed byte becomes current CX divisor', 6);
+  operation(c, mixed, registerSpec('zero', 0, 4, livePc + 4), 0x80, 'live original AH becomes AX128 without modifying CX or FLAGS', 6);
   function step(length, nextFlags, changes, budget = 1, retired = 1) {
     const before = cpu(c), next = {...before, registers: [...before.registers], pc: before.pc + length, flags: nextFlags};
     for (const [index, value] of Object.entries(changes)) next.registers[index] = lowWord(before.registers[index], value);
-    run(c, mixed, budget, next, {label: 'live returned factors/full product/quotient/FLAGS without CPU reseeding', retired, exitVersion: 5});
+    run(c, mixed, budget, next, {label: 'live returned factors/full product/quotient/FLAGS without CPU reseeding', retired, exitVersion: 6});
   }
   step(3, 0x402, {0: 0xfe80, 2: 0xffff}); step(3, 0x402, {0: 0x0080, 2: 0}); step(6, 0x402, {3: 0}, 2, 2);
-  run(c, mixed, 2, {...cpu(c), pc: livePc + live.length}, {label: 'live V5 suffix reaches cold lookup with returned quotient', reason: 3, exitVersion: 5});
-  run(c, mixed, 1, cpu(c), {label: 'live V5 cold result retains all returned state', reason: 3, retired: 0, exitVersion: 5}); counts.consumers += 7;
+  run(c, mixed, 2, {...cpu(c), pc: livePc + live.length}, {label: 'live V5 suffix reaches cold lookup with returned quotient', reason: 3, exitVersion: 6});
+  run(c, mixed, 1, cpu(c), {label: 'live V5 cold result retains all returned state', reason: 3, retired: 0, exitVersion: 6}); counts.consumers += 7;
   checkRam(c, DATA, canary); checkRam(c, DATA + 0x80, Buffer.from([0xfd])); checkRam(c, livePc, live); assert.equal(c.api.close(), 0);
 }
 
@@ -259,8 +261,8 @@ for (const owner of ['replacement', 'resident']) for (const entries of [false, t
       const r = registers(); r[0] = 0xcafe7777; r[7] = 0x9008;
       const before = seed(c, row.pc - 5, r), stopped = {...before, registers: [...before.registers], pc: row.pc}; stopped.registers[3] = 0x11223344;
       const fault = {detail: failure.permission === null ? 1 : 2, address: 0x9008, access: 1};
-      run(c, faultModule, 2, stopped, {label: failure.name + ' after MOV retains destination/FLAGS/FP', reason: 5, retired: 1, fault, helperVersion: 2});
-      run(c, faultModule, 1, stopped, {label: failure.name + ' unchanged retry', reason: 5, retired: 0, fault, helperVersion: 2}); counts.faults += 2;
+      run(c, faultModule, 2, stopped, {label: failure.name + ' after MOV retains destination/FLAGS/FP', reason: 5, retired: 1, fault, helperVersion: 10});
+      run(c, faultModule, 1, stopped, {label: failure.name + ' unchanged retry', reason: 5, retired: 0, fault, helperVersion: 10}); counts.faults += 2;
       if (failure.permission === null) host(c, 'map', [0x9000, 1, 1]); else host(c, 'protect', [0x9000, 1, 1]);
       assert.deepEqual(cpu(c), stopped, 'map/protect-only repair retains the stopped CPU');
       operation(c, faultModule, row, failure.value, 'repair reads current zero-filled/original BYTE without CPU or RAM reseed');
@@ -270,8 +272,8 @@ for (const owner of ['replacement', 'resident']) for (const entries of [false, t
     const r = registers(); r[0] = 0xcafe7777; r[7] = DATA + 12;
     const before = seed(c, row.pc - 5, r), stopped = {...before, registers: [...before.registers], pc: row.pc}; stopped.registers[3] = 0x11223344;
     const fault = {detail: 2, address: DATA + 12, access: 1};
-    run(c, faultModule, 2, stopped, {label: 'current-input witness starts with zero-byte read fault', reason: 5, retired: 1, fault, helperVersion: 2});
-    run(c, faultModule, 1, stopped, {label: 'current-input witness unchanged retry', reason: 5, retired: 0, fault, helperVersion: 2}); counts.faults += 2;
+    run(c, faultModule, 2, stopped, {label: 'current-input witness starts with zero-byte read fault', reason: 5, retired: 1, fault, helperVersion: 10});
+    run(c, faultModule, 1, stopped, {label: 'current-input witness unchanged retry', reason: 5, retired: 0, fault, helperVersion: 10}); counts.faults += 2;
     host(c, 'protect', [DATA, 1, 3]); upload(c, DATA + 14, Buffer.from([0xfd])); host(c, 'protect', [DATA, 1, 1]);
     const current = {...stopped, registers: [...stopped.registers], flags: 0x892}; current.registers[0] = 0xbaffdead; current.registers[7] = DATA + 14;
     input(c, 0, state(current)); assert.deepEqual(cpu(c), current, 'explicit current byte/EA/destination-high/FLAGS witness is separate from repair-only cases');

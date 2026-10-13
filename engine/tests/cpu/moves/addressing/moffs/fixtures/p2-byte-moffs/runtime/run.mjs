@@ -1,3 +1,4 @@
+import {ARENA_SIZE} from '../../../../../../../support/wasm/arena.mjs';
 import {generatedRunBody} from '../../../../../../../support/wasm/run.mjs';
 import {assertEngineExports} from '../../../../../../../support/wasm/exports.mjs';
 import assert from 'node:assert/strict';
@@ -9,8 +10,8 @@ import {join} from 'node:path';
 const [enginePath, output, root] = process.argv.slice(2);
 assert.ok(root, 'expected actual engine, new output directory and repository root');
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
-const SIZE = 4612, TRANSFER = 140, EXIT = 0x8020, EXIT_ID = 0x10003, MARKER = 0xaa77ffc1;
-const arities = {open:3, close:0, arena_ptr:0, map:3, protect:3, upload:2, read32:1, compile_entries:2, compile_resident_entries:2, generation:0, module_ptr:0, module_len:0, guard:6, guard_resident:7, read8:1, store8:2, store_resident8:6, store32:2, store_resident32:6, begin_image_input:1, append_image_input:2, load_pe32_linked_v2_input_at:2, start_loaded_image:2, capture_call:5, capture_resident_call:6, complete_windows_call:4, complete_resident_windows_call:5};
+const SIZE = ARENA_SIZE, TRANSFER = 140, EXIT = 0x8020, EXIT_ID = 0x10003, MARKER = 0xaa77ffc1;
+const arities = {cpu_read8:1,cpu_read32:1,cpu_store8:2,cpu_store_resident8:6,cpu_store32:2,cpu_store_resident32:6,open:3, close:0, arena_ptr:0, map:3, protect:3, upload:2, read32:1, compile_entries:2, compile_resident_entries:2, generation:0, module_ptr:0, module_len:0, guard:6, guard_resident:7, read8:1, store8:2, store_resident8:6, store32:2, store_resident32:6, begin_image_input:1, append_image_input:2, load_pe32_linked_v2_input_at:2, start_loaded_image:2, capture_call:5, capture_resident_call:6, complete_windows_call:4, complete_resident_windows_call:5};
 const productionPaths = execFileSync('rg', ['--files', 'engine/src'], {cwd:root, encoding:'utf8'}).trim().split('\n').sort();
 const engineBytes = readFileSync(enginePath), engineModule = new WebAssembly.Module(engineBytes);
 const engineExportContract = assertEngineExports(engineModule, root);
@@ -63,8 +64,8 @@ const state = (registers, pc, flags) => {
   return record('R3ST',56,[...registers,pc,flags]);
 };
 const exit = (reason, retired, version=2, detail=0, address=0, access=0, length=0) => record('R3EX',40,[reason,retired,detail,address,access,length],version);
-const readHelper = (value, reason=0, address=0) => record('R3MH',40,[reason?1:0,reason?0:value,reason,address,reason?1:0,1],2);
-const storeHelper = (reason=0, address=0) => record('R3MH',40,[reason?1:0,0,reason,address,reason?2:0,1],3);
+const readHelper = (value, reason=0, address=0) => record('R3MH',40,[reason?1:0,reason?0:value,reason,address,reason?1:0,1],10);
+const storeHelper = (reason=0, address=0) => record('R3MH',40,[reason?1:0,0,reason,address,reason?2:0,1],10);
 function refresh(ctx) {ctx.bytes = new Uint8Array(ctx.memory.buffer); ctx.view = new DataView(ctx.memory.buffer); return ctx;}
 function arena(ctx) {return refresh(ctx).bytes.slice(ctx.base,ctx.base+SIZE);}
 function request(ctx, bytes) {assert.ok(bytes.length<=4096); refresh(ctx).bytes.set(bytes,ctx.base+TRANSFER);}
@@ -104,8 +105,9 @@ function shape(ctx, bytes, binding, helpers, gates) {
     if(section===1) for(let n=u();n>0;n--){assert.equal(bytes[at++],0x60);types.push({parameters:Array.from({length:u()},()=>bytes[at++]),results:Array.from({length:u()},()=>bytes[at++])});}
     else if(section===2) for(let n=u();n>0;n--){const module=name(),field=name(),kind=bytes[at++];if(kind===0)imports.push({module,name:field,kind:'function',type:u()});else{assert.equal(kind,2);assert.equal(u(),0);assert.equal(u(),1);imports.push({module,name:field,kind:'memory'});}}
     else if(section===3) for(let n=u();n>0;n--)functions.push(u());
+    else if(section===6) {assert.equal(u(),3);for(const value of [1,0,1]){assert.equal(bytes[at++],0x7f);assert.equal(bytes[at++],0);assert.equal(bytes[at++],0x41);assert.equal(s(),value);assert.equal(bytes[at++],0x0b);}}
     else if(section===7) for(let n=u();n>0;n--)exports.push({name:name(),kind:bytes[at++],index:u()});
-    else if(section===10) {assert.equal(u(), functions.length);const length=u();assert.equal(length, runBody.length); assert.ok(at + length <= end);locals=Array.from({length:u()},()=>[u(),bytes[at++]]);assert.deepEqual(locals, [[16, 0x7f], [1, 0x7e], [10, 0x7f]]);
+    else if(section===10) {assert.equal(u(), functions.length);const length=u();assert.equal(length, runBody.length); assert.ok(at + length <= end);locals=Array.from({length:u()},()=>[u(),bytes[at++]]);assert.deepEqual(locals, [[16, 0x7f], [1, 0x7e], [10, 0x7f], [1, 0x7f]]);
       const constants=[ctx.low,ctx.high,...(ctx.owner==='replacement'?[binding.generation]:[binding.low,binding.high])];for(const value of constants){assert.equal(bytes[at++],0x41);assert.equal(s(),value);}for(const value of [0,1,3]){assert.equal(bytes[at++],0x20);assert.equal(u(),value);}assert.equal(bytes[at++],0x10);assert.equal(u(),0);guard={constants,parameters:[0,1,3]};at=end;}
     else assert.fail(`unexpected child section${section}`); assert.equal(at,end);
   }
@@ -122,9 +124,9 @@ function compile(ctx, entries, gates, label, extra) {
   assert.ok(WebAssembly.validate(bytes));const module=new WebAssembly.Module(bytes);assert.deepEqual(WebAssembly.Module.imports(module),[{module:'env',name:'memory',kind:'memory'},...helpers.map(name=>({module:'ring3',name,kind:'function'}))]);assert.deepEqual(WebAssembly.Module.exports(module),[{name:'run',kind:'function'}]);
   const instance=new WebAssembly.Instance(module,{env:{memory:ctx.memory},ring3:ctx.api});assert.equal(instance.exports.run.length,4);writeFileSync(join(output,`${label}.wasm`),bytes);modules.push({context:ctx.ordinal,label,owner:ctx.owner,entries,gates,...binding,...meta,sha256:hash(bytes)});return {...binding,bytes,run:instance.exports.run,label};
 }
-const storeName=ctx=>ctx.owner==='replacement'?'store8':'store_resident8';
+const storeName=ctx=>ctx.owner==='replacement'?'cpu_store8':'cpu_store_resident8';
 function guard(ctx, unit, status=0) {call(ctx,ctx.owner==='replacement'?'guard':'guard_resident',ctx.owner==='replacement'?[ctx.low,ctx.high,unit.generation,ctx.base,ctx.base+56,ctx.base+96]:[ctx.low,ctx.high,unit.low,unit.high,ctx.base,ctx.base+56,ctx.base+96],status);refresh(ctx);assert.deepEqual(ctx.bytes.slice(unit.pointer,unit.pointer+unit.length),unit.bytes);}
-function run(ctx, unit, label, budget, registers, pc, flags, reason, retired, helperPacket=null, version=2, detail=0, address=0, access=0, length=0) {
+function run(ctx, unit, label, budget, registers, pc, flags, reason, retired, helperPacket=null, version=6, detail=0, address=0, access=0, length=0) {
   const before=arena(ctx),expected=before.slice();expected.set(state(registers,pc,flags));expected.set(exit(reason,retired,version,detail,address,access,length),56);if(helperPacket)expected.set(helperPacket,100);
   assert.equal(unit.run(ctx.base,ctx.base+56,budget,ctx.base+96),0);const observed=arena(ctx);assert.deepEqual(observed,expected,label);
   const file=`${ctx.label}-${label}-arena.bin`;writeFileSync(join(output,file),observed);runs.push({context:ctx.ordinal,module:unit.label,label,budget,status:0,retired,pc,flags,registers:[...registers],reason,version,detail,address,access,length,arena:file,sha256:hash(observed)});
@@ -137,7 +139,7 @@ for(const owner of ['replacement','resident']) for(const [index,item] of finite.
   const ctx=fresh(owner,`${owner}-finite-${index}`),code=Buffer.concat([moffs(item.op,item.address),Buffer.from([0xeb,0])]),page=item.address-item.address%4096,data=Buffer.alloc(4096,0x6d);
   data[item.address%4096]=item.op===0xa0?item.value:0x6d;mapPage(ctx,0x1000,codePage(code),5);mapPage(ctx,page,data);
   if(item.address===0xffffffff)mapPage(ctx,0,Buffer.alloc(4096,0x5a),1);
-  const unit=compile(ctx,[0x1000],[],`${ctx.label}-mov`,[item.op===0xa0?'read8':storeName(ctx)]);readPages(ctx,'before');call(ctx,'protect',[page,1,item.op===0xa0?1:2]);
+  const unit=compile(ctx,[0x1000],[],`${ctx.label}-mov`,[item.op===0xa0?'cpu_read8':storeName(ctx)]);readPages(ctx,'before');call(ctx,'protect',[page,1,item.op===0xa0?1:2]);
   const registers=[...initialRegisters];registers[0]=item.eax;seed(ctx,registers,0x1000,item.flags);registers[0]=item.result;
   run(ctx,unit,'mov',1,registers,0x1005,item.flags,1,1,item.op===0xa0?readHelper(item.value):storeHelper());
   if(item.op===0xa2){ctx.pages.get(page)[item.address%4096]=item.value;call(ctx,'protect',[page,1,3]);}readPages(ctx,'after');guard(ctx,unit);
@@ -145,12 +147,12 @@ for(const owner of ['replacement','resident']) for(const [index,item] of finite.
 }
 for(const owner of ['replacement','resident']) for(const op of [0xa0,0xa2]) {
   const ctx=fresh(owner,`${owner}-retry-${op.toString(16)}`),code=Buffer.concat([Buffer.from('b8805634123c01','hex'),moffs(op,0x5010),Buffer.from([0xeb,0])]);mapPage(ctx,0x9000,codePage(code),5);
-  const unit=compile(ctx,[0x9000],[],`${ctx.label}-prefix`,[op===0xa0?'read8':storeName(ctx)]),registers=[...initialRegisters];readPages(ctx,'before');seed(ctx,registers,0x9000,0x0402);
+  const unit=compile(ctx,[0x9000],[],`${ctx.label}-prefix`,[op===0xa0?'cpu_read8':storeName(ctx)]),registers=[...initialRegisters];readPages(ctx,'before');seed(ctx,registers,0x9000,0x0402);
   registers[0]=0x12345680;const access=op===0xa0?1:2,fault=reason=>op===0xa0?readHelper(0,reason,0x5010):storeHelper(reason,0x5010);
-  run(ctx,unit,'unmapped',8,registers,0x9007,0x0c12,5,2,fault(1),2,1,0x5010,access,1);readPages(ctx,'unmapped');
+  run(ctx,unit,'unmapped',8,registers,0x9007,0x0c12,5,2,fault(1),6,1,0x5010,access,1);readPages(ctx,'unmapped');
   if(op===0xa0){run(ctx,unit,'budget0',0,registers,0x9007,0x0c12,1,0);refresh(ctx).view.setUint32(ctx.base+96,1,true);run(ctx,unit,'cancel',8,registers,0x9007,0x0c12,2,0);refresh(ctx).view.setUint32(ctx.base+96,0,true);}
   mapPage(ctx,0x5000,Buffer.alloc(4096,0x6d),op===0xa0?2:1);guard(ctx,unit);
-  run(ctx,unit,'permission',8,registers,0x9007,0x0c12,5,0,fault(2),2,2,0x5010,access,1);
+  run(ctx,unit,'permission',8,registers,0x9007,0x0c12,5,0,fault(2),6,2,0x5010,access,1);
   if(op===0xa0)call(ctx,'protect',[0x5000,1,3]);readPages(ctx,'permission');if(op===0xa0)call(ctx,'protect',[0x5000,1,2]);
   call(ctx,'protect',[0x5000,1,op===0xa0?1:2]);guard(ctx,unit);if(op===0xa0)registers[0]=0x1234566d;
   run(ctx,unit,'retry',1,registers,0x900c,0x0c12,1,1,op===0xa0?readHelper(0x6d):storeHelper());
@@ -187,9 +189,9 @@ for(const base of [0x400000,0x500000]) for(const owner of ['replacement','reside
   const receipt=record('R3LI',72,[base,0x5000,entry,5,0x8000,1,0,0,EXIT,EXIT_ID,0,0,0,0],2);call(ctx,'load_pe32_linked_v2_input_at',[base,0x8000],0,[[TRANSFER,receipt]]);writeFileSync(join(output,`${ctx.label}-receipt.bin`),receipt);
   const header=Buffer.alloc(4096),text=Buffer.alloc(4096),data=Buffer.alloc(4096),fixups=Buffer.alloc(4096),gatePage=Buffer.alloc(4096);header.set(image.subarray(0,512));text.set(image.subarray(0x200,0x400));data.set(image.subarray(0x400,0x600));fixups.set(image.subarray(0x600,0x800));gatePage.set([0x0f,0x0b],0x20);
   relocations.forEach(([offset,rva])=>text.writeUInt32LE(base+rva,offset));data.writeUInt32LE(EXIT,0x150);for(const [address,bytes] of [[base,header],[entry,text],[base+0x2000,data],[base+0x4000,fixups],[0x8000,gatePage]])ctx.pages.set(address,bytes);readPages(ctx,'loaded');
-  const entries=callerOffsets.map(offset=>entry+offset);if(owner==='replacement')entries.push(EXIT);const gates=[[EXIT,EXIT_ID]],caller=compile(ctx,entries,owner==='replacement'?gates:[],`${ctx.label}-caller`,['read32',owner==='replacement'?'store32':'store_resident32','read8',storeName(ctx)]),gate=owner==='replacement'?caller:compile(ctx,[EXIT],gates,`${ctx.label}-gate`,[]);
+  const entries=callerOffsets.map(offset=>entry+offset);if(owner==='replacement')entries.push(EXIT);const gates=[[EXIT,EXIT_ID]],caller=compile(ctx,entries,owner==='replacement'?gates:[],`${ctx.label}-caller`,['cpu_read32',owner==='replacement'?'cpu_store32':'cpu_store_resident32','cpu_read8',storeName(ctx)]),gate=owner==='replacement'?caller:compile(ctx,[EXIT],gates,`${ctx.label}-gate`,[]);
   call(ctx,'start_loaded_image',[0x70000,1],0,[[0,state([0,0,0,0,0x71000,0,0,0],entry,2)],[56,exit(3,0,3)]]);ctx.pages.set(0x70000,Buffer.alloc(4096));readPages(ctx,'started');
-  const registers=[0x123456ff,0,0,0,0x70ff8,0,0,0];run(ctx,caller,'caller',32,registers,EXIT,0x46,owner==='replacement'?8:3,10,record('R3MH',40,[0,0,0,0,0,0]),owner==='replacement'?3:2,owner==='replacement'?EXIT_ID:0);
+  const registers=[0x123456ff,0,0,0,0x70ff8,0,0,0];run(ctx,caller,'caller',32,registers,EXIT,0x46,owner==='replacement'?8:3,10,record('R3MH',40,[0,0,0,0,0,4],10),6,owner==='replacement'?EXIT_ID:0);
   ctx.pages.get(base+0x2000)[0]=0xff;ctx.pages.get(0x70000).writeUInt32LE(entry+36,0xff8);ctx.pages.get(0x70000).writeUInt32LE(MARKER,0xffc);readPages(ctx,'called');
   if(owner==='resident')run(ctx,gate,'gate',1,registers,EXIT,0x46,8,0,null,3,EXIT_ID);
   const frame=record('R3CF',112,[1,EXIT_ID,2,1,EXIT,0x70ff8,entry+36,0,MARKER,...Array(15).fill(0)]);call(ctx,owner==='replacement'?'capture_call':'capture_resident_call',owner==='replacement'?[ctx.low,ctx.high,gate.generation,2,1]:[ctx.low,ctx.high,gate.low,gate.high,2,1],0,[[TRANSFER,frame]]);writeFileSync(join(output,`${ctx.label}-frame.bin`),frame);
@@ -199,5 +201,6 @@ for(const base of [0x400000,0x500000]) for(const owner of ['replacement','reside
 const counts={contexts,modules:modules.length,finite:rows.filter(row=>row.kind==='finite').length,retry:rows.filter(row=>row.kind==='retry').length,smc:rows.filter(row=>row.kind==='smc').length,pe:rows.filter(row=>row.kind==='pe').length,generated_invocations:runs.length,retired:runs.reduce((sum,row)=>sum+row.retired,0),page_observations:pageChecks,host_read32:read32Calls,other_host_api:hostCalls.length,total_host_api:read32Calls+hostCalls.length,source_inputs:sourcePaths.length};
 assert.deepEqual(counts,{contexts:24,modules:34,finite:12,retry:4,smc:4,pe:4,generated_invocations:50,retired:84,page_observations:196,host_read32:200704,other_host_api:360,total_host_api:201064,source_inputs: productionPaths.length + 10});
 const afterSources=sources();assert.deepEqual(afterSources,beforeSources);assert.deepEqual(readFileSync(enginePath),engineBytes);writeFileSync(join(output,'source-after.json'),JSON.stringify(afterSources,null,2));
-const result={schema:'bounded-accumulator-byte-moffs-v1',counts,engine_sha256:hash(engineBytes),sources:beforeSources,llvm,finite_inputs:finite,rows,modules,runs,observations,host_calls:hostCalls,pe:{bytes:2048,sha256:hash(image),program_length:51,program_hex:program.toString('hex'),caller_offsets:callerOffsets,relocations},limits:['Only unprefixed flat32 A0/A2; no general ISA/OS/address-size/segments/browser/performance/game claim','Numeric expected byte/parent/flags states are authored independently; full raw arenas and complete observed pages are saved for these compact calls','SMC status11 is inferred from strict source protocol plus committed Invalidated exit; not captured as helper return','LLVM checks only the two encoding samples; fresh PE bytes/CFG/relocations are independent literal input','Old unchanged load/store original raw results/provenance are handled by ROOT separately']};
+const cpuSourcePins=Object.fromEntries(["engine/src/abi/memory_helper/cpu.rs", "engine/src/cpu/dbt/wasm/memory/cpu_scalar.rs", "engine/src/cpu/dbt/wasm/emitter.rs", "engine/src/cpu/dbt/wasm/code_fetch.rs", "engine/src/process/memory/cpu_scalar.rs", "engine/src/process/memory/scalar/cpu_write.rs", "engine/src/process/wasm/memory/cpu_write.rs", "engine/src/abi/wasm/exports/memory/cpu_write.rs", "engine/tests/support/wasm/arena.mjs"].map(path=>[path,hash(readFileSync(join(root,path)))]));
+const result={cpu_source_sha256:cpuSourcePins,schema:'bounded-accumulator-byte-moffs-v1',counts,engine_sha256:hash(engineBytes),sources:beforeSources,llvm,finite_inputs:finite,rows,modules,runs,observations,host_calls:hostCalls,pe:{bytes:2048,sha256:hash(image),program_length:51,program_hex:program.toString('hex'),caller_offsets:callerOffsets,relocations},limits:['Only unprefixed flat32 A0/A2; no general ISA/OS/address-size/segments/browser/performance/game claim','Numeric expected byte/parent/flags states are authored independently; full raw arenas and complete observed pages are saved for these compact calls','SMC status11 is inferred from strict source protocol plus committed Invalidated exit; not captured as helper return','LLVM checks only the two encoding samples; fresh PE bytes/CFG/relocations are independent literal input','Old unchanged load/store original raw results/provenance are handled by ROOT separately']};
 writeFileSync(join(output,'result.json'),JSON.stringify(result,null,2));console.log(JSON.stringify({status:'PASS',output:join(output,'result.json'),counts,engine_sha256:hash(engineBytes)}));

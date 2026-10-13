@@ -19,14 +19,16 @@ const sourcePaths=['engine/tests/cpu/moves/addressing/lookup/wasm/xlat.rs', 'eng
   'engine/src/cpu/x86/ir.rs','engine/src/cpu/x86/decode/lower.rs','engine/src/cpu/dbt/region.rs',
   'engine/src/cpu/dbt/wasm/integer/arithmetic.rs', 'engine/src/cpu/dbt/wasm/integer/bits.rs', 'engine/src/cpu/dbt/wasm/integer/carry_rotates.rs', 'engine/src/cpu/dbt/wasm/integer/decimal.rs', 'engine/src/cpu/dbt/wasm/integer/dispatch.rs', 'engine/src/cpu/dbt/wasm/integer/flags.rs', 'engine/src/cpu/dbt/wasm/integer/mod.rs', 'engine/src/cpu/dbt/wasm/integer/multiply_divide.rs', 'engine/src/cpu/dbt/wasm/integer/operands.rs', 'engine/src/cpu/dbt/wasm/integer/rotates.rs', 'engine/src/cpu/dbt/wasm/integer/shifts.rs','engine/src/cpu/dbt/wasm/memory.rs','engine/src/cpu/dbt/wasm/memory/narrow.rs'];
 assert.equal(new Set(sourcePaths).size, sourcePaths.length);
+sourcePaths.push(...["engine/src/abi/memory_helper/cpu.rs", "engine/src/cpu/dbt/wasm/memory/cpu_scalar.rs", "engine/src/cpu/dbt/wasm/emitter.rs", "engine/src/cpu/dbt/wasm/code_fetch.rs", "engine/src/process/memory/cpu_scalar.rs", "engine/src/process/memory/scalar/cpu_write.rs", "engine/src/process/wasm/memory/cpu_write.rs", "engine/src/abi/wasm/exports/memory/cpu_write.rs"].filter(path=>!sourcePaths.includes(path)));
 const sourcePins=()=>Object.fromEntries(sourcePaths.map(path=>[path,hash(readFileSync(join(root,path)))]));
 const initialSources=sourcePins(), modules=[], events=[], rows=[], frames=[];
 const counts={profiles:0,modules:0,translations:0,all_al:0,chained:0,boundaries:0,repairs:0,jumps:0,nops:0,fault_calls:0,controls:0,generated_calls:0,retired:0,raw_pairs:0};
 function record(magic,size,fields=[],version=1){const b=Buffer.alloc(size);b.write(magic);b.writeUInt16LE(version,4);b.writeUInt16LE(1,6);b.writeUInt32LE(size,8);fields.forEach((v,i)=>b.writeUInt32LE(v>>>0,16+i*4));return b;}
 const words=values=>Buffer.concat(values.map(v=>{const b=Buffer.alloc(4);b.writeUInt32LE(v>>>0);return b;}));
 const state=cpu=>record('R3ST',56,[...cpu.registers,cpu.pc,cpu.flags]);
-const exit=(reason,retired,detail=0,address=0,access=0,length=0)=>record('R3EX',40,[reason,retired,detail,address,access,length],2);
+const exit=(reason,retired,detail=0,address=0,access=0,length=0,version=2)=>record('R3EX',40,[reason,retired,detail,address,access,length],version);
 const helper=(value,detail=0,address=0)=>record('R3MH',40,detail?[1,0,detail,address,1,1]:[0,value,0,0,0,1],2);
+const cpuHelper=(value,detail=0,address=0)=>record('R3MH',40,detail?[1,0,detail,address,1,1]:[0,value,0,0,0,1],10);
 function initial(){const b=createArena(SIZE);b.set(state({registers:Array(8).fill(0),pc:0,flags:2}));b.set(record('R3EX',40,[1,0,0,0,0,0]),56);b.set(record('R3MH',40),100);const fp=record('R3FP',128);fp.writeUInt16LE(0x37f,16);fp.writeUInt16LE(0xffff,20);b.set(fp,FP);return b;}
 function opaqueFpu(seed){const b=record('R3FP',128);b.writeUInt16LE(0x27f,16);b.writeUInt16LE(0x81a5,18);b.writeUInt16LE(0x55aa,20);b.writeUInt16LE(0x7ff,22);b.writeUInt32LE(0xf1234567,24);b.writeUInt32LE(0xfedcba98,28);b.writeUInt16LE(0xf135,32);b.writeUInt16LE(0xe246,34);b.set(Buffer.from(Array.from({length:80},(_,i)=>(i*73+seed*29+17)&255)),40);return b;}
 function observed(ctx){return Buffer.from(new Uint8Array(ctx.memory.buffer,ctx.base,SIZE));}
@@ -37,7 +39,8 @@ function upload(ctx,address,bytes){input(ctx,140,bytes);host(ctx,'upload',addres
 function open(owner,entries){
   const instance=new WebAssembly.Instance(engine.module,{}),ctx={owner,entries,profile:`${owner}/${entries?'entry':'explicit'}`,memory:instance.exports.memory,api:{},expected:initial()};
   for(const [name,arity] of Object.entries({open:3,close:0,arena_ptr:0,map:3,unmap:2,protect:3,upload:2,read8:1,compile:1,compile_entries:2,compile_resident:1,compile_resident_entries:2,generation:0,module_ptr:0,module_len:0,guard:6,guard_resident:7})){const fn=instance.exports['ring3_abi_v1_'+name];assert.equal(typeof fn,'function',name);assert.equal(fn.length,arity,name);ctx.api[name]=fn;}
-  assert.equal(ctx.api.open(6,1,0x9abcde00),0);ctx.base=ctx.api.arena_ptr()>>>0;check(ctx,'default full arena');
+  for(const name of ["read8"]) {ctx.api["cpu_"+name]=instance.exports["ring3_abi_v1_cpu_"+name];assert.equal(ctx.api["cpu_"+name]?.length,name.startsWith("read")?1:name.includes("resident")?6:2,"cpu_"+name);}
+ assert.equal(ctx.api.open(6,1,0x9abcde00),0);ctx.base=ctx.api.arena_ptr()>>>0;check(ctx,'default full arena');
   for(const address of [PC,TABLE,0xfffff000,0])host(ctx,'map',address,1,address===PC?7:3);
   upload(ctx,PC,bank);upload(ctx,TABLE,table);input(ctx,FP,opaqueFpu(counts.profiles));counts.profiles++;return ctx;
 }
@@ -46,25 +49,25 @@ function compile(ctx){
   if(ctx.owner==='replacement'){host(ctx,ctx.entries?'compile_entries':'compile',3,...(ctx.entries?[0]:[]));binding={generation:ctx.api.generation(),pointer:ctx.api.module_ptr()>>>0,length:ctx.api.module_len()>>>0};}
   else{check(ctx,'before resident compile');assert.equal(ctx.entries?ctx.api.compile_resident_entries(3,0):ctx.api.compile_resident(3),0);const receipt=observed(ctx);assert.equal(receipt.readUInt32LE(140),1);assert.equal(receipt.readUInt32LE(144),24);binding=Object.fromEntries(['low','high','pointer','length'].map((n,i)=>[n,receipt.readUInt32LE(148+i*4)]));ctx.expected.set(words([1,24,binding.low,binding.high,binding.pointer,binding.length]),140);check(ctx,'resident metadata');events.push({profile:ctx.profile,kind:'compile_resident',entries:ctx.entries,binding});}
   const bytes=Buffer.from(new Uint8Array(ctx.memory.buffer,binding.pointer,binding.length)),module=new WebAssembly.Module(bytes);
-  const names=[ctx.owner==='replacement'?'guard':'guard_resident','read8'];assert.deepEqual(WebAssembly.Module.imports(module),[{module:'env',name:'memory',kind:'memory'},...names.map(name=>({module:'ring3',name,kind:'function'}))]);assert.deepEqual(WebAssembly.Module.exports(module),[{name:'run',kind:'function'}]);
+  const names=[ctx.owner==='replacement'?'guard':'guard_resident','cpu_read8'];assert.deepEqual(WebAssembly.Module.imports(module),[{module:'env',name:'memory',kind:'memory'},...names.map(name=>({module:'ring3',name,kind:'function'}))]);assert.deepEqual(WebAssembly.Module.exports(module),[{name:'run',kind:'function'}]);
   const unit={...binding,run:new WebAssembly.Instance(module,{env:{memory:ctx.memory},ring3:ctx.api}).exports.run};assert.equal(unit.run.length,4);
   const file=`module-${counts.modules}.wasm`;writeFileSync(join(output,file),bytes,{flag:'wx'});modules.push({profile:ctx.profile,file,bytes:bytes.length,sha256:hash(bytes),binding});counts.modules++;return unit;
 }
 function seed(ctx,pc,base,al,flags=2){ctx.cpu={registers:[(0xa53c7b00|al)>>>0,0x1234807f,0x23457f80,base>>>0,0x4567ff00,0x56789abc,0x6789abcd,0x789abcde],pc,flags};input(ctx,0,state(ctx.cpu));input(ctx,56,exit(3,0));input(ctx,96,words([0]));}
 function run(ctx,unit,label,budget,next,reason=1,retired=1,nextHelper,status=0,fault,pointers){
   check(ctx,'before generated');const before=observed(ctx),index=rows.length;
-  if(status===0){ctx.expected.set(state(next));ctx.expected.set(exit(reason,retired,fault?.detail,fault?.address,fault?1:0,fault?1:0),56);if(nextHelper)ctx.expected.set(nextHelper,100);}
+  if(status===0){ctx.expected.set(state(next));ctx.expected.set(exit(reason,retired,fault?.detail,fault?.address,fault?1:0,fault?1:0,6),56);if(nextHelper)ctx.expected.set(nextHelper,100);}
   assert.equal(unit.run(...(pointers??[ctx.base,ctx.base+56,budget,ctx.base+96])),status);check(ctx,'after generated');
   const after=observed(ctx);rows.push({profile:ctx.profile,label,budget,status,reason,retired,frame:index*2,pointers:pointers??null});frames.push(before,after);events.push({profile:ctx.profile,kind:'run',row:index});counts.generated_calls++;counts.retired+=status===0?retired:0;if(status===0)ctx.cpu=next;return {before,after};
 }
-function translate(ctx,unit,label,value){const next={...ctx.cpu,registers:ctx.cpu.registers.slice(),pc:(ctx.cpu.pc+1)>>>0};next.registers[0]=((next.registers[0]&0xffffff00)|value)>>>0;run(ctx,unit,label,1,next,1,1,helper(value));counts.translations++;}
+function translate(ctx,unit,label,value){const next={...ctx.cpu,registers:ctx.cpu.registers.slice(),pc:(ctx.cpu.pc+1)>>>0};next.registers[0]=((next.registers[0]&0xffffff00)|value)>>>0;run(ctx,unit,label,1,next,1,1,cpuHelper(value));counts.translations++;}
 function diagnostic(ctx,address,value){check(ctx,'before Read8 diagnostic');assert.equal(ctx.api.read8(address>>>0),0);ctx.expected.set(helper(value),100);events.push({profile:ctx.profile,kind:'diagnostic',address:address>>>0,value});check(ctx,'literal RAM diagnostic');}
 function faultCases(ctx,unit){
   for(const permission of [false,true]){
     if(permission){host(ctx,'map',0x7000,1,3);upload(ctx,0x7008,Buffer.from([0x77]));host(ctx,'protect',0x7000,1,2);}
     seed(ctx,PC+16,0x7000,8,0xcd7);const fault={detail:permission?2:1,address:0x7008},next={...ctx.cpu,pc:PC+17};
-    run(ctx,unit,permission?'permission-prefix':'unmapped-prefix',2,next,5,1,helper(0,fault.detail,fault.address),0,fault);counts.nops++;counts.fault_calls++;
-    run(ctx,unit,permission?'permission-retry':'unmapped-retry',1,next,5,0,helper(0,fault.detail,fault.address),0,fault);counts.fault_calls++;
+    run(ctx,unit,permission?'permission-prefix':'unmapped-prefix',2,next,5,1,cpuHelper(0,fault.detail,fault.address),0,fault);counts.nops++;counts.fault_calls++;
+    run(ctx,unit,permission?'permission-retry':'unmapped-retry',1,next,5,0,cpuHelper(0,fault.detail,fault.address),0,fault);counts.fault_calls++;
     if(permission)host(ctx,'protect',0x7000,1,3);else host(ctx,'map',0x7000,1,3);
     upload(ctx,0x7008,Buffer.from([0x66]));assert.deepEqual(ctx.cpu,next,'repair retains current faulting CPU');translate(ctx,unit,permission?'permission-repair':'unmapped-repair',0x66);counts.repairs++;diagnostic(ctx,0x7008,0x66);host(ctx,'unmap',0x7000,1);
   }
@@ -98,15 +101,15 @@ for(let index=0;index<rows.length;index++){
   const expected=Buffer.from(before),pc=before.readUInt32LE(48),offset=pc-PC;let next=pc,retired=0,reason=1;
   if(row.label.startsWith('control-'))reason=before.readUInt32LE(96)?2:1;
   else if(row.label==='cold')reason=3;
-  else if(row.label.endsWith('-retry')){reason=5;expected.set(helper(0,row.label.startsWith('permission')?2:1,0x7008),100);}
-  else if(row.label.endsWith('-prefix')){assert.equal(bank[offset],0x90);assert.equal(bank[offset+1],0xd7);next=pc+1;retired=1;reason=5;expected.set(helper(0,row.label.startsWith('permission')?2:1,0x7008),100);}
+  else if(row.label.endsWith('-retry')){reason=5;expected.set(cpuHelper(0,row.label.startsWith('permission')?2:1,0x7008),100);}
+  else if(row.label.endsWith('-prefix')){assert.equal(bank[offset],0x90);assert.equal(bank[offset+1],0xd7);next=pc+1;retired=1;reason=5;expected.set(cpuHelper(0,row.label.startsWith('permission')?2:1,0x7008),100);}
   else if(row.label.endsWith('-jump')){assert.deepEqual(bank.subarray(offset,offset+2),Buffer.from([0xeb,0]));next=pc+2;retired=1;reason=3;}
   else{
     assert.equal(bank[offset],0xd7);const address=(before.readUInt32LE(28)+(before.readUInt32LE(16)&255))>>>0;
     let value;if(address>=TABLE&&address<TABLE+256)value=readFileSync(join(output,'table.bin'))[address-TABLE];else if(address===0x7008)value=0x66;else if(address===0xffffffff)value=row.label.endsWith('-255')?0x31:0xe7;else if(address===0)value=row.label==='boundary-4294967295-1'?0x80:0xa6;else assert.fail('unknown physical XLAT address');
-    expected.writeUInt32LE(((before.readUInt32LE(16)&0xffffff00)|value)>>>0,16);expected.set(helper(value),100);next=pc+1;retired=1;
+    expected.writeUInt32LE(((before.readUInt32LE(16)&0xffffff00)|value)>>>0,16);expected.set(cpuHelper(value),100);next=pc+1;retired=1;
   }
-  expected.writeUInt32LE(next>>>0,48);expected.set(exit(reason,retired,reason===5?(row.label.startsWith('permission')?2:1):0,reason===5?0x7008:0,reason===5?1:0,reason===5?1:0),56);
+  expected.writeUInt32LE(next>>>0,48);expected.set(exit(reason,retired,reason===5?(row.label.startsWith('permission')?2:1):0,reason===5?0x7008:0,reason===5?1:0,reason===5?1:0,6),56);
   assert.deepEqual(after,expected,'saved opcode-selected full arena recomputation');counts.raw_pairs++;
 }
 assert.equal(counts.raw_pairs,1128);assert.deepEqual(sourcePins(),initialSources,'fixture sources unchanged');writeFileSync(join(output,'engine.wasm'),engine.bytes,{flag:'wx'});

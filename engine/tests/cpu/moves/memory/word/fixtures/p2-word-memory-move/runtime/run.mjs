@@ -20,7 +20,7 @@ function record(magic, size, fields, version = 1) {
 }
 const state = c => record("R3ST", 56, [...c.registers, c.pc, c.flags]);
 const exit = (reason, count, fault, version = 2) => record("R3EX", 40, [reason, count, fault?.detail ?? 0, fault?.address ?? 0, fault?.access ?? 0, fault ? 2 : 0], version);
-const helper = (form, value = 0, fault) => record("R3MH", 40, [fault ? 1 : 0, value, fault?.detail ?? 0, fault?.address ?? 0, fault?.access ?? 0, 2], form === "load" ? 2 : 4);
+const helper = (form, value = 0, fault) => record("R3MH", 40, [fault ? 1 : 0, value, fault?.detail ?? 0, fault?.address ?? 0, fault?.access ?? 0, 2], 10);
 const words = values => {const b = Buffer.alloc(values.length * 4); values.forEach((v, i) => b.writeUInt32LE(u32(v), i * 4)); return b;};
 const copy = c => ({...c, registers: [...c.registers]});
 const defaultRegisters = [0xb64d8001, 0xc75e2222, 0xd86f3333, 0xe9704444, 0xfa815555, 0x8b926666, 0x9ca37777, 0x5008];
@@ -72,8 +72,8 @@ function makePlan() {
     const name = c.owner === "resident" ? (c.entries ? "compile_resident_entries" : "compile_resident") : (c.entries ? "compile_entries" : "compile");
     host(c, name, c.entries ? [blocks.length, 0] : [blocks.length]);
     if (c.owner === "replacement") for (const getter of ["generation", "module_ptr", "module_len"]) host(c, getter, []);
-    const module = {id: modules.length + 1, context: c.id, bank: bank.id, label, owner: c.owner, entries: c.entries, version: helperNames.length ? 2 : 1,
-      imports: [c.owner === "resident" ? "guard_resident" : "guard", ...helperNames.map(name => name === "store16" && c.owner === "resident" ? "store_resident16" : name)]};
+    const module = {id: modules.length + 1, context: c.id, bank: bank.id, label, owner: c.owner, entries: c.entries, version: helperNames.length ? 6 : 1,
+      imports: [c.owner === "resident" ? "guard_resident" : "guard", ...helperNames.map(name => "cpu_" + (name === "store16" && c.owner === "resident" ? "store_resident16" : name))]};
     modules.push(module); add(c, "module", {module: module.id}); return module;
   }
   function discard(c, module) {if (c.owner === "resident") host(c, "discard_unacknowledged_resident", ["key_low", "key_high", `module:${module.id}:low`, `module:${module.id}:high`]);}
@@ -218,6 +218,7 @@ if (process.argv[2] === "--plan") {
   writePlan(output, false); writeFileSync(join(output, "engine.wasm"), engine.bytes, {flag: "wx"});
   const paths = ["engine/src/abi/arena.rs", "engine/src/abi/memory_helper.rs", "engine/src/abi/x86/x87.rs", "engine/src/abi/wasm/exports/calls.rs", "engine/src/abi/wasm/exports/cpu.rs", "engine/src/abi/wasm/exports/execution.rs", "engine/src/abi/wasm/exports/image.rs", "engine/src/abi/wasm/exports/instance.rs", "engine/src/abi/wasm/exports/memory.rs", "engine/src/abi/wasm/exports/mod.rs", "engine/src/cpu/x86/ir.rs", "engine/src/cpu/x86/decode/lower.rs", "engine/src/cpu/x86/decode/profile.rs", "engine/src/cpu/dbt/region.rs", "engine/src/cpu/dbt/wasm/integer/arithmetic.rs", "engine/src/cpu/dbt/wasm/integer/bits.rs", "engine/src/cpu/dbt/wasm/integer/carry_rotates.rs", "engine/src/cpu/dbt/wasm/integer/decimal.rs", "engine/src/cpu/dbt/wasm/integer/dispatch.rs", "engine/src/cpu/dbt/wasm/integer/flags.rs", "engine/src/cpu/dbt/wasm/integer/mod.rs", "engine/src/cpu/dbt/wasm/integer/multiply_divide.rs", "engine/src/cpu/dbt/wasm/integer/operands.rs", "engine/src/cpu/dbt/wasm/integer/rotates.rs", "engine/src/cpu/dbt/wasm/integer/shifts.rs", "engine/src/cpu/dbt/wasm/emitter.rs", "engine/src/cpu/dbt/wasm/locals.rs", "engine/src/cpu/dbt/wasm/memory.rs", "engine/src/cpu/dbt/wasm/memory/narrow.rs", "engine/src/cpu/dbt/wasm/memory/word_store.rs", "engine/src/memory/space.rs", "engine/src/process/instance.rs", "engine/src/process/execution/compiled.rs", "engine/src/process/execution/authority.rs", "engine/src/process/memory/address_space.rs", "engine/src/process/memory/scalar.rs", "engine/src/process/memory/scalar/tests.rs", "engine/src/process/execution/mod.rs", "engine/src/process/memory/mod.rs", "engine/src/process/mod.rs", "engine/src/process/execution/resident.rs", "engine/tests/cpu/moves/memory/word/wasm/operations.rs", "engine/tests/cpu/moves/wasm.rs", "engine/tests/cpu/moves/memory/word/fixtures/p2-word-memory-move/runtime/run.mjs", "engine/tests/cpu/moves/memory/word/fixtures/p2-word-memory-move/cases.json", "engine/tests/support/wasm/engine.mjs"];
 assert.equal(new Set(paths).size, paths.length);
+  paths.push(...["engine/src/abi/memory_helper/cpu.rs", "engine/src/cpu/dbt/wasm/memory/cpu_scalar.rs", "engine/src/cpu/dbt/wasm/emitter.rs", "engine/src/cpu/dbt/wasm/code_fetch.rs", "engine/src/process/memory/cpu_scalar.rs", "engine/src/process/memory/scalar/cpu_write.rs", "engine/src/process/wasm/memory/cpu_write.rs", "engine/src/abi/wasm/exports/memory/cpu_write.rs"].filter(path=>!paths.includes(path)));
   const sources = () => Object.fromEntries(paths.map(path => {const b = readFileSync(join(root, path)); return [path, {bytes: b.length, sha256: sha(b)}];}));
   const pins = sources(), contexts = new Map(), savedModules = new Map(), frames = [], frameHashes = [], journal = [], captures = [];
   const snapshot = c => {assert.equal(c.closed, false, "no freed arena access"); return Buffer.from(new Uint8Array(c.memory.buffer, c.base, SIZE));};
@@ -265,7 +266,7 @@ assert.equal(new Set(paths).size, paths.length);
         const module = savedModules.get(event.module); let fn = module.run, foreign;
         if (event.foreign_helper) {
           foreign = new WebAssembly.Instance(injectorModule, {env: {memory: c.memory}}); foreign.exports.configure(c.base + 100);
-          const names = event.foreign_helper === "load" ? {read16: foreign.exports.read16} : {store16: foreign.exports.store16, store_resident16: foreign.exports.store_resident16};
+          const names = event.foreign_helper === "load" ? {cpu_read16: foreign.exports.read16} : {cpu_store16: foreign.exports.store16, cpu_store_resident16: foreign.exports.store_resident16};
           fn = new WebAssembly.Instance(module.module, {env: {memory: c.memory}, ring3: {...c.api, ...names}}).exports.run;
         }
         const args = [c.base, c.base + 56, event.budget, c.base + 96]; if (event.invalid_pointer) args[{state: 0, exit: 1, cancel: 3}[event.invalid_pointer]] = 0xffffffff;

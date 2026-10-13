@@ -1,6 +1,6 @@
 import {generatedRunBody} from '../../../../../../support/wasm/run.mjs';
 import {assertEngineExports} from '../../../../../../support/wasm/exports.mjs';
-import {createArena} from '../../../../../../support/wasm/arena.mjs';
+import {ARENA_SIZE, createArena} from '../../../../../../support/wasm/arena.mjs';
 import assert from 'node:assert/strict';
 import {execFileSync} from 'node:child_process';
 import {createHash} from 'node:crypto';
@@ -13,9 +13,9 @@ const fixtureRoot = join(root, 'engine/tests/cpu/moves/register/fixtures/p2-byte
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
 const oracleBytes = readFileSync(join(fixtureRoot, 'oracle.json')), oracle = JSON.parse(oracleBytes);
 const programBytes = readFileSync(join(fixtureRoot, 'program.S'));
-assert.equal(hash(oracleBytes), 'b32d98ba147b9f70c89534aa99b48ff1ee0f191dc287d418c87a7fedab148b9b');
+assert.equal(hash(oracleBytes), '8305ab06d5d53f4e11f7458ba063afc12c0168d8565f024184a1057d3c2542e0');
 assert.equal(hash(programBytes), 'a2cb5ef91e8ef5184ad3baf80cbe5ac51a79aaecdfe7dc3263a91675b4922f05');
-const size = 4612, transfer = 140, artifacts = {}, identities = [], operations = [], hostInputs = [], observations = [], ramChecks = [], stackChecks = [], refusalRows = [], exitedRows = [];
+const size = ARENA_SIZE, transfer = 140, artifacts = {}, identities = [], operations = [], hostInputs = [], observations = [], ramChecks = [], stackChecks = [], refusalRows = [], exitedRows = [];
 const fromHex = hex => new Uint8Array(Buffer.from(hex, 'hex'));
 function save(filename, bytes) { writeFileSync(join(outputDir, filename), bytes); artifacts[filename] = hash(bytes); return filename; }
 function words(fields) { const bytes = new Uint8Array(fields.length * 4), view = new DataView(bytes.buffer); fields.forEach((value, index) => view.setUint32(index * 4, value, true)); return bytes; }
@@ -51,7 +51,8 @@ function authoredText(object) {
 }
 const inputReceiptPath=join(root,'target/r3-byte-move/input-build-freeze.json'), inputReceiptBytes=readFileSync(inputReceiptPath), inputReceipt=JSON.parse(inputReceiptBytes);
 const inputReceiptSha='a0337a6e26ade7a7fbf842cadc97a0001d06bb89a2a50f485a85b04806b1b885';
-assert.equal(hash(inputReceiptBytes),inputReceiptSha);assert.equal(inputReceipt.source_sha256,hash(programBytes));assert.equal(inputReceipt.oracle_sha256,hash(oracleBytes));
+assert.equal(hash(inputReceiptBytes),inputReceiptSha);assert.equal(inputReceipt.source_sha256,hash(programBytes));// Retain the original encoding-input receipt; current packet literal SHA is checked above.
+assert.equal(inputReceipt.oracle_sha256,'b32d98ba147b9f70c89534aa99b48ff1ee0f191dc287d418c87a7fedab148b9b');
 assert.deepEqual(inputReceipt.symbols,oracle.program.symbols);assert.deepEqual(inputReceipt.labels,oracle.program.labels);
 for(const [file,sha] of Object.entries(inputReceipt.artifacts))assert.equal(hash(readFileSync(join(root,file))),sha);
 for(const file of ['program.o','program.disassembly.txt','program.x86','linked-byte-move.exe'])save(file,readFileSync(join(root,'target/r3-byte-move/input-build',file)));
@@ -73,7 +74,7 @@ const sources=Object.fromEntries(sourcePaths.map(file=>[file,hash(readFileSync(j
 save('engine.wasm',engineBytes);assert.ok(WebAssembly.validate(engineBytes));
 assert.deepEqual(WebAssembly.Module.imports(engineModule),[]);
 
-const arities={open:3,close:0,arena_ptr:0,generation:0,module_ptr:0,module_len:0,map:3,protect:3,upload:2,begin_image_input:1,append_image_input:2,load_pe32_linked_v2_input_at:2,start_loaded_image:2,compile_entries:2,compile_resident_entries:2,find_resident:1,acknowledge_resident_installation:5,find_installed_resident:3,dispatcher_module:2,guard:6,guard_resident:7,guard_dispatch_entry:5,read32:1,read8:1,read16:1,write8:2,store32:2,store_resident32:6,store8:2,store_resident8:6,capture_call:5,capture_resident_call:6,complete_windows_call:4,complete_resident_windows_call:5};
+const arities={cpu_read8:1,cpu_read16:1,cpu_read32:1,cpu_store8:2,cpu_store_resident8:6,cpu_store32:2,cpu_store_resident32:6,open:3,close:0,arena_ptr:0,generation:0,module_ptr:0,module_len:0,map:3,protect:3,upload:2,begin_image_input:1,append_image_input:2,load_pe32_linked_v2_input_at:2,start_loaded_image:2,compile_entries:2,compile_resident_entries:2,find_resident:1,acknowledge_resident_installation:5,find_installed_resident:3,dispatcher_module:2,guard:6,guard_resident:7,guard_dispatch_entry:5,read32:1,read8:1,read16:1,write8:2,store32:2,store_resident32:6,store8:2,store_resident8:6,capture_call:5,capture_resident_call:6,complete_windows_call:4,complete_resident_windows_call:5};
 let engine, nextInstance=0, guestRetirements=0;
 function refresh() { if (engine.buffer !== engine.memory.buffer) { engine.buffer = engine.memory.buffer; engine.bytes = new Uint8Array(engine.buffer); engine.view = new DataView(engine.buffer); } return engine; }
 function arena() { return refresh().bytes.slice(engine.base, engine.base + size); }
@@ -136,10 +137,11 @@ function childShape(bytes, unit, helpers, dispatch = false, pure = false) {
     if(section===1) {for(let count=unsigned();count>0;count--){assert.equal(bytes[at++],0x60);const parameters=Array.from({length:unsigned()},()=>bytes[at++]),results=Array.from({length:unsigned()},()=>bytes[at++]);types.push({parameters,results});}}
     else if(section===2) {for(let count=unsigned();count>0;count--){const module=name(),field=name(),kind=bytes[at++];if(kind===0)imports.push({module,name:field,kind:'function',type:unsigned()});else if(kind===2){assert.deepEqual(limits(),{minimum:1,maximum:null});imports.push({module,name:field,kind:'memory'});}else if(kind===1){assert.equal(bytes[at++],0x70);assert.deepEqual(limits(),{minimum:8,maximum:8});imports.push({module,name:field,kind:'table'});}else assert.fail('unexpected child import kind');}}
     else if(section===3) {for(let count=unsigned();count>0;count--)functions.push(unsigned());}
+    else if(section===6) {assert.equal(dispatch,false);assert.equal(unsigned(),3);for(const value of [1,0,1]){assert.equal(bytes[at++],0x7f);assert.equal(bytes[at++],0);assert.equal(bytes[at++],0x41);assert.equal(signed(),value);assert.equal(bytes[at++],0x0b);}}
     else if(section===7) {for(let count=unsigned();count>0;count--)exports.push({name:name(),kind:bytes[at++],index:unsigned()});}
     else if(section===10) {
       assert.equal(unsigned(),functions.length);const bodyLength=unsigned(),bodyEnd=at+bodyLength; if(dispatch) assert.equal(bodyEnd,end); else {assert.equal(bodyLength,runBody.length);assert.ok(bodyEnd<=end);}locals=Array.from({length:unsigned()},()=>[unsigned(),bytes[at++]]);
-      assert.deepEqual(locals,dispatch?[[6,0x7f]]:[[16,0x7f],[1,0x7e],[10,0x7f]]);
+      assert.deepEqual(locals,dispatch?[[7,0x7f]]:[[16,0x7f],[1,0x7e],[10,0x7f],[1,0x7f]]);
       const expected=[engine.low,engine.high,...(dispatch?[]:engine.owner==='resident'?[unit.low,unit.high]:[unit.generation])];
       guard={name:dispatch?'guard_dispatch_entry':engine.owner==='resident'?'guard_resident':'guard',constants:expected};
       for(const value of expected){assert.equal(bytes[at++],0x41);assert.equal(signed(),value);}

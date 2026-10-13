@@ -1,6 +1,6 @@
 import {generatedRunBody} from '../../../../../../../support/wasm/run.mjs';
 import {assertEngineExports} from '../../../../../../../support/wasm/exports.mjs';
-import {createArena} from '../../../../../../../support/wasm/arena.mjs';
+import {ARENA_SIZE, createArena} from '../../../../../../../support/wasm/arena.mjs';
 import assert from 'node:assert/strict';
 import {execFileSync} from 'node:child_process';
 import {createHash} from 'node:crypto';
@@ -13,9 +13,9 @@ const fixtureRoot = join(root, 'engine/tests/cpu/moves/memory/load/fixtures/p2-b
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
 const oracleBytes = readFileSync(join(fixtureRoot, 'oracle.json')), oracle = JSON.parse(oracleBytes);
 const programBytes = readFileSync(join(fixtureRoot, 'program.S'));
-assert.equal(hash(oracleBytes), '1c7552e267142630a6c94fe00ab8724733e589ae421a6c47a31a4784f4f7be8e');
+assert.equal(hash(oracleBytes), '8195f9a9bf3174a390e73b96910bdd9f3372a13a7d28bb9abe23ed165d1adf01');
 assert.equal(hash(programBytes), '15886209e03e8839ca539c3ae630cff08645a2238a0eab9939425db05850f236');
-const size = 4612, transfer = 140, artifacts = {}, identities = [], operations = [], hostInputs = [], observations = [], ramChecks = [], stackChecks = [], syntheticBindings = [], syntheticObservations = [];
+const size = ARENA_SIZE, transfer = 140, artifacts = {}, identities = [], operations = [], hostInputs = [], observations = [], ramChecks = [], stackChecks = [], syntheticBindings = [], syntheticObservations = [];
 const fromHex = hex => new Uint8Array(Buffer.from(hex, 'hex'));
 function save(filename, bytes) { writeFileSync(join(outputDir, filename), bytes); artifacts[filename] = hash(bytes); return filename; }
 function words(fields) { const bytes = new Uint8Array(fields.length * 4), view = new DataView(bytes.buffer); fields.forEach((value, index) => view.setUint32(index * 4, value, true)); return bytes; }
@@ -86,7 +86,7 @@ const sources=Object.fromEntries(sourcePaths.map(file=>[file,hash(readFileSync(j
 save('engine.wasm',engineBytes);assert.ok(WebAssembly.validate(engineBytes));
 assert.deepEqual(WebAssembly.Module.imports(engineModule),[]);
 
-const arities={open:3,close:0,arena_ptr:0,generation:0,module_ptr:0,module_len:0,map:3,protect:3,upload:2,begin_image_input:1,append_image_input:2,load_pe32_linked_v2_input_at:2,start_loaded_image:2,compile_entries:2,compile_resident_entries:2,find_resident:1,acknowledge_resident_installation:5,find_installed_resident:3,dispatcher_module:2,guard:6,guard_resident:7,guard_dispatch_entry:5,read32:1,read8:1,read16:1,write8:2,store32:2,store_resident32:6,store8:2,store_resident8:6,capture_call:5,capture_resident_call:6,complete_windows_call:4,complete_resident_windows_call:5};
+const arities={cpu_read8:1,cpu_read16:1,cpu_read32:1,cpu_store8:2,cpu_store_resident8:6,cpu_store32:2,cpu_store_resident32:6,open:3,close:0,arena_ptr:0,generation:0,module_ptr:0,module_len:0,map:3,protect:3,upload:2,begin_image_input:1,append_image_input:2,load_pe32_linked_v2_input_at:2,start_loaded_image:2,compile_entries:2,compile_resident_entries:2,find_resident:1,acknowledge_resident_installation:5,find_installed_resident:3,dispatcher_module:2,guard:6,guard_resident:7,guard_dispatch_entry:5,read32:1,read8:1,read16:1,write8:2,store32:2,store_resident32:6,store8:2,store_resident8:6,capture_call:5,capture_resident_call:6,complete_windows_call:4,complete_resident_windows_call:5};
 let engine, nextInstance=0, guestRetirements=0;
 function refresh() { if (engine.buffer !== engine.memory.buffer) { engine.buffer = engine.memory.buffer; engine.bytes = new Uint8Array(engine.buffer); engine.view = new DataView(engine.buffer); } return engine; }
 function arena() { return refresh().bytes.slice(engine.base, engine.base + size); }
@@ -149,10 +149,11 @@ function childShape(bytes, unit, helpers, dispatch = false) {
     if(section===1) {for(let count=unsigned();count>0;count--){assert.equal(bytes[at++],0x60);const parameters=Array.from({length:unsigned()},()=>bytes[at++]),results=Array.from({length:unsigned()},()=>bytes[at++]);types.push({parameters,results});}}
     else if(section===2) {for(let count=unsigned();count>0;count--){const module=name(),field=name(),kind=bytes[at++];if(kind===0)imports.push({module,name:field,kind:'function',type:unsigned()});else if(kind===2){assert.deepEqual(limits(),{minimum:1,maximum:null});imports.push({module,name:field,kind:'memory'});}else if(kind===1){assert.equal(bytes[at++],0x70);assert.deepEqual(limits(),{minimum:8,maximum:8});imports.push({module,name:field,kind:'table'});}else assert.fail('unexpected child import kind');}}
     else if(section===3) {for(let count=unsigned();count>0;count--)functions.push(unsigned());}
+    else if(section===6) {assert.equal(dispatch,false);assert.equal(unsigned(),3);for(const value of [1,0,1]){assert.equal(bytes[at++],0x7f);assert.equal(bytes[at++],0);assert.equal(bytes[at++],0x41);assert.equal(signed(),value);assert.equal(bytes[at++],0x0b);}}
     else if(section===7) {for(let count=unsigned();count>0;count--)exports.push({name:name(),kind:bytes[at++],index:unsigned()});}
     else if(section===10) {
       assert.equal(unsigned(), functions.length);const bodyLength=unsigned(),bodyEnd=at+bodyLength;if (dispatch) assert.equal(bodyEnd, end); else {assert.equal(bodyLength, runBody.length); assert.ok(bodyEnd <= end);}locals=Array.from({length:unsigned()},()=>[unsigned(),bytes[at++]]);
-      assert.deepEqual(locals,dispatch?[[6,0x7f]]:[[16,0x7f],[1,0x7e],[10,0x7f]]);
+      assert.deepEqual(locals,dispatch?[[7,0x7f]]:[[16,0x7f],[1,0x7e],[10,0x7f],[1,0x7f]]);
       const expected=[engine.low,engine.high,...(dispatch?[]:engine.owner==='resident'?[unit.low,unit.high]:[unit.generation])];
       guard={name:dispatch?'guard_dispatch_entry':engine.owner==='resident'?'guard_resident':'guard',constants:expected};
       for(const value of expected){assert.equal(bytes[at++],0x41);assert.equal(signed(),value);}
@@ -268,7 +269,7 @@ function retainedBytes() {
   refresh();for(const unit of engine.units)assert.deepEqual(engine.bytes.slice(unit.pointer,unit.pointer+unit.length),unit.bytes);
   if(engine.dispatcher){assert.deepEqual(engine.bytes.slice(engine.dispatcher.pointer,engine.dispatcher.pointer+engine.dispatcher.length),engine.dispatcher.bytes);assert.equal(engine.table.length,8);assert.equal(engine.table.get(0),engine.gate.run);assert.equal(engine.table.get(1),engine.caller.run);for(let index=2;index<8;index++)assert.equal(engine.table.get(index),null);}
 }
-const residentCallerNeedCodeHex='52334558020001002800000000000000030000000700000000000000000000000000000000000000';
+const residentCallerNeedCodeHex='52334558060001002800000000000000030000000700000000000000000000000000000000000000';
 for(const example of oracle.cases) {
   setup(example);
   for(const [index,checkpoint] of example.checkpoints.entries()) {
@@ -325,7 +326,7 @@ assert.ok(WebAssembly.validate(injectorBytes));const injectorModule=new WebAssem
 assert.deepEqual(WebAssembly.Module.imports(injectorModule),[{module:'env',name:'memory',kind:'memory'}]);assert.deepEqual(WebAssembly.Module.exports(injectorModule),['configure','read8'].map(name=>({name,kind:'function'})));
 function syntheticProtocol(spec,unit) {
   const injector=new WebAssembly.Instance(injectorModule,{env:{memory:engine.memory}}).exports;assert.equal(injector.configure.length,3);assert.equal(injector.read8.length,1);
-  const helpers=oracle.transport[`mixed_${spec.owner}_imports`],binding=Object.fromEntries(helpers.map(name=>[name,name==='read8'?injector.read8:engine.api[name]]));
+  const helpers=oracle.transport[`mixed_${spec.owner}_imports`],binding=Object.fromEntries(helpers.map(name=>[name,name==='cpu_read8'?injector.read8:engine.api[name]]));
   const instance=new WebAssembly.Instance(new WebAssembly.Module(unit.bytes),{env:{memory:engine.memory},ring3:binding}),target={run:instance.exports.run};assert.equal(target.run.length,4);
   syntheticBindings.push({instance:engine.ordinal,name:engine.name,owner:engine.owner,source_child:unit.filename,source_child_sha256:hash(unit.bytes),key:engine.key.toString(),id:unit.id?.toString(),generation:unit.generation,imports:helpers,injector:injectorArtifact,injector_sha256:hash(injectorBytes),claim:'synthetic strict Read1 packet/status validation; no guest RAM effect; actual engine guard and all other helpers'});
   for(const row of oracle.synthetic_protocol) {
