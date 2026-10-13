@@ -173,3 +173,6 @@ fn live_limit(code: &mut InstructionSink<'_>) {
         .end()
         .end();
 }
+
+mod hoist;
+pub(super) use hoist::helper_free_block;

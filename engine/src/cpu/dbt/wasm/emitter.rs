@@ -1009,6 +1009,11 @@ fn emit_block(code: &mut InstructionSink<'_>, block: &CompiledBlock, imports: me
             .i32_const(-1)
             .i32_ne()
             .if_(BlockType::Empty);
+        let helper_free = code_fetch::helper_free_block(block);
+        if helper_free && let Some(limit) = imports.code_fetch_limit {
+            // the loop's safepoint and key check already precede this selected block.
+            code_fetch::refresh(code, limit);
+        }
         let count = block.instructions.len() as u32;
         for _ in 0..count {
             code.block(BlockType::Empty);
@@ -1019,8 +1024,10 @@ fn emit_block(code: &mut InstructionSink<'_>, block: &CompiledBlock, imports: me
             let remaining = count - index as u32 - 1;
             abi::safepoint(code, remaining + 2);
             if let Some(limit) = imports.code_fetch_limit {
-                code_fetch::check_context(code, remaining + 2);
-                code_fetch::refresh(code, limit);
+                if !helper_free {
+                    code_fetch::check_context(code, remaining + 2);
+                    code_fetch::refresh(code, limit);
+                }
                 code_fetch::check_instruction(code, instruction, limit, remaining + 2);
             }
             if matches!(instruction.operation(), Operation::InterruptReturn { .. }) {
