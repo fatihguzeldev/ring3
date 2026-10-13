@@ -404,41 +404,6 @@ fn nan_payloads_and_signed_zero_keep_sse_source_priority() {
 }
 
 #[test]
-fn integer_logical_bits_use_both_sources_and_preserve_mxcsr() {
-    for (kind, expected) in [
-        (LogicalOperation::And, 0x0303_c0c0),
-        (LogicalOperation::AndNot, 0x3030_0c0c),
-        (LogicalOperation::Or, 0x3f3f_fcfc),
-        (LogicalOperation::Xor, 0x3c3c_3c3c),
-    ] {
-        for width in [VectorWidth::Xmm, VectorWidth::Ymm] {
-            let mut current = state();
-            current.simd.mxcsr = 0xfff3;
-            fill(&mut current, 1, bytes(&[0x0f0f_f0f0; 8], Element::Single));
-            fill(&mut current, 0, bytes(&[0x3333_cccc; 8], Element::Single));
-            let before = current;
-            current
-                .execute(Instruction::Logical(LogicalInstruction {
-                    kind,
-                    width,
-                    destination: register(0),
-                    first: register(1),
-                    second: MoveSource::Register(register(0)),
-                }))
-                .unwrap();
-            assert_eq!(
-                current.read(register(0)),
-                bytes(&vec![expected; width.bytes() / 4], Element::Single)
-            );
-            assert_eq!(current.simd.mxcsr, before.simd.mxcsr);
-            for index in 1..8 {
-                assert_eq!(current.read(register(index)), before.read(register(index)));
-            }
-        }
-    }
-}
-
-#[test]
 fn invalid_state_registers_and_float_shapes_are_effect_neutral() {
     for index in 0..8 {
         assert_eq!(VectorRegister::new(index), Ok(VectorRegister(index)));

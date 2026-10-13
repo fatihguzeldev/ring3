@@ -13,6 +13,8 @@ mod crypto;
 #[cfg(test)]
 mod f16c;
 mod integer;
+#[cfg(test)]
+mod logical;
 mod masked;
 mod moves;
 mod multiply;

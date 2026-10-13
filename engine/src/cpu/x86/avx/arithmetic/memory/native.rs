@@ -279,49 +279,6 @@ fn upper_memory_lane_faults_publish_only_sticky_mxcsr() {
 }
 
 #[test]
-fn logical_memory_sources_preserve_raw_bits_and_first_source_aliases() {
-    for kind in [
-        LogicalOperation::And,
-        LogicalOperation::AndNot,
-        LogicalOperation::Or,
-        LogicalOperation::Xor,
-    ] {
-        for width in [VectorWidth::Xmm, VectorWidth::Ymm] {
-            for destination in [0, 1] {
-                let mut current = state();
-                let before = current;
-                let operand: [u8; 32] = std::array::from_fn(|i| (i as u8).wrapping_mul(17));
-                let first = before.read(register(1));
-                let mut value = [0; 32];
-                for i in 0..width.bytes() {
-                    value[i] = match kind {
-                        LogicalOperation::And => first[i] & operand[i],
-                        LogicalOperation::AndNot => !first[i] & operand[i],
-                        LogicalOperation::Or => first[i] | operand[i],
-                        LogicalOperation::Xor => first[i] ^ operand[i],
-                    };
-                }
-                let mut expected = before;
-                expected.publish(register(destination), value);
-                current
-                    .execute_with_operand(
-                        Instruction::Logical(LogicalInstruction {
-                            kind,
-                            width,
-                            destination: register(destination),
-                            first: register(1),
-                            second: MoveSource::Memory,
-                        }),
-                        &operand[..width.bytes()],
-                    )
-                    .unwrap();
-                assert_eq!(current, expected);
-            }
-        }
-    }
-}
-
-#[test]
 fn wrong_operand_lengths_and_invalid_host_state_are_effect_neutral() {
     for scalar in [false, true] {
         for width in [VectorWidth::Xmm, VectorWidth::Ymm] {
