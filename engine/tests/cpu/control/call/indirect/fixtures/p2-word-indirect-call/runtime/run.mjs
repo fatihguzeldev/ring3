@@ -13,6 +13,7 @@ assert.equal(initial.length, SIZE); assert.deepEqual(WebAssembly.Module.imports(
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
 const paths = [
   'engine/src/abi/arena.rs', 'engine/src/abi/memory_helper.rs',
+  'engine/src/cpu/dbt/wasm/stack/pointer.rs', 'engine/src/cpu/dbt/wasm/segments/access.rs',
   'engine/src/cpu/x86/ir.rs', 'engine/src/cpu/x86/decode/decoder.rs', 'engine/src/cpu/x86/decode/lower.rs',
   'engine/src/cpu/x86/decode/flow.rs', 'engine/src/cpu/x86/decode/profile.rs', 'engine/src/cpu/dbt/region.rs',
   'engine/src/cpu/dbt/wasm/integer/arithmetic.rs', 'engine/src/cpu/dbt/wasm/integer/bits.rs', 'engine/src/cpu/dbt/wasm/integer/carry_rotates.rs', 'engine/src/cpu/dbt/wasm/integer/decimal.rs', 'engine/src/cpu/dbt/wasm/integer/dispatch.rs', 'engine/src/cpu/dbt/wasm/integer/flags.rs', 'engine/src/cpu/dbt/wasm/integer/mod.rs', 'engine/src/cpu/dbt/wasm/integer/multiply_divide.rs', 'engine/src/cpu/dbt/wasm/integer/operands.rs', 'engine/src/cpu/dbt/wasm/integer/rotates.rs', 'engine/src/cpu/dbt/wasm/integer/shifts.rs', 'engine/src/cpu/dbt/wasm/memory.rs', 'engine/src/cpu/dbt/wasm/memory/narrow.rs',
@@ -72,7 +73,14 @@ function seed(c, pc, r = registers(), flag = 0xcd7) {
   b.set(record('R3MH', 40, [0, 0xdecafbad, 0, 0, 0, 0]), 100); input(c, 0, b); return cpu(c);
 }
 function run(c, unit, budget, next, {label, reason = 1, retired = 1, fault, events = [], value = 0, status = 0} = {}) {
-  if (fault?.detail === 3) {reason = fault.access === 2 || label.startsWith('RET') ? 15 : 11; fault = undefined; events = [];}
+  if (fault?.detail === 3) {
+    // The logical span check rejects the failing operand before its page helper.
+    // Earlier source reads remain observable when a later stack check fails.
+    assert.equal(events.at(-1)?.access, fault.access, 'the final declared event is the failing operand');
+    assert.equal(events.at(-1)?.address, fault.address, 'the rejected span keeps its literal address');
+    reason = fault.access === 2 || label.startsWith('RET') ? 15 : 11;
+    fault = undefined; events = events.slice(0, -1);
+  }
   const expected = arena(c);
   if (status === 0) {
     expected.set(state(next)); expected.set(exit(reason, retired, fault, reason === 11 || reason === 15 ? 6 : unit.exitVersion), 56);
@@ -222,7 +230,7 @@ function stopped(c, unit, f, access) {
   if (access === 2) events.push({access: 2, address: f.address, value: low(faultPC + 3)});
   for (const [budget, retired] of [[2, 1], [1, 0]]) {
     run(c, unit, budget, held, {label: `${f.name} ${access === 1 ? 'read precedes bad stack' : 'successful read precedes failed push'}`,
-      reason: 5, retired, events, fault: {detail: f.detail, address: f.faultAddress, access}});
+      reason: 5, retired, events, value: access === 2 ? 0x2000 : 0, fault: {detail: f.detail, address: f.faultAddress, access}});
     if (f.name === 'overflow') overflowCanaries(c);
     if (access === 2) checkRam(c, DATA + 32, word(0x2000));
     if (access === 2 && f.name.startsWith('cross-')) checkRam(c, 0x9fff, Buffer.from([0x0f]));
@@ -388,7 +396,7 @@ assert.deepEqual(sources(), sourcePins, 'selected source pins stayed fixed durin
 assert.deepEqual(counts, {contexts: 16, runs: 2028, retired: 1906, register_inputs: 312, memory_inputs: 312, flag_inputs: 1024,
   boundaries: 20, code_reads: 16, faults: 128, repairs: 48, current_inputs: 4, repeats: 16, controls: 24,
   cold: 8, consumers: 8, retained: 4, currentness: 4, overlap: 8, relative: 32, self_code: 36,
-  deferred_store_faults: 24, helper_calls: 2990 - 4 * 2 * 4, read_calls: 1084 - 4 * 2 * 2, store_calls: 1906 - 4 * 2 * 2}, 'finite source ledger and observed canonical chronology');
+  deferred_store_faults: 24, helper_calls: 2990 - 4 * 2 * 3, read_calls: 1084 - 4 * 2, store_calls: 1906 - 4 * 2 * 2}, 'finite source ledger and observed canonical chronology');
 assert.equal(modules.length, 40);
 writeFileSync(join(output, 'result.json'), JSON.stringify({status: 'ok', engine_sha256: engine.sha256, source_pins: sourcePins,
   counts, contexts, modules, observations, limits: [

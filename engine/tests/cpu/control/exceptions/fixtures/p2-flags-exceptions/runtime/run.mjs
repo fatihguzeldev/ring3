@@ -25,6 +25,9 @@ const sources = [
   'engine/src/cpu/dbt/wasm/locals.rs',
   'engine/src/abi/header.rs',
   'engine/src/process/calls/context.rs',
+  'engine/src/process/calls/callback.rs',
+  'engine/src/windows/callback_frame.rs',
+  'engine/src/windows/calling_convention.rs',
   'engine/src/process/calls/call.rs',
   'engine/src/cpu/dbt/wasm/integer/dispatch.rs',
   'engine/src/cpu/dbt/wasm/integer/flags.rs',
@@ -347,13 +350,18 @@ for (const resident of [false, true]) {
   for (const finish of [false, true]) {
     assert.equal(c.api.begin_callback(...key, generation, outerToken, PC + 4, PC + 5, 18, 0), 0);
     const callbackToken = c.arena().readUInt32LE(156);
-    assert.equal(c.arena().readUInt32LE(12), 0, 'callback starts a fresh debug context');
+    assert.equal(c.arena().readUInt32LE(12), 1, 'callback inherits the pending SS shadow until its first actual instruction');
+    assert.equal(c.arena().readUInt32LE(52), 0x102, 'callback retains the outer TF flag');
     if (finish) {
       assert.equal(invoke(), 0);
       assert.equal(c.arena().readUInt32LE(72), 16, 'callback RET single-steps independently');
+      assert.equal(c.arena().readUInt32LE(76), 1, 'the first actual callback instruction retires once');
+      assert.equal(c.arena().readUInt32LE(12), 0, 'callback RET consumes its inherited SS shadow');
       assert.equal(c.arena().readUInt32LE(48), PC + 5);
       assert.equal(invoke(), 0);
       assert.equal(c.arena().readUInt32LE(72), 8);
+      assert.equal(c.arena().readUInt32LE(76), 0, 'the synthetic return gate retires no guest instruction');
+      assert.equal(c.arena().readUInt32LE(12), 0, 'the return gate does not rearm consumed metadata');
       assert.equal(c.api.finish_callback(...key, generation, callbackToken), 0);
     } else {
       assert.equal(c.api.abort_callback(...key, callbackToken), 0);
