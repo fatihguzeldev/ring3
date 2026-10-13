@@ -1,5 +1,7 @@
 use ring3_engine::abi::arena::{TRANSFER_OFFSET, TRANSFER_SIZE};
-use ring3_engine::abi::x86::{decode_exit, decode_state, encode_exit_v3, encode_state};
+use ring3_engine::abi::x86::{
+    decode_exit, decode_state, encode_exit_v3, encode_exit_v9, encode_state,
+};
 use ring3_engine::cpu::dbt::{CompileError, InstructionError};
 use ring3_engine::cpu::x86::{State32, decode::DecodeError};
 use ring3_engine::cpu::{ExecutionExit, ExitReason, UnsupportedFeature};
@@ -35,6 +37,45 @@ fn version_five_need_code_resumes_but_divide_error_cannot_publish_callback_code(
     let mut expected = before;
     expected[140..204].copy_from_slice(&wire(2));
     assert_eq!(engine.arena(), expected);
+}
+
+#[test]
+fn version_nine_need_code_resumes_without_admitting_faults_or_unknown_versions() {
+    let mut engine = active();
+    replacement(&mut engine, TARGET, 6);
+    encode_exit_v9(
+        &ExecutionExit {
+            retired: 7,
+            reason: ExitReason::DivideError,
+        },
+        &mut engine.arena_mut().unwrap()[56..96],
+    )
+    .unwrap();
+    unchanged(&mut engine, error(CallError::InvalidStop), |engine| {
+        engine.resume_callback_code(KEY, 1, 2, 4, 2)
+    });
+    encode_exit_v9(
+        &ExecutionExit {
+            retired: 7,
+            reason: ExitReason::NeedCode,
+        },
+        &mut engine.arena_mut().unwrap()[56..96],
+    )
+    .unwrap();
+    engine.arena_mut().unwrap()[60..62].copy_from_slice(&10_u16.to_le_bytes());
+    unchanged(&mut engine, error(CallError::InvalidStop), |engine| {
+        engine.resume_callback_code(KEY, 1, 2, 4, 2)
+    });
+    engine.arena_mut().unwrap()[60..62].copy_from_slice(&9_u16.to_le_bytes());
+    let before = engine.arena().to_vec();
+    let stack = bytes(&engine, 0x8000, 32);
+    assert_eq!(engine.resume_callback_code(KEY, 1, 2, 4, 2), Ok(2));
+    let mut expected = before;
+    expected[140..204].copy_from_slice(&wire(2));
+    assert_eq!(engine.arena(), expected);
+    assert_eq!(bytes(&engine, 0x8000, 32), stack);
+    assert_eq!(engine.guard(KEY, 1), Err(HostError::InvalidArtifact));
+    assert_eq!(engine.guard(KEY, 2), Ok(()));
 }
 
 const KEY: u64 = 0xfedc_ba98_1234_5678;

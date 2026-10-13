@@ -31,7 +31,7 @@ function refresh(engine) {
   return engine;
 }
 
-function fresh() {
+function fresh(arenaSize = 4612) {
   const instance = new WebAssembly.Instance(engineModule, {});
   const api = Object.fromEntries(names.map(name => {
     const fn = instance.exports[`ring3_abi_v1_${name}`];
@@ -41,17 +41,17 @@ function fresh() {
   const memory = instance.exports.memory;
   assert.ok(memory instanceof WebAssembly.Memory);
   const key = 0x8123456700000000n + ++keys;
-  const engine = refresh({api, memory, key, low: Number(key & 0xffffffffn), high: Number(key >> 32n)});
+  const engine = refresh({api, memory, key, arenaSize, low: Number(key & 0xffffffffn), high: Number(key >> 32n)});
   assert.equal(api.open(12, engine.low, engine.high), 0);
   engine.base = api.arena_ptr() >>> 0;
   refresh(engine);
-  assert.ok(engine.base > 0 && engine.base + 4612 <= engine.bytes.length);
+  assert.ok(engine.base > 0 && engine.base + arenaSize <= engine.bytes.length);
   assert.equal(api.map(0x1000, 1, 7), 0);
   return engine;
 }
 
 function arena(engine) {
-  return refresh(engine).bytes.slice(engine.base, engine.base + 4612);
+  return refresh(engine).bytes.slice(engine.base, engine.base + engine.arenaSize);
 }
 
 function upload(engine, address, bytes) {
@@ -303,13 +303,16 @@ function addFlags(left, right, old) {
   return flags;
 }
 
-function prepare(values = [7, 9]) {
-  const engine = fresh();
+function prepare(values = [7, 9], xstate = false) {
+  const engine = fresh(xstate ? 4756 : 4612);
   assert.equal(engine.api.map(0x4000, 1, 7), 0);
   assert.equal(engine.api.map(0x8000, 1, 3), 0);
   upload(engine, 0x1000, Uint8Array.from(callerBytes));
   for (const address of [0x1100, 0x1200, 0x1300]) upload(engine, address, Uint8Array.from([0x0f, 0x0b]));
-  upload(engine, 0x1400, Uint8Array.from([...callbackBytes, ...afterCalleeBytes, ...afterInnerBytes]));
+  const entry = xstate
+    ? [0xb9, 0, 0, 0, 0, 0x0f, 0x01, 0xd0, 0x90, 0x90, ...callbackBytes.slice(10)]
+    : callbackBytes;
+  upload(engine, 0x1400, Uint8Array.from([...entry, ...afterCalleeBytes, ...afterInnerBytes]));
   upload(engine, 0x4000, Uint8Array.from(calleeBytes));
   const child = compile(engine, oldBlocks, gates, ['read32', 'store32']);
   const start = state();
@@ -318,7 +321,7 @@ function prepare(values = [7, 9]) {
   outer.registers[4] = 0x8ff4;
   outer.eip = 0x1100;
   writeState(engine, start); // The only host CPU-state initialization in this instance.
-  run(engine, child, 4, outer, exit(8, 3, outerId), 'actual outer PUSH/PUSH/CALL reaches gate', helperRecord(0));
+  run(engine, child, 4, outer, exit(8, 3, outerId, 0, 0, 0, xstate ? 9 : 3), 'actual outer PUSH/PUSH/CALL reaches gate', helperRecord(0));
   const callbackState = copyState(outer);
   callbackState.registers[4] = 0x8fe8;
   callbackState.eip = 0x1400;
@@ -462,6 +465,41 @@ for (const [values, singleStepCall] of [[[7, 9], false], [[0xffffffff, 1], true]
   run(engine, child, 2, caller, exit(3, 1), 'original outer caller resumes under installed generation', arena(engine).slice(100, 140));
 }
 
+
+{
+  const test = prepare([7, 9], true), {engine, child} = test;
+  const stopped = copyState(test.callbackState);
+  stopped.registers[0] = 7;
+  stopped.registers[1] = 0;
+  stopped.registers[2] = 0;
+  stopped.registers[4] -= 4;
+  stopped.eip = 0x4000;
+  test.stopped = stopped;
+  run(engine, child, 6, stopped, exit(3, 5, 0, 0, 0, 0, 9),
+    'XGETBV callback reaches real EXIT9 NeedCode before replacement', helperRecord(0));
+  install(test);
+  fail(engine, () => child.run(0xffffffff, 0xffffffff, 1, 0xffffffff), 3,
+    'EXIT9 installation retires the old generated binding');
+  const resumed = copyState(stopped);
+  resumed.registers[0] = 10;
+  resumed.eflags = addFlags(7, 3, stopped.eflags);
+  resumed.eip = 0x4003;
+  run(engine, test.child, 1, resumed, exit(1, 1),
+    'EXIT9 replacement resumes callee once without replaying XGETBV or CALL', arena(engine).slice(100, 140));
+  assert.equal(guestValue(engine, stopped.registers[4]), 0x140f,
+    'EXIT9 replacement preserves the single committed CALL return word');
+  const beforeAbort = arena(engine);
+  assert.equal(engine.api.abort_callback(engine.low, engine.high, 2), 0);
+  aborts++;
+  const expectedAbort = beforeAbort.slice();
+  expectedAbort.set(test.outerRecords);
+  assert.deepEqual(arena(engine), expectedAbort, 'EXIT9 callback abort restores exact outer frame');
+  const beforeAbandon = arena(engine);
+  assert.equal(engine.api.abandon_call(engine.low, engine.high, 1), 0);
+  abandons++;
+  assert.deepEqual(arena(engine), beforeAbandon, 'EXIT9 cleanup preserves the complete4756byte arena');
+}
+
 {
   const test = prepare(), {engine, child} = test;
   stopAtAbsentCallee(test);
@@ -487,6 +525,7 @@ const provenance = {
   successful_captures: captures, successful_call_completions: callCompletions,
   successful_callback_begins: begins, successful_code_installations: installs,
   successful_callback_finishes: finishes, explicit_callback_aborts: aborts, explicit_outer_abandons: abandons,
+  actual_exit9_callback_continuations: 1,
   rejected_operations: rejectedOperations, synthetic_helper_runs: 0,
   generated_set_sha256: hash(generatedHashes.join('\n')),
   sources: {assembly_sha256: hash(readFileSync(assembly)), node_sha256: hash(readFileSync(join(fixtureRoot, 'runtime/run.mjs')))},

@@ -75,7 +75,7 @@ const names = [
   'find_installed_resident', 'read32', 'write32', 'store_resident32',
   'acknowledge_resident_installation', 'capture_resident_call', 'complete_resident_call',
   'begin_resident_callback', 'authorize_resident_callback', 'select_resident_callback_unit',
-  'capture_active_resident_callback_call', 'complete_active_resident_callback_call', 'finish_resident_callback',
+  'capture_active_resident_callback_call', 'complete_active_resident_callback_call', 'finish_resident_callback', 'abandon_call',
 ];
 const api = Object.fromEntries(names.map(name => [name, instance.exports[`ring3_abi_v1_${name}`]]));
 for (const [name, fn] of Object.entries(api)) assert.equal(typeof fn, 'function', name);
@@ -87,11 +87,11 @@ function refresh() { bytes = new Uint8Array(memory.buffer); view = new DataView(
 assert.equal(api.open(16, LOW, HIGH), 0);
 const base = api.arena_ptr() >>> 0;
 refresh(); assert.ok(base > 0 && base + SIZE <= bytes.length);
-const arena = () => { refresh(); return bytes.slice(base, base + SIZE); };
+const arena = (size = SIZE) => { refresh(); return bytes.slice(base, base + size); };
 const observations = [], artifacts = {}, units = {};
-function check(expected, label) { assert.deepEqual(arena(), expected, `${label}: complete arena`); }
-function operation(label, action, status = 0, patches = []) {
-  const expected = arena();
+function check(expected, label) { assert.deepEqual(arena(expected.length), expected, `${label}: complete arena`); }
+function operation(label, action, status = 0, patches = [], size = SIZE) {
+  const expected = arena(size);
   for (const [offset, value] of patches) expected.set(value, offset);
   assert.equal(action(), status, label); check(expected, label);
   observations.push({label, status});
@@ -103,9 +103,9 @@ function descriptors(blocks, gates) {
     view.setUint32(base + TRANSFER + index * 8 + 4, value, true);
   });
 }
-function compile(label, blocks, gates, helpers, slot, action) {
+function compile(label, blocks, gates, helpers, slot, action, frameSize = SIZE) {
   descriptors(blocks, gates);
-  const before = arena(); assert.equal(action(), 0, `${label}: compile`);
+  const before = arena(frameSize); assert.equal(action(), 0, `${label}: compile`);
   refresh();
   const [version, size, low, high, pointer, length] = Array.from({length: 6}, (_, i) => view.getUint32(base + TRANSFER + i * 4, true));
   assert.equal(version, 1); assert.equal(size, 24);
@@ -234,12 +234,74 @@ for (const unit of Object.values(units)) {
   assert.deepEqual(bytes.slice(unit.pointer, unit.pointer + unit.length), unit.code);
 }
 for (let slot = 4; slot < 8; slot++) assert.equal(table.get(slot), null);
+{
+  const fullSize = 4756;
+  const fullOperation = (label, action, status = 0, patches = []) =>
+    operation(label, action, status, patches, fullSize);
+  const xstateCpu = (eip, esp, eax) => {
+    const value = cpu(eip, esp, eax);
+    value.registers[1] = 0;
+    value.registers[2] = 0;
+    return value;
+  };
+  for (const [pc, hex] of [[0x5400, 'b9000000000f01d0e9f3100000'], [0x5500, '0f0b'], [0x6500, '8d4003c3']]) {
+    const input = Buffer.from(hex, 'hex');
+    refresh(); bytes.set(input, base + TRANSFER);
+    assert.equal(api.upload(pc, input.length), 0);
+    artifact(`exit9-${pc.toString(16)}.x86`, input);
+  }
+  const home9 = compile('exit9-home', [[0x5400, 13], [0x5500, 2]], [[0x5500, RETURN]], [], 4,
+    () => api.compile_resident_with_gates(2, 1), fullSize);
+  instantiate(home9);
+  fullOperation('EXIT9 home initial acknowledgement',
+    () => api.acknowledge_resident_installation(LOW, HIGH, home9.low, home9.high, 4), 0,
+    [[TRANSFER, installed32(home9)]]);
+  hostWord(0x8ffc, 0x3005);
+  refresh(); bytes.set(state56(cpu(0x4000, 0x8ffc)), base);
+  view.setUint32(base + 96, 0, true);
+  fullOperation('EXIT9 path establishes a real outer gate',
+    () => outer.run(base, base + 56, 1, base + 96), 0, [[56, exit40(8, 0, OUTER)]]);
+  const retainedOuter = arena(fullSize).slice(0, 96);
+  fullOperation('EXIT9 path captures the next outer token',
+    () => api.capture_resident_call(LOW, HIGH, outer.low, outer.high, 1, 0), 0,
+    [[TRANSFER, words(112, 'R3CF', [4, OUTER, 1, 0, 0x4000, 0x8ffc, 0x3005, 0])]]);
+  fullOperation('EXIT9 path begins an independent callback',
+    () => api.begin_resident_callback(LOW, HIGH, outer.low, outer.high, home9.low, home9.high, 4, 0x5400, 0x5500, RETURN, 0), 0,
+    [[0, state56(cpu(0x5400, 0x8ff8))], [56, exit40(3)],
+      [TRANSFER, words(72, 'R3RC', [5, 4, 1, 0, 0x5400, 0x8ff8, 0x5500, RETURN, 0, 0, outer.low, outer.high, home9.low, home9.high])]]);
+  fullOperation('EXIT9 path authorizes its exact home identity',
+    () => api.authorize_resident_callback(LOW, HIGH, home9.low, home9.high, 5));
+  fullOperation('XGETBV reaches real EXIT9 resident NeedCode',
+    () => home9.run(base, base + 56, 4, base + 96), 0,
+    [[0, state56(xstateCpu(0x6500, 0x8ff8, 7))], [56, words(40, 'R3EX', [3, 3, 0, 0, 0, 0], 9)]]);
+  const child9 = compile('exit9-child', [[0x6500, 4]], [], ['read32'], 5,
+    () => api.compile_resident_callback_unit(LOW, HIGH, home9.low, home9.high, 5, 1, 0), fullSize);
+  instantiate(child9);
+  fullOperation('EXIT9 child acknowledgement retains callback identity',
+    () => api.acknowledge_resident_callback_installation(LOW, HIGH, home9.low, home9.high, 5, child9.low, child9.high, 5), 0,
+    [[TRANSFER, installed32(child9)]]);
+  fullOperation('EXIT9 path selects only its acknowledged child',
+    () => api.select_resident_callback_unit(LOW, HIGH, home9.low, home9.high, 5, child9.low, child9.high));
+  fullOperation('EXIT9 child resumes once and returns through the original stack word',
+    () => child9.run(base, base + 56, 3, base + 96), 0,
+    [[0, state56(xstateCpu(0x5500, 0x8ffc, 10))], [56, words(40, 'R3EX', [3, 2, 0, 0, 0, 0], 2)], [100, helper40(0x5500)]]);
+  fullOperation('EXIT9 path reselects its unchanged home identity',
+    () => api.select_resident_callback_unit(LOW, HIGH, home9.low, home9.high, 5, home9.low, home9.high));
+  fullOperation('EXIT9 return gate is reached without another stack pop',
+    () => home9.run(base, base + 56, 1, base + 96), 0,
+    [[56, words(40, 'R3EX', [8, 0, RETURN, 0, 0, 0], 9)]]);
+  fullOperation('EXIT9 callback finishes into the exact retained outer frame',
+    () => api.finish_resident_callback(LOW, HIGH, home9.low, home9.high, 5), 0,
+    [[0, retainedOuter], [TRANSFER, words(48, 'R3RR', [5, 4, 10, 0, outer.low, outer.high, home9.low, home9.high])]]);
+  fullOperation('EXIT9 outer cleanup remains arena neutral', () => api.abandon_call(LOW, HIGH, 4));
+}
 operation('close preserves arena', () => api.close());
 operation('closed cold compile wins identity/token', () => coldCompile(0, 0, HIGH ^ 1), 5);
 operation('closed cold ack wins token', () => coldAck(B, 0), 5);
 for (const path of sourcePaths) assert.deepEqual(readFileSync(join(root, path)), sourceBytes[path], `source unchanged: ${path}`);
 const provenance = {
   fixture: 'cold-resident-callback-installation', engine_sha256: sha256(engineBytes),
+  actual_exit9_callback_continuations: 1,
   engine_copy: 'executed-engine.wasm', oracle_sha256: sha256(readFileSync(join(outputDir, 'authored-oracle.json'))),
   sources: Object.fromEntries(sourcePaths.map(path => [path, sha256(sourceBytes[path])])),
   source_snapshot: 'sources', snapshot_before_first_module: true, source_bytes_unchanged_after_proof: true,

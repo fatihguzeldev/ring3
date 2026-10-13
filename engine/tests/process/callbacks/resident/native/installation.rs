@@ -1,7 +1,10 @@
 use ring3_engine::{
     abi::{
         arena::{CANCEL_OFFSET, EXIT_OFFSET, STATE_OFFSET, TRANSFER_OFFSET},
-        x86::{EXIT_SIZE, STATE_SIZE, decode_state, encode_exit, encode_exit_v3, encode_state},
+        x86::{
+            EXIT_SIZE, STATE_SIZE, decode_state, encode_exit, encode_exit_v3, encode_exit_v9,
+            encode_state,
+        },
     },
     cpu::{ExecutionExit, ExitReason, dbt::RegistryError, x86::State32},
     memory::GuestAddress,
@@ -37,6 +40,50 @@ fn version_five_need_code_allows_cold_callback_installation_and_fault_does_not()
         &f.engine.arena()[..TRANSFER_OFFSET],
         &before[..TRANSFER_OFFSET]
     );
+}
+
+#[test]
+fn version_nine_need_code_installs_without_admitting_faults_or_unknown_versions() {
+    let mut f = fixture(true);
+    encode_exit_v9(
+        &ExecutionExit {
+            retired: 2,
+            reason: ExitReason::DivideError,
+        },
+        &mut f.engine.arena_mut().unwrap()[EXIT_OFFSET..EXIT_OFFSET + EXIT_SIZE],
+    )
+    .unwrap();
+    reject_both(&mut f, invalid_stop());
+    encode_exit_v9(
+        &ExecutionExit {
+            retired: 2,
+            reason: ExitReason::NeedCode,
+        },
+        &mut f.engine.arena_mut().unwrap()[EXIT_OFFSET..EXIT_OFFSET + EXIT_SIZE],
+    )
+    .unwrap();
+    f.engine.arena_mut().unwrap()[EXIT_OFFSET + 4..EXIT_OFFSET + 6]
+        .copy_from_slice(&10_u16.to_le_bytes());
+    reject_both(&mut f, invalid_stop());
+    f.engine.arena_mut().unwrap()[EXIT_OFFSET + 4..EXIT_OFFSET + 6]
+        .copy_from_slice(&9_u16.to_le_bytes());
+    let before = f.engine.arena().to_vec();
+    let before_ram = ram(&f.engine);
+    let unit = compile_cold(&mut f, &[(COLD, 3)], &[]);
+    assert_eq!(f.engine.arena(), before);
+    assert_eq!(ram(&f.engine), before_ram);
+    assert_eq!(
+        ack(&mut f, unit, 2),
+        Ok(ResidentInstallation {
+            unit_id: unit,
+            slot: 2
+        })
+    );
+    assert_eq!(
+        &f.engine.arena()[..TRANSFER_OFFSET],
+        &before[..TRANSFER_OFFSET]
+    );
+    assert_eq!(ram(&f.engine), before_ram);
 }
 
 const KEY: u64 = 0x1020_3040_5060_7080;
