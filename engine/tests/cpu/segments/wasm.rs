@@ -33,3 +33,6 @@ mod cpu_ss_base_wasm;
 
 #[path = "code/base/wasm.rs"]
 mod cpu_code_base_wasm;
+
+#[path = "stack/b16/wasm.rs"]
+mod cpu_ss_b16_wasm;
