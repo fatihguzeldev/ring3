@@ -187,7 +187,7 @@ impl SegmentContext {
                             && cache.default32()
                             && (cache.conforming() || cache.dpl() == 3)
                     }
-                    2 => cache.writable() && cache.default32() && cache.dpl() == 3,
+                    2 => cache.writable() && cache.dpl() == 3,
                     _ => cache.readable() && (cache.conforming() || cache.dpl() == 3),
                 }
             })
@@ -282,7 +282,6 @@ mod tests {
         assert!(valid.is_valid() && valid.is_legacy());
         for (index, bits) in [
             (1, 0xf1bf_ffff),
-            (2, 0xf13f_ffff),
             (1, 0xf33f_ffff),
             (2, 0xf31f_ffff),
             (3, 0xf39f_ffff),
@@ -307,7 +306,7 @@ mod tests {
         assert!(conforming.is_valid() && !conforming.is_legacy());
     }
     #[test]
-    fn current_context_accepts_all_bases_but_keeps_d32_b32_profile() {
+    fn current_context_accepts_all_bases_and_b16_but_keeps_code_d32() {
         let mut context = SegmentContext::default();
         for segment in [
             SegmentRegister::Es,
@@ -321,19 +320,12 @@ mod tests {
         }
         assert!(context.is_valid());
         assert!(!context.is_legacy());
-        for segment in [SegmentRegister::Cs, SegmentRegister::Ss] {
-            let mut invalid = context;
-            invalid.caches[segment.index()] = cache(
-                if segment == SegmentRegister::Cs {
-                    0xb
-                } else {
-                    3
-                },
-                0xfffff,
-                true,
-                false,
-            );
-            assert!(!invalid.is_valid());
-        }
+        let mut narrow_stack = context;
+        narrow_stack.caches[2] = cache(3, 0xfffff, true, false);
+        assert!(narrow_stack.is_valid());
+        assert!(!narrow_stack.is_legacy());
+        let mut invalid = context;
+        invalid.caches[SegmentRegister::Cs.index()] = cache(0xb, 0xfffff, true, false);
+        assert!(!invalid.is_valid());
     }
 }

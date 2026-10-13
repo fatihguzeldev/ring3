@@ -27,6 +27,7 @@ pub use segments::{
     SegmentQuery, SegmentRegister, SegmentState,
 };
 pub use stack::StackFrameKind;
+pub(crate) use stack::StackPointerSize;
 pub use state::{Register32, State32};
 pub use x87::{
     Ext80, X87Binary, X87Condition, X87Error, X87Format, X87Operation, X87Outcome, X87Rounding,

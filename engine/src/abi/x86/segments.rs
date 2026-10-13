@@ -82,7 +82,10 @@ pub fn encode_segment_context(context: &SegmentContext, output: &mut [u8]) -> Re
     if output.len() != SEGMENTS_SIZE {
         return Err(AbiError::Length);
     }
-    if !context.is_valid() || context.state.bases[..4].iter().any(|base| *base != 0) {
+    if !context.is_valid()
+        || context.state.bases[..4].iter().any(|base| *base != 0)
+        || !context.caches[2].default32()
+    {
         return Err(AbiError::Reserved);
     }
     if context.is_legacy() {
@@ -128,7 +131,11 @@ fn decode_legacy_context(input: &[u8], version: u16) -> Result<SegmentContext, A
     for (index, base) in bases.iter_mut().enumerate().skip(4) {
         *base = read_u32(input, SEGMENTS_BASES_OFFSET + index * 4);
     }
-    decode_cached_context(input, bases)
+    let context = decode_cached_context(input, bases)?;
+    if !context.caches[2].default32() {
+        return Err(AbiError::Reserved);
+    }
+    Ok(context)
 }
 
 fn decode_cached_context(input: &[u8], bases: [u32; 6]) -> Result<SegmentContext, AbiError> {
@@ -167,7 +174,7 @@ pub fn encode_current_segment_context(
     let mut staged_segments = [0; SEGMENTS_SIZE];
     let mut staged_bases = [0; SEGMENT_BASES_RECORD_SIZE];
     header::write(&mut staged_bases, *b"R3SB");
-    if context.state.bases[..4].iter().any(|base| *base != 0) {
+    if context.state.bases[..4].iter().any(|base| *base != 0) || !context.caches[2].default32() {
         encode_cached_context(context, SEGMENTS_VERSION_3, &mut staged_segments);
         for (index, base) in context.state.bases.into_iter().enumerate() {
             write_u32(&mut staged_bases, 16 + index * 4, base);
@@ -448,7 +455,7 @@ mod tests {
             assert_eq!(untouched_bases, vec![0x5a; invalid_length]);
         }
         context.caches[2] =
-            SegmentCache::from_bits(context.caches[2].bits() & !0x0200_0000).unwrap();
+            SegmentCache::from_bits(context.caches[2].bits() & !0x0020_0000).unwrap();
         let mut untouched_segments = [0xa5; SEGMENTS_SIZE];
         let mut untouched_bases = [0x5a; SEGMENT_BASES_RECORD_SIZE];
         assert_eq!(

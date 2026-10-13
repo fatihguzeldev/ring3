@@ -1,5 +1,9 @@
 use super::*;
-use crate::{cpu::x86::SegmentAccess, memory::MemoryError, process::StoreCompletion};
+use crate::{
+    cpu::x86::{SegmentAccess, StackPointerSize},
+    memory::MemoryError,
+    process::StoreCompletion,
+};
 
 impl EngineInstance {
     pub fn far_call(
@@ -53,7 +57,12 @@ impl EngineInstance {
             }
         };
         let slot = width.slot_bytes();
-        let offsets = [esp.wrapping_sub(slot), esp.wrapping_sub(2 * slot)];
+        let pointer =
+            StackPointerSize::new(context.caches[SegmentRegister::Ss.index()].default32());
+        let offsets = [
+            pointer.offset(pointer.advance(esp, -(slot as i32))),
+            pointer.offset(pointer.advance(esp, -((2 * slot) as i32))),
+        ];
         // Intel places stack capacity before the target-offset limit for direct far CALL.
         // our batch profile checks both cached spans before any page permission probe.
         for offset in offsets {

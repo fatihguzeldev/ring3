@@ -17,7 +17,7 @@ use crate::{
     cpu::x86::{
         Register32, SegmentRegister,
         decode::DecodedInstruction,
-        ir::{EffectiveAddress, Location32, Operation, SmallWidth, Value32},
+        ir::{Location32, Operation, SmallWidth, Value32},
     },
 };
 
@@ -59,20 +59,7 @@ pub(super) fn instruction(
             selector(code, segment);
             code.local_set(RESULT);
             let width = if word { 2 } else { 4 };
-            let address = EffectiveAddress {
-                base: Some(Register32::Esp),
-                displacement: 0_u32.wrapping_sub(width),
-                ..Default::default()
-            };
-            if word {
-                memory::store_word_result(code, address, imports, exit_depth);
-            } else {
-                memory::store_result(code, address, imports, exit_depth);
-            }
-            code.local_get(register(Register32::Esp))
-                .i32_const(width as i32)
-                .i32_sub()
-                .local_set(register(Register32::Esp));
+            super::stack::pointer::push_result(code, width, imports, exit_depth);
             true
         }
         Operation::LoadSegment { segment, source } => {
@@ -93,21 +80,15 @@ pub(super) fn instruction(
             false
         }
         Operation::PopSegment { segment, word } => {
-            let address = EffectiveAddress {
-                base: Some(Register32::Esp),
-                ..Default::default()
-            };
-            if word {
-                memory::load_narrow_value(code, address, SmallWidth::Word, imports, exit_depth);
-                code.local_set(RESULT);
-            } else {
-                memory::load_result(code, address, imports, exit_depth);
-            }
+            super::stack::pointer::load_result(code, if word { 2 } else { 4 }, imports, exit_depth);
+            // POP SS advances using the old stack width before publishing the newly loaded cache.
+            super::stack::pointer::assigned(
+                code,
+                register(Register32::Esp),
+                if word { 2 } else { 4 },
+            );
             load_selector(code, segment, imports, exit_depth);
-            code.local_get(register(Register32::Esp))
-                .i32_const(if word { 2 } else { 4 })
-                .i32_add()
-                .local_set(register(Register32::Esp));
+            code.local_set(register(Register32::Esp));
             if segment == SegmentRegister::Ss {
                 super::abi::inhibit_debug_after_ss_load(code);
             }

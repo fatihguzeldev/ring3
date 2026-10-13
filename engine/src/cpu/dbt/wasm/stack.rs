@@ -1,3 +1,5 @@
+pub(super) mod pointer;
+
 use super::{locals::*, memory};
 use crate::{
     abi::arena::TRANSFER_OFFSET,
@@ -53,10 +55,7 @@ pub(super) fn instruction(
     let width = kind.width();
     match kind {
         StackFrameKind::PushAll32 | StackFrameKind::PushAll16 => {
-            code.local_get(register(Register32::Esp))
-                .i32_const((8 * width) as i32)
-                .i32_sub()
-                .local_set(register(Register32::Esp));
+            pointer::advance(code, -((8 * width) as i32));
         }
         StackFrameKind::PopAll32 | StackFrameKind::PopAll16 => {
             for destination in REGISTERS.into_iter().filter(|r| *r != Register32::Esp) {
@@ -72,10 +71,7 @@ pub(super) fn instruction(
                 }
                 code.local_set(register(destination));
             }
-            code.local_get(register(Register32::Esp))
-                .i32_const((8 * width) as i32)
-                .i32_add()
-                .local_set(register(Register32::Esp));
+            pointer::advance(code, (8 * width) as i32);
         }
         StackFrameKind::Enter32 | StackFrameKind::Enter16 => {
             if width == 2 {
@@ -83,9 +79,7 @@ pub(super) fn instruction(
                     .i32_const(!0xffff)
                     .i32_and();
             }
-            code.local_get(register(Register32::Esp))
-                .i32_const(width as i32)
-                .i32_sub();
+            pointer::assigned(code, register(Register32::Esp), -(width as i32));
             if width == 2 {
                 code.i32_const(0xffff).i32_and().i32_or();
             }
@@ -95,10 +89,7 @@ pub(super) fn instruction(
             } else {
                 u32::from(nesting) + 1
             };
-            code.local_get(register(Register32::Esp))
-                .i32_const((count * width + u32::from(allocation)) as i32)
-                .i32_sub()
-                .local_set(register(Register32::Esp));
+            pointer::advance(code, -((count * width + u32::from(allocation)) as i32));
         }
     }
     code.i32_const(instruction.next_pc().0 as i32)
@@ -308,9 +299,7 @@ fn candidate(
     access: u32,
 ) {
     use memory::helper_field;
-    code.local_get(super::locals::register(register))
-        .i32_const(delta as i32)
-        .i32_add();
+    pointer::offset(code, super::locals::register(register), delta as i32);
     super::segments::base(code, crate::cpu::x86::SegmentRegister::Ss);
     code.i32_add().local_set(ADDRESS);
     code.local_get(RESUME);

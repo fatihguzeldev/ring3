@@ -1,4 +1,7 @@
-/// stack operations use the configured flat 32-bit stack-address profile.
+mod pointer;
+pub(crate) use pointer::StackPointerSize;
+
+/// operand width is independent of the loaded stack pointer width.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(u8)]
 pub enum StackFrameKind {

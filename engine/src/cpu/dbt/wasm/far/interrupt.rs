@@ -31,12 +31,10 @@ pub(in crate::cpu::dbt::wasm) fn interrupt_return(
         .expect("iret capture locals");
     let slot = width.slot_bytes();
     let esp = register(Register32::Esp);
-    // B32 permits wrapping between slots; each whole slot keeps its cached authority.
+    // the active pointer wraps between slots; each whole slot keeps its cached authority.
     for offset in [0, slot, 2 * slot] {
-        code.local_get(esp)
-            .i32_const(offset as i32)
-            .i32_add()
-            .local_set(ADDRESS);
+        super::super::stack::pointer::offset(code, esp, offset as i32);
+        code.local_set(ADDRESS);
         super::super::segments::check_span(
             code,
             SegmentRegister::Ss,
@@ -51,7 +49,7 @@ pub(in crate::cpu::dbt::wasm) fn interrupt_return(
         (slot, saved.selector),
         (2 * slot, saved.flags),
     ] {
-        code.local_get(esp).i32_const(offset as i32).i32_add();
+        super::super::stack::pointer::offset(code, esp, offset as i32);
         super::super::segments::base(code, SegmentRegister::Ss);
         code.i32_add()
             .local_tee(ADDRESS)
@@ -101,10 +99,6 @@ pub(in crate::cpu::dbt::wasm) fn interrupt_return(
         .i32_and()
         .i32_or()
         .local_set(FLAGS);
-    code.local_get(esp)
-        .i32_const((3 * slot) as i32)
-        .i32_add()
-        .local_set(esp)
-        .local_get(saved.target)
-        .local_set(EIP);
+    super::super::stack::pointer::advance(code, (3 * slot) as i32);
+    code.local_get(saved.target).local_set(EIP);
 }

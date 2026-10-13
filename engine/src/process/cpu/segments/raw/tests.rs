@@ -204,7 +204,8 @@ fn architectural_load_failures_publish_only_the_exact_packet_without_setting_acc
 #[test]
 fn unsupported_raw_profiles_are_neutral_host_refusals_before_any_publication() {
     let mut engine = engine();
-    for (target, low, high) in [(2, 0xffff, 0x0000_f200), (4, 0xffff, 0x0060_f200)] {
+    {
+        let (target, low, high) = (4, 0xffff, 0x0060_f200);
         engine
             .configure_segment_descriptor_raw(0x43, raw(low, high))
             .unwrap();
@@ -390,7 +391,7 @@ fn failed_far_pointer_read_preserves_raw_accessed_and_the_prior_loaded_context()
 }
 
 #[test]
-fn nonflat_ss_load_and_b16_refusal_publish_atomically_with_the_table_accessed_bit() {
+fn nonflat_ss_load_and_long_mode_refusal_publish_atomically_with_the_table_accessed_bit() {
     let mut engine = engine();
     engine
         .configure_segment_descriptor_raw(0x43, raw(0x5000_003f, 0x0040_f200))
@@ -414,7 +415,7 @@ fn nonflat_ss_load_and_b16_refusal_publish_atomically_with_the_table_accessed_bi
         3
     );
     engine
-        .configure_segment_descriptor_raw(0x43, raw(0x6000_003f, 0x0000_f200))
+        .configure_segment_descriptor_raw(0x43, raw(0x6000_003f, 0x0060_f200))
         .unwrap();
     let before = engine.arena().to_vec();
     let table = engine.segment_descriptors.clone();

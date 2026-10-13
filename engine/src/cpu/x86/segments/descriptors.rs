@@ -299,7 +299,7 @@ impl SegmentDescriptorTable {
             return Err(fail(SegmentLoadFailure::NotPresent));
         }
         let base = record.code_data_base().expect("code/data checked above");
-        if record.long_mode() || (target == SegmentRegister::Ss && !record.default32()) {
+        if record.long_mode() {
             return Err(fail(SegmentLoadFailure::UnsupportedProfile));
         }
         Ok(SegmentLoad {

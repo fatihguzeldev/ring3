@@ -85,7 +85,7 @@ fn ram(engine: &EngineInstance, address: u32, length: usize) -> Vec<u8> {
 }
 
 #[test]
-fn ss_only_base_uses_v3_companion_without_weakening_legacy_or_b16_validation() {
+fn ss_only_base_and_b16_use_strict_v3_without_weakening_legacy_validation() {
     let mut context = SegmentContext::default();
     assert!(context.state.set_base(SegmentRegister::Ss, 0x5000));
     let mut segments = [0; SEGMENTS_SIZE];
@@ -103,8 +103,14 @@ fn ss_only_base_uses_v3_companion_without_weakening_legacy_or_b16_validation() {
     assert_eq!(legacy, [0xa5; SEGMENTS_SIZE]);
     context.caches[2] = SegmentCache::from_bits(context.caches[2].bits() & !0x0200_0000).unwrap();
     let before = (segments, bases);
-    assert!(encode_current_segment_context(&context, &mut segments, &mut bases).is_err());
-    assert_eq!((segments, bases), before);
+    encode_current_segment_context(&context, &mut segments, &mut bases).unwrap();
+    assert_eq!(&segments[4..6], &3_u16.to_le_bytes());
+    assert_eq!(
+        decode_current_segment_context(&segments, Some(&bases)),
+        Ok(context)
+    );
+    assert!(ring3_engine::abi::x86::encode_segment_context(&context, &mut legacy).is_err());
+    assert_ne!((segments, bases), before);
 }
 
 #[test]
@@ -129,7 +135,7 @@ fn raw_nonflat_ss_resolves_without_mutating_table_and_preserves_fault_priority()
         (0x0040_f000, SegmentLoadFailure::Type),
         (0x0040_d200, SegmentLoadFailure::Privilege),
         (0x0040_7200, SegmentLoadFailure::NotPresent),
-        (0x0000_f200, SegmentLoadFailure::UnsupportedProfile),
+        (0x0060_f200, SegmentLoadFailure::UnsupportedProfile),
     ] {
         table
             .configure_raw(0x43, SegmentDescriptorRecord::from_words(0x5000_003f, high))
@@ -296,7 +302,7 @@ fn far_call_checks_logical_slots_then_writes_based_slots_without_publishing_cpu_
 }
 
 #[test]
-fn host_ss_load_publishes_complete_companion_and_b16_refusal_is_arena_neutral() {
+fn host_ss_load_publishes_complete_companion_and_long_mode_refusal_is_arena_neutral() {
     for resident in [false, true] {
         let (mut engine, id) = bound(resident, false);
         engine
@@ -335,7 +341,7 @@ fn host_ss_load_publishes_complete_companion_and_b16_refusal_is_arena_neutral() 
         engine
             .configure_segment_descriptor_raw(
                 0x43,
-                SegmentDescriptorRecord::from_words(0x6000_003f, 0x0000_f200),
+                SegmentDescriptorRecord::from_words(0x6000_003f, 0x0060_f200),
             )
             .unwrap();
         let before = engine.arena().to_vec();

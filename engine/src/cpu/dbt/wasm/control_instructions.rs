@@ -4,10 +4,9 @@ use super::{cpu_result, locals::*, memory};
 use crate::{
     abi::arena::TRANSFER_OFFSET,
     cpu::x86::{
-        ControlOperation, Register32, SegmentRegister, USER_POP_FLAGS_MASK,
-        USER_POP_FLAGS_WORD_MASK,
+        ControlOperation, Register32, USER_POP_FLAGS_MASK, USER_POP_FLAGS_WORD_MASK,
         decode::DecodedInstruction,
-        ir::{AddressSize, EffectiveAddress, Operation, SmallWidth},
+        ir::{AddressSize, EffectiveAddress, Operation},
     },
 };
 
@@ -80,17 +79,7 @@ fn pop_flags(
     imports: memory::Imports,
     exit_depth: u32,
 ) {
-    let source = EffectiveAddress {
-        base: Some(Register32::Esp),
-        segment: Some(SegmentRegister::Ss),
-        ..Default::default()
-    };
-    if word {
-        memory::load_narrow_value(code, source, SmallWidth::Word, imports, exit_depth);
-        code.local_set(RESULT);
-    } else {
-        memory::load_result(code, source, imports, exit_depth);
-    }
+    super::stack::pointer::load_result(code, if word { 2 } else { 4 }, imports, exit_depth);
     let mutable = if word {
         USER_POP_FLAGS_WORD_MASK
     } else {
@@ -103,11 +92,8 @@ fn pop_flags(
         .i32_const(mutable as i32)
         .i32_and()
         .i32_or()
-        .local_set(FLAGS)
-        .local_get(register(Register32::Esp))
-        .i32_const(if word { 2 } else { 4 })
-        .i32_add()
-        .local_set(register(Register32::Esp));
+        .local_set(FLAGS);
+    super::stack::pointer::advance(code, if word { 2 } else { 4 });
 }
 
 fn bound(

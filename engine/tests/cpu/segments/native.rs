@@ -16,3 +16,6 @@ mod cpu_code_fetch;
 
 #[path = "stack/base/native.rs"]
 mod cpu_ss_base;
+
+#[path = "stack/b16/native.rs"]
+mod cpu_ss_b16;

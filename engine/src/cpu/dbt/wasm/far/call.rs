@@ -24,12 +24,8 @@ pub(in crate::cpu::dbt::wasm) fn call(
         .local_set(HELPER_STATUS);
     call_result(code, width.slot_bytes(), exit_depth);
     target_echo(code, exit_depth);
-    code.local_get(esp)
-        .i32_const((2 * width.slot_bytes()) as i32)
-        .i32_sub()
-        .local_set(esp)
-        .local_get(RESULT)
-        .local_set(EIP);
+    super::super::stack::pointer::advance(code, -((2 * width.slot_bytes()) as i32));
+    code.local_get(RESULT).local_set(EIP);
 }
 
 // the descriptor and stack phases have distinct status/length contracts. The common
@@ -84,9 +80,7 @@ fn call_result(code: &mut InstructionSink<'_>, slot: u32, exit_depth: u32) {
     code.i32_const(1).i32_eq();
     memory::helper_field(code, 16);
     code.i32_const(7).i32_eq().i32_or().if_(BlockType::Empty);
-    code.local_get(register(Register32::Esp))
-        .i32_const(slot as i32)
-        .i32_sub();
+    super::super::stack::pointer::offset(code, register(Register32::Esp), -(slot as i32));
     super::super::segments::base(code, crate::cpu::x86::SegmentRegister::Ss);
     code.i32_add().local_set(ADDRESS);
     memory::helper_field(code, 28);
@@ -94,10 +88,8 @@ fn call_result(code: &mut InstructionSink<'_>, slot: u32, exit_depth: u32) {
         .i32_sub()
         .i32_const(slot as i32 - 1)
         .i32_gt_u()
-        .if_(BlockType::Empty)
-        .local_get(register(Register32::Esp))
-        .i32_const((2 * slot) as i32)
-        .i32_sub();
+        .if_(BlockType::Empty);
+    super::super::stack::pointer::offset(code, register(Register32::Esp), -((2 * slot) as i32));
     super::super::segments::base(code, crate::cpu::x86::SegmentRegister::Ss);
     code.i32_add().local_set(ADDRESS).end();
     cpu_result::validate(code, slot, 2, true, exit_depth + 1);

@@ -809,103 +809,102 @@ pub(super) fn push_memory(
     exit_depth: u32,
 ) {
     checked_address(code, source, 4, SegmentAccess::Read, imports, exit_depth);
-    checked_address(
+    super::stack::pointer::check(
         code,
-        EffectiveAddress {
-            base: Some(crate::cpu::x86::Register32::Esp),
-            displacement: (-4_i32) as u32,
-            ..Default::default()
-        },
+        crate::cpu::x86::Register32::Esp,
+        -4,
         4,
         SegmentAccess::Write,
         imports,
         exit_depth,
     );
     load_result(code, source, imports, exit_depth);
-    store_result(
-        code,
-        EffectiveAddress {
-            base: Some(crate::cpu::x86::Register32::Esp),
-            index: None,
-            scale: 1,
-            displacement: (-4_i32) as u32,
-            ..Default::default()
-        },
-        imports,
-        exit_depth,
-    );
-    code.local_get(register(crate::cpu::x86::Register32::Esp))
-        .i32_const(4)
-        .i32_sub()
-        .local_set(register(crate::cpu::x86::Register32::Esp));
+    super::stack::pointer::push_result(code, 4, imports, exit_depth);
 }
 
 pub(super) fn pop_memory(
     code: &mut InstructionSink<'_>,
-    mut destination: EffectiveAddress,
+    destination: EffectiveAddress,
     imports: Imports,
     exit_depth: u32,
 ) {
-    let esp = crate::cpu::x86::Register32::Esp;
-    if destination.base == Some(esp) {
-        destination.displacement = destination.displacement.wrapping_add(4);
+    pop_memory_width(code, destination, 4, imports, exit_depth);
+}
+
+fn checked_pop_destination(
+    code: &mut InstructionSink<'_>,
+    destination: EffectiveAddress,
+    width: u32,
+    imports: Imports,
+    exit_depth: u32,
+) {
+    if destination.base == Some(crate::cpu::x86::Register32::Esp) {
+        // wrapped B16 POP follows the declared Ring3 recomposed-ESP destination policy.
+        code.i32_const(destination.displacement as i32);
+        super::stack::pointer::assigned(
+            code,
+            register(crate::cpu::x86::Register32::Esp),
+            width as i32,
+        );
+        code.i32_add();
+        if let Some(index) = destination.index {
+            code.local_get(register(index))
+                .i32_const(i32::from(destination.scale))
+                .i32_mul()
+                .i32_add();
+        }
+        if destination.address_size == crate::cpu::x86::ir::AddressSize::Bits16 {
+            code.i32_const(0xffff).i32_and();
+        }
+        checked_offset(
+            code,
+            destination.resolved_segment(),
+            width,
+            SegmentAccess::Write,
+            imports,
+            exit_depth,
+        );
+    } else {
+        checked_address(
+            code,
+            destination,
+            width,
+            SegmentAccess::Write,
+            imports,
+            exit_depth,
+        );
     }
-    checked_address(
+}
+
+fn pop_memory_width(
+    code: &mut InstructionSink<'_>,
+    destination: EffectiveAddress,
+    width: u32,
+    imports: Imports,
+    exit_depth: u32,
+) {
+    super::stack::pointer::check(
         code,
-        EffectiveAddress {
-            base: Some(esp),
-            ..Default::default()
-        },
-        4,
+        crate::cpu::x86::Register32::Esp,
+        0,
+        width,
         SegmentAccess::Read,
         imports,
         exit_depth,
     );
-    checked_address(
-        code,
-        destination,
-        4,
-        SegmentAccess::Write,
-        imports,
-        exit_depth,
-    );
-    load_result(
-        code,
-        EffectiveAddress {
-            base: Some(esp),
-            index: None,
-            scale: 1,
-            displacement: 0,
-            ..Default::default()
-        },
-        imports,
-        exit_depth,
-    );
-    store_result(code, destination, imports, exit_depth);
-    code.local_get(register(esp))
-        .i32_const(4)
-        .i32_add()
-        .local_set(register(esp));
+    checked_pop_destination(code, destination, width, imports, exit_depth);
+    super::stack::pointer::load_result(code, width, imports, exit_depth);
+    checked_pop_destination(code, destination, width, imports, exit_depth);
+    if width == 2 {
+        store_word_result_at_address(code, imports, exit_depth);
+    } else {
+        store_result_at_address(code, imports, exit_depth);
+    }
+    super::stack::pointer::advance(code, width as i32);
 }
 
 pub(super) fn push_word_result(code: &mut InstructionSink<'_>, imports: Imports, exit_depth: u32) {
-    let esp = crate::cpu::x86::Register32::Esp;
-    store_word_result(
-        code,
-        EffectiveAddress {
-            base: Some(esp),
-            index: None,
-            scale: 1,
-            displacement: (-2_i32) as u32,
-            ..Default::default()
-        },
-        imports,
-        exit_depth,
-    );
-    code.local_get(register(esp))
-        .i32_const(2)
-        .i32_sub()
-        .local_set(register(esp));
+    super::stack::pointer::push_result(code, 2, imports, exit_depth);
 }
 
 pub(super) fn pop_word_register(
@@ -915,83 +914,28 @@ pub(super) fn pop_word_register(
     exit_depth: u32,
 ) {
     let esp = crate::cpu::x86::Register32::Esp;
-    load_narrow_value(
-        code,
-        EffectiveAddress {
-            base: Some(esp),
-            index: None,
-            scale: 1,
-            displacement: 0,
-            ..Default::default()
-        },
-        SmallWidth::Word,
-        imports,
-        exit_depth,
-    );
-    code.local_get(register(destination));
+    super::stack::pointer::load(code, esp, 0, 2, imports, exit_depth);
     if destination == esp {
-        code.i32_const(2).i32_add();
+        super::stack::pointer::assigned(code, register(esp), 2);
+    } else {
+        code.local_get(register(destination));
     }
     code.i32_const(!0xffff)
         .i32_and()
         .i32_or()
         .local_set(register(destination));
     if destination != esp {
-        code.local_get(register(esp))
-            .i32_const(2)
-            .i32_add()
-            .local_set(register(esp));
+        super::stack::pointer::advance(code, 2);
     }
 }
 
 pub(super) fn pop_word_memory(
     code: &mut InstructionSink<'_>,
-    mut destination: EffectiveAddress,
+    destination: EffectiveAddress,
     imports: Imports,
     exit_depth: u32,
 ) {
-    let esp = crate::cpu::x86::Register32::Esp;
-    if destination.base == Some(esp) {
-        destination.displacement = destination.displacement.wrapping_add(2);
-    }
-    checked_address(
-        code,
-        EffectiveAddress {
-            base: Some(esp),
-            ..Default::default()
-        },
-        2,
-        SegmentAccess::Read,
-        imports,
-        exit_depth,
-    );
-    checked_address(
-        code,
-        destination,
-        2,
-        SegmentAccess::Write,
-        imports,
-        exit_depth,
-    );
-    load_narrow_value(
-        code,
-        EffectiveAddress {
-            base: Some(esp),
-            index: None,
-            scale: 1,
-            displacement: 0,
-            ..Default::default()
-        },
-        SmallWidth::Word,
-        imports,
-        exit_depth,
-    );
-    code.local_set(RESULT);
-    store_word_result(code, destination, imports, exit_depth);
-    code.local_get(register(esp))
-        .i32_const(2)
-        .i32_add()
-        .local_set(register(esp));
+    pop_memory_width(code, destination, 2, imports, exit_depth);
 }
 
 pub(super) fn load_result(
@@ -1095,25 +1039,10 @@ pub(super) fn pop_register(
     imports: Imports,
     exit_depth: u32,
 ) {
-    let esp = crate::cpu::x86::Register32::Esp;
-    load(
-        code,
-        EffectiveAddress {
-            base: Some(esp),
-            index: None,
-            scale: 1,
-            displacement: 0,
-            ..Default::default()
-        },
-        destination,
-        imports,
-        exit_depth,
-    );
-    if destination != esp {
-        code.local_get(register(esp))
-            .i32_const(4)
-            .i32_add()
-            .local_set(register(esp));
+    super::stack::pointer::load_result(code, 4, imports, exit_depth);
+    code.local_get(RESULT).local_set(register(destination));
+    if destination != crate::cpu::x86::Register32::Esp {
+        super::stack::pointer::advance(code, 4);
     }
 }
 
@@ -1123,35 +1052,12 @@ pub(super) fn pop_return(
     imports: Imports,
     exit_depth: u32,
 ) {
-    let esp = register(crate::cpu::x86::Register32::Esp);
-    checked_address(
-        code,
-        EffectiveAddress {
-            base: Some(crate::cpu::x86::Register32::Esp),
-            ..Default::default()
-        },
-        4,
-        SegmentAccess::Read,
-        imports,
-        exit_depth,
-    );
-    code.local_get(ADDRESS)
-        .call(imports.read.expect("prepared return has a read import"))
-        .local_set(HELPER_STATUS);
-    super::code_fetch::check_context(code, exit_depth);
-    validate_result(code, false);
-    exit_if_failed(code, exit_depth);
-    helper_field(code, 20);
-    code.local_set(RESULT);
+    super::stack::pointer::load_result(code, 4, imports, exit_depth);
     if let Some(limit) = imports.code_fetch_limit {
         super::code_fetch::check_value(code, RESULT, limit, exit_depth);
     }
-    code.local_get(RESULT)
-        .local_set(EIP)
-        .local_get(esp)
-        .i32_const(4 + i32::from(stack_adjust))
-        .i32_add()
-        .local_set(esp);
+    code.local_get(RESULT).local_set(EIP);
+    super::stack::pointer::advance(code, 4 + i32::from(stack_adjust));
 }
 
 pub(super) fn exit_if_invalidated(code: &mut InstructionSink<'_>, exit_depth: u32) {

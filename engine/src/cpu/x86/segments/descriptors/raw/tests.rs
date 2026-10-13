@@ -182,10 +182,8 @@ fn verification_and_failed_resolution_preserve_every_raw_bit() {
 fn unsupported_profiles_remain_distinct_from_architectural_load_failures() {
     let mut table = SegmentDescriptorTable::empty();
     let state = SegmentState::default();
-    for (target, low, high) in [
-        (SegmentRegister::Ss, 0x0000_ffff, 0x0000_f200),
-        (SegmentRegister::Fs, 0x0000_ffff, 0x0060_f200),
-    ] {
+    {
+        let (target, low, high) = (SegmentRegister::Fs, 0x0000_ffff, 0x0060_f200);
         table.configure_raw(0x43, record(low, high)).unwrap();
         let before = table.clone();
         assert_eq!(

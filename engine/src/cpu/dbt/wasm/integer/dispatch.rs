@@ -2,7 +2,7 @@ use super::super::{atomic, integer_system, segments, simd, stack, strings};
 use super::{
     BUDGET, BinaryKind, BitIndex, BitTestKind, BlockType, BranchTarget, ByteArithmeticKind,
     ByteLogicalKind, BytePredicateKind, ByteReadArithmeticKind, ByteRegister, ByteValue, CarryFlag,
-    CarryKind, Condition, CountBranchKind, DecodedInstruction, EIP, EffectiveAddress,
+    CarryKind, Condition, CountBranchKind, DecodedInstruction, EIP,
     ExtensionKind, FLAGS, InstructionSink, LHS, Location32, Operation, RESULT, RETIRED, RHS,
     Register32, ShiftCount, SmallSource, SmallWidth, ValType, Value32, WordArithmeticKind,
     WordLogicalKind, WordMemoryArithmeticKind, WordReadArithmeticKind, WordValue,
@@ -2291,25 +2291,10 @@ pub(in crate::cpu::dbt::wasm) fn instruction(
             target: BranchTarget::Direct(target),
         } => {
             check_near_target(code, target.0, imports, exit_depth);
-            memory::store(
-                code,
-                EffectiveAddress {
-                    base: Some(Register32::Esp),
-                    index: None,
-                    scale: 1,
-                    displacement: (-4_i32) as u32,
-                    ..Default::default()
-                },
-                Value32::Immediate(instruction.next_pc().0),
-                imports,
-                exit_depth,
-            );
-            code.local_get(register(Register32::Esp))
-                .i32_const(4)
-                .i32_sub()
-                .local_set(register(Register32::Esp))
-                .i32_const(target.0 as i32)
-                .local_set(EIP);
+            code.i32_const(instruction.next_pc().0 as i32)
+                .local_set(RESULT);
+            stack::pointer::push_result(code, 4, imports, exit_depth);
+            code.i32_const(target.0 as i32).local_set(EIP);
             store = true;
         }
         Operation::Call {
@@ -2317,25 +2302,11 @@ pub(in crate::cpu::dbt::wasm) fn instruction(
         } => {
             indirect_target(code, target, imports, exit_depth);
             check_near_value(code, RESULT, imports, exit_depth);
-            memory::store(
-                code,
-                EffectiveAddress {
-                    base: Some(Register32::Esp),
-                    index: None,
-                    scale: 1,
-                    displacement: (-4_i32) as u32,
-                    ..Default::default()
-                },
-                Value32::Immediate(instruction.next_pc().0),
-                imports,
-                exit_depth,
-            );
-            code.local_get(register(Register32::Esp))
-                .i32_const(4)
-                .i32_sub()
-                .local_set(register(Register32::Esp))
-                .local_get(RESULT)
-                .local_set(EIP);
+            code.local_get(RESULT)
+                .i32_const(instruction.next_pc().0 as i32)
+                .local_set(RESULT);
+            stack::pointer::push_result(code, 4, imports, exit_depth);
+            code.local_set(EIP);
             store = true;
         }
         Operation::Push {
@@ -2345,23 +2316,17 @@ pub(in crate::cpu::dbt::wasm) fn instruction(
             store = true;
         }
         Operation::Push { source } => {
-            memory::store(
-                code,
-                EffectiveAddress {
-                    base: Some(Register32::Esp),
-                    index: None,
-                    scale: 1,
-                    displacement: (-4_i32) as u32,
-                    ..Default::default()
-                },
-                source,
-                imports,
-                exit_depth,
-            );
-            code.local_get(register(Register32::Esp))
-                .i32_const(4)
-                .i32_sub()
-                .local_set(register(Register32::Esp));
+            match source {
+                Value32::Register(source) => {
+                    code.local_get(register(source));
+                }
+                Value32::Immediate(value) => {
+                    code.i32_const(value as i32);
+                }
+                Value32::Memory(_) => unreachable!("memory push handled above"),
+            }
+            code.local_set(RESULT);
+            stack::pointer::push_result(code, 4, imports, exit_depth);
             store = true;
         }
         Operation::PushWord { source } => {
@@ -2379,13 +2344,10 @@ pub(in crate::cpu::dbt::wasm) fn instruction(
                 imports,
                 exit_depth,
             );
-            memory::checked_address(
+            stack::pointer::check(
                 code,
-                EffectiveAddress {
-                    base: Some(Register32::Esp),
-                    displacement: (-2_i32) as u32,
-                    ..Default::default()
-                },
+                Register32::Esp,
+                -2,
                 2,
                 crate::cpu::x86::SegmentAccess::Write,
                 imports,
@@ -2401,22 +2363,7 @@ pub(in crate::cpu::dbt::wasm) fn instruction(
                 .i32_const(0x00fc_ffff)
                 .i32_and()
                 .local_set(RESULT);
-            memory::store_result(
-                code,
-                EffectiveAddress {
-                    base: Some(Register32::Esp),
-                    index: None,
-                    scale: 1,
-                    displacement: (-4_i32) as u32,
-                    ..Default::default()
-                },
-                imports,
-                exit_depth,
-            );
-            code.local_get(register(Register32::Esp))
-                .i32_const(4)
-                .i32_sub()
-                .local_set(register(Register32::Esp));
+            stack::pointer::push_result(code, 4, imports, exit_depth);
             store = true;
         }
         Operation::PushFlagsWord => {
@@ -2446,43 +2393,17 @@ pub(in crate::cpu::dbt::wasm) fn instruction(
             store = true;
         }
         Operation::Leave => {
-            memory::load_result(
-                code,
-                EffectiveAddress {
-                    base: Some(Register32::Ebp),
-                    index: None,
-                    scale: 1,
-                    displacement: 0,
-                    ..Default::default()
-                },
-                imports,
-                exit_depth,
-            );
-            code.local_get(register(Register32::Ebp))
-                .i32_const(4)
-                .i32_add()
-                .local_set(register(Register32::Esp))
+            stack::pointer::load(code, Register32::Ebp, 0, 4, imports, exit_depth);
+            code.local_set(RESULT);
+            stack::pointer::assigned(code, register(Register32::Ebp), 4);
+            code.local_set(register(Register32::Esp))
                 .local_get(RESULT)
                 .local_set(register(Register32::Ebp));
         }
         Operation::LeaveWord => {
-            memory::load_narrow_value(
-                code,
-                EffectiveAddress {
-                    base: Some(Register32::Ebp),
-                    index: None,
-                    scale: 1,
-                    displacement: 0,
-                    ..Default::default()
-                },
-                SmallWidth::Word,
-                imports,
-                exit_depth,
-            );
-            code.local_get(register(Register32::Ebp))
-                .i32_const(2)
-                .i32_add()
-                .local_set(register(Register32::Esp))
+            stack::pointer::load(code, Register32::Ebp, 0, 2, imports, exit_depth);
+            stack::pointer::assigned(code, register(Register32::Ebp), 2);
+            code.local_set(register(Register32::Esp))
                 .local_get(register(Register32::Ebp))
                 .i32_const(!0xffff)
                 .i32_and()
@@ -2493,27 +2414,11 @@ pub(in crate::cpu::dbt::wasm) fn instruction(
             memory::pop_return(code, stack_adjust, imports, exit_depth);
         }
         Operation::ReturnWord { stack_adjust } => {
-            memory::load_narrow_value(
-                code,
-                EffectiveAddress {
-                    base: Some(Register32::Esp),
-                    index: None,
-                    scale: 1,
-                    displacement: 0,
-                    ..Default::default()
-                },
-                SmallWidth::Word,
-                imports,
-                exit_depth,
-            );
+            stack::pointer::load(code, Register32::Esp, 0, 2, imports, exit_depth);
             code.local_set(RESULT);
             check_near_value(code, RESULT, imports, exit_depth);
-            code.local_get(RESULT)
-                .local_set(EIP)
-                .local_get(register(Register32::Esp))
-                .i32_const(2 + i32::from(stack_adjust))
-                .i32_add()
-                .local_set(register(Register32::Esp));
+            code.local_get(RESULT).local_set(EIP);
+            stack::pointer::advance(code, 2 + i32::from(stack_adjust));
         }
     }
     if !matches!(

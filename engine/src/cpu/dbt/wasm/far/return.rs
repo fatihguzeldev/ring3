@@ -11,13 +11,10 @@ pub(in crate::cpu::dbt::wasm) fn return_(
 ) {
     let slot = width.slot_bytes();
     let esp = register(Register32::Esp);
-    // keep the two logical slots separate: B32 permits wrapping between slots,
-    // while each individual slot must satisfy the checked cached span policy.
+    // the active pointer wraps between slots; each whole slot retains cached span authority.
     for offset in [0, slot] {
-        code.local_get(esp)
-            .i32_const(offset as i32)
-            .i32_add()
-            .local_set(ADDRESS);
+        super::super::stack::pointer::offset(code, esp, offset as i32);
+        code.local_set(ADDRESS);
         segments::check_span(
             code,
             SegmentRegister::Ss,
@@ -28,7 +25,7 @@ pub(in crate::cpu::dbt::wasm) fn return_(
         );
     }
     for offset in [0, slot] {
-        code.local_get(esp).i32_const(offset as i32).i32_add();
+        super::super::stack::pointer::offset(code, esp, offset as i32);
         segments::base(code, SegmentRegister::Ss);
         code.i32_add()
             .local_tee(ADDRESS)
@@ -66,10 +63,6 @@ pub(in crate::cpu::dbt::wasm) fn return_(
     descriptor_result(code, exit_depth);
     cpu_result::validate(code, 0, 0, false, exit_depth);
     target_echo(code, exit_depth);
-    code.local_get(esp)
-        .i32_const((2 * slot + u32::from(stack_adjust)) as i32)
-        .i32_add()
-        .local_set(esp)
-        .local_get(RESULT)
-        .local_set(EIP);
+    super::super::stack::pointer::advance(code, (2 * slot + u32::from(stack_adjust)) as i32);
+    code.local_get(RESULT).local_set(EIP);
 }

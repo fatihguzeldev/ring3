@@ -5,12 +5,13 @@ use crate::{
         cpu_helper::{CpuMemoryError, encode_cpu_result},
         memory_helper::HELPER_SIZE,
     },
-    cpu::x86::{SegmentAccess, SegmentContext, SegmentRegister, StackFrameKind},
+    cpu::x86::{SegmentAccess, SegmentContext, SegmentRegister, StackFrameKind, StackPointerSize},
     memory::{Access, AddressSpace, GuestAddress, MemoryError},
 };
 
 struct Prepared {
     ss_base: u32,
+    pointer: StackPointerSize,
     registers: [u32; 8],
     addresses: [u32; 32],
     values: [u32; 32],
@@ -19,18 +20,18 @@ struct Prepared {
 
 impl Prepared {
     fn push(&mut self, memory: &AddressSpace, width: u32, value: u32) -> Result<(), MemoryError> {
-        let offset = self.registers[4].wrapping_sub(width);
-        let address = self.ss_base.wrapping_add(offset);
+        let advanced = self.pointer.advance(self.registers[4], -(width as i32));
+        let address = self.ss_base.wrapping_add(self.pointer.offset(advanced));
         memory.check_span(GuestAddress(address), width as usize, Access::Write)?;
         self.addresses[self.count] = address;
         self.values[self.count] = value;
         self.count += 1;
-        self.registers[4] = offset;
+        self.registers[4] = advanced;
         Ok(())
     }
 
     fn read(&self, memory: &AddressSpace, offset: u32, width: u32) -> Result<u32, MemoryError> {
-        let address = self.ss_base.wrapping_add(offset);
+        let address = self.ss_base.wrapping_add(self.pointer.offset(offset));
         let mut bytes = [0; 4];
         memory.read(GuestAddress(address), &mut bytes[..width as usize])?;
         // ENTER's ordered reads must observe a preceding push when frames overlap.
@@ -59,8 +60,15 @@ fn check_segments(
     original: [u32; 8],
 ) -> Result<(), CpuMemoryError> {
     let width = kind.width();
+    let pointer = StackPointerSize::new(context.caches[SegmentRegister::Ss.index()].default32());
     let span = |offset, access| {
-        super::segments::check_cached_span(context, SegmentRegister::Ss, offset, width, access)
+        super::segments::check_cached_span(
+            context,
+            SegmentRegister::Ss,
+            pointer.offset(offset),
+            width,
+            access,
+        )
     };
     match kind {
         StackFrameKind::PushAll32 | StackFrameKind::PushAll16 => {
@@ -108,6 +116,7 @@ fn check_segments(
 fn prepare(
     memory: &AddressSpace,
     ss_base: u32,
+    pointer: StackPointerSize,
     kind: StackFrameKind,
     allocation: u16,
     nesting: u8,
@@ -116,6 +125,7 @@ fn prepare(
     let width = kind.width();
     let mut result = Prepared {
         ss_base,
+        pointer,
         registers: original,
         addresses: [0; 32],
         values: [0; 32],
@@ -136,10 +146,11 @@ fn prepare(
                     value
                 };
             }
-            result.registers[4] = original[4].wrapping_add(8 * width);
+            result.registers[4] = pointer.advance(original[4], (8 * width) as i32);
         }
         StackFrameKind::Enter32 | StackFrameKind::Enter16 => {
             result.push(memory, width, original[5])?;
+            // the frame value follows operand width; only implicit accesses use the active pointer.
             let frame = result.registers[4];
             for index in 1..u32::from(nesting) {
                 let value = result.read(memory, original[5].wrapping_sub(index * width), width)?;
@@ -153,12 +164,11 @@ fn prepare(
             } else {
                 frame
             };
-            // the software profile fixes SS.B=1: all stack addresses and allocation use ESP.
-            result.registers[4] = result.registers[4].wrapping_sub(u32::from(allocation));
+            result.registers[4] = pointer.advance(result.registers[4], -i32::from(allocation));
             // intel ENTER requires a writeability check at the final stack pointer,
             // including local storage which is allocated without being initialized.
             memory.check_span(
-                GuestAddress(ss_base.wrapping_add(result.registers[4])),
+                GuestAddress(ss_base.wrapping_add(pointer.offset(result.registers[4]))),
                 width as usize,
                 Access::Write,
             )?;
@@ -195,6 +205,8 @@ impl EngineInstance {
             u32::from_le_bytes(input[index * 4..index * 4 + 4].try_into().unwrap())
         });
         let context = self.segment_context()?;
+        let pointer =
+            StackPointerSize::new(context.caches[SegmentRegister::Ss.index()].default32());
         let memory = self.memory.as_mut().ok_or(HostError::Closed)?;
         let version = memory.code_validation_version();
         let result = check_segments(&context, kind, allocation, nesting, original)
@@ -202,6 +214,7 @@ impl EngineInstance {
                 prepare(
                     memory,
                     context.state.bases[SegmentRegister::Ss.index()],
+                    pointer,
                     kind,
                     allocation,
                     nesting,
@@ -276,7 +289,16 @@ mod tests {
                 0x11112222, 0x22223333, 0x33334444, 0x44445555, 0x8080, 0x55556666, 0x66667777,
                 0x77778888,
             ];
-            let pushed = prepare(&memory, 0, kind, 0, 0, registers).unwrap();
+            let pushed = prepare(
+                &memory,
+                0,
+                StackPointerSize::new(true),
+                kind,
+                0,
+                0,
+                registers,
+            )
+            .unwrap();
             memory
                 .write_stack(
                     &pushed.addresses[..8],
@@ -288,6 +310,7 @@ mod tests {
             let popped = prepare(
                 &memory,
                 0,
+                StackPointerSize::new(true),
                 if kind.width() == 2 {
                     StackFrameKind::PopAll16
                 } else {
@@ -307,7 +330,16 @@ mod tests {
         let mut memory = memory();
         memory.write(GuestAddress(0x8000), &[0xa5; 128]).unwrap();
         let registers = [0, 0, 0, 0, 0x8080, 0x8080, 0, 0];
-        let prepared = prepare(&memory, 0, StackFrameKind::Enter32, 16, 3, registers).unwrap();
+        let prepared = prepare(
+            &memory,
+            0,
+            StackPointerSize::new(true),
+            StackFrameKind::Enter32,
+            16,
+            3,
+            registers,
+        )
+        .unwrap();
         assert_eq!(&prepared.values[..4], &[0x8080, 0x8080, 0x8080, 0x807c]);
         assert_eq!(
             (prepared.registers[4], prepared.registers[5]),
@@ -325,10 +357,32 @@ mod tests {
     fn final_allocation_probe_and_late_frame_read_fail_before_any_commit() {
         let memory = memory();
         let registers = [0, 0, 0, 0, 0x8004, 0x9004, 0, 0];
-        assert!(prepare(&memory, 0, StackFrameKind::Enter32, 0, 2, registers).is_err());
+        assert!(
+            prepare(
+                &memory,
+                0,
+                StackPointerSize::new(true),
+                StackFrameKind::Enter32,
+                0,
+                2,
+                registers
+            )
+            .is_err()
+        );
         let mut registers = registers;
         registers[5] = 0x8000;
-        assert!(prepare(&memory, 0, StackFrameKind::Enter32, 0x1001, 0, registers).is_err());
+        assert!(
+            prepare(
+                &memory,
+                0,
+                StackPointerSize::new(true),
+                StackFrameKind::Enter32,
+                0x1001,
+                0,
+                registers
+            )
+            .is_err()
+        );
         let mut bytes = [1; 4];
         memory.read(GuestAddress(0x8000), &mut bytes).unwrap();
         assert_eq!(bytes, [0; 4]);
@@ -339,7 +393,16 @@ mod tests {
         let mut memory = memory();
         memory.write(GuestAddress(0x8000), &[0xa5; 128]).unwrap();
         let registers = [0, 0, 0, 0, 0x3080, 0x3080, 0, 0];
-        let prepared = prepare(&memory, 0x5000, StackFrameKind::Enter32, 16, 3, registers).unwrap();
+        let prepared = prepare(
+            &memory,
+            0x5000,
+            StackPointerSize::new(true),
+            StackFrameKind::Enter32,
+            16,
+            3,
+            registers,
+        )
+        .unwrap();
         assert_eq!(&prepared.addresses[..4], &[0x807c, 0x8078, 0x8074, 0x8070]);
         assert_eq!(&prepared.values[..4], &[0x3080, 0x3080, 0x3080, 0x307c]);
         assert_eq!(
@@ -347,7 +410,6 @@ mod tests {
             (0x3060, 0x307c)
         );
     }
-
     #[test]
     fn nonflat_late_stack_page_fault_keeps_ram_registers_and_code_version_atomic() {
         for kind in [StackFrameKind::PushAll32, StackFrameKind::PushAll16] {
@@ -404,5 +466,104 @@ mod tests {
             assert_eq!(after_ram, before_ram);
             assert_eq!(engine.memory().unwrap().code_validation_version(), version);
         }
+    }
+    #[test]
+    fn mixed_enter32_stages_full_frame_value_and_active_bp_overlay() {
+        let memory = memory();
+        let original = [1, 2, 3, 4, 0xabcd3080, 0x76543080, 7, 8];
+        let prepared = prepare(
+            &memory,
+            0x5000,
+            StackPointerSize::new(false),
+            StackFrameKind::Enter32,
+            16,
+            3,
+            original,
+        )
+        .unwrap();
+        assert_eq!(&prepared.addresses[..4], &[0x807c, 0x8078, 0x8074, 0x8070]);
+        assert_eq!(
+            &prepared.values[..4],
+            &[0x76543080, 0x76543080, 0x76543080, 0xabcd307c]
+        );
+        assert_eq!(
+            (prepared.registers[4], prepared.registers[5]),
+            (0xabcd3060, 0xabcd307c)
+        );
+    }
+
+    #[test]
+    fn mixed_enter32_final_probe_failure_preserves_code_validation_version() {
+        use crate::abi::x86::{
+            SEGMENT_BASES_RECORD_SIZE, SEGMENTS_SIZE, encode_current_segment_context,
+        };
+        let mut engine = EngineInstance::new(2, 0x53425353).unwrap();
+        engine.map(0x1000, 1, 7).unwrap();
+        engine.map(0x6000, 1, 3).unwrap();
+        engine.arena_mut().unwrap()[TRANSFER_OFFSET..TRANSFER_OFFSET + 2]
+            .copy_from_slice(&[0xeb, 0xfe]);
+        engine.upload(0x1000, 2).unwrap();
+        engine.arena_mut().unwrap()[TRANSFER_OFFSET..TRANSFER_OFFSET + 8]
+            .copy_from_slice(&[0, 0x10, 0, 0, 2, 0, 0, 0]);
+        engine.compile(1).unwrap();
+        let mut context = engine.segment_context().unwrap();
+        context.state.bases[2] = 0x5000;
+        context.caches[2] =
+            crate::cpu::x86::SegmentCache::from_bits(context.caches[2].bits() & !0x02000000)
+                .unwrap();
+        let mut segments = [0; SEGMENTS_SIZE];
+        let mut bases = [0; SEGMENT_BASES_RECORD_SIZE];
+        encode_current_segment_context(&context, &mut segments, &mut bases).unwrap();
+        engine.arena_mut().unwrap()[crate::abi::arena::SEGMENTS_OFFSET
+            ..crate::abi::arena::SEGMENTS_OFFSET + SEGMENTS_SIZE]
+            .copy_from_slice(&segments);
+        engine.arena_mut().unwrap()[crate::abi::arena::SEGMENT_BASES_RECORD_OFFSET
+            ..crate::abi::arena::SEGMENT_BASES_RECORD_OFFSET + SEGMENT_BASES_RECORD_SIZE]
+            .copy_from_slice(&bases);
+        for (index, value) in [1_u32, 2, 3, 4, 0xabcd1004, 0x76540024, 7, 8]
+            .into_iter()
+            .enumerate()
+        {
+            engine.arena_mut().unwrap()
+                [TRANSFER_OFFSET + index * 4..TRANSFER_OFFSET + index * 4 + 4]
+                .copy_from_slice(&value.to_le_bytes());
+        }
+        let before = engine.arena().to_vec();
+        let version = engine.memory().unwrap().code_validation_version();
+        let mut before_ram = [0; 16];
+        engine
+            .memory()
+            .unwrap()
+            .read(GuestAddress(0x6000), &mut before_ram)
+            .unwrap();
+        assert_eq!(
+            engine.stack_execute(StackFrameKind::Enter32.control(8, 0)),
+            Ok(StoreCompletion::Complete)
+        );
+        let mut packet = [0; HELPER_SIZE];
+        encode_cpu_result(
+            4,
+            0,
+            Err(CpuMemoryError::Memory(MemoryError::Fault(
+                crate::memory::MemoryFault {
+                    address: GuestAddress(0x5ff8),
+                    access: Access::Write,
+                    reason: crate::memory::FaultReason::Unmapped,
+                },
+            ))),
+            &mut packet,
+        )
+        .unwrap();
+        let mut expected = before;
+        expected[HELPER_OFFSET..HELPER_OFFSET + HELPER_SIZE].copy_from_slice(&packet);
+        assert_eq!(engine.arena(), expected);
+        let mut after_ram = [0; 16];
+        engine
+            .memory()
+            .unwrap()
+            .read(GuestAddress(0x6000), &mut after_ram)
+            .unwrap();
+        assert_eq!(after_ram, before_ram);
+        assert_eq!(engine.memory().unwrap().code_validation_version(), version);
     }
 }
