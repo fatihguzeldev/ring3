@@ -1,11 +1,7 @@
 use crate::cpu::x86::avx::{LogicalInstruction, LogicalOperation, VectorRegister, VectorWidth};
 use wasm_encoder::{InstructionSink, MemArg};
 
-#[derive(Clone, Copy)]
-pub(super) struct VectorLayout {
-    pub lower: u32,
-    pub upper: u32,
-}
+use super::VectorLayout;
 
 fn offset(base: u32, register: VectorRegister) -> MemArg {
     MemArg {

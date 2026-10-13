@@ -1,4 +1,9 @@
 mod arithmetic;
+mod moves;
+
+pub(crate) use moves::{
+    DuplicateKind, Half, HalfMerge, MoveInstruction, MoveSource, WordSource, WordTarget,
+};
 
 use super::simd::SimdState;
 
