@@ -28,9 +28,9 @@ const bytes = hex => Buffer.from(hex, 'hex');
 const traced = (name, args, status = 0) => ({name, args: args.map(value => value >>> 0), status});
 const bound = (c, material, args) => [...(c.resident ? material.binding : []), ...args];
 const route = (c, kind) => {
-  if (kind === 'or') return c.resident ? 'atomic_or_resident_u32' : 'atomic_or_u32';
-  if (kind === 'exchange') return c.resident ? 'exchange_resident32' : 'exchange32';
-  return c.resident ? `store_resident${kind}` : `store${kind}`;
+  if (kind === 'or') return c.resident ? 'cpu_atomic_or_resident_u32' : 'cpu_atomic_or_u32';
+  if (kind === 'exchange') return c.resident ? 'cpu_exchange_resident32' : 'cpu_exchange32';
+  return c.resident ? `cpu_store_resident${kind}` : `cpu_store${kind}`;
 };
 function seed({set = {}, flags = FLAGS, segments} = {}) {
   const regs = [...registers];
@@ -48,17 +48,17 @@ function seed({set = {}, flags = FLAGS, segments} = {}) {
   }
   return input;
 }
-function done(input, next, flags, {reason = 1, version = 2, ecx} = {}) {
+function done(input, next, flags, {reason = 1, version = 6, ecx} = {}) {
   const want = Buffer.from(input);
   want.writeUInt32LE(next, 48); want.writeUInt32LE(flags, 52);
   if (ecx !== undefined) want.writeUInt32LE(ecx, 20);
   return exit(want, reason, 1, reason >= 16 ? 7 : version);
 }
 function packet(want, kind) {
-  // Legacy OR and XCHG helpers report the old dword; stores report zero.
+  // cpu or and xchg helpers report the old dword; stores report zero.
   const value = kind === 'or' || kind === 'exchange' ? 0x12345678 : 0;
-  const version = kind === 8 ? 3 : kind === 16 ? 4 : 1;
-  const length = kind === 8 ? 1 : kind === 16 ? 2 : 0;
+  const version = 10;
+  const length = kind === 8 ? 1 : kind === 16 ? 2 : 4;
   want.set(record('R3MH', 40, [0, value, 0, 0, 0, length], version), 100);
 }
 const ordinary = [
@@ -130,9 +130,9 @@ for (const resident of [false, true]) for (const entries of [false, true]) {
       h.host(c, 'protect', [0x6000, 1, 1]); // READ: the RMW read succeeds, then the write is denied.
     }
     const {name, material} = compile(c, row, input);
-    const want = exit(Buffer.from(input), row.pageFault ? 5 : row.reason, 0, row.pageFault ? 2 : 6);
+    const want = exit(Buffer.from(input), row.pageFault ? 5 : row.reason, 0, 6);
     if (row.pageFault) {
-      want.set(record('R3MH', 40, [1, 0, 2, 0x6000, 2, 4]), 100);
+      want.set(record('R3MH', 40, [1, 0, 2, 0x6000, 2, 4], 10), 100);
       want.set(words([2, 0x6000, 2, 4]), 80);
     }
     const helpers = row.pageFault && material ? [traced(name, bound(c, material, [row.address, row.value]))] : [];

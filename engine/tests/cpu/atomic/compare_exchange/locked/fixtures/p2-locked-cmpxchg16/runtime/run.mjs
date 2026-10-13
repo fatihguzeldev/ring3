@@ -22,6 +22,7 @@ const sourcePaths = ['engine/src/memory/space.rs', 'engine/src/abi/memory_helper
   ...['runtime/run.mjs', 'kernel.c', 'build.py', 'kernel.obj', 'kernel.text.bin', 'kernel.disasm.txt', 'receipt.json', 'PROVENANCE.md']
     .map(p => 'engine/tests/cpu/atomic/compare_exchange/locked/fixtures/p2-locked-cmpxchg16/' + p),
   'engine/tests/programs/records/fixtures/p2-compiled-records/build.py', 'engine/tests/support/wasm/engine.mjs'];
+sourcePaths.push('engine/src/abi/memory_helper/cpu.rs','engine/src/cpu/dbt/wasm/memory/cpu_scalar.rs','engine/src/cpu/dbt/wasm/emitter.rs','engine/src/process/memory/cpu_scalar.rs','engine/src/process/memory/scalar/cpu_write.rs','engine/src/process/wasm/memory/cpu_write.rs','engine/src/abi/wasm/exports/memory/cpu_write.rs','engine/src/memory/space/cpu/atomic.rs');
 const sourceHashes = () => Object.fromEntries(sourcePaths.map(p => [p, hash(readFileSync(join(root, p)))]));
 const sourcesBefore = sourceHashes(), contexts = [], modules = [], observations = [], helperTrace = [], diagnostics = [], controls = [];
 const counts = {contexts: 0, modules: 0, runs: 0, retired: 0, compares: 0, helper_calls: 0, read32: 0, read16: 0, store32: 0, store16: 0,
@@ -34,9 +35,12 @@ function record(magic, version, size, fields) {
 }
 const state = s => record('R3ST', 1, 56, [...s.registers, s.pc, s.flags]);
 const exit = (reason, retired, {detail = 0, address = 0, access = 0} = {}, version = 2) => record('R3EX', reason === 11 ? 6 : version, 40, [reason, retired, detail, address, access, access ? 2 : 0]);
-const helper = (value = 0, {detail = 0, address = 0, access = 0} = {}) => record('R3MH', 6, 40, [access ? 1 : 0, value, detail, address, access, 2]);
+const initialHelper = (value = 0, {detail = 0, address = 0, access = 0} = {}) => record('R3MH', 6, 40, [access ? 1 : 0, value, detail, address, access, 2]);
+const helper = (value = 0, {detail = 0, address = 0, access = 0} = {}) => record('R3MH', 10, 40, [access ? 1 : 0, value, detail, address, access, 2]);
 const helper32 = value => record('R3MH', 1, 40, [0, value, 0, 0, 0, 0]);
+const cpuHelper32 = value => record('R3MH', 10, 40, [0, value, 0, 0, 0, 4]);
 const helper16 = value => record('R3MH', 2, 40, [0, value, 0, 0, 0, 2]);
+const cpuHelper16 = value => record('R3MH', 10, 40, [0, value, 0, 0, 0, 2]);
 const lowWord = parent => parent % 65536;
 const mergeWord = (parent, value) => parent - lowWord(parent) + value;
 const setSource = (registers, source, value) => {registers[source] = mergeWord(registers[source], value);};
@@ -101,7 +105,7 @@ function map(c, page, permission = 3) {host(c, 'map', [page, 1, permission]); c.
 function protect(c, page, permission) {host(c, 'protect', [page, 1, permission]);}
 function unmap(c, page) {host(c, 'unmap', [page, 1]); c.pages.delete(page);}
 function upload(c, address, bytes) {assert.ok(address >= 0 && address + bytes.length <= 4294967296); input(c, 140, bytes); host(c, 'upload', [address, bytes.length]);}
-function seed(c, pc, flags = 0xcd7, registers = parents()) {input(c, 0, Buffer.concat([state({registers, pc, flags}), exit(1, 0), word(0), helper(0xad)])); return cpu(c);}
+function seed(c, pc, flags = 0xcd7, registers = parents()) {input(c, 0, Buffer.concat([state({registers, pc, flags}), exit(1, 0), word(0), initialHelper(0xad)])); return cpu(c);}
 const arities = {open: 3, close: 0, arena_ptr: 0, map: 3, protect: 3, unmap: 2, upload: 2, read32: 1, read16: 1, store16: 2, store_resident16: 6,
   store32: 2, store_resident32: 6, compare_exchange16: 3, compare_exchange_resident16: 7, compile: 1, compile_entries: 2,
   compile_resident: 1, compile_resident_entries: 2, generation: 0, module_ptr: 0, module_len: 0, guard: 6, guard_resident: 7};
@@ -109,6 +113,7 @@ const arities = {open: 3, close: 0, arena_ptr: 0, map: 3, protect: 3, unmap: 2, 
 function open(owner, entries, purpose) {
   const instance = new WebAssembly.Instance(engine.module, {}), c = {id: ++counts.contexts, owner, entries, purpose, memory: instance.exports.memory, api: {}, high: 0x4341534c, captures: 0, pages: new Set(), maxPages: 0};
   for (const [name, arity] of Object.entries(arities)) {c.api[name] = instance.exports['ring3_abi_v1_' + name]; assert.equal(c.api[name]?.length, arity, name);}
+  for (const name of ['read32', 'read16', 'store16', 'store_resident16', 'store32', 'store_resident32', 'compare_exchange16', 'compare_exchange_resident16']) {c.api['cpu_'+name] = instance.exports['ring3_abi_v1_cpu_'+name]; assert.equal(c.api['cpu_'+name]?.length, arities[name], 'cpu_'+name);}
   assert.equal(c.api.open(12, c.id, c.high), 0); c.base = c.api.arena_ptr() >>> 0; input(c, 0, initial);
   for (const [page, permission] of [[0, 3], [0x1000, 7], [0x2000, 7], [0x3000, 7], [0x5000, 3], [0x6000, 3], [0x7000, 3], [0xfffff000, 3]]) map(c, page, permission);
   for (const block of [...normal, ...aliases, faultBlock, live, ...caller]) upload(c, block.pc, block.bytes);
@@ -124,21 +129,22 @@ function compile(c, name, blocks, helpers = ['compare']) {
   host(c, method, c.entries ? [blocks.length, 0] : [blocks.length], c.owner === 'resident' ? [140, 164] : null);
   const b = arena(c), binding = c.owner === 'resident' ? {low: b.readUInt32LE(148), high: b.readUInt32LE(152), pointer: b.readUInt32LE(156), length: b.readUInt32LE(160)} : {generation: c.api.generation(), pointer: c.api.module_ptr() >>> 0, length: c.api.module_len() >>> 0};
   const bytes = Buffer.from(new Uint8Array(c.memory.buffer, binding.pointer, binding.length)), module = new WebAssembly.Module(bytes), guard = c.owner === 'resident' ? 'guard_resident' : 'guard';
-  const names = helpers.map(n => n === 'compare' ? (c.owner === 'resident' ? 'compare_exchange_resident16' : 'compare_exchange16') : n === 'store' ? (c.owner === 'resident' ? 'store_resident32' : 'store32') : n === 'store16' ? (c.owner === 'resident' ? 'store_resident16' : 'store16') : n);
+  const names = helpers.map(n => n === 'compare' ? (c.owner === 'resident' ? 'compare_exchange_resident16' : 'compare_exchange16') : n === 'store' ? (c.owner === 'resident' ? 'store_resident32' : 'store32') : n === 'store16' ? (c.owner === 'resident' ? 'store_resident16' : 'store16') : n).map(n => 'cpu_'+n);
   const imports = [{module: 'env', name: 'memory', kind: 'memory'}, ...[guard, ...names].map(name => ({module: 'ring3', name, kind: 'function'}))];
   assert.ok(bytes.length <= 65536); assert.deepEqual(WebAssembly.Module.imports(module), imports); assert.deepEqual(WebAssembly.Module.exports(module), [{name: 'run', kind: 'function'}]);
   const ring3 = {...c.api};
   for (const name of names) ring3[name] = (...args) => {
+    const legacyName = name.slice(4);
     const before = arena(c), status = c.api[name](...args), after = arena(c), expected = Buffer.from(before); expected.set(after.subarray(100, 140), 100);
     assert.deepEqual(after, expected, 'canonical helper changes only its 40-byte record');
     const payload = args.slice(name.includes('resident') ? 4 : 0).map(v => v >>> 0);
-    helperTrace.push({context: c.id, call: counts.runs + 1, name, address: payload[0], expected: name.startsWith('compare') ? payload[1] : null,
-      input_value: name.startsWith('read') ? null : payload.at(-1), status, helper_hex: after.subarray(100, 140).toString('hex')});
-    counts.helper_calls++; counts[name.startsWith('compare') ? 'compares' : name.startsWith('read') ? name : name.endsWith('16') ? 'store16' : 'store32']++; return status;
+    helperTrace.push({context: c.id, call: counts.runs + 1, name, address: payload[0], expected: legacyName.startsWith('compare') ? payload[1] : null,
+      input_value: legacyName.startsWith('read') ? null : payload.at(-1), status, helper_hex: after.subarray(100, 140).toString('hex')});
+    counts.helper_calls++; counts[legacyName.startsWith('compare') ? 'compares' : legacyName.startsWith('read') ? legacyName : name.endsWith('16') ? 'store16' : 'store32']++; return status;
   };
   const run = new WebAssembly.Instance(module, {env: {memory: c.memory}, ring3}).exports.run; assert.equal(run.length, 4);
   const file = `module-${++counts.modules}.wasm`; writeFileSync(join(output, file), bytes, {flag: 'wx'});
-  const unit = {...binding, name, module, ring3, run, exitVersion: names.length ? 2 : 1};
+  const unit = {...binding, name, module, ring3, run, exitVersion: names.length ? 6 : 1};
   modules.push({context: c.id, owner: c.owner, entries: c.entries, name, file, bytes: bytes.length, sha256: hash(bytes), blocks: blocks.length, instructions: instructionCount, imports, ...binding}); return unit;
 }
 function run(c, unit, budget, next, label, {status = 0, reason = 1, retired = 1, packet, fault = {}, synthetic = false} = {}) {
@@ -265,8 +271,8 @@ function core(owner, entries) {
   compilerProof(c,compiled);close(c);
 }
 function synthetic(c, unit) {
-  const malformed = [
-    {name: 'magic', edit: b => b.write('BAD!')}, {name: 'old-version', edit: b => b.writeUInt16LE(5, 4)},
+  const replies = [
+    {name: 'magic', edit: b => b.write('BAD!')}, {name: 'legacy-reply-version', edit: b => b.writeUInt16LE(6, 4)},
     {name: 'size', edit: b => b.writeUInt32LE(36, 8)}, {name: 'reserved', edit: b => b.writeUInt32LE(1, 12)},
     {name: 'success-fault-field', edit: b => b.writeUInt32LE(2, 24)}, {name: 'old-value-too-wide', packet: helper(0x10000)},
     {name: 'success-length-zero', edit: b => b.writeUInt32LE(0, 36)}, {name: 'success-length-byte', edit: b => b.writeUInt32LE(1, 36)},
@@ -275,29 +281,29 @@ function synthetic(c, unit) {
     {name: 'write-unmapped', packet: helper(0, {detail: 1, address: DATA, access: 2})},
     {name: 'write-overflow', address:0xfffffffe, packet: helper(0, {detail: 3, address: 0xffffffff, access: 2})},
     {name: 'invalidated-fault', status: 11, packet: helper(0, {detail: 2, address: DATA, access: 1})},
-    {name: 'invalidated-infrastructure', status: 11, packet: record('R3MH', 6, 40, [2, 0, 1, 0, 0, 2])},
+    {name: 'invalidated-infrastructure', status: 11, packet: record('R3MH',10,40,[2,0, 1, 0, 0, 2])},
     {name: 'fault-outside-word', packet: helper(0, {detail: 2, address: DATA + 2, access: 1})},
-    {name: 'top-nonoverflow-read-fault', address: 0xfffffffe, packet: helper(0, {detail: 2, address: 0xffffffff, access: 1})},
-    {name: 'top-nonoverflow-write-fault', address: 0xfffffffe, packet: helper(0, {detail: 2, address: 0xffffffff, access: 2})},
+    {name: 'current-v10-top-read-fault', address: 0xfffffffe, validFault: {detail: 2, address: 0xffffffff, access: 1}, packet: helper(0, {detail: 2, address: 0xffffffff, access: 1})},
+    {name: 'current-v10-top-write-fault', address: 0xfffffffe, validFault: {detail: 2, address: 0xffffffff, access: 2}, packet: helper(0, {detail: 2, address: 0xffffffff, access: 2})},
     {name: 'fault-width', packet: helper(0, {detail: 2, address: DATA, access: 1}), edit: b => b.writeUInt32LE(1, 36)},
     {name: 'fault-access', packet: helper(0, {detail: 2, address: DATA, access: 3})},
     {name: 'fault-reason', packet: helper(0, {detail: 4, address: DATA, access: 1})},
-    {name: 'infrastructure-value', packet: record('R3MH', 6, 40, [2, 1, 1, 0, 0, 2])},
-    {name: 'infrastructure-reason', packet: record('R3MH', 6, 40, [2, 0, 3, 0, 0, 2])},
-    {name: 'infrastructure-address', packet: record('R3MH', 6, 40, [2, 0, 1, DATA, 0, 2])},
+    {name: 'infrastructure-value', packet: record('R3MH',10,40,[2,1, 1, 0, 0, 2])},
+    {name: 'infrastructure-reason', packet: record('R3MH',10,40,[2,0, 3, 0, 0, 2])},
+    {name: 'infrastructure-address', packet: record('R3MH',10,40,[2,0, 1, DATA, 0, 2])},
     {name: 'unknown-status', status: 99, detail: 3},
     {name: 'top-nonoverflow-permission', address: 0xffffffff, packet: helper(0, {detail: 2, address: 0xffffffff, access: 1})},
     {name: 'top-wrong-overflow-address', address: 0xffffffff, packet: helper(0, {detail: 3, address: 0xfffffffe, access: 1})},
-    {name: 'canonical-version-exhaustion', packet: record('R3MH', 6, 40, [2, 0, 1, 0, 0, 2]), detail: 1},
-    {name: 'canonical-generic-infrastructure', packet: record('R3MH', 6, 40, [2, 0, 2, 0, 0, 2]), detail: 3},
+    {name: 'canonical-version-exhaustion', packet: record('R3MH',10,40,[2,0, 1, 0, 0, 2]), detail: 1},
+    {name: 'canonical-generic-infrastructure', packet: record('R3MH',10,40,[2,0, 2, 0, 0, 2]), detail: 3},
   ];
-  assert.equal(malformed.length, 29);
-  for (const row of malformed) {
+  assert.equal(replies.length, 29);
+  for (const row of replies) {
     const address = row.address ?? DATA, r = parents(); r[6] = address; r[0] = 0x89abcdef; r[1] = 0x12345678;
     const f = frame(c, Math.min(address, 0xfffffffe), 0x1122), zero = address === 0xffffffff || row.name === 'write-overflow' ? frame(c, 0, 0x3344) : null;
     const packet = Buffer.from(row.packet ?? helper(0x1122)); row.edit?.(packet);
     let calls = 0; const ring3 = {...unit.ring3}, name = c.owner === 'resident' ? 'compare_exchange_resident16' : 'compare_exchange16';
-    ring3[name] = (...args) => {
+    ring3['cpu_'+name] = (...args) => {
       assert.deepEqual(args.slice(name.includes('resident')?4:0).map(v=>v>>>0),[address,0xcdef,0x5678]);
       input(c, 100, packet); calls++; return row.status ?? 0;
     };
@@ -305,7 +311,7 @@ function synthetic(c, unit) {
     const start = seed(c, FAULT, 0xcd7, r);
     // flat-4GiB logical span overflow is stopped before any injected helper packet.
     const segmentOverflow = address > 0xfffffffe;
-    run(c, fake, 1, start, 'nonforwarding-' + row.name, segmentOverflow ? {reason: 11, retired: 0, synthetic: true} : {reason: 7, retired: 0, fault: {detail: row.detail ?? 2}, packet, synthetic: true});
+    run(c, fake, 1, start, 'nonforwarding-' + row.name, segmentOverflow ? {reason: 11, retired: 0, synthetic: true} : {reason: row.validFault ? 5 : 7, retired: 0, fault: row.validFault ?? {detail: row.detail ?? 2}, packet, synthetic: true});
     assert.equal(calls, segmentOverflow ? 0 : 1); checkRam(c, f.address, f.bytes); if (zero) checkRam(c, zero.address, zero.bytes); counts.synthetic++;
   }
 }
@@ -327,19 +333,19 @@ function compilerProof(c,unit) {
   let s=seed(c,0x3000,0xcd7,r),trace=helperTrace.length;
   const snapshots=[{label:'entry',cpu:s,arena_hex:arena(c).toString('hex')}];
   s={...s,registers:[...s.registers],pc:0x2000};s.registers[4]=0x7070;
-  run(c,unit,4,s,'compiler-first-cdecl-call',{retired:4,packet:helper32(0)});
+  run(c,unit,4,s,'compiler-first-cdecl-call',{retired:4,packet:cpuHelper32(0)});
   s={...s,registers:[...s.registers],pc:0x3014,flags:0xc87};s.registers[0]=0xd300;s.registers[1]=0xd300;s.registers[2]=0x5020;s.registers[4]=0x7074;
-  run(c,unit,12,s,'compiler-mismatch-natural-expected-update-al-false',{retired:12,packet:helper32(0x3014)});counts.compiler_calls++;
+  run(c,unit,12,s,'compiler-mismatch-natural-expected-update-al-false',{retired:12,packet:cpuHelper32(0x3014)});counts.compiler_calls++;
   for(const i of [3,5,6,7])assert.equal(s.registers[i],r[i]);data.writeUInt16LE(0xa7b6,32);checkRam(c,0x5000,data);
   snapshots.push({label:'first-return',cpu:cpu(c),arena_hex:arena(c).toString('hex'),cell:0xa7b6,expected:0xa7b6,returned_al:0});
   s={...s,registers:[...s.registers],pc:0x2000,flags:0x412};s.registers[0]=0;s.registers[4]=0x7070;s.registers[5]=0;
-  run(c,unit,7,s,'compiler-normalized-first-bool-and-second-call-consumes-updated-expected',{retired:7,packet:helper32(0)});
+  run(c,unit,7,s,'compiler-normalized-first-bool-and-second-call-consumes-updated-expected',{retired:7,packet:cpuHelper32(0)});
   s={...s,registers:[...s.registers],pc:0x3030,flags:0x446};s.registers[0]=0xd301;s.registers[1]=0xd301;s.registers[4]=0x7074;
-  run(c,unit,11,s,'compiler-match-natural-al-true',{retired:11,packet:helper32(0x3030)});counts.compiler_calls++;
+  run(c,unit,11,s,'compiler-match-natural-al-true',{retired:11,packet:cpuHelper32(0x3030)});counts.compiler_calls++;
   for(const i of [3,6,7])assert.equal(s.registers[i],r[i]);assert.equal(s.registers[5],0);data.writeUInt16LE(0xd3e4,16);checkRam(c,0x5000,data);
   snapshots.push({label:'second-return',cpu:cpu(c),arena_hex:arena(c).toString('hex'),cell:0xd3e4,expected:0xa7b6,returned_al:1});
   s={...s,registers:[...s.registers],pc:0x3040,flags:0x402};s.registers[0]=2;s.registers[4]=0x7080;
-  run(c,unit,6,s,'compiler-normalized-both-bools-consumed-guest-self-loop',{retired:6,packet:helper32(0)});data.set(word(2),48);checkRam(c,0x5000,data);
+  run(c,unit,6,s,'compiler-normalized-both-bools-consumed-guest-self-loop',{retired:6,packet:cpuHelper32(0)});data.set(word(2),48);checkRam(c,0x5000,data);
   const stackBytes=Buffer.from(stack.bytes);stackBytes.set(words([r[6],0x3030,DATA,0x5020,0xa1b2d3e4]),12);checkRam(c,stack.address,stackBytes);
   const expected=[
     ['store32',0x707c,null,0xa1b2d3e4,0],['store32',0x7078,null,0x5020,0],['store32',0x7074,null,DATA,0],['store32',0x7070,null,0x3014,0],
@@ -353,8 +359,8 @@ function compilerProof(c,unit) {
   for(const [i,[kind,address,compare,inputValue,old]] of expected.entries()){
     const e=events[i],name=kind==='compare'?(c.owner==='resident'?'compare_exchange_resident16':'compare_exchange16'):
       kind==='store32'?(c.owner==='resident'?'store_resident32':'store32'):kind==='store16'?(c.owner==='resident'?'store_resident16':'store16'):kind;
-    assert.equal(e.name,name);assert.equal(e.address,address);assert.equal(e.expected,compare);assert.equal(e.input_value,inputValue);assert.equal(e.status,0);
-    const packet=kind==='compare'?helper(old):kind==='read16'?helper16(old):kind==='store16'?record('R3MH',4,40,[0,0,0,0,0,2]):helper32(old);
+    assert.equal(e.name,'cpu_'+name);assert.equal(e.address,address);assert.equal(e.expected,compare);assert.equal(e.input_value,inputValue);assert.equal(e.status,0);
+    const packet=kind==='compare'?helper(old):kind==='read16'?cpuHelper16(old):kind==='store16'?record('R3MH',10,40,[0,0,0,0,0,2]):cpuHelper32(old);
     assert.equal(e.helper_hex,packet.toString('hex'));
   }
   snapshots.push({label:'final',cpu:cpu(c),arena_hex:arena(c).toString('hex'),cell:0xd3e4,expected:0xa7b6,consumed_bools:2});

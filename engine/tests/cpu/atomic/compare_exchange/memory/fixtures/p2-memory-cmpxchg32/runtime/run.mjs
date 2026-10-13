@@ -89,6 +89,7 @@ for (const kind of ['pdf', 'full_text']) {const bytes = readFileSync(join(root, 
 const chapter = Buffer.from(readFileSync(join(root, source.full_text_path), 'utf8').split('\n').slice(15501, 15590).join('\n') + '\n');
 assert.equal(chapter.length, source.chapter_bytes); assert.equal(hash(chapter), source.chapter_sha256); source.saved_chapter = artifact('intel-cmpxchg.txt', chapter);
 const sourcePaths = ['engine/tests/cpu/atomic/compare_exchange/memory/native/dword.rs', 'engine/tests/cpu/atomic/native.rs', 'engine/tests/support/cpu/prefix/admission.rs', 'engine/tests/cpu/atomic/compare_exchange/memory/wasm/dword.rs', 'engine/tests/cpu/atomic/wasm.rs', 'engine/tests/support/wasm.rs', 'engine/tests/cpu/atomic/compare_exchange/memory/fixtures/p2-memory-cmpxchg32/runtime/run.mjs', 'engine/tests/support/wasm/engine.mjs'];
+sourcePaths.push('engine/src/abi/memory_helper/cpu.rs','engine/src/cpu/dbt/wasm/memory/cpu_scalar.rs','engine/src/cpu/dbt/wasm/emitter.rs','engine/src/process/memory/cpu_scalar.rs','engine/src/process/memory/scalar/cpu_write.rs','engine/src/process/wasm/memory/cpu_write.rs','engine/src/abi/wasm/exports/memory/cpu_write.rs','engine/src/memory/space/cpu/atomic.rs');
 const sourceHashes = () => Object.fromEntries(sourcePaths.map(path => [path, hash(readFileSync(join(root, path)))]));
 const testHashes = sourceHashes();
 const productPaths = ['engine/src/cpu/x86/ir.rs', 'engine/src/cpu/x86/decode/lower.rs', 'engine/src/cpu/dbt/region.rs', 'engine/src/cpu/dbt/wasm/memory.rs', 'engine/src/cpu/dbt/wasm/integer/arithmetic.rs', 'engine/src/cpu/dbt/wasm/integer/bits.rs', 'engine/src/cpu/dbt/wasm/integer/carry_rotates.rs', 'engine/src/cpu/dbt/wasm/integer/decimal.rs', 'engine/src/cpu/dbt/wasm/integer/dispatch.rs', 'engine/src/cpu/dbt/wasm/integer/flags.rs', 'engine/src/cpu/dbt/wasm/integer/mod.rs', 'engine/src/cpu/dbt/wasm/integer/multiply_divide.rs', 'engine/src/cpu/dbt/wasm/integer/operands.rs', 'engine/src/cpu/dbt/wasm/integer/rotates.rs', 'engine/src/cpu/dbt/wasm/integer/shifts.rs'];
@@ -101,6 +102,7 @@ function record(magic, version, size, fields) {
 const state = (registers, pc, flags) => record('R3ST', 1, 56, [...registers, pc, flags]);
 const exit = (version, reason, retired, detail = 0, address = 0, access = 0) => record('R3EX', version, 40, [reason, retired, detail, address, access, access ? 4 : 0]);
 const helper = (value = 0, detail = 0, address = 0, access = 0) => record('R3MH', 1, 40, [access ? 1 : 0, value, detail, address, access, access ? 4 : 0]);
+const cpuHelper = (value = 0, detail = 0, address = 0, access = 0) => record('R3MH', 10, 40, [access ? 1 : 0, value, detail, address, access, 4]);
 const pattern = Buffer.from(Array.from({length: 4096}, (_, index) => index % 251 + 1));
 function refresh(ctx) {ctx.bytes = new Uint8Array(ctx.memory.buffer); ctx.view = new DataView(ctx.memory.buffer); return ctx;}
 function arena(ctx) {return Buffer.from(refresh(ctx).bytes.subarray(ctx.base, ctx.base + SIZE));}
@@ -119,6 +121,7 @@ function fresh(owner, selected, label) {
   const arities = {open: 3, close: 0, arena_ptr: 0, map: 3, unmap: 2, protect: 3, upload: 2, read32: 1,
     compile_entries: 2, compile_resident: 1, generation: 0, module_ptr: 0, module_len: 0, guard: 6, guard_resident: 7, store32: 2, store_resident32: 6};
   for (const [name, arity] of Object.entries(arities)) {api[name] = instance.exports[`ring3_abi_v1_${name}`]; assert.equal(typeof api[name], 'function', name); assert.equal(api[name].length, arity, name);}
+  for (const name of ['read32', 'store32', 'store_resident32']) {api['cpu_'+name] = instance.exports['ring3_abi_v1_cpu_'+name]; assert.equal(api['cpu_'+name]?.length, arities[name], 'cpu_'+name);}
   const ctx = {owner, ordinal, bank: selected, label, api, memory: instance.exports.memory, low: ordinal, high: 0x434d5032,
     expected: createArena(SIZE), pages: new Map(), permissions: new Map(), units: []};
   assert.equal(api.open(4, ctx.low, ctx.high), 0); ctx.base = api.arena_ptr() >>> 0;
@@ -140,11 +143,11 @@ function compile(ctx, phase = 'initial', tail) {
   }
   refresh(ctx); assert.ok(binding.pointer > 0 && binding.length > 8 && binding.length <= 65536 && binding.pointer + binding.length <= ctx.bytes.length);
   const bytes = Buffer.from(ctx.bytes.subarray(binding.pointer, binding.pointer + binding.length)), module = new WebAssembly.Module(bytes);
-  const names = [ctx.owner === 'replacement' ? 'guard' : 'guard_resident', ...(memory ? ['read32', ctx.owner === 'replacement' ? 'store32' : 'store_resident32'] : [])];
+  const names = [ctx.owner === 'replacement' ? 'guard' : 'guard_resident', ...(memory ? ['cpu_read32', ctx.owner === 'replacement' ? 'cpu_store32' : 'cpu_store_resident32'] : [])];
   const imports = [{module: 'env', name: 'memory', kind: 'memory'}, ...names.map(name => ({module: 'ring3', name, kind: 'function'}))];
   assert.deepEqual(WebAssembly.Module.imports(module), imports); assert.deepEqual(WebAssembly.Module.exports(module), [{name: 'run', kind: 'function'}]);
   const child = new WebAssembly.Instance(module, {env: {memory: ctx.memory}, ring3: ctx.api}); assert.equal(child.exports.run.length, 4);
-  const file = `${ctx.owner}-${ctx.ordinal}-${phase}.wasm`, saved = artifact(file, bytes), unit = {...binding, bytes, file, run: child.exports.run, version: memory ? 2 : 1};
+  const file = `${ctx.owner}-${ctx.ordinal}-${phase}.wasm`, saved = artifact(file, bytes), unit = {...binding, bytes, file, run: child.exports.run, version: memory ? 6 : 1};
   modules.push({owner: ctx.owner, context: ctx.ordinal, phase, bank: ctx.bank.name, specs, instructions: tail ? 4 : ctx.bank.instructions, ...binding,
     exit_version: unit.version, imports, run_arity: 4, identity: identity(ctx, unit), artifact: saved,
     code_page_sha256: hash(ctx.pages.get(PC)), source_spans: specs.map(([entry, length]) => {const sourceBytes = ctx.pages.get(PC).subarray(entry - PC, entry - PC + length); return {entry, length, hex: sourceBytes.toString('hex'), sha256: hash(sourceBytes)};})});
@@ -177,7 +180,7 @@ function target(ctx, unit, scan, address, group, reason = 1) {
   const current = cpu(ctx), oldMemory = wordAt(ctx, address), oldAccumulator = current.registers[0], oldSource = current.registers[scan.source];
   const result = compare32(oldAccumulator, oldMemory, current.flags), stored = result.equal ? oldSource : oldMemory;
   const registers = [...current.registers]; if (!result.equal) registers[0] = oldMemory; patch(ctx, address, words([stored]));
-  const evidence = run(ctx, unit, 1, `${group}: full target state before consumers`, {registers, pc: scan.next, flags: result.flags, reason, helperBytes: helper()});
+  const evidence = run(ctx, unit, 1, `${group}: full target state before consumers`, {registers, pc: scan.next, flags: result.flags, reason, helperBytes: cpuHelper()});
   counts.cmpxchgs++; counts[group]++; counts[result.equal ? 'equal_targets' : 'mismatch_targets']++;
   const row = {context: ctx.ordinal, group, source: scan.source, source_name: GPRS[scan.source], address, width: 4,
     old_accumulator: oldAccumulator, old_memory: oldMemory, old_source: oldSource, new_accumulator: registers[0], stored_value: stored,
@@ -264,7 +267,7 @@ function special(owner) {
     const initialEqual = seedFlags === 2, registers = [...REG]; registers[0] = initialEqual ? 0x7fffffff : 0x80000000;
     registers[1] = 0x12345678; registers[3] = 0xffffffff; registers[7] = 0x4ffe; seed(ctx, registers, scan.entry, seedFlags);
     registers[3] = 0; const prefixFlags = initialEqual ? 0x57 : 0x457;
-    const failure = {registers, pc: scan.target, flags: prefixFlags, reason: 5, detail: shape.detail, fault: shape.fault, access: shape.access, helperBytes: helper(0, shape.detail, shape.fault, shape.access)};
+    const failure = {registers, pc: scan.target, flags: prefixFlags, reason: 5, detail: shape.detail, fault: shape.fault, access: shape.access, helperBytes: cpuHelper(0, shape.detail, shape.fault, shape.access)};
     const first = run(ctx, unit, 2, `${shape.name}: retired ADD then fault`, {...failure, retired: 1}); counts.retired_add_prefixes++; counts.fault_calls++;
     const firstArena = saveArena(ctx, `fault-${faults.length}-first`); pages(ctx, `${shape.name} first fault: every mapped declared page`);
     const retry = run(ctx, unit, 1, `${shape.name}: unchanged retry`, {...failure, retired: 0}); counts.fault_calls++;
@@ -353,7 +356,7 @@ const result = {status: 'ok', engine_sha256: engineSha256, engine_bytes: engineB
     banks: Object.fromEntries(Object.entries(banks).map(([name, entry]) => [name, {hex: entry.bytes.toString('hex'), sha256: hash(entry.bytes), specs: entry.specs, scans: entry.scans, instructions: entry.instructions}])),
     arithmetic: 'widened unsigned numeric subtraction modulo2^32; separate signed numeric-range overflow; nibble borrow and full low-byte bitstring parity; old EAX/memory/source/original EA captured before exchange; source EAX follows implicit accumulator on mismatch',
     checkpoint_policy: 'complete live arena compared around every generated run, explicit upload/map/unmap/protect/guard/close and diagnostic Read32; compiler requests/getter groups checked at publication, initialization checked after open/getter group; actual full CPU/exit/helper snapshots saved immediately at targets and faults; first/retry raw arenas saved before every mapped declared page diagnostic, denied data temporarily readable only for diagnostics then restored; SMC RAM physically read after pure-tail consumers to retain first Store4 helper through stale/publication/tail; selected raw arenas and complete current pages saved physically',
-    binding_policy: 'actual managed engine read32/store32 or store_resident32 directly imported; no synthetic helpers; checked Store4 mandatory on equality and mismatch; source-inferred rawStore4 status11 is distinct from observed helper success/exit6',
+    binding_policy: 'actual managed engine cpu_read32/cpu_store32 or cpu_store_resident32 directly imported; no synthetic helpers; checked Store4 mandatory on equality and mismatch; source-inferred rawStore4 status11 is distinct from observed helper success/exit6',
     continuation_policy: 'declared data/permission repairs, observed diagnostic helper updates, cancellation writes and compiler requests; no CPU/helper reseed after a fault or consumed MOV/CMPXCHG; pure current tail has exitv1 and retains committed Store4 helper; replay discriminators are hypothetical pre-consumer values'},
   artifacts, artifact_census: {modules: modules.length, pages: counts.pages, raw_arenas: rawArenas, engine_files: 1, program_banks: 2, primary_excerpts: 1, result_files: 1, total: artifactNames.length, names: artifactNames},
   claim: 'finite prefix-free flat32 memory CMPXCHG32 in actual managed replacement/resident Wasm: all eight source GPRs equal/mismatch and ECX eight literal CMP edges under FLAGS2/cd7; five original-EA source/implicit-EAX/base/index aliases, crossing success and four precise Read4/Write4 fault shapes with retired ADD, unchanged zero-retirement retry, declared permission/data-only repair at same CPU/module with changed-memory equality-to-mismatch reread; full target CPU before live SETZ/SETB/JMP, normal/alias/cross/repair RAM physically read before consumers; unconditional checked writes on both comparator outcomes, including equal unchanged/equal changing/mismatch unchanged truly consumed MOV-immediate stores committing helper/EAX/flags/EIP and one retirement with exit6, then stale4 with immediate whole live old allocation retention, pure fresh tail without MOV/CMPXCHG replay retaining helper and intentionally changing AL, SMC RAM physically read after tail, same-byte tail stale retention and both closed5; complete live4236 arenas and current declared pages with selected physical evidence/provenance; intentional offline immutable primary inputs; no atomicity/LOCK/prefix/byte/word/wider EA-exhaustive ISA/PE/Windows/SDK/browser/performance/fullCI/game claim'};

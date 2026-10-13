@@ -20,6 +20,7 @@ const sourcePaths = ['engine/src/memory/space.rs','engine/src/abi/memory_helper.
   'engine/tests/process/memory/bit_test/native/reset.rs', 'engine/tests/process/memory/native.rs', 'engine/tests/process/memory/native.rs','engine/tests/cpu/atomic/bit_test/locked/native/reset32.rs', 'engine/tests/cpu/atomic/native.rs', 'engine/tests/support/cpu/prefix/admission.rs', 'engine/tests/cpu/atomic/native.rs','engine/tests/cpu/atomic/bit_test/locked/compiler/native/reset32.rs', 'engine/tests/cpu/atomic/native.rs', 'engine/tests/cpu/atomic/native.rs','engine/tests/cpu/atomic/bit_test/locked/wasm/reset32.rs', 'engine/tests/cpu/atomic/wasm.rs', 'engine/tests/support/wasm.rs', 'engine/tests/cpu/atomic/wasm.rs', 'engine/tests/support/wasm.rs',
   ...['kernel.c','build.py','PROVENANCE.md','kernel.obj','kernel.text.bin','kernel.disasm.txt','receipt.json','runtime/run.mjs'].map(p=>'engine/tests/cpu/atomic/bit_test/locked/fixtures/p2-locked-btr32/'+p),
   'engine/tests/programs/records/fixtures/p2-compiled-records/build.py','engine/tests/support/wasm/engine.mjs'];
+sourcePaths.push('engine/src/abi/memory_helper/cpu.rs','engine/src/cpu/dbt/wasm/memory/cpu_scalar.rs','engine/src/cpu/dbt/wasm/emitter.rs','engine/src/process/memory/cpu_scalar.rs','engine/src/process/memory/scalar/cpu_write.rs','engine/src/process/wasm/memory/cpu_write.rs','engine/src/abi/wasm/exports/memory/cpu_write.rs','engine/src/memory/space/cpu/atomic.rs');
 const sourceHashes = () => Object.fromEntries(sourcePaths.map(p=>[p,hash(readFileSync(join(root,p)))]));
 const sourcesBefore=sourceHashes(),contexts=[],modules=[],observations=[],helperTrace=[],diagnostics=[],controls=[];
 const counts={contexts:0,modules:0,runs:0,retired:0,bit_resets:0,helper_calls:0,read32:0,store32:0,
@@ -28,8 +29,9 @@ const word=n=>{const b=Buffer.alloc(4);b.writeUInt32LE(n>>>0);return b;}, words=
 function record(magic,version,size,fields){const b=Buffer.alloc(size);b.write(magic);b.writeUInt16LE(version,4);b.writeUInt16LE(1,6);b.writeUInt32LE(size,8);fields.forEach((v,i)=>b.writeUInt32LE(v>>>0,16+i*4));return b;}
 const state=s=>record('R3ST',1,56,[...s.registers,s.pc,s.flags]);
 const exit=(reason,retired,{detail=0,address=0,access=0}={},version=2)=>record('R3EX',reason===11?6:version,40,[reason,retired,detail,address,access,access?4:0]);
-const helper=(value=0,{detail=0,address=0,access=0}={})=>record('R3MH',1,40,[access?1:0,value,detail,address,access,access?4:0]);
-const helper32=value=>helper(value);
+const initialHelper=(value=0,{detail=0,address=0,access=0}={})=>record('R3MH',1,40,[access?1:0,value,detail,address,access,access?4:0]);
+const helper=(value=0,{detail=0,address=0,access=0}={})=>record('R3MH',10,40,[access?1:0,value,detail,address,access,4]);
+const helper32=value=>initialHelper(value);
 const parents=()=>Array.from({length:8},(_,i)=>(0xa100+i)*65536+0x1234+i);
 const mod32=n=>Number((n%4294967296n+4294967296n)%4294967296n);
 const signed=n=>n>=0x80000000?BigInt(n)-4294967296n:BigInt(n);
@@ -69,13 +71,14 @@ function map(c, page, permission = 3) {host(c, 'map', [page, 1, permission]); c.
 function protect(c, page, permission) {host(c, 'protect', [page, 1, permission]);}
 function unmap(c, page) {host(c, 'unmap', [page, 1]); c.pages.delete(page);}
 function upload(c, address, bytes) {assert.ok(address >= 0 && address + bytes.length <= 4294967296); input(c, 140, bytes); host(c, 'upload', [address, bytes.length]);}
-function seed(c, pc, flags = 0xcd7, registers = parents()) {input(c, 0, Buffer.concat([state({registers, pc, flags}), exit(1, 0), word(0), helper(0xad)])); return cpu(c);}
+function seed(c, pc, flags = 0xcd7, registers = parents()) {input(c, 0, Buffer.concat([state({registers, pc, flags}), exit(1, 0), word(0), initialHelper(0xad)])); return cpu(c);}
 const arities = {open: 3, close: 0, arena_ptr: 0, map: 3, protect: 3, unmap: 2, upload: 2, read32: 1, store32: 2, store_resident32: 6, bit_test_reset32: 2, bit_test_reset_resident32: 6, compile: 1, compile_entries: 2,
   compile_resident: 1, compile_resident_entries: 2, generation: 0, module_ptr: 0, module_len: 0, guard: 6, guard_resident: 7};
 
 function open(owner, entries, purpose) {
   const instance = new WebAssembly.Instance(engine.module, {}), c = {id: ++counts.contexts, owner, entries, purpose, memory: instance.exports.memory, api: {}, high: 0x42545232, captures: 0, pages: new Set(), maxPages: 0};
   for (const [name, arity] of Object.entries(arities)) {c.api[name] = instance.exports['ring3_abi_v1_' + name]; assert.equal(c.api[name]?.length, arity, name);}
+  for (const name of ['read32', 'store32', 'store_resident32', 'bit_test_reset32', 'bit_test_reset_resident32']) {c.api['cpu_'+name] = instance.exports['ring3_abi_v1_cpu_'+name]; assert.equal(c.api['cpu_'+name]?.length, arities[name], 'cpu_'+name);}
   assert.equal(c.api.open(12, c.id, c.high), 0); c.base = c.api.arena_ptr() >>> 0; input(c, 0, initial);
   for (const [page, permission] of [[0, 3], [0x1000, 7], [0x2000, 7], [0x3000, 7], [0x5000, 3], [0x6000, 3], [0x7000, 3], [0xfffff000, 3]]) map(c, page, permission);
   for (const block of [...normal, ...aliases, faultBlock, live, ...caller]) upload(c, block.pc, block.bytes);
@@ -91,20 +94,20 @@ function compile(c, name, blocks, helpers = ['btr']) {
   host(c, method, c.entries ? [blocks.length, 0] : [blocks.length], c.owner === 'resident' ? [140, 164] : null);
   const b = arena(c), binding = c.owner === 'resident' ? {low: b.readUInt32LE(148), high: b.readUInt32LE(152), pointer: b.readUInt32LE(156), length: b.readUInt32LE(160)} : {generation: c.api.generation(), pointer: c.api.module_ptr() >>> 0, length: c.api.module_len() >>> 0};
   const bytes = Buffer.from(new Uint8Array(c.memory.buffer, binding.pointer, binding.length)), module = new WebAssembly.Module(bytes), guard = c.owner === 'resident' ? 'guard_resident' : 'guard';
-  const names = helpers.map(n => n === 'btr' ? (c.owner === 'resident' ? 'bit_test_reset_resident32' : 'bit_test_reset32') : n === 'store' ? (c.owner === 'resident' ? 'store_resident32' : 'store32') : n);
+  const names = helpers.map(n => n === 'btr' ? (c.owner === 'resident' ? 'bit_test_reset_resident32' : 'bit_test_reset32') : n === 'store' ? (c.owner === 'resident' ? 'store_resident32' : 'store32') : n).map(n => 'cpu_'+n);
   const imports = [{module: 'env', name: 'memory', kind: 'memory'}, ...[guard, ...names].map(name => ({module: 'ring3', name, kind: 'function'}))];
   assert.ok(bytes.length <= 65536); assert.deepEqual(WebAssembly.Module.imports(module), imports); assert.deepEqual(WebAssembly.Module.exports(module), [{name: 'run', kind: 'function'}]);
   const ring3 = {...c.api};
   for (const name of names) ring3[name] = (...args) => {
     const before = arena(c), status = c.api[name](...args), after = arena(c), expected = Buffer.from(before); expected.set(after.subarray(100, 140), 100);
     assert.deepEqual(after, expected, 'canonical helper changes only its 40-byte record');
-    const payload = args.slice(name.includes('resident') ? 4 : 0).map(v => v >>> 0);
-    helperTrace.push({context: c.id, call: counts.runs + 1, name, address: payload[0], input_value: name.startsWith('read') ? null : payload.at(-1), status, helper_hex: after.subarray(100, 140).toString('hex')});
-    counts.helper_calls++; counts[name.startsWith('bit_test_reset') ? 'bit_resets' : name.startsWith('read') ? name : 'store32']++; return status;
+    const legacyName = name.slice(4), payload = args.slice(name.includes('resident') ? 4 : 0).map(v => v >>> 0);
+    helperTrace.push({context: c.id, call: counts.runs + 1, name, address: payload[0], input_value: legacyName.startsWith('read') ? null : payload.at(-1), status, helper_hex: after.subarray(100, 140).toString('hex')});
+    counts.helper_calls++; counts[legacyName.startsWith('bit_test_reset') ? 'bit_resets' : legacyName.startsWith('read') ? legacyName : 'store32']++; return status;
   };
   const run = new WebAssembly.Instance(module, {env: {memory: c.memory}, ring3}).exports.run; assert.equal(run.length, 4);
   const file = `module-${++counts.modules}.wasm`; writeFileSync(join(output, file), bytes, {flag: 'wx'});
-  const unit = {...binding, name, module, ring3, run, exitVersion: names.length ? 2 : 1};
+  const unit = {...binding, name, module, ring3, run, exitVersion: names.length ? 6 : 1};
   modules.push({context: c.id, owner: c.owner, entries: c.entries, name, file, bytes: bytes.length, sha256: hash(bytes), blocks: blocks.length, instructions: instructionCount, imports, ...binding}); return unit;
 }
 function run(c, unit, budget, next, label, {status = 0, reason = 1, retired = 1, packet, fault = {}, synthetic = false} = {}) {
@@ -224,7 +227,7 @@ function core(owner,entries){
   const compiled=compile(c,'original-two-live-calls',[...kernelBlocks,...caller],['read32','store','btr']);compilerProof(c,compiled);finish(c,compiled);
 }
 function synthetic(c,unit){
-  const infra=(value=0,detail=1)=>record('R3MH',1,40,[2,value,detail,0,0,0]);
+  const infra=(value=0,detail=1)=>record('R3MH',10,40,[2,value,detail,0,0,4]);
   const rows=[
     {name:'magic',edit:b=>b.write('BAD!')},
     {name:'fault-value',packet:helper(1,{detail:2,address:DATA,access:1})},
@@ -232,7 +235,7 @@ function synthetic(c,unit){
     {name:'invalidated-infrastructure',status:11,packet:infra()},
     {name:'write-unmapped',packet:helper(0,{detail:1,address:DATA,access:2})},
     {name:'write-overflow',address:0xfffffffc,packet:helper(0,{detail:3,address:0xfffffffd,access:2})},
-    {name:'top-nonoverflow-fault',address:0xfffffffc,packet:helper(0,{detail:2,address:0xfffffffd,access:1})},
+    {name:'current-v10-top-read-fault',address:0xfffffffc,packet:helper(0,{detail:2,address:0xfffffffd,access:1})},
     {name:'overflow-success',address:0xfffffffd},
     {name:'infrastructure-value',packet:infra(1)},
     {name:'canonical-version-exhaustion',packet:infra(),detail:1},
@@ -245,11 +248,11 @@ function synthetic(c,unit){
     const f=frame(c,Math.min(address,0xfffffffc),0x1234567a),zero=(address>0xfffffffc||row.name==='write-overflow')?frame(c,0,0x33445566):null;
     const packet=Buffer.from(row.packet??helper(0x1234567a));row.edit?.(packet);let calls=0;
     const ring3={...unit.ring3},name=c.owner==='resident'?'bit_test_reset_resident32':'bit_test_reset32';
-    ring3[name]=(...args)=>{assert.deepEqual(args.slice(name.includes('resident')?4:0).map(v=>v>>>0),[address,5]);input(c,100,packet);calls++;return row.status??0;};
+    ring3['cpu_'+name]=(...args)=>{assert.deepEqual(args.slice(name.includes('resident')?4:0).map(v=>v>>>0),[address,5]);input(c,100,packet);calls++;return row.status??0;};
     const fake={...unit,name:unit.name+'-synthetic',run:new WebAssembly.Instance(unit.module,{env:{memory:c.memory},ring3}).exports.run},start=seed(c,FAULT,0xcd7,r);
     // flat-4GiB logical span overflow is stopped before any injected helper packet.
     const segmentOverflow=address>0xfffffffc;
-    run(c,fake,1,start,'nonforwarding-'+row.name,segmentOverflow?{reason:11,retired:0,synthetic:true}:{reason:7,retired:0,fault:{detail:row.detail??2},packet,synthetic:true});
+    run(c,fake,1,start,'nonforwarding-'+row.name,segmentOverflow?{reason:11,retired:0,synthetic:true}:{reason:row.name==='current-v10-top-read-fault'?5:7,retired:0,fault:row.name==='current-v10-top-read-fault'?{detail:2,address:0xfffffffd,access:1}:{detail:row.detail??2},packet,synthetic:true});
     assert.equal(calls,segmentOverflow?0:1);checkRam(c,f.address,f.bytes);if(zero)checkRam(c,zero.address,zero.bytes);counts.synthetic++;
   }
 }
@@ -268,28 +271,28 @@ function compilerProof(c,unit){
   const stack=frame(c,0x706c,0x11223344),r=parents();r[4]=0x7080;
   let s=seed(c,0x3000,0xcd7,r),at=helperTrace.length;const snapshots=[{label:'entry',cpu:s,arena_hex:arena(c).toString('hex')}];
   s={...s,registers:[...s.registers],pc:0x2000};s.registers[4]=0x7078;
-  run(c,unit,2,s,'compiler-first-cdecl-call',{retired:2,packet:helper32(0)});
+  run(c,unit,2,s,'compiler-first-cdecl-call',{retired:2,packet:helper(0)});
   s={...s,registers:[...s.registers],pc:0x200b,flags:0x446};s.registers[0]=0;s.registers[1]=DATA;s.registers[2]=5;
-  run(c,unit,3,s,'compiler-first-leaf-pauses-before-lock',{retired:3,packet:helper32(DATA)});checkRam(c,0x5000,data);
+  run(c,unit,3,s,'compiler-first-leaf-pauses-before-lock',{retired:3,packet:helper(DATA)});checkRam(c,0x5000,data);
   s={...s,registers:[...s.registers],pc:0x300a,flags:0x443};s.registers[0]=1;s.registers[4]=0x707c;
-  run(c,unit,3,s,'compiler-first-natural-oldbit-return',{retired:3,packet:helper32(0x300a)});counts.compiler_calls++;
+  run(c,unit,3,s,'compiler-first-natural-oldbit-return',{retired:3,packet:helper(0x300a)});counts.compiler_calls++;
   for(const i of [3,5,6,7])assert.equal(s.registers[i],r[i]);data.writeUInt32LE(0xa5a55a5a,16);checkRam(c,0x5000,data);
   snapshots.push({label:'first-return',cpu:cpu(c),arena_hex:arena(c).toString('hex'),cell:0xa5a55a5a,returned_oldbit:1});
   s={...s,registers:[...s.registers],pc:0x2000,flags:0x412};s.registers[4]=0x7078;s.registers[5]=1;
-  run(c,unit,4,s,'compiler-second-call-retains-first-oldbit',{retired:4,packet:helper32(0)});
+  run(c,unit,4,s,'compiler-second-call-retains-first-oldbit',{retired:4,packet:helper(0)});
   s={...s,registers:[...s.registers],pc:0x3019,flags:0x442};s.registers[0]=0;s.registers[1]=DATA;s.registers[2]=5;s.registers[4]=0x707c;
-  run(c,unit,6,s,'compiler-second-natural-oldbit-return',{retired:6,packet:helper32(0x3019)});counts.compiler_calls++;
+  run(c,unit,6,s,'compiler-second-natural-oldbit-return',{retired:6,packet:helper(0x3019)});counts.compiler_calls++;
   for(const i of [3,6,7])assert.equal(s.registers[i],r[i]);assert.equal(s.registers[5],1);checkRam(c,0x5000,data);
   snapshots.push({label:'second-return',cpu:cpu(c),arena_hex:arena(c).toString('hex'),cell:0xa5a55a5a,returned_oldbit:0});
   s={...s,registers:[...s.registers],pc:0x3025,flags:0x402};s.registers[0]=1;s.registers[4]=0x7080;
-  run(c,unit,5,s,'compiler-both-oldbits-consumed-guest-self-loop',{retired:5,packet:helper32(0)});data.writeUInt32LE(1,48);checkRam(c,0x5000,data);
+  run(c,unit,5,s,'compiler-both-oldbits-consumed-guest-self-loop',{retired:5,packet:helper(0)});data.writeUInt32LE(1,48);checkRam(c,0x5000,data);
   const stackBytes=Buffer.from(stack.bytes);stackBytes.set(words([0x3019,DATA]),0x7078-stack.address);checkRam(c,stack.address,stackBytes);
   const expected=[['store32',0x707c,DATA,0],['store32',0x7078,0x300a,0],['read32',0x707c,null,DATA],['btr',DATA,5,0xa5a55a7a],['read32',0x7078,null,0x300a],
     ['store32',0x707c,DATA,0],['store32',0x7078,0x3019,0],['read32',0x707c,null,DATA],['btr',DATA,5,0xa5a55a5a],['read32',0x7078,null,0x3019],['store32',0x5030,1,0]];
   const events=helperTrace.slice(at);assert.equal(events.length,11);
   for(const [i,[kind,address,inputValue,old]] of expected.entries()){
     const e=events[i],name=kind==='btr'?(c.owner==='resident'?'bit_test_reset_resident32':'bit_test_reset32'):kind==='store32'?(c.owner==='resident'?'store_resident32':'store32'):kind;
-    assert.equal(e.name,name);assert.equal(e.address,address);assert.equal(e.input_value,inputValue);assert.equal(e.status,0);assert.equal(e.helper_hex,helper32(old).toString('hex'));
+    assert.equal(e.name,'cpu_'+name);assert.equal(e.address,address);assert.equal(e.input_value,inputValue);assert.equal(e.status,0);assert.equal(e.helper_hex,helper(old).toString('hex'));
   }
   snapshots.push({label:'final',cpu:cpu(c),arena_hex:arena(c).toString('hex'),cell:0xa5a55a5a,consumed_oldbits:1});
   writeFileSync(join(output,`context-${c.id}-compiler-milestones.json`),JSON.stringify({snapshots,expected_helper_chronology:expected},null,2)+'\n',{flag:'wx'});

@@ -88,6 +88,7 @@ for (const kind of ['pdf', 'full_text']) {const bytes = readFileSync(join(root, 
 const chapter = Buffer.from(readFileSync(join(root, source.full_text_path), 'utf8').split('\n').slice(978, 1048).join('\n') + '\n');
 assert.equal(chapter.length, source.chapter_bytes); assert.equal(hash(chapter), source.chapter_sha256); source.saved_chapter = artifact('intel-xadd.txt', chapter);
 const sourcePaths = ['engine/tests/cpu/atomic/fetch_add/memory/native/byte.rs', 'engine/tests/cpu/atomic/native.rs', 'engine/tests/support/cpu/prefix/admission.rs', 'engine/tests/cpu/atomic/fetch_add/memory/wasm/byte.rs', 'engine/tests/cpu/atomic/wasm.rs', 'engine/tests/support/wasm.rs', 'engine/tests/cpu/atomic/fetch_add/memory/fixtures/p2-memory-xadd8/runtime/run.mjs', 'engine/tests/support/wasm/engine.mjs'];
+sourcePaths.push('engine/src/abi/memory_helper/cpu.rs','engine/src/cpu/dbt/wasm/memory/cpu_scalar.rs','engine/src/cpu/dbt/wasm/emitter.rs','engine/src/process/memory/cpu_scalar.rs','engine/src/process/memory/scalar/cpu_write.rs','engine/src/process/wasm/memory/cpu_write.rs','engine/src/abi/wasm/exports/memory/cpu_write.rs','engine/src/memory/space/cpu/atomic.rs');
 const sourceHashes = () => Object.fromEntries(sourcePaths.map(path => [path, hash(readFileSync(join(root, path)))]));
 const testHashes = sourceHashes();
 function record(magic, version, size, fields) {
@@ -98,7 +99,9 @@ const state = (registers, pc, flags) => record('R3ST', 1, 56, [...registers, pc,
 const exit = (version, reason, retired, detail = 0, address = 0, access = 0) => record('R3EX', version, 40, [reason, retired, detail, address, access, access ? 1 : 0]);
 const helper = (value = 0) => record('R3MH', 1, 40, [0, value, 0, 0, 0, 0]);
 const readHelper = (value = 0, detail = 0, address = 0) => record('R3MH', 2, 40, [detail ? 1 : 0, detail ? 0 : value, detail, detail ? address : 0, detail ? 1 : 0, 1]);
+const cpuReadHelper = (value = 0, detail = 0, address = 0) => record('R3MH', 10, 40, [detail ? 1 : 0, detail ? 0 : value, detail, detail ? address : 0, detail ? 1 : 0, 1]);
 const storeHelper = (detail = 0, address = 0) => record('R3MH', 3, 40, [detail ? 1 : 0, 0, detail, detail ? address : 0, detail ? 2 : 0, 1]);
+const cpuStoreHelper = (detail = 0, address = 0) => record('R3MH', 10, 40, [detail ? 1 : 0, 0, detail, detail ? address : 0, detail ? 2 : 0, 1]);
 const pattern = Buffer.from(Array.from({length: 4096}, (_, index) => index % 251 + 1));
 function refresh(ctx) {ctx.bytes = new Uint8Array(ctx.memory.buffer); ctx.view = new DataView(ctx.memory.buffer); return ctx;}
 function arena(ctx) {return Buffer.from(refresh(ctx).bytes.subarray(ctx.base, ctx.base + SIZE));}
@@ -117,6 +120,7 @@ function fresh(owner, selected, label) {
   const arities = {open: 3, close: 0, arena_ptr: 0, map: 3, unmap: 2, protect: 3, upload: 2, read8: 1, read32: 1,
     compile_entries: 2, compile_resident: 1, generation: 0, module_ptr: 0, module_len: 0, guard: 6, guard_resident: 7, store8: 2, store_resident8: 6};
   for (const [name, arity] of Object.entries(arities)) {api[name] = instance.exports[`ring3_abi_v1_${name}`]; assert.equal(typeof api[name], 'function', name); assert.equal(api[name].length, arity, name);}
+  for (const name of ['read8', 'read32', 'store8', 'store_resident8']) {api['cpu_'+name] = instance.exports['ring3_abi_v1_cpu_'+name]; assert.equal(api['cpu_'+name]?.length, arities[name], 'cpu_'+name);}
   const ctx = {owner, ordinal, bank: selected, label, api, memory: instance.exports.memory, low: ordinal, high: 0x58414438,
     expected: createArena(SIZE), pages: new Map(), permissions: new Map(), units: []};
   assert.equal(api.open(4, ctx.low, ctx.high), 0); ctx.base = api.arena_ptr() >>> 0;
@@ -138,11 +142,11 @@ function compile(ctx, phase = 'initial', tail) {
   }
   refresh(ctx); assert.ok(binding.pointer > 0 && binding.length > 8 && binding.length <= 65536 && binding.pointer + binding.length <= ctx.bytes.length);
   const bytes = Buffer.from(ctx.bytes.subarray(binding.pointer, binding.pointer + binding.length)), module = new WebAssembly.Module(bytes);
-  const names = [ctx.owner === 'replacement' ? 'guard' : 'guard_resident', ...(memory ? ['read8', ctx.owner === 'replacement' ? 'store8' : 'store_resident8'] : [])];
+  const names = [ctx.owner === 'replacement' ? 'guard' : 'guard_resident', ...(memory ? ['cpu_read8', ctx.owner === 'replacement' ? 'cpu_store8' : 'cpu_store_resident8'] : [])];
   const imports = [{module: 'env', name: 'memory', kind: 'memory'}, ...names.map(name => ({module: 'ring3', name, kind: 'function'}))];
   assert.deepEqual(WebAssembly.Module.imports(module), imports); assert.deepEqual(WebAssembly.Module.exports(module), [{name: 'run', kind: 'function'}]);
   const child = new WebAssembly.Instance(module, {env: {memory: ctx.memory}, ring3: ctx.api}); assert.equal(child.exports.run.length, 4);
-  const file = `${ctx.owner}-${ctx.ordinal}-${phase}.wasm`, saved = artifact(file, bytes), unit = {...binding, bytes, file, run: child.exports.run, version: memory ? 2 : 1};
+  const file = `${ctx.owner}-${ctx.ordinal}-${phase}.wasm`, saved = artifact(file, bytes), unit = {...binding, bytes, file, run: child.exports.run, version: memory ? 6 : 1};
   modules.push({owner: ctx.owner, context: ctx.ordinal, phase, bank: ctx.bank.name, specs, instructions: tail ? 4 : ctx.bank.instructions, ...binding,
     exit_version: unit.version, imports, run_arity: 4, identity: identity(ctx, unit), artifact: saved,
     code_page_sha256: hash(ctx.pages.get(PC)), source_spans: specs.map(([entry, length]) => {const sourceBytes = ctx.pages.get(PC).subarray(entry - PC, entry - PC + length); return {entry, length, hex: sourceBytes.toString('hex'), sha256: hash(sourceBytes)};})});
@@ -181,7 +185,7 @@ function target(ctx, unit, scan, address, group, reason = 1) {
   const current = cpu(ctx), parent = PARENTS[scan.source], oldMemory = byteAt(ctx, address);
   const oldParent = current.registers[parent], oldSource = byteFrom(oldParent, scan.source), result = add8(oldMemory, oldSource, current.flags);
   const registers = [...current.registers]; registers[parent] = insertByte(oldParent, scan.source, oldMemory); patch(ctx, address, Buffer.from([result.value]));
-  const evidence = run(ctx, unit, 1, `${group}: full target state before consumers`, {registers, pc: scan.next, flags: result.flags, reason, helperBytes: storeHelper()});
+  const evidence = run(ctx, unit, 1, `${group}: full target state before consumers`, {registers, pc: scan.next, flags: result.flags, reason, helperBytes: cpuStoreHelper()});
   counts.xadds++; counts[group]++; const row = {context: ctx.ordinal, group, source: scan.source, source_name: BYTE_REGISTERS[scan.source], parent,
     old_parent: oldParent, new_parent: registers[parent], address, width: 1, old_memory: oldMemory, old_source: oldSource,
     sum: result.value, flags: result.flags, pc: scan.next, retired: 1, ...evidence}; targetRows.push(row); return row;
@@ -240,7 +244,7 @@ function special(owner) {
     seed(ctx, registers, scan.entry, seedFlags); registers[3] = 0;
     const prefixFlags = seedFlags === 2 ? 0x57 : 0x457;
     const failure = {registers, pc: scan.target, flags: prefixFlags, reason: 5, detail: shape.detail, fault: shape.fault, access: shape.access,
-      helperBytes: shape.access === 1 ? readHelper(0, shape.detail, shape.fault) : storeHelper(shape.detail, shape.fault)};
+      helperBytes: shape.access === 1 ? cpuReadHelper(0, shape.detail, shape.fault) : cpuStoreHelper(shape.detail, shape.fault)};
     const first = run(ctx, unit, 2, `${shape.name}: retired ADD then fault`, {...failure, retired: 1}); counts.retired_add_prefixes++; counts.fault_calls++;
     const firstArena = saveArena(ctx, `fault-${faults.length}-first`), existing = shape.missing !== undefined ? [KEEP, TOP] : [DATA];
     pages(ctx, `${shape.name} first fault`, existing);
@@ -317,7 +321,7 @@ const result = {status: 'ok', engine_sha256: engineSha256, engine_bytes: engineB
     banks: Object.fromEntries(Object.entries(banks).map(([name, entry]) => [name, {hex: entry.bytes.toString('hex'), sha256: hash(entry.bytes), specs: entry.specs, scans: entry.scans, instructions: entry.instructions}])),
     arithmetic: 'widened unsigned numeric sum modulo256; separate signed numeric-range overflow at -128..127; low-nibble carry and full byte bitstring parity; old memory/source/original EA captured before exchange; independent hex byte extraction/replacement preserves the other parent bytes',
     checkpoint_policy: 'complete live arena compared around every generated run, explicit upload/map/unmap/protect/guard/close, diagnostic Read32 and isolated unmapped-neighbor Read8; compiler requests/getter groups checked at publication, initialization checked after open/getter group; actual CPU/exit/helper snapshots saved for target and fault rows; selected fault/SMC raw arenas and complete observed pages saved physically',
-    binding_policy: 'actual managed engine read8/store8 or store_resident8 directly imported; no synthetic helpers; R3MHv2 read/R3MHv3 store length1, separate aligned Read32 diagnostics update R3MHv1; source-inferred Store8 status11 is distinct from observed helper success/exit6',
+    binding_policy: 'actual managed engine cpu_read8/cpu_store8 or cpu_store_resident8 directly imported; no synthetic helpers; R3MHv2 read/R3MHv3 store length1, separate aligned Read32 diagnostics update R3MHv1; source-inferred Store8 status11 is distinct from observed helper success/exit6',
     continuation_policy: 'declared data/permission repairs, observed diagnostic helper updates, cancellation writes and compilation requests between live guest steps; no CPU/helper reseed after a fault or consumed MOV/XADD; pure current tail has exit v1 and retains helper'},
   artifacts, artifact_census: {modules: modules.length, pages: counts.pages, raw_arenas: rawArenas, engine_files: 1, program_banks: 2, primary_excerpts: 1, result_files: 1, total: artifactNames.length, names: artifactNames},
   claim: 'finite prefix-free flat32 memory XADD8 in actual managed replacement/resident Wasm: all eight low/high source bytes and eight literal ADD8 edges under FLAGS2/cd7; five original-EA source/parent/base/index aliases including BH parent as both, valid width1 page/top endpoints with aligned diagnostics and genuinely unmapped5000, three precise Read8/Write8 faults with retired ADD, unchanged zero-retirement retry and declared permission/data-only repair at same CPU/module; full target CPU/partial parent before live SETB/SETO/JMP; equal/changing stores to the low byte of a truly consumed MOV immediate commit helper/source/flags/EIP and one retirement with exit6, then stale4 with immediate whole live old allocation retention, pure fresh tail without MOV/XADD replay, same-byte tail stale retention and both closed5; complete live4236 arenas and current declared pages, physical selected evidence/provenance; required offline immutable Intel inputs; no atomicity/LOCK/prefix/word/wider EA-exhaustive ISA/PE/Windows/SDK/browser/performance/fullCI/game claim'};

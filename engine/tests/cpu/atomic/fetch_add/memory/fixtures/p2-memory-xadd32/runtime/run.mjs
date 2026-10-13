@@ -82,6 +82,7 @@ for (const kind of ['pdf', 'full_text']) {const bytes = readFileSync(join(root, 
 const chapter = Buffer.from(readFileSync(join(root, source.full_text_path), 'utf8').split('\n').slice(978, 1048).join('\n') + '\n');
 assert.equal(chapter.length, source.chapter_bytes); assert.equal(hash(chapter), source.chapter_sha256); source.saved_chapter = artifact('intel-xadd.txt', chapter);
 const sourcePaths = ['engine/tests/cpu/atomic/fetch_add/memory/native/dword.rs', 'engine/tests/cpu/atomic/native.rs', 'engine/tests/support/cpu/prefix/admission.rs', 'engine/tests/cpu/atomic/fetch_add/memory/wasm/dword.rs', 'engine/tests/cpu/atomic/wasm.rs', 'engine/tests/support/wasm.rs', 'engine/tests/cpu/atomic/fetch_add/memory/fixtures/p2-memory-xadd32/runtime/run.mjs', 'engine/tests/support/wasm/engine.mjs'];
+sourcePaths.push('engine/src/abi/memory_helper/cpu.rs','engine/src/cpu/dbt/wasm/memory/cpu_scalar.rs','engine/src/cpu/dbt/wasm/emitter.rs','engine/src/process/memory/cpu_scalar.rs','engine/src/process/memory/scalar/cpu_write.rs','engine/src/process/wasm/memory/cpu_write.rs','engine/src/abi/wasm/exports/memory/cpu_write.rs','engine/src/memory/space/cpu/atomic.rs');
 const sourceHashes = () => Object.fromEntries(sourcePaths.map(path => [path, hash(readFileSync(join(root, path)))]));
 const testHashes = sourceHashes();
 function record(magic, version, size, fields) {
@@ -91,6 +92,7 @@ function record(magic, version, size, fields) {
 const state = (registers, pc, flags) => record('R3ST', 1, 56, [...registers, pc, flags]);
 const exit = (version, reason, retired, detail = 0, address = 0, access = 0) => record('R3EX', version, 40, [reason, retired, detail, address, access, access ? 4 : 0]);
 const helper = (value = 0, detail = 0, address = 0, access = 0) => record('R3MH', 1, 40, [access ? 1 : 0, value, detail, address, access, access ? 4 : 0]);
+const cpuHelper = (value = 0, detail = 0, address = 0, access = 0) => record('R3MH', 10, 40, [access ? 1 : 0, value, detail, address, access, 4]);
 const pattern = Buffer.from(Array.from({length: 4096}, (_, index) => index % 251 + 1));
 function refresh(ctx) {ctx.bytes = new Uint8Array(ctx.memory.buffer); ctx.view = new DataView(ctx.memory.buffer); return ctx;}
 function arena(ctx) {return Buffer.from(refresh(ctx).bytes.subarray(ctx.base, ctx.base + SIZE));}
@@ -109,6 +111,7 @@ function fresh(owner, selected, label) {
   const arities = {open: 3, close: 0, arena_ptr: 0, map: 3, unmap: 2, protect: 3, upload: 2, read32: 1,
     compile_entries: 2, compile_resident: 1, generation: 0, module_ptr: 0, module_len: 0, guard: 6, guard_resident: 7, store32: 2, store_resident32: 6};
   for (const [name, arity] of Object.entries(arities)) {api[name] = instance.exports[`ring3_abi_v1_${name}`]; assert.equal(typeof api[name], 'function', name); assert.equal(api[name].length, arity, name);}
+  for (const name of ['read32', 'store32', 'store_resident32']) {api['cpu_'+name] = instance.exports['ring3_abi_v1_cpu_'+name]; assert.equal(api['cpu_'+name]?.length, arities[name], 'cpu_'+name);}
   const ctx = {owner, ordinal, bank: selected, label, api, memory: instance.exports.memory, low: ordinal, high: 0x58414432,
     expected: createArena(SIZE), pages: new Map(), permissions: new Map(), units: []};
   assert.equal(api.open(4, ctx.low, ctx.high), 0); ctx.base = api.arena_ptr() >>> 0;
@@ -130,11 +133,11 @@ function compile(ctx, phase = 'initial', tail) {
   }
   refresh(ctx); assert.ok(binding.pointer > 0 && binding.length > 8 && binding.length <= 65536 && binding.pointer + binding.length <= ctx.bytes.length);
   const bytes = Buffer.from(ctx.bytes.subarray(binding.pointer, binding.pointer + binding.length)), module = new WebAssembly.Module(bytes);
-  const names = [ctx.owner === 'replacement' ? 'guard' : 'guard_resident', ...(memory ? ['read32', ctx.owner === 'replacement' ? 'store32' : 'store_resident32'] : [])];
+  const names = [ctx.owner === 'replacement' ? 'guard' : 'guard_resident', ...(memory ? ['cpu_read32', ctx.owner === 'replacement' ? 'cpu_store32' : 'cpu_store_resident32'] : [])];
   const imports = [{module: 'env', name: 'memory', kind: 'memory'}, ...names.map(name => ({module: 'ring3', name, kind: 'function'}))];
   assert.deepEqual(WebAssembly.Module.imports(module), imports); assert.deepEqual(WebAssembly.Module.exports(module), [{name: 'run', kind: 'function'}]);
   const child = new WebAssembly.Instance(module, {env: {memory: ctx.memory}, ring3: ctx.api}); assert.equal(child.exports.run.length, 4);
-  const file = `${ctx.owner}-${ctx.ordinal}-${phase}.wasm`, saved = artifact(file, bytes), unit = {...binding, bytes, file, run: child.exports.run, version: memory ? 2 : 1};
+  const file = `${ctx.owner}-${ctx.ordinal}-${phase}.wasm`, saved = artifact(file, bytes), unit = {...binding, bytes, file, run: child.exports.run, version: memory ? 6 : 1};
   modules.push({owner: ctx.owner, context: ctx.ordinal, phase, bank: ctx.bank.name, specs, instructions: tail ? 4 : ctx.bank.instructions, ...binding,
     exit_version: unit.version, imports, run_arity: 4, identity: identity(ctx, unit), artifact: saved,
     code_page_sha256: hash(ctx.pages.get(PC)), source_spans: specs.map(([entry, length]) => {const sourceBytes = ctx.pages.get(PC).subarray(entry - PC, entry - PC + length); return {entry, length, hex: sourceBytes.toString('hex'), sha256: hash(sourceBytes)};})});
@@ -166,7 +169,7 @@ function pages(ctx, label, addresses = [...ctx.pages.keys()]) {
 function target(ctx, unit, scan, address, group, reason = 1) {
   const current = cpu(ctx), oldMemory = wordAt(ctx, address), oldSource = current.registers[scan.source], result = add32(oldMemory, oldSource, current.flags);
   const registers = [...current.registers]; registers[scan.source] = oldMemory; patch(ctx, address, words([result.value]));
-  const evidence = run(ctx, unit, 1, `${group}: full target state before consumers`, {registers, pc: scan.next, flags: result.flags, reason, helperBytes: helper()});
+  const evidence = run(ctx, unit, 1, `${group}: full target state before consumers`, {registers, pc: scan.next, flags: result.flags, reason, helperBytes: cpuHelper()});
   counts.xadds++; counts[group]++; const row = {context: ctx.ordinal, group, source: scan.source, address, old_memory: oldMemory, old_source: oldSource,
     sum: result.value, flags: result.flags, pc: scan.next, retired: 1, ...evidence}; targetRows.push(row); return row;
 }
@@ -220,7 +223,7 @@ function special(owner) {
     if (shape.denied !== undefined) protect(ctx, shape.denied, shape.permissions);
     const registers = [...REG]; registers[1] = 1; registers[3] = 0xffffffff; registers[7] = 0x4ffe; seed(ctx, registers, scan.entry, seedFlags);
     const produced = add32(registers[3], 1, seedFlags); registers[3] = produced.value;
-    const failure = {registers, pc: scan.target, flags: produced.flags, reason: 5, detail: shape.detail, fault: shape.fault, access: shape.access, helperBytes: helper(0, shape.detail, shape.fault, shape.access)};
+    const failure = {registers, pc: scan.target, flags: produced.flags, reason: 5, detail: shape.detail, fault: shape.fault, access: shape.access, helperBytes: cpuHelper(0, shape.detail, shape.fault, shape.access)};
     const first = run(ctx, unit, 2, `${shape.name}: retired ADD then fault`, {...failure, retired: 1}); counts.retired_add_prefixes++; counts.fault_calls++;
     const firstArena = saveArena(ctx, `fault-${faults.length}-first`), existing = [DATA, SECOND].filter(address => ctx.pages.has(address)); pages(ctx, `${shape.name} first fault`, existing);
     const retry = run(ctx, unit, 1, `${shape.name}: unchanged retry`, {...failure, retired: 0}); counts.fault_calls++;
@@ -288,7 +291,7 @@ const result = {status: 'ok', engine_sha256: engineSha256, engine_bytes: engineB
     banks: Object.fromEntries(Object.entries(banks).map(([name, entry]) => [name, {hex: entry.bytes.toString('hex'), sha256: hash(entry.bytes), specs: entry.specs, scans: entry.scans, instructions: entry.instructions}])),
     arithmetic: 'widened unsigned numeric sum; separate signed numeric-range overflow; low-nibble carry and full low-byte bitstring parity; old memory/source/original EA captured before exchange',
     checkpoint_policy: 'complete live arena compared around every generated run, explicit upload/map/unmap/protect/guard/close and diagnostic Read32; compiler requests/getter groups checked at publication, initialization checked after open/getter group; actual CPU/exit/helper snapshots saved for target and fault rows; selected fault/SMC raw arenas and complete observed pages saved physically',
-    binding_policy: 'actual managed engine read32/store32 or store_resident32 directly imported; no synthetic helpers; source-inferred Store4 status11 is distinct from observed helper success/exit6',
+    binding_policy: 'actual managed engine cpu_read32/cpu_store32 or cpu_store_resident32 directly imported; no synthetic helpers; source-inferred Store4 status11 is distinct from observed helper success/exit6',
     continuation_policy: 'only declared data/permission repairs, cancellation writes and compilation requests between live guest steps; no CPU/helper reseed after a fault or consumed MOV/XADD; pure current tail has exit v1 and retains helper'},
   artifacts, artifact_census: {modules: modules.length, program_banks: 2, result_files: 1, total: artifactNames.length, names: artifactNames},
   claim: 'finite prefix-free flat32 memory XADD32 in actual managed replacement/resident Wasm: all eight source GPRs and eight literal ADD edges under FLAGS2/cd7; five source/base/index aliases including EBX as both, crossing success and four precise Read4/Write4 faults with retired ADD, unchanged zero-retirement retry, declared permission/data-only repair at same CPU/module; full target CPU before live SETB/SETO/JMP; equal/changing stores to a truly consumed MOV immediate commit helper/source/flags/EIP and one retirement with exit6, then stale4 with immediate whole live old allocation retention, pure fresh tail without MOV/XADD replay, same-byte tail stale retention and both closed5; complete live4236 arenas and current declared pages, physical selected evidence/provenance; no atomicity/LOCK/prefix/byte/word/wider EA-exhaustive ISA/PE/Windows/SDK/browser/performance/fullCI/game claim'};

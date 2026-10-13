@@ -16,14 +16,16 @@ const sourcePaths=['engine/src/cpu/x86/decode/profile.rs','engine/src/cpu/x86/de
   'engine/src/memory/space.rs','engine/src/process/instance.rs', 'engine/src/process/execution/compiled.rs', 'engine/src/process/execution/authority.rs', 'engine/src/process/memory/address_space.rs', 'engine/src/process/memory/scalar.rs', 'engine/src/process/memory/scalar/tests.rs', 'engine/src/process/execution/mod.rs', 'engine/src/process/memory/mod.rs', 'engine/src/process/mod.rs','engine/src/process/wasm/mod.rs', 'engine/src/process/wasm/loading.rs', 'engine/src/process/wasm/execution.rs', 'engine/src/process/wasm/calls.rs', 'engine/src/process/wasm/memory.rs', 'engine/src/process/wasm/cpu.rs', 'engine/src/process/execution/resident.rs', 'engine/src/abi/memory_helper.rs','engine/src/abi/arena.rs','engine/src/abi/wasm/exports/calls.rs', 'engine/src/abi/wasm/exports/cpu.rs', 'engine/src/abi/wasm/exports/execution.rs', 'engine/src/abi/wasm/exports/image.rs', 'engine/src/abi/wasm/exports/instance.rs', 'engine/src/abi/wasm/exports/memory.rs', 'engine/src/abi/wasm/exports/mod.rs',
   'engine/tests/cpu/atomic/logical/locked/native/immediate32.rs', 'engine/tests/cpu/atomic/native.rs', 'engine/tests/support/cpu/prefix/admission.rs', 'engine/tests/cpu/atomic/logical/flags/constant/native.rs', 'engine/tests/cpu/atomic/logical/flags/constant/wasm.rs', 'engine/tests/cpu/atomic/wasm.rs', 'engine/tests/support/wasm.rs', ...['kernel.c','build.py','PROVENANCE.md','kernel.obj','kernel.text.bin','kernel.disasm.txt','receipt.json','runtime/run.mjs'].map(p=>'engine/tests/cpu/atomic/logical/flags/constant/fixtures/p2-locked-fullmask32/'+p),
   'engine/tests/programs/records/fixtures/p2-compiled-records/build.py','engine/tests/support/wasm/engine.mjs'];
+sourcePaths.push('engine/src/abi/memory_helper/cpu.rs','engine/src/cpu/dbt/wasm/memory/cpu_scalar.rs','engine/src/cpu/dbt/wasm/emitter.rs','engine/src/process/memory/cpu_scalar.rs','engine/src/process/memory/scalar/cpu_write.rs','engine/src/process/wasm/memory/cpu_write.rs','engine/src/abi/wasm/exports/memory/cpu_write.rs','engine/src/memory/space/cpu/atomic.rs');
 const sourceHashes=()=>Object.fromEntries(sourcePaths.map(p=>[p,hash(readFileSync(join(root,p)))]));
 const sourcesBefore=sourceHashes(),contexts=[],modules=[],observations=[],helperTrace=[],diagnostics=[];
 const counts={contexts:0,modules:0,runs:0,retired:0,helper_calls:0,read32:0,store32:0,atomic_ors:0,atomic_ands:0,atomic_xors:0,compiler_calls:0,probes:0};
 const word=n=>{const b=Buffer.alloc(4);b.writeUInt32LE(n>>>0);return b;},words=v=>Buffer.concat(v.map(word));
 function record(magic,version,size,fields){const b=Buffer.alloc(size);b.write(magic);b.writeUInt16LE(version,4);b.writeUInt16LE(1,6);b.writeUInt32LE(size,8);fields.forEach((v,i)=>b.writeUInt32LE(v>>>0,16+4*i));return b;}
 const state=s=>record('R3ST',1,56,[...s.registers,s.pc,s.flags]);
-const exit=retired=>record('R3EX',2,40,[1,retired,0,0,0,0]);
-const helper=value=>record('R3MH',1,40,[0,value,0,0,0,0]);
+const exit=(retired,version=2)=>record('R3EX',version,40,[1,retired,0,0,0,0]);
+const initialHelper=value=>record('R3MH',1,40,[0,value,0,0,0,0]);
+const helper=value=>record('R3MH',10,40,[0,value,0,0,0,4]);
 const parents=()=>Array.from({length:8},(_,i)=>(0xa100+i)*65536+0x1234+i);
 const parity=value=>{let n=value&255,ones=0;while(n){ones+=n&1;n>>>=1;}return ones%2===0?4:0;};
 const logicalFlags=value=>0x402|parity(value)|(value===0?0x40:0)|(value>=0x80000000?0x80:0);
@@ -51,11 +53,12 @@ const cpu=c=>{const a=arena(c);return{registers:Array.from({length:8},(_,i)=>a.r
 function input(c,offset,bytes){const expected=arena(c);expected.set(bytes,offset);new Uint8Array(c.memory.buffer).set(bytes,c.base+offset);assert.deepEqual(arena(c),expected);}
 function host(c,name,args,span){const expected=arena(c);assert.equal(c.api[name](...args),0,name);if(span)expected.set(arena(c).subarray(...span),span[0]);assert.deepEqual(arena(c),expected,'host full4612 '+name);}
 function upload(c,address,bytes){input(c,140,bytes);host(c,'upload',[address,bytes.length]);}
-function seed(c,pc,registers){const s={registers:[...registers],pc,flags:0xcd7};input(c,0,Buffer.concat([state(s),exit(0),word(0),helper(0xad)]));return s;}
-function name(c,kind){if(kind==='read32')return kind;if(kind==='store32')return c.owner==='resident'?'store_resident32':'store32';return 'atomic_'+kind+(c.owner==='resident'?'_resident_u32':'_u32');}
+function seed(c,pc,registers){const s={registers:[...registers],pc,flags:0xcd7};input(c,0,Buffer.concat([state(s),exit(0),word(0),initialHelper(0xad)]));return s;}
+function name(c,kind){if(kind==='read32')return 'cpu_read32';if(kind==='store32')return c.owner==='resident'?'cpu_store_resident32':'cpu_store32';return 'cpu_atomic_'+kind+(c.owner==='resident'?'_resident_u32':'_u32');}
 function open(owner,entries){
   const instance=new WebAssembly.Instance(engine.module,{}),c={id:++counts.contexts,owner,entries,memory:instance.exports.memory,api:{},high:0x46554c4c,captures:0};
   for(const[n,arity]of Object.entries(arities)){c.api[n]=instance.exports['ring3_abi_v1_'+n];assert.equal(c.api[n]?.length,arity,n);}
+  for (const name of ['read32', 'store32', 'store_resident32', 'atomic_or_u32', 'atomic_or_resident_u32', 'atomic_and_u32', 'atomic_and_resident_u32', 'atomic_xor_u32', 'atomic_xor_resident_u32']) {c.api['cpu_'+name] = instance.exports['ring3_abi_v1_cpu_'+name]; assert.equal(c.api['cpu_'+name]?.length, arities[name], 'cpu_'+name);}
   assert.equal(c.api.open(12,c.id,c.high),0);c.base=c.api.arena_ptr()>>>0;input(c,0,initial);
   for(const[page,permission]of[[0x1000,7],[0x2000,7],[0x3000,7],[0x5000,3],[0x7000,3]])host(c,'map',[page,1,permission]);
   for(const b of[...probeBlocks,...caller,{pc:0x2000,bytes:kernel}])upload(c,b.pc,b.bytes);
@@ -78,11 +81,11 @@ function compile(c,title,blocks,kinds){
   const file=`module-${++counts.modules}.wasm`;writeFileSync(join(output,file),bytes,{flag:'wx'});modules.push({context:c.id,owner:c.owner,entries:c.entries,name:title,file,bytes:bytes.length,sha256:hash(bytes),blocks:blocks.length,instructions,imports,...binding});return{...binding,name:title,run};
 }
 function run(c,unit,budget,s,label,packet){
-  const expected=arena(c),at=helperTrace.length;expected.set(state(s));expected.set(exit(budget),56);expected.set(packet,100);
+  const expected=arena(c),at=helperTrace.length;expected.set(state(s));expected.set(exit(budget,6),56);expected.set(packet,100);
   const status=unit.run(c.base,c.base+56,budget,c.base+96);assert.equal(status,0,label);assert.deepEqual(arena(c),expected,'full4612 '+label);const a=arena(c);
   observations.push({context:c.id,module:unit.name,label,budget,observed_status:status,observed_reason:a.readUInt32LE(72),observed_retired:a.readUInt32LE(76),observed_cpu:cpu(c),helper_calls:helperTrace.length-at,helper_hex:a.subarray(100,140).toString('hex')});counts.runs++;counts.retired+=budget;
 }
-function checkRam(c,address,expected){for(let i=0;i<expected.length;i+=4){const a=arena(c),value=expected.readUInt32LE(i);assert.equal(c.api.read32(address+i),0);a.set(helper(value),100);assert.deepEqual(arena(c),a,'diagnostic full4612');diagnostics.push({context:c.id,address:address+i,value});}}
+function checkRam(c,address,expected){for(let i=0;i<expected.length;i+=4){const a=arena(c),value=expected.readUInt32LE(i);assert.equal(c.api.read32(address+i),0);a.set(initialHelper(value),100);assert.deepEqual(arena(c),a,'diagnostic full4612');diagnostics.push({context:c.id,address:address+i,value});}}
 function next(s,pc,flags=s.flags,updates={}){const n={registers:[...s.registers],pc,flags};for(const[r,v]of Object.entries(updates))n.registers[Number(r)]=v>>>0;return n;}
 function probeProof(c,unit){for(const p of probes){const registers=parents();for(const[r,v]of Object.entries(p.set))registers[Number(r)]=v;const start=p.address-12,frame=Buffer.from(Array.from({length:32},(_,i)=>(i*17+23)&255));frame.writeUInt32LE(p.old,12);upload(c,start,frame);
   const s=seed(c,p.pc,registers);run(c,unit,1,next(s,p.pc+p.bytes.length,p.flags),`full-imm32-${p.kind}`,helper(p.old));counts.probes++;frame.writeUInt32LE(p.value,12);checkRam(c,start,frame);
