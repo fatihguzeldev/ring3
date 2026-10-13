@@ -22,8 +22,7 @@ const apiNames = [
   'find_installed_resident', 'capture_resident_call', 'complete_resident_call',
   'capture_call', 'complete_call', 'abandon_call', 'begin_resident_callback',
   'authorize_resident_callback', 'finish_resident_callback', 'begin_callback', 'finish_callback',
-  'resume_callback_code', 'resume_callback_entries', 'abort_callback',
-];
+  'resume_callback_code', 'resume_callback_entries', 'abort_callback', 'cpu_read32', 'cpu_store_resident32'];
 const fields = [
   'engines', 'resident_units', 'legacy_modules', 'metadata24', 'metadata32',
   'acks', 'dispatch_calls', 'dispatch_canonical', 'dispatch_rejected',
@@ -95,6 +94,14 @@ function exit40(reason, retired = 0, detail = 0) {
 function helper40(value = 0) {
   return wordsRecord(40, 'R3MH', [0, value, 0, 0, 0, 0]);
 }
+function cpuHelper(value = 0) {
+  return wordsRecord(40, 'R3MH', [0, value, 0, 0, 0, 4], 10);
+}
+function cpuExit(reason, retired = 0, detail = 0) {
+  return wordsRecord(40, 'R3EX', [reason, retired, detail, 0, 0, 0], 6);
+}
+function unitExit(unit, ...fields) { return (unit.cpuScalar ? cpuExit : exit40)(...fields); }
+
 function reset(e, s) {
   refresh(e).bytes.set(state56(s), e.base);
   e.bytes.fill(0xa5, e.base + 56, e.base + 96);
@@ -216,7 +223,7 @@ function resident(e, blocks, gates, helpers, label) {
   });
   const file = `resident-${++stats.resident_units}.wasm`;
   saveArtifact(file, bytes);
-  const unit = {id, low, high, pointer, length, bytes, run: instance.exports.run, label, file};
+  const unit = {cpuScalar: helpers.some(name => name.startsWith('cpu_')), id, low, high, pointer, length, bytes, run: instance.exports.run, label, file};
   unitBindings.push({key: e.key.toString(), id: id.toString(), pointer, length, sha256: sha256(bytes), file, blocks, gates, label});
   saveRecord(e, 'resident24', after.slice(TRANSFER, TRANSFER + 24), {id: id.toString(), pointer, length});
   stats.metadata24++;
@@ -242,7 +249,7 @@ function legacyModule(e, blocks, gates, helpers = []) {
   });
   const file = `legacy-${++stats.legacy_modules}.wasm`; saveArtifact(file, bytes);
   unitBindings.push({key: e.key.toString(), generation, pointer, length, sha256: sha256(bytes), file, blocks, gates});
-  return {generation, run: instance.exports.run};
+  return {cpuScalar: helpers.some(name => name.startsWith('cpu_')), generation, run: instance.exports.run};
 }
 function ack(e, unit, slot) {
   e.table.set(slot, unit.run);
@@ -388,14 +395,14 @@ function finish(e, outer, callback, token, value, stopped, frozenExit, status = 
   upload(e, 0x5000, '8d40038d4905c3', 'callback-lea-eax-ecx-ret');
   upload(e, 0x5100, '0f0b', 'callback-return-gate');
   const outer = resident(e, [[0x4000, 2]], [[0x4000, OUTER]], [], 'zero-argument outer');
-  const caller = resident(e, [[0x3000, 5], [0x3005, 3]], [], ['store_resident32'], 'real caller');
-  const cb = resident(e, [[0x5000, 7], [0x5100, 2]], [[0x5100, RETURN]], ['read32'], 'zero-argument callback');
+  const caller = resident(e, [[0x3000, 5], [0x3005, 3]], [], ['cpu_store_resident32'], 'real caller');
+  const cb = resident(e, [[0x5000, 7], [0x5100, 2]], [[0x5100, RETURN]], ['cpu_read32'], 'zero-argument callback');
   ack(e, outer, 0); ack(e, caller, 1); ack(e, cb, 2);
   const initialWords = [[0x8ff4, 0x11223344], [0x8ff8, 0x23456789], [0x8ffc, 0x3456789a], [0x9000, 0x456789ab]];
   for (const [address, value] of initialWords) hostWord(e, address, value);
   const start = state(), stopped = state(0x4000, 0x8ffc);
   reset(e, start);
-  dispatch(e, 9, stopped, exit40(8, 1, OUTER), {child: 2, successes: 2, last: outer, slot: 0, helper: helper40()});
+  dispatch(e, 9, stopped, exit40(8, 1, OUTER), {child: 2, successes: 2, last: outer, slot: 0, helper: cpuHelper()});
   stats.guest_stores++;
   capture(e, outer, stopped, 1, 0x3005);
   const first = begin(e, outer, cb, 1, stopped, 0x5000, 0x5100, []);
@@ -408,8 +415,8 @@ function finish(e, outer, callback, token, value, stopped, frozenExit, status = 
   const returned = copy(first.active);
   returned.eip = 0x5100; returned.registers[4] = 0x8ffc;
   returned.registers[0] = 0x89abcdf2; returned.registers[1] = 8;
-  dispatch(e, 9, returned, exit40(8, 3, RETURN), {
-    child: 1, successes: 1, last: cb, slot: 2, helper: helper40(0x5100), callbackRetired: 3,
+  dispatch(e, 9, returned, cpuExit(8, 3, RETURN), {
+    child: 1, successes: 1, last: cb, slot: 2, helper: cpuHelper(0x5100), callbackRetired: 3,
   });
   finish(e, outer, cb, 2, undefined, undefined, undefined, 3, {high: (e.high ^ 1) >>> 0});
   finish(e, outer, cb, 2, undefined, undefined, undefined, 3, {unitHigh: 1});
@@ -434,8 +441,8 @@ function finish(e, outer, callback, token, value, stopped, frozenExit, status = 
   const second = begin(e, outer, cb, 1, stopped, 0x5000, 0x5100, [], false, 3);
   finish(e, outer, cb, 3, undefined, undefined, undefined, 12);
   authorize(e, cb, 3);
-  dispatch(e, 9, returned, exit40(8, 3, RETURN), {
-    child: 1, successes: 1, last: cb, slot: 2, helper: helper40(0x5100), callbackRetired: 3,
+  dispatch(e, 9, returned, cpuExit(8, 3, RETURN), {
+    child: 1, successes: 1, last: cb, slot: 2, helper: cpuHelper(0x5100), callbackRetired: 3,
   });
   hostWord(e, 0x5000, 0x8d03408d); // same bytes invalidate the retained callback page.
   cancel(e, 1); refresh(e).bytes.fill(0xff, e.base, e.base + 96);
@@ -470,9 +477,9 @@ function finish(e, outer, callback, token, value, stopped, frozenExit, status = 
   upload(e, 0x6100, '8d4003c3', 'legacy-callback-not-executed');
   upload(e, 0x6200, '0f0b', 'legacy-return-gate');
   const outer = resident(e, [[0x4000, 2]], [[0x4000, OUTER]], [], 'two-argument outer');
-  const caller = resident(e, [[0x3000, 5], [0x3005, 3]], [], ['store_resident32'], 'real caller');
-  const cb = resident(e, [[0x5000, 10], [0x5100, 2]], [[0x5100, RETURN]], ['read32'], 'callback reads first stack arg and wraps to zero');
-  const legacy = legacyModule(e, [[0x6000, 2], [0x6100, 4], [0x6200, 2]], [[0x6000, LEGACY], [0x6200, LEGACY_RETURN]], ['read32']);
+  const caller = resident(e, [[0x3000, 5], [0x3005, 3]], [], ['cpu_store_resident32'], 'real caller');
+  const cb = resident(e, [[0x5000, 10], [0x5100, 2]], [[0x5100, RETURN]], ['cpu_read32'], 'callback reads first stack arg and wraps to zero');
+  const legacy = legacyModule(e, [[0x6000, 2], [0x6100, 4], [0x6200, 2]], [[0x6000, LEGACY], [0x6200, LEGACY_RETURN]], ['cpu_read32']);
   ack(e, outer, 0); ack(e, caller, 1); ack(e, cb, 2);
   const initialWords = [
     [0x8fec, 0x11223344], [0x8ff0, 0x23456789], [0x8ff4, 0x3456789a],
@@ -480,7 +487,7 @@ function finish(e, outer, callback, token, value, stopped, frozenExit, status = 
   ];
   for (const [address, value] of initialWords) hostWord(e, address, value);
   const start = state(), stopped = state(0x4000, 0x8ffc); reset(e, start);
-  dispatch(e, 9, stopped, exit40(8, 1, OUTER), {child: 2, successes: 2, last: outer, slot: 0, helper: helper40()});
+  dispatch(e, 9, stopped, exit40(8, 1, OUTER), {child: 2, successes: 2, last: outer, slot: 0, helper: cpuHelper()});
   stats.guest_stores++; capture(e, outer, stopped, 1, 0x3005);
   const first = begin(e, outer, cb, 1, stopped, 0x5000, 0x5100, [0xfffffffd, 0x12345678]);
   const frame = [
@@ -491,10 +498,10 @@ function finish(e, outer, callback, token, value, stopped, frozenExit, status = 
   finish(e, outer, cb, 2, undefined, undefined, undefined, 12);
   dispatcherGetter(e); authorize(e, cb, 2);
   const afterRead = copy(first.active); afterRead.eip = 0x5004; afterRead.registers[0] = 0xfffffffd;
-  direct(e, cb, afterRead, exit40(1, 1), {budget: 1, helper: helper40(0xfffffffd), callbackRetired: 1});
+  direct(e, cb, afterRead, unitExit(cb, 1, 1), {budget: 1, helper: cpuHelper(0xfffffffd), callbackRetired: 1});
   const returned = copy(afterRead); returned.eip = 0x5100; returned.registers[4] = 0x8ffc; returned.registers[0] = 0;
-  dispatch(e, 9, returned, exit40(8, 2, RETURN), {
-    child: 1, successes: 1, last: cb, slot: 2, helper: helper40(0x5100), callbackRetired: 2,
+  dispatch(e, 9, returned, cpuExit(8, 2, RETURN), {
+    child: 1, successes: 1, last: cb, slot: 2, helper: cpuHelper(0x5100), callbackRetired: 2,
   });
   pure(e, () => e.api.finish_callback(e.low, e.high, legacy.generation, 2), 14, 'legacy finish cannot consume Resident callback token');
   const resultRecord = finish(e, outer, cb, 2, 0, stopped, exit40(8, 1, OUTER));
@@ -509,7 +516,7 @@ function finish(e, outer, callback, token, value, stopped, frozenExit, status = 
   // auxiliary legacy Gate uses a host-authored return word; no callback body runs.
   hostWord(e, 0x9000, 0x3005);
   const legacyStop = state(0x6000, 0x9000); reset(e, legacyStop);
-  direct(e, legacy, legacyStop, exit40(8, 0, LEGACY), {legacy: true});
+  direct(e, legacy, legacyStop, unitExit(legacy, 8, 0, LEGACY), {legacy: true});
   capture(e, legacy, legacyStop, 3, 0x3005, true);
   const replacement = begin(e, legacy, legacy, 3, legacyStop, 0x6100, 0x6200, [], true);
   finish(e, outer, outer, 4, undefined, undefined, undefined, 14);

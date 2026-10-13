@@ -130,8 +130,7 @@ const names = [
   'capture_resident_call', 'complete_resident_call', 'begin_resident_callback',
   'authorize_resident_callback', 'finish_resident_callback', 'select_resident_callback_unit',
   'capture_resident_callback_call', 'complete_resident_callback_call',
-  'capture_active_resident_callback_call', 'complete_active_resident_callback_call',
-];
+  'capture_active_resident_callback_call', 'complete_active_resident_callback_call', 'cpu_read32', 'cpu_store_resident32'];
 const fields = [
   'engines', 'resident_units', 'metadata24', 'metadata32', 'acknowledgements',
   'selectors', 'selectors_success', 'selectors_rejected', 'dispatch_calls',
@@ -159,6 +158,9 @@ function cpu(pc, esp, eax = 10) {
 const state56 = value => words(56, 'R3ST', [...value.registers, value.eip, value.eflags]);
 const exit40 = (reason, retired = 0, detail = 0, version = 3) => words(40, 'R3EX', [reason, retired, detail, 0, 0, 0], version);
 const helper40 = (value = 0) => words(40, 'R3MH', [0, value, 0, 0, 0, 0]);
+const cpuHelper = (value = 0) => words(40, 'R3MH', [0, value, 0, 0, 0, 4], 10);
+const cpuExit = (reason, retired = 0, detail = 0, version = 3) => words(40, 'R3EX', [reason, retired, detail, 0, 0, 0], 6);
+function unitExit(unit, ...fields) { return (unit.cpuScalar ? cpuExit : exit40)(...fields); }
 function refresh(e) {
   if (e.buffer !== e.memory.buffer) {
     e.buffer = e.memory.buffer; e.bytes = new Uint8Array(e.buffer); e.view = new DataView(e.buffer);
@@ -251,7 +253,7 @@ function resident(e, blocks, gates, helpers, label, slot) {
     ...helpers.map(name => ({module: 'ring3', name, kind: 'function'})),
   ]);
   const instance = new WebAssembly.Instance(module, {env: {memory: e.memory}, ring3: Object.fromEntries(['guard_resident', ...helpers].map(name => [name, e.api[name]]))});
-  const unit = {id, low, high, pointer, length, bytes, module, instance, run: instance.exports.run, label, slot};
+  const unit = {cpuScalar: helpers.some(name => name.startsWith('cpu_')), id, low, high, pointer, length, bytes, module, instance, run: instance.exports.run, label, slot};
   const file = `resident-${low}.wasm`; artifact(file, bytes);
   bindings.push({key: KEY.toString(), id: id.toString(), pointer, length, sha256: sha256(bytes), file, label, blocks, gates, slot});
   record('resident24', metadata, {id: id.toString(), pointer, length}); stats.metadata24++;
@@ -327,8 +329,8 @@ for (const [label, pc, hex] of [
 }
 const outer = resident(e, [[0x4000, 2]], [[0x4000, OUTER]], [], 'outer', 0);
 const home = resident(e, [[0x5000, 8], [0x5100, 2]], [[0x5100, RETURN]], [], 'home', 1);
-const continuation = resident(e, [[0x6000, 8], [0x6008, 4], [0x6200, 2]], [[0x6200, INNER]], ['read32', 'store_resident32'], 'continuation', 2);
-const caller = resident(e, [[0x3000, 5], [0x3005, 3]], [], ['store_resident32'], 'caller', 3);
+const continuation = resident(e, [[0x6000, 8], [0x6008, 4], [0x6200, 2]], [[0x6200, INNER]], ['cpu_read32', 'cpu_store_resident32'], 'continuation', 2);
+const caller = resident(e, [[0x3000, 5], [0x3005, 3]], [], ['cpu_store_resident32'], 'caller', 3);
 e.units = [outer, home, continuation, caller];
 e.refs = {memory: e.memory, instance, table: e.table, dispatcher: e.dispatcher, dispatcherModule: e.dispatcherModule, units: e.units.map(({module, instance, run}) => ({module, instance, run}))};
 stable(e);
@@ -338,7 +340,7 @@ for (const [address, value] of [[0x8ff4, 0x11223344], [0x8ff8, 0x55667788], [0x8
 refresh(e).bytes.set(state56(cpu(0x3000, 0x9000)), e.base);
 e.bytes.fill(0xa5, e.base + 56, e.base + 96); e.view.setUint32(e.base + 96, 0, true);
 e.bytes.fill(0x5a, e.base + 100, e.base + 140);
-dispatch(e, 9, cpu(0x4000, 0x8ffc), exit40(8, 1, OUTER), {children: 2, success: 2, last: outer, helper: helper40(), label: 'real caller CALL then outer Gate'}); stats.guest_stores++;
+dispatch(e, 9, cpu(0x4000, 0x8ffc), exit40(8, 1, OUTER), {children: 2, success: 2, last: outer, helper: cpuHelper(), label: 'real caller CALL then outer Gate'}); stats.guest_stores++;
 observe(e, 0x11223344, 0x55667788, 0x3005, 'real caller return word');
 const outerBefore = arena(e); assert.equal(api.capture_resident_call(e.low, e.high, outer.low, outer.high, 1, 0), 0);
 const outerRecord = words(112, 'R3CF', [1, OUTER, 1, 0, 0x4000, 0x8ffc, 0x3005, 0]);
@@ -378,7 +380,7 @@ reject(e, () => api.finish_resident_callback(e.low, e.high, home.low, home.high,
 reject(e, () => api.finish_resident_callback(e.low, e.high, continuation.low, continuation.high, 2), 14, 'B cannot own callback finish');
 reject(e, () => api.compile_resident_with_gates(1, 0), 12, 'suspended compilation remains Busy');
 reject(e, () => api.acknowledge_resident_installation(e.low, e.high, continuation.low, continuation.high, 2), 12, 'suspended acknowledgement remains Busy');
-dispatch(e, 9, cpu(0x6200, 0x8ff4, 18), exit40(8, 2, INNER), {children: 1, success: 1, last: continuation, helper: helper40(), callbackRetired: 2, label: 'real B LEA/CALL then ordinary API Gate'}); stats.guest_stores++;
+dispatch(e, 9, cpu(0x6200, 0x8ff4, 18), cpuExit(8, 2, INNER), {children: 1, success: 1, last: continuation, helper: cpuHelper(), callbackRetired: 2, label: 'real B LEA/CALL then ordinary API Gate'}); stats.guest_stores++;
 observe(e, 0x6008, 0x5100, 0x3005, 'real B inner CALL return word');
 tamper(e, 0, Uint8Array.of(0), () => activeCall('capture', e, continuation, 2, 1, 0, 13, 'malformed Gate State header'), 'malformed Gate State header');
 refresh(e).view.setUint32(e.base + 96, 1, true);
@@ -402,7 +404,7 @@ reject(e, () => api.finish_resident_callback(e.low, e.high, home.low, home.high,
 reject(e, () => api.finish_resident_callback(e.low, e.high, continuation.low, continuation.high, 2), 14, 'pending B still cannot own finish');
 guard(e, continuation, 12); guard(e, home, 12);
 select(e, home, 2, home, 12, 'inner pending prevents active selection');
-dispatch(e, 9, cpu(0x6200, 0x8ff4, 18), exit40(8, 2, INNER), {status: 12, label: 'pending dispatcher guard-first rejection before finder or child'});
+dispatch(e, 9, cpu(0x6200, 0x8ff4, 18), cpuExit(8, 2, INNER), {status: 12, label: 'pending dispatcher guard-first rejection before finder or child'});
 tamper(e, 52, new Uint8Array(4), () => activeCall('complete', e, continuation, 2, 3, 44, 15, 'frozen CPU flags mismatch before decoding'), 'frozen CPU flags mismatch');
 tamper(e, 56, Uint8Array.of(0), () => activeCall('complete', e, continuation, 2, 3, 44, 15, 'frozen Exit header mismatch before decoding'), 'frozen Exit header mismatch');
 refresh(e).view.setUint32(e.base + 96, 1, true);
@@ -422,7 +424,7 @@ activeCall('complete', e, continuation, 2, 3, 44, 14, 'consumed inner cannot rep
 activeCall('complete', e, continuation, 2, 1, 44, 12, 'retained outer protected even without inner pending');
 guard(e, continuation, 0); guard(e, home, 12);
 stable(e);
-dispatch(e, 9, cpu(0x5100, 0x8ffc, 47), exit40(3, 2), {status: 12, children: 1, success: 1, failure: 1, last: continuation, helper: helper40(0x5100), callbackRetired: 2, label: 'real B LEA/RET0 retained-prefix home Busy'});
+dispatch(e, 9, cpu(0x5100, 0x8ffc, 47), cpuExit(3, 2), {status: 12, children: 1, success: 1, failure: 1, last: continuation, helper: cpuHelper(0x5100), callbackRetired: 2, label: 'real B LEA/RET0 retained-prefix home Busy'});
 select(e, home, 2, home, 0, 'pure home return-Gate activation');
 guard(e, home, 0); guard(e, continuation, 12);
 dispatch(e, 1, cpu(0x5100, 0x8ffc, 47), exit40(8, 0, RETURN), {children: 1, success: 1, last: home, label: 'real home registered return Gate'});

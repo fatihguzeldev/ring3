@@ -24,8 +24,7 @@ const arities = {
   acknowledge_resident_installation:5, capture_resident_call:6, complete_resident_call:6,
   begin_resident_callback:11, authorize_resident_callback:5, select_resident_callback_unit:7,
   capture_active_resident_callback_call:7, complete_active_resident_callback_call:7,
-  finish_resident_callback:5, abort_callback:3, abandon_call:3, discard_unacknowledged_resident:4,
-};
+  finish_resident_callback:5, abort_callback:3, abandon_call:3, discard_unacknowledged_resident:4, cpu_read32: 1, cpu_store_resident32: 6};
 const productionPaths = ['Cargo.toml', 'Cargo.lock', 'engine/Cargo.toml',
   ...execFileSync('rg', ['--files', 'engine/src'], {cwd:root, encoding:'utf8'}).trim().split('\n')].sort();
 assert.ok(productionPaths.length > 0, 'nonempty source manifest'); assert.equal(new Set(productionPaths).size, productionPaths.length);
@@ -59,6 +58,9 @@ const cpu = (eip, esp, eax = 10) => ({registers:[eax,0x11111111,0x22222222,0x333
 const state56 = value => words(56, 'R3ST', [...value.registers,value.eip,value.eflags]);
 const exit40 = (reason, retired = 0, detail = 0) => words(40, 'R3EX', [reason,retired,detail,0,0,0], 3);
 const helper40 = (value = 0) => words(40, 'R3MH', [0,value,0,0,0,0]);
+const cpuHelper = (value = 0) => words(40, 'R3MH', [0, value, 0, 0, 0, 4], 10);
+const cpuExit = (reason, retired = 0, detail = 0) => words(40, 'R3EX', [reason,retired,detail,0,0,0], 6);
+function unitExit(unit, ...fields) { return (unit.cpuScalar ? cpuExit : exit40)(...fields); }
 const installed32 = unit => words(32, 'R3IN', [unit.low,unit.high,unit.slot,0]);
 const metadata24 = unit => {
   const bytes = new Uint8Array(24), view = new DataView(bytes.buffer);
@@ -73,11 +75,11 @@ const inputs = [
 ];
 // the second prefix is a restart after neutral abort, not a resume of the abandoned callback.
 const trace = [
-  ['original caller CALL',cpu(0x4000,0x8ffc),exit40(8,1,OUTER),0,'outer',helper40()],
+  ['original caller CALL',cpu(0x4000,0x8ffc),exit40(8,1,OUTER),0,'outer',cpuHelper()],
   ['first home prefix to missing B',cpu(0x6000,0x8ff8,13),exit40(3,2),0,'home',null],
   ['fresh home prefix to missing B',cpu(0x6000,0x8ff8,13),exit40(3,2),0,'home',null],
-  ['fresh B CALL to inner Gate',cpu(0x6200,0x8ff4,18),exit40(8,2,INNER),0,'freshB',helper40()],
-  ['fresh B RET to immutable home',cpu(0x5100,0x8ffc,47),exit40(3,2),12,'freshB',helper40(0x5100)],
+  ['fresh B CALL to inner Gate',cpu(0x6200,0x8ff4,18),cpuExit(8,2,INNER),0,'freshB',cpuHelper()],
+  ['fresh B RET to immutable home',cpu(0x5100,0x8ffc,47),cpuExit(3,2),12,'freshB',cpuHelper(0x5100)],
   ['home return Gate',cpu(0x5100,0x8ffc,47),exit40(8,0,RETURN),0,'home',null],
   ['caller continuation once',cpu(0x3008,0x9000,50),exit40(3,1),0,'caller',null],
 ];
@@ -167,7 +169,7 @@ assert.equal(dispatcher.exports.run.length,4);
 const keepers = [];
 for (const [label,blocks,gates,helpers,slot] of [
   ['outer',[[0x4000,2]],[[0x4000,OUTER]],[],0], ['home',[[0x5000,8],[0x5100,2]],[[0x5100,RETURN]],[],1],
-  ['caller',[[0x3000,5],[0x3005,3]],[],['store_resident32'],2],
+  ['caller',[[0x3000,5],[0x3005,3]],[],['cpu_store_resident32'],2],
   ...[0,1,2,3].map(index => [`keeper${index}`,[[0x7000+index*0x10,1]],[],[],3+index]),
 ]) {
   const unit = compile(label,blocks,gates,helpers,slot,()=>api.compile_resident_with_gates(blocks.length,gates.length));
@@ -236,7 +238,7 @@ function begin(outerToken,callbackToken) {
 }
 begin(1,2); dispatch(1);
 operation('genuinely missing B at first prefix stop',()=>api.find_resident(0x6000),17);
-const Bblocks = [[0x6000,8],[0x6008,4],[0x6200,2]], Bgates = [[0x6200,INNER]], Bhelpers = ['read32','store_resident32'];
+const Bblocks = [[0x6000,8],[0x6008,4],[0x6200,2]], Bgates = [[0x6200,INNER]], Bhelpers = ['cpu_read32','cpu_store_resident32'];
 const coldCompile = token => api.compile_resident_callback_unit(LOW,HIGH,home.low,home.high,token,3,1);
 const oldB = compile('oldB',Bblocks,Bgates,Bhelpers,7,()=>coldCompile(2));
 const failedBefore = arena(); assert.throws(()=>new WebAssembly.Instance(oldB.module,{env:{memory},ring3:{}}),WebAssembly.LinkError);

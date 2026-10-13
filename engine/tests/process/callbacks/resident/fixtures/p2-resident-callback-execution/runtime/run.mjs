@@ -22,8 +22,7 @@ const apiNames = [
   'find_installed_resident', 'capture_resident_call', 'complete_resident_call',
   'capture_call', 'complete_call', 'abandon_call', 'begin_resident_callback',
   'authorize_resident_callback', 'begin_callback', 'finish_callback',
-  'resume_callback_code', 'resume_callback_entries', 'abort_callback',
-];
+  'resume_callback_code', 'resume_callback_entries', 'abort_callback', 'cpu_read32', 'cpu_store_resident32'];
 const fields = [
   'engines', 'resident_units', 'legacy_modules', 'metadata24', 'metadata32',
   'acks', 'dispatch_calls', 'dispatch_canonical', 'dispatch_rejected',
@@ -76,6 +75,14 @@ function exit40(reason, retired = 0, detail = 0) {
 function helper40(value = 0) {
   return wordsRecord(40, 'R3MH', [0, value, 0, 0, 0, 0]);
 }
+function cpuHelper(value = 0) {
+  return wordsRecord(40, 'R3MH', [0, value, 0, 0, 0, 4], 10);
+}
+function cpuExit(reason, retired = 0, detail = 0) {
+  return wordsRecord(40, 'R3EX', [reason, retired, detail, 0, 0, 0], 6);
+}
+function unitExit(unit, ...fields) { return (unit.cpuScalar ? cpuExit : exit40)(...fields); }
+
 function reset(e, s) {
   refresh(e).bytes.set(state56(s), e.base);
   e.bytes.fill(0xa5, e.base + 56, e.base + 96);
@@ -196,7 +203,7 @@ function resident(e, blocks, gates, helpers, label) {
   });
   const file = `resident-${++stats.resident_units}.wasm`;
   saveArtifact(file, bytes);
-  const unit = {id, low, high, pointer, length, bytes, run: instance.exports.run, label, file};
+  const unit = {cpuScalar: helpers.some(name => name.startsWith('cpu_')), id, low, high, pointer, length, bytes, run: instance.exports.run, label, file};
   unitBindings.push({key: e.key.toString(), id: id.toString(), pointer, length, sha256: sha256(bytes), file, blocks, gates, label});
   saveRecord(e, 'resident24', after.slice(TRANSFER, TRANSFER + 24), {id: id.toString(), pointer, length});
   stats.metadata24++;
@@ -222,7 +229,7 @@ function legacyModule(e, blocks, gates, helpers = []) {
   });
   const file = `legacy-${++stats.legacy_modules}.wasm`; saveArtifact(file, bytes);
   unitBindings.push({key: e.key.toString(), generation, pointer, length, sha256: sha256(bytes), file, blocks, gates});
-  return {generation, run: instance.exports.run};
+  return {cpuScalar: helpers.some(name => name.startsWith('cpu_')), generation, run: instance.exports.run};
 }
 function ack(e, unit, slot) {
   e.table.set(slot, unit.run);
@@ -350,8 +357,8 @@ function section(name, before) {
   upload(e, 0x5100, '0f0b', 'callback-return-gate');
   upload(e, 0x6000, '0f0b', 'legacy-gate');
   const outer = resident(e, [[0x4000, 2]], [[0x4000, OUTER]], [], 'real CALL outer');
-  const caller = resident(e, [[0x3000, 5], [0x3005, 3]], [], ['store_resident32'], 'real caller');
-  const cb = resident(e, [[0x5000, 8], [0x5100, 2]], [[0x5100, RETURN]], ['read32', 'store_resident32'], 'callback LEA/store/RET8');
+  const caller = resident(e, [[0x3000, 5], [0x3005, 3]], [], ['cpu_store_resident32'], 'real caller');
+  const cb = resident(e, [[0x5000, 8], [0x5100, 2]], [[0x5100, RETURN]], ['cpu_read32', 'cpu_store_resident32'], 'callback LEA/store/RET8');
   const legacy = legacyModule(e, [[0x6000, 2]], [[0x6000, LEGACY]]);
   ack(e, outer, 0); ack(e, caller, 1); ack(e, cb, 2);
   const neighbours = [
@@ -363,7 +370,7 @@ function section(name, before) {
   const start = state(), stopped = state(0x4000, 0x8ffc);
   reset(e, start);
   dispatch(e, 9, stopped, exit40(8, 1, OUTER), {
-    child: 2, successes: 2, last: outer, slot: 0, helper: helper40(),
+    child: 2, successes: 2, last: outer, slot: 0, helper: cpuHelper(),
   });
   stats.guest_stores++; // real CALL pushes 0x3005 through bound Store6.
   const afterCall = neighbours.map(([address, value]) => [address, address === 0x8ffc ? 0x3005 : value]);
@@ -409,7 +416,7 @@ function section(name, before) {
   pure(e, () => e.api.abandon_call(e.low, e.high, 1), 12, 'outer abandon requires callback revocation');
   complete(e, outer, 1, 55, undefined, 12);
   const afterLea = copy(active); afterLea.registers[0] = 0x89abcdf2; afterLea.eip = 0x5003;
-  direct(e, cb, afterLea, exit40(1, 1), {budget: 1, callbackRetired: 1});
+  direct(e, cb, afterLea, unitExit(cb, 1, 1), {budget: 1, callbackRetired: 1});
   cancel(e, 1);
   dispatch(e, 0, afterLea, exit40(2));
   cancel(e, 0); dispatch(e, 0, afterLea, exit40(1));
@@ -419,11 +426,11 @@ function section(name, before) {
   e.bytes.set(state56(afterLea), e.base); cancel(e, 0);
   authorize(e, cb, 2, 12); // busy precedes the legitimate advanced-image mismatch.
   const afterStore = copy(afterLea); afterStore.eip = 0x5005;
-  direct(e, cb, afterStore, exit40(1, 1), {budget: 1, helper: helper40(), callbackRetired: 1});
+  direct(e, cb, afterStore, unitExit(cb, 1, 1), {budget: 1, helper: cpuHelper(), callbackRetired: 1});
   stats.guest_stores++; observe(e, [[0xa010, 0x89abcdf2]]);
   const returned = copy(afterStore); returned.eip = 0x5100; returned.registers[4] = 0x8ffc;
-  dispatch(e, 9, returned, exit40(8, 1, RETURN), {
-    child: 1, successes: 1, last: cb, slot: 2, helper: helper40(0x5100), callbackRetired: 1,
+  dispatch(e, 9, returned, cpuExit(8, 1, RETURN), {
+    child: 1, successes: 1, last: cb, slot: 2, helper: cpuHelper(0x5100), callbackRetired: 1,
   });
   pure(e, () => e.api.capture_resident_call(e.low, e.high, cb.low, cb.high, 1, 0), 12, 'return Gate does not enable inner capture');
   complete(e, outer, 1, 55, undefined, 12);
@@ -442,7 +449,7 @@ function section(name, before) {
   // auxiliary real translated Gate with a host-authored return word isolates close.
   hostWord(e, 0x9000, 0x6002);
   const closeStop = state(0x4000, 0x9000); reset(e, closeStop);
-  direct(e, outer, closeStop, exit40(8, 0, OUTER));
+  direct(e, outer, closeStop, unitExit(outer, 8, 0, OUTER));
   capture(e, outer, closeStop, 3, 0x6002);
   begin(e, outer, cb, 3, closeStop, 0x5000, 0x5100, []);
   authorize(e, cb, 4); observe(e, [[0x8ffc, 0x5100]]);
@@ -471,17 +478,17 @@ function section(name, before) {
   const initialWords = [[0x8ff8, 0x11223344], [0x8ffc, 0x23456789], [0x9000, 0x6002], [0x9004, 0x3456789a]];
   for (const [address, value] of initialWords) hostWord(e, address, value);
   const stopped = state(0x4000, 0x9000); reset(e, stopped);
-  direct(e, outer, stopped, exit40(8, 0, OUTER)); capture(e, outer, stopped, 1, 0x6002);
+  direct(e, outer, stopped, unitExit(outer, 8, 0, OUTER)); capture(e, outer, stopped, 1, 0x6002);
   const {active, record} = begin(e, outer, cb, 1, stopped, 0x5000, 0x5100, []);
   const frame = [[0x8ff8, 0x11223344], [0x8ffc, 0x5100], [0x9000, 0x6002], [0x9004, 0x3456789a]];
   observe(e, frame); dispatcherGetter(e); authorize(e, cb, 2);
   dispatch(e, 9, active, exit40(3), {failures: 1});
   pure(e, () => e.api.acknowledge_resident_installation(e.low, e.high, cb.low, cb.high, 2), 12, 'uninstalled callback cannot be acknowledged while armed');
   const afterLea = copy(active); afterLea.eip = 0x5003; afterLea.registers[0] = 0x89abcdf2;
-  direct(e, cb, afterLea, exit40(1, 1), {budget: 1, callbackRetired: 1});
+  direct(e, cb, afterLea, unitExit(cb, 1, 1), {budget: 1, callbackRetired: 1});
   dispatch(e, 9, afterLea, exit40(3), {failures: 1});
   const crossed = copy(afterLea); crossed.eip = 0x6000;
-  direct(e, cb, crossed, exit40(3, 1), {callbackRetired: 1});
+  direct(e, cb, crossed, unitExit(cb, 3, 1), {callbackRetired: 1});
   dispatch(e, 9, undefined, undefined, {status: 12, failures: 1});
   direct(e, foreign, undefined, undefined, {status: 12});
   hostWord(e, 0x5000, 0xe903408d); // same bytes still invalidate the retained callback snapshot.
@@ -512,16 +519,16 @@ function section(name, before) {
   for (const [address, value] of words) hostWord(e, address, value);
   hostWord(e, 0x4200, 0x10203040); // before compiling the outer page snapshot.
   const outer = resident(e, [[0x4000, 2]], [[0x4000, OUTER]], [], 'outer-only write victim');
-  const cb = resident(e, [[0x5000, 3], [0x5100, 2]], [[0x5100, RETURN]], ['read32', 'store_resident32'], 'callback writes distinct outer page');
+  const cb = resident(e, [[0x5000, 3], [0x5100, 2]], [[0x5100, RETURN]], ['cpu_read32', 'cpu_store_resident32'], 'callback writes distinct outer page');
   const legacy = legacyModule(e, [[0x6000, 2]], [[0x6000, LEGACY]]);
   ack(e, outer, 0); ack(e, cb, 1);
   const stopped = state(0x4000, 0x9000, 0x4200); reset(e, stopped);
-  direct(e, outer, stopped, exit40(8, 0, OUTER)); capture(e, outer, stopped, 1, 0x6002);
+  direct(e, outer, stopped, unitExit(outer, 8, 0, OUTER)); capture(e, outer, stopped, 1, 0x6002);
   const {active, record} = begin(e, outer, cb, 1, stopped, 0x5000, 0x5100, []);
   dispatcherGetter(e); authorize(e, cb, 2);
   const returned = copy(active); returned.eip = 0x5100; returned.registers[4] = 0x9000;
-  dispatch(e, 9, returned, exit40(8, 2, RETURN), {
-    child: 1, successes: 1, last: cb, slot: 1, helper: helper40(0x5100), callbackRetired: 2,
+  dispatch(e, 9, returned, cpuExit(8, 2, RETURN), {
+    child: 1, successes: 1, last: cb, slot: 1, helper: cpuHelper(0x5100), callbackRetired: 2,
   });
   stats.guest_stores++;
   const frameAndOuter = [[0x8ff8, 0x11223344], [0x8ffc, 0x5100], [0x9000, 0x6002], [0x9004, 0x3456789a], [0x4200, 0x89abcdef]];
@@ -554,22 +561,22 @@ function section(name, before) {
   upload(e, 0x6000, '0f0b', 'legacy-outer-gate');
   upload(e, 0x6200, '8d4003c3', 'legacy-callback');
   upload(e, 0x6300, '0f0b', 'legacy-return-gate');
-  const same = resident(e, [[0x4000, 2], [0x4100, 4], [0x4110, 2]], [[0x4000, OUTER], [0x4110, RETURN]], ['read32'], 'same-unit admission remains supported');
-  const legacy = legacyModule(e, [[0x6000, 2], [0x6200, 4], [0x6300, 2]], [[0x6000, LEGACY], [0x6300, LEGACY_RETURN]], ['read32']);
+  const same = resident(e, [[0x4000, 2], [0x4100, 4], [0x4110, 2]], [[0x4000, OUTER], [0x4110, RETURN]], ['cpu_read32'], 'same-unit admission remains supported');
+  const legacy = legacyModule(e, [[0x6000, 2], [0x6200, 4], [0x6300, 2]], [[0x6000, LEGACY], [0x6300, LEGACY_RETURN]], ['cpu_read32']);
   const words = [[0x8ff8, 0x11223344], [0x8ffc, 0x23456789], [0x9000, 0x6002], [0x9004, 0x3456789a]];
   for (const [address, value] of words) hostWord(e, address, value);
   const stopped = state(0x4000, 0x9000); reset(e, stopped);
-  direct(e, same, stopped, exit40(8, 0, OUTER)); capture(e, same, stopped, 1, 0x6002);
+  direct(e, same, stopped, unitExit(same, 8, 0, OUTER)); capture(e, same, stopped, 1, 0x6002);
   const sameBegin = begin(e, same, same, 1, stopped, 0x4100, 0x4110, []);
   dispatcherGetter(e); authorize(e, same, 2, 7);
   direct(e, same, undefined, undefined, {status: 12});
   dispatch(e, 0, undefined, undefined, {status: 12, badPointers: true});
-  abort(e, 2, stopped, exit40(8, 0, OUTER));
+  abort(e, 2, stopped, unitExit(same, 8, 0, OUTER));
   const resumed = state(0x6002, 0x9004); resumed.registers[0] = 55;
   complete(e, same, 1, 55, resumed);
   hostWord(e, 0x9004, 0x6002);
   const legacyStopped = state(0x6000, 0x9004); reset(e, legacyStopped);
-  direct(e, legacy, legacyStopped, exit40(8, 0, LEGACY), {legacy: true});
+  direct(e, legacy, legacyStopped, unitExit(legacy, 8, 0, LEGACY), {legacy: true});
   capture(e, legacy, legacyStopped, 3, 0x6002, true);
   const legacyBegin = begin(e, legacy, legacy, 3, legacyStopped, 0x6200, 0x6300, [], true);
   authorize(e, same, 4, 14); direct(e, same, undefined, undefined, {status: 12});

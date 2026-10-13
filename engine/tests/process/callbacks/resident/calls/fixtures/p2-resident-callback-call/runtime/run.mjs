@@ -22,8 +22,7 @@ const apiNames = [
   'find_installed_resident', 'capture_resident_call', 'complete_resident_call',
   'capture_call', 'complete_call', 'abandon_call', 'begin_resident_callback',
   'authorize_resident_callback', 'finish_resident_callback', 'begin_callback', 'finish_callback',
-  'capture_resident_callback_call', 'complete_resident_callback_call', 'abort_callback',
-];
+  'capture_resident_callback_call', 'complete_resident_callback_call', 'abort_callback', 'cpu_read32', 'cpu_store_resident32'];
 const fields = [
   'engines', 'resident_units', 'legacy_modules', 'metadata24',
   'metadata32', 'acks', 'dispatch_calls', 'dispatch_canonical',
@@ -181,6 +180,14 @@ function exit40(reason, retired = 0, detail = 0) {
 function helper40(value = 0) {
   return wordsRecord(40, 'R3MH', [0, value, 0, 0, 0, 0]);
 }
+function cpuHelper(value = 0) {
+  return wordsRecord(40, 'R3MH', [0, value, 0, 0, 0, 4], 10);
+}
+function cpuExit(reason, retired = 0, detail = 0) {
+  return wordsRecord(40, 'R3EX', [reason, retired, detail, 0, 0, 0], 6);
+}
+function unitExit(unit, ...fields) { return (unit.cpuScalar ? cpuExit : exit40)(...fields); }
+
 function reset(e, s) {
   refresh(e).bytes.set(state56(s), e.base);
   e.bytes.fill(0xa5, e.base + 56, e.base + 96);
@@ -304,7 +311,7 @@ function resident(e, blocks, gates, helpers, label) {
   });
   const file = `resident-${++stats.resident_units}.wasm`;
   saveArtifact(file, bytes);
-  const unit = {id, low, high, pointer, length, bytes, run: instance.exports.run, label, file};
+  const unit = {cpuScalar: helpers.some(name => name.startsWith('cpu_')), id, low, high, pointer, length, bytes, run: instance.exports.run, label, file};
   unitBindings.push({key: e.key.toString(), id: id.toString(), pointer, length, sha256: sha256(bytes), file, blocks, gates, label});
   saveRecord(e, 'resident24', after.slice(TRANSFER, TRANSFER + 24), {id: id.toString(), pointer, length});
   stats.metadata24++;
@@ -330,7 +337,7 @@ function legacyModule(e, blocks, gates, helpers = []) {
   });
   const file = `legacy-${++stats.legacy_modules}.wasm`; saveArtifact(file, bytes);
   unitBindings.push({key: e.key.toString(), generation, pointer, length, sha256: sha256(bytes), file, blocks, gates});
-  return {generation, run: instance.exports.run};
+  return {cpuScalar: helpers.some(name => name.startsWith('cpu_')), generation, run: instance.exports.run};
 }
 function ack(e, unit, slot) {
   e.table.set(slot, unit.run);
@@ -531,9 +538,9 @@ function pendingFinder(e, pc, unit, slot, status = 0) {
   upload(e, 0x5100, '0f0b', 'callback-return-gate');
   upload(e, 0x6000, '0f0b', 'legacy-owner-not-executed');
   const outer = resident(e, [[0x4000, 2]], [[0x4000, OUTER]], [], 'frozen outer');
-  const caller = resident(e, [[0x3000, 5], [0x3005, 3]], [], ['store_resident32'], 'real caller');
+  const caller = resident(e, [[0x3000, 5], [0x3005, 3]], [], ['cpu_store_resident32'], 'real caller');
   const cb = resident(e, [[0x5000, 10], [0x500a, 6], [0x5200, 2], [0x5100, 2]],
-    [[0x5200, INNER], [0x5100, RETURN]], ['read32', 'store_resident32'], 'named callback with ordinary inner Gate');
+    [[0x5200, INNER], [0x5100, RETURN]], ['cpu_read32', 'cpu_store_resident32'], 'named callback with ordinary inner Gate');
   const legacy = legacyModule(e, [[0x6000, 2]], [[0x6000, LEGACY]]);
   ack(e, outer, 0); ack(e, caller, 1); ack(e, cb, 2);
   const initialWords = [
@@ -543,7 +550,7 @@ function pendingFinder(e, pc, unit, slot, status = 0) {
   for (const [address, value] of initialWords) hostWord(e, address, value);
   const start = state(), stopped = state(0x4000, 0x8ffc); reset(e, start);
   dispatch(e, 9, stopped, exit40(8, 1, OUTER), {
-    child: 2, successes: 2, last: outer, slot: 0, helper: helper40(),
+    child: 2, successes: 2, last: outer, slot: 0, helper: cpuHelper(),
   });
   stats.guest_stores++; capture(e, outer, stopped, 1, 0x3005);
   const admission = begin(e, outer, cb, 1, stopped, 0x5000, 0x5100, [0x11223344, 0x12345678]);
@@ -559,14 +566,14 @@ function pendingFinder(e, pc, unit, slot, status = 0) {
   dispatcherGetter(e); authorize(e, cb, 2);
   const afterPush = copy(admission.active);
   afterPush.eip = 0x5005; afterPush.registers[0] = 0x11223344; afterPush.registers[4] = 0x8fec;
-  direct(e, cb, afterPush, exit40(1, 2), {
-    budget: 2, helper: helper40(), callbackRetired: 2,
+  direct(e, cb, afterPush, unitExit(cb, 1, 2), {
+    budget: 2, helper: cpuHelper(), callbackRetired: 2,
   });
   stats.guest_stores++;
   captureInner(e, cb, 2, undefined, undefined, 13);
   const inner = copy(afterPush); inner.eip = 0x5200; inner.registers[4] = 0x8fe8;
-  dispatch(e, 9, inner, exit40(8, 1, INNER), {
-    child: 1, successes: 1, last: cb, slot: 2, helper: helper40(), callbackRetired: 1,
+  dispatch(e, 9, inner, cpuExit(8, 1, INNER), {
+    child: 1, successes: 1, last: cb, slot: 2, helper: cpuHelper(), callbackRetired: 1,
   });
   stats.guest_stores++;
   const committedFrame = [
@@ -602,7 +609,7 @@ function pendingFinder(e, pc, unit, slot, status = 0) {
   cancel(e, 1); refresh(e).bytes.fill(0xff, e.base, e.base + 96);
   completeInner(e, cb, 2, 3, 0, undefined, 15);
   captureInner(e, cb, 2, undefined, undefined, 12, {convention: 99, count: 17});
-  e.bytes.set(state56(inner), e.base); e.bytes.set(exit40(8, 1, INNER), e.base + 56);
+  e.bytes.set(state56(inner), e.base); e.bytes.set(cpuExit(8, 1, INNER), e.base + 56);
   completeInner(e, cb, 2, 3, 0, undefined, 16); cancel(e, 0);
   e.bytes.fill(0x7c, e.base + TRANSFER, e.base + TRANSFER + 4096); dispatcherGetter(e);
   const completedInner = copy(inner);
@@ -613,8 +620,8 @@ function pendingFinder(e, pc, unit, slot, status = 0) {
   completeInner(e, cb, 2, 3, 0, undefined, 14);
   const returned = copy(completedInner);
   returned.eip = 0x5100; returned.registers[0] = 0; returned.registers[4] = 0x8ffc;
-  dispatch(e, 9, returned, exit40(8, 2, RETURN), {
-    child: 1, successes: 1, last: cb, slot: 2, helper: helper40(0x5100), callbackRetired: 2,
+  dispatch(e, 9, returned, cpuExit(8, 2, RETURN), {
+    child: 1, successes: 1, last: cb, slot: 2, helper: cpuHelper(0x5100), callbackRetired: 2,
   });
   captureInner(e, cb, 2, undefined, undefined, 13);
   const resultRecord = finish(e, outer, cb, 2, 0, stopped, exit40(8, 1, OUTER));
@@ -655,9 +662,9 @@ function pendingFinder(e, pc, unit, slot, status = 0) {
   upload(e, 0x5200, '0f0b', 'ordinary-inner-gate');
   upload(e, 0x5100, '0f0b', 'callback-return-gate');
   const outer = resident(e, [[0x4000, 2]], [[0x4000, OUTER]], [], 'stale recovery outer');
-  const caller = resident(e, [[0x3000, 5], [0x3005, 3]], [], ['store_resident32'], 'recovery real caller');
+  const caller = resident(e, [[0x3000, 5], [0x3005, 3]], [], ['cpu_store_resident32'], 'recovery real caller');
   const cb = resident(e, [[0x5000, 10], [0x500a, 6], [0x5200, 2], [0x5100, 2]],
-    [[0x5200, INNER], [0x5100, RETURN]], ['read32', 'store_resident32'], 'current recovery callback');
+    [[0x5200, INNER], [0x5100, RETURN]], ['cpu_read32', 'cpu_store_resident32'], 'current recovery callback');
   ack(e, outer, 0); ack(e, caller, 1); ack(e, cb, 2);
   const initialWords = [
     [0x8fe8, 0x01234567], [0x8fec, 0x22334455], [0x8ff0, 0x23456789],
@@ -666,15 +673,15 @@ function pendingFinder(e, pc, unit, slot, status = 0) {
   for (const [address, value] of initialWords) hostWord(e, address, value);
   const start = state(), stopped = state(0x4000, 0x8ffc); reset(e, start);
   dispatch(e, 9, stopped, exit40(8, 1, OUTER), {
-    child: 2, successes: 2, last: outer, slot: 0, helper: helper40(),
+    child: 2, successes: 2, last: outer, slot: 0, helper: cpuHelper(),
   });
   stats.guest_stores++; capture(e, outer, stopped, 1, 0x3005);
   const admission = begin(e, outer, cb, 1, stopped, 0x5000, 0x5100, [0x11223344, 0x12345678]);
   authorize(e, cb, 2);
   const inner = copy(admission.active);
   inner.eip = 0x5200; inner.registers[0] = 0x11223344; inner.registers[4] = 0x8fe8;
-  dispatch(e, 9, inner, exit40(8, 3, INNER), {
-    child: 1, successes: 1, last: cb, slot: 2, helper: helper40(), callbackRetired: 3,
+  dispatch(e, 9, inner, cpuExit(8, 3, INNER), {
+    child: 1, successes: 1, last: cb, slot: 2, helper: cpuHelper(), callbackRetired: 3,
   });
   stats.guest_stores += 2;
   const innerRecord = captureInner(e, cb, 2, inner, 3);

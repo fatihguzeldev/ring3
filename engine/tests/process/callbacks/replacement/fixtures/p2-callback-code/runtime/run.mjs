@@ -10,7 +10,7 @@ const engineBytes = readFileSync(enginePath);
 assert.ok(WebAssembly.validate(engineBytes), 'actual engine validates');
 const engineModule = new WebAssembly.Module(engineBytes);
 assert.deepEqual(WebAssembly.Module.imports(engineModule), [], 'engine has no JS imports');
-const names = ['open', 'close', 'arena_ptr', 'map', 'protect', 'unmap', 'upload', 'compile', 'compile_with_gates', 'capture_call', 'complete_call', 'abandon_call', 'begin_callback', 'finish_callback', 'abort_callback', 'resume_callback_code', 'generation', 'module_ptr', 'module_len', 'guard', 'read32', 'write32', 'store32'];
+const names = ['open', 'close', 'arena_ptr', 'map', 'protect', 'unmap', 'upload', 'compile', 'compile_with_gates', 'capture_call', 'complete_call', 'abandon_call', 'begin_callback', 'finish_callback', 'abort_callback', 'resume_callback_code', 'generation', 'module_ptr', 'module_len', 'guard', 'read32', 'write32', 'store32', 'cpu_read32', 'cpu_store32'];
 let keys = 0n, modules = 0, actualRuns = 0;
 const generatedHashes = [];
 
@@ -75,6 +75,19 @@ function helperRecord(tag, value = 0, detail = 0, address = 0, access = 0, lengt
   [tag, value, detail, address, access, length].forEach((field, index) => view.setUint32(16 + index * 4, field, true));
   return bytes;
 }
+function cpuHelperRecord(tag, value = 0, detail = 0, address = 0, access = 0, length = 4) {
+  const bytes = new Uint8Array(40), view = new DataView(bytes.buffer);
+  header(bytes, view, 0, 'R3MH', 40, 10);
+  [tag, value, detail, address, access, length].forEach((field, index) => view.setUint32(16 + index * 4, field, true));
+  return bytes;
+}
+function unitExit(unit, reason, retired, detail = 0, address = 0, access = 0, length = reason === 5 ? 4 : 0, version = 3) {
+  const bytes = new Uint8Array(40), view = new DataView(bytes.buffer);
+  header(bytes, view, 0, 'R3EX', 40, version >= 7 ? version : unit.cpuScalar ? 6 : version);
+  [reason, retired, detail, address, access, length].forEach((field, index) => view.setUint32(16 + index * 4, field, true));
+  return bytes;
+}
+
 
 function guestValue(engine, address) {
   assert.equal(engine.api.read32(address), 0, 'actual guest observation helper');
@@ -102,7 +115,7 @@ function compile(engine, blocks, gates, expectedHelpers = []) {
   return installedModule(engine, expectedHelpers);
 }
 
-function installedModule(engine, expectedHelpers = ['read32', 'store32']) {
+function installedModule(engine, expectedHelpers = ['cpu_read32', 'cpu_store32']) {
   refresh(engine);
   const pointer = engine.api.module_ptr() >>> 0, length = engine.api.module_len() >>> 0;
   assert.ok(length > 8);
@@ -117,12 +130,12 @@ function installedModule(engine, expectedHelpers = ['read32', 'store32']) {
   assert.deepEqual(sortedImports(module), expected, 'only actual memory/guard/instruction helpers; no hot gate import');
   const instance = new WebAssembly.Instance(module, {
     env: {memory: engine.memory},
-    ring3: {guard: engine.api.guard, read32: engine.api.read32, store32: engine.api.store32},
+    ring3: {guard: engine.api.guard, cpu_read32: engine.api.cpu_read32, cpu_store32: engine.api.cpu_store32},
   });
   modules++;
   generatedHashes.push(hash(encoded));
   writeFileSync(join(outputDir, `generated-${modules}.wasm`), encoded);
-  return {module, run: instance.exports.run, generation: engine.api.generation() >>> 0};
+  return {module, cpuScalar: expectedHelpers.some(name => name.startsWith('cpu_')), run: instance.exports.run, generation: engine.api.generation() >>> 0};
 }
 
 function state(eip = 0x1000, eflags = 0xcd7) {
@@ -314,14 +327,14 @@ function prepare(values = [7, 9], xstate = false) {
     : callbackBytes;
   upload(engine, 0x1400, Uint8Array.from([...entry, ...afterCalleeBytes, ...afterInnerBytes]));
   upload(engine, 0x4000, Uint8Array.from(calleeBytes));
-  const child = compile(engine, oldBlocks, gates, ['read32', 'store32']);
+  const child = compile(engine, oldBlocks, gates, ['cpu_read32', 'cpu_store32']);
   const start = state();
   start.registers[4] = 0x9000;
   const outer = copyState(start);
   outer.registers[4] = 0x8ff4;
   outer.eip = 0x1100;
   writeState(engine, start); // The only host CPU-state initialization in this instance.
-  run(engine, child, 4, outer, exit(8, 3, outerId, 0, 0, 0, xstate ? 9 : 3), 'actual outer PUSH/PUSH/CALL reaches gate', helperRecord(0));
+  run(engine, child, 4, outer, unitExit(child, 8, 3, outerId, 0, 0, 0, xstate ? 9 : 3), 'actual outer PUSH/PUSH/CALL reaches gate', cpuHelperRecord(0));
   const callbackState = copyState(outer);
   callbackState.registers[4] = 0x8fe8;
   callbackState.eip = 0x1400;
@@ -342,14 +355,14 @@ function stopAtAbsentCallee(test, singleStepCall = false) {
   stopped.registers[4] -= 4;
   stopped.eip = 0x4000;
   if (singleStepCall) {
-    run(engine, child, 3, arithmetic, exit(1, 3), 'callback arithmetic budget checkpoint before missing CALL', helperRecord(0, values[1]));
+    run(engine, child, 3, arithmetic, unitExit(child, 1, 3), 'callback arithmetic budget checkpoint before missing CALL', cpuHelperRecord(0, values[1]));
     descriptors(engine, newBlocks, gates);
     fail(engine, () => engine.api.resume_callback_code(engine.low, engine.high, child.generation, 2, 0, 0), 7, 'counts precede non-NeedCode stop validation');
     fail(engine, () => engine.api.resume_callback_code(engine.low, engine.high, child.generation, 2, 8, 3), 13, 'Budget stop cannot install replacement');
-    run(engine, child, 1, stopped, exit(1, 1), 'missing CALL writes one return then budget wins at committed callee PC', helperRecord(0));
+    run(engine, child, 1, stopped, unitExit(child, 1, 1), 'missing CALL writes one return then budget wins at committed callee PC', cpuHelperRecord(0));
     assert.equal(guestValue(engine, stopped.registers[4]), 0x140f);
-    run(engine, child, 1, stopped, exit(3, 0), 'positive resume NeedCode does not repeat committed CALL push', helperRecord(0, 0x140f));
-  } else run(engine, child, 5, stopped, exit(3, 4), 'callback real CALL commits before absent-callee NeedCode', helperRecord(0));
+    run(engine, child, 1, stopped, unitExit(child, 3, 0), 'positive resume NeedCode does not repeat committed CALL push', helperRecord(0, 0x140f));
+  } else run(engine, child, 5, stopped, unitExit(child, 3, 4), 'callback real CALL commits before absent-callee NeedCode', cpuHelperRecord(0));
   test.stopped = stopped;
   return stopped;
 }
@@ -432,7 +445,7 @@ for (const [values, singleStepCall] of [[[7, 9], false], [[0xffffffff, 1], true]
   inner.registers[4] -= 8;
   inner.eip = 0x1200;
   inner.eflags = addFlags(test.stopped.registers[0], 3, test.stopped.eflags);
-  run(engine, child, 5, inner, exit(8, 4, innerId), 'new callee ADD/real RET resumes callback PUSH/CALL exactly once', helperRecord(0));
+  run(engine, child, 5, inner, unitExit(child, 8, 4, innerId), 'new callee ADD/real RET resumes callback PUSH/CALL exactly once', cpuHelperRecord(0));
   capture(test, 3, innerId, inner, 0x1415, [inner.registers[0]]);
   fail(engine, () => engine.api.resume_callback_code(engine.low, engine.high, child.generation, 2, 0, 0), 12, 'active inner pending precedes replacement counts');
   fail(engine, () => engine.api.compile(0), 12, 'ordinary compile remains Busy across migrated callback');
@@ -446,10 +459,10 @@ for (const [values, singleStepCall] of [[[7, 9], false], [[0xffffffff, 1], true]
   returned.registers[4] = test.outer.registers[4];
   returned.eip = 0x1300;
   if (!singleStepCall) {
-    run(engine, child, 1, added, exit(1, 1), 'callback post-inner ADD checkpoint', arena(engine).slice(100, 140));
-    run(engine, child, 1, returned, exit(1, 1), 'migrated real RET8 commits before return-gate budget', helperRecord(0, 0x1300));
-    run(engine, child, 1, returned, exit(8, 0, returnId), 'return gate observes committed RET8 without another pop', helperRecord(0, 0x1300));
-  } else run(engine, child, 3, returned, exit(8, 2, returnId), 'migrated callback reaches distinct return gate through real RET8', helperRecord(0, 0x1300));
+    run(engine, child, 1, added, unitExit(child, 1, 1), 'callback post-inner ADD checkpoint', arena(engine).slice(100, 140));
+    run(engine, child, 1, returned, unitExit(child, 1, 1), 'migrated real RET8 commits before return-gate budget', cpuHelperRecord(0, 0x1300));
+    run(engine, child, 1, returned, unitExit(child, 8, 0, returnId), 'return gate observes committed RET8 without another pop', cpuHelperRecord(0, 0x1300));
+  } else run(engine, child, 3, returned, unitExit(child, 8, 2, returnId), 'migrated callback reaches distinct return gate through real RET8', cpuHelperRecord(0, 0x1300));
   const beforeFinish = arena(engine);
   assert.equal(engine.api.finish_callback(engine.low, engine.high, child.generation, 2), 0);
   finishes++;
@@ -462,7 +475,7 @@ for (const [values, singleStepCall] of [[[7, 9], false], [[0xffffffff, 1], true]
   const completed = complete(test, 1, test.outer, 2, 0x1009, returned.registers[0]);
   const caller = copyState(completed);
   caller.eip = 0x100a;
-  run(engine, child, 2, caller, exit(3, 1), 'original outer caller resumes under installed generation', arena(engine).slice(100, 140));
+  run(engine, child, 2, caller, unitExit(child, 3, 1), 'original outer caller resumes under installed generation', arena(engine).slice(100, 140));
 }
 
 
@@ -475,8 +488,8 @@ for (const [values, singleStepCall] of [[[7, 9], false], [[0xffffffff, 1], true]
   stopped.registers[4] -= 4;
   stopped.eip = 0x4000;
   test.stopped = stopped;
-  run(engine, child, 6, stopped, exit(3, 5, 0, 0, 0, 0, 9),
-    'XGETBV callback reaches real EXIT9 NeedCode before replacement', helperRecord(0));
+  run(engine, child, 6, stopped, unitExit(child, 3, 5, 0, 0, 0, 0, 9),
+    'XGETBV callback reaches real EXIT9 NeedCode before replacement', cpuHelperRecord(0));
   install(test);
   fail(engine, () => child.run(0xffffffff, 0xffffffff, 1, 0xffffffff), 3,
     'EXIT9 installation retires the old generated binding');
@@ -484,7 +497,7 @@ for (const [values, singleStepCall] of [[[7, 9], false], [[0xffffffff, 1], true]
   resumed.registers[0] = 10;
   resumed.eflags = addFlags(7, 3, stopped.eflags);
   resumed.eip = 0x4003;
-  run(engine, test.child, 1, resumed, exit(1, 1),
+  run(engine, test.child, 1, resumed, unitExit(test.child, 1, 1),
     'EXIT9 replacement resumes callee once without replaying XGETBV or CALL', arena(engine).slice(100, 140));
   assert.equal(guestValue(engine, stopped.registers[4]), 0x140f,
     'EXIT9 replacement preserves the single committed CALL return word');

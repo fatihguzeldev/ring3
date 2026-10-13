@@ -42,13 +42,16 @@ const cpu = (eip, esp, eax = 10) => ({
 const state56 = value => words(56, 'R3ST', [...value.registers, value.eip, value.eflags]);
 const exit40 = (reason, retired = 0, detail = 0) => words(40, 'R3EX', [reason, retired, detail, 0, 0, 0], 3);
 const helper40 = (value = 0) => words(40, 'R3MH', [0, value, 0, 0, 0, 0]);
+const cpuHelper = (value = 0) => words(40, 'R3MH', [0, value, 0, 0, 0, 4], 10);
+const cpuExit = (reason, retired = 0, detail = 0) => words(40, 'R3EX', [reason, retired, detail, 0, 0, 0], 6);
+function unitExit(unit, ...fields) { return (unit.cpuScalar ? cpuExit : exit40)(...fields); }
 const installed32 = unit => words(32, 'R3IN', [unit.low, unit.high, unit.slot, 0]);
 // these authored semantics are fixed before an engine or generated module executes.
 const trace = [
-  ['caller CALL -> outer Gate', cpu(0x4000, 0x8ffc), exit40(8, 1, OUTER), 0, 'outer', helper40()],
+  ['caller CALL -> outer Gate', cpu(0x4000, 0x8ffc), exit40(8, 1, OUTER), 0, 'outer', cpuHelper()],
   ['home LEA/JMP -> uncompiled B', cpu(0x6000, 0x8ff8, 13), exit40(3, 2), 0, 'home', null],
-  ['B LEA/CALL -> inner Gate', cpu(0x6200, 0x8ff4, 18), exit40(8, 2, INNER), 0, 'B', helper40()],
-  ['B LEA/RET -> home selection boundary', cpu(0x5100, 0x8ffc, 47), exit40(3, 2), 12, 'B', helper40(0x5100)],
+  ['B LEA/CALL -> inner Gate', cpu(0x6200, 0x8ff4, 18), cpuExit(8, 2, INNER), 0, 'B', cpuHelper()],
+  ['B LEA/RET -> home selection boundary', cpu(0x5100, 0x8ffc, 47), cpuExit(3, 2), 12, 'B', cpuHelper(0x5100)],
   ['home return Gate', cpu(0x5100, 0x8ffc, 47), exit40(8, 0, RETURN), 0, 'home', null],
   ['frozen outer caller LEA', cpu(0x3008, 0x9000, 50), exit40(3, 1), 0, 'caller', null],
 ];
@@ -75,8 +78,7 @@ const names = [
   'find_installed_resident', 'read32', 'write32', 'store_resident32',
   'acknowledge_resident_installation', 'capture_resident_call', 'complete_resident_call',
   'begin_resident_callback', 'authorize_resident_callback', 'select_resident_callback_unit',
-  'capture_active_resident_callback_call', 'complete_active_resident_callback_call', 'finish_resident_callback', 'abandon_call',
-];
+  'capture_active_resident_callback_call', 'complete_active_resident_callback_call', 'finish_resident_callback', 'abandon_call', 'cpu_read32', 'cpu_store_resident32'];
 const api = Object.fromEntries(names.map(name => [name, instance.exports[`ring3_abi_v1_${name}`]]));
 for (const [name, fn] of Object.entries(api)) assert.equal(typeof fn, 'function', name);
 assert.equal(api.compile_resident_callback_unit.length, 7);
@@ -150,7 +152,7 @@ for (const [label, pc, hex] of inputs) {
 for (const [label, blocks, gates, helpers, slot] of [
   ['outer', [[0x4000, 2]], [[0x4000, OUTER]], [], 0],
   ['home', [[0x5000, 8], [0x5100, 2]], [[0x5100, RETURN]], [], 1],
-  ['caller', [[0x3000, 5], [0x3005, 3]], [], ['store_resident32'], 2],
+  ['caller', [[0x3000, 5], [0x3005, 3]], [], ['cpu_store_resident32'], 2],
 ]) {
   const unit = compile(label, blocks, gates, helpers, slot, () => api.compile_resident_with_gates(blocks.length, gates.length));
   instantiate(unit);
@@ -189,7 +191,7 @@ operation('old compile remains Busy', () => api.compile_resident_with_gates(0, 0
 operation('wrong full key precedes descriptor rejection', () => coldCompile(2, 0, HIGH ^ 1), 3);
 operation('wrong token precedes descriptor rejection', () => coldCompile(0, 0), 14);
 operation('invalid count at admitted cold stop', () => coldCompile(2, 0), 7);
-const B = compile('B', [[0x6000, 8], [0x6008, 4], [0x6200, 2]], [[0x6200, INNER]], ['read32', 'store_resident32'], 3, () => coldCompile());
+const B = compile('B', [[0x6000, 8], [0x6008, 4], [0x6200, 2]], [[0x6200, INNER]], ['cpu_read32', 'cpu_store_resident32'], 3, () => coldCompile());
 operation('compile preserves active home', () => guard(home));
 operation('unselected B guard remains Busy', () => guard(B), 12);
 operation('compiled B cannot select without acknowledgement', () => select(B), 17);
@@ -274,7 +276,7 @@ for (let slot = 4; slot < 8; slot++) assert.equal(table.get(slot), null);
   fullOperation('XGETBV reaches real EXIT9 resident NeedCode',
     () => home9.run(base, base + 56, 4, base + 96), 0,
     [[0, state56(xstateCpu(0x6500, 0x8ff8, 7))], [56, words(40, 'R3EX', [3, 3, 0, 0, 0, 0], 9)]]);
-  const child9 = compile('exit9-child', [[0x6500, 4]], [], ['read32'], 5,
+  const child9 = compile('exit9-child', [[0x6500, 4]], [], ['cpu_read32'], 5,
     () => api.compile_resident_callback_unit(LOW, HIGH, home9.low, home9.high, 5, 1, 0), fullSize);
   instantiate(child9);
   fullOperation('EXIT9 child acknowledgement retains callback identity',
@@ -284,7 +286,7 @@ for (let slot = 4; slot < 8; slot++) assert.equal(table.get(slot), null);
     () => api.select_resident_callback_unit(LOW, HIGH, home9.low, home9.high, 5, child9.low, child9.high));
   fullOperation('EXIT9 child resumes once and returns through the original stack word',
     () => child9.run(base, base + 56, 3, base + 96), 0,
-    [[0, state56(xstateCpu(0x5500, 0x8ffc, 10))], [56, words(40, 'R3EX', [3, 2, 0, 0, 0, 0], 2)], [100, helper40(0x5500)]]);
+    [[0, state56(xstateCpu(0x5500, 0x8ffc, 10))], [56, words(40, 'R3EX', [3, 2, 0, 0, 0, 0], 6)], [100, cpuHelper(0x5500)]]);
   fullOperation('EXIT9 path reselects its unchanged home identity',
     () => api.select_resident_callback_unit(LOW, HIGH, home9.low, home9.high, 5, home9.low, home9.high));
   fullOperation('EXIT9 return gate is reached without another stack pop',

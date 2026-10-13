@@ -10,7 +10,7 @@ const engineBytes = readFileSync(enginePath);
 assert.ok(WebAssembly.validate(engineBytes), 'actual engine validates');
 const engineModule = new WebAssembly.Module(engineBytes);
 assert.deepEqual(WebAssembly.Module.imports(engineModule), [], 'engine has no JS imports');
-const names = ['open', 'close', 'arena_ptr', 'map', 'protect', 'unmap', 'upload', 'compile', 'compile_with_gates', 'capture_call', 'complete_call', 'abandon_call', 'begin_callback', 'finish_callback', 'abort_callback', 'generation', 'module_ptr', 'module_len', 'guard', 'read32', 'write32', 'store32'];
+const names = ['open', 'close', 'arena_ptr', 'map', 'protect', 'unmap', 'upload', 'compile', 'compile_with_gates', 'capture_call', 'complete_call', 'abandon_call', 'begin_callback', 'finish_callback', 'abort_callback', 'generation', 'module_ptr', 'module_len', 'guard', 'read32', 'write32', 'store32', 'cpu_read32', 'cpu_store32'];
 let keys = 0n, modules = 0, actualRuns = 0;
 const generatedHashes = [];
 
@@ -75,6 +75,19 @@ function helperRecord(tag, value = 0, detail = 0, address = 0, access = 0, lengt
   [tag, value, detail, address, access, length].forEach((field, index) => view.setUint32(16 + index * 4, field, true));
   return bytes;
 }
+function cpuHelperRecord(tag, value = 0, detail = 0, address = 0, access = 0, length = 4) {
+  const bytes = new Uint8Array(40), view = new DataView(bytes.buffer);
+  header(bytes, view, 0, 'R3MH', 40, 10);
+  [tag, value, detail, address, access, length].forEach((field, index) => view.setUint32(16 + index * 4, field, true));
+  return bytes;
+}
+function unitExit(unit, reason, retired, detail = 0, address = 0, access = 0, length = reason === 5 ? 4 : 0, version = 3) {
+  const bytes = new Uint8Array(40), view = new DataView(bytes.buffer);
+  header(bytes, view, 0, 'R3EX', 40, version >= 7 ? version : unit.cpuScalar ? 6 : version);
+  [reason, retired, detail, address, access, length].forEach((field, index) => view.setUint32(16 + index * 4, field, true));
+  return bytes;
+}
+
 
 function guestValue(engine, address) {
   assert.equal(engine.api.read32(address), 0, 'actual guest observation helper');
@@ -113,12 +126,12 @@ function compile(engine, blocks, gates, expectedHelpers = []) {
   assert.deepEqual(sortedImports(module), expected, 'only actual memory/guard/instruction helpers; no hot gate import');
   const instance = new WebAssembly.Instance(module, {
     env: {memory: engine.memory},
-    ring3: {guard: engine.api.guard, read32: engine.api.read32, store32: engine.api.store32},
+    ring3: {guard: engine.api.guard, cpu_read32: engine.api.cpu_read32, cpu_store32: engine.api.cpu_store32},
   });
   modules++;
   generatedHashes.push(hash(encoded));
   writeFileSync(join(outputDir, `generated-${modules}.wasm`), encoded);
-  return {module, run: instance.exports.run, generation: engine.api.generation() >>> 0};
+  return {module, cpuScalar: expectedHelpers.some(name => name.startsWith('cpu_')), run: instance.exports.run, generation: engine.api.generation() >>> 0};
 }
 
 function state(eip = 0x1000, eflags = 0xcd7) {
@@ -337,7 +350,7 @@ function prepare(stackTop = 0x9000, smc = false) {
   upload(engine, 0x1500, Uint8Array.from(smcBytes));
   const specs = smc ? [[0x1000, 9], [0x1009, 1], [0x1100, 2], [0x1300, 2], [0x1500, 5]] : [[0x1000, 9], [0x1009, 1], [0x1100, 2], [0x1200, 2], [0x1300, 2], [0x1400, 16], [0x1410, 6]];
   const gates = smc ? [[0x1100, outerId], [0x1300, returnId]] : [[0x1100, outerId], [0x1200, innerId], [0x1300, returnId]];
-  const child = compile(engine, specs, gates, ['read32', 'store32']);
+  const child = compile(engine, specs, gates, ['cpu_read32', 'cpu_store32']);
   const start = state();
   start.registers[4] = stackTop;
   if (smc) start.registers[7] = 0x1300;
@@ -345,7 +358,7 @@ function prepare(stackTop = 0x9000, smc = false) {
   outer.registers[4] = (stackTop - 12) >>> 0;
   outer.eip = 0x1100;
   writeState(engine, start);
-  run(engine, child, 4, outer, exit(8, 3, outerId), 'actual authored outer CALL reaches numeric API gate', helperRecord(0));
+  run(engine, child, 4, outer, unitExit(child, 8, 3, outerId), 'actual authored outer CALL reaches numeric API gate', cpuHelperRecord(0));
   const callbackState = copyState(outer);
   callbackState.registers[4] = (outer.registers[4] - 12) >>> 0;
   callbackState.eip = smc ? 0x1500 : 0x1400;
@@ -358,7 +371,7 @@ function outerCompleteAndResume(test, result) {
   const completed = complete(test, 1, test.outer, 2, 0x1009, result);
   const resumed = copyState(completed);
   resumed.eip = 0x100a;
-  run(test.engine, test.child, 2, resumed, exit(3, 1), 'actual outer caller resumes once after process completion', arena(test.engine).slice(100, 140));
+  run(test.engine, test.child, 2, resumed, unitExit(test.child, 3, 1), 'actual outer caller resumes once after process completion', arena(test.engine).slice(100, 140));
 }
 
 for (const [values, stackTop, singleStepRet] of [[[7, 9], 0x9000, true], [[0xffffffff, 1], 0x9000, false], [[7, 9], 16, true]]) {
@@ -369,7 +382,7 @@ for (const [values, stackTop, singleStepRet] of [[[7, 9], 0x9000, true], [[0xfff
   fail(engine, () => engine.api.complete_call(engine.low, engine.high, child.generation, 1, 0), 12, 'suspended outer cannot complete during callback');
   fail(engine, () => engine.api.abandon_call(engine.low, engine.high, 1), 12, 'suspended outer cannot be abandoned during callback');
   const inner = innerState(test, values);
-  run(engine, child, 6, inner, exit(8, 5, innerId), 'actual callback arithmetic/call yields ordinary inner API', helperRecord(0));
+  run(engine, child, 6, inner, unitExit(child, 8, 5, innerId), 'actual callback arithmetic/call yields ordinary inner API', cpuHelperRecord(0));
   capture(test, 3, innerId, inner, 0x1410, [inner.registers[0]]);
   fail(engine, () => child.run(0xffffffff, 0xffffffff, 1, 0xffffffff), 12, 'inner pending parks CPU before invalid pointer access');
   fail(engine, () => engine.api.finish_callback(engine.low, engine.high, child.generation, 2), 12, 'inner pending precedes callback finish stop validation');
@@ -383,10 +396,10 @@ for (const [values, stackTop, singleStepRet] of [[[7, 9], 0x9000, true], [[0xfff
   returned.registers[4] = test.outer.registers[4];
   returned.eip = 0x1300;
   if (singleStepRet) {
-    run(engine, child, 1, added, exit(1, 1), 'callback ADD budget checkpoint', arena(engine).slice(100, 140));
-    run(engine, child, 1, returned, exit(1, 1), 'real RET8 commits once then budget wins at return gate', helperRecord(0, 0x1300));
-    run(engine, child, 1, returned, exit(8, 0, returnId), 'next positive run reaches return gate without repeated pop', helperRecord(0, 0x1300));
-  } else run(engine, child, 3, returned, exit(8, 2, returnId), 'actual callback continuation and RET8 reach distinct return gate', helperRecord(0, 0x1300));
+    run(engine, child, 1, added, unitExit(child, 1, 1), 'callback ADD budget checkpoint', arena(engine).slice(100, 140));
+    run(engine, child, 1, returned, unitExit(child, 1, 1), 'real RET8 commits once then budget wins at return gate', cpuHelperRecord(0, 0x1300));
+    run(engine, child, 1, returned, unitExit(child, 8, 0, returnId), 'next positive run reaches return gate without repeated pop', cpuHelperRecord(0, 0x1300));
+  } else run(engine, child, 3, returned, unitExit(child, 8, 2, returnId), 'actual callback continuation and RET8 reach distinct return gate', cpuHelperRecord(0, 0x1300));
   fail(engine, () => engine.api.capture_call(engine.low, engine.high, child.generation, 2, 0), 13, 'reserved callback return gate cannot be captured as ordinary API');
   word(engine, test.callbackState.registers[4], 0xf1234567);
   word(engine, test.outer.registers[4], 0xf1234567);
@@ -434,12 +447,12 @@ for (const [values, stackTop, singleStepRet] of [[[7, 9], 0x9000, true], [[0xfff
   loaded.registers[0] = 7;
   loaded.registers[2] = 9;
   loaded.eip = 0x1408;
-  run(engine, child, 2, loaded, exit(1, 2), 'callback runs two real loads before cancellation', helperRecord(0, 9));
+  run(engine, child, 2, loaded, unitExit(child, 1, 2), 'callback runs two real loads before cancellation', cpuHelperRecord(0, 9));
   engine.view.setUint32(engine.base + 96, 1, true);
-  run(engine, child, 100, loaded, exit(2, 0), 'cancellation parks callback at precise instruction without retirement', helperRecord(0, 9));
+  run(engine, child, 100, loaded, unitExit(child, 2, 0), 'cancellation parks callback at precise instruction without retirement', cpuHelperRecord(0, 9));
   engine.view.setUint32(engine.base + 96, 0, true);
   const inner = innerState(test, values);
-  run(engine, child, 4, inner, exit(8, 3, innerId), 'cleared cancellation resumes remaining callback instructions once', helperRecord(0));
+  run(engine, child, 4, inner, unitExit(child, 8, 3, innerId), 'cleared cancellation resumes remaining callback instructions once', cpuHelperRecord(0));
   capture(test, 3, innerId, inner, 0x1410, [16]);
   engine.view.setUint32(engine.base + 96, 1, true);
   abort(test); // forced unwind discards the active inner token and ignores cancellation.
@@ -458,7 +471,7 @@ for (const [values, stackTop, singleStepRet] of [[[7, 9], 0x9000, true], [[0xfff
   begin(test, [7, 9]);
   const changed = copyState(test.callbackState);
   changed.eip = 0x1502;
-  run(engine, child, 1, changed, exit(6, 1), 'actual callback code write commits once then invalidates before RET', helperRecord(0));
+  run(engine, child, 1, changed, unitExit(child, 6, 1), 'actual callback code write commits once then invalidates before RET', cpuHelperRecord(0));
   assert.equal(guestValue(engine, 0x1300), test.start.registers[0], 'committed code write remains visible');
   fail(engine, () => child.run(0xffffffff, 0xffffffff, 1, 0xffffffff), 4, 'stale code rejection precedes callback/pointer checks');
   fail(engine, () => engine.api.finish_callback(engine.low, engine.high, child.generation, 2), 4, 'finish rejects stale pinned artifact');
