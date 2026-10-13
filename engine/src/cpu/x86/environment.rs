@@ -4,6 +4,7 @@
 pub(crate) struct UserModeEnvironment {
     current_privilege: u8,
     io_privilege: u8,
+    performance_counter_access: bool,
     protected_virtual_interrupts: bool,
     debug_general_detect: bool,
     debug_extensions_enabled: bool,
@@ -12,6 +13,7 @@ pub(crate) struct UserModeEnvironment {
 pub(crate) const USER_MODE_ENVIRONMENT: UserModeEnvironment = UserModeEnvironment {
     current_privilege: 3,
     io_privilege: 0,
+    performance_counter_access: false,
     protected_virtual_interrupts: false,
     debug_general_detect: false,
     debug_extensions_enabled: false,
@@ -24,6 +26,11 @@ impl UserModeEnvironment {
 
     pub(crate) const fn io_privilege(self) -> u8 {
         self.io_privilege
+    }
+
+    /// cr4.pce permits performance-counter reads outside privilege level zero.
+    pub(crate) const fn performance_counter_access(self) -> bool {
+        self.performance_counter_access
     }
 
     pub(crate) const fn protected_virtual_interrupts(self) -> bool {
@@ -47,6 +54,7 @@ mod tests {
     fn user_environment_keeps_privilege_interrupt_and_debug_controls_explicit() {
         assert_eq!(USER_MODE_ENVIRONMENT.current_privilege(), 3);
         assert_eq!(USER_MODE_ENVIRONMENT.io_privilege(), 0);
+        assert!(!USER_MODE_ENVIRONMENT.performance_counter_access());
         assert!(!USER_MODE_ENVIRONMENT.protected_virtual_interrupts());
         assert!(!USER_MODE_ENVIRONMENT.debug_general_detect());
         assert!(!USER_MODE_ENVIRONMENT.debug_extensions_enabled());

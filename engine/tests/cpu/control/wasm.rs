@@ -50,3 +50,6 @@ mod cpu_undefined;
 
 #[path = "exceptions/privileged/msr/wasm.rs"]
 mod cpu_msr;
+
+#[path = "exceptions/environment/counters/wasm.rs"]
+mod cpu_counters;

@@ -51,4 +51,4 @@ for (const [name, bytes] of [
   ['environment-dependent-out', [0xe6, 0x80]],
   ['valid-unsupported-int80', [0xcd, 0x80]],
 ]) negatives.push({name, bytes: Buffer.from(bytes)});
-export const claim = 'bounded CPL3 privileged GP0 whitelist and explicit IOPL0/PVI0/GD0/DE0 user environment; strict public preparation, invalidLOCK priority, reservedREP refusal and full CPU/arena preservation; present MSR instructions fault at CPL3; RDPMC/IO environment remains unsupported';
+export const claim = 'bounded CPL3 privileged GP0 whitelist and explicit IOPL0/PVI0/GD0/DE0 user environment; strict public preparation, invalidLOCK priority, reservedREP refusal and full CPU/arena preservation; present MSR instructions and PCE0 RDPMC fault at CPL3; IO environment remains unsupported';

@@ -54,3 +54,6 @@ mod cpu_msr;
 
 #[path = "exceptions/support/stopped.rs"]
 mod stopped_support;
+
+#[path = "exceptions/environment/counters/native.rs"]
+mod cpu_counters;

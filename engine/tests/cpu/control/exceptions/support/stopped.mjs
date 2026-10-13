@@ -258,6 +258,10 @@ export function runStoppedFaults({ sourcePaths, positive, continuations, negativ
     before.writeUInt32LE(c.target, 48);
     before.writeUInt32LE(flags, 52);
     before.writeUInt32LE(cancel, 96);
+    for (const [index, value] of Object.entries(row.registers ?? {})) {
+      assert.ok(Number.isInteger(Number(index)) && Number(index) >= 0 && Number(index) < 8);
+      before.writeUInt32LE(value >>> 0, 16 + Number(index) * 4);
+    }
     for (const offset of [80, 84, 88, 92]) before.writeUInt32LE(0xdeadbeef, offset);
     c.put(0, before);
     const expected = Buffer.from(before),
