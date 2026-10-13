@@ -21,3 +21,6 @@ mod cpu_segment_queries_wasm;
 
 #[path = "selectors/attributes/wasm.rs"]
 mod cpu_segment_rights_limit_wasm;
+
+#[path = "base/wasm.rs"]
+mod cpu_segment_base_wasm;
