@@ -464,11 +464,17 @@ fn alignment_nop_late_refusal_preserves_dirty_full_arena_and_both_owners() {
         pc: GuestAddress(refused_pc),
         cause: InstructionError::Decode(DecodeError::InvalidEncoding),
     };
+    let segment_offset = ring3_engine::abi::arena::SEGMENTS_OFFSET;
+    let segment_record = engine.arena()
+        [segment_offset..segment_offset + ring3_engine::abi::x86::SEGMENTS_SIZE]
+        .to_vec();
     for is_resident in [false, true] {
         for entries in [false, true] {
             for (index, byte) in engine.arena_mut().unwrap().iter_mut().enumerate() {
                 *byte = (index.wrapping_mul(37).wrapping_add(11) & 0xff) as u8;
             }
+            engine.arena_mut().unwrap()[segment_offset..segment_offset + segment_record.len()]
+                .copy_from_slice(&segment_record);
             describe(&mut engine, CODE, refused_length, entries);
             let before = engine.arena().to_vec();
             assert_eq!(before.len(), ring3_engine::abi::arena::ARENA_SIZE);
