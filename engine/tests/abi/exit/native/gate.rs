@@ -333,5 +333,7 @@ fn exit_version_three_leaves_state_and_helper_headers_at_version_one() {
     assert_eq!(&state[4..8], &[1, 0, 1, 0]);
     assert_eq!(&helper[4..8], &[1, 0, 1, 0]);
     state[4] = 3;
+    assert_eq!(decode_state(&state), Ok(State32::default()));
+    state[4] = 4;
     assert_eq!(decode_state(&state), Err(AbiError::Version));
 }
