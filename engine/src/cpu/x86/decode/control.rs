@@ -10,7 +10,11 @@ pub(super) fn lower(instruction: &Instruction) -> Option<Result<Operation, Decod
     let operation = match instruction.code() {
         Code::Popfd => ControlOperation::PopFlags { word: false },
         Code::Popfw => ControlOperation::PopFlags { word: true },
-        Code::Ud2 => ControlOperation::InvalidOpcode,
+        Code::Ud0_r16_rm16
+        | Code::Ud0_r32_rm32
+        | Code::Ud1_r16_rm16
+        | Code::Ud1_r32_rm32
+        | Code::Ud2 => ControlOperation::InvalidOpcode,
         Code::Int3 => ControlOperation::Breakpoint,
         Code::Into => ControlOperation::Overflow,
         Code::Bound_r16_m1616 | Code::Bound_r32_m3232 => {

@@ -45,3 +45,6 @@ mod cpu_far_return;
 
 #[path = "far/support.rs"]
 mod far_support;
+
+#[path = "exceptions/undefined/native.rs"]
+mod cpu_undefined;

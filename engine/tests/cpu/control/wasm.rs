@@ -44,3 +44,6 @@ mod cpu_far_call;
 
 #[path = "far/return/wasm.rs"]
 mod cpu_far_return;
+
+#[path = "exceptions/undefined/wasm.rs"]
+mod cpu_undefined;
