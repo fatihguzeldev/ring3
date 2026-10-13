@@ -96,3 +96,6 @@ mod blend_capability;
 
 #[path = "avx/scalar/mask/capability/native.rs"]
 mod movemask_capability;
+
+#[path = "avx/moves/stream/capability/native.rs"]
+mod stream_capability;

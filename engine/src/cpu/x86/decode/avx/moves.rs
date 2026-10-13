@@ -467,8 +467,13 @@ pub(super) fn lower(
                 }
                 (0x01000317, operands, 0)
             }
-            Code::VEX_Vmovdqa_ymm_ymmm256 => {
+            Code::VEX_Vmovdqa_ymm_ymmm256 | Code::VEX_Vmovntdqa_ymm_m256 => {
                 encoding.validate(false, 1, true)?;
+                if instruction.code() == Code::VEX_Vmovntdqa_ymm_m256
+                    && instruction.op_kind(1) != OpKind::Memory
+                {
+                    return Err(invalid());
+                }
                 let mut operands = index(instruction, 0, false, false)?;
                 operands |= index(instruction, 1, false, true)? << 6;
                 if instruction.op_kind(1) == OpKind::Memory {
@@ -651,7 +656,13 @@ pub(super) fn lower(
         };
         let instruction_value = AvxInstruction::decode_descriptor(descriptor, operands, immediate)
             .map_err(|_| invalid())?;
-        bind_address(instruction, instruction_value).map(Some)
+        let operation = bind_address(instruction, instruction_value)?;
+        if instruction.code() == Code::VEX_Vmovntdqa_ymm_m256
+            && !crate::cpu::x86::capabilities::AVX2_ENABLED
+        {
+            return Err(unsupported());
+        }
+        Ok(Some(operation))
     })();
     result.transpose()
 }
