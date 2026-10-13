@@ -13,6 +13,8 @@ const legacy = [
   ['wbinvd', [0x0f, 0x09]],
   ['rdmsr', [0x0f, 0x32]],
   ['wrmsr', [0x0f, 0x30]],
+  ['denied-user-in', [0xe4, 0x80]],
+  ['denied-user-out', [0xe6, 0x80]],
   ['cpl3-iopl0-pvi0-cli', [0xfa]],
   ['cpl3-iopl0-pvi0-sti', [0xfb]],
 ];
@@ -47,8 +49,6 @@ export const negatives = legacy.flatMap(([name, bytes]) => [0xf2, 0xf3]
   })));
 for (const [name, bytes] of [
   ['distinct-wbnoinvd', [0xf3, 0x0f, 0x09]],
-  ['environment-dependent-in', [0xe4, 0x80]],
-  ['environment-dependent-out', [0xe6, 0x80]],
   ['valid-unsupported-int80', [0xcd, 0x80]],
 ]) negatives.push({name, bytes: Buffer.from(bytes)});
-export const claim = 'bounded CPL3 privileged GP0 whitelist and explicit IOPL0/PVI0/GD0/DE0 user environment; strict public preparation, invalidLOCK priority, reservedREP refusal and full CPU/arena preservation; present MSR instructions and PCE0 RDPMC fault at CPL3; IO environment remains unsupported';
+export const claim = 'bounded CPL3 privileged GP0 whitelist and explicit IOPL0/PVI0/GD0/DE0 user environment; strict public preparation, invalidLOCK priority, reservedREP refusal and full CPU/arena preservation; present MSR instructions and PCE0 RDPMC fault at CPL3; trusted DenyAll scalar port permissions are explicit; IO strings remain unsupported';

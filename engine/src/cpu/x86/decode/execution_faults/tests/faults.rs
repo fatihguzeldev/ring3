@@ -42,6 +42,8 @@ fn privileged_rows() -> Vec<Vec<u8>> {
         vec![0x0f, 0x32],
         vec![0x0f, 0x30],
         vec![0x0f, 0x33],
+        vec![0xe4, 0x80],
+        vec![0xe6, 0x80],
     ];
     for opcode in [0x20, 0x22] {
         for control in [0, 2, 3, 4] {
@@ -120,12 +122,7 @@ fn privileged_repeat_and_duplicate_prefixes_keep_strict_refusals() {
 
 #[test]
 fn environment_dependent_or_unadvertised_families_keep_strict_refusals() {
-    for bytes in [
-        &[0xf3, 0x0f, 0x09][..],
-        &[0xe4, 0x80],
-        &[0xe6, 0x80],
-        &[0xcd, 0x80],
-    ] {
+    for bytes in [&[0xf3, 0x0f, 0x09][..], &[0xcd, 0x80]] {
         let memory = executable(bytes);
         let strict = decode_one(&memory, GuestAddress(0x1000)).unwrap_err();
         assert!(matches!(strict, DecodeError::Unsupported(_)));

@@ -47,8 +47,6 @@ for (const opcode of [0x32, 0x30])
       bytes: Buffer.from([...prefix, 0x0f, opcode]),
     });
 negatives.push(
-  { name: 'in-environment-remains-unsupported', bytes: Buffer.from([0xe4, 0x80]) },
-  { name: 'out-environment-remains-unsupported', bytes: Buffer.from([0xe6, 0x80]) },
   {
     name: 'incomplete-fetch-remains-typed-preparation-error',
     bytes: Buffer.from([0x0f]),
@@ -68,5 +66,5 @@ runStoppedFaults({
   continuations,
   negatives,
   claim:
-    'present RDMSR/WRMSR implicit forms fault GP0 at fixed CPL3 without MSR values, PC progress, retirement or operand effects; invalidLOCK stays UD, strict APIs/reserved prefixes/IO/fetch errors remain distinct',
+    'present RDMSR/WRMSR implicit forms fault GP0 at fixed CPL3 without MSR values, PC progress, retirement or operand effects; invalidLOCK stays UD, strict APIs/reserved prefixes/fetch errors remain distinct',
 });

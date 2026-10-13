@@ -1,9 +1,17 @@
+/// trusted operating-system authority for user-mode port access.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum UserPortPermissions {
+    /// every port is denied without a guest-memory tss or bitmap lookup.
+    DenyAll,
+}
+
 /// immutable operating-system guarantees of the fixed protected32 user-mode profile.
 /// these are execution controls, separate from cpuid instruction availability.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct UserModeEnvironment {
     current_privilege: u8,
     io_privilege: u8,
+    user_port_permissions: UserPortPermissions,
     performance_counter_access: bool,
     protected_virtual_interrupts: bool,
     debug_general_detect: bool,
@@ -13,6 +21,7 @@ pub(crate) struct UserModeEnvironment {
 pub(crate) const USER_MODE_ENVIRONMENT: UserModeEnvironment = UserModeEnvironment {
     current_privilege: 3,
     io_privilege: 0,
+    user_port_permissions: UserPortPermissions::DenyAll,
     performance_counter_access: false,
     protected_virtual_interrupts: false,
     debug_general_detect: false,
@@ -26,6 +35,10 @@ impl UserModeEnvironment {
 
     pub(crate) const fn io_privilege(self) -> u8 {
         self.io_privilege
+    }
+
+    pub(crate) const fn user_port_permissions(self) -> UserPortPermissions {
+        self.user_port_permissions
     }
 
     /// cr4.pce permits performance-counter reads outside privilege level zero.
@@ -48,12 +61,16 @@ impl UserModeEnvironment {
 
 #[cfg(test)]
 mod tests {
-    use super::USER_MODE_ENVIRONMENT;
+    use super::{USER_MODE_ENVIRONMENT, UserPortPermissions};
 
     #[test]
     fn user_environment_keeps_privilege_interrupt_and_debug_controls_explicit() {
         assert_eq!(USER_MODE_ENVIRONMENT.current_privilege(), 3);
         assert_eq!(USER_MODE_ENVIRONMENT.io_privilege(), 0);
+        assert_eq!(
+            USER_MODE_ENVIRONMENT.user_port_permissions(),
+            UserPortPermissions::DenyAll,
+        );
         assert!(!USER_MODE_ENVIRONMENT.performance_counter_access());
         assert!(!USER_MODE_ENVIRONMENT.protected_virtual_interrupts());
         assert!(!USER_MODE_ENVIRONMENT.debug_general_detect());

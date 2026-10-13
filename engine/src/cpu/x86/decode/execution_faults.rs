@@ -3,7 +3,7 @@ use iced_x86::{Code, Instruction, Register};
 use crate::cpu::x86::{
     ControlOperation,
     capabilities::{MSR_ENABLED, RDPMC_ENABLED},
-    environment::UserModeEnvironment,
+    environment::{UserModeEnvironment, UserPortPermissions},
 };
 
 pub(super) fn invalid(bytes: &[u8]) -> Option<ControlOperation> {
@@ -56,6 +56,21 @@ fn general_protection(instruction: &Instruction, environment: UserModeEnvironmen
             RDPMC_ENABLED
                 && environment.current_privilege() != 0
                 && !environment.performance_counter_access()
+        }
+        Code::In_AL_imm8
+        | Code::In_AX_imm8
+        | Code::In_EAX_imm8
+        | Code::In_AL_DX
+        | Code::In_AX_DX
+        | Code::In_EAX_DX
+        | Code::Out_imm8_AL
+        | Code::Out_imm8_AX
+        | Code::Out_imm8_EAX
+        | Code::Out_DX_AL
+        | Code::Out_DX_AX
+        | Code::Out_DX_EAX => {
+            environment.current_privilege() > environment.io_privilege()
+                && environment.user_port_permissions() == UserPortPermissions::DenyAll
         }
         Code::Mov_r32_cr => control_register(instruction.op1_register()),
         Code::Mov_cr_r32 => control_register(instruction.op0_register()),
