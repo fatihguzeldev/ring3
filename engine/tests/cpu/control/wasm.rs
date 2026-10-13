@@ -65,3 +65,6 @@ mod cpu_short_word;
 
 #[path = "exceptions/availability/wasm.rs"]
 mod cpu_availability;
+
+#[path = "interrupt/return/wasm.rs"]
+mod interrupt_return;
