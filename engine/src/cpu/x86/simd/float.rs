@@ -260,6 +260,85 @@ fn binary(
     (result, status | flags, None)
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ElementwiseKind {
+    Add,
+    Subtract,
+    Multiply,
+    Divide,
+    Minimum,
+    Maximum,
+    SquareRoot,
+    Reciprocal,
+    ReciprocalSquareRoot,
+}
+
+impl ElementwiseKind {
+    pub(crate) fn unary(self) -> bool {
+        self == Self::SquareRoot || self.approximate()
+    }
+
+    pub(crate) fn approximate(self) -> bool {
+        matches!(self, Self::Reciprocal | Self::ReciprocalSquareRoot)
+    }
+
+    fn from_legacy(kind: F) -> Option<Self> {
+        Some(match kind {
+            F::Add => Self::Add,
+            F::Subtract => Self::Subtract,
+            F::Multiply => Self::Multiply,
+            F::Divide => Self::Divide,
+            F::Minimum => Self::Minimum,
+            F::Maximum => Self::Maximum,
+            F::SquareRoot => Self::SquareRoot,
+            F::Reciprocal => Self::Reciprocal,
+            F::ReciprocalSquareRoot => Self::ReciprocalSquareRoot,
+            _ => return None,
+        })
+    }
+
+    fn legacy(self) -> F {
+        match self {
+            Self::Add => F::Add,
+            Self::Subtract => F::Subtract,
+            Self::Multiply => F::Multiply,
+            Self::Divide => F::Divide,
+            Self::Minimum => F::Minimum,
+            Self::Maximum => F::Maximum,
+            Self::SquareRoot => F::SquareRoot,
+            Self::Reciprocal => F::Reciprocal,
+            Self::ReciprocalSquareRoot => F::ReciprocalSquareRoot,
+        }
+    }
+}
+
+// all active lanes share one exception aggregation before any architectural publication.
+pub(crate) fn elementwise<const N: usize>(
+    kind: ElementwiseKind,
+    width: usize,
+    count: usize,
+    first: [u8; N],
+    second: [u8; N],
+    mxcsr: u32,
+) -> ([u8; N], u32) {
+    assert!(matches!(width, 4 | 8) && count <= N / width);
+    let mut result = first;
+    let mut exceptions = 0;
+    for lane in 0..count {
+        let offset = lane * width;
+        let read = |source: &[u8; N]| {
+            let mut bits = [0; 8];
+            bits[..width].copy_from_slice(&source[offset..offset + width]);
+            u64::from_le_bytes(bits)
+        };
+        let left = if kind.unary() { 0 } else { read(&first) };
+        let (value, status, _) = binary(kind.legacy(), left, read(&second), width, mxcsr, 0);
+        exceptions |= lane_exceptions(status, mxcsr);
+        result[offset..offset + width].copy_from_slice(&value.to_le_bytes()[..width]);
+    }
+    (result, instruction_exceptions(exceptions, mxcsr))
+}
+
 fn round_integral(op: SimdOperation, a: [u8; 16], b: [u8; 16], mxcsr: u32) -> ([u8; 16], u32) {
     let immediate = op.immediate.unwrap();
     let mode = if immediate & 4 != 0 {
@@ -368,6 +447,10 @@ pub(super) fn floating(
     } else {
         usize::from(op.vector_bytes) / width
     };
+    if let Some(kind) = ElementwiseKind::from_legacy(kind) {
+        let (out, exceptions) = elementwise(kind, width, count, a, b, mxcsr);
+        return (out, exceptions, incoming_flags);
+    }
     let mut out = a;
     let mut exceptions = 0;
     let mut flags = incoming_flags;
@@ -554,5 +637,63 @@ mod tests {
         );
         assert_eq!(binary(F::Compare, 0x7fc0_1234, 0, 4, 0x1f80, 0).1, 0);
         assert_eq!(binary(F::Compare, 0x7fc0_1234, 0, 4, 0x1f80, 1).1, 1);
+    }
+    #[test]
+    fn legacy_elementwise_wrapper_retains_scalar_merge_and_flags() {
+        let op = SimdOperation {
+            kind: super::super::SimdKind::Float(F::Add),
+            destination: super::super::SimdOperand::Register(super::super::SimdRegister::Xmm(0)),
+            source: super::super::SimdOperand::Register(super::super::SimdRegister::Xmm(1)),
+            vector_bytes: 16,
+            lane_bytes: 4,
+            memory_bytes: 0,
+            immediate: None,
+            aligned: false,
+            scalar: true,
+            implicit_address: None,
+        };
+        let mut first = [0xa5; 16];
+        first[..4].copy_from_slice(&0x4000_0000u32.to_le_bytes());
+        let mut second = [0x5a; 16];
+        second[..4].copy_from_slice(&0x4080_0000u32.to_le_bytes());
+        let mut expected = first;
+        expected[..4].copy_from_slice(&0x40c0_0000u32.to_le_bytes());
+        assert_eq!(
+            floating(op, first, second, 0x1f80, 0x8d7),
+            (expected, 0, 0x8d7)
+        );
+    }
+
+    #[test]
+    fn legacy_elementwise_wrapper_aggregates_packed_exception_priority() {
+        let op = SimdOperation {
+            kind: super::super::SimdKind::Float(F::Add),
+            destination: super::super::SimdOperand::Register(super::super::SimdRegister::Xmm(0)),
+            source: super::super::SimdOperand::Register(super::super::SimdRegister::Xmm(1)),
+            vector_bytes: 16,
+            lane_bytes: 4,
+            memory_bytes: 0,
+            immediate: None,
+            aligned: false,
+            scalar: false,
+            implicit_address: None,
+        };
+        let mut first = [0; 16];
+        let mut second = [0; 16];
+        for (index, (left, right)) in [
+            (0x4b80_0000u32, 0x3f80_0000u32),
+            (1, 0x3f80_0000),
+            (0x7f80_0000, 0xff80_0000),
+            (0x4000_0000, 0x4080_0000),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            first[index * 4..index * 4 + 4].copy_from_slice(&left.to_le_bytes());
+            second[index * 4..index * 4 + 4].copy_from_slice(&right.to_le_bytes());
+        }
+        let (_, exceptions, flags) = floating(op, first, second, 0x1f00, 0x8d7);
+        assert_eq!(exceptions, 3);
+        assert_eq!(flags, 0x8d7);
     }
 }

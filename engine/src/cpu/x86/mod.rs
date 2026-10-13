@@ -1,4 +1,6 @@
 pub mod atomic;
+#[cfg(test)]
+pub(crate) mod avx;
 pub mod bits;
 pub(crate) mod capabilities;
 mod control;

@@ -251,6 +251,9 @@ mod crypto;
 mod float;
 mod packed;
 
+#[cfg(test)]
+pub(crate) use float::{ElementwiseKind, elementwise};
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SimdError {
     InvalidDescriptor,
