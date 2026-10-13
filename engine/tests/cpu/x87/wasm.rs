@@ -21,3 +21,6 @@ mod cpu_x87_segment_access;
 
 #[path = "control/compatibility/wasm.rs"]
 mod cpu_x87_compatibility;
+
+#[path = "protocol/wasm/helper.rs"]
+mod cpu_x87_helper_protocol;
