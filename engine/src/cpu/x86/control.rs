@@ -1,4 +1,7 @@
-use super::{Register32, ir::EffectiveAddress};
+use super::{
+    Register32,
+    ir::{AddressSize, EffectiveAddress},
+};
 
 pub const USER_POP_FLAGS_MASK: u32 = 0x0024_4dd5;
 pub const USER_POP_FLAGS_WORD_MASK: u32 = 0x4dd5;
@@ -10,6 +13,10 @@ pub enum ControlOperation {
     },
     InvalidOpcode,
     GeneralProtectionZero,
+    /// denied port strings skip the attempt only for a zero selected repeat count.
+    DeniedPortString {
+        repeat_count: Option<AddressSize>,
+    },
     Breakpoint,
     Overflow,
     Bound {

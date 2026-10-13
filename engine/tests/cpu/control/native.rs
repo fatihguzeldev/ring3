@@ -60,3 +60,6 @@ mod cpu_counters;
 
 #[path = "exceptions/environment/io/native.rs"]
 mod cpu_port_io;
+
+#[path = "exceptions/environment/io/strings/native.rs"]
+mod cpu_port_strings;

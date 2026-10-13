@@ -1,9 +1,10 @@
-use iced_x86::{Code, Instruction, Register};
+use iced_x86::{Code, Instruction, OpKind, Register};
 
 use crate::cpu::x86::{
     ControlOperation,
     capabilities::{MSR_ENABLED, RDPMC_ENABLED},
     environment::{UserModeEnvironment, UserPortPermissions},
+    ir::AddressSize,
 };
 
 pub(super) fn invalid(bytes: &[u8]) -> Option<ControlOperation> {
@@ -22,6 +23,21 @@ pub(super) fn privileged(
     bytes: &[u8],
     environment: UserModeEnvironment,
 ) -> Option<ControlOperation> {
+    if let Some(address_size) = port_string_address_size(instruction)
+        && ports_denied(environment)
+        && !instruction.has_repne_prefix()
+        && !duplicate_profile_prefix(bytes)
+        && bytes
+            .iter()
+            .take_while(|byte| legacy_prefix(**byte))
+            .filter(|byte| **byte == 0x67)
+            .count()
+            <= 1
+    {
+        return Some(ControlOperation::DeniedPortString {
+            repeat_count: instruction.has_rep_prefix().then_some(address_size),
+        });
+    }
     if general_protection(instruction, environment)
         && !instruction.has_rep_prefix()
         && !instruction.has_repne_prefix()
@@ -68,10 +84,7 @@ fn general_protection(instruction: &Instruction, environment: UserModeEnvironmen
         | Code::Out_imm8_EAX
         | Code::Out_DX_AL
         | Code::Out_DX_AX
-        | Code::Out_DX_EAX => {
-            environment.current_privilege() > environment.io_privilege()
-                && environment.user_port_permissions() == UserPortPermissions::DenyAll
-        }
+        | Code::Out_DX_EAX => ports_denied(environment),
         Code::Mov_r32_cr => control_register(instruction.op1_register()),
         Code::Mov_cr_r32 => control_register(instruction.op0_register()),
         Code::Cli | Code::Sti => {
@@ -81,6 +94,24 @@ fn general_protection(instruction: &Instruction, environment: UserModeEnvironmen
         Code::Mov_r32_dr => debug_register_fault(instruction.op1_register(), environment),
         Code::Mov_dr_r32 => debug_register_fault(instruction.op0_register(), environment),
         _ => false,
+    }
+}
+
+fn ports_denied(environment: UserModeEnvironment) -> bool {
+    environment.current_privilege() > environment.io_privilege()
+        && environment.user_port_permissions() == UserPortPermissions::DenyAll
+}
+
+fn port_string_address_size(instruction: &Instruction) -> Option<AddressSize> {
+    let operand = match instruction.code() {
+        Code::Insb_m8_DX | Code::Insw_m16_DX | Code::Insd_m32_DX => instruction.op0_kind(),
+        Code::Outsb_DX_m8 | Code::Outsw_DX_m16 | Code::Outsd_DX_m32 => instruction.op1_kind(),
+        _ => return None,
+    };
+    match operand {
+        OpKind::MemoryESDI | OpKind::MemorySegSI => Some(AddressSize::Bits16),
+        OpKind::MemoryESEDI | OpKind::MemorySegESI => Some(AddressSize::Bits32),
+        _ => None,
     }
 }
 
@@ -136,3 +167,7 @@ mod tests;
 #[cfg(test)]
 #[path = "execution_faults/tests/environment.rs"]
 mod environment_tests;
+
+#[cfg(test)]
+#[path = "execution_faults/tests/strings.rs"]
+mod strings;

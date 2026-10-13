@@ -7,7 +7,7 @@ use crate::{
         ControlOperation, Register32, SegmentRegister, USER_POP_FLAGS_MASK,
         USER_POP_FLAGS_WORD_MASK,
         decode::DecodedInstruction,
-        ir::{EffectiveAddress, Operation, SmallWidth},
+        ir::{AddressSize, EffectiveAddress, Operation, SmallWidth},
     },
 };
 
@@ -29,6 +29,20 @@ pub(super) fn instruction(
         ControlOperation::GeneralProtectionZero => {
             exit(code, 11, exit_depth);
             return;
+        }
+        ControlOperation::DeniedPortString { repeat_count } => {
+            if let Some(address_size) = repeat_count {
+                code.local_get(register(Register32::Ecx));
+                if address_size == AddressSize::Bits16 {
+                    code.i32_const(0xffff).i32_and();
+                }
+                code.if_(BlockType::Empty);
+                exit(code, 11, exit_depth + 1);
+                code.end();
+            } else {
+                exit(code, 11, exit_depth);
+                return;
+            }
         }
         ControlOperation::Breakpoint => {
             retire(code, instruction.next_pc().0);

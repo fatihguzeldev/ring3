@@ -50,10 +50,6 @@ const negatives = [[0xf2], [0xf3], [0x66, 0x66]].map((prefix) => ({
   bytes: Buffer.from([...prefix, 0x0f, 0x33]),
 }));
 negatives.push(
-  { name: 'io-string-input-remains-separate', bytes: Buffer.from([0x6c]) },
-  { name: 'io-string-output-remains-separate', bytes: Buffer.from([0x6e]) },
-  { name: 'repeated-io-string-input-remains-separate', bytes: Buffer.from([0xf3, 0x6c]) },
-  { name: 'repeated-io-string-output-remains-separate', bytes: Buffer.from([0xf3, 0x6e]) },
   { name: 'valid-unsupported-int80', bytes: Buffer.from([0xcd, 0x80]) },
   {
     name: 'incomplete-rdpmc-fetch-remains-typed-preparation-error',
@@ -73,5 +69,5 @@ runStoppedFaults({
   continuations,
   negatives,
   claim:
-    'present RDPMC with immutable PCE0 faults GP0 at CPL3 for every ECX without counter values or GPR publication; strict APIs, invalidLOCK, fetch faults and deferred I/O strings remain distinct',
+    'present RDPMC with immutable PCE0 faults GP0 at CPL3 for every ECX without counter values or GPR publication; strict APIs, invalidLOCK and fetch faults remain distinct; conditional denied I/O strings have a separate context-owned proof',
 });

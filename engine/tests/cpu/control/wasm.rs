@@ -56,3 +56,6 @@ mod cpu_counters;
 
 #[path = "exceptions/environment/io/wasm.rs"]
 mod cpu_port_io;
+
+#[path = "exceptions/environment/io/strings/wasm.rs"]
+mod cpu_port_strings;

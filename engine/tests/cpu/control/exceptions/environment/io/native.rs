@@ -125,7 +125,7 @@ fn strict_scalar_ports_and_reserved_prefixes_keep_atomic_refusals() {
         &[0xf3, 0x6c],
         &[0x67, 0xf3, 0x6e],
     ] {
-        assert_refused(bytes, false);
+        assert_refused(bytes, true);
     }
 }
 

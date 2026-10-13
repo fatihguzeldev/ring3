@@ -238,6 +238,12 @@ export function runStoppedFaults({ sourcePaths, positive, continuations, negativ
     c.put(0, saved);
     return result;
   }
+  function seedRegisters(frame, row) {
+    for (const [index, value] of Object.entries(row.registers ?? {})) {
+      assert.ok(Number.isInteger(Number(index)) && Number(index) >= 0 && Number(index) < 8);
+      frame.writeUInt32LE(value >>> 0, 16 + Number(index) * 4);
+    }
+  }
   function execute(
     c,
     fn,
@@ -249,7 +255,10 @@ export function runStoppedFaults({ sourcePaths, positive, continuations, negativ
       cancel = 0,
       reason = row.reason,
       retired = row.retired ?? 0,
-      pc = c.target + (row.offset ?? 0),
+      offset = row.offset ?? 0,
+      pc = c.target + offset,
+      version = reason === 20 ? 7 : row.baseVersion,
+      work = row.work,
     } = {},
   ) {
     const before = c.arena();
@@ -258,9 +267,10 @@ export function runStoppedFaults({ sourcePaths, positive, continuations, negativ
     before.writeUInt32LE(c.target, 48);
     before.writeUInt32LE(flags, 52);
     before.writeUInt32LE(cancel, 96);
-    for (const [index, value] of Object.entries(row.registers ?? {})) {
-      assert.ok(Number.isInteger(Number(index)) && Number(index) >= 0 && Number(index) < 8);
-      before.writeUInt32LE(value >>> 0, 16 + Number(index) * 4);
+    seedRegisters(before, row);
+    if (row.segments) {
+      assert.equal(row.segments.length, 64);
+      before.set(row.segments, 4524);
     }
     for (const offset of [80, 84, 88, 92]) before.writeUInt32LE(0xdeadbeef, offset);
     c.put(0, before);
@@ -268,7 +278,8 @@ export function runStoppedFaults({ sourcePaths, positive, continuations, negativ
       beforeRam = ram(c);
     expected.writeUInt32LE(retired === 0 && [1, 2].includes(reason) ? shadow : 0, 12);
     expected.writeUInt32LE(pc, 48);
-    expected.set(exit(reason, retired, reason === 20 ? 7 : row.baseVersion), 56);
+    expected.set(exit(reason, retired, version), 56);
+    if (work !== undefined) expected.writeUInt32LE(work, 4604);
     const calls = c.helpers();
     assert.equal(fn(c.base, c.base + 56, budget, c.base + 96), 0, c.label + ' run status');
     assert.deepEqual(
@@ -280,32 +291,48 @@ export function runStoppedFaults({ sourcePaths, positive, continuations, negativ
     assert.deepEqual(ram(c), beforeRam, c.label + ' complete mapped RAM remains unchanged');
     assert.deepEqual(c.arena(), expected, c.label + ' diagnostics preserve complete arena');
     fullRamPairs++;
-    observations.push({ label: c.label, flags, shadow, budget, cancel, reason, retired, pc });
+    observations.push({
+      label: c.label,
+      flags,
+      shadow,
+      budget,
+      cancel,
+      reason,
+      retired,
+      pc,
+      version,
+      work,
+    });
     runs++;
   }
   for (const entries of [false, true])
     for (const row of positive) {
       const c = open(row, entries),
         fn = prepare(c, row);
-      execute(c, fn, row);
-      execute(c, fn, row, { flags: 0x102 });
-      execute(c, fn, row, { flags: 0x244cd7, shadow: 1 });
-      execute(c, fn, row, {
-        flags: 0x102,
-        shadow: 1,
-        budget: 0,
-        reason: 1,
-        retired: 0,
-        pc: c.target,
-      });
-      execute(c, fn, row, {
-        flags: 0x102,
-        shadow: 1,
-        cancel: 1,
-        reason: 2,
-        retired: 0,
-        pc: c.target,
-      });
+      if (row.schedules) {
+        assert.ok(row.schedules.length > 0);
+        for (const schedule of row.schedules) execute(c, fn, row, schedule);
+      } else {
+        execute(c, fn, row);
+        execute(c, fn, row, { flags: 0x102 });
+        execute(c, fn, row, { flags: 0x244cd7, shadow: 1 });
+        execute(c, fn, row, {
+          flags: 0x102,
+          shadow: 1,
+          budget: 0,
+          reason: 1,
+          retired: 0,
+          pc: c.target,
+        });
+        execute(c, fn, row, {
+          flags: 0x102,
+          shadow: 1,
+          cancel: 1,
+          reason: 2,
+          retired: 0,
+          pc: c.target,
+        });
+      }
       const before = c.arena();
       before.writeUInt32LE(0, 96);
       c.upload(c.target, Buffer.from([0x90]));
@@ -325,13 +352,21 @@ export function runStoppedFaults({ sourcePaths, positive, continuations, negativ
     for (const row of continuations) {
       const c = open(row, entries),
         fn = prepare(c, row);
-      execute(c, fn, row);
-      execute(c, fn, row, { budget: 1, reason: 1, retired: 1, pc: c.target + 1 });
+      if (row.schedules) {
+        assert.ok(row.schedules.length > 0);
+        for (const schedule of row.schedules) execute(c, fn, row, schedule);
+      } else {
+        execute(c, fn, row);
+        execute(c, fn, row, { budget: 1, reason: 1, retired: 1, pc: c.target + 1 });
+      }
       assert.equal(c.api.close(), 0);
     }
   for (const entries of [false, true])
     for (const row of negatives) {
       const c = open(row, entries);
+      const before = c.arena();
+      seedRegisters(before, row);
+      c.put(0, before);
       c.put(140, words([0xdeadbeef, 0xffffffff]));
       assertRefusal(
         c,
@@ -351,8 +386,8 @@ export function runStoppedFaults({ sourcePaths, positive, continuations, negativ
     }
   assert.equal(
     runs,
-    positive.length * 10 +
-      continuations.length * 4 +
+    positive.reduce((sum, row) => sum + 2 * (row.schedules?.length ?? 5), 0) +
+      continuations.reduce((sum, row) => sum + 2 * (row.schedules?.length ?? 2), 0) +
       negatives.filter((row) => row.repair).length * 2,
   );
   assert.equal(fullRamPairs, runs);

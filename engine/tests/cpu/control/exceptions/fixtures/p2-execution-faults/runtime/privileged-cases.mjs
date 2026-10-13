@@ -51,4 +51,4 @@ for (const [name, bytes] of [
   ['distinct-wbnoinvd', [0xf3, 0x0f, 0x09]],
   ['valid-unsupported-int80', [0xcd, 0x80]],
 ]) negatives.push({name, bytes: Buffer.from(bytes)});
-export const claim = 'bounded CPL3 privileged GP0 whitelist and explicit IOPL0/PVI0/GD0/DE0 user environment; strict public preparation, invalidLOCK priority, reservedREP refusal and full CPU/arena preservation; present MSR instructions and PCE0 RDPMC fault at CPL3; trusted DenyAll scalar port permissions are explicit; IO strings remain unsupported';
+export const claim = 'bounded CPL3 privileged GP0 whitelist and explicit IOPL0/PVI0/GD0/DE0 user environment; strict public preparation, invalidLOCK priority, reservedREP refusal and full CPU/arena preservation; present MSR instructions and PCE0 RDPMC fault at CPL3; trusted DenyAll scalar port permissions are explicit; denied IO strings use a separate count-aware control path';

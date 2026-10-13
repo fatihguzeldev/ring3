@@ -86,7 +86,7 @@ fn strict_rdpmc_and_reserved_profile_prefixes_preserve_refusals() {
         assert_refused(&[prefix, &[0x0f, 0x33]].concat(), false);
     }
     for bytes in [&[0x6c][..], &[0x6e], &[0xf3, 0x6c], &[0xf3, 0x6e]] {
-        assert_refused(bytes, false);
+        assert_refused(bytes, true);
     }
 }
 

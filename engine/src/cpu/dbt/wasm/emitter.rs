@@ -95,8 +95,10 @@ pub(in crate::cpu::dbt) fn emit(
             .any(|instruction| {
                 matches!(
                     instruction.operation(),
-                    Operation::Control(crate::cpu::x86::ControlOperation::GeneralProtectionZero)
-                        | Operation::XState(_)
+                    Operation::Control(
+                        crate::cpu::x86::ControlOperation::GeneralProtectionZero
+                            | crate::cpu::x86::ControlOperation::DeniedPortString { .. }
+                    ) | Operation::XState(_)
                 )
             });
     let has_cpu = has_simd
@@ -159,7 +161,15 @@ pub(in crate::cpu::dbt) fn emit(
     let has_repeat = blocks
         .iter()
         .flat_map(|block| &block.instructions)
-        .any(|instruction| matches!(instruction.operation(), Operation::RepeatString { .. }));
+        .any(|instruction| {
+            matches!(
+                instruction.operation(),
+                Operation::RepeatString { .. }
+                    | Operation::Control(crate::cpu::x86::ControlOperation::DeniedPortString {
+                        repeat_count: Some(_),
+                    })
+            )
+        });
     let has_segments = blocks
         .iter()
         .flat_map(|block| &block.instructions)

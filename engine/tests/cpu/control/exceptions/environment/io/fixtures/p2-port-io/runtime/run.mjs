@@ -85,14 +85,6 @@ for (const [name, bytes] of forms) {
   const opcode = bytes[0] === 0x66 ? bytes.slice(1) : bytes;
   negatives.push({ name: name + '-duplicate66', bytes: Buffer.from([0x66, 0x66, ...opcode]) });
 }
-for (const bytes of [[0x6c], [0x66, 0x6d], [0x6d], [0x6e], [0x66, 0x6f], [0x6f]]) {
-  const name = bytes.map((byte) => byte.toString(16)).join('');
-  negatives.push({ name: 'io-string-remains-separate-' + name, bytes: Buffer.from(bytes) });
-  negatives.push({
-    name: 'repeated-io-string-remains-separate-' + name,
-    bytes: Buffer.from([0xf3, ...bytes]),
-  });
-}
 negatives.push({ name: 'valid-unsupported-int80', bytes: Buffer.from([0xcd, 0x80]) });
 for (const opcode of [0xe4, 0xe5, 0xe6, 0xe7]) {
   for (const prefix of [[], [0x66]]) {
@@ -116,5 +108,5 @@ runStoppedFaults({
   continuations,
   negatives,
   claim:
-    'baseline scalar IN/OUT forms fault GP0 under explicit trusted DenyAll user-port permissions at CPL3/IOPL0 without a fabricated TSS or device effect; strict APIs, invalidLOCK, immediate fetch faults and deferred I/O strings remain distinct',
+    'baseline scalar IN/OUT forms fault GP0 under explicit trusted DenyAll user-port permissions at CPL3/IOPL0 without a fabricated TSS or device effect; strict APIs, invalidLOCK and immediate fetch faults remain distinct; conditional denied I/O strings have a separate context-owned proof',
 });
