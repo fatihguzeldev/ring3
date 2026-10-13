@@ -87,3 +87,6 @@ mod lane_capability;
 
 #[path = "avx/multiply/capability/native.rs"]
 mod multiply_capability;
+
+#[path = "avx/permute/whole/capability/native.rs"]
+mod whole_permute_capability;

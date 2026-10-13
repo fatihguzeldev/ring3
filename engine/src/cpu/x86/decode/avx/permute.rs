@@ -1,4 +1,5 @@
 use super::*;
+use crate::cpu::x86::avx::AvxSemantic;
 pub(super) fn lower(
     instruction: &Instruction,
     encoding: Encoding,
@@ -304,11 +305,39 @@ pub(super) fn lower(
                 }
                 (0x0100041e, operands, 0)
             }
+            Code::VEX_Vpermps_ymm_ymm_ymmm256 | Code::VEX_Vpermd_ymm_ymm_ymmm256 => {
+                encoding.validate_w(false)?;
+                encoding.validate(false, 1, false)?;
+                let mut operands = index(instruction, 0, false, false)?;
+                operands |= index(instruction, 1, false, false)? << 3;
+                operands |= index(instruction, 2, false, true)? << 6;
+                if instruction.op_kind(2) == OpKind::Memory {
+                    operands |= 1 << 12;
+                }
+                (0x0100041f, operands, 0)
+            }
+            Code::VEX_Vpermq_ymm_ymmm256_imm8 | Code::VEX_Vpermpd_ymm_ymmm256_imm8 => {
+                encoding.validate_w(true)?;
+                encoding.validate(false, 1, true)?;
+                let mut operands = index(instruction, 0, false, false)?;
+                operands |= index(instruction, 1, false, true)? << 6;
+                if instruction.op_kind(1) == OpKind::Memory {
+                    operands |= 1 << 12;
+                }
+                (0x01000420, operands, u32::from(instruction.immediate8()))
+            }
             _ => return Ok(None),
         };
         let instruction_value = AvxInstruction::decode_descriptor(descriptor, operands, immediate)
             .map_err(|_| invalid())?;
-        bind_address(instruction, instruction_value).map(Some)
+        let operation = bind_address(instruction, instruction_value)?;
+        let AvxSemantic::Permute(value) = instruction_value.semantic() else {
+            unreachable!("permute decoder constructs only permutations")
+        };
+        if value.requires_avx2() && !crate::cpu::x86::capabilities::AVX2_ENABLED {
+            return Err(unsupported());
+        }
+        Ok(Some(operation))
     })();
     result.transpose()
 }

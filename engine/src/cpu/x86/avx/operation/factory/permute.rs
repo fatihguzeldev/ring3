@@ -498,7 +498,39 @@ pub(super) fn decode(kind: u8, s: Slots, immediate: u8) -> Result<AvxSemantic, A
                 mask: s.vector(3),
             })
         }
+        31 => {
+            s.validate(
+                D | A | B,
+                MemoryPolicy::Optional,
+                MemoryPolicy::Forbidden,
+                false,
+                immediate,
+            )?;
+            AvxSemantic::Permute(PermuteInstruction::WholeDwords {
+                destination: s.vector(0),
+                indices: s.vector(1),
+                source: s.source(),
+            })
+        }
+        32 => {
+            s.validate(
+                D | B,
+                MemoryPolicy::Optional,
+                MemoryPolicy::Forbidden,
+                true,
+                immediate,
+            )?;
+            AvxSemantic::Permute(PermuteInstruction::WholeQwords {
+                destination: s.vector(0),
+                source: s.source(),
+                immediate,
+            })
+        }
         _ => return Err(AvxDecodeError::Family),
     };
     Ok(semantic)
 }
+
+#[cfg(test)]
+#[path = "permute/whole/native.rs"]
+mod whole;

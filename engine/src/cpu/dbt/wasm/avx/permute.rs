@@ -47,6 +47,33 @@ fn load(
         }
     }
 }
+fn whole_indices(
+    code: &mut InstructionSink<'_>,
+    layout: PermuteLayout,
+    locals: PermuteLocals,
+    indices: VectorRegister,
+    half: usize,
+    source_half: usize,
+) {
+    load(code, layout, locals, MoveSource::Register(indices), half);
+    let mask = std::array::from_fn(|byte| if byte % 4 == 0 { 7 } else { 0 });
+    let repeat = std::array::from_fn(|byte| (byte / 4 * 4) as u8);
+    let offsets = std::array::from_fn(|byte| (byte % 4) as u8);
+    code.v128_const(i128::from_le_bytes(mask))
+        .v128_and()
+        .i32_const(2)
+        .i32x4_shl()
+        .v128_const(0)
+        .i8x16_shuffle(repeat)
+        .v128_const(i128::from_le_bytes(offsets))
+        .i8x16_add();
+    if source_half == 1 {
+        // low-half indices wrap above 15 and swizzle to zero; high-half indices
+        // become 0..15. the two swizzles therefore merge without overlap.
+        code.i32_const(16).i8x16_splat().i8x16_sub();
+    }
+}
+
 fn width(operation: PermuteInstruction) -> VectorWidth {
     use PermuteInstruction::*;
     match operation {
@@ -56,6 +83,7 @@ fn width(operation: PermuteInstruction) -> VectorWidth {
         | Variable { width, .. }
         | Blend { width, .. }
         | BlendVariable { width, .. } => width,
+        WholeDwords { .. } | WholeQwords { .. } => VectorWidth::Ymm,
         InsertSingle { .. } | ExtractSingle { .. } => VectorWidth::Xmm,
     }
 }
@@ -96,6 +124,34 @@ pub(super) fn emit(
     let mut destination = None;
     for half in 0..if width == VectorWidth::Ymm { 2 } else { 1 } {
         let target = match operation {
+            WholeDwords {
+                destination,
+                indices,
+                source,
+            } => {
+                for source_half in 0..2 {
+                    load(code, layout, locals, source, source_half);
+                    whole_indices(code, layout, locals, indices, half, source_half);
+                    code.i8x16_swizzle();
+                }
+                code.v128_or();
+                destination
+            }
+            WholeQwords {
+                destination,
+                source,
+                immediate,
+            } => {
+                load(code, layout, locals, source, 0);
+                load(code, layout, locals, source, 1);
+                let lanes = std::array::from_fn(|byte| {
+                    let lane = half * 2 + byte / 8;
+                    let selected = usize::from(immediate >> (lane * 2) & 3);
+                    (selected * 8 + byte % 8) as u8
+                });
+                code.i8x16_shuffle(lanes);
+                destination
+            }
             Interleave {
                 high,
                 element,

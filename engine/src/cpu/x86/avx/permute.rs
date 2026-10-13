@@ -5,6 +5,16 @@ use crate::{cpu::x86::State32, memory::Access};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum PermuteInstruction {
+    WholeDwords {
+        destination: VectorRegister,
+        indices: VectorRegister,
+        source: MoveSource,
+    },
+    WholeQwords {
+        destination: VectorRegister,
+        source: MoveSource,
+        immediate: u8,
+    },
     Interleave {
         high: bool,
         element: Element,
@@ -71,9 +81,20 @@ pub(crate) enum PermuteError {
 }
 
 impl PermuteInstruction {
+    pub(crate) fn requires_avx2(self) -> bool {
+        matches!(self, Self::WholeDwords { .. } | Self::WholeQwords { .. })
+    }
     pub(crate) fn memory(self) -> Option<MemoryRequirement> {
         use PermuteInstruction::*;
         let (access, bytes) = match self {
+            WholeDwords {
+                source: MoveSource::Memory,
+                ..
+            }
+            | WholeQwords {
+                source: MoveSource::Memory,
+                ..
+            } => (Access::Read, 32),
             Interleave {
                 width,
                 second: MoveSource::Memory,
@@ -161,6 +182,31 @@ impl VectorState {
         let mut value = [0; 32];
         use PermuteInstruction::*;
         let destination = match operation {
+            WholeDwords {
+                destination,
+                indices,
+                source,
+            } => {
+                let indices = self.read(indices);
+                let source = input(self, source, operand);
+                for index in 0..8 {
+                    let selected = usize::from(indices[index * 4] & 7);
+                    lane(&mut value, index * 4, &source, selected * 4, 4);
+                }
+                Some(destination)
+            }
+            WholeQwords {
+                destination,
+                source,
+                immediate,
+            } => {
+                let source = input(self, source, operand);
+                for index in 0..4 {
+                    let selected = usize::from(immediate >> (index * 2) & 3);
+                    lane(&mut value, index * 8, &source, selected * 8, 8);
+                }
+                Some(destination)
+            }
             Interleave {
                 high,
                 element,
@@ -376,3 +422,7 @@ impl VectorState {
 #[cfg(test)]
 #[path = "permute/native.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "permute/whole/native.rs"]
+mod whole;
