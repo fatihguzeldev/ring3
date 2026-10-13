@@ -41,6 +41,7 @@ fn module(operation: LogicalInstruction) -> Vec<u8> {
             upper: 256,
         },
         0,
+        0,
         [1, 2],
     );
     function.instructions().end();
@@ -68,7 +69,7 @@ fn direct_logical_wasm_preserves_aliases_upper_rules_and_unrelated_bytes() {
                     width,
                     destination: VectorRegister::new(destination).unwrap(),
                     first: VectorRegister::new(first).unwrap(),
-                    second: VectorRegister::new(second).unwrap(),
+                    second: MoveSource::Register(VectorRegister::new(second).unwrap()),
                 };
                 let bytes = module(operation)
                     .iter()

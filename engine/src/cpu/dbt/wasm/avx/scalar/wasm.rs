@@ -94,9 +94,7 @@ fn case(
     form: &str,
     width: ScalarWidth,
     imm: u8,
-    d: u8,
-    a: u8,
-    scalar: u8,
+    (d, a, scalar): (u8, u8, u8),
     memory: bool,
     address: u32,
     invalid: bool,
@@ -157,7 +155,7 @@ fn direct_scalar_transfers_match_exact_span_gpr_and_full_memory_oracle() {
     ];
     for (form, width) in forms {
         for imm in 0..=if form == "mask" { 0 } else { 255 } {
-            cases.push(case(form, width, imm, 0, 1, 2, false, 0, false));
+            cases.push(case(form, width, imm, (0, 1, 2), false, 0, false));
         }
         if form == "insert" {
             for (d, a, g) in [
@@ -170,7 +168,7 @@ fn direct_scalar_transfers_match_exact_span_gpr_and_full_memory_oracle() {
                 (0, 7, 7),
             ] {
                 for imm in [0, 1, 3, 7, 15, 16, 31, 128, 255] {
-                    cases.push(case(form, width, imm, d, a, g, false, 0, false));
+                    cases.push(case(form, width, imm, (d, a, g), false, 0, false));
                 }
             }
         }
@@ -181,18 +179,18 @@ fn direct_scalar_transfers_match_exact_span_gpr_and_full_memory_oracle() {
                     65536 - u32::from(width.bytes()),
                     65537 - u32::from(width.bytes()),
                 ] {
-                    cases.push(case(form, width, imm, 0, 1, 2, true, address, false));
+                    cases.push(case(form, width, imm, (0, 1, 2), true, address, false));
                 }
             }
         }
         if form != "insert" {
             for a in 0..8 {
                 for g in 0..8 {
-                    cases.push(case(form, width, 255, 0, a, g, false, 0, false));
+                    cases.push(case(form, width, 255, (0, a, g), false, 0, false));
                 }
             }
         }
-        cases.push(case(form, width, 0, 0, 1, 2, false, 0, true));
+        cases.push(case(form, width, 0, (0, 1, 2), false, 0, true));
     }
     assert_eq!(cases.len(), 2472);
     let mut child = Command::new("node")

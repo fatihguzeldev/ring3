@@ -12,7 +12,7 @@ use crate::{
     },
     cpu::x86::simd::{CryptoKind, PackedKind as P, ShuffleKind as S},
 };
-use wasm_encoder::{BlockType, InstructionSink, MemArg, ValType};
+use wasm_encoder::{BlockType, InstructionSink, MemArg};
 
 pub(super) fn accepts(op: SimdOperation) -> bool {
     match op.kind {

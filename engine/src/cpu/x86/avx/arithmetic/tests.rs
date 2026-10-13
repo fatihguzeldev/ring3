@@ -44,7 +44,7 @@ fn binary(
             width,
             element,
             first: register(first),
-            second: register(second),
+            second: MoveSource::Register(register(second)),
         },
     })
 }
@@ -92,14 +92,14 @@ fn elementwise_arithmetic_covers_both_widths_and_formats_with_literal_bits() {
                     FloatForm::PackedUnary {
                         width,
                         element,
-                        source: register(2),
+                        source: MoveSource::Register(register(2)),
                     }
                 } else {
                     FloatForm::PackedBinary {
                         width,
                         element,
                         first: register(1),
-                        second: register(2),
+                        second: MoveSource::Register(register(2)),
                     }
                 };
                 current
@@ -150,7 +150,7 @@ fn scalar_arithmetic_merges_first_source_and_zeroes_only_retired_upper_half() {
                 form: FloatForm::Scalar {
                     element,
                     first: register(1),
-                    second: register(2),
+                    second: MoveSource::Register(register(2)),
                 },
             }))
             .unwrap();
@@ -213,7 +213,7 @@ fn all_register_alias_partitions_snapshot_sources_before_destination_publication
             form: FloatForm::PackedUnary {
                 width: VectorWidth::Ymm,
                 element: Element::Single,
-                source: register(0),
+                source: MoveSource::Register(register(0)),
             },
         }))
         .unwrap();
@@ -423,7 +423,7 @@ fn integer_logical_bits_use_both_sources_and_preserve_mxcsr() {
                     width,
                     destination: register(0),
                     first: register(1),
-                    second: register(0),
+                    second: MoveSource::Register(register(0)),
                 }))
                 .unwrap();
             assert_eq!(
@@ -472,7 +472,7 @@ fn invalid_state_registers_and_float_shapes_are_effect_neutral() {
             form: FloatForm::PackedUnary {
                 width: VectorWidth::Ymm,
                 element: Element::Double,
-                source: register(1),
+                source: MoveSource::Register(register(1)),
             },
         }),
     ] {
@@ -526,7 +526,7 @@ fn scalar_source_aliases_preserve_first_source_merge_bytes() {
                 form: FloatForm::Scalar {
                     element: Element::Single,
                     first: register(first),
-                    second: register(second),
+                    second: MoveSource::Register(register(second)),
                 },
             }))
             .unwrap();
@@ -556,7 +556,7 @@ fn scalar_square_root_ignores_first_source_numeric_lane_but_preserves_its_merge_
             form: FloatForm::Scalar {
                 element: Element::Single,
                 first: register(1),
-                second: register(2),
+                second: MoveSource::Register(register(2)),
             },
         }))
         .unwrap();

@@ -108,9 +108,7 @@ fn module(instruction: RearrangeInstruction) -> Vec<u8> {
 }
 fn case(
     op: RearrangeOperation,
-    d: u8,
-    a: u8,
-    b: Option<u8>,
+    (d, a, b): (u8, u8, Option<u8>),
     m: u8,
     seed: u8,
     address: u32,
@@ -153,14 +151,14 @@ fn direct_rearrangements_match_independent_full_memory_oracle() {
                 (0, 1, None, 3),
             ] {
                 if b.is_some() {
-                    cases.push(case(op, d, a, b, m, seed, 0, false));
+                    cases.push(case(op, (d, a, b), m, seed, 0, false));
                 } else {
                     for address in [
                         0x8003,
                         65536 - u32::from(op.memory_bytes()),
                         65537 - u32::from(op.memory_bytes()),
                     ] {
-                        cases.push(case(op, d, a, b, m, seed, address, false));
+                        cases.push(case(op, (d, a, b), m, seed, address, false));
                     }
                 }
             }
@@ -171,10 +169,10 @@ fn direct_rearrangements_match_independent_full_memory_oracle() {
         ) {
             for immediate in 0..=255 {
                 let op = RearrangeOperation::new(op.kind(), op.lane_bytes(), immediate).unwrap();
-                cases.push(case(op, 0, 1, Some(2), 3, 5, 0, false));
+                cases.push(case(op, (0, 1, Some(2)), 3, 5, 0, false));
             }
         }
-        cases.push(case(op, 0, 1, Some(2), 3, 0, 0, true));
+        cases.push(case(op, (0, 1, Some(2)), 3, 0, 0, true));
     }
     assert_eq!(cases.len(), 2148);
     let mut child = Command::new("node")

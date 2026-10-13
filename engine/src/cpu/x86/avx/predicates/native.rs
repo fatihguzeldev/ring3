@@ -29,8 +29,10 @@ fn sign_tests_ignore_payload_bits_and_include_every_active_element() {
                 vectors.upper[0].copy_from_slice(&value[16..]);
                 vectors.simd.xmm[1] = vectors.simd.xmm[0];
                 vectors.upper[1] = vectors.upper[0];
-                let mut state = State32::default();
-                state.eflags = 0x244fd7;
+                let mut state = State32 {
+                    eflags: 0x244fd7,
+                    ..State32::default()
+                };
                 let before = vectors;
                 vectors
                     .execute_test(instruction(kind, width, false), &mut state, &[])
@@ -67,8 +69,10 @@ fn packed_test_uses_all_bits_and_directional_and_not() {
                 vectors.upper[0].copy_from_slice(&first[16..]);
                 vectors.simd.xmm[1].copy_from_slice(&second[..16]);
                 vectors.upper[1].copy_from_slice(&second[16..]);
-                let mut state = State32::default();
-                state.eflags = 0xcd7;
+                let mut state = State32 {
+                    eflags: 0xcd7,
+                    ..State32::default()
+                };
                 vectors
                     .execute_test(
                         instruction(BitTestKind::Bits, width, false),
@@ -95,8 +99,10 @@ fn exact_memory_and_invalid_state_fail_before_flags_or_vectors_change() {
             assert_eq!(op.memory().unwrap().bytes as usize, length);
             for bad_length in [0, length - 1, length + 1] {
                 let vectors = VectorState::default();
-                let mut state = State32::default();
-                state.eflags = 0xcd7;
+                let mut state = State32 {
+                    eflags: 0xcd7,
+                    ..State32::default()
+                };
                 let before = state;
                 assert_eq!(
                     vectors.execute_test(op, &mut state, &vec![0; bad_length]),
@@ -107,8 +113,10 @@ fn exact_memory_and_invalid_state_fail_before_flags_or_vectors_change() {
             let mut vectors = VectorState::default();
             vectors.simd.mxcsr |= 1 << 16;
             let before = vectors;
-            let mut state = State32::default();
-            state.eflags = 0xcd7;
+            let mut state = State32 {
+                eflags: 0xcd7,
+                ..State32::default()
+            };
             let saved = state;
             assert_eq!(
                 vectors.execute_test(op, &mut state, &vec![0; length]),

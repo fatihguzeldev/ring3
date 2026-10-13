@@ -17,24 +17,17 @@ mod shift;
 mod strings;
 
 pub(crate) use super::simd::BitTestKind;
-pub(crate) use compare::{CompareInstruction, CompareShape};
-pub(crate) use compound::CompoundInstruction;
-pub(crate) use convert::{ConvertInstruction, PackedConversion};
 pub(crate) use cross_lane::{BlockTarget, CrossLaneInstruction};
-pub(crate) use crypto::CryptoInstruction;
-pub(crate) use f16c::{F16cError, F16cInstruction, F16cTarget};
 pub(crate) use integer::IntegerInstruction;
-pub(crate) use masked::{MaskedError, MaskedInstruction};
+pub(crate) use masked::MaskedInstruction;
 pub(crate) use moves::{
     DuplicateKind, Half, HalfMerge, MoveInstruction, MoveSource, WordSource, WordTarget,
 };
 pub(crate) use multiply::MultiplyInstruction;
 pub(crate) use permute::PermuteInstruction;
-pub(crate) use predicates::TestInstruction;
 pub(crate) use rearrange::RearrangeInstruction;
 pub(crate) use scalar::ScalarInstruction;
 pub(crate) use shift::{ShiftCount, ShiftInstruction};
-pub(crate) use strings::StringInstruction;
 
 use super::simd::SimdState;
 
@@ -100,17 +93,17 @@ pub(crate) enum FloatForm {
         width: VectorWidth,
         element: Element,
         first: VectorRegister,
-        second: VectorRegister,
+        second: MoveSource,
     },
     PackedUnary {
         width: VectorWidth,
         element: Element,
-        source: VectorRegister,
+        source: MoveSource,
     },
     Scalar {
         element: Element,
         first: VectorRegister,
-        second: VectorRegister,
+        second: MoveSource,
     },
 }
 
@@ -135,13 +128,32 @@ pub(crate) struct LogicalInstruction {
     pub width: VectorWidth,
     pub destination: VectorRegister,
     pub first: VectorRegister,
-    pub second: VectorRegister,
+    pub second: MoveSource,
+}
+
+impl LogicalInstruction {
+    pub(crate) fn memory(self) -> Option<MemoryRequirement> {
+        matches!(self.second, MoveSource::Memory).then_some(MemoryRequirement {
+            access: crate::memory::Access::Read,
+            bytes: self.width.bytes() as u8,
+            alignment: 1,
+        })
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Instruction {
     Floating(FloatInstruction),
     Logical(LogicalInstruction),
+}
+
+impl Instruction {
+    pub(crate) fn memory(self) -> Option<MemoryRequirement> {
+        match self {
+            Self::Floating(operation) => operation.memory(),
+            Self::Logical(operation) => operation.memory(),
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -174,13 +186,36 @@ impl VectorState {
         self.upper[index].copy_from_slice(&value[16..]);
     }
 
+    fn capture_source(&self, source: MoveSource, operand: &[u8]) -> [u8; 32] {
+        match source {
+            MoveSource::Register(register) => self.read(register),
+            MoveSource::Memory => {
+                let mut value = [0; 32];
+                value[..operand.len()].copy_from_slice(operand);
+                value
+            }
+        }
+    }
+
     pub(crate) fn execute(&mut self, instruction: Instruction) -> Result<(), ArithmeticError> {
+        self.execute_with_operand(instruction, &[])
+    }
+
+    // the caller captures an exact checked guest span before entering this kernel.
+    pub(crate) fn execute_with_operand(
+        &mut self,
+        instruction: Instruction,
+        operand: &[u8],
+    ) -> Result<(), ArithmeticError> {
+        if operand.len() != instruction.memory().map_or(0, |r| usize::from(r.bytes)) {
+            return Err(ArithmeticError::OperandLength);
+        }
         if self.simd.mxcsr & !0xffff != 0 {
             return Err(ArithmeticError::InvalidState);
         }
         match instruction {
             Instruction::Floating(operation) => {
-                let (value, exceptions) = arithmetic::floating(operation, self)?;
+                let (value, exceptions) = arithmetic::floating(operation, self, operand)?;
                 self.simd.mxcsr |= exceptions;
                 if exceptions & !(self.simd.mxcsr >> 7) & 0x3f != 0 {
                     return Err(ArithmeticError::FloatingPoint(self.simd.mxcsr));
@@ -189,7 +224,7 @@ impl VectorState {
             }
             Instruction::Logical(operation) => {
                 let first = self.read(operation.first);
-                let second = self.read(operation.second);
+                let second = self.capture_source(operation.second, operand);
                 let mut value = [0; 32];
                 for index in 0..operation.width.bytes() {
                     value[index] = match operation.kind {

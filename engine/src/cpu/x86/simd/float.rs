@@ -572,7 +572,7 @@ pub(crate) fn pairwise_lanes<const N: usize>(
     b: [u8; N],
     mxcsr: u32,
 ) -> ([u8; N], u32) {
-    assert!(matches!(width, 4 | 8) && bytes <= N && bytes % 16 == 0);
+    assert!(matches!(width, 4 | 8) && bytes <= N && bytes.is_multiple_of(16));
     let count = bytes / width;
     let block_lanes = 16 / width;
     let mut out = a;

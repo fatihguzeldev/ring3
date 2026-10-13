@@ -78,9 +78,7 @@ fn module(i: ShiftInstruction) -> Vec<u8> {
 fn case(
     op: ShiftOperation,
     immediate: Option<u8>,
-    d: u8,
-    a: u8,
-    b: Option<u8>,
+    (d, a, b): (u8, u8, Option<u8>),
     count: u64,
     seed: u8,
     address: u32,
@@ -128,14 +126,14 @@ fn direct_shifts_match_full_count_and_full_memory_oracle() {
     immediate_forms.extend([ShiftOperation::bytes(false), ShiftOperation::bytes(true)]);
     for op in immediate_forms {
         for n in 0..=255 {
-            cases.push(case(op, Some(n), 0, 1, Some(2), 0, 3, 0, false));
+            cases.push(case(op, Some(n), (0, 1, Some(2)), 0, 3, 0, false));
         }
         for (d, a) in [(0, 0), (7, 7), (7, 1)] {
             for n in [0, 1, 15, 16, 31, 32, 63, 64, 255] {
-                cases.push(case(op, Some(n), d, a, Some(2), 0, 5, 0, false));
+                cases.push(case(op, Some(n), (d, a, Some(2)), 0, 5, 0, false));
             }
         }
-        cases.push(case(op, Some(0), 0, 1, Some(2), 0, 0, 0, true));
+        cases.push(case(op, Some(0), (0, 1, Some(2)), 0, 0, 0, true));
     }
     for op in lane_forms {
         for count in [
@@ -163,16 +161,16 @@ fn direct_shifts_match_full_count_and_full_memory_oracle() {
                     (0, 1, None),
                 ] {
                     if b.is_some() {
-                        cases.push(case(op, None, d, a, b, count, seed, 0, false));
+                        cases.push(case(op, None, (d, a, b), count, seed, 0, false));
                     } else {
                         for address in [0x8003, 65520, 65521] {
-                            cases.push(case(op, None, d, a, b, count, seed, address, false));
+                            cases.push(case(op, None, (d, a, b), count, seed, address, false));
                         }
                     }
                 }
             }
         }
-        cases.push(case(op, None, 0, 1, Some(2), 0, 0, 0, true));
+        cases.push(case(op, None, (0, 1, Some(2)), 0, 0, 0, true));
     }
     assert_eq!(cases.len(), 5344);
     let mut child = Command::new("node")
