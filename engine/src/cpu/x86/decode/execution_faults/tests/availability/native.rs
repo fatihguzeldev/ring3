@@ -1,3 +1,5 @@
+use iced_x86::{Code, Decoder, DecoderOptions, EncodingKind};
+
 use crate::{
     cpu::{
         UnsupportedFeature,
@@ -106,6 +108,30 @@ fn known_evex_vector_widths_fault_before_register_or_memory_operands() {
 }
 
 #[test]
+fn known_vex_opmask_forms_fault_before_register_or_memory_operands() {
+    for (bytes, code) in [
+        (&[0xc5, 0xec, 0x47, 0xcb][..], Code::VEX_Kxorw_kr_kr_kr),
+        (&[0xc5, 0xf8, 0x90, 0x0b], Code::VEX_Kmovw_kr_km16),
+        (&[0xc5, 0xf8, 0x91, 0x0b], Code::VEX_Kmovw_m16_kr),
+    ] {
+        let pc = 0x2000 - bytes.len() as u32;
+        let mut decoder = Decoder::with_ip(32, bytes, u64::from(pc), DecoderOptions::NONE);
+        let instruction = decoder.decode();
+        assert!(!instruction.is_invalid());
+        assert_eq!(instruction.code(), code);
+        assert_eq!(instruction.encoding(), EncodingKind::VEX);
+        assert_eq!(instruction.len(), bytes.len());
+        let memory = executable(bytes, pc);
+        assert_unavailable(
+            &memory,
+            pc,
+            bytes.len(),
+            DecodeError::Unsupported(UnsupportedFeature::Simd),
+        );
+    }
+}
+
+#[test]
 fn instruction_fetch_fault_precedes_unavailability_until_final_byte_is_repaired() {
     for (bytes, strict) in [
         (&[0x0f, 0xaa][..], UnsupportedFeature::Privileged),
@@ -115,6 +141,10 @@ fn instruction_fetch_fault_precedes_unavailability_until_final_byte_is_repaired(
         ),
         (
             &[0x62, 0xf1, 0x7c, 0x48, 0x58, 0x05, 0x78, 0x56, 0x34, 0x12],
+            UnsupportedFeature::Simd,
+        ),
+        (
+            &[0xc5, 0xf8, 0x90, 0x0d, 0x12, 0x34, 0x56, 0x78],
             UnsupportedFeature::Simd,
         ),
     ] {
@@ -151,8 +181,12 @@ fn instruction_fetch_fault_precedes_unavailability_until_final_byte_is_repaired(
 
 #[test]
 fn availability_does_not_replace_present_paths_unknown_features_or_profile_refusals() {
-    // a legacy bound opcode and vex scalar instruction are outside the evex state predicate.
-    for bytes in [&[0x62, 0x00][..], &[0xc5, 0xfa, 0x58, 0xc1]] {
+    // legacy bound, present vex vectors and vex gpr forms retain their execution paths.
+    for bytes in [
+        &[0x62, 0x00][..],
+        &[0xc5, 0xfa, 0x58, 0xc1],
+        &[0xc4, 0xe3, 0x7b, 0xf0, 0xc1, 0x04],
+    ] {
         let memory = executable(bytes, 0x1000);
         let strict = decode_one(&memory, GuestAddress(0x1000)).unwrap();
         let runtime = decode_for_execution(&memory, GuestAddress(0x1000)).unwrap();

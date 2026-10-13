@@ -57,12 +57,18 @@ fn unavailable(instruction: &Instruction) -> bool {
     if instruction.code() == Code::Rsm {
         return true;
     }
-    if instruction.encoding() != EncodingKind::EVEX || XCR0 & 0xe7 == 0xe7 {
+    let encoding = instruction.encoding();
+    let required_state = match encoding {
+        EncodingKind::EVEX => 0xe7,
+        EncodingKind::VEX => 0xe3,
+        _ => return false,
+    };
+    if XCR0 & required_state == required_state {
         return false;
     }
-    // these known evex vector categories require xmm/ymm and all avx512 state components,
-    // including memory-only vsib or mask-result forms. encoding alone is insufficient.
-    instruction.cpuid_features().iter().any(|feature| {
+    // known evex categories include memory-only vsib and mask-result forms;
+    // vex requires an explicit opmask operand before its distinct state rule applies.
+    let known_category = instruction.cpuid_features().iter().any(|feature| {
         matches!(
             feature,
             CpuidFeature::AVX512BW
@@ -84,7 +90,13 @@ fn unavailable(instruction: &Instruction) -> bool {
                 | CpuidFeature::AVX512_VP2INTERSECT
                 | CpuidFeature::AVX512_VPOPCNTDQ
         )
-    })
+    });
+    known_category
+        && (encoding == EncodingKind::EVEX
+            || (0..instruction.op_count()).any(|index| {
+                instruction.op_kind(index) == OpKind::Register
+                    && instruction.op_register(index).is_k()
+            }))
 }
 
 fn general_protection(instruction: &Instruction, environment: UserModeEnvironment) -> bool {
