@@ -8,6 +8,9 @@ pub(crate) const XCR0: u64 = 7;
 /// baseline avx is admitted only with its complete architectural state enabled.
 pub(crate) const AVX_ENABLED: bool = XCR0 & 7 == 7;
 
+// individual avx2 encodings remain private until the complete feature is verified.
+pub(crate) const AVX2_ENABLED: bool = false;
+
 // activation follows complete guest-path verification independently of baseline avx.
 pub(crate) const F16C_ENABLED: bool = AVX_ENABLED;
 /// fused arithmetic is exposed only after its complete guest family is verified.

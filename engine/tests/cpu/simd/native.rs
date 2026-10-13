@@ -50,3 +50,6 @@ mod avx_helper;
 mod f16c;
 #[path = "avx/fma/native.rs"]
 mod fma;
+
+#[path = "avx/logical/capability/native.rs"]
+mod logical_capability;
