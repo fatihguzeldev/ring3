@@ -1,3 +1,4 @@
+import {ARENA_SIZE} from '../../../../../../../support/wasm/arena.mjs';
 import assert from 'node:assert/strict';
 import {execFileSync, spawnSync} from 'node:child_process';
 import {createHash} from 'node:crypto';
@@ -11,7 +12,7 @@ assert.ok(WebAssembly.validate(engineBytes), 'actual engine validates');
 assert.ok(WebAssembly.validate(injectorBytes), 'pure-Wasm helper injector validates');
 const engineModule = new WebAssembly.Module(engineBytes), injectorModule = new WebAssembly.Module(injectorBytes);
 assert.deepEqual(WebAssembly.Module.imports(engineModule), [], 'engine has no JS imports');
-const names = ['open', 'close', 'arena_ptr', 'map', 'protect', 'unmap', 'upload', 'compile', 'generation', 'module_ptr', 'module_len', 'guard', 'read32', 'write32', 'store32'];
+const names = ['open', 'close', 'arena_ptr', 'map', 'protect', 'unmap', 'upload', 'compile', 'generation', 'module_ptr', 'module_len', 'guard', 'read32', 'write32', 'store32', 'cpu_read32', 'cpu_store32'];
 let keys = 0n, modules = 0, actualRuns = 0, injectedRuns = 0, resumes = 0;
 const generatedHashes = [];
 
@@ -51,13 +52,13 @@ function fresh() {
   assert.equal(api.open(32, engine.low, engine.high), 0);
   engine.base = api.arena_ptr() >>> 0;
   refresh(engine);
-  assert.ok(engine.base > 0 && engine.base + 4236 <= engine.bytes.length);
+  assert.ok(engine.base > 0 && engine.base + ARENA_SIZE <= engine.bytes.length);
   assert.equal(api.map(0x1000, 1, 7), 0);
   return engine;
 }
 
 function arena(engine) {
-  return refresh(engine).bytes.slice(engine.base, engine.base + 4236);
+  return refresh(engine).bytes.slice(engine.base, engine.base + ARENA_SIZE);
 }
 
 function upload(engine, address, bytes) {
@@ -82,6 +83,11 @@ function helperRecord(tag, value = 0, detail = 0, address = 0, access = 0, lengt
   return bytes;
 }
 
+function cpuHelperRecord(tag, value = 0, detail = 0, address = 0, access = 0, width = 4) {
+  const bytes = helperRecord(tag, value, detail, address, access, width), view = new DataView(bytes.buffer);
+  view.setUint16(4, 10, true); return bytes;
+}
+
 function guestValue(engine, address) {
   assert.equal(engine.api.read32(address), 0, 'actual guest observation helper');
   refresh(engine);
@@ -95,6 +101,7 @@ function word(engine, address, value) {
 }
 
 function compile(engine, bytes, blocks = [[0x1000, bytes.length]], expectedHelpers = []) {
+  expectedHelpers = expectedHelpers.map(name => {assert.ok(['read32', 'store32'].includes(name)); return 'cpu_' + name;});
   if (bytes.length !== 0) upload(engine, 0x1000, bytes);
   refresh(engine);
   blocks.forEach(([entry, length], index) => {
@@ -116,7 +123,7 @@ function compile(engine, bytes, blocks = [[0x1000, bytes.length]], expectedHelpe
   assert.deepEqual(sortedImports(module), expected, 'module imports exactly needed actual Wasm helpers');
   const instance = new WebAssembly.Instance(module, {
     env: {memory: engine.memory},
-    ring3: {guard: engine.api.guard, read32: engine.api.read32, store32: engine.api.store32},
+    ring3: {guard: engine.api.guard, cpu_read32: engine.api.cpu_read32, cpu_store32: engine.api.cpu_store32},
   });
   modules++;
   generatedHashes.push(hash(encoded));
@@ -155,7 +162,7 @@ function readState(engine) {
 
 function exit(reason, retired, detail = 0, address = 0, access = 0, length = reason === 5 ? 4 : 0) {
   const bytes = new Uint8Array(40), view = new DataView(bytes.buffer);
-  header(bytes, view, 0, 'R3EX', 40, reason === 11 || reason === 15 ? 6 : 2);
+  header(bytes, view, 0, 'R3EX', 40, 6);
   [reason, retired, detail, address, access, length].forEach((field, index) => view.setUint32(16 + index * 4, field, true));
   return bytes;
 }
@@ -242,7 +249,7 @@ function guarded(engine, child, label) {
   expected.eflags = 0x406;
   expected.eip = 0x100a;
   writeState(engine, start);
-  run(engine, child, 20, expected, exit(3, 8), 'nested calls return to literal caller continuation', helperRecord(0, 0x100a));
+  run(engine, child, 20, expected, exit(3, 8), 'nested calls return to literal caller continuation', cpuHelperRecord(0, 0x100a));
   assert.equal(guestValue(engine, 0x8ffc), 0x100a, 'outer call pushed its exact next EIP');
   assert.equal(guestValue(engine, 0x8ff8), 0x1013, 'inner call pushed its exact next EIP');
 }
@@ -270,7 +277,7 @@ for (const count of nativeInputs) {
   const {engine, child, start, expected} = recursiveFixture(count);
   assert.deepEqual(native, {sum: expected.registers[0], remaining: 0, retired: 6 * count + 5}, 'native unsigned algorithm agrees with independent math');
   writeState(engine, start);
-  run(engine, child, native.retired + 10, expected, exit(3, native.retired), `guest recursive algorithm/native ${count}`, helperRecord(0, 0x100a));
+  run(engine, child, native.retired + 10, expected, exit(3, native.retired), `guest recursive algorithm/native ${count}`, cpuHelperRecord(0, 0x100a));
   assert.equal(guestValue(engine, stackTop - 4), 0x100a);
   if (count !== 0) assert.equal(guestValue(engine, stackTop - 4 * (count + 1)), 0x101a, 'deepest frame stores recursive continuation');
 }
@@ -287,11 +294,11 @@ for (const args of [[], ['-1'], ['20001'], ['1x'], [' 1'], ['1', 'extra']]) {
   const deepest = copyState(expected);
   deepest.registers[4] = stackTop - 4 * (count + 1);
   deepest.eip = 0x100b;
-  run(engine, child, 5 * count + 2, deepest, exit(1, 5 * count + 2), '20001 guest frames checkpoint without host recursion', helperRecord(0));
+  run(engine, child, 5 * count + 2, deepest, exit(1, 5 * count + 2), '20001 guest frames checkpoint without host recursion', cpuHelperRecord(0));
   assert.equal(guestValue(engine, deepest.registers[4]), 0x101a, 'observed deepest return word');
   assert.equal(guestValue(engine, stackTop - 4), 0x100a, 'observed top caller return word');
   assert.equal(guestValue(engine, deepest.registers[4] + 4), 0x101a, 'observed adjacent deep frame');
-  run(engine, child, count + 10, expected, exit(3, count + 3), '20001 guest frames unwind precisely', helperRecord(0, 0x100a));
+  run(engine, child, count + 10, expected, exit(3, count + 3), '20001 guest frames unwind precisely', cpuHelperRecord(0, 0x100a));
 }
 
 {
@@ -335,7 +342,7 @@ for (const args of [[], ['-1'], ['20001'], ['1x'], [' 1'], ['1', 'extra']]) {
   const called = copyState(start);
   called.registers[4] = 0x8ffc;
   called.eip = 0x1100;
-  run(engine, child, 1, called, exit(1, 1), 'CALL commit checkpoint', helperRecord(0));
+  run(engine, child, 1, called, exit(1, 1), 'CALL commit checkpoint', cpuHelperRecord(0));
   assert.equal(guestValue(engine, 0x8ffc), 0x1005);
   word(engine, 0x8ffc, 0xf1234567);
   refresh(engine).view.setUint32(engine.base + 96, 1, true);
@@ -343,8 +350,8 @@ for (const args of [[], ['-1'], ['20001'], ['1x'], [' 1'], ['1', 'extra']]) {
   engine.view.setUint32(engine.base + 96, 0, true);
   const returned = copyState(start);
   returned.eip = 0xf1234567;
-  run(engine, child, 1, returned, exit(1, 1), 'RET budget1 commits the pop before checking the unknown target', helperRecord(0, 0xf1234567));
-  run(engine, child, 2, returned, exit(3, 0), 'RET checkpoint resumes at the returned PC without popping again', helperRecord(0, 0xf1234567));
+  run(engine, child, 1, returned, exit(1, 1), 'RET budget1 commits the pop before checking the unknown target', cpuHelperRecord(0, 0xf1234567));
+  run(engine, child, 2, returned, exit(3, 0), 'RET checkpoint resumes at the returned PC without popping again', cpuHelperRecord(0, 0xf1234567));
   assert.equal(guestValue(engine, 0x8ffc), 0xf1234567, 'resuming RET did not repeat CALL push');
 }
 
@@ -358,7 +365,7 @@ for (const args of [[], ['-1'], ['20001'], ['1x'], [' 1'], ['1', 'extra']]) {
   expected.registers[4] = 0x8ffc;
   expected.eip = 0x1100;
   writeState(engine, start);
-  run(engine, child, 2, expected, exit(3, 1), 'unknown CALL target is NeedCode after successful push', helperRecord(0));
+  run(engine, child, 2, expected, exit(3, 1), 'unknown CALL target is NeedCode after successful push', cpuHelperRecord(0));
   assert.equal(guestValue(engine, 0x8ffc), 0x1005);
 }
 
@@ -392,7 +399,7 @@ for (const fault of faultCases) {
   expected.eip = 0x1008;
   writeState(engine, start);
   const access = fault.call ? 2 : 1;
-  run(engine, child, 20, expected, fault.detail === 3 ? exit(15, 2) : exit(5, 2, fault.detail, fault.fault, access), `${fault.name}: failed frame preserves ESP and computed flags`, fault.detail === 3 ? arena(engine).slice(100, 140) : helperRecord(1, 0, fault.detail, fault.fault, access));
+  run(engine, child, 20, expected, fault.detail === 3 ? exit(15, 2) : exit(5, 2, fault.detail, fault.fault, access), `${fault.name}: failed frame preserves ESP and computed flags`, fault.detail === 3 ? arena(engine).slice(100, 140) : cpuHelperRecord(1, 0, fault.detail, fault.fault, access));
   if (fault.call && fault.map) {
     assert.equal(guestValue(engine, 0x4000), 0x11223344, 'failed CALL preserves attempted writable/readable word');
     assert.equal(guestValue(engine, 0x4ffc), 0xa1b2c3d4, 'failed CALL preserves first-page tail');
@@ -414,7 +421,7 @@ for (const call of [true, false]) {
     expected.registers[4] = call ? address : (address + 4) >>> 0;
     expected.eip = call ? 0x1100 : 0xf1234567;
     writeState(engine, start);
-    run(engine, child, 2, expected, exit(3, 1), `${call ? 'CALL' : 'RET'} ${low ? 'zero-page' : 'high-page'} ESP wrap succeeds with nonwrapping width`, helperRecord(0, call ? 0 : 0xf1234567));
+    run(engine, child, 2, expected, exit(3, 1), `${call ? 'CALL' : 'RET'} ${low ? 'zero-page' : 'high-page'} ESP wrap succeeds with nonwrapping width`, cpuHelperRecord(0, call ? 0 : 0xf1234567));
     if (call) assert.equal(guestValue(engine, address), 0x1005);
   }
 }
@@ -431,7 +438,7 @@ for (const call of [true, false]) {
   expected.registers[4] = 0x4000;
   expected.eip = 5;
   writeState(engine, start);
-  run(engine, child, 2, expected, exit(3, 1), 'CALL return address and direct target wrap at guest PC end', helperRecord(0));
+  run(engine, child, 2, expected, exit(3, 1), 'CALL return address and direct target wrap at guest PC end', cpuHelperRecord(0));
   assert.equal(guestValue(engine, 0x4000), 0, 'CALL pushed wrapping next EIP');
 }
 
@@ -445,7 +452,7 @@ for (const call of [true, false]) {
   expected.registers[4] = 0x1004;
   expected.eip = 0x1100;
   writeState(engine, start);
-  run(engine, child, 1, expected, exit(6, 1), 'CALL code-page push commits ESP and target before SMC exit', helperRecord(0));
+  run(engine, child, 1, expected, exit(6, 1), 'CALL code-page push commits ESP and target before SMC exit', cpuHelperRecord(0));
   assert.equal(guestValue(engine, 0x1004), 0x1005, 'CALL committed exact return word into guest code');
   const before = arena(engine);
   assert.equal(child.run(0xffffffff, 0xffffffff, 10, 0xffffffff), 4, 'stale stack module rejected before generated access');
@@ -456,7 +463,7 @@ for (const call of [true, false]) {
   returned.registers[4] = 0x1008;
   returned.eip = 0x1005;
   writeState(engine, expected);
-  run(engine, replacement, 2, returned, exit(3, 1), 'recompiled callee RET pops committed SMC return word', helperRecord(0, 0x1005));
+  run(engine, replacement, 2, returned, exit(3, 1), 'recompiled callee RET pops committed SMC return word', cpuHelperRecord(0, 0x1005));
 }
 
 {
@@ -468,19 +475,19 @@ for (const call of [true, false]) {
 }
 
 const injectedCases = [
-  {name: 'VersionExhausted', status: 0, record: helperRecord(2, 0, 1), detail: 1},
-  {name: 'OtherReturned', status: 0, record: helperRecord(2, 0, 2), detail: 3},
-  {name: 'bad helper tag', status: 0, record: helperRecord(3), detail: 2},
-  {name: 'closed helper', status: 5, record: helperRecord(0), detail: 3},
-  {name: 'completion11 non-success', status: 11, record: helperRecord(2, 0, 1), detail: 2, callOnly: true},
-  {name: 'RET completion11 rejected', status: 11, record: helperRecord(0), detail: 3, retOnly: true},
+  {name: 'VersionExhausted', status: 0, record: cpuHelperRecord(2, 0, 1), detail: 1},
+  {name: 'OtherReturned', status: 0, record: cpuHelperRecord(2, 0, 2), detail: 3},
+  {name: 'bad helper tag', status: 0, record: cpuHelperRecord(3), detail: 2},
+  {name: 'closed helper', status: 5, record: cpuHelperRecord(0), detail: 3},
+  {name: 'completion11 non-success', status: 11, record: cpuHelperRecord(2, 0, 1), detail: 2, callOnly: true},
+  {name: 'RET completion11 rejected', status: 11, record: cpuHelperRecord(0), detail: 3, retOnly: true},
 ];
 for (const call of [true, false]) {
   const engine = fresh();
   const bytes = call ? arithmeticCall : arithmeticRet;
   const actual = compile(engine, Uint8Array.from(bytes), undefined, [call ? 'store32' : 'read32']);
   const injector = new WebAssembly.Instance(injectorModule, {env: {memory: engine.memory}, ring3: {guard: engine.api.guard}}).exports;
-  const injected = new WebAssembly.Instance(actual.module, {env: {memory: engine.memory}, ring3: {guard: injector.guard, read32: injector.read32, store32: injector.store32}}).exports;
+  const injected = new WebAssembly.Instance(actual.module, {env: {memory: engine.memory}, ring3: {guard: injector.guard, cpu_read32: injector.read32, cpu_store32: injector.store32}}).exports;
   for (const fixture of injectedCases) {
     if ((call && fixture.retOnly) || (!call && fixture.callOnly)) continue;
     const start = state();
@@ -498,7 +505,9 @@ for (const call of [true, false]) {
   }
 }
 
+const cpuSourcePaths=['engine/src/abi/memory_helper/cpu.rs', 'engine/src/cpu/dbt/wasm/memory/cpu_scalar.rs', 'engine/src/cpu/dbt/wasm/emitter.rs', 'engine/src/cpu/dbt/wasm/code_fetch.rs', 'engine/src/process/memory/cpu_scalar.rs', 'engine/src/process/memory/scalar/cpu_write.rs', 'engine/src/process/wasm/memory/cpu_write.rs', 'engine/src/abi/wasm/exports/memory/cpu_write.rs'];
 const provenance = {
+  cpu_source_sha256: Object.fromEntries(cpuSourcePaths.map(path => [path, hash(readFileSync(join(root, path)))])),
   engine_sha256: hash(engineBytes), injector_sha256: hash(injectorBytes), generated_modules: modules,
   actual_engine_runs: actualRuns, synthetic_helper_runs: injectedRuns, resumes,
   native_algorithm_cases: nativeInputs.length, native_invalid_inputs: 6, maximum_guest_frames: 20001,

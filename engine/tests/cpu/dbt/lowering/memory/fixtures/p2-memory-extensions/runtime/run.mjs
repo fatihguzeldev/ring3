@@ -1,3 +1,4 @@
+import {ARENA_SIZE} from '../../../../../../../support/wasm/arena.mjs';
 import assert from 'node:assert/strict';
 import {execFileSync} from 'node:child_process';
 import {createHash} from 'node:crypto';
@@ -11,7 +12,7 @@ assert.ok(WebAssembly.validate(engineBytes), 'actual engine validates');
 assert.ok(WebAssembly.validate(injectorBytes), 'pure-Wasm helper injector validates');
 const engineModule = new WebAssembly.Module(engineBytes), injectorModule = new WebAssembly.Module(injectorBytes);
 assert.deepEqual(WebAssembly.Module.imports(engineModule), [], 'engine has no JS imports');
-const names = ['open', 'close', 'arena_ptr', 'map', 'protect', 'unmap', 'upload', 'compile', 'compile_with_gates', 'generation', 'module_ptr', 'module_len', 'guard', 'read8', 'read16'];
+const names = ['open', 'close', 'arena_ptr', 'map', 'protect', 'unmap', 'upload', 'compile', 'compile_with_gates', 'generation', 'module_ptr', 'module_len', 'guard', 'read8', 'read16', 'cpu_read8', 'cpu_read16'];
 let keys = 0n, modules = 0, actualRuns = 0, injectedRuns = 0, continuations = 0, helperProbes = 0;
 const generatedHashes = [];
 
@@ -51,13 +52,13 @@ function fresh() {
   assert.equal(api.open(12, engine.low, engine.high), 0);
   engine.base = api.arena_ptr() >>> 0;
   refresh(engine);
-  assert.ok(engine.base > 0 && engine.base + 4236 <= engine.bytes.length);
+  assert.ok(engine.base > 0 && engine.base + ARENA_SIZE <= engine.bytes.length);
   assert.equal(api.map(0x1000, 1, 7), 0);
   return engine;
 }
 
 function arena(engine) {
-  return refresh(engine).bytes.slice(engine.base, engine.base + 4236);
+  return refresh(engine).bytes.slice(engine.base, engine.base + ARENA_SIZE);
 }
 
 function upload(engine, address, bytes) {
@@ -82,7 +83,13 @@ function narrow(width, tag = 0, value = 0, detail = 0, address = 0, access = 0) 
   return bytes;
 }
 
+function cpuNarrow(width, tag = 0, value = 0, detail = 0, address = 0, access = 0) {
+  const bytes = narrow(width, tag, value, detail, address, access), view = new DataView(bytes.buffer);
+  view.setUint16(4, 10, true); return bytes;
+}
+
 function compile(engine, bytes, blocks = [[0x1000, bytes.length]], expectedHelpers = [], gates = []) {
+  expectedHelpers = expectedHelpers.map(name => {assert.ok(['read8', 'read16'].includes(name)); return 'cpu_' + name;});
   if (bytes.length !== 0) upload(engine, 0x1000, bytes);
   refresh(engine);
   blocks.forEach(([entry, length], index) => {
@@ -108,7 +115,7 @@ function compile(engine, bytes, blocks = [[0x1000, bytes.length]], expectedHelpe
   assert.deepEqual(sortedImports(module), expected, 'module imports exactly needed actual Wasm helpers');
   const instance = new WebAssembly.Instance(module, {
     env: {memory: engine.memory},
-    ring3: {guard: engine.api.guard, read8: engine.api.read8, read16: engine.api.read16},
+    ring3: {guard: engine.api.guard, cpu_read8: engine.api.cpu_read8, cpu_read16: engine.api.cpu_read16},
   });
   modules++;
   generatedHashes.push(hash(encoded));
@@ -145,7 +152,7 @@ function readState(engine) {
   };
 }
 
-function exit(reason, retired, detail = 0, address = 0, access = 0, length = 0, version = reason === 11 || reason === 15 ? 6 : 2) {
+function exit(reason, retired, detail = 0, address = 0, access = 0, length = 0, version = 6) {
   const bytes = new Uint8Array(40), view = new DataView(bytes.buffer);
   header(bytes, view, 0, 'R3EX', 40, version);
   [reason, retired, detail, address, access, length].forEach((field, index) => view.setUint32(16 + index * 4, field, true));
@@ -252,7 +259,7 @@ for (const fixture of forms) {
     expected.registers[fixture.destination] = conversion(fixture.kind, value, fixture.width);
     expected.eip += fixture.hex.length / 2;
     writeState(engine, start);
-    run(engine, child, 1, expected, exit(1, 1), `actual EA/alias/all-destinations ${fixture.name}/flags${flags}`, narrow(fixture.width, 0, value));
+    run(engine, child, 1, expected, exit(1, 1), `actual EA/alias/all-destinations ${fixture.name}/flags${flags}`, cpuNarrow(fixture.width, 0, value));
   }
 }
 
@@ -268,7 +275,7 @@ for (const fixture of generic) {
       expected.registers[0] = literal;
       expected.eip += 3;
       writeState(engine, start);
-      run(engine, child, 1, expected, exit(1, 1), `actual literal ${fixture.name}/${value}/flags${flags}`, narrow(fixture.width, 0, value));
+      run(engine, child, 1, expected, exit(1, 1), `actual literal ${fixture.name}/${value}/flags${flags}`, cpuNarrow(fixture.width, 0, value));
     }
   }
 }
@@ -289,22 +296,22 @@ for (const fixture of generic) {
     const start = state(); start.registers[6] = address;
     const expected = copyState(start); expected.registers[0] = conversion(fixture.kind, value, fixture.width); expected.eip += 3;
     writeState(engine, start);
-    run(engine, child, 1, expected, exit(1, 1), `actual no-overfetch ${fixture.name}/${address}`, narrow(fixture.width, 0, value));
+    run(engine, child, 1, expected, exit(1, 1), `actual no-overfetch ${fixture.name}/${address}`, cpuNarrow(fixture.width, 0, value));
   }
 }
 const crossing = boundary.get('sx_word');
 for (const [address, detail, denied] of [[0x4fff, 1, 0x5000], [0xffffffff, 3, 0xffffffff]]) {
   const start = state(); start.registers[6] = address; writeState(crossing.engine, start);
-  run(crossing.engine, crossing.child, 10, start, detail === 3 ? exit(11, 0) : exit(5, 0, detail, denied, 1, 2), `actual narrow fault ${address}`, detail === 3 ? arena(crossing.engine).slice(100, 140) : narrow(2, 1, 0, detail, denied, 1));
+  run(crossing.engine, crossing.child, 10, start, detail === 3 ? exit(11, 0) : exit(5, 0, detail, denied, 1, 2), `actual narrow fault ${address}`, detail === 3 ? arena(crossing.engine).slice(100, 140) : cpuNarrow(2, 1, 0, detail, denied, 1));
 }
 assert.equal(crossing.engine.api.map(0x5000, 1, 2), 0);
 upload(crossing.engine, 0x5000, Uint8Array.from([1]));
 const deniedStart = state(); deniedStart.registers[6] = 0x4fff;
 writeState(crossing.engine, deniedStart);
-run(crossing.engine, crossing.child, 10, deniedStart, exit(5, 0, 2, 0x5000, 1, 2), 'actual word crossing into write-only page', narrow(2, 1, 0, 2, 0x5000, 1));
+run(crossing.engine, crossing.child, 10, deniedStart, exit(5, 0, 2, 0x5000, 1, 2), 'actual word crossing into write-only page', cpuNarrow(2, 1, 0, 2, 0x5000, 1));
 assert.equal(crossing.engine.api.protect(0x5000, 1, 1), 0);
 const crossingSuccess = copyState(deniedStart); crossingSuccess.registers[0] = 0x180; crossingSuccess.eip += 3;
-run(crossing.engine, crossing.child, 1, crossingSuccess, exit(1, 1), 'actual repaired word resumes same EA once across page', narrow(2, 0, 0x180));
+run(crossing.engine, crossing.child, 1, crossingSuccess, exit(1, 1), 'actual repaired word resumes same EA once across page', cpuNarrow(2, 0, 0x180));
 continuations++;
 
 {
@@ -313,7 +320,7 @@ continuations++;
   const start = state(); start.registers[3] = 0xffffffff; start.registers[6] = 1;
   const expected = copyState(start); expected.registers[1] = 0xffffff80; expected.eip += 5;
   writeState(engine, start);
-  run(engine, child, 1, expected, exit(1, 1), 'actual old-EA modulo wrap before narrow request', narrow(1, 0, 0x80));
+  run(engine, child, 1, expected, exit(1, 1), 'actual old-EA modulo wrap before narrow request', cpuNarrow(1, 0, 0x80));
 }
 
 function directRead(engine, width, address, record, status = 0) {
@@ -348,17 +355,17 @@ function directRead(engine, width, address, record, status = 0) {
   const stopped = copyState(start); stopped.registers[0] = 3; stopped.eip = 0x1004;
   writeState(engine, start);
   run(engine, child, 0, start, exit(1, 0), 'budget0 before narrow helper/prefix', arena(engine).slice(100, 140));
-  run(engine, child, 10, stopped, exit(5, 1, 1, 0x9000, 1, 2), 'committed LEA prefix survives precise word fault', narrow(2, 1, 0, 1, 0x9000, 1)); continuations++;
+  run(engine, child, 10, stopped, exit(5, 1, 1, 0x9000, 1, 2), 'committed LEA prefix survives precise word fault', cpuNarrow(2, 1, 0, 1, 0x9000, 1)); continuations++;
   refresh(engine).view.setUint32(engine.base + 96, 1, true);
-  run(engine, child, 0, stopped, exit(2, 0), 'cancel outranks zero budget at failed extension', narrow(2, 1, 0, 1, 0x9000, 1)); continuations++;
+  run(engine, child, 0, stopped, exit(2, 0), 'cancel outranks zero budget at failed extension', cpuNarrow(2, 1, 0, 1, 0x9000, 1)); continuations++;
   engine.view.setUint32(engine.base + 96, 0, true);
-  run(engine, child, 1, stopped, exit(5, 0, 1, 0x9000, 1, 2), 'unrepaired fault retry retires no prefix again', narrow(2, 1, 0, 1, 0x9000, 1)); continuations++;
+  run(engine, child, 1, stopped, exit(5, 0, 1, 0x9000, 1, 2), 'unrepaired fault retry retires no prefix again', cpuNarrow(2, 1, 0, 1, 0x9000, 1)); continuations++;
   assert.equal(engine.api.map(0x9000, 1, 3), 0); upload(engine, 0x9000, Uint8Array.from([0, 0x80]));
   const repaired = copyState(stopped); repaired.registers[2] = 0xffff8000; repaired.eip = 0x1007;
-  run(engine, child, 1, repaired, exit(1, 1), 'budget1 repaired extension commits destination once', narrow(2, 0, 0x8000)); continuations++;
+  run(engine, child, 1, repaired, exit(1, 1), 'budget1 repaired extension commits destination once', cpuNarrow(2, 0, 0x8000)); continuations++;
   const next = copyState(repaired); next.eip++;
-  run(engine, child, 1, next, exit(1, 1), 'interior successor resumes after extension', narrow(2, 0, 0x8000)); continuations++;
-  run(engine, child, 1, next, exit(3, 0), 'unknown continuation retires no extra instruction', narrow(2, 0, 0x8000)); continuations++;
+  run(engine, child, 1, next, exit(1, 1), 'interior successor resumes after extension', cpuNarrow(2, 0, 0x8000)); continuations++;
+  run(engine, child, 1, next, exit(3, 0), 'unknown continuation retires no extra instruction', cpuNarrow(2, 0, 0x8000)); continuations++;
 }
 
 {
@@ -373,7 +380,7 @@ function directRead(engine, width, address, record, status = 0) {
     const start = state(0x1200); start.registers[6] = 0x4000;
     const expected = copyState(start); expected.registers[0] = literal; expected.registers[2] = Number(BigInt.asUintN(32, convertedByte)); expected.registers[3] = Number(BigInt.asUintN(32, convertedWord)); expected.registers[7] = tail; expected.eflags = flags; expected.eip = 0x1500;
     writeState(engine, start);
-    run(engine, child, 8, expected, exit(8, 7, 308, 0, 0, 0, 3), `actual resident narrow input composition ${byte}/${signedByte}/${word}`, narrow(2, 0, tail));
+    run(engine, child, 8, expected, exit(8, 7, 308, 0, 0, 0, 6), `actual resident narrow input composition ${byte}/${signedByte}/${word}`, cpuNarrow(2, 0, tail));
   }
 }
 
@@ -384,16 +391,16 @@ function changed(record, offset, value, size = 4) {
   return result;
 }
 function scriptedCases(width) {
-  const success = narrow(width, 0, width === 1 ? 255 : 65535), fault = narrow(width, 1, 0, 1, 0x9000, 1), infrastructure = narrow(width, 2, 0, 1);
+  const success = cpuNarrow(width, 0, width === 1 ? 255 : 65535), fault = cpuNarrow(width, 1, 0, 1, 0x9000, 1), infrastructure = cpuNarrow(width, 2, 0, 1);
   const protocol = exit(7, 1, 2), rejected = exit(7, 1, 3);
   const cases = [
     {label: 'canonical success exact unsigned maximum', record: success, success: true},
     {label: 'canonical unmapped request byte', record: fault, expected: exit(5, 1, 1, 0x9000, 1, width)},
     {label: 'canonical infrastructure version exhaustion', record: infrastructure, expected: exit(7, 1, 1)},
-    {label: 'canonical other memory infrastructure', record: narrow(width, 2, 0, 2), expected: rejected},
-    ...[[0, 0, 4, 'magic'], [4, 1, 2, 'version'], [6, 2, 2, 'profile'], [8, 39, 4, 'length'], [12, 1, 4, 'reserved']].map(([offset, value, size, label]) => ({label: `invalid v2 ${label}`, record: changed(success, offset, value, size)})),
+    {label: 'canonical other memory infrastructure', record: cpuNarrow(width, 2, 0, 2), expected: rejected},
+    ...[[0, 0, 4, 'magic'], [4, 1, 2, 'version'], [6, 2, 2, 'profile'], [8, 39, 4, 'length'], [12, 1, 4, 'reserved']].map(([offset, value, size, label]) => ({label: `invalid current CPU ${label}`, record: changed(success, offset, value, size)})),
     ...[[success, 'success'], [fault, 'fault'], [infrastructure, 'infrastructure']].map(([record, label]) => ({label: `wrong requested width on ${label}`, record: changed(record, 36, width === 1 ? 2 : 1)})),
-    {label: 'legacy width4 is excluded from narrow result', record: changed(success, 36, 4)},
+    {label: 'current width4 is excluded from requested narrow result', record: changed(success, 36, 4)},
     {label: 'value exceeds requested width', record: changed(success, 20, width === 1 ? 256 : 65536)},
     ...[[24, 'detail'], [28, 'fault byte'], [32, 'access']].map(([offset, label]) => ({label: `nonzero success ${label}`, record: changed(success, offset, 1)})),
     {label: 'unknown result tag', record: changed(success, 16, 3)},
@@ -402,7 +409,7 @@ function scriptedCases(width) {
     {label: 'fault access must be read', record: changed(fault, 32, 2)},
     {label: 'fault byte precedes request', record: changed(fault, 28, 0x8fff)},
     {label: 'fault byte is after requested span', record: changed(fault, 28, 0x9000 + width)},
-    {label: 'false request overflow', record: narrow(width, 1, 0, 3, 0x9000, 1)},
+    {label: 'false request overflow', record: cpuNarrow(width, 1, 0, 3, 0x9000, 1)},
     ...[[20, 'value'], [28, 'fault byte'], [32, 'access']].map(([offset, label]) => ({label: `nonzero infrastructure ${label}`, record: changed(infrastructure, offset, 1)})),
     {label: 'unknown infrastructure detail', record: changed(infrastructure, 24, 3)},
     {label: 'read lifecycle rejection is terminal infrastructure', status: 5, record: success, expected: rejected},
@@ -410,11 +417,11 @@ function scriptedCases(width) {
     {label: 'store committed status11 is rejected before parsing malformed read result', status: 11, record: changed(success, 0, 0), expected: rejected},
   ];
   if (width === 2) cases.push(
-    {label: 'terminal fault byte lies in nonoverflowing request', address: 0xfffffffe, record: narrow(2, 1, 0, 1, 0xffffffff, 1), expected: exit(5, 1, 1, 0xffffffff, 1, 2)},
-    {label: 'true request overflow', address: 0xffffffff, record: narrow(2, 1, 0, 3, 0xffffffff, 1), expected: exit(5, 1, 3, 0xffffffff, 1, 2)},
-    {label: 'overflowing request cannot report success', address: 0xffffffff, record: narrow(2, 0, 0)},
-    {label: 'overflowing request cannot report unmapped', address: 0xffffffff, record: narrow(2, 1, 0, 1, 0xffffffff, 1)},
-    {label: 'overflow fault byte must equal original request', address: 0xffffffff, record: narrow(2, 1, 0, 3, 0xfffffffe, 1)},
+    {label: 'terminal fault byte lies in nonoverflowing request', address: 0xfffffffe, record: cpuNarrow(2, 1, 0, 1, 0xffffffff, 1), expected: exit(5, 1, 1, 0xffffffff, 1, 2)},
+    {label: 'true request overflow', address: 0xffffffff, record: cpuNarrow(2, 1, 0, 3, 0xffffffff, 1), expected: exit(5, 1, 3, 0xffffffff, 1, 2)},
+    {label: 'overflowing request cannot report success', address: 0xffffffff, record: cpuNarrow(2, 0, 0)},
+    {label: 'overflowing request cannot report unmapped', address: 0xffffffff, record: cpuNarrow(2, 1, 0, 1, 0xffffffff, 1)},
+    {label: 'overflow fault byte must equal original request', address: 0xffffffff, record: cpuNarrow(2, 1, 0, 3, 0xfffffffe, 1)},
   );
   return cases.map(test => ({status: 0, address: 0x9000, expected: protocol, ...test,
     ...(test.address === 0xffffffff && width === 2 ? {segmentFault: true, expected: exit(11, 1)} : {})}));
@@ -424,7 +431,7 @@ const scriptedEvidence = [];
 for (const width of [1, 2]) {
   const engine = fresh(), actual = compile(engine, assembled.get(width === 1 ? 'scripted_byte' : 'scripted_word').bytes, undefined, [width === 1 ? 'read8' : 'read16']);
   const injector = new WebAssembly.Instance(injectorModule, {env: {memory: engine.memory}, ring3: {guard: engine.api.guard}});
-  const injected = new WebAssembly.Instance(actual.module, {env: {memory: engine.memory}, ring3: {guard: injector.exports.guard, read8: injector.exports.read8, read16: injector.exports.read16}});
+  const injected = new WebAssembly.Instance(actual.module, {env: {memory: engine.memory}, ring3: {guard: injector.exports.guard, cpu_read8: injector.exports.read8, cpu_read16: injector.exports.read16}});
   const child = {...actual, run: injected.exports.run};
   const cases = scriptedCases(width);
   for (const test of cases) {
@@ -450,7 +457,9 @@ for (const width of [1, 2]) {
   }
 }
 
+const cpuSourcePaths=['engine/src/abi/memory_helper/cpu.rs', 'engine/src/cpu/dbt/wasm/memory/cpu_scalar.rs', 'engine/src/cpu/dbt/wasm/emitter.rs', 'engine/src/cpu/dbt/wasm/code_fetch.rs', 'engine/src/process/memory/cpu_scalar.rs', 'engine/src/process/memory/scalar/cpu_write.rs', 'engine/src/process/wasm/memory/cpu_write.rs', 'engine/src/abi/wasm/exports/memory/cpu_write.rs'];
 const provenance = {
+  cpu_source_sha256: Object.fromEntries(cpuSourcePaths.map(path => [path, hash(readFileSync(join(root, path)))])),
   claim: 'Own embedded baseline Wasm memory-source MOVZX/MOVSX32 with actual engine read8/read16 and precise width1/2 faults; scripted pure-Wasm helper protocol evidence is separate. No host helper callbacks, intermediate host CPU edits, hardware flags, performance or full P2-V0 claim.',
   generated_modules: modules, actual_engine_cpu_calls: actualRuns, actual_engine_direct_helper_calls: helperProbes, continuation_calls: continuations, pure_wasm_scripted_cpu_calls: injectedRuns,
   llvm_symbols: llvm, scripted_cases: scriptedEvidence,

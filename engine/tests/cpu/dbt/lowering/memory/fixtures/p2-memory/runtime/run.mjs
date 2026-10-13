@@ -1,3 +1,4 @@
+import {ARENA_SIZE} from '../../../../../../../support/wasm/arena.mjs';
 import assert from 'node:assert/strict';
 import {execFileSync, spawnSync} from 'node:child_process';
 import {createHash} from 'node:crypto';
@@ -11,7 +12,7 @@ assert.ok(WebAssembly.validate(engineBytes), 'actual engine validates');
 assert.ok(WebAssembly.validate(injectorBytes), 'pure-Wasm helper injector validates');
 const engineModule = new WebAssembly.Module(engineBytes), injectorModule = new WebAssembly.Module(injectorBytes);
 assert.deepEqual(WebAssembly.Module.imports(engineModule), [], 'engine has no JS imports');
-const names = ['open', 'close', 'arena_ptr', 'map', 'protect', 'unmap', 'upload', 'compile', 'generation', 'module_ptr', 'module_len', 'guard', 'read32', 'write32', 'store32'];
+const names = ['open', 'close', 'arena_ptr', 'map', 'protect', 'unmap', 'upload', 'compile', 'generation', 'module_ptr', 'module_len', 'guard', 'read32', 'write32', 'store32', 'cpu_read32', 'cpu_store32'];
 let keys = 0n, modules = 0, actualRuns = 0, injectedRuns = 0, resumes = 0, storeProbes = 0;
 const generatedHashes = [];
 
@@ -51,13 +52,13 @@ function fresh() {
   assert.equal(api.open(12, engine.low, engine.high), 0);
   engine.base = api.arena_ptr() >>> 0;
   refresh(engine);
-  assert.ok(engine.base > 0 && engine.base + 4236 <= engine.bytes.length);
+  assert.ok(engine.base > 0 && engine.base + ARENA_SIZE <= engine.bytes.length);
   assert.equal(api.map(0x1000, 1, 7), 0);
   return engine;
 }
 
 function arena(engine) {
-  return refresh(engine).bytes.slice(engine.base, engine.base + 4236);
+  return refresh(engine).bytes.slice(engine.base, engine.base + ARENA_SIZE);
 }
 
 function upload(engine, address, bytes) {
@@ -82,6 +83,11 @@ function helperRecord(tag, value = 0, detail = 0, address = 0, access = 0, lengt
   return bytes;
 }
 
+function cpuHelperRecord(tag, value = 0, detail = 0, address = 0, access = 0, width = 4) {
+  const bytes = helperRecord(tag, value, detail, address, access, width), view = new DataView(bytes.buffer);
+  view.setUint16(4, 10, true); return bytes;
+}
+
 function guestValue(engine, address) {
   assert.equal(engine.api.read32(address), 0, 'actual guest observation helper');
   refresh(engine);
@@ -95,6 +101,7 @@ function word(engine, address, value) {
 }
 
 function compile(engine, bytes, blocks = [[0x1000, bytes.length]], expectedHelpers = []) {
+  expectedHelpers = expectedHelpers.map(name => {assert.ok(['read32', 'store32'].includes(name)); return 'cpu_' + name;});
   if (bytes.length !== 0) upload(engine, 0x1000, bytes);
   refresh(engine);
   blocks.forEach(([entry, length], index) => {
@@ -116,7 +123,7 @@ function compile(engine, bytes, blocks = [[0x1000, bytes.length]], expectedHelpe
   assert.deepEqual(sortedImports(module), expected, 'module imports exactly needed actual Wasm helpers');
   const instance = new WebAssembly.Instance(module, {
     env: {memory: engine.memory},
-    ring3: {guard: engine.api.guard, read32: engine.api.read32, store32: engine.api.store32},
+    ring3: {guard: engine.api.guard, cpu_read32: engine.api.cpu_read32, cpu_store32: engine.api.cpu_store32},
   });
   modules++;
   generatedHashes.push(hash(encoded));
@@ -155,7 +162,7 @@ function readState(engine) {
 
 function exit(reason, retired, detail = 0, address = 0, access = 0, length = reason === 5 ? 4 : 0) {
   const bytes = new Uint8Array(40), view = new DataView(bytes.buffer);
-  header(bytes, view, 0, 'R3EX', 40, reason === 11 || reason === 15 ? 6 : 2);
+  header(bytes, view, 0, 'R3EX', 40, 6);
   [reason, retired, detail, address, access, length].forEach((field, index) => view.setUint32(16 + index * 4, field, true));
   return bytes;
 }
@@ -249,7 +256,7 @@ for (const fixture of literals) {
     if (!store) expected.registers[0] = loaded;
     expected.eip += fixture.bytes.length;
     writeState(engine, start);
-    run(engine, child, 1, expected, exit(1, 1), `literal ${fixture.name}/flags${flags}`, helperRecord(0, store ? 0 : loaded));
+    run(engine, child, 1, expected, exit(1, 1), `literal ${fixture.name}/flags${flags}`, cpuHelperRecord(0, store ? 0 : loaded));
     if (store) assert.equal(guestValue(engine, fixture.address), fixture.value ?? start.registers[fixture.source], `${fixture.name}: store source uses old locals`);
     assert.equal(engine.api.guard(engine.low, engine.high, child.generation, engine.base, engine.base + 56, engine.base + 96), 0, `${fixture.name}: unrelated data store preserves code`);
   }
@@ -267,7 +274,7 @@ for (const [address, permissions, label] of [[0x4ffe, 3, 'unaligned cross-page']
   expected.registers[2] = start.registers[0];
   expected.eip = 0x1004;
   writeState(engine, start);
-  run(engine, child, 3, expected, exit(3, 2), label, helperRecord(0, start.registers[0]));
+  run(engine, child, 3, expected, exit(3, 2), label, cpuHelperRecord(0, start.registers[0]));
   assert.equal(guestValue(engine, address), start.registers[0]);
 }
 
@@ -305,7 +312,7 @@ for (const fault of faultCases) {
     expected.eip = 0x1007;
     writeState(engine, start);
     const access = store ? 2 : 1;
-    run(engine, child, 20, expected, fault.detail === 3 ? exit(11, 2) : exit(5, 2, fault.detail, fault.fault, access), `${fault.name}/${store ? 'store' : 'load'}`, fault.detail === 3 ? helperRecord(0) : helperRecord(1, 0, fault.detail, fault.fault, access));
+    run(engine, child, 20, expected, fault.detail === 3 ? exit(11, 2) : exit(5, 2, fault.detail, fault.fault, access), `${fault.name}/${store ? 'store' : 'load'}`, fault.detail === 3 ? cpuHelperRecord(0) : cpuHelperRecord(1, 0, fault.detail, fault.fault, access));
     assert.equal(guestValue(engine, 0x6000), start.registers[0], 'prior committed data store survives later fault');
     if (store && fault.name === 'write permission') assert.equal(guestValue(engine, 0x4000), 0x11223344, 'write-permission fault preserves the exact attempted word');
     if (store && fault.name === 'second-page write permission') assert.equal(guestValue(engine, 0x5000), 0x55667788, 'cross-page permission fault preserves second-page bytes');
@@ -327,7 +334,7 @@ for (const store of [false, true]) {
   expected.eip = 0x1008;
   writeState(engine, start);
   const access = store ? 2 : 1;
-  run(engine, child, 20, expected, exit(5, 2, 1, 0x9000, access), `computed ADD flags survive ${store ? 'store' : 'load'} fault`, helperRecord(1, 0, 1, 0x9000, access));
+  run(engine, child, 20, expected, exit(5, 2, 1, 0x9000, access), `computed ADD flags survive ${store ? 'store' : 'load'} fault`, cpuHelperRecord(1, 0, 1, 0x9000, access));
 }
 
 const oracleSource = join(fixtureRoot, 'oracle/native.c'), oraclePath = join(outputDir, 'ram_oracle');
@@ -365,7 +372,7 @@ for (const [count, seed] of nativeInputs) {
   expected.eip = 0x1018;
   expected.eflags = 0x446;
   writeState(engine, start);
-  run(engine, child, native.retired + 10, expected, exit(3, native.retired), `actual RAM/native algorithm ${count}/${seed}`, helperRecord(0));
+  run(engine, child, native.retired + 10, expected, exit(3, native.retired), `actual RAM/native algorithm ${count}/${seed}`, cpuHelperRecord(0));
   assert.equal(guestValue(engine, 0x6000), native.sum, 'native result stored in actual guest RAM');
 }
 for (const args of [[], ['1'], ['-1', '0'], ['257', '0'], ['1x', '0'], ['1', '4294967296'], ['1', ' 0'], ['1', '0', 'extra']]) {
@@ -420,7 +427,7 @@ assert.equal(guestValue(resumed.engine, 0x6000), resumedExpected.registers[0]);
   writeState(engine, start);
   const afterStore = copyState(start);
   afterStore.eip = 0x1002;
-  run(engine, child, 1, afterStore, exit(1, 1), 'store checkpoint', helperRecord(0));
+  run(engine, child, 1, afterStore, exit(1, 1), 'store checkpoint', cpuHelperRecord(0));
   word(engine, 0x4000, 0x33333333);
   refresh(engine).view.setUint32(engine.base + 96, 1, true);
   run(engine, child, 10, afterStore, exit(2, 0), 'cancel between store and load', helperRecord(0));
@@ -428,7 +435,7 @@ assert.equal(guestValue(resumed.engine, 0x6000), resumedExpected.registers[0]);
   const finished = copyState(afterStore);
   finished.registers[2] = 0x33333333;
   finished.eip = 0x1004;
-  run(engine, child, 2, finished, exit(3, 1), 'resume skips already committed store', helperRecord(0, 0x33333333));
+  run(engine, child, 2, finished, exit(3, 1), 'resume skips already committed store', cpuHelperRecord(0, 0x33333333));
   assert.equal(guestValue(engine, 0x4000), 0x33333333, 'resume did not repeat store');
 }
 
@@ -438,7 +445,7 @@ assert.equal(guestValue(resumed.engine, 0x6000), resumedExpected.registers[0]);
   const start = state(), afterStore = copyState(start);
   afterStore.eip = 0x100a;
   writeState(engine, start);
-  run(engine, child, 1, afterStore, exit(6, 1), 'active SMC commits store and exits before old next instruction', helperRecord(0));
+  run(engine, child, 1, afterStore, exit(6, 1), 'active SMC commits store and exits before old next instruction', cpuHelperRecord(0));
   assert.equal(guestValue(engine, 0x100b), 0x44332211, 'SMC changed actual future instruction immediate');
   assert.equal(engine.api.module_ptr(), 0);
   assert.equal(engine.api.module_len(), 0);
@@ -465,7 +472,7 @@ for (const identical of [false, true]) {
   const expected = copyState(start);
   expected.eip = 0x1002;
   writeState(engine, start);
-  run(engine, child, 1, expected, exit(6, 1), `conservative code-page store/identical${identical}`, helperRecord(0));
+  run(engine, child, 1, expected, exit(6, 1), `conservative code-page store/identical${identical}`, cpuHelperRecord(0));
   assert.equal(guestValue(engine, 0x1ff0), start.registers[0]);
 }
 
@@ -477,7 +484,7 @@ for (const identical of [false, true]) {
   start.registers[0] = 0xffffffff;
   start.registers[3] = 0x1ffe;
   writeState(engine, start);
-  run(engine, child, 5, start, exit(5, 0, 1, 0x2000, 2), 'faulting store on code page does not invalidate', helperRecord(1, 0, 1, 0x2000, 2));
+  run(engine, child, 5, start, exit(5, 0, 1, 0x2000, 2), 'faulting store on code page does not invalidate', cpuHelperRecord(1, 0, 1, 0x2000, 2));
   assert.equal(guestValue(engine, 0x1ffc), 0x11223344);
   assert.equal(engine.api.guard(engine.low, engine.high, child.generation, engine.base, engine.base + 56, engine.base + 96), 0);
 }
@@ -521,43 +528,43 @@ function altered(record, offset, value, width = 4) {
   return bytes;
 }
 const injectionCases = [
-  {name: 'version exhaustion', record: helperRecord(2, 0, 1), detail: 1},
-  {name: 'other returned infrastructure', record: helperRecord(2, 0, 2), detail: 3},
-  {name: 'unknown tag', record: helperRecord(3), detail: 2},
-  {name: 'unknown infrastructure detail', record: helperRecord(2, 0, 3), detail: 2},
-  {name: 'success detail', record: helperRecord(0, 0, 1), detail: 2},
-  {name: 'success address', record: helperRecord(0, 0, 0, 0x9000), detail: 2},
-  {name: 'success access', record: helperRecord(0, 0, 0, 0, 1), detail: 2},
-  {name: 'success length', record: helperRecord(0, 0, 0, 0, 0, 4), detail: 2},
-  {name: 'fault value', record: helperRecord(1, 1, 1, 0x9000, 1), detail: 2, loadOnly: true},
-  {name: 'fault detail', record: helperRecord(1, 0, 4, 0x9000, 1), detail: 2, loadOnly: true},
-  {name: 'fault wrong access', record: helperRecord(1, 0, 1, 0x9000, 2), detail: 2, loadOnly: true},
-  {name: 'fault wrong width', record: helperRecord(1, 0, 1, 0x9000, 1, 2), detail: 2, loadOnly: true},
-  {name: 'fault outside access', record: helperRecord(1, 0, 1, 0x9004, 1), detail: 2, loadOnly: true},
-  {name: 'fault before access', record: helperRecord(1, 0, 1, 0x8fff, 1), detail: 2, loadOnly: true},
-  {name: 'false overflow', record: helperRecord(1, 0, 3, 0x9000, 1), detail: 2, loadOnly: true},
-  {name: 'reported nonoverflow fault wraps canonical width', record: helperRecord(1, 0, 1, 0xffffffff, 1), address: 0xfffffffc, detail: 2, loadOnly: true},
-  {name: 'infra value', record: helperRecord(2, 1, 1), detail: 2},
-  {name: 'infra fault fields', record: helperRecord(2, 0, 1, 0x9000, 1, 4), detail: 2},
-  {name: 'closed helper status', record: helperRecord(0), status: 5, detail: 3},
-  {name: 'reentrant helper status', record: helperRecord(0), status: 9, detail: 3},
-  {name: 'missing artifact helper status', record: helperRecord(0), status: 3, detail: 3},
-  {name: 'stale helper status', record: helperRecord(0), status: 4, detail: 3},
-  {name: 'unknown helper status', record: helperRecord(0), status: 12, detail: 3},
-  {name: 'read completion11 rejected', record: helperRecord(0), status: 11, detail: 3, loadOnly: true},
-  {name: 'store success value', record: helperRecord(0, 1), detail: 2, storeOnly: true},
-  {name: 'store11 fault contradiction', record: helperRecord(1, 0, 1, 0x9000, 2), status: 11, detail: 2, storeOnly: true},
-  {name: 'store11 infrastructure contradiction', record: helperRecord(2, 0, 1), status: 11, detail: 2, storeOnly: true},
+  {name: 'version exhaustion', record: cpuHelperRecord(2, 0, 1), detail: 1},
+  {name: 'other returned infrastructure', record: cpuHelperRecord(2, 0, 2), detail: 3},
+  {name: 'unknown tag', record: cpuHelperRecord(3), detail: 2},
+  {name: 'unknown infrastructure detail', record: cpuHelperRecord(2, 0, 3), detail: 2},
+  {name: 'success detail', record: cpuHelperRecord(0, 0, 1), detail: 2},
+  {name: 'success address', record: cpuHelperRecord(0, 0, 0, 0x9000), detail: 2},
+  {name: 'success access', record: cpuHelperRecord(0, 0, 0, 0, 1), detail: 2},
+  {name: 'success wrong current width', record: cpuHelperRecord(0, 0, 0, 0, 0, 2), detail: 2},
+  {name: 'fault value', record: cpuHelperRecord(1, 1, 1, 0x9000, 1), detail: 2, loadOnly: true},
+  {name: 'fault detail', record: cpuHelperRecord(1, 0, 4, 0x9000, 1), detail: 2, loadOnly: true},
+  {name: 'fault wrong access', record: cpuHelperRecord(1, 0, 1, 0x9000, 2), detail: 2, loadOnly: true},
+  {name: 'fault wrong width', record: cpuHelperRecord(1, 0, 1, 0x9000, 1, 2), detail: 2, loadOnly: true},
+  {name: 'fault outside access', record: cpuHelperRecord(1, 0, 1, 0x9004, 1), detail: 2, loadOnly: true},
+  {name: 'fault before access', record: cpuHelperRecord(1, 0, 1, 0x8fff, 1), detail: 2, loadOnly: true},
+  {name: 'false overflow', record: cpuHelperRecord(1, 0, 3, 0x9000, 1), detail: 2, loadOnly: true},
+  {name: 'current in-span final-byte fault accepted', record: cpuHelperRecord(1, 0, 1, 0xffffffff, 1), address: 0xfffffffc, architecturalFault: true, loadOnly: true},
+  {name: 'infra value', record: cpuHelperRecord(2, 1, 1), detail: 2},
+  {name: 'infra fault fields', record: cpuHelperRecord(2, 0, 1, 0x9000, 1, 4), detail: 2},
+  {name: 'closed helper status', record: cpuHelperRecord(0), status: 5, detail: 3},
+  {name: 'reentrant helper status', record: cpuHelperRecord(0), status: 9, detail: 3},
+  {name: 'missing artifact helper status', record: cpuHelperRecord(0), status: 3, detail: 3},
+  {name: 'stale helper status', record: cpuHelperRecord(0), status: 4, detail: 3},
+  {name: 'unknown helper status', record: cpuHelperRecord(0), status: 12, detail: 3},
+  {name: 'read completion11 rejected', record: cpuHelperRecord(0), status: 11, detail: 3, loadOnly: true},
+  {name: 'store success value', record: cpuHelperRecord(0, 1), detail: 2, storeOnly: true},
+  {name: 'store11 fault contradiction', record: cpuHelperRecord(1, 0, 1, 0x9000, 2), status: 11, detail: 2, storeOnly: true},
+  {name: 'store11 infrastructure contradiction', record: cpuHelperRecord(2, 0, 1), status: 11, detail: 2, storeOnly: true},
 ];
 for (const [offset, width, value, name] of [[0, 1, 0, 'magic'], [4, 2, 2, 'version'], [6, 2, 2, 'profile'], [8, 4, 39, 'length'], [12, 4, 1, 'reserved']]) {
-  injectionCases.push({name: `header ${name}`, record: altered(helperRecord(0), offset, value, width), detail: 2});
+  injectionCases.push({name: `header ${name}`, record: altered(cpuHelperRecord(0), offset, value, width), detail: 2});
 }
 for (const store of [false, true]) {
   const engine = fresh();
   const bytes = Uint8Array.from([0xbe, 0x78, 0x56, 0x34, 0x12, store ? 0x89 : 0x8b, store ? 0x03 : 0x13, 0xb9, 0x99, 0x99, 0x99, 0x99]);
   const actual = compile(engine, bytes, undefined, [store ? 'store32' : 'read32']);
   const injector = new WebAssembly.Instance(injectorModule, {env: {memory: engine.memory}, ring3: {guard: engine.api.guard}}).exports;
-  const injected = new WebAssembly.Instance(actual.module, {env: {memory: engine.memory}, ring3: {guard: injector.guard, read32: injector.read32, store32: injector.store32}}).exports;
+  const injected = new WebAssembly.Instance(actual.module, {env: {memory: engine.memory}, ring3: {guard: injector.guard, cpu_read32: injector.read32, cpu_store32: injector.store32}}).exports;
   for (const fixture of injectionCases) {
     if ((store && fixture.loadOnly) || (!store && fixture.storeOnly)) continue;
     const start = state();
@@ -568,7 +575,7 @@ for (const store of [false, true]) {
     writeState(engine, start);
     refresh(engine).bytes.set(fixture.record, engine.base + 140);
     injector.configure(engine.base + 100, engine.base + 140, fixture.status ?? 0);
-    run(engine, injected, 10, expected, exit(7, 1, fixture.detail), `synthetic Wasm helper branch/${store ? 'store' : 'load'}/${fixture.name}`, undefined, true);
+    run(engine, injected, 10, expected, fixture.architecturalFault ? exit(5, 1, 1, 0xffffffff, 1) : exit(7, 1, fixture.detail), `synthetic Wasm helper branch/${store ? 'store' : 'load'}/${fixture.name}`, fixture.architecturalFault ? fixture.record : undefined, true);
     assert.equal(injector.calls(), 1, 'synthetic helper invoked once after committed prefix');
     assert.equal(engine.api.guard(engine.low, engine.high, actual.generation, engine.base, engine.base + 56, engine.base + 96), 0, 'injector did not mutate actual guest code');
   }
@@ -585,7 +592,7 @@ for (const store of [false, true]) {
   const bytes = Uint8Array.from([0xb8, 0xff, 0xff, 0xff, 0xff, 0x83, 0xc0, 1, 0x8b, 0x13, 0xb9, 0x99, 0x99, 0x99, 0x99]);
   const actual = compile(engine, bytes, undefined, ['read32']);
   const injector = new WebAssembly.Instance(injectorModule, {env: {memory: engine.memory}, ring3: {guard: engine.api.guard}}).exports;
-  const injected = new WebAssembly.Instance(actual.module, {env: {memory: engine.memory}, ring3: {guard: injector.guard, read32: injector.read32}}).exports;
+  const injected = new WebAssembly.Instance(actual.module, {env: {memory: engine.memory}, ring3: {guard: injector.guard, cpu_read32: injector.read32}}).exports;
   const start = state();
   start.registers[3] = 0x9000;
   const expected = copyState(start);
@@ -593,14 +600,16 @@ for (const store of [false, true]) {
   expected.eflags = 0x457;
   expected.eip = 0x1008;
   writeState(engine, start);
-  const record = helperRecord(2, 0, 1);
+  const record = cpuHelperRecord(2, 0, 1);
   refresh(engine).bytes.set(record, engine.base + 140);
   injector.configure(engine.base + 100, engine.base + 140, 0);
   run(engine, injected, 20, expected, exit(7, 2, 1), 'synthetic VersionExhausted preserves computed ADD flags', record, true);
   assert.equal(injector.calls(), 1);
 }
 
+const cpuSourcePaths=['engine/src/abi/memory_helper/cpu.rs', 'engine/src/cpu/dbt/wasm/memory/cpu_scalar.rs', 'engine/src/cpu/dbt/wasm/emitter.rs', 'engine/src/cpu/dbt/wasm/code_fetch.rs', 'engine/src/process/memory/cpu_scalar.rs', 'engine/src/process/memory/scalar/cpu_write.rs', 'engine/src/process/wasm/memory/cpu_write.rs', 'engine/src/abi/wasm/exports/memory/cpu_write.rs'];
 const provenance = {
+  cpu_source_sha256: Object.fromEntries(cpuSourcePaths.map(path => [path, hash(readFileSync(join(root, path)))])),
   engine_sha256: hash(engineBytes), injector_sha256: hash(injectorBytes), generated_modules: modules,
   actual_engine_runs: actualRuns, synthetic_helper_runs: injectedRuns, store_probes: storeProbes,
   resumes, native_algorithm_cases: nativeInputs.length, native_invalid_inputs: 8,

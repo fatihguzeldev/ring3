@@ -1,3 +1,4 @@
+import {ARENA_SIZE} from '../../../../../../../support/wasm/arena.mjs';
 import assert from 'node:assert/strict';
 import {execFileSync} from 'node:child_process';
 import {createHash} from 'node:crypto';
@@ -10,7 +11,7 @@ const engineBytes = readFileSync(enginePath);
 assert.ok(WebAssembly.validate(engineBytes), 'actual engine validates');
 const engineModule = new WebAssembly.Module(engineBytes);
 assert.deepEqual(WebAssembly.Module.imports(engineModule), [], 'engine has no JS imports');
-const names = ['open', 'close', 'arena_ptr', 'map', 'protect', 'unmap', 'upload', 'compile', 'compile_with_gates', 'capture_call', 'complete_call', 'abandon_call', 'begin_callback', 'finish_callback', 'abort_callback', 'resume_callback_code', 'compile_entries', 'resume_callback_entries', 'generation', 'module_ptr', 'module_len', 'guard', 'read32', 'write32', 'store32'];
+const names = ['open', 'close', 'arena_ptr', 'map', 'protect', 'unmap', 'upload', 'compile', 'compile_with_gates', 'capture_call', 'complete_call', 'abandon_call', 'begin_callback', 'finish_callback', 'abort_callback', 'resume_callback_code', 'compile_entries', 'resume_callback_entries', 'generation', 'module_ptr', 'module_len', 'guard', 'read32', 'write32', 'store32', 'cpu_read32', 'cpu_store32'];
 let keys = 0n, modules = 0, actualRuns = 0;
 const generatedHashes = [];
 
@@ -45,13 +46,13 @@ function fresh() {
   assert.equal(api.open(12, engine.low, engine.high), 0);
   engine.base = api.arena_ptr() >>> 0;
   refresh(engine);
-  assert.ok(engine.base > 0 && engine.base + 4236 <= engine.bytes.length);
+  assert.ok(engine.base > 0 && engine.base + ARENA_SIZE <= engine.bytes.length);
   assert.equal(api.map(0x1000, 1, 7), 0);
   return engine;
 }
 
 function arena(engine) {
-  return refresh(engine).bytes.slice(engine.base, engine.base + 4236);
+  return refresh(engine).bytes.slice(engine.base, engine.base + ARENA_SIZE);
 }
 
 function upload(engine, address, bytes) {
@@ -74,6 +75,11 @@ function helperRecord(tag, value = 0, detail = 0, address = 0, access = 0, lengt
   header(bytes, view, 0, 'R3MH', 40);
   [tag, value, detail, address, access, length].forEach((field, index) => view.setUint32(16 + index * 4, field, true));
   return bytes;
+}
+
+function cpuHelperRecord(tag, value = 0, detail = 0, address = 0, access = 0, width = 4) {
+  const bytes = helperRecord(tag, value, detail, address, access, width), view = new DataView(bytes.buffer);
+  view.setUint16(4, 10, true); return bytes;
 }
 
 function guestValue(engine, address) {
@@ -105,6 +111,7 @@ function compile(engine, entries, gates, expectedHelpers = []) {
 }
 
 function installedModule(engine, expectedHelpers = ['read32', 'store32']) {
+  expectedHelpers = expectedHelpers.map(name => {assert.ok(['read32', 'store32'].includes(name)); return 'cpu_' + name;});
   refresh(engine);
   const pointer = engine.api.module_ptr() >>> 0, length = engine.api.module_len() >>> 0;
   assert.ok(length > 8);
@@ -119,12 +126,12 @@ function installedModule(engine, expectedHelpers = ['read32', 'store32']) {
   assert.deepEqual(sortedImports(module), expected, 'only actual memory/guard/instruction helpers; no hot gate import');
   const instance = new WebAssembly.Instance(module, {
     env: {memory: engine.memory},
-    ring3: {guard: engine.api.guard, read32: engine.api.read32, store32: engine.api.store32},
+    ring3: {guard: engine.api.guard, cpu_read32: engine.api.cpu_read32, cpu_store32: engine.api.cpu_store32},
   });
   modules++;
   generatedHashes.push(hash(encoded));
   writeFileSync(join(outputDir, `generated-${modules}.wasm`), encoded);
-  return {module, run: instance.exports.run, generation: engine.api.generation() >>> 0};
+  return {cpuScalar: expectedHelpers.length > 0, module, run: instance.exports.run, generation: engine.api.generation() >>> 0};
 }
 
 function state(eip = 0x1000, eflags = 0xcd7) {
@@ -164,6 +171,7 @@ function exit(reason, retired, detail = 0, address = 0, access = 0, length = rea
 }
 
 function run(engine, child, budget, expected, expectedExit, label, expectedHelper = undefined) {
+  if (child.cpuScalar) {expectedExit = expectedExit.slice(); new DataView(expectedExit.buffer).setUint16(4, 6, true);}
   const before = arena(engine);
   assert.equal(child.run(engine.base, engine.base + 56, budget, engine.base + 96), 0, `${label}: canonical runtime exit status`);
   actualRuns++;
@@ -329,7 +337,7 @@ function prepare(values = [7, 9], checkIngress = false) {
   outer.registers[4] = 0x8ff4;
   outer.eip = 0x1100;
   writeState(engine, start); // The only host CPU-state initialization in this instance.
-  run(engine, child, 4, outer, exit(8, 3, outerId), 'actual outer PUSH/PUSH/CALL reaches gate', helperRecord(0));
+  run(engine, child, 4, outer, exit(8, 3, outerId), 'actual outer PUSH/PUSH/CALL reaches gate', cpuHelperRecord(0));
   const callbackState = copyState(outer);
   callbackState.registers[4] = 0x8fe8;
   callbackState.eip = 0x1400;
@@ -350,14 +358,14 @@ function stopAtAbsentCallee(test, singleStepCall = false) {
   stopped.registers[4] -= 4;
   stopped.eip = 0x4000;
   if (singleStepCall) {
-    run(engine, child, 3, arithmetic, exit(1, 3), 'callback arithmetic budget checkpoint before missing CALL', helperRecord(0, values[1]));
+    run(engine, child, 3, arithmetic, exit(1, 3), 'callback arithmetic budget checkpoint before missing CALL', cpuHelperRecord(0, values[1]));
     descriptors(engine, newSeeds, gates);
     fail(engine, () => engine.api.resume_callback_entries(engine.low, engine.high, child.generation, 2, 0, 0), 7, 'counts precede non-NeedCode stop validation');
     fail(engine, () => engine.api.resume_callback_entries(engine.low, engine.high, child.generation, 2, 8, 3), 13, 'Budget stop cannot install replacement');
-    run(engine, child, 1, stopped, exit(1, 1), 'missing CALL writes one return then budget wins at committed callee PC', helperRecord(0));
+    run(engine, child, 1, stopped, exit(1, 1), 'missing CALL writes one return then budget wins at committed callee PC', cpuHelperRecord(0));
     assert.equal(guestValue(engine, stopped.registers[4]), 0x140f);
     run(engine, child, 1, stopped, exit(3, 0), 'positive resume NeedCode does not repeat committed CALL push', helperRecord(0, 0x140f));
-  } else run(engine, child, 5, stopped, exit(3, 4), 'callback real CALL commits before absent-callee NeedCode', helperRecord(0));
+  } else run(engine, child, 5, stopped, exit(3, 4), 'callback real CALL commits before absent-callee NeedCode', cpuHelperRecord(0));
   test.stopped = stopped;
   return stopped;
 }
@@ -440,7 +448,7 @@ for (const [values, singleStepCall] of [[[7, 9], false], [[0xffffffff, 1], true]
   inner.registers[4] -= 8;
   inner.eip = 0x1200;
   inner.eflags = addFlags(test.stopped.registers[0], 3, test.stopped.eflags);
-  run(engine, child, 5, inner, exit(8, 4, innerId), 'new callee ADD/real RET resumes callback PUSH/CALL exactly once', helperRecord(0));
+  run(engine, child, 5, inner, exit(8, 4, innerId), 'new callee ADD/real RET resumes callback PUSH/CALL exactly once', cpuHelperRecord(0));
   capture(test, 3, innerId, inner, 0x1415, [inner.registers[0]]);
   fail(engine, () => engine.api.resume_callback_entries(engine.low, engine.high, child.generation, 2, 0, 0), 12, 'active inner pending precedes replacement counts');
   fail(engine, () => engine.api.compile_entries(0, 0), 12, 'ordinary seed compilation remains Busy across migrated callback');
@@ -455,9 +463,9 @@ for (const [values, singleStepCall] of [[[7, 9], false], [[0xffffffff, 1], true]
   returned.eip = 0x1300;
   if (!singleStepCall) {
     run(engine, child, 1, added, exit(1, 1), 'callback post-inner ADD checkpoint', arena(engine).slice(100, 140));
-    run(engine, child, 1, returned, exit(1, 1), 'migrated real RET8 commits before return-gate budget', helperRecord(0, 0x1300));
-    run(engine, child, 1, returned, exit(8, 0, returnId), 'return gate observes committed RET8 without another pop', helperRecord(0, 0x1300));
-  } else run(engine, child, 3, returned, exit(8, 2, returnId), 'migrated callback reaches distinct return gate through real RET8', helperRecord(0, 0x1300));
+    run(engine, child, 1, returned, exit(1, 1), 'migrated real RET8 commits before return-gate budget', cpuHelperRecord(0, 0x1300));
+    run(engine, child, 1, returned, exit(8, 0, returnId), 'return gate observes committed RET8 without another pop', cpuHelperRecord(0, 0x1300));
+  } else run(engine, child, 3, returned, exit(8, 2, returnId), 'migrated callback reaches distinct return gate through real RET8', cpuHelperRecord(0, 0x1300));
   const beforeFinish = arena(engine);
   assert.equal(engine.api.finish_callback(engine.low, engine.high, child.generation, 2), 0);
   finishes++;
@@ -493,7 +501,9 @@ for (const [values, singleStepCall] of [[[7, 9], false], [[0xffffffff, 1], true]
   assert.equal(guestValue(engine, 0x1000), 0x006aff6a);
 }
 
+const cpuSourcePaths=['engine/src/abi/memory_helper/cpu.rs', 'engine/src/cpu/dbt/wasm/memory/cpu_scalar.rs', 'engine/src/cpu/dbt/wasm/emitter.rs', 'engine/src/cpu/dbt/wasm/code_fetch.rs', 'engine/src/process/memory/cpu_scalar.rs', 'engine/src/process/memory/scalar/cpu_write.rs', 'engine/src/process/wasm/memory/cpu_write.rs', 'engine/src/abi/wasm/exports/memory/cpu_write.rs'];
 const provenance = {
+  cpu_source_sha256: Object.fromEntries(cpuSourcePaths.map(path => [path, hash(readFileSync(join(root, path)))])),
   engine_sha256: hash(engineBytes), generated_modules: modules, actual_engine_runs: actualRuns,
   successful_captures: captures, successful_call_completions: callCompletions,
   successful_callback_begins: begins, successful_code_installations: installs,

@@ -1,3 +1,4 @@
+import {ARENA_SIZE} from '../../../../../../../support/wasm/arena.mjs';
 import assert from 'node:assert/strict';
 import {execFileSync} from 'node:child_process';
 import {createHash} from 'node:crypto';
@@ -62,20 +63,20 @@ function exit(reason, retired, version = 1, detail = 0, address = 0, access = 0,
 
 function helper(tag, value = 0, detail = 0, address = 0, access = 0, length = 0) {
   const bytes = new Uint8Array(40), view = new DataView(bytes.buffer);
-  header(bytes, view, 0, 'R3MH', 40);
+  header(bytes, view, 0, 'R3MH', 40, 10);
   [tag, value, detail, address, access, length].forEach((field, index) => view.setUint32(16 + index * 4, field, true));
   return bytes;
 }
 
 function call(ctx, budget, expectedState, expectedExit, label, expectedHelper = undefined) {
   refresh(ctx);
-  const before = ctx.bytes.slice(ctx.base + 96, ctx.base + 4236);
+  const before = ctx.bytes.slice(ctx.base + 96, ctx.base + ARENA_SIZE);
   assert.equal(ctx.run(ctx.base, ctx.base + 56, budget, ctx.base + 96), 0, `${label}: runtime status`);
   if (ctx.embedded) embeddedRuns++; else standaloneRuns++;
   assert.deepEqual(readState(ctx), expectedState, `${label}: all registers/EIP/flags`);
   assert.deepEqual(ctx.bytes.slice(ctx.base + 56, ctx.base + 96), expectedExit, `${label}: complete canonical exit`);
   assert.deepEqual(ctx.bytes.slice(ctx.base + 96, ctx.base + 100), before.slice(0, 4), `${label}: cancellation unchanged`);
-  assert.deepEqual(ctx.bytes.slice(ctx.base + 140, ctx.base + 4236), before.slice(44), `${label}: transfer unchanged`);
+  assert.deepEqual(ctx.bytes.slice(ctx.base + 140, ctx.base + ARENA_SIZE), before.slice(44), `${label}: transfer unchanged`);
   assert.deepEqual(ctx.bytes.slice(ctx.base + 100, ctx.base + 140), expectedHelper ?? before.slice(4, 44), `${label}: helper record`);
 }
 
@@ -256,7 +257,7 @@ assert.ok(WebAssembly.validate(engineBytes));
 assert.deepEqual(WebAssembly.Module.imports(engineModule), [], 'actual engine has no JS imports');
 function engine() {
   const instance = new WebAssembly.Instance(engineModule, {});
-  const names = ['open', 'arena_ptr', 'map', 'upload', 'compile_entries', 'generation', 'module_ptr', 'module_len', 'guard', 'read32', 'store32'];
+  const names = ['open', 'arena_ptr', 'map', 'upload', 'compile_entries', 'generation', 'module_ptr', 'module_len', 'guard', 'read32', 'store32', 'cpu_read32', 'cpu_store32'];
   const api = Object.fromEntries(names.map(name => {
     const fn = instance.exports[`ring3_abi_v1_${name}`];
     assert.equal(typeof fn, 'function', `actual export ${name}`);
@@ -276,6 +277,7 @@ function upload(ctx, address, bytes) {
 }
 
 function compile(ctx, name, entries, gates, helpers = []) {
+  helpers = helpers.map(name => {assert.equal(name, 'read32'); return 'cpu_read32';});
   refresh(ctx);
   entries.forEach((entry, index) => ctx.view.setUint32(ctx.base + 140 + index * 4, entry, true));
   gates.forEach(([entry, id], index) => {
@@ -290,7 +292,7 @@ function compile(ctx, name, entries, gates, helpers = []) {
   const imports = [{module: 'env', name: 'memory', kind: 'memory'}, {module: 'ring3', name: 'guard', kind: 'function'}, ...helpers.map(name => ({module: 'ring3', name, kind: 'function'}))];
   const sort = list => list.sort((a, b) => `${a.module}.${a.name}`.localeCompare(`${b.module}.${b.name}`));
   assert.deepEqual(sort(WebAssembly.Module.imports(module)), sort(imports), `${name}: bounded actual Wasm imports`);
-  const instance = new WebAssembly.Instance(module, {env: {memory: ctx.memory}, ring3: {guard: ctx.api.guard, read32: ctx.api.read32, store32: ctx.api.store32}});
+  const instance = new WebAssembly.Instance(module, {env: {memory: ctx.memory}, ring3: {guard: ctx.api.guard, cpu_read32: ctx.api.cpu_read32, cpu_store32: ctx.api.cpu_store32}});
   ctx.run = instance.exports.run;
   generated.set(name, hash(encoded));
   writeFileSync(join(outputDir, `${name}.wasm`), encoded);
@@ -361,12 +363,14 @@ initialize(fault, faultStart);
 const faultExpected = copyState(faultStart);
 faultExpected.registers[0] = 0xffffff80;
 faultExpected.eip = 0x1403;
-call(fault, 10, faultExpected, exit(5, 1, 2, 1, 0x9000, 1, 4), 'AH sign extension commits before precise existing MOV read fault', helper(1, 0, 1, 0x9000, 1, 4));
-call(fault, 10, faultExpected, exit(5, 0, 2, 1, 0x9000, 1, 4), 'MOV fault retry preserves converted EAX and all flags without retirement', helper(1, 0, 1, 0x9000, 1, 4));
+call(fault, 10, faultExpected, exit(5, 1, 6, 1, 0x9000, 1, 4), 'AH sign extension commits before precise existing MOV read fault', helper(1, 0, 1, 0x9000, 1, 4));
+call(fault, 10, faultExpected, exit(5, 0, 6, 1, 0x9000, 1, 4), 'MOV fault retry preserves converted EAX and all flags without retirement', helper(1, 0, 1, 0x9000, 1, 4));
 resumes++;
 
 const aggregate = [...generated].sort(([a], [b]) => a.localeCompare(b)).map(([name, digest]) => `${name}:${digest}`).join('\n');
+const cpuSourcePaths=['engine/src/abi/memory_helper/cpu.rs', 'engine/src/cpu/dbt/wasm/memory/cpu_scalar.rs', 'engine/src/cpu/dbt/wasm/emitter.rs', 'engine/src/cpu/dbt/wasm/code_fetch.rs', 'engine/src/process/memory/cpu_scalar.rs', 'engine/src/process/memory/scalar/cpu_write.rs', 'engine/src/process/wasm/memory/cpu_write.rs', 'engine/src/abi/wasm/exports/memory/cpu_write.rs'];
 const provenance = {
+  cpu_source_sha256: Object.fromEntries(cpuSourcePaths.map(path => [path, hash(readFileSync(join(root, path)))])),
   claim: 'Own baseline Wasm register-source MOVZX/MOVSX32 execution; unsigned extraction/sign-subtraction oracle and resident conversion composition, no memory conversion, synthetic helpers, native C, hardware flags, performance or full P2-V0 claim.',
   standalone_modules: generated.size - 3, embedded_modules: 3, standalone_runs: standaloneRuns, embedded_runs: embeddedRuns, continuation_calls: resumes, synthetic_runs: 0,
   composition_inputs: compositionInputs, module_set_sha256: hash(aggregate), engine_sha256: hash(engineBytes),

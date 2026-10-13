@@ -1,3 +1,4 @@
+import {ARENA_SIZE} from '../../../../../../../support/wasm/arena.mjs';
 import assert from 'node:assert/strict';
 import {execFileSync} from 'node:child_process';
 import {createHash} from 'node:crypto';
@@ -10,7 +11,7 @@ const engineBytes = readFileSync(enginePath);
 assert.ok(WebAssembly.validate(engineBytes), 'actual engine validates');
 const engineModule = new WebAssembly.Module(engineBytes);
 assert.deepEqual(WebAssembly.Module.imports(engineModule), [], 'engine has no JS imports');
-const names = ['open', 'close', 'arena_ptr', 'map', 'protect', 'unmap', 'upload', 'compile', 'generation', 'module_ptr', 'module_len', 'guard', 'read32', 'write32', 'compile_with_gates', 'compile_entries', 'store32'];
+const names = ['open', 'close', 'arena_ptr', 'map', 'protect', 'unmap', 'upload', 'compile', 'generation', 'module_ptr', 'module_len', 'guard', 'read32', 'cpu_read32', 'cpu_store32', 'write32', 'compile_with_gates', 'compile_entries', 'store32'];
 let keys = 0n, modules = 0, actualRuns = 0, ramWords = 0, snapshotGuards = 0;
 const counts = {values_flags: 0, allowed_flag_patterns: 0, aliases: 0, addresses: 0, entry: 0, read_faults: 0, store_faults: 0, continuation_initial_calls: 0, continuation_resume_calls: 0, canonical_exits: 0, guard_rejections: 0, code_writes: 0, involutions: 0};
 const generatedHashes = [];
@@ -46,13 +47,13 @@ function fresh() {
   assert.equal(api.open(12, engine.low, engine.high), 0);
   engine.base = api.arena_ptr() >>> 0;
   refresh(engine);
-  assert.ok(engine.base > 0 && engine.base + 4236 <= engine.bytes.length);
+  assert.ok(engine.base > 0 && engine.base + ARENA_SIZE <= engine.bytes.length);
   assert.equal(api.map(0x1000, 1, 7), 0);
   return engine;
 }
 
 function arena(engine) {
-  return refresh(engine).bytes.slice(engine.base, engine.base + 4236);
+  return refresh(engine).bytes.slice(engine.base, engine.base + ARENA_SIZE);
 }
 
 function upload(engine, address, bytes) {
@@ -73,6 +74,12 @@ function header(bytes, view, pointer, magic, length, version = 1) {
 function helperRecord(tag, value = 0, detail = 0, address = 0, access = 0, length = tag === 1 ? 4 : 0) {
   const bytes = new Uint8Array(40), view = new DataView(bytes.buffer);
   header(bytes, view, 0, 'R3MH', 40);
+  [tag, value, detail, address, access, length].forEach((field, index) => view.setUint32(16 + index * 4, field, true));
+  return bytes;
+}
+function cpuHelperRecord(tag, value = 0, detail = 0, address = 0, access = 0, length = 4) {
+  const bytes = new Uint8Array(40), view = new DataView(bytes.buffer);
+  header(bytes, view, 0, 'R3MH', 40, 10);
   [tag, value, detail, address, access, length].forEach((field, index) => view.setUint32(16 + index * 4, field, true));
   return bytes;
 }
@@ -111,13 +118,13 @@ function compile(engine, bytes, blocks = [[0x1000, bytes.length]], entry = false
   const expected = [
     {module: 'env', name: 'memory', kind: 'memory'},
     {module: 'ring3', name: 'guard', kind: 'function'},
-    {module: 'ring3', name: 'read32', kind: 'function'},
-    {module: 'ring3', name: 'store32', kind: 'function'},
+    {module: 'ring3', name: 'cpu_read32', kind: 'function'},
+    {module: 'ring3', name: 'cpu_store32', kind: 'function'},
   ].sort((a, b) => `${a.module}.${a.name}`.localeCompare(`${b.module}.${b.name}`));
   assert.deepEqual(sortedImports(module), expected, 'module imports exactly needed actual Wasm helpers');
   const instance = new WebAssembly.Instance(module, {
     env: {memory: engine.memory},
-    ring3: {guard: engine.api.guard, read32: engine.api.read32, store32: engine.api.store32},
+    ring3: {guard: engine.api.guard, cpu_read32: engine.api.cpu_read32, cpu_store32: engine.api.cpu_store32},
   });
   modules++;
   generatedHashes.push(hash(encoded));
@@ -156,7 +163,7 @@ function readState(engine) {
 
 function exit(reason, retired, detail = 0, address = 0, access = 0, length = reason === 5 ? 4 : 0) {
   const bytes = new Uint8Array(40), view = new DataView(bytes.buffer);
-  header(bytes, view, 0, 'R3EX', 40, reason === 11 || reason === 15 ? 6 : 2);
+  header(bytes, view, 0, 'R3EX', 40, 6);
   [reason, retired, detail, address, access, length].forEach((field, index) => view.setUint32(16 + index * 4, field, true));
   return bytes;
 }
@@ -265,7 +272,7 @@ for (const [value, inverse] of literals) {
     const sampled = sampleRam(engine, [0x4000, 0x4008, 0x4ffc, 0x1000]);
     const start = state(0x1000, eflags); start.registers[6] = 0x4004;
     writeState(engine, start);
-    run(engine, child, 1, nextNot(start, bytes.length), exit(1, 1), `NOT literal/allowed flags/${value}/${eflags}`, helperRecord(0));
+    run(engine, child, 1, nextNot(start, bytes.length), exit(1, 1), `NOT literal/allowed flags/${value}/${eflags}`, cpuHelperRecord(0));
     assert.equal(sampleRam(engine, [0x4004])[0], complement(value));
     assert.deepEqual(sampleRam(engine, [0x4000, 0x4008, 0x4ffc, 0x1000]), sampled, 'only the selected word changes; neighbors/page tail/code preserved');
     guarded(engine, child); counts.values_flags++;
@@ -287,7 +294,7 @@ for (const [register, name] of registers.entries()) for (const kind of ['base', 
   if (kind === 'index') assert.equal((bytes[2] >>> 3) & 7, register, 'LLVM old index GPR');
   const sampled = sampleRam(engine, [address - 4, address + 4, 0x1000]);
   writeState(engine, start);
-  run(engine, child, 1, nextNot(start, bytes.length), exit(1, 1), `NOT old ${name}/${kind} EA preserves all GPRs`, helperRecord(0));
+  run(engine, child, 1, nextNot(start, bytes.length), exit(1, 1), `NOT old ${name}/${kind} EA preserves all GPRs`, cpuHelperRecord(0));
   assert.equal(sampleRam(engine, [address])[0], complement(value));
   assert.deepEqual(sampleRam(engine, [address - 4, address + 4, 0x1000]), sampled);
   guarded(engine, child); counts.aliases++;
@@ -314,7 +321,7 @@ for (const fixture of addressForms) {
   const bytes = assembled.get(fixture.form ? `not_${fixture.form}` : 'not').bytes, child = compile(engine, bytes);
   const sampled = sampleRam(engine, [0x1000]);
   writeState(engine, start);
-  run(engine, child, 1, nextNot(start, bytes.length), exit(1, 1), `NOT ${fixture.form ?? 'page boundary'}/${fixture.address}`, helperRecord(0));
+  run(engine, child, 1, nextNot(start, bytes.length), exit(1, 1), `NOT ${fixture.form ?? 'page boundary'}/${fixture.address}`, cpuHelperRecord(0));
   assert.equal(sampleRam(engine, [fixture.address])[0], complement(value));
   assert.deepEqual(sampleRam(engine, [0x1000]), sampled);
   guarded(engine, child); counts.addresses++;
@@ -324,10 +331,10 @@ for (const fixture of addressForms) {
   const engine = fresh(), bytes = assembled.get('not_entry').bytes, child = compile(engine, bytes, undefined, true);
   const start = state(); start.registers[6] = 0x9000;
   writeState(engine, start);
-  run(engine, child, 1, start, exit(5, 0, 1, 0x9000, 1), 'entry prepared with unmapped data faults only on actual read', helperRecord(1, 0, 1, 0x9000, 1), 'initial');
+  run(engine, child, 1, start, exit(5, 0, 1, 0x9000, 1), 'entry prepared with unmapped data faults only on actual read', cpuHelperRecord(1, 0, 1, 0x9000, 1), 'initial');
   assert.equal(engine.api.map(0x9000, 1, 3), 0); word(engine, 0x9000, 0x80000000);
   const repaired = nextNot(start, assembled.get('not').bytes.length);
-  run(engine, child, 1, repaired, exit(1, 1), 'entry mapping repair resumes same NOT artifact', helperRecord(0), 'resume');
+  run(engine, child, 1, repaired, exit(1, 1), 'entry mapping repair resumes same NOT artifact', cpuHelperRecord(0), 'resume');
   assert.equal(sampleRam(engine, [0x9000])[0], 0x7fffffff);
   guarded(engine, child); counts.entry += 2;
 }
@@ -355,7 +362,7 @@ for (const fixture of faults) {
   const start = state(); start.registers[6] = fixture.address;
   const stopped = copyState(start); stopped.registers[2] = 0; stopped.eflags = 0x457; stopped.eip = 0x1008;
   writeState(engine, start);
-  run(engine, child, 20, stopped, fixture.detail === 3 ? exit(11, 2) : exit(5, 2, fixture.detail, fixture.fault, fixture.access), `prefix/NOT/${fixture.label}`, fixture.detail === 3 ? arena(engine).slice(100, 140) : helperRecord(1, 0, fixture.detail, fixture.fault, fixture.access));
+  run(engine, child, 20, stopped, fixture.detail === 3 ? exit(11, 2) : exit(5, 2, fixture.detail, fixture.fault, fixture.access), `prefix/NOT/${fixture.label}`, fixture.detail === 3 ? arena(engine).slice(100, 140) : cpuHelperRecord(1, 0, fixture.detail, fixture.fault, fixture.access));
   assert.deepEqual(sampleRam(engine, sampledAddresses.concat([0x1000])), sampled, 'failed read or Store4 preserves every readable destination word and code');
   guarded(engine, child); if (fixture.access === 1) counts.read_faults++; else counts.store_faults++;
 }
@@ -379,13 +386,13 @@ for (const secondStore of [false, true]) {
   refresh(engine).view.setUint32(engine.base + 96, 1, true);
   run(engine, child, 20, stopped, exit(2, 0), 'cancel at NOT precedes either faulting access', undefined, 'resume');
   engine.view.setUint32(engine.base + 96, 0, true);
-  run(engine, child, 20, stopped, exit(5, 0, detail, 0x9000, access), `actual continued NOT ${secondStore ? 'second store' : 'first read'} fault`, helperRecord(1, 0, detail, 0x9000, access), 'resume');
-  run(engine, child, 1, stopped, exit(5, 0, detail, 0x9000, access), 'unrepaired NOT retry does not repeat prefix or mutate RAM', helperRecord(1, 0, detail, 0x9000, access), 'resume');
+  run(engine, child, 20, stopped, exit(5, 0, detail, 0x9000, access), `actual continued NOT ${secondStore ? 'second store' : 'first read'} fault`, cpuHelperRecord(1, 0, detail, 0x9000, access), 'resume');
+  run(engine, child, 1, stopped, exit(5, 0, detail, 0x9000, access), 'unrepaired NOT retry does not repeat prefix or mutate RAM', cpuHelperRecord(1, 0, detail, 0x9000, access), 'resume');
   if (secondStore) { assert.equal(sampleRam(engine, [0x9000])[0], 0x11223344); assert.equal(engine.api.protect(0x9000, 1, 3), 0); }
   else assert.equal(engine.api.map(0x9000, 1, 3), 0);
   word(engine, 0x9000, 0x89abcdef);
   const repaired = nextNot(stopped, assembled.get('not').bytes.length);
-  run(engine, child, 1, repaired, exit(1, 1), 'repair resumes NOT and re-reads current RAM before complement/store', helperRecord(0), 'resume');
+  run(engine, child, 1, repaired, exit(1, 1), 'repair resumes NOT and re-reads current RAM before complement/store', cpuHelperRecord(0), 'resume');
   assert.equal(sampleRam(engine, [0x9000])[0], 0x76543210, 'retry uses repaired current RAM, not captured value from failed store');
   refresh(engine).view.setUint32(engine.base + 96, 1, true);
   run(engine, child, 20, repaired, exit(2, 0), 'cancel between completed NOT and successor', undefined, 'resume');
@@ -414,7 +421,7 @@ for (const immediate of [true, false]) {
   const original = immediate ? 0xbbbbbbbb : 0x12345678, changed = complement(original);
   const sampled = sampleRam(engine, [0x1000]), committed = nextNot(start, assembled.get('not').bytes.length);
   writeState(engine, start);
-  run(engine, child, 1, committed, exit(6, 1), `NOT ${immediate ? 'successor immediate' : 'code-page data word'} commits before invalidation/successor/budget`, helperRecord(0), 'initial');
+  run(engine, child, 1, committed, exit(6, 1), `NOT ${immediate ? 'successor immediate' : 'code-page data word'} commits before invalidation/successor/budget`, cpuHelperRecord(0), 'initial');
   assert.equal(sampleRam(engine, [start.registers[6]])[0], changed);
   if (!immediate) assert.deepEqual(sampleRam(engine, [0x1000]), sampled, 'page-granular stamp changes even when instruction bytes are elsewhere');
   reject(engine, child, 4, 'old NOT module rejects after its successful code word write');
@@ -440,19 +447,20 @@ for (const values of arrays) {
   const sentinels = [0x4000 + values.length * 4, 0x4ffc, 0x1600], sampled = sampleRam(engine, sentinels);
   const addresses = values.map((_, index) => 0x4000 + index * 4), inverse = values.map(complement);
   writeState(engine, start);
-  run(engine, child, values.length * 4, afterFirst, exit(1, values.length * 4), `resident array inversion/${values.length}`, helperRecord(0), 'initial');
+  run(engine, child, values.length * 4, afterFirst, exit(1, values.length * 4), `resident array inversion/${values.length}`, cpuHelperRecord(0), 'initial');
   assert.deepEqual(sampleRam(engine, addresses), inverse, 'first authored pass matches independent BigInt complement for every word');
   assert.deepEqual(sampleRam(engine, sentinels), sampled);
   const restored = copyState(afterFirst); restored.eip = 0x1700;
   const remaining = values.length * 4 + 5;
-  run(engine, child, remaining + 1, restored, exit(3, remaining), `resident involution resumes through guest reset and second loop/${values.length}`, helperRecord(0), 'resume');
+  run(engine, child, remaining + 1, restored, exit(3, remaining), `resident involution resumes through guest reset and second loop/${values.length}`, cpuHelperRecord(0), 'resume');
   assert.deepEqual(sampleRam(engine, addresses), values, 'second authored pass restores every original word');
   assert.deepEqual(sampleRam(engine, sentinels), sampled);
   guarded(engine, child); counts.involutions++; invertedWords += values.length; involutionRetired += values.length * 8 + 5;
 }
 assert.equal(actualRuns, counts.canonical_exits + counts.guard_rejections, 'actual generated calls equal canonical exits plus guard rejections');
 assert.equal(counts.continuation_initial_calls, 9); assert.equal(counts.continuation_resume_calls, 31);
-const provenance = {
+const cpuSourcePins = Object.fromEntries(["engine/src/abi/memory_helper/cpu.rs", "engine/src/cpu/dbt/wasm/memory/cpu_scalar.rs", "engine/src/cpu/dbt/wasm/emitter.rs", "engine/src/cpu/dbt/wasm/code_fetch.rs", "engine/src/process/memory/cpu_scalar.rs", "engine/src/process/memory/scalar/cpu_write.rs", "engine/src/process/wasm/memory/cpu_write.rs", "engine/src/abi/wasm/exports/memory/cpu_write.rs", "engine/tests/support/wasm/arena.mjs"].map(path=>[path,hash(readFileSync(join(root,path)))]));
+const provenance = {cpu_source_sha256: cpuSourcePins,
   counts, generated_modules: modules, actual_generated_run_calls: actualRuns, snapshot_guard_calls: snapshotGuards, ram_words_observed: ramWords,
   inversion: {array_cases: arrays.length, words_per_pass: invertedWords, retired: involutionRetired},
   engine_sha256: hash(engineBytes), generated_set_sha256: hash(generatedHashes.join('\n')), generated_module_sha256: generatedHashes,

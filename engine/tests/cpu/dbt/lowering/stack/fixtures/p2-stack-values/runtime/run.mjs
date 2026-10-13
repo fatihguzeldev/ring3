@@ -1,3 +1,4 @@
+import {ARENA_SIZE} from '../../../../../../../support/wasm/arena.mjs';
 import assert from 'node:assert/strict';
 import {execFileSync, spawnSync} from 'node:child_process';
 import {createHash} from 'node:crypto';
@@ -11,7 +12,7 @@ assert.ok(WebAssembly.validate(engineBytes), 'actual engine validates');
 assert.ok(WebAssembly.validate(injectorBytes), 'pure-Wasm helper injector validates');
 const engineModule = new WebAssembly.Module(engineBytes), injectorModule = new WebAssembly.Module(injectorBytes);
 assert.deepEqual(WebAssembly.Module.imports(engineModule), [], 'engine has no JS imports');
-const names = ['open', 'close', 'arena_ptr', 'map', 'protect', 'unmap', 'upload', 'compile', 'generation', 'module_ptr', 'module_len', 'guard', 'read32', 'write32', 'store32'];
+const names = ['open', 'close', 'arena_ptr', 'map', 'protect', 'unmap', 'upload', 'compile', 'generation', 'module_ptr', 'module_len', 'guard', 'read32', 'write32', 'store32', 'cpu_read32', 'cpu_store32'];
 let keys = 0n, modules = 0, actualRuns = 0, injectedRuns = 0;
 const generatedHashes = [];
 
@@ -51,13 +52,13 @@ function fresh() {
   assert.equal(api.open(12, engine.low, engine.high), 0);
   engine.base = api.arena_ptr() >>> 0;
   refresh(engine);
-  assert.ok(engine.base > 0 && engine.base + 4236 <= engine.bytes.length);
+  assert.ok(engine.base > 0 && engine.base + ARENA_SIZE <= engine.bytes.length);
   assert.equal(api.map(0x1000, 1, 7), 0);
   return engine;
 }
 
 function arena(engine) {
-  return refresh(engine).bytes.slice(engine.base, engine.base + 4236);
+  return refresh(engine).bytes.slice(engine.base, engine.base + ARENA_SIZE);
 }
 
 function upload(engine, address, bytes) {
@@ -82,6 +83,11 @@ function helperRecord(tag, value = 0, detail = 0, address = 0, access = 0, lengt
   return bytes;
 }
 
+function cpuHelperRecord(tag, value = 0, detail = 0, address = 0, access = 0, width = 4) {
+  const bytes = helperRecord(tag, value, detail, address, access, width), view = new DataView(bytes.buffer);
+  view.setUint16(4, 10, true); return bytes;
+}
+
 function guestValue(engine, address) {
   assert.equal(engine.api.read32(address), 0, 'actual guest observation helper');
   refresh(engine);
@@ -95,6 +101,7 @@ function word(engine, address, value) {
 }
 
 function compile(engine, bytes, blocks = [[0x1000, bytes.length]], expectedHelpers = []) {
+  expectedHelpers = expectedHelpers.map(name => {assert.ok(['read32', 'store32'].includes(name)); return 'cpu_' + name;});
   if (bytes.length !== 0) upload(engine, 0x1000, bytes);
   refresh(engine);
   blocks.forEach(([entry, length], index) => {
@@ -116,7 +123,7 @@ function compile(engine, bytes, blocks = [[0x1000, bytes.length]], expectedHelpe
   assert.deepEqual(sortedImports(module), expected, 'module imports exactly needed actual Wasm helpers');
   const instance = new WebAssembly.Instance(module, {
     env: {memory: engine.memory},
-    ring3: {guard: engine.api.guard, read32: engine.api.read32, store32: engine.api.store32},
+    ring3: {guard: engine.api.guard, cpu_read32: engine.api.cpu_read32, cpu_store32: engine.api.cpu_store32},
   });
   modules++;
   generatedHashes.push(hash(encoded));
@@ -155,7 +162,7 @@ function readState(engine) {
 
 function exit(reason, retired, detail = 0, address = 0, access = 0, length = reason === 5 ? 4 : 0) {
   const bytes = new Uint8Array(40), view = new DataView(bytes.buffer);
-  header(bytes, view, 0, 'R3EX', 40, reason === 11 || reason === 15 ? 6 : 2);
+  header(bytes, view, 0, 'R3EX', 40, 6);
   [reason, retired, detail, address, access, length].forEach((field, index) => view.setUint32(16 + index * 4, field, true));
   return bytes;
 }
@@ -268,7 +275,7 @@ for (const fixture of registerForms) {
   }
   expected.eip += fixture.bytes.length;
   writeState(engine, start);
-  run(engine, child, 1, expected, exit(1, 1), `${fixture.name}: exact alias and complete state`, helperRecord(0, fixture.push ? 0 : 0xfedcba98));
+  run(engine, child, 1, expected, exit(1, 1), `${fixture.name}: exact alias and complete state`, cpuHelperRecord(0, fixture.push ? 0 : 0xfedcba98));
   assert.equal(guestValue(engine, 0x8ffc), fixture.push ? start.registers[fixture.register] : 0xfedcba98, `${fixture.name}: old source or read-only stack word`);
   guarded(engine, child, 'ordinary stack access preserves code stamps');
 }
@@ -283,7 +290,7 @@ for (const fixture of immediateForms) {
   expected.registers[4] = 0x8ffc;
   expected.eip += fixture.bytes.length;
   writeState(engine, start);
-  run(engine, child, 1, expected, exit(1, 1), `${fixture.name}: decoded immediate bit pattern`, helperRecord(0));
+  run(engine, child, 1, expected, exit(1, 1), `${fixture.name}: decoded immediate bit pattern`, cpuHelperRecord(0));
   assert.equal(guestValue(engine, 0x8ffc), fixture.value);
 }
 
@@ -298,7 +305,7 @@ for (const fixture of cleanupForms) {
   expected.registers[4] = 0x9000 + fixture.cleanup;
   expected.eip = 0xf1234567;
   writeState(engine, start);
-  run(engine, child, 2, expected, exit(3, 1), `${fixture.name}: unsigned byte cleanup without argument access`, helperRecord(0, 0xf1234567));
+  run(engine, child, 2, expected, exit(3, 1), `${fixture.name}: unsigned byte cleanup without argument access`, cpuHelperRecord(0, 0xf1234567));
   assert.equal(guestValue(engine, 0x8ffc), 0xf1234567, 'RET cleanup does not write popped return word');
   if (fixture.cleanup === 65535) {
     assert.equal(engine.api.read32(0x9000), 0);
@@ -317,7 +324,7 @@ for (const cleanup of [1, 65535]) {
   expected.registers[4] = cleanup;
   expected.eip = 0xf1234567;
   writeState(engine, start);
-  run(engine, child, 2, expected, exit(3, 1), `RET cleanup${cleanup} wraps ESP after valid final-width read`, helperRecord(0, 0xf1234567));
+  run(engine, child, 2, expected, exit(3, 1), `RET cleanup${cleanup} wraps ESP after valid final-width read`, cpuHelperRecord(0, 0xf1234567));
   assert.equal(guestValue(engine, 0xfffffffc), 0xf1234567);
 }
 
@@ -334,7 +341,7 @@ for (const push of [true, false]) {
     if (!push) expected.registers[7] = 0x12345678;
     expected.eip++;
     writeState(engine, start);
-    run(engine, child, 1, expected, exit(1, 1), `${push ? 'PUSH' : 'POP'} valid access${address} with arithmetic ESP wrap`, helperRecord(0, push ? 0 : 0x12345678));
+    run(engine, child, 1, expected, exit(1, 1), `${push ? 'PUSH' : 'POP'} valid access${address} with arithmetic ESP wrap`, cpuHelperRecord(0, push ? 0 : 0x12345678));
     assert.equal(guestValue(engine, address), push ? start.registers[0] : 0x12345678);
   }
 }
@@ -359,7 +366,7 @@ for (const [first, second, sum, flags] of nativeInputs) {
   expected.eip = 0x1007;
   expected.eflags = flags;
   writeState(engine, start);
-  run(engine, child, 20, expected, exit(3, 9), `pushed arguments, EBX save/restore and RET8/${first}/${second}`, helperRecord(0, 0x1007));
+  run(engine, child, 20, expected, exit(3, 9), `pushed arguments, EBX save/restore and RET8/${first}/${second}`, cpuHelperRecord(0, 0x1007));
   assert.equal(guestValue(engine, 0x8ffc), second, 'second argument remains unchanged');
   assert.equal(guestValue(engine, 0x8ff8), first, 'first argument remains unchanged');
   assert.equal(guestValue(engine, 0x8ff4), 0x1007, 'exact caller continuation');
@@ -388,7 +395,7 @@ for (const args of [[], ['1'], ['-1', '0'], ['4294967296', '0'], ['1x', '0'], ['
   const pushed = copyState(start);
   pushed.registers[4] = 0x8000;
   pushed.eip = 0x1001;
-  run(engine, child, 1, pushed, exit(1, 1), 'one PUSH checkpoint', helperRecord(0));
+  run(engine, child, 1, pushed, exit(1, 1), 'one PUSH checkpoint', cpuHelperRecord(0));
   assert.equal(guestValue(engine, 0x8000), start.registers[0]);
   word(engine, 0x8000, 0x87654321);
   refresh(engine).view.setUint32(engine.base + 96, 1, true);
@@ -397,13 +404,13 @@ for (const args of [[], ['1'], ['-1', '0'], ['4294967296', '0'], ['1x', '0'], ['
   const popped = copyState(start);
   popped.registers[1] = 0x87654321;
   popped.eip = 0x1002;
-  run(engine, child, 1, popped, exit(1, 1), 'one POP resume never repeats PUSH', helperRecord(0, 0x87654321));
+  run(engine, child, 1, popped, exit(1, 1), 'one POP resume never repeats PUSH', cpuHelperRecord(0, 0x87654321));
   assert.equal(guestValue(engine, 0x8000), 0x87654321);
   const returned = copyState(popped);
   returned.registers[4] = 0x800c;
   returned.eip = 0x12345678;
-  run(engine, child, 1, returned, exit(1, 1), 'one RET4 cleanup checkpoint', helperRecord(0, 0x12345678));
-  run(engine, child, 2, returned, exit(3, 0), 'unknown target after RET resume never repeats cleanup', helperRecord(0, 0x12345678));
+  run(engine, child, 1, returned, exit(1, 1), 'one RET4 cleanup checkpoint', cpuHelperRecord(0, 0x12345678));
+  run(engine, child, 2, returned, exit(3, 0), 'unknown target after RET resume never repeats cleanup', cpuHelperRecord(0, 0x12345678));
 }
 
 {
@@ -418,11 +425,11 @@ for (const args of [[], ['1'], ['-1', '0'], ['4294967296', '0'], ['1x', '0'], ['
   const popped = copyState(start);
   popped.registers[4] = 0x8008;
   popped.eip = 0x1001;
-  run(engine, child, 1, popped, exit(1, 1), 'POP ESP loaded value wins increment at budget boundary', helperRecord(0, 0x8008));
+  run(engine, child, 1, popped, exit(1, 1), 'POP ESP loaded value wins increment at budget boundary', cpuHelperRecord(0, 0x8008));
   const pushed = copyState(popped);
   pushed.registers[4] = 0x8004;
   pushed.eip = 0x1002;
-  run(engine, child, 1, pushed, exit(1, 1), 'PUSH resumes using committed POP ESP value', helperRecord(0));
+  run(engine, child, 1, pushed, exit(1, 1), 'PUSH resumes using committed POP ESP value', cpuHelperRecord(0));
   assert.equal(guestValue(engine, 0x8000), 0x8008, 'POP source word remains unchanged');
   assert.equal(guestValue(engine, 0x8004), start.registers[0], 'next PUSH uses loaded ESP');
 }
@@ -461,7 +468,7 @@ for (const fault of faultCases) {
   expected.eip = 0x1008;
   writeState(engine, start);
   const access = push ? 2 : 1;
-  run(engine, child, 20, expected, fault.detail === 3 ? exit(15, 2) : exit(5, 2, fault.detail, fault.fault, access), `${fault.name}: flags and every precommit effect preserved`, fault.detail === 3 ? arena(engine).slice(100, 140) : helperRecord(1, 0, fault.detail, fault.fault, access));
+  run(engine, child, 20, expected, fault.detail === 3 ? exit(15, 2) : exit(5, 2, fault.detail, fault.fault, access), `${fault.name}: flags and every precommit effect preserved`, fault.detail === 3 ? arena(engine).slice(100, 140) : cpuHelperRecord(1, 0, fault.detail, fault.fault, access));
   if (push && fault.map) {
     assert.equal(guestValue(engine, 0x4000), 0x11223344, 'PUSH fault preserves attempted word');
     assert.equal(guestValue(engine, 0x4ffc), 0xa1b2c3d4, 'PUSH fault preserves first-page tail');
@@ -480,7 +487,7 @@ for (const fault of faultCases) {
   pushed.registers[4] = 0x1002;
   pushed.eip = 0x1001;
   writeState(engine, start);
-  run(engine, child, 1, pushed, exit(6, 1), 'PUSH SMC commits stack and next EIP before successor/budget', helperRecord(0));
+  run(engine, child, 1, pushed, exit(6, 1), 'PUSH SMC commits stack and next EIP before successor/budget', cpuHelperRecord(0));
   assert.equal(guestValue(engine, 0x1002), 0x11223344, 'PUSH patched exact next MOV immediate');
   const before = arena(engine);
   assert.equal(child.run(0xffffffff, 0xffffffff, 10, 0xffffffff), 4, 'stale PUSH artifact rejected before reads');
@@ -496,18 +503,18 @@ for (const fault of faultCases) {
 }
 
 const injectedCases = [
-  {name: 'VersionExhausted', status: 0, record: helperRecord(2, 0, 1), detail: 1},
-  {name: 'bad helper tag', status: 0, record: helperRecord(3), detail: 2},
-  {name: 'closed helper', status: 5, record: helperRecord(0), detail: 3},
+  {name: 'VersionExhausted', status: 0, record: cpuHelperRecord(2, 0, 1), detail: 1},
+  {name: 'bad helper tag', status: 0, record: cpuHelperRecord(3), detail: 2},
+  {name: 'closed helper', status: 5, record: cpuHelperRecord(0), detail: 3},
 ];
 for (const operation of ['push', 'pop_esp', 'cleanup']) {
   const engine = fresh(), push = operation === 'push';
   const actual = compile(engine, Uint8Array.from([...arithmeticPrefix, ...operationBytes(operation)]), undefined, [push ? 'store32' : 'read32']);
   const injector = new WebAssembly.Instance(injectorModule, {env: {memory: engine.memory}, ring3: {guard: engine.api.guard}}).exports;
-  const injected = new WebAssembly.Instance(actual.module, {env: {memory: engine.memory}, ring3: {guard: injector.guard, read32: injector.read32, store32: injector.store32}}).exports;
+  const injected = new WebAssembly.Instance(actual.module, {env: {memory: engine.memory}, ring3: {guard: injector.guard, cpu_read32: injector.read32, cpu_store32: injector.store32}}).exports;
   const cases = [...injectedCases];
-  if (push) cases.push({name: 'completion11 non-success', status: 11, record: helperRecord(2, 0, 1), detail: 2});
-  if (operation === 'pop_esp') cases.push({name: 'read completion11 rejected', status: 11, record: helperRecord(0), detail: 3});
+  if (push) cases.push({name: 'completion11 non-success', status: 11, record: cpuHelperRecord(2, 0, 1), detail: 2});
+  if (operation === 'pop_esp') cases.push({name: 'read completion11 rejected', status: 11, record: cpuHelperRecord(0), detail: 3});
   for (const fixture of cases) {
     const start = state();
     start.registers[4] = push ? 0x9004 : 0x9000;
@@ -524,7 +531,9 @@ for (const operation of ['push', 'pop_esp', 'cleanup']) {
   }
 }
 
+const cpuSourcePaths=['engine/src/abi/memory_helper/cpu.rs', 'engine/src/cpu/dbt/wasm/memory/cpu_scalar.rs', 'engine/src/cpu/dbt/wasm/emitter.rs', 'engine/src/cpu/dbt/wasm/code_fetch.rs', 'engine/src/process/memory/cpu_scalar.rs', 'engine/src/process/memory/scalar/cpu_write.rs', 'engine/src/process/wasm/memory/cpu_write.rs', 'engine/src/abi/wasm/exports/memory/cpu_write.rs'];
 const provenance = {
+  cpu_source_sha256: Object.fromEntries(cpuSourcePaths.map(path => [path, hash(readFileSync(join(root, path)))])),
   engine_sha256: hash(engineBytes), injector_sha256: hash(injectorBytes), generated_modules: modules,
   actual_engine_runs: actualRuns, synthetic_helper_runs: injectedRuns,
   native_algorithm_cases: nativeInputs.length, native_invalid_inputs: 7,
