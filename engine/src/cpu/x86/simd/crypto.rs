@@ -1,7 +1,7 @@
 use super::CryptoKind;
 use crate::math::{self, aes};
 
-pub(super) fn execute(
+pub(crate) fn execute(
     kind: CryptoKind,
     destination: [u8; 16],
     source: [u8; 16],

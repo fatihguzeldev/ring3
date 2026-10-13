@@ -290,6 +290,9 @@ pub(crate) use predicates::BitTestKind;
 #[cfg(test)]
 pub(crate) use predicates::flags as test_flags;
 
+#[cfg(test)]
+pub(crate) use crypto::execute as crypto_value;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SimdError {
     InvalidDescriptor,
