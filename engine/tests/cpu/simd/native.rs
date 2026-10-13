@@ -48,3 +48,5 @@ mod avx_helper;
 
 #[path = "avx/f16c/native.rs"]
 mod f16c;
+#[path = "avx/fma/native.rs"]
+mod fma;

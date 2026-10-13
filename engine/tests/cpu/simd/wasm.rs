@@ -33,3 +33,5 @@ mod cpu_avx_protocol_wasm;
 
 #[path = "avx/f16c/wasm.rs"]
 mod f16c;
+#[path = "avx/fma/wasm.rs"]
+mod fma;

@@ -6,7 +6,7 @@ pub(crate) const AVX_ENABLED: bool = XCR0 & 7 == 7;
 // activation follows complete guest-path verification independently of baseline avx.
 pub(crate) const F16C_ENABLED: bool = AVX_ENABLED;
 /// fused arithmetic is exposed only after its complete guest family is verified.
-pub(crate) const FMA_ENABLED: bool = false;
+pub(crate) const FMA_ENABLED: bool = AVX_ENABLED;
 
 pub(crate) struct CpuIdLeaf {
     pub function: u32,
@@ -33,6 +33,7 @@ pub(crate) const CPU_ID_LEAVES: [CpuIdLeaf; 8] = [
             8 << 8,
             1 | 1 << 1
                 | 1 << 9
+                | ((FMA_ENABLED as u32) << 12)
                 | 1 << 19
                 | 1 << 20
                 | 1 << 22
