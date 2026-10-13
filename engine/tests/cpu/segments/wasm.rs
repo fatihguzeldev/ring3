@@ -42,3 +42,12 @@ mod cpu_code_defaults_wasm;
 
 #[path = "code/wrap/wasm.rs"]
 mod cpu_code_linear_wrap_wasm;
+
+#[path = "data/wrap/wasm.rs"]
+mod cpu_data_linear_wrap;
+
+#[path = "data/wrap/wide/wasm.rs"]
+mod cpu_data_linear_wrap_wide;
+
+#[path = "data/wrap/regressions/wasm.rs"]
+mod cpu_data_wrap_regressions;
