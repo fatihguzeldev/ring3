@@ -11,7 +11,7 @@ use ring3_engine::{
 
 const CODE: u32 = 0x2000;
 const KEY: u64 = 0x4655_4c4c_4d41_534b;
-const ORIGINAL: &[u8; 36] = include_bytes!("../../fixtures/p2-locked-fullmask32/kernel.text.bin");
+const ORIGINAL: &[u8; 36] = include_bytes!("fixtures/p2-locked-fullmask32/kernel.text.bin");
 
 #[test]
 fn original_fullmask_consumer_keeps_all_ten_instructions_and_three_literal_masks() {

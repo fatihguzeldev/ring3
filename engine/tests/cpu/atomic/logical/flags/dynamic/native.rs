@@ -11,8 +11,7 @@ use ring3_engine::{
 
 const CODE: u32 = 0x2000;
 const KEY: u64 = 0x4655_4c4c_4d41_534b;
-const ORIGINAL: &[u8; 38] =
-    include_bytes!("../../fixtures/p2-locked-dynamic-flags32/kernel.text.bin");
+const ORIGINAL: &[u8; 38] = include_bytes!("fixtures/p2-locked-dynamic-flags32/kernel.text.bin");
 
 #[test]
 fn original_dynamic_flags_consumer_keeps_all_fifteen_instructions_and_three_register_masks() {

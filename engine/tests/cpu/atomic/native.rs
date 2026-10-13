@@ -121,10 +121,10 @@ mod locked_cmpxchg16_original;
 #[path = "compare_exchange/locked/compiler/native/byte.rs"]
 mod locked_cmpxchg8_original;
 
-#[path = "logical/flags/dynamic/compiler/native/dword.rs"]
+#[path = "logical/flags/dynamic/native.rs"]
 mod locked_dynamic_flags32_original;
 
-#[path = "logical/flags/constant/compiler/native/dword.rs"]
+#[path = "logical/flags/constant/native.rs"]
 mod locked_fullmask32_original;
 
 #[path = "logical/locked/compiler/native/or32.rs"]

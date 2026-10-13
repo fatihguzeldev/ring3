@@ -25,10 +25,10 @@ mod cpu_locked_cmpxchg32_wasm;
 #[path = "compare_exchange/locked/wasm/byte.rs"]
 mod cpu_locked_cmpxchg8_wasm;
 
-#[path = "logical/flags/dynamic/wasm/dword.rs"]
+#[path = "logical/flags/dynamic/wasm.rs"]
 mod cpu_locked_dynamic_flags32_wasm;
 
-#[path = "logical/flags/constant/wasm/dword.rs"]
+#[path = "logical/flags/constant/wasm.rs"]
 mod cpu_locked_fullmask32_wasm;
 
 #[path = "logical/locked/wasm/or32.rs"]
