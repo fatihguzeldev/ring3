@@ -1,3 +1,4 @@
+mod cross_lane;
 mod integer;
 mod logical;
 mod moves;
