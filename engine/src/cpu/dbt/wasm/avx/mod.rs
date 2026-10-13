@@ -3,6 +3,7 @@ mod integer;
 mod logical;
 mod moves;
 mod permute;
+mod rearrange;
 
 #[derive(Clone, Copy)]
 pub(super) struct VectorLayout {

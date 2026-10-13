@@ -23,6 +23,15 @@ pub(super) fn integer_lanes(
     direct::integer_lanes(code, operation, scratch);
 }
 
+#[cfg(test)]
+pub(super) fn rearrange_value(
+    code: &mut InstructionSink<'_>,
+    operation: crate::cpu::x86::simd::RearrangeOperation,
+    sources: [u32; 3],
+) {
+    direct::rearrange_value(code, operation, sources);
+}
+
 pub(super) fn direct_hotpath(operation: SimdOperation) -> bool {
     direct::accepts(operation)
 }

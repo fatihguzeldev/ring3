@@ -1,3 +1,5 @@
+mod rearrange;
+
 use super::super::{cpu_result, locals::*};
 use super::{Imports, SimdKind, SimdOperand, SimdOperation, SimdRegister, mark_mmx, memory};
 use crate::{
@@ -603,12 +605,9 @@ fn multiply_high_round_signed(code: &mut InstructionSink<'_>, op: SimdOperation)
 fn shuffle_bytes(code: &mut InstructionSink<'_>, op: SimdOperation) {
     load(code, op.destination, op.vector_bytes);
     load(code, op.source, op.vector_bytes);
-    code.i32_const(i32::from(op.vector_bytes) - 1)
-        .i8x16_splat()
-        .v128_and()
-        .i8x16_swizzle();
-    load(code, op.source, op.vector_bytes);
-    code.i32_const(0).i8x16_splat().i8x16_ge_s().v128_and();
+    rearrange::bytes(code, op.vector_bytes, |code| {
+        load(code, op.source, op.vector_bytes)
+    });
 }
 
 fn align_right(code: &mut InstructionSink<'_>, op: SimdOperation) {
@@ -620,25 +619,7 @@ fn align_right(code: &mut InstructionSink<'_>, op: SimdOperation) {
     }
     load(code, op.source, op.vector_bytes);
     load(code, op.destination, op.vector_bytes);
-    let lanes = std::array::from_fn(|byte| {
-        let index = count + byte;
-        if index < size {
-            index as u8
-        } else if index < size * 2 {
-            (16 + index - size) as u8
-        } else {
-            0
-        }
-    });
-    code.i8x16_shuffle(lanes);
-    let mask = std::array::from_fn::<_, 16, _>(|byte| {
-        if byte < size && count + byte < size * 2 {
-            255u8
-        } else {
-            0
-        }
-    });
-    code.v128_const(i128::from_le_bytes(mask)).v128_and();
+    rearrange::align_right(code, size, count);
 }
 
 fn packed_shift(code: &mut InstructionSink<'_>, op: SimdOperation, kind: P) {
@@ -678,21 +659,7 @@ fn saturating_pack(code: &mut InstructionSink<'_>, op: SimdOperation, kind: S) {
         code.i8x16_shuffle([0, 1, 2, 3, 4, 5, 6, 7, 16, 17, 18, 19, 20, 21, 22, 23])
             .v128_const(0);
     }
-    match (kind, op.lane_bytes) {
-        (S::PackSigned, 1) => {
-            code.i8x16_narrow_i16x8_s();
-        }
-        (S::PackSigned, 2) => {
-            code.i16x8_narrow_i32x4_s();
-        }
-        (S::PackUnsigned, 1) => {
-            code.i8x16_narrow_i16x8_u();
-        }
-        (S::PackUnsigned, 2) => {
-            code.i16x8_narrow_i32x4_u();
-        }
-        _ => unreachable!("direct saturating pack kind and width were decoded"),
-    }
+    rearrange::pack(code, kind, op.lane_bytes);
 }
 
 fn byte_shift(code: &mut InstructionSink<'_>, op: SimdOperation, kind: S) {
@@ -842,58 +809,19 @@ fn insert_single(code: &mut InstructionSink<'_>, op: SimdOperation) {
 }
 
 fn widen(code: &mut InstructionSink<'_>, op: SimdOperation, kind: S) {
-    let (mut from, signed) = kind.widening().unwrap();
+    let (from, _) = kind.widening().unwrap();
     load(code, op.source, 16 / op.lane_bytes * from);
-    while from < op.lane_bytes {
-        match (from, signed) {
-            (1, true) => {
-                code.i16x8_extend_low_i8x16_s();
-            }
-            (1, false) => {
-                code.i16x8_extend_low_i8x16_u();
-            }
-            (2, true) => {
-                code.i32x4_extend_low_i16x8_s();
-            }
-            (2, false) => {
-                code.i32x4_extend_low_i16x8_u();
-            }
-            (4, true) => {
-                code.i64x2_extend_low_i32x4_s();
-            }
-            (4, false) => {
-                code.i64x2_extend_low_i32x4_u();
-            }
-            _ => unreachable!("direct widening source width was decoded"),
-        }
-        from *= 2;
-    }
+    rearrange::widen(code, kind, op.lane_bytes);
 }
 
 fn blend_variable(code: &mut InstructionSink<'_>, op: SimdOperation) {
     load(code, op.source, 16);
     load(code, op.destination, 16);
     load(code, SimdOperand::Register(SimdRegister::Xmm(0)), 16);
-    code.i32_const(i32::from(op.lane_bytes * 8 - 1));
-    match op.lane_bytes {
-        1 => {
-            code.i8x16_shr_s();
-        }
-        4 => {
-            code.i32x4_shr_s();
-        }
-        8 => {
-            code.i64x2_shr_s();
-        }
-        _ => unreachable!("direct variable blend width was decoded"),
-    }
-    code.v128_bitselect();
+    rearrange::blend_variable(code, op.lane_bytes);
 }
 
 fn shuffle(code: &mut InstructionSink<'_>, op: SimdOperation, kind: S) {
-    let width = usize::from(op.lane_bytes);
-    let size = usize::from(op.vector_bytes);
-    let immediate = op.immediate.unwrap_or(0);
     let source_only = matches!(
         kind,
         S::Dwords | S::Words | S::HighWords | S::LowWords | S::DuplicateEven | S::DuplicateOdd
@@ -908,79 +836,13 @@ fn shuffle(code: &mut InstructionSink<'_>, op: SimdOperation, kind: S) {
         op.vector_bytes,
     );
     load(code, op.source, op.vector_bytes);
-    let mut lanes = std::array::from_fn(|i| i as u8);
-    match kind {
-        S::DuplicateEven | S::DuplicateOdd => {
-            for lane in 0..size / width {
-                let source = (lane / 2 * 2 + usize::from(kind == S::DuplicateOdd)) * width;
-                for byte in 0..width {
-                    lanes[lane * width + byte] = (source + byte) as u8;
-                }
-            }
-        }
-        S::BlendImmediate => {
-            for lane in 0..size / width {
-                for byte in 0..width {
-                    lanes[lane * width + byte] =
-                        (lane * width + byte + if immediate & (1 << lane) != 0 { 16 } else { 0 })
-                            as u8;
-                }
-            }
-        }
-        S::Dwords | S::Words => {
-            for i in 0..4 {
-                for j in 0..width {
-                    lanes[i * width + j] =
-                        (((immediate >> (i * 2)) & 3) as usize * width + j) as u8;
-                }
-            }
-        }
-        S::HighWords | S::LowWords => {
-            let start = if kind == S::HighWords { 8 } else { 0 };
-            for i in 0..4 {
-                for j in 0..2 {
-                    lanes[start + i * 2 + j] =
-                        (start + usize::from((immediate >> (i * 2)) & 3) * 2 + j) as u8;
-                }
-            }
-        }
-        S::Singles => {
-            for i in 0..4 {
-                for j in 0..4 {
-                    lanes[i * 4 + j] = (usize::from((immediate >> (i * 2)) & 3) * 4
-                        + j
-                        + if i < 2 { 0 } else { 16 }) as u8;
-                }
-            }
-        }
-        S::Doubles => {
-            for j in 0..8 {
-                lanes[j] = (usize::from(immediate & 1) * 8 + j) as u8;
-                lanes[8 + j] = (16 + usize::from((immediate >> 1) & 1) * 8 + j) as u8;
-            }
-        }
-        S::UnpackLow | S::UnpackHigh => {
-            let start = if kind == S::UnpackHigh { size / 2 } else { 0 };
-            for i in 0..size / width / 2 {
-                for j in 0..width {
-                    lanes[i * width * 2 + j] = (start + i * width + j) as u8;
-                    lanes[i * width * 2 + width + j] = (16 + start + i * width + j) as u8;
-                }
-            }
-        }
-        S::MoveLowToHigh => {
-            for j in 0..8 {
-                lanes[8 + j] = (16 + j) as u8;
-            }
-        }
-        S::MoveHighToLow => {
-            for (j, lane) in lanes[..8].iter_mut().enumerate() {
-                *lane = (24 + j) as u8;
-            }
-        }
-        _ => unreachable!(),
-    }
-    code.i8x16_shuffle(lanes);
+    rearrange::shuffle(
+        code,
+        kind,
+        op.vector_bytes,
+        op.lane_bytes,
+        op.immediate.unwrap_or(0),
+    );
 }
 
 pub(super) fn instruction(
@@ -1200,4 +1062,54 @@ pub(super) fn instruction(
         mark_mmx(code);
     }
     op.writes_memory()
+}
+
+#[cfg(test)]
+pub(super) fn rearrange_value(
+    code: &mut InstructionSink<'_>,
+    operation: crate::cpu::x86::simd::RearrangeOperation,
+    sources: [u32; 3],
+) {
+    let [first, second, mask] = sources;
+    let kind = operation.kind();
+    match kind {
+        S::PackSigned | S::PackUnsigned => {
+            code.local_get(first).local_get(second);
+            rearrange::pack(code, kind, operation.lane_bytes());
+        }
+        _ if kind.widening().is_some() => {
+            code.local_get(second);
+            rearrange::widen(code, kind, operation.lane_bytes());
+        }
+        S::Bytes => {
+            code.local_get(first).local_get(second);
+            rearrange::bytes(code, 16, |code| {
+                code.local_get(second);
+            });
+        }
+        S::AlignRight => {
+            let count = usize::from(operation.immediate());
+            if count >= 32 {
+                code.v128_const(0);
+            } else {
+                code.local_get(second).local_get(first);
+                rearrange::align_right(code, 16, count);
+            }
+        }
+        S::BlendVariable => {
+            code.local_get(second).local_get(first).local_get(mask);
+            rearrange::blend_variable(code, 1);
+        }
+        _ => {
+            code.local_get(if operation.unary() { second } else { first })
+                .local_get(second);
+            rearrange::shuffle(
+                code,
+                kind,
+                16,
+                operation.lane_bytes(),
+                operation.immediate(),
+            );
+        }
+    }
 }

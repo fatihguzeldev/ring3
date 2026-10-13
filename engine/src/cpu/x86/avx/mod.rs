@@ -7,6 +7,7 @@ mod f16c;
 mod integer;
 mod moves;
 mod permute;
+mod rearrange;
 
 pub(crate) use compare::{CompareInstruction, CompareShape};
 pub(crate) use compound::CompoundInstruction;
@@ -18,6 +19,7 @@ pub(crate) use moves::{
     DuplicateKind, Half, HalfMerge, MoveInstruction, MoveSource, WordSource, WordTarget,
 };
 pub(crate) use permute::PermuteInstruction;
+pub(crate) use rearrange::RearrangeInstruction;
 
 use super::simd::SimdState;
 

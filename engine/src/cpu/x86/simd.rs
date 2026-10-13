@@ -265,6 +265,11 @@ pub(crate) use float::{CompareMode, compare_lanes, conversion_lanes};
 #[cfg(test)]
 pub(crate) use float::{PairwiseKind, dot_product_lanes, pairwise_lanes, round_lanes};
 
+#[cfg(test)]
+mod rearrange;
+#[cfg(test)]
+pub(crate) use rearrange::RearrangeOperation;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SimdError {
     InvalidDescriptor,
