@@ -259,6 +259,9 @@ mod integer;
 #[cfg(test)]
 pub(crate) use integer::IntegerLaneOperation;
 
+#[cfg(test)]
+pub(crate) use float::{CompareMode, compare_lanes, conversion_lanes};
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SimdError {
     InvalidDescriptor,

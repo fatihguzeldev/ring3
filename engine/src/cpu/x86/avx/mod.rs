@@ -1,8 +1,12 @@
 mod arithmetic;
+mod compare;
+mod convert;
 mod integer;
 mod moves;
 mod permute;
 
+pub(crate) use compare::{CompareInstruction, CompareShape};
+pub(crate) use convert::{ConvertInstruction, PackedConversion};
 pub(crate) use integer::IntegerInstruction;
 pub(crate) use moves::{
     DuplicateKind, Half, HalfMerge, MoveInstruction, MoveSource, WordSource, WordTarget,
@@ -119,6 +123,7 @@ pub(crate) enum Instruction {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum ArithmeticError {
+    OperandLength,
     InvalidRegister,
     InvalidOperation,
     InvalidState,

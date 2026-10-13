@@ -98,6 +98,105 @@ fn square_root(bits: u64, width: usize, round: Rounding) -> (u64, u32) {
     (result.bits, u32::from(result.exceptions))
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum CompareMode {
+    Predicate(u8),
+    Flags { quiet: bool },
+}
+
+fn compare_lane(
+    mode: CompareMode,
+    a: u64,
+    b: u64,
+    width: usize,
+    mxcsr: u32,
+) -> (u64, u32, Option<u32>) {
+    let (a, ad) = input(a, width, mxcsr);
+    let (b, bd) = input(b, width, mxcsr);
+    let unordered = nan(a, width) || nan(b, width);
+    let signaling_predicate = match mode {
+        CompareMode::Predicate(immediate) => matches!(
+            immediate & 31,
+            1 | 2 | 5 | 6 | 9 | 10 | 13 | 14 | 16 | 19 | 20 | 23 | 24 | 27 | 28 | 31
+        ),
+        CompareMode::Flags { quiet } => !quiet,
+    };
+    let invalid = signaling(a, width) || signaling(b, width) || unordered && signaling_predicate;
+    let exceptions = if invalid { 1 } else { ad | bd };
+    let eq = !unordered && equal(a, b, width);
+    let lt = !unordered && less(a, b, width);
+    if matches!(mode, CompareMode::Flags { .. }) {
+        return (
+            0,
+            exceptions,
+            Some(if unordered {
+                0x45
+            } else if lt {
+                1
+            } else if eq {
+                0x40
+            } else {
+                0
+            }),
+        );
+    }
+    let CompareMode::Predicate(immediate) = mode else {
+        unreachable!()
+    };
+    let result = match immediate & 15 {
+        0 => eq,
+        1 => lt,
+        2 => lt || eq,
+        3 => unordered,
+        4 => !eq,
+        5 => !lt,
+        6 => !(lt || eq),
+        7 => !unordered,
+        8 => eq || unordered,
+        9 => lt || unordered,
+        10 => lt || eq || unordered,
+        11 => false,
+        12 => !eq && !unordered,
+        13 => !lt && !unordered,
+        14 => !(lt || eq) && !unordered,
+        15 => true,
+        _ => unreachable!(),
+    };
+    (if result { u64::MAX } else { 0 }, exceptions, None)
+}
+
+#[cfg(test)]
+pub(crate) fn compare_lanes<const N: usize>(
+    mode: CompareMode,
+    width: usize,
+    count: usize,
+    first: [u8; N],
+    second: [u8; N],
+    mxcsr: u32,
+) -> ([u8; N], u32, Option<u32>) {
+    assert!(matches!(width, 4 | 8) && count <= N / width);
+    assert!(!matches!(mode, CompareMode::Flags { .. }) || count == 1);
+    let mut result = [0; N];
+    let mut exceptions = 0;
+    let mut flags = None;
+    for index in 0..count {
+        let offset = index * width;
+        let read = |source: &[u8; N]| {
+            let mut bytes = [0; 8];
+            bytes[..width].copy_from_slice(&source[offset..offset + width]);
+            u64::from_le_bytes(bytes)
+        };
+        let (value, status, compare) =
+            compare_lane(mode, read(&first), read(&second), width, mxcsr);
+        exceptions |= lane_exceptions(status, mxcsr);
+        if compare.is_some() {
+            flags = compare;
+        }
+        result[offset..offset + width].copy_from_slice(&value.to_le_bytes()[..width]);
+    }
+    (result, instruction_exceptions(exceptions, mxcsr), flags)
+}
+
 fn binary(
     kind: F,
     mut a: u64,
@@ -106,6 +205,15 @@ fn binary(
     mxcsr: u32,
     predicate: u8,
 ) -> (u64, u32, Option<u32>) {
+    if matches!(kind, F::Compare | F::CompareFlags | F::CompareFlagsQuiet) {
+        let mode = match kind {
+            F::Compare => CompareMode::Predicate(predicate & 7),
+            F::CompareFlags => CompareMode::Flags { quiet: false },
+            F::CompareFlagsQuiet => CompareMode::Flags { quiet: true },
+            _ => unreachable!(),
+        };
+        return compare_lane(mode, a, b, width, mxcsr);
+    }
     let unary = matches!(
         kind,
         F::SquareRoot | F::Reciprocal | F::ReciprocalSquareRoot
@@ -118,44 +226,6 @@ fn binary(
     let an = nan(a, width);
     let bn = nan(b, width);
     let sn = signaling(a, width) || signaling(b, width);
-    if matches!(kind, F::Compare | F::CompareFlags | F::CompareFlagsQuiet) {
-        let unordered = an || bn;
-        let invalid = sn
-            || (unordered
-                && (kind == F::CompareFlags
-                    || (kind == F::Compare && matches!(predicate & 7, 1 | 2 | 5 | 6))));
-        if invalid {
-            flags = 1;
-        }
-        let eq = !unordered && equal(a, b, width);
-        let lt = !unordered && less(a, b, width);
-        if kind != F::Compare {
-            return (
-                0,
-                flags,
-                Some(if unordered {
-                    0x45
-                } else if lt {
-                    1
-                } else if eq {
-                    0x40
-                } else {
-                    0
-                }),
-            );
-        }
-        let result = match predicate & 7 {
-            0 => eq,
-            1 => lt,
-            2 => lt || eq,
-            3 => unordered,
-            4 => !eq,
-            5 => !lt,
-            6 => !(lt || eq),
-            _ => !unordered,
-        };
-        return (if result { u64::MAX } else { 0 }, flags, None);
-    }
     if matches!(kind, F::Minimum | F::Maximum) {
         if an || bn {
             flags = 1;
@@ -493,62 +563,35 @@ pub(super) fn floating(
     (out, instruction_exceptions(exceptions, mxcsr), flags)
 }
 
-pub(super) fn convert(
-    op: SimdOperation,
-    a: [u8; 16],
-    b: [u8; 16],
+pub(crate) fn conversion_lanes<const N: usize>(
+    kind: C,
+    truncate: bool,
+    count: usize,
+    mut out: [u8; N],
+    b: [u8; N],
     mxcsr: u32,
-) -> ([u8; 16], u32, Option<u32>) {
-    let super::SimdKind::Convert { kind, truncate } = op.kind else {
-        unreachable!()
+) -> ([u8; N], u32) {
+    let (source_width, destination_width) = match kind {
+        C::SignedDwordsToSingles
+        | C::SignedDwordToSingle
+        | C::SinglesToSignedDwords
+        | C::SingleToSignedDword => (4, 4),
+        C::SignedDwordsToDoubles
+        | C::SignedDwordToDouble
+        | C::SinglesToDoubles
+        | C::SingleToDouble => (4, 8),
+        C::DoublesToSignedDwords
+        | C::DoubleToSignedDword
+        | C::DoublesToSingles
+        | C::DoubleToSingle => (8, 4),
     };
+    assert!(count <= N / source_width && count <= N / destination_width);
     let round = if truncate {
         Rounding::Zero
     } else {
         rounding(mxcsr)
     };
-    let mut out = if op.scalar { a } else { [0; 16] };
     let mut flags = 0;
-    let (source_width, destination_width, count) = match kind {
-        C::SignedDwordsToSingles => (
-            4,
-            4,
-            if matches!(
-                op.source,
-                super::SimdOperand::Register(super::SimdRegister::Mmx(_))
-            ) || op.memory_bytes == 8
-            {
-                2
-            } else {
-                4
-            },
-        ),
-        C::SignedDwordsToDoubles => (4, 8, 2),
-        C::SinglesToSignedDwords => (
-            4,
-            4,
-            if matches!(
-                op.destination,
-                super::SimdOperand::Register(super::SimdRegister::Mmx(_))
-            ) {
-                2
-            } else {
-                4
-            },
-        ),
-        C::DoublesToSignedDwords => (8, 4, 2),
-        C::SinglesToDoubles => (4, 8, 2),
-        C::DoublesToSingles => (8, 4, 2),
-        C::SignedDwordToSingle => (4, 4, 1),
-        C::SignedDwordToDouble => (4, 8, 1),
-        C::SingleToSignedDword => (4, 4, 1),
-        C::DoubleToSignedDword => (8, 4, 1),
-        C::SingleToDouble => (4, 8, 1),
-        C::DoubleToSingle => (8, 4, 1),
-    };
-    if kind == C::SignedDwordsToSingles && count == 2 {
-        out = a;
-    }
     for lane in 0..count {
         let raw = unsigned(&b, lane * source_width, source_width);
         let to_integer = matches!(
@@ -601,9 +644,63 @@ pub(super) fn convert(
         flags |= lane_exceptions(status, mxcsr);
         put(&mut out, lane * destination_width, destination_width, value);
     }
+    (out, instruction_exceptions(flags, mxcsr))
+}
+
+pub(super) fn convert(
+    op: SimdOperation,
+    a: [u8; 16],
+    b: [u8; 16],
+    mxcsr: u32,
+) -> ([u8; 16], u32, Option<u32>) {
+    let super::SimdKind::Convert { kind, truncate } = op.kind else {
+        unreachable!()
+    };
+    let mut out = if op.scalar { a } else { [0; 16] };
+    let (_, _, count) = match kind {
+        C::SignedDwordsToSingles => (
+            4,
+            4,
+            if matches!(
+                op.source,
+                super::SimdOperand::Register(super::SimdRegister::Mmx(_))
+            ) || op.memory_bytes == 8
+            {
+                2
+            } else {
+                4
+            },
+        ),
+        C::SignedDwordsToDoubles => (4, 8, 2),
+        C::SinglesToSignedDwords => (
+            4,
+            4,
+            if matches!(
+                op.destination,
+                super::SimdOperand::Register(super::SimdRegister::Mmx(_))
+            ) {
+                2
+            } else {
+                4
+            },
+        ),
+        C::DoublesToSignedDwords => (8, 4, 2),
+        C::SinglesToDoubles => (4, 8, 2),
+        C::DoublesToSingles => (8, 4, 2),
+        C::SignedDwordToSingle => (4, 4, 1),
+        C::SignedDwordToDouble => (4, 8, 1),
+        C::SingleToSignedDword => (4, 4, 1),
+        C::DoubleToSignedDword => (8, 4, 1),
+        C::SingleToDouble => (4, 8, 1),
+        C::DoubleToSingle => (8, 4, 1),
+    };
+    if kind == C::SignedDwordsToSingles && count == 2 {
+        out = a;
+    }
+    let (out, flags) = conversion_lanes(kind, truncate, count, out, b, mxcsr);
     let gpr = matches!(kind, C::SingleToSignedDword | C::DoubleToSignedDword)
         .then(|| unsigned(&out, 0, 4) as u32);
-    (out, instruction_exceptions(flags, mxcsr), gpr)
+    (out, flags, gpr)
 }
 
 #[cfg(test)]
