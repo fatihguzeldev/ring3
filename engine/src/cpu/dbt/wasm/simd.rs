@@ -219,13 +219,14 @@ pub(super) fn instruction(
             payload(code, 0);
             code.local_set(RESUME);
             code.local_get(RESUME).if_(wasm_encoder::BlockType::Empty);
-            super::segments::access(
+            memory::checked_address(
                 code,
                 operation
                     .implicit_address
-                    .expect("MASKMOV has an implicit address")
-                    .segment
-                    .unwrap_or(crate::cpu::x86::SegmentRegister::Ds),
+                    .expect("MASKMOV has an implicit address"),
+                u32::from(operation.memory_bytes),
+                crate::cpu::x86::SegmentAccess::Write,
+                imports,
                 exit_depth + 1,
             );
             code.end();

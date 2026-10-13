@@ -41,3 +41,6 @@ mod avx2_wrapping;
 
 #[path = "avx/gather/wasm.rs"]
 mod avx2_gather;
+
+#[path = "memory/masked/wasm.rs"]
+mod masked;
