@@ -18,6 +18,8 @@ pub(crate) struct UserModeEnvironment {
     protected_virtual_interrupts: bool,
     debug_general_detect: bool,
     debug_extensions_enabled: bool,
+    protection_keys_enabled: bool,
+    control_flow_enforcement_enabled: bool,
 }
 
 pub(crate) const USER_MODE_ENVIRONMENT: UserModeEnvironment = UserModeEnvironment {
@@ -30,6 +32,8 @@ pub(crate) const USER_MODE_ENVIRONMENT: UserModeEnvironment = UserModeEnvironmen
     protected_virtual_interrupts: false,
     debug_general_detect: false,
     debug_extensions_enabled: false,
+    protection_keys_enabled: false,
+    control_flow_enforcement_enabled: false,
 };
 
 impl UserModeEnvironment {
@@ -67,6 +71,16 @@ impl UserModeEnvironment {
         self.debug_general_detect
     }
 
+    /// cr4.pke must agree with the virtual ospke bit; no pkru state is enabled.
+    pub(crate) const fn protection_keys_enabled(self) -> bool {
+        self.protection_keys_enabled
+    }
+
+    /// cr4.cet is clear, so no user or supervisor shadow-stack msr is consulted.
+    pub(crate) const fn control_flow_enforcement_enabled(self) -> bool {
+        self.control_flow_enforcement_enabled
+    }
+
     pub(crate) const fn debug_extensions_enabled(self) -> bool {
         self.debug_extensions_enabled
     }
@@ -90,5 +104,22 @@ mod tests {
         assert!(!USER_MODE_ENVIRONMENT.protected_virtual_interrupts());
         assert!(!USER_MODE_ENVIRONMENT.debug_general_detect());
         assert!(!USER_MODE_ENVIRONMENT.debug_extensions_enabled());
+    }
+
+    #[test]
+    fn disabled_pke_and_cet_controls_are_coherent_with_unchanged_cpuid() {
+        let leaf = crate::cpu::x86::capabilities::CPU_ID_LEAVES
+            .iter()
+            .find(|leaf| leaf.function == 7 && leaf.subfunction == Some(0))
+            .unwrap();
+        assert!(!USER_MODE_ENVIRONMENT.protection_keys_enabled());
+        assert!(!USER_MODE_ENVIRONMENT.control_flow_enforcement_enabled());
+        assert_eq!(leaf.registers[2] & ((1 << 3) | (1 << 4) | (1 << 7)), 0);
+        assert_eq!(leaf.registers[3] & (1 << 20), 0);
+        assert_eq!(
+            leaf.registers[2] & (1 << 4) != 0,
+            USER_MODE_ENVIRONMENT.protection_keys_enabled(),
+            "ospke reports cr4.pke exactly"
+        );
     }
 }

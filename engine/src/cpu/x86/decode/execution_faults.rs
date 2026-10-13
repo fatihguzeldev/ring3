@@ -48,6 +48,7 @@ pub(super) fn for_instruction(
         if optional::unavailable(instruction)
             || unavailable(instruction)
             || user_privilege_invalid(instruction, environment)
+            || state::disabled(instruction, environment)
         {
             return Some(ControlOperation::InvalidOpcode);
         }
@@ -286,3 +287,5 @@ mod syscall;
 mod sep;
 
 mod optional;
+
+mod state;

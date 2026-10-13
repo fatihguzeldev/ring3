@@ -80,3 +80,6 @@ mod cpu_optional_availability;
 
 #[path = "system_registers/wasm.rs"]
 mod cpu_system_registers;
+
+#[path = "exceptions/availability/state/wasm.rs"]
+mod cpu_disabled_state;
