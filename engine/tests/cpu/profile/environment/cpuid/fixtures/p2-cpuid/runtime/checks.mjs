@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
 import {queries} from './oracle.mjs';
+import {ARENA_SIZE, createArena} from '../../../../../../../support/wasm/arena.mjs';
 
-export const PC = 0x1000, SIZE = 4612;
+export const PC = 0x1000, SIZE = ARENA_SIZE;
 export function words(values) {
   const bytes = Buffer.alloc(values.length * 4);
   values.forEach((value, i) => bytes.writeUInt32LE(value >>> 0, i * 4));
@@ -16,6 +17,13 @@ const cpuRecord = state => record('R3ST', 56, [...state.registers, state.pc, sta
 export const arena = context => Buffer.from(new Uint8Array(context.memory.buffer, context.base, SIZE));
 export function input(context, offset, bytes) {
   new Uint8Array(context.memory.buffer).set(bytes, context.base + offset);
+}
+// seed required flat code authority in input only; numeric/helper payload stays dirty.
+export function seedFlatCodeContext(context) {
+  const canonical = createArena(), initial = Buffer.alloc(SIZE, 0xa5);
+  initial.set(canonical.subarray(4524, 4588), 4524);
+  initial.set(canonical.subarray(4756, 4796), 4756);
+  input(context, 0, initial);
 }
 export function checkImports(module, resident) {
   assert.deepEqual(WebAssembly.Module.imports(module), [

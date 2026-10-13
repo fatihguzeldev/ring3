@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
-import {arena, checkContext, checkImports, SIZE} from './checks.mjs';
+import {arena, checkContext, checkImports, seedFlatCodeContext, SIZE} from './checks.mjs';
 
 const bytes = readFileSync(0); let offset = 0, contexts = 0, runs = 0;
 while (offset < bytes.length) {
@@ -9,7 +9,7 @@ while (offset < bytes.length) {
   const module = new WebAssembly.Module(bytes.subarray(offset, offset + length)); offset += length;
   checkImports(module, resident);
   const memory = new WebAssembly.Memory({initial: 1}), context = {memory, base: 0, label: `${resident ? 'resident' : 'replacement'}-${entries ? 'entry' : 'extent'}-${instructionLength}`};
-  new Uint8Array(memory.buffer, 0, SIZE).fill(0xa5); let guards = 0;
+  seedFlatCodeContext(context); let guards = 0;
   const guard = () => {guards++; return 0;};
   context.run = new WebAssembly.Instance(module, {env: {memory}, ring3: {guard, guard_resident: guard}}).exports.run;
   const count = checkContext(context, instructionLength);
