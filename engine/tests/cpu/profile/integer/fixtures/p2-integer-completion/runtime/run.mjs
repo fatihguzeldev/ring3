@@ -107,7 +107,7 @@ function execute(c,label,s,{next=s,reason=1,retired=1,width,source,descriptor,ca
   if(!fault){payload[1]=next.flags;if(cas||timestamp){payload[2]=next.r[0];payload[3]=next.r[2];}}
   expected.set(dwords(payload),T);expected.set(packet(width,fault?1:0,...(fault?[fault[0],fault[1],fault[2]]:[])),100);
  }
- if(readByte!==undefined)expected.set(record('R3MH',40,[0,readByte,0,0,0,1],2),100);
+ if(readByte!==undefined)expected.set(record('R3MH',40,[0,readByte,0,0,0,1],10),100);
  if(legacyPacket)expected.set(legacyPacket,100);
  const status=c.run(c.base,c.base+56,budget,c.base+96),after=arena(c);assert.equal(status,0,label+' status');assert.deepEqual(after,expected,label+' entire arena');
  const calls=helpers.slice(start);assert.equal(calls.length,helperCount,label+' helper count');
@@ -138,7 +138,7 @@ function caseRun(c,block,row){
    }
   }
   upload(c,DATA,bytes(row.old,width));
-  const version=width===1?5:width===2?6:1,length=width===4?0:width;
+  const version=10,length=width;
   execute(c,row.name,s,{next,helperCount:1,legacyPacket:record('R3MH',40,[0,Number(row.old),0,0,0,length],version)});
   assert.deepEqual(read(c,DATA,width),bytes(stored,width),row.name+' memory');
  }else if(row.cas){
@@ -184,8 +184,8 @@ function prefixBoundaryCases(owner,entries){
   const s=cpu(row.pc),next={...s,r:[...s.r],pc:row.pc+hex(row.code).length};
   const original=Buffer.from(row.load?[0x11,0xef,0xbe,0x22]:[0x55,0x66,0x77,0x88]);upload(m,row.address-1,original);
   if(row.load)next.r[0]=((s.r[0]&0xffff0000)|0xbeef)>>>0;
-  execute(m,row.name,s,{next,helperCount:1,legacyPacket:record('R3MH',40,[0,row.load?0xbeef:0,0,0,0,2],row.load?2:4)});
-  const call=helpers.at(-1);assert.equal(call.name,row.load?'read16':owner==='resident'?'store_resident16':'store16');
+  execute(m,row.name,s,{next,helperCount:1,legacyPacket:record('R3MH',40,[0,row.load?0xbeef:0,0,0,0,2],10)});
+  const call=helpers.at(-1);assert.equal(call.name,row.load?'cpu_read16':owner==='resident'?'cpu_store_resident16':'cpu_store16');
   assert.deepEqual(call.args.slice(row.load?-1:-2),row.load?[row.address]:[row.address,0xc3d4],row.name+' exact selected address/source');
   const expected=Buffer.from(original);if(!row.load)expected.set([0xd4,0xc3],1);
   assert.deepEqual(read(m,row.address-1,4),expected,row.name+' word plus adjacent canaries');
@@ -205,15 +205,15 @@ function prefixBoundaryCases(owner,entries){
   const s=cpu(row.pc),returnPc=row.pc+hex(row.call).length,stack=0x7078,original=Buffer.from(Array.from({length:16},(_,i)=>0x90+i));
   upload(c,stack,original);const afterCall={...s,r:[...s.r],pc:row.target};afterCall.r[4]-=row.width;
   execute(c,`${row.name} prefixed direct CALL ignores null FS/base and address16`,s,{next:afterCall,helperCount:1,
-   legacyPacket:record('R3MH',40,[0,0,0,0,0,row.width===2?2:0],row.width===2?4:1)});
-  let call=helpers.at(-1);assert.equal(call.name,row.width===2?(owner==='resident'?'store_resident16':'store16'):(owner==='resident'?'store_resident32':'store32'));
+   legacyPacket:record('R3MH',40,[0,0,0,0,0,row.width],10)});
+  let call=helpers.at(-1);assert.equal(call.name,row.width===2?(owner==='resident'?'cpu_store_resident16':'cpu_store16'):(owner==='resident'?'cpu_store_resident32':'cpu_store32'));
   assert.deepEqual(call.args.slice(-2),[afterCall.r[4],returnPc],'CALL writes the full consumed return PC at the SS stack address');
   const pushed=Buffer.from(original);pushed.set(bytes(returnPc,row.width),afterCall.r[4]-stack);
   assert.deepEqual(read(c,stack,16),pushed,'CALL changes exactly the operand-width return slot');
   const afterReturn={...afterCall,r:[...afterCall.r],pc:returnPc};afterReturn.r[4]=s.r[4]+row.adjust;
   execute(c,`${row.name} prefixed near RET resumes live stack and ignores null GS/base`,afterCall,{next:afterReturn,seed:false,helperCount:1,
-   legacyPacket:record('R3MH',40,[0,returnPc,0,0,0,row.width===2?2:0],row.width===2?2:1)});
-  call=helpers.at(-1);assert.equal(call.name,row.width===2?'read16':'read32');assert.deepEqual(call.args,[afterCall.r[4]],'RET reads the exact live SS stack slot');
+   legacyPacket:record('R3MH',40,[0,returnPc,0,0,0,row.width],10)});
+  call=helpers.at(-1);assert.equal(call.name,row.width===2?'cpu_read16':'cpu_read32');assert.deepEqual(call.args,[afterCall.r[4]],'RET reads the exact live SS stack slot');
   assert.deepEqual(read(c,stack,16),pushed,'RET preserves the return slot and adjacent stack bytes');
  }host(c,'close');
 }
