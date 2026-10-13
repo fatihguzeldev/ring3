@@ -35,3 +35,6 @@ mod pe32_mutable_records;
 
 #[path = "sort/native.rs"]
 mod pe32_sort;
+
+#[path = "atomic/flags/native.rs"]
+mod returned_atomic_flags32_original;

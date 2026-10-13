@@ -138,6 +138,3 @@ mod locked_xadd8_original;
 
 #[path = "logical/locked/compiler/native/xor32.rs"]
 mod locked_xor32_original;
-
-#[path = "logical/flags/returned/compiler/native/dword.rs"]
-mod returned_atomic_flags32_original;
