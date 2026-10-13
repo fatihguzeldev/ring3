@@ -30,3 +30,6 @@ mod cpu_code_fetch_wasm;
 
 #[path = "stack/base/wasm.rs"]
 mod cpu_ss_base_wasm;
+
+#[path = "code/base/wasm.rs"]
+mod cpu_code_base_wasm;
