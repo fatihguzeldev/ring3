@@ -1,8 +1,8 @@
-use iced_x86::{Code, Instruction, OpKind, Register};
+use iced_x86::{Code, CpuidFeature, EncodingKind, Instruction, OpKind, Register};
 
 use crate::cpu::x86::{
     ControlOperation,
-    capabilities::{MSR_ENABLED, RDPMC_ENABLED},
+    capabilities::{MSR_ENABLED, RDPMC_ENABLED, XCR0},
     environment::{UserModeEnvironment, UserPortPermissions},
     ir::AddressSize,
 };
@@ -18,7 +18,7 @@ pub(super) fn invalid(bytes: &[u8]) -> Option<ControlOperation> {
     }
 }
 
-pub(super) fn privileged(
+pub(super) fn for_instruction(
     instruction: &Instruction,
     bytes: &[u8],
     environment: UserModeEnvironment,
@@ -38,15 +38,53 @@ pub(super) fn privileged(
             repeat_count: instruction.has_rep_prefix().then_some(address_size),
         });
     }
-    if general_protection(instruction, environment)
-        && !instruction.has_rep_prefix()
+    if !instruction.has_rep_prefix()
         && !instruction.has_repne_prefix()
         && !duplicate_profile_prefix(bytes)
     {
-        Some(ControlOperation::GeneralProtectionZero)
-    } else {
-        None
+        if unavailable(instruction) {
+            return Some(ControlOperation::InvalidOpcode);
+        }
+        if general_protection(instruction, environment) {
+            return Some(ControlOperation::GeneralProtectionZero);
+        }
     }
+    None
+}
+
+fn unavailable(instruction: &Instruction) -> bool {
+    // the fixed protected32 user profile never executes inside smm.
+    if instruction.code() == Code::Rsm {
+        return true;
+    }
+    if instruction.encoding() != EncodingKind::EVEX || XCR0 & 0xe7 == 0xe7 {
+        return false;
+    }
+    // these known evex vector categories require xmm/ymm and all avx512 state components,
+    // including memory-only vsib or mask-result forms. encoding alone is insufficient.
+    instruction.cpuid_features().iter().any(|feature| {
+        matches!(
+            feature,
+            CpuidFeature::AVX512BW
+                | CpuidFeature::AVX512CD
+                | CpuidFeature::AVX512DQ
+                | CpuidFeature::AVX512ER
+                | CpuidFeature::AVX512F
+                | CpuidFeature::AVX512PF
+                | CpuidFeature::AVX512VL
+                | CpuidFeature::AVX512_4FMAPS
+                | CpuidFeature::AVX512_4VNNIW
+                | CpuidFeature::AVX512_BF16
+                | CpuidFeature::AVX512_BITALG
+                | CpuidFeature::AVX512_FP16
+                | CpuidFeature::AVX512_IFMA
+                | CpuidFeature::AVX512_VBMI
+                | CpuidFeature::AVX512_VBMI2
+                | CpuidFeature::AVX512_VNNI
+                | CpuidFeature::AVX512_VP2INTERSECT
+                | CpuidFeature::AVX512_VPOPCNTDQ
+        )
+    })
 }
 
 fn general_protection(instruction: &Instruction, environment: UserModeEnvironment) -> bool {
@@ -171,3 +209,7 @@ mod environment_tests;
 #[cfg(test)]
 #[path = "execution_faults/tests/strings.rs"]
 mod strings;
+
+#[cfg(test)]
+#[path = "execution_faults/tests/availability/native.rs"]
+mod availability;

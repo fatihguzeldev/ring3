@@ -111,7 +111,7 @@ fn decode(
             DecoderError::None => {
                 let consumed = instruction.len();
                 let fault = if policy == DecodePolicy::Execution {
-                    super::execution_faults::privileged(
+                    super::execution_faults::for_instruction(
                         &instruction,
                         &bytes[..consumed],
                         USER_MODE_ENVIRONMENT,

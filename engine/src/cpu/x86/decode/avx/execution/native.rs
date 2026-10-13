@@ -124,10 +124,23 @@ fn integer_extensions_are_admitted_while_evex_and_unpredictable_l_remain_refused
         let memory = code(bytes, 0x1000);
         let strict = decode_one(&memory, GuestAddress(0x1000)).unwrap_err();
         assert_eq!(strict, DecodeError::Unsupported(UnsupportedFeature::Simd));
-        assert_eq!(
-            decode_for_execution(&memory, GuestAddress(0x1000)).unwrap_err(),
-            strict
-        );
+        if encoding == EncodingKind::EVEX {
+            let runtime = decode_for_execution(&memory, GuestAddress(0x1000)).unwrap();
+            assert_eq!(
+                runtime.operation(),
+                &Operation::Control(ControlOperation::InvalidOpcode)
+            );
+            assert_eq!(runtime.pc(), GuestAddress(0x1000));
+            assert_eq!(runtime.length() as usize, bytes.len());
+            assert_eq!(runtime.next_pc(), GuestAddress(0x1000 + bytes.len() as u32));
+            assert_eq!(runtime.segment_accesses(), 0);
+            assert!(memory.is_code_current(runtime.code_snapshot()));
+        } else {
+            assert_eq!(
+                decode_for_execution(&memory, GuestAddress(0x1000)).unwrap_err(),
+                strict
+            );
+        }
     }
 }
 #[test]
