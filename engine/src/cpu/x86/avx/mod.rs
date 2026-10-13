@@ -1,12 +1,14 @@
 mod arithmetic;
 mod compare;
 mod convert;
+mod f16c;
 mod integer;
 mod moves;
 mod permute;
 
 pub(crate) use compare::{CompareInstruction, CompareShape};
 pub(crate) use convert::{ConvertInstruction, PackedConversion};
+pub(crate) use f16c::{F16cError, F16cInstruction, F16cTarget};
 pub(crate) use integer::IntegerInstruction;
 pub(crate) use moves::{
     DuplicateKind, Half, HalfMerge, MoveInstruction, MoveSource, WordSource, WordTarget,
