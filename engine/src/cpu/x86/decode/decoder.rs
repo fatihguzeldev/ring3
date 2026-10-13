@@ -122,10 +122,21 @@ fn decode(
                 let (operation, segments) = if let Some(operation) = fault {
                     (Operation::Control(operation), 0)
                 } else {
-                    (
-                        super::lower::lower(&instruction, &bytes[..consumed])?,
-                        segment_accesses(&instruction),
-                    )
+                    match super::lower::lower(&instruction, &bytes[..consumed]) {
+                        Ok(operation) => (operation, segment_accesses(&instruction)),
+                        Err(DecodeError::InvalidEncoding)
+                            if policy == DecodePolicy::Execution
+                                && instruction.encoding() == iced_x86::EncodingKind::VEX =>
+                        {
+                            (
+                                Operation::Control(
+                                    crate::cpu::x86::ControlOperation::InvalidOpcode,
+                                ),
+                                0,
+                            )
+                        }
+                        Err(error) => return Err(error),
+                    }
                 };
                 return finish(
                     memory,

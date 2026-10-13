@@ -1,6 +1,5 @@
 mod abi;
 mod atomic;
-#[cfg(test)]
 mod avx;
 mod cache_flush;
 mod control;

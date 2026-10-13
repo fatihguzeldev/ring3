@@ -307,7 +307,6 @@ impl AddressSpace {
     }
 
     /// preflights selected bytes before changing the caller's output; disabled bytes are preserved.
-    #[cfg(test)]
     pub(crate) fn read_masked(
         &self,
         address: GuestAddress,

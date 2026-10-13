@@ -1,5 +1,6 @@
 #![forbid(unsafe_code)]
 
+pub(super) mod avx;
 pub(super) mod far;
 pub(super) mod integer;
 pub(super) mod segment_queries;

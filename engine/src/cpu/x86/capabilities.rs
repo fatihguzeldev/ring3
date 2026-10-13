@@ -1,5 +1,8 @@
 pub(crate) const XCR0: u64 = 3;
 
+/// baseline avx is admitted only with its complete architectural state enabled.
+pub(crate) const AVX_ENABLED: bool = XCR0 & 7 == 7;
+
 pub(crate) struct CpuIdLeaf {
     pub function: u32,
     pub subfunction: Option<u32>,

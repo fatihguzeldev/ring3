@@ -206,3 +206,6 @@ pub(crate) use cpu::{
     segment_load_far_resident, segment_load_resident, set_segment_base, simd_execute,
     simd_execute_resident, stack_execute, stack_execute_resident, x87_op, x87_resident_op,
 };
+
+mod avx;
+pub(crate) use avx::{avx_execute, avx_execute_resident};

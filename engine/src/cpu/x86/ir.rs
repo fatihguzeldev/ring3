@@ -441,6 +441,7 @@ pub enum Operation {
         opcode: u16,
     },
     Simd(super::simd::SimdOperation),
+    Avx(super::avx::AvxOperation),
     LoadSegment {
         segment: super::SegmentRegister,
         source: Value32,

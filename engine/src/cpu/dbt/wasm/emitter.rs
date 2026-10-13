@@ -19,6 +19,7 @@ pub(in crate::cpu::dbt) fn emit(
         cpu_write: needs_cpu_write,
         x87_op: needs_x87_op,
         simd_execute: needs_simd_execute,
+        avx_execute: needs_avx_execute,
         cpu_fxsave: needs_cpu_fxsave,
         cpu_xsave: needs_cpu_xsave,
         cpu_xrstor: needs_cpu_xrstor,
@@ -64,6 +65,10 @@ pub(in crate::cpu::dbt) fn emit(
         || needs_atomic_and_u32
         || needs_atomic_xor_u32;
     let has_reads = needs_read || needs_read8 || needs_read16;
+    let has_avx = blocks
+        .iter()
+        .flat_map(|block| &block.instructions)
+        .any(|instruction| matches!(instruction.operation(), Operation::Avx(_)));
     let has_simd = blocks
         .iter()
         .flat_map(|block| &block.instructions)
@@ -71,6 +76,7 @@ pub(in crate::cpu::dbt) fn emit(
             matches!(
                 instruction.operation(),
                 Operation::Simd(_)
+                    | Operation::Avx(_)
                     | Operation::PackedStringCompare(_)
                     | Operation::XState(
                         crate::cpu::x86::xstate::XStateOperation::Save { .. }
@@ -101,6 +107,7 @@ pub(in crate::cpu::dbt) fn emit(
         || needs_cpu_write
         || needs_x87_op
         || needs_simd_execute
+        || needs_avx_execute
         || needs_cpu_fxsave
         || needs_cpu_xsave
         || needs_cpu_xrstor
@@ -652,6 +659,13 @@ pub(in crate::cpu::dbt) fn emit(
             &mut helper_imports.cpu_integer,
         ),
         (
+            needs_avx_execute,
+            "avx_execute",
+            "avx_execute_resident",
+            3,
+            &mut helper_imports.avx_execute,
+        ),
+        (
             needs_simd_execute,
             "simd_execute",
             "simd_execute_resident",
@@ -780,6 +794,12 @@ pub(in crate::cpu::dbt) fn emit(
     {
         declarations.push((5, ValType::I64));
     }
+    if has_avx {
+        let first = 4 + declarations.iter().map(|(count, _)| count).sum::<u32>();
+        helper_imports.avx_locals = Some(super::avx::AvxLocals::new(first));
+        declarations.push((super::avx::INTEGER_LOCALS, ValType::I32));
+        declarations.push((super::avx::VECTOR_LOCALS, ValType::V128));
+    }
     let mut function = Function::new(declarations);
     let mut code = function.instructions();
     if let Some(binding) = binding {
@@ -820,7 +840,13 @@ pub(in crate::cpu::dbt) fn emit(
     if has_simd {
         super::simd::preflight(&mut code);
     }
+    if has_avx {
+        super::avx::preflight(&mut code);
+    }
     abi::load_state(&mut code);
+    if let Some(locals) = helper_imports.avx_locals {
+        super::avx::initialize(&mut code, locals);
+    }
     code.block(BlockType::Empty).loop_(BlockType::Empty);
     abi::safepoint(&mut code, 1);
     for block in blocks {

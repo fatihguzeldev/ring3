@@ -45,6 +45,8 @@ pub(super) struct Imports {
     pub(super) cpu_write: Option<StoreImport>,
     pub(super) x87_op: Option<StoreImport>,
     pub(super) simd_execute: Option<StoreImport>,
+    pub(super) avx_execute: Option<StoreImport>,
+    pub(super) avx_locals: Option<super::avx::AvxLocals>,
     pub(super) cpu_fxsave: Option<StoreImport>,
     pub(super) cpu_xsave: Option<StoreImport>,
     pub(super) cpu_xrstor: Option<StoreImport>,
@@ -83,6 +85,7 @@ pub(super) struct ImportNeeds {
     pub(super) cpu_write: bool,
     pub(super) x87_op: bool,
     pub(super) simd_execute: bool,
+    pub(super) avx_execute: bool,
     pub(super) cpu_fxsave: bool,
     pub(super) cpu_xsave: bool,
     pub(super) cpu_xrstor: bool,
@@ -122,6 +125,7 @@ impl Imports {
         let mut cpu_write = false;
         let mut x87_op = false;
         let mut simd_execute = false;
+        let mut avx_execute = false;
         let mut cpu_fxsave = false;
         let mut cpu_xsave = false;
         let mut cpu_xrstor = false;
@@ -153,6 +157,18 @@ impl Imports {
         let mut atomic_xor_u32 = false;
         for instruction in blocks.iter().flat_map(|block| &block.instructions) {
             match instruction.operation() {
+                Operation::Avx(operation) => {
+                    if super::avx::direct_hotpath(operation.instruction()) {
+                        if let crate::cpu::x86::avx::MemoryEffect::Full(requirement) =
+                            operation.instruction().memory()
+                        {
+                            cpu_read |= requirement.access == crate::memory::Access::Read;
+                            cpu_write |= requirement.access == crate::memory::Access::Write;
+                        }
+                    } else {
+                        avx_execute = true;
+                    }
+                }
                 Operation::FarJump { target, .. } => {
                     far_jump = true;
                     cpu_read |= matches!(target, crate::cpu::x86::ir::FarPointer::Memory(_));
@@ -478,6 +494,7 @@ impl Imports {
             cpu_write,
             x87_op,
             simd_execute,
+            avx_execute,
             cpu_fxsave,
             cpu_xsave,
             cpu_xrstor,

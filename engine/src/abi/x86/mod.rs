@@ -1,3 +1,4 @@
+mod avx;
 mod exit;
 mod segments;
 mod simd;
@@ -35,3 +36,9 @@ pub use x87::{
 pub(crate) use segments::SEGMENTS_CACHE_OFFSETS;
 
 pub use ymm::{YMM_REGISTERS_OFFSET, YMM_SIZE, decode_ymm, encode_ymm};
+
+pub(crate) use avx::{
+    AVX_ADDRESS_LOGICAL_OFFSET, AVX_ADDRESS_MAGIC, AVX_ADDRESS_SEGMENT_OFFSET, AVX_ADDRESS_SIZE,
+    AVX_ADDRESS_TRANSFER, AVX_ADDRESS_VERSION, AVX_OUTPUT_SIZE, AVX_OUTPUT_TRANSFER,
+    decode_avx_address,
+};

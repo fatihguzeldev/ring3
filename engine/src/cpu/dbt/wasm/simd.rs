@@ -14,7 +14,6 @@ use wasm_encoder::{InstructionSink, MemArg};
 
 mod direct;
 
-#[cfg(test)]
 pub(super) fn integer_lanes(
     code: &mut InstructionSink<'_>,
     operation: crate::cpu::x86::simd::IntegerLaneOperation,
@@ -23,7 +22,6 @@ pub(super) fn integer_lanes(
     direct::integer_lanes(code, operation, scratch);
 }
 
-#[cfg(test)]
 pub(super) fn rearrange_value(
     code: &mut InstructionSink<'_>,
     operation: crate::cpu::x86::simd::RearrangeOperation,
@@ -32,7 +30,6 @@ pub(super) fn rearrange_value(
     direct::rearrange_value(code, operation, sources);
 }
 
-#[cfg(test)]
 pub(super) fn shift_value(
     code: &mut InstructionSink<'_>,
     operation: crate::cpu::x86::simd::ShiftOperation,
@@ -42,7 +39,6 @@ pub(super) fn shift_value(
     direct::shift_value(code, operation, immediate, sources);
 }
 
-#[cfg(test)]
 pub(super) fn multiply_value(
     code: &mut InstructionSink<'_>,
     operation: crate::cpu::x86::simd::MultiplyOperation,
@@ -52,7 +48,6 @@ pub(super) fn multiply_value(
     direct::multiply_value(code, operation, sources, scratch);
 }
 
-#[cfg(test)]
 pub(super) fn scalar_value(
     code: &mut InstructionSink<'_>,
     operation: crate::cpu::x86::simd::ScalarOperation,

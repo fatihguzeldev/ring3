@@ -42,6 +42,7 @@ pub(in crate::cpu::dbt::wasm) fn instruction(
             | Operation::X87 { .. }
             | Operation::FarCall { .. }
     ) && !matches!(instruction.operation(), Operation::Simd(operation) if operation.kind == crate::cpu::x86::simd::SimdKind::MaskedStore)
+        && !matches!(instruction.operation(), Operation::Avx(_))
     {
         use crate::cpu::x86::SegmentRegister::*;
         for segment in [Es, Cs, Ss, Ds, Fs, Gs] {
@@ -211,6 +212,9 @@ pub(in crate::cpu::dbt::wasm) fn instruction(
                 exit_depth,
             );
             store = operation.write_size() != 0;
+        }
+        Operation::Avx(operation) => {
+            store = super::super::avx::instruction(code, operation, imports, exit_depth)
         }
         Operation::Simd(operation) => {
             store = simd::instruction(code, operation, imports, exit_depth)

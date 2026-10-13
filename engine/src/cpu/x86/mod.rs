@@ -1,5 +1,4 @@
 pub mod atomic;
-#[cfg(test)]
 pub(crate) mod avx;
 pub mod bits;
 pub(crate) mod capabilities;
@@ -15,6 +14,7 @@ mod state;
 mod x87;
 pub mod xstate;
 
+pub use avx::AvxOperation;
 pub use control::{ControlOperation, USER_POP_FLAGS_MASK, USER_POP_FLAGS_WORD_MASK, pop_flags};
 pub(crate) use environment::USER_MODE_ENVIRONMENT;
 pub use segments::{

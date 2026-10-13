@@ -18,6 +18,16 @@ use crate::cpu::x86::{
 };
 
 pub(super) fn lower(instruction: &Instruction, bytes: &[u8]) -> Result<Operation, DecodeError> {
+    if let Some(operation) = super::avx::lower(instruction, bytes) {
+        let operation = operation?;
+        return if crate::cpu::x86::capabilities::AVX_ENABLED {
+            Ok(Operation::Avx(operation))
+        } else {
+            Err(DecodeError::Unsupported(
+                crate::cpu::UnsupportedFeature::Simd,
+            ))
+        };
+    }
     check_profile(instruction, bytes)?;
     if let Some(operation) = super::far::lower(instruction) {
         return operation;

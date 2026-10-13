@@ -423,7 +423,6 @@ fn absolute(code: &mut InstructionSink<'_>, width: u8) {
     }
 }
 
-#[cfg(test)]
 pub(super) fn integer_lanes(
     code: &mut InstructionSink<'_>,
     operation: crate::cpu::x86::simd::IntegerLaneOperation,
@@ -925,7 +924,6 @@ pub(super) fn instruction(
     op.writes_memory()
 }
 
-#[cfg(test)]
 pub(super) fn rearrange_value(
     code: &mut InstructionSink<'_>,
     operation: crate::cpu::x86::simd::RearrangeOperation,
@@ -975,7 +973,6 @@ pub(super) fn rearrange_value(
     }
 }
 
-#[cfg(test)]
 pub(super) fn shift_value(
     code: &mut InstructionSink<'_>,
     operation: crate::cpu::x86::simd::ShiftOperation,
@@ -1006,7 +1003,6 @@ pub(super) fn shift_value(
     }
 }
 
-#[cfg(test)]
 pub(super) fn multiply_value(
     code: &mut InstructionSink<'_>,
     operation: crate::cpu::x86::simd::MultiplyOperation,
@@ -1055,7 +1051,6 @@ pub(super) fn multiply_value(
     }
 }
 
-#[cfg(test)]
 pub(super) fn scalar_value(
     code: &mut InstructionSink<'_>,
     operation: crate::cpu::x86::simd::ScalarOperation,

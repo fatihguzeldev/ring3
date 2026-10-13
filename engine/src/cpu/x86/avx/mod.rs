@@ -1,5 +1,9 @@
+pub(crate) mod dispatch;
 mod operation;
-pub(crate) use operation::{AvxDecodeError, AvxInstruction, AvxOperation, AvxSemantic, MemoryEffect};
+#[cfg(test)]
+pub(crate) use operation::AvxDecodeError;
+pub use operation::AvxOperation;
+pub(crate) use operation::{AvxInstruction, AvxSemantic, MemoryEffect};
 mod arithmetic;
 mod compare;
 mod compound;
@@ -26,7 +30,7 @@ pub(crate) use convert::{ConvertInstruction, PackedConversion};
 pub(crate) use cross_lane::{BlockTarget, CrossLaneInstruction};
 pub(crate) use crypto::CryptoInstruction;
 pub(crate) use integer::IntegerInstruction;
-pub(crate) use masked::MaskedInstruction;
+pub(crate) use masked::{MaskedError, MaskedInstruction};
 pub(crate) use moves::{
     DuplicateKind, Half, HalfMerge, MoveInstruction, MoveSource, WordSource, WordTarget,
 };
@@ -44,6 +48,7 @@ use super::simd::SimdState;
 pub(crate) struct VectorRegister(u8);
 
 impl VectorRegister {
+    #[cfg(test)]
     pub(crate) fn new(index: u8) -> Result<Self, ArithmeticError> {
         if index < 8 {
             Ok(Self(index))
@@ -168,6 +173,7 @@ impl Instruction {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum ArithmeticError {
     OperandLength,
+    #[cfg(test)]
     InvalidRegister,
     InvalidOperation,
     InvalidState,
@@ -206,6 +212,7 @@ impl VectorState {
         }
     }
 
+    #[cfg(test)]
     pub(crate) fn execute(&mut self, instruction: Instruction) -> Result<(), ArithmeticError> {
         self.execute_with_operand(instruction, &[])
     }

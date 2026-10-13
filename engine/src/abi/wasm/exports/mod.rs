@@ -13,10 +13,11 @@ macro_rules! export_process_calls {
     };
 }
 
+mod avx;
 mod calls;
 mod cpu;
-mod xstate;
 mod execution;
 mod image;
 mod instance;
 mod memory;
+mod xstate;

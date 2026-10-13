@@ -165,7 +165,6 @@ fn compare_lane(
     (if result { u64::MAX } else { 0 }, exceptions, None)
 }
 
-#[cfg(test)]
 pub(crate) fn compare_lanes<const N: usize>(
     mode: CompareMode,
     width: usize,

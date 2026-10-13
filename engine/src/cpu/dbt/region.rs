@@ -371,6 +371,7 @@ fn supports_cpu_state(operation: &Operation) -> bool {
         | Operation::FarCall { .. }
         | Operation::FarReturn { .. }
         | Operation::XState(_)
+        | Operation::Avx(_)
         | Operation::VerifySegment { .. }
         | Operation::QuerySegment { .. } => true,
         Operation::AdjustPrivilege { .. } => true,
@@ -604,6 +605,7 @@ pub(super) fn supports(instruction: &DecodedInstruction, embedded: bool) -> bool
         | Operation::FarCall { .. }
         | Operation::FarReturn { .. }
         | Operation::XState(_)
+        | Operation::Avx(_)
         | Operation::VerifySegment { .. }
         | Operation::QuerySegment { .. } => {
             return embedded;
@@ -757,3 +759,7 @@ pub(super) fn supports(instruction: &DecodedInstruction, embedded: bool) -> bool
                 | Operation::CountBranchWord { .. }
         )
 }
+
+#[cfg(test)]
+#[path = "region/avx/native.rs"]
+mod avx;

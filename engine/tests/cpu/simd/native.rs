@@ -42,3 +42,6 @@ mod ymm_upper;
 
 #[path = "state/xsave/upper/native.rs"]
 mod xstate_upper;
+
+#[path = "avx/helper/native.rs"]
+mod avx_helper;

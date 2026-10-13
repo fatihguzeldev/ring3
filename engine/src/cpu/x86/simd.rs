@@ -251,46 +251,31 @@ mod crypto;
 mod float;
 mod packed;
 
-#[cfg(test)]
 pub(crate) use float::{ElementwiseKind, elementwise};
 
-#[cfg(test)]
 mod integer;
-#[cfg(test)]
 pub(crate) use integer::IntegerLaneOperation;
 
-#[cfg(test)]
 pub(crate) use float::{CompareMode, compare_lanes, conversion_lanes};
 
-#[cfg(test)]
 pub(crate) use float::{PairwiseKind, dot_product_lanes, pairwise_lanes, round_lanes};
 
-#[cfg(test)]
 mod rearrange;
-#[cfg(test)]
 pub(crate) use rearrange::RearrangeOperation;
 
-#[cfg(test)]
 mod shift;
-#[cfg(test)]
 pub(crate) use shift::ShiftOperation;
 
-#[cfg(test)]
 mod multiply;
-#[cfg(test)]
 pub(crate) use multiply::MultiplyOperation;
 
-#[cfg(test)]
 mod scalar;
-#[cfg(test)]
 pub(crate) use scalar::{ScalarOperation, ScalarWidth};
 
 mod predicates;
 pub(crate) use predicates::BitTestKind;
-#[cfg(test)]
 pub(crate) use predicates::flags as test_flags;
 
-#[cfg(test)]
 pub(crate) use crypto::execute as crypto_value;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
