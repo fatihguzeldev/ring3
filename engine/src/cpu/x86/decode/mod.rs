@@ -10,6 +10,7 @@ mod fetch;
 mod flow;
 mod integer;
 mod lower;
+mod mpx;
 mod operands;
 mod packed_strings;
 mod profile;

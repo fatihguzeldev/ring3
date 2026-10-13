@@ -42,6 +42,9 @@ pub(super) fn lower(
         };
     }
     check_profile(instruction, bytes)?;
+    if super::mpx::canonical_nop(instruction, bytes) {
+        return Ok(Operation::Nop);
+    }
     if let Some(operation) = super::system_registers::lower(instruction, bank) {
         return operation;
     }

@@ -29,6 +29,7 @@ pub(super) fn unavailable(instruction: &Instruction) -> bool {
         Code::Movdiri_m32_r32 => (7, 0, 2, 27),
         Code::Movdir64b_r16_m512 | Code::Movdir64b_r32_m512 => (7, 0, 2, 28),
         Code::Serialize => (7, 0, 3, 14),
+        Code::Xsusldtrk | Code::Xresldtrk => (7, 0, 3, 16),
         Code::Xsaveopt_mem => (13, 1, 0, 0),
         Code::Xsavec_mem => (13, 1, 0, 1),
         Code::Ptwrite_rm32 => (20, 0, 1, 4),
@@ -44,3 +45,7 @@ pub(super) fn unavailable(instruction: &Instruction) -> bool {
 #[cfg(test)]
 #[path = "tests/optional.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "tests/tsxldtrk.rs"]
+mod tsxldtrk;

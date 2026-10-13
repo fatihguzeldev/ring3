@@ -3,6 +3,7 @@ import {readFileSync, writeFileSync} from 'node:fs';
 import {join} from 'node:path';
 import {pathToFileURL} from 'node:url';
 import {unavailable, memoryForms, nops, repairs, refusals, invalidLocks, cpuidQueries} from './vectors.mjs';
+import {tsxUnavailable, mpxNops, boundedRepairs, boundedRefusals, boundedInvalidLocks} from './tsxldtrk-mpx.mjs';
 
 const [enginePath, output, root] = process.argv.slice(2);
 assert.ok(enginePath && output && root, 'explicit selected engine, output and source root');
@@ -14,6 +15,8 @@ const paths = [
   'engine/src/cpu/x86/capabilities.rs', 'engine/src/cpu/x86/environment.rs',
   'engine/src/cpu/x86/decode/execution_faults.rs', 'engine/src/cpu/x86/decode/execution_faults/optional.rs',
   'engine/src/cpu/x86/decode/profile.rs', 'engine/src/cpu/x86/decode/lower.rs',
+  'engine/src/cpu/x86/decode/mod.rs', 'engine/src/cpu/x86/decode/mpx.rs',
+  'engine/src/cpu/x86/decode/mpx/tests.rs', 'engine/src/cpu/x86/decode/execution_faults/tests/tsxldtrk.rs',
   'engine/src/cpu/x86/decode/decoder.rs', 'engine/src/cpu/x86/decode/simd.rs',
   'engine/src/cpu/x86/decode/avx/mod.rs', 'engine/src/cpu/x86/decode/avx/encoding.rs',
   'engine/src/cpu/dbt/wasm/control_instructions.rs', 'engine/src/cpu/dbt/wasm/integer/dispatch.rs',
@@ -22,7 +25,8 @@ const paths = [
   'engine/src/process/execution/stopped.rs', 'engine/src/memory/space.rs',
   'engine/tests/cpu/control/wasm.rs', own + 'wasm.rs',
   own + 'fixtures/p2-optional-availability/runtime/run.mjs',
-  own + 'fixtures/p2-optional-availability/runtime/vectors.mjs', supportPath,
+  own + 'fixtures/p2-optional-availability/runtime/vectors.mjs',
+  own + 'fixtures/p2-optional-availability/runtime/tsxldtrk-mpx.mjs', supportPath,
 ];
 const pins = () => Object.fromEntries(paths.map(path => [path, hash(readFileSync(join(root, path)))]));
 const sourcePins = pins(), codeSet = new Set(unavailable.map(row => row.code));
@@ -184,9 +188,120 @@ for (const resident of [false, true]) for (const entries of [false, true]) {
     queries('after'); h.host(c, 'close');
   }
 }
+// The original 1016-row group above is unchanged. This additive group owns only
+// TSXLDTRK absence and the finite canonical D32 MPX register compatibility cut.
+assert.equal(tsxUnavailable.length, 2);
+assert.equal(new Set(tsxUnavailable.map(row => row.code)).size, 2);
+assert.equal(mpxNops.length, 32);
+assert.equal(new Set(mpxNops.map(row => row.hex)).size, 32);
+assert.equal(new Set(mpxNops.map(row => row.code)).size, 2);
+const originalPlanned = planned;
+function boundedFetch(c, material, target, length) {
+  for (const [label, limit] of [['first byte', target - 1], ['last consumed byte', target + length - 2]]) {
+    const input = seed(target, {shadow: 1});
+    input.writeUInt32LE((0xf2b00000 | limit) >>> 0, SEG + 32);
+    // CS authority fails before begin_instruction: RF and pending SS shadow survive.
+    invoke(c, `${label} outside live CS limit precedes classification and RF consumption`, material,
+      input, exit(Buffer.from(input), 11, 0, 6), {budget: 2, kind: 'logical-fetch-authority'});
+  }
+}
+for (const resident of [false, true]) for (const entries of [false, true]) {
+  for (const row of tsxUnavailable) {
+    const code = bytes(row.hex), target = 0x2000 - code.length;
+    const c = open(resident, entries, `${row.code} absent TSXLDTRK`);
+    h.upload(c, target, code); bootstrap(c, target);
+    strict(c, 'exact absent TSXLDTRK retains strict public refusal', target, code.length, 10);
+    const material = stopped(c, 'complete TSXLDTRK captures absence UD');
+    const input = seed(target, {shadow: 1});
+    invoke(c, 'absent TSXLDTRK is UD, with no outside-transaction NOP or state effect', material,
+      input, expected(input, 20, 0), {budget: 2});
+    scheduleStops(c, material, target, row.code);
+    boundedFetch(c, material, target, code.length);
+    // Both encodings have the same absent-UD result; currentness must still notice.
+    h.upload(c, target + 3, bytes(row.code === 'Xsusldtrk' ? 'e9' : 'e8'));
+    invoke(c, 'changed TSXLDTRK opcode rejects held material before RF/fault publication', material,
+      input, input, {status: 4, kind: 'physical-currentness'});
+    h.host(c, 'close');
+  }
+  for (const row of mpxNops) {
+    const code = bytes(row.hex), target = 0x1100;
+    const c = open(resident, entries, `${row.variant}/${row.code} disabled MPX`);
+    h.upload(c, target, Buffer.concat([code, bytes('ebfe')])); h.put(c, 0, seed(target));
+    const material = strict(c, 'canonical BND0..3 register form strictly captures ordinary NOP', target, 6, 0);
+    for (const flags of [FLAGS, FLAGS | RF, FLAGS | RF | TF]) {
+      const input = seed(target, {flags, shadow: 1}), reason = flags & TF ? 16 : 1;
+      invoke(c, 'disabled canonical MPX retires one NOP with exact flags/registers/numeric state', material,
+        input, expected(input, reason, 1, target + 4), {budget: flags & TF ? 2 : 1});
+    }
+    if (row.schedules) {
+      scheduleStops(c, material, target, row.code);
+      boundedFetch(c, material, target, 4);
+      const input = seed(target, {shadow: 1}); h.upload(c, target + 3, bytes('c2'));
+      invoke(c, 'changed canonical MPX ModRM rejects held material before NOP/flags publication', material,
+        input, input, {status: 4, kind: 'physical-currentness'});
+    }
+    h.host(c, 'close');
+  }
+  for (const row of boundedRepairs) {
+    const code = bytes(row.hex), target = 0x2000 - code.length + 1;
+    const c = open(resident, entries, `${row.code} complete-fetch repair`);
+    h.upload(c, target, code.subarray(0, -1)); bootstrap(c, target);
+    strict(c, 'missing final opcode or ModRM byte prevents strict preparation', target, code.length, 10);
+    stopped(c, 'missing final byte prevents UD/NOP classification and publication', 10);
+    h.host(c, 'map', [0x2000, 1, 7]); c.pages.push(0x2000); c.pages.sort((a, b) => a - b);
+    h.upload(c, 0x2000, Buffer.concat([code.subarray(-1), bytes('ebfe')]));
+    h.host(c, 'protect', [0x2000, 1, 1]);
+    stopped(c, 'final byte readable without execute permission still prevents classification', 10);
+    h.host(c, 'protect', [0x2000, 1, 7]);
+    const material = stopped(c, 'executable final-byte repair admits exact absent-feature result');
+    const input = seed(target, {shadow: 1}), retired = row.reason === 20 ? 0 : 1;
+    invoke(c, 'fullfetch repair selects exact TSXLDTRK UD or canonical MPX NOP', material,
+      input, expected(input, row.reason, retired, target + retired * code.length), {budget: 2});
+    h.host(c, 'close');
+  }
+  for (const row of [...boundedRefusals, ...boundedInvalidLocks]) {
+    const code = bytes(row.hex), target = 0x1100, c = open(resident, entries, row.label);
+    h.upload(c, target, code); bootstrap(c, target);
+    strict(c, row.label + ': strict preparation refuses neutrally', target, code.length, 10);
+    const invalid = boundedInvalidLocks.includes(row), material = stopped(c,
+      row.label + ': invalid encoding differs from bounded profile refusal', invalid ? 0 : 10);
+    if (invalid) {
+      const input = seed(target, {shadow: 1});
+      invoke(c, 'illegal LOCK is the existing invalid-encoding UD, never absent-MPX NOP', material,
+        input, expected(input, 20, 0), {budget: 2});
+    }
+    h.host(c, 'close');
+  }
+  {
+    const c = open(resident, entries, 'MPX and TSXLDTRK absence stays immutable'), queryPC = 0x1300;
+    h.upload(c, queryPC, bytes('0fa2ebfe'));
+    h.upload(c, 0x1200, bytes('660f1bc1ebfe')); h.upload(c, 0x1100, bytes('f20f01e8'));
+    function query(phase) {
+      const regs = [...poison]; regs[0] = 7; regs[1] = 0;
+      const input = seed(queryPC, {regs, flags: FLAGS | RF}); h.put(c, 0, input);
+      const material = strict(c, `${phase} actual CPUID7.0`, queryPC, 4, 0), want = expected(input, 1, 1, queryPC + 2);
+      [0, 0x128, 0x400000, 0].forEach((value, i) => want.writeUInt32LE(value, 16 + [0, 3, 1, 2][i] * 4));
+      invoke(c, `${phase} CPUID7.0 has MPX EBX14 and TSXLDTRK EDX16 clear`, material, input, want);
+    }
+    query('before');
+    const nopInput = seed(0x1200, {flags: FLAGS | RF, shadow: 1}); h.put(c, 0, nopInput);
+    const nopMaterial = strict(c, 'real canonical disabled-MPX NOP between feature queries', 0x1200, 6, 0);
+    invoke(c, 'canonical MPX NOP cannot create bounds state or enable MPX', nopMaterial,
+      nopInput, expected(nopInput, 1, 1, 0x1204));
+    bootstrap(c, 0x1100); const udMaterial = stopped(c, 'real absent TSXLDTRK between feature queries');
+    const udInput = seed(0x1100, {shadow: 1});
+    invoke(c, 'TSXLDTRK absence UD cannot create transaction or tracking state', udMaterial,
+      udInput, expected(udInput, 20, 0));
+    query('after'); h.host(c, 'close');
+  }
+}
+assert.equal(originalPlanned, 432, 'all original optional module invocations remain');
+assert.equal(planned - originalPlanned, 596, 'finite four-profile TSXLDTRK/MPX extension');
 assert.deepEqual(pins(), sourcePins, 'optional primary-backed oracles and all current execution sources stay pinned');
 writeFileSync(join(output, 'optional-counts.json'), JSON.stringify({planned_module_invocations: planned,
-  admitted_module_invocations: invoked, exact_unavailable_codes: [...codeSet], compatible_nop_codes: [...new Set(nops.map(row => row.code))], source_pins: sourcePins}, null, 2) + '\n');
+  admitted_module_invocations: invoked, exact_unavailable_codes: [...codeSet], compatible_nop_codes: [...new Set(nops.map(row => row.code))],
+  bounded_tsxldtrk_codes: tsxUnavailable.map(row => row.code), canonical_mpx_register_forms: mpxNops.length,
+  canonical_mpx_decoder_codes: [...new Set(mpxNops.map(row => row.code))], source_pins: sourcePins}, null, 2) + '\n');
 h.finish([
   'finite exact IA32 group: 31 absence-UD Codes and two absent-feature NOP Codes; no optional facility enabled',
   'all four replacement/resident by extent/entry profiles use real helpers, literal complete arena and every mapped RAM page',
@@ -194,5 +309,6 @@ h.finish([
   'fullfetch repair rows establish host preparation neutrality until the final byte is executable; native companion owns exact Execute MemoryFault details, not an invented guest PF exit',
   'UD/NOP modules import only the real currentness guard; poisoned nullDS/limitedSS/unmapped operands and all numeric/register payloads remain untouched',
   'exact CPUID leaf7.0, Dh.1 and14h.0 values agree before and after real NOP/UD in the same instance; no hidden activation',
-  'PKRU/CET stateful faults, MPX/prefetch/vendor/newer vector families remain outside the frozen group; no general optional-ISA completion claim',
+  'additive exact TSXLDTRK2 absence-UD and canonical D32 BNDMOV32 register-NOP group; MPX stays absent and no bounds or transaction state is synthesized',
+  'PKRU/CET stateful faults, other MPX forms, prefetch/vendor/newer vector families remain outside the frozen group; no general optional-ISA completion claim',
 ]);

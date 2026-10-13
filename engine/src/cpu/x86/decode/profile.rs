@@ -20,6 +20,9 @@ pub(super) fn check_profile(instruction: &Instruction, bytes: &[u8]) -> Result<(
     if groups.iter().any(|count| *count > 1) {
         return Err(unsupported());
     }
+    if super::mpx::canonical_nop(instruction, bytes) {
+        return Ok(());
+    }
     // these compatibility encodings are nops in the fixed absent-feature profile.
     if matches!(instruction.code(), Code::Cldemote_m8 | Code::Rdsspd_r32) {
         if instruction.has_lock_prefix()
