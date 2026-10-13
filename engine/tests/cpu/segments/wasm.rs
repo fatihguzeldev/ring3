@@ -24,3 +24,6 @@ mod cpu_segment_rights_limit_wasm;
 
 #[path = "base/wasm.rs"]
 mod cpu_segment_base_wasm;
+
+#[path = "code/fetch/wasm.rs"]
+mod cpu_code_fetch_wasm;

@@ -10,3 +10,6 @@ mod cpu_segment_rights_limit;
 
 #[path = "base/native.rs"]
 mod cpu_segment_base;
+
+#[path = "code/fetch/native.rs"]
+mod cpu_code_fetch;
