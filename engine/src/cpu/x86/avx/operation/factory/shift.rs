@@ -6,7 +6,8 @@ pub(super) fn decode(kind: u8, slots: Slots, immediate: u8) -> Result<AvxSemanti
     } else {
         VectorWidth::Xmm
     };
-    let (operation, immediate_count) = match kind & 0x7f {
+    let normalized = kind & 0x7f;
+    let (operation, immediate_count) = match normalized {
         1 => (ShiftOperation::lanes(PackedKind::ShiftRight, 2), true),
         2 => (ShiftOperation::lanes(PackedKind::ShiftRightSigned, 2), true),
         3 => (ShiftOperation::lanes(PackedKind::ShiftLeft, 2), true),
@@ -31,6 +32,14 @@ pub(super) fn decode(kind: u8, slots: Slots, immediate: u8) -> Result<AvxSemanti
         16 => (ShiftOperation::lanes(PackedKind::ShiftLeft, 2), false),
         17 => (ShiftOperation::lanes(PackedKind::ShiftLeft, 4), false),
         18 => (ShiftOperation::lanes(PackedKind::ShiftLeft, 8), false),
+        19 => (ShiftOperation::lanes(PackedKind::ShiftRight, 4), false),
+        20 => (ShiftOperation::lanes(PackedKind::ShiftRight, 8), false),
+        21 => (
+            ShiftOperation::lanes(PackedKind::ShiftRightSigned, 4),
+            false,
+        ),
+        22 => (ShiftOperation::lanes(PackedKind::ShiftLeft, 4), false),
+        23 => (ShiftOperation::lanes(PackedKind::ShiftLeft, 8), false),
         _ => return Err(AvxDecodeError::Family),
     };
     let operation = operation.ok_or(AvxDecodeError::Operands)?;
@@ -51,7 +60,13 @@ pub(super) fn decode(kind: u8, slots: Slots, immediate: u8) -> Result<AvxSemanti
             false,
             immediate,
         )?;
-        if slots.source_memory() {
+        if normalized >= 19 {
+            ShiftCount::Elements(if slots.source_memory() {
+                MoveSource::Memory
+            } else {
+                MoveSource::Register(slots.vector(2))
+            })
+        } else if slots.source_memory() {
             ShiftCount::Memory
         } else {
             ShiftCount::Register(slots.vector(2))
@@ -66,3 +81,7 @@ pub(super) fn decode(kind: u8, slots: Slots, immediate: u8) -> Result<AvxSemanti
 #[cfg(test)]
 #[path = "shift/uniform/native.rs"]
 mod uniform;
+
+#[cfg(test)]
+#[path = "shift/variable/native.rs"]
+mod variable;

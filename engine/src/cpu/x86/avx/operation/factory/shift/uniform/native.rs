@@ -70,7 +70,7 @@ fn all_eighteen_widths_preserve_historic_slots_and_immediate_priority() {
             }
         }
     }
-    for kind in (0..=255).filter(|kind| !(1..=18).contains(kind) && !(0x81..=0x92).contains(kind)) {
+    for kind in (0..=255).filter(|kind| !(1..=23).contains(kind) && !(0x81..=0x97).contains(kind)) {
         for operands in [0, 1 << 9, 1 << 12, 1 << 13, 0x3fff] {
             for immediate in [0, 1, 255] {
                 assert_eq!(

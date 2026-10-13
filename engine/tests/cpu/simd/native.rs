@@ -74,3 +74,6 @@ mod uniform_shift_capability;
 
 #[path = "avx/rearrange/widen/capability/native.rs"]
 mod avx2_widen_capability;
+
+#[path = "avx/shift/variable/capability/native.rs"]
+mod variable_shift_capability;

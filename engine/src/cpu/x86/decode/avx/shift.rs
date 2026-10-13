@@ -1,4 +1,5 @@
 use super::*;
+use crate::cpu::x86::avx::AvxSemantic;
 pub(super) fn lower(
     instruction: &Instruction,
     encoding: Encoding,
@@ -145,6 +146,39 @@ pub(super) fn lower(
                 }
                 (0x01000712, operands, 0)
             }
+            Code::VEX_Vpsrlvd_xmm_xmm_xmmm128
+            | Code::VEX_Vpsrlvd_ymm_ymm_ymmm256
+            | Code::VEX_Vpsrlvq_xmm_xmm_xmmm128
+            | Code::VEX_Vpsrlvq_ymm_ymm_ymmm256
+            | Code::VEX_Vpsravd_xmm_xmm_xmmm128
+            | Code::VEX_Vpsravd_ymm_ymm_ymmm256
+            | Code::VEX_Vpsllvd_xmm_xmm_xmmm128
+            | Code::VEX_Vpsllvd_ymm_ymm_ymmm256
+            | Code::VEX_Vpsllvq_xmm_xmm_xmmm128
+            | Code::VEX_Vpsllvq_ymm_ymm_ymmm256 => {
+                let (kind, wide, w) = match instruction.code() {
+                    Code::VEX_Vpsrlvd_xmm_xmm_xmmm128 => (19, false, false),
+                    Code::VEX_Vpsrlvd_ymm_ymm_ymmm256 => (19, true, false),
+                    Code::VEX_Vpsrlvq_xmm_xmm_xmmm128 => (20, false, true),
+                    Code::VEX_Vpsrlvq_ymm_ymm_ymmm256 => (20, true, true),
+                    Code::VEX_Vpsravd_xmm_xmm_xmmm128 => (21, false, false),
+                    Code::VEX_Vpsravd_ymm_ymm_ymmm256 => (21, true, false),
+                    Code::VEX_Vpsllvd_xmm_xmm_xmmm128 => (22, false, false),
+                    Code::VEX_Vpsllvd_ymm_ymm_ymmm256 => (22, true, false),
+                    Code::VEX_Vpsllvq_xmm_xmm_xmmm128 => (23, false, true),
+                    Code::VEX_Vpsllvq_ymm_ymm_ymmm256 => (23, true, true),
+                    _ => unreachable!("validated variable shift Code"),
+                };
+                encoding.validate_w(w)?;
+                encoding.validate(false, u8::from(wide), false)?;
+                let mut operands = index(instruction, 0, false, false)?;
+                operands |= index(instruction, 1, false, false)? << 3;
+                operands |= index(instruction, 2, false, true)? << 6;
+                if instruction.op_kind(2) == OpKind::Memory {
+                    operands |= 1 << 12;
+                }
+                (0x01000700 | kind | if wide { 0x80 } else { 0 }, operands, 0)
+            }
             _ => {
                 let (kind, immediate_count) = match instruction.code() {
                     Code::VEX_Vpsrlw_ymm_ymm_imm8 => (1, true),
@@ -185,7 +219,10 @@ pub(super) fn lower(
         let instruction_value = AvxInstruction::decode_descriptor(descriptor, operands, immediate)
             .map_err(|_| invalid())?;
         let operation = bind_address(instruction, instruction_value)?;
-        if !crate::cpu::x86::capabilities::AVX2_ENABLED && descriptor & 0x80 != 0 {
+        let AvxSemantic::Shift(value) = instruction_value.semantic() else {
+            unreachable!("shift decoder constructs only shift instructions")
+        };
+        if !crate::cpu::x86::capabilities::AVX2_ENABLED && value.requires_avx2() {
             return Err(unsupported());
         }
         Ok(Some(operation))

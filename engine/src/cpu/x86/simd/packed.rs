@@ -179,21 +179,9 @@ pub(super) fn packed(
             P::MaximumSigned => sx.max(sy) as u64,
             P::MinimumUnsigned => x.min(y),
             P::MaximumUnsigned => x.max(y),
-            P::ShiftLeft => {
-                if count >= bits as u64 {
-                    0
-                } else {
-                    x << count
-                }
+            P::ShiftLeft | P::ShiftRight | P::ShiftRightSigned => {
+                super::shift::lane_value(kind, x, width, count)
             }
-            P::ShiftRight => {
-                if count >= bits as u64 {
-                    0
-                } else {
-                    x >> count
-                }
-            }
-            P::ShiftRightSigned => (sx >> count.min((bits - 1) as u64)) as u64,
             P::MultipleSumAbsoluteByteDifferences
             | P::MinimumPositionUnsignedWord
             | P::Test
