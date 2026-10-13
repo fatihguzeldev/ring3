@@ -150,6 +150,10 @@ export function runStoppedFaults({ sourcePaths, positive, continuations, negativ
       return new WebAssembly.Instance(module, { env: { memory }, ring3 }).exports.run;
     }
     const initial = createArena();
+    if (row.x87 !== undefined) {
+      assert.equal(row.x87.length, 128);
+      initial.set(row.x87, 4236);
+    }
     [
       0xa1b2c3d4, 0x23456789, 0x3456789a, 0x456789ab, 0x7000, 0x56789abc, 0x6789abcd, 0x789abcde,
     ].forEach((value, i) => initial.writeUInt32LE(value, 16 + i * 4));

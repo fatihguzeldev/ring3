@@ -62,3 +62,6 @@ mod cpu_port_strings;
 
 #[path = "branch/short/wasm/word.rs"]
 mod cpu_short_word;
+
+#[path = "exceptions/availability/wasm.rs"]
+mod cpu_availability;
