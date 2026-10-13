@@ -49,6 +49,9 @@ pub(super) fn call(
         .local_get(ADDRESS)
         .call(index)
         .local_set(HELPER_STATUS);
+    if matches!(descriptor, 0x30001..=0x30004) {
+        super::code_fetch::check_context(code, exit_depth);
+    }
     super::cpu_result::validate(
         code,
         width,

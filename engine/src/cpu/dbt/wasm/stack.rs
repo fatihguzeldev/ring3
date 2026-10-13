@@ -46,6 +46,9 @@ pub(super) fn instruction(
     code.i32_const(kind.control(allocation, nesting) as i32)
         .call(index)
         .local_set(HELPER_STATUS);
+    if matches!(kind, StackFrameKind::PopAll32 | StackFrameKind::PopAll16) {
+        super::code_fetch::check_context(code, exit_depth);
+    }
     validate(code, kind, allocation, nesting, exit_depth);
     let width = kind.width();
     match kind {
