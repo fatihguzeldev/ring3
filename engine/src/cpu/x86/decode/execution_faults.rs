@@ -2,7 +2,10 @@ use iced_x86::{Code, CpuidFeature, EncodingKind, Instruction, OpKind, Register};
 
 use crate::cpu::x86::{
     ControlOperation,
-    capabilities::{MSR_ENABLED, RDPMC_ENABLED, XCR0},
+    capabilities::{
+        HLE_ENABLED, MSR_ENABLED, RDPMC_ENABLED, RDRAND_ENABLED, RDSEED_ENABLED, RTM_ENABLED,
+        SEP_ENABLED, SYSCALL_ENABLED, XCR0,
+    },
     environment::{UserModeEnvironment, UserPortPermissions},
     ir::AddressSize,
 };
@@ -42,7 +45,7 @@ pub(super) fn for_instruction(
         && !instruction.has_repne_prefix()
         && !duplicate_profile_prefix(bytes)
     {
-        if unavailable(instruction) {
+        if unavailable(instruction) || user_privilege_invalid(instruction, environment) {
             return Some(ControlOperation::InvalidOpcode);
         }
         if general_protection(instruction, environment) {
@@ -52,7 +55,40 @@ pub(super) fn for_instruction(
     None
 }
 
+// MONITOR and MWAIT explicitly raise UD at nonzero CPL, independently of
+// their optional availability bits; no monitor-address or scheduler backend is reached.
+fn user_privilege_invalid(instruction: &Instruction, environment: UserModeEnvironment) -> bool {
+    environment.current_privilege() != 0
+        && matches!(
+            instruction.code(),
+            Code::Monitorw | Code::Monitord | Code::Mwait
+        )
+}
+
 fn unavailable(instruction: &Instruction) -> bool {
+    // exact optional facilities fault only when their advertised capability is absent.
+    match instruction.code() {
+        Code::Rdrand_r16 | Code::Rdrand_r32 if !RDRAND_ENABLED => return true,
+        Code::Rdseed_r16 | Code::Rdseed_r32 if !RDSEED_ENABLED => return true,
+        Code::Xabort_imm8 | Code::Xbegin_rel16 | Code::Xbegin_rel32 | Code::Xend
+            if !RTM_ENABLED =>
+        {
+            return true;
+        }
+        // XTEST is available with either transaction extension.
+        Code::Xtest if !RTM_ENABLED && !HLE_ENABLED => return true,
+        _ => {}
+    }
+    // the virtual feature bit is absent. This precedes EFER and return-privilege
+    // questions and does not infer a physical vendor/model or invent an MSR value.
+    if !SYSCALL_ENABLED && matches!(instruction.code(), Code::Syscall | Code::Sysretd) {
+        return true;
+    }
+    // SEP0 explicitly makes both instructions unavailable before their entry-MSR
+    // or return-privilege rules; no software operating-system state is guessed.
+    if !SEP_ENABLED && matches!(instruction.code(), Code::Sysenter | Code::Sysexitd) {
+        return true;
+    }
     // the fixed protected32 user profile never executes inside smm.
     if instruction.code() == Code::Rsm {
         return true;
@@ -225,3 +261,23 @@ mod strings;
 #[cfg(test)]
 #[path = "execution_faults/tests/availability/native.rs"]
 mod availability;
+
+#[cfg(test)]
+#[path = "execution_faults/tests/random.rs"]
+mod random;
+
+#[cfg(test)]
+#[path = "execution_faults/tests/monitor.rs"]
+mod monitor;
+
+#[cfg(test)]
+#[path = "execution_faults/tests/transactions.rs"]
+mod transactions;
+
+#[cfg(test)]
+#[path = "execution_faults/tests/syscall.rs"]
+mod syscall;
+
+#[cfg(test)]
+#[path = "execution_faults/tests/sep.rs"]
+mod sep;

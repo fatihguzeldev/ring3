@@ -1,3 +1,17 @@
+// successful random facilities remain absent until an owned entropy contract exists.
+pub(crate) const RDRAND_ENABLED: bool = false;
+pub(crate) const RDSEED_ENABLED: bool = false;
+
+// transaction extensions stay absent; availability faults do not create transaction state.
+pub(crate) const HLE_ENABLED: bool = false;
+pub(crate) const RTM_ENABLED: bool = false;
+
+// no successful syscall/sysret facility or operating-system MSR bank is exposed.
+pub(crate) const SYSCALL_ENABLED: bool = false;
+
+// SEP remains absent independently of MSR instruction presence; no entry MSRs are exposed.
+pub(crate) const SEP_ENABLED: bool = false;
+
 pub(crate) const MSR_ENABLED: bool = true;
 
 // user-mode counter reads remain subject to the immutable cr4.pce policy.
@@ -53,10 +67,12 @@ pub(crate) const CPU_ID_LEAVES: [CpuIdLeaf; 8] = [
                 | 1 << 26
                 | 1 << 27
                 | ((AVX_ENABLED as u32) << 28)
-                | ((F16C_ENABLED as u32) << 29),
+                | ((F16C_ENABLED as u32) << 29)
+                | ((RDRAND_ENABLED as u32) << 30),
             1 | 1 << 4
                 | ((MSR_ENABLED as u32) << 5)
                 | 1 << 8
+                | ((SEP_ENABLED as u32) << 11)
                 | 1 << 15
                 | 1 << 19
                 | 1 << 23
@@ -70,7 +86,12 @@ pub(crate) const CPU_ID_LEAVES: [CpuIdLeaf; 8] = [
         subfunction: Some(0),
         registers: [
             0,
-            1 << 3 | ((AVX2_ENABLED as u32) << 5) | 1 << 8,
+            1 << 3
+                | ((HLE_ENABLED as u32) << 4)
+                | ((AVX2_ENABLED as u32) << 5)
+                | 1 << 8
+                | ((RTM_ENABLED as u32) << 11)
+                | ((RDSEED_ENABLED as u32) << 18),
             (RDPID_ENABLED as u32) << 22,
             0,
         ],
@@ -99,7 +120,7 @@ pub(crate) const CPU_ID_LEAVES: [CpuIdLeaf; 8] = [
     CpuIdLeaf {
         function: 0x8000_0001,
         subfunction: None,
-        registers: [0, 0, 1 << 5, 1 << 27],
+        registers: [0, 0, 1 << 5, 1 << 27 | ((SYSCALL_ENABLED as u32) << 11)],
     },
 ];
 
