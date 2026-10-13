@@ -73,6 +73,12 @@ pub(crate) fn execute(
         String(value) => vectors
             .execute_string(value, general, operand)
             .map_err(arithmetic),
+        F16c(value) => vectors
+            .execute_f16c(value, operand)
+            .map_err(|error| match error {
+                super::f16c::F16cError::FloatingPoint(mxcsr) => DispatchError::FloatingPoint(mxcsr),
+                _ => DispatchError::InvalidState,
+            }),
         // selected memory has one authority/transaction owner in process.
         Masked(_) => Err(DispatchError::InvalidState),
     }

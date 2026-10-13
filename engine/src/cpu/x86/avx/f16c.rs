@@ -82,8 +82,8 @@ fn denormal_single(bits: u32) -> bool {
 }
 
 impl VectorState {
-    // the operand is an exact checked span; the caller owns segment/page authority
-    // and writable-code currentness before invoking this private state kernel.
+    // the operand is an exact checked span; the caller owns segment/page authority.
+    // the caller commits staged stores and their code currentness after this kernel.
     pub(crate) fn execute_f16c(
         &mut self,
         operation: F16cInstruction,

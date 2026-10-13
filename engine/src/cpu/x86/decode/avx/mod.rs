@@ -18,6 +18,7 @@ mod compound;
 mod convert;
 mod cross_lane;
 mod crypto;
+mod f16c;
 mod floating;
 mod integer;
 mod logical;
@@ -109,6 +110,9 @@ pub(crate) fn lower(
         return Some(value);
     }
     if let Some(value) = permute::lower(instruction, encoding) {
+        return Some(value);
+    }
+    if let Some(value) = f16c::lower(instruction, encoding) {
         return Some(value);
     }
     if let Some(value) = convert::lower(instruction, encoding) {

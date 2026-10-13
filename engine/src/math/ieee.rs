@@ -1,7 +1,5 @@
-#[cfg(test)]
 mod half;
 
-#[cfg(test)]
 pub(crate) use half::{half_narrowing_tiny, half_to_single, single_to_half};
 
 use rustc_apfloat::{

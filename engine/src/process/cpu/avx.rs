@@ -12,7 +12,7 @@ use crate::{
     cpu::x86::{
         SegmentAccess, SegmentContext, SegmentRegister, State32,
         avx::{
-            AvxInstruction, MaskedError, MemoryEffect, VectorState,
+            AvxInstruction, AvxSemantic, MaskedError, MemoryEffect, VectorState,
             dispatch::{self, DispatchError},
         },
         simd::ymm::YmmUpperState,
@@ -117,6 +117,11 @@ impl EngineInstance {
     ) -> Result<StoreCompletion, HostError> {
         let instruction = AvxInstruction::decode_descriptor(descriptor, operands, immediate)
             .map_err(|_| HostError::InvalidRequest)?;
+        if matches!(instruction.semantic(), AvxSemantic::F16c(_))
+            && !crate::cpu::x86::capabilities::F16C_ENABLED
+        {
+            return Err(HostError::InvalidRequest);
+        }
         if flags & 2 == 0
             || flags & !USER_FLAGS_MASK != 0
             || instruction
@@ -231,6 +236,18 @@ impl EngineInstance {
             linear = context.state.bases[address.segment.index()].wrapping_add(address.offset);
             if linear & (u32::from(requirement.alignment) - 1) != 0 {
                 return self.avx_fault(length, CpuMemoryError::GeneralProtection(0));
+            }
+            // the fixed software environment checks numerical-store authority first.
+            // this probe changes neither ram nor its version; the atomic write remains below.
+            if requirement.access == Access::Write
+                && matches!(instruction.semantic(), AvxSemantic::F16c(_))
+            {
+                let memory = self.memory.as_ref().ok_or(HostError::Closed)?;
+                if let Err(error) =
+                    memory.check_span(GuestAddress(linear), length as usize, Access::Write)
+                {
+                    return self.avx_fault(length, CpuMemoryError::Memory(error));
+                }
             }
             if requirement.access == Access::Read {
                 let memory = self.memory.as_ref().ok_or(HostError::Closed)?;

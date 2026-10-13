@@ -10,7 +10,6 @@ mod compound;
 mod convert;
 mod cross_lane;
 mod crypto;
-#[cfg(test)]
 mod f16c;
 mod integer;
 #[cfg(test)]
@@ -31,6 +30,7 @@ pub(crate) use compound::CompoundInstruction;
 pub(crate) use convert::{ConvertInstruction, PackedConversion};
 pub(crate) use cross_lane::{BlockTarget, CrossLaneInstruction};
 pub(crate) use crypto::CryptoInstruction;
+pub(crate) use f16c::{F16cInstruction, F16cTarget};
 pub(crate) use integer::IntegerInstruction;
 pub(crate) use masked::{MaskedError, MaskedInstruction};
 pub(crate) use moves::{

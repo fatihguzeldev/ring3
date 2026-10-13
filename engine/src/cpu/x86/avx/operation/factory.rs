@@ -12,6 +12,7 @@ mod compound;
 mod convert;
 mod cross_lane;
 mod crypto;
+mod f16c;
 mod floating;
 mod integer;
 mod logical;
@@ -147,6 +148,7 @@ pub(super) fn decode(
         15 => predicates::decode(kind as u8, slots, immediate),
         16 => crypto::decode(kind as u8, slots, immediate),
         17 => strings::decode(kind as u8, slots, immediate),
+        18 => f16c::decode(kind as u8, slots, immediate),
         _ => Err(AvxDecodeError::Family),
     }
 }

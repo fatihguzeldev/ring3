@@ -77,6 +77,7 @@ pub(super) fn instruction(
             | AvxSemantic::Compare(_)
             | AvxSemantic::Convert(_)
             | AvxSemantic::Compound(_)
+            | AvxSemantic::F16c(_)
     );
     cpu_result::validate_avx(
         code,

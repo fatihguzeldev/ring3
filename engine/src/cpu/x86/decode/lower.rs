@@ -20,7 +20,12 @@ use crate::cpu::x86::{
 pub(super) fn lower(instruction: &Instruction, bytes: &[u8]) -> Result<Operation, DecodeError> {
     if let Some(operation) = super::avx::lower(instruction, bytes) {
         let operation = operation?;
-        return if crate::cpu::x86::capabilities::AVX_ENABLED {
+        return if crate::cpu::x86::capabilities::AVX_ENABLED
+            && (!matches!(
+                operation.instruction().semantic(),
+                crate::cpu::x86::avx::AvxSemantic::F16c(_)
+            ) || crate::cpu::x86::capabilities::F16C_ENABLED)
+        {
             Ok(Operation::Avx(operation))
         } else {
             Err(DecodeError::Unsupported(

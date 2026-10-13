@@ -478,3 +478,36 @@ fn exhausted_store_version_preserves_all_staged_outputs_and_ram() {
         .unwrap();
     assert_eq!(after, ram);
 }
+
+#[test]
+fn f16c_helper_uses_the_same_canonical_gate_as_guest_admission() {
+    let (mut engine, id) = engine();
+    for kind in 1..=4 {
+        for resident in [false, true] {
+            let before = engine.arena().to_vec();
+            let result = if resident {
+                engine.avx_execute_resident(91, id, descriptor(18, kind), 0, 0, 0, 0, 2)
+            } else {
+                engine.avx_execute(descriptor(18, kind), 0, 0, 0, 0, 2)
+            };
+            if crate::cpu::x86::capabilities::F16C_ENABLED {
+                assert_eq!(result, Ok(StoreCompletion::Complete));
+                let mut expected = before;
+                encode_cpu_result(
+                    0,
+                    0,
+                    Ok(()),
+                    &mut expected[HELPER_OFFSET..HELPER_OFFSET + HELPER_SIZE],
+                )
+                .unwrap();
+                let start = TRANSFER_OFFSET + AVX_OUTPUT_TRANSFER;
+                expected[start..start + AVX_OUTPUT_SIZE].fill(0);
+                expected[start + 4..start + 8].copy_from_slice(&2_u32.to_le_bytes());
+                assert_eq!(engine.arena(), expected);
+            } else {
+                assert_eq!(result, Err(HostError::InvalidRequest));
+                assert_eq!(engine.arena(), before);
+            }
+        }
+    }
+}

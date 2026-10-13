@@ -22,6 +22,7 @@ pub(crate) enum AvxSemantic {
     Test(TestInstruction),
     Crypto(CryptoInstruction),
     String(StringInstruction),
+    F16c(F16cInstruction),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -126,6 +127,7 @@ impl AvxInstruction {
             Test(value) => value.memory(),
             Crypto(value) => value.memory(),
             String(value) => value.memory(),
+            F16c(value) => value.memory(),
             Masked(value) => return MemoryEffect::Selected(value),
         };
         requirement.map_or(MemoryEffect::None, MemoryEffect::Full)
