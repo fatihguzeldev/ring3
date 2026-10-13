@@ -68,3 +68,6 @@ mod cpu_availability;
 
 #[path = "interrupt/return/wasm.rs"]
 mod interrupt_return;
+
+#[path = "near/segments/wasm.rs"]
+mod cpu_near_segments;
