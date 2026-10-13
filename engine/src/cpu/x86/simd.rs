@@ -285,6 +285,11 @@ mod scalar;
 #[cfg(test)]
 pub(crate) use scalar::{ScalarOperation, ScalarWidth};
 
+mod predicates;
+pub(crate) use predicates::BitTestKind;
+#[cfg(test)]
+pub(crate) use predicates::flags as test_flags;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SimdError {
     InvalidDescriptor,
@@ -1313,9 +1318,7 @@ fn execute_validated(
         flags: incoming_flags,
     };
     if op.kind == K::Packed(PackedKind::Test) {
-        let zero = a.iter().zip(b).all(|(a, b)| a & b == 0);
-        let carry = a.iter().zip(b).all(|(a, b)| !a & b == 0);
-        result.flags = (incoming_flags & !0x8d5) | (u32::from(zero) << 6) | u32::from(carry);
+        result.flags = predicates::flags(&a, &b, BitTestKind::Bits, incoming_flags);
         return Ok(result);
     }
     let mut exception_flags = 0;
