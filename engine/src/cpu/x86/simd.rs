@@ -1546,3 +1546,6 @@ fn extended_descriptor(
     }
     Ok(SimdResult { gpr, flags })
 }
+
+#[cfg(test)]
+pub(crate) use float::{FusedKind, fused_lanes};

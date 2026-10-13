@@ -895,3 +895,9 @@ mod tests {
         assert_eq!(flags, 0x8d7);
     }
 }
+
+#[cfg(test)]
+mod fused;
+
+#[cfg(test)]
+pub(crate) use fused::{FusedKind, fused_lanes};

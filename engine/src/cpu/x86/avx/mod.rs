@@ -262,3 +262,6 @@ impl VectorState {
 #[cfg(test)]
 #[path = "integration/wasm.rs"]
 mod integration;
+
+#[cfg(test)]
+mod fma;
