@@ -11,14 +11,16 @@ const hash = bytes => createHash('sha256').update(bytes).digest('hex');
 const engineBytes = readFileSync(enginePath), engineModule = new WebAssembly.Module(engineBytes);
 assert.deepEqual(WebAssembly.Module.imports(engineModule), []);
 const SIZE = 4612, TRANSFER = 140, STACK = 0xa100, marker = Buffer.from('0f0b', 'hex');
-const names = ['open', 'close', 'arena_ptr', 'map', 'protect', 'unmap', 'upload', 'compile', 'compile_with_gates', 'compile_resident', 'compile_resident_with_gates', 'resident_module', 'find_resident', 'generation', 'module_ptr', 'module_len', 'guard', 'guard_resident', 'read32', 'write32', 'store_resident32', 'capture_call', 'complete_call', 'capture_resident_call', 'complete_resident_call', 'abandon_call', 'begin_callback'];
+const names = ['open', 'close', 'arena_ptr', 'map', 'protect', 'unmap', 'upload', 'compile', 'compile_with_gates', 'compile_resident', 'compile_resident_with_gates', 'resident_module', 'find_resident', 'generation', 'module_ptr', 'module_len', 'guard', 'guard_resident', 'read32', 'write32', 'store_resident32', 'capture_call', 'complete_call', 'capture_resident_call', 'complete_resident_call', 'abandon_call', 'begin_callback', 'cpu_read32', 'cpu_store_resident32'];
 const stats = {engine_instances: 0, compiled_units: 0, legacy_modules: 0, canonical_runs: 0, rejected_runs: 0, full_arena_checks: 0, metadata_checks: 0, find_success: 0, find_failure: 0, initial_calls: 0, resumes: 0, resident_captures: 0, legacy_captures: 0, resident_completions: 0, legacy_completions: 0, abandonments: 0, capture_failures: 0, completion_failures: 0, rejected_operations: 0, guard_success: 0, guard_failure: 0, host_reads: 0, host_writes: 0, guest_store32: 0, bound_store_sites: 0, convention_cases: 0, capture_read_faults: 0, guest_store_faults: 0, repairs: 0, cancellation_cases: 0, currency_cases: 0};
 const artifacts = {}, authored = {}, units = [], metadata = [], captures = [], completions = [], sections = [], legacyControls = [];
 function refresh(e) { if (e.buffer !== e.memory.buffer) { e.buffer = e.memory.buffer; e.bytes = new Uint8Array(e.buffer); e.view = new DataView(e.buffer); } return e; }
 function arena(e) { return refresh(e).bytes.slice(e.base, e.base + SIZE); }
 function header(bytes, view, pointer, magic, size, version = 1) { bytes.set(Buffer.from(magic), pointer); view.setUint16(pointer + 4, version, true); view.setUint16(pointer + 6, 1, true); view.setUint32(pointer + 8, size, true); view.setUint32(pointer + 12, 0, true); }
 function exit(reason, retired, detail = 0, address = 0, access = 0, length = 0, version = 3) { const b = new Uint8Array(40), v = new DataView(b.buffer); header(b, v, 0, 'R3EX', 40, version); [reason, retired, detail, address, access, length].forEach((x, i) => v.setUint32(16 + i * 4, x, true)); return b; }
+function unitExit(unit, reason, retired, detail = 0, address = 0, access = 0, length = 0, version = 3) { const b = new Uint8Array(40), v = new DataView(b.buffer); header(b, v, 0, 'R3EX', 40, unit.returns.length ? 6 : version); [reason, retired, detail, address, access, length].forEach((x, i) => v.setUint32(16 + i * 4, x, true)); return b; }
 function helper(value = 0, detail = 0, address = 0, access = 0) { const b = new Uint8Array(40), v = new DataView(b.buffer); header(b, v, 0, 'R3MH', 40); [detail ? 1 : 0, detail ? 0 : value, detail, address, access, detail ? 4 : 0].forEach((x, i) => v.setUint32(16 + i * 4, x, true)); return b; }
+function cpuHelper(value = 0, detail = 0, address = 0, access = 0) { const b = new Uint8Array(40), v = new DataView(b.buffer); header(b, v, 0, 'R3MH', 40, 10); [detail ? 1 : 0, detail ? 0 : value, detail, address, access, 4].forEach((x, i) => v.setUint32(16 + i * 4, x, true)); return b; }
 function copy(s) { return {...s, registers: [...s.registers]}; }
 function state(pc = 0x3000, esp = STACK) { return {registers: [0x89abcdef, 0x13579bdf, 0x23456789, 0x3456789a, esp, 0x56789abc, 0x6789abcd, 0x789abcde], eip: pc, eflags: 0xcd7}; }
 function stateBytes(s) { const b = new Uint8Array(56), v = new DataView(b.buffer); header(b, v, 0, 'R3ST', 56); s.registers.forEach((x, i) => v.setUint32(16 + i * 4, x, true)); v.setUint32(48, s.eip, true); v.setUint32(52, s.eflags, true); return b; }
@@ -34,6 +36,17 @@ function word(e, address, value) { assert.equal(e.api.write32(address, value), 0
 function observe(e, address, value) { const before = arena(e); assert.equal(e.api.read32(address), 0); stats.host_reads++; const wanted = before.slice(); wanted.set(helper(value), 100); check(e, before, wanted, 'host RAM observation changes only helper40'); }
 function uleb(bytes, c) { let value = 0, shift = 0, byte; do { byte = bytes[c.i++]; assert.ok(byte !== undefined && shift <= 28); value += (byte & 127) * 2 ** shift; shift += 7; } while (byte & 128); return value; }
 function sleb(bytes, c) { let value = 0n, shift = 0n, byte; do { byte = bytes[c.i++]; assert.ok(byte !== undefined && shift <= 28n); value |= BigInt(byte & 127) << shift; shift += 7n; } while (byte & 128); if (byte & 64) value -= 1n << shift; return Number(BigInt.asUintN(32, value)); }
+function stagedOperand(body, from, to, expected) {
+  for (let i = from; i < to; i++) {
+    const c = {i}, opcode = body[c.i++];
+    if (opcode !== 0x20 && opcode !== 0x41) continue;
+    try {
+      const value = opcode === 0x20 ? {local: uleb(body, c)} : {immediate: sleb(body, c)};
+      if (body[c.i++] === 0x21 && uleb(body, c) === 18 && JSON.stringify(value) === JSON.stringify(expected)) return true;
+    } catch {}
+  }
+  return false;
+}
 function binding(bytes, e, id, returns) {
   const c = {i: 8}, types = [], imports = new Map(); let body;
   function string() { const n = uleb(bytes, c), s = Buffer.from(bytes.subarray(c.i, c.i + n)).toString(); c.i += n; return s; }
@@ -48,14 +61,14 @@ function binding(bytes, e, id, returns) {
   const cursor = {i: 0}, groups = uleb(body, cursor); for (let i = 0; i < groups; i++) { uleb(body, cursor); cursor.i++; }
   const limbs = [e.low, e.high, Number(id & 0xffffffffn), Number(id >> 32n)], actual = [];
   for (let i = 0; i < 4; i++) { assert.equal(body[cursor.i++], 0x41); actual.push(sleb(body, cursor)); } assert.deepEqual(actual, limbs); assert.deepEqual([...body.subarray(cursor.i, cursor.i + 8)], [0x20, 0, 0x20, 1, 0x20, 3, 0x10, 0]);
-  assert.equal(imports.has('read32'), false);
-  if (!returns.length) { assert.equal(imports.has('store_resident32'), false); return; }
-  assert.deepEqual(types[imports.get('store_resident32')], {args: Array(6).fill(0x7f), result: [0x7f]}); let count = 0;
+  assert.equal(imports.has('cpu_read32'), false);
+  if (!returns.length) { assert.equal(imports.has('cpu_store_resident32'), false); return; }
+  assert.deepEqual(types[imports.get('cpu_store_resident32')], {args: Array(6).fill(0x7f), result: [0x7f]}); let count = 0, previous = 0;
   for (let offset = 0; offset < body.length; offset++) {
     if (body[offset] !== 0x41) continue; const p = {i: offset}, values = []; let match = true;
     try { for (let i = 0; i < 4; i++) { if (body[p.i++] !== 0x41) { match = false; break; } values.push(sleb(body, p)); } } catch { match = false; }
     if (!match || !values.every((x, i) => x === limbs[i]) || body[p.i] !== 0x20 || body[p.i + 1] !== 26) continue;
-    p.i += 2; assert.equal(body[p.i++], 0x41); assert.equal(sleb(body, p), returns[count++]); assert.equal(body[p.i++], 0x10); assert.equal(uleb(body, p), 1);
+    p.i += 2; assert.equal(body[p.i++], 0x20); assert.equal(uleb(body, p), 18); assert.ok(stagedOperand(body, previous, offset, {immediate: returns[count++]}), 'exact CALL return PC staged before stack translation'); assert.equal(body[p.i++], 0x10); assert.equal(uleb(body, p), 1); previous = p.i;
   }
   assert.equal(count, returns.length); stats.bound_store_sites += count;
 }
@@ -63,7 +76,7 @@ function fresh() {
   const instance = new WebAssembly.Instance(engineModule, {}), api = Object.fromEntries(names.map(name => [name, instance.exports[`ring3_abi_v1_${name}`]])); for (const [name, fn] of Object.entries(api)) assert.equal(typeof fn, 'function', name);
   const ordinal = ++stats.engine_instances, key = 0x92345678c0000000n + BigInt(ordinal), e = refresh({instance, api, ordinal, key, low: Number(key & 0xffffffffn), high: Number(key >> 32n), memory: instance.exports.memory, token: 0});
   assert.equal(api.open(24, e.low, e.high), 0); e.base = api.arena_ptr() >>> 0; refresh(e); assert.ok(e.base > 0 && e.base + SIZE <= e.bytes.length);
-  for (const [name, length] of [['capture_resident_call', 6], ['complete_resident_call', 6], ['capture_call', 5], ['complete_call', 5], ['abandon_call', 3], ['guard_resident', 7], ['store_resident32', 6]]) assert.equal(api[name].length, length);
+  for (const [name, length] of [['capture_resident_call', 6], ['complete_resident_call', 6], ['capture_call', 5], ['complete_call', 5], ['abandon_call', 3], ['guard_resident', 7], ['cpu_store_resident32', 6]]) assert.equal(api[name].length, length);
   assert.equal(api.generation(), 0); assert.equal(api.module_ptr(), 0); assert.equal(api.module_len(), 0); return e;
 }
 function record(e, before, label) {
@@ -74,9 +87,9 @@ function record(e, before, label) {
 }
 function compile(e, blocks, gates, label, returns = []) {
   descriptors(e, blocks, gates); const before = arena(e); assert.equal(e.api.compile_resident_with_gates(blocks.length, gates.length), 0, label); const selected = record(e, before, label); binding(selected.bytes, e, selected.id, returns);
-  const module = new WebAssembly.Module(selected.bytes), helpers = returns.length ? ['store_resident32'] : [];
+  const module = new WebAssembly.Module(selected.bytes), helpers = returns.length ? ['cpu_store_resident32'] : [];
   assert.deepEqual(WebAssembly.Module.imports(module), [{module: 'env', name: 'memory', kind: 'memory'}, {module: 'ring3', name: 'guard_resident', kind: 'function'}, ...helpers.map(name => ({module: 'ring3', name, kind: 'function'}))]); assert.deepEqual(WebAssembly.Module.exports(module), [{name: 'run', kind: 'function'}]);
-  const instance = new WebAssembly.Instance(module, {env: {memory: e.memory}, ring3: {guard_resident: e.api.guard_resident, store_resident32: e.api.store_resident32}}); assert.equal(instance.exports.run.length, 4);
+  const instance = new WebAssembly.Instance(module, {env: {memory: e.memory}, ring3: {guard_resident: e.api.guard_resident, cpu_store_resident32: e.api.cpu_store_resident32}}); assert.equal(instance.exports.run.length, 4);
   const filename = `unit-${++stats.compiled_units}.wasm`; writeFileSync(join(outputDir, filename), selected.bytes); artifacts[filename] = hash(selected.bytes);
   const unit = {...selected, module, instance, run: instance.exports.run, key: e.key.toString(), blocks, gates, returns, label, filename}; units.push(unit); return unit;
 }
@@ -85,7 +98,7 @@ function getter(e, unit) { const before = arena(e); assert.equal(e.api.resident_
 function miss(e, pc, status = 17) { failure(e, () => e.api.find_resident(pc), status, 'controlled finder miss'); stats.find_failure++; }
 function guard(e, unit, status = 0) { unchanged(e, () => e.api.guard_resident(e.low, e.high, unit.low, unit.high, e.base, e.base + 56, e.base + 96), status, 'direct resident guard'); stats[status ? 'guard_failure' : 'guard_success']++; }
 function reject(e, unit, status, label, pointers = [e.base, e.base + 56, e.base + 96]) { unchanged(e, () => unit.run(pointers[0], pointers[1], 3, pointers[2]), status, label); stats.rejected_runs++; }
-function copied(e, unit) { const instance = new WebAssembly.Instance(new WebAssembly.Module(unit.bytes.slice()), {env: {memory: e.memory}, ring3: {guard_resident: e.api.guard_resident, store_resident32: e.api.store_resident32}}); return {...unit, run: instance.exports.run}; }
+function copied(e, unit) { const instance = new WebAssembly.Instance(new WebAssembly.Module(unit.bytes.slice()), {env: {memory: e.memory}, ring3: {guard_resident: e.api.guard_resident, cpu_store_resident32: e.api.cpu_store_resident32}}); return {...unit, run: instance.exports.run}; }
 function run(e, unit, budget, expected, expectedExit, label, continuation, expectedHelper, stores = 0) {
   const before = arena(e); assert.equal(unit.run(e.base, e.base + 56, budget, e.base + 96), 0, label); const wanted = before.slice(); wanted.set(stateBytes(expected), 0); wanted.set(expectedExit, 56); if (expectedHelper !== undefined) wanted.set(expectedHelper, 100); check(e, before, wanted, label);
   stats.canonical_runs++; stats[continuation === 'initial' ? 'initial_calls' : 'resumes']++; stats.guest_store32 += stores;
@@ -106,11 +119,11 @@ function frameWords(e, esp, args) {
 }
 function entered(e, a, b, form, start, budget = 8, budgetGate = false) {
   select(e, form.pc, a); const stopped = copy(start); stopped.registers[4] = (start.registers[4] - 4) >>> 0; stopped.eip = form.target;
-  run(e, a, budget, stopped, exit(budget === 1 ? 1 : 3, 1, 0, 0, 0, 0, 2), 'actual CALL stores return PC and enters B', 'initial', helper(), 1);
+  run(e, a, budget, stopped, unitExit(a, budget === 1 ? 1 : 3, 1, 0, 0, 0, 0, 2), 'actual CALL stores return PC and enters B', 'initial', cpuHelper(), 1);
   if (budget === 1) failure(e, () => e.api.capture_resident_call(e.low, e.high, b.low, b.high, 1, 0), 13, 'CALL Budget is not a Gate', 'capture');
   select(e, form.target, b);
-  if (budgetGate) { run(e, b, 0, stopped, exit(1, 0), 'zero Gate budget', 'resume'); failure(e, () => e.api.capture_resident_call(e.low, e.high, b.low, b.high, 1, 0), 13, 'Gate Budget cannot capture', 'capture'); }
-  run(e, budgetGate ? copied(e, b) : b, 1, stopped, exit(8, 0, form.id), 'actual generated numeric Gate', 'resume'); return stopped;
+  if (budgetGate) { run(e, b, 0, stopped, unitExit(b, 1, 0), 'zero Gate budget', 'resume'); failure(e, () => e.api.capture_resident_call(e.low, e.high, b.low, b.high, 1, 0), 13, 'Gate Budget cannot capture', 'capture'); }
+  run(e, budgetGate ? copied(e, b) : b, 1, stopped, unitExit(budgetGate ? copied(e, b) : b, 8, 0, form.id), 'actual generated numeric Gate', 'resume'); return stopped;
 }
 function callRecord(token, id, tag, stopped, args, returnPC) {
   const b = new Uint8Array(112), v = new DataView(b.buffer); header(b, v, 0, 'R3CF', 112); [token, id, tag, args.length, stopped.eip, stopped.registers[4], returnPC, tag === 3 ? stopped.registers[1] : 0].forEach((x, i) => v.setUint32(16 + i * 4, x, true)); for (let i = 0; i < 16; i++) v.setUint32(48 + i * 4, args[i] ?? 0, true); return b;
@@ -126,7 +139,7 @@ function capture(e, b, tag, stopped, args, returnPC, legacy = false) {
 }
 function completed(frame, result = frame.result) { const s = copy(frame.stopped); s.registers[0] = result; s.registers[4] = (s.registers[4] + 4 + (frame.tag === 1 ? 0 : frame.args.length * 4)) >>> 0; s.eip = frame.returnPC; return s; }
 function complete(e, b, frame, legacy = false) { const before = arena(e), s = completed(frame), wanted = before.slice(); assert.equal(legacy ? e.api.complete_call(e.low, e.high, 1, frame.token, frame.result) : e.api.complete_resident_call(e.low, e.high, b.low, b.high, frame.token, frame.result), 0); wanted.set(stateBytes(s), 0); wanted.set(exit(3, 0), 56); check(e, before, wanted, 'completion publishes only56+40'); stats[legacy ? 'legacy_completions' : 'resident_completions']++; completions.push({key: e.key.toString(), unit_id: b.id.toString(), token: frame.token, result: frame.result, state: s, owner: legacy ? 'replacement1' : 'resident'}); return s; }
-function returned(e, a, s) { select(e, s.eip, a); const next = copy(s); next.registers[0] = Number(BigInt.asUintN(32, BigInt(s.registers[0]) + 7n)); next.eip += 3; run(e, a, 1, next, exit(1, 1, 0, 0, 0, 0, a.returns.length ? 2 : 1), 'actual caller LEA continuation', 'resume'); return next; }
+function returned(e, a, s) { select(e, s.eip, a); const next = copy(s); next.registers[0] = Number(BigInt.asUintN(32, BigInt(s.registers[0]) + 7n)); next.eip += 3; run(e, a, 1, next, unitExit(a, 1, 1, 0, 0, 0, 0, a.returns.length ? 2 : 1), 'actual caller LEA continuation', 'resume'); return next; }
 function abandon(e, token) { unchanged(e, () => e.api.abandon_call(e.low, e.high, token), 0, 'owner-neutral abandon changes no arena or RAM'); stats.abandonments++; }
 function close(e) { unchanged(e, () => e.api.close(), 0, 'close changes no arena'); }
 function section(name, before) { sections.push({name, stats: Object.fromEntries(Object.entries(stats).map(([key, value]) => [key, value - (before[key] ?? 0)]))}); }
@@ -189,7 +202,7 @@ for (const kind of ['return-read', 'argument-read', 'cross-return', 'wrapped-fra
   if (kind === 'wrapped-frame') { assert.equal(e.api.map(0xfffff000, 1, 3), 0); assert.equal(e.api.map(0, 1, 3), 0); }
   const args = [kind === 'wrapped-frame' ? 0xfffffffe : 1], words = kind === 'guest-overflow' ? [] : frameWords(e, esp, args), start = state(0x3000, esp); reset(e, start);
   if (kind === 'guest-overflow') {
-    run(e, a, 8, start, exit(15, 0, 0, 0, 0, 0, 6), 'CALL wrapping EA with overflowing Store4 fails before Gate', 'initial'); stats.guest_store_faults++;
+    run(e, a, 8, start, unitExit(a, 15, 0, 0, 0, 0, 0, 6), 'CALL wrapping EA with overflowing Store4 fails before Gate', 'initial'); stats.guest_store_faults++;
     failure(e, () => e.api.capture_resident_call(e.low, e.high, b.low, b.high, 1, 0), 13, 'memory fault exit is not Gate', 'capture'); close(e); continue;
   }
   const stopped = entered(e, a, b, form, start); let currentArgs = args, returnPC = 0x3005;
@@ -211,11 +224,11 @@ section('direct capture reads repair and wrapped addresses', before);
 before = {...stats};
 {
   const {e, a, b, forms} = setup(), form = forms[0], start = state(), words = frameWords(e, STACK, []); reset(e, start, 1);
-  run(e, a, 8, start, exit(2, 0, 0, 0, 0, 0, 2), 'preset cancellation stops CALL', 'initial'); failure(e, () => e.api.capture_resident_call(e.low, e.high, b.low, b.high, 1, 0), 13, 'cancelled guest exit precedes capture cancellation', 'capture'); cancelled(e, 0);
-  const stopped = copy(start); stopped.registers[4] -= 4; stopped.eip = 0x4000; run(e, a, 8, stopped, exit(3, 1, 0, 0, 0, 0, 2), 'CALL resumes after clearing cancellation', 'resume', helper(), 1); run(e, b, 1, stopped, exit(8, 0, 17), 'Gate after cancelled CALL retry', 'resume');
+  run(e, a, 8, start, unitExit(a, 2, 0, 0, 0, 0, 0, 2), 'preset cancellation stops CALL', 'initial'); failure(e, () => e.api.capture_resident_call(e.low, e.high, b.low, b.high, 1, 0), 13, 'cancelled guest exit precedes capture cancellation', 'capture'); cancelled(e, 0);
+  const stopped = copy(start); stopped.registers[4] -= 4; stopped.eip = 0x4000; run(e, a, 8, stopped, unitExit(a, 3, 1, 0, 0, 0, 0, 2), 'CALL resumes after clearing cancellation', 'resume', cpuHelper(), 1); run(e, b, 1, stopped, unitExit(b, 8, 0, 17), 'Gate after cancelled CALL retry', 'resume');
   cancelled(e, 1); failure(e, () => e.api.capture_resident_call(e.low, e.high, b.low, b.high, 1, 0), 16, 'capture can retry cancelled stop', 'capture'); cancelled(e, 0); const first = capture(e, b, 1, stopped, [], 0x3005);
   cancelled(e, 1); failure(e, () => e.api.complete_resident_call(e.low, e.high, b.low, b.high, first.token, first.result), 16, 'cancelled pending completion', 'completion'); abandon(e, first.token);
-  run(e, b, 1, stopped, exit(2, 0), 'owner-neutral abandon leaves CPU at cancelled Gate', 'resume'); cancelled(e, 0); run(e, b, 1, stopped, exit(8, 0, 17), 'Gate resumes without repeating CALL', 'resume');
+  run(e, b, 1, stopped, unitExit(b, 2, 0), 'owner-neutral abandon leaves CPU at cancelled Gate', 'resume'); cancelled(e, 0); run(e, b, 1, stopped, unitExit(b, 8, 0, 17), 'Gate resumes without repeating CALL', 'resume');
   const second = capture(e, b, 1, stopped, [], 0x3005); assert.equal(second.token, 2); returned(e, a, complete(e, b, second)); words[1][1] = 0x3005; for (const [address, value] of words) observe(e, address, value); stats.cancellation_cases++; close(e);
 }
 section('cancelled pending abandon and Gate retry', before);
@@ -231,9 +244,9 @@ for (const kind of ['same-byte', 'protect', 'remap', 'whole-unit', 'marker-lower
   else upload(e, target, marker);
   cancelled(e, 1); failure(e, () => e.api.complete_resident_call(e.low, e.high, b.low, b.high, 0, first.result), 4, 'stale owner precedes token and cancel', 'completion'); guard(e, a, 12); guard(e, b, 4); miss(e, target, 4);
   reject(e, b, 4, 'stale B cannot run'); reject(e, copied(e, b), 4, 'copied stale B cannot rebind', [0xffffffff, 0xffffffff, 0xffffffff]); abandon(e, first.token); cancelled(e, 0);
-  run(e, a, 8, stopped, exit(3, 0, 0, 0, 0, 0, 2), 'current A at B does not replay CALL', 'resume');
+  run(e, a, 8, stopped, unitExit(a, 3, 0, 0, 0, 0, 0, 2), 'current A at B does not replay CALL', 'resume');
   const freshB = compile(e, gateBlocks, targets, 'fresh gate owner after explicit abandon'); assert.ok(freshB.id > b.id); select(e, target, freshB); guard(e, freshB);
-  failure(e, () => e.api.capture_resident_call(e.low, e.high, b.low, b.high, 1, 0), 4, 'old owner cannot migrate to fresh B', 'capture'); run(e, freshB, 1, stopped, exit(8, 0, 17), 'fresh B stops at committed target', 'resume');
+  failure(e, () => e.api.capture_resident_call(e.low, e.high, b.low, b.high, 1, 0), 4, 'old owner cannot migrate to fresh B', 'capture'); run(e, freshB, 1, stopped, unitExit(freshB, 8, 0, 17), 'fresh B stops at committed target', 'resume');
   const second = capture(e, freshB, 1, stopped, [], 0x3005); assert.equal(second.token, 2); failure(e, () => e.api.complete_resident_call(e.low, e.high, b.low, b.high, second.token, second.result), 4, 'old unit cannot complete fresh pending', 'completion'); returned(e, a, complete(e, freshB, second));
   words[1][1] = 0x3005; for (const [address, value] of words) observe(e, address, value); for (const [address, value] of [[target - 4, 0], [target, 0x0b0f], [target + 4, 0]]) observe(e, address, value); stats.currency_cases++; close(e);
 }

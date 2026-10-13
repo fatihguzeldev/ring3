@@ -11,7 +11,7 @@ const hash = bytes => createHash('sha256').update(bytes).digest('hex');
 const engineBytes = readFileSync(enginePath), engineModule = new WebAssembly.Module(engineBytes);
 assert.deepEqual(WebAssembly.Module.imports(engineModule), []);
 const SIZE = 4612, TRANSFER = 140, DATA = 0x5000;
-const names = ['open', 'close', 'arena_ptr', 'map', 'protect', 'unmap', 'upload', 'generation', 'module_ptr', 'module_len', 'guard_resident', 'compile_resident', 'resident_module', 'find_resident', 'read8', 'read16', 'read32', 'write32'];
+const names = ['open', 'close', 'arena_ptr', 'map', 'protect', 'unmap', 'upload', 'generation', 'module_ptr', 'module_len', 'guard_resident', 'compile_resident', 'resident_module', 'find_resident', 'read8', 'read16', 'read32', 'write32', 'cpu_read16', 'cpu_read32', 'cpu_read8'];
 const stats = {engine_instances: 0, compiled_units: 0, canonical_runs: 0, rejected_runs: 0, full_arena_checks: 0, metadata_checks: 0, successful_guards: 0, failed_guards: 0, find_success: 0, find_failure: 0, continuation_initial_calls: 0, continuation_resumes: 0, form_cases: 0, faults: 0, repairs: 0, cancellations: 0, host_reads: 0, host_writes: 0, guest_read8: 0, guest_read16: 0, guest_read32: 0};
 const units = [], artifacts = {}, metadata = [];
 
@@ -131,6 +131,15 @@ function helper(width, value, detail = 0, address = 0) {
   const bytes = new Uint8Array(40), view = new DataView(bytes.buffer); header(bytes, view, 0, 'R3MH', 40, width === 4 ? 1 : 2);
   [detail ? 1 : 0, detail ? 0 : value, detail, address, detail ? 1 : 0, width === 4 && detail === 0 ? 0 : width].forEach((v, i) => view.setUint32(16 + i * 4, v, true)); return bytes;
 }
+function unitExit(unit, reason, retired, detail = 0, address = 0, width = 0, version = 2) {
+  const bytes = new Uint8Array(40), view = new DataView(bytes.buffer); header(bytes, view, 0, 'R3EX', 40, unit.reads.length || (Array.isArray(unit.stores) ? unit.stores.length : unit.stores ?? 0) ? 6 : version);
+  [reason, retired, detail, address, reason === 5 ? 1 : 0, width].forEach((v, i) => view.setUint32(16 + i * 4, v, true)); return bytes;
+}
+function cpuHelper(width, value, detail = 0, address = 0) {
+  const bytes = new Uint8Array(40), view = new DataView(bytes.buffer); header(bytes, view, 0, 'R3MH', 40, 10);
+  [detail ? 1 : 0, detail ? 0 : value, detail, address, detail ? 1 : 0, width].forEach((v, i) => view.setUint32(16 + i * 4, v, true)); return bytes;
+}
+
 function run(engine, unit, budget, expected, expectedExit, expectedHelper, label, continuation, reads = {}) {
   const before = arena(engine); assert.equal(unit.run(engine.base, engine.base + 56, budget, engine.base + 96), 0, label);
   const wanted = before.slice(), view = new DataView(wanted.buffer);
@@ -193,13 +202,13 @@ for (const offset of [0, 6, 12]) {
     upload(engine, form.pc, form.program); const filename = `${form.name}.x86`; writeFileSync(join(outputDir, filename), form.program); artifacts[filename] = hash(form.program);
   });
   upload(engine, 0x2000, bBytes);
-  const reads = [4, 1, 2].filter(width => group.some(form => form.width === width)).map(width => `read${width * 8}`);
-  const a = compile(engine, group.map(form => [form.pc, form.program.length]), reads, `A forms${offset}`), b = compile(engine, [[0x2000, bBytes.length]], ['read32'], `B forms${offset}`);
+  const reads = [4, 1, 2].filter(width => group.some(form => form.width === width)).map(width => `cpu_read${width * 8}`);
+  const a = compile(engine, group.map(form => [form.pc, form.program.length]), reads, `A forms${offset}`), b = compile(engine, [[0x2000, bBytes.length]], ['cpu_read32'], `B forms${offset}`);
   contexts.push({engine, group, a, b}); assert.notEqual(a.id, b.id);
   for (const form of group) for (const wordValue of [0, 0x800080ff, 0xffffffff, 0x7fffffff]) {
     word(engine, DATA, wordValue); const start = startFor(form); reset(engine, start); select(engine, form.pc + 1, a);
-    const afterA = completed(form, start, wordValue); run(engine, a, 4, afterA, exit(3, 3), helper(form.width, Number(BigInt.asUintN(form.width * 8, BigInt(wordValue)))), `${form.name} live RAM/flags`, 'initial', {[form.width]: 1});
-    run(engine, b, 4, bResult(afterA, wordValue), exit(3, 3), helper(4, wordValue), 'B reads live RAM and branches on TEST', 'resume', {4: 2});
+    const afterA = completed(form, start, wordValue); run(engine, a, 4, afterA, unitExit(a, 3, 3), cpuHelper(form.width, Number(BigInt.asUintN(form.width * 8, BigInt(wordValue)))), `${form.name} live RAM/flags`, 'initial', {[form.width]: 1});
+    run(engine, b, 4, bResult(afterA, wordValue), unitExit(b, 3, 3), cpuHelper(4, wordValue), 'B reads live RAM and branches on TEST', 'resume', {4: 2});
     observe(engine, DATA, 4, wordValue); stats.form_cases++;
   }
   guard(engine, a); guard(engine, b);
@@ -217,45 +226,45 @@ for (const [index, form] of faultForms.entries()) {
   for (const fault of cases) {
     if (fault.repair === 'cross') { assert.equal(engine.api.unmap(0x7000, 1), 0); word(engine, 0x6ffc, 0x11223344); }
     const start = startFor(form, fault.address), stopped = prefix(form, start); reset(engine, start);
-    run(engine, a, 4, stopped, fault.detail === 3 ? exit(11, 1, 0, 0, 0, 6) : exit(5, 1, fault.detail, fault.at, form.width), fault.detail === 3 ? undefined : helper(form.width, 0, fault.detail, fault.at), 'fault preserves load destination and INC prefix flags', 'initial', fault.detail === 3 ? {} : {[form.width]: 1}); stats.faults++;
+    run(engine, a, 4, stopped, fault.detail === 3 ? unitExit(a, 11, 1, 0, 0, 0, 6) : unitExit(a, 5, 1, fault.detail, fault.at, form.width), fault.detail === 3 ? undefined : cpuHelper(form.width, 0, fault.detail, fault.at), 'fault preserves load destination and INC prefix flags', 'initial', fault.detail === 3 ? {} : {[form.width]: 1}); stats.faults++;
     if (fault.repair) {
       if (fault.repair === 'permission') assert.equal(engine.api.protect(denied, 1, 3), 0);
       else assert.equal(engine.api.map(fault.repair === 'cross' ? 0x7000 : unmapped, 1, 3), 0);
       const repaired = 0x876580ff; word(engine, fault.address, repaired);
       if (fault.repair === 'permission') assert.equal(engine.api.protect(denied, 1, 1), 0);
       const expected = completed(form, start, repaired);
-      run(engine, a, 3, expected, exit(3, 2), helper(form.width, Number(BigInt.asUintN(form.width * 8, BigInt(repaired)))), 'same unit retries current repaired RAM without CPU patch', 'resume', {[form.width]: 1}); stats.repairs++;
+      run(engine, a, 3, expected, unitExit(a, 3, 2), cpuHelper(form.width, Number(BigInt.asUintN(form.width * 8, BigInt(repaired)))), 'same unit retries current repaired RAM without CPU patch', 'resume', {[form.width]: 1}); stats.repairs++;
       observe(engine, fault.address, 4, repaired); guard(engine, a); guard(engine, b);
     } else {
-      run(engine, a, 4, stopped, exit(11, 0, 0, 0, 0, 6), undefined, 'overflow repeats zero retirement without CPU patch', 'resume'); stats.faults++;
+      run(engine, a, 4, stopped, unitExit(a, 11, 0, 0, 0, 0, 6), undefined, 'overflow repeats zero retirement without CPU patch', 'resume'); stats.faults++;
     }
   }
 }
 assert.equal(engine.api.map(0xfffff000, 1, 3), 0); word(engine, 0xfffffffc, 0x80000000);
 const topForm = forms[2], topStart = startFor(topForm, 0xffffffff); reset(engine, topStart);
-run(engine, a, 4, completed(topForm, topStart, 0x80), exit(3, 3), helper(1, 0x80), 'read8 at unsigned maximum succeeds without address overflow', 'initial', {1: 1}); observe(engine, 0xffffffff, 1, 0x80);
+run(engine, a, 4, completed(topForm, topStart, 0x80), unitExit(a, 3, 3), cpuHelper(1, 0x80), 'read8 at unsigned maximum succeeds without address overflow', 'initial', {1: 1}); observe(engine, 0xffffffff, 1, 0x80);
 assert.equal(engine.api.unmap(0x7000, 1), 0); word(engine, 0x6ffc, 0x80000000); const edgeStart = startFor(topForm, 0x6fff); reset(engine, edgeStart);
-run(engine, a, 4, completed(topForm, edgeStart, 0x80), exit(3, 3), helper(1, 0x80), 'read8 last byte of mapped page does not require next page', 'initial', {1: 1}); observe(engine, 0x6fff, 1, 0x80);
+run(engine, a, 4, completed(topForm, edgeStart, 0x80), unitExit(a, 3, 3), cpuHelper(1, 0x80), 'read8 last byte of mapped page does not require next page', 'initial', {1: 1}); observe(engine, 0x6fff, 1, 0x80);
 
 const splitForm = forms[4], splitValue = 0x876580ff, splitStart = startFor(splitForm); word(engine, DATA, splitValue); reset(engine, splitStart);
-run(engine, a, 0, splitStart, exit(1, 0), undefined, 'memory unit zero budget uses Exitv2', 'initial');
-const splitPrefix = prefix(splitForm, splitStart); run(engine, a, 1, splitPrefix, exit(1, 1), undefined, 'budget stops before read at exact interior PC', 'resume');
-run(engine, a, 0, splitPrefix, exit(1, 0), undefined, 'zero budget resumes no prefix twice', 'resume');
-engine.view.setUint32(engine.base + 96, 1, true); run(engine, a, 0, splitPrefix, exit(2, 0), undefined, 'cancel between resumes precedes zero budget and read', 'resume'); stats.cancellations++; engine.view.setUint32(engine.base + 96, 0, true);
-const splitLoaded = loaded(splitForm, splitStart, splitValue); run(engine, a, 1, splitLoaded, exit(1, 1), helper(2, 0x80ff), 'one interior read resumes with current RAM', 'resume', {2: 1});
-const splitDone = completed(splitForm, splitStart, splitValue); run(engine, a, 1, splitDone, exit(1, 1), undefined, 'JMP commits before exact budget exhaustion', 'resume');
-const splitB = bResult(splitDone, splitValue); run(engine, b, 3, splitB, exit(1, 3), helper(4, splitValue), 'B completes exact retirement budget', 'resume', {4: 2}); run(engine, b, 1, splitB, exit(3, 0), undefined, 'completed B repeats no memory read', 'resume');
+run(engine, a, 0, splitStart, unitExit(a, 1, 0), undefined, 'memory unit zero budget uses scalar Exitv6', 'initial');
+const splitPrefix = prefix(splitForm, splitStart); run(engine, a, 1, splitPrefix, unitExit(a, 1, 1), undefined, 'budget stops before read at exact interior PC', 'resume');
+run(engine, a, 0, splitPrefix, unitExit(a, 1, 0), undefined, 'zero budget resumes no prefix twice', 'resume');
+engine.view.setUint32(engine.base + 96, 1, true); run(engine, a, 0, splitPrefix, unitExit(a, 2, 0), undefined, 'cancel between resumes precedes zero budget and read', 'resume'); stats.cancellations++; engine.view.setUint32(engine.base + 96, 0, true);
+const splitLoaded = loaded(splitForm, splitStart, splitValue); run(engine, a, 1, splitLoaded, unitExit(a, 1, 1), cpuHelper(2, 0x80ff), 'one interior read resumes with current RAM', 'resume', {2: 1});
+const splitDone = completed(splitForm, splitStart, splitValue); run(engine, a, 1, splitDone, unitExit(a, 1, 1), undefined, 'JMP commits before exact budget exhaustion', 'resume');
+const splitB = bResult(splitDone, splitValue); run(engine, b, 3, splitB, unitExit(b, 1, 3), cpuHelper(4, splitValue), 'B completes exact retirement budget', 'resume', {4: 2}); run(engine, b, 1, splitB, unitExit(b, 3, 0), undefined, 'completed B repeats no memory read', 'resume');
 select(engine, splitForm.pc + 1, a); guard(engine, a); guard(engine, b); observe(engine, DATA, 4, splitValue);
-const preset = startFor(forms[3]); reset(engine, preset, 1); run(engine, a, 10, preset, exit(2, 0), undefined, 'preset cancel precedes read8 and prefix', 'initial'); stats.cancellations++;
+const preset = startFor(forms[3]); reset(engine, preset, 1); run(engine, a, 10, preset, unitExit(a, 2, 0), undefined, 'preset cancel precedes read8 and prefix', 'initial'); stats.cancellations++;
 
 // helper operands are guest addresses even when numerically equal to engine-linear pointers.
 for (const address of [engine.base + TRANSFER, a.pointer]) {
   const page = Math.floor(address / 4096) * 4096; assert.ok(page > 0x100000 && address % 4096 <= 4092);
   const start = startFor(first, address), stopped = prefix(first, start); reset(engine, start);
-  run(engine, a, 4, stopped, exit(5, 1, 1, address, 4), helper(4, 0, 1, address), 'numeric engine pointer has no implicit guest mapping', 'initial', {4: 1}); stats.faults++;
+  run(engine, a, 4, stopped, unitExit(a, 5, 1, 1, address, 4), cpuHelper(4, 0, 1, address), 'numeric engine pointer has no implicit guest mapping', 'initial', {4: 1}); stats.faults++;
   const linear = refresh(engine).view.getUint32(address, true), guest = linear === 0x11223344 ? 0x55667788 : 0x11223344;
   assert.equal(engine.api.map(page, 1, 3), 0); word(engine, address, guest);
-  run(engine, a, 3, completed(first, start, guest), exit(3, 2), helper(4, guest), 'mapped guest pointer alias reads independent RAM', 'resume', {4: 1}); stats.repairs++;
+  run(engine, a, 3, completed(first, start, guest), unitExit(a, 3, 2), cpuHelper(4, guest), 'mapped guest pointer alias reads independent RAM', 'resume', {4: 1}); stats.repairs++;
   assert.equal(refresh(engine).view.getUint32(address, true), linear, 'guest mapping does not expose or overwrite engine bytes'); observe(engine, address, 4, guest); assert.equal(engine.api.unmap(page, 1), 0); guard(engine, a); guard(engine, b);
 }
 
@@ -265,10 +274,10 @@ guard(engine, a, 4); guard(engine, b); rejected(engine, a, 4, 'stale A rejects b
 unchanged(engine, () => engine.api.find_resident(first.pc), 4, 'stale A lookup'); stats.find_failure++;
 const copied = new WebAssembly.Instance(new WebAssembly.Module(a.bytes.slice()), {env: {memory: engine.memory}, ring3: Object.fromEntries(['guard_resident', ...a.reads].map(name => [name, engine.api[name]]))});
 rejected(engine, {...a, run: copied.exports.run}, 4, 'copied stale memory unit retains immutable guard binding');
-const independentB = initial(0x2000); reset(engine, independentB); run(engine, b, 4, bResult(independentB, 0x12345678), exit(3, 3), helper(4, 0x12345678), 'current B reads live RAM without any legacy artifact', 'initial', {4: 2});
+const independentB = initial(0x2000); reset(engine, independentB); run(engine, b, 4, bResult(independentB, 0x12345678), unitExit(b, 3, 3), cpuHelper(4, 0x12345678), 'current B reads live RAM without any legacy artifact', 'initial', {4: 2});
 const freshA = compile(engine, a.blocks, a.reads, 'fresh same-PC read A'); assert.ok(freshA.id > a.id && freshA.id > b.id); select(engine, first.pc, freshA); select(engine, 0x2000, b); guard(engine, a, 4); guard(engine, freshA);
 const replacementStart = startFor(first); reset(engine, replacementStart); const replacementDone = completed(first, replacementStart, 0x12345678);
-run(engine, freshA, 4, replacementDone, exit(3, 3), helper(4, 0x12345678), 'fresh A uses current memory under new ID', 'initial', {4: 1}); run(engine, b, 4, bResult(replacementDone, 0x12345678), exit(3, 3), helper(4, 0x12345678), 'B continuation survives A replacement', 'resume', {4: 2});
+run(engine, freshA, 4, replacementDone, unitExit(freshA, 3, 3), cpuHelper(4, 0x12345678), 'fresh A uses current memory under new ID', 'initial', {4: 1}); run(engine, b, 4, bResult(replacementDone, 0x12345678), unitExit(b, 3, 3), cpuHelper(4, 0x12345678), 'B continuation survives A replacement', 'resume', {4: 2});
 observe(engine, DATA, 4, 0x12345678);
 const beforeClose = arena(engine); assert.equal(engine.api.close(), 0); assert.deepEqual(arena(engine), beforeClose); stats.full_arena_checks++;
 rejected(engine, freshA, 5, 'closed memory unit rejects before read'); rejected(engine, b, 5, 'closed retained read unit rejects');
@@ -285,6 +294,6 @@ const provenance = {
   forms: forms.map(form => ({name: form.name, hex: form.hex, width: form.width, pc: form.pc})), unit_bindings: units.map(unit => ({label: unit.label, id: unit.id.toString(), pointer: unit.pointer, length: unit.length, filename: unit.filename, reads: unit.reads})), metadata_observations: metadata,
   tools: {node: process.version, v8: process.versions.v8, platform: process.platform, architecture: process.arch, rustc: execFileSync('rustc', ['--version'], {encoding: 'utf8'}).trim(), cargo: execFileSync('cargo', ['--version'], {encoding: 'utf8'}).trim()},
   commands: {run: [process.execPath, process.argv[1], enginePath, outputDir, root], generate_and_run: ['cargo', 'test', '-p', 'ring3-engine', '--test', 'process_resident_memory_wasm', '--', '--nocapture']},
-  claim: 'actual engine-Wasm resident data reads for all17 existing encoding forms; seven compiled units across three independent two-unit contexts plus one fresh replacement, direct Wasm guard/read imports and exact same engine memory, no store or legacy artifact, explicit whole-arena metadata/CPU/flags/Exit-v2/helper-v1-v2 oracles, live RAM and independent source/destination EA aliases, width-specific fault/prefix/repair/interior budget/cancel resumes without CPU patches, maximum-byte read success and word/dword overflow, code-stale A/current B/fresh A and copied stale binding, engine-linear arena/module pointers resolved solely through guest mapping. Independent literal/BigInt mathematics; no decoder/ISA interpreter/helper simulation. No product dispatcher/installer, indirect jump, resident Store4/active SMC, callbacks, browser/async cancellation/performance/game claim.',
+  claim: 'actual engine-Wasm resident data reads for all17 existing encoding forms; seven compiled units across three independent two-unit contexts plus one fresh replacement, direct Wasm guard/read imports and exact same engine memory, no store or legacy artifact, explicit whole-arena metadata/CPU/flags/Exit-v6/CPU-helper-v10 oracles, live RAM and independent source/destination EA aliases, width-specific fault/prefix/repair/interior budget/cancel resumes without CPU patches, maximum-byte read success and word/dword overflow, code-stale A/current B/fresh A and copied stale binding, engine-linear arena/module pointers resolved solely through guest mapping. Independent literal/BigInt mathematics; no decoder/ISA interpreter/helper simulation. No product dispatcher/installer, indirect jump, resident Store4/active SMC, callbacks, browser/async cancellation/performance/game claim.',
 };
 writeFileSync(join(outputDir, 'provenance.json'), JSON.stringify(provenance, null, 2)); console.log(JSON.stringify({...provenance, sources: Object.keys(provenance.sources).length, metadata_observations: metadata.length, artifacts: outputDir}));

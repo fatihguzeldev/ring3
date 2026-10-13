@@ -13,7 +13,7 @@ const hash = bytes => createHash('sha256').update(bytes).digest('hex');
 const engineBytes = fixtureEngine.bytes, engineModule = fixtureEngine.module;
 assert.deepEqual(WebAssembly.Module.imports(engineModule), []);
 const SIZE = 4612, TRANSFER = 140, MARKER = 0xc8c00006, EXIT = 0x8020, EXIT_ID = 0x10003;
-const apiNames = ['open', 'close', 'arena_ptr', 'read32', 'store_resident32', 'compile_resident_entries', 'resident_module', 'guard_resident', 'dispatcher_module', 'guard_dispatch_entry', 'find_installed_resident', 'acknowledge_resident_installation', 'retire_stale_resident', 'begin_image_input', 'append_image_input', 'load_pe32_linked_v2_input_at', 'start_loaded_image', 'capture_resident_call', 'complete_resident_windows_call'];
+const apiNames = ['open', 'close', 'arena_ptr', 'read32', 'store_resident32', 'compile_resident_entries', 'resident_module', 'guard_resident', 'dispatcher_module', 'guard_dispatch_entry', 'find_installed_resident', 'acknowledge_resident_installation', 'retire_stale_resident', 'begin_image_input', 'append_image_input', 'load_pe32_linked_v2_input_at', 'start_loaded_image', 'capture_resident_call', 'complete_resident_windows_call', 'cpu_read32', 'cpu_store_resident32'];
 const modules = [], controls = [], paths = [];
 let ordinal = 0, retired = 0, retirements = 0, recompilations = 0, captures = 0, completions = 0;
 function record(magic, length, fields, version = 1) {
@@ -104,7 +104,7 @@ function stable(ctx, keeper) {
 }
 function dispatch(ctx, unit, count, state, reason, version, detail = 0, slot = 0) {
   const expected = arena(ctx); expected.set(stateRecord(state), 0); expected.set(exitRecord(reason, count, version, detail), 56);
-  expected.set(record('R3MH', 40, [0, 0, 0, 0, 0, 0]), 100); expected.set(installRecord(unit, slot), TRANSFER);
+  expected.set(record('R3MH', 40, [0, 0, 0, 0, 0, 4], 10), 100); expected.set(installRecord(unit, slot), TRANSFER);
   assert.equal(ctx.dispatcher.run(ctx.base, ctx.base + 56, 64, ctx.base + 96), 0);
   assert.deepEqual(arena(ctx), expected, 'product dispatcher whole-arena state/exit/helper/last lookup'); retired += count;
 }
@@ -136,7 +136,7 @@ function load(base) {
   for (const offset of relocationOffsets) textView.setUint32(offset, image.readUInt32LE(0x200 + offset) + base - 0x400000, true);
   dataView.setUint32(0x150, EXIT, true);
   assert.deepEqual(readBytes(ctx, entry, 4096), text); assert.deepEqual(readBytes(ctx, base + 0x3000, 4096), data); assert.deepEqual(readBytes(ctx, base + 0x5000, 4096), keep);
-  const main = compile(ctx, seeds.map(offset => entry + offset), [], `${label}-main-0`, 0, ['read32', 'store_resident32']);
+  const main = compile(ctx, seeds.map(offset => entry + offset), [], `${label}-main-0`, 0, ['cpu_read32', 'cpu_store_resident32']);
   const keeper = compile(ctx, [base + 0x5100], [], `${label}-keeper`, 1, []);
   const gate = compile(ctx, [EXIT], [[EXIT, EXIT_ID]], `${label}-exit`, 2, []); dispatcher(ctx);
   assert.equal(ctx.api.start_loaded_image(0x70000, 1), 0); assert.deepEqual(arena(ctx).subarray(0, 56), stateRecord(cpu(entry)));
@@ -164,7 +164,7 @@ for (const base of [0x400000, 0x500000]) {
   pure(ctx, () => retire(keeper, ctx.low, ctx.high, keeper.high ^ 1), 3, 'full high unit identity checked');
   for (let cycle = 1; cycle <= 9; cycle++) {
     const old = path.main, count = sliceCounts[cycle - 1];
-    dispatch(ctx, old, count, cpu(entry + 16, cycle === 1 ? 0 : MARKER, 0x71000, invalidatedFlags[cycle - 1]), 6, 2);
+    dispatch(ctx, old, count, cpu(entry + 16, cycle === 1 ? 0 : MARKER, 0x71000, invalidatedFlags[cycle - 1]), 6, 6);
     const ramHashes = ram(path, cycle); guard(ctx, old, 4, 'committed same-byte store leaves old unit stale');
     pure(ctx, () => old.run(0xffffffff, 0xffffffff, 0, 0xffffffff), 4, 'stale saved run rejects before malformed pointers');
     if (cycle === 1) {
@@ -183,7 +183,7 @@ for (const base of [0x400000, 0x500000]) {
     // old.pointer/old.length are descriptive expired coordinates only from this line onward.
     pure(ctx, () => retire(old), 3, 'double retirement refuses without mutation');
     pure(ctx, () => old.run(0xffffffff, 0xffffffff, 0, 0xffffffff), 3, 'retired saved run rejects before pointers and budget');
-    path.main = compile(ctx, [entry + 16, entry, entry + 30], [], `${path.label}-main-${cycle}`, 0, ['read32', 'store_resident32']); recompilations++;
+    path.main = compile(ctx, [entry + 16, entry, entry + 30], [], `${path.label}-main-${cycle}`, 0, ['cpu_read32', 'cpu_store_resident32']); recompilations++;
     pure(ctx, () => old.run(0xffffffff, 0xffffffff, 0, 0xffffffff), 3, 'fresh same slot cannot resurrect old immutable id');
     assert.equal(ctx.live.size, 3); assert.equal(ctx.table.get(1), keeper.run); assert.equal(ctx.table.get(2), gate.run); stable(ctx, keeper);
     assert.deepEqual(ram(path, cycle), ramHashes, 'retire/recompile/install leaves declared RAM unchanged');
@@ -212,6 +212,6 @@ assert.deepEqual(counts, {paths: 2, invalidation_cycles: 18, successful_retireme
 assert.equal(controls.length, 190, 'per path:5 initial +9*8 cycle +3 cancel +9 final-old +2 Busy +4 lifecycle controls');
 const sourcePaths = ['engine/src/cpu/dbt/resident.rs', 'engine/src/cpu/dbt/artifact.rs', 'engine/src/cpu/dbt/cold.rs', 'engine/src/cpu/dbt/wasm/emitter.rs', 'engine/src/cpu/dbt/wasm/dispatcher.rs', 'engine/src/cpu/dbt/wasm/memory.rs', 'engine/src/cpu/dbt/wasm/integer/arithmetic.rs', 'engine/src/cpu/dbt/wasm/integer/bits.rs', 'engine/src/cpu/dbt/wasm/integer/carry_rotates.rs', 'engine/src/cpu/dbt/wasm/integer/decimal.rs', 'engine/src/cpu/dbt/wasm/integer/dispatch.rs', 'engine/src/cpu/dbt/wasm/integer/flags.rs', 'engine/src/cpu/dbt/wasm/integer/mod.rs', 'engine/src/cpu/dbt/wasm/integer/multiply_divide.rs', 'engine/src/cpu/dbt/wasm/integer/operands.rs', 'engine/src/cpu/dbt/wasm/integer/rotates.rs', 'engine/src/cpu/dbt/wasm/integer/shifts.rs', 'engine/src/cpu/x86/decode/decoder.rs', 'engine/src/cpu/x86/decode/integer.rs', 'engine/src/cpu/x86/decode/flow.rs', 'engine/src/process/execution/resident.rs', 'engine/src/process/execution/authority.rs', 'engine/src/process/execution/mod.rs', 'engine/src/process/mod.rs', 'engine/src/process/execution/installation.rs', 'engine/src/process/instance.rs', 'engine/src/process/execution/compiled.rs', 'engine/src/process/memory/address_space.rs', 'engine/src/process/memory/scalar.rs', 'engine/src/process/memory/scalar/tests.rs', 'engine/src/process/memory/mod.rs', 'engine/src/process/wasm/mod.rs', 'engine/src/process/wasm/loading.rs', 'engine/src/process/wasm/execution.rs', 'engine/src/process/wasm/calls.rs', 'engine/src/process/wasm/memory.rs', 'engine/src/process/wasm/cpu.rs', 'engine/src/process/calls/call.rs', 'engine/src/process/calls/context.rs', 'engine/src/process/calls/mod.rs', 'engine/src/process/windows/calls.rs', 'engine/src/process/windows/mod.rs', 'engine/src/process/loading/image.rs', 'engine/src/process/loading/mod.rs', 'engine/src/process/loading/input.rs', 'engine/src/abi/wasm/exports/calls.rs', 'engine/src/abi/wasm/exports/cpu.rs', 'engine/src/abi/wasm/exports/execution.rs', 'engine/src/abi/wasm/exports/image.rs', 'engine/src/abi/wasm/exports/instance.rs', 'engine/src/abi/wasm/exports/memory.rs', 'engine/src/abi/wasm/exports/mod.rs', 'engine/src/loader/mod.rs', 'engine/src/loader/pe32.rs', 'engine/src/loader/imports.rs', 'engine/src/loader/relocation.rs', 'engine/src/memory/space.rs', 'engine/tests/support/loader/pe32/image.rs', 'engine/tests/process/resident/lifecycle/wasm/retirement.rs', 'engine/tests/process/resident/wasm.rs', 'engine/tests/support/wasm.rs', 'engine/tests/process/resident/lifecycle/fixtures/p2-resident-retirement/runtime/run.mjs'];
 sourcePaths.push(...[...exportContract.sourcePaths, 'engine/tests/support/wasm/engine.mjs'].filter(path => !sourcePaths.includes(path)));
-const result = {counts, paths, controls, modules, engine_sha256: hash(engineBytes), pe_sha256: hash(image), sources: Object.fromEntries(sourcePaths.map(path => [path, hash(readFileSync(join(root, path)))])), oracle: {program, cfg_seeds: seeds, relocation_offsets: relocationOffsets, invalidated_flags: invalidatedFlags, slice_counts: sliceCounts, child_imports: childImports(['read32', 'store_resident32']), dispatcher_imports: dispatcherImports}, limitations: 'Synchronous trusted host quiescence after generated run returns; exact engine stale-unit retirement and one active Table slot reused. Native tests separately prove retained byte credit and full8 capacity. Finite18 old JS functions are intentionally retained for refusal tests; no GC, allocator shrink, concurrent/reentrant retirement, arbitrary Table safety, browser/SDK/performance/game claim. Raw retired pointers are never dereferenced. RAM scope is full declared text/data/keeper pages plus32 stack bytes. Source hashes refer to current frozen repository files, not saved source copies.'};
+const result = {counts, paths, controls, modules, engine_sha256: hash(engineBytes), pe_sha256: hash(image), sources: Object.fromEntries(sourcePaths.map(path => [path, hash(readFileSync(join(root, path)))])), oracle: {program, cfg_seeds: seeds, relocation_offsets: relocationOffsets, invalidated_flags: invalidatedFlags, slice_counts: sliceCounts, child_imports: childImports(['cpu_read32', 'cpu_store_resident32']), dispatcher_imports: dispatcherImports}, limitations: 'Synchronous trusted host quiescence after generated run returns; exact engine stale-unit retirement and one active Table slot reused. Native tests separately prove retained byte credit and full8 capacity. Finite18 old JS functions are intentionally retained for refusal tests; no GC, allocator shrink, concurrent/reentrant retirement, arbitrary Table safety, browser/SDK/performance/game claim. Raw retired pointers are never dereferenced. RAM scope is full declared text/data/keeper pages plus32 stack bytes. Source hashes refer to current frozen repository files, not saved source copies.'};
 writeFileSync(join(output, 'result.json'), JSON.stringify(result, null, 2));
 console.log(JSON.stringify({counts, controls: controls.length, engine_sha256: result.engine_sha256, output}));

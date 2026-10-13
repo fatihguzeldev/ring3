@@ -11,7 +11,7 @@ const hash = bytes => createHash('sha256').update(bytes).digest('hex');
 const engineBytes = readFileSync(enginePath), engineModule = new WebAssembly.Module(engineBytes);
 assert.deepEqual(WebAssembly.Module.imports(engineModule), []);
 const SIZE = 4612, TRANSFER = 140, DATA = 0x5000;
-const names = ['open', 'close', 'arena_ptr', 'map', 'protect', 'unmap', 'upload', 'generation', 'module_ptr', 'module_len', 'guard_resident', 'compile_resident', 'resident_module', 'find_resident', 'read8', 'read16', 'read32', 'write32', 'store_resident32', 'compile', 'compile_with_gates', 'guard', 'capture_call', 'abandon_call'];
+const names = ['open', 'close', 'arena_ptr', 'map', 'protect', 'unmap', 'upload', 'generation', 'module_ptr', 'module_len', 'guard_resident', 'compile_resident', 'resident_module', 'find_resident', 'read8', 'read16', 'read32', 'write32', 'store_resident32', 'compile', 'compile_with_gates', 'guard', 'capture_call', 'abandon_call', 'cpu_read16', 'cpu_read32', 'cpu_read8', 'cpu_store_resident32'];
 const stats = {engine_instances: 0, compiled_units: 0, canonical_runs: 0, rejected_runs: 0, full_arena_checks: 0, metadata_checks: 0, successful_guards: 0, failed_guards: 0, find_success: 0, find_failure: 0, continuation_initial_calls: 0, continuation_resumes: 0, form_cases: 0, alias_cases: 0, smc_cases: 0, bound_store_sites: 0, raw_store_success: 0, raw_store_rejected: 0, legacy_compiles: 0, legacy_runs: 0, pending_captures: 0, pending_abandons: 0, algorithm_cases: 0, algorithm_retired: 0, faults: 0, repairs: 0, cancellations: 0, host_reads: 0, host_writes: 0, mixed_cases: 0, guest_read8: 0, guest_read16: 0, guest_read32: 0, guest_store32: 0};
 const units = [], artifacts = {}, metadata = [];
 
@@ -84,11 +84,11 @@ function record(engine, before, label) {
 function compile(engine, blocks, reads, label, stores = 0) {
   descriptors(engine, blocks); const before = arena(engine); assert.equal(engine.api.compile_resident(blocks.length), 0, label);
   const selected = record(engine, before, label), module = new WebAssembly.Module(selected.bytes);
-  const helpers = [...reads.filter(name => name === 'read32'), ...(stores ? ['store_resident32'] : []), ...reads.filter(name => name !== 'read32')];
+  const helpers = [...reads.filter(name => name === 'cpu_read32'), ...(stores ? ['cpu_store_resident32'] : []), ...reads.filter(name => name !== 'cpu_read32')];
   const expected = [{module: 'env', name: 'memory', kind: 'memory'}, {module: 'ring3', name: 'guard_resident', kind: 'function'}, ...helpers.map(name => ({module: 'ring3', name, kind: 'function'}))];
   assert.deepEqual(WebAssembly.Module.imports(module), expected, 'exact direct bound guard/read/store imports'); assert.deepEqual(WebAssembly.Module.exports(module), [{name: 'run', kind: 'function'}]);
-  const imports = {guard_resident: engine.api.guard_resident, ...Object.fromEntries(reads.map(name => [name, engine.api[name]])), ...(stores ? {store_resident32: engine.api.store_resident32} : {})};
-  boundStores(selected.bytes, engine, selected.id, stores, 1 + Number(reads.includes('read32')));
+  const imports = {guard_resident: engine.api.guard_resident, ...Object.fromEntries(reads.map(name => [name, engine.api[name]])), ...(stores ? {cpu_store_resident32: engine.api.cpu_store_resident32} : {})};
+  boundStores(selected.bytes, engine, selected.id, stores, 1 + Number(reads.includes('cpu_read32')));
   const instance = new WebAssembly.Instance(module, {env: {memory: engine.memory}, ring3: imports}); assert.equal(instance.exports.run.length, 4);
   const filename = `unit-${++stats.compiled_units}.wasm`; writeFileSync(join(outputDir, filename), selected.bytes); artifacts[filename] = hash(selected.bytes);
   const unit = {...selected, module, instance, run: instance.exports.run, blocks, reads, stores, filename, label}; units.push(unit); return unit;
@@ -133,6 +133,16 @@ function helper(width, value, detail = 0, address = 0, access = 1) {
   const bytes = new Uint8Array(40), view = new DataView(bytes.buffer); header(bytes, view, 0, 'R3MH', 40, width === 4 ? 1 : 2);
   [detail ? 1 : 0, detail ? 0 : value, detail, address, detail ? access : 0, width === 4 && detail === 0 ? 0 : width].forEach((v, i) => view.setUint32(16 + i * 4, v, true)); return bytes;
 }
+function unitExit(unit, reason, retired, detail = 0, address = 0, width = 0, version = 2, access = 2) {
+  const bytes = new Uint8Array(40), view = new DataView(bytes.buffer); header(bytes, view, 0, 'R3EX', 40, unit.reads.length || (Array.isArray(unit.stores) ? unit.stores.length : unit.stores ?? 0) ? 6 : version);
+  [reason, retired, detail, address, reason === 5 ? access : 0, width].forEach((v, i) => view.setUint32(16 + i * 4, v, true)); return bytes;
+}
+function cpuHelper(width, value, detail = 0, address = 0, access = 1) {
+  const bytes = new Uint8Array(40), view = new DataView(bytes.buffer); header(bytes, view, 0, 'R3MH', 40, 10);
+  [detail ? 1 : 0, detail ? 0 : value, detail, address, detail ? access : 0, width].forEach((v, i) => view.setUint32(16 + i * 4, v, true)); return bytes;
+}
+function cpuStoreHelper(detail = 0, address = 0) { return cpuHelper(4, 0, detail, address, 2); }
+
 function run(engine, unit, budget, expected, expectedExit, expectedHelper, label, continuation, stores = 0, reads = 0) {
   const before = arena(engine); assert.equal(unit.run(engine.base, engine.base + 56, budget, engine.base + 96), 0, label);
   const wanted = before.slice(), view = new DataView(wanted.buffer);
@@ -160,8 +170,8 @@ function boundStores(bytes, engine, id, count, index) {
     cursor.i = end;
   }
   assert.ok(body); assert.deepEqual(signatures[importTypes.get('guard_resident')], {args: Array(7).fill(0x7f), returns: [0x7f]});
-  if (!count) { assert.equal(importTypes.has('store_resident32'), false); return; }
-  assert.deepEqual(signatures[importTypes.get('store_resident32')], {args: Array(6).fill(0x7f), returns: [0x7f]});
+  if (!count) { assert.equal(importTypes.has('cpu_store_resident32'), false); return; }
+  assert.deepEqual(signatures[importTypes.get('cpu_store_resident32')], {args: Array(6).fill(0x7f), returns: [0x7f]});
   const limbs = [engine.low, engine.high, Number(id & 0xffffffffn), Number(id >> 32n)]; let found = 0;
   for (let offset = 0; offset < body.length; offset++) {
     if (body[offset] !== 0x41) continue;
@@ -200,19 +210,19 @@ const engine = fresh(); assert.equal(engine.api.store_resident32.length, 6);
 for (const page of [0x1000, 0x2000, 0x3000]) assert.equal(engine.api.map(page, 1, 7), 0); assert.equal(engine.api.map(0x4000, 3, 3), 0);
 for (const form of forms) upload(engine, form.pc, authored[form.name]); upload(engine, 0x2000, authored.reader); upload(engine, 0x3000, authored.loop);
 const a = compile(engine, forms.map(form => [form.pc, authored[form.name].length]), [], 'three MOV forms and old-EA aliases', forms.length);
-const b = compile(engine, [[0x2000, 4]], ['read32'], 'reader sees live stored RAM'); const loop = compile(engine, [[0x3000, 10]], [], 'four-instruction store loop', 1);
+const b = compile(engine, [[0x2000, 4]], ['cpu_read32'], 'reader sees live stored RAM'); const loop = compile(engine, [[0x3000, 10]], [], 'four-instruction store loop', 1);
 for (const form of forms) {
   const start = initial(form.pc); start.registers[0] = 0x87654321; start.registers[1] = 2; start.registers[3] = DATA; start.registers[6] = form.address;
   for (const [offset, value] of [[-4, 0x11223344], [0, 0xaabbccdd], [4, 0x55667788]]) word(engine, form.address + offset, value);
   reset(engine, start); select(engine, form.pc, a); select(engine, form.pc + 1, a);
-  const expected = afterA(start); run(engine, a, 8, expected, exit(3, 4), storeHelper(), form.name, 'initial', 1);
+  const expected = afterA(start); run(engine, a, 8, expected, unitExit(a, 3, 4), cpuStoreHelper(), form.name, 'initial', 1);
   observe(engine, form.address - 4, 4, 0x11223344); observe(engine, form.address, 4, form.value); observe(engine, form.address + 4, 4, 0x55667788);
   const read = copy(expected); read.registers[2] = form.value; read.eip = 0x2004; select(engine, 0x2000, b);
-  run(engine, b, 3, read, exit(3, 2), helper(4, form.value), 'live reader true continuation', 'resume', 0, 1); stats.form_cases++;
+  run(engine, b, 3, read, unitExit(b, 3, 2), cpuHelper(4, form.value), 'live reader true continuation', 'resume', 0, 1); stats.form_cases++;
 }
 assert.equal(engine.api.map(0x8000, 1, 2), 0); word(engine, 0x8000, 0xaabbccdd); const writeOnly = initial(0x1000); writeOnly.registers[0] = 0x10203040; writeOnly.registers[3] = 0x8000; writeOnly.registers[6] = 0x8000; reset(engine, writeOnly);
-run(engine, a, 8, afterA(writeOnly), exit(3, 4), storeHelper(), 'write-only data does not require a Read4', 'initial', 1); assert.equal(engine.api.protect(0x8000, 1, 1), 0); observe(engine, 0x8000, 4, 0x10203040);
-const writeOnlyRead = afterA(writeOnly); writeOnlyRead.registers[2] = 0x10203040; writeOnlyRead.eip = 0x2004; run(engine, b, 3, writeOnlyRead, exit(3, 2), helper(4, 0x10203040), 'read permission is applied after the completed store', 'resume', 0, 1);
+run(engine, a, 8, afterA(writeOnly), unitExit(a, 3, 4), cpuStoreHelper(), 'write-only data does not require a Read4', 'initial', 1); assert.equal(engine.api.protect(0x8000, 1, 1), 0); observe(engine, 0x8000, 4, 0x10203040);
+const writeOnlyRead = afterA(writeOnly); writeOnlyRead.registers[2] = 0x10203040; writeOnlyRead.eip = 0x2004; run(engine, b, 3, writeOnlyRead, unitExit(b, 3, 2), cpuHelper(4, 0x10203040), 'read permission is applied after the completed store', 'resume', 0, 1);
 for (const limbs of [{low: engine.low ^ 1}, {high: engine.high ^ 1}, {idLow: 0, idHigh: 0}, {idLow: 0xffffffff, idHigh: 0xffffffff}]) rawStore(engine, a, DATA, 0, 3, 'identity failure leaves RAM/arena unchanged', limbs);
 observe(engine, DATA, 4, 0x12345678); guard(engine, a); guard(engine, b); guard(engine, loop);
 
@@ -221,33 +231,33 @@ assert.equal(engine.api.map(0xb000, 2, 3), 0); word(engine, 0xbffc, 0x11223344);
 const faults = [{address: 0x9000, detail: 1, at: 0x9000, repair() { assert.equal(engine.api.map(0x9000, 1, 3), 0); word(engine, 0x9000, 0x99999999); }}, {address: 0xa000, detail: 2, at: 0xa000, repair() { assert.equal(engine.api.protect(0xa000, 1, 3), 0); word(engine, 0xa000, 0x99999999); }}, {address: 0xbfff, detail: 1, at: 0xc000, repair() { assert.equal(engine.api.map(0xc000, 1, 3), 0); word(engine, 0xc000, 0x55667788); }}, {address: 0xbfff, detail: 2, at: 0xc000, setup() { word(engine, 0xbffc, 0x11223344); word(engine, 0xc000, 0x55667788); assert.equal(engine.api.protect(0xc000, 1, 1), 0); }, repair() { assert.equal(engine.api.protect(0xc000, 1, 3), 0); }}, {address: 0xffffffff, detail: 3, at: 0xffffffff}];
 for (const fault of faults) {
   fault.setup?.(); const start = initial(0x1000); start.registers[0] = 0x87654321; start.registers[3] = fault.address; reset(engine, start); const stopped = prefixed(start);
-  run(engine, a, 8, stopped, fault.detail === 3 ? exit(11, 1, 0, 0, 0, 6) : exit(5, 1, fault.detail, fault.at, 4), fault.detail === 3 ? undefined : storeHelper(fault.detail, fault.at), 'fault commits prefix and preserves MOV/flags', 'initial', fault.detail === 3 ? 0 : 1); stats.faults++;
+  run(engine, a, 8, stopped, fault.detail === 3 ? unitExit(a, 11, 1, 0, 0, 0, 6) : unitExit(a, 5, 1, fault.detail, fault.at, 4), fault.detail === 3 ? undefined : cpuStoreHelper(fault.detail, fault.at), 'fault commits prefix and preserves MOV/flags', 'initial', fault.detail === 3 ? 0 : 1); stats.faults++;
   if (fault.address === 0xa000) observe(engine, 0xa000, 4, 0x11111111);
   if (fault.address === 0xbfff) { observe(engine, 0xbffc, 4, 0x11223344); if (fault.detail === 2) observe(engine, 0xc000, 4, 0x55667788); }
   if (fault.repair) {
-    fault.repair(); const expected = afterA(start); run(engine, a, 8, expected, exit(3, 3), storeHelper(), 'same CPU resumes repaired MOV without repeating prefix', 'resume', 1); stats.repairs++;
+    fault.repair(); const expected = afterA(start); run(engine, a, 8, expected, unitExit(a, 3, 3), cpuStoreHelper(), 'same CPU resumes repaired MOV without repeating prefix', 'resume', 1); stats.repairs++;
     if (fault.address === 0xbfff) { observe(engine, 0xbffc, 4, 0x21223344); observe(engine, 0xc000, 4, 0x55876543); } else observe(engine, fault.address, 4, 0x87654321);
-  } else { run(engine, a, 8, stopped, exit(11, 0, 0, 0, 0, 6), undefined, 'overflow retry remains unretired', 'resume'); stats.faults++; }
+  } else { run(engine, a, 8, stopped, unitExit(a, 11, 0, 0, 0, 0, 6), undefined, 'overflow retry remains unretired', 'resume'); stats.faults++; }
   guard(engine, a); guard(engine, b);
 }
 assert.equal(engine.api.map(0xfffff000, 1, 3), 0); word(engine, 0xfffffff8, 0x10203040); word(engine, 0xfffffffc, 0x11223344);
-const top = initial(0x1000); top.registers[3] = 0xfffffffc; top.registers[0] = 0xdeadbeef; reset(engine, top); run(engine, a, 8, afterA(top), exit(3, 4), storeHelper(), 'last valid Store4', 'initial', 1); observe(engine, 0xfffffff8, 4, 0x10203040); observe(engine, 0xfffffffc, 4, 0xdeadbeef);
+const top = initial(0x1000); top.registers[3] = 0xfffffffc; top.registers[0] = 0xdeadbeef; reset(engine, top); run(engine, a, 8, afterA(top), unitExit(a, 3, 4), cpuStoreHelper(), 'last valid Store4', 'initial', 1); observe(engine, 0xfffffff8, 4, 0x10203040); observe(engine, 0xfffffffc, 4, 0xdeadbeef);
 
 const split = initial(0x1000); split.registers[0] = 0x12345678; split.registers[3] = DATA; reset(engine, split);
-run(engine, a, 0, split, exit(1, 0), undefined, 'zero budget has no store', 'initial'); const prefix = prefixed(split);
-run(engine, a, 1, prefix, exit(1, 1), undefined, 'budget at exact MOV interior', 'resume'); select(engine, 0x1001, a);
-engine.view.setUint32(engine.base + 96, 1, true); run(engine, a, 0, prefix, exit(2, 0), undefined, 'cancel wins over zero budget before store', 'resume'); stats.cancellations++;
-engine.view.setUint32(engine.base + 96, 0, true); const stored = at(prefix, 0x1003); run(engine, a, 1, stored, exit(1, 1), storeHelper(), 'exact store budget retires once', 'resume', 1);
+run(engine, a, 0, split, unitExit(a, 1, 0), undefined, 'zero budget has no store', 'initial'); const prefix = prefixed(split);
+run(engine, a, 1, prefix, unitExit(a, 1, 1), undefined, 'budget at exact MOV interior', 'resume'); select(engine, 0x1001, a);
+engine.view.setUint32(engine.base + 96, 1, true); run(engine, a, 0, prefix, unitExit(a, 2, 0), undefined, 'cancel wins over zero budget before store', 'resume'); stats.cancellations++;
+engine.view.setUint32(engine.base + 96, 0, true); const stored = at(prefix, 0x1003); run(engine, a, 1, stored, unitExit(a, 1, 1), cpuStoreHelper(), 'exact store budget retires once', 'resume', 1);
 word(engine, DATA, 0xfeedface); const incremented = copy(stored), inc = unary('inc', incremented.registers[1], incremented.eflags); incremented.registers[1] = inc.value; incremented.eflags = inc.flags; incremented.eip = 0x1004;
-run(engine, a, 1, incremented, exit(1, 1), undefined, 'successor consumes current CPU', 'resume'); run(engine, a, 1, at(incremented, 0x2000), exit(1, 1), undefined, 'direct target wins exact branch budget', 'resume'); run(engine, a, 8, at(incremented, 0x2000), exit(3, 0), undefined, 'external PC never repeats retired MOV', 'resume');
-const afterRead = at(incremented, 0x2004); afterRead.registers[2] = 0xfeedface; run(engine, b, 3, afterRead, exit(3, 2), helper(4, 0xfeedface), 'reader proves store was not repeated', 'resume', 0, 1);
-const preset = initial(0x1000); reset(engine, preset, 1); run(engine, a, 8, preset, exit(2, 0), undefined, 'preset cancel skips prefix/store', 'initial'); stats.cancellations++;
-const middle = initial(0x1002); reset(engine, middle); miss(engine, 0x1002); run(engine, a, 8, middle, exit(3, 0), undefined, 'middle instruction byte is not an entry', 'initial');
+run(engine, a, 1, incremented, unitExit(a, 1, 1), undefined, 'successor consumes current CPU', 'resume'); run(engine, a, 1, at(incremented, 0x2000), unitExit(a, 1, 1), undefined, 'direct target wins exact branch budget', 'resume'); run(engine, a, 8, at(incremented, 0x2000), unitExit(a, 3, 0), undefined, 'external PC never repeats retired MOV', 'resume');
+const afterRead = at(incremented, 0x2004); afterRead.registers[2] = 0xfeedface; run(engine, b, 3, afterRead, unitExit(b, 3, 2), cpuHelper(4, 0xfeedface), 'reader proves store was not repeated', 'resume', 0, 1);
+const preset = initial(0x1000); reset(engine, preset, 1); run(engine, a, 8, preset, unitExit(a, 2, 0), undefined, 'preset cancel skips prefix/store', 'initial'); stats.cancellations++;
+const middle = initial(0x1002); reset(engine, middle); miss(engine, 0x1002); run(engine, a, 8, middle, unitExit(a, 3, 0), undefined, 'middle instruction byte is not an entry', 'initial');
 
 for (const [label, address] of [['arena-number', engine.base + TRANSFER], ['module-number', a.pointer]]) {
   const start = initial(0x1000); start.registers[0] = 0x87654321; start.registers[3] = address; reset(engine, start); const stopped = prefixed(start), linearBefore = refresh(engine).bytes.slice(address, address + 4);
-  run(engine, a, 8, stopped, exit(5, 1, 1, address, 4), storeHelper(1, address), `${label} is a guest address, not an engine pointer`, 'initial', 1); stats.faults++;
-  assert.equal(engine.api.map(address & 0xfffff000, 1, 3), 0); run(engine, a, 8, afterA(start), exit(3, 3), storeHelper(), `${label} separate guest page repair`, 'resume', 1); stats.repairs++;
+  run(engine, a, 8, stopped, unitExit(a, 5, 1, 1, address, 4), cpuStoreHelper(1, address), `${label} is a guest address, not an engine pointer`, 'initial', 1); stats.faults++;
+  assert.equal(engine.api.map(address & 0xfffff000, 1, 3), 0); run(engine, a, 8, afterA(start), unitExit(a, 3, 3), cpuStoreHelper(), `${label} separate guest page repair`, 'resume', 1); stats.repairs++;
   assert.deepEqual(refresh(engine).bytes.slice(address, address + 4), linearBefore); observe(engine, address, 4, 0x87654321); assert.deepEqual(refresh(engine).bytes.slice(a.pointer, a.pointer + a.length), a.bytes); stats.alias_cases++; assert.equal(engine.api.unmap(address & 0xfffff000, 1), 0);
 }
 function loopTrace(start, retired) {
@@ -264,17 +274,17 @@ for (const n of [1, 3, 5]) {
   const schedules = n === 3 ? [1, 2, 9] : [4 * n + 1]; let retired = 0, calls = 0;
   for (const budget of schedules) {
     const next = Math.min(4 * n, retired + budget), stores = Math.ceil(next / 4) - Math.ceil(retired / 4), result = loopTrace(start, next), reason = next - retired === budget ? 1 : 3;
-    run(engine, loop, budget, result, exit(reason, next - retired), stores ? storeHelper() : undefined, 'closed-form four-phase loop', retired === 0 ? 'initial' : 'resume', stores); calls++; retired = next;
+    run(engine, loop, budget, result, unitExit(loop, reason, next - retired), stores ? cpuStoreHelper() : undefined, 'closed-form four-phase loop', retired === 0 ? 'initial' : 'resume', stores); calls++; retired = next;
     if (retired) observe(engine, DATA, 4, Number(BigInt.asUintN(32, BigInt(start.registers[0]) + BigInt(Math.ceil(retired / 4) - 1))));
   }
   assert.equal(retired, 4 * n); algorithmRows.push({n, retired, calls, eax: loopTrace(start, retired).registers[0], ecx: 0, ram: Number(BigInt.asUintN(32, BigInt(start.registers[0]) + BigInt(n - 1)))}); stats.algorithm_cases++; stats.algorithm_retired += retired;
 }
 assert.equal(engine.api.map(0x7000, 1, 7), 0);
 const mixedUnits = [];
-for (const [label, pc, hex, reads, expectedEdx, counters] of [['narrow-mixed', 0x7000, '89030fb6130fb70beb00', ['read8', 'read16'], 255, {8: 1, 16: 1}], ['wide-mixed', 0x7100, '89038b130fb70beb00', ['read32', 'read16'], 0x876580ff, {32: 1, 16: 1}]]) {
+for (const [label, pc, hex, reads, expectedEdx, counters] of [['narrow-mixed', 0x7000, '89030fb6130fb70beb00', ['cpu_read8', 'cpu_read16'], 255, {8: 1, 16: 1}], ['wide-mixed', 0x7100, '89038b130fb70beb00', ['cpu_read32', 'cpu_read16'], 0x876580ff, {32: 1, 16: 1}]]) {
   const code = authoredCode(label, Buffer.from(hex, 'hex')); authored[label] = code; upload(engine, pc, code); const unit = compile(engine, [[pc, code.length]], reads, label, 1); mixedUnits.push(unit);
   const start = initial(pc); start.registers[0] = 0x876580ff; start.registers[3] = DATA; reset(engine, start); const expected = at(start, pc + code.length); expected.registers[2] = expectedEdx; expected.registers[1] = 0x80ff;
-  run(engine, unit, 5, expected, exit(3, 4), helper(2, 0x80ff), 'store/read type and function index composition', 'initial', 1, counters); observe(engine, DATA, 4, 0x876580ff); stats.mixed_cases++;
+  run(engine, unit, 5, expected, unitExit(unit, 3, 4), cpuHelper(2, 0x80ff), 'store/read type and function index composition', 'initial', 1, counters); observe(engine, DATA, 4, 0x876580ff); stats.mixed_cases++;
 }
 close(engine, [a, b, loop, ...mixedUnits]);
 
@@ -290,25 +300,25 @@ for (const kind of ['self', 'same-byte', 'whole-unit', 'shared-page', 'separate-
   const oldA = compile(e, [[0x1000, code.length], [0x4000, 3]], [], `SMC ${kind} whole A`, 1), currentB = compile(e, [[bpc, 3]], [], `SMC ${kind} B`);
   const start = initial(0x1000); start.registers[3] = destination; reset(e, start); const stopped = prefixed(start, 0x1007);
   if (kind === 'self-RX') {
-    stopped.eip = 0x1001; run(e, oldA, 8, stopped, exit(5, 1, 2, destination, 4), storeHelper(2, destination), 'RX self-store faults without invalidating A', 'initial', 1); stats.faults++; observe(e, destination, 4, 0xaaaaaaaa); guard(e, oldA); select(e, 0x1001, oldA); guard(e, currentB);
+    stopped.eip = 0x1001; run(e, oldA, 8, stopped, unitExit(oldA, 5, 1, 2, destination, 4), cpuStoreHelper(2, destination), 'RX self-store faults without invalidating A', 'initial', 1); stats.faults++; observe(e, destination, 4, 0xaaaaaaaa); guard(e, oldA); select(e, 0x1001, oldA); guard(e, currentB);
     smcRows.push({kind, destination, status: 0, reason: 5, retired: 1}); close(e, [oldA, currentB]); continue;
   }
   const invalidatesA = kind !== 'separate-B';
-  if (invalidatesA) run(e, oldA, 2, stopped, exit(6, 2), storeHelper(), 'committed store invalidation wins exact budget before successor', 'initial', 1);
-  else { const complete = at(stopped, bpc); complete.registers[1] = 0xaaaaaaaa; run(e, oldA, 8, complete, exit(3, 4), storeHelper(), 'separate B invalidation leaves executing A current', 'initial', 1); }
+  if (invalidatesA) run(e, oldA, 2, stopped, unitExit(oldA, 6, 2), cpuStoreHelper(), 'committed store invalidation wins exact budget before successor', 'initial', 1);
+  else { const complete = at(stopped, bpc); complete.registers[1] = 0xaaaaaaaa; run(e, oldA, 8, complete, unitExit(oldA, 3, 4), cpuStoreHelper(), 'separate B invalidation leaves executing A current', 'initial', 1); }
   observe(e, destination, 4, newWord); stats.smc_cases++; smcRows.push({kind, destination, status: invalidatesA ? 11 : 0, reason: invalidatesA ? 6 : 3, retired: invalidatesA ? 2 : 4});
   guard(e, oldA, invalidatesA ? 4 : 0); guard(e, currentB, kind === 'shared-page' || kind === 'separate-B' ? 4 : 0);
   if (invalidatesA) {
     miss(e, 0x1007, 4); miss(e, 0x4000, 4); rejected(e, oldA, 4, 'stale original A'); rawStore(e, oldA, DATA, 0, 4, 'stale bound helper preserves RAM/arena'); observe(e, DATA, 4, 0x11223344);
-    const copied = new WebAssembly.Instance(new WebAssembly.Module(oldA.bytes.slice()), {env: {memory: e.memory}, ring3: {guard_resident: e.api.guard_resident, store_resident32: e.api.store_resident32}}); rejected(e, {...oldA, run: copied.exports.run}, 4, 'copied stale module retains old baked ID');
+    const copied = new WebAssembly.Instance(new WebAssembly.Module(oldA.bytes.slice()), {env: {memory: e.memory}, ring3: {guard_resident: e.api.guard_resident, cpu_store_resident32: e.api.cpu_store_resident32}}); rejected(e, {...oldA, run: copied.exports.run}, 4, 'copied stale module retains old baked ID');
     const successor = compile(e, [[0x1007, 10]], [], `fresh ${kind} successor`); assert.ok(successor.id > oldA.id); select(e, 0x1007, successor);
-    const continued = at(stopped, bpc); continued.registers[1] = kind === 'self' ? newWord : 0xaaaaaaaa; run(e, successor, 8, continued, exit(3, 2, 0, 0, 0, 1), undefined, 'fresh successor resumes without repeating retired store', 'resume');
-    if (kind === 'shared-page') { miss(e, bpc, 4); const freshB = compile(e, [[bpc, 3]], [], 'fresh shared-page B'); select(e, bpc, freshB); run(e, freshB, 3, at(continued, bpc + 3), exit(3, 2, 0, 0, 0, 1), undefined, 'fresh B true continuation', 'resume'); }
-    else { select(e, bpc, currentB); run(e, currentB, 3, at(continued, bpc + 3), exit(3, 2, 0, 0, 0, 1), undefined, 'separate current B true continuation', 'resume'); }
+    const continued = at(stopped, bpc); continued.registers[1] = kind === 'self' ? newWord : 0xaaaaaaaa; run(e, successor, 8, continued, unitExit(successor, 3, 2, 0, 0, 0, 1), undefined, 'fresh successor resumes without repeating retired store', 'resume');
+    if (kind === 'shared-page') { miss(e, bpc, 4); const freshB = compile(e, [[bpc, 3]], [], 'fresh shared-page B'); select(e, bpc, freshB); run(e, freshB, 3, at(continued, bpc + 3), unitExit(freshB, 3, 2, 0, 0, 0, 1), undefined, 'fresh B true continuation', 'resume'); }
+    else { select(e, bpc, currentB); run(e, currentB, 3, at(continued, bpc + 3), unitExit(currentB, 3, 2, 0, 0, 0, 1), undefined, 'separate current B true continuation', 'resume'); }
     guard(e, oldA, 4); guard(e, successor); close(e, [successor, currentB]);
   } else {
-    const complete = at(stopped, bpc); complete.registers[1] = 0xaaaaaaaa; run(e, oldA, 8, complete, exit(3, 0), undefined, 'returning A does not repeat retired store', 'resume'); rejected(e, currentB, 4, 'only separately written B is stale');
-    const freshB = compile(e, [[bpc, 3]], [], 'fresh separate B'); select(e, bpc, freshB); run(e, freshB, 3, at(complete, bpc + 3), exit(3, 2, 0, 0, 0, 1), undefined, 'fresh separate B continues from existing CPU', 'resume'); guard(e, oldA); close(e, [oldA, freshB]);
+    const complete = at(stopped, bpc); complete.registers[1] = 0xaaaaaaaa; run(e, oldA, 8, complete, unitExit(oldA, 3, 0), undefined, 'returning A does not repeat retired store', 'resume'); rejected(e, currentB, 4, 'only separately written B is stale');
+    const freshB = compile(e, [[bpc, 3]], [], 'fresh separate B'); select(e, bpc, freshB); run(e, freshB, 3, at(complete, bpc + 3), unitExit(freshB, 3, 2, 0, 0, 0, 1), undefined, 'fresh separate B continues from existing CPU', 'resume'); guard(e, oldA); close(e, [oldA, freshB]);
   }
 }
 function legacyCompile(e, blocks, gates, label) {
@@ -331,8 +341,8 @@ const token = new DataView(captured.buffer).getUint32(156, true); assert.ok(toke
 select(independent, 0x1000, independentA); unchanged(independent, () => independent.api.abandon_call(independent.low, independent.high, token), 0, 'abandon pending without arena mutation'); stats.pending_abandons++;
 legacyCompile(independent, [[0x3100, 3]], false, 'legacy replacement'); assert.equal(independent.legacy.generation, 2); guard(independent, independentA); guard(independent, independentB); select(independent, 0x1000, independentA);
 const legacyWrite = initial(0x1000); legacyWrite.registers[3] = 0x3000; legacyWrite.registers[0] = 0x12345678; reset(independent, legacyWrite); independent.legacy.stale = true;
-run(independent, independentA, 8, prefixed(legacyWrite, 0x1005), exit(3, 3), storeHelper(), 'legacy code invalidation does not invalidate A', 'initial', 1); observe(independent, 0x3000, 4, 0x12345678); guard(independent, independentA); guard(independent, independentB);
-run(independent, independentA, 8, prefixed(legacyWrite, 0x1005), exit(3, 0), undefined, 'resident execution remains independent of stale legacy artifact', 'resume'); close(independent, [independentA, independentB]);
+run(independent, independentA, 8, prefixed(legacyWrite, 0x1005), unitExit(independentA, 3, 3), cpuStoreHelper(), 'legacy code invalidation does not invalidate A', 'initial', 1); observe(independent, 0x3000, 4, 0x12345678); guard(independent, independentA); guard(independent, independentB);
+run(independent, independentA, 8, prefixed(legacyWrite, 0x1005), unitExit(independentA, 3, 0), undefined, 'resident execution remains independent of stale legacy artifact', 'resume'); close(independent, [independentA, independentB]);
 
 assert.equal(stats.mixed_cases, 2); assert.equal(stats.form_cases, 7); assert.equal(stats.alias_cases, 2); assert.equal(stats.algorithm_cases, 3); assert.equal(stats.algorithm_retired, 36); assert.equal(stats.smc_cases, 5);
 const productionPaths = execFileSync('rg', ['--files', 'engine/src'], {cwd: root, encoding: 'utf8'}).trim().split('\n').sort();
@@ -346,6 +356,6 @@ const provenance = {
   authored: Object.fromEntries(Object.entries(authored).map(([name, bytes]) => [name, bytes.toString('hex')])), unit_bindings: units.map(unit => ({label: unit.label, id: unit.id.toString(), pointer: unit.pointer, length: unit.length, filename: unit.filename, reads: unit.reads, stores: unit.stores})), algorithm_rows: algorithmRows, smc_rows: smcRows, metadata_observations: metadata,
   tools: {node: process.version, v8: process.versions.v8, platform: process.platform, architecture: process.arch, rustc: execFileSync('rustc', ['--version'], {encoding: 'utf8'}).trim(), cargo: execFileSync('cargo', ['--version'], {encoding: 'utf8'}).trim()},
   commands: {run: [process.execPath, process.argv[1], enginePath, outputDir, root], generate_and_run: ['cargo', 'test', '-p', 'ring3-engine', '--test', 'process_resident_store_wasm', '--', '--nocapture']},
-  claim: 'actual Node engine-Wasm resident MOV32 89/A3/C7 stores through direct Wasm guard/store/read exports bound to the same engine memory. Independently decoded immutable six-argument store binding, exact import signatures, no legacy dependency, old EA/register/immediate/ESP/SIB aliases, full4236 arena and Helperv1/Exitv2, target-only RAM/neighbours, atomic guest faults and permission/map repair, current-CPU budget/cancel/interior continuations, no repeated retired store, literal/BigInt flags and bounded closed-form 4*n arithmetic. Self/same-byte/other-block/shared-page executing-unit invalidation commits once before successor; separate B and legacy invalidation keep A current; stale/copied/fresh/closed and pending Busy probes. Counts authored-path derived, not instrumentation. No ISA interpreter, product installer/table, callback/asynchronous cancellation/concurrency, narrow/read-modify-write/stack/CALL/RET stores, browser/performance/game/full P2-V0 claim.',
+  claim: 'actual Node engine-Wasm resident MOV32 89/A3/C7 stores through direct Wasm guard/store/read exports bound to the same engine memory. Independently decoded immutable six-argument store binding, exact import signatures, no legacy dependency, old EA/register/immediate/ESP/SIB aliases, full4236 arena and CPUHelperv10/Exitv6, target-only RAM/neighbours, atomic guest faults and permission/map repair, current-CPU budget/cancel/interior continuations, no repeated retired store, literal/BigInt flags and bounded closed-form 4*n arithmetic. Self/same-byte/other-block/shared-page executing-unit invalidation commits once before successor; separate B and legacy invalidation keep A current; stale/copied/fresh/closed and pending Busy probes. Counts authored-path derived, not instrumentation. No ISA interpreter, product installer/table, callback/asynchronous cancellation/concurrency, narrow/read-modify-write/stack/CALL/RET stores, browser/performance/game/full P2-V0 claim.',
 };
 writeFileSync(join(outputDir, 'provenance.json'), JSON.stringify(provenance, null, 2)); console.log(JSON.stringify({...provenance, sources: Object.keys(provenance.sources).length, metadata_observations: metadata.length, artifacts: outputDir}));

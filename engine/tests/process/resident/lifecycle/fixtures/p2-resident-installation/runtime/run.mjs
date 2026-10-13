@@ -11,7 +11,7 @@ const hash = bytes => createHash('sha256').update(bytes).digest('hex');
 const engineBytes = readFileSync(enginePath), engineModule = new WebAssembly.Module(engineBytes);
 assert.deepEqual(WebAssembly.Module.imports(engineModule), []);
 const SIZE = 4612, TRANSFER = 140, KEY = 0x91345678e0000000n;
-const names = ['open', 'close', 'arena_ptr', 'map', 'upload', 'compile_resident_with_gates', 'resident_module', 'find_resident', 'guard_resident', 'read32', 'write32', 'store_resident32', 'capture_resident_call', 'complete_resident_call', 'acknowledge_resident_installation', 'find_installed_resident'];
+const names = ['open', 'close', 'arena_ptr', 'map', 'upload', 'compile_resident_with_gates', 'resident_module', 'find_resident', 'guard_resident', 'read32', 'write32', 'store_resident32', 'capture_resident_call', 'complete_resident_call', 'acknowledge_resident_installation', 'find_installed_resident', 'cpu_read32', 'cpu_store_resident32'];
 const stats = {engine_instances: 0, compiled_units: 0, metadata24_checks: 0, installation32_checks: 0, ack_success: 0, ack_failure: 0, idempotent_acks: 0, installed_find_success: 0, installed_find_failure: 0, logical_find_success: 0, dispatcher_calls: 0, dispatcher_canonical: 0, dispatcher_rejections: 0, dispatcher_child_entries: 0, dispatcher_lookup_calls: 0, dispatcher_lookup_success: 0, dispatcher_lookup_failure: 0, direct_unit_calls: 0, direct_unit_canonical: 0, direct_unit_rejections: 0, direct_guard_calls: 0, full_arena_checks: 0, initial_calls: 0, resumes: 0, host_reads: 0, host_writes: 0, guest_store32: 0, resident_captures: 0, resident_completions: 0, host_module_failures: 0, host_instance_failures: 0, host_table_failures: 0, platform_traps: 0, zero_progress_stops: 0, closed_engines: 0};
 const artifacts = {}, authored = {}, units = [], metadata = [], installations = [], sections = [], algorithm = [], mismatches = [];
 for (const file of ['dispatcher-1.wasm', 'dispatcher-2.wasm', 'dispatcher-3.wasm', 'wrong.wasm']) artifacts[file] = hash(readFileSync(join(outputDir, file)));
@@ -20,6 +20,7 @@ function arena(e) { return refresh(e).bytes.slice(e.base, e.base + SIZE); }
 function header(b, v, p, magic, size, version = 1) { b.set(Buffer.from(magic), p); v.setUint16(p + 4, version, true); v.setUint16(p + 6, 1, true); v.setUint32(p + 8, size, true); v.setUint32(p + 12, 0, true); }
 function exit(reason, retired, version = 3, detail = 0) { const b = new Uint8Array(40), v = new DataView(b.buffer); header(b, v, 0, 'R3EX', 40, version); [reason, retired, detail, 0, 0, 0].forEach((x, i) => v.setUint32(16 + i * 4, x, true)); return b; }
 function helper(value = 0) { const b = new Uint8Array(40), v = new DataView(b.buffer); header(b, v, 0, 'R3MH', 40); v.setUint32(20, value, true); return b; }
+function cpuHelper(value = 0) { const b = new Uint8Array(40), v = new DataView(b.buffer); header(b, v, 0, 'R3MH', 40, 10); v.setUint32(20, value, true); v.setUint32(36, 4, true); return b; }
 function copy(s) { return {...s, registers: [...s.registers]}; }
 function state(eax = 0xfffffffd, ecx = 5, flags = 0x403, pc = 0x1000) { return {registers: [eax, ecx, 0x23456789, 0x3456789a, 0x9000, 0x56789abc, 0x6789abcd, 0x789abcde], eip: pc, eflags: flags}; }
 function stateBytes(s) { const b = new Uint8Array(56), v = new DataView(b.buffer); header(b, v, 0, 'R3ST', 56); s.registers.forEach((x, i) => v.setUint32(16 + i * 4, x, true)); v.setUint32(48, s.eip, true); v.setUint32(52, s.eflags, true); return b; }
@@ -34,7 +35,7 @@ function fresh() {
   const instance = new WebAssembly.Instance(engineModule, {}), api = Object.fromEntries(names.map(name => [name, instance.exports[`ring3_abi_v1_${name}`]])); for (const [name, fn] of Object.entries(api)) assert.equal(typeof fn, 'function', name);
   const ordinal = ++stats.engine_instances, key = KEY + BigInt(ordinal), e = refresh({instance, api, ordinal, key, low: Number(key & 0xffffffffn), high: Number(key >> 32n), memory: instance.exports.memory, nextId: 0, installed: new Map()});
   assert.equal(api.open(16, e.low, e.high), 0); e.base = api.arena_ptr() >>> 0; refresh(e); assert.ok(e.base > 0 && e.base + SIZE <= e.bytes.length);
-  for (const [name, length] of [['acknowledge_resident_installation', 5], ['find_installed_resident', 3], ['guard_resident', 7], ['store_resident32', 6], ['capture_resident_call', 6], ['complete_resident_call', 6]]) assert.equal(api[name].length, length);
+  for (const [name, length] of [['acknowledge_resident_installation', 5], ['find_installed_resident', 3], ['guard_resident', 7], ['cpu_store_resident32', 6], ['capture_resident_call', 6], ['complete_resident_call', 6]]) assert.equal(api[name].length, length);
   e.table = new WebAssembly.Table({element: 'anyfunc', initial: 8, maximum: 8}); refreshDispatcher(e); return e;
 }
 function upload(e, pc, bytes, label) { refresh(e).bytes.set(bytes, e.base + TRANSFER); assert.equal(e.api.upload(pc, bytes.length), 0); const file = `engine-${e.ordinal}-${label}.x86`; writeFileSync(join(outputDir, file), bytes); artifacts[file] = hash(bytes); authored[file] = Buffer.from(bytes).toString('hex'); }
@@ -60,8 +61,8 @@ function metadata24(e, before, expectedId, label, known) {
 }
 function compile(e, blocks, gates, label, stores = false) {
   descriptors(e, blocks, gates); const before = arena(e); assert.equal(e.api.compile_resident_with_gates(blocks.length, gates.length), 0); const selected = metadata24(e, before, BigInt(++e.nextId), label);
-  const module = new WebAssembly.Module(selected.bytes); assert.deepEqual(WebAssembly.Module.imports(module), [{module: 'env', name: 'memory', kind: 'memory'}, {module: 'ring3', name: 'guard_resident', kind: 'function'}, ...(stores ? [{module: 'ring3', name: 'store_resident32', kind: 'function'}] : [])]); assert.deepEqual(WebAssembly.Module.exports(module), [{name: 'run', kind: 'function'}]);
-  const instance = new WebAssembly.Instance(module, {env: {memory: e.memory}, ring3: {guard_resident: e.api.guard_resident, store_resident32: e.api.store_resident32}}), file = `unit-${++stats.compiled_units}.wasm`; assert.equal(instance.exports.run.length, 4); writeFileSync(join(outputDir, file), selected.bytes); artifacts[file] = hash(selected.bytes); const u = {...selected, module, instance, run: instance.exports.run, file, key: e.key.toString(), blocks, gates, label}; units.push(u); return u;
+  const module = new WebAssembly.Module(selected.bytes); assert.deepEqual(WebAssembly.Module.imports(module), [{module: 'env', name: 'memory', kind: 'memory'}, {module: 'ring3', name: 'guard_resident', kind: 'function'}, ...(stores ? [{module: 'ring3', name: 'cpu_store_resident32', kind: 'function'}] : [])]); assert.deepEqual(WebAssembly.Module.exports(module), [{name: 'run', kind: 'function'}]);
+  const instance = new WebAssembly.Instance(module, {env: {memory: e.memory}, ring3: {guard_resident: e.api.guard_resident, cpu_store_resident32: e.api.cpu_store_resident32}}), file = `unit-${++stats.compiled_units}.wasm`; assert.equal(instance.exports.run.length, 4); writeFileSync(join(outputDir, file), selected.bytes); artifacts[file] = hash(selected.bytes); const u = {...selected, module, instance, run: instance.exports.run, file, key: e.key.toString(), blocks, gates, label}; units.push(u); return u;
 }
 function logical(e, pc, u) { const before = arena(e); assert.equal(e.api.find_resident(pc), 0); metadata24(e, before, u.id, 'logical finder remains available', u); stats.logical_find_success++; }
 function getter(e, u) { const before = arena(e); assert.equal(e.api.resident_module(u.low, u.high), 0); metadata24(e, before, u.id, 'immutable module getter', u); }
@@ -75,7 +76,7 @@ function installed(e, pc, u, slot, status = 0, options = {}) {
 }
 function guard(e, u, status = 0, options = {}) { unchanged(e, () => e.api.guard_resident(options.low ?? e.low, options.high ?? e.high, u.low, u.high, e.base, e.base + 56, e.base + 96), status, 'direct guard independent of installation'); stats.direct_guard_calls++; }
 function direct(e, u, budget, expected, expectedExit, status = 0) { const before = arena(e); assert.equal(u.run(e.base, e.base + 56, budget, e.base + 96), status); const wanted = before.slice(); if (!status) { wanted.set(stateBytes(expected), 0); wanted.set(expectedExit, 56); stats.direct_unit_canonical++; } else stats.direct_unit_rejections++; check(e, wanted, 'direct unit compatibility'); stats.direct_unit_calls++; }
-function copied(e, u) { return new WebAssembly.Instance(new WebAssembly.Module(u.bytes.slice()), {env: {memory: e.memory}, ring3: {guard_resident: e.api.guard_resident, store_resident32: e.api.store_resident32}}).exports.run; }
+function copied(e, u) { return new WebAssembly.Instance(new WebAssembly.Module(u.bytes.slice()), {env: {memory: e.memory}, ring3: {guard_resident: e.api.guard_resident, cpu_store_resident32: e.api.cpu_store_resident32}}).exports.run; }
 function dispatch(e, budget, expected, expectedExit, plan, continuation, status = 0, expectedHelper) {
   const before = arena(e); assert.equal(e.dispatcher.exports.run(e.base, e.base + 56, budget, e.base + 96), status); const wanted = before.slice(); wanted.set(stateBytes(expected), 0); if (expectedExit) wanted.set(expectedExit, 56); if (expectedHelper) wanted.set(expectedHelper, 100);
   if (plan.last) { wanted.set(installRecord(plan.last, plan.slot), TRANSFER); tuple(e, plan.last, plan.slot, 'dispatcher last successful lookup', plan.relation ?? true); }
@@ -162,7 +163,7 @@ const gateB = compile(gate, [[0x4000, 2]], [[0x4000, gateId]], 'registered Gate 
 gate.table.set(1, gateB.run); gate.table.set(0, callerA.run); ack(gate, gateB, 1); ack(gate, callerA, 0);
 const stackWords = [[0x8ff8, 0x11223344], [0x8ffc, 0x89abcdef], [0x9000, 0x55667788]]; for (const [address, value] of stackWords) word(gate, address, value);
 const callStart = state(0x89abcdef, 3, 0xcd7, 0x3000), stopped = copy(callStart); stopped.registers[4] = 0x8ffc; stopped.eip = 0x4000; reset(gate, callStart);
-dispatch(gate, 9, stopped, exit(8, 1, 3, gateId), {children: 2, lookups: 2, successes: 2, last: gateB, slot: 1}, 'initial', 0, helper()); stats.guest_store32++;
+dispatch(gate, 9, stopped, exit(8, 1, 3, gateId), {children: 2, lookups: 2, successes: 2, last: gateB, slot: 1}, 'initial', 0, cpuHelper()); stats.guest_store32++;
 stackWords[1][1] = 0x3005; for (const [address, value] of stackWords) observe(gate, address, value);
 const expectedCall = new Uint8Array(112), expectedCallView = new DataView(expectedCall.buffer); header(expectedCall, expectedCallView, 0, 'R3CF', 112);
 [1, gateId, 1, 0, 0x4000, 0x8ffc, 0x3005, 0].forEach((x, i) => expectedCallView.setUint32(16 + i * 4, x, true));

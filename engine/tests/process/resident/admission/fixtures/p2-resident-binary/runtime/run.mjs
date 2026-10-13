@@ -11,7 +11,7 @@ const hash = bytes => createHash('sha256').update(bytes).digest('hex');
 const engineBytes = readFileSync(enginePath), engineModule = new WebAssembly.Module(engineBytes);
 assert.deepEqual(WebAssembly.Module.imports(engineModule), []);
 const SIZE = 4612, TRANSFER = 140, DATA = 0x5000;
-const names = ['open', 'close', 'arena_ptr', 'map', 'protect', 'unmap', 'upload', 'generation', 'module_ptr', 'module_len', 'guard_resident', 'compile_resident', 'resident_module', 'find_resident', 'read32', 'write32', 'store_resident32'];
+const names = ['open', 'close', 'arena_ptr', 'map', 'protect', 'unmap', 'upload', 'generation', 'module_ptr', 'module_len', 'guard_resident', 'compile_resident', 'resident_module', 'find_resident', 'read32', 'write32', 'store_resident32', 'cpu_read32', 'cpu_store_resident32'];
 const stats = {engine_instances: 0, compiled_units: 0, canonical_runs: 0, rejected_runs: 0, full_arena_checks: 0, metadata_checks: 0, successful_guards: 0, failed_guards: 0, find_success: 0, find_failure: 0, continuation_initial_calls: 0, continuation_resumes: 0, form_cases: 0, alias_cases: 0, smc_cases: 0, same_byte_code_writes: 0, same_byte_permission_faults: 0, bound_store_sites: 0, algorithm_cases: 0, algorithm_retired: 0, faults: 0, read_faults: 0, store_faults: 0, repairs: 0, cancellations: 0, host_reads: 0, host_writes: 0, guest_read32: 0, guest_store32: 0, raw_rejected_stores: 0};
 const units = [], artifacts = {}, metadata = [];
 
@@ -79,11 +79,11 @@ function record(engine, before, label) {
 function compile(engine, blocks, reads, label, stores = 0) {
   descriptors(engine, blocks); const before = arena(engine); assert.equal(engine.api.compile_resident(blocks.length), 0, label);
   const selected = record(engine, before, label), module = new WebAssembly.Module(selected.bytes);
-  const helpers = [...reads.filter(name => name === 'read32'), ...(stores ? ['store_resident32'] : []), ...reads.filter(name => name !== 'read32')];
+  const helpers = [...reads.filter(name => name === 'cpu_read32'), ...(stores ? ['cpu_store_resident32'] : []), ...reads.filter(name => name !== 'cpu_read32')];
   const expected = [{module: 'env', name: 'memory', kind: 'memory'}, {module: 'ring3', name: 'guard_resident', kind: 'function'}, ...helpers.map(name => ({module: 'ring3', name, kind: 'function'}))];
   assert.deepEqual(WebAssembly.Module.imports(module), expected, 'exact direct bound guard/read/store imports'); assert.deepEqual(WebAssembly.Module.exports(module), [{name: 'run', kind: 'function'}]);
-  const imports = {guard_resident: engine.api.guard_resident, ...Object.fromEntries(reads.map(name => [name, engine.api[name]])), ...(stores ? {store_resident32: engine.api.store_resident32} : {})};
-  boundStores(selected.bytes, engine, selected.id, stores, 1 + Number(reads.includes('read32')));
+  const imports = {guard_resident: engine.api.guard_resident, ...Object.fromEntries(reads.map(name => [name, engine.api[name]])), ...(stores ? {cpu_store_resident32: engine.api.cpu_store_resident32} : {})};
+  boundStores(selected.bytes, engine, selected.id, stores, 1 + Number(reads.includes('cpu_read32')));
   const instance = new WebAssembly.Instance(module, {env: {memory: engine.memory}, ring3: imports}); assert.equal(instance.exports.run.length, 4);
   const filename = `unit-${++stats.compiled_units}.wasm`; writeFileSync(join(outputDir, filename), selected.bytes); artifacts[filename] = hash(selected.bytes);
   const unit = {...selected, module, instance, run: instance.exports.run, blocks, reads, stores, filename, label}; units.push(unit); return unit;
@@ -138,6 +138,16 @@ function helper(width, value, detail = 0, address = 0, access = 1) {
   const bytes = new Uint8Array(40), view = new DataView(bytes.buffer); header(bytes, view, 0, 'R3MH', 40, width === 4 ? 1 : 2);
   [detail ? 1 : 0, detail ? 0 : value, detail, address, detail ? access : 0, width === 4 && detail === 0 ? 0 : width].forEach((v, i) => view.setUint32(16 + i * 4, v, true)); return bytes;
 }
+function unitExit(unit, reason, retired, detail = 0, address = 0, width = 0, version = 2, access = 2) {
+  const bytes = new Uint8Array(40), view = new DataView(bytes.buffer); header(bytes, view, 0, 'R3EX', 40, unit.reads.length || (Array.isArray(unit.stores) ? unit.stores.length : unit.stores ?? 0) ? 6 : version);
+  [reason, retired, detail, address, reason === 5 ? access : 0, width].forEach((v, i) => view.setUint32(16 + i * 4, v, true)); return bytes;
+}
+function cpuHelper(width, value, detail = 0, address = 0, access = 1) {
+  const bytes = new Uint8Array(40), view = new DataView(bytes.buffer); header(bytes, view, 0, 'R3MH', 40, 10);
+  [detail ? 1 : 0, detail ? 0 : value, detail, address, detail ? access : 0, width].forEach((v, i) => view.setUint32(16 + i * 4, v, true)); return bytes;
+}
+function cpuStoreHelper(detail = 0, address = 0) { return cpuHelper(4, 0, detail, address, 2); }
+
 function run(engine, unit, budget, expected, expectedExit, expectedHelper, label, continuation, stores = 0, reads = 0) {
   const before = arena(engine); assert.equal(unit.run(engine.base, engine.base + 56, budget, engine.base + 96), 0, label);
   const wanted = before.slice(), view = new DataView(wanted.buffer);
@@ -165,9 +175,9 @@ function boundStores(bytes, engine, id, count, index) {
     cursor.i = end;
   }
   assert.ok(body); assert.deepEqual(signatures[importTypes.get('guard_resident')], {args: Array(7).fill(0x7f), returns: [0x7f]});
-  if (!count) { assert.equal(importTypes.has('store_resident32'), false); return; }
-  assert.deepEqual(signatures[importTypes.get('read32')], {args: [0x7f], returns: [0x7f]}); assert.equal(index, 2);
-  assert.deepEqual(signatures[importTypes.get('store_resident32')], {args: Array(6).fill(0x7f), returns: [0x7f]});
+  if (!count) { assert.equal(importTypes.has('cpu_store_resident32'), false); return; }
+  assert.deepEqual(signatures[importTypes.get('cpu_read32')], {args: [0x7f], returns: [0x7f]}); assert.equal(index, 2);
+  assert.deepEqual(signatures[importTypes.get('cpu_store_resident32')], {args: Array(6).fill(0x7f), returns: [0x7f]});
   const limbs = [engine.low, engine.high, Number(id & 0xffffffffn), Number(id >> 32n)]; let found = 0;
   for (let offset = 0; offset < body.length; offset++) {
     if (body[offset] !== 0x41) continue;
@@ -204,17 +214,17 @@ for (const form of [...forms, ...aliases]) form.code = authoredCode(form.name, d
 const readerBytes = authoredCode('reader', Buffer.from('8b12eb00', 'hex')), loopBytes = authoredCode('composition', Buffer.from('0103290383230f830b108133ff000000490f85e9ffffff', 'hex'));
 const engine = fresh(); assert.equal(engine.api.store_resident32.length, 6); for (const page of [0x1000, 0x2000, 0x3000, 0x7000]) assert.equal(engine.api.map(page, 1, 7), 0); assert.equal(engine.api.map(0x4000, 3, 3), 0);
 for (const form of [...forms, ...aliases]) upload(engine, form.pc, form.code); upload(engine, 0x2000, readerBytes); upload(engine, 0x3000, loopBytes);
-for (const kind of kinds) { const selected = forms.filter(form => form.kind === kind.kind), unit = compile(engine, selected.map(form => [form.pc, form.code.length]), ['read32'], `${kind.kind} three memory source encodings`, 3); for (const form of selected) form.unit = unit; }
-const aliasUnit = compile(engine, aliases.map(form => [form.pc, form.code.length]), ['read32'], 'all remaining source GPRs and old EA aliases', aliases.length), b = compile(engine, [[0x2000, readerBytes.length]], ['read32'], 'live read destination/base alias'), composition = compile(engine, [[0x3000, loopBytes.length]], ['read32'], 'all-five operations and JNZ composition', 5);
+for (const kind of kinds) { const selected = forms.filter(form => form.kind === kind.kind), unit = compile(engine, selected.map(form => [form.pc, form.code.length]), ['cpu_read32'], `${kind.kind} three memory source encodings`, 3); for (const form of selected) form.unit = unit; }
+const aliasUnit = compile(engine, aliases.map(form => [form.pc, form.code.length]), ['cpu_read32'], 'all remaining source GPRs and old EA aliases', aliases.length), b = compile(engine, [[0x2000, readerBytes.length]], ['cpu_read32'], 'live read destination/base alias'), composition = compile(engine, [[0x3000, loopBytes.length]], ['cpu_read32'], 'all-five operations and JNZ composition', 5);
 for (const form of aliases) form.unit = aliasUnit;
 function sourceOf(form, start) { return form.source === undefined ? form.immediate : start.registers[form.source]; }
 function startFor(form, interior = true) { const value = initial(form.pc + Number(interior)); value.registers[0] = 1; value.registers[1] = 2; value.registers[2] = form.address; value.registers[3] = DATA; value.registers[5] = DATA; value.registers[6] = 2; if (form.source === 7) value.registers[7] = DATA; return value; }
 function values(form, operand, flags, label) {
   for (const [offset, value] of [[-4, 0x11223344], [0, operand], [4, 0x55667788]]) word(engine, form.address + offset, value);
   const start = startFor(form); start.eflags = flags; reset(engine, start); const source = sourceOf(form, start), result = binary(form.kind, operand, source, flags), expected = applied(start, form.kind, operand, source, 0x2000);
-  run(engine, form.unit, 3, expected, exit(3, 2), storeHelper(), label, 'initial', 1, 1);
+  run(engine, form.unit, 3, expected, unitExit(form.unit, 3, 2), cpuStoreHelper(), label, 'initial', 1, 1);
   observe(engine, form.address - 4, 4, 0x11223344); observe(engine, form.address, 4, result.value); observe(engine, form.address + 4, 4, 0x55667788);
-  const read = at(expected, 0x2004); read.registers[2] = result.value; run(engine, b, 3, read, exit(3, 2), helper(4, result.value), 'live B read consumes existing CPU', 'resume', 0, 1);
+  const read = at(expected, 0x2004); read.registers[2] = result.value; run(engine, b, 3, read, unitExit(b, 3, 2), cpuHelper(4, result.value), 'live B read consumes existing CPU', 'resume', 0, 1);
 }
 for (const form of forms) {
   select(engine, form.pc, form.unit); select(engine, form.pc + 1, form.unit);
@@ -228,15 +238,15 @@ for (const page of [0x8000, 0x9000]) assert.equal(engine.api.map(page, 1, 3), 0)
 for (const form of registerForms) for (const access of [1, 2]) {
   const address = access === 1 ? 0x8000 : 0x9000; assert.equal(engine.api.protect(address, 1, 3), 0); word(engine, address, 0x10); assert.equal(engine.api.protect(address, 1, access === 1 ? 2 : 1), 0);
   const start = startFor(form, false); start.registers[3] = address; reset(engine, start); const stopped = prefixed(start), source = sourceOf(form, stopped);
-  run(engine, form.unit, 8, stopped, exit(5, 1, 2, address, 4, 2, access), helper(4, 0, 2, address, access), 'first read or second store permission failure preserves binary flags', 'initial', access === 2 ? 1 : 0, 1); stats.faults++; stats[access === 1 ? 'read_faults' : 'store_faults']++;
+  run(engine, form.unit, 8, stopped, unitExit(form.unit, 5, 1, 2, address, 4, 2, access), cpuHelper(4, 0, 2, address, access), 'first read or second store permission failure preserves binary flags', 'initial', access === 2 ? 1 : 0, 1); stats.faults++; stats[access === 1 ? 'read_faults' : 'store_faults']++;
   assert.equal(engine.api.protect(address, 1, 3), 0); observe(engine, address, 4, 0x10); word(engine, address, 0x80000000);
-  run(engine, form.unit, 8, applied(stopped, form.kind, 0x80000000, source, 0x2000), exit(3, 2), storeHelper(), 'same CPU retries changed current RAM without repeating prefix', 'resume', 1, 1); observe(engine, address, 4, binary(form.kind, 0x80000000, source, stopped.eflags).value); stats.repairs++;
+  run(engine, form.unit, 8, applied(stopped, form.kind, 0x80000000, source, 0x2000), unitExit(form.unit, 3, 2), cpuStoreHelper(), 'same CPU retries changed current RAM without repeating prefix', 'resume', 1, 1); observe(engine, address, 4, binary(form.kind, 0x80000000, source, stopped.eflags).value); stats.repairs++;
 }
 function identitySource(kind) { return kind === 'and' ? 0xffffffff : 0; }
 for (const form of registerForms) {
   assert.equal(engine.api.protect(0x9000, 1, 3), 0); word(engine, 0x9000, 0x80000000); assert.equal(engine.api.protect(0x9000, 1, 1), 0); const start = startFor(form, false); start.registers[0] = identitySource(form.kind); start.registers[3] = 0x9000; reset(engine, start); const stopped = prefixed(start);
   assert.equal(binary(form.kind, 0x80000000, start.registers[0], stopped.eflags).value, 0x80000000);
-  run(engine, form.unit, 8, stopped, exit(5, 1, 2, 0x9000, 4), storeHelper(2, 0x9000), 'same-byte binary still requires Write permission and leaves flags uncommitted', 'initial', 1, 1); observe(engine, 0x9000, 4, 0x80000000); stats.faults++; stats.store_faults++; stats.same_byte_permission_faults++;
+  run(engine, form.unit, 8, stopped, unitExit(form.unit, 5, 1, 2, 0x9000, 4), cpuStoreHelper(2, 0x9000), 'same-byte binary still requires Write permission and leaves flags uncommitted', 'initial', 1, 1); observe(engine, 0x9000, 4, 0x80000000); stats.faults++; stats.store_faults++; stats.same_byte_permission_faults++;
 }
 const sub = registerForms.find(form => form.kind === 'sub');
 assert.equal(engine.api.map(0xb000, 2, 3), 0);
@@ -244,21 +254,21 @@ for (const access of [1, 2]) {
   assert.equal(engine.api.protect(0xc000, 1, 3), 0); word(engine, 0xbffc, 0x11223344); word(engine, 0xc000, 0x55667788);
   if (access === 1) assert.equal(engine.api.unmap(0xc000, 1), 0); else assert.equal(engine.api.protect(0xc000, 1, 1), 0);
   const start = startFor(sub, false); start.registers[3] = 0xbfff; reset(engine, start); const stopped = prefixed(start), detail = access === 1 ? 1 : 2;
-  run(engine, sub.unit, 8, stopped, exit(5, 1, detail, 0xc000, 4, 2, access), helper(4, 0, detail, 0xc000, access), 'cross-page access rejects before partial write or flags commit', 'initial', access === 2 ? 1 : 0, 1); observe(engine, 0xbffc, 4, 0x11223344); if (access === 2) observe(engine, 0xc000, 4, 0x55667788); stats.faults++; stats[access === 1 ? 'read_faults' : 'store_faults']++;
+  run(engine, sub.unit, 8, stopped, unitExit(sub.unit, 5, 1, detail, 0xc000, 4, 2, access), cpuHelper(4, 0, detail, 0xc000, access), 'cross-page access rejects before partial write or flags commit', 'initial', access === 2 ? 1 : 0, 1); observe(engine, 0xbffc, 4, 0x11223344); if (access === 2) observe(engine, 0xc000, 4, 0x55667788); stats.faults++; stats[access === 1 ? 'read_faults' : 'store_faults']++;
   if (access === 1) { assert.equal(engine.api.map(0xc000, 1, 3), 0); word(engine, 0xc000, 0x55667788); } else assert.equal(engine.api.protect(0xc000, 1, 3), 0); word(engine, 0xbfff, 0x80000000);
-  run(engine, sub.unit, 8, applied(stopped, 'sub', 0x80000000, 1, 0x2000), exit(3, 2), storeHelper(), 'cross-page retry reads repaired current operand', 'resume', 1, 1); observe(engine, 0xbffc, 4, 0xff223344); observe(engine, 0xc000, 4, 0x557fffff); stats.repairs++;
+  run(engine, sub.unit, 8, applied(stopped, 'sub', 0x80000000, 1, 0x2000), unitExit(sub.unit, 3, 2), cpuStoreHelper(), 'cross-page retry reads repaired current operand', 'resume', 1, 1); observe(engine, 0xbffc, 4, 0xff223344); observe(engine, 0xc000, 4, 0x557fffff); stats.repairs++;
 }
 const overflow = startFor(sub, false); overflow.registers[3] = 0xffffffff; reset(engine, overflow); const overflowStopped = prefixed(overflow);
-run(engine, sub.unit, 8, overflowStopped, exit(11, 1, 0, 0, 0, 6), undefined, 'segment overflow suppresses Read4/Store4', 'initial'); run(engine, sub.unit, 8, overflowStopped, exit(11, 0, 0, 0, 0, 6), undefined, 'overflow retry never retires binary', 'resume'); stats.faults += 2; stats.read_faults += 2;
+run(engine, sub.unit, 8, overflowStopped, unitExit(sub.unit, 11, 1, 0, 0, 0, 6), undefined, 'segment overflow suppresses Read4/Store4', 'initial'); run(engine, sub.unit, 8, overflowStopped, unitExit(sub.unit, 11, 0, 0, 0, 0, 6), undefined, 'overflow retry never retires binary', 'resume'); stats.faults += 2; stats.read_faults += 2;
 assert.equal(engine.api.map(0xfffff000, 1, 3), 0); word(engine, 0xfffffff8, 0x11223344); word(engine, 0xfffffffc, 0x80000000); const top = startFor(sub, false); top.registers[3] = 0xfffffffc; reset(engine, top);
-run(engine, sub.unit, 8, applied(prefixed(top), 'sub', 0x80000000, 1, 0x2000), exit(3, 3), storeHelper(), 'last valid Read4/Store4 address', 'initial', 1, 1); observe(engine, 0xfffffff8, 4, 0x11223344); observe(engine, 0xfffffffc, 4, 0x7fffffff);
+run(engine, sub.unit, 8, applied(prefixed(top), 'sub', 0x80000000, 1, 0x2000), unitExit(sub.unit, 3, 3), cpuStoreHelper(), 'last valid Read4/Store4 address', 'initial', 1, 1); observe(engine, 0xfffffff8, 4, 0x11223344); observe(engine, 0xfffffffc, 4, 0x7fffffff);
 
-word(engine, DATA, 1); const split = startFor(sub, false); reset(engine, split); run(engine, sub.unit, 0, split, exit(1, 0), undefined, 'zero budget skips prefix and helpers', 'initial'); const prefix = prefixed(split);
-run(engine, sub.unit, 1, prefix, exit(1, 1), undefined, 'exact prefix budget resumes at SUB', 'resume'); select(engine, sub.pc + 1, sub.unit); engine.view.setUint32(engine.base + 96, 1, true); run(engine, sub.unit, 0, prefix, exit(2, 0), undefined, 'cancel precedes zero budget and both helpers', 'resume'); stats.cancellations++;
-engine.view.setUint32(engine.base + 96, 0, true); const stored = applied(prefix, 'sub', 1, 1, sub.pc + 3); run(engine, sub.unit, 1, stored, exit(1, 1), storeHelper(), 'exact binary budget commits RAM and flags once', 'resume', 1, 1); word(engine, DATA, 0xfeedface);
-run(engine, sub.unit, 1, at(stored, 0x2000), exit(1, 1), undefined, 'branch continues from committed binary flags', 'resume'); run(engine, sub.unit, 8, at(stored, 0x2000), exit(3, 0), undefined, 'external PC does not repeat binary', 'resume'); const read = at(stored, 0x2004); read.registers[2] = 0xfeedface; run(engine, b, 3, read, exit(3, 2), helper(4, 0xfeedface), 'reader proves retired SUB was not repeated', 'resume', 0, 1);
-const preset = startFor(registerForms[0], false); reset(engine, preset, 1); run(engine, registerForms[0].unit, 8, preset, exit(2, 0), undefined, 'preset cancel suppresses Read4/Store4', 'initial'); stats.cancellations++;
-const middle = initial(sub.pc + 2); reset(engine, middle); miss(engine, sub.pc + 2); run(engine, sub.unit, 8, middle, exit(3, 0), undefined, 'middle instruction byte is not a resumable entry', 'initial');
+word(engine, DATA, 1); const split = startFor(sub, false); reset(engine, split); run(engine, sub.unit, 0, split, unitExit(sub.unit, 1, 0), undefined, 'zero budget skips prefix and helpers', 'initial'); const prefix = prefixed(split);
+run(engine, sub.unit, 1, prefix, unitExit(sub.unit, 1, 1), undefined, 'exact prefix budget resumes at SUB', 'resume'); select(engine, sub.pc + 1, sub.unit); engine.view.setUint32(engine.base + 96, 1, true); run(engine, sub.unit, 0, prefix, unitExit(sub.unit, 2, 0), undefined, 'cancel precedes zero budget and both helpers', 'resume'); stats.cancellations++;
+engine.view.setUint32(engine.base + 96, 0, true); const stored = applied(prefix, 'sub', 1, 1, sub.pc + 3); run(engine, sub.unit, 1, stored, unitExit(sub.unit, 1, 1), cpuStoreHelper(), 'exact binary budget commits RAM and flags once', 'resume', 1, 1); word(engine, DATA, 0xfeedface);
+run(engine, sub.unit, 1, at(stored, 0x2000), unitExit(sub.unit, 1, 1), undefined, 'branch continues from committed binary flags', 'resume'); run(engine, sub.unit, 8, at(stored, 0x2000), unitExit(sub.unit, 3, 0), undefined, 'external PC does not repeat binary', 'resume'); const read = at(stored, 0x2004); read.registers[2] = 0xfeedface; run(engine, b, 3, read, unitExit(b, 3, 2), cpuHelper(4, 0xfeedface), 'reader proves retired SUB was not repeated', 'resume', 0, 1);
+const preset = startFor(registerForms[0], false); reset(engine, preset, 1); run(engine, registerForms[0].unit, 8, preset, unitExit(registerForms[0].unit, 2, 0), undefined, 'preset cancel suppresses Read4/Store4', 'initial'); stats.cancellations++;
+const middle = initial(sub.pc + 2); reset(engine, middle); miss(engine, sub.pc + 2); run(engine, sub.unit, 8, middle, unitExit(sub.unit, 3, 0), undefined, 'middle instruction byte is not a resumable entry', 'initial');
 
 const algorithmRows = [], phases = [0, 2, 4, 7, 10, 16, 17], input = 0x1234567a;
 for (const n of [1, 2, 5]) {
@@ -274,7 +284,7 @@ for (const n of [1, 2, 5]) {
     else if (phase >= 5) { ram = 0xe0 | ((previous & 15) ^ 15); expected.eflags = phase === 5 ? binary('xor', (previous & 15) | 16, 255, start.eflags).flags : unary('dec', n - cycles, start.eflags & ~1).flags; }
     else if (cycles) expected.eflags = unary('dec', n - cycles + 1, start.eflags & ~1).flags;
     const stores = cycles * 5 + Math.min(phase, 5) - previousCycles * 5 - Math.min(previousPhase, 5);
-    run(engine, composition, budget, expected, exit(next - retired === budget ? 1 : 3, next - retired), stores ? storeHelper() : undefined, 'closed-form five-operation/JNZ composition', retired === 0 ? 'initial' : 'resume', stores, stores); observe(engine, DATA, 4, ram); retired = next; calls++;
+    run(engine, composition, budget, expected, unitExit(composition, next - retired === budget ? 1 : 3, next - retired), stores ? cpuStoreHelper() : undefined, 'closed-form five-operation/JNZ composition', retired === 0 ? 'initial' : 'resume', stores, stores); observe(engine, DATA, 4, ram); retired = next; calls++;
   }
   assert.equal(retired, 7 * n); const ram = 0xe0 | ((input & 15) ^ (n % 2 ? 15 : 0)); algorithmRows.push({n, retired, calls, ram, flags: unary('dec', 1, start.eflags & ~1).flags}); stats.algorithm_cases++; stats.algorithm_retired += retired;
 }
@@ -294,23 +304,23 @@ for (const fixture of smcCases) {
   authoredCode(`${fixture.name}-A`, code); authoredCode(`${fixture.name}-B`, control); authoredCode(`${fixture.name}-other-A`, other);
   assert.equal(e.api.map(0x1000, 1, 7), 0); if (bpc === 0x2000) assert.equal(e.api.map(bpc, 1, 7), 0); assert.equal(e.api.map(0x4000, 1, 7), 0);
   upload(e, 0x1000, code); upload(e, bpc, control); upload(e, 0x4000, other);
-  const oldA = compile(e, [[0x1000, 13], [0x4000, 7]], ['read32'], `${fixture.name} A`, 1), oldB = compile(e, [[bpc, 7]], [], `${fixture.name} B`);
+  const oldA = compile(e, [[0x1000, 13], [0x4000, 7]], ['cpu_read32'], `${fixture.name} A`, 1), oldB = compile(e, [[bpc, 7]], [], `${fixture.name} B`);
   const start = initial(0x1000); start.registers[0] = fixture.source; start.registers[3] = destination; reset(e, start); const prefix = prefixed(start), result = binary(fixture.kind, fixture.operand, fixture.source, prefix.eflags), stopped = applied(prefix, fixture.kind, fixture.operand, fixture.source, 0x1003), invalidatesA = fixture.target !== 'separate';
-  if (invalidatesA) run(e, oldA, 2, stopped, exit(6, 2), storeHelper(), 'post-store flags and RAM commit before invalidation/exact budget/successor', 'initial', 1, 1);
-  else { const completed = at(stopped, bpc); completed.registers[1] = aWord; run(e, oldA, 8, completed, exit(3, 4), storeHelper(), 'separate B-code write leaves executing A current with new flags', 'initial', 1, 1); }
+  if (invalidatesA) run(e, oldA, 2, stopped, unitExit(oldA, 6, 2), cpuStoreHelper(), 'post-store flags and RAM commit before invalidation/exact budget/successor', 'initial', 1, 1);
+  else { const completed = at(stopped, bpc); completed.registers[1] = aWord; run(e, oldA, 8, completed, unitExit(oldA, 3, 4), cpuStoreHelper(), 'separate B-code write leaves executing A current with new flags', 'initial', 1, 1); }
   observe(e, destination, 4, result.value); stats.smc_cases++; if (result.value === fixture.operand) stats.same_byte_code_writes++;
   smcRows.push({name: fixture.name, kind: fixture.kind, destination, old: fixture.operand, source: fixture.source, value: result.value, flags: result.flags, reason: invalidatesA ? 6 : 3, retired: invalidatesA ? 2 : 4}); guard(e, oldA, invalidatesA ? 4 : 0); guard(e, oldB, ['shared', 'separate'].includes(fixture.target) ? 4 : 0);
   if (invalidatesA) {
     miss(e, 0x1003, 4); if (fixture.target === 'whole') miss(e, 0x4000, 4);
     if (fixture.name === 'identity-xor') {
-      rawStore(e, e.low, e.high, oldA.low, oldA.high, 4, destination); rejected(e, oldA, 4, 'same-byte code write makes original A stale'); const copied = new WebAssembly.Instance(new WebAssembly.Module(oldA.bytes.slice()), {env: {memory: e.memory}, ring3: {guard_resident: e.api.guard_resident, read32: e.api.read32, store_resident32: e.api.store_resident32}}); rejected(e, {...oldA, run: copied.exports.run}, 4, 'copied stale binary A retains baked identity');
+      rawStore(e, e.low, e.high, oldA.low, oldA.high, 4, destination); rejected(e, oldA, 4, 'same-byte code write makes original A stale'); const copied = new WebAssembly.Instance(new WebAssembly.Module(oldA.bytes.slice()), {env: {memory: e.memory}, ring3: {guard_resident: e.api.guard_resident, cpu_read32: e.api.cpu_read32, cpu_store_resident32: e.api.cpu_store_resident32}}); rejected(e, {...oldA, run: copied.exports.run}, 4, 'copied stale binary A retains baked identity');
     }
     const successor = compile(e, [[0x1003, 10]], [], `${fixture.name} fresh successor`); assert.ok(successor.id > oldA.id); select(e, 0x1003, successor);
-    const continued = at(stopped, bpc); continued.registers[1] = fixture.target === 'self' ? result.value : aWord; run(e, successor, 8, continued, exit(3, 2, 0, 0, 0, 1), undefined, 'fresh next-PC unit never repeats retired binary or flags', 'resume');
-    if (fixture.target === 'shared') { miss(e, bpc, 4); const freshB = compile(e, [[bpc, 7]], [], 'fresh shared B'); select(e, bpc, freshB); const done = at(continued, bpc + 7); done.registers[1] = result.value; run(e, freshB, 3, done, exit(3, 2, 0, 0, 0, 1), undefined, 'fresh shared B true continuation', 'resume'); }
-    else { select(e, bpc, oldB); const done = at(continued, bpc + 7); done.registers[1] = bWord; run(e, oldB, 3, done, exit(3, 2, 0, 0, 0, 1), undefined, 'independent current B true continuation', 'resume'); }
+    const continued = at(stopped, bpc); continued.registers[1] = fixture.target === 'self' ? result.value : aWord; run(e, successor, 8, continued, unitExit(successor, 3, 2, 0, 0, 0, 1), undefined, 'fresh next-PC unit never repeats retired binary or flags', 'resume');
+    if (fixture.target === 'shared') { miss(e, bpc, 4); const freshB = compile(e, [[bpc, 7]], [], 'fresh shared B'); select(e, bpc, freshB); const done = at(continued, bpc + 7); done.registers[1] = result.value; run(e, freshB, 3, done, unitExit(freshB, 3, 2, 0, 0, 0, 1), undefined, 'fresh shared B true continuation', 'resume'); }
+    else { select(e, bpc, oldB); const done = at(continued, bpc + 7); done.registers[1] = bWord; run(e, oldB, 3, done, unitExit(oldB, 3, 2, 0, 0, 0, 1), undefined, 'independent current B true continuation', 'resume'); }
   } else {
-    const continued = at(stopped, bpc); continued.registers[1] = aWord; run(e, oldA, 8, continued, exit(3, 0), undefined, 'returning A preserves current RAM without repeating binary', 'resume'); rejected(e, oldB, 4, 'only separate B is stale'); const freshB = compile(e, [[bpc, 7]], [], 'fresh separate B'); select(e, bpc, freshB); const done = at(continued, bpc + 7); done.registers[1] = result.value; run(e, freshB, 3, done, exit(3, 2, 0, 0, 0, 1), undefined, 'fresh separate B consumes existing CPU', 'resume');
+    const continued = at(stopped, bpc); continued.registers[1] = aWord; run(e, oldA, 8, continued, unitExit(oldA, 3, 0), undefined, 'returning A preserves current RAM without repeating binary', 'resume'); rejected(e, oldB, 4, 'only separate B is stale'); const freshB = compile(e, [[bpc, 7]], [], 'fresh separate B'); select(e, bpc, freshB); const done = at(continued, bpc + 7); done.registers[1] = result.value; run(e, freshB, 3, done, unitExit(freshB, 3, 2, 0, 0, 0, 1), undefined, 'fresh separate B consumes existing CPU', 'resume');
   }
   observe(e, destination, 4, result.value); close(e);
 }

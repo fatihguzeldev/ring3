@@ -90,7 +90,7 @@ writeFileSync(join(outputDir, 'engine.wasm'), engineBytes);
 assert.ok(WebAssembly.validate(engineBytes));
 const engineModule = new WebAssembly.Module(engineBytes);
 assert.deepEqual(WebAssembly.Module.imports(engineModule), []);
-const names = ['open', 'close', 'arena_ptr', 'load_pe32_linked_at', 'map', 'protect', 'generation', 'module_len', 'compile_resident_entries', 'resident_module', 'find_resident', 'acknowledge_resident_installation', 'find_installed_resident', 'dispatcher_module', 'guard_dispatch_entry', 'guard_resident', 'read32', 'write32', 'store_resident32', 'capture_resident_call', 'complete_resident_windows_call'];
+const names = ['open', 'close', 'arena_ptr', 'load_pe32_linked_at', 'map', 'protect', 'generation', 'module_len', 'compile_resident_entries', 'resident_module', 'find_resident', 'acknowledge_resident_installation', 'find_installed_resident', 'dispatcher_module', 'guard_dispatch_entry', 'guard_resident', 'read32', 'write32', 'store_resident32', 'capture_resident_call', 'complete_resident_windows_call', 'cpu_read32', 'cpu_store_resident32'];
 const instance = new WebAssembly.Instance(engineModule, {});
 const api = Object.fromEntries(names.map(name => { const fn = instance.exports[`ring3_abi_v1_${name}`]; assert.equal(typeof fn, 'function', name); return [name, fn]; }));
 assert.equal(api.compile_resident_entries.length, 2);
@@ -114,6 +114,7 @@ function record(magic, length, fields, version = 1) {
 function words(fields) { const bytes = new Uint8Array(fields.length * 4), view = new DataView(bytes.buffer); fields.forEach((value, index) => view.setUint32(index * 4, value, true)); return bytes; }
 function cpu(registers, pc) { return record('R3ST', 56, [...registers, pc, oracle.startup.eflags]); }
 function exit(reason, retired, detail = 0) { return record('R3EX', 40, [reason, retired, detail, 0, 0, 0], 3); }
+function cpuHelper(value = 0) { return record('R3MH', 40, [0, value, 0, 0, 0, 4], 10); }
 function helper(value = 0) { return record('R3MH', 40, [0, value, 0, 0, 0, 0]); }
 function residentRecord(unit) { return words([1, 24, unit.low, unit.high, unit.pointer, unit.length]); }
 function installation(unit, slot) { return record('R3IN', 32, [unit.low, unit.high, slot, 0]); }
@@ -134,6 +135,7 @@ function getUnit(unit, label) {
   refresh(engine); assert.deepEqual(engine.bytes.slice(unit.pointer, unit.pointer + unit.length), unit.bytes, 'retained immutable module bytes/pointer');
 }
 function compile(entries, gates, label, helpers) {
+  helpers = helpers.map(name => ({read32: 'cpu_read32', store_resident32: 'cpu_store_resident32'}[name] ?? name));
   entriesRequest(entries, gates);
   const before = arena(engine); assert.equal(api.compile_resident_entries(entries.length, gates.length), 0);
   const after = arena(engine), view = new DataView(after.buffer, transfer, 24);
@@ -146,7 +148,7 @@ function compile(entries, gates, label, helpers) {
   const module = new WebAssembly.Module(unit.bytes), imports = WebAssembly.Module.imports(module);
   const sort = rows => rows.sort((a, b) => `${a.module}.${a.name}`.localeCompare(`${b.module}.${b.name}`));
   assert.deepEqual(sort(imports), sort([{module: 'env', name: 'memory', kind: 'memory'}, ...helpers.map(name => ({module: 'ring3', name, kind: 'function'}))]), 'exact independently frozen required helpers');
-  const allowed = new Set(['guard_resident', 'read32', 'store_resident32']);
+  const allowed = new Set(['guard_resident', 'cpu_read32', 'cpu_store_resident32']);
   const binding = Object.fromEntries(imports.filter(item => item.module === 'ring3').map(item => { assert.ok(allowed.has(item.name)); return [item.name, api[item.name]]; }));
   unit.instance = new WebAssembly.Instance(module, {env: {memory: engine.memory}, ring3: binding}); unit.run = unit.instance.exports.run;
   assert.equal(typeof unit.run, 'function'); assert.equal(unit.run.length, 4);
@@ -237,7 +239,7 @@ for (let index = 0; index < cpuOracle.stages.length; index++) {
   }
   const stage = cpuOracle.stages[index], expected = selected.stages[index];
   const wantedLookup = installation(gate, oracle.installation.gate_slot);
-  dispatch(cpuOracle.budget - retired, 'actual returning dispatcher reaches IAT provider gate', [[0, cpu(stage.stop_registers, receipt.gates[stage.gate_index][0])], [56, exit(8, stage.retired, stage.id)], [100, helper()], [transfer, wantedLookup]]);
+  dispatch(cpuOracle.budget - retired, 'actual returning dispatcher reaches IAT provider gate', [[0, cpu(stage.stop_registers, receipt.gates[stage.gate_index][0])], [56, exit(8, stage.retired, stage.id)], [100, cpuHelper()], [transfer, wantedLookup]]);
   retired += stage.retired;
   const owner = lookupOwner(); assert.deepEqual(owner, {low: gate.low, high: gate.high, slot: 0});
   stack(expected.stack_values, 'real indirect CALL/PUSH stack');

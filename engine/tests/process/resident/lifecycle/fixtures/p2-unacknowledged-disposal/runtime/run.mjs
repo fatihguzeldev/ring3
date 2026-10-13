@@ -14,7 +14,7 @@ assert.ok(root, 'expected copied actual engine, output directory and repository 
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
 const SIZE = 4612, TRANSFER = 140, CODE = 0x1000, DATA = 0x4000, VICTIM = CODE + 0x10;
 const KEY_LOW = 1, KEY_HIGH = 0xc3790000;
-const arities = {open:3, close:0, arena_ptr:0, map:3, protect:3, upload:2, read32:1, compile_resident_entries:2, resident_module:2, guard_resident:7, dispatcher_module:2, guard_dispatch_entry:5, find_installed_resident:3, acknowledge_resident_installation:5, retire_stale_resident:4, discard_unacknowledged_resident:4};
+const arities = {open:3, close:0, arena_ptr:0, map:3, protect:3, upload:2, read32:1, compile_resident_entries:2, resident_module:2, guard_resident:7, dispatcher_module:2, guard_dispatch_entry:5, find_installed_resident:3, acknowledge_resident_installation:5, retire_stale_resident:4, discard_unacknowledged_resident:4, cpu_read32: 1};
 const sourcePaths = [...execFileSync('rg', ['--files', 'engine/src'], {cwd:root, encoding:'utf8'}).trim().split('\n').sort(), 'Cargo.toml', 'Cargo.lock', 'engine/Cargo.toml', 'engine/tests/process/resident/lifecycle/disposal/wasm.rs', 'engine/tests/process/resident/wasm.rs', 'engine/tests/process/resident/lifecycle/fixtures/p2-unacknowledged-disposal/runtime/run.mjs'];
 sourcePaths.push(...[...exportContract.sourcePaths, 'engine/tests/support/wasm/engine.mjs'].filter(path => !sourcePaths.includes(path)));
 assert.ok(sourcePaths.length > 0, 'nonempty source manifest'); assert.equal(new Set(sourcePaths).size, sourcePaths.length);
@@ -73,7 +73,7 @@ function readPages(label) {
 
 // this bounded structural reader checks complete function types and baked guard prefixes.
 function shape(bytes, dispatcher, unit) {
-  let at=8; const types=[], imports=[], functions=[], exports=[]; let locals,guard;
+  let at=8; const types=[], imports=[], functions=[], exports=[]; let locals,guard,globals;
   assert.deepEqual([...bytes.subarray(0,8)],[0,97,115,109,1,0,0,0]);
   const u=()=>{let value=0,shift=0; for(let count=0;count<5;count++){assert.ok(at<bytes.length);const byte=bytes[at++];value|=(byte&127)<<shift;if(!(byte&128))return value>>>0;shift+=7;}assert.fail('bounded unsigned LEB');};
   const signed=()=>{let value=0n,shift=0n,byte;do{assert.ok(at<bytes.length&&shift<35n);byte=bytes[at++];value|=BigInt(byte&127)<<shift;shift+=7n;}while(byte&128);if(byte&64)value-=1n<<shift;return Number(BigInt.asUintN(32,value));};
@@ -83,6 +83,7 @@ function shape(bytes, dispatcher, unit) {
     if(section===1) for(let n=u();n>0;n--){assert.equal(bytes[at++],0x60);types.push({parameters:Array.from({length:u()},()=>bytes[at++]),results:Array.from({length:u()},()=>bytes[at++])});}
     else if(section===2) for(let n=u();n>0;n--){const module=name(),field=name(),kind=bytes[at++];if(kind===0)imports.push({module,name:field,kind:'function',type:u()});else if(kind===2){assert.equal(u(),0);assert.equal(u(),1);imports.push({module,name:field,kind:'memory',minimum:1});}else{assert.ok(dispatcher);assert.equal(kind,1);assert.equal(bytes[at++],0x70);assert.equal(u(),1);assert.equal(u(),8);assert.equal(u(),8);imports.push({module,name:field,kind:'table',minimum:8,maximum:8});}}
     else if(section===3) for(let n=u();n>0;n--)functions.push(u());
+    else if(section===6) {assert.equal(dispatcher,false);assert.equal(u(),3);globals=[];for(let i=0;i<3;i++){assert.equal(bytes[at++],127);assert.equal(bytes[at++],0);assert.equal(bytes[at++],0x41);globals.push(signed());assert.equal(bytes[at++],0x0b);}assert.deepEqual(globals,[1,0,1]);}
     else if(section===7) for(let n=u();n>0;n--)exports.push({name:name(),kind:bytes[at++],index:u()});
     else if(section===10) {
       assert.equal(u(),1);const bodyLength=u();assert.equal(at+bodyLength,end);locals=Array.from({length:u()},()=>[u(),bytes[at++]]);
@@ -96,7 +97,7 @@ function shape(bytes, dispatcher, unit) {
   assert.deepEqual(types,dispatcher?[signature(4),signature(5),signature(3)]:[signature(4),signature(7)]);
   assert.deepEqual(functions,[0]); assert.deepEqual(exports,[{name:'run',kind:0,index:dispatcher?2:1}]);
   assert.deepEqual(imports,dispatcher?[{module:'env',name:'memory',kind:'memory',minimum:1},{module:'env',name:'table',kind:'table',minimum:8,maximum:8},{module:'ring3',name:'guard_dispatch_entry',kind:'function',type:1},{module:'ring3',name:'find_installed_resident',kind:'function',type:2}]:[{module:'env',name:'memory',kind:'memory',minimum:1},{module:'ring3',name:'guard_resident',kind:'function',type:1}]);
-  assert.deepEqual(locals,dispatcher?[[6,127]]:[[16,127],[1,126],[10,127]]); assert.ok(guard);
+  assert.deepEqual(locals,dispatcher?[[7,127]]:[[16,127],[1,126],[10,127],[1,127]]); assert.ok(guard);
   return {types,imports,exports,locals,guard};
 }
 function saveModule(bytes, label, dispatcher, binding={}) {
