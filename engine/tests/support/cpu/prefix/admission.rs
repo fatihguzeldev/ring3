@@ -148,6 +148,7 @@ pub fn admit_if_new_prefix(bytes: &[u8]) -> bool {
             _ => false,
         };
     let instruction = Decoder::with_ip(32, bytes, 0x1000, DecoderOptions::NONE).decode();
+    let hle_hint = instruction.has_xacquire_prefix() || instruction.has_xrelease_prefix();
     let scalar_count = matches!(
         instruction.code(),
         Code::Tzcnt_r16_rm16
@@ -270,6 +271,7 @@ pub fn admit_if_new_prefix(bytes: &[u8]) -> bool {
         && !scalar_count
         && !ignored_byte_width
         && !ignored_pause_width
+        && !hle_hint
     {
         return false;
     }
