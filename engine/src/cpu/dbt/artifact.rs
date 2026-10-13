@@ -2,7 +2,10 @@ use super::{
     BlockSpec, CompileError, CompileLimits, GateSpec, PreparedRegion, prepare_region, wasm,
 };
 use super::{
-    cold::{prepare_embedded_entry_region, prepare_entry_region, prepare_runtime_entry},
+    cold::{
+        prepare_embedded_entry_region, prepare_entry_region, prepare_runtime_entry,
+        shorten_entry_region,
+    },
     region::prepare_embedded_region,
 };
 use crate::{
@@ -145,7 +148,7 @@ pub fn compile_entry_region(
     limits: CompileLimits,
 ) -> Result<CompiledRegion, CompileError> {
     let prepared = prepare_entry_region(memory, entries, limits)?;
-    emit_prepared(prepared, limits, None)
+    emit_entry_prepared(memory, prepared, limits, None, None)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -160,10 +163,12 @@ pub(crate) fn compile_embedded_entry_region(
     bank: Option<crate::cpu::x86::UserSystemRegisterBank32>,
 ) -> Result<CompiledRegion, CompileError> {
     let prepared = prepare_embedded_entry_region(memory, entries, limits, gates, Some(cs), bank)?;
-    emit_prepared(
+    emit_entry_prepared(
+        memory,
         prepared,
         limits,
         Some(wasm::EmbeddedBinding::Replacement { key, generation }),
+        Some(cs),
     )
 }
 
@@ -177,10 +182,12 @@ pub(crate) fn compile_runtime_entry(
     bank: Option<crate::cpu::x86::UserSystemRegisterBank32>,
 ) -> Result<CompiledRegion, CompileError> {
     let prepared = prepare_runtime_entry(memory, entry, limits, Some(cs), bank)?;
-    emit_prepared(
+    emit_entry_prepared(
+        memory,
         prepared,
         limits,
         Some(wasm::EmbeddedBinding::Replacement { key, generation }),
+        Some(cs),
     )
 }
 
@@ -233,4 +240,22 @@ pub(super) fn emit_prepared(
         return Err(CompileError::WasmLimit);
     }
     Ok(CompiledRegion { prepared, bytes })
+}
+
+pub(super) fn emit_entry_prepared(
+    memory: &AddressSpace,
+    mut prepared: PreparedRegion,
+    limits: CompileLimits,
+    binding: Option<wasm::EmbeddedBinding>,
+    cs: Option<CodeFetchContext>,
+) -> Result<CompiledRegion, CompileError> {
+    loop {
+        let bytes = wasm::emit(&prepared.blocks, binding, prepared.decode_key);
+        if bytes.len() <= limits.wasm_bytes {
+            return Ok(CompiledRegion { prepared, bytes });
+        }
+        if !shorten_entry_region(memory, &mut prepared, cs)? {
+            return Err(CompileError::WasmLimit);
+        }
+    }
 }

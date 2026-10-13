@@ -15,6 +15,11 @@ const MAX_UNITS: usize = 8;
 const MAX_BYTES: usize = MAX_UNITS * 65_536;
 static NEXT_UNIT_ID: AtomicU64 = AtomicU64::new(1);
 
+enum EmissionPolicy {
+    WholeUnit(CompileLimits),
+    EntryPrefix(CompileLimits),
+}
+
 /// an immutable id in one engine allocation domain, not a persisted handle.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct UnitId(u64);
@@ -166,7 +171,14 @@ impl ResidentRegistry {
         }
         let prepared = prepare_resident_region(memory, specs, limits, gates, cs, bank)
             .map_err(RegistryError::Compile)?;
-        self.compile_prepared_bound(memory, prepared, limits, key, cs, counter)
+        self.compile_prepared_bound(
+            memory,
+            prepared,
+            EmissionPolicy::WholeUnit(limits),
+            key,
+            cs,
+            counter,
+        )
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -187,7 +199,14 @@ impl ResidentRegistry {
         }
         let prepared = prepare_resident_entry_region(memory, entries, limits, gates, cs, bank)
             .map_err(RegistryError::Compile)?;
-        self.compile_prepared_bound(memory, prepared, limits, key, cs, counter)
+        self.compile_prepared_bound(
+            memory,
+            prepared,
+            EmissionPolicy::EntryPrefix(limits),
+            key,
+            cs,
+            counter,
+        )
     }
 
     pub(crate) fn compile_runtime_bound(
@@ -205,25 +224,34 @@ impl ResidentRegistry {
         }
         let prepared = super::cold::prepare_runtime_entry(memory, entry, limits, Some(cs), bank)
             .map_err(RegistryError::Compile)?;
-        self.compile_prepared_bound(memory, prepared, limits, key, Some(cs), &NEXT_UNIT_ID)
+        self.compile_prepared_bound(
+            memory,
+            prepared,
+            EmissionPolicy::EntryPrefix(limits),
+            key,
+            Some(cs),
+            &NEXT_UNIT_ID,
+        )
     }
 
     fn compile_prepared_bound(
         &mut self,
         memory: &AddressSpace,
         prepared: PreparedRegion,
-        limits: CompileLimits,
+        policy: EmissionPolicy,
         key: u64,
         cs: Option<CodeFetchContext>,
         counter: &AtomicU64,
     ) -> Result<UnitId, RegistryError> {
         // final emission can fail after reservation; unpublished ids are never reused.
         let id = allocate_id(counter)?;
-        let region = emit_prepared(
-            prepared,
-            limits,
-            Some(EmbeddedBinding::Resident { key, id: id.get() }),
-        )
+        let binding = Some(EmbeddedBinding::Resident { key, id: id.get() });
+        let region = match policy {
+            EmissionPolicy::EntryPrefix(limits) => {
+                super::artifact::emit_entry_prepared(memory, prepared, limits, binding, cs)
+            }
+            EmissionPolicy::WholeUnit(limits) => emit_prepared(prepared, limits, binding),
+        }
         .map_err(RegistryError::Compile)?;
         let wasm_bytes = self.admit(memory, &region, cs)?;
         self.publish(id, region, wasm_bytes);

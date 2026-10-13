@@ -106,12 +106,16 @@ fn prepare(
     let specs = &specs[..entries.len()];
     region::validate_blocks(specs, limits.blocks)?;
     gate::validate(specs, gates)?;
+    if entries.len() > limits.instructions {
+        return Err(CompileError::InstructionLimit);
+    }
     let mut blocks = Vec::new();
     blocks
         .try_reserve_exact(entries.len())
         .map_err(|_| CompileError::Allocation)?;
     let mut instruction_count = 0;
-    for entry in entries {
+    for (index, entry) in entries.iter().enumerate() {
+        let entry_limit = limits.instructions - (entries.len() - index - 1);
         if let Some(gate) = gates.iter().find(|gate| gate.entry == *entry) {
             if instruction_count == limits.instructions {
                 return Err(CompileError::InstructionLimit);
@@ -134,8 +138,8 @@ fn prepare(
         let mut instructions = Vec::new();
         let mut terminal = None;
         while cursor < boundary {
-            if instruction_count == limits.instructions {
-                return Err(CompileError::InstructionLimit);
+            if instruction_count == entry_limit {
+                break;
             }
             let pc = GuestAddress(cursor as u32);
             let decoded = crate::cpu::x86::decode::decode_with_system_registers(
@@ -209,6 +213,37 @@ fn prepare(
     Ok(PreparedRegion::new(memory, blocks, cs))
 }
 
+// automatic emission can shorten a candidate without dropping a requested entry.
+pub(super) fn shorten_entry_region(
+    memory: &AddressSpace,
+    prepared: &mut PreparedRegion,
+    cs: Option<CodeFetchContext>,
+) -> Result<bool, CompileError> {
+    for block in prepared.blocks.iter_mut().rev() {
+        let remove_fault = block.context_fault().is_some() && !block.instructions.is_empty();
+        if !remove_fault {
+            if block.instructions.len() <= 1 {
+                continue;
+            }
+            block.instructions.pop();
+        }
+        let entry = block.instructions[0].pc();
+        let length = block
+            .instructions
+            .iter()
+            .map(|instruction| usize::from(instruction.length()))
+            .sum();
+        block.source =
+            BlockSource::Instructions(region::prepare_block_snapshot(memory, entry, length, cs)?);
+        return Ok(true);
+    }
+    Ok(false)
+}
+
 #[cfg(test)]
 #[path = "cold/tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "cold/tests/capacity.rs"]
+mod capacity;

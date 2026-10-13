@@ -216,20 +216,19 @@ fn runtime_entry_keeps_limits_fetch_and_valid_unsupported_errors_as_preparation_
     memory
         .write(GuestAddress(0x1000), &[0x90, 0xf0, 0x90])
         .unwrap();
-    assert_eq!(
-        prepare_runtime_entry(
-            &memory,
-            GuestAddress(0x1000),
-            CompileLimits {
-                instructions: 1,
-                ..limits
-            },
-            None,
-            None
-        )
-        .unwrap_err(),
-        CompileError::InstructionLimit
-    );
+    let prefix = prepare_runtime_entry(
+        &memory,
+        GuestAddress(0x1000),
+        CompileLimits {
+            instructions: 1,
+            ..limits
+        },
+        None,
+        None,
+    )
+    .unwrap();
+    assert_eq!(prefix.instruction_count(), 1);
+    assert_eq!(prefix.blocks[0].instructions[0].length(), 1);
 }
 
 #[test]
@@ -300,7 +299,7 @@ fn wrapped_translated_prefix_capture_preserves_consumed_and_source_free_currentn
 }
 
 #[test]
-fn wrapped_block_snapshot_counts_instructions_and_rejects_insufficient_quota() {
+fn wrapped_block_snapshot_counts_instructions_and_stops_at_quota() {
     use crate::cpu::x86::SegmentContext;
     let mut memory = AddressSpace::new(2).unwrap();
     for page in [0, 0xfffff000] {
@@ -324,17 +323,18 @@ fn wrapped_block_snapshot_counts_instructions_and_rejects_insufficient_quota() {
         instructions: 1,
         ..CompileLimits::default()
     };
-    assert!(matches!(
-        prepare_embedded_entry_region(
-            &memory,
-            &[GuestAddress(0x1ffd)],
-            limits,
-            &[],
-            Some(cs),
-            None
-        ),
-        Err(CompileError::InstructionLimit)
-    ));
+    let prefix = prepare_embedded_entry_region(
+        &memory,
+        &[GuestAddress(0x1ffd)],
+        limits,
+        &[],
+        Some(cs),
+        None,
+    )
+    .unwrap();
+    assert_eq!(prefix.instruction_count(), 1);
+    assert_eq!(prefix.blocks[0].instructions[0].length(), 5);
+    assert!(prefix.is_current(&memory));
     limits.instructions = 2;
     let prepared = prepare_embedded_entry_region(
         &memory,

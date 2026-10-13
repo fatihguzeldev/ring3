@@ -356,7 +356,7 @@ fn preparation_failures_leave_local_counter_and_retained_usage_unchanged() {
             RegistryError::Compile(CompileError::InvalidLimits),
         ),
         (
-            vec![B],
+            vec![B, GuestAddress(0x2200)],
             vec![],
             CompileLimits {
                 instructions: 1,
@@ -729,4 +729,66 @@ fn stale_code_admission_and_fresh_successor_preserve_existing_unit_accounting() 
             .as_ptr(),
         retained_pointer
     );
+}
+
+#[test]
+fn entry_prefix_retries_allocate_one_identity_and_keep_every_requested_entry() {
+    let memory = memory();
+    let counter = AtomicU64::new(211);
+    let binding = Some(EmbeddedBinding::Resident { key: KEY, id: 211 });
+    let minimum = prepare_resident_entry_region(
+        &memory,
+        &[A, B],
+        CompileLimits {
+            instructions: 2,
+            ..CompileLimits::default()
+        },
+        &[],
+        None,
+        None,
+    )
+    .unwrap();
+    let minimum_bytes = crate::cpu::dbt::wasm::emit(&minimum.blocks, binding, minimum.decode_key);
+    let limits = CompileLimits {
+        wasm_bytes: minimum_bytes.len(),
+        ..CompileLimits::default()
+    };
+    let mut registry = registry(&memory);
+    let id = compile(&mut registry, &memory, &[A, B], &[], limits, &counter).unwrap();
+    assert_eq!(id.get(), 211);
+    assert_eq!(counter.load(Ordering::Relaxed), 212);
+    assert_eq!(
+        registry.get(&memory, id).unwrap().metadata().instructions,
+        2
+    );
+    assert_eq!(registry.lookup(&memory, A), Ok(id));
+    assert_eq!(registry.lookup(&memory, B), Ok(id));
+    assert!(registry.lookup(&memory, GuestAddress(A.0 + 1)).is_err());
+    assert_eq!(bytes(&registry, &memory, id), minimum_bytes);
+}
+
+#[test]
+fn single_entry_instruction_quota_keeps_original_program_as_a_prefix() {
+    let memory = memory();
+    let mut registry = registry(&memory);
+    let counter = AtomicU64::new(41);
+    let id = compile(
+        &mut registry,
+        &memory,
+        &[B],
+        &[],
+        CompileLimits {
+            instructions: 1,
+            ..CompileLimits::default()
+        },
+        &counter,
+    )
+    .unwrap();
+    assert_eq!(
+        registry.get(&memory, id).unwrap().metadata().instructions,
+        1
+    );
+    assert_eq!(registry.lookup(&memory, B), Ok(id));
+    assert!(registry.lookup(&memory, GuestAddress(B.0 + 1)).is_err());
+    assert_eq!(counter.load(Ordering::Relaxed), 42);
 }

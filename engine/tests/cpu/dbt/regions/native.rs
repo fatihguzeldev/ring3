@@ -12,3 +12,6 @@ mod dbt_resident;
 
 #[path = "dispatch/native/table.rs"]
 mod dbt_table_dispatch;
+
+#[path = "capacity/native.rs"]
+mod module_capacity;
