@@ -3,9 +3,7 @@ use super::{
     region::{self, BlockSource, CompiledBlock, GUEST_END, MAX_BLOCKS},
 };
 use crate::{
-    cpu::x86::decode::{
-        BoundDecode, CodeFetchContext, DecodePolicy, decode_bound, decode_for_execution,
-    },
+    cpu::x86::decode::{BoundDecode, CodeFetchContext, DecodePolicy},
     memory::{AddressSpace, GuestAddress},
 };
 
@@ -22,6 +20,7 @@ pub fn prepare_entry_region(
         &[],
         DecodePolicy::Strict,
         None,
+        None,
     )
 }
 
@@ -31,6 +30,7 @@ pub(super) fn prepare_embedded_entry_region(
     limits: CompileLimits,
     gates: &[GateSpec],
     cs: Option<CodeFetchContext>,
+    bank: Option<crate::cpu::x86::UserSystemRegisterBank32>,
 ) -> Result<PreparedRegion, CompileError> {
     prepare(
         memory,
@@ -40,6 +40,7 @@ pub(super) fn prepare_embedded_entry_region(
         gates,
         DecodePolicy::Strict,
         cs,
+        bank,
     )
 }
 
@@ -49,8 +50,9 @@ pub(super) fn prepare_resident_entry_region(
     limits: CompileLimits,
     gates: &[GateSpec],
     cs: Option<CodeFetchContext>,
+    bank: Option<crate::cpu::x86::UserSystemRegisterBank32>,
 ) -> Result<PreparedRegion, CompileError> {
-    prepare_embedded_entry_region(memory, entries, limits, gates, cs)
+    prepare_embedded_entry_region(memory, entries, limits, gates, cs, bank)
 }
 
 pub(super) fn prepare_runtime_entry(
@@ -58,6 +60,7 @@ pub(super) fn prepare_runtime_entry(
     entry: GuestAddress,
     limits: CompileLimits,
     cs: Option<CodeFetchContext>,
+    bank: Option<crate::cpu::x86::UserSystemRegisterBank32>,
 ) -> Result<PreparedRegion, CompileError> {
     prepare(
         memory,
@@ -67,9 +70,11 @@ pub(super) fn prepare_runtime_entry(
         &[],
         DecodePolicy::Execution,
         cs,
+        bank,
     )
 }
 
+#[allow(clippy::too_many_arguments)]
 fn prepare(
     memory: &AddressSpace,
     entries: &[GuestAddress],
@@ -78,6 +83,7 @@ fn prepare(
     gates: &[GateSpec],
     decode_policy: DecodePolicy,
     cs: Option<CodeFetchContext>,
+    bank: Option<crate::cpu::x86::UserSystemRegisterBank32>,
 ) -> Result<PreparedRegion, CompileError> {
     region::validate_limits(limits)?;
     if entries.is_empty() || entries.len() > limits.blocks {
@@ -132,15 +138,13 @@ fn prepare(
                 return Err(CompileError::InstructionLimit);
             }
             let pc = GuestAddress(cursor as u32);
-            let decoded = if let Some(cs) = cs {
-                decode_bound(memory, pc, cs, decode_policy)
-            } else {
-                match decode_policy {
-                    DecodePolicy::Strict => region::strict_instruction(memory, pc, None),
-                    DecodePolicy::Execution => decode_for_execution(memory, pc),
-                }
-                .map(BoundDecode::Instruction)
-            }
+            let decoded = crate::cpu::x86::decode::decode_with_system_registers(
+                memory,
+                pc,
+                decode_policy,
+                cs,
+                bank,
+            )
             .map_err(|error| region::instruction_error(pc, InstructionError::Decode(error)))?;
             let instruction = match decoded {
                 BoundDecode::Instruction(instruction) => instruction,

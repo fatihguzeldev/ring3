@@ -2,29 +2,29 @@ use super::super::{atomic, integer_system, segments, simd, stack, strings};
 use super::{
     BUDGET, BinaryKind, BitIndex, BitTestKind, BlockType, BranchTarget, ByteArithmeticKind,
     ByteLogicalKind, BytePredicateKind, ByteReadArithmeticKind, ByteRegister, ByteValue, CarryFlag,
-    CarryKind, Condition, CountBranchKind, DecodedInstruction, EIP,
-    ExtensionKind, FLAGS, InstructionSink, LHS, Location32, Operation, RESULT, RETIRED, RHS,
-    Register32, ShiftCount, SmallSource, SmallWidth, ValType, Value32, WordArithmeticKind,
-    WordLogicalKind, WordMemoryArithmeticKind, WordReadArithmeticKind, WordValue,
-    accumulator_divide, accumulator_multiply, arithmetic_flags, arithmetic_memory_byte,
-    ascii_adjust, ascii_adjust_after_multiplication, ascii_adjust_before_division,
-    binary_memory_store, bit_scan, bit_scan_word, bit_test, bit_test_word, byte_accumulator_divide,
-    byte_accumulator_divide_value, byte_accumulator_multiply, byte_accumulator_multiply_value,
-    byte_rotate_cl, byte_rotate_immediate, byte_rotate_memory, byte_rotate_one,
-    byte_rotate_one_flags, byte_rotate_one_value, byte_rotate_through_carry,
-    byte_rotate_through_carry_cl, byte_rotate_through_carry_memory_cl,
-    byte_rotate_through_carry_memory_immediate, byte_rotate_through_carry_one,
-    byte_rotate_through_carry_one_flags, byte_rotate_through_carry_one_value, byte_value, control,
-    decimal_adjust, double_shift, double_shift_memory, double_shift_memory_word, double_shift_word,
-    extend_byte_to_word, extend_value, indirect_target, insert_byte, logical_flags,
-    logical_memory_byte, memory, memory_bit_mutation, memory_bit_test_word,
-    memory_rotate_through_carry_cl, memory_rotate_through_carry_immediate, register, rotate,
-    rotate_memory, rotate_memory_word, rotate_one, rotate_one_flags, rotate_one_value,
-    rotate_through_carry_cl, rotate_through_carry_immediate, rotate_through_carry_memory_word,
-    rotate_through_carry_one, rotate_through_carry_one_flags, rotate_through_carry_one_value,
-    rotate_through_carry_word, rotate_word, shift, shift_byte, shift_memory, shift_memory_byte,
-    shift_memory_byte_cl, shift_memory_byte_immediate, shift_memory_word, shift_word,
-    signed_multiply, signed_multiply_word, trailing_zero_count32, unary, unary_byte, unary_memory,
+    CarryKind, Condition, CountBranchKind, DecodedInstruction, EIP, ExtensionKind, FLAGS,
+    InstructionSink, LHS, Location32, Operation, RESULT, RETIRED, RHS, Register32, ShiftCount,
+    SmallSource, SmallWidth, ValType, Value32, WordArithmeticKind, WordLogicalKind,
+    WordMemoryArithmeticKind, WordReadArithmeticKind, WordValue, accumulator_divide,
+    accumulator_multiply, arithmetic_flags, arithmetic_memory_byte, ascii_adjust,
+    ascii_adjust_after_multiplication, ascii_adjust_before_division, binary_memory_store, bit_scan,
+    bit_scan_word, bit_test, bit_test_word, byte_accumulator_divide, byte_accumulator_divide_value,
+    byte_accumulator_multiply, byte_accumulator_multiply_value, byte_rotate_cl,
+    byte_rotate_immediate, byte_rotate_memory, byte_rotate_one, byte_rotate_one_flags,
+    byte_rotate_one_value, byte_rotate_through_carry, byte_rotate_through_carry_cl,
+    byte_rotate_through_carry_memory_cl, byte_rotate_through_carry_memory_immediate,
+    byte_rotate_through_carry_one, byte_rotate_through_carry_one_flags,
+    byte_rotate_through_carry_one_value, byte_value, control, decimal_adjust, double_shift,
+    double_shift_memory, double_shift_memory_word, double_shift_word, extend_byte_to_word,
+    extend_value, indirect_target, insert_byte, logical_flags, logical_memory_byte, memory,
+    memory_bit_mutation, memory_bit_test_word, memory_rotate_through_carry_cl,
+    memory_rotate_through_carry_immediate, register, rotate, rotate_memory, rotate_memory_word,
+    rotate_one, rotate_one_flags, rotate_one_value, rotate_through_carry_cl,
+    rotate_through_carry_immediate, rotate_through_carry_memory_word, rotate_through_carry_one,
+    rotate_through_carry_one_flags, rotate_through_carry_one_value, rotate_through_carry_word,
+    rotate_word, shift, shift_byte, shift_memory, shift_memory_byte, shift_memory_byte_cl,
+    shift_memory_byte_immediate, shift_memory_word, shift_word, signed_multiply,
+    signed_multiply_word, trailing_zero_count32, unary, unary_byte, unary_memory,
     unary_memory_byte, unary_memory_word, unary_word, value, word_accumulator_divide,
     word_accumulator_multiply, word_value, x87,
 };
@@ -972,6 +972,16 @@ pub(in crate::cpu::dbt::wasm) fn instruction(
                 .i32_and()
                 .i32_or()
                 .local_set(register(destination));
+        }
+        Operation::StoreSystemDescriptor {
+            address,
+            limit,
+            base,
+        } => {
+            super::super::system_registers::store_descriptor(
+                code, address, limit, base, imports, exit_depth,
+            );
+            store = true;
         }
         Operation::StoreWord { address, source } => {
             word_value(code, source);

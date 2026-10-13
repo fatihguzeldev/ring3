@@ -19,6 +19,7 @@ mod segments;
 mod simd;
 mod stack;
 mod strings;
+mod system_registers;
 mod x87;
 mod xstate;
 

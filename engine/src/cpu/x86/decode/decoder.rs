@@ -20,6 +20,7 @@ pub enum DecodeError {
         pc: GuestAddress,
         attempted_length: u8,
     },
+    MissingSystemRegisterAuthority(crate::cpu::x86::SystemRegisterQuery),
     InvalidEncoding,
     Unsupported(UnsupportedFeature),
     Infrastructure(MemoryError),
@@ -73,14 +74,14 @@ pub fn decode_one(
     memory: &AddressSpace,
     pc: GuestAddress,
 ) -> Result<DecodedInstruction, DecodeError> {
-    unbound(decode(memory, pc, DecodePolicy::Strict, None)?)
+    unbound(decode(memory, pc, DecodePolicy::Strict, None, None)?)
 }
 
 pub(crate) fn decode_for_execution(
     memory: &AddressSpace,
     pc: GuestAddress,
 ) -> Result<DecodedInstruction, DecodeError> {
-    unbound(decode(memory, pc, DecodePolicy::Execution, None)?)
+    unbound(decode(memory, pc, DecodePolicy::Execution, None, None)?)
 }
 
 fn unbound(decoded: BoundDecode) -> Result<DecodedInstruction, DecodeError> {
@@ -96,7 +97,28 @@ pub(crate) fn decode_bound(
     cs: CodeFetchContext,
     policy: DecodePolicy,
 ) -> Result<BoundDecode, DecodeError> {
-    decode(memory, pc, policy, Some(cs))
+    decode(memory, pc, policy, Some(cs), None)
+}
+
+pub(crate) fn decode_with_system_registers(
+    memory: &AddressSpace,
+    pc: GuestAddress,
+    policy: DecodePolicy,
+    cs: Option<CodeFetchContext>,
+    bank: Option<crate::cpu::x86::UserSystemRegisterBank32>,
+) -> Result<BoundDecode, DecodeError> {
+    if bank.is_some() {
+        return decode(memory, pc, policy, cs, bank);
+    }
+    if let Some(cs) = cs {
+        decode_bound(memory, pc, cs, policy)
+    } else {
+        match policy {
+            DecodePolicy::Strict => decode_one(memory, pc),
+            DecodePolicy::Execution => decode_for_execution(memory, pc),
+        }
+        .map(BoundDecode::Instruction)
+    }
 }
 
 fn decode(
@@ -104,6 +126,7 @@ fn decode(
     pc: GuestAddress,
     policy: DecodePolicy,
     cs: Option<CodeFetchContext>,
+    bank: Option<crate::cpu::x86::UserSystemRegisterBank32>,
 ) -> Result<BoundDecode, DecodeError> {
     let bitness = cs.map_or(32, CodeFetchContext::decoder_bitness);
     let mut bytes = [0; 15];
@@ -177,7 +200,7 @@ fn decode(
                 let (operation, segments) = if let Some(operation) = fault {
                     (Operation::Control(operation), 0)
                 } else {
-                    match super::lower::lower(&instruction, &bytes[..consumed]) {
+                    match super::lower::lower(&instruction, &bytes[..consumed], bank) {
                         Ok(operation) => (operation, segment_accesses(&instruction)),
                         Err(DecodeError::InvalidEncoding)
                             if policy == DecodePolicy::Execution

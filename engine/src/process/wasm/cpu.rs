@@ -384,3 +384,7 @@ pub(crate) fn stack_execute_resident(
         )
     })
 }
+
+pub(crate) fn configure_system_register_bank() -> u32 {
+    mutate(|instance| instance.configure_system_register_bank_request())
+}

@@ -176,6 +176,7 @@ impl EngineInstance {
                     CompileLimits::default(),
                     self.key,
                     Some(cs),
+                    self.system_register_bank,
                 )
                 .map_err(HostError::Resident)
         } else {
@@ -189,6 +190,7 @@ impl EngineInstance {
                     CompileLimits::default(),
                     self.key,
                     Some(cs),
+                    self.system_register_bank,
                 )
                 .map_err(HostError::Resident)?;
             self.resident = Some(registry);
@@ -250,6 +252,7 @@ impl EngineInstance {
                     CompileLimits::default(),
                     self.key,
                     Some(cs),
+                    self.system_register_bank,
                 )
                 .map_err(HostError::Resident)
         } else {
@@ -263,6 +266,7 @@ impl EngineInstance {
                     CompileLimits::default(),
                     self.key,
                     Some(cs),
+                    self.system_register_bank,
                 )
                 .map_err(HostError::Resident)?;
             self.resident = Some(registry);

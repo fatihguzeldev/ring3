@@ -4,7 +4,7 @@ use crate::{
     cpu::x86::{
         decode::{
             BoundDecode, CapturedCodeFault, CodeDecodeKey, CodeFetchContext, DecodeError,
-            DecodePolicy, DecodedInstruction, decode_bound, decode_one,
+            DecodePolicy, DecodedInstruction,
         },
         ir::{BinaryKind, BranchTarget, Location32, Operation, SmallSource, UnaryKind, Value32},
     },
@@ -175,6 +175,7 @@ pub fn prepare_region(
         PreparationProfile::Standalone,
         &[],
         None,
+        None,
     )
 }
 
@@ -184,6 +185,7 @@ pub(super) fn prepare_resident_region(
     limits: CompileLimits,
     gates: &[GateSpec],
     cs: Option<CodeFetchContext>,
+    bank: Option<crate::cpu::x86::UserSystemRegisterBank32>,
 ) -> Result<PreparedRegion, CompileError> {
     prepare(
         memory,
@@ -192,6 +194,7 @@ pub(super) fn prepare_resident_region(
         PreparationProfile::Resident,
         gates,
         cs,
+        bank,
     )
 }
 
@@ -201,6 +204,7 @@ pub(super) fn prepare_embedded_region(
     limits: CompileLimits,
     gates: &[GateSpec],
     cs: Option<CodeFetchContext>,
+    bank: Option<crate::cpu::x86::UserSystemRegisterBank32>,
 ) -> Result<PreparedRegion, CompileError> {
     prepare(
         memory,
@@ -209,6 +213,7 @@ pub(super) fn prepare_embedded_region(
         PreparationProfile::Embedded,
         gates,
         cs,
+        bank,
     )
 }
 
@@ -219,6 +224,7 @@ fn prepare(
     profile: PreparationProfile,
     gates: &[GateSpec],
     cs: Option<CodeFetchContext>,
+    bank: Option<crate::cpu::x86::UserSystemRegisterBank32>,
 ) -> Result<PreparedRegion, CompileError> {
     validate_limits(limits)?;
     validate_blocks(specs, limits.blocks)?;
@@ -253,7 +259,7 @@ fn prepare(
                 return Err(CompileError::InstructionLimit);
             }
             let pc = GuestAddress(cursor as u32);
-            let instruction = strict_instruction(memory, pc, cs)
+            let instruction = strict_instruction(memory, pc, cs, bank)
                 .map_err(|error| instruction_error(pc, InstructionError::Decode(error)))?;
             let next = cursor + u64::from(instruction.length());
             let terminates = terminates(&instruction, embedded)
@@ -301,14 +307,17 @@ pub(super) fn strict_instruction(
     memory: &AddressSpace,
     pc: GuestAddress,
     cs: Option<CodeFetchContext>,
+    bank: Option<crate::cpu::x86::UserSystemRegisterBank32>,
 ) -> Result<DecodedInstruction, DecodeError> {
-    if let Some(cs) = cs {
-        match decode_bound(memory, pc, cs, DecodePolicy::Strict)? {
-            BoundDecode::Instruction(instruction) => Ok(instruction),
-            BoundDecode::CodeFault(_) => unreachable!("strict decoding returns a typed error"),
-        }
-    } else {
-        decode_one(memory, pc)
+    match crate::cpu::x86::decode::decode_with_system_registers(
+        memory,
+        pc,
+        DecodePolicy::Strict,
+        cs,
+        bank,
+    )? {
+        BoundDecode::Instruction(instruction) => Ok(instruction),
+        BoundDecode::CodeFault(_) => unreachable!("strict decoding returns a typed error"),
     }
 }
 
@@ -595,6 +604,7 @@ fn supports_narrow_store(operation: &Operation) -> bool {
             | Operation::X87ControlToMemory { .. }
             | Operation::StoreByte { .. }
             | Operation::StoreWord { .. }
+            | Operation::StoreSystemDescriptor { .. }
             | Operation::MemorySetByte { .. }
     )
 }

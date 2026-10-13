@@ -123,6 +123,7 @@ impl EngineInstance {
                 generation,
                 &gates[..gate_count as usize],
                 cs,
+                self.system_register_bank,
             ),
             DescriptorFormat::Entries => compile_embedded_entry_region(
                 memory,
@@ -132,6 +133,7 @@ impl EngineInstance {
                 generation,
                 &gates[..gate_count as usize],
                 cs,
+                self.system_register_bank,
             ),
         }
         .map_err(HostError::Compile)

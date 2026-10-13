@@ -57,6 +57,7 @@ impl EngineInstance {
             key,
             next_generation,
             cs,
+            self.system_register_bank,
         )
         .map_err(HostError::Compile)?;
         self.artifact = Some(artifact);
@@ -96,13 +97,27 @@ impl EngineInstance {
         }
         if let Some(registry) = self.resident.as_mut() {
             registry
-                .compile_runtime_bound(memory, pc, CompileLimits::default(), key, cs)
+                .compile_runtime_bound(
+                    memory,
+                    pc,
+                    CompileLimits::default(),
+                    key,
+                    cs,
+                    self.system_register_bank,
+                )
                 .map_err(HostError::Resident)
         } else {
             let mut registry = ResidentRegistry::new(memory, RegistryLimits::default())
                 .map_err(HostError::Resident)?;
             let id = registry
-                .compile_runtime_bound(memory, pc, CompileLimits::default(), key, cs)
+                .compile_runtime_bound(
+                    memory,
+                    pc,
+                    CompileLimits::default(),
+                    key,
+                    cs,
+                    self.system_register_bank,
+                )
                 .map_err(HostError::Resident)?;
             self.resident = Some(registry);
             Ok(id)

@@ -11,6 +11,7 @@ mod segments;
 pub mod simd;
 mod stack;
 mod state;
+mod system_registers;
 mod x87;
 pub mod xstate;
 
@@ -29,6 +30,9 @@ pub use segments::{
 pub use stack::StackFrameKind;
 pub(crate) use stack::StackPointerSize;
 pub use state::{Register32, State32};
+pub use system_registers::{
+    DescriptorTableRegister32, SystemRegisterQuery, UserSystemRegisterBank32,
+};
 pub use x87::{
     Ext80, X87Binary, X87Condition, X87Error, X87Format, X87Operation, X87Outcome, X87Rounding,
     X87State,

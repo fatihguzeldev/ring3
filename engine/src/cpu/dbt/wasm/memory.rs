@@ -197,6 +197,7 @@ impl Imports {
                     cpu_integer = true;
                     read16 |= matches!(source, Value32::Memory(_));
                 }
+                Operation::StoreSystemDescriptor { .. } => cpu_write = true,
                 Operation::CacheFlush { .. } => read8 = true,
                 Operation::VirtualTimestampAux => cpu_integer = true,
                 Operation::PackedStringCompare(operation) => {

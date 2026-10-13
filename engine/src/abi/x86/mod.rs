@@ -3,6 +3,7 @@ mod exit;
 mod segments;
 mod simd;
 mod state;
+mod system_registers;
 mod x87;
 mod ymm;
 
@@ -50,4 +51,8 @@ pub(crate) use avx::{
     GATHER_RESULT_MAGIC, GATHER_RESULT_SIZE, GATHER_RESULT_VERSION, GATHER_STATUS_OFFSET,
     GatherFaultKind, GatherFaultResult, GatherResult, decode_avx_address, decode_gather_address,
     encode_gather_result,
+};
+
+pub use system_registers::{
+    SYSTEM_REGISTER_BANK_SIZE, decode_system_register_bank, encode_system_register_bank,
 };

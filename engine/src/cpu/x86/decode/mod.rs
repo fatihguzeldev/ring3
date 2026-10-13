@@ -19,11 +19,15 @@ mod segments;
 mod simd;
 mod stack;
 mod strings;
+mod system_registers;
 mod x87;
 mod xstate;
 
 pub use decoder::{DecodeError, DecodedInstruction, decode_one};
-pub(crate) use decoder::{DecodePolicy, decode_bound, decode_for_execution};
+pub(crate) use decoder::{DecodePolicy, decode_with_system_registers};
+
+#[cfg(test)]
+pub(crate) use decoder::{decode_bound, decode_for_execution};
 pub(crate) use fetch::{BoundDecode, CapturedCodeFault, CodeDecodeKey, CodeFetchContext};
 
 #[cfg(test)]

@@ -4,7 +4,7 @@ use super::{DecodeError, operands::unsupported};
 use crate::cpu::UnsupportedFeature;
 
 pub(super) fn check_profile(instruction: &Instruction, bytes: &[u8]) -> Result<(), DecodeError> {
-    if instruction.is_privileged() {
+    if instruction.is_privileged() && !super::system_registers::is_query(instruction.code()) {
         return Err(DecodeError::Unsupported(UnsupportedFeature::Privileged));
     }
     let mut groups = [0_u8; 3];

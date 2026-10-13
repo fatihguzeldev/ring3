@@ -1,6 +1,6 @@
 use super::*;
 use crate::{
-    cpu::{UnsupportedFeature, dbt::cold},
+    cpu::{UnsupportedFeature, dbt::cold, x86::decode::decode_one},
     memory::{PageRange, Permissions},
 };
 
@@ -63,7 +63,7 @@ fn embedded_admits_typed_avx_without_relaxing_explicit_block_ends() {
             byte_length: length as u32 + 2,
         };
         prepared(
-            prepare_embedded_region(&memory, &[spec], limits, &[], None),
+            prepare_embedded_region(&memory, &[spec], limits, &[], None, None),
             &memory,
         );
         assert_eq!(
@@ -75,6 +75,7 @@ fn embedded_admits_typed_avx_without_relaxing_explicit_block_ends() {
                 }],
                 limits,
                 &[],
+                None,
                 None,
             )
             .unwrap_err(),
@@ -89,6 +90,7 @@ fn embedded_admits_typed_avx_without_relaxing_explicit_block_ends() {
                 }],
                 limits,
                 &[],
+                None,
                 None,
             )
             .unwrap_err(),
@@ -117,7 +119,7 @@ fn resident_admits_typed_avx_and_preserves_instruction_limits() {
             byte_length: length as u32 + 2,
         };
         prepared(
-            prepare_resident_region(&memory, &[spec], CompileLimits::default(), &[], None),
+            prepare_resident_region(&memory, &[spec], CompileLimits::default(), &[], None, None),
             &memory,
         );
         assert_eq!(
@@ -129,6 +131,7 @@ fn resident_admits_typed_avx_and_preserves_instruction_limits() {
                     ..CompileLimits::default()
                 },
                 &[],
+                None,
                 None,
             )
             .unwrap_err(),
@@ -143,6 +146,7 @@ fn resident_admits_typed_avx_and_preserves_instruction_limits() {
                 }],
                 CompileLimits::default(),
                 &[],
+                None,
                 None,
             )
             .unwrap_err(),
@@ -161,15 +165,15 @@ fn entry_paths_admit_typed_avx_only_with_cpu_state_authority() {
         }
         let limits = CompileLimits::default();
         prepared(
-            cold::prepare_embedded_entry_region(&memory, &[PC], limits, &[], None),
+            cold::prepare_embedded_entry_region(&memory, &[PC], limits, &[], None, None),
             &memory,
         );
         prepared(
-            cold::prepare_resident_entry_region(&memory, &[PC], limits, &[], None),
+            cold::prepare_resident_entry_region(&memory, &[PC], limits, &[], None, None),
             &memory,
         );
         prepared(
-            cold::prepare_runtime_entry(&memory, PC, limits, None),
+            cold::prepare_runtime_entry(&memory, PC, limits, None, None),
             &memory,
         );
         assert_eq!(
@@ -182,6 +186,7 @@ fn entry_paths_admit_typed_avx_only_with_cpu_state_authority() {
                 &[PC, GuestAddress(PC.0 + length as u32 - 1)],
                 limits,
                 &[],
+                None,
                 None,
             )
             .unwrap_err(),

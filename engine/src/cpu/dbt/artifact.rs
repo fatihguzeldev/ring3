@@ -136,7 +136,7 @@ pub fn compile_region(
     specs: &[BlockSpec],
     limits: CompileLimits,
 ) -> Result<CompiledRegion, CompileError> {
-    compile(memory, specs, limits, None, &[], None)
+    compile(memory, specs, limits, None, &[], None, None)
 }
 
 pub fn compile_entry_region(
@@ -148,6 +148,7 @@ pub fn compile_entry_region(
     emit_prepared(prepared, limits, None)
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn compile_embedded_entry_region(
     memory: &AddressSpace,
     entries: &[GuestAddress],
@@ -156,8 +157,9 @@ pub(crate) fn compile_embedded_entry_region(
     generation: u32,
     gates: &[GateSpec],
     cs: CodeFetchContext,
+    bank: Option<crate::cpu::x86::UserSystemRegisterBank32>,
 ) -> Result<CompiledRegion, CompileError> {
-    let prepared = prepare_embedded_entry_region(memory, entries, limits, gates, Some(cs))?;
+    let prepared = prepare_embedded_entry_region(memory, entries, limits, gates, Some(cs), bank)?;
     emit_prepared(
         prepared,
         limits,
@@ -172,8 +174,9 @@ pub(crate) fn compile_runtime_entry(
     key: u64,
     generation: u32,
     cs: CodeFetchContext,
+    bank: Option<crate::cpu::x86::UserSystemRegisterBank32>,
 ) -> Result<CompiledRegion, CompileError> {
-    let prepared = prepare_runtime_entry(memory, entry, limits, Some(cs))?;
+    let prepared = prepare_runtime_entry(memory, entry, limits, Some(cs), bank)?;
     emit_prepared(
         prepared,
         limits,
@@ -181,6 +184,7 @@ pub(crate) fn compile_runtime_entry(
     )
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn compile_embedded_region(
     memory: &AddressSpace,
     specs: &[BlockSpec],
@@ -189,6 +193,7 @@ pub(crate) fn compile_embedded_region(
     generation: u32,
     gates: &[GateSpec],
     cs: CodeFetchContext,
+    bank: Option<crate::cpu::x86::UserSystemRegisterBank32>,
 ) -> Result<CompiledRegion, CompileError> {
     compile(
         memory,
@@ -197,6 +202,7 @@ pub(crate) fn compile_embedded_region(
         Some(wasm::EmbeddedBinding::Replacement { key, generation }),
         gates,
         Some(cs),
+        bank,
     )
 }
 
@@ -207,9 +213,10 @@ fn compile(
     binding: Option<wasm::EmbeddedBinding>,
     gates: &[GateSpec],
     cs: Option<CodeFetchContext>,
+    bank: Option<crate::cpu::x86::UserSystemRegisterBank32>,
 ) -> Result<CompiledRegion, CompileError> {
     let prepared = if binding.is_some() {
-        prepare_embedded_region(memory, specs, limits, gates, cs)?
+        prepare_embedded_region(memory, specs, limits, gates, cs, bank)?
     } else {
         prepare_region(memory, specs, limits)?
     };

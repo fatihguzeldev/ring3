@@ -30,7 +30,9 @@ fn compile(
     limits: CompileLimits,
     counter: &AtomicU64,
 ) -> Result<UnitId, RegistryError> {
-    registry.compile_entries_bound_with_counter(memory, entries, gates, limits, KEY, None, counter)
+    registry.compile_entries_bound_with_counter(
+        memory, entries, gates, limits, KEY, None, None, counter,
+    )
 }
 
 fn bytes(registry: &ResidentRegistry, memory: &AddressSpace, id: UnitId) -> Vec<u8> {
@@ -120,6 +122,7 @@ fn resident_cold_families_match_literal_extents_and_existing_full_u64_bound_emis
                 CompileLimits::default(),
                 KEY,
                 None,
+                None,
                 &explicit_counter,
             )
             .unwrap();
@@ -198,6 +201,7 @@ fn unordered_cold_gates_match_existing_snapshot_and_executable_address_ownership
             CompileLimits::default(),
             KEY,
             None,
+            None,
             &AtomicU64::new(0x1_0000_0001),
         )
         .unwrap();
@@ -275,6 +279,7 @@ fn gate_only_units_lookup_unsigned_zero_and_top_entries_in_both_preparation_path
                 &gates,
                 CompileLimits::default(),
                 KEY,
+                None,
                 None,
                 &counter,
             )

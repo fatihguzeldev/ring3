@@ -10,6 +10,7 @@ pub(crate) enum UserPortPermissions {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct UserModeEnvironment {
     current_privilege: u8,
+    user_mode_instruction_prevention: bool,
     io_privilege: u8,
     user_port_permissions: UserPortPermissions,
     performance_counter_access: bool,
@@ -21,6 +22,7 @@ pub(crate) struct UserModeEnvironment {
 
 pub(crate) const USER_MODE_ENVIRONMENT: UserModeEnvironment = UserModeEnvironment {
     current_privilege: 3,
+    user_mode_instruction_prevention: false,
     io_privilege: 0,
     user_port_permissions: UserPortPermissions::DenyAll,
     performance_counter_access: false,
@@ -31,6 +33,10 @@ pub(crate) const USER_MODE_ENVIRONMENT: UserModeEnvironment = UserModeEnvironmen
 };
 
 impl UserModeEnvironment {
+    pub(crate) const fn user_mode_instruction_prevention(self) -> bool {
+        self.user_mode_instruction_prevention
+    }
+
     pub(crate) const fn current_privilege(self) -> u8 {
         self.current_privilege
     }
@@ -73,6 +79,7 @@ mod tests {
     #[test]
     fn user_environment_keeps_privilege_interrupt_and_debug_controls_explicit() {
         assert_eq!(USER_MODE_ENVIRONMENT.current_privilege(), 3);
+        assert!(!USER_MODE_ENVIRONMENT.user_mode_instruction_prevention());
         assert_eq!(USER_MODE_ENVIRONMENT.io_privilege(), 0);
         assert_eq!(
             USER_MODE_ENVIRONMENT.user_port_permissions(),

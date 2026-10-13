@@ -683,6 +683,11 @@ pub enum Operation {
         destination: Register32,
         address: EffectiveAddress,
     },
+    StoreSystemDescriptor {
+        address: EffectiveAddress,
+        limit: u16,
+        base: u32,
+    },
     StoreWord {
         address: EffectiveAddress,
         source: WordValue,
