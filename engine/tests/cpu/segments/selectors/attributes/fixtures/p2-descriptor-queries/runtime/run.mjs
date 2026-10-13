@@ -53,12 +53,12 @@ function compile(c, instruction, kind, destination, word, memory = false) {
   const bytes = Buffer.from(new Uint8Array(c.memory.buffer, pointer, length)), module = new WebAssembly.Module(bytes);
   const name = c.owner === 'resident' ? 'cpu_integer_resident' : 'cpu_integer';
   assert.deepEqual(WebAssembly.Module.imports(module).map(i => `${i.module}:${i.name}:${i.kind}`).sort(),
-    ['env:memory:memory', `ring3:${c.owner === 'resident' ? 'guard_resident' : 'guard'}:function`, `ring3:${name}:function`, ...(memory ? ['ring3:read16:function'] : [])].sort());
+    ['env:memory:memory', `ring3:${c.owner === 'resident' ? 'guard_resident' : 'guard'}:function`, `ring3:${name}:function`, ...(memory ? ['ring3:cpu_read16:function'] : [])].sort());
   writeFileSync(join(output, `module-${++counts.modules}.wasm`), bytes, {flag: 'wx'});
   const ring3 = {...c.api};
-  for (const helper of [name, ...(memory ? ['read16'] : [])]) ring3[helper] = (...args) => {
-    const before = arena(c), status = c.override && helper !== 'read16' ? c.override(c) : c.api[helper](...args), after = arena(c), allowed = Buffer.from(before);
-    allowed.set(after.subarray(100, helper === 'read16' ? 140 : 164), 100);
+  for (const helper of [name, ...(memory ? ['cpu_read16'] : [])]) ring3[helper] = (...args) => {
+    const before = arena(c), status = c.override && helper !== 'cpu_read16' ? c.override(c) : c.api[helper](...args), after = arena(c), allowed = Buffer.from(before);
+    allowed.set(after.subarray(100, helper === 'cpu_read16' ? 140 : 164), 100);
     assert.deepEqual(after, allowed, 'query helper publication is restricted to packet and payload');
     c.calls.push({name: helper, status, args: args.map(v => v >>> 0), input: before.subarray(140, 164)}); return status;
   };
@@ -74,13 +74,13 @@ function execute(c, fn, s, {value, selector, budget = 1, reason = 1, retired = 1
   if (completed) {
     expected.set(record('R3MH', 40, [0, 0, 0, 0, 0, 0], 7), 100);
     expected.set(words([value === null ? selector : value, n.flags, s.r[0], s.r[2], s.r[3], s.r[1]]), 140);
-  } else if (packet) expected.set(record('R3MH', 40, packet, 2), 100);
+  } else if (packet) expected.set(record('R3MH', 40, packet, 10), 100);
   assert.equal(fn.run(c.base, c.base + 56, budget, c.base + 96), 0);
   assert.deepEqual(arena(c), expected, `whole arena kind=${fn.kind} word=${fn.word} selector=${selector} reason=${reason}`);
   const observed = c.calls.slice(at); assert.equal(observed.length, calls ?? (completed ? fn.memory ? 2 : 1 : 0));
   for (const call of observed) {
     assert.equal(call.status, 0);
-    if (call.name !== 'read16') {
+    if (call.name !== 'cpu_read16') {
       assert.deepEqual(call.args.slice(-2), [fn.kind === 'lar' ? 0x30003 : 0x30004, 0]);
       assert.deepEqual(call.input, words([selector, s.flags, s.r[0], s.r[2], s.r[3], s.r[1]]));
     }

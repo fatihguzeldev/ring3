@@ -37,6 +37,7 @@ function record(magic, size, fields, version = 1) {
 const state = s => record('R3ST', 56, [...s.registers, s.pc, s.flags]);
 const exit = (reason, retired, version = 1) => record('R3EX', 40, [reason, retired, 0, 0, 0, 0], version);
 const helper = value => record('R3MH', 40, [0, value, 0, 0, 0, 0]);
+const cpuHelper = value => record('R3MH', 40, [0, value, 0, 0, 0, 4], 10);
 const arena = c => Buffer.from(new Uint8Array(c.memory.buffer, c.base, SIZE));
 const cpu = c => {const b = arena(c); return {registers: Array.from({length: 8}, (_, i) => b.readUInt32LE(16 + i * 4)), pc: b.readUInt32LE(48), flags: b.readUInt32LE(52)};};
 const parents = () => Array.from({length: 8}, (_, i) => (0xa100 + i) * 65536 + 0x1234 + i);
@@ -52,7 +53,7 @@ function seed(c, pc, flags = 0xcd7, registers = parents()) {
   return cpu(c);
 }
 const arities = {open: 3, close: 0, arena_ptr: 0, map: 3, protect: 3, upload: 2, read32: 1,
-  store32: 2, store_resident32: 6, compile: 1, compile_entries: 2, compile_resident: 1, compile_resident_entries: 2,
+  store32: 2, store_resident32: 6, cpu_read32: 1, cpu_store32: 2, cpu_store_resident32: 6, compile: 1, compile_entries: 2, compile_resident: 1, compile_resident_entries: 2,
   generation: 0, module_ptr: 0, module_len: 0, guard: 6, guard_resident: 7, acknowledge_resident_installation: 5,
   dispatcher_module: 2, guard_dispatch_entry: 5, find_installed_resident: 3};
 function open(owner, entries, purpose) {
@@ -81,25 +82,25 @@ function compile(c, name, blocks) {
   }
   assert.ok(bytes.length <= 65536); const module = new WebAssembly.Module(bytes), guard = c.owner === 'resident' ? 'guard_resident' : 'guard';
   const imports = [{module: 'env', name: 'memory', kind: 'memory'}, ...(c.owner === 'standalone' ? [] : [{module: 'ring3', name: guard, kind: 'function'}]),
-    ...(name === 'poll' ? ['read32', c.owner === 'resident' ? 'store_resident32' : 'store32'].map(name => ({module: 'ring3', name, kind: 'function'})) : [])];
+    ...(name === 'poll' ? ['cpu_read32', c.owner === 'resident' ? 'cpu_store_resident32' : 'cpu_store32'].map(name => ({module: 'ring3', name, kind: 'function'})) : [])];
   assert.deepEqual(WebAssembly.Module.imports(module), imports); assert.deepEqual(WebAssembly.Module.exports(module), [{name: 'run', kind: 'function'}]);
   const ring3 = {...c.api};
-  if (name === 'poll') for (const imported of imports.filter(i => i.name === 'read32' || i.name.startsWith('store'))) ring3[imported.name] = (...args) => {
+  if (name === 'poll') for (const imported of imports.filter(i => i.name === 'cpu_read32' || i.name.startsWith('cpu_store'))) ring3[imported.name] = (...args) => {
     const expected = arena(c), status = c.api[imported.name](...args), after = arena(c); assert.equal(status, 0);
     expected.set(after.subarray(100, 140), 100); assert.deepEqual(after, expected, 'canonical helper changes only its record');
-    const value = after.readUInt32LE(120); assert.deepEqual(after.subarray(100, 140), helper(value));
-    const store = imported.name.startsWith('store'), address = args[store && c.owner === 'resident' ? 4 : 0] >>> 0;
+    const value = after.readUInt32LE(120); assert.deepEqual(after.subarray(100, 140), cpuHelper(value));
+    const store = imported.name.startsWith('cpu_store'), address = args[store && c.owner === 'resident' ? 4 : 0] >>> 0;
     if (store) assert.equal(value, 0);
     helperTrace.push({context: c.id, call: counts.runs + 1, name: imported.name, address, value: store ? args.at(-1) >>> 0 : value, status, helper_hex: after.subarray(100, 140).toString('hex')});
     counts.helper_calls++; counts[store ? 'store32' : 'read32']++; return status;
   };
-  const unit = {...binding, name, run: new WebAssembly.Instance(module, {env: {memory: c.memory}, ring3}).exports.run, exitVersion: name === 'poll' ? 2 : 1};
+  const unit = {...binding, name, run: new WebAssembly.Instance(module, {env: {memory: c.memory}, ring3}).exports.run, exitVersion: name === 'poll' ? 6 : 1};
   assert.equal(unit.run.length, 4); const file = `module-${modules.length + 1}.wasm`; writeFileSync(join(output, file), bytes, {flag: 'wx'});
   modules.push({context: c.id, name, owner: c.owner, entries: c.entries, file, sha256: hash(bytes), bytes: bytes.length, blocks: blocks.length, instructions: total, imports, ...binding}); return unit;
 }
 function run(c, unit, budget, next, label, {reason = 1, retired = 1, status = 0, value, transfer, version = unit.exitVersion} = {}) {
   const before = arena(c), expected = Buffer.from(before), beforeEvents = helperTrace.length;
-  if (status === 0) {expected.set(state(next)); expected.set(exit(reason, retired, version), 56); if (value !== undefined) expected.set(helper(value), 100); if (transfer) expected.set(transfer, 140);}
+  if (status === 0) {expected.set(state(next)); expected.set(exit(reason, retired, version), 56); if (value !== undefined) expected.set(cpuHelper(value), 100); if (transfer) expected.set(transfer, 140);}
   const actual = unit.run(c.base, c.base + 56, budget, c.base + 96); assert.equal(actual, status, label); assert.deepEqual(arena(c), expected, 'full4612: ' + label);
   const b = arena(c), saved = {};
   if (c.purpose === 'poll') for (const [phase, bytes] of [['before', before], ['after', b]]) {
@@ -161,14 +162,14 @@ function completed(start, limit, result, flags) {
   return {registers, pc: 0x3000, flags};
 }
 function events(c, start, limit, readyAddress, values) {
-  const write = c.owner === 'resident' ? 'store_resident32' : 'store32';
-  return [[write, 0x7004, start.registers[7]], [write, 0x7000, start.registers[6]], ['read32', 0x7014, 0xffffffff], ['read32', 0x7010, limit],
-    ...(limit ? [['read32', 0x700c, readyAddress], ...values.map(value => ['read32', readyAddress, value])] : []),
-    ['read32', 0x7000, start.registers[6]], ['read32', 0x7004, start.registers[7]], ['read32', 0x7008, 0x3000]];
+  const write = c.owner === 'resident' ? 'cpu_store_resident32' : 'cpu_store32';
+  return [[write, 0x7004, start.registers[7]], [write, 0x7000, start.registers[6]], ['cpu_read32', 0x7014, 0xffffffff], ['cpu_read32', 0x7010, limit],
+    ...(limit ? [['cpu_read32', 0x700c, readyAddress], ...values.map(value => ['cpu_read32', readyAddress, value])] : []),
+    ['cpu_read32', 0x7000, start.registers[6]], ['cpu_read32', 0x7004, start.registers[7]], ['cpu_read32', 0x7008, 0x3000]];
 }
 const traceRows = start => helperTrace.slice(start).map(({name, address, value}) => [name, address, value]);
 for (const owner of ['replacement', 'resident']) for (const entries of [false, true]) {
-  const c = open(owner, entries, 'poll'), leaf = compile(c, 'poll', poll), unit = installed(c, leaf), coldVersion = owner === 'resident' ? 3 : 2;
+  const c = open(owner, entries, 'poll'), leaf = compile(c, 'poll', poll), unit = installed(c, leaf), coldVersion = owner === 'resident' ? 3 : 6;
   const identity = owner === 'resident' ? {low: leaf.low, high: leaf.high, slot: 0} : {generation: leaf.generation};
   for (const [limit, ready, readyAddress, result, finalLimit, flags, retired] of [
     [0, 0, 0x9008, 0xffffffff, 0, 0x486, 11],
@@ -194,7 +195,7 @@ for (const owner of ['replacement', 'resident']) for (const entries of [false, t
   else host(c, 'guard', [c.id, c.high, leaf.generation, c.base, c.base + 56, c.base + 96]);
   const resumeAt = helperTrace.length;
   run(c, unit, 100, completed(start, 4, 3, 0x417), 'host ready write lets same captured leaf return without CPU reseed', {reason: 3, retired: 8, value: 0x3000, transfer: unit.transfer, version: coldVersion});
-  assert.deepEqual(traceRows(resumeAt), [['read32', 0x5008, 1], ['read32', 0x7000, start.registers[6]], ['read32', 0x7004, start.registers[7]], ['read32', 0x7008, 0x3000]]);
+  assert.deepEqual(traceRows(resumeAt), [['cpu_read32', 0x5008, 1], ['cpu_read32', 0x7000, start.registers[6]], ['cpu_read32', 0x7004, start.registers[7]], ['cpu_read32', 0x7008, 0x3000]]);
   assert.deepEqual(owner === 'resident' ? {low: leaf.low, high: leaf.high, slot: 0} : {generation: leaf.generation}, identity);
   run(c, unit, 1, cpu(c), 'returned cold PC cannot replay leaf or read ready', {reason: 3, retired: 0, version: coldVersion});
   read(c, 0x5008, 1); read(c, 0x5010, 0x55aa19f3); read(c, 0x5014, 0xa55a8127); read(c, 0x7000, start.registers[6]); read(c, 0x7004, start.registers[7]); read(c, 0x7018, 0x55aa19f3);

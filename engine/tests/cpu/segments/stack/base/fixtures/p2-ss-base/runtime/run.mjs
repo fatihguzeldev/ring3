@@ -126,7 +126,7 @@ const cases = [
   {label: 'base-addition-wrap-valid-span', code: '50', base: 0xfffffff0, regs: update({4: 0x34}), end: update({4: 0x30}), writes: [[0x20, [0x12345678]]]},
   {label: 'far-call-wrap-between-slots', code: '9a001000001b00', terminal: true, regs: update({4: 4}), end: update({4: 0xfffffffc}), pc: PC, writes: [[0x4ffc, [0x1007]], [0x5000, [0x1b]]]},
   {label: 'logical-whole-slot-overflow-precedes-RAM', code: '58', regs: update({4: 0xfffffffe}), end: update({4: 0xfffffffe}), pc: PC, retired: 0, fault: [15,0,0,0,0]},
-  {label: 'far-call-linear-span-overflow', code: '9a001000001b00', terminal: true, base: 0xfffffff0, regs: update({4: 0x12}), end: update({4: 0x12}), pc: PC, retired: 0, fault: [5,3,0xfffffffe,2,4]},
+  {label: 'far-call-translated-linear-high-leg-unmapped', code: '9a001000001b00', terminal: true, base: 0xfffffff0, regs: update({4: 0x12}), end: update({4: 0x12}), pc: PC, retired: 0, fault: [5,1,0xfffffffe,2,4]},
   {label: 'far-return-late-page-fault', code: 'cb', terminal: true, regs: update({4: 0xffc}), seed: [[0x5ffc,[PC,0x1b]]], protect: [0x6000,1,0], end: update({4: 0xffc}), pc: PC, retired: 0, fault: [5,2,0x6000,1,4]},
   {label: 'iret-late-page-fault', code: 'cf', terminal: true, regs: update({4: 0xff8}), seed: [[0x5ff8,[PC,0x1b,0x46]]], protect: [0x6000,1,0], end: update({4: 0xff8}), pc: PC, retired: 0, fault: [5,2,0x6000,1,4]},
   {label: 'far-call-late-page-fault', code: '9a001000001b00', terminal: true, regs: update({4: 0x1004}), protect: [0x5000,1,0], end: update({4: 0x1004}), pc: PC, retired: 0, fault: [5,2,0x5ffc,2,4]},

@@ -39,7 +39,7 @@ function record(magic, size, fields, version = 1) {
 const state = c => record('R3ST', 56, [...c.registers, c.pc, c.flags]);
 const exit = (reason, retired, f, version) => record('R3EX', 40,
   [reason, retired, f?.detail ?? 0, f?.address ?? 0, f?.access ?? 0, f ? 2 : 0], version);
-const helper = (value = 0, f) => record('R3MH', 40, [f ? 1 : 0, value, f?.detail ?? 0, f?.address ?? 0, f?.access ?? 0, 2], 2);
+const helper = (value = 0, f) => record('R3MH', 40, [f ? 1 : 0, value, f?.detail ?? 0, f?.address ?? 0, f?.access ?? 0, 2], 10);
 const arena = c => Buffer.from(new Uint8Array(c.memory.buffer, c.base, SIZE));
 function input(c, offset, bytes) {
   const expected = arena(c); expected.set(bytes, offset); new Uint8Array(c.memory.buffer).set(bytes, c.base + offset);
@@ -95,13 +95,13 @@ function compile(c, blocks) {
     ? {low: b.readUInt32LE(148), high: b.readUInt32LE(152), pointer: b.readUInt32LE(156), length: b.readUInt32LE(160)}
     : {generation: c.api.generation(), pointer: c.api.module_ptr() >>> 0, length: c.api.module_len() >>> 0};
   const bytes = Buffer.from(new Uint8Array(c.memory.buffer, binding.pointer, binding.length)), module = new WebAssembly.Module(bytes);
-  const reads = blocks.some(b => b.read), names = [c.owner === 'resident' ? 'guard_resident' : 'guard', ...(reads ? ['read16'] : [])];
+  const reads = blocks.some(b => b.read), names = [c.owner === 'resident' ? 'guard_resident' : 'guard', ...(reads ? ['cpu_read16'] : [])];
   assert.deepEqual(WebAssembly.Module.imports(module), [{module: 'env', name: 'memory', kind: 'memory'}, ...names.map(name => ({module: 'ring3', name, kind: 'function'}))]);
   assert.deepEqual(WebAssembly.Module.exports(module), [{name: 'run', kind: 'function'}]);
-  const imports = {...c.api, read16: address => {c.trace.push({access: 1, address: address >>> 0}); return c.api.read16(address);}};
+  const imports = {...c.api, cpu_read16: address => {c.trace.push({access: 1, address: address >>> 0}); return c.api.cpu_read16(address);}};
   const file = `module-${modules.length + 1}.wasm`; writeFileSync(join(output, file), bytes, {flag: 'wx'});
   modules.push({context: c.id, owner: c.owner, entries: c.entries, file, sha256: hash(bytes), instructions, blocks: blocks.length, bytes: bytesTotal, imports: names});
-  return {...binding, exitVersion: reads ? 2 : 1, run: new WebAssembly.Instance(module, {env: {memory: c.memory}, ring3: imports}).exports.run};
+  return {...binding, exitVersion: reads ? 6 : 1, run: new WebAssembly.Instance(module, {env: {memory: c.memory}, ring3: imports}).exports.run};
 }
 
 const regRows = Array.from({length: 8}, (_, source) => ({pc: PC + source * 0x20, source,
@@ -139,7 +139,7 @@ const canary = Buffer.from([0x55, 0xa5, 0x66, 0x67, 0xf0, 0xf2, 0xf3, 0xaa]);
 function open(owner, entries) {
   const instance = new WebAssembly.Instance(engine.module, {}), c = {id: ++counts.contexts, owner, entries, captures: 0,
     memory: instance.exports.memory, api: {}, mapped: new Set(), trace: []};
-  for (const name of ['open', 'close', 'arena_ptr', 'map', 'unmap', 'protect', 'upload', 'read8', 'read16',
+  for (const name of ['open', 'close', 'arena_ptr', 'map', 'unmap', 'protect', 'upload', 'read8', 'read16', 'cpu_read16', 'cpu_store16', 'cpu_store_resident16',
     'compile', 'compile_entries', 'compile_resident', 'compile_resident_entries', 'generation', 'module_ptr', 'module_len', 'guard', 'guard_resident'])
     c.api[name] = instance.exports['ring3_abi_v1_' + name];
   assert.equal(c.api.open(12, c.id, 0x57494a50), 0); c.base = c.api.arena_ptr() >>> 0; input(c, 0, initial);

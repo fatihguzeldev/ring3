@@ -49,14 +49,14 @@ const CASES = [
 ];
 assert.equal(CASES.length, 31, 'frozen finite family inventory');
 const FAMILIES = [['gdtr','0f0100'], ['idtr','0f0108'], ['ldtr','0f00c0'], ['tr','0f00c8'], ['msw','0f01e0']];
-const suffix = (c, name) => c.resident ? ({cpu_write:'cpu_write_resident',store16:'store_resident16'}[name]) : name;
+const suffix = (c, name) => c.resident ? ({cpu_write:'cpu_write_resident',cpu_store16:'cpu_store_resident16'}[name]) : name;
 const binding = (c, material) => c.resident ? material.binding : [];
 function helper(c, material, address, bytes, status = 0) {
-  const six = bytes.length === 6, name = suffix(c, six ? 'cpu_write' : 'store16');
+  const six = bytes.length === 6, name = suffix(c, six ? 'cpu_write' : 'cpu_store16');
   return {name, args:[...binding(c, material), address, ...(six ? [6,1] : [bytes.readUInt16LE(0)])], status};
 }
 function packet(want, width, fault = false) {
-  want.set(record('R3MH', 40, fault ? [1,0,2,0x6000,2,width] : [0,0,0,0,0,width], width === 6 ? 7 : 4), 100);
+  want.set(record('R3MH', 40, fault ? [1,0,2,0x6000,2,width] : [0,0,0,0,0,width], width === 6 ? 7 : 10), 100);
 }
 function result(input, spec, instructionLength, {pc = PC, fault = spec.fault, gates = false} = {}) {
   const want = Buffer.from(input), six = spec.bytes?.length === 12;
@@ -65,7 +65,7 @@ function result(input, spec, instructionLength, {pc = PC, fault = spec.fault, ga
     want.writeUInt32LE(pc + instructionLength,48);
     if (spec.eax !== undefined) want.writeUInt32LE(spec.eax,16);
   }
-  const version = six || spec.segmentFault ? 6 : spec.bytes ? 2 : gates ? 3 : 1;
+  const version = six || spec.segmentFault ? 6 : spec.bytes ? 6 : gates ? 3 : 1;
   if (spec.segmentFault) exit(want,spec.segmentFault,0,6);
   else if (fault) exit(want,5,0,version,[2,0x6000,2,spec.bytes.length/2]);
   else if (spec.debug) exit(want,16,1,7);
@@ -120,7 +120,7 @@ for (const resident of [false,true]) for (const entries of [false,true]) {
       h.protect(c,0x6000,5);
     }
     h.put(c,0,seed(c,spec));
-    const imports = spec.bytes ? [suffix(c,spec.bytes.length === 12 ? 'cpu_write' : 'store16')] : [];
+    const imports = spec.bytes ? [suffix(c,spec.bytes.length === 12 ? 'cpu_write' : 'cpu_store16')] : [];
     // Segment denial still has the generated write import but must never invoke it.
     if (spec.segmentFault) imports.push(suffix(c,'cpu_write'));
     const material = strict(c,spec.id+': bound query',PC,length,imports,0,extra);

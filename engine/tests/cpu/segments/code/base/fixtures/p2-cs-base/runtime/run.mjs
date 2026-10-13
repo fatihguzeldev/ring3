@@ -51,14 +51,14 @@ for (const resident of [false, true]) for (const entries of [false, true]) {
     h.upload(c, 0x20, words([0xa1a2a3a4])); h.upload(c, 0x4020, words([0x55667788])); h.upload(c, 0x6020, words([0x11223344]));
     const context = {bases: [0, 0x4000, 0, 0x6000, 0, 0]}, regs = [...registers]; regs[3] = 0x20;
     const input = state(h.initial, {...context, regs}); h.put(c, 0, input);
-    const material = h.compile(c, 'based operand body compilation', [[PC, 7]], ['read32']);
+    const material = h.compile(c, 'based operand body compilation', [[PC, 7]], ['cpu_read32']);
     if (material) {
-      const first = success(input, PC + 2, {reg: 0, value: 0x11223344, version: 2});
-      first.set(record('R3MH', 40, [0, 0x11223344, 0, 0, 0, 0]), 100);
-      h.observe(c, 'default DS load uses DS linear address', {input, want: first, helpers: [call('read32', [0x6020])]});
-      const second = success(first, PC + 5, {reg: 2, value: 0x55667788, version: 2});
-      second.set(record('R3MH', 40, [0, 0x55667788, 0, 0, 0, 0]), 100);
-      h.observe(c, 'CS override uses loaded CS base as data authority', {input: first, want: second, helpers: [call('read32', [0x4020])]});
+      const first = success(input, PC + 2, {reg: 0, value: 0x11223344, version: 6});
+      first.set(record('R3MH', 40, [0, 0x11223344, 0, 0, 0, 4], 10), 100);
+      h.observe(c, 'default DS load uses DS linear address', {input, want: first, helpers: [call('cpu_read32', [0x6020])]});
+      const second = success(first, PC + 5, {reg: 2, value: 0x55667788, version: 6});
+      second.set(record('R3MH', 40, [0, 0x55667788, 0, 0, 0, 4], 10), 100);
+      h.observe(c, 'CS override uses loaded CS base as data authority', {input: first, want: second, helpers: [call('cpu_read32', [0x4020])]});
       const denied = state(h.initial, {...context, regs, dsLimit: 0x1f}), fault = exit(Buffer.from(denied), 11, 0);
       fault.writeUInt32LE(2, 52);
       h.observe(c, 'logical DS limit faults before translated RAM read', {input: denied, want: fault});
@@ -166,13 +166,13 @@ for (const resident of [false, true]) for (const entries of [false, true]) {
   }
   for (const kind of ['read', 'store']) {
     const c = h.open(resident, entries, `late ${kind} helper sees changed live key`, [[PC], [0x5000], [0x6000, 3], [0x7000, 3]]);
-    const address = kind === 'read' ? 0x6000 : 0x7000, helper = kind === 'read' ? 'read32' : resident ? 'store_resident32' : 'store32';
+    const address = kind === 'read' ? 0x6000 : 0x7000, helper = kind === 'read' ? 'cpu_read32' : resident ? 'cpu_store_resident32' : 'cpu_store32';
     const code = Buffer.concat([Buffer.from([kind === 'read' ? 0xa1 : 0xa3]), words([address]), Buffer.from([0xeb, 0xfe])]);
     h.upload(c, PC, code); h.upload(c, 0x6000, words([0x0badcafe])); h.upload(c, 0x7000, Buffer.alloc(4096, 0x6b));
     const input = state(h.initial); h.put(c, 0, input); const source = h.compile(c, `late ${kind} flat body`, [[PC, 7]], [helper]);
     if (source) {
-      const context = {...based, csLimit: PC}, want = exit(setSegments(Buffer.from(input), context), 3, 0, 2); want.writeUInt32LE(2, 52);
-      if (kind === 'read') want.set(record('R3MH', 40, [0, 0x0badcafe, 0, 0, 0, 0]), 100);
+      const context = {...based, csLimit: PC}, want = exit(setSegments(Buffer.from(input), context), 3, 0, 6); want.writeUInt32LE(2, 52);
+      if (kind === 'read') want.set(record('R3MH', 40, [0, 0x0badcafe, 0, 0, 0, 4], 10), 100);
       c.hook = {name: helper, run: () => {const bytes = h.arena(c); setSegments(bytes, context); h.put(c, SEG, bytes.subarray(SEG, SEG + 64)); h.put(c, BASES, bytes.subarray(BASES, BASES + 40));}};
       h.observe(c, kind === 'read' ? 'stage-only real read publishes packet but changed key prevents register commit' : 'stateful store rejects changed key before RAM publication',
         {input, want, helpers: [call(helper, kind === 'read' ? [address] : bound(c, source, [address, registers[0]]), kind === 'read' ? 0 : 3)]});

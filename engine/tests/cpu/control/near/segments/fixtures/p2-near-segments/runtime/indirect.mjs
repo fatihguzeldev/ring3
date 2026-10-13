@@ -127,8 +127,8 @@ for (const resident of [false, true]) for (const entries of [false, true]) for (
   const helpers = [];
   const readWidth = row.noRead ? 0 : row.read ?? row.operandRead ?? 0;
   if (readWidth) {
-    want.set(packet('R3MH', 40, row.readFault ? [1, 0, 1, row.dataAddress, 1, readWidth] : [0, row.target ?? 0x2000, 0, 0, 0, readWidth === 2 ? 2 : 0], readWidth === 2 ? 2 : 1), 100);
-    helpers.push(readWidth === 2 ? 'read16' : 'read32');
+    want.set(packet('R3MH', 40, row.readFault ? [1, 0, 1, row.dataAddress, 1, readWidth] : [0, row.target ?? 0x2000, 0, 0, 0, readWidth], 10), 100);
+    helpers.push(readWidth === 2 ? 'cpu_read16' : 'cpu_read32');
   }
   if (success) {
     want.writeUInt32LE(row.target ?? PC + row.code.length, 48);
@@ -136,12 +136,12 @@ for (const resident of [false, true]) for (const entries of [false, true]) for (
     if (row.read) want.writeUInt32LE(STACK + row.read + (row.adjust ?? 0), 32);
     if (row.write) {
       want.writeUInt32LE(STACK - row.write, 32);
-      want.set(packet('R3MH', 40, [0, 0, 0, 0, 0, row.write === 2 ? 2 : 0], row.write === 2 ? 4 : 1), 100);
-      helpers.push(resident ? `store_resident${row.write * 8}` : `store${row.write * 8}`);
+      want.set(packet('R3MH', 40, [0, 0, 0, 0, 0, row.write], 10), 100);
+      helpers.push(resident ? `cpu_store_resident${row.write * 8}` : `cpu_store${row.write * 8}`);
       const returned = words([PC + row.code.length]); ramBefore.get(0x7000).set(returned.subarray(0, row.write), STACK - row.write - 0x7000);
     }
   }
-  want.set(packet('R3EX', 40, [reason, success ? 1 : 0, row.readFault ? 1 : 0, row.readFault ? row.dataAddress : 0, row.readFault ? 1 : 0, row.readFault ? readWidth : 0], reason >= 11 ? 6 : (row.read || row.operandRead || row.write ? 2 : 1)), 56);
+  want.set(packet('R3EX', 40, [reason, success ? 1 : 0, row.readFault ? 1 : 0, row.readFault ? row.dataAddress : 0, row.readFault ? 1 : 0, row.readFault ? readWidth : 0], reason >= 11 ? 6 : (row.read || row.operandRead || row.write ? 6 : 1)), 56);
   const status = run(base, base + 56, 1, base + 96), after = arena(), errors = [];
   const check = (condition, label) => {if (!condition) errors.push(label);};
   check(status === 0, 'run status');

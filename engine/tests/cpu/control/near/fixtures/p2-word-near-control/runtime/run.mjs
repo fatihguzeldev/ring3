@@ -43,7 +43,7 @@ const state = c => record('R3ST', 56, [...c.registers, c.pc, c.flags]);
 const exit = (reason, retired, f, version = 2) => record('R3EX', 40,
   [reason, retired, f?.detail ?? 0, f?.address ?? 0, f?.access ?? 0, f ? 2 : 0], version);
 const helper = (access, value = 0, f) => record('R3MH', 40,
-  [f ? 1 : 0, value, f?.detail ?? 0, f?.address ?? 0, f?.access ?? 0, 2], access === 1 ? 2 : 4);
+  [f ? 1 : 0, value, f?.detail ?? 0, f?.address ?? 0, f?.access ?? 0, 2], 10);
 const arena = c => Buffer.from(new Uint8Array(c.memory.buffer, c.base, SIZE));
 function input(c, offset, bytes) {
   const expected = arena(c); expected.set(bytes, offset); new Uint8Array(c.memory.buffer).set(bytes, c.base + offset);
@@ -109,19 +109,19 @@ function compile(c, blocks) {
     : {generation: c.api.generation(), pointer: c.api.module_ptr() >>> 0, length: c.api.module_len() >>> 0};
   const bytes = Buffer.from(new Uint8Array(c.memory.buffer, binding.pointer, binding.length)), module = new WebAssembly.Module(bytes);
   const reads = blocks.some(b => b.read), stores = blocks.some(b => b.store);
-  const names = [c.owner === 'resident' ? 'guard_resident' : 'guard', ...(reads ? ['read16'] : []), ...(stores ? [c.owner === 'resident' ? 'store_resident16' : 'store16'] : [])];
+  const names = [c.owner === 'resident' ? 'guard_resident' : 'guard', ...(reads ? ['cpu_read16'] : []), ...(stores ? [c.owner === 'resident' ? 'cpu_store_resident16' : 'cpu_store16'] : [])];
   assert.deepEqual(WebAssembly.Module.imports(module), [{module: 'env', name: 'memory', kind: 'memory'}, ...names.map(name => ({module: 'ring3', name, kind: 'function'}))]);
   assert.deepEqual(WebAssembly.Module.exports(module), [{name: 'run', kind: 'function'}]);
   const imports = {...c.api};
-  imports.read16 = address => {c.trace.push({access: 1, address: address >>> 0}); return c.api.read16(address);};
-  imports.store16 = (address, value) => {c.trace.push({access: 2, address: address >>> 0, value: value >>> 0}); return c.api.store16(address, value);};
-  imports.store_resident16 = (...args) => {
+  imports.cpu_read16 = address => {c.trace.push({access: 1, address: address >>> 0}); return c.api.cpu_read16(address);};
+  imports.cpu_store16 = (address, value) => {c.trace.push({access: 2, address: address >>> 0, value: value >>> 0}); return c.api.cpu_store16(address, value);};
+  imports.cpu_store_resident16 = (...args) => {
     assert.deepEqual(args.slice(0, 4).map(n => n >>> 0), [c.id, c.keyHigh, binding.low, binding.high]);
-    c.trace.push({access: 2, address: args[4] >>> 0, value: args[5] >>> 0}); return c.api.store_resident16(...args);
+    c.trace.push({access: 2, address: args[4] >>> 0, value: args[5] >>> 0}); return c.api.cpu_store_resident16(...args);
   };
   const file = `module-${modules.length + 1}.wasm`; writeFileSync(join(output, file), bytes, {flag: 'wx'});
   modules.push({context: c.id, owner: c.owner, entries: c.entries, file, sha256: hash(bytes), instructions, blocks: blocks.length, imports: names});
-  return {...binding, run: new WebAssembly.Instance(module, {env: {memory: c.memory}, ring3: imports}).exports.run, exitVersion: reads || stores ? 2 : 1};
+  return {...binding, run: new WebAssembly.Instance(module, {env: {memory: c.memory}, ring3: imports}).exports.run, exitVersion: reads || stores ? 6 : 1};
 }
 const mov = Buffer.from([0xbb, 0x44, 0x33, 0x22, 0x11]), canary = Buffer.from([0x55, 0xa5, 0x66, 0x67, 0xf0, 0xf2, 0xf3, 0xaa]);
 const calls = [
@@ -166,7 +166,7 @@ const liveBlocks = [block(liveCall),
 function open(owner, entries, smc) {
   const instance = new WebAssembly.Instance(engine.module, {}), c = {id: ++counts.contexts, keyHigh: 0x574e4354, owner, entries,
     memory: instance.exports.memory, api: {}, mapped: new Set(), captures: 0, trace: []};
-  for (const name of ['open', 'close', 'arena_ptr', 'map', 'unmap', 'protect', 'upload', 'read8', 'read16', 'store16', 'store_resident16',
+  for (const name of ['open', 'close', 'arena_ptr', 'map', 'unmap', 'protect', 'upload', 'read8', 'read16', 'cpu_read16', 'cpu_store16', 'cpu_store_resident16', 'store16', 'store_resident16',
     'compile', 'compile_entries', 'compile_resident', 'compile_resident_entries', 'generation', 'module_ptr', 'module_len', 'guard', 'guard_resident',
     'acknowledge_resident_installation', 'guard_dispatch_entry', 'find_installed_resident', 'dispatcher_module']) c.api[name] = instance.exports['ring3_abi_v1_' + name];
   assert.equal(c.api.open(12, c.id, c.keyHigh), 0); c.base = c.api.arena_ptr() >>> 0; input(c, 0, initial);

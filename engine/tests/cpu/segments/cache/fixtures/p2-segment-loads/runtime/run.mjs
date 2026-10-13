@@ -25,7 +25,7 @@ function seed(c,updates={},flags=0xcd7){const s={r:[0xabcd1234,0x12345678,0x2345
 function next(s,pc,updates={},flags=s.flags){const n={r:[...s.r],pc,flags};for(const[i,v]of Object.entries(updates))n.r[+i]=v>>>0;return n;}
 function open(bytes,owner='replacement'){
  const instance=new WebAssembly.Instance(engine.module,{}),c={id:cases.length+1,owner,memory:instance.exports.memory,api:{}};
- for(const n of ['open','close','arena_ptr','map','protect','upload','read8','read16','read32','store8','store16','store32','store_resident8','store_resident16','store_resident32','compile','compile_resident','module_ptr','module_len','guard','guard_resident','segment_load','segment_load_resident','segment_load_far','segment_load_far_resident','set_segment_base','configure_segment_descriptor']){
+ for(const n of ['open','close','arena_ptr','map','protect','upload','read8','read16','read32','cpu_read8','cpu_read16','cpu_read32','cpu_store8','cpu_store16','cpu_store32','cpu_store_resident8','cpu_store_resident16','cpu_store_resident32','store8','store16','store32','store_resident8','store_resident16','store_resident32','compile','compile_resident','module_ptr','module_len','guard','guard_resident','segment_load','segment_load_resident','segment_load_far','segment_load_far_resident','set_segment_base','configure_segment_descriptor']){
   c.api[n]=instance.exports['ring3_abi_v1_'+n];assert.equal(typeof c.api[n],'function',n);
  }
  host(c,'open',[8,c.id,0x5347]);c.base=c.api.arena_ptr()>>>0;input(c,0,initial);

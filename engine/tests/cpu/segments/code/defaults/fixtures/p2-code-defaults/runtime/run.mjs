@@ -34,7 +34,7 @@ function complete(input, pc, changes = {}, version = 1) {
   return exit(want, 1, 1, version);
 }
 function scalarPacket(want, width, value, store = false) {
-  want.set(record('R3MH', 40, [0, store ? 0 : value, 0, 0, 0, width === 4 ? 0 : width], store ? width === 2 ? 4 : 1 : width === 4 ? 1 : 2), 100);
+  want.set(record('R3MH', 40, [0, store ? 0 : value, 0, 0, 0, width], 10), 100);
 }
 function compile(c, name, code, input, helpers = [], pc = PC, linear = 0x5000) {
   h.upload(c, linear, code); h.put(c, 0, input); return h.compile(c, name, [[pc, code.length]], helpers);
@@ -56,12 +56,12 @@ for (const resident of [false, true]) for (const entries of [false, true]) {
     [regs[0], regs[2], regs[3], regs[6]] = [0x5000, 0x33330000, 0xabcd0020, 0x12340004];
     h.upload(c, 0x6024, words([0x11223344])); h.upload(c, 0xb000, words([0x55667788]));
     const input = seed({regs}), code = Buffer.from('8b10668b10678b1066678b10ebfe', 'hex');
-    if (compile(c, 'D16 all four operand-address combinations', code, input, ['read16', 'read32'])) {
+    if (compile(c, 'D16 all four operand-address combinations', code, input, ['cpu_read16', 'cpu_read32'])) {
       let next = input;
       for (const [pc, width, address, value, edx] of [[0x1002, 2, 0x6024, 0x3344, 0x33333344], [0x1005, 4, 0x6024, 0x11223344, 0x11223344],
         [0x1008, 2, 0xb000, 0x7788, 0x11227788], [0x100c, 4, 0xb000, 0x55667788, 0x55667788]]) {
-        const want = complete(next, pc, {2: edx}, 2); scalarPacket(want, width, value);
-        h.observe(c, 'operand width and effective-address width are independent', {input: next, want, helpers: [call(`read${width * 8}`, [address])]}); next = want;
+        const want = complete(next, pc, {2: edx}, 6); scalarPacket(want, width, value);
+        h.observe(c, 'operand width and effective-address width are independent', {input: next, want, helpers: [call(`cpu_read${width * 8}`, [address])]}); next = want;
       }
     } else h.skip(c, 'D16 independent size execution', 'D16 all four operand-address combinations'); h.host(c, 'close');
   }
@@ -71,12 +71,12 @@ for (const resident of [false, true]) for (const entries of [false, true]) {
     h.upload(c, 0x6020, Buffer.from('0312', 'hex')); h.upload(c, 0x6030, Buffer.from('0356', 'hex'));
     h.upload(c, 0x6043, Buffer.from([5])); h.upload(c, 0xaaaa6045, Buffer.from([7]));
     const input = seed({regs}), code = Buffer.from('a1200067a130000000d767d7ebfe', 'hex');
-    if (compile(c, 'D16 moffs16 moffs32 XLAT16 XLAT32', code, input, ['read16', 'read8'])) {
+    if (compile(c, 'D16 moffs16 moffs32 XLAT16 XLAT32', code, input, ['cpu_read16', 'cpu_read8'])) {
       let next = input;
       for (const [pc, width, address, value, eax] of [[0x1003, 2, 0x6020, 0x1203, 0xdead1203], [0x1009, 2, 0x6030, 0x5603, 0xdead5603],
         [0x100a, 1, 0x6043, 5, 0xdead5605], [0x100c, 1, 0xaaaa6045, 7, 0xdead5607]]) {
-        const want = complete(next, pc, {0: eax}, 2); scalarPacket(want, width, value);
-        h.observe(c, 'moffs and XLAT honor decoded address size', {input: next, want, helpers: [call(`read${width * 8}`, [address])]}); next = want;
+        const want = complete(next, pc, {0: eax}, 6); scalarPacket(want, width, value);
+        h.observe(c, 'moffs and XLAT honor decoded address size', {input: next, want, helpers: [call(`cpu_read${width * 8}`, [address])]}); next = want;
       }
     } else h.skip(c, 'D16 moffs XLAT execution', 'D16 moffs16 moffs32 XLAT16 XLAT32'); h.host(c, 'close');
   }
@@ -86,7 +86,7 @@ for (const resident of [false, true]) for (const entries of [false, true]) {
     h.upload(c, 0x6020, Buffer.from('3412', 'hex'));
     h.host(c, 'configure_segment_descriptor_raw', [0x43, 0x600000ff, 0x0040f200]);
     const input = seed({regs, bases: [0, 0, 0, 0, 0, 0]}), load = helper(c, 'segment_load');
-    const material = compile(c, 'D16 MOV DS AX followed by word data load', Buffer.from('8ed88b17ebfe', 'hex'), input, [load, 'read16'], PC, PC);
+    const material = compile(c, 'D16 MOV DS AX followed by word data load', Buffer.from('8ed88b17ebfe', 'hex'), input, [load, 'cpu_read16'], PC, PC);
     if (material) {
       const first = complete(input, 0x1002, {}, 6);
       first.writeUInt16LE(0x43, SEG + 22); first.writeUInt32LE(0xf23000ff, SEG + 40); first.writeUInt32LE(0x6000, BASES + 28);
@@ -94,7 +94,7 @@ for (const resident of [false, true]) for (const entries of [false, true]) {
       h.observe(c, 'segment helper keeps current-v3 D16 with CS base zero', {input, want: first,
         helpers: [call(load, bound(c, material, [3, 0x43]))]});
       const second = complete(first, 0x1004, {2: 0x34561234}, 6); scalarPacket(second, 2, 0x1234);
-      h.observe(c, 'retained next word instruction uses newly loaded DS authority', {input: first, want: second, helpers: [call('read16', [0x6020])]});
+      h.observe(c, 'retained next word instruction uses newly loaded DS authority', {input: first, want: second, helpers: [call('cpu_read16', [0x6020])]});
     } else h.skip(c, 'D16 loaded DS continuation', 'D16 MOV DS AX followed by word data load'); h.host(c, 'close');
   }
   for (const address32 of [false, true]) {
@@ -103,18 +103,18 @@ for (const resident of [false, true]) for (const entries of [false, true]) {
     const bases = [address32 ? 0x9000 : 0x7000, 0x4000, 0, 0x6000, 0, 0], input = seed({regs, bases});
     const source = address32 ? 0x7020 : 0x6020, destination = address32 ? 0xb040 : 0x7040;
     h.upload(c, source, Buffer.from('3412', 'hex')); h.upload(c, destination, Buffer.from('aaaa', 'hex'));
-    const code = Buffer.from(address32 ? '67f3a5ebfe' : 'f3a5ebfe', 'hex'), store = resident ? 'store_resident16' : 'store16';
-    const material = compile(c, 'D16 REP MOVSW decoded pointer width', code, input, ['read16', store]);
+    const code = Buffer.from(address32 ? '67f3a5ebfe' : 'f3a5ebfe', 'hex'), store = resident ? 'cpu_store_resident16' : 'cpu_store16';
+    const material = compile(c, 'D16 REP MOVSW decoded pointer width', code, input, ['cpu_read16', store]);
     if (material) {
       const want = complete(input, address32 ? 0x1003 : 0x1002,
-        {1: address32 ? 0 : 0xabcd0000, 6: address32 ? 0x1022 : 0x12340022, 7: address32 ? 0x2042 : 0x56780042}, 2);
+        {1: address32 ? 0 : 0xabcd0000, 6: address32 ? 0x1022 : 0x12340022, 7: address32 ? 0x2042 : 0x56780042}, 6);
       scalarPacket(want, 2, 0, true); want.writeUInt32LE(1, 4604);
       const wantRAM = h.ram(c); writeRAM(wantRAM, destination, Buffer.from('3412', 'hex'));
       h.observe(c, 'REP advances active count and indices with inactive halves preserved', {input, want, wantRAM,
-        helpers: [call('read16', [source]), call(store, bound(c, material, [destination, 0x1234]))]});
+        helpers: [call('cpu_read16', [source]), call(store, bound(c, material, [destination, 0x1234]))]});
       if (!address32) {
         const zeroRegs = [...regs]; zeroRegs[1] = 0xabcd0000; zeroRegs[6] = 0xffff0000; zeroRegs[7] = 0xffff0000;
-        const zero = seed({regs: zeroRegs, bases}), zeroWant = complete(zero, 0x1002, {}, 2); zeroWant.writeUInt32LE(1, 4604);
+        const zero = seed({regs: zeroRegs, bases}), zeroWant = complete(zero, 0x1002, {}, 6); zeroWant.writeUInt32LE(1, 4604);
         h.observe(c, 'zero CX ignores high ECX and touches no guest address', {input: zero, want: zeroWant, kind: 'control'});
       }
     } else h.skip(c, 'D16 REP execution', 'D16 REP MOVSW decoded pointer width'); h.host(c, 'close');
@@ -122,15 +122,15 @@ for (const resident of [false, true]) for (const entries of [false, true]) {
   {
     const c = h.open(resident, entries, 'D16 stack operand width with independent B32 pointer', [[0x5000], [0x7000, 3]]), input = seed();
     h.upload(c, 0x7000, Buffer.alloc(4096, 0x6b));
-    const store16 = resident ? 'store_resident16' : 'store16', store32 = resident ? 'store_resident32' : 'store32';
-    const material = compile(c, 'D16 PUSH POP word dword body', Buffer.from('505866506658ebfe', 'hex'), input, [store16, store32, 'read16', 'read32']);
+    const store16 = resident ? 'cpu_store_resident16' : 'cpu_store16', store32 = resident ? 'cpu_store_resident32' : 'cpu_store32';
+    const material = compile(c, 'D16 PUSH POP word dword body', Buffer.from('505866506658ebfe', 'hex'), input, [store16, store32, 'cpu_read16', 'cpu_read32']);
     if (material) {
       let next = input, ram = h.ram(c);
       for (const [pc, width, store, address, esp, value] of [[0x1001, 2, true, 0x77fe, 0x77fe, 0x5678], [0x1002, 2, false, 0x77fe, 0x7800, 0x5678],
         [0x1004, 4, true, 0x77fc, 0x77fc, 0x12345678], [0x1006, 4, false, 0x77fc, 0x7800, 0x12345678]]) {
-        const want = complete(next, pc, {4: esp}, 2); scalarPacket(want, width, value, store);
+        const want = complete(next, pc, {4: esp}, 6); scalarPacket(want, width, value, store);
         if (store) writeRAM(ram, address, words([value]).subarray(0, width));
-        const name = store ? width === 2 ? store16 : store32 : `read${width * 8}`;
+        const name = store ? width === 2 ? store16 : store32 : `cpu_read${width * 8}`;
         h.observe(c, 'stack value width changes while SS.B32 remains independent', {input: next, want, wantRAM: ram,
           helpers: [call(name, store ? bound(c, material, [address, value]) : [address])]}); next = want;
       }
@@ -140,11 +140,11 @@ for (const resident of [false, true]) for (const entries of [false, true]) {
     const c = h.open(resident, entries, 'D16 near CALL RET operand-selected frame', [[0x5000], [0x6000], [0x7000, 3]]);
     const code = Buffer.from(word ? 'e8fd0f' : '66e8fa0f0000', 'hex'), ret = Buffer.from(word ? 'c3' : '66c3', 'hex');
     h.upload(c, 0x5000, code); h.upload(c, 0x6000, ret); h.upload(c, 0x7000, Buffer.alloc(4096, 0x6b));
-    const input = seed(), store = resident ? `store_resident${word ? 16 : 32}` : `store${word ? 16 : 32}`, read = `read${word ? 16 : 32}`;
+    const input = seed(), store = resident ? `cpu_store_resident${word ? 16 : 32}` : `cpu_store${word ? 16 : 32}`, read = `cpu_read${word ? 16 : 32}`;
     h.put(c, 0, input); const material = h.compile(c, 'D16 near call and return two-block capture', [[PC, code.length], [0x2000, ret.length]], [store, read]);
     if (material) {
       const returned = PC + code.length, width = word ? 2 : 4, address = 0x7800 - width;
-      const want = exit(Buffer.from(input), 3, 2, 2); want.writeUInt32LE(returned, 48); want.writeUInt32LE(2, 52); scalarPacket(want, width, returned);
+      const want = exit(Buffer.from(input), 3, 2, 6); want.writeUInt32LE(returned, 48); want.writeUInt32LE(2, 52); scalarPacket(want, width, returned);
       const wantRAM = h.ram(c); writeRAM(wantRAM, address, words([returned]).subarray(0, width));
       h.observe(c, 'near CALL RET uses operand width and commits each transaction once', {input, want, wantRAM, budget: 3,
         helpers: [call(store, bound(c, material, [address, returned])), call(read, [address])]});

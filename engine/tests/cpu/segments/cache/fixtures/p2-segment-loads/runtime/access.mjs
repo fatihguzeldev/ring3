@@ -71,8 +71,8 @@ function run(c, fn, row, state) {
   assert.equal(fn.run(c.base, c.base + 56, row.budget ?? 1, c.base + 96), 0, row.name);
   const after = arena(c), observed = c.calls.slice(at);
   if (row.helperFault) {
-    assert.deepEqual(observed, ['read32'], `${row.name}: source page access precedes stack authority`);
-    expected.set(record('R3MH', [1, 0, 1, 0x7000, 1, 4]), 100);
+    assert.deepEqual(observed, ['cpu_read32'], `${row.name}: source page access precedes stack authority`);
+    expected.set(record('R3MH', [1, 0, 1, 0x7000, 1, 4], 10), 100);
   } else if (row.fault || retired === 0 || !fn.memory) assert.equal(observed.length, 0, `${row.name}: authority precedes page helpers`);
   else {
     expected.set(after.subarray(100, 4236), 100);

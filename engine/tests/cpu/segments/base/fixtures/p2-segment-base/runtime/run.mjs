@@ -101,7 +101,7 @@ function open(owner, entries, instruction, label) {
   const length = resident ? b.readUInt32LE(160) : c.api.module_len() >>> 0;
   const bytes = Buffer.from(new Uint8Array(c.memory.buffer, pointer, length)), module = new WebAssembly.Module(bytes);
   const imports = WebAssembly.Module.imports(module), ring3 = {...c.api};
-  c.exitVersion = imports.some(row => /^(segment_load|x87)/.test(row.name)) ? 6 : 2;
+  c.exitVersion = imports.some(row => /^(segment_load|x87|cpu_read(?:8|16|32)$|cpu_store)/.test(row.name)) ? 6 : 2;
   for (const imp of imports.filter(row => row.module === 'ring3' && !row.name.startsWith('guard'))) {
     ring3[imp.name] = (...args) => {
       const before = arena(c), status = c.api[imp.name](...args), after = arena(c), allowed = Buffer.from(before);
@@ -149,8 +149,8 @@ function run(c, label, state, {budget = 1, retired = budget, reason = 1, fault =
     arena: {file: arenaFile, bytes: SIZE, sha256: hash(after)}, ram: {file: ramFile, pages, bytes: afterRam.length, sha256: hash(afterRam)}});
 }
 function loadCall(c, target, base) {return {name: c.owner === 'resident' ? 'segment_load_resident' : 'segment_load', args: [target, 0x43], packet: packet([0, base, 0, 0, 0, 0], 7)};}
-const readCall = (address, value) => ({name: 'read32', args: [address], packet: packet([0, value, 0, 0, 0, 0])});
-function storeCall(c, address, value) {return {name: c.owner === 'resident' ? 'store_resident32' : 'store32', args: [address, value], packet: packet([0, 0, 0, 0, 0, 0])};}
+const readCall = (address, value) => ({name: 'cpu_read32', args: [address], packet: packet([0, value, 0, 0, 0, 4], 10)});
+function storeCall(c, address, value) {return {name: c.owner === 'resident' ? 'cpu_store_resident32' : 'cpu_store32', args: [address, value], packet: packet([0, 0, 0, 0, 0, 4], 10)};}
 function hostLoad(c, target, base, version = 2) {
   const before = arena(c), records = loadedRecords(target, base, 0xff, version), expected = Buffer.from(before);
   expected.set(records.segment, SEG); expected.set(records.companion, BASES); expected.set(packet([0, base, 0, 0, 0, 0], 7), 100);

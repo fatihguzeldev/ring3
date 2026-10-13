@@ -29,7 +29,7 @@ function seed(c,{count=3,source=0x5010,destination=0x6010,eax=0xabcd1234,df=fals
 }
 function open(owner,bytes,entries=false,tail=[0xeb,0xfe]){
  const instance=new WebAssembly.Instance(engine.module,{}),c={id:cases.length+1,owner,entries,memory:instance.exports.memory,api:{},cancelAfter:0,stores:0};
- for(const n of ['open','close','arena_ptr','map','protect','upload','read8','read16','read32','compile','compile_entries','compile_resident','compile_resident_entries','generation','module_ptr','module_len','guard','guard_resident','store8','store16','store32','store_resident8','store_resident16','store_resident32','acknowledge_resident_installation','dispatcher_module','guard_dispatch_entry','find_installed_resident'])c.api[n]=instance.exports['ring3_abi_v1_'+n];
+ for(const n of ['open','close','arena_ptr','map','protect','upload','read8','read16','read32','cpu_read8','cpu_read16','cpu_read32','cpu_store8','cpu_store16','cpu_store32','cpu_store_resident8','cpu_store_resident16','cpu_store_resident32','compile','compile_entries','compile_resident','compile_resident_entries','generation','module_ptr','module_len','guard','guard_resident','store8','store16','store32','store_resident8','store_resident16','store_resident32','acknowledge_resident_installation','dispatcher_module','guard_dispatch_entry','find_installed_resident'])c.api[n]=instance.exports['ring3_abi_v1_'+n];
  host(c,'open',[8,c.id,0x5250]);c.base=c.api.arena_ptr()>>>0;input(c,0,initial);
  for(const [p,permission] of [[0x1000,7],[0x5000,3],[0x6000,3]])host(c,'map',[p,1,permission]);
  const code=Buffer.from([...bytes,...tail]);upload(c,0x1000,code);host(c,'protect',[0x1000,1,5]);
@@ -42,7 +42,7 @@ function open(owner,bytes,entries=false,tail=[0xeb,0xfe]){
   ring3[imp.name]=(...args)=>{const before=arena(c),status=c.api[imp.name](...args),after=arena(c);before.set(after.subarray(100,140),100);
    assert.deepEqual(after,before,'canonical helper only changes40B');
    helpers.push({context:c.id,name:imp.name,args:args.map(x=>x>>>0),status,packet:after.subarray(100,140).toString('hex')});
-   if(imp.name.startsWith('store')&&status===0&&++c.stores===c.cancelAfter)input(c,96,Buffer.from([1,0,0,0]));
+   if(imp.name.startsWith('cpu_store')&&status===0&&++c.stores===c.cancelAfter)input(c,96,Buffer.from([1,0,0,0]));
    return status;
   };
  }
@@ -144,7 +144,7 @@ for(const segment of [4,5]){
  const c=open('replacement',[0x64,0xf3,0xad]);
  const a=arena(c);a.writeUInt32LE(0x1000,SEGMENTS+48);input(c,SEGMENTS,a.subarray(SEGMENTS,SEGMENTS+64));
  const s=seed(c,{count:1,source:0xffffefff});
- run(c,1,s,{reason:5,work:0,fault:[3,0xffffffff,1,4],label:'LODSD source overflow before publication'});host(c,'close');
+ run(c,1,s,{reason:5,work:0,fault:[1,0xffffffff,1,4],label:'LODSD translated high linear leg unmapped before publication'});host(c,'close');
 }
 // ordinary explicit memory uses FS/GS; LEA and implicit SS stack addresses stay offsets/flat.
 for(const segment of [4,5]){
