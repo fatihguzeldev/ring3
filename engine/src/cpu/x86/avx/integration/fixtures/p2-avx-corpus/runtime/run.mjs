@@ -4,6 +4,7 @@ import {readFileSync, readdirSync, writeFileSync} from 'node:fs';
 import {join} from 'node:path';
 import {readEngine} from '../../../../../../../../tests/support/wasm/engine.mjs';
 import {assertEngineExports} from '../../../../../../../../tests/support/wasm/exports.mjs';
+import {ARENA_SIZE} from '../../../../../../../../tests/support/wasm/arena.mjs';
 
 const [enginePath, output, root] = process.argv.slice(2), engine = readEngine(enginePath);
 const receipt = assertEngineExports(engine.module, root);
@@ -14,14 +15,14 @@ function ownerFiles(path) {
     return item.isDirectory() ? ownerFiles(child) : /\.(rs|tsv|mjs)$/.test(item.name) ? [child] : [];
   });
 }
-const sourcePaths = [...new Set([...receipt.sourcePaths, 'engine/tests/support/wasm/engine.mjs',
+const sourcePaths = [...new Set([...receipt.sourcePaths, 'engine/tests/support/wasm/engine.mjs', 'engine/tests/support/wasm/arena.mjs',
   ...ownerFiles('engine/src/cpu/x86/avx'), ...ownerFiles('engine/src/cpu/x86/decode/avx'), ...ownerFiles('engine/src/cpu/dbt/wasm/avx'),
   'engine/src/cpu/x86/simd.rs', 'engine/src/cpu/dbt/wasm/cpu_result.rs', 'engine/src/cpu/dbt/wasm/emitter.rs',
   'engine/src/cpu/dbt/wasm/integer/dispatch.rs', 'engine/src/cpu/dbt/wasm/memory.rs', 'engine/src/process/cpu/avx.rs',
   'engine/src/abi/arena.rs', 'engine/src/abi/x86/avx.rs', 'engine/src/abi/x86/ymm.rs', 'engine/src/cpu/x86/capabilities.rs'])].sort();
 const pins = () => Object.fromEntries(sourcePaths.map(path => [path, hash(readFileSync(join(root, path)))]));
 const sourcePins = pins(), cases = JSON.parse(readFileSync(join(output, 'cases.json'), 'utf8'));
-const SIZE = 4756, PAGE = 0x5000, ADDRESS = 0x5020, PC = 0x1000, T = 140, keyHigh = 0x434f5250;
+const SIZE = ARENA_SIZE, PAGE = 0x5000, ADDRESS = 0x5020, PC = 0x1000, T = 140, keyHigh = 0x434f5250;
 const files = Object.fromEntries(['input', 'expected', 'ram', 'expected-ram'].map(name => [name, readFileSync(join(output, name + '.bin'))]));
 assert.equal(cases.length, 688); assert.equal(new Set(cases.map(row => row.name)).size, 374);
 for (const name of ['input', 'expected']) assert.equal(files[name].length, SIZE * cases.length);
