@@ -61,7 +61,7 @@ const REGISTERS: [Register32; 8] = [
 fn admit(bytes: &[u8]) {
     let mut explicit = engine(bytes);
     explicit.protect(0x1000, 1, 4).unwrap();
-    explicit.arena_mut().unwrap().fill(0xa5);
+    crate::support_arena::poison_preserving_code_context(&mut explicit, |arena| arena.fill(0xa5));
     explicit.arena_mut().unwrap()[140..148].copy_from_slice(&[
         0,
         0x10,
@@ -83,7 +83,7 @@ fn admit(bytes: &[u8]) {
     assert!(explicit.memory().unwrap().is_code_current(&snapshot));
     let mut entries = engine(bytes);
     entries.protect(0x1000, 1, 4).unwrap();
-    entries.arena_mut().unwrap().fill(0xa5);
+    crate::support_arena::poison_preserving_code_context(&mut entries, |arena| arena.fill(0xa5));
     entries.arena_mut().unwrap()[140..144].copy_from_slice(&[0, 0x10, 0, 0]);
     let arena = entries.arena().to_vec();
     assert_eq!(entries.compile_entries(1, 0), Ok(1));

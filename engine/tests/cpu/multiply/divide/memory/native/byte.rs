@@ -12,7 +12,8 @@ fn admission(modrm: u8) {
         .copy_from_slice(&bytes);
     engine.upload(0x1000, bytes.len() as u32).unwrap();
     engine.protect(0x1000, 1, 4).unwrap();
-    let transfer = &mut engine.arena_mut().unwrap()[TRANSFER_OFFSET..];
+    let transfer = &mut engine.arena_mut().unwrap()
+        [TRANSFER_OFFSET..TRANSFER_OFFSET + ring3_engine::abi::arena::TRANSFER_SIZE];
     transfer[..4].copy_from_slice(&0x1000_u32.to_le_bytes());
     transfer[4..8].copy_from_slice(&(bytes.len() as u32).to_le_bytes());
     engine.compile(1).expect("memory byte divide admission");

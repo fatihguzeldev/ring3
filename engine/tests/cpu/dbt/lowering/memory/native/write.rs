@@ -183,7 +183,9 @@ fn admit(bytes: &[u8]) {
     for entries in [false, true] {
         let mut instance = engine(bytes);
         instance.protect(0x1000, 1, 4).unwrap();
-        instance.arena_mut().unwrap().fill(0xa5);
+        crate::support_arena::poison_preserving_code_context(&mut instance, |arena| {
+            arena.fill(0xa5)
+        });
         describe(&mut instance, 0x1000, bytes.len());
         let arena = instance.arena().to_vec();
         let snapshot = instance
@@ -565,7 +567,9 @@ fn narrow_prefix_and_declared_span_errors_remain_precise() {
                 for entries in [false, true] {
                     let mut instance = engine(&bytes);
                     instance.protect(0x1000, 1, 4).unwrap();
-                    instance.arena_mut().unwrap().fill(0xa5);
+                    crate::support_arena::poison_preserving_code_context(&mut instance, |arena| {
+                        arena.fill(0xa5)
+                    });
                     describe(&mut instance, 0x1000, bytes.len());
                     let before = instance.arena().to_vec();
                     let memory = instance.memory().unwrap();

@@ -1,3 +1,6 @@
+#[path = "../../support/cpu/arena.rs"]
+mod support_arena;
+
 #[path = "../../support/cpu/prefix/byte.rs"]
 mod support_byte_prefix_admission;
 

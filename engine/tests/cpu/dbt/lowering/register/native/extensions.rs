@@ -184,7 +184,7 @@ fn embedded(bytes: &[u8]) -> EngineInstance {
     engine.map(0x1000, 1, 7).unwrap();
     engine.arena_mut().unwrap()[140..140 + bytes.len()].copy_from_slice(bytes);
     engine.upload(0x1000, bytes.len() as u32).unwrap();
-    engine.arena_mut().unwrap().fill(0xa5);
+    crate::support_arena::poison_preserving_code_context(&mut engine, |arena| arena.fill(0xa5));
     engine.protect(0x1000, 1, 4).unwrap();
     engine
 }

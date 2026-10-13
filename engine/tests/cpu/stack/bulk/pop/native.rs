@@ -448,9 +448,11 @@ fn pop_all_late_refusal_preserves_full_arena_and_both_owners() {
     };
     for is_resident in [false, true] {
         for entries in [false, true] {
-            for (index, byte) in engine.arena_mut().unwrap().iter_mut().enumerate() {
-                *byte = (index.wrapping_mul(37).wrapping_add(11) & 0xff) as u8;
-            }
+            crate::support_arena::poison_preserving_code_context(&mut engine, |arena| {
+                for (index, byte) in arena.iter_mut().enumerate() {
+                    *byte = (index.wrapping_mul(37).wrapping_add(11) & 0xff) as u8;
+                }
+            });
             let descriptor = &mut engine.arena_mut().unwrap()[TRANSFER_OFFSET..TRANSFER_OFFSET + 8];
             descriptor[..4].copy_from_slice(&CODE.to_le_bytes());
             descriptor[4..]

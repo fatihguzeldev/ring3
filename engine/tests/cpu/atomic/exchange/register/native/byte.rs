@@ -113,7 +113,8 @@ fn code(pc: u32, bytes: &[u8]) -> EngineInstance {
 }
 
 fn describe(engine: &mut EngineInstance, pc: u32, length: u32, entries: bool) {
-    let transfer = &mut engine.arena_mut().unwrap()[TRANSFER_OFFSET..];
+    let transfer = &mut engine.arena_mut().unwrap()
+        [TRANSFER_OFFSET..TRANSFER_OFFSET + ring3_engine::abi::arena::TRANSFER_SIZE];
     transfer.fill(0xa5);
     transfer[..4].copy_from_slice(&pc.to_le_bytes());
     transfer[4..8].copy_from_slice(&if entries { 0 } else { length }.to_le_bytes());

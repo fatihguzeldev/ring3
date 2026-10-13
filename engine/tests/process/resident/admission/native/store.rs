@@ -56,7 +56,8 @@ fn upload(engine: &mut EngineInstance, pc: u32, bytes: &[u8]) {
 }
 
 fn describe(engine: &mut EngineInstance, specs: &[(u32, usize)]) {
-    let transfer = &mut engine.arena_mut().unwrap()[140..];
+    let transfer =
+        &mut engine.arena_mut().unwrap()[140..140 + ring3_engine::abi::arena::TRANSFER_SIZE];
     transfer.fill(0xa5);
     for (index, &(pc, length)) in specs.iter().enumerate() {
         transfer[index * 8..index * 8 + 4].copy_from_slice(&pc.to_le_bytes());

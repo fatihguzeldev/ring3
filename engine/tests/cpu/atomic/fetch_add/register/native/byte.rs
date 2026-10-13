@@ -137,7 +137,8 @@ fn code(pc: u32, bytes: &[u8]) -> EngineInstance {
 }
 
 fn describe(engine: &mut EngineInstance, rows: &[(u32, u32)], entries: bool) {
-    let transfer = &mut engine.arena_mut().unwrap()[TRANSFER_OFFSET..];
+    let transfer = &mut engine.arena_mut().unwrap()
+        [TRANSFER_OFFSET..TRANSFER_OFFSET + ring3_engine::abi::arena::TRANSFER_SIZE];
     transfer.fill(0xa5);
     let stride = if entries { 4 } else { 8 };
     for (index, &(pc, length)) in rows.iter().enumerate() {

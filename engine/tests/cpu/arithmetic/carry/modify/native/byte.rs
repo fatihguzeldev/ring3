@@ -84,7 +84,8 @@ fn code(pc: u32, bytes: &[u8], execute_only: bool) -> EngineInstance {
 }
 
 fn describe(engine: &mut EngineInstance, pc: u32, length: usize, entries: bool) {
-    let transfer = &mut engine.arena_mut().unwrap()[140..];
+    let transfer =
+        &mut engine.arena_mut().unwrap()[140..140 + ring3_engine::abi::arena::TRANSFER_SIZE];
     transfer.fill(0xa5);
     transfer[..4].copy_from_slice(&pc.to_le_bytes());
     if !entries {
@@ -468,7 +469,8 @@ fn family_batches_require_bound_read8_and_store8_in_four_profiles_with_existing_
     for owner in [Owner::Replacement, Owner::Resident] {
         for entries in [false, true] {
             let mut engine = code(CODE, &bytes, true);
-            let transfer = &mut engine.arena_mut().unwrap()[140..];
+            let transfer = &mut engine.arena_mut().unwrap()
+                [140..140 + ring3_engine::abi::arena::TRANSFER_SIZE];
             transfer.fill(0xa5);
             for index in 0..8 {
                 let stride = if entries { 4 } else { 8 };

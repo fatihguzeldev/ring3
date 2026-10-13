@@ -29,7 +29,8 @@ fn memory_imul_two_operand_admits_with_unmapped_data() {
                     .resolve(GuestAddress(0), Access::Read)
                     .is_err()
             );
-            let transfer = &mut engine.arena_mut().unwrap()[140..];
+            let transfer = &mut engine.arena_mut().unwrap()
+                [140..140 + ring3_engine::abi::arena::TRANSFER_SIZE];
             transfer[..4].copy_from_slice(&0x1000_u32.to_le_bytes());
             if !entries {
                 transfer[4..8].copy_from_slice(&(bytes.len() as u32).to_le_bytes());
@@ -85,7 +86,8 @@ fn code(pc: u32, bytes: &[u8], execute_only: bool) -> EngineInstance {
 }
 
 fn describe(engine: &mut EngineInstance, specs: &[(u32, usize)], entries: bool) {
-    let transfer = &mut engine.arena_mut().unwrap()[140..];
+    let transfer =
+        &mut engine.arena_mut().unwrap()[140..140 + ring3_engine::abi::arena::TRANSFER_SIZE];
     transfer.fill(0xa5);
     let stride = if entries { 4 } else { 8 };
     for (index, (pc, length)) in specs.iter().enumerate() {
@@ -223,7 +225,9 @@ fn three_memory_forms_and_both_zero_immediates_admit_without_reading_data() {
                     .unwrap()
                     .snapshot_code(GuestAddress(CODE), length)
                     .unwrap();
-                engine.arena_mut().unwrap().fill(0xa5);
+                crate::support_arena::poison_preserving_code_context(&mut engine, |arena| {
+                    arena.fill(0xa5)
+                });
                 describe(&mut engine, &[(CODE, length)], entries);
                 let before = engine.arena().to_vec();
                 let id = compile(&mut engine, owner, entries, 1).unwrap();

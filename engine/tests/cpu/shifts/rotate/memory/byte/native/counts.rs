@@ -221,7 +221,8 @@ fn spec(pc: u32, length: usize) -> BlockSpec {
 }
 
 fn describe(engine: &mut EngineInstance, specs: &[(u32, usize)], entries: bool) {
-    let transfer = &mut engine.arena_mut().unwrap()[TRANSFER_OFFSET..];
+    let transfer = &mut engine.arena_mut().unwrap()
+        [TRANSFER_OFFSET..TRANSFER_OFFSET + ring3_engine::abi::arena::TRANSFER_SIZE];
     transfer.fill(0xa5);
     for (index, &(pc, length)) in specs.iter().enumerate() {
         let offset = index * if entries { 4 } else { 8 };

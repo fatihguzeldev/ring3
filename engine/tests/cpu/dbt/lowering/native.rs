@@ -1,3 +1,6 @@
+#[path = "../../../support/cpu/arena.rs"]
+mod support_arena;
+
 #[path = "../../../support/cpu/prefix/admission.rs"]
 mod support_prefix_admission;
 

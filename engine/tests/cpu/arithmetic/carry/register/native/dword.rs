@@ -547,7 +547,8 @@ fn upload(engine: &mut EngineInstance, pc: u32, bytes: &[u8]) {
 }
 
 fn describe(engine: &mut EngineInstance, pc: u32, length: usize, entries: bool) {
-    let transfer = &mut engine.arena_mut().unwrap()[140..];
+    let transfer =
+        &mut engine.arena_mut().unwrap()[140..140 + ring3_engine::abi::arena::TRANSFER_SIZE];
     transfer.fill(0xa5);
     transfer[..4].copy_from_slice(&pc.to_le_bytes());
     if !entries {
@@ -599,7 +600,9 @@ fn bound_explicit_and_entry_forms_admit_without_data_and_preserve_arena() {
                     .unwrap()
                     .snapshot_code(GuestAddress(CODE), length)
                     .unwrap();
-                engine.arena_mut().unwrap().fill(0xa5);
+                crate::support_arena::poison_preserving_code_context(&mut engine, |arena| {
+                    arena.fill(0xa5)
+                });
                 describe(&mut engine, CODE, length, entries);
                 let before = engine.arena().to_vec();
                 let id = compile(&mut engine, owner, entries).unwrap();

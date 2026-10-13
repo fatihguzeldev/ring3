@@ -35,7 +35,8 @@ fn fixture() -> EngineInstance {
 }
 
 fn describe(engine: &mut EngineInstance, pc: u32, length: u32) {
-    let transfer = &mut engine.arena_mut().unwrap()[140..];
+    let transfer =
+        &mut engine.arena_mut().unwrap()[140..140 + ring3_engine::abi::arena::TRANSFER_SIZE];
     transfer.fill(0xa5);
     transfer[..4].copy_from_slice(&pc.to_le_bytes());
     transfer[4..8].copy_from_slice(&length.to_le_bytes());

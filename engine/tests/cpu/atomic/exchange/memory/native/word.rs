@@ -787,9 +787,11 @@ fn memory_xchg16_late_refusal_keeps_dirty_full_arena_and_both_existing_owners() 
     );
     for is_resident in [false, true] {
         for entries in [false, true] {
-            for (index, byte) in engine.arena_mut().unwrap().iter_mut().enumerate() {
-                *byte = (index.wrapping_mul(37).wrapping_add(11) & 0xff) as u8;
-            }
+            crate::support_arena::poison_preserving_code_context(&mut engine, |arena| {
+                for (index, byte) in arena.iter_mut().enumerate() {
+                    *byte = (index.wrapping_mul(37).wrapping_add(11) & 0xff) as u8;
+                }
+            });
             describe(&mut engine, CODE, 10, entries);
             let before = engine.arena().to_vec();
             assert_eq!(before.len(), ring3_engine::abi::arena::ARENA_SIZE);

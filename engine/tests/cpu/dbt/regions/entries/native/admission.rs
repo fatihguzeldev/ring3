@@ -472,7 +472,8 @@ fn embedded(pc: u32, bytes: &[u8]) -> EngineInstance {
 }
 
 fn entry_descriptors(engine: &mut EngineInstance, entries: &[u32], gates: &[(u32, u32)]) {
-    let transfer = &mut engine.arena_mut().unwrap()[140..];
+    let transfer =
+        &mut engine.arena_mut().unwrap()[140..140 + ring3_engine::abi::arena::TRANSFER_SIZE];
     transfer.fill(0xa5);
     for (index, entry) in entries.iter().enumerate() {
         transfer[index * 4..index * 4 + 4].copy_from_slice(&entry.to_le_bytes());

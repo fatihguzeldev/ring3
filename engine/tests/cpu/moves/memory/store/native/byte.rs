@@ -94,7 +94,8 @@ fn code(pc: u32, bytes: &[u8], execute_only: bool) -> EngineInstance {
 }
 
 fn describe(engine: &mut EngineInstance, specs: &[(u32, usize)], entries: bool) {
-    let transfer = &mut engine.arena_mut().unwrap()[140..];
+    let transfer =
+        &mut engine.arena_mut().unwrap()[140..140 + ring3_engine::abi::arena::TRANSFER_SIZE];
     transfer.fill(0xa5);
     let stride = if entries { 4 } else { 8 };
     for (index, (pc, length)) in specs.iter().enumerate() {
