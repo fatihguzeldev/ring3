@@ -1,5 +1,6 @@
 use super::{
-    AVX_ENABLED, AVX2_ENABLED, CPU_ID_LEAVES, F16C_ENABLED, FMA_ENABLED, RDPID_ENABLED, XCR0,
+    AVX_ENABLED, AVX2_ENABLED, CPU_ID_LEAVES, F16C_ENABLED, FMA_ENABLED, PREFETCHW_ENABLED,
+    RDPID_ENABLED, XCR0,
 };
 
 fn leaf(function: u32, subfunction: Option<u32>) -> [u32; 4] {
@@ -36,4 +37,15 @@ fn extensions_without_complete_execution_support_remain_unadvertised() {
 #[test]
 fn msr_instructions_are_present_under_fixed_user_privilege() {
     assert_eq!(leaf(1, None)[3] & (1 << 5), 1 << 5);
+}
+
+#[test]
+fn ignored_data_prefetch_capability_is_explicit_without_changing_vendor_or_wt1() {
+    assert_eq!(
+        PREFETCHW_ENABLED,
+        leaf(0x8000_0001, None)[2] & (1 << 8) != 0
+    );
+    assert_eq!(leaf(0x8000_0001, None), [0, 0, 0x120, 0x0800_0000]);
+    assert_eq!(leaf(7, Some(0))[2] & 1, 0);
+    assert_eq!(leaf(0, None), [13, 0x676e_6952, 0x2065_6e69, 0x676e_4533]);
 }

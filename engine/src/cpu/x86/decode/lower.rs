@@ -110,6 +110,12 @@ pub(super) fn lower(
         return operation;
     }
     match instruction.code() {
+        // exact supported memory hints may be ignored without operand access.
+        Code::Prefetch_m8 | Code::Prefetchw_m8
+            if crate::cpu::x86::capabilities::PREFETCHW_ENABLED =>
+        {
+            Ok(Operation::Nop)
+        }
         Code::Nopd => Ok(Operation::Nop),
         Code::Nopw => Ok(Operation::Nop),
         Code::Nop_rm16 => Ok(Operation::Nop),

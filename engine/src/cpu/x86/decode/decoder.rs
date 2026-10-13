@@ -279,7 +279,12 @@ fn memory_error(error: MemoryError, pc: GuestAddress, length: usize) -> DecodeEr
 }
 
 fn segment_accesses(instruction: &iced_x86::Instruction) -> u8 {
-    use iced_x86::{InstructionInfoFactory, Mnemonic, Register};
+    use iced_x86::{Code, InstructionInfoFactory, Mnemonic, Register};
+    if crate::cpu::x86::capabilities::PREFETCHW_ENABLED
+        && matches!(instruction.code(), Code::Prefetch_m8 | Code::Prefetchw_m8)
+    {
+        return 0;
+    }
     if matches!(
         instruction.mnemonic(),
         Mnemonic::Lea

@@ -83,3 +83,6 @@ mod cpu_system_registers;
 
 #[path = "exceptions/availability/state/wasm.rs"]
 mod cpu_disabled_state;
+
+#[path = "hints/prefetch/wasm.rs"]
+mod cpu_data_prefetch_wasm;

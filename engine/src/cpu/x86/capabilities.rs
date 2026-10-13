@@ -12,6 +12,10 @@ pub(crate) const SYSCALL_ENABLED: bool = false;
 // SEP remains absent independently of MSR instruction presence; no entry MSRs are exposed.
 pub(crate) const SEP_ENABLED: bool = false;
 
+// prefetch/prefetchw are supported hints that this software CPU ignores.
+// their architectural support does not promise a physical cache operation.
+pub(crate) const PREFETCHW_ENABLED: bool = true;
+
 pub(crate) const MSR_ENABLED: bool = true;
 
 // user-mode counter reads remain subject to the immutable cr4.pce policy.
@@ -120,7 +124,12 @@ pub(crate) const CPU_ID_LEAVES: [CpuIdLeaf; 8] = [
     CpuIdLeaf {
         function: 0x8000_0001,
         subfunction: None,
-        registers: [0, 0, 1 << 5, 1 << 27 | ((SYSCALL_ENABLED as u32) << 11)],
+        registers: [
+            0,
+            0,
+            1 << 5 | ((PREFETCHW_ENABLED as u32) << 8),
+            1 << 27 | ((SYSCALL_ENABLED as u32) << 11),
+        ],
     },
 ];
 

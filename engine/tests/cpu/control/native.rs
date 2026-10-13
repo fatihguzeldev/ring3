@@ -75,3 +75,6 @@ mod interrupt_return;
 
 #[path = "far/gates/native.rs"]
 mod far_gates;
+
+#[path = "hints/prefetch/native.rs"]
+mod cpu_data_prefetch;

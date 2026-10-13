@@ -6,7 +6,7 @@ const structured = [0, 0x400000, 0, 0x128];
 const xstate = [7, 832, 0, 832];
 const upper = [256, 0, 0, 576];
 const extendedLimit = [0x80000001, 0, 0, 0];
-const extendedFeatures = [0, 0x20, 0x08000000, 0];
+const extendedFeatures = [0, 0x120, 0x08000000, 0];
 const zero = [0, 0, 0, 0];
 
 export const queries = [
