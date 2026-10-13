@@ -21,6 +21,7 @@ const sourcePaths = ['Cargo.toml', 'Cargo.lock', 'engine/Cargo.toml', 'engine/sr
   'engine/tests/cpu/predicates/set/memory/fixtures/p2-memory-set-byte/runtime/run.mjs', 'engine/tests/cpu/predicates/set/memory/fixtures/p2-memory-set-byte/runtime/pe.mjs',
   'engine/tests/cpu/predicates/set/memory/fixtures/p2-memory-set-byte/integer.S', 'engine/tests/support/wasm/engine.mjs'];
 assert.equal(new Set(sourcePaths).size, sourcePaths.length);
+sourcePaths.push(...["engine/src/abi/memory_helper/cpu.rs", "engine/src/cpu/dbt/wasm/memory/cpu_scalar.rs", "engine/src/cpu/dbt/wasm/emitter.rs", "engine/src/cpu/dbt/wasm/code_fetch.rs", "engine/src/process/memory/cpu_scalar.rs", "engine/src/process/memory/scalar/cpu_write.rs", "engine/src/process/wasm/memory/cpu_write.rs", "engine/src/abi/wasm/exports/memory/cpu_write.rs", "engine/tests/cpu/predicates/set/memory/fixtures/p2-memory-set-byte/runtime/pe.mjs"].filter(path=>!sourcePaths.includes(path)));
 const sources = () => Object.fromEntries(sourcePaths.map(p => [p, hash(readFileSync(join(root, p)))]));
 const sourcePins = sources(), modules = [], observations = [], helperTrace = [], contexts = [], rows = [], pageObservations = [], guardControls = [];
 const counts = {contexts: 0, runs: 0, retired: 0, canonical_cases: 0, ignored_cases: 0, ea_cases: 0,
@@ -28,7 +29,7 @@ const counts = {contexts: 0, runs: 0, retired: 0, canonical_cases: 0, ignored_ca
   helper_calls: 0, diagnostic_read8: 0, diagnostic_fault_read8: 0, diagnostic_read32: 0, public_guard_controls: 0, selected_ranges: 0, whole_pages: 0};
 const arities = {open: 3, close: 0, arena_ptr: 0, map: 3, protect: 3, upload: 2, read8: 1, read32: 1,
   compile: 1, compile_entries: 2, compile_resident: 1, compile_resident_entries: 2,
-  generation: 0, module_ptr: 0, module_len: 0, guard: 6, guard_resident: 7, store8: 2, store_resident8: 6};
+  generation: 0, module_ptr: 0, module_len: 0, guard: 6, guard_resident: 7, store8: 2, store_resident8: 6, cpu_read8: 1, cpu_store8: 2, cpu_store_resident8: 6};
 const irrelevantSeeds = [0, 0x10, 0x400, 0x410];
 const initialRegisters = [0x1234807f, 0x23457f80, 0x34560f10, 0x4567ff00, 0x56789abc, 0x6789abcd, 0x789abcde, 0x89abcdef];
 const anchors = [[0x802, 2], [2, 0x802], [3, 2], [2, 3], [0x42, 2], [2, 0x42], [3, 2], [2, 3],
@@ -101,8 +102,9 @@ const words = values => {const b = Buffer.alloc(values.length * 4); values.forEa
 const state = s => record('R3ST', 56, [...s.registers, s.pc, s.flags]);
 const exit = (reason, retired, version = 2, fault = null) => record('R3EX', 40,
   [reason, retired, fault?.reason ?? 0, fault?.address ?? 0, fault ? 2 : 0, fault ? 1 : 0], version);
-const storePacket = fault => record('R3MH', 40, fault ? [1, 0, fault.reason, fault.address, 2, 1] : [0, 0, 0, 0, 0, 1], 3);
+const storePacket = fault => record('R3MH', 40, fault ? [1, 0, fault.reason, fault.address, 2, 1] : [0, 0, 0, 0, 0, 1], 10);
 const readPacket = value => record('R3MH', 40, [0, value, 0, 0, 0, 1], 2);
+const cpuReadPacket = value => record('R3MH', 40, [0, value, 0, 0, 0, 1], 10);
 const arena = c => Buffer.from(new Uint8Array(c.memory.buffer, c.base, SIZE));
 const cpu = c => {const b = arena(c); return {registers: Array.from({length: 8}, (_, i) => b.readUInt32LE(16 + i * 4)), pc: b.readUInt32LE(48), flags: b.readUInt32LE(52)};};
 function input(c, offset, bytes) {
@@ -140,7 +142,7 @@ function seed(c, pc, flags = 0xcd7, registers = initialRegisters) {
   const b = Buffer.alloc(140); b.set(state({registers, pc, flags})); b.set(exit(3, 0, 1), 56);
   b.set(record('R3MH', 40, [0, 0xdecafbad, 0, 0, 0, 0]), 100); input(c, 0, b); return cpu(c);
 }
-const storeName = owner => owner === 'replacement' ? 'store8' : 'store_resident8';
+const storeName = owner => owner === 'replacement' ? 'cpu_store8' : 'cpu_store_resident8';
 function compile(c, label, specs, instructions, helpers = [storeName(c.owner)], owner = c.owner) {
   assert.ok(specs.length > 0 && specs.length <= 8 && instructions <= 64);
   c.captures++; if (owner === 'resident') assert.ok(++c.resident <= 8);
@@ -158,7 +160,7 @@ function compile(c, label, specs, instructions, helpers = [storeName(c.owner)], 
   assert.deepEqual(WebAssembly.Module.imports(module), imports); assert.deepEqual(WebAssembly.Module.exports(module), [{name: 'run', kind: 'function'}]);
   const ring3 = {...c.api};
   for (const name of helpers) ring3[name] = (...args) => {
-    const status = c.api[name](...args), read = name === 'read8';
+    const status = c.api[name](...args), read = name === 'cpu_read8';
     helperTrace.push({context: c.id, run: c.runOrdinal, name, address: args[read ? 0 : args.length - 2] >>> 0,
       value: read ? null : args.at(-1) >>> 0, status, helper_hex: arena(c).subarray(100, 140).toString('hex')}); counts.helper_calls++; return status;
   };
@@ -166,7 +168,7 @@ function compile(c, label, specs, instructions, helpers = [storeName(c.owner)], 
   const file = `micro-module-${modules.length + 1}.wasm`; writeFileSync(join(output, file), bytes, {flag: 'wx'});
   modules.push({context: c.id, label, owner, entries: c.entries, blocks: specs.length, instructions,
     file, sha256: hash(bytes), bytes: bytes.length, imports, ...binding});
-  return {...binding, run, owner, version: helpers.length ? 2 : 1, file, bytes};
+  return {...binding, run, owner, version: helpers.length ? 6 : 1, file, bytes};
 }
 function run(c, unit, budget, next, label, {reason = 1, retired = 1, status = 0, packet = null, fault = null, pointers = null} = {}) {
   const expected = arena(c), traceStart = helperTrace.length;
@@ -281,7 +283,7 @@ for (const owner of ['replacement', 'resident']) for (const entries of [false, t
 function livePath(owner, entries, truth) {
   const c = fresh(owner, entries, 'live fault/repair/consumer'), address = 0x400f;
   const code = Buffer.alloc(4096, 0xcc); code.set(liveCode); map(c, 0x9000, code, 7);
-  const unit = compile(c, 'live', [{pc: 0x9000, length: 17}], 6, ['read8', storeName(owner)]);
+  const unit = compile(c, 'live', [{pc: 0x9000, length: 17}], 6, ['cpu_read8', storeName(owner)]);
   const r = [...initialRegisters]; r[0] = truth ? 0x1234807f : 0x12348080; r[1] = truth ? 0x23457fff : 0x23457f80;
   const initialFlags = owner === 'resident' ? 0xcd7 : 0x8d7, f = (truth ? 0x883 : 0x46) + (owner === 'resident' ? 0x400 : 0);
   assert.equal(condition(0, f), truth); seed(c, 0x9000, initialFlags, r); pages(c, 'live', 'before live');
@@ -304,7 +306,7 @@ function livePath(owner, entries, truth) {
   next = cpu(c); next.pc = 0x900d; next.registers[3] = r[3] - r[3] % 256 + truth;
   run(c, unit, 1, next, 'register SETO consumes preserved live condition');
   next = cpu(c); next.pc = 0x900f; next.registers[0] = r[0] - r[0] % 256 + truth;
-  run(c, unit, 1, next, 'real read8 consumes the stored zero or one', {packet: readPacket(truth)});
+  run(c, unit, 1, next, 'real read8 consumes the stored zero or one', {packet: cpuReadPacket(truth)});
   run(c, unit, 2, {...cpu(c), pc: 0x9011}, 'live tail reaches cold entry without replay', {reason: 3});
   run(c, unit, 1, cpu(c), 'cold entry preserves returned live state', {reason: 3, retired: 0});
   pages(c, 'live', 'after live'); counts.live_paths++; counts.live_faults += 4; close(c);

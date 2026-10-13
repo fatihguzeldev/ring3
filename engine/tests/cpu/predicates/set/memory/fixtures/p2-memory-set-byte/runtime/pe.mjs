@@ -92,7 +92,7 @@ export function runPeProof({engine, output, initial}) {
     assert.ok(binding.pointer > 0 && binding.length > 8 && binding.length <= 65536);
     const bytes = Buffer.from(new Uint8Array(c.memory.buffer, binding.pointer, binding.length)), module = new WebAssembly.Module(bytes);
     const guard = c.owner === 'replacement' ? 'guard' : 'guard_resident';
-    const helperNames = label === 'gate' ? [] : ['read32', c.owner === 'replacement' ? 'store32' : 'store_resident32', 'read8', c.owner === 'replacement' ? 'store8' : 'store_resident8'];
+    const helperNames = label === 'gate' ? [] : ['cpu_read32', c.owner === 'replacement' ? 'cpu_store32' : 'cpu_store_resident32', 'cpu_read8', c.owner === 'replacement' ? 'cpu_store8' : 'cpu_store_resident8'];
     const imports = [{module: 'env', name: 'memory', kind: 'memory'}, ...[guard, ...helperNames].map(name => ({module: 'ring3', name, kind: 'function'}))];
     assert.deepEqual(WebAssembly.Module.imports(module), imports); assert.deepEqual(WebAssembly.Module.exports(module), [{name: 'run', kind: 'function'}]);
     const forwarded = {[guard]: c.api[guard]};
@@ -124,7 +124,7 @@ export function runPeProof({engine, output, initial}) {
   const arities = {open: 3, close: 0, arena_ptr: 0, begin_image_input: 1, append_image_input: 2, load_pe32_linked_v2_input_at: 2,
     start_loaded_image: 2, compile_entries: 2, compile_with_gates: 2, compile_resident_entries: 2, compile_resident_with_gates: 2,
     generation: 0, module_ptr: 0, module_len: 0, guard: 6, guard_resident: 7, read8: 1, read32: 1, write32: 2,
-    store8: 2, store_resident8: 6, store32: 2, store_resident32: 6, capture_call: 5, capture_resident_call: 6,
+    store8: 2, store_resident8: 6, store32: 2, store_resident32: 6, cpu_read8: 1, cpu_read32: 1, cpu_store8: 2, cpu_store_resident8: 6, cpu_store32: 2, cpu_store_resident32: 6, capture_call: 5, capture_resident_call: 6,
     complete_windows_call: 4, complete_resident_windows_call: 5};
   for (const base of [0x400000, 0x500000]) for (const owner of ['replacement', 'resident']) for (const entries of [false, true]) {
     const id = `pe-${++counts.contexts}`, instance = new WebAssembly.Instance(engine.module, {});
@@ -151,17 +151,17 @@ export function runPeProof({engine, output, initial}) {
     const gate = owner === 'replacement' ? caller : compile(c, 'gate', [], [], true);
     const registers = [0x12347fff, 0x2345ff80, 0x3456a5a5, 0x4567a5a5, 0x70ff8, 0, base + 0x3fe0, MARKER];
     const helperStart = helper_trace.length;
-    run(c, caller, '32 genuine SETcc/consumer/call instructions from startup', {reason: owner === 'replacement' ? 8 : 3, retired: 32, version: owner === 'replacement' ? 3 : 2, registers, pc: EXIT, flags: 0x46, detail: owner === 'replacement' ? EXIT_ID : 0, helper: record('R3MH', 40, [0, 0, 0, 0, 0, 0])});
-    const expectedTrace = finalBytes.map((value, i) => ({name: owner === 'replacement' ? 'store8' : 'store_resident8', address: base + 0x3fe0 + i, value, version: 3}));
-    expectedTrace.push({name: 'read8', address: base + 0x3fe8, value: 1, version: 2},
-      ...[[base + 0x3000, MARKER], [0x70ffc, MARKER]].map(([address, value]) => ({name: owner === 'replacement' ? 'store32' : 'store_resident32', address, value, version: 1})),
-      {name: 'read32', address: base + 0x3150, value: EXIT, version: 1},
-      {name: owner === 'replacement' ? 'store32' : 'store_resident32', address: 0x70ff8, value: c.entry + 118, version: 1});
+    run(c, caller, '32 genuine SETcc/consumer/call instructions from startup', {reason: owner === 'replacement' ? 8 : 3, retired: 32, version: 6, registers, pc: EXIT, flags: 0x46, detail: owner === 'replacement' ? EXIT_ID : 0, helper: record('R3MH', 40, [0, 0, 0, 0, 0, 4], 10)});
+    const expectedTrace = finalBytes.map((value, i) => ({name: owner === 'replacement' ? 'cpu_store8' : 'cpu_store_resident8', address: base + 0x3fe0 + i, value, version: 10}));
+    expectedTrace.push({name: 'cpu_read8', address: base + 0x3fe8, value: 1, version: 10},
+      ...[[base + 0x3000, MARKER], [0x70ffc, MARKER]].map(([address, value]) => ({name: owner === 'replacement' ? 'cpu_store32' : 'cpu_store_resident32', address, value, version: 10})),
+      {name: 'cpu_read32', address: base + 0x3150, value: EXIT, version: 10},
+      {name: owner === 'replacement' ? 'cpu_store32' : 'cpu_store_resident32', address: 0x70ff8, value: c.entry + 118, version: 10});
     const events = helper_trace.slice(helperStart); assert.equal(events.length, expectedTrace.length);
     events.forEach((event, i) => {
-      const expected = expectedTrace[i], store = expected.name.startsWith('store'), args = event.args;
+      const expected = expectedTrace[i], store = expected.name.startsWith('cpu_store'), args = event.args;
       assert.equal(event.name, expected.name); assert.equal(args[args.length - (store ? 2 : 1)], expected.address); if (store) assert.equal(args.at(-1), expected.value);
-      assert.equal(event.helper_hex, record('R3MH', 40, [0, store ? 0 : expected.value, 0, 0, 0, expected.version === 1 ? 0 : 1], expected.version).toString('hex'));
+      assert.equal(event.helper_hex, record('R3MH', 40, [0, store ? 0 : expected.value, 0, 0, 0, expected.name.endsWith('32') ? 4 : 1], expected.version).toString('hex'));
     });
     if (owner === 'resident') run(c, gate, 'named ExitProcess gate after cold lookup', {reason: 8, retired: 0, version: 3, detail: EXIT_ID, registers, pc: EXIT, flags: 0x46});
     const frame = record('R3CF', 112, [1, EXIT_ID, 2, 1, EXIT, 0x70ff8, c.entry + 118, 0, MARKER, ...Array(15).fill(0)]), expectedCapture = arena(c); expectedCapture.set(frame, TRANSFER);

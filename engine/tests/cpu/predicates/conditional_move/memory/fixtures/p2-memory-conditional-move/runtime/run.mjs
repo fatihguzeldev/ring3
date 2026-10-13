@@ -1,4 +1,4 @@
-import {createArena} from '../../../../../../../support/wasm/arena.mjs';
+import {ARENA_SIZE, createArena} from '../../../../../../../support/wasm/arena.mjs';
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
 import {readFileSync, writeFileSync} from 'node:fs';
@@ -9,7 +9,7 @@ assert.ok(root, 'expected actual engine wasm, output directory and repository ro
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
 const engineBytes = readFileSync(enginePath), engineModule = new WebAssembly.Module(engineBytes);
 assert.deepEqual(WebAssembly.Module.imports(engineModule), []);
-const SIZE = 4612, TRANSFER = 140, PC = 0x1000, DATA = 0x4000, ALIAS = 0x1100, FAULT = 0x1200;
+const SIZE = ARENA_SIZE, TRANSFER = 140, PC = 0x1000, DATA = 0x4000, ALIAS = 0x1100, FAULT = 0x1200;
 const REG = [0x1234807f, 0x23457f80, 0x34560f10, 0x4567ff00, 0x56789abc, 0x6789abcd, 0x789abcde, 0x89abcdef];
 const MASKS = [0xffff0000, 0x0000ffff, 0xaaaaaaaa, 0x55555555, 0xf0f0f0f0, 0x0f0f0f0f, 0xfafafafa, 0x05050505,
   0xff00ff00, 0x00ff00ff, 0xcccccccc, 0x33333333, 0x00ffff00, 0xff0000ff, 0xf0fffff0, 0x0f00000f];
@@ -42,7 +42,9 @@ function record(magic, size, fields, version = 1) {
 }
 const state = (registers, pc, flags) => record('R3ST', 56, [...registers, pc, flags]);
 const exit = (reason, retired, detail = 0, address = 0) => record('R3EX', 40, [reason, retired, detail, address, reason === 5 ? 1 : 0, reason === 5 ? 4 : 0], reason === 11 ? 6 : 2);
+const cpuExit = (reason, retired, detail = 0, address = 0) => record('R3EX', 40, [reason, retired, detail, address, reason === 5 ? 1 : 0, reason === 5 ? 4 : 0], 6);
 const helper = (value = 0, detail = 0, address = 0) => record('R3MH', 40, [detail ? 1 : 0, detail ? 0 : value, detail, address, detail ? 1 : 0, detail ? 4 : 0]);
+const cpuHelper = (value = 0, detail = 0, address = 0) => record('R3MH', 40, [detail ? 1 : 0, detail ? 0 : value, detail, address, detail ? 1 : 0, 4],10);
 function refresh(ctx) {ctx.bytes = new Uint8Array(ctx.memory.buffer); ctx.view = new DataView(ctx.memory.buffer); return ctx;}
 function arena(ctx) {return Buffer.from(refresh(ctx).bytes.subarray(ctx.base, ctx.base + SIZE));}
 function check(ctx, label) {assert.deepEqual(arena(ctx), ctx.expected, `${ctx.owner}/${label}: complete arena`); counts.arena_checks++;}
@@ -53,7 +55,7 @@ function map(ctx, address) {pure(ctx, () => ctx.api.map(address, 1, 3), 'data ma
 function protect(ctx, address, permissions) {pure(ctx, () => ctx.api.protect(address, 1, permissions), 'data permission input');}
 function fresh(owner) {
   const instance = new WebAssembly.Instance(engineModule, {}), ordinal = ++counts.contexts;
-  const arities = {open: 3, close: 0, arena_ptr: 0, map: 3, unmap: 2, protect: 3, upload: 2, read32: 1, write8: 2,
+  const arities = {open: 3, close: 0, arena_ptr: 0, map: 3, unmap: 2, protect: 3, upload: 2, read32: 1, cpu_read32: 1, write8: 2,
     compile_entries: 2, compile_resident: 1, generation: 0, module_ptr: 0, module_len: 0, guard: 6, guard_resident: 7};
   const api = Object.fromEntries(Object.entries(arities).map(([name, arity]) => {
     const fn = instance.exports[`ring3_abi_v1_${name}`]; assert.equal(typeof fn, 'function', name); assert.equal(fn.length, arity, name); return [name, fn];
@@ -81,7 +83,7 @@ function compile(ctx) {
   const bytes = Buffer.from(ctx.bytes.subarray(binding.pointer, binding.pointer + binding.length)), module = new WebAssembly.Module(bytes);
   const guard = ctx.owner === 'replacement' ? 'guard' : 'guard_resident';
   assert.deepEqual(WebAssembly.Module.imports(module), [{module: 'env', name: 'memory', kind: 'memory'},
-    {module: 'ring3', name: guard, kind: 'function'}, {module: 'ring3', name: 'read32', kind: 'function'}]);
+    {module: 'ring3', name: guard, kind: 'function'}, {module: 'ring3', name: 'cpu_read32', kind: 'function'}]);
   assert.deepEqual(WebAssembly.Module.exports(module), [{name: 'run', kind: 'function'}]);
   const child = new WebAssembly.Instance(module, {env: {memory: ctx.memory}, ring3: ctx.api}); assert.equal(child.exports.run.length, 4);
   writeFileSync(join(output, `${ctx.owner}.wasm`), bytes, {flag: 'wx'}); counts.modules++;
@@ -93,8 +95,8 @@ function seed(ctx, registers, pc, flags) {
 }
 function cancel(ctx, value) {ctx.expected.writeUInt32LE(value, 96); refresh(ctx).view.setUint32(ctx.base + 96, value, true);}
 function run(ctx, unit, budget, label, registers, pc, flags, reason = 1, retired = 1, read, detail = 0, faultAddress = 0) {
-  check(ctx, `before ${label}`); ctx.expected.set(state(registers, pc, flags)); ctx.expected.set(exit(reason, retired, detail, faultAddress), 56);
-  if (read !== undefined || detail !== 0) ctx.expected.set(helper(read, detail, faultAddress), 100);
+  check(ctx, `before ${label}`); ctx.expected.set(state(registers, pc, flags)); ctx.expected.set(cpuExit(reason, retired, detail, faultAddress), 56);
+  if (read !== undefined || detail !== 0) ctx.expected.set(cpuHelper(read, detail, faultAddress), 100);
   assert.equal(unit.run(ctx.base, ctx.base + 56, budget, ctx.base + 96), 0, label); check(ctx, label); counts.generated_calls++;
 }
 function page(ctx, address) {
@@ -191,7 +193,8 @@ assert.equal(counts.canonical_cmov, 4096); assert.equal(counts.alias_cmov, 24); 
 assert.equal(counts.jumps, 264); assert.equal(counts.fault_calls, 320); assert.equal(counts.prefix_retired, 160);
 assert.equal(counts.repairs, 128); assert.equal(counts.preflight, 324); assert.equal(counts.owner_controls, 8);
 assert.equal(counts.generated_calls, 5160); assert.equal(counts.pages, 10);
-const result = {status: 'ok', engine_sha256: hash(engineBytes), tools: {node: process.version, v8: process.versions.v8}, counts, modules, faults,
+const cpuSourcePins = Object.fromEntries(["engine/src/abi/memory_helper/cpu.rs", "engine/src/cpu/dbt/wasm/memory/cpu_scalar.rs", "engine/src/cpu/dbt/wasm/emitter.rs", "engine/src/cpu/dbt/wasm/code_fetch.rs", "engine/src/process/memory/cpu_scalar.rs", "engine/src/process/memory/scalar/cpu_write.rs", "engine/src/process/wasm/memory/cpu_write.rs", "engine/src/abi/wasm/exports/memory/cpu_write.rs", "engine/tests/support/wasm/arena.mjs"].map(path=>[path,hash(readFileSync(join(root,path)))]));
+const result = {cpu_source_sha256: cpuSourcePins, status: 'ok', engine_sha256: hash(engineBytes), tools: {node: process.version, v8: process.versions.v8}, counts, modules, faults,
   oracle: {flag_seeds: FLAGS, truth_masks: MASKS, bit_order: [1, 4, 0x40, 0x80, 0x800], witnesses, registers: REG,
     program_sha256: hash(code), specs, arena_bytes: SIZE, source_page_sha256: hash(pattern)},
   test_sha256: Object.fromEntries(['engine/tests/cpu/predicates/conditional_move/memory/wasm/dword.rs', 'engine/tests/cpu/predicates/wasm.rs', 'engine/tests/support/wasm.rs', 'engine/tests/cpu/predicates/wasm.rs', 'engine/tests/support/wasm.rs', 'engine/tests/cpu/predicates/conditional_move/memory/fixtures/p2-memory-conditional-move/runtime/run.mjs'].map(path => [path, hash(readFileSync(join(root, path)))])),
