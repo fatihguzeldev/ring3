@@ -55,6 +55,8 @@ fn far_jump_outer_descriptors_check_every_type_privilege_presence_and_table_with
                                     CodeTransferError::GeneralProtection(u32::from(table_selector))
                                 } else if !present {
                                     CodeTransferError::NotPresent(u32::from(table_selector))
+                                } else if kind == 12 {
+                                    CodeTransferError::GeneralProtection(0)
                                 } else {
                                     CodeTransferError::UnsupportedProfile
                                 })
@@ -144,7 +146,7 @@ fn normalized_offset_limit_and_execution_profile_refusals_are_distinct() {
 }
 
 #[test]
-fn known_invalid_system_metadata_is_distinct_from_unresolved_task_and_gate_payloads() {
+fn known_invalid_system_metadata_and_inner_null_gates_are_distinct_from_unresolved_tasks() {
     // expected results are taken directly from the JMP operation's three named branches.
     for (selector, kind, dpl, present, expected) in [
         (0x43, 3, 3, true, CodeTransferError::GeneralProtection(0x40)),
@@ -173,9 +175,9 @@ fn known_invalid_system_metadata_is_distinct_from_unresolved_task_and_gate_paylo
         (0x47, 12, 3, false, CodeTransferError::NotPresent(0x44)),
         (0x43, 1, 3, true, CodeTransferError::UnsupportedProfile),
         (0x43, 9, 3, true, CodeTransferError::UnsupportedProfile),
-        (0x47, 4, 3, true, CodeTransferError::UnsupportedProfile),
+        (0x47, 4, 3, true, CodeTransferError::GeneralProtection(0)),
         (0x47, 5, 3, true, CodeTransferError::UnsupportedProfile),
-        (0x47, 12, 3, true, CodeTransferError::UnsupportedProfile),
+        (0x47, 12, 3, true, CodeTransferError::GeneralProtection(0)),
     ] {
         let mut table = SegmentDescriptorTable::empty();
         table

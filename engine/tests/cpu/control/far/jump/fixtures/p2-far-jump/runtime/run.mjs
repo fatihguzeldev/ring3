@@ -24,6 +24,9 @@ const sources = [
   "engine/tests/support/wasm/exports.mjs",
   "engine/tests/cpu/control/far/support/transport.mjs",
   "engine/src/cpu/x86/segments/transfers.rs",
+  "engine/src/cpu/x86/segments/transfers/gates.rs",
+  "engine/src/abi/far.rs",
+  "engine/src/cpu/dbt/wasm/far/gate.rs",
   "engine/src/cpu/x86/decode/fetch.rs",
   "engine/src/cpu/x86/decode/decoder.rs",
   "engine/src/cpu/dbt/wasm/code_fetch.rs",
@@ -111,6 +114,13 @@ function oracle(selector, raw, offset, word) {
     const eligible = [4, 5, 12].includes(raw.type) || ((selector & 4) === 0 && [1, 9].includes(raw.type));
     if (!eligible || raw.dpl < 3) return {reason: 11, status: 3, detail: code};
     if (!raw.present) return {reason: 14, status: 6, detail: code};
+    if (raw.type === 4 || raw.type === 12) {
+      if ((raw.high & 0xe0) !== 0 || (raw.type === 4 && (raw.high & 0xffff0000) !== 0))
+        return {reason: 7, host: 7, detail: 3};
+      const embedded = (raw.low >>> 16) & 0xfffc;
+      assert.equal(embedded, 0, 'these frozen ordinary-descriptor rows encode a null gate target');
+      return {reason: 11, status: 3, detail: embedded, gate: true};
+    }
     return {reason: 7, host: 7, detail: 3};
   }
   if (raw.type < 8 || ((raw.type & 4) === 0 && raw.dpl !== 3)) return {reason: 11, status: 3, detail: code};
@@ -213,7 +223,7 @@ function execute(c, label, expected, {address = POINTER, sourceSegment, logical 
   if (helper) {
     if (c.source !== 'immediate' && pointerBytes && !faultRead) want.set(pointerBytes, 140);
     if (faultRead) want.set(packet('R3MH', 40, [1, 0, detail, at, 1, length], 7), 100);
-    else if (!expected.host) want.set(packet('R3MH', 40, [expected.status, success ? expected.target : 0, expected.detail ?? 0, 0, 0, 0], 7), 100);
+    else if (!expected.host) want.set(packet('R3MH', 40, [expected.status, success ? expected.target : 0, expected.detail ?? 0, 0, 0, 0], expected.gate ? 9 : 7), 100);
     else if (c.source !== 'immediate' && pointerBytes) want.set(packet('R3MH', 40, [0, 0, 0, 0, 0, pointerBytes.length], 7), 100);
   }
   if (injectedHelper) want.set(injectedHelper, 100);
@@ -371,6 +381,6 @@ if (mode !== 'protocol') {
 
 assert.deepEqual(pins(), sourcePins, 'all pinned source bytes remain frozen');
 writeFileSync(join(output, 'result.json'), JSON.stringify({status: 'ok', engine_sha256: engine.sha256, source_pins: sourcePins, counts,
-  limits: ['fixed protected32 CPL3, D16/D32 L0 CS destinations with logical target and current v3 base/mode publication; all four direct far JMP encodings only', 'known outer system descriptor faults are architectural; outer-admissible gate/task payloads remain unresolved neutral host profile refusals; L1 direct CS stays refused; nonflat and D16 CS publish current v3 records; D16 instruction execution is owned by the defaults fixture', 'CALL/RETF/INTn/IRET and generic CS fetch-limit enforcement remain separate', 'native process tests own raw A-bit readback; actual proof owns cache publication, retained capture, flags, exact pointer reads and helper currentness']}, null, 2) + '\n');
+  limits: ['fixed protected32 CPL3, D16/D32 L0 CS destinations with logical target and current v3 base/mode publication; all four direct far JMP encodings only', 'known outer system descriptor faults are architectural; canonical outer-admitted gate32 rows reach embedded-null GP0 with exact v9 slot0 packets; gate16 rows with reserved nonzero high16 and outer-admissible tasks remain neutral profile refusals; full gate success/width semantics are owned by the separate call-gates fixture; L1 direct CS stays refused; nonflat and D16 CS publish current v3 records; D16 instruction execution is owned by the defaults fixture', 'CALL/RETF/INTn/IRET and generic CS fetch-limit enforcement remain separate', 'native process tests own raw A-bit readback; actual proof owns cache publication, retained capture, flags, exact pointer reads and helper currentness']}, null, 2) + '\n');
 writeFileSync(join(output, 'observations.json'), JSON.stringify(observations, null, 2) + '\n');
 console.log(JSON.stringify({status: 'ok', ...counts, output}));

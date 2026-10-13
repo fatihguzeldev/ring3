@@ -22,9 +22,14 @@ pub(in crate::cpu::dbt::wasm) fn call(
         .local_get(esp)
         .call(index)
         .local_set(HELPER_STATUS);
-    call_result(code, width.slot_bytes(), exit_depth);
-    target_echo(code, exit_depth);
+    gate::is_packet(code);
+    code.if_(BlockType::Empty);
+    gate::call_result(code, exit_depth + 1);
+    code.else_();
+    call_result(code, width.slot_bytes(), exit_depth + 1);
+    target_echo(code, exit_depth + 1);
     super::super::stack::pointer::advance(code, -((2 * width.slot_bytes()) as i32));
+    code.end();
     code.local_get(RESULT).local_set(EIP);
 }
 

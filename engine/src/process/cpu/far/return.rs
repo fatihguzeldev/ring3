@@ -30,7 +30,7 @@ impl EngineInstance {
             USER_MODE_ENVIRONMENT.current_privilege(),
         ) {
             Ok(transfer) => {
-                let prepared = self.prepare_code_transfer(context, transfer)?;
+                let prepared = self.prepare_code_transfer(context, transfer, 0)?;
                 self.commit_code_transfer(prepared);
                 Ok(())
             }

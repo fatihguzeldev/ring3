@@ -41,9 +41,14 @@ pub enum CodeTransferError {
 pub struct CodeTransfer {
     pub offset: u32,
     load: SegmentLoad,
+    gate_width: Option<FarWidth>,
 }
 
 impl CodeTransfer {
+    pub(crate) fn gate_width(self) -> Option<FarWidth> {
+        self.gate_width
+    }
+
     pub fn selector(self) -> u16 {
         self.load.selector
     }
@@ -59,11 +64,22 @@ impl CodeTransfer {
 pub struct CodeDestination {
     record: SegmentDescriptorRecord,
     selector: u16,
+    gate: Option<gates::Gate>,
 }
 
 impl CodeDestination {
+    pub(crate) fn effective_width(self, operand: FarWidth) -> FarWidth {
+        self.gate.map_or(operand, |gate| gate.width)
+    }
+    pub(crate) fn gate_width(self) -> Option<FarWidth> {
+        self.gate.map(|gate| gate.width)
+    }
+
     pub fn target(self, offset: u32, width: FarWidth) -> Result<CodeTransfer, CodeTransferError> {
         let record = self.record;
+        let (offset, width) = self
+            .gate
+            .map_or((offset, width), |gate| (gate.offset, gate.width));
         let offset = width.offset(offset);
         let limit = if record.granularity() {
             (record.raw_limit() << 12) | 0xfff
@@ -79,6 +95,7 @@ impl CodeDestination {
         }
         Ok(CodeTransfer {
             offset,
+            gate_width: self.gate_width(),
             load: SegmentLoad {
                 selector: self.selector,
                 base: record.code_data_base().expect("code descriptor has a base"),
@@ -100,7 +117,7 @@ impl SegmentDescriptorTable {
         width: FarWidth,
         cpl: u8,
     ) -> Result<CodeTransfer, CodeTransferError> {
-        self.direct_destination(selector, cpl)?
+        self.destination(selector, cpl, false)?
             .target(offset, width)
     }
 
@@ -110,7 +127,7 @@ impl SegmentDescriptorTable {
         selector: u16,
         cpl: u8,
     ) -> Result<CodeDestination, CodeTransferError> {
-        self.direct_destination(selector, cpl)
+        self.destination(selector, cpl, true)
     }
 
     /// RETF requires RPL >= CPL even for conforming code; it cannot select a gate or task.
@@ -149,13 +166,29 @@ impl SegmentDescriptorTable {
         if rpl != cpl {
             return Err(CodeTransferError::UnsupportedProfile);
         }
-        CodeDestination { record, selector }.target(offset, width)
+        CodeDestination {
+            record,
+            selector,
+            gate: None,
+        }
+        .target(offset, width)
     }
 
-    fn direct_destination(
+    pub(crate) fn admitted_gate_width(&self, selector: u16, cpl: u8) -> Option<FarWidth> {
+        let record = self.raw_descriptor(selector).copied()?;
+        if record.code_data() || !matches!(record.descriptor_type(), 4 | 12) {
+            return None;
+        }
+        gates::outer(record, selector, cpl)
+            .ok()
+            .map(|gate| gate.width)
+    }
+
+    fn destination(
         &self,
         selector: u16,
         cpl: u8,
+        call: bool,
     ) -> Result<CodeDestination, CodeTransferError> {
         let error = u32::from(selector & !3);
         if error == 0 {
@@ -166,11 +199,14 @@ impl SegmentDescriptorTable {
             .copied()
             .ok_or(CodeTransferError::GeneralProtection(error))?;
         if !record.code_data() {
+            if matches!(record.descriptor_type(), 4 | 12) {
+                return gates::destination(self, record, selector, cpl, call);
+            }
             // busy tss, reserved types, and a direct tss selector in the ldt are
             // architectural faults even though task/gate execution is outside this profile.
             match record.descriptor_type() {
                 1 | 9 if selector & 4 == 0 => {}
-                4 | 5 | 12 => {}
+                5 => {}
                 _ => return Err(CodeTransferError::GeneralProtection(error)),
             }
             if cpl > 3 || record.dpl() < cpl || record.dpl() < (selector & 3) as u8 {
@@ -203,9 +239,12 @@ impl SegmentDescriptorTable {
         Ok(CodeDestination {
             record,
             selector: (selector & !3) | u16::from(cpl),
+            gate: None,
         })
     }
 }
 
 #[cfg(test)]
 mod tests;
+
+mod gates;

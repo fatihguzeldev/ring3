@@ -46,17 +46,26 @@ impl EngineInstance {
         let width = width(word)?;
         let selector = u16::try_from(selector).map_err(|_| HostError::InvalidRequest)?;
         let context = self.segment_context()?;
+        let gate_width = self
+            .segment_descriptors
+            .admitted_gate_width(selector, USER_MODE_ENVIRONMENT.current_privilege());
         let destination = match self
             .segment_descriptors
             .resolve_far_call(selector, USER_MODE_ENVIRONMENT.current_privilege())
         {
             Ok(destination) => destination,
             Err(error) => {
-                self.code_transfer_fault(error)?;
+                if let Some(gate_width) = gate_width {
+                    self.gate_transfer_fault(gate_width.slot_bytes(), error)?;
+                } else {
+                    self.code_transfer_fault(error)?;
+                }
                 return Ok(StoreCompletion::Complete);
             }
         };
+        let width = destination.effective_width(width);
         let slot = width.slot_bytes();
+        let gate = destination.gate_width().is_some();
         let pointer =
             StackPointerSize::new(context.caches[SegmentRegister::Ss.index()].default32());
         let offsets = [
@@ -73,18 +82,26 @@ impl EngineInstance {
                 slot,
                 SegmentAccess::Write,
             ) {
-                self.code_memory_fault(slot, error)?;
+                if gate {
+                    self.gate_memory_fault(slot, error)?;
+                } else {
+                    self.code_memory_fault(slot, error)?;
+                }
                 return Ok(StoreCompletion::Complete);
             }
         }
         let transfer = match destination.target(offset, width) {
             Ok(transfer) => transfer,
             Err(error) => {
-                self.code_transfer_fault(error)?;
+                if gate {
+                    self.gate_transfer_fault(slot, error)?;
+                } else {
+                    self.code_transfer_fault(error)?;
+                }
                 return Ok(StoreCompletion::Complete);
             }
         };
-        let prepared = self.prepare_code_transfer(context, transfer)?;
+        let prepared = self.prepare_code_transfer(context, transfer, slot)?;
         let values = [
             u32::from(context.state.selectors[SegmentRegister::Cs.index()]),
             width.offset(return_eip),
@@ -99,7 +116,11 @@ impl EngineInstance {
             } else {
                 0
             };
-            self.code_memory_fault(length, CpuMemoryError::Memory(error))?;
+            if gate {
+                self.gate_memory_fault(slot, CpuMemoryError::Memory(error))?;
+            } else {
+                self.code_memory_fault(length, CpuMemoryError::Memory(error))?;
+            }
             return Ok(StoreCompletion::Complete);
         }
         let changed = version != memory.code_validation_version();

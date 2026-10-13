@@ -22,9 +22,14 @@ pub(super) fn jump(
         .i32_const(i32::from(width == FarWidth::Word))
         .call(index)
         .local_set(HELPER_STATUS);
-    descriptor_result(code, exit_depth);
-    cpu_result::validate(code, 0, 0, false, exit_depth);
-    target_echo(code, exit_depth);
+    gate::is_packet(code);
+    code.if_(BlockType::Empty);
+    gate::jump_result(code, exit_depth + 1);
+    code.else_();
+    descriptor_result(code, exit_depth + 1);
+    cpu_result::validate(code, 0, 0, false, exit_depth + 1);
+    target_echo(code, exit_depth + 1);
+    code.end();
     code.local_get(RESULT).local_set(EIP);
 }
 
@@ -158,3 +163,5 @@ pub(super) use return_::return_;
 
 mod interrupt;
 pub(super) use interrupt::{InterruptReturnLocals, interrupt_return};
+
+mod gate;

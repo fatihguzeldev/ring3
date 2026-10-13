@@ -9,6 +9,9 @@ const sources=[
   "engine/src/cpu/x86/segments.rs",
   "engine/src/process/memory/address_space.rs",
   "engine/src/cpu/x86/segments/transfers.rs",
+  "engine/src/cpu/x86/segments/transfers/gates.rs",
+  "engine/src/abi/far.rs",
+  "engine/src/cpu/dbt/wasm/far/gate.rs",
   "engine/src/cpu/x86/decode/fetch.rs",
   "engine/src/cpu/x86/decode/decoder.rs",
   "engine/src/cpu/dbt/wasm/code_fetch.rs",
@@ -82,8 +85,8 @@ function proof(c,label,{raw=descriptor(),selector=0x43,target=TARGET,esp=STACK,f
    if(reply){want.set(reply.packet,100);exit(want,reply.reason??7,0,reply.detail??2,reply.address??0,reply.access??0,reply.length??0);}
    else if(expect.host){if(c.source!=='immediate')want.set(packet('R3MH',40,[0,0,0,0,0,ptr.length],7),100);exit(want,7,0,3);}
    else {
-    const status=expect.status,detail=expect.detail??0,at=expect.address??0,len=status===1||status===7?slot:0;
-    want.set(packet('R3MH',40,[status,status===0?ip:0,detail,at,status===1?2:0,len],7),100);
+    const status=expect.status,detail=expect.detail??0,at=expect.address??0,len=expect.gateSlot??(status===1||status===7?slot:0);
+    want.set(packet('R3MH',40,[status,status===0?ip:0,detail,at,status===1?2:0,len],expect.gateSlot===undefined?7:9),100);
     if(success){
      publishCode(want,raw,selector,ip);want.writeUInt32LE((esp-2*slot)>>>0,32);
      writeExpected(ram,(esp-slot)>>>0,words([input.readUInt16LE(SEG+18)]).subarray(0,slot));
@@ -110,7 +113,7 @@ for(const resident of [false,true])for(const entries of [false,true])for(const w
   ['D16-destination-publishes-current-v3',descriptor({d32:false}),{status:0}],
   ['L1-refuses',descriptor({long:true}),{host:true}],
   ['busy-TSS-is-GP',descriptor({type:11,codeData:false}),{status:3,detail:0x40}],
-  ['outer-call-gate-refuses',descriptor({type:12,codeData:false}),{host:true}],
+  ['outer-call-gate-null-target-is-GP0',descriptor({type:12,codeData:false}),{status:3,detail:0,gateSlot:4}],
  ];
  for(const [label,raw,expect]of rows){configure(c,0x43,raw);proof(c,label,{raw,expect});}
  const raw=descriptor();configure(c,0x43,raw);
@@ -217,4 +220,4 @@ for(const resident of [false,true])for(const entries of [false,true]){
 }
 
 assert.deepEqual(pins(root,sources),sourcePins,'source bytes frozen');
-finish(output,engine,sourcePins,['IA32 protected32 CPL3, same-CPL direct CALL four forms, logical D16/D32 CS targets with current v3 base/mode publication, and B32 SS','batch cached SS spans precede page probes as deterministic Ring3 policy; no universal multioperand fault priority claimed','zero high16 padding in CALL32 CS slot is a deterministic padding choice','native tests separately read raw descriptor A bit and exercise version exhaustion; actual proof validates whole arena/RAM, helper width/order, TF/SMC and malformed phase replies','gate/task payloads, privilege switches and INT/IRET remain outside this slice; D16 execution is established by the separate defaults fixture']);
+finish(output,engine,sourcePins,['IA32 protected32 CPL3, same-CPL direct CALL four forms, logical D16/D32 CS targets with current v3 base/mode publication, and B32 SS','batch cached SS spans precede page probes as deterministic Ring3 policy; no universal multioperand fault priority claimed','zero high16 padding in CALL32 CS slot is a deterministic padding choice','native tests separately read raw descriptor A bit and exercise version exhaustion; actual proof validates whole arena/RAM, helper width/order, TF/SMC and malformed phase replies','the direct-CALL corpus also checks an outer-admitted gate32 with embedded-null target and exact v9 slot4 fault packet; the complete gate success/width matrix is owned by the separate call-gates fixture; task execution, privilege switches and INT/IRET remain outside this slice; D16 execution is established by the separate defaults fixture']);

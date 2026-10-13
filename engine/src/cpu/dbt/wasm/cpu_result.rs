@@ -45,6 +45,26 @@ pub(super) fn validate(
     );
 }
 
+// gate packets report an effective frame slot, not an ordinary scalar-memory span.
+// direct transfers and every other CPU helper continue to require their existing version.
+pub(super) fn validate_gate(
+    code: &mut InstructionSink<'_>,
+    slot: u32,
+    allow_smc: bool,
+    exit_depth: u32,
+) {
+    assert!(matches!(slot, 0 | 2 | 4));
+    validate_span(
+        code,
+        slot,
+        if slot == 0 { 0 } else { 2 },
+        allow_smc,
+        None,
+        Validation::Gate,
+        exit_depth,
+    );
+}
+
 pub(super) fn validate_masked(
     code: &mut InstructionSink<'_>,
     length: u32,
@@ -112,6 +132,7 @@ enum Validation {
     Ordinary,
     Avx(AvxValidation),
     XState,
+    Gate,
 }
 
 fn validate_span(
@@ -124,6 +145,7 @@ fn validate_span(
     exit_depth: u32,
 ) {
     let xstate = matches!(validation, Validation::XState);
+    let gate = matches!(validation, Validation::Gate);
     let avx = if let Validation::Avx(value) = validation {
         Some(value)
     } else {
@@ -150,7 +172,16 @@ fn validate_span(
     reset_checks(code);
     for (offset, expected) in [
         (0, u32::from_le_bytes(*b"R3MH")),
-        (4, if xstate { 0x10008 } else { 0x10007 }),
+        (
+            4,
+            if gate {
+                0x10009
+            } else if xstate {
+                0x10008
+            } else {
+                0x10007
+            },
+        ),
         (8, 40),
         (12, 0),
         (36, length),
@@ -163,7 +194,14 @@ fn validate_span(
     helper_field(code, 16);
     code.local_set(RHS);
     code.local_get(RHS).i32_eqz().if_(BlockType::Empty);
-    success(code, if xstate { 0 } else { length }, mask);
+    success(code, if xstate || gate { 0 } else { length }, mask);
+    if gate && length == 2 {
+        reset_checks(code);
+        helper_field(code, 20);
+        code.i32_const(0xffff).i32_gt_u();
+        add_check(code);
+        protocol_if_bad(code);
+    }
     code.else_();
     code.local_get(HELPER_STATUS)
         .i32_const(11)
@@ -181,7 +219,11 @@ fn validate_span(
         .i32_const(2)
         .i32_eq()
         .if_(BlockType::Empty);
-    rejected(code);
+    if gate && length == 0 {
+        infrastructure(code, 2);
+    } else {
+        rejected(code);
+    }
     code.else_()
         .local_get(RHS)
         .i32_const(3)
@@ -191,7 +233,7 @@ fn validate_span(
         .i32_le_u()
         .i32_and()
         .if_(BlockType::Empty);
-    exception(code, length, avx);
+    exception(code, length, avx, gate);
     code.else_();
     infrastructure(code, 2);
     code.end().end().end().end().end().end().end();
@@ -341,10 +383,43 @@ fn rejected(code: &mut InstructionSink<'_>) {
     code.end().end();
 }
 
-fn exception(code: &mut InstructionSink<'_>, length: u32, avx: Option<AvxValidation>) {
+fn exception(code: &mut InstructionSink<'_>, length: u32, avx: Option<AvxValidation>, gate: bool) {
     reset_checks(code);
     for offset in [20, 28, 32] {
         expect_field(code, offset, 0);
+    }
+    if gate {
+        code.local_get(RHS)
+            .i32_const(4)
+            .i32_eq()
+            .local_get(RHS)
+            .i32_const(5)
+            .i32_eq()
+            .i32_or();
+        add_check(code);
+        helper_field(code, 24);
+        code.i32_const(0xfffc).i32_gt_u();
+        helper_field(code, 24);
+        code.i32_const(3).i32_and().i32_or();
+        add_check(code);
+        code.local_get(RHS)
+            .i32_const(6)
+            .i32_eq()
+            .if_(BlockType::Empty);
+        helper_field(code, 24);
+        code.i32_eqz();
+        add_check(code);
+        code.end();
+        code.local_get(RHS)
+            .i32_const(7)
+            .i32_eq()
+            .if_(BlockType::Empty);
+        expect_field(code, 24, 0);
+        if length == 0 {
+            code.i32_const(1);
+            add_check(code);
+        }
+        code.end();
     }
     if let Some(validation) = avx {
         code.local_get(RHS)

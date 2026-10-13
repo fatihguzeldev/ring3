@@ -2,6 +2,7 @@ use crate::{
     abi::{
         arena::HELPER_OFFSET,
         cpu_helper::{CpuMemoryError, encode_cpu_result},
+        far::encode_gate_result,
         memory_helper::HELPER_SIZE,
         x86::{SEGMENT_BASES_RECORD_SIZE, SEGMENTS_SIZE, encode_current_segment_context},
     },
@@ -49,6 +50,10 @@ impl EngineInstance {
         let width = width(word)?;
         let selector = u16::try_from(selector).map_err(|_| HostError::InvalidRequest)?;
         let context = self.segment_context()?;
+        let gate = self
+            .segment_descriptors
+            .admitted_gate_width(selector, USER_MODE_ENVIRONMENT.current_privilege())
+            .is_some();
         let result = self.segment_descriptors.resolve_far_jump(
             selector,
             offset,
@@ -57,10 +62,11 @@ impl EngineInstance {
         );
         match result {
             Ok(transfer) => {
-                let prepared = self.prepare_code_transfer(context, transfer)?;
+                let prepared = self.prepare_code_transfer(context, transfer, 0)?;
                 self.commit_code_transfer(prepared);
                 Ok(())
             }
+            Err(error) if gate => self.gate_transfer_fault(0, error),
             Err(error) => self.code_transfer_fault(error),
         }
     }
@@ -69,6 +75,7 @@ impl EngineInstance {
         &self,
         mut context: SegmentContext,
         transfer: CodeTransfer,
+        gate_slot: u32,
     ) -> Result<PreparedTransfer, HostError> {
         transfer.apply(&mut context);
         let mut segments = [0; SEGMENTS_SIZE];
@@ -76,8 +83,12 @@ impl EngineInstance {
         encode_current_segment_context(&context, &mut segments, &mut bases)
             .map_err(|_| HostError::Infrastructure)?;
         let mut packet = [0; HELPER_SIZE];
-        encode_cpu_result(0, transfer.offset, Ok(()), &mut packet)
-            .map_err(|_| HostError::Infrastructure)?;
+        if transfer.gate_width().is_some() {
+            encode_gate_result(gate_slot, transfer.offset, Ok(()), &mut packet)
+        } else {
+            encode_cpu_result(0, transfer.offset, Ok(()), &mut packet)
+        }
+        .map_err(|_| HostError::Infrastructure)?;
         Ok(PreparedTransfer {
             segments,
             bases,
@@ -103,6 +114,28 @@ impl EngineInstance {
         self.code_memory_fault(0, error)
     }
 
+    fn gate_transfer_fault(
+        &mut self,
+        slot: u32,
+        error: CodeTransferError,
+    ) -> Result<(), HostError> {
+        let error = match error {
+            CodeTransferError::GeneralProtection(code) => CpuMemoryError::GeneralProtection(code),
+            CodeTransferError::NotPresent(code) => CpuMemoryError::SegmentNotPresent(code),
+            CodeTransferError::UnsupportedProfile => return Err(HostError::InvalidRequest),
+        };
+        self.gate_memory_fault(slot, error)
+    }
+
+    fn gate_memory_fault(&mut self, slot: u32, error: CpuMemoryError) -> Result<(), HostError> {
+        let mut packet = [0; HELPER_SIZE];
+        encode_gate_result(slot, 0, Err(error), &mut packet)
+            .map_err(|_| HostError::Infrastructure)?;
+        self.arena.as_mut().get_mut()[HELPER_OFFSET..HELPER_OFFSET + HELPER_SIZE]
+            .copy_from_slice(&packet);
+        Ok(())
+    }
+
     fn code_memory_fault(&mut self, length: u32, error: CpuMemoryError) -> Result<(), HostError> {
         let mut packet = [0; HELPER_SIZE];
         encode_cpu_result(length, 0, Err(error), &mut packet)
@@ -122,3 +155,6 @@ mod support;
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod gates;

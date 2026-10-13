@@ -72,3 +72,6 @@ mod cpu_port_strings;
 
 #[path = "interrupt/return/native.rs"]
 mod interrupt_return;
+
+#[path = "far/gates/native.rs"]
+mod far_gates;
