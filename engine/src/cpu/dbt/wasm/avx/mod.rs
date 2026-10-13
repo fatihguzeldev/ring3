@@ -1,3 +1,4 @@
+mod integer;
 mod logical;
 mod moves;
 mod permute;

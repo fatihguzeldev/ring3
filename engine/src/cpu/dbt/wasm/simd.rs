@@ -14,6 +14,15 @@ use wasm_encoder::{InstructionSink, MemArg};
 
 mod direct;
 
+#[cfg(test)]
+pub(super) fn integer_lanes(
+    code: &mut InstructionSink<'_>,
+    operation: crate::cpu::x86::simd::IntegerLaneOperation,
+    scratch: [u32; 2],
+) {
+    direct::integer_lanes(code, operation, scratch);
+}
+
 pub(super) fn direct_hotpath(operation: SimdOperation) -> bool {
     direct::accepts(operation)
 }

@@ -451,6 +451,51 @@ fn absolute(code: &mut InstructionSink<'_>, width: u8) {
     }
 }
 
+#[cfg(test)]
+pub(super) fn integer_lanes(
+    code: &mut InstructionSink<'_>,
+    operation: crate::cpu::x86::simd::IntegerLaneOperation,
+    scratch: [u32; 2],
+) {
+    let width = operation.lane_bytes();
+    match operation.kind() {
+        P::Absolute => absolute(code, width),
+        P::Sign => {
+            let [first, second] = scratch;
+            code.local_set(second).local_set(first).local_get(first);
+            match width {
+                1 => {
+                    code.i8x16_neg();
+                }
+                2 => {
+                    code.i16x8_neg();
+                }
+                4 => {
+                    code.i32x4_neg();
+                }
+                _ => unreachable!(),
+            }
+            code.local_get(first).local_get(second).v128_const(0);
+            match width {
+                1 => {
+                    code.i8x16_lt_s();
+                }
+                2 => {
+                    code.i16x8_lt_s();
+                }
+                4 => {
+                    code.i32x4_lt_s();
+                }
+                _ => unreachable!(),
+            }
+            code.v128_bitselect().local_get(second).v128_const(0);
+            arithmetic(code, P::Equal, width);
+            code.v128_not().v128_and();
+        }
+        kind => arithmetic(code, kind, width),
+    }
+}
+
 fn sign(code: &mut InstructionSink<'_>, op: SimdOperation) {
     load(code, op.destination, op.vector_bytes);
     match op.lane_bytes {

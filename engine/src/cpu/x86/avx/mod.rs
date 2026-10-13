@@ -1,7 +1,9 @@
 mod arithmetic;
+mod integer;
 mod moves;
 mod permute;
 
+pub(crate) use integer::IntegerInstruction;
 pub(crate) use moves::{
     DuplicateKind, Half, HalfMerge, MoveInstruction, MoveSource, WordSource, WordTarget,
 };

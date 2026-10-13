@@ -254,6 +254,11 @@ mod packed;
 #[cfg(test)]
 pub(crate) use float::{ElementwiseKind, elementwise};
 
+#[cfg(test)]
+mod integer;
+#[cfg(test)]
+pub(crate) use integer::IntegerLaneOperation;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SimdError {
     InvalidDescriptor,
