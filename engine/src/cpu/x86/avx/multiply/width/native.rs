@@ -1,43 +1,32 @@
 use super::*;
 
 #[test]
-fn controlled_and_unary_shapes_remain_xmm_only() {
-    for (operation, first) in [
-        (
-            MultiplyOperation::new(PackedKind::MinimumPositionUnsignedWord, 2, 0).unwrap(),
-            None,
-        ),
-        (
-            MultiplyOperation::new(PackedKind::MultipleSumAbsoluteByteDifferences, 1, 0x29)
-                .unwrap(),
-            Some(VectorRegister(1)),
-        ),
-    ] {
-        for second in [MoveSource::Memory, MoveSource::Register(VectorRegister(2))] {
-            let old =
-                MultiplyInstruction::new(operation, VectorRegister(0), first, second).unwrap();
-            assert_eq!(old.width(), VectorWidth::Xmm);
-            assert_eq!(
-                MultiplyInstruction::with_width(
-                    VectorWidth::Xmm,
-                    operation,
-                    VectorRegister(0),
-                    first,
-                    second
-                ),
-                Some(old)
-            );
-            assert!(
-                MultiplyInstruction::with_width(
-                    VectorWidth::Ymm,
-                    operation,
-                    VectorRegister(0),
-                    first,
-                    second
-                )
-                .is_none()
-            );
-        }
+fn unary_minimum_position_remains_xmm_only() {
+    let operation = MultiplyOperation::new(PackedKind::MinimumPositionUnsignedWord, 2, 0).unwrap();
+    let first = None;
+    for second in [MoveSource::Memory, MoveSource::Register(VectorRegister(2))] {
+        let old = MultiplyInstruction::new(operation, VectorRegister(0), first, second).unwrap();
+        assert_eq!(old.width(), VectorWidth::Xmm);
+        assert_eq!(
+            MultiplyInstruction::with_width(
+                VectorWidth::Xmm,
+                operation,
+                VectorRegister(0),
+                first,
+                second
+            ),
+            Some(old)
+        );
+        assert!(
+            MultiplyInstruction::with_width(
+                VectorWidth::Ymm,
+                operation,
+                VectorRegister(0),
+                first,
+                second
+            )
+            .is_none()
+        );
     }
 }
 

@@ -7,7 +7,7 @@ pub(super) fn decode(kind: u8, slots: Slots, immediate: u8) -> Result<AvxSemanti
         VectorWidth::Ymm
     };
     let kind = kind & 0x7f;
-    if width == VectorWidth::Ymm && !matches!(kind, 1..=16) {
+    if width == VectorWidth::Ymm && !matches!(kind, 1..=16 | 18) {
         return Err(AvxDecodeError::Family);
     }
     let (operation, bytes) = match kind {

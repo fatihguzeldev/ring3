@@ -117,3 +117,26 @@ fn wide_helper_refusal_precedes_address_inputs_and_any_publication() {
         }
     }
 }
+
+#[test]
+fn controlled_wide_sad_stays_private_while_xmm_controls_remain_available() {
+    for w in [0, 0x80] {
+        for second in [0xcb, 0x08] {
+            for immediate in [0, 8, 200, 255] {
+                let bytes = [0xc4, 0xe3, 0x6d | w, 0x42, second, immediate];
+                assert_eq!(
+                    decode(&bytes),
+                    Err(DecodeError::Unsupported(UnsupportedFeature::Simd))
+                );
+                let mut xmm = bytes;
+                xmm[2] &= !4;
+                assert_eq!(decode(&xmm), Ok(()));
+                for prefix in [0x66, 0xf0, 0xf2, 0xf3] {
+                    let mut forbidden = vec![prefix];
+                    forbidden.extend(bytes);
+                    assert_eq!(decode(&forbidden), Err(DecodeError::InvalidEncoding));
+                }
+            }
+        }
+    }
+}

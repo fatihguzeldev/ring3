@@ -48,7 +48,7 @@ pub(super) fn emit(
         code.local_set(second).local_get(locals.state);
         super::super::simd::multiply_value(
             code,
-            instruction.operation(),
+            instruction.operation_for_half(upper),
             locals.sources,
             locals.scratch,
         );

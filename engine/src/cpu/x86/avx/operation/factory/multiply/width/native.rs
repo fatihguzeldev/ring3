@@ -27,7 +27,7 @@ fn original_mapping_and_slots_survive_width_selection() {
     for (index, &(packed, lane)) in ORIGINAL.iter().enumerate() {
         let kind = index as u32 + 1;
         for (width, bit) in [(VectorWidth::Xmm, 0), (VectorWidth::Ymm, 0x80)] {
-            if kind > 16 && width == VectorWidth::Ymm {
+            if kind == 17 && width == VectorWidth::Ymm {
                 continue;
             }
             for destination in 0..8 {
@@ -85,7 +85,8 @@ fn original_mapping_and_slots_survive_width_selection() {
 fn unassigned_widths_and_slots_keep_exact_error_priority() {
     for kind in 0..=255 {
         let normalized = kind & 0x7f;
-        let assigned = (1..=18).contains(&normalized) && (kind & 0x80 == 0 || normalized <= 16);
+        let assigned = (1..=18).contains(&normalized)
+            && (kind & 0x80 == 0 || normalized <= 16 || normalized == 18);
         if !assigned {
             for operands in [0, 1 << 9, 1 << 12, 1 << 13, 0x3fff] {
                 assert_eq!(

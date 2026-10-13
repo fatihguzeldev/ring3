@@ -35,24 +35,37 @@ impl MultiplyInstruction {
     ) -> Option<Self> {
         (operation.unary() == first.is_none()
             && (width == VectorWidth::Xmm
-                || !matches!(
-                    operation.kind(),
-                    PackedKind::MinimumPositionUnsignedWord
-                        | PackedKind::MultipleSumAbsoluteByteDifferences
-                )))
-        .then_some(Self {
-            width,
-            operation,
-            destination,
-            first,
-            second,
-        })
+                || operation.kind() != PackedKind::MinimumPositionUnsignedWord))
+            .then_some(Self {
+                width,
+                operation,
+                destination,
+                first,
+                second,
+            })
     }
     pub(crate) fn width(self) -> VectorWidth {
         self.width
     }
+    #[cfg(test)]
     pub(crate) fn operation(self) -> MultiplyOperation {
         self.operation
+    }
+    pub(crate) fn operation_for_half(self, upper: bool) -> MultiplyOperation {
+        if self.width == VectorWidth::Ymm
+            && self.operation.kind() == PackedKind::MultipleSumAbsoluteByteDifferences
+        {
+            // ymm mpsadbw selects independent four-byte windows in each 128-bit half.
+            let shift = if upper { 3 } else { 0 };
+            MultiplyOperation::new(
+                PackedKind::MultipleSumAbsoluteByteDifferences,
+                1,
+                self.operation.immediate() >> shift & 7,
+            )
+            .expect("masked MPSADBW control is valid")
+        } else {
+            self.operation
+        }
     }
     pub(crate) fn destination(self) -> VectorRegister {
         self.destination
@@ -87,10 +100,12 @@ impl VectorState {
         let b = self.capture_source(instruction.second, operand);
         let mut value = [0; 32];
         for offset in (0..instruction.width.bytes()).step_by(16) {
-            value[offset..offset + 16].copy_from_slice(&instruction.operation.evaluate(
-                a[offset..offset + 16].try_into().unwrap(),
-                b[offset..offset + 16].try_into().unwrap(),
-            ));
+            value[offset..offset + 16].copy_from_slice(
+                &instruction.operation_for_half(offset != 0).evaluate(
+                    a[offset..offset + 16].try_into().unwrap(),
+                    b[offset..offset + 16].try_into().unwrap(),
+                ),
+            );
         }
         self.publish(instruction.destination, value);
         Ok(())
@@ -103,3 +118,7 @@ mod tests;
 #[cfg(test)]
 #[path = "multiply/width/native.rs"]
 mod width;
+
+#[cfg(test)]
+#[path = "multiply/sad/native.rs"]
+mod sad;

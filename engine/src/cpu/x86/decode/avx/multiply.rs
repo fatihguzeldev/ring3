@@ -203,6 +203,7 @@ pub(super) fn lower(
                     Code::VEX_Vpmulhrsw_ymm_ymm_ymmm256 => 14,
                     Code::VEX_Vpmuldq_ymm_ymm_ymmm256 => 15,
                     Code::VEX_Vpmulld_ymm_ymm_ymmm256 => 16,
+                    Code::VEX_Vmpsadbw_ymm_ymm_ymmm256_imm8 => 18,
                     _ => return Ok(None),
                 };
                 encoding.validate(false, 1, false)?;
@@ -212,7 +213,15 @@ pub(super) fn lower(
                 if instruction.op_kind(2) == OpKind::Memory {
                     operands |= 1 << 12;
                 }
-                (0x01000880 | kind, operands, 0)
+                (
+                    0x01000880 | kind,
+                    operands,
+                    if kind == 18 {
+                        u32::from(instruction.immediate8())
+                    } else {
+                        0
+                    },
+                )
             }
         };
         let instruction_value = AvxInstruction::decode_descriptor(descriptor, operands, immediate)
