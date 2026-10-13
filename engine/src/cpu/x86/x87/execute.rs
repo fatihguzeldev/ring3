@@ -71,6 +71,9 @@ pub enum X87Operation {
         index: u8,
         pop: bool,
     },
+    StoreRegisterNoUnderflow {
+        index: u8,
+    },
     Exchange {
         index: u8,
     },
@@ -160,6 +163,7 @@ impl X87Operation {
             } => (4, format as u32, u32::from(pop), u32::from(truncate)),
             Self::LoadRegister { index } => (5, u32::from(index), 0, 0),
             Self::StoreRegister { index, pop } => (6, u32::from(index), u32::from(pop), 0),
+            Self::StoreRegisterNoUnderflow { index } => (38, u32::from(index), 0, 0),
             Self::Exchange { index } => (7, u32::from(index), 0, 0),
             Self::Binary {
                 kind,
@@ -320,6 +324,7 @@ impl X87Operation {
             35 => Self::PartialAtan,
             36 => Self::Trigonometric { function: a },
             37 => Self::StatusToAx,
+            38 => Self::StoreRegisterNoUnderflow { index: a },
             _ => return None,
         };
         if operation.encode() != word {
@@ -328,6 +333,7 @@ impl X87Operation {
         match operation {
             Self::LoadRegister { index }
             | Self::StoreRegister { index, .. }
+            | Self::StoreRegisterNoUnderflow { index }
             | Self::Exchange { index }
             | Self::Free { index, .. }
             | Self::ConditionalMove { index, .. }
@@ -624,6 +630,12 @@ impl X87Outcome {
                 if pop {
                     self.pop();
                 }
+            }
+            X87Operation::StoreRegisterNoUnderflow { index } => {
+                // empty payloads are unspecified; use indefinite without raising stack underflow.
+                let value = self.state.stack(0).unwrap_or(Ext80::INDEFINITE);
+                self.write(index, value)?;
+                self.pop();
             }
             X87Operation::Exchange { index } => {
                 let a = self.read(0)?;

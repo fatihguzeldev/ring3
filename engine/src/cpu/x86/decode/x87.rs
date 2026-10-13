@@ -75,12 +75,11 @@ pub(super) fn decode(instruction: &Instruction) -> Option<DecodedX87> {
             index: index(),
             pop: false,
         },
-        Code::Fstp_sti | Code::Fstp_sti_DFD0 | Code::Fstp_sti_DFD8 | Code::Fstpnce_sti => {
-            O::StoreRegister {
-                index: index(),
-                pop: true,
-            }
-        }
+        Code::Fstp_sti | Code::Fstp_sti_DFD0 | Code::Fstp_sti_DFD8 => O::StoreRegister {
+            index: index(),
+            pop: true,
+        },
+        Code::Fstpnce_sti => O::StoreRegisterNoUnderflow { index: index() },
         Code::Fadd_st0_sti => register_binary(B::Add, false, false),
         Code::Fmul_st0_sti => register_binary(B::Multiply, false, false),
         Code::Fsub_st0_sti => register_binary(B::Subtract, false, false),

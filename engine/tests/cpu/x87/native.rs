@@ -21,3 +21,6 @@ mod x87_numeric_boundaries;
 
 #[path = "control/compatibility/native.rs"]
 mod cpu_x87_compatibility;
+
+#[path = "stack/compatibility/native.rs"]
+mod cpu_x87_stack_compatibility;
