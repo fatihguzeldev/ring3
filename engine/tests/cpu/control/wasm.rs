@@ -59,3 +59,6 @@ mod cpu_port_io;
 
 #[path = "exceptions/environment/io/strings/wasm.rs"]
 mod cpu_port_strings;
+
+#[path = "branch/short/wasm/word.rs"]
+mod cpu_short_word;
