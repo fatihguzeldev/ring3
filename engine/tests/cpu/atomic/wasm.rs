@@ -1,3 +1,6 @@
+#[path = "../../support/wasm/engine.rs"]
+mod engine_artifact;
+
 #[path = "../../support/wasm.rs"]
 mod support_wasm;
 

@@ -14,7 +14,7 @@ use ring3_engine::{
 #[test]
 fn actual_wasm_compares_current_eax_exchanges_and_resumes_owners_without_replay() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
-    let engine = root.join("target/wasm32-unknown-unknown/debug/ring3_engine.wasm");
+    let engine = super::engine_artifact::selected_engine(root);
     assert!(
         engine.is_file(),
         "build the actual engine wasm32 cdylib first"
