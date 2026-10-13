@@ -51,7 +51,8 @@ function record(magic, size, fields, version = 1) {
   fields.forEach((v, i) => bytes.writeUInt32LE(v >>> 0, 16 + i * 4)); return bytes;
 }
 const state = s => record('R3ST', 56, [...s.registers, s.pc, s.flags]);
-const exit = retired => record('R3EX', 40, [1, retired, 0, 0, 0, 0], 2);
+const exit = retired => record('R3EX', 40, [1, retired, 0, 0, 0, 0], 6);
+const cpuHelper = value => record('R3MH', 40, [0, value, 0, 0, 0, 4], 10);
 const helper = value => record('R3MH', 40, [0, value, 0, 0, 0, 0]);
 const fault = (address, access, detail) => record('R3MH', 40, [1, 0, detail, address, access, 4]);
 const arena = c => Buffer.from(new Uint8Array(c.memory.buffer, c.base, SIZE));
@@ -109,19 +110,19 @@ function compile(c, entry) {
   } else binding = {generation: c.api.generation(), pointer: c.api.module_ptr() >>> 0, length: c.api.module_len() >>> 0};
   assert.deepEqual(after, expected, 'compile changes only the exact resident receipt'); assert.ok(binding.length > 8 && binding.length <= 65536);
   const bytes = Buffer.from(new Uint8Array(c.memory.buffer, binding.pointer, binding.length)), module = new WebAssembly.Module(bytes);
-  const guard = c.owner === 'resident' ? 'guard_resident' : 'guard', store = c.owner === 'resident' ? 'store_resident32' : 'store32';
-  const imports = [{module: 'env', name: 'memory', kind: 'memory'}, ...[guard, 'read32', store].map(name => ({module: 'ring3', name, kind: 'function'}))];
+  const guard = c.owner === 'resident' ? 'guard_resident' : 'guard', store = c.owner === 'resident' ? 'cpu_store_resident32' : 'cpu_store32';
+  const imports = [{module: 'env', name: 'memory', kind: 'memory'}, ...[guard, 'cpu_read32', store].map(name => ({module: 'ring3', name, kind: 'function'}))];
   assert.deepEqual(WebAssembly.Module.imports(module), imports); assert.deepEqual(WebAssembly.Module.exports(module), [{name: 'run', kind: 'function'}]);
   const forwarded = name => (...raw) => {
     const args = raw.map(v => v >>> 0), next = c.helperSchedule.shift(); assert.ok(next, 'unexpected guest helper'); assert.equal(name, next.name);
-    const wanted = name === 'read32' ? [next.address] : c.owner === 'resident'
+    const wanted = name === 'cpu_read32' ? [next.address] : c.owner === 'resident'
       ? [c.id, 0x52454c4f, binding.low, binding.high, next.address, next.value] : [next.address, next.value];
     assert.deepEqual(args, wanted); const before = arena(c), status = c.api[name](...raw), after = arena(c), expected = Buffer.from(before);
-    expected.set(helper(name === 'read32' ? next.value : 0), 100); assert.equal(status, 0); assert.deepEqual(after, expected, 'canonical guest helper changes only its40B record');
+    expected.set(cpuHelper(name === 'cpu_read32' ? next.value : 0), 100); assert.equal(status, 0); assert.deepEqual(after, expected, 'canonical guest helper changes only its40B record');
     helperTrace.push({context: c.id, run: c.run, name, args, observed_status: status, helper_hex: after.subarray(100, 140).toString('hex')});
-    counts.helper_calls++; counts[name === 'read32' ? 'read32' : 'store32']++; return status;
+    counts.helper_calls++; counts[name === 'cpu_read32' ? 'read32' : 'store32']++; return status;
   };
-  const run = new WebAssembly.Instance(module, {env: {memory: c.memory}, ring3: {[guard]: c.api[guard], read32: forwarded('read32'), [store]: forwarded(store)}}).exports.run;
+  const run = new WebAssembly.Instance(module, {env: {memory: c.memory}, ring3: {[guard]: c.api[guard], cpu_read32: forwarded('cpu_read32'), [store]: forwarded(store)}}).exports.run;
   assert.equal(run.length, 4); const file = save(`context-${c.id}-module.wasm`, bytes);
   modules.push({context: c.id, owner: c.owner, file, sha256: hash(bytes), bytes: bytes.length, imports,
     block_specs: specs, blocks: 3, instructions: 5, source_bytes: 15, ...binding}); counts.modules++;
@@ -134,7 +135,7 @@ for (const actualBase of [0x400000, 0x500000, 0x300000]) for (const owner of ['r
   const instance = new WebAssembly.Instance(engine.module, {}), memory = instance.exports.memory;
   const arities = {open: 3, close: 0, arena_ptr: 0, begin_image_input: 1, append_image_input: 2, abort_image_input: 0, load_pe32_input_at: 1,
     map: 3, protect: 3, upload: 2, compile: 1, compile_resident: 1, compile_entries: 2, generation: 0, module_ptr: 0, module_len: 0,
-    read32: 1, write32: 2, store32: 2, store_resident32: 6, guard: 6, guard_resident: 7};
+    read32: 1, write32: 2, store32: 2, store_resident32: 6, guard: 6, guard_resident: 7, cpu_read32: 1, cpu_store32: 2, cpu_store_resident32: 6};
   const api = Object.fromEntries(Object.entries(arities).map(([name, arity]) => {
     const fn = instance.exports[`ring3_abi_v1_${name}`]; assert.equal(typeof fn, 'function'); assert.equal(fn.length, arity, name); return [name, fn];
   }));
@@ -174,11 +175,11 @@ for (const actualBase of [0x400000, 0x500000, 0x300000]) for (const owner of ['r
   const returned = {registers: [0, ...registers.slice(1)], pc: 0x8005, flags: 0x446};
   const consumed = {...returned, pc: 0x800a};
   const steps = [{label: 'authored CALL retires and publishes original entry', budget: 1, cpu: called, helpers: [{name: unit.store, address: 0x907c, value: 0x8005}], helperValue: 0},
-    {label: 'original XOR and natural RET return zero without reseed', budget: 2, cpu: returned, helpers: [{name: 'read32', address: 0x907c, value: 0x8005}], helperValue: 0x8005},
+    {label: 'original XOR and natural RET return zero without reseed', budget: 2, cpu: returned, helpers: [{name: 'cpu_read32', address: 0x907c, value: 0x8005}], helperValue: 0x8005},
     {label: 'guest caller stores returned EAX in separate stack output', budget: 2, cpu: consumed, helpers: [{name: unit.store, address: 0x9040, value: 0}], helperValue: 0}];
   for (const step of steps) {
     c.run++; c.helperSchedule = [...step.helpers]; const after = action(c, step.label, () => unit.run(c.base, c.base + 56, step.budget, c.base + 96), 0,
-      [[0, state(step.cpu)], [56, exit(step.budget)], [100, helper(step.helperValue)]]);
+      [[0, state(step.cpu)], [56, exit(step.budget)], [100, cpuHelper(step.helperValue)]]);
     assert.equal(c.helperSchedule.length, 0); const row = observations.at(-1);
     Object.assign(row, {module: unit.file, run: c.run, budget: step.budget, expected_reason: 1, observed_reason: after.readUInt32LE(72),
       expected_retired: step.budget, observed_retired: after.readUInt32LE(76), expected_registers: step.cpu.registers,

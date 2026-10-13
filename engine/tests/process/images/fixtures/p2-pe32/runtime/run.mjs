@@ -93,7 +93,7 @@ writeFileSync(join(outputDir, 'engine.wasm'), engineBytes);
 assert.ok(WebAssembly.validate(engineBytes), 'actual engine validates');
 const engineModule = new WebAssembly.Module(engineBytes);
 assert.deepEqual(WebAssembly.Module.imports(engineModule), [], 'actual engine has no host imports');
-const names = ['open', 'close', 'arena_ptr', 'load_pe32', 'map', 'compile_entries', 'generation', 'module_ptr', 'module_len', 'guard', 'read32', 'write32', 'store32'];
+const names = ['open', 'close', 'arena_ptr', 'load_pe32', 'map', 'compile_entries', 'generation', 'module_ptr', 'module_len', 'guard', 'read32', 'write32', 'store32', 'cpu_read32', 'cpu_store32'];
 let nextKey = 0n;
 
 function refresh(engine) {
@@ -167,7 +167,7 @@ function compile(engine, name, receipt) {
   const pointer = engine.api.module_ptr() >>> 0, length = engine.api.module_len() >>> 0;
   refresh(engine); assert.ok(length > 8 && pointer + length <= engine.bytes.length);
   const bytes = engine.bytes.slice(pointer, pointer + length), module = new WebAssembly.Module(bytes);
-  const helpers = name === 'data_bss' ? ['read32', 'store32'] : [];
+  const helpers = name === 'data_bss' ? ['cpu_read32', 'cpu_store32'] : [];
   const expectedImports = [{module: 'env', name: 'memory', kind: 'memory'}, {module: 'ring3', name: 'guard', kind: 'function'}, ...helpers.map(helper => ({module: 'ring3', name: helper, kind: 'function'}))];
   const sort = imports => imports.sort((a, b) => `${a.module}.${a.name}`.localeCompare(`${b.module}.${b.name}`));
   assert.deepEqual(sort(WebAssembly.Module.imports(module)), sort(expectedImports), `${name}: exact needed imports`);
@@ -189,8 +189,8 @@ function startup(engine, receipt) {
 function runProgram(engine, name, run) {
   let retired = 0;
   for (const expected of oracle[name].runs) {
-    const patches = [[0, record('R3ST', 56, [...expected.registers, expected.eip, expected.eflags])], [56, record('R3EX', 40, [expected.reason, expected.retired, 0, 0, 0, 0], expected.exit_version)]];
-    if (name === 'data_bss') patches.push([100, record('R3MH', 40, [0, 0, 0, 0, 0, 0])]);
+    const patches = [[0, record('R3ST', 56, [...expected.registers, expected.eip, expected.eflags])], [56, record('R3EX', 40, [expected.reason, expected.retired, 0, 0, 0, 0], name === 'data_bss' ? 6 : expected.exit_version)]];
+    if (name === 'data_bss') patches.push([100, record('R3MH', 40, [0, 0, 0, 0, 0, 4], 10)]);
     operation(engine, `${name} budget ${expected.budget}`, () => run(engine.base, engine.base + 56, expected.budget, engine.base + 96), 0, patches);
     retired += expected.retired;
     observations.push({program: name, budget: expected.budget, registers: expected.registers, eip: expected.eip, eflags: expected.eflags, reason: expected.reason, retired: expected.retired});

@@ -92,7 +92,7 @@ writeFileSync(join(outputDir, 'engine.wasm'), engineBytes);
 assert.ok(WebAssembly.validate(engineBytes));
 const engineModule = new WebAssembly.Module(engineBytes);
 assert.deepEqual(WebAssembly.Module.imports(engineModule), [], 'Rust PE linker and provider need no host imports');
-const names = ['open', 'close', 'arena_ptr', 'load_pe32', 'load_pe32_at', 'load_pe32_linked_at', 'map', 'unmap', 'compile_entries', 'compile_with_gates', 'compile_resident_with_gates', 'generation', 'module_ptr', 'module_len', 'guard', 'guard_resident', 'read32', 'write32', 'store32', 'store_resident32', 'capture_call', 'capture_resident_call', 'complete_windows_call', 'complete_resident_windows_call'];
+const names = ['open', 'close', 'arena_ptr', 'load_pe32', 'load_pe32_at', 'load_pe32_linked_at', 'map', 'unmap', 'compile_entries', 'compile_with_gates', 'compile_resident_with_gates', 'generation', 'module_ptr', 'module_len', 'guard', 'guard_resident', 'read32', 'write32', 'store32', 'store_resident32', 'capture_call', 'capture_resident_call', 'complete_windows_call', 'complete_resident_windows_call', 'cpu_read32', 'cpu_store32', 'cpu_store_resident32'];
 let nextInstance = 0;
 
 function refresh(engine) {
@@ -117,6 +117,7 @@ function words(fields) {
 function cpu(registers, eip) { return record('R3ST', 56, [...registers, eip, oracle.eflags]); }
 function exit(reason, retired, detail = 0, version = 3) { return record('R3EX', 40, [reason, retired, detail, 0, 0, 0], version); }
 function helper(value = 0) { return record('R3MH', 40, [0, value, 0, 0, 0, 0]); }
+function cpuHelper(value = 0) { return record('R3MH', 40, [0, value, 0, 0, 0, 4], 10); }
 function operation(engine, label, action, status = 0, patches = []) {
   const expected = arena(engine);
   for (const [offset, bytes] of patches) expected.set(bytes, offset);
@@ -222,7 +223,7 @@ function child(engine, label, blocks, gates, caller, residentId) {
   }
   assert.ok(WebAssembly.validate(bytes));
   const module = new WebAssembly.Module(bytes), guard = residentId === undefined ? 'guard' : 'guard_resident';
-  const imports = [guard, ...(caller ? ['read32', residentId === undefined ? 'store32' : 'store_resident32'] : [])];
+  const imports = [guard, ...(caller ? ['cpu_read32', residentId === undefined ? 'cpu_store32' : 'cpu_store_resident32'] : [])];
   const sort = rows => rows.sort((a, b) => `${a.module}.${a.name}`.localeCompare(`${b.module}.${b.name}`));
   assert.deepEqual(sort(WebAssembly.Module.imports(module)), sort([{module: 'env', name: 'memory', kind: 'memory'}, ...imports.map(name => ({module: 'ring3', name, kind: 'function'}))]), `${label}: exact indirect-CALL/read/store imports`);
   const run = new WebAssembly.Instance(module, {env: {memory: engine.memory}, ring3: Object.fromEntries(imports.map(name => [name, engine.api[name]]))}).exports.run;
@@ -256,7 +257,7 @@ function dispatch(ctx, stage, expected) {
   const {engine, receipt, example, caller, gateOwner} = ctx, resident = example.owner === 'resident';
   const [pc, id] = receipt.gates[stage.gate_index];
   operation(engine, `${example.name}: real CALL [IAT] ${stage.api}`, () => caller.run(engine.base, engine.base + 56, oracle.budget, engine.base + 96), 0, [
-    [0, cpu(stage.stop_registers, pc)], [56, exit(resident ? 3 : 8, stage.retired, resident ? 0 : id, resident ? 2 : 3)], [100, helper()],
+    [0, cpu(stage.stop_registers, pc)], [56, exit(resident ? 3 : 8, stage.retired, resident ? 0 : id, 6)], [100, cpuHelper()],
   ]);
   if (resident) operation(engine, 'Gate B dispatch retires0', () => gateOwner.run(engine.base, engine.base + 56, oracle.budget, engine.base + 96), 0, [[56, exit(8, 0, id)]]);
   stack(engine, expected.stack_values, 'real indirect CALL/PUSH stack');
@@ -288,7 +289,7 @@ for (const example of oracle.cases) {
     operation(engine, 'consumed import-call token cannot replay', () => provider(ctx, token), 14);
     observations.push({name: example.name, owner: example.owner, api: stage.api, token, retired: stage.retired, last_error_after: stage.last_error_after, guest_data: stage.data_after_dispatch, return_pc: expected.return_pc});
   }
-  operation(engine, 'actual final LEA/JMP caller continuation', () => caller.run(engine.base, engine.base + 56, oracle.budget, engine.base + 96), 0, [[0, cpu(oracle.final.registers, example.done)], [56, exit(oracle.final.reason, oracle.final.retired, 0, example.owner === 'resident' ? 2 : 3)]]);
+  operation(engine, 'actual final LEA/JMP caller continuation', () => caller.run(engine.base, engine.base + 56, oracle.budget, engine.base + 96), 0, [[0, cpu(oracle.final.registers, example.done)], [56, exit(oracle.final.reason, oracle.final.retired, 0, 6)]]);
   retired += oracle.final.retired; assert.equal(retired, oracle.total_retired);
   stack(engine, example.final_stack_values, 'final unchanged stack neighbors');
   read(engine, receipt.image_base + 0x3000, oracle.final_data, 'full-u32 value written by guest survives Set0/Get0');

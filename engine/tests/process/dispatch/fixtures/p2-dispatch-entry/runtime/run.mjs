@@ -10,7 +10,7 @@ const hash = bytes => createHash('sha256').update(bytes).digest('hex');
 const engineBytes = readFileSync(enginePath), engineModule = new WebAssembly.Module(engineBytes);
 assert.deepEqual(WebAssembly.Module.imports(engineModule), []);
 const KEY = 0xa1345678c0000001n, SIZE = 4612, TRANSFER = 140;
-const names = ['open', 'close', 'arena_ptr', 'map', 'upload', 'compile_with_gates', 'generation', 'module_ptr', 'module_len', 'guard', 'guard_dispatch_entry', 'compile_resident_with_gates', 'resident_module', 'guard_resident', 'acknowledge_resident_installation', 'read32', 'write32', 'capture_resident_call', 'capture_call', 'abandon_call', 'begin_callback', 'abort_callback'];
+const names = ['open', 'close', 'arena_ptr', 'map', 'upload', 'compile_with_gates', 'generation', 'module_ptr', 'module_len', 'guard', 'guard_dispatch_entry', 'compile_resident_with_gates', 'resident_module', 'guard_resident', 'acknowledge_resident_installation', 'read32', 'write32', 'capture_resident_call', 'capture_call', 'abandon_call', 'begin_callback', 'abort_callback', 'cpu_read32'];
 const stats = {engine_instances: 0, preopen_guard_calls: 0, direct_guard_calls: 0, direct_guard_success: 0, direct_guard_rejections: 0, probe_calls: 0, probe_guard_success: 0, probe_guard_rejections: 0, probe_child_calls: 0, probe_child_canonical: 0, probe_child_rejections: 0, direct_resident_runs: 0, direct_legacy_runs: 0, resident_compiles: 0, resident_getters: 0, metadata24_checks: 0, installation32_checks: 0, resident_captures: 0, legacy_captures: 0, pending_abandons: 0, callback_begins: 0, callback_aborts: 0, host_reads: 0, host_writes: 0, callback_word_writes: 0, full_arena_checks: 0, ram_snapshots: 0, header_cases: 0, pointer_cases: 0, closed_engines: 0};
 const artifacts = {}, authored = {}, units = [], metadata = [], controls = [], sections = [];
 for (const file of ['probe.wasm', 'foreign-probe.wasm']) artifacts[file] = hash(readFileSync(join(outputDir, file)));
@@ -94,7 +94,7 @@ section('engine initialization', Object.fromEntries(Object.keys(stats).map(k => 
 
 let before = {...stats}; observeRAM(e, 'initial independent RAM model');
 for (const value of [0, 1, 0xffffffff]) { reset(e, state(0xffffffff, value ? 0xcd7 : 2), value); guard(e, 0, 'empty registry and arbitrary output/cancel accepted'); }
-const malformed = [['magic', 0, 0], ['version', 4, 3], ['profile', 6, 2], ['length', 8, 55], ['reserved', 12, 1], ['mandatory flag bit1', 52, 0xcd5], ['unsupported flag bit3', 52, 0xcdf]];
+const malformed = [['magic', 0, 0], ['version', 4, 4], ['profile', 6, 2], ['length', 8, 55], ['reserved', 12, 1], ['mandatory flag bit1', 52, 0xcd5], ['unsupported flag bit3', 52, 0xcdf]];
 for (const [label, offset, value] of malformed) {
   reset(e, state(), 0xffffffff); if (offset === 0) e.bytes[e.base] = value; else if (offset === 4 || offset === 6) e.view.setUint16(e.base + offset, value, true); else e.view.setUint32(e.base + offset, value, true);
   guard(e, 2, `invalid own ${label}`); probe(e, 0, 2, 0, `header rejection before zero-budget child and null table: ${label}`); stats.header_cases++;

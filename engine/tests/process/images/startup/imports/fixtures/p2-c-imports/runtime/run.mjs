@@ -69,6 +69,7 @@ function record(magic, version, length, values) {
 }
 const state = (registers, pc, flags) => record('R3ST', 1, 56, [...registers, pc, flags]);
 const exit = (version, reason, retired, detail = 0) => record('R3EX', version, 40, [reason, retired, detail, 0, 0, 0]);
+const cpuPacket = (value = 0) => record('R3MH', 10, 40, [0, value, 0, 0, 0, 4]);
 const packet = (value = 0) => record('R3MH', 1, 40, [0, value, 0, 0, 0, 0]);
 const residentRecord = unit => words([1, 24, unit.low, unit.high, unit.pointer, unit.length]);
 const installation = unit => record('R3IN', 1, 32, [unit.low, unit.high, unit.slot, 0]);
@@ -153,18 +154,18 @@ function bindHelper(c, unit, name) {
     const access = c.accesses.shift();
     assert.ok(access, 'every generated helper has an original literal access');
     let expectedPacket;
-    if (name === 'read32') {
+    if (name === 'cpu_read32') {
       assert.equal(access.kind, 'read');
       assert.deepEqual(args, [access.address]);
       assert.equal(ramRead(c, access.address, 4).readUInt32LE(), access.value);
-      expectedPacket = packet(access.value);
+      expectedPacket = cpuPacket(access.value);
       counts.read32++;
     } else {
-      assert.equal(name, 'store_resident32');
+      assert.equal(name, 'cpu_store_resident32');
       assert.equal(access.kind, 'store');
       assert.deepEqual(args, [KEY_LOW, KEY_HIGH, unit.low, unit.high, access.address, access.value]);
       ramWrite(c, access.address, access.value);
-      expectedPacket = packet();
+      expectedPacket = cpuPacket();
       counts.store32++;
     }
     assert.equal(c.api[name](...raw), 0, name);
@@ -193,8 +194,8 @@ function captureUnit(c, label, entries, gates, slot) {
   const bytes = Buffer.from(new Uint8Array(c.memory.buffer, unit.pointer, unit.length));
   const module = new WebAssembly.Module(bytes), imports = WebAssembly.Module.imports(module);
   const expectedHelpers = ['guard_resident'];
-  if (label === 'caller-1' || label === 'caller-2') expectedHelpers.push('read32');
-  if (label !== 'gates') expectedHelpers.push('store_resident32');
+  if (label === 'caller-1' || label === 'caller-2') expectedHelpers.push('cpu_read32');
+  if (label !== 'gates') expectedHelpers.push('cpu_store_resident32');
   assert.deepEqual(imports, [{module: 'env', name: 'memory', kind: 'memory'},
     ...expectedHelpers.map(name => ({module: 'ring3', name, kind: 'function'}))]);
   const ring3 = Object.fromEntries(expectedHelpers.map(name => [name, bindHelper(c, unit, name)]));
@@ -306,7 +307,7 @@ for (const test of oracle.cases) {
     load_pe32_linked_v2_input_at: 2, start_loaded_image: 2, compile_resident_entries: 2,
     acknowledge_resident_installation: 5, dispatcher_module: 2, guard_dispatch_entry: 5,
     find_installed_resident: 3, guard_resident: 7, read32: 1, store_resident32: 6,
-    capture_resident_call: 6, complete_resident_windows_call: 5};
+    capture_resident_call: 6, complete_resident_windows_call: 5, cpu_read32: 1, cpu_store_resident32: 6};
   for (const [name, arity] of Object.entries(arities)) {
     api[name] = instance.exports[`ring3_abi_v1_${name}`];
     assert.equal(typeof api[name], 'function', name);
@@ -373,7 +374,7 @@ for (const test of oracle.cases) {
   const finalSeed = observedCold(c, final.entry_pc);
   captureUnit(c, 'caller-5', [finalSeed], [], 5);
   run(c, 'original-guest-stores-and-stable-loop', 14 - retired, final.retired, final.reason,
-    final.registers, final.pc, final.flags, final.exit_version, 0, final.accesses);
+    final.registers, final.pc, final.flags, 6, 0, final.accesses);
   retired += final.retired;
   assert.equal(retired, oracle.total_retired);
   assert.equal(c.units.length, 6);

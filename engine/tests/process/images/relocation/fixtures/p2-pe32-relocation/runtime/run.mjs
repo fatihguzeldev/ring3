@@ -86,7 +86,7 @@ writeFileSync(join(outputDir, 'engine.wasm'), engineBytes);
 assert.ok(WebAssembly.validate(engineBytes), 'actual engine validates');
 const engineModule = new WebAssembly.Module(engineBytes);
 assert.deepEqual(WebAssembly.Module.imports(engineModule), [], 'actual engine has no host imports');
-const names = ['open', 'close', 'arena_ptr', 'load_pe32', 'load_pe32_at', 'map', 'compile_entries', 'generation', 'module_ptr', 'module_len', 'guard', 'read32', 'write32', 'store32'];
+const names = ['open', 'close', 'arena_ptr', 'load_pe32', 'load_pe32_at', 'map', 'compile_entries', 'generation', 'module_ptr', 'module_len', 'guard', 'read32', 'write32', 'store32', 'cpu_read32', 'cpu_store32'];
 let nextKey = 0n;
 
 function refresh(engine) {
@@ -158,8 +158,8 @@ function compile(engine, example, receipt) {
   refresh(engine); assert.ok(length > 8 && pointer + length <= engine.bytes.length);
   const bytes = engine.bytes.slice(pointer, pointer + length), module = new WebAssembly.Module(bytes);
   const sort = imports => imports.sort((a, b) => `${a.module}.${a.name}`.localeCompare(`${b.module}.${b.name}`));
-  assert.deepEqual(sort(WebAssembly.Module.imports(module)), sort([{module: 'env', name: 'memory', kind: 'memory'}, ...['guard', 'read32', 'store32'].map(name => ({module: 'ring3', name, kind: 'function'}))]), 'only exact memory/guard/instruction imports');
-  const run = new WebAssembly.Instance(module, {env: {memory: engine.memory}, ring3: {guard: engine.api.guard, read32: engine.api.read32, store32: engine.api.store32}}).exports.run;
+  assert.deepEqual(sort(WebAssembly.Module.imports(module)), sort([{module: 'env', name: 'memory', kind: 'memory'}, ...['guard', 'cpu_read32', 'cpu_store32'].map(name => ({module: 'ring3', name, kind: 'function'}))]), 'only exact memory/guard/instruction imports');
+  const run = new WebAssembly.Instance(module, {env: {memory: engine.memory}, ring3: {guard: engine.api.guard, cpu_read32: engine.api.cpu_read32, cpu_store32: engine.api.cpu_store32}}).exports.run;
   assert.equal(typeof run, 'function'); assert.equal(run.length, 4);
   writeFileSync(join(outputDir, `${example.name}.wasm`), bytes); artifacts[`${example.name}.wasm`] = hash(bytes);
   return run;
@@ -193,8 +193,8 @@ for (const example of oracle.cases) {
   startup(engine, receipt);
   operation(engine, `${example.name}: actual emitted guest execution`, () => run(engine.base, engine.base + 56, oracle.budget, engine.base + 96), 0, [
     [0, record('R3ST', 56, [...example.registers, example.done, example.eflags])],
-    [56, record('R3EX', 40, [oracle.reason, oracle.retired, 0, 0, 0, 0], oracle.exit_version)],
-    [100, record('R3MH', 40, [0, 0, 0, 0, 0, 0])],
+    [56, record('R3EX', 40, [oracle.reason, oracle.retired, 0, 0, 0, 0], 6)],
+    [100, record('R3MH', 40, [0, 0, 0, 0, 0, 4], 10)],
   ]);
   read(engine, base + 0x3004, oracle.initialized_value, `${example.name}: initialized value retained`);
   read(engine, base + 0x3200, oracle.final_bss, `${example.name}: emitted guest store proves final RW data`);

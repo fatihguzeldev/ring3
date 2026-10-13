@@ -10,7 +10,7 @@ const engineBytes = readFileSync(enginePath);
 assert.ok(WebAssembly.validate(engineBytes), 'actual engine validates');
 const engineModule = new WebAssembly.Module(engineBytes);
 assert.deepEqual(WebAssembly.Module.imports(engineModule), [], 'engine has no JS imports');
-const names = ['open', 'close', 'arena_ptr', 'map', 'protect', 'unmap', 'upload', 'compile', 'compile_with_gates', 'capture_call', 'complete_call', 'abandon_call', 'generation', 'module_ptr', 'module_len', 'guard', 'read32', 'write32', 'store32'];
+const names = ['open', 'close', 'arena_ptr', 'map', 'protect', 'unmap', 'upload', 'compile', 'compile_with_gates', 'capture_call', 'complete_call', 'abandon_call', 'generation', 'module_ptr', 'module_len', 'guard', 'read32', 'write32', 'store32', 'cpu_read32', 'cpu_store32'];
 let keys = 0n, modules = 0, actualRuns = 0;
 const generatedHashes = [];
 
@@ -75,6 +75,19 @@ function helperRecord(tag, value = 0, detail = 0, address = 0, access = 0, lengt
   [tag, value, detail, address, access, length].forEach((field, index) => view.setUint32(16 + index * 4, field, true));
   return bytes;
 }
+function cpuHelperRecord(tag, value = 0, detail = 0, address = 0, access = 0, length = 4) {
+  const bytes = new Uint8Array(40), view = new DataView(bytes.buffer);
+  header(bytes, view, 0, 'R3MH', 40, 10);
+  [tag, value, detail, address, access, length].forEach((field, index) => view.setUint32(16 + index * 4, field, true));
+  return bytes;
+}
+function unitExit(unit, reason, retired, detail = 0, address = 0, access = 0, length = reason === 5 ? 4 : 0, version = 3) {
+  const bytes = new Uint8Array(40), view = new DataView(bytes.buffer);
+  header(bytes, view, 0, 'R3EX', 40, version >= 7 ? version : unit.cpuScalar ? 6 : version);
+  [reason, retired, detail, address, access, length].forEach((field, index) => view.setUint32(16 + index * 4, field, true));
+  return bytes;
+}
+
 
 function guestValue(engine, address) {
   assert.equal(engine.api.read32(address), 0, 'actual guest observation helper');
@@ -113,12 +126,12 @@ function compile(engine, blocks, gates, expectedHelpers = []) {
   assert.deepEqual(sortedImports(module), expected, 'only actual memory/guard/instruction helpers; no hot gate import');
   const instance = new WebAssembly.Instance(module, {
     env: {memory: engine.memory},
-    ring3: {guard: engine.api.guard, read32: engine.api.read32, store32: engine.api.store32},
+    ring3: {guard: engine.api.guard, cpu_read32: engine.api.cpu_read32, cpu_store32: engine.api.cpu_store32},
   });
   modules++;
   generatedHashes.push(hash(encoded));
   writeFileSync(join(outputDir, `generated-${modules}.wasm`), encoded);
-  return {module, run: instance.exports.run, generation: engine.api.generation() >>> 0};
+  return {module, cpuScalar: expectedHelpers.some(name => name.startsWith('cpu_')), run: instance.exports.run, generation: engine.api.generation() >>> 0};
 }
 
 function state(eip = 0x1000, eflags = 0xcd7) {
@@ -284,7 +297,7 @@ function prepare(tag, count, stackTop = 0x9000) {
   upload(engine, 0x1000, Uint8Array.from(program.bytes));
   upload(engine, 0x1100, Uint8Array.from([0x0f, 0x0b]));
   const returnPc = 0x1000 + program.callLength;
-  const child = compile(engine, [[0x1000, program.callLength], [returnPc, program.bytes.length - program.callLength], [0x1100, 2]], [[0x1100, gateId]], tag === 2 ? ['read32', 'store32'] : ['store32']);
+  const child = compile(engine, [[0x1000, program.callLength], [returnPc, program.bytes.length - program.callLength], [0x1100, 2]], [[0x1100, gateId]], tag === 2 ? ['cpu_read32', 'cpu_store32'] : ['cpu_store32']);
   const start = state();
   start.registers[3] = 0x4000;
   start.registers[4] = stackTop;
@@ -295,7 +308,7 @@ function prepare(tag, count, stackTop = 0x9000) {
   if (tag === 3) stopped.registers[1] = 0xf1234567;
   writeState(engine, start);
   const retired = count + 1 + (tag === 3 ? 1 : 0);
-  run(engine, child, retired + 1, stopped, exit(8, retired, gateId), `${conventionNames[tag]}${count} authored CALL reaches gate`, helperRecord(0));
+  run(engine, child, retired + 1, stopped, unitExit(child, 8, retired, gateId), `${conventionNames[tag]}${count} authored CALL reaches gate`, cpuHelperRecord(0));
   return {engine, child, program, returnPc, start, stopped};
 }
 
@@ -321,7 +334,7 @@ function callerResume(test, completed) {
     expected.registers[4] = start.registers[4];
     expected.eflags = addFlags(completed.registers[4], program.count * 4, completed.eflags);
   }
-  run(engine, child, 3, expected, exit(3, cleanup ? 2 : 1), 'actual caller resumes once after process completion', arena(engine).slice(100, 140));
+  run(engine, child, 3, expected, unitExit(child, 3, cleanup ? 2 : 1), 'actual caller resumes once after process completion', arena(engine).slice(100, 140));
 }
 
 for (const tag of [1, 2, 3]) for (const count of [0, 2, 16]) {
@@ -375,7 +388,7 @@ for (const tag of [1, 2, 3]) for (const count of [0, 2, 16]) {
   fail(engine, () => engine.api.capture_call(engine.low, engine.high, child.generation, 0, 2), 7, 'bad convention tag');
   fail(engine, () => engine.api.capture_call(engine.low, engine.high, child.generation, 2, 17), 7, 'stack word count above sixteen');
   const saved = arena(engine).slice(0, 96);
-  refresh(engine).view.setUint16(engine.base + 4, 3, true);
+  refresh(engine).view.setUint16(engine.base + 4, 4, true);
   fail(engine, () => engine.api.capture_call(engine.low, engine.high, child.generation, 0, 99), 7, 'bad request precedes malformed state');
   fail(engine, () => engine.api.capture_call(engine.low, engine.high, child.generation, 2, 2), 13, 'malformed state is not a capturable stop');
   engine.bytes.set(saved, engine.base);
@@ -439,7 +452,7 @@ for (const [esp, count] of [[0xfffffffd, 0], [0xfffffff9, 1]]) {
   const stopped = state(0x1100);
   stopped.registers[4] = esp;
   writeState(engine, stopped);
-  run(engine, child, 1, stopped, exit(8, 0, gateId), 'preset stack pointer reaches actual helper-free numeric gate', arena(engine).slice(100, 140));
+  run(engine, child, 1, stopped, unitExit(child, 8, 0, gateId), 'preset stack pointer reaches actual helper-free numeric gate', arena(engine).slice(100, 140));
   fail(engine, () => engine.api.capture_call(engine.low, engine.high, child.generation, 2, count), 8, `${count ? 'argument' : 'return'} width4 overflow capture failure is atomic`);
 }
 
@@ -464,11 +477,11 @@ for (const [esp, count] of [[0xfffffffd, 0], [0xfffffff9, 1]]) {
   word(engine, stopped.registers[4], unknown);
   const token = capture(engine, child, 3, args.slice(0, 2), stopped, unknown);
   const completed = complete(engine, child, 3, 2, stopped, unknown, token, 0xffffffff);
-  run(engine, child, 2, completed, exit(3, 0), 'unknown captured return succeeds then CPU NeedCode without another pop', arena(engine).slice(100, 140));
+  run(engine, child, 2, completed, unitExit(child, 3, 0), 'unknown captured return succeeds then CPU NeedCode without another pop', arena(engine).slice(100, 140));
 
   // a fresh Gate stop permits another parked frame; close consumes it permanently.
   writeState(engine, stopped);
-  run(engine, child, 1, stopped, exit(8, 0, gateId), 'fresh actual gate observation after completion');
+  run(engine, child, 1, stopped, unitExit(child, 8, 0, gateId), 'fresh actual gate observation after completion');
   const pending = capture(engine, child, 3, args.slice(0, 2), stopped, unknown, 2);
   assert.equal(engine.api.close(), 0);
   fail(engine, () => child.run(0xffffffff, 0xffffffff, 1, 0xffffffff), 5, 'closed context precedes pending/pointer checks');

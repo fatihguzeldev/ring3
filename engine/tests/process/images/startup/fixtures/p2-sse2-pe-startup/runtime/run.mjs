@@ -74,7 +74,7 @@ function record(magic, version, size, values) {
   return bytes;
 }
 const state = (registers, pc, flags) => record('R3ST', 1, 56, [...registers, pc, flags]);
-const exit = (reason, retired) => record('R3EX', reason === 3 ? 3 : 2, 40, [reason, retired, 0, 0, 0, 0]);
+const exit = (reason, retired) => record('R3EX', reason === 3 ? 3 : 6, 40, [reason, retired, 0, 0, 0, 0]);
 const packet = (version, value = 0, length = 0) => record('R3MH', version, 40, [0, value, 0, 0, 0, length]);
 const residentRecord = unit => words([1, 24, unit.low, unit.high, unit.pointer, unit.length]);
 const installation = unit => record('R3IN', 1, 32, [unit.low, unit.high, unit.slot, 0]);
@@ -152,22 +152,22 @@ function bindHelper(c, unit, name) {
       assert.deepEqual(arena(c), before, 'resident guard is neutral');
       return 0;
     }
-    const resident = ['store_resident32', 'cpu_write_resident', 'simd_execute_resident'].includes(name);
+    const resident = ['cpu_store_resident32', 'cpu_write_resident', 'simd_execute_resident'].includes(name);
     if (resident) assert.deepEqual(args.slice(0, 4), [KEY_LOW, KEY_HIGH, unit.low, unit.high]);
     const payload = args.slice(resident ? 4 : 0);
     let helper, family;
-    if (name === 'read32') {
+    if (name === 'cpu_read32') {
       family = 'read32';
       const next = c.reads.shift();
       assert.deepEqual(payload, [next.address], 'ordered original stack read');
-      helper = packet(1, next.value);
+      helper = packet(10, next.value, 4);
       assert.equal(ramRead(c, next.address, 4).readUInt32LE(), next.value);
-    } else if (name === 'store_resident32') {
+    } else if (name === 'cpu_store_resident32') {
       family = 'store32';
       const next = c.stores.shift();
       assert.deepEqual(payload, [next.address, next.value], 'ordered guest stack or completion write');
       ramWrite(c, next.address, word(next.value));
-      helper = packet(1);
+      helper = packet(10, 0, 4);
     } else if (name === 'cpu_read') {
       family = 'cpu_read';
       assert.equal(payload[1], 16);
@@ -216,7 +216,7 @@ function capture(c, label, rvas, slot) {
   const bytes = Buffer.from(new Uint8Array(c.memory.buffer, unit.pointer, unit.length));
   const module = new WebAssembly.Module(bytes), imports = WebAssembly.Module.imports(module), ring3 = {};
   assert.deepEqual(imports[0], {module: 'env', name: 'memory', kind: 'memory'});
-  const allowed = new Set(['guard_resident', 'read32', 'store_resident32', 'cpu_read', 'cpu_write_resident', 'simd_execute_resident']);
+  const allowed = new Set(['guard_resident', 'cpu_read32', 'cpu_store_resident32', 'cpu_read', 'cpu_write_resident', 'simd_execute_resident']);
   for (const item of imports.slice(1)) {
     assert.equal(item.module, 'ring3');
     assert.equal(item.kind, 'function');

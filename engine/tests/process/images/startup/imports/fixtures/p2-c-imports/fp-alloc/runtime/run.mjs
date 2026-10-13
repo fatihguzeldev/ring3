@@ -76,6 +76,7 @@ function record(magic, version, length, values) {
 }
 const state = (registers, pc, flags) => record('R3ST', 1, 56, [...registers, pc, flags]);
 const exit = (version, reason, retired, detail = 0) => record('R3EX', version, 40, [reason, retired, detail, 0, 0, 0]);
+const cpuPacket = (value = 0) => record('R3MH', 10, 40, [0, value, 0, 0, 0, 4]);
 const packet = (value = 0) => record('R3MH', 1, 40, [0, value, 0, 0, 0, 0]);
 const residentRecord = unit => words([1, 24, unit.low, unit.high, unit.pointer, unit.length]);
 const installation = unit => record('R3IN', 1, 32, [unit.low, unit.high, unit.slot, 0]);
@@ -187,25 +188,25 @@ function bindHelper(c, unit, name) {
       assert.deepEqual(arena(c), before, 'resident guard is neutral');
       return 0;
     }
-    const resident = ['store_resident32', 'cpu_write_resident', 'simd_execute_resident'].includes(name);
+    const resident = ['cpu_store_resident32', 'cpu_write_resident', 'simd_execute_resident'].includes(name);
     if (resident) assert.deepEqual(args.slice(0, 4), [KEY_LOW, KEY_HIGH, unit.low, unit.high]);
     const payload = args.slice(resident ? 4 : 0);
     let family, resultPacket;
-    if (name === 'read32' || name === 'store_resident32') {
+    if (name === 'cpu_read32' || name === 'cpu_store_resident32') {
       const access = c.accesses.shift();
       assert.ok(access, 'each generated DWORD helper has an original literal access');
-      if (name === 'read32') {
+      if (name === 'cpu_read32') {
         family = 'read32';
         assert.equal(access.kind, 'read');
         assert.deepEqual(payload, [access.address]);
         assert.equal(ramRead(c, access.address, 4).readUInt32LE(), access.value);
-        resultPacket = packet(access.value);
+        resultPacket = cpuPacket(access.value);
       } else {
         family = 'store32';
         assert.equal(access.kind, 'store');
         assert.deepEqual(payload, [access.address, access.value]);
         ramWrite(c, access.address, word(access.value));
-        resultPacket = packet();
+        resultPacket = cpuPacket();
       }
     } else if (name === 'cpu_read') {
       family = 'cpu_read';
@@ -261,7 +262,7 @@ function captureUnit(c, label, entries, gates, slot) {
   assert.ok(unit.pointer + unit.length <= c.memory.buffer.byteLength);
   const bytes = Buffer.from(new Uint8Array(c.memory.buffer, unit.pointer, unit.length));
   const module = new WebAssembly.Module(bytes), imports = WebAssembly.Module.imports(module);
-  const expectedHelpers = ['guard_resident', ...c.captureImports];
+  const expectedHelpers = ['guard_resident', ...c.captureImports.map(name => ({read32: 'cpu_read32', store_resident32: 'cpu_store_resident32'}[name] ?? name))];
   assert.deepEqual(imports, [{module: 'env', name: 'memory', kind: 'memory'},
     ...expectedHelpers.map(name => ({module: 'ring3', name, kind: 'function'}))]);
   const ring3 = Object.fromEntries(expectedHelpers.map(name => [name, bindHelper(c, unit, name)]));
@@ -330,7 +331,7 @@ function run(c, phase) {
   expected.set(c.latest.subarray(T, T + 32), T);
   expected.set(c.latest.subarray(T + 512, T + 520), T + 512);
   expected.set(state(phase.registers, phase.pc, phase.flags), 0);
-  expected.set(exit(phase.exit_version, phase.reason, phase.retired, phase.detail ?? 0), 56);
+  expected.set(exit(phase.exit_version === 2 ? 6 : phase.exit_version, phase.reason, phase.retired, phase.detail ?? 0), 56);
   const expectedSimd = Buffer.from(phase.simd_hex, 'hex');
   assert.equal(expectedSimd.length, 160, 'oracle provides the complete physical SIMD bank');
   expected.set(expectedSimd, SV);
@@ -402,7 +403,7 @@ for (const test of oracle.cases) {
     acknowledge_resident_installation: 5, dispatcher_module: 2, guard_dispatch_entry: 5,
     find_installed_resident: 3, guard_resident: 7, read32: 1, store_resident32: 6,
     cpu_read: 3, cpu_write_resident: 7, simd_execute_resident: 10,
-    capture_resident_call: 6, complete_resident_windows_call: 5};
+    capture_resident_call: 6, complete_resident_windows_call: 5, cpu_read32: 1, cpu_store_resident32: 6};
   for (const [name, arity] of Object.entries(arities)) {
     api[name] = instance.exports[`ring3_abi_v1_${name}`];
     assert.equal(typeof api[name], 'function', name);

@@ -90,7 +90,7 @@ writeFileSync(join(outputDir, 'engine.wasm'), engineBytes);
 assert.ok(WebAssembly.validate(engineBytes));
 const engineModule = new WebAssembly.Module(engineBytes);
 assert.deepEqual(WebAssembly.Module.imports(engineModule), []);
-const names = ['open', 'close', 'arena_ptr', 'load_pe32', 'start_loaded_image', 'map', 'write32', 'compile_entries', 'compile_resident_entries', 'generation', 'module_ptr', 'module_len', 'resident_module', 'find_resident', 'acknowledge_resident_installation', 'find_installed_resident', 'dispatcher_module', 'guard', 'guard_dispatch_entry', 'guard_resident', 'read32', 'store32', 'store_resident32', 'capture_call', 'capture_resident_call', 'complete_call', 'complete_resident_call', 'complete_windows_call', 'complete_resident_windows_call'];
+const names = ['open', 'close', 'arena_ptr', 'load_pe32', 'start_loaded_image', 'map', 'write32', 'compile_entries', 'compile_resident_entries', 'generation', 'module_ptr', 'module_len', 'resident_module', 'find_resident', 'acknowledge_resident_installation', 'find_installed_resident', 'dispatcher_module', 'guard', 'guard_dispatch_entry', 'guard_resident', 'read32', 'store32', 'store_resident32', 'capture_call', 'capture_resident_call', 'complete_call', 'complete_resident_call', 'complete_windows_call', 'complete_resident_windows_call', 'cpu_read32', 'cpu_store32', 'cpu_store_resident32'];
 let engine, nextInstance = 0;
 const bytesFromHex = hex => new Uint8Array(Buffer.from(hex, 'hex'));
 
@@ -105,6 +105,7 @@ function words(fields) { const bytes = new Uint8Array(fields.length * 4), view =
 function cpu(registers, pc) { return record('R3ST', 56, [...registers, pc, oracle.runtime.eflags]); }
 function exit(reason, retired, detail = 0, version = 3) { return record('R3EX', 40, [reason, retired, detail, 0, 0, 0], version); }
 function helper(value = 0) { return record('R3MH', 40, [0, value, 0, 0, 0, 0]); }
+function cpuHelper(value = 0) { return record('R3MH', 40, [0, value, 0, 0, 0, 4], 10); }
 function residentRecord(unit) { return words([1, 24, unit.low, unit.high, unit.pointer, unit.length]); }
 function installation(unit, slot) { return record('R3IN', 32, [unit.low, unit.high, slot, 0]); }
 function operation(label, action, status = 0, patches = []) {
@@ -120,12 +121,13 @@ function entriesRequest(entries, gates = []) {
   gates.forEach(([pc, id], index) => { const offset = engine.base + transfer + entries.length * 4 + index * 8; view.setUint32(offset, pc, true); view.setUint32(offset + 4, id, true); });
 }
 function instantiate(unit, helpers) {
+  helpers = helpers.map(name => ({read32: 'cpu_read32', store32: 'cpu_store32', store_resident32: 'cpu_store_resident32'}[name] ?? name));
   refresh(); assert.ok(unit.pointer > 0 && unit.length > 8 && unit.pointer + unit.length <= engine.bytes.length);
   unit.bytes = engine.bytes.slice(unit.pointer, unit.pointer + unit.length);
   const module = new WebAssembly.Module(unit.bytes), imports = WebAssembly.Module.imports(module);
   const sort = rows => rows.sort((a, b) => `${a.module}.${a.name}`.localeCompare(`${b.module}.${b.name}`));
   assert.deepEqual(sort(imports), sort([{module: 'env', name: 'memory', kind: 'memory'}, ...helpers.map(name => ({module: 'ring3', name, kind: 'function'}))]));
-  const allowed = new Set(['guard', 'guard_resident', 'store32', 'store_resident32']);
+  const allowed = new Set(['guard', 'guard_resident', 'cpu_store32', 'cpu_store_resident32']);
   const binding = Object.fromEntries(imports.filter(item => item.module === 'ring3').map(item => { assert.ok(allowed.has(item.name)); return [item.name, engine.api[item.name]]; }));
   unit.instance = new WebAssembly.Instance(module, {env: {memory: engine.memory}, ring3: binding}); unit.run = unit.instance.exports.run;
   assert.equal(typeof unit.run, 'function'); assert.equal(unit.run.length, 4);
@@ -141,6 +143,7 @@ function replacement(entries, gates) {
   return instantiate({label: 'replacement', generation: engine.api.generation(), pointer: engine.api.module_ptr() >>> 0, length: engine.api.module_len() >>> 0, entries}, oracle.transport.replacement.helper_imports);
 }
 function resident(entries, gates, label, helpers) {
+  helpers = helpers.map(name => ({read32: 'cpu_read32', store32: 'cpu_store32', store_resident32: 'cpu_store_resident32'}[name] ?? name));
   entriesRequest(entries, gates);
   const before = arena(); assert.equal(engine.api.compile_resident_entries(entries.length, gates.length), 0);
   const after = arena(), view = new DataView(after.buffer, transfer, 24);
@@ -239,7 +242,8 @@ function retainedBytes() {
 for (const owner of oracle.runtime.cases) {
   setup(owner);
   const primary = engine.dispatcher ?? engine.caller, base = engine.base, memory = engine.memory;
-  const gatePatches = [[0, bytesFromHex(oracle.records.gate_state_hex)], [56, bytesFromHex(oracle.records.gate_exit_hex)], [100, helper()]];
+  assert.deepEqual(bytesFromHex(oracle.records.gate_exit_hex), exit(8, oracle.runtime.prefix_retired, oracle.runtime.gate_id), 'historical Gate fields remain exact');
+  const gatePatches = [[0, bytesFromHex(oracle.records.gate_state_hex)], [56, exit(8, oracle.runtime.prefix_retired, oracle.runtime.gate_id, owner === 'replacement' ? 6 : 3)], [100, cpuHelper()]];
   if (owner === 'resident') gatePatches.push([transfer, installation(engine.gate, 0)]);
   run(primary, oracle.runtime.budget, 'actual MOV/PUSH/CALL and zero-retirement Gate', gatePatches);
   stack(oracle.runtime.stack_at_gate, 'real return and exit argument'); read(oracle.runtime.data_address, 0, 'precompiled return canary has not run');
@@ -290,7 +294,8 @@ for (const owner of oracle.runtime.cases) {
 setup('replacement', 'forged-terminal-output');
 refresh().bytes.set(bytesFromHex(oracle.records.terminal_exit_hex), engine.base + 56);
 const forged = oracle.forged_terminal_without_private_latch;
-run(engine.caller, forged.budget, 'forged terminal bytes do not create process ownership', [[0, cpu(forged.registers_after_MOV, forged.eip_after_MOV)], [56, bytesFromHex(forged.exit_hex_after_MOV)]]);
+assert.deepEqual(bytesFromHex(forged.exit_hex_after_MOV), exit(1, 1), 'historical forged-output control fields remain exact');
+run(engine.caller, forged.budget, 'forged terminal bytes do not create process ownership', [[0, cpu(forged.registers_after_MOV, forged.eip_after_MOV)], [56, exit(1, 1, 0, 6)]]);
 stack(oracle.runtime.stack_initial, 'one MOV does not synthesize or write stack'); read(oracle.runtime.data_address, 0, 'fresh forged-output control retains canary zero');
 observations.push({owner: 'fresh-forged-terminal', phase: 'diagnostic_only', status: 0, retired: 1, registers: forged.registers_after_MOV, eip: forged.eip_after_MOV, data: 0});
 operation('fresh nonterminal close', () => engine.api.close());

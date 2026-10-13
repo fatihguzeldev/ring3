@@ -86,7 +86,7 @@ writeFileSync(join(outputDir, 'source-sha256.json'), JSON.stringify(sources, nul
 const engineBytes = readFileSync(enginePath); writeFileSync(join(outputDir, 'engine.wasm'), engineBytes);
 assert.ok(WebAssembly.validate(engineBytes));
 const engineModule = new WebAssembly.Module(engineBytes); assert.deepEqual(WebAssembly.Module.imports(engineModule), []);
-const names = ['open','close','arena_ptr','load_pe32','load_pe32_at','load_pe32_linked_at','load_pe32_linked_v2_at','start_loaded_image','map','compile_entries','compile_resident_entries','generation','module_ptr','module_len','resident_module','find_resident','acknowledge_resident_installation','find_installed_resident','dispatcher_module','guard','guard_dispatch_entry','guard_resident','read32','write32','store32','store_resident32','capture_call','capture_resident_call','complete_call','complete_resident_call','complete_windows_call','complete_resident_windows_call'];
+const names = ['open','close','arena_ptr','load_pe32','load_pe32_at','load_pe32_linked_at','load_pe32_linked_v2_at','start_loaded_image','map','compile_entries','compile_resident_entries','generation','module_ptr','module_len','resident_module','find_resident','acknowledge_resident_installation','find_installed_resident','dispatcher_module','guard','guard_dispatch_entry','guard_resident','read32','write32','store32','store_resident32','capture_call','capture_resident_call','complete_call','complete_resident_call','complete_windows_call','complete_resident_windows_call', 'cpu_read32', 'cpu_store32', 'cpu_store_resident32'];
 let engine, nextInstance = 0;
 const fromHex = hex => new Uint8Array(Buffer.from(hex, 'hex'));
 function refresh() { if (engine.buffer !== engine.memory.buffer) { engine.buffer = engine.memory.buffer; engine.bytes = new Uint8Array(engine.buffer); engine.view = new DataView(engine.buffer); } return engine; }
@@ -99,6 +99,7 @@ function record(magic, length, fields, version = 1) {
 function words(fields) { const bytes = new Uint8Array(fields.length * 4), view = new DataView(bytes.buffer); fields.forEach((value, index) => view.setUint32(index * 4, value, true)); return bytes; }
 function cpu(registers, pc) { return record('R3ST', 56, [...registers, pc, 2]); }
 function helper(value = 0) { return record('R3MH', 40, [0,value,0,0,0,0]); }
+function cpuHelper(value = 0) { return record('R3MH', 40, [0,value,0,0,0,4], 10); }
 function residentRecord(unit) { return words([1,24,unit.low,unit.high,unit.pointer,unit.length]); }
 function installation(unit, slot) { return record('R3IN', 32, [unit.low,unit.high,slot,0]); }
 function operation(label, action, status = 0, patches = []) {
@@ -138,6 +139,7 @@ function entriesRequest(entries, gates = []) {
   gates.forEach(([pc,id],index)=>{const offset=engine.base+transfer+entries.length*4+index*8;view.setUint32(offset,pc,true);view.setUint32(offset+4,id,true);});
 }
 function instantiate(unit, helpers) {
+  helpers = helpers.map(name => ({read32: 'cpu_read32', store32: 'cpu_store32', store_resident32: 'cpu_store_resident32'}[name] ?? name));
   refresh(); assert.ok(unit.pointer > 0 && unit.length > 8 && unit.pointer + unit.length <= engine.bytes.length);
   unit.bytes = engine.bytes.slice(unit.pointer, unit.pointer + unit.length);
   const module = new WebAssembly.Module(unit.bytes), imports = WebAssembly.Module.imports(module);
@@ -155,6 +157,7 @@ function replacement(entries, gates) {
   return instantiate({label:'replacement',generation:engine.api.generation(),pointer:engine.api.module_ptr()>>>0,length:engine.api.module_len()>>>0,entries},oracle.transport.replacement.helper_imports);
 }
 function resident(entries, gates, label, helpers) {
+  helpers = helpers.map(name => ({read32: 'cpu_read32', store32: 'cpu_store32', store_resident32: 'cpu_store_resident32'}[name] ?? name));
   entriesRequest(entries,gates); const before=arena(); assert.equal(engine.api.compile_resident_entries(entries.length,gates.length),0);
   const after=arena(),view=new DataView(after.buffer,transfer,24);
   const unit={low:view.getUint32(8,true),high:view.getUint32(12,true),pointer:view.getUint32(16,true),length:view.getUint32(20,true),entries,label};
@@ -215,7 +218,8 @@ for(const example of oracle.cases){
   setup(example);const primary=engine.dispatcher??engine.caller,base=engine.base,memory=engine.memory;let total=0;
   for(let index=0;index<oracle.stages.length;index++){
     const stage=oracle.stages[index],expected=example.stages[index];
-    const patches=[[0,fromHex(expected.stop_state_hex)],[56,fromHex(stage.gate_exit_hex)],[100,helper()]];
+    assert.deepEqual(fromHex(stage.gate_exit_hex), record('R3EX', 40, [8, stage.retired, stage.id, 0, 0, 0], 3), 'historical oracle semantic fields remain exact');
+    const patches=[[0,fromHex(expected.stop_state_hex)],[56,record('R3EX', 40, [8, stage.retired, stage.id, 0, 0, 0], engine.owner === 'replacement' ? 6 : 3)],[100,cpuHelper()]];
     if(engine.owner==='resident')patches.push([transfer,installation(engine.gate,0)]);
     run(primary,oracle.runtime.budget,`real IAT ${stage.api} fresh guest retirement`,patches);
     const gateArena=arena(),actualRetired=new DataView(gateArena.buffer).getUint32(76,true);total+=actualRetired;
