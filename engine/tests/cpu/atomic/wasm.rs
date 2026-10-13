@@ -93,3 +93,6 @@ mod cpu_xchg32_wasm;
 
 #[path = "exchange/register/wasm/byte.rs"]
 mod cpu_xchg8_wasm;
+
+#[path = "hints/wasm.rs"]
+mod cpu_hle_wasm;
