@@ -68,3 +68,6 @@ mod integer_capability;
 
 #[path = "avx/masked/capability/native.rs"]
 mod masked_capability;
+
+#[path = "avx/shift/uniform/capability/native.rs"]
+mod uniform_shift_capability;

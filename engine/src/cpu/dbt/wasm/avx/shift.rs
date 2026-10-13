@@ -1,5 +1,5 @@
 use super::VectorLayout;
-use crate::cpu::x86::avx::{ShiftCount, ShiftInstruction, VectorRegister};
+use crate::cpu::x86::avx::{ShiftCount, ShiftInstruction, VectorRegister, VectorWidth};
 use wasm_encoder::{InstructionSink, MemArg};
 #[derive(Clone, Copy)]
 pub(super) struct ShiftLocals {
@@ -45,10 +45,22 @@ pub(super) fn emit(
     };
     code.local_get(locals.state);
     super::super::simd::shift_value(code, instruction.operation(), immediate, locals.sources);
-    code.v128_store(vector(layout, instruction.destination(), false));
-    code.local_get(locals.state)
-        .v128_const(0)
-        .v128_store(vector(layout, instruction.destination(), true));
+    if instruction.width() == VectorWidth::Ymm {
+        // keep the lower result pending while the upper data is captured; the
+        // original xmm count stays in its local even if a register aliases.
+        code.local_get(locals.state);
+        code.local_get(locals.state)
+            .v128_load(vector(layout, instruction.source(), true))
+            .local_set(source);
+        super::super::simd::shift_value(code, instruction.operation(), immediate, locals.sources);
+        code.v128_store(vector(layout, instruction.destination(), true));
+        code.v128_store(vector(layout, instruction.destination(), false));
+    } else {
+        code.v128_store(vector(layout, instruction.destination(), false));
+        code.local_get(locals.state)
+            .v128_const(0)
+            .v128_store(vector(layout, instruction.destination(), true));
+    }
 }
 #[cfg(test)]
 #[path = "shift/wasm.rs"]

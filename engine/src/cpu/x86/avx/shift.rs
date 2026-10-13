@@ -1,4 +1,4 @@
-use super::{MemoryRequirement, VectorRegister, VectorState};
+use super::{MemoryRequirement, VectorRegister, VectorState, VectorWidth};
 use crate::{cpu::x86::simd::ShiftOperation, memory::Access};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -9,6 +9,7 @@ pub(crate) enum ShiftCount {
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct ShiftInstruction {
+    width: VectorWidth,
     operation: ShiftOperation,
     destination: VectorRegister,
     source: VectorRegister,
@@ -20,7 +21,17 @@ pub(crate) enum ShiftError {
     InvalidState,
 }
 impl ShiftInstruction {
+    #[cfg(test)]
     pub(crate) fn new(
+        operation: ShiftOperation,
+        destination: VectorRegister,
+        source: VectorRegister,
+        count: ShiftCount,
+    ) -> Option<Self> {
+        Self::with_width(VectorWidth::Xmm, operation, destination, source, count)
+    }
+    pub(crate) fn with_width(
+        width: VectorWidth,
         operation: ShiftOperation,
         destination: VectorRegister,
         source: VectorRegister,
@@ -28,12 +39,16 @@ impl ShiftInstruction {
     ) -> Option<Self> {
         (operation.byte_kind().is_none() || matches!(count, ShiftCount::Immediate(_))).then_some(
             Self {
+                width,
                 operation,
                 destination,
                 source,
                 count,
             },
         )
+    }
+    pub(crate) fn width(self) -> VectorWidth {
+        self.width
     }
     pub(crate) fn operation(self) -> ShiftOperation {
         self.operation
@@ -67,14 +82,20 @@ impl VectorState {
         if self.simd.mxcsr & !0xffff != 0 {
             return Err(ShiftError::InvalidState);
         }
-        let source = self.simd.xmm[instruction.source.index()];
+        let source = self.read(instruction.source);
         let (count, immediate) = match instruction.count {
             ShiftCount::Immediate(n) => ([0; 16], Some(n)),
             ShiftCount::Register(r) => (self.simd.xmm[r.index()], None),
             ShiftCount::Memory => (operand.try_into().unwrap(), None),
         };
         let mut value = [0; 32];
-        value[..16].copy_from_slice(&instruction.operation.evaluate(source, count, immediate));
+        for offset in (0..instruction.width.bytes()).step_by(16) {
+            value[offset..offset + 16].copy_from_slice(&instruction.operation.evaluate(
+                source[offset..offset + 16].try_into().unwrap(),
+                count,
+                immediate,
+            ));
+        }
         self.publish(instruction.destination, value);
         Ok(())
     }
@@ -82,3 +103,7 @@ impl VectorState {
 #[cfg(test)]
 #[path = "shift/native.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "shift/uniform/native.rs"]
+mod uniform;
