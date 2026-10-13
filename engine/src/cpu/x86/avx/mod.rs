@@ -8,6 +8,7 @@ mod integer;
 mod moves;
 mod permute;
 mod rearrange;
+mod shift;
 
 pub(crate) use compare::{CompareInstruction, CompareShape};
 pub(crate) use compound::CompoundInstruction;
@@ -20,6 +21,7 @@ pub(crate) use moves::{
 };
 pub(crate) use permute::PermuteInstruction;
 pub(crate) use rearrange::RearrangeInstruction;
+pub(crate) use shift::{ShiftCount, ShiftInstruction};
 
 use super::simd::SimdState;
 

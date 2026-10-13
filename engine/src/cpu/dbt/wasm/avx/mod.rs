@@ -4,6 +4,7 @@ mod logical;
 mod moves;
 mod permute;
 mod rearrange;
+mod shift;
 
 #[derive(Clone, Copy)]
 pub(super) struct VectorLayout {

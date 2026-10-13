@@ -270,6 +270,11 @@ mod rearrange;
 #[cfg(test)]
 pub(crate) use rearrange::RearrangeOperation;
 
+#[cfg(test)]
+mod shift;
+#[cfg(test)]
+pub(crate) use shift::ShiftOperation;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SimdError {
     InvalidDescriptor,

@@ -32,6 +32,16 @@ pub(super) fn rearrange_value(
     direct::rearrange_value(code, operation, sources);
 }
 
+#[cfg(test)]
+pub(super) fn shift_value(
+    code: &mut InstructionSink<'_>,
+    operation: crate::cpu::x86::simd::ShiftOperation,
+    immediate: Option<u8>,
+    sources: [u32; 2],
+) {
+    direct::shift_value(code, operation, immediate, sources);
+}
+
 pub(super) fn direct_hotpath(operation: SimdOperation) -> bool {
     direct::accepts(operation)
 }

@@ -1,4 +1,5 @@
 mod rearrange;
+mod shift;
 
 use super::super::{cpu_result, locals::*};
 use super::{Imports, SimdKind, SimdOperand, SimdOperation, SimdRegister, mark_mmx, memory};
@@ -631,24 +632,13 @@ fn packed_shift(code: &mut InstructionSink<'_>, op: SimdOperation, kind: P) {
             code.i64x2_extract_lane(0);
         }
     };
-    let bits = i32::from(op.lane_bytes) * 8;
-    count(code);
-    code.i64_const(i64::from(bits))
-        .i64_ge_u()
-        .if_(BlockType::Result(ValType::V128));
-    if kind == P::ShiftRightSigned {
-        load(code, op.destination, op.vector_bytes);
-        code.i32_const(bits - 1);
-        arithmetic(code, kind, op.lane_bytes);
-    } else {
-        code.v128_const(0);
-    }
-    code.else_();
-    load(code, op.destination, op.vector_bytes);
-    count(code);
-    code.i32_wrap_i64();
-    arithmetic(code, kind, op.lane_bytes);
-    code.end();
+    shift::lanes(
+        code,
+        kind,
+        op.lane_bytes,
+        |code| load(code, op.destination, op.vector_bytes),
+        count,
+    );
 }
 
 fn saturating_pack(code: &mut InstructionSink<'_>, op: SimdOperation, kind: S) {
@@ -663,18 +653,9 @@ fn saturating_pack(code: &mut InstructionSink<'_>, op: SimdOperation, kind: S) {
 }
 
 fn byte_shift(code: &mut InstructionSink<'_>, op: SimdOperation, kind: S) {
-    let count = usize::from(op.immediate.unwrap()).min(16);
-    let lanes = std::array::from_fn(|i| {
-        if kind == S::ShiftBytesLeft {
-            if i >= count { (i - count) as u8 } else { 16 }
-        } else if i + count < 16 {
-            (i + count) as u8
-        } else {
-            16
-        }
+    shift::bytes(code, kind, op.immediate.unwrap(), |code| {
+        load(code, op.destination, 16)
     });
-    load(code, op.destination, 16);
-    code.v128_const(0).i8x16_shuffle(lanes);
 }
 
 fn multiple_sum_absolute_byte_differences(code: &mut InstructionSink<'_>, op: SimdOperation) {
@@ -1111,5 +1092,36 @@ pub(super) fn rearrange_value(
                 operation.immediate(),
             );
         }
+    }
+}
+
+#[cfg(test)]
+pub(super) fn shift_value(
+    code: &mut InstructionSink<'_>,
+    operation: crate::cpu::x86::simd::ShiftOperation,
+    immediate: Option<u8>,
+    sources: [u32; 2],
+) {
+    let [source, count] = sources;
+    if let Some(kind) = operation.byte_kind() {
+        shift::bytes(code, kind, immediate.unwrap(), |code| {
+            code.local_get(source);
+        });
+    } else {
+        shift::lanes(
+            code,
+            operation.lane_kind().unwrap(),
+            operation.lane_bytes(),
+            |code| {
+                code.local_get(source);
+            },
+            |code| {
+                if let Some(n) = immediate {
+                    code.i64_const(i64::from(n));
+                } else {
+                    code.local_get(count).i64x2_extract_lane(0);
+                }
+            },
+        );
     }
 }
