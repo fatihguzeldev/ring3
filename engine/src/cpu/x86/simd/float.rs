@@ -896,8 +896,6 @@ mod tests {
     }
 }
 
-#[cfg(test)]
 mod fused;
 
-#[cfg(test)]
 pub(crate) use fused::{FusedKind, fused_lanes};

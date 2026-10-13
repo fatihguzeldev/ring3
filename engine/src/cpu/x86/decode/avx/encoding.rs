@@ -36,6 +36,14 @@ impl Encoding {
             vvvv: (control >> 3) & 15,
         })
     }
+    pub(super) fn validate_w(self, expected: bool) -> Result<(), DecodeError> {
+        if self.w == expected {
+            Ok(())
+        } else {
+            Err(invalid())
+        }
+    }
+
     pub(super) fn validate(
         self,
         strict_w: bool,

@@ -117,8 +117,10 @@ impl EngineInstance {
     ) -> Result<StoreCompletion, HostError> {
         let instruction = AvxInstruction::decode_descriptor(descriptor, operands, immediate)
             .map_err(|_| HostError::InvalidRequest)?;
-        if matches!(instruction.semantic(), AvxSemantic::F16c(_))
-            && !crate::cpu::x86::capabilities::F16C_ENABLED
+        if (matches!(instruction.semantic(), AvxSemantic::F16c(_))
+            && !crate::cpu::x86::capabilities::F16C_ENABLED)
+            || (matches!(instruction.semantic(), AvxSemantic::Fma(_))
+                && !crate::cpu::x86::capabilities::FMA_ENABLED)
         {
             return Err(HostError::InvalidRequest);
         }
@@ -327,3 +329,7 @@ fn segment_fault(segment: SegmentRegister) -> CpuMemoryError {
 #[cfg(test)]
 #[path = "avx/tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "avx/fma/native.rs"]
+mod fma_tests;

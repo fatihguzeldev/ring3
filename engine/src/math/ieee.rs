@@ -432,8 +432,6 @@ mod conversion;
 #[path = "ieee/arithmetic/native.rs"]
 mod arithmetic;
 
-#[cfg(test)]
 mod fused;
 
-#[cfg(test)]
 pub(crate) use fused::{fused_multiply_add, fused_unbounded_tiny};

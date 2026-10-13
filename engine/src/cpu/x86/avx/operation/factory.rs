@@ -14,6 +14,7 @@ mod cross_lane;
 mod crypto;
 mod f16c;
 mod floating;
+mod fma;
 mod integer;
 mod logical;
 mod masked;
@@ -149,6 +150,7 @@ pub(super) fn decode(
         16 => crypto::decode(kind as u8, slots, immediate),
         17 => strings::decode(kind as u8, slots, immediate),
         18 => f16c::decode(kind as u8, slots, immediate),
+        19 => fma::decode(kind as u8, slots, immediate),
         _ => Err(AvxDecodeError::Family),
     }
 }

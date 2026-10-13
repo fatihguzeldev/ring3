@@ -63,6 +63,7 @@ pub(crate) fn execute(
             .execute_convert(value, general, operand)
             .map_err(arithmetic),
         Compound(value) => vectors.execute_compound(value, operand).map_err(arithmetic),
+        Fma(value) => vectors.execute_fma(value, operand).map_err(arithmetic),
         CrossLane(value) => vectors
             .execute_cross_lane(value, operand)
             .map_err(arithmetic),

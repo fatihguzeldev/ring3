@@ -25,6 +25,10 @@ pub(super) fn lower(instruction: &Instruction, bytes: &[u8]) -> Result<Operation
                 operation.instruction().semantic(),
                 crate::cpu::x86::avx::AvxSemantic::F16c(_)
             ) || crate::cpu::x86::capabilities::F16C_ENABLED)
+            && (!matches!(
+                operation.instruction().semantic(),
+                crate::cpu::x86::avx::AvxSemantic::Fma(_)
+            ) || crate::cpu::x86::capabilities::FMA_ENABLED)
         {
             Ok(Operation::Avx(operation))
         } else {

@@ -20,6 +20,7 @@ mod cross_lane;
 mod crypto;
 mod f16c;
 mod floating;
+mod fma;
 mod integer;
 mod logical;
 mod masked;
@@ -119,6 +120,9 @@ pub(crate) fn lower(
         return Some(value);
     }
     if let Some(value) = compare::lower(instruction, encoding) {
+        return Some(value);
+    }
+    if let Some(value) = fma::lower(instruction, encoding) {
         return Some(value);
     }
     if let Some(value) = floating::lower(instruction, encoding) {

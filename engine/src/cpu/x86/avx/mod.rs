@@ -31,6 +31,7 @@ pub(crate) use convert::{ConvertInstruction, PackedConversion};
 pub(crate) use cross_lane::{BlockTarget, CrossLaneInstruction};
 pub(crate) use crypto::CryptoInstruction;
 pub(crate) use f16c::{F16cInstruction, F16cTarget};
+pub(crate) use fma::{FmaInstruction, FmaKind, FmaOrder, FmaShape};
 pub(crate) use integer::IntegerInstruction;
 pub(crate) use masked::{MaskedError, MaskedInstruction};
 pub(crate) use moves::{
@@ -263,5 +264,4 @@ impl VectorState {
 #[path = "integration/wasm.rs"]
 mod integration;
 
-#[cfg(test)]
 mod fma;
